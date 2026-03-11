@@ -59,6 +59,8 @@ export interface Conversation {
   messageCount: number;
   summary?: string;
   provider?: string;
+  profile?: string;
+  profileLocked?: boolean;
   platform?: string;
   api_mode?: string;
   metadata?: Record<string, unknown>;
@@ -109,6 +111,18 @@ export interface ChatRequest {
   message: string;
   content?: ContentBlock[];
   conversationId?: string;
+  profile?: string;
+}
+
+export interface ChatProfileOption {
+  name: string;
+  scope: string;
+  active?: boolean;
+}
+
+export interface ChatSettings {
+  currentProfile?: string;
+  profiles: ChatProfileOption[];
 }
 
 export interface PendingImageAttachment {

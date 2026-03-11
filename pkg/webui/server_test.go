@@ -14,6 +14,7 @@ import (
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -176,7 +177,7 @@ func TestServer_handleGetConversation(t *testing.T) {
 					ID:          conversationID,
 					Summary:     "Test conversation",
 					Provider:    "openai",
-					Metadata:    map[string]any{"platform": "fireworks", "api_mode": "responses"},
+					Metadata:    map[string]any{"platform": "fireworks", "api_mode": "responses", "profile": "premium"},
 					RawMessages: json.RawMessage(`[{"type":"message","role":"user","content":"hello"}]`),
 				}, nil
 			}
@@ -203,7 +204,37 @@ func TestServer_handleGetConversation(t *testing.T) {
 	assert.Equal(t, conversationID, response.ID)
 	assert.Equal(t, "Test conversation", response.Summary)
 	assert.Equal(t, "OpenAI", response.Provider)
+	assert.Equal(t, "premium", response.Profile)
+	assert.True(t, response.ProfileLocked)
 	assert.Equal(t, 1, response.MessageCount)
+}
+
+func TestServer_handleGetChatSettings(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	}()
+
+	viper.Reset()
+	viper.Set("profile", "work")
+
+	server := &Server{router: mux.NewRouter()}
+	req := httptest.NewRequest("GET", "/api/chat/settings", nil)
+	w := httptest.NewRecorder()
+
+	server.handleGetChatSettings(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response ChatSettingsResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	assert.Equal(t, "work", response.CurrentProfile)
+	require.NotEmpty(t, response.Profiles)
+	assert.Equal(t, "default", response.Profiles[0].Name)
 }
 
 func TestServer_handleGetConversationPreservesImageContent(t *testing.T) {
@@ -435,6 +466,31 @@ func TestServer_handleChatWithImageContent(t *testing.T) {
 	assert.Len(t, capturedRequest.Content, 2)
 	assert.Equal(t, "image", capturedRequest.Content[1].Type)
 	assert.Equal(t, "image/png", capturedRequest.Content[1].Source.MediaType)
+}
+
+func TestServer_handleChatWithProfile(t *testing.T) {
+	var capturedRequest ChatRequest
+
+	server := &Server{
+		conversationService: &mockConversationService{},
+		chatRunner: &mockChatRunner{
+			runFunc: func(_ context.Context, req ChatRequest, sink ChatEventSink) (string, error) {
+				capturedRequest = req
+				err := sink.Send(ChatEvent{Kind: "conversation", ConversationID: "conv-profile", Role: "assistant"})
+				require.NoError(t, err)
+				return "conv-profile", nil
+			},
+		},
+		router: mux.NewRouter(),
+	}
+
+	req := httptest.NewRequest("POST", "/api/chat", strings.NewReader(`{"message":"hello","profile":"premium"}`))
+	w := httptest.NewRecorder()
+
+	server.handleChat(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "premium", capturedRequest.Profile)
 }
 
 func TestServer_handleChatRunnerError(t *testing.T) {

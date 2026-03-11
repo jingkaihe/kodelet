@@ -5,6 +5,7 @@ import ChatTranscript from '../components/chat/ChatTranscript';
 import { applyChatStreamEvent, conversationToChatMessages } from '../features/chat/state';
 import apiService from '../services/api';
 import type {
+  ChatSettings,
   ChatStreamEvent,
   ContentBlock,
   Conversation,
@@ -14,6 +15,10 @@ import { cn, formatCost, formatDate, showToast } from '../utils';
 
 const normalizeConversation = (conversation: Conversation): Conversation => ({
   ...conversation,
+  profile:
+    typeof conversation.profile === 'string' && conversation.profile.trim()
+      ? conversation.profile.trim()
+      : undefined,
   messages: (conversation.messages || []).map((message) => ({
     role: message.role || 'user',
     content: message.content || '',
@@ -137,6 +142,8 @@ const ChatPage: React.FC = () => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState(() => conversationToChatMessages(null));
+  const [chatSettings, setChatSettings] = useState<ChatSettings>({ profiles: [] });
+  const [selectedProfile, setSelectedProfile] = useState('default');
   const [draft, setDraft] = useState('');
   const [sidebarLoading, setSidebarLoading] = useState(true);
   const [conversationLoading, setConversationLoading] = useState(false);
@@ -171,6 +178,16 @@ const ChatPage: React.FC = () => {
 
   useEffect(() => {
     void refreshConversations();
+
+    void apiService
+      .getChatSettings()
+      .then((settings) => {
+        setChatSettings(settings);
+        setSelectedProfile(settings.currentProfile || 'default');
+      })
+      .catch((error) => {
+        console.error('Failed to load chat settings', error);
+      });
   }, []);
 
   useEffect(() => {
@@ -276,6 +293,7 @@ const ChatPage: React.FC = () => {
     setMessages([]);
     setConversationError(null);
     setStreamError(null);
+    setSelectedProfile(chatSettings.currentProfile || 'default');
     startTransition(() => navigate('/'));
   };
 
@@ -338,6 +356,7 @@ const ChatPage: React.FC = () => {
           message: prompt,
           content: buildUserContent(prompt, attachmentsForSend),
           conversationId: conversationId || undefined,
+          profile: conversationId ? undefined : selectedProfile,
         },
         {
           signal: controller.signal,
@@ -487,6 +506,28 @@ const ChatPage: React.FC = () => {
     return getGreeting();
   }, [conversation?.summary]);
 
+  const currentProfileLabel = useMemo(() => {
+    if (conversationId) {
+      return conversation?.profile || 'default';
+    }
+    return selectedProfile || 'default';
+  }, [conversation?.profile, conversationId, selectedProfile]);
+
+  const availableProfiles = useMemo(() => {
+    const configuredProfiles = chatSettings.profiles || [];
+    if (configuredProfiles.some((profile) => profile.name === currentProfileLabel)) {
+      return configuredProfiles;
+    }
+
+    return [
+      ...configuredProfiles,
+      {
+        name: currentProfileLabel,
+        scope: conversationId ? 'conversation' : 'selected',
+      },
+    ];
+  }, [chatSettings.profiles, conversationId, currentProfileLabel]);
+
   return (
     <div className="min-h-screen bg-transparent">
       {sidebarVisible ? (
@@ -626,6 +667,10 @@ const ChatPage: React.FC = () => {
                           {formatCost(conversation.usage)}
                         </span>
                       ) : null}
+                      <span className="meta-chip">
+                        Profile {currentProfileLabel}
+                        {conversation?.profileLocked ? ' · locked' : ''}
+                      </span>
                     </div>
                   </>
                 ) : null}
@@ -724,9 +769,9 @@ const ChatPage: React.FC = () => {
                 />
 
                 <div className="flex items-center justify-between gap-3 border-t border-black/8 px-3 pt-3">
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
                     <button
-                      className="composer-attachment-button"
+                      className="composer-capsule composer-capsule-accent"
                       disabled={sending}
                       onClick={() => fileInputRef.current?.click()}
                       type="button"
@@ -760,8 +805,55 @@ const ChatPage: React.FC = () => {
                           strokeWidth="1.7"
                         />
                       </svg>
-                      Add image
+                      <span>Add image</span>
                     </button>
+
+                    {conversationId ? (
+                      <div className="composer-profile-static" data-testid="profile-static-pill">
+                        <div className="composer-profile-copy">
+                          <span className="composer-profile-label">Profile</span>
+                          <span className="composer-profile-value">{currentProfileLabel}</span>
+                        </div>
+                        <span className="composer-profile-lock">Locked</span>
+                      </div>
+                    ) : (
+                      <label className="composer-profile-picker" data-testid="profile-picker">
+                        <span className="composer-profile-copy">
+                          <span className="composer-profile-label">Profile</span>
+                          <span className="composer-profile-value">{currentProfileLabel}</span>
+                        </span>
+                        <select
+                          aria-label="Profile"
+                          className="composer-profile-select"
+                          disabled={sending}
+                          onChange={(event) => setSelectedProfile(event.target.value)}
+                          value={currentProfileLabel}
+                        >
+                          {availableProfiles.map((profile) => (
+                            <option key={profile.name} value={profile.name}>
+                              {profile.name}
+                            </option>
+                          ))}
+                        </select>
+                        <span aria-hidden="true" className="composer-profile-chevron">
+                          <svg
+                            className="h-3.5 w-3.5"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            xmlns="http://www.w3.org/2000/svg"
+                          >
+                            <path
+                              d="m6 9 6 6 6-6"
+                              stroke="currentColor"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth="1.8"
+                            />
+                          </svg>
+                        </span>
+                      </label>
+                    )}
+
                     <p className="eyebrow-label text-kodelet-mid-gray">
                       Enter to send. Shift + Enter for a new line. Paste or drop images.
                     </p>

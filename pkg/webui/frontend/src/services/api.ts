@@ -1,6 +1,7 @@
 // API service layer for Kodelet Web UI
 
 import {
+  ChatSettings,
   ChatRequest,
   ChatStreamEvent,
   Conversation,
@@ -82,6 +83,10 @@ class ApiService {
 
   async getConversation(id: string): Promise<Conversation> {
     return this.request<Conversation>(`/api/conversations/${id}`);
+  }
+
+  async getChatSettings(): Promise<ChatSettings> {
+    return this.request<ChatSettings>('/api/chat/settings');
   }
 
   async deleteConversation(id: string): Promise<void> {

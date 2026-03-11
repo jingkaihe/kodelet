@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.3.7.beta (2026-03-11)
+
+Preserved conversation profile metadata across providers so resumed CLI and web conversations keep using the original profile, model, and provider-specific settings.
+Added web UI profile selection for new chats, plus locked profile display for existing conversations and a chat settings API to expose available profiles.
+Refactored config loading to support request-scoped profile resolution without mutating shared Viper state, with regression coverage for resume and web chat flows.
+
 ## 0.3.6.beta (2026-03-08)
 
 Support chat through the web UI

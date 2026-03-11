@@ -5,7 +5,9 @@ import ChatPage from './ChatPage';
 const mockNavigate = vi.fn();
 const mockGetConversations = vi.fn();
 const mockGetConversation = vi.fn();
+const mockGetChatSettings = vi.fn();
 const mockStreamChat = vi.fn();
+let routeParams: { id?: string } = {};
 
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>(
@@ -15,7 +17,7 @@ vi.mock('react-router-dom', async () => {
   return {
     ...actual,
     useNavigate: () => mockNavigate,
-    useParams: () => ({}),
+    useParams: () => routeParams,
   };
 });
 
@@ -23,6 +25,7 @@ vi.mock('../services/api', () => ({
   default: {
     getConversations: (...args: unknown[]) => mockGetConversations(...args),
     getConversation: (...args: unknown[]) => mockGetConversation(...args),
+    getChatSettings: (...args: unknown[]) => mockGetChatSettings(...args),
     streamChat: (...args: unknown[]) => mockStreamChat(...args),
   },
 }));
@@ -30,8 +33,17 @@ vi.mock('../services/api', () => ({
 describe('ChatPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    routeParams = {};
     window.localStorage.clear();
     window.HTMLElement.prototype.scrollIntoView = vi.fn();
+    mockGetChatSettings.mockResolvedValue({
+      currentProfile: 'work',
+      profiles: [
+        { name: 'default', scope: 'built-in' },
+        { name: 'work', scope: 'repo' },
+        { name: 'premium', scope: 'global' },
+      ],
+    });
     mockGetConversations.mockResolvedValue({
       conversations: [],
       hasMore: false,
@@ -116,6 +128,7 @@ describe('ChatPage', () => {
     render(<ChatPage />);
 
     await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
+    await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
 
     const textarea = screen.getByPlaceholderText('Ask kodelet anything...');
     fireEvent.change(textarea, { target: { value: 'describe this image' } });
@@ -142,6 +155,7 @@ describe('ChatPage', () => {
     expect(mockStreamChat).toHaveBeenCalledWith(
       expect.objectContaining({
         message: 'describe this image',
+        profile: 'work',
         content: expect.arrayContaining([
           expect.objectContaining({ type: 'text', text: 'describe this image' }),
           expect.objectContaining({
@@ -157,5 +171,67 @@ describe('ChatPage', () => {
     );
 
     window.FileReader = originalFileReader;
+  });
+
+  it('allows selecting a profile for a new conversation', async () => {
+    mockStreamChat.mockResolvedValue(undefined);
+
+    render(<ChatPage />);
+
+    await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByLabelText('Profile'), {
+      target: { value: 'premium' },
+    });
+
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+      target: { value: 'hello' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
+    expect(mockStreamChat).toHaveBeenCalledWith(
+      expect.objectContaining({ profile: 'premium' }),
+      expect.any(Object)
+    );
+  });
+
+  it('locks the profile selector for existing conversations', async () => {
+    routeParams = { id: 'conv-123' };
+    mockGetConversation.mockResolvedValue({
+      id: 'conv-123',
+      createdAt: '2023-01-01T00:00:00Z',
+      updatedAt: '2023-01-02T00:00:00Z',
+      messageCount: 1,
+      profile: 'premium',
+      profileLocked: true,
+      messages: [
+        {
+          role: 'user',
+          content: 'hello',
+        },
+      ],
+      toolResults: {},
+    });
+    mockStreamChat.mockResolvedValue(undefined);
+
+    render(<ChatPage />);
+
+    await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-123'));
+
+    expect(screen.getByTestId('profile-static-pill')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Profile')).not.toBeInTheDocument();
+    expect(screen.getByText('Profile premium · locked')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+      target: { value: 'continue' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
+    expect(mockStreamChat).toHaveBeenCalledWith(
+      expect.not.objectContaining({ profile: expect.anything() }),
+      expect.any(Object)
+    );
   });
 });

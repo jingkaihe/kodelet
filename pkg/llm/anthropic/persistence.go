@@ -85,12 +85,17 @@ func (t *Thread) SaveConversation(ctx context.Context, summarise bool) error {
 	}
 
 	// Create a new conversation record
+	metadata := map[string]any{"model": t.Config.Model}
+	if profile := strings.TrimSpace(t.Config.Profile); profile != "" {
+		metadata["profile"] = profile
+	}
+
 	record := convtypes.ConversationRecord{
 		ID:             t.ConversationID,
 		RawMessages:    rawMessages,
 		Provider:       "anthropic",
 		Usage:          *t.Usage,
-		Metadata:       map[string]any{"model": t.Config.Model},
+		Metadata:       metadata,
 		Summary:        t.summary,
 		CreatedAt:      time.Now(),
 		UpdatedAt:      time.Now(),
