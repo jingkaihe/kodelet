@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ChatPage from './ChatPage';
+import type { ChatStreamEvent } from '../types';
 
 const mockNavigate = vi.fn();
 const mockGetConversations = vi.fn();
@@ -260,9 +261,9 @@ describe('ChatPage', () => {
       toolResults: {},
     });
 
-    let streamOptions: { onEvent: (event: { kind: string; conversation_id?: string }) => void } | null = null;
+    let streamOptions: { onEvent: (event: ChatStreamEvent) => void } | null = null;
     mockStreamChat.mockImplementation(async (_request, options) => {
-      streamOptions = options as { onEvent: (event: { kind: string; conversation_id?: string }) => void };
+      streamOptions = options as { onEvent: (event: ChatStreamEvent) => void };
       return new Promise(() => undefined);
     });
 
