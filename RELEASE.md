@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.3.9.beta (2026-03-13)
+
+Added in-flight conversation steering to the web UI — while the agent is streaming, a "Steer" button appears once a tool call begins, allowing users to inject guidance via the `steerConversation` API without interrupting the run. Also includes a "Stop" button to abort an active stream.
+Fixed steering message injection order for Google and OpenAI Responses providers so pending steer messages are appended *after* the current user message (previously they could be processed too early).
+Extracted `MaxMessageLength` constant in `pkg/steer` and referenced it from the CLI, and fixed the empty-state layout in `ChatTranscript` to fill the full viewport height.
+
 ## 0.3.8.beta (2026-03-13)
 
 Bumped Anthropic SDK to v1.26.0 (expanding Claude Sonnet 4.5 and Opus 4.5 context windows to 1M tokens), upgraded Vitest to v4.1.0.
