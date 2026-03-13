@@ -23,6 +23,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/llm/openai/preset/xai"
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
@@ -427,6 +428,12 @@ func (t *Thread) processMessageExchange(
 		}
 	}
 
+	if !t.Config.IsSubAgent {
+		if err := t.processPendingSteer(ctx, handler); err != nil {
+			return "", false, false, errors.Wrap(err, "failed to process pending steer")
+		}
+	}
+
 	// Build tools
 	tools := buildTools(t.State, opt.NoToolUse)
 	log.WithField("tool_count", len(tools)).Debug("built tools for request")
@@ -550,6 +557,63 @@ func (t *Thread) processMessageExchange(
 	saveConversation()
 
 	return finalOutput, streamResult.toolsUsed, streamResult.responseCompleted, nil
+}
+
+func (t *Thread) processPendingSteer(ctx context.Context, handler llmtypes.MessageHandler) error {
+	steerStore, err := steer.NewSteerStore()
+	if err != nil {
+		return errors.Wrap(err, "failed to create steer store")
+	}
+
+	pendingSteer, err := steerStore.ReadPendingSteer(t.ConversationID)
+	if err != nil {
+		return errors.Wrap(err, "failed to read pending steer")
+	}
+
+	if len(pendingSteer) == 0 {
+		return nil
+	}
+
+	logger.G(ctx).WithField("steer_count", len(pendingSteer)).Info("processing pending steer messages")
+
+	for i, steerMsg := range pendingSteer {
+		if steerMsg.Content == "" {
+			logger.G(ctx).WithField("message_index", i).Warn("skipping empty steer message")
+			continue
+		}
+
+		inputItem := responses.ResponseInputItemUnionParam{
+			OfMessage: &responses.EasyInputMessageParam{
+				Role:    responses.EasyInputMessageRoleUser,
+				Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(steerMsg.Content)},
+			},
+		}
+
+		t.inputItems = append(t.inputItems, inputItem)
+		t.pendingItems = append(t.pendingItems, inputItem)
+
+		rawItem, err := json.Marshal(inputItem)
+		if err != nil {
+			logger.G(ctx).WithError(err).Warn("failed to marshal steering input item for persistence")
+		}
+
+		t.storedItems = append(t.storedItems, StoredInputItem{
+			Type:    "message",
+			Role:    "user",
+			Content: steerMsg.Content,
+			RawItem: rawItem,
+		})
+
+		handler.HandleText(fmt.Sprintf("🗣️ User steering: %s", steerMsg.Content))
+	}
+
+	if err := steerStore.ClearPendingSteer(t.ConversationID); err != nil {
+		logger.G(ctx).WithError(err).Warn("failed to clear pending steer, may be processed again")
+	} else {
+		logger.G(ctx).Debug("successfully cleared pending steer")
+	}
+
+	return nil
 }
 
 // GetMessages returns the messages from the thread in a common format.

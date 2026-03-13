@@ -8,6 +8,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
+	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -1400,6 +1401,62 @@ func TestProcessMessageExchangeSavesConversationPerTurn(t *testing.T) {
 	assert.Equal(t, "openai", store.savedRecords[0].Provider)
 	assert.Equal(t, "responses", store.savedRecords[0].Metadata["api_mode"])
 	assert.Equal(t, "xai", store.savedRecords[0].Metadata["platform"])
+}
+
+func TestProcessMessageExchangeInjectsPendingSteer(t *testing.T) {
+	homeDir := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	require.NoError(t, os.Setenv("HOME", homeDir))
+	defer func() {
+		if originalHome == "" {
+			os.Unsetenv("HOME")
+			return
+		}
+		require.NoError(t, os.Setenv("HOME", originalHome))
+	}()
+
+	steerStore, err := steer.NewSteerStore()
+	require.NoError(t, err)
+	require.NoError(t, steerStore.WriteSteer("conv-test", "Please focus on error handling"))
+
+	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
+	thread := &Thread{
+		Thread: base.NewThread(config, "conv-test", hooks.Trigger{}),
+	}
+	thread.inputItems = []openairesponses.ResponseInputItemUnionParam{
+		{
+			OfMessage: &openairesponses.EasyInputMessageParam{
+				Role:    openairesponses.EasyInputMessageRoleUser,
+				Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("hello")},
+			},
+		},
+	}
+	thread.pendingItems = append([]openairesponses.ResponseInputItemUnionParam{}, thread.inputItems...)
+	thread.storedItems = []StoredInputItem{{Type: "message", Role: "user", Content: "hello"}}
+
+	var capturedParams openairesponses.ResponseNewParams
+	thread.newStreamingFunc = func(_ context.Context, params openairesponses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
+		capturedParams = params
+		return nil
+	}
+	thread.processStreamFunc = func(_ context.Context, _ *ssestream.Stream[openairesponses.ResponseStreamEventUnion], _ llmtypes.MessageHandler, _ string, _ llmtypes.MessageOpt) (processStreamResult, error) {
+		return processStreamResult{responseCompleted: true}, nil
+	}
+
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
+	_, _, _, err = thread.processMessageExchange(context.Background(), handler, "gpt-4.1", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
+	require.NoError(t, err)
+
+	require.Len(t, capturedParams.Input.OfInputItemList, 2)
+	assert.Equal(t, "hello", extractInputItemText(capturedParams.Input.OfInputItemList[0]))
+	assert.Equal(t, "Please focus on error handling", extractInputItemText(capturedParams.Input.OfInputItemList[1]))
+	assert.Contains(t, handler.CollectedText(), "🗣️ User steering: Please focus on error handling")
+
+	require.Len(t, thread.inputItems, 2)
+	require.Len(t, thread.pendingItems, 2)
+	require.Len(t, thread.storedItems, 2)
+	assert.Equal(t, "Please focus on error handling", thread.storedItems[1].Content)
+	assert.False(t, steerStore.HasPendingSteer("conv-test"))
 }
 
 func TestProcessMessageExchangeSavesConversationOnError(t *testing.T) {
