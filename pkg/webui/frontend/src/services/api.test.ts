@@ -218,6 +218,34 @@ describe('ApiService', () => {
     });
   });
 
+  describe('steerConversation', () => {
+    it('queues steering for an existing conversation', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          success: true,
+          conversation_id: 'conv-123',
+          queued: false,
+        }),
+      });
+
+      const result = await apiService.steerConversation('conv-123', 'Please focus on tests');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/conversations/conv-123/steer',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ message: 'Please focus on tests' }),
+        })
+      );
+      expect(result).toEqual({
+        success: true,
+        conversation_id: 'conv-123',
+        queued: false,
+      });
+    });
+  });
+
   describe('getToolResult', () => {
     it('fetches tool result', async () => {
       const mockToolResult: ToolResult = {

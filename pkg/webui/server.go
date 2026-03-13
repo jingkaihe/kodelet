@@ -24,6 +24,7 @@ import (
 	openairesponses "github.com/jingkaihe/kodelet/pkg/llm/openai/responses"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
+	"github.com/jingkaihe/kodelet/pkg/steer"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
@@ -107,6 +108,7 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/chat/settings", s.handleGetChatSettings).Methods("GET")
 	api.HandleFunc("/conversations", s.handleListConversations).Methods("GET")
 	api.HandleFunc("/conversations/{id}", s.handleGetConversation).Methods("GET")
+	api.HandleFunc("/conversations/{id}/steer", s.handleSteerConversation).Methods("POST")
 	api.HandleFunc("/conversations/{id}/tools/{toolCallId}", s.handleGetToolResult).Methods("GET")
 	api.HandleFunc("/conversations/{id}", s.handleDeleteConversation).Methods("DELETE")
 	api.HandleFunc("/chat", s.handleChat).Methods("POST")
@@ -918,6 +920,58 @@ func (s *Server) handleGetToolResult(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSONResponse(w, response)
+}
+
+type steerConversationRequest struct {
+	Message string `json:"message"`
+}
+
+type steerConversationResponse struct {
+	Success        bool   `json:"success"`
+	ConversationID string `json:"conversation_id"`
+	Queued         bool   `json:"queued"`
+}
+
+// handleSteerConversation handles POST /api/conversations/{id}/steer
+func (s *Server) handleSteerConversation(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	conversationID := strings.TrimSpace(vars["id"])
+	if conversationID == "" {
+		s.writeErrorResponse(w, http.StatusBadRequest, "conversation ID is required", nil)
+		return
+	}
+
+	var req steerConversationRequest
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		s.writeErrorResponse(w, http.StatusBadRequest, "invalid steer request", err)
+		return
+	}
+
+	message := strings.TrimSpace(req.Message)
+	if message == "" {
+		s.writeErrorResponse(w, http.StatusBadRequest, "message cannot be empty", nil)
+		return
+	}
+
+	steerStore, err := steer.NewSteerStore()
+	if err != nil {
+		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to initialize steer store", err)
+		return
+	}
+
+	queued := steerStore.HasPendingSteer(conversationID)
+	if err := steerStore.WriteSteer(conversationID, message); err != nil {
+		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to queue steering message", err)
+		return
+	}
+
+	s.writeJSONResponse(w, steerConversationResponse{
+		Success:        true,
+		ConversationID: conversationID,
+		Queued:         queued,
+	})
 }
 
 // handleDeleteConversation handles DELETE /api/conversations/{id}

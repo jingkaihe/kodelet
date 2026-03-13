@@ -8,6 +8,7 @@ import {
   ConversationListResponse,
   SearchFilters,
   ApiError,
+  SteerConversationResponse,
   ToolResult
 } from '../types';
 
@@ -92,6 +93,13 @@ class ApiService {
   async deleteConversation(id: string): Promise<void> {
     await this.request(`/api/conversations/${id}`, {
       method: 'DELETE',
+    });
+  }
+
+  async steerConversation(id: string, message: string): Promise<SteerConversationResponse> {
+    return this.request<SteerConversationResponse>(`/api/conversations/${id}/steer`, {
+      method: 'POST',
+      body: JSON.stringify({ message }),
     });
   }
 

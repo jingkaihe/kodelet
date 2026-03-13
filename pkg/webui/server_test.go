@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/gorilla/mux"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/steer"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
@@ -599,6 +601,66 @@ func TestServer_handleGetToolResult(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, toolCallID, response.ToolCallID)
 	assert.Equal(t, "TestTool", response.Result.ToolName)
+}
+
+func TestServer_handleSteerConversation(t *testing.T) {
+	homeDir := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	require.NoError(t, os.Setenv("HOME", homeDir))
+	defer func() {
+		if originalHome == "" {
+			os.Unsetenv("HOME")
+			return
+		}
+		require.NoError(t, os.Setenv("HOME", originalHome))
+	}()
+
+	server := &Server{
+		conversationService: &mockConversationService{},
+		router:              mux.NewRouter(),
+	}
+
+	req := httptest.NewRequest("POST", "/api/conversations/conv-123/steer", strings.NewReader(`{"message":"Please focus on error handling"}`))
+	req = mux.SetURLVars(req, map[string]string{"id": "conv-123"})
+	w := httptest.NewRecorder()
+
+	server.handleSteerConversation(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response struct {
+		Success        bool   `json:"success"`
+		ConversationID string `json:"conversation_id"`
+		Queued         bool   `json:"queued"`
+	}
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	assert.True(t, response.Success)
+	assert.Equal(t, "conv-123", response.ConversationID)
+	assert.False(t, response.Queued)
+
+	steerStore, err := steer.NewSteerStore()
+	require.NoError(t, err)
+	pending, err := steerStore.ReadPendingSteer("conv-123")
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	assert.Equal(t, "Please focus on error handling", pending[0].Content)
+}
+
+func TestServer_handleSteerConversationRequiresMessage(t *testing.T) {
+	server := &Server{
+		conversationService: &mockConversationService{},
+		router:              mux.NewRouter(),
+	}
+
+	req := httptest.NewRequest("POST", "/api/conversations/conv-123/steer", strings.NewReader(`{"message":"   "}`))
+	req = mux.SetURLVars(req, map[string]string{"id": "conv-123"})
+	w := httptest.NewRecorder()
+
+	server.handleSteerConversation(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "message cannot be empty")
 }
 
 func TestDisplayProviderName(t *testing.T) {

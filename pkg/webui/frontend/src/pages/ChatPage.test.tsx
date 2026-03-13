@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ChatPage from './ChatPage';
 
 const mockNavigate = vi.fn();
@@ -7,6 +7,7 @@ const mockGetConversations = vi.fn();
 const mockGetConversation = vi.fn();
 const mockGetChatSettings = vi.fn();
 const mockStreamChat = vi.fn();
+const mockSteerConversation = vi.fn();
 let routeParams: { id?: string } = {};
 
 vi.mock('react-router-dom', async () => {
@@ -27,6 +28,7 @@ vi.mock('../services/api', () => ({
     getConversation: (...args: unknown[]) => mockGetConversation(...args),
     getChatSettings: (...args: unknown[]) => mockGetChatSettings(...args),
     streamChat: (...args: unknown[]) => mockStreamChat(...args),
+    steerConversation: (...args: unknown[]) => mockSteerConversation(...args),
   },
 }));
 
@@ -50,6 +52,11 @@ describe('ChatPage', () => {
       total: 0,
       limit: 40,
       offset: 0,
+    });
+    mockSteerConversation.mockResolvedValue({
+      success: true,
+      conversation_id: 'conv-123',
+      queued: false,
     });
   });
 
@@ -233,5 +240,87 @@ describe('ChatPage', () => {
       expect.not.objectContaining({ profile: expect.anything() }),
       expect.any(Object)
     );
+  });
+
+  it('queues steering while a conversation is streaming', async () => {
+    routeParams = { id: 'conv-123' };
+    mockGetConversation.mockResolvedValue({
+      id: 'conv-123',
+      createdAt: '2023-01-01T00:00:00Z',
+      updatedAt: '2023-01-02T00:00:00Z',
+      messageCount: 1,
+      profile: 'premium',
+      profileLocked: true,
+      messages: [
+        {
+          role: 'user',
+          content: 'hello',
+        },
+      ],
+      toolResults: {},
+    });
+
+    let streamOptions: { onEvent: (event: { kind: string; conversation_id?: string }) => void } | null = null;
+    mockStreamChat.mockImplementation(async (_request, options) => {
+      streamOptions = options as { onEvent: (event: { kind: string; conversation_id?: string }) => void };
+      return new Promise(() => undefined);
+    });
+
+    render(<ChatPage />);
+
+    await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-123'));
+
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+      target: { value: 'continue' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Steer' })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText('Steer the active conversation…'), {
+      target: { value: 'Focus on tests' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Steer' }));
+
+    await waitFor(() =>
+      expect(mockSteerConversation).toHaveBeenCalledWith('conv-123', 'Focus on tests')
+    );
+
+    await act(async () => {
+      streamOptions?.onEvent({ kind: 'conversation', conversation_id: 'conv-123' });
+    });
+  });
+
+  it('stops an active streaming conversation', async () => {
+    const abortSpy = vi.fn();
+    const originalAbortController = global.AbortController;
+
+    class MockAbortController {
+      signal = {} as AbortSignal;
+      abort = abortSpy;
+    }
+
+    // @ts-expect-error test shim
+    global.AbortController = MockAbortController;
+
+    mockStreamChat.mockImplementation(async () => new Promise(() => undefined));
+
+    render(<ChatPage />);
+
+    await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+      target: { value: 'hello' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+
+    expect(abortSpy).toHaveBeenCalled();
+
+    global.AbortController = originalAbortController;
   });
 });

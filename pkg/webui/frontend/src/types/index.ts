@@ -114,6 +114,16 @@ export interface ChatRequest {
   profile?: string;
 }
 
+export interface SteerConversationRequest {
+  message: string;
+}
+
+export interface SteerConversationResponse {
+  success: boolean;
+  conversation_id: string;
+  queued: boolean;
+}
+
 export interface ChatProfileOption {
   name: string;
   scope: string;

@@ -142,6 +142,7 @@ const ChatPage: React.FC = () => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState(() => conversationToChatMessages(null));
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(conversationId);
   const [chatSettings, setChatSettings] = useState<ChatSettings>({ profiles: [] });
   const [selectedProfile, setSelectedProfile] = useState('default');
   const [draft, setDraft] = useState('');
@@ -150,6 +151,7 @@ const ChatPage: React.FC = () => {
   const [conversationError, setConversationError] = useState<string | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [steering, setSteering] = useState(false);
   const [attachments, setAttachments] = useState<PendingImageAttachment[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(readStoredSidebarVisible);
@@ -253,6 +255,8 @@ const ChatPage: React.FC = () => {
   }, [isResizingSidebar]);
 
   useEffect(() => {
+    setActiveConversationId(conversationId);
+
     if (!conversationId) {
       setConversation(null);
       setMessages([]);
@@ -267,6 +271,7 @@ const ChatPage: React.FC = () => {
       .getConversation(conversationId)
       .then((data) => {
         const normalizedConversation = normalizeConversation(data);
+        setActiveConversationId(normalizedConversation.id);
         setConversation(normalizedConversation);
         setMessages(conversationToChatMessages(normalizedConversation));
       })
@@ -290,6 +295,7 @@ const ChatPage: React.FC = () => {
     }
 
     setConversation(null);
+    setActiveConversationId(null);
     setMessages([]);
     setConversationError(null);
     setStreamError(null);
@@ -327,7 +333,31 @@ const ChatPage: React.FC = () => {
 
   const handleSubmit = async () => {
     const prompt = draft.trim();
-    if ((!prompt && attachments.length === 0) || sending) {
+    if ((!prompt && attachments.length === 0) || steering) {
+      return;
+    }
+
+    if (sending) {
+      if (!activeConversationId) {
+        return;
+      }
+
+      setSteering(true);
+      setStreamError(null);
+
+      try {
+        await apiService.steerConversation(activeConversationId, prompt);
+        setDraft('');
+        showToast('Steering queued for the active conversation', 'success');
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'Failed to steer conversation';
+        setStreamError(message);
+        showToast(message, 'error');
+      } finally {
+        setSteering(false);
+      }
+
       return;
     }
 
@@ -363,6 +393,7 @@ const ChatPage: React.FC = () => {
           onEvent: (event: ChatStreamEvent) => {
             if (event.kind === 'conversation' && event.conversation_id) {
               streamedConversationId = event.conversation_id;
+              setActiveConversationId(event.conversation_id);
             }
 
             if (event.kind === 'error') {
@@ -417,6 +448,13 @@ const ChatPage: React.FC = () => {
       event.preventDefault();
       void handleSubmit();
     }
+  };
+
+  const handleStop = () => {
+    abortControllerRef.current?.abort();
+    setSending(false);
+    setSteering(false);
+    showToast('Stopped the active conversation', 'info');
   };
 
   const appendAttachments = async (files: File[]) => {
@@ -527,6 +565,9 @@ const ChatPage: React.FC = () => {
       },
     ];
   }, [chatSettings.profiles, conversationId, currentProfileLabel]);
+
+  const canSubmit = draft.trim().length > 0 || attachments.length > 0;
+  const canSteerActiveConversation = Boolean(activeConversationId);
 
   return (
     <div className="min-h-screen bg-transparent">
@@ -760,11 +801,17 @@ const ChatPage: React.FC = () => {
 
                 <textarea
                   className="min-h-[88px] w-full resize-none border-0 bg-transparent px-3 py-3 font-body text-base leading-7 text-kodelet-dark outline-none placeholder:text-kodelet-dark/40"
-                  disabled={sending}
+                  disabled={steering}
                   onChange={(event) => setDraft(event.target.value)}
                   onKeyDown={handleDraftKeyDown}
                   onPaste={handlePaste}
-                  placeholder="Ask kodelet anything..."
+                  placeholder={
+                    sending
+                      ? canSteerActiveConversation
+                        ? 'Steer the active conversation…'
+                        : 'Waiting for conversation to start…'
+                      : 'Ask kodelet anything...'
+                  }
                   value={draft}
                 />
 
@@ -772,7 +819,7 @@ const ChatPage: React.FC = () => {
                   <div className="flex flex-wrap items-center gap-3">
                     <button
                       className="composer-capsule composer-capsule-accent"
-                      disabled={sending}
+                      disabled={sending || steering}
                       onClick={() => fileInputRef.current?.click()}
                       type="button"
                     >
@@ -825,7 +872,7 @@ const ChatPage: React.FC = () => {
                         <select
                           aria-label="Profile"
                           className="composer-profile-select"
-                          disabled={sending}
+                          disabled={sending || steering}
                           onChange={(event) => setSelectedProfile(event.target.value)}
                           value={currentProfileLabel}
                         >
@@ -859,19 +906,31 @@ const ChatPage: React.FC = () => {
                     </p>
                   </div>
 
-                  <button
-                    className={cn(
-                      'primary-pill-button',
-                      sending || (!draft.trim() && attachments.length === 0)
-                        ? 'cursor-not-allowed bg-kodelet-mid-gray'
-                        : 'bg-kodelet-dark hover:bg-black'
-                    )}
-                    disabled={sending || (!draft.trim() && attachments.length === 0)}
-                    onClick={() => void handleSubmit()}
-                    type="button"
-                  >
-                    {sending ? 'Working…' : 'Send'}
-                  </button>
+                  <div className="flex items-center gap-3">
+                    {sending ? (
+                      <button
+                        className="composer-capsule"
+                        onClick={handleStop}
+                        type="button"
+                      >
+                        Stop
+                      </button>
+                    ) : null}
+
+                    <button
+                      className={cn(
+                        'primary-pill-button',
+                        steering || !canSubmit || (sending && !canSteerActiveConversation)
+                          ? 'cursor-not-allowed bg-kodelet-mid-gray'
+                          : 'bg-kodelet-dark hover:bg-black'
+                      )}
+                      disabled={steering || !canSubmit || (sending && !canSteerActiveConversation)}
+                      onClick={() => void handleSubmit()}
+                      type="button"
+                    >
+                      {steering ? 'Queueing…' : sending ? 'Steer' : 'Send'}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
