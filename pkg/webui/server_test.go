@@ -663,6 +663,27 @@ func TestServer_handleSteerConversationRequiresMessage(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "message cannot be empty")
 }
 
+func TestServer_handleSteerConversationRejectsMessagesThatAreTooLong(t *testing.T) {
+	server := &Server{
+		conversationService: &mockConversationService{},
+		router:              mux.NewRouter(),
+	}
+
+	message := strings.Repeat("a", steer.MaxMessageLength+1)
+	req := httptest.NewRequest(
+		"POST",
+		"/api/conversations/conv-123/steer",
+		strings.NewReader(fmt.Sprintf(`{"message":"%s"}`, message)),
+	)
+	req = mux.SetURLVars(req, map[string]string{"id": "conv-123"})
+	w := httptest.NewRecorder()
+
+	server.handleSteerConversation(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "message must be 10000 characters or fewer")
+}
+
 func TestDisplayProviderName(t *testing.T) {
 	tests := []struct {
 		name     string

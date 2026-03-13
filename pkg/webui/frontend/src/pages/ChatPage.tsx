@@ -152,6 +152,7 @@ const ChatPage: React.FC = () => {
   const [streamError, setStreamError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [steering, setSteering] = useState(false);
+  const [steerAvailable, setSteerAvailable] = useState(false);
   const [attachments, setAttachments] = useState<PendingImageAttachment[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(readStoredSidebarVisible);
@@ -338,6 +339,10 @@ const ChatPage: React.FC = () => {
     }
 
     if (sending) {
+      if (!canSteerActiveConversation) {
+        return;
+      }
+
       if (!activeConversationId) {
         return;
       }
@@ -373,6 +378,7 @@ const ChatPage: React.FC = () => {
       },
     ]);
     setSending(true);
+    setSteerAvailable(false);
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -400,6 +406,10 @@ const ChatPage: React.FC = () => {
               streamedError = event.error || 'Chat request failed';
               setStreamError(streamedError);
               return;
+            }
+
+            if (event.kind === 'tool-use' || event.kind === 'tool-result') {
+              setSteerAvailable(true);
             }
 
             setMessages((currentMessages) =>
@@ -438,8 +448,11 @@ const ChatPage: React.FC = () => {
       setStreamError(message);
       showToast(message, 'error');
     } finally {
-      abortControllerRef.current = null;
-      setSending(false);
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+        setSending(false);
+        setSteerAvailable(false);
+      }
     }
   };
 
@@ -452,8 +465,8 @@ const ChatPage: React.FC = () => {
 
   const handleStop = () => {
     abortControllerRef.current?.abort();
-    setSending(false);
     setSteering(false);
+    setSteerAvailable(false);
     showToast('Stopped the active conversation', 'info');
   };
 
@@ -567,7 +580,8 @@ const ChatPage: React.FC = () => {
   }, [chatSettings.profiles, conversationId, currentProfileLabel]);
 
   const canSubmit = draft.trim().length > 0 || attachments.length > 0;
-  const canSteerActiveConversation = Boolean(activeConversationId);
+  const hasActiveConversationTarget = Boolean(activeConversationId);
+  const canSteerActiveConversation = hasActiveConversationTarget && steerAvailable;
 
   return (
     <div className="h-[100dvh] bg-transparent">
@@ -807,9 +821,11 @@ const ChatPage: React.FC = () => {
                   onPaste={handlePaste}
                   placeholder={
                     sending
-                      ? canSteerActiveConversation
-                        ? 'Steer the active conversation…'
-                        : 'Waiting for conversation to start…'
+                      ? !hasActiveConversationTarget
+                        ? 'Waiting for conversation to start…'
+                        : canSteerActiveConversation
+                          ? 'Steer the active conversation…'
+                          : 'Steering becomes available if the agent starts another turn…'
                       : 'Ask kodelet anything...'
                   }
                   value={draft}

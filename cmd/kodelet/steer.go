@@ -88,7 +88,7 @@ func sendSteerCmd(ctx context.Context, conversationID, message string, isFollow 
 		os.Exit(1)
 	}
 
-	if len(message) > 10000 {
+	if len(message) > steer.MaxMessageLength {
 		presenter.Error(errors.New("message too long"), "Steering message must be less than 10,000 characters")
 		os.Exit(1)
 	}

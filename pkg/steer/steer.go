@@ -16,6 +16,8 @@ import (
 	"github.com/rogpeppe/go-internal/lockedfile"
 )
 
+const MaxMessageLength = 10000
+
 // Message represents a steering message
 type Message struct {
 	Role      string    `json:"role"`

@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"iter"
 	"net/http"
 	"net/url"
 	"os"
@@ -47,6 +48,8 @@ type Thread struct {
 	messages       []*genai.Content // Google-specific message format
 	summary        string           // Conversation summary
 	thinkingBudget int32            // Budget for thinking tokens
+
+	generateContentStreamFunc func(context.Context, string, []*genai.Content, *genai.GenerateContentConfig) iter.Seq2[*genai.GenerateContentResponse, error]
 }
 
 // Response represents a response from Google's GenAI API
@@ -240,13 +243,6 @@ func (t *Thread) SendMessage(
 			attribute.Int("tokens.cache_read", t.GetUsage().CacheReadInputTokens))
 	}()
 
-	// Process pending steer messages if this is not a subagent
-	if !t.Config.IsSubAgent {
-		if err := t.processPendingSteer(ctx, handler); err != nil {
-			logger.G(ctx).WithError(err).Warn("failed to process pending steer, continuing")
-		}
-	}
-
 	// Trigger user_message_send hook before adding user message
 	if blocked, reason := t.HookTrigger.TriggerUserMessageSend(ctx, t, message, t.GetRecipeHooks()); blocked {
 		return "", errors.Errorf("message blocked by hook: %s", reason)
@@ -335,6 +331,12 @@ func (t *Thread) processMessageExchange(
 	}
 	systemPrompt := sysprompt.SystemPrompt(t.Config.Model, t.Config, contexts)
 
+	if !t.Config.IsSubAgent {
+		if err := t.processPendingSteer(ctx, handler); err != nil {
+			logger.G(ctx).WithError(err).Warn("failed to process pending steer, continuing")
+		}
+	}
+
 	config := &genai.GenerateContentConfig{
 		Temperature:     genai.Ptr(float32(1.0)),
 		MaxOutputTokens: int32(t.Config.MaxTokens),
@@ -369,9 +371,14 @@ func (t *Thread) processMessageExchange(
 	// Record start time for usage logging
 	apiStartTime := time.Now()
 
+	generateContentStream := t.generateContentStreamFunc
+	if generateContentStream == nil {
+		generateContentStream = t.client.Models.GenerateContentStream
+	}
+
 	err := t.executeWithRetry(ctx, func() error {
 		response = &Response{}
-		for chunk, err := range t.client.Models.GenerateContentStream(ctx, modelName, prompt, config) {
+		for chunk, err := range generateContentStream(ctx, modelName, prompt, config) {
 			// Check for context cancellation
 			if ctx.Err() != nil {
 				return ctx.Err()

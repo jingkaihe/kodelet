@@ -2,6 +2,7 @@ package google
 
 import (
 	"context"
+	"iter"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
+	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -163,6 +165,51 @@ func TestGoogleThread_InterfaceCompliance(t *testing.T) {
 	messages, err := thread.GetMessages()
 	assert.NoError(t, err)
 	assert.Empty(t, messages)
+}
+
+func TestProcessMessageExchangeAppendsPendingSteerAfterCurrentUserMessage(t *testing.T) {
+	homeDir := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	require.NoError(t, os.Setenv("HOME", homeDir))
+	defer func() {
+		if originalHome == "" {
+			os.Unsetenv("HOME")
+			return
+		}
+		require.NoError(t, os.Setenv("HOME", originalHome))
+	}()
+
+	steerStore, err := steer.NewSteerStore()
+	require.NoError(t, err)
+	require.NoError(t, steerStore.WriteSteer("conv-test", "Please focus on error handling"))
+
+	thread := &Thread{
+		Thread: base.NewThread(llmtypes.Config{
+			Provider: "google",
+			Model:    "gemini-2.5-pro",
+			Google:   &llmtypes.GoogleConfig{Backend: "gemini"},
+		}, "conv-test", base.CreateHookTrigger(context.Background(), llmtypes.Config{Provider: "google", Model: "gemini-2.5-pro"}, "conv-test")),
+		thinkingBudget: 8000,
+	}
+	thread.AddUserMessage(context.Background(), "continue")
+
+	var capturedPrompt []*genai.Content
+	thread.generateContentStreamFunc = func(_ context.Context, _ string, prompt []*genai.Content, _ *genai.GenerateContentConfig) iter.Seq2[*genai.GenerateContentResponse, error] {
+		capturedPrompt = prompt
+		return func(yield func(*genai.GenerateContentResponse, error) bool) {}
+	}
+
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
+	_, _, err = thread.processMessageExchange(context.Background(), handler, llmtypes.MessageOpt{NoToolUse: true})
+	require.NoError(t, err)
+
+	require.Len(t, capturedPrompt, 3)
+	require.Len(t, capturedPrompt[1].Parts, 1)
+	require.Len(t, capturedPrompt[2].Parts, 1)
+	assert.Equal(t, "continue", capturedPrompt[1].Parts[0].Text)
+	assert.Equal(t, "Please focus on error handling", capturedPrompt[2].Parts[0].Text)
+	assert.Contains(t, handler.CollectedText(), "🗣️ User steering: Please focus on error handling")
+	assert.False(t, steerStore.HasPendingSteer("conv-test"))
 }
 
 func TestGoogleThread_ModelPricing(t *testing.T) {

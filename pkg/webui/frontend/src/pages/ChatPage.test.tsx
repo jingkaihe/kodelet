@@ -279,9 +279,21 @@ describe('ChatPage', () => {
     expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Steer' })).toBeInTheDocument();
 
+    await act(async () => {
+      streamOptions?.onEvent({
+        kind: 'tool-use',
+        tool_call_id: 'tool-1',
+        tool_name: 'search',
+        input: '{}',
+      });
+    });
+
     fireEvent.change(screen.getByPlaceholderText('Steer the active conversation…'), {
       target: { value: 'Focus on tests' },
     });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Steer' })).toBeEnabled());
+
     fireEvent.click(screen.getByRole('button', { name: 'Steer' }));
 
     await waitFor(() =>
@@ -293,9 +305,53 @@ describe('ChatPage', () => {
     });
   });
 
+  it('does not queue steering before the stream shows another backend turn is possible', async () => {
+    routeParams = { id: 'conv-123' };
+    mockGetConversation.mockResolvedValue({
+      id: 'conv-123',
+      createdAt: '2023-01-01T00:00:00Z',
+      updatedAt: '2023-01-02T00:00:00Z',
+      messageCount: 1,
+      profile: 'premium',
+      profileLocked: true,
+      messages: [
+        {
+          role: 'user',
+          content: 'hello',
+        },
+      ],
+      toolResults: {},
+    });
+
+    mockStreamChat.mockImplementation(async () => new Promise(() => undefined));
+
+    render(<ChatPage />);
+
+    await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-123'));
+
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+      target: { value: 'continue' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
+
+    const steerButton = screen.getByRole('button', { name: 'Steer' });
+    expect(steerButton).toBeDisabled();
+
+    const textarea = screen.getByPlaceholderText(
+      'Steering becomes available if the agent starts another turn…'
+    );
+    fireEvent.change(textarea, { target: { value: 'Focus on tests' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false, preventDefault: vi.fn() });
+
+    expect(mockSteerConversation).not.toHaveBeenCalled();
+  });
+
   it('stops an active streaming conversation', async () => {
     const abortSpy = vi.fn();
     const originalAbortController = global.AbortController;
+    let rejectStream: ((reason?: unknown) => void) | null = null;
 
     class MockAbortController {
       signal = {} as AbortSignal;
@@ -304,7 +360,12 @@ describe('ChatPage', () => {
 
     global.AbortController = MockAbortController as unknown as typeof AbortController;
 
-    mockStreamChat.mockImplementation(async () => new Promise(() => undefined));
+    mockStreamChat.mockImplementation(
+      async () =>
+        new Promise((_, reject) => {
+          rejectStream = reject;
+        })
+    );
 
     render(<ChatPage />);
 
@@ -319,6 +380,14 @@ describe('ChatPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
 
     expect(abortSpy).toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Send' })).not.toBeInTheDocument();
+
+    await act(async () => {
+      rejectStream?.(new DOMException('The operation was aborted', 'AbortError'));
+    });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument());
 
     global.AbortController = originalAbortController;
   });

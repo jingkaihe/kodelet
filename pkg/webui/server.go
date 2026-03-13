@@ -954,6 +954,15 @@ func (s *Server) handleSteerConversation(w http.ResponseWriter, r *http.Request)
 		s.writeErrorResponse(w, http.StatusBadRequest, "message cannot be empty", nil)
 		return
 	}
+	if len(message) > steer.MaxMessageLength {
+		s.writeErrorResponse(
+			w,
+			http.StatusBadRequest,
+			fmt.Sprintf("message must be %d characters or fewer", steer.MaxMessageLength),
+			nil,
+		)
+		return
+	}
 
 	steerStore, err := steer.NewSteerStore()
 	if err != nil {
