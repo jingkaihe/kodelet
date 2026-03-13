@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.3.8.beta (2026-03-13)
+
+Bumped Anthropic SDK to v1.26.0 (expanding Claude Sonnet 4.5 and Opus 4.5 context windows to 1M tokens), upgraded Vitest to v4.1.0.
+
 ## 0.3.7.beta (2026-03-11)
 
 Preserved conversation profile metadata across providers so resumed CLI and web conversations keep using the original profile, model, and provider-specific settings.
