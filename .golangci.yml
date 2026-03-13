@@ -16,32 +16,33 @@ linters:
     - misspell         # Spelling errors
     - revive           # Fast, configurable linter
 
+  settings:
+    staticcheck:
+      checks: ["all"]
+
+    revive:
+      # Minimal revive config to avoid conflicts with gopls
+      rules:
+        - name: var-naming
+        - name: context-as-argument
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+
+  exclusions:
+    # Which file paths to exclude: they will be analyzed, but issues from them won't be reported.
+    paths:
+      - "node_modules"
+      - "\\.git"
+      - "\\.vscode"
+      - "\\.vscode-test"
+      - "\\.idea"
+
 formatters:
   enable:
     - gofumpt          # gopls: gofumpt = true (stricter formatting)
 
-linters-settings:
-  staticcheck:
-    checks: ["all"]
-
-  revive:
-    # Minimal revive config to avoid conflicts with gopls
-    rules:
-      - name: var-naming
-      - name: context-as-argument
-      - name: error-return
-      - name: error-strings
-      - name: error-naming
-
 issues:
-  # Exclude directories that match gopls directoryFilters
-  exclude-dirs:
-    - .git
-    - .vscode
-    - .vscode-test
-    - .idea
-    - node_modules
-
   # Maximum issues count per one linter
   max-issues-per-linter: 0
 
@@ -54,4 +55,3 @@ run:
 
   # Include test files
   tests: true
-

@@ -65,7 +65,7 @@ run = ["gofumpt -w ."]
 
 [tasks.lint]
 description = "Run all linters (go vet, golangci-lint, staticcheck)"
-run = ["go vet ./...", "echo 'Running golangci-lint...'", "golangci-lint run", "echo 'Running staticcheck...'", "staticcheck -checks=all ./..."]
+run = ["go vet ./...", "echo 'Running golangci-lint...'", "golangci-lint run"]
 
 [tasks.install-npm]
 description = "Install npm dependencies for frontend"
