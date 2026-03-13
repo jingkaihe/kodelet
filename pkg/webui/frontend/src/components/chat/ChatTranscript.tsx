@@ -146,7 +146,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
 
   if (messages.length === 0) {
     return (
-      <div className="flex min-h-[50vh] items-center justify-center px-6 py-12">
+      <div className="flex min-h-full items-center justify-center px-6 py-12">
         <div className="max-w-2xl text-center">
           <p className="eyebrow-label mb-3 text-kodelet-orange">
             Kodelet Chat

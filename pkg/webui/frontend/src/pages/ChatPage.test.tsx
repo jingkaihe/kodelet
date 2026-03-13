@@ -302,8 +302,7 @@ describe('ChatPage', () => {
       abort = abortSpy;
     }
 
-    // @ts-expect-error test shim
-    global.AbortController = MockAbortController;
+    global.AbortController = MockAbortController as unknown as typeof AbortController;
 
     mockStreamChat.mockImplementation(async () => new Promise(() => undefined));
 

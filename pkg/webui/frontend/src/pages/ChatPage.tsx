@@ -570,7 +570,7 @@ const ChatPage: React.FC = () => {
   const canSteerActiveConversation = Boolean(activeConversationId);
 
   return (
-    <div className="min-h-screen bg-transparent">
+    <div className="h-[100dvh] bg-transparent">
       {sidebarVisible ? (
         <button
           aria-label="Hide sidebar overlay"
@@ -580,10 +580,10 @@ const ChatPage: React.FC = () => {
         />
       ) : null}
 
-      <div className={cn('min-h-screen lg:flex', isResizingSidebar && 'select-none')}>
+      <div className={cn('h-[100dvh] lg:flex', isResizingSidebar && 'select-none')}>
         {sidebarVisible ? (
           <div
-            className="fixed inset-y-0 left-0 z-40 w-[min(85vw,360px)] max-w-full shrink-0 lg:sticky lg:top-0 lg:relative lg:z-auto lg:h-screen lg:self-start lg:w-[var(--sidebar-width)]"
+            className="fixed inset-y-0 left-0 z-40 w-[min(85vw,360px)] max-w-full shrink-0 lg:sticky lg:top-0 lg:relative lg:z-auto lg:h-[100dvh] lg:self-start lg:w-[var(--sidebar-width)]"
             data-testid="chat-sidebar-shell"
             style={{ '--sidebar-width': `${sidebarWidth}px` } as React.CSSProperties}
           >
@@ -618,7 +618,7 @@ const ChatPage: React.FC = () => {
         {!sidebarVisible ? (
           <>
             <div
-              className="sidebar-collapsed-rail hidden lg:sticky lg:top-0 lg:flex lg:h-screen lg:self-start"
+              className="sidebar-collapsed-rail hidden lg:sticky lg:top-0 lg:flex lg:h-[100dvh] lg:self-start"
               data-testid="sidebar-collapsed-rail"
             >
               <button
@@ -674,8 +674,8 @@ const ChatPage: React.FC = () => {
           </>
         ) : null}
 
-        <main className="relative flex min-h-screen min-w-0 flex-1 flex-col">
-          <header className="border-b border-black/8 px-4 py-5 md:px-8">
+        <main className="relative flex h-[100dvh] min-w-0 flex-1 flex-col overflow-hidden">
+          <header className="shrink-0 border-b border-black/8 px-4 py-5 md:px-8">
             <div className="flex items-start gap-4">
               <div className="min-w-0 max-w-5xl flex-1">
                 <p className="eyebrow-label">
@@ -719,9 +719,9 @@ const ChatPage: React.FC = () => {
             </div>
           </header>
 
-          <div className="flex-1 overflow-y-auto">
+          <div className="min-h-0 flex-1 overflow-y-auto">
             {conversationLoading ? (
-              <div className="flex min-h-[50vh] items-center justify-center px-6 py-12">
+              <div className="flex min-h-full items-center justify-center px-6 py-12">
                 <div className="surface-panel rounded-2xl px-6 py-5 text-sm text-kodelet-dark/70">
                   Loading conversation…
                 </div>
@@ -747,7 +747,7 @@ const ChatPage: React.FC = () => {
             )}
           </div>
 
-          <div className="border-t border-black/8 bg-[color:var(--kodelet-panel-soft)] px-4 py-4 md:px-8">
+          <div className="sticky bottom-0 z-10 shrink-0 border-t border-black/8 bg-[color:var(--kodelet-panel-soft)]/95 px-4 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] backdrop-blur-sm md:px-8">
             <div className="mx-auto w-full max-w-5xl px-4 md:px-8">
               {streamError ? (
                 <div className="surface-panel mb-3 rounded-2xl border-kodelet-orange/20 px-4 py-3 text-sm text-kodelet-dark">
