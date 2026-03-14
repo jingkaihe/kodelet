@@ -195,9 +195,13 @@ const ChatPage: React.FC = () => {
 
   useEffect(() => {
     return () => {
+      const conversationToStop = activeConversationId;
       abortControllerRef.current?.abort();
+      if (conversationToStop) {
+        void apiService.stopConversation(conversationToStop).catch(() => undefined);
+      }
     };
-  }, []);
+  }, [activeConversationId]);
 
   useEffect(() => {
     return () => {
@@ -464,9 +468,15 @@ const ChatPage: React.FC = () => {
   };
 
   const handleStop = () => {
+	  const conversationToStop = activeConversationId;
     abortControllerRef.current?.abort();
     setSteering(false);
     setSteerAvailable(false);
+	  if (conversationToStop) {
+	    void apiService.stopConversation(conversationToStop).catch((error) => {
+	      console.error('Failed to stop conversation', error);
+	    });
+	  }
     showToast('Stopped the active conversation', 'info');
   };
 

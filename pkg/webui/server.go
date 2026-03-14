@@ -13,9 +13,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -45,6 +47,10 @@ type Server struct {
 	config              *ServerConfig
 	server              *http.Server
 	staticFS            fs.FS
+	runCtx              context.Context
+	runCancel           context.CancelFunc
+	activeChats         map[string]context.CancelFunc
+	activeChatsMu       sync.Mutex
 }
 
 // ServerConfig holds the configuration for the web server
@@ -87,12 +93,17 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 		return nil, errors.Wrap(err, "failed to create static filesystem")
 	}
 
+	runCtx, runCancel := context.WithCancel(ctx)
+
 	s := &Server{
 		router:              mux.NewRouter(),
 		conversationService: conversationService,
 		chatRunner:          NewDefaultChatRunner(),
 		config:              config,
 		staticFS:            staticFS,
+		runCtx:              runCtx,
+		runCancel:           runCancel,
+		activeChats:         make(map[string]context.CancelFunc),
 	}
 
 	// Setup routes
@@ -109,6 +120,7 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/conversations", s.handleListConversations).Methods("GET")
 	api.HandleFunc("/conversations/{id}", s.handleGetConversation).Methods("GET")
 	api.HandleFunc("/conversations/{id}/steer", s.handleSteerConversation).Methods("POST")
+	api.HandleFunc("/conversations/{id}/stop", s.handleStopConversation).Methods("POST")
 	api.HandleFunc("/conversations/{id}/tools/{toolCallId}", s.handleGetToolResult).Methods("GET")
 	api.HandleFunc("/conversations/{id}", s.handleDeleteConversation).Methods("DELETE")
 	api.HandleFunc("/chat", s.handleChat).Methods("POST")
@@ -188,6 +200,12 @@ type responseWriter struct {
 	statusCode int
 }
 
+type stopConversationResponse struct {
+	Success        bool   `json:"success"`
+	ConversationID string `json:"conversation_id"`
+	Stopped        bool   `json:"stopped"`
+}
+
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.statusCode = code
 	rw.ResponseWriter.WriteHeader(code)
@@ -197,6 +215,60 @@ func (rw *responseWriter) Flush() {
 	if flusher, ok := rw.ResponseWriter.(http.Flusher); ok {
 		flusher.Flush()
 	}
+}
+
+func (s *Server) chatExecutionContext(requestCtx context.Context) context.Context {
+	baseCtx := s.runCtx
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
+
+	return logger.WithLogger(baseCtx, logger.G(requestCtx))
+}
+
+func (s *Server) registerActiveChat(conversationID string, cancel context.CancelFunc) {
+	if strings.TrimSpace(conversationID) == "" || cancel == nil {
+		return
+	}
+
+	s.activeChatsMu.Lock()
+	defer s.activeChatsMu.Unlock()
+	if s.activeChats == nil {
+		s.activeChats = make(map[string]context.CancelFunc)
+	}
+	s.activeChats[conversationID] = cancel
+}
+
+func (s *Server) unregisterActiveChat(conversationID string, cancel context.CancelFunc) {
+	if strings.TrimSpace(conversationID) == "" {
+		return
+	}
+
+	s.activeChatsMu.Lock()
+	defer s.activeChatsMu.Unlock()
+	registered, ok := s.activeChats[conversationID]
+	if ok && reflect.ValueOf(registered).Pointer() == reflect.ValueOf(cancel).Pointer() {
+		delete(s.activeChats, conversationID)
+	}
+}
+
+func (s *Server) cancelActiveChat(conversationID string) bool {
+	if strings.TrimSpace(conversationID) == "" {
+		return false
+	}
+
+	s.activeChatsMu.Lock()
+	cancel, ok := s.activeChats[conversationID]
+	if ok {
+		delete(s.activeChats, conversationID)
+	}
+	s.activeChatsMu.Unlock()
+
+	if ok {
+		cancel()
+	}
+
+	return ok
 }
 
 // API Handlers
@@ -983,6 +1055,22 @@ func (s *Server) handleSteerConversation(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+// handleStopConversation handles POST /api/conversations/{id}/stop
+func (s *Server) handleStopConversation(w http.ResponseWriter, r *http.Request) {
+	conversationID := strings.TrimSpace(mux.Vars(r)["id"])
+	if conversationID == "" {
+		s.writeErrorResponse(w, http.StatusBadRequest, "conversation ID is required", nil)
+		return
+	}
+
+	stopped := s.cancelActiveChat(conversationID)
+	s.writeJSONResponse(w, stopConversationResponse{
+		Success:        true,
+		ConversationID: conversationID,
+		Stopped:        stopped,
+	})
+}
+
 // handleDeleteConversation handles DELETE /api/conversations/{id}
 func (s *Server) handleDeleteConversation(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -1060,6 +1148,9 @@ func (s *Server) Start(ctx context.Context) error {
 
 // Stop stops the web server
 func (s *Server) Stop() error {
+	if s.runCancel != nil {
+		s.runCancel()
+	}
 	if s.server != nil {
 		return s.server.Close()
 	}

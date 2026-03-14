@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/gorilla/mux"
@@ -399,11 +400,17 @@ func TestServer_handleDeleteConversation(t *testing.T) {
 
 func TestServer_handleChat(t *testing.T) {
 	var capturedRequest ChatRequest
+	requestCtx, requestCancel := context.WithCancel(context.Background())
+	defer requestCancel()
+	runnerStarted := make(chan struct{})
+	allowFinish := make(chan struct{})
 
 	server := &Server{
 		conversationService: &mockConversationService{},
+		runCtx:              context.Background(),
+		activeChats:         make(map[string]context.CancelFunc),
 		chatRunner: &mockChatRunner{
-			runFunc: func(_ context.Context, req ChatRequest, sink ChatEventSink) (string, error) {
+			runFunc: func(ctx context.Context, req ChatRequest, sink ChatEventSink) (string, error) {
 				capturedRequest = req
 				err := sink.Send(ChatEvent{
 					Kind:           "conversation",
@@ -411,6 +418,9 @@ func TestServer_handleChat(t *testing.T) {
 					Role:           "assistant",
 				})
 				require.NoError(t, err)
+				close(runnerStarted)
+				<-allowFinish
+				require.NoError(t, ctx.Err())
 				return "conv-123", nil
 			},
 		},
@@ -418,13 +428,23 @@ func TestServer_handleChat(t *testing.T) {
 	}
 
 	req := httptest.NewRequest("POST", "/api/chat", strings.NewReader(`{"message":"hello"}`))
+	req = req.WithContext(requestCtx)
 	w := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		server.handleChat(w, req)
+		close(done)
+	}()
 
-	server.handleChat(w, req)
+	<-runnerStarted
+	requestCancel()
+	close(allowFinish)
+	<-done
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "application/x-ndjson", w.Header().Get("Content-Type"))
 	assert.Equal(t, "hello", capturedRequest.Message)
+	assert.NotEmpty(t, capturedRequest.ConversationID)
 
 	lines := strings.Split(strings.TrimSpace(w.Body.String()), "\n")
 	require.Len(t, lines, 2)
@@ -498,6 +518,8 @@ func TestServer_handleChatWithProfile(t *testing.T) {
 func TestServer_handleChatRunnerError(t *testing.T) {
 	server := &Server{
 		conversationService: &mockConversationService{},
+		runCtx:              context.Background(),
+		activeChats:         make(map[string]context.CancelFunc),
 		chatRunner: &mockChatRunner{
 			runFunc: func(_ context.Context, _ ChatRequest, sink ChatEventSink) (string, error) {
 				err := sink.Send(ChatEvent{
@@ -526,6 +548,37 @@ func TestServer_handleChatRunnerError(t *testing.T) {
 	assert.Equal(t, "error", errorEvent.Kind)
 	assert.Equal(t, "conv-err", errorEvent.ConversationID)
 	assert.Equal(t, "boom", errorEvent.Error)
+}
+
+func TestServer_handleStopConversation(t *testing.T) {
+	var cancelled atomic.Bool
+
+	server := &Server{
+		conversationService: &mockConversationService{},
+		router:              mux.NewRouter(),
+		activeChats:         make(map[string]context.CancelFunc),
+	}
+	server.activeChats["conv-123"] = func() {
+		cancelled.Store(true)
+	}
+
+	req := httptest.NewRequest("POST", "/api/conversations/conv-123/stop", nil)
+	req = mux.SetURLVars(req, map[string]string{"id": "conv-123"})
+	w := httptest.NewRecorder()
+
+	server.handleStopConversation(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.True(t, cancelled.Load())
+
+	var response stopConversationResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	assert.True(t, response.Success)
+	assert.Equal(t, "conv-123", response.ConversationID)
+	assert.True(t, response.Stopped)
+	_, exists := server.activeChats["conv-123"]
+	assert.False(t, exists)
 }
 
 func TestServer_handleChatThroughMiddleware(t *testing.T) {

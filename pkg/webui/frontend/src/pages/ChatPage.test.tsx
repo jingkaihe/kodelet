@@ -9,6 +9,7 @@ const mockGetConversation = vi.fn();
 const mockGetChatSettings = vi.fn();
 const mockStreamChat = vi.fn();
 const mockSteerConversation = vi.fn();
+const mockStopConversation = vi.fn();
 let routeParams: { id?: string } = {};
 
 vi.mock('react-router-dom', async () => {
@@ -30,6 +31,7 @@ vi.mock('../services/api', () => ({
     getChatSettings: (...args: unknown[]) => mockGetChatSettings(...args),
     streamChat: (...args: unknown[]) => mockStreamChat(...args),
     steerConversation: (...args: unknown[]) => mockSteerConversation(...args),
+    stopConversation: (...args: unknown[]) => mockStopConversation(...args),
   },
 }));
 
@@ -58,6 +60,11 @@ describe('ChatPage', () => {
       success: true,
       conversation_id: 'conv-123',
       queued: false,
+    });
+    mockStopConversation.mockResolvedValue({
+      success: true,
+      conversation_id: 'conv-123',
+      stopped: true,
     });
   });
 
@@ -362,8 +369,9 @@ describe('ChatPage', () => {
     global.AbortController = MockAbortController as unknown as typeof AbortController;
 
     mockStreamChat.mockImplementation(
-      async () =>
+      async (_request, options) =>
         new Promise((_, reject) => {
+          options.onEvent({ kind: 'conversation', conversation_id: 'conv-123' } as ChatStreamEvent);
           rejectStream = reject;
         })
     );
@@ -381,6 +389,9 @@ describe('ChatPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
 
     expect(abortSpy).toHaveBeenCalled();
+    await waitFor(() =>
+      expect(mockStopConversation).toHaveBeenCalledWith('conv-123')
+    );
     expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Send' })).not.toBeInTheDocument();
 

@@ -9,6 +9,7 @@ import {
   SearchFilters,
   ApiError,
   SteerConversationResponse,
+  StopConversationResponse,
   ToolResult
 } from '../types';
 
@@ -100,6 +101,12 @@ class ApiService {
     return this.request<SteerConversationResponse>(`/api/conversations/${id}/steer`, {
       method: 'POST',
       body: JSON.stringify({ message }),
+    });
+  }
+
+  async stopConversation(id: string): Promise<StopConversationResponse> {
+    return this.request<StopConversationResponse>(`/api/conversations/${id}/stop`, {
+      method: 'POST',
     });
   }
 

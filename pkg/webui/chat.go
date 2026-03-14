@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	stdErrors "errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -145,7 +146,7 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 		ConversationID: sessionID,
 		Role:           "assistant",
 	}); err != nil {
-		return sessionID, err
+		logger.G(ctx).WithError(err).Debug("failed to send initial conversation event")
 	}
 
 	handler := &chatMessageHandler{
@@ -511,7 +512,7 @@ func (s *ndjsonEventSink) Send(event ChatEvent) error {
 }
 
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
+	requestCtx := r.Context()
 
 	var req ChatRequest
 	decoder := json.NewDecoder(r.Body)
@@ -543,8 +544,23 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
+	conversationID := strings.TrimSpace(req.ConversationID)
+	if conversationID == "" {
+		conversationID = convtypes.GenerateID()
+		req.ConversationID = conversationID
+	}
+
+	ctx, cancel := context.WithCancel(s.chatExecutionContext(requestCtx))
+	defer s.unregisterActiveChat(conversationID, cancel)
+	s.registerActiveChat(conversationID, cancel)
+
 	conversationID, runErr := s.chatRunner.Run(ctx, req, sink)
 	if runErr != nil {
+		if stdErrors.Is(runErr, io.ErrClosedPipe) || stdErrors.Is(runErr, context.Canceled) {
+			logger.G(requestCtx).WithError(runErr).Debug("chat stream disconnected")
+			return
+		}
+
 		logger.G(ctx).WithError(runErr).Error("chat request failed")
 		_ = sink.Send(ChatEvent{
 			Kind:           "error",
