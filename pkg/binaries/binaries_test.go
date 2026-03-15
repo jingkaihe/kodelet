@@ -35,21 +35,6 @@ func writeVersionedTestBinary(t *testing.T, path, versionLine string) {
 	require.NoError(t, err)
 }
 
-func prependPathEnv(t *testing.T, dir string) {
-	t.Helper()
-
-	oldPath := os.Getenv("PATH")
-	sep := string(os.PathListSeparator)
-	if oldPath == "" {
-		require.NoError(t, os.Setenv("PATH", dir))
-	} else {
-		require.NoError(t, os.Setenv("PATH", dir+sep+oldPath))
-	}
-	t.Cleanup(func() {
-		_ = os.Setenv("PATH", oldPath)
-	})
-}
-
 func setPathEnv(t *testing.T, path string) {
 	t.Helper()
 

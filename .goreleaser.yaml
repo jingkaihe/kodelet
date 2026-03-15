@@ -72,6 +72,3 @@ nfpms:
         dst: /usr/libexec/kodelet/fd
         file_info:
           mode: 0755
-
-release:
-  disable: true

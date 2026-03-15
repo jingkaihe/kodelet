@@ -2,8 +2,8 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
-REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+REPO_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd -P)"
 OUTPUT_DIR="$REPO_ROOT/.build/package-binaries"
 
 extract_version() {

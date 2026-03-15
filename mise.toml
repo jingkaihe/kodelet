@@ -24,7 +24,8 @@ experimental = true
 
 [env]
 # Version-related environment variables
-VERSION = "{{exec(command='echo ${VERSION:-$(cat VERSION.txt)}')}}"
+VERSION = "{{exec(command='version=${VERSION:-$(cat VERSION.txt)}; printf %s \"${version#v}\"')}}"
+VERSION_TAG = "{{exec(command='version=${VERSION:-$(cat VERSION.txt)}; case \"$version\" in v*) printf %s \"$version\" ;; *) printf v%s \"$version\" ;; esac')}}"
 GIT_COMMIT = "{{exec(command='echo ${GIT_COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}')}}"
 BUILD_TIME = "{{exec(command='echo ${BUILD_TIME:-$(date -u \"+%a %b %d %H:%M:%S UTC %Y\")}')}}"
 
@@ -156,19 +157,19 @@ run = [
 ]
 
 [tasks.github-release]
-description = "Build GoReleaser release artifacts for CI"
+description = "Publish GoReleaser release artifacts with RELEASE.md notes"
 depends = ["lint", "test"]
 run = [
-  "goreleaser release --clean",
+  "./scripts/run-github-release.sh",
 ]
 
 [tasks.push-tag]
 description = "Push version tag to trigger automated GitHub Actions release"
 run = [
-  "echo 'Creating and pushing tag v$VERSION...'",
-  "if git rev-parse \"v$VERSION\" >/dev/null 2>&1; then echo 'Tag v$VERSION already exists locally. Pushing to origin...'; else echo 'Creating new tag v$VERSION...'; git tag v$VERSION; fi",
-  "git push origin v$VERSION",
-  "echo 'Tag v$VERSION pushed successfully!'",
+  "echo 'Creating and pushing tag $VERSION_TAG...'",
+  "if git rev-parse \"$VERSION_TAG\" >/dev/null 2>&1; then echo 'Tag $VERSION_TAG already exists locally. Pushing to origin...'; else echo 'Creating new tag $VERSION_TAG...'; git tag \"$VERSION_TAG\"; fi",
+  "git push origin \"$VERSION_TAG\"",
+  "echo 'Tag $VERSION_TAG pushed successfully!'",
   "echo 'GitHub Actions will automatically create a release with binaries and release notes.'",
 ]
 

@@ -224,10 +224,10 @@ mise run frontend-test-coverage
 ## Release Process
 
 ### Manual Release
-1. Update version in `VERSION.txt`
+1. Update `VERSION.txt` to the release version you plan to publish (for example `0.3.11-beta`)
 2. Update `RELEASE.md` with changelog for the new version at the top:
    ```markdown
-   ## 0.0.XX.alpha (YYYY-MM-DD)
+   ## 0.0.XX-beta (YYYY-MM-DD)
 
    ### Feature Category
 
@@ -251,19 +251,18 @@ The project includes a GitHub Actions workflow (`.github/workflows/release.yml`)
 - Uploads all platform binaries, checksums, and Linux packages to GitHub releases
 
 To trigger an automated release:
-1. Update version in `VERSION.txt`
+1. Update `VERSION.txt` to the release version you plan to publish (for example `0.3.11-beta`)
 2. Add release notes to the top of `RELEASE.md` following the existing format:
    ```markdown
-   ## 0.0.XX.alpha (YYYY-MM-DD)
+   ## 0.0.XX-beta (YYYY-MM-DD)
 
    ### Your Feature Title
 
    Description of changes...
    ```
-3. Create and push a version tag:
+3. Create and push the corresponding `v`-prefixed tag:
    ```bash
-   git tag v$(cat VERSION.txt)
-   git push origin v$(cat VERSION.txt)
+   mise run push-tag
    ```
 
 The release notes will be automatically extracted from the top entry in `RELEASE.md` and used in the GitHub release.
@@ -288,7 +287,7 @@ Common tasks:
 - `mise run cross-build` - Build for multiple platforms
 - `mise run release-snapshot` - Build GoReleaser snapshot artifacts into `dist/`
 - `mise run release` - Create a release
-- `mise run github-release` - Create GitHub release with RELEASE.md notes (recommended)
+- `mise run github-release` - Publish a tagged GitHub release with `RELEASE.md` notes
 
 ## Tool Management
 

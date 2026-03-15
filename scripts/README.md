@@ -17,6 +17,15 @@ Extracts the top release notes from `RELEASE.md` for use in GitHub releases.
 
 **Used by:** The `github-release` mise task to automatically include release notes in GitHub releases.
 
+### `run-github-release.sh`
+
+Extracts the top `RELEASE.md` entry into a temporary file and passes it to GoReleaser via `--release-notes`.
+
+**Usage:**
+```bash
+./scripts/run-github-release.sh
+```
+
 ## Usage in mise Tasks
 
-- `mise run github-release` - Uses `extract-release-notes.sh` to create GitHub releases with proper release notes from `RELEASE.md`
+- `mise run github-release` - Uses `run-github-release.sh` to publish GitHub releases with proper release notes from `RELEASE.md`

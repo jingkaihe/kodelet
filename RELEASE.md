@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.3.11-beta (2026-03-15)
+
+Support deb and rpm package release
+
 ## 0.3.10.beta (2026-03-15)
 
 Added resumable live chat in the web UI, plus sidebar actions to copy/delete conversations and immediate preview for newly started chats.
