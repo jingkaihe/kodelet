@@ -512,7 +512,7 @@ const ChatPage: React.FC = () => {
 	}, [messages, sending]);
 
 	const handleNewChat = () => {
-		if (sending) {
+		if (sending && !activeConversationId) {
 			return;
 		}
 
@@ -931,6 +931,7 @@ const ChatPage: React.FC = () => {
 	const canSubmit = draft.trim().length > 0 || attachments.length > 0;
 	const hasActiveConversationTarget = Boolean(activeConversationId);
 	const canStopActiveConversation = sending && hasActiveConversationTarget;
+	const canStartNewChat = !sending || hasActiveConversationTarget;
 	const canSteerActiveConversation =
 		hasActiveConversationTarget && steerAvailable;
 	const composerStatus = useMemo(() => {
@@ -983,7 +984,7 @@ const ChatPage: React.FC = () => {
 						<ChatSidebar
 							activeConversationId={conversationId}
 							conversations={conversations}
-							disabled={false}
+							disabled={!canStartNewChat}
 							loading={sidebarLoading}
 							runningConversationId={sending ? activeConversationId : null}
 							onDeleteConversation={handleDeleteConversation}

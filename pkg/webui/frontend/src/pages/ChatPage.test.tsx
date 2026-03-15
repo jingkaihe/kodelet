@@ -743,7 +743,37 @@ describe("ChatPage", () => {
 
 		expect(mockStreamChat.mock.calls[0]?.[0]?.conversationId).toBeUndefined();
 		expect(screen.getByRole("button", { name: "Starting…" })).toBeDisabled();
+		expect(
+			screen.getByRole("button", { name: /new chat/i }),
+		).toBeDisabled();
 		expect(mockStopConversation).not.toHaveBeenCalled();
+	});
+
+	it("allows starting a new chat once streaming has a conversation id", async () => {
+		mockStreamChat.mockImplementation(async (_request, options) => {
+			options.onEvent({ kind: "conversation", conversation_id: "conv-123" });
+			return new Promise(() => undefined);
+		});
+
+		render(<ChatPage />);
+
+		await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
+
+		fireEvent.change(screen.getByPlaceholderText("Ask kodelet anything..."), {
+			target: { value: "hello" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+		await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
+		await waitFor(() =>
+			expect(
+				screen.getByRole("button", { name: /new chat/i }),
+			).toBeEnabled(),
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: /new chat/i }));
+
+		expect(mockNavigate).toHaveBeenCalledWith("/");
 	});
 
 	it("disables delete for the active conversation while it is streaming", async () => {
