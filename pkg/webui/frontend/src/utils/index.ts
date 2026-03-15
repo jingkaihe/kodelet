@@ -27,6 +27,27 @@ export const formatDate = (dateString: string | null | undefined): string => {
   return format(date, 'MMM d, yyyy h:mm a');
 };
 
+export const formatCompactRelativeTime = (dateString: string | null | undefined): string => {
+  if (!dateString) return '—';
+
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) {
+    return '—';
+  }
+
+  const diffMs = Math.max(0, Date.now() - date.getTime());
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+
+  if (diffMs < minute) return 'now';
+  if (diffMs < hour) return `${Math.floor(diffMs / minute)}m`;
+  if (diffMs < day) return `${Math.floor(diffMs / hour)}h`;
+  if (diffMs < 7 * day) return `${Math.floor(diffMs / day)}d`;
+
+  return format(date, 'MMM d');
+};
+
 // Cost formatting utility
 export const formatCost = (usage: Usage | null | undefined): string => {
   if (!usage) return '$0.00';

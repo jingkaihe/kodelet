@@ -11,7 +11,7 @@ import type {
   Conversation,
   PendingImageAttachment,
 } from '../types';
-import { cn, formatContextWindow, formatCost, formatDate, showToast } from '../utils';
+import { cn, formatCompactRelativeTime, formatContextWindow, formatCost, showToast } from '../utils';
 
 const normalizeConversation = (conversation: Conversation): Conversation => ({
   ...conversation,
@@ -158,6 +158,7 @@ const ChatPage: React.FC = () => {
   const [sidebarVisible, setSidebarVisible] = useState(readStoredSidebarVisible);
   const [sidebarWidth, setSidebarWidth] = useState(readStoredSidebarWidth);
   const [isResizingSidebar, setIsResizingSidebar] = useState(false);
+  const [statusTick, setStatusTick] = useState(0);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const resumeControllerRef = useRef<AbortController | null>(null);
@@ -218,6 +219,16 @@ const ChatPage: React.FC = () => {
   useEffect(() => {
     window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
   }, [sidebarWidth]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setStatusTick((current) => current + 1);
+    }, 30000);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, []);
 
   useEffect(() => {
     if (!isResizingSidebar) {
@@ -691,12 +702,16 @@ const ChatPage: React.FC = () => {
   const composerStatus = useMemo(() => {
     if (!conversation) {
       return sending
-        ? 'Starting conversation…'
+        ? 'live · starting…'
         : 'New conversation · profile ready';
     }
 
     const parts: string[] = [];
     const contextWindow = formatContextWindow(conversation.usage);
+
+    if (sending) {
+      parts.push('live');
+    }
 
     if (contextWindow) {
       parts.push(contextWindow);
@@ -705,11 +720,11 @@ const ChatPage: React.FC = () => {
     parts.push(formatCost(conversation.usage));
 
     if (conversation.updatedAt) {
-      parts.push(`Updated ${formatDate(conversation.updatedAt)}`);
+      parts.push(formatCompactRelativeTime(conversation.updatedAt));
     }
 
     return parts.join(' · ');
-  }, [conversation, sending]);
+  }, [conversation, sending, statusTick]);
 
   return (
     <div className="h-[100dvh] bg-transparent">
