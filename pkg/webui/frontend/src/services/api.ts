@@ -172,6 +172,61 @@ class ApiService {
       }
     }
   }
+
+  async streamConversation(
+    conversationId: string,
+    options: {
+      signal?: AbortSignal;
+      onEvent: (event: ChatStreamEvent) => void;
+    }
+  ): Promise<void> {
+    const response = await fetch(`/api/conversations/${conversationId}/stream`, {
+      method: 'GET',
+      signal: options.signal,
+    });
+
+    if (!response.ok) {
+      let error: ApiError;
+      try {
+        error = await response.json();
+      } catch {
+        error = { error: `HTTP ${response.status}` };
+      }
+      throw new Error(error.error || error.message || `HTTP ${response.status}`);
+    }
+
+    if (!response.body) {
+      throw new Error('Streaming response body is unavailable');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) {
+          continue;
+        }
+        options.onEvent(JSON.parse(trimmed) as ChatStreamEvent);
+      }
+
+      if (done) {
+        const trimmed = buffer.trim();
+        if (trimmed) {
+          options.onEvent(JSON.parse(trimmed) as ChatStreamEvent);
+        }
+        return;
+      }
+    }
+  }
 }
 
 export const apiService = new ApiService();

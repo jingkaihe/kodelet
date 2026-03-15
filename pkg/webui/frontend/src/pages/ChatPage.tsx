@@ -160,6 +160,7 @@ const ChatPage: React.FC = () => {
   const [isResizingSidebar, setIsResizingSidebar] = useState(false);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const resumeControllerRef = useRef<AbortController | null>(null);
   const sidebarResizeStartRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -195,13 +196,10 @@ const ChatPage: React.FC = () => {
 
   useEffect(() => {
     return () => {
-      const conversationToStop = activeConversationId;
       abortControllerRef.current?.abort();
-      if (conversationToStop) {
-        void apiService.stopConversation(conversationToStop).catch(() => undefined);
-      }
+      resumeControllerRef.current?.abort();
     };
-  }, [activeConversationId]);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -261,6 +259,8 @@ const ChatPage: React.FC = () => {
 
   useEffect(() => {
     setActiveConversationId(conversationId);
+    resumeControllerRef.current?.abort();
+    resumeControllerRef.current = null;
 
     if (!conversationId) {
       setConversation(null);
@@ -291,6 +291,69 @@ const ChatPage: React.FC = () => {
   }, [conversationId]);
 
   useEffect(() => {
+    if (!conversationId || conversationLoading || conversation?.id !== conversationId) {
+      return;
+    }
+
+    const controller = new AbortController();
+    resumeControllerRef.current = controller;
+    let sawEvent = false;
+
+    void apiService
+      .streamConversation(conversationId, {
+        signal: controller.signal,
+        onEvent: (event: ChatStreamEvent) => {
+          sawEvent = true;
+          if (event.kind === 'conversation' && event.conversation_id) {
+            setActiveConversationId(event.conversation_id);
+            setSending(true);
+            return;
+          }
+
+          if (event.kind === 'done' || event.kind === 'error') {
+            setSending(false);
+          }
+
+          if (event.kind === 'error') {
+            setStreamError(event.error || 'Chat request failed');
+          }
+
+          if (event.kind === 'tool-use' || event.kind === 'tool-result') {
+            setSteerAvailable(true);
+          }
+
+          setMessages((currentMessages) => applyChatStreamEvent(currentMessages, event));
+        },
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        const message = error instanceof Error ? error.message : 'Failed to resume conversation stream';
+        if (message !== 'conversation is not actively streaming') {
+          console.error('Failed to resume conversation stream', error);
+        }
+      })
+      .finally(() => {
+        if (resumeControllerRef.current === controller) {
+          resumeControllerRef.current = null;
+        }
+        if (sawEvent) {
+          setSending(false);
+          setSteerAvailable(false);
+        }
+      });
+
+    return () => {
+      controller.abort();
+      if (resumeControllerRef.current === controller) {
+        resumeControllerRef.current = null;
+      }
+    };
+  }, [conversation, conversationId, conversationLoading]);
+
+  useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages, sending]);
 
@@ -309,7 +372,7 @@ const ChatPage: React.FC = () => {
   };
 
   const handleSelectConversation = (nextConversationId: string) => {
-    if (sending || nextConversationId === conversationId) {
+    if (nextConversationId === conversationId) {
       return;
     }
 
@@ -318,10 +381,6 @@ const ChatPage: React.FC = () => {
   };
 
   const handleSidebarToggle = () => {
-    if (sending) {
-      return;
-    }
-
     setSidebarVisible((currentValue) => !currentValue);
   };
 
@@ -614,7 +673,7 @@ const ChatPage: React.FC = () => {
             <ChatSidebar
               activeConversationId={conversationId}
               conversations={conversations}
-              disabled={sending}
+              disabled={false}
               loading={sidebarLoading}
               onHide={handleSidebarToggle}
               onNewChat={handleNewChat}
@@ -649,7 +708,6 @@ const ChatPage: React.FC = () => {
                 aria-label="Show panel"
                 className="sidebar-toggle-button sidebar-toggle-button-collapsed"
                 data-testid="sidebar-attached-toggle"
-                disabled={sending}
                 onClick={handleSidebarToggle}
                 type="button"
               >
@@ -675,7 +733,6 @@ const ChatPage: React.FC = () => {
               aria-label="Show panel"
               className="sidebar-toggle-button sidebar-toggle-button-mobile lg:hidden"
               data-testid="sidebar-attached-toggle-mobile"
-              disabled={sending}
               onClick={handleSidebarToggle}
               type="button"
             >

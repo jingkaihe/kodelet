@@ -370,6 +370,7 @@ func buildChatState(
 type chatMessageHandler struct {
 	conversationID string
 	sink           ChatEventSink
+	broadcast      func(string, ChatEvent)
 }
 
 func (h *chatMessageHandler) HandleText(text string) {
@@ -377,23 +378,31 @@ func (h *chatMessageHandler) HandleText(text string) {
 		return
 	}
 
-	_ = h.sink.Send(ChatEvent{
+	event := ChatEvent{
 		Kind:           "text",
 		Content:        text,
 		ConversationID: h.conversationID,
 		Role:           "assistant",
-	})
+	}
+	_ = h.sink.Send(event)
+	if h.broadcast != nil {
+		h.broadcast(h.conversationID, event)
+	}
 }
 
 func (h *chatMessageHandler) HandleToolUse(toolCallID string, toolName string, input string) {
-	_ = h.sink.Send(ChatEvent{
+	event := ChatEvent{
 		Kind:           "tool-use",
 		ConversationID: h.conversationID,
 		Role:           "assistant",
 		ToolCallID:     toolCallID,
 		ToolName:       toolName,
 		Input:          input,
-	})
+	}
+	_ = h.sink.Send(event)
+	if h.broadcast != nil {
+		h.broadcast(h.conversationID, event)
+	}
 }
 
 func (h *chatMessageHandler) HandleToolResult(toolCallID string, toolName string, result tooltypes.ToolResult) {
@@ -402,14 +411,18 @@ func (h *chatMessageHandler) HandleToolResult(toolCallID string, toolName string
 		structuredResult.ToolName = toolName
 	}
 
-	_ = h.sink.Send(ChatEvent{
+	event := ChatEvent{
 		Kind:           "tool-result",
 		ConversationID: h.conversationID,
 		Role:           "assistant",
 		ToolCallID:     toolCallID,
 		ToolName:       structuredResult.ToolName,
 		ToolResult:     &structuredResult,
-	})
+	}
+	_ = h.sink.Send(event)
+	if h.broadcast != nil {
+		h.broadcast(h.conversationID, event)
+	}
 }
 
 func (h *chatMessageHandler) HandleThinking(thinking string) {
@@ -417,12 +430,16 @@ func (h *chatMessageHandler) HandleThinking(thinking string) {
 		return
 	}
 
-	_ = h.sink.Send(ChatEvent{
+	event := ChatEvent{
 		Kind:           "thinking",
 		Content:        thinking,
 		ConversationID: h.conversationID,
 		Role:           "assistant",
-	})
+	}
+	_ = h.sink.Send(event)
+	if h.broadcast != nil {
+		h.broadcast(h.conversationID, event)
+	}
 }
 
 func (h *chatMessageHandler) HandleDone() {}
@@ -432,20 +449,28 @@ func (h *chatMessageHandler) HandleTextDelta(delta string) {
 		return
 	}
 
-	_ = h.sink.Send(ChatEvent{
+	event := ChatEvent{
 		Kind:           "text-delta",
 		Delta:          delta,
 		ConversationID: h.conversationID,
 		Role:           "assistant",
-	})
+	}
+	_ = h.sink.Send(event)
+	if h.broadcast != nil {
+		h.broadcast(h.conversationID, event)
+	}
 }
 
 func (h *chatMessageHandler) HandleThinkingStart() {
-	_ = h.sink.Send(ChatEvent{
+	event := ChatEvent{
 		Kind:           "thinking-start",
 		ConversationID: h.conversationID,
 		Role:           "assistant",
-	})
+	}
+	_ = h.sink.Send(event)
+	if h.broadcast != nil {
+		h.broadcast(h.conversationID, event)
+	}
 }
 
 func (h *chatMessageHandler) HandleThinkingDelta(delta string) {
@@ -453,34 +478,51 @@ func (h *chatMessageHandler) HandleThinkingDelta(delta string) {
 		return
 	}
 
-	_ = h.sink.Send(ChatEvent{
+	event := ChatEvent{
 		Kind:           "thinking-delta",
 		Delta:          delta,
 		ConversationID: h.conversationID,
 		Role:           "assistant",
-	})
+	}
+	_ = h.sink.Send(event)
+	if h.broadcast != nil {
+		h.broadcast(h.conversationID, event)
+	}
 }
 
 func (h *chatMessageHandler) HandleThinkingBlockEnd() {
-	_ = h.sink.Send(ChatEvent{
+	event := ChatEvent{
 		Kind:           "thinking-end",
 		ConversationID: h.conversationID,
 		Role:           "assistant",
-	})
+	}
+	_ = h.sink.Send(event)
+	if h.broadcast != nil {
+		h.broadcast(h.conversationID, event)
+	}
 }
 
 func (h *chatMessageHandler) HandleContentBlockEnd() {
-	_ = h.sink.Send(ChatEvent{
+	event := ChatEvent{
 		Kind:           "content-end",
 		ConversationID: h.conversationID,
 		Role:           "assistant",
-	})
+	}
+	_ = h.sink.Send(event)
+	if h.broadcast != nil {
+		h.broadcast(h.conversationID, event)
+	}
 }
 
 type ndjsonEventSink struct {
 	w       http.ResponseWriter
 	flusher http.Flusher
 	mu      sync.Mutex
+}
+
+type subscriberEventSink struct {
+	ch   chan ChatEvent
+	once sync.Once
 }
 
 func newNDJSONEventSink(w http.ResponseWriter) (*ndjsonEventSink, error) {
@@ -509,6 +551,25 @@ func (s *ndjsonEventSink) Send(event ChatEvent) error {
 	}
 	s.flusher.Flush()
 	return nil
+}
+
+func newSubscriberEventSink() *subscriberEventSink {
+	return &subscriberEventSink{ch: make(chan ChatEvent, 128)}
+}
+
+func (s *subscriberEventSink) Send(event ChatEvent) error {
+	select {
+	case s.ch <- event:
+		return nil
+	default:
+		return errors.New("subscriber buffer full")
+	}
+}
+
+func (s *subscriberEventSink) Close() {
+	s.once.Do(func() {
+		close(s.ch)
+	})
 }
 
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
@@ -553,8 +614,16 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(s.chatExecutionContext(requestCtx))
 	defer s.unregisterActiveChat(conversationID, cancel)
 	s.registerActiveChat(conversationID, cancel)
+	defer s.closeChatSubscribers(conversationID)
+	defer cancel()
 
-	conversationID, runErr := s.chatRunner.Run(ctx, req, sink)
+	broadcastingSink := &broadcastingEventSink{
+		primary:        sink,
+		broadcast:      s.broadcastChatEvent,
+		conversationID: conversationID,
+	}
+
+	conversationID, runErr := s.chatRunner.Run(ctx, req, broadcastingSink)
 	if runErr != nil {
 		if stdErrors.Is(runErr, io.ErrClosedPipe) || stdErrors.Is(runErr, context.Canceled) {
 			logger.G(requestCtx).WithError(runErr).Debug("chat stream disconnected")
@@ -562,6 +631,12 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		}
 
 		logger.G(ctx).WithError(runErr).Error("chat request failed")
+		s.broadcastChatEvent(conversationID, ChatEvent{
+			Kind:           "error",
+			ConversationID: conversationID,
+			Role:           "assistant",
+			Error:          runErr.Error(),
+		})
 		_ = sink.Send(ChatEvent{
 			Kind:           "error",
 			ConversationID: conversationID,
@@ -571,9 +646,34 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.broadcastChatEvent(conversationID, ChatEvent{
+		Kind:           "done",
+		ConversationID: conversationID,
+		Role:           "assistant",
+	})
 	_ = sink.Send(ChatEvent{
 		Kind:           "done",
 		ConversationID: conversationID,
 		Role:           "assistant",
 	})
+}
+
+type broadcastingEventSink struct {
+	primary        ChatEventSink
+	broadcast      func(string, ChatEvent)
+	conversationID string
+}
+
+func (s *broadcastingEventSink) Send(event ChatEvent) error {
+	if err := s.primary.Send(event); err != nil {
+		if s.broadcast != nil {
+			s.broadcast(s.conversationID, event)
+		}
+		return err
+	}
+
+	if s.broadcast != nil {
+		s.broadcast(s.conversationID, event)
+	}
+	return nil
 }

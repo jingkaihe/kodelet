@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
@@ -579,6 +580,49 @@ func TestServer_handleStopConversation(t *testing.T) {
 	assert.True(t, response.Stopped)
 	_, exists := server.activeChats["conv-123"]
 	assert.False(t, exists)
+}
+
+func TestServer_handleStreamConversation(t *testing.T) {
+	server := &Server{
+		conversationService: &mockConversationService{},
+		router:              mux.NewRouter(),
+		activeChats:         map[string]context.CancelFunc{"conv-123": func() {}},
+		chatSubscribers:     make(map[string]map[*subscriberEventSink]struct{}),
+	}
+
+	req := httptest.NewRequest("GET", "/api/conversations/conv-123/stream", nil)
+	req = mux.SetURLVars(req, map[string]string{"id": "conv-123"})
+	w := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		server.handleStreamConversation(w, req)
+		close(done)
+	}()
+
+	require.Eventually(t, func() bool {
+		server.chatSubscribersMu.Lock()
+		defer server.chatSubscribersMu.Unlock()
+		return len(server.chatSubscribers["conv-123"]) == 1
+	}, time.Second, 10*time.Millisecond)
+
+	server.broadcastChatEvent("conv-123", ChatEvent{Kind: "text-delta", ConversationID: "conv-123", Delta: "hi", Role: "assistant"})
+	server.closeChatSubscribers("conv-123")
+	<-done
+
+	lines := strings.Split(strings.TrimSpace(w.Body.String()), "\n")
+	require.Len(t, lines, 2)
+
+	var firstEvent ChatEvent
+	err := json.Unmarshal([]byte(lines[0]), &firstEvent)
+	require.NoError(t, err)
+	assert.Equal(t, "conversation", firstEvent.Kind)
+
+	var secondEvent ChatEvent
+	err = json.Unmarshal([]byte(lines[1]), &secondEvent)
+	require.NoError(t, err)
+	assert.Equal(t, "text-delta", secondEvent.Kind)
+	assert.Equal(t, "hi", secondEvent.Delta)
 }
 
 func TestServer_handleChatThroughMiddleware(t *testing.T) {

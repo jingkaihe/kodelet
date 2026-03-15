@@ -8,6 +8,7 @@ const mockGetConversations = vi.fn();
 const mockGetConversation = vi.fn();
 const mockGetChatSettings = vi.fn();
 const mockStreamChat = vi.fn();
+const mockStreamConversation = vi.fn();
 const mockSteerConversation = vi.fn();
 const mockStopConversation = vi.fn();
 let routeParams: { id?: string } = {};
@@ -30,6 +31,7 @@ vi.mock('../services/api', () => ({
     getConversation: (...args: unknown[]) => mockGetConversation(...args),
     getChatSettings: (...args: unknown[]) => mockGetChatSettings(...args),
     streamChat: (...args: unknown[]) => mockStreamChat(...args),
+    streamConversation: (...args: unknown[]) => mockStreamConversation(...args),
     steerConversation: (...args: unknown[]) => mockSteerConversation(...args),
     stopConversation: (...args: unknown[]) => mockStopConversation(...args),
   },
@@ -61,6 +63,7 @@ describe('ChatPage', () => {
       conversation_id: 'conv-123',
       queued: false,
     });
+    mockStreamConversation.mockRejectedValue(new Error('conversation is not actively streaming'));
     mockStopConversation.mockResolvedValue({
       success: true,
       conversation_id: 'conv-123',
@@ -250,6 +253,29 @@ describe('ChatPage', () => {
     );
   });
 
+  it('re-subscribes to an active conversation stream when reopening a conversation', async () => {
+    routeParams = { id: 'conv-123' };
+    mockGetConversation.mockResolvedValue({
+      id: 'conv-123',
+      createdAt: '2024-01-01T00:00:00Z',
+      updatedAt: '2024-01-01T00:00:00Z',
+      messageCount: 1,
+      messages: [],
+      toolResults: {},
+    });
+    mockStreamConversation.mockImplementation(async (_id, options) => {
+      options.onEvent({ kind: 'conversation', conversation_id: 'conv-123' });
+      options.onEvent({ kind: 'text-delta', conversation_id: 'conv-123', delta: 'hello' });
+      options.onEvent({ kind: 'done', conversation_id: 'conv-123' });
+    });
+
+    render(<ChatPage />);
+
+    await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-123'));
+    await waitFor(() => expect(mockStreamConversation).toHaveBeenCalledWith('conv-123', expect.any(Object)));
+    await waitFor(() => expect(screen.getByText('hello')).toBeInTheDocument());
+  });
+
   it('queues steering while a conversation is streaming', async () => {
     routeParams = { id: 'conv-123' };
     mockGetConversation.mockResolvedValue({
@@ -311,6 +337,55 @@ describe('ChatPage', () => {
     await act(async () => {
       streamOptions?.onEvent({ kind: 'conversation', conversation_id: 'conv-123' });
     });
+  });
+
+  it('allows sidebar navigation while a conversation is streaming', async () => {
+    mockGetConversations.mockResolvedValue({
+      conversations: [
+        {
+          id: 'conv-123',
+          createdAt: '2024-01-01T00:00:00Z',
+          updatedAt: '2024-01-01T00:00:00Z',
+          messageCount: 1,
+          summary: 'Active conversation',
+        },
+        {
+          id: 'conv-456',
+          createdAt: '2024-01-01T00:00:00Z',
+          updatedAt: '2024-01-01T00:00:00Z',
+          messageCount: 1,
+          summary: 'Other conversation',
+        },
+      ],
+      hasMore: false,
+      total: 2,
+      limit: 40,
+      offset: 0,
+    });
+
+    mockStreamChat.mockImplementation(async (_request, options) => {
+      options.onEvent({ kind: 'conversation', conversation_id: 'conv-123' });
+      return new Promise(() => undefined);
+    });
+
+    render(<ChatPage />);
+
+    await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+      target: { value: 'hello' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByTestId('sidebar-hide-button'));
+    expect(screen.queryByTestId('chat-sidebar-shell')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('sidebar-attached-toggle'));
+    fireEvent.click(screen.getByRole('button', { name: /Other conversation/i }));
+
+    expect(mockNavigate).toHaveBeenCalledWith('/c/conv-456');
   });
 
   it('does not queue steering before the stream shows another backend turn is possible', async () => {
