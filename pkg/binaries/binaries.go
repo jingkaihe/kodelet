@@ -169,6 +169,67 @@ func GetLibexecBinaryPath(name string) string {
 	return filepath.Join(GetLibexecBinDir(), binaryName)
 }
 
+// PreferredBinDirs returns binary lookup directories in the same precedence order
+// used by ResolveBinary for command execution contexts that rely on PATH.
+func PreferredBinDirs() ([]string, error) {
+	binDir, err := GetBinDir()
+	if err != nil {
+		return nil, err
+	}
+
+	return []string{
+		GetLibexecBinDir(),
+		binDir,
+	}, nil
+}
+
+// EnvWithPreferredBinDirs prepends kodelet-managed binary directories to PATH
+// while preserving the existing environment and avoiding duplicate path entries.
+func EnvWithPreferredBinDirs(env []string) ([]string, error) {
+	preferredDirs, err := PreferredBinDirs()
+	if err != nil {
+		return env, err
+	}
+
+	clonedEnv := append([]string(nil), env...)
+	pathValue := ""
+	pathIndex := -1
+	for i, kv := range clonedEnv {
+		if strings.HasPrefix(kv, "PATH=") {
+			pathIndex = i
+			pathValue = strings.TrimPrefix(kv, "PATH=")
+			break
+		}
+	}
+
+	pathParts := append([]string(nil), preferredDirs...)
+	if pathValue != "" {
+		pathParts = append(pathParts, strings.Split(pathValue, string(os.PathListSeparator))...)
+	}
+
+	dedupedParts := make([]string, 0, len(pathParts))
+	seen := make(map[string]struct{}, len(pathParts))
+	for _, part := range pathParts {
+		if part == "" {
+			continue
+		}
+		if _, ok := seen[part]; ok {
+			continue
+		}
+		seen[part] = struct{}{}
+		dedupedParts = append(dedupedParts, part)
+	}
+
+	newPath := strings.Join(dedupedParts, string(os.PathListSeparator))
+	if pathIndex >= 0 {
+		clonedEnv[pathIndex] = "PATH=" + newPath
+	} else {
+		clonedEnv = append(clonedEnv, "PATH="+newPath)
+	}
+
+	return clonedEnv, nil
+}
+
 // EnsureBinary ensures the binary is installed with the correct version.
 // Returns the path to the binary.
 func EnsureBinary(ctx context.Context, spec BinarySpec) (string, error) {

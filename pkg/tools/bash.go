@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -18,6 +17,7 @@ import (
 
 	"github.com/gobwas/glob"
 	"github.com/invopop/jsonschema"
+	"github.com/jingkaihe/kodelet/pkg/binaries"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"go.opentelemetry.io/otel/attribute"
@@ -311,7 +311,7 @@ func (b *BashTool) executeForeground(ctx context.Context, input *BashInput) tool
 	workingDir, _ := os.Getwd()
 
 	cmd := exec.CommandContext(ctx, "bash", "-c", input.Command)
-	if env, err := bashEnvWithKodeletBin(); err == nil {
+	if env, err := bashEnvWithPreferredBinDirs(); err == nil {
 		cmd.Env = env
 	}
 	osutil.SetProcessGroup(cmd)
@@ -356,35 +356,6 @@ func (b *BashTool) executeForeground(ctx context.Context, input *BashInput) tool
 	}
 }
 
-func bashEnvWithKodeletBin() ([]string, error) {
-	env := os.Environ()
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return env, err
-	}
-
-	kodeletBin := filepath.Join(homeDir, ".kodelet", "bin")
-	pathValue := ""
-	pathIndex := -1
-	for i, kv := range env {
-		if strings.HasPrefix(kv, "PATH=") {
-			pathIndex = i
-			pathValue = strings.TrimPrefix(kv, "PATH=")
-			break
-		}
-	}
-
-	pathParts := []string{kodeletBin}
-	if pathValue != "" {
-		pathParts = append(pathParts, pathValue)
-	}
-	newPath := strings.Join(pathParts, string(os.PathListSeparator))
-
-	if pathIndex >= 0 {
-		env[pathIndex] = "PATH=" + newPath
-	} else {
-		env = append(env, "PATH="+newPath)
-	}
-
-	return env, nil
+func bashEnvWithPreferredBinDirs() ([]string, error) {
+	return binaries.EnvWithPreferredBinDirs(os.Environ())
 }

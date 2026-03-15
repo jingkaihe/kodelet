@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -79,6 +80,67 @@ func TestGetLibexecBinaryPath(t *testing.T) {
 		binaryName = "rg.exe"
 	}
 	assert.Equal(t, filepath.Join(GetLibexecBinDir(), binaryName), path)
+}
+
+func TestPreferredBinDirs(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	oldLibexecDir := libexecDir
+	libexecDir = filepath.Join(tmpDir, "libexec")
+	t.Cleanup(func() { libexecDir = oldLibexecDir })
+
+	oldHome := os.Getenv("HOME")
+	homeDir := filepath.Join(tmpDir, "home")
+	require.NoError(t, os.Setenv("HOME", homeDir))
+	t.Cleanup(func() { _ = os.Setenv("HOME", oldHome) })
+
+	dirs, err := PreferredBinDirs()
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		filepath.Join(tmpDir, "libexec"),
+		filepath.Join(homeDir, ".kodelet", "bin"),
+	}, dirs)
+}
+
+func TestEnvWithPreferredBinDirsPrependsAndDeduplicatesPath(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	oldLibexecDir := libexecDir
+	libexecDir = filepath.Join(tmpDir, "libexec")
+	t.Cleanup(func() { libexecDir = oldLibexecDir })
+
+	oldHome := os.Getenv("HOME")
+	homeDir := filepath.Join(tmpDir, "home")
+	require.NoError(t, os.Setenv("HOME", homeDir))
+	t.Cleanup(func() { _ = os.Setenv("HOME", oldHome) })
+
+	managedBin := filepath.Join(homeDir, ".kodelet", "bin")
+	systemBin := filepath.Join(tmpDir, "system-bin")
+
+	env, err := EnvWithPreferredBinDirs([]string{
+		"FOO=bar",
+		"PATH=" + strings.Join([]string{
+			managedBin,
+			systemBin,
+			filepath.Join(tmpDir, "libexec"),
+		}, string(os.PathListSeparator)),
+	})
+	require.NoError(t, err)
+
+	var pathValue string
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "PATH=") {
+			pathValue = strings.TrimPrefix(kv, "PATH=")
+			break
+		}
+	}
+
+	require.NotEmpty(t, pathValue)
+	assert.Equal(t, []string{
+		filepath.Join(tmpDir, "libexec"),
+		managedBin,
+		systemBin,
+	}, strings.Split(pathValue, string(os.PathListSeparator)))
 }
 
 func TestResolveBinaryPrefersLibexecOverManagedAndSystem(t *testing.T) {
