@@ -17,6 +17,7 @@ For user documentation, see the [User Manual](MANUAL.md).
 - golangci-lint (latest version)
 - air (for development auto-reload)
 - gh CLI (for GitHub releases)
+- goreleaser (for release packaging)
 
 ### Optional (for Docker-based builds)
 - Docker (for containerized cross-compilation)
@@ -72,36 +73,24 @@ This creates the binary in `./bin/kodelet`.
 
 ### Cross-Platform Build
 
-With the complex toolchain including Go, Node.js, and npm, Kodelet provides both local and Docker-based cross-compilation options:
+Kodelet provides both direct cross-build tasks and a GoReleaser-based packaging path:
 
 #### Local Cross-Build
 ```bash
 mise run cross-build
 ```
 
-**Requirements:**
-- All tools automatically managed by mise (Go 1.24.2, Node.js 22.17.0, npm 10.9.2)
-- Runs `go generate ./pkg/webui` to build frontend assets
-- Cross-compiles for all supported platforms
+This produces raw binaries in `./bin/` for the supported platforms.
 
-#### Docker Cross-Build (Recommended)
+#### GoReleaser Snapshot Build
 ```bash
-mise run cross-build-docker
+mise run release
 ```
 
-**Benefits:**
-- Uses containerized build environment with exact toolchain versions
-- No local dependencies beyond Docker required
-- Ensures consistent builds across different development machines
-- Recommended for CI/CD and release builds
-
-**How it works:**
-1. Builds a Docker image with Go 1.24 + Node.js 22.17.0 + npm 10.9.2
-2. Generates frontend assets inside the container
-3. Cross-compiles for all platforms (linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64)
-4. Extracts binaries to local `./bin/` directory
-
-Both approaches create binaries for multiple platforms in the `./bin/` directory.
+This runs GoReleaser in snapshot mode and emits release-style artifacts into `./dist/`, including:
+- raw platform binaries
+- `checksums.txt`
+- Linux `.deb` and `.rpm` packages
 
 ### Docker Build
 
@@ -245,21 +234,21 @@ mise run frontend-test-coverage
    - **Feature Name**: Description of changes
    - **Another Feature**: More details about improvements
    ```
-3. Create release using mise:
+3. Build release artifacts using mise:
    ```bash
-   # Traditional release
+   # Build snapshot artifacts locally with GoReleaser
    mise run release
 
-   # GitHub release with RELEASE.md notes (recommended)
+   # Build a full tagged release (used in CI)
    mise run github-release
    ```
 
 ### Automated Release
 The project includes a GitHub Actions workflow (`.github/workflows/release.yml`) that automatically:
 - Triggers on version tags (`v*`)
-- Uses Docker cross-build for consistent reproducible builds
+- Runs GoReleaser for release packaging
 - Extracts release notes from the top entry in `RELEASE.md`
-- Uploads all platform binaries to GitHub releases
+- Uploads all platform binaries, checksums, and Linux packages to GitHub releases
 
 To trigger an automated release:
 1. Update version in `VERSION.txt`

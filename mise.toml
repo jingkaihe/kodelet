@@ -12,6 +12,7 @@ fd = "10.3.0"
 golangci-lint = "latest"
 air = "latest"
 gh = "latest"
+goreleaser = "latest"
 
 "go:github.com/isaacphi/mcp-language-server" = "latest"
 "go:golang.org/x/tools/gopls" = "latest"
@@ -154,26 +155,17 @@ depends = ["build"]
 run = ["./bin/kodelet run -r release-note"]
 
 [tasks.release]
-description = "Create GitHub release with cross-compiled binaries"
-depends = ["cross-build"]
+description = "Build GoReleaser snapshot artifacts"
+depends = ["lint", "test"]
 run = [
-  "gh release create v$VERSION",
-  "gh release upload v$VERSION ./bin/kodelet-linux-amd64",
-  "gh release upload v$VERSION ./bin/kodelet-linux-arm64",
-  "gh release upload v$VERSION ./bin/kodelet-darwin-amd64",
-  "gh release upload v$VERSION ./bin/kodelet-darwin-arm64",
-  "gh release upload v$VERSION ./bin/kodelet-windows-amd64.exe",
+  "goreleaser release --snapshot --clean",
 ]
 
 [tasks.github-release]
-description = "Create GitHub release with release notes from RELEASE.md"
-depends = ["cross-build-docker"]
+description = "Build GoReleaser release artifacts for CI"
+depends = ["lint", "test"]
 run = [
-  "echo 'Creating GitHub release v$VERSION...'",
-  "./scripts/extract-release-notes.sh > /tmp/release-notes.md",
-  "gh release create v$VERSION --title \"v$VERSION\" --notes-file /tmp/release-notes.md ./bin/kodelet-linux-amd64 ./bin/kodelet-linux-arm64 ./bin/kodelet-darwin-amd64 ./bin/kodelet-darwin-arm64 ./bin/kodelet-windows-amd64.exe",
-  "rm -f /tmp/release-notes.md",
-  "echo 'GitHub release v$VERSION created successfully!'",
+  "goreleaser release --clean",
 ]
 
 [tasks.push-tag]

@@ -1,0 +1,71 @@
+version: 2
+
+project_name: kodelet
+
+before:
+  hooks:
+    - go mod download
+    - go generate ./pkg/webui
+
+builds:
+  - id: kodelet
+    main: ./cmd/kodelet
+    binary: kodelet
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: darwin
+        goarch: arm64
+      - goos: windows
+        goarch: arm64
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - >-
+        -s -w
+        -X github.com/jingkaihe/kodelet/pkg/version.Version={{ .Version }}
+        -X github.com/jingkaihe/kodelet/pkg/version.GitCommit={{ .Commit }}
+        -X github.com/jingkaihe/kodelet/pkg/version.BuildTime={{ .Date }}
+
+archives:
+  - id: raw-binaries
+    ids:
+      - kodelet
+    formats:
+      - binary
+    name_template: >-
+      kodelet-{{ .Os }}-
+      {{- if eq .Arch "amd64" -}}amd64
+      {{- else if eq .Arch "arm64" -}}arm64
+      {{- else -}}{{ .Arch }}{{- end -}}
+      {{- if eq .Os "windows" -}}.exe{{- end -}}
+
+checksum:
+  name_template: checksums.txt
+
+nfpms:
+  - id: kodelet-linux
+    ids:
+      - kodelet
+    package_name: kodelet
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/bin
+    maintainer: Jingkai He <jingkai@hey.com>
+    description: Lightweight CLI agent for software engineering and production operations tasks.
+    homepage: https://github.com/jingkaihe/kodelet
+    license: MIT
+    contents:
+      - src: README.md
+        dst: /usr/share/doc/kodelet/README.md
+        file_info:
+          mode: 0644
+
+release:
+  disable: true
