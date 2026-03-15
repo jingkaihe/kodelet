@@ -245,7 +245,7 @@ func EnsureBinary(ctx context.Context, spec BinarySpec) (string, error) {
 func resolveLibexecBinary(ctx context.Context, spec BinarySpec) (string, bool) {
 	binaryPath := GetLibexecBinaryPath(spec.BinaryName)
 	if getInstalledVersion(binaryPath, spec) == spec.Version {
-		logger.G(ctx).WithField("path", binaryPath).Infof("Using packaged %s from libexec", spec.BinaryName)
+		logger.G(ctx).WithField("path", binaryPath).Debugf("Using packaged %s from libexec", spec.BinaryName)
 		return binaryPath, true
 	}
 
@@ -275,7 +275,7 @@ func resolveSystemBinary(ctx context.Context, spec BinarySpec) (string, bool) {
 	for _, name := range names {
 		systemPath, err := exec.LookPath(name)
 		if err == nil {
-			logger.G(ctx).WithField("path", systemPath).Infof("Using system-installed %s", name)
+			logger.G(ctx).WithField("path", systemPath).Debugf("Using system-installed %s", name)
 			return systemPath, true
 		}
 	}
