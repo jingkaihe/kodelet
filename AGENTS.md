@@ -133,7 +133,7 @@ Scripts at `.kodelet/hooks/` or `~/.kodelet/hooks/` that intercept agent operati
 See [docs/HOOKS.md](docs/HOOKS.md).
 
 ## External Binary Management
-Managed binaries in `~/.kodelet/bin/`: ripgrep (15.1.0), fd (10.3.0). Auto-downloaded with checksum verification; falls back to system binaries if unavailable.
+Managed binaries in `~/.kodelet/bin/`: ripgrep (15.1.0), fd (10.3.0). Auto-downloaded with checksum verification for standalone installs; packaged Linux builds bundle them in `/usr/libexec/kodelet/` and resolution prefers that location before falling back to managed or system binaries.
 
 ## Resources
 - [docs/MANUAL.md](docs/MANUAL.md) - CLI reference

@@ -92,6 +92,8 @@ This runs GoReleaser in snapshot mode and emits release-style artifacts into `./
 - `checksums.txt`
 - Linux `.deb` and `.rpm` packages
 
+The Linux packages also bundle `rg` and `fd` into `/usr/libexec/kodelet/` so packaged installs do not need to download those search binaries into the user's home directory.
+
 ### Docker Build
 
 ```bash

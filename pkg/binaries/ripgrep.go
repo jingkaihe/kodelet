@@ -20,6 +20,7 @@ func RipgrepSpec() BinarySpec {
 		Name:            "ripgrep",
 		Version:         RipgrepVersion,
 		BinaryName:      "rg",
+		SystemNames:     []string{"rg"},
 		GetDownloadURL:  getRipgrepDownloadURL,
 		GetChecksumURL:  getRipgrepChecksumURL,
 		GetArchiveEntry: getRipgrepArchiveEntry,
@@ -28,11 +29,11 @@ func RipgrepSpec() BinarySpec {
 }
 
 // EnsureRipgrep ensures ripgrep is installed and returns its path.
-// It first tries to use the managed binary, then falls back to system ripgrep.
+// It prefers packaged libexec binaries, then managed binaries, then system ripgrep.
 // This is cached after the first successful call.
 func EnsureRipgrep(ctx context.Context) (string, error) {
 	return ripgrepCache.Get(func() (string, error) {
-		return EnsureBinaryWithFallback(ctx, RipgrepSpec())
+		return ResolveBinary(ctx, RipgrepSpec())
 	})
 }
 
