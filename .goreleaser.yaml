@@ -64,11 +64,11 @@ nfpms:
         dst: /usr/share/doc/kodelet/README.md
         file_info:
           mode: 0644
-      - src: dist/package-binaries/linux-{{ .Arch }}/rg
+      - src: .build/package-binaries/linux-{{ .Arch }}/rg
         dst: /usr/libexec/kodelet/rg
         file_info:
           mode: 0755
-      - src: dist/package-binaries/linux-{{ .Arch }}/fd
+      - src: .build/package-binaries/linux-{{ .Arch }}/fd
         dst: /usr/libexec/kodelet/fd
         file_info:
           mode: 0755

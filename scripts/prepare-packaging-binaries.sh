@@ -4,13 +4,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
-OUTPUT_DIR="$REPO_ROOT/dist/package-binaries"
+OUTPUT_DIR="$REPO_ROOT/.build/package-binaries"
 
 extract_version() {
   local file="$1"
   local const_name="$2"
 
-  sed -n "s/.*${const_name} = \"\([^"]*\)\".*/\1/p" "$file"
+  awk -v const_name="$const_name" '$1 == const_name && $2 == "=" { gsub(/"/, "", $3); print $3 }' "$file"
 }
 
 download_and_extract() {
