@@ -248,7 +248,8 @@ describe('ChatPage', () => {
 
     expect(screen.getByTestId('profile-static-pill')).toBeInTheDocument();
     expect(screen.queryByLabelText('Profile')).not.toBeInTheDocument();
-    expect(screen.getByText('Profile premium · locked')).toBeInTheDocument();
+    expect(screen.getByText('premium')).toBeInTheDocument();
+    expect(screen.getByText('Locked')).toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
       target: { value: 'continue' },

@@ -11,7 +11,7 @@ import type {
   Conversation,
   PendingImageAttachment,
 } from '../types';
-import { cn, formatCost, formatDate, showToast } from '../utils';
+import { cn, showToast } from '../utils';
 
 const normalizeConversation = (conversation: Conversation): Conversation => ({
   ...conversation,
@@ -795,50 +795,6 @@ const ChatPage: React.FC = () => {
         ) : null}
 
         <main className="relative flex h-[100dvh] min-w-0 flex-1 flex-col overflow-hidden">
-          <header className="shrink-0 border-b border-black/8 px-4 py-5 md:px-8">
-            <div className="flex items-start gap-4">
-              <div className="min-w-0 max-w-5xl flex-1">
-                <p className="eyebrow-label">
-                  {conversation ? 'Conversation' : 'Workspace assistant'}
-                </p>
-
-                {conversation ? (
-                  <>
-                    <h2 className="balanced-title conversation-title mt-2 text-3xl font-heading font-bold tracking-tight text-kodelet-dark md:text-4xl">
-                      {heading}
-                    </h2>
-                    <div className="mt-3 flex flex-wrap gap-2 text-kodelet-mid-gray">
-                      {conversation.provider ? (
-                        <span className="meta-chip">
-                          {conversation.provider}
-                        </span>
-                      ) : null}
-                      {conversation.id ? (
-                        <span className="meta-chip">
-                          {conversation.id}
-                        </span>
-                      ) : null}
-                      {conversation.updatedAt ? (
-                        <span className="meta-chip">
-                          Updated {formatDate(conversation.updatedAt)}
-                        </span>
-                      ) : null}
-                      {conversation.usage ? (
-                        <span className="meta-chip">
-                          {formatCost(conversation.usage)}
-                        </span>
-                      ) : null}
-                      <span className="meta-chip">
-                        Profile {currentProfileLabel}
-                        {conversation?.profileLocked ? ' · locked' : ''}
-                      </span>
-                    </div>
-                  </>
-                ) : null}
-              </div>
-            </div>
-          </header>
-
           <div className="min-h-0 flex-1 overflow-y-auto">
             {conversationLoading ? (
               <div className="flex min-h-full items-center justify-center px-6 py-12">
@@ -867,7 +823,7 @@ const ChatPage: React.FC = () => {
             )}
           </div>
 
-          <div className="sticky bottom-0 z-10 shrink-0 border-t border-black/8 bg-[color:var(--kodelet-panel-soft)]/95 px-4 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] backdrop-blur-sm md:px-8">
+          <div className="sticky bottom-0 z-10 shrink-0 border-t border-black/8 bg-[color:var(--kodelet-panel-soft)]/95 px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur-sm md:px-8 md:py-3.5">
             <div className="mx-auto w-full max-w-5xl px-4 md:px-8">
               {streamError ? (
                 <div className="surface-panel mb-3 rounded-2xl border-kodelet-orange/20 px-4 py-3 text-sm text-kodelet-dark">
@@ -877,7 +833,7 @@ const ChatPage: React.FC = () => {
 
               <div
                 className={cn(
-                  'surface-panel w-full rounded-[1.75rem] p-3',
+                  'surface-panel w-full rounded-[1.45rem] p-2.5',
                   dragActive && 'border-kodelet-blue/35 bg-kodelet-blue/5'
                 )}
                 onDragLeave={handleDragLeave}
@@ -895,7 +851,7 @@ const ChatPage: React.FC = () => {
                 />
 
                 {attachments.length > 0 ? (
-                  <div className="mb-3 flex flex-wrap gap-3 px-3 pt-2">
+                  <div className="mb-2.5 flex flex-wrap gap-2.5 px-2.5 pt-1.5">
                     {attachments.map((attachment) => (
                       <div
                         key={attachment.id}
@@ -920,7 +876,7 @@ const ChatPage: React.FC = () => {
                 ) : null}
 
                 <textarea
-                  className="min-h-[88px] w-full resize-none border-0 bg-transparent px-3 py-3 font-body text-base leading-7 text-kodelet-dark outline-none placeholder:text-kodelet-dark/40"
+                  className="min-h-[68px] w-full resize-none border-0 bg-transparent px-2.5 py-2.5 font-body text-[0.97rem] leading-6 text-kodelet-dark outline-none placeholder:text-kodelet-dark/40"
                   disabled={steering}
                   onChange={(event) => setDraft(event.target.value)}
                   onKeyDown={handleDraftKeyDown}
@@ -937,8 +893,8 @@ const ChatPage: React.FC = () => {
                   value={draft}
                 />
 
-                <div className="flex items-center justify-between gap-3 border-t border-black/8 px-3 pt-3">
-                  <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center justify-between gap-3 border-t border-black/8 px-2.5 pt-2.5">
+                  <div className="flex flex-wrap items-center gap-2.5">
                     <button
                       className="composer-capsule composer-capsule-accent"
                       disabled={sending || steering}
