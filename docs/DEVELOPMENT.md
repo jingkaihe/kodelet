@@ -102,7 +102,6 @@ This builds a runtime Docker image using the regular `Dockerfile`.
 
 #### Docker Files
 - `Dockerfile` - Runtime Docker image for running Kodelet
-- `Dockerfile.cross-build` - Specialized build environment for cross-compilation with complete toolchain (Go + Node.js + npm)
 
 ## Development Commands
 
@@ -205,7 +204,6 @@ mise run frontend-test-coverage
 │       └── dist/        # Built frontend assets (embedded in binary)
 ├── scripts/             # Build and release automation scripts
 ├── Dockerfile           # Docker configuration for runtime
-├── Dockerfile.cross-build # Docker configuration for cross-compilation
 ├── mise.toml            # Tool management and task automation
 └── VERSION.txt          # Version information file
 ```
@@ -286,7 +284,7 @@ Common tasks:
 - `mise run format` - Format code
 - `mise run docker-build` - Build Docker image
 - `mise run cross-build` - Build for multiple platforms
-- `mise run cross-build-docker` - Build for multiple platforms using Docker (recommended)
+- `mise run release-snapshot` - Build GoReleaser snapshot artifacts into `dist/`
 - `mise run release` - Create a release
 - `mise run github-release` - Create GitHub release with RELEASE.md notes (recommended)
 

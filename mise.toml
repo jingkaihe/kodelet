@@ -130,16 +130,10 @@ run = [
   "CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags=\"-s -w -X '$VERSION_PKG.Version=$VERSION' -X '$VERSION_PKG.GitCommit=$GIT_COMMIT' -X '$VERSION_PKG.BuildTime=$BUILD_TIME'\" -o ./bin/kodelet-windows-amd64.exe ./cmd/kodelet/",
 ]
 
-[tasks.cross-build-docker]
-description = "Cross-compile for multiple platforms using Docker"
+[tasks.release-snapshot]
+description = "Build GoReleaser snapshot artifacts"
 run = [
-  "mkdir -p bin",
-  "echo 'Cross-compiling for multiple platforms using Docker...'",
-  "docker build --build-arg VERSION=\"$VERSION\" --build-arg GIT_COMMIT=\"$GIT_COMMIT\" --build-arg BUILD_TIME=\"$BUILD_TIME\" --build-arg GITHUB_TOKEN=\"${GITHUB_TOKEN:-$(gh auth token 2>/dev/null || true)}\" -f Dockerfile.cross-build -t kodelet-cross-build .",
-  "echo 'Extracting binaries from Docker container...'",
-  "docker run --rm -v $(pwd)/bin:/output kodelet-cross-build cp /bin/kodelet-linux-amd64 /bin/kodelet-linux-arm64 /bin/kodelet-darwin-amd64 /bin/kodelet-darwin-arm64 /bin/kodelet-windows-amd64.exe /output/",
-  "echo 'Cross-build complete. Binaries available in ./bin/'",
-  "ls -la ./bin/kodelet-*",
+  "goreleaser release --snapshot --clean",
 ]
 
 [tasks.e2e-test-docker]
@@ -158,7 +152,7 @@ run = ["./bin/kodelet run -r release-note"]
 description = "Build GoReleaser snapshot artifacts"
 depends = ["lint", "test"]
 run = [
-  "goreleaser release --snapshot --clean",
+  "mise run release-snapshot",
 ]
 
 [tasks.github-release]
