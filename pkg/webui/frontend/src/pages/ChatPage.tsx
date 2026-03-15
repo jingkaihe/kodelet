@@ -11,7 +11,7 @@ import type {
   Conversation,
   PendingImageAttachment,
 } from '../types';
-import { cn, showToast } from '../utils';
+import { cn, formatContextWindow, formatCost, formatDate, showToast } from '../utils';
 
 const normalizeConversation = (conversation: Conversation): Conversation => ({
   ...conversation,
@@ -688,6 +688,28 @@ const ChatPage: React.FC = () => {
   const canSubmit = draft.trim().length > 0 || attachments.length > 0;
   const hasActiveConversationTarget = Boolean(activeConversationId);
   const canSteerActiveConversation = hasActiveConversationTarget && steerAvailable;
+  const composerStatus = useMemo(() => {
+    if (!conversation) {
+      return sending
+        ? 'Starting conversation…'
+        : 'New conversation · profile ready';
+    }
+
+    const parts: string[] = [];
+    const contextWindow = formatContextWindow(conversation.usage);
+
+    if (contextWindow) {
+      parts.push(contextWindow);
+    }
+
+    parts.push(formatCost(conversation.usage));
+
+    if (conversation.updatedAt) {
+      parts.push(`Updated ${formatDate(conversation.updatedAt)}`);
+    }
+
+    return parts.join(' · ');
+  }, [conversation, sending]);
 
   return (
     <div className="h-[100dvh] bg-transparent">
@@ -980,7 +1002,7 @@ const ChatPage: React.FC = () => {
                     )}
 
                     <p className="eyebrow-label text-kodelet-mid-gray">
-                      Enter to send. Shift + Enter for a new line. Paste or drop images.
+                      {composerStatus}
                     </p>
                   </div>
 

@@ -3,6 +3,13 @@
 import { format, formatDistanceToNow } from 'date-fns';
 import { Usage } from '../types';
 
+const formatCompactNumber = (value: number): string => {
+  return new Intl.NumberFormat('en-US', {
+    notation: value >= 1000 ? 'compact' : 'standard',
+    maximumFractionDigits: value >= 1000 ? 1 : 0,
+  }).format(value);
+};
+
 // Date formatting utility
 export const formatDate = (dateString: string | null | undefined): string => {
   if (!dateString) return 'N/A';
@@ -32,6 +39,30 @@ export const formatCost = (usage: Usage | null | undefined): string => {
     currency: 'USD',
     minimumFractionDigits: 4
   }).format(total);
+};
+
+export const formatTokenUsage = (usage: Usage | null | undefined): string => {
+  if (!usage) return '0 tokens';
+
+  const total =
+    (usage.inputTokens || 0) +
+    (usage.outputTokens || 0) +
+    (usage.cacheCreationInputTokens || 0) +
+    (usage.cacheReadInputTokens || 0);
+
+  return `${formatCompactNumber(total)} tokens`;
+};
+
+export const formatContextWindow = (usage: Usage | null | undefined): string | null => {
+  if (!usage?.currentContextWindow || !usage?.maxContextWindow) {
+    return null;
+  }
+
+  const current = usage.currentContextWindow;
+  const max = usage.maxContextWindow;
+  const percentage = Math.max(0, Math.min(100, Math.round((current / max) * 100)));
+
+  return `${formatCompactNumber(current)}/${formatCompactNumber(max)} (${percentage}%) context`;
 };
 
 // Copy to clipboard utility
