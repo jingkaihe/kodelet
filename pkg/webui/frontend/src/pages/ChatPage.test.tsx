@@ -398,6 +398,69 @@ describe('ChatPage', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/c/conv-456');
   });
 
+  it('ignores stale new-chat stream events after switching conversations', async () => {
+    mockGetConversation.mockImplementation(async (id: string) => ({
+      id,
+      createdAt: '2024-01-01T00:00:00Z',
+      updatedAt: '2024-01-01T00:00:00Z',
+      messageCount: 1,
+      messages:
+        id === 'conv-456'
+          ? [
+              {
+                role: 'user',
+                content: 'Existing conversation',
+              },
+            ]
+          : [],
+      toolResults: {},
+    }));
+
+    let streamOptions: { onEvent: (event: ChatStreamEvent) => void } | null = null;
+    let resolveStream: (() => void) | null = null;
+    mockStreamChat.mockImplementation(
+      async (_request, options) =>
+        new Promise<void>((resolve) => {
+          streamOptions = options as { onEvent: (event: ChatStreamEvent) => void };
+          resolveStream = resolve;
+        })
+    );
+
+    const { rerender } = render(<ChatPage />);
+
+    await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+      target: { value: 'hello' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
+
+    await act(async () => {
+      streamOptions?.onEvent({ kind: 'conversation', conversation_id: 'conv-123' });
+    });
+
+    routeParams = { id: 'conv-456' };
+    rerender(<ChatPage />);
+
+    await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-456'));
+    await waitFor(() => expect(screen.getByText('Existing conversation')).toBeInTheDocument());
+
+    await act(async () => {
+      streamOptions?.onEvent({
+        kind: 'text-delta',
+        conversation_id: 'conv-123',
+        delta: 'Leaked streamed text',
+      });
+      resolveStream?.();
+    });
+
+    expect(screen.queryByText('Leaked streamed text')).not.toBeInTheDocument();
+    expect(mockNavigate).not.toHaveBeenCalledWith('/c/conv-123');
+    expect(mockGetConversation).not.toHaveBeenCalledWith('conv-123');
+  });
+
   it('forks a conversation from the sidebar menu', async () => {
     mockGetConversations.mockResolvedValue({
       conversations: [

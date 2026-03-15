@@ -162,6 +162,9 @@ const ChatPage: React.FC = () => {
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const resumeControllerRef = useRef<AbortController | null>(null);
+  const sendStreamRef = useRef(0);
+  const resumeStreamRef = useRef(0);
+  const viewedConversationIdRef = useRef<string | null>(conversationId);
   const sidebarResizeStartRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -197,10 +200,16 @@ const ChatPage: React.FC = () => {
 
   useEffect(() => {
     return () => {
+      sendStreamRef.current += 1;
+      resumeStreamRef.current += 1;
       abortControllerRef.current?.abort();
       resumeControllerRef.current?.abort();
     };
   }, []);
+
+  useEffect(() => {
+    viewedConversationIdRef.current = conversationId;
+  }, [conversationId]);
 
   useEffect(() => {
     return () => {
@@ -269,7 +278,17 @@ const ChatPage: React.FC = () => {
   }, [isResizingSidebar]);
 
   useEffect(() => {
+    sendStreamRef.current += 1;
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+
+    resumeStreamRef.current += 1;
     setActiveConversationId(conversationId);
+    setSending(false);
+    setSteering(false);
+    setSteerAvailable(false);
+    setStreamError(null);
+
     resumeControllerRef.current?.abort();
     resumeControllerRef.current = null;
 
@@ -306,6 +325,8 @@ const ChatPage: React.FC = () => {
       return;
     }
 
+    const streamInstance = resumeStreamRef.current + 1;
+    resumeStreamRef.current = streamInstance;
     const controller = new AbortController();
     resumeControllerRef.current = controller;
     let sawEvent = false;
@@ -314,6 +335,14 @@ const ChatPage: React.FC = () => {
       .streamConversation(conversationId, {
         signal: controller.signal,
         onEvent: (event: ChatStreamEvent) => {
+          if (
+            resumeStreamRef.current !== streamInstance ||
+            viewedConversationIdRef.current !== conversationId ||
+            (event.conversation_id && event.conversation_id !== conversationId)
+          ) {
+            return;
+          }
+
           sawEvent = true;
           if (event.kind === 'conversation' && event.conversation_id) {
             setActiveConversationId(event.conversation_id);
@@ -341,6 +370,13 @@ const ChatPage: React.FC = () => {
           return;
         }
 
+        if (
+          resumeStreamRef.current !== streamInstance ||
+          viewedConversationIdRef.current !== conversationId
+        ) {
+          return;
+        }
+
         const message = error instanceof Error ? error.message : 'Failed to resume conversation stream';
         if (message !== 'conversation is not actively streaming') {
           console.error('Failed to resume conversation stream', error);
@@ -350,6 +386,14 @@ const ChatPage: React.FC = () => {
         if (resumeControllerRef.current === controller) {
           resumeControllerRef.current = null;
         }
+
+        if (
+          resumeStreamRef.current !== streamInstance ||
+          viewedConversationIdRef.current !== conversationId
+        ) {
+          return;
+        }
+
         if (sawEvent) {
           setSending(false);
           setSteerAvailable(false);
@@ -493,6 +537,9 @@ const ChatPage: React.FC = () => {
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
+    const streamInstance = sendStreamRef.current + 1;
+    sendStreamRef.current = streamInstance;
+    const viewConversationIdAtStart = conversationId;
 
     let streamedConversationId = conversationId;
     let streamedError: string | null = null;
@@ -508,6 +555,16 @@ const ChatPage: React.FC = () => {
         {
           signal: controller.signal,
           onEvent: (event: ChatStreamEvent) => {
+            if (
+              sendStreamRef.current !== streamInstance ||
+              viewedConversationIdRef.current !== viewConversationIdAtStart ||
+              (viewConversationIdAtStart !== null &&
+                event.conversation_id &&
+                event.conversation_id !== viewConversationIdAtStart)
+            ) {
+              return;
+            }
+
             if (event.kind === 'conversation' && event.conversation_id) {
               streamedConversationId = event.conversation_id;
               setActiveConversationId(event.conversation_id);
@@ -529,6 +586,13 @@ const ChatPage: React.FC = () => {
           },
         }
       );
+
+      if (
+        sendStreamRef.current !== streamInstance ||
+        viewedConversationIdRef.current !== viewConversationIdAtStart
+      ) {
+        return;
+      }
 
       if (streamedError) {
         showToast(streamedError, 'error');
@@ -553,13 +617,24 @@ const ChatPage: React.FC = () => {
         return;
       }
 
+      if (
+        sendStreamRef.current !== streamInstance ||
+        viewedConversationIdRef.current !== viewConversationIdAtStart
+      ) {
+        return;
+      }
+
       setAttachments(attachmentsForSend);
       const message =
         error instanceof Error ? error.message : 'Failed to send message';
       setStreamError(message);
       showToast(message, 'error');
     } finally {
-      if (abortControllerRef.current === controller) {
+      if (
+        abortControllerRef.current === controller &&
+        sendStreamRef.current === streamInstance &&
+        viewedConversationIdRef.current === viewConversationIdAtStart
+      ) {
         abortControllerRef.current = null;
         setSending(false);
         setSteerAvailable(false);
