@@ -380,6 +380,43 @@ const ChatPage: React.FC = () => {
     startTransition(() => navigate(`/c/${nextConversationId}`));
   };
 
+  const handleForkConversation = async (sourceConversationId: string) => {
+    try {
+      const response = await apiService.forkConversation(sourceConversationId);
+      await refreshConversations();
+      showToast('Conversation copied', 'success');
+      startTransition(() => navigate(`/c/${response.conversation_id}`));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to copy conversation';
+      showToast(message, 'error');
+    }
+  };
+
+  const handleDeleteConversation = async (targetConversationId: string) => {
+    try {
+      await apiService.deleteConversation(targetConversationId);
+
+      if (targetConversationId === conversationId || targetConversationId === activeConversationId) {
+        abortControllerRef.current?.abort();
+        resumeControllerRef.current?.abort();
+        setConversation(null);
+        setActiveConversationId(null);
+        setMessages([]);
+        setConversationError(null);
+        setStreamError(null);
+        setSending(false);
+        setSteerAvailable(false);
+        startTransition(() => navigate('/'));
+      }
+
+      await refreshConversations();
+      showToast('Conversation deleted', 'neutral');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to delete conversation';
+      showToast(message, 'error');
+    }
+  };
+
   const handleSidebarToggle = () => {
     setSidebarVisible((currentValue) => !currentValue);
   };
@@ -675,6 +712,8 @@ const ChatPage: React.FC = () => {
               conversations={conversations}
               disabled={false}
               loading={sidebarLoading}
+              onDeleteConversation={handleDeleteConversation}
+              onForkConversation={handleForkConversation}
               onHide={handleSidebarToggle}
               onNewChat={handleNewChat}
               onSelectConversation={handleSelectConversation}

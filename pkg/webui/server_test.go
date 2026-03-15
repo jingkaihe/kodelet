@@ -27,6 +27,7 @@ import (
 type mockConversationService struct {
 	listFunc    func(ctx context.Context, req *conversations.ListConversationsRequest) (*conversations.ListConversationsResponse, error)
 	getFunc     func(ctx context.Context, id string) (*conversations.GetConversationResponse, error)
+	forkFunc    func(ctx context.Context, id string) (*conversations.GetConversationResponse, error)
 	deleteFunc  func(ctx context.Context, id string) error
 	getToolFunc func(ctx context.Context, conversationID, toolCallID string) (*conversations.GetToolResultResponse, error)
 	closeFunc   func() error
@@ -51,6 +52,13 @@ func (m *mockConversationService) DeleteConversation(ctx context.Context, id str
 		return m.deleteFunc(ctx, id)
 	}
 	return nil
+}
+
+func (m *mockConversationService) ForkConversation(ctx context.Context, id string) (*conversations.GetConversationResponse, error) {
+	if m.forkFunc != nil {
+		return m.forkFunc(ctx, id)
+	}
+	return &conversations.GetConversationResponse{}, nil
 }
 
 type mockChatRunner struct {
@@ -397,6 +405,36 @@ func TestServer_handleDeleteConversation(t *testing.T) {
 
 	assert.Equal(t, http.StatusNoContent, w.Code)
 	assert.True(t, deleteCalled)
+}
+
+func TestServer_handleForkConversation(t *testing.T) {
+	conversationID := "test-id-123"
+	mockService := &mockConversationService{
+		forkFunc: func(_ context.Context, id string) (*conversations.GetConversationResponse, error) {
+			assert.Equal(t, conversationID, id)
+			return &conversations.GetConversationResponse{ID: "forked-456"}, nil
+		},
+	}
+
+	server := &Server{
+		conversationService: mockService,
+		router:              mux.NewRouter(),
+	}
+
+	req := httptest.NewRequest("POST", "/api/conversations/"+conversationID+"/fork", nil)
+	req = mux.SetURLVars(req, map[string]string{"id": conversationID})
+	w := httptest.NewRecorder()
+
+	server.handleForkConversation(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
+
+	var response forkConversationResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	assert.True(t, response.Success)
+	assert.Equal(t, "forked-456", response.ConversationID)
 }
 
 func TestServer_handleChat(t *testing.T) {

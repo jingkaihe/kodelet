@@ -10,6 +10,7 @@ import {
   ApiError,
   SteerConversationResponse,
   StopConversationResponse,
+  ForkConversationResponse,
   ToolResult
 } from '../types';
 
@@ -36,6 +37,10 @@ class ApiService {
         error = { error: `HTTP ${response.status}` };
       }
       throw new Error(error.error || error.message || `HTTP ${response.status}`);
+    }
+
+    if (response.status === 204) {
+      return undefined as T;
     }
 
     return response.json();
@@ -94,6 +99,12 @@ class ApiService {
   async deleteConversation(id: string): Promise<void> {
     await this.request(`/api/conversations/${id}`, {
       method: 'DELETE',
+    });
+  }
+
+  async forkConversation(id: string): Promise<ForkConversationResponse> {
+    return this.request<ForkConversationResponse>(`/api/conversations/${id}/fork`, {
+      method: 'POST',
     });
   }
 

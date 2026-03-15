@@ -10,6 +10,8 @@ interface ChatSidebarProps {
   onHide?: () => void;
   onNewChat: () => void;
   onSelectConversation: (conversationId: string) => void;
+  onForkConversation: (conversationId: string) => void;
+  onDeleteConversation: (conversationId: string) => void;
 }
 
 const previewConversation = (conversation: Conversation): string => {
@@ -29,7 +31,38 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
   onHide,
   onNewChat,
   onSelectConversation,
+  onForkConversation,
+  onDeleteConversation,
 }) => {
+  const [openMenuConversationId, setOpenMenuConversationId] = React.useState<string | null>(null);
+  const menuRef = React.useRef<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    if (!openMenuConversationId) {
+      return undefined;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        setOpenMenuConversationId(null);
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpenMenuConversationId(null);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleEscape);
+
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [openMenuConversationId]);
+
   return (
     <aside className="relative overflow-visible border-b border-black/8 bg-kodelet-light-gray px-6 py-6 lg:flex lg:h-screen lg:flex-col lg:border-b-0 lg:border-r">
       {onHide ? (
@@ -85,23 +118,74 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 
           {conversations.map((conversation) => {
             const isActive = conversation.id === activeConversationId;
+            const isMenuOpen = conversation.id === openMenuConversationId;
+            const preview = previewConversation(conversation);
 
             return (
-              <button
+              <div
                 key={conversation.id}
-                className={cn(
-                  'conversation-link',
-                  isActive && 'active'
-                )}
-                disabled={disabled}
-                onClick={() => onSelectConversation(conversation.id)}
-                type="button"
+                className={cn('conversation-link-row', isActive && 'active', isMenuOpen && 'menu-open')}
+                ref={isMenuOpen ? menuRef : undefined}
               >
-                <span className="conversation-link-title">
-                  {truncateText(previewConversation(conversation), 80)}
-                </span>
-                <span className="conversation-link-more">•••</span>
-              </button>
+                <button
+                  className={cn('conversation-link', isActive && 'active')}
+                  disabled={disabled}
+                  onClick={() => {
+                    setOpenMenuConversationId(null);
+                    onSelectConversation(conversation.id);
+                  }}
+                  type="button"
+                >
+                  <span className="conversation-link-title">
+                    {truncateText(preview, 80)}
+                  </span>
+                </button>
+
+                <div className="conversation-actions">
+                  <button
+                    aria-expanded={isMenuOpen}
+                    aria-haspopup="menu"
+                    aria-label={`More actions for ${preview}`}
+                    className="conversation-link-more-button"
+                    disabled={disabled}
+                    onClick={() => {
+                      setOpenMenuConversationId((currentId) =>
+                        currentId === conversation.id ? null : conversation.id
+                      );
+                    }}
+                    type="button"
+                  >
+                    <span className="conversation-link-more">•••</span>
+                  </button>
+
+                  {isMenuOpen ? (
+                    <div className="conversation-action-menu" role="menu">
+                      <button
+                        className="conversation-action-menu-item"
+                        onClick={() => {
+                          setOpenMenuConversationId(null);
+                          onForkConversation(conversation.id);
+                        }}
+                        role="menuitem"
+                        type="button"
+                      >
+                        Copy
+                      </button>
+                      <button
+                        className="conversation-action-menu-item danger"
+                        onClick={() => {
+                          setOpenMenuConversationId(null);
+                          onDeleteConversation(conversation.id);
+                        }}
+                        role="menuitem"
+                        type="button"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
             );
           })}
         </div>

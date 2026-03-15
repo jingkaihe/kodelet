@@ -6,6 +6,7 @@ package conversations
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"time"
 
 	"github.com/pkg/errors"
@@ -31,6 +32,7 @@ type ConversationServiceInterface interface {
 	ListConversations(ctx context.Context, req *ListConversationsRequest) (*ListConversationsResponse, error)
 	GetConversation(ctx context.Context, id string) (*GetConversationResponse, error)
 	GetToolResult(ctx context.Context, conversationID, toolCallID string) (*GetToolResultResponse, error)
+	ForkConversation(ctx context.Context, id string) (*GetConversationResponse, error)
 	DeleteConversation(ctx context.Context, id string) error
 	Close() error
 }
@@ -229,6 +231,47 @@ func (s *ConversationService) GetToolResult(ctx context.Context, conversationID,
 
 	logger.G(ctx).WithField("toolName", result.ToolName).Debug("Retrieved tool result")
 	return response, nil
+}
+
+// ForkConversation duplicates a conversation into a new conversation record while
+// resetting token and cost usage counters and preserving context window data.
+func (s *ConversationService) ForkConversation(ctx context.Context, id string) (*GetConversationResponse, error) {
+	logger.G(ctx).WithField("id", id).Debug("Forking conversation")
+
+	sourceRecord, err := s.store.Load(ctx, id)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to load conversation")
+	}
+
+	forkedRecord := conversations.NewConversationRecord("")
+	forkedRecord.RawMessages = sourceRecord.RawMessages
+	forkedRecord.Provider = sourceRecord.Provider
+	forkedRecord.Summary = sourceRecord.Summary
+	forkedRecord.Usage.CurrentContextWindow = sourceRecord.Usage.CurrentContextWindow
+	forkedRecord.Usage.MaxContextWindow = sourceRecord.Usage.MaxContextWindow
+
+	if sourceRecord.ToolResults != nil {
+		forkedRecord.ToolResults = maps.Clone(sourceRecord.ToolResults)
+	}
+
+	if sourceRecord.FileLastAccess != nil {
+		forkedRecord.FileLastAccess = maps.Clone(sourceRecord.FileLastAccess)
+	}
+
+	if sourceRecord.Metadata != nil {
+		forkedRecord.Metadata = maps.Clone(sourceRecord.Metadata)
+	}
+
+	if err := s.store.Save(ctx, forkedRecord); err != nil {
+		return nil, errors.Wrap(err, "failed to save forked conversation")
+	}
+
+	logger.G(ctx).WithFields(map[string]any{
+		"sourceID": id,
+		"forkedID": forkedRecord.ID,
+	}).Info("Forked conversation")
+
+	return s.GetConversation(ctx, forkedRecord.ID)
 }
 
 // DeleteConversation deletes a conversation

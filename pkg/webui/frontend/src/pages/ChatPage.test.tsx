@@ -11,6 +11,8 @@ const mockStreamChat = vi.fn();
 const mockStreamConversation = vi.fn();
 const mockSteerConversation = vi.fn();
 const mockStopConversation = vi.fn();
+const mockDeleteConversation = vi.fn();
+const mockForkConversation = vi.fn();
 let routeParams: { id?: string } = {};
 
 vi.mock('react-router-dom', async () => {
@@ -34,6 +36,8 @@ vi.mock('../services/api', () => ({
     streamConversation: (...args: unknown[]) => mockStreamConversation(...args),
     steerConversation: (...args: unknown[]) => mockSteerConversation(...args),
     stopConversation: (...args: unknown[]) => mockStopConversation(...args),
+    deleteConversation: (...args: unknown[]) => mockDeleteConversation(...args),
+    forkConversation: (...args: unknown[]) => mockForkConversation(...args),
   },
 }));
 
@@ -68,6 +72,11 @@ describe('ChatPage', () => {
       success: true,
       conversation_id: 'conv-123',
       stopped: true,
+    });
+    mockDeleteConversation.mockResolvedValue(undefined);
+    mockForkConversation.mockResolvedValue({
+      success: true,
+      conversation_id: 'conv-copy-123',
     });
   });
 
@@ -383,9 +392,83 @@ describe('ChatPage', () => {
     expect(screen.queryByTestId('chat-sidebar-shell')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('sidebar-attached-toggle'));
-    fireEvent.click(screen.getByRole('button', { name: /Other conversation/i }));
+    fireEvent.click(screen.getAllByRole('button', { name: /Other conversation/i })[0]);
 
     expect(mockNavigate).toHaveBeenCalledWith('/c/conv-456');
+  });
+
+  it('forks a conversation from the sidebar menu', async () => {
+    mockGetConversations.mockResolvedValue({
+      conversations: [
+        {
+          id: 'conv-123',
+          createdAt: '2024-01-01T00:00:00Z',
+          updatedAt: '2024-01-01T00:00:00Z',
+          messageCount: 1,
+          summary: 'Enabled resumable webUI conversation',
+        },
+      ],
+      hasMore: false,
+      total: 1,
+      limit: 40,
+      offset: 0,
+    });
+
+    render(<ChatPage />);
+
+    await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /More actions for Enabled resumable webUI conversation/i,
+      })
+    );
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Copy' }));
+
+    await waitFor(() => expect(mockForkConversation).toHaveBeenCalledWith('conv-123'));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/c/conv-copy-123'));
+  });
+
+  it('deletes the active conversation from the sidebar menu', async () => {
+    routeParams = { id: 'conv-123' };
+    mockGetConversations.mockResolvedValue({
+      conversations: [
+        {
+          id: 'conv-123',
+          createdAt: '2024-01-01T00:00:00Z',
+          updatedAt: '2024-01-01T00:00:00Z',
+          messageCount: 1,
+          summary: 'Enabled resumable webUI conversation',
+        },
+      ],
+      hasMore: false,
+      total: 1,
+      limit: 40,
+      offset: 0,
+    });
+    mockGetConversation.mockResolvedValue({
+      id: 'conv-123',
+      createdAt: '2024-01-01T00:00:00Z',
+      updatedAt: '2024-01-01T00:00:00Z',
+      messageCount: 1,
+      summary: 'Enabled resumable webUI conversation',
+      messages: [],
+      toolResults: {},
+    });
+
+    render(<ChatPage />);
+
+    await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-123'));
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /More actions for Enabled resumable webUI conversation/i,
+      })
+    );
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
+
+    await waitFor(() => expect(mockDeleteConversation).toHaveBeenCalledWith('conv-123'));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/'));
   });
 
   it('does not queue steering before the stream shows another backend turn is possible', async () => {

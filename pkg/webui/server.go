@@ -123,6 +123,7 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/conversations", s.handleListConversations).Methods("GET")
 	api.HandleFunc("/conversations/{id}", s.handleGetConversation).Methods("GET")
 	api.HandleFunc("/conversations/{id}/stream", s.handleStreamConversation).Methods("GET")
+	api.HandleFunc("/conversations/{id}/fork", s.handleForkConversation).Methods("POST")
 	api.HandleFunc("/conversations/{id}/steer", s.handleSteerConversation).Methods("POST")
 	api.HandleFunc("/conversations/{id}/stop", s.handleStopConversation).Methods("POST")
 	api.HandleFunc("/conversations/{id}/tools/{toolCallId}", s.handleGetToolResult).Methods("GET")
@@ -208,6 +209,11 @@ type stopConversationResponse struct {
 	Success        bool   `json:"success"`
 	ConversationID string `json:"conversation_id"`
 	Stopped        bool   `json:"stopped"`
+}
+
+type forkConversationResponse struct {
+	Success        bool   `json:"success"`
+	ConversationID string `json:"conversation_id"`
 }
 
 func (rw *responseWriter) WriteHeader(code int) {
@@ -1203,6 +1209,27 @@ func (s *Server) handleStopConversation(w http.ResponseWriter, r *http.Request) 
 		Success:        true,
 		ConversationID: conversationID,
 		Stopped:        stopped,
+	})
+}
+
+// handleForkConversation handles POST /api/conversations/{id}/fork
+func (s *Server) handleForkConversation(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	conversationID := strings.TrimSpace(mux.Vars(r)["id"])
+	if conversationID == "" {
+		s.writeErrorResponse(w, http.StatusBadRequest, "conversation ID is required", nil)
+		return
+	}
+
+	response, err := s.conversationService.ForkConversation(ctx, conversationID)
+	if err != nil {
+		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to fork conversation", err)
+		return
+	}
+
+	s.writeJSONResponse(w, forkConversationResponse{
+		Success:        true,
+		ConversationID: response.ID,
 	})
 }
 

@@ -275,6 +275,76 @@ func TestConversationService_DeleteConversation(t *testing.T) {
 	}
 }
 
+func TestConversationService_ForkConversation(t *testing.T) {
+	now := time.Now().UTC()
+	sourceRecord := conversations.ConversationRecord{
+		ID:          "source-id",
+		CreatedAt:   now.Add(-time.Hour),
+		UpdatedAt:   now.Add(-time.Minute),
+		Provider:    "anthropic",
+		Summary:     "Source conversation",
+		RawMessages: []byte(`[{"role":"user","content":"hello"}]`),
+		Usage: llm.Usage{
+			InputTokens:          123,
+			OutputTokens:         456,
+			InputCost:            1.23,
+			OutputCost:           4.56,
+			CurrentContextWindow: 64000,
+			MaxContextWindow:     200000,
+		},
+		Metadata: map[string]any{"profile": "work"},
+		FileLastAccess: map[string]time.Time{
+			"/tmp/a.txt": now,
+		},
+		ToolResults: map[string]tools.StructuredToolResult{
+			"tool-1": {ToolName: "bash"},
+		},
+	}
+
+	t.Run("successful fork", func(t *testing.T) {
+		mockStore := newMockConversationStore()
+		mockStore.conversations[sourceRecord.ID] = &sourceRecord
+
+		service := NewConversationService(mockStore)
+		response, err := service.ForkConversation(context.Background(), sourceRecord.ID)
+
+		require.NoError(t, err)
+		require.NotNil(t, response)
+		assert.NotEqual(t, sourceRecord.ID, response.ID)
+		assert.Equal(t, sourceRecord.Provider, response.Provider)
+		assert.Equal(t, sourceRecord.Summary, response.Summary)
+		assert.Equal(t, 1, response.MessageCount)
+
+		forkedRecord, exists := mockStore.conversations[response.ID]
+		require.True(t, exists)
+		assert.Equal(t, sourceRecord.RawMessages, forkedRecord.RawMessages)
+		assert.Equal(t, sourceRecord.Provider, forkedRecord.Provider)
+		assert.Equal(t, sourceRecord.Summary, forkedRecord.Summary)
+		assert.Zero(t, forkedRecord.Usage.InputTokens)
+		assert.Zero(t, forkedRecord.Usage.OutputTokens)
+		assert.Zero(t, forkedRecord.Usage.InputCost)
+		assert.Zero(t, forkedRecord.Usage.OutputCost)
+		assert.Equal(t, sourceRecord.Usage.CurrentContextWindow, forkedRecord.Usage.CurrentContextWindow)
+		assert.Equal(t, sourceRecord.Usage.MaxContextWindow, forkedRecord.Usage.MaxContextWindow)
+		assert.Equal(t, sourceRecord.Metadata, forkedRecord.Metadata)
+		assert.Equal(t, sourceRecord.ToolResults, forkedRecord.ToolResults)
+		assert.Equal(t, sourceRecord.FileLastAccess, forkedRecord.FileLastAccess)
+	})
+
+	t.Run("load error", func(t *testing.T) {
+		mockStore := newMockConversationStore()
+		mockStore.loadFunc = func(_ context.Context, _ string) (*conversations.ConversationRecord, error) {
+			return nil, assert.AnError
+		}
+
+		service := NewConversationService(mockStore)
+		response, err := service.ForkConversation(context.Background(), sourceRecord.ID)
+
+		assert.Nil(t, response)
+		assert.Error(t, err)
+	})
+}
+
 func TestConversationService_Close(t *testing.T) {
 	t.Run("successful close", func(t *testing.T) {
 		mockStore := newMockConversationStore()

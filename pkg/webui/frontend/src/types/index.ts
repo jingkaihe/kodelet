@@ -130,6 +130,11 @@ export interface StopConversationResponse {
   stopped: boolean;
 }
 
+export interface ForkConversationResponse {
+  success: boolean;
+  conversation_id: string;
+}
+
 export interface ChatProfileOption {
   name: string;
   scope: string;

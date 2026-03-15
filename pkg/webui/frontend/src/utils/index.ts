@@ -46,11 +46,24 @@ export const copyToClipboard = async (text: string): Promise<void> => {
 };
 
 // Toast notification utility
-export const showToast = (message: string, type: 'info' | 'success' | 'error' = 'info'): void => {
+export const showToast = (
+  message: string,
+  type: 'info' | 'success' | 'error' | 'neutral' = 'info'
+): void => {
   const toast = document.createElement('div');
   toast.className = 'toast toast-top toast-end';
+
+  const alertClass =
+    type === 'error'
+      ? 'error'
+      : type === 'success'
+        ? 'success'
+        : type === 'neutral'
+          ? 'neutral'
+          : 'info';
+
   toast.innerHTML = `
-    <div class="alert alert-${type === 'error' ? 'error' : type === 'success' ? 'success' : 'info'}">
+    <div class="alert alert-${alertClass}">
       <span>${escapeHtml(message)}</span>
     </div>
   `;

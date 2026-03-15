@@ -133,6 +133,15 @@ describe('showToast', () => {
 
     vi.useRealTimers();
   });
+
+  it('supports neutral toasts for muted feedback', () => {
+    showToast('Conversation deleted', 'neutral');
+
+    const toast = document.querySelector('.toast');
+    expect(toast).toBeTruthy();
+    expect(toast?.innerHTML).toContain('alert-neutral');
+    expect(toast?.textContent).toContain('Conversation deleted');
+  });
 });
 
 describe('escapeHtml', () => {
