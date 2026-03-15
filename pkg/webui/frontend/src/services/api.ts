@@ -9,6 +9,8 @@ import {
   SearchFilters,
   ApiError,
   SteerConversationResponse,
+  StopConversationResponse,
+  ForkConversationResponse,
   ToolResult
 } from '../types';
 
@@ -35,6 +37,10 @@ class ApiService {
         error = { error: `HTTP ${response.status}` };
       }
       throw new Error(error.error || error.message || `HTTP ${response.status}`);
+    }
+
+    if (response.status === 204) {
+      return undefined as T;
     }
 
     return response.json();
@@ -96,10 +102,22 @@ class ApiService {
     });
   }
 
+  async forkConversation(id: string): Promise<ForkConversationResponse> {
+    return this.request<ForkConversationResponse>(`/api/conversations/${id}/fork`, {
+      method: 'POST',
+    });
+  }
+
   async steerConversation(id: string, message: string): Promise<SteerConversationResponse> {
     return this.request<SteerConversationResponse>(`/api/conversations/${id}/steer`, {
       method: 'POST',
       body: JSON.stringify({ message }),
+    });
+  }
+
+  async stopConversation(id: string): Promise<StopConversationResponse> {
+    return this.request<StopConversationResponse>(`/api/conversations/${id}/stop`, {
+      method: 'POST',
     });
   }
 
@@ -120,6 +138,61 @@ class ApiService {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(request),
+      signal: options.signal,
+    });
+
+    if (!response.ok) {
+      let error: ApiError;
+      try {
+        error = await response.json();
+      } catch {
+        error = { error: `HTTP ${response.status}` };
+      }
+      throw new Error(error.error || error.message || `HTTP ${response.status}`);
+    }
+
+    if (!response.body) {
+      throw new Error('Streaming response body is unavailable');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) {
+          continue;
+        }
+        options.onEvent(JSON.parse(trimmed) as ChatStreamEvent);
+      }
+
+      if (done) {
+        const trimmed = buffer.trim();
+        if (trimmed) {
+          options.onEvent(JSON.parse(trimmed) as ChatStreamEvent);
+        }
+        return;
+      }
+    }
+  }
+
+  async streamConversation(
+    conversationId: string,
+    options: {
+      signal?: AbortSignal;
+      onEvent: (event: ChatStreamEvent) => void;
+    }
+  ): Promise<void> {
+    const response = await fetch(`/api/conversations/${conversationId}/stream`, {
+      method: 'GET',
       signal: options.signal,
     });
 

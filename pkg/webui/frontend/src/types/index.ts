@@ -124,6 +124,17 @@ export interface SteerConversationResponse {
   queued: boolean;
 }
 
+export interface StopConversationResponse {
+  success: boolean;
+  conversation_id: string;
+  stopped: boolean;
+}
+
+export interface ForkConversationResponse {
+  success: boolean;
+  conversation_id: string;
+}
+
 export interface ChatProfileOption {
   name: string;
   scope: string;

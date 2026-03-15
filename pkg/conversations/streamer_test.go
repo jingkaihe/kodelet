@@ -37,6 +37,10 @@ func (m *mockConversationService) GetToolResult(_ context.Context, _, _ string) 
 	return nil, errNotImplemented
 }
 
+func (m *mockConversationService) ForkConversation(_ context.Context, _ string) (*GetConversationResponse, error) {
+	return nil, errNotImplemented
+}
+
 func (m *mockConversationService) DeleteConversation(_ context.Context, _ string) error {
 	return nil
 }

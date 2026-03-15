@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.3.10.beta (2026-03-15)
+
+Added resumable live chat in the web UI, plus sidebar actions to copy/delete conversations and immediate preview for newly started chats.
+
 ## 0.3.9.beta (2026-03-13)
 
 Added in-flight conversation steering to the web UI — while the agent is streaming, a "Steer" button appears once a tool call begins, allowing users to inject guidance via the `steerConversation` API without interrupting the run. Also includes a "Stop" button to abort an active stream.

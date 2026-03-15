@@ -8,7 +8,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
@@ -25,6 +27,7 @@ import (
 type mockConversationService struct {
 	listFunc    func(ctx context.Context, req *conversations.ListConversationsRequest) (*conversations.ListConversationsResponse, error)
 	getFunc     func(ctx context.Context, id string) (*conversations.GetConversationResponse, error)
+	forkFunc    func(ctx context.Context, id string) (*conversations.GetConversationResponse, error)
 	deleteFunc  func(ctx context.Context, id string) error
 	getToolFunc func(ctx context.Context, conversationID, toolCallID string) (*conversations.GetToolResultResponse, error)
 	closeFunc   func() error
@@ -49,6 +52,13 @@ func (m *mockConversationService) DeleteConversation(ctx context.Context, id str
 		return m.deleteFunc(ctx, id)
 	}
 	return nil
+}
+
+func (m *mockConversationService) ForkConversation(ctx context.Context, id string) (*conversations.GetConversationResponse, error) {
+	if m.forkFunc != nil {
+		return m.forkFunc(ctx, id)
+	}
+	return &conversations.GetConversationResponse{}, nil
 }
 
 type mockChatRunner struct {
@@ -397,13 +407,49 @@ func TestServer_handleDeleteConversation(t *testing.T) {
 	assert.True(t, deleteCalled)
 }
 
+func TestServer_handleForkConversation(t *testing.T) {
+	conversationID := "test-id-123"
+	mockService := &mockConversationService{
+		forkFunc: func(_ context.Context, id string) (*conversations.GetConversationResponse, error) {
+			assert.Equal(t, conversationID, id)
+			return &conversations.GetConversationResponse{ID: "forked-456"}, nil
+		},
+	}
+
+	server := &Server{
+		conversationService: mockService,
+		router:              mux.NewRouter(),
+	}
+
+	req := httptest.NewRequest("POST", "/api/conversations/"+conversationID+"/fork", nil)
+	req = mux.SetURLVars(req, map[string]string{"id": conversationID})
+	w := httptest.NewRecorder()
+
+	server.handleForkConversation(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
+
+	var response forkConversationResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	assert.True(t, response.Success)
+	assert.Equal(t, "forked-456", response.ConversationID)
+}
+
 func TestServer_handleChat(t *testing.T) {
 	var capturedRequest ChatRequest
+	requestCtx, requestCancel := context.WithCancel(context.Background())
+	defer requestCancel()
+	runnerStarted := make(chan struct{})
+	allowFinish := make(chan struct{})
 
 	server := &Server{
 		conversationService: &mockConversationService{},
+		runCtx:              context.Background(),
+		activeChats:         make(map[string]*activeChatRun),
 		chatRunner: &mockChatRunner{
-			runFunc: func(_ context.Context, req ChatRequest, sink ChatEventSink) (string, error) {
+			runFunc: func(ctx context.Context, req ChatRequest, sink ChatEventSink) (string, error) {
 				capturedRequest = req
 				err := sink.Send(ChatEvent{
 					Kind:           "conversation",
@@ -411,6 +457,9 @@ func TestServer_handleChat(t *testing.T) {
 					Role:           "assistant",
 				})
 				require.NoError(t, err)
+				close(runnerStarted)
+				<-allowFinish
+				require.NoError(t, ctx.Err())
 				return "conv-123", nil
 			},
 		},
@@ -418,13 +467,23 @@ func TestServer_handleChat(t *testing.T) {
 	}
 
 	req := httptest.NewRequest("POST", "/api/chat", strings.NewReader(`{"message":"hello"}`))
+	req = req.WithContext(requestCtx)
 	w := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		server.handleChat(w, req)
+		close(done)
+	}()
 
-	server.handleChat(w, req)
+	<-runnerStarted
+	requestCancel()
+	close(allowFinish)
+	<-done
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "application/x-ndjson", w.Header().Get("Content-Type"))
 	assert.Equal(t, "hello", capturedRequest.Message)
+	assert.NotEmpty(t, capturedRequest.ConversationID)
 
 	lines := strings.Split(strings.TrimSpace(w.Body.String()), "\n")
 	require.Len(t, lines, 2)
@@ -498,6 +557,8 @@ func TestServer_handleChatWithProfile(t *testing.T) {
 func TestServer_handleChatRunnerError(t *testing.T) {
 	server := &Server{
 		conversationService: &mockConversationService{},
+		runCtx:              context.Background(),
+		activeChats:         make(map[string]*activeChatRun),
 		chatRunner: &mockChatRunner{
 			runFunc: func(_ context.Context, _ ChatRequest, sink ChatEventSink) (string, error) {
 				err := sink.Send(ChatEvent{
@@ -526,6 +587,153 @@ func TestServer_handleChatRunnerError(t *testing.T) {
 	assert.Equal(t, "error", errorEvent.Kind)
 	assert.Equal(t, "conv-err", errorEvent.ConversationID)
 	assert.Equal(t, "boom", errorEvent.Error)
+}
+
+func TestServer_handleChatRejectsConcurrentRunForConversation(t *testing.T) {
+	runnerStarted := make(chan struct{})
+	allowFinish := make(chan struct{})
+	done := make(chan struct{})
+
+	server := &Server{
+		conversationService: &mockConversationService{},
+		runCtx:              context.Background(),
+		activeChats:         make(map[string]*activeChatRun),
+		chatRunner: &mockChatRunner{
+			runFunc: func(_ context.Context, req ChatRequest, _ ChatEventSink) (string, error) {
+				close(runnerStarted)
+				<-allowFinish
+				return req.ConversationID, nil
+			},
+		},
+		router: mux.NewRouter(),
+	}
+
+	firstReq := httptest.NewRequest(
+		"POST",
+		"/api/chat",
+		strings.NewReader(`{"message":"hello","conversationId":"conv-123"}`),
+	)
+	firstW := httptest.NewRecorder()
+	go func() {
+		server.handleChat(firstW, firstReq)
+		close(done)
+	}()
+
+	<-runnerStarted
+
+	secondReq := httptest.NewRequest(
+		"POST",
+		"/api/chat",
+		strings.NewReader(`{"message":"again","conversationId":"conv-123"}`),
+	)
+	secondW := httptest.NewRecorder()
+	server.handleChat(secondW, secondReq)
+
+	assert.Equal(t, http.StatusConflict, secondW.Code)
+	assert.Contains(t, secondW.Body.String(), "conversation already has an active run")
+
+	close(allowFinish)
+	<-done
+}
+
+func TestServer_handleStopConversation(t *testing.T) {
+	var cancelled atomic.Bool
+
+	server := &Server{
+		conversationService: &mockConversationService{},
+		router:              mux.NewRouter(),
+		activeChats:         make(map[string]*activeChatRun),
+	}
+	server.activeChats["conv-123"] = newActiveChatRun(func() {
+		cancelled.Store(true)
+	})
+
+	req := httptest.NewRequest("POST", "/api/conversations/conv-123/stop", nil)
+	req = mux.SetURLVars(req, map[string]string{"id": "conv-123"})
+	w := httptest.NewRecorder()
+
+	server.handleStopConversation(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.True(t, cancelled.Load())
+
+	var response stopConversationResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	assert.True(t, response.Success)
+	assert.Equal(t, "conv-123", response.ConversationID)
+	assert.True(t, response.Stopped)
+	assert.False(t, server.isActiveChat("conv-123"))
+	assert.True(t, server.activeChats["conv-123"].stopRequested)
+}
+
+func TestServer_handleStreamConversation(t *testing.T) {
+	server := &Server{
+		conversationService: &mockConversationService{},
+		router:              mux.NewRouter(),
+		activeChats:         map[string]*activeChatRun{"conv-123": newActiveChatRun(func() {})},
+		chatSubscribers:     make(map[string]map[*subscriberEventSink]struct{}),
+	}
+
+	req := httptest.NewRequest("GET", "/api/conversations/conv-123/stream", nil)
+	req = mux.SetURLVars(req, map[string]string{"id": "conv-123"})
+	w := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		server.handleStreamConversation(w, req)
+		close(done)
+	}()
+
+	require.Eventually(t, func() bool {
+		server.chatSubscribersMu.Lock()
+		defer server.chatSubscribersMu.Unlock()
+		return len(server.chatSubscribers["conv-123"]) == 1
+	}, time.Second, 10*time.Millisecond)
+
+	server.broadcastChatEvent("conv-123", ChatEvent{Kind: "text-delta", ConversationID: "conv-123", Delta: "hi", Role: "assistant"})
+	server.closeChatSubscribers("conv-123")
+	<-done
+
+	lines := strings.Split(strings.TrimSpace(w.Body.String()), "\n")
+	require.Len(t, lines, 2)
+
+	var firstEvent ChatEvent
+	err := json.Unmarshal([]byte(lines[0]), &firstEvent)
+	require.NoError(t, err)
+	assert.Equal(t, "conversation", firstEvent.Kind)
+
+	var secondEvent ChatEvent
+	err = json.Unmarshal([]byte(lines[1]), &secondEvent)
+	require.NoError(t, err)
+	assert.Equal(t, "text-delta", secondEvent.Kind)
+	assert.Equal(t, "hi", secondEvent.Delta)
+}
+
+func TestServer_handleDeleteConversationRejectsActiveRun(t *testing.T) {
+	deleteCalled := false
+
+	server := &Server{
+		conversationService: &mockConversationService{
+			deleteFunc: func(_ context.Context, _ string) error {
+				deleteCalled = true
+				return nil
+			},
+		},
+		activeChats:     map[string]*activeChatRun{"conv-123": newActiveChatRun(func() {})},
+		chatSubscribers: make(map[string]map[*subscriberEventSink]struct{}),
+		router:          mux.NewRouter(),
+	}
+
+	deleteReq := httptest.NewRequest("DELETE", "/api/conversations/conv-123", nil)
+	deleteReq = mux.SetURLVars(deleteReq, map[string]string{"id": "conv-123"})
+	deleteW := httptest.NewRecorder()
+
+	server.handleDeleteConversation(deleteW, deleteReq)
+
+	assert.Equal(t, http.StatusConflict, deleteW.Code)
+	assert.Contains(t, deleteW.Body.String(), "conversation is actively running")
+	assert.False(t, deleteCalled)
 }
 
 func TestServer_handleChatThroughMiddleware(t *testing.T) {

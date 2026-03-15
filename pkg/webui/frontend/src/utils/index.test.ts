@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   formatDate,
+  formatCompactRelativeTime,
   formatCost,
   copyToClipboard,
   showToast,
@@ -50,6 +51,39 @@ describe('formatDate', () => {
 
     const pastDate = '2023-01-02T10:00:00Z';
     expect(formatDate(pastDate)).toMatch(/Jan 2, 2023/);
+  });
+});
+
+describe('formatCompactRelativeTime', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('returns em dash for missing values', () => {
+    expect(formatCompactRelativeTime(null)).toBe('—');
+    expect(formatCompactRelativeTime(undefined)).toBe('—');
+    expect(formatCompactRelativeTime('')).toBe('—');
+  });
+
+  it('returns now for recent timestamps', () => {
+    vi.setSystemTime(new Date('2023-01-02T12:00:30Z'));
+    expect(formatCompactRelativeTime('2023-01-02T12:00:00Z')).toBe('now');
+  });
+
+  it('returns short minute and hour labels', () => {
+    vi.setSystemTime(new Date('2023-01-02T12:35:00Z'));
+    expect(formatCompactRelativeTime('2023-01-02T12:32:00Z')).toBe('3m');
+    expect(formatCompactRelativeTime('2023-01-02T10:00:00Z')).toBe('2h');
+  });
+
+  it('returns short day labels and compact dates for older timestamps', () => {
+    vi.setSystemTime(new Date('2023-01-10T12:00:00Z'));
+    expect(formatCompactRelativeTime('2023-01-08T12:00:00Z')).toBe('2d');
+    expect(formatCompactRelativeTime('2022-12-20T12:00:00Z')).toBe('Dec 20');
   });
 });
 
@@ -132,6 +166,15 @@ describe('showToast', () => {
     expect(document.querySelector('.toast')).toBeFalsy();
 
     vi.useRealTimers();
+  });
+
+  it('supports neutral toasts for muted feedback', () => {
+    showToast('Conversation deleted', 'neutral');
+
+    const toast = document.querySelector('.toast');
+    expect(toast).toBeTruthy();
+    expect(toast?.innerHTML).toContain('alert-neutral');
+    expect(toast?.textContent).toContain('Conversation deleted');
   });
 });
 

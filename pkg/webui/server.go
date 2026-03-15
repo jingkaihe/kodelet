@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -45,6 +46,40 @@ type Server struct {
 	config              *ServerConfig
 	server              *http.Server
 	staticFS            fs.FS
+	runCtx              context.Context
+	runCancel           context.CancelFunc
+	activeChats         map[string]*activeChatRun
+	activeChatsMu       sync.Mutex
+	chatSubscribers     map[string]map[*subscriberEventSink]struct{}
+	chatSubscribersMu   sync.Mutex
+}
+
+type activeChatRun struct {
+	cancel        context.CancelFunc
+	done          chan struct{}
+	doneOnce      sync.Once
+	stopRequested bool
+}
+
+func newActiveChatRun(cancel context.CancelFunc) *activeChatRun {
+	if cancel == nil {
+		return nil
+	}
+
+	return &activeChatRun{
+		cancel: cancel,
+		done:   make(chan struct{}),
+	}
+}
+
+func (r *activeChatRun) markDone() {
+	if r == nil {
+		return
+	}
+
+	r.doneOnce.Do(func() {
+		close(r.done)
+	})
 }
 
 // ServerConfig holds the configuration for the web server
@@ -87,12 +122,18 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 		return nil, errors.Wrap(err, "failed to create static filesystem")
 	}
 
+	runCtx, runCancel := context.WithCancel(ctx)
+
 	s := &Server{
 		router:              mux.NewRouter(),
 		conversationService: conversationService,
 		chatRunner:          NewDefaultChatRunner(),
 		config:              config,
 		staticFS:            staticFS,
+		runCtx:              runCtx,
+		runCancel:           runCancel,
+		activeChats:         make(map[string]*activeChatRun),
+		chatSubscribers:     make(map[string]map[*subscriberEventSink]struct{}),
 	}
 
 	// Setup routes
@@ -108,7 +149,10 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/chat/settings", s.handleGetChatSettings).Methods("GET")
 	api.HandleFunc("/conversations", s.handleListConversations).Methods("GET")
 	api.HandleFunc("/conversations/{id}", s.handleGetConversation).Methods("GET")
+	api.HandleFunc("/conversations/{id}/stream", s.handleStreamConversation).Methods("GET")
+	api.HandleFunc("/conversations/{id}/fork", s.handleForkConversation).Methods("POST")
 	api.HandleFunc("/conversations/{id}/steer", s.handleSteerConversation).Methods("POST")
+	api.HandleFunc("/conversations/{id}/stop", s.handleStopConversation).Methods("POST")
 	api.HandleFunc("/conversations/{id}/tools/{toolCallId}", s.handleGetToolResult).Methods("GET")
 	api.HandleFunc("/conversations/{id}", s.handleDeleteConversation).Methods("DELETE")
 	api.HandleFunc("/chat", s.handleChat).Methods("POST")
@@ -188,6 +232,17 @@ type responseWriter struct {
 	statusCode int
 }
 
+type stopConversationResponse struct {
+	Success        bool   `json:"success"`
+	ConversationID string `json:"conversation_id"`
+	Stopped        bool   `json:"stopped"`
+}
+
+type forkConversationResponse struct {
+	Success        bool   `json:"success"`
+	ConversationID string `json:"conversation_id"`
+}
+
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.statusCode = code
 	rw.ResponseWriter.WriteHeader(code)
@@ -196,6 +251,170 @@ func (rw *responseWriter) WriteHeader(code int) {
 func (rw *responseWriter) Flush() {
 	if flusher, ok := rw.ResponseWriter.(http.Flusher); ok {
 		flusher.Flush()
+	}
+}
+
+func (s *Server) chatExecutionContext(requestCtx context.Context) context.Context {
+	baseCtx := s.runCtx
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
+
+	return logger.WithLogger(baseCtx, logger.G(requestCtx))
+}
+
+func (s *Server) registerActiveChat(conversationID string, run *activeChatRun) bool {
+	if strings.TrimSpace(conversationID) == "" || run == nil || run.cancel == nil {
+		return false
+	}
+
+	s.activeChatsMu.Lock()
+	defer s.activeChatsMu.Unlock()
+	if s.activeChats == nil {
+		s.activeChats = make(map[string]*activeChatRun)
+	}
+
+	if _, exists := s.activeChats[conversationID]; exists {
+		return false
+	}
+
+	s.activeChats[conversationID] = run
+	return true
+}
+
+func (s *Server) unregisterActiveChat(conversationID string, run *activeChatRun) {
+	if strings.TrimSpace(conversationID) == "" || run == nil {
+		return
+	}
+
+	s.activeChatsMu.Lock()
+	registered, ok := s.activeChats[conversationID]
+	if ok && registered == run {
+		delete(s.activeChats, conversationID)
+	}
+	s.activeChatsMu.Unlock()
+
+	run.markDone()
+}
+
+func (s *Server) cancelActiveChat(conversationID string) (*activeChatRun, bool) {
+	if strings.TrimSpace(conversationID) == "" {
+		return nil, false
+	}
+
+	var cancel context.CancelFunc
+	s.activeChatsMu.Lock()
+	run, ok := s.activeChats[conversationID]
+	if ok && run != nil && !run.stopRequested {
+		run.stopRequested = true
+		cancel = run.cancel
+	}
+	s.activeChatsMu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+
+	return run, ok
+}
+
+func (s *Server) isActiveChat(conversationID string) bool {
+	if strings.TrimSpace(conversationID) == "" {
+		return false
+	}
+
+	s.activeChatsMu.Lock()
+	defer s.activeChatsMu.Unlock()
+	run, ok := s.activeChats[conversationID]
+	return ok && run != nil && !run.stopRequested
+}
+
+func (s *Server) hasActiveChatRun(conversationID string) bool {
+	if strings.TrimSpace(conversationID) == "" {
+		return false
+	}
+
+	s.activeChatsMu.Lock()
+	defer s.activeChatsMu.Unlock()
+	run, ok := s.activeChats[conversationID]
+	return ok && run != nil
+}
+
+func (s *Server) registerChatSubscriber(conversationID string, sink *subscriberEventSink) bool {
+	if strings.TrimSpace(conversationID) == "" || sink == nil {
+		return false
+	}
+
+	s.activeChatsMu.Lock()
+	run, ok := s.activeChats[conversationID]
+	if !ok || run == nil || run.stopRequested {
+		s.activeChatsMu.Unlock()
+		return false
+	}
+
+	s.chatSubscribersMu.Lock()
+	if s.chatSubscribers == nil {
+		s.chatSubscribers = make(map[string]map[*subscriberEventSink]struct{})
+	}
+	if s.chatSubscribers[conversationID] == nil {
+		s.chatSubscribers[conversationID] = make(map[*subscriberEventSink]struct{})
+	}
+	s.chatSubscribers[conversationID][sink] = struct{}{}
+	s.chatSubscribersMu.Unlock()
+	s.activeChatsMu.Unlock()
+
+	return true
+}
+
+func (s *Server) removeChatSubscriber(conversationID string, sink *subscriberEventSink) {
+	if strings.TrimSpace(conversationID) == "" || sink == nil {
+		return
+	}
+
+	s.chatSubscribersMu.Lock()
+	defer s.chatSubscribersMu.Unlock()
+	subscribers := s.chatSubscribers[conversationID]
+	if subscribers == nil {
+		return
+	}
+	delete(subscribers, sink)
+	if len(subscribers) == 0 {
+		delete(s.chatSubscribers, conversationID)
+	}
+}
+
+func (s *Server) broadcastChatEvent(conversationID string, event ChatEvent) {
+	if strings.TrimSpace(conversationID) == "" {
+		return
+	}
+
+	s.chatSubscribersMu.Lock()
+	subscribers := make([]*subscriberEventSink, 0, len(s.chatSubscribers[conversationID]))
+	for sink := range s.chatSubscribers[conversationID] {
+		subscribers = append(subscribers, sink)
+	}
+	s.chatSubscribersMu.Unlock()
+
+	for _, sink := range subscribers {
+		if err := sink.Send(event); err != nil {
+			s.removeChatSubscriber(conversationID, sink)
+			sink.Close()
+		}
+	}
+}
+
+func (s *Server) closeChatSubscribers(conversationID string) {
+	if strings.TrimSpace(conversationID) == "" {
+		return
+	}
+
+	s.chatSubscribersMu.Lock()
+	subscribers := s.chatSubscribers[conversationID]
+	delete(s.chatSubscribers, conversationID)
+	s.chatSubscribersMu.Unlock()
+
+	for sink := range subscribers {
+		sink.Close()
 	}
 }
 
@@ -922,6 +1141,57 @@ func (s *Server) handleGetToolResult(w http.ResponseWriter, r *http.Request) {
 	s.writeJSONResponse(w, response)
 }
 
+// handleStreamConversation handles GET /api/conversations/{id}/stream
+func (s *Server) handleStreamConversation(w http.ResponseWriter, r *http.Request) {
+	conversationID := strings.TrimSpace(mux.Vars(r)["id"])
+	if conversationID == "" {
+		s.writeErrorResponse(w, http.StatusBadRequest, "conversation ID is required", nil)
+		return
+	}
+
+	sink, err := newNDJSONEventSink(w)
+	if err != nil {
+		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to initialize chat stream", err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	subscriber := newSubscriberEventSink()
+	if !s.registerChatSubscriber(conversationID, subscriber) {
+		subscriber.Close()
+		s.writeErrorResponse(w, http.StatusConflict, "conversation is not actively streaming", nil)
+		return
+	}
+	defer func() {
+		s.removeChatSubscriber(conversationID, subscriber)
+		subscriber.Close()
+	}()
+
+	_ = sink.Send(ChatEvent{
+		Kind:           "conversation",
+		ConversationID: conversationID,
+		Role:           "assistant",
+	})
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case event, ok := <-subscriber.ch:
+			if !ok {
+				return
+			}
+			if err := sink.Send(event); err != nil {
+				return
+			}
+		}
+	}
+}
+
 type steerConversationRequest struct {
 	Message string `json:"message"`
 }
@@ -983,11 +1253,53 @@ func (s *Server) handleSteerConversation(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+// handleStopConversation handles POST /api/conversations/{id}/stop
+func (s *Server) handleStopConversation(w http.ResponseWriter, r *http.Request) {
+	conversationID := strings.TrimSpace(mux.Vars(r)["id"])
+	if conversationID == "" {
+		s.writeErrorResponse(w, http.StatusBadRequest, "conversation ID is required", nil)
+		return
+	}
+
+	_, stopped := s.cancelActiveChat(conversationID)
+	s.writeJSONResponse(w, stopConversationResponse{
+		Success:        true,
+		ConversationID: conversationID,
+		Stopped:        stopped,
+	})
+}
+
+// handleForkConversation handles POST /api/conversations/{id}/fork
+func (s *Server) handleForkConversation(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	conversationID := strings.TrimSpace(mux.Vars(r)["id"])
+	if conversationID == "" {
+		s.writeErrorResponse(w, http.StatusBadRequest, "conversation ID is required", nil)
+		return
+	}
+
+	response, err := s.conversationService.ForkConversation(ctx, conversationID)
+	if err != nil {
+		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to fork conversation", err)
+		return
+	}
+
+	s.writeJSONResponse(w, forkConversationResponse{
+		Success:        true,
+		ConversationID: response.ID,
+	})
+}
+
 // handleDeleteConversation handles DELETE /api/conversations/{id}
 func (s *Server) handleDeleteConversation(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	vars := mux.Vars(r)
 	id := vars["id"]
+
+	if s.hasActiveChatRun(id) {
+		s.writeErrorResponse(w, http.StatusConflict, "conversation is actively running", nil)
+		return
+	}
 
 	// Delete conversation
 	err := s.conversationService.DeleteConversation(ctx, id)
@@ -1060,6 +1372,9 @@ func (s *Server) Start(ctx context.Context) error {
 
 // Stop stops the web server
 func (s *Server) Stop() error {
+	if s.runCancel != nil {
+		s.runCancel()
+	}
 	if s.server != nil {
 		return s.server.Close()
 	}

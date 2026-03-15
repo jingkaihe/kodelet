@@ -57,7 +57,7 @@ run = ["echo 'Starting development server with auto-reload...'", "air"]
 
 [tasks.test]
 description = "Run Go tests"
-run = ["go test ./pkg/... ./cmd/..."]
+run = ["go test $(go list ./pkg/... ./cmd/... | grep -v '/node_modules/')"]
 
 [tasks.format]
 description = "Format Go code with gofumpt"

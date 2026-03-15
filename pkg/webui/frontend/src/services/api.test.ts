@@ -159,6 +159,23 @@ describe('ApiService', () => {
     });
   });
 
+  describe('stopConversation', () => {
+    it('posts to the conversation stop endpoint', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ success: true, conversation_id: 'conv-123', stopped: true }),
+      });
+
+      const result = await apiService.stopConversation('conv-123');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/conversations/conv-123/stop',
+        expect.objectContaining({ method: 'POST' })
+      );
+      expect(result).toEqual({ success: true, conversation_id: 'conv-123', stopped: true });
+    });
+  });
+
   describe('getConversation', () => {
     it('fetches a single conversation', async () => {
       const mockConversation: Conversation = {
@@ -201,10 +218,10 @@ describe('ApiService', () => {
   });
 
   describe('deleteConversation', () => {
-    it('sends DELETE request', async () => {
+    it('sends DELETE request and handles no-content responses', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
-        json: async () => ({}),
+        status: 204,
       });
 
       await apiService.deleteConversation('123');
@@ -215,6 +232,24 @@ describe('ApiService', () => {
           method: 'DELETE',
         })
       );
+    });
+  });
+
+  describe('forkConversation', () => {
+    it('posts to the conversation fork endpoint', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true, conversation_id: 'conv-456' }),
+      });
+
+      const result = await apiService.forkConversation('conv-123');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/conversations/conv-123/fork',
+        expect.objectContaining({ method: 'POST' })
+      );
+      expect(result).toEqual({ success: true, conversation_id: 'conv-456' });
     });
   });
 

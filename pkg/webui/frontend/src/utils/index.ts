@@ -3,6 +3,13 @@
 import { format, formatDistanceToNow } from 'date-fns';
 import { Usage } from '../types';
 
+const formatCompactNumber = (value: number): string => {
+  return new Intl.NumberFormat('en-US', {
+    notation: value >= 1000 ? 'compact' : 'standard',
+    maximumFractionDigits: value >= 1000 ? 1 : 0,
+  }).format(value);
+};
+
 // Date formatting utility
 export const formatDate = (dateString: string | null | undefined): string => {
   if (!dateString) return 'N/A';
@@ -20,6 +27,27 @@ export const formatDate = (dateString: string | null | undefined): string => {
   return format(date, 'MMM d, yyyy h:mm a');
 };
 
+export const formatCompactRelativeTime = (dateString: string | null | undefined): string => {
+  if (!dateString) return '—';
+
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) {
+    return '—';
+  }
+
+  const diffMs = Math.max(0, Date.now() - date.getTime());
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+
+  if (diffMs < minute) return 'now';
+  if (diffMs < hour) return `${Math.floor(diffMs / minute)}m`;
+  if (diffMs < day) return `${Math.floor(diffMs / hour)}h`;
+  if (diffMs < 7 * day) return `${Math.floor(diffMs / day)}d`;
+
+  return format(date, 'MMM d');
+};
+
 // Cost formatting utility
 export const formatCost = (usage: Usage | null | undefined): string => {
   if (!usage) return '$0.00';
@@ -34,6 +62,30 @@ export const formatCost = (usage: Usage | null | undefined): string => {
   }).format(total);
 };
 
+export const formatTokenUsage = (usage: Usage | null | undefined): string => {
+  if (!usage) return '0 tokens';
+
+  const total =
+    (usage.inputTokens || 0) +
+    (usage.outputTokens || 0) +
+    (usage.cacheCreationInputTokens || 0) +
+    (usage.cacheReadInputTokens || 0);
+
+  return `${formatCompactNumber(total)} tokens`;
+};
+
+export const formatContextWindow = (usage: Usage | null | undefined): string | null => {
+  if (!usage?.currentContextWindow || !usage?.maxContextWindow) {
+    return null;
+  }
+
+  const current = usage.currentContextWindow;
+  const max = usage.maxContextWindow;
+  const percentage = Math.max(0, Math.min(100, Math.round((current / max) * 100)));
+
+  return `${formatCompactNumber(current)}/${formatCompactNumber(max)} (${percentage}%) context`;
+};
+
 // Copy to clipboard utility
 export const copyToClipboard = async (text: string): Promise<void> => {
   try {
@@ -46,11 +98,24 @@ export const copyToClipboard = async (text: string): Promise<void> => {
 };
 
 // Toast notification utility
-export const showToast = (message: string, type: 'info' | 'success' | 'error' = 'info'): void => {
+export const showToast = (
+  message: string,
+  type: 'info' | 'success' | 'error' | 'neutral' = 'info'
+): void => {
   const toast = document.createElement('div');
   toast.className = 'toast toast-top toast-end';
+
+  const alertClass =
+    type === 'error'
+      ? 'error'
+      : type === 'success'
+        ? 'success'
+        : type === 'neutral'
+          ? 'neutral'
+          : 'info';
+
   toast.innerHTML = `
-    <div class="alert alert-${type === 'error' ? 'error' : type === 'success' ? 'success' : 'info'}">
+    <div class="alert alert-${alertClass}">
       <span>${escapeHtml(message)}</span>
     </div>
   `;
