@@ -254,6 +254,77 @@ func TestFetchChecksumError(t *testing.T) {
 	assert.Contains(t, err.Error(), "HTTP 404")
 }
 
+func TestResolveDownloadMetadataUsesEmbeddedChecksum(t *testing.T) {
+	spec := BinarySpec{
+		Version: "1.0.0",
+		GetDownloadURL: func(version, goos, goarch string) (string, error) {
+			assert.Equal(t, "1.0.0", version)
+			assert.Equal(t, "linux", goos)
+			assert.Equal(t, "amd64", goarch)
+			return "https://example.com/tool.tar.gz", nil
+		},
+		GetChecksum: func(version, goos, goarch string) (string, error) {
+			assert.Equal(t, "1.0.0", version)
+			assert.Equal(t, "linux", goos)
+			assert.Equal(t, "amd64", goarch)
+			return "abc123", nil
+		},
+	}
+
+	metadata, err := ResolveDownloadMetadata(context.Background(), spec, "linux", "amd64")
+	require.NoError(t, err)
+	assert.Equal(t, DownloadMetadata{
+		URL:      "https://example.com/tool.tar.gz",
+		Checksum: "abc123",
+	}, metadata)
+}
+
+func TestResolveDownloadMetadataFetchesChecksumURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintln(w, "def456  tool.tar.gz")
+	}))
+	defer server.Close()
+
+	spec := BinarySpec{
+		Version: "1.0.0",
+		GetDownloadURL: func(version, goos, goarch string) (string, error) {
+			assert.Equal(t, "1.0.0", version)
+			assert.Equal(t, "linux", goos)
+			assert.Equal(t, "arm64", goarch)
+			return "https://example.com/tool.tar.gz", nil
+		},
+		GetChecksumURL: func(version, goos, goarch string) (string, error) {
+			assert.Equal(t, "1.0.0", version)
+			assert.Equal(t, "linux", goos)
+			assert.Equal(t, "arm64", goarch)
+			return server.URL, nil
+		},
+	}
+
+	metadata, err := ResolveDownloadMetadata(context.Background(), spec, "linux", "arm64")
+	require.NoError(t, err)
+	assert.Equal(t, DownloadMetadata{
+		URL:      "https://example.com/tool.tar.gz",
+		Checksum: "def456",
+	}, metadata)
+}
+
+func TestResolveDownloadMetadataRequiresChecksumSource(t *testing.T) {
+	spec := BinarySpec{
+		Version: "1.0.0",
+		GetDownloadURL: func(version, goos, goarch string) (string, error) {
+			assert.Equal(t, "1.0.0", version)
+			assert.Equal(t, "linux", goos)
+			assert.Equal(t, "amd64", goarch)
+			return "https://example.com/tool.tar.gz", nil
+		},
+	}
+
+	_, err := ResolveDownloadMetadata(context.Background(), spec, "linux", "amd64")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no checksum method provided")
+}
+
 func TestDownloadFile(t *testing.T) {
 	content := []byte("test file content")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

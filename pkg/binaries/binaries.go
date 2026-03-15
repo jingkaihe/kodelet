@@ -46,6 +46,12 @@ type BinarySpec struct {
 	GetVersionCmd   func(binaryPath string) (args []string, parseVersion func(output string) string) // Returns command args and version parser
 }
 
+// DownloadMetadata contains the resolved archive URL and checksum for a binary artifact.
+type DownloadMetadata struct {
+	URL      string
+	Checksum string
+}
+
 // EnsureDepsInstalled ensures all required binaries are installed
 func EnsureDepsInstalled(ctx context.Context) {
 	if _, err := EnsureRipgrep(ctx); err != nil {
@@ -189,34 +195,15 @@ func EnsureBinary(ctx context.Context, spec BinarySpec) (string, error) {
 
 	logger.G(ctx).WithField("binary", spec.Name).WithField("version", spec.Version).Info("Installing binary")
 
-	downloadURL, err := spec.GetDownloadURL(spec.Version, runtime.GOOS, runtime.GOARCH)
+	download, err := ResolveDownloadMetadata(ctx, spec, runtime.GOOS, runtime.GOARCH)
 	if err != nil {
-		return "", errors.Wrap(err, "failed to get download URL")
+		return "", errors.Wrap(err, "failed to resolve download metadata")
 	}
 
-	var expectedChecksum string
-	if spec.GetChecksum != nil {
-		expectedChecksum, err = spec.GetChecksum(spec.Version, runtime.GOOS, runtime.GOARCH)
-		if err != nil {
-			return "", errors.Wrap(err, "failed to get embedded checksum")
-		}
-	} else if spec.GetChecksumURL != nil {
-		checksumURL, err := spec.GetChecksumURL(spec.Version, runtime.GOOS, runtime.GOARCH)
-		if err != nil {
-			return "", errors.Wrap(err, "failed to get checksum URL")
-		}
-		expectedChecksum, err = fetchChecksum(ctx, checksumURL)
-		if err != nil {
-			return "", errors.Wrap(err, "failed to fetch checksum")
-		}
-	} else {
-		return "", errors.New("no checksum method provided")
-	}
-
-	archivePath := filepath.Join(binDir, filepath.Base(downloadURL))
+	archivePath := filepath.Join(binDir, filepath.Base(download.URL))
 	defer os.Remove(archivePath)
 
-	if err := downloadFile(ctx, downloadURL, archivePath); err != nil {
+	if err := downloadFile(ctx, download.URL, archivePath); err != nil {
 		return "", errors.Wrap(err, "failed to download binary archive")
 	}
 
@@ -225,8 +212,8 @@ func EnsureBinary(ctx context.Context, spec BinarySpec) (string, error) {
 		return "", errors.Wrap(err, "failed to calculate checksum")
 	}
 
-	if actualChecksum != expectedChecksum {
-		return "", errors.Errorf("checksum mismatch: expected %s, got %s", expectedChecksum, actualChecksum)
+	if actualChecksum != download.Checksum {
+		return "", errors.Errorf("checksum mismatch: expected %s, got %s", download.Checksum, actualChecksum)
 	}
 
 	archiveEntry := spec.GetArchiveEntry(spec.Version, runtime.GOOS, runtime.GOARCH)
@@ -309,6 +296,50 @@ func getInstalledVersion(binaryPath string, spec BinarySpec) string {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// ResolveDownloadMetadata resolves the archive URL and checksum for the given binary and target platform.
+func ResolveDownloadMetadata(ctx context.Context, spec BinarySpec, goos, goarch string) (DownloadMetadata, error) {
+	downloadURL, err := spec.GetDownloadURL(spec.Version, goos, goarch)
+	if err != nil {
+		return DownloadMetadata{}, errors.Wrap(err, "failed to get download URL")
+	}
+
+	expectedChecksum, err := resolveExpectedChecksum(ctx, spec, goos, goarch)
+	if err != nil {
+		return DownloadMetadata{}, err
+	}
+
+	return DownloadMetadata{
+		URL:      downloadURL,
+		Checksum: expectedChecksum,
+	}, nil
+}
+
+func resolveExpectedChecksum(ctx context.Context, spec BinarySpec, goos, goarch string) (string, error) {
+	if spec.GetChecksum != nil {
+		checksum, err := spec.GetChecksum(spec.Version, goos, goarch)
+		if err != nil {
+			return "", errors.Wrap(err, "failed to get embedded checksum")
+		}
+		return checksum, nil
+	}
+
+	if spec.GetChecksumURL == nil {
+		return "", errors.New("no checksum method provided")
+	}
+
+	checksumURL, err := spec.GetChecksumURL(spec.Version, goos, goarch)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to get checksum URL")
+	}
+
+	checksum, err := fetchChecksum(ctx, checksumURL)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to fetch checksum")
+	}
+
+	return checksum, nil
 }
 
 func fetchChecksum(ctx context.Context, url string) (string, error) {

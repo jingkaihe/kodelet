@@ -43,6 +43,9 @@ archives:
       {{- else if eq .Arch "arm64" -}}arm64
       {{- else -}}{{ .Arch }}{{- end -}}
 
+snapshot:
+  version_template: "{{ if .Env.VERSION }}{{ .Env.VERSION }}{{ else }}{{ .Version }}{{ end }}"
+
 checksum:
   name_template: checksums.txt
 
