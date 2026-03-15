@@ -612,8 +612,13 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx, cancel := context.WithCancel(s.chatExecutionContext(requestCtx))
-	defer s.unregisterActiveChat(conversationID, cancel)
-	s.registerActiveChat(conversationID, cancel)
+	run := newActiveChatRun(cancel)
+	if !s.registerActiveChat(conversationID, run) {
+		cancel()
+		s.writeErrorResponse(w, http.StatusConflict, "conversation already has an active run", nil)
+		return
+	}
+	defer s.unregisterActiveChat(conversationID, run)
 	defer s.closeChatSubscribers(conversationID)
 	defer cancel()
 

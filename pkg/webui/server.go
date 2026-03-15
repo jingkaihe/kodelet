@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -49,10 +48,38 @@ type Server struct {
 	staticFS            fs.FS
 	runCtx              context.Context
 	runCancel           context.CancelFunc
-	activeChats         map[string]context.CancelFunc
+	activeChats         map[string]*activeChatRun
 	activeChatsMu       sync.Mutex
 	chatSubscribers     map[string]map[*subscriberEventSink]struct{}
 	chatSubscribersMu   sync.Mutex
+}
+
+type activeChatRun struct {
+	cancel        context.CancelFunc
+	done          chan struct{}
+	doneOnce      sync.Once
+	stopRequested bool
+}
+
+func newActiveChatRun(cancel context.CancelFunc) *activeChatRun {
+	if cancel == nil {
+		return nil
+	}
+
+	return &activeChatRun{
+		cancel: cancel,
+		done:   make(chan struct{}),
+	}
+}
+
+func (r *activeChatRun) markDone() {
+	if r == nil {
+		return
+	}
+
+	r.doneOnce.Do(func() {
+		close(r.done)
+	})
 }
 
 // ServerConfig holds the configuration for the web server
@@ -105,7 +132,7 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 		staticFS:            staticFS,
 		runCtx:              runCtx,
 		runCancel:           runCancel,
-		activeChats:         make(map[string]context.CancelFunc),
+		activeChats:         make(map[string]*activeChatRun),
 		chatSubscribers:     make(map[string]map[*subscriberEventSink]struct{}),
 	}
 
@@ -236,49 +263,59 @@ func (s *Server) chatExecutionContext(requestCtx context.Context) context.Contex
 	return logger.WithLogger(baseCtx, logger.G(requestCtx))
 }
 
-func (s *Server) registerActiveChat(conversationID string, cancel context.CancelFunc) {
-	if strings.TrimSpace(conversationID) == "" || cancel == nil {
-		return
+func (s *Server) registerActiveChat(conversationID string, run *activeChatRun) bool {
+	if strings.TrimSpace(conversationID) == "" || run == nil || run.cancel == nil {
+		return false
 	}
 
 	s.activeChatsMu.Lock()
 	defer s.activeChatsMu.Unlock()
 	if s.activeChats == nil {
-		s.activeChats = make(map[string]context.CancelFunc)
+		s.activeChats = make(map[string]*activeChatRun)
 	}
-	s.activeChats[conversationID] = cancel
+
+	if _, exists := s.activeChats[conversationID]; exists {
+		return false
+	}
+
+	s.activeChats[conversationID] = run
+	return true
 }
 
-func (s *Server) unregisterActiveChat(conversationID string, cancel context.CancelFunc) {
-	if strings.TrimSpace(conversationID) == "" {
+func (s *Server) unregisterActiveChat(conversationID string, run *activeChatRun) {
+	if strings.TrimSpace(conversationID) == "" || run == nil {
 		return
 	}
 
 	s.activeChatsMu.Lock()
-	defer s.activeChatsMu.Unlock()
 	registered, ok := s.activeChats[conversationID]
-	if ok && reflect.ValueOf(registered).Pointer() == reflect.ValueOf(cancel).Pointer() {
-		delete(s.activeChats, conversationID)
-	}
-}
-
-func (s *Server) cancelActiveChat(conversationID string) bool {
-	if strings.TrimSpace(conversationID) == "" {
-		return false
-	}
-
-	s.activeChatsMu.Lock()
-	cancel, ok := s.activeChats[conversationID]
-	if ok {
+	if ok && registered == run {
 		delete(s.activeChats, conversationID)
 	}
 	s.activeChatsMu.Unlock()
 
-	if ok {
+	run.markDone()
+}
+
+func (s *Server) cancelActiveChat(conversationID string) (*activeChatRun, bool) {
+	if strings.TrimSpace(conversationID) == "" {
+		return nil, false
+	}
+
+	var cancel context.CancelFunc
+	s.activeChatsMu.Lock()
+	run, ok := s.activeChats[conversationID]
+	if ok && run != nil && !run.stopRequested {
+		run.stopRequested = true
+		cancel = run.cancel
+	}
+	s.activeChatsMu.Unlock()
+
+	if cancel != nil {
 		cancel()
 	}
 
-	return ok
+	return run, ok
 }
 
 func (s *Server) isActiveChat(conversationID string) bool {
@@ -288,17 +325,34 @@ func (s *Server) isActiveChat(conversationID string) bool {
 
 	s.activeChatsMu.Lock()
 	defer s.activeChatsMu.Unlock()
-	_, ok := s.activeChats[conversationID]
-	return ok
+	run, ok := s.activeChats[conversationID]
+	return ok && run != nil && !run.stopRequested
 }
 
-func (s *Server) addChatSubscriber(conversationID string, sink *subscriberEventSink) {
+func (s *Server) hasActiveChatRun(conversationID string) bool {
+	if strings.TrimSpace(conversationID) == "" {
+		return false
+	}
+
+	s.activeChatsMu.Lock()
+	defer s.activeChatsMu.Unlock()
+	run, ok := s.activeChats[conversationID]
+	return ok && run != nil
+}
+
+func (s *Server) registerChatSubscriber(conversationID string, sink *subscriberEventSink) bool {
 	if strings.TrimSpace(conversationID) == "" || sink == nil {
-		return
+		return false
+	}
+
+	s.activeChatsMu.Lock()
+	run, ok := s.activeChats[conversationID]
+	if !ok || run == nil || run.stopRequested {
+		s.activeChatsMu.Unlock()
+		return false
 	}
 
 	s.chatSubscribersMu.Lock()
-	defer s.chatSubscribersMu.Unlock()
 	if s.chatSubscribers == nil {
 		s.chatSubscribers = make(map[string]map[*subscriberEventSink]struct{})
 	}
@@ -306,6 +360,10 @@ func (s *Server) addChatSubscriber(conversationID string, sink *subscriberEventS
 		s.chatSubscribers[conversationID] = make(map[*subscriberEventSink]struct{})
 	}
 	s.chatSubscribers[conversationID][sink] = struct{}{}
+	s.chatSubscribersMu.Unlock()
+	s.activeChatsMu.Unlock()
+
+	return true
 }
 
 func (s *Server) removeChatSubscriber(conversationID string, sink *subscriberEventSink) {
@@ -1091,11 +1149,6 @@ func (s *Server) handleStreamConversation(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if !s.isActiveChat(conversationID) {
-		s.writeErrorResponse(w, http.StatusConflict, "conversation is not actively streaming", nil)
-		return
-	}
-
 	sink, err := newNDJSONEventSink(w)
 	if err != nil {
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to initialize chat stream", err)
@@ -1107,18 +1160,22 @@ func (s *Server) handleStreamConversation(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
+	subscriber := newSubscriberEventSink()
+	if !s.registerChatSubscriber(conversationID, subscriber) {
+		subscriber.Close()
+		s.writeErrorResponse(w, http.StatusConflict, "conversation is not actively streaming", nil)
+		return
+	}
+	defer func() {
+		s.removeChatSubscriber(conversationID, subscriber)
+		subscriber.Close()
+	}()
+
 	_ = sink.Send(ChatEvent{
 		Kind:           "conversation",
 		ConversationID: conversationID,
 		Role:           "assistant",
 	})
-
-	subscriber := newSubscriberEventSink()
-	s.addChatSubscriber(conversationID, subscriber)
-	defer func() {
-		s.removeChatSubscriber(conversationID, subscriber)
-		subscriber.Close()
-	}()
 
 	for {
 		select {
@@ -1204,7 +1261,7 @@ func (s *Server) handleStopConversation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	stopped := s.cancelActiveChat(conversationID)
+	_, stopped := s.cancelActiveChat(conversationID)
 	s.writeJSONResponse(w, stopConversationResponse{
 		Success:        true,
 		ConversationID: conversationID,
@@ -1238,6 +1295,11 @@ func (s *Server) handleDeleteConversation(w http.ResponseWriter, r *http.Request
 	ctx := r.Context()
 	vars := mux.Vars(r)
 	id := vars["id"]
+
+	if s.hasActiveChatRun(id) {
+		s.writeErrorResponse(w, http.StatusConflict, "conversation is actively running", nil)
+		return
+	}
 
 	// Delete conversation
 	err := s.conversationService.DeleteConversation(ctx, id)
