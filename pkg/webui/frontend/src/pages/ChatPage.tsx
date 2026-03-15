@@ -111,6 +111,52 @@ const buildUserContent = (
 const clampSidebarWidth = (width: number): number =>
   Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, width));
 
+const buildConversationPreview = (
+  prompt: string,
+  attachments: PendingImageAttachment[]
+): string => {
+  const trimmedPrompt = prompt.trim();
+  if (trimmedPrompt) {
+    return trimmedPrompt;
+  }
+
+  if (attachments.length === 1) {
+    return attachments[0].name || 'Image attachment';
+  }
+
+  if (attachments.length > 1) {
+    return `${attachments.length} image attachments`;
+  }
+
+  return 'Untitled conversation';
+};
+
+const upsertConversationSummary = (
+  conversations: Conversation[],
+  nextConversation: Conversation
+): Conversation[] => {
+  const merged = conversations.filter((conversation) => conversation.id !== nextConversation.id);
+  merged.unshift(nextConversation);
+
+  merged.sort((left, right) => {
+    const getConversationTime = (conversation: Conversation): number => {
+      const timestamp =
+        conversation.updatedAt ??
+        conversation.updated_at ??
+        conversation.createdAt ??
+        conversation.created_at;
+
+      return timestamp ? new Date(timestamp).getTime() : 0;
+    };
+
+    const leftTime = getConversationTime(left);
+    const rightTime = getConversationTime(right);
+    return rightTime - leftTime;
+  });
+
+  return merged;
+};
+
 const readStoredSidebarWidth = (): number => {
   if (typeof window === 'undefined') {
     return DEFAULT_SIDEBAR_WIDTH;
@@ -540,6 +586,7 @@ const ChatPage: React.FC = () => {
     const streamInstance = sendStreamRef.current + 1;
     sendStreamRef.current = streamInstance;
     const viewConversationIdAtStart = conversationId;
+    const userPreview = buildConversationPreview(prompt, attachmentsForSend);
 
     let streamedConversationId = conversationId;
     let streamedError: string | null = null;
@@ -566,8 +613,23 @@ const ChatPage: React.FC = () => {
             }
 
             if (event.kind === 'conversation' && event.conversation_id) {
-              streamedConversationId = event.conversation_id;
-              setActiveConversationId(event.conversation_id);
+              const streamedId = event.conversation_id;
+              streamedConversationId = streamedId;
+              setActiveConversationId(streamedId);
+              if (!viewConversationIdAtStart) {
+                const now = new Date().toISOString();
+                setConversations((currentConversations) =>
+                  upsertConversationSummary(currentConversations, {
+                    id: streamedId,
+                    createdAt: now,
+                    updatedAt: now,
+                    messageCount: 1,
+                    summary: userPreview,
+                    preview: userPreview,
+                    profile: selectedProfile,
+                  })
+                );
+              }
             }
 
             if (event.kind === 'error') {

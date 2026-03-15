@@ -461,6 +461,69 @@ describe('ChatPage', () => {
     expect(mockGetConversation).not.toHaveBeenCalledWith('conv-123');
   });
 
+  it('adds a newly started conversation to the sidebar before refresh', async () => {
+    mockGetConversations.mockResolvedValue({
+      conversations: [
+        {
+          id: 'conv-456',
+          createdAt: '2024-01-01T00:00:00Z',
+          updatedAt: '2024-01-01T00:00:00Z',
+          messageCount: 1,
+          summary: 'Existing conversation',
+        },
+      ],
+      hasMore: false,
+      total: 1,
+      limit: 40,
+      offset: 0,
+    });
+
+    mockGetConversation.mockImplementation(async (id: string) => ({
+      id,
+      createdAt: '2024-01-01T00:00:00Z',
+      updatedAt: '2024-01-01T00:00:00Z',
+      messageCount: 1,
+      messages: [
+        {
+          role: 'user',
+          content: id === 'conv-456' ? 'Existing conversation' : 'Brand new task',
+        },
+      ],
+      toolResults: {},
+    }));
+
+    let streamOptions: { onEvent: (event: ChatStreamEvent) => void } | null = null;
+    mockStreamChat.mockImplementation(
+      async (_request, options) =>
+        new Promise<void>(() => {
+          streamOptions = options as { onEvent: (event: ChatStreamEvent) => void };
+        })
+    );
+
+    const { rerender } = render(<ChatPage />);
+
+    await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+      target: { value: 'Brand new task' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
+
+    await act(async () => {
+      streamOptions?.onEvent({ kind: 'conversation', conversation_id: 'conv-123' });
+    });
+
+    expect(screen.getAllByRole('button', { name: /Brand new task/i })[0]).toBeInTheDocument();
+
+    routeParams = { id: 'conv-456' };
+    rerender(<ChatPage />);
+
+    await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-456'));
+    expect(screen.getAllByRole('button', { name: /Brand new task/i })[0]).toBeInTheDocument();
+  });
+
   it('forks a conversation from the sidebar menu', async () => {
     mockGetConversations.mockResolvedValue({
       conversations: [
