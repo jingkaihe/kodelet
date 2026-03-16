@@ -13,11 +13,38 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func writeVersionedTestBinary(t *testing.T, path, versionLine string) {
+	t.Helper()
+
+	var content string
+	if runtime.GOOS == "windows" {
+		content = "@echo off\r\n"
+		content += "echo " + versionLine + "\r\n"
+	} else {
+		content = "#!/bin/sh\n"
+		content += "echo '" + versionLine + "'\n"
+	}
+
+	err := os.WriteFile(path, []byte(content), 0o755)
+	require.NoError(t, err)
+}
+
+func setPathEnv(t *testing.T, path string) {
+	t.Helper()
+
+	oldPath := os.Getenv("PATH")
+	require.NoError(t, os.Setenv("PATH", path))
+	t.Cleanup(func() {
+		_ = os.Setenv("PATH", oldPath)
+	})
+}
 
 func TestGetBinDir(t *testing.T) {
 	binDir, err := GetBinDir()
@@ -43,6 +70,197 @@ func TestGetBinaryPath(t *testing.T) {
 	}
 	expected := filepath.Join(homeDir, ".kodelet", "bin", binaryName)
 	assert.Equal(t, expected, path)
+}
+
+func TestGetLibexecBinaryPath(t *testing.T) {
+	path := GetLibexecBinaryPath("rg")
+
+	binaryName := "rg"
+	if runtime.GOOS == "windows" {
+		binaryName = "rg.exe"
+	}
+	assert.Equal(t, filepath.Join(GetLibexecBinDir(), binaryName), path)
+}
+
+func TestPreferredBinDirs(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	oldLibexecDir := libexecDir
+	libexecDir = filepath.Join(tmpDir, "libexec")
+	t.Cleanup(func() { libexecDir = oldLibexecDir })
+
+	oldHome := os.Getenv("HOME")
+	homeDir := filepath.Join(tmpDir, "home")
+	require.NoError(t, os.Setenv("HOME", homeDir))
+	t.Cleanup(func() { _ = os.Setenv("HOME", oldHome) })
+
+	dirs, err := PreferredBinDirs()
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		filepath.Join(tmpDir, "libexec"),
+		filepath.Join(homeDir, ".kodelet", "bin"),
+	}, dirs)
+}
+
+func TestEnvWithPreferredBinDirsPrependsAndDeduplicatesPath(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	oldLibexecDir := libexecDir
+	libexecDir = filepath.Join(tmpDir, "libexec")
+	t.Cleanup(func() { libexecDir = oldLibexecDir })
+
+	oldHome := os.Getenv("HOME")
+	homeDir := filepath.Join(tmpDir, "home")
+	require.NoError(t, os.Setenv("HOME", homeDir))
+	t.Cleanup(func() { _ = os.Setenv("HOME", oldHome) })
+
+	managedBin := filepath.Join(homeDir, ".kodelet", "bin")
+	systemBin := filepath.Join(tmpDir, "system-bin")
+
+	env, err := EnvWithPreferredBinDirs([]string{
+		"FOO=bar",
+		"PATH=" + strings.Join([]string{
+			managedBin,
+			systemBin,
+			filepath.Join(tmpDir, "libexec"),
+		}, string(os.PathListSeparator)),
+	})
+	require.NoError(t, err)
+
+	var pathValue string
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "PATH=") {
+			pathValue = strings.TrimPrefix(kv, "PATH=")
+			break
+		}
+	}
+
+	require.NotEmpty(t, pathValue)
+	assert.Equal(t, []string{
+		filepath.Join(tmpDir, "libexec"),
+		managedBin,
+		systemBin,
+	}, strings.Split(pathValue, string(os.PathListSeparator)))
+}
+
+func TestResolveBinaryPrefersLibexecOverManagedAndSystem(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("resolver precedence test uses Unix-style executable scripts")
+	}
+
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	oldLibexecDir := libexecDir
+	libexecDir = filepath.Join(tmpDir, "libexec")
+	t.Cleanup(func() { libexecDir = oldLibexecDir })
+
+	oldHome := os.Getenv("HOME")
+	homeDir := filepath.Join(tmpDir, "home")
+	require.NoError(t, os.Setenv("HOME", homeDir))
+	t.Cleanup(func() { _ = os.Setenv("HOME", oldHome) })
+
+	pathDir := filepath.Join(tmpDir, "path-bin")
+	require.NoError(t, os.MkdirAll(pathDir, 0o755))
+	setPathEnv(t, pathDir)
+
+	require.NoError(t, os.MkdirAll(libexecDir, 0o755))
+	writeVersionedTestBinary(t, GetLibexecBinaryPath("rg"), "ripgrep 15.1.0")
+
+	managedPath, err := GetBinaryPath("rg")
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Dir(managedPath), 0o755))
+	writeVersionedTestBinary(t, managedPath, "ripgrep 15.1.0")
+
+	pathBinaryName := "rg"
+	if runtime.GOOS == "windows" {
+		pathBinaryName = "rg.exe"
+	}
+	writeVersionedTestBinary(t, filepath.Join(pathDir, pathBinaryName), "ripgrep 15.1.0")
+
+	resolved, err := ResolveBinary(ctx, RipgrepSpec())
+	require.NoError(t, err)
+	assert.Equal(t, GetLibexecBinaryPath("rg"), resolved)
+}
+
+func TestResolveBinaryFallsBackToManagedBeforeSystem(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("resolver precedence test uses Unix-style executable scripts")
+	}
+
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	oldLibexecDir := libexecDir
+	libexecDir = filepath.Join(tmpDir, "missing-libexec")
+	t.Cleanup(func() { libexecDir = oldLibexecDir })
+
+	oldHome := os.Getenv("HOME")
+	homeDir := filepath.Join(tmpDir, "home")
+	require.NoError(t, os.Setenv("HOME", homeDir))
+	t.Cleanup(func() { _ = os.Setenv("HOME", oldHome) })
+
+	pathDir := filepath.Join(tmpDir, "path-bin")
+	require.NoError(t, os.MkdirAll(pathDir, 0o755))
+	setPathEnv(t, pathDir)
+
+	managedPath, err := GetBinaryPath("rg")
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Dir(managedPath), 0o755))
+	writeVersionedTestBinary(t, managedPath, "ripgrep 15.1.0")
+
+	pathBinaryName := "rg"
+	if runtime.GOOS == "windows" {
+		pathBinaryName = "rg.exe"
+	}
+	writeVersionedTestBinary(t, filepath.Join(pathDir, pathBinaryName), "ripgrep 15.1.0")
+
+	resolved, err := ResolveBinary(ctx, RipgrepSpec())
+	require.NoError(t, err)
+	assert.Equal(t, managedPath, resolved)
+}
+
+func TestResolveBinaryUsesAlternateSystemName(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("alternate system name test uses Unix-style executable scripts")
+	}
+
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	oldLibexecDir := libexecDir
+	libexecDir = filepath.Join(tmpDir, "missing-libexec")
+	t.Cleanup(func() { libexecDir = oldLibexecDir })
+
+	oldHome := os.Getenv("HOME")
+	homeDir := filepath.Join(tmpDir, "home")
+	require.NoError(t, os.Setenv("HOME", homeDir))
+	t.Cleanup(func() { _ = os.Setenv("HOME", oldHome) })
+
+	pathDir := filepath.Join(tmpDir, "path-bin")
+	require.NoError(t, os.MkdirAll(pathDir, 0o755))
+	setPathEnv(t, pathDir)
+
+	pathBinaryName := "fdfind"
+	if runtime.GOOS == "windows" {
+		pathBinaryName = "fdfind.exe"
+	}
+	writeVersionedTestBinary(t, filepath.Join(pathDir, pathBinaryName), "fd 10.3.0")
+
+	spec := BinarySpec{
+		Name:        "fd",
+		Version:     FdVersion,
+		BinaryName:  "fd",
+		SystemNames: []string{"fd", "fdfind"},
+		GetDownloadURL: func(_, _, _ string) (string, error) {
+			return "", assert.AnError
+		},
+		GetVersionCmd: getFdVersionCmd,
+	}
+
+	resolved, err := ResolveBinary(ctx, spec)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(pathDir, pathBinaryName), resolved)
 }
 
 func TestFileExists(t *testing.T) {
@@ -96,6 +314,77 @@ func TestFetchChecksumError(t *testing.T) {
 	_, err := fetchChecksum(context.Background(), server.URL)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "HTTP 404")
+}
+
+func TestResolveDownloadMetadataUsesEmbeddedChecksum(t *testing.T) {
+	spec := BinarySpec{
+		Version: "1.0.0",
+		GetDownloadURL: func(version, goos, goarch string) (string, error) {
+			assert.Equal(t, "1.0.0", version)
+			assert.Equal(t, "linux", goos)
+			assert.Equal(t, "amd64", goarch)
+			return "https://example.com/tool.tar.gz", nil
+		},
+		GetChecksum: func(version, goos, goarch string) (string, error) {
+			assert.Equal(t, "1.0.0", version)
+			assert.Equal(t, "linux", goos)
+			assert.Equal(t, "amd64", goarch)
+			return "abc123", nil
+		},
+	}
+
+	metadata, err := ResolveDownloadMetadata(context.Background(), spec, "linux", "amd64")
+	require.NoError(t, err)
+	assert.Equal(t, DownloadMetadata{
+		URL:      "https://example.com/tool.tar.gz",
+		Checksum: "abc123",
+	}, metadata)
+}
+
+func TestResolveDownloadMetadataFetchesChecksumURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintln(w, "def456  tool.tar.gz")
+	}))
+	defer server.Close()
+
+	spec := BinarySpec{
+		Version: "1.0.0",
+		GetDownloadURL: func(version, goos, goarch string) (string, error) {
+			assert.Equal(t, "1.0.0", version)
+			assert.Equal(t, "linux", goos)
+			assert.Equal(t, "arm64", goarch)
+			return "https://example.com/tool.tar.gz", nil
+		},
+		GetChecksumURL: func(version, goos, goarch string) (string, error) {
+			assert.Equal(t, "1.0.0", version)
+			assert.Equal(t, "linux", goos)
+			assert.Equal(t, "arm64", goarch)
+			return server.URL, nil
+		},
+	}
+
+	metadata, err := ResolveDownloadMetadata(context.Background(), spec, "linux", "arm64")
+	require.NoError(t, err)
+	assert.Equal(t, DownloadMetadata{
+		URL:      "https://example.com/tool.tar.gz",
+		Checksum: "def456",
+	}, metadata)
+}
+
+func TestResolveDownloadMetadataRequiresChecksumSource(t *testing.T) {
+	spec := BinarySpec{
+		Version: "1.0.0",
+		GetDownloadURL: func(version, goos, goarch string) (string, error) {
+			assert.Equal(t, "1.0.0", version)
+			assert.Equal(t, "linux", goos)
+			assert.Equal(t, "amd64", goarch)
+			return "https://example.com/tool.tar.gz", nil
+		},
+	}
+
+	_, err := ResolveDownloadMetadata(context.Background(), spec, "linux", "amd64")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no checksum method provided")
 }
 
 func TestDownloadFile(t *testing.T) {

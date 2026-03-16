@@ -88,20 +88,6 @@ curl -sSL https://raw.githubusercontent.com/jingkaihe/kodelet/main/install.sh | 
 For running locally or building from source:
 - Go 1.24 or higher
 
-## Updating
-
-To update Kodelet to the latest version:
-
-```bash
-kodelet update
-```
-
-To install a specific version:
-
-```bash
-kodelet update --version 0.0.24.alpha
-```
-
 ## Usage Modes
 
 Kodelet supports several usage modes depending on your needs.

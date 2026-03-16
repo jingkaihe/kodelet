@@ -1,0 +1,77 @@
+version: 2
+
+project_name: kodelet
+
+before:
+  hooks:
+    - go mod download
+    - go generate ./pkg/webui
+    - ./scripts/prepare-packaging-binaries.sh
+
+builds:
+  - id: kodelet
+    main: ./cmd/kodelet
+    binary: kodelet
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - >-
+        -s -w
+        -X github.com/jingkaihe/kodelet/pkg/version.Version={{ .Version }}
+        -X github.com/jingkaihe/kodelet/pkg/version.GitCommit={{ .Commit }}
+        -X github.com/jingkaihe/kodelet/pkg/version.BuildTime={{ .Date }}
+
+archives:
+  - id: raw-binaries
+    ids:
+      - kodelet
+    formats:
+      - binary
+    name_template: >-
+      kodelet-{{ .Os }}-
+      {{- if eq .Arch "amd64" -}}amd64
+      {{- else if eq .Arch "arm64" -}}arm64
+      {{- else -}}{{ .Arch }}{{- end -}}
+
+snapshot:
+  version_template: "{{ if .Env.VERSION }}{{ .Env.VERSION }}{{ else }}{{ .Version }}{{ end }}"
+
+checksum:
+  name_template: checksums.txt
+
+nfpms:
+  - id: kodelet-linux
+    ids:
+      - kodelet
+    package_name: kodelet
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/bin
+    maintainer: Jingkai He <jingkai@hey.com>
+    description: Lightweight CLI agent for software engineering and production operations tasks.
+    homepage: https://github.com/jingkaihe/kodelet
+    license: MIT
+    contents:
+      - src: README.md
+        dst: /usr/share/doc/kodelet/README.md
+        file_info:
+          mode: 0644
+      - src: .build/package-binaries/linux-{{ .Arch }}/rg
+        dst: /usr/libexec/kodelet/rg
+        file_info:
+          mode: 0755
+      - src: .build/package-binaries/linux-{{ .Arch }}/fd
+        dst: /usr/libexec/kodelet/fd
+        file_info:
+          mode: 0755

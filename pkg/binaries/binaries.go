@@ -1,6 +1,6 @@
 // Package binaries provides functionality for managing external binary dependencies
-// that kodelet requires, such as ripgrep. It handles downloading, verifying, and
-// installing binaries to ~/.kodelet/bin/.
+// that kodelet requires, such as ripgrep and fd. It can resolve binaries from a
+// packaged libexec directory, a managed per-user install location, or the system PATH.
 package binaries
 
 import (
@@ -26,20 +26,30 @@ import (
 
 const (
 	binDir           = ".kodelet/bin"
+	libexecBinDir    = "/usr/libexec/kodelet"
 	downloadTimeout  = 5 * time.Minute
 	httpClientTimout = 30 * time.Second
 )
+
+var libexecDir = libexecBinDir
 
 // BinarySpec defines the specification for an external binary
 type BinarySpec struct {
 	Name            string
 	Version         string
 	BinaryName      string
+	SystemNames     []string
 	GetDownloadURL  func(version, goos, goarch string) (string, error)
 	GetChecksumURL  func(version, goos, goarch string) (string, error) // Optional if GetChecksum is provided
 	GetChecksum     func(version, goos, goarch string) (string, error) // Optional: returns embedded checksum
 	GetArchiveEntry func(version, goos, goarch string) string
 	GetVersionCmd   func(binaryPath string) (args []string, parseVersion func(output string) string) // Returns command args and version parser
+}
+
+// DownloadMetadata contains the resolved archive URL and checksum for a binary artifact.
+type DownloadMetadata struct {
+	URL      string
+	Checksum string
 }
 
 // EnsureDepsInstalled ensures all required binaries are installed
@@ -67,22 +77,32 @@ func (c *BinaryPathCache) Get(fn func() (string, error)) (string, error) {
 	return c.path, c.err
 }
 
-// EnsureBinaryWithFallback ensures a binary is installed, falling back to system binary if needed
-func EnsureBinaryWithFallback(ctx context.Context, spec BinarySpec) (string, error) {
+// ResolveBinary resolves a binary using the following precedence:
+// 1. Packaged libexec binary (e.g. /usr/libexec/kodelet/rg)
+// 2. Managed user binary in ~/.kodelet/bin (if already installed with the expected version)
+// 3. Managed user install attempt into ~/.kodelet/bin
+// 4. System PATH lookup (including alternate names such as Debian's fdfind)
+func ResolveBinary(ctx context.Context, spec BinarySpec) (string, error) {
+	if path, ok := resolveLibexecBinary(ctx, spec); ok {
+		return path, nil
+	}
+
+	if path, ok := resolveManagedBinary(ctx, spec); ok {
+		return path, nil
+	}
+
 	path, err := EnsureBinary(ctx, spec)
 	if err == nil {
 		return path, nil
 	}
 
-	logger.G(ctx).WithError(err).Debugf("Failed to ensure managed %s, falling back to system %s", spec.Name, spec.BinaryName)
+	logger.G(ctx).WithError(err).Debugf("Failed to ensure managed %s, falling back to system PATH", spec.Name)
 
-	systemPath, lookErr := exec.LookPath(spec.BinaryName)
-	if lookErr == nil {
-		logger.G(ctx).WithField("path", systemPath).Infof("Using system-installed %s", spec.BinaryName)
+	if systemPath, ok := resolveSystemBinary(ctx, spec); ok {
 		return systemPath, nil
 	}
 
-	return "", errors.Wrapf(err, "failed to ensure %s (managed download failed and no system %s found)", spec.Name, spec.BinaryName)
+	return "", errors.Wrapf(err, "failed to resolve %s (libexec missing, managed install failed, and no system binary found)", spec.Name)
 }
 
 // GetPlatformString returns the platform-specific string for common rust-style releases
@@ -122,6 +142,11 @@ func GetBinDir() (string, error) {
 	return filepath.Join(homeDir, binDir), nil
 }
 
+// GetLibexecBinDir returns the path to the packaged libexec directory.
+func GetLibexecBinDir() string {
+	return libexecDir
+}
+
 // GetBinaryPath returns the full path to a binary in the kodelet bin directory
 func GetBinaryPath(name string) (string, error) {
 	binDir, err := GetBinDir()
@@ -133,6 +158,76 @@ func GetBinaryPath(name string) (string, error) {
 		binaryName = name + ".exe"
 	}
 	return filepath.Join(binDir, binaryName), nil
+}
+
+// GetLibexecBinaryPath returns the full path to a packaged binary in the libexec directory.
+func GetLibexecBinaryPath(name string) string {
+	binaryName := name
+	if runtime.GOOS == "windows" {
+		binaryName = name + ".exe"
+	}
+	return filepath.Join(GetLibexecBinDir(), binaryName)
+}
+
+// PreferredBinDirs returns binary lookup directories in the same precedence order
+// used by ResolveBinary for command execution contexts that rely on PATH.
+func PreferredBinDirs() ([]string, error) {
+	binDir, err := GetBinDir()
+	if err != nil {
+		return nil, err
+	}
+
+	return []string{
+		GetLibexecBinDir(),
+		binDir,
+	}, nil
+}
+
+// EnvWithPreferredBinDirs prepends kodelet-managed binary directories to PATH
+// while preserving the existing environment and avoiding duplicate path entries.
+func EnvWithPreferredBinDirs(env []string) ([]string, error) {
+	preferredDirs, err := PreferredBinDirs()
+	if err != nil {
+		return env, err
+	}
+
+	clonedEnv := append([]string(nil), env...)
+	pathValue := ""
+	pathIndex := -1
+	for i, kv := range clonedEnv {
+		if strings.HasPrefix(kv, "PATH=") {
+			pathIndex = i
+			pathValue = strings.TrimPrefix(kv, "PATH=")
+			break
+		}
+	}
+
+	pathParts := append([]string(nil), preferredDirs...)
+	if pathValue != "" {
+		pathParts = append(pathParts, strings.Split(pathValue, string(os.PathListSeparator))...)
+	}
+
+	dedupedParts := make([]string, 0, len(pathParts))
+	seen := make(map[string]struct{}, len(pathParts))
+	for _, part := range pathParts {
+		if part == "" {
+			continue
+		}
+		if _, ok := seen[part]; ok {
+			continue
+		}
+		seen[part] = struct{}{}
+		dedupedParts = append(dedupedParts, part)
+	}
+
+	newPath := strings.Join(dedupedParts, string(os.PathListSeparator))
+	if pathIndex >= 0 {
+		clonedEnv[pathIndex] = "PATH=" + newPath
+	} else {
+		clonedEnv = append(clonedEnv, "PATH="+newPath)
+	}
+
+	return clonedEnv, nil
 }
 
 // EnsureBinary ensures the binary is installed with the correct version.
@@ -161,34 +256,15 @@ func EnsureBinary(ctx context.Context, spec BinarySpec) (string, error) {
 
 	logger.G(ctx).WithField("binary", spec.Name).WithField("version", spec.Version).Info("Installing binary")
 
-	downloadURL, err := spec.GetDownloadURL(spec.Version, runtime.GOOS, runtime.GOARCH)
+	download, err := ResolveDownloadMetadata(ctx, spec, runtime.GOOS, runtime.GOARCH)
 	if err != nil {
-		return "", errors.Wrap(err, "failed to get download URL")
+		return "", errors.Wrap(err, "failed to resolve download metadata")
 	}
 
-	var expectedChecksum string
-	if spec.GetChecksum != nil {
-		expectedChecksum, err = spec.GetChecksum(spec.Version, runtime.GOOS, runtime.GOARCH)
-		if err != nil {
-			return "", errors.Wrap(err, "failed to get embedded checksum")
-		}
-	} else if spec.GetChecksumURL != nil {
-		checksumURL, err := spec.GetChecksumURL(spec.Version, runtime.GOOS, runtime.GOARCH)
-		if err != nil {
-			return "", errors.Wrap(err, "failed to get checksum URL")
-		}
-		expectedChecksum, err = fetchChecksum(ctx, checksumURL)
-		if err != nil {
-			return "", errors.Wrap(err, "failed to fetch checksum")
-		}
-	} else {
-		return "", errors.New("no checksum method provided")
-	}
-
-	archivePath := filepath.Join(binDir, filepath.Base(downloadURL))
+	archivePath := filepath.Join(binDir, filepath.Base(download.URL))
 	defer os.Remove(archivePath)
 
-	if err := downloadFile(ctx, downloadURL, archivePath); err != nil {
+	if err := downloadFile(ctx, download.URL, archivePath); err != nil {
 		return "", errors.Wrap(err, "failed to download binary archive")
 	}
 
@@ -197,8 +273,8 @@ func EnsureBinary(ctx context.Context, spec BinarySpec) (string, error) {
 		return "", errors.Wrap(err, "failed to calculate checksum")
 	}
 
-	if actualChecksum != expectedChecksum {
-		return "", errors.Errorf("checksum mismatch: expected %s, got %s", expectedChecksum, actualChecksum)
+	if actualChecksum != download.Checksum {
+		return "", errors.Errorf("checksum mismatch: expected %s, got %s", download.Checksum, actualChecksum)
 	}
 
 	archiveEntry := spec.GetArchiveEntry(spec.Version, runtime.GOOS, runtime.GOARCH)
@@ -212,6 +288,47 @@ func EnsureBinary(ctx context.Context, spec BinarySpec) (string, error) {
 
 	logger.G(ctx).WithField("binary", spec.Name).WithField("version", spec.Version).Info("Binary installed successfully")
 	return binaryPath, nil
+}
+
+func resolveLibexecBinary(ctx context.Context, spec BinarySpec) (string, bool) {
+	binaryPath := GetLibexecBinaryPath(spec.BinaryName)
+	if getInstalledVersion(binaryPath, spec) == spec.Version {
+		logger.G(ctx).WithField("path", binaryPath).Debugf("Using packaged %s from libexec", spec.BinaryName)
+		return binaryPath, true
+	}
+
+	return "", false
+}
+
+func resolveManagedBinary(ctx context.Context, spec BinarySpec) (string, bool) {
+	binaryPath, err := GetBinaryPath(spec.BinaryName)
+	if err != nil {
+		return "", false
+	}
+
+	if getInstalledVersion(binaryPath, spec) == spec.Version {
+		logger.G(ctx).WithField("path", binaryPath).Debugf("Using managed %s from user bin dir", spec.BinaryName)
+		return binaryPath, true
+	}
+
+	return "", false
+}
+
+func resolveSystemBinary(ctx context.Context, spec BinarySpec) (string, bool) {
+	names := spec.SystemNames
+	if len(names) == 0 {
+		names = []string{spec.BinaryName}
+	}
+
+	for _, name := range names {
+		systemPath, err := exec.LookPath(name)
+		if err == nil {
+			logger.G(ctx).WithField("path", systemPath).Debugf("Using system-installed %s", name)
+			return systemPath, true
+		}
+	}
+
+	return "", false
 }
 
 func getInstalledVersion(binaryPath string, spec BinarySpec) string {
@@ -240,6 +357,50 @@ func getInstalledVersion(binaryPath string, spec BinarySpec) string {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// ResolveDownloadMetadata resolves the archive URL and checksum for the given binary and target platform.
+func ResolveDownloadMetadata(ctx context.Context, spec BinarySpec, goos, goarch string) (DownloadMetadata, error) {
+	downloadURL, err := spec.GetDownloadURL(spec.Version, goos, goarch)
+	if err != nil {
+		return DownloadMetadata{}, errors.Wrap(err, "failed to get download URL")
+	}
+
+	expectedChecksum, err := resolveExpectedChecksum(ctx, spec, goos, goarch)
+	if err != nil {
+		return DownloadMetadata{}, err
+	}
+
+	return DownloadMetadata{
+		URL:      downloadURL,
+		Checksum: expectedChecksum,
+	}, nil
+}
+
+func resolveExpectedChecksum(ctx context.Context, spec BinarySpec, goos, goarch string) (string, error) {
+	if spec.GetChecksum != nil {
+		checksum, err := spec.GetChecksum(spec.Version, goos, goarch)
+		if err != nil {
+			return "", errors.Wrap(err, "failed to get embedded checksum")
+		}
+		return checksum, nil
+	}
+
+	if spec.GetChecksumURL == nil {
+		return "", errors.New("no checksum method provided")
+	}
+
+	checksumURL, err := spec.GetChecksumURL(spec.Version, goos, goarch)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to get checksum URL")
+	}
+
+	checksum, err := fetchChecksum(ctx, checksumURL)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to fetch checksum")
+	}
+
+	return checksum, nil
 }
 
 func fetchChecksum(ctx context.Context, url string) (string, error) {

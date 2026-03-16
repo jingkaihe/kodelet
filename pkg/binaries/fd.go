@@ -31,6 +31,7 @@ func FdSpec() BinarySpec {
 		Name:            "fd",
 		Version:         FdVersion,
 		BinaryName:      "fd",
+		SystemNames:     []string{"fd", "fdfind"},
 		GetDownloadURL:  getFdDownloadURL,
 		GetChecksum:     getFdChecksum,
 		GetArchiveEntry: getFdArchiveEntry,
@@ -39,11 +40,11 @@ func FdSpec() BinarySpec {
 }
 
 // EnsureFd ensures fd is installed and returns its path.
-// It first tries to use the managed binary, then falls back to system fd.
+// It prefers packaged libexec binaries, then managed binaries, then system fd/fdfind.
 // This is cached after the first successful call.
 func EnsureFd(ctx context.Context) (string, error) {
 	return fdCache.Get(func() (string, error) {
-		return EnsureBinaryWithFallback(ctx, FdSpec())
+		return ResolveBinary(ctx, FdSpec())
 	})
 }
 

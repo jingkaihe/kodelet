@@ -12,6 +12,7 @@ fd = "10.3.0"
 golangci-lint = "latest"
 air = "latest"
 gh = "latest"
+goreleaser = "latest"
 
 "go:github.com/isaacphi/mcp-language-server" = "latest"
 "go:golang.org/x/tools/gopls" = "latest"
@@ -23,7 +24,8 @@ experimental = true
 
 [env]
 # Version-related environment variables
-VERSION = "{{exec(command='echo ${VERSION:-$(cat VERSION.txt)}')}}"
+VERSION = "{{exec(command='version=${VERSION:-$(cat VERSION.txt)}; printf %s \"${version#v}\"')}}"
+VERSION_TAG = "{{exec(command='version=${VERSION:-$(cat VERSION.txt)}; case \"$version\" in v*) printf %s \"$version\" ;; *) printf v%s \"$version\" ;; esac')}}"
 GIT_COMMIT = "{{exec(command='echo ${GIT_COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}')}}"
 BUILD_TIME = "{{exec(command='echo ${BUILD_TIME:-$(date -u \"+%a %b %d %H:%M:%S UTC %Y\")}')}}"
 
@@ -129,16 +131,10 @@ run = [
   "CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags=\"-s -w -X '$VERSION_PKG.Version=$VERSION' -X '$VERSION_PKG.GitCommit=$GIT_COMMIT' -X '$VERSION_PKG.BuildTime=$BUILD_TIME'\" -o ./bin/kodelet-windows-amd64.exe ./cmd/kodelet/",
 ]
 
-[tasks.cross-build-docker]
-description = "Cross-compile for multiple platforms using Docker"
+[tasks.release-snapshot]
+description = "Build GoReleaser snapshot artifacts"
 run = [
-  "mkdir -p bin",
-  "echo 'Cross-compiling for multiple platforms using Docker...'",
-  "docker build --build-arg VERSION=\"$VERSION\" --build-arg GIT_COMMIT=\"$GIT_COMMIT\" --build-arg BUILD_TIME=\"$BUILD_TIME\" --build-arg GITHUB_TOKEN=\"${GITHUB_TOKEN:-$(gh auth token 2>/dev/null || true)}\" -f Dockerfile.cross-build -t kodelet-cross-build .",
-  "echo 'Extracting binaries from Docker container...'",
-  "docker run --rm -v $(pwd)/bin:/output kodelet-cross-build cp /bin/kodelet-linux-amd64 /bin/kodelet-linux-arm64 /bin/kodelet-darwin-amd64 /bin/kodelet-darwin-arm64 /bin/kodelet-windows-amd64.exe /output/",
-  "echo 'Cross-build complete. Binaries available in ./bin/'",
-  "ls -la ./bin/kodelet-*",
+  "goreleaser release --snapshot --clean",
 ]
 
 [tasks.e2e-test-docker]
@@ -154,35 +150,26 @@ depends = ["build"]
 run = ["./bin/kodelet run -r release-note"]
 
 [tasks.release]
-description = "Create GitHub release with cross-compiled binaries"
-depends = ["cross-build"]
+description = "Build GoReleaser snapshot artifacts"
+depends = ["lint", "test"]
 run = [
-  "gh release create v$VERSION",
-  "gh release upload v$VERSION ./bin/kodelet-linux-amd64",
-  "gh release upload v$VERSION ./bin/kodelet-linux-arm64",
-  "gh release upload v$VERSION ./bin/kodelet-darwin-amd64",
-  "gh release upload v$VERSION ./bin/kodelet-darwin-arm64",
-  "gh release upload v$VERSION ./bin/kodelet-windows-amd64.exe",
+  "mise run release-snapshot",
 ]
 
 [tasks.github-release]
-description = "Create GitHub release with release notes from RELEASE.md"
-depends = ["cross-build-docker"]
+description = "Publish GoReleaser release artifacts with RELEASE.md notes"
+depends = ["lint", "test"]
 run = [
-  "echo 'Creating GitHub release v$VERSION...'",
-  "./scripts/extract-release-notes.sh > /tmp/release-notes.md",
-  "gh release create v$VERSION --title \"v$VERSION\" --notes-file /tmp/release-notes.md ./bin/kodelet-linux-amd64 ./bin/kodelet-linux-arm64 ./bin/kodelet-darwin-amd64 ./bin/kodelet-darwin-arm64 ./bin/kodelet-windows-amd64.exe",
-  "rm -f /tmp/release-notes.md",
-  "echo 'GitHub release v$VERSION created successfully!'",
+  "./scripts/run-github-release.sh",
 ]
 
 [tasks.push-tag]
 description = "Push version tag to trigger automated GitHub Actions release"
 run = [
-  "echo 'Creating and pushing tag v$VERSION...'",
-  "if git rev-parse \"v$VERSION\" >/dev/null 2>&1; then echo 'Tag v$VERSION already exists locally. Pushing to origin...'; else echo 'Creating new tag v$VERSION...'; git tag v$VERSION; fi",
-  "git push origin v$VERSION",
-  "echo 'Tag v$VERSION pushed successfully!'",
+  "echo 'Creating and pushing tag $VERSION_TAG...'",
+  "if git rev-parse \"$VERSION_TAG\" >/dev/null 2>&1; then echo 'Tag $VERSION_TAG already exists locally. Pushing to origin...'; else echo 'Creating new tag $VERSION_TAG...'; git tag \"$VERSION_TAG\"; fi",
+  "git push origin \"$VERSION_TAG\"",
+  "echo 'Tag $VERSION_TAG pushed successfully!'",
   "echo 'GitHub Actions will automatically create a release with binaries and release notes.'",
 ]
 

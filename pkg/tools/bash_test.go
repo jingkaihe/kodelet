@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/binaries"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 )
@@ -844,8 +845,8 @@ func TestBashToolResult_StructuredDataFields(t *testing.T) {
 	})
 }
 
-func TestBashEnvWithKodeletBin(t *testing.T) {
-	env, err := bashEnvWithKodeletBin()
+func TestBashEnvWithPreferredBinDirs(t *testing.T) {
+	env, err := bashEnvWithPreferredBinDirs()
 	assert.NoError(t, err)
 
 	var pathValue string
@@ -860,5 +861,7 @@ func TestBashEnvWithKodeletBin(t *testing.T) {
 	parts := strings.Split(pathValue, string(os.PathListSeparator))
 	homeDir, err := os.UserHomeDir()
 	assert.NoError(t, err)
-	assert.Equal(t, filepath.Join(homeDir, ".kodelet", "bin"), parts[0])
+	assert.GreaterOrEqual(t, len(parts), 2)
+	assert.Equal(t, binaries.GetLibexecBinDir(), parts[0])
+	assert.Equal(t, filepath.Join(homeDir, ".kodelet", "bin"), parts[1])
 }

@@ -14,9 +14,6 @@ description: Kodelet CLI usage guide, commands, configuration, and workflows. Us
 ```bash
 # Using install script
 curl -sSL https://raw.githubusercontent.com/jingkaihe/kodelet/main/install.sh | bash
-
-# Update to latest version
-kodelet update
 ```
 
 ## Core Usage Modes
