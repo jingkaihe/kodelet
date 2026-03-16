@@ -59,7 +59,8 @@ run = ["echo 'Starting development server with auto-reload...'", "air"]
 
 [tasks.test]
 description = "Run Go tests"
-run = ["go test $(go list ./pkg/... ./cmd/... | grep -v '/node_modules/')"]
+depends = ["code-generation"]
+run = ["bash -c 'set -euo pipefail; pkgs=$(go list ./pkg/... ./cmd/... | grep -v \"/node_modules/\" || true); test -n \"$pkgs\"; go test $pkgs'"]
 
 [tasks.format]
 description = "Format Go code with gofumpt"
@@ -67,6 +68,7 @@ run = ["gofumpt -w ."]
 
 [tasks.lint]
 description = "Run all linters (go vet, golangci-lint, staticcheck)"
+depends = ["code-generation"]
 run = ["go vet ./...", "echo 'Running golangci-lint...'", "golangci-lint run"]
 
 [tasks.install-npm]
@@ -158,7 +160,7 @@ run = [
 
 [tasks.github-release]
 description = "Publish GoReleaser release artifacts with RELEASE.md notes"
-depends = ["lint", "test"]
+depends = ["code-generation"]
 run = [
   "./scripts/run-github-release.sh",
 ]

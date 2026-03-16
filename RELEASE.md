@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.3.12-beta (2026-03-16)
+
+Ensure release lint/test generate embedded Web UI assets first while preserving `node_modules` exclusion and avoiding misleading root-package test failures.
+
 ## 0.3.11-beta (2026-03-15)
 
 Support deb and rpm package release
