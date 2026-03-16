@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.3.13-beta (2026-03-16)
+
+Surfaced OpenAI reasoning content in persisted conversations and the Web UI, while skipping system messages in chat-completions history.
+
 ## 0.3.12-beta (2026-03-16)
 
 Ensure release lint/test generate embedded Web UI assets first while preserving `node_modules` exclusion and avoiding misleading root-package test failures.
