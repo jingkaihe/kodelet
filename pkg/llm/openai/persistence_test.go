@@ -567,6 +567,39 @@ func TestStreamMessages_ToolResultMessage(t *testing.T) {
 	assert.Contains(t, streamableMessages[0].Content, "file1.txt")
 }
 
+func TestStreamMessages_WithReasoningContent(t *testing.T) {
+	messages := []openai.ChatCompletionMessage{
+		{
+			Role:    openai.ChatMessageRoleUser,
+			Content: "Think step by step.",
+		},
+		{
+			Role:             openai.ChatMessageRoleAssistant,
+			ReasoningContent: "\nfirst reason about the problem",
+			Content:          "Final answer",
+		},
+	}
+
+	rawMessages, err := json.Marshal(messages)
+	require.NoError(t, err)
+
+	streamableMessages, err := StreamMessages(rawMessages, map[string]tooltypes.StructuredToolResult{})
+	require.NoError(t, err)
+	require.Len(t, streamableMessages, 3)
+
+	assert.Equal(t, "text", streamableMessages[0].Kind)
+	assert.Equal(t, "user", streamableMessages[0].Role)
+	assert.Equal(t, "Think step by step.", streamableMessages[0].Content)
+
+	assert.Equal(t, "thinking", streamableMessages[1].Kind)
+	assert.Equal(t, "assistant", streamableMessages[1].Role)
+	assert.Equal(t, "first reason about the problem", streamableMessages[1].Content)
+
+	assert.Equal(t, "text", streamableMessages[2].Kind)
+	assert.Equal(t, "assistant", streamableMessages[2].Role)
+	assert.Equal(t, "Final answer", streamableMessages[2].Content)
+}
+
 func TestStreamMessages_EdgeCases(t *testing.T) {
 	tests := []struct {
 		name           string

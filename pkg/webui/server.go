@@ -827,6 +827,9 @@ func (s *Server) convertToWebMessages(rawMessages json.RawMessage, provider stri
 		}
 
 		role, _ := baseMsg["role"].(string)
+		if role == "system" {
+			continue
+		}
 
 		webMsg := WebMessage{Role: role, Content: "", ToolCalls: []WebToolCall{}}
 
@@ -847,8 +850,9 @@ func (s *Server) convertToWebMessages(rawMessages json.RawMessage, provider stri
 				webMsg.ToolCalls = toolCalls
 			}
 			// Extract content using SDK for consistency
-			if content, err := s.extractOpenAIContent(rawMsg); err == nil {
+			if content, thinkingText, err := s.extractOpenAIContent(rawMsg); err == nil {
 				webMsg.Content = content
+				webMsg.ThinkingText = thinkingText
 			}
 		case "google":
 			if toolCalls, err := s.extractGoogleToolCalls(rawMsg); err == nil {
@@ -1084,17 +1088,19 @@ func (s *Server) extractOpenAIToolCalls(rawMessage json.RawMessage) ([]WebToolCa
 	return toolCalls, nil
 }
 
-// extractOpenAIContent extracts content from OpenAI messages using SDK
-func (s *Server) extractOpenAIContent(rawMessage json.RawMessage) (any, error) {
+// extractOpenAIContent extracts content and reasoning from OpenAI messages using SDK.
+func (s *Server) extractOpenAIContent(rawMessage json.RawMessage) (any, string, error) {
 	// Deserialize single message using the OpenAI SDK
 	var openaiMessage openai.ChatCompletionMessage
 	if err := json.Unmarshal(rawMessage, &openaiMessage); err != nil {
-		return "", errors.Wrap(err, "failed to deserialize OpenAI message")
+		return "", "", errors.Wrap(err, "failed to deserialize OpenAI message")
 	}
+
+	thinkingText := strings.TrimLeft(openaiMessage.ReasoningContent, "\n")
 
 	// OpenAI messages have simple string content or multimodal content
 	if openaiMessage.Content != "" {
-		return openaiMessage.Content, nil
+		return openaiMessage.Content, thinkingText, nil
 	}
 
 	// Handle multimodal content if present
@@ -1121,7 +1127,7 @@ func (s *Server) extractOpenAIContent(rawMessage json.RawMessage) (any, error) {
 		}
 	}
 
-	return normalizeWebContent(textParts, contentBlocks), nil
+	return normalizeWebContent(textParts, contentBlocks), thinkingText, nil
 }
 
 // handleGetToolResult handles GET /api/conversations/{id}/tools/{toolCallId}

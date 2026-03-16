@@ -221,6 +221,48 @@ func TestServer_handleGetConversation(t *testing.T) {
 	assert.Equal(t, 1, response.MessageCount)
 }
 
+func TestServer_handleGetConversationOpenAIChatCompletionsSkipsSystemAndPreservesThinking(t *testing.T) {
+	conversationID := "test-openai-chat-completions"
+	mockService := &mockConversationService{
+		getFunc: func(_ context.Context, id string) (*conversations.GetConversationResponse, error) {
+			if id == conversationID {
+				return &conversations.GetConversationResponse{
+					ID:       conversationID,
+					Provider: "openai",
+					Metadata: map[string]any{"api_mode": "chat_completions"},
+					RawMessages: json.RawMessage(`[
+						{"role":"system","content":"SECRET SYSTEM PROMPT"},
+						{"role":"user","content":"hello"},
+						{"role":"assistant","content":"Hi there!","reasoning_content":"\ninternal reasoning"}
+					]`),
+				}, nil
+			}
+			return nil, errors.New("conversation not found")
+		},
+	}
+
+	server := &Server{conversationService: mockService, router: mux.NewRouter()}
+
+	req := httptest.NewRequest("GET", "/api/conversations/"+conversationID, nil)
+	req = mux.SetURLVars(req, map[string]string{"id": conversationID})
+	w := httptest.NewRecorder()
+
+	server.handleGetConversation(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response WebConversationResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	require.Len(t, response.Messages, 2)
+
+	assert.Equal(t, "user", response.Messages[0].Role)
+	assert.Equal(t, "hello", response.Messages[0].Content)
+	assert.Equal(t, "assistant", response.Messages[1].Role)
+	assert.Equal(t, "Hi there!", response.Messages[1].Content)
+	assert.Equal(t, "internal reasoning", response.Messages[1].ThinkingText)
+}
+
 func TestServer_handleGetChatSettings(t *testing.T) {
 	originalSettings := viper.AllSettings()
 	defer func() {

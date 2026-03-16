@@ -90,6 +90,25 @@ func TestExtractMessages(t *testing.T) {
 	assert.Contains(t, toolCallMessage.Content, "get_time") // The content should contain the serialized tool call
 }
 
+func TestExtractMessagesWithReasoningContent(t *testing.T) {
+	messagesJSON := `[
+		{"role": "system", "content": "You are a helpful AI assistant."},
+		{"role": "user", "content": "hello"},
+		{"role": "assistant", "reasoning_content": "\nstep 1", "content": "done"}
+	]`
+
+	messages, err := ExtractMessages([]byte(messagesJSON), nil)
+	assert.NoError(t, err)
+	require.Len(t, messages, 3)
+
+	assert.Equal(t, "user", messages[0].Role)
+	assert.Equal(t, "hello", messages[0].Content)
+	assert.Equal(t, "assistant", messages[1].Role)
+	assert.Equal(t, "💭 Thinking: step 1", messages[1].Content)
+	assert.Equal(t, "assistant", messages[2].Role)
+	assert.Equal(t, "done", messages[2].Content)
+}
+
 func TestExtractMessagesWithMultipleToolResults(t *testing.T) {
 	// Test with multiple tool calls and results
 	messagesWithMultipleToolsJSON := `[

@@ -169,6 +169,14 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 			continue
 		}
 
+		if msg.ReasoningContent != "" {
+			streamable = append(streamable, StreamableMessage{
+				Kind:    "thinking",
+				Role:    msg.Role,
+				Content: strings.TrimLeft(msg.ReasoningContent, "\n"),
+			})
+		}
+
 		// Handle plain content (legacy format)
 		if msg.Content != "" && len(msg.MultiContent) == 0 && len(msg.ToolCalls) == 0 {
 			streamable = append(streamable, StreamableMessage{
@@ -232,6 +240,13 @@ func ExtractMessages(data []byte, toolResults map[string]tooltypes.StructuredToo
 				Content: fmt.Sprintf("🔄 Tool result:\n%s", text),
 			})
 			continue
+		}
+
+		if msg.ReasoningContent != "" {
+			result = append(result, llmtypes.Message{
+				Role:    "assistant",
+				Content: fmt.Sprintf("💭 Thinking: %s", strings.TrimLeft(msg.ReasoningContent, "\n")),
+			})
 		}
 
 		// Handle plain content (legacy format)
