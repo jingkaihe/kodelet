@@ -23,7 +23,12 @@ brew install kodelet
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/jingkaihe/kodelet/main/install.sh | bash
+
+# Force standalone binary install
+curl -sSL https://raw.githubusercontent.com/jingkaihe/kodelet/main/install.sh | bash -s -- --binary
 ```
+
+The install script defaults to package-based installation: Homebrew on macOS and `.deb`/`.rpm` packages on Linux.
 
 ## Choice of LLM
 

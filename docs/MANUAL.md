@@ -81,7 +81,12 @@ Kodelet is a lightweight agentic SWE Agent that runs as an interactive CLI tool 
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/jingkaihe/kodelet/main/install.sh | bash
+
+# Force standalone binary install
+curl -sSL https://raw.githubusercontent.com/jingkaihe/kodelet/main/install.sh | bash -s -- --binary
 ```
+
+By default the install script uses package-based installation: Homebrew on macOS and `.deb`/`.rpm` packages on Linux.
 
 ### Prerequisites
 
