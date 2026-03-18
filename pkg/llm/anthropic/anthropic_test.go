@@ -411,8 +411,8 @@ func TestIsThinkingModel(t *testing.T) {
 			expected: true,
 		},
 		{
-			name:     "haiku 3.5 does not support thinking",
-			model:    anthropic.ModelClaude3_5HaikuLatest,
+			name:     "claude 3 haiku does not support thinking",
+			model:    anthropic.ModelClaude_3_Haiku_20240307,
 			expected: false,
 		},
 	}
