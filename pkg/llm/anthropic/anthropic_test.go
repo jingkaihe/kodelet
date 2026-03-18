@@ -389,6 +389,41 @@ func TestShouldAutoCompact(t *testing.T) {
 	}
 }
 
+func TestIsThinkingModel(t *testing.T) {
+	tests := []struct {
+		name     string
+		model    anthropic.Model
+		expected bool
+	}{
+		{
+			name:     "haiku 4.5 alias supports thinking",
+			model:    anthropic.ModelClaudeHaiku4_5,
+			expected: true,
+		},
+		{
+			name:     "haiku 4.5 dated model supports thinking",
+			model:    anthropic.ModelClaudeHaiku4_5_20251001,
+			expected: true,
+		},
+		{
+			name:     "sonnet 4.5 supports thinking",
+			model:    anthropic.ModelClaudeSonnet4_5,
+			expected: true,
+		},
+		{
+			name:     "haiku 3.5 does not support thinking",
+			model:    anthropic.ModelClaude3_5HaikuLatest,
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, isThinkingModel(tt.model))
+		})
+	}
+}
+
 func TestCompactContextIntegration(t *testing.T) {
 	// Skip if no API key is available
 	if os.Getenv("ANTHROPIC_API_KEY") == "" {
