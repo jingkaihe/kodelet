@@ -34,21 +34,21 @@ profiles:
     openai-subagent:
         disable_fs_search_tools: true
         tool_mode: patch
-        model: gpt-5.2-codex
+        model: gpt-5.4
         openai:
             use_responses_api: true
         provider: openai
-        reasoning_effort: high
+        reasoning_effort: xhigh
     openai:
         disable_fs_search_tools: true
         tool_mode: patch
         max_tokens: 16000
-        model: gpt-5.2-codex
+        model: gpt-5.4
         openai:
             use_responses_api: true
         provider: openai
-        reasoning_effort: high
-        weak_model: gpt-5.1-codex-mini
+        reasoning_effort: xhigh
+        weak_model: gpt-5.4-mini
     premium:
         max_tokens: 64000
         model: opus-46

@@ -614,7 +614,7 @@ export OPENAI_API_KEY="sk-..."
 export KODELET_PROVIDER="openai"
 export KODELET_MODEL="gpt-4.1"
 export KODELET_MAX_TOKENS="8192"
-export KODELET_REASONING_EFFORT="medium"  # low, medium, high
+export KODELET_REASONING_EFFORT="medium"  # none, minimal, low, medium, high, xhigh
 
 # Profile configuration
 export KODELET_PROFILE="premium"  # Use a specific profile
@@ -992,7 +992,7 @@ Kodelet supports OpenAI models:
 - `gpt-4.1-mini` (lightweight variant)
 
 Features:
-- Reasoning effort control (low, medium, high)
+- Reasoning effort control (none, minimal, low, medium, high, xhigh)
 - Function calling capabilities
 - Vision support (planned)
 

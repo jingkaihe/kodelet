@@ -72,10 +72,10 @@ profiles:
   openai:
     provider: "openai"
     use_copilot: true
-    model: "gpt-5.2-codex"
-    weak_model: "gpt-5.2-codex-mini"
+    model: "gpt-5.4"
+    weak_model: "gpt-5.4-mini"
     max_tokens: 16000
-    reasoning_effort: "medium"
+    reasoning_effort: "xhigh"
     tool_mode: "patch"
     disable_fs_search_tools: true
     openai:
@@ -109,10 +109,10 @@ profiles:
 
   openai-responses:
     provider: "openai"
-    model: "gpt-5.2-codex"
-    weak_model: "gpt-5.2-codex-mini"
+    model: "gpt-5.4"
+    weak_model: "gpt-5.4-mini"
     max_tokens: 16000
-    reasoning_effort: "medium"
+    reasoning_effort: "xhigh"
     tool_mode: "patch"
     disable_fs_search_tools: true
     openai:
@@ -142,7 +142,7 @@ profiles:
     disable_fs_search_tools: true
 
 # OpenAI specific settings
-# Reasoning effort for OpenAI models (low, medium, high)
+# Reasoning effort for OpenAI models (none, minimal, low, medium, high, xhigh)
 reasoning_effort: "medium"
 
 # API Retry Configuration

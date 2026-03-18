@@ -474,7 +474,7 @@ profiles:
     openai-subagent:
         disable_fs_search_tools: true
         tool_mode: patch
-        model: gpt-5.2-codex
+        model: gpt-5.4
         openai:
             use_responses_api: true
         provider: openai
@@ -539,7 +539,7 @@ kodelet run --provider anthropic "query"
 - `gpt-5` - Latest GPT model
 
 **Features:**
-- Reasoning effort control (low, medium, high)
+- Reasoning effort control (none, minimal, low, medium, high, xhigh)
 - Function calling
 - Vision capabilities (multi-modal models)
 

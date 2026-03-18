@@ -12,6 +12,9 @@ func TestModels(t *testing.T) {
 	require.NotNil(t, Models)
 
 	// Test reasoning models
+	assert.Contains(t, Models.Reasoning, "gpt-5.4")
+	assert.Contains(t, Models.Reasoning, "gpt-5.4-mini")
+	assert.Contains(t, Models.Reasoning, "gpt-5.4-nano")
 	assert.Contains(t, Models.Reasoning, "o1")
 	assert.Contains(t, Models.Reasoning, "o1-pro")
 	assert.Contains(t, Models.Reasoning, "o1-mini")
@@ -46,6 +49,13 @@ func TestPricing(t *testing.T) {
 	require.NotNil(t, Pricing)
 
 	// Test some key models have pricing
+	gpt54Mini, exists := Pricing["gpt-5.4-mini"]
+	require.True(t, exists, "gpt-5.4-mini pricing should exist")
+	assert.Equal(t, 0.00000075, gpt54Mini.Input)
+	assert.Equal(t, 0.000000075, gpt54Mini.CachedInput)
+	assert.Equal(t, 0.0000045, gpt54Mini.Output)
+	assert.Equal(t, 400_000, gpt54Mini.ContextWindow)
+
 	gpt41, exists := Pricing["gpt-4.1"]
 	require.True(t, exists, "gpt-4.1 pricing should exist")
 	assert.Equal(t, 0.000002, gpt41.Input)

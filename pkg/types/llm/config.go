@@ -36,7 +36,7 @@ type Config struct {
 	MaxTokens            int                `mapstructure:"max_tokens" json:"max_tokens" yaml:"max_tokens"`
 	WeakModelMaxTokens   int                `mapstructure:"weak_model_max_tokens" json:"weak_model_max_tokens" yaml:"weak_model_max_tokens"`    // WeakModelMaxTokens is the maximum tokens for the weak model
 	ThinkingBudgetTokens int                `mapstructure:"thinking_budget_tokens" json:"thinking_budget_tokens" yaml:"thinking_budget_tokens"` // ThinkingBudgetTokens is the budget for the thinking capability
-	ReasoningEffort      string             `mapstructure:"reasoning_effort" json:"reasoning_effort" yaml:"reasoning_effort"`                   // ReasoningEffort is used for OpenAI models (low, medium, high)
+	ReasoningEffort      string             `mapstructure:"reasoning_effort" json:"reasoning_effort" yaml:"reasoning_effort"`                   // ReasoningEffort is used for OpenAI models (none, minimal, low, medium, high, xhigh)
 	AllowedCommands      []string           `mapstructure:"allowed_commands" json:"allowed_commands" yaml:"allowed_commands"`                   // AllowedCommands is a list of allowed command patterns for the bash tool
 	AllowedDomainsFile   string             `mapstructure:"allowed_domains_file" json:"allowed_domains_file" yaml:"allowed_domains_file"`       // AllowedDomainsFile is the path to the file containing allowed domains for web_fetch tool
 	AllowedTools         []string           `mapstructure:"allowed_tools" json:"allowed_tools" yaml:"allowed_tools"`                            // AllowedTools is a list of allowed tools for the main agent (empty means use defaults)

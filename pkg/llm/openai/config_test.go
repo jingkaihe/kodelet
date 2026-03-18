@@ -13,6 +13,7 @@ import (
 // Define expected OpenAI platform defaults once to avoid duplication
 var (
 	expectedOpenAIReasoningModels = []string{
+		"gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano",
 		"gpt-5.2", "gpt-5.2-pro",
 		"gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-chat-latest",
 		"gpt-5.3-codex", "gpt-5.2-codex",
@@ -201,6 +202,7 @@ func TestLoadCodexPlatformDefaults(t *testing.T) {
 	expectedReasoning := []string{
 		"gpt-5.3-codex",
 		"gpt-5.4",
+		"gpt-5.4-mini",
 		"gpt-5.3-codex-spark",
 		"gpt-5.2-codex",
 		"gpt-5.2",
@@ -216,11 +218,23 @@ func TestLoadCodexPlatformDefaults(t *testing.T) {
 	assert.Equal(t, 0.0, gpt54Pricing.Output)
 	assert.Equal(t, 272_000, gpt54Pricing.ContextWindow)
 
+	miniPricing, exists := pricing["gpt-5.4-mini"]
+	require.True(t, exists)
+	assert.Equal(t, 0.0, miniPricing.Input)
+	assert.Equal(t, 0.0, miniPricing.Output)
+	assert.Equal(t, 272_000, miniPricing.ContextWindow)
+
 	sparkPricing, exists := pricing["gpt-5.3-codex-spark"]
 	require.True(t, exists)
 	assert.Equal(t, 0.0, sparkPricing.Input)
 	assert.Equal(t, 0.0, sparkPricing.Output)
 	assert.Equal(t, 128_000, sparkPricing.ContextWindow)
+
+	legacyPricing, exists := pricing["gpt-5.1-codex-mini"]
+	require.True(t, exists)
+	assert.Equal(t, 0.0, legacyPricing.Input)
+	assert.Equal(t, 0.0, legacyPricing.Output)
+	assert.Equal(t, 272_000, legacyPricing.ContextWindow)
 
 	for _, model := range models.Reasoning {
 		_, exists := pricing[model]
