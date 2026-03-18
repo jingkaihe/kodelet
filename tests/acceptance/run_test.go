@@ -27,7 +27,7 @@ func TestRunCommandHelp(t *testing.T) {
 func TestRunCommandWithNoSaveFlag(t *testing.T) {
 	// Test run command with --no-save flag
 	cmd := exec.Command("kodelet", "run", "--no-save", "test query")
-	cmd.Env = []string{} // Clear environment
+	cmd.Env = commandEnv() // Keep minimal environment needed for runtime config
 	output, _ := cmd.CombinedOutput()
 
 	outputStr := strings.TrimSpace(string(output))
@@ -57,7 +57,7 @@ func TestRunCommandWithInvalidFlags(t *testing.T) {
 func TestRunCommandWithCompactFlags(t *testing.T) {
 	// Test run command with compact flags
 	cmd := exec.Command("kodelet", "run", "--compact-ratio=0.9", "--disable-auto-compact", "test query")
-	cmd.Env = []string{} // Clear environment
+	cmd.Env = commandEnv() // Keep minimal environment needed for runtime config
 	output, _ := cmd.CombinedOutput()
 
 	outputStr := strings.TrimSpace(string(output))
@@ -95,7 +95,7 @@ func TestRunCommandWithInvalidCompactRatio(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			cmd := exec.Command("kodelet", "run", "--compact-ratio="+test.ratio, "test query")
-			cmd.Env = []string{} // Clear environment
+			cmd.Env = commandEnv() // Keep minimal environment needed for runtime config
 			output, err := cmd.CombinedOutput()
 
 			// Should fail due to invalid compact ratio
@@ -141,7 +141,7 @@ func TestRunCommandWithValidCompactRatio(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			cmd := exec.Command("kodelet", "run", "--compact-ratio="+test.ratio, "test query")
-			cmd.Env = []string{} // Clear environment
+			cmd.Env = commandEnv() // Keep minimal environment needed for runtime config
 			output, _ := cmd.CombinedOutput()
 
 			outputStr := strings.TrimSpace(string(output))

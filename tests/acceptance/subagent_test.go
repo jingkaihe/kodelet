@@ -14,7 +14,7 @@ func TestSubagentFlagParsing(t *testing.T) {
 	args := []string{"run", "--as-subagent", "--result-only", "--no-tools", "--no-save", "test query"}
 
 	cmd := exec.Command("kodelet", args...)
-	cmd.Env = []string{} // Clear environment to trigger missing API key
+	cmd.Env = commandEnv() // Keep minimal environment needed for runtime config
 	output, _ := cmd.CombinedOutput()
 
 	outputStr := strings.TrimSpace(string(output))
