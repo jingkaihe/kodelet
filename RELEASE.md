@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.3.14-beta (2026-03-18)
+
+Added OpenAI `gpt-5.4`, `gpt-5.4-mini`, and `gpt-5.4-nano` model metadata, promoted `gpt-5.4` defaults in setup/sample config, and expanded reasoning effort support to include `none`, `minimal`, and `xhigh`.
+Enabled Anthropic Haiku 4.5 thinking-model support and refreshed Codex model listings/documentation to match the new defaults.
+Hardened acceptance tests by preserving a minimal runtime environment so config-related behavior is exercised more reliably.
+
 ## 0.3.13-beta (2026-03-16)
 
 Surfaced OpenAI reasoning content in persisted conversations and the Web UI, while skipping system messages in chat-completions history.
