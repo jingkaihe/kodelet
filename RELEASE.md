@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.3.15-beta (2026-03-19)
+
+Added `kodelet codex login --device-auth` so ChatGPT-backed Codex authentication now works on remote and headless machines without requiring the local browser redirect flow.
+Codex OAuth credentials now refresh automatically before expiry for Codex/OpenAI Responses requests, while preserving persisted token metadata more reliably.
+Documented the new Codex login flow in the manual and expanded regression coverage around token refresh and device authorization.
+
 ## 0.3.14-beta (2026-03-18)
 
 Added OpenAI `gpt-5.4`, `gpt-5.4-mini`, and `gpt-5.4-nano` model metadata, promoted `gpt-5.4` defaults in setup/sample config, and expanded reasoning effort support to include `none`, `minimal`, and `xhigh`.
