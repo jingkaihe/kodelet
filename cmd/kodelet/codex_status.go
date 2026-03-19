@@ -37,6 +37,7 @@ func runCodexStatus() {
 		fmt.Println()
 		presenter.Info("To enable Codex authentication:")
 		fmt.Println("1. Run 'kodelet codex login' to authenticate with your ChatGPT account")
+		fmt.Println("   - Use 'kodelet codex login --device-auth' on remote or headless machines")
 		fmt.Println("2. Run 'kodelet codex status' again to verify")
 		fmt.Println()
 		presenter.Info("Once authenticated, add to your config:")

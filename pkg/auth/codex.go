@@ -3,6 +3,7 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -52,6 +53,7 @@ const (
 	CodexOriginator = "kodelet"
 
 	// OAuth configuration for OpenAI Codex
+	codexAuthIssuer   = "https://auth.openai.com"
 	codexClientID     = "app_EMoamEEZ73f0CkXaXp7hrann"
 	codexAuthorizeURL = "https://auth.openai.com/oauth/authorize"
 	codexTokenURL     = "https://auth.openai.com/oauth/token"
@@ -61,7 +63,31 @@ const (
 
 	// codexTokenRefreshThreshold is the duration before token expiry when we should refresh
 	codexTokenRefreshThreshold = 10 * time.Minute
+
+	// codexDeviceCodeTimeout matches the official Codex CLI device auth window.
+	codexDeviceCodeTimeout = 15 * time.Minute
 )
+
+// CodexDeviceCode contains the device authorization details shown to the user.
+type CodexDeviceCode struct {
+	VerificationURL string
+	UserCode        string
+	deviceAuthID    string
+	interval        time.Duration
+}
+
+type codexDeviceCodeResponse struct {
+	DeviceAuthID string          `json:"device_auth_id"`
+	UserCode     string          `json:"user_code"`
+	UserCodeAlt  string          `json:"usercode"`
+	IntervalRaw  json.RawMessage `json:"interval"`
+}
+
+type codexDeviceAuthorizationResponse struct {
+	AuthorizationCode string `json:"authorization_code"`
+	CodeVerifier      string `json:"code_verifier"`
+	CodeChallenge     string `json:"code_challenge"`
+}
 
 // codexAuthFilePath returns the path to the Codex auth file.
 func codexAuthFilePath() (string, error) {
@@ -211,6 +237,167 @@ func GenerateCodexAuthURL() (authURL string, verifier string, state string, err 
 	return u.String(), pkceParams.Verifier, state, nil
 }
 
+func buildCodexIssuerURL(issuer string, path string) string {
+	return strings.TrimRight(issuer, "/") + path
+}
+
+func parseCodexDeviceCodeInterval(raw json.RawMessage) (time.Duration, error) {
+	if len(raw) == 0 {
+		return 0, nil
+	}
+
+	var stringValue string
+	if err := json.Unmarshal(raw, &stringValue); err == nil {
+		seconds, err := time.ParseDuration(strings.TrimSpace(stringValue) + "s")
+		if err != nil {
+			return 0, err
+		}
+		return seconds, nil
+	}
+
+	var intValue int64
+	if err := json.Unmarshal(raw, &intValue); err == nil {
+		return time.Duration(intValue) * time.Second, nil
+	}
+
+	return 0, errors.Errorf("invalid device code interval: %s", string(raw))
+}
+
+func requestCodexDeviceCode(ctx context.Context, issuer string) (*CodexDeviceCode, error) {
+	requestBody, err := json.Marshal(map[string]string{"client_id": codexClientID})
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to encode device code request")
+	}
+
+	endpoint := buildCodexIssuerURL(issuer, "/api/accounts/deviceauth/usercode")
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(requestBody))
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create device code request")
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to request device code")
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to read device code response")
+	}
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, errors.New("device code login is not enabled for Codex. Use the browser login instead")
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.Errorf("device code request failed with status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var deviceResp codexDeviceCodeResponse
+	if err := json.Unmarshal(body, &deviceResp); err != nil {
+		return nil, errors.Wrap(err, "failed to parse device code response")
+	}
+
+	userCode := deviceResp.UserCode
+	if userCode == "" {
+		userCode = deviceResp.UserCodeAlt
+	}
+	if userCode == "" || deviceResp.DeviceAuthID == "" {
+		return nil, errors.New("device code response missing required fields")
+	}
+
+	interval, err := parseCodexDeviceCodeInterval(deviceResp.IntervalRaw)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to parse device code polling interval")
+	}
+
+	return &CodexDeviceCode{
+		VerificationURL: buildCodexIssuerURL(issuer, "/codex/device"),
+		UserCode:        userCode,
+		deviceAuthID:    deviceResp.DeviceAuthID,
+		interval:        interval,
+	}, nil
+}
+
+// RequestCodexDeviceCode starts the device authorization flow for Codex.
+func RequestCodexDeviceCode(ctx context.Context) (*CodexDeviceCode, error) {
+	return requestCodexDeviceCode(ctx, codexAuthIssuer)
+}
+
+func pollCodexDeviceAuthorization(ctx context.Context, issuer string, deviceCode *CodexDeviceCode) (*codexDeviceAuthorizationResponse, error) {
+	if deviceCode == nil {
+		return nil, errors.New("device code is required")
+	}
+
+	deadline := time.Now().Add(codexDeviceCodeTimeout)
+	endpoint := buildCodexIssuerURL(issuer, "/api/accounts/deviceauth/token")
+
+	for {
+		requestBody, err := json.Marshal(map[string]string{
+			"device_auth_id": deviceCode.deviceAuthID,
+			"user_code":      deviceCode.UserCode,
+		})
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to encode device authorization poll request")
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(requestBody))
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to create device authorization poll request")
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to poll device authorization")
+		}
+
+		body, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			return nil, errors.Wrap(readErr, "failed to read device authorization response")
+		}
+
+		switch resp.StatusCode {
+		case http.StatusOK:
+			var authResp codexDeviceAuthorizationResponse
+			if err := json.Unmarshal(body, &authResp); err != nil {
+				return nil, errors.Wrap(err, "failed to parse device authorization response")
+			}
+			if authResp.AuthorizationCode == "" || authResp.CodeVerifier == "" {
+				return nil, errors.New("device authorization response missing required fields")
+			}
+			return &authResp, nil
+		case http.StatusForbidden, http.StatusNotFound:
+			if time.Now().After(deadline) {
+				return nil, errors.New("device authorization timed out after 15 minutes")
+			}
+			wait := deviceCode.interval
+			if remaining := time.Until(deadline); wait > remaining {
+				wait = remaining
+			}
+			timer := time.NewTimer(wait)
+			select {
+			case <-ctx.Done():
+				if !timer.Stop() {
+					<-timer.C
+				}
+				return nil, ctx.Err()
+			case <-timer.C:
+			}
+			continue
+		default:
+			trimmed := strings.TrimSpace(string(body))
+			if trimmed == "" {
+				return nil, errors.Errorf("device authorization failed with status %d", resp.StatusCode)
+			}
+			return nil, errors.Errorf("device authorization failed with status %d: %s", resp.StatusCode, trimmed)
+		}
+	}
+}
+
 // StartCodexOAuthServer starts a local HTTP server to receive the OAuth callback.
 // It returns a server that can be used to wait for the authorization code.
 func StartCodexOAuthServer(expectedState string) (*CodexOAuthServer, error) {
@@ -322,17 +509,16 @@ type codexTokenResponse struct {
 	TokenType    string `json:"token_type"`
 }
 
-// ExchangeCodexCode exchanges an authorization code for Codex access credentials.
-func ExchangeCodexCode(ctx context.Context, code string, verifier string) (*CodexCredentials, error) {
+func exchangeCodexCode(ctx context.Context, tokenURL string, code string, verifier string, redirectURI string) (*CodexCredentials, error) {
 	data := url.Values{
 		"grant_type":    {"authorization_code"},
 		"client_id":     {codexClientID},
 		"code":          {code},
 		"code_verifier": {verifier},
-		"redirect_uri":  {codexRedirectURI},
+		"redirect_uri":  {redirectURI},
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", codexTokenURL, strings.NewReader(data.Encode()))
+	req, err := http.NewRequestWithContext(ctx, "POST", tokenURL, strings.NewReader(data.Encode()))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create token request")
 	}
@@ -373,6 +559,27 @@ func ExchangeCodexCode(ctx context.Context, code string, verifier string) (*Code
 		AccountID:    accountID,
 		ExpiresAt:    time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second).Unix(),
 	}, nil
+}
+
+// ExchangeCodexCode exchanges an authorization code for Codex access credentials.
+func ExchangeCodexCode(ctx context.Context, code string, verifier string) (*CodexCredentials, error) {
+	return exchangeCodexCode(ctx, codexTokenURL, code, verifier, codexRedirectURI)
+}
+
+func completeCodexDeviceCodeLogin(ctx context.Context, issuer string, deviceCode *CodexDeviceCode) (*CodexCredentials, error) {
+	authResp, err := pollCodexDeviceAuthorization(ctx, issuer, deviceCode)
+	if err != nil {
+		return nil, err
+	}
+
+	redirectURI := buildCodexIssuerURL(issuer, "/deviceauth/callback")
+	return exchangeCodexCode(ctx, buildCodexIssuerURL(issuer, "/oauth/token"), authResp.AuthorizationCode, authResp.CodeVerifier, redirectURI)
+}
+
+// CompleteCodexDeviceCodeLogin waits for the device authorization flow to complete
+// and exchanges the resulting authorization code for Codex credentials.
+func CompleteCodexDeviceCodeLogin(ctx context.Context, deviceCode *CodexDeviceCode) (*CodexCredentials, error) {
+	return completeCodexDeviceCodeLogin(ctx, codexAuthIssuer, deviceCode)
 }
 
 // extractCodexAccountID extracts the ChatGPT account ID from the JWT access token.

@@ -996,6 +996,36 @@ Features:
 - Function calling capabilities
 - Vision support (planned)
 
+## OpenAI Codex Authentication
+
+Kodelet supports ChatGPT-backed Codex authentication for `openai.platform: codex`.
+
+### Login
+
+```bash
+# Browser redirect flow
+kodelet codex login
+
+# Device code flow for remote/headless machines
+kodelet codex login --device-auth
+```
+
+Both flows save credentials to `~/.kodelet/codex-credentials.json`.
+
+### Check Status
+
+```bash
+kodelet codex status
+```
+
+### Configure Codex
+
+```yaml
+provider: openai
+openai:
+  platform: codex
+```
+
 ## Anthropic Multi-Account Authentication
 
 Kodelet supports multiple Anthropic subscription accounts, allowing you to manage different accounts (e.g., work and personal) and switch between them at runtime.

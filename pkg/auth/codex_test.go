@@ -1,10 +1,16 @@
 package auth
 
 import (
+	"context"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -494,4 +500,150 @@ func TestCodexCredentialsFilePermissions(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "secure_token", creds.AccessToken)
 	})
+}
+
+func TestParseCodexDeviceCodeInterval(t *testing.T) {
+	t.Run("parses string interval", func(t *testing.T) {
+		interval, err := parseCodexDeviceCodeInterval(json.RawMessage(`"5"`))
+		require.NoError(t, err)
+		assert.Equal(t, 5*time.Second, interval)
+	})
+
+	t.Run("parses numeric interval", func(t *testing.T) {
+		interval, err := parseCodexDeviceCodeInterval(json.RawMessage(`3`))
+		require.NoError(t, err)
+		assert.Equal(t, 3*time.Second, interval)
+	})
+
+	t.Run("empty interval defaults to zero", func(t *testing.T) {
+		interval, err := parseCodexDeviceCodeInterval(nil)
+		require.NoError(t, err)
+		assert.Zero(t, interval)
+	})
+
+	t.Run("invalid interval returns error", func(t *testing.T) {
+		_, err := parseCodexDeviceCodeInterval(json.RawMessage(`{"bad":true}`))
+		assert.Error(t, err)
+	})
+}
+
+func TestRequestCodexDeviceCode(t *testing.T) {
+	t.Run("returns device code details", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "/api/accounts/deviceauth/usercode", r.URL.Path)
+			assert.Equal(t, http.MethodPost, r.Method)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"device_auth_id":"device-auth-123","user_code":"CODE-123","interval":"2"}`))
+		}))
+		defer server.Close()
+
+		deviceCode, err := requestCodexDeviceCode(context.Background(), server.URL)
+		require.NoError(t, err)
+		require.NotNil(t, deviceCode)
+		assert.Equal(t, server.URL+"/codex/device", deviceCode.VerificationURL)
+		assert.Equal(t, "CODE-123", deviceCode.UserCode)
+		assert.Equal(t, "device-auth-123", deviceCode.deviceAuthID)
+		assert.Equal(t, 2*time.Second, deviceCode.interval)
+	})
+
+	t.Run("supports legacy usercode field", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"device_auth_id":"device-auth-123","usercode":"CODE-123","interval":"0"}`))
+		}))
+		defer server.Close()
+
+		deviceCode, err := requestCodexDeviceCode(context.Background(), server.URL)
+		require.NoError(t, err)
+		assert.Equal(t, "CODE-123", deviceCode.UserCode)
+	})
+
+	t.Run("not found indicates unsupported device auth", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.NotFound(w, r)
+		}))
+		defer server.Close()
+
+		_, err := requestCodexDeviceCode(context.Background(), server.URL)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "device code login is not enabled")
+	})
+}
+
+func TestCompleteCodexDeviceCodeLogin(t *testing.T) {
+	t.Run("polls and exchanges device code", func(t *testing.T) {
+		pollAttempts := 0
+		accessToken := makeTestCodexJWT(t, "acct_device")
+
+		var server *httptest.Server
+		server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/api/accounts/deviceauth/token":
+				pollAttempts++
+				if pollAttempts == 1 {
+					w.WriteHeader(http.StatusForbidden)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"authorization_code":"auth-code-123","code_verifier":"verifier-123","code_challenge":"challenge-123"}`))
+			case "/oauth/token":
+				require.NoError(t, r.ParseForm())
+				assert.Equal(t, "authorization_code", r.Form.Get("grant_type"))
+				assert.Equal(t, "auth-code-123", r.Form.Get("code"))
+				assert.Equal(t, "verifier-123", r.Form.Get("code_verifier"))
+				assert.Equal(t, server.URL+"/deviceauth/callback", r.Form.Get("redirect_uri"))
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprintf(w, `{"access_token":%q,"refresh_token":"refresh-123","expires_in":3600}`, accessToken)
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		defer server.Close()
+
+		deviceCode := &CodexDeviceCode{
+			VerificationURL: server.URL + "/codex/device",
+			UserCode:        "CODE-123",
+			deviceAuthID:    "device-auth-123",
+			interval:        0,
+		}
+
+		creds, err := completeCodexDeviceCodeLogin(context.Background(), server.URL, deviceCode)
+		require.NoError(t, err)
+		require.NotNil(t, creds)
+		assert.Equal(t, "acct_device", creds.AccountID)
+		assert.Equal(t, "refresh-123", creds.RefreshToken)
+		assert.GreaterOrEqual(t, pollAttempts, 2)
+	})
+
+	t.Run("terminal poll errors are surfaced", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"authorization_declined"}`))
+		}))
+		defer server.Close()
+
+		deviceCode := &CodexDeviceCode{UserCode: "CODE-123", deviceAuthID: "device-auth-123", interval: 0}
+		_, err := completeCodexDeviceCodeLogin(context.Background(), server.URL, deviceCode)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "device authorization failed with status 401")
+	})
+}
+
+func makeTestCodexJWT(t *testing.T, accountID string) string {
+	t.Helper()
+
+	header, err := json.Marshal(map[string]string{"alg": "none", "typ": "JWT"})
+	require.NoError(t, err)
+	payload, err := json.Marshal(map[string]any{
+		codexJWTClaimPath: map[string]any{
+			"chatgpt_account_id": accountID,
+		},
+	})
+	require.NoError(t, err)
+
+	return encodeJWTPart(header) + "." + encodeJWTPart(payload) + ".sig"
+}
+
+func encodeJWTPart(data []byte) string {
+	return base64.RawURLEncoding.EncodeToString(data)
 }
