@@ -182,7 +182,7 @@ func GetCodexCredentialsForRequest(ctx context.Context) (*CodexCredentials, erro
 	}
 
 	refreshThreshold := time.Now().Add(codexTokenRefreshThreshold).Unix()
-	if creds.ExpiresAt > refreshThreshold {
+	if creds.ExpiresAt <= 0 || creds.ExpiresAt > refreshThreshold {
 		return creds, nil
 	}
 
@@ -550,6 +550,14 @@ type codexTokenResponse struct {
 	TokenType    string `json:"token_type"`
 }
 
+func codexExpiresAt(expiresIn int64) int64 {
+	if expiresIn <= 0 {
+		return 0
+	}
+
+	return time.Now().Add(time.Duration(expiresIn) * time.Second).Unix()
+}
+
 func exchangeCodexCode(ctx context.Context, tokenURL string, code string, verifier string, redirectURI string) (*CodexCredentials, error) {
 	data := url.Values{
 		"grant_type":    {"authorization_code"},
@@ -599,7 +607,7 @@ func exchangeCodexCode(ctx context.Context, tokenURL string, code string, verifi
 		AccessToken:  tokenResp.AccessToken,
 		RefreshToken: tokenResp.RefreshToken,
 		AccountID:    accountID,
-		ExpiresAt:    time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second).Unix(),
+		ExpiresAt:    codexExpiresAt(tokenResp.ExpiresIn),
 	}, nil
 }
 
@@ -701,8 +709,12 @@ func RefreshCodexToken(ctx context.Context, refreshToken string) (*CodexCredenti
 		return nil, errors.Wrap(err, "failed to parse refresh token response")
 	}
 
-	if tokenResp.AccessToken == "" || tokenResp.RefreshToken == "" {
-		return nil, errors.New("refresh token response missing required fields")
+	if tokenResp.AccessToken == "" {
+		return nil, errors.New("refresh token response missing access token")
+	}
+
+	if tokenResp.RefreshToken == "" {
+		tokenResp.RefreshToken = refreshToken
 	}
 
 	accountID := extractCodexAccountID(tokenResp.AccessToken)
@@ -715,7 +727,7 @@ func RefreshCodexToken(ctx context.Context, refreshToken string) (*CodexCredenti
 		AccessToken:  tokenResp.AccessToken,
 		RefreshToken: tokenResp.RefreshToken,
 		AccountID:    accountID,
-		ExpiresAt:    time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second).Unix(),
+		ExpiresAt:    codexExpiresAt(tokenResp.ExpiresIn),
 	}, nil
 }
 

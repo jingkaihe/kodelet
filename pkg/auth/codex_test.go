@@ -18,6 +18,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
 func TestCodexAuthFilePath(t *testing.T) {
 	// The function is unexported, so we test it indirectly through GetCodexCredentialsExists
 	// Create a temporary directory for testing
@@ -306,6 +312,43 @@ func TestCodexHeader(t *testing.T) {
 		assert.Contains(t, err.Error(), "failed to get codex credentials")
 	})
 
+	t.Run("does not refresh OAuth credentials when expiry is unknown", func(t *testing.T) {
+		authData := CodexAuthFile{
+			Tokens: CodexTokens{
+				IDToken:      "persisted_id_token",
+				AccessToken:  "current_access_token",
+				RefreshToken: "refresh-123",
+				AccountID:    "test_account_id",
+			},
+		}
+
+		kodeletDir := filepath.Join(tempDir, ".kodelet")
+		require.NoError(t, os.MkdirAll(kodeletDir, 0o755))
+
+		authFile := filepath.Join(kodeletDir, "codex-credentials.json")
+		data, err := json.Marshal(authData)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(authFile, data, 0o644))
+
+		originalClient := http.DefaultClient
+		http.DefaultClient = &http.Client{
+			Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+				t.Fatalf("unexpected token refresh request to %s", req.URL.String())
+				return nil, assert.AnError
+			}),
+		}
+		defer func() { http.DefaultClient = originalClient }()
+
+		creds, err := GetCodexCredentialsForRequest(context.Background())
+		require.NoError(t, err)
+
+		assert.Equal(t, "persisted_id_token", creds.IDToken)
+		assert.Equal(t, "current_access_token", creds.AccessToken)
+		assert.Equal(t, "refresh-123", creds.RefreshToken)
+		assert.Equal(t, "test_account_id", creds.AccountID)
+		assert.Zero(t, creds.ExpiresAt)
+	})
+
 	t.Run("refreshes OAuth credentials when nearing expiry", func(t *testing.T) {
 		refreshAccessToken := makeTestCodexJWT(t, "test_account_id")
 
@@ -365,6 +408,68 @@ func TestCodexHeader(t *testing.T) {
 		assert.Equal(t, "persisted_id_token", persisted.IDToken)
 		assert.Equal(t, refreshAccessToken, persisted.AccessToken)
 		assert.Equal(t, "refresh-456", persisted.RefreshToken)
+		assert.Equal(t, "test_account_id", persisted.AccountID)
+	})
+
+	t.Run("preserves refresh token when refresh response does not rotate it", func(t *testing.T) {
+		refreshAccessToken := makeTestCodexJWT(t, "test_account_id")
+
+		authData := CodexAuthFile{
+			Tokens: CodexTokens{
+				IDToken:      "persisted_id_token",
+				AccessToken:  "expiring_access_token",
+				RefreshToken: "refresh-123",
+				AccountID:    "test_account_id",
+				ExpiresAt:    time.Now().Add(5 * time.Minute).Unix(),
+			},
+		}
+
+		kodeletDir := filepath.Join(tempDir, ".kodelet")
+		require.NoError(t, os.MkdirAll(kodeletDir, 0o755))
+
+		authFile := filepath.Join(kodeletDir, "codex-credentials.json")
+		data, err := json.Marshal(authData)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(authFile, data, 0o644))
+
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "/oauth/token", r.URL.Path)
+			assert.Equal(t, http.MethodPost, r.Method)
+			require.NoError(t, r.ParseForm())
+			assert.Equal(t, "refresh_token", r.Form.Get("grant_type"))
+			assert.Equal(t, "refresh-123", r.Form.Get("refresh_token"))
+			assert.Equal(t, codexClientID, r.Form.Get("client_id"))
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"access_token":%q,"expires_in":3600}`, refreshAccessToken)
+		}))
+		defer server.Close()
+
+		originalClient := http.DefaultClient
+		http.DefaultClient = &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+				DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+					var dialer net.Dialer
+					return dialer.DialContext(ctx, network, server.Listener.Addr().String())
+				},
+			},
+		}
+		defer func() { http.DefaultClient = originalClient }()
+
+		creds, err := GetCodexCredentialsForRequest(context.Background())
+		require.NoError(t, err)
+
+		assert.Equal(t, "persisted_id_token", creds.IDToken)
+		assert.Equal(t, refreshAccessToken, creds.AccessToken)
+		assert.Equal(t, "refresh-123", creds.RefreshToken)
+		assert.Equal(t, "test_account_id", creds.AccountID)
+		assert.Greater(t, creds.ExpiresAt, time.Now().Add(30*time.Minute).Unix())
+
+		persisted, err := GetCodexCredentials()
+		require.NoError(t, err)
+		assert.Equal(t, "persisted_id_token", persisted.IDToken)
+		assert.Equal(t, refreshAccessToken, persisted.AccessToken)
+		assert.Equal(t, "refresh-123", persisted.RefreshToken)
 		assert.Equal(t, "test_account_id", persisted.AccountID)
 	})
 }
