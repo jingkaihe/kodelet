@@ -22,6 +22,7 @@ import (
 
 // CodexTokens represents the OAuth tokens stored by the Codex CLI.
 type CodexTokens struct {
+	IDToken      string `json:"id_token,omitempty"`
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token,omitempty"`
 	AccountID    string `json:"account_id"`
@@ -37,6 +38,7 @@ type CodexAuthFile struct {
 
 // CodexCredentials contains the resolved credentials for making Codex API calls.
 type CodexCredentials struct {
+	IDToken      string
 	AccessToken  string
 	RefreshToken string
 	AccountID    string
@@ -138,6 +140,7 @@ func GetCodexCredentials() (*CodexCredentials, error) {
 	// Prefer OAuth tokens over API key
 	if authFile.Tokens.AccessToken != "" && authFile.Tokens.AccountID != "" {
 		return &CodexCredentials{
+			IDToken:      authFile.Tokens.IDToken,
 			AccessToken:  authFile.Tokens.AccessToken,
 			RefreshToken: authFile.Tokens.RefreshToken,
 			AccountID:    authFile.Tokens.AccountID,
@@ -157,13 +160,50 @@ func GetCodexCredentials() (*CodexCredentials, error) {
 
 // CodexHeader returns the HTTP request options for Codex API calls.
 // These headers are required for authentication with the ChatGPT backend API.
-func CodexHeader() ([]option.RequestOption, error) {
-	creds, err := GetCodexCredentials()
+func CodexHeader(ctx context.Context) ([]option.RequestOption, error) {
+	creds, err := GetCodexCredentialsForRequest(ctx)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get codex credentials")
 	}
 
 	return CodexHeaderWithCredentials(creds), nil
+}
+
+// GetCodexCredentialsForRequest returns credentials suitable for making Codex API calls.
+// OAuth access tokens are refreshed when they are within the configured refresh threshold.
+func GetCodexCredentialsForRequest(ctx context.Context) (*CodexCredentials, error) {
+	creds, err := GetCodexCredentials()
+	if err != nil {
+		return nil, err
+	}
+
+	if creds.AccessToken == "" || creds.AccountID == "" {
+		return creds, nil
+	}
+
+	refreshThreshold := time.Now().Add(codexTokenRefreshThreshold).Unix()
+	if creds.ExpiresAt > refreshThreshold {
+		return creds, nil
+	}
+
+	if creds.RefreshToken == "" {
+		return nil, errors.New("token expired and no refresh token available, please login again")
+	}
+
+	refreshed, err := RefreshCodexToken(ctx, creds.RefreshToken)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to refresh token")
+	}
+
+	if refreshed.IDToken == "" {
+		refreshed.IDToken = creds.IDToken
+	}
+
+	if _, err := SaveCodexCredentials(refreshed); err != nil {
+		return nil, errors.Wrap(err, "failed to save refreshed credentials")
+	}
+
+	return refreshed, nil
 }
 
 // CodexHeaderWithCredentials returns the HTTP request options for Codex API calls
@@ -503,6 +543,7 @@ func (s *CodexOAuthServer) Close() error {
 
 // codexTokenResponse represents the OAuth token response from OpenAI.
 type codexTokenResponse struct {
+	IDToken      string `json:"id_token"`
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
 	ExpiresIn    int64  `json:"expires_in"`
@@ -554,6 +595,7 @@ func exchangeCodexCode(ctx context.Context, tokenURL string, code string, verifi
 	}
 
 	return &CodexCredentials{
+		IDToken:      tokenResp.IDToken,
 		AccessToken:  tokenResp.AccessToken,
 		RefreshToken: tokenResp.RefreshToken,
 		AccountID:    accountID,
@@ -669,6 +711,7 @@ func RefreshCodexToken(ctx context.Context, refreshToken string) (*CodexCredenti
 	}
 
 	return &CodexCredentials{
+		IDToken:      tokenResp.IDToken,
 		AccessToken:  tokenResp.AccessToken,
 		RefreshToken: tokenResp.RefreshToken,
 		AccountID:    accountID,
@@ -692,6 +735,7 @@ func SaveCodexCredentials(creds *CodexCredentials) (string, error) {
 
 	authFile := CodexAuthFile{
 		Tokens: CodexTokens{
+			IDToken:      creds.IDToken,
 			AccessToken:  creds.AccessToken,
 			RefreshToken: creds.RefreshToken,
 			AccountID:    creds.AccountID,
@@ -759,7 +803,7 @@ func DeleteCodexCredentials() error {
 
 // GetCodexAccessToken retrieves a valid Codex access token, refreshing if necessary.
 func GetCodexAccessToken(ctx context.Context) (string, error) {
-	creds, err := GetCodexCredentials()
+	creds, err := GetCodexCredentialsForRequest(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -769,25 +813,5 @@ func GetCodexAccessToken(ctx context.Context) (string, error) {
 		return "", errors.New("no valid OAuth credentials, please login first with 'kodelet codex login'")
 	}
 
-	// Check if token needs refresh
-	refreshThreshold := time.Now().Add(codexTokenRefreshThreshold).Unix()
-	if creds.ExpiresAt > refreshThreshold {
-		return creds.AccessToken, nil
-	}
-
-	// Token is expired or about to expire, refresh it
-	if creds.RefreshToken == "" {
-		return "", errors.New("token expired and no refresh token available, please login again")
-	}
-
-	refreshed, err := RefreshCodexToken(ctx, creds.RefreshToken)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to refresh token")
-	}
-
-	if _, err := SaveCodexCredentials(refreshed); err != nil {
-		return "", errors.Wrap(err, "failed to save refreshed credentials")
-	}
-
-	return refreshed.AccessToken, nil
+	return creds.AccessToken, nil
 }

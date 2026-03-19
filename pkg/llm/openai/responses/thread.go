@@ -1223,7 +1223,7 @@ func buildClientOptions(config llmtypes.Config, log *logrus.Entry) ([]option.Req
 // buildCodexAuthOptions returns client options for Codex CLI authentication.
 func buildCodexAuthOptions(log *logrus.Entry) ([]option.RequestOption, error) {
 	log.Debug("using Codex authentication for Responses API")
-	opts, err := auth.CodexHeader()
+	opts, err := auth.CodexHeader(context.Background())
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get Codex credentials")
 	}

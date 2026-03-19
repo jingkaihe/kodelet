@@ -2,9 +2,11 @@ package auth
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -95,6 +97,7 @@ func TestGetCodexCredentials(t *testing.T) {
 	t.Run("OAuth tokens present", func(t *testing.T) {
 		authData := CodexAuthFile{
 			Tokens: CodexTokens{
+				IDToken:     "test_id_token",
 				AccessToken: "test_access_token",
 				AccountID:   "test_account_id",
 			},
@@ -110,6 +113,7 @@ func TestGetCodexCredentials(t *testing.T) {
 
 		creds, err := GetCodexCredentials()
 		require.NoError(t, err)
+		assert.Equal(t, "test_id_token", creds.IDToken)
 		assert.Equal(t, "test_access_token", creds.AccessToken)
 		assert.Equal(t, "test_account_id", creds.AccountID)
 		assert.Empty(t, creds.APIKey)
@@ -144,6 +148,7 @@ func TestGetCodexCredentials(t *testing.T) {
 	t.Run("OAuth tokens preferred over API key", func(t *testing.T) {
 		authData := CodexAuthFile{
 			Tokens: CodexTokens{
+				IDToken:     "oauth_id_token",
 				AccessToken: "oauth_access_token",
 				AccountID:   "oauth_account_id",
 			},
@@ -160,6 +165,7 @@ func TestGetCodexCredentials(t *testing.T) {
 
 		creds, err := GetCodexCredentials()
 		require.NoError(t, err)
+		assert.Equal(t, "oauth_id_token", creds.IDToken)
 		assert.Equal(t, "oauth_access_token", creds.AccessToken)
 		assert.Equal(t, "oauth_account_id", creds.AccountID)
 		assert.Empty(t, creds.APIKey) // Should not include API key when OAuth is available
@@ -247,6 +253,7 @@ func TestCodexHeader(t *testing.T) {
 			Tokens: CodexTokens{
 				AccessToken: "test_access_token",
 				AccountID:   "test_account_id",
+				ExpiresAt:   time.Now().Add(30 * time.Minute).Unix(),
 			},
 		}
 
@@ -258,7 +265,7 @@ func TestCodexHeader(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(authFile, data, 0o644))
 
-		headers, err := CodexHeader()
+		headers, err := CodexHeader(context.Background())
 		require.NoError(t, err)
 		require.NotNil(t, headers)
 		assert.Len(t, headers, 5, "should return 5 request options for OAuth")
@@ -280,7 +287,7 @@ func TestCodexHeader(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(authFile, data, 0o644))
 
-		headers, err := CodexHeader()
+		headers, err := CodexHeader(context.Background())
 		require.NoError(t, err)
 		require.NotNil(t, headers)
 		assert.Len(t, headers, 1, "should return 1 request option for API key")
@@ -294,9 +301,71 @@ func TestCodexHeader(t *testing.T) {
 		kodeletDir := filepath.Join(tempDir, ".kodelet")
 		os.RemoveAll(kodeletDir)
 
-		_, err := CodexHeader()
+		_, err := CodexHeader(context.Background())
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to get codex credentials")
+	})
+
+	t.Run("refreshes OAuth credentials when nearing expiry", func(t *testing.T) {
+		refreshAccessToken := makeTestCodexJWT(t, "test_account_id")
+
+		authData := CodexAuthFile{
+			Tokens: CodexTokens{
+				IDToken:      "persisted_id_token",
+				AccessToken:  "expiring_access_token",
+				RefreshToken: "refresh-123",
+				AccountID:    "test_account_id",
+				ExpiresAt:    time.Now().Add(5 * time.Minute).Unix(),
+			},
+		}
+
+		kodeletDir := filepath.Join(tempDir, ".kodelet")
+		require.NoError(t, os.MkdirAll(kodeletDir, 0o755))
+
+		authFile := filepath.Join(kodeletDir, "codex-credentials.json")
+		data, err := json.Marshal(authData)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(authFile, data, 0o644))
+
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "/oauth/token", r.URL.Path)
+			assert.Equal(t, http.MethodPost, r.Method)
+			require.NoError(t, r.ParseForm())
+			assert.Equal(t, "refresh_token", r.Form.Get("grant_type"))
+			assert.Equal(t, "refresh-123", r.Form.Get("refresh_token"))
+			assert.Equal(t, codexClientID, r.Form.Get("client_id"))
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"access_token":%q,"refresh_token":"refresh-456","expires_in":3600}`, refreshAccessToken)
+		}))
+		defer server.Close()
+
+		originalClient := http.DefaultClient
+		http.DefaultClient = &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+				DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+					var dialer net.Dialer
+					return dialer.DialContext(ctx, network, server.Listener.Addr().String())
+				},
+			},
+		}
+		defer func() { http.DefaultClient = originalClient }()
+
+		creds, err := GetCodexCredentialsForRequest(context.Background())
+		require.NoError(t, err)
+
+		assert.Equal(t, "persisted_id_token", creds.IDToken)
+		assert.Equal(t, refreshAccessToken, creds.AccessToken)
+		assert.Equal(t, "refresh-456", creds.RefreshToken)
+		assert.Equal(t, "test_account_id", creds.AccountID)
+		assert.Greater(t, creds.ExpiresAt, time.Now().Add(30*time.Minute).Unix())
+
+		persisted, err := GetCodexCredentials()
+		require.NoError(t, err)
+		assert.Equal(t, "persisted_id_token", persisted.IDToken)
+		assert.Equal(t, refreshAccessToken, persisted.AccessToken)
+		assert.Equal(t, "refresh-456", persisted.RefreshToken)
+		assert.Equal(t, "test_account_id", persisted.AccountID)
 	})
 }
 
@@ -433,6 +502,7 @@ func TestCodexAuthFileStructure(t *testing.T) {
 	t.Run("JSON serialization matches expected format", func(t *testing.T) {
 		authFile := CodexAuthFile{
 			Tokens: CodexTokens{
+				IDToken:     "test_id_token",
 				AccessToken: "test_token",
 				AccountID:   "test_account",
 			},
@@ -448,6 +518,7 @@ func TestCodexAuthFileStructure(t *testing.T) {
 		// Check structure matches Codex CLI format
 		tokens, ok := unmarshaled["tokens"].(map[string]any)
 		require.True(t, ok, "tokens should be an object")
+		assert.Equal(t, "test_id_token", tokens["id_token"])
 		assert.Equal(t, "test_token", tokens["access_token"])
 		assert.Equal(t, "test_account", tokens["account_id"])
 		assert.Equal(t, "sk-key", unmarshaled["OPENAI_API_KEY"])
@@ -457,6 +528,7 @@ func TestCodexAuthFileStructure(t *testing.T) {
 		// Simulate the format that Codex CLI creates
 		jsonData := `{
 			"tokens": {
+				"id_token": "real_id_token",
 				"access_token": "real_token",
 				"account_id": "real_account"
 			},
@@ -466,6 +538,7 @@ func TestCodexAuthFileStructure(t *testing.T) {
 		var authFile CodexAuthFile
 		require.NoError(t, json.Unmarshal([]byte(jsonData), &authFile))
 
+		assert.Equal(t, "real_id_token", authFile.Tokens.IDToken)
 		assert.Equal(t, "real_token", authFile.Tokens.AccessToken)
 		assert.Equal(t, "real_account", authFile.Tokens.AccountID)
 		assert.Equal(t, "sk-real-key", authFile.OpenAIAPIKey)
