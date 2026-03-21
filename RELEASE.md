@@ -1,5 +1,10 @@
 # Kodelet
 
+## 0.3.16-beta (2026-03-21)
+
+Made OpenAI `gpt-5.4` and `gpt-5.4-mini` the default Kodelet models, switching the default provider to OpenAI and enabling the Responses API by default.
+Defaulted the root config and recommended setup template to patch-only tool mode with filesystem search tools disabled, while preserving fuller tool access for hybrid, Anthropic, Google, and xAI profiles.
+
 ## 0.3.15-beta (2026-03-19)
 
 Added `kodelet codex login --device-auth` so ChatGPT-backed Codex authentication now works on remote and headless machines without requiring the local browser redirect flow.
