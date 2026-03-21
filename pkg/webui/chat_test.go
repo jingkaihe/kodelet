@@ -86,8 +86,8 @@ func TestResolveWebChatConfigForNewConversation_DefaultProfileNameIgnoresActiveP
 	}()
 
 	viper.Reset()
-	viper.Set("provider", "anthropic")
-	viper.Set("model", "claude-sonnet-4-6")
+	viper.Set("provider", "openai")
+	viper.Set("model", "gpt-5.4")
 	viper.Set("profile", "work")
 	viper.Set("profiles", map[string]any{
 		"work": map[string]any{
@@ -98,8 +98,8 @@ func TestResolveWebChatConfigForNewConversation_DefaultProfileNameIgnoresActiveP
 
 	config, err := resolveWebChatConfigForNewConversation("default")
 	require.NoError(t, err)
-	assert.Equal(t, "anthropic", config.Provider)
-	assert.Equal(t, "claude-sonnet-4-6", config.Model)
+	assert.Equal(t, "openai", config.Provider)
+	assert.Equal(t, "gpt-5.4", config.Model)
 	assert.Equal(t, "default", config.Profile)
 }
 
@@ -113,8 +113,8 @@ func TestResolveWebChatConfigForExistingConversation_DefaultProfileIgnoresActive
 	}()
 
 	viper.Reset()
-	viper.Set("provider", "anthropic")
-	viper.Set("model", "claude-sonnet-4-6")
+	viper.Set("provider", "openai")
+	viper.Set("model", "gpt-5.4")
 	viper.Set("profile", "work")
 	viper.Set("profiles", map[string]any{
 		"work": map[string]any{
@@ -125,13 +125,13 @@ func TestResolveWebChatConfigForExistingConversation_DefaultProfileIgnoresActive
 
 	config, err := resolveWebChatConfigForExistingConversation(&conversations.GetConversationResponse{
 		ID:       "conv-default",
-		Provider: "anthropic",
+		Provider: "openai",
 		Metadata: map[string]any{
 			"profile": "default",
 		},
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "anthropic", config.Provider)
-	assert.Equal(t, "claude-sonnet-4-6", config.Model)
+	assert.Equal(t, "openai", config.Provider)
+	assert.Equal(t, "gpt-5.4", config.Model)
 	assert.Equal(t, "default", config.Profile)
 }

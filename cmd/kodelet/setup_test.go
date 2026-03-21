@@ -20,6 +20,7 @@ func TestRecommendedSetupConfigYAML_OpenAIProfilesUsePatchMode(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "patch", openAIProfile["tool_mode"])
 	assert.Equal(t, true, openAIProfile["disable_fs_search_tools"])
+	assert.Equal(t, "openai", openAIProfile["provider"])
 
 	openAISubagentProfile, ok := config.Profiles["openai-subagent"]
 	require.True(t, ok)
@@ -28,8 +29,29 @@ func TestRecommendedSetupConfigYAML_OpenAIProfilesUsePatchMode(t *testing.T) {
 	_, hasAllowedTools := openAISubagentProfile["allowed_tools"]
 	assert.False(t, hasAllowedTools)
 
+	hybridProfile, ok := config.Profiles["hybrid"]
+	require.True(t, ok)
+	assert.Equal(t, "anthropic", hybridProfile["provider"])
+	assert.Equal(t, "full", hybridProfile["tool_mode"])
+	assert.Equal(t, false, hybridProfile["disable_fs_search_tools"])
+
 	premiumProfile, ok := config.Profiles["premium"]
 	require.True(t, ok)
+	assert.Equal(t, "anthropic", premiumProfile["provider"])
+	assert.Equal(t, "full", premiumProfile["tool_mode"])
+	assert.Equal(t, false, premiumProfile["disable_fs_search_tools"])
 	assert.Equal(t, 64000, premiumProfile["max_tokens"])
 	assert.Equal(t, 32000, premiumProfile["thinking_budget_tokens"])
+
+	googleProfile, ok := config.Profiles["google"]
+	require.True(t, ok)
+	assert.Equal(t, "google", googleProfile["provider"])
+	assert.Equal(t, "full", googleProfile["tool_mode"])
+	assert.Equal(t, false, googleProfile["disable_fs_search_tools"])
+
+	xaiProfile, ok := config.Profiles["xai"]
+	require.True(t, ok)
+	assert.Equal(t, "openai", xaiProfile["provider"])
+	assert.Equal(t, "full", xaiProfile["tool_mode"])
+	assert.Equal(t, false, xaiProfile["disable_fs_search_tools"])
 }

@@ -158,7 +158,7 @@ func resolveClientBaseURL(config llmtypes.Config, useCopilot bool) string {
 func NewOpenAIThread(config llmtypes.Config) (*Thread, error) {
 	// Apply defaults if not provided
 	if config.Model == "" {
-		config.Model = "gpt-4.1" // Default to GPT-4.1
+		config.Model = "gpt-5.4" // Default to GPT-5.4
 	}
 	if config.MaxTokens == 0 {
 		config.MaxTokens = 8192

@@ -45,9 +45,9 @@ func TestNewThread(t *testing.T) {
 		{
 			name: "WithDefaultValues",
 			config: llmtypes.Config{
-				Provider: "anthropic",
+				Provider: "openai",
 			},
-			expectedModel: "claude-sonnet-4-6",
+			expectedModel: "gpt-5.4",
 			expectedMax:   8192,
 		},
 		{

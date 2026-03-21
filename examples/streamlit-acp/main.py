@@ -13,6 +13,8 @@ A chatbot interface that communicates with kodelet via the Agent Client Protocol
 
 Usage:
     uv run main.py
+
+This example explicitly uses the OpenAI provider with gpt-5.4.
 """
 
 import asyncio
@@ -55,6 +57,9 @@ from acp.schema import (  # type: ignore[import-not-found]
 
 os.environ["STREAMLIT_THEME_BASE"] = "light"
 st: Any = cast(Any, st_module)
+
+DEFAULT_PROVIDER = "openai"
+DEFAULT_MODEL = "gpt-5.4"
 
 CUSTOM_CSS = """
 <style>
@@ -342,7 +347,16 @@ async def run_acp_prompt(
     result_session_id = session_id
 
     try:
-        async with spawn_agent_process(client, kodelet_path, "acp", transport_kwargs={"limit": ACP_BUFFER_LIMIT}) as (conn, _):
+        async with spawn_agent_process(
+            client,
+            kodelet_path,
+            "acp",
+            "--provider",
+            DEFAULT_PROVIDER,
+            "--model",
+            DEFAULT_MODEL,
+            transport_kwargs={"limit": ACP_BUFFER_LIMIT},
+        ) as (conn, _):
             init_resp = await conn.initialize(protocol_version=PROTOCOL_VERSION, client_capabilities={})
             can_load_session = supports_load_session(init_resp)
 
@@ -537,7 +551,16 @@ async def load_history_via_acp(session_id: str) -> list[dict]:
                     blocks.append({"type": "tools", "items": [tool_entry]})
 
     try:
-        async with spawn_agent_process(HistoryClient(), kodelet_path, "acp", transport_kwargs={"limit": ACP_BUFFER_LIMIT}) as (conn, _):
+        async with spawn_agent_process(
+            HistoryClient(),
+            kodelet_path,
+            "acp",
+            "--provider",
+            DEFAULT_PROVIDER,
+            "--model",
+            DEFAULT_MODEL,
+            transport_kwargs={"limit": ACP_BUFFER_LIMIT},
+        ) as (conn, _):
             init_resp = await conn.initialize(protocol_version=PROTOCOL_VERSION, client_capabilities={})
             if not supports_load_session(init_resp):
                 return []

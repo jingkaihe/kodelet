@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/jingkaihe/kodelet/pkg/binaries"
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
@@ -21,16 +20,18 @@ func init() {
 	viper.SetDefault("max_tokens", 8192)
 	viper.SetDefault("weak_model_max_tokens", 8192)
 	viper.SetDefault("thinking_budget_tokens", 4048)
-	viper.SetDefault("model", "claude-sonnet-4-6")
-	viper.SetDefault("weak_model", anthropic.ModelClaudeHaiku4_5_20251001)
-	viper.SetDefault("provider", "anthropic")
+	viper.SetDefault("model", "gpt-5.4")
+	viper.SetDefault("weak_model", "gpt-5.4-mini")
+	viper.SetDefault("provider", "openai")
+	viper.SetDefault("openai.use_responses_api", true)
 	viper.SetDefault("use_copilot", false)
 	viper.SetDefault("reasoning_effort", "medium")
 	viper.SetDefault("allowed_commands", []string{})
 	viper.SetDefault("allowed_domains_file", "~/.kodelet/allowed_domains.txt")
 	viper.SetDefault("sysprompt", "")
 	viper.SetDefault("sysprompt_args", map[string]string{})
-	viper.SetDefault("tool_mode", "full")
+	viper.SetDefault("tool_mode", "patch")
+	viper.SetDefault("disable_fs_search_tools", true)
 	viper.SetDefault("anthropic_api_access", "auto")
 	viper.SetDefault("enable_todos", false)
 
@@ -102,12 +103,12 @@ func main() {
 		}
 	})
 
-	rootCmd.PersistentFlags().String("provider", "anthropic", "LLM provider to use (anthropic, openai)")
+	rootCmd.PersistentFlags().String("provider", "openai", "LLM provider to use (anthropic, openai)")
 	rootCmd.PersistentFlags().Bool("use-copilot", false, "Use GitHub Copilot subscription for OpenAI requests (env: KODELET_USE_COPILOT)")
-	rootCmd.PersistentFlags().String("model", "claude-sonnet-4-6", "LLM model to use (overrides config)")
+	rootCmd.PersistentFlags().String("model", "gpt-5.4", "LLM model to use (overrides config)")
 	rootCmd.PersistentFlags().Int("max-tokens", 8192, "Maximum tokens for response (overrides config)")
 	rootCmd.PersistentFlags().Int("thinking-budget-tokens", 4048, "Maximum tokens for thinking capability (overrides config)")
-	rootCmd.PersistentFlags().String("weak-model", string(anthropic.ModelClaudeHaiku4_5_20251001), "Weak model to use (overrides config)")
+	rootCmd.PersistentFlags().String("weak-model", "gpt-5.4-mini", "Weak model to use (overrides config)")
 	rootCmd.PersistentFlags().Int("weak-model-max-tokens", 8192, "Maximum tokens for weak model response (overrides config)")
 	rootCmd.PersistentFlags().String("reasoning-effort", "medium", "Reasoning effort for OpenAI models (none, minimal, low, medium, high, xhigh)")
 	rootCmd.PersistentFlags().String("log-level", "info", "Log level (panic, fatal, error, warn, info, debug, trace)")

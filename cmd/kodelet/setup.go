@@ -17,18 +17,26 @@ func recommendedSetupConfigYAML() string {
     haiku-45: claude-haiku-4-5-20251001
     opus-46: claude-opus-4-6
     sonnet-46: claude-sonnet-4-6
+disable_fs_search_tools: true
 max_tokens: 16000
-model: sonnet-46
+model: gpt-5.4
+openai:
+    use_responses_api: true
 profile: default
-thinking_budget_tokens: 8000
-weak_model: haiku-45
+provider: openai
+reasoning_effort: xhigh
+tool_mode: patch
+weak_model: gpt-5.4-mini
 weak_model_max_tokens: 8192
 profiles:
     hybrid:
+        disable_fs_search_tools: false
         max_tokens: 16000
         model: sonnet-46
+        provider: anthropic
         subagent_args: "--profile openai-subagent"
         thinking_budget_tokens: 8000
+        tool_mode: full
         weak_model: haiku-45
         weak_model_max_tokens: 8192
     openai-subagent:
@@ -50,24 +58,31 @@ profiles:
         reasoning_effort: xhigh
         weak_model: gpt-5.4-mini
     premium:
+        disable_fs_search_tools: false
         max_tokens: 64000
         model: opus-46
+        provider: anthropic
         thinking_budget_tokens: 32000
+        tool_mode: full
         weak_model: haiku-45
         weak_model_max_tokens: 8192
     google:
+        disable_fs_search_tools: false
         max_tokens: 16000
         model: gemini-pro
         provider: google
+        tool_mode: full
         weak_model: gemini-flash
         weak_model_max_tokens: 8192
     xai:
+        disable_fs_search_tools: false
         max_tokens: 16000
         model: grok-code-fast-1
         openai:
             platform: xai
         provider: openai
         reasoning_effort: none
+        tool_mode: full
         weak_model: grok-code-fast-1
 `
 }
@@ -192,7 +207,7 @@ var setupCmd = &cobra.Command{
 
 		presenter.Separator()
 		presenter.Section("Getting Started")
-		presenter.Info("  kodelet run \"your query\"              # Run one-shot query")
+		presenter.Info("  kodelet run \"your query\"              # Run one-shot query with OpenAI gpt-5.4")
 		presenter.Info("  kodelet run --profile hybrid \"query\"  # Use hybrid profile (Claude + OpenAI subagent)")
 		presenter.Info("  kodelet serve                         # Start web UI server")
 		presenter.Info("  toad acp 'kodelet acp'                # Start interactive chat via ACP")

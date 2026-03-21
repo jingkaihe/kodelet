@@ -111,6 +111,10 @@ type Thread struct {
 func NewThread(config llmtypes.Config) (*Thread, error) {
 	log := logger.G(context.Background())
 
+	if config.Model == "" {
+		config.Model = "gpt-5.4"
+	}
+
 	log.WithField("model", config.Model).Debug("creating OpenAI Responses API thread")
 
 	conversationID := convtypes.GenerateID()

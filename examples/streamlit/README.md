@@ -15,11 +15,11 @@ The script auto-launches Streamlit when run directly.
 ## Requirements
 
 - kodelet binary (either `./bin/kodelet` from building or system-installed)
-- Valid API keys configured for kodelet (e.g., `ANTHROPIC_API_KEY`)
+- Valid API keys configured for kodelet (for the default example setup, `OPENAI_API_KEY`)
 
 ## How It Works
 
-The chatbot shells out to `kodelet run --headless --stream-deltas` for each message, parsing the JSON stream events:
+The chatbot shells out to `kodelet run --headless --stream-deltas --provider openai --model gpt-5.4` for each message, parsing the JSON stream events:
 
 | Event | Description |
 |-------|-------------|

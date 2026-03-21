@@ -31,7 +31,7 @@ func TestNewOpenAIThread(t *testing.T) {
 	thread, err := NewOpenAIThread(config)
 	require.NoError(t, err)
 
-	assert.Equal(t, "gpt-4.1", thread.Config.Model)
+	assert.Equal(t, "gpt-5.4", thread.Config.Model)
 	assert.Equal(t, 8192, thread.Config.MaxTokens)
 	assert.Equal(t, "medium", thread.reasoningEffort)
 

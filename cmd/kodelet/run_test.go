@@ -97,14 +97,14 @@ func TestLoadResumeConversationConfig_DefaultsToCurrentConfigForNewConversation(
 	}()
 
 	viper.Reset()
-	viper.Set("provider", "anthropic")
-	viper.Set("model", "claude-sonnet-4-6")
+	viper.Set("provider", "openai")
+	viper.Set("model", "gpt-5.4")
 
 	cmd := &cobra.Command{Use: "run"}
 	config, err := loadResumeConversationConfig(context.Background(), cmd, "")
 	require.NoError(t, err)
-	assert.Equal(t, "anthropic", config.Provider)
-	assert.Equal(t, "claude-sonnet-4-6", config.Model)
+	assert.Equal(t, "openai", config.Provider)
+	assert.Equal(t, "gpt-5.4", config.Model)
 }
 
 func TestLoadResumeConversationConfig_ProfiledConversationPreservesExplicitFlagOverrides(t *testing.T) {
@@ -189,6 +189,36 @@ func TestLoadResumeConversationConfig_ProfiledConversationPreservesExplicitFlagO
 	assert.Equal(t, []string{"CODING.md", "README.md"}, config.Context.Patterns)
 	assert.Equal(t, []string{"bash", "file_read"}, config.AllowedTools)
 	assert.Equal(t, llmtypes.ToolModePatch, config.ToolMode)
+}
+
+func TestLoadResumeConversationConfig_ProfileCanDisableFSSearchToolsFromRootDefault(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	}()
+
+	viper.Reset()
+	viper.Set("disable_fs_search_tools", true)
+	viper.Set("provider", "openai")
+	viper.Set("profile", "premium")
+	viper.Set("profiles", map[string]any{
+		"premium": map[string]any{
+			"provider":                "anthropic",
+			"disable_fs_search_tools": false,
+		},
+	})
+
+	cmd := &cobra.Command{Use: "run"}
+	cmd.Flags().Bool("disable-fs-search-tools", false, "Disable filesystem search tools")
+
+	config, err := loadResumeConversationConfig(context.Background(), cmd, "")
+	require.NoError(t, err)
+	assert.Equal(t, "anthropic", config.Provider)
+	assert.False(t, config.DisableFSSearchTools)
+	assert.False(t, cmd.Flags().Changed("disable-fs-search-tools"))
 }
 
 func TestLoadResumeConversationConfig_DefaultStoredProfileIgnoresActiveProfile(t *testing.T) {

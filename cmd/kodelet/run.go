@@ -313,9 +313,15 @@ var runCmd = &cobra.Command{
 		}
 
 		llmConfig.NoHooks = config.NoHooks
-		llmConfig.DisableFSSearchTools = config.DisableFSSearchTools || viper.GetBool("disable_fs_search_tools")
-		llmConfig.DisableSubagent = config.DisableSubagent || viper.GetBool("disable_subagent")
-		llmConfig.EnableTodos = config.EnableTodos || viper.GetBool("enable_todos")
+		if cmd.Flags().Changed("disable-fs-search-tools") {
+			llmConfig.DisableFSSearchTools = config.DisableFSSearchTools
+		}
+		if cmd.Flags().Changed("disable-subagent") {
+			llmConfig.DisableSubagent = config.DisableSubagent
+		}
+		if cmd.Flags().Changed("enable-todos") {
+			llmConfig.EnableTodos = config.EnableTodos
+		}
 		if strings.TrimSpace(config.Sysprompt) != "" {
 			llmConfig.Sysprompt = strings.TrimSpace(config.Sysprompt)
 		}

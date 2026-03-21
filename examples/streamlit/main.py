@@ -13,6 +13,8 @@ by shelling out to the kodelet CLI with streaming output.
 
 Usage:
     uv run streamlit run main.py
+
+This example explicitly uses the OpenAI provider with gpt-5.4.
 """
 
 import json
@@ -26,6 +28,8 @@ os.environ["STREAMLIT_THEME_BASE"] = "light"
 import streamlit as st
 
 KODELET_BIN = Path(__file__).parent.parent.parent / "bin" / "kodelet"
+DEFAULT_PROVIDER = "openai"
+DEFAULT_MODEL = "gpt-5.4"
 
 CUSTOM_CSS = """
 <style>
@@ -210,7 +214,16 @@ def stream_kodelet_response(query: str, placeholder, conversation_id: str = None
     """Stream kodelet response and update the placeholder in real-time."""
     kodelet_path = find_kodelet_binary()
 
-    cmd = [kodelet_path, "run", "--headless", "--stream-deltas"]
+    cmd = [
+        kodelet_path,
+        "run",
+        "--headless",
+        "--stream-deltas",
+        "--provider",
+        DEFAULT_PROVIDER,
+        "--model",
+        DEFAULT_MODEL,
+    ]
     if conversation_id:
         cmd.extend(["--resume", conversation_id])
     cmd.append(query)
