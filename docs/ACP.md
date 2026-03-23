@@ -72,7 +72,7 @@ Kodelet advertises the following ACP capabilities:
 | `loadSession` | Resume previous conversations |
 | `promptCapabilities.image` | Support image inputs |
 | `promptCapabilities.embeddedContext` | Inline file contents |
-| `mcpCapabilities.http` | Connect to HTTP MCP servers |
+| `mcpCapabilities.http` | Connect to streamable HTTP MCP servers |
 
 ## Session Lifecycle
 

@@ -229,8 +229,16 @@ func convertMCPServers(servers []acptypes.MCPServer) tools.MCPConfig {
 		switch server.Type {
 		case "stdio", "":
 			serverConfig.ServerType = tools.MCPServerTypeStdio
-		case "sse", "http":
+		case "sse":
 			serverConfig.ServerType = tools.MCPServerTypeSSE
+			serverConfig.BaseURL = server.URL
+			if server.AuthHeader != "" {
+				serverConfig.Headers = map[string]string{
+					"Authorization": server.AuthHeader,
+				}
+			}
+		case "http", "streamable_http", "streamable-http":
+			serverConfig.ServerType = tools.MCPServerTypeHTTP
 			serverConfig.BaseURL = server.URL
 			if server.AuthHeader != "" {
 				serverConfig.Headers = map[string]string{

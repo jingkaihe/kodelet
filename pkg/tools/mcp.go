@@ -37,17 +37,34 @@ const (
 	MCPServerTypeStdio MCPServerType = "stdio"
 	// MCPServerTypeSSE represents an SSE-based MCP server
 	MCPServerTypeSSE MCPServerType = "sse"
+	// MCPServerTypeHTTP represents a streamable HTTP-based MCP server
+	MCPServerTypeHTTP MCPServerType = "http"
 )
 
 // MCPServerConfig holds the configuration for an MCP server
 type MCPServerConfig struct {
-	ServerType    MCPServerType     `json:"server_type" yaml:"server_type"`         // stdio or sse
+	ServerType    MCPServerType     `json:"server_type" yaml:"server_type"`         // stdio, sse (deprecated), or http (streamable HTTP)
 	Command       string            `json:"command" yaml:"command"`                 // stdio: command to start the server
 	Args          []string          `json:"args" yaml:"args"`                       // stdio: arguments to pass to the server
 	Envs          map[string]string `json:"envs" yaml:"envs"`                       // stdio: environment variables to set
-	BaseURL       string            `json:"base_url" yaml:"base_url"`               // sse: base URL of the server
-	Headers       map[string]string `json:"headers" yaml:"headers"`                 // sse: headers to send to the server
-	ToolWhiteList []string          `json:"tool_white_list" yaml:"tool_white_list"` // sse: tool white list
+	BaseURL       string            `json:"base_url" yaml:"base_url"`               // http/sse: base URL of the server
+	Headers       map[string]string `json:"headers" yaml:"headers"`                 // http/sse: headers to send to the server
+	ToolWhiteList []string          `json:"tool_white_list" yaml:"tool_white_list"` // optional tool white list
+}
+
+func normalizeMCPServerType(serverType MCPServerType) MCPServerType {
+	switch strings.ToLower(strings.TrimSpace(string(serverType))) {
+	case "":
+		return ""
+	case string(MCPServerTypeStdio):
+		return MCPServerTypeStdio
+	case string(MCPServerTypeSSE):
+		return MCPServerTypeSSE
+	case string(MCPServerTypeHTTP), "streamable_http", "streamable-http", "streamablehttp":
+		return MCPServerTypeHTTP
+	default:
+		return MCPServerType(strings.ToLower(strings.TrimSpace(string(serverType))))
+	}
 }
 
 // MCPConfig holds the configuration for all MCP servers
@@ -66,7 +83,7 @@ func newMCPClient(config MCPServerConfig) (*client.Client, error) {
 		}
 	}
 
-	switch config.ServerType {
+	switch normalizeMCPServerType(config.ServerType) {
 	case MCPServerTypeStdio:
 		if config.Command == "" {
 			return nil, errors.New("command is required for stdio server")
@@ -85,6 +102,15 @@ func newMCPClient(config MCPServerConfig) (*client.Client, error) {
 			return nil, errors.New("base_url is required for sse server")
 		}
 		tp, err := transport.NewSSE(config.BaseURL, transport.WithHeaders(config.Headers))
+		if err != nil {
+			return nil, err
+		}
+		return client.NewClient(tp), nil
+	case MCPServerTypeHTTP:
+		if config.BaseURL == "" {
+			return nil, errors.New("base_url is required for http server")
+		}
+		tp, err := transport.NewStreamableHTTP(config.BaseURL, transport.WithHTTPHeaders(config.Headers))
 		if err != nil {
 			return nil, err
 		}

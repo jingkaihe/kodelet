@@ -150,7 +150,7 @@ func (e *EnvMap) UnmarshalJSON(data []byte) error {
 // MCPServer describes an MCP server provided by the client
 type MCPServer struct {
 	Name       string   `json:"name"`
-	Type       string   `json:"type,omitempty"` // stdio, http
+	Type       string   `json:"type,omitempty"` // stdio, sse, http (streamable HTTP)
 	Command    string   `json:"command,omitempty"`
 	Args       []string `json:"args,omitempty"`
 	Env        EnvMap   `json:"env,omitempty"`

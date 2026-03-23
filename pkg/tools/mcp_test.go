@@ -8,8 +8,28 @@ import (
 
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func newStreamableHTTPTestServer(t *testing.T) string {
+	t.Helper()
+
+	mcpServer := server.NewMCPServer("test-http-server", "1.0.0")
+	mcpServer.AddTool(
+		mcp.NewTool("get_current_time", mcp.WithDescription("Get the current time")),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return mcp.NewToolResultText("2024-01-01T00:00:00Z"), nil
+		},
+	)
+
+	testServer := server.NewTestStreamableHTTPServer(mcpServer)
+	t.Cleanup(testServer.Close)
+
+	return testServer.URL
+}
 
 func TestNewMCPManager(t *testing.T) {
 	// Test with empty config
@@ -41,6 +61,39 @@ func TestNewMCPManager(t *testing.T) {
 
 		// This will fail because it tries to create an actual SSE client
 		// In a real test, you would mock the transport layer
+		_, err := NewMCPManager(config)
+		assert.NoError(t, err)
+	})
+
+	// Test with valid streamable HTTP config
+	t.Run("valid http config", func(t *testing.T) {
+		config := MCPConfig{
+			Servers: map[string]MCPServerConfig{
+				"test-http": {
+					ServerType: MCPServerTypeHTTP,
+					BaseURL:    "http://example.com/mcp",
+					Headers: map[string]string{
+						"Authorization": "Bearer test-token",
+					},
+					ToolWhiteList: []string{"tool1", "tool2"},
+				},
+			},
+		}
+
+		_, err := NewMCPManager(config)
+		assert.NoError(t, err)
+	})
+
+	t.Run("valid streamable http alias config", func(t *testing.T) {
+		config := MCPConfig{
+			Servers: map[string]MCPServerConfig{
+				"test-http": {
+					ServerType: "streamable_http",
+					BaseURL:    "http://example.com/mcp",
+				},
+			},
+		}
+
 		_, err := NewMCPManager(config)
 		assert.NoError(t, err)
 	})
@@ -397,4 +450,34 @@ func TestMCPManager_Clone(t *testing.T) {
 
 	cloned.whiteList["example"][0] = "changed"
 	assert.Equal(t, "tool-a", original.whiteList["example"][0])
+}
+
+func TestMCPManager_StreamableHTTPTransport(t *testing.T) {
+	serverURL := newStreamableHTTPTestServer(t)
+
+	config := MCPConfig{
+		Servers: map[string]MCPServerConfig{
+			"time": {
+				ServerType:    MCPServerTypeHTTP,
+				BaseURL:       serverURL,
+				ToolWhiteList: []string{"get_current_time"},
+			},
+		},
+	}
+
+	manager, err := NewMCPManager(config)
+	require.NoError(t, err)
+
+	err = manager.Initialize(context.Background())
+	require.NoError(t, err)
+	defer manager.Close(context.Background())
+
+	mcpTools, err := manager.ListMCPTools(context.Background())
+	require.NoError(t, err)
+	require.Len(t, mcpTools, 1)
+	assert.Equal(t, "mcp__time_get_current_time", mcpTools[0].Name())
+
+	result := (&mcpTools[0]).Execute(context.Background(), NewBasicState(context.Background()), `{}`)
+	assert.False(t, result.IsError())
+	assert.Contains(t, result.GetResult(), "2024-01-01T00:00:00Z")
 }
