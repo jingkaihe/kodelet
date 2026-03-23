@@ -25,6 +25,11 @@ Use --detailed to see descriptions and --json for machine-readable output.`,
 		if err != nil {
 			return errors.Wrap(err, "failed to create MCP manager")
 		}
+		if mcpManager != nil {
+			defer func() {
+				_ = mcpManager.Close(ctx)
+			}()
+		}
 
 		// Get flags
 		serverFilter, _ := cmd.Flags().GetString("server")

@@ -107,10 +107,14 @@ func runMCPServeCommand(ctx context.Context, config *MCPServeConfig) {
 		presenter.Error(errors.New("no MCP tools configured"), "Please configure MCP servers in your config file")
 		os.Exit(1)
 	}
+	defer func() {
+		_ = mcpManager.Close(ctx)
+	}()
 
 	// Create RPC server
 	rpcServer, err := rpc.NewMCPRPCServer(mcpManager, absSocketPath)
 	if err != nil {
+		_ = mcpManager.Close(ctx)
 		presenter.Error(err, "failed to create MCP RPC server")
 		os.Exit(1)
 	}
@@ -135,6 +139,7 @@ func runMCPServeCommand(ctx context.Context, config *MCPServeConfig) {
 		if err != nil {
 			logger.G(ctx).WithError(err).Error("MCP RPC server error")
 			presenter.Error(err, "MCP RPC server failed")
+			_ = mcpManager.Close(ctx)
 			os.Exit(1)
 		}
 	case <-ctx.Done():
@@ -146,6 +151,7 @@ func runMCPServeCommand(ctx context.Context, config *MCPServeConfig) {
 		if err := rpcServer.Shutdown(shutdownCtx); err != nil {
 			logger.G(ctx).WithError(err).Error("failed to shutdown MCP RPC server gracefully")
 			presenter.Error(err, "server shutdown error")
+			_ = mcpManager.Close(ctx)
 			os.Exit(1)
 		}
 	}

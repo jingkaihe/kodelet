@@ -157,7 +157,11 @@ func TestBuildSessionMCPStateOpts_UsesSessionProjectDirForCodeExecution(t *testi
 		kodeletMCPManager: kodeletMCPManager,
 	}
 
-	opts := manager.buildSessionMCPStateOpts(context.Background(), "session-123", "/tmp/worktree", nil)
+	sessionMCPManager := manager.buildSessionMCPManager(context.Background(), nil)
+	require.NotNil(t, sessionMCPManager)
+	require.NotSame(t, kodeletMCPManager, sessionMCPManager)
+
+	opts := manager.buildSessionMCPStateOpts(context.Background(), "session-123", "/tmp/worktree", sessionMCPManager)
 
 	assert.NotNil(t, opts)
 	assert.Equal(t, "session-123", gotSessionID)

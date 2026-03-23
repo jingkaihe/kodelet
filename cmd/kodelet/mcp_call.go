@@ -40,6 +40,11 @@ Arguments should be provided as JSON using the --args flag.`,
 		if err != nil {
 			return errors.Wrap(err, "failed to create MCP manager")
 		}
+		if mcpManager != nil {
+			defer func() {
+				_ = mcpManager.Close(ctx)
+			}()
+		}
 
 		// Get flags
 		argsJSON, _ := cmd.Flags().GetString("args")

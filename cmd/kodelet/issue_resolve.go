@@ -86,24 +86,11 @@ Examples:
 			cancel()
 		}()
 
-		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
-		if err != nil && !errors.Is(err, tools.ErrMCPDisabled) {
-			presenter.Error(err, "Failed to create MCP manager")
-			return
-		}
-
-		customManager, err := tools.CreateCustomToolManagerFromViper(ctx)
-		if err != nil {
-			presenter.Error(err, "Failed to create custom tool manager")
-			return
-		}
-
 		llmConfig, err := llm.GetConfigFromViperWithCmd(cmd)
 		if err != nil {
 			presenter.Error(err, "Failed to load configuration")
 			return
 		}
-		s := tools.NewBasicState(ctx, tools.WithLLMConfig(llmConfig), tools.WithMCPTools(mcpManager), tools.WithCustomTools(customManager))
 
 		config := getIssueResolveConfigFromFlags(cmd)
 
@@ -144,6 +131,25 @@ Examples:
 		}
 
 		prompt := fragment.Content
+
+		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
+		if err != nil && !errors.Is(err, tools.ErrMCPDisabled) {
+			presenter.Error(err, "Failed to create MCP manager")
+			return
+		}
+		if mcpManager != nil {
+			defer func() {
+				_ = mcpManager.Close(ctx)
+			}()
+		}
+
+		customManager, err := tools.CreateCustomToolManagerFromViper(ctx)
+		if err != nil {
+			presenter.Error(err, "Failed to create custom tool manager")
+			return
+		}
+
+		s := tools.NewBasicState(ctx, tools.WithLLMConfig(llmConfig), tools.WithMCPTools(mcpManager), tools.WithCustomTools(customManager))
 
 		presenter.Info("Analyzing GitHub issue and determining appropriate resolution workflow...")
 		presenter.Separator()

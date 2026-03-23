@@ -3,11 +3,16 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/assert"
@@ -439,6 +444,9 @@ func TestMCPManager_Clone(t *testing.T) {
 		whiteList: map[string][]string{
 			"example": {"tool-a", "tool-b"},
 		},
+		owned: map[string]bool{
+			"example": true,
+		},
 	}
 
 	cloned := original.Clone()
@@ -447,9 +455,76 @@ func TestMCPManager_Clone(t *testing.T) {
 	assert.NotSame(t, original, cloned)
 	assert.Equal(t, original.clients, cloned.clients)
 	assert.Equal(t, original.whiteList, cloned.whiteList)
+	assert.False(t, cloned.owned["example"])
 
 	cloned.whiteList["example"][0] = "changed"
 	assert.Equal(t, "tool-a", original.whiteList["example"][0])
+}
+
+type noopTransport struct {
+	closeCalls atomic.Int32
+}
+
+func (t *noopTransport) Start(context.Context) error {
+	return nil
+}
+
+func (t *noopTransport) SendRequest(context.Context, transport.JSONRPCRequest) (*transport.JSONRPCResponse, error) {
+	return nil, nil
+}
+
+func (t *noopTransport) SendNotification(context.Context, mcp.JSONRPCNotification) error {
+	return nil
+}
+
+func (t *noopTransport) SetNotificationHandler(func(mcp.JSONRPCNotification)) {}
+
+func (t *noopTransport) Close() error {
+	t.closeCalls.Add(1)
+	return nil
+}
+
+func (t *noopTransport) GetSessionId() string {
+	return ""
+}
+
+func TestMCPManager_CloseOnlyClosesOwnedClients(t *testing.T) {
+	sharedTransport := &noopTransport{}
+	sessionTransport := &noopTransport{}
+
+	configured := &MCPManager{
+		clients: map[string]*client.Client{
+			"configured": client.NewClient(sharedTransport),
+		},
+		whiteList: map[string][]string{
+			"configured": nil,
+		},
+		owned: map[string]bool{
+			"configured": true,
+		},
+	}
+
+	sessionOnly := &MCPManager{
+		clients: map[string]*client.Client{
+			"session": client.NewClient(sessionTransport),
+		},
+		whiteList: map[string][]string{
+			"session": nil,
+		},
+		owned: map[string]bool{
+			"session": true,
+		},
+	}
+
+	combined := configured.Clone()
+	combined.Merge(sessionOnly)
+
+	require.NoError(t, combined.Close(context.Background()))
+	assert.Equal(t, int32(0), sharedTransport.closeCalls.Load())
+	assert.Equal(t, int32(1), sessionTransport.closeCalls.Load())
+
+	require.NoError(t, configured.Close(context.Background()))
+	assert.Equal(t, int32(1), sharedTransport.closeCalls.Load())
 }
 
 func TestMCPManager_StreamableHTTPTransport(t *testing.T) {
@@ -480,4 +555,57 @@ func TestMCPManager_StreamableHTTPTransport(t *testing.T) {
 	result := (&mcpTools[0]).Execute(context.Background(), NewBasicState(context.Background()), `{}`)
 	assert.False(t, result.IsError())
 	assert.Contains(t, result.GetResult(), "2024-01-01T00:00:00Z")
+}
+
+func TestMCPManager_StreamableHTTPClosePreservesHeaders(t *testing.T) {
+	const authHeader = "Bearer test-token"
+
+	mcpServer := server.NewMCPServer("test-http-server", "1.0.0")
+	mcpServer.AddTool(
+		mcp.NewTool("get_current_time", mcp.WithDescription("Get the current time")),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return mcp.NewToolResultText("2024-01-01T00:00:00Z"), nil
+		},
+	)
+
+	streamableHandler := server.NewStreamableHTTPServer(mcpServer)
+	deleteAuthorized := make(chan struct{}, 1)
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != authHeader {
+			http.Error(w, "missing auth header", http.StatusUnauthorized)
+			return
+		}
+		if r.Method == http.MethodDelete {
+			select {
+			case deleteAuthorized <- struct{}{}:
+			default:
+			}
+		}
+		streamableHandler.ServeHTTP(w, r)
+	}))
+	defer testServer.Close()
+
+	manager, err := NewMCPManager(MCPConfig{
+		Servers: map[string]MCPServerConfig{
+			"time": {
+				ServerType: MCPServerTypeHTTP,
+				BaseURL:    testServer.URL,
+				Headers: map[string]string{
+					"Authorization": authHeader,
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, manager.Initialize(context.Background()))
+	_, err = manager.ListMCPTools(context.Background())
+	require.NoError(t, err)
+	require.NoError(t, manager.Close(context.Background()))
+
+	select {
+	case <-deleteAuthorized:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected authenticated DELETE request during MCP manager close")
+	}
 }

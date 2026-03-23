@@ -905,6 +905,12 @@ func (s *Server) Shutdown() {
 	s.cancel()
 	s.wg.Wait()
 
+	if s.sessionManager != nil {
+		if err := s.sessionManager.Close(context.Background()); err != nil {
+			logger.G(s.ctx).WithError(err).Warn("Failed to close ACP session manager")
+		}
+	}
+
 	if s.sessionStorage != nil {
 		s.sessionStorage.Close()
 	}

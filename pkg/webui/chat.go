@@ -109,9 +109,7 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 	}
 	if mcpManager != nil {
 		defer func() {
-			if closeErr := mcpManager.Close(ctx); closeErr != nil {
-				logger.G(ctx).WithError(closeErr).Warn("failed to close MCP manager")
-			}
+			_ = mcpManager.Close(ctx)
 		}()
 	}
 
