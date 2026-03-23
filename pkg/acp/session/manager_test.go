@@ -208,3 +208,24 @@ func TestConvertMCPServers_MapsHTTPAndSSETransports(t *testing.T) {
 	assert.Equal(t, "https://example.com/sse", config.Servers["sse-server"].BaseURL)
 	assert.Equal(t, map[string]string{"Authorization": "Bearer sse-token"}, config.Servers["sse-server"].Headers)
 }
+
+func TestBuildSessionMCPManager_FallbackToConfiguredManagerReturnsClone(t *testing.T) {
+	kodeletMCPManager, err := tools.NewMCPManager(tools.MCPConfig{
+		Servers: map[string]tools.MCPServerConfig{},
+	})
+	require.NoError(t, err)
+
+	manager := &Manager{
+		kodeletMCPManager: kodeletMCPManager,
+	}
+
+	sessionMCPManager := manager.buildSessionMCPManager(context.Background(), []acptypes.MCPServer{
+		{
+			Name: "broken-server",
+			Type: "stdio",
+		},
+	})
+
+	require.NotNil(t, sessionMCPManager)
+	require.NotSame(t, kodeletMCPManager, sessionMCPManager)
+}

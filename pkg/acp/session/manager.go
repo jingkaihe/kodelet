@@ -307,7 +307,7 @@ func (m *Manager) buildSessionMCPManager(ctx context.Context, servers []acptypes
 		if !errors.Is(err, ErrNoMCPServers) {
 			logger.G(ctx).WithError(err).Warn("Failed to connect to client MCP servers")
 		}
-		return m.kodeletMCPManager
+		return m.kodeletMCPManager.Clone()
 	}
 
 	combinedManager := m.kodeletMCPManager.Clone()
