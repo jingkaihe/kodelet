@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.3.17-beta (2026-03-23)
+
+Added first-class streamable HTTP MCP server support, while keeping deprecated SSE support and normalizing transport handling across config, ACP, and CLI flows.
+Hardened MCP lifecycle management so CLI commands, web chat runs, and ACP sessions clean up session-scoped managers correctly without closing shared clients; authenticated HTTP shutdown now preserves request headers.
+Expanded regression coverage for HTTP/SSE MCP mapping, streamable HTTP execution, auth-preserving shutdown, and ACP session MCP manager cloning and cleanup.
+
 ## 0.3.16-beta (2026-03-21)
 
 Made OpenAI `gpt-5.4` and `gpt-5.4-mini` the default Kodelet models, switching the default provider to OpenAI and enabling the Responses API by default.
