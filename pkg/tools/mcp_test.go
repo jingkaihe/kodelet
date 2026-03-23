@@ -470,7 +470,7 @@ func (t *noopTransport) Start(context.Context) error {
 }
 
 func (t *noopTransport) SendRequest(context.Context, transport.JSONRPCRequest) (*transport.JSONRPCResponse, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // stub implementation for testing
 }
 
 func (t *noopTransport) SendNotification(context.Context, mcp.JSONRPCNotification) error {
@@ -484,7 +484,7 @@ func (t *noopTransport) Close() error {
 	return nil
 }
 
-func (t *noopTransport) GetSessionId() string {
+func (t *noopTransport) GetSessionId() string { //nolint:revive,staticcheck // method name defined by mcp-go transport interface
 	return ""
 }
 

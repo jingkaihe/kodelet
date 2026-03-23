@@ -137,7 +137,7 @@ func (t *authenticatedStreamableHTTPTransport) Close() error {
 	return closeErr
 }
 
-func (t *authenticatedStreamableHTTPTransport) GetSessionId() string {
+func (t *authenticatedStreamableHTTPTransport) GetSessionId() string { //nolint:revive,staticcheck // method name defined by mcp-go transport interface
 	return t.inner.GetSessionId()
 }
 
