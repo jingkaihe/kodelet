@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
 	"github.com/jingkaihe/kodelet/pkg/mcp"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/spf13/viper"
@@ -156,9 +157,75 @@ func TestBuildSessionMCPStateOpts_UsesSessionProjectDirForCodeExecution(t *testi
 		kodeletMCPManager: kodeletMCPManager,
 	}
 
-	opts := manager.buildSessionMCPStateOpts(context.Background(), "session-123", "/tmp/worktree", nil)
+	sessionMCPManager := manager.buildSessionMCPManager(context.Background(), nil)
+	require.NotNil(t, sessionMCPManager)
+	require.NotSame(t, kodeletMCPManager, sessionMCPManager)
+
+	opts := manager.buildSessionMCPStateOpts(context.Background(), "session-123", "/tmp/worktree", sessionMCPManager)
 
 	assert.NotNil(t, opts)
 	assert.Equal(t, "session-123", gotSessionID)
 	assert.Equal(t, "/tmp/worktree", gotProjectDir)
+}
+
+func TestConvertMCPServers_MapsHTTPAndSSETransports(t *testing.T) {
+	config := convertMCPServers([]acptypes.MCPServer{
+		{
+			Name:       "stdio-server",
+			Type:       "stdio",
+			Command:    "npx",
+			Args:       []string{"-y", "test-server"},
+			Env:        acptypes.EnvMap{"TOKEN": "secret"},
+			AuthHeader: "Bearer should-not-be-used",
+		},
+		{
+			Name:       "http-server",
+			Type:       "http",
+			URL:        "https://example.com/mcp",
+			AuthHeader: "Bearer http-token",
+		},
+		{
+			Name:       "sse-server",
+			Type:       "sse",
+			URL:        "https://example.com/sse",
+			AuthHeader: "Bearer sse-token",
+		},
+	})
+
+	require.Len(t, config.Servers, 3)
+
+	assert.Equal(t, tools.MCPServerTypeStdio, config.Servers["stdio-server"].ServerType)
+	assert.Equal(t, "npx", config.Servers["stdio-server"].Command)
+	assert.Equal(t, []string{"-y", "test-server"}, config.Servers["stdio-server"].Args)
+	assert.Equal(t, map[string]string{"TOKEN": "secret"}, config.Servers["stdio-server"].Envs)
+	assert.Empty(t, config.Servers["stdio-server"].Headers)
+
+	assert.Equal(t, tools.MCPServerTypeHTTP, config.Servers["http-server"].ServerType)
+	assert.Equal(t, "https://example.com/mcp", config.Servers["http-server"].BaseURL)
+	assert.Equal(t, map[string]string{"Authorization": "Bearer http-token"}, config.Servers["http-server"].Headers)
+
+	assert.Equal(t, tools.MCPServerTypeSSE, config.Servers["sse-server"].ServerType)
+	assert.Equal(t, "https://example.com/sse", config.Servers["sse-server"].BaseURL)
+	assert.Equal(t, map[string]string{"Authorization": "Bearer sse-token"}, config.Servers["sse-server"].Headers)
+}
+
+func TestBuildSessionMCPManager_FallbackToConfiguredManagerReturnsClone(t *testing.T) {
+	kodeletMCPManager, err := tools.NewMCPManager(tools.MCPConfig{
+		Servers: map[string]tools.MCPServerConfig{},
+	})
+	require.NoError(t, err)
+
+	manager := &Manager{
+		kodeletMCPManager: kodeletMCPManager,
+	}
+
+	sessionMCPManager := manager.buildSessionMCPManager(context.Background(), []acptypes.MCPServer{
+		{
+			Name: "broken-server",
+			Type: "stdio",
+		},
+	})
+
+	require.NotNil(t, sessionMCPManager)
+	require.NotSame(t, kodeletMCPManager, sessionMCPManager)
 }

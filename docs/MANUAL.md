@@ -709,11 +709,18 @@ mcp:
       command: "npx" # Command to execute for stdio server
       args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/files"]
       tool_white_list: ["list_directory"] # Optional tool white list
-   some_sse_server:   # sse config
-      base_url: "http://localhost:8000" # Base URL for SSE server
+    some_http_server: # streamable HTTP config
+      server_type: "http"
+      base_url: "https://example.com/mcp" # Base URL for streamable HTTP server
       headers: # Headers for HTTP requests
         Authorization: "Bearer token"
       tool_white_list: ["tool1", "tool2"] # Optional tool white list
+    some_sse_server: # deprecated SSE config
+      server_type: "sse"
+      base_url: "http://localhost:8000/sse" # Base URL for SSE server
+      headers:
+        Authorization: "Bearer token"
+      tool_white_list: ["tool1", "tool2"]
 ```
 
 ### Command Line Flags

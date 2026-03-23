@@ -7,6 +7,7 @@ import (
 	"errors"
 	"sync"
 
+	"github.com/hashicorp/go-multierror"
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
 	"github.com/jingkaihe/kodelet/pkg/acp/bridge"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
@@ -29,6 +30,7 @@ type Session struct {
 	ID         acptypes.SessionID
 	Thread     llmtypes.Thread
 	State      *tools.BasicState
+	MCPManager *tools.MCPManager
 	CWD        string
 	MCPServers []acptypes.MCPServer
 
@@ -56,6 +58,15 @@ func (s *Session) IsCancelled() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.cancelled
+}
+
+// Close releases session-scoped resources.
+func (s *Session) Close(ctx context.Context) error {
+	s.Cancel()
+	if s.MCPManager != nil {
+		return s.MCPManager.Close(ctx)
+	}
+	return nil
 }
 
 // UpdateSender interface for sending session updates
@@ -229,8 +240,16 @@ func convertMCPServers(servers []acptypes.MCPServer) tools.MCPConfig {
 		switch server.Type {
 		case "stdio", "":
 			serverConfig.ServerType = tools.MCPServerTypeStdio
-		case "sse", "http":
+		case "sse":
 			serverConfig.ServerType = tools.MCPServerTypeSSE
+			serverConfig.BaseURL = server.URL
+			if server.AuthHeader != "" {
+				serverConfig.Headers = map[string]string{
+					"Authorization": server.AuthHeader,
+				}
+			}
+		case "http", "streamable_http", "streamable-http":
+			serverConfig.ServerType = tools.MCPServerTypeHTTP
 			serverConfig.BaseURL = server.URL
 			if server.AuthHeader != "" {
 				serverConfig.Headers = map[string]string{
@@ -259,6 +278,7 @@ func (m *Manager) connectMCPServers(ctx context.Context, servers []acptypes.MCPS
 	}
 
 	if err := manager.Initialize(ctx); err != nil {
+		_ = manager.Close(ctx)
 		return nil, pkgerrors.Wrap(err, "failed to initialize MCP servers")
 	}
 
@@ -279,7 +299,7 @@ func (m *Manager) buildSessionMCPManager(ctx context.Context, servers []acptypes
 		}
 		return clientMCPManager
 	case len(servers) == 0:
-		return m.kodeletMCPManager
+		return m.kodeletMCPManager.Clone()
 	}
 
 	clientMCPManager, err := m.connectMCPServers(ctx, servers)
@@ -287,7 +307,7 @@ func (m *Manager) buildSessionMCPManager(ctx context.Context, servers []acptypes
 		if !errors.Is(err, ErrNoMCPServers) {
 			logger.G(ctx).WithError(err).Warn("Failed to connect to client MCP servers")
 		}
-		return m.kodeletMCPManager
+		return m.kodeletMCPManager.Clone()
 	}
 
 	combinedManager := m.kodeletMCPManager.Clone()
@@ -296,8 +316,7 @@ func (m *Manager) buildSessionMCPManager(ctx context.Context, servers []acptypes
 }
 
 // buildSessionMCPStateOpts returns session-scoped MCP state options.
-func (m *Manager) buildSessionMCPStateOpts(ctx context.Context, sessionID string, projectDir string, servers []acptypes.MCPServer) []tools.BasicStateOption {
-	sessionMCPManager := m.buildSessionMCPManager(ctx, servers)
+func (m *Manager) buildSessionMCPStateOpts(ctx context.Context, sessionID string, projectDir string, sessionMCPManager *tools.MCPManager) []tools.BasicStateOption {
 	if sessionMCPManager == nil {
 		return nil
 	}
@@ -314,6 +333,21 @@ func (m *Manager) buildSessionMCPStateOpts(ctx context.Context, sessionID string
 	}
 
 	return []tools.BasicStateOption{tools.WithMCPTools(sessionMCPManager)}
+}
+
+func (m *Manager) storeSession(ctx context.Context, session *Session) {
+	var previous *Session
+
+	m.mu.Lock()
+	previous = m.sessions[session.ID]
+	m.sessions[session.ID] = session
+	m.mu.Unlock()
+
+	if previous != nil {
+		if err := previous.Close(ctx); err != nil {
+			logger.G(ctx).WithField("session_id", session.ID).WithError(err).Warn("Failed to close replaced ACP session resources")
+		}
+	}
 }
 
 // NewSession creates a new session
@@ -340,7 +374,8 @@ func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest
 		stateOpts = append(stateOpts, tools.WithSubAgentTool())
 	}
 
-	if mcpOpts := m.buildSessionMCPStateOpts(ctx, thread.GetConversationID(), req.CWD, req.MCPServers); mcpOpts != nil {
+	sessionMCPManager := m.buildSessionMCPManager(ctx, req.MCPServers)
+	if mcpOpts := m.buildSessionMCPStateOpts(ctx, thread.GetConversationID(), req.CWD, sessionMCPManager); mcpOpts != nil {
 		stateOpts = append(stateOpts, mcpOpts...)
 	}
 
@@ -352,6 +387,7 @@ func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest
 		ID:                 acptypes.SessionID(thread.GetConversationID()),
 		Thread:             thread,
 		State:              state,
+		MCPManager:         sessionMCPManager,
 		CWD:                req.CWD,
 		MCPServers:         req.MCPServers,
 		maxTurns:           m.config.MaxTurns,
@@ -359,9 +395,7 @@ func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest
 		disableAutoCompact: m.config.DisableAutoCompact,
 	}
 
-	m.mu.Lock()
-	m.sessions[session.ID] = session
-	m.mu.Unlock()
+	m.storeSession(ctx, session)
 
 	return session, nil
 }
@@ -401,7 +435,8 @@ func (m *Manager) LoadSession(ctx context.Context, req acptypes.LoadSessionReque
 		stateOpts = append(stateOpts, tools.WithSubAgentTool())
 	}
 
-	if mcpOpts := m.buildSessionMCPStateOpts(ctx, string(req.SessionID), req.CWD, req.MCPServers); mcpOpts != nil {
+	sessionMCPManager := m.buildSessionMCPManager(ctx, req.MCPServers)
+	if mcpOpts := m.buildSessionMCPStateOpts(ctx, string(req.SessionID), req.CWD, sessionMCPManager); mcpOpts != nil {
 		stateOpts = append(stateOpts, mcpOpts...)
 	}
 
@@ -413,6 +448,7 @@ func (m *Manager) LoadSession(ctx context.Context, req acptypes.LoadSessionReque
 		ID:                 req.SessionID,
 		Thread:             thread,
 		State:              state,
+		MCPManager:         sessionMCPManager,
 		CWD:                req.CWD,
 		MCPServers:         req.MCPServers,
 		maxTurns:           m.config.MaxTurns,
@@ -420,9 +456,7 @@ func (m *Manager) LoadSession(ctx context.Context, req acptypes.LoadSessionReque
 		disableAutoCompact: m.config.DisableAutoCompact,
 	}
 
-	m.mu.Lock()
-	m.sessions[session.ID] = session
-	m.mu.Unlock()
+	m.storeSession(ctx, session)
 
 	return session, nil
 }
@@ -447,4 +481,35 @@ func (m *Manager) Cancel(id acptypes.SessionID) error {
 	}
 	session.Cancel()
 	return nil
+}
+
+// Close releases session-scoped resources, shared MCP clients, and conversation storage.
+func (m *Manager) Close(ctx context.Context) error {
+	m.mu.Lock()
+	sessions := make([]*Session, 0, len(m.sessions))
+	for _, session := range m.sessions {
+		sessions = append(sessions, session)
+	}
+	m.sessions = make(map[acptypes.SessionID]*Session)
+	kodeletMCPManager := m.kodeletMCPManager
+	m.kodeletMCPManager = nil
+	store := m.store
+	m.store = nil
+	m.mu.Unlock()
+
+	var result error
+	for _, session := range sessions {
+		if session == nil {
+			continue
+		}
+		result = multierror.Append(result, session.Close(ctx))
+	}
+	if kodeletMCPManager != nil {
+		result = multierror.Append(result, kodeletMCPManager.Close(ctx))
+	}
+	if store != nil {
+		result = multierror.Append(result, store.Close())
+	}
+
+	return result
 }

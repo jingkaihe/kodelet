@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"slices"
 	"strings"
@@ -37,22 +39,179 @@ const (
 	MCPServerTypeStdio MCPServerType = "stdio"
 	// MCPServerTypeSSE represents an SSE-based MCP server
 	MCPServerTypeSSE MCPServerType = "sse"
+	// MCPServerTypeHTTP represents a streamable HTTP-based MCP server
+	MCPServerTypeHTTP MCPServerType = "http"
 )
 
 // MCPServerConfig holds the configuration for an MCP server
 type MCPServerConfig struct {
-	ServerType    MCPServerType     `json:"server_type" yaml:"server_type"`         // stdio or sse
+	ServerType    MCPServerType     `json:"server_type" yaml:"server_type"`         // stdio, sse (deprecated), or http (streamable HTTP)
 	Command       string            `json:"command" yaml:"command"`                 // stdio: command to start the server
 	Args          []string          `json:"args" yaml:"args"`                       // stdio: arguments to pass to the server
 	Envs          map[string]string `json:"envs" yaml:"envs"`                       // stdio: environment variables to set
-	BaseURL       string            `json:"base_url" yaml:"base_url"`               // sse: base URL of the server
-	Headers       map[string]string `json:"headers" yaml:"headers"`                 // sse: headers to send to the server
-	ToolWhiteList []string          `json:"tool_white_list" yaml:"tool_white_list"` // sse: tool white list
+	BaseURL       string            `json:"base_url" yaml:"base_url"`               // http/sse: base URL of the server
+	Headers       map[string]string `json:"headers" yaml:"headers"`                 // http/sse: headers to send to the server
+	ToolWhiteList []string          `json:"tool_white_list" yaml:"tool_white_list"` // optional tool white list
+}
+
+func normalizeMCPServerType(serverType MCPServerType) MCPServerType {
+	switch strings.ToLower(strings.TrimSpace(string(serverType))) {
+	case "":
+		return ""
+	case string(MCPServerTypeStdio):
+		return MCPServerTypeStdio
+	case string(MCPServerTypeSSE):
+		return MCPServerTypeSSE
+	case string(MCPServerTypeHTTP), "streamable_http", "streamable-http", "streamablehttp":
+		return MCPServerTypeHTTP
+	default:
+		return MCPServerType(strings.ToLower(strings.TrimSpace(string(serverType))))
+	}
 }
 
 // MCPConfig holds the configuration for all MCP servers
 type MCPConfig struct {
 	Servers map[string]MCPServerConfig `json:"servers"`
+}
+
+type authenticatedStreamableHTTPTransport struct {
+	inner       *transport.StreamableHTTP
+	serverURL   string
+	headers     map[string]string
+	headerFunc  transport.HTTPHeaderFunc
+	protocolMu  sync.RWMutex
+	protocolVer string
+}
+
+func newAuthenticatedStreamableHTTPTransport(
+	serverURL string,
+	headers map[string]string,
+) (*authenticatedStreamableHTTPTransport, error) {
+	inner, err := transport.NewStreamableHTTP(serverURL, transport.WithHTTPHeaders(headers))
+	if err != nil {
+		return nil, err
+	}
+
+	return &authenticatedStreamableHTTPTransport{
+		inner:      inner,
+		serverURL:  serverURL,
+		headers:    mapsClone(headers),
+		headerFunc: nil,
+	}, nil
+}
+
+func (t *authenticatedStreamableHTTPTransport) Start(ctx context.Context) error {
+	return t.inner.Start(ctx)
+}
+
+func (t *authenticatedStreamableHTTPTransport) SendRequest(
+	ctx context.Context,
+	request transport.JSONRPCRequest,
+) (*transport.JSONRPCResponse, error) {
+	return t.inner.SendRequest(ctx, request)
+}
+
+func (t *authenticatedStreamableHTTPTransport) SendNotification(
+	ctx context.Context,
+	notification mcp.JSONRPCNotification,
+) error {
+	return t.inner.SendNotification(ctx, notification)
+}
+
+func (t *authenticatedStreamableHTTPTransport) SetNotificationHandler(
+	handler func(mcp.JSONRPCNotification),
+) {
+	t.inner.SetNotificationHandler(handler)
+}
+
+func (t *authenticatedStreamableHTTPTransport) Close() error {
+	var closeErr error
+	if len(t.headers) > 0 || t.headerFunc != nil {
+		closeErr = t.closeWithHeaders()
+	}
+
+	if err := t.inner.Close(); err != nil {
+		closeErr = multierror.Append(closeErr, err)
+	}
+
+	return closeErr
+}
+
+func (t *authenticatedStreamableHTTPTransport) GetSessionId() string { //nolint:revive,staticcheck // method name defined by mcp-go transport interface
+	return t.inner.GetSessionId()
+}
+
+func (t *authenticatedStreamableHTTPTransport) SetProtocolVersion(version string) {
+	t.protocolMu.Lock()
+	t.protocolVer = version
+	t.protocolMu.Unlock()
+
+	t.inner.SetProtocolVersion(version)
+}
+
+func (t *authenticatedStreamableHTTPTransport) SetRequestHandler(handler transport.RequestHandler) {
+	t.inner.SetRequestHandler(handler)
+}
+
+func (t *authenticatedStreamableHTTPTransport) closeWithHeaders() error {
+	sessionID := t.inner.GetSessionId()
+	if strings.TrimSpace(sessionID) == "" {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, t.serverURL, nil)
+	if err != nil {
+		return errors.Wrap(err, "failed to create authenticated MCP close request")
+	}
+
+	req.Header.Set(transport.HeaderKeySessionID, sessionID)
+
+	t.protocolMu.RLock()
+	protocolVersion := t.protocolVer
+	t.protocolMu.RUnlock()
+	if protocolVersion != "" {
+		req.Header.Set(transport.HeaderKeyProtocolVersion, protocolVersion)
+	}
+
+	for k, v := range t.headers {
+		req.Header.Set(k, v)
+	}
+	if t.headerFunc != nil {
+		for k, v := range t.headerFunc(ctx) {
+			req.Header.Set(k, v)
+		}
+	}
+
+	resp, err := (&http.Client{}).Do(req)
+	if err != nil {
+		return errors.Wrap(err, "failed to send authenticated MCP close request")
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= http.StatusBadRequest {
+		if len(body) == 0 {
+			return errors.Errorf("authenticated MCP close request failed with status %d", resp.StatusCode)
+		}
+		return errors.Errorf("authenticated MCP close request failed with status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	return nil
+}
+
+func mapsClone(headers map[string]string) map[string]string {
+	if len(headers) == 0 {
+		return nil
+	}
+
+	cloned := make(map[string]string, len(headers))
+	for k, v := range headers {
+		cloned[k] = v
+	}
+	return cloned
 }
 
 func newMCPClient(config MCPServerConfig) (*client.Client, error) {
@@ -66,7 +225,7 @@ func newMCPClient(config MCPServerConfig) (*client.Client, error) {
 		}
 	}
 
-	switch config.ServerType {
+	switch normalizeMCPServerType(config.ServerType) {
 	case MCPServerTypeStdio:
 		if config.Command == "" {
 			return nil, errors.New("command is required for stdio server")
@@ -89,6 +248,15 @@ func newMCPClient(config MCPServerConfig) (*client.Client, error) {
 			return nil, err
 		}
 		return client.NewClient(tp), nil
+	case MCPServerTypeHTTP:
+		if config.BaseURL == "" {
+			return nil, errors.New("base_url is required for http server")
+		}
+		tp, err := newAuthenticatedStreamableHTTPTransport(config.BaseURL, config.Headers)
+		if err != nil {
+			return nil, err
+		}
+		return client.NewClient(tp), nil
 	default:
 		return nil, errors.New("invalid server type")
 	}
@@ -99,6 +267,7 @@ type MCPManager struct {
 	clients map[string]*client.Client
 
 	whiteList map[string][]string
+	owned     map[string]bool
 }
 
 // NewMCPManager creates a new MCP manager with the given configuration
@@ -106,6 +275,7 @@ func NewMCPManager(config MCPConfig) (*MCPManager, error) {
 	clients := &MCPManager{
 		clients:   make(map[string]*client.Client),
 		whiteList: make(map[string][]string),
+		owned:     make(map[string]bool),
 	}
 	for name, config := range config.Servers {
 		client, err := newMCPClient(config)
@@ -114,6 +284,7 @@ func NewMCPManager(config MCPConfig) (*MCPManager, error) {
 		}
 		clients.clients[name] = client
 		clients.whiteList[name] = config.ToolWhiteList
+		clients.owned[name] = true
 	}
 	return clients, nil
 }
@@ -160,13 +331,18 @@ func (m *MCPManager) Initialize(ctx context.Context) error {
 
 // Close closes all MCP clients
 func (m *MCPManager) Close(ctx context.Context) error {
+	var multiErr error
 	for name, client := range m.clients {
+		if !m.owned[name] {
+			continue
+		}
 		err := client.Close()
 		if err != nil {
+			multiErr = multierror.Append(multiErr, err)
 			logger.G(ctx).WithField("name", name).WithError(err).Error("failed to close mcp client")
 		}
 	}
-	return nil
+	return multiErr
 }
 
 // Merge adds all clients from another MCPManager into this one.
@@ -179,12 +355,13 @@ func (m *MCPManager) Merge(other *MCPManager) {
 		if _, exists := m.clients[name]; !exists {
 			m.clients[name] = client
 			m.whiteList[name] = other.whiteList[name]
+			m.owned[name] = other.owned[name]
 		}
 	}
 }
 
-// Clone returns a shallow copy of the manager so callers can compose per-session
-// views without mutating the shared configured MCP manager.
+// Clone returns a shallow, non-owning copy of the manager so callers can compose
+// per-session views without mutating or closing the shared configured MCP manager.
 func (m *MCPManager) Clone() *MCPManager {
 	if m == nil {
 		return nil
@@ -193,10 +370,12 @@ func (m *MCPManager) Clone() *MCPManager {
 	clone := &MCPManager{
 		clients:   make(map[string]*client.Client, len(m.clients)),
 		whiteList: make(map[string][]string, len(m.whiteList)),
+		owned:     make(map[string]bool, len(m.owned)),
 	}
 
 	for name, c := range m.clients {
 		clone.clients[name] = c
+		clone.owned[name] = false
 	}
 	for name, whiteList := range m.whiteList {
 		clone.whiteList[name] = slices.Clone(whiteList)
@@ -324,6 +503,7 @@ func CreateMCPManagerFromViper(ctx context.Context) (*MCPManager, error) {
 
 	// Initialize the manager
 	if err := manager.Initialize(ctx); err != nil {
+		_ = manager.Close(ctx)
 		return nil, errors.Wrap(err, "failed to initialize MCP manager")
 	}
 

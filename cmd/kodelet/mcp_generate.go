@@ -29,6 +29,11 @@ This creates a filesystem representation of your MCP tools that can be:
 		if err != nil {
 			return errors.Wrap(err, "failed to create MCP manager")
 		}
+		if mcpManager != nil {
+			defer func() {
+				_ = mcpManager.Close(ctx)
+			}()
+		}
 
 		// Get flags
 		outputDir, _ := cmd.Flags().GetString("output")

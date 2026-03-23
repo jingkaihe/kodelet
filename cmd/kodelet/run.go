@@ -299,6 +299,11 @@ var runCmd = &cobra.Command{
 				return
 			}
 		}
+		if mcpManager != nil {
+			defer func() {
+				_ = mcpManager.Close(ctx)
+			}()
+		}
 
 		customManager, err := tools.CreateCustomToolManagerFromViper(ctx)
 		if err != nil {

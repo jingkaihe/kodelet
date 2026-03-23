@@ -545,17 +545,25 @@ mcp:
     # to avoid Unix socket path length limits.
 
   # MCP servers configuration
-  # Each server can be either stdio or SSE based
+  # Each server can be stdio, streamable HTTP, or deprecated SSE based
   servers:
     # Example stdio server (uncomment to enable)
     # filesystem:
     #   command: "npx"
     #   args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/directory"]
 
-    # Example SSE server (uncomment to enable)
+    # Example streamable HTTP server (uncomment to enable)
+    # example-http:
+    #   server_type: "http"
+    #   base_url: "https://example.com/mcp"
+    #   headers:
+    #     Authorization: "Bearer ${MCP_TOKEN}"
+    #   tool_white_list: ["tool1", "tool2"]
+
+    # Example deprecated SSE server (uncomment to enable)
     # example-sse:
     #   server_type: "sse"
-    #   base_url: "https://example.com/mcp"
+    #   base_url: "https://example.com/sse"
     #   headers:
     #     Authorization: "Bearer ${MCP_TOKEN}"
     #   tool_white_list: ["tool1", "tool2"]
