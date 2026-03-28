@@ -1,19 +1,7 @@
 import React from 'react';
 import { ToolResult } from '../types';
-import FileReadRenderer from './tool-renderers/FileReadRenderer';
-import FileWriteRenderer from './tool-renderers/FileWriteRenderer';
-import FileEditRenderer from './tool-renderers/FileEditRenderer';
-import ApplyPatchRenderer from './tool-renderers/ApplyPatchRenderer';
-import BashRenderer from './tool-renderers/BashRenderer';
-import GrepRenderer from './tool-renderers/GrepRenderer';
-import GlobRenderer from './tool-renderers/GlobRenderer';
-import WebFetchRenderer from './tool-renderers/WebFetchRenderer';
-import ThinkingRenderer from './tool-renderers/ThinkingRenderer';
-import TodoRenderer from './tool-renderers/TodoRenderer';
-import SubagentRenderer from './tool-renderers/SubagentRenderer';
-import ImageRecognitionRenderer from './tool-renderers/ImageRecognitionRenderer';
-import SkillRenderer from './tool-renderers/SkillRenderer';
 import FallbackRenderer from './tool-renderers/FallbackRenderer';
+import { getToolRendererRegistration } from './tool-renderers/registry';
 import { normalizeToolName } from './tool-renderers/reference';
 
 interface ToolRendererProps {
@@ -23,8 +11,9 @@ interface ToolRendererProps {
 const ToolRenderer: React.FC<ToolRendererProps> = ({ toolResult }) => {
   const renderTool = () => {
     const normalizedToolName = normalizeToolName(toolResult.toolName);
+    const rendererRegistration = getToolRendererRegistration(toolResult.toolName);
 
-    if (!toolResult.success) {
+    if (!toolResult.success && !(rendererRegistration?.supportsFailureRendering && toolResult.metadata)) {
       return (
         <div className="surface-panel rounded-2xl border-kodelet-orange/20 p-4" role="alert">
           <div className="flex items-center gap-2 mb-2">
@@ -50,38 +39,12 @@ const ToolRenderer: React.FC<ToolRendererProps> = ({ toolResult }) => {
       );
     }
 
-    // Route to specific renderer based on tool name
-    switch (normalizedToolName) {
-      case 'file_read':
-        return <FileReadRenderer toolResult={toolResult} />;
-      case 'file_write':
-        return <FileWriteRenderer toolResult={toolResult} />;
-      case 'file_edit':
-        return <FileEditRenderer toolResult={toolResult} />;
-      case 'apply_patch':
-        return <ApplyPatchRenderer toolResult={toolResult} />;
-      case 'bash':
-        return <BashRenderer toolResult={toolResult} />;
-      case 'grep_tool':
-        return <GrepRenderer toolResult={toolResult} />;
-      case 'glob_tool':
-        return <GlobRenderer toolResult={toolResult} />;
-      case 'web_fetch':
-        return <WebFetchRenderer toolResult={toolResult} />;
-      case 'thinking':
-        return <ThinkingRenderer toolResult={toolResult} />;
-      case 'todo_read':
-      case 'todo_write':
-        return <TodoRenderer toolResult={toolResult} />;
-      case 'subagent':
-        return <SubagentRenderer toolResult={toolResult} />;
-      case 'image_recognition':
-        return <ImageRecognitionRenderer toolResult={toolResult} />;
-      case 'skill':
-        return <SkillRenderer toolResult={toolResult} />;
-      default:
-        return <FallbackRenderer toolResult={toolResult} />;
+    if (rendererRegistration) {
+      const Renderer = rendererRegistration.component;
+      return <Renderer toolResult={toolResult} />;
     }
+
+    return <FallbackRenderer toolResult={toolResult} />;
   };
 
   try {

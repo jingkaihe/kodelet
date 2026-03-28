@@ -5,17 +5,13 @@ import {
   parseUnifiedDiff,
   ReferenceCodeList,
   ReferenceDiffBlock,
+  ReferenceDiffLine,
   ReferenceToolHeader,
   TOOL_ICONS,
 } from './reference';
 
 interface ApplyPatchRendererProps {
   toolResult: ToolResult;
-}
-
-interface DiffLine {
-  type: 'context' | 'added' | 'removed' | 'header' | 'meta';
-  content: string;
 }
 
 const stripTrailingEmptyLine = (text: string): string[] => {
@@ -26,53 +22,75 @@ const stripTrailingEmptyLine = (text: string): string[] => {
   return lines;
 };
 
-const buildFallbackDiff = (change: ApplyPatchChange): DiffLine[] => {
+const buildFallbackDiff = (change: ApplyPatchChange): ReferenceDiffLine[] => {
   if (change.operation === 'add') {
     return (change.newContent ? stripTrailingEmptyLine(change.newContent) : []).map((line) => ({
-      type: 'added',
-      content: `+${line}`,
+      kind: 'added',
+      content: line,
     }));
   }
 
   if (change.operation === 'delete') {
     return (change.oldContent ? stripTrailingEmptyLine(change.oldContent) : []).map((line) => ({
-      type: 'removed',
-      content: `-${line}`,
+      kind: 'removed',
+      content: line,
     }));
   }
 
   const removed = (change.oldContent ? stripTrailingEmptyLine(change.oldContent) : []).map((line) => ({
-    type: 'removed' as const,
-    content: `-${line}`,
+    kind: 'removed' as const,
+    content: line,
   }));
   const added = (change.newContent ? stripTrailingEmptyLine(change.newContent) : []).map((line) => ({
-    type: 'added' as const,
-    content: `+${line}`,
+    kind: 'added' as const,
+    content: line,
   }));
 
   return [...removed, ...added];
 };
 
-const buildDiffLines = (change: ApplyPatchChange): DiffLine[] => {
+const buildDiffLines = (change: ApplyPatchChange): ReferenceDiffLine[] => {
   if (!change.unifiedDiff) {
     return buildFallbackDiff(change);
   }
 
   return change.unifiedDiff.split('\n').map((line) => {
     if (line.startsWith('@@')) {
-      return { type: 'header', content: line };
+      return { kind: 'header', content: line };
     }
     if (line.startsWith('---') || line.startsWith('+++')) {
-      return { type: 'meta', content: line };
+      return { kind: 'meta', content: line };
     }
     if (line.startsWith('+')) {
-      return { type: 'added', content: line };
+      return { kind: 'added', content: line.slice(1) };
     }
     if (line.startsWith('-')) {
-      return { type: 'removed', content: line };
+      return { kind: 'removed', content: line.slice(1) };
     }
-    return { type: 'context', content: line };
+    if (line.startsWith(' ')) {
+      return { kind: 'context', content: line.slice(1) };
+    }
+    return { kind: 'context', content: line };
   });
+};
+
+const buildFocusedDiffPreview = (lines: ReferenceDiffLine[]): ReferenceDiffLine[] => {
+  const compacted = compactDiffLines(lines, 1, 1, Number.MAX_SAFE_INTEGER);
+  const previewHead = 8;
+  const previewTail = 6;
+
+  if (compacted.length <= previewHead + previewTail + 1) {
+    return compacted;
+  }
+
+  return [
+    ...compacted.slice(0, previewHead),
+    {
+      kind: 'meta',
+      content: `... ${compacted.length - previewHead - previewTail} more diff lines omitted ...`,
+    },
+    ...compacted.slice(-previewTail),
+  ];
 };
 
 const titleCase = (value: string): string =>
@@ -112,15 +130,8 @@ const ApplyPatchRenderer: React.FC<ApplyPatchRendererProps> = ({ toolResult }) =
       <div className="space-y-4">
         {changes.map((change, index) => {
           const displayPath = change.movePath ? `${change.path} -> ${change.movePath}` : change.path;
-          const diffLines = compactDiffLines(
-            change.unifiedDiff
-              ? parseUnifiedDiff(change.unifiedDiff)
-              : buildDiffLines(change).map((line) => ({
-                  kind: line.type === 'added' || line.type === 'removed' || line.type === 'header' || line.type === 'meta' ? line.type : 'context',
-                  content: line.content.startsWith('+') || line.content.startsWith('-')
-                    ? line.content.slice(1)
-                    : line.content,
-                }))
+          const diffLines = buildFocusedDiffPreview(
+            change.unifiedDiff ? parseUnifiedDiff(change.unifiedDiff) : buildDiffLines(change)
           );
 
           return (

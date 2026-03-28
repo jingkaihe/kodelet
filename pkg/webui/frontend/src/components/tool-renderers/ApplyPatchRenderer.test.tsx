@@ -83,4 +83,25 @@ describe('ApplyPatchRenderer', () => {
     expect(screen.getByText('line2')).toBeInTheDocument();
     expect(container.querySelectorAll('.diff-line-added')).toHaveLength(2);
   });
+
+  it('renders a focused preview for large added files', () => {
+    const lines = Array.from({ length: 20 }, (_, index) => `line${index + 1}`).join('\n');
+    const toolResult = createToolResult({
+      added: ['/tmp/large.txt'],
+      changes: [
+        {
+          path: '/tmp/large.txt',
+          operation: 'add',
+          newContent: lines,
+        },
+      ],
+    });
+
+    render(<ApplyPatchRenderer toolResult={toolResult} />);
+
+    expect(screen.getByText('line1')).toBeInTheDocument();
+    expect(screen.getByText('line20')).toBeInTheDocument();
+    expect(screen.getByText('... 6 more diff lines omitted ...')).toBeInTheDocument();
+    expect(screen.queryByText('line10')).not.toBeInTheDocument();
+  });
 });

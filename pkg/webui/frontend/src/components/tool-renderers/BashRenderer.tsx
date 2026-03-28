@@ -18,15 +18,20 @@ const BashRenderer: React.FC<BashRendererProps> = ({ toolResult }) => {
   const meta = toolResult.metadata as BashMetadata;
   if (!meta) return null;
 
-  const hasOutput = meta.output && meta.output.trim();
-  const exitCode = meta.exitCode || 0;
-  const isSuccess = exitCode === 0;
+  const hasOutput = !!meta.output?.trim();
+  const exitCode = meta.exitCode ?? 0;
+  const isFailure = !toolResult.success || exitCode !== 0;
+  const hasMeaningfulExitCode = toolResult.success || exitCode !== 0;
+  const statusBadgeText = hasMeaningfulExitCode ? `exit ${exitCode}` : 'failed';
+  const emptyOutputText = isFailure
+    ? 'Command failed without output.'
+    : 'Command completed without output.';
 
   return (
     <div className="space-y-2">
       <ReferenceToolHeader
         badges={[
-          { text: `exit ${exitCode}`, variant: isSuccess ? 'success' : 'error' },
+          { text: statusBadgeText, variant: isFailure ? 'error' : 'success' },
           {
             text: hasOutput ? formatReferenceSize(new TextEncoder().encode(meta.output || '').length) : 'no output',
             variant: 'neutral',
@@ -35,6 +40,10 @@ const BashRenderer: React.FC<BashRendererProps> = ({ toolResult }) => {
         subtitle={meta.command}
         title={`${TOOL_ICONS.bash} Shell Command`}
       />
+
+      {!toolResult.success && toolResult.error ? (
+        <ReferenceToolNote text={toolResult.error} />
+      ) : null}
 
       <ReferenceToolKVGrid
         items={[
@@ -46,7 +55,7 @@ const BashRenderer: React.FC<BashRendererProps> = ({ toolResult }) => {
       {hasOutput ? (
         <ReferenceTerminal output={meta.output || ''} />
       ) : (
-        <ReferenceToolNote text="Command completed without output." />
+        <ReferenceToolNote text={emptyOutputText} />
       )}
     </div>
   );

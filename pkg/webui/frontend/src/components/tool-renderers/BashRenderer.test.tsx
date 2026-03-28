@@ -52,6 +52,46 @@ describe('BashRenderer', () => {
     expect(container.querySelector('.tool-badge-error')).toBeInTheDocument();
   });
 
+  it('renders failure details and output for unsuccessful commands', () => {
+    const toolResult: ToolResult = {
+      toolName: 'bash',
+      success: false,
+      error: 'Command exited with status 127',
+      timestamp: '2023-01-01T00:00:00Z',
+      metadata: {
+        command: 'invalid-command',
+        exitCode: 127,
+        output: 'command not found',
+      } as BashMetadata,
+    };
+
+    render(<BashRenderer toolResult={toolResult} />);
+
+    expect(screen.getByText('Command exited with status 127')).toBeInTheDocument();
+    expect(screen.getByText('command not found')).toBeInTheDocument();
+    expect(screen.getByText('exit 127')).toBeInTheDocument();
+  });
+
+  it('shows a failed badge instead of exit 0 when execution failed without an exit code', () => {
+    const toolResult: ToolResult = {
+      toolName: 'bash',
+      success: false,
+      error: 'Command timed out after 10 seconds',
+      timestamp: '2023-01-01T00:00:00Z',
+      metadata: {
+        command: 'sleep 20',
+        exitCode: 0,
+        output: '',
+      } as BashMetadata,
+    };
+
+    render(<BashRenderer toolResult={toolResult} />);
+
+    expect(screen.getByText('failed')).toBeInTheDocument();
+    expect(screen.queryByText('exit 0')).not.toBeInTheDocument();
+    expect(screen.getByText('Command failed without output.')).toBeInTheDocument();
+  });
+
   it('shows a note when the command produces no output', () => {
     const toolResult = createToolResult({
       command: 'touch newfile.txt',
