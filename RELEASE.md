@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.3.18-beta (2026-03-28)
+
+Refined Web UI tool rendering by centralizing renderer registration and improving bash/apply_patch displays, including failed command output and inline patch diffs.
+
 ## 0.3.17-beta (2026-03-23)
 
 Added first-class streamable HTTP MCP server support, while keeping deprecated SSE support and normalizing transport handling across config, ACP, and CLI flows.
