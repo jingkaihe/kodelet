@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.3.19-beta (2026-03-29)
+
+Added `kodelet conversation show --format markdown` with structured markdown rendering for tool calls and results, plus truncation controls for verbose tool output.
+Introduced the `read_conversation` tool so agents can extract goal-focused context from saved Kodelet conversations without loading the full transcript.
+Limited bash tool output returned to the model to roughly 10k tokens, preserving head/tail context while reporting total output lines and clearly marking truncation for very large command results.
+
 ## 0.3.18-beta (2026-03-28)
 
 Refined Web UI tool rendering by centralizing renderer registration and improving bash/apply_patch displays, including failed command output and inline patch diffs.
