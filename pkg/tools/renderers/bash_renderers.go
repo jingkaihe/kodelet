@@ -27,6 +27,40 @@ func (r *BashRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	return "Error: Invalid metadata type for bash"
 }
 
+// RenderMarkdown renders bash results in markdown format.
+func (r *BashRenderer) RenderMarkdown(result tools.StructuredToolResult) string {
+	var meta tools.BashMetadata
+	if !tools.ExtractMetadata(result.Metadata, &meta) {
+		return renderMarkdownFromCLI(result, r.RenderCLI(result))
+	}
+
+	var output strings.Builder
+	status := "success"
+	if !result.Success {
+		status = "failed"
+	}
+
+	fmt.Fprintf(&output, "- **Status:** %s\n", status)
+	fmt.Fprintf(&output, "- **Exit code:** %d\n", meta.ExitCode)
+	if meta.WorkingDir != "" {
+		fmt.Fprintf(&output, "- **Working directory:** %s\n", inlineCode(meta.WorkingDir))
+	}
+	fmt.Fprintf(&output, "- **Execution time:** %s\n", inlineCode(meta.ExecutionTime.String()))
+	if result.Error != "" {
+		fmt.Fprintf(&output, "- **Error:** %s\n", inlineCode(result.Error))
+	}
+
+	output.WriteString("\n**Command**\n\n")
+	output.WriteString(fencedCodeBlock("bash", meta.Command))
+
+	if strings.TrimSpace(meta.Output) != "" {
+		output.WriteString("\n\n**Output**\n\n")
+		output.WriteString(fencedCodeBlock("text", meta.Output))
+	}
+
+	return strings.TrimSpace(output.String())
+}
+
 func (r *BashRenderer) renderBashMetadata(meta tools.BashMetadata, output *strings.Builder) string {
 	fmt.Fprintf(output, "Command: %s\n", meta.Command)
 	fmt.Fprintf(output, "Exit Code: %d\n", meta.ExitCode)

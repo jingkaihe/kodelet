@@ -66,21 +66,44 @@ func (r *RendererRegistry) RegisterPattern(pattern string, renderer CLIRenderer)
 
 // Render finds the appropriate renderer and renders the result
 func (r *RendererRegistry) Render(result tools.StructuredToolResult) string {
-	// First try exact match
-	renderer, exists := r.renderers[result.ToolName]
+	renderer, exists := r.resolveRenderer(result.ToolName)
 	if exists {
 		return renderer.RenderCLI(result)
 	}
 
+	// Fallback renderer for unknown tools
+	return r.renderFallback(result)
+}
+
+// RenderMarkdown finds the appropriate renderer and renders the result as markdown.
+func (r *RendererRegistry) RenderMarkdown(result tools.StructuredToolResult) string {
+	renderer, exists := r.resolveRenderer(result.ToolName)
+	if !exists {
+		return r.renderFallbackMarkdown(result)
+	}
+
+	if markdownRenderer, ok := renderer.(MarkdownRenderer); ok {
+		return markdownRenderer.RenderMarkdown(result)
+	}
+
+	return renderMarkdownFromCLI(result, renderer.RenderCLI(result))
+}
+
+func (r *RendererRegistry) resolveRenderer(toolName string) (CLIRenderer, bool) {
+	// First try exact match
+	renderer, exists := r.renderers[toolName]
+	if exists {
+		return renderer, true
+	}
+
 	// Then try pattern matching
 	for pattern, patternRenderer := range r.patterns {
-		if r.matchesPattern(result.ToolName, pattern) {
-			return patternRenderer.RenderCLI(result)
+		if r.matchesPattern(toolName, pattern) {
+			return patternRenderer, true
 		}
 	}
 
-	// Fallback renderer for unknown tools
-	return r.renderFallback(result)
+	return nil, false
 }
 
 func (r *RendererRegistry) matchesPattern(toolName, pattern string) bool {
@@ -98,4 +121,8 @@ func (r *RendererRegistry) renderFallback(result tools.StructuredToolResult) str
 	}
 	return fmt.Sprintf("Tool Result (%s):\nSuccess: %v\nTimestamp: %s",
 		result.ToolName, result.Success, result.Timestamp.Format("2006-01-02 15:04:05"))
+}
+
+func (r *RendererRegistry) renderFallbackMarkdown(result tools.StructuredToolResult) string {
+	return renderMarkdownFromCLI(result, r.renderFallback(result))
 }

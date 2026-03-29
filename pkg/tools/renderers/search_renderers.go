@@ -63,6 +63,61 @@ func (r *GrepRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	return output.String()
 }
 
+// RenderMarkdown renders grep search results in markdown format.
+func (r *GrepRenderer) RenderMarkdown(result tools.StructuredToolResult) string {
+	if !result.Success {
+		return renderMarkdownFromCLI(result, r.RenderCLI(result))
+	}
+
+	var meta tools.GrepMetadata
+	if !tools.ExtractMetadata(result.Metadata, &meta) {
+		return renderMarkdownFromCLI(result, r.RenderCLI(result))
+	}
+
+	var output strings.Builder
+	fmt.Fprintf(&output, "- **Pattern:** %s\n", inlineCode(meta.Pattern))
+	if meta.Path != "" {
+		fmt.Fprintf(&output, "- **Path:** %s\n", inlineCode(meta.Path))
+	}
+	if meta.Include != "" {
+		fmt.Fprintf(&output, "- **Include:** %s\n", inlineCode(meta.Include))
+	}
+	fmt.Fprintf(&output, "- **Files with matches:** %d\n", len(meta.Results))
+
+	if meta.Truncated {
+		summary := "results truncated"
+		switch meta.TruncationReason {
+		case tools.GrepTruncatedByFileLimit:
+			maxResults := meta.MaxResults
+			if maxResults == 0 {
+				maxResults = 100
+			}
+			summary = fmt.Sprintf("truncated at %d files", maxResults)
+		case tools.GrepTruncatedByOutputSize:
+			summary = "truncated at output size limit"
+		}
+		fmt.Fprintf(&output, "- **Truncated:** %s\n", summary)
+	}
+
+	for _, res := range meta.Results {
+		var fileOutput strings.Builder
+		for _, match := range res.Matches {
+			if match.IsContext {
+				fmt.Fprintf(&fileOutput, "%d- %s\n", match.LineNumber, match.Content)
+			} else {
+				fmt.Fprintf(&fileOutput, "%d: %s\n", match.LineNumber, match.Content)
+			}
+		}
+
+		output.WriteString("\n")
+		fmt.Fprintf(&output, "#### %s\n\n", inlineCode(res.FilePath))
+		output.WriteString(fencedCodeBlock("text", strings.TrimSuffix(fileOutput.String(), "\n")))
+		output.WriteString("\n")
+	}
+
+	return strings.TrimSpace(output.String())
+}
+
 // GlobRenderer renders glob file pattern results
 type GlobRenderer struct{}
 
@@ -100,4 +155,43 @@ func (r *GlobRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	}
 
 	return output.String()
+}
+
+// RenderMarkdown renders glob pattern results in markdown format.
+func (r *GlobRenderer) RenderMarkdown(result tools.StructuredToolResult) string {
+	if !result.Success {
+		return renderMarkdownFromCLI(result, r.RenderCLI(result))
+	}
+
+	var meta tools.GlobMetadata
+	if !tools.ExtractMetadata(result.Metadata, &meta) {
+		return renderMarkdownFromCLI(result, r.RenderCLI(result))
+	}
+
+	var output strings.Builder
+	fmt.Fprintf(&output, "- **Pattern:** %s\n", inlineCode(meta.Pattern))
+	if meta.Path != "" {
+		fmt.Fprintf(&output, "- **Path:** %s\n", inlineCode(meta.Path))
+	}
+	fmt.Fprintf(&output, "- **Matches:** %d\n", len(meta.Files))
+	if meta.Truncated {
+		output.WriteString("- **Truncated:** yes\n")
+	}
+
+	if len(meta.Files) > 0 {
+		output.WriteString("\n**Files**\n")
+		for _, file := range meta.Files {
+			typeLabel := file.Type
+			if typeLabel == "" {
+				typeLabel = "file"
+			}
+			path := file.Path
+			if file.Type == "directory" {
+				path += "/"
+			}
+			fmt.Fprintf(&output, "- %s (%s, %d bytes)\n", inlineCode(path), typeLabel, file.Size)
+		}
+	}
+
+	return strings.TrimSpace(output.String())
 }

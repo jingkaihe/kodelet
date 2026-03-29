@@ -36,6 +36,41 @@ func (r *FileReadRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	return buf.String()
 }
 
+// RenderMarkdown renders file read results in markdown format.
+func (r *FileReadRenderer) RenderMarkdown(result tools.StructuredToolResult) string {
+	if !result.Success {
+		return renderMarkdownFromCLI(result, r.RenderCLI(result))
+	}
+
+	var meta tools.FileReadMetadata
+	if !tools.ExtractMetadata(result.Metadata, &meta) {
+		return renderMarkdownFromCLI(result, r.RenderCLI(result))
+	}
+
+	var output strings.Builder
+	fmt.Fprintf(&output, "- **Path:** %s\n", inlineCode(meta.FilePath))
+	fmt.Fprintf(&output, "- **Offset:** %d\n", meta.Offset)
+	fmt.Fprintf(&output, "- **Lines:** %d\n", len(meta.Lines))
+	if meta.Language != "" {
+		fmt.Fprintf(&output, "- **Language:** %s\n", inlineCode(meta.Language))
+	}
+	if meta.Truncated {
+		fmt.Fprintf(&output, "- **Truncated:** yes")
+		if meta.RemainingLines > 0 {
+			fmt.Fprintf(&output, " (%d lines remaining)", meta.RemainingLines)
+		}
+		output.WriteString("\n")
+	}
+
+	content := osutil.ContentWithLineNumber(meta.Lines, meta.Offset)
+	if strings.TrimSpace(content) != "" {
+		output.WriteString("\n")
+		output.WriteString(fencedCodeBlock("text", content))
+	}
+
+	return strings.TrimSpace(output.String())
+}
+
 // FileWriteRenderer renders file write results
 type FileWriteRenderer struct{}
 
@@ -52,6 +87,32 @@ func (r *FileWriteRenderer) RenderCLI(result tools.StructuredToolResult) string 
 
 	return fmt.Sprintf("File written successfully: %s\nSize: %d bytes",
 		meta.FilePath, meta.Size)
+}
+
+// RenderMarkdown renders file write results in markdown format.
+func (r *FileWriteRenderer) RenderMarkdown(result tools.StructuredToolResult) string {
+	if !result.Success {
+		return renderMarkdownFromCLI(result, r.RenderCLI(result))
+	}
+
+	var meta tools.FileWriteMetadata
+	if !tools.ExtractMetadata(result.Metadata, &meta) {
+		return renderMarkdownFromCLI(result, r.RenderCLI(result))
+	}
+
+	var output strings.Builder
+	fmt.Fprintf(&output, "- **Path:** %s\n", inlineCode(meta.FilePath))
+	fmt.Fprintf(&output, "- **Size:** %d bytes\n", meta.Size)
+	if meta.Language != "" {
+		fmt.Fprintf(&output, "- **Language:** %s\n", inlineCode(meta.Language))
+	}
+
+	if strings.TrimSpace(meta.Content) != "" {
+		output.WriteString("\n")
+		output.WriteString(markdownDetails("Written content", fencedCodeBlock(meta.Language, meta.Content)))
+	}
+
+	return strings.TrimSpace(output.String())
 }
 
 // FileEditRenderer renders file edit results
@@ -102,6 +163,48 @@ func (r *FileEditRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	return output.String()
 }
 
+// RenderMarkdown renders file edit results in markdown format.
+func (r *FileEditRenderer) RenderMarkdown(result tools.StructuredToolResult) string {
+	if !result.Success {
+		return renderMarkdownFromCLI(result, r.RenderCLI(result))
+	}
+
+	var meta tools.FileEditMetadata
+	if !tools.ExtractMetadata(result.Metadata, &meta) {
+		return renderMarkdownFromCLI(result, r.RenderCLI(result))
+	}
+
+	if len(meta.Edits) == 0 {
+		return fmt.Sprintf("- **Path:** %s\n- **Changes:** none", inlineCode(meta.FilePath))
+	}
+
+	var output strings.Builder
+	fmt.Fprintf(&output, "- **Path:** %s\n", inlineCode(meta.FilePath))
+	if meta.Language != "" {
+		fmt.Fprintf(&output, "- **Language:** %s\n", inlineCode(meta.Language))
+	}
+	if meta.ReplaceAll {
+		fmt.Fprintf(&output, "- **Replace all:** yes\n")
+	}
+	if meta.ReplacedCount > 0 {
+		fmt.Fprintf(&output, "- **Replacements:** %d\n", meta.ReplacedCount)
+	}
+
+	for i, edit := range meta.Edits {
+		diff := udiff.Unified(meta.FilePath, meta.FilePath, edit.OldContent, edit.NewContent)
+		output.WriteString("\n")
+		if len(meta.Edits) > 1 {
+			fmt.Fprintf(&output, "#### Edit %d · lines %d-%d\n\n", i+1, edit.StartLine, edit.EndLine)
+		} else {
+			fmt.Fprintf(&output, "#### Diff · lines %d-%d\n\n", edit.StartLine, edit.EndLine)
+		}
+		output.WriteString(fencedCodeBlock("diff", diff))
+		output.WriteString("\n")
+	}
+
+	return strings.TrimSpace(output.String())
+}
+
 // ApplyPatchRenderer renders apply_patch results.
 type ApplyPatchRenderer struct{}
 
@@ -146,4 +249,65 @@ func (r *ApplyPatchRenderer) RenderCLI(result tools.StructuredToolResult) string
 	}
 
 	return strings.TrimSuffix(output.String(), "\n")
+}
+
+// RenderMarkdown renders apply_patch results in markdown format.
+func (r *ApplyPatchRenderer) RenderMarkdown(result tools.StructuredToolResult) string {
+	if !result.Success {
+		return renderMarkdownFromCLI(result, r.RenderCLI(result))
+	}
+
+	var meta tools.ApplyPatchMetadata
+	if !tools.ExtractMetadata(result.Metadata, &meta) {
+		return renderMarkdownFromCLI(result, r.RenderCLI(result))
+	}
+
+	var output strings.Builder
+	fmt.Fprintf(&output, "- **Added:** %d\n", len(meta.Added))
+	fmt.Fprintf(&output, "- **Modified:** %d\n", len(meta.Modified))
+	fmt.Fprintf(&output, "- **Deleted:** %d\n", len(meta.Deleted))
+
+	if len(meta.Added)+len(meta.Modified)+len(meta.Deleted) > 0 {
+		output.WriteString("\n**Files**\n")
+		for _, path := range meta.Added {
+			fmt.Fprintf(&output, "- Added %s\n", inlineCode(path))
+		}
+		for _, path := range meta.Modified {
+			fmt.Fprintf(&output, "- Modified %s\n", inlineCode(path))
+		}
+		for _, path := range meta.Deleted {
+			fmt.Fprintf(&output, "- Deleted %s\n", inlineCode(path))
+		}
+	}
+
+	for _, change := range meta.Changes {
+		var diff string
+		switch change.Operation {
+		case tools.ApplyPatchOperationUpdate:
+			diff = change.UnifiedDiff
+		case tools.ApplyPatchOperationAdd:
+			if change.NewContent != "" {
+				diff = udiff.Unified(change.Path, change.Path, "", change.NewContent)
+			}
+		case tools.ApplyPatchOperationDelete:
+			if change.OldContent != "" {
+				diff = udiff.Unified(change.Path, change.Path, change.OldContent, "")
+			}
+		}
+
+		if strings.TrimSpace(diff) == "" {
+			continue
+		}
+
+		output.WriteString("\n")
+		heading := inlineCode(change.Path)
+		if change.MovePath != "" {
+			heading = fmt.Sprintf("%s → %s", inlineCode(change.Path), inlineCode(change.MovePath))
+		}
+		fmt.Fprintf(&output, "#### %s\n\n", heading)
+		output.WriteString(fencedCodeBlock("diff", diff))
+		output.WriteString("\n")
+	}
+
+	return strings.TrimSpace(output.String())
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
+	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -247,7 +249,7 @@ func init() {
 	conversationDeleteCmd.Flags().Bool("no-confirm", deleteDefaults.NoConfirm, "Skip confirmation prompt")
 
 	showDefaults := NewConversationShowConfig()
-	conversationShowCmd.Flags().String("format", showDefaults.Format, "Output format: raw, json, or text")
+	conversationShowCmd.Flags().String("format", showDefaults.Format, "Output format: raw, json, text, or markdown")
 	conversationShowCmd.Flags().Bool("no-header", showDefaults.NoHeader, "Skip header (stats/summary), show only messages")
 	conversationShowCmd.Flags().Bool("stats-only", showDefaults.StatsOnly, "Show only stats/summary without messages")
 
@@ -763,8 +765,25 @@ func showConversationCmd(ctx context.Context, id string, config *ConversationSho
 			}
 			displayConversation(messages)
 		}
+	case "markdown":
+		showHeader := !config.NoHeader
+		showMessages := !config.StatsOnly
+		if showHeader {
+			fmt.Print(renderConversationHeaderMarkdown(record, providerDisplay, platform, apiMode))
+			if showMessages {
+				fmt.Println()
+			}
+		}
+		if showMessages {
+			messages, err := llm.ExtractConversationEntries(record.Provider, record.RawMessages, record.Metadata, record.ToolResults)
+			if err != nil {
+				presenter.Error(err, "Failed to parse conversation messages")
+				os.Exit(1)
+			}
+			fmt.Print(renderConversationMarkdown(messages, record.ToolResults))
+		}
 	default:
-		presenter.Error(errors.Errorf("unsupported format: %s", config.Format), "Unknown format. Supported formats are raw, json, and text")
+		presenter.Error(errors.Errorf("unsupported format: %s", config.Format), "Unknown format. Supported formats are raw, json, text, and markdown")
 		os.Exit(1)
 	}
 }
@@ -824,6 +843,354 @@ func displayConversation(messages []llmtypes.Message) {
 		presenter.Section(roleLabel)
 		fmt.Printf("%s\n", msg.Content)
 	}
+}
+
+func renderConversationHeaderMarkdown(record convtypes.ConversationRecord, providerDisplay string, platform string, apiMode string) string {
+	var output strings.Builder
+
+	output.WriteString("# Conversation\n\n")
+	output.WriteString("## Info\n\n")
+	fmt.Fprintf(&output, "- **ID:** %s\n", inlineMarkdownCode(record.ID))
+	fmt.Fprintf(&output, "- **Provider:** %s\n", providerDisplay)
+	if platform != "" {
+		fmt.Fprintf(&output, "- **Platform:** %s\n", inlineMarkdownCode(platform))
+	}
+	if apiMode != "" {
+		fmt.Fprintf(&output, "- **API Mode:** %s\n", inlineMarkdownCode(apiMode))
+	}
+	fmt.Fprintf(&output, "- **Created:** %s\n", inlineMarkdownCode(record.CreatedAt.Format(time.RFC3339)))
+	fmt.Fprintf(&output, "- **Updated:** %s\n", inlineMarkdownCode(record.UpdatedAt.Format(time.RFC3339)))
+	if record.Summary != "" {
+		fmt.Fprintf(&output, "- **Summary:** %s\n", sanitizeMarkdownText(record.Summary))
+	}
+
+	usage := record.Usage
+	output.WriteString("\n## Usage\n\n")
+	fmt.Fprintf(&output, "- **Input Tokens:** %d\n", usage.InputTokens)
+	fmt.Fprintf(&output, "- **Output Tokens:** %d\n", usage.OutputTokens)
+	if usage.CacheReadInputTokens > 0 || usage.CacheCreationInputTokens > 0 {
+		fmt.Fprintf(&output, "- **Cache Read:** %d\n", usage.CacheReadInputTokens)
+		fmt.Fprintf(&output, "- **Cache Creation:** %d\n", usage.CacheCreationInputTokens)
+	}
+	fmt.Fprintf(&output, "- **Total Cost:** $%.4f\n", usage.TotalCost())
+	if usage.MaxContextWindow > 0 {
+		fmt.Fprintf(&output, "- **Context Window:** %d / %d\n", usage.CurrentContextWindow, usage.MaxContextWindow)
+	}
+
+	return output.String()
+}
+
+func renderConversationMarkdown(messages []conversations.StreamableMessage, toolResults map[string]tools.StructuredToolResult) string {
+	var output strings.Builder
+	output.WriteString("## Messages\n\n")
+
+	registry := renderers.NewRendererRegistry()
+
+	for i, msg := range messages {
+		if i > 0 {
+			output.WriteString("\n")
+		}
+
+		heading := markdownRoleHeading(msg.Role, msg.Kind)
+		fmt.Fprintf(&output, "### %s\n\n", heading)
+
+		switch msg.Kind {
+		case "text":
+			output.WriteString(renderTextBlockMarkdown(msg.Content))
+		case "thinking":
+			output.WriteString("<details>\n<summary>Thinking</summary>\n\n")
+			output.WriteString(markdownCodeFence("text", msg.Content))
+			output.WriteString("\n\n</details>")
+		case "tool-use":
+			output.WriteString(renderToolUseMarkdown(msg))
+		case "tool-result":
+			output.WriteString(renderToolResultMarkdown(msg, toolResults, registry))
+		default:
+			output.WriteString(renderTextBlockMarkdown(msg.Content))
+		}
+	}
+
+	if len(messages) == 0 {
+		output.WriteString("_No messages._\n")
+	}
+
+	return strings.TrimRight(output.String(), "\n") + "\n"
+}
+
+func markdownRoleHeading(role string, kind string) string {
+	base := "Message"
+	switch role {
+	case "user":
+		base = "User"
+	case "assistant":
+		base = "Assistant"
+	case "system":
+		base = "System"
+	default:
+		if role != "" {
+			base = strings.ToUpper(role[:1]) + role[1:]
+		}
+	}
+
+	switch kind {
+	case "thinking":
+		return base + " · Thinking"
+	case "tool-use":
+		return base + " · Tool Call"
+	case "tool-result":
+		return base + " · Tool Result"
+	default:
+		return base
+	}
+}
+
+func renderTextBlockMarkdown(content string) string {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return "_Empty message._"
+	}
+	return content
+}
+
+func renderToolUseMarkdown(msg conversations.StreamableMessage) string {
+	var output strings.Builder
+	fmt.Fprintf(&output, "- **Tool:** %s\n", inlineMarkdownCode(msg.ToolName))
+	if msg.ToolCallID != "" {
+		fmt.Fprintf(&output, "- **Call ID:** %s\n", inlineMarkdownCode(msg.ToolCallID))
+	}
+
+	renderedInput := renderToolInputMarkdown(msg.ToolName, msg.Input)
+	if strings.TrimSpace(renderedInput) != "" {
+		output.WriteString("\n")
+		output.WriteString(renderedInput)
+	}
+
+	return strings.TrimSpace(output.String())
+}
+
+func renderToolResultMarkdown(msg conversations.StreamableMessage, toolResults map[string]tools.StructuredToolResult, registry *renderers.RendererRegistry) string {
+	var output strings.Builder
+	toolName := msg.ToolName
+	if toolName == "" {
+		toolName = inferToolNameFromResult(msg, toolResults)
+	}
+	if toolName != "" {
+		fmt.Fprintf(&output, "- **Tool:** %s\n", inlineMarkdownCode(toolName))
+	}
+	if msg.ToolCallID != "" {
+		fmt.Fprintf(&output, "- **Call ID:** %s\n", inlineMarkdownCode(msg.ToolCallID))
+	}
+
+	if structuredResult, ok := lookupStructuredToolResult(msg, toolResults); ok {
+		output.WriteString("\n")
+		output.WriteString(registry.RenderMarkdown(structuredResult))
+		return strings.TrimSpace(output.String())
+	}
+
+	trimmed := strings.TrimSpace(msg.Content)
+	if trimmed != "" {
+		output.WriteString("\n")
+		language := "text"
+		if json.Valid([]byte(trimmed)) {
+			language = "json"
+			trimmed = trimJSONForMarkdown(trimmed)
+		}
+		output.WriteString(markdownCodeFence(language, trimmed))
+	}
+
+	return strings.TrimSpace(output.String())
+}
+
+func renderToolInputMarkdown(toolName string, rawInput string) string {
+	trimmed := strings.TrimSpace(rawInput)
+	if trimmed == "" {
+		return ""
+	}
+
+	type bashInput struct {
+		Command     string `json:"command"`
+		Description string `json:"description"`
+		Timeout     int    `json:"timeout"`
+	}
+	type fileReadInput struct {
+		FilePath  string `json:"file_path"`
+		Offset    int    `json:"offset"`
+		LineLimit int    `json:"line_limit"`
+	}
+	type fileWriteInput struct {
+		FilePath string `json:"file_path"`
+		Text     string `json:"text"`
+	}
+	type fileEditInput struct {
+		FilePath   string `json:"file_path"`
+		OldText    string `json:"old_text"`
+		NewText    string `json:"new_text"`
+		ReplaceAll bool   `json:"replace_all"`
+	}
+	type applyPatchInput struct {
+		Input string `json:"input"`
+	}
+	type grepInput struct {
+		Pattern       string `json:"pattern"`
+		Path          string `json:"path"`
+		Include       string `json:"include"`
+		IgnoreCase    bool   `json:"ignore_case"`
+		FixedStrings  bool   `json:"fixed_strings"`
+		SurroundLines int    `json:"surround_lines"`
+		MaxResults    int    `json:"max_results"`
+	}
+	type globInput struct {
+		Pattern         string `json:"pattern"`
+		Path            string `json:"path"`
+		IgnoreGitignore bool   `json:"ignore_gitignore"`
+	}
+
+	var output strings.Builder
+	switch toolName {
+	case "bash":
+		var input bashInput
+		if json.Unmarshal([]byte(trimmed), &input) == nil {
+			if input.Description != "" {
+				fmt.Fprintf(&output, "- **Description:** %s\n", sanitizeMarkdownText(input.Description))
+			}
+			if input.Timeout > 0 {
+				fmt.Fprintf(&output, "- **Timeout:** %d seconds\n", input.Timeout)
+			}
+			output.WriteString("\n**Command**\n\n")
+			output.WriteString(markdownCodeFence("bash", input.Command))
+			return strings.TrimSpace(output.String())
+		}
+	case "file_read":
+		var input fileReadInput
+		if json.Unmarshal([]byte(trimmed), &input) == nil {
+			fmt.Fprintf(&output, "- **Path:** %s\n", inlineMarkdownCode(input.FilePath))
+			if input.Offset > 0 {
+				fmt.Fprintf(&output, "- **Offset:** %d\n", input.Offset)
+			}
+			if input.LineLimit > 0 {
+				fmt.Fprintf(&output, "- **Line limit:** %d\n", input.LineLimit)
+			}
+			return strings.TrimSpace(output.String())
+		}
+	case "file_write":
+		var input fileWriteInput
+		if json.Unmarshal([]byte(trimmed), &input) == nil {
+			fmt.Fprintf(&output, "- **Path:** %s\n", inlineMarkdownCode(input.FilePath))
+			output.WriteString("\n")
+			output.WriteString(markdownDetails("Content", markdownCodeFence("text", input.Text)))
+			return strings.TrimSpace(output.String())
+		}
+	case "file_edit":
+		var input fileEditInput
+		if json.Unmarshal([]byte(trimmed), &input) == nil {
+			fmt.Fprintf(&output, "- **Path:** %s\n", inlineMarkdownCode(input.FilePath))
+			fmt.Fprintf(&output, "- **Replace all:** %t\n", input.ReplaceAll)
+			output.WriteString("\n")
+			output.WriteString(markdownDetails("Old text", markdownCodeFence("text", input.OldText)))
+			output.WriteString("\n\n")
+			output.WriteString(markdownDetails("New text", markdownCodeFence("text", input.NewText)))
+			return strings.TrimSpace(output.String())
+		}
+	case "apply_patch":
+		var input applyPatchInput
+		if json.Unmarshal([]byte(trimmed), &input) == nil {
+			return markdownCodeFence("diff", input.Input)
+		}
+	case "grep_tool":
+		var input grepInput
+		if json.Unmarshal([]byte(trimmed), &input) == nil {
+			fmt.Fprintf(&output, "- **Pattern:** %s\n", inlineMarkdownCode(input.Pattern))
+			if input.Path != "" {
+				fmt.Fprintf(&output, "- **Path:** %s\n", inlineMarkdownCode(input.Path))
+			}
+			if input.Include != "" {
+				fmt.Fprintf(&output, "- **Include:** %s\n", inlineMarkdownCode(input.Include))
+			}
+			if input.SurroundLines > 0 {
+				fmt.Fprintf(&output, "- **Context lines:** %d\n", input.SurroundLines)
+			}
+			if input.MaxResults > 0 {
+				fmt.Fprintf(&output, "- **Max results:** %d\n", input.MaxResults)
+			}
+			if input.FixedStrings {
+				output.WriteString("- **Fixed strings:** true\n")
+			}
+			if input.IgnoreCase {
+				output.WriteString("- **Ignore case:** true\n")
+			}
+			return strings.TrimSpace(output.String())
+		}
+	case "glob_tool":
+		var input globInput
+		if json.Unmarshal([]byte(trimmed), &input) == nil {
+			fmt.Fprintf(&output, "- **Pattern:** %s\n", inlineMarkdownCode(input.Pattern))
+			if input.Path != "" {
+				fmt.Fprintf(&output, "- **Path:** %s\n", inlineMarkdownCode(input.Path))
+			}
+			if input.IgnoreGitignore {
+				output.WriteString("- **Ignore .gitignore:** true\n")
+			}
+			return strings.TrimSpace(output.String())
+		}
+	}
+
+	return markdownCodeFence("json", trimJSONForMarkdown(trimmed))
+}
+
+func lookupStructuredToolResult(msg conversations.StreamableMessage, toolResults map[string]tools.StructuredToolResult) (tools.StructuredToolResult, bool) {
+	if msg.ToolCallID != "" {
+		if result, ok := toolResults[msg.ToolCallID]; ok {
+			return result, true
+		}
+	}
+	if msg.ToolName != "" {
+		if result, ok := toolResults[msg.ToolName]; ok {
+			return result, true
+		}
+	}
+	return tools.StructuredToolResult{}, false
+}
+
+func inferToolNameFromResult(msg conversations.StreamableMessage, toolResults map[string]tools.StructuredToolResult) string {
+	if result, ok := lookupStructuredToolResult(msg, toolResults); ok {
+		return result.ToolName
+	}
+	return msg.ToolName
+}
+
+func markdownCodeFence(language string, content string) string {
+	content = strings.TrimSuffix(content, "\n")
+	if language != "" {
+		return fmt.Sprintf("```%s\n%s\n```", language, content)
+	}
+	return fmt.Sprintf("```\n%s\n```", content)
+}
+
+func markdownDetails(summary string, body string) string {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return ""
+	}
+	return fmt.Sprintf("<details>\n<summary>%s</summary>\n\n%s\n\n</details>", summary, body)
+}
+
+func inlineMarkdownCode(value string) string {
+	if strings.Contains(value, "`") {
+		return fmt.Sprintf("``%s``", value)
+	}
+	return fmt.Sprintf("`%s`", value)
+}
+
+func sanitizeMarkdownText(value string) string {
+	return strings.ReplaceAll(value, "\n", " ")
+}
+
+func trimJSONForMarkdown(value string) string {
+	var pretty bytes.Buffer
+	if err := json.Indent(&pretty, []byte(value), "", "  "); err == nil {
+		return pretty.String()
+	}
+	return value
 }
 
 func importConversationCmd(ctx context.Context, source string, config *ConversationImportConfig) {

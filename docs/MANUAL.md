@@ -289,7 +289,7 @@ kodelet conversation list --search "term" --sort-by "updated" --sort-order "desc
 
 # View conversation details
 kodelet conversation show <conversation-id>
-kodelet conversation show <conversation-id> --format [text|json|raw]
+kodelet conversation show <conversation-id> --format [text|markdown|json|raw]
 
 # Stream conversation updates in real-time
 kodelet conversation stream <conversation-id>

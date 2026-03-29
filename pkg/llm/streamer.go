@@ -6,6 +6,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm/anthropic"
+	"github.com/jingkaihe/kodelet/pkg/llm/google"
 	"github.com/jingkaihe/kodelet/pkg/llm/openai"
 	"github.com/jingkaihe/kodelet/pkg/llm/openai/responses"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -53,6 +54,14 @@ func NewConversationStreamer(ctx context.Context) (streamer *conversations.Conve
 		return convertResponsesStreamableMessages(msgs), nil
 	})
 
+	streamer.RegisterMessageParser("google", func(rawMessages json.RawMessage, _ map[string]any, toolResults map[string]tooltypes.StructuredToolResult) ([]conversations.StreamableMessage, error) {
+		msgs, err := google.StreamMessages(rawMessages, toolResults)
+		if err != nil {
+			return nil, err
+		}
+		return convertGoogleStreamableMessages(msgs), nil
+	})
+
 	return streamer, service.Close, nil
 }
 
@@ -87,6 +96,21 @@ func convertOpenAIStreamableMessages(msgs []openai.StreamableMessage) []conversa
 }
 
 func convertResponsesStreamableMessages(msgs []responses.StreamableMessage) []conversations.StreamableMessage {
+	result := make([]conversations.StreamableMessage, len(msgs))
+	for i, msg := range msgs {
+		result[i] = conversations.StreamableMessage{
+			Kind:       msg.Kind,
+			Role:       msg.Role,
+			Content:    msg.Content,
+			ToolName:   msg.ToolName,
+			ToolCallID: msg.ToolCallID,
+			Input:      msg.Input,
+		}
+	}
+	return result
+}
+
+func convertGoogleStreamableMessages(msgs []google.StreamableMessage) []conversations.StreamableMessage {
 	result := make([]conversations.StreamableMessage, len(msgs))
 	for i, msg := range msgs {
 		result[i] = conversations.StreamableMessage{
