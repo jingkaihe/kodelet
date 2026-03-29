@@ -179,27 +179,23 @@ func (r *FileEditRenderer) RenderMarkdown(result tools.StructuredToolResult) str
 	}
 
 	var output strings.Builder
-	fmt.Fprintf(&output, "- **Path:** %s\n", inlineCode(meta.FilePath))
-	if meta.Language != "" {
-		fmt.Fprintf(&output, "- **Language:** %s\n", inlineCode(meta.Language))
-	}
-	if meta.ReplaceAll {
-		fmt.Fprintf(&output, "- **Replace all:** yes\n")
-	}
-	if meta.ReplacedCount > 0 {
-		fmt.Fprintf(&output, "- **Replacements:** %d\n", meta.ReplacedCount)
+	if meta.ReplaceAll && meta.ReplacedCount > 1 {
+		fmt.Fprintf(&output, "File edited: %s (%d replacements)\n", meta.FilePath, meta.ReplacedCount)
+	} else if meta.ReplaceAll {
+		fmt.Fprintf(&output, "File edited: %s (1 replacement)\n", meta.FilePath)
+	} else {
+		fmt.Fprintf(&output, "File edited: %s\n", meta.FilePath)
 	}
 
 	for i, edit := range meta.Edits {
 		diff := udiff.Unified(meta.FilePath, meta.FilePath, edit.OldContent, edit.NewContent)
 		output.WriteString("\n")
 		if len(meta.Edits) > 1 {
-			fmt.Fprintf(&output, "#### Edit %d · lines %d-%d\n\n", i+1, edit.StartLine, edit.EndLine)
+			fmt.Fprintf(&output, "Edit %d (lines %d-%d):\n\n", i+1, edit.StartLine, edit.EndLine)
 		} else {
-			fmt.Fprintf(&output, "#### Diff · lines %d-%d\n\n", edit.StartLine, edit.EndLine)
+			fmt.Fprintf(&output, "Lines %d-%d:\n\n", edit.StartLine, edit.EndLine)
 		}
 		output.WriteString(fencedCodeBlock("diff", diff))
-		output.WriteString("\n")
 	}
 
 	return strings.TrimSpace(output.String())
@@ -263,20 +259,17 @@ func (r *ApplyPatchRenderer) RenderMarkdown(result tools.StructuredToolResult) s
 	}
 
 	var output strings.Builder
-	fmt.Fprintf(&output, "- **Added:** %d\n", len(meta.Added))
-	fmt.Fprintf(&output, "- **Modified:** %d\n", len(meta.Modified))
-	fmt.Fprintf(&output, "- **Deleted:** %d\n", len(meta.Deleted))
+	output.WriteString("Success. Updated the following files:\n")
 
 	if len(meta.Added)+len(meta.Modified)+len(meta.Deleted) > 0 {
-		output.WriteString("\n**Files**\n")
 		for _, path := range meta.Added {
-			fmt.Fprintf(&output, "- Added %s\n", inlineCode(path))
+			fmt.Fprintf(&output, "A %s\n", path)
 		}
 		for _, path := range meta.Modified {
-			fmt.Fprintf(&output, "- Modified %s\n", inlineCode(path))
+			fmt.Fprintf(&output, "M %s\n", path)
 		}
 		for _, path := range meta.Deleted {
-			fmt.Fprintf(&output, "- Deleted %s\n", inlineCode(path))
+			fmt.Fprintf(&output, "D %s\n", path)
 		}
 	}
 
@@ -300,13 +293,7 @@ func (r *ApplyPatchRenderer) RenderMarkdown(result tools.StructuredToolResult) s
 		}
 
 		output.WriteString("\n")
-		heading := inlineCode(change.Path)
-		if change.MovePath != "" {
-			heading = fmt.Sprintf("%s → %s", inlineCode(change.Path), inlineCode(change.MovePath))
-		}
-		fmt.Fprintf(&output, "#### %s\n\n", heading)
 		output.WriteString(fencedCodeBlock("diff", diff))
-		output.WriteString("\n")
 	}
 
 	return strings.TrimSpace(output.String())

@@ -410,6 +410,16 @@ func TestRenderToolInputMarkdownForApplyPatch(t *testing.T) {
 	assert.Contains(t, output, "+hello")
 }
 
+func TestRenderToolInputMarkdownForFileEditUsesFocusedBlocks(t *testing.T) {
+	output := renderToolInputMarkdown("file_edit", `{"file_path":"/tmp/test.go","old_text":"old()","new_text":"new()","replace_all":false}`)
+	assert.Contains(t, output, "- **Path:** `/tmp/test.go`")
+	assert.Contains(t, output, "**Old text**")
+	assert.Contains(t, output, "```text\nold()\n```")
+	assert.Contains(t, output, "**New text**")
+	assert.Contains(t, output, "```text\nnew()\n```")
+	assert.NotContains(t, output, "<details>")
+}
+
 func TestRenderToolResultMarkdownFallbackUsesTextFenceWhenNotJSON(t *testing.T) {
 	msg := conversations.StreamableMessage{
 		Kind:       "tool-result",

@@ -1084,11 +1084,14 @@ func renderToolInputMarkdown(toolName string, rawInput string) string {
 		var input fileEditInput
 		if json.Unmarshal([]byte(trimmed), &input) == nil {
 			fmt.Fprintf(&output, "- **Path:** %s\n", inlineMarkdownCode(input.FilePath))
-			fmt.Fprintf(&output, "- **Replace all:** %t\n", input.ReplaceAll)
+			if input.ReplaceAll {
+				output.WriteString("- **Mode:** replace all\n")
+			}
 			output.WriteString("\n")
-			output.WriteString(markdownDetails("Old text", markdownCodeFence("text", input.OldText)))
-			output.WriteString("\n\n")
-			output.WriteString(markdownDetails("New text", markdownCodeFence("text", input.NewText)))
+			output.WriteString("**Old text**\n\n")
+			output.WriteString(markdownCodeFence("text", input.OldText))
+			output.WriteString("\n\n**New text**\n\n")
+			output.WriteString(markdownCodeFence("text", input.NewText))
 			return strings.TrimSpace(output.String())
 		}
 	case "apply_patch":
