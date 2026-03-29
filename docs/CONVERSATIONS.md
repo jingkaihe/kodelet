@@ -35,9 +35,10 @@ kodelet conversation list --json
 kodelet conversation show <conversation-id>
 
 # Show in different formats
-kodelet conversation show <conversation-id> --format text  # Default format with user/assistant labels
-kodelet conversation show <conversation-id> --format json  # Structured JSON output
-kodelet conversation show <conversation-id> --format raw   # Raw message format as stored
+kodelet conversation show <conversation-id> --format text      # Default format with user/assistant labels
+kodelet conversation show <conversation-id> --format markdown  # Markdown transcript with markdown-rendered tool calls/results
+kodelet conversation show <conversation-id> --format json      # Structured JSON output
+kodelet conversation show <conversation-id> --format raw       # Raw message format as stored
 ```
 
 ### Deleting Conversations

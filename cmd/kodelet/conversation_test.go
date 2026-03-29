@@ -339,6 +339,33 @@ func TestConversationShowOutputJSONStatsOnly(t *testing.T) {
 	assert.NotContains(t, jsonStr, `"summary"`)
 }
 
+func TestRenderConversationHeaderMarkdown(t *testing.T) {
+	record := convtypes.ConversationRecord{
+		ID:        "conv-md",
+		Summary:   "Summary line",
+		CreatedAt: time.Date(2026, 1, 23, 10, 0, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2026, 1, 23, 10, 30, 0, 0, time.UTC),
+		Usage: llmtypes.Usage{
+			InputTokens:          123,
+			OutputTokens:         45,
+			InputCost:            0.001,
+			OutputCost:           0.002,
+			CurrentContextWindow: 1000,
+			MaxContextWindow:     8000,
+		},
+	}
+
+	output := renderConversationHeaderMarkdown(record, "OpenAI", "fireworks", "responses")
+	assert.Contains(t, output, "# Conversation")
+	assert.Contains(t, output, "- **ID:** `conv-md`")
+	assert.Contains(t, output, "- **Provider:** OpenAI")
+	assert.Contains(t, output, "- **Platform:** `fireworks`")
+	assert.Contains(t, output, "- **API Mode:** `responses`")
+	assert.Contains(t, output, "## Usage")
+	assert.Contains(t, output, "- **Total Cost:** $0.0030")
+	assert.Contains(t, output, "- **Context Window:** 1000 / 8000")
+}
+
 func TestDisplayProviderName(t *testing.T) {
 	tests := []struct {
 		name     string

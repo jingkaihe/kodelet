@@ -162,13 +162,8 @@ func (t *FileEditTool) Name() string {
 	return "file_edit"
 }
 
-// FileEditInput defines the input parameters for the file_edit tool
-type FileEditInput struct {
-	FilePath   string `json:"file_path" jsonschema:"description=The absolute path of the file to edit"`
-	OldText    string `json:"old_text" jsonschema:"description=The text to be replaced"`
-	NewText    string `json:"new_text" jsonschema:"description=The text to replace the old text with"`
-	ReplaceAll bool   `json:"replace_all" jsonschema:"description=If true, replace all occurrences of old_text; if false (default), old_text must be unique"`
-}
+// FileEditInput reuses the shared file_edit tool input schema while preserving pkg/tools schema IDs.
+type FileEditInput tooltypes.FileEditInput
 
 // GenerateSchema generates the JSON schema for the tool's input parameters
 func (t *FileEditTool) GenerateSchema() *jsonschema.Schema {

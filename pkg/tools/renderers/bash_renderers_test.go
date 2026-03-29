@@ -259,4 +259,69 @@ echo "Script completed"`
 		assert.Contains(t, output, "Exit Code: 0", "Expected exit code in output")
 		assert.NotContains(t, output, "Background Command:", "Should not show background format for regular bash")
 	})
+
+	t.Run("RenderMarkdown successful command", func(t *testing.T) {
+		result := tools.StructuredToolResult{
+			ToolName:  "bash",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata: &tools.BashMetadata{
+				Command:       "pwd",
+				ExitCode:      0,
+				WorkingDir:    "/home/user/project",
+				ExecutionTime: 25 * time.Millisecond,
+				Output:        "/home/user/project",
+			},
+		}
+
+		output := renderer.RenderMarkdown(result)
+
+		assert.Contains(t, output, "- **Status:** success")
+		assert.Contains(t, output, "- **Exit code:** 0")
+		assert.Contains(t, output, "- **Working directory:** `/home/user/project`")
+		assert.Contains(t, output, "- **Execution time:** `25ms`")
+		assert.Contains(t, output, "**Command**")
+		assert.Contains(t, output, "```bash\npwd\n```")
+		assert.Contains(t, output, "**Output**")
+		assert.Contains(t, output, "```text\n/home/user/project\n```")
+	})
+
+	t.Run("RenderMarkdown failed command", func(t *testing.T) {
+		result := tools.StructuredToolResult{
+			ToolName:  "bash",
+			Success:   false,
+			Error:     "command failed",
+			Timestamp: time.Now(),
+			Metadata: &tools.BashMetadata{
+				Command:       "grep missing file.txt",
+				ExitCode:      2,
+				WorkingDir:    "/tmp",
+				ExecutionTime: 50 * time.Millisecond,
+				Output:        "grep: missing: No such file or directory",
+			},
+		}
+
+		output := renderer.RenderMarkdown(result)
+
+		assert.Contains(t, output, "- **Status:** failed")
+		assert.Contains(t, output, "- **Exit code:** 2")
+		assert.Contains(t, output, "- **Error:** `command failed`")
+		assert.Contains(t, output, "```bash\ngrep missing file.txt\n```")
+		assert.Contains(t, output, "No such file or directory")
+	})
+
+	t.Run("RenderMarkdown invalid metadata falls back", func(t *testing.T) {
+		result := tools.StructuredToolResult{
+			ToolName:  "bash",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata:  &tools.FileReadMetadata{},
+		}
+
+		output := renderer.RenderMarkdown(result)
+
+		assert.Contains(t, output, "- **Status:** success")
+		assert.Contains(t, output, "Error: Invalid metadata type for bash")
+		assert.Contains(t, output, "```text")
+	})
 }

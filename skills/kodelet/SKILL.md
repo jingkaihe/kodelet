@@ -412,6 +412,7 @@ kodelet conversation list --search "keyword"
 
 # View conversation
 kodelet conversation show <id>
+kodelet conversation show <id> --format markdown
 kodelet conversation show <id> --format json
 kodelet conversation show <id> --stats-only        # Header/stats only, no messages
 kodelet conversation show <id> --no-header         # Messages only, no header
@@ -436,6 +437,7 @@ kodelet conversation fork <id>
 | Format | Description |
 |--------|-------------|
 | `--format text` | Human-readable output (default) |
+| `--format markdown` | Markdown transcript with markdown-rendered tool calls/results |
 | `--format json` | Structured JSON with id, provider, summary, usage, messages |
 | `--format raw` | Full `ConversationRecord` dump as JSON (includes rawMessages, toolResults, metadata, etc.) |
 

@@ -283,3 +283,75 @@ func TestApplyPatchRenderer(t *testing.T) {
 		assert.Contains(t, output, "Error: parse error")
 	})
 }
+
+func TestFileEditRendererRenderMarkdown(t *testing.T) {
+	renderer := &FileEditRenderer{}
+	result := tools.StructuredToolResult{
+		ToolName:  "file_edit",
+		Success:   true,
+		Timestamp: time.Now(),
+		Metadata: &tools.FileEditMetadata{
+			FilePath:      "/test/file.go",
+			ReplaceAll:    true,
+			ReplacedCount: 2,
+			Edits: []tools.Edit{
+				{
+					StartLine:  5,
+					EndLine:    5,
+					OldContent: "old",
+					NewContent: "new",
+				},
+				{
+					StartLine:  10,
+					EndLine:    10,
+					OldContent: "before",
+					NewContent: "after",
+				},
+			},
+		},
+	}
+
+	output := renderer.RenderMarkdown(result)
+	assert.Contains(t, output, "File edited: /test/file.go (2 replacements)")
+	assert.Contains(t, output, "Edit 1 (lines 5-5):")
+	assert.Contains(t, output, "Edit 2 (lines 10-10):")
+	assert.Contains(t, output, "```diff")
+	assert.NotContains(t, output, "####")
+	assert.NotContains(t, output, "- **Language:**")
+}
+
+func TestApplyPatchRendererRenderMarkdown(t *testing.T) {
+	renderer := &ApplyPatchRenderer{}
+	result := tools.StructuredToolResult{
+		ToolName:  "apply_patch",
+		Success:   true,
+		Timestamp: time.Now(),
+		Metadata: &tools.ApplyPatchMetadata{
+			Added:    []string{"/tmp/new.txt"},
+			Modified: []string{"/tmp/edit.go"},
+			Deleted:  []string{"/tmp/old.txt"},
+			Changes: []tools.ApplyPatchChange{
+				{
+					Path:       "/tmp/new.txt",
+					Operation:  tools.ApplyPatchOperationAdd,
+					NewContent: "hello\n",
+				},
+				{
+					Path:        "/tmp/edit.go",
+					Operation:   tools.ApplyPatchOperationUpdate,
+					UnifiedDiff: "@@ -1 +1 @@\n-old\n+new\n",
+				},
+			},
+		},
+	}
+
+	output := renderer.RenderMarkdown(result)
+	assert.Contains(t, output, "Success. Updated the following files:")
+	assert.Contains(t, output, "A /tmp/new.txt")
+	assert.Contains(t, output, "M /tmp/edit.go")
+	assert.Contains(t, output, "D /tmp/old.txt")
+	assert.Contains(t, output, "```diff")
+	assert.Contains(t, output, "@@ -1 +1 @@")
+	assert.NotContains(t, output, "####")
+	assert.NotContains(t, output, "- **Added:**")
+}

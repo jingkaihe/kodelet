@@ -198,6 +198,40 @@ func TestBashTool_Execute_ContextCancellation(t *testing.T) {
 	assert.Empty(t, result.GetResult())
 }
 
+func TestBashToolResult_AssistantFacing_TruncatesLargeOutput(t *testing.T) {
+	longOutput := strings.Repeat("token token token token\n", 15000)
+	result := &BashToolResult{
+		command:        "seq 1 15000",
+		combinedOutput: longOutput,
+	}
+
+	assistantFacing := result.AssistantFacing()
+
+	assert.Contains(t, assistantFacing, "<result>")
+	assert.Contains(t, assistantFacing, "Total output lines: 15000")
+	assert.Contains(t, assistantFacing, "tokens truncated")
+	assert.NotContains(t, assistantFacing, longOutput)
+
+	structured := result.StructuredData()
+	metadata := structured.Metadata.(*tooltypes.BashMetadata)
+	assert.Contains(t, metadata.Output, "Total output lines: 15000")
+	assert.Contains(t, metadata.Output, "tokens truncated")
+	assert.NotContains(t, metadata.Output, longOutput)
+}
+
+func TestBashToolResult_AssistantFacing_PreservesSmallOutput(t *testing.T) {
+	result := &BashToolResult{
+		command:        "echo hello",
+		combinedOutput: "hello\n",
+	}
+
+	assistantFacing := result.AssistantFacing()
+
+	assert.Contains(t, assistantFacing, "hello\n")
+	assert.NotContains(t, assistantFacing, "tokens truncated")
+	assert.NotContains(t, assistantFacing, "Total output lines:")
+}
+
 func TestBashTool_ValidateInput(t *testing.T) {
 	tool := &BashTool{}
 	tests := []struct {

@@ -117,12 +117,8 @@ func (r *GlobToolResult) StructuredData() tooltypes.StructuredToolResult {
 // GlobTool provides functionality to search for files using glob patterns
 type GlobTool struct{}
 
-// GlobInput defines the input parameters for the glob_tool
-type GlobInput struct {
-	Pattern         string `json:"pattern" jsonschema:"description=The glob pattern"`
-	Path            string `json:"path" jsonschema:"description=The absolute path to a DIRECTORY to search in (not a file path). Defaults to current working directory if not specified"`
-	IgnoreGitignore bool   `json:"ignore_gitignore,omitempty" jsonschema:"description=If true, do not respect .gitignore rules (default: false, meaning .gitignore is respected)"`
-}
+// GlobInput reuses the shared glob_tool input schema while preserving pkg/tools schema IDs.
+type GlobInput tooltypes.GlobInput
 
 // Name returns the name of the tool
 func (t *GlobTool) Name() string {

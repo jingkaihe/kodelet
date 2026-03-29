@@ -42,6 +42,7 @@ func NewRendererRegistry() *RendererRegistry {
 	registry.Register("subagent", &SubAgentRenderer{})
 	registry.Register("image_recognition", &ImageRecognitionRenderer{})
 	registry.Register("web_fetch", &WebFetchRenderer{})
+	registry.Register("read_conversation", &ReadConversationRenderer{})
 	registry.Register("code_execution", &CodeExecutionRenderer{})
 	registry.Register("skill", &SkillRenderer{})
 
@@ -66,21 +67,79 @@ func (r *RendererRegistry) RegisterPattern(pattern string, renderer CLIRenderer)
 
 // Render finds the appropriate renderer and renders the result
 func (r *RendererRegistry) Render(result tools.StructuredToolResult) string {
-	// First try exact match
-	renderer, exists := r.renderers[result.ToolName]
+	renderer, exists := r.resolveRenderer(result.ToolName)
 	if exists {
 		return renderer.RenderCLI(result)
 	}
 
-	// Then try pattern matching
-	for pattern, patternRenderer := range r.patterns {
-		if r.matchesPattern(result.ToolName, pattern) {
-			return patternRenderer.RenderCLI(result)
+	// Fallback renderer for unknown tools
+	return r.renderFallback(result)
+}
+
+// RenderMarkdown finds the appropriate renderer and renders the result as markdown.
+func (r *RendererRegistry) RenderMarkdown(result tools.StructuredToolResult) string {
+	renderer, exists := r.resolveRenderer(result.ToolName)
+	if !exists {
+		return r.renderFallbackMarkdown(result)
+	}
+
+	if markdownRenderer, ok := renderer.(MarkdownRenderer); ok {
+		return markdownRenderer.RenderMarkdown(result)
+	}
+
+	return renderMarkdownFromCLI(result, renderer.RenderCLI(result))
+}
+
+// RenderToolUseMarkdown renders tool invocation input as markdown.
+func (r *RendererRegistry) RenderToolUseMarkdown(toolName string, rawInput string) string {
+	renderer, exists := r.resolveRenderer(toolName)
+	if !exists {
+		return renderToolUseJSONFallback(rawInput)
+	}
+
+	if toolUseRenderer, ok := renderer.(ToolUseMarkdownRenderer); ok {
+		if rendered := strings.TrimSpace(toolUseRenderer.RenderToolUseMarkdown(rawInput)); rendered != "" {
+			return rendered
 		}
 	}
 
-	// Fallback renderer for unknown tools
-	return r.renderFallback(result)
+	return renderToolUseJSONFallback(rawInput)
+}
+
+// RenderMergedMarkdown renders a tool result for the merged tool-call view.
+func (r *RendererRegistry) RenderMergedMarkdown(result tools.StructuredToolResult) string {
+	renderer, exists := r.resolveRenderer(result.ToolName)
+	if !exists {
+		return r.renderFallbackMergedMarkdown(result)
+	}
+
+	if mergedRenderer, ok := renderer.(MergedMarkdownRenderer); ok {
+		if rendered := strings.TrimSpace(mergedRenderer.RenderMergedMarkdown(result)); rendered != "" {
+			return rendered
+		}
+	}
+
+	return stripLeadingMarkdownMetadata(r.RenderMarkdown(result), map[string]struct{}{
+		"Tool":    {},
+		"Call ID": {},
+	})
+}
+
+func (r *RendererRegistry) resolveRenderer(toolName string) (CLIRenderer, bool) {
+	// First try exact match
+	renderer, exists := r.renderers[toolName]
+	if exists {
+		return renderer, true
+	}
+
+	// Then try pattern matching
+	for pattern, patternRenderer := range r.patterns {
+		if r.matchesPattern(toolName, pattern) {
+			return patternRenderer, true
+		}
+	}
+
+	return nil, false
 }
 
 func (r *RendererRegistry) matchesPattern(toolName, pattern string) bool {
@@ -98,4 +157,15 @@ func (r *RendererRegistry) renderFallback(result tools.StructuredToolResult) str
 	}
 	return fmt.Sprintf("Tool Result (%s):\nSuccess: %v\nTimestamp: %s",
 		result.ToolName, result.Success, result.Timestamp.Format("2006-01-02 15:04:05"))
+}
+
+func (r *RendererRegistry) renderFallbackMarkdown(result tools.StructuredToolResult) string {
+	return renderMarkdownFromCLI(result, r.renderFallback(result))
+}
+
+func (r *RendererRegistry) renderFallbackMergedMarkdown(result tools.StructuredToolResult) string {
+	return stripLeadingMarkdownMetadata(r.renderFallbackMarkdown(result), map[string]struct{}{
+		"Tool":    {},
+		"Call ID": {},
+	})
 }

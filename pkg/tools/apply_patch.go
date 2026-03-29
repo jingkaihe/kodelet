@@ -33,10 +33,8 @@ const (
 // ApplyPatchTool applies codex-style file patch instructions.
 type ApplyPatchTool struct{}
 
-// ApplyPatchInput defines the JSON input for the apply_patch tool.
-type ApplyPatchInput struct {
-	Input string `json:"input" jsonschema:"description=The entire contents of the apply_patch command"`
-}
+// ApplyPatchInput reuses the shared apply_patch tool input schema while preserving pkg/tools schema IDs.
+type ApplyPatchInput tooltypes.ApplyPatchInput
 
 //go:embed descriptions/apply_patch.txt
 var applyPatchDescription string

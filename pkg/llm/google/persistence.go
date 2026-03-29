@@ -17,6 +17,16 @@ import (
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
+// StreamableMessage contains parsed message data for streaming.
+type StreamableMessage struct {
+	Kind       string // "text", "tool-use", "tool-result", "thinking"
+	Role       string // "user", "assistant", "system"
+	Content    string // Text content
+	ToolName   string // For tool use/result
+	ToolCallID string // For matching tool results
+	Input      string // For tool use (JSON string)
+}
+
 // SaveConversation persists the current conversation state to the conversation store
 func (t *Thread) SaveConversation(ctx context.Context, summarise bool) error {
 	t.ConversationMu.Lock()
@@ -131,6 +141,97 @@ func (t *Thread) generateSummary(ctx context.Context) string {
 	}
 
 	return handler.CollectedText()
+}
+
+// StreamMessages parses raw Google messages into streamable format for conversation streaming.
+func StreamMessages(rawMessages []byte, toolResults map[string]tooltypes.StructuredToolResult) ([]StreamableMessage, error) {
+	var googleMessages []*genai.Content
+	if err := json.Unmarshal(rawMessages, &googleMessages); err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal Google messages")
+	}
+
+	var messages []StreamableMessage
+	pendingToolUsesByName := make(map[string][]int)
+
+	for _, content := range googleMessages {
+		for _, part := range content.Parts {
+			switch {
+			case part.Text != "":
+				if part.Thought {
+					messages = append(messages, StreamableMessage{
+						Kind:    "thinking",
+						Role:    "assistant",
+						Content: part.Text,
+					})
+					continue
+				}
+
+				role := "assistant"
+				if content.Role == genai.RoleUser {
+					role = "user"
+				}
+
+				messages = append(messages, StreamableMessage{
+					Kind:    "text",
+					Role:    role,
+					Content: part.Text,
+				})
+
+			case part.FunctionCall != nil:
+				argsJSON, _ := json.Marshal(part.FunctionCall.Args)
+				messages = append(messages, StreamableMessage{
+					Kind:       "tool-use",
+					Role:       "assistant",
+					ToolName:   part.FunctionCall.Name,
+					ToolCallID: part.FunctionCall.ID,
+					Input:      string(argsJSON),
+				})
+				if part.FunctionCall.ID == "" {
+					pendingToolUsesByName[part.FunctionCall.Name] = append(
+						pendingToolUsesByName[part.FunctionCall.Name],
+						len(messages)-1,
+					)
+				}
+
+			case part.FunctionResponse != nil:
+				result := ""
+				toolName := part.FunctionResponse.Name
+				callID := extractToolCallID(part.FunctionResponse.Response)
+				if callID != "" {
+					if pending := pendingToolUsesByName[toolName]; len(pending) > 0 {
+						messages[pending[0]].ToolCallID = callID
+						pendingToolUsesByName[toolName] = pending[1:]
+					}
+				}
+
+				structuredResult, ok := toolResults[callID]
+				if !ok {
+					structuredResult, ok = toolResults[toolName]
+				}
+				if ok {
+					toolName = structuredResult.ToolName
+					if jsonData, err := structuredResult.MarshalJSON(); err == nil {
+						result = string(jsonData)
+					}
+				}
+				if result == "" {
+					if responseJSON, err := json.Marshal(part.FunctionResponse.Response); err == nil {
+						result = string(responseJSON)
+					}
+				}
+
+				messages = append(messages, StreamableMessage{
+					Kind:       "tool-result",
+					Role:       "assistant",
+					ToolName:   toolName,
+					ToolCallID: callID,
+					Content:    result,
+				})
+			}
+		}
+	}
+
+	return messages, nil
 }
 
 // ExtractMessages converts raw Google GenAI message bytes to standard message format

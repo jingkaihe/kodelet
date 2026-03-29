@@ -64,16 +64,18 @@ func NewConversationDeleteConfig() *ConversationDeleteConfig {
 }
 
 type ConversationShowConfig struct {
-	Format    string
-	NoHeader  bool
-	StatsOnly bool
+	Format              string
+	NoHeader            bool
+	StatsOnly           bool
+	TruncateToolResults bool
 }
 
 func NewConversationShowConfig() *ConversationShowConfig {
 	return &ConversationShowConfig{
-		Format:    "text",
-		NoHeader:  false,
-		StatsOnly: false,
+		Format:              "text",
+		NoHeader:            false,
+		StatsOnly:           false,
+		TruncateToolResults: false,
 	}
 }
 
@@ -247,9 +249,10 @@ func init() {
 	conversationDeleteCmd.Flags().Bool("no-confirm", deleteDefaults.NoConfirm, "Skip confirmation prompt")
 
 	showDefaults := NewConversationShowConfig()
-	conversationShowCmd.Flags().String("format", showDefaults.Format, "Output format: raw, json, or text")
+	conversationShowCmd.Flags().String("format", showDefaults.Format, "Output format: raw, json, text, or markdown")
 	conversationShowCmd.Flags().Bool("no-header", showDefaults.NoHeader, "Skip header (stats/summary), show only messages")
 	conversationShowCmd.Flags().Bool("stats-only", showDefaults.StatsOnly, "Show only stats/summary without messages")
+	conversationShowCmd.Flags().Bool("truncate-tool-results", showDefaults.TruncateToolResults, "Truncate verbose tool results in markdown output to reduce context size")
 
 	importDefaults := NewConversationImportConfig()
 	conversationImportCmd.Flags().Bool("force", importDefaults.Force, "Force overwrite existing conversation")
@@ -332,6 +335,9 @@ func getConversationShowConfigFromFlags(cmd *cobra.Command) *ConversationShowCon
 	}
 	if statsOnly, err := cmd.Flags().GetBool("stats-only"); err == nil {
 		config.StatsOnly = statsOnly
+	}
+	if truncateToolResults, err := cmd.Flags().GetBool("truncate-tool-results"); err == nil {
+		config.TruncateToolResults = truncateToolResults
 	}
 
 	return config
@@ -763,8 +769,33 @@ func showConversationCmd(ctx context.Context, id string, config *ConversationSho
 			}
 			displayConversation(messages)
 		}
+	case "markdown":
+		showHeader := !config.NoHeader
+		showMessages := !config.StatsOnly
+		if showHeader {
+			fmt.Print(renderConversationHeaderMarkdown(record, providerDisplay, platform, apiMode))
+			if showMessages {
+				fmt.Println()
+			}
+		}
+		if showMessages {
+			markdown, err := llm.RenderConversationMarkdownWithOptions(
+				record.Provider,
+				record.RawMessages,
+				record.Metadata,
+				record.ToolResults,
+				llm.ConversationMarkdownOptions{
+					TruncateToolResults: config.TruncateToolResults,
+				},
+			)
+			if err != nil {
+				presenter.Error(err, "Failed to render conversation markdown")
+				os.Exit(1)
+			}
+			fmt.Print(markdown)
+		}
 	default:
-		presenter.Error(errors.Errorf("unsupported format: %s", config.Format), "Unknown format. Supported formats are raw, json, and text")
+		presenter.Error(errors.Errorf("unsupported format: %s", config.Format), "Unknown format. Supported formats are raw, json, text, and markdown")
 		os.Exit(1)
 	}
 }
@@ -824,6 +855,53 @@ func displayConversation(messages []llmtypes.Message) {
 		presenter.Section(roleLabel)
 		fmt.Printf("%s\n", msg.Content)
 	}
+}
+
+func renderConversationHeaderMarkdown(record convtypes.ConversationRecord, providerDisplay string, platform string, apiMode string) string {
+	var output strings.Builder
+
+	output.WriteString("# Conversation\n\n")
+	output.WriteString("## Info\n\n")
+	fmt.Fprintf(&output, "- **ID:** %s\n", inlineMarkdownCode(record.ID))
+	fmt.Fprintf(&output, "- **Provider:** %s\n", providerDisplay)
+	if platform != "" {
+		fmt.Fprintf(&output, "- **Platform:** %s\n", inlineMarkdownCode(platform))
+	}
+	if apiMode != "" {
+		fmt.Fprintf(&output, "- **API Mode:** %s\n", inlineMarkdownCode(apiMode))
+	}
+	fmt.Fprintf(&output, "- **Created:** %s\n", inlineMarkdownCode(record.CreatedAt.Format(time.RFC3339)))
+	fmt.Fprintf(&output, "- **Updated:** %s\n", inlineMarkdownCode(record.UpdatedAt.Format(time.RFC3339)))
+	if record.Summary != "" {
+		fmt.Fprintf(&output, "- **Summary:** %s\n", sanitizeMarkdownText(record.Summary))
+	}
+
+	usage := record.Usage
+	output.WriteString("\n## Usage\n\n")
+	fmt.Fprintf(&output, "- **Input Tokens:** %d\n", usage.InputTokens)
+	fmt.Fprintf(&output, "- **Output Tokens:** %d\n", usage.OutputTokens)
+	if usage.CacheReadInputTokens > 0 || usage.CacheCreationInputTokens > 0 {
+		fmt.Fprintf(&output, "- **Cache Read:** %d\n", usage.CacheReadInputTokens)
+		fmt.Fprintf(&output, "- **Cache Creation:** %d\n", usage.CacheCreationInputTokens)
+	}
+	fmt.Fprintf(&output, "- **Total Cost:** $%.4f\n", usage.TotalCost())
+	if usage.MaxContextWindow > 0 {
+		fmt.Fprintf(&output, "- **Context Window:** %d / %d\n", usage.CurrentContextWindow, usage.MaxContextWindow)
+	}
+
+	return output.String()
+}
+
+func inlineMarkdownCode(value string) string {
+	if strings.Contains(value, "`") {
+		return fmt.Sprintf("``%s``", value)
+	}
+
+	return fmt.Sprintf("`%s`", value)
+}
+
+func sanitizeMarkdownText(value string) string {
+	return strings.ReplaceAll(value, "\n", " ")
 }
 
 func importConversationCmd(ctx context.Context, source string, config *ConversationImportConfig) {

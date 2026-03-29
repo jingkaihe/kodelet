@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/pkg/errors"
 
 	"github.com/jingkaihe/kodelet/pkg/llm/anthropic"
@@ -91,6 +92,45 @@ func ExtractMessages(provider string, rawMessages []byte, metadata map[string]an
 		return openai.ExtractResponsesMessages(rawMessages, toolResults)
 	case "google":
 		return google.ExtractMessages(rawMessages, toolResults)
+	default:
+		return nil, errors.Errorf("unsupported provider: %s", provider)
+	}
+}
+
+// ExtractConversationEntries parses the raw messages from a conversation record into structured conversation entries.
+func ExtractConversationEntries(provider string, rawMessages []byte, metadata map[string]any, toolResults map[string]tooltypes.StructuredToolResult) ([]conversations.StreamableMessage, error) {
+	switch provider {
+	case "anthropic":
+		msgs, err := anthropic.StreamMessages(rawMessages, toolResults)
+		if err != nil {
+			return nil, err
+		}
+		return convertAnthropicStreamableMessages(msgs), nil
+	case "openai":
+		if openai.RecordUsesResponsesMode(metadata, rawMessages) {
+			msgs, err := openai.StreamResponsesMessages(rawMessages, toolResults)
+			if err != nil {
+				return nil, err
+			}
+			return convertResponsesStreamableMessages(msgs), nil
+		}
+		msgs, err := openai.StreamMessages(rawMessages, toolResults)
+		if err != nil {
+			return nil, err
+		}
+		return convertOpenAIStreamableMessages(msgs), nil
+	case "openai-responses":
+		msgs, err := openai.StreamResponsesMessages(rawMessages, toolResults)
+		if err != nil {
+			return nil, err
+		}
+		return convertResponsesStreamableMessages(msgs), nil
+	case "google":
+		msgs, err := google.StreamMessages(rawMessages, toolResults)
+		if err != nil {
+			return nil, err
+		}
+		return convertGoogleStreamableMessages(msgs), nil
 	default:
 		return nil, errors.Errorf("unsupported provider: %s", provider)
 	}
