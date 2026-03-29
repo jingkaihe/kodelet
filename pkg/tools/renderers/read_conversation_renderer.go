@@ -30,6 +30,29 @@ func (r *ReadConversationRenderer) RenderCLI(result tools.StructuredToolResult) 
 
 // RenderMarkdown renders read_conversation results in markdown format.
 func (r *ReadConversationRenderer) RenderMarkdown(result tools.StructuredToolResult) string {
+	return r.renderMarkdown(result, true)
+}
+
+// RenderToolUseMarkdown renders read_conversation invocation inputs in markdown format.
+func (r *ReadConversationRenderer) RenderToolUseMarkdown(rawInput string) string {
+	var input tools.ReadConversationInput
+	if !decodeToolInput(rawInput, &input) {
+		return ""
+	}
+
+	var output strings.Builder
+	fmt.Fprintf(&output, "- **Conversation ID:** %s\n", inlineCode(input.ConversationID))
+	fmt.Fprintf(&output, "- **Goal:** %s", sanitizeMarkdownText(input.Goal))
+
+	return strings.TrimSpace(output.String())
+}
+
+// RenderMergedMarkdown renders read_conversation results for the merged tool-call view.
+func (r *ReadConversationRenderer) RenderMergedMarkdown(result tools.StructuredToolResult) string {
+	return r.renderMarkdown(result, false)
+}
+
+func (r *ReadConversationRenderer) renderMarkdown(result tools.StructuredToolResult, includeContext bool) string {
 	if !result.Success {
 		return renderMarkdownFromCLI(result, r.RenderCLI(result))
 	}
@@ -40,11 +63,15 @@ func (r *ReadConversationRenderer) RenderMarkdown(result tools.StructuredToolRes
 	}
 
 	var output strings.Builder
-	fmt.Fprintf(&output, "- **Conversation ID:** %s\n", inlineCode(meta.ConversationID))
-	fmt.Fprintf(&output, "- **Goal:** %s\n", meta.Goal)
+	if includeContext {
+		fmt.Fprintf(&output, "- **Conversation ID:** %s\n", inlineCode(meta.ConversationID))
+		fmt.Fprintf(&output, "- **Goal:** %s\n", sanitizeMarkdownText(meta.Goal))
+	}
 
 	if strings.TrimSpace(meta.Content) != "" {
-		output.WriteString("\n")
+		if output.Len() > 0 {
+			output.WriteString("\n")
+		}
 		output.WriteString(meta.Content)
 	}
 

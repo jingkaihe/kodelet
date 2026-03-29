@@ -96,12 +96,8 @@ func (r *FileReadToolResult) StructuredData() tooltypes.StructuredToolResult {
 // FileReadTool provides functionality to read files with line numbers
 type FileReadTool struct{}
 
-// FileReadInput defines the input parameters for the file_read tool
-type FileReadInput struct {
-	FilePath  string `json:"file_path" jsonschema:"description=The absolute path of the file to read"`
-	Offset    int    `json:"offset" jsonschema:"description=The 1-indexed line number to start reading from. Default: 1"`
-	LineLimit int    `json:"line_limit" jsonschema:"description=The maximum number of lines to read from the offset. Default: 2000. Max: 2000"`
-}
+// FileReadInput reuses the shared file_read tool input schema while preserving pkg/tools schema IDs.
+type FileReadInput tooltypes.FileReadInput
 
 // GenerateSchema generates the JSON schema for the tool's input parameters
 func (r *FileReadTool) GenerateSchema() *jsonschema.Schema {

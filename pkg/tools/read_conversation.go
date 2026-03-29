@@ -86,11 +86,8 @@ type ReadConversationTool struct {
 	extractContent     conversationExtractor
 }
 
-// ReadConversationInput defines the input parameters for the read_conversation tool.
-type ReadConversationInput struct {
-	ConversationID string `json:"conversation_id" jsonschema:"description=The ID of the saved conversation to read"`
-	Goal           string `json:"goal" jsonschema:"description=What information to extract from the conversation"`
-}
+// ReadConversationInput reuses the shared read_conversation input schema while preserving pkg/tools schema IDs.
+type ReadConversationInput tooltypes.ReadConversationInput
 
 // ReadConversationToolResult represents the extracted conversation content.
 type ReadConversationToolResult struct {

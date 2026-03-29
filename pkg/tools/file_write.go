@@ -85,11 +85,8 @@ func (t *FileWriteTool) Name() string {
 	return "file_write"
 }
 
-// FileWriteInput defines the input parameters for the file_write tool
-type FileWriteInput struct {
-	FilePath string `json:"file_path" jsonschema:"description=The absolute path of the file to write,required"`
-	Text     string `json:"text" jsonschema:"description=The text of the file MUST BE provided"`
-}
+// FileWriteInput reuses the shared file_write tool input schema while preserving pkg/tools schema IDs.
+type FileWriteInput tooltypes.FileWriteInput
 
 // GenerateSchema generates the JSON schema for the tool's input parameters
 func (t *FileWriteTool) GenerateSchema() *jsonschema.Schema {

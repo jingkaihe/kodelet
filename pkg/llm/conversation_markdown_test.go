@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -56,6 +57,9 @@ func TestRenderConversationEntriesMarkdown(t *testing.T) {
 	assert.Contains(t, markdown, "**Command**")
 	assert.Contains(t, markdown, "- **Exit code:** 0")
 	assert.Contains(t, markdown, "/tmp/project")
+	assert.Equal(t, 1, strings.Count(markdown, "- **Tool:** `bash`"))
+	assert.Equal(t, 1, strings.Count(markdown, "```bash\npwd\n```"))
+	assert.NotContains(t, markdown, "### Assistant · Tool Result")
 }
 
 func TestRenderConversationEntriesMarkdownTruncatesToolResults(t *testing.T) {
@@ -165,4 +169,87 @@ func TestRenderConversationEntriesMarkdownUsesHardCapPlaceholder(t *testing.T) {
 	assert.Contains(t, markdown, "Tool result truncated:")
 	assert.Contains(t, markdown, "Please refine the query.")
 	assert.NotContains(t, markdown, strings.Repeat("A", 200))
+}
+
+func TestRenderConversationEntriesMarkdownMergesApplyPatchToolCallAndResult(t *testing.T) {
+	messages := []conversations.StreamableMessage{
+		{Kind: "tool-use", Role: "assistant", ToolName: "apply_patch", ToolCallID: "patch-1", Input: `{"input":"*** Begin Patch\n*** Add File: hello.txt\n+hello\n*** End Patch"}`},
+		{Kind: "tool-result", Role: "assistant", ToolName: "apply_patch", ToolCallID: "patch-1"},
+	}
+
+	toolResults := map[string]tooltypes.StructuredToolResult{
+		"patch-1": {
+			ToolName:  "apply_patch",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata: &tooltypes.ApplyPatchMetadata{
+				Added: []string{"hello.txt"},
+				Changes: []tooltypes.ApplyPatchChange{
+					{
+						Path:       "hello.txt",
+						Operation:  tooltypes.ApplyPatchOperationAdd,
+						NewContent: "hello\n",
+					},
+				},
+			},
+		},
+	}
+
+	markdown := renderConversationEntriesMarkdown(messages, toolResults, ConversationMarkdownOptions{})
+
+	assert.Contains(t, markdown, "### Assistant · Tool")
+	assert.Contains(t, markdown, "- **Patch operations:** 1")
+	assert.Contains(t, markdown, "**Result**")
+	assert.Contains(t, markdown, "Success. Updated the following files:")
+	assert.NotContains(t, markdown, "### Assistant · Tool Result")
+	assert.Equal(t, 1, strings.Count(markdown, "### Assistant · Tool"))
+	assert.Equal(t, 1, strings.Count(markdown, "- **Tool:** `apply_patch`"))
+}
+
+func TestRenderConversationEntriesMarkdownFallsBackToTextFenceForUnknownToolPayload(t *testing.T) {
+	messages := []conversations.StreamableMessage{
+		{
+			Kind:       "tool-result",
+			Role:       "assistant",
+			ToolName:   "unknown_tool",
+			ToolCallID: "call-2",
+			Content:    "plain text output",
+		},
+	}
+
+	markdown := renderConversationEntriesMarkdown(messages, nil, ConversationMarkdownOptions{})
+
+	assert.Contains(t, markdown, "```text\nplain text output\n```")
+	assert.NotContains(t, markdown, "```json")
+}
+
+func TestRenderConversationEntriesMarkdownPreservesResponsesImageOnlyMessage(t *testing.T) {
+	messages := []conversations.StreamableMessage{
+		{
+			Kind:    "text",
+			Role:    "user",
+			RawItem: json.RawMessage(`{"role":"user","content":[{"type":"input_image","image_url":"data:image/png;base64,aGVsbG8="}]}`),
+		},
+	}
+
+	markdown := renderConversationEntriesMarkdown(messages, nil, ConversationMarkdownOptions{})
+
+	assert.Contains(t, markdown, "### User")
+	assert.Contains(t, markdown, "_Inline image input (image/png)._")
+	assert.NotContains(t, markdown, "_Empty message._")
+}
+
+func TestRenderConversationEntriesMarkdownUsesLongerCodeFenceWhenPayloadContainsBackticks(t *testing.T) {
+	messages := []conversations.StreamableMessage{
+		{
+			Kind:     "tool-result",
+			Role:     "assistant",
+			ToolName: "file_read",
+			Content:  "before\n```\ninside\n```\nafter",
+		},
+	}
+
+	markdown := renderConversationEntriesMarkdown(messages, nil, ConversationMarkdownOptions{})
+
+	assert.Contains(t, markdown, "````text\nbefore\n```\ninside\n```\nafter\n````")
 }

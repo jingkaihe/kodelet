@@ -90,6 +90,41 @@ func (r *RendererRegistry) RenderMarkdown(result tools.StructuredToolResult) str
 	return renderMarkdownFromCLI(result, renderer.RenderCLI(result))
 }
 
+// RenderToolUseMarkdown renders tool invocation input as markdown.
+func (r *RendererRegistry) RenderToolUseMarkdown(toolName string, rawInput string) string {
+	renderer, exists := r.resolveRenderer(toolName)
+	if !exists {
+		return renderToolUseJSONFallback(rawInput)
+	}
+
+	if toolUseRenderer, ok := renderer.(ToolUseMarkdownRenderer); ok {
+		if rendered := strings.TrimSpace(toolUseRenderer.RenderToolUseMarkdown(rawInput)); rendered != "" {
+			return rendered
+		}
+	}
+
+	return renderToolUseJSONFallback(rawInput)
+}
+
+// RenderMergedMarkdown renders a tool result for the merged tool-call view.
+func (r *RendererRegistry) RenderMergedMarkdown(result tools.StructuredToolResult) string {
+	renderer, exists := r.resolveRenderer(result.ToolName)
+	if !exists {
+		return r.renderFallbackMergedMarkdown(result)
+	}
+
+	if mergedRenderer, ok := renderer.(MergedMarkdownRenderer); ok {
+		if rendered := strings.TrimSpace(mergedRenderer.RenderMergedMarkdown(result)); rendered != "" {
+			return rendered
+		}
+	}
+
+	return stripLeadingMarkdownMetadata(r.RenderMarkdown(result), map[string]struct{}{
+		"Tool":    {},
+		"Call ID": {},
+	})
+}
+
 func (r *RendererRegistry) resolveRenderer(toolName string) (CLIRenderer, bool) {
 	// First try exact match
 	renderer, exists := r.renderers[toolName]
@@ -126,4 +161,11 @@ func (r *RendererRegistry) renderFallback(result tools.StructuredToolResult) str
 
 func (r *RendererRegistry) renderFallbackMarkdown(result tools.StructuredToolResult) string {
 	return renderMarkdownFromCLI(result, r.renderFallback(result))
+}
+
+func (r *RendererRegistry) renderFallbackMergedMarkdown(result tools.StructuredToolResult) string {
+	return stripLeadingMarkdownMetadata(r.renderFallbackMarkdown(result), map[string]struct{}{
+		"Tool":    {},
+		"Call ID": {},
+	})
 }

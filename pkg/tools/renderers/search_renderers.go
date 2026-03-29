@@ -65,6 +65,46 @@ func (r *GrepRenderer) RenderCLI(result tools.StructuredToolResult) string {
 
 // RenderMarkdown renders grep search results in markdown format.
 func (r *GrepRenderer) RenderMarkdown(result tools.StructuredToolResult) string {
+	return r.renderMarkdown(result, true)
+}
+
+// RenderToolUseMarkdown renders grep_tool invocation inputs in markdown format.
+func (r *GrepRenderer) RenderToolUseMarkdown(rawInput string) string {
+	var input tools.CodeSearchInput
+	if !decodeToolInput(rawInput, &input) {
+		return ""
+	}
+
+	var output strings.Builder
+	fmt.Fprintf(&output, "- **Pattern:** %s\n", inlineCode(input.Pattern))
+	if input.Path != "" {
+		fmt.Fprintf(&output, "- **Path:** %s\n", inlineCode(input.Path))
+	}
+	if input.Include != "" {
+		fmt.Fprintf(&output, "- **Include:** %s\n", inlineCode(input.Include))
+	}
+	if input.SurroundLines > 0 {
+		fmt.Fprintf(&output, "- **Context lines:** %d\n", input.SurroundLines)
+	}
+	if input.MaxResults > 0 {
+		fmt.Fprintf(&output, "- **Max results:** %d\n", input.MaxResults)
+	}
+	if input.FixedStrings {
+		output.WriteString("- **Fixed strings:** true\n")
+	}
+	if input.IgnoreCase {
+		output.WriteString("- **Ignore case:** true\n")
+	}
+
+	return strings.TrimSpace(output.String())
+}
+
+// RenderMergedMarkdown renders grep search results for the merged tool-call view.
+func (r *GrepRenderer) RenderMergedMarkdown(result tools.StructuredToolResult) string {
+	return r.renderMarkdown(result, false)
+}
+
+func (r *GrepRenderer) renderMarkdown(result tools.StructuredToolResult, includeQueryMetadata bool) string {
 	if !result.Success {
 		return renderMarkdownFromCLI(result, r.RenderCLI(result))
 	}
@@ -75,12 +115,14 @@ func (r *GrepRenderer) RenderMarkdown(result tools.StructuredToolResult) string 
 	}
 
 	var output strings.Builder
-	fmt.Fprintf(&output, "- **Pattern:** %s\n", inlineCode(meta.Pattern))
-	if meta.Path != "" {
-		fmt.Fprintf(&output, "- **Path:** %s\n", inlineCode(meta.Path))
-	}
-	if meta.Include != "" {
-		fmt.Fprintf(&output, "- **Include:** %s\n", inlineCode(meta.Include))
+	if includeQueryMetadata {
+		fmt.Fprintf(&output, "- **Pattern:** %s\n", inlineCode(meta.Pattern))
+		if meta.Path != "" {
+			fmt.Fprintf(&output, "- **Path:** %s\n", inlineCode(meta.Path))
+		}
+		if meta.Include != "" {
+			fmt.Fprintf(&output, "- **Include:** %s\n", inlineCode(meta.Include))
+		}
 	}
 	fmt.Fprintf(&output, "- **Files with matches:** %d\n", len(meta.Results))
 
@@ -159,6 +201,34 @@ func (r *GlobRenderer) RenderCLI(result tools.StructuredToolResult) string {
 
 // RenderMarkdown renders glob pattern results in markdown format.
 func (r *GlobRenderer) RenderMarkdown(result tools.StructuredToolResult) string {
+	return r.renderMarkdown(result, true)
+}
+
+// RenderToolUseMarkdown renders glob_tool invocation inputs in markdown format.
+func (r *GlobRenderer) RenderToolUseMarkdown(rawInput string) string {
+	var input tools.GlobInput
+	if !decodeToolInput(rawInput, &input) {
+		return ""
+	}
+
+	var output strings.Builder
+	fmt.Fprintf(&output, "- **Pattern:** %s\n", inlineCode(input.Pattern))
+	if input.Path != "" {
+		fmt.Fprintf(&output, "- **Path:** %s\n", inlineCode(input.Path))
+	}
+	if input.IgnoreGitignore {
+		output.WriteString("- **Ignore .gitignore:** true\n")
+	}
+
+	return strings.TrimSpace(output.String())
+}
+
+// RenderMergedMarkdown renders glob pattern results for the merged tool-call view.
+func (r *GlobRenderer) RenderMergedMarkdown(result tools.StructuredToolResult) string {
+	return r.renderMarkdown(result, false)
+}
+
+func (r *GlobRenderer) renderMarkdown(result tools.StructuredToolResult, includePattern bool) string {
 	if !result.Success {
 		return renderMarkdownFromCLI(result, r.RenderCLI(result))
 	}
@@ -169,9 +239,11 @@ func (r *GlobRenderer) RenderMarkdown(result tools.StructuredToolResult) string 
 	}
 
 	var output strings.Builder
-	fmt.Fprintf(&output, "- **Pattern:** %s\n", inlineCode(meta.Pattern))
-	if meta.Path != "" {
-		fmt.Fprintf(&output, "- **Path:** %s\n", inlineCode(meta.Path))
+	if includePattern {
+		fmt.Fprintf(&output, "- **Pattern:** %s\n", inlineCode(meta.Pattern))
+		if meta.Path != "" {
+			fmt.Fprintf(&output, "- **Path:** %s\n", inlineCode(meta.Path))
+		}
 	}
 	fmt.Fprintf(&output, "- **Matches:** %d\n", len(meta.Files))
 	if meta.Truncated {

@@ -1,6 +1,8 @@
 package renderers
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -10,6 +12,16 @@ import (
 // MarkdownRenderer renders structured tool results to markdown.
 type MarkdownRenderer interface {
 	RenderMarkdown(result tools.StructuredToolResult) string
+}
+
+// ToolUseMarkdownRenderer renders tool invocation inputs to markdown.
+type ToolUseMarkdownRenderer interface {
+	RenderToolUseMarkdown(rawInput string) string
+}
+
+// MergedMarkdownRenderer renders a tool result for the merged tool-call view.
+type MergedMarkdownRenderer interface {
+	RenderMergedMarkdown(result tools.StructuredToolResult) string
 }
 
 // FencedCodeBlock wraps content in a markdown code fence longer than any backtick run inside it.
@@ -83,4 +95,120 @@ func renderMarkdownFromCLI(result tools.StructuredToolResult, cliOutput string) 
 	}
 
 	return strings.TrimSpace(output.String())
+}
+
+func decodeToolInput(rawInput string, dest any) bool {
+	trimmed := strings.TrimSpace(rawInput)
+	if trimmed == "" {
+		return false
+	}
+
+	return json.Unmarshal([]byte(trimmed), dest) == nil
+}
+
+func renderToolUseJSONFallback(rawInput string) string {
+	trimmed := strings.TrimSpace(rawInput)
+	if trimmed == "" {
+		return ""
+	}
+
+	return fencedCodeBlock("json", trimJSONForMarkdown(trimmed))
+}
+
+func trimJSONForMarkdown(value string) string {
+	var pretty bytes.Buffer
+	if err := json.Indent(&pretty, []byte(value), "", "  "); err == nil {
+		return pretty.String()
+	}
+
+	return value
+}
+
+func stripLeadingMarkdownMetadata(input string, keys map[string]struct{}) string {
+	lines := strings.Split(input, "\n")
+	trimmed := make([]string, 0, len(lines))
+	stripping := true
+
+	for _, line := range lines {
+		if !stripping {
+			trimmed = append(trimmed, line)
+			continue
+		}
+
+		lineTrimmed := strings.TrimSpace(line)
+		if lineTrimmed == "" {
+			continue
+		}
+		if !strings.HasPrefix(lineTrimmed, "- **") {
+			stripping = false
+			trimmed = append(trimmed, line)
+			continue
+		}
+
+		key, ok := parseMarkdownMetadataKey(lineTrimmed)
+		if !ok {
+			stripping = false
+			trimmed = append(trimmed, line)
+			continue
+		}
+		if _, skip := keys[key]; skip {
+			continue
+		}
+		trimmed = append(trimmed, line)
+	}
+
+	return strings.TrimSpace(strings.Join(trimmed, "\n"))
+}
+
+func parseMarkdownMetadataKey(line string) (string, bool) {
+	if !strings.HasPrefix(line, "- **") {
+		return "", false
+	}
+
+	rest := strings.TrimPrefix(line, "- **")
+	idx := strings.Index(rest, ":**")
+	if idx < 0 {
+		return "", false
+	}
+
+	return rest[:idx], true
+}
+
+func sanitizeMarkdownText(value string) string {
+	return strings.ReplaceAll(value, "\n", " ")
+}
+
+func summarizeApplyPatchInput(input string) []string {
+	lines := strings.Split(input, "\n")
+	operations := make([]string, 0)
+	currentUpdatePath := ""
+
+	for _, line := range lines {
+		switch {
+		case strings.HasPrefix(line, "*** Add File: "):
+			path := strings.TrimSpace(strings.TrimPrefix(line, "*** Add File: "))
+			if path != "" {
+				operations = append(operations, fmt.Sprintf("Add %s", inlineCode(path)))
+			}
+			currentUpdatePath = ""
+		case strings.HasPrefix(line, "*** Delete File: "):
+			path := strings.TrimSpace(strings.TrimPrefix(line, "*** Delete File: "))
+			if path != "" {
+				operations = append(operations, fmt.Sprintf("Delete %s", inlineCode(path)))
+			}
+			currentUpdatePath = ""
+		case strings.HasPrefix(line, "*** Update File: "):
+			currentUpdatePath = strings.TrimSpace(strings.TrimPrefix(line, "*** Update File: "))
+			if currentUpdatePath != "" {
+				operations = append(operations, fmt.Sprintf("Update %s", inlineCode(currentUpdatePath)))
+			}
+		case strings.HasPrefix(line, "*** Move to: "):
+			movePath := strings.TrimSpace(strings.TrimPrefix(line, "*** Move to: "))
+			if currentUpdatePath != "" && movePath != "" && len(operations) > 0 {
+				operations[len(operations)-1] = fmt.Sprintf("Update %s -> %s", inlineCode(currentUpdatePath), inlineCode(movePath))
+			}
+		}
+	}
+
+	return operations
 }

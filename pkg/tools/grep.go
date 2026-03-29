@@ -170,16 +170,8 @@ func (r *GrepToolResult) StructuredData() tooltypes.StructuredToolResult {
 // GrepTool provides functionality to search for patterns in files
 type GrepTool struct{}
 
-// CodeSearchInput defines the input parameters for the grep_tool
-type CodeSearchInput struct {
-	Pattern       string `json:"pattern" jsonschema:"description=The pattern to search for (regex by default or literal string if fixed_strings is true)"`
-	Path          string `json:"path" jsonschema:"description=The absolute path to search in. Can be a directory (searches all files recursively) or a single file. Defaults to current working directory if not specified"`
-	Include       string `json:"include" jsonschema:"description=The optional glob pattern to filter files for example: '*.go' '*.{go,py}'. Only applies when searching directories"`
-	IgnoreCase    bool   `json:"ignore_case" jsonschema:"description=If true use case-insensitive search. Default is false (smart-case: case-insensitive if pattern is all lowercase)"`
-	FixedStrings  bool   `json:"fixed_strings" jsonschema:"description=If true treat pattern as literal string instead of regex. Default is false"`
-	SurroundLines int    `json:"surround_lines" jsonschema:"description=Number of lines to show before and after each match. Default is 0 (no context lines)"`
-	MaxResults    int    `json:"max_results" jsonschema:"description=Maximum number of files to return results from. Default is 100. Use a smaller value to reduce output size"`
-}
+// CodeSearchInput reuses the shared grep_tool input schema while preserving pkg/tools schema IDs.
+type CodeSearchInput tooltypes.CodeSearchInput
 
 // Name returns the name of the tool
 func (t *GrepTool) Name() string {

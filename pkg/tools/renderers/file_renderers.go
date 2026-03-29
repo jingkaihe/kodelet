@@ -38,6 +38,34 @@ func (r *FileReadRenderer) RenderCLI(result tools.StructuredToolResult) string {
 
 // RenderMarkdown renders file read results in markdown format.
 func (r *FileReadRenderer) RenderMarkdown(result tools.StructuredToolResult) string {
+	return r.renderMarkdown(result, true, true)
+}
+
+// RenderToolUseMarkdown renders file_read invocation inputs in markdown format.
+func (r *FileReadRenderer) RenderToolUseMarkdown(rawInput string) string {
+	var input tools.FileReadInput
+	if !decodeToolInput(rawInput, &input) {
+		return ""
+	}
+
+	var output strings.Builder
+	fmt.Fprintf(&output, "- **Path:** %s\n", inlineCode(input.FilePath))
+	if input.Offset > 0 {
+		fmt.Fprintf(&output, "- **Offset:** %d\n", input.Offset)
+	}
+	if input.LineLimit > 0 {
+		fmt.Fprintf(&output, "- **Line limit:** %d\n", input.LineLimit)
+	}
+
+	return strings.TrimSpace(output.String())
+}
+
+// RenderMergedMarkdown renders file_read results for the merged tool-call view.
+func (r *FileReadRenderer) RenderMergedMarkdown(result tools.StructuredToolResult) string {
+	return r.renderMarkdown(result, false, false)
+}
+
+func (r *FileReadRenderer) renderMarkdown(result tools.StructuredToolResult, includePath bool, includeOffset bool) string {
 	if !result.Success {
 		return renderMarkdownFromCLI(result, r.RenderCLI(result))
 	}
@@ -48,8 +76,12 @@ func (r *FileReadRenderer) RenderMarkdown(result tools.StructuredToolResult) str
 	}
 
 	var output strings.Builder
-	fmt.Fprintf(&output, "- **Path:** %s\n", inlineCode(meta.FilePath))
-	fmt.Fprintf(&output, "- **Offset:** %d\n", meta.Offset)
+	if includePath {
+		fmt.Fprintf(&output, "- **Path:** %s\n", inlineCode(meta.FilePath))
+	}
+	if includeOffset {
+		fmt.Fprintf(&output, "- **Offset:** %d\n", meta.Offset)
+	}
 	fmt.Fprintf(&output, "- **Lines:** %d\n", len(meta.Lines))
 	if meta.Language != "" {
 		fmt.Fprintf(&output, "- **Language:** %s\n", inlineCode(meta.Language))
@@ -91,6 +123,30 @@ func (r *FileWriteRenderer) RenderCLI(result tools.StructuredToolResult) string 
 
 // RenderMarkdown renders file write results in markdown format.
 func (r *FileWriteRenderer) RenderMarkdown(result tools.StructuredToolResult) string {
+	return r.renderMarkdown(result, true, true)
+}
+
+// RenderToolUseMarkdown renders file_write invocation inputs in markdown format.
+func (r *FileWriteRenderer) RenderToolUseMarkdown(rawInput string) string {
+	var input tools.FileWriteInput
+	if !decodeToolInput(rawInput, &input) {
+		return ""
+	}
+
+	var output strings.Builder
+	fmt.Fprintf(&output, "- **Path:** %s\n", inlineCode(input.FilePath))
+	output.WriteString("\n")
+	output.WriteString(markdownDetails("Requested content", fencedCodeBlock("text", input.Text)))
+
+	return strings.TrimSpace(output.String())
+}
+
+// RenderMergedMarkdown renders file_write results for the merged tool-call view.
+func (r *FileWriteRenderer) RenderMergedMarkdown(result tools.StructuredToolResult) string {
+	return r.renderMarkdown(result, false, false)
+}
+
+func (r *FileWriteRenderer) renderMarkdown(result tools.StructuredToolResult, includePath bool, includeContent bool) string {
 	if !result.Success {
 		return renderMarkdownFromCLI(result, r.RenderCLI(result))
 	}
@@ -101,13 +157,15 @@ func (r *FileWriteRenderer) RenderMarkdown(result tools.StructuredToolResult) st
 	}
 
 	var output strings.Builder
-	fmt.Fprintf(&output, "- **Path:** %s\n", inlineCode(meta.FilePath))
+	if includePath {
+		fmt.Fprintf(&output, "- **Path:** %s\n", inlineCode(meta.FilePath))
+	}
 	fmt.Fprintf(&output, "- **Size:** %d bytes\n", meta.Size)
 	if meta.Language != "" {
 		fmt.Fprintf(&output, "- **Language:** %s\n", inlineCode(meta.Language))
 	}
 
-	if strings.TrimSpace(meta.Content) != "" {
+	if includeContent && strings.TrimSpace(meta.Content) != "" {
 		output.WriteString("\n")
 		output.WriteString(markdownDetails("Written content", fencedCodeBlock(meta.Language, meta.Content)))
 	}
@@ -165,6 +223,41 @@ func (r *FileEditRenderer) RenderCLI(result tools.StructuredToolResult) string {
 
 // RenderMarkdown renders file edit results in markdown format.
 func (r *FileEditRenderer) RenderMarkdown(result tools.StructuredToolResult) string {
+	return r.renderMarkdown(result, true)
+}
+
+// RenderToolUseMarkdown renders file_edit invocation inputs in markdown format.
+func (r *FileEditRenderer) RenderToolUseMarkdown(rawInput string) string {
+	var input tools.FileEditInput
+	if !decodeToolInput(rawInput, &input) {
+		return ""
+	}
+
+	var output strings.Builder
+	fmt.Fprintf(&output, "- **Path:** %s\n", inlineCode(input.FilePath))
+	if input.ReplaceAll {
+		output.WriteString("- **Mode:** replace all\n")
+	} else {
+		output.WriteString("- **Mode:** targeted edit\n")
+	}
+
+	output.WriteString("\n")
+	var request strings.Builder
+	request.WriteString("**Old text**\n\n")
+	request.WriteString(fencedCodeBlock("text", input.OldText))
+	request.WriteString("\n\n**New text**\n\n")
+	request.WriteString(fencedCodeBlock("text", input.NewText))
+	output.WriteString(markdownDetails("Requested edit", request.String()))
+
+	return strings.TrimSpace(output.String())
+}
+
+// RenderMergedMarkdown renders file_edit results for the merged tool-call view.
+func (r *FileEditRenderer) RenderMergedMarkdown(result tools.StructuredToolResult) string {
+	return r.renderMarkdown(result, false)
+}
+
+func (r *FileEditRenderer) renderMarkdown(result tools.StructuredToolResult, includeHeader bool) string {
 	if !result.Success {
 		return renderMarkdownFromCLI(result, r.RenderCLI(result))
 	}
@@ -175,21 +268,28 @@ func (r *FileEditRenderer) RenderMarkdown(result tools.StructuredToolResult) str
 	}
 
 	if len(meta.Edits) == 0 {
-		return fmt.Sprintf("- **Path:** %s\n- **Changes:** none", inlineCode(meta.FilePath))
+		if includeHeader {
+			return fmt.Sprintf("- **Path:** %s\n- **Changes:** none", inlineCode(meta.FilePath))
+		}
+		return "- **Changes:** none"
 	}
 
 	var output strings.Builder
-	if meta.ReplaceAll && meta.ReplacedCount > 1 {
-		fmt.Fprintf(&output, "File edited: %s (%d replacements)\n", meta.FilePath, meta.ReplacedCount)
-	} else if meta.ReplaceAll {
-		fmt.Fprintf(&output, "File edited: %s (1 replacement)\n", meta.FilePath)
-	} else {
-		fmt.Fprintf(&output, "File edited: %s\n", meta.FilePath)
+	if includeHeader {
+		if meta.ReplaceAll && meta.ReplacedCount > 1 {
+			fmt.Fprintf(&output, "File edited: %s (%d replacements)\n", meta.FilePath, meta.ReplacedCount)
+		} else if meta.ReplaceAll {
+			fmt.Fprintf(&output, "File edited: %s (1 replacement)\n", meta.FilePath)
+		} else {
+			fmt.Fprintf(&output, "File edited: %s\n", meta.FilePath)
+		}
 	}
 
 	for i, edit := range meta.Edits {
 		diff := udiff.Unified(meta.FilePath, meta.FilePath, edit.OldContent, edit.NewContent)
-		output.WriteString("\n")
+		if output.Len() > 0 {
+			output.WriteString("\n")
+		}
 		if len(meta.Edits) > 1 {
 			fmt.Fprintf(&output, "Edit %d (lines %d-%d):\n\n", i+1, edit.StartLine, edit.EndLine)
 		} else {
@@ -249,6 +349,38 @@ func (r *ApplyPatchRenderer) RenderCLI(result tools.StructuredToolResult) string
 
 // RenderMarkdown renders apply_patch results in markdown format.
 func (r *ApplyPatchRenderer) RenderMarkdown(result tools.StructuredToolResult) string {
+	return r.renderMarkdown(result)
+}
+
+// RenderToolUseMarkdown renders apply_patch invocation inputs in markdown format.
+func (r *ApplyPatchRenderer) RenderToolUseMarkdown(rawInput string) string {
+	var input tools.ApplyPatchInput
+	if !decodeToolInput(rawInput, &input) {
+		return ""
+	}
+
+	operations := summarizeApplyPatchInput(input.Input)
+	if len(operations) == 0 {
+		return markdownDetails("Original patch", fencedCodeBlock("diff", input.Input))
+	}
+
+	var output strings.Builder
+	fmt.Fprintf(&output, "- **Patch operations:** %d\n", len(operations))
+	for _, op := range operations {
+		fmt.Fprintf(&output, "- %s\n", op)
+	}
+	output.WriteString("\n")
+	output.WriteString(markdownDetails("Original patch", fencedCodeBlock("diff", input.Input)))
+
+	return strings.TrimSpace(output.String())
+}
+
+// RenderMergedMarkdown renders apply_patch results for the merged tool-call view.
+func (r *ApplyPatchRenderer) RenderMergedMarkdown(result tools.StructuredToolResult) string {
+	return r.renderMarkdown(result)
+}
+
+func (r *ApplyPatchRenderer) renderMarkdown(result tools.StructuredToolResult) string {
 	if !result.Success {
 		return renderMarkdownFromCLI(result, r.RenderCLI(result))
 	}

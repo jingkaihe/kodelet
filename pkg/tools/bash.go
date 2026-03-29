@@ -109,12 +109,8 @@ func (b *BashTool) MatchesCommand(command string) bool {
 	return false
 }
 
-// BashInput defines the input parameters for the bash tool
-type BashInput struct {
-	Description string `json:"description" jsonschema:"description=A description of the command to run"`
-	Command     string `json:"command" jsonschema:"description=The bash command to run"`
-	Timeout     int    `json:"timeout" jsonschema:"description=Timeout in seconds (10-120)"`
-}
+// BashInput reuses the shared bash tool input schema while preserving pkg/tools schema IDs.
+type BashInput tooltypes.BashInput
 
 // GenerateSchema generates the JSON schema for the tool's input parameters
 func (b *BashTool) GenerateSchema() *jsonschema.Schema {

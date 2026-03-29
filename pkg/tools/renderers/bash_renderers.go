@@ -29,6 +29,36 @@ func (r *BashRenderer) RenderCLI(result tools.StructuredToolResult) string {
 
 // RenderMarkdown renders bash results in markdown format.
 func (r *BashRenderer) RenderMarkdown(result tools.StructuredToolResult) string {
+	return r.renderMarkdown(result, true)
+}
+
+// RenderToolUseMarkdown renders bash invocation inputs in markdown format.
+func (r *BashRenderer) RenderToolUseMarkdown(rawInput string) string {
+	var input tools.BashInput
+	if !decodeToolInput(rawInput, &input) {
+		return ""
+	}
+
+	var output strings.Builder
+	if input.Description != "" {
+		fmt.Fprintf(&output, "- **Description:** %s\n", sanitizeMarkdownText(input.Description))
+	}
+	if input.Timeout > 0 {
+		fmt.Fprintf(&output, "- **Timeout:** %d seconds\n", input.Timeout)
+	}
+
+	output.WriteString("\n**Command**\n\n")
+	output.WriteString(fencedCodeBlock("bash", input.Command))
+
+	return strings.TrimSpace(output.String())
+}
+
+// RenderMergedMarkdown renders bash results for the merged tool-call view.
+func (r *BashRenderer) RenderMergedMarkdown(result tools.StructuredToolResult) string {
+	return r.renderMarkdown(result, false)
+}
+
+func (r *BashRenderer) renderMarkdown(result tools.StructuredToolResult, includeCommand bool) string {
 	var meta tools.BashMetadata
 	if !tools.ExtractMetadata(result.Metadata, &meta) {
 		return renderMarkdownFromCLI(result, r.RenderCLI(result))
@@ -50,11 +80,17 @@ func (r *BashRenderer) RenderMarkdown(result tools.StructuredToolResult) string 
 		fmt.Fprintf(&output, "- **Error:** %s\n", inlineCode(result.Error))
 	}
 
-	output.WriteString("\n**Command**\n\n")
-	output.WriteString(fencedCodeBlock("bash", meta.Command))
+	if includeCommand {
+		output.WriteString("\n**Command**\n\n")
+		output.WriteString(fencedCodeBlock("bash", meta.Command))
+	}
 
 	if strings.TrimSpace(meta.Output) != "" {
-		output.WriteString("\n\n**Output**\n\n")
+		if includeCommand {
+			output.WriteString("\n\n**Output**\n\n")
+		} else {
+			output.WriteString("\n**Output**\n\n")
+		}
 		output.WriteString(fencedCodeBlock("text", meta.Output))
 	}
 
