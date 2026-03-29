@@ -885,10 +885,25 @@ func renderConversationMarkdown(messages []conversations.StreamableMessage, tool
 	output.WriteString("## Messages\n\n")
 
 	registry := renderers.NewRendererRegistry()
+	consumedResults := make(map[int]struct{})
 
 	for i, msg := range messages {
+		if _, consumed := consumedResults[i]; consumed {
+			continue
+		}
+
 		if i > 0 {
 			output.WriteString("\n")
+		}
+
+		if msg.Kind == "tool-use" {
+			resultIndex, resultMsg, hasResult := findMatchingToolResult(messages, i, consumedResults)
+			fmt.Fprintf(&output, "### %s\n\n", markdownRoleHeading(msg.Role, "tool-invocation"))
+			output.WriteString(renderToolInvocationMarkdown(msg, resultMsg, hasResult, toolResults, registry))
+			if hasResult {
+				consumedResults[resultIndex] = struct{}{}
+			}
+			continue
 		}
 
 		heading := markdownRoleHeading(msg.Role, msg.Kind)
@@ -901,8 +916,6 @@ func renderConversationMarkdown(messages []conversations.StreamableMessage, tool
 			output.WriteString("<details>\n<summary>Thinking</summary>\n\n")
 			output.WriteString(markdownCodeFence("text", msg.Content))
 			output.WriteString("\n\n</details>")
-		case "tool-use":
-			output.WriteString(renderToolUseMarkdown(msg))
 		case "tool-result":
 			output.WriteString(renderToolResultMarkdown(msg, toolResults, registry))
 		default:
@@ -935,6 +948,8 @@ func markdownRoleHeading(role string, kind string) string {
 	switch kind {
 	case "thinking":
 		return base + " · Thinking"
+	case "tool-invocation":
+		return base + " · Tool"
 	case "tool-use":
 		return base + " · Tool Call"
 	case "tool-result":
@@ -966,6 +981,181 @@ func renderToolUseMarkdown(msg conversations.StreamableMessage) string {
 	}
 
 	return strings.TrimSpace(output.String())
+}
+
+func renderToolInvocationMarkdown(
+	toolUse conversations.StreamableMessage,
+	toolResult conversations.StreamableMessage,
+	hasResult bool,
+	toolResults map[string]tools.StructuredToolResult,
+	registry *renderers.RendererRegistry,
+) string {
+	var output strings.Builder
+	toolName := toolUse.ToolName
+	if toolName == "" && hasResult {
+		toolName = inferToolNameFromResult(toolResult, toolResults)
+	}
+
+	if toolName != "" {
+		fmt.Fprintf(&output, "- **Tool:** %s\n", inlineMarkdownCode(toolName))
+	}
+	if toolUse.ToolCallID != "" {
+		fmt.Fprintf(&output, "- **Call ID:** %s\n", inlineMarkdownCode(toolUse.ToolCallID))
+	}
+
+	renderedInput := renderToolInputMarkdown(toolUse.ToolName, toolUse.Input)
+	if strings.TrimSpace(renderedInput) != "" {
+		output.WriteString("\n")
+		output.WriteString(renderedInput)
+	}
+
+	if hasResult {
+		resultBody := renderMergedToolResultMarkdown(toolUse, toolResult, toolResults, registry)
+		if strings.TrimSpace(resultBody) != "" {
+			output.WriteString("\n\n**Result**\n\n")
+			output.WriteString(resultBody)
+		}
+	}
+
+	return strings.TrimSpace(output.String())
+}
+
+func renderMergedToolResultMarkdown(
+	toolUse conversations.StreamableMessage,
+	toolResult conversations.StreamableMessage,
+	toolResults map[string]tools.StructuredToolResult,
+	registry *renderers.RendererRegistry,
+) string {
+	structuredResult, ok := lookupStructuredToolResult(toolResult, toolResults)
+	if !ok {
+		trimmed := strings.TrimSpace(toolResult.Content)
+		if trimmed == "" {
+			return ""
+		}
+		language := "text"
+		if json.Valid([]byte(trimmed)) {
+			language = "json"
+			trimmed = trimJSONForMarkdown(trimmed)
+		}
+		return markdownCodeFence(language, trimmed)
+	}
+
+	if structuredResult.ToolName == "bash" {
+		return renderMergedBashResultMarkdown(toolUse, structuredResult)
+	}
+
+	resultBody := registry.RenderMarkdown(structuredResult)
+	return stripLeadingMarkdownMetadata(resultBody, map[string]struct{}{
+		"Tool":    {},
+		"Call ID": {},
+	})
+}
+
+func renderMergedBashResultMarkdown(toolUse conversations.StreamableMessage, result tools.StructuredToolResult) string {
+	var meta tools.BashMetadata
+	if !tools.ExtractMetadata(result.Metadata, &meta) {
+		return stripLeadingMarkdownMetadata(renderers.NewRendererRegistry().RenderMarkdown(result), map[string]struct{}{
+			"Tool":    {},
+			"Call ID": {},
+			"Command": {},
+		})
+	}
+
+	var output strings.Builder
+	status := "success"
+	if !result.Success {
+		status = "failed"
+	}
+	fmt.Fprintf(&output, "- **Status:** %s\n", status)
+	fmt.Fprintf(&output, "- **Exit code:** %d\n", meta.ExitCode)
+	if meta.WorkingDir != "" {
+		fmt.Fprintf(&output, "- **Working directory:** %s\n", inlineMarkdownCode(meta.WorkingDir))
+	}
+	fmt.Fprintf(&output, "- **Execution time:** %s\n", inlineMarkdownCode(meta.ExecutionTime.String()))
+	if result.Error != "" {
+		fmt.Fprintf(&output, "- **Error:** %s\n", inlineMarkdownCode(result.Error))
+	}
+
+	if strings.TrimSpace(meta.Output) != "" {
+		output.WriteString("\n**Output**\n\n")
+		output.WriteString(markdownCodeFence("text", meta.Output))
+	}
+
+	_ = toolUse
+	return strings.TrimSpace(output.String())
+}
+
+func stripLeadingMarkdownMetadata(input string, keys map[string]struct{}) string {
+	lines := strings.Split(input, "\n")
+	trimmed := make([]string, 0, len(lines))
+	stripping := true
+
+	for _, line := range lines {
+		if !stripping {
+			trimmed = append(trimmed, line)
+			continue
+		}
+
+		lineTrimmed := strings.TrimSpace(line)
+		if lineTrimmed == "" {
+			continue
+		}
+		if !strings.HasPrefix(lineTrimmed, "- **") {
+			stripping = false
+			trimmed = append(trimmed, line)
+			continue
+		}
+
+		key, ok := parseMarkdownMetadataKey(lineTrimmed)
+		if !ok {
+			stripping = false
+			trimmed = append(trimmed, line)
+			continue
+		}
+		if _, skip := keys[key]; skip {
+			continue
+		}
+		trimmed = append(trimmed, line)
+	}
+
+	return strings.TrimSpace(strings.Join(trimmed, "\n"))
+}
+
+func parseMarkdownMetadataKey(line string) (string, bool) {
+	if !strings.HasPrefix(line, "- **") {
+		return "", false
+	}
+	rest := strings.TrimPrefix(line, "- **")
+	idx := strings.Index(rest, ":**")
+	if idx < 0 {
+		return "", false
+	}
+	return rest[:idx], true
+}
+
+func findMatchingToolResult(
+	messages []conversations.StreamableMessage,
+	toolUseIndex int,
+	consumedResults map[int]struct{},
+) (int, conversations.StreamableMessage, bool) {
+	toolUse := messages[toolUseIndex]
+	for i := toolUseIndex + 1; i < len(messages); i++ {
+		if _, consumed := consumedResults[i]; consumed {
+			continue
+		}
+		candidate := messages[i]
+		if candidate.Kind != "tool-result" {
+			continue
+		}
+		if toolUse.ToolCallID != "" && candidate.ToolCallID == toolUse.ToolCallID {
+			return i, candidate, true
+		}
+		if toolUse.ToolCallID == "" && toolUse.ToolName != "" && candidate.ToolName == toolUse.ToolName {
+			return i, candidate, true
+		}
+	}
+
+	return -1, conversations.StreamableMessage{}, false
 }
 
 func renderToolResultMarkdown(msg conversations.StreamableMessage, toolResults map[string]tools.StructuredToolResult, registry *renderers.RendererRegistry) string {
@@ -1077,7 +1267,7 @@ func renderToolInputMarkdown(toolName string, rawInput string) string {
 		if json.Unmarshal([]byte(trimmed), &input) == nil {
 			fmt.Fprintf(&output, "- **Path:** %s\n", inlineMarkdownCode(input.FilePath))
 			output.WriteString("\n")
-			output.WriteString(markdownDetails("Content", markdownCodeFence("text", input.Text)))
+			output.WriteString(markdownDetails("Requested content", markdownCodeFence("text", input.Text)))
 			return strings.TrimSpace(output.String())
 		}
 	case "file_edit":
@@ -1086,18 +1276,33 @@ func renderToolInputMarkdown(toolName string, rawInput string) string {
 			fmt.Fprintf(&output, "- **Path:** %s\n", inlineMarkdownCode(input.FilePath))
 			if input.ReplaceAll {
 				output.WriteString("- **Mode:** replace all\n")
+			} else {
+				output.WriteString("- **Mode:** targeted edit\n")
 			}
 			output.WriteString("\n")
-			output.WriteString("**Old text**\n\n")
-			output.WriteString(markdownCodeFence("text", input.OldText))
-			output.WriteString("\n\n**New text**\n\n")
-			output.WriteString(markdownCodeFence("text", input.NewText))
+			var request strings.Builder
+			request.WriteString("**Old text**\n\n")
+			request.WriteString(markdownCodeFence("text", input.OldText))
+			request.WriteString("\n\n**New text**\n\n")
+			request.WriteString(markdownCodeFence("text", input.NewText))
+			output.WriteString(markdownDetails("Requested edit", request.String()))
 			return strings.TrimSpace(output.String())
 		}
 	case "apply_patch":
 		var input applyPatchInput
 		if json.Unmarshal([]byte(trimmed), &input) == nil {
-			return markdownCodeFence("diff", input.Input)
+			operations := summarizeApplyPatchInput(input.Input)
+			if len(operations) == 0 {
+				return markdownDetails("Original patch", markdownCodeFence("diff", input.Input))
+			}
+
+			fmt.Fprintf(&output, "- **Patch operations:** %d\n", len(operations))
+			for _, op := range operations {
+				fmt.Fprintf(&output, "- %s\n", op)
+			}
+			output.WriteString("\n")
+			output.WriteString(markdownDetails("Original patch", markdownCodeFence("diff", input.Input)))
+			return strings.TrimSpace(output.String())
 		}
 	case "grep_tool":
 		var input grepInput
@@ -1175,6 +1380,41 @@ func markdownDetails(summary string, body string) string {
 		return ""
 	}
 	return fmt.Sprintf("<details>\n<summary>%s</summary>\n\n%s\n\n</details>", summary, body)
+}
+
+func summarizeApplyPatchInput(input string) []string {
+	lines := strings.Split(input, "\n")
+	operations := make([]string, 0)
+	currentUpdatePath := ""
+
+	for _, line := range lines {
+		switch {
+		case strings.HasPrefix(line, "*** Add File: "):
+			path := strings.TrimSpace(strings.TrimPrefix(line, "*** Add File: "))
+			if path != "" {
+				operations = append(operations, fmt.Sprintf("Add %s", inlineMarkdownCode(path)))
+			}
+			currentUpdatePath = ""
+		case strings.HasPrefix(line, "*** Delete File: "):
+			path := strings.TrimSpace(strings.TrimPrefix(line, "*** Delete File: "))
+			if path != "" {
+				operations = append(operations, fmt.Sprintf("Delete %s", inlineMarkdownCode(path)))
+			}
+			currentUpdatePath = ""
+		case strings.HasPrefix(line, "*** Update File: "):
+			currentUpdatePath = strings.TrimSpace(strings.TrimPrefix(line, "*** Update File: "))
+			if currentUpdatePath != "" {
+				operations = append(operations, fmt.Sprintf("Update %s", inlineMarkdownCode(currentUpdatePath)))
+			}
+		case strings.HasPrefix(line, "*** Move to: "):
+			movePath := strings.TrimSpace(strings.TrimPrefix(line, "*** Move to: "))
+			if currentUpdatePath != "" && movePath != "" && len(operations) > 0 {
+				operations[len(operations)-1] = fmt.Sprintf("Update %s → %s", inlineMarkdownCode(currentUpdatePath), inlineMarkdownCode(movePath))
+			}
+		}
+	}
+
+	return operations
 }
 
 func inlineMarkdownCode(value string) string {

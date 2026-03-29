@@ -7,6 +7,7 @@ import (
 	"io"
 	"maps"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -394,30 +395,96 @@ func TestRenderConversationMarkdownWithToolUseAndResult(t *testing.T) {
 	assert.Contains(t, output, "## Messages")
 	assert.Contains(t, output, "### User")
 	assert.Contains(t, output, "Please inspect the repo")
-	assert.Contains(t, output, "### Assistant · Tool Call")
+	assert.Contains(t, output, "### Assistant · Tool")
 	assert.Contains(t, output, "- **Tool:** `bash`")
+	assert.Equal(t, 1, strings.Count(output, "- **Tool:** `bash`"))
 	assert.Contains(t, output, "```bash\npwd\n```")
-	assert.Contains(t, output, "### Assistant · Tool Result")
+	assert.Contains(t, output, "**Result**")
 	assert.Contains(t, output, "- **Status:** success")
 	assert.Contains(t, output, "**Output**")
 	assert.Contains(t, output, "/tmp/project")
+	assert.Equal(t, 1, strings.Count(output, "```bash\npwd\n```"))
+	assert.NotContains(t, output, "### Assistant · Tool Result")
 }
 
 func TestRenderToolInputMarkdownForApplyPatch(t *testing.T) {
 	output := renderToolInputMarkdown("apply_patch", `{"input":"*** Begin Patch\n*** Add File: hello.txt\n+hello\n*** End Patch"}`)
+	assert.Contains(t, output, "- **Patch operations:** 1")
+	assert.Contains(t, output, "- Add `hello.txt`")
+	assert.Contains(t, output, "<details>")
+	assert.Contains(t, output, "Original patch")
 	assert.Contains(t, output, "```diff")
-	assert.Contains(t, output, "*** Begin Patch")
-	assert.Contains(t, output, "+hello")
 }
 
 func TestRenderToolInputMarkdownForFileEditUsesFocusedBlocks(t *testing.T) {
 	output := renderToolInputMarkdown("file_edit", `{"file_path":"/tmp/test.go","old_text":"old()","new_text":"new()","replace_all":false}`)
 	assert.Contains(t, output, "- **Path:** `/tmp/test.go`")
+	assert.Contains(t, output, "- **Mode:** targeted edit")
+	assert.Contains(t, output, "Requested edit")
 	assert.Contains(t, output, "**Old text**")
 	assert.Contains(t, output, "```text\nold()\n```")
 	assert.Contains(t, output, "**New text**")
 	assert.Contains(t, output, "```text\nnew()\n```")
-	assert.NotContains(t, output, "<details>")
+	assert.Contains(t, output, "<details>")
+}
+
+func TestSummarizeApplyPatchInput(t *testing.T) {
+	input := "*** Begin Patch\n*** Add File: a.txt\n+hello\n*** Update File: src/app.go\n*** Move to: src/main.go\n@@\n-old\n+new\n*** Delete File: old.txt\n*** End Patch"
+
+	summary := summarizeApplyPatchInput(input)
+	assert.Equal(t, []string{
+		"Add `a.txt`",
+		"Update `src/app.go` → `src/main.go`",
+		"Delete `old.txt`",
+	}, summary)
+}
+
+func TestRenderConversationMarkdownMergesApplyPatchToolCallAndResult(t *testing.T) {
+	messages := []conversations.StreamableMessage{
+		{Kind: "tool-use", Role: "assistant", ToolName: "apply_patch", ToolCallID: "patch-1", Input: `{"input":"*** Begin Patch\n*** Add File: hello.txt\n+hello\n*** End Patch"}`},
+		{Kind: "tool-result", Role: "assistant", ToolName: "apply_patch", ToolCallID: "patch-1"},
+	}
+
+	toolResults := map[string]tools.StructuredToolResult{
+		"patch-1": {
+			ToolName:  "apply_patch",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata: &tools.ApplyPatchMetadata{
+				Added: []string{"hello.txt"},
+				Changes: []tools.ApplyPatchChange{
+					{
+						Path:       "hello.txt",
+						Operation:  tools.ApplyPatchOperationAdd,
+						NewContent: "hello\n",
+					},
+				},
+			},
+		},
+	}
+
+	output := renderConversationMarkdown(messages, toolResults)
+	assert.Contains(t, output, "### Assistant · Tool")
+	assert.Contains(t, output, "- **Patch operations:** 1")
+	assert.Contains(t, output, "**Result**")
+	assert.Contains(t, output, "Success. Updated the following files:")
+	assert.NotContains(t, output, "### Assistant · Tool Result")
+	assert.Equal(t, 1, strings.Count(output, "### Assistant · Tool"))
+	assert.Equal(t, 1, strings.Count(output, "- **Tool:** `apply_patch`"))
+}
+
+func TestStripLeadingMarkdownMetadata(t *testing.T) {
+	input := "- **Tool:** `bash`\n- **Call ID:** `call-1`\n- **Status:** success\n\n**Output**\n\n```text\nhello\n```"
+
+	output := stripLeadingMarkdownMetadata(input, map[string]struct{}{
+		"Tool":    {},
+		"Call ID": {},
+	})
+
+	assert.NotContains(t, output, "- **Tool:**")
+	assert.NotContains(t, output, "- **Call ID:**")
+	assert.Contains(t, output, "- **Status:** success")
+	assert.Contains(t, output, "**Output**")
 }
 
 func TestRenderToolResultMarkdownFallbackUsesTextFenceWhenNotJSON(t *testing.T) {
