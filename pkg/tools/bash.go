@@ -12,6 +12,7 @@ import (
 	"strings"
 	"text/template"
 	"time"
+	"unicode/utf8"
 
 	"github.com/pkg/errors"
 
@@ -24,6 +25,9 @@ import (
 )
 
 var (
+	// bashMaxOutputTokens to preserve context window usage
+	bashMaxOutputTokens = 10_000
+
 	// BannedCommands lists commands that are not allowed to run through the bash tool
 	BannedCommands = []string{
 		"vim",
@@ -65,6 +69,8 @@ Examples:
 - (cd /repo && mise run test)
 `
 )
+
+const bashApproxBytesPerToken = 4
 
 // BashTool executes bash commands with configurable restrictions and timeout support
 type BashTool struct {
@@ -259,7 +265,7 @@ func (r *BashToolResult) IsError() bool {
 
 // AssistantFacing returns the string representation for the AI assistant
 func (r *BashToolResult) AssistantFacing() string {
-	return tooltypes.StringifyToolResult(r.combinedOutput, r.GetError())
+	return tooltypes.StringifyToolResult(truncateBashOutputForModel(r.combinedOutput), r.GetError())
 }
 
 // StructuredData returns structured metadata about the tool execution
@@ -273,7 +279,7 @@ func (r *BashToolResult) StructuredData() tooltypes.StructuredToolResult {
 	// Always populate metadata, even for errors
 	result.Metadata = &tooltypes.BashMetadata{
 		Command:       r.command,
-		Output:        r.combinedOutput,
+		Output:        truncateBashOutputForModel(r.combinedOutput),
 		ExitCode:      r.exitCode,
 		ExecutionTime: r.executionTime,
 		WorkingDir:    r.workingDir,
@@ -358,4 +364,138 @@ func (b *BashTool) executeForeground(ctx context.Context, input *BashInput) tool
 
 func bashEnvWithPreferredBinDirs() ([]string, error) {
 	return binaries.EnvWithPreferredBinDirs(os.Environ())
+}
+
+func truncateBashOutputForModel(content string) string {
+	maxBytes := approxBytesForTokens(bashMaxOutputTokens)
+	if len(content) <= maxBytes {
+		return content
+	}
+
+	totalLines := countOutputLines(content)
+	truncated := truncateMiddleWithTokenBudget(content, bashMaxOutputTokens)
+	return fmt.Sprintf("Total output lines: %d\n\n%s", totalLines, truncated)
+}
+
+func countOutputLines(content string) int {
+	if content == "" {
+		return 0
+	}
+
+	lineCount := strings.Count(content, "\n")
+	if !strings.HasSuffix(content, "\n") {
+		lineCount++
+	}
+
+	return lineCount
+}
+
+func truncateMiddleWithTokenBudget(content string, maxTokens int) string {
+	if content == "" {
+		return ""
+	}
+
+	maxBytes := approxBytesForTokens(maxTokens)
+	if maxTokens > 0 && len(content) <= maxBytes {
+		return content
+	}
+
+	return truncateMiddleByBytesEstimate(content, maxBytes, true)
+}
+
+func approxBytesForTokens(tokens int) int {
+	if tokens <= 0 {
+		return 0
+	}
+
+	return tokens * bashApproxBytesPerToken
+}
+
+func approxTokensFromByteCount(bytes int) int {
+	if bytes <= 0 {
+		return 0
+	}
+
+	return (bytes + bashApproxBytesPerToken - 1) / bashApproxBytesPerToken
+}
+
+func truncateMiddleByBytesEstimate(content string, maxBytes int, useTokens bool) string {
+	if content == "" {
+		return ""
+	}
+
+	if maxBytes <= 0 {
+		return formatBashTruncationMarker(useTokens, removedUnits(useTokens, len(content), utf8.RuneCountInString(content)))
+	}
+
+	if len(content) <= maxBytes {
+		return content
+	}
+
+	leftBudget, rightBudget := splitBashBudget(maxBytes)
+	prefixEnd, suffixStart, removedRunes := splitBashString(content, leftBudget, rightBudget)
+	prefix := content[:prefixEnd]
+	suffix := content[suffixStart:]
+	removedBytes := len(content) - len(prefix) - len(suffix)
+	marker := formatBashTruncationMarker(useTokens, removedUnits(useTokens, removedBytes, removedRunes))
+
+	return prefix + marker + suffix
+}
+
+func splitBashBudget(budget int) (int, int) {
+	left := budget / 2
+	return left, budget - left
+}
+
+func splitBashString(content string, beginningBytes, endBytes int) (int, int, int) {
+	contentLen := len(content)
+	tailStartTarget := max(contentLen-endBytes, 0)
+	prefixEnd := 0
+	suffixStart := contentLen
+	removedRunes := 0
+	suffixStarted := false
+
+	for idx, char := range content {
+		charLen := utf8.RuneLen(char)
+		if charLen < 0 {
+			charLen = 0
+		}
+		charEnd := idx + charLen
+		if charEnd <= beginningBytes {
+			prefixEnd = charEnd
+			continue
+		}
+
+		if idx >= tailStartTarget {
+			if !suffixStarted {
+				suffixStart = idx
+				suffixStarted = true
+			}
+			continue
+		}
+
+		removedRunes++
+	}
+
+	if suffixStart < prefixEnd {
+		suffixStart = prefixEnd
+	}
+
+	return prefixEnd, suffixStart, removedRunes
+}
+
+func removedUnits(useTokens bool, removedBytes, removedRunes int) int {
+	if useTokens {
+		return approxTokensFromByteCount(removedBytes)
+	}
+
+	return removedRunes
+}
+
+func formatBashTruncationMarker(useTokens bool, removedCount int) string {
+	if useTokens {
+		return fmt.Sprintf("…%d tokens truncated…", removedCount)
+	}
+
+	return fmt.Sprintf("…%d chars truncated…", removedCount)
 }
