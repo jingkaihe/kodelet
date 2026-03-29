@@ -74,10 +74,15 @@ func TestReadConversationToolExecuteRenderError(t *testing.T) {
 }
 
 func TestBuildReadConversationPromptSpacing(t *testing.T) {
-	prompt := buildReadConversationPrompt("## Messages\n\n### User\n\nhello", "Extract the fix")
+	prompt, err := buildReadConversationPrompt("## Messages\n\n### User\n\nhello", "Extract the fix")
+	require.NoError(t, err)
 
 	assert.Contains(t, prompt, "Here is the mentioned conversation content:\n\n<mentionedConversation>\n## Messages")
 	assert.Contains(t, prompt, "</mentionedConversation>\n\nYou are helping me extract relevant information")
 	assert.Contains(t, prompt, "## Goal\n\nExtract the fix\n\n## Your Response")
+	assert.Contains(t, prompt, "Preserve Fidelity: When content IS relevant")
+	assert.NotContains(t, prompt, "**Preserve Fidelity**")
+	assert.NotContains(t, prompt, "{{.Conversation}}")
+	assert.NotContains(t, prompt, "{{.Goal}}")
 	assert.Contains(t, prompt, "Return only the extracted relevant content as markdown.")
 }

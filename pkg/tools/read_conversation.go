@@ -1,12 +1,15 @@
 package tools
 
 import (
+	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/google/shlex"
@@ -18,62 +21,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
-const readConversationPromptTemplate = `Here is the mentioned conversation content:
-
-<mentionedConversation>
-%s
-</mentionedConversation>
-
-You are helping me extract relevant information from the mentioned conversation based on a goal.
-
-## Task
-
-I am talking to another user. They mentioned a conversation in their last message. I turned the conversation into Markdown and provided it to you, along with a goal of what I want you to extract.
-
-Your job is to:
-1. Analyze the mentioned conversation's content
-2. Identify information that is relevant to the goal
-3. Extract and preserve those relevant parts with full fidelity
-4. Omit clearly irrelevant content to keep the context concise
-
-## Guidelines
-
-**Preserve Fidelity**: When content IS relevant, include it completely with all important details, code snippets, explanations, and context.
-**Be Selective**: When content is clearly NOT relevant to the goal, omit it entirely.
-**Maintain Structure**: Keep the extracted content well-organized and coherent. If multiple parts are relevant, preserve their logical flow.
-**Technical Precision**: Preserve exact technical details like file paths, function names, error messages, and code snippets that are relevant.
-
-## Examples
-
-### Example 1: Extract implementation details
-
-**Goal**: "Extract the implementation details of the authentication mechanism in the mentioned conversation"
-**Good Extraction**:
-- Includes: Authentication logic, security considerations, code examples, relevant files
-- Omits: Unrelated features, general discussion, tangential topics
-
-### Example 2: Referencing a bug fix
-
-**Goal**: "Extract how the bug was fixed in the mentioned conversation"
-**Good Extraction**:
-- Includes: The bug description, root cause, the fix or solution, relevant code changes
-- Omits: Initial troubleshooting steps, unrelated changes, meeting notes
-
-### Example 3: Learning from past work
-
-**Goal**: "Describe what pattern was used to implement the widget Foo in the mentioned conversation"
-**Good Extraction**:
-- Includes: The design pattern, implementation approach, example code, key decisions
-- Omits: Project-specific details that don't apply, alternative approaches that were rejected
-
-## Goal
-
-%s
-
-## Your Response
-
-Return only the extracted relevant content as markdown.
-`
+//go:embed prompts/read_conversation.txt
+var readConversationPromptTemplate string
 
 type (
 	conversationMarkdownRenderer func(ctx context.Context, conversationID string) (string, error)
@@ -279,7 +228,10 @@ func defaultConversationExtractor(ctx context.Context, state tooltypes.State, ma
 		}
 	}
 
-	prompt := buildReadConversationPrompt(markdown, goal)
+	prompt, err := buildReadConversationPrompt(markdown, goal)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to build read conversation prompt")
+	}
 	cmd := exec.CommandContext(ctx, exe, args...)
 	cmd.Stdin = strings.NewReader(prompt)
 
@@ -300,10 +252,24 @@ func defaultConversationExtractor(ctx context.Context, state tooltypes.State, ma
 	return content, nil
 }
 
-func buildReadConversationPrompt(markdown string, goal string) string {
-	return fmt.Sprintf(
-		readConversationPromptTemplate,
-		strings.TrimSpace(markdown),
-		strings.TrimSpace(goal),
-	)
+func buildReadConversationPrompt(markdown string, goal string) (string, error) {
+	data := struct {
+		Conversation string
+		Goal         string
+	}{
+		Conversation: strings.TrimSpace(markdown),
+		Goal:         strings.TrimSpace(goal),
+	}
+
+	tmpl, err := template.New("read_conversation_prompt").Parse(readConversationPromptTemplate)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to parse read_conversation prompt template")
+	}
+
+	var rendered bytes.Buffer
+	if err := tmpl.Execute(&rendered, data); err != nil {
+		return "", errors.Wrap(err, "failed to execute read_conversation prompt template")
+	}
+
+	return rendered.String(), nil
 }
