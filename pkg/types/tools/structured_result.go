@@ -68,6 +68,7 @@ var metadataTypeRegistry = map[string]reflect.Type{
 	"image_recognition": reflect.TypeOf(ImageRecognitionMetadata{}),
 	"subagent":          reflect.TypeOf(SubAgentMetadata{}),
 	"web_fetch":         reflect.TypeOf(WebFetchMetadata{}),
+	"read_conversation": reflect.TypeOf(ReadConversationMetadata{}),
 	"code_execution":    reflect.TypeOf(CodeExecutionMetadata{}),
 	"skill":             reflect.TypeOf(SkillMetadata{}),
 	"blocked":           reflect.TypeOf(BlockedMetadata{}),
@@ -372,6 +373,16 @@ type WebFetchMetadata struct {
 
 // ToolType returns the tool type identifier for web fetch operations
 func (m WebFetchMetadata) ToolType() string { return "web_fetch" }
+
+// ReadConversationMetadata contains metadata about a read_conversation operation.
+type ReadConversationMetadata struct {
+	ConversationID string `json:"conversationID"`
+	Goal           string `json:"goal"`
+	Content        string `json:"content"`
+}
+
+// ToolType returns the tool type identifier for read_conversation operations.
+func (m ReadConversationMetadata) ToolType() string { return "read_conversation" }
 
 // ExtractMetadata is a helper that handles both pointer and value type assertions
 // This is necessary because JSON unmarshaling creates value types, while

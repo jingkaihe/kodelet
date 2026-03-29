@@ -775,12 +775,12 @@ func showConversationCmd(ctx context.Context, id string, config *ConversationSho
 			}
 		}
 		if showMessages {
-			messages, err := llm.ExtractConversationEntries(record.Provider, record.RawMessages, record.Metadata, record.ToolResults)
+			markdown, err := llm.RenderConversationMarkdown(record.Provider, record.RawMessages, record.Metadata, record.ToolResults)
 			if err != nil {
-				presenter.Error(err, "Failed to parse conversation messages")
+				presenter.Error(err, "Failed to render conversation markdown")
 				os.Exit(1)
 			}
-			fmt.Print(renderConversationMarkdown(messages, record.ToolResults))
+			fmt.Print(markdown)
 		}
 	default:
 		presenter.Error(errors.Errorf("unsupported format: %s", config.Format), "Unknown format. Supported formats are raw, json, text, and markdown")
