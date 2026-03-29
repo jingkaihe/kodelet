@@ -911,7 +911,7 @@ func renderConversationMarkdown(messages []conversations.StreamableMessage, tool
 
 		switch msg.Kind {
 		case "text":
-			output.WriteString(renderTextBlockMarkdown(msg.Content))
+			output.WriteString(renderTextBlockMarkdown(msg))
 		case "thinking":
 			output.WriteString("<details>\n<summary>Thinking</summary>\n\n")
 			output.WriteString(markdownCodeFence("text", msg.Content))
@@ -919,7 +919,7 @@ func renderConversationMarkdown(messages []conversations.StreamableMessage, tool
 		case "tool-result":
 			output.WriteString(renderToolResultMarkdown(msg, toolResults, registry))
 		default:
-			output.WriteString(renderTextBlockMarkdown(msg.Content))
+			output.WriteString(renderTextBlockMarkdown(msg))
 		}
 	}
 
@@ -959,28 +959,89 @@ func markdownRoleHeading(role string, kind string) string {
 	}
 }
 
-func renderTextBlockMarkdown(content string) string {
-	trimmed := strings.TrimSpace(content)
+func renderTextBlockMarkdown(msg conversations.StreamableMessage) string {
+	if rendered := renderOpenAIResponsesRawItemMarkdown(msg.RawItem); strings.TrimSpace(rendered) != "" {
+		return rendered
+	}
+
+	trimmed := strings.TrimSpace(msg.Content)
 	if trimmed == "" {
 		return "_Empty message._"
 	}
-	return content
+	return msg.Content
 }
 
-func renderToolUseMarkdown(msg conversations.StreamableMessage) string {
-	var output strings.Builder
-	fmt.Fprintf(&output, "- **Tool:** %s\n", inlineMarkdownCode(msg.ToolName))
-	if msg.ToolCallID != "" {
-		fmt.Fprintf(&output, "- **Call ID:** %s\n", inlineMarkdownCode(msg.ToolCallID))
+func renderOpenAIResponsesRawItemMarkdown(rawItem json.RawMessage) string {
+	if len(rawItem) == 0 {
+		return ""
 	}
 
-	renderedInput := renderToolInputMarkdown(msg.ToolName, msg.Input)
-	if strings.TrimSpace(renderedInput) != "" {
-		output.WriteString("\n")
-		output.WriteString(renderedInput)
+	var rawMessage struct {
+		Content json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(rawItem, &rawMessage); err != nil || len(rawMessage.Content) == 0 {
+		return ""
 	}
 
-	return strings.TrimSpace(output.String())
+	var textContent string
+	if err := json.Unmarshal(rawMessage.Content, &textContent); err == nil {
+		return textContent
+	}
+
+	var parts []struct {
+		Type     string `json:"type"`
+		Text     string `json:"text,omitempty"`
+		ImageURL string `json:"image_url,omitempty"`
+	}
+	if err := json.Unmarshal(rawMessage.Content, &parts); err != nil {
+		return ""
+	}
+
+	renderedParts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		switch part.Type {
+		case "input_text", "output_text":
+			if strings.TrimSpace(part.Text) != "" {
+				renderedParts = append(renderedParts, part.Text)
+			}
+		case "input_image":
+			if imageMarkdown := renderInputImageMarkdown(part.ImageURL); imageMarkdown != "" {
+				renderedParts = append(renderedParts, imageMarkdown)
+			}
+		}
+	}
+
+	return strings.Join(renderedParts, "\n\n")
+}
+
+func renderInputImageMarkdown(imageURL string) string {
+	if imageURL == "" {
+		return ""
+	}
+
+	if strings.HasPrefix(imageURL, "data:") {
+		mediaType := mediaTypeFromDataURL(imageURL)
+		if mediaType == "" {
+			return "_Inline image input._"
+		}
+		return fmt.Sprintf("_Inline image input (%s)._", mediaType)
+	}
+
+	return fmt.Sprintf("Image input: <%s>", imageURL)
+}
+
+func mediaTypeFromDataURL(dataURL string) string {
+	if !strings.HasPrefix(dataURL, "data:") {
+		return ""
+	}
+
+	metadata, _, found := strings.Cut(strings.TrimPrefix(dataURL, "data:"), ",")
+	if !found {
+		return ""
+	}
+
+	mediaType, _, _ := strings.Cut(metadata, ";")
+	return mediaType
 }
 
 func renderToolInvocationMarkdown(
@@ -1367,11 +1428,7 @@ func inferToolNameFromResult(msg conversations.StreamableMessage, toolResults ma
 }
 
 func markdownCodeFence(language string, content string) string {
-	content = strings.TrimSuffix(content, "\n")
-	if language != "" {
-		return fmt.Sprintf("```%s\n%s\n```", language, content)
-	}
-	return fmt.Sprintf("```\n%s\n```", content)
+	return renderers.FencedCodeBlock(language, content)
 }
 
 func markdownDetails(summary string, body string) string {

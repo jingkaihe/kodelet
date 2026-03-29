@@ -368,3 +368,105 @@ func TestExtractMessages_FallsBackToToolNameWhenCallIDMissing(t *testing.T) {
 	assert.Contains(t, messages[1].Content, "tool-name-fallback-marker")
 	assert.NotContains(t, messages[1].Content, "raw-output-without-call-id")
 }
+
+func TestStreamMessages_PreservesToolCallIDFromFunctionCall(t *testing.T) {
+	rawMessages := `[
+		{
+			"role": "model",
+			"parts": [
+				{
+					"functionCall": {
+						"id": "call_123",
+						"name": "bash",
+						"args": {
+							"command": "pwd"
+						}
+					}
+				}
+			]
+		},
+		{
+			"role": "user",
+			"parts": [
+				{
+					"functionResponse": {
+						"name": "bash",
+						"response": {
+							"call_id": "call_123",
+							"result": "/tmp/project",
+							"error": false
+						}
+					}
+				}
+			]
+		}
+	]`
+
+	streamableMessages, err := StreamMessages([]byte(rawMessages), nil)
+	require.NoError(t, err)
+	require.Len(t, streamableMessages, 2)
+
+	assert.Equal(t, "tool-use", streamableMessages[0].Kind)
+	assert.Equal(t, "call_123", streamableMessages[0].ToolCallID)
+	assert.Equal(t, "tool-result", streamableMessages[1].Kind)
+	assert.Equal(t, "call_123", streamableMessages[1].ToolCallID)
+}
+
+func TestStreamMessages_BackfillsToolCallIDFromMatchingResponse(t *testing.T) {
+	rawMessages := `[
+		{
+			"role": "model",
+			"parts": [
+				{
+					"functionCall": {
+						"name": "bash",
+						"args": {
+							"command": "pwd"
+						}
+					}
+				}
+			]
+		},
+		{
+			"role": "user",
+			"parts": [
+				{
+					"functionResponse": {
+						"name": "bash",
+						"response": {
+							"call_id": "call_legacy",
+							"result": "/tmp/project",
+							"error": false
+						}
+					}
+				}
+			]
+		}
+	]`
+
+	streamableMessages, err := StreamMessages([]byte(rawMessages), nil)
+	require.NoError(t, err)
+	require.Len(t, streamableMessages, 2)
+
+	assert.Equal(t, "call_legacy", streamableMessages[0].ToolCallID)
+	assert.Equal(t, "call_legacy", streamableMessages[1].ToolCallID)
+}
+
+func TestAddAssistantMessage_PersistsToolCallIDs(t *testing.T) {
+	thread := &Thread{}
+
+	thread.addAssistantMessage(&Response{
+		ToolCalls: []*ToolCall{
+			{
+				ID:   "call_789",
+				Name: "bash",
+				Args: map[string]any{"command": "pwd"},
+			},
+		},
+	})
+
+	require.Len(t, thread.messages, 1)
+	require.Len(t, thread.messages[0].Parts, 1)
+	require.NotNil(t, thread.messages[0].Parts[0].FunctionCall)
+	assert.Equal(t, "call_789", thread.messages[0].Parts[0].FunctionCall.ID)
+}

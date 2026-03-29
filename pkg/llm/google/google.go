@@ -532,6 +532,7 @@ func (t *Thread) addAssistantMessage(response *Response) {
 	for _, toolCall := range response.ToolCalls {
 		parts = append(parts, &genai.Part{
 			FunctionCall: &genai.FunctionCall{
+				ID:   toolCall.ID,
 				Name: toolCall.Name,
 				Args: toolCall.Args,
 			},

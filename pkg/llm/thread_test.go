@@ -3,6 +3,7 @@ package llm
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"os"
 	"strings"
@@ -238,6 +239,30 @@ func TestStringCollectorHandlerCapture(t *testing.T) {
 
 	// Verify collected text
 	assert.Equal(t, "Test text\n", handler.CollectedText())
+}
+
+func TestExtractConversationEntriesPreservesResponsesRawItem(t *testing.T) {
+	rawMessages := json.RawMessage(`[
+		{
+			"type": "message",
+			"role": "user",
+			"raw_item": {
+				"role": "user",
+				"content": [
+					{"type": "input_image", "image_url": "data:image/png;base64,aGVsbG8="}
+				]
+			}
+		}
+	]`)
+
+	messages, err := ExtractConversationEntries("openai", rawMessages, map[string]any{
+		"api_mode": "responses",
+	}, nil)
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	assert.Equal(t, "text", messages[0].Kind)
+	assert.Empty(t, messages[0].Content)
+	assert.Contains(t, string(messages[0].RawItem), `"input_image"`)
 }
 
 // TestSendMessageWithToolUse tests the tool-using capability of the Thread with real API

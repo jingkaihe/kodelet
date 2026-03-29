@@ -151,6 +151,7 @@ func StreamMessages(rawMessages []byte, toolResults map[string]tooltypes.Structu
 	}
 
 	var messages []StreamableMessage
+	pendingToolUsesByName := make(map[string][]int)
 
 	for _, content := range googleMessages {
 		for _, part := range content.Parts {
@@ -179,16 +180,29 @@ func StreamMessages(rawMessages []byte, toolResults map[string]tooltypes.Structu
 			case part.FunctionCall != nil:
 				argsJSON, _ := json.Marshal(part.FunctionCall.Args)
 				messages = append(messages, StreamableMessage{
-					Kind:     "tool-use",
-					Role:     "assistant",
-					ToolName: part.FunctionCall.Name,
-					Input:    string(argsJSON),
+					Kind:       "tool-use",
+					Role:       "assistant",
+					ToolName:   part.FunctionCall.Name,
+					ToolCallID: part.FunctionCall.ID,
+					Input:      string(argsJSON),
 				})
+				if part.FunctionCall.ID == "" {
+					pendingToolUsesByName[part.FunctionCall.Name] = append(
+						pendingToolUsesByName[part.FunctionCall.Name],
+						len(messages)-1,
+					)
+				}
 
 			case part.FunctionResponse != nil:
 				result := ""
 				toolName := part.FunctionResponse.Name
 				callID := extractToolCallID(part.FunctionResponse.Response)
+				if callID != "" {
+					if pending := pendingToolUsesByName[toolName]; len(pending) > 0 {
+						messages[pending[0]].ToolCallID = callID
+						pendingToolUsesByName[toolName] = pending[1:]
+					}
+				}
 
 				structuredResult, ok := toolResults[callID]
 				if !ok {

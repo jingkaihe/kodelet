@@ -501,6 +501,35 @@ func TestRenderToolResultMarkdownFallbackUsesTextFenceWhenNotJSON(t *testing.T) 
 	assert.NotContains(t, output, "```json")
 }
 
+func TestRenderConversationMarkdownPreservesResponsesImageOnlyMessage(t *testing.T) {
+	messages := []conversations.StreamableMessage{
+		{
+			Kind:    "text",
+			Role:    "user",
+			RawItem: json.RawMessage(`{"role":"user","content":[{"type":"input_image","image_url":"data:image/png;base64,aGVsbG8="}]}`),
+		},
+	}
+
+	output := renderConversationMarkdown(messages, nil)
+
+	assert.Contains(t, output, "### User")
+	assert.Contains(t, output, "_Inline image input (image/png)._")
+	assert.NotContains(t, output, "_Empty message._")
+}
+
+func TestRenderToolResultMarkdownUsesLongerCodeFenceWhenPayloadContainsBackticks(t *testing.T) {
+	msg := conversations.StreamableMessage{
+		Kind:     "tool-result",
+		Role:     "assistant",
+		ToolName: "file_read",
+		Content:  "before\n```\ninside\n```\nafter",
+	}
+
+	output := renderToolResultMarkdown(msg, nil, renderers.NewRendererRegistry())
+
+	assert.Contains(t, output, "````text\nbefore\n```\ninside\n```\nafter\n````")
+}
+
 func TestDisplayProviderName(t *testing.T) {
 	tests := []struct {
 		name     string

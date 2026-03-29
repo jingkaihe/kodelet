@@ -12,12 +12,40 @@ type MarkdownRenderer interface {
 	RenderMarkdown(result tools.StructuredToolResult) string
 }
 
-func fencedCodeBlock(language string, content string) string {
+// FencedCodeBlock wraps content in a markdown code fence longer than any backtick run inside it.
+func FencedCodeBlock(language string, content string) string {
+	fence := markdownFence(content)
 	trimmed := strings.TrimSuffix(content, "\n")
 	if language != "" {
-		return fmt.Sprintf("```%s\n%s\n```", language, trimmed)
+		return fmt.Sprintf("%s%s\n%s\n%s", fence, language, trimmed, fence)
 	}
-	return fmt.Sprintf("```\n%s\n```", trimmed)
+	return fmt.Sprintf("%s\n%s\n%s", fence, trimmed, fence)
+}
+
+func fencedCodeBlock(language string, content string) string {
+	return FencedCodeBlock(language, content)
+}
+
+func markdownFence(content string) string {
+	maxFenceLen := 3
+	for i := 0; i < len(content); {
+		if content[i] != '`' {
+			i++
+			continue
+		}
+
+		j := i
+		for j < len(content) && content[j] == '`' {
+			j++
+		}
+
+		if runLen := j - i; runLen >= maxFenceLen {
+			maxFenceLen = runLen + 1
+		}
+		i = j
+	}
+
+	return strings.Repeat("`", maxFenceLen)
 }
 
 func inlineCode(value string) string {
