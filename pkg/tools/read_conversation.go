@@ -19,44 +19,60 @@ import (
 )
 
 const readConversationPromptTemplate = `Here is the mentioned conversation content:
+
 <mentionedConversation>
 %s
 </mentionedConversation>
 
 You are helping me extract relevant information from the mentioned conversation based on a goal.
+
 ## Task
+
 I am talking to another user. They mentioned a conversation in their last message. I turned the conversation into Markdown and provided it to you, along with a goal of what I want you to extract.
+
 Your job is to:
 1. Analyze the mentioned conversation's content
 2. Identify information that is relevant to the goal
 3. Extract and preserve those relevant parts with full fidelity
 4. Omit clearly irrelevant content to keep the context concise
+
 ## Guidelines
+
 **Preserve Fidelity**: When content IS relevant, include it completely with all important details, code snippets, explanations, and context.
 **Be Selective**: When content is clearly NOT relevant to the goal, omit it entirely.
 **Maintain Structure**: Keep the extracted content well-organized and coherent. If multiple parts are relevant, preserve their logical flow.
 **Technical Precision**: Preserve exact technical details like file paths, function names, error messages, and code snippets that are relevant.
+
 ## Examples
+
 ### Example 1: Extract implementation details
+
 **Goal**: "Extract the implementation details of the authentication mechanism in the mentioned conversation"
 **Good Extraction**:
 - Includes: Authentication logic, security considerations, code examples, relevant files
 - Omits: Unrelated features, general discussion, tangential topics
+
 ### Example 2: Referencing a bug fix
+
 **Goal**: "Extract how the bug was fixed in the mentioned conversation"
 **Good Extraction**:
 - Includes: The bug description, root cause, the fix or solution, relevant code changes
 - Omits: Initial troubleshooting steps, unrelated changes, meeting notes
+
 ### Example 3: Learning from past work
+
 **Goal**: "Describe what pattern was used to implement the widget Foo in the mentioned conversation"
 **Good Extraction**:
 - Includes: The design pattern, implementation approach, example code, key decisions
 - Omits: Project-specific details that don't apply, alternative approaches that were rejected
+
 ## Goal
+
 %s
+
 ## Your Response
-Format your response as JSON with:
-- "relevantContent": The extracted relevant information as markdown text
+
+Return only the extracted relevant content as markdown.
 `
 
 type (
@@ -266,7 +282,7 @@ func defaultConversationExtractor(ctx context.Context, state tooltypes.State, ma
 		}
 	}
 
-	prompt := fmt.Sprintf(readConversationPromptTemplate, markdown, goal)
+	prompt := buildReadConversationPrompt(markdown, goal)
 	cmd := exec.CommandContext(ctx, exe, args...)
 	cmd.Stdin = strings.NewReader(prompt)
 
@@ -279,61 +295,18 @@ func defaultConversationExtractor(ctx context.Context, state tooltypes.State, ma
 		return "", err
 	}
 
-	return parseReadConversationResponse(strings.TrimSpace(string(output)))
-}
-
-func parseReadConversationResponse(raw string) (string, error) {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
+	content := strings.TrimSpace(string(output))
+	if content == "" {
 		return "", errors.New("empty extraction response")
 	}
 
-	type responsePayload struct {
-		RelevantContent string `json:"relevantContent"`
-	}
-
-	candidates := []string{
-		trimmed,
-		stripMarkdownCodeFence(trimmed),
-	}
-
-	if start := strings.Index(trimmed, "{"); start >= 0 {
-		if end := strings.LastIndex(trimmed, "}"); end > start {
-			candidates = append(candidates, trimmed[start:end+1])
-		}
-	}
-
-	for _, candidate := range candidates {
-		candidate = strings.TrimSpace(candidate)
-		if candidate == "" {
-			continue
-		}
-
-		var payload responsePayload
-		if err := json.Unmarshal([]byte(candidate), &payload); err == nil {
-			return strings.TrimSpace(payload.RelevantContent), nil
-		}
-	}
-
-	return trimmed, nil
+	return content, nil
 }
 
-func stripMarkdownCodeFence(content string) string {
-	trimmed := strings.TrimSpace(content)
-	if !strings.HasPrefix(trimmed, "```") {
-		return trimmed
-	}
-
-	lines := strings.Split(trimmed, "\n")
-	if len(lines) < 2 {
-		return trimmed
-	}
-
-	if strings.HasPrefix(strings.TrimSpace(lines[len(lines)-1]), "```") {
-		lines = lines[1 : len(lines)-1]
-	} else {
-		lines = lines[1:]
-	}
-
-	return strings.TrimSpace(strings.Join(lines, "\n"))
+func buildReadConversationPrompt(markdown string, goal string) string {
+	return fmt.Sprintf(
+		readConversationPromptTemplate,
+		strings.TrimSpace(markdown),
+		strings.TrimSpace(goal),
+	)
 }

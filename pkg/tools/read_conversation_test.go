@@ -73,34 +73,11 @@ func TestReadConversationToolExecuteRenderError(t *testing.T) {
 	assert.Contains(t, result.GetError(), "Failed to render conversation")
 }
 
-func TestParseReadConversationResponse(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected string
-	}{
-		{
-			name:     "plain json",
-			input:    `{"relevantContent":"hello"}`,
-			expected: "hello",
-		},
-		{
-			name:     "fenced json",
-			input:    "```json\n{\"relevantContent\":\"hello\"}\n```",
-			expected: "hello",
-		},
-		{
-			name:     "fallback raw markdown",
-			input:    "### Assistant\n\nHere is the extracted content.",
-			expected: "### Assistant\n\nHere is the extracted content.",
-		},
-	}
+func TestBuildReadConversationPromptSpacing(t *testing.T) {
+	prompt := buildReadConversationPrompt("## Messages\n\n### User\n\nhello", "Extract the fix")
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			content, err := parseReadConversationResponse(tt.input)
-			require.NoError(t, err)
-			assert.Equal(t, tt.expected, content)
-		})
-	}
+	assert.Contains(t, prompt, "Here is the mentioned conversation content:\n\n<mentionedConversation>\n## Messages")
+	assert.Contains(t, prompt, "</mentionedConversation>\n\nYou are helping me extract relevant information")
+	assert.Contains(t, prompt, "## Goal\n\nExtract the fix\n\n## Your Response")
+	assert.Contains(t, prompt, "Return only the extracted relevant content as markdown.")
 }
