@@ -1,6 +1,6 @@
 # Kodelet
 
-## 0.3.19-beta (2026-03-29)
+## 0.3.20-beta (2026-03-29)
 
 Added `kodelet conversation show --format markdown` with structured markdown rendering for tool calls and results, plus truncation controls for verbose tool output.
 Introduced the `read_conversation` tool so agents can extract goal-focused context from saved Kodelet conversations without loading the full transcript.
