@@ -1,7 +1,6 @@
 package llm
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -614,12 +613,4 @@ func inlineMarkdownCode(value string) string {
 		return fmt.Sprintf("``%s``", value)
 	}
 	return fmt.Sprintf("`%s`", value)
-}
-
-func trimJSONForMarkdown(value string) string {
-	var pretty bytes.Buffer
-	if err := json.Indent(&pretty, []byte(value), "", "  "); err == nil {
-		return pretty.String()
-	}
-	return value
 }
