@@ -253,7 +253,7 @@ func defaultConversationMarkdownRenderer(ctx context.Context, conversationID str
 		return "", errors.Wrap(err, "failed to get executable path")
 	}
 
-	cmd := exec.CommandContext(ctx, exe, "conversation", "show", conversationID, "--format", "markdown")
+	cmd := exec.CommandContext(ctx, exe, "conversation", "show", conversationID, "--format", "markdown", "--truncate-tool-results")
 	output, err := cmd.Output()
 	if err != nil {
 		var exitErr *exec.ExitError

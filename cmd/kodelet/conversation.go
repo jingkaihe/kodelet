@@ -66,16 +66,18 @@ func NewConversationDeleteConfig() *ConversationDeleteConfig {
 }
 
 type ConversationShowConfig struct {
-	Format    string
-	NoHeader  bool
-	StatsOnly bool
+	Format              string
+	NoHeader            bool
+	StatsOnly           bool
+	TruncateToolResults bool
 }
 
 func NewConversationShowConfig() *ConversationShowConfig {
 	return &ConversationShowConfig{
-		Format:    "text",
-		NoHeader:  false,
-		StatsOnly: false,
+		Format:              "text",
+		NoHeader:            false,
+		StatsOnly:           false,
+		TruncateToolResults: false,
 	}
 }
 
@@ -252,6 +254,7 @@ func init() {
 	conversationShowCmd.Flags().String("format", showDefaults.Format, "Output format: raw, json, text, or markdown")
 	conversationShowCmd.Flags().Bool("no-header", showDefaults.NoHeader, "Skip header (stats/summary), show only messages")
 	conversationShowCmd.Flags().Bool("stats-only", showDefaults.StatsOnly, "Show only stats/summary without messages")
+	conversationShowCmd.Flags().Bool("truncate-tool-results", showDefaults.TruncateToolResults, "Truncate verbose tool results in markdown output to reduce context size")
 
 	importDefaults := NewConversationImportConfig()
 	conversationImportCmd.Flags().Bool("force", importDefaults.Force, "Force overwrite existing conversation")
@@ -334,6 +337,9 @@ func getConversationShowConfigFromFlags(cmd *cobra.Command) *ConversationShowCon
 	}
 	if statsOnly, err := cmd.Flags().GetBool("stats-only"); err == nil {
 		config.StatsOnly = statsOnly
+	}
+	if truncateToolResults, err := cmd.Flags().GetBool("truncate-tool-results"); err == nil {
+		config.TruncateToolResults = truncateToolResults
 	}
 
 	return config
@@ -775,7 +781,15 @@ func showConversationCmd(ctx context.Context, id string, config *ConversationSho
 			}
 		}
 		if showMessages {
-			markdown, err := llm.RenderConversationMarkdown(record.Provider, record.RawMessages, record.Metadata, record.ToolResults)
+			markdown, err := llm.RenderConversationMarkdownWithOptions(
+				record.Provider,
+				record.RawMessages,
+				record.Metadata,
+				record.ToolResults,
+				llm.ConversationMarkdownOptions{
+					TruncateToolResults: config.TruncateToolResults,
+				},
+			)
 			if err != nil {
 				presenter.Error(err, "Failed to render conversation markdown")
 				os.Exit(1)
