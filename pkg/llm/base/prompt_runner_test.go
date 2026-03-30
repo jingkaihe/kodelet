@@ -18,7 +18,8 @@ func TestGenerateShortSummary(t *testing.T) {
 			ctx,
 			"summary prompt",
 			func(_ context.Context, prompt string, useWeakModel bool) (string, error) {
-				assert.Equal(t, "summary prompt", prompt)
+				assert.Contains(t, prompt, "Conversation to summarize:")
+				assert.Contains(t, prompt, "summary prompt")
 				assert.True(t, useWeakModel)
 				return "generated summary", nil
 			},

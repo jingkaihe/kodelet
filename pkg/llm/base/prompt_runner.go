@@ -2,8 +2,12 @@ package base
 
 import (
 	"context"
+	"strings"
 
+	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
 // UtilityThread is a thread that supports utility-mode preparation.
@@ -67,10 +71,11 @@ func UtilityPromptOptions(useWeakModel bool) llmtypes.MessageOpt {
 // If generation fails, it calls onError (if provided) and returns a stable fallback message.
 func GenerateShortSummary(
 	ctx context.Context,
-	prompt string,
+	markdown string,
 	runUtilityPrompt func(ctx context.Context, prompt string, useWeakModel bool) (string, error),
 	onError func(err error),
 ) string {
+	prompt := BuildShortSummaryPrompt(markdown)
 	summary, err := runUtilityPrompt(ctx, prompt, true)
 	if err != nil {
 		if onError != nil {
@@ -80,6 +85,22 @@ func GenerateShortSummary(
 	}
 
 	return summary
+}
+
+// BuildShortSummaryPrompt wraps rendered conversation markdown in the short-summary instruction.
+func BuildShortSummaryPrompt(markdown string) string {
+	trimmed := strings.TrimSpace(markdown)
+	return strings.TrimSpace(prompts.ShortSummaryPrompt) + "\n\nConversation to summarize:\n\n" + trimmed
+}
+
+// RenderMarkdownForSummary converts streamable messages into markdown optimized for summary generation.
+func RenderMarkdownForSummary(
+	messages []conversations.StreamableMessage,
+	toolResults map[string]tooltypes.StructuredToolResult,
+) string {
+	return conversations.RenderMarkdown(messages, toolResults, conversations.MarkdownOptions{
+		TruncateToolResults: true,
+	})
 }
 
 // RunUtilityPrompt creates a helper thread, seeds provider-specific history,

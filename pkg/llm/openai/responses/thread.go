@@ -16,12 +16,12 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	codexpreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/codex"
 	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
 	"github.com/jingkaihe/kodelet/pkg/llm/openai/preset/xai"
-	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
@@ -930,18 +930,48 @@ func (t *Thread) runUtilityPrompt(ctx context.Context, prompt string, useWeakMod
 
 // ShortSummary generates a short summary of the conversation using an LLM.
 func (t *Thread) ShortSummary(ctx context.Context) string {
-	if len(t.inputItems) == 0 {
+	rawMessages, err := json.Marshal(t.storedItems)
+	if err != nil {
+		logger.G(ctx).WithError(err).Error("failed to marshal conversation for summary")
+		return "Could not generate summary."
+	}
+
+	toolResults := t.GetStructuredToolResults()
+	messages, err := StreamMessages(rawMessages, toolResults)
+	if err != nil {
+		logger.G(ctx).WithError(err).Error("failed to parse conversation for summary")
+		return "Could not generate summary."
+	}
+	if len(messages) == 0 {
 		return ""
 	}
 
+	markdown := base.RenderMarkdownForSummary(conversationsFromResponses(messages), toolResults)
+
 	return base.GenerateShortSummary(
 		ctx,
-		prompts.ShortSummaryPrompt,
+		markdown,
 		t.runUtilityPrompt,
 		func(err error) {
 			logger.G(ctx).WithError(err).Error("failed to generate summary")
 		},
 	)
+}
+
+func conversationsFromResponses(msgs []StreamableMessage) []conversations.StreamableMessage {
+	result := make([]conversations.StreamableMessage, len(msgs))
+	for i, msg := range msgs {
+		result[i] = conversations.StreamableMessage{
+			Kind:       msg.Kind,
+			Role:       msg.Role,
+			Content:    msg.Content,
+			RawItem:    msg.RawItem,
+			ToolName:   msg.ToolName,
+			ToolCallID: msg.ToolCallID,
+			Input:      msg.Input,
+		}
+	}
+	return result
 }
 
 // SaveConversation saves the current thread to the conversation store.

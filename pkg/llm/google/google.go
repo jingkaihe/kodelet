@@ -24,9 +24,9 @@ import (
 	"github.com/pkg/errors"
 	"google.golang.org/genai"
 
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
-	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
@@ -1066,14 +1066,47 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 
 // ShortSummary generates a brief summary of the conversation
 func (t *Thread) ShortSummary(ctx context.Context) string {
+	rawMessages, err := json.Marshal(t.messages)
+	if err != nil {
+		logger.G(ctx).WithError(err).Error("failed to marshal conversation for summary")
+		return "Could not generate summary."
+	}
+
+	toolResults := t.GetStructuredToolResults()
+	messages, err := StreamMessages(rawMessages, toolResults)
+	if err != nil {
+		logger.G(ctx).WithError(err).Error("failed to parse conversation for summary")
+		return "Could not generate summary."
+	}
+	if len(messages) == 0 {
+		return ""
+	}
+
+	markdown := base.RenderMarkdownForSummary(conversationsFromGoogle(messages), toolResults)
+
 	return base.GenerateShortSummary(
 		ctx,
-		prompts.ShortSummaryPrompt,
+		markdown,
 		t.runUtilityPrompt,
 		func(err error) {
 			logger.G(ctx).WithError(err).Error("failed to generate summary")
 		},
 	)
+}
+
+func conversationsFromGoogle(msgs []StreamableMessage) []conversations.StreamableMessage {
+	result := make([]conversations.StreamableMessage, len(msgs))
+	for i, msg := range msgs {
+		result[i] = conversations.StreamableMessage{
+			Kind:       msg.Kind,
+			Role:       msg.Role,
+			Content:    msg.Content,
+			ToolName:   msg.ToolName,
+			ToolCallID: msg.ToolCallID,
+			Input:      msg.Input,
+		}
+	}
+	return result
 }
 
 // processPendingSteer processes any pending steering messages

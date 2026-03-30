@@ -10,7 +10,6 @@ import (
 	"github.com/pkg/errors"
 	"google.golang.org/genai"
 
-	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -43,7 +42,7 @@ func (t *Thread) SaveConversation(ctx context.Context, summarise bool) error {
 
 	summary := ""
 	if summarise {
-		summary = t.generateSummary(ctx)
+		summary = t.ShortSummary(ctx)
 	}
 
 	var fileLastAccess map[string]time.Time
@@ -101,46 +100,6 @@ func (t *Thread) LoadConversationByID(ctx context.Context, conversationID string
 
 	logger.G(ctx).WithField("conversation_id", conversationID).Info("Loaded conversation")
 	return nil
-}
-
-func (t *Thread) generateSummary(ctx context.Context) string {
-	messages := t.convertToStandardMessages()
-	if len(messages) == 0 {
-		return ""
-	}
-
-	summaryPrompt := prompts.ShortSummaryPrompt + "\n\nConversation to summarize:"
-	for _, msg := range messages {
-		summaryPrompt += fmt.Sprintf("\n%s: %s", msg.Role, msg.Content)
-	}
-
-	weakModelConfig := t.Config
-	if t.Config.WeakModel != "" {
-		weakModelConfig.Model = t.Config.WeakModel
-	} else {
-		weakModelConfig.Model = "gemini-2.5-flash"
-	}
-
-	summaryThread, err := NewGoogleThread(weakModelConfig)
-	if err != nil {
-		logger.G(ctx).WithError(err).Error("Failed to create summary thread")
-		return ""
-	}
-
-	// Set the state so tools are available
-	summaryThread.SetState(t.State)
-
-	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	_, err = summaryThread.SendMessage(ctx, summaryPrompt, handler, llmtypes.MessageOpt{
-		NoSaveConversation: true,
-		UseWeakModel:       true,
-	})
-	if err != nil {
-		logger.G(ctx).WithError(err).Error("Failed to generate summary")
-		return ""
-	}
-
-	return handler.CollectedText()
 }
 
 // StreamMessages parses raw Google messages into streamable format for conversation streaming.
