@@ -4,7 +4,7 @@
 package prompts
 
 // ShortSummaryPrompt is the prompt used for generating short conversation summaries
-const ShortSummaryPrompt = `Summarise the conversation in one sentence, less or equal than 12 words. Keep it short and concise.
+const ShortSummaryPrompt = `Summarise the conversation in one sentence, less or equal than 12 words. Keep it short and concise. Do not end the summary with a period.
 
 ## Process
 1. Analyze the multi-turn conversation to understand the context and main topics
@@ -16,6 +16,7 @@ const ShortSummaryPrompt = `Summarise the conversation in one sentence, less or 
 * Focus on the main topic or task discussed
 * Keep it professional and direct
 * Avoid unnecessary words like "help with" or "assistance for"
+* Do not end the final summary with a period
 
 ## Examples
 <example>

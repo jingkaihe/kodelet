@@ -84,7 +84,15 @@ func GenerateShortSummary(
 		return "Could not generate summary."
 	}
 
-	return summary
+	return normalizeShortSummary(summary)
+}
+
+func normalizeShortSummary(summary string) string {
+	trimmed := strings.TrimSpace(summary)
+	if strings.HasSuffix(trimmed, ".") && !strings.HasSuffix(trimmed, "...") {
+		trimmed = strings.TrimSuffix(trimmed, ".")
+	}
+	return trimmed
 }
 
 // BuildShortSummaryPrompt wraps rendered conversation markdown in the short-summary instruction.

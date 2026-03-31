@@ -22,7 +22,7 @@ func TestGenerateShortSummary(t *testing.T) {
 				assert.Contains(t, prompt, "Conversation to summarize:")
 				assert.Contains(t, prompt, "summary prompt")
 				assert.True(t, useWeakModel)
-				return "generated summary", nil
+				return "generated summary.", nil
 			},
 			func(error) {
 				called = true
@@ -31,6 +31,21 @@ func TestGenerateShortSummary(t *testing.T) {
 
 		assert.Equal(t, "generated summary", summary)
 		assert.False(t, called)
+	})
+
+	t.Run("preserves ellipsis", func(t *testing.T) {
+		summary := GenerateShortSummary(
+			ctx,
+			"summary prompt",
+			func(_ context.Context, prompt string, useWeakModel bool) (string, error) {
+				assert.Contains(t, prompt, "Conversation to summarize:")
+				assert.True(t, useWeakModel)
+				return "generated summary...", nil
+			},
+			nil,
+		)
+
+		assert.Equal(t, "generated summary...", summary)
 	})
 
 	t.Run("error with callback", func(t *testing.T) {

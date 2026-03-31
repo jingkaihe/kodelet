@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.3.21-beta (2026-03-31)
+
+Updated conversation short-summary generation to build from rendered conversation markdown instead of plain role/content text, preserving tool context while excluding thinking blocks.
+
 ## 0.3.20-beta (2026-03-29)
 
 Added `kodelet conversation show --format markdown` with structured markdown rendering for tool calls and results, plus truncation controls for verbose tool output.
