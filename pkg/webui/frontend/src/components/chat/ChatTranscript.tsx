@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { marked } from 'marked';
 import type { ChatRenderMessage, ContentBlock } from '../../types';
 import ToolRenderer from '../ToolRenderer';
-import { cn, copyToClipboard } from '../../utils';
+import { CopyButton } from '../tool-renderers/shared';
+import { cn } from '../../utils';
 import { normalizeToolName, ReferenceCodeBlock, TOOL_LABELS } from '../tool-renderers/reference';
 
 const renderContent = (content: string | ContentBlock[] | undefined): string => {
@@ -206,13 +207,10 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
                   </div>
                 </div>
 
-                <button
-                  className="panel-action-button px-3 py-2"
-                  onClick={() => copyToClipboard(getCopyText(message))}
-                  type="button"
-                >
-                  Copy
-                </button>
+                <CopyButton
+                  className="px-3 py-2"
+                  content={getCopyText(message)}
+                />
               </div>
 
               {isUser ? (

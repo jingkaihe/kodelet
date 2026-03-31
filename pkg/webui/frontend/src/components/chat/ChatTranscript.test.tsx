@@ -156,4 +156,26 @@ describe('ChatTranscript', () => {
       'data:image/png;base64,aGVsbG8='
     );
   });
+
+  it('uses an icon-only copy button with an accessible label', () => {
+    render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[
+          {
+            role: 'assistant',
+            blocks: [
+              {
+                type: 'message',
+                content: 'Ready to copy',
+              },
+            ],
+          },
+        ]}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: 'Copy to clipboard' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Copy' })).not.toBeInTheDocument();
+  });
 });
