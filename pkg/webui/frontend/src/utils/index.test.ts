@@ -112,13 +112,37 @@ describe('formatCost', () => {
 });
 
 describe('copyToClipboard', () => {
+  let originalClipboard: Clipboard | undefined;
+  let originalExecCommand: typeof document.execCommand | undefined;
+
   beforeEach(() => {
+    originalClipboard = navigator.clipboard;
+    originalExecCommand = document.execCommand;
+
     // Mock navigator.clipboard
     Object.assign(navigator, {
       clipboard: {
         writeText: vi.fn(),
       },
     });
+  });
+
+  afterEach(() => {
+    Object.assign(navigator, {
+      clipboard: originalClipboard,
+    });
+
+    if (originalExecCommand) {
+      Object.defineProperty(document, 'execCommand', {
+        value: originalExecCommand,
+        configurable: true,
+        writable: true,
+      });
+      return;
+    }
+
+    // @ts-expect-error execCommand is optional in jsdom tests
+    delete document.execCommand;
   });
 
   it('calls clipboard writeText with provided text', async () => {
@@ -129,8 +153,46 @@ describe('copyToClipboard', () => {
     expect(writeTextMock).toHaveBeenCalledWith('test text');
   });
 
-  it('handles clipboard API errors', async () => {
+  it('falls back to execCommand when clipboard API is unavailable', async () => {
+    Object.assign(navigator, {
+      clipboard: undefined,
+    });
+    const execCommandMock = vi.fn().mockReturnValue(true);
+    Object.defineProperty(document, 'execCommand', {
+      value: execCommandMock,
+      configurable: true,
+      writable: true,
+    });
+
+    await copyToClipboard('test text');
+
+    expect(execCommandMock).toHaveBeenCalledWith('copy');
+  });
+
+  it('falls back to execCommand when clipboard API errors', async () => {
     vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValue(new Error('Failed'));
+    const execCommandMock = vi.fn().mockReturnValue(true);
+    Object.defineProperty(document, 'execCommand', {
+      value: execCommandMock,
+      configurable: true,
+      writable: true,
+    });
+
+    await copyToClipboard('test text');
+
+    expect(execCommandMock).toHaveBeenCalledWith('copy');
+  });
+
+  it('shows an error when both clipboard mechanisms fail', async () => {
+    Object.assign(navigator, {
+      clipboard: undefined,
+    });
+    const execCommandMock = vi.fn().mockReturnValue(false);
+    Object.defineProperty(document, 'execCommand', {
+      value: execCommandMock,
+      configurable: true,
+      writable: true,
+    });
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     await copyToClipboard('test text');
