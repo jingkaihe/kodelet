@@ -43,6 +43,7 @@ func (j JSONField[T]) Value() (driver.Value, error) {
 // dbConversationRecord represents the conversations table structure
 type dbConversationRecord struct {
 	ID             string                                           `db:"id"`
+	CWD            *string                                          `db:"cwd"`
 	RawMessages    json.RawMessage                                  `db:"raw_messages"`
 	Provider       string                                           `db:"provider"`
 	FileLastAccess JSONField[map[string]time.Time]                  `db:"file_last_access"`
@@ -57,6 +58,7 @@ type dbConversationRecord struct {
 // dbConversationSummary represents the conversation_summaries table structure
 type dbConversationSummary struct {
 	ID           string                    `db:"id"`
+	CWD          *string                   `db:"cwd"`
 	MessageCount int                       `db:"message_count"`
 	FirstMessage string                    `db:"first_message"`
 	Summary      *string                   `db:"summary"` // NULL in database
@@ -84,6 +86,9 @@ func (dbr *dbConversationRecord) ToConversationRecord() conversations.Conversati
 	if dbr.Summary != nil {
 		record.Summary = *dbr.Summary
 	}
+	if dbr.CWD != nil {
+		record.CWD = *dbr.CWD
+	}
 
 	return record
 }
@@ -103,6 +108,9 @@ func (dbs *dbConversationSummary) ToConversationSummary() conversations.Conversa
 
 	if dbs.Summary != nil {
 		summary.Summary = *dbs.Summary
+	}
+	if dbs.CWD != nil {
+		summary.CWD = *dbs.CWD
 	}
 
 	return summary
@@ -125,6 +133,9 @@ func fromConversationRecord(record conversations.ConversationRecord) *dbConversa
 	if record.Summary != "" {
 		dbRecord.Summary = &record.Summary
 	}
+	if record.CWD != "" {
+		dbRecord.CWD = &record.CWD
+	}
 
 	return dbRecord
 }
@@ -144,6 +155,9 @@ func fromConversationSummary(summary conversations.ConversationSummary) *dbConve
 
 	if summary.Summary != "" {
 		dbSummary.Summary = &summary.Summary
+	}
+	if summary.CWD != "" {
+		dbSummary.CWD = &summary.CWD
 	}
 
 	return dbSummary

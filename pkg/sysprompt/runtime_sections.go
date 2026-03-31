@@ -22,7 +22,7 @@ func RenderRuntimeSections(ctx *PromptContext, renderer *Renderer) []string {
 
 // BuildRuntimeContext creates prompt context configured for runtime section rendering.
 func BuildRuntimeContext(llmConfig llmtypes.Config, contexts map[string]string) *PromptContext {
-	promptCtx := newPromptContext(contexts)
+	promptCtx := newPromptContext(contexts, llmConfig.WorkingDirectory)
 	patterns := llmtypes.DefaultContextPatterns()
 	if llmConfig.Context != nil && len(llmConfig.Context.Patterns) > 0 {
 		patterns = llmConfig.Context.Patterns

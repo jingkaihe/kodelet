@@ -528,7 +528,7 @@ func truncateResultsBySize(results []SearchResult, pattern string) ([]SearchResu
 }
 
 // Execute searches for the pattern in files and returns the results
-func (t *GrepTool) Execute(ctx context.Context, _ tooltypes.State, parameters string) tooltypes.ToolResult {
+func (t *GrepTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input CodeSearchInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return &GrepToolResult{
@@ -539,13 +539,17 @@ func (t *GrepTool) Execute(ctx context.Context, _ tooltypes.State, parameters st
 		}
 	}
 
-	path, err := os.Getwd()
-	if err != nil {
-		return &GrepToolResult{
-			pattern: input.Pattern,
-			path:    input.Path,
-			include: input.Include,
-			err:     fmt.Sprintf("failed to get current working directory: %s", err),
+	path := state.WorkingDirectory()
+	var err error
+	if path == "" {
+		path, err = os.Getwd()
+		if err != nil {
+			return &GrepToolResult{
+				pattern: input.Pattern,
+				path:    input.Path,
+				include: input.Include,
+				err:     fmt.Sprintf("failed to get current working directory: %s", err),
+			}
 		}
 	}
 	if input.Path != "" {

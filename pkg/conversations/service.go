@@ -82,6 +82,7 @@ type ListConversationsResponse struct {
 // GetConversationResponse represents the response from getting a conversation
 type GetConversationResponse struct {
 	ID           string                                `json:"id"`
+	CWD          string                                `json:"cwd,omitempty"`
 	CreatedAt    time.Time                             `json:"createdAt"`
 	UpdatedAt    time.Time                             `json:"updatedAt"`
 	Provider     string                                `json:"provider"`
@@ -193,6 +194,7 @@ func (s *ConversationService) GetConversation(ctx context.Context, id string) (*
 
 	response := &GetConversationResponse{
 		ID:           record.ID,
+		CWD:          record.CWD,
 		CreatedAt:    record.CreatedAt,
 		UpdatedAt:    record.UpdatedAt,
 		Provider:     record.Provider,
@@ -245,6 +247,7 @@ func (s *ConversationService) ForkConversation(ctx context.Context, id string) (
 
 	forkedRecord := conversations.NewConversationRecord("")
 	forkedRecord.RawMessages = sourceRecord.RawMessages
+	forkedRecord.CWD = sourceRecord.CWD
 	forkedRecord.Provider = sourceRecord.Provider
 	forkedRecord.Summary = sourceRecord.Summary
 	forkedRecord.Usage.CurrentContextWindow = sourceRecord.Usage.CurrentContextWindow

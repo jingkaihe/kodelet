@@ -23,6 +23,7 @@ func TestBuildChatState_BindsTodoPathToConversationID(t *testing.T) {
 			DisableSubagent: true,
 		},
 		"conv-web-123",
+		"/workspace/project",
 		nil,
 		customManager,
 	)

@@ -3,6 +3,7 @@ import apiService from './api';
 import {
   ConversationListResponse,
   Conversation,
+  CWDHintsResponse,
   ToolResult
 } from '../types';
 
@@ -206,6 +207,7 @@ describe('ApiService', () => {
         ok: true,
         json: async () => ({
           currentProfile: 'work',
+          defaultCWD: '/workspace/default',
           profiles: [{ name: 'default', scope: 'built-in' }],
         }),
       });
@@ -214,7 +216,31 @@ describe('ApiService', () => {
 
       expect(mockFetch).toHaveBeenCalledWith('/api/chat/settings', expect.any(Object));
       expect(result.currentProfile).toBe('work');
+	  expect(result.defaultCWD).toBe('/workspace/default');
     });
+  });
+
+  describe('getCWDHints', () => {
+	  it('fetches cwd suggestions', async () => {
+		const mockResponse: CWDHintsResponse = {
+		  baseDir: '/workspace',
+		  query: '/workspace/ko',
+		  hints: [{ path: '/workspace/kodelet' }],
+		};
+
+		mockFetch.mockResolvedValueOnce({
+		  ok: true,
+		  json: async () => mockResponse,
+		});
+
+		const result = await apiService.getCWDHints('/workspace/ko');
+
+		expect(mockFetch).toHaveBeenCalledWith(
+		  '/api/chat/cwd-suggestions?q=%2Fworkspace%2Fko',
+		  expect.any(Object)
+		);
+		expect(result).toEqual(mockResponse);
+	  });
   });
 
   describe('deleteConversation', () => {
@@ -433,5 +459,37 @@ describe('ApiService', () => {
         })
       );
     });
+
+	it('sends cwd when provided', async () => {
+	  const encoder = new TextEncoder();
+	  const stream = new ReadableStream({
+		start(controller) {
+		  controller.enqueue(encoder.encode('{"kind":"done"}\n'));
+		  controller.close();
+		},
+	  });
+
+	  mockFetch.mockResolvedValueOnce({
+		ok: true,
+		body: stream,
+	  });
+
+	  await apiService.streamChat(
+		{
+		  message: 'hello',
+		  cwd: '/workspace/project',
+		},
+		{
+		  onEvent: vi.fn(),
+		}
+	  );
+
+	  expect(mockFetch).toHaveBeenCalledWith(
+		'/api/chat',
+		expect.objectContaining({
+		  body: JSON.stringify({ message: 'hello', cwd: '/workspace/project' }),
+		})
+	  );
+	});
   });
 });

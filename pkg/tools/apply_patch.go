@@ -122,8 +122,8 @@ func (t *ApplyPatchTool) TracingKVs(parameters string) ([]attribute.KeyValue, er
 }
 
 // ValidateInput validates the patch format and referenced files.
-func (t *ApplyPatchTool) ValidateInput(_ tooltypes.State, parameters string) error {
-	parsed, err := parseAndResolvePatchInput(parameters)
+func (t *ApplyPatchTool) ValidateInput(state tooltypes.State, parameters string) error {
+	parsed, err := parseAndResolvePatchInput(parameters, state.WorkingDirectory())
 	if err != nil {
 		return err
 	}
@@ -165,7 +165,7 @@ func (t *ApplyPatchTool) ValidateInput(_ tooltypes.State, parameters string) err
 
 // Execute applies the patch to disk.
 func (t *ApplyPatchTool) Execute(_ context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
-	parsed, err := parseAndResolvePatchInput(parameters)
+	parsed, err := parseAndResolvePatchInput(parameters, state.WorkingDirectory())
 	if err != nil {
 		return &applyPatchToolResult{err: err.Error()}
 	}
@@ -327,7 +327,7 @@ func lockPaths(state tooltypes.State, paths ...string) func() {
 	}
 }
 
-func parseAndResolvePatchInput(parameters string) (*parsedPatch, error) {
+func parseAndResolvePatchInput(parameters string, workingDir string) (*parsedPatch, error) {
 	input := &ApplyPatchInput{}
 	if err := json.Unmarshal([]byte(parameters), input); err != nil {
 		return nil, errors.Wrap(err, "invalid input")
@@ -341,9 +341,12 @@ func parseAndResolvePatchInput(parameters string) (*parsedPatch, error) {
 		return nil, err
 	}
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get current working directory")
+	cwd := strings.TrimSpace(workingDir)
+	if cwd == "" {
+		cwd, err = os.Getwd()
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to get current working directory")
+		}
 	}
 
 	for i := range parsed.hunks {

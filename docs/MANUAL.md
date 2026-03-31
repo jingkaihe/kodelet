@@ -1025,6 +1025,9 @@ Both flows save credentials to `~/.kodelet/codex-credentials.json`.
 kodelet codex status
 ```
 
+With ChatGPT OAuth credentials, this also shows the live Codex usage snapshot,
+including rolling windows and workspace credits.
+
 ### Configure Codex
 
 ```yaml

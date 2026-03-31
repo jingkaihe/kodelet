@@ -18,6 +18,7 @@ type QueryOptions struct {
 	EndDate    *time.Time // Filter by end date
 	SearchTerm string     // Text to search for in messages
 	Provider   string     // Filter by LLM provider (e.g., "anthropic", "openai")
+	CWD        string     // Filter by canonical working directory
 	Limit      int        // Maximum number of results
 	Offset     int        // Offset for pagination
 	SortBy     string     // Field to sort by
@@ -27,6 +28,7 @@ type QueryOptions struct {
 // ConversationRecord represents a persisted conversation with its messages and metadata
 type ConversationRecord struct {
 	ID             string                                `json:"id"`
+	CWD            string                                `json:"cwd,omitempty"`
 	RawMessages    json.RawMessage                       `json:"rawMessages"` // Raw LLM provider messages
 	Provider       string                                `json:"provider"`    // e.g., "anthropic"
 	FileLastAccess map[string]time.Time                  `json:"fileLastAccess"`
@@ -41,6 +43,7 @@ type ConversationRecord struct {
 // ConversationSummary provides a brief overview of a conversation
 type ConversationSummary struct {
 	ID           string         `json:"id"`
+	CWD          string         `json:"cwd,omitempty"`
 	MessageCount int            `json:"messageCount"`
 	FirstMessage string         `json:"firstMessage"`
 	Summary      string         `json:"summary,omitempty"`
@@ -114,6 +117,7 @@ func (cr *ConversationRecord) ToSummary() ConversationSummary {
 
 	return ConversationSummary{
 		ID:           cr.ID,
+		CWD:          cr.CWD,
 		MessageCount: messageCount,
 		FirstMessage: firstMessage,
 		Summary:      cr.Summary,

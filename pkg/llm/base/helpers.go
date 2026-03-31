@@ -2,6 +2,7 @@ package base
 
 import (
 	"context"
+	"os"
 
 	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -22,7 +23,14 @@ func CreateHookTrigger(ctx context.Context, config llmtypes.Config, conversation
 		return hooks.Trigger{}
 	}
 
-	return hooks.NewTrigger(hookManager, conversationID, config.IsSubAgent, config.RecipeName)
+	workingDir := config.WorkingDirectory
+	if workingDir == "" {
+		if cwd, err := os.Getwd(); err == nil {
+			workingDir = cwd
+		}
+	}
+
+	return hooks.NewTrigger(hookManager, conversationID, config.IsSubAgent, workingDir, config.RecipeName)
 }
 
 // AvailableTools returns tools from state while handling disabled tool use and nil state.

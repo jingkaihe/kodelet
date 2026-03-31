@@ -28,6 +28,7 @@ import (
 
 type RunConfig struct {
 	ResumeConvID         string
+	CWD                  string
 	Follow               bool
 	NoSave               bool
 	Headless             bool              // Use structured JSON output instead of console formatting
@@ -58,6 +59,7 @@ type RunConfig struct {
 func NewRunConfig() *RunConfig {
 	return &RunConfig{
 		ResumeConvID:         "",
+		CWD:                  "",
 		Follow:               false,
 		NoSave:               false,
 		Headless:             false,
@@ -178,22 +180,42 @@ func normalizeConversationProfile(profile string) string {
 	return profile
 }
 
-func loadResumeConversationConfig(ctx context.Context, cmd *cobra.Command, conversationID string) (llmtypes.Config, error) {
+func loadResumeConversationConfig(ctx context.Context, cmd *cobra.Command, conversationID string, requestedCWD string) (llmtypes.Config, string, error) {
+	defaultCWD, err := conversations.CurrentWorkingDirectory()
+	if err != nil {
+		return llmtypes.Config{}, "", err
+	}
+
 	if strings.TrimSpace(conversationID) == "" {
-		return llm.GetConfigFromViperWithCmd(cmd)
+		config, err := llm.GetConfigFromViperWithCmd(cmd)
+		if err != nil {
+			return llmtypes.Config{}, "", err
+		}
+
+		resolution, err := conversations.ResolveCWD(ctx, nil, "", requestedCWD, defaultCWD, false)
+		if err != nil {
+			return llmtypes.Config{}, "", err
+		}
+		config.WorkingDirectory = resolution.CWD
+		return config, resolution.CWD, nil
 	}
 
 	store, err := conversations.GetConversationStore(ctx)
 	if err != nil {
-		return llmtypes.Config{}, errors.Wrap(err, "failed to open conversation store")
+		return llmtypes.Config{}, "", errors.Wrap(err, "failed to open conversation store")
 	}
 	defer func() {
 		_ = store.Close()
 	}()
 
+	resolution, err := conversations.ResolveCWD(ctx, store, conversationID, requestedCWD, defaultCWD, true)
+	if err != nil {
+		return llmtypes.Config{}, "", errors.Wrap(err, "failed to resolve conversation cwd")
+	}
+
 	record, err := store.Load(ctx, conversationID)
 	if err != nil {
-		return llmtypes.Config{}, errors.Wrap(err, "failed to load conversation")
+		return llmtypes.Config{}, "", errors.Wrap(err, "failed to load conversation")
 	}
 
 	profileName := ""
@@ -212,7 +234,7 @@ func loadResumeConversationConfig(ctx context.Context, cmd *cobra.Command, conve
 		config, err = llm.GetConfigFromViperWithCmd(cmd)
 	}
 	if err != nil {
-		return llmtypes.Config{}, err
+		return llmtypes.Config{}, "", err
 	}
 
 	if strings.TrimSpace(record.Provider) != "" {
@@ -251,7 +273,8 @@ func loadResumeConversationConfig(ctx context.Context, cmd *cobra.Command, conve
 	} else {
 		config.Profile = profileName
 	}
-	return config, nil
+	config.WorkingDirectory = resolution.CWD
+	return config, resolution.CWD, nil
 }
 
 var runCmd = &cobra.Command{
@@ -311,11 +334,12 @@ var runCmd = &cobra.Command{
 			return
 		}
 
-		llmConfig, err := loadResumeConversationConfig(ctx, cmd, config.ResumeConvID)
+		llmConfig, resolvedCWD, err := loadResumeConversationConfig(ctx, cmd, config.ResumeConvID, config.CWD)
 		if err != nil {
 			presenter.Error(err, "Failed to load configuration")
 			return
 		}
+		llmConfig.WorkingDirectory = resolvedCWD
 
 		llmConfig.NoHooks = config.NoHooks
 		if cmd.Flags().Changed("disable-fs-search-tools") {
@@ -355,7 +379,7 @@ var runCmd = &cobra.Command{
 
 		// Check if MCP code execution mode is enabled
 		executionMode := viper.GetString("mcp.execution_mode")
-		workspaceDir, err := mcp.ResolveWorkspaceDir("")
+		workspaceDir, err := mcp.ResolveWorkspaceDir(llmConfig.WorkingDirectory)
 		if err != nil {
 			presenter.Error(err, "Failed to resolve MCP workspace directory")
 			return
@@ -366,6 +390,7 @@ var runCmd = &cobra.Command{
 		llmConfig.MCPWorkspaceDir = workspaceDir
 
 		var stateOpts []tools.BasicStateOption
+		stateOpts = append(stateOpts, tools.WithWorkingDirectory(llmConfig.WorkingDirectory))
 		stateOpts = append(stateOpts, tools.WithLLMConfig(llmConfig))
 		stateOpts = append(stateOpts, tools.WithCustomTools(customManager))
 
@@ -392,7 +417,7 @@ var runCmd = &cobra.Command{
 
 		// Set up MCP execution mode
 		if mcpManager != nil {
-			mcpSetup, err := mcp.SetupExecutionMode(ctx, mcpManager, sessionID, "")
+			mcpSetup, err := mcp.SetupExecutionMode(ctx, mcpManager, sessionID, llmConfig.WorkingDirectory)
 			if err != nil && !errors.Is(err, mcp.ErrDirectMode) {
 				presenter.Error(err, "Failed to set up MCP execution mode")
 				return
@@ -547,6 +572,7 @@ var runCmd = &cobra.Command{
 func init() {
 	defaults := NewRunConfig()
 	runCmd.Flags().String("resume", defaults.ResumeConvID, "Resume a specific conversation")
+	runCmd.Flags().String("cwd", defaults.CWD, "Working directory to execute in (defaults to current shell directory for new runs)")
 	runCmd.Flags().BoolP("follow", "f", defaults.Follow, "Follow the most recent conversation")
 	runCmd.Flags().Bool("no-save", defaults.NoSave, "Disable conversation persistence")
 	runCmd.Flags().Bool("headless", defaults.Headless, "Output structured JSON instead of console formatting")
@@ -576,6 +602,9 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 
 	if resumeConvID, err := cmd.Flags().GetString("resume"); err == nil {
 		config.ResumeConvID = resumeConvID
+	}
+	if cwd, err := cmd.Flags().GetString("cwd"); err == nil {
+		config.CWD = strings.TrimSpace(cwd)
 	}
 	if follow, err := cmd.Flags().GetBool("follow"); err == nil {
 		config.Follow = follow

@@ -290,7 +290,6 @@ func (r *BashToolResult) StructuredData() tooltypes.StructuredToolResult {
 
 // Execute runs the bash command and returns the result
 func (b *BashTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
-	_ = state
 	input := &BashInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
@@ -301,18 +300,21 @@ func (b *BashTool) Execute(ctx context.Context, state tooltypes.State, parameter
 			error:      err.Error(),
 		}
 	}
-	return b.executeForeground(ctx, input)
+	return b.executeForeground(ctx, input, state.WorkingDirectory())
 }
 
-func (b *BashTool) executeForeground(ctx context.Context, input *BashInput) tooltypes.ToolResult {
+func (b *BashTool) executeForeground(ctx context.Context, input *BashInput, cwd string) tooltypes.ToolResult {
 	startTime := time.Now()
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(input.Timeout)*time.Second)
 	defer cancel()
 
-	// Get current working directory
-	workingDir, _ := os.Getwd()
+	workingDir := cwd
+	if strings.TrimSpace(workingDir) == "" {
+		workingDir, _ = os.Getwd()
+	}
 
 	cmd := exec.CommandContext(ctx, "bash", "-c", input.Command)
+	cmd.Dir = workingDir
 	if env, err := bashEnvWithPreferredBinDirs(); err == nil {
 		cmd.Env = env
 	}

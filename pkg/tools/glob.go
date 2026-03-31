@@ -294,7 +294,7 @@ func searchWithFd(ctx context.Context, searchPath, pattern string, ignoreGitigno
 }
 
 // Execute searches for files matching the glob pattern
-func (t *GlobTool) Execute(ctx context.Context, _ tooltypes.State, parameters string) tooltypes.ToolResult {
+func (t *GlobTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
 	var input GlobInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return &GlobToolResult{
@@ -307,12 +307,15 @@ func (t *GlobTool) Execute(ctx context.Context, _ tooltypes.State, parameters st
 	searchPath := input.Path
 	var err error
 	if searchPath == "" {
-		searchPath, err = os.Getwd()
-		if err != nil {
-			return &GlobToolResult{
-				pattern: input.Pattern,
-				path:    input.Path,
-				err:     err.Error(),
+		searchPath = state.WorkingDirectory()
+		if searchPath == "" {
+			searchPath, err = os.Getwd()
+			if err != nil {
+				return &GlobToolResult{
+					pattern: input.Pattern,
+					path:    input.Path,
+					err:     err.Error(),
+				}
 			}
 		}
 	}

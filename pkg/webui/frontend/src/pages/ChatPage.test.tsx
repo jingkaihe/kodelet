@@ -15,6 +15,7 @@ const mockGetConversation = vi.fn();
 const mockGetChatSettings = vi.fn();
 const mockStreamChat = vi.fn();
 const mockStreamConversation = vi.fn();
+const mockGetCWDHints = vi.fn();
 const mockSteerConversation = vi.fn();
 const mockStopConversation = vi.fn();
 const mockDeleteConversation = vi.fn();
@@ -39,6 +40,7 @@ vi.mock("../services/api", () => ({
 		getConversations: (...args: unknown[]) => mockGetConversations(...args),
 		getConversation: (...args: unknown[]) => mockGetConversation(...args),
 		getChatSettings: (...args: unknown[]) => mockGetChatSettings(...args),
+		getCWDHints: (...args: unknown[]) => mockGetCWDHints(...args),
 		streamChat: (...args: unknown[]) => mockStreamChat(...args),
 		streamConversation: (...args: unknown[]) => mockStreamConversation(...args),
 		steerConversation: (...args: unknown[]) => mockSteerConversation(...args),
@@ -56,6 +58,7 @@ describe("ChatPage", () => {
 		window.HTMLElement.prototype.scrollIntoView = vi.fn();
 		mockGetChatSettings.mockResolvedValue({
 			currentProfile: "work",
+			defaultCWD: "/workspace/default",
 			profiles: [
 				{ name: "default", scope: "built-in" },
 				{ name: "work", scope: "repo" },
@@ -86,6 +89,9 @@ describe("ChatPage", () => {
 		mockForkConversation.mockResolvedValue({
 			success: true,
 			conversation_id: "conv-copy-123",
+		});
+		mockGetCWDHints.mockResolvedValue({
+			hints: [{ path: "/workspace/default" }],
 		});
 	});
 
@@ -226,6 +232,10 @@ describe("ChatPage", () => {
 		render(<ChatPage />);
 
 		await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
+		await waitFor(() => expect(mockGetCWDHints).toHaveBeenCalled());
+		fireEvent.change(screen.getByLabelText("Working directory"), {
+			target: { value: "/workspace/alt" },
+		});
 
 		fireEvent.change(screen.getByLabelText("Profile"), {
 			target: { value: "premium" },
@@ -238,9 +248,96 @@ describe("ChatPage", () => {
 
 		await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
 		expect(mockStreamChat).toHaveBeenCalledWith(
-			expect.objectContaining({ profile: "premium" }),
+			expect.objectContaining({ profile: "premium", cwd: "/workspace/alt" }),
 			expect.any(Object),
 		);
+	});
+
+	it("shows cwd suggestions and applies a clicked suggestion", async () => {
+		mockGetCWDHints.mockResolvedValueOnce({
+			hints: [{ path: "/workspace/default" }],
+		});
+		mockGetCWDHints.mockResolvedValueOnce({
+			hints: [{ path: "/workspace/kodelet" }, { path: "/workspace/koala" }],
+		});
+		mockStreamChat.mockResolvedValue(undefined);
+
+		render(<ChatPage />);
+
+		await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
+
+		const cwdInput = screen.getByLabelText("Working directory");
+		fireEvent.focus(cwdInput);
+		fireEvent.change(cwdInput, { target: { value: "/workspace/ko" } });
+
+		await waitFor(() =>
+			expect(mockGetCWDHints).toHaveBeenLastCalledWith("/workspace/ko"),
+		);
+		await waitFor(() =>
+			expect(screen.getByTestId("cwd-suggestions")).toBeInTheDocument(),
+		);
+
+		fireEvent.mouseDown(screen.getByTestId("cwd-suggestion-0"));
+		expect((screen.getByLabelText("Working directory") as HTMLInputElement).value).toBe(
+			"/workspace/kodelet",
+		);
+	});
+
+	it("supports keyboard selection for cwd suggestions", async () => {
+		mockGetCWDHints.mockResolvedValueOnce({
+			hints: [{ path: "/workspace/default" }],
+		});
+		mockGetCWDHints.mockResolvedValueOnce({
+			hints: [{ path: "/workspace/kodelet" }, { path: "/workspace/koala" }],
+		});
+
+		render(<ChatPage />);
+
+		await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
+
+		const cwdInput = screen.getByLabelText("Working directory");
+		fireEvent.focus(cwdInput);
+		fireEvent.change(cwdInput, { target: { value: "/workspace/ko" } });
+
+		await waitFor(() =>
+			expect(screen.getByTestId("cwd-suggestions")).toBeInTheDocument(),
+		);
+
+		fireEvent.keyDown(cwdInput, { key: "ArrowDown" });
+		fireEvent.keyDown(cwdInput, { key: "Enter" });
+
+		expect((screen.getByLabelText("Working directory") as HTMLInputElement).value).toBe(
+			"/workspace/kodelet",
+		);
+	});
+
+	it("locks the cwd input for existing conversations", async () => {
+		routeParams = { id: "conv-123" };
+		mockGetConversation.mockResolvedValue({
+			id: "conv-123",
+			createdAt: "2023-01-01T00:00:00Z",
+			updatedAt: "2023-01-02T00:00:00Z",
+			messageCount: 1,
+			cwd: "/workspace/project",
+			cwdLocked: true,
+			messages: [
+				{
+					role: "user",
+					content: "hello",
+				},
+			],
+			toolResults: {},
+		});
+
+		render(<ChatPage />);
+
+		await waitFor(() =>
+			expect(mockGetConversation).toHaveBeenCalledWith("conv-123"),
+		);
+
+		expect(screen.getByTestId("cwd-static-pill")).toBeInTheDocument();
+		expect(screen.queryByLabelText("Working directory")).not.toBeInTheDocument();
+		expect(screen.getByText("/workspace/project")).toBeInTheDocument();
 	});
 
 	it("locks the profile selector for existing conversations", async () => {
@@ -271,7 +368,7 @@ describe("ChatPage", () => {
 		expect(screen.getByTestId("profile-static-pill")).toBeInTheDocument();
 		expect(screen.queryByLabelText("Profile")).not.toBeInTheDocument();
 		expect(screen.getByText("premium")).toBeInTheDocument();
-		expect(screen.getByText("Locked")).toBeInTheDocument();
+		expect(screen.getAllByText("Locked")).toHaveLength(2);
 
 		fireEvent.change(screen.getByPlaceholderText("Ask kodelet anything..."), {
 			target: { value: "continue" },

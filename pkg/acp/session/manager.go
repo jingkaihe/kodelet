@@ -204,6 +204,7 @@ func (m *Manager) buildLLMConfig(projectDir string) llmtypes.Config {
 	config.NoHooks = m.config.NoHooks
 	config.DisableFSSearchTools = m.config.DisableFSSearchTools
 	config.DisableSubagent = m.config.DisableSubagent
+	config.WorkingDirectory = projectDir
 
 	if m.config.NoSkills {
 		if config.Skills == nil {
@@ -362,6 +363,7 @@ func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest
 	}
 
 	var stateOpts []tools.BasicStateOption
+	stateOpts = append(stateOpts, tools.WithWorkingDirectory(req.CWD))
 	stateOpts = append(stateOpts, tools.WithLLMConfig(llmConfig))
 	stateOpts = append(stateOpts, tools.WithMainTools())
 
@@ -423,6 +425,7 @@ func (m *Manager) LoadSession(ctx context.Context, req acptypes.LoadSessionReque
 	thread.SetConversationID(string(req.SessionID))
 
 	var stateOpts []tools.BasicStateOption
+	stateOpts = append(stateOpts, tools.WithWorkingDirectory(req.CWD))
 	stateOpts = append(stateOpts, tools.WithLLMConfig(llmConfig))
 	stateOpts = append(stateOpts, tools.WithMainTools())
 

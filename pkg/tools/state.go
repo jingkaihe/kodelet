@@ -33,6 +33,7 @@ type BasicState struct {
 	mu           sync.RWMutex
 	sessionID    string
 	todoFilePath string
+	workingDir   string
 	tools        []tooltypes.Tool
 	mcpTools     []tooltypes.Tool
 	customTools  []tooltypes.Tool
@@ -79,6 +80,7 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 		lastAccessed: make(map[string]time.Time),
 		sessionID:    uuid.New().String(),
 		todoFilePath: "",
+		workingDir:   workingDir,
 		contextCache: make(map[string]*contextInfo),
 		contextDiscovery: &ContextDiscovery{
 			workingDir:      workingDir,
@@ -180,6 +182,30 @@ func WithCustomTools(customManager *CustomToolManager) BasicStateOption {
 func WithLLMConfig(config llmtypes.Config) BasicStateOption {
 	return func(_ context.Context, s *BasicState) error {
 		s.llmConfig = config
+		if strings.TrimSpace(config.WorkingDirectory) != "" {
+			s.workingDir = config.WorkingDirectory
+			if s.contextDiscovery != nil {
+				s.contextDiscovery.workingDir = config.WorkingDirectory
+			}
+		}
+		return nil
+	}
+}
+
+// WithWorkingDirectory returns an option that sets the explicit working directory.
+func WithWorkingDirectory(workingDir string) BasicStateOption {
+	return func(_ context.Context, s *BasicState) error {
+		workingDir = strings.TrimSpace(workingDir)
+		if workingDir == "" {
+			return nil
+		}
+		s.workingDir = workingDir
+		if s.contextDiscovery != nil {
+			s.contextDiscovery.workingDir = workingDir
+		}
+		if s.llmConfig.WorkingDirectory == "" {
+			s.llmConfig.WorkingDirectory = workingDir
+		}
 		return nil
 	}
 }
@@ -469,6 +495,13 @@ func (s *BasicState) GetLLMConfig() any {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.llmConfig
+}
+
+// WorkingDirectory returns the state working directory.
+func (s *BasicState) WorkingDirectory() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.workingDir
 }
 
 func (s *BasicState) configureTools() {

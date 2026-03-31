@@ -44,6 +44,7 @@ func (m *swapContextMockState) MCPTools() []tooltypes.Tool                 { ret
 func (m *swapContextMockState) Tools() []tooltypes.Tool                    { return nil }
 func (m *swapContextMockState) DiscoverContexts() map[string]string        { return nil }
 func (m *swapContextMockState) GetLLMConfig() any                          { return nil }
+func (m *swapContextMockState) WorkingDirectory() string                   { return "" }
 func (m *swapContextMockState) LockFile(_ string)                          {}
 func (m *swapContextMockState) UnlockFile(_ string)                        {}
 

@@ -2,6 +2,7 @@
 
 import {
   ChatSettings,
+  CWDHintsResponse,
   ChatRequest,
   ChatStreamEvent,
   Conversation,
@@ -94,6 +95,15 @@ class ApiService {
 
   async getChatSettings(): Promise<ChatSettings> {
     return this.request<ChatSettings>('/api/chat/settings');
+  }
+
+  async getCWDHints(query: string): Promise<CWDHintsResponse> {
+    const params = new URLSearchParams();
+    if (query) {
+      params.append('q', query);
+    }
+    const suffix = params.toString();
+    return this.request<CWDHintsResponse>(`/api/chat/cwd-suggestions${suffix ? `?${suffix}` : ''}`);
   }
 
   async deleteConversation(id: string): Promise<void> {

@@ -59,6 +59,8 @@ export interface Conversation {
   messageCount: number;
   summary?: string;
   provider?: string;
+  cwd?: string;
+  cwdLocked?: boolean;
   profile?: string;
   profileLocked?: boolean;
   platform?: string;
@@ -112,6 +114,7 @@ export interface ChatRequest {
   content?: ContentBlock[];
   conversationId?: string;
   profile?: string;
+  cwd?: string;
 }
 
 export interface SteerConversationRequest {
@@ -144,6 +147,17 @@ export interface ChatProfileOption {
 export interface ChatSettings {
   currentProfile?: string;
   profiles: ChatProfileOption[];
+  defaultCWD?: string;
+}
+
+export interface CWDHint {
+  path: string;
+}
+
+export interface CWDHintsResponse {
+  baseDir?: string;
+  query?: string;
+  hints: CWDHint[];
 }
 
 export interface PendingImageAttachment {
