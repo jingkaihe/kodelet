@@ -175,7 +175,15 @@ describe('ChatTranscript', () => {
       />
     );
 
-    expect(screen.getByRole('button', { name: 'Copy to clipboard' })).toBeInTheDocument();
+    const button = screen.getByRole('button', { name: 'Copy to clipboard' });
+
+    expect(button).toBeInTheDocument();
+    expect(button).toHaveClass(
+      'opacity-0',
+      'transition-opacity',
+      'group-hover:opacity-100',
+      'group-focus-within:opacity-100'
+    );
     expect(screen.queryByRole('button', { name: 'Copy' })).not.toBeInTheDocument();
   });
 });
