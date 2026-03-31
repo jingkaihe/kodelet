@@ -3,6 +3,7 @@
 ## 0.3.21-beta (2026-03-31)
 
 Updated conversation short-summary generation to build from rendered conversation markdown instead of plain role/content text, preserving tool context while excluding thinking blocks.
+Collapsed completed Web UI thinking blocks by default while keeping active reasoning expanded until streaming finishes.
 
 ## 0.3.20-beta (2026-03-29)
 

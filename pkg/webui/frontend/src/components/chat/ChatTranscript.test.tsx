@@ -15,7 +15,7 @@ describe('ChatTranscript', () => {
     expect(screen.getByText('Good afternoon')).toBeInTheDocument();
   });
 
-  it('renders thinking blocks as markdown', () => {
+  it('renders completed thinking blocks collapsed by default', () => {
     const { container } = render(
       <ChatTranscript
         isStreaming={false}
@@ -26,6 +26,32 @@ describe('ChatTranscript', () => {
               {
                 type: 'thinking',
                 content: '**Plan**\n\n- inspect repo',
+                inProgress: false,
+              },
+            ],
+          },
+        ]}
+      />
+    );
+
+    expect(screen.getByText('Thinking')).toBeInTheDocument();
+    expect(container.querySelector('details')).not.toHaveAttribute('open');
+    expect(screen.getByText('Plan')).toBeInTheDocument();
+    expect(container.querySelector('strong')?.textContent).toBe('Plan');
+    expect(screen.getByText('inspect repo')).toBeInTheDocument();
+  });
+
+  it('auto-collapses a thinking block when streaming finishes', () => {
+    const { container, rerender } = render(
+      <ChatTranscript
+        isStreaming={true}
+        messages={[
+          {
+            role: 'assistant',
+            blocks: [
+              {
+                type: 'thinking',
+                content: 'Inspecting the repo',
                 inProgress: true,
               },
             ],
@@ -34,9 +60,29 @@ describe('ChatTranscript', () => {
       />
     );
 
-    expect(screen.getByText('Plan')).toBeInTheDocument();
-    expect(container.querySelector('strong')?.textContent).toBe('Plan');
-    expect(screen.getByText('inspect repo')).toBeInTheDocument();
+    expect(container.querySelector('details')).toBeNull();
+    expect(screen.getByText('Following the thread…')).toBeInTheDocument();
+
+    rerender(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[
+          {
+            role: 'assistant',
+            blocks: [
+              {
+                type: 'thinking',
+                content: 'Inspecting the repo',
+                inProgress: false,
+              },
+            ],
+          },
+        ]}
+      />
+    );
+
+    expect(screen.getByText('Thinking')).toBeInTheDocument();
+    expect(container.querySelector('details')).not.toHaveAttribute('open');
   });
 
   it('uses the rotating streaming label on in-progress thinking blocks', () => {

@@ -228,6 +228,33 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
                         isActiveStreamingAssistant && block.inProgress
                           ? streamingIndicatorMessage
                           : 'Thinking';
+                      const hasThinkingContent =
+                        extractContentText(block.content).trim().length > 0;
+
+                      if (!block.inProgress) {
+                        return (
+                          <details
+                            key={`thinking-${blockIndex}`}
+                            className="chat-subpanel overflow-hidden rounded-2xl"
+                          >
+                            <summary className="cursor-pointer list-none px-4 py-3 font-heading text-sm font-semibold text-kodelet-blue">
+                              {thinkingLabel}
+                            </summary>
+                            <div className="border-t border-black/8 px-4 py-4">
+                              {hasThinkingContent ? (
+                                <div
+                                  className="chat-prose max-w-none text-kodelet-dark"
+                                  dangerouslySetInnerHTML={{ __html: renderContent(block.content) }}
+                                />
+                              ) : (
+                                <p className="text-sm italic text-kodelet-blue/80">
+                                  Reasoning complete.
+                                </p>
+                              )}
+                            </div>
+                          </details>
+                        );
+                      }
 
                       return (
                         <div
@@ -244,7 +271,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
                               {thinkingLabel}
                             </span>
                           </div>
-                          {extractContentText(block.content).trim() ? (
+                          {hasThinkingContent ? (
                             <div
                               className="chat-prose max-w-none text-kodelet-dark"
                               dangerouslySetInnerHTML={{ __html: renderContent(block.content) }}
