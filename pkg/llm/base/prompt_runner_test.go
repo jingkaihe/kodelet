@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -62,4 +63,19 @@ func TestGenerateShortSummary(t *testing.T) {
 
 		assert.Equal(t, "Could not generate summary.", summary)
 	})
+}
+
+func TestRenderMarkdownForSummaryExcludesThinking(t *testing.T) {
+	messages := []conversations.StreamableMessage{
+		{Kind: "text", Role: "user", Content: "Summarize this"},
+		{Kind: "thinking", Role: "assistant", Content: "Internal reasoning"},
+		{Kind: "text", Role: "assistant", Content: "Here is the summary."},
+	}
+
+	markdown := RenderMarkdownForSummary(messages, nil)
+
+	assert.Contains(t, markdown, "Summarize this")
+	assert.Contains(t, markdown, "Here is the summary.")
+	assert.NotContains(t, markdown, "### Assistant · Thinking")
+	assert.NotContains(t, markdown, "Internal reasoning")
 }

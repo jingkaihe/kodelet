@@ -23,6 +23,7 @@ type MarkdownOptions struct {
 	TruncateToolResults bool
 	MaxToolResultChars  int
 	MaxToolResultBytes  int
+	ExcludeThinking     bool
 }
 
 // RenderMarkdown converts conversation entries into markdown.
@@ -37,13 +38,18 @@ func RenderMarkdown(
 	opts = normalizeMarkdownOptions(opts)
 	registry := renderers.NewRendererRegistry()
 	consumedResults := make(map[int]struct{})
+	renderedMessages := 0
 
 	for i, msg := range messages {
+		if opts.ExcludeThinking && msg.Kind == "thinking" {
+			continue
+		}
+
 		if _, consumed := consumedResults[i]; consumed {
 			continue
 		}
 
-		if i > 0 {
+		if renderedMessages > 0 {
 			output.WriteString("\n")
 		}
 
@@ -54,6 +60,7 @@ func RenderMarkdown(
 			if hasResult {
 				consumedResults[resultIndex] = struct{}{}
 			}
+			renderedMessages++
 			continue
 		}
 
@@ -72,9 +79,11 @@ func RenderMarkdown(
 		default:
 			output.WriteString(renderTextBlockMarkdown(msg))
 		}
+
+		renderedMessages++
 	}
 
-	if len(messages) == 0 {
+	if renderedMessages == 0 {
 		output.WriteString("_No messages._\n")
 	}
 

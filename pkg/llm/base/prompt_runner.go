@@ -100,6 +100,7 @@ func RenderMarkdownForSummary(
 ) string {
 	return conversations.RenderMarkdown(messages, toolResults, conversations.MarkdownOptions{
 		TruncateToolResults: true,
+		ExcludeThinking:     true,
 	})
 }
 
