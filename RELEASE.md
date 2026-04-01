@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.3.22-beta (2026-04-01)
+
+Bound conversations to a canonical working directory, persisting `cwd` in conversation records so resumed CLI and Web UI chats stay attached to the same workspace; added Web UI cwd picking/autocomplete plus `kodelet serve --cwd` defaults for new chats.
+Updated `kodelet codex status` to fetch and display live ChatGPT-backed Codex usage windows and workspace credits when OAuth credentials are available, while still handling API-key-only setups cleanly.
+Plumbed the resolved working directory through hook, sysprompt, MCP, and tool state handling so relative-path tools like `apply_patch`, `grep`, `glob`, and `bash` execute against the intended workspace more reliably.
+
 ## 0.3.21-beta (2026-03-31)
 
 Updated conversation short-summary generation to build from rendered conversation markdown instead of plain role/content text, preserving tool context while excluding thinking blocks.
