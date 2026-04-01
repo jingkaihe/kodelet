@@ -1407,11 +1407,12 @@ const ChatPage: React.FC = () => {
 									value={draft}
 								/>
 
-								<div className="flex items-center justify-between gap-3 border-t border-black/8 px-2.5 pt-2.5">
-									<div className="flex flex-wrap items-center gap-2.5">
-										<button
-											className="composer-capsule composer-capsule-accent"
-											disabled={sending || steering}
+								<div className="border-t border-black/8 px-2.5 pt-2.5">
+									<div className="flex items-start justify-between gap-3">
+										<div className="flex min-w-0 flex-1 flex-wrap items-center gap-2.5">
+											<button
+												className="composer-capsule composer-capsule-accent"
+												disabled={sending || steering}
 											onClick={() => fileInputRef.current?.click()}
 											type="button"
 										>
@@ -1675,17 +1676,12 @@ const ChatPage: React.FC = () => {
 											</div>
 										)}
 
-											{composerStatus ? (
-												<p className="eyebrow-label text-kodelet-mid-gray">
-													{composerStatus}
-												</p>
-											) : null}
-									</div>
+										</div>
 
-									<div className="flex items-center gap-3">
-										{sending ? (
-											<button
-												className="composer-capsule"
+										<div className="flex shrink-0 items-center gap-3">
+											{sending ? (
+												<button
+													className="composer-capsule"
 												disabled={!canStopActiveConversation}
 												onClick={handleStop}
 												type="button"
@@ -1710,10 +1706,17 @@ const ChatPage: React.FC = () => {
 											}
 											onClick={() => void handleSubmit()}
 											type="button"
-										>
-											{steering ? "Queueing…" : sending ? "Steer" : "Send"}
-										</button>
+												>
+													{steering ? "Queueing…" : sending ? "Steer" : "Send"}
+												</button>
+											</div>
 									</div>
+
+									{composerStatus ? (
+										<p className="eyebrow-label mt-2 px-0.5 text-kodelet-mid-gray">
+											{composerStatus}
+										</p>
+									) : null}
 								</div>
 							</div>
 						</div>
