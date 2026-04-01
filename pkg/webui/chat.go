@@ -167,12 +167,14 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 }
 
 func resolveWebChatConfig(ctx context.Context, conversationID, requestedProfile, requestedCWD, defaultCWDInput string) (llmtypes.Config, string, error) {
-	defaultCWD, err := conversationservice.NormalizeCWD(defaultCWDInput)
-	if err != nil || defaultCWD == "" {
-		defaultCWD, err = conversationservice.CurrentWorkingDirectory()
-		if err != nil {
-			return llmtypes.Config{}, "", err
-		}
+	defaultCWD, err := resolveConfiguredDefaultCWD(defaultCWDInput)
+	if err != nil {
+		return llmtypes.Config{}, "", err
+	}
+
+	expandedRequestedCWD, err := expandWebCWDInput(requestedCWD, defaultCWD)
+	if err != nil {
+		return llmtypes.Config{}, "", err
 	}
 
 	if strings.TrimSpace(conversationID) == "" {
@@ -180,7 +182,7 @@ func resolveWebChatConfig(ctx context.Context, conversationID, requestedProfile,
 		if err != nil {
 			return llmtypes.Config{}, "", err
 		}
-		resolution, err := conversationservice.ResolveCWD(ctx, nil, "", requestedCWD, defaultCWD, false)
+		resolution, err := conversationservice.ResolveCWD(ctx, nil, "", expandedRequestedCWD, defaultCWD, false)
 		if err != nil {
 			return llmtypes.Config{}, "", err
 		}
@@ -196,7 +198,7 @@ func resolveWebChatConfig(ctx context.Context, conversationID, requestedProfile,
 		_ = service.Close()
 	}()
 
-	resolution, err := conversationservice.ResolveCWD(ctx, serviceStoreAdapter{service: service}, conversationID, requestedCWD, defaultCWD, false)
+	resolution, err := conversationservice.ResolveCWD(ctx, serviceStoreAdapter{service: service}, conversationID, expandedRequestedCWD, defaultCWD, false)
 	if err != nil {
 		return llmtypes.Config{}, "", err
 	}

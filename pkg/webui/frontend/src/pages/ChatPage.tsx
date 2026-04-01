@@ -251,6 +251,7 @@ const ChatPage: React.FC = () => {
 	const resumeControllerRef = useRef<AbortController | null>(null);
 	const sendStreamRef = useRef(0);
 	const resumeStreamRef = useRef(0);
+	const cwdSuggestionRequestRef = useRef(0);
 	const viewedConversationIdRef = useRef<string | null>(conversationId);
 	const sidebarResizeStartRef = useRef<{
 		startX: number;
@@ -302,6 +303,14 @@ const ChatPage: React.FC = () => {
 
 	useEffect(() => {
 		viewedConversationIdRef.current = conversationId;
+	}, [conversationId]);
+
+	useEffect(() => {
+		if (!conversationId) {
+			return;
+		}
+
+		cwdSuggestionRequestRef.current += 1;
 	}, [conversationId]);
 
 	useEffect(() => {
@@ -547,14 +556,31 @@ const ChatPage: React.FC = () => {
 	const requestCwdSuggestions = useMemo(
 		() =>
 			debounce((query: string) => {
+				const requestId = cwdSuggestionRequestRef.current + 1;
+				cwdSuggestionRequestRef.current = requestId;
+
 				void apiService
 					.getCWDHints(query)
 					.then((response) => {
+						if (
+							cwdSuggestionRequestRef.current !== requestId ||
+							viewedConversationIdRef.current
+						) {
+							return;
+						}
+
 						setCwdSuggestions(response.hints || []);
 						setCwdSuggestionsOpen((response.hints || []).length > 0);
 						setCwdSuggestionIndex(-1);
 					})
 					.catch((error) => {
+						if (
+							cwdSuggestionRequestRef.current !== requestId ||
+							viewedConversationIdRef.current
+						) {
+							return;
+						}
+
 						console.error("Failed to load cwd suggestions", error);
 						setCwdSuggestions([]);
 						setCwdSuggestionsOpen(false);
@@ -739,12 +765,12 @@ const ChatPage: React.FC = () => {
 										id: streamedId,
 										createdAt: now,
 										updatedAt: now,
-									messageCount: 1,
-									summary: userPreview,
-									preview: userPreview,
-									cwd: currentCWDLabel,
-									profile: selectedProfile,
-								}),
+										messageCount: 1,
+										summary: userPreview,
+										preview: userPreview,
+										cwd: currentCWDLabel,
+										profile: selectedProfile,
+									}),
 								);
 							}
 						}
@@ -964,7 +990,13 @@ const ChatPage: React.FC = () => {
 			return conversation?.cwd || chatSettings.defaultCWD || "";
 		}
 		return selectedCWD || cwdQuery || chatSettings.defaultCWD || "";
-	}, [chatSettings.defaultCWD, conversation?.cwd, conversationId, cwdQuery, selectedCWD]);
+	}, [
+		chatSettings.defaultCWD,
+		conversation?.cwd,
+		conversationId,
+		cwdQuery,
+		selectedCWD,
+	]);
 
 	const applyCwdSuggestion = (path: string) => {
 		setSelectedCWD(path);
@@ -1039,7 +1071,9 @@ const ChatPage: React.FC = () => {
 		hasActiveConversationTarget && steerAvailable;
 	const composerStatus = useMemo(() => {
 		if (!conversation) {
-			return sending ? "live · starting…" : "New conversation · profile and cwd ready";
+			return sending
+				? "live · starting…"
+				: "New conversation · profile and cwd ready";
 		}
 
 		const parts: string[] = [];
@@ -1373,77 +1407,99 @@ const ChatPage: React.FC = () => {
 														/>
 													</svg>
 												</span>
-						</label>
-					)}
+											</label>
+										)}
 
-					{conversationId ? (
-						<div
-							className="composer-profile-static"
-							data-testid="cwd-static-pill"
-						>
-							<div className="composer-profile-copy">
-								<span className="composer-profile-label">Directory</span>
-								<span className="composer-profile-value" title={currentCWDLabel}>
-									{currentCWDLabel || "(not set)"}
-								</span>
-							</div>
-							<span className="composer-profile-lock">Locked</span>
-						</div>
-					) : (
-						<label
-							className="composer-profile-picker"
-							data-testid="cwd-picker"
-						>
-							<span className="composer-profile-copy">
-								<span className="composer-profile-label">Directory</span>
-								<span className="composer-profile-value" title={currentCWDLabel}>
-									{currentCWDLabel || "Select working directory"}
-								</span>
-							</span>
-							<input
-								aria-label="Working directory"
-								className="composer-profile-input"
-								data-testid="cwd-input"
-								disabled={sending || steering}
-								onBlur={() => {
-									window.setTimeout(() => setCwdSuggestionsOpen(false), 120);
-								}}
-								onChange={(event) => handleCwdInputChange(event.target.value)}
-								onFocus={() => {
-									setCwdSuggestionsOpen(cwdSuggestions.length > 0);
-								}}
-								onKeyDown={handleCwdInputKeyDown}
-								placeholder={chatSettings.defaultCWD || "/path/to/project"}
-								ref={cwdInputRef}
-								type="text"
-								value={cwdQuery}
-							/>
-							{cwdSuggestionsOpen && cwdSuggestions.length > 0 ? (
-								<div className="composer-cwd-suggestions" data-testid="cwd-suggestions">
-									{cwdSuggestions.map((suggestion, index) => (
-										<button
-											className={cn(
-												"composer-cwd-suggestion",
-												index === cwdSuggestionIndex && "is-active",
-											)}
-											data-testid={`cwd-suggestion-${index}`}
-											key={suggestion.path}
-											onMouseDown={(event) => {
-												event.preventDefault();
-												applyCwdSuggestion(suggestion.path);
-											}}
-											type="button"
-										>
-											<span className="composer-cwd-suggestion-path">{suggestion.path}</span>
-										</button>
-									))}
-								</div>
-							) : null}
-						</label>
-					)}
+										{conversationId ? (
+											<div
+												className="composer-profile-static"
+												data-testid="cwd-static-pill"
+											>
+												<div className="composer-profile-copy">
+													<span className="composer-profile-label">
+														Directory
+													</span>
+													<span
+														className="composer-profile-value"
+														title={currentCWDLabel}
+													>
+														{currentCWDLabel || "(not set)"}
+													</span>
+												</div>
+												<span className="composer-profile-lock">Locked</span>
+											</div>
+										) : (
+											<label
+												className="composer-profile-picker"
+												data-testid="cwd-picker"
+											>
+												<span className="composer-profile-copy">
+													<span className="composer-profile-label">
+														Directory
+													</span>
+													<span
+														className="composer-profile-value"
+														title={currentCWDLabel}
+													>
+														{currentCWDLabel || "Select working directory"}
+													</span>
+												</span>
+												<input
+													aria-label="Working directory"
+													className="composer-profile-input"
+													data-testid="cwd-input"
+													disabled={sending || steering}
+													onBlur={() => {
+														window.setTimeout(
+															() => setCwdSuggestionsOpen(false),
+															120,
+														);
+													}}
+													onChange={(event) =>
+														handleCwdInputChange(event.target.value)
+													}
+													onFocus={() => {
+														setCwdSuggestionsOpen(cwdSuggestions.length > 0);
+													}}
+													onKeyDown={handleCwdInputKeyDown}
+													placeholder={
+														chatSettings.defaultCWD || "/path/to/project"
+													}
+													ref={cwdInputRef}
+													type="text"
+													value={cwdQuery}
+												/>
+												{cwdSuggestionsOpen && cwdSuggestions.length > 0 ? (
+													<div
+														className="composer-cwd-suggestions"
+														data-testid="cwd-suggestions"
+													>
+														{cwdSuggestions.map((suggestion, index) => (
+															<button
+																className={cn(
+																	"composer-cwd-suggestion",
+																	index === cwdSuggestionIndex && "is-active",
+																)}
+																data-testid={`cwd-suggestion-${index}`}
+																key={suggestion.path}
+																onMouseDown={(event) => {
+																	event.preventDefault();
+																	applyCwdSuggestion(suggestion.path);
+																}}
+																type="button"
+															>
+																<span className="composer-cwd-suggestion-path">
+																	{suggestion.path}
+																</span>
+															</button>
+														))}
+													</div>
+												) : null}
+											</label>
+										)}
 
-					<p className="eyebrow-label text-kodelet-mid-gray">
-						{composerStatus}
+										<p className="eyebrow-label text-kodelet-mid-gray">
+											{composerStatus}
 										</p>
 									</div>
 

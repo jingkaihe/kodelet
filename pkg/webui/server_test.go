@@ -139,6 +139,18 @@ func TestServerConfig_Validate(t *testing.T) {
 	}
 }
 
+func TestServerConfig_Validate_RejectsInvalidCWD(t *testing.T) {
+	config := &ServerConfig{
+		Host: "localhost",
+		Port: 8080,
+		CWD:  filepath.Join(t.TempDir(), "missing"),
+	}
+
+	err := config.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid cwd")
+}
+
 func TestServer_handleListConversations(t *testing.T) {
 	mockService := &mockConversationService{
 		listFunc: func(_ context.Context, _ *conversations.ListConversationsRequest) (*conversations.ListConversationsResponse, error) {
@@ -226,8 +238,9 @@ func TestServer_handleGetConversation(t *testing.T) {
 }
 
 func TestServer_handleGetChatSettings_IncludesDefaultCWD(t *testing.T) {
+	tmpDir := t.TempDir()
 	server := &Server{
-		config: &ServerConfig{CWD: "/workspace/project"},
+		config: &ServerConfig{CWD: tmpDir},
 	}
 
 	req := httptest.NewRequest("GET", "/api/chat/settings", nil)
@@ -240,7 +253,18 @@ func TestServer_handleGetChatSettings_IncludesDefaultCWD(t *testing.T) {
 	var response ChatSettingsResponse
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
-	assert.NotEmpty(t, response.DefaultCWD)
+	assert.Equal(t, tmpDir, response.DefaultCWD)
+}
+
+func TestServer_defaultCWD_ReturnsErrorForInvalidConfiguredCWD(t *testing.T) {
+	server := &Server{
+		config: &ServerConfig{CWD: filepath.Join(t.TempDir(), "missing")},
+	}
+
+	defaultCWD, err := server.defaultCWD()
+	require.Error(t, err)
+	assert.Empty(t, defaultCWD)
+	assert.Contains(t, err.Error(), "cwd directory does not exist")
 }
 
 func TestServer_handleGetCWDHints(t *testing.T) {

@@ -101,6 +101,12 @@ func (c *ServerConfig) Validate() error {
 		return errors.Errorf("port must be between 1 and 65535, got %d", c.Port)
 	}
 
+	if strings.TrimSpace(c.CWD) != "" {
+		if _, err := resolveConfiguredDefaultCWD(c.CWD); err != nil {
+			return errors.Wrap(err, "invalid cwd")
+		}
+	}
+
 	return nil
 }
 
@@ -109,6 +115,14 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 	// Validate configuration
 	if err := config.Validate(); err != nil {
 		return nil, errors.Wrap(err, "invalid server configuration")
+	}
+
+	if strings.TrimSpace(config.CWD) != "" {
+		normalizedCWD, err := resolveConfiguredDefaultCWD(config.CWD)
+		if err != nil {
+			return nil, errors.Wrap(err, "invalid server configuration")
+		}
+		config.CWD = normalizedCWD
 	}
 
 	// Get the conversation service
@@ -813,16 +827,20 @@ func (s *Server) defaultCWD() (string, error) {
 		configuredCWD = s.config.CWD
 	}
 
-	defaultCWD, err := conversations.NormalizeCWD(configuredCWD)
-	if err == nil && defaultCWD != "" {
-		return defaultCWD, nil
+	return resolveConfiguredDefaultCWD(configuredCWD)
+}
+
+func resolveConfiguredDefaultCWD(configuredCWD string) (string, error) {
+	trimmed := strings.TrimSpace(configuredCWD)
+	if trimmed == "" {
+		return conversations.CurrentWorkingDirectory()
 	}
 
-	return conversations.CurrentWorkingDirectory()
+	return conversations.NormalizeCWD(trimmed)
 }
 
 func resolveSuggestionBaseDir(query, defaultCWD string) (string, string, error) {
-	expandedQuery, err := expandSuggestionQuery(query, defaultCWD)
+	expandedQuery, err := expandWebCWDInput(query, defaultCWD)
 	if err != nil {
 		return "", "", err
 	}
@@ -851,7 +869,7 @@ func resolveSuggestionBaseDir(query, defaultCWD string) (string, string, error) 
 	return baseDir, filter, nil
 }
 
-func expandSuggestionQuery(query, defaultCWD string) (string, error) {
+func expandWebCWDInput(query, defaultCWD string) (string, error) {
 	trimmed := strings.TrimSpace(query)
 	if trimmed == "" {
 		return "", nil

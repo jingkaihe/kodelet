@@ -2,6 +2,7 @@ package webui
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -135,4 +136,33 @@ func TestResolveWebChatConfigForExistingConversation_DefaultProfileIgnoresActive
 	assert.Equal(t, "openai", config.Provider)
 	assert.Equal(t, "gpt-5.4", config.Model)
 	assert.Equal(t, "default", config.Profile)
+}
+
+func TestResolveWebChatConfig_ResolvesRelativeCWDFromDefaultWorkspace(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	}()
+
+	rootDir := t.TempDir()
+	backendDir := filepath.Join(rootDir, "backend")
+	require.NoError(t, os.Mkdir(backendDir, 0o755))
+
+	viper.Reset()
+	viper.Set("provider", "openai")
+	viper.Set("model", "gpt-5.4")
+
+	config, resolvedCWD, err := resolveWebChatConfig(
+		context.Background(),
+		"",
+		"default",
+		"backend",
+		rootDir,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, backendDir, resolvedCWD)
+	assert.Equal(t, backendDir, config.WorkingDirectory)
 }
