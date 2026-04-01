@@ -292,6 +292,32 @@ func TestServer_handleGetCWDHints(t *testing.T) {
 	assert.Equal(t, filepath.Join(tmpDir, "kodelet"), response.Hints[1].Path)
 }
 
+func TestServer_handleGetCWDHints_NaturalSiblingQuery(t *testing.T) {
+	parentDir := t.TempDir()
+	defaultDir := filepath.Join(parentDir, "workspace")
+	require.NoError(t, os.Mkdir(defaultDir, 0o755))
+	require.NoError(t, os.Mkdir(filepath.Join(parentDir, "kodelet"), 0o755))
+	require.NoError(t, os.Mkdir(filepath.Join(parentDir, "kodelet-website"), 0o755))
+
+	server := &Server{
+		config: &ServerConfig{CWD: defaultDir},
+	}
+
+	req := httptest.NewRequest("GET", "/api/chat/cwd-suggestions?q=kodelet", nil)
+	w := httptest.NewRecorder()
+
+	server.handleGetCWDHints(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response CWDHintsResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	require.Len(t, response.Hints, 2)
+	assert.Equal(t, filepath.Join(parentDir, "kodelet"), response.Hints[0].Path)
+	assert.Equal(t, filepath.Join(parentDir, "kodelet-website"), response.Hints[1].Path)
+}
+
 func TestServer_handleGetConversationOpenAIChatCompletionsSkipsSystemAndPreservesThinking(t *testing.T) {
 	conversationID := "test-openai-chat-completions"
 	mockService := &mockConversationService{

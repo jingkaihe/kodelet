@@ -814,6 +814,16 @@ func (s *Server) handleGetCWDHints(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if isNaturalDirectoryQuery(query) {
+		siblingBaseDir, siblingErr := conversations.NormalizeCWD(filepath.Dir(defaultCWD))
+		if siblingErr == nil && siblingBaseDir != baseDir {
+			siblingHints, err := listDirectoryHints(siblingBaseDir, filter)
+			if err == nil {
+				hints = mergeDirectoryHints(hints, siblingHints)
+			}
+		}
+	}
+
 	s.writeJSONResponse(w, CWDHintsResponse{
 		BaseDir: baseDir,
 		Query:   query,
@@ -892,6 +902,20 @@ func expandWebCWDInput(query, defaultCWD string) (string, error) {
 		return trimmed, nil
 	}
 
+	if isNaturalDirectoryQuery(trimmed) {
+		exactCandidates := []string{
+			filepath.Join(defaultCWD, trimmed),
+			filepath.Join(filepath.Dir(defaultCWD), trimmed),
+		}
+
+		for _, candidate := range exactCandidates {
+			resolved, err := conversations.NormalizeCWD(candidate)
+			if err == nil {
+				return resolved, nil
+			}
+		}
+	}
+
 	return filepath.Join(defaultCWD, trimmed), nil
 }
 
@@ -927,6 +951,44 @@ func listDirectoryHints(baseDir, filter string) ([]CWDHint, error) {
 	}
 
 	return hints, nil
+}
+
+func mergeDirectoryHints(groups ...[]CWDHint) []CWDHint {
+	merged := make([]CWDHint, 0)
+	seen := make(map[string]struct{})
+
+	for _, group := range groups {
+		for _, hint := range group {
+			if _, ok := seen[hint.Path]; ok {
+				continue
+			}
+			seen[hint.Path] = struct{}{}
+			merged = append(merged, hint)
+		}
+	}
+
+	sort.Slice(merged, func(i, j int) bool {
+		left := strings.ToLower(filepath.Base(merged[i].Path))
+		right := strings.ToLower(filepath.Base(merged[j].Path))
+		if left == right {
+			return merged[i].Path < merged[j].Path
+		}
+		return left < right
+	})
+
+	if len(merged) > 20 {
+		merged = merged[:20]
+	}
+
+	return merged
+}
+
+func isNaturalDirectoryQuery(query string) bool {
+	trimmed := strings.TrimSpace(query)
+	return trimmed != "" &&
+		!strings.HasPrefix(trimmed, "~") &&
+		!filepath.IsAbs(trimmed) &&
+		!strings.ContainsRune(trimmed, os.PathSeparator)
 }
 
 func matchesDirectoryHint(name, filter string) bool {

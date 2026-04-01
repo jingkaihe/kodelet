@@ -232,10 +232,15 @@ describe("ChatPage", () => {
 		render(<ChatPage />);
 
 		await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
-		await waitFor(() => expect(mockGetCWDHints).toHaveBeenCalled());
+		fireEvent.click(screen.getByTestId("cwd-trigger"));
 		fireEvent.change(screen.getByLabelText("Working directory"), {
 			target: { value: "/workspace/alt" },
 		});
+
+		await waitFor(() =>
+			expect(mockGetCWDHints).toHaveBeenCalledWith("/workspace/alt"),
+		);
+		fireEvent.click(screen.getByRole("button", { name: "Use directory" }));
 
 		fireEvent.change(screen.getByLabelText("Profile"), {
 			target: { value: "premium" },
@@ -270,8 +275,10 @@ describe("ChatPage", () => {
 
 		await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
 
+		fireEvent.click(screen.getByTestId("cwd-trigger"));
 		const cwdInput = screen.getByLabelText("Working directory");
 		fireEvent.focus(cwdInput);
+		expect(screen.queryByTestId("cwd-suggestions")).not.toBeInTheDocument();
 		fireEvent.change(cwdInput, { target: { value: "/workspace/ko" } });
 
 		await waitFor(() =>
@@ -282,9 +289,11 @@ describe("ChatPage", () => {
 		);
 
 		fireEvent.mouseDown(screen.getByTestId("cwd-suggestion-0"));
+		fireEvent.click(screen.getByRole("button", { name: "Use directory" }));
+		expect(screen.queryByTestId("cwd-popover")).not.toBeInTheDocument();
 		expect(
-			(screen.getByLabelText("Working directory") as HTMLInputElement).value,
-		).toBe("/workspace/kodelet");
+			screen.getByText("/workspace/kodelet"),
+		).toBeInTheDocument();
 	});
 
 	it("supports keyboard selection for cwd suggestions", async () => {
@@ -303,8 +312,10 @@ describe("ChatPage", () => {
 
 		await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
 
+		fireEvent.click(screen.getByTestId("cwd-trigger"));
 		const cwdInput = screen.getByLabelText("Working directory");
 		fireEvent.focus(cwdInput);
+		expect(screen.queryByTestId("cwd-suggestions")).not.toBeInTheDocument();
 		fireEvent.change(cwdInput, { target: { value: "/workspace/ko" } });
 
 		await waitFor(() =>
@@ -313,10 +324,11 @@ describe("ChatPage", () => {
 
 		fireEvent.keyDown(cwdInput, { key: "ArrowDown" });
 		fireEvent.keyDown(cwdInput, { key: "Enter" });
+		fireEvent.click(screen.getByRole("button", { name: "Use directory" }));
 
 		expect(
-			(screen.getByLabelText("Working directory") as HTMLInputElement).value,
-		).toBe("/workspace/kodelet");
+			screen.getByText("/workspace/kodelet"),
+		).toBeInTheDocument();
 	});
 
 	it("keeps the latest cwd suggestions when earlier requests resolve later", async () => {
@@ -351,13 +363,9 @@ describe("ChatPage", () => {
 				await Promise.resolve();
 			});
 			expect(mockGetChatSettings).toHaveBeenCalled();
+			expect(mockGetCWDHints).not.toHaveBeenCalledWith("/workspace/default");
 
-			await act(async () => {
-				vi.runOnlyPendingTimers();
-			});
-
-			expect(mockGetCWDHints).toHaveBeenCalledWith("/workspace/default");
-
+			fireEvent.click(screen.getByTestId("cwd-trigger"));
 			const cwdInput = screen.getByLabelText("Working directory");
 			fireEvent.focus(cwdInput);
 			fireEvent.change(cwdInput, { target: { value: "/workspace/ko" } });
@@ -382,11 +390,49 @@ describe("ChatPage", () => {
 				await Promise.resolve();
 			});
 
-			expect(screen.queryByText("/workspace/default")).not.toBeInTheDocument();
-			expect(screen.getByText("/workspace/kodelet")).toBeInTheDocument();
+			expect(screen.queryByTestId("cwd-suggestion-1")).not.toBeInTheDocument();
+			expect(screen.getByTestId("cwd-suggestion-0")).toHaveTextContent(
+				"/workspace/kodelet",
+			);
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+
+	it("submits a relative directory typed naturally", async () => {
+		mockStreamChat.mockResolvedValue(undefined);
+
+		render(<ChatPage />);
+
+		await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
+
+		fireEvent.click(screen.getByTestId("cwd-trigger"));
+		fireEvent.change(screen.getByLabelText("Working directory"), {
+			target: { value: "kodelet-website" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Use directory" }));
+		fireEvent.change(screen.getByPlaceholderText("Ask kodelet anything..."), {
+			target: { value: "hello" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+		await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
+		expect(mockStreamChat).toHaveBeenCalledWith(
+			expect.objectContaining({ cwd: "kodelet-website" }),
+			expect.any(Object),
+		);
+	});
+
+	it("opens and closes the directory popover", async () => {
+		render(<ChatPage />);
+
+		await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
+
+		fireEvent.click(screen.getByTestId("cwd-trigger"));
+		expect(screen.getByTestId("cwd-popover")).toBeInTheDocument();
+
+		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+		expect(screen.queryByTestId("cwd-popover")).not.toBeInTheDocument();
 	});
 
 	it("locks the cwd input for existing conversations", async () => {

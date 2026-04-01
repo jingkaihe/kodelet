@@ -414,6 +414,80 @@ h6 {
   color: transparent;
 }
 
+.composer-cwd-shell {
+  position: relative;
+}
+
+.composer-cwd-trigger {
+  min-width: min(22rem, calc(100vw - 8rem));
+  text-align: left;
+}
+
+.composer-cwd-popover {
+  position: absolute;
+  bottom: calc(100% + 0.65rem);
+  left: 0;
+  z-index: 30;
+  display: flex;
+  width: min(30rem, calc(100vw - 4rem));
+  flex-direction: column;
+  gap: 0.8rem;
+  border-radius: 1.2rem;
+  border: 1px solid rgba(20, 20, 19, 0.1);
+  background: rgba(255, 255, 255, 0.98);
+  padding: 0.95rem;
+  box-shadow: 0 18px 40px rgba(20, 20, 19, 0.14);
+}
+
+.composer-cwd-popover-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.24rem;
+}
+
+.composer-cwd-helper {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: rgba(20, 20, 19, 0.62);
+}
+
+.composer-cwd-input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-family: var(--font-heading);
+  font-size: 0.74rem;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: 0.01em;
+  color: var(--kodelet-dark);
+  outline: none;
+}
+
+.composer-cwd-input::placeholder {
+  color: rgba(20, 20, 19, 0.42);
+}
+
+.composer-cwd-input:disabled {
+  cursor: not-allowed;
+}
+
+.composer-cwd-popover-input {
+  border-radius: 0.9rem;
+  border: 1px solid rgba(20, 20, 19, 0.12);
+  background: rgba(247, 243, 235, 0.56);
+  padding: 0.82rem 0.95rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.composer-cwd-popover-input:focus {
+  border-color: rgba(217, 119, 87, 0.32);
+  box-shadow: 0 0 0 4px rgba(217, 119, 87, 0.1);
+}
+
 .composer-cwd-suggestions {
   position: absolute;
   bottom: calc(100% + 0.4rem);
@@ -428,6 +502,13 @@ h6 {
   border: 1px solid rgba(20, 20, 19, 0.1);
   background: rgba(255, 255, 255, 0.98);
   box-shadow: 0 18px 36px rgba(20, 20, 19, 0.12);
+}
+
+.composer-cwd-suggestions-inline {
+  position: static;
+  min-width: 0;
+  max-height: 14rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
 
 .composer-cwd-suggestion {
@@ -451,6 +532,12 @@ h6 {
   font-family: var(--font-mono, monospace);
   font-size: 0.76rem;
   color: var(--kodelet-dark);
+}
+
+.composer-cwd-popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
 }
 
 .tool-action-link {
