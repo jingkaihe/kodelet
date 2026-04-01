@@ -1337,7 +1337,7 @@ const ChatPage: React.FC = () => {
 						)}
 					</div>
 
-					<div className="sticky bottom-0 z-10 shrink-0 border-t border-black/8 bg-[color:var(--kodelet-panel-soft)]/95 px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur-sm md:px-8 md:py-3.5">
+					<div className="sticky bottom-0 z-10 shrink-0 border-t border-black/8 bg-[color:var(--kodelet-panel-soft)]/95 px-4 py-2.5 pb-[calc(0.55rem+env(safe-area-inset-bottom))] backdrop-blur-sm md:px-8 md:py-3">
 						<div className="mx-auto w-full max-w-5xl px-4 md:px-8">
 							{streamError ? (
 								<div className="surface-panel mb-3 rounded-2xl border-kodelet-orange/20 px-4 py-3 text-sm text-kodelet-dark">
@@ -1345,11 +1345,11 @@ const ChatPage: React.FC = () => {
 								</div>
 							) : null}
 
-							<div
-								className={cn(
-									"surface-panel w-full rounded-[1.45rem] p-2.5",
-									dragActive && "border-kodelet-blue/35 bg-kodelet-blue/5",
-								)}
+								<div
+									className={cn(
+										"surface-panel w-full rounded-[1.45rem] p-2",
+										dragActive && "border-kodelet-blue/35 bg-kodelet-blue/5",
+									)}
 								onDragLeave={handleDragLeave}
 								onDragOver={handleDragOver}
 								onDrop={handleDrop}
@@ -1407,12 +1407,12 @@ const ChatPage: React.FC = () => {
 									value={draft}
 								/>
 
-								<div className="border-t border-black/8 px-2.5 pt-2.5">
-									<div className="flex items-start justify-between gap-3">
-										<div className="flex min-w-0 flex-1 flex-wrap items-center gap-2.5">
-											<button
-												className="composer-capsule composer-capsule-accent"
-												disabled={sending || steering}
+									<div className="border-t border-black/8 px-2.5 pt-2">
+										<div className="composer-toolbar-row">
+										<button
+											aria-label="Add image"
+											className="composer-icon-button"
+											disabled={sending || steering}
 											onClick={() => fileInputRef.current?.click()}
 											type="button"
 										>
@@ -1445,52 +1445,83 @@ const ChatPage: React.FC = () => {
 													strokeWidth="1.7"
 												/>
 											</svg>
-											<span>Add image</span>
 										</button>
 
-										{conversationId ? (
-											<div
-												className="composer-profile-static"
-												data-testid="profile-static-pill"
-											>
-												<div className="composer-profile-copy">
-													<span className="composer-profile-label">
-														Profile
-													</span>
-													<span className="composer-profile-value">
-														{currentProfileLabel}
-													</span>
-												</div>
-												<span className="composer-profile-lock">Locked</span>
-											</div>
-										) : (
-											<label
-												className="composer-profile-picker"
-												data-testid="profile-picker"
-											>
+											<div className="composer-context-cluster">
+												<label
+													className="composer-profile-picker"
+													data-testid="profile-picker"
+												>
 												<span className="composer-profile-copy">
 													<span className="composer-profile-label">
 														Profile
+												</span>
+												<span className="composer-profile-value">
+													{currentProfileLabel}
+												</span>
+											</span>
+											<select
+												aria-label="Profile"
+												className="composer-profile-select"
+												disabled={Boolean(conversationId) || sending || steering}
+												onChange={(event) =>
+													setSelectedProfile(event.target.value)
+												}
+												value={currentProfileLabel}
+											>
+												{availableProfiles.map((profile) => (
+													<option key={profile.name} value={profile.name}>
+														{profile.name}
+													</option>
+												))}
+											</select>
+											<span
+												aria-hidden="true"
+												className="composer-profile-chevron"
+											>
+												<svg
+													className="h-3.5 w-3.5"
+													fill="none"
+													viewBox="0 0 24 24"
+													xmlns="http://www.w3.org/2000/svg"
+												>
+													<path
+														d="m6 9 6 6 6-6"
+														stroke="currentColor"
+														strokeLinecap="round"
+														strokeLinejoin="round"
+														strokeWidth="1.8"
+													/>
+														</svg>
 													</span>
-													<span className="composer-profile-value">
-														{currentProfileLabel}
+												</label>
+
+												<div
+													className="composer-cwd-shell"
+													data-testid="cwd-picker"
+													ref={cwdPickerRef}
+												>
+											<button
+												aria-expanded={cwdPickerOpen}
+												aria-haspopup="dialog"
+												className="composer-profile-picker composer-cwd-trigger"
+												data-testid="cwd-trigger"
+												disabled={Boolean(conversationId) || sending || steering}
+												onClick={openCwdPicker}
+												ref={cwdTriggerRef}
+												type="button"
+											>
+												<span className="composer-profile-copy">
+													<span className="composer-profile-label">
+														Directory
+													</span>
+													<span
+														className="composer-profile-value"
+														title={currentCWDLabel}
+													>
+														{currentCWDLabel || "Choose directory"}
 													</span>
 												</span>
-												<select
-													aria-label="Profile"
-													className="composer-profile-select"
-													disabled={sending || steering}
-													onChange={(event) =>
-														setSelectedProfile(event.target.value)
-													}
-													value={currentProfileLabel}
-												>
-													{availableProfiles.map((profile) => (
-														<option key={profile.name} value={profile.name}>
-															{profile.name}
-														</option>
-													))}
-												</select>
 												<span
 													aria-hidden="true"
 													className="composer-profile-chevron"
@@ -1510,76 +1541,9 @@ const ChatPage: React.FC = () => {
 														/>
 													</svg>
 												</span>
-											</label>
-										)}
+											</button>
 
-										{conversationId ? (
-											<div
-												className="composer-profile-static"
-												data-testid="cwd-static-pill"
-											>
-												<div className="composer-profile-copy">
-													<span className="composer-profile-label">
-														Directory
-													</span>
-													<span
-														className="composer-profile-value"
-														title={currentCWDLabel}
-													>
-														{currentCWDLabel || "(not set)"}
-													</span>
-												</div>
-												<span className="composer-profile-lock">Locked</span>
-											</div>
-										) : (
-											<div
-												className="composer-cwd-shell"
-												data-testid="cwd-picker"
-												ref={cwdPickerRef}
-											>
-												<button
-													aria-expanded={cwdPickerOpen}
-													aria-haspopup="dialog"
-													className="composer-profile-picker composer-cwd-trigger"
-													data-testid="cwd-trigger"
-													disabled={sending || steering}
-													onClick={openCwdPicker}
-													ref={cwdTriggerRef}
-													type="button"
-												>
-													<span className="composer-profile-copy">
-														<span className="composer-profile-label">
-															Directory
-														</span>
-														<span
-															className="composer-profile-value"
-															title={currentCWDLabel}
-														>
-															{currentCWDLabel || "Choose directory"}
-														</span>
-													</span>
-													<span
-														aria-hidden="true"
-														className="composer-profile-chevron"
-													>
-														<svg
-															className="h-3.5 w-3.5"
-															fill="none"
-															viewBox="0 0 24 24"
-															xmlns="http://www.w3.org/2000/svg"
-														>
-															<path
-																d="m6 9 6 6 6-6"
-																stroke="currentColor"
-																strokeLinecap="round"
-																strokeLinejoin="round"
-																strokeWidth="1.8"
-															/>
-														</svg>
-													</span>
-												</button>
-
-												{cwdPickerOpen ? (
+											{!conversationId && cwdPickerOpen ? (
 													<div
 														aria-label="Directory picker"
 														className="composer-cwd-popover"
@@ -1671,52 +1635,54 @@ const ChatPage: React.FC = () => {
 																Use directory
 															</button>
 														</div>
-													</div>
-												) : null}
+														</div>
+											) : null}
+												</div>
 											</div>
-										)}
-
 										</div>
 
-										<div className="flex shrink-0 items-center gap-3">
+										<div className="composer-status-row">
+											<div className="min-w-0 flex-1">
+												{composerStatus ? (
+													<p className="eyebrow-label px-0.5 text-kodelet-mid-gray">
+													{composerStatus}
+												</p>
+											) : null}
+										</div>
+
+											<div className="composer-status-actions">
 											{sending ? (
 												<button
 													className="composer-capsule"
-												disabled={!canStopActiveConversation}
-												onClick={handleStop}
-												type="button"
-											>
-												{canStopActiveConversation ? "Stop" : "Starting…"}
-											</button>
-										) : null}
+													disabled={!canStopActiveConversation}
+													onClick={handleStop}
+													type="button"
+												>
+													{canStopActiveConversation ? "Stop" : "Starting…"}
+												</button>
+											) : null}
 
-										<button
-											className={cn(
-												"primary-pill-button",
-												steering ||
+											<button
+												className={cn(
+													"primary-pill-button",
+													steering ||
+														!canSubmit ||
+														(sending && !canSteerActiveConversation)
+														? "cursor-not-allowed bg-kodelet-mid-gray"
+														: "bg-kodelet-dark hover:bg-black",
+												)}
+												disabled={
+													steering ||
 													!canSubmit ||
 													(sending && !canSteerActiveConversation)
-													? "cursor-not-allowed bg-kodelet-mid-gray"
-													: "bg-kodelet-dark hover:bg-black",
-											)}
-											disabled={
-												steering ||
-												!canSubmit ||
-												(sending && !canSteerActiveConversation)
-											}
-											onClick={() => void handleSubmit()}
-											type="button"
-												>
-													{steering ? "Queueing…" : sending ? "Steer" : "Send"}
-												</button>
-											</div>
+												}
+												onClick={() => void handleSubmit()}
+												type="button"
+											>
+												{steering ? "Queueing…" : sending ? "Steer" : "Send"}
+											</button>
+										</div>
 									</div>
-
-									{composerStatus ? (
-										<p className="eyebrow-label mt-2 px-0.5 text-kodelet-mid-gray">
-											{composerStatus}
-										</p>
-									) : null}
 								</div>
 							</div>
 						</div>

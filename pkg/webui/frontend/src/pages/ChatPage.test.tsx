@@ -459,10 +459,8 @@ describe("ChatPage", () => {
 			expect(mockGetConversation).toHaveBeenCalledWith("conv-123"),
 		);
 
-		expect(screen.getByTestId("cwd-static-pill")).toBeInTheDocument();
-		expect(
-			screen.queryByLabelText("Working directory"),
-		).not.toBeInTheDocument();
+		expect(screen.getByTestId("cwd-picker")).toBeInTheDocument();
+		expect(screen.getByTestId("cwd-trigger")).toBeDisabled();
 		expect(screen.getByText("/workspace/project")).toBeInTheDocument();
 	});
 
@@ -491,10 +489,10 @@ describe("ChatPage", () => {
 			expect(mockGetConversation).toHaveBeenCalledWith("conv-123"),
 		);
 
-		expect(screen.getByTestId("profile-static-pill")).toBeInTheDocument();
-		expect(screen.queryByLabelText("Profile")).not.toBeInTheDocument();
-		expect(screen.getByText("premium")).toBeInTheDocument();
-		expect(screen.getAllByText("Locked")).toHaveLength(2);
+		expect(screen.getByTestId("profile-picker")).toBeInTheDocument();
+		expect(screen.getByLabelText("Profile")).toBeDisabled();
+		expect(screen.getByTestId("profile-picker")).toHaveTextContent("premium");
+		expect(screen.queryByText("Locked")).not.toBeInTheDocument();
 
 		fireEvent.change(screen.getByPlaceholderText("Ask kodelet anything..."), {
 			target: { value: "continue" },
