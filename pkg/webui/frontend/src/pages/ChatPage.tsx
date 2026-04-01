@@ -14,6 +14,7 @@ import {
 } from "../features/chat/state";
 import apiService from "../services/api";
 import type {
+	CWDHint,
 	ChatSettings,
 	ChatStreamEvent,
 	ContentBlock,
@@ -22,6 +23,7 @@ import type {
 } from "../types";
 import {
 	cn,
+	debounce,
 	formatCompactRelativeTime,
 	formatContextWindow,
 	formatCost,
@@ -30,6 +32,10 @@ import {
 
 const normalizeConversation = (conversation: Conversation): Conversation => ({
 	...conversation,
+	cwd:
+		typeof conversation.cwd === "string" && conversation.cwd.trim()
+			? conversation.cwd.trim()
+			: undefined,
 	profile:
 		typeof conversation.profile === "string" && conversation.profile.trim()
 			? conversation.profile.trim()
@@ -217,6 +223,12 @@ const ChatPage: React.FC = () => {
 		profiles: [],
 	});
 	const [selectedProfile, setSelectedProfile] = useState("default");
+	const [selectedCWD, setSelectedCWD] = useState("");
+	const [cwdQuery, setCwdQuery] = useState("");
+	const [cwdSuggestions, setCwdSuggestions] = useState<CWDHint[]>([]);
+	const [cwdPickerOpen, setCwdPickerOpen] = useState(false);
+	const [cwdSuggestionsOpen, setCwdSuggestionsOpen] = useState(false);
+	const [cwdSuggestionIndex, setCwdSuggestionIndex] = useState(-1);
 	const [draft, setDraft] = useState("");
 	const [sidebarLoading, setSidebarLoading] = useState(true);
 	const [conversationLoading, setConversationLoading] = useState(false);
@@ -240,12 +252,17 @@ const ChatPage: React.FC = () => {
 	const resumeControllerRef = useRef<AbortController | null>(null);
 	const sendStreamRef = useRef(0);
 	const resumeStreamRef = useRef(0);
+	const cwdSuggestionRequestRef = useRef(0);
+	const cwdInputFocusedRef = useRef(false);
 	const viewedConversationIdRef = useRef<string | null>(conversationId);
 	const sidebarResizeStartRef = useRef<{
 		startX: number;
 		startWidth: number;
 	} | null>(null);
 	const fileInputRef = useRef<HTMLInputElement | null>(null);
+	const cwdPickerRef = useRef<HTMLDivElement | null>(null);
+	const cwdTriggerRef = useRef<HTMLButtonElement | null>(null);
+	const cwdInputRef = useRef<HTMLInputElement | null>(null);
 
 	const refreshConversations = async () => {
 		setSidebarLoading(true);
@@ -271,6 +288,8 @@ const ChatPage: React.FC = () => {
 			.then((settings) => {
 				setChatSettings(settings);
 				setSelectedProfile(settings.currentProfile || "default");
+				setSelectedCWD(settings.defaultCWD || "");
+				setCwdQuery("");
 			})
 			.catch((error) => {
 				console.error("Failed to load chat settings", error);
@@ -288,6 +307,14 @@ const ChatPage: React.FC = () => {
 
 	useEffect(() => {
 		viewedConversationIdRef.current = conversationId;
+	}, [conversationId]);
+
+	useEffect(() => {
+		if (!conversationId) {
+			return;
+		}
+
+		cwdSuggestionRequestRef.current += 1;
 	}, [conversationId]);
 
 	useEffect(() => {
@@ -522,8 +549,114 @@ const ChatPage: React.FC = () => {
 		setConversationError(null);
 		setStreamError(null);
 		setSelectedProfile(chatSettings.currentProfile || "default");
+		setSelectedCWD(chatSettings.defaultCWD || "");
+		setCwdQuery("");
+		setCwdPickerOpen(false);
+		cwdInputFocusedRef.current = false;
+		setCwdSuggestions([]);
+		setCwdSuggestionsOpen(false);
+		setCwdSuggestionIndex(-1);
 		startTransition(() => navigate("/"));
 	};
+
+	const requestCwdSuggestions = useMemo(
+		() =>
+			debounce((query: string) => {
+				const requestId = cwdSuggestionRequestRef.current + 1;
+				cwdSuggestionRequestRef.current = requestId;
+
+				void apiService
+					.getCWDHints(query)
+					.then((response) => {
+						if (
+							cwdSuggestionRequestRef.current !== requestId ||
+							viewedConversationIdRef.current
+						) {
+							return;
+						}
+
+						setCwdSuggestions(response.hints || []);
+						setCwdSuggestionsOpen(
+							cwdInputFocusedRef.current && (response.hints || []).length > 0,
+						);
+						setCwdSuggestionIndex(-1);
+					})
+					.catch((error) => {
+						if (
+							cwdSuggestionRequestRef.current !== requestId ||
+							viewedConversationIdRef.current
+						) {
+							return;
+						}
+
+						console.error("Failed to load cwd suggestions", error);
+						setCwdSuggestions([]);
+						setCwdSuggestionsOpen(false);
+					});
+			}, 150),
+		[],
+	);
+
+	useEffect(() => {
+		if (conversationId) {
+			setCwdPickerOpen(false);
+			cwdInputFocusedRef.current = false;
+			setCwdSuggestionsOpen(false);
+			setCwdSuggestionIndex(-1);
+			return;
+		}
+
+		if (!cwdQuery.trim()) {
+			cwdSuggestionRequestRef.current += 1;
+			setCwdSuggestions([]);
+			setCwdSuggestionsOpen(false);
+			setCwdSuggestionIndex(-1);
+			return;
+		}
+
+		requestCwdSuggestions(cwdQuery);
+	}, [conversationId, cwdQuery, requestCwdSuggestions]);
+
+	useEffect(() => {
+		if (!cwdPickerOpen) {
+			cwdInputFocusedRef.current = false;
+			setCwdSuggestionsOpen(false);
+			setCwdSuggestionIndex(-1);
+			setCwdQuery("");
+			return;
+		}
+
+		const focusInput = window.setTimeout(() => {
+			cwdInputRef.current?.focus();
+			cwdInputRef.current?.select();
+		}, 0);
+
+		const handlePointerDown = (event: MouseEvent) => {
+			if (cwdPickerRef.current?.contains(event.target as Node)) {
+				return;
+			}
+
+			setCwdPickerOpen(false);
+		};
+
+		const handleKeyDown = (event: KeyboardEvent) => {
+			if (event.key !== "Escape") {
+				return;
+			}
+
+			setCwdPickerOpen(false);
+			cwdTriggerRef.current?.focus();
+		};
+
+		window.addEventListener("mousedown", handlePointerDown);
+		window.addEventListener("keydown", handleKeyDown);
+
+		return () => {
+			window.clearTimeout(focusInput);
+			window.removeEventListener("mousedown", handlePointerDown);
+			window.removeEventListener("keydown", handleKeyDown);
+		};
+	}, [cwdPickerOpen]);
 
 	const handleSelectConversation = (nextConversationId: string) => {
 		if (nextConversationId === conversationId) {
@@ -667,6 +800,7 @@ const ChatPage: React.FC = () => {
 					content: buildUserContent(prompt, attachmentsForSend),
 					conversationId: conversationId || undefined,
 					profile: conversationId ? undefined : selectedProfile,
+					cwd: conversationId ? undefined : currentCWDLabel || undefined,
 				},
 				{
 					signal: controller.signal,
@@ -695,6 +829,7 @@ const ChatPage: React.FC = () => {
 										messageCount: 1,
 										summary: userPreview,
 										preview: userPreview,
+										cwd: currentCWDLabel,
 										profile: selectedProfile,
 									}),
 								);
@@ -911,6 +1046,110 @@ const ChatPage: React.FC = () => {
 		return selectedProfile || "default";
 	}, [conversation?.profile, conversationId, selectedProfile]);
 
+	const currentCWDLabel = useMemo(() => {
+		if (conversationId) {
+			return conversation?.cwd || chatSettings.defaultCWD || "";
+		}
+		return selectedCWD || chatSettings.defaultCWD || "";
+	}, [
+		chatSettings.defaultCWD,
+		conversation?.cwd,
+		conversationId,
+		selectedCWD,
+	]);
+
+	const applyCwdSuggestion = (path: string) => {
+		setSelectedCWD(path);
+		setCwdQuery(path);
+		setCwdSuggestionsOpen(false);
+		setCwdSuggestionIndex(-1);
+	};
+
+	const openCwdPicker = () => {
+		if (sending || steering || conversationId) {
+			return;
+		}
+
+		setCwdPickerOpen(true);
+		setCwdQuery(selectedCWD || chatSettings.defaultCWD || "");
+	};
+
+	const closeCwdPicker = () => {
+		setCwdPickerOpen(false);
+		setCwdQuery("");
+		setCwdSuggestionsOpen(false);
+		setCwdSuggestionIndex(-1);
+		cwdInputFocusedRef.current = false;
+	};
+
+	const commitCwdSelection = () => {
+		const nextValue = cwdQuery.trim();
+		setSelectedCWD(nextValue);
+		closeCwdPicker();
+	};
+
+	const handleCwdInputChange = (value: string) => {
+		setCwdQuery(value);
+		setCwdSuggestionsOpen(false);
+		setCwdSuggestionIndex(-1);
+	};
+
+	const handleCwdInputKeyDown = (
+		event: React.KeyboardEvent<HTMLInputElement>,
+	) => {
+		if (
+			cwdSuggestionsOpen &&
+			cwdSuggestions.length > 0 &&
+			event.key === "ArrowDown"
+		) {
+			event.preventDefault();
+			setCwdSuggestionIndex((current) =>
+				current >= cwdSuggestions.length - 1 ? 0 : current + 1,
+			);
+			return;
+		}
+
+		if (
+			cwdSuggestionsOpen &&
+			cwdSuggestions.length > 0 &&
+			event.key === "ArrowUp"
+		) {
+			event.preventDefault();
+			setCwdSuggestionIndex((current) =>
+				current <= 0 ? cwdSuggestions.length - 1 : current - 1,
+			);
+			return;
+		}
+
+		if (
+			event.key === "Enter" &&
+			cwdSuggestionsOpen &&
+			cwdSuggestions.length > 0 &&
+			cwdSuggestionIndex >= 0
+		) {
+			event.preventDefault();
+			applyCwdSuggestion(cwdSuggestions[cwdSuggestionIndex].path);
+			return;
+		}
+
+		if (event.key === "Enter") {
+			event.preventDefault();
+			commitCwdSelection();
+			return;
+		}
+
+		if (event.key === "Escape") {
+			if (cwdSuggestionsOpen) {
+				setCwdSuggestionsOpen(false);
+				setCwdSuggestionIndex(-1);
+				return;
+			}
+
+			closeCwdPicker();
+			cwdTriggerRef.current?.focus();
+		}
+	};
+
 	const availableProfiles = useMemo(() => {
 		const configuredProfiles = chatSettings.profiles || [];
 		if (
@@ -936,7 +1175,7 @@ const ChatPage: React.FC = () => {
 		hasActiveConversationTarget && steerAvailable;
 	const composerStatus = useMemo(() => {
 		if (!conversation) {
-			return sending ? "live · starting…" : "New conversation · profile ready";
+			return sending ? "live · starting…" : "";
 		}
 
 		const parts: string[] = [];
@@ -1098,7 +1337,7 @@ const ChatPage: React.FC = () => {
 						)}
 					</div>
 
-					<div className="sticky bottom-0 z-10 shrink-0 border-t border-black/8 bg-[color:var(--kodelet-panel-soft)]/95 px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur-sm md:px-8 md:py-3.5">
+					<div className="sticky bottom-0 z-10 shrink-0 border-t border-black/8 bg-[color:var(--kodelet-panel-soft)]/95 px-4 py-2.5 pb-[calc(0.55rem+env(safe-area-inset-bottom))] backdrop-blur-sm md:px-8 md:py-3">
 						<div className="mx-auto w-full max-w-5xl px-4 md:px-8">
 							{streamError ? (
 								<div className="surface-panel mb-3 rounded-2xl border-kodelet-orange/20 px-4 py-3 text-sm text-kodelet-dark">
@@ -1106,11 +1345,11 @@ const ChatPage: React.FC = () => {
 								</div>
 							) : null}
 
-							<div
-								className={cn(
-									"surface-panel w-full rounded-[1.45rem] p-2.5",
-									dragActive && "border-kodelet-blue/35 bg-kodelet-blue/5",
-								)}
+								<div
+									className={cn(
+										"surface-panel w-full rounded-[1.45rem] p-2",
+										dragActive && "border-kodelet-blue/35 bg-kodelet-blue/5",
+									)}
 								onDragLeave={handleDragLeave}
 								onDragOver={handleDragOver}
 								onDrop={handleDrop}
@@ -1168,10 +1407,11 @@ const ChatPage: React.FC = () => {
 									value={draft}
 								/>
 
-								<div className="flex items-center justify-between gap-3 border-t border-black/8 px-2.5 pt-2.5">
-									<div className="flex flex-wrap items-center gap-2.5">
+									<div className="border-t border-black/8 px-2.5 pt-2">
+										<div className="composer-toolbar-row">
 										<button
-											className="composer-capsule composer-capsule-accent"
+											aria-label="Add image"
+											className="composer-icon-button"
 											disabled={sending || steering}
 											onClick={() => fileInputRef.current?.click()}
 											type="button"
@@ -1205,52 +1445,83 @@ const ChatPage: React.FC = () => {
 													strokeWidth="1.7"
 												/>
 											</svg>
-											<span>Add image</span>
 										</button>
 
-										{conversationId ? (
-											<div
-												className="composer-profile-static"
-												data-testid="profile-static-pill"
-											>
-												<div className="composer-profile-copy">
-													<span className="composer-profile-label">
-														Profile
-													</span>
-													<span className="composer-profile-value">
-														{currentProfileLabel}
-													</span>
-												</div>
-												<span className="composer-profile-lock">Locked</span>
-											</div>
-										) : (
-											<label
-												className="composer-profile-picker"
-												data-testid="profile-picker"
-											>
+											<div className="composer-context-cluster">
+												<label
+													className="composer-profile-picker"
+													data-testid="profile-picker"
+												>
 												<span className="composer-profile-copy">
 													<span className="composer-profile-label">
 														Profile
+												</span>
+												<span className="composer-profile-value">
+													{currentProfileLabel}
+												</span>
+											</span>
+											<select
+												aria-label="Profile"
+												className="composer-profile-select"
+												disabled={Boolean(conversationId) || sending || steering}
+												onChange={(event) =>
+													setSelectedProfile(event.target.value)
+												}
+												value={currentProfileLabel}
+											>
+												{availableProfiles.map((profile) => (
+													<option key={profile.name} value={profile.name}>
+														{profile.name}
+													</option>
+												))}
+											</select>
+											<span
+												aria-hidden="true"
+												className="composer-profile-chevron"
+											>
+												<svg
+													className="h-3.5 w-3.5"
+													fill="none"
+													viewBox="0 0 24 24"
+													xmlns="http://www.w3.org/2000/svg"
+												>
+													<path
+														d="m6 9 6 6 6-6"
+														stroke="currentColor"
+														strokeLinecap="round"
+														strokeLinejoin="round"
+														strokeWidth="1.8"
+													/>
+														</svg>
 													</span>
-													<span className="composer-profile-value">
-														{currentProfileLabel}
+												</label>
+
+												<div
+													className="composer-cwd-shell"
+													data-testid="cwd-picker"
+													ref={cwdPickerRef}
+												>
+											<button
+												aria-expanded={cwdPickerOpen}
+												aria-haspopup="dialog"
+												className="composer-profile-picker composer-cwd-trigger"
+												data-testid="cwd-trigger"
+												disabled={Boolean(conversationId) || sending || steering}
+												onClick={openCwdPicker}
+												ref={cwdTriggerRef}
+												type="button"
+											>
+												<span className="composer-profile-copy">
+													<span className="composer-profile-label">
+														Directory
+													</span>
+													<span
+														className="composer-profile-value"
+														title={currentCWDLabel}
+													>
+														{currentCWDLabel || "Choose directory"}
 													</span>
 												</span>
-												<select
-													aria-label="Profile"
-													className="composer-profile-select"
-													disabled={sending || steering}
-													onChange={(event) =>
-														setSelectedProfile(event.target.value)
-													}
-													value={currentProfileLabel}
-												>
-													{availableProfiles.map((profile) => (
-														<option key={profile.name} value={profile.name}>
-															{profile.name}
-														</option>
-													))}
-												</select>
 												<span
 													aria-hidden="true"
 													className="composer-profile-chevron"
@@ -1270,45 +1541,147 @@ const ChatPage: React.FC = () => {
 														/>
 													</svg>
 												</span>
-											</label>
-										)}
-
-										<p className="eyebrow-label text-kodelet-mid-gray">
-											{composerStatus}
-										</p>
-									</div>
-
-									<div className="flex items-center gap-3">
-										{sending ? (
-											<button
-												className="composer-capsule"
-												disabled={!canStopActiveConversation}
-												onClick={handleStop}
-												type="button"
-											>
-												{canStopActiveConversation ? "Stop" : "Starting…"}
 											</button>
-										) : null}
 
-										<button
-											className={cn(
-												"primary-pill-button",
-												steering ||
+											{!conversationId && cwdPickerOpen ? (
+													<div
+														aria-label="Directory picker"
+														className="composer-cwd-popover"
+														data-testid="cwd-popover"
+														role="dialog"
+													>
+														<div className="composer-cwd-popover-header">
+															<p className="composer-profile-label">Directory</p>
+															<p className="composer-cwd-helper">
+																Type a full path or a nearby project name.
+															</p>
+														</div>
+														<input
+															aria-autocomplete="list"
+															aria-expanded={cwdSuggestionsOpen && cwdSuggestions.length > 0}
+															aria-label="Working directory"
+															autoCapitalize="off"
+															autoComplete="off"
+															autoCorrect="off"
+															className="composer-cwd-input composer-cwd-popover-input"
+															data-testid="cwd-input"
+															disabled={sending || steering}
+															onBlur={() => {
+																cwdInputFocusedRef.current = false;
+																window.setTimeout(() => {
+																	setCwdSuggestionsOpen(false);
+																	setCwdSuggestionIndex(-1);
+																}, 120);
+															}}
+															onChange={(event) =>
+																handleCwdInputChange(event.target.value)
+															}
+															onFocus={() => {
+																cwdInputFocusedRef.current = true;
+																setCwdSuggestionsOpen(
+																	cwdQuery.trim().length > 0 && cwdSuggestions.length > 0,
+																);
+															}}
+															onKeyDown={handleCwdInputKeyDown}
+															placeholder={
+																chatSettings.defaultCWD || "/path/to/project"
+															}
+															ref={cwdInputRef}
+															spellCheck={false}
+															type="text"
+															value={cwdQuery}
+														/>
+
+														{cwdSuggestionsOpen && cwdSuggestions.length > 0 ? (
+															<div
+																className="composer-cwd-suggestions composer-cwd-suggestions-inline"
+																data-testid="cwd-suggestions"
+															>
+																{cwdSuggestions.map((suggestion, index) => (
+																	<button
+																		className={cn(
+																			"composer-cwd-suggestion",
+																			index === cwdSuggestionIndex && "is-active",
+																		)}
+																		data-testid={`cwd-suggestion-${index}`}
+																		key={suggestion.path}
+																		onMouseDown={(event) => {
+																			event.preventDefault();
+																			applyCwdSuggestion(suggestion.path);
+																		}}
+																		type="button"
+																	>
+																		<span className="composer-cwd-suggestion-path">
+																			{suggestion.path}
+																		</span>
+																	</button>
+																))}
+															</div>
+														) : null}
+
+														<div className="composer-cwd-popover-actions">
+															<button
+																className="composer-capsule"
+																onClick={closeCwdPicker}
+																type="button"
+															>
+																Cancel
+															</button>
+															<button
+																className="composer-capsule composer-capsule-accent"
+																onClick={commitCwdSelection}
+																type="button"
+															>
+																Use directory
+															</button>
+														</div>
+														</div>
+											) : null}
+												</div>
+											</div>
+										</div>
+
+										<div className="composer-status-row">
+											<div className="min-w-0 flex-1">
+												{composerStatus ? (
+													<p className="eyebrow-label px-0.5 text-kodelet-mid-gray">
+													{composerStatus}
+												</p>
+											) : null}
+										</div>
+
+											<div className="composer-status-actions">
+											{sending ? (
+												<button
+													className="composer-capsule"
+													disabled={!canStopActiveConversation}
+													onClick={handleStop}
+													type="button"
+												>
+													{canStopActiveConversation ? "Stop" : "Starting…"}
+												</button>
+											) : null}
+
+											<button
+												className={cn(
+													"primary-pill-button",
+													steering ||
+														!canSubmit ||
+														(sending && !canSteerActiveConversation)
+														? "cursor-not-allowed bg-kodelet-mid-gray"
+														: "bg-kodelet-dark hover:bg-black",
+												)}
+												disabled={
+													steering ||
 													!canSubmit ||
 													(sending && !canSteerActiveConversation)
-													? "cursor-not-allowed bg-kodelet-mid-gray"
-													: "bg-kodelet-dark hover:bg-black",
-											)}
-											disabled={
-												steering ||
-												!canSubmit ||
-												(sending && !canSteerActiveConversation)
-											}
-											onClick={() => void handleSubmit()}
-											type="button"
-										>
-											{steering ? "Queueing…" : sending ? "Steer" : "Send"}
-										</button>
+												}
+												onClick={() => void handleSubmit()}
+												type="button"
+											>
+												{steering ? "Queueing…" : sending ? "Steer" : "Send"}
+											</button>
+										</div>
 									</div>
 								</div>
 							</div>

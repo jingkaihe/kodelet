@@ -76,12 +76,13 @@ func TestLoadResumeConversationConfig_UsesStoredProfileAndMetadata(t *testing.T)
 	require.NoError(t, err)
 
 	cmd := &cobra.Command{Use: "run"}
-	config, err := loadResumeConversationConfig(ctx, cmd, conversationID)
+	config, resolvedCWD, err := loadResumeConversationConfig(ctx, cmd, conversationID, "")
 	require.NoError(t, err)
 
 	assert.Equal(t, "premium", config.Profile)
 	assert.Equal(t, "openai", config.Provider)
 	assert.Equal(t, "accounts/fireworks/models/kimi-k2", config.Model)
+	assert.NotEmpty(t, resolvedCWD)
 	require.NotNil(t, config.OpenAI)
 	assert.Equal(t, "fireworks", config.OpenAI.Platform)
 	assert.Equal(t, llmtypes.OpenAIAPIMode("responses"), config.OpenAI.APIMode)
@@ -101,10 +102,11 @@ func TestLoadResumeConversationConfig_DefaultsToCurrentConfigForNewConversation(
 	viper.Set("model", "gpt-5.4")
 
 	cmd := &cobra.Command{Use: "run"}
-	config, err := loadResumeConversationConfig(context.Background(), cmd, "")
+	config, resolvedCWD, err := loadResumeConversationConfig(context.Background(), cmd, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "openai", config.Provider)
 	assert.Equal(t, "gpt-5.4", config.Model)
+	assert.NotEmpty(t, resolvedCWD)
 }
 
 func TestLoadResumeConversationConfig_ProfiledConversationPreservesExplicitFlagOverrides(t *testing.T) {
@@ -180,7 +182,7 @@ func TestLoadResumeConversationConfig_ProfiledConversationPreservesExplicitFlagO
 	err = cmd.Flags().Set("tool-mode", "patch")
 	require.NoError(t, err)
 
-	config, err := loadResumeConversationConfig(ctx, cmd, conversationID)
+	config, _, err := loadResumeConversationConfig(ctx, cmd, conversationID, "")
 	require.NoError(t, err)
 
 	assert.Equal(t, "premium", config.Profile)
@@ -214,7 +216,7 @@ func TestLoadResumeConversationConfig_ProfileCanDisableFSSearchToolsFromRootDefa
 	cmd := &cobra.Command{Use: "run"}
 	cmd.Flags().Bool("disable-fs-search-tools", false, "Disable filesystem search tools")
 
-	config, err := loadResumeConversationConfig(context.Background(), cmd, "")
+	config, _, err := loadResumeConversationConfig(context.Background(), cmd, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "anthropic", config.Provider)
 	assert.False(t, config.DisableFSSearchTools)
@@ -275,7 +277,7 @@ func TestLoadResumeConversationConfig_DefaultStoredProfileIgnoresActiveProfile(t
 	require.NoError(t, err)
 
 	cmd := &cobra.Command{Use: "run"}
-	config, err := loadResumeConversationConfig(ctx, cmd, conversationID)
+	config, _, err := loadResumeConversationConfig(ctx, cmd, conversationID, "")
 	require.NoError(t, err)
 
 	assert.Equal(t, "anthropic", config.Provider)

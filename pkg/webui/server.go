@@ -86,6 +86,7 @@ func (r *activeChatRun) markDone() {
 type ServerConfig struct {
 	Host string
 	Port int
+	CWD  string
 }
 
 // Validate validates the server configuration
@@ -100,6 +101,12 @@ func (c *ServerConfig) Validate() error {
 		return errors.Errorf("port must be between 1 and 65535, got %d", c.Port)
 	}
 
+	if strings.TrimSpace(c.CWD) != "" {
+		if _, err := resolveConfiguredDefaultCWD(c.CWD); err != nil {
+			return errors.Wrap(err, "invalid cwd")
+		}
+	}
+
 	return nil
 }
 
@@ -108,6 +115,14 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 	// Validate configuration
 	if err := config.Validate(); err != nil {
 		return nil, errors.Wrap(err, "invalid server configuration")
+	}
+
+	if strings.TrimSpace(config.CWD) != "" {
+		normalizedCWD, err := resolveConfiguredDefaultCWD(config.CWD)
+		if err != nil {
+			return nil, errors.Wrap(err, "invalid server configuration")
+		}
+		config.CWD = normalizedCWD
 	}
 
 	// Get the conversation service
@@ -127,7 +142,7 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 	s := &Server{
 		router:              mux.NewRouter(),
 		conversationService: conversationService,
-		chatRunner:          NewDefaultChatRunner(),
+		chatRunner:          NewDefaultChatRunner(config.CWD),
 		config:              config,
 		staticFS:            staticFS,
 		runCtx:              runCtx,
@@ -147,6 +162,7 @@ func (s *Server) setupRoutes() {
 	// API routes
 	api := s.router.PathPrefix("/api").Subrouter()
 	api.HandleFunc("/chat/settings", s.handleGetChatSettings).Methods("GET")
+	api.HandleFunc("/chat/cwd-suggestions", s.handleGetCWDHints).Methods("GET")
 	api.HandleFunc("/conversations", s.handleListConversations).Methods("GET")
 	api.HandleFunc("/conversations/{id}", s.handleGetConversation).Methods("GET")
 	api.HandleFunc("/conversations/{id}/stream", s.handleStreamConversation).Methods("GET")
@@ -490,6 +506,8 @@ type WebConversationResponse struct {
 	CreatedAt     time.Time    `json:"createdAt"`
 	UpdatedAt     time.Time    `json:"updatedAt"`
 	Provider      string       `json:"provider"`
+	CWD           string       `json:"cwd,omitempty"`
+	CWDLocked     bool         `json:"cwdLocked,omitempty"`
 	Profile       string       `json:"profile,omitempty"`
 	ProfileLocked bool         `json:"profileLocked,omitempty"`
 	Summary       string       `json:"summary,omitempty"`
@@ -510,6 +528,17 @@ type ChatProfileOption struct {
 type ChatSettingsResponse struct {
 	CurrentProfile string              `json:"currentProfile,omitempty"`
 	Profiles       []ChatProfileOption `json:"profiles"`
+	DefaultCWD     string              `json:"defaultCWD,omitempty"`
+}
+
+type CWDHint struct {
+	Path string `json:"path"`
+}
+
+type CWDHintsResponse struct {
+	BaseDir string    `json:"baseDir,omitempty"`
+	Query   string    `json:"query,omitempty"`
+	Hints   []CWDHint `json:"hints"`
 }
 
 const (
@@ -753,10 +782,233 @@ func getCurrentWebUIProfile() string {
 
 // handleGetChatSettings handles GET /api/chat/settings.
 func (s *Server) handleGetChatSettings(w http.ResponseWriter, _ *http.Request) {
+	defaultCWD, err := s.defaultCWD()
+	if err != nil {
+		defaultCWD = ""
+	}
+
 	s.writeJSONResponse(w, ChatSettingsResponse{
 		CurrentProfile: getCurrentWebUIProfile(),
 		Profiles:       getWebUIProfileOptions(),
+		DefaultCWD:     defaultCWD,
 	})
+}
+
+func (s *Server) handleGetCWDHints(w http.ResponseWriter, r *http.Request) {
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	defaultCWD, err := s.defaultCWD()
+	if err != nil {
+		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to resolve default cwd", err)
+		return
+	}
+
+	baseDir, filter, err := resolveSuggestionBaseDir(query, defaultCWD)
+	if err != nil {
+		s.writeErrorResponse(w, http.StatusBadRequest, "invalid cwd query", err)
+		return
+	}
+
+	hints, err := listDirectoryHints(baseDir, filter)
+	if err != nil {
+		s.writeErrorResponse(w, http.StatusBadRequest, "failed to list cwd suggestions", err)
+		return
+	}
+
+	if isNaturalDirectoryQuery(query) {
+		siblingBaseDir, siblingErr := conversations.NormalizeCWD(filepath.Dir(defaultCWD))
+		if siblingErr == nil && siblingBaseDir != baseDir {
+			siblingHints, err := listDirectoryHints(siblingBaseDir, filter)
+			if err == nil {
+				hints = mergeDirectoryHints(hints, siblingHints)
+			}
+		}
+	}
+
+	s.writeJSONResponse(w, CWDHintsResponse{
+		BaseDir: baseDir,
+		Query:   query,
+		Hints:   hints,
+	})
+}
+
+func (s *Server) defaultCWD() (string, error) {
+	configuredCWD := ""
+	if s != nil && s.config != nil {
+		configuredCWD = s.config.CWD
+	}
+
+	return resolveConfiguredDefaultCWD(configuredCWD)
+}
+
+func resolveConfiguredDefaultCWD(configuredCWD string) (string, error) {
+	trimmed := strings.TrimSpace(configuredCWD)
+	if trimmed == "" {
+		return conversations.CurrentWorkingDirectory()
+	}
+
+	return conversations.NormalizeCWD(trimmed)
+}
+
+func resolveSuggestionBaseDir(query, defaultCWD string) (string, string, error) {
+	expandedQuery, err := expandWebCWDInput(query, defaultCWD)
+	if err != nil {
+		return "", "", err
+	}
+
+	if expandedQuery == "" {
+		return defaultCWD, "", nil
+	}
+
+	hasTrailingSlash := strings.HasSuffix(expandedQuery, string(os.PathSeparator))
+	cleanQuery := filepath.Clean(expandedQuery)
+	if hasTrailingSlash {
+		return cleanQuery, "", nil
+	}
+
+	baseDir := filepath.Dir(cleanQuery)
+	filter := filepath.Base(cleanQuery)
+	if baseDir == "." {
+		baseDir = defaultCWD
+	}
+
+	baseDir, err = conversations.NormalizeCWD(baseDir)
+	if err != nil {
+		return "", "", err
+	}
+
+	return baseDir, filter, nil
+}
+
+func expandWebCWDInput(query, defaultCWD string) (string, error) {
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" {
+		return "", nil
+	}
+
+	if strings.HasPrefix(trimmed, "~") {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return "", errors.Wrap(err, "failed to resolve home directory")
+		}
+		if trimmed == "~" {
+			return homeDir, nil
+		}
+		if strings.HasPrefix(trimmed, "~/") {
+			return filepath.Join(homeDir, strings.TrimPrefix(trimmed, "~/")), nil
+		}
+	}
+
+	if filepath.IsAbs(trimmed) {
+		return trimmed, nil
+	}
+
+	if isNaturalDirectoryQuery(trimmed) {
+		exactCandidates := []string{
+			filepath.Join(defaultCWD, trimmed),
+			filepath.Join(filepath.Dir(defaultCWD), trimmed),
+		}
+
+		for _, candidate := range exactCandidates {
+			resolved, err := conversations.NormalizeCWD(candidate)
+			if err == nil {
+				return resolved, nil
+			}
+		}
+	}
+
+	return filepath.Join(defaultCWD, trimmed), nil
+}
+
+func listDirectoryHints(baseDir, filter string) ([]CWDHint, error) {
+	entries, err := os.ReadDir(baseDir)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to read suggestion directory")
+	}
+
+	filter = strings.ToLower(strings.TrimSpace(filter))
+	hints := make([]CWDHint, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		name := entry.Name()
+		if filter != "" && !matchesDirectoryHint(name, filter) {
+			continue
+		}
+
+		hints = append(hints, CWDHint{Path: filepath.Join(baseDir, name)})
+	}
+
+	sort.Slice(hints, func(i, j int) bool {
+		left := strings.ToLower(filepath.Base(hints[i].Path))
+		right := strings.ToLower(filepath.Base(hints[j].Path))
+		return left < right
+	})
+
+	if len(hints) > 20 {
+		hints = hints[:20]
+	}
+
+	return hints, nil
+}
+
+func mergeDirectoryHints(groups ...[]CWDHint) []CWDHint {
+	merged := make([]CWDHint, 0)
+	seen := make(map[string]struct{})
+
+	for _, group := range groups {
+		for _, hint := range group {
+			if _, ok := seen[hint.Path]; ok {
+				continue
+			}
+			seen[hint.Path] = struct{}{}
+			merged = append(merged, hint)
+		}
+	}
+
+	sort.Slice(merged, func(i, j int) bool {
+		left := strings.ToLower(filepath.Base(merged[i].Path))
+		right := strings.ToLower(filepath.Base(merged[j].Path))
+		if left == right {
+			return merged[i].Path < merged[j].Path
+		}
+		return left < right
+	})
+
+	if len(merged) > 20 {
+		merged = merged[:20]
+	}
+
+	return merged
+}
+
+func isNaturalDirectoryQuery(query string) bool {
+	trimmed := strings.TrimSpace(query)
+	return trimmed != "" &&
+		!strings.HasPrefix(trimmed, "~") &&
+		!filepath.IsAbs(trimmed) &&
+		!strings.ContainsRune(trimmed, os.PathSeparator)
+}
+
+func matchesDirectoryHint(name, filter string) bool {
+	lowerName := strings.ToLower(name)
+	if strings.HasPrefix(lowerName, filter) || strings.Contains(lowerName, filter) {
+		return true
+	}
+
+	filterRunes := []rune(filter)
+	filterIndex := 0
+	for _, char := range lowerName {
+		if filterIndex >= len(filterRunes) {
+			break
+		}
+		if char == filterRunes[filterIndex] {
+			filterIndex++
+		}
+	}
+
+	return filterIndex == len(filterRunes)
 }
 
 // handleGetConversation handles GET /api/conversations/{id}
@@ -794,6 +1046,8 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:     response.CreatedAt,
 		UpdatedAt:     response.UpdatedAt,
 		Provider:      providerLabel,
+		CWD:           response.CWD,
+		CWDLocked:     response.ID != "" && strings.TrimSpace(response.CWD) != "",
 		Profile:       resolveConversationProfile(response.Metadata),
 		ProfileLocked: response.ID != "",
 		Summary:       response.Summary,

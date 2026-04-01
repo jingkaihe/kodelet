@@ -76,6 +76,7 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 	// Build the conversation record
 	record := convtypes.ConversationRecord{
 		ID:             t.ConversationID,
+		CWD:            t.Config.WorkingDirectory,
 		RawMessages:    messagesJSON,
 		Provider:       "openai",
 		Usage:          *t.Usage,

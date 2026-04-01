@@ -19,12 +19,14 @@ import (
 type ServeConfig struct {
 	Host string
 	Port int
+	CWD  string
 }
 
 func NewServeConfig() *ServeConfig {
 	return &ServeConfig{
 		Host: "localhost",
 		Port: 8080,
+		CWD:  "",
 	}
 }
 
@@ -47,6 +49,7 @@ func init() {
 	defaults := NewServeConfig()
 	serveCmd.Flags().String("host", defaults.Host, "Host to bind the web server to")
 	serveCmd.Flags().Int("port", defaults.Port, "Port to bind the web server to")
+	serveCmd.Flags().String("cwd", defaults.CWD, "Default working directory for new web conversations")
 }
 
 func getServeConfigFromFlags(cmd *cobra.Command) *ServeConfig {
@@ -57,6 +60,9 @@ func getServeConfigFromFlags(cmd *cobra.Command) *ServeConfig {
 	}
 	if port, err := cmd.Flags().GetInt("port"); err == nil {
 		config.Port = port
+	}
+	if cwd, err := cmd.Flags().GetString("cwd"); err == nil {
+		config.CWD = strings.TrimSpace(cwd)
 	}
 
 	return config
@@ -100,6 +106,7 @@ func runServeCommand(ctx context.Context, config *ServeConfig) {
 	serverConfig := &webui.ServerConfig{
 		Host: config.Host,
 		Port: config.Port,
+		CWD:  config.CWD,
 	}
 
 	server, err := webui.NewServer(ctx, serverConfig)

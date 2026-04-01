@@ -86,15 +86,70 @@ export const formatContextWindow = (usage: Usage | null | undefined): string | n
   return `${formatCompactNumber(current)}/${formatCompactNumber(max)} (${percentage}%) context`;
 };
 
+const fallbackCopyToClipboard = (text: string): boolean => {
+  if (typeof document === 'undefined' || typeof document.execCommand !== 'function') {
+    return false;
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.top = '0';
+  textarea.style.left = '0';
+  textarea.style.opacity = '0';
+  textarea.style.pointerEvents = 'none';
+
+  const selection = document.getSelection();
+  const previousRanges = selection
+    ? Array.from({ length: selection.rangeCount }, (_, index) => selection.getRangeAt(index).cloneRange())
+    : [];
+  const activeElement = document.activeElement instanceof HTMLElement
+    ? document.activeElement
+    : null;
+
+  document.body.appendChild(textarea);
+
+  try {
+    textarea.focus();
+    textarea.select();
+    textarea.setSelectionRange(0, textarea.value.length);
+    return document.execCommand('copy');
+  } finally {
+    textarea.remove();
+
+    if (selection) {
+      selection.removeAllRanges();
+      for (const range of previousRanges) {
+        selection.addRange(range);
+      }
+    }
+
+    activeElement?.focus();
+  }
+};
+
 // Copy to clipboard utility
 export const copyToClipboard = async (text: string): Promise<void> => {
+  let clipboardError: unknown;
+
   try {
-    await navigator.clipboard.writeText(text);
-    showToast('Copied to clipboard!', 'success');
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      showToast('Copied to clipboard!', 'success');
+      return;
+    }
   } catch (err) {
-    console.error('Failed to copy:', err);
-    showToast('Failed to copy to clipboard', 'error');
+    clipboardError = err;
   }
+
+  if (fallbackCopyToClipboard(text)) {
+    showToast('Copied to clipboard!', 'success');
+    return;
+  }
+
+  console.error('Failed to copy:', clipboardError || new Error('Clipboard API unavailable'));
+  showToast('Failed to copy to clipboard', 'error');
 };
 
 // Toast notification utility

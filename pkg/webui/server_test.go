@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -138,6 +139,18 @@ func TestServerConfig_Validate(t *testing.T) {
 	}
 }
 
+func TestServerConfig_Validate_RejectsInvalidCWD(t *testing.T) {
+	config := &ServerConfig{
+		Host: "localhost",
+		Port: 8080,
+		CWD:  filepath.Join(t.TempDir(), "missing"),
+	}
+
+	err := config.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid cwd")
+}
+
 func TestServer_handleListConversations(t *testing.T) {
 	mockService := &mockConversationService{
 		listFunc: func(_ context.Context, _ *conversations.ListConversationsRequest) (*conversations.ListConversationsResponse, error) {
@@ -187,6 +200,7 @@ func TestServer_handleGetConversation(t *testing.T) {
 			if id == conversationID {
 				return &conversations.GetConversationResponse{
 					ID:          conversationID,
+					CWD:         "/workspace/project",
 					Summary:     "Test conversation",
 					Provider:    "openai",
 					Metadata:    map[string]any{"platform": "fireworks", "api_mode": "responses", "profile": "premium"},
@@ -216,9 +230,92 @@ func TestServer_handleGetConversation(t *testing.T) {
 	assert.Equal(t, conversationID, response.ID)
 	assert.Equal(t, "Test conversation", response.Summary)
 	assert.Equal(t, "OpenAI", response.Provider)
+	assert.Equal(t, "/workspace/project", response.CWD)
+	assert.True(t, response.CWDLocked)
 	assert.Equal(t, "premium", response.Profile)
 	assert.True(t, response.ProfileLocked)
 	assert.Equal(t, 1, response.MessageCount)
+}
+
+func TestServer_handleGetChatSettings_IncludesDefaultCWD(t *testing.T) {
+	tmpDir := t.TempDir()
+	server := &Server{
+		config: &ServerConfig{CWD: tmpDir},
+	}
+
+	req := httptest.NewRequest("GET", "/api/chat/settings", nil)
+	w := httptest.NewRecorder()
+
+	server.handleGetChatSettings(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response ChatSettingsResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	assert.Equal(t, tmpDir, response.DefaultCWD)
+}
+
+func TestServer_defaultCWD_ReturnsErrorForInvalidConfiguredCWD(t *testing.T) {
+	server := &Server{
+		config: &ServerConfig{CWD: filepath.Join(t.TempDir(), "missing")},
+	}
+
+	defaultCWD, err := server.defaultCWD()
+	require.Error(t, err)
+	assert.Empty(t, defaultCWD)
+	assert.Contains(t, err.Error(), "cwd directory does not exist")
+}
+
+func TestServer_handleGetCWDHints(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(tmpDir, "kodelet"), 0o755))
+	require.NoError(t, os.Mkdir(filepath.Join(tmpDir, "koala"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("x"), 0o644))
+
+	server := &Server{
+		config: &ServerConfig{CWD: tmpDir},
+	}
+
+	req := httptest.NewRequest("GET", "/api/chat/cwd-suggestions?q=ko", nil)
+	w := httptest.NewRecorder()
+
+	server.handleGetCWDHints(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response CWDHintsResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	require.Len(t, response.Hints, 2)
+	assert.Equal(t, filepath.Join(tmpDir, "koala"), response.Hints[0].Path)
+	assert.Equal(t, filepath.Join(tmpDir, "kodelet"), response.Hints[1].Path)
+}
+
+func TestServer_handleGetCWDHints_NaturalSiblingQuery(t *testing.T) {
+	parentDir := t.TempDir()
+	defaultDir := filepath.Join(parentDir, "workspace")
+	require.NoError(t, os.Mkdir(defaultDir, 0o755))
+	require.NoError(t, os.Mkdir(filepath.Join(parentDir, "kodelet"), 0o755))
+	require.NoError(t, os.Mkdir(filepath.Join(parentDir, "kodelet-website"), 0o755))
+
+	server := &Server{
+		config: &ServerConfig{CWD: defaultDir},
+	}
+
+	req := httptest.NewRequest("GET", "/api/chat/cwd-suggestions?q=kodelet", nil)
+	w := httptest.NewRecorder()
+
+	server.handleGetCWDHints(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response CWDHintsResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	require.Len(t, response.Hints, 2)
+	assert.Equal(t, filepath.Join(parentDir, "kodelet"), response.Hints[0].Path)
+	assert.Equal(t, filepath.Join(parentDir, "kodelet-website"), response.Hints[1].Path)
 }
 
 func TestServer_handleGetConversationOpenAIChatCompletionsSkipsSystemAndPreservesThinking(t *testing.T) {

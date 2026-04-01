@@ -156,4 +156,34 @@ describe('ChatTranscript', () => {
       'data:image/png;base64,aGVsbG8='
     );
   });
+
+  it('uses an icon-only copy button with an accessible label', () => {
+    render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[
+          {
+            role: 'assistant',
+            blocks: [
+              {
+                type: 'message',
+                content: 'Ready to copy',
+              },
+            ],
+          },
+        ]}
+      />
+    );
+
+    const button = screen.getByRole('button', { name: 'Copy to clipboard' });
+
+    expect(button).toBeInTheDocument();
+    expect(button).toHaveClass(
+      'opacity-0',
+      'transition-opacity',
+      'group-hover:opacity-100',
+      'group-focus-within:opacity-100'
+    );
+    expect(screen.queryByRole('button', { name: 'Copy' })).not.toBeInTheDocument();
+  });
 });

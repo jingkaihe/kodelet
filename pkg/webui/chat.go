@@ -28,6 +28,7 @@ type ChatRequest struct {
 	Content        []ChatContentBlock `json:"content,omitempty"`
 	ConversationID string             `json:"conversationId,omitempty"`
 	Profile        string             `json:"profile,omitempty"`
+	CWD            string             `json:"cwd,omitempty"`
 }
 
 // ChatContentBlock represents a multimodal user input block from the web UI.
@@ -74,11 +75,13 @@ type ChatRunner interface {
 }
 
 // DefaultChatRunner executes chat turns using the same LLM/tool stack as the CLI.
-type DefaultChatRunner struct{}
+type DefaultChatRunner struct {
+	defaultCWD string
+}
 
 // NewDefaultChatRunner creates a chat runner for the web UI server.
-func NewDefaultChatRunner() *DefaultChatRunner {
-	return &DefaultChatRunner{}
+func NewDefaultChatRunner(defaultCWD string) *DefaultChatRunner {
+	return &DefaultChatRunner{defaultCWD: defaultCWD}
 }
 
 // Run executes a single persisted chat turn and streams events to the sink.
@@ -90,11 +93,6 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 
 	if message == "" && len(imageInputs) == 0 {
 		return "", errors.New("message cannot be empty")
-	}
-
-	workspaceDir, err := mcp.ResolveWorkspaceDir("")
-	if err != nil {
-		return "", errors.Wrap(err, "failed to resolve MCP workspace directory")
 	}
 
 	customManager, err := tools.CreateCustomToolManagerFromViper(ctx)
@@ -118,14 +116,19 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 		sessionID = convtypes.GenerateID()
 	}
 
-	llmConfig, err := resolveWebChatConfig(ctx, sessionID, strings.TrimSpace(req.Profile))
+	llmConfig, resolvedCWD, err := resolveWebChatConfig(ctx, sessionID, strings.TrimSpace(req.Profile), strings.TrimSpace(req.CWD), r.defaultCWD)
 	if err != nil {
 		return sessionID, errors.Wrap(err, "failed to load configuration")
 	}
+	workspaceDir, err := mcp.ResolveWorkspaceDir(resolvedCWD)
+	if err != nil {
+		return sessionID, errors.Wrap(err, "failed to resolve MCP workspace directory")
+	}
 	llmConfig.MCPExecutionMode = viper.GetString("mcp.execution_mode")
 	llmConfig.MCPWorkspaceDir = workspaceDir
+	llmConfig.WorkingDirectory = resolvedCWD
 
-	appState, err := buildChatState(ctx, llmConfig, sessionID, mcpManager, customManager)
+	appState, err := buildChatState(ctx, llmConfig, sessionID, resolvedCWD, mcpManager, customManager)
 	if err != nil {
 		return sessionID, err
 	}
@@ -163,25 +166,96 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 	return sessionID, nil
 }
 
-func resolveWebChatConfig(ctx context.Context, conversationID, requestedProfile string) (llmtypes.Config, error) {
+func resolveWebChatConfig(ctx context.Context, conversationID, requestedProfile, requestedCWD, defaultCWDInput string) (llmtypes.Config, string, error) {
+	defaultCWD, err := resolveConfiguredDefaultCWD(defaultCWDInput)
+	if err != nil {
+		return llmtypes.Config{}, "", err
+	}
+
+	expandedRequestedCWD, err := expandWebCWDInput(requestedCWD, defaultCWD)
+	if err != nil {
+		return llmtypes.Config{}, "", err
+	}
+
 	if strings.TrimSpace(conversationID) == "" {
-		return resolveWebChatConfigForNewConversation(requestedProfile)
+		config, err := resolveWebChatConfigForNewConversation(requestedProfile)
+		if err != nil {
+			return llmtypes.Config{}, "", err
+		}
+		resolution, err := conversationservice.ResolveCWD(ctx, nil, "", expandedRequestedCWD, defaultCWD, false)
+		if err != nil {
+			return llmtypes.Config{}, "", err
+		}
+		config.WorkingDirectory = resolution.CWD
+		return config, resolution.CWD, nil
 	}
 
 	service, err := conversationservice.GetDefaultConversationService(ctx)
 	if err != nil {
-		return llmtypes.Config{}, errors.Wrap(err, "failed to open conversation service")
+		return llmtypes.Config{}, "", errors.Wrap(err, "failed to open conversation service")
 	}
 	defer func() {
 		_ = service.Close()
 	}()
 
-	record, err := service.GetConversation(ctx, conversationID)
+	resolution, err := conversationservice.ResolveCWD(ctx, serviceStoreAdapter{service: service}, conversationID, expandedRequestedCWD, defaultCWD, false)
 	if err != nil {
-		return resolveWebChatConfigForNewConversation(requestedProfile)
+		return llmtypes.Config{}, "", err
 	}
 
-	return resolveWebChatConfigForExistingConversation(record)
+	record, err := service.GetConversation(ctx, conversationID)
+	if err != nil {
+		config, newErr := resolveWebChatConfigForNewConversation(requestedProfile)
+		if newErr != nil {
+			return llmtypes.Config{}, "", newErr
+		}
+		config.WorkingDirectory = resolution.CWD
+		return config, resolution.CWD, nil
+	}
+
+	config, err := resolveWebChatConfigForExistingConversation(record)
+	if err != nil {
+		return llmtypes.Config{}, "", err
+	}
+	config.WorkingDirectory = resolution.CWD
+	return config, resolution.CWD, nil
+}
+
+type serviceStoreAdapter struct {
+	service conversationservice.ConversationServiceInterface
+}
+
+func (s serviceStoreAdapter) Save(context.Context, convtypes.ConversationRecord) error {
+	return errors.New("save not implemented")
+}
+
+func (s serviceStoreAdapter) Delete(context.Context, string) error {
+	return errors.New("delete not implemented")
+}
+
+func (s serviceStoreAdapter) Query(context.Context, convtypes.QueryOptions) (convtypes.QueryResult, error) {
+	return convtypes.QueryResult{}, errors.New("query not implemented")
+}
+
+func (s serviceStoreAdapter) Close() error { return nil }
+
+func (s serviceStoreAdapter) Load(ctx context.Context, id string) (convtypes.ConversationRecord, error) {
+	record, err := s.service.GetConversation(ctx, id)
+	if err != nil {
+		return convtypes.ConversationRecord{}, err
+	}
+	return convtypes.ConversationRecord{
+		ID:          record.ID,
+		CWD:         record.CWD,
+		Provider:    record.Provider,
+		Metadata:    record.Metadata,
+		RawMessages: record.RawMessages,
+		CreatedAt:   record.CreatedAt,
+		UpdatedAt:   record.UpdatedAt,
+		Usage:       record.Usage,
+		Summary:     record.Summary,
+		ToolResults: record.ToolResults,
+	}, nil
 }
 
 func resolveWebChatConfigForNewConversation(requestedProfile string) (llmtypes.Config, error) {
@@ -334,11 +408,13 @@ func buildChatState(
 	ctx context.Context,
 	llmConfig llmtypes.Config,
 	sessionID string,
+	workingDir string,
 	mcpManager *tools.MCPManager,
 	customManager *tools.CustomToolManager,
 ) (*tools.BasicState, error) {
 	stateOpts := []tools.BasicStateOption{
 		tools.WithSessionID(sessionID),
+		tools.WithWorkingDirectory(workingDir),
 		tools.WithLLMConfig(llmConfig),
 		tools.WithCustomTools(customManager),
 		tools.WithMainTools(),
@@ -350,7 +426,7 @@ func buildChatState(
 	}
 
 	if mcpManager != nil {
-		mcpSetup, err := mcp.SetupExecutionMode(ctx, mcpManager, sessionID, "")
+		mcpSetup, err := mcp.SetupExecutionMode(ctx, mcpManager, sessionID, workingDir)
 		if err != nil && !stdErrors.Is(err, mcp.ErrDirectMode) {
 			return nil, errors.Wrap(err, "failed to set up MCP execution mode")
 		}

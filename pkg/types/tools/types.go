@@ -169,6 +169,7 @@ type State interface {
 
 	// LLM configuration access
 	GetLLMConfig() any // Returns llmtypes.Config but using any to avoid circular import
+	WorkingDirectory() string
 
 	// File locking for atomic operations
 	// LockFile acquires an exclusive lock for the given file path to prevent race conditions

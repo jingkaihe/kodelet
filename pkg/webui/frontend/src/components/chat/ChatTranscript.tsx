@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { marked } from 'marked';
 import type { ChatRenderMessage, ContentBlock } from '../../types';
 import ToolRenderer from '../ToolRenderer';
-import { cn, copyToClipboard } from '../../utils';
+import { CopyButton } from '../tool-renderers/shared';
+import { cn } from '../../utils';
 import { normalizeToolName, ReferenceCodeBlock, TOOL_LABELS } from '../tool-renderers/reference';
 
 const renderContent = (content: string | ContentBlock[] | undefined): string => {
@@ -180,7 +181,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
           <article key={`${message.role}-${index}`} className="w-full">
             <div
               className={cn(
-                'chat-message-panel w-full rounded-[1.5rem]',
+                'chat-message-panel group w-full rounded-[1.5rem]',
                 isUser ? 'px-5 py-4' : 'px-5 py-5'
               )}
             >
@@ -206,13 +207,10 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
                   </div>
                 </div>
 
-                <button
-                  className="panel-action-button px-3 py-2"
-                  onClick={() => copyToClipboard(getCopyText(message))}
-                  type="button"
-                >
-                  Copy
-                </button>
+                <CopyButton
+                  className="pointer-events-none px-3 py-2 opacity-0 transition-opacity duration-200 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
+                  content={getCopyText(message)}
+                />
               </div>
 
               {isUser ? (

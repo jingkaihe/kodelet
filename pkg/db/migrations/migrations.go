@@ -16,5 +16,6 @@ func All() []db.Migration {
 		Migration20260204163003AddBackgroundProcesses(),
 		Migration20260204163004CreateACPSessionUpdates(),
 		Migration20260226120000AddMetadataToSummaries(),
+		Migration20260331120000AddCWDToConversations(),
 	}
 }

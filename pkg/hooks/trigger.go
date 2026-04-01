@@ -3,7 +3,6 @@ package hooks
 import (
 	"context"
 	"encoding/json"
-	"os"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -17,15 +16,27 @@ type Trigger struct {
 	Manager        HookManager
 	ConversationID string
 	IsSubAgent     bool
+	WorkingDir     string
 	RecipeName     string // Active recipe name, empty if none
 }
 
 // NewTrigger creates a new hook trigger with the given parameters.
-func NewTrigger(manager HookManager, conversationID string, isSubAgent bool, recipeName string) Trigger {
+
+func NewTrigger(manager HookManager, conversationID string, isSubAgent bool, args ...string) Trigger {
+	workingDir := ""
+	recipeName := ""
+	if len(args) == 1 {
+		recipeName = args[0]
+	} else if len(args) >= 2 {
+		workingDir = args[0]
+		recipeName = args[1]
+	}
+
 	return Trigger{
 		Manager:        manager,
 		ConversationID: conversationID,
 		IsSubAgent:     isSubAgent,
+		WorkingDir:     workingDir,
 		RecipeName:     recipeName,
 	}
 }
@@ -38,14 +49,12 @@ func (t Trigger) invokedBy() InvokedBy {
 	return InvokedByMain
 }
 
-// getCwd returns the current working directory, logging a warning on error
+// getCwd returns the configured working directory.
 func (t Trigger) getCwd(ctx context.Context) string {
-	cwd, err := os.Getwd()
-	if err != nil {
-		logger.G(ctx).WithError(err).Warn("failed to get working directory for hook")
-		return ""
+	if t.WorkingDir == "" {
+		logger.G(ctx).Debug("hook trigger missing working directory")
 	}
-	return cwd
+	return t.WorkingDir
 }
 
 // TriggerUserMessageSend invokes user_message_send hooks including built-in handlers.

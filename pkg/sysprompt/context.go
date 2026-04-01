@@ -42,8 +42,15 @@ type contextEntry struct {
 }
 
 // newPromptContext creates a new PromptContext with default values.
-func newPromptContext(contexts map[string]string) *PromptContext {
-	pwd, _ := os.Getwd()
+// The optional workingDirectory override preserves compatibility with existing callers.
+func newPromptContext(contexts map[string]string, workingDirectory ...string) *PromptContext {
+	pwd := ""
+	if len(workingDirectory) > 0 {
+		pwd = strings.TrimSpace(workingDirectory[0])
+	}
+	if pwd == "" {
+		pwd, _ = os.Getwd()
+	}
 	isGitRepo := checkIsGitRepo(pwd)
 	platform := runtime.GOOS
 	osVersion := getOSVersion()
@@ -154,6 +161,9 @@ func resolveActiveContextFile(workingDir string, contexts map[string]string, pat
 
 // checkIsGitRepo checks if the given directory is a git repository
 func checkIsGitRepo(dir string) bool {
+	if dir == "" {
+		return false
+	}
 	_, err := os.Stat(dir + "/.git")
 	return err == nil
 }

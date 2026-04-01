@@ -53,13 +53,14 @@ func (s *Store) Save(ctx context.Context, record conversations.ConversationRecor
 	// Insert or update conversation record with UPSERT to preserve created_at
 	conversationQuery := `
 		INSERT INTO conversations (
-			id, raw_messages, provider, file_last_access, usage,
+			id, cwd, raw_messages, provider, file_last_access, usage,
 			summary, created_at, updated_at, metadata, tool_results
 		) VALUES (
-			:id, :raw_messages, :provider, :file_last_access, :usage,
+			:id, :cwd, :raw_messages, :provider, :file_last_access, :usage,
 			:summary, :created_at, :updated_at, :metadata, :tool_results
 		)
 		ON CONFLICT(id) DO UPDATE SET
+			cwd = excluded.cwd,
 			raw_messages = excluded.raw_messages,
 			provider = excluded.provider,
 			file_last_access = excluded.file_last_access,
@@ -77,11 +78,12 @@ func (s *Store) Save(ctx context.Context, record conversations.ConversationRecor
 	// Insert or update conversation summary with UPSERT to preserve created_at
 	summaryQuery := `
 		INSERT INTO conversation_summaries (
-			id, message_count, first_message, summary, provider, metadata, usage, created_at, updated_at
+			id, cwd, message_count, first_message, summary, provider, metadata, usage, created_at, updated_at
 		) VALUES (
-			:id, :message_count, :first_message, :summary, :provider, :metadata, :usage, :created_at, :updated_at
+			:id, :cwd, :message_count, :first_message, :summary, :provider, :metadata, :usage, :created_at, :updated_at
 		)
 		ON CONFLICT(id) DO UPDATE SET
+			cwd = excluded.cwd,
 			message_count = excluded.message_count,
 			first_message = excluded.first_message,
 			summary = excluded.summary,
@@ -102,7 +104,7 @@ func (s *Store) Save(ctx context.Context, record conversations.ConversationRecor
 func (s *Store) Load(ctx context.Context, id string) (conversations.ConversationRecord, error) {
 	var dbRecord dbConversationRecord
 
-	query := `SELECT id, raw_messages, provider, file_last_access, usage,
+	query := `SELECT id, cwd, raw_messages, provider, file_last_access, usage,
 		summary, created_at, updated_at, metadata, tool_results
 		FROM conversations WHERE id = ?`
 	err := s.db.GetContext(ctx, &dbRecord, query, id)
@@ -165,6 +167,11 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 		args["provider"] = options.Provider
 	}
 
+	if options.CWD != "" {
+		conditions = append(conditions, "cwd = :cwd")
+		args["cwd"] = options.CWD
+	}
+
 	// Build ORDER BY clause
 	sortBy := "updated_at"
 	switch options.SortBy {
@@ -182,7 +189,7 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 	}
 
 	// Build main query
-	baseQuery := `SELECT id, message_count, first_message, summary, provider,
+	baseQuery := `SELECT id, cwd, message_count, first_message, summary, provider,
 		metadata, usage, created_at, updated_at FROM conversation_summaries`
 	if len(conditions) > 0 {
 		baseQuery += " WHERE " + strings.Join(conditions, " AND ")

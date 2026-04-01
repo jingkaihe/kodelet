@@ -92,6 +92,7 @@ func (t *Thread) SaveConversation(ctx context.Context, summarise bool) error {
 
 	record := convtypes.ConversationRecord{
 		ID:             t.ConversationID,
+		CWD:            t.Config.WorkingDirectory,
 		RawMessages:    rawMessages,
 		Provider:       "anthropic",
 		Usage:          *t.Usage,
