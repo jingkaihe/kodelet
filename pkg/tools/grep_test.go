@@ -100,6 +100,26 @@ func TestGrepTool_ValidateInput(t *testing.T) {
 			errorMsg:    "path must be an absolute path",
 		},
 		{
+			name: "invalid relative path without dot prefix",
+			input: CodeSearchInput{
+				Pattern: "func Test",
+				Path:    "pkg",
+				Include: "*.go",
+			},
+			expectError: true,
+			errorMsg:    "path must be an absolute path",
+		},
+		{
+			name: "invalid nested relative path without dot prefix",
+			input: CodeSearchInput{
+				Pattern: "func Test",
+				Path:    "pkg/tools",
+				Include: "*.go",
+			},
+			expectError: true,
+			errorMsg:    "path must be an absolute path",
+		},
+		{
 			name: "missing pattern",
 			input: CodeSearchInput{
 				Path:    "/tmp",

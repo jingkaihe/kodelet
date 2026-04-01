@@ -233,7 +233,7 @@ func (t *GrepTool) ValidateInput(_ tooltypes.State, parameters string) error {
 		return err
 	}
 
-	if strings.HasPrefix(input.Path, ".") {
+	if input.Path != "" && !filepath.IsAbs(input.Path) {
 		return errors.New("path must be an absolute path")
 	}
 
