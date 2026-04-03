@@ -41,6 +41,7 @@ func NewRendererRegistry() *RendererRegistry {
 	registry.Register("todo_write", &TodoRenderer{})
 	registry.Register("subagent", &SubAgentRenderer{})
 	registry.Register("image_recognition", &ImageRecognitionRenderer{})
+	registry.Register("openai_web_search", &OpenAIWebSearchRenderer{})
 	registry.Register("web_fetch", &WebFetchRenderer{})
 	registry.Register("read_conversation", &ReadConversationRenderer{})
 	registry.Register("code_execution", &CodeExecutionRenderer{})

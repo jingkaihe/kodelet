@@ -5,6 +5,7 @@ package responses
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
@@ -33,6 +34,8 @@ type StoredInputItem struct {
 	CallID    string `json:"call_id,omitempty"`
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
+	Status    string `json:"status,omitempty"`
+	Action    string `json:"action,omitempty"`
 
 	// Function call output fields (when Type == "function_call_output")
 	Output string `json:"output,omitempty"`
@@ -98,6 +101,15 @@ func fromStoredItems(items []StoredInputItem) []responses.ResponseInputItemUnion
 					Output: responses.ResponseInputItemFunctionCallOutputOutputUnionParam{
 						OfString: param.NewOpt(item.Output),
 					},
+				},
+			})
+
+		case "web_search_call":
+			result = append(result, responses.ResponseInputItemUnionParam{
+				OfWebSearchCall: &responses.ResponseFunctionWebSearchParam{
+					ID:     item.CallID,
+					Status: responses.ResponseFunctionWebSearchStatus(item.Status),
+					Action: webSearchActionParamFromStoredItem(item),
 				},
 			})
 
@@ -186,4 +198,28 @@ func inputItemFromRawItem(raw json.RawMessage) (responses.ResponseInputItemUnion
 	}
 
 	return responses.ResponseInputItemUnionParam{}, false
+}
+
+func webSearchActionParamFromStoredItem(item StoredInputItem) responses.ResponseFunctionWebSearchActionUnionParam {
+	switch item.Action {
+	case "open_page":
+		return responses.ResponseFunctionWebSearchActionUnionParam{
+			OfOpenPage: &responses.ResponseFunctionWebSearchActionOpenPageParam{URL: param.NewOpt(item.Content)},
+		}
+	case "find_in_page":
+		return responses.ResponseFunctionWebSearchActionUnionParam{
+			OfFind: &responses.ResponseFunctionWebSearchActionFindParam{
+				URL:     item.Content,
+				Pattern: item.Arguments,
+			},
+		}
+	default:
+		queries := []string{}
+		if strings.TrimSpace(item.Content) != "" {
+			queries = append(queries, item.Content)
+		}
+		return responses.ResponseFunctionWebSearchActionUnionParam{
+			OfSearch: &responses.ResponseFunctionWebSearchActionSearchParam{Queries: queries},
+		}
+	}
 }

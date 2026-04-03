@@ -270,6 +270,11 @@ openai:
   # native compaction support, and richer streaming events.
   # use_responses_api: true
 
+  # Enable OpenAI's native Responses web_search tool when talking to the real
+  # OpenAI platform. This stays off for OpenAI-compatible platforms and custom
+  # base URLs that may not support the built-in tool.
+  # enable_search: true
+
   # Enable manual prompt-cache affinity for Chat Completions.
   # When true, kodelet adds x-session-affinity header per conversation,
   # but only on calls where prompt caching is requested.

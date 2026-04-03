@@ -38,8 +38,6 @@ Kodelet includes several built-in recipes for common tasks:
 - **`compact`** - Compact conversation context into a comprehensive summary (uses recipe hooks)
 - **`custom-tool`** - Create custom tools for Kodelet
 - **`github/pr`** - Generate pull request descriptions
-- **`github/issue-resolve`** - Resolve GitHub issues
-- **`github/pr-respond`** - Respond to pull request comments
 
 List all available recipes with:
 ```bash

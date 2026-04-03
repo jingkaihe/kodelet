@@ -186,4 +186,41 @@ describe('ChatTranscript', () => {
     );
     expect(screen.queryByRole('button', { name: 'Copy' })).not.toBeInTheDocument();
   });
+
+  it('uses a friendly transcript label for native OpenAI search tool calls', () => {
+    const { container } = render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[
+          {
+            role: 'assistant',
+            blocks: [
+              {
+                type: 'tools',
+                tools: [
+                  {
+                    callId: 'search-1',
+                    name: 'openai_web_search',
+                    input: '{"type":"search","queries":["kodelet web ui"]}',
+                    result: {
+                      toolName: 'openai_web_search',
+                      success: true,
+                      metadata: {
+                        status: 'completed',
+                        action: 'search',
+                        queries: ['kodelet web ui'],
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ]}
+      />
+    )
+
+    expect(screen.getByText('Tools (1)')).toBeInTheDocument()
+    expect(container.querySelector('.tool-item-label')?.textContent).toContain('OpenAI Web Search')
+  })
 });

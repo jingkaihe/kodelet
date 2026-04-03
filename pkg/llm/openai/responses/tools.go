@@ -2,7 +2,9 @@ package responses
 
 import (
 	"encoding/json"
+	"strings"
 
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 
 	"github.com/openai/openai-go/v3/packages/param"
@@ -15,17 +17,58 @@ func buildTools(state tooltypes.State, noToolUse bool) []responses.ToolUnionPara
 		return nil
 	}
 
+	var llmConfig llmtypesConfig
+	if state != nil {
+		if cfg, ok := state.GetLLMConfig().(llmtypes.Config); ok {
+			llmConfig = llmtypesConfig{
+				platform:    resolvePlatformName(cfg),
+				baseURL:     getBaseURL(cfg),
+				useCopilot:  cfg.UseCopilot,
+				allowedFile: cfg.AllowedDomainsFile,
+			}
+			if cfg.OpenAI != nil {
+				llmConfig.enableSearch = cfg.OpenAI.EnableSearch
+			}
+			if len(cfg.AllowedTools) > 0 {
+				llmConfig.allowedTools = append([]string(nil), cfg.AllowedTools...)
+			}
+		}
+	}
+
 	// Get available tools from the state
 	var availableTools []tooltypes.Tool
 	if state != nil {
 		availableTools = state.Tools()
 	}
 
-	if len(availableTools) == 0 {
+	result := make([]responses.ToolUnionParam, 0, len(availableTools)+1)
+	if shouldEnableNativeOpenAISearch(llmConfig) && nativeOpenAISearchAllowed(llmConfig.allowedTools) {
+		result = append(result, buildNativeOpenAISearchTool(llmConfig))
+	}
+
+	if len(availableTools) > 0 {
+		result = append(result, toResponsesAPITools(availableTools)...)
+	}
+
+	if len(result) == 0 {
 		return nil
 	}
 
-	return toResponsesAPITools(availableTools)
+	return result
+}
+
+func nativeOpenAISearchAllowed(allowedTools []string) bool {
+	if len(allowedTools) == 0 {
+		return true
+	}
+
+	for _, toolName := range allowedTools {
+		if strings.EqualFold(strings.TrimSpace(toolName), openAISearchToolName) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // toResponsesAPITools converts internal tool definitions to Responses API format.

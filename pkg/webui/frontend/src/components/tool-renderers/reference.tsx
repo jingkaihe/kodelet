@@ -12,6 +12,7 @@ export const TOOL_LABELS: Record<string, string> = {
   glob_tool: 'File Discovery',
   web_fetch: 'Web Fetch',
   image_recognition: 'Image Analysis',
+  openai_web_search: 'OpenAI Web Search',
 };
 
 export const TOOL_ICONS: Record<string, string> = {
@@ -24,6 +25,7 @@ export const TOOL_ICONS: Record<string, string> = {
   glob_tool: '**',
   web_fetch: '//',
   image_recognition: '◫',
+  openai_web_search: '>>',
 };
 
 export const normalizeToolName = (toolName: string): string => {

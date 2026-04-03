@@ -99,6 +99,93 @@ func TestNewThreadWithoutAPIKey(t *testing.T) {
 	assert.Contains(t, err.Error(), "OPENAI_API_KEY")
 }
 
+func TestBuildToolsIncludesNativeOpenAISearchWhenEligible(t *testing.T) {
+	state := tools.NewBasicState(context.Background(), tools.WithLLMConfig(llmtypes.Config{
+		Provider: "openai",
+		OpenAI: &llmtypes.OpenAIConfig{
+			Platform:        "openai",
+			UseResponsesAPI: true,
+		},
+	}))
+
+	toolDefs := buildTools(state, false)
+	require.NotEmpty(t, toolDefs)
+	assert.NotNil(t, toolDefs[0].OfWebSearch)
+	assert.Equal(t, openairesponses.WebSearchToolTypeWebSearch, toolDefs[0].OfWebSearch.Type)
+}
+
+func TestBuildToolsSkipsNativeOpenAISearchForNonOpenAIPlatforms(t *testing.T) {
+	state := tools.NewBasicState(context.Background(), tools.WithLLMConfig(llmtypes.Config{
+		Provider: "openai",
+		OpenAI: &llmtypes.OpenAIConfig{
+			Platform:        "xai",
+			UseResponsesAPI: true,
+		},
+	}))
+
+	toolDefs := buildTools(state, false)
+	for _, toolDef := range toolDefs {
+		assert.Nil(t, toolDef.OfWebSearch)
+	}
+}
+
+func TestBuildToolsIncludesNativeOpenAISearchForCodexPlatform(t *testing.T) {
+	state := tools.NewBasicState(context.Background(), tools.WithLLMConfig(llmtypes.Config{
+		Provider: "openai",
+		OpenAI: &llmtypes.OpenAIConfig{
+			Platform:        "codex",
+			UseResponsesAPI: true,
+		},
+	}))
+
+	toolDefs := buildTools(state, false)
+	foundWebSearch := false
+	for _, toolDef := range toolDefs {
+		if toolDef.OfWebSearch != nil && toolDef.OfWebSearch.Type == openairesponses.WebSearchToolTypeWebSearch {
+			foundWebSearch = true
+			break
+		}
+	}
+	assert.True(t, foundWebSearch)
+}
+
+func TestBuildToolsSkipsNativeOpenAISearchWhenAllowlistExcludesIt(t *testing.T) {
+	state := tools.NewBasicState(context.Background(), tools.WithLLMConfig(llmtypes.Config{
+		Provider:     "openai",
+		AllowedTools: []string{"bash"},
+		OpenAI: &llmtypes.OpenAIConfig{
+			Platform:        "openai",
+			UseResponsesAPI: true,
+		},
+	}))
+
+	toolDefs := buildTools(state, false)
+	for _, toolDef := range toolDefs {
+		assert.Nil(t, toolDef.OfWebSearch)
+	}
+}
+
+func TestBuildToolsIncludesNativeOpenAISearchWhenAllowlistIncludesIt(t *testing.T) {
+	state := tools.NewBasicState(context.Background(), tools.WithLLMConfig(llmtypes.Config{
+		Provider:     "openai",
+		AllowedTools: []string{"bash", openAISearchToolName},
+		OpenAI: &llmtypes.OpenAIConfig{
+			Platform:        "openai",
+			UseResponsesAPI: true,
+		},
+	}))
+
+	toolDefs := buildTools(state, false)
+	foundWebSearch := false
+	for _, toolDef := range toolDefs {
+		if toolDef.OfWebSearch != nil && toolDef.OfWebSearch.Type == openairesponses.WebSearchToolTypeWebSearch {
+			foundWebSearch = true
+			break
+		}
+	}
+	assert.True(t, foundWebSearch)
+}
+
 func TestIsReasoningModelDynamic(t *testing.T) {
 	// Create a thread with default OpenAI platform defaults loaded.
 	thread := &Thread{
@@ -1457,6 +1544,55 @@ func TestProcessMessageExchangeInjectsPendingSteer(t *testing.T) {
 	require.Len(t, thread.storedItems, 2)
 	assert.Equal(t, "Please focus on error handling", thread.storedItems[1].Content)
 	assert.False(t, steerStore.HasPendingSteer("conv-test"))
+}
+
+func TestProcessMessageExchangeRegistersNativeOpenAISearchToolInRequest(t *testing.T) {
+	config := llmtypes.Config{
+		Provider: "openai",
+		Model:    "gpt-4.1",
+		OpenAI: &llmtypes.OpenAIConfig{
+			Platform:        "openai",
+			UseResponsesAPI: true,
+		},
+	}
+	thread := &Thread{
+		Thread: base.NewThread(config, "conv-test", hooks.Trigger{}),
+	}
+	thread.SetState(tools.NewBasicState(context.Background(), tools.WithLLMConfig(config)))
+	thread.inputItems = []openairesponses.ResponseInputItemUnionParam{
+		{
+			OfMessage: &openairesponses.EasyInputMessageParam{
+				Role:    openairesponses.EasyInputMessageRoleUser,
+				Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("hello")},
+			},
+		},
+	}
+	thread.pendingItems = append([]openairesponses.ResponseInputItemUnionParam{}, thread.inputItems...)
+	thread.storedItems = []StoredInputItem{{Type: "message", Role: "user", Content: "hello"}}
+
+	var capturedParams openairesponses.ResponseNewParams
+	thread.newStreamingFunc = func(_ context.Context, params openairesponses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
+		capturedParams = params
+		return nil
+	}
+	thread.processStreamFunc = func(_ context.Context, _ *ssestream.Stream[openairesponses.ResponseStreamEventUnion], _ llmtypes.MessageHandler, _ string, _ llmtypes.MessageOpt) (processStreamResult, error) {
+		return processStreamResult{responseCompleted: true}, nil
+	}
+
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
+	_, _, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-4.1", 256, "system", llmtypes.MessageOpt{})
+	require.NoError(t, err)
+
+	foundWebSearch := false
+	for _, toolDef := range capturedParams.Tools {
+		if toolDef.OfWebSearch != nil && toolDef.OfWebSearch.Type == openairesponses.WebSearchToolTypeWebSearch {
+			foundWebSearch = true
+			break
+		}
+	}
+	assert.True(t, foundWebSearch, "expected native OpenAI web_search tool in request schema")
+	require.True(t, capturedParams.ToolChoice.OfToolChoiceMode.Valid())
+	assert.Equal(t, openairesponses.ToolChoiceOptionsAuto, capturedParams.ToolChoice.OfToolChoiceMode.Value)
 }
 
 func TestProcessMessageExchangeSavesConversationOnError(t *testing.T) {

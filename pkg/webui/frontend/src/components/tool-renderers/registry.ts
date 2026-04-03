@@ -8,6 +8,7 @@ import FileWriteRenderer from './FileWriteRenderer';
 import GlobRenderer from './GlobRenderer';
 import GrepRenderer from './GrepRenderer';
 import ImageRecognitionRenderer from './ImageRecognitionRenderer';
+import OpenAIWebSearchRenderer from './OpenAIWebSearchRenderer';
 import SkillRenderer from './SkillRenderer';
 import SubagentRenderer from './SubagentRenderer';
 import ThinkingRenderer from './ThinkingRenderer';
@@ -35,6 +36,7 @@ const toolRendererRegistry: Record<string, ToolRendererRegistration> = {
   subagent: { component: SubagentRenderer },
   image_recognition: { component: ImageRecognitionRenderer },
   skill: { component: SkillRenderer },
+  openai_web_search: { component: OpenAIWebSearchRenderer, supportsFailureRendering: true },
 };
 
 export const getToolRendererRegistration = (toolName: string): ToolRendererRegistration | undefined =>

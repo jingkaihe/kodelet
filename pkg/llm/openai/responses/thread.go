@@ -462,6 +462,9 @@ func (t *Thread) processMessageExchange(
 		Tools:          tools,
 		Store:          param.NewOpt(true), // Enable server-side conversation state storage
 		PromptCacheKey: param.NewOpt(t.ConversationID),
+		ToolChoice: responses.ResponseNewParamsToolChoiceUnion{
+			OfToolChoiceMode: param.NewOpt(responses.ToolChoiceOptionsAuto),
+		},
 	}
 
 	// Set previous_response_id for multi-turn conversations
@@ -854,6 +857,22 @@ func storedItemFromCompactOutput(output responses.ResponseOutputItemUnion, raw s
 	case "function_call_output":
 		item.CallID = output.CallID
 		item.Output = output.Output.OfString
+	case "web_search_call":
+		search := output.AsWebSearchCall()
+		item.CallID = search.ID
+		item.Status = string(search.Status)
+		item.Action = search.Action.Type
+		switch search.Action.Type {
+		case "open_page":
+			item.Content = search.Action.AsOpenPage().URL
+		case "find_in_page":
+			find := search.Action.AsFind()
+			item.Content = find.URL
+			item.Arguments = find.Pattern
+		default:
+			queries := searchQueries(search.Action.AsSearch().Query, search.Action.AsSearch().Queries)
+			item.Content = strings.Join(queries, ", ")
+		}
 	case "reasoning":
 		item.Role = "assistant"
 		reasoning := output.AsReasoning()
@@ -1482,6 +1501,29 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 				ToolCallID: item.CallID,
 				Content:    resultStr,
 			})
+
+		case "web_search_call":
+			streamable = append(streamable, StreamableMessage{
+				Kind:       "tool-use",
+				Role:       "assistant",
+				ToolName:   openAISearchToolName,
+				ToolCallID: item.CallID,
+				Input:      webSearchStoredInput(item),
+			})
+
+			resultStr := item.Content
+			if structuredResult, ok := toolResults[item.CallID]; ok {
+				if jsonData, err := structuredResult.MarshalJSON(); err == nil {
+					resultStr = string(jsonData)
+				}
+			}
+			streamable = append(streamable, StreamableMessage{
+				Kind:       "tool-result",
+				Role:       "assistant",
+				ToolName:   openAISearchToolName,
+				ToolCallID: item.CallID,
+				Content:    resultStr,
+			})
 		}
 	}
 
@@ -1544,6 +1586,21 @@ func ExtractMessages(data []byte, toolResults map[string]tooltypes.StructuredToo
 				Role:    "assistant",
 				Content: fmt.Sprintf("🔄 Tool result:\n%s", text),
 			})
+
+		case "web_search_call":
+			result = append(result, llmtypes.Message{
+				Role:    "assistant",
+				Content: fmt.Sprintf("🔧 Using tool: %s\n  Arguments: %s", openAISearchToolName, webSearchStoredInput(item)),
+			})
+
+			text := item.Content
+			if structuredResult, ok := toolResults[item.CallID]; ok {
+				text = registry.Render(structuredResult)
+			}
+			result = append(result, llmtypes.Message{
+				Role:    "assistant",
+				Content: fmt.Sprintf("🔄 Tool result:\n%s", text),
+			})
 		}
 	}
 
@@ -1574,6 +1631,31 @@ func isInvalidPreviousResponseIDError(err error) bool {
 	}
 
 	return false
+}
+
+func webSearchStoredInput(item StoredInputItem) string {
+	payload := map[string]any{
+		"status": webSearchStatusMessage(item.Status),
+		"type":   item.Action,
+	}
+	if item.Content != "" {
+		switch item.Action {
+		case "open_page":
+			payload["url"] = item.Content
+		case "find_in_page":
+			payload["url"] = item.Content
+			if item.Arguments != "" {
+				payload["pattern"] = item.Arguments
+			}
+		default:
+			payload["queries"] = []string{item.Content}
+		}
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Sprintf(`{"status":%q}`, webSearchStatusMessage(item.Status))
+	}
+	return string(data)
 }
 
 func recordUsesResponsesAPI(metadata map[string]any) bool {

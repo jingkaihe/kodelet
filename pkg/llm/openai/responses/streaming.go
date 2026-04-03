@@ -2,12 +2,14 @@ package responses
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
+	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/jingkaihe/kodelet/pkg/usage"
@@ -52,6 +54,19 @@ func (t *Thread) processStream(
 	// Check if handler supports streaming
 	streamHandler, isStreaming := handler.(llmtypes.StreamingMessageHandler)
 	var contentFinalized bool
+
+	flushPendingReasoning := func() {
+		if t.pendingReasoning.Len() == 0 {
+			return
+		}
+
+		t.storedItems = append(t.storedItems, StoredInputItem{
+			Type:    "reasoning",
+			Role:    "assistant",
+			Content: t.pendingReasoning.String(),
+		})
+		t.pendingReasoning.Reset()
+	}
 
 	finalizeContentBlocks := func() {
 		if contentFinalized {
@@ -151,6 +166,66 @@ func (t *Thread) processStream(
 			item := event.Item
 
 			switch item.Type {
+			case "web_search_call":
+				if isStreaming && thinkingStarted {
+					streamHandler.HandleThinkingBlockEnd()
+					thinkingStarted = false
+				}
+
+				if isStreaming && !contentBlockEnded && currentText.Len() > 0 {
+					streamHandler.HandleContentBlockEnd()
+					contentBlockEnded = true
+				}
+
+				webSearch := item.AsWebSearchCall()
+				callID := webSearch.ID
+				if callID == "" {
+					callID = item.ID
+				}
+
+				toolInput := webSearchInputJSON(webSearch.Action, string(webSearch.Status))
+				handler.HandleToolUse(callID, openAISearchToolName, toolInput)
+
+				rawItem := []byte(webSearch.RawJSON())
+				if len(rawItem) == 0 {
+					if marshaled, err := json.Marshal(webSearch); err == nil {
+						rawItem = marshaled
+					}
+				}
+
+				flushPendingReasoning()
+
+				storedItem := StoredInputItem{
+					Type:    "web_search_call",
+					CallID:  callID,
+					Status:  string(webSearch.Status),
+					Action:  webSearch.Action.Type,
+					RawItem: rawItem,
+				}
+				switch webSearch.Action.Type {
+				case "open_page":
+					storedItem.Content = webSearch.Action.AsOpenPage().URL
+				case "find_in_page":
+					find := webSearch.Action.AsFind()
+					storedItem.Content = find.URL
+					storedItem.Arguments = find.Pattern
+				default:
+					storedItem.Content = strings.Join(searchQueries(webSearch.Action.AsSearch().Query, webSearch.Action.AsSearch().Queries), ", ")
+				}
+				t.storedItems = append(t.storedItems, storedItem)
+				if inputItems := fromStoredItems([]StoredInputItem{storedItem}); len(inputItems) > 0 {
+					t.inputItems = append(t.inputItems, inputItems[0])
+					t.pendingItems = append(t.pendingItems, inputItems[0])
+				}
+
+				result := webSearchStructuredResult(callID, webSearch)
+				if meta, ok := result.Metadata.(tooltypes.OpenAIWebSearchMetadata); ok {
+					extendWebSearchMetadataFromRawItem(&meta, rawItem)
+					result.Metadata = meta
+				}
+				t.SetStructuredToolResult(callID, result)
+				handler.HandleToolResult(callID, openAISearchToolName, structuredToolResultToToolResult(result))
+
 			case "function_call":
 				// Complete function call
 				toolsUsed = true
@@ -171,14 +246,7 @@ func (t *Thread) processStream(
 				handler.HandleToolUse(funcCall.CallID, funcCall.Name, funcCall.Arguments)
 
 				// Flush pending reasoning to storedItems before adding function call
-				if t.pendingReasoning.Len() > 0 {
-					t.storedItems = append(t.storedItems, StoredInputItem{
-						Type:    "reasoning",
-						Role:    "assistant",
-						Content: t.pendingReasoning.String(),
-					})
-					t.pendingReasoning.Reset()
-				}
+				flushPendingReasoning()
 
 				// Add to inputItems (for API) and storedItems (for persistence)
 				t.inputItems = append(t.inputItems, responses.ResponseInputItemUnionParam{
@@ -236,14 +304,7 @@ func (t *Thread) processStream(
 					}
 					if textContent != "" {
 						// Flush pending reasoning to storedItems before adding message
-						if t.pendingReasoning.Len() > 0 {
-							t.storedItems = append(t.storedItems, StoredInputItem{
-								Type:    "reasoning",
-								Role:    "assistant",
-								Content: t.pendingReasoning.String(),
-							})
-							t.pendingReasoning.Reset()
-						}
+						flushPendingReasoning()
 
 						t.inputItems = append(t.inputItems, responses.ResponseInputItemUnionParam{
 							OfMessage: &responses.EasyInputMessageParam{
@@ -270,6 +331,7 @@ func (t *Thread) processStream(
 			)
 
 			finalizeContentBlocks()
+			flushPendingReasoning()
 
 		case "response.incomplete":
 			// Response ended but is incomplete (e.g. max_output_tokens/content_filter)
@@ -357,6 +419,36 @@ type toolCallState struct {
 	callID    string
 	name      string
 	arguments strings.Builder
+}
+
+type structuredResultToolResult struct {
+	result tooltypes.StructuredToolResult
+}
+
+func (r structuredResultToolResult) AssistantFacing() string {
+	registry := renderers.NewRendererRegistry()
+	return tooltypes.StringifyToolResult(registry.Render(r.result), r.result.Error)
+}
+
+func (r structuredResultToolResult) IsError() bool {
+	return !r.result.Success
+}
+
+func (r structuredResultToolResult) GetError() string {
+	return r.result.Error
+}
+
+func (r structuredResultToolResult) GetResult() string {
+	registry := renderers.NewRendererRegistry()
+	return registry.Render(r.result)
+}
+
+func (r structuredResultToolResult) StructuredData() tooltypes.StructuredToolResult {
+	return r.result
+}
+
+func structuredToolResultToToolResult(result tooltypes.StructuredToolResult) tooltypes.ToolResult {
+	return structuredResultToolResult{result: result}
 }
 
 // executeToolCall executes a tool call and returns the result.
