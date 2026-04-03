@@ -96,6 +96,7 @@ type OpenAIConfig struct {
 	APIMode         OpenAIAPIMode           `mapstructure:"api_mode" json:"api_mode" yaml:"api_mode"`                                    // Preferred API mode selection (chat_completions or responses)
 	UseResponsesAPI bool                    `mapstructure:"use_responses_api" json:"use_responses_api" yaml:"use_responses_api"`         // Legacy bool alias for API mode
 	ResponsesAPI    *bool                   `mapstructure:"responses_api" json:"responses_api,omitempty" yaml:"responses_api,omitempty"` // Legacy bool alias for API mode
+	EnableSearch    *bool                   `mapstructure:"enable_search" json:"enable_search,omitempty" yaml:"enable_search,omitempty"` // Enable native OpenAI Responses web_search tool when supported (defaults to true)
 	ManualCache     bool                    `mapstructure:"manual_cache" json:"manual_cache" yaml:"manual_cache"`                        // Enables manual cache affinity headers for Chat Completions when prompt caching is requested
 	Models          *CustomModels           `mapstructure:"models" json:"models,omitempty" yaml:"models,omitempty"`                      // Custom model configuration
 	Pricing         map[string]ModelPricing `mapstructure:"pricing" json:"pricing,omitempty" yaml:"pricing,omitempty"`                   // Custom pricing configuration

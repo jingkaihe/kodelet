@@ -67,6 +67,7 @@ var metadataTypeRegistry = map[string]reflect.Type{
 
 	"image_recognition": reflect.TypeOf(ImageRecognitionMetadata{}),
 	"subagent":          reflect.TypeOf(SubAgentMetadata{}),
+	"openai_web_search": reflect.TypeOf(OpenAIWebSearchMetadata{}),
 	"web_fetch":         reflect.TypeOf(WebFetchMetadata{}),
 	"read_conversation": reflect.TypeOf(ReadConversationMetadata{}),
 	"code_execution":    reflect.TypeOf(CodeExecutionMetadata{}),
@@ -373,6 +374,21 @@ type WebFetchMetadata struct {
 
 // ToolType returns the tool type identifier for web fetch operations
 func (m WebFetchMetadata) ToolType() string { return "web_fetch" }
+
+// OpenAIWebSearchMetadata contains metadata about a native OpenAI web search operation.
+type OpenAIWebSearchMetadata struct {
+	CallID  string   `json:"callId"`
+	Status  string   `json:"status"`
+	Action  string   `json:"action"`
+	Queries []string `json:"queries,omitempty"`
+	Sources []string `json:"sources,omitempty"`
+	Results []string `json:"results,omitempty"`
+	URL     string   `json:"url,omitempty"`
+	Pattern string   `json:"pattern,omitempty"`
+}
+
+// ToolType returns the tool type identifier for native OpenAI web search operations.
+func (m OpenAIWebSearchMetadata) ToolType() string { return "openai_web_search" }
 
 // ReadConversationMetadata contains metadata about a read_conversation operation.
 type ReadConversationMetadata struct {

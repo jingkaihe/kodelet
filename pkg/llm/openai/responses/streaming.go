@@ -2,12 +2,14 @@ package responses
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
+	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/jingkaihe/kodelet/pkg/usage"
@@ -151,6 +153,52 @@ func (t *Thread) processStream(
 			item := event.Item
 
 			switch item.Type {
+			case "web_search_call":
+				toolsUsed = true
+
+				if isStreaming && thinkingStarted {
+					streamHandler.HandleThinkingBlockEnd()
+					thinkingStarted = false
+				}
+
+				if isStreaming && !contentBlockEnded && currentText.Len() > 0 {
+					streamHandler.HandleContentBlockEnd()
+					contentBlockEnded = true
+				}
+
+				webSearch := item.AsWebSearchCall()
+				callID := webSearch.ID
+				if callID == "" {
+					callID = item.ID
+				}
+
+				toolInput := webSearchInputJSON(webSearch.Action, string(webSearch.Status))
+				handler.HandleToolUse(callID, openAISearchToolName, toolInput)
+
+				rawItem := []byte(webSearch.RawJSON())
+				if len(rawItem) == 0 {
+					if marshaled, err := json.Marshal(webSearch); err == nil {
+						rawItem = marshaled
+					}
+				}
+
+				t.storedItems = append(t.storedItems, StoredInputItem{
+					Type:    "web_search_call",
+					CallID:  callID,
+					Status:  string(webSearch.Status),
+					Action:  webSearch.Action.Type,
+					Content: formatWebSearchAction(webSearch.Action),
+					RawItem: rawItem,
+				})
+
+				result := webSearchStructuredResult(callID, webSearch)
+				if meta, ok := result.Metadata.(tooltypes.OpenAIWebSearchMetadata); ok {
+					extendWebSearchMetadataFromRawItem(&meta, rawItem)
+					result.Metadata = meta
+				}
+				t.SetStructuredToolResult(callID, result)
+				handler.HandleToolResult(callID, openAISearchToolName, structuredToolResultToToolResult(result))
+
 			case "function_call":
 				// Complete function call
 				toolsUsed = true
@@ -357,6 +405,36 @@ type toolCallState struct {
 	callID    string
 	name      string
 	arguments strings.Builder
+}
+
+type structuredResultToolResult struct {
+	result tooltypes.StructuredToolResult
+}
+
+func (r structuredResultToolResult) AssistantFacing() string {
+	registry := renderers.NewRendererRegistry()
+	return tooltypes.StringifyToolResult(registry.Render(r.result), r.result.Error)
+}
+
+func (r structuredResultToolResult) IsError() bool {
+	return !r.result.Success
+}
+
+func (r structuredResultToolResult) GetError() string {
+	return r.result.Error
+}
+
+func (r structuredResultToolResult) GetResult() string {
+	registry := renderers.NewRendererRegistry()
+	return registry.Render(r.result)
+}
+
+func (r structuredResultToolResult) StructuredData() tooltypes.StructuredToolResult {
+	return r.result
+}
+
+func structuredToolResultToToolResult(result tooltypes.StructuredToolResult) tooltypes.ToolResult {
+	return structuredResultToolResult{result: result}
 }
 
 // executeToolCall executes a tool call and returns the result.

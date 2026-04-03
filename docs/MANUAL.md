@@ -796,6 +796,7 @@ profiles:
     reasoning_effort: "medium"
     tool_mode: "patch"
     disable_fs_search_tools: true
+    enable_search: true
 
   xai:
     provider: "openai"
@@ -1035,6 +1036,36 @@ provider: openai
 openai:
   platform: codex
 ```
+
+## OpenAI Native Web Search
+
+When you use the OpenAI Responses API against the real OpenAI platform,
+Kodelet can expose OpenAI's native `web_search` tool in addition to the existing
+`web_fetch` tool.
+
+- `web_search` is for open-ended discovery and current information.
+- `web_fetch` is still available for deterministic fetching/extraction from a known URL.
+
+Native OpenAI search is enabled by default and can be controlled with:
+
+```bash
+kodelet run --enable-openai-search "what changed in postgres 18 this week?"
+```
+
+Or in config:
+
+```yaml
+openai:
+  enable_search: true
+```
+
+Kodelet only enables this built-in tool when all of the following are true:
+
+- provider is `openai`
+- API mode resolves to `responses`
+- platform resolves to the real OpenAI platform
+- GitHub Copilot mode is not being used
+- no custom non-OpenAI base URL is configured
 
 ## Anthropic Multi-Account Authentication
 
