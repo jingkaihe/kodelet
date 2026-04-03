@@ -1,5 +1,10 @@
 # Kodelet
 
+## 0.3.24-beta (2026-04-03)
+
+Added native OpenAI Responses `web_search` support, enabled by default for supported OpenAI/Codex setups, with new config/CLI controls and renderer support across persisted conversations, CLI output, and the Web UI.
+Removed the GitHub automation commands and assets for issue resolution, PR response, and GitHub Actions background-agent onboarding, simplifying the shipped CLI surface and related docs/templates.
+
 ## 0.3.22-beta (2026-04-01)
 
 Bound conversations to a canonical working directory, persisting `cwd` in conversation records so resumed CLI and Web UI chats stay attached to the same workspace; added Web UI cwd picking/autocomplete plus `kodelet serve --cwd` defaults for new chats.
