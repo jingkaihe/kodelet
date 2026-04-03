@@ -154,8 +154,6 @@ func (t *Thread) processStream(
 
 			switch item.Type {
 			case "web_search_call":
-				toolsUsed = true
-
 				if isStreaming && thinkingStarted {
 					streamHandler.HandleThinkingBlockEnd()
 					thinkingStarted = false

@@ -191,3 +191,66 @@ func TestProcessStreamReturnsErrorOnIncompleteResponse(t *testing.T) {
 		"content_block_end",
 	}, handler.events)
 }
+
+func TestProcessStreamWebSearchDoesNotTriggerFollowUpTurn(t *testing.T) {
+	usage := map[string]any{
+		"input_tokens":  1,
+		"output_tokens": 1,
+		"input_tokens_details": map[string]any{
+			"cached_tokens": 0,
+		},
+	}
+	completedEvent := map[string]any{
+		"type": "response.completed",
+		"response": map[string]any{
+			"id":     "resp_search",
+			"status": "completed",
+			"usage":  usage,
+		},
+	}
+
+	events := []map[string]any{
+		{
+			"type": "response.output_item.done",
+			"item": map[string]any{
+				"id":     "ws_123",
+				"type":   "web_search_call",
+				"status": "completed",
+				"action": map[string]any{
+					"type":    "search",
+					"query":   "kodelet web search loop",
+					"queries": []string{"kodelet web search loop"},
+					"sources": []map[string]any{{"type": "url", "url": "https://example.com/result"}},
+				},
+			},
+		},
+		completedEvent,
+	}
+
+	streamEvents := make([]ssestream.Event, 0, len(events))
+	for _, event := range events {
+		payload, err := json.Marshal(event)
+		require.NoError(t, err)
+		streamEvents = append(streamEvents, ssestream.Event{Data: payload})
+	}
+
+	decoder := &fakeDecoder{events: streamEvents}
+	stream := ssestream.NewStream[responses.ResponseStreamEventUnion](decoder, nil)
+
+	thread := &Thread{
+		Thread:       base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}, "test", hooks.Trigger{}),
+		storedItems:  make([]StoredInputItem, 0),
+		inputItems:   make([]responses.ResponseInputItemUnionParam, 0),
+		pendingItems: make([]responses.ResponseInputItemUnionParam, 0),
+	}
+
+	handler := &captureStreamHandler{}
+
+	streamResult, err := thread.processStream(context.Background(), stream, handler, "gpt-4.1", llmtypes.MessageOpt{})
+	require.NoError(t, err)
+	assert.False(t, streamResult.toolsUsed)
+	assert.True(t, streamResult.responseCompleted)
+	require.Len(t, thread.storedItems, 1)
+	assert.Equal(t, "web_search_call", thread.storedItems[0].Type)
+	assert.Equal(t, "ws_123", thread.storedItems[0].CallID)
+}
