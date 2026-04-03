@@ -103,7 +103,7 @@ func TestBuildToolsIncludesNativeOpenAISearchWhenEligible(t *testing.T) {
 	state := tools.NewBasicState(context.Background(), tools.WithLLMConfig(llmtypes.Config{
 		Provider: "openai",
 		OpenAI: &llmtypes.OpenAIConfig{
-			Platform:     "openai",
+			Platform:        "openai",
 			UseResponsesAPI: true,
 		},
 	}))
@@ -134,6 +134,43 @@ func TestBuildToolsIncludesNativeOpenAISearchForCodexPlatform(t *testing.T) {
 		Provider: "openai",
 		OpenAI: &llmtypes.OpenAIConfig{
 			Platform:        "codex",
+			UseResponsesAPI: true,
+		},
+	}))
+
+	toolDefs := buildTools(state, false)
+	foundWebSearch := false
+	for _, toolDef := range toolDefs {
+		if toolDef.OfWebSearch != nil && toolDef.OfWebSearch.Type == openairesponses.WebSearchToolTypeWebSearch {
+			foundWebSearch = true
+			break
+		}
+	}
+	assert.True(t, foundWebSearch)
+}
+
+func TestBuildToolsSkipsNativeOpenAISearchWhenAllowlistExcludesIt(t *testing.T) {
+	state := tools.NewBasicState(context.Background(), tools.WithLLMConfig(llmtypes.Config{
+		Provider:     "openai",
+		AllowedTools: []string{"bash"},
+		OpenAI: &llmtypes.OpenAIConfig{
+			Platform:        "openai",
+			UseResponsesAPI: true,
+		},
+	}))
+
+	toolDefs := buildTools(state, false)
+	for _, toolDef := range toolDefs {
+		assert.Nil(t, toolDef.OfWebSearch)
+	}
+}
+
+func TestBuildToolsIncludesNativeOpenAISearchWhenAllowlistIncludesIt(t *testing.T) {
+	state := tools.NewBasicState(context.Background(), tools.WithLLMConfig(llmtypes.Config{
+		Provider:     "openai",
+		AllowedTools: []string{"bash", openAISearchToolName},
+		OpenAI: &llmtypes.OpenAIConfig{
+			Platform:        "openai",
 			UseResponsesAPI: true,
 		},
 	}))

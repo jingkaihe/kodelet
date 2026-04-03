@@ -55,6 +55,19 @@ func (t *Thread) processStream(
 	streamHandler, isStreaming := handler.(llmtypes.StreamingMessageHandler)
 	var contentFinalized bool
 
+	flushPendingReasoning := func() {
+		if t.pendingReasoning.Len() == 0 {
+			return
+		}
+
+		t.storedItems = append(t.storedItems, StoredInputItem{
+			Type:    "reasoning",
+			Role:    "assistant",
+			Content: t.pendingReasoning.String(),
+		})
+		t.pendingReasoning.Reset()
+	}
+
 	finalizeContentBlocks := func() {
 		if contentFinalized {
 			return
@@ -180,14 +193,30 @@ func (t *Thread) processStream(
 					}
 				}
 
-				t.storedItems = append(t.storedItems, StoredInputItem{
+				flushPendingReasoning()
+
+				storedItem := StoredInputItem{
 					Type:    "web_search_call",
 					CallID:  callID,
 					Status:  string(webSearch.Status),
 					Action:  webSearch.Action.Type,
-					Content: formatWebSearchAction(webSearch.Action),
 					RawItem: rawItem,
-				})
+				}
+				switch webSearch.Action.Type {
+				case "open_page":
+					storedItem.Content = webSearch.Action.AsOpenPage().URL
+				case "find_in_page":
+					find := webSearch.Action.AsFind()
+					storedItem.Content = find.URL
+					storedItem.Arguments = find.Pattern
+				default:
+					storedItem.Content = strings.Join(searchQueries(webSearch.Action.AsSearch().Query, webSearch.Action.AsSearch().Queries), ", ")
+				}
+				t.storedItems = append(t.storedItems, storedItem)
+				if inputItems := fromStoredItems([]StoredInputItem{storedItem}); len(inputItems) > 0 {
+					t.inputItems = append(t.inputItems, inputItems[0])
+					t.pendingItems = append(t.pendingItems, inputItems[0])
+				}
 
 				result := webSearchStructuredResult(callID, webSearch)
 				if meta, ok := result.Metadata.(tooltypes.OpenAIWebSearchMetadata); ok {
@@ -217,14 +246,7 @@ func (t *Thread) processStream(
 				handler.HandleToolUse(funcCall.CallID, funcCall.Name, funcCall.Arguments)
 
 				// Flush pending reasoning to storedItems before adding function call
-				if t.pendingReasoning.Len() > 0 {
-					t.storedItems = append(t.storedItems, StoredInputItem{
-						Type:    "reasoning",
-						Role:    "assistant",
-						Content: t.pendingReasoning.String(),
-					})
-					t.pendingReasoning.Reset()
-				}
+				flushPendingReasoning()
 
 				// Add to inputItems (for API) and storedItems (for persistence)
 				t.inputItems = append(t.inputItems, responses.ResponseInputItemUnionParam{
@@ -282,14 +304,7 @@ func (t *Thread) processStream(
 					}
 					if textContent != "" {
 						// Flush pending reasoning to storedItems before adding message
-						if t.pendingReasoning.Len() > 0 {
-							t.storedItems = append(t.storedItems, StoredInputItem{
-								Type:    "reasoning",
-								Role:    "assistant",
-								Content: t.pendingReasoning.String(),
-							})
-							t.pendingReasoning.Reset()
-						}
+						flushPendingReasoning()
 
 						t.inputItems = append(t.inputItems, responses.ResponseInputItemUnionParam{
 							OfMessage: &responses.EasyInputMessageParam{
@@ -316,6 +331,7 @@ func (t *Thread) processStream(
 			)
 
 			finalizeContentBlocks()
+			flushPendingReasoning()
 
 		case "response.incomplete":
 			// Response ended but is incomplete (e.g. max_output_tokens/content_filter)

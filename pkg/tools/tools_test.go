@@ -18,9 +18,10 @@ func TestGetAvailableToolNames(t *testing.T) {
 	assert.Contains(t, tools, "bash")
 	assert.Contains(t, tools, "file_read")
 	assert.Contains(t, tools, "subagent")
+	assert.Contains(t, tools, "openai_web_search")
 
-	// Should have the expected number of tools (check against toolRegistry)
-	assert.Equal(t, len(toolRegistry), len(tools))
+	// Should have the expected number of tools (registry tools plus virtual tools)
+	assert.Equal(t, len(toolRegistry)+len(virtualToolNames), len(tools))
 }
 
 func TestGetAvailableSubAgentToolNames(t *testing.T) {
@@ -29,17 +30,23 @@ func TestGetAvailableSubAgentToolNames(t *testing.T) {
 	// Should include most tools from toolRegistry except subagent
 	assert.Contains(t, tools, "bash")
 	assert.Contains(t, tools, "file_read")
+	assert.Contains(t, tools, "openai_web_search")
 
 	// Should NOT include subagent tool
 	assert.NotContains(t, tools, "subagent")
 
-	// Should have one less tool than toolRegistry (excluding subagent)
-	assert.Equal(t, len(toolRegistry)-1, len(tools))
+	// Should have one less registry tool than toolRegistry (excluding subagent), plus virtual tools
+	assert.Equal(t, len(toolRegistry)-1+len(virtualToolNames), len(tools))
 }
 
 func TestValidateTools_ValidTools(t *testing.T) {
 	validTools := []string{"bash", "file_read", "file_write"}
 	err := ValidateTools(validTools)
+	assert.NoError(t, err)
+}
+
+func TestValidateTools_AllowsVirtualOpenAIWebSearch(t *testing.T) {
+	err := ValidateTools([]string{"bash", "openai_web_search"})
 	assert.NoError(t, err)
 }
 
@@ -84,6 +91,11 @@ func TestValidateTools_MixedValidAndInvalidTools(t *testing.T) {
 func TestValidateSubAgentTools_ValidTools(t *testing.T) {
 	validTools := []string{"bash", "file_read", "file_write"}
 	err := ValidateSubAgentTools(validTools)
+	assert.NoError(t, err)
+}
+
+func TestValidateSubAgentTools_AllowsVirtualOpenAIWebSearch(t *testing.T) {
+	err := ValidateSubAgentTools([]string{"bash", "openai_web_search"})
 	assert.NoError(t, err)
 }
 

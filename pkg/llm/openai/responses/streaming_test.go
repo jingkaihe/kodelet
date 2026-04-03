@@ -253,4 +253,92 @@ func TestProcessStreamWebSearchDoesNotTriggerFollowUpTurn(t *testing.T) {
 	require.Len(t, thread.storedItems, 1)
 	assert.Equal(t, "web_search_call", thread.storedItems[0].Type)
 	assert.Equal(t, "ws_123", thread.storedItems[0].CallID)
+	require.Len(t, thread.inputItems, 1)
+	require.NotNil(t, thread.inputItems[0].OfWebSearchCall)
+	require.Len(t, thread.pendingItems, 1)
+	require.NotNil(t, thread.pendingItems[0].OfWebSearchCall)
+	restoredItems := fromStoredItems(thread.storedItems)
+	require.Len(t, restoredItems, 1)
+	require.NotNil(t, restoredItems[0].OfWebSearchCall)
+}
+
+func TestProcessStreamWebSearchFlushesReasoningIntoReplayState(t *testing.T) {
+	usage := map[string]any{
+		"input_tokens":  1,
+		"output_tokens": 1,
+		"input_tokens_details": map[string]any{
+			"cached_tokens": 0,
+		},
+	}
+	completedEvent := map[string]any{
+		"type": "response.completed",
+		"response": map[string]any{
+			"id":     "resp_search_reasoning",
+			"status": "completed",
+			"usage":  usage,
+		},
+	}
+
+	events := []map[string]any{
+		{"type": "response.reasoning_text.delta", "delta": "Need to look this up."},
+		{
+			"type": "response.output_item.done",
+			"item": map[string]any{
+				"id":     "ws_reasoning",
+				"type":   "web_search_call",
+				"status": "completed",
+				"action": map[string]any{
+					"type":    "search",
+					"query":   "kodelet replay state",
+					"queries": []string{"kodelet replay state"},
+					"sources": []map[string]any{{"type": "url", "url": "https://example.com/replay"}},
+				},
+			},
+		},
+		completedEvent,
+	}
+
+	streamEvents := make([]ssestream.Event, 0, len(events))
+	for _, event := range events {
+		payload, err := json.Marshal(event)
+		require.NoError(t, err)
+		streamEvents = append(streamEvents, ssestream.Event{Data: payload})
+	}
+
+	decoder := &fakeDecoder{events: streamEvents}
+	stream := ssestream.NewStream[responses.ResponseStreamEventUnion](decoder, nil)
+
+	thread := &Thread{
+		Thread:       base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}, "test", hooks.Trigger{}),
+		storedItems:  make([]StoredInputItem, 0),
+		inputItems:   make([]responses.ResponseInputItemUnionParam, 0),
+		pendingItems: make([]responses.ResponseInputItemUnionParam, 0),
+	}
+
+	handler := &captureStreamHandler{}
+
+	streamResult, err := thread.processStream(context.Background(), stream, handler, "gpt-4.1", llmtypes.MessageOpt{})
+	require.NoError(t, err)
+	assert.False(t, streamResult.toolsUsed)
+	assert.True(t, streamResult.responseCompleted)
+	assert.Equal(t, []string{
+		"thinking_start",
+		"thinking_delta:Need to look this up.",
+		"thinking_block_end",
+	}, handler.events)
+
+	require.Len(t, thread.storedItems, 2)
+	assert.Equal(t, "reasoning", thread.storedItems[0].Type)
+	assert.Equal(t, "Need to look this up.", thread.storedItems[0].Content)
+	assert.Equal(t, "web_search_call", thread.storedItems[1].Type)
+	assert.Equal(t, "kodelet replay state", thread.storedItems[1].Content)
+	assert.Empty(t, thread.pendingReasoning.String())
+
+	require.Len(t, thread.inputItems, 1)
+	require.NotNil(t, thread.inputItems[0].OfWebSearchCall)
+	assert.Equal(t, "ws_reasoning", thread.inputItems[0].OfWebSearchCall.ID)
+
+	require.Len(t, thread.pendingItems, 1)
+	require.NotNil(t, thread.pendingItems[0].OfWebSearchCall)
+	assert.Equal(t, "ws_reasoning", thread.pendingItems[0].OfWebSearchCall.ID)
 }

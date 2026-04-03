@@ -46,6 +46,10 @@ var toolRegistry = map[string]tooltypes.Tool{
 	"skill":             NewSkillTool(nil, false, false),
 }
 
+var virtualToolNames = []string{
+	"openai_web_search",
+}
+
 // NoToolsMarker is a special value indicating no tools should be enabled
 const NoToolsMarker = "none"
 
@@ -94,6 +98,7 @@ func getAvailableToolNames() []string {
 	for toolName := range toolRegistry {
 		tools = append(tools, toolName)
 	}
+	tools = append(tools, virtualToolNames...)
 	return tools
 }
 
@@ -105,6 +110,7 @@ func getAvailableSubAgentToolNames() []string {
 			tools = append(tools, toolName)
 		}
 	}
+	tools = append(tools, virtualToolNames...)
 	return tools
 }
 
@@ -112,6 +118,12 @@ func getAvailableSubAgentToolNames() []string {
 func ValidateTools(toolNames []string) error {
 	var unknownTools []string
 	for _, toolName := range toolNames {
+		if _, exists := toolRegistry[toolName]; exists {
+			continue
+		}
+		if isVirtualToolName(toolName) {
+			continue
+		}
 		if _, exists := toolRegistry[toolName]; !exists {
 			unknownTools = append(unknownTools, toolName)
 		}
@@ -136,6 +148,8 @@ func ValidateSubAgentTools(toolNames []string) error {
 		if toolName == "subagent" {
 			subagentToolFound = true
 			invalidTools = append(invalidTools, toolName)
+		} else if isVirtualToolName(toolName) {
+			continue
 		} else if _, exists := toolRegistry[toolName]; !exists {
 			invalidTools = append(invalidTools, toolName)
 		}
@@ -158,6 +172,15 @@ func ValidateSubAgentTools(toolNames []string) error {
 		return errors.Errorf("unknown tools: %s\nAvailable tools: %s", strings.Join(invalidTools, ", "), strings.Join(availableTools, ", "))
 	}
 	return nil
+}
+
+func isVirtualToolName(toolName string) bool {
+	for _, virtualToolName := range virtualToolNames {
+		if toolName == virtualToolName {
+			return true
+		}
+	}
+	return false
 }
 
 func metaToolsWithOptions(disableFSSearchTools bool) []string {

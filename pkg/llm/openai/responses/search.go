@@ -48,6 +48,7 @@ type llmtypesConfig struct {
 	useCopilot   bool
 	enableSearch *bool
 	allowedFile  string
+	allowedTools []string
 }
 
 func normalizeSearchPlatformName(platform string) string {
@@ -79,32 +80,6 @@ func buildWebSearchFilters(allowedDomainsFile string) (responses.WebSearchToolFi
 	}
 
 	return responses.WebSearchToolFiltersParam{AllowedDomains: allowedDomains}, true
-}
-
-func formatWebSearchAction(action responses.ResponseFunctionWebSearchActionUnion) string {
-	switch action.Type {
-	case "search":
-		search := action.AsSearch()
-		queries := searchQueries(search.Query, search.Queries)
-		if len(queries) == 0 {
-			return "searching the web"
-		}
-		return fmt.Sprintf("searching the web for %s", strings.Join(queries, ", "))
-	case "open_page":
-		openPage := action.AsOpenPage()
-		if strings.TrimSpace(openPage.URL) == "" {
-			return "opening a search result"
-		}
-		return fmt.Sprintf("opening %s", openPage.URL)
-	case "find_in_page":
-		find := action.AsFind()
-		if strings.TrimSpace(find.URL) == "" {
-			return fmt.Sprintf("finding %q in a page", find.Pattern)
-		}
-		return fmt.Sprintf("finding %q in %s", find.Pattern, find.URL)
-	default:
-		return "using native OpenAI web search"
-	}
 }
 
 func webSearchStatusMessage(status string) string {
