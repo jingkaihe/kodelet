@@ -338,26 +338,6 @@ kodelet pr --target main        # Specify target branch
 kodelet pr --draft              # Create draft PR
 ```
 
-**Issue Resolution:**
-```bash
-kodelet issue-resolve --issue-url https://github.com/owner/repo/issues/123
-```
-
-**PR Response:**
-```bash
-kodelet pr-respond --pr-url https://github.com/owner/repo/pull/456
-kodelet pr-respond --pr-url URL --review-id 123456
-```
-
-### GitHub Actions Background Agent
-Automated agent that responds to `@kodelet` mentions:
-
-```bash
-kodelet gha-agent-onboard       # Complete setup (GitHub app + secrets + workflow)
-```
-
-After setup, team members can mention `@kodelet` in issues and PRs for automated assistance.
-
 ### Image Input Support
 Vision-enabled analysis with multi-modal models:
 

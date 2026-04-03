@@ -57,7 +57,6 @@ kodelet run --follow "continue"  # Continue recent conversation
 # Git integration
 kodelet commit                   # AI commit messages
 kodelet pr [--target main]       # Generate PRs
-kodelet issue-resolve --issue-url URL
 
 # Development
 mise run build|test|lint|format  # Standard commands
