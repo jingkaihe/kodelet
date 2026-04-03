@@ -1104,6 +1104,7 @@ func TestServer_convertToWebMessages(t *testing.T) {
 		toolResults   map[string]tools.StructuredToolResult
 		expectedMsgs  int
 		checkToolCall bool
+		expectedTool  string
 	}{
 		{
 			name:          "anthropic messages with tool calls",
@@ -1111,6 +1112,7 @@ func TestServer_convertToWebMessages(t *testing.T) {
 			provider:      "anthropic",
 			expectedMsgs:  1,
 			checkToolCall: true,
+			expectedTool:  "TestTool",
 		},
 		{
 			name:          "openai messages with tool calls",
@@ -1118,6 +1120,7 @@ func TestServer_convertToWebMessages(t *testing.T) {
 			provider:      "openai",
 			expectedMsgs:  1,
 			checkToolCall: true,
+			expectedTool:  "TestTool",
 		},
 		{
 			name:         "simple text messages",
@@ -1144,6 +1147,16 @@ func TestServer_convertToWebMessages(t *testing.T) {
 			toolResults:   map[string]tools.StructuredToolResult{"tool-123": {ToolName: "TestTool"}},
 			expectedMsgs:  4,
 			checkToolCall: true,
+			expectedTool:  "TestTool",
+		},
+		{
+			name:          "openai responses native web search tool calls",
+			rawMessages:   json.RawMessage(`[{"type":"message","role":"user","content":"Look up the latest notes"},{"type":"web_search_call","call_id":"search-123","status":"completed","action":"search","content":"kodelet web ui search"}]`),
+			provider:      "openai-responses",
+			toolResults:   map[string]tools.StructuredToolResult{"search-123": {ToolName: "openai_web_search"}},
+			expectedMsgs:  2,
+			checkToolCall: true,
+			expectedTool:  "openai_web_search",
 		},
 	}
 
@@ -1157,7 +1170,7 @@ func TestServer_convertToWebMessages(t *testing.T) {
 				foundToolCall := false
 				for _, msg := range messages {
 					if len(msg.ToolCalls) > 0 {
-						assert.Equal(t, "TestTool", msg.ToolCalls[0].Function.Name)
+						assert.Equal(t, tt.expectedTool, msg.ToolCalls[0].Function.Name)
 						foundToolCall = true
 						break
 					}

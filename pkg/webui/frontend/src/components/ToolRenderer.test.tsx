@@ -42,4 +42,27 @@ describe('ToolRenderer', () => {
     expect(screen.getByText('Error (file_read):')).toBeInTheDocument();
     expect(screen.getByText('permission denied')).toBeInTheDocument();
   });
+
+  it('uses the native search renderer for failed OpenAI web search results', () => {
+    const toolResult: ToolResult = {
+      toolName: 'openai_web_search',
+      success: false,
+      error: 'OpenAI web search failed',
+      timestamp: '2026-04-03T00:00:00Z',
+      metadata: {
+        status: 'failed',
+        action: 'search',
+        queries: ['kodelet web ui search'],
+        sources: ['https://example.com/source'],
+      },
+    };
+
+    render(<ToolRenderer toolResult={toolResult} />);
+
+    expect(screen.getByText(/OpenAI Web Search/)).toBeInTheDocument();
+    expect(screen.getByText('failed')).toBeInTheDocument();
+    expect(screen.getAllByText('kodelet web ui search')).toHaveLength(2);
+    expect(screen.getByText('https://example.com/source')).toBeInTheDocument();
+    expect(screen.queryByText('Error (openai_web_search):')).not.toBeInTheDocument();
+  });
 });

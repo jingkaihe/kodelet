@@ -32,7 +32,7 @@ export interface ToolResult {
   toolName: string;
   success: boolean;
   error?: string;
-  metadata?: FileMetadata | ApplyPatchMetadata | BashMetadata | GrepMetadata | GlobMetadata | WebFetchMetadata | ThinkingMetadata | TodoMetadata | SubagentMetadata | BatchMetadata | ImageRecognitionMetadata | BrowserMetadata | SkillMetadata | Record<string, unknown>;
+  metadata?: FileMetadata | ApplyPatchMetadata | BashMetadata | GrepMetadata | GlobMetadata | WebFetchMetadata | ThinkingMetadata | TodoMetadata | SubagentMetadata | BatchMetadata | ImageRecognitionMetadata | BrowserMetadata | SkillMetadata | OpenAIWebSearchMetadata | Record<string, unknown>;
   timestamp?: string;
 }
 
@@ -374,6 +374,17 @@ export interface BrowserMetadata {
 export interface SkillMetadata {
   skillName: string;
   directory: string;
+}
+
+export interface OpenAIWebSearchMetadata {
+  callId?: string;
+  status?: string;
+  action?: string;
+  queries?: string[];
+  sources?: string[];
+  results?: string[];
+  url?: string;
+  pattern?: string;
 }
 
 // Component props
