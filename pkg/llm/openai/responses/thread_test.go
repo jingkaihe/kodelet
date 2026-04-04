@@ -805,8 +805,12 @@ func TestFromStoredItemsWithCompactedAssistantRawMessage(t *testing.T) {
 
 	restored := fromStoredItems(stored)
 	require.Len(t, restored, 1)
-	require.NotNil(t, restored[0].OfMessage)
-	assert.Equal(t, openairesponses.EasyInputMessageRoleAssistant, restored[0].OfMessage.Role)
+	require.NotNil(t, restored[0].OfOutputMessage)
+	b, err := json.Marshal(restored[0])
+	require.NoError(t, err)
+	assert.Contains(t, string(b), `"role":"assistant"`)
+	assert.Contains(t, string(b), `"type":"message"`)
+	assert.Contains(t, string(b), `"type":"output_text"`)
 	assert.Equal(t, "Compacted assistant context", extractInputItemText(restored[0]))
 }
 
@@ -1025,8 +1029,13 @@ func TestStorageRoundTripWithReasoning(t *testing.T) {
 	require.Len(t, restoredItems, 2)
 	assert.NotNil(t, restoredItems[0].OfMessage)
 	assert.Equal(t, openairesponses.EasyInputMessageRoleUser, restoredItems[0].OfMessage.Role)
-	assert.NotNil(t, restoredItems[1].OfMessage)
-	assert.Equal(t, openairesponses.EasyInputMessageRoleAssistant, restoredItems[1].OfMessage.Role)
+	assert.NotNil(t, restoredItems[1].OfOutputMessage)
+	b, err := json.Marshal(restoredItems[1])
+	require.NoError(t, err)
+	assert.Contains(t, string(b), `"role":"assistant"`)
+	assert.Contains(t, string(b), `"type":"message"`)
+	assert.Contains(t, string(b), `"type":"output_text"`)
+	assert.Contains(t, string(b), `"text":"The answer is 4."`)
 
 	// Verify JSON round-trip preserves reasoning for display
 	jsonData, err := json.Marshal(storedItems)
@@ -1039,6 +1048,52 @@ func TestStorageRoundTripWithReasoning(t *testing.T) {
 	require.Len(t, parsedItems, 3)
 	assert.Equal(t, "reasoning", parsedItems[1].Type)
 	assert.Equal(t, "I need to add 2 and 2 together. 2+2=4.", parsedItems[1].Content)
+}
+
+func TestFromStoredItemsAssistantStoredMessageUsesOutputMessage(t *testing.T) {
+	storedItems := []StoredInputItem{{
+		Type:    "message",
+		Role:    "assistant",
+		Content: "The answer is 4.",
+	}}
+
+	restoredItems := fromStoredItems(storedItems)
+	require.Len(t, restoredItems, 1)
+	require.NotNil(t, restoredItems[0].OfOutputMessage)
+	b, err := json.Marshal(restoredItems[0])
+	require.NoError(t, err)
+	assert.Contains(t, string(b), `"role":"assistant"`)
+	assert.Contains(t, string(b), `"type":"message"`)
+	assert.Contains(t, string(b), `"type":"output_text"`)
+	assert.Contains(t, string(b), `"text":"The answer is 4."`)
+}
+
+func TestFromStoredItemsAssistantRawInputTextMessageNormalizesToOutputMessage(t *testing.T) {
+	storedItems := []StoredInputItem{{
+		Type:    "message",
+		Role:    "assistant",
+		Content: "legacy assistant text",
+		RawItem: json.RawMessage(`{
+			"id": "msg_legacy",
+			"type": "message",
+			"role": "assistant",
+			"status": "completed",
+			"phase": "final_answer",
+			"content": [{"type": "input_text", "text": "legacy assistant text"}]
+		}`),
+	}}
+
+	restoredItems := fromStoredItems(storedItems)
+	require.Len(t, restoredItems, 1)
+	require.NotNil(t, restoredItems[0].OfOutputMessage)
+	b, err := json.Marshal(restoredItems[0])
+	require.NoError(t, err)
+	assert.Contains(t, string(b), `"id":"msg_legacy"`)
+	assert.Contains(t, string(b), `"role":"assistant"`)
+	assert.Contains(t, string(b), `"status":"completed"`)
+	assert.Contains(t, string(b), `"phase":"final_answer"`)
+	assert.Contains(t, string(b), `"type":"output_text"`)
+	assert.Contains(t, string(b), `"text":"legacy assistant text"`)
 }
 
 func TestAddUserMessageWithImagesPersistsRawItem(t *testing.T) {

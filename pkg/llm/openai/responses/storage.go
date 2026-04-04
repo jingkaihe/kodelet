@@ -64,6 +64,13 @@ func fromStoredItems(items []StoredInputItem) []responses.ResponseInputItemUnion
 			}
 		}
 
+		if item.Type == "message" {
+			if inputItem, ok := messageInputItemFromStoredItem(item); ok {
+				result = append(result, inputItem)
+				continue
+			}
+		}
+
 		if len(item.RawItem) > 0 {
 			if inputItem, ok := inputItemFromRawItem(item.RawItem); ok {
 				result = append(result, inputItem)
@@ -121,10 +128,58 @@ func fromStoredItems(items []StoredInputItem) []responses.ResponseInputItemUnion
 	return result
 }
 
+func messageInputItemFromStoredItem(item StoredInputItem) (responses.ResponseInputItemUnionParam, bool) {
+	role := strings.ToLower(strings.TrimSpace(item.Role))
+	switch role {
+	case "assistant":
+		var rawMessage struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+			Phase  string `json:"phase"`
+		}
+		if len(item.RawItem) > 0 {
+			_ = json.Unmarshal(item.RawItem, &rawMessage)
+		}
+		content := []responses.ResponseOutputMessageContentUnionParam{{
+			OfOutputText: &responses.ResponseOutputTextParam{Text: item.Content},
+		}}
+		status := responses.ResponseOutputMessageStatusCompleted
+		switch strings.ToLower(strings.TrimSpace(rawMessage.Status)) {
+		case string(responses.ResponseOutputMessageStatusInProgress):
+			status = responses.ResponseOutputMessageStatusInProgress
+		case string(responses.ResponseOutputMessageStatusIncomplete):
+			status = responses.ResponseOutputMessageStatusIncomplete
+		}
+		outputItem := responses.ResponseInputItemParamOfOutputMessage(content, rawMessage.ID, status)
+		if outputItem.OfOutputMessage != nil {
+			outputItem.OfOutputMessage.ID = rawMessage.ID
+			outputItem.OfOutputMessage.Status = status
+			switch strings.ToLower(strings.TrimSpace(rawMessage.Phase)) {
+			case string(responses.ResponseOutputMessagePhaseCommentary):
+				outputItem.OfOutputMessage.Phase = responses.ResponseOutputMessagePhaseCommentary
+			case string(responses.ResponseOutputMessagePhaseFinalAnswer):
+				outputItem.OfOutputMessage.Phase = responses.ResponseOutputMessagePhaseFinalAnswer
+			}
+		}
+		return outputItem, true
+	case "user", "system", "developer":
+		parsedRole, ok := parseStoredMessageRole(role)
+		if !ok {
+			return responses.ResponseInputItemUnionParam{}, false
+		}
+		return responses.ResponseInputItemParamOfMessage(item.Content, parsedRole), true
+	default:
+		return responses.ResponseInputItemUnionParam{}, false
+	}
+}
+
 func messageInputItemFromRawItem(raw json.RawMessage) (responses.ResponseInputItemUnionParam, bool) {
 	var rawMessage struct {
 		Role    string          `json:"role"`
 		Content json.RawMessage `json:"content"`
+		ID      string          `json:"id"`
+		Status  string          `json:"status"`
+		Phase   string          `json:"phase"`
 	}
 
 	if err := json.Unmarshal(raw, &rawMessage); err != nil {
@@ -156,10 +211,16 @@ func messageInputItemFromRawItem(raw json.RawMessage) (responses.ResponseInputIt
 	}
 
 	contentParts := make(responses.ResponseInputMessageContentListParam, 0, len(parts))
+	outputParts := make([]responses.ResponseOutputMessageContentUnionParam, 0, len(parts))
 	hasSupportedPart := false
 	for _, part := range parts {
 		switch part.Type {
-		case "input_text", "output_text":
+		case "output_text":
+			outputParts = append(outputParts, responses.ResponseOutputMessageContentUnionParam{
+				OfOutputText: &responses.ResponseOutputTextParam{Text: part.Text},
+			})
+			hasSupportedPart = true
+		case "input_text":
 			contentParts = append(contentParts, responses.ResponseInputContentUnionParam{
 				OfInputText: &responses.ResponseInputTextParam{Text: part.Text},
 			})
@@ -173,6 +234,40 @@ func messageInputItemFromRawItem(raw json.RawMessage) (responses.ResponseInputIt
 	}
 	if !hasSupportedPart {
 		return responses.ResponseInputItemUnionParam{}, false
+	}
+
+	if role == responses.EasyInputMessageRoleAssistant {
+		if len(outputParts) == 0 {
+			for _, part := range parts {
+				if part.Type == "input_text" {
+					outputParts = append(outputParts, responses.ResponseOutputMessageContentUnionParam{
+						OfOutputText: &responses.ResponseOutputTextParam{Text: part.Text},
+					})
+				}
+			}
+		}
+		if len(outputParts) == 0 {
+			return responses.ResponseInputItemUnionParam{}, false
+		}
+		status := responses.ResponseOutputMessageStatusCompleted
+		switch strings.ToLower(strings.TrimSpace(rawMessage.Status)) {
+		case string(responses.ResponseOutputMessageStatusInProgress):
+			status = responses.ResponseOutputMessageStatusInProgress
+		case string(responses.ResponseOutputMessageStatusIncomplete):
+			status = responses.ResponseOutputMessageStatusIncomplete
+		}
+		outputItem := responses.ResponseInputItemParamOfOutputMessage(outputParts, rawMessage.ID, status)
+		if outputItem.OfOutputMessage != nil {
+			outputItem.OfOutputMessage.ID = rawMessage.ID
+			outputItem.OfOutputMessage.Status = status
+			switch strings.ToLower(strings.TrimSpace(rawMessage.Phase)) {
+			case string(responses.ResponseOutputMessagePhaseCommentary):
+				outputItem.OfOutputMessage.Phase = responses.ResponseOutputMessagePhaseCommentary
+			case string(responses.ResponseOutputMessagePhaseFinalAnswer):
+				outputItem.OfOutputMessage.Phase = responses.ResponseOutputMessagePhaseFinalAnswer
+			}
+		}
+		return outputItem, true
 	}
 
 	return responses.ResponseInputItemUnionParam{
