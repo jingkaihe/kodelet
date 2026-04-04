@@ -140,6 +140,8 @@ func messageInputItemFromStoredItem(item StoredInputItem) (responses.ResponseInp
 		if len(item.RawItem) > 0 {
 			_ = json.Unmarshal(item.RawItem, &rawMessage)
 		}
+		// Codex resumes must replay assistant history as output-message items.
+		// Rebuilding these as input_text content causes the backend to reject the request.
 		content := []responses.ResponseOutputMessageContentUnionParam{{
 			OfOutputText: &responses.ResponseOutputTextParam{Text: item.Content},
 		}}
@@ -221,6 +223,8 @@ func messageInputItemFromRawItem(raw json.RawMessage) (responses.ResponseInputIt
 			})
 			hasSupportedPart = true
 		case "input_text":
+			// Keep input_text for user/developer/system messages, but do not reuse it
+			// verbatim for assistant messages when rebuilding request history.
 			contentParts = append(contentParts, responses.ResponseInputContentUnionParam{
 				OfInputText: &responses.ResponseInputTextParam{Text: part.Text},
 			})
@@ -238,6 +242,8 @@ func messageInputItemFromRawItem(raw json.RawMessage) (responses.ResponseInputIt
 
 	if role == responses.EasyInputMessageRoleAssistant {
 		if len(outputParts) == 0 {
+			// Older Codex transcripts may persist assistant text as input_text.
+			// Accept that shape on load, but normalize it back to output_text on replay.
 			for _, part := range parts {
 				if part.Type == "input_text" {
 					outputParts = append(outputParts, responses.ResponseOutputMessageContentUnionParam{
