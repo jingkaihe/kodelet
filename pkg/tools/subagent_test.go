@@ -74,8 +74,8 @@ func TestSubAgentTool_DescriptionWithWorkflows(t *testing.T) {
 		assert.Contains(t, desc, "Use fd via ${bash} instead.")
 	})
 
-	t.Run("patch only avoids file_read guidance", func(t *testing.T) {
-		tool := NewSubAgentToolWithOptions(nil, true, llmtypes.ToolModePatchOnly, false)
+	t.Run("patch avoids file_read guidance", func(t *testing.T) {
+		tool := NewSubAgentToolWithOptions(nil, true, llmtypes.ToolModePatch, false)
 		desc := tool.Description()
 		assert.Contains(t, desc, "grep_tool / glob_tool plus bash inspection")
 		assert.Contains(t, desc, "Use ${bash} with sed/cat instead.")

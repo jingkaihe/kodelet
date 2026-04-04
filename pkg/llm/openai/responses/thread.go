@@ -1195,7 +1195,7 @@ func parseAPIMode(raw string) (llmtypes.OpenAIAPIMode, bool) {
 	switch normalized {
 	case "chat", "chat_completions", "chatcompletions":
 		return llmtypes.OpenAIAPIModeChatCompletions, true
-	case "responses", "responses_api", "response":
+	case "responses":
 		return llmtypes.OpenAIAPIModeResponses, true
 	default:
 		return "", false
@@ -1694,12 +1694,6 @@ func recordUsesResponsesAPI(metadata map[string]any) bool {
 			if parsedMode, parsed := parseAPIMode(mode); parsed {
 				return parsedMode == llmtypes.OpenAIAPIModeResponses
 			}
-		}
-	}
-
-	if legacyRaw, ok := metadata["use_responses_api"]; ok {
-		if legacy, ok := legacyRaw.(bool); ok {
-			return legacy
 		}
 	}
 

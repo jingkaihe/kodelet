@@ -458,7 +458,7 @@ profiles:
         tool_mode: patch
         model: gpt-5.4
         openai:
-            use_responses_api: true
+            api_mode: responses
         provider: openai
         reasoning_effort: high
     openai:

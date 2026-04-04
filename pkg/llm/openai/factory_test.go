@@ -12,25 +12,15 @@ import (
 
 func TestShouldUseResponsesAPI(t *testing.T) {
 	tests := []struct {
-		name     string
-		config   llmtypes.Config
-		envValue string
-		envMode  string
-		want     bool
+		name    string
+		config  llmtypes.Config
+		envMode string
+		want    bool
 	}{
 		{
 			name:   "default returns false",
 			config: llmtypes.Config{},
 			want:   false,
-		},
-		{
-			name: "config with UseResponsesAPI true",
-			config: llmtypes.Config{
-				OpenAI: &llmtypes.OpenAIConfig{
-					UseResponsesAPI: true,
-				},
-			},
-			want: true,
 		},
 		{
 			name: "config with APIMode responses",
@@ -42,15 +32,6 @@ func TestShouldUseResponsesAPI(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "config with UseResponsesAPI false",
-			config: llmtypes.Config{
-				OpenAI: &llmtypes.OpenAIConfig{
-					UseResponsesAPI: false,
-				},
-			},
-			want: false,
-		},
-		{
 			name: "nil OpenAI config",
 			config: llmtypes.Config{
 				OpenAI: nil,
@@ -58,57 +39,10 @@ func TestShouldUseResponsesAPI(t *testing.T) {
 			want: false,
 		},
 		{
-			name:     "env var true overrides config false",
-			envValue: "true",
-			config: llmtypes.Config{
-				OpenAI: &llmtypes.OpenAIConfig{
-					UseResponsesAPI: false,
-				},
-			},
-			want: true,
-		},
-		{
-			name:     "env var false overrides config true",
-			envValue: "false",
-			config: llmtypes.Config{
-				OpenAI: &llmtypes.OpenAIConfig{
-					UseResponsesAPI: true,
-				},
-			},
-			want: false,
-		},
-		{
-			name:     "env var 1 means true",
-			envValue: "1",
-			config:   llmtypes.Config{},
-			want:     true,
-		},
-		{
 			name:    "api mode env responses means true",
 			envMode: "responses",
 			config:  llmtypes.Config{},
 			want:    true,
-		},
-		{
-			name:     "env var TRUE (uppercase) means true",
-			envValue: "TRUE",
-			config:   llmtypes.Config{},
-			want:     true,
-		},
-		{
-			name:     "env var 0 means false",
-			envValue: "0",
-			config:   llmtypes.Config{},
-			want:     false,
-		},
-		{
-			name: "platform codex forces responses",
-			config: llmtypes.Config{
-				OpenAI: &llmtypes.OpenAIConfig{
-					Platform: "codex",
-				},
-			},
-			want: true,
 		},
 		{
 			name: "platform codex forces responses",
@@ -123,13 +57,8 @@ func TestShouldUseResponsesAPI(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			os.Unsetenv("KODELET_OPENAI_USE_RESPONSES_API")
 			os.Unsetenv("KODELET_OPENAI_API_MODE")
 
-			if tt.envValue != "" {
-				os.Setenv("KODELET_OPENAI_USE_RESPONSES_API", tt.envValue)
-				defer os.Unsetenv("KODELET_OPENAI_USE_RESPONSES_API")
-			}
 			if tt.envMode != "" {
 				os.Setenv("KODELET_OPENAI_API_MODE", tt.envMode)
 				defer os.Unsetenv("KODELET_OPENAI_API_MODE")
@@ -146,15 +75,11 @@ func TestNewThreadDispatchesToChatCompletions(t *testing.T) {
 	os.Setenv("OPENAI_API_KEY", "test-key")
 	defer os.Unsetenv("OPENAI_API_KEY")
 
-	os.Unsetenv("KODELET_OPENAI_USE_RESPONSES_API")
 	os.Unsetenv("KODELET_OPENAI_API_MODE")
 
 	config := llmtypes.Config{
 		Provider: "openai",
 		Model:    "gpt-4.1",
-		OpenAI: &llmtypes.OpenAIConfig{
-			UseResponsesAPI: false,
-		},
 	}
 
 	thread, err := NewThread(config)
@@ -175,30 +100,7 @@ func TestNewThreadDispatchesToResponsesAPI(t *testing.T) {
 		Provider: "openai",
 		Model:    "gpt-4.1",
 		OpenAI: &llmtypes.OpenAIConfig{
-			UseResponsesAPI: true,
-		},
-	}
-
-	thread, err := NewThread(config)
-	require.NoError(t, err)
-	require.NotNil(t, thread)
-
-	assert.Equal(t, "openai", thread.Provider())
-}
-
-func TestNewThreadDispatchesToResponsesAPIViaEnvVar(t *testing.T) {
-	os.Setenv("OPENAI_API_KEY", "test-key")
-	defer os.Unsetenv("OPENAI_API_KEY")
-
-	os.Setenv("KODELET_OPENAI_USE_RESPONSES_API", "true")
-	defer os.Unsetenv("KODELET_OPENAI_USE_RESPONSES_API")
-	os.Unsetenv("KODELET_OPENAI_API_MODE")
-
-	config := llmtypes.Config{
-		Provider: "openai",
-		Model:    "gpt-4.1",
-		OpenAI: &llmtypes.OpenAIConfig{
-			UseResponsesAPI: false,
+			APIMode: llmtypes.OpenAIAPIModeResponses,
 		},
 	}
 
@@ -215,7 +117,6 @@ func TestNewThreadDispatchesToResponsesAPIViaApiModeEnv(t *testing.T) {
 
 	os.Setenv("KODELET_OPENAI_API_MODE", "responses")
 	defer os.Unsetenv("KODELET_OPENAI_API_MODE")
-	os.Unsetenv("KODELET_OPENAI_USE_RESPONSES_API")
 
 	config := llmtypes.Config{
 		Provider: "openai",

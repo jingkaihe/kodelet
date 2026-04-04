@@ -21,7 +21,7 @@ disable_fs_search_tools: true
 max_tokens: 16000
 model: gpt-5.4
 openai:
-    use_responses_api: true
+    api_mode: responses
 profile: default
 provider: openai
 reasoning_effort: xhigh
@@ -44,7 +44,7 @@ profiles:
         tool_mode: patch
         model: gpt-5.4
         openai:
-            use_responses_api: true
+            api_mode: responses
         provider: openai
         reasoning_effort: xhigh
     openai:
@@ -53,7 +53,7 @@ profiles:
         max_tokens: 16000
         model: gpt-5.4
         openai:
-            use_responses_api: true
+            api_mode: responses
         provider: openai
         reasoning_effort: xhigh
         weak_model: gpt-5.4-mini

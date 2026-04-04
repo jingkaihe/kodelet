@@ -103,8 +103,8 @@ func TestBuildToolsIncludesNativeOpenAISearchWhenEligible(t *testing.T) {
 	state := tools.NewBasicState(context.Background(), tools.WithLLMConfig(llmtypes.Config{
 		Provider: "openai",
 		OpenAI: &llmtypes.OpenAIConfig{
-			Platform:        "openai",
-			UseResponsesAPI: true,
+			Platform: "openai",
+			APIMode:  llmtypes.OpenAIAPIModeResponses,
 		},
 	}))
 
@@ -118,8 +118,8 @@ func TestBuildToolsSkipsNativeOpenAISearchForNonOpenAIPlatforms(t *testing.T) {
 	state := tools.NewBasicState(context.Background(), tools.WithLLMConfig(llmtypes.Config{
 		Provider: "openai",
 		OpenAI: &llmtypes.OpenAIConfig{
-			Platform:        "xai",
-			UseResponsesAPI: true,
+			Platform: "xai",
+			APIMode:  llmtypes.OpenAIAPIModeResponses,
 		},
 	}))
 
@@ -133,8 +133,8 @@ func TestBuildToolsIncludesNativeOpenAISearchForCodexPlatform(t *testing.T) {
 	state := tools.NewBasicState(context.Background(), tools.WithLLMConfig(llmtypes.Config{
 		Provider: "openai",
 		OpenAI: &llmtypes.OpenAIConfig{
-			Platform:        "codex",
-			UseResponsesAPI: true,
+			Platform: "codex",
+			APIMode:  llmtypes.OpenAIAPIModeResponses,
 		},
 	}))
 
@@ -154,8 +154,8 @@ func TestBuildToolsSkipsNativeOpenAISearchWhenAllowlistExcludesIt(t *testing.T) 
 		Provider:     "openai",
 		AllowedTools: []string{"bash"},
 		OpenAI: &llmtypes.OpenAIConfig{
-			Platform:        "openai",
-			UseResponsesAPI: true,
+			Platform: "openai",
+			APIMode:  llmtypes.OpenAIAPIModeResponses,
 		},
 	}))
 
@@ -170,8 +170,8 @@ func TestBuildToolsIncludesNativeOpenAISearchWhenAllowlistIncludesIt(t *testing.
 		Provider:     "openai",
 		AllowedTools: []string{"bash", openAISearchToolName},
 		OpenAI: &llmtypes.OpenAIConfig{
-			Platform:        "openai",
-			UseResponsesAPI: true,
+			Platform: "openai",
+			APIMode:  llmtypes.OpenAIAPIModeResponses,
 		},
 	}))
 
@@ -1670,8 +1670,8 @@ func TestProcessMessageExchangeRegistersNativeOpenAISearchToolInRequest(t *testi
 		Provider: "openai",
 		Model:    "gpt-4.1",
 		OpenAI: &llmtypes.OpenAIConfig{
-			Platform:        "openai",
-			UseResponsesAPI: true,
+			Platform: "openai",
+			APIMode:  llmtypes.OpenAIAPIModeResponses,
 		},
 	}
 	thread := &Thread{
@@ -1814,7 +1814,6 @@ func TestSendMessageRequiresResponseCompletedEvent(t *testing.T) {
 
 func TestRecordUsesResponsesAPI_MetadataDetection(t *testing.T) {
 	assert.True(t, recordUsesResponsesAPI(map[string]any{"api_mode": "responses"}))
-	assert.True(t, recordUsesResponsesAPI(map[string]any{"use_responses_api": true}))
 	assert.False(t, recordUsesResponsesAPI(map[string]any{"api_mode": "chat_completions"}))
 	assert.False(t, recordUsesResponsesAPI(nil))
 }

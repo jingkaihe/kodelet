@@ -52,7 +52,7 @@ func parseAPIMode(raw string) (llmtypes.OpenAIAPIMode, bool) {
 	switch normalized {
 	case "chat", "chat_completions", "chatcompletions":
 		return llmtypes.OpenAIAPIModeChatCompletions, true
-	case "responses", "responses_api", "response":
+	case "responses":
 		return llmtypes.OpenAIAPIModeResponses, true
 	default:
 		return "", false
@@ -70,30 +70,12 @@ func resolveAPIMode(config llmtypes.Config) llmtypes.OpenAIAPIMode {
 		}
 	}
 
-	if envValue := os.Getenv("KODELET_OPENAI_USE_RESPONSES_API"); envValue != "" {
-		if strings.EqualFold(envValue, "true") || envValue == "1" {
-			return llmtypes.OpenAIAPIModeResponses
-		}
-		return llmtypes.OpenAIAPIModeChatCompletions
-	}
-
 	if config.OpenAI == nil {
 		return llmtypes.OpenAIAPIModeChatCompletions
 	}
 
 	if mode, ok := parseAPIMode(string(config.OpenAI.APIMode)); ok {
 		return mode
-	}
-
-	if config.OpenAI.ResponsesAPI != nil {
-		if *config.OpenAI.ResponsesAPI {
-			return llmtypes.OpenAIAPIModeResponses
-		}
-		return llmtypes.OpenAIAPIModeChatCompletions
-	}
-
-	if config.OpenAI.UseResponsesAPI {
-		return llmtypes.OpenAIAPIModeResponses
 	}
 
 	return llmtypes.OpenAIAPIModeChatCompletions

@@ -51,8 +51,8 @@ func TestSkillTool_Description(t *testing.T) {
 		assert.NotContains(t, desc, "file_read or glob_tool")
 	})
 
-	t.Run("patch only avoids removed file tools", func(t *testing.T) {
-		tool := NewSkillToolWithOptions(nil, true, llmtypes.ToolModePatchOnly, false)
+	t.Run("patch avoids removed file tools", func(t *testing.T) {
+		tool := NewSkillToolWithOptions(nil, true, llmtypes.ToolModePatch, false)
 		desc := tool.Description()
 		assert.Contains(t, desc, "locate with glob_tool and inspect via bash using sed/cat/rg")
 		assert.Contains(t, desc, "update it using apply_patch")

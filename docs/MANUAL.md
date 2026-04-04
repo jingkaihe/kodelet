@@ -644,7 +644,6 @@ allowed_commands: []  # Empty means use default banned commands
 # Tool interaction mode
 # - full: standard tool access
 # - patch: use apply_patch plus search/navigation tools instead of direct file reads/writes
-# - patch_only: legacy alias for patch
 tool_mode: full
 
 # MCP configuration

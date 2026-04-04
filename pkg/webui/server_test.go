@@ -1081,7 +1081,7 @@ func TestExtractProviderMetadata(t *testing.T) {
 		{
 			name:             "openai metadata normalized",
 			provider:         "openai",
-			metadata:         map[string]any{"platform": "Fireworks", "api_mode": "responses_api"},
+			metadata:         map[string]any{"platform": "Fireworks", "api_mode": "responses"},
 			expectedPlatform: "fireworks",
 			expectedAPIMode:  "responses",
 		},

@@ -18,13 +18,11 @@ const (
 	ToolModeFull ToolMode = "full"
 	// ToolModePatch restricts file operations to apply_patch plus search/navigation tools.
 	ToolModePatch ToolMode = "patch"
-	// ToolModePatchOnly is a backwards-compatible alias for patch mode.
-	ToolModePatchOnly ToolMode = "patch_only"
 )
 
 // IsPatchMode reports whether the tool mode should use apply_patch-only workflows.
 func (m ToolMode) IsPatchMode() bool {
-	return m == ToolModePatch || m == ToolModePatchOnly
+	return m == ToolModePatch
 }
 
 // Config holds the configuration for the LLM client
@@ -90,16 +88,14 @@ const (
 
 // OpenAIConfig holds OpenAI-specific configuration including support for compatible APIs
 type OpenAIConfig struct {
-	Platform        string                  `mapstructure:"platform" json:"platform" yaml:"platform"`                                    // Canonical platform name for OpenAI-compatible APIs (e.g., openai, xai, codex)
-	BaseURL         string                  `mapstructure:"base_url" json:"base_url" yaml:"base_url"`                                    // Custom API base URL (overrides platform defaults)
-	APIKeyEnvVar    string                  `mapstructure:"api_key_env_var" json:"api_key_env_var" yaml:"api_key_env_var"`               // Environment variable name for API key (overrides platform default)
-	APIMode         OpenAIAPIMode           `mapstructure:"api_mode" json:"api_mode" yaml:"api_mode"`                                    // Preferred API mode selection (chat_completions or responses)
-	UseResponsesAPI bool                    `mapstructure:"use_responses_api" json:"use_responses_api" yaml:"use_responses_api"`         // Legacy bool alias for API mode
-	ResponsesAPI    *bool                   `mapstructure:"responses_api" json:"responses_api,omitempty" yaml:"responses_api,omitempty"` // Legacy bool alias for API mode
-	EnableSearch    *bool                   `mapstructure:"enable_search" json:"enable_search,omitempty" yaml:"enable_search,omitempty"` // Enable native OpenAI Responses web_search tool when supported (defaults to true)
-	ManualCache     bool                    `mapstructure:"manual_cache" json:"manual_cache" yaml:"manual_cache"`                        // Enables manual cache affinity headers for Chat Completions when prompt caching is requested
-	Models          *CustomModels           `mapstructure:"models" json:"models,omitempty" yaml:"models,omitempty"`                      // Custom model configuration
-	Pricing         map[string]ModelPricing `mapstructure:"pricing" json:"pricing,omitempty" yaml:"pricing,omitempty"`                   // Custom pricing configuration
+	Platform     string                  `mapstructure:"platform" json:"platform" yaml:"platform"`                                    // Canonical platform name for OpenAI-compatible APIs (e.g., openai, xai, codex)
+	BaseURL      string                  `mapstructure:"base_url" json:"base_url" yaml:"base_url"`                                    // Custom API base URL (overrides platform defaults)
+	APIKeyEnvVar string                  `mapstructure:"api_key_env_var" json:"api_key_env_var" yaml:"api_key_env_var"`               // Environment variable name for API key (overrides platform default)
+	APIMode      OpenAIAPIMode           `mapstructure:"api_mode" json:"api_mode" yaml:"api_mode"`                                    // Preferred API mode selection (chat_completions or responses)
+	EnableSearch *bool                   `mapstructure:"enable_search" json:"enable_search,omitempty" yaml:"enable_search,omitempty"` // Enable native OpenAI Responses web_search tool when supported (defaults to true)
+	ManualCache  bool                    `mapstructure:"manual_cache" json:"manual_cache" yaml:"manual_cache"`                        // Enables manual cache affinity headers for Chat Completions when prompt caching is requested
+	Models       *CustomModels           `mapstructure:"models" json:"models,omitempty" yaml:"models,omitempty"`                      // Custom model configuration
+	Pricing      map[string]ModelPricing `mapstructure:"pricing" json:"pricing,omitempty" yaml:"pricing,omitempty"`                   // Custom pricing configuration
 }
 
 // CustomModels holds model categorization for custom configurations

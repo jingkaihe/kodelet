@@ -79,7 +79,7 @@ profiles:
     tool_mode: "patch"
     disable_fs_search_tools: true
     openai:
-      use_responses_api: true
+      api_mode: "responses"
 
   xai:
     provider: "openai"
@@ -116,7 +116,7 @@ profiles:
     tool_mode: "patch"
     disable_fs_search_tools: true
     openai:
-      use_responses_api: true
+      api_mode: "responses"
 
   google-pro:
     provider: "google"
@@ -205,7 +205,6 @@ allowed_domains_file: "~/.kodelet/allowed_domains.txt"
 # - full: standard tool access
 # - patch: removes file_read, file_write, and file_edit from both main-agent and subagent
 #   toolsets, and ensures apply_patch is available
-# - patch_only: legacy alias for patch
 tool_mode: full
 
 # Disable built-in filesystem search tools (glob_tool and grep_tool).
@@ -265,10 +264,10 @@ openai:
   # base_url: "https://api.x.ai/v1"  # Custom API endpoint
   # api_key_env_var: "XAI_API_KEY"   # Environment variable name for API key (defaults to OPENAI_API_KEY)
 
-  # Use the Responses API instead of Chat Completions API (default: false)
+  # Select which OpenAI API surface to use.
   # The Responses API offers multi-turn conversations via previous_response_id,
   # native compaction support, and richer streaming events.
-  # use_responses_api: true
+  # api_mode: "responses"
 
   # Enable OpenAI's native Responses web_search tool when talking to the real
   # OpenAI platform. This stays off for OpenAI-compatible platforms and custom
@@ -504,7 +503,7 @@ tracing:
 # - KODELET_COMMIT_COAUTHOR_ENABLED: Enable/disable coauthor attribution in commits
 # - KODELET_COMMIT_COAUTHOR_NAME: Name for coauthor attribution
 # - KODELET_COMMIT_COAUTHOR_EMAIL: Email for coauthor attribution
-# - KODELET_OPENAI_USE_RESPONSES_API: Use OpenAI Responses API instead of Chat Completions
+# - KODELET_OPENAI_API_MODE: OpenAI API mode (chat_completions or responses)
 #
 # API Keys:
 # - ANTHROPIC_API_KEY: Required when using the Anthropic provider

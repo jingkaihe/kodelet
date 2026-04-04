@@ -18,8 +18,8 @@ func TestCodeExecutionTool_Description(t *testing.T) {
 		assert.Contains(t, desc, "file_write /absolute/path/to/mcp-workspace/check_diagnostics.ts")
 	})
 
-	t.Run("patch only uses bash inspection and apply_patch only", func(t *testing.T) {
-		tool := NewCodeExecutionToolWithOptions(nil, llmtypes.ToolModePatchOnly, false)
+	t.Run("patch uses bash inspection and apply_patch only", func(t *testing.T) {
+		tool := NewCodeExecutionToolWithOptions(nil, llmtypes.ToolModePatch, false)
 		desc := tool.Description()
 
 		assert.Contains(t, desc, "Inspect generated files using shell commands such as `sed`, `cat`, or `rg` via the `bash` tool")

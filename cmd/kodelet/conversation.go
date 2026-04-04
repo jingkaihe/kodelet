@@ -465,8 +465,6 @@ func extractProviderMetadata(provider string, metadata map[string]any) (string, 
 	}
 
 	switch apiMode {
-	case "responses_api", "response":
-		apiMode = "responses"
 	case "chat", "chatcompletions":
 		apiMode = "chat_completions"
 	}

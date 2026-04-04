@@ -459,19 +459,14 @@ func TestGetAPIKeyEnvVar(t *testing.T) {
 func TestResolveAPIMode(t *testing.T) {
 	resetEnv := func() {
 		os.Unsetenv("KODELET_OPENAI_API_MODE")
-		os.Unsetenv("KODELET_OPENAI_USE_RESPONSES_API")
 	}
 	resetEnv()
 	defer resetEnv()
-
-	trueValue := true
-	falseValue := false
 
 	tests := []struct {
 		name     string
 		config   llmtypes.Config
 		envMode  string
-		envBool  string
 		expected llmtypes.OpenAIAPIMode
 	}{
 		{
@@ -485,30 +480,9 @@ func TestResolveAPIMode(t *testing.T) {
 			expected: llmtypes.OpenAIAPIModeResponses,
 		},
 		{
-			name:     "legacy responses_api true",
-			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{ResponsesAPI: &trueValue}},
-			expected: llmtypes.OpenAIAPIModeResponses,
-		},
-		{
-			name:     "legacy responses_api false",
-			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{ResponsesAPI: &falseValue}},
-			expected: llmtypes.OpenAIAPIModeChatCompletions,
-		},
-		{
-			name:     "legacy use_responses_api true",
-			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{UseResponsesAPI: true}},
-			expected: llmtypes.OpenAIAPIModeResponses,
-		},
-		{
 			name:     "env api mode overrides config",
 			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{APIMode: llmtypes.OpenAIAPIModeChatCompletions}},
 			envMode:  "responses",
-			expected: llmtypes.OpenAIAPIModeResponses,
-		},
-		{
-			name:     "legacy env bool true",
-			config:   llmtypes.Config{},
-			envBool:  "true",
 			expected: llmtypes.OpenAIAPIModeResponses,
 		},
 		{
@@ -523,9 +497,6 @@ func TestResolveAPIMode(t *testing.T) {
 			resetEnv()
 			if tt.envMode != "" {
 				os.Setenv("KODELET_OPENAI_API_MODE", tt.envMode)
-			}
-			if tt.envBool != "" {
-				os.Setenv("KODELET_OPENAI_USE_RESPONSES_API", tt.envBool)
 			}
 
 			assert.Equal(t, tt.expected, resolveAPIMode(tt.config))

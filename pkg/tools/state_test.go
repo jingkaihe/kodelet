@@ -730,9 +730,9 @@ func TestWithSubAgentToolsFromConfig(t *testing.T) {
 		assert.Empty(t, state.Tools(), "NoToolsMarker should result in no tools")
 	})
 
-	t.Run("patch_only removes file_read file_write and file_edit", func(t *testing.T) {
+	t.Run("patch removes file_read file_write and file_edit", func(t *testing.T) {
 		config := llmtypes.Config{
-			ToolMode:     llmtypes.ToolModePatchOnly,
+			ToolMode:     llmtypes.ToolModePatch,
 			AllowedTools: []string{"file_read", "file_write", "file_edit"},
 		}
 		state := NewBasicState(ctx, WithLLMConfig(config), WithSubAgentToolsFromConfig())
@@ -748,9 +748,9 @@ func TestWithSubAgentToolsFromConfig(t *testing.T) {
 		assert.NotContains(t, toolNames, "file_edit")
 	})
 
-	t.Run("patch_only still removes file_read file_write and file_edit after fallback", func(t *testing.T) {
+	t.Run("patch still removes file_read file_write and file_edit after fallback", func(t *testing.T) {
 		config := llmtypes.Config{
-			ToolMode:     llmtypes.ToolModePatchOnly,
+			ToolMode:     llmtypes.ToolModePatch,
 			AllowedTools: []string{"file_read", "unknown_tool"},
 		}
 		state := NewBasicState(ctx, WithLLMConfig(config), WithSubAgentToolsFromConfig())
@@ -917,9 +917,9 @@ func TestWithMainTools(t *testing.T) {
 		assert.Contains(t, toolNames, "subagent", "subagent should remain when DisableSubagent is false")
 	})
 
-	t.Run("patch_only removes file_read file_write and file_edit from defaults", func(t *testing.T) {
+	t.Run("patch removes file_read file_write and file_edit from defaults", func(t *testing.T) {
 		config := llmtypes.Config{
-			ToolMode: llmtypes.ToolModePatchOnly,
+			ToolMode: llmtypes.ToolModePatch,
 		}
 		state := NewBasicState(ctx, WithLLMConfig(config), WithMainTools())
 
@@ -934,9 +934,9 @@ func TestWithMainTools(t *testing.T) {
 		assert.NotContains(t, toolNames, "file_edit")
 	})
 
-	t.Run("patch_only with allowed_tools keeps apply_patch and removes file_read file_write and file_edit", func(t *testing.T) {
+	t.Run("patch with allowed_tools keeps apply_patch and removes file_read file_write and file_edit", func(t *testing.T) {
 		config := llmtypes.Config{
-			ToolMode:     llmtypes.ToolModePatchOnly,
+			ToolMode:     llmtypes.ToolModePatch,
 			AllowedTools: []string{"bash", "file_read", "file_write", "file_edit"},
 		}
 		state := NewBasicState(ctx, WithLLMConfig(config), WithMainTools())
@@ -953,18 +953,18 @@ func TestWithMainTools(t *testing.T) {
 		assert.NotContains(t, toolNames, "file_edit")
 	})
 
-	t.Run("patch_only respects NoToolsMarker", func(t *testing.T) {
+	t.Run("patch respects NoToolsMarker", func(t *testing.T) {
 		config := llmtypes.Config{
-			ToolMode:     llmtypes.ToolModePatchOnly,
+			ToolMode:     llmtypes.ToolModePatch,
 			AllowedTools: []string{NoToolsMarker},
 		}
 		state := NewBasicState(ctx, WithLLMConfig(config), WithMainTools())
 		assert.Empty(t, state.Tools(), "NoToolsMarker should still disable all tools")
 	})
 
-	t.Run("patch_only still removes file_read file_write and file_edit after fallback", func(t *testing.T) {
+	t.Run("patch still removes file_read file_write and file_edit after fallback", func(t *testing.T) {
 		config := llmtypes.Config{
-			ToolMode:     llmtypes.ToolModePatchOnly,
+			ToolMode:     llmtypes.ToolModePatch,
 			AllowedTools: []string{"bash", "unknown_tool"},
 		}
 		state := NewBasicState(ctx, WithLLMConfig(config), WithMainTools())
@@ -1018,7 +1018,7 @@ func TestNewBasicState_ReconfiguresExtraMCPTools(t *testing.T) {
 	ctx := context.Background()
 	state := NewBasicState(
 		ctx,
-		WithLLMConfig(llmtypes.Config{ToolMode: llmtypes.ToolModePatchOnly}),
+		WithLLMConfig(llmtypes.Config{ToolMode: llmtypes.ToolModePatch}),
 		WithMainTools(),
 		WithExtraMCPTools([]tooltypes.Tool{NewCodeExecutionTool(nil)}),
 	)

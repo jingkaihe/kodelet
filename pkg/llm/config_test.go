@@ -426,15 +426,12 @@ func TestGetConfigFromViperOpenAIApiModeConfig(t *testing.T) {
 	viper.Reset()
 	viper.Set("provider", "openai")
 	viper.Set("openai.api_mode", "responses")
-	viper.Set("openai.responses_api", true)
 
 	config, err := GetConfigFromViper()
 	require.NoError(t, err)
 	require.NotNil(t, config.OpenAI)
 
 	assert.Equal(t, llmtypes.OpenAIAPIModeResponses, config.OpenAI.APIMode)
-	require.NotNil(t, config.OpenAI.ResponsesAPI)
-	assert.True(t, *config.OpenAI.ResponsesAPI)
 }
 
 func TestGetConfigFromViperOpenAISearchConfig(t *testing.T) {
