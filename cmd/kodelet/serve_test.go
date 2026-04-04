@@ -3,7 +3,9 @@ package main
 import (
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestValidateServeConfig(t *testing.T) {
@@ -81,6 +83,15 @@ func TestValidateServeConfig(t *testing.T) {
 			},
 			// No error expected, just a warning logged
 		},
+		{
+			name: "invalid compact ratio",
+			config: &ServeConfig{
+				Host:         "localhost",
+				Port:         8080,
+				CompactRatio: 1.5,
+			},
+			expectedError: "compact-ratio must be between 0.0 and 1.0",
+		},
 	}
 
 	for _, tt := range tests {
@@ -95,4 +106,21 @@ func TestValidateServeConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetServeConfigFromFlags_ParsesAutoCompactFlags(t *testing.T) {
+	cmd := &cobra.Command{Use: "serve"}
+	defaults := NewServeConfig()
+	cmd.Flags().String("host", defaults.Host, "")
+	cmd.Flags().Int("port", defaults.Port, "")
+	cmd.Flags().String("cwd", defaults.CWD, "")
+	cmd.Flags().Float64("compact-ratio", defaults.CompactRatio, "")
+	cmd.Flags().Bool("disable-auto-compact", defaults.DisableAutoCompact, "")
+
+	require.NoError(t, cmd.Flags().Set("compact-ratio", "0.65"))
+	require.NoError(t, cmd.Flags().Set("disable-auto-compact", "true"))
+
+	config := getServeConfigFromFlags(cmd)
+	assert.Equal(t, 0.65, config.CompactRatio)
+	assert.True(t, config.DisableAutoCompact)
 }

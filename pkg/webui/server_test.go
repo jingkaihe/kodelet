@@ -124,6 +124,15 @@ func TestServerConfig_Validate(t *testing.T) {
 			},
 			expectedError: "port must be between 1 and 65535",
 		},
+		{
+			name: "invalid compact ratio",
+			config: &ServerConfig{
+				Host:         "localhost",
+				Port:         8080,
+				CompactRatio: -0.1,
+			},
+			expectedError: "compact-ratio must be between 0.0 and 1.0",
+		},
 	}
 
 	for _, tt := range tests {

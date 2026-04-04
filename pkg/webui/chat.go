@@ -76,12 +76,18 @@ type ChatRunner interface {
 
 // DefaultChatRunner executes chat turns using the same LLM/tool stack as the CLI.
 type DefaultChatRunner struct {
-	defaultCWD string
+	defaultCWD         string
+	compactRatio       float64
+	disableAutoCompact bool
 }
 
 // NewDefaultChatRunner creates a chat runner for the web UI server.
-func NewDefaultChatRunner(defaultCWD string) *DefaultChatRunner {
-	return &DefaultChatRunner{defaultCWD: defaultCWD}
+func NewDefaultChatRunner(defaultCWD string, compactRatio float64, disableAutoCompact bool) *DefaultChatRunner {
+	return &DefaultChatRunner{
+		defaultCWD:         defaultCWD,
+		compactRatio:       compactRatio,
+		disableAutoCompact: disableAutoCompact,
+	}
 }
 
 // Run executes a single persisted chat turn and streams events to the sink.
@@ -156,8 +162,10 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 	}
 
 	_, err = thread.SendMessage(ctx, message, handler, llmtypes.MessageOpt{
-		PromptCache: true,
-		Images:      imageInputs,
+		PromptCache:        true,
+		Images:             imageInputs,
+		CompactRatio:       r.compactRatio,
+		DisableAutoCompact: r.disableAutoCompact,
 	})
 	if err != nil {
 		return sessionID, errors.Wrap(err, "failed to process chat message")

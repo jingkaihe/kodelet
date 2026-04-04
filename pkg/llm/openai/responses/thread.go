@@ -830,6 +830,32 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	t.lastResponseID = ""
 
 	t.ResetContextStateLocked()
+	pricing := t.getPricing(t.Config.Model)
+	if t.Usage != nil {
+		t.Usage.MaxContextWindow = pricing.ContextWindow
+	}
+
+	estimatedContext := 0
+	for _, item := range newStoredItems {
+		switch item.Type {
+		case "message", "reasoning":
+			estimatedContext += len(item.Content)
+		case "function_call":
+			estimatedContext += len(item.Name) + len(item.Arguments)
+		case "function_call_output":
+			estimatedContext += len(item.Output)
+		case "web_search_call":
+			estimatedContext += len(item.Content) + len(item.Action) + len(item.Status)
+		case "compaction", "compaction_summary":
+			estimatedContext += len(item.EncryptedContent)
+		}
+	}
+
+	// Rough token estimate (~4 chars/token) with a small non-zero floor so future
+	// auto-compact decisions are based on the compacted thread, not stale pre-compact usage.
+	if t.Usage != nil {
+		t.Usage.CurrentContextWindow = max(estimatedContext/4, 1)
+	}
 
 	return nil
 }

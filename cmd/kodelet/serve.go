@@ -17,16 +17,20 @@ import (
 )
 
 type ServeConfig struct {
-	Host string
-	Port int
-	CWD  string
+	Host               string
+	Port               int
+	CWD                string
+	CompactRatio       float64
+	DisableAutoCompact bool
 }
 
 func NewServeConfig() *ServeConfig {
 	return &ServeConfig{
-		Host: "localhost",
-		Port: 8080,
-		CWD:  "",
+		Host:               "localhost",
+		Port:               8080,
+		CWD:                "",
+		CompactRatio:       0.8,
+		DisableAutoCompact: false,
 	}
 }
 
@@ -50,6 +54,8 @@ func init() {
 	serveCmd.Flags().String("host", defaults.Host, "Host to bind the web server to")
 	serveCmd.Flags().Int("port", defaults.Port, "Port to bind the web server to")
 	serveCmd.Flags().String("cwd", defaults.CWD, "Default working directory for new web conversations")
+	serveCmd.Flags().Float64("compact-ratio", defaults.CompactRatio, "Context window utilization ratio to trigger auto-compact (0.0-1.0)")
+	serveCmd.Flags().Bool("disable-auto-compact", defaults.DisableAutoCompact, "Disable auto-compact functionality")
 }
 
 func getServeConfigFromFlags(cmd *cobra.Command) *ServeConfig {
@@ -63,6 +69,12 @@ func getServeConfigFromFlags(cmd *cobra.Command) *ServeConfig {
 	}
 	if cwd, err := cmd.Flags().GetString("cwd"); err == nil {
 		config.CWD = strings.TrimSpace(cwd)
+	}
+	if compactRatio, err := cmd.Flags().GetFloat64("compact-ratio"); err == nil {
+		config.CompactRatio = compactRatio
+	}
+	if disableAutoCompact, err := cmd.Flags().GetBool("disable-auto-compact"); err == nil {
+		config.DisableAutoCompact = disableAutoCompact
 	}
 
 	return config
@@ -89,6 +101,10 @@ func validateServeConfig(config *ServeConfig) error {
 		logger.G(context.Background()).WithField("port", config.Port).Warn("using privileged port (< 1024) may require elevated permissions")
 	}
 
+	if config.CompactRatio < 0.0 || config.CompactRatio > 1.0 {
+		return errors.New("compact-ratio must be between 0.0 and 1.0")
+	}
+
 	return nil
 }
 
@@ -104,9 +120,11 @@ func runServeCommand(ctx context.Context, config *ServeConfig) {
 	}).Info("Starting web UI server")
 
 	serverConfig := &webui.ServerConfig{
-		Host: config.Host,
-		Port: config.Port,
-		CWD:  config.CWD,
+		Host:               config.Host,
+		Port:               config.Port,
+		CWD:                config.CWD,
+		CompactRatio:       config.CompactRatio,
+		DisableAutoCompact: config.DisableAutoCompact,
 	}
 
 	server, err := webui.NewServer(ctx, serverConfig)

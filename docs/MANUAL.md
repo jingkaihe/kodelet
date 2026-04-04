@@ -212,6 +212,8 @@ kodelet run --follow "now implement the next feature"
 
 The `compact` recipe generates a comprehensive summary of the conversation history, then replaces the conversation with that summary. This preserves all essential context while significantly reducing token usage.
 
+Auto-compaction settings are available in both CLI and web UI server modes via `--compact-ratio` and `--disable-auto-compact`.
+
 **When to use manual compaction:**
 - Before starting a new phase of work on a long-running task
 - When you notice responses slowing down due to large context

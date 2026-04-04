@@ -600,6 +600,70 @@ func TestCompactContextPreservesAssistantMessageFromCompactOutput(t *testing.T) 
 	assert.NotEmpty(t, thread.storedItems[1].RawItem)
 }
 
+func TestCompactContextUpdatesContextWindowEstimateAfterNativeCompaction(t *testing.T) {
+	thread := &Thread{
+		Thread: base.NewThread(
+			llmtypes.Config{Provider: "openai", Model: "gpt-4.1"},
+			"conv-test",
+			hooks.Trigger{},
+		),
+		inputItems: []openairesponses.ResponseInputItemUnionParam{
+			{
+				OfMessage: &openairesponses.EasyInputMessageParam{
+					Role:    openairesponses.EasyInputMessageRoleUser,
+					Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("hello")},
+				},
+			},
+		},
+	}
+	thread.Usage.CurrentContextWindow = 200000
+	thread.Usage.MaxContextWindow = 1047576
+	thread.ToolResults = map[string]tooltypes.StructuredToolResult{
+		"tool-1": {ToolName: "bash", Success: true},
+	}
+
+	raw := `{
+		"id": "resp_test",
+		"created_at": 1,
+		"object": "response.compaction",
+		"output": [
+			{
+				"id": "msg_1",
+				"type": "message",
+				"role": "assistant",
+				"status": "completed",
+				"content": [{"type": "output_text", "text": "short compacted context"}]
+			},
+			{
+				"id": "cmp_1",
+				"type": "compaction",
+				"encrypted_content": "enc_value"
+			}
+		],
+		"usage": {
+			"input_tokens": 10,
+			"input_tokens_details": {"cached_tokens": 0},
+			"output_tokens": 3,
+			"output_tokens_details": {"reasoning_tokens": 0},
+			"total_tokens": 13
+		}
+	}`
+	var compacted openairesponses.CompactedResponse
+	require.NoError(t, json.Unmarshal([]byte(raw), &compacted))
+
+	thread.compactFunc = func(_ context.Context, _ openairesponses.ResponseCompactParams, _ ...option.RequestOption) (*openairesponses.CompactedResponse, error) {
+		return &compacted, nil
+	}
+
+	err := thread.CompactContext(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 8, thread.Usage.CurrentContextWindow)
+	assert.Equal(t, 1047576, thread.Usage.MaxContextWindow)
+	assert.Empty(t, thread.ToolResults)
+	assert.Nil(t, thread.pendingItems)
+	assert.Empty(t, thread.lastResponseID)
+}
+
 func TestCompactContextPreservesFunctionCallFromCompactOutput(t *testing.T) {
 	thread := &Thread{
 		Thread: base.NewThread(

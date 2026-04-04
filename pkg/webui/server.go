@@ -84,9 +84,11 @@ func (r *activeChatRun) markDone() {
 
 // ServerConfig holds the configuration for the web server
 type ServerConfig struct {
-	Host string
-	Port int
-	CWD  string
+	Host               string
+	Port               int
+	CWD                string
+	CompactRatio       float64
+	DisableAutoCompact bool
 }
 
 // Validate validates the server configuration
@@ -99,6 +101,10 @@ func (c *ServerConfig) Validate() error {
 	// Validate port
 	if c.Port < 1 || c.Port > 65535 {
 		return errors.Errorf("port must be between 1 and 65535, got %d", c.Port)
+	}
+
+	if c.CompactRatio < 0.0 || c.CompactRatio > 1.0 {
+		return errors.New("compact-ratio must be between 0.0 and 1.0")
 	}
 
 	if strings.TrimSpace(c.CWD) != "" {
@@ -142,7 +148,7 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 	s := &Server{
 		router:              mux.NewRouter(),
 		conversationService: conversationService,
-		chatRunner:          NewDefaultChatRunner(config.CWD),
+		chatRunner:          NewDefaultChatRunner(config.CWD, config.CompactRatio, config.DisableAutoCompact),
 		config:              config,
 		staticFS:            staticFS,
 		runCtx:              runCtx,
