@@ -2,6 +2,9 @@ import React from "react";
 import type { Conversation } from "../../types";
 import { cn, truncateText } from "../../utils";
 
+const DEFAULT_VISIBLE_CONVERSATIONS_PER_GROUP = 10;
+const VISIBLE_CONVERSATIONS_STEP = 10;
+
 interface ChatSidebarProps {
 	conversations: Conversation[];
 	activeConversationId: string | null;
@@ -100,6 +103,9 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 	const [expandedGroups, setExpandedGroups] = React.useState<Record<string, boolean>>(
 		{},
 	);
+	const [visibleGroupCounts, setVisibleGroupCounts] = React.useState<
+		Record<string, number>
+	>({});
 	const menuRef = React.useRef<HTMLDivElement | null>(null);
 
 	React.useEffect(() => {
@@ -143,6 +149,32 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 				);
 				nextState[group.key] =
 					currentState[group.key] ?? (hasActiveConversation || index === 0);
+			});
+
+			return nextState;
+		});
+	}, [activeConversationId, groupedConversations]);
+
+	React.useEffect(() => {
+		setVisibleGroupCounts((currentState) => {
+			const nextState: Record<string, number> = {};
+
+			groupedConversations.forEach((group) => {
+				const activeIndex = group.conversations.findIndex(
+					(conversation) => conversation.id === activeConversationId,
+				);
+				const minimumVisibleCount =
+					activeIndex >= 0
+						? Math.max(
+								DEFAULT_VISIBLE_CONVERSATIONS_PER_GROUP,
+								activeIndex + 1,
+							)
+						: DEFAULT_VISIBLE_CONVERSATIONS_PER_GROUP;
+
+				nextState[group.key] = Math.min(
+					group.conversations.length,
+					Math.max(currentState[group.key] ?? minimumVisibleCount, minimumVisibleCount),
+				);
 			});
 
 			return nextState;
@@ -210,6 +242,26 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 
 					{groupedConversations.map((group) => (
 						<section className="conversation-group" key={group.key}>
+							{(() => {
+								const activeIndex = group.conversations.findIndex(
+									(conversation) => conversation.id === activeConversationId,
+								);
+								const minimumVisibleCount =
+									activeIndex >= 0
+										? Math.max(
+												DEFAULT_VISIBLE_CONVERSATIONS_PER_GROUP,
+												activeIndex + 1,
+											)
+										: DEFAULT_VISIBLE_CONVERSATIONS_PER_GROUP;
+								const visibleCount = Math.min(
+									visibleGroupCounts[group.key] ?? minimumVisibleCount,
+									group.conversations.length,
+								);
+								const remainingCount = group.conversations.length - visibleCount;
+								const visibleConversations = group.conversations.slice(0, visibleCount);
+
+								return (
+									<>
 							<button
 								aria-expanded={expandedGroups[group.key] !== false}
 								className="conversation-group-header"
@@ -253,7 +305,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 
 							{expandedGroups[group.key] !== false ? (
 								<div className="conversation-group-list">
-									{group.conversations.map((conversation) => {
+									{visibleConversations.map((conversation) => {
 									const isActive = conversation.id === activeConversationId;
 									const isMenuOpen =
 										conversation.id === openMenuConversationId;
@@ -333,8 +385,42 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 										</div>
 									);
 									})}
+
+									{remainingCount > 0 ? (
+										<button
+											className="conversation-group-more"
+											onClick={() =>
+												setVisibleGroupCounts((currentState) => ({
+													...currentState,
+													[group.key]: Math.min(
+														group.conversations.length,
+														visibleCount + VISIBLE_CONVERSATIONS_STEP,
+													),
+												}))
+											}
+											type="button"
+										>
+											Show {Math.min(remainingCount, VISIBLE_CONVERSATIONS_STEP)} more
+										</button>
+									) : group.conversations.length > minimumVisibleCount ? (
+										<button
+											className="conversation-group-more"
+											onClick={() =>
+												setVisibleGroupCounts((currentState) => ({
+													...currentState,
+													[group.key]: minimumVisibleCount,
+												}))
+											}
+											type="button"
+										>
+											Show less
+										</button>
+									) : null}
 								</div>
 							) : null}
+									</>
+								);
+							})()}
 						</section>
 					))}
 				</div>

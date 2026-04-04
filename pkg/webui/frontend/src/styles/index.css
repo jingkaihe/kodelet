@@ -1282,6 +1282,27 @@ code[class*="language-"] {
   gap: 0.12rem;
 }
 
+.conversation-group-more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: fit-content;
+  margin: 0.2rem 0 0 2rem;
+  border: 0;
+  background: transparent;
+  padding: 0.2rem 0.4rem;
+  font-family: var(--font-heading);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #8a8477;
+}
+
+.conversation-group-more:hover {
+  color: var(--kodelet-dark);
+}
+
 .sidebar-action-icon {
   display: inline-flex;
   height: 2.4rem;

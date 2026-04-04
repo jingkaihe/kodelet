@@ -1047,6 +1047,36 @@ describe("ChatPage", () => {
 		await waitFor(() => expect(screen.getByText("Conversation 7")).toBeInTheDocument());
 	});
 
+	it("reveals more conversations within an expanded directory", async () => {
+		mockGetConversations.mockResolvedValue({
+			conversations: Array.from({ length: 12 }, (_, index) => ({
+				id: `conv-${index + 1}`,
+				createdAt: `2024-01-${String(index + 1).padStart(2, "0")}T00:00:00Z`,
+				updatedAt: `2024-01-${String(index + 1).padStart(2, "0")}T00:00:00Z`,
+				messageCount: 1,
+				summary: `Conversation ${index + 1}`,
+				cwd: "/workspace/kodelet",
+			})),
+			hasMore: false,
+			total: 12,
+			limit: 100,
+			offset: 0,
+		});
+
+		render(<ChatPage />);
+
+		await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
+		expect(screen.getByText("Conversation 10")).toBeInTheDocument();
+		expect(screen.queryByText("Conversation 11")).not.toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Show 2 more" })).toBeInTheDocument();
+
+		fireEvent.click(screen.getByRole("button", { name: "Show 2 more" }));
+
+		await waitFor(() => expect(screen.getByText("Conversation 11")).toBeInTheDocument());
+		expect(screen.getByText("Conversation 12")).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Show less" })).toBeInTheDocument();
+	});
+
 	it("shows compact new chat context text in the composer", async () => {
 		render(<ChatPage />);
 
