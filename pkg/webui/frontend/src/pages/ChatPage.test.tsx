@@ -69,7 +69,7 @@ describe("ChatPage", () => {
 			conversations: [],
 			hasMore: false,
 			total: 0,
-			limit: 40,
+			limit: 10,
 			offset: 0,
 		});
 		mockSteerConversation.mockResolvedValue({
@@ -232,7 +232,12 @@ describe("ChatPage", () => {
 		render(<ChatPage />);
 
 		await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
-		fireEvent.click(screen.getByTestId("cwd-trigger"));
+		fireEvent.click(screen.getByTestId("sidebar-new-chat-button"));
+		expect(screen.getByTestId("new-chat-dialog")).toBeInTheDocument();
+
+		fireEvent.change(screen.getByTestId("new-chat-profile-select"), {
+			target: { value: "premium" },
+		});
 		fireEvent.change(screen.getByLabelText("Working directory"), {
 			target: { value: "/workspace/alt" },
 		});
@@ -240,11 +245,7 @@ describe("ChatPage", () => {
 		await waitFor(() =>
 			expect(mockGetCWDHints).toHaveBeenCalledWith("/workspace/alt"),
 		);
-		fireEvent.click(screen.getByRole("button", { name: "Use directory" }));
-
-		fireEvent.change(screen.getByLabelText("Profile"), {
-			target: { value: "premium" },
-		});
+		fireEvent.click(screen.getByRole("button", { name: "Use these settings" }));
 
 		fireEvent.change(screen.getByPlaceholderText("Ask kodelet anything..."), {
 			target: { value: "hello" },
@@ -275,7 +276,7 @@ describe("ChatPage", () => {
 
 		await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
 
-		fireEvent.click(screen.getByTestId("cwd-trigger"));
+		fireEvent.click(screen.getByTestId("sidebar-new-chat-button"));
 		const cwdInput = screen.getByLabelText("Working directory");
 		fireEvent.focus(cwdInput);
 		expect(screen.queryByTestId("cwd-suggestions")).not.toBeInTheDocument();
@@ -289,10 +290,10 @@ describe("ChatPage", () => {
 		);
 
 		fireEvent.mouseDown(screen.getByTestId("cwd-suggestion-0"));
-		fireEvent.click(screen.getByRole("button", { name: "Use directory" }));
-		expect(screen.queryByTestId("cwd-popover")).not.toBeInTheDocument();
+		fireEvent.click(screen.getByRole("button", { name: "Use these settings" }));
+		expect(screen.queryByTestId("new-chat-dialog")).not.toBeInTheDocument();
 		expect(
-			screen.getByText("/workspace/kodelet"),
+			screen.getByText(/workspace\/kodelet/),
 		).toBeInTheDocument();
 	});
 
@@ -312,7 +313,7 @@ describe("ChatPage", () => {
 
 		await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
 
-		fireEvent.click(screen.getByTestId("cwd-trigger"));
+		fireEvent.click(screen.getByTestId("sidebar-new-chat-button"));
 		const cwdInput = screen.getByLabelText("Working directory");
 		fireEvent.focus(cwdInput);
 		expect(screen.queryByTestId("cwd-suggestions")).not.toBeInTheDocument();
@@ -324,10 +325,10 @@ describe("ChatPage", () => {
 
 		fireEvent.keyDown(cwdInput, { key: "ArrowDown" });
 		fireEvent.keyDown(cwdInput, { key: "Enter" });
-		fireEvent.click(screen.getByRole("button", { name: "Use directory" }));
+		fireEvent.click(screen.getByRole("button", { name: "Use these settings" }));
 
 		expect(
-			screen.getByText("/workspace/kodelet"),
+			screen.getByText(/workspace\/kodelet/),
 		).toBeInTheDocument();
 	});
 
@@ -365,7 +366,7 @@ describe("ChatPage", () => {
 			expect(mockGetChatSettings).toHaveBeenCalled();
 			expect(mockGetCWDHints).not.toHaveBeenCalledWith("/workspace/default");
 
-			fireEvent.click(screen.getByTestId("cwd-trigger"));
+			fireEvent.click(screen.getByTestId("sidebar-new-chat-button"));
 			const cwdInput = screen.getByLabelText("Working directory");
 			fireEvent.focus(cwdInput);
 			fireEvent.change(cwdInput, { target: { value: "/workspace/ko" } });
@@ -406,11 +407,11 @@ describe("ChatPage", () => {
 
 		await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
 
-		fireEvent.click(screen.getByTestId("cwd-trigger"));
+		fireEvent.click(screen.getByTestId("sidebar-new-chat-button"));
 		fireEvent.change(screen.getByLabelText("Working directory"), {
 			target: { value: "kodelet-website" },
 		});
-		fireEvent.click(screen.getByRole("button", { name: "Use directory" }));
+		fireEvent.click(screen.getByRole("button", { name: "Use these settings" }));
 		fireEvent.change(screen.getByPlaceholderText("Ask kodelet anything..."), {
 			target: { value: "hello" },
 		});
@@ -423,19 +424,19 @@ describe("ChatPage", () => {
 		);
 	});
 
-	it("opens and closes the directory popover", async () => {
+	it("opens and closes the new chat settings dialog", async () => {
 		render(<ChatPage />);
 
 		await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
 
-		fireEvent.click(screen.getByTestId("cwd-trigger"));
-		expect(screen.getByTestId("cwd-popover")).toBeInTheDocument();
+		fireEvent.click(screen.getByTestId("sidebar-new-chat-button"));
+		expect(screen.getByTestId("new-chat-dialog")).toBeInTheDocument();
 
 		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-		expect(screen.queryByTestId("cwd-popover")).not.toBeInTheDocument();
+		expect(screen.queryByTestId("new-chat-dialog")).not.toBeInTheDocument();
 	});
 
-	it("locks the cwd input for existing conversations", async () => {
+	it("shows the cwd inside the inline context for existing conversations", async () => {
 		routeParams = { id: "conv-123" };
 		mockGetConversation.mockResolvedValue({
 			id: "conv-123",
@@ -459,12 +460,16 @@ describe("ChatPage", () => {
 			expect(mockGetConversation).toHaveBeenCalledWith("conv-123"),
 		);
 
-		expect(screen.getByTestId("cwd-picker")).toBeInTheDocument();
-		expect(screen.getByTestId("cwd-trigger")).toBeDisabled();
-		expect(screen.getByText("/workspace/project")).toBeInTheDocument();
+		expect(screen.getByTestId("composer-inline-context")).toBeInTheDocument();
+		expect(screen.getByTestId("composer-inline-context")).toHaveTextContent(
+			"/workspace/project",
+		);
+		expect(
+			screen.queryByLabelText("Working directory"),
+		).not.toBeInTheDocument();
 	});
 
-	it("locks the profile selector for existing conversations", async () => {
+	it("shows the profile inside the inline context for existing conversations", async () => {
 		routeParams = { id: "conv-123" };
 		mockGetConversation.mockResolvedValue({
 			id: "conv-123",
@@ -489,10 +494,11 @@ describe("ChatPage", () => {
 			expect(mockGetConversation).toHaveBeenCalledWith("conv-123"),
 		);
 
-		expect(screen.getByTestId("profile-picker")).toBeInTheDocument();
-		expect(screen.getByLabelText("Profile")).toBeDisabled();
-		expect(screen.getByTestId("profile-picker")).toHaveTextContent("premium");
-		expect(screen.queryByText("Locked")).not.toBeInTheDocument();
+		expect(screen.getByTestId("composer-inline-context")).toBeInTheDocument();
+		expect(screen.getByTestId("composer-inline-context")).toHaveTextContent(
+			"premium",
+		);
+		expect(screen.queryByLabelText("Profile")).not.toBeInTheDocument();
 
 		fireEvent.change(screen.getByPlaceholderText("Ask kodelet anything..."), {
 			target: { value: "continue" },
@@ -964,7 +970,7 @@ describe("ChatPage", () => {
 
 		expect(mockStreamChat.mock.calls[0]?.[0]?.conversationId).toBeUndefined();
 		expect(screen.getByRole("button", { name: "Starting…" })).toBeDisabled();
-		expect(screen.getByRole("button", { name: /new chat/i })).toBeDisabled();
+		expect(screen.getByTestId("sidebar-new-chat-button")).toBeDisabled();
 		expect(mockStopConversation).not.toHaveBeenCalled();
 	});
 
@@ -985,12 +991,78 @@ describe("ChatPage", () => {
 
 		await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
 		await waitFor(() =>
-			expect(screen.getByRole("button", { name: /new chat/i })).toBeEnabled(),
+			expect(screen.getByTestId("sidebar-new-chat-button")).toBeEnabled(),
 		);
 
-		fireEvent.click(screen.getByRole("button", { name: /new chat/i }));
+		fireEvent.click(screen.getByTestId("sidebar-new-chat-button"));
 
 		expect(mockNavigate).toHaveBeenCalledWith("/");
+		expect(screen.getByTestId("new-chat-dialog")).toBeInTheDocument();
+	});
+
+	it("groups recent chats by cwd and loads 10 more on demand", async () => {
+		mockGetConversations
+			.mockResolvedValueOnce({
+				conversations: Array.from({ length: 10 }, (_, index) => ({
+					id: `conv-${index + 1}`,
+					createdAt: `2024-01-${String(index + 1).padStart(2, "0")}T00:00:00Z`,
+					updatedAt: `2024-01-${String(index + 1).padStart(2, "0")}T00:00:00Z`,
+					messageCount: 1,
+					summary: `Conversation ${index + 1}`,
+					cwd: index < 6 ? "/workspace/a" : "/workspace/b",
+				})),
+				hasMore: true,
+				total: 12,
+				limit: 10,
+				offset: 0,
+			})
+			.mockResolvedValueOnce({
+				conversations: Array.from({ length: 12 }, (_, index) => ({
+					id: `conv-${index + 1}`,
+					createdAt: `2024-01-${String(index + 1).padStart(2, "0")}T00:00:00Z`,
+					updatedAt: `2024-01-${String(index + 1).padStart(2, "0")}T00:00:00Z`,
+					messageCount: 1,
+					summary: `Conversation ${index + 1}`,
+					cwd:
+						index < 6
+							? "/workspace/a"
+							: index < 10
+								? "/workspace/b"
+								: "/workspace/c",
+				})),
+				hasMore: false,
+				total: 12,
+				limit: 20,
+				offset: 0,
+			});
+
+		render(<ChatPage />);
+
+		await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
+		expect(screen.getByText("/workspace/a")).toBeInTheDocument();
+		expect(screen.getByText("/workspace/b")).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Show 10 more" })).toBeInTheDocument();
+
+		fireEvent.click(screen.getByRole("button", { name: "Show 10 more" }));
+
+		await waitFor(() =>
+			expect(mockGetConversations).toHaveBeenLastCalledWith(
+				expect.objectContaining({ limit: 20 }),
+			),
+		);
+		await waitFor(() => expect(screen.getByText("/workspace/c")).toBeInTheDocument());
+		expect(
+			screen.queryByRole("button", { name: "Show 10 more" }),
+		).not.toBeInTheDocument();
+	});
+
+	it("shows compact new chat context text in the composer", async () => {
+		render(<ChatPage />);
+
+		await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
+		expect(
+			screen.getByText(/work · \/workspace\/default/),
+		).toBeInTheDocument();
 	});
 
 	it("disables delete for the active conversation while it is streaming", async () => {

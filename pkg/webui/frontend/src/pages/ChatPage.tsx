@@ -28,6 +28,7 @@ import {
 	formatContextWindow,
 	formatCost,
 	showToast,
+	truncateMiddle,
 } from "../utils";
 
 const normalizeConversation = (conversation: Conversation): Conversation => ({
@@ -67,6 +68,7 @@ const SIDEBAR_WIDTH_STORAGE_KEY = "kodelet.chat.sidebar.width";
 const SIDEBAR_VISIBLE_STORAGE_KEY = "kodelet.chat.sidebar.visible";
 const MAX_IMAGE_ATTACHMENTS = 10;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const SIDEBAR_PAGE_SIZE = 10;
 const SUPPORTED_IMAGE_TYPES = new Set([
 	"image/png",
 	"image/jpeg",
@@ -223,14 +225,20 @@ const ChatPage: React.FC = () => {
 		profiles: [],
 	});
 	const [selectedProfile, setSelectedProfile] = useState("default");
+	const [newChatProfileDraft, setNewChatProfileDraft] = useState("default");
 	const [selectedCWD, setSelectedCWD] = useState("");
 	const [cwdQuery, setCwdQuery] = useState("");
 	const [cwdSuggestions, setCwdSuggestions] = useState<CWDHint[]>([]);
-	const [cwdPickerOpen, setCwdPickerOpen] = useState(false);
 	const [cwdSuggestionsOpen, setCwdSuggestionsOpen] = useState(false);
 	const [cwdSuggestionIndex, setCwdSuggestionIndex] = useState(-1);
 	const [draft, setDraft] = useState("");
 	const [sidebarLoading, setSidebarLoading] = useState(true);
+	const [sidebarHasMore, setSidebarHasMore] = useState(false);
+	const [loadedConversationCount, setLoadedConversationCount] = useState(
+		SIDEBAR_PAGE_SIZE,
+	);
+	const [loadingMoreConversations, setLoadingMoreConversations] =
+		useState(false);
 	const [conversationLoading, setConversationLoading] = useState(false);
 	const [conversationError, setConversationError] = useState<string | null>(
 		null,
@@ -246,6 +254,7 @@ const ChatPage: React.FC = () => {
 	);
 	const [sidebarWidth, setSidebarWidth] = useState(readStoredSidebarWidth);
 	const [isResizingSidebar, setIsResizingSidebar] = useState(false);
+	const [newChatDialogOpen, setNewChatDialogOpen] = useState(false);
 	const [statusTick, setStatusTick] = useState(0);
 	const transcriptEndRef = useRef<HTMLDivElement | null>(null);
 	const abortControllerRef = useRef<AbortController | null>(null);
@@ -260,19 +269,21 @@ const ChatPage: React.FC = () => {
 		startWidth: number;
 	} | null>(null);
 	const fileInputRef = useRef<HTMLInputElement | null>(null);
-	const cwdPickerRef = useRef<HTMLDivElement | null>(null);
-	const cwdTriggerRef = useRef<HTMLButtonElement | null>(null);
 	const cwdInputRef = useRef<HTMLInputElement | null>(null);
+	const newChatDialogRef = useRef<HTMLDivElement | null>(null);
+	const newChatProfileSelectRef = useRef<HTMLSelectElement | null>(null);
 
-	const refreshConversations = async () => {
+	const refreshConversations = async (limit = loadedConversationCount) => {
 		setSidebarLoading(true);
 		try {
 			const response = await apiService.getConversations({
-				limit: 40,
+				limit,
 				sortBy: "updated",
 				sortOrder: "desc",
 			});
 			setConversations(response.conversations || []);
+			setLoadedConversationCount(limit);
+			setSidebarHasMore(Boolean(response.hasMore));
 		} catch (error) {
 			console.error("Failed to load conversations", error);
 		} finally {
@@ -281,13 +292,14 @@ const ChatPage: React.FC = () => {
 	};
 
 	useEffect(() => {
-		void refreshConversations();
+		void refreshConversations(SIDEBAR_PAGE_SIZE);
 
 		void apiService
 			.getChatSettings()
 			.then((settings) => {
 				setChatSettings(settings);
 				setSelectedProfile(settings.currentProfile || "default");
+				setNewChatProfileDraft(settings.currentProfile || "default");
 				setSelectedCWD(settings.defaultCWD || "");
 				setCwdQuery("");
 			})
@@ -316,6 +328,47 @@ const ChatPage: React.FC = () => {
 
 		cwdSuggestionRequestRef.current += 1;
 	}, [conversationId]);
+
+	useEffect(() => {
+		if (!newChatDialogOpen) {
+			return undefined;
+		}
+
+		const focusInput = window.setTimeout(() => {
+			newChatProfileSelectRef.current?.focus();
+		}, 0);
+
+		const handlePointerDown = (event: MouseEvent) => {
+			if (newChatDialogRef.current?.contains(event.target as Node)) {
+				return;
+			}
+
+			setNewChatProfileDraft(
+				selectedProfile || chatSettings.currentProfile || "default",
+			);
+			setCwdQuery(selectedCWD || chatSettings.defaultCWD || "");
+			setNewChatDialogOpen(false);
+		};
+
+		const handleKeyDown = (event: KeyboardEvent) => {
+			if (event.key === "Escape") {
+				setNewChatProfileDraft(
+					selectedProfile || chatSettings.currentProfile || "default",
+				);
+				setCwdQuery(selectedCWD || chatSettings.defaultCWD || "");
+				setNewChatDialogOpen(false);
+			}
+		};
+
+		window.addEventListener("mousedown", handlePointerDown);
+		window.addEventListener("keydown", handleKeyDown);
+
+		return () => {
+			window.clearTimeout(focusInput);
+			window.removeEventListener("mousedown", handlePointerDown);
+			window.removeEventListener("keydown", handleKeyDown);
+		};
+	}, [newChatDialogOpen]);
 
 	useEffect(() => {
 		return () => {
@@ -549,14 +602,28 @@ const ChatPage: React.FC = () => {
 		setConversationError(null);
 		setStreamError(null);
 		setSelectedProfile(chatSettings.currentProfile || "default");
+		setNewChatProfileDraft(chatSettings.currentProfile || "default");
 		setSelectedCWD(chatSettings.defaultCWD || "");
-		setCwdQuery("");
-		setCwdPickerOpen(false);
+		setCwdQuery(chatSettings.defaultCWD || "");
 		cwdInputFocusedRef.current = false;
 		setCwdSuggestions([]);
 		setCwdSuggestionsOpen(false);
 		setCwdSuggestionIndex(-1);
 		startTransition(() => navigate("/"));
+		setNewChatDialogOpen(true);
+	};
+
+	const handleLoadMoreConversations = async () => {
+		if (sidebarLoading || loadingMoreConversations || !sidebarHasMore) {
+			return;
+		}
+
+		setLoadingMoreConversations(true);
+		try {
+			await refreshConversations(loadedConversationCount + SIDEBAR_PAGE_SIZE);
+		} finally {
+			setLoadingMoreConversations(false);
+		}
 	};
 
 	const requestCwdSuggestions = useMemo(
@@ -599,7 +666,6 @@ const ChatPage: React.FC = () => {
 
 	useEffect(() => {
 		if (conversationId) {
-			setCwdPickerOpen(false);
 			cwdInputFocusedRef.current = false;
 			setCwdSuggestionsOpen(false);
 			setCwdSuggestionIndex(-1);
@@ -616,47 +682,6 @@ const ChatPage: React.FC = () => {
 
 		requestCwdSuggestions(cwdQuery);
 	}, [conversationId, cwdQuery, requestCwdSuggestions]);
-
-	useEffect(() => {
-		if (!cwdPickerOpen) {
-			cwdInputFocusedRef.current = false;
-			setCwdSuggestionsOpen(false);
-			setCwdSuggestionIndex(-1);
-			setCwdQuery("");
-			return;
-		}
-
-		const focusInput = window.setTimeout(() => {
-			cwdInputRef.current?.focus();
-			cwdInputRef.current?.select();
-		}, 0);
-
-		const handlePointerDown = (event: MouseEvent) => {
-			if (cwdPickerRef.current?.contains(event.target as Node)) {
-				return;
-			}
-
-			setCwdPickerOpen(false);
-		};
-
-		const handleKeyDown = (event: KeyboardEvent) => {
-			if (event.key !== "Escape") {
-				return;
-			}
-
-			setCwdPickerOpen(false);
-			cwdTriggerRef.current?.focus();
-		};
-
-		window.addEventListener("mousedown", handlePointerDown);
-		window.addEventListener("keydown", handleKeyDown);
-
-		return () => {
-			window.clearTimeout(focusInput);
-			window.removeEventListener("mousedown", handlePointerDown);
-			window.removeEventListener("keydown", handleKeyDown);
-		};
-	}, [cwdPickerOpen]);
 
 	const handleSelectConversation = (nextConversationId: string) => {
 		if (nextConversationId === conversationId) {
@@ -1059,33 +1084,9 @@ const ChatPage: React.FC = () => {
 	]);
 
 	const applyCwdSuggestion = (path: string) => {
-		setSelectedCWD(path);
 		setCwdQuery(path);
 		setCwdSuggestionsOpen(false);
 		setCwdSuggestionIndex(-1);
-	};
-
-	const openCwdPicker = () => {
-		if (sending || steering || conversationId) {
-			return;
-		}
-
-		setCwdPickerOpen(true);
-		setCwdQuery(selectedCWD || chatSettings.defaultCWD || "");
-	};
-
-	const closeCwdPicker = () => {
-		setCwdPickerOpen(false);
-		setCwdQuery("");
-		setCwdSuggestionsOpen(false);
-		setCwdSuggestionIndex(-1);
-		cwdInputFocusedRef.current = false;
-	};
-
-	const commitCwdSelection = () => {
-		const nextValue = cwdQuery.trim();
-		setSelectedCWD(nextValue);
-		closeCwdPicker();
 	};
 
 	const handleCwdInputChange = (value: string) => {
@@ -1134,7 +1135,9 @@ const ChatPage: React.FC = () => {
 
 		if (event.key === "Enter") {
 			event.preventDefault();
-			commitCwdSelection();
+			setCwdQuery(cwdQuery.trim());
+			setCwdSuggestionsOpen(false);
+			setCwdSuggestionIndex(-1);
 			return;
 		}
 
@@ -1144,9 +1147,6 @@ const ChatPage: React.FC = () => {
 				setCwdSuggestionIndex(-1);
 				return;
 			}
-
-			closeCwdPicker();
-			cwdTriggerRef.current?.focus();
 		}
 	};
 
@@ -1167,6 +1167,14 @@ const ChatPage: React.FC = () => {
 		];
 	}, [chatSettings.profiles, conversationId, currentProfileLabel]);
 
+	const composerContextText = useMemo(() => {
+		const directoryLabel = currentCWDLabel
+			? truncateMiddle(currentCWDLabel, 46)
+			: "Default directory";
+
+		return `${currentProfileLabel} · ${directoryLabel}`;
+	}, [currentCWDLabel, currentProfileLabel]);
+
 	const canSubmit = draft.trim().length > 0 || attachments.length > 0;
 	const hasActiveConversationTarget = Boolean(activeConversationId);
 	const canStopActiveConversation = sending && hasActiveConversationTarget;
@@ -1175,15 +1183,11 @@ const ChatPage: React.FC = () => {
 		hasActiveConversationTarget && steerAvailable;
 	const composerStatus = useMemo(() => {
 		if (!conversation) {
-			return sending ? "live · starting…" : "";
+			return sending ? "starting…" : "";
 		}
 
 		const parts: string[] = [];
 		const contextWindow = formatContextWindow(conversation.usage);
-
-		if (sending) {
-			parts.push("live");
-		}
 
 		if (contextWindow) {
 			parts.push(contextWindow);
@@ -1198,8 +1202,152 @@ const ChatPage: React.FC = () => {
 		return parts.join(" · ");
 	}, [conversation, sending, statusTick]);
 
+	const handleCloseNewChatDialog = () => {
+		setNewChatProfileDraft(
+			selectedProfile || chatSettings.currentProfile || "default",
+		);
+		setCwdQuery(selectedCWD || chatSettings.defaultCWD || "");
+		setCwdSuggestions([]);
+		setCwdSuggestionsOpen(false);
+		setCwdSuggestionIndex(-1);
+		setNewChatDialogOpen(false);
+	};
+
+	const newChatContextEditor = (
+		<div className="new-chat-context-panel" data-testid="new-chat-context-panel">
+			<div className="new-chat-dialog-grid">
+				<label className="new-chat-field">
+					<span className="composer-profile-label">Profile</span>
+				<select
+					aria-label="Profile"
+					className="new-chat-field-control"
+					data-testid="new-chat-profile-select"
+					onChange={(event) => setNewChatProfileDraft(event.target.value)}
+					ref={newChatProfileSelectRef}
+					value={newChatProfileDraft}
+					>
+						{availableProfiles.map((profile) => (
+							<option key={profile.name} value={profile.name}>
+								{profile.name}
+							</option>
+						))}
+					</select>
+				</label>
+
+				<label className="new-chat-field new-chat-field-wide">
+					<span className="composer-profile-label">Directory</span>
+					<input
+						aria-autocomplete="list"
+						aria-expanded={cwdSuggestionsOpen && cwdSuggestions.length > 0}
+						aria-label="Working directory"
+						autoCapitalize="off"
+						autoComplete="off"
+						autoCorrect="off"
+						className="new-chat-field-control new-chat-field-control-mono"
+						data-testid="cwd-input"
+						onBlur={() => {
+							cwdInputFocusedRef.current = false;
+							window.setTimeout(() => {
+								setCwdSuggestionsOpen(false);
+								setCwdSuggestionIndex(-1);
+							}, 120);
+						}}
+						onChange={(event) => handleCwdInputChange(event.target.value)}
+						onFocus={() => {
+							cwdInputFocusedRef.current = true;
+							setCwdSuggestionsOpen(
+								cwdQuery.trim().length > 0 && cwdSuggestions.length > 0,
+							);
+						}}
+						onKeyDown={handleCwdInputKeyDown}
+						placeholder={chatSettings.defaultCWD || "/path/to/project"}
+						ref={cwdInputRef}
+						spellCheck={false}
+						type="text"
+						value={cwdQuery}
+					/>
+					<p className="new-chat-field-hint">
+						Type a full path or a nearby project name.
+					</p>
+
+					{cwdSuggestionsOpen && cwdSuggestions.length > 0 ? (
+						<div
+							className="composer-cwd-suggestions composer-cwd-suggestions-inline"
+							data-testid="cwd-suggestions"
+						>
+							{cwdSuggestions.map((suggestion, index) => (
+								<button
+									className={cn(
+										"composer-cwd-suggestion",
+										index === cwdSuggestionIndex && "is-active",
+									)}
+									data-testid={`cwd-suggestion-${index}`}
+									key={suggestion.path}
+									onMouseDown={(event) => {
+										event.preventDefault();
+										applyCwdSuggestion(suggestion.path);
+									}}
+									type="button"
+								>
+									<span className="composer-cwd-suggestion-path">
+										{suggestion.path}
+									</span>
+								</button>
+							))}
+						</div>
+					) : null}
+				</label>
+			</div>
+		</div>
+	);
+
+	const handleCommitNewChatContext = () => {
+		setSelectedProfile(newChatProfileDraft || "default");
+		setSelectedCWD(cwdQuery.trim());
+		setCwdSuggestions([]);
+		setCwdSuggestionsOpen(false);
+		setCwdSuggestionIndex(-1);
+		setNewChatDialogOpen(false);
+	};
+
 	return (
 		<div className="h-[100dvh] bg-transparent">
+			{newChatDialogOpen ? (
+				<div className="new-chat-dialog-backdrop">
+					<div
+						aria-label="New chat settings"
+						className="new-chat-dialog surface-panel"
+						data-testid="new-chat-dialog"
+						ref={newChatDialogRef}
+						role="dialog"
+					>
+						<div className="new-chat-dialog-header">
+							<p className="eyebrow-label text-kodelet-mid-gray">New chat</p>
+							<h2 className="new-chat-dialog-title">Profile & directory</h2>
+						</div>
+
+						{newChatContextEditor}
+
+						<div className="new-chat-dialog-actions">
+							<button
+								className="composer-capsule"
+								onClick={handleCloseNewChatDialog}
+								type="button"
+							>
+								Cancel
+							</button>
+							<button
+								className="composer-capsule composer-capsule-accent"
+								onClick={handleCommitNewChatContext}
+								type="button"
+							>
+								Use these settings
+							</button>
+						</div>
+					</div>
+				</div>
+			) : null}
+
 			{sidebarVisible ? (
 				<button
 					aria-label="Hide sidebar overlay"
@@ -1220,18 +1368,21 @@ const ChatPage: React.FC = () => {
 							{ "--sidebar-width": `${sidebarWidth}px` } as React.CSSProperties
 						}
 					>
-						<ChatSidebar
-							activeConversationId={conversationId}
-							conversations={conversations}
-							disabled={!canStartNewChat}
-							loading={sidebarLoading}
-							runningConversationId={sending ? activeConversationId : null}
-							onDeleteConversation={handleDeleteConversation}
-							onForkConversation={handleForkConversation}
-							onHide={handleSidebarToggle}
-							onNewChat={handleNewChat}
-							onSelectConversation={handleSelectConversation}
-						/>
+							<ChatSidebar
+								activeConversationId={conversationId}
+								conversations={conversations}
+								disabled={!canStartNewChat}
+								hasMore={sidebarHasMore}
+								loading={sidebarLoading}
+								loadingMore={loadingMoreConversations}
+								runningConversationId={sending ? activeConversationId : null}
+								onDeleteConversation={handleDeleteConversation}
+								onForkConversation={handleForkConversation}
+								onHide={handleSidebarToggle}
+								onLoadMore={() => void handleLoadMoreConversations()}
+								onNewChat={handleNewChat}
+								onSelectConversation={handleSelectConversation}
+							/>
 
 						<div
 							aria-label="Resize sidebar"
@@ -1345,11 +1496,11 @@ const ChatPage: React.FC = () => {
 								</div>
 							) : null}
 
-								<div
-									className={cn(
-										"surface-panel w-full rounded-[1.45rem] p-2",
-										dragActive && "border-kodelet-blue/35 bg-kodelet-blue/5",
-									)}
+							<div
+								className={cn(
+									"surface-panel w-full rounded-[1.45rem] p-2",
+									dragActive && "border-kodelet-blue/35 bg-kodelet-blue/5",
+								)}
 								onDragLeave={handleDragLeave}
 								onDragOver={handleDragOver}
 								onDrop={handleDrop}
@@ -1407,8 +1558,8 @@ const ChatPage: React.FC = () => {
 									value={draft}
 								/>
 
-									<div className="border-t border-black/8 px-2.5 pt-2">
-										<div className="composer-toolbar-row">
+								<div className="border-t border-black/8 px-2.5 pt-2">
+									<div className="composer-footer-row">
 										<button
 											aria-label="Add image"
 											className="composer-icon-button"
@@ -1447,210 +1598,45 @@ const ChatPage: React.FC = () => {
 											</svg>
 										</button>
 
-											<div className="composer-context-cluster">
-												<label
-													className="composer-profile-picker"
-													data-testid="profile-picker"
-												>
-												<span className="composer-profile-copy">
-													<span className="composer-profile-label">
-														Profile
-												</span>
-												<span className="composer-profile-value">
-													{currentProfileLabel}
-												</span>
-											</span>
-											<select
-												aria-label="Profile"
-												className="composer-profile-select"
-												disabled={Boolean(conversationId) || sending || steering}
-												onChange={(event) =>
-													setSelectedProfile(event.target.value)
-												}
-												value={currentProfileLabel}
-											>
-												{availableProfiles.map((profile) => (
-													<option key={profile.name} value={profile.name}>
-														{profile.name}
-													</option>
-												))}
-											</select>
-											<span
-												aria-hidden="true"
-												className="composer-profile-chevron"
-											>
-												<svg
-													className="h-3.5 w-3.5"
-													fill="none"
-													viewBox="0 0 24 24"
-													xmlns="http://www.w3.org/2000/svg"
-												>
-													<path
-														d="m6 9 6 6 6-6"
-														stroke="currentColor"
-														strokeLinecap="round"
-														strokeLinejoin="round"
-														strokeWidth="1.8"
-													/>
-														</svg>
-													</span>
-												</label>
-
+										<div className="composer-context-cluster">
+											{conversationId ? (
 												<div
-													className="composer-cwd-shell"
-													data-testid="cwd-picker"
-													ref={cwdPickerRef}
+													className="composer-inline-context is-static"
+													data-testid="composer-inline-context"
 												>
-											<button
-												aria-expanded={cwdPickerOpen}
-												aria-haspopup="dialog"
-												className="composer-profile-picker composer-cwd-trigger"
-												data-testid="cwd-trigger"
-												disabled={Boolean(conversationId) || sending || steering}
-												onClick={openCwdPicker}
-												ref={cwdTriggerRef}
-												type="button"
-											>
-												<span className="composer-profile-copy">
-													<span className="composer-profile-label">
-														Directory
-													</span>
 													<span
-														className="composer-profile-value"
-														title={currentCWDLabel}
+														className="composer-inline-context-value"
+														title={composerContextText}
 													>
-														{currentCWDLabel || "Choose directory"}
+														{composerContextText}
 													</span>
-												</span>
-												<span
-													aria-hidden="true"
-													className="composer-profile-chevron"
-												>
-													<svg
-														className="h-3.5 w-3.5"
-														fill="none"
-														viewBox="0 0 24 24"
-														xmlns="http://www.w3.org/2000/svg"
-													>
-														<path
-															d="m6 9 6 6 6-6"
-															stroke="currentColor"
-															strokeLinecap="round"
-															strokeLinejoin="round"
-															strokeWidth="1.8"
-														/>
-													</svg>
-												</span>
-											</button>
-
-											{!conversationId && cwdPickerOpen ? (
-													<div
-														aria-label="Directory picker"
-														className="composer-cwd-popover"
-														data-testid="cwd-popover"
-														role="dialog"
-													>
-														<div className="composer-cwd-popover-header">
-															<p className="composer-profile-label">Directory</p>
-															<p className="composer-cwd-helper">
-																Type a full path or a nearby project name.
-															</p>
-														</div>
-														<input
-															aria-autocomplete="list"
-															aria-expanded={cwdSuggestionsOpen && cwdSuggestions.length > 0}
-															aria-label="Working directory"
-															autoCapitalize="off"
-															autoComplete="off"
-															autoCorrect="off"
-															className="composer-cwd-input composer-cwd-popover-input"
-															data-testid="cwd-input"
-															disabled={sending || steering}
-															onBlur={() => {
-																cwdInputFocusedRef.current = false;
-																window.setTimeout(() => {
-																	setCwdSuggestionsOpen(false);
-																	setCwdSuggestionIndex(-1);
-																}, 120);
-															}}
-															onChange={(event) =>
-																handleCwdInputChange(event.target.value)
-															}
-															onFocus={() => {
-																cwdInputFocusedRef.current = true;
-																setCwdSuggestionsOpen(
-																	cwdQuery.trim().length > 0 && cwdSuggestions.length > 0,
-																);
-															}}
-															onKeyDown={handleCwdInputKeyDown}
-															placeholder={
-																chatSettings.defaultCWD || "/path/to/project"
-															}
-															ref={cwdInputRef}
-															spellCheck={false}
-															type="text"
-															value={cwdQuery}
-														/>
-
-														{cwdSuggestionsOpen && cwdSuggestions.length > 0 ? (
-															<div
-																className="composer-cwd-suggestions composer-cwd-suggestions-inline"
-																data-testid="cwd-suggestions"
-															>
-																{cwdSuggestions.map((suggestion, index) => (
-																	<button
-																		className={cn(
-																			"composer-cwd-suggestion",
-																			index === cwdSuggestionIndex && "is-active",
-																		)}
-																		data-testid={`cwd-suggestion-${index}`}
-																		key={suggestion.path}
-																		onMouseDown={(event) => {
-																			event.preventDefault();
-																			applyCwdSuggestion(suggestion.path);
-																		}}
-																		type="button"
-																	>
-																		<span className="composer-cwd-suggestion-path">
-																			{suggestion.path}
-																		</span>
-																	</button>
-																))}
-															</div>
-														) : null}
-
-														<div className="composer-cwd-popover-actions">
-															<button
-																className="composer-capsule"
-																onClick={closeCwdPicker}
-																type="button"
-															>
-																Cancel
-															</button>
-															<button
-																className="composer-capsule composer-capsule-accent"
-																onClick={commitCwdSelection}
-																type="button"
-															>
-																Use directory
-															</button>
-														</div>
-														</div>
-											) : null}
 												</div>
-											</div>
-										</div>
+											) : (
+												<button
+													className="composer-inline-context"
+													disabled={sending || steering}
+													onClick={() => {
+														setNewChatProfileDraft(currentProfileLabel);
+														setCwdQuery(selectedCWD || chatSettings.defaultCWD || "");
+														setNewChatDialogOpen(true);
+													}}
+													type="button"
+												>
+													<span
+														className="composer-inline-context-value"
+														title={composerContextText}
+													>
+														{composerContextText}
+													</span>
+												</button>
+											)}
 
-										<div className="composer-status-row">
-											<div className="min-w-0 flex-1">
-												{composerStatus ? (
-													<p className="eyebrow-label px-0.5 text-kodelet-mid-gray">
-													{composerStatus}
-												</p>
+											{composerStatus ? (
+												<p className="composer-status-inline">{composerStatus}</p>
 											) : null}
 										</div>
 
-											<div className="composer-status-actions">
+										<div className="composer-status-actions">
 											{sending ? (
 												<button
 													className="composer-capsule"

@@ -7,9 +7,12 @@ interface ChatSidebarProps {
 	activeConversationId: string | null;
 	runningConversationId?: string | null;
 	loading: boolean;
+	hasMore?: boolean;
+	loadingMore?: boolean;
 	disabled?: boolean;
 	onHide?: () => void;
 	onNewChat: () => void;
+	onLoadMore?: () => void;
 	onSelectConversation: (conversationId: string) => void;
 	onForkConversation: (conversationId: string) => void;
 	onDeleteConversation: (conversationId: string) => void;
@@ -24,14 +27,75 @@ const previewConversation = (conversation: Conversation): string => {
 	);
 };
 
+const getConversationTime = (conversation: Conversation): number => {
+	const timestamp =
+		conversation.updatedAt ??
+		conversation.updated_at ??
+		conversation.createdAt ??
+		conversation.created_at;
+
+	return timestamp ? new Date(timestamp).getTime() : 0;
+};
+
+const formatCwdGroupLabel = (cwd?: string): string => {
+	const normalized = cwd?.trim();
+	if (!normalized) {
+		return "No directory";
+	}
+
+	const segments = normalized.split(/[\\/]+/).filter(Boolean);
+	if (segments.length <= 2) {
+		return normalized;
+	}
+
+	return `…/${segments.slice(-2).join("/")}`;
+};
+
+const groupConversationsByCwd = (conversations: Conversation[]) => {
+	const groups = new Map<
+		string,
+		{
+			key: string;
+			cwd?: string;
+			label: string;
+			conversations: Conversation[];
+		}
+	>();
+
+	conversations.forEach((conversation) => {
+		const normalizedCwd = conversation.cwd?.trim();
+		const key = normalizedCwd || "__no_cwd__";
+
+		if (!groups.has(key)) {
+			groups.set(key, {
+				key,
+				cwd: normalizedCwd,
+				label: formatCwdGroupLabel(normalizedCwd),
+				conversations: [],
+			});
+		}
+
+		groups.get(key)?.conversations.push(conversation);
+	});
+
+	return Array.from(groups.values()).sort((left, right) => {
+		const leftTime = getConversationTime(left.conversations[0]);
+		const rightTime = getConversationTime(right.conversations[0]);
+		return rightTime - leftTime;
+	});
+};
+
 const ChatSidebar: React.FC<ChatSidebarProps> = ({
 	conversations,
 	activeConversationId,
 	runningConversationId = null,
 	loading,
+	hasMore = false,
+	loadingMore = false,
 	disabled = false,
 	onHide,
 	onNewChat,
+	onLoadMore,
 	onSelectConversation,
 	onForkConversation,
 	onDeleteConversation,
@@ -67,6 +131,12 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 		};
 	}, [openMenuConversationId]);
 
+	const groupedConversations = React.useMemo(
+		() => groupConversationsByCwd(conversations),
+		[conversations],
+	);
+	const showLoadingState = loading && conversations.length === 0;
+
 	return (
 		<aside className="relative overflow-visible border-b border-black/8 bg-kodelet-light-gray px-6 py-6 lg:flex lg:h-screen lg:flex-col lg:border-b-0 lg:border-r">
 			{onHide ? (
@@ -99,6 +169,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 			<div className="min-h-0 flex-1 pt-8 lg:pt-2">
 				<button
 					className="sidebar-action-link"
+					data-testid="sidebar-new-chat-button"
 					disabled={disabled}
 					onClick={onNewChat}
 					type="button"
@@ -109,99 +180,130 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 					<span className="sidebar-action-label">New chat</span>
 				</button>
 
-				<div className="sidebar-section-title">Recents</div>
+				<div className="sidebar-section-title">Recent chats</div>
 
 				<div className="conversation-list max-h-[calc(100vh-13.5rem)] overflow-y-auto pr-1">
-					{conversations.length === 0 && !loading ? (
+					{conversations.length === 0 && !showLoadingState ? (
 						<div className="px-2 py-2 text-sm text-kodelet-dark/65">
 							No saved conversations yet.
 						</div>
 					) : null}
 
-					{loading ? (
+					{showLoadingState ? (
 						<div className="px-2 py-2 text-sm text-kodelet-dark/65">
 							Loading…
 						</div>
 					) : null}
 
-					{conversations.map((conversation) => {
-						const isActive = conversation.id === activeConversationId;
-						const isMenuOpen = conversation.id === openMenuConversationId;
-						const isDeleteDisabled = conversation.id === runningConversationId;
-						const preview = previewConversation(conversation);
-
-						return (
-							<div
-								key={conversation.id}
-								className={cn(
-									"conversation-link-row",
-									isActive && "active",
-									isMenuOpen && "menu-open",
-								)}
-								ref={isMenuOpen ? menuRef : undefined}
-							>
-								<button
-									className={cn("conversation-link", isActive && "active")}
-									disabled={disabled}
-									onClick={() => {
-										setOpenMenuConversationId(null);
-										onSelectConversation(conversation.id);
-									}}
-									type="button"
+					{groupedConversations.map((group) => (
+						<section className="conversation-group" key={group.key}>
+							<div className="conversation-group-header">
+								<span
+									className="conversation-group-title"
+									title={group.cwd || group.label}
 								>
-									<span className="conversation-link-title">
-										{truncateText(preview, 80)}
-									</span>
-								</button>
-
-								<div className="conversation-actions">
-									<button
-										aria-expanded={isMenuOpen}
-										aria-haspopup="menu"
-										aria-label={`More actions for ${preview}`}
-										className="conversation-link-more-button"
-										disabled={disabled}
-										onClick={() => {
-											setOpenMenuConversationId((currentId) =>
-												currentId === conversation.id ? null : conversation.id,
-											);
-										}}
-										type="button"
-									>
-										<span className="conversation-link-more">•••</span>
-									</button>
-
-									{isMenuOpen ? (
-										<div className="conversation-action-menu" role="menu">
-											<button
-												className="conversation-action-menu-item"
-												onClick={() => {
-													setOpenMenuConversationId(null);
-													onForkConversation(conversation.id);
-												}}
-												role="menuitem"
-												type="button"
-											>
-												Copy
-											</button>
-											<button
-												className="conversation-action-menu-item danger"
-												disabled={isDeleteDisabled}
-												onClick={() => {
-													setOpenMenuConversationId(null);
-													onDeleteConversation(conversation.id);
-												}}
-												role="menuitem"
-												type="button"
-											>
-												Delete
-											</button>
-										</div>
-									) : null}
-								</div>
+									{group.label}
+								</span>
+								<span className="conversation-group-count">
+									{group.conversations.length}
+								</span>
 							</div>
-						);
-					})}
+
+							<div className="conversation-group-list">
+								{group.conversations.map((conversation) => {
+									const isActive = conversation.id === activeConversationId;
+									const isMenuOpen =
+										conversation.id === openMenuConversationId;
+									const isDeleteDisabled =
+										conversation.id === runningConversationId;
+									const preview = previewConversation(conversation);
+
+									return (
+										<div
+											key={conversation.id}
+											className={cn(
+												"conversation-link-row",
+												isActive && "active",
+												isMenuOpen && "menu-open",
+											)}
+											ref={isMenuOpen ? menuRef : undefined}
+										>
+											<button
+												className={cn("conversation-link", isActive && "active")}
+												disabled={disabled}
+												onClick={() => {
+													setOpenMenuConversationId(null);
+													onSelectConversation(conversation.id);
+												}}
+												type="button"
+											>
+												<span className="conversation-link-title">
+													{truncateText(preview, 80)}
+												</span>
+											</button>
+
+											<div className="conversation-actions">
+												<button
+													aria-expanded={isMenuOpen}
+													aria-haspopup="menu"
+													aria-label={`More actions for ${preview}`}
+													className="conversation-link-more-button"
+													disabled={disabled}
+													onClick={() => {
+														setOpenMenuConversationId((currentId) =>
+															currentId === conversation.id ? null : conversation.id,
+														);
+													}}
+													type="button"
+												>
+													<span className="conversation-link-more">•••</span>
+												</button>
+
+												{isMenuOpen ? (
+													<div className="conversation-action-menu" role="menu">
+														<button
+															className="conversation-action-menu-item"
+															onClick={() => {
+																setOpenMenuConversationId(null);
+																onForkConversation(conversation.id);
+															}}
+															role="menuitem"
+															type="button"
+														>
+															Copy
+														</button>
+														<button
+															className="conversation-action-menu-item danger"
+															disabled={isDeleteDisabled}
+															onClick={() => {
+																setOpenMenuConversationId(null);
+																onDeleteConversation(conversation.id);
+															}}
+															role="menuitem"
+															type="button"
+														>
+															Delete
+														</button>
+													</div>
+												) : null}
+											</div>
+										</div>
+									);
+								})}
+							</div>
+						</section>
+					))}
+
+					{hasMore ? (
+						<button
+							className="conversation-list-more"
+							disabled={disabled || loadingMore}
+							onClick={onLoadMore}
+							type="button"
+						>
+							{loadingMore ? "Loading…" : "Show 10 more"}
+						</button>
+					) : null}
 				</div>
 			</div>
 

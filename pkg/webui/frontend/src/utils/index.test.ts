@@ -69,20 +69,20 @@ describe('formatCompactRelativeTime', () => {
     expect(formatCompactRelativeTime('')).toBe('—');
   });
 
-  it('returns now for recent timestamps', () => {
+  it('returns intuitive text for recent timestamps', () => {
     vi.setSystemTime(new Date('2023-01-02T12:00:30Z'));
-    expect(formatCompactRelativeTime('2023-01-02T12:00:00Z')).toBe('now');
+    expect(formatCompactRelativeTime('2023-01-02T12:00:00Z')).toBe('just now');
   });
 
-  it('returns short minute and hour labels', () => {
+  it('returns short minute and hour labels with suffixes', () => {
     vi.setSystemTime(new Date('2023-01-02T12:35:00Z'));
-    expect(formatCompactRelativeTime('2023-01-02T12:32:00Z')).toBe('3m');
-    expect(formatCompactRelativeTime('2023-01-02T10:00:00Z')).toBe('2h');
+    expect(formatCompactRelativeTime('2023-01-02T12:32:00Z')).toBe('3m ago');
+    expect(formatCompactRelativeTime('2023-01-02T10:00:00Z')).toBe('2h ago');
   });
 
   it('returns short day labels and compact dates for older timestamps', () => {
     vi.setSystemTime(new Date('2023-01-10T12:00:00Z'));
-    expect(formatCompactRelativeTime('2023-01-08T12:00:00Z')).toBe('2d');
+    expect(formatCompactRelativeTime('2023-01-08T12:00:00Z')).toBe('2d ago');
     expect(formatCompactRelativeTime('2022-12-20T12:00:00Z')).toBe('Dec 20');
   });
 });
