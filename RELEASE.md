@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.3.27-beta (2026-04-04)
+
+Added Web UI/server auto-compaction controls via `kodelet serve --compact-ratio` and `--disable-auto-compact`, and refreshed the chat sidebar to group recent conversations by working directory with expandable sections.
+Fixed OpenAI Responses/Codex conversation replay so persisted assistant history is rebuilt correctly during resume/compaction, improving reliability for stored responses threads.
+Simplified OpenAI config/docs around `openai.api_mode`, removed the legacy `patch_only` tool-mode alias, and dropped legacy Anthropic credential-file migration handling.
+
 ## 0.3.24-beta (2026-04-03)
 
 Added native OpenAI Responses `web_search` support, enabled by default for supported OpenAI/Codex setups, with new config/CLI controls and renderer support across persisted conversations, CLI output, and the Web UI.
