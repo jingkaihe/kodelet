@@ -68,7 +68,7 @@ const SIDEBAR_WIDTH_STORAGE_KEY = "kodelet.chat.sidebar.width";
 const SIDEBAR_VISIBLE_STORAGE_KEY = "kodelet.chat.sidebar.visible";
 const MAX_IMAGE_ATTACHMENTS = 10;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-const SIDEBAR_PAGE_SIZE = 10;
+const SIDEBAR_CONVERSATION_LIMIT = 100;
 const SUPPORTED_IMAGE_TYPES = new Set([
 	"image/png",
 	"image/jpeg",
@@ -233,12 +233,6 @@ const ChatPage: React.FC = () => {
 	const [cwdSuggestionIndex, setCwdSuggestionIndex] = useState(-1);
 	const [draft, setDraft] = useState("");
 	const [sidebarLoading, setSidebarLoading] = useState(true);
-	const [sidebarHasMore, setSidebarHasMore] = useState(false);
-	const [loadedConversationCount, setLoadedConversationCount] = useState(
-		SIDEBAR_PAGE_SIZE,
-	);
-	const [loadingMoreConversations, setLoadingMoreConversations] =
-		useState(false);
 	const [conversationLoading, setConversationLoading] = useState(false);
 	const [conversationError, setConversationError] = useState<string | null>(
 		null,
@@ -273,17 +267,15 @@ const ChatPage: React.FC = () => {
 	const newChatDialogRef = useRef<HTMLDivElement | null>(null);
 	const newChatProfileSelectRef = useRef<HTMLSelectElement | null>(null);
 
-	const refreshConversations = async (limit = loadedConversationCount) => {
+	const refreshConversations = async () => {
 		setSidebarLoading(true);
 		try {
 			const response = await apiService.getConversations({
-				limit,
+				limit: SIDEBAR_CONVERSATION_LIMIT,
 				sortBy: "updated",
 				sortOrder: "desc",
 			});
 			setConversations(response.conversations || []);
-			setLoadedConversationCount(limit);
-			setSidebarHasMore(Boolean(response.hasMore));
 		} catch (error) {
 			console.error("Failed to load conversations", error);
 		} finally {
@@ -292,7 +284,7 @@ const ChatPage: React.FC = () => {
 	};
 
 	useEffect(() => {
-		void refreshConversations(SIDEBAR_PAGE_SIZE);
+		void refreshConversations();
 
 		void apiService
 			.getChatSettings()
@@ -611,19 +603,6 @@ const ChatPage: React.FC = () => {
 		setCwdSuggestionIndex(-1);
 		startTransition(() => navigate("/"));
 		setNewChatDialogOpen(true);
-	};
-
-	const handleLoadMoreConversations = async () => {
-		if (sidebarLoading || loadingMoreConversations || !sidebarHasMore) {
-			return;
-		}
-
-		setLoadingMoreConversations(true);
-		try {
-			await refreshConversations(loadedConversationCount + SIDEBAR_PAGE_SIZE);
-		} finally {
-			setLoadingMoreConversations(false);
-		}
 	};
 
 	const requestCwdSuggestions = useMemo(
@@ -1368,21 +1347,18 @@ const ChatPage: React.FC = () => {
 							{ "--sidebar-width": `${sidebarWidth}px` } as React.CSSProperties
 						}
 					>
-							<ChatSidebar
-								activeConversationId={conversationId}
-								conversations={conversations}
-								disabled={!canStartNewChat}
-								hasMore={sidebarHasMore}
-								loading={sidebarLoading}
-								loadingMore={loadingMoreConversations}
-								runningConversationId={sending ? activeConversationId : null}
-								onDeleteConversation={handleDeleteConversation}
-								onForkConversation={handleForkConversation}
-								onHide={handleSidebarToggle}
-								onLoadMore={() => void handleLoadMoreConversations()}
-								onNewChat={handleNewChat}
-								onSelectConversation={handleSelectConversation}
-							/>
+								<ChatSidebar
+									activeConversationId={conversationId}
+									conversations={conversations}
+									disabled={!canStartNewChat}
+									loading={sidebarLoading}
+									runningConversationId={sending ? activeConversationId : null}
+									onDeleteConversation={handleDeleteConversation}
+									onForkConversation={handleForkConversation}
+									onHide={handleSidebarToggle}
+									onNewChat={handleNewChat}
+									onSelectConversation={handleSelectConversation}
+								/>
 
 						<div
 							aria-label="Resize sidebar"

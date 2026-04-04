@@ -667,6 +667,7 @@ describe("ChatPage", () => {
 		expect(screen.queryByTestId("chat-sidebar-shell")).not.toBeInTheDocument();
 
 		fireEvent.click(screen.getByTestId("sidebar-attached-toggle"));
+		fireEvent.click(screen.getByRole("button", { name: /No directory 1/i }));
 		fireEvent.click(
 			screen.getAllByRole("button", { name: /Other conversation/i })[0],
 		);
@@ -1000,22 +1001,8 @@ describe("ChatPage", () => {
 		expect(screen.getByTestId("new-chat-dialog")).toBeInTheDocument();
 	});
 
-	it("groups recent chats by cwd and loads 10 more on demand", async () => {
+	it("groups recent chats by cwd and lets directories collapse independently", async () => {
 		mockGetConversations
-			.mockResolvedValueOnce({
-				conversations: Array.from({ length: 10 }, (_, index) => ({
-					id: `conv-${index + 1}`,
-					createdAt: `2024-01-${String(index + 1).padStart(2, "0")}T00:00:00Z`,
-					updatedAt: `2024-01-${String(index + 1).padStart(2, "0")}T00:00:00Z`,
-					messageCount: 1,
-					summary: `Conversation ${index + 1}`,
-					cwd: index < 6 ? "/workspace/a" : "/workspace/b",
-				})),
-				hasMore: true,
-				total: 12,
-				limit: 10,
-				offset: 0,
-			})
 			.mockResolvedValueOnce({
 				conversations: Array.from({ length: 12 }, (_, index) => ({
 					id: `conv-${index + 1}`,
@@ -1032,7 +1019,7 @@ describe("ChatPage", () => {
 				})),
 				hasMore: false,
 				total: 12,
-				limit: 20,
+				limit: 100,
 				offset: 0,
 			});
 
@@ -1041,19 +1028,23 @@ describe("ChatPage", () => {
 		await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
 		expect(screen.getByText("/workspace/a")).toBeInTheDocument();
 		expect(screen.getByText("/workspace/b")).toBeInTheDocument();
-		expect(screen.getByRole("button", { name: "Show 10 more" })).toBeInTheDocument();
+		expect(screen.getByText("/workspace/c")).toBeInTheDocument();
 
-		fireEvent.click(screen.getByRole("button", { name: "Show 10 more" }));
+		fireEvent.click(screen.getByRole("button", { name: /\/workspace\/a 6/i }));
+		await waitFor(() => expect(screen.getByText("Conversation 1")).toBeInTheDocument());
+
+		fireEvent.click(screen.getByRole("button", { name: /\/workspace\/b 4/i }));
+		await waitFor(() => expect(screen.getByText("Conversation 7")).toBeInTheDocument());
+
+		fireEvent.click(screen.getByRole("button", { name: /\/workspace\/b/i }));
 
 		await waitFor(() =>
-			expect(mockGetConversations).toHaveBeenLastCalledWith(
-				expect.objectContaining({ limit: 20 }),
-			),
+			expect(screen.queryByText("Conversation 7")).not.toBeInTheDocument(),
 		);
-		await waitFor(() => expect(screen.getByText("/workspace/c")).toBeInTheDocument());
-		expect(
-			screen.queryByRole("button", { name: "Show 10 more" }),
-		).not.toBeInTheDocument();
+		expect(screen.getByText("Conversation 1")).toBeInTheDocument();
+
+		fireEvent.click(screen.getByRole("button", { name: /\/workspace\/b/i }));
+		await waitFor(() => expect(screen.getByText("Conversation 7")).toBeInTheDocument());
 	});
 
 	it("shows compact new chat context text in the composer", async () => {

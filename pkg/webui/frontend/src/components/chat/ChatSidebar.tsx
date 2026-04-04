@@ -7,12 +7,9 @@ interface ChatSidebarProps {
 	activeConversationId: string | null;
 	runningConversationId?: string | null;
 	loading: boolean;
-	hasMore?: boolean;
-	loadingMore?: boolean;
 	disabled?: boolean;
 	onHide?: () => void;
 	onNewChat: () => void;
-	onLoadMore?: () => void;
 	onSelectConversation: (conversationId: string) => void;
 	onForkConversation: (conversationId: string) => void;
 	onDeleteConversation: (conversationId: string) => void;
@@ -90,12 +87,9 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 	activeConversationId,
 	runningConversationId = null,
 	loading,
-	hasMore = false,
-	loadingMore = false,
 	disabled = false,
 	onHide,
 	onNewChat,
-	onLoadMore,
 	onSelectConversation,
 	onForkConversation,
 	onDeleteConversation,
@@ -103,6 +97,9 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 	const [openMenuConversationId, setOpenMenuConversationId] = React.useState<
 		string | null
 	>(null);
+	const [expandedGroups, setExpandedGroups] = React.useState<Record<string, boolean>>(
+		{},
+	);
 	const menuRef = React.useRef<HTMLDivElement | null>(null);
 
 	React.useEffect(() => {
@@ -135,6 +132,22 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 		() => groupConversationsByCwd(conversations),
 		[conversations],
 	);
+
+	React.useEffect(() => {
+		setExpandedGroups((currentState) => {
+			const nextState: Record<string, boolean> = {};
+
+			groupedConversations.forEach((group, index) => {
+				const hasActiveConversation = group.conversations.some(
+					(conversation) => conversation.id === activeConversationId,
+				);
+				nextState[group.key] =
+					currentState[group.key] ?? (hasActiveConversation || index === 0);
+			});
+
+			return nextState;
+		});
+	}, [activeConversationId, groupedConversations]);
 	const showLoadingState = loading && conversations.length === 0;
 
 	return (
@@ -197,7 +210,36 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 
 					{groupedConversations.map((group) => (
 						<section className="conversation-group" key={group.key}>
-							<div className="conversation-group-header">
+							<button
+								aria-expanded={expandedGroups[group.key] !== false}
+								className="conversation-group-header"
+								onClick={() =>
+									setExpandedGroups((currentState) => ({
+										...currentState,
+										[group.key]: currentState[group.key] === false,
+									}))
+								}
+								type="button"
+							>
+								<span className="conversation-group-chevron" aria-hidden="true">
+									<svg
+										className={cn(
+											"h-3.5 w-3.5",
+											expandedGroups[group.key] !== false && "rotate-90",
+										)}
+										fill="none"
+										viewBox="0 0 24 24"
+										xmlns="http://www.w3.org/2000/svg"
+									>
+										<path
+											d="m9 6 6 6-6 6"
+											stroke="currentColor"
+											strokeLinecap="round"
+											strokeLinejoin="round"
+											strokeWidth="1.8"
+										/>
+									</svg>
+								</span>
 								<span
 									className="conversation-group-title"
 									title={group.cwd || group.label}
@@ -207,10 +249,11 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 								<span className="conversation-group-count">
 									{group.conversations.length}
 								</span>
-							</div>
+							</button>
 
-							<div className="conversation-group-list">
-								{group.conversations.map((conversation) => {
+							{expandedGroups[group.key] !== false ? (
+								<div className="conversation-group-list">
+									{group.conversations.map((conversation) => {
 									const isActive = conversation.id === activeConversationId;
 									const isMenuOpen =
 										conversation.id === openMenuConversationId;
@@ -289,21 +332,11 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 											</div>
 										</div>
 									);
-								})}
-							</div>
+									})}
+								</div>
+							) : null}
 						</section>
 					))}
-
-					{hasMore ? (
-						<button
-							className="conversation-list-more"
-							disabled={disabled || loadingMore}
-							onClick={onLoadMore}
-							type="button"
-						>
-							{loadingMore ? "Loading…" : "Show 10 more"}
-						</button>
-					) : null}
 				</div>
 			</div>
 
