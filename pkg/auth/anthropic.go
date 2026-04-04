@@ -83,7 +83,7 @@ func ValidateAlias(alias string) error {
 	return nil
 }
 
-// anthropicCredentialsFilePath returns the path to the multi-account credentials file.
+// anthropicCredentialsFilePath returns the path to the Anthropic credentials file.
 func anthropicCredentialsFilePath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -92,38 +92,15 @@ func anthropicCredentialsFilePath() (string, error) {
 	return filepath.Join(home, ".kodelet", "anthropic-credentials.json"), nil
 }
 
-// legacyAnthropicCredentialsFilePath returns the path to the legacy single-account credentials file.
-func legacyAnthropicCredentialsFilePath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", errors.Wrap(err, "failed to get user home directory")
-	}
-	return filepath.Join(home, ".kodelet", "anthropic-subscription.json"), nil
-}
-
-// readAnthropicCredentialsFile reads the multi-account credentials file.
+// readAnthropicCredentialsFile reads the Anthropic credentials file.
 // If the file doesn't exist, it returns an empty credentials file.
-// It also handles migration from the legacy single-account file.
 func readAnthropicCredentialsFile() (*AnthropicCredentialsFile, error) {
 	filePath, err := anthropicCredentialsFilePath()
 	if err != nil {
 		return nil, err
 	}
 
-	// Check if the multi-account file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		// Try to migrate from legacy file
-		legacyPath, err := legacyAnthropicCredentialsFilePath()
-		if err != nil {
-			return nil, err
-		}
-
-		if _, err := os.Stat(legacyPath); err == nil {
-			// Legacy file exists, migrate it
-			return migrateFromLegacyCredentials(legacyPath)
-		}
-
-		// No credentials file exists, return empty
 		return &AnthropicCredentialsFile{
 			Accounts: make(map[string]AnthropicCredentials),
 		}, nil
@@ -209,37 +186,6 @@ func writeAnthropicCredentialsFile(credsFile *AnthropicCredentialsFile) error {
 
 	success = true
 	return nil
-}
-
-// migrateFromLegacyCredentials reads the legacy single-account file and converts it to multi-account format.
-func migrateFromLegacyCredentials(legacyPath string) (*AnthropicCredentialsFile, error) {
-	f, err := os.Open(legacyPath)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to open legacy credentials file")
-	}
-	defer f.Close()
-
-	var creds AnthropicCredentials
-	if err := json.NewDecoder(f).Decode(&creds); err != nil {
-		return nil, errors.Wrap(err, "failed to decode legacy credentials file")
-	}
-
-	// Generate alias from email prefix
-	alias := GenerateAliasFromEmail(creds.Email)
-
-	credsFile := &AnthropicCredentialsFile{
-		DefaultAccount: alias,
-		Accounts: map[string]AnthropicCredentials{
-			alias: creds,
-		},
-	}
-
-	// Save the migrated credentials
-	if err := writeAnthropicCredentialsFile(credsFile); err != nil {
-		return nil, errors.Wrap(err, "failed to save migrated credentials")
-	}
-
-	return credsFile, nil
 }
 
 // GenerateAliasFromEmail extracts the prefix (part before @) from an email address to use as an alias.
@@ -557,26 +503,13 @@ func ExchangeAnthropicCode(ctx context.Context, code string, verifier string) (*
 	}, nil
 }
 
-// GetAnthropicCredentialsExists checks if Anthropic credentials file exists in the user's home directory.
-// It checks both the new multi-account file and the legacy single-account file.
+// GetAnthropicCredentialsExists checks if the Anthropic credentials file exists in the user's home directory.
 func GetAnthropicCredentialsExists() (bool, error) {
-	// Check multi-account file first
-	multiPath, err := anthropicCredentialsFilePath()
+	filePath, err := anthropicCredentialsFilePath()
 	if err != nil {
 		return false, err
 	}
-	if _, err := os.Stat(multiPath); err == nil {
-		return true, nil
-	} else if !os.IsNotExist(err) {
-		return false, errors.Wrap(err, "failed to check if anthropic credentials file exists")
-	}
-
-	// Check legacy file
-	legacyPath, err := legacyAnthropicCredentialsFilePath()
-	if err != nil {
-		return false, err
-	}
-	if _, err := os.Stat(legacyPath); err == nil {
+	if _, err := os.Stat(filePath); err == nil {
 		return true, nil
 	} else if !os.IsNotExist(err) {
 		return false, errors.Wrap(err, "failed to check if anthropic credentials file exists")

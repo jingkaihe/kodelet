@@ -19,7 +19,7 @@ var anthropicLogoutCmd = &cobra.Command{
 	Long: `Logout from Anthropic and remove stored credentials.
 
 This command will:
-1. Remove the stored authentication credentials from ~/.kodelet/anthropic-subscription.json
+1. Remove the stored authentication credentials from ~/.kodelet/anthropic-credentials.json
 2. You will need to run 'kodelet anthropic login' again to access subscription-based models
 
 After running this command, you will no longer have access to subscription-based
@@ -46,7 +46,7 @@ func runAnthropicLogout(_ context.Context, noConfirm bool) error {
 		return errors.Wrap(err, "failed to get user home directory")
 	}
 
-	credentialsPath := filepath.Join(home, ".kodelet", "anthropic-subscription.json")
+	credentialsPath := filepath.Join(home, ".kodelet", "anthropic-credentials.json")
 
 	if _, err := os.Stat(credentialsPath); os.IsNotExist(err) {
 		presenter.Info("No Anthropic credentials found. You are already logged out.")

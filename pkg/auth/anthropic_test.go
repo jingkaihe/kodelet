@@ -127,19 +127,6 @@ func TestGetAnthropicCredentialsExists(t *testing.T) {
 		// Clean up for next test
 		require.NoError(t, os.Remove(credsFile))
 	})
-
-	t.Run("legacy credentials exist", func(t *testing.T) {
-		// Create the credentials directory and legacy file
-		credsDir := filepath.Join(tempDir, ".kodelet")
-		require.NoError(t, os.MkdirAll(credsDir, 0o755))
-
-		legacyFile := filepath.Join(credsDir, "anthropic-subscription.json")
-		require.NoError(t, os.WriteFile(legacyFile, []byte("{}"), 0o644))
-
-		exists, err := GetAnthropicCredentialsExists()
-		assert.NoError(t, err)
-		assert.True(t, exists)
-	})
 }
 
 func TestSaveAnthropicCredentials(t *testing.T) {
@@ -913,47 +900,6 @@ func TestRenameAnthropicAccount(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "same")
 	})
-}
-
-func TestMigrateFromLegacyCredentials(t *testing.T) {
-	// Create a temporary directory for testing
-	tempDir := t.TempDir()
-	originalHome := os.Getenv("HOME")
-	defer os.Setenv("HOME", originalHome)
-	os.Setenv("HOME", tempDir)
-
-	// Create legacy credentials file
-	legacyCreds := AnthropicCredentials{
-		Email:        "legacy@example.com",
-		Scope:        "user:inference user:profile",
-		AccessToken:  "legacy_access_token",
-		RefreshToken: "legacy_refresh_token",
-		ExpiresAt:    time.Now().Add(time.Hour).Unix(),
-	}
-
-	credsDir := filepath.Join(tempDir, ".kodelet")
-	require.NoError(t, os.MkdirAll(credsDir, 0o755))
-
-	legacyFile := filepath.Join(credsDir, "anthropic-subscription.json")
-	data, err := json.Marshal(legacyCreds)
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(legacyFile, data, 0o644))
-
-	// Accessing credentials should trigger migration
-	creds, err := GetAnthropicCredentialsByAlias("")
-	require.NoError(t, err)
-	assert.Equal(t, "legacy@example.com", creds.Email)
-	assert.Equal(t, "legacy_access_token", creds.AccessToken)
-
-	// Verify the multi-account file was created
-	multiFile := filepath.Join(credsDir, "anthropic-credentials.json")
-	_, err = os.Stat(multiFile)
-	assert.NoError(t, err)
-
-	// Verify default was set to email prefix
-	defaultAlias, err := GetDefaultAnthropicAccount()
-	require.NoError(t, err)
-	assert.Equal(t, "legacy", defaultAlias)
 }
 
 func TestAnthropicAccessTokenForAlias(t *testing.T) {
