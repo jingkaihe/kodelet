@@ -1224,10 +1224,10 @@ code[class*="language-"] {
 }
 
 .conversation-group-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.65rem;
+  display: grid;
+  grid-template-columns: 1rem minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 0.8rem;
   width: 100%;
   padding: 0 0.6rem;
   border: 0;
@@ -1244,6 +1244,8 @@ code[class*="language-"] {
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
+  width: 1rem;
+  margin-top: 0.12rem;
   color: #8a8477;
 }
 
@@ -1253,19 +1255,21 @@ code[class*="language-"] {
 
 .conversation-group-title {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  grid-column: 2;
   font-family: var(--font-heading);
   font-size: 0.7rem;
   font-weight: 600;
+  line-height: 1.35;
   letter-spacing: 0.04em;
+  word-break: break-all;
   color: #8a8477;
 }
 
 .conversation-group-count {
+  grid-column: 3;
   flex-shrink: 0;
   min-width: 1.45rem;
+  margin-top: 0.06rem;
   border-radius: 9999px;
   background: rgba(232, 230, 220, 0.84);
   padding: 0.12rem 0.45rem;
@@ -1282,25 +1286,48 @@ code[class*="language-"] {
   gap: 0.12rem;
 }
 
+.conversation-group-controls {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.28rem 0 0 2rem;
+}
+
 .conversation-group-more {
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;
   width: fit-content;
-  margin: 0.2rem 0 0 2rem;
+  margin: 0;
   border: 0;
+  border-radius: 0;
   background: transparent;
-  padding: 0.2rem 0.4rem;
+  padding: 0;
   font-family: var(--font-heading);
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  letter-spacing: 0.01em;
   color: #8a8477;
+  white-space: nowrap;
+  transition: color 140ms ease;
+}
+
+.conversation-group-more + .conversation-group-more::before {
+  content: "·";
+  margin-right: 0.5rem;
+  color: rgba(138, 132, 119, 0.72);
 }
 
 .conversation-group-more:hover {
   color: var(--kodelet-dark);
+}
+
+.conversation-group-more:focus-visible {
+  outline: none;
+  color: var(--kodelet-dark);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
 }
 
 .sidebar-action-icon {
@@ -1473,25 +1500,6 @@ code[class*="language-"] {
 
 .conversation-action-menu-item.danger {
   color: #9d3b33;
-}
-
-.sidebar-footer {
-  border-top: 1px solid rgba(20, 20, 19, 0.08);
-  margin-top: 1.15rem;
-  padding-top: 0.95rem;
-  display: grid;
-  gap: 0.35rem;
-}
-
-.sidebar-caption {
-  color: #7a756b;
-  font-size: 0.77rem;
-  line-height: 1.4;
-}
-
-.sidebar-caption code {
-  font-family: var(--font-mono);
-  color: #5f5a50;
 }
 
 .sidebar-collapsed-rail {

@@ -43,12 +43,7 @@ const formatCwdGroupLabel = (cwd?: string): string => {
 		return "No directory";
 	}
 
-	const segments = normalized.split(/[\\/]+/).filter(Boolean);
-	if (segments.length <= 2) {
-		return normalized;
-	}
-
-	return `…/${segments.slice(-2).join("/")}`;
+	return normalized;
 };
 
 const groupConversationsByCwd = (conversations: Conversation[]) => {
@@ -253,12 +248,14 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 												activeIndex + 1,
 											)
 										: DEFAULT_VISIBLE_CONVERSATIONS_PER_GROUP;
-								const visibleCount = Math.min(
-									visibleGroupCounts[group.key] ?? minimumVisibleCount,
-									group.conversations.length,
-								);
-								const remainingCount = group.conversations.length - visibleCount;
-								const visibleConversations = group.conversations.slice(0, visibleCount);
+							const visibleCount = Math.min(
+								visibleGroupCounts[group.key] ?? minimumVisibleCount,
+								group.conversations.length,
+							);
+							const remainingCount = group.conversations.length - visibleCount;
+							const canShowLess = visibleCount > minimumVisibleCount;
+							const canShowMore = remainingCount > 0;
+							const visibleConversations = group.conversations.slice(0, visibleCount);
 
 								return (
 									<>
@@ -386,35 +383,41 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 									);
 									})}
 
-									{remainingCount > 0 ? (
-										<button
-											className="conversation-group-more"
-											onClick={() =>
-												setVisibleGroupCounts((currentState) => ({
-													...currentState,
-													[group.key]: Math.min(
-														group.conversations.length,
-														visibleCount + VISIBLE_CONVERSATIONS_STEP,
-													),
-												}))
-											}
-											type="button"
-										>
-											Show {Math.min(remainingCount, VISIBLE_CONVERSATIONS_STEP)} more
-										</button>
-									) : group.conversations.length > minimumVisibleCount ? (
-										<button
-											className="conversation-group-more"
-											onClick={() =>
-												setVisibleGroupCounts((currentState) => ({
-													...currentState,
-													[group.key]: minimumVisibleCount,
-												}))
-											}
-											type="button"
-										>
-											Show less
-										</button>
+									{canShowLess || canShowMore ? (
+										<div className="conversation-group-controls">
+											{canShowLess ? (
+												<button
+													className="conversation-group-more"
+													onClick={() =>
+														setVisibleGroupCounts((currentState) => ({
+															...currentState,
+															[group.key]: minimumVisibleCount,
+														}))
+													}
+													type="button"
+												>
+													Show less
+												</button>
+											) : null}
+
+											{canShowMore ? (
+												<button
+													className="conversation-group-more"
+													onClick={() =>
+														setVisibleGroupCounts((currentState) => ({
+															...currentState,
+															[group.key]: Math.min(
+																group.conversations.length,
+																visibleCount + VISIBLE_CONVERSATIONS_STEP,
+															),
+														}))
+													}
+													type="button"
+												>
+													Show {Math.min(remainingCount, VISIBLE_CONVERSATIONS_STEP)} more
+												</button>
+											) : null}
+										</div>
 									) : null}
 								</div>
 							) : null}
@@ -426,16 +429,6 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 				</div>
 			</div>
 
-			<div className="sidebar-footer">
-				{activeConversationId ? (
-					<div className="sidebar-caption">
-						ID: <code>{activeConversationId}</code>
-					</div>
-				) : null}
-				<div className="sidebar-caption">
-					Mode: <code>kodelet serve</code>
-				</div>
-			</div>
 		</aside>
 	);
 };
