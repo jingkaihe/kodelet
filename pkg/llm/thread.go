@@ -88,8 +88,6 @@ func ExtractMessages(provider string, rawMessages []byte, metadata map[string]an
 			return openai.ExtractResponsesMessages(rawMessages, toolResults)
 		}
 		return openai.ExtractMessages(rawMessages, toolResults)
-	case "openai-responses":
-		return openai.ExtractResponsesMessages(rawMessages, toolResults)
 	case "google":
 		return google.ExtractMessages(rawMessages, toolResults)
 	default:
@@ -119,12 +117,6 @@ func ExtractConversationEntries(provider string, rawMessages []byte, metadata ma
 			return nil, err
 		}
 		return convertOpenAIStreamableMessages(msgs), nil
-	case "openai-responses":
-		msgs, err := openai.StreamResponsesMessages(rawMessages, toolResults)
-		if err != nil {
-			return nil, err
-		}
-		return convertResponsesStreamableMessages(msgs), nil
 	case "google":
 		msgs, err := google.StreamMessages(rawMessages, toolResults)
 		if err != nil {

@@ -165,9 +165,6 @@ func StreamMessages(rawMessages []byte, toolResults map[string]tooltypes.Structu
 				}
 
 				structuredResult, ok := toolResults[callID]
-				if !ok {
-					structuredResult, ok = toolResults[toolName]
-				}
 				if ok {
 					toolName = structuredResult.ToolName
 					if jsonData, err := structuredResult.MarshalJSON(); err == nil {
@@ -230,15 +227,9 @@ func ExtractMessages(rawMessages []byte, toolResults map[string]tooltypes.Struct
 
 			case part.FunctionResponse != nil:
 				result := ""
-				toolName := part.FunctionResponse.Name
 				callID := extractToolCallID(part.FunctionResponse.Response)
 
-				// Structured results are keyed by tool call ID at execution time.
-				// Keep a tool-name fallback for older persisted records.
 				structuredResult, ok := toolResults[callID]
-				if !ok {
-					structuredResult, ok = toolResults[toolName]
-				}
 				if ok && (structuredResult.Metadata != nil || structuredResult.Error != "") {
 					if jsonData, err := structuredResult.MarshalJSON(); err == nil {
 						result = string(jsonData)

@@ -46,14 +46,6 @@ func NewConversationStreamer(ctx context.Context) (streamer *conversations.Conve
 		return convertOpenAIStreamableMessages(msgs), nil
 	})
 
-	streamer.RegisterMessageParser("openai-responses", func(rawMessages json.RawMessage, _ map[string]any, toolResults map[string]tooltypes.StructuredToolResult) ([]conversations.StreamableMessage, error) {
-		msgs, err := openai.StreamResponsesMessages(rawMessages, toolResults)
-		if err != nil {
-			return nil, err
-		}
-		return convertResponsesStreamableMessages(msgs), nil
-	})
-
 	streamer.RegisterMessageParser("google", func(rawMessages json.RawMessage, _ map[string]any, toolResults map[string]tooltypes.StructuredToolResult) ([]conversations.StreamableMessage, error) {
 		msgs, err := google.StreamMessages(rawMessages, toolResults)
 		if err != nil {

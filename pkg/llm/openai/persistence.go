@@ -178,7 +178,7 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 			})
 		}
 
-		// Handle plain content (legacy format)
+		// Handle plain text content stored directly on the message.
 		if msg.Content != "" && len(msg.MultiContent) == 0 && len(msg.ToolCalls) == 0 {
 			streamable = append(streamable, StreamableMessage{
 				Kind:    "text",
@@ -250,7 +250,7 @@ func ExtractMessages(data []byte, toolResults map[string]tooltypes.StructuredToo
 			})
 		}
 
-		// Handle plain content (legacy format)
+		// Handle plain text content stored directly on the message.
 		if msg.Content != "" && len(msg.MultiContent) == 0 && len(msg.ToolCalls) == 0 {
 			result = append(result, llmtypes.Message{
 				Role:    msg.Role,

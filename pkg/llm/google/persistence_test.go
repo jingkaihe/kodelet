@@ -323,7 +323,7 @@ func TestExtractMessages_UsesStructuredToolResultByCallID(t *testing.T) {
 	assert.NotContains(t, messages[1].Content, "raw-output")
 }
 
-func TestExtractMessages_FallsBackToToolNameWhenCallIDMissing(t *testing.T) {
+func TestExtractMessages_UsesRawFunctionResponseWhenCallIDMissing(t *testing.T) {
 	rawMessages := `[
 		{
 			"role": "user",
@@ -365,8 +365,8 @@ func TestExtractMessages_FallsBackToToolNameWhenCallIDMissing(t *testing.T) {
 	messages, err := ExtractMessages([]byte(rawMessages), toolResults)
 	require.NoError(t, err)
 	require.Len(t, messages, 2)
-	assert.Contains(t, messages[1].Content, "tool-name-fallback-marker")
-	assert.NotContains(t, messages[1].Content, "raw-output-without-call-id")
+	assert.Contains(t, messages[1].Content, "raw-output-without-call-id")
+	assert.NotContains(t, messages[1].Content, "tool-name-fallback-marker")
 }
 
 func TestStreamMessages_PreservesToolCallIDFromFunctionCall(t *testing.T) {

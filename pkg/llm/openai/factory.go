@@ -14,7 +14,7 @@ import (
 
 // NewThread creates a new OpenAI thread based on the configuration.
 // It dispatches between the Chat Completions API and the Responses API
-// based on api_mode with backward-compatible aliases.
+// based on api_mode.
 func NewThread(config llmtypes.Config) (llmtypes.Thread, error) {
 	log := logger.G(context.Background())
 	apiMode := resolveAPIMode(config)
