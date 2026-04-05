@@ -371,6 +371,38 @@ h6 {
   gap: 0.7rem;
 }
 
+.composer-leading-actions {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.composer-editor {
+  width: 100%;
+  min-height: 5.75rem;
+  max-height: 13rem;
+  resize: none;
+  border: 0;
+  background: transparent;
+  padding: 0.7rem 0.7rem 0.85rem;
+  font-family: var(--font-body);
+  font-size: 0.97rem;
+  line-height: 1.65;
+  color: var(--kodelet-dark);
+  outline: none;
+  transition: min-height 180ms ease, max-height 180ms ease;
+}
+
+.composer-editor::placeholder {
+  color: rgba(20, 20, 19, 0.4);
+}
+
+.composer-editor-expanded {
+  min-height: 14rem;
+  max-height: min(50vh, 28rem);
+}
+
 .composer-icon-button {
   display: inline-flex;
   align-items: center;

@@ -243,6 +243,7 @@ const ChatPage: React.FC = () => {
 	const [steerAvailable, setSteerAvailable] = useState(false);
 	const [attachments, setAttachments] = useState<PendingImageAttachment[]>([]);
 	const [dragActive, setDragActive] = useState(false);
+	const [composerExpanded, setComposerExpanded] = useState(false);
 	const [sidebarVisible, setSidebarVisible] = useState(
 		readStoredSidebarVisible,
 	);
@@ -915,7 +916,7 @@ const ChatPage: React.FC = () => {
 	const handleDraftKeyDown = (
 		event: React.KeyboardEvent<HTMLTextAreaElement>,
 	) => {
-		if (event.key === "Enter" && !event.shiftKey) {
+		if (event.key === "Enter" && event.shiftKey) {
 			event.preventDefault();
 			void handleSubmit();
 		}
@@ -1491,7 +1492,7 @@ const ChatPage: React.FC = () => {
 									type="file"
 								/>
 
-								{attachments.length > 0 ? (
+							{attachments.length > 0 ? (
 									<div className="mb-2.5 flex flex-wrap gap-2.5 px-2.5 pt-1.5">
 										{attachments.map((attachment) => (
 											<div
@@ -1514,13 +1515,17 @@ const ChatPage: React.FC = () => {
 											</div>
 										))}
 									</div>
-								) : null}
+							) : null}
 
-								<textarea
-									className="min-h-[68px] w-full resize-none border-0 bg-transparent px-2.5 py-2.5 font-body text-[0.97rem] leading-6 text-kodelet-dark outline-none placeholder:text-kodelet-dark/40"
-									disabled={steering}
-									onChange={(event) => setDraft(event.target.value)}
-									onKeyDown={handleDraftKeyDown}
+							<textarea
+								className={cn(
+									"composer-editor",
+									composerExpanded && "composer-editor-expanded",
+								)}
+								data-testid="composer-textarea"
+								disabled={steering}
+								onChange={(event) => setDraft(event.target.value)}
+								onKeyDown={handleDraftKeyDown}
 									onPaste={handlePaste}
 									placeholder={
 										sending
@@ -1536,43 +1541,126 @@ const ChatPage: React.FC = () => {
 
 								<div className="border-t border-black/8 px-2.5 pt-2">
 									<div className="composer-footer-row">
-										<button
-											aria-label="Add image"
-											className="composer-icon-button"
-											disabled={sending || steering}
-											onClick={() => fileInputRef.current?.click()}
-											type="button"
-										>
-											<svg
-												aria-hidden="true"
-												className="h-4 w-4"
-												fill="none"
-												viewBox="0 0 24 24"
-												xmlns="http://www.w3.org/2000/svg"
+										<div className="composer-leading-actions">
+											<button
+												aria-label="Add image"
+												className="composer-icon-button"
+												disabled={sending || steering}
+												onClick={() => fileInputRef.current?.click()}
+												type="button"
 											>
-												<path
-													d="M12 16.5v-9"
-													stroke="currentColor"
-													strokeLinecap="round"
-													strokeLinejoin="round"
-													strokeWidth="1.7"
-												/>
-												<path
-													d="M7.5 12 12 7.5 16.5 12"
-													stroke="currentColor"
-													strokeLinecap="round"
-													strokeLinejoin="round"
-													strokeWidth="1.7"
-												/>
-												<path
-													d="M5.5 18.5h13"
-													stroke="currentColor"
-													strokeLinecap="round"
-													strokeLinejoin="round"
-													strokeWidth="1.7"
-												/>
-											</svg>
-										</button>
+												<svg
+													aria-hidden="true"
+													className="h-4 w-4"
+													fill="none"
+													viewBox="0 0 24 24"
+													xmlns="http://www.w3.org/2000/svg"
+												>
+													<path
+														d="M12 16.5v-9"
+														stroke="currentColor"
+														strokeLinecap="round"
+														strokeLinejoin="round"
+														strokeWidth="1.7"
+													/>
+													<path
+														d="M7.5 12 12 7.5 16.5 12"
+														stroke="currentColor"
+														strokeLinecap="round"
+														strokeLinejoin="round"
+														strokeWidth="1.7"
+													/>
+													<path
+														d="M5.5 18.5h13"
+														stroke="currentColor"
+														strokeLinecap="round"
+														strokeLinejoin="round"
+														strokeWidth="1.7"
+													/>
+												</svg>
+											</button>
+
+											<button
+												aria-label={composerExpanded ? "Restore composer" : "Expand composer"}
+												aria-pressed={composerExpanded}
+												className="composer-icon-button"
+												data-testid="composer-expand-toggle"
+												onClick={() => setComposerExpanded((currentValue) => !currentValue)}
+												type="button"
+											>
+												<svg
+													aria-hidden="true"
+													className="h-4 w-4"
+													fill="none"
+													viewBox="0 0 24 24"
+													xmlns="http://www.w3.org/2000/svg"
+												>
+													{composerExpanded ? (
+														<>
+															<path
+																d="M8 3H5a2 2 0 0 0-2 2v3"
+																stroke="currentColor"
+																strokeLinecap="round"
+																strokeLinejoin="round"
+																strokeWidth="1.7"
+															/>
+															<path
+																d="M16 3h3a2 2 0 0 1 2 2v3"
+																stroke="currentColor"
+																strokeLinecap="round"
+																strokeLinejoin="round"
+																strokeWidth="1.7"
+															/>
+															<path
+																d="M8 21H5a2 2 0 0 1-2-2v-3"
+																stroke="currentColor"
+																strokeLinecap="round"
+																strokeLinejoin="round"
+																strokeWidth="1.7"
+															/>
+															<path
+																d="M16 21h3a2 2 0 0 0 2-2v-3"
+																stroke="currentColor"
+																strokeLinecap="round"
+																strokeLinejoin="round"
+																strokeWidth="1.7"
+															/>
+														</>
+													) : (
+														<>
+															<path
+																d="M15 3h6v6"
+																stroke="currentColor"
+																strokeLinecap="round"
+																strokeLinejoin="round"
+																strokeWidth="1.7"
+															/>
+															<path
+																d="M9 21H3v-6"
+																stroke="currentColor"
+																strokeLinecap="round"
+																strokeLinejoin="round"
+																strokeWidth="1.7"
+															/>
+															<path
+																d="M21 3 14 10"
+																stroke="currentColor"
+																strokeLinecap="round"
+																strokeLinejoin="round"
+																strokeWidth="1.7"
+															/>
+															<path
+																d="M3 21 10 14"
+																stroke="currentColor"
+																strokeLinecap="round"
+																strokeLinejoin="round"
+																strokeWidth="1.7"
+															/>
+														</>
+													)}
+												</svg>
+											</button>
+										</div>
 
 										<div className="composer-context-cluster">
 											{conversationId ? (

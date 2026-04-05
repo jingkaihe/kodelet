@@ -226,6 +226,61 @@ describe("ChatPage", () => {
 		window.FileReader = originalFileReader;
 	});
 
+	it("submits with Shift+Enter and keeps plain Enter for multiline editing", async () => {
+		mockStreamChat.mockResolvedValue(undefined);
+
+		render(<ChatPage />);
+
+		await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
+		await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
+
+		const textarea = screen.getByTestId("composer-textarea");
+		fireEvent.change(textarea, { target: { value: "hello from shortcut" } });
+
+		fireEvent.keyDown(textarea, {
+			key: "Enter",
+			shiftKey: false,
+		});
+
+		expect(mockStreamChat).not.toHaveBeenCalled();
+
+		fireEvent.keyDown(textarea, {
+			key: "Enter",
+			shiftKey: true,
+		});
+
+		await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
+		expect(mockStreamChat).toHaveBeenCalledWith(
+			expect.objectContaining({ message: "hello from shortcut" }),
+			expect.any(Object),
+		);
+	});
+
+	it("toggles the composer between expanded and restored states", async () => {
+		render(<ChatPage />);
+
+		await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
+
+		const toggle = screen.getByTestId("composer-expand-toggle");
+		const textarea = screen.getByTestId("composer-textarea");
+
+		expect(toggle).toHaveAttribute("aria-label", "Expand composer");
+		expect(toggle).toHaveAttribute("aria-pressed", "false");
+		expect(textarea).not.toHaveClass("composer-editor-expanded");
+
+		fireEvent.click(toggle);
+
+		expect(toggle).toHaveAttribute("aria-label", "Restore composer");
+		expect(toggle).toHaveAttribute("aria-pressed", "true");
+		expect(textarea).toHaveClass("composer-editor-expanded");
+
+		fireEvent.click(toggle);
+
+		expect(toggle).toHaveAttribute("aria-label", "Expand composer");
+		expect(toggle).toHaveAttribute("aria-pressed", "false");
+		expect(textarea).not.toHaveClass("composer-editor-expanded");
+	});
+
 	it("allows selecting a profile for a new conversation", async () => {
 		mockStreamChat.mockResolvedValue(undefined);
 
