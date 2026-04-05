@@ -1727,6 +1727,53 @@ code[class*="language-"] {
   color: #5f5a50;
 }
 
+.tool-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.72rem;
+  cursor: pointer;
+  list-style: none;
+  padding: 0.9rem 1rem;
+  transition: background-color 160ms ease;
+}
+
+.tool-summary:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.tool-summary:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px rgba(106, 155, 204, 0.28);
+}
+
+.tool-summary-chevron {
+  flex: 0 0 auto;
+  font-family: var(--font-heading);
+  font-size: 0.82rem;
+  color: #7a756b;
+  transform: rotate(0deg);
+  transform-origin: center;
+  transition:
+    transform 180ms ease,
+    color 180ms ease;
+}
+
+.chat-subpanel[open] .tool-summary-chevron {
+  color: var(--kodelet-orange);
+  transform: rotate(90deg);
+}
+
+.tool-summary-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-heading);
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--kodelet-dark);
+}
+
 .tool-item-label {
   font-family: var(--font-heading);
   font-size: 0.84rem;

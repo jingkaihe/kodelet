@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { marked } from 'marked';
-import type { ChatRenderMessage, ContentBlock } from '../../types';
+import type { ChatRenderMessage, ChatRenderToolCall, ContentBlock, ToolResult } from '../../types';
 import ToolRenderer from '../ToolRenderer';
 import { CopyButton } from '../tool-renderers/shared';
 import { cn } from '../../utils';
-import { normalizeToolName, ReferenceCodeBlock, TOOL_LABELS } from '../tool-renderers/reference';
+import { normalizeToolName, ReferenceCodeBlock } from '../tool-renderers/reference';
 
 const renderContent = (content: string | ContentBlock[] | undefined): string => {
   if (!content) {
@@ -41,6 +41,250 @@ const formatToolInput = (input: string): string => {
     return JSON.stringify(JSON.parse(input), null, 2);
   } catch {
     return input;
+  }
+};
+
+const parseToolInput = (input: string): Record<string, unknown> | null => {
+  try {
+    const parsed = JSON.parse(input);
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+};
+
+const getMetadataRecord = (toolResult?: ToolResult): Record<string, unknown> | null => {
+  const metadata = toolResult?.metadata;
+  return metadata && typeof metadata === 'object' ? (metadata as Record<string, unknown>) : null;
+};
+
+const getStringField = (
+  source: Record<string, unknown> | null,
+  ...keys: string[]
+): string | undefined => {
+  for (const key of keys) {
+    const value = source?.[key];
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+
+  return undefined;
+};
+
+const getStringArrayField = (
+  source: Record<string, unknown> | null,
+  ...keys: string[]
+): string[] => {
+  for (const key of keys) {
+    const value = source?.[key];
+    if (!Array.isArray(value)) {
+      continue;
+    }
+
+    const items = value
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    if (items.length > 0) {
+      return items;
+    }
+  }
+
+  return [];
+};
+
+const collapseWhitespace = (value: string): string => value.replace(/\s+/g, ' ').trim();
+
+const summarizeList = (items: string[]): string | undefined => {
+  const values = items.map(collapseWhitespace).filter(Boolean);
+
+  if (values.length === 0) {
+    return undefined;
+  }
+
+  if (values.length === 1) {
+    return values[0];
+  }
+
+  return `${values[0]} (+${values.length - 1} more)`;
+};
+
+const summarizeApplyPatchInput = (patchInput: string): string | undefined => {
+  const operations: string[] = [];
+
+  patchInput.split('\n').forEach((line) => {
+    const trimmedLine = line.trim();
+
+    if (trimmedLine.startsWith('*** Add File: ')) {
+      operations.push(`add ${trimmedLine.slice('*** Add File: '.length).trim()}`);
+      return;
+    }
+
+    if (trimmedLine.startsWith('*** Update File: ')) {
+      operations.push(`update ${trimmedLine.slice('*** Update File: '.length).trim()}`);
+      return;
+    }
+
+    if (trimmedLine.startsWith('*** Delete File: ')) {
+      operations.push(`delete ${trimmedLine.slice('*** Delete File: '.length).trim()}`);
+      return;
+    }
+
+    if (trimmedLine.startsWith('*** Move to: ') && operations.length > 0) {
+      const previousOperation = operations[operations.length - 1];
+      operations[operations.length - 1] = `${previousOperation} → ${trimmedLine.slice('*** Move to: '.length).trim()}`;
+    }
+  });
+
+  return summarizeList(operations);
+};
+
+const summarizeApplyPatchResult = (metadata: Record<string, unknown> | null): string | undefined => {
+  const changes = metadata?.changes;
+  if (!Array.isArray(changes) || changes.length === 0) {
+    return summarizeList([
+      ...getStringArrayField(metadata, 'added').map((path) => `add ${path}`),
+      ...getStringArrayField(metadata, 'modified').map((path) => `update ${path}`),
+      ...getStringArrayField(metadata, 'deleted').map((path) => `delete ${path}`),
+    ]);
+  }
+
+  const operations = changes
+    .map((change) => {
+      if (!change || typeof change !== 'object') {
+        return undefined;
+      }
+
+      const changeRecord = change as Record<string, unknown>;
+      const operation = getStringField(changeRecord, 'operation') || 'update';
+      const path = getStringField(changeRecord, 'path');
+      const movePath = getStringField(changeRecord, 'movePath');
+
+      if (!path) {
+        return undefined;
+      }
+
+      return movePath ? `${operation} ${path} → ${movePath}` : `${operation} ${path}`;
+    })
+    .filter((value): value is string => Boolean(value));
+
+  return summarizeList(operations);
+};
+
+const formatToolSummary = (label: string, value?: string): string => {
+  if (!value) {
+    return label;
+  }
+
+  return `${label}: ${collapseWhitespace(value)}`;
+};
+
+const getFallbackToolLabel = (toolName: string): string =>
+  normalizeToolName(toolName)
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (match) => match.toUpperCase());
+
+const getToolSummary = (toolCall: ChatRenderToolCall): string => {
+  const normalizedToolName = normalizeToolName(toolCall.name);
+  const input = parseToolInput(toolCall.input);
+  const metadata = getMetadataRecord(toolCall.result);
+
+  switch (normalizedToolName) {
+    case 'bash':
+      return formatToolSummary(
+        'Bash',
+        getStringField(input, 'command') || getStringField(metadata, 'command')
+      );
+
+    case 'file_read':
+      return formatToolSummary(
+        'Read file',
+        getStringField(input, 'file_path') || getStringField(metadata, 'filePath')
+      );
+
+    case 'file_write':
+      return formatToolSummary(
+        'Write file',
+        getStringField(input, 'file_path') || getStringField(metadata, 'filePath')
+      );
+
+    case 'file_edit':
+      return formatToolSummary(
+        'Edit file',
+        getStringField(input, 'file_path') || getStringField(metadata, 'filePath')
+      );
+
+    case 'apply_patch':
+      return formatToolSummary(
+        'Apply patch',
+        summarizeApplyPatchResult(metadata) ||
+          summarizeApplyPatchInput(getStringField(input, 'input') || '')
+      );
+
+    case 'grep_tool': {
+      const pattern = getStringField(input, 'pattern') || getStringField(metadata, 'pattern');
+      const path = getStringField(input, 'path') || getStringField(metadata, 'path');
+      return formatToolSummary('Search', pattern && path ? `${pattern} in ${path}` : pattern || path);
+    }
+
+    case 'glob_tool': {
+      const pattern = getStringField(input, 'pattern') || getStringField(metadata, 'pattern');
+      const path = getStringField(input, 'path') || getStringField(metadata, 'path');
+      return formatToolSummary(
+        'Find files',
+        pattern && path ? `${pattern} in ${path}` : pattern || path
+      );
+    }
+
+    case 'web_fetch':
+      return formatToolSummary(
+        'Fetch URL',
+        getStringField(input, 'url') || getStringField(metadata, 'url')
+      );
+
+    case 'image_recognition':
+      return formatToolSummary(
+        'Analyze image',
+        getStringField(input, 'image_path') ||
+          getStringField(metadata, 'imagePath', 'image_path', 'path') ||
+          getStringField(input, 'prompt') ||
+          getStringField(metadata, 'prompt')
+      );
+
+    case 'openai_web_search': {
+      const queries = [
+        ...getStringArrayField(input, 'queries'),
+        ...getStringArrayField(metadata, 'queries'),
+      ];
+      const query = queries[0];
+      const location =
+        getStringField(metadata, 'url', 'pattern') || getStringField(input, 'url', 'pattern');
+      return formatToolSummary('Web search', query || location);
+    }
+
+    case 'subagent':
+      return formatToolSummary(
+        'Subagent',
+        getStringField(input, 'workflow') ||
+          getStringField(metadata, 'workflow') ||
+          getStringField(input, 'question') ||
+          getStringField(metadata, 'question')
+      );
+
+    case 'skill':
+      return formatToolSummary(
+        'Skill',
+        getStringField(input, 'skill_name') || getStringField(metadata, 'skillName')
+      );
+
+    default:
+      return formatToolSummary(
+        getFallbackToolLabel(normalizedToolName),
+        getStringField(input, 'path', 'file_path', 'url', 'command', 'pattern') ||
+          getStringField(metadata, 'path', 'filePath', 'url', 'command', 'pattern')
+      );
   }
 };
 
@@ -85,7 +329,7 @@ const getCopyText = (message: ChatRenderMessage): string => {
       }
 
       if (block.type === 'tools') {
-        return `Tools (${block.tools.length})`;
+        return block.tools.map((toolCall) => `- ${getToolSummary(toolCall)}`).join('\n');
       }
 
       return '';
@@ -284,27 +528,28 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
                     }
 
                     if (block.type === 'tools') {
+                      if (block.tools.length === 0) {
+                        return null;
+                      }
+
                       return (
-                        <details
-                          key={`tools-${blockIndex}`}
-                          className="chat-subpanel overflow-hidden rounded-2xl"
-                        >
-                          <summary className="cursor-pointer list-none px-4 py-3 font-heading text-sm font-semibold text-kodelet-dark">
-                            Tools ({block.tools.length})
-                          </summary>
-                          <div className="space-y-4 border-t border-black/8 px-4 py-4">
-                            {block.tools.map((toolCall, toolIndex) => {
-                              const normalizedToolName = normalizeToolName(toolCall.name);
+                        <div key={`tools-${blockIndex}`} className="space-y-3">
+                          {block.tools.map((toolCall, toolIndex) => {
+                            const summaryText = getToolSummary(toolCall);
 
-                              return (
-                                <div
-                                  key={toolCall.callId || `${toolCall.name}-${blockIndex}`}
-                                  className="space-y-2"
-                                >
-                                  <p className="tool-item-label">
-                                    {toolIndex + 1}. {TOOL_LABELS[normalizedToolName] || normalizedToolName}
-                                  </p>
+                            return (
+                              <details
+                                key={toolCall.callId || `${toolCall.name}-${blockIndex}-${toolIndex}`}
+                                className="chat-subpanel overflow-hidden rounded-2xl"
+                              >
+                                <summary className="tool-summary" title={summaryText}>
+                                  <span className="tool-summary-chevron" aria-hidden="true">
+                                    ›
+                                  </span>
+                                  <span className="tool-summary-text">{summaryText}</span>
+                                </summary>
 
+                                <div className="space-y-2 border-t border-black/8 px-4 py-4">
                                   {toolCall.result ? (
                                     <ToolRenderer toolResult={toolCall.result} />
                                   ) : (
@@ -319,10 +564,10 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
                                     </>
                                   )}
                                 </div>
-                              );
-                            })}
-                          </div>
-                        </details>
+                              </details>
+                            );
+                          })}
+                        </div>
                       );
                     }
 

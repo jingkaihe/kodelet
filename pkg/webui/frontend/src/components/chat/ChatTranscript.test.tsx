@@ -220,7 +220,48 @@ describe('ChatTranscript', () => {
       />
     )
 
-    expect(screen.getByText('Tools (1)')).toBeInTheDocument()
-    expect(container.querySelector('.tool-item-label')?.textContent).toContain('OpenAI Web Search')
+    expect(screen.getByText('Web search: kodelet web ui')).toBeInTheDocument()
+    expect(screen.queryByText('Tools (1)')).not.toBeInTheDocument()
+    expect(container.querySelectorAll('details')).toHaveLength(1)
+  })
+
+  it('renders each tool as its own collapsible row with concise summaries', () => {
+    const { container } = render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[
+          {
+            role: 'assistant',
+            blocks: [
+              {
+                type: 'tools',
+                tools: [
+                  {
+                    callId: 'bash-1',
+                    name: 'bash',
+                    input: '{"command":"rg -n \\\"ChatTranscript\\\" pkg/webui/frontend/src","timeout":30,"description":"Search transcript component"}',
+                  },
+                  {
+                    callId: 'read-1',
+                    name: 'file_read',
+                    input: '{"file_path":"/home/jingkaihe/workspace/kodelet/pkg/webui/frontend/src/components/chat/ChatTranscript.tsx","offset":1,"line_limit":200}',
+                  },
+                ],
+              },
+            ],
+          },
+        ]}
+      />
+    )
+
+    expect(screen.getByText('Bash: rg -n "ChatTranscript" pkg/webui/frontend/src')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        'Read file: /home/jingkaihe/workspace/kodelet/pkg/webui/frontend/src/components/chat/ChatTranscript.tsx'
+      )
+    ).toBeInTheDocument()
+    expect(screen.queryByText('Tools (2)')).not.toBeInTheDocument()
+    expect(container.querySelectorAll('details')).toHaveLength(2)
+    expect(container.querySelector('.tool-summary-text')?.textContent).not.toContain('timeout')
   })
 });
