@@ -104,7 +104,6 @@ func (t *Thread) processStream(
 			telemetry.AddEvent(ctx, "response_created",
 				attribute.String("response_id", event.Response.ID),
 			)
-			t.lastResponseID = event.Response.ID
 
 		case "response.output_text.delta":
 			// Text content delta
@@ -215,7 +214,6 @@ func (t *Thread) processStream(
 				t.storedItems = append(t.storedItems, storedItem)
 				if inputItems := fromStoredItems([]StoredInputItem{storedItem}); len(inputItems) > 0 {
 					t.inputItems = append(t.inputItems, inputItems[0])
-					t.pendingItems = append(t.pendingItems, inputItems[0])
 				}
 
 				result := webSearchStructuredResult(callID, webSearch)
@@ -279,14 +277,13 @@ func (t *Thread) processStream(
 					},
 				}
 
-				// Add the tool result to inputItems, storedItems, and pendingItems
+				// Add the tool result to inputItems and storedItems
 				t.inputItems = append(t.inputItems, toolResultItem)
 				t.storedItems = append(t.storedItems, StoredInputItem{
 					Type:   "function_call_output",
 					CallID: funcCall.CallID,
 					Output: resultStr,
 				})
-				t.pendingItems = append(t.pendingItems, toolResultItem)
 
 				handler.HandleToolResult(funcCall.CallID, funcCall.Name, result)
 
@@ -485,7 +482,7 @@ func (t *Thread) updateUsage(usage responses.ResponseUsage) {
 
 	// Update cached tokens if available
 	if usage.InputTokensDetails.CachedTokens > 0 {
-		t.Usage.CacheReadInputTokens = int(usage.InputTokensDetails.CachedTokens)
+		t.Usage.CacheReadInputTokens += int(usage.InputTokensDetails.CachedTokens)
 	}
 
 	// Calculate costs based on model pricing

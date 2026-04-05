@@ -959,7 +959,6 @@ func TestServer_handleGetToolResult(t *testing.T) {
 	assert.Equal(t, "TestTool", response.Result.ToolName)
 }
 
-
 func TestServer_handleSteerConversation(t *testing.T) {
 	homeDir := t.TempDir()
 	originalHome := os.Getenv("HOME")

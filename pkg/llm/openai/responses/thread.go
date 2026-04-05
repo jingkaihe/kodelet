@@ -62,10 +62,6 @@ type Thread struct {
 	// This is used for persistence and display purposes
 	inputItems []responses.ResponseInputItemUnionParam
 
-	// pendingItems holds items that need to be sent in the next API call
-	// When using previous_response_id, only these items are sent instead of full history
-	pendingItems []responses.ResponseInputItemUnionParam
-
 	// storedItems is the canonical conversation history for persistence
 	// It includes all items (messages, function calls, reasoning) in order
 	// This mirrors how Anthropic stores thinking blocks inline with messages
@@ -83,10 +79,6 @@ type Thread struct {
 
 	// customPricing contains provider-specific pricing information
 	customPricing map[string]llmtypes.ModelPricing
-
-	// lastResponseID stores the ID of the last response for multi-turn conversations
-	// Used with previous_response_id parameter for server-side conversation state
-	lastResponseID string
 
 	// summary stores a short summary of the conversation for persistence
 	summary string
@@ -145,7 +137,6 @@ func NewThread(config llmtypes.Config) (*Thread, error) {
 		Thread:          baseThread,
 		client:          &client,
 		inputItems:      make([]responses.ResponseInputItemUnionParam, 0),
-		pendingItems:    make([]responses.ResponseInputItemUnionParam, 0),
 		storedItems:     make([]StoredInputItem, 0),
 		reasoningEffort: reasoningEffort,
 		customModels:    customModels,
@@ -222,9 +213,8 @@ func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths 
 		}
 	}
 
-	// Add to inputItems (for API calls), pendingItems (for next API call), and storedItems (for persistence)
+	// Add to inputItems (for API calls) and storedItems (for persistence)
 	t.inputItems = append(t.inputItems, inputItem)
-	t.pendingItems = append(t.pendingItems, inputItem)
 	rawItem, err := json.Marshal(inputItem)
 	if err != nil {
 		logger.G(ctx).WithError(err).Warn("failed to marshal OpenAI Responses user input item for persistence")
@@ -256,14 +246,9 @@ func (t *Thread) SendMessage(
 	}()
 
 	var originalInputItems []responses.ResponseInputItemUnionParam
-	var originalPendingItems []responses.ResponseInputItemUnionParam
-	var originalLastResponseID string
 	if opt.NoSaveConversation {
 		originalInputItems = make([]responses.ResponseInputItemUnionParam, len(t.inputItems))
 		copy(originalInputItems, t.inputItems)
-		originalPendingItems = make([]responses.ResponseInputItemUnionParam, len(t.pendingItems))
-		copy(originalPendingItems, t.pendingItems)
-		originalLastResponseID = t.lastResponseID
 	}
 
 	// Trigger user_message_send hook before adding user message
@@ -348,9 +333,6 @@ OUTER:
 					continue OUTER
 				}
 
-				// Turn completed successfully, clear pending items
-				// The server now has the full conversation state via previous_response_id
-				t.pendingItems = nil
 				break OUTER
 			}
 		}
@@ -358,8 +340,6 @@ OUTER:
 
 	if opt.NoSaveConversation {
 		t.inputItems = originalInputItems
-		t.pendingItems = originalPendingItems
-		t.lastResponseID = originalLastResponseID
 	}
 
 	// Save conversation state
@@ -377,16 +357,17 @@ OUTER:
 }
 
 // applyCodexRestrictions modifies request parameters for Codex API compatibility.
-// The Codex API doesn't support: store=true, previous_response_id, max_output_tokens.
+// The Codex API doesn't support max_output_tokens on this path, and Codex also
+// expects runtime sections as developer messages rather than top-level
+// instructions only.
 // This method centralizes all Codex-specific parameter restrictions in one place.
 func (t *Thread) applyCodexRestrictions(params *responses.ResponseNewParams) {
 	if !t.isCodex {
 		return
 	}
-	// Codex API requires store=false (no server-side conversation state)
+	// Codex uses prompt_cache_key plus full input replay on this path, not
+	// server-side stored conversation state.
 	params.Store = param.NewOpt(false)
-	// Clear unsupported parameters
-	params.PreviousResponseID = param.Opt[string]{}
 	params.MaxOutputTokens = param.Opt[int64]{}
 
 	if t.State != nil {
@@ -442,34 +423,19 @@ func (t *Thread) processMessageExchange(
 	tools := buildTools(t.State, opt.NoToolUse)
 	log.WithField("tool_count", len(tools)).Debug("built tools for request")
 
-	// Determine which input items to send:
-	// - If we have a previous response ID (and not Codex), only send pending items (server has history)
-	// - For Codex or fresh conversations, send full input items (no server-side state)
-	var inputToSend []responses.ResponseInputItemUnionParam
-	usePreviousResponseID := t.lastResponseID != "" && len(t.pendingItems) > 0 && !t.isCodex
-
-	if usePreviousResponseID {
-		inputToSend = t.pendingItems
-	} else {
-		inputToSend = t.inputItems
-	}
-
-	// Build request parameters with standard settings
+	// Mirror Codex prompt caching on the HTTP Responses path by replaying the full
+	// input history every time with a stable prompt_cache_key. We intentionally do
+	// not use previous_response_id here.
 	params := responses.ResponseNewParams{
 		Model:          model,
-		Input:          responses.ResponseNewParamsInputUnion{OfInputItemList: inputToSend},
+		Input:          responses.ResponseNewParamsInputUnion{OfInputItemList: t.inputItems},
 		Instructions:   param.NewOpt(systemPrompt),
 		Tools:          tools,
-		Store:          param.NewOpt(true), // Enable server-side conversation state storage
+		Store:          param.NewOpt(false),
 		PromptCacheKey: param.NewOpt(t.ConversationID),
 		ToolChoice: responses.ResponseNewParamsToolChoiceUnion{
 			OfToolChoiceMode: param.NewOpt(responses.ToolChoiceOptionsAuto),
 		},
-	}
-
-	// Set previous_response_id for multi-turn conversations
-	if usePreviousResponseID {
-		params.PreviousResponseID = param.NewOpt(t.lastResponseID)
 	}
 
 	// Set max output tokens if specified
@@ -493,7 +459,7 @@ func (t *Thread) processMessageExchange(
 	t.applyCodexRestrictions(&params)
 
 	log.WithField("model", model).
-		WithField("input_items", len(inputToSend)).
+		WithField("input_items", len(t.inputItems)).
 		WithField("tool_count", len(tools)).
 		WithField("is_codex", t.isCodex).
 		Debug("sending request to Responses API")
@@ -518,33 +484,10 @@ func (t *Thread) processMessageExchange(
 		log.WithError(err).
 			WithField("model", model).
 			WithField("tool_count", len(tools)).
-			WithField("input_items", len(inputToSend)).
+			WithField("input_items", len(t.inputItems)).
 			Error("API request failed")
-
-		// Check if the error is related to invalid previous_response_id
-		// If so, fall back to sending full input items
-		if usePreviousResponseID && isInvalidPreviousResponseIDError(err) {
-			log.WithError(err).Warn("previous_response_id invalid, falling back to full input items")
-
-			// Clear the invalid response ID and retry with full history
-			t.lastResponseID = ""
-			t.pendingItems = nil
-
-			// Rebuild params with full input items
-			params.Input = responses.ResponseNewParamsInputUnion{OfInputItemList: t.inputItems}
-			params.PreviousResponseID = param.Opt[string]{} // Clear the param
-
-			// Retry the request
-			stream = newStreaming(ctx, params)
-			streamResult, err = processStream(ctx, stream, handler, model, opt)
-			if err != nil {
-				saveConversation()
-				return "", false, false, err
-			}
-		} else {
-			saveConversation()
-			return "", false, false, err
-		}
+		saveConversation()
+		return "", false, false, err
 	}
 
 	// Extract final text output from the last response
@@ -597,7 +540,6 @@ func (t *Thread) processPendingSteer(ctx context.Context, handler llmtypes.Messa
 		}
 
 		t.inputItems = append(t.inputItems, inputItem)
-		t.pendingItems = append(t.pendingItems, inputItem)
 
 		rawItem, err := json.Marshal(inputItem)
 		if err != nil {
@@ -679,12 +621,6 @@ func (t *Thread) SwapContext(_ context.Context, summary string) error {
 			Content: summary,
 		},
 	}
-
-	// Clear pending items - next request will use the new input
-	t.pendingItems = nil
-
-	// Clear the previous response ID
-	t.lastResponseID = ""
 
 	t.FinalizeSwapContextLocked(summary)
 
@@ -821,13 +757,6 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	// Replace input items with compacted output
 	t.inputItems = newInputItems
 	t.storedItems = newStoredItems
-
-	// Clear pending items - next request will use the new compacted input
-	t.pendingItems = nil
-
-	// Clear the previous response ID - the server-side conversation state is now
-	// represented by the compaction item, not the response chain
-	t.lastResponseID = ""
 
 	t.ResetContextStateLocked()
 	pricing := t.getPricing(t.Config.Model)
@@ -1044,10 +973,9 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 
 	// Build the conversation record
 	metadata := map[string]any{
-		"model":          t.Config.Model,
-		"lastResponseID": t.lastResponseID,
-		"api_mode":       "responses",
-		"platform":       resolvePlatformName(t.Config),
+		"model":    t.Config.Model,
+		"api_mode": "responses",
+		"platform": resolvePlatformName(t.Config),
 	}
 	if profile := strings.TrimSpace(t.Config.Profile); profile != "" {
 		metadata["profile"] = profile
@@ -1107,13 +1035,6 @@ func (t *Thread) loadConversation(ctx context.Context) {
 	t.summary = record.Summary
 	t.State.SetFileLastAccess(record.FileLastAccess)
 	t.SetStructuredToolResults(record.ToolResults)
-
-	// Restore lastResponseID from metadata
-	if record.Metadata != nil {
-		if lastResponseID, ok := record.Metadata["lastResponseID"].(string); ok {
-			t.lastResponseID = lastResponseID
-		}
-	}
 }
 
 // cleanupOrphanedItems removes incomplete tool call sequences from the end.
@@ -1136,16 +1057,6 @@ func (t *Thread) cleanupOrphanedItems() {
 		lastItem := t.storedItems[len(t.storedItems)-1]
 		if lastItem.Type == "function_call" {
 			t.storedItems = t.storedItems[:len(t.storedItems)-1]
-			continue
-		}
-		break
-	}
-
-	// Pending items can also contain an unfinished tail.
-	for len(t.pendingItems) > 0 {
-		lastItem := t.pendingItems[len(t.pendingItems)-1]
-		if lastItem.OfFunctionCall != nil {
-			t.pendingItems = t.pendingItems[:len(t.pendingItems)-1]
 			continue
 		}
 		break
@@ -1631,32 +1542,6 @@ func ExtractMessages(data []byte, toolResults map[string]tooltypes.StructuredToo
 	}
 
 	return result, nil
-}
-
-// isInvalidPreviousResponseIDError checks if an error is related to an invalid previous_response_id.
-// This can happen when the server-side conversation state has expired or been deleted.
-func isInvalidPreviousResponseIDError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	errStr := err.Error()
-
-	invalidResponseIDPatterns := []string{
-		"previous_response_id",
-		"response not found",
-		"invalid response id",
-		"response id not found",
-		"no response found",
-	}
-
-	for _, pattern := range invalidResponseIDPatterns {
-		if strings.Contains(strings.ToLower(errStr), pattern) {
-			return true
-		}
-	}
-
-	return false
 }
 
 func webSearchStoredInput(item StoredInputItem) string {

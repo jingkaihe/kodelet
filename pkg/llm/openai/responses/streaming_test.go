@@ -116,10 +116,9 @@ func TestProcessStreamThinkingEndsBeforeText(t *testing.T) {
 	stream := ssestream.NewStream[responses.ResponseStreamEventUnion](decoder, nil)
 
 	thread := &Thread{
-		Thread:       base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}, "test", hooks.Trigger{}),
-		storedItems:  make([]StoredInputItem, 0),
-		inputItems:   make([]responses.ResponseInputItemUnionParam, 0),
-		pendingItems: make([]responses.ResponseInputItemUnionParam, 0),
+		Thread:      base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}, "test", hooks.Trigger{}),
+		storedItems: make([]StoredInputItem, 0),
+		inputItems:  make([]responses.ResponseInputItemUnionParam, 0),
 	}
 
 	handler := &captureStreamHandler{}
@@ -135,6 +134,40 @@ func TestProcessStreamThinkingEndsBeforeText(t *testing.T) {
 		"text_delta:Answer",
 		"content_block_end",
 	}, handler.events)
+}
+
+func TestUpdateUsageAccumulatesCachedTokensLikeCodexTotals(t *testing.T) {
+	thread := &Thread{
+		Thread: base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}, "test", hooks.Trigger{}),
+		customPricing: map[string]llmtypes.ModelPricing{
+			"gpt-4.1": {
+				Input:         1,
+				Output:        1,
+				CachedInput:   1,
+				ContextWindow: 200000,
+			},
+		},
+	}
+
+	thread.updateUsage(responses.ResponseUsage{
+		InputTokens:  100,
+		OutputTokens: 10,
+		InputTokensDetails: responses.ResponseUsageInputTokensDetails{
+			CachedTokens: 2400,
+		},
+	})
+	thread.updateUsage(responses.ResponseUsage{
+		InputTokens:  120,
+		OutputTokens: 20,
+		InputTokensDetails: responses.ResponseUsageInputTokensDetails{
+			CachedTokens: 143900,
+		},
+	})
+
+	assert.Equal(t, 220, thread.Usage.InputTokens)
+	assert.Equal(t, 30, thread.Usage.OutputTokens)
+	assert.Equal(t, 146300, thread.Usage.CacheReadInputTokens)
+	assert.Equal(t, 140, thread.Usage.CurrentContextWindow)
 }
 
 func TestProcessStreamReturnsErrorOnIncompleteResponse(t *testing.T) {
@@ -173,10 +206,9 @@ func TestProcessStreamReturnsErrorOnIncompleteResponse(t *testing.T) {
 	stream := ssestream.NewStream[responses.ResponseStreamEventUnion](decoder, nil)
 
 	thread := &Thread{
-		Thread:       base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}, "test", hooks.Trigger{}),
-		storedItems:  make([]StoredInputItem, 0),
-		inputItems:   make([]responses.ResponseInputItemUnionParam, 0),
-		pendingItems: make([]responses.ResponseInputItemUnionParam, 0),
+		Thread:      base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}, "test", hooks.Trigger{}),
+		storedItems: make([]StoredInputItem, 0),
+		inputItems:  make([]responses.ResponseInputItemUnionParam, 0),
 	}
 
 	handler := &captureStreamHandler{}
@@ -238,10 +270,9 @@ func TestProcessStreamWebSearchDoesNotTriggerFollowUpTurn(t *testing.T) {
 	stream := ssestream.NewStream[responses.ResponseStreamEventUnion](decoder, nil)
 
 	thread := &Thread{
-		Thread:       base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}, "test", hooks.Trigger{}),
-		storedItems:  make([]StoredInputItem, 0),
-		inputItems:   make([]responses.ResponseInputItemUnionParam, 0),
-		pendingItems: make([]responses.ResponseInputItemUnionParam, 0),
+		Thread:      base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}, "test", hooks.Trigger{}),
+		storedItems: make([]StoredInputItem, 0),
+		inputItems:  make([]responses.ResponseInputItemUnionParam, 0),
 	}
 
 	handler := &captureStreamHandler{}
@@ -255,8 +286,6 @@ func TestProcessStreamWebSearchDoesNotTriggerFollowUpTurn(t *testing.T) {
 	assert.Equal(t, "ws_123", thread.storedItems[0].CallID)
 	require.Len(t, thread.inputItems, 1)
 	require.NotNil(t, thread.inputItems[0].OfWebSearchCall)
-	require.Len(t, thread.pendingItems, 1)
-	require.NotNil(t, thread.pendingItems[0].OfWebSearchCall)
 	restoredItems := fromStoredItems(thread.storedItems)
 	require.Len(t, restoredItems, 1)
 	require.NotNil(t, restoredItems[0].OfWebSearchCall)
@@ -309,10 +338,9 @@ func TestProcessStreamWebSearchFlushesReasoningIntoReplayState(t *testing.T) {
 	stream := ssestream.NewStream[responses.ResponseStreamEventUnion](decoder, nil)
 
 	thread := &Thread{
-		Thread:       base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}, "test", hooks.Trigger{}),
-		storedItems:  make([]StoredInputItem, 0),
-		inputItems:   make([]responses.ResponseInputItemUnionParam, 0),
-		pendingItems: make([]responses.ResponseInputItemUnionParam, 0),
+		Thread:      base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}, "test", hooks.Trigger{}),
+		storedItems: make([]StoredInputItem, 0),
+		inputItems:  make([]responses.ResponseInputItemUnionParam, 0),
 	}
 
 	handler := &captureStreamHandler{}
@@ -337,8 +365,4 @@ func TestProcessStreamWebSearchFlushesReasoningIntoReplayState(t *testing.T) {
 	require.Len(t, thread.inputItems, 1)
 	require.NotNil(t, thread.inputItems[0].OfWebSearchCall)
 	assert.Equal(t, "ws_reasoning", thread.inputItems[0].OfWebSearchCall.ID)
-
-	require.Len(t, thread.pendingItems, 1)
-	require.NotNil(t, thread.pendingItems[0].OfWebSearchCall)
-	assert.Equal(t, "ws_reasoning", thread.pendingItems[0].OfWebSearchCall.ID)
 }

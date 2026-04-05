@@ -660,8 +660,6 @@ func TestCompactContextUpdatesContextWindowEstimateAfterNativeCompaction(t *test
 	assert.Equal(t, 8, thread.Usage.CurrentContextWindow)
 	assert.Equal(t, 1047576, thread.Usage.MaxContextWindow)
 	assert.Empty(t, thread.ToolResults)
-	assert.Nil(t, thread.pendingItems)
-	assert.Empty(t, thread.lastResponseID)
 }
 
 func TestCompactContextPreservesFunctionCallFromCompactOutput(t *testing.T) {
@@ -1098,9 +1096,8 @@ func TestFromStoredItemsAssistantRawInputTextMessageNormalizesToOutputMessage(t 
 
 func TestAddUserMessageWithImagesPersistsRawItem(t *testing.T) {
 	thread := &Thread{
-		inputItems:   make([]openairesponses.ResponseInputItemUnionParam, 0),
-		pendingItems: make([]openairesponses.ResponseInputItemUnionParam, 0),
-		storedItems:  make([]StoredInputItem, 0),
+		inputItems:  make([]openairesponses.ResponseInputItemUnionParam, 0),
+		storedItems: make([]StoredInputItem, 0),
 	}
 
 	thread.AddUserMessage(context.Background(), "what is in the image?", "data:image/png;base64,aGVsbG8=")
@@ -1165,15 +1162,6 @@ func TestCleanupOrphanedItems_RemovesTrailingFunctionCallFromStorage(t *testing.
 				Arguments: `{"command":"ls"}`,
 			},
 		},
-		pendingItems: []openairesponses.ResponseInputItemUnionParam{
-			{
-				OfFunctionCall: &openairesponses.ResponseFunctionToolCallParam{
-					CallID:    "call_orphaned",
-					Name:      "bash",
-					Arguments: `{"command":"ls"}`,
-				},
-			},
-		},
 	}
 
 	thread.cleanupOrphanedItems()
@@ -1181,7 +1169,6 @@ func TestCleanupOrphanedItems_RemovesTrailingFunctionCallFromStorage(t *testing.
 	require.Len(t, thread.inputItems, 1)
 	require.Len(t, thread.storedItems, 1)
 	assert.Equal(t, "message", thread.storedItems[0].Type)
-	assert.Empty(t, thread.pendingItems)
 }
 
 func TestLoadCustomConfiguration(t *testing.T) {
@@ -1234,63 +1221,7 @@ func TestLoadCustomConfigurationDefaultPlatform(t *testing.T) {
 	assert.True(t, hasGPT4o, "gpt-4o pricing should be present")
 }
 
-func TestIsInvalidPreviousResponseIDError(t *testing.T) {
-	tests := []struct {
-		name     string
-		err      error
-		expected bool
-	}{
-		{
-			name:     "nil error",
-			err:      nil,
-			expected: false,
-		},
-		{
-			name:     "generic error",
-			err:      assert.AnError,
-			expected: false,
-		},
-		{
-			name:     "previous_response_id error",
-			err:      errors.New("invalid previous_response_id: response not found"),
-			expected: true,
-		},
-		{
-			name:     "response not found error",
-			err:      errors.New("response not found for the given ID"),
-			expected: true,
-		},
-		{
-			name:     "invalid response id error",
-			err:      errors.New("invalid response id provided"),
-			expected: true,
-		},
-		{
-			name:     "no response found error",
-			err:      errors.New("no response found"),
-			expected: true,
-		},
-		{
-			name:     "case insensitive match",
-			err:      errors.New("PREVIOUS_RESPONSE_ID is invalid"),
-			expected: true,
-		},
-		{
-			name:     "unrelated 404 error",
-			err:      errors.New("resource not found"),
-			expected: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := isInvalidPreviousResponseIDError(tt.err)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-func TestAddUserMessageUpdatesPendingItems(t *testing.T) {
+func TestAddUserMessageAppendsInputItems(t *testing.T) {
 	os.Setenv("OPENAI_API_KEY", "test-key")
 	defer os.Unsetenv("OPENAI_API_KEY")
 
@@ -1302,27 +1233,24 @@ func TestAddUserMessageUpdatesPendingItems(t *testing.T) {
 	thread, err := NewThread(config)
 	require.NoError(t, err)
 
-	// Initially, both slices should be empty
+	// Initially, input history should be empty
 	assert.Empty(t, thread.inputItems)
-	assert.Empty(t, thread.pendingItems)
 
 	// Add a user message
 	ctx := context.Background()
 	thread.AddUserMessage(ctx, "Hello, world!")
 
-	// Both slices should now have one item
+	// Input history should now have one item
 	assert.Len(t, thread.inputItems, 1)
-	assert.Len(t, thread.pendingItems, 1)
 
 	// Add another message
 	thread.AddUserMessage(ctx, "How are you?")
 
-	// Both slices should now have two items
+	// Input history should now have two items
 	assert.Len(t, thread.inputItems, 2)
-	assert.Len(t, thread.pendingItems, 2)
 }
 
-func TestThreadPendingItemsInitialization(t *testing.T) {
+func TestThreadInitialization(t *testing.T) {
 	os.Setenv("OPENAI_API_KEY", "test-key")
 	defer os.Unsetenv("OPENAI_API_KEY")
 
@@ -1334,12 +1262,7 @@ func TestThreadPendingItemsInitialization(t *testing.T) {
 	thread, err := NewThread(config)
 	require.NoError(t, err)
 
-	// Verify pendingItems is initialized (not nil)
-	assert.NotNil(t, thread.pendingItems)
 	assert.NotNil(t, thread.inputItems)
-
-	// Verify lastResponseID is initially empty
-	assert.Empty(t, thread.lastResponseID)
 }
 
 // Integration tests that use the real OpenAI API
@@ -1413,12 +1336,6 @@ func TestIntegration_CompactContext(t *testing.T) {
 	originalItemCount := len(thread.inputItems)
 	t.Logf("Original input items count: %d", originalItemCount)
 
-	// Set a fake lastResponseID to verify it gets cleared
-	thread.lastResponseID = "fake-response-id"
-
-	// Add some fake pending items
-	thread.pendingItems = thread.inputItems
-
 	// Compact the context
 	err = thread.CompactContext(ctx)
 	require.NoError(t, err)
@@ -1432,12 +1349,6 @@ func TestIntegration_CompactContext(t *testing.T) {
 	// (user messages + one compaction item)
 	assert.LessOrEqual(t, len(thread.inputItems), originalItemCount+1,
 		"Compacted items should be fewer or equal to original")
-
-	// Verify that lastResponseID was cleared
-	assert.Empty(t, thread.lastResponseID, "lastResponseID should be cleared after compaction")
-
-	// Verify that pendingItems was cleared
-	assert.Nil(t, thread.pendingItems, "pendingItems should be cleared after compaction")
 
 	// Verify that tool results were cleared
 	assert.Empty(t, thread.ToolResults, "ToolResults should be cleared after compaction")
@@ -1475,8 +1386,6 @@ func TestIntegration_SendMessageAndCompact(t *testing.T) {
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
 
 	// Send a message and get a response
-	// Note: We don't use NoSaveConversation here because we want to test the full flow
-	// including lastResponseID being set (NoSaveConversation restores original state)
 	_, err = thread.SendMessage(ctx, "What is 2 + 2? Reply with just the number.", handler, llmtypes.MessageOpt{
 		NoToolUse: true,
 		MaxTurns:  1,
@@ -1487,10 +1396,6 @@ func TestIntegration_SendMessageAndCompact(t *testing.T) {
 	t.Logf("Response: %s", response)
 	assert.NotEmpty(t, response)
 
-	// Verify we have a lastResponseID from the interaction
-	assert.NotEmpty(t, thread.lastResponseID, "Should have lastResponseID after SendMessage")
-	t.Logf("lastResponseID after first message: %s", thread.lastResponseID)
-
 	// Store the count before compacting
 	itemCountBeforeCompact := len(thread.inputItems)
 	t.Logf("Input items before compact: %d", itemCountBeforeCompact)
@@ -1500,9 +1405,6 @@ func TestIntegration_SendMessageAndCompact(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Logf("Input items after compact: %d", len(thread.inputItems))
-
-	// Verify lastResponseID was cleared
-	assert.Empty(t, thread.lastResponseID, "lastResponseID should be cleared after compaction")
 
 	// Verify we can still continue the conversation after compaction
 	handler2 := &llmtypes.StringCollectorHandler{Silent: true}
@@ -1515,9 +1417,6 @@ func TestIntegration_SendMessageAndCompact(t *testing.T) {
 	response2 := handler2.CollectedText()
 	t.Logf("Response after compact: %s", response2)
 	assert.NotEmpty(t, response2)
-
-	// Verify a new lastResponseID was set after the second message
-	assert.NotEmpty(t, thread.lastResponseID, "Should have new lastResponseID after second SendMessage")
 }
 
 // splitWords is a simple helper to count words in a string
@@ -1583,7 +1482,6 @@ func TestProcessMessageExchangeSavesConversationPerTurn(t *testing.T) {
 			},
 		},
 	}
-	thread.pendingItems = append([]openairesponses.ResponseInputItemUnionParam{}, thread.inputItems...)
 	thread.storedItems = []StoredInputItem{{Type: "message", Role: "user", Content: "hello"}}
 
 	thread.newStreamingFunc = func(_ context.Context, _ openairesponses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
@@ -1637,7 +1535,6 @@ func TestProcessMessageExchangeInjectsPendingSteer(t *testing.T) {
 			},
 		},
 	}
-	thread.pendingItems = append([]openairesponses.ResponseInputItemUnionParam{}, thread.inputItems...)
 	thread.storedItems = []StoredInputItem{{Type: "message", Role: "user", Content: "hello"}}
 
 	var capturedParams openairesponses.ResponseNewParams
@@ -1659,7 +1556,6 @@ func TestProcessMessageExchangeInjectsPendingSteer(t *testing.T) {
 	assert.Contains(t, handler.CollectedText(), "🗣️ User steering: Please focus on error handling")
 
 	require.Len(t, thread.inputItems, 2)
-	require.Len(t, thread.pendingItems, 2)
 	require.Len(t, thread.storedItems, 2)
 	assert.Equal(t, "Please focus on error handling", thread.storedItems[1].Content)
 	assert.False(t, steerStore.HasPendingSteer("conv-test"))
@@ -1686,7 +1582,6 @@ func TestProcessMessageExchangeRegistersNativeOpenAISearchToolInRequest(t *testi
 			},
 		},
 	}
-	thread.pendingItems = append([]openairesponses.ResponseInputItemUnionParam{}, thread.inputItems...)
 	thread.storedItems = []StoredInputItem{{Type: "message", Role: "user", Content: "hello"}}
 
 	var capturedParams openairesponses.ResponseNewParams
@@ -1714,6 +1609,68 @@ func TestProcessMessageExchangeRegistersNativeOpenAISearchToolInRequest(t *testi
 	assert.Equal(t, openairesponses.ToolChoiceOptionsAuto, capturedParams.ToolChoice.OfToolChoiceMode.Value)
 }
 
+func TestProcessMessageExchangeMirrorsCodexPromptCachingRequestShape(t *testing.T) {
+	config := llmtypes.Config{
+		Provider: "openai",
+		Model:    "gpt-4.1",
+		OpenAI: &llmtypes.OpenAIConfig{
+			Platform: "openai",
+			APIMode:  llmtypes.OpenAIAPIModeResponses,
+		},
+	}
+	thread := &Thread{
+		Thread: base.NewThread(config, "conv-test", hooks.Trigger{}),
+	}
+	thread.inputItems = []openairesponses.ResponseInputItemUnionParam{
+		{
+			OfMessage: &openairesponses.EasyInputMessageParam{
+				Role:    openairesponses.EasyInputMessageRoleUser,
+				Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("hello 1")},
+			},
+		},
+		{
+			OfMessage: &openairesponses.EasyInputMessageParam{
+				Role:    openairesponses.EasyInputMessageRoleAssistant,
+				Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("hi")},
+			},
+		},
+		{
+			OfMessage: &openairesponses.EasyInputMessageParam{
+				Role:    openairesponses.EasyInputMessageRoleUser,
+				Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("hello 2")},
+			},
+		},
+	}
+	thread.storedItems = []StoredInputItem{
+		{Type: "message", Role: "user", Content: "hello 1"},
+		{Type: "message", Role: "assistant", Content: "hi"},
+		{Type: "message", Role: "user", Content: "hello 2"},
+	}
+
+	var capturedParams openairesponses.ResponseNewParams
+	thread.newStreamingFunc = func(_ context.Context, params openairesponses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
+		capturedParams = params
+		return nil
+	}
+	thread.processStreamFunc = func(_ context.Context, _ *ssestream.Stream[openairesponses.ResponseStreamEventUnion], _ llmtypes.MessageHandler, _ string, _ llmtypes.MessageOpt) (processStreamResult, error) {
+		return processStreamResult{responseCompleted: true}, nil
+	}
+
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
+	_, _, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-4.1", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
+	require.NoError(t, err)
+
+	require.Len(t, capturedParams.Input.OfInputItemList, len(thread.inputItems), "full input history should be replayed")
+	assert.Equal(t, "hello 1", extractInputItemText(capturedParams.Input.OfInputItemList[0]))
+	assert.Equal(t, "hi", extractInputItemText(capturedParams.Input.OfInputItemList[1]))
+	assert.Equal(t, "hello 2", extractInputItemText(capturedParams.Input.OfInputItemList[2]))
+	assert.True(t, capturedParams.PromptCacheKey.Valid())
+	assert.Equal(t, "conv-test", capturedParams.PromptCacheKey.Value)
+	assert.False(t, capturedParams.PreviousResponseID.Valid(), "should not use previous_response_id")
+	assert.True(t, capturedParams.Store.Valid())
+	assert.False(t, capturedParams.Store.Value, "should mirror Codex by disabling stored conversation state")
+}
+
 func TestProcessMessageExchangeSavesConversationOnError(t *testing.T) {
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", IsSubAgent: true, OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
 	thread := &Thread{
@@ -1732,7 +1689,6 @@ func TestProcessMessageExchangeSavesConversationOnError(t *testing.T) {
 			},
 		},
 	}
-	thread.pendingItems = append([]openairesponses.ResponseInputItemUnionParam{}, thread.inputItems...)
 	thread.storedItems = []StoredInputItem{{Type: "message", Role: "user", Content: "hello"}}
 
 	thread.newStreamingFunc = func(_ context.Context, _ openairesponses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
@@ -1765,7 +1721,6 @@ func TestProcessMessageExchangeCodexUsesDefaultStreamingOptions(t *testing.T) {
 			},
 		},
 	}
-	thread.pendingItems = append([]openairesponses.ResponseInputItemUnionParam{}, thread.inputItems...)
 	thread.storedItems = []StoredInputItem{{Type: "message", Role: "user", Content: "hello"}}
 
 	streamingOptsCount := 0
@@ -1786,10 +1741,9 @@ func TestProcessMessageExchangeCodexUsesDefaultStreamingOptions(t *testing.T) {
 func TestSendMessageRequiresResponseCompletedEvent(t *testing.T) {
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", IsSubAgent: true}
 	thread := &Thread{
-		Thread:       base.NewThread(config, "conv-test", hooks.Trigger{}),
-		inputItems:   make([]openairesponses.ResponseInputItemUnionParam, 0),
-		pendingItems: make([]openairesponses.ResponseInputItemUnionParam, 0),
-		storedItems:  make([]StoredInputItem, 0),
+		Thread:      base.NewThread(config, "conv-test", hooks.Trigger{}),
+		inputItems:  make([]openairesponses.ResponseInputItemUnionParam, 0),
+		storedItems: make([]StoredInputItem, 0),
 	}
 
 	exchangeCalls := 0

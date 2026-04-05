@@ -4,6 +4,7 @@
 
 Polished the Web UI transcript by rendering tool calls as individual collapsible rows with concise summaries, friendlier native OpenAI web-search labels, and cleaner formatting for persisted thinking blocks.
 Refined composer ergonomics with an expand/restore toggle for longer prompts, plus regression coverage for the updated transcript and chat-page interactions.
+Aligned OpenAI Responses/Codex prompt caching with full-prefix replay, removed obsolete previous-response replay state, and fixed cached-token usage accounting so cache-read totals no longer jump backward.
 
 ## 0.3.27-beta (2026-04-04)
 
