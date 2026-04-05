@@ -1161,9 +1161,9 @@ const ChatPage: React.FC = () => {
 	const canStartNewChat = !sending || hasActiveConversationTarget;
 	const canSteerActiveConversation =
 		hasActiveConversationTarget && steerAvailable;
-	const composerStatus = useMemo(() => {
+	const composerMetaText = useMemo(() => {
 		if (!conversation) {
-			return sending ? "starting…" : "";
+			return "";
 		}
 
 		const parts: string[] = [];
@@ -1173,14 +1173,52 @@ const ChatPage: React.FC = () => {
 			parts.push(contextWindow);
 		}
 
+		const inputTokens = conversation.usage?.inputTokens || 0;
+		const outputTokens = conversation.usage?.outputTokens || 0;
+		const cacheReadTokens = conversation.usage?.cacheReadInputTokens || 0;
+		const cacheWriteTokens = conversation.usage?.cacheCreationInputTokens || 0;
+		const tokenParts: string[] = [];
+
+		if (inputTokens > 0) {
+			tokenParts.push(`in ${Intl.NumberFormat("en-US", {
+				notation: inputTokens >= 1000 ? "compact" : "standard",
+				maximumFractionDigits: inputTokens >= 1000 ? 1 : 0,
+			}).format(inputTokens)}`);
+		}
+
+		if (outputTokens > 0) {
+			tokenParts.push(`out ${Intl.NumberFormat("en-US", {
+				notation: outputTokens >= 1000 ? "compact" : "standard",
+				maximumFractionDigits: outputTokens >= 1000 ? 1 : 0,
+			}).format(outputTokens)}`);
+		}
+
+		if (cacheReadTokens > 0) {
+			tokenParts.push(`cr ${Intl.NumberFormat("en-US", {
+				notation: cacheReadTokens >= 1000 ? "compact" : "standard",
+				maximumFractionDigits: cacheReadTokens >= 1000 ? 1 : 0,
+			}).format(cacheReadTokens)}`);
+		}
+
+		if (cacheWriteTokens > 0) {
+			tokenParts.push(`cw ${Intl.NumberFormat("en-US", {
+				notation: cacheWriteTokens >= 1000 ? "compact" : "standard",
+				maximumFractionDigits: cacheWriteTokens >= 1000 ? 1 : 0,
+			}).format(cacheWriteTokens)}`);
+		}
+
+		if (tokenParts.length > 0) {
+			parts.push(tokenParts.join(", "));
+		}
+
 		parts.push(formatCost(conversation.usage));
 
 		if (conversation.updatedAt) {
 			parts.push(formatCompactRelativeTime(conversation.updatedAt));
 		}
 
-		return parts.join(" · ");
-	}, [conversation, sending, statusTick]);
+		return parts.join(", ");
+	}, [conversation, statusTick]);
 
 	const handleCloseNewChatDialog = () => {
 		setNewChatProfileDraft(
@@ -1460,6 +1498,19 @@ const ChatPage: React.FC = () => {
 									isStreaming={sending}
 									messages={messages}
 								/>
+								{composerMetaText ? (
+									<div className="transcript-meta-strip-shell">
+										<div className="mx-auto w-full max-w-5xl px-4 md:px-8">
+											<p
+												className="transcript-meta-strip"
+												data-testid="transcript-meta-strip"
+												title={composerMetaText}
+											>
+												{composerMetaText}
+											</p>
+										</div>
+									</div>
+								) : null}
 								<div ref={transcriptEndRef} />
 							</>
 						)}
@@ -1526,18 +1577,18 @@ const ChatPage: React.FC = () => {
 								disabled={steering}
 								onChange={(event) => setDraft(event.target.value)}
 								onKeyDown={handleDraftKeyDown}
-									onPaste={handlePaste}
-									placeholder={
-										sending
-											? !hasActiveConversationTarget
-												? "Waiting for conversation to start…"
-												: canSteerActiveConversation
-													? "Steer the active conversation…"
-													: "Steering becomes available if the agent starts another turn…"
-											: "Ask kodelet anything..."
-									}
-									value={draft}
-								/>
+								onPaste={handlePaste}
+								placeholder={
+									sending
+										? !hasActiveConversationTarget
+											? "Waiting for conversation to start…"
+											: canSteerActiveConversation
+												? "Steer the active conversation…"
+												: "Steering becomes available if the agent starts another turn…"
+										: "Ask kodelet anything..."
+								}
+								value={draft}
+							/>
 
 								<div className="border-t border-black/8 px-2.5 pt-2">
 									<div className="composer-footer-row">
@@ -1695,10 +1746,8 @@ const ChatPage: React.FC = () => {
 												</button>
 											)}
 
-											{composerStatus ? (
-												<p className="composer-status-inline">{composerStatus}</p>
-											) : null}
-										</div>
+										<p className="composer-status-inline">Shift+Enter to send</p>
+									</div>
 
 										<div className="composer-status-actions">
 											{sending ? (

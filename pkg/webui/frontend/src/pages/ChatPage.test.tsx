@@ -1204,6 +1204,53 @@ describe("ChatPage", () => {
 		expect(
 			screen.getByText(/work · \/workspace\/default/),
 		).toBeInTheDocument();
+		expect(screen.getByText("Shift+Enter to send")).toBeInTheDocument();
+	});
+
+	it("shows compact usage metadata below the transcript when available", async () => {
+		routeParams = { id: "conv-123" };
+		const updatedAt = new Date(Date.now() - 3 * 60 * 1000).toISOString();
+		mockGetConversation.mockResolvedValue({
+			id: "conv-123",
+			createdAt: "2023-01-02T11:00:00Z",
+			updatedAt,
+			messageCount: 1,
+			messages: [
+				{
+					role: "user",
+					content: "hello",
+				},
+			],
+			toolResults: {},
+			usage: {
+				currentContextWindow: 14200,
+				maxContextWindow: 272000,
+				inputTokens: 1200,
+				outputTokens: 340,
+				cacheReadInputTokens: 8000,
+				cacheCreationInputTokens: 2200,
+				inputCost: 0,
+				outputCost: 0,
+				cacheCreationCost: 0,
+				cacheReadCost: 0,
+			},
+		});
+
+		render(<ChatPage />);
+
+		await waitFor(() =>
+			expect(mockGetConversation).toHaveBeenCalledWith("conv-123"),
+		);
+
+		const meta = screen.getByTestId("transcript-meta-strip");
+		expect(meta).toHaveTextContent("14.2K/272K (5%) context");
+		expect(meta).toHaveTextContent("in 1.2K");
+		expect(meta).toHaveTextContent("out 340");
+		expect(meta).toHaveTextContent("cr 8K");
+		expect(meta).toHaveTextContent("cw 2.2K");
+		expect(meta).toHaveTextContent("$0.0000");
+		expect(meta.textContent).toContain(", in 1.2K, out 340, cr 8K, cw 2.2K, $0.0000,");
+		expect(meta.textContent).toMatch(/\d+m ago|just now/);
 	});
 
 	it("disables delete for the active conversation while it is streaming", async () => {

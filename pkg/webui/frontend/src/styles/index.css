@@ -371,6 +371,25 @@ h6 {
   gap: 0.7rem;
 }
 
+.transcript-meta-strip-shell {
+  width: 100%;
+  padding: 0.15rem 0 0.55rem;
+}
+
+.transcript-meta-strip {
+  margin: 0;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  font-family: var(--font-heading);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: rgba(20, 20, 19, 0.44);
+}
+
 .composer-leading-actions {
   display: inline-flex;
   flex-shrink: 0;
@@ -658,6 +677,10 @@ h6 {
   .composer-status-actions {
     width: 100%;
     justify-content: flex-end;
+  }
+
+  .transcript-meta-strip-shell {
+    padding: 0.1rem 0 0.45rem;
   }
 }
 
