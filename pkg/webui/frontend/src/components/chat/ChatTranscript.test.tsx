@@ -41,6 +41,36 @@ describe('ChatTranscript', () => {
     expect(screen.getByText('inspect repo')).toBeInTheDocument();
   });
 
+  it('normalizes persisted thinking markdown so summary headings are split onto separate paragraphs', () => {
+    const { container } = render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[
+          {
+            role: 'assistant',
+            blocks: [
+              {
+                type: 'thinking',
+                content:
+                  'I can use sentence case and prettify the tool names.**Improving tool text clarity**\n\nI should focus on the essence.',
+                inProgress: false,
+              },
+            ],
+          },
+        ]}
+      />
+    );
+
+    const paragraphs = container.querySelectorAll('details .chat-prose p');
+
+    expect(paragraphs).toHaveLength(3);
+    expect(paragraphs[0]?.textContent).toBe(
+      'I can use sentence case and prettify the tool names.'
+    );
+    expect(paragraphs[1]?.textContent).toBe('Improving tool text clarity');
+    expect(paragraphs[2]?.textContent).toBe('I should focus on the essence.');
+  });
+
   it('auto-collapses a thinking block when streaming finishes', () => {
     const { container, rerender } = render(
       <ChatTranscript

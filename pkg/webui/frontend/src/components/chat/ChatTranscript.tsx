@@ -36,6 +36,13 @@ const renderContent = (content: string | ContentBlock[] | undefined): string => 
     .join('');
 };
 
+const normalizeThinkingMarkdown = (content: string): string =>
+  content
+    .replace(/([^\n])\n(#{1,6}\s)/g, '$1\n\n$2')
+    .replace(/([^\n])\n(\*\*[A-Z][^*\n]+\*\*)/g, '$1\n\n$2')
+    .replace(/([.!?])(?=\*\*[A-Z][^*\n]+\*\*)/g, '$1\n\n')
+    .replace(/([.!?])(?=#{1,6}\s)/g, '$1\n\n');
+
 const formatToolInput = (input: string): string => {
   try {
     return JSON.stringify(JSON.parse(input), null, 2);
@@ -486,7 +493,9 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
                               {hasThinkingContent ? (
                                 <div
                                   className="chat-prose max-w-none text-kodelet-dark"
-                                  dangerouslySetInnerHTML={{ __html: renderContent(block.content) }}
+                                  dangerouslySetInnerHTML={{
+                                    __html: renderContent(normalizeThinkingMarkdown(block.content)),
+                                  }}
                                 />
                               ) : (
                                 <p className="text-sm italic text-kodelet-blue/80">
@@ -516,7 +525,9 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
                           {hasThinkingContent ? (
                             <div
                               className="chat-prose max-w-none text-kodelet-dark"
-                              dangerouslySetInnerHTML={{ __html: renderContent(block.content) }}
+                              dangerouslySetInnerHTML={{
+                                __html: renderContent(normalizeThinkingMarkdown(block.content)),
+                              }}
                             />
                           ) : (
                             <p className="text-sm italic text-kodelet-blue/80">
