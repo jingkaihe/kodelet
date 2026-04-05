@@ -360,7 +360,7 @@ h6 {
   font-size: 0.72rem;
   font-weight: 600;
   letter-spacing: 0.08em;
-  text-transform: uppercase;
+  text-transform: none;
   color: #7d786d;
 }
 
