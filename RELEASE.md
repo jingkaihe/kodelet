@@ -1,5 +1,10 @@
 # Kodelet
 
+## 0.3.28-beta (2026-04-05)
+
+Polished the Web UI transcript by rendering tool calls as individual collapsible rows with concise summaries, friendlier native OpenAI web-search labels, and cleaner formatting for persisted thinking blocks.
+Refined composer ergonomics with an expand/restore toggle for longer prompts, plus regression coverage for the updated transcript and chat-page interactions.
+
 ## 0.3.27-beta (2026-04-04)
 
 Added Web UI/server auto-compaction controls via `kodelet serve --compact-ratio` and `--disable-auto-compact`, and refreshed the chat sidebar to group recent conversations by working directory with expandable sections.
