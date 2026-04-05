@@ -452,15 +452,12 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
                   >
                     {isUser ? 'You' : 'Ko'}
                   </div>
-                  <div>
-                    <p className="font-heading text-sm font-semibold tracking-tight text-kodelet-dark">
-                      {isUser ? 'You' : 'Kodelet'}
-                    </p>
-                    <p className="eyebrow-label text-kodelet-mid-gray">
-                      {isUser ? 'Prompt' : isStreaming && index === messages.length - 1 ? 'Streaming' : 'Reply'}
-                    </p>
-                  </div>
-                </div>
+					<div>
+						<p className="font-heading text-sm font-semibold tracking-tight text-kodelet-dark">
+							{isUser ? 'You' : 'Kodelet'}
+						</p>
+					</div>
+				</div>
 
                 <CopyButton
                   className="pointer-events-none px-3 py-2 opacity-0 transition-opacity duration-200 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
