@@ -28,7 +28,11 @@ const renderContent = (content: string | ContentBlock[] | undefined): string => 
         if (!imageUrl) {
           return '';
         }
-        return `<img src="${imageUrl}" alt="Uploaded content" class="max-w-full rounded-xl border border-black/10" />`;
+        return [
+          '<figure class="chat-uploaded-image">',
+          `<img src="${imageUrl}" alt="Uploaded content" class="chat-uploaded-image-media" loading="lazy" />`,
+          '</figure>',
+        ].join('');
       }
 
       return '';

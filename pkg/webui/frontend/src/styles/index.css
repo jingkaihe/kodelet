@@ -171,6 +171,27 @@ h6 {
   letter-spacing: 0.01em;
 }
 
+.chat-uploaded-image {
+  width: min(100%, 34rem);
+  margin: 0.9rem 0;
+  padding: 0.65rem;
+  border-radius: 1.1rem;
+  border: 1px solid rgba(20, 20, 19, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.74) 0%, rgba(250, 249, 245, 0.96) 100%);
+  box-shadow: 0 10px 24px rgba(20, 20, 19, 0.08);
+}
+
+.chat-uploaded-image-media {
+  display: block;
+  width: 100%;
+  max-height: 24rem;
+  object-fit: contain;
+  border-radius: 0.8rem;
+  border: 1px solid rgba(20, 20, 19, 0.08);
+  background: rgba(232, 230, 220, 0.42);
+}
+
 .panel-action-button {
   display: inline-flex;
   align-items: center;

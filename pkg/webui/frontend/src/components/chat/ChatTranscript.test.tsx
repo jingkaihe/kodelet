@@ -160,7 +160,7 @@ describe('ChatTranscript', () => {
   });
 
   it('renders embedded base64 images in user content', () => {
-    render(
+    const { container } = render(
       <ChatTranscript
         isStreaming={false}
         messages={[
@@ -185,6 +185,7 @@ describe('ChatTranscript', () => {
       'src',
       'data:image/png;base64,aGVsbG8='
     );
+    expect(container.querySelector('.chat-uploaded-image-media')).toBeInTheDocument();
   });
 
   it('uses an icon-only copy button with an accessible label', () => {
