@@ -9,10 +9,20 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type recordingChatSink struct {
+	events []ChatEvent
+}
+
+func (s *recordingChatSink) Send(event ChatEvent) error {
+	s.events = append(s.events, event)
+	return nil
+}
 
 func TestBuildChatState_BindsTodoPathToConversationID(t *testing.T) {
 	customManager, err := tools.NewCustomToolManager()
@@ -165,4 +175,40 @@ func TestResolveWebChatConfig_ResolvesRelativeCWDFromDefaultWorkspace(t *testing
 	require.NoError(t, err)
 	assert.Equal(t, backendDir, resolvedCWD)
 	assert.Equal(t, backendDir, config.WorkingDirectory)
+}
+
+func TestChatMessageHandler_HandleUsageDeduplicatesSnapshots(t *testing.T) {
+	sink := &recordingChatSink{}
+	handler := &chatMessageHandler{
+		conversationID: "conv-123",
+		sink:           sink,
+	}
+
+	usage := llmtypes.Usage{InputTokens: 100, OutputTokens: 50}
+	handler.HandleUsage(usage)
+	handler.HandleUsage(usage)
+	handler.HandleText("done")
+
+	require.Len(t, sink.events, 2)
+	assert.Equal(t, "usage", sink.events[0].Kind)
+	if assert.NotNil(t, sink.events[0].Usage) {
+		assert.Equal(t, usage, *sink.events[0].Usage)
+	}
+	assert.Equal(t, "text", sink.events[1].Kind)
+}
+
+func TestChatMessageHandler_HandleToolResultBackfillsToolName(t *testing.T) {
+	sink := &recordingChatSink{}
+	handler := &chatMessageHandler{
+		conversationID: "conv-123",
+		sink:           sink,
+	}
+
+	handler.HandleToolResult("tool-1", "bash", tooltypes.BaseToolResult{Result: "ok"})
+
+	require.Len(t, sink.events, 1)
+	assert.Equal(t, "tool-result", sink.events[0].Kind)
+	if assert.NotNil(t, sink.events[0].ToolResult) {
+		assert.Equal(t, "bash", sink.events[0].ToolResult.ToolName)
+	}
 }

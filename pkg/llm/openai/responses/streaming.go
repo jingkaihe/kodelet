@@ -380,6 +380,9 @@ func (t *Thread) processStream(
 	// Update usage from final response
 	if finalResponse != nil {
 		t.updateUsage(finalResponse.Usage)
+		if usageHandler, ok := handler.(llmtypes.UsageMessageHandler); ok {
+			usageHandler.HandleUsage(t.GetUsage())
+		}
 
 		if !t.Config.IsSubAgent && !opt.DisableUsageLog {
 			usage.LogLLMUsage(ctx, t.GetUsage(), model, apiStartTime, int(finalResponse.Usage.OutputTokens))

@@ -554,6 +554,9 @@ func (t *Thread) processMessageExchange(
 	t.messages = append(t.messages, response.ToParam())
 
 	t.updateUsage(response, model)
+	if usageHandler, ok := handler.(llmtypes.UsageMessageHandler); ok {
+		usageHandler.HandleUsage(t.GetUsage())
+	}
 
 	// Process the response content blocks - first pass: handle text/thinking, collect tool blocks
 	var toolBlocks []struct {

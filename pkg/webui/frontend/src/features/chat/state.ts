@@ -200,6 +200,7 @@ export const applyChatStreamEvent = (
 
   switch (event.kind) {
     case 'conversation':
+    case 'usage':
     case 'done':
     case 'error':
       return nextMessages;

@@ -505,6 +505,9 @@ func (t *Thread) processMessageExchange(
 
 	// Update usage tracking
 	t.updateUsage(response.Usage, model)
+	if usageHandler, ok := handler.(llmtypes.UsageMessageHandler); ok {
+		usageHandler.HandleUsage(t.GetUsage())
+	}
 
 	// Process the response
 	if len(response.Choices) == 0 {

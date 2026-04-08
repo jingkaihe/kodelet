@@ -432,6 +432,9 @@ func (t *Thread) processMessageExchange(
 
 	// Update usage statistics
 	t.updateUsage(response.Usage)
+	if usageHandler, ok := handler.(llmtypes.UsageMessageHandler); ok {
+		usageHandler.HandleUsage(t.GetUsage())
+	}
 
 	// Execute tool calls if any
 	toolsUsed := t.hasToolCalls(response)

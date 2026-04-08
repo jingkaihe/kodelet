@@ -50,6 +50,20 @@ const normalizeConversation = (conversation: Conversation): Conversation => ({
 	toolResults: conversation.toolResults || {},
 });
 
+const mergeConversationUsage = (
+	currentConversation: Conversation | null,
+	usage: Conversation["usage"],
+): Conversation | null => {
+	if (!currentConversation || !usage) {
+		return currentConversation;
+	}
+
+	return {
+		...currentConversation,
+		usage,
+	};
+};
+
 const getGreeting = (): string => {
 	const hour = new Date().getHours();
 	if (hour < 12) {
@@ -514,6 +528,13 @@ const ChatPage: React.FC = () => {
 						return;
 					}
 
+					if (event.kind === "usage" && event.usage) {
+						setConversation((currentConversation) =>
+							mergeConversationUsage(currentConversation, event.usage),
+						);
+						return;
+					}
+
 					if (event.kind === "done" || event.kind === "error") {
 						setSending(false);
 					}
@@ -839,6 +860,13 @@ const ChatPage: React.FC = () => {
 									}),
 								);
 							}
+						}
+
+						if (event.kind === "usage" && event.usage) {
+							setConversation((currentConversation) =>
+								mergeConversationUsage(currentConversation, event.usage),
+							);
+							return;
 						}
 
 						if (event.kind === "error") {

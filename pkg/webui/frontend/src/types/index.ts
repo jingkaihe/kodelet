@@ -172,6 +172,7 @@ export interface PendingImageAttachment {
 export interface ChatStreamEvent {
   kind:
     | 'conversation'
+    | 'usage'
     | 'thinking-start'
     | 'thinking-delta'
     | 'thinking-end'
@@ -187,6 +188,7 @@ export interface ChatStreamEvent {
   role?: 'user' | 'assistant';
   delta?: string;
   content?: string;
+  usage?: Usage;
   tool_name?: string;
   tool_call_id?: string;
   input?: string;

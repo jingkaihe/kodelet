@@ -276,6 +276,27 @@ describe('applyChatStreamEvent', () => {
     ]);
   });
 
+  it('ignores usage events for transcript rendering', () => {
+    const messages: ChatRenderMessage[] = [
+      {
+        role: 'user',
+        content: 'hello',
+      },
+    ];
+
+    const nextMessages = applyChatStreamEvent(messages, {
+      kind: 'usage',
+      conversation_id: 'conv-123',
+      role: 'assistant',
+      usage: {
+        inputTokens: 100,
+        outputTokens: 50,
+      },
+    });
+
+    expect(nextMessages).toEqual(messages);
+  });
+
   it('keeps later streamed text in the same assistant container after tool events', () => {
     let messages: ChatRenderMessage[] = [
       {

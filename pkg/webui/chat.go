@@ -57,6 +57,7 @@ type ChatEvent struct {
 	Role           string                          `json:"role,omitempty"`
 	Delta          string                          `json:"delta,omitempty"`
 	Content        string                          `json:"content,omitempty"`
+	Usage          *llmtypes.Usage                 `json:"usage,omitempty"`
 	ToolName       string                          `json:"tool_name,omitempty"`
 	ToolCallID     string                          `json:"tool_call_id,omitempty"`
 	Input          string                          `json:"input,omitempty"`
@@ -453,6 +454,16 @@ type chatMessageHandler struct {
 	conversationID string
 	sink           ChatEventSink
 	broadcast      func(string, ChatEvent)
+	usageMu        sync.Mutex
+	hasLastUsage   bool
+	lastUsage      llmtypes.Usage
+}
+
+func (h *chatMessageHandler) sendEvent(event ChatEvent) {
+	_ = h.sink.Send(event)
+	if h.broadcast != nil {
+		h.broadcast(h.conversationID, event)
+	}
 }
 
 func (h *chatMessageHandler) HandleText(text string) {
@@ -466,10 +477,7 @@ func (h *chatMessageHandler) HandleText(text string) {
 		ConversationID: h.conversationID,
 		Role:           "assistant",
 	}
-	_ = h.sink.Send(event)
-	if h.broadcast != nil {
-		h.broadcast(h.conversationID, event)
-	}
+	h.sendEvent(event)
 }
 
 func (h *chatMessageHandler) HandleToolUse(toolCallID string, toolName string, input string) {
@@ -481,15 +489,12 @@ func (h *chatMessageHandler) HandleToolUse(toolCallID string, toolName string, i
 		ToolName:       toolName,
 		Input:          input,
 	}
-	_ = h.sink.Send(event)
-	if h.broadcast != nil {
-		h.broadcast(h.conversationID, event)
-	}
+	h.sendEvent(event)
 }
 
 func (h *chatMessageHandler) HandleToolResult(toolCallID string, toolName string, result tooltypes.ToolResult) {
 	structuredResult := result.StructuredData()
-	if structuredResult.ToolName == "" {
+	if structuredResult.ToolName == "" || structuredResult.ToolName == "unknown" {
 		structuredResult.ToolName = toolName
 	}
 
@@ -501,10 +506,7 @@ func (h *chatMessageHandler) HandleToolResult(toolCallID string, toolName string
 		ToolName:       structuredResult.ToolName,
 		ToolResult:     &structuredResult,
 	}
-	_ = h.sink.Send(event)
-	if h.broadcast != nil {
-		h.broadcast(h.conversationID, event)
-	}
+	h.sendEvent(event)
 }
 
 func (h *chatMessageHandler) HandleThinking(thinking string) {
@@ -518,13 +520,28 @@ func (h *chatMessageHandler) HandleThinking(thinking string) {
 		ConversationID: h.conversationID,
 		Role:           "assistant",
 	}
-	_ = h.sink.Send(event)
-	if h.broadcast != nil {
-		h.broadcast(h.conversationID, event)
-	}
+	h.sendEvent(event)
 }
 
 func (h *chatMessageHandler) HandleDone() {}
+
+func (h *chatMessageHandler) HandleUsage(usage llmtypes.Usage) {
+	h.usageMu.Lock()
+	if h.hasLastUsage && h.lastUsage == usage {
+		h.usageMu.Unlock()
+		return
+	}
+	h.lastUsage = usage
+	h.hasLastUsage = true
+	h.usageMu.Unlock()
+
+	h.sendEvent(ChatEvent{
+		Kind:           "usage",
+		ConversationID: h.conversationID,
+		Role:           "assistant",
+		Usage:          &usage,
+	})
+}
 
 func (h *chatMessageHandler) HandleTextDelta(delta string) {
 	if delta == "" {
@@ -537,10 +554,7 @@ func (h *chatMessageHandler) HandleTextDelta(delta string) {
 		ConversationID: h.conversationID,
 		Role:           "assistant",
 	}
-	_ = h.sink.Send(event)
-	if h.broadcast != nil {
-		h.broadcast(h.conversationID, event)
-	}
+	h.sendEvent(event)
 }
 
 func (h *chatMessageHandler) HandleThinkingStart() {
@@ -549,10 +563,7 @@ func (h *chatMessageHandler) HandleThinkingStart() {
 		ConversationID: h.conversationID,
 		Role:           "assistant",
 	}
-	_ = h.sink.Send(event)
-	if h.broadcast != nil {
-		h.broadcast(h.conversationID, event)
-	}
+	h.sendEvent(event)
 }
 
 func (h *chatMessageHandler) HandleThinkingDelta(delta string) {
@@ -566,10 +577,7 @@ func (h *chatMessageHandler) HandleThinkingDelta(delta string) {
 		ConversationID: h.conversationID,
 		Role:           "assistant",
 	}
-	_ = h.sink.Send(event)
-	if h.broadcast != nil {
-		h.broadcast(h.conversationID, event)
-	}
+	h.sendEvent(event)
 }
 
 func (h *chatMessageHandler) HandleThinkingBlockEnd() {
@@ -578,10 +586,7 @@ func (h *chatMessageHandler) HandleThinkingBlockEnd() {
 		ConversationID: h.conversationID,
 		Role:           "assistant",
 	}
-	_ = h.sink.Send(event)
-	if h.broadcast != nil {
-		h.broadcast(h.conversationID, event)
-	}
+	h.sendEvent(event)
 }
 
 func (h *chatMessageHandler) HandleContentBlockEnd() {
@@ -590,10 +595,7 @@ func (h *chatMessageHandler) HandleContentBlockEnd() {
 		ConversationID: h.conversationID,
 		Role:           "assistant",
 	}
-	_ = h.sink.Send(event)
-	if h.broadcast != nil {
-		h.broadcast(h.conversationID, event)
-	}
+	h.sendEvent(event)
 }
 
 type ndjsonEventSink struct {

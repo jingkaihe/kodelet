@@ -1253,6 +1253,83 @@ describe("ChatPage", () => {
 		expect(meta.textContent).toMatch(/\d+m ago|just now/);
 	});
 
+	it("updates compact usage metadata when a streamed usage event arrives", async () => {
+		routeParams = { id: "conv-123" };
+		mockGetConversation.mockResolvedValue({
+			id: "conv-123",
+			createdAt: "2023-01-02T11:00:00Z",
+			updatedAt: "2023-01-02T11:05:00Z",
+			messageCount: 1,
+			messages: [
+				{
+					role: "user",
+					content: "hello",
+				},
+			],
+			toolResults: {},
+			usage: {
+				currentContextWindow: 1000,
+				maxContextWindow: 272000,
+				inputTokens: 100,
+				outputTokens: 20,
+				inputCost: 0,
+				outputCost: 0,
+				cacheCreationCost: 0,
+				cacheReadCost: 0,
+			},
+		});
+
+		let streamOptions: { onEvent: (event: ChatStreamEvent) => void } | null =
+			null;
+		mockStreamConversation.mockImplementation(async (_id, options) => {
+			streamOptions = options as { onEvent: (event: ChatStreamEvent) => void };
+			return new Promise(() => undefined);
+		});
+
+		render(<ChatPage />);
+
+		await waitFor(() =>
+			expect(mockGetConversation).toHaveBeenCalledWith("conv-123"),
+		);
+		await waitFor(() =>
+			expect(mockStreamConversation).toHaveBeenCalledWith(
+				"conv-123",
+				expect.any(Object),
+			),
+		);
+
+		expect(screen.getByTestId("transcript-meta-strip")).toHaveTextContent(
+			"in 100",
+		);
+
+		await act(async () => {
+			streamOptions?.onEvent({
+				kind: "usage",
+				conversation_id: "conv-123",
+				usage: {
+					currentContextWindow: 2400,
+					maxContextWindow: 272000,
+					inputTokens: 100,
+					outputTokens: 140,
+					cacheReadInputTokens: 50,
+					inputCost: 0.0001,
+					outputCost: 0.0002,
+					cacheCreationCost: 0,
+					cacheReadCost: 0,
+				},
+			});
+		});
+
+		await waitFor(() => {
+			const meta = screen.getByTestId("transcript-meta-strip");
+			expect(meta).toHaveTextContent("2.4K/272K (1%) context");
+			expect(meta).toHaveTextContent("in 100");
+			expect(meta).toHaveTextContent("out 140");
+			expect(meta).toHaveTextContent("cr 50");
+			expect(meta).toHaveTextContent("$0.0003");
+		});
+	});
+
 	it("disables delete for the active conversation while it is streaming", async () => {
 		routeParams = { id: "conv-123" };
 

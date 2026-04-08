@@ -17,6 +17,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
@@ -856,6 +857,55 @@ func TestServer_handleStreamConversation(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "text-delta", secondEvent.Kind)
 	assert.Equal(t, "hi", secondEvent.Delta)
+}
+
+func TestServer_handleStreamConversationForwardsUsageEvents(t *testing.T) {
+	server := &Server{
+		conversationService: &mockConversationService{},
+		router:              mux.NewRouter(),
+		activeChats:         map[string]*activeChatRun{"conv-123": newActiveChatRun(func() {})},
+		chatSubscribers:     make(map[string]map[*subscriberEventSink]struct{}),
+	}
+
+	req := httptest.NewRequest("GET", "/api/conversations/conv-123/stream", nil)
+	req = mux.SetURLVars(req, map[string]string{"id": "conv-123"})
+	w := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		server.handleStreamConversation(w, req)
+		close(done)
+	}()
+
+	require.Eventually(t, func() bool {
+		server.chatSubscribersMu.Lock()
+		defer server.chatSubscribersMu.Unlock()
+		return len(server.chatSubscribers["conv-123"]) == 1
+	}, time.Second, 10*time.Millisecond)
+
+	server.broadcastChatEvent("conv-123", ChatEvent{
+		Kind:           "usage",
+		ConversationID: "conv-123",
+		Role:           "assistant",
+		Usage: &llmtypes.Usage{
+			InputTokens:  120,
+			OutputTokens: 45,
+		},
+	})
+	server.closeChatSubscribers("conv-123")
+	<-done
+
+	lines := strings.Split(strings.TrimSpace(w.Body.String()), "\n")
+	require.Len(t, lines, 2)
+
+	var usageEvent ChatEvent
+	err := json.Unmarshal([]byte(lines[1]), &usageEvent)
+	require.NoError(t, err)
+	assert.Equal(t, "usage", usageEvent.Kind)
+	if assert.NotNil(t, usageEvent.Usage) {
+		assert.Equal(t, 120, usageEvent.Usage.InputTokens)
+		assert.Equal(t, 45, usageEvent.Usage.OutputTokens)
+	}
 }
 
 func TestServer_handleDeleteConversationRejectsActiveRun(t *testing.T) {

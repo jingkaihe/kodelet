@@ -56,6 +56,12 @@ type StreamingMessageHandler interface {
 	HandleContentBlockEnd()           // Called when any content block ends
 }
 
+// UsageMessageHandler receives cumulative usage snapshots while a message is being
+// processed. Implementations can use this to surface live token usage updates.
+type UsageMessageHandler interface {
+	HandleUsage(usage Usage)
+}
+
 // MessageEvent represents an event from processing a message
 type MessageEvent struct {
 	Type    string
