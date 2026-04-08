@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.3.29-beta (2026-04-07)
+
+Bumped the embedded Web UI frontend's Vite dev dependency from `^6.4.1` to `^6.4.2`.
+
 ## 0.3.28-beta (2026-04-05)
 
 Polished the Web UI transcript by rendering tool calls as individual collapsible rows with concise summaries, friendlier native OpenAI web-search labels, and cleaner formatting for persisted thinking blocks.
