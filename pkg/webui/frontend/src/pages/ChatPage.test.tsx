@@ -1279,10 +1279,11 @@ describe("ChatPage", () => {
 			},
 		});
 
-		let streamOptions: { onEvent: (event: ChatStreamEvent) => void } | null =
-			null;
+		const streamListeners: Array<(event: ChatStreamEvent) => void> = [];
 		mockStreamConversation.mockImplementation(async (_id, options) => {
-			streamOptions = options as { onEvent: (event: ChatStreamEvent) => void };
+			streamListeners.push(
+				(options as { onEvent: (event: ChatStreamEvent) => void }).onEvent,
+			);
 			return new Promise(() => undefined);
 		});
 
@@ -1297,13 +1298,14 @@ describe("ChatPage", () => {
 				expect.any(Object),
 			),
 		);
+		expect(streamListeners).toHaveLength(1);
 
 		expect(screen.getByTestId("transcript-meta-strip")).toHaveTextContent(
 			"in 100",
 		);
 
 		await act(async () => {
-			streamOptions?.onEvent({
+			streamListeners[0]?.({
 				kind: "usage",
 				conversation_id: "conv-123",
 				usage: {
@@ -1328,6 +1330,18 @@ describe("ChatPage", () => {
 			expect(meta).toHaveTextContent("cr 50");
 			expect(meta).toHaveTextContent("$0.0003");
 		});
+
+		expect(mockStreamConversation).toHaveBeenCalledTimes(1);
+
+		await act(async () => {
+			streamListeners[0]?.({
+				kind: "text-delta",
+				conversation_id: "conv-123",
+				delta: "stream continues",
+			});
+		});
+
+		expect(screen.getByText("stream continues")).toBeInTheDocument();
 	});
 
 	it("disables delete for the active conversation while it is streaming", async () => {

@@ -265,6 +265,7 @@ const ChatPage: React.FC = () => {
 	const [isResizingSidebar, setIsResizingSidebar] = useState(false);
 	const [newChatDialogOpen, setNewChatDialogOpen] = useState(false);
 	const [statusTick, setStatusTick] = useState(0);
+	const loadedConversationId = conversation?.id ?? null;
 	const transcriptEndRef = useRef<HTMLDivElement | null>(null);
 	const abortControllerRef = useRef<AbortController | null>(null);
 	const resumeControllerRef = useRef<AbortController | null>(null);
@@ -498,7 +499,7 @@ const ChatPage: React.FC = () => {
 		if (
 			!conversationId ||
 			conversationLoading ||
-			conversation?.id !== conversationId
+			loadedConversationId !== conversationId
 		) {
 			return;
 		}
@@ -596,7 +597,7 @@ const ChatPage: React.FC = () => {
 				resumeControllerRef.current = null;
 			}
 		};
-	}, [conversation, conversationId, conversationLoading]);
+	}, [conversationId, conversationLoading, loadedConversationId]);
 
 	useEffect(() => {
 		transcriptEndRef.current?.scrollIntoView({
