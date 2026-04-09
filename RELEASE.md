@@ -1,10 +1,14 @@
 # Kodelet
 
-## Unreleased
+## 0.3.31-beta (2026-04-09)
 
 Stream live cumulative token/cost usage snapshots from Anthropic, Google, OpenAI, and OpenAI Responses into the Web UI so compact chat metadata updates during active runs without requiring a reload.
 
 Upgraded OpenTelemetry tracing dependencies to `v1.43.0` and refreshed compatible transitive Go modules to resolve the repo's open Dependabot security alerts for `go.opentelemetry.io/otel/sdk` and `go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp`.
+
+Added support for plugin-bundled executable custom tools: `kodelet plugin` install/list/show now detects and reports plugin `tools/` alongside skills, recipes, and hooks, while custom tool discovery now loads tool executables from local/global plugin directories with documented precedence over duplicate names.
+
+Increased the default custom tool execution timeout from `30s` to `120s` in config/docs to better accommodate slower external tools.
 
 ## 0.3.29-beta (2026-04-07)
 
