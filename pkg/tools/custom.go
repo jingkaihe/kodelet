@@ -84,7 +84,7 @@ func LoadCustomToolConfig() CustomToolConfig {
 		Enabled:       true,
 		GlobalDir:     "~/.kodelet/tools",
 		LocalDir:      "./.kodelet/tools",
-		Timeout:       30 * time.Second,
+		Timeout:       120 * time.Second,
 		MaxOutputSize: 102400, // 100KB
 	}
 

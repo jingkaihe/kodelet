@@ -1160,8 +1160,8 @@ custom_tools:
   # Local tools directory (default: ./.kodelet/tools)
   local_dir: "./.kodelet/tools"
 
-  # Execution timeout (default: 30s)
-  timeout: 30s
+  # Execution timeout (default: 120s)
+  timeout: 120s
 
   # Maximum output size (default: 100KB)
   max_output_size: 102400
