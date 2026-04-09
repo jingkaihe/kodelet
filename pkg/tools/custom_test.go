@@ -585,8 +585,114 @@ func TestCustomToolManager_DiscoverTools_WithWhitelist(t *testing.T) {
 	})
 }
 
+func TestCustomToolManager_DiscoverTools_FromPluginDirectories(t *testing.T) {
+	tempDir := t.TempDir()
+	globalPluginsDir := filepath.Join(tempDir, "global-plugins")
+	localPluginsDir := filepath.Join(tempDir, "local-plugins")
+
+	createMockTool(t, filepath.Join(globalPluginsDir, "org1@repo1", "tools"), "global-plugin-tool")
+	createMockTool(t, filepath.Join(localPluginsDir, "org2@repo2", "tools"), "local-plugin-tool")
+
+	manager := &CustomToolManager{
+		tools:            make(map[string]*CustomTool),
+		globalDir:        filepath.Join(tempDir, "global-tools"),
+		localDir:         filepath.Join(tempDir, "local-tools"),
+		globalPluginsDir: globalPluginsDir,
+		localPluginsDir:  localPluginsDir,
+		config: CustomToolConfig{
+			Enabled:       true,
+			Timeout:       5 * time.Second,
+			MaxOutputSize: 1024,
+		},
+	}
+
+	err := manager.DiscoverTools(context.Background())
+	require.NoError(t, err)
+
+	tools := manager.ListTools()
+	toolNames := make([]string, len(tools))
+	for i, tool := range tools {
+		toolNames[i] = strings.TrimPrefix(tool.Name(), "custom_tool_")
+	}
+
+	assert.ElementsMatch(t, []string{"global-plugin-tool", "local-plugin-tool"}, toolNames)
+}
+
+func TestCustomToolManager_DiscoverTools_PluginPrecedence(t *testing.T) {
+	tempDir := t.TempDir()
+	globalPluginsDir := filepath.Join(tempDir, "global-plugins")
+	globalDir := filepath.Join(tempDir, "global-tools")
+	localPluginsDir := filepath.Join(tempDir, "local-plugins")
+	localDir := filepath.Join(tempDir, "local-tools")
+
+	createMockToolWithOutput(t, filepath.Join(globalPluginsDir, "org1@repo1", "tools"), "shared-tool", "global-plugin")
+	createMockToolWithOutput(t, globalDir, "shared-tool", "global-standalone")
+	createMockToolWithOutput(t, filepath.Join(localPluginsDir, "org1@repo1", "tools"), "shared-tool", "local-plugin")
+	createMockToolWithOutput(t, localDir, "shared-tool", "local-standalone")
+
+	manager := &CustomToolManager{
+		tools:            make(map[string]*CustomTool),
+		globalDir:        globalDir,
+		localDir:         localDir,
+		globalPluginsDir: globalPluginsDir,
+		localPluginsDir:  localPluginsDir,
+		config: CustomToolConfig{
+			Enabled:       true,
+			Timeout:       5 * time.Second,
+			MaxOutputSize: 1024,
+		},
+	}
+
+	err := manager.DiscoverTools(context.Background())
+	require.NoError(t, err)
+
+	tool, exists := manager.GetTool("shared-tool")
+	require.True(t, exists)
+	assert.Equal(t, filepath.Join(localDir, "shared-tool"), tool.execPath)
+
+	result := tool.Execute(context.Background(), nil, `{}`)
+	assert.False(t, result.IsError())
+	assert.Contains(t, result.GetResult(), "local-standalone")
+}
+
+func TestCustomToolManager_DiscoverTools_GlobalStandaloneOverridesGlobalPlugin(t *testing.T) {
+	tempDir := t.TempDir()
+	globalPluginsDir := filepath.Join(tempDir, "global-plugins")
+	globalDir := filepath.Join(tempDir, "global-tools")
+
+	createMockToolWithOutput(t, filepath.Join(globalPluginsDir, "org1@repo1", "tools"), "shared-tool", "global-plugin")
+	createMockToolWithOutput(t, globalDir, "shared-tool", "global-standalone")
+
+	manager := &CustomToolManager{
+		tools:            make(map[string]*CustomTool),
+		globalDir:        globalDir,
+		localDir:         filepath.Join(tempDir, "local-tools"),
+		globalPluginsDir: globalPluginsDir,
+		localPluginsDir:  filepath.Join(tempDir, "local-plugins"),
+		config: CustomToolConfig{
+			Enabled:       true,
+			Timeout:       5 * time.Second,
+			MaxOutputSize: 1024,
+		},
+	}
+
+	err := manager.DiscoverTools(context.Background())
+	require.NoError(t, err)
+
+	tool, exists := manager.GetTool("shared-tool")
+	require.True(t, exists)
+	assert.Equal(t, filepath.Join(globalDir, "shared-tool"), tool.execPath)
+
+	result := tool.Execute(context.Background(), nil, `{}`)
+	assert.False(t, result.IsError())
+	assert.Contains(t, result.GetResult(), "global-standalone")
+}
+
 // Helper function to create mock tools for testing
 func createMockTool(t *testing.T, dir, name string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+
 	toolPath := filepath.Join(dir, name)
 
 	toolScript := `#!/bin/bash
@@ -594,6 +700,24 @@ if [ "$1" = "description" ]; then
     echo '{"name": "` + name + `", "description": "A test tool named ` + name + `", "input_schema": {"type": "object", "properties": {"message": {"type": "string"}}}}'
 else
     echo "Tool ` + name + ` executed"
+fi
+`
+
+	err := os.WriteFile(toolPath, []byte(toolScript), 0o755)
+	require.NoError(t, err)
+}
+
+func createMockToolWithOutput(t *testing.T, dir, name, output string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+
+	toolPath := filepath.Join(dir, name)
+
+	toolScript := `#!/bin/bash
+if [ "$1" = "description" ]; then
+    echo '{"name": "` + name + `", "description": "A test tool named ` + name + `", "input_schema": {"type": "object"}}'
+else
+    echo "` + output + `"
 fi
 `
 

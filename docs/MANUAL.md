@@ -1136,16 +1136,14 @@ The tool receives JSON input via stdin and can:
 
 ### Directory Structure
 
-Custom tools are discovered from two directories:
+Custom tools are discovered from four locations in precedence order:
 
-**Global Tools**: `~/.kodelet/tools/`
-- Available across all projects
-- Good for general-purpose utilities
+- `./.kodelet/tools/` - Repository-local standalone tools (highest precedence)
+- `./.kodelet/plugins/<org@repo>/tools/` - Repository-local plugin tools
+- `~/.kodelet/tools/` - User-global standalone tools
+- `~/.kodelet/plugins/<org@repo>/tools/` - User-global plugin tools (lowest precedence)
 
-**Local Tools**: `./.kodelet/tools/`
-- Project-specific tools
-- Override global tools with the same name
-- Should be committed to your repository
+All plugin tools use the same executable protocol as standalone custom tools. If multiple tools return the same tool name, the higher-precedence location wins.
 
 ### Custom Tools Configuration
 
@@ -1178,7 +1176,7 @@ custom_tools:
 ```
 
 **Tool Whitelisting:**
-The `tool_white_list` configuration allows you to control which custom tools are loaded and available for use. When the whitelist is empty or not specified, all discovered custom tools in the configured directories will be available. When you specify tool names in the whitelist, only those exact tools will be loaded, providing granular control over which tools are accessible in your environment.
+The `tool_white_list` configuration allows you to control which custom tools are loaded and available for use. When the whitelist is empty or not specified, all discovered custom tools in the configured locations (including plugin `tools/` directories) will be available. When you specify tool names in the whitelist, only those exact tools will be loaded, providing granular control over which tools are accessible in your environment.
 
 **Command Line Override:**
 ```bash

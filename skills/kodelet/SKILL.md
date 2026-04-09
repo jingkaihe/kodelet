@@ -356,8 +356,12 @@ kodelet run --image ./diagram.png --image ./mockup.jpg "Compare these designs"
 Extend kodelet with executable tools in any language:
 
 **Directory structure:**
-- `~/.kodelet/tools/` - Global tools
-- `./.kodelet/tools/` - Project-specific tools
+- `./.kodelet/tools/` - Repository-local standalone tools
+- `./.kodelet/plugins/<org@repo>/tools/` - Repository-local plugin tools
+- `~/.kodelet/tools/` - User-global standalone tools
+- `~/.kodelet/plugins/<org@repo>/tools/` - User-global plugin tools
+
+If the same tool name appears in multiple locations, precedence is local standalone > local plugin > global standalone > global plugin.
 
 **Generate custom tool:**
 ```bash

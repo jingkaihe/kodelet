@@ -410,7 +410,9 @@ subagent_args: ""
 
 
 # Custom Tools Configuration
-# Kodelet can discover and execute custom executable tools from specified directories
+# Kodelet can discover and execute custom executable tools from standalone directories
+# plus plugin directories like ./.kodelet/plugins/<org@repo>/tools and
+# ~/.kodelet/plugins/<org@repo>/tools using the same custom tool protocol.
 custom_tools:
   # Enable/disable custom tools discovery (default: true)
   enabled: true

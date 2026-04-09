@@ -236,6 +236,10 @@ description: A skill
 	require.NoError(t, os.MkdirAll(recipesDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(recipesDir, "my-recipe.md"), []byte("# Recipe"), 0o644))
 
+	toolsDir := filepath.Join(pluginDir, "tools")
+	require.NoError(t, os.MkdirAll(toolsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(toolsDir, "my-tool"), []byte("#!/bin/bash\necho hi\n"), 0o755))
+
 	discovery, err := NewDiscovery(
 		WithBaseDir(tmpDir),
 		WithHomeDir(tmpDir),
@@ -250,6 +254,7 @@ description: A skill
 	assert.Equal(t, "test-plugin", plugin.Name)
 	assert.Equal(t, []string{"my-skill"}, plugin.Skills)
 	assert.Equal(t, []string{"my-recipe"}, plugin.Recipes)
+	assert.Equal(t, []string{"my-tool"}, plugin.Tools)
 }
 
 func TestDiscoverAll(t *testing.T) {

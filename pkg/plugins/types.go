@@ -1,6 +1,7 @@
-// Package plugins provides a unified plugin system for managing both skills
-// (model-invoked capabilities) and recipes (user-invoked templates). It handles
-// discovery, installation, and removal of plugins from GitHub repositories.
+// Package plugins provides a unified plugin system for managing skills
+// (model-invoked capabilities), recipes (user-invoked templates), hooks,
+// and plugin-bundled custom tools. It handles discovery, installation,
+// and removal of plugins from GitHub repositories.
 package plugins
 
 import (
@@ -88,12 +89,13 @@ func (r *RecipePlugin) Directory() string { return r.directory }
 // Type returns the plugin type (recipe)
 func (r *RecipePlugin) Type() PluginType { return PluginTypeRecipe }
 
-// InstalledPlugin represents a plugin package that may contain multiple skills, recipes, and hooks
+// InstalledPlugin represents a plugin package that may contain multiple skills, recipes, tools, and hooks.
 type InstalledPlugin struct {
 	Name    string   // Plugin package name (e.g., "my-plugin-repo")
 	Path    string   // Full path to the plugin directory
 	Skills  []string // List of skill names contained in this plugin
 	Recipes []string // List of recipe names contained in this plugin
+	Tools   []string // List of executable custom tool filenames contained in this plugin
 	Hooks   []string // List of hook names contained in this plugin
 }
 

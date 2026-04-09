@@ -101,6 +101,7 @@ type InstallResult struct {
 	PluginName string
 	Skills     []string
 	Recipes    []string
+	Tools      []string
 	Hooks      []string
 }
 
@@ -180,9 +181,24 @@ func (i *Installer) Install(ctx context.Context, repo string, ref string) (*Inst
 		}
 	}
 
-	if len(result.Skills) == 0 && len(result.Recipes) == 0 && len(result.Hooks) == 0 {
+	toolsDir := filepath.Join(tempDir, toolsSubdir)
+	if tools, err := i.findTools(toolsDir); err == nil && len(tools) > 0 {
+		destToolsDir := filepath.Join(pluginDir, toolsSubdir)
+		if err := os.MkdirAll(destToolsDir, 0o755); err != nil {
+			return nil, errors.Wrap(err, "failed to create tools directory")
+		}
+		for _, tool := range tools {
+			toolName := filepath.Base(tool)
+			if err := i.copyFile(tool, filepath.Join(destToolsDir, toolName)); err != nil {
+				return nil, errors.Wrapf(err, "failed to install tool %s", toolName)
+			}
+			result.Tools = append(result.Tools, toolName)
+		}
+	}
+
+	if len(result.Skills) == 0 && len(result.Recipes) == 0 && len(result.Tools) == 0 && len(result.Hooks) == 0 {
 		os.RemoveAll(pluginDir)
-		return nil, errors.New("no plugins found in repository (expected skills/, recipes/, or hooks/ directories)")
+		return nil, errors.New("no plugins found in repository (expected skills/, recipes/, tools/, or hooks/ directories)")
 	}
 
 	return result, nil
@@ -265,6 +281,21 @@ func (i *Installer) findHooks(dir string) ([]string, error) {
 		}
 	}
 	return hooks, nil
+}
+
+func (i *Installer) findTools(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	var tools []string
+	for _, entry := range entries {
+		if IsExecutableFile(entry) {
+			tools = append(tools, filepath.Join(dir, entry.Name()))
+		}
+	}
+	return tools, nil
 }
 
 func (i *Installer) installRecipe(srcPath, recipesRoot, destRecipesDir string) error {
@@ -432,6 +463,7 @@ func (r *Remover) ListPlugins() ([]string, error) {
 		pluginPath := filepath.Join(pluginsDir, entry.Name())
 		hasSkills := false
 		hasRecipes := false
+		hasTools := false
 		hasHooks := false
 
 		if _, err := os.Stat(filepath.Join(pluginPath, skillsSubdir)); err == nil {
@@ -440,11 +472,14 @@ func (r *Remover) ListPlugins() ([]string, error) {
 		if _, err := os.Stat(filepath.Join(pluginPath, recipesSubdir)); err == nil {
 			hasRecipes = true
 		}
+		if _, err := os.Stat(filepath.Join(pluginPath, toolsSubdir)); err == nil {
+			hasTools = true
+		}
 		if _, err := os.Stat(filepath.Join(pluginPath, hooksSubdir)); err == nil {
 			hasHooks = true
 		}
 
-		if hasSkills || hasRecipes || hasHooks {
+		if hasSkills || hasRecipes || hasTools || hasHooks {
 			// Convert org@repo to org/repo for user-facing output
 			plugins = append(plugins, PluginNameToUserFacing(entry.Name()))
 		}

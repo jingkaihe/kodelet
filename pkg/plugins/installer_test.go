@@ -83,6 +83,8 @@ func TestRemoverListPlugins(t *testing.T) {
 	// Create valid plugins with skills/ or recipes/ subdirectories
 	require.NoError(t, os.MkdirAll(filepath.Join(pluginsDir, "plugin-a", "skills"), 0o755))
 	require.NoError(t, os.MkdirAll(filepath.Join(pluginsDir, "plugin-b", "recipes"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(pluginsDir, "plugin-c", "tools"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(pluginsDir, "plugin-c", "tools", "my-tool"), []byte("#!/bin/bash\necho tool\n"), 0o755))
 	// This is not a valid plugin (no skills/ or recipes/)
 	require.NoError(t, os.MkdirAll(filepath.Join(pluginsDir, "not-a-plugin"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(pluginsDir, "file.txt"), []byte("file"), 0o644))
@@ -94,9 +96,10 @@ func TestRemoverListPlugins(t *testing.T) {
 
 	plugins, err := remover.ListPlugins()
 	require.NoError(t, err)
-	assert.Len(t, plugins, 2)
+	assert.Len(t, plugins, 3)
 	assert.Contains(t, plugins, "plugin-a")
 	assert.Contains(t, plugins, "plugin-b")
+	assert.Contains(t, plugins, "plugin-c")
 }
 
 func TestRemoverListPluginsEmptyDir(t *testing.T) {
@@ -187,6 +190,22 @@ func TestInstallerFindRecipes(t *testing.T) {
 	recipes, err := installer.findRecipes(recipesDir)
 	require.NoError(t, err)
 	assert.Len(t, recipes, 2)
+}
+
+func TestInstallerFindTools(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	toolsDir := filepath.Join(tmpDir, "tools")
+	require.NoError(t, os.MkdirAll(toolsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(toolsDir, "tool-a"), []byte("#!/bin/bash\necho hi\n"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(toolsDir, "README.md"), []byte("ignored"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(toolsDir, "nested"), 0o755))
+
+	installer := &Installer{}
+	tools, err := installer.findTools(toolsDir)
+	require.NoError(t, err)
+	require.Len(t, tools, 1)
+	assert.Equal(t, filepath.Join(toolsDir, "tool-a"), tools[0])
 }
 
 func TestInstallerCopyDir(t *testing.T) {

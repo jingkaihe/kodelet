@@ -57,8 +57,12 @@ type CustomToolManager struct {
 	tools     map[string]*CustomTool
 	globalDir string
 	localDir  string
-	config    CustomToolConfig
-	mu        sync.RWMutex
+
+	globalPluginsDir string
+	localPluginsDir  string
+
+	config CustomToolConfig
+	mu     sync.RWMutex
 }
 
 // NewCustomToolManager creates a new custom tool manager
@@ -69,10 +73,12 @@ func NewCustomToolManager() (*CustomToolManager, error) {
 	localDir := config.LocalDir
 
 	manager := &CustomToolManager{
-		tools:     make(map[string]*CustomTool),
-		globalDir: globalDir,
-		localDir:  localDir,
-		config:    config,
+		tools:            make(map[string]*CustomTool),
+		globalDir:        globalDir,
+		localDir:         localDir,
+		globalPluginsDir: expandHomePath("~/.kodelet/plugins"),
+		localPluginsDir:  filepath.Join(".kodelet", "plugins"),
+		config:           config,
 	}
 
 	return manager, nil
@@ -130,12 +136,49 @@ func (m *CustomToolManager) DiscoverTools(ctx context.Context) error {
 		logger.G(ctx).WithError(err).WithField("dir", m.globalDir).Warn("failed to discover global custom tools")
 	}
 
+	if err := m.discoverToolsFromPluginsDir(ctx, m.globalPluginsDir, false); err != nil {
+		logger.G(ctx).WithError(err).WithField("dir", m.globalPluginsDir).Warn("failed to discover global plugin custom tools")
+	}
+
+	if err := m.discoverToolsFromPluginsDir(ctx, m.localPluginsDir, true); err != nil {
+		logger.G(ctx).WithError(err).WithField("dir", m.localPluginsDir).Debug("failed to discover local plugin custom tools")
+	}
+
 	// Local tools override global ones with same name
 	if err := m.discoverToolsInDir(ctx, m.localDir, true); err != nil {
 		logger.G(ctx).WithError(err).WithField("dir", m.localDir).Debug("failed to discover local custom tools")
 	}
 
 	logger.G(ctx).WithField("count", len(m.tools)).Debug("discovered custom tools")
+	return nil
+}
+
+// discoverToolsFromPluginsDir discovers tools from each plugin's tools/ directory.
+func (m *CustomToolManager) discoverToolsFromPluginsDir(ctx context.Context, pluginsDir string, override bool) error {
+	if strings.TrimSpace(pluginsDir) == "" {
+		return nil
+	}
+
+	if _, err := os.Stat(pluginsDir); os.IsNotExist(err) {
+		return nil
+	}
+
+	entries, err := os.ReadDir(pluginsDir)
+	if err != nil {
+		return errors.Wrap(err, "failed to read plugins directory")
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		toolDir := filepath.Join(pluginsDir, entry.Name(), "tools")
+		if err := m.discoverToolsInDir(ctx, toolDir, override); err != nil {
+			logger.G(ctx).WithError(err).WithField("dir", toolDir).Debug("failed to discover tools from plugin")
+		}
+	}
+
 	return nil
 }
 

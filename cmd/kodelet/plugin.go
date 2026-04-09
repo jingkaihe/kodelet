@@ -23,7 +23,7 @@ const (
 
 var pluginCmd = &cobra.Command{
 	Use:   "plugin",
-	Short: "Manage kodelet plugins (skills and recipes)",
+	Short: "Manage kodelet plugins (skills, recipes, hooks, and tools)",
 	Long:  `Install, list, and remove kodelet plugins from GitHub repositories.`,
 	Run: func(cmd *cobra.Command, _ []string) {
 		cmd.Help()
@@ -38,6 +38,8 @@ var pluginAddCmd = &cobra.Command{
 The repository should contain:
   - skills/<name>/SKILL.md for skills
   - recipes/<name>.md for recipes
+  - tools/<name> for executable custom tools
+  - hooks/<name> for executable lifecycle hooks
 
 Examples:
   kodelet plugin add user/repo              # Install all plugins from repo
@@ -89,6 +91,9 @@ Examples:
 			if len(result.Recipes) > 0 {
 				presenter.Success(fmt.Sprintf("Installed recipes: %s", strings.Join(result.Recipes, ", ")))
 			}
+			if len(result.Tools) > 0 {
+				presenter.Success(fmt.Sprintf("Installed tools: %s", strings.Join(result.Tools, ", ")))
+			}
 			if len(result.Hooks) > 0 {
 				presenter.Success(fmt.Sprintf("Installed hooks: %s", strings.Join(result.Hooks, ", ")))
 			}
@@ -120,6 +125,7 @@ type PluginInfo struct {
 	Path     string       `json:"path,omitempty"`
 	Skills   []SkillInfo  `json:"skills"`
 	Recipes  []RecipeInfo `json:"recipes"`
+	Tools    []ToolInfo   `json:"tools"`
 	Hooks    []HookInfo   `json:"hooks"`
 }
 
@@ -133,6 +139,11 @@ type SkillInfo struct {
 type RecipeInfo struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+}
+
+// ToolInfo represents a plugin-bundled executable custom tool in the JSON output.
+type ToolInfo struct {
+	Name string `json:"name"`
 }
 
 // HookInfo represents a hook in the JSON output
@@ -205,12 +216,12 @@ Examples:
 		}
 
 		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "NAME\tLOCATION\tSKILLS\tRECIPES\tHOOKS")
-		fmt.Fprintln(tw, "----\t--------\t------\t-------\t-----")
+		fmt.Fprintln(tw, "NAME\tLOCATION\tSKILLS\tRECIPES\tTOOLS\tHOOKS")
+		fmt.Fprintln(tw, "----\t--------\t------\t-------\t-----\t-----")
 
 		for _, entry := range allPlugins {
 			p := entry.plugin
-			fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%d\n", p.Name, entry.location, len(p.Skills), len(p.Recipes), len(p.Hooks))
+			fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%d\t%d\n", p.Name, entry.location, len(p.Skills), len(p.Recipes), len(p.Tools), len(p.Hooks))
 		}
 		tw.Flush()
 
@@ -241,6 +252,7 @@ func outputPluginsJSON(discovery *plugins.Discovery, allPlugins []pluginEntry) e
 			Path:     p.Path,
 			Skills:   make([]SkillInfo, 0, len(p.Skills)),
 			Recipes:  make([]RecipeInfo, 0, len(p.Recipes)),
+			Tools:    make([]ToolInfo, 0, len(p.Tools)),
 			Hooks:    make([]HookInfo, 0, len(p.Hooks)),
 		}
 
@@ -262,6 +274,10 @@ func outputPluginsJSON(discovery *plugins.Discovery, allPlugins []pluginEntry) e
 			info.Recipes = append(info.Recipes, recipeInfo)
 		}
 
+		for _, toolName := range p.Tools {
+			info.Tools = append(info.Tools, ToolInfo{Name: toolName})
+		}
+
 		for _, hookName := range p.Hooks {
 			info.Hooks = append(info.Hooks, HookInfo{Name: hookName})
 		}
@@ -277,7 +293,7 @@ func outputPluginsJSON(discovery *plugins.Discovery, allPlugins []pluginEntry) e
 var pluginShowCmd = &cobra.Command{
 	Use:   "show <name>",
 	Short: "Show details of a specific plugin",
-	Long: `Show detailed information about an installed plugin including its skills and recipes.
+	Long: `Show detailed information about an installed plugin including its skills, recipes, tools, and hooks.
 
 Examples:
   kodelet plugin show user/repo            # Show plugin details
@@ -402,6 +418,14 @@ func outputPluginShowTable(discovery *plugins.Discovery, p *plugins.InstalledPlu
 		fmt.Println()
 	}
 
+	if len(p.Tools) > 0 {
+		fmt.Printf("Tools (%d):\n", len(p.Tools))
+		for _, toolName := range p.Tools {
+			fmt.Printf("  • %s\n", toolName)
+		}
+		fmt.Println()
+	}
+
 	if len(p.Hooks) > 0 {
 		fmt.Printf("Hooks (%d):\n", len(p.Hooks))
 		for _, hookName := range p.Hooks {
@@ -431,6 +455,7 @@ func outputPluginShowJSON(discovery *plugins.Discovery, p *plugins.InstalledPlug
 		Path:     p.Path,
 		Skills:   make([]SkillInfo, 0, len(p.Skills)),
 		Recipes:  make([]RecipeInfo, 0, len(p.Recipes)),
+		Tools:    make([]ToolInfo, 0, len(p.Tools)),
 		Hooks:    make([]HookInfo, 0, len(p.Hooks)),
 	}
 
@@ -450,6 +475,10 @@ func outputPluginShowJSON(discovery *plugins.Discovery, p *plugins.InstalledPlug
 			recipeInfo.Description = recipe.Description()
 		}
 		info.Recipes = append(info.Recipes, recipeInfo)
+	}
+
+	for _, toolName := range p.Tools {
+		info.Tools = append(info.Tools, ToolInfo{Name: toolName})
 	}
 
 	for _, hookName := range p.Hooks {

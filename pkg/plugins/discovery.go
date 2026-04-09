@@ -19,6 +19,7 @@ const (
 	pluginsSubdir = "plugins"
 	skillsSubdir  = "skills"
 	recipesSubdir = "recipes"
+	toolsSubdir   = "tools"
 	hooksSubdir   = "hooks"
 	kodeletDir    = ".kodelet"
 )
@@ -609,10 +610,12 @@ func (d *Discovery) ListInstalledPlugins(global bool) ([]InstalledPlugin, error)
 		pluginPath := filepath.Join(pluginsDir, entry.Name())
 		skillsDir := filepath.Join(pluginPath, skillsSubdir)
 		recipesDir := filepath.Join(pluginPath, recipesSubdir)
+		toolsDir := filepath.Join(pluginPath, toolsSubdir)
 		hooksDir := filepath.Join(pluginPath, hooksSubdir)
 
 		hasSkills := false
 		hasRecipes := false
+		hasTools := false
 		hasHooks := false
 		if _, err := os.Stat(skillsDir); err == nil {
 			hasSkills = true
@@ -620,11 +623,14 @@ func (d *Discovery) ListInstalledPlugins(global bool) ([]InstalledPlugin, error)
 		if _, err := os.Stat(recipesDir); err == nil {
 			hasRecipes = true
 		}
+		if _, err := os.Stat(toolsDir); err == nil {
+			hasTools = true
+		}
 		if _, err := os.Stat(hooksDir); err == nil {
 			hasHooks = true
 		}
 
-		if !hasSkills && !hasRecipes && !hasHooks {
+		if !hasSkills && !hasRecipes && !hasTools && !hasHooks {
 			continue
 		}
 
@@ -664,6 +670,16 @@ func (d *Discovery) ListInstalledPlugins(global bool) ([]InstalledPlugin, error)
 				plugin.Recipes = append(plugin.Recipes, recipeName)
 				return nil
 			})
+		}
+
+		if hasTools {
+			if toolEntries, err := os.ReadDir(toolsDir); err == nil {
+				for _, toolEntry := range toolEntries {
+					if IsExecutableFile(toolEntry) {
+						plugin.Tools = append(plugin.Tools, toolEntry.Name())
+					}
+				}
+			}
 		}
 
 		if hasHooks {
