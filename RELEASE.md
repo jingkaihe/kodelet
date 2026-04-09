@@ -4,6 +4,8 @@
 
 Stream live cumulative token/cost usage snapshots from Anthropic, Google, OpenAI, and OpenAI Responses into the Web UI so compact chat metadata updates during active runs without requiring a reload.
 
+Upgraded OpenTelemetry tracing dependencies to `v1.43.0` and refreshed compatible transitive Go modules to resolve the repo's open Dependabot security alerts for `go.opentelemetry.io/otel/sdk` and `go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp`.
+
 ## 0.3.29-beta (2026-04-07)
 
 Bumped the embedded Web UI frontend's Vite dev dependency from `^6.4.1` to `^6.4.2`.
