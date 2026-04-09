@@ -1,5 +1,9 @@
 # Kodelet
 
+## Unreleased
+
+Stream live cumulative token/cost usage snapshots from Anthropic, Google, OpenAI, and OpenAI Responses into the Web UI so compact chat metadata updates during active runs without requiring a reload.
+
 ## 0.3.29-beta (2026-04-07)
 
 Bumped the embedded Web UI frontend's Vite dev dependency from `^6.4.1` to `^6.4.2`.
