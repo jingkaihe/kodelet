@@ -625,10 +625,10 @@ func TestCustomToolManager_DiscoverTools_PluginPrecedence(t *testing.T) {
 	localPluginsDir := filepath.Join(tempDir, "local-plugins")
 	localDir := filepath.Join(tempDir, "local-tools")
 
-	createMockToolWithOutput(t, filepath.Join(globalPluginsDir, "org1@repo1", "tools"), "shared-tool", "global-plugin")
-	createMockToolWithOutput(t, globalDir, "shared-tool", "global-standalone")
-	createMockToolWithOutput(t, filepath.Join(localPluginsDir, "org1@repo1", "tools"), "shared-tool", "local-plugin")
-	createMockToolWithOutput(t, localDir, "shared-tool", "local-standalone")
+	createSharedToolWithOutput(t, filepath.Join(globalPluginsDir, "org1@repo1", "tools"), "global-plugin")
+	createSharedToolWithOutput(t, globalDir, "global-standalone")
+	createSharedToolWithOutput(t, filepath.Join(localPluginsDir, "org1@repo1", "tools"), "local-plugin")
+	createSharedToolWithOutput(t, localDir, "local-standalone")
 
 	manager := &CustomToolManager{
 		tools:            make(map[string]*CustomTool),
@@ -660,8 +660,8 @@ func TestCustomToolManager_DiscoverTools_GlobalStandaloneOverridesGlobalPlugin(t
 	globalPluginsDir := filepath.Join(tempDir, "global-plugins")
 	globalDir := filepath.Join(tempDir, "global-tools")
 
-	createMockToolWithOutput(t, filepath.Join(globalPluginsDir, "org1@repo1", "tools"), "shared-tool", "global-plugin")
-	createMockToolWithOutput(t, globalDir, "shared-tool", "global-standalone")
+	createSharedToolWithOutput(t, filepath.Join(globalPluginsDir, "org1@repo1", "tools"), "global-plugin")
+	createSharedToolWithOutput(t, globalDir, "global-standalone")
 
 	manager := &CustomToolManager{
 		tools:            make(map[string]*CustomTool),
@@ -707,15 +707,15 @@ fi
 	require.NoError(t, err)
 }
 
-func createMockToolWithOutput(t *testing.T, dir, name, output string) {
+func createSharedToolWithOutput(t *testing.T, dir, output string) {
 	t.Helper()
 	require.NoError(t, os.MkdirAll(dir, 0o755))
 
-	toolPath := filepath.Join(dir, name)
+	toolPath := filepath.Join(dir, "shared-tool")
 
 	toolScript := `#!/bin/bash
 if [ "$1" = "description" ]; then
-    echo '{"name": "` + name + `", "description": "A test tool named ` + name + `", "input_schema": {"type": "object"}}'
+    echo '{"name": "shared-tool", "description": "A test tool named shared-tool", "input_schema": {"type": "object"}}'
 else
     echo "` + output + `"
 fi

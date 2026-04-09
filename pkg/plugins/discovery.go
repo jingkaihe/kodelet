@@ -2,11 +2,14 @@ package plugins
 
 import (
 	"bytes"
+	"context"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/customtools"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/yuin/goldmark"
@@ -675,9 +678,18 @@ func (d *Discovery) ListInstalledPlugins(global bool) ([]InstalledPlugin, error)
 		if hasTools {
 			if toolEntries, err := os.ReadDir(toolsDir); err == nil {
 				for _, toolEntry := range toolEntries {
-					if IsExecutableFile(toolEntry) {
-						plugin.Tools = append(plugin.Tools, toolEntry.Name())
+					if !IsExecutableFile(toolEntry) {
+						continue
 					}
+
+					toolPath := filepath.Join(toolsDir, toolEntry.Name())
+					toolMetadata, err := customtools.Inspect(context.Background(), toolPath, 5*time.Second)
+					if err != nil {
+						logrus.WithError(err).WithField("path", toolPath).Debug("failed to inspect plugin tool")
+						continue
+					}
+
+					plugin.Tools = append(plugin.Tools, toolMetadata.Name)
 				}
 			}
 		}

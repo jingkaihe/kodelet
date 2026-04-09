@@ -95,7 +95,7 @@ type InstalledPlugin struct {
 	Path    string   // Full path to the plugin directory
 	Skills  []string // List of skill names contained in this plugin
 	Recipes []string // List of recipe names contained in this plugin
-	Tools   []string // List of executable custom tool filenames contained in this plugin
+	Tools   []string // List of declared custom tool names contained in this plugin
 	Hooks   []string // List of hook names contained in this plugin
 }
 
