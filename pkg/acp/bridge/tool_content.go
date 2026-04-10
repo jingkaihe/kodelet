@@ -39,11 +39,28 @@ func (g *ToolContentGenerator) GenerateToolContent(result tooltypes.ToolResult) 
 		return g.generateApplyPatchContent(structured)
 	case "subagent":
 		return g.generateSubAgentContent(structured)
+	case "view_image":
+		return g.generateViewImageContent(structured)
 	case "grep_tool", "glob_tool":
 		return g.generateCodeBlockContent(structured, result)
 	default:
 		return g.generateDefaultContent(result)
 	}
+}
+
+func (g *ToolContentGenerator) generateViewImageContent(structured tooltypes.StructuredToolResult) []map[string]any {
+	var meta tooltypes.ViewImageMetadata
+	if !tooltypes.ExtractMetadata(structured.Metadata, &meta) {
+		return g.generateTextContent(structured.Error)
+	}
+	if structured.Error != "" {
+		return g.generateTextContent(structured.Error)
+	}
+	summary := meta.Path
+	if meta.MimeType != "" {
+		summary += fmt.Sprintf(" (%s)", meta.MimeType)
+	}
+	return g.generateTextContent(summary)
 }
 
 // generateBashContent generates content for bash command results

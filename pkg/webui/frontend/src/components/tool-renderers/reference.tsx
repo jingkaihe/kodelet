@@ -11,7 +11,7 @@ export const TOOL_LABELS: Record<string, string> = {
   grep_tool: 'Search Results',
   glob_tool: 'File Discovery',
   web_fetch: 'Web Fetch',
-  image_recognition: 'Image Analysis',
+  view_image: 'View Image',
   openai_web_search: 'OpenAI Web Search',
 };
 
@@ -24,7 +24,7 @@ export const TOOL_ICONS: Record<string, string> = {
   grep_tool: '::',
   glob_tool: '**',
   web_fetch: '//',
-  image_recognition: '◫',
+  view_image: '◫',
   openai_web_search: '>>',
 };
 

@@ -176,6 +176,11 @@ func StreamMessages(rawMessages []byte, toolResults map[string]tooltypes.Structu
 						result = string(responseJSON)
 					}
 				}
+				if rich := extractGoogleRichToolResult(part.FunctionResponse.Response); len(rich) > 0 {
+					if data, err := json.Marshal(rich); err == nil {
+						result = string(data)
+					}
+				}
 
 				messages = append(messages, StreamableMessage{
 					Kind:       "tool-result",
@@ -240,6 +245,11 @@ func ExtractMessages(rawMessages []byte, toolResults map[string]tooltypes.Struct
 						result = string(responseJSON)
 					}
 				}
+				if rich := extractGoogleRichToolResult(part.FunctionResponse.Response); len(rich) > 0 {
+					if data, err := json.Marshal(rich); err == nil {
+						result = string(data)
+					}
+				}
 
 				messages = append(messages, llmtypes.Message{
 					Role:    "user",
@@ -264,6 +274,27 @@ func extractToolCallID(response map[string]any) string {
 	}
 
 	return ""
+}
+
+func extractGoogleRichToolResult(response map[string]any) []map[string]any {
+	if response == nil {
+		return nil
+	}
+	rawOutput, ok := response["output"]
+	if !ok {
+		return nil
+	}
+	list, ok := rawOutput.([]any)
+	if !ok {
+		return nil
+	}
+	result := make([]map[string]any, 0, len(list))
+	for _, item := range list {
+		if m, ok := item.(map[string]any); ok {
+			result = append(result, m)
+		}
+	}
+	return result
 }
 
 // DeserializeMessages deserializes raw message bytes into Google GenAI Content objects

@@ -452,7 +452,7 @@ func TestFilterOutSubagent(t *testing.T) {
 		assert.Contains(t, toolNames, "bash")
 		assert.Contains(t, toolNames, "file_read")
 		assert.Contains(t, toolNames, "web_fetch")
-		assert.Contains(t, toolNames, "image_recognition")
+		assert.Contains(t, toolNames, "view_image")
 		assert.Equal(t, len(tools)-1, len(filtered))
 	})
 

@@ -200,7 +200,7 @@ allowed_domains_file: "~/.kodelet/allowed_domains.txt"
 # Meta tools (grep_tool and glob_tool) are always enabled for basic functionality unless
 # disable_fs_search_tools is set to true.
 # Available tools: bash, apply_patch, file_read, file_write, file_edit, thinking, subagent, grep_tool,
-#                  glob_tool, todo_read, todo_write, web_fetch, image_recognition
+#                  glob_tool, todo_read, todo_write, web_fetch, view_image
 # Tool interaction mode.
 # - full: standard tool access
 # - patch: removes file_read, file_write, and file_edit from both main-agent and subagent
@@ -224,7 +224,7 @@ allowed_tools: []
 #   - "todo_read"
 #   - "todo_write"
 #   - "web_fetch"
-#   - "image_recognition"
+#   - "view_image"
 
 # Commit Configuration
 # Configure coauthor attribution for commit messages
@@ -379,7 +379,7 @@ subagent_args: ""
 # Disable Subagent
 # When set to true, the subagent tool is removed from available tools and
 # subagent-related context is excluded from the system prompt.
-# Other tools like web_fetch and image_recognition remain available.
+# Other tools like web_fetch remain available.
 # Can also be set via the --disable-subagent CLI flag or per-profile.
 # disable_subagent: true
 #

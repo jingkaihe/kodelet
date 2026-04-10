@@ -95,5 +95,20 @@ func ReadImageFileAsDataURL(filePath string) (string, error) {
 		return "", err
 	}
 
-	return "data:" + mimeType + ";base64," + base64Data, nil
+	return DataURLFromBase64Payload(mimeType, base64Data), nil
+}
+
+// DataURLFromBase64Payload constructs a data URL from mime type and base64 bytes.
+func DataURLFromBase64Payload(mimeType, base64Data string) string {
+	return "data:" + mimeType + ";base64," + base64Data
+}
+
+// Base64ImageSourceMediaType validates Anthropic-compatible base64 image MIME types.
+func Base64ImageSourceMediaType(mimeType string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(mimeType)) {
+	case "image/jpeg", "image/png", "image/gif", "image/webp":
+		return strings.ToLower(strings.TrimSpace(mimeType)), nil
+	default:
+		return "", errors.Errorf("unsupported image mime type: %s", mimeType)
+	}
 }

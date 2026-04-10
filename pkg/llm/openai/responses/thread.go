@@ -1437,6 +1437,7 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 				ToolName:   toolName,
 				ToolCallID: item.CallID,
 				Content:    resultStr,
+				RawItem:    item.RawOutput,
 			})
 
 		case "web_search_call":

@@ -217,7 +217,7 @@ kodelet acp --no-workflows
 ```
 
 **Disabling subagent:**
-Removes the subagent tool and subagent-related context from the system prompt. Other tools like `web_fetch` and `image_recognition` remain available.
+Removes the subagent tool and subagent-related context from the system prompt. Other tools like `web_fetch` remain available.
 ```bash
 kodelet run --disable-subagent "query"
 kodelet acp --disable-subagent

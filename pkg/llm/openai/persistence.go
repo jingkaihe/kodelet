@@ -131,6 +131,7 @@ type StreamableMessage struct {
 	Kind       string // "text", "tool-use", "tool-result", "thinking"
 	Role       string // "user", "assistant", "system"
 	Content    string // Text content
+	RawItem    json.RawMessage
 	ToolName   string // For tool use/result
 	ToolCallID string // For matching tool results
 	Input      string // For tool use (JSON string)
@@ -166,6 +167,7 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 				ToolName:   toolName,
 				ToolCallID: msg.ToolCallID,
 				Content:    result,
+				RawItem:    mustMarshalOpenAIMultiContent(msg.MultiContent),
 			})
 			continue
 		}
@@ -212,6 +214,32 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 	}
 
 	return streamable, nil
+}
+
+func mustMarshalOpenAIMultiContent(parts []openai.ChatMessagePart) json.RawMessage {
+	if len(parts) == 0 {
+		return nil
+	}
+	payload := make([]map[string]any, 0, len(parts))
+	for _, part := range parts {
+		switch part.Type {
+		case openai.ChatMessagePartTypeText:
+			payload = append(payload, map[string]any{"type": "input_text", "text": part.Text})
+		case openai.ChatMessagePartTypeImageURL:
+			if part.ImageURL == nil {
+				continue
+			}
+			payload = append(payload, map[string]any{"type": "input_image", "image_url": part.ImageURL.URL})
+		}
+	}
+	if len(payload) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return nil
+	}
+	return b
 }
 
 // ExtractMessages converts the internal message format to the common format

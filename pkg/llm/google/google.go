@@ -952,14 +952,21 @@ func (t *Thread) executeToolCalls(ctx context.Context, response *Response, handl
 			attribute.String("result", output.AssistantFacing()),
 		)
 
+		responsePayload := map[string]any{
+			"call_id": toolCall.ID,
+			"result":  output.AssistantFacing(),
+			"error":   output.IsError(),
+		}
+		if rich, ok := output.(tooltypes.RichToolResult); ok {
+			if richPayload := googleRichToolResultPayload(rich.ToolResultContent()); len(richPayload) > 0 {
+				responsePayload["output"] = richPayload
+			}
+		}
 		resultPart := &genai.Part{
 			FunctionResponse: &genai.FunctionResponse{
-				Name: toolCall.Name,
-				Response: map[string]any{
-					"call_id": toolCall.ID,
-					"result":  output.AssistantFacing(),
-					"error":   output.IsError(),
-				},
+				Name:     toolCall.Name,
+				ID:       toolCall.ID,
+				Response: responsePayload,
 			},
 		}
 		toolResultParts = append(toolResultParts, resultPart)
@@ -970,6 +977,33 @@ func (t *Thread) executeToolCalls(ctx context.Context, response *Response, handl
 		content := genai.NewContentFromParts(toolResultParts, genai.RoleUser)
 		t.messages = append(t.messages, content)
 	}
+}
+
+func googleRichToolResultPayload(parts []tooltypes.ToolResultContentPart) []map[string]any {
+	result := make([]map[string]any, 0, len(parts))
+	for _, part := range parts {
+		switch part.Type {
+		case tooltypes.ToolResultContentPartTypeText:
+			if strings.TrimSpace(part.Text) == "" {
+				continue
+			}
+			result = append(result, map[string]any{
+				"type": "text",
+				"text": part.Text,
+			})
+		case tooltypes.ToolResultContentPartTypeImage:
+			if strings.TrimSpace(part.ImageURL) == "" {
+				continue
+			}
+			result = append(result, map[string]any{
+				"type":      "image",
+				"image_url": part.ImageURL,
+				"mime_type": part.MimeType,
+				"detail":    part.Detail,
+			})
+		}
+	}
+	return result
 }
 
 // hasToolCalls checks if the response contains tool calls

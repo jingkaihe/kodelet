@@ -7,12 +7,12 @@ import FileReadRenderer from './FileReadRenderer';
 import FileWriteRenderer from './FileWriteRenderer';
 import GlobRenderer from './GlobRenderer';
 import GrepRenderer from './GrepRenderer';
-import ImageRecognitionRenderer from './ImageRecognitionRenderer';
 import OpenAIWebSearchRenderer from './OpenAIWebSearchRenderer';
 import SkillRenderer from './SkillRenderer';
 import SubagentRenderer from './SubagentRenderer';
 import ThinkingRenderer from './ThinkingRenderer';
 import TodoRenderer from './TodoRenderer';
+import ViewImageRenderer from './ViewImageRenderer';
 import WebFetchRenderer from './WebFetchRenderer';
 import { normalizeToolName } from './reference';
 
@@ -34,7 +34,7 @@ const toolRendererRegistry: Record<string, ToolRendererRegistration> = {
   todo_read: { component: TodoRenderer },
   todo_write: { component: TodoRenderer },
   subagent: { component: SubagentRenderer },
-  image_recognition: { component: ImageRecognitionRenderer },
+  view_image: { component: ViewImageRenderer },
   skill: { component: SkillRenderer },
   openai_web_search: { component: OpenAIWebSearchRenderer, supportsFailureRendering: true },
 };
