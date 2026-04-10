@@ -183,6 +183,44 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 			description: "should remove orphaned tool call message with content at the end",
 		},
 		{
+			name: "preserve image-only multimodal message at end",
+			initialMessages: []openai.ChatCompletionMessage{
+				{
+					Role:    openai.ChatMessageRoleUser,
+					Content: "Analyze this image",
+				},
+				{
+					Role: openai.ChatMessageRoleUser,
+					MultiContent: []openai.ChatMessagePart{
+						{
+							Type: openai.ChatMessagePartTypeImageURL,
+							ImageURL: &openai.ChatMessageImageURL{
+								URL: "data:image/png;base64,aGVsbG8=",
+							},
+						},
+					},
+				},
+			},
+			expectedMessages: []openai.ChatCompletionMessage{
+				{
+					Role:    openai.ChatMessageRoleUser,
+					Content: "Analyze this image",
+				},
+				{
+					Role: openai.ChatMessageRoleUser,
+					MultiContent: []openai.ChatMessagePart{
+						{
+							Type: openai.ChatMessagePartTypeImageURL,
+							ImageURL: &openai.ChatMessageImageURL{
+								URL: "data:image/png;base64,aGVsbG8=",
+							},
+						},
+					},
+				},
+			},
+			description: "should preserve image-only multimodal messages needed for follow-up context",
+		},
+		{
 			name: "preserve valid tool call followed by tool result",
 			initialMessages: []openai.ChatCompletionMessage{
 				{
@@ -598,6 +636,34 @@ func TestStreamMessages_WithReasoningContent(t *testing.T) {
 	assert.Equal(t, "text", streamableMessages[2].Kind)
 	assert.Equal(t, "assistant", streamableMessages[2].Role)
 	assert.Equal(t, "Final answer", streamableMessages[2].Content)
+}
+
+func TestStreamMessages_ImageOnlyMultiContentMessage(t *testing.T) {
+	messages := []openai.ChatCompletionMessage{
+		{
+			Role: openai.ChatMessageRoleUser,
+			MultiContent: []openai.ChatMessagePart{
+				{
+					Type: openai.ChatMessagePartTypeImageURL,
+					ImageURL: &openai.ChatMessageImageURL{
+						URL: "data:image/png;base64,aGVsbG8=",
+					},
+				},
+			},
+		},
+	}
+
+	rawMessages, err := json.Marshal(messages)
+	require.NoError(t, err)
+
+	streamableMessages, err := StreamMessages(rawMessages, map[string]tooltypes.StructuredToolResult{})
+	require.NoError(t, err)
+	require.Len(t, streamableMessages, 1)
+
+	assert.Equal(t, "text", streamableMessages[0].Kind)
+	assert.Equal(t, "user", streamableMessages[0].Role)
+	assert.Empty(t, streamableMessages[0].Content)
+	assert.Contains(t, string(streamableMessages[0].RawItem), `"input_image"`)
 }
 
 func TestStreamMessages_EdgeCases(t *testing.T) {

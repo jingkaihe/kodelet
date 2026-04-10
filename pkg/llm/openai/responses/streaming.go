@@ -265,21 +265,7 @@ func (t *Thread) processStream(
 				result := t.executeToolCall(ctx, funcCall.CallID, funcCall.Name, funcCall.Arguments, handler)
 
 				// Get the representation for API response
-				resultStr := result.AssistantFacing()
-				outputUnion := responses.ResponseInputItemFunctionCallOutputOutputUnionParam{
-					OfString: param.NewOpt(resultStr),
-				}
-				storedOutput := resultStr
-				if rich, ok := result.(tooltypes.MultiModalToolResult); ok {
-					if outputItems := responseFunctionCallOutputItems(rich.ContentParts()); len(outputItems) > 0 {
-						outputUnion = responses.ResponseInputItemFunctionCallOutputOutputUnionParam{
-							OfResponseFunctionCallOutputItemArray: outputItems,
-						}
-						if data, err := json.Marshal(outputItems); err == nil {
-							storedOutput = string(data)
-						}
-					}
-				}
+				outputUnion, storedOutput, rawOutput := buildStoredFunctionCallOutput(result)
 
 				// Create tool result item
 				toolResultItem := responses.ResponseInputItemUnionParam{
@@ -292,18 +278,10 @@ func (t *Thread) processStream(
 				// Add the tool result to inputItems and storedItems
 				t.inputItems = append(t.inputItems, toolResultItem)
 				t.storedItems = append(t.storedItems, StoredInputItem{
-					Type:   "function_call_output",
-					CallID: funcCall.CallID,
-					Output: storedOutput,
-					RawOutput: func() json.RawMessage {
-						if !param.IsOmitted(outputUnion.OfResponseFunctionCallOutputItemArray) {
-							b, err := json.Marshal(outputUnion.OfResponseFunctionCallOutputItemArray)
-							if err == nil {
-								return b
-							}
-						}
-						return nil
-					}(),
+					Type:      "function_call_output",
+					CallID:    funcCall.CallID,
+					Output:    storedOutput,
+					RawOutput: rawOutput,
 				})
 
 				handler.HandleToolResult(funcCall.CallID, funcCall.Name, result)
@@ -440,6 +418,29 @@ type toolCallState struct {
 	callID    string
 	name      string
 	arguments strings.Builder
+}
+
+func buildStoredFunctionCallOutput(result tooltypes.ToolResult) (
+	responses.ResponseInputItemFunctionCallOutputOutputUnionParam,
+	string,
+	json.RawMessage,
+) {
+	resultStr := result.AssistantFacing()
+	outputUnion := responses.ResponseInputItemFunctionCallOutputOutputUnionParam{
+		OfString: param.NewOpt(resultStr),
+	}
+	if rich, ok := result.(tooltypes.MultiModalToolResult); ok {
+		if outputItems := responseFunctionCallOutputItems(rich.ContentParts()); len(outputItems) > 0 {
+			outputUnion = responses.ResponseInputItemFunctionCallOutputOutputUnionParam{
+				OfResponseFunctionCallOutputItemArray: outputItems,
+			}
+			if rawOutput, err := json.Marshal(outputItems); err == nil {
+				return outputUnion, resultStr, rawOutput
+			}
+		}
+	}
+
+	return outputUnion, resultStr, nil
 }
 
 type structuredResultToolResult struct {

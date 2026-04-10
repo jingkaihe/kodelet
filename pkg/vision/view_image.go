@@ -112,7 +112,10 @@ func MakeViewImageResult(path string, detail string, model string, provider stri
 	bounds := img.Bounds()
 	originalWidth := bounds.Dx()
 	originalHeight := bounds.Dy()
-	mimeType := mimeTypeForDecodedImage(cleanPath, format)
+	mimeType, err := mimeTypeForDecodedImage(format)
+	if err != nil {
+		return nil, err
+	}
 	if _, err := base64ImageSourceMediaType(mimeType); err != nil {
 		return nil, err
 	}
@@ -163,25 +166,18 @@ func MetadataFromResult(result *Result) *tooltypes.ViewImageMetadata {
 	}
 }
 
-func mimeTypeForDecodedImage(path string, format string) string {
-	if byExt := mime.TypeByExtension(strings.ToLower(filepath.Ext(path))); byExt != "" {
-		switch byExt {
-		case "image/jpeg", "image/png", "image/gif", "image/webp":
-			return byExt
-		}
-	}
-
+func mimeTypeForDecodedImage(format string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(format)) {
 	case "jpeg", "jpg":
-		return "image/jpeg"
+		return "image/jpeg", nil
 	case "png":
-		return "image/png"
+		return "image/png", nil
 	case "gif":
-		return "image/gif"
+		return "image/gif", nil
 	case "webp":
-		return "image/webp"
+		return "image/webp", nil
 	default:
-		return "image/png"
+		return "", errors.Errorf("unsupported decoded image format: %s", strings.TrimSpace(format))
 	}
 }
 

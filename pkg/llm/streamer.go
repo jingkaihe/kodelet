@@ -79,6 +79,7 @@ func convertOpenAIStreamableMessages(msgs []openai.StreamableMessage) []conversa
 			Kind:       msg.Kind,
 			Role:       msg.Role,
 			Content:    msg.Content,
+			RawItem:    msg.RawItem,
 			ToolName:   msg.ToolName,
 			ToolCallID: msg.ToolCallID,
 			Input:      msg.Input,

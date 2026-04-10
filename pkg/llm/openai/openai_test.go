@@ -2,6 +2,7 @@ package openai
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -107,6 +108,30 @@ func TestExtractMessagesWithReasoningContent(t *testing.T) {
 	assert.Equal(t, "💭 Thinking: step 1", messages[1].Content)
 	assert.Equal(t, "assistant", messages[2].Role)
 	assert.Equal(t, "done", messages[2].Content)
+}
+
+func TestExtractMessagesWithImageOnlyMultiContent(t *testing.T) {
+	rawMessages, err := json.Marshal([]openai.ChatCompletionMessage{
+		{
+			Role: openai.ChatMessageRoleUser,
+			MultiContent: []openai.ChatMessagePart{
+				{
+					Type: openai.ChatMessagePartTypeImageURL,
+					ImageURL: &openai.ChatMessageImageURL{
+						URL:    "data:image/png;base64,aGVsbG8=",
+						Detail: openai.ImageURLDetailAuto,
+					},
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	messages, err := ExtractMessages(rawMessages, nil)
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	assert.Equal(t, "user", messages[0].Role)
+	assert.Equal(t, "Inline image input (image/png).", messages[0].Content)
 }
 
 func TestExtractMessagesWithMultipleToolResults(t *testing.T) {

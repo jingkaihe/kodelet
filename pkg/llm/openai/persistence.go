@@ -25,7 +25,7 @@ func (t *Thread) cleanupOrphanedMessages() {
 		lastMessage := t.messages[len(t.messages)-1]
 
 		// Remove the last message if it is empty (no content and no tool calls)
-		if lastMessage.Content == "" && len(lastMessage.ToolCalls) == 0 && lastMessage.Role != openai.ChatMessageRoleTool {
+		if lastMessage.Content == "" && len(lastMessage.ToolCalls) == 0 && lastMessage.Role != openai.ChatMessageRoleTool && !hasOpenAIMultiContent(lastMessage.MultiContent) {
 			t.messages = t.messages[:len(t.messages)-1]
 			continue
 		}
@@ -167,7 +167,7 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 				ToolName:   toolName,
 				ToolCallID: msg.ToolCallID,
 				Content:    result,
-				RawItem:    mustMarshalOpenAIMultiContent(msg.MultiContent),
+				RawItem:    mustMarshalOpenAIMultiContent(msg.Role, msg.MultiContent),
 			})
 			continue
 		}
@@ -189,14 +189,13 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 			})
 		}
 
-		for _, contentBlock := range msg.MultiContent {
-			if contentBlock.Text != "" {
-				streamable = append(streamable, StreamableMessage{
-					Kind:    "text",
-					Role:    msg.Role,
-					Content: contentBlock.Text,
-				})
-			}
+		if rawItem := mustMarshalOpenAIMultiContent(msg.Role, msg.MultiContent); len(rawItem) > 0 {
+			streamable = append(streamable, StreamableMessage{
+				Kind:    "text",
+				Role:    msg.Role,
+				Content: openAIMultiContentText(msg.MultiContent),
+				RawItem: rawItem,
+			})
 		}
 
 		if len(msg.ToolCalls) > 0 {
@@ -216,7 +215,22 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 	return streamable, nil
 }
 
-func mustMarshalOpenAIMultiContent(parts []openai.ChatMessagePart) json.RawMessage {
+func mustMarshalOpenAIMultiContent(role string, parts []openai.ChatMessagePart) json.RawMessage {
+	payload := openAIMultiContentPayload(parts)
+	if len(payload) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(map[string]any{
+		"role":    role,
+		"content": payload,
+	})
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+func openAIMultiContentPayload(parts []openai.ChatMessagePart) []map[string]any {
 	if len(parts) == 0 {
 		return nil
 	}
@@ -224,22 +238,80 @@ func mustMarshalOpenAIMultiContent(parts []openai.ChatMessagePart) json.RawMessa
 	for _, part := range parts {
 		switch part.Type {
 		case openai.ChatMessagePartTypeText:
+			if strings.TrimSpace(part.Text) == "" {
+				continue
+			}
 			payload = append(payload, map[string]any{"type": "input_text", "text": part.Text})
 		case openai.ChatMessagePartTypeImageURL:
-			if part.ImageURL == nil {
+			if part.ImageURL == nil || strings.TrimSpace(part.ImageURL.URL) == "" {
 				continue
 			}
 			payload = append(payload, map[string]any{"type": "input_image", "image_url": part.ImageURL.URL})
 		}
 	}
-	if len(payload) == 0 {
-		return nil
+	return payload
+}
+
+func hasOpenAIMultiContent(parts []openai.ChatMessagePart) bool {
+	return len(openAIMultiContentPayload(parts)) > 0
+}
+
+func openAIMultiContentText(parts []openai.ChatMessagePart) string {
+	textParts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part.Type != openai.ChatMessagePartTypeText || strings.TrimSpace(part.Text) == "" {
+			continue
+		}
+		textParts = append(textParts, part.Text)
 	}
-	b, err := json.Marshal(payload)
-	if err != nil {
-		return nil
+	return strings.Join(textParts, "\n\n")
+}
+
+func openAIMultiContentDisplay(parts []openai.ChatMessagePart) string {
+	blocks := make([]string, 0, len(parts))
+	for _, part := range parts {
+		switch part.Type {
+		case openai.ChatMessagePartTypeText:
+			if strings.TrimSpace(part.Text) != "" {
+				blocks = append(blocks, part.Text)
+			}
+		case openai.ChatMessagePartTypeImageURL:
+			if part.ImageURL == nil {
+				continue
+			}
+			if imageText := openAIImageDisplayString(part.ImageURL.URL); imageText != "" {
+				blocks = append(blocks, imageText)
+			}
+		}
 	}
-	return b
+	return strings.Join(blocks, "\n\n")
+}
+
+func openAIImageDisplayString(imageURL string) string {
+	if strings.TrimSpace(imageURL) == "" {
+		return ""
+	}
+	if mediaType := openAIDataURLMediaType(imageURL); mediaType != "" {
+		return fmt.Sprintf("Inline image input (%s).", mediaType)
+	}
+	return fmt.Sprintf("Image input: %s", imageURL)
+}
+
+func openAIDataURLMediaType(dataURL string) string {
+	if !strings.HasPrefix(dataURL, "data:") {
+		return ""
+	}
+
+	metadata, hasPayload := strings.CutPrefix(dataURL, "data:")
+	if !hasPayload {
+		return ""
+	}
+	header, _, found := strings.Cut(metadata, ",")
+	if !found {
+		return ""
+	}
+	mediaType, _, _ := strings.Cut(header, ";")
+	return mediaType
 }
 
 // ExtractMessages converts the internal message format to the common format
@@ -286,14 +358,11 @@ func ExtractMessages(data []byte, toolResults map[string]tooltypes.StructuredToo
 			})
 		}
 
-		// Handle text blocks in MultiContent
-		for _, contentBlock := range msg.MultiContent {
-			if contentBlock.Text != "" {
-				result = append(result, llmtypes.Message{
-					Role:    msg.Role,
-					Content: contentBlock.Text,
-				})
-			}
+		if content := openAIMultiContentDisplay(msg.MultiContent); strings.TrimSpace(content) != "" {
+			result = append(result, llmtypes.Message{
+				Role:    msg.Role,
+				Content: content,
+			})
 		}
 
 		// Handle tool calls
