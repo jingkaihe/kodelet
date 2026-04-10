@@ -238,7 +238,7 @@ func init() {
 	conversationListCmd.Flags().String("start", listDefaults.StartDate, "Filter conversations after this date (format: YYYY-MM-DD)")
 	conversationListCmd.Flags().String("end", listDefaults.EndDate, "Filter conversations before this date (format: YYYY-MM-DD)")
 	conversationListCmd.Flags().String("search", listDefaults.Search, "Search term to filter conversations")
-	conversationListCmd.Flags().String("provider", listDefaults.Provider, "Filter conversations by LLM provider (anthropic, openai, google)")
+	conversationListCmd.Flags().String("provider", listDefaults.Provider, "Filter conversations by LLM provider (anthropic, openai)")
 	conversationListCmd.Flags().Int("limit", listDefaults.Limit, "Maximum number of conversations to display")
 	conversationListCmd.Flags().Int("offset", listDefaults.Offset, "Offset for pagination")
 	conversationListCmd.Flags().String("sort-by", listDefaults.SortBy, "Field to sort by: updated_at, created_at, or messages")
@@ -482,8 +482,6 @@ func displayProviderName(provider string) string {
 		return "Anthropic"
 	case "openai", "openai-responses":
 		return "OpenAI"
-	case "google":
-		return "Google"
 	default:
 		return provider
 	}
@@ -1017,8 +1015,8 @@ func validateConversationRecord(data []byte) (*convtypes.ConversationRecord, err
 		return nil, errors.New("model type is required")
 	}
 
-	if record.Provider != "anthropic" && record.Provider != "openai" && record.Provider != "openai-responses" && record.Provider != "google" {
-		return nil, errors.Errorf("unsupported model type: %s (supported: anthropic, openai, openai-responses, google)", record.Provider)
+	if record.Provider != "anthropic" && record.Provider != "openai" && record.Provider != "openai-responses" {
+		return nil, errors.Errorf("unsupported model type: %s (supported: anthropic, openai, openai-responses)", record.Provider)
 	}
 
 	if len(record.RawMessages) == 0 {

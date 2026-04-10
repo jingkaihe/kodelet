@@ -12,7 +12,6 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/jingkaihe/kodelet/pkg/llm/anthropic"
-	"github.com/jingkaihe/kodelet/pkg/llm/google"
 	"github.com/jingkaihe/kodelet/pkg/llm/openai"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -48,8 +47,6 @@ func NewThread(config llmtypes.Config) (llmtypes.Thread, error) {
 		return openai.NewThread(config)
 	case "anthropic":
 		return anthropic.NewAnthropicThread(config)
-	case "google":
-		return google.NewGoogleThread(config)
 	default:
 		return nil, errors.Errorf("unsupported provider: %s", config.Provider)
 	}
@@ -88,8 +85,6 @@ func ExtractMessages(provider string, rawMessages []byte, metadata map[string]an
 			return openai.ExtractResponsesMessages(rawMessages, toolResults)
 		}
 		return openai.ExtractMessages(rawMessages, toolResults)
-	case "google":
-		return google.ExtractMessages(rawMessages, toolResults)
 	default:
 		return nil, errors.Errorf("unsupported provider: %s", provider)
 	}
@@ -117,12 +112,6 @@ func ExtractConversationEntries(provider string, rawMessages []byte, metadata ma
 			return nil, err
 		}
 		return convertOpenAIStreamableMessages(msgs), nil
-	case "google":
-		msgs, err := google.StreamMessages(rawMessages, toolResults)
-		if err != nil {
-			return nil, err
-		}
-		return convertGoogleStreamableMessages(msgs), nil
 	default:
 		return nil, errors.Errorf("unsupported provider: %s", provider)
 	}

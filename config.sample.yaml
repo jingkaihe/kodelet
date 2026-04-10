@@ -9,7 +9,7 @@ log_level: "info"
 log_format: "json"
 
 # LLM Configuration
-# Provider to use (anthropic, openai, or google)
+# Provider to use (anthropic or openai)
 provider: "anthropic"
 
 # Model to use for LLM interactions
@@ -46,8 +46,6 @@ aliases:
   sonnet-46: "claude-sonnet-4-6"
   haiku-45: "claude-haiku-4-5-20251001"
   opus-46: "claude-opus-4-6"
-  gemini-pro: "gemini-2.5-pro"
-  gemini-flash: "gemini-2.5-flash"
 
 # Active profile selection (uncomment to activate a specific profile)
 # profile: "premium"
@@ -117,13 +115,6 @@ profiles:
     disable_fs_search_tools: true
     openai:
       api_mode: "responses"
-
-  google-pro:
-    provider: "google"
-    model: "gemini-pro"
-    weak_model: "gemini-flash"
-    max_tokens: 8192
-    thinking_budget_tokens: 8000
 
   mix-n-match:
     provider: "anthropic"
@@ -246,14 +237,6 @@ commit:
 # weak_model_max_tokens: 4096
 # reasoning_effort: "medium"
 
-# Example Google GenAI configuration (uncomment to use)
-# provider: "google"
-# model: "gemini-2.5-pro"
-# max_tokens: 8192
-# weak_model: "gemini-2.5-flash"
-# weak_model_max_tokens: 4096
-# thinking_budget_tokens: 8000
-
 # OpenAI-compatible API configuration
 # Supports any OpenAI-compatible provider (xAI, Groq, Together AI, etc.)
 openai:
@@ -299,40 +282,6 @@ openai:
   #     output: 0.000015        # $15 per million tokens
   #     context_window: 131072  # 131k tokens
   #   # ... additional models
-
-# Google GenAI Configuration
-# Supports both Gemini API (developer-focused) and Vertex AI (enterprise-grade)
-google:
-  # Backend selection: "gemini" (Gemini API) or "vertexai" (Vertex AI)
-  # Auto-detected based on available authentication if not specified
-  # backend: "gemini"
-
-  # Authentication for Gemini API
-  # api_key: "your-google-api-key"  # Can also use GOOGLE_API_KEY environment variable
-
-  # Authentication for Vertex AI (choose one method)
-  # project: "your-gcp-project-id"      # GCP project ID
-  # location: "us-central1"             # GCP region (default: us-central1)
-  # Using GOOGLE_APPLICATION_CREDENTIALS environment variable is recommended
-
-  # Token budget for thinking capability (Google models support thinking)
-  # thinking_budget: 8000  # Default: 8000 tokens
-
-
-
-  # Model-specific pricing and configuration (advanced users)
-  # pricing:
-  #   gemini-2.5-pro:
-  #     input: 0.00125            # $1.25 per million tokens (≤200K input)
-  #     input_high: 0.0025        # $2.50 per million tokens (>200K input)
-  #     output: 0.01              # $10 per million tokens (≤200K input)
-  #     output_high: 0.015        # $15 per million tokens (>200K input)
-  #     context_window: 2097152   # 2M tokens
-  #   gemini-2.5-flash:
-  #     input: 0.0003             # $0.30 per million tokens
-  #     audio_input: 0.001        # $1.00 per million tokens (audio)
-  #     output: 0.0025            # $2.50 per million tokens
-  #     context_window: 1048576   # 1M tokens
 
 # Subagent Configuration
 # Subagents are spawned as separate processes using shell-out pattern.
@@ -398,16 +347,6 @@ subagent_args: ""
 # profiles:
 #   no-subagent:
 #     disable_subagent: true
-
-# Scenario 3: Google Vertex AI for enterprise with thinking capability
-# provider: "google"
-# model: "gemini-2.5-pro"
-# thinking_budget_tokens: 8000
-# google:
-#   backend: "vertexai"
-#   project: "my-company-project"
-#   location: "us-central1"
-
 
 # Custom Tools Configuration
 # Kodelet can discover and execute custom executable tools from standalone directories
@@ -482,7 +421,7 @@ tracing:
 # Environment variables can also be used to configure Kodelet:
 # - KODELET_LOG_LEVEL: Overrides the log_level setting
 # - KODELET_LOG_FORMAT: Overrides the log_format setting
-# - KODELET_PROVIDER: Overrides the provider setting (anthropic, openai, google)
+# - KODELET_PROVIDER: Overrides the provider setting (anthropic, openai)
 # - KODELET_MODEL: Overrides the model setting
 # - KODELET_MAX_TOKENS: Overrides the max_tokens setting
 # - KODELET_THINKING_BUDGET_TOKENS: Overrides the thinking_budget_tokens setting
@@ -512,12 +451,6 @@ tracing:
 # - OPENAI_API_KEY: Required when using the OpenAI provider (default)
 # - XAI_API_KEY: Required when using the xAI platform
 # - OPENAI_API_BASE: Custom OpenAI API endpoint (overrides config base_url)
-# - GOOGLE_API_KEY: Required when using Google Gemini API
-# - GEMINI_API_KEY: Alternative to GOOGLE_API_KEY for Gemini API
-# - GOOGLE_CLOUD_PROJECT: GCP project ID for Vertex AI
-# - GOOGLE_CLOUD_LOCATION: GCP region for Vertex AI (default: us-central1)
-# - GOOGLE_APPLICATION_CREDENTIALS: Path to GCP service account JSON for Vertex AI
-# - GOOGLE_GENAI_USE_VERTEXAI: Force Vertex AI backend (true/false)
 # Note: The API key environment variable can be customized using the api_key_env_var setting
 #
 # Standard OpenTelemetry environment variables are also supported:

@@ -360,8 +360,6 @@ func displayDailyProviderBreakdownTable(w io.Writer, stats *usage.DailyProviderB
 				displayName = "Anthropic"
 			case "openai":
 				displayName = "OpenAI"
-			case "google":
-				displayName = "Google"
 			}
 
 			fmt.Fprintf(tw, "%s\t%s\t%d\t%s\t%s\t%s\t%s\t$%.4f\n",
@@ -424,8 +422,6 @@ func displayDailyProviderBreakdownTable(w io.Writer, stats *usage.DailyProviderB
 				displayName = "Anthropic"
 			case "openai":
 				displayName = "OpenAI"
-			case "google":
-				displayName = "Google"
 			}
 
 			fmt.Fprintf(tw, "TOTAL\t%s\t%d\t%s\t%s\t%s\t%s\t$%.4f\n",
@@ -483,8 +479,6 @@ func displayDailyProviderBreakdownJSON(w io.Writer, stats *usage.DailyProviderBr
 				displayName = "Anthropic"
 			case "openai":
 				displayName = "OpenAI"
-			case "google":
-				displayName = "Google"
 			}
 
 			providers[displayName] = ProviderUsageJSON{

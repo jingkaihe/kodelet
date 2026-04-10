@@ -1,7 +1,7 @@
 # Kodelet Documentation
 
 ## Project Overview
-Kodelet is a lightweight CLI tool that helps with software engineering tasks. It supports Anthropic Claude, OpenAI, and Google GenAI APIs to process user queries and execute various tools through an agentic workflow.
+Kodelet is a lightweight CLI tool that helps with software engineering tasks. It supports Anthropic Claude and OpenAI APIs to process user queries and execute various tools through an agentic workflow.
 
 ## Project Structure
 ```
@@ -11,7 +11,7 @@ pkg/             # Core packages
   ├── binaries/  # External binary management (ripgrep, fd)
   ├── conversations/  # Conversation storage (SQLite)
   ├── fragments/ # Fragment/recipe templates
-  ├── llm/       # LLM clients (anthropic/, google/, openai/)
+  ├── llm/       # LLM clients (anthropic/, openai/)
   ├── plugins/   # Unified plugin system
   ├── skills/    # Agentic skills system
   ├── tools/     # Tool implementations
@@ -26,7 +26,7 @@ recipes/         # Sample fragment/recipe templates
 ## Tech Stack
 **Backend**: Go 1.25.6, Cobra/Viper (CLI), Logrus (logging), SQLite (modernc.org/sqlite), OpenTelemetry
 **Frontend**: React 18, TypeScript, Vite, Vitest, Tailwind CSS, DaisyUI
-**LLM SDKs**: Anthropic v1.13.0, OpenAI v1.41.2, Google GenAI v1.25.0, MCP v0.29.0
+**LLM SDKs**: Anthropic v1.13.0, OpenAI v1.41.2, MCP v0.29.0
 **Tools**: mise (task runner), Docker
 
 ## Build System
@@ -72,11 +72,10 @@ Layered: env vars → global (`~/.kodelet/config.yaml`) → repo (`kodelet-confi
 # Required API keys
 export ANTHROPIC_API_KEY="sk-ant-api..."
 export OPENAI_API_KEY="sk-..."
-export GOOGLE_API_KEY="your-api-key"  # or GOOGLE_CLOUD_PROJECT for Vertex AI
 
 # Common settings
-export KODELET_PROVIDER="anthropic|openai|google"
-export KODELET_MODEL="claude-sonnet-4-6|gpt-4.1|gemini-2.5-pro"
+export KODELET_PROVIDER="anthropic|openai"
+export KODELET_MODEL="claude-sonnet-4-6|gpt-4.1"
 ```
 
 See [`config.sample.yaml`](./config.sample.yaml) for all options.

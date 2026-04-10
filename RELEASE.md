@@ -4,6 +4,8 @@
 
 Replaced the legacy `image_recognition` tool with a new `view_image` tool for inspecting local filesystem images, including provider-aware image preprocessing, richer structured metadata, and updated ACP/Web UI rendering.
 
+Removed the little-used Google/Gemini provider integration.
+
 ## 0.3.31-beta (2026-04-09)
 
 Stream live cumulative token/cost usage snapshots from Anthropic, Google, OpenAI, and OpenAI Responses into the Web UI so compact chat metadata updates during active runs without requiring a reload.

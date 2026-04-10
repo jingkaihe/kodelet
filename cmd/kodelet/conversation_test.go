@@ -264,7 +264,7 @@ func TestDisplayConversationHeaderWithoutCache(t *testing.T) {
 func TestDisplayConversationHeaderWithoutSummary(t *testing.T) {
 	record := convtypes.ConversationRecord{
 		ID:        "test-conv-789",
-		Provider:  "google",
+		Provider:  "openai",
 		CreatedAt: time.Date(2026, 1, 23, 10, 0, 0, 0, time.UTC),
 		UpdatedAt: time.Date(2026, 1, 23, 10, 30, 0, 0, time.UTC),
 		Usage: llmtypes.Usage{
@@ -278,7 +278,7 @@ func TestDisplayConversationHeaderWithoutSummary(t *testing.T) {
 	})
 
 	assert.Contains(t, output, "test-conv-789")
-	assert.Contains(t, output, "google")
+	assert.Contains(t, output, "openai")
 	assert.NotContains(t, output, "Summary:")
 }
 

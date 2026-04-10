@@ -44,7 +44,7 @@ kodelet acp [flags]
 | Flag | Description |
 |------|-------------|
 | `--model` | LLM model to use (overrides config) |
-| `--provider` | LLM provider (anthropic, openai, google) |
+| `--provider` | LLM provider (anthropic, openai) |
 | `--max-tokens` | Maximum tokens for LLM responses |
 | `--no-skills` | Disable agentic skills |
 | `--disable-fs-search-tools` | Disable `glob_tool` and `grep_tool`; use `fd`/`rg` via bash instead |

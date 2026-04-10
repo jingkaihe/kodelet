@@ -438,8 +438,6 @@ Kodelet uses layered configuration:
 Example `config.yaml`:
 ```yaml
 aliases:
-    gemini-flash: gemini-2.5-flash
-    gemini-pro: gemini-2.5-pro
     haiku-45: claude-haiku-4-5-20251001
     opus-46: claude-opus-4-6
     sonnet-46: claude-sonnet-4-6
@@ -478,12 +476,6 @@ profiles:
         model: opus-46
         thinking_budget_tokens: 32000
         weak_model: sonnet-46
-        weak_model_max_tokens: 8192
-    google:
-        max_tokens: 16000
-        model: gemini-pro
-        provider: google
-        weak_model: gemini-flash
         weak_model_max_tokens: 8192
     xai:
         max_tokens: 16000
@@ -533,21 +525,6 @@ kodelet run --provider anthropic "query"
 ```bash
 export OPENAI_API_KEY="sk-..."
 kodelet run --provider openai --model gpt-5 "query"
-```
-
-### Google Gemini
-**Models:**
-- `gemini-2.5-pro` - Advanced capabilities
-- `gemini-2.5-flash` - Fast responses
-
-**Features:**
-- Vision capabilities (multi-modal models)
-- Fast inference
-
-**Setup:**
-```bash
-export GOOGLE_API_KEY="your-api-key"
-kodelet run --provider google --model gemini-2.5-pro "query"
 ```
 
 ## Advanced Features
