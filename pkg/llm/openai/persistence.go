@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -21,24 +22,89 @@ import (
 // - Empty messages (messages with no content and no tool calls)
 // - Assistant messages containing tool calls that are not followed by tool result messages
 func (t *Thread) cleanupOrphanedMessages() {
-	for len(t.messages) > 0 {
-		lastMessage := t.messages[len(t.messages)-1]
+	t.messages = cleanedOpenAIMessages(t.messages)
+}
+
+func cleanedOpenAIMessages(messages []openai.ChatCompletionMessage) []openai.ChatCompletionMessage {
+	cleaned := slices.Clone(messages)
+	for len(cleaned) > 0 {
+		lastMessage := cleaned[len(cleaned)-1]
 
 		// Remove the last message if it is empty (no content and no tool calls)
 		if lastMessage.Content == "" && len(lastMessage.ToolCalls) == 0 && lastMessage.Role != openai.ChatMessageRoleTool && !hasOpenAIMultiContent(lastMessage.MultiContent) {
-			t.messages = t.messages[:len(t.messages)-1]
+			cleaned = cleaned[:len(cleaned)-1]
+			continue
+		}
+
+		// Remove the synthetic multimodal follow-up injected after tool results.
+		if isOpenAIInternalFollowupImageMessage(cleaned) {
+			cleaned = cleaned[:len(cleaned)-1]
 			continue
 		}
 
 		// Remove the last message if it's an assistant message with tool calls,
 		// as it must be followed by tool result messages
 		if lastMessage.Role == openai.ChatMessageRoleAssistant && len(lastMessage.ToolCalls) > 0 {
-			t.messages = t.messages[:len(t.messages)-1]
+			cleaned = cleaned[:len(cleaned)-1]
 			continue
 		}
 
 		break
 	}
+
+	return cleaned
+}
+
+func isOpenAIInternalFollowupImageMessage(messages []openai.ChatCompletionMessage) bool {
+	if len(messages) < 3 {
+		return false
+	}
+
+	lastMessage := messages[len(messages)-1]
+	if lastMessage.Role != openai.ChatMessageRoleUser || strings.TrimSpace(lastMessage.Content) != "" || len(lastMessage.ToolCalls) > 0 {
+		return false
+	}
+	if !isImageOnlyOpenAIMultiContent(lastMessage.MultiContent) {
+		return false
+	}
+
+	toolResultStart := len(messages) - 1
+	for toolResultStart > 0 && messages[toolResultStart-1].Role == openai.ChatMessageRoleTool {
+		toolResultStart--
+	}
+	if toolResultStart == len(messages)-1 || toolResultStart == 0 {
+		return false
+	}
+
+	assistantMessage := messages[toolResultStart-1]
+	if assistantMessage.Role != openai.ChatMessageRoleAssistant || len(assistantMessage.ToolCalls) == 0 {
+		return false
+	}
+
+	return true
+}
+
+func isImageOnlyOpenAIMultiContent(parts []openai.ChatMessagePart) bool {
+	if len(parts) == 0 {
+		return false
+	}
+	hasImage := false
+	for _, part := range parts {
+		switch part.Type {
+		case openai.ChatMessagePartTypeImageURL:
+			if part.ImageURL == nil || strings.TrimSpace(part.ImageURL.URL) == "" {
+				return false
+			}
+			hasImage = true
+		case openai.ChatMessagePartTypeText:
+			if strings.TrimSpace(part.Text) != "" {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return hasImage
 }
 
 // SaveConversation saves the current thread to the conversation store
@@ -51,7 +117,7 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 	}
 
 	// Clean up orphaned messages before saving
-	t.cleanupOrphanedMessages()
+	messagesToSave := cleanedOpenAIMessages(t.messages)
 
 	// Generate a new summary if requested
 	if summarize {
@@ -59,7 +125,7 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 	}
 
 	// Serialize the thread state
-	messagesJSON, err := json.Marshal(t.messages)
+	messagesJSON, err := json.Marshal(messagesToSave)
 	if err != nil {
 		return errors.Wrap(err, "error marshaling messages")
 	}
@@ -117,8 +183,7 @@ func (t *Thread) loadConversation(ctx context.Context) {
 		return
 	}
 
-	t.messages = messages
-	t.cleanupOrphanedMessages()
+	t.messages = cleanedOpenAIMessages(messages)
 	t.Usage = &record.Usage
 	t.summary = record.Summary
 	t.State.SetFileLastAccess(record.FileLastAccess)

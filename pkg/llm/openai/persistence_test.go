@@ -221,6 +221,95 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 			description: "should preserve image-only multimodal messages needed for follow-up context",
 		},
 		{
+			name: "remove synthetic image-only follow-up after tool results",
+			initialMessages: []openai.ChatCompletionMessage{
+				{
+					Role:    openai.ChatMessageRoleUser,
+					Content: "Inspect these files and image",
+				},
+				{
+					Role: openai.ChatMessageRoleAssistant,
+					ToolCalls: []openai.ToolCall{
+						{
+							ID:   "call_view_image",
+							Type: openai.ToolTypeFunction,
+							Function: openai.FunctionCall{
+								Name:      "view_image",
+								Arguments: `{"path":"/tmp/test.png"}`,
+							},
+						},
+						{
+							ID:   "call_read_file",
+							Type: openai.ToolTypeFunction,
+							Function: openai.FunctionCall{
+								Name:      "read_file",
+								Arguments: `{"path":"README.md"}`,
+							},
+						},
+					},
+				},
+				{
+					Role:       openai.ChatMessageRoleTool,
+					Content:    "view image result",
+					ToolCallID: "call_view_image",
+				},
+				{
+					Role:       openai.ChatMessageRoleTool,
+					Content:    "file contents",
+					ToolCallID: "call_read_file",
+				},
+				{
+					Role: openai.ChatMessageRoleUser,
+					MultiContent: []openai.ChatMessagePart{
+						{
+							Type: openai.ChatMessagePartTypeImageURL,
+							ImageURL: &openai.ChatMessageImageURL{
+								URL: "data:image/png;base64,aGVsbG8=",
+							},
+						},
+					},
+				},
+			},
+			expectedMessages: []openai.ChatCompletionMessage{
+				{
+					Role:    openai.ChatMessageRoleUser,
+					Content: "Inspect these files and image",
+				},
+				{
+					Role: openai.ChatMessageRoleAssistant,
+					ToolCalls: []openai.ToolCall{
+						{
+							ID:   "call_view_image",
+							Type: openai.ToolTypeFunction,
+							Function: openai.FunctionCall{
+								Name:      "view_image",
+								Arguments: `{"path":"/tmp/test.png"}`,
+							},
+						},
+						{
+							ID:   "call_read_file",
+							Type: openai.ToolTypeFunction,
+							Function: openai.FunctionCall{
+								Name:      "read_file",
+								Arguments: `{"path":"README.md"}`,
+							},
+						},
+					},
+				},
+				{
+					Role:       openai.ChatMessageRoleTool,
+					Content:    "view image result",
+					ToolCallID: "call_view_image",
+				},
+				{
+					Role:       openai.ChatMessageRoleTool,
+					Content:    "file contents",
+					ToolCallID: "call_read_file",
+				},
+			},
+			description: "should drop the internal image-only follow-up while preserving contiguous tool results",
+		},
+		{
 			name: "preserve valid tool call followed by tool result",
 			initialMessages: []openai.ChatCompletionMessage{
 				{
@@ -415,6 +504,68 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 	}
 }
 
+func TestSaveConversation_CleansCopyWithoutMutatingLiveMessages(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	thread, err := NewOpenAIThread(llmtypes.Config{
+		Model: "gpt-4.1",
+	})
+	require.NoError(t, err)
+
+	store := &MockConversationStore{}
+	thread.Store = store
+	thread.Persisted = true
+	thread.ConversationID = "conv-followup-cleanup"
+	thread.SetState(tools.NewBasicState(context.Background()))
+	thread.messages = []openai.ChatCompletionMessage{
+		{
+			Role:    openai.ChatMessageRoleUser,
+			Content: "Inspect this image",
+		},
+		{
+			Role: openai.ChatMessageRoleAssistant,
+			ToolCalls: []openai.ToolCall{
+				{
+					ID:   "call_view_image",
+					Type: openai.ToolTypeFunction,
+					Function: openai.FunctionCall{
+						Name:      "view_image",
+						Arguments: `{"path":"/tmp/test.png"}`,
+					},
+				},
+			},
+		},
+		{
+			Role:       openai.ChatMessageRoleTool,
+			Content:    "view image result",
+			ToolCallID: "call_view_image",
+		},
+		{
+			Role: openai.ChatMessageRoleUser,
+			MultiContent: []openai.ChatMessagePart{
+				{
+					Type: openai.ChatMessagePartTypeImageURL,
+					ImageURL: &openai.ChatMessageImageURL{
+						URL: "data:image/png;base64,aGVsbG8=",
+					},
+				},
+			},
+		},
+	}
+
+	err = thread.SaveConversation(context.Background(), false)
+	require.NoError(t, err)
+	require.Len(t, store.SavedRecords, 1)
+
+	assert.Len(t, thread.messages, 4, "live thread state should keep the synthetic follow-up for the next in-memory request")
+
+	var savedMessages []openai.ChatCompletionMessage
+	err = json.Unmarshal(store.SavedRecords[0].RawMessages, &savedMessages)
+	require.NoError(t, err)
+	require.Len(t, savedMessages, 3)
+	assert.Equal(t, openai.ChatMessageRoleTool, savedMessages[len(savedMessages)-1].Role)
+}
+
 func TestSaveConversationMetadataIncludesPlatformAndAPIMode(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-key")
 
@@ -491,6 +642,72 @@ func TestLoadConversation_CleansOrphanedTrailingToolCall(t *testing.T) {
 	require.Len(t, thread.messages, 1)
 	assert.Equal(t, openai.ChatMessageRoleUser, thread.messages[0].Role)
 	assert.Equal(t, "List files", thread.messages[0].Content)
+}
+
+func TestLoadConversation_CleansTrailingInternalImageFollowup(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	thread, err := NewOpenAIThread(llmtypes.Config{
+		Model: "gpt-4.1",
+	})
+	require.NoError(t, err)
+
+	thread.SetState(tools.NewBasicState(context.Background()))
+
+	rawMessages, err := json.Marshal([]openai.ChatCompletionMessage{
+		{
+			Role:    openai.ChatMessageRoleUser,
+			Content: "Inspect this image",
+		},
+		{
+			Role: openai.ChatMessageRoleAssistant,
+			ToolCalls: []openai.ToolCall{
+				{
+					ID:   "call_view_image",
+					Type: openai.ToolTypeFunction,
+					Function: openai.FunctionCall{
+						Name:      "view_image",
+						Arguments: `{"path":"/tmp/test.png"}`,
+					},
+				},
+			},
+		},
+		{
+			Role:       openai.ChatMessageRoleTool,
+			Content:    "view image result",
+			ToolCallID: "call_view_image",
+		},
+		{
+			Role: openai.ChatMessageRoleUser,
+			MultiContent: []openai.ChatMessagePart{
+				{
+					Type: openai.ChatMessagePartTypeImageURL,
+					ImageURL: &openai.ChatMessageImageURL{
+						URL: "data:image/png;base64,aGVsbG8=",
+					},
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	record := conversations.ConversationRecord{
+		ID:          "conv-image-followup",
+		Provider:    "openai",
+		RawMessages: rawMessages,
+	}
+
+	thread.Store = &MockConversationStore{LoadedRecord: &record}
+	thread.Persisted = true
+	thread.ConversationID = record.ID
+
+	thread.ConversationMu.Lock()
+	thread.loadConversation(context.Background())
+	thread.ConversationMu.Unlock()
+
+	require.Len(t, thread.messages, 3)
+	assert.Equal(t, openai.ChatMessageRoleTool, thread.messages[2].Role)
+	assert.Equal(t, "call_view_image", thread.messages[2].ToolCallID)
 }
 
 func TestStreamMessages_SimpleTextMessage(t *testing.T) {

@@ -134,6 +134,41 @@ func TestExtractMessagesWithImageOnlyMultiContent(t *testing.T) {
 	assert.Equal(t, "Inline image input (image/png).", messages[0].Content)
 }
 
+func TestOpenAIChatToolResultMessages_AppendsFollowupAfterAllToolResults(t *testing.T) {
+	toolResults := []openai.ChatCompletionMessage{
+		{
+			Role:       openai.ChatMessageRoleTool,
+			Content:    "<result>image analyzed</result>",
+			ToolCallID: "call_view_image",
+		},
+		{
+			Role:       openai.ChatMessageRoleTool,
+			Content:    "<result>file contents</result>",
+			ToolCallID: "call_file_read",
+		},
+	}
+
+	followupParts := openAIChatFollowupImageParts([]tooltypes.ToolResultContentPart{
+		{
+			Type:     tooltypes.ToolResultContentPartTypeImage,
+			ImageURL: "data:image/png;base64,aGVsbG8=",
+			Detail:   "original",
+		},
+	})
+
+	messages := openAIChatToolResultMessages(toolResults, followupParts)
+	require.Len(t, messages, 3)
+
+	assert.Equal(t, openai.ChatMessageRoleTool, messages[0].Role)
+	assert.Equal(t, "call_view_image", messages[0].ToolCallID)
+	assert.Equal(t, openai.ChatMessageRoleTool, messages[1].Role)
+	assert.Equal(t, "call_file_read", messages[1].ToolCallID)
+	assert.Equal(t, openai.ChatMessageRoleUser, messages[2].Role)
+	require.Len(t, messages[2].MultiContent, 1)
+	assert.Equal(t, openai.ChatMessagePartTypeImageURL, messages[2].MultiContent[0].Type)
+	assert.Equal(t, openai.ImageURLDetailHigh, messages[2].MultiContent[0].ImageURL.Detail)
+}
+
 func TestExtractMessagesWithMultipleToolResults(t *testing.T) {
 	// Test with multiple tool calls and results
 	messagesWithMultipleToolsJSON := `[
