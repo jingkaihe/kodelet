@@ -405,12 +405,15 @@ func TestServer_handleGetConversationPreservesImageContent(t *testing.T) {
 			if id == conversationID {
 				return &conversations.GetConversationResponse{
 					ID:       conversationID,
-					Provider: "google",
+					Provider: "openai",
 					RawMessages: json.RawMessage(`[
-						{"role":"user","parts":[
-							{"text":"what is in the image?"},
-							{"inlineData":{"data":"aGVsbG8=","mimeType":"image/png"}}
-						]}
+						{
+							"role":"user",
+							"content":[
+								{"type":"text","text":"what is in the image?"},
+								{"type":"image_url","image_url":{"url":"data:image/png;base64,aGVsbG8="}}
+							]
+						}
 					]`),
 				}, nil
 			}

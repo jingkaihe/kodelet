@@ -12,8 +12,6 @@ import (
 
 func recommendedSetupConfigYAML() string {
 	return `aliases:
-    gemini-flash: gemini-2.5-flash
-    gemini-pro: gemini-2.5-pro
     haiku-45: claude-haiku-4-5-20251001
     opus-46: claude-opus-4-6
     sonnet-46: claude-sonnet-4-6
@@ -65,14 +63,6 @@ profiles:
         thinking_budget_tokens: 32000
         tool_mode: full
         weak_model: haiku-45
-        weak_model_max_tokens: 8192
-    google:
-        disable_fs_search_tools: false
-        max_tokens: 16000
-        model: gemini-pro
-        provider: google
-        tool_mode: full
-        weak_model: gemini-flash
         weak_model_max_tokens: 8192
     xai:
         disable_fs_search_tools: false
@@ -188,7 +178,7 @@ var setupCmd = &cobra.Command{
 			presenter.Success(fmt.Sprintf("Configuration saved to %s", configFile))
 		}
 		presenter.Info("You can modify these settings at any time by editing the config file")
-		presenter.Info("Use different profiles with: --profile hybrid|openai|premium|google|xai")
+		presenter.Info("Use different profiles with: --profile hybrid|openai|premium|xai")
 		logger.G(ctx).WithField("config_file", configFile).Info("Configuration file created successfully")
 
 		presenter.Separator()
@@ -202,7 +192,6 @@ var setupCmd = &cobra.Command{
 			presenter.Info("  export ANTHROPIC_API_KEY=\"your-key-here\"  # For Claude models")
 			presenter.Info("  export OPENAI_API_KEY=\"your-key-here\"     # For OpenAI models")
 			presenter.Info("  export XAI_API_KEY=\"your-key-here\"        # For xAI Grok models")
-			presenter.Info("For Google models, see the configuration documentation for authentication options")
 		}
 
 		presenter.Separator()

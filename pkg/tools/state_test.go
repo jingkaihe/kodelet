@@ -883,7 +883,7 @@ func TestWithMainTools(t *testing.T) {
 		assert.NotContains(t, toolNames, "subagent", "DisableSubagent should exclude subagent tool")
 		assert.Contains(t, toolNames, "bash", "Other tools should remain")
 		assert.Contains(t, toolNames, "web_fetch", "web_fetch should remain when subagent is disabled")
-		assert.Contains(t, toolNames, "image_recognition", "image_recognition should remain when subagent is disabled")
+		assert.Contains(t, toolNames, "view_image", "view_image should remain when subagent is disabled")
 	})
 
 	t.Run("DisableSubagent with allowed_tools still excludes subagent", func(t *testing.T) {

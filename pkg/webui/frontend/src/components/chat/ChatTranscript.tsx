@@ -255,13 +255,10 @@ const getToolSummary = (toolCall: ChatRenderToolCall): string => {
         getStringField(input, 'url') || getStringField(metadata, 'url')
       );
 
-    case 'image_recognition':
+    case 'view_image':
       return formatToolSummary(
-        'Analyze image',
-        getStringField(input, 'image_path') ||
-          getStringField(metadata, 'imagePath', 'image_path', 'path') ||
-          getStringField(input, 'prompt') ||
-          getStringField(metadata, 'prompt')
+        'View image',
+        getStringField(input, 'path') || getStringField(metadata, 'path')
       );
 
     case 'openai_web_search': {

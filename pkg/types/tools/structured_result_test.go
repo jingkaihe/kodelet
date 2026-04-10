@@ -583,7 +583,7 @@ func TestExtractMetadata_AllTypes(t *testing.T) {
 		{"GlobMetadata", GlobMetadata{Pattern: "*.go"}, &GlobMetadata{}},
 		{"TodoMetadata", TodoMetadata{Action: "read"}, &TodoMetadata{}},
 		{"SubAgentMetadata", SubAgentMetadata{Question: "test"}, &SubAgentMetadata{}},
-		{"ImageRecognitionMetadata", ImageRecognitionMetadata{ImagePath: "/test.png"}, &ImageRecognitionMetadata{}},
+		{"ViewImageMetadata", ViewImageMetadata{Path: "/test.png"}, &ViewImageMetadata{}},
 		{"WebFetchMetadata", WebFetchMetadata{URL: "https://test"}, &WebFetchMetadata{}},
 		{"MCPToolMetadata", MCPToolMetadata{MCPToolName: "test"}, &MCPToolMetadata{}},
 	}

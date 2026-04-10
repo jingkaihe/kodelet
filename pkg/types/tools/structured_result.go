@@ -65,7 +65,7 @@ var metadataTypeRegistry = map[string]reflect.Type{
 	"custom_tool": reflect.TypeOf(CustomToolMetadata{}),
 	"todo":        reflect.TypeOf(TodoMetadata{}),
 
-	"image_recognition": reflect.TypeOf(ImageRecognitionMetadata{}),
+	"view_image":        reflect.TypeOf(ViewImageMetadata{}),
 	"subagent":          reflect.TypeOf(SubAgentMetadata{}),
 	"openai_web_search": reflect.TypeOf(OpenAIWebSearchMetadata{}),
 	"web_fetch":         reflect.TypeOf(WebFetchMetadata{}),
@@ -332,12 +332,11 @@ func (m TodoMetadata) ToolType() string { return "todo" }
 
 // Additional tool metadata structures
 
-// ImageRecognitionMetadata contains metadata about an image recognition operation
-type ImageRecognitionMetadata struct {
-	ImagePath string          `json:"imagePath"`
-	ImageType string          `json:"imageType"` // "local" or "remote"
-	Prompt    string          `json:"prompt"`
-	Analysis  string          `json:"analysis"`
+// ViewImageMetadata contains metadata about a view_image operation.
+type ViewImageMetadata struct {
+	Path      string          `json:"path"`
+	MimeType  string          `json:"mimeType,omitempty"`
+	Detail    string          `json:"detail,omitempty"`
 	ImageSize ImageDimensions `json:"imageSize,omitempty"`
 }
 
@@ -347,8 +346,8 @@ type ImageDimensions struct {
 	Height int `json:"height"`
 }
 
-// ToolType returns the tool type identifier for image recognition operations
-func (m ImageRecognitionMetadata) ToolType() string { return "image_recognition" }
+// ToolType returns the tool type identifier for view_image operations.
+func (m ViewImageMetadata) ToolType() string { return "view_image" }
 
 // SubAgentMetadata contains metadata about a sub-agent invocation
 type SubAgentMetadata struct {

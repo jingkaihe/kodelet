@@ -520,6 +520,8 @@ func (s *BasicState) configureToolSlice(tools []tooltypes.Tool) []tooltypes.Tool
 			}
 		case "web_fetch":
 			tools[i] = NewWebFetchTool(s.llmConfig.AllowedDomainsFile)
+		case "view_image":
+			tools[i] = NewViewImageTool(s.llmConfig.Model, s.llmConfig.Provider)
 		}
 	}
 	return tools

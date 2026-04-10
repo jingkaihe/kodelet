@@ -264,25 +264,24 @@ func (t *Thread) processStream(
 				// Execute the tool
 				result := t.executeToolCall(ctx, funcCall.CallID, funcCall.Name, funcCall.Arguments, handler)
 
-				// Get the string representation for API response
-				resultStr := result.AssistantFacing()
+				// Get the representation for API response
+				outputUnion, storedOutput, rawOutput := buildStoredFunctionCallOutput(result)
 
 				// Create tool result item
 				toolResultItem := responses.ResponseInputItemUnionParam{
 					OfFunctionCallOutput: &responses.ResponseInputItemFunctionCallOutputParam{
 						CallID: funcCall.CallID,
-						Output: responses.ResponseInputItemFunctionCallOutputOutputUnionParam{
-							OfString: param.NewOpt(resultStr),
-						},
+						Output: outputUnion,
 					},
 				}
 
 				// Add the tool result to inputItems and storedItems
 				t.inputItems = append(t.inputItems, toolResultItem)
 				t.storedItems = append(t.storedItems, StoredInputItem{
-					Type:   "function_call_output",
-					CallID: funcCall.CallID,
-					Output: resultStr,
+					Type:      "function_call_output",
+					CallID:    funcCall.CallID,
+					Output:    storedOutput,
+					RawOutput: rawOutput,
 				})
 
 				handler.HandleToolResult(funcCall.CallID, funcCall.Name, result)
@@ -421,6 +420,29 @@ type toolCallState struct {
 	arguments strings.Builder
 }
 
+func buildStoredFunctionCallOutput(result tooltypes.ToolResult) (
+	responses.ResponseInputItemFunctionCallOutputOutputUnionParam,
+	string,
+	json.RawMessage,
+) {
+	resultStr := result.AssistantFacing()
+	outputUnion := responses.ResponseInputItemFunctionCallOutputOutputUnionParam{
+		OfString: param.NewOpt(resultStr),
+	}
+	if rich, ok := result.(tooltypes.MultiModalToolResult); ok {
+		if outputItems := responseFunctionCallOutputItems(rich.ContentParts()); len(outputItems) > 0 {
+			outputUnion = responses.ResponseInputItemFunctionCallOutputOutputUnionParam{
+				OfResponseFunctionCallOutputItemArray: outputItems,
+			}
+			if rawOutput, err := json.Marshal(outputItems); err == nil {
+				return outputUnion, resultStr, rawOutput
+			}
+		}
+	}
+
+	return outputUnion, resultStr, nil
+}
+
 type structuredResultToolResult struct {
 	result tooltypes.StructuredToolResult
 }
@@ -449,6 +471,34 @@ func (r structuredResultToolResult) StructuredData() tooltypes.StructuredToolRes
 
 func structuredToolResultToToolResult(result tooltypes.StructuredToolResult) tooltypes.ToolResult {
 	return structuredResultToolResult{result: result}
+}
+
+func responseFunctionCallOutputItems(parts []tooltypes.ToolResultContentPart) responses.ResponseFunctionCallOutputItemListParam {
+	result := make(responses.ResponseFunctionCallOutputItemListParam, 0, len(parts))
+	for _, part := range parts {
+		switch part.Type {
+		case tooltypes.ToolResultContentPartTypeText:
+			if strings.TrimSpace(part.Text) == "" {
+				continue
+			}
+			result = append(result, responses.ResponseFunctionCallOutputItemParamOfInputText(part.Text))
+		case tooltypes.ToolResultContentPartTypeImage:
+			if strings.TrimSpace(part.ImageURL) == "" {
+				continue
+			}
+			detail := responses.ResponseInputImageContentDetailAuto
+			if strings.TrimSpace(part.Detail) == "original" {
+				detail = responses.ResponseInputImageContentDetailOriginal
+			}
+			result = append(result, responses.ResponseFunctionCallOutputItemUnionParam{
+				OfInputImage: &responses.ResponseInputImageContentParam{
+					Detail:   detail,
+					ImageURL: param.NewOpt(part.ImageURL),
+				},
+			})
+		}
+	}
+	return result
 }
 
 // executeToolCall executes a tool call and returns the result.

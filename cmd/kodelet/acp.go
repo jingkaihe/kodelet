@@ -39,7 +39,7 @@ func init() {
 
 	defaults := NewRunConfig()
 	acpCmd.Flags().String("model", "", "LLM model to use")
-	acpCmd.Flags().String("provider", "", "LLM provider (anthropic, openai, google)")
+	acpCmd.Flags().String("provider", "", "LLM provider (anthropic, openai)")
 	acpCmd.Flags().Int("max-tokens", 0, "Maximum tokens for LLM responses")
 	acpCmd.Flags().Bool("no-skills", defaults.NoSkills, "Disable agentic skills")
 	acpCmd.Flags().Bool("no-workflows", false, "Disable subagent workflows") // no RunConfig default — ACP-only flag

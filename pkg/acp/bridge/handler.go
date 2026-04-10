@@ -334,6 +334,8 @@ func ToACPToolKind(toolName string) acptypes.ToolKind {
 		return acptypes.ToolKindEdit
 	case "web_fetch":
 		return acptypes.ToolKindFetch
+	case "view_image":
+		return acptypes.ToolKindRead
 	case "thinking":
 		return acptypes.ToolKindThink
 	case "subagent":
@@ -437,8 +439,8 @@ func (g *DefaultTitleGenerator) GenerateTitle(toolName string, input string) str
 		} else if question, ok := params["question"].(string); ok {
 			title = fmt.Sprintf("Subagent: %s", question)
 		}
-	case "image_recognition":
-		if path, ok := params["image_path"].(string); ok {
+	case "view_image":
+		if path, ok := params["path"].(string); ok {
 			title = fmt.Sprintf("Image: %s", path)
 		}
 	}

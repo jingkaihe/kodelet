@@ -42,7 +42,7 @@ var toolRegistry = map[string]tooltypes.Tool{
 	"todo_read":         &TodoReadTool{},
 	"todo_write":        &TodoWriteTool{},
 	"web_fetch":         &WebFetchTool{},
-	"image_recognition": &ImageRecognitionTool{},
+	"view_image":        NewViewImageTool("", ""),
 	"skill":             NewSkillTool(nil, false, false),
 }
 
@@ -71,7 +71,7 @@ var defaultMainTools = []string{
 	"grep_tool",
 	"glob_tool",
 	"web_fetch",
-	"image_recognition",
+	"view_image",
 	"skill",
 }
 

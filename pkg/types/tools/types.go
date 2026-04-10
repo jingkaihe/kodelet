@@ -31,6 +31,32 @@ type ToolResult interface {
 	StructuredData() StructuredToolResult
 }
 
+// ToolResultContentPartType enumerates rich tool result content block types.
+type ToolResultContentPartType string
+
+const (
+	// ToolResultContentPartTypeText represents plain text tool result content.
+	ToolResultContentPartTypeText ToolResultContentPartType = "text"
+	// ToolResultContentPartTypeImage represents image tool result content.
+	ToolResultContentPartTypeImage ToolResultContentPartType = "image"
+)
+
+// ToolResultContentPart describes one rich content block attached to a tool result.
+// Providers can translate these parts into their native multimodal message formats.
+type ToolResultContentPart struct {
+	Type     ToolResultContentPartType `json:"type"`
+	Text     string                    `json:"text,omitempty"`
+	ImageURL string                    `json:"image_url,omitempty"`
+	MimeType string                    `json:"mime_type,omitempty"`
+	Detail   string                    `json:"detail,omitempty"`
+}
+
+// MultiModalToolResult is implemented by tool results that can provide
+// structured multimodal content beyond the plain AssistantFacing text representation.
+type MultiModalToolResult interface {
+	ContentParts() []ToolResultContentPart
+}
+
 // BaseToolResult provides a basic implementation of the ToolResult interface
 type BaseToolResult struct {
 	Result string `json:"result"`

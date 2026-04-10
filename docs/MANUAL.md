@@ -1497,7 +1497,7 @@ To disable the subagent tool and remove subagent-related context from the system
 kodelet run --disable-subagent "your query"
 ```
 
-This can also be set via configuration file (`disable_subagent: true`) or environment variable (`KODELET_DISABLE_SUBAGENT=true`). Other tools like `web_fetch` and `image_recognition` remain available when the subagent is disabled.
+This can also be set via configuration file (`disable_subagent: true`) or environment variable (`KODELET_DISABLE_SUBAGENT=true`). Other tools like `web_fetch` remain available when the subagent is disabled.
 
 ### Disabling Filesystem Search Tools
 

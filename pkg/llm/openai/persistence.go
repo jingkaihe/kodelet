@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -21,24 +22,89 @@ import (
 // - Empty messages (messages with no content and no tool calls)
 // - Assistant messages containing tool calls that are not followed by tool result messages
 func (t *Thread) cleanupOrphanedMessages() {
-	for len(t.messages) > 0 {
-		lastMessage := t.messages[len(t.messages)-1]
+	t.messages = cleanedOpenAIMessages(t.messages)
+}
+
+func cleanedOpenAIMessages(messages []openai.ChatCompletionMessage) []openai.ChatCompletionMessage {
+	cleaned := slices.Clone(messages)
+	for len(cleaned) > 0 {
+		lastMessage := cleaned[len(cleaned)-1]
 
 		// Remove the last message if it is empty (no content and no tool calls)
-		if lastMessage.Content == "" && len(lastMessage.ToolCalls) == 0 && lastMessage.Role != openai.ChatMessageRoleTool {
-			t.messages = t.messages[:len(t.messages)-1]
+		if lastMessage.Content == "" && len(lastMessage.ToolCalls) == 0 && lastMessage.Role != openai.ChatMessageRoleTool && !hasOpenAIMultiContent(lastMessage.MultiContent) {
+			cleaned = cleaned[:len(cleaned)-1]
+			continue
+		}
+
+		// Remove the synthetic multimodal follow-up injected after tool results.
+		if isOpenAIInternalFollowupImageMessage(cleaned) {
+			cleaned = cleaned[:len(cleaned)-1]
 			continue
 		}
 
 		// Remove the last message if it's an assistant message with tool calls,
 		// as it must be followed by tool result messages
 		if lastMessage.Role == openai.ChatMessageRoleAssistant && len(lastMessage.ToolCalls) > 0 {
-			t.messages = t.messages[:len(t.messages)-1]
+			cleaned = cleaned[:len(cleaned)-1]
 			continue
 		}
 
 		break
 	}
+
+	return cleaned
+}
+
+func isOpenAIInternalFollowupImageMessage(messages []openai.ChatCompletionMessage) bool {
+	if len(messages) < 3 {
+		return false
+	}
+
+	lastMessage := messages[len(messages)-1]
+	if lastMessage.Role != openai.ChatMessageRoleUser || strings.TrimSpace(lastMessage.Content) != "" || len(lastMessage.ToolCalls) > 0 {
+		return false
+	}
+	if !isImageOnlyOpenAIMultiContent(lastMessage.MultiContent) {
+		return false
+	}
+
+	toolResultStart := len(messages) - 1
+	for toolResultStart > 0 && messages[toolResultStart-1].Role == openai.ChatMessageRoleTool {
+		toolResultStart--
+	}
+	if toolResultStart == len(messages)-1 || toolResultStart == 0 {
+		return false
+	}
+
+	assistantMessage := messages[toolResultStart-1]
+	if assistantMessage.Role != openai.ChatMessageRoleAssistant || len(assistantMessage.ToolCalls) == 0 {
+		return false
+	}
+
+	return true
+}
+
+func isImageOnlyOpenAIMultiContent(parts []openai.ChatMessagePart) bool {
+	if len(parts) == 0 {
+		return false
+	}
+	hasImage := false
+	for _, part := range parts {
+		switch part.Type {
+		case openai.ChatMessagePartTypeImageURL:
+			if part.ImageURL == nil || strings.TrimSpace(part.ImageURL.URL) == "" {
+				return false
+			}
+			hasImage = true
+		case openai.ChatMessagePartTypeText:
+			if strings.TrimSpace(part.Text) != "" {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return hasImage
 }
 
 // SaveConversation saves the current thread to the conversation store
@@ -51,7 +117,7 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 	}
 
 	// Clean up orphaned messages before saving
-	t.cleanupOrphanedMessages()
+	messagesToSave := cleanedOpenAIMessages(t.messages)
 
 	// Generate a new summary if requested
 	if summarize {
@@ -59,7 +125,7 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 	}
 
 	// Serialize the thread state
-	messagesJSON, err := json.Marshal(t.messages)
+	messagesJSON, err := json.Marshal(messagesToSave)
 	if err != nil {
 		return errors.Wrap(err, "error marshaling messages")
 	}
@@ -117,8 +183,7 @@ func (t *Thread) loadConversation(ctx context.Context) {
 		return
 	}
 
-	t.messages = messages
-	t.cleanupOrphanedMessages()
+	t.messages = cleanedOpenAIMessages(messages)
 	t.Usage = &record.Usage
 	t.summary = record.Summary
 	t.State.SetFileLastAccess(record.FileLastAccess)
@@ -131,6 +196,7 @@ type StreamableMessage struct {
 	Kind       string // "text", "tool-use", "tool-result", "thinking"
 	Role       string // "user", "assistant", "system"
 	Content    string // Text content
+	RawItem    json.RawMessage
 	ToolName   string // For tool use/result
 	ToolCallID string // For matching tool results
 	Input      string // For tool use (JSON string)
@@ -166,6 +232,7 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 				ToolName:   toolName,
 				ToolCallID: msg.ToolCallID,
 				Content:    result,
+				RawItem:    mustMarshalOpenAIMultiContent(msg.Role, msg.MultiContent),
 			})
 			continue
 		}
@@ -187,14 +254,13 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 			})
 		}
 
-		for _, contentBlock := range msg.MultiContent {
-			if contentBlock.Text != "" {
-				streamable = append(streamable, StreamableMessage{
-					Kind:    "text",
-					Role:    msg.Role,
-					Content: contentBlock.Text,
-				})
-			}
+		if rawItem := mustMarshalOpenAIMultiContent(msg.Role, msg.MultiContent); len(rawItem) > 0 {
+			streamable = append(streamable, StreamableMessage{
+				Kind:    "text",
+				Role:    msg.Role,
+				Content: openAIMultiContentText(msg.MultiContent),
+				RawItem: rawItem,
+			})
 		}
 
 		if len(msg.ToolCalls) > 0 {
@@ -212,6 +278,105 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 	}
 
 	return streamable, nil
+}
+
+func mustMarshalOpenAIMultiContent(role string, parts []openai.ChatMessagePart) json.RawMessage {
+	payload := openAIMultiContentPayload(parts)
+	if len(payload) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(map[string]any{
+		"role":    role,
+		"content": payload,
+	})
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+func openAIMultiContentPayload(parts []openai.ChatMessagePart) []map[string]any {
+	if len(parts) == 0 {
+		return nil
+	}
+	payload := make([]map[string]any, 0, len(parts))
+	for _, part := range parts {
+		switch part.Type {
+		case openai.ChatMessagePartTypeText:
+			if strings.TrimSpace(part.Text) == "" {
+				continue
+			}
+			payload = append(payload, map[string]any{"type": "input_text", "text": part.Text})
+		case openai.ChatMessagePartTypeImageURL:
+			if part.ImageURL == nil || strings.TrimSpace(part.ImageURL.URL) == "" {
+				continue
+			}
+			payload = append(payload, map[string]any{"type": "input_image", "image_url": part.ImageURL.URL})
+		}
+	}
+	return payload
+}
+
+func hasOpenAIMultiContent(parts []openai.ChatMessagePart) bool {
+	return len(openAIMultiContentPayload(parts)) > 0
+}
+
+func openAIMultiContentText(parts []openai.ChatMessagePart) string {
+	textParts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part.Type != openai.ChatMessagePartTypeText || strings.TrimSpace(part.Text) == "" {
+			continue
+		}
+		textParts = append(textParts, part.Text)
+	}
+	return strings.Join(textParts, "\n\n")
+}
+
+func openAIMultiContentDisplay(parts []openai.ChatMessagePart) string {
+	blocks := make([]string, 0, len(parts))
+	for _, part := range parts {
+		switch part.Type {
+		case openai.ChatMessagePartTypeText:
+			if strings.TrimSpace(part.Text) != "" {
+				blocks = append(blocks, part.Text)
+			}
+		case openai.ChatMessagePartTypeImageURL:
+			if part.ImageURL == nil {
+				continue
+			}
+			if imageText := openAIImageDisplayString(part.ImageURL.URL); imageText != "" {
+				blocks = append(blocks, imageText)
+			}
+		}
+	}
+	return strings.Join(blocks, "\n\n")
+}
+
+func openAIImageDisplayString(imageURL string) string {
+	if strings.TrimSpace(imageURL) == "" {
+		return ""
+	}
+	if mediaType := openAIDataURLMediaType(imageURL); mediaType != "" {
+		return fmt.Sprintf("Inline image input (%s).", mediaType)
+	}
+	return fmt.Sprintf("Image input: %s", imageURL)
+}
+
+func openAIDataURLMediaType(dataURL string) string {
+	if !strings.HasPrefix(dataURL, "data:") {
+		return ""
+	}
+
+	metadata, hasPayload := strings.CutPrefix(dataURL, "data:")
+	if !hasPayload {
+		return ""
+	}
+	header, _, found := strings.Cut(metadata, ",")
+	if !found {
+		return ""
+	}
+	mediaType, _, _ := strings.Cut(header, ";")
+	return mediaType
 }
 
 // ExtractMessages converts the internal message format to the common format
@@ -258,14 +423,11 @@ func ExtractMessages(data []byte, toolResults map[string]tooltypes.StructuredToo
 			})
 		}
 
-		// Handle text blocks in MultiContent
-		for _, contentBlock := range msg.MultiContent {
-			if contentBlock.Text != "" {
-				result = append(result, llmtypes.Message{
-					Role:    msg.Role,
-					Content: contentBlock.Text,
-				})
-			}
+		if content := openAIMultiContentDisplay(msg.MultiContent); strings.TrimSpace(content) != "" {
+			result = append(result, llmtypes.Message{
+				Role:    msg.Role,
+				Content: content,
+			})
 		}
 
 		// Handle tool calls

@@ -56,7 +56,6 @@ type Config struct {
 
 	// Provider-specific configurations
 	OpenAI *OpenAIConfig `mapstructure:"openai" json:"openai,omitempty" yaml:"openai,omitempty"` // OpenAI-specific configuration including compatible providers
-	Google *GoogleConfig `mapstructure:"google" json:"google,omitempty" yaml:"google,omitempty"` // Google GenAI-specific configuration
 
 	// SubagentArgs is CLI arguments to pass when spawning subagents via shell-out
 	// Example: "--profile cheap" or "--use-weak-model"
@@ -114,15 +113,6 @@ type ModelPricing struct {
 
 // CustomPricing maps model names to their pricing information
 type CustomPricing map[string]ModelPricing
-
-// GoogleConfig holds Google GenAI-specific configuration for both Vertex AI and Gemini API
-type GoogleConfig struct {
-	Backend        string `mapstructure:"backend" json:"backend" yaml:"backend"`                         // Backend to use: "gemini" or "vertexai" (auto-detected if not specified)
-	APIKey         string `mapstructure:"api_key" json:"api_key" yaml:"api_key"`                         // API key for Gemini API
-	Project        string `mapstructure:"project" json:"project" yaml:"project"`                         // Google Cloud project ID for Vertex AI
-	Location       string `mapstructure:"location" json:"location" yaml:"location"`                      // Google Cloud region for Vertex AI (e.g., "us-central1")
-	ThinkingBudget int32  `mapstructure:"thinking_budget" json:"thinking_budget" yaml:"thinking_budget"` // Token budget for thinking capability
-}
 
 // ProfileConfig holds the configuration values for a named profile
 type ProfileConfig map[string]any

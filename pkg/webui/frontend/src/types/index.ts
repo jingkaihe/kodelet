@@ -32,7 +32,7 @@ export interface ToolResult {
   toolName: string;
   success: boolean;
   error?: string;
-  metadata?: FileMetadata | ApplyPatchMetadata | BashMetadata | GrepMetadata | GlobMetadata | WebFetchMetadata | ThinkingMetadata | TodoMetadata | SubagentMetadata | BatchMetadata | ImageRecognitionMetadata | BrowserMetadata | SkillMetadata | OpenAIWebSearchMetadata | Record<string, unknown>;
+  metadata?: FileMetadata | ApplyPatchMetadata | BashMetadata | GrepMetadata | GlobMetadata | WebFetchMetadata | ThinkingMetadata | TodoMetadata | SubagentMetadata | BatchMetadata | ViewImageMetadata | BrowserMetadata | SkillMetadata | OpenAIWebSearchMetadata | Record<string, unknown>;
   timestamp?: string;
 }
 
@@ -348,14 +348,11 @@ export interface BatchMetadata {
   failureCount?: number;
 }
 
-export interface ImageRecognitionMetadata {
-  imagePath?: string;
-  image_path?: string;
+export interface ViewImageMetadata {
   path?: string;
-  imageType?: string;
-  prompt?: string;
-  analysis?: string;
-  result?: string;
+  mimeType?: string;
+  mime_type?: string;
+  detail?: string;
   imageSize?: {
     width?: number;
     height?: number;

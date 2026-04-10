@@ -14,6 +14,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/sashabaranov/go-openai"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -49,14 +50,6 @@ func TestNewThread(t *testing.T) {
 				Provider: "openai",
 			},
 			expectedModel: "gpt-5.4",
-			expectedMax:   8192,
-		},
-		{
-			name: "GoogleProvider",
-			config: llmtypes.Config{
-				Provider: "google",
-			},
-			expectedModel: "gemini-2.5-pro",
 			expectedMax:   8192,
 		},
 	}
@@ -257,6 +250,33 @@ func TestExtractConversationEntriesPreservesResponsesRawItem(t *testing.T) {
 
 	messages, err := ExtractConversationEntries("openai", rawMessages, map[string]any{
 		"api_mode": "responses",
+	}, nil)
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	assert.Equal(t, "text", messages[0].Kind)
+	assert.Empty(t, messages[0].Content)
+	assert.Contains(t, string(messages[0].RawItem), `"input_image"`)
+}
+
+func TestExtractConversationEntriesPreservesOpenAIRawItem(t *testing.T) {
+	rawMessages, err := json.Marshal([]openai.ChatCompletionMessage{
+		{
+			Role: openai.ChatMessageRoleUser,
+			MultiContent: []openai.ChatMessagePart{
+				{
+					Type: openai.ChatMessagePartTypeImageURL,
+					ImageURL: &openai.ChatMessageImageURL{
+						URL:    "data:image/png;base64,aGVsbG8=",
+						Detail: openai.ImageURLDetailAuto,
+					},
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	messages, err := ExtractConversationEntries("openai", rawMessages, map[string]any{
+		"api_mode": "chat_completions",
 	}, nil)
 	require.NoError(t, err)
 	require.Len(t, messages, 1)

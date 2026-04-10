@@ -600,9 +600,7 @@ func (t *Thread) processMessageExchange(
 			WithField("result", result.output.AssistantFacing()).
 			Debug("Adding tool result to messages")
 
-		toolResultBlocks = append(toolResultBlocks,
-			anthropic.NewToolResultBlock(result.blockID, result.output.AssistantFacing(), false),
-		)
+		toolResultBlocks = append(toolResultBlocks, anthropicToolResultBlock(result.blockID, result.output))
 	}
 
 	// Add all tool results as a single user message (required by Anthropic API)
@@ -623,6 +621,51 @@ func (t *Thread) processMessageExchange(
 
 	// Return whether tools were used in this exchange
 	return finalOutput, toolUseCount > 0, nil
+}
+
+func anthropicToolResultBlock(toolUseID string, result tooltypes.ToolResult) anthropic.ContentBlockParamUnion {
+	content := []anthropic.ToolResultBlockParamContentUnion{}
+	if rich, ok := result.(tooltypes.MultiModalToolResult); ok {
+		for _, part := range rich.ContentParts() {
+			switch part.Type {
+			case tooltypes.ToolResultContentPartTypeImage:
+				mimeType, encoded, err := base.ParseBase64DataURL(part.ImageURL)
+				if err != nil {
+					continue
+				}
+				validatedMimeType, err := base.Base64ImageSourceMediaType(mimeType)
+				if err != nil {
+					continue
+				}
+				content = append(content, anthropic.ToolResultBlockParamContentUnion{
+					OfImage: &anthropic.ImageBlockParam{
+						Source: anthropic.ImageBlockParamSourceUnion{
+							OfBase64: &anthropic.Base64ImageSourceParam{
+								Data:      encoded,
+								MediaType: anthropic.Base64ImageSourceMediaType(validatedMimeType),
+							},
+						},
+					},
+				})
+			case tooltypes.ToolResultContentPartTypeText:
+				if strings.TrimSpace(part.Text) != "" {
+					content = append(content, anthropic.ToolResultBlockParamContentUnion{
+						OfText: &anthropic.TextBlockParam{Text: part.Text},
+					})
+				}
+			}
+		}
+	}
+	if len(content) == 0 {
+		content = []anthropic.ToolResultBlockParamContentUnion{{
+			OfText: &anthropic.TextBlockParam{Text: result.AssistantFacing()},
+		}}
+	}
+	return anthropic.ContentBlockParamUnion{OfToolResult: &anthropic.ToolResultBlockParam{
+		ToolUseID: toolUseID,
+		Content:   content,
+		IsError:   anthropic.Bool(result.IsError()),
+	}}
 }
 
 func (t *Thread) processPendingSteer(ctx context.Context, messageParams *anthropic.MessageNewParams, handler llmtypes.MessageHandler) error {

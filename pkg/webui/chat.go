@@ -338,15 +338,6 @@ func resolveWebChatConfigForExistingConversation(record *conversationservice.Get
 				config.OpenAI.APIMode = llmtypes.OpenAIAPIMode(strings.TrimSpace(apiMode))
 			}
 		}
-
-		if strings.EqualFold(config.Provider, "google") {
-			if config.Google == nil {
-				config.Google = &llmtypes.GoogleConfig{}
-			}
-			if backend, ok := record.Metadata["backend"].(string); ok && strings.TrimSpace(backend) != "" {
-				config.Google.Backend = strings.TrimSpace(backend)
-			}
-		}
 	}
 
 	if hasStoredProfile && profileName == "" {

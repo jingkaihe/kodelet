@@ -546,6 +546,8 @@ func (t *Thread) processMessageExchange(
 	}
 
 	// Process tool calls
+	toolResultMessages := make([]openai.ChatCompletionMessage, 0, len(toolCalls))
+	followupImageParts := make([]openai.ChatMessagePart, 0)
 	for _, toolCall := range toolCalls {
 		handler.HandleToolUse(toolCall.ID, toolCall.Function.Name, toolCall.Function.Arguments)
 
@@ -583,12 +585,17 @@ func (t *Thread) processMessageExchange(
 			WithField("result", output.AssistantFacing()).
 			Debug("Adding tool result to messages")
 
-		t.messages = append(t.messages, openai.ChatCompletionMessage{
+		message := openai.ChatCompletionMessage{
 			Role:       openai.ChatMessageRoleTool,
 			Content:    output.AssistantFacing(),
 			ToolCallID: toolCall.ID,
-		})
+		}
+		toolResultMessages = append(toolResultMessages, message)
+		if rich, ok := output.(tooltypes.MultiModalToolResult); ok {
+			followupImageParts = append(followupImageParts, openAIChatFollowupImageParts(rich.ContentParts())...)
+		}
 	}
+	t.messages = append(t.messages, openAIChatToolResultMessages(toolResultMessages, followupImageParts)...)
 
 	// Log structured LLM usage after all content processing is complete (main agent only)
 	if !t.Config.IsSubAgent && !opt.DisableUsageLog {
@@ -599,6 +606,46 @@ func (t *Thread) processMessageExchange(
 		t.SaveConversation(ctx, false)
 	}
 	return finalOutput, true, nil
+}
+
+func openAIChatFollowupImageParts(parts []tooltypes.ToolResultContentPart) []openai.ChatMessagePart {
+	content := make([]openai.ChatMessagePart, 0, len(parts))
+	for _, part := range parts {
+		if part.Type != tooltypes.ToolResultContentPartTypeImage || strings.TrimSpace(part.ImageURL) == "" {
+			continue
+		}
+		detail := openai.ImageURLDetailAuto
+		if strings.TrimSpace(part.Detail) == "original" {
+			detail = openai.ImageURLDetailHigh
+		}
+		content = append(content, openai.ChatMessagePart{
+			Type: openai.ChatMessagePartTypeImageURL,
+			ImageURL: &openai.ChatMessageImageURL{
+				URL:    part.ImageURL,
+				Detail: detail,
+			},
+		})
+	}
+	return content
+}
+
+func openAIChatFollowupImageMessage(parts []openai.ChatMessagePart) *openai.ChatCompletionMessage {
+	if len(parts) == 0 {
+		return nil
+	}
+	return &openai.ChatCompletionMessage{
+		Role:         openai.ChatMessageRoleUser,
+		MultiContent: slices.Clone(parts),
+	}
+}
+
+func openAIChatToolResultMessages(toolResults []openai.ChatCompletionMessage, followupParts []openai.ChatMessagePart) []openai.ChatCompletionMessage {
+	messages := make([]openai.ChatCompletionMessage, 0, len(toolResults)+1)
+	messages = append(messages, toolResults...)
+	if followup := openAIChatFollowupImageMessage(followupParts); followup != nil {
+		messages = append(messages, *followup)
+	}
+	return messages
 }
 
 func (t *Thread) processPendingSteer(ctx context.Context, requestParams *openai.ChatCompletionRequest, handler llmtypes.MessageHandler) error {

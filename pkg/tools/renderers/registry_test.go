@@ -27,7 +27,7 @@ func TestRendererRegistry_ExactMatches(t *testing.T) {
 		{"Todo", "todo_read", true, false},
 		{"Thinking", "thinking", true, false},
 		{"Batch", "batch", true, false},
-		{"Image Recognition", "image_recognition", true, false},
+		{"View Image", "view_image", true, false},
 		{"Subagent", "subagent", true, false},
 		{"Web Fetch", "web_fetch", true, false},
 		{"Code Execution", "code_execution", true, false},

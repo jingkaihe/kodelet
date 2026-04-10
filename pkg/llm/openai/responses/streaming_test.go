@@ -81,6 +81,35 @@ func (h *captureStreamHandler) HandleContentBlockEnd() {
 	h.events = append(h.events, "content_block_end")
 }
 
+type fakeMultiModalToolResult struct {
+	tooltypes.BaseToolResult
+	parts []tooltypes.ToolResultContentPart
+}
+
+func (r fakeMultiModalToolResult) ContentParts() []tooltypes.ToolResultContentPart {
+	return r.parts
+}
+
+func TestBuildStoredFunctionCallOutputKeepsAssistantSummary(t *testing.T) {
+	result := fakeMultiModalToolResult{
+		BaseToolResult: tooltypes.BaseToolResult{Result: "Viewed image /tmp/demo.png (1x1, image/png)"},
+		parts: []tooltypes.ToolResultContentPart{
+			{
+				Type:     tooltypes.ToolResultContentPartTypeImage,
+				ImageURL: "data:image/png;base64,aGVsbG8=",
+				MimeType: "image/png",
+			},
+		},
+	}
+
+	outputUnion, storedOutput, rawOutput := buildStoredFunctionCallOutput(result)
+
+	assert.Len(t, outputUnion.OfResponseFunctionCallOutputItemArray, 1)
+	assert.Contains(t, storedOutput, "Viewed image /tmp/demo.png")
+	assert.NotContains(t, storedOutput, "data:image/png;base64")
+	assert.Contains(t, string(rawOutput), `"image_url":"data:image/png;base64,aGVsbG8="`)
+}
+
 func TestProcessStreamThinkingEndsBeforeText(t *testing.T) {
 	usage := map[string]any{
 		"input_tokens":  1,

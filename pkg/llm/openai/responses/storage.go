@@ -39,6 +39,8 @@ type StoredInputItem struct {
 
 	// Function call output fields (when Type == "function_call_output")
 	Output string `json:"output,omitempty"`
+	// Optional structured raw output for multimodal function call outputs.
+	RawOutput json.RawMessage `json:"raw_output,omitempty"`
 
 	// Compaction fields (when Type == "compaction")
 	EncryptedContent string `json:"encrypted_content,omitempty"`
@@ -102,6 +104,20 @@ func fromStoredItems(items []StoredInputItem) []responses.ResponseInputItemUnion
 			})
 
 		case "function_call_output":
+			if len(item.RawOutput) > 0 {
+				var outputItems responses.ResponseFunctionCallOutputItemListParam
+				if err := json.Unmarshal(item.RawOutput, &outputItems); err == nil {
+					result = append(result, responses.ResponseInputItemUnionParam{
+						OfFunctionCallOutput: &responses.ResponseInputItemFunctionCallOutputParam{
+							CallID: item.CallID,
+							Output: responses.ResponseInputItemFunctionCallOutputOutputUnionParam{
+								OfResponseFunctionCallOutputItemArray: outputItems,
+							},
+						},
+					})
+					continue
+				}
+			}
 			result = append(result, responses.ResponseInputItemUnionParam{
 				OfFunctionCallOutput: &responses.ResponseInputItemFunctionCallOutputParam{
 					CallID: item.CallID,
