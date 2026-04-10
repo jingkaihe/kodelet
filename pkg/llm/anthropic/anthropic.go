@@ -625,8 +625,8 @@ func (t *Thread) processMessageExchange(
 
 func anthropicToolResultBlock(toolUseID string, result tooltypes.ToolResult) anthropic.ContentBlockParamUnion {
 	content := []anthropic.ToolResultBlockParamContentUnion{}
-	if rich, ok := result.(tooltypes.RichToolResult); ok {
-		for _, part := range rich.ToolResultContent() {
+	if rich, ok := result.(tooltypes.MultiModalToolResult); ok {
+		for _, part := range rich.ContentParts() {
 			switch part.Type {
 			case tooltypes.ToolResultContentPartTypeImage:
 				mimeType, encoded, err := base.ParseBase64DataURL(part.ImageURL)

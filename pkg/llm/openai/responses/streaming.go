@@ -270,8 +270,8 @@ func (t *Thread) processStream(
 					OfString: param.NewOpt(resultStr),
 				}
 				storedOutput := resultStr
-				if rich, ok := result.(tooltypes.RichToolResult); ok {
-					if outputItems := responseFunctionCallOutputItems(rich.ToolResultContent()); len(outputItems) > 0 {
+				if rich, ok := result.(tooltypes.MultiModalToolResult); ok {
+					if outputItems := responseFunctionCallOutputItems(rich.ContentParts()); len(outputItems) > 0 {
 						outputUnion = responses.ResponseInputItemFunctionCallOutputOutputUnionParam{
 							OfResponseFunctionCallOutputItemArray: outputItems,
 						}

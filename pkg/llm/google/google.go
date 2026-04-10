@@ -957,8 +957,8 @@ func (t *Thread) executeToolCalls(ctx context.Context, response *Response, handl
 			"result":  output.AssistantFacing(),
 			"error":   output.IsError(),
 		}
-		if rich, ok := output.(tooltypes.RichToolResult); ok {
-			if richPayload := googleRichToolResultPayload(rich.ToolResultContent()); len(richPayload) > 0 {
+		if rich, ok := output.(tooltypes.MultiModalToolResult); ok {
+			if richPayload := googleRichToolResultPayload(rich.ContentParts()); len(richPayload) > 0 {
 				responsePayload["output"] = richPayload
 			}
 		}

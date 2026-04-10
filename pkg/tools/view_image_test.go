@@ -72,10 +72,10 @@ func TestViewImageTool_ExecuteAndStructuredData(t *testing.T) {
 	assert.Equal(t, 12, meta.ImageSize.Height)
 
 	rich, ok := result.(interface {
-		ToolResultContent() []tooltypes.ToolResultContentPart
+		ContentParts() []tooltypes.ToolResultContentPart
 	})
 	require.True(t, ok)
-	parts := rich.ToolResultContent()
+	parts := rich.ContentParts()
 	require.Len(t, parts, 1)
 	assert.Equal(t, tooltypes.ToolResultContentPartTypeImage, parts[0].Type)
 	assert.Contains(t, parts[0].ImageURL, "data:image/png;base64,")

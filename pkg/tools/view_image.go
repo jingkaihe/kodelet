@@ -62,7 +62,7 @@ func (r *ViewImageToolResult) StructuredData() tooltypes.StructuredToolResult {
 	return result
 }
 
-func (r *ViewImageToolResult) ToolResultContent() []tooltypes.ToolResultContentPart {
+func (r *ViewImageToolResult) ContentParts() []tooltypes.ToolResultContentPart {
 	if r.data == nil || r.base.Error != "" {
 		return nil
 	}

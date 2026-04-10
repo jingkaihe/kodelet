@@ -589,8 +589,8 @@ func (t *Thread) processMessageExchange(
 			ToolCallID: toolCall.ID,
 		}
 		t.messages = append(t.messages, message)
-		if rich, ok := output.(tooltypes.RichToolResult); ok {
-			if followup := openAIChatFollowupImageMessage(rich.ToolResultContent()); followup != nil {
+		if rich, ok := output.(tooltypes.MultiModalToolResult); ok {
+			if followup := openAIChatFollowupImageMessage(rich.ContentParts()); followup != nil {
 				t.messages = append(t.messages, *followup)
 			}
 		}

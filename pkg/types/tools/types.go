@@ -51,10 +51,10 @@ type ToolResultContentPart struct {
 	Detail   string                    `json:"detail,omitempty"`
 }
 
-// RichToolResult is implemented by tool results that can provide structured
-// multimodal content beyond the plain AssistantFacing text representation.
-type RichToolResult interface {
-	ToolResultContent() []ToolResultContentPart
+// MultiModalToolResult is implemented by tool results that can provide
+// structured multimodal content beyond the plain AssistantFacing text representation.
+type MultiModalToolResult interface {
+	ContentParts() []ToolResultContentPart
 }
 
 // BaseToolResult provides a basic implementation of the ToolResult interface
