@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.3.33-beta (2026-04-11)
+
+Made `kodelet run --no-tools` fully skip MCP, custom, skill, and subagent tool initialization so no tools are registered later in setup when tools are explicitly disabled.
+
+Improved the Web UI new-chat directory autocomplete so clicking a suggestion keeps the dialog stable, suggestions stay anchored to the directory field, and `Tab` now accepts the active path suggestion.
+
 ## 0.3.32-beta (2026-04-10)
 
 Replaced the legacy `image_recognition` tool with a new `view_image` tool for inspecting local filesystem images, including provider-aware image preprocessing, richer structured metadata, and updated ACP/Web UI rendering.
