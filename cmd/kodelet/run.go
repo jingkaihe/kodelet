@@ -172,6 +172,38 @@ func applyFragmentRestrictions(llmConfig *llmtypes.Config, fragmentMetadata *fra
 	}
 }
 
+func applyRunToolRestrictions(llmConfig *llmtypes.Config, fragmentMetadata *fragments.Metadata, noTools bool) {
+	applyFragmentRestrictions(llmConfig, fragmentMetadata)
+	if noTools {
+		llmConfig.AllowedTools = []string{tools.NoToolsMarker}
+	}
+}
+
+func createRunToolManagers(ctx context.Context, config *RunConfig) (*tools.MCPManager, *tools.CustomToolManager, error) {
+	if config.NoTools {
+		return nil, nil, nil
+	}
+
+	var mcpManager *tools.MCPManager
+	var err error
+	if !config.NoMCP {
+		mcpManager, err = tools.CreateMCPManagerFromViper(ctx)
+		if err != nil && !errors.Is(err, tools.ErrMCPDisabled) {
+			return nil, nil, err
+		}
+	}
+
+	customManager, err := tools.CreateCustomToolManagerFromViper(ctx)
+	if err != nil {
+		if mcpManager != nil {
+			_ = mcpManager.Close(ctx)
+		}
+		return nil, nil, err
+	}
+
+	return mcpManager, customManager, nil
+}
+
 func normalizeConversationProfile(profile string) string {
 	profile = strings.TrimSpace(profile)
 	if profile == "" || strings.EqualFold(profile, "default") {
@@ -305,24 +337,15 @@ var runCmd = &cobra.Command{
 			}
 		}
 
-		var mcpManager *tools.MCPManager
-		if !config.NoMCP {
-			mcpManager, err = tools.CreateMCPManagerFromViper(ctx)
-			if err != nil && !errors.Is(err, tools.ErrMCPDisabled) {
-				presenter.Error(err, "Failed to create MCP manager")
-				return
-			}
+		mcpManager, customManager, err := createRunToolManagers(ctx, config)
+		if err != nil {
+			presenter.Error(err, "Failed to initialize tools")
+			return
 		}
 		if mcpManager != nil {
 			defer func() {
 				_ = mcpManager.Close(ctx)
 			}()
-		}
-
-		customManager, err := tools.CreateCustomToolManagerFromViper(ctx)
-		if err != nil {
-			presenter.Error(err, "Failed to create custom tool manager")
-			return
 		}
 
 		llmConfig, resolvedCWD, err := loadResumeConversationConfig(ctx, cmd, config.ResumeConvID, config.CWD)
@@ -351,11 +374,6 @@ var runCmd = &cobra.Command{
 		llmConfig.IsSubAgent = config.AsSubagent
 		llmConfig.RecipeName = config.FragmentName
 
-		// Disable all tools if requested
-		if config.NoTools {
-			llmConfig.AllowedTools = []string{tools.NoToolsMarker}
-		}
-
 		// Set Anthropic account if specified
 		if config.Account != "" {
 			// Validate the account exists
@@ -366,38 +384,41 @@ var runCmd = &cobra.Command{
 			llmConfig.AnthropicAccount = config.Account
 		}
 
-		applyFragmentRestrictions(&llmConfig, fragmentMetadata)
+		applyRunToolRestrictions(&llmConfig, fragmentMetadata, config.NoTools)
 
-		// Check if MCP code execution mode is enabled
-		executionMode := viper.GetString("mcp.execution_mode")
-		workspaceDir, err := mcp.ResolveWorkspaceDir(llmConfig.WorkingDirectory)
-		if err != nil {
-			presenter.Error(err, "Failed to resolve MCP workspace directory")
-			return
+		if !config.NoTools {
+			workspaceDir, err := mcp.ResolveWorkspaceDir(llmConfig.WorkingDirectory)
+			if err != nil {
+				presenter.Error(err, "Failed to resolve MCP workspace directory")
+				return
+			}
+
+			llmConfig.MCPExecutionMode = viper.GetString("mcp.execution_mode")
+			llmConfig.MCPWorkspaceDir = workspaceDir
 		}
-
-		// Set MCP configuration in llmConfig for system prompt
-		llmConfig.MCPExecutionMode = executionMode
-		llmConfig.MCPWorkspaceDir = workspaceDir
 
 		var stateOpts []tools.BasicStateOption
 		stateOpts = append(stateOpts, tools.WithWorkingDirectory(llmConfig.WorkingDirectory))
 		stateOpts = append(stateOpts, tools.WithLLMConfig(llmConfig))
-		stateOpts = append(stateOpts, tools.WithCustomTools(customManager))
+		if !config.NoTools {
+			if customManager != nil {
+				stateOpts = append(stateOpts, tools.WithCustomTools(customManager))
+			}
 
-		// When running as subagent, use subagent tools (excludes subagent tool to prevent recursion)
-		if config.AsSubagent {
-			stateOpts = append(stateOpts, tools.WithSubAgentToolsFromConfig())
-		} else {
-			stateOpts = append(stateOpts, tools.WithMainTools())
-		}
+			// When running as subagent, use subagent tools (excludes subagent tool to prevent recursion)
+			if config.AsSubagent {
+				stateOpts = append(stateOpts, tools.WithSubAgentToolsFromConfig())
+			} else {
+				stateOpts = append(stateOpts, tools.WithMainTools())
+			}
 
-		// Initialize skills (discovery happens inside WithSkillTool)
-		stateOpts = append(stateOpts, tools.WithSkillTool())
+			// Initialize skills (discovery happens inside WithSkillTool)
+			stateOpts = append(stateOpts, tools.WithSkillTool())
 
-		// Initialize workflows for subagent (only for main agent, not subagent, and if not disabled)
-		if !config.AsSubagent && !viper.GetBool("no_workflows") && !llmConfig.DisableSubagent {
-			stateOpts = append(stateOpts, tools.WithSubAgentTool())
+			// Initialize workflows for subagent (only for main agent, not subagent, and if not disabled)
+			if !config.AsSubagent && !viper.GetBool("no_workflows") && !llmConfig.DisableSubagent {
+				stateOpts = append(stateOpts, tools.WithSubAgentTool())
+			}
 		}
 
 		// Generate session ID for MCP socket (use resume ID if available, otherwise new ID)
@@ -407,7 +428,7 @@ var runCmd = &cobra.Command{
 		}
 
 		// Set up MCP execution mode
-		if mcpManager != nil {
+		if !config.NoTools && mcpManager != nil {
 			mcpSetup, err := mcp.SetupExecutionMode(ctx, mcpManager, sessionID, llmConfig.WorkingDirectory)
 			if err != nil && !errors.Is(err, mcp.ErrDirectMode) {
 				presenter.Error(err, "Failed to set up MCP execution mode")

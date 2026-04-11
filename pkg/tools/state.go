@@ -150,6 +150,9 @@ func WithMainTools() BasicStateOption {
 // WithMCPTools returns an option that configures MCP tools
 func WithMCPTools(mcpManager *MCPManager) BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
+		if noToolsConfigured(s.llmConfig) || mcpManager == nil {
+			return nil
+		}
 		tools, err := mcpManager.ListMCPTools(ctx)
 		if err != nil {
 			return err
@@ -164,6 +167,9 @@ func WithMCPTools(mcpManager *MCPManager) BasicStateOption {
 // WithExtraMCPTools returns an option that adds extra MCP tools
 func WithExtraMCPTools(tools []tooltypes.Tool) BasicStateOption {
 	return func(_ context.Context, s *BasicState) error {
+		if noToolsConfigured(s.llmConfig) {
+			return nil
+		}
 		s.mcpTools = append(s.mcpTools, tools...)
 		return nil
 	}
@@ -172,6 +178,9 @@ func WithExtraMCPTools(tools []tooltypes.Tool) BasicStateOption {
 // WithCustomTools returns an option that configures custom tools
 func WithCustomTools(customManager *CustomToolManager) BasicStateOption {
 	return func(_ context.Context, s *BasicState) error {
+		if noToolsConfigured(s.llmConfig) || customManager == nil {
+			return nil
+		}
 		tools := customManager.ListTools()
 		s.customTools = append(s.customTools, tools...)
 		return nil
@@ -224,6 +233,9 @@ func WithSessionID(sessionID string) BasicStateOption {
 // WithSkillTool returns an option that configures the skill tool with discovered skills
 func WithSkillTool() BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
+		if noToolsConfigured(s.llmConfig) {
+			return nil
+		}
 		discoveredSkills := discoverSkills(ctx, s.llmConfig)
 		skillTool := NewSkillToolWithOptions(discoveredSkills, len(discoveredSkills) > 0, s.llmConfig.ToolMode, s.llmConfig.DisableFSSearchTools)
 		for i, tool := range s.tools {
@@ -267,6 +279,9 @@ func discoverSkills(ctx context.Context, llmConfig llmtypes.Config) map[string]*
 // WithSubAgentTool returns an option that configures the subagent tool with discovered workflows
 func WithSubAgentTool() BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
+		if noToolsConfigured(s.llmConfig) {
+			return nil
+		}
 		discoveredWorkflows := discoverWorkflows(ctx)
 		subagentTool := NewSubAgentToolWithOptions(discoveredWorkflows, len(discoveredWorkflows) > 0, s.llmConfig.ToolMode, s.llmConfig.DisableFSSearchTools)
 		for i, tool := range s.tools {
@@ -374,6 +389,10 @@ func enforceToolModeOnResolvedTools(tools []tooltypes.Tool, allowedTools []strin
 	}
 
 	return filteredTools
+}
+
+func noToolsConfigured(config llmtypes.Config) bool {
+	return len(config.AllowedTools) == 1 && config.AllowedTools[0] == NoToolsMarker
 }
 
 // TodoFilePath returns the path to the todo file

@@ -9,6 +9,8 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
+	"github.com/jingkaihe/kodelet/pkg/fragments"
+	"github.com/jingkaihe/kodelet/pkg/tools"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/spf13/cobra"
@@ -283,4 +285,23 @@ func TestLoadResumeConversationConfig_DefaultStoredProfileIgnoresActiveProfile(t
 	assert.Equal(t, "anthropic", config.Provider)
 	assert.Equal(t, "base-model", config.Model)
 	assert.Equal(t, "default", config.Profile)
+}
+
+func TestApplyRunToolRestrictions_NoToolsWinsOverFragmentAllowedTools(t *testing.T) {
+	llmConfig := llmtypes.Config{}
+	fragmentMetadata := &fragments.Metadata{
+		AllowedTools: []string{"bash", "file_read"},
+	}
+
+	applyRunToolRestrictions(&llmConfig, fragmentMetadata, true)
+
+	assert.Equal(t, []string{tools.NoToolsMarker}, llmConfig.AllowedTools)
+}
+
+func TestCreateRunToolManagers_NoToolsSkipsToolInitialization(t *testing.T) {
+	mcpManager, customManager, err := createRunToolManagers(context.Background(), &RunConfig{NoTools: true})
+
+	require.NoError(t, err)
+	assert.Nil(t, mcpManager)
+	assert.Nil(t, customManager)
 }

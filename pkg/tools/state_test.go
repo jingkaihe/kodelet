@@ -1037,6 +1037,25 @@ func TestNewBasicState_ReconfiguresExtraMCPTools(t *testing.T) {
 	assert.NotContains(t, description, "using `file_write` / `file_edit` / `apply_patch`.")
 }
 
+func TestNoToolsConfigured_PreventsAdditionalToolRegistration(t *testing.T) {
+	ctx := context.Background()
+	config := llmtypes.Config{AllowedTools: []string{NoToolsMarker}}
+
+	customManager := &CustomToolManager{}
+	state := NewBasicState(
+		ctx,
+		WithLLMConfig(config),
+		WithMainTools(),
+		WithCustomTools(customManager),
+		WithExtraMCPTools([]tooltypes.Tool{NewCodeExecutionTool(nil)}),
+		WithSkillTool(),
+		WithSubAgentTool(),
+	)
+
+	assert.Empty(t, state.Tools(), "NoToolsMarker should block all later tool registration")
+	assert.Empty(t, state.MCPTools(), "NoToolsMarker should block MCP tool registration")
+}
+
 func TestGetLLMConfig_ReturnsSubagentArgs(t *testing.T) {
 	ctx := context.Background()
 
