@@ -9,6 +9,7 @@ import (
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1077,4 +1078,85 @@ func TestGetLLMConfig_ReturnsSubagentArgs(t *testing.T) {
 		assert.True(t, ok, "GetLLMConfig should return llmtypes.Config")
 		assert.Empty(t, retrievedConfig.SubagentArgs)
 	})
+}
+
+func TestWithSkillTool_RespectsExplicitAllowlist(t *testing.T) {
+	ctx := context.Background()
+	state := NewBasicState(
+		ctx,
+		WithLLMConfig(llmtypes.Config{AllowedTools: []string{"file_read", "grep_tool", "glob_tool"}}),
+		WithSubAgentToolsFromConfig(),
+		WithSkillTool(),
+	)
+
+	toolNames := make([]string, len(state.Tools()))
+	for i, tool := range state.Tools() {
+		toolNames[i] = tool.Name()
+	}
+
+	assert.Equal(t, []string{"file_read", "grep_tool", "glob_tool"}, toolNames)
+	assert.NotContains(t, toolNames, "skill")
+}
+
+func TestWithCustomTools_RespectsExplicitAllowlist(t *testing.T) {
+	ctx := context.Background()
+	customManager := &CustomToolManager{
+		tools: map[string]*CustomTool{
+			"finder": {name: "finder"},
+		},
+	}
+
+	state := NewBasicState(
+		ctx,
+		WithLLMConfig(llmtypes.Config{AllowedTools: []string{"file_read", "grep_tool", "glob_tool"}}),
+		WithSubAgentToolsFromConfig(),
+		WithCustomTools(customManager),
+	)
+
+	toolNames := make([]string, len(state.Tools()))
+	for i, tool := range state.Tools() {
+		toolNames[i] = tool.Name()
+	}
+
+	assert.Equal(t, []string{"file_read", "grep_tool", "glob_tool"}, toolNames)
+	assert.NotContains(t, toolNames, "custom_tool_finder")
+}
+
+func TestWithSkillTool_RespectsNoSkillsFlag(t *testing.T) {
+	ctx := context.Background()
+	viper.Set("no_skills", true)
+	t.Cleanup(func() {
+		viper.Set("no_skills", false)
+	})
+
+	state := NewBasicState(
+		ctx,
+		WithLLMConfig(llmtypes.Config{}),
+		WithMainTools(),
+		WithSkillTool(),
+	)
+
+	toolNames := make([]string, len(state.Tools()))
+	for i, tool := range state.Tools() {
+		toolNames[i] = tool.Name()
+	}
+
+	assert.NotContains(t, toolNames, "skill")
+}
+
+func TestWithSkillTool_SkipsSubagents(t *testing.T) {
+	ctx := context.Background()
+	state := NewBasicState(
+		ctx,
+		WithLLMConfig(llmtypes.Config{IsSubAgent: true}),
+		WithSubAgentToolsFromConfig(),
+		WithSkillTool(),
+	)
+
+	toolNames := make([]string, len(state.Tools()))
+	for i, tool := range state.Tools() {
+		toolNames[i] = tool.Name()
+	}
+
+	assert.NotContains(t, toolNames, "skill")
 }

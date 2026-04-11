@@ -17,6 +17,7 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
+	"github.com/spf13/viper"
 )
 
 var _ tooltypes.State = &BasicState{}
@@ -46,6 +47,70 @@ type BasicState struct {
 	// Per-file locking for atomic file operations
 	fileLocks   map[string]*sync.Mutex
 	fileLocksMu sync.Mutex
+}
+
+func hasExplicitAllowedTools(config llmtypes.Config) bool {
+	return len(config.AllowedTools) > 0
+}
+
+func allowedToolNameSet(config llmtypes.Config) map[string]struct{} {
+	if len(config.AllowedTools) == 0 {
+		return nil
+	}
+
+	allowed := make(map[string]struct{}, len(config.AllowedTools))
+	for _, name := range config.AllowedTools {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			continue
+		}
+		allowed[trimmed] = struct{}{}
+	}
+
+	return allowed
+}
+
+func filterDiscoveredToolsByAllowed(config llmtypes.Config, tools []tooltypes.Tool) []tooltypes.Tool {
+	if len(tools) == 0 || !hasExplicitAllowedTools(config) {
+		return tools
+	}
+
+	allowed := allowedToolNameSet(config)
+	if len(allowed) == 0 {
+		return nil
+	}
+
+	filtered := make([]tooltypes.Tool, 0, len(tools))
+	for _, tool := range tools {
+		if _, ok := allowed[tool.Name()]; ok {
+			filtered = append(filtered, tool)
+		}
+	}
+
+	return filtered
+}
+
+func skillsEnabledForConfig(config llmtypes.Config) bool {
+	if config.IsSubAgent {
+		return false
+	}
+	if config.Skills != nil && !config.Skills.Enabled {
+		return false
+	}
+	if viper.GetBool("no_skills") {
+		return false
+	}
+	return true
+}
+
+func filterOutToolByName(tools []tooltypes.Tool, name string) []tooltypes.Tool {
+	filtered := make([]tooltypes.Tool, 0, len(tools))
+	for _, tool := range tools {
+		if tool.Name() != name {
+			filtered = append(filtered, tool)
+		}
+	}
+	return filtered
 }
 
 // ContextDiscovery tracks context discovery results
@@ -142,6 +207,9 @@ func WithMainTools() BasicStateOption {
 		if s.llmConfig.DisableSubagent {
 			s.tools = filterOutSubagent(s.tools)
 		}
+		if !skillsEnabledForConfig(s.llmConfig) {
+			s.tools = filterOutToolByName(s.tools, "skill")
+		}
 		s.configureTools()
 		return nil
 	}
@@ -158,6 +226,9 @@ func WithMCPTools(mcpManager *MCPManager) BasicStateOption {
 			return err
 		}
 		for _, tool := range tools {
+			if len(filterDiscoveredToolsByAllowed(s.llmConfig, []tooltypes.Tool{&tool})) == 0 {
+				continue
+			}
 			s.mcpTools = append(s.mcpTools, &tool)
 		}
 		return nil
@@ -170,7 +241,7 @@ func WithExtraMCPTools(tools []tooltypes.Tool) BasicStateOption {
 		if noToolsConfigured(s.llmConfig) {
 			return nil
 		}
-		s.mcpTools = append(s.mcpTools, tools...)
+		s.mcpTools = append(s.mcpTools, filterDiscoveredToolsByAllowed(s.llmConfig, tools)...)
 		return nil
 	}
 }
@@ -181,7 +252,7 @@ func WithCustomTools(customManager *CustomToolManager) BasicStateOption {
 		if noToolsConfigured(s.llmConfig) || customManager == nil {
 			return nil
 		}
-		tools := customManager.ListTools()
+		tools := filterDiscoveredToolsByAllowed(s.llmConfig, customManager.ListTools())
 		s.customTools = append(s.customTools, tools...)
 		return nil
 	}
@@ -236,7 +307,22 @@ func WithSkillTool() BasicStateOption {
 		if noToolsConfigured(s.llmConfig) {
 			return nil
 		}
+		if !skillsEnabledForConfig(s.llmConfig) {
+			s.tools = filterOutToolByName(s.tools, "skill")
+			return nil
+		}
+		if hasExplicitAllowedTools(s.llmConfig) {
+			allowed := allowedToolNameSet(s.llmConfig)
+			if _, ok := allowed["skill"]; !ok {
+				s.tools = filterOutToolByName(s.tools, "skill")
+				return nil
+			}
+		}
 		discoveredSkills := discoverSkills(ctx, s.llmConfig)
+		if len(discoveredSkills) == 0 {
+			s.tools = filterOutToolByName(s.tools, "skill")
+			return nil
+		}
 		skillTool := NewSkillToolWithOptions(discoveredSkills, len(discoveredSkills) > 0, s.llmConfig.ToolMode, s.llmConfig.DisableFSSearchTools)
 		for i, tool := range s.tools {
 			if tool.Name() == "skill" {
@@ -251,8 +337,16 @@ func WithSkillTool() BasicStateOption {
 
 // discoverSkills discovers available skills based on configuration
 func discoverSkills(ctx context.Context, llmConfig llmtypes.Config) map[string]*skills.Skill {
+	if llmConfig.IsSubAgent {
+		return nil
+	}
+
 	// Check if skills are disabled via config
 	if llmConfig.Skills != nil && !llmConfig.Skills.Enabled {
+		return nil
+	}
+
+	if viper.GetBool("no_skills") {
 		return nil
 	}
 
