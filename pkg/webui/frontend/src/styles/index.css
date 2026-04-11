@@ -773,8 +773,10 @@ h6 {
 }
 
 .composer-cwd-suggestions-inline {
-  position: static;
-  min-width: 0;
+  top: calc(100% + 0.35rem);
+  bottom: auto;
+  min-width: 100%;
+  max-width: 100%;
   max-height: 14rem;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
@@ -873,6 +875,10 @@ h6 {
   min-width: 0;
 }
 
+.new-chat-field-autocomplete {
+  position: relative;
+}
+
 .new-chat-field-control {
   min-height: 2.75rem;
   width: 100%;
@@ -903,6 +909,7 @@ h6 {
   font-size: 0.79rem;
   line-height: 1.45;
   color: rgba(20, 20, 19, 0.58);
+  min-height: 1.15rem;
 }
 
 .new-chat-dialog-actions {

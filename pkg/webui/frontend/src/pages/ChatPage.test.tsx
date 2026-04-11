@@ -345,6 +345,8 @@ describe("ChatPage", () => {
 		);
 
 		fireEvent.mouseDown(screen.getByTestId("cwd-suggestion-0"));
+		fireEvent.click(screen.getByTestId("cwd-suggestion-0"));
+		expect(screen.getByTestId("new-chat-dialog")).toBeInTheDocument();
 		fireEvent.click(screen.getByRole("button", { name: "Use these settings" }));
 		expect(screen.queryByTestId("new-chat-dialog")).not.toBeInTheDocument();
 		expect(
@@ -380,6 +382,41 @@ describe("ChatPage", () => {
 
 		fireEvent.keyDown(cwdInput, { key: "ArrowDown" });
 		fireEvent.keyDown(cwdInput, { key: "Enter" });
+		fireEvent.click(screen.getByRole("button", { name: "Use these settings" }));
+
+		expect(
+			screen.getByText(/workspace\/kodelet/),
+		).toBeInTheDocument();
+	});
+
+	it("supports tab completion for cwd suggestions", async () => {
+		mockGetCWDHints.mockImplementation((query: string) => {
+			if (query === "/workspace/ko") {
+				return Promise.resolve({
+					hints: [{ path: "/workspace/kodelet" }, { path: "/workspace/koala" }],
+				});
+			}
+			return Promise.resolve({
+				hints: [{ path: "/workspace/default" }],
+			});
+		});
+
+		render(<ChatPage />);
+
+		await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
+
+		fireEvent.click(screen.getByTestId("sidebar-new-chat-button"));
+		const cwdInput = screen.getByLabelText("Working directory");
+		fireEvent.focus(cwdInput);
+		fireEvent.change(cwdInput, { target: { value: "/workspace/ko" } });
+
+		await waitFor(() =>
+			expect(screen.getByTestId("cwd-suggestions")).toBeInTheDocument(),
+		);
+
+		fireEvent.keyDown(cwdInput, { key: "Tab" });
+		expect(screen.queryByTestId("cwd-suggestions")).not.toBeInTheDocument();
+		expect(cwdInput).toHaveValue("/workspace/kodelet");
 		fireEvent.click(screen.getByRole("button", { name: "Use these settings" }));
 
 		expect(

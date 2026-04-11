@@ -347,7 +347,17 @@ const ChatPage: React.FC = () => {
 		}, 0);
 
 		const handlePointerDown = (event: MouseEvent) => {
-			if (newChatDialogRef.current?.contains(event.target as Node)) {
+			const dialog = newChatDialogRef.current;
+			if (!dialog) {
+				return;
+			}
+
+			const eventPath =
+				typeof event.composedPath === "function" ? event.composedPath() : [];
+			if (
+				eventPath.includes(dialog) ||
+				dialog.contains(event.target as Node | null)
+			) {
 				return;
 			}
 
@@ -1132,6 +1142,23 @@ const ChatPage: React.FC = () => {
 		}
 
 		if (
+			!event.shiftKey &&
+			event.key === "Tab" &&
+			cwdSuggestionsOpen &&
+			cwdSuggestions.length > 0
+		) {
+			event.preventDefault();
+			const suggestion =
+				cwdSuggestions[
+					cwdSuggestionIndex >= 0 ? cwdSuggestionIndex : 0
+				];
+			if (suggestion) {
+				applyCwdSuggestion(suggestion.path);
+			}
+			return;
+		}
+
+		if (
 			event.key === "Enter" &&
 			cwdSuggestionsOpen &&
 			cwdSuggestions.length > 0 &&
@@ -1283,66 +1310,70 @@ const ChatPage: React.FC = () => {
 
 				<label className="new-chat-field new-chat-field-wide">
 					<span className="composer-profile-label">Directory</span>
-					<input
-						aria-autocomplete="list"
-						aria-expanded={cwdSuggestionsOpen && cwdSuggestions.length > 0}
-						aria-label="Working directory"
-						autoCapitalize="off"
-						autoComplete="off"
-						autoCorrect="off"
-						className="new-chat-field-control new-chat-field-control-mono"
-						data-testid="cwd-input"
-						onBlur={() => {
-							cwdInputFocusedRef.current = false;
-							window.setTimeout(() => {
-								setCwdSuggestionsOpen(false);
-								setCwdSuggestionIndex(-1);
-							}, 120);
-						}}
-						onChange={(event) => handleCwdInputChange(event.target.value)}
-						onFocus={() => {
-							cwdInputFocusedRef.current = true;
-							setCwdSuggestionsOpen(
-								cwdQuery.trim().length > 0 && cwdSuggestions.length > 0,
-							);
-						}}
-						onKeyDown={handleCwdInputKeyDown}
-						placeholder={chatSettings.defaultCWD || "/path/to/project"}
-						ref={cwdInputRef}
-						spellCheck={false}
-						type="text"
-						value={cwdQuery}
-					/>
+					<div className="new-chat-field-autocomplete">
+						<input
+							aria-autocomplete="list"
+							aria-expanded={cwdSuggestionsOpen && cwdSuggestions.length > 0}
+							aria-label="Working directory"
+							autoCapitalize="off"
+							autoComplete="off"
+							autoCorrect="off"
+							className="new-chat-field-control new-chat-field-control-mono"
+							data-testid="cwd-input"
+							onBlur={() => {
+								cwdInputFocusedRef.current = false;
+								window.setTimeout(() => {
+									setCwdSuggestionsOpen(false);
+									setCwdSuggestionIndex(-1);
+								}, 120);
+							}}
+							onChange={(event) => handleCwdInputChange(event.target.value)}
+							onFocus={() => {
+								cwdInputFocusedRef.current = true;
+								setCwdSuggestionsOpen(
+									cwdQuery.trim().length > 0 && cwdSuggestions.length > 0,
+								);
+							}}
+							onKeyDown={handleCwdInputKeyDown}
+							placeholder={chatSettings.defaultCWD || "/path/to/project"}
+							ref={cwdInputRef}
+							spellCheck={false}
+							type="text"
+							value={cwdQuery}
+						/>
+
+						{cwdSuggestionsOpen && cwdSuggestions.length > 0 ? (
+							<div
+								className="composer-cwd-suggestions composer-cwd-suggestions-inline"
+								data-testid="cwd-suggestions"
+							>
+								{cwdSuggestions.map((suggestion, index) => (
+									<button
+										className={cn(
+											"composer-cwd-suggestion",
+											index === cwdSuggestionIndex && "is-active",
+										)}
+										data-testid={`cwd-suggestion-${index}`}
+										key={suggestion.path}
+										onClick={() => {
+											applyCwdSuggestion(suggestion.path);
+										}}
+										onMouseDown={(event) => {
+											event.preventDefault();
+										}}
+										type="button"
+									>
+										<span className="composer-cwd-suggestion-path">
+											{suggestion.path}
+										</span>
+									</button>
+								))}
+							</div>
+						) : null}
+					</div>
 					<p className="new-chat-field-hint">
 						Type a full path or a nearby project name.
 					</p>
-
-					{cwdSuggestionsOpen && cwdSuggestions.length > 0 ? (
-						<div
-							className="composer-cwd-suggestions composer-cwd-suggestions-inline"
-							data-testid="cwd-suggestions"
-						>
-							{cwdSuggestions.map((suggestion, index) => (
-								<button
-									className={cn(
-										"composer-cwd-suggestion",
-										index === cwdSuggestionIndex && "is-active",
-									)}
-									data-testid={`cwd-suggestion-${index}`}
-									key={suggestion.path}
-									onMouseDown={(event) => {
-										event.preventDefault();
-										applyCwdSuggestion(suggestion.path);
-									}}
-									type="button"
-								>
-									<span className="composer-cwd-suggestion-path">
-										{suggestion.path}
-									</span>
-								</button>
-							))}
-						</div>
-					) : null}
 				</label>
 			</div>
 		</div>
