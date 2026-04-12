@@ -11,7 +11,7 @@ import (
 func TestLoadCachedCopilotModels(t *testing.T) {
 	t.Run("returns fresh cached models", func(t *testing.T) {
 		dir := t.TempDir()
-		path := dir + "/models.json"
+		path := dir + "/copilot-models.json"
 		fetchedAt := time.Date(2026, 4, 12, 17, 0, 0, 0, time.UTC)
 
 		err := saveCachedCopilotModels(path, []CopilotModelCatalogEntry{{ID: "gpt-5.4"}}, fetchedAt)
@@ -26,7 +26,7 @@ func TestLoadCachedCopilotModels(t *testing.T) {
 
 	t.Run("treats stale cache as miss", func(t *testing.T) {
 		dir := t.TempDir()
-		path := dir + "/models.json"
+		path := dir + "/copilot-models.json"
 		fetchedAt := time.Date(2026, 4, 12, 17, 0, 0, 0, time.UTC)
 
 		err := saveCachedCopilotModels(path, []CopilotModelCatalogEntry{{ID: "gpt-5.4"}}, fetchedAt)

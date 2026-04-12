@@ -1,3 +1,4 @@
+// Package copilotdefaults builds OpenAI-compatible model defaults from the Copilot model catalog.
 package copilotdefaults
 
 import (

@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
+	"github.com/jingkaihe/kodelet/pkg/llm/openai/copilotdefaults"
 	codexpreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/codex"
 	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
 	"github.com/jingkaihe/kodelet/pkg/llm/openai/preset/xai"
@@ -158,76 +158,11 @@ func loadCopilotPlatformDefaults() (*llmtypes.CustomModels, llmtypes.CustomPrici
 }
 
 func loadCopilotPlatformDefaultsWithContext(ctx context.Context) (*llmtypes.CustomModels, llmtypes.CustomPricing, error) {
-	entries, err := auth.LoadCopilotModels(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	models, pricing := buildCopilotPlatformDefaults(entries)
-	return models, pricing, nil
+	return copilotdefaults.LoadPlatformDefaults(ctx)
 }
 
 func buildCopilotPlatformDefaults(entries []auth.CopilotModelCatalogEntry) (*llmtypes.CustomModels, llmtypes.CustomPricing) {
-	models := &llmtypes.CustomModels{}
-	pricing := make(llmtypes.CustomPricing)
-	seenReasoning := map[string]bool{}
-	seenNonReasoning := map[string]bool{}
-
-	for _, entry := range entries {
-		name := copilotCanonicalModelName(entry)
-		if name == "" {
-			continue
-		}
-
-		pricing[name] = llmtypes.ModelPricing{
-			Input:         0,
-			CachedInput:   0,
-			Output:        0,
-			ContextWindow: copilotContextWindow(entry),
-		}
-
-		if copilotSupportsReasoning(entry) {
-			if !seenReasoning[name] {
-				models.Reasoning = append(models.Reasoning, name)
-				seenReasoning[name] = true
-			}
-			continue
-		}
-
-		if !seenNonReasoning[name] {
-			models.NonReasoning = append(models.NonReasoning, name)
-			seenNonReasoning[name] = true
-		}
-	}
-
-	sort.Strings(models.Reasoning)
-	sort.Strings(models.NonReasoning)
-
-	return models, pricing
-}
-
-func copilotCanonicalModelName(entry auth.CopilotModelCatalogEntry) string {
-	if normalized := strings.TrimSpace(entry.ID); normalized != "" {
-		return normalized
-	}
-
-	if normalized := strings.TrimSpace(entry.Version); normalized != "" {
-		return normalized
-	}
-
-	return strings.TrimSpace(entry.Capabilities.Family)
-}
-
-func copilotSupportsReasoning(entry auth.CopilotModelCatalogEntry) bool {
-	return len(entry.Capabilities.Supports.ReasoningEffort) > 0
-}
-
-func copilotContextWindow(entry auth.CopilotModelCatalogEntry) int {
-	if entry.Capabilities.Limits.MaxContextWindowTokens > 0 {
-		return entry.Capabilities.Limits.MaxContextWindowTokens
-	}
-
-	return 128000
+	return copilotdefaults.BuildPlatformDefaults(entries)
 }
 
 // loadOpenAIPlatformDefaults loads the complete OpenAI platform defaults.

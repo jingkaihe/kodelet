@@ -58,7 +58,7 @@ func copilotModelsCachePath() (string, error) {
 		return "", errors.Wrap(err, "failed to get user home directory")
 	}
 
-	return filepath.Join(home, ".kodelet", "models.json"), nil
+	return filepath.Join(home, ".kodelet", "copilot-models.json"), nil
 }
 
 func loadCachedCopilotModels(path string, now time.Time) ([]CopilotModelCatalogEntry, time.Time, error) {
