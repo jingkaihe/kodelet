@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -177,6 +178,24 @@ func TestCopilotAnthropicAuthorizer(t *testing.T) {
 	assert.Equal(t, "copilot-chat/0.26.7", req.Header.Get("Editor-Plugin-Version"))
 	assert.Equal(t, "vscode-chat", req.Header.Get("Copilot-Integration-Id"))
 	assert.Equal(t, CopilotInitiatorAgent, req.Header.Get("X-Initiator"))
+}
+
+func TestCopilotHeaderMap(t *testing.T) {
+	headers := CopilotHeaderMap(llmtypes.MessageOpt{Initiator: llmtypes.InitiatorAgent})
+	assert.Equal(t, CopilotInitiatorAgent, headers["X-Initiator"])
+
+	headers = CopilotHeaderMap(llmtypes.MessageOpt{})
+	assert.Equal(t, CopilotInitiatorUser, headers["X-Initiator"])
+}
+
+func TestCopilotOpenAIRequestOptions(t *testing.T) {
+	opts := CopilotOpenAIRequestOptions(llmtypes.MessageOpt{Initiator: llmtypes.InitiatorAgent})
+	require.Len(t, opts, 1)
+}
+
+func TestCopilotAnthropicRequestOptions(t *testing.T) {
+	opts := CopilotAnthropicRequestOptions(llmtypes.MessageOpt{Initiator: llmtypes.InitiatorAgent})
+	require.Len(t, opts, 1)
 }
 
 func TestCodexAuthorizer(t *testing.T) {

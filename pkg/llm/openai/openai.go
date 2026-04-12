@@ -1125,9 +1125,7 @@ func (t *Thread) getExtraHeaders(opt llmtypes.MessageOpt) map[string]string {
 	var headers map[string]string
 
 	if t.useCopilot {
-		headers = map[string]string{
-			"X-Initiator": opt.ResolvedInitiator(),
-		}
+		headers = auth.CopilotHeaderMap(opt)
 	}
 
 	if opt.PromptCache && t.Config.OpenAI != nil && t.Config.OpenAI.ManualCache && t.ConversationID != "" {

@@ -430,8 +430,6 @@ func (t *Thread) processMessageExchange(
 	tools := buildTools(t.State, opt.NoToolUse)
 	log.WithField("tool_count", len(tools)).Debug("built tools for request")
 
-	initiator := opt.ResolvedInitiator()
-
 	// Mirror Codex prompt caching on the HTTP Responses path by replaying the full
 	// input history every time with a stable prompt_cache_key. We intentionally do
 	// not use previous_response_id here.
@@ -467,7 +465,7 @@ func (t *Thread) processMessageExchange(
 	// Apply Codex-specific restrictions (overrides unsupported params)
 	t.applyCodexRestrictions(&params)
 
-	requestOpts := t.requestOptions(initiator)
+	requestOpts := t.requestOptions(opt)
 
 	log.WithField("model", model).
 		WithField("input_items", len(t.inputItems)).
@@ -672,7 +670,7 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	if t.isCodex {
 		compactOpts = append(compactOpts, option.WithHeader("Accept", "application/json"))
 	}
-	compactOpts = append(compactOpts, t.requestOptions(auth.CopilotInitiatorAgent)...)
+	compactOpts = append(compactOpts, t.requestOptions(llmtypes.MessageOpt{Initiator: llmtypes.InitiatorAgent})...)
 
 	// Use raw JSON compact parsing by default because some backends may omit
 	// JSON content-type on compact responses, which can break typed SDK decode.
@@ -1251,12 +1249,12 @@ func buildCopilotAuthOptions(config llmtypes.Config, log *logrus.Entry) ([]optio
 	return opts, nil
 }
 
-func (t *Thread) requestOptions(initiator string) []option.RequestOption {
+func (t *Thread) requestOptions(opt llmtypes.MessageOpt) []option.RequestOption {
 	if !t.useCopilot {
 		return nil
 	}
 
-	return []option.RequestOption{option.WithHeader("X-Initiator", initiator)}
+	return auth.CopilotOpenAIRequestOptions(opt)
 }
 
 // buildCodexAuthOptions returns client options for Codex CLI authentication.

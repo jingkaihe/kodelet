@@ -5,6 +5,7 @@ import (
 	"os"
 
 	anthropicoption "github.com/anthropics/anthropic-sdk-go/option"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	openaioption "github.com/openai/openai-go/v3/option"
 	"github.com/pkg/errors"
 )
@@ -220,6 +221,26 @@ func OpenAIRequestOptionsWithAuthorizer(authorizer HTTPAuthorizer) []openaioptio
 	return []openaioption.RequestOption{
 		openaioption.WithHTTPClient(HTTPClientWithAuthorizer(authorizer)),
 	}
+}
+
+// CopilotInitiator resolves the Copilot initiator from message options.
+func CopilotInitiator(opt llmtypes.MessageOpt) string {
+	return opt.ResolvedInitiator()
+}
+
+// CopilotHeaderMap returns Copilot request headers derived from message options.
+func CopilotHeaderMap(opt llmtypes.MessageOpt) map[string]string {
+	return map[string]string{"X-Initiator": CopilotInitiator(opt)}
+}
+
+// CopilotOpenAIRequestOptions returns OpenAI SDK request options for Copilot initiator headers.
+func CopilotOpenAIRequestOptions(opt llmtypes.MessageOpt) []openaioption.RequestOption {
+	return []openaioption.RequestOption{openaioption.WithHeader("X-Initiator", CopilotInitiator(opt))}
+}
+
+// CopilotAnthropicRequestOptions returns Anthropic SDK request options for Copilot initiator headers.
+func CopilotAnthropicRequestOptions(opt llmtypes.MessageOpt) []anthropicoption.RequestOption {
+	return []anthropicoption.RequestOption{anthropicoption.WithHeader("X-Initiator", CopilotInitiator(opt))}
 }
 
 // OpenAIAPIKeyAuthorizerFromEnv returns a static API key authorizer for the given env var.

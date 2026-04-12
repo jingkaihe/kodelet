@@ -817,7 +817,7 @@ func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewPara
 	retryAttempts := t.Config.Retry.Attempts
 	requestOpts := []option.RequestOption{option.WithMaxRetries(retryAttempts)}
 	if t.useCopilot {
-		requestOpts = append(requestOpts, option.WithHeader("X-Initiator", opt.ResolvedInitiator()))
+		requestOpts = append(requestOpts, auth.CopilotAnthropicRequestOptions(opt)...)
 	}
 
 	stream := t.client.Messages.NewStreaming(ctx, params, requestOpts...)
