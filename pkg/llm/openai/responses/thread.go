@@ -1198,7 +1198,7 @@ func buildClientOptions(config llmtypes.Config, log *logrus.Entry) ([]option.Req
 	var err error
 
 	if useCodex {
-		opts, err = buildCodexAuthOptions(config, log)
+		opts = buildCodexAuthOptions(config, log)
 	} else {
 		opts, err = buildAPIKeyAuthOptions(config, log)
 	}
@@ -1212,7 +1212,7 @@ func buildClientOptions(config llmtypes.Config, log *logrus.Entry) ([]option.Req
 }
 
 // buildCodexAuthOptions returns client options for Codex CLI authentication.
-func buildCodexAuthOptions(config llmtypes.Config, log *logrus.Entry) ([]option.RequestOption, error) {
+func buildCodexAuthOptions(config llmtypes.Config, log *logrus.Entry) []option.RequestOption {
 	log.Debug("using Codex authentication for Responses API")
 	opts := auth.OpenAIRequestOptionsWithAuthorizer(auth.CodexAuthorizer())
 	if baseURL := getBaseURL(config); baseURL != "" {
@@ -1220,7 +1220,7 @@ func buildCodexAuthOptions(config llmtypes.Config, log *logrus.Entry) ([]option.
 	} else {
 		opts = append(opts, option.WithBaseURL(auth.CodexAPIBaseURL))
 	}
-	return opts, nil
+	return opts
 }
 
 // buildAPIKeyAuthOptions returns client options for standard API key authentication.
