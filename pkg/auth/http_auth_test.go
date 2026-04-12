@@ -145,7 +145,7 @@ func TestCodexAuthorizer(t *testing.T) {
 		assert.Equal(t, CodexOriginator, req.Header.Get("originator"))
 	})
 
-	t.Run("falls back to api key", func(t *testing.T) {
+	t.Run("rejects api key only credentials", func(t *testing.T) {
 		setTestHome(t)
 
 		authPath, err := codexAuthFilePath()
@@ -159,8 +159,9 @@ func TestCodexAuthorizer(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "https://api.openai.com/v1/responses", nil)
 		err = CodexAuthorizer().Authorize(req)
 
-		require.NoError(t, err)
-		assert.Equal(t, "Bearer codex-api-key", req.Header.Get("Authorization"))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no valid OAuth credentials")
+		assert.Empty(t, req.Header.Get("Authorization"))
 		assert.Empty(t, req.Header.Get("ChatGPT-Account-ID"))
 	})
 }

@@ -88,7 +88,7 @@ func TestGetCodexUsageStatsWithCredentials(t *testing.T) {
 	})
 
 	t.Run("requires chatgpt oauth credentials", func(t *testing.T) {
-		stats, err := GetCodexUsageStatsWithCredentials(context.Background(), &CodexCredentials{APIKey: "sk-test"})
+		stats, err := GetCodexUsageStatsWithCredentials(context.Background(), &CodexCredentials{})
 		assert.Nil(t, stats)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "chatgpt authentication required")

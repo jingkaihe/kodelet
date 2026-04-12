@@ -43,7 +43,6 @@ type CodexCredentials struct {
 	RefreshToken string
 	AccountID    string
 	ExpiresAt    int64
-	APIKey       string // Fallback OpenAI API key if tokens are not available
 }
 
 const (
@@ -137,7 +136,7 @@ func GetCodexCredentials() (*CodexCredentials, error) {
 		return nil, errors.Wrap(err, "failed to decode codex auth file")
 	}
 
-	// Prefer OAuth tokens over API key
+	// Codex requests require ChatGPT OAuth credentials.
 	if authFile.Tokens.AccessToken != "" && authFile.Tokens.AccountID != "" {
 		return &CodexCredentials{
 			IDToken:      authFile.Tokens.IDToken,
@@ -148,14 +147,7 @@ func GetCodexCredentials() (*CodexCredentials, error) {
 		}, nil
 	}
 
-	// Fall back to API key if tokens are not available
-	if authFile.OpenAIAPIKey != "" {
-		return &CodexCredentials{
-			APIKey: authFile.OpenAIAPIKey,
-		}, nil
-	}
-
-	return nil, errors.New("codex auth file contains no valid credentials")
+	return nil, errors.New("codex auth file contains no valid OAuth credentials, please login first with 'kodelet codex login'")
 }
 
 // CodexHeader returns the HTTP request options for Codex API calls.
@@ -175,10 +167,6 @@ func GetCodexCredentialsForRequest(ctx context.Context) (*CodexCredentials, erro
 	creds, err := GetCodexCredentials()
 	if err != nil {
 		return nil, err
-	}
-
-	if creds.AccessToken == "" || creds.AccountID == "" {
-		return creds, nil
 	}
 
 	refreshThreshold := time.Now().Add(codexTokenRefreshThreshold).Unix()
@@ -207,7 +195,7 @@ func GetCodexCredentialsForRequest(ctx context.Context) (*CodexCredentials, erro
 }
 
 // CodexHeaderWithCredentials returns the HTTP request options for Codex API calls
-// using the provided credentials. Returns nil if credentials are nil or empty.
+// using the provided OAuth credentials. Returns nil if credentials are nil or incomplete.
 func CodexHeaderWithCredentials(creds *CodexCredentials) []option.RequestOption {
 	if creds == nil {
 		return nil
@@ -221,13 +209,6 @@ func CodexHeaderWithCredentials(creds *CodexCredentials) []option.RequestOption 
 			option.WithHeader("ChatGPT-Account-ID", creds.AccountID),
 			option.WithHeader("OpenAI-Beta", "responses=experimental"),
 			option.WithHeader("originator", CodexOriginator),
-		}
-	}
-
-	// Fall back to API key (standard OpenAI API)
-	if creds.APIKey != "" {
-		return []option.RequestOption{
-			option.WithAPIKey(creds.APIKey),
 		}
 	}
 

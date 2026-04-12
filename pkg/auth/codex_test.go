@@ -122,13 +122,12 @@ func TestGetCodexCredentials(t *testing.T) {
 		assert.Equal(t, "test_id_token", creds.IDToken)
 		assert.Equal(t, "test_access_token", creds.AccessToken)
 		assert.Equal(t, "test_account_id", creds.AccountID)
-		assert.Empty(t, creds.APIKey)
 
 		// Clean up for next test
 		require.NoError(t, os.Remove(authFile))
 	})
 
-	t.Run("API key fallback", func(t *testing.T) {
+	t.Run("API key only credentials are rejected", func(t *testing.T) {
 		authData := CodexAuthFile{
 			OpenAIAPIKey: "sk-test-api-key",
 		}
@@ -141,17 +140,15 @@ func TestGetCodexCredentials(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(authFile, data, 0o644))
 
-		creds, err := GetCodexCredentials()
-		require.NoError(t, err)
-		assert.Empty(t, creds.AccessToken)
-		assert.Empty(t, creds.AccountID)
-		assert.Equal(t, "sk-test-api-key", creds.APIKey)
+		_, err = GetCodexCredentials()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no valid OAuth credentials")
 
 		// Clean up for next test
 		require.NoError(t, os.Remove(authFile))
 	})
 
-	t.Run("OAuth tokens preferred over API key", func(t *testing.T) {
+	t.Run("OAuth tokens are used even when API key is present", func(t *testing.T) {
 		authData := CodexAuthFile{
 			Tokens: CodexTokens{
 				IDToken:     "oauth_id_token",
@@ -174,7 +171,6 @@ func TestGetCodexCredentials(t *testing.T) {
 		assert.Equal(t, "oauth_id_token", creds.IDToken)
 		assert.Equal(t, "oauth_access_token", creds.AccessToken)
 		assert.Equal(t, "oauth_account_id", creds.AccountID)
-		assert.Empty(t, creds.APIKey) // Should not include API key when OAuth is available
 
 		// Clean up for next test
 		require.NoError(t, os.Remove(authFile))
@@ -195,7 +191,7 @@ func TestGetCodexCredentials(t *testing.T) {
 
 		_, err = GetCodexCredentials()
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "no valid credentials")
+		assert.Contains(t, err.Error(), "no valid OAuth credentials")
 
 		// Clean up for next test
 		require.NoError(t, os.Remove(authFile))
@@ -219,7 +215,7 @@ func TestGetCodexCredentials(t *testing.T) {
 
 		_, err = GetCodexCredentials()
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "no valid credentials")
+		assert.Contains(t, err.Error(), "no valid OAuth credentials")
 
 		// Clean up for next test
 		require.NoError(t, os.Remove(authFile))
@@ -243,7 +239,7 @@ func TestGetCodexCredentials(t *testing.T) {
 
 		_, err = GetCodexCredentials()
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "no valid credentials")
+		assert.Contains(t, err.Error(), "no valid OAuth credentials")
 	})
 }
 
@@ -280,7 +276,7 @@ func TestCodexHeader(t *testing.T) {
 		require.NoError(t, os.Remove(authFile))
 	})
 
-	t.Run("returns headers for API key credentials", func(t *testing.T) {
+	t.Run("returns error for API key only credentials", func(t *testing.T) {
 		authData := CodexAuthFile{
 			OpenAIAPIKey: "sk-test-api-key",
 		}
@@ -294,9 +290,9 @@ func TestCodexHeader(t *testing.T) {
 		require.NoError(t, os.WriteFile(authFile, data, 0o644))
 
 		headers, err := CodexHeader(context.Background())
-		require.NoError(t, err)
-		require.NotNil(t, headers)
-		assert.Len(t, headers, 1, "should return 1 request option for API key")
+		require.Error(t, err)
+		assert.Nil(t, headers)
+		assert.Contains(t, err.Error(), "no valid OAuth credentials")
 
 		// Clean up
 		require.NoError(t, os.Remove(authFile))
@@ -491,16 +487,6 @@ func TestCodexHeaderWithCredentials(t *testing.T) {
 		assert.Len(t, headers, 5, "should return 5 request options for OAuth")
 	})
 
-	t.Run("API key credentials return API key option", func(t *testing.T) {
-		creds := &CodexCredentials{
-			APIKey: "sk-test-key",
-		}
-
-		headers := CodexHeaderWithCredentials(creds)
-		require.NotNil(t, headers)
-		assert.Len(t, headers, 1, "should return 1 request option for API key")
-	})
-
 	t.Run("empty credentials return nil", func(t *testing.T) {
 		creds := &CodexCredentials{}
 
@@ -525,21 +511,6 @@ func TestCodexHeaderWithCredentials(t *testing.T) {
 		headers = CodexHeaderWithCredentials(creds)
 		assert.Nil(t, headers)
 	})
-
-	t.Run("OAuth preferred over API key", func(t *testing.T) {
-		// Note: With the current struct, a credential can have both OAuth and API key
-		// but the implementation prefers OAuth
-		creds := &CodexCredentials{
-			AccessToken: "oauth_token",
-			AccountID:   "account_123",
-			APIKey:      "sk-fallback",
-		}
-
-		headers := CodexHeaderWithCredentials(creds)
-		require.NotNil(t, headers)
-		// Should return OAuth headers (5 options), not API key (1 option)
-		assert.Len(t, headers, 5, "should use OAuth headers when both are present")
-	})
 }
 
 func TestIsCodexOAuthEnabled(t *testing.T) {
@@ -549,13 +520,6 @@ func TestIsCodexOAuthEnabled(t *testing.T) {
 
 	t.Run("empty credentials returns false", func(t *testing.T) {
 		creds := &CodexCredentials{}
-		assert.False(t, IsCodexOAuthEnabled(creds))
-	})
-
-	t.Run("API key only returns false", func(t *testing.T) {
-		creds := &CodexCredentials{
-			APIKey: "sk-test-key",
-		}
 		assert.False(t, IsCodexOAuthEnabled(creds))
 	})
 
@@ -577,15 +541,6 @@ func TestIsCodexOAuthEnabled(t *testing.T) {
 		creds := &CodexCredentials{
 			AccessToken: "oauth_token",
 			AccountID:   "account_123",
-		}
-		assert.True(t, IsCodexOAuthEnabled(creds))
-	})
-
-	t.Run("full OAuth with API key returns true", func(t *testing.T) {
-		creds := &CodexCredentials{
-			AccessToken: "oauth_token",
-			AccountID:   "account_123",
-			APIKey:      "sk-fallback",
 		}
 		assert.True(t, IsCodexOAuthEnabled(creds))
 	})

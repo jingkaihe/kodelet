@@ -96,9 +96,6 @@ func runCodexStatus() {
 		if displayCreds.RefreshToken != "" {
 			fmt.Println("Refresh token: available")
 		}
-	} else if displayCreds.APIKey != "" {
-		presenter.Info("Authentication type: API Key")
-		fmt.Printf("API Key: %s\n", maskString(displayCreds.APIKey))
 	}
 
 	if !auth.IsCodexOAuthEnabled(displayCreds) {

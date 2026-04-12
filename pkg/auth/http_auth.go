@@ -114,7 +114,7 @@ func OpenAIStaticAPIKeyAuthorizer(apiKey string) HTTPAuthorizer {
 	})
 }
 
-// CodexAuthorizer returns a request authorizer for Codex subscription auth.
+// CodexAuthorizer returns a request authorizer for Codex OAuth auth.
 func CodexAuthorizer() HTTPAuthorizer {
 	return AuthorizerFunc(func(req *http.Request) error {
 		creds, err := GetCodexCredentialsForRequest(req.Context())
@@ -130,12 +130,7 @@ func CodexAuthorizer() HTTPAuthorizer {
 			return nil
 		}
 
-		if creds.APIKey != "" {
-			req.Header.Set("Authorization", "Bearer "+creds.APIKey)
-			return nil
-		}
-
-		return errors.New("no valid codex credentials available")
+		return errors.New("no valid codex OAuth credentials available")
 	})
 }
 
