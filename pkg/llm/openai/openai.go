@@ -154,6 +154,17 @@ func resolveClientBaseURL(config llmtypes.Config, useCopilot bool) string {
 	return GetBaseURL(config)
 }
 
+func isCopilotPlatform(config llmtypes.Config) bool {
+	if config.Provider == "anthropic" {
+		if config.Anthropic == nil {
+			return false
+		}
+		return strings.EqualFold(strings.TrimSpace(config.Anthropic.Platform), "copilot")
+	}
+
+	return resolvePlatformName(config) == "copilot"
+}
+
 // NewOpenAIThread creates a new thread with OpenAI's API
 func NewOpenAIThread(config llmtypes.Config) (*Thread, error) {
 	// Apply defaults if not provided
@@ -182,17 +193,11 @@ func NewOpenAIThread(config llmtypes.Config) (*Thread, error) {
 	ctx := context.Background()
 	log := logger.G(ctx)
 
-	// Check if Copilot usage is requested via flag
-	if config.UseCopilot {
+	if isCopilotPlatform(config) {
 		// Verify Copilot credentials exist
 		copilotCredsExists, _ := auth.GetCopilotCredentialsExists()
 		if !copilotCredsExists {
-			log.Error("use-copilot flag set but no GitHub Copilot credentials found, run 'kodelet copilot-login'")
-			// Fall back to OpenAI API key
-			apiKeyEnvVar := GetAPIKeyEnvVar(config)
-			apiKey := os.Getenv(apiKeyEnvVar)
-			clientConfig = openai.DefaultConfig(apiKey)
-			useCopilot = false
+			return nil, errors.New("GitHub Copilot credentials not found, run 'kodelet copilot-login'")
 		} else {
 			log.Debug("using GitHub Copilot token")
 			clientConfig = openai.DefaultConfig("") // Auth is injected at request time.
@@ -287,7 +292,7 @@ func (t *Thread) SendMessage(
 	// Create span with OpenAI-specific attributes
 	ctx, span := t.CreateMessageSpan(ctx, tracer, message, opt,
 		attribute.String("reasoning_effort", t.reasoningEffort),
-		attribute.Bool("use_copilot", t.useCopilot),
+		attribute.String("platform", resolvePlatformName(t.Config)),
 	)
 	defer func() {
 		t.FinalizeMessageSpan(span, err)

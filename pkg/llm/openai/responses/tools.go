@@ -20,10 +20,11 @@ func buildTools(state tooltypes.State, noToolUse bool) []responses.ToolUnionPara
 	var llmConfig llmtypesConfig
 	if state != nil {
 		if cfg, ok := state.GetLLMConfig().(llmtypes.Config); ok {
+			platform := resolvePlatformName(cfg)
 			llmConfig = llmtypesConfig{
-				platform:    resolvePlatformName(cfg),
+				platform:    platform,
 				baseURL:     getBaseURL(cfg),
-				useCopilot:  cfg.UseCopilot,
+				useCopilot:  platform == "copilot",
 				allowedFile: cfg.AllowedDomainsFile,
 			}
 			if cfg.OpenAI != nil {

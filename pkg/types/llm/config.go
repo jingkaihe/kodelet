@@ -42,7 +42,6 @@ type Config struct {
 	ToolMode             ToolMode           `mapstructure:"tool_mode" json:"tool_mode" yaml:"tool_mode"`                                    // ToolMode controls file-interaction behavior (e.g. full or patch)
 	AnthropicAPIAccess   AnthropicAPIAccess `mapstructure:"anthropic_api_access" json:"anthropic_api_access" yaml:"anthropic_api_access"`   // AnthropicAPIAccess controls how to authenticate with Anthropic API
 	AnthropicAccount     string             `mapstructure:"anthropic_account" json:"anthropic_account" yaml:"anthropic_account"`            // AnthropicAccount specifies which Anthropic subscription account to use
-	UseCopilot           bool               `mapstructure:"use_copilot" json:"use_copilot" yaml:"use_copilot"`                              // UseCopilot enables GitHub Copilot subscription-backed routing for compatible OpenAI and Anthropic requests
 	Aliases              map[string]string  `mapstructure:"aliases" json:"aliases,omitempty" yaml:"aliases,omitempty"`                      // Aliases maps short model names to full model names
 	Retry                RetryConfig        `mapstructure:"retry" json:"retry" yaml:"retry"`                                                // Retry configuration for API calls
 	MCPExecutionMode     string             `mapstructure:"mcp_execution_mode" json:"mcp_execution_mode" yaml:"mcp_execution_mode"`         // MCP execution mode (code, direct, or empty)
@@ -55,7 +54,8 @@ type Config struct {
 	Profiles map[string]ProfileConfig `mapstructure:"profiles" json:"profiles,omitempty" yaml:"profiles,omitempty"` // Named configuration profiles
 
 	// Provider-specific configurations
-	OpenAI *OpenAIConfig `mapstructure:"openai" json:"openai,omitempty" yaml:"openai,omitempty"` // OpenAI-specific configuration including compatible providers
+	OpenAI    *OpenAIConfig    `mapstructure:"openai" json:"openai,omitempty" yaml:"openai,omitempty"`          // OpenAI-specific configuration including compatible providers
+	Anthropic *AnthropicConfig `mapstructure:"anthropic" json:"anthropic,omitempty" yaml:"anthropic,omitempty"` // Anthropic-specific configuration including compatible providers
 
 	// SubagentArgs is CLI arguments to pass when spawning subagents via shell-out
 	// Example: "--profile cheap" or "--use-weak-model"
@@ -95,6 +95,11 @@ type OpenAIConfig struct {
 	ManualCache  bool                    `mapstructure:"manual_cache" json:"manual_cache" yaml:"manual_cache"`                        // Enables manual cache affinity headers for Chat Completions when prompt caching is requested
 	Models       *CustomModels           `mapstructure:"models" json:"models,omitempty" yaml:"models,omitempty"`                      // Custom model configuration
 	Pricing      map[string]ModelPricing `mapstructure:"pricing" json:"pricing,omitempty" yaml:"pricing,omitempty"`                   // Custom pricing configuration
+}
+
+// AnthropicConfig holds Anthropic-specific configuration including compatible platforms.
+type AnthropicConfig struct {
+	Platform string `mapstructure:"platform" json:"platform" yaml:"platform"` // Canonical platform name for Anthropic-compatible APIs (e.g., anthropic, copilot)
 }
 
 // CustomModels holds model categorization for custom configurations

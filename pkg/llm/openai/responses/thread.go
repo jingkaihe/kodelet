@@ -243,6 +243,7 @@ func (t *Thread) SendMessage(
 	ctx, span := t.CreateMessageSpan(ctx, tracer, message, opt,
 		attribute.String("reasoning_effort", string(t.reasoningEffort)),
 		attribute.String("api", "responses"),
+		attribute.String("platform", resolvePlatformName(t.Config)),
 	)
 	defer func() {
 		t.FinalizeMessageSpan(span, err)
@@ -1211,7 +1212,7 @@ func loadCustomConfiguration(config llmtypes.Config) (map[string]string, map[str
 // Returns the options, whether Codex auth is being used, and any error.
 func buildClientOptions(config llmtypes.Config, log *logrus.Entry) ([]option.RequestOption, bool, bool, error) {
 	useCodex := resolvePlatformName(config) == "codex"
-	useCopilot := config.UseCopilot
+	useCopilot := resolvePlatformName(config) == "copilot"
 
 	var opts []option.RequestOption
 	var err error

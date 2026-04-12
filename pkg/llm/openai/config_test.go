@@ -4,6 +4,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -240,6 +241,33 @@ func TestLoadCodexPlatformDefaults(t *testing.T) {
 		_, exists := pricing[model]
 		assert.True(t, exists, "Model %s should have pricing information", model)
 	}
+}
+
+func TestBuildCopilotPlatformDefaults(t *testing.T) {
+	models, pricing := buildCopilotPlatformDefaults([]auth.CopilotModelCatalogEntry{
+		{
+			ID: "gpt-5.4",
+			Capabilities: auth.CopilotModelCapabilities{
+				Limits:   auth.CopilotModelLimits{MaxContextWindowTokens: 400000},
+				Supports: auth.CopilotModelSupport{ReasoningEffort: []string{"low", "medium", "high"}},
+			},
+		},
+		{
+			ID: "gpt-4.1",
+			Capabilities: auth.CopilotModelCapabilities{
+				Limits: auth.CopilotModelLimits{MaxContextWindowTokens: 1047576},
+			},
+		},
+	})
+
+	require.NotNil(t, models)
+	assert.Equal(t, []string{"gpt-5.4"}, models.Reasoning)
+	assert.Equal(t, []string{"gpt-4.1"}, models.NonReasoning)
+	require.Contains(t, pricing, "gpt-5.4")
+	assert.Equal(t, 0.0, pricing["gpt-5.4"].Input)
+	assert.Equal(t, 400000, pricing["gpt-5.4"].ContextWindow)
+	require.Contains(t, pricing, "gpt-4.1")
+	assert.Equal(t, 1047576, pricing["gpt-4.1"].ContextWindow)
 }
 
 func TestLoadOpenAIPlatformDefaults(t *testing.T) {
@@ -639,6 +667,12 @@ func TestResolveClientBaseURL(t *testing.T) {
 			useCopilot: false,
 			expected:   "https://api.openai.com/v1",
 		},
+		{
+			name:       "copilot platform uses copilot endpoint",
+			config:     llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{Platform: "copilot"}},
+			useCopilot: true,
+			expected:   "https://api.githubcopilot.com",
+		},
 	}
 
 	for _, tt := range tests {
@@ -687,6 +721,15 @@ func TestValidateCustomConfiguration(t *testing.T) {
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
 					Platform: "codex",
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "valid built-in platform copilot",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					Platform: "copilot",
 				},
 			},
 			expectError: false,
@@ -852,6 +895,17 @@ func TestValidateCustomConfiguration(t *testing.T) {
 			},
 			expectError:   true,
 			errorContains: "api_key_env_var cannot contain whitespace characters",
+		},
+		{
+			name: "copilot platform rejects api_key_env_var",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					Platform:     "copilot",
+					APIKeyEnvVar: "OPENAI_API_KEY",
+				},
+			},
+			expectError:   true,
+			errorContains: "api_key_env_var is not supported when openai.platform is copilot",
 		},
 	}
 

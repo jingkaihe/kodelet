@@ -71,7 +71,7 @@ func NewAnthropicThread(config llmtypes.Config) (*Thread, error) {
 	var useSubscription bool
 	var useCopilot bool
 
-	if config.UseCopilot {
+	if config.Anthropic != nil && strings.EqualFold(strings.TrimSpace(config.Anthropic.Platform), "copilot") {
 		copilotCredsExists, _ := auth.GetCopilotCredentialsExists()
 		if !copilotCredsExists {
 			return nil, errors.New("GitHub Copilot credentials not found, run 'kodelet copilot-login'")

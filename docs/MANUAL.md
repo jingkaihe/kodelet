@@ -733,7 +733,6 @@ profiles:
 
   openai:
     provider: "openai"
-    use_copilot: true
     model: "gpt-4.1"
     weak_model: "gpt-4.1-mini"
     max_tokens: 16000
@@ -741,6 +740,8 @@ profiles:
     tool_mode: "patch"
     disable_fs_search_tools: true
     enable_search: true
+    openai:
+      platform: copilot
 
   xai:
     provider: "openai"

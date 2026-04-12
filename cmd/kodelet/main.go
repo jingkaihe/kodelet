@@ -25,7 +25,6 @@ func init() {
 	viper.SetDefault("provider", "openai")
 	viper.SetDefault("openai.api_mode", "responses")
 	viper.SetDefault("openai.enable_search", true)
-	viper.SetDefault("use_copilot", false)
 	viper.SetDefault("reasoning_effort", "medium")
 	viper.SetDefault("allowed_commands", []string{})
 	viper.SetDefault("allowed_domains_file", "~/.kodelet/allowed_domains.txt")
@@ -105,7 +104,6 @@ func main() {
 	})
 
 	rootCmd.PersistentFlags().String("provider", "openai", "LLM provider to use (anthropic, openai)")
-	rootCmd.PersistentFlags().Bool("use-copilot", false, "Use GitHub Copilot subscription for compatible OpenAI or Anthropic requests (env: KODELET_USE_COPILOT)")
 	rootCmd.PersistentFlags().String("model", "gpt-5.4", "LLM model to use (overrides config)")
 	rootCmd.PersistentFlags().Int("max-tokens", 8192, "Maximum tokens for response (overrides config)")
 	rootCmd.PersistentFlags().Int("thinking-budget-tokens", 4048, "Maximum tokens for thinking capability (overrides config)")
@@ -131,7 +129,6 @@ func main() {
 	rootCmd.PersistentFlags().StringSlice("context-patterns", []string{"AGENTS.md"}, "Context file patterns to load (e.g. 'AGENTS.md,README.md')")
 
 	viper.BindPFlag("provider", rootCmd.PersistentFlags().Lookup("provider"))
-	viper.BindPFlag("use_copilot", rootCmd.PersistentFlags().Lookup("use-copilot"))
 	viper.BindPFlag("model", rootCmd.PersistentFlags().Lookup("model"))
 	viper.BindPFlag("max_tokens", rootCmd.PersistentFlags().Lookup("max-tokens"))
 	viper.BindPFlag("thinking_budget_tokens", rootCmd.PersistentFlags().Lookup("thinking-budget-tokens"))

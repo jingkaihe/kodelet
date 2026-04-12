@@ -1,8 +1,10 @@
 package openai
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
@@ -140,10 +142,92 @@ func loadPlatformDefaults(platformName string) (*llmtypes.CustomModels, llmtypes
 	case "codex":
 		return loadCodexPlatformDefaults()
 	case "copilot":
-		return loadOpenAIPlatformDefaults()
+		return loadCopilotPlatformDefaults()
 	default:
 		return nil, nil
 	}
+}
+
+func loadCopilotPlatformDefaults() (*llmtypes.CustomModels, llmtypes.CustomPricing) {
+	models, pricing, err := loadCopilotPlatformDefaultsWithContext(context.Background())
+	if err == nil {
+		return models, pricing
+	}
+
+	return loadOpenAIPlatformDefaults()
+}
+
+func loadCopilotPlatformDefaultsWithContext(ctx context.Context) (*llmtypes.CustomModels, llmtypes.CustomPricing, error) {
+	entries, err := auth.LoadCopilotModels(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	models, pricing := buildCopilotPlatformDefaults(entries)
+	return models, pricing, nil
+}
+
+func buildCopilotPlatformDefaults(entries []auth.CopilotModelCatalogEntry) (*llmtypes.CustomModels, llmtypes.CustomPricing) {
+	models := &llmtypes.CustomModels{}
+	pricing := make(llmtypes.CustomPricing)
+	seenReasoning := map[string]bool{}
+	seenNonReasoning := map[string]bool{}
+
+	for _, entry := range entries {
+		name := copilotCanonicalModelName(entry)
+		if name == "" {
+			continue
+		}
+
+		pricing[name] = llmtypes.ModelPricing{
+			Input:         0,
+			CachedInput:   0,
+			Output:        0,
+			ContextWindow: copilotContextWindow(entry),
+		}
+
+		if copilotSupportsReasoning(entry) {
+			if !seenReasoning[name] {
+				models.Reasoning = append(models.Reasoning, name)
+				seenReasoning[name] = true
+			}
+			continue
+		}
+
+		if !seenNonReasoning[name] {
+			models.NonReasoning = append(models.NonReasoning, name)
+			seenNonReasoning[name] = true
+		}
+	}
+
+	sort.Strings(models.Reasoning)
+	sort.Strings(models.NonReasoning)
+
+	return models, pricing
+}
+
+func copilotCanonicalModelName(entry auth.CopilotModelCatalogEntry) string {
+	if normalized := strings.TrimSpace(entry.ID); normalized != "" {
+		return normalized
+	}
+
+	if normalized := strings.TrimSpace(entry.Version); normalized != "" {
+		return normalized
+	}
+
+	return strings.TrimSpace(entry.Capabilities.Family)
+}
+
+func copilotSupportsReasoning(entry auth.CopilotModelCatalogEntry) bool {
+	return len(entry.Capabilities.Supports.ReasoningEffort) > 0
+}
+
+func copilotContextWindow(entry auth.CopilotModelCatalogEntry) int {
+	if entry.Capabilities.Limits.MaxContextWindowTokens > 0 {
+		return entry.Capabilities.Limits.MaxContextWindowTokens
+	}
+
+	return 128000
 }
 
 // loadOpenAIPlatformDefaults loads the complete OpenAI platform defaults.
@@ -275,6 +359,10 @@ func validateCustomConfiguration(config llmtypes.Config) error {
 
 	if config.OpenAI.Platform != "" && platform == "" {
 		return fmt.Errorf("platform cannot be empty or whitespace")
+	}
+
+	if platform == "copilot" && config.OpenAI.APIKeyEnvVar != "" {
+		return fmt.Errorf("api_key_env_var is not supported when openai.platform is copilot")
 	}
 
 	if config.OpenAI.APIMode != "" {
