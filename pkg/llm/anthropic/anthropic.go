@@ -74,7 +74,8 @@ func NewAnthropicThread(config llmtypes.Config) (*Thread, error) {
 	case llmtypes.AnthropicAPIAccessAPIKey:
 		// Force API key usage
 		logger.Debug("using API key authentication (forced by configuration)")
-		client = anthropic.NewClient(opts...)
+		apiKeyOpts := auth.AnthropicRequestOptionsWithAuthorizer(auth.AnthropicAPIKeyAuthorizerFromEnv())
+		client = anthropic.NewClient(append(opts, apiKeyOpts...)...)
 		useSubscription = false
 
 	case llmtypes.AnthropicAPIAccessSubscription:
@@ -83,8 +84,7 @@ func NewAnthropicThread(config llmtypes.Config) (*Thread, error) {
 		if !antCredsExists {
 			return nil, errors.New("subscription authentication forced but no credentials found")
 		}
-		headerOpts, err := auth.AnthropicHeader(context.Background(), config.AnthropicAccount)
-		if err != nil {
+		if _, err := auth.AnthropicAccessToken(context.Background(), config.AnthropicAccount); err != nil {
 			return nil, errors.Wrap(err, "subscription authentication forced but failed to get access token")
 		}
 		if config.AnthropicAccount != "" {
@@ -92,7 +92,7 @@ func NewAnthropicThread(config llmtypes.Config) (*Thread, error) {
 		} else {
 			logger.Debug("using anthropic access token (forced by configuration)")
 		}
-		opts = append(opts, headerOpts...)
+		opts = append(opts, auth.AnthropicRequestOptionsWithAuthorizer(auth.AnthropicSubscriptionAuthorizer(config.AnthropicAccount))...)
 		client = anthropic.NewClient(opts...)
 		useSubscription = true
 
@@ -102,10 +102,10 @@ func NewAnthropicThread(config llmtypes.Config) (*Thread, error) {
 		// Auto mode: try subscription first, then fall back to API key
 		antCredsExists, _ := auth.GetAnthropicCredentialsExists()
 		if antCredsExists {
-			headerOpts, err := auth.AnthropicHeader(context.Background(), config.AnthropicAccount)
-			if err != nil {
+			if _, err := auth.AnthropicAccessToken(context.Background(), config.AnthropicAccount); err != nil {
 				logger.WithError(err).Error("failed to get anthropic access token, falling back to use API key")
-				client = anthropic.NewClient()
+				apiKeyOpts := auth.AnthropicRequestOptionsWithAuthorizer(auth.AnthropicAPIKeyAuthorizerFromEnv())
+				client = anthropic.NewClient(append(opts, apiKeyOpts...)...)
 				useSubscription = false
 			} else {
 				if config.AnthropicAccount != "" {
@@ -113,13 +113,14 @@ func NewAnthropicThread(config llmtypes.Config) (*Thread, error) {
 				} else {
 					logger.Debug("using anthropic access token")
 				}
-				opts = append(opts, headerOpts...)
+				opts = append(opts, auth.AnthropicRequestOptionsWithAuthorizer(auth.AnthropicSubscriptionAuthorizer(config.AnthropicAccount))...)
 				client = anthropic.NewClient(opts...)
 				useSubscription = true
 			}
 		} else {
 			logger.Debug("no anthropic credentials found, falling back to use API key")
-			client = anthropic.NewClient(opts...)
+			apiKeyOpts := auth.AnthropicRequestOptionsWithAuthorizer(auth.AnthropicAPIKeyAuthorizerFromEnv())
+			client = anthropic.NewClient(append(opts, apiKeyOpts...)...)
 			useSubscription = false
 		}
 	}

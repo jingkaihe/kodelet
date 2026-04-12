@@ -1198,7 +1198,7 @@ func buildClientOptions(config llmtypes.Config, log *logrus.Entry) ([]option.Req
 	var err error
 
 	if useCodex {
-		opts, err = buildCodexAuthOptions(log)
+		opts, err = buildCodexAuthOptions(config, log)
 	} else {
 		opts, err = buildAPIKeyAuthOptions(config, log)
 	}
@@ -1212,11 +1212,13 @@ func buildClientOptions(config llmtypes.Config, log *logrus.Entry) ([]option.Req
 }
 
 // buildCodexAuthOptions returns client options for Codex CLI authentication.
-func buildCodexAuthOptions(log *logrus.Entry) ([]option.RequestOption, error) {
+func buildCodexAuthOptions(config llmtypes.Config, log *logrus.Entry) ([]option.RequestOption, error) {
 	log.Debug("using Codex authentication for Responses API")
-	opts, err := auth.CodexHeader(context.Background())
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get Codex credentials")
+	opts := auth.OpenAIRequestOptionsWithAuthorizer(auth.CodexAuthorizer())
+	if baseURL := getBaseURL(config); baseURL != "" {
+		opts = append(opts, option.WithBaseURL(baseURL))
+	} else {
+		opts = append(opts, option.WithBaseURL(auth.CodexAPIBaseURL))
 	}
 	return opts, nil
 }
@@ -1224,14 +1226,14 @@ func buildCodexAuthOptions(log *logrus.Entry) ([]option.RequestOption, error) {
 // buildAPIKeyAuthOptions returns client options for standard API key authentication.
 func buildAPIKeyAuthOptions(config llmtypes.Config, log *logrus.Entry) ([]option.RequestOption, error) {
 	apiKeyEnvVar := getAPIKeyEnvVar(config)
-	apiKey := os.Getenv(apiKeyEnvVar)
-	if apiKey == "" {
-		return nil, errors.Errorf("%s environment variable is required", apiKeyEnvVar)
+	authorizer, err := auth.OpenAIAPIKeyAuthorizerFromEnv(apiKeyEnvVar)
+	if err != nil {
+		return nil, err
 	}
 
 	log.WithField("api_key_env_var", apiKeyEnvVar).Debug("using OpenAI API key for Responses API")
 
-	opts := []option.RequestOption{option.WithAPIKey(apiKey)}
+	opts := auth.OpenAIRequestOptionsWithAuthorizer(authorizer)
 	if baseURL := getBaseURL(config); baseURL != "" {
 		opts = append(opts, option.WithBaseURL(baseURL))
 	}

@@ -194,24 +194,10 @@ func NewOpenAIThread(config llmtypes.Config) (*Thread, error) {
 			clientConfig = openai.DefaultConfig(apiKey)
 			useCopilot = false
 		} else {
-			copilotToken, err := auth.CopilotAccessToken(ctx)
-			if err != nil {
-				log.WithError(err).Error("failed to get copilot access token despite credentials existing")
-				// Fall back to OpenAI API key
-				apiKeyEnvVar := GetAPIKeyEnvVar(config)
-				apiKey := os.Getenv(apiKeyEnvVar)
-				clientConfig = openai.DefaultConfig(apiKey)
-				useCopilot = false
-			} else {
-				log.Debug("using GitHub Copilot token")
-				// Create custom HTTP client with Copilot transport
-				copilotTransport := auth.NewCopilotTransport(copilotToken)
-				clientConfig = openai.DefaultConfig("") // No API key needed
-				clientConfig.HTTPClient = &http.Client{
-					Transport: copilotTransport,
-				}
-				useCopilot = true
-			}
+			log.Debug("using GitHub Copilot token")
+			clientConfig = openai.DefaultConfig("") // Auth is injected at request time.
+			clientConfig.HTTPClient = auth.HTTPClientWithAuthorizer(auth.CopilotAuthorizer())
+			useCopilot = true
 		}
 	} else {
 		// Use OpenAI API key
@@ -1178,16 +1164,10 @@ func (h *headerInjectingHTTPClient) Do(req *http.Request) (*http.Response, error
 
 func (t *Thread) buildClientConfig() openai.ClientConfig {
 	if t.useCopilot {
-		ctx := context.Background()
-		copilotToken, err := auth.CopilotAccessToken(ctx)
-		if err == nil {
-			clientConfig := openai.DefaultConfig("")
-			clientConfig.HTTPClient = &http.Client{Transport: auth.NewCopilotTransport(copilotToken)}
-
-			clientConfig.BaseURL = resolveClientBaseURL(t.Config, true)
-
-			return clientConfig
-		}
+		clientConfig := openai.DefaultConfig("")
+		clientConfig.HTTPClient = auth.HTTPClientWithAuthorizer(auth.CopilotAuthorizer())
+		clientConfig.BaseURL = resolveClientBaseURL(t.Config, true)
+		return clientConfig
 	}
 
 	apiKeyEnvVar := GetAPIKeyEnvVar(t.Config)

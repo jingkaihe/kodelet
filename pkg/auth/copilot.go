@@ -14,31 +14,6 @@ import (
 	"github.com/pkg/errors"
 )
 
-// CopilotTransport is a custom HTTP transport for GitHub Copilot requests
-type CopilotTransport struct {
-	underlying http.RoundTripper
-	token      string
-}
-
-// NewCopilotTransport creates a new transport for GitHub Copilot with the given token
-func NewCopilotTransport(token string) *CopilotTransport {
-	return &CopilotTransport{
-		underlying: http.DefaultTransport,
-		token:      token,
-	}
-}
-
-// RoundTrip implements the http.RoundTripper interface for GitHub Copilot
-func (t *CopilotTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	// Set GitHub Copilot specific headers
-	req.Header.Set("Authorization", "Bearer "+t.token)
-	req.Header.Set("User-Agent", "GithubCopilot/1.342.0")
-	req.Header.Set("Editor-Version", "vscode/1.102.0")
-	req.Header.Del("x-api-key") // Remove default OpenAI API key header
-
-	return t.underlying.RoundTrip(req)
-}
-
 // CopilotDeviceCodeResponse represents the response from GitHub's device flow initiation endpoint.
 type CopilotDeviceCodeResponse struct {
 	DeviceCode      string `json:"device_code"`
@@ -245,17 +220,43 @@ func SaveCopilotCredentials(creds *CopilotCredentials) (string, error) {
 		return "", errors.Wrap(err, "failed to create credentials directory")
 	}
 
-	f, err := os.Create(filePath)
+	dir := filepath.Dir(filePath)
+	f, err := os.CreateTemp(dir, "copilot-subscription-*.tmp")
 	if err != nil {
-		return "", errors.Wrap(err, "failed to create credentials file")
+		return "", errors.Wrap(err, "failed to create temporary credentials file")
 	}
+	tempPath := f.Name()
+	success := false
 	defer f.Close()
+	defer func() {
+		if !success {
+			os.Remove(tempPath)
+		}
+	}()
 
 	encoder := json.NewEncoder(f)
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(creds); err != nil {
 		return "", errors.Wrap(err, "failed to write credentials")
 	}
+
+	if err := f.Sync(); err != nil {
+		return "", errors.Wrap(err, "failed to sync credentials file")
+	}
+
+	if err := f.Close(); err != nil {
+		return "", errors.Wrap(err, "failed to close temporary credentials file")
+	}
+
+	if err := os.Chmod(tempPath, 0o600); err != nil {
+		return "", errors.Wrap(err, "failed to set credentials file permissions")
+	}
+
+	if err := os.Rename(tempPath, filePath); err != nil {
+		return "", errors.Wrap(err, "failed to save credentials file")
+	}
+
+	success = true
 
 	return filePath, nil
 }
