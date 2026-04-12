@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.3.36-beta (2026-04-12)
+
+Promoted GitHub Copilot to a first-class `platform: copilot` configuration for both OpenAI and Anthropic profiles, replacing the older `use_copilot` setup in the sample config, manual, and login guidance.
+
+Added Copilot model catalog fetching/caching so OpenAI-compatible Copilot defaults can be discovered dynamically, including context windows and reasoning-model classification.
+
 ## 0.3.35-beta (2026-04-12)
 
 Refactored Anthropic, Copilot, OpenAI, and Codex authentication to use request-time HTTP authorizers so refreshed tokens and headers are injected immediately before each outbound request. Added shared HTTP auth helpers and regression coverage around subscription, Copilot, Codex OAuth, and API-key flows. Also tightened Codex auth to require ChatGPT OAuth credentials instead of falling back to a plain OpenAI API key, and made Copilot credential writes atomic.
