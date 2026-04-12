@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 
@@ -125,13 +126,13 @@ func explicitFlagViperKey(flagName string) string {
 }
 
 var explicitFlagKeyOverrides = map[string]string{
-	"context-patterns":                 "context.patterns",
-	"tracing-enabled":                  "tracing.enabled",
-	"tracing-sampler":                  "tracing.sampler",
-	"tracing-ratio":                    "tracing.ratio",
-	"sysprompt":                        "sysprompt",
-	"sysprompt-arg":                    "sysprompt_args",
-	"disable-llm-conversation-summary": "disable_llm_conversation_summary",
+	"context-patterns":          "context.patterns",
+	"tracing-enabled":           "tracing.enabled",
+	"tracing-sampler":           "tracing.sampler",
+	"tracing-ratio":             "tracing.ratio",
+	"sysprompt":                 "sysprompt",
+	"sysprompt-arg":             "sysprompt_args",
+	"conversation-summary-mode": "conversation_summary_mode",
 }
 
 // applyProfileToSettings applies profile settings to a local settings map.
@@ -156,12 +157,29 @@ func loadConfigFromSettings(settings map[string]any) (llmtypes.Config, error) {
 		config.AnthropicAPIAccess = llmtypes.AnthropicAPIAccessAuto
 	}
 
+	// Set default conversation summary mode if empty
+	if config.ConversationSummaryMode == "" {
+		config.ConversationSummaryMode = llmtypes.ConversationSummaryModeLLM
+	}
+	if err := validateConversationSummaryMode(config.ConversationSummaryMode); err != nil {
+		return config, err
+	}
+
 	// Apply retry defaults if not set
 	if config.Retry.Attempts == 0 {
 		config.Retry = llmtypes.DefaultRetryConfig
 	}
 
 	return config, nil
+}
+
+func validateConversationSummaryMode(mode llmtypes.ConversationSummaryMode) error {
+	switch mode {
+	case llmtypes.ConversationSummaryModeLLM, llmtypes.ConversationSummaryModeFirstMessage:
+		return nil
+	default:
+		return fmt.Errorf("invalid conversation_summary_mode '%s', valid values are: llm, first_message", mode)
+	}
 }
 
 func cloneSettings(settings map[string]any) map[string]any {

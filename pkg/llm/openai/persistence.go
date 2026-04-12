@@ -124,7 +124,7 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 
 	// Generate a new summary if requested and enabled; otherwise keep the first user message.
 	if summarize {
-		if !t.Config.DisableLLMConversationSummary {
+		if t.Config.ConversationSummaryMode.UsesLLM() {
 			generatedSummary, err := t.ShortSummary(ctx)
 			if err != nil {
 				logger.G(ctx).WithError(err).Error("failed to generate summary")

@@ -227,9 +227,9 @@ Also configurable via `disable_subagent: true` in config or `KODELET_DISABLE_SUB
 **Disabling LLM conversation summaries:**
 Uses the first user message for persisted conversation titles instead of calling the weak model.
 ```bash
-kodelet run --disable-llm-conversation-summary "query"
+kodelet run --conversation-summary-mode first_message "query"
 ```
-Also configurable via `disable_llm_conversation_summary: true` in config or `KODELET_DISABLE_LLM_CONVERSATION_SUMMARY=true`.
+Also configurable via `conversation_summary_mode: first_message` in config or `KODELET_CONVERSATION_SUMMARY_MODE=first_message`.
 
 ### Agent Lifecycle Hooks
 Hooks allow external scripts to observe and control agent behavior for audit logging, security controls, and monitoring.
@@ -454,7 +454,7 @@ profile: default
 thinking_budget_tokens: 8000
 weak_model: haiku-45
 weak_model_max_tokens: 8192
-disable_llm_conversation_summary: false
+conversation_summary_mode: llm
 profiles:
     hybrid:
         max_tokens: 16000

@@ -89,7 +89,7 @@ func (t *Thread) SaveConversation(ctx context.Context, summarise bool) error {
 	summary := base.FirstUserMessageFallback(conversationsFromAnthropic(messages))
 
 	if summarise {
-		if !t.Config.DisableLLMConversationSummary {
+		if t.Config.ConversationSummaryMode.UsesLLM() {
 			generatedSummary, err := t.ShortSummary(ctx)
 			if err != nil {
 				logger.G(ctx).WithError(err).Error("failed to generate summary")

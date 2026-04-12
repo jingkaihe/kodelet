@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.3.37-beta (2026-04-12)
+
+Added `conversation_summary_mode` across config, CLI, and docs so persisted conversation titles can use either weak-model summary generation (`llm`) or the first user message (`first_message`).
+
+Improved conversation summary persistence so when LLM title generation fails or returns empty output, Kodelet now falls back to the first user message instead of storing a generic placeholder.
+
 ## 0.3.36-beta (2026-04-12)
 
 Promoted GitHub Copilot to a first-class `platform: copilot` configuration for both OpenAI and Anthropic profiles, replacing the older `use_copilot` setup in the sample config, manual, and login guidance.

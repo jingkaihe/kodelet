@@ -647,9 +647,9 @@ allowed_commands: []  # Empty means use default banned commands
 tool_mode: full
 
 # Conversation summary behavior
-# When true, persisted conversation titles use the first user message instead
-# of calling the weak model for an LLM-generated short summary.
-disable_llm_conversation_summary: false
+# - llm: generate a short summary with the weak model
+# - first_message: use the first user message directly
+conversation_summary_mode: llm
 
 # MCP configuration
 mcp:
@@ -695,8 +695,8 @@ kodelet run --disable-subagent "query"
 # Disable filesystem search tools (`glob_tool` and `grep_tool`)
 kodelet run --disable-fs-search-tools "query"
 
-# Disable LLM-generated conversation summaries and use the first user message instead
-kodelet run --disable-llm-conversation-summary "query"
+# Use the first user message for persisted conversation summaries
+kodelet run --conversation-summary-mode first_message "query"
 
 # Enable todo tools for this run (disabled by default)
 kodelet run --enable-todos "query"
@@ -1518,15 +1518,15 @@ kodelet run --disable-fs-search-tools "your query"
 
 This can also be set via configuration file (`disable_fs_search_tools: true`) or environment variable (`KODELET_DISABLE_FS_SEARCH_TOOLS=true`). When enabled, the system prompt instructs the agent to use `fd` and `rg` via the `bash` tool for filesystem search tasks instead.
 
-### Disabling LLM Conversation Summaries
+### Conversation Summary Mode
 
-To skip weak-model conversation title generation and use the first user message instead:
+To use the first user message instead of weak-model summary generation for persisted conversation titles:
 
 ```bash
-kodelet run --disable-llm-conversation-summary "your query"
+kodelet run --conversation-summary-mode first_message "your query"
 ```
 
-This can also be set via configuration file (`disable_llm_conversation_summary: true`) or environment variable (`KODELET_DISABLE_LLM_CONVERSATION_SUMMARY=true`). This only affects short persisted conversation summaries/titles, not context compaction.
+This can also be set via configuration file (`conversation_summary_mode: first_message`) or environment variable (`KODELET_CONVERSATION_SUMMARY_MODE=first_message`). The default is `llm`. This only affects short persisted conversation summaries/titles, not context compaction.
 
 ### Enabling Todo Tools
 

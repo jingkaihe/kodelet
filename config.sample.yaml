@@ -202,10 +202,11 @@ tool_mode: full
 # When enabled, the agent is instructed to use fd/rg via the bash tool instead.
 # disable_fs_search_tools: true
 
-# Disable LLM-generated conversation summaries.
-# When enabled, conversation titles use the first user message instead of the weak model.
+# Conversation summary mode for persisted conversation titles.
+# - llm: generate a short summary with the weak model
+# - first_message: use the first user message directly
 # This only affects short persisted conversation summaries/titles, not compact context generation.
-# disable_llm_conversation_summary: true
+# conversation_summary_mode: "first_message"
 
 allowed_tools: []
 # allowed_tools:

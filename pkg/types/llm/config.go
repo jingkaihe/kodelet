@@ -6,6 +6,9 @@ type AnthropicAPIAccess string
 // ToolMode defines how the agent can interact with project files.
 type ToolMode string
 
+// ConversationSummaryMode defines how persisted conversation summaries are produced.
+type ConversationSummaryMode string
+
 const (
 	// AnthropicAPIAccessAuto uses subscription auth if available, then falls back to API key
 	AnthropicAPIAccessAuto AnthropicAPIAccess = "auto"
@@ -18,11 +21,21 @@ const (
 	ToolModeFull ToolMode = "full"
 	// ToolModePatch restricts file operations to apply_patch plus search/navigation tools.
 	ToolModePatch ToolMode = "patch"
+
+	// ConversationSummaryModeLLM generates a short summary via an LLM.
+	ConversationSummaryModeLLM ConversationSummaryMode = "llm"
+	// ConversationSummaryModeFirstMessage uses the first user message as the summary.
+	ConversationSummaryModeFirstMessage ConversationSummaryMode = "first_message"
 )
 
 // IsPatchMode reports whether the tool mode should use apply_patch-only workflows.
 func (m ToolMode) IsPatchMode() bool {
 	return m == ToolModePatch
+}
+
+// UsesLLM reports whether conversation summaries should be generated via an LLM.
+func (m ConversationSummaryMode) UsesLLM() bool {
+	return m == "" || m == ConversationSummaryModeLLM
 }
 
 // Config holds the configuration for the LLM client
@@ -68,12 +81,12 @@ type Config struct {
 	Context *ContextConfig `mapstructure:"context" json:"context,omitempty" yaml:"context,omitempty"` // Context configuration for context file discovery
 
 	// Hooks and feature toggle configuration
-	NoHooks                       bool   `mapstructure:"no_hooks" json:"no_hooks" yaml:"no_hooks"`                                                                         // NoHooks disables agent lifecycle hooks
-	DisableFSSearchTools          bool   `mapstructure:"disable_fs_search_tools" json:"disable_fs_search_tools" yaml:"disable_fs_search_tools"`                            // DisableFSSearchTools disables glob_tool and grep_tool and updates prompt/tool guidance accordingly
-	DisableLLMConversationSummary bool   `mapstructure:"disable_llm_conversation_summary" json:"disable_llm_conversation_summary" yaml:"disable_llm_conversation_summary"` // DisableLLMConversationSummary skips LLM-generated conversation titles and uses the first user message instead
-	DisableSubagent               bool   `mapstructure:"disable_subagent" json:"disable_subagent" yaml:"disable_subagent"`                                                 // DisableSubagent disables the subagent tool and removes subagent-related system prompt context
-	EnableTodos                   bool   `mapstructure:"enable_todos" json:"enable_todos" yaml:"enable_todos"`                                                             // EnableTodos enables todo_read and todo_write tools for the main agent
-	RecipeName                    string `mapstructure:"recipe_name" json:"recipe_name" yaml:"recipe_name"`                                                                // RecipeName is the active recipe/fragment name for hooks
+	NoHooks                 bool                    `mapstructure:"no_hooks" json:"no_hooks" yaml:"no_hooks"`                                                    // NoHooks disables agent lifecycle hooks
+	DisableFSSearchTools    bool                    `mapstructure:"disable_fs_search_tools" json:"disable_fs_search_tools" yaml:"disable_fs_search_tools"`       // DisableFSSearchTools disables glob_tool and grep_tool and updates prompt/tool guidance accordingly
+	ConversationSummaryMode ConversationSummaryMode `mapstructure:"conversation_summary_mode" json:"conversation_summary_mode" yaml:"conversation_summary_mode"` // ConversationSummaryMode controls whether persisted conversation summaries come from the LLM or first user message
+	DisableSubagent         bool                    `mapstructure:"disable_subagent" json:"disable_subagent" yaml:"disable_subagent"`                            // DisableSubagent disables the subagent tool and removes subagent-related system prompt context
+	EnableTodos             bool                    `mapstructure:"enable_todos" json:"enable_todos" yaml:"enable_todos"`                                        // EnableTodos enables todo_read and todo_write tools for the main agent
+	RecipeName              string                  `mapstructure:"recipe_name" json:"recipe_name" yaml:"recipe_name"`                                           // RecipeName is the active recipe/fragment name for hooks
 }
 
 // OpenAIAPIMode defines which OpenAI-compatible API surface to use.
