@@ -103,10 +103,10 @@ func skillsEnabledForConfig(config llmtypes.Config) bool {
 	return true
 }
 
-func filterOutToolByName(tools []tooltypes.Tool, name string) []tooltypes.Tool {
+func filterOutSkill(tools []tooltypes.Tool) []tooltypes.Tool {
 	filtered := make([]tooltypes.Tool, 0, len(tools))
 	for _, tool := range tools {
-		if tool.Name() != name {
+		if tool.Name() != "skill" {
 			filtered = append(filtered, tool)
 		}
 	}
@@ -208,7 +208,7 @@ func WithMainTools() BasicStateOption {
 			s.tools = filterOutSubagent(s.tools)
 		}
 		if !skillsEnabledForConfig(s.llmConfig) {
-			s.tools = filterOutToolByName(s.tools, "skill")
+			s.tools = filterOutSkill(s.tools)
 		}
 		s.configureTools()
 		return nil
@@ -308,19 +308,19 @@ func WithSkillTool() BasicStateOption {
 			return nil
 		}
 		if !skillsEnabledForConfig(s.llmConfig) {
-			s.tools = filterOutToolByName(s.tools, "skill")
+			s.tools = filterOutSkill(s.tools)
 			return nil
 		}
 		if hasExplicitAllowedTools(s.llmConfig) {
 			allowed := allowedToolNameSet(s.llmConfig)
 			if _, ok := allowed["skill"]; !ok {
-				s.tools = filterOutToolByName(s.tools, "skill")
+				s.tools = filterOutSkill(s.tools)
 				return nil
 			}
 		}
 		discoveredSkills := discoverSkills(ctx, s.llmConfig)
 		if len(discoveredSkills) == 0 {
-			s.tools = filterOutToolByName(s.tools, "skill")
+			s.tools = filterOutSkill(s.tools)
 			return nil
 		}
 		skillTool := NewSkillToolWithOptions(discoveredSkills, len(discoveredSkills) > 0, s.llmConfig.ToolMode, s.llmConfig.DisableFSSearchTools)
