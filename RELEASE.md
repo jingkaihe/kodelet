@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.3.35-beta (2026-04-12)
+
+Refactored Anthropic, Copilot, OpenAI, and Codex authentication to use request-time HTTP authorizers so refreshed tokens and headers are injected immediately before each outbound request. Added shared HTTP auth helpers and regression coverage around subscription, Copilot, Codex OAuth, and API-key flows. Also tightened Codex auth to require ChatGPT OAuth credentials instead of falling back to a plain OpenAI API key, and made Copilot credential writes atomic.
+
 ## 0.3.34-beta (2026-04-11)
 
 Tightened tool registration so explicit `allowed_tools` filtering now also applies to discovered MCP and custom tools, preventing unlisted dynamic tools from being exposed later in setup. Made skill tool availability respect `--no-skills`, explicit tool allowlists, and subagent mode more consistently, and drop the `skill` tool entirely when no skills are discoverable.
