@@ -19,6 +19,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
+	"github.com/jingkaihe/kodelet/pkg/llm/openai/copilotdefaults"
 	codexpreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/codex"
 	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
 	"github.com/jingkaihe/kodelet/pkg/llm/openai/preset/xai"
@@ -86,6 +87,8 @@ type Thread struct {
 	// isCodex indicates if this thread is using Codex authentication
 	// Some API parameters may not be supported by the Codex API
 	isCodex bool
+	// useCopilot indicates if this thread authenticates through GitHub Copilot.
+	useCopilot bool
 
 	processMessageExchangeFunc func(
 		ctx context.Context,
@@ -116,7 +119,7 @@ func NewThread(config llmtypes.Config) (*Thread, error) {
 	baseThread := base.NewThread(config, conversationID, hookTrigger)
 
 	// Build client options based on authentication mode
-	opts, useCodex, err := buildClientOptions(config, log)
+	opts, useCodex, useCopilot, err := buildClientOptions(config, log)
 	if err != nil {
 		return nil, err
 	}
@@ -142,6 +145,7 @@ func NewThread(config llmtypes.Config) (*Thread, error) {
 		customModels:    customModels,
 		customPricing:   customPricing,
 		isCodex:         useCodex,
+		useCopilot:      useCopilot,
 	}
 	thread.processMessageExchangeFunc = thread.processMessageExchange
 	thread.newStreamingFunc = thread.client.Responses.NewStreaming
@@ -240,6 +244,7 @@ func (t *Thread) SendMessage(
 	ctx, span := t.CreateMessageSpan(ctx, tracer, message, opt,
 		attribute.String("reasoning_effort", string(t.reasoningEffort)),
 		attribute.String("api", "responses"),
+		attribute.String("platform", resolvePlatformName(t.Config)),
 	)
 	defer func() {
 		t.FinalizeMessageSpan(span, err)
@@ -301,12 +306,14 @@ OUTER:
 			// Check if auto-compact should be triggered
 			t.TryAutoCompact(ctx, opt.DisableAutoCompact, opt.CompactRatio, t.CompactContext)
 
+			exchangeOpt := opt.WithTurnInitiator(turnCount)
+
 			logger.G(ctx).WithField("model", model).Debug("starting message exchange")
 			processExchange := t.processMessageExchangeFunc
 			if processExchange == nil {
 				processExchange = t.processMessageExchange
 			}
-			exchangeOutput, toolsUsed, responseCompleted, err := processExchange(ctx, handler, model, maxTokens, systemPrompt, opt)
+			exchangeOutput, toolsUsed, responseCompleted, err := processExchange(ctx, handler, model, maxTokens, systemPrompt, exchangeOpt)
 			if err != nil {
 				if errors.Is(err, context.Canceled) {
 					logger.G(ctx).Info("Request cancelled, stopping kodelet.llm.openai.responses")
@@ -458,6 +465,8 @@ func (t *Thread) processMessageExchange(
 	// Apply Codex-specific restrictions (overrides unsupported params)
 	t.applyCodexRestrictions(&params)
 
+	requestOpts := t.requestOptions(opt)
+
 	log.WithField("model", model).
 		WithField("input_items", len(t.inputItems)).
 		WithField("tool_count", len(tools)).
@@ -474,7 +483,7 @@ func (t *Thread) processMessageExchange(
 	}
 
 	// Use streaming API
-	stream := newStreaming(ctx, params)
+	stream := newStreaming(ctx, params, requestOpts...)
 	log.Debug("stream created, processing events")
 
 	// Process stream events
@@ -661,6 +670,7 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	if t.isCodex {
 		compactOpts = append(compactOpts, option.WithHeader("Accept", "application/json"))
 	}
+	compactOpts = append(compactOpts, t.requestOptions(llmtypes.MessageOpt{Initiator: llmtypes.InitiatorAgent})...)
 
 	// Use raw JSON compact parsing by default because some backends may omit
 	// JSON content-type on compact responses, which can break typed SDK decode.
@@ -1128,6 +1138,8 @@ func getPlatformBaseURL(platform string) string {
 		return xai.BaseURL
 	case "codex":
 		return codexpreset.BaseURL
+	case "copilot":
+		return auth.CopilotBaseURL
 	case "openai":
 		return openaipreset.BaseURL
 	default:
@@ -1191,24 +1203,58 @@ func loadCustomConfiguration(config llmtypes.Config) (map[string]string, map[str
 
 // buildClientOptions constructs the OpenAI client options based on authentication mode.
 // Returns the options, whether Codex auth is being used, and any error.
-func buildClientOptions(config llmtypes.Config, log *logrus.Entry) ([]option.RequestOption, bool, error) {
+func buildClientOptions(config llmtypes.Config, log *logrus.Entry) ([]option.RequestOption, bool, bool, error) {
 	useCodex := resolvePlatformName(config) == "codex"
+	useCopilot := resolvePlatformName(config) == "copilot"
 
 	var opts []option.RequestOption
 	var err error
 
-	if useCodex {
+	if useCopilot {
+		if config.OpenAI == nil {
+			config.OpenAI = &llmtypes.OpenAIConfig{}
+		}
+		if normalizePlatformName(config.OpenAI.Platform) == "" {
+			config.OpenAI.Platform = "copilot"
+		}
+		opts, err = buildCopilotAuthOptions(config, log)
+	} else if useCodex {
 		opts = buildCodexAuthOptions(config, log)
 	} else {
 		opts, err = buildAPIKeyAuthOptions(config, log)
 	}
 	if err != nil {
-		return nil, useCodex, err
+		return nil, useCodex, useCopilot, err
 	}
 
 	opts = append(opts, errorLoggingMiddleware(log))
 
-	return opts, useCodex, nil
+	return opts, useCodex, useCopilot, nil
+}
+
+func buildCopilotAuthOptions(config llmtypes.Config, log *logrus.Entry) ([]option.RequestOption, error) {
+	copilotCredsExists, _ := auth.GetCopilotCredentialsExists()
+	if !copilotCredsExists {
+		return nil, errors.New("GitHub Copilot credentials not found, run 'kodelet copilot-login'")
+	}
+
+	log.Debug("using GitHub Copilot authentication for Responses API")
+	opts := auth.OpenAIRequestOptionsWithAuthorizer(auth.CopilotAuthorizer())
+	if baseURL := getBaseURL(config); baseURL != "" {
+		opts = append(opts, option.WithBaseURL(baseURL))
+	} else {
+		opts = append(opts, option.WithBaseURL(auth.CopilotBaseURL))
+	}
+
+	return opts, nil
+}
+
+func (t *Thread) requestOptions(opt llmtypes.MessageOpt) []option.RequestOption {
+	if !t.useCopilot {
+		return nil
+	}
+
+	return auth.CopilotOpenAIRequestOptions(opt)
 }
 
 // buildCodexAuthOptions returns client options for Codex CLI authentication.
@@ -1279,6 +1325,12 @@ func loadPlatformDefaults(platformName string) (map[string]string, map[string]ll
 		return loadPlatformDefaultsFromConfig(xai.Models, xai.Pricing)
 	case "codex":
 		return loadPlatformDefaultsFromConfig(codexpreset.Models, codexpreset.Pricing)
+	case "copilot":
+		models, pricing, err := copilotdefaults.LoadPlatformDefaults(context.Background())
+		if err == nil {
+			return loadPlatformDefaultsFromConfig(*models, pricing)
+		}
+		return loadPlatformDefaultsFromConfig(openaipreset.Models, openaipreset.Pricing)
 	default:
 		return nil, nil
 	}

@@ -43,6 +43,7 @@ type Thread struct {
 	messages        []anthropic.MessageParam
 	summary         string // Conversation summary
 	useSubscription bool   // Whether using Anthropic subscription vs API key
+	useCopilot      bool   // Whether using GitHub Copilot Anthropic-compatible API
 }
 
 // Provider returns the provider name for this thread
@@ -68,60 +69,75 @@ func NewAnthropicThread(config llmtypes.Config) (*Thread, error) {
 	logger := logger.G(context.Background())
 	var client anthropic.Client
 	var useSubscription bool
+	var useCopilot bool
 
-	// Determine authentication method based on access mode configuration
-	switch config.AnthropicAPIAccess {
-	case llmtypes.AnthropicAPIAccessAPIKey:
-		// Force API key usage
-		logger.Debug("using API key authentication (forced by configuration)")
-		apiKeyOpts := auth.AnthropicRequestOptionsWithAuthorizer(auth.AnthropicAPIKeyAuthorizerFromEnv())
-		client = anthropic.NewClient(append(opts, apiKeyOpts...)...)
-		useSubscription = false
+	if config.Anthropic != nil && strings.EqualFold(strings.TrimSpace(config.Anthropic.Platform), "copilot") {
+		copilotCredsExists, _ := auth.GetCopilotCredentialsExists()
+		if !copilotCredsExists {
+			return nil, errors.New("GitHub Copilot credentials not found, run 'kodelet copilot-login'")
+		}
 
-	case llmtypes.AnthropicAPIAccessSubscription:
-		// Force subscription usage - no fallbacks allowed
-		antCredsExists, _ := auth.GetAnthropicCredentialsExists()
-		if !antCredsExists {
-			return nil, errors.New("subscription authentication forced but no credentials found")
-		}
-		if _, err := auth.AnthropicAccessToken(context.Background(), config.AnthropicAccount); err != nil {
-			return nil, errors.Wrap(err, "subscription authentication forced but failed to get access token")
-		}
-		if config.AnthropicAccount != "" {
-			logger.WithField("account", config.AnthropicAccount).Debug("using anthropic access token for specified account")
-		} else {
-			logger.Debug("using anthropic access token (forced by configuration)")
-		}
-		opts = append(opts, auth.AnthropicRequestOptionsWithAuthorizer(auth.AnthropicSubscriptionAuthorizer(config.AnthropicAccount))...)
+		logger.Debug("using GitHub Copilot Anthropic-compatible API")
+		opts = append(opts, auth.AnthropicRequestOptionsWithAuthorizer(auth.CopilotAnthropicAuthorizer())...)
+		opts = append(opts, option.WithBaseURL(auth.CopilotBaseURL))
 		client = anthropic.NewClient(opts...)
-		useSubscription = true
-
-	case llmtypes.AnthropicAPIAccessAuto:
-		fallthrough
-	default:
-		// Auto mode: try subscription first, then fall back to API key
-		antCredsExists, _ := auth.GetAnthropicCredentialsExists()
-		if antCredsExists {
-			if _, err := auth.AnthropicAccessToken(context.Background(), config.AnthropicAccount); err != nil {
-				logger.WithError(err).Error("failed to get anthropic access token, falling back to use API key")
-				apiKeyOpts := auth.AnthropicRequestOptionsWithAuthorizer(auth.AnthropicAPIKeyAuthorizerFromEnv())
-				client = anthropic.NewClient(append(opts, apiKeyOpts...)...)
-				useSubscription = false
-			} else {
-				if config.AnthropicAccount != "" {
-					logger.WithField("account", config.AnthropicAccount).Debug("using anthropic access token for specified account")
-				} else {
-					logger.Debug("using anthropic access token")
-				}
-				opts = append(opts, auth.AnthropicRequestOptionsWithAuthorizer(auth.AnthropicSubscriptionAuthorizer(config.AnthropicAccount))...)
-				client = anthropic.NewClient(opts...)
-				useSubscription = true
-			}
-		} else {
-			logger.Debug("no anthropic credentials found, falling back to use API key")
+		useSubscription = false
+		useCopilot = true
+	} else {
+		// Determine authentication method based on access mode configuration
+		switch config.AnthropicAPIAccess {
+		case llmtypes.AnthropicAPIAccessAPIKey:
+			// Force API key usage
+			logger.Debug("using API key authentication (forced by configuration)")
 			apiKeyOpts := auth.AnthropicRequestOptionsWithAuthorizer(auth.AnthropicAPIKeyAuthorizerFromEnv())
 			client = anthropic.NewClient(append(opts, apiKeyOpts...)...)
 			useSubscription = false
+
+		case llmtypes.AnthropicAPIAccessSubscription:
+			// Force subscription usage - no fallbacks allowed
+			antCredsExists, _ := auth.GetAnthropicCredentialsExists()
+			if !antCredsExists {
+				return nil, errors.New("subscription authentication forced but no credentials found")
+			}
+			if _, err := auth.AnthropicAccessToken(context.Background(), config.AnthropicAccount); err != nil {
+				return nil, errors.Wrap(err, "subscription authentication forced but failed to get access token")
+			}
+			if config.AnthropicAccount != "" {
+				logger.WithField("account", config.AnthropicAccount).Debug("using anthropic access token for specified account")
+			} else {
+				logger.Debug("using anthropic access token (forced by configuration)")
+			}
+			opts = append(opts, auth.AnthropicRequestOptionsWithAuthorizer(auth.AnthropicSubscriptionAuthorizer(config.AnthropicAccount))...)
+			client = anthropic.NewClient(opts...)
+			useSubscription = true
+
+		case llmtypes.AnthropicAPIAccessAuto:
+			fallthrough
+		default:
+			// Auto mode: try subscription first, then fall back to API key
+			antCredsExists, _ := auth.GetAnthropicCredentialsExists()
+			if antCredsExists {
+				if _, err := auth.AnthropicAccessToken(context.Background(), config.AnthropicAccount); err != nil {
+					logger.WithError(err).Error("failed to get anthropic access token, falling back to use API key")
+					apiKeyOpts := auth.AnthropicRequestOptionsWithAuthorizer(auth.AnthropicAPIKeyAuthorizerFromEnv())
+					client = anthropic.NewClient(append(opts, apiKeyOpts...)...)
+					useSubscription = false
+				} else {
+					if config.AnthropicAccount != "" {
+						logger.WithField("account", config.AnthropicAccount).Debug("using anthropic access token for specified account")
+					} else {
+						logger.Debug("using anthropic access token")
+					}
+					opts = append(opts, auth.AnthropicRequestOptionsWithAuthorizer(auth.AnthropicSubscriptionAuthorizer(config.AnthropicAccount))...)
+					client = anthropic.NewClient(opts...)
+					useSubscription = true
+				}
+			} else {
+				logger.Debug("no anthropic credentials found, falling back to use API key")
+				apiKeyOpts := auth.AnthropicRequestOptionsWithAuthorizer(auth.AnthropicAPIKeyAuthorizerFromEnv())
+				client = anthropic.NewClient(append(opts, apiKeyOpts...)...)
+				useSubscription = false
+			}
 		}
 	}
 
@@ -135,6 +151,7 @@ func NewAnthropicThread(config llmtypes.Config) (*Thread, error) {
 		Thread:          baseThread,
 		client:          client,
 		useSubscription: useSubscription,
+		useCopilot:      useCopilot,
 	}
 
 	// Set the LoadConversation callback for provider-specific loading
@@ -283,8 +300,10 @@ OUTER:
 			}
 			systemPrompt := sysprompt.SystemPrompt(string(model), t.Config, contexts)
 
+			exchangeOpt := opt.WithTurnInitiator(turnCount)
+
 			var exchangeOutput string
-			exchangeOutput, toolsUsed, err := t.processMessageExchange(ctx, handler, model, maxTokens, systemPrompt, opt)
+			exchangeOutput, toolsUsed, err := t.processMessageExchange(ctx, handler, model, maxTokens, systemPrompt, exchangeOpt)
 			if err != nil {
 				logger.G(ctx).WithError(err).Error("error processing message exchange")
 				// xxx: based on the observation, the anthropic sdk swallows context cancellation, and return empty message
@@ -537,7 +556,7 @@ func (t *Thread) processMessageExchange(
 	// Check if handler supports streaming for skipping post-stream calls
 	_, isStreamingHandler := handler.(llmtypes.StreamingMessageHandler)
 
-	response, err := t.NewMessage(ctx, messageParams, handler)
+	response, err := t.NewMessage(ctx, messageParams, handler, opt)
 	if err != nil {
 		if t.Persisted && t.Store != nil && !opt.NoSaveConversation {
 			t.SaveConversation(ctx, false)
@@ -758,7 +777,7 @@ func isThinkingModel(model anthropic.Model) bool {
 
 // NewMessage sends a message to Anthropic with OTEL tracing.
 // If handler implements StreamingMessageHandler, content will be streamed as it arrives.
-func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewParams, handler llmtypes.MessageHandler) (*anthropic.Message, error) {
+func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewParams, handler llmtypes.MessageHandler, opt llmtypes.MessageOpt) (*anthropic.Message, error) {
 	tracer := telemetry.Tracer("kodelet.llm.anthropic")
 
 	// Create attributes for the span
@@ -796,8 +815,12 @@ func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewPara
 	defer span.End()
 
 	retryAttempts := t.Config.Retry.Attempts
+	requestOpts := []option.RequestOption{option.WithMaxRetries(retryAttempts)}
+	if t.useCopilot {
+		requestOpts = append(requestOpts, auth.CopilotAnthropicRequestOptions(opt)...)
+	}
 
-	stream := t.client.Messages.NewStreaming(ctx, params, option.WithMaxRetries(retryAttempts))
+	stream := t.client.Messages.NewStreaming(ctx, params, requestOpts...)
 	defer stream.Close()
 
 	if stream.Err() != nil {

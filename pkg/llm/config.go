@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"reflect"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -134,11 +135,7 @@ var explicitFlagKeyOverrides = map[string]string{
 
 // applyProfileToSettings applies profile settings to a local settings map.
 func applyProfileToSettings(settings map[string]any, profile llmtypes.ProfileConfig) {
-	for key, value := range profile {
-		if value != nil {
-			setSetting(settings, key, value)
-		}
-	}
+	mergeSettings(settings, map[string]any(profile))
 }
 
 func loadConfigFromSettings(settings map[string]any) (llmtypes.Config, error) {
@@ -178,6 +175,8 @@ func cloneSettingValue(value any) any {
 	switch typed := value.(type) {
 	case map[string]any:
 		return cloneSettings(typed)
+	case llmtypes.ProfileConfig:
+		return cloneSettings(map[string]any(typed))
 	case map[string]string:
 		cloned := make(map[string]string, len(typed))
 		for k, v := range typed {
@@ -195,6 +194,69 @@ func cloneSettingValue(value any) any {
 	default:
 		return value
 	}
+}
+
+func mergeSettings(settings map[string]any, overrides map[string]any) {
+	for key, value := range overrides {
+		if value == nil {
+			continue
+		}
+
+		existing, exists := settings[key]
+		if exists {
+			if merged, ok := mergeSettingValue(existing, value); ok {
+				settings[key] = merged
+				continue
+			}
+		}
+
+		settings[key] = cloneSettingValue(value)
+	}
+}
+
+func mergeSettingValue(base any, override any) (map[string]any, bool) {
+	baseMap, ok := settingValueMap(base)
+	if !ok {
+		return nil, false
+	}
+
+	overrideMap, ok := settingValueMap(override)
+	if !ok {
+		return nil, false
+	}
+
+	merged := cloneSettings(baseMap)
+	mergeSettings(merged, overrideMap)
+
+	return merged, true
+}
+
+func settingValueMap(value any) (map[string]any, bool) {
+	switch typed := value.(type) {
+	case map[string]any:
+		return typed, true
+	case llmtypes.ProfileConfig:
+		return map[string]any(typed), true
+	case map[string]string:
+		converted := make(map[string]any, len(typed))
+		for key, item := range typed {
+			converted[key] = item
+		}
+		return converted, true
+	}
+
+	rv := reflect.ValueOf(value)
+	if !rv.IsValid() || rv.Kind() != reflect.Map || rv.Type().Key().Kind() != reflect.String {
+		return nil, false
+	}
+
+	converted := make(map[string]any, rv.Len())
+	iter := rv.MapRange()
+	for iter.Next() {
+		converted[iter.Key().String()] = iter.Value().Interface()
+	}
+
+	return converted, true
 }
 
 func setSetting(settings map[string]any, key string, value any) {

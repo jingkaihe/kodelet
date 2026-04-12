@@ -5,8 +5,22 @@ import (
 	"os"
 
 	anthropicoption "github.com/anthropics/anthropic-sdk-go/option"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	openaioption "github.com/openai/openai-go/v3/option"
 	"github.com/pkg/errors"
+)
+
+const (
+	CopilotBaseURL         = "https://api.githubcopilot.com"
+	copilotChatUserAgent   = "GitHubCopilotChat/0.26.7"
+	copilotOpenAIUserAgent = "GithubCopilot/1.342.0"
+	copilotEditorVersion   = "vscode/1.102.0"
+	copilotPluginVersion   = "copilot-chat/0.26.7"
+	copilotIntegrationID   = "vscode-chat"
+	copilotGitHubAPIVer    = "2025-04-01"
+	copilotFetchLibrary    = "electron-fetch"
+	CopilotInitiatorUser   = "user"
+	CopilotInitiatorAgent  = "agent"
 )
 
 // HTTPAuthorizer applies request-time authentication to outgoing HTTP requests.
@@ -88,16 +102,69 @@ func AnthropicStaticAPIKeyAuthorizer(apiKey string) HTTPAuthorizer {
 
 // CopilotAuthorizer returns a request authorizer for GitHub Copilot-backed OpenAI calls.
 func CopilotAuthorizer() HTTPAuthorizer {
+	return CopilotAuthorizerWithInitiator("")
+}
+
+// CopilotAuthorizerWithInitiator returns a request authorizer for GitHub Copilot-backed calls.
+// When initiator is empty, requests default to a user-initiated origin.
+func CopilotAuthorizerWithInitiator(initiator string) HTTPAuthorizer {
 	return AuthorizerFunc(func(req *http.Request) error {
 		token, err := CopilotAccessToken(req.Context())
 		if err != nil {
 			return errors.Wrap(err, "failed to get copilot access token")
 		}
 
+		resolvedInitiator := initiator
+		if resolvedInitiator == "" {
+			resolvedInitiator = req.Header.Get("X-Initiator")
+		}
+		if resolvedInitiator == "" {
+			resolvedInitiator = CopilotInitiatorUser
+		}
+
 		req.Header.Set("Authorization", "Bearer "+token)
-		req.Header.Set("User-Agent", "GithubCopilot/1.342.0")
-		req.Header.Set("Editor-Version", "vscode/1.102.0")
+		req.Header.Set("User-Agent", copilotOpenAIUserAgent)
+		req.Header.Set("Editor-Version", copilotEditorVersion)
+		req.Header.Set("X-Initiator", resolvedInitiator)
 		req.Header.Del("x-api-key")
+		req.Header.Del("X-Api-Key")
+		return nil
+	})
+}
+
+// CopilotAnthropicHeaders returns the static headers expected by Copilot's Anthropic-compatible API.
+func CopilotAnthropicHeaders() map[string]string {
+	return map[string]string{
+		"User-Agent":                          copilotChatUserAgent,
+		"Editor-Version":                      copilotEditorVersion,
+		"Editor-Plugin-Version":               copilotPluginVersion,
+		"Copilot-Integration-Id":              copilotIntegrationID,
+		"OpenAI-Intent":                       "conversation-panel",
+		"X-GitHub-Api-Version":                copilotGitHubAPIVer,
+		"X-Vscode-User-Agent-Library-Version": copilotFetchLibrary,
+	}
+}
+
+// CopilotAnthropicAuthorizer returns a request authorizer for GitHub Copilot's Anthropic-compatible API.
+func CopilotAnthropicAuthorizer() HTTPAuthorizer {
+	return AuthorizerFunc(func(req *http.Request) error {
+		token, err := CopilotAccessToken(req.Context())
+		if err != nil {
+			return errors.Wrap(err, "failed to get copilot access token")
+		}
+
+		resolvedInitiator := req.Header.Get("X-Initiator")
+		if resolvedInitiator == "" {
+			resolvedInitiator = CopilotInitiatorUser
+		}
+
+		req.Header.Set("Authorization", "Bearer "+token)
+		for key, value := range CopilotAnthropicHeaders() {
+			req.Header.Set(key, value)
+		}
+		req.Header.Set("X-Initiator", resolvedInitiator)
+		req.Header.Del("x-api-key")
+		req.Header.Del("X-Api-Key")
 		return nil
 	})
 }
@@ -154,6 +221,26 @@ func OpenAIRequestOptionsWithAuthorizer(authorizer HTTPAuthorizer) []openaioptio
 	return []openaioption.RequestOption{
 		openaioption.WithHTTPClient(HTTPClientWithAuthorizer(authorizer)),
 	}
+}
+
+// CopilotInitiator resolves the Copilot initiator from message options.
+func CopilotInitiator(opt llmtypes.MessageOpt) string {
+	return opt.ResolvedInitiator()
+}
+
+// CopilotHeaderMap returns Copilot request headers derived from message options.
+func CopilotHeaderMap(opt llmtypes.MessageOpt) map[string]string {
+	return map[string]string{"X-Initiator": CopilotInitiator(opt)}
+}
+
+// CopilotOpenAIRequestOptions returns OpenAI SDK request options for Copilot initiator headers.
+func CopilotOpenAIRequestOptions(opt llmtypes.MessageOpt) []openaioption.RequestOption {
+	return []openaioption.RequestOption{openaioption.WithHeader("X-Initiator", CopilotInitiator(opt))}
+}
+
+// CopilotAnthropicRequestOptions returns Anthropic SDK request options for Copilot initiator headers.
+func CopilotAnthropicRequestOptions(opt llmtypes.MessageOpt) []anthropicoption.RequestOption {
+	return []anthropicoption.RequestOption{anthropicoption.WithHeader("X-Initiator", CopilotInitiator(opt))}
 }
 
 // OpenAIAPIKeyAuthorizerFromEnv returns a static API key authorizer for the given env var.

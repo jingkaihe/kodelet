@@ -1054,6 +1054,23 @@ func TestGetPromptCacheHeaders(t *testing.T) {
 	assert.Nil(t, headersWithoutOpenAIConfig)
 }
 
+func TestGetExtraHeadersAddsCopilotInitiatorAndManualCache(t *testing.T) {
+	config := llm.Config{OpenAI: &llm.OpenAIConfig{ManualCache: true}}
+	thread := &Thread{
+		Thread:     base.NewThread(config, "conv-test", base.CreateHookTrigger(context.Background(), config, "conv-test")),
+		useCopilot: true,
+	}
+
+	headers := thread.getExtraHeaders(llm.MessageOpt{PromptCache: true, Initiator: "agent"})
+	require.NotNil(t, headers)
+	assert.Equal(t, "agent", headers["X-Initiator"])
+	assert.Equal(t, "conv-test", headers["x-session-affinity"])
+
+	headers = thread.getExtraHeaders(llm.MessageOpt{})
+	require.NotNil(t, headers)
+	assert.Equal(t, "user", headers["X-Initiator"])
+}
+
 func TestUpdateUsageWithCachedTokens(t *testing.T) {
 	thread := &Thread{Thread: base.NewThread(llm.Config{}, "conv-test", base.CreateHookTrigger(context.Background(), llm.Config{}, "conv-test"))}
 	thread.customPricing = llm.CustomPricing{

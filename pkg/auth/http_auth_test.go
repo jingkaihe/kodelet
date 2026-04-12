@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -120,7 +121,81 @@ func TestCopilotAuthorizer(t *testing.T) {
 	assert.Equal(t, "Bearer copilot-access-token", req.Header.Get("Authorization"))
 	assert.Equal(t, "GithubCopilot/1.342.0", req.Header.Get("User-Agent"))
 	assert.Equal(t, "vscode/1.102.0", req.Header.Get("Editor-Version"))
+	assert.Equal(t, CopilotInitiatorUser, req.Header.Get("X-Initiator"))
 	assert.Empty(t, req.Header.Get("x-api-key"))
+}
+
+func TestCopilotAuthorizerWithInitiatorOverride(t *testing.T) {
+	setTestHome(t)
+
+	_, err := SaveCopilotCredentials(&CopilotCredentials{
+		AccessToken:    "github-oauth-token",
+		CopilotToken:   "copilot-access-token",
+		CopilotExpires: time.Now().Add(time.Hour).Unix(),
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "https://api.githubcopilot.com/v1/messages", nil)
+	err = CopilotAuthorizerWithInitiator(CopilotInitiatorAgent).Authorize(req)
+	require.NoError(t, err)
+	assert.Equal(t, CopilotInitiatorAgent, req.Header.Get("X-Initiator"))
+
+	req2 := httptest.NewRequest(http.MethodPost, "https://api.githubcopilot.com/v1/messages", nil)
+	req2.Header.Set("X-Initiator", CopilotInitiatorAgent)
+	err = CopilotAuthorizer().Authorize(req2)
+	require.NoError(t, err)
+	assert.Equal(t, CopilotInitiatorAgent, req2.Header.Get("X-Initiator"))
+}
+
+func TestCopilotAnthropicHeaders(t *testing.T) {
+	headers := CopilotAnthropicHeaders()
+	assert.Equal(t, "GitHubCopilotChat/0.26.7", headers["User-Agent"])
+	assert.Equal(t, "vscode/1.102.0", headers["Editor-Version"])
+	assert.Equal(t, "copilot-chat/0.26.7", headers["Editor-Plugin-Version"])
+	assert.Equal(t, "vscode-chat", headers["Copilot-Integration-Id"])
+	assert.Equal(t, "conversation-panel", headers["OpenAI-Intent"])
+	assert.Equal(t, "2025-04-01", headers["X-GitHub-Api-Version"])
+	assert.Equal(t, "electron-fetch", headers["X-Vscode-User-Agent-Library-Version"])
+}
+
+func TestCopilotAnthropicAuthorizer(t *testing.T) {
+	setTestHome(t)
+
+	_, err := SaveCopilotCredentials(&CopilotCredentials{
+		AccessToken:    "github-oauth-token",
+		CopilotToken:   "copilot-access-token",
+		CopilotExpires: time.Now().Add(time.Hour).Unix(),
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "https://api.githubcopilot.com/v1/messages", nil)
+	req.Header.Set("X-Initiator", CopilotInitiatorAgent)
+	err = CopilotAnthropicAuthorizer().Authorize(req)
+	require.NoError(t, err)
+	assert.Equal(t, "Bearer copilot-access-token", req.Header.Get("Authorization"))
+	assert.Equal(t, "GitHubCopilotChat/0.26.7", req.Header.Get("User-Agent"))
+	assert.Equal(t, "vscode/1.102.0", req.Header.Get("Editor-Version"))
+	assert.Equal(t, "copilot-chat/0.26.7", req.Header.Get("Editor-Plugin-Version"))
+	assert.Equal(t, "vscode-chat", req.Header.Get("Copilot-Integration-Id"))
+	assert.Equal(t, CopilotInitiatorAgent, req.Header.Get("X-Initiator"))
+}
+
+func TestCopilotHeaderMap(t *testing.T) {
+	headers := CopilotHeaderMap(llmtypes.MessageOpt{Initiator: llmtypes.InitiatorAgent})
+	assert.Equal(t, CopilotInitiatorAgent, headers["X-Initiator"])
+
+	headers = CopilotHeaderMap(llmtypes.MessageOpt{})
+	assert.Equal(t, CopilotInitiatorUser, headers["X-Initiator"])
+}
+
+func TestCopilotOpenAIRequestOptions(t *testing.T) {
+	opts := CopilotOpenAIRequestOptions(llmtypes.MessageOpt{Initiator: llmtypes.InitiatorAgent})
+	require.Len(t, opts, 1)
+}
+
+func TestCopilotAnthropicRequestOptions(t *testing.T) {
+	opts := CopilotAnthropicRequestOptions(llmtypes.MessageOpt{Initiator: llmtypes.InitiatorAgent})
+	require.Len(t, opts, 1)
 }
 
 func TestCodexAuthorizer(t *testing.T) {

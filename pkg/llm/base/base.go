@@ -318,7 +318,7 @@ func (t *Thread) EstimateContextWindowFromMessage(msg string) {
 //
 // Provider-specific attributes (passed via extraAttributes):
 //   - Anthropic: thinking_budget_tokens, prompt_cache
-//   - OpenAI: reasoning_effort, use_copilot
+//   - OpenAI: reasoning_effort, platform
 //   - Google: backend
 func (t *Thread) CreateMessageSpan(
 	ctx context.Context,

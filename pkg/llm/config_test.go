@@ -153,6 +153,57 @@ func TestGetConfigFromViperWithProfileOpenAIManualCache(t *testing.T) {
 	assert.True(t, config.OpenAI.ManualCache)
 }
 
+func TestApplyProfileToSettings_DeepMergesNestedMaps(t *testing.T) {
+	settings := map[string]any{
+		"openai": map[string]any{
+			"api_mode":     "responses",
+			"manual_cache": true,
+		},
+	}
+
+	applyProfileToSettings(settings, llmtypes.ProfileConfig{
+		"openai": map[string]any{
+			"platform": "fireworks",
+		},
+	})
+
+	openAISettings, ok := settings["openai"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "responses", openAISettings["api_mode"])
+	assert.Equal(t, true, openAISettings["manual_cache"])
+	assert.Equal(t, "fireworks", openAISettings["platform"])
+}
+
+func TestGetConfigFromViperWithProfile_InheritsNestedOpenAISettings(t *testing.T) {
+	originalConfig := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalConfig {
+			viper.Set(key, value)
+		}
+	}()
+
+	viper.Reset()
+	viper.Set("provider", "openai")
+	viper.Set("openai.api_mode", "responses")
+	viper.Set("openai.manual_cache", true)
+	viper.Set("profile", "fireworks")
+	viper.Set("profiles", map[string]any{
+		"fireworks": map[string]any{
+			"openai": map[string]any{
+				"platform": "fireworks",
+			},
+		},
+	})
+
+	config, err := GetConfigFromViperWithCmd(nil)
+	require.NoError(t, err)
+	require.NotNil(t, config.OpenAI)
+	assert.Equal(t, llmtypes.OpenAIAPIModeResponses, config.OpenAI.APIMode)
+	assert.True(t, config.OpenAI.ManualCache)
+	assert.Equal(t, "fireworks", config.OpenAI.Platform)
+}
+
 func TestGetConfigFromViperWithProfile_UsesExplicitProfileWithoutMutatingViper(t *testing.T) {
 	originalConfig := viper.AllSettings()
 	defer func() {
