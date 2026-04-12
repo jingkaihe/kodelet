@@ -19,6 +19,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
+	openaiconfig "github.com/jingkaihe/kodelet/pkg/llm/openai"
 	codexpreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/codex"
 	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
 	"github.com/jingkaihe/kodelet/pkg/llm/openai/preset/xai"
@@ -1337,7 +1338,8 @@ func loadPlatformDefaults(platformName string) (map[string]string, map[string]ll
 	case "codex":
 		return loadPlatformDefaultsFromConfig(codexpreset.Models, codexpreset.Pricing)
 	case "copilot":
-		return loadPlatformDefaultsFromConfig(openaipreset.Models, openaipreset.Pricing)
+		models, pricing := openaiconfig.LoadCopilotPlatformDefaultsForResponses(context.Background())
+		return loadPlatformDefaultsFromConfig(*models, pricing)
 	default:
 		return nil, nil
 	}
