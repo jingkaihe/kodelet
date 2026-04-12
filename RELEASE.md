@@ -1,5 +1,10 @@
 # Kodelet
 
+## 0.3.34-beta (2026-04-11)
+
+Tightened tool registration so explicit `allowed_tools` filtering now also applies to discovered MCP and custom tools, preventing unlisted dynamic tools from being exposed later in setup. Made skill tool availability respect `--no-skills`, explicit tool allowlists, and subagent mode more consistently, and drop the `skill` tool entirely when no skills are discoverable.
+
+
 ## 0.3.33-beta (2026-04-11)
 
 Made `kodelet run --no-tools` fully skip MCP, custom, skill, and subagent tool initialization so no tools are registered later in setup when tools are explicitly disabled.
