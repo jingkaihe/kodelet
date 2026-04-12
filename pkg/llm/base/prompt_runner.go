@@ -9,6 +9,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/pkg/errors"
 )
 
 const shortSummaryFallbackMaxLength = 100
@@ -72,35 +73,25 @@ func UtilityPromptOptions(useWeakModel bool) llmtypes.MessageOpt {
 }
 
 // GenerateShortSummary runs a summary prompt using the utility prompt runner.
-// If generation fails or LLM summary generation is disabled, it returns the first user message.
+// It returns a normalized summary on success, or an error when generation fails
+// or produces an empty result.
 func GenerateShortSummary(
 	ctx context.Context,
-	messages []conversations.StreamableMessage,
-	disableLLMSummary bool,
 	markdown string,
 	runUtilityPrompt func(ctx context.Context, prompt string, useWeakModel bool) (string, error),
-	onError func(err error),
-) string {
-	fallback := FirstUserMessageFallback(messages)
-	if disableLLMSummary {
-		return fallback
-	}
-
+) (string, error) {
 	prompt := BuildShortSummaryPrompt(markdown)
 	summary, err := runUtilityPrompt(ctx, prompt, true)
 	if err != nil {
-		if onError != nil {
-			onError(err)
-		}
-		return fallback
+		return "", err
 	}
 
 	normalized := normalizeShortSummary(summary)
 	if normalized == "" {
-		return fallback
+		return "", errors.New("generated empty summary")
 	}
 
-	return normalized
+	return normalized, nil
 }
 
 func normalizeShortSummary(summary string) string {

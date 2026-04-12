@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/llm/base"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	"github.com/pkg/errors"
 	"github.com/sashabaranov/go-openai"
@@ -118,11 +120,20 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 
 	// Clean up orphaned messages before saving
 	messagesToSave := cleanedOpenAIMessages(t.messages)
+	summary := base.FirstUserMessageFallback(conversationsFromOpenAI(streamMessagesForSummary(messagesToSave, t.GetStructuredToolResults())))
 
-	// Generate a new summary if requested
+	// Generate a new summary if requested and enabled; otherwise keep the first user message.
 	if summarize {
-		t.summary = t.ShortSummary(ctx)
+		if !t.Config.DisableLLMConversationSummary {
+			generatedSummary, err := t.ShortSummary(ctx)
+			if err != nil {
+				logger.G(ctx).WithError(err).Error("failed to generate summary")
+			} else if generatedSummary != "" {
+				summary = generatedSummary
+			}
+		}
 	}
+	t.summary = summary
 
 	// Serialize the thread state
 	messagesJSON, err := json.Marshal(messagesToSave)
@@ -156,6 +167,20 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 
 	// Save to the store
 	return t.Store.Save(ctx, record)
+}
+
+func streamMessagesForSummary(messages []openai.ChatCompletionMessage, toolResults map[string]tooltypes.StructuredToolResult) []StreamableMessage {
+	rawMessages, err := json.Marshal(messages)
+	if err != nil {
+		return nil
+	}
+
+	streamable, err := StreamMessages(rawMessages, toolResults)
+	if err != nil {
+		return nil
+	}
+
+	return streamable
 }
 
 // loadConversation loads a conversation from the store.

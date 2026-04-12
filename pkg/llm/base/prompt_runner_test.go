@@ -15,12 +15,8 @@ func TestGenerateShortSummary(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("success", func(t *testing.T) {
-		called := false
-		messages := []conversations.StreamableMessage{{Kind: "text", Role: "user", Content: "Fallback title"}}
-		summary := GenerateShortSummary(
+		summary, err := GenerateShortSummary(
 			ctx,
-			messages,
-			false,
 			"summary prompt",
 			func(_ context.Context, prompt string, useWeakModel bool) (string, error) {
 				assert.Contains(t, prompt, "Conversation to summarize:")
@@ -28,105 +24,53 @@ func TestGenerateShortSummary(t *testing.T) {
 				assert.True(t, useWeakModel)
 				return "generated summary.", nil
 			},
-			func(error) {
-				called = true
-			},
 		)
 
+		require.NoError(t, err)
 		assert.Equal(t, "generated summary", summary)
-		assert.False(t, called)
 	})
 
 	t.Run("preserves ellipsis", func(t *testing.T) {
-		messages := []conversations.StreamableMessage{{Kind: "text", Role: "user", Content: "Fallback title"}}
-		summary := GenerateShortSummary(
+		summary, err := GenerateShortSummary(
 			ctx,
-			messages,
-			false,
 			"summary prompt",
 			func(_ context.Context, prompt string, useWeakModel bool) (string, error) {
 				assert.Contains(t, prompt, "Conversation to summarize:")
 				assert.True(t, useWeakModel)
 				return "generated summary...", nil
 			},
-			nil,
 		)
 
+		require.NoError(t, err)
 		assert.Equal(t, "generated summary...", summary)
 	})
 
-	t.Run("error with callback", func(t *testing.T) {
-		var gotErr error
-		messages := []conversations.StreamableMessage{{Kind: "text", Role: "user", Content: "Fallback title"}}
-		summary := GenerateShortSummary(
+	t.Run("error returns explicit failure", func(t *testing.T) {
+		summary, err := GenerateShortSummary(
 			ctx,
-			messages,
-			false,
 			"summary prompt",
 			func(context.Context, string, bool) (string, error) {
 				return "", errors.New("generation failed")
 			},
-			func(err error) {
-				gotErr = err
-			},
 		)
 
-		assert.Equal(t, "Fallback title", summary)
-		require.Error(t, gotErr)
-		assert.Contains(t, gotErr.Error(), "generation failed")
+		assert.Empty(t, summary)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "generation failed")
 	})
 
-	t.Run("error without callback", func(t *testing.T) {
-		messages := []conversations.StreamableMessage{{Kind: "text", Role: "user", Content: "Fallback title"}}
-		summary := GenerateShortSummary(
+	t.Run("empty model summary returns explicit failure", func(t *testing.T) {
+		summary, err := GenerateShortSummary(
 			ctx,
-			messages,
-			false,
-			"summary prompt",
-			func(context.Context, string, bool) (string, error) {
-				return "", errors.New("generation failed")
-			},
-			nil,
-		)
-
-		assert.Equal(t, "Fallback title", summary)
-	})
-
-	t.Run("disabled llm summary uses fallback", func(t *testing.T) {
-		messages := []conversations.StreamableMessage{{Kind: "text", Role: "user", Content: "Use first user message instead"}}
-		called := false
-
-		summary := GenerateShortSummary(
-			ctx,
-			messages,
-			true,
-			"summary prompt",
-			func(context.Context, string, bool) (string, error) {
-				called = true
-				return "generated summary", nil
-			},
-			nil,
-		)
-
-		assert.Equal(t, "Use first user message instead", summary)
-		assert.False(t, called)
-	})
-
-	t.Run("empty model summary falls back to first user message", func(t *testing.T) {
-		messages := []conversations.StreamableMessage{{Kind: "text", Role: "user", Content: "Fallback title"}}
-
-		summary := GenerateShortSummary(
-			ctx,
-			messages,
-			false,
 			"summary prompt",
 			func(context.Context, string, bool) (string, error) {
 				return "   ", nil
 			},
-			nil,
 		)
 
-		assert.Equal(t, "Fallback title", summary)
+		assert.Empty(t, summary)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "generated empty summary")
 	})
 }
 

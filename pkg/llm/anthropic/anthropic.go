@@ -986,63 +986,28 @@ func (t *Thread) runUtilityPrompt(ctx context.Context, prompt string, useWeakMod
 }
 
 // ShortSummary generates a short summary of the conversation using rendered markdown.
-func (t *Thread) ShortSummary(ctx context.Context) string {
+func (t *Thread) ShortSummary(ctx context.Context) (string, error) {
 	rawMessages, err := json.Marshal(t.messages)
 	if err != nil {
-		logger.G(ctx).WithError(err).Error("failed to marshal conversation for summary")
-		return t.shortSummaryFallback()
+		return "", err
 	}
 
 	toolResults := t.GetStructuredToolResults()
 	messages, err := StreamMessages(rawMessages, toolResults)
 	if err != nil {
-		logger.G(ctx).WithError(err).Error("failed to parse conversation for summary")
-		return t.shortSummaryFallback()
+		return "", err
 	}
 	if len(messages) == 0 {
-		return ""
+		return "", nil
 	}
 
 	markdown := base.RenderMarkdownForSummary(conversationsFromAnthropic(messages), toolResults)
 
 	return base.GenerateShortSummary(
 		ctx,
-		conversationsFromAnthropic(messages),
-		t.Config.DisableLLMConversationSummary,
 		markdown,
 		t.runUtilityPrompt,
-		func(err error) {
-			logger.G(ctx).WithError(err).Error("failed to generate summary")
-		},
 	)
-}
-
-func (t *Thread) shortSummaryFallback() string {
-	streamable := make([]conversations.StreamableMessage, 0, len(t.messages))
-	for _, msg := range t.messages {
-		if string(msg.Role) != "user" {
-			continue
-		}
-
-		var textParts []string
-		for _, contentBlock := range msg.Content {
-			if textBlock := contentBlock.OfText; textBlock != nil && strings.TrimSpace(textBlock.Text) != "" {
-				textParts = append(textParts, textBlock.Text)
-			}
-		}
-
-		streamable = append(streamable, conversations.StreamableMessage{
-			Kind:    "text",
-			Role:    string(msg.Role),
-			Content: strings.Join(textParts, "\n\n"),
-		})
-	}
-
-	if len(streamable) == 0 {
-		return ""
-	}
-
-	return base.FirstUserMessageFallback(streamable)
 }
 
 func conversationsFromAnthropic(msgs []StreamableMessage) []conversations.StreamableMessage {

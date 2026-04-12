@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/jingkaihe/kodelet/pkg/llm/base"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -79,10 +81,24 @@ func (t *Thread) SaveConversation(ctx context.Context, summarise bool) error {
 		return errors.Wrap(err, "failed to marshal conversation messages")
 	}
 
-	if summarise {
-		// Generate summary for the conversation
-		t.summary = t.ShortSummary(ctx)
+	toolResults := t.GetStructuredToolResults()
+	messages, err := StreamMessages(rawMessages, toolResults)
+	if err != nil {
+		return errors.Wrap(err, "failed to parse conversation messages for summary")
 	}
+	summary := base.FirstUserMessageFallback(conversationsFromAnthropic(messages))
+
+	if summarise {
+		if !t.Config.DisableLLMConversationSummary {
+			generatedSummary, err := t.ShortSummary(ctx)
+			if err != nil {
+				logger.G(ctx).WithError(err).Error("failed to generate summary")
+			} else if generatedSummary != "" {
+				summary = generatedSummary
+			}
+		}
+	}
+	t.summary = summary
 
 	// Create a new conversation record
 	metadata := map[string]any{"model": t.Config.Model}
@@ -101,7 +117,7 @@ func (t *Thread) SaveConversation(ctx context.Context, summarise bool) error {
 		CreatedAt:      time.Now(),
 		UpdatedAt:      time.Now(),
 		FileLastAccess: t.State.FileLastAccess(),
-		ToolResults:    t.GetStructuredToolResults(),
+		ToolResults:    toolResults,
 	}
 
 	// Save the record

@@ -977,62 +977,28 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 }
 
 // ShortSummary generates a concise summary of the conversation using a faster model.
-func (t *Thread) ShortSummary(ctx context.Context) string {
+func (t *Thread) ShortSummary(ctx context.Context) (string, error) {
 	toolResults := t.GetStructuredToolResults()
 	rawMessages, err := json.Marshal(t.messages)
 	if err != nil {
-		logger.G(ctx).WithError(err).Error("failed to marshal conversation for summary")
-		return t.shortSummaryFallback()
+		return "", err
 	}
 
 	messages, err := StreamMessages(rawMessages, toolResults)
 	if err != nil {
-		logger.G(ctx).WithError(err).Error("failed to parse conversation for summary")
-		return t.shortSummaryFallback()
+		return "", err
 	}
 	if len(messages) == 0 {
-		return ""
+		return "", nil
 	}
 
 	markdown := base.RenderMarkdownForSummary(conversationsFromOpenAI(messages), toolResults)
 
 	return base.GenerateShortSummary(
 		ctx,
-		conversationsFromOpenAI(messages),
-		t.Config.DisableLLMConversationSummary,
 		markdown,
 		t.runUtilityPrompt,
-		func(err error) {
-			logger.G(ctx).WithError(err).Error("failed to generate summary")
-		},
 	)
-}
-
-func (t *Thread) shortSummaryFallback() string {
-	streamable := make([]conversations.StreamableMessage, 0, len(t.messages))
-	for _, msg := range t.messages {
-		if msg.Role != openai.ChatMessageRoleUser {
-			continue
-		}
-
-		content := msg.Content
-		if strings.TrimSpace(content) == "" {
-			content = openAIMultiContentText(msg.MultiContent)
-		}
-
-		streamable = append(streamable, conversations.StreamableMessage{
-			Kind:    "text",
-			Role:    msg.Role,
-			Content: content,
-			RawItem: mustMarshalOpenAIMultiContent(msg.Role, msg.MultiContent),
-		})
-	}
-
-	if len(streamable) == 0 {
-		return ""
-	}
-
-	return base.FirstUserMessageFallback(streamable)
 }
 
 func conversationsFromOpenAI(msgs []StreamableMessage) []conversations.StreamableMessage {

@@ -1297,7 +1297,8 @@ func TestIntegration_ShortSummary(t *testing.T) {
 	thread.AddUserMessage(ctx, "Can you help me plan this migration?")
 
 	// Generate a short summary
-	summary := thread.ShortSummary(ctx)
+	summary, err := thread.ShortSummary(ctx)
+	require.NoError(t, err)
 
 	t.Logf("Generated summary: %s", summary)
 

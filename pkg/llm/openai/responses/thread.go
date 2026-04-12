@@ -913,57 +913,28 @@ func (t *Thread) runUtilityPrompt(ctx context.Context, prompt string, useWeakMod
 }
 
 // ShortSummary generates a short summary of the conversation using an LLM.
-func (t *Thread) ShortSummary(ctx context.Context) string {
+func (t *Thread) ShortSummary(ctx context.Context) (string, error) {
 	rawMessages, err := json.Marshal(t.storedItems)
 	if err != nil {
-		logger.G(ctx).WithError(err).Error("failed to marshal conversation for summary")
-		return t.shortSummaryFallback()
+		return "", err
 	}
 
 	toolResults := t.GetStructuredToolResults()
 	messages, err := StreamMessages(rawMessages, toolResults)
 	if err != nil {
-		logger.G(ctx).WithError(err).Error("failed to parse conversation for summary")
-		return t.shortSummaryFallback()
+		return "", err
 	}
 	if len(messages) == 0 {
-		return ""
+		return "", nil
 	}
 
 	markdown := base.RenderMarkdownForSummary(conversationsFromResponses(messages), toolResults)
 
 	return base.GenerateShortSummary(
 		ctx,
-		conversationsFromResponses(messages),
-		t.Config.DisableLLMConversationSummary,
 		markdown,
 		t.runUtilityPrompt,
-		func(err error) {
-			logger.G(ctx).WithError(err).Error("failed to generate summary")
-		},
 	)
-}
-
-func (t *Thread) shortSummaryFallback() string {
-	streamable := make([]conversations.StreamableMessage, 0, len(t.storedItems))
-	for _, item := range t.storedItems {
-		if item.Type != "message" || item.Role != "user" {
-			continue
-		}
-
-		streamable = append(streamable, conversations.StreamableMessage{
-			Kind:    "text",
-			Role:    item.Role,
-			Content: item.Content,
-			RawItem: item.RawItem,
-		})
-	}
-
-	if len(streamable) == 0 {
-		return ""
-	}
-
-	return base.FirstUserMessageFallback(streamable)
 }
 
 func conversationsFromResponses(msgs []StreamableMessage) []conversations.StreamableMessage {
@@ -982,6 +953,14 @@ func conversationsFromResponses(msgs []StreamableMessage) []conversations.Stream
 	return result
 }
 
+func rawMessagesForSummary(items []StoredInputItem) json.RawMessage {
+	raw, err := json.Marshal(items)
+	if err != nil {
+		return nil
+	}
+	return raw
+}
+
 // SaveConversation saves the current thread to the conversation store.
 func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 	t.ConversationMu.Lock()
@@ -993,11 +972,25 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 
 	// Clean up orphaned messages before saving
 	t.cleanupOrphanedItems()
-
-	// Generate a new summary if requested
-	if summarize {
-		t.summary = t.ShortSummary(ctx)
+	toolResults := t.GetStructuredToolResults()
+	messages, err := StreamMessages(rawMessagesForSummary(t.storedItems), toolResults)
+	if err != nil {
+		return errors.Wrap(err, "failed to parse conversation for summary")
 	}
+	summary := base.FirstUserMessageFallback(conversationsFromResponses(messages))
+
+	// Generate a new summary if requested and enabled; otherwise keep the first user message.
+	if summarize {
+		if !t.Config.DisableLLMConversationSummary {
+			generatedSummary, err := t.ShortSummary(ctx)
+			if err != nil {
+				logger.G(ctx).WithError(err).Error("failed to generate summary")
+			} else if generatedSummary != "" {
+				summary = generatedSummary
+			}
+		}
+	}
+	t.summary = summary
 
 	// Serialize stored items directly (already built inline during streaming)
 	inputItemsJSON, err := json.Marshal(t.storedItems)
@@ -1026,7 +1019,7 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 		CreatedAt:      time.Now(),
 		UpdatedAt:      time.Now(),
 		FileLastAccess: t.State.FileLastAccess(),
-		ToolResults:    t.GetStructuredToolResults(),
+		ToolResults:    toolResults,
 	}
 
 	return t.Store.Save(ctx, record)
