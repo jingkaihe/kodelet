@@ -646,6 +646,11 @@ allowed_commands: []  # Empty means use default banned commands
 # - patch: use apply_patch plus search/navigation tools instead of direct file reads/writes
 tool_mode: full
 
+# Conversation summary behavior
+# When true, persisted conversation titles use the first user message instead
+# of calling the weak model for an LLM-generated short summary.
+disable_llm_conversation_summary: false
+
 # MCP configuration
 mcp:
   servers:
@@ -689,6 +694,9 @@ kodelet run --disable-subagent "query"
 
 # Disable filesystem search tools (`glob_tool` and `grep_tool`)
 kodelet run --disable-fs-search-tools "query"
+
+# Disable LLM-generated conversation summaries and use the first user message instead
+kodelet run --disable-llm-conversation-summary "query"
 
 # Enable todo tools for this run (disabled by default)
 kodelet run --enable-todos "query"
@@ -1509,6 +1517,16 @@ kodelet run --disable-fs-search-tools "your query"
 ```
 
 This can also be set via configuration file (`disable_fs_search_tools: true`) or environment variable (`KODELET_DISABLE_FS_SEARCH_TOOLS=true`). When enabled, the system prompt instructs the agent to use `fd` and `rg` via the `bash` tool for filesystem search tasks instead.
+
+### Disabling LLM Conversation Summaries
+
+To skip weak-model conversation title generation and use the first user message instead:
+
+```bash
+kodelet run --disable-llm-conversation-summary "your query"
+```
+
+This can also be set via configuration file (`disable_llm_conversation_summary: true`) or environment variable (`KODELET_DISABLE_LLM_CONVERSATION_SUMMARY=true`). This only affects short persisted conversation summaries/titles, not context compaction.
 
 ### Enabling Todo Tools
 

@@ -125,12 +125,13 @@ func explicitFlagViperKey(flagName string) string {
 }
 
 var explicitFlagKeyOverrides = map[string]string{
-	"context-patterns": "context.patterns",
-	"tracing-enabled":  "tracing.enabled",
-	"tracing-sampler":  "tracing.sampler",
-	"tracing-ratio":    "tracing.ratio",
-	"sysprompt":        "sysprompt",
-	"sysprompt-arg":    "sysprompt_args",
+	"context-patterns":                 "context.patterns",
+	"tracing-enabled":                  "tracing.enabled",
+	"tracing-sampler":                  "tracing.sampler",
+	"tracing-ratio":                    "tracing.ratio",
+	"sysprompt":                        "sysprompt",
+	"sysprompt-arg":                    "sysprompt_args",
+	"disable-llm-conversation-summary": "disable_llm_conversation_summary",
 }
 
 // applyProfileToSettings applies profile settings to a local settings map.

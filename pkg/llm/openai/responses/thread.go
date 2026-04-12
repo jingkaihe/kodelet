@@ -917,14 +917,14 @@ func (t *Thread) ShortSummary(ctx context.Context) string {
 	rawMessages, err := json.Marshal(t.storedItems)
 	if err != nil {
 		logger.G(ctx).WithError(err).Error("failed to marshal conversation for summary")
-		return "Could not generate summary."
+		return t.shortSummaryFallback()
 	}
 
 	toolResults := t.GetStructuredToolResults()
 	messages, err := StreamMessages(rawMessages, toolResults)
 	if err != nil {
 		logger.G(ctx).WithError(err).Error("failed to parse conversation for summary")
-		return "Could not generate summary."
+		return t.shortSummaryFallback()
 	}
 	if len(messages) == 0 {
 		return ""
@@ -934,12 +934,36 @@ func (t *Thread) ShortSummary(ctx context.Context) string {
 
 	return base.GenerateShortSummary(
 		ctx,
+		conversationsFromResponses(messages),
+		t.Config.DisableLLMConversationSummary,
 		markdown,
 		t.runUtilityPrompt,
 		func(err error) {
 			logger.G(ctx).WithError(err).Error("failed to generate summary")
 		},
 	)
+}
+
+func (t *Thread) shortSummaryFallback() string {
+	streamable := make([]conversations.StreamableMessage, 0, len(t.storedItems))
+	for _, item := range t.storedItems {
+		if item.Type != "message" || item.Role != "user" {
+			continue
+		}
+
+		streamable = append(streamable, conversations.StreamableMessage{
+			Kind:    "text",
+			Role:    item.Role,
+			Content: item.Content,
+			RawItem: item.RawItem,
+		})
+	}
+
+	if len(streamable) == 0 {
+		return ""
+	}
+
+	return base.FirstUserMessageFallback(streamable)
 }
 
 func conversationsFromResponses(msgs []StreamableMessage) []conversations.StreamableMessage {

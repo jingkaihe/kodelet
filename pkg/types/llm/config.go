@@ -68,11 +68,12 @@ type Config struct {
 	Context *ContextConfig `mapstructure:"context" json:"context,omitempty" yaml:"context,omitempty"` // Context configuration for context file discovery
 
 	// Hooks and feature toggle configuration
-	NoHooks              bool   `mapstructure:"no_hooks" json:"no_hooks" yaml:"no_hooks"`                                              // NoHooks disables agent lifecycle hooks
-	DisableFSSearchTools bool   `mapstructure:"disable_fs_search_tools" json:"disable_fs_search_tools" yaml:"disable_fs_search_tools"` // DisableFSSearchTools disables glob_tool and grep_tool and updates prompt/tool guidance accordingly
-	DisableSubagent      bool   `mapstructure:"disable_subagent" json:"disable_subagent" yaml:"disable_subagent"`                      // DisableSubagent disables the subagent tool and removes subagent-related system prompt context
-	EnableTodos          bool   `mapstructure:"enable_todos" json:"enable_todos" yaml:"enable_todos"`                                  // EnableTodos enables todo_read and todo_write tools for the main agent
-	RecipeName           string `mapstructure:"recipe_name" json:"recipe_name" yaml:"recipe_name"`                                     // RecipeName is the active recipe/fragment name for hooks
+	NoHooks                       bool   `mapstructure:"no_hooks" json:"no_hooks" yaml:"no_hooks"`                                                                         // NoHooks disables agent lifecycle hooks
+	DisableFSSearchTools          bool   `mapstructure:"disable_fs_search_tools" json:"disable_fs_search_tools" yaml:"disable_fs_search_tools"`                            // DisableFSSearchTools disables glob_tool and grep_tool and updates prompt/tool guidance accordingly
+	DisableLLMConversationSummary bool   `mapstructure:"disable_llm_conversation_summary" json:"disable_llm_conversation_summary" yaml:"disable_llm_conversation_summary"` // DisableLLMConversationSummary skips LLM-generated conversation titles and uses the first user message instead
+	DisableSubagent               bool   `mapstructure:"disable_subagent" json:"disable_subagent" yaml:"disable_subagent"`                                                 // DisableSubagent disables the subagent tool and removes subagent-related system prompt context
+	EnableTodos                   bool   `mapstructure:"enable_todos" json:"enable_todos" yaml:"enable_todos"`                                                             // EnableTodos enables todo_read and todo_write tools for the main agent
+	RecipeName                    string `mapstructure:"recipe_name" json:"recipe_name" yaml:"recipe_name"`                                                                // RecipeName is the active recipe/fragment name for hooks
 }
 
 // OpenAIAPIMode defines which OpenAI-compatible API surface to use.

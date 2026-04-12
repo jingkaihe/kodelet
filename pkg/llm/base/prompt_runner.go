@@ -2,6 +2,7 @@ package base
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
@@ -9,6 +10,8 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
+
+const shortSummaryFallbackMaxLength = 100
 
 // UtilityThread is a thread that supports utility-mode preparation.
 type UtilityThread interface {
@@ -69,23 +72,35 @@ func UtilityPromptOptions(useWeakModel bool) llmtypes.MessageOpt {
 }
 
 // GenerateShortSummary runs a summary prompt using the utility prompt runner.
-// If generation fails, it calls onError (if provided) and returns a stable fallback message.
+// If generation fails or LLM summary generation is disabled, it returns the first user message.
 func GenerateShortSummary(
 	ctx context.Context,
+	messages []conversations.StreamableMessage,
+	disableLLMSummary bool,
 	markdown string,
 	runUtilityPrompt func(ctx context.Context, prompt string, useWeakModel bool) (string, error),
 	onError func(err error),
 ) string {
+	fallback := FirstUserMessageFallback(messages)
+	if disableLLMSummary {
+		return fallback
+	}
+
 	prompt := BuildShortSummaryPrompt(markdown)
 	summary, err := runUtilityPrompt(ctx, prompt, true)
 	if err != nil {
 		if onError != nil {
 			onError(err)
 		}
-		return "Could not generate summary."
+		return fallback
 	}
 
-	return normalizeShortSummary(summary)
+	normalized := normalizeShortSummary(summary)
+	if normalized == "" {
+		return fallback
+	}
+
+	return normalized
 }
 
 func normalizeShortSummary(summary string) string {
@@ -94,6 +109,79 @@ func normalizeShortSummary(summary string) string {
 		trimmed = strings.TrimSuffix(trimmed, ".")
 	}
 	return trimmed
+}
+
+// FirstUserMessageFallback builds a user-facing conversation title from the first user text message.
+func FirstUserMessageFallback(messages []conversations.StreamableMessage) string {
+	for _, msg := range messages {
+		if msg.Role != "user" {
+			continue
+		}
+
+		text := strings.TrimSpace(firstUserMessageText(msg))
+		if text == "" {
+			continue
+		}
+
+		return truncateSummaryFallback(text)
+	}
+
+	return ""
+}
+
+func firstUserMessageText(msg conversations.StreamableMessage) string {
+	if strings.TrimSpace(msg.Content) != "" {
+		return msg.Content
+	}
+
+	if len(msg.RawItem) == 0 {
+		return ""
+	}
+
+	return extractTextFromRawItem(msg.RawItem)
+}
+
+func extractTextFromRawItem(raw json.RawMessage) string {
+	var payload struct {
+		Content json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil || len(payload.Content) == 0 {
+		return ""
+	}
+
+	var textContent string
+	if err := json.Unmarshal(payload.Content, &textContent); err == nil {
+		return strings.TrimSpace(textContent)
+	}
+
+	var parts []struct {
+		Type string `json:"type"`
+		Text string `json:"text,omitempty"`
+	}
+	if err := json.Unmarshal(payload.Content, &parts); err != nil {
+		return ""
+	}
+
+	textParts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		switch part.Type {
+		case "text", "input_text", "output_text":
+			if strings.TrimSpace(part.Text) != "" {
+				textParts = append(textParts, part.Text)
+			}
+		}
+	}
+
+	return strings.TrimSpace(strings.Join(textParts, "\n\n"))
+}
+
+func truncateSummaryFallback(text string) string {
+	trimmed := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(text, "\r", " "), "\n", " "))
+	if len(trimmed) <= shortSummaryFallbackMaxLength {
+		return trimmed
+	}
+
+	return trimmed[:shortSummaryFallbackMaxLength-3] + "..."
 }
 
 // BuildShortSummaryPrompt wraps rendered conversation markdown in the short-summary instruction.

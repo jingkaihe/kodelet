@@ -38,6 +38,43 @@ func TestGetConfigFromViperDefaults(t *testing.T) {
 	assert.Zero(t, config.MaxTokens)
 }
 
+func TestGetConfigFromViper_DisableLLMConversationSummary(t *testing.T) {
+	viper.Reset()
+	viper.Set("disable_llm_conversation_summary", true)
+
+	config, err := GetConfigFromViper()
+	require.NoError(t, err)
+
+	assert.True(t, config.DisableLLMConversationSummary)
+}
+
+func TestGetConfigFromViperWithCmd_ExplicitDisableLLMConversationSummaryOverridesProfile(t *testing.T) {
+	originalConfig := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalConfig {
+			viper.Set(key, value)
+		}
+	}()
+
+	viper.Reset()
+	viper.Set("profile", "work")
+	viper.Set("profiles", map[string]any{
+		"work": map[string]any{
+			"disable_llm_conversation_summary": true,
+		},
+	})
+
+	cmd := &cobra.Command{Use: "test"}
+	cmd.Flags().Bool("disable-llm-conversation-summary", false, "Disable LLM-generated conversation summaries")
+	err := cmd.Flags().Set("disable-llm-conversation-summary", "false")
+	require.NoError(t, err)
+
+	config, err := GetConfigFromViperWithCmd(cmd)
+	require.NoError(t, err)
+	assert.False(t, config.DisableLLMConversationSummary)
+}
+
 func TestGetConfigFromViperWithCmd_ExplicitContextPatternsOverrideProfile(t *testing.T) {
 	originalConfig := viper.AllSettings()
 	defer func() {

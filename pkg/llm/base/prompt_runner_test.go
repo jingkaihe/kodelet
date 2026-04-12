@@ -2,6 +2,7 @@ package base
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
@@ -15,8 +16,11 @@ func TestGenerateShortSummary(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		called := false
+		messages := []conversations.StreamableMessage{{Kind: "text", Role: "user", Content: "Fallback title"}}
 		summary := GenerateShortSummary(
 			ctx,
+			messages,
+			false,
 			"summary prompt",
 			func(_ context.Context, prompt string, useWeakModel bool) (string, error) {
 				assert.Contains(t, prompt, "Conversation to summarize:")
@@ -34,8 +38,11 @@ func TestGenerateShortSummary(t *testing.T) {
 	})
 
 	t.Run("preserves ellipsis", func(t *testing.T) {
+		messages := []conversations.StreamableMessage{{Kind: "text", Role: "user", Content: "Fallback title"}}
 		summary := GenerateShortSummary(
 			ctx,
+			messages,
+			false,
 			"summary prompt",
 			func(_ context.Context, prompt string, useWeakModel bool) (string, error) {
 				assert.Contains(t, prompt, "Conversation to summarize:")
@@ -50,8 +57,11 @@ func TestGenerateShortSummary(t *testing.T) {
 
 	t.Run("error with callback", func(t *testing.T) {
 		var gotErr error
+		messages := []conversations.StreamableMessage{{Kind: "text", Role: "user", Content: "Fallback title"}}
 		summary := GenerateShortSummary(
 			ctx,
+			messages,
+			false,
 			"summary prompt",
 			func(context.Context, string, bool) (string, error) {
 				return "", errors.New("generation failed")
@@ -61,14 +71,17 @@ func TestGenerateShortSummary(t *testing.T) {
 			},
 		)
 
-		assert.Equal(t, "Could not generate summary.", summary)
+		assert.Equal(t, "Fallback title", summary)
 		require.Error(t, gotErr)
 		assert.Contains(t, gotErr.Error(), "generation failed")
 	})
 
 	t.Run("error without callback", func(t *testing.T) {
+		messages := []conversations.StreamableMessage{{Kind: "text", Role: "user", Content: "Fallback title"}}
 		summary := GenerateShortSummary(
 			ctx,
+			messages,
+			false,
 			"summary prompt",
 			func(context.Context, string, bool) (string, error) {
 				return "", errors.New("generation failed")
@@ -76,7 +89,77 @@ func TestGenerateShortSummary(t *testing.T) {
 			nil,
 		)
 
-		assert.Equal(t, "Could not generate summary.", summary)
+		assert.Equal(t, "Fallback title", summary)
+	})
+
+	t.Run("disabled llm summary uses fallback", func(t *testing.T) {
+		messages := []conversations.StreamableMessage{{Kind: "text", Role: "user", Content: "Use first user message instead"}}
+		called := false
+
+		summary := GenerateShortSummary(
+			ctx,
+			messages,
+			true,
+			"summary prompt",
+			func(context.Context, string, bool) (string, error) {
+				called = true
+				return "generated summary", nil
+			},
+			nil,
+		)
+
+		assert.Equal(t, "Use first user message instead", summary)
+		assert.False(t, called)
+	})
+
+	t.Run("empty model summary falls back to first user message", func(t *testing.T) {
+		messages := []conversations.StreamableMessage{{Kind: "text", Role: "user", Content: "Fallback title"}}
+
+		summary := GenerateShortSummary(
+			ctx,
+			messages,
+			false,
+			"summary prompt",
+			func(context.Context, string, bool) (string, error) {
+				return "   ", nil
+			},
+			nil,
+		)
+
+		assert.Equal(t, "Fallback title", summary)
+	})
+}
+
+func TestFirstUserMessageFallback(t *testing.T) {
+	t.Run("prefers first user text message", func(t *testing.T) {
+		messages := []conversations.StreamableMessage{
+			{Kind: "text", Role: "assistant", Content: "Ignore"},
+			{Kind: "text", Role: "user", Content: "  First user message  "},
+			{Kind: "text", Role: "user", Content: "Second user message"},
+		}
+
+		assert.Equal(t, "First user message", FirstUserMessageFallback(messages))
+	})
+
+	t.Run("uses raw item text when content is empty", func(t *testing.T) {
+		messages := []conversations.StreamableMessage{
+			{
+				Kind:    "text",
+				Role:    "user",
+				RawItem: []byte(`{"content":[{"type":"input_text","text":"Message from raw item"}]}`),
+			},
+		}
+
+		assert.Equal(t, "Message from raw item", FirstUserMessageFallback(messages))
+	})
+
+	t.Run("truncates long fallback to 100 chars", func(t *testing.T) {
+		long := "This is a very long user message that should be truncated when used as the fallback conversation summary text."
+		messages := []conversations.StreamableMessage{{Kind: "text", Role: "user", Content: long}}
+
+		fallback := FirstUserMessageFallback(messages)
+		assert.Len(t, fallback, 100)
+		assert.True(t, strings.HasSuffix(fallback, "..."))
 	})
 }
 

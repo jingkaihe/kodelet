@@ -1303,7 +1303,7 @@ func TestIntegration_ShortSummary(t *testing.T) {
 
 	// Verify the summary is not empty and is reasonably short
 	assert.NotEmpty(t, summary)
-	assert.NotEqual(t, "Could not generate summary.", summary)
+	assert.NotEqual(t, "I want to refactor the authentication module in my Go application", summary)
 
 	// Summary should be concise (the prompt asks for <= 12 words)
 	words := len(splitWords(summary))
