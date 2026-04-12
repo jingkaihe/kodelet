@@ -300,10 +300,7 @@ OUTER:
 			}
 			systemPrompt := sysprompt.SystemPrompt(string(model), t.Config, contexts)
 
-			exchangeOpt := opt
-			if turnCount > 0 && exchangeOpt.Initiator == "" {
-				exchangeOpt.Initiator = auth.CopilotInitiatorAgent
-			}
+			exchangeOpt := opt.WithTurnInitiator(turnCount)
 
 			var exchangeOutput string
 			exchangeOutput, toolsUsed, err := t.processMessageExchange(ctx, handler, model, maxTokens, systemPrompt, exchangeOpt)
@@ -820,11 +817,7 @@ func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewPara
 	retryAttempts := t.Config.Retry.Attempts
 	requestOpts := []option.RequestOption{option.WithMaxRetries(retryAttempts)}
 	if t.useCopilot {
-		initiator := opt.Initiator
-		if initiator == "" {
-			initiator = auth.CopilotInitiatorUser
-		}
-		requestOpts = append(requestOpts, option.WithHeader("X-Initiator", initiator))
+		requestOpts = append(requestOpts, option.WithHeader("X-Initiator", opt.ResolvedInitiator()))
 	}
 
 	stream := t.client.Messages.NewStreaming(ctx, params, requestOpts...)

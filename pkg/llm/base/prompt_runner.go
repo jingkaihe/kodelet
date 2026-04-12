@@ -58,7 +58,7 @@ func RunPreparedPromptTyped[T llmtypes.Thread](
 // UtilityPromptOptions returns standard options for internal utility prompts (summary/compaction).
 func UtilityPromptOptions(useWeakModel bool) llmtypes.MessageOpt {
 	return llmtypes.MessageOpt{
-		Initiator:          "agent",
+		Initiator:          llmtypes.InitiatorAgent,
 		UseWeakModel:       useWeakModel,
 		PromptCache:        false,
 		NoToolUse:          true,

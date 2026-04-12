@@ -2,8 +2,14 @@ package llm
 
 import (
 	"context"
+	"strings"
 
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+)
+
+const (
+	InitiatorUser  = "user"
+	InitiatorAgent = "agent"
 )
 
 // SubAgentConfig removed per ADR 027 - subagents now use shell-out via exec.Command
@@ -38,6 +44,35 @@ type MessageOpt struct {
 	DisableAutoCompact bool
 	// DisableUsageLog disables LLM usage logging for this message
 	DisableUsageLog bool
+}
+
+// ResolvedInitiator returns the normalized initiator, defaulting to user.
+func (o MessageOpt) ResolvedInitiator() string {
+	initiator := strings.ToLower(strings.TrimSpace(o.Initiator))
+	if initiator == "" {
+		return InitiatorUser
+	}
+	return initiator
+}
+
+// WithInitiator returns a copy with the provided initiator set.
+func (o MessageOpt) WithInitiator(initiator string) MessageOpt {
+	o.Initiator = initiator
+	return o
+}
+
+// WithTurnInitiator returns a copy whose initiator is derived from whether the message
+// is the first user-facing turn or an internal follow-up turn.
+func (o MessageOpt) WithTurnInitiator(turnCount int) MessageOpt {
+	if strings.TrimSpace(o.Initiator) != "" {
+		return o
+	}
+	if turnCount > 0 {
+		o.Initiator = InitiatorAgent
+		return o
+	}
+	o.Initiator = InitiatorUser
+	return o
 }
 
 // HookConfig is a forward declaration of hooks.HookConfig to avoid circular imports.

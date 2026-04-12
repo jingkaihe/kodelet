@@ -306,10 +306,7 @@ OUTER:
 			// Check if auto-compact should be triggered
 			t.TryAutoCompact(ctx, opt.DisableAutoCompact, opt.CompactRatio, t.CompactContext)
 
-			exchangeOpt := opt
-			if turnCount > 0 && exchangeOpt.Initiator == "" {
-				exchangeOpt.Initiator = auth.CopilotInitiatorAgent
-			}
+			exchangeOpt := opt.WithTurnInitiator(turnCount)
 
 			logger.G(ctx).WithField("model", model).Debug("starting message exchange")
 			processExchange := t.processMessageExchangeFunc
@@ -433,10 +430,7 @@ func (t *Thread) processMessageExchange(
 	tools := buildTools(t.State, opt.NoToolUse)
 	log.WithField("tool_count", len(tools)).Debug("built tools for request")
 
-	initiator := opt.Initiator
-	if initiator == "" {
-		initiator = auth.CopilotInitiatorUser
-	}
+	initiator := opt.ResolvedInitiator()
 
 	// Mirror Codex prompt caching on the HTTP Responses path by replaying the full
 	// input history every time with a stable prompt_cache_key. We intentionally do
@@ -1260,10 +1254,6 @@ func buildCopilotAuthOptions(config llmtypes.Config, log *logrus.Entry) ([]optio
 func (t *Thread) requestOptions(initiator string) []option.RequestOption {
 	if !t.useCopilot {
 		return nil
-	}
-
-	if initiator == "" {
-		initiator = auth.CopilotInitiatorUser
 	}
 
 	return []option.RequestOption{option.WithHeader("X-Initiator", initiator)}

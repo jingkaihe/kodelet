@@ -372,10 +372,7 @@ OUTER:
 			// Check if auto-compact should be triggered before each exchange
 			t.TryAutoCompact(ctx, opt.DisableAutoCompact, opt.CompactRatio, t.CompactContext)
 
-			exchangeOpt := opt
-			if turnCount > 0 && exchangeOpt.Initiator == "" {
-				exchangeOpt.Initiator = auth.CopilotInitiatorAgent
-			}
+			exchangeOpt := opt.WithTurnInitiator(turnCount)
 
 			var exchangeOutput string
 			exchangeOutput, toolsUsed, err := t.processMessageExchange(ctx, handler, model, maxTokens, exchangeOpt)
@@ -1128,12 +1125,8 @@ func (t *Thread) getExtraHeaders(opt llmtypes.MessageOpt) map[string]string {
 	var headers map[string]string
 
 	if t.useCopilot {
-		initiator := opt.Initiator
-		if initiator == "" {
-			initiator = auth.CopilotInitiatorUser
-		}
 		headers = map[string]string{
-			"X-Initiator": initiator,
+			"X-Initiator": opt.ResolvedInitiator(),
 		}
 	}
 
