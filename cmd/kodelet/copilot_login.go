@@ -17,7 +17,12 @@ const copilotConfigSuggestion = `provider: "openai"
 use_copilot: true
 model: "gpt-4.1"
 weak_model: "gpt-4.1"
-max_tokens: 16000`
+max_tokens: 16000
+
+# Anthropic also supports Copilot-backed routing:
+# provider: "anthropic"
+# use_copilot: true
+# model: "claude-sonnet-4-6"`
 
 var copilotLoginCmd = &cobra.Command{
 	Use:   "copilot-login",

@@ -105,7 +105,7 @@ func main() {
 	})
 
 	rootCmd.PersistentFlags().String("provider", "openai", "LLM provider to use (anthropic, openai)")
-	rootCmd.PersistentFlags().Bool("use-copilot", false, "Use GitHub Copilot subscription for OpenAI requests (env: KODELET_USE_COPILOT)")
+	rootCmd.PersistentFlags().Bool("use-copilot", false, "Use GitHub Copilot subscription for compatible OpenAI or Anthropic requests (env: KODELET_USE_COPILOT)")
 	rootCmd.PersistentFlags().String("model", "gpt-5.4", "LLM model to use (overrides config)")
 	rootCmd.PersistentFlags().Int("max-tokens", 8192, "Maximum tokens for response (overrides config)")
 	rootCmd.PersistentFlags().Int("thinking-budget-tokens", 4048, "Maximum tokens for thinking capability (overrides config)")

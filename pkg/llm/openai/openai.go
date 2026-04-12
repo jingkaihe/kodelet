@@ -148,7 +148,7 @@ func resolveClientBaseURL(config llmtypes.Config, useCopilot bool) string {
 		if configuredBaseURL := GetConfiguredBaseURL(config); configuredBaseURL != "" {
 			return configuredBaseURL
 		}
-		return "https://api.githubcopilot.com"
+		return auth.CopilotBaseURL
 	}
 
 	return GetBaseURL(config)
@@ -196,7 +196,7 @@ func NewOpenAIThread(config llmtypes.Config) (*Thread, error) {
 		} else {
 			log.Debug("using GitHub Copilot token")
 			clientConfig = openai.DefaultConfig("") // Auth is injected at request time.
-			clientConfig.HTTPClient = auth.HTTPClientWithAuthorizer(auth.CopilotAuthorizer())
+			clientConfig.HTTPClient = auth.HTTPClientWithAuthorizer(auth.CopilotAuthorizerWithInitiator(auth.CopilotInitiatorUser))
 			useCopilot = true
 		}
 	} else {
@@ -367,8 +367,13 @@ OUTER:
 			// Check if auto-compact should be triggered before each exchange
 			t.TryAutoCompact(ctx, opt.DisableAutoCompact, opt.CompactRatio, t.CompactContext)
 
+			exchangeOpt := opt
+			if turnCount > 0 && exchangeOpt.Initiator == "" {
+				exchangeOpt.Initiator = auth.CopilotInitiatorAgent
+			}
+
 			var exchangeOutput string
-			exchangeOutput, toolsUsed, err := t.processMessageExchange(ctx, handler, model, maxTokens, opt)
+			exchangeOutput, toolsUsed, err := t.processMessageExchange(ctx, handler, model, maxTokens, exchangeOpt)
 			if err != nil {
 				if errors.Is(err, context.Canceled) {
 					logger.G(ctx).Info("Request to OpenAI cancelled, stopping kodelet.llm.openai")
@@ -463,7 +468,7 @@ func (t *Thread) processMessageExchange(
 		}
 	}
 
-	extraHeaders := t.getPromptCacheHeaders(opt)
+	extraHeaders := t.getExtraHeaders(opt)
 
 	// Add a tracing event for API call start
 	telemetry.AddEvent(ctx, "api_call_start",
@@ -1114,18 +1119,27 @@ func getImageMediaType(ext string) (string, error) {
 	return base.ImageMIMETypeFromExtension(ext)
 }
 
-func (t *Thread) getPromptCacheHeaders(opt llmtypes.MessageOpt) map[string]string {
-	if !opt.PromptCache || t.Config.OpenAI == nil || !t.Config.OpenAI.ManualCache {
-		return nil
+func (t *Thread) getExtraHeaders(opt llmtypes.MessageOpt) map[string]string {
+	var headers map[string]string
+
+	if t.useCopilot {
+		initiator := opt.Initiator
+		if initiator == "" {
+			initiator = auth.CopilotInitiatorUser
+		}
+		headers = map[string]string{
+			"X-Initiator": initiator,
+		}
 	}
 
-	if t.ConversationID == "" {
-		return nil
+	if opt.PromptCache && t.Config.OpenAI != nil && t.Config.OpenAI.ManualCache && t.ConversationID != "" {
+		if headers == nil {
+			headers = make(map[string]string)
+		}
+		headers["x-session-affinity"] = t.ConversationID
 	}
 
-	return map[string]string{
-		"x-session-affinity": t.ConversationID,
-	}
+	return headers
 }
 
 func (t *Thread) chatClientWithHeaders(extraHeaders map[string]string) *openai.Client {
@@ -1178,4 +1192,23 @@ func (t *Thread) buildClientConfig() openai.ClientConfig {
 	}
 
 	return clientConfig
+}
+
+func (t *Thread) getPromptCacheHeaders(opt llmtypes.MessageOpt) map[string]string {
+	headers := t.getExtraHeaders(opt)
+	if len(headers) == 0 {
+		return nil
+	}
+
+	cacheHeaders := make(map[string]string)
+	for key, value := range headers {
+		if strings.EqualFold(key, "x-session-affinity") {
+			cacheHeaders[key] = value
+		}
+	}
+	if len(cacheHeaders) == 0 {
+		return nil
+	}
+
+	return cacheHeaders
 }

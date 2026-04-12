@@ -16,6 +16,9 @@ type Message struct {
 
 // MessageOpt represents options for sending messages
 type MessageOpt struct {
+	// Initiator identifies whether a Copilot-backed request originated from the user or agent internals.
+	// Empty means "user".
+	Initiator string
 	// PromptCache indicates if prompt caching should be used
 	PromptCache bool
 	// UseWeakModel allows temporarily overriding the model for this message

@@ -42,7 +42,7 @@ type Config struct {
 	ToolMode             ToolMode           `mapstructure:"tool_mode" json:"tool_mode" yaml:"tool_mode"`                                    // ToolMode controls file-interaction behavior (e.g. full or patch)
 	AnthropicAPIAccess   AnthropicAPIAccess `mapstructure:"anthropic_api_access" json:"anthropic_api_access" yaml:"anthropic_api_access"`   // AnthropicAPIAccess controls how to authenticate with Anthropic API
 	AnthropicAccount     string             `mapstructure:"anthropic_account" json:"anthropic_account" yaml:"anthropic_account"`            // AnthropicAccount specifies which Anthropic subscription account to use
-	UseCopilot           bool               `mapstructure:"use_copilot" json:"use_copilot" yaml:"use_copilot"`                              // UseCopilot enables GitHub Copilot subscription for OpenAI requests
+	UseCopilot           bool               `mapstructure:"use_copilot" json:"use_copilot" yaml:"use_copilot"`                              // UseCopilot enables GitHub Copilot subscription-backed routing for compatible OpenAI and Anthropic requests
 	Aliases              map[string]string  `mapstructure:"aliases" json:"aliases,omitempty" yaml:"aliases,omitempty"`                      // Aliases maps short model names to full model names
 	Retry                RetryConfig        `mapstructure:"retry" json:"retry" yaml:"retry"`                                                // Retry configuration for API calls
 	MCPExecutionMode     string             `mapstructure:"mcp_execution_mode" json:"mcp_execution_mode" yaml:"mcp_execution_mode"`         // MCP execution mode (code, direct, or empty)

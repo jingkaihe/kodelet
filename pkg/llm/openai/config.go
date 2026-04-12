@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/jingkaihe/kodelet/pkg/auth"
 	codexpreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/codex"
 	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
 	"github.com/jingkaihe/kodelet/pkg/llm/openai/preset/xai"
@@ -138,6 +139,8 @@ func loadPlatformDefaults(platformName string) (*llmtypes.CustomModels, llmtypes
 		return loadXAIPlatformDefaults()
 	case "codex":
 		return loadCodexPlatformDefaults()
+	case "copilot":
+		return loadOpenAIPlatformDefaults()
 	default:
 		return nil, nil
 	}
@@ -211,6 +214,8 @@ func getPlatformBaseURL(platformName string) string {
 		return xai.BaseURL
 	case "codex":
 		return codexpreset.BaseURL
+	case "copilot":
+		return auth.CopilotBaseURL
 	default:
 		return ""
 	}
