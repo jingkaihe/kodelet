@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.3.38-beta (2026-04-13)
+
+Fixed Web UI prose rendering so inline backtick code wraps cleanly inside assistant and subagent responses without turning into block code styling.
+
+Stopped duplicated plain-text tool output from appearing in persisted OpenAI Chat Completions transcripts by filtering raw `tool` role messages that are already represented through structured tool results.
+
 ## 0.3.37-beta (2026-04-12)
 
 Added `conversation_summary_mode` across config, CLI, and docs so persisted conversation titles can use either weak-model summary generation (`llm`) or the first user message (`first_message`).
