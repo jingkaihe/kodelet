@@ -1203,6 +1203,12 @@ func TestServer_convertToWebMessages(t *testing.T) {
 			expectedMsgs: 1,
 		},
 		{
+			name:         "openai chat completions tool result messages are filtered out",
+			rawMessages:  json.RawMessage(`[{"role":"assistant","content":"","tool_calls":[{"id":"tool-123","function":{"name":"bash","arguments":"{\"command\":\"nproc\"}"}}]},{"role":"tool","tool_call_id":"tool-123","content":"24\nMem: 31Gi"},{"role":"assistant","content":"This machine has 24 CPU cores."}]`),
+			provider:     "openai",
+			expectedMsgs: 2,
+		},
+		{
 			name:          "openai responses messages with reasoning and tool calls",
 			rawMessages:   json.RawMessage(`[{"type":"message","role":"user","content":"Hello"},{"type":"reasoning","role":"assistant","content":"Analyzing request"},{"type":"function_call","call_id":"tool-123","name":"TestTool","arguments":"{\"arg\":\"value\"}"},{"type":"function_call_output","call_id":"tool-123","output":"{\"ok\":true}"},{"type":"message","role":"assistant","content":"Done"}]`),
 			provider:      "openai-responses",

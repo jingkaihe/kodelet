@@ -1084,6 +1084,11 @@ func (s *Server) convertToWebMessages(rawMessages json.RawMessage, provider stri
 		if role == "system" {
 			continue
 		}
+		if provider == "openai" && role == string(openai.ChatMessageRoleTool) {
+			// Chat Completions tool results are rendered from the structured ToolResults map.
+			// Showing the raw persisted tool message here duplicates the output as plain text.
+			continue
+		}
 
 		webMsg := WebMessage{Role: role, Content: "", ToolCalls: []WebToolCall{}}
 
