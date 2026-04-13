@@ -499,6 +499,4 @@ kodelet run --no-hooks "your query"
 
 ## Related Documentation
 
-- [ADR 021: Agent Lifecycle Hooks](../adrs/021-agent-lifecycle-hooks.md) - Architecture decision record for core hook system
-- [ADR 029: Plugin Hooks](../adrs/029-plugin-hooks.md) - Architecture decision record for plugin-based hooks
 - [Tools Reference](./tools.md) - Available tools that can be hooked

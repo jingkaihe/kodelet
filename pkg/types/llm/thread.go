@@ -12,8 +12,6 @@ const (
 	InitiatorAgent = "agent"
 )
 
-// SubAgentConfig removed per ADR 027 - subagents now use shell-out via exec.Command
-
 // Message represents a chat message
 type Message struct {
 	Role    string `json:"role"`

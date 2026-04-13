@@ -424,5 +424,3 @@ func TestNewThreadWithAliases(t *testing.T) {
 		})
 	}
 }
-
-// Subagent tests removed per ADR 027 - shell-out pattern tested at integration level

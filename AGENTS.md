@@ -18,7 +18,6 @@ pkg/             # Core packages
   ├── webui/     # Web UI (React/TypeScript SPA embedded in binary)
   └── ...        # logger/, presenter/, sysprompt/, telemetry/, types/, utils/
 docs/            # Documentation (MANUAL.md, DEVELOPMENT.md, SKILLS.md, etc.)
-adrs/            # Architecture Decision Records
 skills/          # Built-in skills
 recipes/         # Sample fragment/recipe templates
 ```
@@ -120,7 +119,7 @@ kodelet plugin list               # List all plugins
 kodelet plugin remove user/repo   # Remove plugin
 ```
 
-Plugins stored as `org@repo` format. See [ADR 028](adrs/028-unified-plugin-system.md).
+Plugins stored as `org@repo` format.
 
 ## Agent Lifecycle Hooks
 Scripts at `.kodelet/hooks/` or `~/.kodelet/hooks/` that intercept agent operations.
@@ -140,4 +139,3 @@ Managed binaries in `~/.kodelet/bin/`: ripgrep (15.1.0), fd (10.3.0). Auto-downl
 - [docs/HOOKS.md](docs/HOOKS.md) - Hooks system
 - [docs/FRAGMENTS.md](docs/FRAGMENTS.md) - Template system
 - [docs/mcp.md](docs/mcp.md) - MCP integration
-- [adrs/](adrs/) - Architecture decisions
