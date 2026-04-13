@@ -1174,11 +1174,23 @@ code[class*="language-"] {
   border: 1px solid var(--kodelet-mid-gray);
 }
 
+.prose :not(pre) > code,
+.chat-prose :not(pre) > code {
+  white-space: break-spaces;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
 .prose pre code,
 .chat-prose pre code {
   background: transparent;
   padding: 0;
   border: none;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 /* Enhanced prose styling for subagent and other technical content */
@@ -1230,6 +1242,14 @@ code[class*="language-"] {
   border: 1px solid rgba(176, 174, 165, 0.22);
 }
 
+.prose-enhanced :not(pre) > code {
+  white-space: break-spaces;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
 .prose-enhanced pre {
   background-color: rgba(232, 230, 220, 0.45);
   color: var(--kodelet-dark);
@@ -1245,6 +1265,9 @@ code[class*="language-"] {
   padding: 0;
   border: none;
   font-size: 0.875rem;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .prose-enhanced ul,

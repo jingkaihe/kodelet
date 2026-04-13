@@ -71,6 +71,37 @@ describe('ChatTranscript', () => {
     expect(paragraphs[2]?.textContent).toBe('I should focus on the essence.');
   });
 
+  it('renders inline backtick markdown as inline code within prose', () => {
+    const { container } = render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[
+          {
+            role: 'assistant',
+            blocks: [
+              {
+                type: 'message',
+                content:
+                  'Run `go test ./pkg/webui -run TestServer_convertToWebMessages -count=1` and inspect `pkg/webui/server.go`.',
+              },
+            ],
+          },
+        ]}
+      />
+    );
+
+    const paragraph = container.querySelector('.chat-prose p');
+    const codeSpans = container.querySelectorAll('.chat-prose p code');
+
+    expect(paragraph).toBeInTheDocument();
+    expect(codeSpans).toHaveLength(2);
+    expect(codeSpans[0]?.textContent).toBe(
+      'go test ./pkg/webui -run TestServer_convertToWebMessages -count=1'
+    );
+    expect(codeSpans[1]?.textContent).toBe('pkg/webui/server.go');
+    expect(container.querySelector('.chat-prose pre')).toBeNull();
+  });
+
   it('auto-collapses a thinking block when streaming finishes', () => {
     const { container, rerender } = render(
       <ChatTranscript

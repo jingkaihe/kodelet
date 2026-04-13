@@ -12,7 +12,11 @@
 }
 
 .prose-enhanced.subagent-response code {
-  white-space: normal;
+  white-space: break-spaces;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
 .prose-enhanced.subagent-response pre code {
