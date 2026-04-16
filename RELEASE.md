@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.3.39-beta (2026-04-16)
+
+Updated the recommended Anthropic profile and default model selection to use `claude-opus-4-7`, and refreshed Anthropic model metadata so default selection, thinking-model detection, and pricing/context-window handling align with the newer Sonnet 4.6 and Opus 4.7 family.
+
+Made MCP integration tests self-contained by replacing the Docker-backed time/filesystem fixtures with in-process stdio test servers, improving reliability and removing the Docker dependency from these regression paths.
+
+Fixed Web UI duration formatting for Go `time.Duration` values so nanosecond payloads now render correctly as sub-millisecond, millisecond, or second durations.
+
 ## 0.3.38-beta (2026-04-13)
 
 Fixed Web UI prose rendering so inline backtick code wraps cleanly inside assistant and subagent responses without turning into block code styling.
