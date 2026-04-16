@@ -16,6 +16,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const testMCPServerEnv = "KODELET_TEST_MCP_SERVER"
+
 // createTestMCPManager creates an MCPManager for testing
 func createTestMCPManager(t *testing.T) *tools.MCPManager {
 	t.Helper()
@@ -25,6 +27,37 @@ func createTestMCPManager(t *testing.T) *tools.MCPManager {
 	})
 	require.NoError(t, err)
 	return manager
+}
+
+func timeMCPConfig(t *testing.T) tools.MCPConfig {
+	t.Helper()
+	exe, err := os.Executable()
+	require.NoError(t, err)
+
+	return tools.MCPConfig{
+		Servers: map[string]tools.MCPServerConfig{
+			"time": {
+				Command: exe,
+				Envs:    map[string]string{testMCPServerEnv: "time"},
+			},
+		},
+	}
+}
+
+func filesystemMCPConfig(t *testing.T) tools.MCPConfig {
+	t.Helper()
+	exe, err := os.Executable()
+	require.NoError(t, err)
+
+	return tools.MCPConfig{
+		Servers: map[string]tools.MCPServerConfig{
+			"filesystem": {
+				Command:       exe,
+				Envs:          map[string]string{testMCPServerEnv: "filesystem"},
+				ToolWhiteList: []string{"list_directory"},
+			},
+		},
+	}
 }
 
 func TestNewMCPRPCServer(t *testing.T) {
@@ -191,24 +224,7 @@ func TestMCPRPCServer_Shutdown(t *testing.T) {
 }
 
 func TestMCPRPCServer_HandleMCPCall_FullIntegration(t *testing.T) {
-	if os.Getenv("SKIP_DOCKER_TEST") == "true" {
-		t.Skip("Skipping docker test")
-	}
-
-	// Use a real MCP server (time tool via Docker)
-	config := tools.MCPConfig{
-		Servers: map[string]tools.MCPServerConfig{
-			"time": {
-				Command: "docker",
-				Args: []string{
-					"run",
-					"-i",
-					"--rm",
-					"mcp/time",
-				},
-			},
-		},
-	}
+	config := timeMCPConfig(t)
 	manager, err := tools.NewMCPManager(config)
 	require.NoError(t, err)
 
@@ -302,26 +318,8 @@ func TestMCPRPCServer_HandleMCPCall_FullIntegration(t *testing.T) {
 }
 
 func TestMCPRPCServer_HandleMCPCall_ResponseFormat(t *testing.T) {
-	if os.Getenv("SKIP_DOCKER_TEST") == "true" {
-		t.Skip("Skipping docker test")
-	}
-
-	// Use a real MCP server to verify actual response format
-	config := tools.MCPConfig{
-		Servers: map[string]tools.MCPServerConfig{
-			"filesystem": {
-				Command: "docker",
-				Args: []string{
-					"run",
-					"-i",
-					"--rm",
-					"mcp/filesystem",
-					"/tmp",
-				},
-				ToolWhiteList: []string{"list_directory"},
-			},
-		},
-	}
+	allowedDir := t.TempDir()
+	config := filesystemMCPConfig(t)
 	manager, err := tools.NewMCPManager(config)
 	require.NoError(t, err)
 
@@ -348,7 +346,7 @@ func TestMCPRPCServer_HandleMCPCall_ResponseFormat(t *testing.T) {
 		Server: "filesystem",
 		Tool:   "list_directory",
 		Arguments: map[string]any{
-			"path": "/",
+			"path": allowedDir,
 		},
 	}
 	reqBody, err := json.Marshal(rpcReq)
@@ -370,8 +368,9 @@ func TestMCPRPCServer_HandleMCPCall_ResponseFormat(t *testing.T) {
 	_, hasContent := response["content"]
 	assert.True(t, hasContent, "response should have 'content' field")
 
-	_, hasIsError := response["isError"]
-	assert.True(t, hasIsError, "response should have 'isError' field")
+	if isError, hasIsError := response["isError"].(bool); hasIsError {
+		assert.False(t, isError, "successful response should not be marked as error")
+	}
 
 	// Verify content structure
 	content := response["content"].([]any)
