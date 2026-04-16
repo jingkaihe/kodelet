@@ -62,7 +62,7 @@ describe("ChatPage", () => {
 			profiles: [
 				{ name: "default", scope: "built-in" },
 				{ name: "work", scope: "repo" },
-				{ name: "premium", scope: "global" },
+				{ name: "anthropic", scope: "global" },
 			],
 		});
 		mockGetConversations.mockResolvedValue({
@@ -291,7 +291,7 @@ describe("ChatPage", () => {
 		expect(screen.getByTestId("new-chat-dialog")).toBeInTheDocument();
 
 		fireEvent.change(screen.getByTestId("new-chat-profile-select"), {
-			target: { value: "premium" },
+			target: { value: "anthropic" },
 		});
 		fireEvent.change(screen.getByLabelText("Working directory"), {
 			target: { value: "/workspace/alt" },
@@ -309,7 +309,7 @@ describe("ChatPage", () => {
 
 		await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
 		expect(mockStreamChat).toHaveBeenCalledWith(
-			expect.objectContaining({ profile: "premium", cwd: "/workspace/alt" }),
+			expect.objectContaining({ profile: "anthropic", cwd: "/workspace/alt" }),
 			expect.any(Object),
 		);
 	});
@@ -568,7 +568,7 @@ describe("ChatPage", () => {
 			createdAt: "2023-01-01T00:00:00Z",
 			updatedAt: "2023-01-02T00:00:00Z",
 			messageCount: 1,
-			profile: "premium",
+			profile: "anthropic",
 			profileLocked: true,
 			messages: [
 				{
@@ -588,7 +588,7 @@ describe("ChatPage", () => {
 
 		expect(screen.getByTestId("composer-inline-context")).toBeInTheDocument();
 		expect(screen.getByTestId("composer-inline-context")).toHaveTextContent(
-			"premium",
+			"anthropic",
 		);
 		expect(screen.queryByLabelText("Profile")).not.toBeInTheDocument();
 
@@ -645,7 +645,7 @@ describe("ChatPage", () => {
 			createdAt: "2023-01-01T00:00:00Z",
 			updatedAt: "2023-01-02T00:00:00Z",
 			messageCount: 1,
-			profile: "premium",
+			profile: "anthropic",
 			profileLocked: true,
 			messages: [
 				{
@@ -1005,7 +1005,7 @@ describe("ChatPage", () => {
 			createdAt: "2023-01-01T00:00:00Z",
 			updatedAt: "2023-01-02T00:00:00Z",
 			messageCount: 1,
-			profile: "premium",
+			profile: "anthropic",
 			profileLocked: true,
 			messages: [
 				{

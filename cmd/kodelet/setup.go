@@ -55,7 +55,7 @@ profiles:
         provider: openai
         reasoning_effort: xhigh
         weak_model: gpt-5.4-mini
-    premium:
+    anthropic:
         disable_fs_search_tools: false
         max_tokens: 64000
         model: opus-47
@@ -178,7 +178,7 @@ var setupCmd = &cobra.Command{
 			presenter.Success(fmt.Sprintf("Configuration saved to %s", configFile))
 		}
 		presenter.Info("You can modify these settings at any time by editing the config file")
-		presenter.Info("Use different profiles with: --profile hybrid|openai|premium|xai")
+		presenter.Info("Use different profiles with: --profile hybrid|openai|anthropic|xai")
 		logger.G(ctx).WithField("config_file", configFile).Info("Configuration file created successfully")
 
 		presenter.Separator()

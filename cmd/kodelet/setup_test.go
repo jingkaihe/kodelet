@@ -35,13 +35,13 @@ func TestRecommendedSetupConfigYAML_OpenAIProfilesUsePatchMode(t *testing.T) {
 	assert.Equal(t, "full", hybridProfile["tool_mode"])
 	assert.Equal(t, false, hybridProfile["disable_fs_search_tools"])
 
-	premiumProfile, ok := config.Profiles["premium"]
+	anthropicProfile, ok := config.Profiles["anthropic"]
 	require.True(t, ok)
-	assert.Equal(t, "anthropic", premiumProfile["provider"])
-	assert.Equal(t, "full", premiumProfile["tool_mode"])
-	assert.Equal(t, false, premiumProfile["disable_fs_search_tools"])
-	assert.Equal(t, 64000, premiumProfile["max_tokens"])
-	assert.Equal(t, 32000, premiumProfile["thinking_budget_tokens"])
+	assert.Equal(t, "anthropic", anthropicProfile["provider"])
+	assert.Equal(t, "full", anthropicProfile["tool_mode"])
+	assert.Equal(t, false, anthropicProfile["disable_fs_search_tools"])
+	assert.Equal(t, 64000, anthropicProfile["max_tokens"])
+	assert.Equal(t, 32000, anthropicProfile["thinking_budget_tokens"])
 
 	xaiProfile, ok := config.Profiles["xai"]
 	require.True(t, ok)

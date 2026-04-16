@@ -1099,7 +1099,7 @@ func TestWithCustomTools_RespectsExplicitAllowlist(t *testing.T) {
 	ctx := context.Background()
 	customManager := &CustomToolManager{
 		tools: map[string]*CustomTool{
-			"finder": {name: "finder"},
+			"notallowedtool": {name: "notallowedtool"},
 		},
 	}
 
@@ -1116,7 +1116,7 @@ func TestWithCustomTools_RespectsExplicitAllowlist(t *testing.T) {
 	}
 
 	assert.Equal(t, []string{"file_read", "grep_tool", "glob_tool"}, toolNames)
-	assert.NotContains(t, toolNames, "custom_tool_finder")
+	assert.NotContains(t, toolNames, "notallowedtool")
 }
 
 func TestWithSkillTool_RespectsNoSkillsFlag(t *testing.T) {

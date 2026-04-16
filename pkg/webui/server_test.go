@@ -213,7 +213,7 @@ func TestServer_handleGetConversation(t *testing.T) {
 					CWD:         "/workspace/project",
 					Summary:     "Test conversation",
 					Provider:    "openai",
-					Metadata:    map[string]any{"platform": "fireworks", "api_mode": "responses", "profile": "premium"},
+					Metadata:    map[string]any{"platform": "fireworks", "api_mode": "responses", "profile": "anthropic"},
 					RawMessages: json.RawMessage(`[{"type":"message","role":"user","content":"hello"}]`),
 				}, nil
 			}
@@ -242,7 +242,7 @@ func TestServer_handleGetConversation(t *testing.T) {
 	assert.Equal(t, "OpenAI", response.Provider)
 	assert.Equal(t, "/workspace/project", response.CWD)
 	assert.True(t, response.CWDLocked)
-	assert.Equal(t, "premium", response.Profile)
+	assert.Equal(t, "anthropic", response.Profile)
 	assert.True(t, response.ProfileLocked)
 	assert.Equal(t, 1, response.MessageCount)
 }
@@ -697,13 +697,13 @@ func TestServer_handleChatWithProfile(t *testing.T) {
 		router: mux.NewRouter(),
 	}
 
-	req := httptest.NewRequest("POST", "/api/chat", strings.NewReader(`{"message":"hello","profile":"premium"}`))
+	req := httptest.NewRequest("POST", "/api/chat", strings.NewReader(`{"message":"hello","profile":"anthropic"}`))
 	w := httptest.NewRecorder()
 
 	server.handleChat(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, "premium", capturedRequest.Profile)
+	assert.Equal(t, "anthropic", capturedRequest.Profile)
 }
 
 func TestServer_handleChatRunnerError(t *testing.T) {

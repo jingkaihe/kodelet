@@ -445,7 +445,7 @@ describe('ApiService', () => {
       await apiService.streamChat(
         {
           message: 'hello',
-          profile: 'premium',
+          profile: 'anthropic',
         },
         {
           onEvent: vi.fn(),
@@ -455,7 +455,7 @@ describe('ApiService', () => {
       expect(mockFetch).toHaveBeenCalledWith(
         '/api/chat',
         expect.objectContaining({
-          body: JSON.stringify({ message: 'hello', profile: 'premium' }),
+          body: JSON.stringify({ message: 'hello', profile: 'anthropic' }),
         })
       );
     });

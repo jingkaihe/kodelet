@@ -479,7 +479,7 @@ profiles:
         reasoning_effort: medium
         tool_mode: patch
         weak_model: gpt-5
-    premium:
+    anthropic:
         max_tokens: 64000
         model: opus-47
         thinking_budget_tokens: 32000

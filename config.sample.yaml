@@ -48,12 +48,12 @@ aliases:
   opus-47: "claude-opus-4-7"
 
 # Active profile selection (uncomment to activate a specific profile)
-# profile: "premium"
+# profile: "anthropic"
 
 # Profile definitions for different use cases
 # Each profile can override any configuration setting
 profiles:
-  premium:
+  anthropic:
     model: "claude-opus-4-7"
     weak_model: "claude-sonnet-4-6"
     max_tokens: 64000

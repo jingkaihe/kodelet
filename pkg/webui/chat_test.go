@@ -60,7 +60,7 @@ func TestResolveWebChatConfigForExistingConversation_UsesStoredProfileAndMetadat
 	viper.Set("provider", "anthropic")
 	viper.Set("model", "base-model")
 	viper.Set("profiles", map[string]any{
-		"premium": map[string]any{
+		"anthropic": map[string]any{
 			"provider": "openai",
 			"model":    "gpt-4.1",
 			"openai": map[string]any{
@@ -73,14 +73,14 @@ func TestResolveWebChatConfigForExistingConversation_UsesStoredProfileAndMetadat
 		ID:       "conv-123",
 		Provider: "openai",
 		Metadata: map[string]any{
-			"profile":  "premium",
+			"profile":  "anthropic",
 			"model":    "accounts/fireworks/models/kimi-k2",
 			"platform": "fireworks",
 			"api_mode": "responses",
 		},
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "premium", config.Profile)
+	assert.Equal(t, "anthropic", config.Profile)
 	assert.Equal(t, "openai", config.Provider)
 	assert.Equal(t, "accounts/fireworks/models/kimi-k2", config.Model)
 	require.NotNil(t, config.OpenAI)

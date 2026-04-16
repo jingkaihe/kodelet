@@ -562,7 +562,7 @@ export KODELET_MAX_TOKENS="8192"
 export KODELET_REASONING_EFFORT="medium"  # none, minimal, low, medium, high, xhigh
 
 # Profile configuration
-export KODELET_PROFILE="premium"  # Use a specific profile
+export KODELET_PROFILE="anthropic"  # Use a specific profile
 
 # Command restriction configuration
 export KODELET_ALLOWED_COMMANDS="ls *,pwd,echo *,git status"  # Comma-separated allowed command patterns
@@ -708,7 +708,7 @@ kodelet run --sysprompt ./sysprompt.tmpl "query"
 kodelet run --sysprompt ./sysprompt.tmpl --sysprompt-arg project=kodelet --sysprompt-arg env=dev "query"
 
 # Profile override for single command
-kodelet run --profile premium "explain this architecture"
+kodelet run --profile anthropic "explain this architecture"
 ```
 
 ## Configuration Profiles
@@ -729,11 +729,11 @@ weak_model_max_tokens: 8192
 thinking_budget_tokens: 8000
 
 # Active profile selection
-profile: "premium"  # Optional: specify the active profile
+profile: "anthropic"  # Optional: specify the active profile
 
 # Profile definitions
 profiles:
-  premium:
+  anthropic:
     weak_model: "sonnet-46" # alias to "claude-sonnet-4-6"
     max_tokens: 64000
     weak_model_max_tokens: 8192
@@ -798,13 +798,13 @@ kodelet profile list
 
 **Show detailed configuration for a profile:**
 ```bash
-kodelet profile show premium
+kodelet profile show anthropic
 kodelet profile show default  # Shows base configuration
 ```
 
 **Switch to a different profile:**
 ```bash
-kodelet profile use premium       # Switch in repository config (./kodelet-config.yaml)
+kodelet profile use anthropic    # Switch in repository config (./kodelet-config.yaml)
 kodelet profile use openai -g     # Switch in global config (~/.kodelet/config.yaml)
 kodelet profile use default       # Use base configuration without any profile
 ```
@@ -815,8 +815,8 @@ kodelet profile use default       # Use base configuration without any profile
 kodelet profile current
 kodelet profile use development
 
-# Use a premium profile globally across all projects
-kodelet profile use premium -g
+# Use the anthropic profile globally across all projects
+kodelet profile use anthropic -g
 
 # Show the merged configuration for a specific profile
 kodelet profile show mix-n-match
@@ -830,8 +830,8 @@ kodelet profile use default
 **Temporary profile override for single commands:**
 ```bash
 # Use a specific profile for a single command without changing config
-kodelet run --profile premium "explain this architecture"
-kodelet commit --profile premium
+kodelet run --profile anthropic "explain this architecture"
+kodelet commit --profile anthropic
 kodelet run --profile openai "what does this function do?"
 
 # Use base configuration without any profile
@@ -840,8 +840,8 @@ kodelet run --profile default "use base configuration"
 
 **Environment variable override:**
 ```bash
-export KODELET_PROFILE="premium"
-kodelet run "this will use the premium profile"
+export KODELET_PROFILE="anthropic"
+kodelet run "this will use the anthropic profile"
 ```
 
 ### Profile Precedence and Merging

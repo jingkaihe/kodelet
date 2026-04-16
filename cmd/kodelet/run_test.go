@@ -35,7 +35,7 @@ func TestLoadResumeConversationConfig_UsesStoredProfileAndMetadata(t *testing.T)
 	viper.Set("provider", "anthropic")
 	viper.Set("model", "base-model")
 	viper.Set("profiles", map[string]any{
-		"premium": map[string]any{
+		"anthropic": map[string]any{
 			"provider": "openai",
 			"model":    "gpt-4.1",
 			"openai": map[string]any{
@@ -69,7 +69,7 @@ func TestLoadResumeConversationConfig_UsesStoredProfileAndMetadata(t *testing.T)
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 		Metadata: map[string]any{
-			"profile":  "premium",
+			"profile":  "anthropic",
 			"model":    "accounts/fireworks/models/kimi-k2",
 			"platform": "fireworks",
 			"api_mode": "responses",
@@ -81,7 +81,7 @@ func TestLoadResumeConversationConfig_UsesStoredProfileAndMetadata(t *testing.T)
 	config, resolvedCWD, err := loadResumeConversationConfig(ctx, cmd, conversationID, "")
 	require.NoError(t, err)
 
-	assert.Equal(t, "premium", config.Profile)
+	assert.Equal(t, "anthropic", config.Profile)
 	assert.Equal(t, "openai", config.Provider)
 	assert.Equal(t, "accounts/fireworks/models/kimi-k2", config.Model)
 	assert.NotEmpty(t, resolvedCWD)
@@ -134,7 +134,7 @@ func TestLoadResumeConversationConfig_ProfiledConversationPreservesExplicitFlagO
 			"allowed_tools": []string{"bash"},
 			"tool_mode":     "full",
 		},
-		"premium": map[string]any{
+		"anthropic": map[string]any{
 			"provider": "openai",
 			"context": map[string]any{
 				"patterns": []string{"README.md"},
@@ -168,7 +168,7 @@ func TestLoadResumeConversationConfig_ProfiledConversationPreservesExplicitFlagO
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 		Metadata: map[string]any{
-			"profile": "premium",
+			"profile": "anthropic",
 		},
 	})
 	require.NoError(t, err)
@@ -187,7 +187,7 @@ func TestLoadResumeConversationConfig_ProfiledConversationPreservesExplicitFlagO
 	config, _, err := loadResumeConversationConfig(ctx, cmd, conversationID, "")
 	require.NoError(t, err)
 
-	assert.Equal(t, "premium", config.Profile)
+	assert.Equal(t, "anthropic", config.Profile)
 	assert.Equal(t, "openai", config.Provider)
 	require.NotNil(t, config.Context)
 	assert.Equal(t, []string{"CODING.md", "README.md"}, config.Context.Patterns)
@@ -207,9 +207,9 @@ func TestLoadResumeConversationConfig_ProfileCanDisableFSSearchToolsFromRootDefa
 	viper.Reset()
 	viper.Set("disable_fs_search_tools", true)
 	viper.Set("provider", "openai")
-	viper.Set("profile", "premium")
+	viper.Set("profile", "anthropic")
 	viper.Set("profiles", map[string]any{
-		"premium": map[string]any{
+		"anthropic": map[string]any{
 			"provider":                "anthropic",
 			"disable_fs_search_tools": false,
 		},
