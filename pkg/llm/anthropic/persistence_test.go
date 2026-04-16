@@ -65,7 +65,7 @@ func (m *MockConversationStore) Close() error {
 
 func TestDeserializeMessages(t *testing.T) {
 	thread, err := NewAnthropicThread(llmtypes.Config{
-		Model: string(anthropic.ModelClaudeSonnet4_20250514),
+		Model: anthropic.ModelClaudeSonnet4_6,
 	})
 	require.NoError(t, err)
 	messages, err := DeserializeMessages([]byte(`[]`))
@@ -183,7 +183,7 @@ func TestSaveAndLoadConversationWithFileLastAccess(t *testing.T) {
 	// Create a thread with a unique conversation ID
 	conversationID := fmt.Sprintf("test-file-last-access-%d", time.Now().UnixNano())
 	thread, err := NewAnthropicThread(llmtypes.Config{
-		Model: string(anthropic.ModelClaudeSonnet4_20250514),
+		Model: anthropic.ModelClaudeSonnet4_6,
 	})
 	require.NoError(t, err)
 	thread.SetConversationID(conversationID)
@@ -212,7 +212,7 @@ func TestSaveAndLoadConversationWithFileLastAccess(t *testing.T) {
 
 	// Create a new thread with the same conversation ID
 	newThread, err := NewAnthropicThread(llmtypes.Config{
-		Model: string(anthropic.ModelClaudeSonnet4_20250514),
+		Model: anthropic.ModelClaudeSonnet4_6,
 	})
 	require.NoError(t, err)
 	newThread.SetConversationID(conversationID)
@@ -713,7 +713,7 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a thread without persistence to avoid store issues
 			thread, err := NewAnthropicThread(llmtypes.Config{
-				Model: string(anthropic.ModelClaudeSonnet4_20250514),
+				Model: anthropic.ModelClaudeSonnet4_6,
 			})
 			require.NoError(t, err)
 

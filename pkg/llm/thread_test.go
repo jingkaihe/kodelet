@@ -128,7 +128,7 @@ func TestSendMessageAndGetText(t *testing.T) {
 		query,
 		llmtypes.Config{
 			Provider:  "anthropic",
-			Model:     string(anthropic.ModelClaudeHaiku4_5_20251001),
+			Model:     anthropic.ModelClaudeHaiku4_5_20251001,
 			MaxTokens: 100,
 		},
 		true,
@@ -187,7 +187,7 @@ func TestSendMessageRealClient(t *testing.T) {
 	// Create a real thread
 	thread, err := NewThread(llmtypes.Config{
 		Provider:  "anthropic",
-		Model:     string(anthropic.ModelClaudeHaiku4_5_20251001), // Using a real model
+		Model:     anthropic.ModelClaudeHaiku4_5_20251001, // Using a real model
 		MaxTokens: 100,
 	})
 	assert.NoError(t, err)
@@ -303,7 +303,7 @@ func TestSendMessageWithToolUse(t *testing.T) {
 	// Create thread
 	thread, err := NewThread(llmtypes.Config{
 		Provider:  "anthropic",
-		Model:     string(anthropic.ModelClaudeHaiku4_5_20251001),
+		Model:     anthropic.ModelClaudeHaiku4_5_20251001,
 		MaxTokens: 1000,
 	})
 	assert.NoError(t, err)

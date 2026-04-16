@@ -780,7 +780,7 @@ profiles:
 # Model aliases work across all profiles
 aliases:
     haiku-45: claude-haiku-4-5-20251001
-    opus-46: claude-opus-4-6
+    opus-47: claude-opus-4-7
     sonnet-46: claude-sonnet-4-6
 ```
 

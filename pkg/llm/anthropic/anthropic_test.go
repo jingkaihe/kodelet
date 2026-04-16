@@ -56,6 +56,7 @@ func TestGetMediaTypeFromExtension(t *testing.T) {
 func TestProcessImageURL(t *testing.T) {
 	thread, err := NewAnthropicThread(llmtypes.Config{})
 	require.NoError(t, err)
+	assert.Equal(t, anthropic.ModelClaudeOpus4_7, thread.Config.Model)
 
 	tests := []struct {
 		name     string
@@ -411,8 +412,8 @@ func TestIsThinkingModel(t *testing.T) {
 			expected: true,
 		},
 		{
-			name:     "claude 3 haiku does not support thinking",
-			model:    anthropic.ModelClaude_3_Haiku_20240307,
+			name:     "unsupported model does not support thinking",
+			model:    anthropic.Model("unsupported-model"),
 			expected: false,
 		},
 	}

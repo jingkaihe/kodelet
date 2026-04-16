@@ -55,14 +55,14 @@ func (t *Thread) Provider() string {
 func NewAnthropicThread(config llmtypes.Config) (*Thread, error) {
 	// Apply defaults if not provided
 	if config.Model == "" {
-		config.Model = "claude-sonnet-4-6"
+		config.Model = anthropic.ModelClaudeOpus4_7
 	}
 	if config.MaxTokens == 0 {
 		config.MaxTokens = 8192
 	}
 
 	opts := []option.RequestOption{}
-	if isThinkingModel(anthropic.Model(config.Model)) {
+	if isThinkingModel(config.Model) {
 		opts = append(opts, option.WithHeaderAdd("anthropic-beta", "interleaved-thinking-2025-05-14"))
 	}
 
@@ -298,7 +298,7 @@ OUTER:
 			if t.State != nil {
 				contexts = t.State.DiscoverContexts()
 			}
-			systemPrompt := sysprompt.SystemPrompt(string(model), t.Config, contexts)
+			systemPrompt := sysprompt.SystemPrompt(model, t.Config, contexts)
 
 			exchangeOpt := opt.WithTurnInitiator(turnCount)
 
@@ -546,7 +546,7 @@ func (t *Thread) processMessageExchange(
 
 	// Add a tracing event for API call start
 	telemetry.AddEvent(ctx, "api_call_start",
-		attribute.String("model", string(model)),
+		attribute.String("model", model),
 		attribute.Int("max_tokens", maxTokens),
 	)
 
@@ -632,7 +632,7 @@ func (t *Thread) processMessageExchange(
 
 	// Log structured LLM usage after all content processing is complete (main agent only)
 	if !t.Config.IsSubAgent && !opt.DisableUsageLog {
-		usage.LogLLMUsage(ctx, t.GetUsage(), string(model), apiStartTime, int(response.Usage.OutputTokens))
+		usage.LogLLMUsage(ctx, t.GetUsage(), model, apiStartTime, int(response.Usage.OutputTokens))
 	}
 
 	if t.Persisted && t.Store != nil && !opt.NoSaveConversation {
@@ -736,7 +736,7 @@ func (t *Thread) getModelAndTokens(opt llmtypes.MessageOpt) (anthropic.Model, in
 		}
 	}
 
-	return anthropic.Model(model), maxTokens
+	return model, maxTokens
 }
 
 func (t *Thread) shouldUtiliseThinking(model anthropic.Model) bool {
@@ -759,18 +759,14 @@ func isThinkingModel(model anthropic.Model) bool {
 		"claude-sonnet-4-6",
 		anthropic.ModelClaudeSonnet4_5,
 		anthropic.ModelClaudeSonnet4_5_20250929,
-
-		// sonnet 4 models
-		anthropic.ModelClaudeSonnet4_0,
-		anthropic.ModelClaudeSonnet4_20250514,
+		anthropic.ModelClaudeSonnet4_6,
 		// opus 4 models
-		anthropic.ModelClaudeOpus4_0,
+		anthropic.ModelClaudeOpus4_7,
+		anthropic.ModelClaudeOpus4_1,
 		anthropic.ModelClaudeOpus4_1_20250805,
+		anthropic.ModelClaudeOpus4_5,
 		anthropic.ModelClaudeOpus4_5_20251101,
 		anthropic.ModelClaudeOpus4_6,
-		anthropic.ModelClaude4Opus20250514,
-		anthropic.ModelClaudeOpus4_20250514,
-		anthropic.ModelClaude4Opus20250514,
 	}
 	return slices.Contains(thinkingModels, model)
 }
@@ -782,7 +778,7 @@ func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewPara
 
 	// Create attributes for the span
 	spanAttrs := []attribute.KeyValue{
-		attribute.String("model", string(params.Model)),
+		attribute.String("model", params.Model),
 		attribute.Int64("max_tokens", params.MaxTokens),
 	}
 
@@ -797,7 +793,7 @@ func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewPara
 	}
 
 	logFields := logrus.Fields{
-		"model":      string(params.Model),
+		"model":      params.Model,
 		"max_tokens": params.MaxTokens,
 	}
 	if t.shouldUtiliseThinking(params.Model) {
