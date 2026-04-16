@@ -22,19 +22,6 @@ func TestRecommendedSetupConfigYAML_OpenAIProfilesUsePatchMode(t *testing.T) {
 	assert.Equal(t, true, openAIProfile["disable_fs_search_tools"])
 	assert.Equal(t, "openai", openAIProfile["provider"])
 
-	openAISubagentProfile, ok := config.Profiles["openai-subagent"]
-	require.True(t, ok)
-	assert.Equal(t, "patch", openAISubagentProfile["tool_mode"])
-	assert.Equal(t, true, openAISubagentProfile["disable_fs_search_tools"])
-	_, hasAllowedTools := openAISubagentProfile["allowed_tools"]
-	assert.False(t, hasAllowedTools)
-
-	hybridProfile, ok := config.Profiles["hybrid"]
-	require.True(t, ok)
-	assert.Equal(t, "anthropic", hybridProfile["provider"])
-	assert.Equal(t, "full", hybridProfile["tool_mode"])
-	assert.Equal(t, false, hybridProfile["disable_fs_search_tools"])
-
 	anthropicProfile, ok := config.Profiles["anthropic"]
 	require.True(t, ok)
 	assert.Equal(t, "anthropic", anthropicProfile["provider"])

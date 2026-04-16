@@ -27,24 +27,6 @@ tool_mode: patch
 weak_model: gpt-5.4-mini
 weak_model_max_tokens: 8192
 profiles:
-    hybrid:
-        disable_fs_search_tools: false
-        max_tokens: 16000
-        model: sonnet-46
-        provider: anthropic
-        subagent_args: "--profile openai-subagent"
-        thinking_budget_tokens: 8000
-        tool_mode: full
-        weak_model: haiku-45
-        weak_model_max_tokens: 8192
-    openai-subagent:
-        disable_fs_search_tools: true
-        tool_mode: patch
-        model: gpt-5.4
-        openai:
-            api_mode: responses
-        provider: openai
-        reasoning_effort: xhigh
     openai:
         disable_fs_search_tools: true
         tool_mode: patch
