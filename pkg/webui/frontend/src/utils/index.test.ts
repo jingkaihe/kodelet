@@ -300,8 +300,12 @@ describe('formatDuration', () => {
     expect(formatDuration(2500000000)).toBe('2.500s');
   });
 
-  it('treats small numbers as milliseconds', () => {
-    expect(formatDuration(150)).toBe('150ms');
+  it('converts nanoseconds to milliseconds', () => {
+    expect(formatDuration(150000000)).toBe('150ms');
+  });
+
+  it('shows sub-millisecond durations clearly', () => {
+    expect(formatDuration(500000)).toBe('<1ms');
   });
 });
 

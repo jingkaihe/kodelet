@@ -218,16 +218,34 @@ export const formatFileSize = (bytes: number): string => {
   return `${size.toFixed(1)} ${sizes[unit]}`;
 };
 
-// Duration formatting utility
+// Duration formatting utility.
+// Numeric values come from Go time.Duration JSON payloads, which are nanoseconds.
 export const formatDuration = (duration: number | string): string => {
   if (typeof duration === 'string') {
     return duration;
   }
-  // If it's in nanoseconds, convert to seconds
-  if (duration > 1000000000) {
-    return `${(duration / 1000000000).toFixed(3)}s`;
+
+  if (!Number.isFinite(duration) || duration < 0) {
+    return '';
   }
-  return `${duration}ms`;
+
+  const milliseconds = duration / 1_000_000;
+
+  if (milliseconds < 1) {
+    return '<1ms';
+  }
+
+  if (milliseconds < 1000) {
+    const roundedMilliseconds = milliseconds >= 100
+      ? Math.round(milliseconds)
+      : Math.round(milliseconds * 10) / 10;
+
+    return Number.isInteger(roundedMilliseconds)
+      ? `${roundedMilliseconds}ms`
+      : `${roundedMilliseconds.toFixed(1)}ms`;
+  }
+
+  return `${(duration / 1_000_000_000).toFixed(3)}s`;
 };
 
 // Language detection from file path

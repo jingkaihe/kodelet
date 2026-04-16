@@ -24,7 +24,7 @@ describe('BashRenderer', () => {
     const toolResult = createToolResult({
       command: 'ls -la',
       exitCode: 0,
-      executionTime: 250,
+      executionTime: 250000000,
       workingDir: '/tmp/work',
       output: 'file1.txt\nfile2.txt',
     });
