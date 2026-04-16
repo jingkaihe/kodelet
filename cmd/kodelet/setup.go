@@ -64,16 +64,6 @@ profiles:
         tool_mode: full
         weak_model: haiku-45
         weak_model_max_tokens: 8192
-    xai:
-        disable_fs_search_tools: false
-        max_tokens: 16000
-        model: grok-code-fast-1
-        openai:
-            platform: xai
-        provider: openai
-        reasoning_effort: none
-        tool_mode: full
-        weak_model: grok-code-fast-1
 `
 }
 

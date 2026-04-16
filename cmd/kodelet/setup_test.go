@@ -42,10 +42,4 @@ func TestRecommendedSetupConfigYAML_OpenAIProfilesUsePatchMode(t *testing.T) {
 	assert.Equal(t, false, anthropicProfile["disable_fs_search_tools"])
 	assert.Equal(t, 64000, anthropicProfile["max_tokens"])
 	assert.Equal(t, 32000, anthropicProfile["thinking_budget_tokens"])
-
-	xaiProfile, ok := config.Profiles["xai"]
-	require.True(t, ok)
-	assert.Equal(t, "openai", xaiProfile["provider"])
-	assert.Equal(t, "full", xaiProfile["tool_mode"])
-	assert.Equal(t, false, xaiProfile["disable_fs_search_tools"])
 }
