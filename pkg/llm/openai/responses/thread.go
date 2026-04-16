@@ -22,7 +22,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/llm/openai/copilotdefaults"
 	codexpreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/codex"
 	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
-	"github.com/jingkaihe/kodelet/pkg/llm/openai/preset/xai"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
@@ -1217,18 +1216,11 @@ func supportsResponsesWebSocket(config llmtypes.Config) bool {
 }
 
 func getPlatformAPIKeyEnvVar(platform string) string {
-	switch normalizePlatformName(platform) {
-	case "xai":
-		return xai.APIKeyEnvVar
-	default:
-		return openaipreset.APIKeyEnvVar
-	}
+	return openaipreset.APIKeyEnvVar
 }
 
 func getPlatformBaseURL(platform string) string {
 	switch normalizePlatformName(platform) {
-	case "xai":
-		return xai.BaseURL
 	case "codex":
 		return codexpreset.BaseURL
 	case "copilot":
@@ -1428,8 +1420,6 @@ func loadPlatformDefaults(platformName string) (map[string]string, map[string]ll
 	switch normalizePlatformName(platformName) {
 	case "openai":
 		return loadPlatformDefaultsFromConfig(openaipreset.Models, openaipreset.Pricing)
-	case "xai":
-		return loadPlatformDefaultsFromConfig(xai.Models, xai.Pricing)
 	case "codex":
 		return loadPlatformDefaultsFromConfig(codexpreset.Models, codexpreset.Pricing)
 	case "copilot":

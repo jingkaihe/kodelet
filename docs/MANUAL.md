@@ -756,15 +756,6 @@ profiles:
     openai:
       platform: copilot
 
-  xai:
-    provider: "openai"
-    model: "grok-3"
-    weak_model: "grok-3-mini"
-    max_tokens: 16000
-    reasoning_effort: "none"
-    openai:
-      platform: "xai"
-
   mix-n-match:
     # Main agent uses Claude
     provider: "anthropic"

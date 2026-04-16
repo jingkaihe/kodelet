@@ -48,14 +48,14 @@ func extractInputItemText(item openairesponses.ResponseInputItemUnionParam) stri
 }
 
 func TestNewThread(t *testing.T) {
-	os.Setenv("XAI_API_KEY", "test-key")
-	defer os.Unsetenv("XAI_API_KEY")
+	os.Setenv("OPENAI_API_KEY", "test-key")
+	defer os.Unsetenv("OPENAI_API_KEY")
 
 	config := llmtypes.Config{
 		Provider: "openai",
 		Model:    "gpt-4.1",
 		OpenAI: &llmtypes.OpenAIConfig{
-			Platform: "xai",
+			Platform: "openai",
 		},
 	}
 
@@ -156,9 +156,9 @@ func TestSupportsResponsesWebSocket(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "xai platform",
+			name: "custom platform",
 			config: llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{
-				Platform: "xai",
+				Platform: "fireworks",
 			}},
 			want: false,
 		},
@@ -198,7 +198,7 @@ func TestBuildToolsSkipsNativeOpenAISearchForNonOpenAIPlatforms(t *testing.T) {
 	state := tools.NewBasicState(context.Background(), tools.WithLLMConfig(llmtypes.Config{
 		Provider: "openai",
 		OpenAI: &llmtypes.OpenAIConfig{
-			Platform: "xai",
+			Platform: "fireworks",
 			APIMode:  llmtypes.OpenAIAPIModeResponses,
 		},
 	}))
@@ -1546,7 +1546,7 @@ func (*mockResponsesConversationStore) Close() error {
 }
 
 func TestProcessMessageExchangeSavesConversationPerTurn(t *testing.T) {
-	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", IsSubAgent: true, OpenAI: &llmtypes.OpenAIConfig{Platform: "xai", ServiceTier: llmtypes.OpenAIServiceTierFlex}}
+	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", IsSubAgent: true, OpenAI: &llmtypes.OpenAIConfig{Platform: "openai", ServiceTier: llmtypes.OpenAIServiceTierFlex}}
 	thread := &Thread{
 		Thread: base.NewThread(config, "conv-test", hooks.Trigger{}),
 	}
@@ -1585,7 +1585,7 @@ func TestProcessMessageExchangeSavesConversationPerTurn(t *testing.T) {
 	require.Equal(t, 1, len(store.savedRecords))
 	assert.Equal(t, "openai", store.savedRecords[0].Provider)
 	assert.Equal(t, "responses", store.savedRecords[0].Metadata["api_mode"])
-	assert.Equal(t, "xai", store.savedRecords[0].Metadata["platform"])
+	assert.Equal(t, "openai", store.savedRecords[0].Metadata["platform"])
 	assert.Equal(t, "flex", store.savedRecords[0].Metadata["service_tier"])
 }
 

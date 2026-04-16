@@ -543,8 +543,8 @@ func TestGetConfigFromViperOpenAIBasicConfig(t *testing.T) {
 	// Setup
 	viper.Reset()
 	viper.Set("provider", "openai")
-	viper.Set("openai.platform", "xai")
-	viper.Set("openai.base_url", "https://api.x.ai/v1")
+	viper.Set("openai.platform", "fireworks")
+	viper.Set("openai.base_url", "https://api.fireworks.ai/inference/v1")
 	viper.Set("openai.manual_cache", true)
 
 	// Execute
@@ -553,8 +553,8 @@ func TestGetConfigFromViperOpenAIBasicConfig(t *testing.T) {
 
 	// Verify
 	require.NotNil(t, config.OpenAI, "OpenAI config should not be nil")
-	assert.Equal(t, "xai", config.OpenAI.Platform)
-	assert.Equal(t, "https://api.x.ai/v1", config.OpenAI.BaseURL)
+	assert.Equal(t, "fireworks", config.OpenAI.Platform)
+	assert.Equal(t, "https://api.fireworks.ai/inference/v1", config.OpenAI.BaseURL)
 	assert.True(t, config.OpenAI.ManualCache)
 	assert.Nil(t, config.OpenAI.Models, "Models should be nil when not set")
 	assert.Nil(t, config.OpenAI.Pricing, "Pricing should be nil when not set")

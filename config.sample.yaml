@@ -80,15 +80,6 @@ profiles:
       platform: "copilot"
       api_mode: "responses"
 
-  xai:
-    provider: "openai"
-    model: "grok-3"
-    weak_model: "grok-3-mini"
-    max_tokens: 16000
-    reasoning_effort: "none"
-    openai:
-      platform: "xai"
-
   fireworks:
     provider: "openai"
     model: "accounts/fireworks/models/kimi-k2p5"
@@ -238,14 +229,14 @@ allowed_tools: []
 # reasoning_effort: "medium"
 
 # OpenAI-compatible API configuration
-# Supports any OpenAI-compatible provider (xAI, Groq, Together AI, etc.)
+# Supports any OpenAI-compatible provider (Fireworks, Groq, Together AI, etc.)
 openai:
-  # Optional platform label used for built-in defaults/metadata (e.g., openai, xai, codex, fireworks)
-  # platform: "xai"
+  # Optional platform label used for built-in defaults/metadata (e.g., openai, codex, fireworks)
+  # platform: "fireworks"
 
   # Custom endpoint/auth configuration
-  # base_url: "https://api.x.ai/v1"  # Custom API endpoint
-  # api_key_env_var: "XAI_API_KEY"   # Environment variable name for API key (defaults to OPENAI_API_KEY)
+  # base_url: "https://api.fireworks.ai/inference/v1"  # Custom API endpoint
+  # api_key_env_var: "FIREWORK_API_KEY"                # Environment variable name for API key (defaults to OPENAI_API_KEY)
 
   # Select which OpenAI API surface to use.
   # Kodelet's Responses API path keeps conversation state locally by replaying
@@ -273,21 +264,19 @@ openai:
   # but only on calls where prompt caching is requested.
   # manual_cache: true
   # models:
-  #   # Models that support reasoning capabilities (o1, o3, grok reasoning models, etc.)
+  #   # Models that support reasoning capabilities
   #   reasoning:
-  #     - "grok-4-0709"
-  #     - "grok-3-mini"
-  #     - "grok-3-mini-fast"
+  #     - "accounts/fireworks/models/kimi-k2p5"
   #   # Non-reasoning models (auto-populated if not specified)
   #   non_reasoning:
-  #     - "grok-3"
-  #     - "grok-3-fast"
-  #     - "grok-2-vision-1212"
+  #     - "accounts/fireworks/models/llama-v3p1-8b-instruct"
   # pricing:
-  #   grok-4-0709:
-  #     input: 0.000003         # $3 per million tokens
-  #     output: 0.000015        # $15 per million tokens
-  #     context_window: 256000  # 256k tokens
+  #   accounts/fireworks/models/kimi-k2p5:
+  #     input: 0.0000006         # $0.6 per million tokens
+  #     cached_input: 0.0000001  # $0.1 per million tokens
+  #     output: 0.000003         # $3 per million tokens
+  #     context_window: 262000   # 262k tokens
+  #   # Optional long-context pricing fields are applied after the threshold.
   #   gpt-5.4:
   #     input: 0.0000025                    # $2.50 per million tokens
   #     cached_input: 0.00000025            # $0.25 per million tokens
@@ -297,10 +286,6 @@ openai:
   #     long_context_output: 0.0000225      # $22.50 per million tokens
   #     long_context_threshold: 272000      # >272k prompt tokens
   #     context_window: 1050000             # 1.05M tokens
-  #   grok-3:
-  #     input: 0.000003         # $3 per million tokens
-  #     output: 0.000015        # $15 per million tokens
-  #     context_window: 131072  # 131k tokens
   #   # ... additional models
 
 # Subagent Configuration
@@ -473,7 +458,6 @@ tracing:
 # API Keys:
 # - ANTHROPIC_API_KEY: Required when using the Anthropic provider
 # - OPENAI_API_KEY: Required when using the OpenAI provider (default)
-# - XAI_API_KEY: Required when using the xAI platform
 # - OPENAI_API_BASE: Custom OpenAI API endpoint (overrides config base_url)
 # Note: The API key environment variable can be customized using the api_key_env_var setting
 #

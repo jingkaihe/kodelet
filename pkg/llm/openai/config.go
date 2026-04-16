@@ -10,7 +10,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/llm/openai/copilotdefaults"
 	codexpreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/codex"
 	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
-	"github.com/jingkaihe/kodelet/pkg/llm/openai/preset/xai"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
@@ -150,8 +149,6 @@ func loadPlatformDefaults(platformName string) (*llmtypes.CustomModels, llmtypes
 	switch normalizePlatformName(platformName) {
 	case "openai":
 		return loadOpenAIPlatformDefaults()
-	case "xai":
-		return loadXAIPlatformDefaults()
 	case "codex":
 		return loadCodexPlatformDefaults()
 	case "copilot":
@@ -202,30 +199,6 @@ func loadOpenAIPlatformDefaults() (*llmtypes.CustomModels, llmtypes.CustomPricin
 	return models, pricing
 }
 
-// loadXAIPlatformDefaults loads the complete xAI platform defaults.
-func loadXAIPlatformDefaults() (*llmtypes.CustomModels, llmtypes.CustomPricing) {
-	models := &llmtypes.CustomModels{
-		Reasoning:    xai.Models.Reasoning,
-		NonReasoning: xai.Models.NonReasoning,
-	}
-
-	pricing := make(llmtypes.CustomPricing)
-	for model, xaiPricing := range xai.Pricing {
-		pricing[model] = llmtypes.ModelPricing{
-			Input:                  xaiPricing.Input,
-			CachedInput:            xaiPricing.CachedInput,
-			Output:                 xaiPricing.Output,
-			LongContextInput:       xaiPricing.LongContextInput,
-			LongContextCachedInput: xaiPricing.LongContextCachedInput,
-			LongContextOutput:      xaiPricing.LongContextOutput,
-			LongContextThreshold:   xaiPricing.LongContextThreshold,
-			ContextWindow:          xaiPricing.ContextWindow,
-		}
-	}
-
-	return models, pricing
-}
-
 func loadCodexPlatformDefaults() (*llmtypes.CustomModels, llmtypes.CustomPricing) {
 	models := &llmtypes.CustomModels{
 		Reasoning:    codexpreset.Models.Reasoning,
@@ -254,8 +227,6 @@ func getPlatformBaseURL(platformName string) string {
 	switch normalizePlatformName(platformName) {
 	case "openai":
 		return openaipreset.BaseURL
-	case "xai":
-		return xai.BaseURL
 	case "codex":
 		return codexpreset.BaseURL
 	case "copilot":
@@ -270,8 +241,6 @@ func getPlatformAPIKeyEnvVar(platformName string) string {
 	switch normalizePlatformName(platformName) {
 	case "openai", "codex":
 		return openaipreset.APIKeyEnvVar
-	case "xai":
-		return xai.APIKeyEnvVar
 	default:
 		return "OPENAI_API_KEY"
 	}
