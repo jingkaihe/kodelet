@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.3.40-beta (2026-04-18)
+
+Added adaptive thinking support for newer Claude models (`claude-opus-4-7`, `claude-mythos-preview`, `claude-opus-4-6`, `claude-sonnet-4-6`) via the Anthropic `output_config.effort` field, driven by the existing `reasoning_effort` setting with levels `none|low|medium|high|xhigh|max` (`xhigh` is Opus 4.7 only, and `none` is rejected for Mythos preview). Non-adaptive Claude models continue to honor `thinking_budget_tokens`, and the `interleaved-thinking-2025-05-14` beta header is now only sent when the classic manual thinking config is active. Updated the sample config, manual, setup template, and built-in kodelet skill to document `reasoning_effort: max` for the premium Anthropic profile.
+
+Fixed macOS path handling by adding `osutil.CanonicalizePath`, which rewrites `/private/var` → `/var` and `/private/tmp` → `/tmp`. The canonical path is now used for tool working directories, file-access and lock tracking, `apply_patch` resolution, and conversation `cwd` normalization, so references stay stable across macOS's symlinked tmp paths.
+
 ## 0.3.39-beta (2026-04-16)
 
 Updated the recommended Anthropic profile and default model selection to use `claude-opus-4-7`, and refreshed Anthropic model metadata so default selection, thinking-model detection, and pricing/context-window handling align with the newer Sonnet 4.6 and Opus 4.7 family.
