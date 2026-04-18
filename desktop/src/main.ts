@@ -330,13 +330,16 @@ function logSidecarStream(prefix: string, stream: NodeJS.ReadableStream): void {
   });
 }
 
-async function stopSidecar(): Promise<void> {
-  const childProcess = sidecarProcess;
-  sidecarProcess = null;
-  currentBaseUrl = '';
-
+async function stopSidecar(
+  childProcess: ChildProcessByStdio<null, Readable, Readable> | null = sidecarProcess,
+): Promise<void> {
   if (!childProcess) {
     return;
+  }
+
+  if (sidecarProcess === childProcess) {
+    sidecarProcess = null;
+    currentBaseUrl = '';
   }
 
   await new Promise<void>((resolve) => {
@@ -374,24 +377,36 @@ async function stopSidecar(): Promise<void> {
 
 async function connectToRemote(remoteInput: string): Promise<void> {
   const remoteUrl = normalizeRemoteServerURL(remoteInput);
+  const previousSidecar = sidecarProcess;
+  const previousBaseUrl = currentBaseUrl;
 
   await waitForChatSettingsReady(remoteUrl);
-  await stopSidecar();
 
   currentBaseUrl = remoteUrl;
+  sidecarProcess = null;
+
+  try {
+    if (mainWindow) {
+      mainWindow.setTitle(`Kodelet — Remote: ${getRemoteDisplayLabel(remoteUrl)}`);
+      await mainWindow.loadURL(remoteUrl);
+    }
+  } catch (error) {
+    currentBaseUrl = previousBaseUrl;
+    sidecarProcess = previousSidecar;
+    throw error;
+  }
+
   desktopState = saveDesktopState(app.getPath('userData'), {
     ...desktopState,
     connectionMode: 'remote',
     remoteUrl,
   });
-
-  if (mainWindow) {
-    mainWindow.setTitle(`Kodelet — Remote: ${getRemoteDisplayLabel(remoteUrl)}`);
-    await mainWindow.loadURL(remoteUrl);
-  }
+  await stopSidecar(previousSidecar);
 }
 
 async function launchWorkspace(workspacePath: string): Promise<void> {
+  const previousSidecar = sidecarProcess;
+  const previousBaseUrl = currentBaseUrl;
   const port = await findFreePort();
   const sidecarBinary = resolveSidecarBinary({
     argv: process.argv,
@@ -464,20 +479,27 @@ async function launchWorkspace(workspacePath: string): Promise<void> {
     throw error;
   }
 
-  await stopSidecar();
-
   sidecarProcess = childProcess;
   currentBaseUrl = baseUrl;
+
+  try {
+    if (mainWindow) {
+      mainWindow.setTitle(`Kodelet — Local: ${workspacePath}`);
+      await mainWindow.loadURL(baseUrl);
+    }
+  } catch (error) {
+    sidecarProcess = previousSidecar;
+    currentBaseUrl = previousBaseUrl;
+    childProcess.kill('SIGTERM');
+    throw error;
+  }
+
   desktopState = saveDesktopState(app.getPath('userData'), {
     ...desktopState,
     connectionMode: 'local',
     workspacePath,
   });
-
-  if (mainWindow) {
-    mainWindow.setTitle(`Kodelet — Local: ${workspacePath}`);
-    await mainWindow.loadURL(baseUrl);
-  }
+  await stopSidecar(previousSidecar);
 }
 
 async function reconnectCurrentServer(): Promise<void> {
