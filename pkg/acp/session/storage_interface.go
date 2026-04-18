@@ -21,5 +21,10 @@ type SessionStorage interface {
 
 // GetDefaultStorage returns the default storage implementation (SQLite).
 func GetDefaultStorage(ctx context.Context) (SessionStorage, error) {
-	return NewStorage(ctx)
+	storage, err := NewStorage(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return storage, nil
 }

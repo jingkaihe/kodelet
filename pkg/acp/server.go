@@ -147,8 +147,9 @@ func NewServer(opts ...Option) *Server {
 	storage, err := session.GetDefaultStorage(ctx)
 	if err != nil {
 		logger.G(ctx).WithError(err).Warn("Failed to create session storage for replay")
+	} else {
+		s.sessionStorage = storage
 	}
-	s.sessionStorage = storage
 
 	return s
 }
