@@ -1802,10 +1802,9 @@ code[class*="language-"] {
   justify-content: center;
   border-radius: 9999px;
   border: 1px solid rgba(20, 20, 19, 0.08);
-  background: rgba(245, 240, 231, 0.88);
+  background: rgb(245 240 231);
   color: #7a7367;
   box-shadow: none;
-  backdrop-filter: blur(4px);
   transition:
     box-shadow 140ms ease,
     border-color 140ms ease,
@@ -1815,7 +1814,7 @@ code[class*="language-"] {
 
 .sidebar-toggle-button:hover {
   border-color: rgba(20, 20, 19, 0.1);
-  background: rgba(247, 242, 234, 0.94);
+  background: rgb(247 242 234);
   color: var(--kodelet-dark);
   box-shadow: none;
 }
@@ -1835,9 +1834,16 @@ code[class*="language-"] {
 .sidebar-toggle-button-open {
   position: absolute;
   top: 1rem;
-  right: -1.15rem;
+  right: -1.35rem;
   z-index: 30;
   pointer-events: auto;
+}
+
+@media (min-width: 1024px) {
+	.sidebar-toggle-button-open {
+		cursor: pointer;
+		opacity: 1;
+	}
 }
 
 .sidebar-toggle-button-collapsed {
@@ -1852,26 +1858,21 @@ code[class*="language-"] {
 }
 
 .sidebar-splitter {
-  width: 2rem;
+  width: 1.35rem;
   z-index: 10;
-  justify-content: flex-start;
-  padding-top: 1rem;
 }
 
 .sidebar-splitter-rail {
   position: absolute;
   inset-block: 0;
   width: 1px;
-  background: rgba(20, 20, 19, 0.1);
+  background: rgba(20, 20, 19, 0.08);
 }
 
 .sidebar-splitter-grip {
   position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 0.9rem;
-  height: 2.9rem;
+  width: 0.5rem;
+  height: 5.25rem;
   border-radius: 999px;
   background: rgb(236 231 220);
   box-shadow: 0 0 0 1px rgba(20, 20, 19, 0.1);
@@ -1881,22 +1882,17 @@ code[class*="language-"] {
     transform 140ms ease;
 }
 
-.sidebar-splitter-grip::before {
-  content: "";
-  width: 2px;
-  height: 0.95rem;
-  border-radius: 999px;
-  background: rgba(20, 20, 19, 0.26);
-  box-shadow:
-    -4px 0 0 rgba(20, 20, 19, 0.18),
-    4px 0 0 rgba(20, 20, 19, 0.18);
-}
-
 .sidebar-splitter:hover .sidebar-splitter-grip,
 .sidebar-splitter.is-resizing .sidebar-splitter-grip {
   background: rgb(229 221 208);
   box-shadow: 0 0 0 1px rgba(20, 20, 19, 0.16);
-  transform: scale(1.04, 1.02);
+  transform: scaleX(1.08);
+}
+
+@media (min-width: 1024px) {
+  .sidebar-splitter:hover {
+    cursor: col-resize;
+  }
 }
 
 .tool-header {

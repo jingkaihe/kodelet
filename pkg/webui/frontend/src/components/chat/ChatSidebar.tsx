@@ -197,7 +197,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 			{onHide ? (
 				<button
 					aria-label="Hide panel"
-					className="sidebar-toggle-button sidebar-toggle-button-open lg:hidden"
+					className="sidebar-toggle-button sidebar-toggle-button-open"
 					data-testid="sidebar-hide-button"
 					disabled={disabled}
 					onClick={onHide}

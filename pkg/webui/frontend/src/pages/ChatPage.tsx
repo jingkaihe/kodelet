@@ -1444,7 +1444,7 @@ const ChatPage: React.FC = () => {
 			>
 				{sidebarVisible ? (
 					<div
-						className="fixed inset-y-0 left-0 z-40 w-[min(85vw,360px)] max-w-full shrink-0 lg:sticky lg:top-0 lg:relative lg:z-auto lg:h-[100dvh] lg:self-start lg:w-[var(--sidebar-width)]"
+						className="fixed inset-y-0 left-0 z-40 w-[min(85vw,360px)] max-w-full shrink-0 lg:sticky lg:top-0 lg:relative lg:z-20 lg:h-[100dvh] lg:self-start lg:w-[var(--sidebar-width)]"
 						data-testid="chat-sidebar-shell"
 						style={
 							{ "--sidebar-width": `${sidebarWidth}px` } as React.CSSProperties
@@ -1467,7 +1467,7 @@ const ChatPage: React.FC = () => {
 							aria-label="Resize sidebar"
 							aria-orientation="vertical"
 							className={cn(
-								"sidebar-splitter absolute inset-y-0 right-0 z-10 hidden translate-x-1/2 cursor-col-resize items-center justify-center lg:flex",
+								"sidebar-splitter absolute bottom-0 right-0 top-[4.25rem] z-10 hidden translate-x-1/2 cursor-col-resize items-center justify-center lg:flex",
 								isResizingSidebar && "is-resizing",
 							)}
 							data-testid="chat-sidebar-resizer"
