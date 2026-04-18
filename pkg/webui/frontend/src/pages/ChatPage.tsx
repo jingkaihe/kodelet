@@ -770,6 +770,10 @@ const ChatPage: React.FC = () => {
 		setIsResizingSidebar(true);
 	};
 
+	const handleSidebarResizeDoubleClick = () => {
+		setSidebarVisible(false);
+	};
+
 	const handleSubmit = async () => {
 		const prompt = draft.trim();
 		if ((!prompt && attachments.length === 0) || steering) {
@@ -1467,6 +1471,7 @@ const ChatPage: React.FC = () => {
 								isResizingSidebar && "is-resizing",
 							)}
 							data-testid="chat-sidebar-resizer"
+							onDoubleClick={handleSidebarResizeDoubleClick}
 							onMouseDown={handleSidebarResizeStart}
 							role="separator"
 							tabIndex={-1}

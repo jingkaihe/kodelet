@@ -46,6 +46,16 @@ const formatCwdGroupLabel = (cwd?: string): string => {
 	return normalized;
 };
 
+const getCwdGroupPrimaryLabel = (cwd?: string): string => {
+	const normalized = cwd?.trim();
+	if (!normalized) {
+		return "No directory";
+	}
+
+	const parts = normalized.split(/[\\/]+/).filter(Boolean);
+	return parts[parts.length - 1] || normalized;
+};
+
 const groupConversationsByCwd = (conversations: Conversation[]) => {
 	const groups = new Map<
 		string,
@@ -53,6 +63,8 @@ const groupConversationsByCwd = (conversations: Conversation[]) => {
 			key: string;
 			cwd?: string;
 			label: string;
+			primaryLabel: string;
+			secondaryLabel?: string;
 			conversations: Conversation[];
 		}
 	>();
@@ -62,10 +74,13 @@ const groupConversationsByCwd = (conversations: Conversation[]) => {
 		const key = normalizedCwd || "__no_cwd__";
 
 		if (!groups.has(key)) {
+			const label = formatCwdGroupLabel(normalizedCwd);
 			groups.set(key, {
 				key,
 				cwd: normalizedCwd,
-				label: formatCwdGroupLabel(normalizedCwd),
+				label,
+				primaryLabel: getCwdGroupPrimaryLabel(normalizedCwd),
+				secondaryLabel: normalizedCwd ? label : undefined,
 				conversations: [],
 			});
 		}
@@ -178,11 +193,11 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 	const showLoadingState = loading && conversations.length === 0;
 
 	return (
-		<aside className="relative overflow-visible border-b border-black/8 bg-kodelet-light-gray px-6 py-6 lg:flex lg:h-screen lg:flex-col lg:border-b-0 lg:border-r">
+		<aside className="chat-sidebar-surface relative overflow-visible border-b border-black/8 px-6 py-6 lg:flex lg:h-screen lg:flex-col lg:border-b-0 lg:border-r">
 			{onHide ? (
 				<button
 					aria-label="Hide panel"
-					className="sidebar-toggle-button sidebar-toggle-button-open"
+					className="sidebar-toggle-button sidebar-toggle-button-open lg:hidden"
 					data-testid="sidebar-hide-button"
 					disabled={disabled}
 					onClick={onHide}
@@ -290,10 +305,17 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 									</svg>
 								</span>
 								<span
-									className="conversation-group-title"
+									className="conversation-group-labels"
 									title={group.cwd || group.label}
 								>
-									{group.label}
+									<span className="conversation-group-title">
+										{group.primaryLabel}
+									</span>
+									{group.secondaryLabel ? (
+										<span className="conversation-group-path">
+											{group.secondaryLabel}
+										</span>
+									) : null}
 								</span>
 								<span className="conversation-group-count">
 									{group.conversations.length}

@@ -16,7 +16,7 @@ tmp_dir = "tmp"
   delay = 1000
   # Exclude directories that shouldn't trigger rebuilds (build artifacts, dependencies, etc.)
   exclude_dir = ["assets", "tmp", "vendor", "testdata", "bin", "dist", "node_modules", ".github", ".git", "pkg/webui/frontend/node_modules", "pkg/webui/dist", "pkg/webui/frontend/dist", "pkg/webui/frontend/.next", "pkg/webui/frontend/coverage", ".kodelet"]
-  exclude_file = []
+  exclude_file = ["pkg/webui/frontend/package-lock.json"]
   # Exclude test files, log files, and temporary files
   exclude_regex = ["_test.go", ".*\\.log$", ".*\\.tmp$"]
   exclude_unchanged = false
