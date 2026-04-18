@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.3.42-beta (2026-04-18)
+
+Polished the Web UI chat sidebar with a broader visual refresh, clearer working-directory group labels, and improved hover/focus treatment for conversation navigation and actions.
+
 ## 0.3.41-beta (2026-04-18)
 
 Updated the Go toolchain baseline to `1.26.2` across the module, local development tooling, and project docs, and pinned `golangci-lint` in `mise.toml` to `2.11.4` for more reproducible local setup.
