@@ -193,7 +193,7 @@ mise run desktop-package
 
 By default, the Electron app resolves `kodelet` from `PATH`. For repository development, `mise run desktop-dev` passes `--kodelet-path ./bin/kodelet` so the shell runs against the freshly built local binary.
 
-The local `desktop-package` flow explicitly disables macOS notarization. This avoids accidental failures when partial `APPLE_*` credentials are present in the shell environment; signing/notarization should be handled in a dedicated release path.
+The local `desktop-package` flow explicitly disables macOS signing and notarization. This avoids accidental failures when partial `APPLE_*` credentials are present in the shell environment; signing/notarization should be handled in a dedicated release path.
 
 ### Local Development
 

@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
+import fs from 'node:fs';
 import type { Readable } from 'node:stream';
 import net from 'node:net';
 import path from 'node:path';
@@ -34,6 +35,8 @@ let desktopState: DesktopState = {
 };
 let shuttingDown = false;
 
+const desktopVersion = resolveDesktopVersion();
+
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 }
@@ -52,6 +55,28 @@ app.on('second-instance', () => {
 
 function getProjectRoot(): string {
   return path.resolve(app.getAppPath(), '..', '..');
+}
+
+function resolveDesktopVersion(): string {
+  const candidatePaths = app.isPackaged
+    ? [path.join(process.resourcesPath, 'VERSION.txt')]
+    : [
+        path.resolve(__dirname, '..', '..', 'VERSION.txt'),
+        path.resolve(app.getAppPath(), '..', 'VERSION.txt'),
+      ];
+
+  for (const candidatePath of candidatePaths) {
+    try {
+      const version = fs.readFileSync(candidatePath, 'utf8').trim();
+      if (version) {
+        return version;
+      }
+    } catch {
+      // Try the next candidate.
+    }
+  }
+
+  return app.getVersion();
 }
 
 function withDefaultDesktopPath(existingPath: string | undefined): string {
@@ -117,7 +142,25 @@ function createMenu(): void {
   const template: MenuItemConstructorOptions[] = [];
 
   if (process.platform === 'darwin') {
-    template.push({ role: 'appMenu' });
+    template.push({
+      role: 'appMenu',
+      submenu: [
+        {
+          label: `About Kodelet ${desktopVersion}`,
+          click: () => {
+            app.showAboutPanel();
+          },
+        },
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    });
   }
 
   const fileMenu: MenuItemConstructorOptions = {
@@ -200,6 +243,14 @@ function createMenu(): void {
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
+
+app.setAboutPanelOptions({
+  applicationName: 'Kodelet',
+  applicationVersion: desktopVersion,
+  version: desktopVersion,
+  copyright: 'Copyright © Jingkai He',
+  website: 'https://github.com/jingkaihe/kodelet',
+});
 
 async function findFreePort(): Promise<number> {
   return new Promise((resolve, reject) => {
