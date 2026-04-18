@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
@@ -248,6 +250,38 @@ func TestServer_SendUpdate(t *testing.T) {
 	params := notif["params"].(map[string]any)
 	assert.Equal(t, "test-session", params["sessionId"])
 	assert.NotNil(t, params["update"])
+}
+
+func TestServer_SendUpdate_WithUnavailableStorage(t *testing.T) {
+	tmpDir := t.TempDir()
+	basePath := filepath.Join(tmpDir, "base-path-file")
+	require.NoError(t, os.WriteFile(basePath, []byte("x"), 0o644))
+	t.Setenv("KODELET_BASE_PATH", basePath)
+
+	input := bytes.NewBuffer(nil)
+	output := bytes.NewBuffer(nil)
+
+	server := NewServer(
+		WithInput(input),
+		WithOutput(output),
+		WithContext(context.Background()),
+	)
+
+	err := server.SendUpdate(acptypes.SessionID("test-session"), map[string]any{
+		"sessionUpdate": "agent_message_chunk",
+		"content": map[string]any{
+			"type": "text",
+			"text": "Hello",
+		},
+	})
+	require.NoError(t, err)
+
+	scanner := bufio.NewScanner(output)
+	require.True(t, scanner.Scan())
+
+	var notif map[string]any
+	require.NoError(t, json.Unmarshal(scanner.Bytes(), &notif))
+	assert.Equal(t, "session/update", notif["method"])
 }
 
 func TestServer_Notification_Cancel(t *testing.T) {
