@@ -212,7 +212,7 @@ func TestFileReadTool_Line_Padding(t *testing.T) {
 	// Create a temporary test file with 100 lines
 	var content strings.Builder
 	for i := 1; i <= 100; i++ {
-		content.WriteString(fmt.Sprintf("Line %d\n", i))
+		fmt.Fprintf(&content, "Line %d\n", i)
 	}
 
 	tmpfile, err := os.CreateTemp("", "FileReadtest_padding")
@@ -274,7 +274,7 @@ func TestFileReadTool_MaxOutputBytes(t *testing.T) {
 
 	// Write 200 of these lines (approx 200KB, which exceeds MaxOutputBytes of 100KB)
 	for i := 1; i < 200; i++ {
-		content.WriteString(fmt.Sprintf("Line %d: %s", i, largeLine))
+		fmt.Fprintf(&content, "Line %d: %s", i, largeLine)
 	}
 
 	tmpfile, err := os.CreateTemp("", "FileReadtest_large")
@@ -343,7 +343,7 @@ func TestFileReadTool_LineLimit(t *testing.T) {
 	// Create a temporary test file with 50 lines
 	var content strings.Builder
 	for i := 1; i <= 50; i++ {
-		content.WriteString(fmt.Sprintf("Line %d\n", i))
+		fmt.Fprintf(&content, "Line %d\n", i)
 	}
 
 	tmpfile, err := os.CreateTemp("", "FileReadtest_linelimit")
@@ -449,7 +449,7 @@ func TestFileReadTool_LineLimitMetadata(t *testing.T) {
 	// Create a temporary test file with 20 lines
 	var content strings.Builder
 	for i := 1; i <= 20; i++ {
-		content.WriteString(fmt.Sprintf("Line %d\n", i))
+		fmt.Fprintf(&content, "Line %d\n", i)
 	}
 
 	tmpfile, err := os.CreateTemp("", "FileReadtest_metadata")

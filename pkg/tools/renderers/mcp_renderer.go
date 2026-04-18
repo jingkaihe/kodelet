@@ -23,10 +23,10 @@ func (r *MCPToolRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	}
 
 	var output strings.Builder
-	output.WriteString(fmt.Sprintf("MCP Tool: %s", meta.MCPToolName))
+	fmt.Fprintf(&output, "MCP Tool: %s", meta.MCPToolName)
 
 	if meta.ServerName != "" {
-		output.WriteString(fmt.Sprintf(" (server: %s)", meta.ServerName))
+		fmt.Fprintf(&output, " (server: %s)", meta.ServerName)
 	}
 	output.WriteString("\n")
 
@@ -34,7 +34,7 @@ func (r *MCPToolRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	if len(meta.Parameters) > 0 {
 		output.WriteString("\nParameters:\n")
 		for k, v := range meta.Parameters {
-			output.WriteString(fmt.Sprintf("  %s: %v\n", k, v))
+			fmt.Fprintf(&output, "  %s: %v\n", k, v)
 		}
 	}
 
@@ -50,13 +50,13 @@ func (r *MCPToolRenderer) RenderCLI(result tools.StructuredToolResult) string {
 			case "text":
 				output.WriteString(content.Text)
 			case "image":
-				output.WriteString(fmt.Sprintf("[Image: %s, size: %d bytes]",
-					content.MimeType, len(content.Data)))
+				fmt.Fprintf(&output, "[Image: %s, size: %d bytes]",
+					content.MimeType, len(content.Data))
 			case "resource":
-				output.WriteString(fmt.Sprintf("[Resource: %s (%s)]",
-					content.URI, content.MimeType))
+				fmt.Fprintf(&output, "[Resource: %s (%s)]",
+					content.URI, content.MimeType)
 			default:
-				output.WriteString(fmt.Sprintf("[%s content]", content.Type))
+				fmt.Fprintf(&output, "[%s content]", content.Type)
 				if content.Text != "" {
 					output.WriteString(": ")
 					output.WriteString(content.Text)
@@ -70,7 +70,7 @@ func (r *MCPToolRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	}
 
 	if meta.ExecutionTime > 0 {
-		output.WriteString(fmt.Sprintf("\n\nExecution time: %v", meta.ExecutionTime))
+		fmt.Fprintf(&output, "\n\nExecution time: %v", meta.ExecutionTime)
 	}
 
 	return output.String()

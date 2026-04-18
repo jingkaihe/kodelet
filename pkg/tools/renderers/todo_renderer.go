@@ -32,11 +32,11 @@ func (r *TodoRenderer) RenderCLI(result tools.StructuredToolResult) string {
 
 	// Show statistics if available
 	if meta.Statistics.Total > 0 {
-		output.WriteString(fmt.Sprintf("\nTotal: %d | Completed: %d | In Progress: %d | Pending: %d\n\n",
+		fmt.Fprintf(&output, "\nTotal: %d | Completed: %d | In Progress: %d | Pending: %d\n\n",
 			meta.Statistics.Total,
 			meta.Statistics.Completed,
 			meta.Statistics.InProgress,
-			meta.Statistics.Pending))
+			meta.Statistics.Pending)
 	}
 
 	// Show todo items
@@ -49,8 +49,8 @@ func (r *TodoRenderer) RenderCLI(result tools.StructuredToolResult) string {
 			statusIcon = "→"
 		}
 
-		output.WriteString(fmt.Sprintf("%s [%s] %s - %s\n",
-			statusIcon, item.Priority, item.ID, item.Content))
+		fmt.Fprintf(&output, "%s [%s] %s - %s\n",
+			statusIcon, item.Priority, item.ID, item.Content)
 	}
 
 	return output.String()

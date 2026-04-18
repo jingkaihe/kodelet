@@ -55,13 +55,13 @@ func (r *applyPatchToolResult) GetResult() string {
 	var b strings.Builder
 	b.WriteString("Success. Updated the following files:\n")
 	for _, path := range r.added {
-		b.WriteString(fmt.Sprintf("A %s\n", path))
+		fmt.Fprintf(&b, "A %s\n", path)
 	}
 	for _, path := range r.modified {
-		b.WriteString(fmt.Sprintf("M %s\n", path))
+		fmt.Fprintf(&b, "M %s\n", path)
 	}
 	for _, path := range r.deleted {
-		b.WriteString(fmt.Sprintf("D %s\n", path))
+		fmt.Fprintf(&b, "D %s\n", path)
 	}
 	return b.String()
 }

@@ -116,9 +116,9 @@ func (t *SkillTool) Description() string {
 
 	for _, name := range names {
 		skill := t.skills[name]
-		sb.WriteString(fmt.Sprintf("### %s\n", skill.Name))
-		sb.WriteString(fmt.Sprintf("- **Description**: %s\n", skill.Description))
-		sb.WriteString(fmt.Sprintf("- **Directory**: `%s`\n\n", skill.Directory))
+		fmt.Fprintf(&sb, "### %s\n", skill.Name)
+		fmt.Fprintf(&sb, "- **Description**: %s\n", skill.Description)
+		fmt.Fprintf(&sb, "- **Directory**: `%s`\n\n", skill.Directory)
 	}
 
 	return sb.String()

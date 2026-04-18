@@ -15,7 +15,7 @@ type BashRenderer struct{}
 func (r *BashRenderer) RenderCLI(result tools.StructuredToolResult) string {
 	var output strings.Builder
 	if !result.Success {
-		output.WriteString(fmt.Sprintf("Error: %s\n", result.Error))
+		fmt.Fprintf(&output, "Error: %s\n", result.Error)
 	}
 
 	// Try to extract regular BashMetadata first

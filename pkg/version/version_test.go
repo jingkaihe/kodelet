@@ -24,11 +24,11 @@ func TestInfo_String(t *testing.T) {
 		Version:   "1.0.0",
 		GitCommit: "abc123",
 		BuildTime: "Sun Aug 25 09:34:29 AM UTC 2025",
-		GoVersion: "go1.25.1",
+		GoVersion: "go1.26.2",
 	}
 
 	result := info.String()
-	expected := "Version: 1.0.0, GitCommit: abc123, BuildTime: Sun Aug 25 09:34:29 AM UTC 2025, GoVersion: go1.25.1"
+	expected := "Version: 1.0.0, GitCommit: abc123, BuildTime: Sun Aug 25 09:34:29 AM UTC 2025, GoVersion: go1.26.2"
 	assert.Equal(t, expected, result)
 }
 
@@ -37,7 +37,7 @@ func TestInfo_JSON(t *testing.T) {
 		Version:   "1.0.0",
 		GitCommit: "abc123",
 		BuildTime: "Sun Aug 25 09:34:29 AM UTC 2025",
-		GoVersion: "go1.25.1",
+		GoVersion: "go1.26.2",
 	}
 
 	jsonString, err := info.JSON()
@@ -65,7 +65,7 @@ func TestInfo_JSONFormat(t *testing.T) {
 		Version:   "1.0.0",
 		GitCommit: "abc123",
 		BuildTime: "Sun Aug 25 09:34:29 AM UTC 2025",
-		GoVersion: "go1.25.1",
+		GoVersion: "go1.26.2",
 	}
 
 	jsonString, err := info.JSON()
@@ -75,7 +75,7 @@ func TestInfo_JSONFormat(t *testing.T) {
   "version": "1.0.0",
   "gitCommit": "abc123",
   "buildTime": "Sun Aug 25 09:34:29 AM UTC 2025",
-  "goVersion": "go1.25.1"
+  "goVersion": "go1.26.2"
 }`
 
 	assert.Equal(t, expectedJSON, jsonString)

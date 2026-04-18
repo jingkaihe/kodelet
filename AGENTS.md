@@ -23,7 +23,7 @@ recipes/         # Sample fragment/recipe templates
 ```
 
 ## Tech Stack
-**Backend**: Go 1.25.6, Cobra/Viper (CLI), Logrus (logging), SQLite (modernc.org/sqlite), OpenTelemetry
+**Backend**: Go 1.26.2, Cobra/Viper (CLI), Logrus (logging), SQLite (modernc.org/sqlite), OpenTelemetry
 **Frontend**: React 18, TypeScript, Vite, Vitest, Tailwind CSS, DaisyUI
 **LLM SDKs**: Anthropic v1.13.0, OpenAI v1.41.2, MCP v0.29.0
 **Tools**: mise (task runner), Docker

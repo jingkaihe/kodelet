@@ -26,10 +26,10 @@ func (r *CustomToolRenderer) RenderCLI(result tools.StructuredToolResult) string
 
 	// Extract tool name without prefix for display
 	toolDisplayName := strings.TrimPrefix(result.ToolName, "custom_tool_")
-	output.WriteString(fmt.Sprintf("Custom Tool: %s", toolDisplayName))
+	fmt.Fprintf(&output, "Custom Tool: %s", toolDisplayName)
 
 	if meta.ExecutionTime > 0 {
-		output.WriteString(fmt.Sprintf(" (executed in %v)", meta.ExecutionTime))
+		fmt.Fprintf(&output, " (executed in %v)", meta.ExecutionTime)
 	}
 	output.WriteString("\n")
 
