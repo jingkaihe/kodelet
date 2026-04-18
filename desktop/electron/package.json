@@ -10,11 +10,11 @@
     "dev:local": "npm run build && electron . --kodelet-path ../../bin/kodelet",
     "start": "npm run build && electron .",
     "test": "tsx --test src/test/*.test.ts",
-    "package": "npm run build && electron-builder"
+    "package": "npm run build && electron-builder --config.mac.notarize=false"
   },
   "devDependencies": {
     "@types/node": "^24.0.10",
-    "electron": "^37.2.0",
+    "electron": "^39.8.5",
     "electron-builder": "^26.0.12",
     "tsx": "^4.20.6",
     "typescript": "^5.9.2"

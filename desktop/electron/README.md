@@ -45,6 +45,8 @@ mise run desktop-package
 
 This packages the Electron app and bundles `bin/kodelet*` into the app resources.
 
+For local development packaging, macOS notarization is explicitly disabled so stray `APPLE_*` environment variables do not cause `electron-builder` to fail. Keep notarization as a separate release/CI concern.
+
 ## Current caveats
 
 - API keys provided only via shell startup files may not be available when launching a packaged GUI app directly from Finder/Explorer.
