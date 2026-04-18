@@ -222,18 +222,18 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 			) : null}
 
 			<div className="min-h-0 flex-1 pt-8 lg:pt-2">
-				<button
-					className="sidebar-action-link"
-					data-testid="sidebar-new-chat-button"
-					disabled={disabled}
-					onClick={onNewChat}
-					type="button"
-				>
-					<span className="sidebar-action-icon">
+				<div className="sidebar-action-link">
+					<button
+						className="sidebar-action-icon"
+						data-testid="sidebar-new-chat-button"
+						disabled={disabled}
+						onClick={onNewChat}
+						type="button"
+					>
 						<span className="sidebar-action-plus">+</span>
-					</span>
+					</button>
 					<span className="sidebar-action-label">New chat</span>
-				</button>
+				</div>
 
 				<div className="sidebar-section-title">Recent chats</div>
 
