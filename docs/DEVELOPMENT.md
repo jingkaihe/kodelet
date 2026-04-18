@@ -170,6 +170,29 @@ mise run frontend-test-ui
 mise run frontend-test-coverage
 ```
 
+### Desktop Development
+
+Kodelet also has an experimental Electron desktop shell under `desktop/electron/`.
+
+The desktop app is intentionally thin and written in TypeScript: it either launches the existing `kodelet serve` web UI as a local sidecar, or connects directly to a remote `kodelet serve` base URL. In both cases it waits for `/api/chat/settings` and then loads the resulting same-origin UI inside Electron.
+
+**Desktop Commands**:
+```bash
+# Install Electron dependencies
+mise run desktop-install
+
+# Build the repo binary and run Electron against ./bin/kodelet
+mise run desktop-dev
+
+# Run desktop helper tests
+mise run desktop-test
+
+# Build a packaged desktop app
+mise run desktop-package
+```
+
+By default, the Electron app resolves `kodelet` from `PATH`. For repository development, `mise run desktop-dev` passes `--kodelet-path ./bin/kodelet` so the shell runs against the freshly built local binary.
+
 ### Local Development
 
 1. Build the development version:
@@ -189,6 +212,8 @@ mise run frontend-test-coverage
 │   └── workflows/       # GitHub Actions workflows (including release.yml)
 ├── cmd/kodelet/         # Application entry point (22+ command files)
 ├── docs/                # Documentation files
+├── desktop/
+│   └── electron/        # Electron shell around `kodelet serve`
 ├── pkg/                 # Core packages
 │   ├── conversations/   # Conversation storage and management
 │   ├── llm/             # LLM client for AI interactions

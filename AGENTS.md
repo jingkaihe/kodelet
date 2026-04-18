@@ -18,6 +18,7 @@ pkg/             # Core packages
   ├── webui/     # Web UI (React/TypeScript SPA embedded in binary)
   └── ...        # logger/, presenter/, sysprompt/, telemetry/, types/, utils/
 docs/            # Documentation (MANUAL.md, DEVELOPMENT.md, SKILLS.md, etc.)
+desktop/         # Desktop clients and shells
 skills/          # Built-in skills
 recipes/         # Sample fragment/recipe templates
 ```
@@ -60,6 +61,9 @@ kodelet pr [--target main]       # Generate PRs
 # Development
 mise run build|test|lint|format  # Standard commands
 mise run build-dev               # Fast build (skip frontend)
+mise run desktop-install         # Install Electron desktop dependencies
+mise run desktop-dev             # Run Electron desktop shell
+mise run desktop-test            # Run Electron desktop helper tests
 ```
 
 See [docs/MANUAL.md](docs/MANUAL.md) for complete reference.

@@ -195,3 +195,30 @@ run = [
   "cd pkg/webui/frontend && npm install",
   "echo 'All dependencies installed successfully!'",
 ]
+
+[tasks.desktop-install]
+description = "Install Electron desktop shell dependencies"
+run = [
+  "echo 'Installing npm dependencies for desktop shell...'",
+  "cd desktop/electron && npm install",
+]
+
+[tasks.desktop-dev]
+description = "Run the Electron desktop shell"
+depends = ["build"]
+run = [
+  "cd desktop/electron && npm run dev -- --kodelet-path ../../bin/kodelet",
+]
+
+[tasks.desktop-test]
+description = "Run Electron desktop shell tests"
+run = [
+  "cd desktop/electron && npm test",
+]
+
+[tasks.desktop-package]
+description = "Package the Electron desktop shell"
+depends = ["build"]
+run = [
+  "cd desktop/electron && npm run package",
+]
