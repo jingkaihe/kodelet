@@ -441,6 +441,7 @@ func TestThinkingConfigForModel(t *testing.T) {
 		assert.Nil(t, config.GetBudgetTokens())
 		require.NotNil(t, config.GetType())
 		assert.Equal(t, "adaptive", *config.GetType())
+		assert.Equal(t, anthropic.ThinkingConfigAdaptiveDisplaySummarized, config.OfAdaptive.Display)
 	})
 
 	t.Run("legacy models keep budgeted thinking", func(t *testing.T) {
@@ -451,6 +452,7 @@ func TestThinkingConfigForModel(t *testing.T) {
 		assert.EqualValues(t, 4096, *config.GetBudgetTokens())
 		require.NotNil(t, config.GetType())
 		assert.Equal(t, "enabled", *config.GetType())
+		assert.Equal(t, anthropic.ThinkingConfigEnabledDisplaySummarized, config.OfEnabled.Display)
 	})
 
 	t.Run("zero budget disables thinking", func(t *testing.T) {

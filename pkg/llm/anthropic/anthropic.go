@@ -754,7 +754,10 @@ func (t *Thread) thinkingConfigForModel(model anthropic.Model) (anthropic.Thinki
 
 	if isAdaptiveThinkingModel(model) {
 		return anthropic.ThinkingConfigParamUnion{
-			OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{Type: "adaptive"},
+			OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{
+				Type:    "adaptive",
+				Display: anthropic.ThinkingConfigAdaptiveDisplaySummarized,
+			},
 		}, true
 	}
 
@@ -762,6 +765,7 @@ func (t *Thread) thinkingConfigForModel(model anthropic.Model) (anthropic.Thinki
 		OfEnabled: &anthropic.ThinkingConfigEnabledParam{
 			Type:         "enabled",
 			BudgetTokens: int64(t.Config.ThinkingBudgetTokens),
+			Display:      anthropic.ThinkingConfigEnabledDisplaySummarized,
 		},
 	}, true
 }
