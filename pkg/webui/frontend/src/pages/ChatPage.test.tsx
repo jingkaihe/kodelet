@@ -287,6 +287,9 @@ describe("ChatPage", () => {
 		render(<ChatPage />);
 
 		await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
+		expect(
+			screen.getByRole("button", { name: "New chat" }),
+		).toBe(screen.getByTestId("sidebar-new-chat-button"));
 		fireEvent.click(screen.getByTestId("sidebar-new-chat-button"));
 		expect(screen.getByTestId("new-chat-dialog")).toBeInTheDocument();
 
