@@ -13,6 +13,7 @@ import {
 } from 'electron';
 
 import { getRemoteDisplayLabel, normalizeRemoteServerURL } from './lib/remote';
+import { canOpenExternalURL } from './lib/navigation';
 import { buildSidecarArgs, resolveSidecarBinary } from './lib/sidecar';
 import {
   type DesktopState,
@@ -118,13 +119,21 @@ function isAllowedNavigation(url: string): boolean {
   }
 }
 
+function openExternalURL(url: string): void {
+  if (!canOpenExternalURL(url)) {
+    return;
+  }
+
+  void shell.openExternal(url);
+}
+
 function attachNavigationGuards(window: BrowserWindow): void {
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedNavigation(url)) {
       return { action: 'allow' };
     }
 
-    void shell.openExternal(url);
+    openExternalURL(url);
     return { action: 'deny' };
   });
 
@@ -134,7 +143,7 @@ function attachNavigationGuards(window: BrowserWindow): void {
     }
 
     event.preventDefault();
-    void shell.openExternal(url);
+    openExternalURL(url);
   });
 }
 
@@ -366,8 +375,8 @@ async function stopSidecar(): Promise<void> {
 async function connectToRemote(remoteInput: string): Promise<void> {
   const remoteUrl = normalizeRemoteServerURL(remoteInput);
 
-  await stopSidecar();
   await waitForChatSettingsReady(remoteUrl);
+  await stopSidecar();
 
   currentBaseUrl = remoteUrl;
   desktopState = saveDesktopState(app.getPath('userData'), {
@@ -392,8 +401,6 @@ async function launchWorkspace(workspacePath: string): Promise<void> {
   });
   const baseUrl = `http://127.0.0.1:${port}`;
 
-  await stopSidecar();
-
   const childProcess = spawn(
     sidecarBinary,
     buildSidecarArgs({
@@ -411,6 +418,24 @@ async function launchWorkspace(workspacePath: string): Promise<void> {
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   );
+  let launchSettled = false;
+  let rejectLaunchError: (error: Error) => void = () => {};
+  const launchErrorPromise = new Promise<never>((_resolve, reject) => {
+    rejectLaunchError = reject;
+  });
+
+  childProcess.on('error', (error) => {
+    if (!launchSettled) {
+      rejectLaunchError(new Error(`failed to start kodelet sidecar "${sidecarBinary}": ${error.message}`));
+      return;
+    }
+
+    if (sidecarProcess !== childProcess || shuttingDown) {
+      return;
+    }
+
+    showErrorDialog('Kodelet sidecar error', error);
+  });
 
   logSidecarStream('[kodelet]', childProcess.stdout);
   logSidecarStream('[kodelet]', childProcess.stderr);
@@ -431,11 +456,15 @@ async function launchWorkspace(workspacePath: string): Promise<void> {
   });
 
   try {
-    await waitForChatSettingsReady(baseUrl, childProcess);
+    await Promise.race([waitForChatSettingsReady(baseUrl, childProcess), launchErrorPromise]);
+    launchSettled = true;
   } catch (error) {
+    launchSettled = true;
     childProcess.kill('SIGTERM');
     throw error;
   }
+
+  await stopSidecar();
 
   sidecarProcess = childProcess;
   currentBaseUrl = baseUrl;
