@@ -397,6 +397,11 @@ func TestIsThinkingModel(t *testing.T) {
 		expected bool
 	}{
 		{
+			name:     "mythos preview supports thinking",
+			model:    anthropic.ModelClaudeMythosPreview,
+			expected: true,
+		},
+		{
 			name:     "haiku 4.5 alias supports thinking",
 			model:    anthropic.ModelClaudeHaiku4_5,
 			expected: true,
@@ -423,6 +428,153 @@ func TestIsThinkingModel(t *testing.T) {
 			assert.Equal(t, tt.expected, isThinkingModel(tt.model))
 		})
 	}
+}
+
+func TestThinkingConfigForModel(t *testing.T) {
+	thread, err := NewAnthropicThread(llmtypes.Config{ThinkingBudgetTokens: 4096})
+	require.NoError(t, err)
+
+	t.Run("adaptive models use adaptive thinking", func(t *testing.T) {
+		config, ok := thread.thinkingConfigForModel(anthropic.ModelClaudeOpus4_7)
+		require.True(t, ok)
+		require.NotNil(t, config.OfAdaptive)
+		assert.Nil(t, config.GetBudgetTokens())
+		require.NotNil(t, config.GetType())
+		assert.Equal(t, "adaptive", *config.GetType())
+	})
+
+	t.Run("legacy models keep budgeted thinking", func(t *testing.T) {
+		config, ok := thread.thinkingConfigForModel(anthropic.ModelClaudeSonnet4_5)
+		require.True(t, ok)
+		require.NotNil(t, config.OfEnabled)
+		require.NotNil(t, config.GetBudgetTokens())
+		assert.EqualValues(t, 4096, *config.GetBudgetTokens())
+		require.NotNil(t, config.GetType())
+		assert.Equal(t, "enabled", *config.GetType())
+	})
+
+	t.Run("zero budget disables thinking", func(t *testing.T) {
+		disabledThread, err := NewAnthropicThread(llmtypes.Config{ThinkingBudgetTokens: 0})
+		require.NoError(t, err)
+
+		config, ok := disabledThread.thinkingConfigForModel(anthropic.ModelClaudeOpus4_7)
+		assert.False(t, ok)
+		assert.Nil(t, config.GetType())
+	})
+}
+
+func TestAnthropicReasoningEffortForModel(t *testing.T) {
+	tests := []struct {
+		name       string
+		model      anthropic.Model
+		configured string
+		expected   anthropic.OutputConfigEffort
+		ok         bool
+	}{
+		{
+			name:       "adaptive model defaults to medium",
+			model:      anthropic.ModelClaudeOpus4_7,
+			configured: "",
+			expected:   anthropic.OutputConfigEffortMedium,
+			ok:         true,
+		},
+		{
+			name:       "none maps to low for anthropic",
+			model:      anthropic.ModelClaudeOpus4_7,
+			configured: "none",
+			expected:   anthropic.OutputConfigEffortLow,
+			ok:         true,
+		},
+		{
+			name:       "minimal maps to low for anthropic",
+			model:      anthropic.ModelClaudeOpus4_7,
+			configured: "minimal",
+			expected:   anthropic.OutputConfigEffortLow,
+			ok:         true,
+		},
+		{
+			name:       "xhigh is preserved on opus 4.7",
+			model:      anthropic.ModelClaudeOpus4_7,
+			configured: "xhigh",
+			expected:   anthropic.OutputConfigEffortXhigh,
+			ok:         true,
+		},
+		{
+			name:       "xhigh falls back to high on sonnet 4.6",
+			model:      anthropic.ModelClaudeSonnet4_6,
+			configured: "xhigh",
+			expected:   anthropic.OutputConfigEffortHigh,
+			ok:         true,
+		},
+		{
+			name:       "max is supported on adaptive models",
+			model:      anthropic.ModelClaudeSonnet4_6,
+			configured: "max",
+			expected:   anthropic.OutputConfigEffortMax,
+			ok:         true,
+		},
+		{
+			name:       "non adaptive models do not get output config",
+			model:      anthropic.ModelClaudeSonnet4_5,
+			configured: "medium",
+			expected:   "",
+			ok:         false,
+		},
+		{
+			name:       "invalid values are ignored",
+			model:      anthropic.ModelClaudeOpus4_7,
+			configured: "banana",
+			expected:   "",
+			ok:         false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			effort, ok := anthropicReasoningEffortForModel(tt.model, tt.configured)
+			assert.Equal(t, tt.ok, ok)
+			assert.Equal(t, tt.expected, effort)
+		})
+	}
+}
+
+func TestOutputConfigForModel(t *testing.T) {
+	thread, err := NewAnthropicThread(llmtypes.Config{ReasoningEffort: "xhigh"})
+	require.NoError(t, err)
+
+	t.Run("adaptive models emit output config", func(t *testing.T) {
+		config, ok := thread.outputConfigForModel(anthropic.ModelClaudeOpus4_7)
+		require.True(t, ok)
+		assert.Equal(t, anthropic.OutputConfigEffortXhigh, config.Effort)
+	})
+
+	t.Run("unsupported models omit output config", func(t *testing.T) {
+		config, ok := thread.outputConfigForModel(anthropic.ModelClaudeSonnet4_5)
+		assert.False(t, ok)
+		assert.Equal(t, anthropic.OutputConfigEffort(""), config.Effort)
+	})
+}
+
+func TestRequiresInterleavedThinkingBeta(t *testing.T) {
+	t.Run("adaptive thinking does not need beta header", func(t *testing.T) {
+		params := anthropic.MessageNewParams{
+			Thinking: anthropic.ThinkingConfigParamUnion{
+				OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{},
+			},
+		}
+
+		assert.False(t, requiresInterleavedThinkingBeta(params))
+	})
+
+	t.Run("manual thinking keeps beta header", func(t *testing.T) {
+		params := anthropic.MessageNewParams{
+			Thinking: anthropic.ThinkingConfigParamUnion{
+				OfEnabled: &anthropic.ThinkingConfigEnabledParam{BudgetTokens: 4096},
+			},
+		}
+
+		assert.True(t, requiresInterleavedThinkingBeta(params))
+	})
 }
 
 func TestCompactContextIntegration(t *testing.T) {

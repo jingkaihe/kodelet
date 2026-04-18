@@ -60,11 +60,11 @@ func NewAnthropicThread(config llmtypes.Config) (*Thread, error) {
 	if config.MaxTokens == 0 {
 		config.MaxTokens = 8192
 	}
+	if config.ReasoningEffort == "" {
+		config.ReasoningEffort = "medium"
+	}
 
 	opts := []option.RequestOption{}
-	if isThinkingModel(config.Model) {
-		opts = append(opts, option.WithHeaderAdd("anthropic-beta", "interleaved-thinking-2025-05-14"))
-	}
 
 	logger := logger.G(context.Background())
 	var client anthropic.Client
@@ -529,13 +529,11 @@ func (t *Thread) processMessageExchange(
 		Model:     model,
 		Tools:     toAnthropicTools(t.tools(opt), t.useSubscription),
 	}
-	if t.shouldUtiliseThinking(model) {
-		messageParams.Thinking = anthropic.ThinkingConfigParamUnion{
-			OfEnabled: &anthropic.ThinkingConfigEnabledParam{
-				Type:         "enabled",
-				BudgetTokens: int64(t.Config.ThinkingBudgetTokens),
-			},
-		}
+	if thinkingConfig, ok := t.thinkingConfigForModel(model); ok {
+		messageParams.Thinking = thinkingConfig
+	}
+	if outputConfig, ok := t.outputConfigForModel(model); ok {
+		messageParams.OutputConfig = outputConfig
 	}
 
 	if !t.Config.IsSubAgent {
@@ -749,14 +747,78 @@ func (t *Thread) shouldUtiliseThinking(model anthropic.Model) bool {
 	return true
 }
 
+func (t *Thread) thinkingConfigForModel(model anthropic.Model) (anthropic.ThinkingConfigParamUnion, bool) {
+	if !t.shouldUtiliseThinking(model) {
+		return anthropic.ThinkingConfigParamUnion{}, false
+	}
+
+	if isAdaptiveThinkingModel(model) {
+		return anthropic.ThinkingConfigParamUnion{
+			OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{Type: "adaptive"},
+		}, true
+	}
+
+	return anthropic.ThinkingConfigParamUnion{
+		OfEnabled: &anthropic.ThinkingConfigEnabledParam{
+			Type:         "enabled",
+			BudgetTokens: int64(t.Config.ThinkingBudgetTokens),
+		},
+	}, true
+}
+
+func (t *Thread) outputConfigForModel(model anthropic.Model) (anthropic.OutputConfigParam, bool) {
+	effort, ok := anthropicReasoningEffortForModel(model, t.Config.ReasoningEffort)
+	if !ok {
+		return anthropic.OutputConfigParam{}, false
+	}
+
+	return anthropic.OutputConfigParam{Effort: effort}, true
+}
+
+func anthropicReasoningEffortForModel(model anthropic.Model, configured string) (anthropic.OutputConfigEffort, bool) {
+	if !isAdaptiveThinkingModel(model) {
+		return "", false
+	}
+
+	switch strings.ToLower(strings.TrimSpace(configured)) {
+	case "", "medium":
+		return anthropic.OutputConfigEffortMedium, true
+	case "none", "minimal", "low":
+		return anthropic.OutputConfigEffortLow, true
+	case "high":
+		return anthropic.OutputConfigEffortHigh, true
+	case "xhigh":
+		if model == anthropic.ModelClaudeOpus4_7 {
+			return anthropic.OutputConfigEffortXhigh, true
+		}
+		return anthropic.OutputConfigEffortHigh, true
+	case "max":
+		return anthropic.OutputConfigEffortMax, true
+	default:
+		return "", false
+	}
+}
+
+func isAdaptiveThinkingModel(model anthropic.Model) bool {
+	adaptiveThinkingModels := []anthropic.Model{
+		anthropic.ModelClaudeOpus4_7,
+		anthropic.ModelClaudeMythosPreview,
+		anthropic.ModelClaudeOpus4_6,
+		anthropic.ModelClaudeSonnet4_6,
+	}
+
+	return slices.Contains(adaptiveThinkingModels, model)
+}
+
 func isThinkingModel(model anthropic.Model) bool {
 	thinkingModels := []anthropic.Model{
+		anthropic.ModelClaudeMythosPreview,
+
 		// haiku 4.5 models
 		anthropic.ModelClaudeHaiku4_5,
 		anthropic.ModelClaudeHaiku4_5_20251001,
 
 		// sonnet 4.6 and 4.5 models
-		"claude-sonnet-4-6",
 		anthropic.ModelClaudeSonnet4_5,
 		anthropic.ModelClaudeSonnet4_5_20250929,
 		anthropic.ModelClaudeSonnet4_6,
@@ -771,6 +833,10 @@ func isThinkingModel(model anthropic.Model) bool {
 	return slices.Contains(thinkingModels, model)
 }
 
+func requiresInterleavedThinkingBeta(params anthropic.MessageNewParams) bool {
+	return params.Thinking.OfEnabled != nil
+}
+
 // NewMessage sends a message to Anthropic with OTEL tracing.
 // If handler implements StreamingMessageHandler, content will be streamed as it arrives.
 func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewParams, handler llmtypes.MessageHandler, opt llmtypes.MessageOpt) (*anthropic.Message, error) {
@@ -782,23 +848,35 @@ func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewPara
 		attribute.Int64("max_tokens", params.MaxTokens),
 	}
 
-	if t.shouldUtiliseThinking(params.Model) {
+	if thinkingType := params.Thinking.GetType(); thinkingType != nil {
 		spanAttrs = append(spanAttrs,
-			attribute.Bool("thinking", params.Thinking.OfEnabled.BudgetTokens > 0),
-			attribute.Int64("budget_tokens", params.Thinking.OfEnabled.BudgetTokens),
+			attribute.Bool("thinking", *thinkingType != "disabled"),
+			attribute.String("thinking_type", *thinkingType),
 		)
+		if budgetTokens := params.Thinking.GetBudgetTokens(); budgetTokens != nil {
+			spanAttrs = append(spanAttrs, attribute.Int64("budget_tokens", *budgetTokens))
+		}
 	}
 	for i, sys := range params.System {
 		spanAttrs = append(spanAttrs, attribute.String(fmt.Sprintf("system.%d", i), sys.Text))
+	}
+	if params.OutputConfig.Effort != "" {
+		spanAttrs = append(spanAttrs, attribute.String("reasoning_effort", string(params.OutputConfig.Effort)))
 	}
 
 	logFields := logrus.Fields{
 		"model":      params.Model,
 		"max_tokens": params.MaxTokens,
 	}
-	if t.shouldUtiliseThinking(params.Model) {
-		logFields["thinking"] = params.Thinking.OfEnabled.BudgetTokens > 0
-		logFields["budget_tokens"] = params.Thinking.OfEnabled.BudgetTokens
+	if thinkingType := params.Thinking.GetType(); thinkingType != nil {
+		logFields["thinking"] = *thinkingType != "disabled"
+		logFields["thinking_type"] = *thinkingType
+		if budgetTokens := params.Thinking.GetBudgetTokens(); budgetTokens != nil {
+			logFields["budget_tokens"] = *budgetTokens
+		}
+	}
+	if params.OutputConfig.Effort != "" {
+		logFields["reasoning_effort"] = params.OutputConfig.Effort
 	}
 	log := logger.G(ctx).WithFields(logFields)
 	log.Debug("new message")
@@ -812,6 +890,9 @@ func (t *Thread) NewMessage(ctx context.Context, params anthropic.MessageNewPara
 
 	retryAttempts := t.Config.Retry.Attempts
 	requestOpts := []option.RequestOption{option.WithMaxRetries(retryAttempts)}
+	if requiresInterleavedThinkingBeta(params) {
+		requestOpts = append(requestOpts, option.WithHeaderAdd("anthropic-beta", "interleaved-thinking-2025-05-14"))
+	}
 	if t.useCopilot {
 		requestOpts = append(requestOpts, auth.CopilotAnthropicRequestOptions(opt)...)
 	}
