@@ -888,6 +888,10 @@ h6 {
   position: relative;
 }
 
+.new-chat-select-shell {
+  position: relative;
+}
+
 .new-chat-field-control {
   min-height: 2.75rem;
   width: 100%;
@@ -902,10 +906,27 @@ h6 {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
 
+.new-chat-field-control-select {
+  appearance: none;
+  padding-right: 2.75rem;
+}
+
 .new-chat-field-control:focus {
   outline: none;
   border-color: rgba(217, 119, 87, 0.32);
   box-shadow: 0 0 0 4px rgba(217, 119, 87, 0.1);
+}
+
+.new-chat-select-chevron {
+  position: absolute;
+  top: 50%;
+  right: 0.95rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transform: translateY(-50%);
+  color: #7f786d;
+  pointer-events: none;
 }
 
 .new-chat-field-control-mono {

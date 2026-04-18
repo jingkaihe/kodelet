@@ -1296,20 +1296,38 @@ const ChatPage: React.FC = () => {
 			<div className="new-chat-dialog-grid">
 				<label className="new-chat-field">
 					<span className="composer-profile-label">Profile</span>
-				<select
-					aria-label="Profile"
-					className="new-chat-field-control"
-					data-testid="new-chat-profile-select"
-					onChange={(event) => setNewChatProfileDraft(event.target.value)}
-					ref={newChatProfileSelectRef}
-					value={newChatProfileDraft}
-					>
-						{availableProfiles.map((profile) => (
-							<option key={profile.name} value={profile.name}>
-								{profile.name}
-							</option>
-						))}
-					</select>
+					<div className="new-chat-select-shell">
+						<select
+							aria-label="Profile"
+							className="new-chat-field-control new-chat-field-control-select"
+							data-testid="new-chat-profile-select"
+							onChange={(event) => setNewChatProfileDraft(event.target.value)}
+							ref={newChatProfileSelectRef}
+							value={newChatProfileDraft}
+						>
+							{availableProfiles.map((profile) => (
+								<option key={profile.name} value={profile.name}>
+									{profile.name}
+								</option>
+							))}
+						</select>
+						<span className="new-chat-select-chevron" aria-hidden="true">
+							<svg
+								className="h-4 w-4"
+								fill="none"
+								viewBox="0 0 24 24"
+								xmlns="http://www.w3.org/2000/svg"
+							>
+								<path
+									d="m6 9 6 6 6-6"
+									stroke="currentColor"
+									strokeLinecap="round"
+									strokeLinejoin="round"
+									strokeWidth="1.8"
+								/>
+							</svg>
+						</span>
+					</div>
 				</label>
 
 				<label className="new-chat-field new-chat-field-wide">
