@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +19,17 @@ import (
 )
 
 const testMCPServerEnv = "KODELET_TEST_MCP_SERVER"
+
+func shortSocketPath(t *testing.T) string {
+	t.Helper()
+	name := strings.ToLower(t.Name())
+	name = strings.ReplaceAll(name, "/", "-")
+	name = strings.ReplaceAll(name, "_", "-")
+	if len(name) > 20 {
+		name = name[:20]
+	}
+	return fmt.Sprintf("/tmp/%s-%d.sock", name, time.Now().UnixNano())
+}
 
 // createTestMCPManager creates an MCPManager for testing
 func createTestMCPManager(t *testing.T) *tools.MCPManager {
@@ -193,8 +206,7 @@ func TestMCPRPCServer_SocketPath(t *testing.T) {
 }
 
 func TestMCPRPCServer_Shutdown(t *testing.T) {
-	tmpDir := t.TempDir()
-	socketPath := filepath.Join(tmpDir, "test.sock")
+	socketPath := shortSocketPath(t)
 
 	manager := createTestMCPManager(t)
 	server, err := NewMCPRPCServer(manager, socketPath)
@@ -236,8 +248,7 @@ func TestMCPRPCServer_HandleMCPCall_FullIntegration(t *testing.T) {
 	}()
 
 	// Create RPC server
-	tmpDir := t.TempDir()
-	socketPath := filepath.Join(tmpDir, "test.sock")
+	socketPath := shortSocketPath(t)
 	rpcServer, err := NewMCPRPCServer(manager, socketPath)
 	require.NoError(t, err)
 	defer func() {
@@ -331,8 +342,7 @@ func TestMCPRPCServer_HandleMCPCall_ResponseFormat(t *testing.T) {
 	}()
 
 	// Create RPC server
-	tmpDir := t.TempDir()
-	socketPath := filepath.Join(tmpDir, "test.sock")
+	socketPath := shortSocketPath(t)
 	rpcServer, err := NewMCPRPCServer(manager, socketPath)
 	require.NoError(t, err)
 	defer func() {
@@ -382,8 +392,7 @@ func TestMCPRPCServer_HandleMCPCall_ResponseFormat(t *testing.T) {
 }
 
 func TestNewMCPRPCServer_RemovesExistingSocket(t *testing.T) {
-	tmpDir := t.TempDir()
-	socketPath := filepath.Join(tmpDir, "test.sock")
+	socketPath := shortSocketPath(t)
 
 	// Create a dummy socket file
 	err := os.WriteFile(socketPath, []byte("dummy"), 0o644)
@@ -406,8 +415,7 @@ func TestNewMCPRPCServer_RemovesExistingSocket(t *testing.T) {
 }
 
 func TestMCPRPCServer_ServerConfiguration(t *testing.T) {
-	tmpDir := t.TempDir()
-	socketPath := filepath.Join(tmpDir, "test.sock")
+	socketPath := shortSocketPath(t)
 
 	manager := createTestMCPManager(t)
 	server, err := NewMCPRPCServer(manager, socketPath)

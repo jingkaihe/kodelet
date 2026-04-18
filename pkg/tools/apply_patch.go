@@ -13,6 +13,7 @@ import (
 
 	"github.com/aymanbagabas/go-udiff"
 	"github.com/invopop/jsonschema"
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
@@ -361,9 +362,9 @@ func parseAndResolvePatchInput(parameters string, workingDir string) (*parsedPat
 
 func resolvePatchPath(cwd string, patchPath string) string {
 	if filepath.IsAbs(patchPath) {
-		return filepath.Clean(patchPath)
+		return osutil.CanonicalizePath(patchPath)
 	}
-	return filepath.Clean(filepath.Join(cwd, patchPath))
+	return osutil.CanonicalizePath(filepath.Join(cwd, patchPath))
 }
 
 type patchHunkKind int

@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/skills"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -130,6 +131,7 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 	if err != nil {
 		logger.G(ctx).WithError(err).Fatal("Failed to get current working directory. Context discovery requires a valid working directory.")
 	}
+	workingDir = osutil.CanonicalizePath(workingDir)
 
 	// Get home directory with fallback
 	homeDir, err := os.UserHomeDir()
@@ -263,9 +265,9 @@ func WithLLMConfig(config llmtypes.Config) BasicStateOption {
 	return func(_ context.Context, s *BasicState) error {
 		s.llmConfig = config
 		if strings.TrimSpace(config.WorkingDirectory) != "" {
-			s.workingDir = config.WorkingDirectory
+			s.workingDir = osutil.CanonicalizePath(config.WorkingDirectory)
 			if s.contextDiscovery != nil {
-				s.contextDiscovery.workingDir = config.WorkingDirectory
+				s.contextDiscovery.workingDir = s.workingDir
 			}
 		}
 		return nil
@@ -279,12 +281,12 @@ func WithWorkingDirectory(workingDir string) BasicStateOption {
 		if workingDir == "" {
 			return nil
 		}
-		s.workingDir = workingDir
+		s.workingDir = osutil.CanonicalizePath(workingDir)
 		if s.contextDiscovery != nil {
-			s.contextDiscovery.workingDir = workingDir
+			s.contextDiscovery.workingDir = s.workingDir
 		}
 		if s.llmConfig.WorkingDirectory == "" {
-			s.llmConfig.WorkingDirectory = workingDir
+			s.llmConfig.WorkingDirectory = s.workingDir
 		}
 		return nil
 	}
@@ -518,6 +520,7 @@ func (s *BasicState) SetTodoFilePath(path string) {
 func (s *BasicState) SetFileLastAccessed(path string, lastAccessed time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	path = osutil.CanonicalizePath(path)
 	s.lastAccessed[path] = lastAccessed
 	return nil
 }
@@ -540,6 +543,7 @@ func (s *BasicState) SetFileLastAccess(fileLastAccess map[string]time.Time) {
 func (s *BasicState) GetFileLastAccessed(path string) (time.Time, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	path = osutil.CanonicalizePath(path)
 	lastAccessed, ok := s.lastAccessed[path]
 	if !ok {
 		return time.Time{}, errors.Errorf("file %s has not been read yet", path)
@@ -551,6 +555,7 @@ func (s *BasicState) GetFileLastAccessed(path string) (time.Time, error) {
 func (s *BasicState) ClearFileLastAccessed(path string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	path = osutil.CanonicalizePath(path)
 	delete(s.lastAccessed, path)
 	return nil
 }
@@ -558,6 +563,7 @@ func (s *BasicState) ClearFileLastAccessed(path string) error {
 // LockFile acquires an exclusive lock for the given file path.
 // This ensures atomic read-modify-write operations when editing files.
 func (s *BasicState) LockFile(path string) {
+	path = osutil.CanonicalizePath(path)
 	s.fileLocksMu.Lock()
 	lock, ok := s.fileLocks[path]
 	if !ok {
@@ -570,6 +576,7 @@ func (s *BasicState) LockFile(path string) {
 
 // UnlockFile releases the lock for the given file path.
 func (s *BasicState) UnlockFile(path string) {
+	path = osutil.CanonicalizePath(path)
 	s.fileLocksMu.Lock()
 	lock, ok := s.fileLocks[path]
 	s.fileLocksMu.Unlock()

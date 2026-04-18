@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/pkg/errors"
 )
@@ -42,6 +43,7 @@ func NormalizeCWD(path string) (string, error) {
 		}
 		return "", errors.Wrapf(err, "failed to resolve cwd path: %s", absPath)
 	}
+	resolvedPath = osutil.CanonicalizePath(resolvedPath)
 
 	info, err := os.Stat(resolvedPath)
 	if err != nil {

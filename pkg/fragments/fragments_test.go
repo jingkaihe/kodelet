@@ -73,7 +73,10 @@ func TestFragmentProcessor_BashCommandError(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Contains(t, result.Content, "Error output: ")
-	assert.Contains(t, result.Content, "cannot access")
+	assert.True(t,
+		strings.Contains(result.Content, "cannot access") || strings.Contains(result.Content, "No such file or directory"),
+		"expected platform-specific file-not-found output, got %q", result.Content,
+	)
 	assert.NotContains(t, result.Content, "[ERROR executing command")
 }
 
