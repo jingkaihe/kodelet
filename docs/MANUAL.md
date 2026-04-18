@@ -559,7 +559,7 @@ export OPENAI_API_KEY="sk-..."
 export KODELET_PROVIDER="openai"
 export KODELET_MODEL="gpt-4.1"
 export KODELET_MAX_TOKENS="8192"
-export KODELET_REASONING_EFFORT="medium"  # OpenAI: none|minimal|low|medium|high|xhigh; Anthropic adaptive thinking: low|medium|high|xhigh|max
+export KODELET_REASONING_EFFORT="medium"  # OpenAI: none|minimal|low|medium|high|xhigh; Anthropic adaptive thinking: none|low|medium|high|xhigh|max
 
 # Profile configuration
 export KODELET_PROFILE="anthropic"  # Use a specific profile
@@ -727,9 +727,9 @@ model: "claude-sonnet-4-6"
 weak_model: "claude-haiku-4-5-20251001"
 max_tokens: 16000
 weak_model_max_tokens: 8192
-# On Claude Opus 4.7 / Opus 4.6 / Sonnet 4.6 this enables adaptive thinking.
-# The numeric budget is used on non-adaptive Claude models that still use manual thinking.
-thinking_budget_tokens: 8000
+# On adaptive Claude models, reasoning_effort controls adaptive thinking.
+# thinking_budget_tokens is only used on older Claude models that still use manual thinking.
+reasoning_effort: "medium"
 
 # Active profile selection
 profile: "anthropic"  # Optional: specify the active profile
@@ -740,8 +740,7 @@ profiles:
     weak_model: "sonnet-46" # alias to "claude-sonnet-4-6"
     max_tokens: 64000
     weak_model_max_tokens: 8192
-    # Enables adaptive thinking on modern Claude models.
-    thinking_budget_tokens: 32000
+    reasoning_effort: "max"
 
   openai:
     provider: "openai"

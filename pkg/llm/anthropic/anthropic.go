@@ -521,6 +521,10 @@ func (t *Thread) processMessageExchange(
 		},
 	})
 
+	if err := t.validateThinkingConfigForModel(model); err != nil {
+		return "", false, err
+	}
+
 	// Prepare message parameters
 	messageParams := anthropic.MessageNewParams{
 		MaxTokens: int64(maxTokens),
@@ -741,10 +745,29 @@ func (t *Thread) shouldUtiliseThinking(model anthropic.Model) bool {
 	if !isThinkingModel(model) {
 		return false
 	}
+	if isAdaptiveThinkingModel(model) {
+		return !t.adaptiveThinkingDisabled(model)
+	}
 	if t.Config.ThinkingBudgetTokens == 0 {
 		return false
 	}
 	return true
+}
+
+func (t *Thread) adaptiveThinkingDisabled(model anthropic.Model) bool {
+	if !isAdaptiveThinkingModel(model) {
+		return false
+	}
+
+	return strings.EqualFold(strings.TrimSpace(t.Config.ReasoningEffort), "none")
+}
+
+func (t *Thread) validateThinkingConfigForModel(model anthropic.Model) error {
+	if model == anthropic.ModelClaudeMythosPreview && t.adaptiveThinkingDisabled(model) {
+		return errors.Errorf("%s does not support disabling adaptive thinking with reasoning_effort=none", model)
+	}
+
+	return nil
 }
 
 func (t *Thread) thinkingConfigForModel(model anthropic.Model) (anthropic.ThinkingConfigParamUnion, bool) {

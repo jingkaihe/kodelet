@@ -451,7 +451,7 @@ aliases:
 max_tokens: 16000
 model: sonnet-46
 profile: default
-thinking_budget_tokens: 8000
+reasoning_effort: medium
 weak_model: haiku-45
 weak_model_max_tokens: 8192
 conversation_summary_mode: llm
@@ -459,8 +459,8 @@ profiles:
     hybrid:
         max_tokens: 16000
         model: sonnet-46
+        reasoning_effort: medium
         subagent_args: "--profile openai-subagent"
-        thinking_budget_tokens: 8000
         weak_model: haiku-45
         weak_model_max_tokens: 8192
     openai-subagent:
@@ -482,7 +482,7 @@ profiles:
     anthropic:
         max_tokens: 64000
         model: opus-47
-        thinking_budget_tokens: 32000
+        reasoning_effort: max
         weak_model: sonnet-46
         weak_model_max_tokens: 8192
     xai:

@@ -42,7 +42,7 @@ profiles:
         max_tokens: 64000
         model: opus-47
         provider: anthropic
-        thinking_budget_tokens: 32000
+        reasoning_effort: max
         tool_mode: full
         weak_model: haiku-45
         weak_model_max_tokens: 8192

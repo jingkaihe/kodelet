@@ -455,13 +455,48 @@ func TestThinkingConfigForModel(t *testing.T) {
 		assert.Equal(t, anthropic.ThinkingConfigEnabledDisplaySummarized, config.OfEnabled.Display)
 	})
 
-	t.Run("zero budget disables thinking", func(t *testing.T) {
+	t.Run("adaptive models ignore zero budget", func(t *testing.T) {
 		disabledThread, err := NewAnthropicThread(llmtypes.Config{ThinkingBudgetTokens: 0})
+		require.NoError(t, err)
+
+		config, ok := disabledThread.thinkingConfigForModel(anthropic.ModelClaudeOpus4_7)
+		require.True(t, ok)
+		require.NotNil(t, config.OfAdaptive)
+		assert.Equal(t, "adaptive", *config.GetType())
+	})
+
+	t.Run("reasoning effort none disables adaptive thinking", func(t *testing.T) {
+		disabledThread, err := NewAnthropicThread(llmtypes.Config{ReasoningEffort: "none"})
 		require.NoError(t, err)
 
 		config, ok := disabledThread.thinkingConfigForModel(anthropic.ModelClaudeOpus4_7)
 		assert.False(t, ok)
 		assert.Nil(t, config.GetType())
+	})
+
+	t.Run("zero budget disables manual thinking", func(t *testing.T) {
+		disabledThread, err := NewAnthropicThread(llmtypes.Config{ThinkingBudgetTokens: 0})
+		require.NoError(t, err)
+
+		config, ok := disabledThread.thinkingConfigForModel(anthropic.ModelClaudeSonnet4_5)
+		assert.False(t, ok)
+		assert.Nil(t, config.GetType())
+	})
+}
+
+func TestValidateThinkingConfigForModel(t *testing.T) {
+	thread, err := NewAnthropicThread(llmtypes.Config{ReasoningEffort: "none"})
+	require.NoError(t, err)
+
+	t.Run("mythos rejects disabled adaptive thinking", func(t *testing.T) {
+		err := thread.validateThinkingConfigForModel(anthropic.ModelClaudeMythosPreview)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "does not support disabling adaptive thinking")
+	})
+
+	t.Run("opus 4.7 allows disabled adaptive thinking", func(t *testing.T) {
+		err := thread.validateThinkingConfigForModel(anthropic.ModelClaudeOpus4_7)
+		assert.NoError(t, err)
 	})
 }
 
@@ -554,6 +589,15 @@ func TestOutputConfigForModel(t *testing.T) {
 		config, ok := thread.outputConfigForModel(anthropic.ModelClaudeSonnet4_5)
 		assert.False(t, ok)
 		assert.Equal(t, anthropic.OutputConfigEffort(""), config.Effort)
+	})
+
+	t.Run("adaptive models keep low effort when thinking is disabled", func(t *testing.T) {
+		disabledThread, err := NewAnthropicThread(llmtypes.Config{ReasoningEffort: "none"})
+		require.NoError(t, err)
+
+		config, ok := disabledThread.outputConfigForModel(anthropic.ModelClaudeOpus4_7)
+		require.True(t, ok)
+		assert.Equal(t, anthropic.OutputConfigEffortLow, config.Effort)
 	})
 }
 

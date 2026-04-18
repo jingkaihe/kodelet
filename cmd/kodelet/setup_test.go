@@ -28,5 +28,5 @@ func TestRecommendedSetupConfigYAML_OpenAIProfilesUsePatchMode(t *testing.T) {
 	assert.Equal(t, "full", anthropicProfile["tool_mode"])
 	assert.Equal(t, false, anthropicProfile["disable_fs_search_tools"])
 	assert.Equal(t, 64000, anthropicProfile["max_tokens"])
-	assert.Equal(t, 32000, anthropicProfile["thinking_budget_tokens"])
+	assert.Equal(t, "max", anthropicProfile["reasoning_effort"])
 }

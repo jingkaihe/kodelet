@@ -18,7 +18,8 @@ model: "claude-sonnet-4-6"
 # Maximum tokens for responses
 max_tokens: 8192
 
-# Maximum tokens budget for thinking capability
+# Maximum thinking budget for non-adaptive Claude models
+# Adaptive Claude models ignore this and use reasoning_effort instead.
 thinking_budget_tokens: 4048
 
 # Weak model to use for less complex tasks
@@ -58,7 +59,7 @@ profiles:
     weak_model: "claude-sonnet-4-6"
     max_tokens: 64000
     weak_model_max_tokens: 8192
-    thinking_budget_tokens: 32000
+    reasoning_effort: "max"
 
   fast:
     model: "haiku-45"
@@ -133,7 +134,9 @@ profiles:
     disable_fs_search_tools: true
 
 # OpenAI specific settings
-# Reasoning effort for OpenAI models (none, minimal, low, medium, high, xhigh)
+# Reasoning effort for supported reasoning/adaptive models
+# OpenAI: none, minimal, low, medium, high, xhigh
+# Anthropic adaptive thinking: none, low, medium, high, xhigh, max
 reasoning_effort: "medium"
 
 # API Retry Configuration
