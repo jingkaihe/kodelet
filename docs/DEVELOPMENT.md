@@ -172,7 +172,7 @@ mise run frontend-test-coverage
 
 ### Desktop Development
 
-Kodelet also has an experimental Electron desktop shell under `desktop/electron/`.
+Kodelet also has an experimental Electron desktop shell under `desktop/`.
 
 The desktop app is intentionally thin and written in TypeScript: it either launches the existing `kodelet serve` web UI as a local sidecar, or connects directly to a remote `kodelet serve` base URL. In both cases it waits for `/api/chat/settings` and then loads the resulting same-origin UI inside Electron.
 
@@ -215,7 +215,7 @@ The local `desktop-package` flow explicitly disables macOS notarization. This av
 ├── cmd/kodelet/         # Application entry point (22+ command files)
 ├── docs/                # Documentation files
 ├── desktop/
-│   └── electron/        # Electron shell around `kodelet serve`
+│   └──                  # Electron shell around `kodelet serve`
 ├── pkg/                 # Core packages
 │   ├── conversations/   # Conversation storage and management
 │   ├── llm/             # LLM client for AI interactions

@@ -7,7 +7,7 @@ The desktop app does not reimplement the chat UI. Instead, it either:
 - starts a local `kodelet serve` sidecar on `127.0.0.1`, waits for the HTTP API to come up, and then loads that URL inside Electron, or
 - connects directly to a remote `kodelet serve` base URL.
 
-The Electron shell itself is written in TypeScript and compiled with `tsc` into `desktop/electron/build/`.
+The Electron shell itself is written in TypeScript and compiled with `tsc` into `desktop/build/`.
 
 ## Development
 
@@ -23,7 +23,7 @@ By default, the Electron shell launches `kodelet` from your `PATH`.
 If you want to force a specific binary, pass `--kodelet-path`:
 
 ```bash
-cd desktop/electron
+cd desktop
 npm run dev -- --kodelet-path /absolute/path/to/kodelet
 ```
 
