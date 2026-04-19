@@ -20,6 +20,7 @@ const MIN_TERMINAL_WIDTH = 520;
 const MIN_TERMINAL_HEIGHT = 320;
 const DEFAULT_TERMINAL_WIDTH = 980;
 const DEFAULT_TERMINAL_HEIGHT = 620;
+const FALLBACK_TERMINAL_FONT_FAMILY = '"SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Ubuntu Mono", monospace';
 
 const isTerminalServerEvent = (value: unknown): value is TerminalServerEvent => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -67,14 +68,20 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose }
       return undefined;
     }
 
+    const resolvedMonoFontFamily =
+      window.getComputedStyle(document.documentElement)
+        .getPropertyValue('--font-mono')
+        .trim() || FALLBACK_TERMINAL_FONT_FAMILY;
+
     const terminal = new Terminal({
       allowTransparency: true,
       convertEol: true,
       cursorBlink: true,
       cursorStyle: 'block',
-      fontFamily: 'var(--font-mono)',
-      fontSize: 13,
-      lineHeight: 1.35,
+      fontFamily: resolvedMonoFontFamily,
+      fontSize: 12,
+      fontWeight: '400',
+      lineHeight: 1.2,
       scrollback: 5000,
       theme: {
         background: '#171512',
@@ -324,32 +331,33 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose }
 
         <div className="workspace-terminal-shell">
           <div className="workspace-terminal-host" data-testid="terminal-host" ref={terminalHostRef} />
+          <div className="workspace-terminal-footer">
+            <button
+              aria-label="Resize terminal"
+              className="workspace-terminal-resize-handle"
+              data-testid="terminal-resize-handle"
+              onPointerDown={(event) => {
+                dragStateRef.current = {
+                  startX: event.clientX,
+                  startY: event.clientY,
+                  startWidth: terminalSize.width,
+                  startHeight: terminalSize.height,
+                };
+                document.body.style.userSelect = 'none';
+                document.body.style.cursor = 'nwse-resize';
+                resizeHandleRef.current?.setPointerCapture(event.pointerId);
+              }}
+              ref={resizeHandleRef}
+              type="button"
+            >
+              <svg aria-hidden="true" className="h-4 w-4" fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M8 16h8" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                <path d="M12 12h4" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                <path d="M16 8h0.01" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+              </svg>
+            </button>
+          </div>
         </div>
-
-        <button
-          aria-label="Resize terminal"
-          className="workspace-terminal-resize-handle"
-          data-testid="terminal-resize-handle"
-          onPointerDown={(event) => {
-            dragStateRef.current = {
-              startX: event.clientX,
-              startY: event.clientY,
-              startWidth: terminalSize.width,
-              startHeight: terminalSize.height,
-            };
-            document.body.style.userSelect = 'none';
-            document.body.style.cursor = 'nwse-resize';
-            resizeHandleRef.current?.setPointerCapture(event.pointerId);
-          }}
-          ref={resizeHandleRef}
-          type="button"
-        >
-          <svg aria-hidden="true" className="h-4 w-4" fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-            <path d="M8 16h8" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
-            <path d="M12 12h4" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
-            <path d="M16 8h0.01" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
-          </svg>
-        </button>
       </div>
     </div>
   );
