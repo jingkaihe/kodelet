@@ -261,6 +261,10 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 
 // Close closes the database connection
 func (s *Store) Close() error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+
 	if s.db != nil {
 		return s.db.Close()
 	}
