@@ -165,7 +165,10 @@ type Manager struct {
 // NewManager creates a new session manager
 func NewManager(cfg ManagerConfig) *Manager {
 	ctx := context.Background()
-	store, _ := conversations.GetConversationStore(ctx)
+	store, err := conversations.GetConversationStore(ctx)
+	if err != nil {
+		logger.G(ctx).WithError(err).Warn("Failed to create conversation store for ACP sessions")
+	}
 
 	return &Manager{
 		config:   cfg,
