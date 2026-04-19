@@ -160,6 +160,55 @@ export interface CWDHintsResponse {
   hints: CWDHint[];
 }
 
+export interface GitDiffResponse {
+  cwd: string;
+  diff: string;
+  has_diff: boolean;
+  git_root?: string;
+  exit_code: number;
+}
+
+export interface TerminalReadyEvent {
+  type: 'ready';
+  cwd: string;
+  name: string;
+  git: boolean;
+  pid: number;
+}
+
+export interface TerminalExitEvent {
+  type: 'exit';
+  code: number;
+}
+
+export interface TerminalInfoEvent {
+  type: 'info';
+  text: string;
+}
+
+export interface TerminalReplayCompleteEvent {
+  type: 'replay-complete';
+}
+
+export interface TerminalInputMessage {
+  type: 'input';
+  data: string;
+}
+
+export interface TerminalResizeMessage {
+  type: 'resize';
+  rows: number;
+  cols: number;
+}
+
+export interface TerminalSignalMessage {
+  type: 'signal';
+  name: string;
+}
+
+export type TerminalServerEvent = TerminalReadyEvent | TerminalExitEvent | TerminalInfoEvent | TerminalReplayCompleteEvent;
+export type TerminalClientMessage = TerminalInputMessage | TerminalResizeMessage | TerminalSignalMessage;
+
 export interface PendingImageAttachment {
   id: string;
   name: string;

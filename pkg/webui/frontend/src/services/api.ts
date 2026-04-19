@@ -3,6 +3,7 @@
 import {
   ChatSettings,
   CWDHintsResponse,
+  GitDiffResponse,
   ChatRequest,
   ChatStreamEvent,
   Conversation,
@@ -104,6 +105,33 @@ class ApiService {
     }
     const suffix = params.toString();
     return this.request<CWDHintsResponse>(`/api/chat/cwd-suggestions${suffix ? `?${suffix}` : ''}`);
+  }
+
+  async getGitDiff(cwd?: string): Promise<GitDiffResponse> {
+    const params = new URLSearchParams();
+    if (cwd) {
+      params.append('cwd', cwd);
+    }
+
+    const suffix = params.toString();
+    return this.request<GitDiffResponse>(`/api/git/diff${suffix ? `?${suffix}` : ''}`);
+  }
+
+  createTerminalWebSocket(options: { cwd?: string; rows?: number; cols?: number }): WebSocket {
+    const params = new URLSearchParams();
+    if (options.cwd) {
+      params.append('cwd', options.cwd);
+    }
+    if (options.rows) {
+      params.append('rows', String(options.rows));
+    }
+    if (options.cols) {
+      params.append('cols', String(options.cols));
+    }
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const suffix = params.toString();
+    return new WebSocket(`${protocol}//${window.location.host}/api/terminal/ws${suffix ? `?${suffix}` : ''}`);
   }
 
   async deleteConversation(id: string): Promise<void> {

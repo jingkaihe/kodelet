@@ -80,7 +80,7 @@ Kodelet provides both direct cross-build tasks and a GoReleaser-based packaging 
 mise run cross-build
 ```
 
-This produces raw binaries in `./bin/` for the supported platforms.
+This produces raw binaries in `./bin/` for supported Linux and macOS platforms.
 
 #### GoReleaser Snapshot Build
 ```bash
@@ -279,7 +279,7 @@ The project includes a GitHub Actions workflow (`.github/workflows/release.yml`)
 - Triggers on version tags (`v*`)
 - Runs GoReleaser for release packaging
 - Extracts release notes from the top entry in `RELEASE.md`
-- Uploads all platform binaries, checksums, and Linux packages to GitHub releases
+- Uploads Linux/macOS binaries, checksums, and Linux packages to GitHub releases
 
 To trigger an automated release:
 1. Update `VERSION.txt` to the release version you plan to publish (for example `0.3.11-beta`)

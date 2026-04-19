@@ -4,11 +4,13 @@
 package webui
 
 import (
+	"bufio"
 	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -46,6 +48,8 @@ type Server struct {
 	staticFS            fs.FS
 	runCtx              context.Context
 	runCancel           context.CancelFunc
+	terminalSessions    *terminalSessionManager
+	terminalSessionsMu  sync.Mutex
 	activeChats         map[string]*activeChatRun
 	activeChatsMu       sync.Mutex
 	chatSubscribers     map[string]map[*subscriberEventSink]struct{}
@@ -151,6 +155,7 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 		staticFS:            staticFS,
 		runCtx:              runCtx,
 		runCancel:           runCancel,
+		terminalSessions:    newTerminalSessionManager(runCtx),
 		activeChats:         make(map[string]*activeChatRun),
 		chatSubscribers:     make(map[string]map[*subscriberEventSink]struct{}),
 	}
@@ -167,6 +172,8 @@ func (s *Server) setupRoutes() {
 	api := s.router.PathPrefix("/api").Subrouter()
 	api.HandleFunc("/chat/settings", s.handleGetChatSettings).Methods("GET")
 	api.HandleFunc("/chat/cwd-suggestions", s.handleGetCWDHints).Methods("GET")
+	api.HandleFunc("/git/diff", s.handleGetGitDiff).Methods("GET")
+	api.HandleFunc("/terminal/ws", s.handleTerminalWebsocket).Methods("GET")
 	api.HandleFunc("/conversations", s.handleListConversations).Methods("GET")
 	api.HandleFunc("/conversations/{id}", s.handleGetConversation).Methods("GET")
 	api.HandleFunc("/conversations/{id}/stream", s.handleStreamConversation).Methods("GET")
@@ -274,6 +281,15 @@ func (rw *responseWriter) Flush() {
 	}
 }
 
+func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := rw.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, errors.New("response writer does not support hijacking")
+	}
+
+	return hijacker.Hijack()
+}
+
 func (s *Server) chatExecutionContext(requestCtx context.Context) context.Context {
 	baseCtx := s.runCtx
 	if baseCtx == nil {
@@ -281,6 +297,21 @@ func (s *Server) chatExecutionContext(requestCtx context.Context) context.Contex
 	}
 
 	return logger.WithLogger(baseCtx, logger.G(requestCtx))
+}
+
+func (s *Server) terminalSessionManager() *terminalSessionManager {
+	s.terminalSessionsMu.Lock()
+	defer s.terminalSessionsMu.Unlock()
+
+	if s.terminalSessions == nil {
+		baseCtx := s.runCtx
+		if baseCtx == nil {
+			baseCtx = context.Background()
+		}
+		s.terminalSessions = newTerminalSessionManager(baseCtx)
+	}
+
+	return s.terminalSessions
 }
 
 func (s *Server) registerActiveChat(conversationID string, run *activeChatRun) bool {
@@ -838,6 +869,24 @@ func (s *Server) defaultCWD() (string, error) {
 	}
 
 	return resolveConfiguredDefaultCWD(configuredCWD)
+}
+
+func (s *Server) resolveRequestedCWD(requestedCWD string) (string, error) {
+	defaultCWD, err := s.defaultCWD()
+	if err != nil {
+		return "", err
+	}
+
+	expandedRequestedCWD, err := expandWebCWDInput(requestedCWD, defaultCWD)
+	if err != nil {
+		return "", err
+	}
+
+	if strings.TrimSpace(expandedRequestedCWD) == "" {
+		return defaultCWD, nil
+	}
+
+	return conversations.NormalizeCWD(expandedRequestedCWD)
 }
 
 func resolveConfiguredDefaultCWD(configuredCWD string) (string, error) {
@@ -1628,6 +1677,12 @@ func (s *Server) Start(ctx context.Context) error {
 
 // Stop stops the web server
 func (s *Server) Stop() error {
+	s.terminalSessionsMu.Lock()
+	terminalSessions := s.terminalSessions
+	s.terminalSessionsMu.Unlock()
+	if terminalSessions != nil {
+		terminalSessions.Close()
+	}
 	if s.runCancel != nil {
 		s.runCancel()
 	}

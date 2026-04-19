@@ -16,6 +16,8 @@
     "test:watch": "vitest --watch"
   },
   "dependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
     "clsx": "^2.1.0",
     "date-fns": "^2.30.0",
     "marked": "^9.1.6",

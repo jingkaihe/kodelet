@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.3.43-beta (2026-04-19)
+
+Added a new Web UI workspace terminal with PTY-backed shell sessions, websocket streaming, reconnect-friendly replay, and regression coverage across the backend and frontend.
+
+Added a Git diff modal in the workspace UI so you can inspect and copy current working tree changes without leaving the browser.
+
+Updated release/build packaging to target Linux and macOS artifacts only, removing the Windows cross-build/release path and refreshing the related development and release docs.
+
 ## 0.3.42-beta (2026-04-18)
 
 Polished the Web UI chat sidebar with a broader visual refresh, clearer working-directory group labels, and improved hover/focus treatment for conversation navigation and actions.
