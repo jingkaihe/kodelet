@@ -11,7 +11,8 @@
     "dev:local": "npm run build && electron . --kodelet-path ../bin/kodelet",
     "start": "npm run build && electron .",
     "test": "tsx --test src/test/*.test.ts",
-    "package": "npm run build && electron-builder --config.mac.notarize=false --config.mac.identity=null"
+    "package": "npm run build && npx electron-builder --config electron-builder.config.js --publish never --config.mac.notarize=false --config.mac.identity=null",
+    "package:ci": "npm run build && npx electron-builder --config electron-builder.config.js --publish never"
   },
   "devDependencies": {
     "@types/node": "^24.0.10",
@@ -20,56 +21,5 @@
     "tsx": "^4.20.6",
     "typescript": "^5.9.2"
   },
-  "build": {
-    "appId": "com.jingkaihe.kodelet.desktop",
-    "productName": "Kodelet",
-    "copyright": "Copyright \u00a9 Jingkai He",
-    "icon": "assets/icon.png",
-    "directories": {
-      "output": "dist",
-      "buildResources": "assets"
-    },
-    "files": [
-      "build/**/*",
-      "package.json"
-    ],
-    "extraResources": [
-      {
-        "from": "../bin",
-        "to": "bin",
-        "filter": [
-          "kodelet*"
-        ]
-      },
-      {
-        "from": "../VERSION.txt",
-        "to": ".",
-        "filter": [
-          "VERSION.txt"
-        ]
-      }
-    ],
-    "mac": {
-      "category": "public.app-category.developer-tools",
-      "icon": "assets/icon.icns",
-      "target": [
-        "dir",
-        "zip"
-      ]
-    },
-    "linux": {
-      "category": "Development",
-      "icon": "assets/icon.png",
-      "target": [
-        "AppImage",
-        "tar.gz"
-      ]
-    },
-    "win": {
-      "icon": "assets/icon.ico",
-      "target": [
-        "portable"
-      ]
-    }
-  }
+  "build": {}
 }

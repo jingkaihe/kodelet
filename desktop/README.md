@@ -9,6 +9,27 @@ The desktop app does not reimplement the chat UI. Instead, it either:
 
 The Electron shell itself is written in TypeScript and compiled with `tsc` into `desktop/build/`.
 
+## Installation
+
+### Build from source
+
+From the repository root:
+
+```bash
+mise install
+mise run install
+mise run desktop-install
+```
+
+This installs the toolchain managed by `mise`, the main repository dependencies, and the Electron desktop shell dependencies.
+
+### Install a packaged app
+
+Packaged desktop builds are published through GitHub Releases.
+
+- **macOS**: download the `.zip`, extract it, and move `Kodelet.app` into `/Applications` if you want a normal app install.
+- **Linux**: download either the `.AppImage` or `.tar.gz`. For AppImage, make it executable first with `chmod +x Kodelet-*.AppImage` and then run it.
+
 ## Development
 
 From the repository root:
@@ -43,7 +64,9 @@ For repository development, `mise run desktop-dev` builds `./bin/kodelet` first 
 mise run desktop-package
 ```
 
-This packages the Electron app and bundles `bin/kodelet*` into the app resources.
+This now builds the sidecar with `goreleaser build --single-target`, stages the resulting `kodelet` binary under `desktop/.sidecar/bin/`, and then packages the Electron app using that staged binary. That keeps the desktop bundle aligned with the release binary flags and stripping settings defined in `.goreleaser.yaml`.
+
+If you already have a specific sidecar directory you want to bundle, set `KODELET_SIDECAR_DIR=/absolute/path/to/bin-dir` before running `npm run package` or `npm run package:ci`.
 
 For local development packaging, macOS signing and notarization are explicitly disabled so stray `APPLE_*` environment variables do not cause `electron-builder` to fail. Keep signing/notarization as a separate release/CI concern.
 

@@ -217,8 +217,7 @@ run = [
 ]
 
 [tasks.desktop-package]
-description = "Package the Electron desktop shell"
-depends = ["build"]
+description = "Package the Electron desktop shell with a GoReleaser-built sidecar"
 run = [
-  "cd desktop && npm run package",
+  "bash -c 'set -euo pipefail; sidecar_dir=$(./desktop/scripts/prepare_sidecar.sh); cd desktop && KODELET_SIDECAR_DIR=\"$sidecar_dir\" npm run package'",
 ]

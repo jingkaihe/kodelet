@@ -193,7 +193,11 @@ mise run desktop-package
 
 By default, the Electron app resolves `kodelet` from `PATH`. For repository development, `mise run desktop-dev` passes `--kodelet-path ./bin/kodelet` so the shell runs against the freshly built local binary.
 
+The `desktop-package` task does not reuse `./bin/kodelet`. Instead it runs `goreleaser build --single-target`, stages the resulting binary into `desktop/.sidecar/bin/`, and packages that exact sidecar into the app. This keeps desktop packaging aligned with the stripped/ldflagged release binary configuration in `.goreleaser.yaml`.
+
 The local `desktop-package` flow explicitly disables macOS signing and notarization. This avoids accidental failures when partial `APPLE_*` credentials are present in the shell environment; signing/notarization should be handled in a dedicated release path.
+
+GitHub Actions also has a desktop packaging workflow at `.github/workflows/desktop-build-release.yml` that builds native macOS and Linux artifacts for both amd64 and arm64, then attaches them to tag releases.
 
 ### Local Development
 

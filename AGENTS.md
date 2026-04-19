@@ -64,6 +64,7 @@ mise run build-dev               # Fast build (skip frontend)
 mise run desktop-install         # Install Electron desktop dependencies
 mise run desktop-dev             # Run Electron desktop shell
 mise run desktop-test            # Run Electron desktop helper tests
+mise run desktop-package         # Package Electron shell with GoReleaser sidecar
 ```
 
 See [docs/MANUAL.md](docs/MANUAL.md) for complete reference.

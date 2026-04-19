@@ -32,7 +32,9 @@ download_and_extract() {
   local dest_dir="$4"
 
   local metadata=()
-  mapfile -t metadata < <(go run ./scripts/package-binary-metadata --binary "$binary" --goos linux --goarch "$goarch")
+  while IFS= read -r line; do
+    metadata+=("$line")
+  done < <(go run ./scripts/package-binary-metadata --binary "$binary" --goos linux --goarch "$goarch")
   if [[ "${#metadata[@]}" -ne 2 ]]; then
     echo "failed to resolve download metadata for $binary linux/$goarch" >&2
     exit 1
