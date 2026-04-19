@@ -197,7 +197,7 @@ The `desktop-package` task does not reuse `./bin/kodelet`. Instead it runs `gore
 
 The local `desktop-package` flow explicitly disables macOS signing and notarization. This avoids accidental failures when partial `APPLE_*` credentials are present in the shell environment; signing/notarization should be handled in a dedicated release path.
 
-GitHub Actions also has a desktop packaging workflow at `.github/workflows/desktop-build-release.yml` that builds native macOS and Linux artifacts for both amd64 and arm64, then attaches them to tag releases.
+GitHub Actions also has separate desktop packaging workflows: `.github/workflows/desktop-build.yml` runs native macOS and Linux packaging for both amd64 and arm64 on pull requests, while `.github/workflows/desktop-release.yml` rebuilds those artifacts on `v*` tag pushes and attaches them to the GitHub release.
 
 ### Local Development
 
