@@ -53,6 +53,12 @@ type terminalMessage struct {
 	Text string `json:"text,omitempty"`
 }
 
+type terminalSocketRead struct {
+	MessageType int
+	Payload     []byte
+	Err         error
+}
+
 type websocketWriter struct {
 	conn *websocket.Conn
 	mu   sync.Mutex
@@ -199,6 +205,9 @@ func (s *Server) handleTerminalWebsocket(w http.ResponseWriter, r *http.Request)
 		errCh <- waitErr
 	}()
 
+	readCh := make(chan terminalSocketRead, 1)
+	go readTerminalWebsocket(ctx, conn, readCh)
+
 	for {
 		select {
 		case asyncErr := <-errCh:
@@ -210,51 +219,63 @@ func (s *Server) handleTerminalWebsocket(w http.ResponseWriter, r *http.Request)
 				}
 			}
 			return
-		default:
-		}
-
-		messageType, payload, readErr := conn.ReadMessage()
-		if readErr != nil {
-			closeAll()
-			return
-		}
-
-		switch messageType {
-		case websocket.BinaryMessage:
-			if _, err := ptmx.Write(payload); err != nil {
+		case socketRead := <-readCh:
+			if socketRead.Err != nil {
 				closeAll()
 				return
 			}
-		case websocket.TextMessage:
-			var message terminalMessage
-			if err := json.Unmarshal(payload, &message); err != nil {
-				continue
-			}
 
-			switch message.Type {
-			case "input":
-				if message.Data == "" {
-					continue
-				}
-				if _, err := ptmx.Write([]byte(message.Data)); err != nil {
+			switch socketRead.MessageType {
+			case websocket.BinaryMessage:
+				if _, err := ptmx.Write(socketRead.Payload); err != nil {
 					closeAll()
 					return
 				}
-			case "resize":
-				if err := pty.Setsize(ptmx, &pty.Winsize{
-					Rows: uint16(boundedTerminalRows(message.Rows)),
-					Cols: uint16(boundedTerminalCols(message.Cols)),
-				}); err != nil {
-					logger.G(r.Context()).WithError(err).Warn("failed to resize terminal pty")
-				}
-			case "signal":
-				if cmd.Process == nil {
+			case websocket.TextMessage:
+				var message terminalMessage
+				if err := json.Unmarshal(socketRead.Payload, &message); err != nil {
 					continue
 				}
-				if sig, ok := parseTerminalSignal(message.Name); ok {
-					_ = syscall.Kill(-cmd.Process.Pid, sig)
+
+				switch message.Type {
+				case "input":
+					if message.Data == "" {
+						continue
+					}
+					if _, err := ptmx.Write([]byte(message.Data)); err != nil {
+						closeAll()
+						return
+					}
+				case "resize":
+					if err := pty.Setsize(ptmx, &pty.Winsize{
+						Rows: uint16(boundedTerminalRows(message.Rows)),
+						Cols: uint16(boundedTerminalCols(message.Cols)),
+					}); err != nil {
+						logger.G(r.Context()).WithError(err).Warn("failed to resize terminal pty")
+					}
+				case "signal":
+					if cmd.Process == nil {
+						continue
+					}
+					if sig, ok := parseTerminalSignal(message.Name); ok {
+						_ = syscall.Kill(-cmd.Process.Pid, sig)
+					}
 				}
 			}
+		}
+	}
+}
+
+func readTerminalWebsocket(ctx context.Context, conn *websocket.Conn, readCh chan<- terminalSocketRead) {
+	for {
+		messageType, payload, readErr := conn.ReadMessage()
+		select {
+		case readCh <- terminalSocketRead{MessageType: messageType, Payload: payload, Err: readErr}:
+		case <-ctx.Done():
+			return
+		}
+		if readErr != nil {
+			return
 		}
 	}
 }

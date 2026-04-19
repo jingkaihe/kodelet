@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/gorilla/websocket"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
@@ -1200,6 +1201,38 @@ func TestBoundedTerminalDimensions(t *testing.T) {
 	assert.Equal(t, defaultTerminalCols, boundedTerminalCols(0))
 	assert.Equal(t, maxTerminalCols, boundedTerminalCols(maxTerminalCols+50))
 	assert.Equal(t, 80, boundedTerminalCols(80))
+}
+
+func TestTerminalWebsocketClosesAfterShellExitWithoutClientInput(t *testing.T) {
+	tmpDir := t.TempDir()
+	shellPath := filepath.Join(tmpDir, "exit-shell")
+	require.NoError(t, os.WriteFile(shellPath, []byte("#!/bin/sh\nexit 0\n"), 0o700))
+	t.Setenv("SHELL", shellPath)
+
+	server := &Server{
+		config: &ServerConfig{CWD: tmpDir},
+		runCtx: context.Background(),
+	}
+	httpServer := httptest.NewServer(http.HandlerFunc(server.handleTerminalWebsocket))
+	defer httpServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		require.NoError(t, conn.SetReadDeadline(deadline))
+		_, _, readErr := conn.ReadMessage()
+		if readErr == nil {
+			continue
+		}
+
+		var netErr net.Error
+		require.False(t, errors.As(readErr, &netErr) && netErr.Timeout(), "terminal websocket did not close after shell exit")
+		return
+	}
 }
 
 func TestDisplayProviderName(t *testing.T) {
