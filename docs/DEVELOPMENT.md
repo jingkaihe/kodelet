@@ -197,7 +197,7 @@ The `desktop-package` task does not reuse `./bin/kodelet`. Instead it runs `gore
 
 The local `desktop-package` flow explicitly disables macOS signing and notarization. This avoids accidental failures when partial `APPLE_*` credentials are present in the shell environment; signing/notarization should be handled in a dedicated release path.
 
-GitHub Actions also has separate desktop packaging workflows: `.github/workflows/desktop-build.yml` runs native macOS and Linux packaging for both amd64 and arm64 on pull requests, while `.github/workflows/desktop-release.yml` rebuilds those artifacts on `v*` tag pushes and attaches them to the GitHub release.
+GitHub Actions keeps desktop packaging separate by trigger: `.github/workflows/desktop-build.yml` runs native macOS and Linux packaging for both amd64 and arm64 on pull requests, while `.github/workflows/release.yml` handles `v*` tag pushes, creates the GitHub release, rebuilds the desktop artifacts, and attaches them to that release in the same workflow.
 
 ### Local Development
 
@@ -280,6 +280,8 @@ The project includes a GitHub Actions workflow (`.github/workflows/release.yml`)
 - Runs GoReleaser for release packaging
 - Extracts release notes from the top entry in `RELEASE.md`
 - Uploads Linux/macOS binaries, checksums, and Linux packages to GitHub releases
+- Builds native desktop bundles for Linux and macOS on amd64 and arm64
+- Attaches the desktop bundles to the same GitHub release
 
 To trigger an automated release:
 1. Update `VERSION.txt` to the release version you plan to publish (for example `0.3.11-beta`)

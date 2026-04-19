@@ -29,3 +29,97 @@ jobs:
         run: mise run github-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  desktop-build:
+    name: Desktop ${{ matrix.platform }} ${{ matrix.goarch }}
+    needs: release
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            goarch: amd64
+            runner: ubuntu-24.04
+            goos: linux
+            electron_args: --linux AppImage tar.gz --x64
+            artifact_name: desktop-linux-amd64
+          - platform: linux
+            goarch: arm64
+            runner: ubuntu-24.04-arm
+            goos: linux
+            electron_args: --linux AppImage tar.gz --arm64
+            artifact_name: desktop-linux-arm64
+          - platform: macos
+            goarch: amd64
+            runner: macos-15-intel
+            goos: darwin
+            electron_args: --mac zip --x64
+            artifact_name: desktop-macos-amd64
+          - platform: macos
+            goarch: arm64
+            runner: macos-15
+            goos: darwin
+            electron_args: --mac zip --arm64
+            artifact_name: desktop-macos-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup mise
+        uses: jdx/mise-action@v2
+        with:
+          install: true
+          cache: false
+          experimental: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install desktop dependencies
+        run: cd desktop && npm ci
+
+      - name: Build and stage GoReleaser sidecar
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          sidecar_dir=$(./desktop/scripts/prepare_sidecar.sh)
+          echo "KODELET_SIDECAR_DIR=$sidecar_dir" >> "$GITHUB_ENV"
+
+      - name: Package desktop app
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          KODELET_SIDECAR_DIR: ${{ env.KODELET_SIDECAR_DIR }}
+        run: cd desktop && npm run package:ci -- ${{ matrix.electron_args }}
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            desktop/dist/Kodelet-*.zip
+            desktop/dist/Kodelet-*.tar.gz
+            desktop/dist/Kodelet-*.AppImage
+            desktop/dist/*.blockmap
+          if-no-files-found: error
+
+  desktop-release:
+    name: Attach desktop assets to GitHub release
+    needs: desktop-build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download desktop artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: desktop-*
+          merge-multiple: true
+
+      - name: Upload desktop assets to release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber
