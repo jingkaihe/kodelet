@@ -1,19 +1,25 @@
 package webui
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/gorilla/websocket"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
@@ -33,6 +39,17 @@ type mockConversationService struct {
 	deleteFunc  func(ctx context.Context, id string) error
 	getToolFunc func(ctx context.Context, conversationID, toolCallID string) (*conversations.GetToolResultResponse, error)
 	closeFunc   func() error
+}
+
+type hijackableRecorder struct {
+	*httptest.ResponseRecorder
+}
+
+func (h *hijackableRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	serverConn, clientConn := net.Pipe()
+	reader := bufio.NewReader(serverConn)
+	writer := bufio.NewWriter(serverConn)
+	return clientConn, bufio.NewReadWriter(reader, writer), nil
 }
 
 func (m *mockConversationService) ListConversations(ctx context.Context, req *conversations.ListConversationsRequest) (*conversations.ListConversationsResponse, error) {
@@ -326,6 +343,97 @@ func TestServer_handleGetCWDHints_NaturalSiblingQuery(t *testing.T) {
 	require.Len(t, response.Hints, 2)
 	assert.Equal(t, filepath.Join(parentDir, "kodelet"), response.Hints[0].Path)
 	assert.Equal(t, filepath.Join(parentDir, "kodelet-website"), response.Hints[1].Path)
+}
+
+func TestServer_resolveRequestedCWD(t *testing.T) {
+	tmpDir := t.TempDir()
+	server := &Server{config: &ServerConfig{CWD: tmpDir}}
+
+	resolved, err := server.resolveRequestedCWD("")
+	require.NoError(t, err)
+	assert.Equal(t, tmpDir, resolved)
+
+	childDir := filepath.Join(tmpDir, "child")
+	require.NoError(t, os.Mkdir(childDir, 0o755))
+
+	resolved, err = server.resolveRequestedCWD("child")
+	require.NoError(t, err)
+	assert.Equal(t, childDir, resolved)
+}
+
+func TestServer_handleGetGitDiff(t *testing.T) {
+	repoDir := t.TempDir()
+	runGit := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, string(output))
+	}
+
+	runGit("init")
+	runGit("config", "user.email", "test@example.com")
+	runGit("config", "user.name", "Test User")
+	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("old\n"), 0o644))
+	runGit("add", "file.txt")
+	runGit("commit", "-m", "initial")
+	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("new\n"), 0o644))
+
+	server := &Server{config: &ServerConfig{CWD: repoDir}}
+	req := httptest.NewRequest("GET", "/api/git/diff", nil)
+	w := httptest.NewRecorder()
+
+	server.handleGetGitDiff(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response gitDiffResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	assert.True(t, response.HasDiff)
+	assert.Equal(t, repoDir, response.CWD)
+	assert.Equal(t, repoDir, response.GitRoot)
+	assert.Contains(t, response.Diff, "diff --git a/file.txt b/file.txt")
+	assert.Contains(t, response.Diff, "-old")
+	assert.Contains(t, response.Diff, "+new")
+	assert.Equal(t, 0, response.ExitCode)
+}
+
+func TestGitDiffDisablesTextconv(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a POSIX shell script as the configured textconv command")
+	}
+
+	repoDir := t.TempDir()
+	runGit := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, string(output))
+	}
+
+	runGit("init")
+	runGit("config", "user.email", "test@example.com")
+	runGit("config", "user.name", "Test User")
+
+	markerPath := filepath.Join(repoDir, "textconv-ran")
+	scriptPath := filepath.Join(repoDir, "textconv-fail")
+	script := fmt.Sprintf("#!/bin/sh\nprintf ran > %q\nexit 42\n", markerPath)
+	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(repoDir, ".gitattributes"), []byte("*.bin diff=fail\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "file.bin"), []byte("old\n"), 0o644))
+	runGit("config", "diff.fail.textconv", fmt.Sprintf("%q", scriptPath))
+	runGit("add", ".gitattributes", "file.bin")
+	runGit("commit", "-m", "initial")
+
+	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "file.bin"), []byte("new\n"), 0o644))
+
+	diff, exitCode, err := gitDiff(context.Background(), repoDir)
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, exitCode)
+	assert.Contains(t, diff, "diff --git a/file.bin b/file.bin")
+	_, statErr := os.Stat(markerPath)
+	assert.True(t, os.IsNotExist(statErr), "textconv command should not run")
 }
 
 func TestServer_handleGetConversationOpenAIChatCompletionsSkipsSystemAndPreservesThinking(t *testing.T) {
@@ -972,6 +1080,16 @@ func TestServer_handleChatThroughMiddleware(t *testing.T) {
 	assert.Equal(t, "conv-middleware", firstEvent.ConversationID)
 }
 
+func TestResponseWriter_HijackDelegates(t *testing.T) {
+	recorder := &hijackableRecorder{ResponseRecorder: httptest.NewRecorder()}
+	rw := &responseWriter{ResponseWriter: recorder, statusCode: http.StatusOK}
+
+	conn, _, err := rw.Hijack()
+	require.NoError(t, err)
+	require.NotNil(t, conn)
+	_ = conn.Close()
+}
+
 func TestServer_handleGetToolResult(t *testing.T) {
 	conversationID := "conv-123"
 	toolCallID := "tool-456"
@@ -1091,6 +1209,212 @@ func TestServer_handleSteerConversationRejectsMessagesThatAreTooLong(t *testing.
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "message must be 10000 characters or fewer")
+}
+
+func TestParseTerminalSignal(t *testing.T) {
+	signal, ok := parseTerminalSignal("sigint")
+	assert.True(t, ok)
+	assert.Equal(t, syscall.SIGINT, signal)
+
+	_, ok = parseTerminalSignal("nope")
+	assert.False(t, ok)
+}
+
+func TestTerminalOriginAllowed(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/terminal/ws", nil)
+	req.Host = "127.0.0.1:8080"
+	req.Header.Set("Origin", "http://localhost:3000")
+	assert.False(t, terminalOriginAllowed(req))
+
+	req = httptest.NewRequest("GET", "/api/terminal/ws", nil)
+	req.Host = "example.com:8080"
+	req.Header.Set("Origin", "http://evil.com")
+	assert.False(t, terminalOriginAllowed(req))
+}
+
+func TestBoundedTerminalDimensions(t *testing.T) {
+	assert.Equal(t, defaultTerminalRows, boundedTerminalRows(0))
+	assert.Equal(t, maxTerminalRows, boundedTerminalRows(maxTerminalRows+50))
+	assert.Equal(t, 40, boundedTerminalRows(40))
+
+	assert.Equal(t, defaultTerminalCols, boundedTerminalCols(0))
+	assert.Equal(t, maxTerminalCols, boundedTerminalCols(maxTerminalCols+50))
+	assert.Equal(t, 80, boundedTerminalCols(80))
+}
+
+func TestTerminalWebsocketClosesAfterShellExitWithoutClientInput(t *testing.T) {
+	tmpDir := t.TempDir()
+	shellPath := filepath.Join(tmpDir, "exit-shell")
+	require.NoError(t, os.WriteFile(shellPath, []byte("#!/bin/sh\nexit 0\n"), 0o700))
+	t.Setenv("SHELL", shellPath)
+
+	server := &Server{
+		config: &ServerConfig{CWD: tmpDir},
+		runCtx: context.Background(),
+	}
+	httpServer := httptest.NewServer(http.HandlerFunc(server.handleTerminalWebsocket))
+	defer httpServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		require.NoError(t, conn.SetReadDeadline(deadline))
+		_, _, readErr := conn.ReadMessage()
+		if readErr == nil {
+			continue
+		}
+
+		var netErr net.Error
+		require.False(t, errors.As(readErr, &netErr) && netErr.Timeout(), "terminal websocket did not close after shell exit")
+		return
+	}
+}
+
+func TestTerminalWebsocketReconnectsToRunningSession(t *testing.T) {
+	tmpDir := t.TempDir()
+	shellPath := filepath.Join(tmpDir, "persistent-shell")
+	require.NoError(t, os.WriteFile(shellPath, []byte(`#!/bin/sh
+echo session-started
+while IFS= read -r line; do
+  printf 'line:%s\n' "$line"
+done
+`), 0o700))
+	t.Setenv("SHELL", shellPath)
+
+	runCtx, runCancel := context.WithCancel(context.Background())
+	defer runCancel()
+	server := &Server{
+		config: &ServerConfig{CWD: tmpDir},
+		runCtx: runCtx,
+	}
+	defer server.terminalSessionManager().Close()
+
+	httpServer := httptest.NewServer(http.HandlerFunc(server.handleTerminalWebsocket))
+	defer httpServer.Close()
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http")
+
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	require.NoError(t, err)
+	ready := readTerminalReady(t, conn)
+	require.NotZero(t, ready.PID)
+	requireTerminalBinaryContains(t, conn, "session-started")
+	require.NoError(t, conn.Close())
+
+	reconnected, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	require.NoError(t, err)
+	defer reconnected.Close()
+
+	reconnectedReady := readTerminalReady(t, reconnected)
+	assert.Equal(t, ready.PID, reconnectedReady.PID)
+	requireTerminalBinaryContains(t, reconnected, "session-started")
+
+	input, err := json.Marshal(terminalMessage{Type: "input", Data: "persist-check\n"})
+	require.NoError(t, err)
+	require.NoError(t, reconnected.WriteMessage(websocket.TextMessage, input))
+	requireTerminalBinaryContains(t, reconnected, "line:persist-check")
+}
+
+func TestTerminalWebsocketReconnectSignalsReplayCompletion(t *testing.T) {
+	tmpDir := t.TempDir()
+	shellPath := filepath.Join(tmpDir, "persistent-shell")
+	require.NoError(t, os.WriteFile(shellPath, []byte("#!/bin/sh\necho session-started\nsleep 10\n"), 0o700))
+	t.Setenv("SHELL", shellPath)
+
+	runCtx, runCancel := context.WithCancel(context.Background())
+	defer runCancel()
+	server := &Server{
+		config: &ServerConfig{CWD: tmpDir},
+		runCtx: runCtx,
+	}
+	defer server.terminalSessionManager().Close()
+
+	httpServer := httptest.NewServer(http.HandlerFunc(server.handleTerminalWebsocket))
+	defer httpServer.Close()
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http")
+
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	require.NoError(t, err)
+	readTerminalReady(t, conn)
+	requireTerminalBinaryContains(t, conn, "session-started")
+	require.NoError(t, conn.Close())
+
+	reconnected, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	require.NoError(t, err)
+	defer reconnected.Close()
+
+	readTerminalReady(t, reconnected)
+
+	deadline := time.Now().Add(2 * time.Second)
+	sawReplay := false
+	for !sawReplay {
+		require.NoError(t, reconnected.SetReadDeadline(deadline))
+		messageType, payload, err := reconnected.ReadMessage()
+		require.NoError(t, err)
+
+		switch messageType {
+		case websocket.BinaryMessage:
+			assert.Contains(t, string(payload), "session-started")
+			sawReplay = true
+		case websocket.TextMessage:
+			var message terminalMessage
+			require.NoError(t, json.Unmarshal(payload, &message))
+			require.NotEqual(t, "replay-complete", message.Type, "replay completion arrived before replay data")
+		}
+	}
+
+	require.NoError(t, reconnected.SetReadDeadline(deadline))
+	messageType, payload, err := reconnected.ReadMessage()
+	require.NoError(t, err)
+	require.Equal(t, websocket.TextMessage, messageType)
+
+	var message terminalMessage
+	require.NoError(t, json.Unmarshal(payload, &message))
+	assert.Equal(t, "replay-complete", message.Type)
+}
+
+func readTerminalReady(t *testing.T, conn *websocket.Conn) terminalMessage {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		require.NoError(t, conn.SetReadDeadline(deadline))
+		messageType, payload, err := conn.ReadMessage()
+		require.NoError(t, err)
+		if messageType != websocket.TextMessage {
+			continue
+		}
+
+		var message terminalMessage
+		require.NoError(t, json.Unmarshal(payload, &message))
+		require.NotEqual(t, "exit", message.Type, "terminal exited before it was ready")
+		if message.Type == "ready" {
+			return message
+		}
+	}
+}
+
+func requireTerminalBinaryContains(t *testing.T, conn *websocket.Conn, expected string) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	var output strings.Builder
+	for {
+		require.NoError(t, conn.SetReadDeadline(deadline))
+		messageType, payload, err := conn.ReadMessage()
+		require.NoError(t, err)
+		if messageType != websocket.BinaryMessage {
+			continue
+		}
+
+		output.Write(payload)
+		if strings.Contains(output.String(), expected) {
+			return
+		}
+	}
 }
 
 func TestDisplayProviderName(t *testing.T) {

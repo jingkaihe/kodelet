@@ -34,7 +34,9 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8080',
         changeOrigin: true,
-        secure: false
+        rewriteWsOrigin: true,
+        secure: false,
+        ws: true
       }
     }
   },
