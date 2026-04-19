@@ -4,6 +4,7 @@ import {
   ConversationListResponse,
   Conversation,
   CWDHintsResponse,
+  GitDiffResponse,
   ToolResult
 } from '../types';
 
@@ -327,6 +328,64 @@ describe('ApiService', () => {
         expect.any(Object)
       );
       expect(result).toEqual(mockToolResult);
+    });
+  });
+
+  describe('getGitDiff', () => {
+    it('fetches git diff for the selected cwd', async () => {
+      const mockGitDiff: GitDiffResponse = {
+        cwd: '/workspace/project',
+        diff: 'diff --git a/file b/file',
+        has_diff: true,
+        git_root: '/workspace/project',
+        command: 'git diff --no-ext-diff --submodule=diff --src-prefix=a/ --dst-prefix=b/',
+        exit_code: 0,
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockGitDiff,
+      });
+
+      const result = await apiService.getGitDiff('/workspace/project');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/git/diff?cwd=%2Fworkspace%2Fproject',
+        expect.any(Object)
+      );
+      expect(result).toEqual(mockGitDiff);
+    });
+  });
+
+  describe('createTerminalWebSocket', () => {
+    it('creates a websocket using the current host and query params', () => {
+      const originalLocation = window.location;
+      const websocketSpy = vi.fn();
+
+      // @ts-expect-error test shim
+      global.WebSocket = websocketSpy;
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: {
+          protocol: 'http:',
+          host: 'localhost:3000',
+        },
+      });
+
+      apiService.createTerminalWebSocket({
+        cwd: '/workspace/project',
+        rows: 24,
+        cols: 80,
+      });
+
+      expect(websocketSpy).toHaveBeenCalledWith(
+        'ws://localhost:3000/api/terminal/ws?cwd=%2Fworkspace%2Fproject&rows=24&cols=80'
+      );
+
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: originalLocation,
+      });
     });
   });
 

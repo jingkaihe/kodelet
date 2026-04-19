@@ -1,15 +1,19 @@
 package webui
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -33,6 +37,17 @@ type mockConversationService struct {
 	deleteFunc  func(ctx context.Context, id string) error
 	getToolFunc func(ctx context.Context, conversationID, toolCallID string) (*conversations.GetToolResultResponse, error)
 	closeFunc   func() error
+}
+
+type hijackableRecorder struct {
+	*httptest.ResponseRecorder
+}
+
+func (h *hijackableRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	serverConn, clientConn := net.Pipe()
+	reader := bufio.NewReader(serverConn)
+	writer := bufio.NewWriter(serverConn)
+	return clientConn, bufio.NewReadWriter(reader, writer), nil
 }
 
 func (m *mockConversationService) ListConversations(ctx context.Context, req *conversations.ListConversationsRequest) (*conversations.ListConversationsResponse, error) {
@@ -326,6 +341,59 @@ func TestServer_handleGetCWDHints_NaturalSiblingQuery(t *testing.T) {
 	require.Len(t, response.Hints, 2)
 	assert.Equal(t, filepath.Join(parentDir, "kodelet"), response.Hints[0].Path)
 	assert.Equal(t, filepath.Join(parentDir, "kodelet-website"), response.Hints[1].Path)
+}
+
+func TestServer_resolveRequestedCWD(t *testing.T) {
+	tmpDir := t.TempDir()
+	server := &Server{config: &ServerConfig{CWD: tmpDir}}
+
+	resolved, err := server.resolveRequestedCWD("")
+	require.NoError(t, err)
+	assert.Equal(t, tmpDir, resolved)
+
+	childDir := filepath.Join(tmpDir, "child")
+	require.NoError(t, os.Mkdir(childDir, 0o755))
+
+	resolved, err = server.resolveRequestedCWD("child")
+	require.NoError(t, err)
+	assert.Equal(t, childDir, resolved)
+}
+
+func TestServer_handleGetGitDiff(t *testing.T) {
+	repoDir := t.TempDir()
+	runGit := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, string(output))
+	}
+
+	runGit("init")
+	runGit("config", "user.email", "test@example.com")
+	runGit("config", "user.name", "Test User")
+	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("old\n"), 0o644))
+	runGit("add", "file.txt")
+	runGit("commit", "-m", "initial")
+	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("new\n"), 0o644))
+
+	server := &Server{config: &ServerConfig{CWD: repoDir}}
+	req := httptest.NewRequest("GET", "/api/git/diff", nil)
+	w := httptest.NewRecorder()
+
+	server.handleGetGitDiff(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response gitDiffResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	assert.True(t, response.HasDiff)
+	assert.Equal(t, repoDir, response.CWD)
+	assert.Equal(t, repoDir, response.GitRoot)
+	assert.Contains(t, response.Diff, "diff --git a/file.txt b/file.txt")
+	assert.Contains(t, response.Diff, "-old")
+	assert.Contains(t, response.Diff, "+new")
+	assert.Equal(t, 0, response.ExitCode)
 }
 
 func TestServer_handleGetConversationOpenAIChatCompletionsSkipsSystemAndPreservesThinking(t *testing.T) {
@@ -972,6 +1040,16 @@ func TestServer_handleChatThroughMiddleware(t *testing.T) {
 	assert.Equal(t, "conv-middleware", firstEvent.ConversationID)
 }
 
+func TestResponseWriter_HijackDelegates(t *testing.T) {
+	recorder := &hijackableRecorder{ResponseRecorder: httptest.NewRecorder()}
+	rw := &responseWriter{ResponseWriter: recorder, statusCode: http.StatusOK}
+
+	conn, _, err := rw.Hijack()
+	require.NoError(t, err)
+	require.NotNil(t, conn)
+	_ = conn.Close()
+}
+
 func TestServer_handleGetToolResult(t *testing.T) {
 	conversationID := "conv-123"
 	toolCallID := "tool-456"
@@ -1091,6 +1169,37 @@ func TestServer_handleSteerConversationRejectsMessagesThatAreTooLong(t *testing.
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "message must be 10000 characters or fewer")
+}
+
+func TestParseTerminalSignal(t *testing.T) {
+	signal, ok := parseTerminalSignal("sigint")
+	assert.True(t, ok)
+	assert.Equal(t, syscall.SIGINT, signal)
+
+	_, ok = parseTerminalSignal("nope")
+	assert.False(t, ok)
+}
+
+func TestTerminalOriginAllowed(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/terminal/ws", nil)
+	req.Host = "127.0.0.1:8080"
+	req.Header.Set("Origin", "http://localhost:3000")
+	assert.True(t, terminalOriginAllowed(req))
+
+	req = httptest.NewRequest("GET", "/api/terminal/ws", nil)
+	req.Host = "example.com:8080"
+	req.Header.Set("Origin", "http://evil.com")
+	assert.False(t, terminalOriginAllowed(req))
+}
+
+func TestBoundedTerminalDimensions(t *testing.T) {
+	assert.Equal(t, defaultTerminalRows, boundedTerminalRows(0))
+	assert.Equal(t, maxTerminalRows, boundedTerminalRows(maxTerminalRows+50))
+	assert.Equal(t, 40, boundedTerminalRows(40))
+
+	assert.Equal(t, defaultTerminalCols, boundedTerminalCols(0))
+	assert.Equal(t, maxTerminalCols, boundedTerminalCols(maxTerminalCols+50))
+	assert.Equal(t, 80, boundedTerminalCols(80))
 }
 
 func TestDisplayProviderName(t *testing.T) {

@@ -4,11 +4,13 @@
 package webui
 
 import (
+	"bufio"
 	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -167,6 +169,8 @@ func (s *Server) setupRoutes() {
 	api := s.router.PathPrefix("/api").Subrouter()
 	api.HandleFunc("/chat/settings", s.handleGetChatSettings).Methods("GET")
 	api.HandleFunc("/chat/cwd-suggestions", s.handleGetCWDHints).Methods("GET")
+	api.HandleFunc("/git/diff", s.handleGetGitDiff).Methods("GET")
+	api.HandleFunc("/terminal/ws", s.handleTerminalWebsocket).Methods("GET")
 	api.HandleFunc("/conversations", s.handleListConversations).Methods("GET")
 	api.HandleFunc("/conversations/{id}", s.handleGetConversation).Methods("GET")
 	api.HandleFunc("/conversations/{id}/stream", s.handleStreamConversation).Methods("GET")
@@ -272,6 +276,15 @@ func (rw *responseWriter) Flush() {
 	if flusher, ok := rw.ResponseWriter.(http.Flusher); ok {
 		flusher.Flush()
 	}
+}
+
+func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := rw.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, errors.New("response writer does not support hijacking")
+	}
+
+	return hijacker.Hijack()
 }
 
 func (s *Server) chatExecutionContext(requestCtx context.Context) context.Context {
@@ -838,6 +851,24 @@ func (s *Server) defaultCWD() (string, error) {
 	}
 
 	return resolveConfiguredDefaultCWD(configuredCWD)
+}
+
+func (s *Server) resolveRequestedCWD(requestedCWD string) (string, error) {
+	defaultCWD, err := s.defaultCWD()
+	if err != nil {
+		return "", err
+	}
+
+	expandedRequestedCWD, err := expandWebCWDInput(requestedCWD, defaultCWD)
+	if err != nil {
+		return "", err
+	}
+
+	if strings.TrimSpace(expandedRequestedCWD) == "" {
+		return defaultCWD, nil
+	}
+
+	return conversations.NormalizeCWD(expandedRequestedCWD)
 }
 
 func resolveConfiguredDefaultCWD(configuredCWD string) (string, error) {

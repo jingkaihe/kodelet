@@ -949,6 +949,248 @@ h6 {
   margin-top: 1rem;
 }
 
+.workspace-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 72;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  background: rgba(20, 20, 19, 0.24);
+  backdrop-filter: blur(10px);
+}
+
+.workspace-modal {
+  width: min(56rem, calc(100vw - 2rem));
+  max-height: min(88vh, 56rem);
+  overflow: hidden;
+  border-radius: 1.6rem;
+  padding: 1.15rem;
+  box-shadow: 0 28px 72px rgba(20, 20, 19, 0.22);
+}
+
+.workspace-modal-wide {
+  width: min(72rem, calc(100vw - 2rem));
+}
+
+.workspace-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.95rem;
+}
+
+.workspace-modal-heading-group {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.workspace-modal-title {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: clamp(1.2rem, 2vw, 1.55rem);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+
+.workspace-modal-copy {
+  margin: 0;
+  color: rgba(20, 20, 19, 0.62);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.workspace-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.55rem;
+}
+
+.workspace-modal-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  align-items: center;
+  margin-bottom: 0.9rem;
+}
+
+.workspace-modal-meta-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.28rem 0.7rem;
+  background: rgba(106, 155, 204, 0.12);
+  border: 1px solid rgba(106, 155, 204, 0.18);
+  color: #537aa5;
+  font-family: var(--font-heading);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.workspace-modal-meta-text {
+  color: rgba(20, 20, 19, 0.62);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.workspace-modal-meta-text.mono {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+.workspace-modal-body {
+  min-height: 0;
+}
+
+.workspace-modal-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.55rem;
+}
+
+.workspace-modal-scroll-region {
+  max-height: min(66vh, 44rem);
+  overflow: auto;
+  border-radius: 1rem;
+  border: 1px solid rgba(20, 20, 19, 0.08);
+  background: rgba(250, 249, 245, 0.68);
+  padding: 0.85rem;
+}
+
+.workspace-modal-placeholder {
+  display: flex;
+  min-height: 16rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 1rem;
+  border: 1px dashed rgba(20, 20, 19, 0.14);
+  background: rgba(247, 243, 235, 0.48);
+  color: rgba(20, 20, 19, 0.6);
+  text-align: center;
+  padding: 1rem;
+}
+
+.workspace-terminal-modal {
+  display: flex;
+  flex-direction: column;
+  min-width: 32rem;
+  min-height: 22rem;
+  resize: none;
+}
+
+.workspace-terminal-header {
+  margin-bottom: 0.7rem;
+}
+
+.workspace-terminal-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-bottom: 0.75rem;
+  padding: 0.5rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(20, 20, 19, 0.05);
+}
+
+.workspace-terminal-status-dot {
+  width: 0.58rem;
+  height: 0.58rem;
+  border-radius: 999px;
+  background: rgba(20, 20, 19, 0.28);
+}
+
+.workspace-terminal-status-dot.is-live {
+  background: #7fbc63;
+  box-shadow: 0 0 0 4px rgba(127, 188, 99, 0.12);
+}
+
+.workspace-terminal-status-dot.is-error {
+  background: #d97757;
+  box-shadow: 0 0 0 4px rgba(217, 119, 87, 0.12);
+}
+
+.workspace-terminal-status-dot.is-idle {
+  background: #b0aea5;
+}
+
+.workspace-terminal-status-text {
+  font-family: var(--font-heading);
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: rgba(20, 20, 19, 0.7);
+}
+
+.workspace-terminal-shell {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 1rem;
+  border: 1px solid rgba(20, 20, 19, 0.12);
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.05), transparent 36%),
+    linear-gradient(180deg, #221e19 0%, #171512 100%);
+}
+
+.workspace-terminal-host {
+  width: 100%;
+  height: 100%;
+  padding: 0.9rem;
+}
+
+.workspace-terminal-host .xterm {
+  height: 100%;
+}
+
+.workspace-terminal-host .xterm-viewport {
+  border-radius: 0.7rem;
+}
+
+.workspace-terminal-resize-handle {
+  position: absolute;
+  right: 0.95rem;
+  bottom: 0.9rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  border: 1px solid rgba(20, 20, 19, 0.12);
+  background: rgba(247, 243, 235, 0.92);
+  color: rgba(20, 20, 19, 0.7);
+  box-shadow: 0 6px 20px rgba(20, 20, 19, 0.12);
+  cursor: nwse-resize;
+}
+
+.workspace-terminal-resize-handle:hover {
+  background: rgba(250, 249, 245, 0.98);
+}
+
+@media (max-width: 900px) {
+  .workspace-modal,
+  .workspace-modal-wide,
+  .workspace-terminal-modal {
+    width: calc(100vw - 1rem) !important;
+    min-width: 0;
+    height: min(86vh, 48rem) !important;
+  }
+
+  .workspace-modal-header {
+    flex-direction: column;
+  }
+
+  .workspace-modal-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
 .tool-action-link {
   display: inline-flex;
   align-items: center;

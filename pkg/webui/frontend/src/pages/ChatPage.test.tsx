@@ -9,6 +9,11 @@ import {
 import ChatPage from "./ChatPage";
 import type { ChatStreamEvent } from "../types";
 
+vi.mock("../components/workspace/TerminalModal", () => ({
+	default: ({ open }: { open: boolean }) =>
+		open ? <div data-testid="terminal-modal">Terminal</div> : null,
+}));
+
 const mockNavigate = vi.fn();
 const mockGetConversations = vi.fn();
 const mockGetConversation = vi.fn();
@@ -16,6 +21,7 @@ const mockGetChatSettings = vi.fn();
 const mockStreamChat = vi.fn();
 const mockStreamConversation = vi.fn();
 const mockGetCWDHints = vi.fn();
+const mockGetGitDiff = vi.fn();
 const mockSteerConversation = vi.fn();
 const mockStopConversation = vi.fn();
 const mockDeleteConversation = vi.fn();
@@ -41,6 +47,7 @@ vi.mock("../services/api", () => ({
 		getConversation: (...args: unknown[]) => mockGetConversation(...args),
 		getChatSettings: (...args: unknown[]) => mockGetChatSettings(...args),
 		getCWDHints: (...args: unknown[]) => mockGetCWDHints(...args),
+		getGitDiff: (...args: unknown[]) => mockGetGitDiff(...args),
 		streamChat: (...args: unknown[]) => mockStreamChat(...args),
 		streamConversation: (...args: unknown[]) => mockStreamConversation(...args),
 		steerConversation: (...args: unknown[]) => mockSteerConversation(...args),
@@ -92,6 +99,15 @@ describe("ChatPage", () => {
 		});
 		mockGetCWDHints.mockResolvedValue({
 			hints: [{ path: "/workspace/default" }],
+		});
+		mockGetGitDiff.mockResolvedValue({
+			cwd: "/workspace/default",
+			diff: "diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n",
+			has_diff: true,
+			git_root: "/workspace/default",
+			command:
+				"git diff --no-ext-diff --submodule=diff --src-prefix=a/ --dst-prefix=b/",
+			exit_code: 0,
 		});
 	});
 
@@ -279,6 +295,29 @@ describe("ChatPage", () => {
 		expect(toggle).toHaveAttribute("aria-label", "Expand composer");
 		expect(toggle).toHaveAttribute("aria-pressed", "false");
 		expect(textarea).not.toHaveClass("composer-editor-expanded");
+	});
+
+	it("opens the git diff modal from the composer toolbar", async () => {
+		render(<ChatPage />);
+
+		await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
+		await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
+
+		fireEvent.click(screen.getByTestId("composer-git-diff-toggle"));
+
+		await waitFor(() => expect(mockGetGitDiff).toHaveBeenCalledWith("/workspace/default"));
+		expect(screen.getByTestId("git-diff-modal")).toBeInTheDocument();
+		expect(screen.getByText("Git diff")).toBeInTheDocument();
+	});
+
+	it("opens the terminal modal from the composer toolbar", async () => {
+		render(<ChatPage />);
+
+		await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
+
+		fireEvent.click(screen.getByTestId("composer-terminal-toggle"));
+
+		expect(screen.getByTestId("terminal-modal")).toBeInTheDocument();
 	});
 
 	it("allows selecting a profile for a new conversation", async () => {

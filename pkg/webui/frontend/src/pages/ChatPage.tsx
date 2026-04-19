@@ -8,6 +8,8 @@ import React, {
 import { useNavigate, useParams } from "react-router-dom";
 import ChatSidebar from "../components/chat/ChatSidebar";
 import ChatTranscript from "../components/chat/ChatTranscript";
+import GitDiffModal from "../components/workspace/GitDiffModal";
+import TerminalModal from "../components/workspace/TerminalModal";
 import {
 	applyChatStreamEvent,
 	conversationToChatMessages,
@@ -19,6 +21,7 @@ import type {
 	ChatStreamEvent,
 	ContentBlock,
 	Conversation,
+	GitDiffResponse,
 	PendingImageAttachment,
 } from "../types";
 import {
@@ -258,6 +261,11 @@ const ChatPage: React.FC = () => {
 	const [attachments, setAttachments] = useState<PendingImageAttachment[]>([]);
 	const [dragActive, setDragActive] = useState(false);
 	const [composerExpanded, setComposerExpanded] = useState(false);
+	const [gitDiffOpen, setGitDiffOpen] = useState(false);
+	const [gitDiffLoading, setGitDiffLoading] = useState(false);
+	const [gitDiffError, setGitDiffError] = useState<string | null>(null);
+	const [gitDiff, setGitDiff] = useState<GitDiffResponse | null>(null);
+	const [terminalOpen, setTerminalOpen] = useState(false);
 	const [sidebarVisible, setSidebarVisible] = useState(
 		readStoredSidebarVisible,
 	);
@@ -1291,6 +1299,28 @@ const ChatPage: React.FC = () => {
 		setNewChatDialogOpen(false);
 	};
 
+	const fetchGitDiff = async () => {
+		setGitDiffLoading(true);
+		setGitDiffError(null);
+
+		try {
+			const response = await apiService.getGitDiff(currentCWDLabel || undefined);
+			setGitDiff(response);
+		} catch (error) {
+			const message =
+				error instanceof Error ? error.message : "Failed to load git diff";
+			setGitDiffError(message);
+			setGitDiff(null);
+		} finally {
+			setGitDiffLoading(false);
+		}
+	};
+
+	const handleOpenGitDiff = () => {
+		setGitDiffOpen(true);
+		void fetchGitDiff();
+	};
+
 	const newChatContextEditor = (
 		<div className="new-chat-context-panel" data-testid="new-chat-context-panel">
 			<div className="new-chat-dialog-grid">
@@ -1412,6 +1442,23 @@ const ChatPage: React.FC = () => {
 
 	return (
 		<div className="h-[100dvh] bg-transparent">
+			<GitDiffModal
+				cwdLabel={currentCWDLabel || chatSettings.defaultCWD || "Default directory"}
+				error={gitDiffError}
+				gitDiff={gitDiff}
+				loading={gitDiffLoading}
+				onClose={() => setGitDiffOpen(false)}
+				open={gitDiffOpen}
+				onRefresh={() => {
+					void fetchGitDiff();
+				}}
+			/>
+			<TerminalModal
+				cwdLabel={currentCWDLabel || chatSettings.defaultCWD || "Default directory"}
+				open={terminalOpen}
+				onClose={() => setTerminalOpen(false)}
+			/>
+
 			{newChatDialogOpen ? (
 				<div className="new-chat-dialog-backdrop">
 					<div
@@ -1675,11 +1722,11 @@ const ChatPage: React.FC = () => {
 
 								<div className="border-t border-black/8 px-2.5 pt-2">
 									<div className="composer-footer-row">
-										<div className="composer-leading-actions">
-											<button
-												aria-label="Add image"
-												className="composer-icon-button"
-												disabled={sending || steering}
+									<div className="composer-leading-actions">
+										<button
+											aria-label="Add image"
+											className="composer-icon-button"
+											disabled={sending || steering}
 												onClick={() => fileInputRef.current?.click()}
 												type="button"
 											>
@@ -1711,12 +1758,98 @@ const ChatPage: React.FC = () => {
 														strokeLinejoin="round"
 														strokeWidth="1.7"
 													/>
-												</svg>
-											</button>
+											</svg>
+										</button>
 
-											<button
-												aria-label={composerExpanded ? "Restore composer" : "Expand composer"}
-												aria-pressed={composerExpanded}
+										<button
+											aria-label="Show git diff"
+											className="composer-icon-button"
+											data-testid="composer-git-diff-toggle"
+											onClick={handleOpenGitDiff}
+											title="Show git diff"
+											type="button"
+										>
+											<svg
+												aria-hidden="true"
+												className="h-4 w-4"
+												fill="none"
+												viewBox="0 0 24 24"
+												xmlns="http://www.w3.org/2000/svg"
+											>
+												<path
+													d="M4 7h16"
+													stroke="currentColor"
+													strokeLinecap="round"
+													strokeLinejoin="round"
+													strokeWidth="1.7"
+												/>
+												<path
+													d="M4 12h7"
+													stroke="currentColor"
+													strokeLinecap="round"
+													strokeLinejoin="round"
+													strokeWidth="1.7"
+												/>
+												<path
+													d="M4 17h16"
+													stroke="currentColor"
+													strokeLinecap="round"
+													strokeLinejoin="round"
+													strokeWidth="1.7"
+												/>
+												<path
+													d="m15 10 2 2 3-4"
+													stroke="currentColor"
+													strokeLinecap="round"
+													strokeLinejoin="round"
+													strokeWidth="1.7"
+												/>
+											</svg>
+										</button>
+
+										<button
+											aria-label="Open terminal"
+											className="composer-icon-button"
+											data-testid="composer-terminal-toggle"
+											onClick={() => setTerminalOpen(true)}
+											title="Open terminal"
+											type="button"
+										>
+											<svg
+												aria-hidden="true"
+												className="h-4 w-4"
+												fill="none"
+												viewBox="0 0 24 24"
+												xmlns="http://www.w3.org/2000/svg"
+											>
+												<rect
+													x="3.5"
+													y="5"
+													width="17"
+													height="14"
+													rx="2.5"
+													stroke="currentColor"
+													strokeWidth="1.7"
+												/>
+												<path
+													d="m7.5 10.5 2.5 2.5-2.5 2.5"
+													stroke="currentColor"
+													strokeLinecap="round"
+													strokeLinejoin="round"
+													strokeWidth="1.7"
+												/>
+												<path
+													d="M13.5 15.5h3"
+													stroke="currentColor"
+													strokeLinecap="round"
+													strokeWidth="1.7"
+												/>
+											</svg>
+										</button>
+
+										<button
+											aria-label={composerExpanded ? "Restore composer" : "Expand composer"}
+											aria-pressed={composerExpanded}
 												className="composer-icon-button"
 												data-testid="composer-expand-toggle"
 												onClick={() => setComposerExpanded((currentValue) => !currentValue)}
