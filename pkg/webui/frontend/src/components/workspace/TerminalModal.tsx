@@ -4,7 +4,6 @@ import { Terminal } from '@xterm/xterm';
 import type {
   TerminalClientMessage,
   TerminalExitEvent,
-  TerminalReadyEvent,
   TerminalServerEvent,
 } from '../../types';
 import apiService from '../../services/api';
@@ -28,7 +27,7 @@ const isTerminalServerEvent = (value: unknown): value is TerminalServerEvent => 
   }
 
   const type = (value as { type?: unknown }).type;
-  return type === 'ready' || type === 'exit' || type === 'info';
+  return type === 'ready' || type === 'exit' || type === 'info' || type === 'replay-complete';
 };
 
 const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose }) => {
@@ -36,8 +35,10 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose }
   const fitAddonRef = useRef<FitAddon | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
-  const modalRef = useRef<HTMLDivElement | null>(null);
   const resizeHandleRef = useRef<HTMLButtonElement | null>(null);
+  const replayPendingWritesRef = useRef(0);
+  const replayCompleteReceivedRef = useRef(false);
+  const suppressTerminalInputRef = useRef(true);
   const dragStateRef = useRef<{
     startX: number;
     startY: number;
@@ -46,7 +47,6 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose }
   } | null>(null);
   const [statusText, setStatusText] = useState('Connecting…');
   const [connectionError, setConnectionError] = useState<string | null>(null);
-  const [shellName, setShellName] = useState<string | null>(null);
   const [exitCode, setExitCode] = useState<number | null>(null);
   const [terminalSize, setTerminalSize] = useState({
     width: DEFAULT_TERMINAL_WIDTH,
@@ -115,10 +115,21 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose }
     terminal.focus();
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
+    replayPendingWritesRef.current = 0;
+    replayCompleteReceivedRef.current = false;
+    suppressTerminalInputRef.current = true;
     setStatusText('Connecting…');
     setConnectionError(null);
     setExitCode(null);
-    setShellName(null);
+
+    const releaseReplaySuppressionIfReady = () => {
+      if (!replayCompleteReceivedRef.current || replayPendingWritesRef.current > 0) {
+        return;
+      }
+
+      suppressTerminalInputRef.current = false;
+      setStatusText('Connected');
+    };
 
     const sendMessage = (message: TerminalClientMessage) => {
       if (socketRef.current?.readyState !== WebSocket.OPEN) {
@@ -148,7 +159,6 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose }
     socketRef.current = socket;
 
     socket.addEventListener('open', () => {
-      setStatusText('Connected');
       sendResize();
     });
 
@@ -161,10 +171,14 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose }
           }
 
           if (payload.type === 'ready') {
-            const readyPayload = payload as TerminalReadyEvent;
-            setShellName(readyPayload.name);
-            setStatusText('Connected');
+            setStatusText('Restoring session…');
             window.setTimeout(() => sendResize(), 0);
+            return;
+          }
+
+          if (payload.type === 'replay-complete') {
+            replayCompleteReceivedRef.current = true;
+            releaseReplaySuppressionIfReady();
             return;
           }
 
@@ -186,6 +200,15 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose }
       }
 
       if (event.data instanceof ArrayBuffer) {
+        if (!replayCompleteReceivedRef.current) {
+          replayPendingWritesRef.current += 1;
+          terminal.write(new Uint8Array(event.data), () => {
+            replayPendingWritesRef.current = Math.max(0, replayPendingWritesRef.current - 1);
+            releaseReplaySuppressionIfReady();
+          });
+          return;
+        }
+
         terminal.write(new Uint8Array(event.data));
       }
     });
@@ -199,6 +222,9 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose }
     });
 
     const disposableData = terminal.onData((data) => {
+      if (suppressTerminalInputRef.current) {
+        return;
+      }
       sendMessage({ type: 'input', data });
     });
 
@@ -301,13 +327,11 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose }
         aria-label="Terminal"
         className="workspace-modal workspace-terminal-modal surface-panel"
         data-testid="terminal-modal"
-        ref={modalRef}
         role="dialog"
         style={{ width: terminalSize.width, height: terminalSize.height }}
       >
         <div className="workspace-modal-header workspace-terminal-header">
           <div className="workspace-modal-heading-group">
-            <p className="eyebrow-label text-kodelet-mid-gray">Workspace</p>
             <h2 className="workspace-modal-title">Terminal</h2>
             <p className="workspace-modal-copy" title={cwdLabel}>
               {truncateMiddle(cwdLabel, 92)}
@@ -315,7 +339,6 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose }
           </div>
 
           <div className="workspace-modal-actions">
-            <span className="workspace-modal-meta-pill">{shellName || 'shell'}</span>
             <button className="composer-capsule" onClick={onClose} type="button">
               Close
             </button>

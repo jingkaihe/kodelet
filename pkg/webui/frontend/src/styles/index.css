@@ -1086,13 +1086,7 @@ h6 {
 }
 
 .workspace-terminal-header {
-  margin-bottom: 0.9rem;
-}
-
-.workspace-terminal-modal .workspace-modal-meta-pill {
-  background: rgba(120, 140, 93, 0.12);
-  border-color: rgba(120, 140, 93, 0.22);
-  color: #5f7247;
+  margin-bottom: 0.6rem;
 }
 
 .workspace-terminal-modal .composer-capsule {

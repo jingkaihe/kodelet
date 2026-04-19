@@ -140,6 +140,9 @@ func (s *Server) handleTerminalWebsocket(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
+	if err := writer.writeJSON(terminalMessage{Type: "replay-complete"}); err != nil {
+		return
+	}
 
 	go func() {
 		ticker := time.NewTicker(terminalPingPeriod)

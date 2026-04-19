@@ -1,6 +1,6 @@
 import React from 'react';
 import { copyToClipboard, truncateMiddle } from '../../utils';
-import { compactDiffLines, parseUnifiedDiff, ReferenceDiffBlock } from '../tool-renderers/reference';
+import { parseUnifiedDiff, ReferenceDiffBlock } from '../tool-renderers/reference';
 import type { GitDiffResponse } from '../../types';
 
 interface GitDiffModalProps {
@@ -27,7 +27,7 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({
   }
 
   const diffText = gitDiff?.diff || '';
-  const diffLines = diffText ? compactDiffLines(parseUnifiedDiff(diffText), 2, 2, 220) : [];
+  const diffLines = diffText ? parseUnifiedDiff(diffText) : [];
 
   return (
     <div className="workspace-modal-backdrop" data-testid="git-diff-modal-backdrop">
@@ -39,7 +39,6 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({
       >
         <div className="workspace-modal-header">
           <div className="workspace-modal-heading-group">
-            <p className="eyebrow-label text-kodelet-mid-gray">Workspace</p>
             <h2 className="workspace-modal-title">Git diff</h2>
             <p className="workspace-modal-copy" title={cwdLabel}>
               {truncateMiddle(cwdLabel, 92)}
@@ -47,6 +46,11 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({
           </div>
 
           <div className="workspace-modal-actions">
+            {gitDiff?.has_diff && !loading ? (
+              <button className="composer-capsule" onClick={() => void copyToClipboard(diffText)} type="button">
+                Copy diff
+              </button>
+            ) : null}
             <button className="composer-capsule" onClick={onRefresh} type="button">
               Refresh
             </button>
@@ -54,16 +58,6 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({
               Close
             </button>
           </div>
-        </div>
-
-        <div className="workspace-modal-meta">
-          <span className="workspace-modal-meta-pill">{gitDiff?.has_diff ? 'Uncommitted changes' : 'Working tree clean'}</span>
-          {gitDiff?.git_root ? (
-            <span className="workspace-modal-meta-text" title={gitDiff.git_root}>
-              Repo {truncateMiddle(gitDiff.git_root, 84)}
-            </span>
-          ) : null}
-          {gitDiff?.command ? <span className="workspace-modal-meta-text mono">{gitDiff.command}</span> : null}
         </div>
 
         {error ? (
@@ -76,16 +70,9 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({
           {loading ? (
             <div className="workspace-modal-placeholder">Loading diff…</div>
           ) : gitDiff?.has_diff ? (
-            <>
-              <div className="workspace-modal-toolbar">
-                <button className="tool-action-link" onClick={() => void copyToClipboard(diffText)} type="button">
-                  Copy diff
-                </button>
-              </div>
-              <div className="workspace-modal-scroll-region" data-testid="git-diff-content">
-                <ReferenceDiffBlock lines={diffLines} />
-              </div>
-            </>
+            <div className="workspace-modal-scroll-region" data-testid="git-diff-content">
+              <ReferenceDiffBlock lines={diffLines} />
+            </div>
           ) : (
             <div className="workspace-modal-placeholder">No working tree changes in this repository.</div>
           )}

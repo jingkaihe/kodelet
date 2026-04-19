@@ -187,6 +187,10 @@ export interface TerminalInfoEvent {
   text: string;
 }
 
+export interface TerminalReplayCompleteEvent {
+  type: 'replay-complete';
+}
+
 export interface TerminalInputMessage {
   type: 'input';
   data: string;
@@ -203,7 +207,7 @@ export interface TerminalSignalMessage {
   name: string;
 }
 
-export type TerminalServerEvent = TerminalReadyEvent | TerminalExitEvent | TerminalInfoEvent;
+export type TerminalServerEvent = TerminalReadyEvent | TerminalExitEvent | TerminalInfoEvent | TerminalReplayCompleteEvent;
 export type TerminalClientMessage = TerminalInputMessage | TerminalResizeMessage | TerminalSignalMessage;
 
 export interface PendingImageAttachment {

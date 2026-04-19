@@ -1279,6 +1279,64 @@ done
 	requireTerminalBinaryContains(t, reconnected, "line:persist-check")
 }
 
+func TestTerminalWebsocketReconnectSignalsReplayCompletion(t *testing.T) {
+	tmpDir := t.TempDir()
+	shellPath := filepath.Join(tmpDir, "persistent-shell")
+	require.NoError(t, os.WriteFile(shellPath, []byte("#!/bin/sh\necho session-started\nsleep 10\n"), 0o700))
+	t.Setenv("SHELL", shellPath)
+
+	runCtx, runCancel := context.WithCancel(context.Background())
+	defer runCancel()
+	server := &Server{
+		config: &ServerConfig{CWD: tmpDir},
+		runCtx: runCtx,
+	}
+	defer server.terminalSessionManager().Close()
+
+	httpServer := httptest.NewServer(http.HandlerFunc(server.handleTerminalWebsocket))
+	defer httpServer.Close()
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http")
+
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	require.NoError(t, err)
+	readTerminalReady(t, conn)
+	requireTerminalBinaryContains(t, conn, "session-started")
+	require.NoError(t, conn.Close())
+
+	reconnected, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	require.NoError(t, err)
+	defer reconnected.Close()
+
+	readTerminalReady(t, reconnected)
+
+	deadline := time.Now().Add(2 * time.Second)
+	sawReplay := false
+	for !sawReplay {
+		require.NoError(t, reconnected.SetReadDeadline(deadline))
+		messageType, payload, err := reconnected.ReadMessage()
+		require.NoError(t, err)
+
+		switch messageType {
+		case websocket.BinaryMessage:
+			assert.Contains(t, string(payload), "session-started")
+			sawReplay = true
+		case websocket.TextMessage:
+			var message terminalMessage
+			require.NoError(t, json.Unmarshal(payload, &message))
+			require.NotEqual(t, "replay-complete", message.Type, "replay completion arrived before replay data")
+		}
+	}
+
+	require.NoError(t, reconnected.SetReadDeadline(deadline))
+	messageType, payload, err := reconnected.ReadMessage()
+	require.NoError(t, err)
+	require.Equal(t, websocket.TextMessage, messageType)
+
+	var message terminalMessage
+	require.NoError(t, json.Unmarshal(payload, &message))
+	assert.Equal(t, "replay-complete", message.Type)
+}
+
 func readTerminalReady(t *testing.T, conn *websocket.Conn) terminalMessage {
 	t.Helper()
 
