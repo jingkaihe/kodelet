@@ -1235,6 +1235,91 @@ func TestTerminalWebsocketClosesAfterShellExitWithoutClientInput(t *testing.T) {
 	}
 }
 
+func TestTerminalWebsocketReconnectsToRunningSession(t *testing.T) {
+	tmpDir := t.TempDir()
+	shellPath := filepath.Join(tmpDir, "persistent-shell")
+	require.NoError(t, os.WriteFile(shellPath, []byte(`#!/bin/sh
+echo session-started
+while IFS= read -r line; do
+  printf 'line:%s\n' "$line"
+done
+`), 0o700))
+	t.Setenv("SHELL", shellPath)
+
+	runCtx, runCancel := context.WithCancel(context.Background())
+	defer runCancel()
+	server := &Server{
+		config: &ServerConfig{CWD: tmpDir},
+		runCtx: runCtx,
+	}
+	defer server.terminalSessionManager().Close()
+
+	httpServer := httptest.NewServer(http.HandlerFunc(server.handleTerminalWebsocket))
+	defer httpServer.Close()
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http")
+
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	require.NoError(t, err)
+	ready := readTerminalReady(t, conn)
+	require.NotZero(t, ready.PID)
+	requireTerminalBinaryContains(t, conn, "session-started")
+	require.NoError(t, conn.Close())
+
+	reconnected, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	require.NoError(t, err)
+	defer reconnected.Close()
+
+	reconnectedReady := readTerminalReady(t, reconnected)
+	assert.Equal(t, ready.PID, reconnectedReady.PID)
+	requireTerminalBinaryContains(t, reconnected, "session-started")
+
+	input, err := json.Marshal(terminalMessage{Type: "input", Data: "persist-check\n"})
+	require.NoError(t, err)
+	require.NoError(t, reconnected.WriteMessage(websocket.TextMessage, input))
+	requireTerminalBinaryContains(t, reconnected, "line:persist-check")
+}
+
+func readTerminalReady(t *testing.T, conn *websocket.Conn) terminalMessage {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		require.NoError(t, conn.SetReadDeadline(deadline))
+		messageType, payload, err := conn.ReadMessage()
+		require.NoError(t, err)
+		if messageType != websocket.TextMessage {
+			continue
+		}
+
+		var message terminalMessage
+		require.NoError(t, json.Unmarshal(payload, &message))
+		require.NotEqual(t, "exit", message.Type, "terminal exited before it was ready")
+		if message.Type == "ready" {
+			return message
+		}
+	}
+}
+
+func requireTerminalBinaryContains(t *testing.T, conn *websocket.Conn, expected string) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	var output strings.Builder
+	for {
+		require.NoError(t, conn.SetReadDeadline(deadline))
+		messageType, payload, err := conn.ReadMessage()
+		require.NoError(t, err)
+		if messageType != websocket.BinaryMessage {
+			continue
+		}
+
+		output.Write(payload)
+		if strings.Contains(output.String(), expected) {
+			return
+		}
+	}
+}
+
 func TestDisplayProviderName(t *testing.T) {
 	tests := []struct {
 		name     string

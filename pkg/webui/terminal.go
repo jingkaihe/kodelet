@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -15,7 +14,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/pkg/errors"
@@ -107,19 +105,12 @@ func (s *Server) handleTerminalWebsocket(w http.ResponseWriter, r *http.Request)
 	rows := boundedTerminalRows(parseTerminalDimension(r.URL.Query().Get("rows")))
 	cols := boundedTerminalCols(parseTerminalDimension(r.URL.Query().Get("cols")))
 
-	shell, shellName := resolveTerminalShell()
-	cmd := exec.CommandContext(ctx, shell)
-	cmd.Dir = resolvedCWD
-	cmd.Env = terminalEnv(shell)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true}
-
-	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
+	session, err := s.terminalSessionManager().getOrCreate(r.Context(), terminalSessionKey(resolvedCWD), resolvedCWD, rows, cols)
 	if err != nil {
 		_ = conn.Close()
-		logger.G(r.Context()).WithError(err).Warn("failed to start terminal pty")
+		logger.G(r.Context()).WithError(err).Warn("failed to get terminal session")
 		return
 	}
-	defer func() { _ = ptmx.Close() }()
 
 	writer := &websocketWriter{conn: conn}
 	defer func() { _ = conn.Close() }()
@@ -130,49 +121,25 @@ func (s *Server) handleTerminalWebsocket(w http.ResponseWriter, r *http.Request)
 		return conn.SetReadDeadline(time.Now().Add(terminalPongWait))
 	})
 
-	gitRepo := false
-	if _, gitErr := resolveGitRoot(r.Context(), resolvedCWD); gitErr == nil {
-		gitRepo = true
-	}
-
-	if err := writer.writeJSON(terminalMessage{
-		Type: "ready",
-		CWD:  resolvedCWD,
-		Name: shellName,
-		Git:  gitRepo,
-		PID:  cmd.Process.Pid,
-	}); err != nil {
+	attachment, replay, err := session.attach()
+	if err != nil {
+		logger.G(r.Context()).WithError(err).Debug("terminal session ended before websocket attach")
 		return
 	}
+	defer session.detach(attachment)
 
-	errCh := make(chan error, 2)
-	var closeOnce sync.Once
-	closeAll := func() {
-		closeOnce.Do(func() {
-			cancel()
-			_ = ptmx.Close()
-			if cmd.Process != nil {
-				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGHUP)
-			}
-		})
+	if err := session.resize(rows, cols); err != nil && !errors.Is(err, errTerminalSessionClosed) {
+		logger.G(r.Context()).WithError(err).Warn("failed to resize terminal pty")
 	}
 
-	go func() {
-		buf := make([]byte, 4096)
-		for {
-			n, readErr := ptmx.Read(buf)
-			if n > 0 {
-				if writeErr := writer.Write(websocket.BinaryMessage, buf[:n]); writeErr != nil {
-					errCh <- writeErr
-					return
-				}
-			}
-			if readErr != nil {
-				errCh <- readErr
-				return
-			}
+	if err := writer.writeJSON(session.readyMessage()); err != nil {
+		return
+	}
+	if len(replay) > 0 {
+		if err := writer.Write(websocket.BinaryMessage, replay); err != nil {
+			return
 		}
-	}()
+	}
 
 	go func() {
 		ticker := time.NewTicker(terminalPingPeriod)
@@ -183,26 +150,11 @@ func (s *Server) handleTerminalWebsocket(w http.ResponseWriter, r *http.Request)
 				return
 			case <-ticker.C:
 				if err := writer.Write(websocket.PingMessage, nil); err != nil {
-					errCh <- err
+					attachment.notify(err)
 					return
 				}
 			}
 		}
-	}()
-
-	go func() {
-		waitErr := cmd.Wait()
-		code := 0
-		if waitErr != nil {
-			var exitErr *exec.ExitError
-			if errors.As(waitErr, &exitErr) {
-				code = exitErr.ExitCode()
-			} else {
-				logger.G(r.Context()).WithError(waitErr).Warn("terminal process ended with error")
-			}
-		}
-		_ = writer.writeJSON(terminalMessage{Type: "exit", Code: code})
-		errCh <- waitErr
 	}()
 
 	readCh := make(chan terminalSocketRead, 1)
@@ -210,9 +162,15 @@ func (s *Server) handleTerminalWebsocket(w http.ResponseWriter, r *http.Request)
 
 	for {
 		select {
-		case asyncErr := <-errCh:
-			closeAll()
-			if asyncErr != nil && !errors.Is(asyncErr, os.ErrClosed) {
+		case output := <-attachment.outputCh:
+			if err := writer.Write(websocket.BinaryMessage, output); err != nil {
+				return
+			}
+		case code := <-attachment.exitCh:
+			_ = writer.writeJSON(terminalMessage{Type: "exit", Code: code})
+			return
+		case asyncErr := <-attachment.errCh:
+			if asyncErr != nil && !errors.Is(asyncErr, errTerminalSessionClosed) {
 				var closeErr *websocket.CloseError
 				if !errors.As(asyncErr, &closeErr) {
 					logger.G(r.Context()).WithError(asyncErr).Debug("terminal session closed")
@@ -221,14 +179,12 @@ func (s *Server) handleTerminalWebsocket(w http.ResponseWriter, r *http.Request)
 			return
 		case socketRead := <-readCh:
 			if socketRead.Err != nil {
-				closeAll()
 				return
 			}
 
 			switch socketRead.MessageType {
 			case websocket.BinaryMessage:
-				if _, err := ptmx.Write(socketRead.Payload); err != nil {
-					closeAll()
+				if err := session.writeInput(socketRead.Payload); err != nil {
 					return
 				}
 			case websocket.TextMessage:
@@ -242,23 +198,16 @@ func (s *Server) handleTerminalWebsocket(w http.ResponseWriter, r *http.Request)
 					if message.Data == "" {
 						continue
 					}
-					if _, err := ptmx.Write([]byte(message.Data)); err != nil {
-						closeAll()
+					if err := session.writeInput([]byte(message.Data)); err != nil {
 						return
 					}
 				case "resize":
-					if err := pty.Setsize(ptmx, &pty.Winsize{
-						Rows: uint16(boundedTerminalRows(message.Rows)),
-						Cols: uint16(boundedTerminalCols(message.Cols)),
-					}); err != nil {
+					if err := session.resize(message.Rows, message.Cols); err != nil && !errors.Is(err, errTerminalSessionClosed) {
 						logger.G(r.Context()).WithError(err).Warn("failed to resize terminal pty")
 					}
 				case "signal":
-					if cmd.Process == nil {
-						continue
-					}
 					if sig, ok := parseTerminalSignal(message.Name); ok {
-						_ = syscall.Kill(-cmd.Process.Pid, sig)
+						_ = session.signal(sig)
 					}
 				}
 			}
