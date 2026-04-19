@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.3.44-beta (2026-04-19)
+
+Added an experimental Electron desktop shell under `desktop/` that can either launch a local `kodelet serve` sidecar for a selected workspace or connect directly to a remote `kodelet serve` base URL. The app persists the last workspace/remote target, keeps same-origin app navigation inside Electron, and includes helper tests for sidecar resolution, state persistence, remote URL normalization, and external-link handling.
+
+Added desktop packaging support and release automation for macOS and Linux on amd64 and arm64, including the `electron-builder` config, checked-in application icons, GoReleaser-based sidecar staging, and a GitHub Actions workflow that uploads packaged desktop artifacts to GitHub tag releases.
+
 ## 0.3.43-beta (2026-04-19)
 
 Added a new Web UI workspace terminal with PTY-backed shell sessions, websocket streaming, reconnect-friendly replay, and regression coverage across the backend and frontend.
