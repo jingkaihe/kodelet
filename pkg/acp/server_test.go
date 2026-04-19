@@ -4,8 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -13,7 +13,27 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	_ "modernc.org/sqlite"
 )
+
+func lockServerTestDatabase(t *testing.T, dbPath string) func() {
+	t.Helper()
+
+	db, err := sql.Open("sqlite", dbPath)
+	require.NoError(t, err)
+
+	_, err = db.Exec("CREATE TABLE IF NOT EXISTS t (id INTEGER PRIMARY KEY)")
+	require.NoError(t, err)
+
+	_, err = db.Exec("BEGIN EXCLUSIVE")
+	require.NoError(t, err)
+
+	return func() {
+		_, _ = db.Exec("ROLLBACK")
+		_ = db.Close()
+	}
+}
 
 func TestServer_Initialize(t *testing.T) {
 	input := bytes.NewBuffer(nil)
@@ -254,9 +274,9 @@ func TestServer_SendUpdate(t *testing.T) {
 
 func TestServer_SendUpdate_WithUnavailableStorage(t *testing.T) {
 	tmpDir := t.TempDir()
-	basePath := filepath.Join(tmpDir, "base-path-file")
-	require.NoError(t, os.WriteFile(basePath, []byte("x"), 0o644))
-	t.Setenv("KODELET_BASE_PATH", basePath)
+	unlock := lockServerTestDatabase(t, filepath.Join(tmpDir, "storage.db"))
+	defer unlock()
+	t.Setenv("KODELET_BASE_PATH", tmpDir)
 
 	input := bytes.NewBuffer(nil)
 	output := bytes.NewBuffer(nil)
@@ -326,6 +346,32 @@ func TestServer_Shutdown(t *testing.T) {
 	assert.NotNil(t, server.cancel)
 
 	server.Shutdown()
+
+	select {
+	case <-server.ctx.Done():
+	default:
+		t.Error("context should be cancelled after Shutdown")
+	}
+}
+
+func TestServer_Shutdown_WithUnavailableStorage(t *testing.T) {
+	tmpDir := t.TempDir()
+	unlock := lockServerTestDatabase(t, filepath.Join(tmpDir, "storage.db"))
+	defer unlock()
+	t.Setenv("KODELET_BASE_PATH", tmpDir)
+
+	input := bytes.NewBuffer(nil)
+	output := bytes.NewBuffer(nil)
+
+	server := NewServer(
+		WithInput(input),
+		WithOutput(output),
+		WithContext(context.Background()),
+	)
+
+	require.NotPanics(t, func() {
+		server.Shutdown()
+	})
 
 	select {
 	case <-server.ctx.Done():

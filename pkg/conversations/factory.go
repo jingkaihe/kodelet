@@ -22,15 +22,23 @@ func NewConversationStore(ctx context.Context, config *Config) (ConversationStor
 		}
 	}
 
+	dbPath := filepath.Join(config.BasePath, "storage.db")
+
 	switch config.StoreType {
 	case "sqlite":
-		dbPath := filepath.Join(config.BasePath, "storage.db")
-		return sqlite.NewStore(ctx, dbPath)
+		return newSQLiteConversationStore(ctx, dbPath)
 	default:
 		// Default to SQLite store
-		dbPath := filepath.Join(config.BasePath, "storage.db")
-		return sqlite.NewStore(ctx, dbPath)
+		return newSQLiteConversationStore(ctx, dbPath)
 	}
+}
+
+func newSQLiteConversationStore(ctx context.Context, dbPath string) (ConversationStore, error) {
+	store, err := sqlite.NewStore(ctx, dbPath)
+	if err != nil {
+		return nil, err
+	}
+	return store, nil
 }
 
 // GetConversationStore is a convenience function that creates a store
