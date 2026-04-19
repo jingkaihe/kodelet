@@ -1,6 +1,5 @@
 {
   "name": "kodelet-desktop",
-  "version": "0.3.42-beta",
   "private": true,
   "description": "Electron shell for kodelet serve",
   "author": "Jingkai He",
@@ -10,9 +9,10 @@
     "dev": "npm run build && electron .",
     "dev:local": "npm run build && electron . --kodelet-path ../bin/kodelet",
     "start": "npm run build && electron .",
-    "test": "tsx --test src/test/*.test.ts",
-    "package": "npm run build && npx electron-builder --config electron-builder.config.js --publish never --config.mac.notarize=false --config.mac.identity=null",
-    "package:ci": "npm run build && npx electron-builder --config electron-builder.config.js --publish never"
+    "check:version": "node scripts/check-version.cjs",
+    "test": "npm run check:version && tsx --test src/test/*.test.ts",
+    "package": "npm run check:version && npm run build && npx electron-builder --config electron-builder.config.js --publish never --config.mac.notarize=false --config.mac.identity=null",
+    "package:ci": "npm run check:version && npm run build && npx electron-builder --config electron-builder.config.js --publish never"
   },
   "devDependencies": {
     "@types/node": "^24.0.10",

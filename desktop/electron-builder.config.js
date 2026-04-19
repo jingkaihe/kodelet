@@ -1,3 +1,4 @@
+const fs = require('node:fs');
 const path = require('node:path');
 
 const projectDir = __dirname;
@@ -5,12 +6,16 @@ const repoRoot = path.resolve(projectDir, '..');
 const sidecarDir = process.env.KODELET_SIDECAR_DIR
   ? path.resolve(process.env.KODELET_SIDECAR_DIR)
   : path.join(repoRoot, 'bin');
+const appVersion = fs.readFileSync(path.join(repoRoot, 'VERSION.txt'), 'utf8').trim();
 
 module.exports = {
   appId: 'com.jingkaihe.kodelet.desktop',
   productName: 'Kodelet',
   copyright: 'Copyright © Jingkai He',
   artifactName: '${productName}-${version}-${os}-${arch}.${ext}',
+  extraMetadata: {
+    version: appVersion,
+  },
   icon: 'assets/icon.png',
   directories: {
     output: 'dist',
