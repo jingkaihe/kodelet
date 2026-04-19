@@ -195,3 +195,29 @@ run = [
   "cd pkg/webui/frontend && npm install",
   "echo 'All dependencies installed successfully!'",
 ]
+
+[tasks.desktop-install]
+description = "Install Electron desktop shell dependencies"
+run = [
+  "echo 'Installing npm dependencies for desktop shell...'",
+  "cd desktop && npm install",
+]
+
+[tasks.desktop-dev]
+description = "Run the Electron desktop shell"
+depends = ["build"]
+run = [
+  "cd desktop && npm run dev -- --kodelet-path ../bin/kodelet",
+]
+
+[tasks.desktop-test]
+description = "Run Electron desktop shell tests"
+run = [
+  "cd desktop && npm test",
+]
+
+[tasks.desktop-package]
+description = "Package the Electron desktop shell with a GoReleaser-built sidecar"
+run = [
+  "bash -c 'set -euo pipefail; sidecar_dir=$(./desktop/scripts/prepare_sidecar.sh); cd desktop && KODELET_SIDECAR_DIR=\"$sidecar_dir\" npm run package'",
+]

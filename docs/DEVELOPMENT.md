@@ -170,6 +170,35 @@ mise run frontend-test-ui
 mise run frontend-test-coverage
 ```
 
+### Desktop Development
+
+Kodelet also has an experimental Electron desktop shell under `desktop/`.
+
+The desktop app is intentionally thin and written in TypeScript: it either launches the existing `kodelet serve` web UI as a local sidecar, or connects directly to a remote `kodelet serve` base URL. In both cases it waits for `/api/chat/settings` and then loads the resulting same-origin UI inside Electron.
+
+**Desktop Commands**:
+```bash
+# Install Electron dependencies
+mise run desktop-install
+
+# Build the repo binary and run Electron against ./bin/kodelet
+mise run desktop-dev
+
+# Run desktop helper tests
+mise run desktop-test
+
+# Build a packaged desktop app
+mise run desktop-package
+```
+
+By default, the Electron app resolves `kodelet` from `PATH`. For repository development, `mise run desktop-dev` passes `--kodelet-path ./bin/kodelet` so the shell runs against the freshly built local binary.
+
+The `desktop-package` task does not reuse `./bin/kodelet`. Instead it runs `goreleaser build --single-target`, stages the resulting binary into `desktop/.sidecar/bin/`, and packages that exact sidecar into the app. This keeps desktop packaging aligned with the stripped/ldflagged release binary configuration in `.goreleaser.yaml`.
+
+The local `desktop-package` flow explicitly disables macOS signing and notarization. This avoids accidental failures when partial `APPLE_*` credentials are present in the shell environment; signing/notarization should be handled in a dedicated release path.
+
+GitHub Actions keeps desktop packaging separate by trigger: `.github/workflows/desktop-build.yml` runs native macOS and Linux packaging for both amd64 and arm64 on pull requests, while `.github/workflows/release.yml` handles `v*` tag pushes, creates the GitHub release, rebuilds the desktop artifacts, and attaches them to that release in the same workflow.
+
 ### Local Development
 
 1. Build the development version:
@@ -189,6 +218,8 @@ mise run frontend-test-coverage
 │   └── workflows/       # GitHub Actions workflows (including release.yml)
 ├── cmd/kodelet/         # Application entry point (22+ command files)
 ├── docs/                # Documentation files
+├── desktop/
+│   └──                  # Electron shell around `kodelet serve`
 ├── pkg/                 # Core packages
 │   ├── conversations/   # Conversation storage and management
 │   ├── llm/             # LLM client for AI interactions
@@ -249,6 +280,8 @@ The project includes a GitHub Actions workflow (`.github/workflows/release.yml`)
 - Runs GoReleaser for release packaging
 - Extracts release notes from the top entry in `RELEASE.md`
 - Uploads Linux/macOS binaries, checksums, and Linux packages to GitHub releases
+- Builds native desktop bundles for Linux and macOS on amd64 and arm64
+- Attaches the desktop bundles to the same GitHub release
 
 To trigger an automated release:
 1. Update `VERSION.txt` to the release version you plan to publish (for example `0.3.11-beta`)

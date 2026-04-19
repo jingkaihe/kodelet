@@ -1,38 +1,12 @@
-name: Release
+name: Desktop Build
 
 on:
-  push:
-    tags:
-      - 'v*'
+  pull_request:
+    branches: [ main ]
 
 jobs:
-  release:
-    name: Create Release
-    runs-on: kodelet-runner
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Fetch all history for proper version detection
-
-      - name: Setup mise
-        uses: jdx/mise-action@v2
-        with:
-          install: true
-          cache: false # Tools cached on PVC at /home/runner/.local/share/mise
-          experimental: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create GitHub Release
-        run: mise run github-release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   desktop-build:
     name: Desktop ${{ matrix.platform }} ${{ matrix.goarch }}
-    needs: release
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -104,22 +78,3 @@ jobs:
             desktop/dist/Kodelet-*.AppImage
             desktop/dist/*.blockmap
           if-no-files-found: error
-
-  desktop-release:
-    name: Attach desktop assets to GitHub release
-    needs: desktop-build
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - name: Download desktop artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: release-assets
-          pattern: desktop-*
-          merge-multiple: true
-
-      - name: Upload desktop assets to release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber
