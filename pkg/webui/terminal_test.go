@@ -164,6 +164,11 @@ func TestTerminalOriginAllowedBranches(t *testing.T) {
 	assert.True(t, terminalOriginAllowed(req))
 
 	req = httptest.NewRequest("GET", "/api/terminal/ws", nil)
+	req.Host = "localhost:8080"
+	req.Header.Set("Origin", "http://localhost:3000")
+	assert.False(t, terminalOriginAllowed(req))
+
+	req = httptest.NewRequest("GET", "/api/terminal/ws", nil)
 	req.Host = "127.0.0.1:8080"
 	req.Header.Set("Origin", "://bad-url")
 	assert.False(t, terminalOriginAllowed(req))
@@ -174,12 +179,12 @@ func TestTerminalOriginAllowedBranches(t *testing.T) {
 	assert.False(t, terminalOriginAllowed(req))
 }
 
-func TestNormalizedHost(t *testing.T) {
-	assert.Equal(t, "", normalizedHost("   "))
-	assert.Equal(t, "example.com", normalizedHost("Example.COM:8080"))
-	assert.Equal(t, "::1", normalizedHost("[::1]:8080"))
-	assert.Equal(t, "example.com", normalizedHost("Example.COM"))
-	assert.Equal(t, "::1", normalizedHost("[::1"))
+func TestNormalizedHostPort(t *testing.T) {
+	assert.Equal(t, "", normalizedHostPort("   "))
+	assert.Equal(t, "example.com:8080", normalizedHostPort("Example.COM:8080"))
+	assert.Equal(t, "[::1]:8080", normalizedHostPort("[::1]:8080"))
+	assert.Equal(t, "example.com", normalizedHostPort("Example.COM"))
+	assert.Equal(t, "::1", normalizedHostPort("[::1"))
 }
 
 func unsetEnvForTest(t *testing.T, key string) {

@@ -338,7 +338,6 @@ describe('ApiService', () => {
         diff: 'diff --git a/file b/file',
         has_diff: true,
         git_root: '/workspace/project',
-        command: 'git diff --no-ext-diff --submodule=diff --src-prefix=a/ --dst-prefix=b/',
         exit_code: 0,
       };
 

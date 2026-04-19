@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -395,6 +396,44 @@ func TestServer_handleGetGitDiff(t *testing.T) {
 	assert.Contains(t, response.Diff, "-old")
 	assert.Contains(t, response.Diff, "+new")
 	assert.Equal(t, 0, response.ExitCode)
+}
+
+func TestGitDiffDisablesTextconv(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a POSIX shell script as the configured textconv command")
+	}
+
+	repoDir := t.TempDir()
+	runGit := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, string(output))
+	}
+
+	runGit("init")
+	runGit("config", "user.email", "test@example.com")
+	runGit("config", "user.name", "Test User")
+
+	markerPath := filepath.Join(repoDir, "textconv-ran")
+	scriptPath := filepath.Join(repoDir, "textconv-fail")
+	script := fmt.Sprintf("#!/bin/sh\nprintf ran > %q\nexit 42\n", markerPath)
+	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(repoDir, ".gitattributes"), []byte("*.bin diff=fail\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "file.bin"), []byte("old\n"), 0o644))
+	runGit("config", "diff.fail.textconv", fmt.Sprintf("%q", scriptPath))
+	runGit("add", ".gitattributes", "file.bin")
+	runGit("commit", "-m", "initial")
+
+	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "file.bin"), []byte("new\n"), 0o644))
+
+	diff, exitCode, err := gitDiff(context.Background(), repoDir)
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, exitCode)
+	assert.Contains(t, diff, "diff --git a/file.bin b/file.bin")
+	_, statErr := os.Stat(markerPath)
+	assert.True(t, os.IsNotExist(statErr), "textconv command should not run")
 }
 
 func TestServer_handleGetConversationOpenAIChatCompletionsSkipsSystemAndPreservesThinking(t *testing.T) {
@@ -1185,7 +1224,7 @@ func TestTerminalOriginAllowed(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/terminal/ws", nil)
 	req.Host = "127.0.0.1:8080"
 	req.Header.Set("Origin", "http://localhost:3000")
-	assert.True(t, terminalOriginAllowed(req))
+	assert.False(t, terminalOriginAllowed(req))
 
 	req = httptest.NewRequest("GET", "/api/terminal/ws", nil)
 	req.Host = "example.com:8080"

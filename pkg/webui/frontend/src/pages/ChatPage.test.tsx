@@ -105,8 +105,6 @@ describe("ChatPage", () => {
 			diff: "diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n",
 			has_diff: true,
 			git_root: "/workspace/default",
-			command:
-				"git diff --no-ext-diff --submodule=diff --src-prefix=a/ --dst-prefix=b/",
 			exit_code: 0,
 		});
 	});

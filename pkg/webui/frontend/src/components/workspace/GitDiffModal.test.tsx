@@ -34,7 +34,6 @@ describe('GitDiffModal', () => {
         cwdLabel="/tmp/project"
         error={null}
         gitDiff={{
-          command: 'git diff --no-ext-diff',
           cwd: '/tmp/project',
           diff,
           exit_code: 0,
@@ -58,7 +57,6 @@ describe('GitDiffModal', () => {
         cwdLabel="/tmp/project"
         error={null}
         gitDiff={{
-          command: 'git diff --no-ext-diff',
           cwd: '/tmp/project',
           diff: 'diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new',
           exit_code: 0,
@@ -89,7 +87,6 @@ describe('GitDiffModal', () => {
         cwdLabel="/tmp/project"
         error={null}
         gitDiff={{
-          command: 'git diff --no-ext-diff',
           cwd: '/tmp/project',
           diff,
           exit_code: 0,

@@ -15,7 +15,6 @@ type gitDiffResponse struct {
 	Diff     string `json:"diff"`
 	HasDiff  bool   `json:"has_diff"`
 	GitRoot  string `json:"git_root,omitempty"`
-	Command  string `json:"command"`
 	ExitCode int    `json:"exit_code"`
 }
 
@@ -43,7 +42,6 @@ func (s *Server) handleGetGitDiff(w http.ResponseWriter, r *http.Request) {
 		Diff:     diff,
 		HasDiff:  strings.TrimSpace(diff) != "",
 		GitRoot:  gitRoot,
-		Command:  "git diff --no-ext-diff --submodule=diff --src-prefix=a/ --dst-prefix=b/",
 		ExitCode: exitCode,
 	})
 }
@@ -79,6 +77,7 @@ func gitDiff(ctx context.Context, cwd string) (string, int, error) {
 		"git",
 		"diff",
 		"--no-ext-diff",
+		"--no-textconv",
 		"--submodule=diff",
 		"--src-prefix=a/",
 		"--dst-prefix=b/",

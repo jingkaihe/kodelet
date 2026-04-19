@@ -165,7 +165,6 @@ export interface GitDiffResponse {
   diff: string;
   has_diff: boolean;
   git_root?: string;
-  command: string;
   exit_code: number;
 }
 

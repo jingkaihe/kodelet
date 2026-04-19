@@ -329,42 +329,33 @@ func terminalOriginAllowed(r *http.Request) bool {
 		return false
 	}
 
-	originHost := normalizedHost(originURL.Host)
-	requestHost := normalizedHost(r.Host)
+	originHost := normalizedHostPort(originURL.Host)
+	requestHost := normalizedHostPort(r.Host)
 	if originHost == "" || requestHost == "" {
 		return false
 	}
 
-	if originHost == requestHost {
-		return true
-	}
-
-	return isLoopbackHost(originHost) && isLoopbackHost(requestHost)
+	return originHost == requestHost
 }
 
-func normalizedHost(value string) string {
+func normalizedHostPort(value string) string {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
 		return ""
 	}
 
-	host, _, err := net.SplitHostPort(trimmed)
+	host, port, err := net.SplitHostPort(trimmed)
 	if err == nil {
-		return strings.ToLower(strings.Trim(host, "[]"))
+		return net.JoinHostPort(normalizedHostname(host), port)
 	}
 
-	if strings.Contains(err.Error(), "missing port in address") {
-		return strings.ToLower(strings.Trim(trimmed, "[]"))
+	if ip := net.ParseIP(strings.Trim(trimmed, "[]")); ip != nil {
+		return strings.ToLower(ip.String())
 	}
 
-	return strings.ToLower(strings.Trim(trimmed, "[]"))
+	return normalizedHostname(trimmed)
 }
 
-func isLoopbackHost(host string) bool {
-	switch strings.ToLower(strings.TrimSpace(host)) {
-	case "localhost", "127.0.0.1", "::1":
-		return true
-	default:
-		return false
-	}
+func normalizedHostname(value string) string {
+	return strings.ToLower(strings.Trim(strings.TrimSpace(value), "[]"))
 }
