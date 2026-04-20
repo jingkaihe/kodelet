@@ -24,7 +24,7 @@ describe('FallbackRenderer', () => {
   });
 
   it('shows Completed badge', () => {
-    const toolResult = createToolResult('custom-tool', { key: 'value' });
+    const toolResult = createToolResult('arbitrary-tool', { key: 'value' });
     render(<FallbackRenderer toolResult={toolResult} />);
     expect(screen.getByText('Completed')).toBeInTheDocument();
   });

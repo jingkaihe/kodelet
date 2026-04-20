@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.3.45-beta (2026-04-20)
+
+Removed the built-in `custom-tool` workflow recipe and the fragment-time injection of custom tool directory arguments. Custom tool scaffolding is now documented as a plugin-provided, model-invoked skill instead of a shipped `-r custom-tool` recipe.
+
+Refreshed the manual, fragments docs, and built-in `kodelet` skill to point users at `kodelet plugin add` / `kodelet plugin show` for installing and discovering plugin-bundled skills and recipes, and updated regression tests to stop depending on the old `custom-tool` workflow name.
+
 ## 0.3.44-beta (2026-04-19)
 
 Added an experimental Electron desktop shell under `desktop/` that can either launch a local `kodelet serve` sidecar for a selected workspace or connect directly to a remote `kodelet serve` base URL. The app persists the last workspace/remote target, keeps same-origin app navigation inside Electron, and includes helper tests for sidecar resolution, state persistence, remote URL normalization, and external-link handling.

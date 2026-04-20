@@ -56,7 +56,6 @@ Kodelet is a lightweight agentic SWE Agent that runs as an interactive CLI tool 
   - [Directory Structure](#directory-structure)
   - [Configuration](#custom-tools-configuration)
   - [Examples](#custom-tools-examples)
-  - [Generate Custom Tool](#generate-custom-tool)
 - [Agentic Skills](#agentic-skills)
   - [How Skills Work](#how-skills-work)
   - [Creating Skills](#creating-skills)
@@ -1384,20 +1383,6 @@ kodelet run "Analyze the server logs for any ERROR patterns"
 6. **Dependencies**: Document any external dependencies (jq, python, etc.)
 7. **Security**: Be careful with user input, especially when executing system commands
 
-### Generate Custom Tool
-
-Kodelet includes a built-in `custom-tool` recipe that automatically generates custom tool templates based on your task description. This is the fastest way to create new tools with proper structure and best practices.
-
-**Generate a Custom Tool:**
-
-```bash
-# Generate a weather tool without API key requirement (saved locally)
-kodelet run -r custom-tool --arg task="implement a tool to fetch the weather based on the location, ideally without requiring api key"
-
-# Generate a global tool available across all projects
-kodelet run -r custom-tool --arg task="format and validate JSON" --arg global=true
-```
-
 ## Agentic Skills
 
 Agentic Skills are model-invoked capabilities that package domain expertise into discoverable units. Unlike fragments/recipes (which require explicit user invocation), skills are automatically invoked by Kodelet when it determines they are relevant to your task.
@@ -1466,27 +1451,32 @@ skills:
 Kodelet provides commands to manage skills from GitHub repositories:
 
 ```bash
-# Add all skills from a GitHub repository
-kodelet skill add orgname/skills
+# Install all skills and recipes from a GitHub repository
+kodelet plugin add orgname/skills
 
-# Add a specific skill from a repository
-kodelet skill add orgname/skills --dir skills/specific-skill
+# Install to the global plugin directory
+kodelet plugin add orgname/skills -g
 
-# Add skills from a specific version/branch/tag
-kodelet skill add orgname/skills@v0.1.0
-kodelet skill add orgname/skills@main
+# List installed plugins and the skills they provide
+kodelet plugin list
 
-# Add skills to global directory (~/.kodelet/skills)
-kodelet skill add orgname/skills -g
+# Show details for one installed plugin
+kodelet plugin show orgname/skills
+```
 
-# List all installed skills
-kodelet skill list
+Install the `custom-tool` skill from the `jingkaihe/skills` plugin if you want help scaffolding a Kodelet custom executable tool:
 
-# Remove a skill from local directory
-kodelet skill remove skill-name
+```bash
+kodelet plugin add jingkaihe/skills
+```
 
-# Remove a skill from global directory
-kodelet skill remove skill-name -g
+Then ask Kodelet to create the tool in natural language. The skill is model-invoked, so you do not run it with `-r`:
+
+```bash
+kodelet run "Create a Kodelet custom tool that fetches weather by location without requiring an API key. Save it in the local custom tools directory."
+
+# Or ask for a globally installed tool
+kodelet run "Create a Kodelet custom tool that formats and validates JSON. Save it in the global custom tools directory."
 ```
 
 **Requirements:**

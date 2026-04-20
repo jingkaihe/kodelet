@@ -749,19 +749,19 @@ func TestSubAgentTool_WorkflowFiltering(t *testing.T) {
 func TestSubAgentTool_DescriptionWithWorkflowField(t *testing.T) {
 	// Test that only fragments with Workflow: true appear in description
 	workflows := map[string]*fragments.Fragment{
-		"custom-tool": {
-			ID: "custom-tool",
+		"test-workflow": {
+			ID: "test-workflow",
 			Metadata: fragments.Metadata{
-				Name:        "Custom Tool Generator",
-				Description: "Creates custom tools",
+				Name:        "Test Workflow",
+				Description: "Creates test artifacts",
 				Workflow:    true,
 				Arguments: map[string]fragments.ArgumentMeta{
-					"task": {
-						Description: "Description of what the tool should do",
+					"target": {
+						Description: "Target path or identifier",
 					},
-					"global": {
-						Description: "Whether to save globally",
-						Default:     "false",
+					"mode": {
+						Description: "Execution mode",
+						Default:     "safe",
 					},
 				},
 			},
@@ -775,11 +775,11 @@ func TestSubAgentTool_DescriptionWithWorkflowField(t *testing.T) {
 	assert.Contains(t, desc, "<workflows>")
 	assert.Contains(t, desc, "</workflows>")
 
-	// Verify custom-tool workflow
-	assert.Contains(t, desc, `<workflow name="custom-tool">`)
-	assert.Contains(t, desc, "<description>Creates custom tools</description>")
-	assert.Contains(t, desc, `<argument name="global" default="false">Whether to save globally</argument>`)
-	assert.Contains(t, desc, `<argument name="task">Description of what the tool should do</argument>`)
+	// Verify workflow rendering
+	assert.Contains(t, desc, `<workflow name="test-workflow">`)
+	assert.Contains(t, desc, "<description>Creates test artifacts</description>")
+	assert.Contains(t, desc, `<argument name="mode" default="safe">Execution mode</argument>`)
+	assert.Contains(t, desc, `<argument name="target">Target path or identifier</argument>`)
 }
 
 // Execute tests require integration testing (shell-out via exec.CommandContext)

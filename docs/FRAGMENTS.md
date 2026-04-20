@@ -36,7 +36,6 @@ Kodelet includes several built-in recipes for common tasks:
 - **`init`** - Bootstrap `AGENTS.md` file with workspace context and conventions
 - **`commit`** - Generate git commit messages from staged changes
 - **`compact`** - Compact conversation context into a comprehensive summary (uses recipe hooks)
-- **`custom-tool`** - Create custom tools for Kodelet
 - **`github/pr`** - Generate pull request descriptions
 
 List all available recipes with:

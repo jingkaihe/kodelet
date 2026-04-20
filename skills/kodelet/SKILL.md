@@ -86,10 +86,6 @@ kodelet recipe show init         # View recipe content
 
 # Repository initialization
 kodelet run -r init             # Bootstrap AGENTS.md with project context
-
-# Custom tool creation
-kodelet run -r custom-tool --arg task="fetch weather data"
-kodelet run -r custom-tool --arg task="validate JSON" --arg global=true
 ```
 
 **Recipe capabilities:**
@@ -145,18 +141,14 @@ Model-invoked capabilities that package domain expertise. Unlike fragments (user
 
 **Managing skills:**
 ```bash
-# Add skills from GitHub repository
-kodelet skill add orgname/skills                        # Add all skills
-kodelet skill add orgname/skills --dir skills/my-skill  # Add specific skill
-kodelet skill add orgname/skills@v0.1.0                 # From specific version
-kodelet skill add orgname/skills -g                     # To global directory
+# Install plugin-provided skills and recipes
+kodelet plugin add orgname/skills        # Install locally
+kodelet plugin add orgname/skills@v0.1.0 # Install a specific ref
+kodelet plugin add orgname/skills -g     # Install globally
 
-# List installed skills
-kodelet skill list
-
-# Remove skills
-kodelet skill remove skill-name                         # From local directory
-kodelet skill remove skill-name -g                      # From global directory
+# Inspect installed plugins and bundled skills
+kodelet plugin list
+kodelet plugin show orgname/skills
 ```
 
 **Creating a skill:**
@@ -192,7 +184,6 @@ Recipes marked with `workflow: true` can be invoked by the subagent tool, enabli
 **Built-in workflows:**
 - `github/pr` - Create pull requests with AI-generated descriptions
 - `init` - Bootstrap AGENTS.md for repository
-- `custom-tool` - Generate custom tools
 - `commit` - Generate commit message
 
 **Workflow recipe example:**
@@ -370,10 +361,12 @@ Extend kodelet with executable tools in any language:
 
 If the same tool name appears in multiple locations, precedence is local standalone > local plugin > global standalone > global plugin.
 
-**Generate custom tool:**
+**Generate custom tools:**
+Install the `custom-tool` skill from the `jingkaihe/skills` plugin, then ask for the tool in natural language:
+
 ```bash
-kodelet run -r custom-tool --arg task="fetch weather without API key"
-kodelet run -r custom-tool --arg task="validate JSON" --arg global=true
+kodelet plugin add jingkaihe/skills
+kodelet run "Create a Kodelet custom tool that fetches weather without an API key and save it locally."
 ```
 
 **Tool protocol:**
