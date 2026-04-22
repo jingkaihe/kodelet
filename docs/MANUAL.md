@@ -1095,6 +1095,32 @@ If a token is expired, run `kodelet anthropic login --alias <alias>` to re-authe
 
 Kodelet supports custom executable tools that extend its capabilities beyond the built-in tool set. Custom tools are standalone executables (scripts or binaries) that implement a simple two-command protocol and can be written in any programming language.
 
+### Direct CLI Invocation
+
+Custom tools can be invoked directly from the CLI without going through the agent:
+
+```bash
+# List discovered tools
+kodelet custom-tool list
+
+# Show description, executable path, and JSON schema
+kodelet custom-tool describe hello
+
+# Invoke a tool using dynamically generated flags from its JSON schema
+kodelet custom-tool invoke hello --name Ada --age 36
+
+# Short alias
+kodelet cti hello --name Ada --age 36
+
+# Show per-tool dynamic help
+kodelet custom-tool invoke hello --help
+
+# Pass complex nested input that doesn't map well to flags
+kodelet custom-tool invoke hello --name Ada --input-json '{"config":{"verbose":true}}'
+```
+
+`kodelet custom-tool invoke <tool> --help` is generated at runtime from the tool's `input_schema`. Simple schema properties such as strings, integers, numbers, booleans, and string/integer arrays are exposed as flags automatically. More complex properties such as nested objects should be passed via `--input-json`.
+
 ### Creating Custom Tools
 
 Custom tools are executable files that respond to two commands:

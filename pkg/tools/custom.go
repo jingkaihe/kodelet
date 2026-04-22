@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -252,10 +253,36 @@ func (m *CustomToolManager) ListTools() []tooltypes.Tool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	tools := make([]tooltypes.Tool, 0, len(m.tools))
-	for _, tool := range m.tools {
+	names := make([]string, 0, len(m.tools))
+	for name := range m.tools {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	tools := make([]tooltypes.Tool, 0, len(names))
+	for _, name := range names {
+		tool := m.tools[name]
 		tools = append(tools, tool)
 	}
+	return tools
+}
+
+// ListCustomTools returns all discovered custom tools sorted by raw tool name.
+func (m *CustomToolManager) ListCustomTools() []*CustomTool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	names := make([]string, 0, len(m.tools))
+	for name := range m.tools {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	tools := make([]*CustomTool, 0, len(names))
+	for _, name := range names {
+		tools = append(tools, m.tools[name])
+	}
+
 	return tools
 }
 
@@ -281,8 +308,23 @@ func (t *CustomTool) Description() string {
 	return t.description
 }
 
+// RawName returns the tool name without the custom_tool_ prefix.
+func (t *CustomTool) RawName() string {
+	return t.name
+}
+
+// ExecPath returns the executable path backing the custom tool.
+func (t *CustomTool) ExecPath() string {
+	return t.execPath
+}
+
 // GenerateSchema generates the JSON schema for the tool's input parameters
 func (t *CustomTool) GenerateSchema() *jsonschema.Schema {
+	return t.schema
+}
+
+// InputSchema returns the tool input schema.
+func (t *CustomTool) InputSchema() *jsonschema.Schema {
 	return t.schema
 }
 
