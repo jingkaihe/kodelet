@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.3.46-beta (2026-04-22)
+
+Added direct CLI support for discovered custom tools with `kodelet custom-tool list`, `describe`, and `invoke`, plus the short `kodelet cti` alias. Per-tool help and flags are now generated at runtime from each tool's `input_schema`, with `--input-json` available for nested or advanced payloads that do not map cleanly to flags.
+
+Also sorted custom tool listings deterministically, exposed custom tool metadata/helpers needed by the new CLI flow, and added regression coverage for listing, describing, dynamic flag parsing, alias handling, and schema-derived help. Updated the manual and built-in `kodelet` skill to document direct invocation and the `KODELET_CUSTOM_TOOLS_TIMEOUT` environment-variable override for one-off runs.
+
 ## 0.3.45-beta (2026-04-20)
 
 Removed the built-in `custom-tool` workflow recipe and the fragment-time injection of custom tool directory arguments. Custom tool scaffolding is now documented as a plugin-provided, model-invoked skill instead of a shipped `-r custom-tool` recipe.
