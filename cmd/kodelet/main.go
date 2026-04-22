@@ -170,6 +170,8 @@ func main() {
 	rootCmd.AddCommand(serveCmd)
 	rootCmd.AddCommand(steerCmd)
 	rootCmd.AddCommand(recipeCmd)
+	rootCmd.AddCommand(customToolCmd)
+	rootCmd.AddCommand(customToolInvokeAliasCmd)
 	rootCmd.AddCommand(profileCmd)
 	rootCmd.AddCommand(dbCmd)
 
@@ -215,6 +217,8 @@ func main() {
 	serveCmd = withTracing(serveCmd)
 	steerCmd = withTracing(steerCmd)
 	recipeCmd = withTracing(recipeCmd)
+	customToolCmd = withTracing(customToolCmd)
+	customToolInvokeAliasCmd = withTracing(customToolInvokeAliasCmd)
 
 	// Set the root command context to include the tracing context
 	rootCmd.SetContext(ctx)

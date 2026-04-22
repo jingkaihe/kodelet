@@ -361,6 +361,42 @@ Extend kodelet with executable tools in any language:
 
 If the same tool name appears in multiple locations, precedence is local standalone > local plugin > global standalone > global plugin.
 
+**Direct CLI invocation:**
+Custom tools can be inspected and run directly without going through the agent:
+
+```bash
+# List discovered tools
+kodelet custom-tool list
+
+# Show description, executable path, and JSON schema
+kodelet custom-tool describe hello
+
+# Invoke a tool using flags generated from its input_schema
+kodelet custom-tool invoke hello --name Ada --age 36
+
+# Short alias
+kodelet cti hello --name Ada --age 36
+
+# Show dynamic per-tool help
+kodelet custom-tool invoke hello --help
+
+# Pass nested or advanced JSON that does not map cleanly to flags
+kodelet custom-tool invoke hello --name Ada --input-json '{"config":{"verbose":true}}'
+```
+
+`kodelet custom-tool invoke <tool> --help` is generated at runtime from the tool's `input_schema`. Strings, integers, numbers, booleans, and string/integer arrays are exposed as flags automatically. Use `--input-json` for nested or complex properties; when both flags and `--input-json` are provided, the JSON values are merged on top of the flag-derived input.
+
+Flags after the tool name are reserved for the tool's schema-derived input. For runtime overrides such as timeout, use config or an environment variable instead of expecting a built-in `invoke` flag.
+
+**Timeout override:**
+Custom tools use `custom_tools.timeout` (`120s` by default). For one-off runs, override it per process with `KODELET_CUSTOM_TOOLS_TIMEOUT`:
+
+```bash
+KODELET_CUSTOM_TOOLS_TIMEOUT=300s kodelet custom-tool invoke my-tool ...
+```
+
+This environment variable also applies when `kodelet run ...` invokes a custom tool through the agent.
+
 **Generate custom tools:**
 Install the `custom-tool` skill from the `jingkaihe/skills` plugin, then ask for the tool in natural language:
 
