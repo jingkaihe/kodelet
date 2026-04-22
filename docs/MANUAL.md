@@ -1212,6 +1212,17 @@ custom_tools:
     - "deploy-script"
 ```
 
+**Environment Variable Override:**
+You can override the custom tool timeout for a single process with `KODELET_CUSTOM_TOOLS_TIMEOUT`. Use the same duration format as the config value, for example `120s`, `2m`, or `5m`.
+
+```bash
+# Increase timeout for one direct invocation
+KODELET_CUSTOM_TOOLS_TIMEOUT=300s kodelet custom-tool invoke my-tool ...
+
+# The same override also applies when the agent invokes custom tools
+KODELET_CUSTOM_TOOLS_TIMEOUT=300s kodelet run "use my-tool ..."
+```
+
 **Tool Whitelisting:**
 The `tool_white_list` configuration allows you to control which custom tools are loaded and available for use. When the whitelist is empty or not specified, all discovered custom tools in the configured locations (including plugin `tools/` directories) will be available. When you specify tool names in the whitelist, only those exact tools will be loaded, providing granular control over which tools are accessible in your environment.
 

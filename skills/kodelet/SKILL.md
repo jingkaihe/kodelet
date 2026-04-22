@@ -375,6 +375,15 @@ kodelet run "Create a Kodelet custom tool that fetches weather without an API ke
 ./my-tool run          # Executes with JSON input from stdin
 ```
 
+**Timeout override:**
+Custom tools use `custom_tools.timeout` (`120s` by default). For one-off runs, override it with `KODELET_CUSTOM_TOOLS_TIMEOUT` using the same duration format as config values:
+
+```bash
+KODELET_CUSTOM_TOOLS_TIMEOUT=300s kodelet custom-tool invoke my-tool ...
+```
+
+This environment variable also applies when running `kodelet run ...` and the agent invokes a custom tool.
+
 ### MCP Integration
 Model Context Protocol for external integrations. Configure in `config.yaml`:
 
