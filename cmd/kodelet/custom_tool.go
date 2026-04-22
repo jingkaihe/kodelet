@@ -219,14 +219,6 @@ func splitDynamicCustomToolArgs(args []string) (string, []string, error) {
 		return "", nil, errors.New("custom tool name is required")
 	}
 
-	if args[0] == "invoke" || args[0] == "cti" {
-		args = args[1:]
-	}
-
-	if len(args) == 0 {
-		return "", nil, errors.New("custom tool name is required")
-	}
-
 	if args[0] == "--help" || args[0] == "-h" {
 		return "", nil, errors.New("custom tool name is required")
 	}
@@ -321,11 +313,6 @@ func addSchemaFlags(cmd *cobra.Command, schema *jsonschema.Schema, required map[
 		if !supported {
 			unsupportedFlags = append(unsupportedFlags, name)
 			continue
-		}
-		if isRequired(name, required) {
-			if err := cmd.MarkFlagRequired(name); err != nil {
-				return nil, errors.Wrapf(err, "failed to mark %s as required", name)
-			}
 		}
 	}
 
@@ -422,6 +409,9 @@ func buildCustomToolInputFromFlags(flags *pflag.FlagSet, schema *jsonschema.Sche
 			name := pair.Key
 			propertySchema := pair.Value
 			if propertySchema == nil {
+				continue
+			}
+			if flags.Lookup(name) == nil {
 				continue
 			}
 

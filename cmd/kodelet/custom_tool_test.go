@@ -99,6 +99,55 @@ func TestCustomToolInvokeDynamicFlags(t *testing.T) {
 	assert.Equal(t, []any{"go", "cli"}, payload["tags"])
 }
 
+func TestCustomToolInvokeInputJSONSatisfiesRequiredFlags(t *testing.T) {
+	homeDir := t.TempDir()
+	globalToolsDir := t.TempDir()
+	localToolsDir := filepath.Join(t.TempDir(), ".kodelet", "tools")
+	setupCustomToolTestConfig(t, homeDir, globalToolsDir, localToolsDir)
+	require.NoError(t, os.MkdirAll(localToolsDir, 0o755))
+
+	createTestCustomTool(t, filepath.Join(localToolsDir, "hello"), `{"name":"hello","description":"Hello tool","input_schema":{"type":"object","properties":{"name":{"type":"string","description":"Your name"}},"required":["name"]}}`)
+
+	oldWD, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(filepath.Dir(localToolsDir)))
+	defer func() { _ = os.Chdir(oldWD) }()
+
+	output := captureStdout(t, func() {
+		err := runCustomToolCommand(t, []string{"invoke", "hello", "--input-json", `{"name":"Ada"}`})
+		require.NoError(t, err)
+	})
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(strings.TrimSpace(output)), &payload))
+	assert.Equal(t, "Ada", payload["name"])
+}
+
+func TestCustomToolInvokeInputJSONSupportsUnsupportedProperties(t *testing.T) {
+	homeDir := t.TempDir()
+	globalToolsDir := t.TempDir()
+	localToolsDir := filepath.Join(t.TempDir(), ".kodelet", "tools")
+	setupCustomToolTestConfig(t, homeDir, globalToolsDir, localToolsDir)
+	require.NoError(t, os.MkdirAll(localToolsDir, 0o755))
+
+	createTestCustomTool(t, filepath.Join(localToolsDir, "hello"), `{"name":"hello","description":"Hello tool","input_schema":{"type":"object","properties":{"name":{"type":"string","description":"Your name"},"config":{"type":"object","description":"Advanced config"}},"required":["name"]}}`)
+
+	oldWD, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(filepath.Dir(localToolsDir)))
+	defer func() { _ = os.Chdir(oldWD) }()
+
+	output := captureStdout(t, func() {
+		err := runCustomToolCommand(t, []string{"invoke", "hello", "--name", "Ada", "--input-json", `{"config":{"verbose":true}}`})
+		require.NoError(t, err)
+	})
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(strings.TrimSpace(output)), &payload))
+	assert.Equal(t, "Ada", payload["name"])
+	assert.Equal(t, map[string]any{"verbose": true}, payload["config"])
+}
+
 func TestCustomToolInvokeHelpShowsDynamicFlags(t *testing.T) {
 	homeDir := t.TempDir()
 	globalToolsDir := t.TempDir()
@@ -144,6 +193,34 @@ func TestCustomToolInvokeAliasWorks(t *testing.T) {
 	})
 
 	assert.Contains(t, output, `"name":"Grace"`)
+}
+
+func TestCustomToolInvokeSupportsToolNamesMatchingInvokeAliases(t *testing.T) {
+	homeDir := t.TempDir()
+	globalToolsDir := t.TempDir()
+	localToolsDir := filepath.Join(t.TempDir(), ".kodelet", "tools")
+	setupCustomToolTestConfig(t, homeDir, globalToolsDir, localToolsDir)
+	require.NoError(t, os.MkdirAll(localToolsDir, 0o755))
+
+	createTestCustomTool(t, filepath.Join(localToolsDir, "invoke"), `{"name":"invoke","description":"Invoke-named tool","input_schema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}}`)
+	createTestCustomTool(t, filepath.Join(localToolsDir, "cti"), `{"name":"cti","description":"CTI-named tool","input_schema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}}`)
+
+	oldWD, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(filepath.Dir(localToolsDir)))
+	defer func() { _ = os.Chdir(oldWD) }()
+
+	invokeOutput := captureStdout(t, func() {
+		err := runCustomToolCommand(t, []string{"invoke", "invoke", "--name", "Ada"})
+		require.NoError(t, err)
+	})
+	ctiOutput := captureStdout(t, func() {
+		err := runCustomToolAliasCommand(t, []string{"cti", "--name", "Grace"})
+		require.NoError(t, err)
+	})
+
+	assert.Contains(t, invokeOutput, `"name":"Ada"`)
+	assert.Contains(t, ctiOutput, `"name":"Grace"`)
 }
 
 func runCustomToolListCommand(t *testing.T, args []string) error {
