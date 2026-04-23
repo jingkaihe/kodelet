@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.3.47-beta (2026-04-23)
+
+Added `openai.service_tier` support for OpenAI and Codex requests, including validation, persistence across resumed CLI/Web UI conversations, and a Codex-friendly `fast` alias that is sent upstream as `priority`.
+
+Added `gpt-5.5` to the Codex platform model catalog and refreshed Codex docs/examples for newer `gpt-5.5`/`gpt-5.4` usage. Also ensured Codex platform profiles use the Codex system prompt even when model names do not include `codex`, and expanded original image detail support for newer GPT/Codex vision models.
+
 ## 0.3.46-beta (2026-04-22)
 
 Added direct CLI support for discovered custom tools with `kodelet custom-tool list`, `describe`, and `invoke`, plus the short `kodelet cti` alias. Per-tool help and flags are now generated at runtime from each tool's `input_schema`, with `--input-json` available for nested or advanced payloads that do not map cleanly to flags.
