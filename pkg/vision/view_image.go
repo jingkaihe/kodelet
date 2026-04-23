@@ -21,6 +21,13 @@ import (
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
+var modelsSupportingOriginalImageDetail = map[string]struct{}{
+	"gpt-5.5":       {},
+	"gpt-5.4":       {},
+	"gpt-5.4-mini":  {},
+	"gpt-5.3-codex": {},
+}
+
 const (
 	maxImageFileSize   = 5 * 1024 * 1024
 	ViewImageMaxWidth  = 2048
@@ -40,7 +47,8 @@ type Result struct {
 
 // SupportsViewImageOriginalDetail returns true when the model supports the optional original detail mode.
 func SupportsViewImageOriginalDetail(model string) bool {
-	return strings.EqualFold(strings.TrimSpace(model), "gpt-5.3-codex")
+	_, ok := modelsSupportingOriginalImageDetail[strings.ToLower(strings.TrimSpace(model))]
+	return ok
 }
 
 // SupportsImageInputs reports whether the current provider/model combination can accept image inputs.

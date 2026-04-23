@@ -41,6 +41,10 @@ func promptTemplatePath(model string, llmConfig llmtypes.Config) string {
 		return SystemTemplate
 	}
 
+	if llmConfig.OpenAI != nil && strings.EqualFold(strings.TrimSpace(llmConfig.OpenAI.Platform), "codex") {
+		return CodexTemplate
+	}
+
 	normalizedModel := strings.ToLower(strings.TrimSpace(model))
 	if strings.Contains(normalizedModel, "codex") {
 		return CodexTemplate

@@ -6,6 +6,7 @@ import "github.com/jingkaihe/kodelet/pkg/types/llm"
 // Models defines the Codex model categorization for reasoning and non-reasoning models.
 var Models = llm.CustomModels{
 	Reasoning: []string{
+		"gpt-5.5",
 		"gpt-5.3-codex",
 		"gpt-5.4",
 		"gpt-5.4-mini",
@@ -21,6 +22,11 @@ var Models = llm.CustomModels{
 // Pricing defines the pricing information for Codex models.
 // Note: Codex subscription pricing is included in the ChatGPT subscription.
 var Pricing = llm.CustomPricing{
+	"gpt-5.5": llm.ModelPricing{
+		Input:         0.0,
+		Output:        0.0,
+		ContextWindow: 272_000,
+	},
 	"gpt-5.3-codex": llm.ModelPricing{
 		Input:         0.0,
 		Output:        0.0,

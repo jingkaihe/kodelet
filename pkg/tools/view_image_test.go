@@ -33,6 +33,11 @@ func TestViewImageTool_GenerateSchema(t *testing.T) {
 	schema = tool.GenerateSchema()
 	_, hasDetail = schema.Properties.Get("detail")
 	assert.True(t, hasDetail)
+
+	tool = NewViewImageTool("gpt-5.5", "openai")
+	schema = tool.GenerateSchema()
+	_, hasDetail = schema.Properties.Get("detail")
+	assert.True(t, hasDetail)
 }
 
 func TestViewImageTool_ValidateInput(t *testing.T) {
@@ -49,6 +54,9 @@ func TestViewImageTool_ValidateInput(t *testing.T) {
 	err = tool.ValidateInput(NewBasicState(t.Context(), WithLLMConfig(llmtypes.Config{Model: "gpt-5"})), `{"path":"/tmp/test.png","detail":"original"}`)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "compatible models")
+
+	err = tool.ValidateInput(NewBasicState(t.Context(), WithLLMConfig(llmtypes.Config{Model: "gpt-5.5"})), `{"path":"/tmp/test.png","detail":"original"}`)
+	assert.NoError(t, err)
 }
 
 func TestViewImageTool_ExecuteAndStructuredData(t *testing.T) {

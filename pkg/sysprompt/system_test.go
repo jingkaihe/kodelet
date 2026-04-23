@@ -102,6 +102,13 @@ func TestSystemPrompt_TemplateSelection(t *testing.T) {
 		assert.NotContains(t, prompt, "coding agent")
 	})
 
+	t.Run("uses codex template for codex platform models without codex slug", func(t *testing.T) {
+		prompt := SystemPrompt("gpt-5.5", llm.Config{Provider: "openai", OpenAI: &llm.OpenAIConfig{Platform: "codex"}}, nil)
+
+		assert.Contains(t, prompt, "Your capabilities:")
+		assert.NotContains(t, prompt, "coding agent")
+	})
+
 	t.Run("keeps default template for non-codex model", func(t *testing.T) {
 		prompt := SystemPrompt("gpt-4.1", llm.Config{Provider: "openai"}, nil)
 

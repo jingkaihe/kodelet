@@ -8,6 +8,7 @@ import (
 
 func TestModels(t *testing.T) {
 	assert.Equal(t, "gpt-5.4", DefaultModel)
+	assert.Contains(t, Models.Reasoning, "gpt-5.5")
 	assert.Contains(t, Models.Reasoning, "gpt-5.3-codex")
 	assert.Contains(t, Models.Reasoning, "gpt-5.4")
 	assert.Contains(t, Models.Reasoning, "gpt-5.4-mini")
@@ -20,6 +21,7 @@ func TestModels(t *testing.T) {
 }
 
 func TestPricing(t *testing.T) {
+	assert.Contains(t, Pricing, "gpt-5.5")
 	assert.Contains(t, Pricing, "gpt-5.3-codex")
 	assert.Contains(t, Pricing, "gpt-5.4")
 	assert.Contains(t, Pricing, "gpt-5.4-mini")

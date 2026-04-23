@@ -201,6 +201,7 @@ func TestLoadCodexPlatformDefaults(t *testing.T) {
 	require.NotNil(t, pricing)
 
 	expectedReasoning := []string{
+		"gpt-5.5",
 		"gpt-5.3-codex",
 		"gpt-5.4",
 		"gpt-5.4-mini",
@@ -212,6 +213,12 @@ func TestLoadCodexPlatformDefaults(t *testing.T) {
 	}
 	assert.ElementsMatch(t, expectedReasoning, models.Reasoning)
 	assert.Empty(t, models.NonReasoning)
+
+	gpt55Pricing, exists := pricing["gpt-5.5"]
+	require.True(t, exists)
+	assert.Equal(t, 0.0, gpt55Pricing.Input)
+	assert.Equal(t, 0.0, gpt55Pricing.Output)
+	assert.Equal(t, 272_000, gpt55Pricing.ContextWindow)
 
 	gpt54Pricing, exists := pricing["gpt-5.4"]
 	require.True(t, exists)
