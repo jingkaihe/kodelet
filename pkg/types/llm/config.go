@@ -1,5 +1,7 @@
 package llm
 
+import "strings"
+
 // AnthropicAPIAccess defines the mode for Anthropic API access
 type AnthropicAPIAccess string
 
@@ -92,12 +94,62 @@ type Config struct {
 // OpenAIAPIMode defines which OpenAI-compatible API surface to use.
 type OpenAIAPIMode string
 
+// OpenAIServiceTier defines the optional OpenAI service tier preference.
+// Kodelet accepts the native OpenAI values plus Codex's user-facing `fast`
+// alias, which is sent to the API as `priority`.
+type OpenAIServiceTier string
+
 const (
 	// OpenAIAPIModeChatCompletions routes requests via chat completions API.
 	OpenAIAPIModeChatCompletions OpenAIAPIMode = "chat_completions"
 	// OpenAIAPIModeResponses routes requests via responses API.
 	OpenAIAPIModeResponses OpenAIAPIMode = "responses"
+
+	// OpenAIServiceTierAuto defers to the project default service tier.
+	OpenAIServiceTierAuto OpenAIServiceTier = "auto"
+	// OpenAIServiceTierDefault uses the standard service tier.
+	OpenAIServiceTierDefault OpenAIServiceTier = "default"
+	// OpenAIServiceTierFast is the Codex-friendly alias for priority processing.
+	OpenAIServiceTierFast OpenAIServiceTier = "fast"
+	// OpenAIServiceTierFlex requests flex processing.
+	OpenAIServiceTierFlex OpenAIServiceTier = "flex"
+	// OpenAIServiceTierPriority requests priority processing.
+	OpenAIServiceTierPriority OpenAIServiceTier = "priority"
+	// OpenAIServiceTierScale requests scale processing when supported.
+	OpenAIServiceTierScale OpenAIServiceTier = "scale"
 )
+
+// ParseOpenAIServiceTier normalizes and validates a configured service tier.
+func ParseOpenAIServiceTier(raw string) (OpenAIServiceTier, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(raw))
+	if normalized == "" {
+		return "", false
+	}
+
+	switch OpenAIServiceTier(normalized) {
+	case OpenAIServiceTierAuto,
+		OpenAIServiceTierDefault,
+		OpenAIServiceTierFast,
+		OpenAIServiceTierFlex,
+		OpenAIServiceTierPriority,
+		OpenAIServiceTierScale:
+		return OpenAIServiceTier(normalized), true
+	default:
+		return "", false
+	}
+}
+
+// WireValue returns the value that should be sent to the upstream API.
+func (t OpenAIServiceTier) WireValue() string {
+	if normalized, ok := ParseOpenAIServiceTier(string(t)); ok {
+		if normalized == OpenAIServiceTierFast {
+			return string(OpenAIServiceTierPriority)
+		}
+		return string(normalized)
+	}
+
+	return ""
+}
 
 // OpenAIConfig holds OpenAI-specific configuration including support for compatible APIs
 type OpenAIConfig struct {
@@ -105,6 +157,7 @@ type OpenAIConfig struct {
 	BaseURL      string                  `mapstructure:"base_url" json:"base_url" yaml:"base_url"`                                    // Custom API base URL (overrides platform defaults)
 	APIKeyEnvVar string                  `mapstructure:"api_key_env_var" json:"api_key_env_var" yaml:"api_key_env_var"`               // Environment variable name for API key (overrides platform default)
 	APIMode      OpenAIAPIMode           `mapstructure:"api_mode" json:"api_mode" yaml:"api_mode"`                                    // Preferred API mode selection (chat_completions or responses)
+	ServiceTier  OpenAIServiceTier       `mapstructure:"service_tier" json:"service_tier" yaml:"service_tier"`                        // Optional service tier hint (e.g. auto, default, fast, flex, priority, scale)
 	EnableSearch *bool                   `mapstructure:"enable_search" json:"enable_search,omitempty" yaml:"enable_search,omitempty"` // Enable native OpenAI Responses web_search tool when supported (defaults to true)
 	ManualCache  bool                    `mapstructure:"manual_cache" json:"manual_cache" yaml:"manual_cache"`                        // Enables manual cache affinity headers for Chat Completions when prompt caching is requested
 	Models       *CustomModels           `mapstructure:"models" json:"models,omitempty" yaml:"models,omitempty"`                      // Custom model configuration

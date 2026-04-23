@@ -1466,7 +1466,7 @@ func (*mockResponsesConversationStore) Close() error {
 }
 
 func TestProcessMessageExchangeSavesConversationPerTurn(t *testing.T) {
-	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", IsSubAgent: true, OpenAI: &llmtypes.OpenAIConfig{Platform: "xai"}}
+	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", IsSubAgent: true, OpenAI: &llmtypes.OpenAIConfig{Platform: "xai", ServiceTier: llmtypes.OpenAIServiceTierFlex}}
 	thread := &Thread{
 		Thread: base.NewThread(config, "conv-test", hooks.Trigger{}),
 	}
@@ -1506,6 +1506,7 @@ func TestProcessMessageExchangeSavesConversationPerTurn(t *testing.T) {
 	assert.Equal(t, "openai", store.savedRecords[0].Provider)
 	assert.Equal(t, "responses", store.savedRecords[0].Metadata["api_mode"])
 	assert.Equal(t, "xai", store.savedRecords[0].Metadata["platform"])
+	assert.Equal(t, "flex", store.savedRecords[0].Metadata["service_tier"])
 }
 
 func TestProcessMessageExchangeInjectsPendingSteer(t *testing.T) {
@@ -1670,6 +1671,45 @@ func TestProcessMessageExchangeMirrorsCodexPromptCachingRequestShape(t *testing.
 	assert.False(t, capturedParams.PreviousResponseID.Valid(), "should not use previous_response_id")
 	assert.True(t, capturedParams.Store.Valid())
 	assert.False(t, capturedParams.Store.Value, "should mirror Codex by disabling stored conversation state")
+}
+
+func TestProcessMessageExchangeSetsConfiguredServiceTier(t *testing.T) {
+	config := llmtypes.Config{
+		Provider: "openai",
+		Model:    "gpt-5.5",
+		OpenAI: &llmtypes.OpenAIConfig{
+			Platform:    "codex",
+			APIMode:     llmtypes.OpenAIAPIModeResponses,
+			ServiceTier: llmtypes.OpenAIServiceTierFast,
+		},
+	}
+	thread := &Thread{
+		Thread: base.NewThread(config, "conv-test", hooks.Trigger{}),
+	}
+	thread.inputItems = []openairesponses.ResponseInputItemUnionParam{
+		{
+			OfMessage: &openairesponses.EasyInputMessageParam{
+				Role:    openairesponses.EasyInputMessageRoleUser,
+				Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("hello")},
+			},
+		},
+	}
+	thread.storedItems = []StoredInputItem{{Type: "message", Role: "user", Content: "hello"}}
+	thread.isCodex = true
+
+	var capturedParams openairesponses.ResponseNewParams
+	thread.newStreamingFunc = func(_ context.Context, params openairesponses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
+		capturedParams = params
+		return nil
+	}
+	thread.processStreamFunc = func(_ context.Context, _ *ssestream.Stream[openairesponses.ResponseStreamEventUnion], _ llmtypes.MessageHandler, _ string, _ llmtypes.MessageOpt) (processStreamResult, error) {
+		return processStreamResult{responseCompleted: true}, nil
+	}
+
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
+	_, _, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-5.5", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
+	require.NoError(t, err)
+	assert.Equal(t, openairesponses.ResponseNewParamsServiceTierPriority, capturedParams.ServiceTier)
 }
 
 func TestProcessMessageExchangeSavesConversationOnError(t *testing.T) {

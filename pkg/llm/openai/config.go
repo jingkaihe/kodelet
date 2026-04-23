@@ -62,6 +62,19 @@ func parseAPIMode(raw string) (llmtypes.OpenAIAPIMode, bool) {
 	}
 }
 
+func normalizeServiceTier(config llmtypes.Config) llmtypes.OpenAIServiceTier {
+	if config.OpenAI == nil {
+		return ""
+	}
+
+	tier, ok := llmtypes.ParseOpenAIServiceTier(string(config.OpenAI.ServiceTier))
+	if !ok {
+		return ""
+	}
+
+	return tier
+}
+
 func resolveAPIMode(config llmtypes.Config) llmtypes.OpenAIAPIMode {
 	if resolvePlatformName(config) == "codex" {
 		return llmtypes.OpenAIAPIModeResponses
@@ -303,6 +316,12 @@ func validateCustomConfiguration(config llmtypes.Config) error {
 	if config.OpenAI.APIMode != "" {
 		if _, ok := parseAPIMode(string(config.OpenAI.APIMode)); !ok {
 			return fmt.Errorf("invalid api_mode '%s', valid values are: chat_completions, responses", config.OpenAI.APIMode)
+		}
+	}
+
+	if config.OpenAI.ServiceTier != "" {
+		if _, ok := llmtypes.ParseOpenAIServiceTier(string(config.OpenAI.ServiceTier)); !ok {
+			return fmt.Errorf("invalid service_tier '%s', valid values are: auto, default, fast, flex, priority, scale", config.OpenAI.ServiceTier)
 		}
 	}
 

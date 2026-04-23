@@ -230,7 +230,7 @@ func TestServer_handleGetConversation(t *testing.T) {
 					CWD:         "/workspace/project",
 					Summary:     "Test conversation",
 					Provider:    "openai",
-					Metadata:    map[string]any{"platform": "fireworks", "api_mode": "responses", "profile": "anthropic"},
+					Metadata:    map[string]any{"platform": "codex", "api_mode": "responses", "profile": "codex", "service_tier": "fast"},
 					RawMessages: json.RawMessage(`[{"type":"message","role":"user","content":"hello"}]`),
 				}, nil
 			}
@@ -259,7 +259,7 @@ func TestServer_handleGetConversation(t *testing.T) {
 	assert.Equal(t, "OpenAI", response.Provider)
 	assert.Equal(t, "/workspace/project", response.CWD)
 	assert.True(t, response.CWDLocked)
-	assert.Equal(t, "anthropic", response.Profile)
+	assert.Equal(t, "codex", response.Profile)
 	assert.True(t, response.ProfileLocked)
 	assert.Equal(t, 1, response.MessageCount)
 }

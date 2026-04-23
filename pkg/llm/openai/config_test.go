@@ -539,6 +539,41 @@ func TestResolveAPIMode(t *testing.T) {
 	}
 }
 
+func TestNormalizeServiceTier(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   llmtypes.Config
+		expected llmtypes.OpenAIServiceTier
+	}{
+		{
+			name:     "missing openai config",
+			config:   llmtypes.Config{},
+			expected: "",
+		},
+		{
+			name:     "fast tier preserved as config value",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{ServiceTier: llmtypes.OpenAIServiceTierFast}},
+			expected: llmtypes.OpenAIServiceTierFast,
+		},
+		{
+			name:     "whitespace and casing normalize",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{ServiceTier: llmtypes.OpenAIServiceTier(" Flex ")}},
+			expected: llmtypes.OpenAIServiceTierFlex,
+		},
+		{
+			name:     "invalid value ignored",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{ServiceTier: llmtypes.OpenAIServiceTier("turbo")}},
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, normalizeServiceTier(tt.config))
+		})
+	}
+}
+
 func TestGetBaseURL(t *testing.T) {
 	os.Unsetenv("OPENAI_API_BASE")
 	defer os.Unsetenv("OPENAI_API_BASE")
@@ -758,6 +793,34 @@ func TestValidateCustomConfiguration(t *testing.T) {
 				},
 			},
 			expectError: false,
+		},
+		{
+			name: "valid service tier fast",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					ServiceTier: llmtypes.OpenAIServiceTierFast,
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "valid service tier priority",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					ServiceTier: llmtypes.OpenAIServiceTierPriority,
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "invalid service tier",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					ServiceTier: llmtypes.OpenAIServiceTier("turbo"),
+				},
+			},
+			expectError:   true,
+			errorContains: "invalid service_tier",
 		},
 		{
 			name: "invalid api mode",

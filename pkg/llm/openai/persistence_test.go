@@ -572,7 +572,8 @@ func TestSaveConversationMetadataIncludesPlatformAndAPIMode(t *testing.T) {
 	thread, err := NewOpenAIThread(llmtypes.Config{
 		Model: "accounts/fireworks/models/kimi-k2p5",
 		OpenAI: &llmtypes.OpenAIConfig{
-			Platform: "fireworks",
+			Platform:    "fireworks",
+			ServiceTier: llmtypes.OpenAIServiceTierPriority,
 		},
 	})
 	require.NoError(t, err)
@@ -591,6 +592,7 @@ func TestSaveConversationMetadataIncludesPlatformAndAPIMode(t *testing.T) {
 	metadata := store.SavedRecords[len(store.SavedRecords)-1].Metadata
 	assert.Equal(t, "fireworks", metadata["platform"])
 	assert.Equal(t, "chat_completions", metadata["api_mode"])
+	assert.Equal(t, "priority", metadata["service_tier"])
 	assert.Equal(t, "accounts/fireworks/models/kimi-k2p5", metadata["model"])
 }
 

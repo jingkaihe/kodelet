@@ -261,6 +261,11 @@ openai:
   # native compaction support, and richer streaming events.
   # api_mode: "responses"
 
+  # Optional request latency tier. Native OpenAI values are auto, default,
+  # flex, priority, and scale. Kodelet also accepts fast as a Codex-friendly
+  # alias that is sent upstream as priority.
+  # service_tier: "fast"
+
   # Enable OpenAI's native Responses web_search tool when talking to the real
   # OpenAI platform. This stays off for OpenAI-compatible platforms and custom
   # base URLs that may not support the built-in tool.

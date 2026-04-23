@@ -35,11 +35,12 @@ func TestLoadResumeConversationConfig_UsesStoredProfileAndMetadata(t *testing.T)
 	viper.Set("provider", "anthropic")
 	viper.Set("model", "base-model")
 	viper.Set("profiles", map[string]any{
-		"anthropic": map[string]any{
+		"codex": map[string]any{
 			"provider": "openai",
-			"model":    "gpt-4.1",
+			"model":    "gpt-5.4",
 			"openai": map[string]any{
-				"platform": "openai",
+				"platform": "codex",
+				"api_mode": "responses",
 			},
 		},
 	})
@@ -69,10 +70,11 @@ func TestLoadResumeConversationConfig_UsesStoredProfileAndMetadata(t *testing.T)
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 		Metadata: map[string]any{
-			"profile":  "anthropic",
-			"model":    "accounts/fireworks/models/kimi-k2",
-			"platform": "fireworks",
-			"api_mode": "responses",
+			"profile":      "codex",
+			"model":        "gpt-5.5",
+			"platform":     "codex",
+			"api_mode":     "responses",
+			"service_tier": "fast",
 		},
 	})
 	require.NoError(t, err)
@@ -81,13 +83,14 @@ func TestLoadResumeConversationConfig_UsesStoredProfileAndMetadata(t *testing.T)
 	config, resolvedCWD, err := loadResumeConversationConfig(ctx, cmd, conversationID, "")
 	require.NoError(t, err)
 
-	assert.Equal(t, "anthropic", config.Profile)
+	assert.Equal(t, "codex", config.Profile)
 	assert.Equal(t, "openai", config.Provider)
-	assert.Equal(t, "accounts/fireworks/models/kimi-k2", config.Model)
+	assert.Equal(t, "gpt-5.5", config.Model)
 	assert.NotEmpty(t, resolvedCWD)
 	require.NotNil(t, config.OpenAI)
-	assert.Equal(t, "fireworks", config.OpenAI.Platform)
+	assert.Equal(t, "codex", config.OpenAI.Platform)
 	assert.Equal(t, llmtypes.OpenAIAPIMode("responses"), config.OpenAI.APIMode)
+	assert.Equal(t, llmtypes.OpenAIServiceTierFast, config.OpenAI.ServiceTier)
 }
 
 func TestLoadResumeConversationConfig_DefaultsToCurrentConfigForNewConversation(t *testing.T) {

@@ -990,7 +990,14 @@ including rolling windows and workspace credits.
 provider: openai
 openai:
   platform: codex
+  api_mode: responses
+  service_tier: fast
 ```
+
+`openai.service_tier` is optional. Kodelet accepts OpenAI's native values
+`auto`, `default`, `flex`, `priority`, and `scale`, plus Codex's
+user-facing `fast` alias. When you set `fast`, Kodelet sends
+`service_tier: priority` to the upstream API.
 
 ## OpenAI Native Web Search
 

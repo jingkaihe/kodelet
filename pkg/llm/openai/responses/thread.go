@@ -445,6 +445,10 @@ func (t *Thread) processMessageExchange(
 		},
 	}
 
+	if serviceTier := normalizeServiceTier(t.Config).WireValue(); serviceTier != "" {
+		params.ServiceTier = responses.ResponseNewParamsServiceTier(serviceTier)
+	}
+
 	// Set max output tokens if specified
 	if maxTokens > 0 {
 		params.MaxOutputTokens = param.NewOpt(int64(maxTokens))
@@ -1004,6 +1008,9 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 		"api_mode": "responses",
 		"platform": resolvePlatformName(t.Config),
 	}
+	if serviceTier := normalizeServiceTier(t.Config); serviceTier != "" {
+		metadata["service_tier"] = string(serviceTier)
+	}
 	if profile := strings.TrimSpace(t.Config.Profile); profile != "" {
 		metadata["profile"] = profile
 	}
@@ -1138,6 +1145,19 @@ func parseAPIMode(raw string) (llmtypes.OpenAIAPIMode, bool) {
 	default:
 		return "", false
 	}
+}
+
+func normalizeServiceTier(config llmtypes.Config) llmtypes.OpenAIServiceTier {
+	if config.OpenAI == nil {
+		return ""
+	}
+
+	tier, ok := llmtypes.ParseOpenAIServiceTier(string(config.OpenAI.ServiceTier))
+	if !ok {
+		return ""
+	}
+
+	return tier
 }
 
 func getPlatformAPIKeyEnvVar(platform string) string {

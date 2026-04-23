@@ -448,6 +448,10 @@ func (t *Thread) processMessageExchange(
 		MaxTokens: maxTokens,
 	}
 
+	if serviceTier := normalizeServiceTier(t.Config).WireValue(); serviceTier != "" {
+		requestParams.ServiceTier = openai.ServiceTier(serviceTier)
+	}
+
 	if t.isReasoningModelDynamic(model) {
 		if t.reasoningEffort != "none" {
 			requestParams.ReasoningEffort = t.reasoningEffort

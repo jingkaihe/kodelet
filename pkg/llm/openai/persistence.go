@@ -146,6 +146,9 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 		"api_mode": "chat_completions",
 		"platform": resolvePlatformName(t.Config),
 	}
+	if serviceTier := normalizeServiceTier(t.Config); serviceTier != "" {
+		metadata["service_tier"] = string(serviceTier)
+	}
 	if profile := strings.TrimSpace(t.Config.Profile); profile != "" {
 		metadata["profile"] = profile
 	}
