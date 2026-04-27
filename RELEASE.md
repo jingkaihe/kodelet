@@ -8,6 +8,8 @@ Removed the older commit coauthor configuration and refreshed the commit documen
 
 Improved the Web UI transcript copy action so assistant message blocks can be copied independently without including neighboring messages or tool-call summaries.
 
+Adjusted Web UI chat auto-scroll behaviour. The transcript now tracks whether the user is near the bottom, only calls scrollIntoView when that is true, and resets to follow-bottom when switching conversations.
+
 ## 0.3.47-beta (2026-04-23)
 
 Added `openai.service_tier` support for OpenAI and Codex requests, including validation, persistence across resumed CLI/Web UI conversations, and a Codex-friendly `fast` alias that is sent upstream as `priority`.
