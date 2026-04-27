@@ -321,30 +321,15 @@ const extractContentText = (content: string | ContentBlock[] | undefined): strin
     .join('\n\n');
 };
 
-const getCopyText = (message: ChatRenderMessage): string => {
-  if (message.role === 'user') {
-    return extractContentText(message.content);
-  }
+const getMessageBlockCopyText = (content: string | ContentBlock[] | undefined): string =>
+  extractContentText(content);
 
-  return (message.blocks || [])
-    .map((block) => {
-      if (block.type === 'thinking') {
-        return `Thinking\n${extractContentText(block.content)}`.trim();
-      }
+const messageCopyButtonBaseClassName =
+  'pointer-events-none px-3 py-2 opacity-0 transition-opacity duration-200 focus-visible:pointer-events-auto focus-visible:opacity-100';
 
-      if (block.type === 'message') {
-        return extractContentText(block.content);
-      }
+const userMessageCopyButtonClassName = `${messageCopyButtonBaseClassName} group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100`;
 
-      if (block.type === 'tools') {
-        return block.tools.map((toolCall) => `- ${getToolSummary(toolCall)}`).join('\n');
-      }
-
-      return '';
-    })
-    .filter(Boolean)
-    .join('\n\n');
-};
+const assistantMessageCopyButtonClassName = `${messageCopyButtonBaseClassName} absolute right-0 top-0 z-10 group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100`;
 
 const STREAMING_INDICATOR_MESSAGES = [
   'Following the thread…',
@@ -456,10 +441,12 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
 					</div>
 				</div>
 
-                <CopyButton
-                  className="pointer-events-none px-3 py-2 opacity-0 transition-opacity duration-200 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
-                  content={getCopyText(message)}
-                />
+                {isUser ? (
+                  <CopyButton
+                    className={userMessageCopyButtonClassName}
+                    content={getMessageBlockCopyText(message.content)}
+                  />
+                ) : null}
               </div>
 
               {isUser ? (
@@ -580,12 +567,21 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
                       );
                     }
 
+                    const copyText = getMessageBlockCopyText(block.content);
+
                     return (
-                      <div
-                        key={`message-${blockIndex}`}
-                        className="chat-prose max-w-none text-kodelet-dark"
-                        dangerouslySetInnerHTML={{ __html: renderContent(block.content) }}
-                      />
+                      <div key={`message-${blockIndex}`} className="group/message relative">
+                        {copyText.trim() ? (
+                          <CopyButton
+                            className={assistantMessageCopyButtonClassName}
+                            content={copyText}
+                          />
+                        ) : null}
+                        <div
+                          className="chat-prose max-w-none pr-12 text-kodelet-dark"
+                          dangerouslySetInnerHTML={{ __html: renderContent(block.content) }}
+                        />
+                      </div>
                     );
                   })}
 
