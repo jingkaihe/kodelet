@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.3.48-beta (2026-04-27)
+
+Made `kodelet commit` faster and cleaner by defaulting to short commit messages, disabling conversation persistence unless `--save` is passed, and adding `--prefix` for ticket or issue identifiers.
+
+Removed the older commit coauthor configuration and refreshed the commit documentation/skill guidance around the simplified flow.
+
+Improved the Web UI transcript copy action so assistant message blocks can be copied independently without including neighboring messages or tool-call summaries.
+
 ## 0.3.47-beta (2026-04-23)
 
 Added `openai.service_tier` support for OpenAI and Codex requests, including validation, persistence across resumed CLI/Web UI conversations, and a Codex-friendly `fast` alias that is sent upstream as `priority`.
