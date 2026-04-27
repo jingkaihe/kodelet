@@ -226,18 +226,6 @@ allowed_tools: []
 #   - "web_fetch"
 #   - "view_image"
 
-# Commit Configuration
-# Configure coauthor attribution for commit messages
-commit:
-  coauthor:
-    # Enable or disable coauthor attribution (default: true)
-    enabled: true
-    # Coauthor name (default: "Kodelet")
-    name: "Kodelet"
-    # Coauthor email (default: "noreply@kodelet.com")
-    email: "noreply@kodelet.com"
-
-
 # Example OpenAI configuration (uncomment to use)
 # provider: "openai"
 # model: "gpt-4.1"
@@ -455,9 +443,6 @@ tracing:
 # - KODELET_TRACING_SAMPLER: Sets the sampling strategy
 # - KODELET_TRACING_RATIO: Sets the sampling ratio
 # - KODELET_ALIASES_*: Define individual aliases (e.g., KODELET_ALIASES_SONNET46=claude-sonnet-4-6)
-# - KODELET_COMMIT_COAUTHOR_ENABLED: Enable/disable coauthor attribution in commits
-# - KODELET_COMMIT_COAUTHOR_NAME: Name for coauthor attribution
-# - KODELET_COMMIT_COAUTHOR_EMAIL: Email for coauthor attribution
 # - KODELET_OPENAI_API_MODE: OpenAI API mode (chat_completions or responses)
 #
 # API Keys:

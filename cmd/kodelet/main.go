@@ -36,10 +36,6 @@ func init() {
 	viper.SetDefault("anthropic_api_access", "auto")
 	viper.SetDefault("enable_todos", false)
 
-	viper.SetDefault("commit.coauthor.enabled", true)
-	viper.SetDefault("commit.coauthor.name", "Kodelet")
-	viper.SetDefault("commit.coauthor.email", "noreply@kodelet.com")
-
 	viper.SetDefault("mcp", map[string]tools.MCPConfig{})
 
 	viper.SetDefault("tracing.enabled", false)

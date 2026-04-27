@@ -151,7 +151,8 @@ This command analyzes your staged changes (`git diff --cached`) and uses AI to g
 Options:
 - `--no-sign`: Disable commit signing (commits are signed by default)
 - `--template` or `-t`: Use a template for the commit message
-- `--short`: Generate a short commit message
+- `--short`: Generate a short commit message (enabled by default)
+- `--prefix`: Prefix the generated commit message, such as `TICKET-123`
 - `--no-confirm`: Skip confirmation prompt
 
 Create pull requests:

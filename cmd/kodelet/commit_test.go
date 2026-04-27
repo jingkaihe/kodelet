@@ -95,9 +95,9 @@ func TestCommitConfigDefaults(t *testing.T) {
 
 	assert.False(t, config.NoSign, "Expected default NoSign to be false")
 	assert.Empty(t, config.Template, "Expected default Template to be empty")
-	assert.False(t, config.Short, "Expected default Short to be false")
+	assert.True(t, config.Short, "Expected default Short to be true")
+	assert.Empty(t, config.Prefix, "Expected default Prefix to be empty")
 	assert.False(t, config.NoConfirm, "Expected default NoConfirm to be false")
-	assert.False(t, config.NoCoauthor, "Expected default NoCoauthor to be false")
 }
 
 func TestSanitizeCommitMessage(t *testing.T) {
@@ -131,6 +131,47 @@ func TestSanitizeCommitMessage(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := sanitizeCommitMessage(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestPrefixCommitMessage(t *testing.T) {
+	tests := []struct {
+		name     string
+		message  string
+		prefix   string
+		expected string
+	}{
+		{
+			name:     "empty prefix leaves message unchanged",
+			message:  "feat: add prefix flag",
+			prefix:   "",
+			expected: "feat: add prefix flag",
+		},
+		{
+			name:     "prefix prepended to message",
+			message:  "feat: add prefix flag",
+			prefix:   "TICKET-123",
+			expected: "TICKET-123 feat: add prefix flag",
+		},
+		{
+			name:     "prefix whitespace is trimmed",
+			message:  "feat: add prefix flag",
+			prefix:   " TICKET-123 ",
+			expected: "TICKET-123 feat: add prefix flag",
+		},
+		{
+			name:     "message leading whitespace is trimmed",
+			message:  "\t feat: add prefix flag",
+			prefix:   "TICKET-123",
+			expected: "TICKET-123 feat: add prefix flag",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := prefixCommitMessage(tt.message, tt.prefix)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
