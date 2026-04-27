@@ -168,6 +168,18 @@ func TestPrefixCommitMessage(t *testing.T) {
 			prefix:   "TICKET-123",
 			expected: "TICKET-123 feat: add prefix flag",
 		},
+		{
+			name:     "message leading newline is trimmed",
+			message:  "\nfeat: add prefix flag\n",
+			prefix:   "TICKET-123",
+			expected: "TICKET-123 feat: add prefix flag",
+		},
+		{
+			name:     "whitespace-only message returns prefix",
+			message:  "\n\t ",
+			prefix:   "TICKET-123",
+			expected: "TICKET-123",
+		},
 	}
 
 	for _, tt := range tests {

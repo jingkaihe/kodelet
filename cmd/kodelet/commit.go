@@ -173,10 +173,11 @@ func prefixCommitMessage(message, prefix string) string {
 	if prefix == "" {
 		return message
 	}
+	message = strings.TrimSpace(message)
 	if message == "" {
 		return prefix
 	}
-	return prefix + " " + strings.TrimLeft(message, " \t")
+	return prefix + " " + message
 }
 
 func isGitRepository() bool {
