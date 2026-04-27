@@ -154,6 +154,7 @@ Options:
 - `--short`: Generate a short commit message (enabled by default)
 - `--prefix`: Prefix the generated commit message, such as `TICKET-123`
 - `--no-confirm`: Skip confirmation prompt
+- `--save`: Enable conversation persistence (disabled by default for commits)
 
 Create pull requests:
 

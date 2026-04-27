@@ -98,6 +98,7 @@ func TestCommitConfigDefaults(t *testing.T) {
 	assert.True(t, config.Short, "Expected default Short to be true")
 	assert.Empty(t, config.Prefix, "Expected default Prefix to be empty")
 	assert.False(t, config.NoConfirm, "Expected default NoConfirm to be false")
+	assert.False(t, config.Save, "Expected default Save to be false")
 }
 
 func TestSanitizeCommitMessage(t *testing.T) {

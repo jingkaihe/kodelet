@@ -321,7 +321,7 @@ kodelet run --no-hooks "query"
 ```bash
 git add .
 # Recommended: fast, non-interactive, no conversation saved
-kodelet commit --no-confirm --no-save
+kodelet commit --no-confirm
 
 # Include a ticket prefix
 kodelet commit --prefix TICKET-123

@@ -20,7 +20,7 @@ type CommitConfig struct {
 	Short     bool
 	Prefix    string
 	NoConfirm bool
-	NoSave    bool
+	Save      bool
 }
 
 func NewCommitConfig() *CommitConfig {
@@ -30,7 +30,7 @@ func NewCommitConfig() *CommitConfig {
 		Short:     true,
 		Prefix:    "",
 		NoConfirm: false,
-		NoSave:    false,
+		Save:      false,
 	}
 }
 
@@ -97,7 +97,7 @@ You must stage your changes (using 'git add') before running this command.`,
 			PromptCache:        false,
 			NoToolUse:          true,
 			DisableUsageLog:    true,
-			NoSaveConversation: config.NoSave,
+			NoSaveConversation: !config.Save,
 		})
 		commitMsg = sanitizeCommitMessage(commitMsg)
 		commitMsg = prefixCommitMessage(commitMsg, config.Prefix)
@@ -134,7 +134,7 @@ func init() {
 	commitCmd.Flags().Bool("short", defaults.Short, "Generate a short commit message with just a description, no bullet points")
 	commitCmd.Flags().String("prefix", defaults.Prefix, "Prefix to prepend to the generated commit message")
 	commitCmd.Flags().Bool("no-confirm", defaults.NoConfirm, "Skip confirmation prompt and create commit automatically")
-	commitCmd.Flags().Bool("no-save", defaults.NoSave, "Disable conversation persistence")
+	commitCmd.Flags().Bool("save", defaults.Save, "Enable conversation persistence")
 }
 
 func getCommitConfigFromFlags(cmd *cobra.Command) *CommitConfig {
@@ -155,8 +155,8 @@ func getCommitConfigFromFlags(cmd *cobra.Command) *CommitConfig {
 	if noConfirm, err := cmd.Flags().GetBool("no-confirm"); err == nil {
 		config.NoConfirm = noConfirm
 	}
-	if noSave, err := cmd.Flags().GetBool("no-save"); err == nil {
-		config.NoSave = noSave
+	if save, err := cmd.Flags().GetBool("save"); err == nil {
+		config.Save = save
 	}
 
 	return config
