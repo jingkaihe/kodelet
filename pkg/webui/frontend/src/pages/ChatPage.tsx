@@ -86,6 +86,7 @@ const SIDEBAR_VISIBLE_STORAGE_KEY = "kodelet.chat.sidebar.visible";
 const MAX_IMAGE_ATTACHMENTS = 10;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const SIDEBAR_CONVERSATION_LIMIT = 100;
+const AUTO_SCROLL_BOTTOM_THRESHOLD = 80;
 const SUPPORTED_IMAGE_TYPES = new Set([
 	"image/png",
 	"image/jpeg",
@@ -153,6 +154,10 @@ const buildUserContent = (
 
 const clampSidebarWidth = (width: number): number =>
 	Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, width));
+
+const isScrolledNearBottom = (element: HTMLElement): boolean =>
+	element.scrollHeight - element.scrollTop - element.clientHeight <=
+	AUTO_SCROLL_BOTTOM_THRESHOLD;
 
 const buildConversationPreview = (
 	prompt: string,
@@ -275,6 +280,7 @@ const ChatPage: React.FC = () => {
 	const [statusTick, setStatusTick] = useState(0);
 	const loadedConversationId = conversation?.id ?? null;
 	const transcriptEndRef = useRef<HTMLDivElement | null>(null);
+	const shouldAutoScrollRef = useRef(true);
 	const abortControllerRef = useRef<AbortController | null>(null);
 	const resumeControllerRef = useRef<AbortController | null>(null);
 	const sendStreamRef = useRef(0);
@@ -469,6 +475,7 @@ const ChatPage: React.FC = () => {
 	}, [isResizingSidebar]);
 
 	useEffect(() => {
+		shouldAutoScrollRef.current = true;
 		sendStreamRef.current += 1;
 		abortControllerRef.current?.abort();
 		abortControllerRef.current = null;
@@ -617,7 +624,15 @@ const ChatPage: React.FC = () => {
 		};
 	}, [conversationId, conversationLoading, loadedConversationId]);
 
+	const handleTranscriptScroll = (event: React.UIEvent<HTMLDivElement>) => {
+		shouldAutoScrollRef.current = isScrolledNearBottom(event.currentTarget);
+	};
+
 	useEffect(() => {
+		if (!shouldAutoScrollRef.current) {
+			return;
+		}
+
 		transcriptEndRef.current?.scrollIntoView({
 			behavior: "smooth",
 			block: "end",
@@ -1605,7 +1620,11 @@ const ChatPage: React.FC = () => {
 				) : null}
 
 				<main className="relative flex h-[100dvh] min-w-0 flex-1 flex-col overflow-hidden">
-					<div className="min-h-0 flex-1 overflow-y-auto">
+					<div
+						className="min-h-0 flex-1 overflow-y-auto"
+						data-testid="chat-transcript-scroll"
+						onScroll={handleTranscriptScroll}
+					>
 						{conversationLoading ? (
 							<div className="flex min-h-full items-center justify-center px-6 py-12">
 								<div className="surface-panel rounded-2xl px-6 py-5 text-sm text-kodelet-dark/70">

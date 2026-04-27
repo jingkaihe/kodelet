@@ -1421,6 +1421,82 @@ describe("ChatPage", () => {
 		expect(screen.getByText("stream continues")).toBeInTheDocument();
 	});
 
+	it("only auto-scrolls streamed updates while the transcript is at the bottom", async () => {
+		routeParams = { id: "conv-123" };
+
+		mockGetConversation.mockResolvedValue({
+			id: "conv-123",
+			createdAt: "2024-01-01T00:00:00Z",
+			updatedAt: "2024-01-01T00:00:00Z",
+			messageCount: 1,
+			messages: [
+				{
+					role: "user",
+					content: "Existing conversation",
+				},
+			],
+			toolResults: {},
+		});
+
+		let streamListener: ((event: ChatStreamEvent) => void) | null = null;
+		mockStreamConversation.mockImplementation(async (_id, options) => {
+			streamListener = (
+				options as { onEvent: (event: ChatStreamEvent) => void }
+			).onEvent;
+			return new Promise(() => undefined);
+		});
+
+		render(<ChatPage />);
+
+		await waitFor(() => expect(streamListener).not.toBeNull());
+
+		const scrollIntoView = vi.mocked(
+			window.HTMLElement.prototype.scrollIntoView,
+		);
+		scrollIntoView.mockClear();
+
+		const transcriptScroll = screen.getByTestId("chat-transcript-scroll");
+		Object.defineProperties(transcriptScroll, {
+			clientHeight: { configurable: true, value: 500 },
+			scrollHeight: { configurable: true, value: 1500 },
+			scrollTop: { configurable: true, value: 200 },
+		});
+
+		fireEvent.scroll(transcriptScroll);
+
+		await act(async () => {
+			streamListener?.({
+				kind: "text-delta",
+				conversation_id: "conv-123",
+				delta: "while reading earlier content",
+			});
+		});
+
+		expect(
+			screen.getByText("while reading earlier content"),
+		).toBeInTheDocument();
+		expect(scrollIntoView).not.toHaveBeenCalled();
+
+		Object.defineProperty(transcriptScroll, "scrollTop", {
+			configurable: true,
+			value: 1000,
+		});
+		fireEvent.scroll(transcriptScroll);
+
+		await act(async () => {
+			streamListener?.({
+				kind: "text-delta",
+				conversation_id: "conv-123",
+				delta: " after returning to bottom",
+			});
+		});
+
+		expect(scrollIntoView).toHaveBeenCalledWith({
+			behavior: "smooth",
+			block: "end",
+		});
+	});
+
 	it("disables delete for the active conversation while it is streaming", async () => {
 		routeParams = { id: "conv-123" };
 
