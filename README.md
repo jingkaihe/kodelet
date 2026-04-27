@@ -32,7 +32,7 @@ The install script defaults to package-based installation: Homebrew on macOS and
 
 ## Choice of LLM
 
-Kodelet supports Anthropic Claude, OpenAI compatible models and Google Gemini. The default model is now OpenAI `gpt-5.4`, with `gpt-5.4-mini` as the default weak model.
+Kodelet supports Anthropic Claude and OpenAI compatible models. The default model is now OpenAI `gpt-5.4`, with `gpt-5.4-mini` as the default weak model.
 
 If you prefer explicit environment configuration, you can use:
 
