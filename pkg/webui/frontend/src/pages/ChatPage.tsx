@@ -210,6 +210,21 @@ const getRecentWorkspaces = (conversations: Conversation[]): string[] => {
 	return Array.from(workspaces);
 };
 
+const getWorkspaceLabelParts = (
+	workspace: string,
+): { name: string; parent: string } => {
+	const trimmedWorkspace = workspace.trim();
+	const normalizedWorkspace =
+		trimmedWorkspace.length > 1
+			? trimmedWorkspace.replace(/\/+$/, "")
+			: trimmedWorkspace;
+	const pathParts = normalizedWorkspace.split("/").filter(Boolean);
+	const name = pathParts[pathParts.length - 1] || normalizedWorkspace || "/";
+	const parent = pathParts.length > 1 ? `/${pathParts.slice(0, -1).join("/")}` : "";
+
+	return { name, parent };
+};
+
 const upsertConversationSummary = (
 	conversations: Conversation[],
 	nextConversation: Conversation,
@@ -1501,17 +1516,32 @@ const ChatPage: React.FC = () => {
 							className="new-chat-recent-workspaces"
 							data-testid="recent-workspaces"
 						>
-							{recentWorkspaces.map((workspace) => (
-								<button
-									className="new-chat-recent-workspace"
-									key={workspace}
-									onClick={() => handleRecentWorkspaceSelect(workspace)}
-									title={workspace}
-									type="button"
-								>
-									{workspace}
-								</button>
-							))}
+							{recentWorkspaces.map((workspace) => {
+								const { name, parent } = getWorkspaceLabelParts(workspace);
+
+								return (
+									<button
+										aria-label={workspace}
+										className="new-chat-recent-workspace"
+										key={workspace}
+										onClick={() => handleRecentWorkspaceSelect(workspace)}
+										title={workspace}
+										type="button"
+									>
+										<span className="new-chat-recent-workspace-icon" aria-hidden="true">
+											↳
+										</span>
+										<span className="new-chat-recent-workspace-text">
+											<span className="new-chat-recent-workspace-name">{name}</span>
+											{parent ? (
+												<span className="new-chat-recent-workspace-parent">
+													{parent}
+												</span>
+											) : null}
+										</span>
+									</button>
+								);
+							})}
 						</div>
 					) : null}
 				</label>
