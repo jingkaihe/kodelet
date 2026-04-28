@@ -340,7 +340,7 @@ describe("ChatPage", () => {
 		await waitFor(() =>
 			expect(mockGetCWDHints).toHaveBeenCalledWith("/workspace/alt"),
 		);
-		fireEvent.click(screen.getByRole("button", { name: "Use these settings" }));
+		fireEvent.click(screen.getByRole("button", { name: "Start" }));
 
 		fireEvent.change(screen.getByPlaceholderText("Ask kodelet anything..."), {
 			target: { value: "hello" },
@@ -391,7 +391,7 @@ describe("ChatPage", () => {
 		expect(mockGetCWDHints).not.toHaveBeenLastCalledWith(
 			"/workspace/kodelet",
 		);
-		fireEvent.click(screen.getByRole("button", { name: "Use these settings" }));
+		fireEvent.click(screen.getByRole("button", { name: "Start" }));
 		expect(screen.queryByTestId("new-chat-dialog")).not.toBeInTheDocument();
 		expect(
 			screen.getByText(/workspace\/kodelet/),
@@ -426,7 +426,7 @@ describe("ChatPage", () => {
 
 		fireEvent.keyDown(cwdInput, { key: "ArrowDown" });
 		fireEvent.keyDown(cwdInput, { key: "Enter" });
-		fireEvent.click(screen.getByRole("button", { name: "Use these settings" }));
+		fireEvent.click(screen.getByRole("button", { name: "Start" }));
 
 		expect(
 			screen.getByText(/workspace\/kodelet/),
@@ -461,7 +461,7 @@ describe("ChatPage", () => {
 		fireEvent.keyDown(cwdInput, { key: "Tab" });
 		expect(screen.queryByTestId("cwd-suggestions")).not.toBeInTheDocument();
 		expect(cwdInput).toHaveValue("/workspace/kodelet");
-		fireEvent.click(screen.getByRole("button", { name: "Use these settings" }));
+		fireEvent.click(screen.getByRole("button", { name: "Start" }));
 
 		expect(
 			screen.getByText(/workspace\/kodelet/),
@@ -547,7 +547,7 @@ describe("ChatPage", () => {
 		fireEvent.change(screen.getByLabelText("Working directory"), {
 			target: { value: "kodelet-website" },
 		});
-		fireEvent.click(screen.getByRole("button", { name: "Use these settings" }));
+		fireEvent.click(screen.getByRole("button", { name: "Start" }));
 		fireEvent.change(screen.getByPlaceholderText("Ask kodelet anything..."), {
 			target: { value: "hello" },
 		});

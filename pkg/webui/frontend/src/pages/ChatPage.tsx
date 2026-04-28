@@ -1602,7 +1602,7 @@ const ChatPage: React.FC = () => {
 								onClick={handleCommitNewChatContext}
 								type="button"
 							>
-								Use these settings
+								Start
 							</button>
 						</div>
 					</div>
