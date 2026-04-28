@@ -387,6 +387,10 @@ describe("ChatPage", () => {
 		fireEvent.mouseDown(screen.getByTestId("cwd-suggestion-0"));
 		fireEvent.click(screen.getByTestId("cwd-suggestion-0"));
 		expect(screen.getByTestId("new-chat-dialog")).toBeInTheDocument();
+		expect(screen.queryByTestId("cwd-suggestions")).not.toBeInTheDocument();
+		expect(mockGetCWDHints).not.toHaveBeenLastCalledWith(
+			"/workspace/kodelet",
+		);
 		fireEvent.click(screen.getByRole("button", { name: "Use these settings" }));
 		expect(screen.queryByTestId("new-chat-dialog")).not.toBeInTheDocument();
 		expect(
@@ -563,9 +567,85 @@ describe("ChatPage", () => {
 
 		fireEvent.click(screen.getByTestId("sidebar-new-chat-button"));
 		expect(screen.getByTestId("new-chat-dialog")).toBeInTheDocument();
+		await waitFor(() =>
+			expect(screen.getByLabelText("Working directory")).toHaveFocus(),
+		);
+		expect(screen.queryByTestId("cwd-suggestions")).not.toBeInTheDocument();
+		expect(screen.queryByText("Type a full path or nearby project name.")).not.toBeInTheDocument();
+
+		await new Promise((resolve) => window.setTimeout(resolve, 200));
+		expect(mockGetCWDHints).not.toHaveBeenCalledWith("/workspace/default");
 
 		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 		expect(screen.queryByTestId("new-chat-dialog")).not.toBeInTheDocument();
+	});
+
+	it("shows recent workspaces and applies a selected workspace", async () => {
+		mockGetConversations.mockResolvedValue({
+			conversations: [
+				{
+					id: "conv-1",
+					createdAt: "2023-01-01T00:00:00Z",
+					updatedAt: "2023-01-06T00:00:00Z",
+					messageCount: 1,
+					cwd: "/workspace/a",
+				},
+				{
+					id: "conv-2",
+					createdAt: "2023-01-01T00:00:00Z",
+					updatedAt: "2023-01-05T00:00:00Z",
+					messageCount: 1,
+					cwd: "/workspace/b",
+				},
+				{
+					id: "conv-3",
+					createdAt: "2023-01-01T00:00:00Z",
+					updatedAt: "2023-01-04T00:00:00Z",
+					messageCount: 1,
+					cwd: "/workspace/c",
+				},
+				{
+					id: "conv-4",
+					createdAt: "2023-01-01T00:00:00Z",
+					updatedAt: "2023-01-03T00:00:00Z",
+					messageCount: 1,
+					cwd: "/workspace/d",
+				},
+				{
+					id: "conv-5",
+					createdAt: "2023-01-01T00:00:00Z",
+					updatedAt: "2023-01-02T00:00:00Z",
+					messageCount: 1,
+					cwd: "/workspace/e",
+				},
+				{
+					id: "conv-6",
+					createdAt: "2023-01-01T00:00:00Z",
+					updatedAt: "2023-01-01T00:00:00Z",
+					messageCount: 1,
+					cwd: "/workspace/f",
+				},
+			],
+			hasMore: false,
+			total: 6,
+			limit: 10,
+			offset: 0,
+		});
+
+		render(<ChatPage />);
+
+		await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
+		fireEvent.click(screen.getByTestId("sidebar-new-chat-button"));
+
+		expect(screen.getByTestId("recent-workspaces")).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "/workspace/a" })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "/workspace/e" })).toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: "/workspace/f" })).not.toBeInTheDocument();
+
+		fireEvent.click(screen.getByRole("button", { name: "/workspace/b" }));
+		expect(screen.getByLabelText("Working directory")).toHaveValue(
+			"/workspace/b",
+		);
 	});
 
 	it("shows the cwd inside the inline context for existing conversations", async () => {

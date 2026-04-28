@@ -86,6 +86,7 @@ const SIDEBAR_VISIBLE_STORAGE_KEY = "kodelet.chat.sidebar.visible";
 const MAX_IMAGE_ATTACHMENTS = 10;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const SIDEBAR_CONVERSATION_LIMIT = 100;
+const RECENT_WORKSPACE_LIMIT = 5;
 const AUTO_SCROLL_BOTTOM_THRESHOLD = 80;
 const SUPPORTED_IMAGE_TYPES = new Set([
 	"image/png",
@@ -179,6 +180,36 @@ const buildConversationPreview = (
 	return "Untitled conversation";
 };
 
+const getConversationTimestamp = (conversation: Conversation): number => {
+	const timestamp =
+		conversation.updatedAt ??
+		conversation.updated_at ??
+		conversation.createdAt ??
+		conversation.created_at;
+
+	return timestamp ? new Date(timestamp).getTime() : 0;
+};
+
+const getRecentWorkspaces = (conversations: Conversation[]): string[] => {
+	const workspaces = new Set<string>();
+
+	[...conversations]
+		.sort(
+			(left, right) =>
+				getConversationTimestamp(right) - getConversationTimestamp(left),
+		)
+		.some((conversation) => {
+			const cwd = conversation.cwd?.trim();
+			if (cwd) {
+				workspaces.add(cwd);
+			}
+
+			return workspaces.size >= RECENT_WORKSPACE_LIMIT;
+		});
+
+	return Array.from(workspaces);
+};
+
 const upsertConversationSummary = (
 	conversations: Conversation[],
 	nextConversation: Conversation,
@@ -189,18 +220,8 @@ const upsertConversationSummary = (
 	merged.unshift(nextConversation);
 
 	merged.sort((left, right) => {
-		const getConversationTime = (conversation: Conversation): number => {
-			const timestamp =
-				conversation.updatedAt ??
-				conversation.updated_at ??
-				conversation.createdAt ??
-				conversation.created_at;
-
-			return timestamp ? new Date(timestamp).getTime() : 0;
-		};
-
-		const leftTime = getConversationTime(left);
-		const rightTime = getConversationTime(right);
+		const leftTime = getConversationTimestamp(left);
+		const rightTime = getConversationTimestamp(right);
 		return rightTime - leftTime;
 	});
 
@@ -287,6 +308,7 @@ const ChatPage: React.FC = () => {
 	const resumeStreamRef = useRef(0);
 	const cwdSuggestionRequestRef = useRef(0);
 	const cwdInputFocusedRef = useRef(false);
+	const cwdSuggestionSkipQueryRef = useRef<string | null>(null);
 	const viewedConversationIdRef = useRef<string | null>(conversationId);
 	const sidebarResizeStartRef = useRef<{
 		startX: number;
@@ -295,7 +317,6 @@ const ChatPage: React.FC = () => {
 	const fileInputRef = useRef<HTMLInputElement | null>(null);
 	const cwdInputRef = useRef<HTMLInputElement | null>(null);
 	const newChatDialogRef = useRef<HTMLDivElement | null>(null);
-	const newChatProfileSelectRef = useRef<HTMLSelectElement | null>(null);
 
 	const refreshConversations = async () => {
 		setSidebarLoading(true);
@@ -357,7 +378,14 @@ const ChatPage: React.FC = () => {
 		}
 
 		const focusInput = window.setTimeout(() => {
-			newChatProfileSelectRef.current?.focus();
+			const input = cwdInputRef.current;
+			if (!input) {
+				return;
+			}
+
+			input.focus();
+			const valueLength = input.value.length;
+			input.setSelectionRange(valueLength, valueLength);
 		}, 0);
 
 		const handlePointerDown = (event: MouseEvent) => {
@@ -378,6 +406,7 @@ const ChatPage: React.FC = () => {
 			setNewChatProfileDraft(
 				selectedProfile || chatSettings.currentProfile || "default",
 			);
+			cwdSuggestionSkipQueryRef.current = null;
 			setCwdQuery(selectedCWD || chatSettings.defaultCWD || "");
 			setNewChatDialogOpen(false);
 		};
@@ -387,6 +416,7 @@ const ChatPage: React.FC = () => {
 				setNewChatProfileDraft(
 					selectedProfile || chatSettings.currentProfile || "default",
 				);
+				cwdSuggestionSkipQueryRef.current = null;
 				setCwdQuery(selectedCWD || chatSettings.defaultCWD || "");
 				setNewChatDialogOpen(false);
 			}
@@ -652,7 +682,9 @@ const ChatPage: React.FC = () => {
 		setSelectedProfile(chatSettings.currentProfile || "default");
 		setNewChatProfileDraft(chatSettings.currentProfile || "default");
 		setSelectedCWD(chatSettings.defaultCWD || "");
-		setCwdQuery(chatSettings.defaultCWD || "");
+		const defaultCWD = chatSettings.defaultCWD || "";
+		cwdSuggestionSkipQueryRef.current = defaultCWD;
+		setCwdQuery(defaultCWD);
 		cwdInputFocusedRef.current = false;
 		setCwdSuggestions([]);
 		setCwdSuggestionsOpen(false);
@@ -708,12 +740,22 @@ const ChatPage: React.FC = () => {
 		}
 
 		if (!cwdQuery.trim()) {
+			cwdSuggestionSkipQueryRef.current = null;
 			cwdSuggestionRequestRef.current += 1;
 			setCwdSuggestions([]);
 			setCwdSuggestionsOpen(false);
 			setCwdSuggestionIndex(-1);
 			return;
 		}
+
+		if (cwdSuggestionSkipQueryRef.current === cwdQuery) {
+			cwdSuggestionRequestRef.current += 1;
+			setCwdSuggestions([]);
+			setCwdSuggestionsOpen(false);
+			setCwdSuggestionIndex(-1);
+			return;
+		}
+		cwdSuggestionSkipQueryRef.current = null;
 
 		requestCwdSuggestions(cwdQuery);
 	}, [conversationId, cwdQuery, requestCwdSuggestions]);
@@ -1130,12 +1172,20 @@ const ChatPage: React.FC = () => {
 	]);
 
 	const applyCwdSuggestion = (path: string) => {
+		cwdSuggestionSkipQueryRef.current = path;
 		setCwdQuery(path);
+		setCwdSuggestions([]);
 		setCwdSuggestionsOpen(false);
 		setCwdSuggestionIndex(-1);
 	};
 
+	const handleRecentWorkspaceSelect = (path: string) => {
+		applyCwdSuggestion(path);
+		cwdInputRef.current?.focus();
+	};
+
 	const handleCwdInputChange = (value: string) => {
+		cwdSuggestionSkipQueryRef.current = null;
 		setCwdQuery(value);
 		setCwdSuggestionsOpen(false);
 		setCwdSuggestionIndex(-1);
@@ -1198,7 +1248,10 @@ const ChatPage: React.FC = () => {
 
 		if (event.key === "Enter") {
 			event.preventDefault();
-			setCwdQuery(cwdQuery.trim());
+			const trimmedQuery = cwdQuery.trim();
+			cwdSuggestionSkipQueryRef.current = trimmedQuery;
+			setCwdQuery(trimmedQuery);
+			setCwdSuggestions([]);
 			setCwdSuggestionsOpen(false);
 			setCwdSuggestionIndex(-1);
 			return;
@@ -1237,6 +1290,11 @@ const ChatPage: React.FC = () => {
 
 		return `${currentProfileLabel} · ${directoryLabel}`;
 	}, [currentCWDLabel, currentProfileLabel]);
+
+	const recentWorkspaces = useMemo(
+		() => getRecentWorkspaces(conversations),
+		[conversations],
+	);
 
 	const canSubmit = draft.trim().length > 0 || attachments.length > 0;
 	const hasActiveConversationTarget = Boolean(activeConversationId);
@@ -1307,6 +1365,7 @@ const ChatPage: React.FC = () => {
 		setNewChatProfileDraft(
 			selectedProfile || chatSettings.currentProfile || "default",
 		);
+		cwdSuggestionSkipQueryRef.current = null;
 		setCwdQuery(selectedCWD || chatSettings.defaultCWD || "");
 		setCwdSuggestions([]);
 		setCwdSuggestionsOpen(false);
@@ -1347,7 +1406,6 @@ const ChatPage: React.FC = () => {
 							className="new-chat-field-control new-chat-field-control-select"
 							data-testid="new-chat-profile-select"
 							onChange={(event) => setNewChatProfileDraft(event.target.value)}
-							ref={newChatProfileSelectRef}
 							value={newChatProfileDraft}
 						>
 							{availableProfiles.map((profile) => (
@@ -1438,9 +1496,24 @@ const ChatPage: React.FC = () => {
 							</div>
 						) : null}
 					</div>
-					<p className="new-chat-field-hint">
-						Type a full path or a nearby project name.
-					</p>
+					{recentWorkspaces.length > 0 ? (
+						<div
+							className="new-chat-recent-workspaces"
+							data-testid="recent-workspaces"
+						>
+							{recentWorkspaces.map((workspace) => (
+								<button
+									className="new-chat-recent-workspace"
+									key={workspace}
+									onClick={() => handleRecentWorkspaceSelect(workspace)}
+									title={workspace}
+									type="button"
+								>
+									{workspace}
+								</button>
+							))}
+						</div>
+					) : null}
 				</label>
 			</div>
 		</div>
@@ -1449,6 +1522,7 @@ const ChatPage: React.FC = () => {
 	const handleCommitNewChatContext = () => {
 		setSelectedProfile(newChatProfileDraft || "default");
 		setSelectedCWD(cwdQuery.trim());
+		cwdSuggestionSkipQueryRef.current = null;
 		setCwdSuggestions([]);
 		setCwdSuggestionsOpen(false);
 		setCwdSuggestionIndex(-1);
@@ -1483,11 +1557,6 @@ const ChatPage: React.FC = () => {
 						ref={newChatDialogRef}
 						role="dialog"
 					>
-						<div className="new-chat-dialog-header">
-							<p className="eyebrow-label text-kodelet-mid-gray">New chat</p>
-							<h2 className="new-chat-dialog-title">Profile & directory</h2>
-						</div>
-
 						{newChatContextEditor}
 
 						<div className="new-chat-dialog-actions">
