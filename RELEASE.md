@@ -1,5 +1,15 @@
 # Kodelet
 
+## 0.3.49-beta (2026-04-28)
+
+Improved the Web UI new-chat dialog with recent workspace shortcuts, cleaner directory labels, cwd-first focus, and a shorter Start action.
+
+Hardened cwd autocomplete so pending suggestion requests are cancelled when dialogs close, conversations switch, or a recent workspace/manual path is applied.
+
+Refined chat UI styling around setup buttons, recent workspace chips, responsive dialog layout, and the sticky composer footer.
+
+Updated the embedded Web UI frontend's PostCSS dev dependency from `^8.4.35` to `^8.5.12`.
+
 ## 0.3.48-beta (2026-04-27)
 
 Made `kodelet commit` faster and cleaner by defaulting to short commit messages, disabling conversation persistence unless `--save` is passed, and adding `--prefix` for ticket or issue identifiers.
