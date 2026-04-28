@@ -278,15 +278,26 @@ export const getFileIcon = (path: string): string => {
 };
 
 // Debounce utility
+export type DebouncedFunction<T extends unknown[]> = ((...args: T) => void) & {
+  cancel: () => void;
+};
+
 export const debounce = <T extends unknown[]>(
   func: (...args: T) => void,
   delay: number
-): ((...args: T) => void) => {
-  let timeoutId: number;
-  return (...args: T) => {
+): DebouncedFunction<T> => {
+  let timeoutId: number | undefined;
+  const debounced = ((...args: T) => {
     clearTimeout(timeoutId);
     timeoutId = window.setTimeout(() => func(...args), delay);
+  }) as DebouncedFunction<T>;
+
+  debounced.cancel = () => {
+    clearTimeout(timeoutId);
+    timeoutId = undefined;
   };
+
+  return debounced;
 };
 
 // Throttle utility

@@ -648,6 +648,58 @@ describe("ChatPage", () => {
 		);
 	});
 
+	it("cancels pending cwd suggestions when applying a recent workspace", async () => {
+		vi.useFakeTimers();
+
+		mockGetConversations.mockResolvedValue({
+			conversations: [
+				{
+					id: "conv-1",
+					createdAt: "2023-01-01T00:00:00Z",
+					updatedAt: "2023-01-06T00:00:00Z",
+					messageCount: 1,
+					cwd: "/workspace/recent",
+				},
+			],
+			hasMore: false,
+			total: 1,
+			limit: 10,
+			offset: 0,
+		});
+		mockGetCWDHints.mockResolvedValue({
+			hints: [{ path: "/workspace/kodelet" }],
+		});
+
+		try {
+			render(<ChatPage />);
+
+			await act(async () => {
+				await Promise.resolve();
+				await Promise.resolve();
+			});
+
+			fireEvent.click(screen.getByTestId("sidebar-new-chat-button"));
+			const cwdInput = screen.getByLabelText("Working directory");
+			fireEvent.focus(cwdInput);
+			fireEvent.change(cwdInput, { target: { value: "/workspace/ko" } });
+			fireEvent.click(
+				screen.getByRole("button", { name: "/workspace/recent" }),
+			);
+
+			await act(async () => {
+				vi.advanceTimersByTime(150);
+				await Promise.resolve();
+				await Promise.resolve();
+			});
+
+			expect(mockGetCWDHints).not.toHaveBeenCalledWith("/workspace/ko");
+			expect(cwdInput).toHaveValue("/workspace/recent");
+			expect(screen.queryByTestId("cwd-suggestions")).not.toBeInTheDocument();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it("shows the cwd inside the inline context for existing conversations", async () => {
 		routeParams = { id: "conv-123" };
 		mockGetConversation.mockResolvedValue({

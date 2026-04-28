@@ -422,6 +422,8 @@ const ChatPage: React.FC = () => {
 				selectedProfile || chatSettings.currentProfile || "default",
 			);
 			cwdSuggestionSkipQueryRef.current = null;
+			requestCwdSuggestions.cancel();
+			cwdSuggestionRequestRef.current += 1;
 			setCwdQuery(selectedCWD || chatSettings.defaultCWD || "");
 			setNewChatDialogOpen(false);
 		};
@@ -432,6 +434,8 @@ const ChatPage: React.FC = () => {
 					selectedProfile || chatSettings.currentProfile || "default",
 				);
 				cwdSuggestionSkipQueryRef.current = null;
+				requestCwdSuggestions.cancel();
+				cwdSuggestionRequestRef.current += 1;
 				setCwdQuery(selectedCWD || chatSettings.defaultCWD || "");
 				setNewChatDialogOpen(false);
 			}
@@ -699,6 +703,8 @@ const ChatPage: React.FC = () => {
 		setSelectedCWD(chatSettings.defaultCWD || "");
 		const defaultCWD = chatSettings.defaultCWD || "";
 		cwdSuggestionSkipQueryRef.current = defaultCWD;
+		requestCwdSuggestions.cancel();
+		cwdSuggestionRequestRef.current += 1;
 		setCwdQuery(defaultCWD);
 		cwdInputFocusedRef.current = false;
 		setCwdSuggestions([]);
@@ -747,7 +753,14 @@ const ChatPage: React.FC = () => {
 	);
 
 	useEffect(() => {
+		return () => {
+			requestCwdSuggestions.cancel();
+		};
+	}, [requestCwdSuggestions]);
+
+	useEffect(() => {
 		if (conversationId) {
+			requestCwdSuggestions.cancel();
 			cwdInputFocusedRef.current = false;
 			setCwdSuggestionsOpen(false);
 			setCwdSuggestionIndex(-1);
@@ -756,6 +769,7 @@ const ChatPage: React.FC = () => {
 
 		if (!cwdQuery.trim()) {
 			cwdSuggestionSkipQueryRef.current = null;
+			requestCwdSuggestions.cancel();
 			cwdSuggestionRequestRef.current += 1;
 			setCwdSuggestions([]);
 			setCwdSuggestionsOpen(false);
@@ -764,6 +778,7 @@ const ChatPage: React.FC = () => {
 		}
 
 		if (cwdSuggestionSkipQueryRef.current === cwdQuery) {
+			requestCwdSuggestions.cancel();
 			cwdSuggestionRequestRef.current += 1;
 			setCwdSuggestions([]);
 			setCwdSuggestionsOpen(false);
@@ -1188,6 +1203,8 @@ const ChatPage: React.FC = () => {
 
 	const applyCwdSuggestion = (path: string) => {
 		cwdSuggestionSkipQueryRef.current = path;
+		requestCwdSuggestions.cancel();
+		cwdSuggestionRequestRef.current += 1;
 		setCwdQuery(path);
 		setCwdSuggestions([]);
 		setCwdSuggestionsOpen(false);
@@ -1265,6 +1282,8 @@ const ChatPage: React.FC = () => {
 			event.preventDefault();
 			const trimmedQuery = cwdQuery.trim();
 			cwdSuggestionSkipQueryRef.current = trimmedQuery;
+			requestCwdSuggestions.cancel();
+			cwdSuggestionRequestRef.current += 1;
 			setCwdQuery(trimmedQuery);
 			setCwdSuggestions([]);
 			setCwdSuggestionsOpen(false);
@@ -1381,6 +1400,8 @@ const ChatPage: React.FC = () => {
 			selectedProfile || chatSettings.currentProfile || "default",
 		);
 		cwdSuggestionSkipQueryRef.current = null;
+		requestCwdSuggestions.cancel();
+		cwdSuggestionRequestRef.current += 1;
 		setCwdQuery(selectedCWD || chatSettings.defaultCWD || "");
 		setCwdSuggestions([]);
 		setCwdSuggestionsOpen(false);
@@ -1553,6 +1574,8 @@ const ChatPage: React.FC = () => {
 		setSelectedProfile(newChatProfileDraft || "default");
 		setSelectedCWD(cwdQuery.trim());
 		cwdSuggestionSkipQueryRef.current = null;
+		requestCwdSuggestions.cancel();
+		cwdSuggestionRequestRef.current += 1;
 		setCwdSuggestions([]);
 		setCwdSuggestionsOpen(false);
 		setCwdSuggestionIndex(-1);

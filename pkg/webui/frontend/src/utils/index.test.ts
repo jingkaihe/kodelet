@@ -379,6 +379,17 @@ describe('debounce', () => {
     expect(fn).toHaveBeenCalledTimes(1);
     expect(fn).toHaveBeenCalledWith('second');
   });
+
+  it('cancels pending calls', () => {
+    const fn = vi.fn();
+    const debounced = debounce(fn, 100);
+
+    debounced('test');
+    debounced.cancel();
+    vi.advanceTimersByTime(100);
+
+    expect(fn).not.toHaveBeenCalled();
+  });
 });
 
 describe('throttle', () => {
