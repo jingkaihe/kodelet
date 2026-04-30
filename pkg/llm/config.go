@@ -152,6 +152,12 @@ func loadConfigFromSettings(settings map[string]any) (llmtypes.Config, error) {
 		return config, errors.Wrap(err, "failed to unmarshal configuration")
 	}
 
+	if config.Bash == nil {
+		config.Bash = &llmtypes.BashConfig{Timeout: llmtypes.DefaultBashTimeout}
+	} else if config.Bash.Timeout == 0 {
+		config.Bash.Timeout = llmtypes.DefaultBashTimeout
+	}
+
 	// Set default anthropic_api_access if empty
 	if config.AnthropicAPIAccess == "" {
 		config.AnthropicAPIAccess = llmtypes.AnthropicAPIAccessAuto

@@ -20,6 +20,7 @@ import (
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/binaries"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -54,7 +55,7 @@ Banned commands:
 # Input
 - command: required single-line bash command
 - description: required, 5-10 words
-- timeout: required, 10-120
+- timeout: required, {{.MinTimeoutSeconds}}-{{.MaxTimeoutSeconds}}
 
 # Rules
 - Use parallel tool calling for independent commands.
@@ -70,26 +71,39 @@ Examples:
 `
 )
 
-const bashApproxBytesPerToken = 4
+const (
+	bashApproxBytesPerToken = 4
+	bashMinTimeoutSeconds   = 1
+)
 
 // BashTool executes bash commands with configurable restrictions and timeout support
 type BashTool struct {
 	allowedCommands      []string
 	compiledGlobs        []glob.Glob
 	disableFSSearchTools bool
+	maxTimeout           time.Duration
 }
 
 // NewBashTool creates a new BashTool with the specified allowed commands
 func NewBashTool(allowedCommands []string, disableFSSearchTools bool) *BashTool {
+	return NewBashToolWithTimeout(allowedCommands, disableFSSearchTools, llmtypes.DefaultBashTimeout)
+}
+
+// NewBashToolWithTimeout creates a BashTool with the specified maximum timeout.
+func NewBashToolWithTimeout(allowedCommands []string, disableFSSearchTools bool, maxTimeout time.Duration) *BashTool {
 	globs := make([]glob.Glob, len(allowedCommands))
 	for i, pattern := range allowedCommands {
 		// Compile glob patterns without custom separators (default behavior)
 		globs[i] = glob.MustCompile(pattern)
 	}
+	if maxTimeout == 0 {
+		maxTimeout = llmtypes.DefaultBashTimeout
+	}
 	return &BashTool{
 		allowedCommands:      allowedCommands,
 		compiledGlobs:        globs,
 		disableFSSearchTools: disableFSSearchTools,
+		maxTimeout:           maxTimeout,
 	}
 }
 
@@ -114,7 +128,15 @@ type BashInput tooltypes.BashInput
 
 // GenerateSchema generates the JSON schema for the tool's input parameters
 func (b *BashTool) GenerateSchema() *jsonschema.Schema {
-	return GenerateSchema[BashInput]()
+	schema := GenerateSchema[BashInput]()
+	if schema.Properties != nil {
+		if timeoutSchema, ok := schema.Properties.Get("timeout"); ok {
+			timeoutSchema.Description = fmt.Sprintf("Timeout in seconds (%d-%d)", bashMinTimeoutSeconds, b.maxTimeoutSeconds())
+			timeoutSchema.Minimum = json.Number(strconv.Itoa(bashMinTimeoutSeconds))
+			timeoutSchema.Maximum = json.Number(strconv.Itoa(b.maxTimeoutSeconds()))
+		}
+	}
+	return schema
 }
 
 // Name returns the name of the tool
@@ -153,8 +175,8 @@ func (b *BashTool) ValidateInput(_ tooltypes.State, parameters string) error {
 		return errors.New("description is required")
 	}
 
-	if input.Timeout < 10 || input.Timeout > 120 {
-		return errors.New("timeout must be between 10 and 120 seconds")
+	if input.Timeout < bashMinTimeoutSeconds || input.Timeout > b.maxTimeoutSeconds() {
+		return errors.Errorf("timeout must be between %d and %d seconds", bashMinTimeoutSeconds, b.maxTimeoutSeconds())
 	}
 
 	validateCommand := func(command string) error {
@@ -219,10 +241,14 @@ func (b *BashTool) Description() string {
 		AllowedCommands      []string
 		BannedCommands       []string
 		DisableFSSearchTools bool
+		MinTimeoutSeconds    int
+		MaxTimeoutSeconds    int
 	}{
 		AllowedCommands:      b.allowedCommands,
 		BannedCommands:       BannedCommands,
 		DisableFSSearchTools: b.disableFSSearchTools,
+		MinTimeoutSeconds:    bashMinTimeoutSeconds,
+		MaxTimeoutSeconds:    b.maxTimeoutSeconds(),
 	}
 
 	var buf bytes.Buffer
@@ -232,6 +258,18 @@ func (b *BashTool) Description() string {
 	}
 
 	return buf.String()
+}
+
+func (b *BashTool) maxTimeoutSeconds() int {
+	maxTimeout := b.maxTimeout
+	if maxTimeout == 0 {
+		maxTimeout = llmtypes.DefaultBashTimeout
+	}
+	seconds := int(maxTimeout.Seconds())
+	if seconds < bashMinTimeoutSeconds {
+		return bashMinTimeoutSeconds
+	}
+	return seconds
 }
 
 // BashToolResult represents the result of a bash command execution

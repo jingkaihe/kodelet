@@ -642,6 +642,10 @@ allowed_commands: []  # Empty means use default banned commands
 #   - "git status"
 #   - "git log *"
 
+bash:
+  # Maximum execution timeout for bash tool calls (default: 120s)
+  timeout: 120s
+
 # Tool behavior configuration
 # Tool interaction mode
 # - full: standard tool access
@@ -934,6 +938,21 @@ kodelet run --allowed-commands "ls *,pwd,echo *" "analyze this directory"
 - Commands are validated before execution, and non-matching commands are rejected with an error
 - Patterns are matched against the entire command string, not just the command name
 - Use specific patterns rather than overly broad wildcards for better security
+
+### Bash Tool Timeout
+
+The `bash.timeout` configuration option controls the maximum timeout the agent can request for a bash command. It defaults to `120s` and accepts Go-style duration strings such as `120s`, `2m`, or `5m`.
+
+Configuration file:
+```yaml
+bash:
+  timeout: 5m
+```
+
+Environment variable:
+```bash
+export KODELET_BASH_TIMEOUT=5m
+```
 
 ## LLM Providers
 

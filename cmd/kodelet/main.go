@@ -27,6 +27,7 @@ func init() {
 	viper.SetDefault("openai.enable_search", true)
 	viper.SetDefault("reasoning_effort", "medium")
 	viper.SetDefault("allowed_commands", []string{})
+	viper.SetDefault("bash.timeout", "120s")
 	viper.SetDefault("allowed_domains_file", "~/.kodelet/allowed_domains.txt")
 	viper.SetDefault("sysprompt", "")
 	viper.SetDefault("sysprompt_args", map[string]string{})

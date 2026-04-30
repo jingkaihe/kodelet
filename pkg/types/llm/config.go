@@ -1,6 +1,9 @@
 package llm
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 // AnthropicAPIAccess defines the mode for Anthropic API access
 type AnthropicAPIAccess string
@@ -12,6 +15,9 @@ type ToolMode string
 type ConversationSummaryMode string
 
 const (
+	// DefaultBashTimeout is the default maximum timeout for bash tool calls.
+	DefaultBashTimeout = 120 * time.Second
+
 	// AnthropicAPIAccessAuto uses subscription auth if available, then falls back to API key
 	AnthropicAPIAccessAuto AnthropicAPIAccess = "auto"
 	// AnthropicAPIAccessSubscription forces use of subscription-based OAuth auth only
@@ -63,6 +69,7 @@ type Config struct {
 	MCPWorkspaceDir      string             `mapstructure:"mcp_workspace_dir" json:"mcp_workspace_dir" yaml:"mcp_workspace_dir"`            // MCP workspace directory for code execution mode
 	Sysprompt            string             `mapstructure:"sysprompt" json:"sysprompt,omitempty" yaml:"sysprompt,omitempty"`                // Sysprompt is the path to a custom system prompt template file
 	SyspromptArgs        map[string]string  `mapstructure:"sysprompt_args" json:"sysprompt_args,omitempty" yaml:"sysprompt_args,omitempty"` // SyspromptArgs are custom template arguments for system prompt rendering
+	Bash                 *BashConfig        `mapstructure:"bash" json:"bash,omitempty" yaml:"bash,omitempty"`                               // Bash contains bash tool configuration
 
 	// Profile system configuration
 	Profile  string                   `mapstructure:"profile" json:"profile,omitempty" yaml:"profile,omitempty"`    // Active profile name
@@ -89,6 +96,19 @@ type Config struct {
 	DisableSubagent         bool                    `mapstructure:"disable_subagent" json:"disable_subagent" yaml:"disable_subagent"`                            // DisableSubagent disables the subagent tool and removes subagent-related system prompt context
 	EnableTodos             bool                    `mapstructure:"enable_todos" json:"enable_todos" yaml:"enable_todos"`                                        // EnableTodos enables todo_read and todo_write tools for the main agent
 	RecipeName              string                  `mapstructure:"recipe_name" json:"recipe_name" yaml:"recipe_name"`                                           // RecipeName is the active recipe/fragment name for hooks
+}
+
+// BashConfig holds configuration for the bash tool.
+type BashConfig struct {
+	Timeout time.Duration `mapstructure:"timeout" json:"timeout" yaml:"timeout"` // Timeout is the maximum allowed timeout for a bash tool call
+}
+
+// BashTimeout returns the configured bash tool timeout, or the default if unset.
+func (c Config) BashTimeout() time.Duration {
+	if c.Bash == nil || c.Bash.Timeout == 0 {
+		return DefaultBashTimeout
+	}
+	return c.Bash.Timeout
 }
 
 // OpenAIAPIMode defines which OpenAI-compatible API surface to use.

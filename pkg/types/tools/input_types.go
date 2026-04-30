@@ -4,7 +4,7 @@ package tools
 type BashInput struct {
 	Description string `json:"description" jsonschema:"description=A description of the command to run"`
 	Command     string `json:"command" jsonschema:"description=The bash command to run"`
-	Timeout     int    `json:"timeout" jsonschema:"description=Timeout in seconds (10-120)"`
+	Timeout     int    `json:"timeout" jsonschema:"description=Timeout in seconds"`
 }
 
 // FileReadInput defines the input parameters for the file_read tool.

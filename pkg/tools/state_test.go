@@ -203,6 +203,28 @@ func TestBasicState_ConfigureBashTool_EmptyAllowedCommands(t *testing.T) {
 	assert.Equal(t, []string{}, bashTool.allowedCommands)
 }
 
+func TestBasicState_ConfigureBashTool_CustomTimeout(t *testing.T) {
+	config := llmtypes.Config{
+		Bash: &llmtypes.BashConfig{Timeout: 5 * time.Minute},
+	}
+
+	s := NewBasicState(context.TODO(), WithLLMConfig(config))
+
+	tools := s.BasicTools()
+	var bashTool *BashTool
+	for _, tool := range tools {
+		if tool.Name() == "bash" {
+			if bt, ok := tool.(*BashTool); ok {
+				bashTool = bt
+				break
+			}
+		}
+	}
+
+	assert.NotNil(t, bashTool)
+	assert.Equal(t, 5*time.Minute, bashTool.maxTimeout)
+}
+
 func TestBasicState_DiscoverContexts(t *testing.T) {
 	tmpDir := t.TempDir()
 

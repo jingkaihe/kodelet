@@ -713,6 +713,19 @@ Or via environment:
 export KODELET_ALLOWED_COMMANDS="ls *,pwd,git status"
 ```
 
+### Bash Tool Timeout
+Set the maximum timeout the agent can request for a bash command. Defaults to `120s`.
+
+```yaml
+bash:
+  timeout: 5m
+```
+
+Or via environment:
+```bash
+export KODELET_BASH_TIMEOUT=5m
+```
+
 ### Tool Restrictions
 Limit available tools:
 

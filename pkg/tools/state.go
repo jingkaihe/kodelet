@@ -633,7 +633,7 @@ func (s *BasicState) configureToolSlice(tools []tooltypes.Tool) []tooltypes.Tool
 	for i, tool := range tools {
 		switch tool.Name() {
 		case "bash":
-			tools[i] = NewBashTool(s.llmConfig.AllowedCommands, s.llmConfig.DisableFSSearchTools)
+			tools[i] = NewBashToolWithTimeout(s.llmConfig.AllowedCommands, s.llmConfig.DisableFSSearchTools, s.llmConfig.BashTimeout())
 		case "code_execution":
 			if codeExecutionTool, ok := tool.(*CodeExecutionTool); ok {
 				tools[i] = NewCodeExecutionToolWithOptions(codeExecutionTool.runtime, s.llmConfig.ToolMode, s.llmConfig.DisableFSSearchTools)

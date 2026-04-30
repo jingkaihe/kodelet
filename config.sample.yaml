@@ -182,6 +182,11 @@ allowed_commands: []
 #   - "git status"
 #   - "git log *"
 
+# Bash tool configuration
+bash:
+  # Maximum execution timeout for bash tool calls (default: 120s)
+  timeout: 120s
+
 # Domain Filtering Configuration
 # Path to file containing allowed domains for web_fetch tool (one domain per line)
 # Supports exact matches (github.com) and glob patterns (*.github.com)

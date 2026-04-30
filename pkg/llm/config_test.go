@@ -1,7 +1,9 @@
 package llm
 
 import (
+	"strings"
 	"testing"
+	"time"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/spf13/cobra"
@@ -36,6 +38,56 @@ func TestGetConfigFromViperDefaults(t *testing.T) {
 	// Verify
 	assert.Empty(t, config.Model)
 	assert.Zero(t, config.MaxTokens)
+	require.NotNil(t, config.Bash)
+	assert.Equal(t, llmtypes.DefaultBashTimeout, config.Bash.Timeout)
+}
+
+func TestGetConfigFromViper_BashTimeout(t *testing.T) {
+	viper.Reset()
+	viper.Set("bash.timeout", "5m")
+
+	config, err := GetConfigFromViper()
+	require.NoError(t, err)
+
+	require.NotNil(t, config.Bash)
+	assert.Equal(t, 5*time.Minute, config.Bash.Timeout)
+}
+
+func TestGetConfigFromViper_BashTimeoutFromNestedConfig(t *testing.T) {
+	viper.Reset()
+	viper.Set("bash", map[string]any{"timeout": "5m"})
+
+	config, err := GetConfigFromViper()
+	require.NoError(t, err)
+
+	require.NotNil(t, config.Bash)
+	assert.Equal(t, 5*time.Minute, config.Bash.Timeout)
+}
+
+func TestGetConfigFromViper_BashTimeoutFromEnv(t *testing.T) {
+	viper.Reset()
+	viper.SetDefault("bash.timeout", "120s")
+	viper.SetEnvPrefix("KODELET")
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	viper.AutomaticEnv()
+	t.Setenv("KODELET_BASH_TIMEOUT", "5m")
+
+	config, err := GetConfigFromViper()
+	require.NoError(t, err)
+
+	require.NotNil(t, config.Bash)
+	assert.Equal(t, 5*time.Minute, config.Bash.Timeout)
+}
+
+func TestGetConfigFromViper_BashTimeoutAllowsShortPositiveDuration(t *testing.T) {
+	viper.Reset()
+	viper.Set("bash.timeout", "5s")
+
+	config, err := GetConfigFromViper()
+	require.NoError(t, err)
+
+	require.NotNil(t, config.Bash)
+	assert.Equal(t, 5*time.Second, config.Bash.Timeout)
 }
 
 func TestGetConfigFromViper_ConversationSummaryMode(t *testing.T) {
