@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.3.50-beta (2026-04-30)
+
+Added `bash.timeout` so the bash tool's maximum requested timeout can be configured beyond the previous fixed 120-second limit, with validation and schema/help text reflecting the configured cap.
+
+Added per-custom-tool runtime configuration for timeouts and environment-variable injection, plus an optional `<tool> config` command that lets custom tools expose default runtime settings.
+
+Updated the sample config, manual, and built-in `kodelet` skill with the new bash and custom tool runtime configuration options.
+
 ## 0.3.49-beta (2026-04-28)
 
 Improved the Web UI new-chat dialog with recent workspace shortcuts, cleaner directory labels, cwd-first focus, and a shorter Start action.
