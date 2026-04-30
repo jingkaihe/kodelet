@@ -841,6 +841,44 @@ func TestCustomToolManager_DiscoverTools_WithWhitelist(t *testing.T) {
 		}
 		assert.ElementsMatch(t, []string{"allowed-tool"}, toolNames)
 	})
+
+	t.Run("Whitelist skips config probe for rejected tools", func(t *testing.T) {
+		tempDir := t.TempDir()
+		createMockTool(t, tempDir, "allowed-tool")
+
+		markerPath := filepath.Join(tempDir, "blocked-config-ran")
+		toolPath := filepath.Join(tempDir, "blocked-config-tool")
+		toolScript := `#!/bin/bash
+if [ "$1" = "description" ]; then
+    echo '{"name": "blocked-config-tool", "description": "A blocked tool", "input_schema": {"type": "object"}}'
+elif [ "$1" = "config" ]; then
+    touch "` + markerPath + `"
+    echo '{"timeout": "30m"}'
+else
+    echo "done"
+fi
+`
+		require.NoError(t, os.WriteFile(toolPath, []byte(toolScript), 0o755))
+
+		manager := &CustomToolManager{
+			tools:     make(map[string]*CustomTool),
+			globalDir: tempDir,
+			localDir:  "",
+			config: CustomToolConfig{
+				Enabled:       true,
+				Timeout:       5 * time.Second,
+				MaxOutputSize: 1024,
+				ToolWhiteList: []string{"allowed-tool"},
+			},
+		}
+
+		err := manager.DiscoverTools(context.Background())
+		require.NoError(t, err)
+
+		_, err = os.Stat(markerPath)
+		assert.True(t, os.IsNotExist(err), "blocked tool config command should not run")
+		assert.Len(t, manager.ListTools(), 1)
+	})
 }
 
 func TestCustomToolManager_DiscoverTools_FromPluginDirectories(t *testing.T) {

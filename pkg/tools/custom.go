@@ -332,14 +332,20 @@ func (m *CustomToolManager) discoverToolsInDir(ctx context.Context, dir string, 
 			continue
 		}
 
-		tool, err := m.validateTool(ctx, execPath)
+		metadata, err := customtools.Inspect(ctx, execPath, m.config.Timeout)
 		if err != nil {
 			logger.G(ctx).WithError(err).WithField("path", execPath).Debug("failed to validate tool")
 			continue
 		}
 
-		if !customToolWhiteListed(tool.name, m.config.ToolWhiteList) {
-			logger.G(ctx).WithField("name", tool.name).Debug("skipping tool, not in whitelist")
+		if !customToolWhiteListed(metadata.Name, m.config.ToolWhiteList) {
+			logger.G(ctx).WithField("name", metadata.Name).Debug("skipping tool, not in whitelist")
+			continue
+		}
+
+		tool, err := m.buildTool(ctx, execPath, metadata)
+		if err != nil {
+			logger.G(ctx).WithError(err).WithField("path", execPath).Debug("failed to validate tool")
 			continue
 		}
 
@@ -365,6 +371,10 @@ func (m *CustomToolManager) validateTool(ctx context.Context, execPath string) (
 		return nil, err
 	}
 
+	return m.buildTool(ctx, execPath, metadata)
+}
+
+func (m *CustomToolManager) buildTool(ctx context.Context, execPath string, metadata *customtools.Metadata) (*CustomTool, error) {
 	timeout := m.config.Timeout
 	envs := map[string]*string(nil)
 
