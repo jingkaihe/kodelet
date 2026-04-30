@@ -23,8 +23,8 @@ func TestBashTool_GenerateSchema(t *testing.T) {
 	assert.Equal(t, "https://github.com/jingkaihe/kodelet/pkg/tools/bash-input", string(schema.ID))
 	timeoutSchema, exists := schema.Properties.Get("timeout")
 	assert.True(t, exists)
-	assert.Equal(t, "Timeout in seconds (1-120)", timeoutSchema.Description)
-	assert.Equal(t, json.Number("1"), timeoutSchema.Minimum)
+	assert.Equal(t, "Timeout in seconds (10-120)", timeoutSchema.Description)
+	assert.Equal(t, json.Number("10"), timeoutSchema.Minimum)
 	assert.Equal(t, json.Number("120"), timeoutSchema.Maximum)
 }
 
@@ -35,8 +35,8 @@ func TestBashTool_GenerateSchema_CustomTimeout(t *testing.T) {
 
 	timeoutSchema, exists := schema.Properties.Get("timeout")
 	assert.True(t, exists)
-	assert.Equal(t, "Timeout in seconds (1-300)", timeoutSchema.Description)
-	assert.Equal(t, json.Number("1"), timeoutSchema.Minimum)
+	assert.Equal(t, "Timeout in seconds (10-300)", timeoutSchema.Description)
+	assert.Equal(t, json.Number("10"), timeoutSchema.Minimum)
 	assert.Equal(t, json.Number("300"), timeoutSchema.Maximum)
 }
 
@@ -50,14 +50,14 @@ func TestBashTool_Description(t *testing.T) {
 	desc := tool.Description()
 	assert.Contains(t, desc, "Run a bash command in a persistent shell session.")
 	assert.Contains(t, desc, "# Input")
-	assert.Contains(t, desc, "timeout: required, 1-120")
+	assert.Contains(t, desc, "timeout: required, 10-120")
 }
 
 func TestBashTool_Description_CustomTimeout(t *testing.T) {
 	tool := NewBashToolWithTimeout(nil, false, 5*time.Minute)
 	desc := tool.Description()
 
-	assert.Contains(t, desc, "timeout: required, 1-300")
+	assert.Contains(t, desc, "timeout: required, 10-300")
 }
 
 func TestBashTool_Description_BannedCommands(t *testing.T) {
@@ -339,7 +339,7 @@ func TestBashTool_ValidateInput(t *testing.T) {
 				Timeout:     0,
 			},
 			expectError: true,
-			errorMsg:    "timeout must be between 1 and 120 seconds",
+			errorMsg:    "timeout must be between 10 and 120 seconds",
 		},
 		{
 			name: "invalid timeout too high",
@@ -349,7 +349,7 @@ func TestBashTool_ValidateInput(t *testing.T) {
 				Timeout:     150,
 			},
 			expectError: true,
-			errorMsg:    "timeout must be between 1 and 120 seconds",
+			errorMsg:    "timeout must be between 10 and 120 seconds",
 		},
 	}
 
@@ -392,7 +392,7 @@ func TestBashTool_ValidateInput_CustomTimeout(t *testing.T) {
 	})
 	err := tool.ValidateInput(NewBasicState(context.TODO()), string(input))
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "timeout must be between 1 and 300 seconds")
+	assert.Contains(t, err.Error(), "timeout must be between 10 and 300 seconds")
 }
 
 func TestBashTool_GlobPatternMatching(t *testing.T) {

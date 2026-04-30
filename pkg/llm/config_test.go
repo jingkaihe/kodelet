@@ -79,15 +79,13 @@ func TestGetConfigFromViper_BashTimeoutFromEnv(t *testing.T) {
 	assert.Equal(t, 5*time.Minute, config.Bash.Timeout)
 }
 
-func TestGetConfigFromViper_BashTimeoutAllowsShortPositiveDuration(t *testing.T) {
+func TestGetConfigFromViper_BashTimeoutRejectsTooShortDuration(t *testing.T) {
 	viper.Reset()
 	viper.Set("bash.timeout", "5s")
 
-	config, err := GetConfigFromViper()
-	require.NoError(t, err)
-
-	require.NotNil(t, config.Bash)
-	assert.Equal(t, 5*time.Second, config.Bash.Timeout)
+	_, err := GetConfigFromViper()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "bash.timeout must be at least 10s")
 }
 
 func TestGetConfigFromViper_ConversationSummaryMode(t *testing.T) {

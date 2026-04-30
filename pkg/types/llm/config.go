@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"encoding/json"
 	"strings"
 	"time"
 )
@@ -15,6 +16,9 @@ type ToolMode string
 type ConversationSummaryMode string
 
 const (
+	// MinBashTimeout is the minimum timeout a bash tool call can request.
+	MinBashTimeout = 10 * time.Second
+
 	// DefaultBashTimeout is the default maximum timeout for bash tool calls.
 	DefaultBashTimeout = 120 * time.Second
 
@@ -101,6 +105,24 @@ type Config struct {
 // BashConfig holds configuration for the bash tool.
 type BashConfig struct {
 	Timeout time.Duration `mapstructure:"timeout" json:"timeout" yaml:"timeout"` // Timeout is the maximum allowed timeout for a bash tool call
+}
+
+// MarshalJSON renders durations as config-friendly strings instead of nanoseconds.
+func (c BashConfig) MarshalJSON() ([]byte, error) {
+	type bashConfig struct {
+		Timeout string `json:"timeout"`
+	}
+
+	return json.Marshal(bashConfig{Timeout: c.Timeout.String()})
+}
+
+// MarshalYAML renders durations as config-friendly strings instead of nanoseconds.
+func (c BashConfig) MarshalYAML() (any, error) {
+	type bashConfig struct {
+		Timeout string `yaml:"timeout"`
+	}
+
+	return bashConfig{Timeout: c.Timeout.String()}, nil
 }
 
 // BashTimeout returns the configured bash tool timeout, or the default if unset.

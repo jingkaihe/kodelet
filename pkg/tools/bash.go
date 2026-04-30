@@ -73,7 +73,7 @@ Examples:
 
 const (
 	bashApproxBytesPerToken = 4
-	bashMinTimeoutSeconds   = 1
+	bashMinTimeoutSeconds   = int(llmtypes.MinBashTimeout / time.Second)
 )
 
 // BashTool executes bash commands with configurable restrictions and timeout support

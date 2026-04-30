@@ -157,6 +157,9 @@ func loadConfigFromSettings(settings map[string]any) (llmtypes.Config, error) {
 	} else if config.Bash.Timeout == 0 {
 		config.Bash.Timeout = llmtypes.DefaultBashTimeout
 	}
+	if config.Bash.Timeout < llmtypes.MinBashTimeout {
+		return config, errors.Errorf("bash.timeout must be at least %s", llmtypes.MinBashTimeout)
+	}
 
 	// Set default anthropic_api_access if empty
 	if config.AnthropicAPIAccess == "" {
