@@ -381,6 +381,18 @@ custom_tools:
   #   - "my-custom-tool"
   #   - "another-tool"
 
+  # Per-tool runtime configuration. Tool names match the name returned by
+  # `<tool> description`, without the custom_tool_ prefix.
+  # Explicit per-tool timeout overrides both the global timeout and any timeout
+  # returned by the optional `<tool> config` command.
+  # tools:
+  #   seer:
+  #     timeout: 30m
+  #     envs:
+  #       SEER_MODEL: gpt-5.5
+  #       # Bare/null values inherit from Kodelet's current process environment.
+  #       ANTHROPIC_API_KEY:
+
 # Agentic Skills Configuration
 # Skills are model-invoked capabilities that package domain expertise
 # Unlike fragments/recipes (user-invoked), skills are automatically invoked by Kodelet

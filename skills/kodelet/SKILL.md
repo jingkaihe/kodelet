@@ -390,8 +390,24 @@ kodelet custom-tool invoke hello --name Ada --input-json '{"config":{"verbose":t
 
 Flags after the tool name are reserved for the tool's schema-derived input. For runtime overrides such as timeout, use config or an environment variable instead of expecting a built-in `invoke` flag.
 
-**Timeout override:**
-Custom tools use `custom_tools.timeout` (`120s` by default). For one-off runs, override it per process with `KODELET_CUSTOM_TOOLS_TIMEOUT`:
+**Runtime configuration:**
+Custom tools use `custom_tools.timeout` (`120s` by default). Individual tools can override timeout and inject environment variables with `custom_tools.tools.<tool-name>`:
+
+```yaml
+custom_tools:
+  tools:
+    seer:
+      timeout: 30m
+      envs:
+        SEER_MODEL: gpt-5.5
+        ANTHROPIC_API_KEY:
+```
+
+Bare or `null` env values inherit from Kodelet's current process environment, so `ANTHROPIC_API_KEY:` behaves like `ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY` when that variable is set. Use `KEY: ""` to intentionally pass an empty string.
+
+Tool binaries may also optionally implement `./my-tool config` and return defaults such as `{"timeout":"30m"}`. Explicit `custom_tools.tools.<tool-name>.timeout` wins over the optional tool config.
+
+For one-off runs, override the global custom tool timeout per process with `KODELET_CUSTOM_TOOLS_TIMEOUT`:
 
 ```bash
 KODELET_CUSTOM_TOOLS_TIMEOUT=300s kodelet custom-tool invoke my-tool ...
@@ -410,6 +426,7 @@ kodelet run "Create a Kodelet custom tool that fetches weather without an API ke
 **Tool protocol:**
 ```bash
 ./my-tool description  # Returns JSON schema
+./my-tool config       # Optional runtime defaults
 ./my-tool run          # Executes with JSON input from stdin
 ```
 

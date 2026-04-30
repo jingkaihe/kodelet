@@ -1121,7 +1121,7 @@ If a token is expired, run `kodelet anthropic login --alias <alias>` to re-authe
 
 ## Custom Tools
 
-Kodelet supports custom executable tools that extend its capabilities beyond the built-in tool set. Custom tools are standalone executables (scripts or binaries) that implement a simple two-command protocol and can be written in any programming language.
+Kodelet supports custom executable tools that extend its capabilities beyond the built-in tool set. Custom tools are standalone executables (scripts or binaries) that implement a simple executable protocol and can be written in any programming language.
 
 ### Direct CLI Invocation
 
@@ -1151,9 +1151,10 @@ kodelet custom-tool invoke hello --name Ada --input-json '{"config":{"verbose":t
 
 ### Creating Custom Tools
 
-Custom tools are executable files that respond to two commands:
+Custom tools are executable files that respond to two required commands and one optional command:
 - `<tool> description` - Returns a JSON schema describing the tool
 - `<tool> run` - Executes the tool with JSON input from stdin
+- `<tool> config` - Optional runtime defaults such as timeout
 
 **Basic Requirements:**
 1. **Executable**: The file must have execute permissions (`chmod +x`)
@@ -1199,6 +1200,20 @@ The tool receives JSON input via stdin and can:
 - **Error**: Write error message to stderr and exit with non-zero code
 - **JSON Error**: Write `{"error": "message"}` to stdout for structured errors
 
+**Optional Config Command:**
+```bash
+./my-tool config
+```
+
+If implemented, the tool can return runtime defaults:
+```json
+{
+  "timeout": "30m"
+}
+```
+
+The `timeout` value uses the same Go-style duration format as `custom_tools.timeout`. If the command is missing or exits non-zero, Kodelet ignores it and uses configured defaults.
+
 ### Directory Structure
 
 Custom tools are discovered from four locations in precedence order:
@@ -1231,6 +1246,20 @@ custom_tools:
   # Maximum output size (default: 100KB)
   max_output_size: 102400
 
+  # Per-tool runtime configuration. Tool names match the name returned by
+  # `<tool> description`, without the custom_tool_ prefix.
+  tools:
+    seer:
+      # Overrides the global timeout and any timeout returned by `seer config`
+      timeout: 30m
+
+      # Injected only when executing this tool
+      envs:
+        SEER_MODEL: gpt-5.5
+        SEER_CACHE_DIR: "/tmp/seer"
+        # Null or bare values inherit from the current Kodelet process environment
+        ANTHROPIC_API_KEY:
+
   # Tool whitelist - only specified tools will be loaded (empty means load all tools)
   # When the whitelist is empty, all discovered custom tools will be available
   # When specified, only tools with these exact names will be loaded
@@ -1239,6 +1268,14 @@ custom_tools:
     - "database-backup"
     - "deploy-script"
 ```
+
+Per-tool timeout resolution order is:
+1. `custom_tools.tools.<name>.timeout`
+2. Optional `<tool> config` timeout
+3. Global `custom_tools.timeout`
+4. Built-in default `120s`
+
+Per-tool `envs` are merged onto the current process environment and only apply to that tool's `run` process. If an injected key already exists in the process environment, the per-tool value wins. A bare or `null` env value means “copy this variable from Kodelet's current process environment”; for example, `ANTHROPIC_API_KEY:` behaves like `ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY` when that variable is set. Use `KEY: ""` when you intentionally want to pass an empty string.
 
 **Environment Variable Override:**
 You can override the custom tool timeout for a single process with `KODELET_CUSTOM_TOOLS_TIMEOUT`. Use the same duration format as the config value, for example `120s`, `2m`, or `5m`.

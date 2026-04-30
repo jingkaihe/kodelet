@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -19,6 +20,10 @@ func TestCustomToolManager_NewCustomToolManager(t *testing.T) {
 	assert.NotNil(t, manager)
 	assert.NotEmpty(t, manager.globalDir)
 	assert.NotEmpty(t, manager.localDir)
+}
+
+func strPtr(value string) *string {
+	return &value
 }
 
 func TestCustomToolManager_DiscoverTools_NoDirectory(t *testing.T) {
@@ -80,6 +85,102 @@ fi
 	assert.Equal(t, "test_tool", tool.name)
 	assert.Equal(t, "A test tool", tool.description)
 	assert.NotNil(t, tool.schema)
+}
+
+func TestCustomToolManager_ValidateTool_UsesToolConfigTimeout(t *testing.T) {
+	tmpDir := t.TempDir()
+	toolPath := filepath.Join(tmpDir, "config_tool")
+
+	toolScript := `#!/bin/bash
+if [ "$1" = "description" ]; then
+    echo '{"name": "config_tool", "description": "A configurable tool", "input_schema": {"type": "object"}}'
+elif [ "$1" = "config" ]; then
+    echo '{"timeout": "30m"}'
+elif [ "$1" = "run" ]; then
+    echo "done"
+fi
+`
+
+	require.NoError(t, os.WriteFile(toolPath, []byte(toolScript), 0o755))
+
+	manager := &CustomToolManager{
+		config: CustomToolConfig{
+			Timeout:       5 * time.Second,
+			MaxOutputSize: 1024,
+		},
+	}
+
+	tool, err := manager.validateTool(context.Background(), toolPath)
+	require.NoError(t, err)
+	assert.Equal(t, 30*time.Minute, tool.timeout)
+}
+
+func TestCustomToolManager_ValidateTool_PerToolConfigOverridesToolDefault(t *testing.T) {
+	tmpDir := t.TempDir()
+	toolPath := filepath.Join(tmpDir, "config_tool")
+
+	toolScript := `#!/bin/bash
+if [ "$1" = "description" ]; then
+    echo '{"name": "config_tool", "description": "A configurable tool", "input_schema": {"type": "object"}}'
+elif [ "$1" = "config" ]; then
+    echo '{"timeout": "30m"}'
+elif [ "$1" = "run" ]; then
+    echo "done"
+fi
+`
+
+	require.NoError(t, os.WriteFile(toolPath, []byte(toolScript), 0o755))
+
+	manager := &CustomToolManager{
+		config: CustomToolConfig{
+			Timeout:       5 * time.Second,
+			MaxOutputSize: 1024,
+			Tools: map[string]CustomToolRuntimeConfig{
+				"config_tool": {
+					Timeout: 45 * time.Second,
+					Envs: map[string]*string{
+						"CONFIG_TOOL_MODE": strPtr("override"),
+					},
+				},
+			},
+		},
+	}
+
+	tool, err := manager.validateTool(context.Background(), toolPath)
+	require.NoError(t, err)
+	assert.Equal(t, 45*time.Second, tool.timeout)
+	assert.Equal(t, map[string]*string{"CONFIG_TOOL_MODE": strPtr("override")}, tool.envs)
+}
+
+func TestCustomToolManager_ValidateTool_SlowOptionalConfigDoesNotDelayDiscoveryByExecutionTimeout(t *testing.T) {
+	tmpDir := t.TempDir()
+	toolPath := filepath.Join(tmpDir, "slow_config_tool")
+
+	toolScript := `#!/bin/bash
+if [ "$1" = "description" ]; then
+    echo '{"name": "slow_config_tool", "description": "A slow config tool", "input_schema": {"type": "object"}}'
+elif [ "$1" = "config" ]; then
+    sleep 10
+    echo '{"timeout": "30m"}'
+elif [ "$1" = "run" ]; then
+    echo "done"
+fi
+`
+
+	require.NoError(t, os.WriteFile(toolPath, []byte(toolScript), 0o755))
+
+	manager := &CustomToolManager{
+		config: CustomToolConfig{
+			Timeout:       30 * time.Minute,
+			MaxOutputSize: 1024,
+		},
+	}
+
+	start := time.Now()
+	tool, err := manager.validateTool(context.Background(), toolPath)
+	require.NoError(t, err)
+	assert.Less(t, time.Since(start), 8*time.Second)
+	assert.Equal(t, 30*time.Minute, tool.timeout)
 }
 
 func TestCustomToolManager_ValidateTool_InvalidJSON(t *testing.T) {
@@ -332,6 +433,100 @@ fi
 	assert.Equal(t, "Something went wrong in the tool", result.GetError())
 }
 
+func TestCustomTool_Execute_InjectsConfiguredEnvs(t *testing.T) {
+	tmpDir := t.TempDir()
+	toolPath := filepath.Join(tmpDir, "env_tool")
+
+	toolScript := `#!/bin/bash
+if [ "$1" = "description" ]; then
+    echo '{"name": "env_tool", "description": "Prints configured env", "input_schema": {"type": "object"}}'
+elif [ "$1" = "run" ]; then
+    printf '%s' "$CUSTOM_TOOL_TEST_ENV"
+fi
+`
+
+	require.NoError(t, os.WriteFile(toolPath, []byte(toolScript), 0o755))
+	t.Setenv("CUSTOM_TOOL_TEST_ENV", "from-parent")
+
+	tool := &CustomTool{
+		execPath:    toolPath,
+		name:        "env_tool",
+		description: "Prints configured env",
+		timeout:     10 * time.Second,
+		maxOutput:   1024,
+		envs: map[string]*string{
+			"CUSTOM_TOOL_TEST_ENV": strPtr("from-config"),
+		},
+	}
+
+	result := tool.Execute(context.Background(), nil, `{}`)
+	require.False(t, result.IsError())
+	assert.Equal(t, "from-config", result.GetResult())
+}
+
+func TestCustomTool_Execute_InheritsConfiguredNullEnv(t *testing.T) {
+	tmpDir := t.TempDir()
+	toolPath := filepath.Join(tmpDir, "env_tool")
+
+	toolScript := `#!/bin/bash
+if [ "$1" = "description" ]; then
+    echo '{"name": "env_tool", "description": "Prints configured env", "input_schema": {"type": "object"}}'
+elif [ "$1" = "run" ]; then
+    printf '%s' "${CUSTOM_TOOL_TEST_ENV:-missing}"
+fi
+`
+
+	require.NoError(t, os.WriteFile(toolPath, []byte(toolScript), 0o755))
+	t.Setenv("CUSTOM_TOOL_TEST_ENV", "from-parent")
+
+	tool := &CustomTool{
+		execPath:    toolPath,
+		name:        "env_tool",
+		description: "Prints configured env",
+		timeout:     10 * time.Second,
+		maxOutput:   1024,
+		envs: map[string]*string{
+			"CUSTOM_TOOL_TEST_ENV": nil,
+		},
+	}
+
+	result := tool.Execute(context.Background(), nil, `{}`)
+	require.False(t, result.IsError())
+	assert.Equal(t, "from-parent", result.GetResult())
+}
+
+func TestCustomTool_Execute_NullEnvDoesNotSetMissingEnv(t *testing.T) {
+	tmpDir := t.TempDir()
+	toolPath := filepath.Join(tmpDir, "env_tool")
+
+	toolScript := `#!/bin/bash
+if [ "$1" = "description" ]; then
+    echo '{"name": "env_tool", "description": "Prints configured env", "input_schema": {"type": "object"}}'
+elif [ "$1" = "run" ]; then
+    printf '%s' "${CUSTOM_TOOL_TEST_ENV:-missing}"
+fi
+`
+
+	require.NoError(t, os.WriteFile(toolPath, []byte(toolScript), 0o755))
+	t.Setenv("CUSTOM_TOOL_TEST_ENV", "")
+	require.NoError(t, os.Unsetenv("CUSTOM_TOOL_TEST_ENV"))
+
+	tool := &CustomTool{
+		execPath:    toolPath,
+		name:        "env_tool",
+		description: "Prints configured env",
+		timeout:     10 * time.Second,
+		maxOutput:   1024,
+		envs: map[string]*string{
+			"CUSTOM_TOOL_TEST_ENV": nil,
+		},
+	}
+
+	result := tool.Execute(context.Background(), nil, `{}`)
+	require.False(t, result.IsError())
+	assert.Equal(t, "missing", result.GetResult())
+}
+
 func TestCustomTool_InterfaceMethods(t *testing.T) {
 	tool := &CustomTool{
 		name:        "test_tool",
@@ -468,6 +663,69 @@ func TestLoadCustomToolConfig(t *testing.T) {
 	assert.Equal(t, 120*time.Second, config.Timeout)
 	assert.Equal(t, 102400, config.MaxOutputSize) // 100KB
 	assert.Empty(t, config.ToolWhiteList)         // Default should be empty (no whitelist)
+	assert.Empty(t, config.Tools)
+}
+
+func TestLoadCustomToolConfig_PerToolSettings(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	viper.Reset()
+	t.Cleanup(func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	})
+
+	viper.Set("custom_tools.enabled", true)
+	viper.Set("custom_tools.timeout", "2m")
+	viper.Set("custom_tools.tools.seer.timeout", "30m")
+	viper.Set("custom_tools.tools.seer.envs.seer_model", "gpt-5.5")
+
+	config := LoadCustomToolConfig()
+
+	assert.Equal(t, 2*time.Minute, config.Timeout)
+	require.Contains(t, config.Tools, "seer")
+	assert.Equal(t, 30*time.Minute, config.Tools["seer"].Timeout)
+	assert.Equal(t, map[string]*string{"seer_model": strPtr("gpt-5.5")}, config.Tools["seer"].Envs)
+}
+
+func TestLoadCustomToolRuntimeConfigFromFilePreservesEnvCase(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(`custom_tools:
+  tools:
+    seer:
+      timeout: 30m
+      envs:
+        SEER_MODEL: gpt-5.5
+`), 0o644))
+
+	config := loadCustomToolRuntimeConfigFromFile(configPath)
+
+	require.Contains(t, config, "seer")
+	assert.Equal(t, 30*time.Minute, config["seer"].Timeout)
+	assert.Equal(t, map[string]*string{"SEER_MODEL": strPtr("gpt-5.5")}, config["seer"].Envs)
+}
+
+func TestLoadCustomToolRuntimeConfigFromFileSupportsNullEnv(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(`custom_tools:
+  tools:
+    seer:
+      envs:
+        ANTHROPIC_API_KEY:
+        OPENAI_API_KEY: null
+        EMPTY_ALLOWED: ""
+`), 0o644))
+
+	config := loadCustomToolRuntimeConfigFromFile(configPath)
+
+	require.Contains(t, config, "seer")
+	assert.Nil(t, config["seer"].Envs["ANTHROPIC_API_KEY"])
+	assert.Nil(t, config["seer"].Envs["OPENAI_API_KEY"])
+	require.NotNil(t, config["seer"].Envs["EMPTY_ALLOWED"])
+	assert.Equal(t, "", *config["seer"].Envs["EMPTY_ALLOWED"])
 }
 
 func TestCustomToolWhiteListed(t *testing.T) {
