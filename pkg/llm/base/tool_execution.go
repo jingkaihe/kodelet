@@ -43,6 +43,9 @@ func ExecuteTool(
 	if blocked {
 		result = tooltypes.NewBlockedToolResult(toolName, reason)
 	} else {
+		if thread != nil {
+			ctx = tools.ContextWithConversationID(ctx, thread.GetConversationID())
+		}
 		result = tools.RunTool(ctx, state, toolName, effectiveInput)
 	}
 

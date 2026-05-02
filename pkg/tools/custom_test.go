@@ -527,6 +527,36 @@ fi
 	assert.Equal(t, "missing", result.GetResult())
 }
 
+func TestCustomTool_Execute_InjectsConversationIDFromContext(t *testing.T) {
+	tmpDir := t.TempDir()
+	toolPath := filepath.Join(tmpDir, "conversation_tool")
+
+	toolScript := `#!/bin/bash
+if [ "$1" = "description" ]; then
+    echo '{"name": "conversation_tool", "description": "Prints conversation id", "input_schema": {"type": "object"}}'
+elif [ "$1" = "run" ]; then
+    printf '%s' "$KODELET_CONVERSATION_ID"
+fi
+`
+
+	require.NoError(t, os.WriteFile(toolPath, []byte(toolScript), 0o755))
+	t.Setenv("KODELET_CONVERSATION_ID", "from-parent")
+
+	tool := &CustomTool{
+		execPath:    toolPath,
+		name:        "conversation_tool",
+		description: "Prints conversation id",
+		timeout:     10 * time.Second,
+		maxOutput:   1024,
+	}
+	ctx := ContextWithConversationID(context.Background(), "conv-123")
+
+	result := tool.Execute(ctx, nil, `{}`)
+
+	require.False(t, result.IsError())
+	assert.Equal(t, "conv-123", result.GetResult())
+}
+
 func TestCustomTool_InterfaceMethods(t *testing.T) {
 	tool := &CustomTool{
 		name:        "test_tool",

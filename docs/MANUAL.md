@@ -1197,6 +1197,8 @@ The tool receives JSON input via stdin and can:
 - **Error**: Write error message to stderr and exit with non-zero code
 - **JSON Error**: Write `{"error": "message"}` to stdout for structured errors
 
+When a custom tool is invoked by an agent conversation, Kodelet sets `KODELET_CONVERSATION_ID` in the tool process environment. Direct CLI invocations do not synthesize a conversation ID; pass one explicitly in the environment if your tool requires it.
+
 **Optional Config Command:**
 ```bash
 ./my-tool config
