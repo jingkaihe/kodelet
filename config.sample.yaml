@@ -199,7 +199,7 @@ allowed_domains_file: "~/.kodelet/allowed_domains.txt"
 # Meta tools (grep_tool and glob_tool) are always enabled for basic functionality unless
 # disable_fs_search_tools is set to true.
 # Available tools: bash, apply_patch, file_read, file_write, file_edit, thinking, subagent, grep_tool,
-#                  glob_tool, todo_read, todo_write, web_fetch, view_image
+#                  glob_tool, web_fetch, view_image
 # Tool interaction mode.
 # - full: standard tool access
 # - patch: removes file_read, file_write, and file_edit from both main-agent and subagent
@@ -226,8 +226,6 @@ allowed_tools: []
 #   - "subagent"
 #   - "grep_tool"      # Always enabled (meta tool)
 #   - "glob_tool"      # Always enabled (meta tool)
-#   - "todo_read"
-#   - "todo_write"
 #   - "web_fetch"
 #   - "view_image"
 
@@ -344,12 +342,6 @@ subagent_args: ""
 # The system prompt will instruct the agent to use fd and rg via the bash tool instead.
 # Can also be set via the --disable-fs-search-tools CLI flag or per-profile.
 # disable_fs_search_tools: true
-#
-# Enable Todo Tools
-# Todo tools (todo_read and todo_write) are disabled by default for the main agent.
-# Set enable_todos to true (or pass --enable-todos) to re-enable them.
-# enable_todos: true
-#
 # Example: Profile with subagent disabled
 # profiles:
 #   no-subagent:

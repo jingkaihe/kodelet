@@ -142,27 +142,3 @@ func TestStructuredToolResult_JSONSerialization(t *testing.T) {
 	assert.Contains(t, jsonStr, "test_tool")
 	assert.Contains(t, jsonStr, "true")
 }
-
-func TestTodoToolResult_StructuredData(t *testing.T) {
-	result := &TodoToolResult{
-		filePath: "/test/todos.json",
-		todos: []Todo{
-			{Content: "Test task", Status: "pending", Priority: "high"},
-			{Content: "Done task", Status: "completed", Priority: "low"},
-		},
-		isWrite: false,
-	}
-
-	structured := result.StructuredData()
-
-	assert.Equal(t, "todo_read", structured.ToolName)
-
-	meta, ok := structured.Metadata.(*tooltypes.TodoMetadata)
-	require.True(t, ok, "Expected TodoMetadata, got %T", structured.Metadata)
-
-	assert.Equal(t, "read", meta.Action)
-	assert.Len(t, meta.TodoList, 2)
-	assert.Equal(t, 2, meta.Statistics.Total)
-	assert.Equal(t, 1, meta.Statistics.Pending)
-	assert.Equal(t, 1, meta.Statistics.Completed)
-}

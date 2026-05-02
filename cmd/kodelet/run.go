@@ -46,7 +46,6 @@ type RunConfig struct {
 	NoTools              bool              // Disable all tools (for simple query-response usage)
 	DisableFSSearchTools bool              // Disable filesystem search tools (glob_tool and grep_tool)
 	DisableSubagent      bool              // Disable the subagent tool and remove subagent-related system prompt context
-	EnableTodos          bool              // Enable todo_read and todo_write tools for the main agent
 	Sysprompt            string            // Path to custom system prompt template file
 	SyspromptArgs        map[string]string // Arguments passed to custom system prompt template
 	ResultOnly           bool              // Only print the final agent message, no intermediate output or usage stats
@@ -76,7 +75,6 @@ func NewRunConfig() *RunConfig {
 		NoTools:              false,
 		DisableFSSearchTools: false,
 		DisableSubagent:      false,
-		EnableTodos:          false,
 		Sysprompt:            "",
 		SyspromptArgs:        make(map[string]string),
 		ResultOnly:           false,
@@ -357,9 +355,6 @@ var runCmd = &cobra.Command{
 		if cmd.Flags().Changed("disable-subagent") {
 			llmConfig.DisableSubagent = config.DisableSubagent
 		}
-		if cmd.Flags().Changed("enable-todos") {
-			llmConfig.EnableTodos = config.EnableTodos
-		}
 		if strings.TrimSpace(config.Sysprompt) != "" {
 			llmConfig.Sysprompt = strings.TrimSpace(config.Sysprompt)
 		}
@@ -597,7 +592,6 @@ func init() {
 	runCmd.Flags().Bool("no-tools", defaults.NoTools, "Disable all tools (for simple query-response usage)")
 	runCmd.Flags().Bool("disable-fs-search-tools", defaults.DisableFSSearchTools, "Disable filesystem search tools (glob_tool and grep_tool)")
 	runCmd.Flags().Bool("disable-subagent", defaults.DisableSubagent, "Disable the subagent tool and remove subagent-related system prompt context")
-	runCmd.Flags().Bool("enable-todos", defaults.EnableTodos, "Enable todo_read and todo_write tools for the main agent")
 	runCmd.Flags().Bool("result-only", defaults.ResultOnly, "Only print the final agent message, suppressing all intermediate output and usage statistics")
 	runCmd.Flags().Bool("use-weak-model", defaults.UseWeakModel, "Use weak model for processing")
 	runCmd.Flags().String("account", defaults.Account, "Anthropic subscription account alias to use (see 'kodelet accounts list')")
@@ -694,10 +688,6 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 
 	if disableSubagent, err := cmd.Flags().GetBool("disable-subagent"); err == nil {
 		config.DisableSubagent = disableSubagent
-	}
-
-	if enableTodos, err := cmd.Flags().GetBool("enable-todos"); err == nil {
-		config.EnableTodos = enableTodos
 	}
 
 	if sysprompt, err := cmd.Flags().GetString("sysprompt"); err == nil {

@@ -86,7 +86,7 @@ func TestMetadataTypeRegistry_Completeness(t *testing.T) {
 	// Test that the registry contains all expected metadata types
 	expectedTypes := []string{
 		"file_read", "file_write", "file_edit", "apply_patch",
-		"grep_tool", "glob_tool", "bash", "mcp_tool", "todo",
+		"grep_tool", "glob_tool", "bash", "mcp_tool",
 		"view_image", "subagent",
 		"openai_web_search",
 		"web_fetch", "read_conversation", "custom_tool",

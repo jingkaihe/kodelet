@@ -24,7 +24,6 @@ func TestRendererRegistry_ExactMatches(t *testing.T) {
 		{"Glob", "glob_tool", true, false},
 		{"Grep", "grep_tool", true, false},
 		{"Bash", "bash", true, false},
-		{"Todo", "todo_read", true, false},
 		{"Thinking", "thinking", true, false},
 		{"Batch", "batch", true, false},
 		{"View Image", "view_image", true, false},

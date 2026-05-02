@@ -35,8 +35,6 @@ func (m *mockState) GetFileLastAccessed(path string) (time.Time, error) {
 	return m.fileLastAccess[path], nil
 }
 func (m *mockState) ClearFileLastAccessed(_ string) error       { return nil }
-func (m *mockState) TodoFilePath() (string, error)              { return "", nil }
-func (m *mockState) SetTodoFilePath(_ string)                   {}
 func (m *mockState) SetFileLastAccess(fla map[string]time.Time) { m.fileLastAccess = fla }
 func (m *mockState) FileLastAccess() map[string]time.Time       { return m.fileLastAccess }
 func (m *mockState) BasicTools() []tooltypes.Tool               { return nil }

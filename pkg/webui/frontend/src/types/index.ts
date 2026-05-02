@@ -32,7 +32,7 @@ export interface ToolResult {
   toolName: string;
   success: boolean;
   error?: string;
-  metadata?: FileMetadata | ApplyPatchMetadata | BashMetadata | GrepMetadata | GlobMetadata | WebFetchMetadata | ThinkingMetadata | TodoMetadata | SubagentMetadata | BatchMetadata | ViewImageMetadata | BrowserMetadata | SkillMetadata | OpenAIWebSearchMetadata | Record<string, unknown>;
+  metadata?: FileMetadata | ApplyPatchMetadata | BashMetadata | GrepMetadata | GlobMetadata | WebFetchMetadata | ThinkingMetadata | SubagentMetadata | BatchMetadata | ViewImageMetadata | BrowserMetadata | SkillMetadata | OpenAIWebSearchMetadata | Record<string, unknown>;
   timestamp?: string;
 }
 
@@ -368,18 +368,6 @@ export interface WebFetchMetadata {
 
 export interface ThinkingMetadata {
   thought: string;
-}
-
-export interface TodoMetadata {
-  action: string;
-  todos: TodoItem[];
-  todoList?: TodoItem[];
-}
-
-export interface TodoItem {
-  content: string;
-  status: 'pending' | 'in_progress' | 'completed' | 'canceled';
-  priority: 'low' | 'medium' | 'high';
 }
 
 export interface SubagentMetadata {

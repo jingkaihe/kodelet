@@ -63,7 +63,6 @@ var metadataTypeRegistry = map[string]reflect.Type{
 	"bash":        reflect.TypeOf(BashMetadata{}),
 	"mcp_tool":    reflect.TypeOf(MCPToolMetadata{}),
 	"custom_tool": reflect.TypeOf(CustomToolMetadata{}),
-	"todo":        reflect.TypeOf(TodoMetadata{}),
 
 	"view_image":        reflect.TypeOf(ViewImageMetadata{}),
 	"subagent":          reflect.TypeOf(SubAgentMetadata{}),
@@ -299,36 +298,6 @@ type CustomToolMetadata struct {
 
 // ToolType returns the tool type identifier for custom tool execution
 func (m CustomToolMetadata) ToolType() string { return "custom_tool" }
-
-// Other tool metadata
-
-// TodoMetadata contains metadata about a todo list operation
-type TodoMetadata struct {
-	Action     string     `json:"action"` // "read" or "write"
-	TodoList   []TodoItem `json:"todoList"`
-	Statistics TodoStats  `json:"statistics,omitempty"`
-}
-
-// TodoItem represents a single todo list item
-type TodoItem struct {
-	ID        string    `json:"id"`
-	Content   string    `json:"content"`
-	Status    string    `json:"status"`
-	Priority  string    `json:"priority"`
-	CreatedAt time.Time `json:"createdAt,omitempty"`
-	UpdatedAt time.Time `json:"updatedAt,omitempty"`
-}
-
-// TodoStats contains statistics about the todo list
-type TodoStats struct {
-	Total      int `json:"total"`
-	Completed  int `json:"completed"`
-	InProgress int `json:"inProgress"`
-	Pending    int `json:"pending"`
-}
-
-// ToolType returns the tool type identifier for todo operations
-func (m TodoMetadata) ToolType() string { return "todo" }
 
 // Additional tool metadata structures
 

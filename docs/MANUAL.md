@@ -704,9 +704,6 @@ kodelet run --disable-fs-search-tools "query"
 # Use the first user message for persisted conversation summaries
 kodelet run --conversation-summary-mode first_message "query"
 
-# Enable todo tools for this run (disabled by default)
-kodelet run --enable-todos "query"
-
 # Use a custom system prompt template
 kodelet run --sysprompt ./sysprompt.tmpl "query"
 
@@ -1622,16 +1619,6 @@ kodelet run --conversation-summary-mode first_message "your query"
 ```
 
 This can also be set via configuration file (`conversation_summary_mode: first_message`) or environment variable (`KODELET_CONVERSATION_SUMMARY_MODE=first_message`). The default is `llm`. This only affects short persisted conversation summaries/titles, not context compaction.
-
-### Enabling Todo Tools
-
-Todo tools (`todo_read` and `todo_write`) are disabled by default for the main agent. To enable them for a run:
-
-```bash
-kodelet run --enable-todos "your query"
-```
-
-You can also enable them via configuration (`enable_todos: true`) or environment variable (`KODELET_ENABLE_TODOS=true`).
 
 ### Custom System Prompt Template
 

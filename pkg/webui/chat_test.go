@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
-	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/spf13/viper"
@@ -22,29 +21,6 @@ type recordingChatSink struct {
 func (s *recordingChatSink) Send(event ChatEvent) error {
 	s.events = append(s.events, event)
 	return nil
-}
-
-func TestBuildChatState_BindsTodoPathToConversationID(t *testing.T) {
-	customManager, err := tools.NewCustomToolManager()
-	require.NoError(t, err)
-
-	state, err := buildChatState(
-		context.Background(),
-		llmtypes.Config{
-			DisableSubagent: true,
-		},
-		"conv-web-123",
-		"/workspace/project",
-		nil,
-		customManager,
-	)
-	require.NoError(t, err)
-
-	todoPath, err := state.TodoFilePath()
-	require.NoError(t, err)
-
-	assert.Equal(t, "conv-web-123.json", filepath.Base(todoPath))
-	assert.Equal(t, "todos", filepath.Base(filepath.Dir(todoPath)))
 }
 
 func TestResolveWebChatConfigForExistingConversation_UsesStoredProfileAndMetadata(t *testing.T) {

@@ -96,37 +96,4 @@ func TestRendererWithJSONUnmarshal(t *testing.T) {
 		// Should contain command
 		assert.Contains(t, output, "ls -la", "Expected command in output")
 	})
-
-	t.Run("TodoRenderer after JSON unmarshal", func(t *testing.T) {
-		original := tools.StructuredToolResult{
-			ToolName:  "todo_read",
-			Success:   true,
-			Timestamp: time.Now(),
-			Metadata: &tools.TodoMetadata{
-				Action: "read",
-				TodoList: []tools.TodoItem{
-					{ID: "1", Content: "Task 1", Status: "pending", Priority: "high"},
-					{ID: "2", Content: "Task 2", Status: "completed", Priority: "low"},
-				},
-				Statistics: tools.TodoStats{
-					Total:      2,
-					Completed:  1,
-					InProgress: 0,
-					Pending:    1,
-				},
-			},
-		}
-
-		data, err := json.Marshal(original)
-		require.NoError(t, err, "Failed to marshal")
-
-		var unmarshaled tools.StructuredToolResult
-		err = json.Unmarshal(data, &unmarshaled)
-		require.NoError(t, err, "Failed to unmarshal")
-
-		output := registry.Render(unmarshaled)
-
-		// Should contain todo content
-		assert.Contains(t, output, "Task 1", "Expected todo content in output")
-	})
 }

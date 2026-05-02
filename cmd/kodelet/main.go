@@ -35,7 +35,6 @@ func init() {
 	viper.SetDefault("disable_fs_search_tools", true)
 	viper.SetDefault("conversation_summary_mode", "llm")
 	viper.SetDefault("anthropic_api_access", "auto")
-	viper.SetDefault("enable_todos", false)
 
 	viper.SetDefault("mcp", map[string]tools.MCPConfig{})
 
@@ -124,7 +123,6 @@ func main() {
 	rootCmd.PersistentFlags().Bool("disable-fs-search-tools", false, "Disable filesystem search tools (glob_tool and grep_tool)")
 	rootCmd.PersistentFlags().String("conversation-summary-mode", "llm", "Conversation summary mode (llm, first_message)")
 	rootCmd.PersistentFlags().Bool("disable-subagent", false, "Disable the subagent tool and remove subagent-related system prompt context")
-	rootCmd.PersistentFlags().Bool("enable-todos", false, "Enable todo_read and todo_write tools for the main agent")
 	rootCmd.PersistentFlags().StringSlice("context-patterns", []string{"AGENTS.md"}, "Context file patterns to load (e.g. 'AGENTS.md,README.md')")
 
 	viper.BindPFlag("provider", rootCmd.PersistentFlags().Lookup("provider"))
@@ -151,7 +149,6 @@ func main() {
 	viper.BindPFlag("disable_fs_search_tools", rootCmd.PersistentFlags().Lookup("disable-fs-search-tools"))
 	viper.BindPFlag("conversation_summary_mode", rootCmd.PersistentFlags().Lookup("conversation-summary-mode"))
 	viper.BindPFlag("disable_subagent", rootCmd.PersistentFlags().Lookup("disable-subagent"))
-	viper.BindPFlag("enable_todos", rootCmd.PersistentFlags().Lookup("enable-todos"))
 	viper.BindPFlag("context.patterns", rootCmd.PersistentFlags().Lookup("context-patterns"))
 
 	rootCmd.AddCommand(runCmd)
