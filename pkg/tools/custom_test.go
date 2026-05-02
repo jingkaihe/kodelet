@@ -572,6 +572,53 @@ fi
 	}, "\n"), result.GetResult())
 }
 
+func TestCustomToolManager_DiscoverTools_ExecutesRelativeLocalToolFromContextWorkingDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	localToolsDir := filepath.Join(tmpDir, ".kodelet", "tools")
+	require.NoError(t, os.MkdirAll(localToolsDir, 0o755))
+
+	toolPath := filepath.Join(localToolsDir, "relative_tool")
+	toolScript := `#!/bin/bash
+if [ "$1" = "description" ]; then
+    echo '{"name": "relative_tool", "description": "Prints pwd", "input_schema": {"type": "object"}}'
+elif [ "$1" = "run" ]; then
+    printf '%s' "$PWD"
+fi
+`
+
+	require.NoError(t, os.WriteFile(toolPath, []byte(toolScript), 0o755))
+
+	oldWD, err := os.Getwd()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.Chdir(oldWD) })
+	require.NoError(t, os.Chdir(tmpDir))
+
+	manager := &CustomToolManager{
+		tools:     make(map[string]*CustomTool),
+		globalDir: filepath.Join(tmpDir, "missing-global-tools"),
+		localDir:  filepath.Join(".kodelet", "tools"),
+		config: CustomToolConfig{
+			Enabled:       true,
+			Timeout:       10 * time.Second,
+			MaxOutputSize: 1024,
+		},
+	}
+
+	require.NoError(t, manager.DiscoverTools(context.Background()))
+	tool, ok := manager.tools["relative_tool"]
+	require.True(t, ok)
+	require.True(t, filepath.IsAbs(tool.execPath))
+
+	workingDir := filepath.Join(tmpDir, "workspace")
+	require.NoError(t, os.Mkdir(workingDir, 0o755))
+	ctx := ContextWithToolContext(context.Background(), ToolContext{WorkingDir: workingDir})
+
+	result := tool.Execute(ctx, nil, `{}`)
+
+	require.False(t, result.IsError(), result.GetError())
+	assert.Equal(t, workingDir, result.GetResult())
+}
+
 func TestCustomTool_InterfaceMethods(t *testing.T) {
 	tool := &CustomTool{
 		name:        "test_tool",

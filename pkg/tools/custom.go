@@ -346,7 +346,11 @@ func (m *CustomToolManager) discoverToolsInDir(ctx context.Context, dir string, 
 			continue
 		}
 
-		execPath := filepath.Join(dir, entry.Name())
+		execPath, err := resolveCustomToolExecPath(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			logger.G(ctx).WithError(err).WithField("path", filepath.Join(dir, entry.Name())).Debug("failed to resolve tool path")
+			continue
+		}
 
 		info, err := entry.Info()
 		if err != nil {
@@ -391,6 +395,11 @@ func (m *CustomToolManager) discoverToolsInDir(ctx context.Context, dir string, 
 
 // validateTool validates a tool by calling its description command
 func (m *CustomToolManager) validateTool(ctx context.Context, execPath string) (*CustomTool, error) {
+	execPath, err := resolveCustomToolExecPath(execPath)
+	if err != nil {
+		return nil, err
+	}
+
 	metadata, err := customtools.Inspect(ctx, execPath, m.config.Timeout)
 	if err != nil {
 		return nil, err
@@ -399,7 +408,20 @@ func (m *CustomToolManager) validateTool(ctx context.Context, execPath string) (
 	return m.buildTool(ctx, execPath, metadata)
 }
 
+func resolveCustomToolExecPath(execPath string) (string, error) {
+	absExecPath, err := filepath.Abs(execPath)
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to resolve custom tool path %s", execPath)
+	}
+	return absExecPath, nil
+}
+
 func (m *CustomToolManager) buildTool(ctx context.Context, execPath string, metadata *customtools.Metadata) (*CustomTool, error) {
+	execPath, err := resolveCustomToolExecPath(execPath)
+	if err != nil {
+		return nil, err
+	}
+
 	timeout := m.config.Timeout
 	envs := map[string]*string(nil)
 
