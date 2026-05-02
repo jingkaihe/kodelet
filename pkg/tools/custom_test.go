@@ -527,15 +527,17 @@ fi
 	assert.Equal(t, "missing", result.GetResult())
 }
 
-func TestCustomTool_Execute_InjectsConversationIDFromContext(t *testing.T) {
+func TestCustomTool_Execute_InjectsContextEnvironmentAndWorkingDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 	toolPath := filepath.Join(tmpDir, "conversation_tool")
+	workingDir := filepath.Join(tmpDir, "workspace")
+	require.NoError(t, os.Mkdir(workingDir, 0o755))
 
 	toolScript := `#!/bin/bash
 if [ "$1" = "description" ]; then
-    echo '{"name": "conversation_tool", "description": "Prints conversation id", "input_schema": {"type": "object"}}'
+    echo '{"name": "conversation_tool", "description": "Prints context env", "input_schema": {"type": "object"}}'
 elif [ "$1" = "run" ]; then
-    printf '%s' "$KODELET_CONVERSATION_ID"
+    printf '%s\n%s\n%s\n%s\n%s\n%s' "$KODELET_CONVERSATION_ID" "$KODELET_WORKING_DIR" "$KODELET_PROVIDER" "$KODELET_MODEL" "$KODELET_PROFILE" "$PWD"
 fi
 `
 
@@ -545,16 +547,29 @@ fi
 	tool := &CustomTool{
 		execPath:    toolPath,
 		name:        "conversation_tool",
-		description: "Prints conversation id",
+		description: "Prints context env",
 		timeout:     10 * time.Second,
 		maxOutput:   1024,
 	}
-	ctx := ContextWithConversationID(context.Background(), "conv-123")
+	ctx := ContextWithToolContext(context.Background(), ToolContext{
+		ConversationID: "conv-123",
+		WorkingDir:     workingDir,
+		Provider:       "anthropic",
+		Model:          "claude-sonnet-4-6",
+		Profile:        "work",
+	})
 
 	result := tool.Execute(ctx, nil, `{}`)
 
 	require.False(t, result.IsError())
-	assert.Equal(t, "conv-123", result.GetResult())
+	assert.Equal(t, strings.Join([]string{
+		"conv-123",
+		workingDir,
+		"anthropic",
+		"claude-sonnet-4-6",
+		"work",
+		workingDir,
+	}, "\n"), result.GetResult())
 }
 
 func TestCustomTool_InterfaceMethods(t *testing.T) {

@@ -44,7 +44,14 @@ func ExecuteTool(
 		result = tooltypes.NewBlockedToolResult(toolName, reason)
 	} else {
 		if thread != nil {
-			ctx = tools.ContextWithConversationID(ctx, thread.GetConversationID())
+			workingDir := ""
+			if state != nil {
+				workingDir = state.WorkingDirectory()
+			}
+			ctx = tools.ContextWithToolContext(
+				ctx,
+				tools.ToolContextFromThreadState(thread.GetConfig(), thread.GetConversationID(), workingDir),
+			)
 		}
 		result = tools.RunTool(ctx, state, toolName, effectiveInput)
 	}

@@ -244,14 +244,28 @@ func appendCustomToolEnv(env []string, envs map[string]*string) []string {
 }
 
 func appendCustomToolContextEnv(ctx context.Context, env []string) []string {
-	conversationID := conversationIDFromContext(ctx)
-	if conversationID == "" {
+	toolContext := toolContextFromContext(ctx)
+	envs := make(map[string]*string)
+	if toolContext.ConversationID != "" {
+		envs["KODELET_CONVERSATION_ID"] = &toolContext.ConversationID
+	}
+	if toolContext.WorkingDir != "" {
+		envs["KODELET_WORKING_DIR"] = &toolContext.WorkingDir
+	}
+	if toolContext.Provider != "" {
+		envs["KODELET_PROVIDER"] = &toolContext.Provider
+	}
+	if toolContext.Model != "" {
+		envs["KODELET_MODEL"] = &toolContext.Model
+	}
+	if toolContext.Profile != "" {
+		envs["KODELET_PROFILE"] = &toolContext.Profile
+	}
+	if len(envs) == 0 {
 		return env
 	}
 
-	return appendCustomToolEnv(env, map[string]*string{
-		"KODELET_CONVERSATION_ID": &conversationID,
-	})
+	return appendCustomToolEnv(env, envs)
 }
 
 // DiscoverTools scans directories and discovers available custom tools
@@ -524,6 +538,9 @@ func (t *CustomTool) Execute(ctx context.Context, _ tooltypes.State, parameters 
 	cmd := exec.CommandContext(execCtx, t.execPath, "run")
 	osutil.SetProcessGroup(cmd)
 	osutil.SetProcessGroupKill(cmd)
+	if workingDir := toolContextFromContext(ctx).WorkingDir; workingDir != "" {
+		cmd.Dir = workingDir
+	}
 	cmd.Env = appendCustomToolContextEnv(ctx, appendCustomToolEnv(os.Environ(), t.envs))
 
 	stdin, err := cmd.StdinPipe()
