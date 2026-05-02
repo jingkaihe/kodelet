@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.3.51-beta (2026-05-02)
+
+Removed the built-in `todo_read` and `todo_write` tools, including the `--enable-todos`/`enable_todos` configuration path and the Web UI/ACP structured renderer plumbing for todo results.
+
+Improved custom tool execution so agent-invoked tools receive conversation context environment variables and run from the effective working directory when available.
+
 ## 0.3.50-beta (2026-04-30)
 
 Added `bash.timeout` so the bash tool's maximum requested timeout can be configured beyond the previous fixed 120-second limit, with validation and schema/help text reflecting the configured cap.
