@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import KonamiPongEgg from './KonamiPongEgg';
+import KonamiGamesEgg from './KonamiGamesEgg';
 
 const konamiKeys = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'b', 'a'];
 
@@ -27,6 +27,7 @@ const installCanvasMock = () => {
     setLineDash: vi.fn(),
     setTransform: vi.fn(),
     stroke: vi.fn(),
+    strokeRect: vi.fn(),
     fillStyle: '',
     font: '',
     globalAlpha: 1,
@@ -41,21 +42,34 @@ const installCanvasMock = () => {
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context as unknown as CanvasRenderingContext2D);
 };
 
-describe('KonamiPongEgg', () => {
-  it('opens the pong canvas popup after the Konami sequence', () => {
+describe('KonamiGamesEgg', () => {
+  it('opens a game picker after the Konami sequence', () => {
     installCanvasMock();
-    render(<KonamiPongEgg />);
+    render(<KonamiGamesEgg />);
 
     enterKonamiSequence();
 
     expect(screen.getByTestId('konami-egg-modal')).toBeInTheDocument();
+    expect(screen.getByTestId('konami-game-picker')).toBeInTheDocument();
+    expect(screen.getByText('Pong')).toBeInTheDocument();
+    expect(screen.getByText('Tetris')).toBeInTheDocument();
+    expect(screen.getByText('Flappy Bird')).toBeInTheDocument();
+  });
+
+  it('starts a selected game in the canvas', () => {
+    installCanvasMock();
+    render(<KonamiGamesEgg />);
+
+    enterKonamiSequence();
+    fireEvent.click(screen.getByText('Tetris'));
+
+    expect(screen.queryByTestId('konami-game-picker')).not.toBeInTheDocument();
     expect(screen.getByTestId('konami-egg-canvas')).toBeInTheDocument();
-    expect(screen.queryByText('Konami channel unlocked')).not.toBeInTheDocument();
   });
 
   it('closes the popup with Escape', () => {
     installCanvasMock();
-    render(<KonamiPongEgg />);
+    render(<KonamiGamesEgg />);
 
     enterKonamiSequence();
     fireEvent.keyDown(window, { key: 'Escape' });
@@ -68,13 +82,13 @@ describe('KonamiPongEgg', () => {
     render(
       <>
         <textarea aria-label="Prompt" />
-        <KonamiPongEgg />
+        <KonamiGamesEgg />
       </>,
     );
 
     const input = screen.getByLabelText('Prompt');
     enterKonamiSequence(input);
 
-    expect(screen.getByTestId('konami-egg-modal')).toBeInTheDocument();
+    expect(screen.getByTestId('konami-game-picker')).toBeInTheDocument();
   });
 });
