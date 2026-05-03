@@ -17,7 +17,7 @@ func recommendedSetupConfigYAML() string {
     sonnet-46: claude-sonnet-4-6
 disable_fs_search_tools: true
 max_tokens: 16000
-model: gpt-5.4
+model: gpt-5.5
 openai:
     api_mode: responses
 profile: default
@@ -31,7 +31,7 @@ profiles:
         disable_fs_search_tools: true
         tool_mode: patch
         max_tokens: 16000
-        model: gpt-5.4
+        model: gpt-5.5
         openai:
             api_mode: responses
         provider: openai
@@ -70,8 +70,6 @@ var setupCmd = &cobra.Command{
 
 		anthropicKey := os.Getenv("ANTHROPIC_API_KEY")
 		openaiKey := os.Getenv("OPENAI_API_KEY")
-		xaiKey := os.Getenv("XAI_API_KEY")
-
 		if anthropicKey != "" {
 			presenter.Success("Found ANTHROPIC_API_KEY in environment")
 		} else {
@@ -82,12 +80,6 @@ var setupCmd = &cobra.Command{
 			presenter.Success("Found OPENAI_API_KEY in environment")
 		} else {
 			presenter.Info("You will need OPENAI_API_KEY environment variable set to use OpenAI models")
-		}
-
-		if xaiKey != "" {
-			presenter.Success("Found XAI_API_KEY in environment")
-		} else {
-			presenter.Info("You will need XAI_API_KEY environment variable set to use xAI Grok models")
 		}
 
 		presenter.Separator()
@@ -150,7 +142,7 @@ var setupCmd = &cobra.Command{
 			presenter.Success(fmt.Sprintf("Configuration saved to %s", configFile))
 		}
 		presenter.Info("You can modify these settings at any time by editing the config file")
-		presenter.Info("Use different profiles with: --profile hybrid|openai|anthropic|xai")
+		presenter.Info("Use different profiles with: --profile openai|anthropic")
 		logger.G(ctx).WithField("config_file", configFile).Info("Configuration file created successfully")
 
 		presenter.Separator()
@@ -158,18 +150,17 @@ var setupCmd = &cobra.Command{
 		presenter.Success("Kodelet has been configured with sensible defaults")
 
 		// Only show setup instructions if no API keys are found
-		if anthropicKey == "" && openaiKey == "" && xaiKey == "" {
+		if anthropicKey == "" && openaiKey == "" {
 			presenter.Separator()
 			presenter.Warning("No API keys found. Please set at least one of the following environment variables:")
 			presenter.Info("  export ANTHROPIC_API_KEY=\"your-key-here\"  # For Claude models")
 			presenter.Info("  export OPENAI_API_KEY=\"your-key-here\"     # For OpenAI models")
-			presenter.Info("  export XAI_API_KEY=\"your-key-here\"        # For xAI Grok models")
 		}
 
 		presenter.Separator()
 		presenter.Section("Getting Started")
-		presenter.Info("  kodelet run \"your query\"              # Run one-shot query with OpenAI gpt-5.4")
-		presenter.Info("  kodelet run --profile hybrid \"query\"  # Use hybrid profile (Claude + OpenAI subagent)")
+		presenter.Info("  kodelet run \"your query\"              # Run one-shot query with OpenAI gpt-5.5")
+		presenter.Info("  kodelet run --profile anthropic \"query\"  # Use Anthropic profile (Claude Opus)")
 		presenter.Info("  kodelet serve                         # Start web UI server")
 		presenter.Info("  toad acp 'kodelet acp'                # Start interactive chat via ACP")
 		presenter.Info("  kodelet --help                        # Show all available commands")

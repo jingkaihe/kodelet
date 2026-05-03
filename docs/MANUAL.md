@@ -756,15 +756,6 @@ profiles:
     openai:
       platform: copilot
 
-  xai:
-    provider: "openai"
-    model: "grok-3"
-    weak_model: "grok-3-mini"
-    max_tokens: 16000
-    reasoning_effort: "none"
-    openai:
-      platform: "xai"
-
   mix-n-match:
     # Main agent uses Claude
     provider: "anthropic"
@@ -1010,12 +1001,26 @@ openai:
   platform: codex
   api_mode: responses
   service_tier: fast
+  websocket_mode: true
 ```
 
 `openai.service_tier` is optional. Kodelet accepts OpenAI's native values
 `auto`, `default`, `flex`, `priority`, and `scale`, plus Codex's
 user-facing `fast` alias. When you set `fast`, Kodelet sends
 `service_tier: priority` to the upstream API.
+
+`openai.websocket_mode` controls the Responses API WebSocket transport. It
+defaults to `true` for supported OpenAI and Codex Responses API endpoints to
+reduce end-to-end latency. Kodelet still sends `store: false` and replays local
+conversation state. If WebSocket setup or streaming fails while this is enabled,
+the request fails instead of silently retrying over HTTP.
+
+You can force HTTP streaming with:
+
+```yaml
+openai:
+  websocket_mode: false
+```
 
 ## OpenAI Native Web Search
 

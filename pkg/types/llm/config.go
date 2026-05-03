@@ -194,15 +194,16 @@ func (t OpenAIServiceTier) WireValue() string {
 
 // OpenAIConfig holds OpenAI-specific configuration including support for compatible APIs
 type OpenAIConfig struct {
-	Platform     string                  `mapstructure:"platform" json:"platform" yaml:"platform"`                                    // Canonical platform name for OpenAI-compatible APIs (e.g., openai, xai, codex)
-	BaseURL      string                  `mapstructure:"base_url" json:"base_url" yaml:"base_url"`                                    // Custom API base URL (overrides platform defaults)
-	APIKeyEnvVar string                  `mapstructure:"api_key_env_var" json:"api_key_env_var" yaml:"api_key_env_var"`               // Environment variable name for API key (overrides platform default)
-	APIMode      OpenAIAPIMode           `mapstructure:"api_mode" json:"api_mode" yaml:"api_mode"`                                    // Preferred API mode selection (chat_completions or responses)
-	ServiceTier  OpenAIServiceTier       `mapstructure:"service_tier" json:"service_tier" yaml:"service_tier"`                        // Optional service tier hint (e.g. auto, default, fast, flex, priority, scale)
-	EnableSearch *bool                   `mapstructure:"enable_search" json:"enable_search,omitempty" yaml:"enable_search,omitempty"` // Enable native OpenAI Responses web_search tool when supported (defaults to true)
-	ManualCache  bool                    `mapstructure:"manual_cache" json:"manual_cache" yaml:"manual_cache"`                        // Enables manual cache affinity headers for Chat Completions when prompt caching is requested
-	Models       *CustomModels           `mapstructure:"models" json:"models,omitempty" yaml:"models,omitempty"`                      // Custom model configuration
-	Pricing      map[string]ModelPricing `mapstructure:"pricing" json:"pricing,omitempty" yaml:"pricing,omitempty"`                   // Custom pricing configuration
+	Platform      string                  `mapstructure:"platform" json:"platform" yaml:"platform"`                                       // Canonical platform name for OpenAI-compatible APIs (e.g., openai, codex, fireworks)
+	BaseURL       string                  `mapstructure:"base_url" json:"base_url" yaml:"base_url"`                                       // Custom API base URL (overrides platform defaults)
+	APIKeyEnvVar  string                  `mapstructure:"api_key_env_var" json:"api_key_env_var" yaml:"api_key_env_var"`                  // Environment variable name for API key (overrides platform default)
+	APIMode       OpenAIAPIMode           `mapstructure:"api_mode" json:"api_mode" yaml:"api_mode"`                                       // Preferred API mode selection (chat_completions or responses)
+	ServiceTier   OpenAIServiceTier       `mapstructure:"service_tier" json:"service_tier" yaml:"service_tier"`                           // Optional service tier hint (e.g. auto, default, fast, flex, priority, scale)
+	EnableSearch  *bool                   `mapstructure:"enable_search" json:"enable_search,omitempty" yaml:"enable_search,omitempty"`    // Enable native OpenAI Responses web_search tool when supported (defaults to true)
+	WebSocketMode *bool                   `mapstructure:"websocket_mode" json:"websocket_mode,omitempty" yaml:"websocket_mode,omitempty"` // Use Responses API WebSocket transport when supported (defaults to true)
+	ManualCache   bool                    `mapstructure:"manual_cache" json:"manual_cache" yaml:"manual_cache"`                           // Enables manual cache affinity headers for Chat Completions when prompt caching is requested
+	Models        *CustomModels           `mapstructure:"models" json:"models,omitempty" yaml:"models,omitempty"`                         // Custom model configuration
+	Pricing       map[string]ModelPricing `mapstructure:"pricing" json:"pricing,omitempty" yaml:"pricing,omitempty"`                      // Custom pricing configuration
 }
 
 // AnthropicConfig holds Anthropic-specific configuration including compatible platforms.
@@ -218,10 +219,42 @@ type CustomModels struct {
 
 // ModelPricing holds the per-token pricing for different operations
 type ModelPricing struct {
-	Input         float64 `mapstructure:"input" json:"input" yaml:"input"`                            // Input token cost per token
-	CachedInput   float64 `mapstructure:"cached_input" json:"cached_input" yaml:"cached_input"`       // Cached input token cost per token
-	Output        float64 `mapstructure:"output" json:"output" yaml:"output"`                         // Output token cost per token
-	ContextWindow int     `mapstructure:"context_window" json:"context_window" yaml:"context_window"` // Maximum context window size
+	// Input token cost per token.
+	Input float64 `mapstructure:"input" json:"input" yaml:"input"`
+	// Cached input token cost per token.
+	CachedInput float64 `mapstructure:"cached_input" json:"cached_input" yaml:"cached_input"`
+	// Output token cost per token.
+	Output float64 `mapstructure:"output" json:"output" yaml:"output"`
+	// Long-context input token cost per token.
+	LongContextInput float64 `mapstructure:"long_context_input" json:"long_context_input,omitempty" yaml:"long_context_input,omitempty"`
+	// Long-context cached input token cost per token.
+	LongContextCachedInput float64 `mapstructure:"long_context_cached_input" json:"long_context_cached_input,omitempty" yaml:"long_context_cached_input,omitempty"`
+	// Long-context output token cost per token.
+	LongContextOutput float64 `mapstructure:"long_context_output" json:"long_context_output,omitempty" yaml:"long_context_output,omitempty"`
+	// Prompt token threshold for long-context pricing.
+	LongContextThreshold int `mapstructure:"long_context_threshold" json:"long_context_threshold,omitempty" yaml:"long_context_threshold,omitempty"`
+	// Maximum context window size.
+	ContextWindow int `mapstructure:"context_window" json:"context_window" yaml:"context_window"`
+}
+
+// ForPromptTokens returns long-context pricing when the configured prompt token
+// threshold is exceeded. OpenAI applies long-context rates to the full session,
+// not just the tokens above the threshold.
+func (p ModelPricing) ForPromptTokens(promptTokens int) ModelPricing {
+	if p.LongContextThreshold <= 0 || promptTokens <= p.LongContextThreshold {
+		return p
+	}
+
+	if p.LongContextInput > 0 {
+		p.Input = p.LongContextInput
+	}
+	if p.LongContextCachedInput > 0 {
+		p.CachedInput = p.LongContextCachedInput
+	}
+	if p.LongContextOutput > 0 {
+		p.Output = p.LongContextOutput
+	}
+	return p
 }
 
 // CustomPricing maps model names to their pricing information

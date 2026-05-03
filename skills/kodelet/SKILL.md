@@ -514,7 +514,7 @@ profiles:
     openai-subagent:
         disable_fs_search_tools: true
         tool_mode: patch
-        model: gpt-5.4
+        model: gpt-5.5
         openai:
             api_mode: responses
         provider: openai
@@ -533,14 +533,6 @@ profiles:
         reasoning_effort: max
         weak_model: sonnet-46
         weak_model_max_tokens: 8192
-    xai:
-        max_tokens: 16000
-        model: grok-code-fast-1
-        openai:
-            platform: xai
-        provider: openai
-        reasoning_effort: none
-        weak_model: grok-code-fast-1
 ```
 
 ## LLM Providers

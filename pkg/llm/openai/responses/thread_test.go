@@ -48,14 +48,14 @@ func extractInputItemText(item openairesponses.ResponseInputItemUnionParam) stri
 }
 
 func TestNewThread(t *testing.T) {
-	os.Setenv("XAI_API_KEY", "test-key")
-	defer os.Unsetenv("XAI_API_KEY")
+	os.Setenv("OPENAI_API_KEY", "test-key")
+	defer os.Unsetenv("OPENAI_API_KEY")
 
 	config := llmtypes.Config{
 		Provider: "openai",
 		Model:    "gpt-4.1",
 		OpenAI: &llmtypes.OpenAIConfig{
-			Platform: "xai",
+			Platform: "openai",
 		},
 	}
 
@@ -99,6 +99,86 @@ func TestNewThreadWithoutAPIKey(t *testing.T) {
 	assert.Contains(t, err.Error(), "OPENAI_API_KEY")
 }
 
+func TestNewThreadEnablesWebSocketByDefaultForOpenAIResponses(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	config := llmtypes.Config{
+		Provider: "openai",
+		Model:    "gpt-4.1",
+		OpenAI: &llmtypes.OpenAIConfig{
+			Platform: "openai",
+			APIMode:  llmtypes.OpenAIAPIModeResponses,
+		},
+	}
+
+	thread, err := NewThread(config)
+	require.NoError(t, err)
+	assert.True(t, thread.useWebSocket)
+	assert.NotNil(t, thread.webSocket)
+}
+
+func TestNewThreadCanDisableWebSocketMode(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	webSocketMode := false
+
+	config := llmtypes.Config{
+		Provider: "openai",
+		Model:    "gpt-4.1",
+		OpenAI: &llmtypes.OpenAIConfig{
+			Platform:      "openai",
+			APIMode:       llmtypes.OpenAIAPIModeResponses,
+			WebSocketMode: &webSocketMode,
+		},
+	}
+
+	thread, err := NewThread(config)
+	require.NoError(t, err)
+	assert.False(t, thread.useWebSocket)
+	assert.Nil(t, thread.webSocket)
+}
+
+func TestSupportsResponsesWebSocket(t *testing.T) {
+	tests := []struct {
+		name   string
+		config llmtypes.Config
+		want   bool
+	}{
+		{
+			name:   "default openai platform",
+			config: llmtypes.Config{},
+			want:   true,
+		},
+		{
+			name: "codex platform",
+			config: llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{
+				Platform: "codex",
+			}},
+			want: true,
+		},
+		{
+			name: "custom platform",
+			config: llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{
+				Platform: "fireworks",
+			}},
+			want: false,
+		},
+		{
+			name: "custom openai base url",
+			config: llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{
+				Platform: "openai",
+				BaseURL:  "https://example.test/v1",
+			}},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, supportsResponsesWebSocket(tt.config))
+		})
+	}
+}
+
 func TestBuildToolsIncludesNativeOpenAISearchWhenEligible(t *testing.T) {
 	state := tools.NewBasicState(context.Background(), tools.WithLLMConfig(llmtypes.Config{
 		Provider: "openai",
@@ -118,7 +198,7 @@ func TestBuildToolsSkipsNativeOpenAISearchForNonOpenAIPlatforms(t *testing.T) {
 	state := tools.NewBasicState(context.Background(), tools.WithLLMConfig(llmtypes.Config{
 		Provider: "openai",
 		OpenAI: &llmtypes.OpenAIConfig{
-			Platform: "xai",
+			Platform: "fireworks",
 			APIMode:  llmtypes.OpenAIAPIModeResponses,
 		},
 	}))
@@ -1466,7 +1546,7 @@ func (*mockResponsesConversationStore) Close() error {
 }
 
 func TestProcessMessageExchangeSavesConversationPerTurn(t *testing.T) {
-	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", IsSubAgent: true, OpenAI: &llmtypes.OpenAIConfig{Platform: "xai", ServiceTier: llmtypes.OpenAIServiceTierFlex}}
+	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", IsSubAgent: true, OpenAI: &llmtypes.OpenAIConfig{Platform: "openai", ServiceTier: llmtypes.OpenAIServiceTierFlex}}
 	thread := &Thread{
 		Thread: base.NewThread(config, "conv-test", hooks.Trigger{}),
 	}
@@ -1505,7 +1585,7 @@ func TestProcessMessageExchangeSavesConversationPerTurn(t *testing.T) {
 	require.Equal(t, 1, len(store.savedRecords))
 	assert.Equal(t, "openai", store.savedRecords[0].Provider)
 	assert.Equal(t, "responses", store.savedRecords[0].Metadata["api_mode"])
-	assert.Equal(t, "xai", store.savedRecords[0].Metadata["platform"])
+	assert.Equal(t, "openai", store.savedRecords[0].Metadata["platform"])
 	assert.Equal(t, "flex", store.savedRecords[0].Metadata["service_tier"])
 }
 

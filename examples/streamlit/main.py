@@ -14,7 +14,7 @@ by shelling out to the kodelet CLI with streaming output.
 Usage:
     uv run streamlit run main.py
 
-This example explicitly uses the OpenAI provider with gpt-5.4.
+This example explicitly uses the OpenAI provider with gpt-5.5.
 """
 
 import json
@@ -29,7 +29,7 @@ import streamlit as st
 
 KODELET_BIN = Path(__file__).parent.parent.parent / "bin" / "kodelet"
 DEFAULT_PROVIDER = "openai"
-DEFAULT_MODEL = "gpt-5.4"
+DEFAULT_MODEL = "gpt-5.5"
 
 CUSTOM_CSS = """
 <style>

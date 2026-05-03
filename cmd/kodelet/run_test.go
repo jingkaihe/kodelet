@@ -37,7 +37,7 @@ func TestLoadResumeConversationConfig_UsesStoredProfileAndMetadata(t *testing.T)
 	viper.Set("profiles", map[string]any{
 		"codex": map[string]any{
 			"provider": "openai",
-			"model":    "gpt-5.4",
+			"model":    "gpt-5.5",
 			"openai": map[string]any{
 				"platform": "codex",
 				"api_mode": "responses",
@@ -104,13 +104,13 @@ func TestLoadResumeConversationConfig_DefaultsToCurrentConfigForNewConversation(
 
 	viper.Reset()
 	viper.Set("provider", "openai")
-	viper.Set("model", "gpt-5.4")
+	viper.Set("model", "gpt-5.5")
 
 	cmd := &cobra.Command{Use: "run"}
 	config, resolvedCWD, err := loadResumeConversationConfig(context.Background(), cmd, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "openai", config.Provider)
-	assert.Equal(t, "gpt-5.4", config.Model)
+	assert.Equal(t, "gpt-5.5", config.Model)
 	assert.NotEmpty(t, resolvedCWD)
 }
 

@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.4.0-beta (2026-05-03)
+
+Added WebSocket streaming support for the OpenAI Responses API, including explicit failure handling and clean stream shutdown on terminal events.
+
+Updated OpenAI configuration for newer flagship and long-context models, with streamed usage pricing now keyed to the actual call model.
+
+Removed the xAI platform preset and refreshed the related config, docs, and regression coverage around supported OpenAI-compatible platforms.
+
 ## 0.3.51-beta (2026-05-02)
 
 Removed the built-in `todo_read` and `todo_write` tools, including the `--enable-todos`/`enable_todos` configuration path and the Web UI/ACP structured renderer plumbing for todo results.

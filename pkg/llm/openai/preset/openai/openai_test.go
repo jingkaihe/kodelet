@@ -12,7 +12,10 @@ func TestModels(t *testing.T) {
 	require.NotNil(t, Models)
 
 	// Test reasoning models
+	assert.Contains(t, Models.Reasoning, "gpt-5.5")
+	assert.Contains(t, Models.Reasoning, "gpt-5.5-pro")
 	assert.Contains(t, Models.Reasoning, "gpt-5.4")
+	assert.Contains(t, Models.Reasoning, "gpt-5.4-pro")
 	assert.Contains(t, Models.Reasoning, "gpt-5.4-mini")
 	assert.Contains(t, Models.Reasoning, "gpt-5.4-nano")
 	assert.Contains(t, Models.Reasoning, "o1")
@@ -49,6 +52,46 @@ func TestPricing(t *testing.T) {
 	require.NotNil(t, Pricing)
 
 	// Test some key models have pricing
+	gpt55, exists := Pricing["gpt-5.5"]
+	require.True(t, exists, "gpt-5.5 pricing should exist")
+	assert.Equal(t, 0.000005, gpt55.Input)
+	assert.Equal(t, 0.0000005, gpt55.CachedInput)
+	assert.Equal(t, 0.00003, gpt55.Output)
+	assert.Equal(t, 0.00001, gpt55.LongContextInput)
+	assert.Equal(t, 0.000001, gpt55.LongContextCachedInput)
+	assert.Equal(t, 0.000045, gpt55.LongContextOutput)
+	assert.Equal(t, 272_000, gpt55.LongContextThreshold)
+	assert.Equal(t, 1_050_000, gpt55.ContextWindow)
+
+	gpt55Pro, exists := Pricing["gpt-5.5-pro"]
+	require.True(t, exists, "gpt-5.5-pro pricing should exist")
+	assert.Equal(t, 0.00003, gpt55Pro.Input)
+	assert.Equal(t, 0.00018, gpt55Pro.Output)
+	assert.Equal(t, 0.00006, gpt55Pro.LongContextInput)
+	assert.Equal(t, 0.00027, gpt55Pro.LongContextOutput)
+	assert.Equal(t, 272_000, gpt55Pro.LongContextThreshold)
+	assert.Equal(t, 1_050_000, gpt55Pro.ContextWindow)
+
+	gpt54, exists := Pricing["gpt-5.4"]
+	require.True(t, exists, "gpt-5.4 pricing should exist")
+	assert.Equal(t, 0.0000025, gpt54.Input)
+	assert.Equal(t, 0.00000025, gpt54.CachedInput)
+	assert.Equal(t, 0.000015, gpt54.Output)
+	assert.Equal(t, 0.000005, gpt54.LongContextInput)
+	assert.Equal(t, 0.0000005, gpt54.LongContextCachedInput)
+	assert.Equal(t, 0.0000225, gpt54.LongContextOutput)
+	assert.Equal(t, 272_000, gpt54.LongContextThreshold)
+	assert.Equal(t, 1_050_000, gpt54.ContextWindow)
+
+	gpt54Pro, exists := Pricing["gpt-5.4-pro"]
+	require.True(t, exists, "gpt-5.4-pro pricing should exist")
+	assert.Equal(t, 0.00003, gpt54Pro.Input)
+	assert.Equal(t, 0.00018, gpt54Pro.Output)
+	assert.Equal(t, 0.00006, gpt54Pro.LongContextInput)
+	assert.Equal(t, 0.00027, gpt54Pro.LongContextOutput)
+	assert.Equal(t, 272_000, gpt54Pro.LongContextThreshold)
+	assert.Equal(t, 1_050_000, gpt54Pro.ContextWindow)
+
 	gpt54Mini, exists := Pricing["gpt-5.4-mini"]
 	require.True(t, exists, "gpt-5.4-mini pricing should exist")
 	assert.Equal(t, 0.00000075, gpt54Mini.Input)
@@ -89,6 +132,10 @@ func TestPricing(t *testing.T) {
 		assert.GreaterOrEqual(t, pricing.Input, 0.0, "Input pricing for %s should be >= 0", model)
 		assert.GreaterOrEqual(t, pricing.CachedInput, 0.0, "CachedInput pricing for %s should be >= 0", model)
 		assert.GreaterOrEqual(t, pricing.Output, 0.0, "Output pricing for %s should be >= 0", model)
+		assert.GreaterOrEqual(t, pricing.LongContextInput, 0.0, "LongContextInput pricing for %s should be >= 0", model)
+		assert.GreaterOrEqual(t, pricing.LongContextCachedInput, 0.0, "LongContextCachedInput pricing for %s should be >= 0", model)
+		assert.GreaterOrEqual(t, pricing.LongContextOutput, 0.0, "LongContextOutput pricing for %s should be >= 0", model)
+		assert.GreaterOrEqual(t, pricing.LongContextThreshold, 0, "LongContextThreshold for %s should be >= 0", model)
 		assert.Greater(t, pricing.ContextWindow, 0, "ContextWindow for %s should be > 0", model)
 	}
 }

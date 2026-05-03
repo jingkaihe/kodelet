@@ -14,7 +14,7 @@ A chatbot interface that communicates with kodelet via the Agent Client Protocol
 Usage:
     uv run main.py
 
-This example explicitly uses the OpenAI provider with gpt-5.4.
+This example explicitly uses the OpenAI provider with gpt-5.5.
 """
 
 import asyncio
@@ -59,7 +59,7 @@ os.environ["STREAMLIT_THEME_BASE"] = "light"
 st: Any = cast(Any, st_module)
 
 DEFAULT_PROVIDER = "openai"
-DEFAULT_MODEL = "gpt-5.4"
+DEFAULT_MODEL = "gpt-5.5"
 
 CUSTOM_CSS = """
 <style>
