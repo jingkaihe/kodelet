@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
@@ -92,10 +91,8 @@ type Thread struct {
 	useCopilot bool
 	// useWebSocket indicates whether Responses API websocket transport is enabled.
 	useWebSocket bool
-	// disableWebSocket is set after a websocket transport failure to fall back to HTTP.
-	disableWebSocket atomic.Bool
-	authorizer       auth.HTTPAuthorizer
-	webSocket        responsesWebSocketStreamer
+	authorizer   auth.HTTPAuthorizer
+	webSocket    responsesWebSocketStreamer
 
 	processMessageExchangeFunc func(
 		ctx context.Context,
@@ -489,20 +486,35 @@ func (t *Thread) processMessageExchange(
 		WithField("is_codex", t.isCodex).
 		Debug("sending request to Responses API")
 
-	newStreaming := t.newStreamingFunc
-	if newStreaming == nil {
-		newStreaming = t.client.Responses.NewStreaming
+	useWebSocket := t.useWebSocket && t.webSocket != nil
+	var newStreaming func(context.Context, responses.ResponseNewParams, ...option.RequestOption) *ssestream.Stream[responses.ResponseStreamEventUnion]
+	if !useWebSocket {
+		newStreaming = t.newStreamingFunc
+		if newStreaming == nil {
+			newStreaming = t.client.Responses.NewStreaming
+		}
 	}
 	processStream := t.processStreamFunc
 	if processStream == nil {
 		processStream = t.processStream
 	}
 
-	// Use WebSocket transport when enabled, falling back to HTTP streaming if the
-	// provider or endpoint rejects the upgrade.
-	stream, usedWebSocket, err := t.createResponsesStream(ctx, params, requestOpts)
-	if err != nil {
-		log.WithError(err).Debug("Responses API websocket unavailable, falling back to HTTP streaming")
+	var stream *ssestream.Stream[responses.ResponseStreamEventUnion]
+	if useWebSocket {
+		var err error
+		stream, err = t.webSocket.Stream(ctx, params, nil, t.authorizer)
+		if err != nil {
+			_ = t.webSocket.Close()
+			err = errors.Wrap(err, "failed to create Responses API websocket stream")
+			log.WithError(err).
+				WithField("model", model).
+				WithField("tool_count", len(tools)).
+				WithField("input_items", len(t.inputItems)).
+				Error("API request failed")
+			saveConversation()
+			return "", false, false, err
+		}
+	} else {
 		stream = newStreaming(ctx, params, requestOpts...)
 	}
 	log.Debug("stream created, processing events")
@@ -510,11 +522,8 @@ func (t *Thread) processMessageExchange(
 	// Process stream events
 	streamResult, err := processStream(ctx, stream, handler, model, opt)
 	if err != nil {
-		if usedWebSocket {
-			t.disableWebSocket.Store(true)
-			if t.webSocket != nil {
-				_ = t.webSocket.Close()
-			}
+		if useWebSocket {
+			_ = t.webSocket.Close()
 		}
 		// Log detailed error information for debugging
 		log.WithError(err).
@@ -543,24 +552,6 @@ func (t *Thread) processMessageExchange(
 	saveConversation()
 
 	return finalOutput, streamResult.toolsUsed, streamResult.responseCompleted, nil
-}
-
-func (t *Thread) createResponsesStream(
-	ctx context.Context,
-	params responses.ResponseNewParams,
-	_ []option.RequestOption,
-) (*ssestream.Stream[responses.ResponseStreamEventUnion], bool, error) {
-	if t == nil || !t.useWebSocket || t.disableWebSocket.Load() || t.webSocket == nil {
-		return nil, false, errors.New("Responses API websocket transport disabled")
-	}
-
-	stream, err := t.webSocket.Stream(ctx, params, nil, t.authorizer)
-	if err != nil {
-		t.disableWebSocket.Store(true)
-		return nil, false, err
-	}
-
-	return stream, true, nil
 }
 
 func (t *Thread) processPendingSteer(ctx context.Context, handler llmtypes.MessageHandler) error {

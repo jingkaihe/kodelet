@@ -264,7 +264,7 @@ openai:
 
   # Use the Responses API WebSocket transport when supported to reduce end-to-end
   # latency. Defaults to true for OpenAI/Codex Responses API calls; Kodelet still
-  # sends store: false and falls back to HTTP streaming if the upgrade is rejected.
+  # sends store: false. Set this to false to force HTTP streaming.
   # websocket_mode: true
 
   # Enable manual prompt-cache affinity for Chat Completions.
