@@ -3042,3 +3042,113 @@ input:focus-visible,
     transition-duration: 0.01ms !important;
   }
 }
+
+.konami-egg-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background:
+    radial-gradient(circle at 28% 24%, rgba(217, 119, 87, 0.12), transparent 28rem),
+    radial-gradient(circle at 72% 18%, rgba(106, 155, 204, 0.13), transparent 30rem),
+    rgba(242, 237, 227, 0.64);
+  backdrop-filter: blur(14px) saturate(0.94);
+  animation: konamiEggBackdropIn 180ms ease-out;
+}
+
+.konami-egg-modal {
+  width: min(43rem, calc(100vw - 2rem));
+  overflow: hidden;
+  border: 1px solid rgba(20, 20, 19, 0.08);
+  border-radius: 1.6rem;
+  background:
+    linear-gradient(145deg, rgba(250, 249, 245, 0.98), rgba(236, 229, 216, 0.96)),
+    var(--noise-texture);
+  box-shadow:
+    0 28px 72px rgba(20, 20, 19, 0.2),
+    0 0 0 1px rgba(255, 255, 255, 0.45) inset;
+  color: var(--kodelet-dark);
+  animation: konamiEggModalIn 240ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.konami-egg-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1rem 0.7rem;
+}
+
+.konami-egg-header-compact {
+  justify-content: flex-end;
+}
+
+.konami-egg-close {
+  flex: 0 0 auto;
+}
+
+.konami-egg-canvas {
+  display: block;
+  width: calc(100% - 2rem);
+  height: min(46vh, 22rem);
+  margin: 0 1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(20, 20, 19, 0.08);
+  background: rgba(250, 249, 245, 0.86);
+  box-shadow:
+    0 14px 34px rgba(20, 20, 19, 0.05) inset,
+    0 0 0 1px rgba(255, 255, 255, 0.7) inset;
+}
+
+.konami-egg-hint {
+  margin: 0;
+  padding: 0.74rem 1rem 0.98rem;
+  color: rgba(20, 20, 19, 0.54);
+  font-family: var(--font-heading);
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+@keyframes konamiEggBackdropIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes konamiEggModalIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (max-width: 640px) {
+  .konami-egg-backdrop {
+    padding: 0.75rem;
+  }
+
+  .konami-egg-header {
+    flex-direction: row;
+  }
+
+  .konami-egg-close {
+    align-self: auto;
+  }
+
+  .konami-egg-canvas {
+    height: min(54vh, 22rem);
+  }
+}
