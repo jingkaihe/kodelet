@@ -49,7 +49,7 @@ func TestNewThread(t *testing.T) {
 			config: llmtypes.Config{
 				Provider: "openai",
 			},
-			expectedModel: "gpt-5.4",
+			expectedModel: "gpt-5.5",
 			expectedMax:   8192,
 		},
 	}

@@ -32,13 +32,13 @@ The install script defaults to package-based installation: Homebrew on macOS and
 
 ## Choice of LLM
 
-Kodelet supports Anthropic Claude and OpenAI compatible models. The default model is now OpenAI `gpt-5.4`, with `gpt-5.4-mini` as the default weak model.
+Kodelet supports Anthropic Claude and OpenAI compatible models. The default model is now OpenAI `gpt-5.5`, with `gpt-5.4-mini` as the default weak model.
 
 If you prefer explicit environment configuration, you can use:
 
 ```bash
 export KODELET_PROVIDER="openai"
-export KODELET_MODEL="gpt-5.4"
+export KODELET_MODEL="gpt-5.5"
 export OPENAI_API_KEY="your-api-key"
 ```
 

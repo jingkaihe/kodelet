@@ -70,7 +70,7 @@ profiles:
 
   openai:
     provider: "openai"
-    model: "gpt-5.4"
+    model: "gpt-5.5"
     weak_model: "gpt-5.4-mini"
     max_tokens: 16000
     reasoning_effort: "xhigh"
@@ -99,7 +99,7 @@ profiles:
 
   openai-responses:
     provider: "openai"
-    model: "gpt-5.4"
+    model: "gpt-5.5"
     weak_model: "gpt-5.4-mini"
     max_tokens: 16000
     reasoning_effort: "xhigh"

@@ -169,7 +169,7 @@ func isCopilotPlatform(config llmtypes.Config) bool {
 func NewOpenAIThread(config llmtypes.Config) (*Thread, error) {
 	// Apply defaults if not provided
 	if config.Model == "" {
-		config.Model = "gpt-5.4" // Default to GPT-5.4
+		config.Model = "gpt-5.5" // Default to GPT-5.5
 	}
 	if config.MaxTokens == 0 {
 		config.MaxTokens = 8192

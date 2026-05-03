@@ -38,7 +38,7 @@ func TestResolveWebChatConfigForExistingConversation_UsesStoredProfileAndMetadat
 	viper.Set("profiles", map[string]any{
 		"codex": map[string]any{
 			"provider": "openai",
-			"model":    "gpt-5.4",
+			"model":    "gpt-5.5",
 			"openai": map[string]any{
 				"platform": "codex",
 				"api_mode": "responses",
@@ -78,7 +78,7 @@ func TestResolveWebChatConfigForNewConversation_DefaultProfileNameIgnoresActiveP
 
 	viper.Reset()
 	viper.Set("provider", "openai")
-	viper.Set("model", "gpt-5.4")
+	viper.Set("model", "gpt-5.5")
 	viper.Set("profile", "work")
 	viper.Set("profiles", map[string]any{
 		"work": map[string]any{
@@ -90,7 +90,7 @@ func TestResolveWebChatConfigForNewConversation_DefaultProfileNameIgnoresActiveP
 	config, err := resolveWebChatConfigForNewConversation("default")
 	require.NoError(t, err)
 	assert.Equal(t, "openai", config.Provider)
-	assert.Equal(t, "gpt-5.4", config.Model)
+	assert.Equal(t, "gpt-5.5", config.Model)
 	assert.Equal(t, "default", config.Profile)
 }
 
@@ -105,7 +105,7 @@ func TestResolveWebChatConfigForExistingConversation_DefaultProfileIgnoresActive
 
 	viper.Reset()
 	viper.Set("provider", "openai")
-	viper.Set("model", "gpt-5.4")
+	viper.Set("model", "gpt-5.5")
 	viper.Set("profile", "work")
 	viper.Set("profiles", map[string]any{
 		"work": map[string]any{
@@ -123,7 +123,7 @@ func TestResolveWebChatConfigForExistingConversation_DefaultProfileIgnoresActive
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "openai", config.Provider)
-	assert.Equal(t, "gpt-5.4", config.Model)
+	assert.Equal(t, "gpt-5.5", config.Model)
 	assert.Equal(t, "default", config.Profile)
 }
 
@@ -142,7 +142,7 @@ func TestResolveWebChatConfig_ResolvesRelativeCWDFromDefaultWorkspace(t *testing
 
 	viper.Reset()
 	viper.Set("provider", "openai")
-	viper.Set("model", "gpt-5.4")
+	viper.Set("model", "gpt-5.5")
 
 	config, resolvedCWD, err := resolveWebChatConfig(
 		context.Background(),

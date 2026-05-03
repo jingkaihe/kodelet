@@ -17,7 +17,7 @@ func recommendedSetupConfigYAML() string {
     sonnet-46: claude-sonnet-4-6
 disable_fs_search_tools: true
 max_tokens: 16000
-model: gpt-5.4
+model: gpt-5.5
 openai:
     api_mode: responses
 profile: default
@@ -31,7 +31,7 @@ profiles:
         disable_fs_search_tools: true
         tool_mode: patch
         max_tokens: 16000
-        model: gpt-5.4
+        model: gpt-5.5
         openai:
             api_mode: responses
         provider: openai
@@ -159,7 +159,7 @@ var setupCmd = &cobra.Command{
 
 		presenter.Separator()
 		presenter.Section("Getting Started")
-		presenter.Info("  kodelet run \"your query\"              # Run one-shot query with OpenAI gpt-5.4")
+		presenter.Info("  kodelet run \"your query\"              # Run one-shot query with OpenAI gpt-5.5")
 		presenter.Info("  kodelet run --profile anthropic \"query\"  # Use Anthropic profile (Claude Opus)")
 		presenter.Info("  kodelet serve                         # Start web UI server")
 		presenter.Info("  toad acp 'kodelet acp'                # Start interactive chat via ACP")
