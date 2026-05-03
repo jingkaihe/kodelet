@@ -50,6 +50,12 @@ func TestNewOpenAIThread(t *testing.T) {
 	assert.Equal(t, "high", thread.reasoningEffort)
 }
 
+func TestOpenAIModelHelpersUsePresetModels(t *testing.T) {
+	assert.True(t, IsReasoningModel("gpt-5.5"))
+	assert.True(t, IsOpenAIModel("gpt-5.5"))
+	assert.True(t, IsOpenAIModel("gpt-4o"))
+}
+
 func TestExtractMessages(t *testing.T) {
 	// Simple test case with a few messages
 	messagesJSON := `[

@@ -18,6 +18,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
+	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/sysprompt"
@@ -33,49 +34,14 @@ import (
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
-var (
-	// ReasoningModels lists OpenAI models that support reasoning capabilities.
-	// These arrays are kept in sync with platform defaults and are used by
-	// IsReasoningModel and IsOpenAIModel.
-	ReasoningModels = []string{
-		"o1",
-		"o1-pro",
-		"o1-mini",
-		"o3",
-		"o3-pro",
-		"o3-mini",
-		"o3-deep-research",
-		"o4-mini",
-		"o4-mini-deep-research",
-	}
-	// NonReasoningModels lists standard OpenAI models without reasoning capabilities.
-	NonReasoningModels = []string{
-		"gpt-4.1",
-		"gpt-4.1-mini",
-		"gpt-4.1-nano",
-		"gpt-4.5-preview",
-		"gpt-4o",
-		"gpt-4o-mini",
-		"gpt-4o-audio-preview",
-		"gpt-4o-realtime-preview",
-		"gpt-4o-mini-audio-preview",
-		"gpt-4o-mini-realtime-preview",
-		"gpt-4o-mini-search-preview",
-		"gpt-4o-search-preview",
-		"computer-use-preview",
-		"gpt-image-1",
-		"codex-mini-latest",
-	}
-)
-
 // IsReasoningModel checks if the given model supports reasoning capabilities.
 func IsReasoningModel(model string) bool {
-	return slices.Contains(ReasoningModels, model)
+	return slices.Contains(openaipreset.Models.Reasoning, model)
 }
 
 // IsOpenAIModel checks if the given model is a valid OpenAI model (reasoning or non-reasoning).
 func IsOpenAIModel(model string) bool {
-	return slices.Contains(ReasoningModels, model) || slices.Contains(NonReasoningModels, model)
+	return slices.Contains(openaipreset.Models.Reasoning, model) || slices.Contains(openaipreset.Models.NonReasoning, model)
 }
 
 func isRetryableError(err error) bool {
