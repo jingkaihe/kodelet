@@ -378,7 +378,7 @@ func (t *Thread) processStream(
 
 	// Update usage from final response
 	if finalResponse != nil {
-		t.updateUsage(finalResponse.Usage)
+		t.updateUsage(finalResponse.Usage, model)
 		if usageHandler, ok := handler.(llmtypes.UsageMessageHandler); ok {
 			usageHandler.HandleUsage(t.GetUsage())
 		}
@@ -526,7 +526,7 @@ func (t *Thread) executeToolCall(
 }
 
 // updateUsage updates the thread's usage statistics from a response.
-func (t *Thread) updateUsage(usage responses.ResponseUsage) {
+func (t *Thread) updateUsage(usage responses.ResponseUsage, model string) {
 	t.Mu.Lock()
 	defer t.Mu.Unlock()
 
@@ -539,7 +539,7 @@ func (t *Thread) updateUsage(usage responses.ResponseUsage) {
 	}
 
 	// Calculate costs based on model pricing
-	pricing := t.getPricing(t.Config.Model)
+	pricing := t.getPricing(model)
 
 	// Calculate individual costs
 	inputTokens := int(usage.InputTokens)
