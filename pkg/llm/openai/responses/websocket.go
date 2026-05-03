@@ -104,7 +104,7 @@ func (t *responsesWebSocketTransport) Close() error {
 
 func (t *responsesWebSocketTransport) connectionLocked(ctx context.Context, requestHeaders []string, authorizer auth.HTTPAuthorizer) (*websocket.Conn, error) {
 	if t.conn != nil {
-		return t.conn, nil
+		_ = t.closeLocked()
 	}
 
 	wsURL, err := responsesWebSocketURL(t.baseURL)
@@ -125,10 +125,7 @@ func (t *responsesWebSocketTransport) connectionLocked(ctx context.Context, requ
 		}
 		headers.Set(name, value)
 	}
-	isCodexBackend := strings.Contains(strings.TrimSpace(t.baseURL), "chatgpt.com/backend-api/codex")
-	if isCodexBackend {
-		headers.Set("OpenAI-Beta", responsesWebSocketBetaHeaderValue)
-	}
+	headers.Set("OpenAI-Beta", responsesWebSocketBetaHeaderValue)
 
 	if authorizer != nil {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, wsURL, nil)
@@ -141,9 +138,7 @@ func (t *responsesWebSocketTransport) connectionLocked(ctx context.Context, requ
 		}
 		headers = req.Header.Clone()
 	}
-	if isCodexBackend {
-		headers.Set("OpenAI-Beta", responsesWebSocketBetaHeaderValue)
-	}
+	headers.Set("OpenAI-Beta", responsesWebSocketBetaHeaderValue)
 
 	dialer := websocket.Dialer{HandshakeTimeout: 30 * time.Second}
 	conn, resp, err := dialer.DialContext(ctx, wsURL, headers)
@@ -293,7 +288,7 @@ func (d *webSocketStreamDecoder) Next() bool {
 			d.event = ssestream.Event{Data: bytes.TrimSpace(data)}
 			d.done = isTerminalWebSocketResponseEvent(d.event.Data)
 			if d.done {
-				d.stopCancelWatch()
+				d.closeTransport()
 			}
 			return true
 		case websocket.BinaryMessage:

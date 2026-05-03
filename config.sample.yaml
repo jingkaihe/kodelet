@@ -248,8 +248,9 @@ openai:
   # api_key_env_var: "XAI_API_KEY"   # Environment variable name for API key (defaults to OPENAI_API_KEY)
 
   # Select which OpenAI API surface to use.
-  # The Responses API offers multi-turn conversations via previous_response_id,
-  # native compaction support, and richer streaming events.
+  # Kodelet's Responses API path keeps conversation state locally by replaying
+  # input history with store: false and a stable prompt_cache_key, rather than
+  # relying on previous_response_id/server-stored conversation state.
   # api_mode: "responses"
 
   # Optional request latency tier. Native OpenAI values are auto, default,

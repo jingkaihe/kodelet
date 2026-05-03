@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/gorilla/websocket"
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
@@ -107,6 +110,38 @@ func TestWebSocketHandshakeErrorIsSafeToFormat(t *testing.T) {
 	assert.Contains(t, err.Error(), "HTTP 426 Upgrade Required")
 }
 
+func TestResponsesWebSocketTransportSetsBetaHeader(t *testing.T) {
+	tests := []struct {
+		name       string
+		authorizer auth.HTTPAuthorizer
+	}{
+		{name: "without authorizer"},
+		{
+			name: "after authorizer override",
+			authorizer: auth.AuthorizerFunc(func(req *http.Request) error {
+				req.Header.Set("OpenAI-Beta", "responses=experimental")
+				return nil
+			}),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			headerSeen := ""
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				headerSeen = r.Header.Get("OpenAI-Beta")
+				http.Error(w, "stop after handshake headers", http.StatusUpgradeRequired)
+			}))
+			defer server.Close()
+
+			transport := newResponsesWebSocketTransport("http" + strings.TrimPrefix(server.URL, "http") + "/v1")
+			_, err := transport.connectionLocked(context.Background(), nil, tt.authorizer)
+			require.Error(t, err)
+			assert.Equal(t, responsesWebSocketBetaHeaderValue, headerSeen)
+		})
+	}
+}
+
 type fakeResponsesWebSocketStreamer struct {
 	streamFunc func(context.Context, openairesponses.ResponseNewParams, []string, auth.HTTPAuthorizer) (*ssestream.Stream[openairesponses.ResponseStreamEventUnion], error)
 	closed     bool
@@ -132,6 +167,30 @@ func (emptyResponsesStreamDecoder) Event() ssestream.Event { return ssestream.Ev
 func (emptyResponsesStreamDecoder) Next() bool             { return false }
 func (emptyResponsesStreamDecoder) Close() error           { return nil }
 func (emptyResponsesStreamDecoder) Err() error             { return nil }
+
+func TestWebSocketStreamDecoderClosesTransportAfterTerminalEvent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upgrader := websocket.Upgrader{}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		require.NoError(t, err)
+		defer conn.Close()
+		_, _, err = conn.ReadMessage()
+		require.NoError(t, err)
+		require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"response.completed","response":{"id":"resp_test","status":"completed","usage":{"input_tokens":1,"input_tokens_details":{"cached_tokens":0},"output_tokens":1,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":2}}}`)))
+	}))
+	defer server.Close()
+
+	transport := newResponsesWebSocketTransport("http" + strings.TrimPrefix(server.URL, "http") + "/v1")
+	stream, err := transport.Stream(context.Background(), openairesponses.ResponseNewParams{Model: "gpt-4.1"}, nil, nil)
+	require.NoError(t, err)
+	require.True(t, stream.Next())
+	assert.Equal(t, "response.completed", stream.Current().Type)
+	require.NoError(t, stream.Err())
+
+	transport.mu.Lock()
+	defer transport.mu.Unlock()
+	assert.Nil(t, transport.conn)
+}
 
 func TestProcessMessageExchangeClosesWebSocketAfterStreamError(t *testing.T) {
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
