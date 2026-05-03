@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
@@ -89,6 +90,12 @@ type Thread struct {
 	isCodex bool
 	// useCopilot indicates if this thread authenticates through GitHub Copilot.
 	useCopilot bool
+	// useWebSocket indicates whether Responses API websocket transport is enabled.
+	useWebSocket bool
+	// disableWebSocket is set after a websocket transport failure to fall back to HTTP.
+	disableWebSocket atomic.Bool
+	authorizer       auth.HTTPAuthorizer
+	webSocket        responsesWebSocketStreamer
 
 	processMessageExchangeFunc func(
 		ctx context.Context,
@@ -119,7 +126,7 @@ func NewThread(config llmtypes.Config) (*Thread, error) {
 	baseThread := base.NewThread(config, conversationID, hookTrigger)
 
 	// Build client options based on authentication mode
-	opts, useCodex, useCopilot, err := buildClientOptions(config, log)
+	opts, authInfo, err := buildClientOptions(config, log)
 	if err != nil {
 		return nil, err
 	}
@@ -144,8 +151,13 @@ func NewThread(config llmtypes.Config) (*Thread, error) {
 		reasoningEffort: reasoningEffort,
 		customModels:    customModels,
 		customPricing:   customPricing,
-		isCodex:         useCodex,
-		useCopilot:      useCopilot,
+		isCodex:         authInfo.useCodex,
+		useCopilot:      authInfo.useCopilot,
+		useWebSocket:    shouldUseResponsesWebSocket(config),
+		authorizer:      authInfo.authorizer,
+	}
+	if thread.useWebSocket && supportsResponsesWebSocket(config) {
+		thread.webSocket = newResponsesWebSocketTransport(authInfo.baseURL)
 	}
 	thread.processMessageExchangeFunc = thread.processMessageExchange
 	thread.newStreamingFunc = thread.client.Responses.NewStreaming
@@ -486,13 +498,24 @@ func (t *Thread) processMessageExchange(
 		processStream = t.processStream
 	}
 
-	// Use streaming API
-	stream := newStreaming(ctx, params, requestOpts...)
+	// Use WebSocket transport when enabled, falling back to HTTP streaming if the
+	// provider or endpoint rejects the upgrade.
+	stream, usedWebSocket, err := t.createResponsesStream(ctx, params, requestOpts)
+	if err != nil {
+		log.WithError(err).Debug("Responses API websocket unavailable, falling back to HTTP streaming")
+		stream = newStreaming(ctx, params, requestOpts...)
+	}
 	log.Debug("stream created, processing events")
 
 	// Process stream events
 	streamResult, err := processStream(ctx, stream, handler, model, opt)
 	if err != nil {
+		if usedWebSocket {
+			t.disableWebSocket.Store(true)
+			if t.webSocket != nil {
+				_ = t.webSocket.Close()
+			}
+		}
 		// Log detailed error information for debugging
 		log.WithError(err).
 			WithField("model", model).
@@ -520,6 +543,24 @@ func (t *Thread) processMessageExchange(
 	saveConversation()
 
 	return finalOutput, streamResult.toolsUsed, streamResult.responseCompleted, nil
+}
+
+func (t *Thread) createResponsesStream(
+	ctx context.Context,
+	params responses.ResponseNewParams,
+	_ []option.RequestOption,
+) (*ssestream.Stream[responses.ResponseStreamEventUnion], bool, error) {
+	if t == nil || !t.useWebSocket || t.disableWebSocket.Load() || t.webSocket == nil {
+		return nil, false, errors.New("Responses API websocket transport disabled")
+	}
+
+	stream, err := t.webSocket.Stream(ctx, params, nil, t.authorizer)
+	if err != nil {
+		t.disableWebSocket.Store(true)
+		return nil, false, err
+	}
+
+	return stream, true, nil
 }
 
 func (t *Thread) processPendingSteer(ctx context.Context, handler llmtypes.MessageHandler) error {
@@ -1160,6 +1201,30 @@ func normalizeServiceTier(config llmtypes.Config) llmtypes.OpenAIServiceTier {
 	return tier
 }
 
+func shouldUseResponsesWebSocket(config llmtypes.Config) bool {
+	if config.OpenAI != nil && config.OpenAI.WebSocketMode != nil {
+		return *config.OpenAI.WebSocketMode
+	}
+	return true
+}
+
+func supportsResponsesWebSocket(config llmtypes.Config) bool {
+	platform := resolvePlatformName(config)
+	if platform != "openai" && platform != "codex" {
+		return false
+	}
+
+	baseURL := strings.TrimRight(getBaseURL(config), "/")
+	switch platform {
+	case "openai":
+		return baseURL == "" || strings.EqualFold(baseURL, strings.TrimRight(openaipreset.BaseURL, "/"))
+	case "codex":
+		return baseURL == "" || strings.EqualFold(baseURL, strings.TrimRight(codexpreset.BaseURL, "/"))
+	default:
+		return false
+	}
+}
+
 func getPlatformAPIKeyEnvVar(platform string) string {
 	switch normalizePlatformName(platform) {
 	case "xai":
@@ -1238,11 +1303,23 @@ func loadCustomConfiguration(config llmtypes.Config) (map[string]string, map[str
 	return customModels, customPricing
 }
 
+type responsesAuthInfo struct {
+	useCodex   bool
+	useCopilot bool
+	baseURL    string
+	authorizer auth.HTTPAuthorizer
+}
+
 // buildClientOptions constructs the OpenAI client options based on authentication mode.
-// Returns the options, whether Codex auth is being used, and any error.
-func buildClientOptions(config llmtypes.Config, log *logrus.Entry) ([]option.RequestOption, bool, bool, error) {
+// Returns the SDK options plus transport/auth metadata used by WebSocket mode.
+func buildClientOptions(config llmtypes.Config, log *logrus.Entry) ([]option.RequestOption, responsesAuthInfo, error) {
 	useCodex := resolvePlatformName(config) == "codex"
 	useCopilot := resolvePlatformName(config) == "copilot"
+	authInfo := responsesAuthInfo{
+		useCodex:   useCodex,
+		useCopilot: useCopilot,
+		baseURL:    getBaseURL(config),
+	}
 
 	var opts []option.RequestOption
 	var err error
@@ -1254,36 +1331,37 @@ func buildClientOptions(config llmtypes.Config, log *logrus.Entry) ([]option.Req
 		if normalizePlatformName(config.OpenAI.Platform) == "" {
 			config.OpenAI.Platform = "copilot"
 		}
-		opts, err = buildCopilotAuthOptions(config, log)
+		opts, authInfo.authorizer, err = buildCopilotAuthOptions(config, log)
 	} else if useCodex {
-		opts = buildCodexAuthOptions(config, log)
+		opts, authInfo.authorizer = buildCodexAuthOptions(config, log)
 	} else {
-		opts, err = buildAPIKeyAuthOptions(config, log)
+		opts, authInfo.authorizer, err = buildAPIKeyAuthOptions(config, log)
 	}
 	if err != nil {
-		return nil, useCodex, useCopilot, err
+		return nil, authInfo, err
 	}
 
 	opts = append(opts, errorLoggingMiddleware(log))
 
-	return opts, useCodex, useCopilot, nil
+	return opts, authInfo, nil
 }
 
-func buildCopilotAuthOptions(config llmtypes.Config, log *logrus.Entry) ([]option.RequestOption, error) {
+func buildCopilotAuthOptions(config llmtypes.Config, log *logrus.Entry) ([]option.RequestOption, auth.HTTPAuthorizer, error) {
 	copilotCredsExists, _ := auth.GetCopilotCredentialsExists()
 	if !copilotCredsExists {
-		return nil, errors.New("GitHub Copilot credentials not found, run 'kodelet copilot-login'")
+		return nil, nil, errors.New("GitHub Copilot credentials not found, run 'kodelet copilot-login'")
 	}
 
 	log.Debug("using GitHub Copilot authentication for Responses API")
-	opts := auth.OpenAIRequestOptionsWithAuthorizer(auth.CopilotAuthorizer())
+	authorizer := auth.CopilotAuthorizer()
+	opts := auth.OpenAIRequestOptionsWithAuthorizer(authorizer)
 	if baseURL := getBaseURL(config); baseURL != "" {
 		opts = append(opts, option.WithBaseURL(baseURL))
 	} else {
 		opts = append(opts, option.WithBaseURL(auth.CopilotBaseURL))
 	}
 
-	return opts, nil
+	return opts, authorizer, nil
 }
 
 func (t *Thread) requestOptions(opt llmtypes.MessageOpt) []option.RequestOption {
@@ -1295,23 +1373,24 @@ func (t *Thread) requestOptions(opt llmtypes.MessageOpt) []option.RequestOption 
 }
 
 // buildCodexAuthOptions returns client options for Codex CLI authentication.
-func buildCodexAuthOptions(config llmtypes.Config, log *logrus.Entry) []option.RequestOption {
+func buildCodexAuthOptions(config llmtypes.Config, log *logrus.Entry) ([]option.RequestOption, auth.HTTPAuthorizer) {
 	log.Debug("using Codex authentication for Responses API")
-	opts := auth.OpenAIRequestOptionsWithAuthorizer(auth.CodexAuthorizer())
+	authorizer := auth.CodexAuthorizer()
+	opts := auth.OpenAIRequestOptionsWithAuthorizer(authorizer)
 	if baseURL := getBaseURL(config); baseURL != "" {
 		opts = append(opts, option.WithBaseURL(baseURL))
 	} else {
 		opts = append(opts, option.WithBaseURL(auth.CodexAPIBaseURL))
 	}
-	return opts
+	return opts, authorizer
 }
 
 // buildAPIKeyAuthOptions returns client options for standard API key authentication.
-func buildAPIKeyAuthOptions(config llmtypes.Config, log *logrus.Entry) ([]option.RequestOption, error) {
+func buildAPIKeyAuthOptions(config llmtypes.Config, log *logrus.Entry) ([]option.RequestOption, auth.HTTPAuthorizer, error) {
 	apiKeyEnvVar := getAPIKeyEnvVar(config)
 	authorizer, err := auth.OpenAIAPIKeyAuthorizerFromEnv(apiKeyEnvVar)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	log.WithField("api_key_env_var", apiKeyEnvVar).Debug("using OpenAI API key for Responses API")
@@ -1321,7 +1400,7 @@ func buildAPIKeyAuthOptions(config llmtypes.Config, log *logrus.Entry) ([]option
 		opts = append(opts, option.WithBaseURL(baseURL))
 	}
 
-	return opts, nil
+	return opts, authorizer, nil
 }
 
 // errorLoggingMiddleware returns a middleware that logs error response bodies for debugging.

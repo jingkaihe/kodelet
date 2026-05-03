@@ -1010,12 +1010,26 @@ openai:
   platform: codex
   api_mode: responses
   service_tier: fast
+  websocket_mode: true
 ```
 
 `openai.service_tier` is optional. Kodelet accepts OpenAI's native values
 `auto`, `default`, `flex`, `priority`, and `scale`, plus Codex's
 user-facing `fast` alias. When you set `fast`, Kodelet sends
 `service_tier: priority` to the upstream API.
+
+`openai.websocket_mode` controls the Responses API WebSocket transport. It
+defaults to `true` for supported OpenAI and Codex Responses API endpoints to
+reduce end-to-end latency. Kodelet still sends `store: false` and replays local
+conversation state; if a WebSocket upgrade is rejected, it falls back to HTTP
+streaming for the request and disables WebSocket reuse for that thread.
+
+You can force HTTP streaming with:
+
+```yaml
+openai:
+  websocket_mode: false
+```
 
 ## OpenAI Native Web Search
 

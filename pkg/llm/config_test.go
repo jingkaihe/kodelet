@@ -584,6 +584,18 @@ func TestGetConfigFromViperOpenAISearchConfig(t *testing.T) {
 	assert.False(t, *config.OpenAI.EnableSearch)
 }
 
+func TestGetConfigFromViperOpenAIWebSocketModeConfig(t *testing.T) {
+	viper.Reset()
+	viper.Set("provider", "openai")
+	viper.Set("openai.websocket_mode", false)
+
+	config, err := GetConfigFromViper()
+	require.NoError(t, err)
+	require.NotNil(t, config.OpenAI)
+	require.NotNil(t, config.OpenAI.WebSocketMode)
+	assert.False(t, *config.OpenAI.WebSocketMode)
+}
+
 func TestGetConfigFromViperOpenAIModelsConfig(t *testing.T) {
 	// Setup
 	viper.Reset()

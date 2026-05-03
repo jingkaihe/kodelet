@@ -99,6 +99,86 @@ func TestNewThreadWithoutAPIKey(t *testing.T) {
 	assert.Contains(t, err.Error(), "OPENAI_API_KEY")
 }
 
+func TestNewThreadEnablesWebSocketByDefaultForOpenAIResponses(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	config := llmtypes.Config{
+		Provider: "openai",
+		Model:    "gpt-4.1",
+		OpenAI: &llmtypes.OpenAIConfig{
+			Platform: "openai",
+			APIMode:  llmtypes.OpenAIAPIModeResponses,
+		},
+	}
+
+	thread, err := NewThread(config)
+	require.NoError(t, err)
+	assert.True(t, thread.useWebSocket)
+	assert.NotNil(t, thread.webSocket)
+}
+
+func TestNewThreadCanDisableWebSocketMode(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	webSocketMode := false
+
+	config := llmtypes.Config{
+		Provider: "openai",
+		Model:    "gpt-4.1",
+		OpenAI: &llmtypes.OpenAIConfig{
+			Platform:      "openai",
+			APIMode:       llmtypes.OpenAIAPIModeResponses,
+			WebSocketMode: &webSocketMode,
+		},
+	}
+
+	thread, err := NewThread(config)
+	require.NoError(t, err)
+	assert.False(t, thread.useWebSocket)
+	assert.Nil(t, thread.webSocket)
+}
+
+func TestSupportsResponsesWebSocket(t *testing.T) {
+	tests := []struct {
+		name   string
+		config llmtypes.Config
+		want   bool
+	}{
+		{
+			name:   "default openai platform",
+			config: llmtypes.Config{},
+			want:   true,
+		},
+		{
+			name: "codex platform",
+			config: llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{
+				Platform: "codex",
+			}},
+			want: true,
+		},
+		{
+			name: "xai platform",
+			config: llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{
+				Platform: "xai",
+			}},
+			want: false,
+		},
+		{
+			name: "custom openai base url",
+			config: llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{
+				Platform: "openai",
+				BaseURL:  "https://example.test/v1",
+			}},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, supportsResponsesWebSocket(tt.config))
+		})
+	}
+}
+
 func TestBuildToolsIncludesNativeOpenAISearchWhenEligible(t *testing.T) {
 	state := tools.NewBasicState(context.Background(), tools.WithLLMConfig(llmtypes.Config{
 		Provider: "openai",

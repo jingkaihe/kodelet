@@ -25,6 +25,7 @@ func init() {
 	viper.SetDefault("provider", "openai")
 	viper.SetDefault("openai.api_mode", "responses")
 	viper.SetDefault("openai.enable_search", true)
+	viper.SetDefault("openai.websocket_mode", true)
 	viper.SetDefault("reasoning_effort", "medium")
 	viper.SetDefault("allowed_commands", []string{})
 	viper.SetDefault("bash.timeout", "120s")

@@ -262,6 +262,11 @@ openai:
   # base URLs that may not support the built-in tool.
   # enable_search: true
 
+  # Use the Responses API WebSocket transport when supported to reduce end-to-end
+  # latency. Defaults to true for OpenAI/Codex Responses API calls; Kodelet still
+  # sends store: false and falls back to HTTP streaming if the upgrade is rejected.
+  # websocket_mode: true
+
   # Enable manual prompt-cache affinity for Chat Completions.
   # When true, kodelet adds x-session-affinity header per conversation,
   # but only on calls where prompt caching is requested.
@@ -453,6 +458,7 @@ tracing:
 # - KODELET_TRACING_RATIO: Sets the sampling ratio
 # - KODELET_ALIASES_*: Define individual aliases (e.g., KODELET_ALIASES_SONNET46=claude-sonnet-4-6)
 # - KODELET_OPENAI_API_MODE: OpenAI API mode (chat_completions or responses)
+# - KODELET_OPENAI_WEBSOCKET_MODE: Use Responses API WebSocket mode when supported (true/false)
 #
 # API Keys:
 # - ANTHROPIC_API_KEY: Required when using the Anthropic provider
