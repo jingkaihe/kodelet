@@ -219,10 +219,42 @@ type CustomModels struct {
 
 // ModelPricing holds the per-token pricing for different operations
 type ModelPricing struct {
-	Input         float64 `mapstructure:"input" json:"input" yaml:"input"`                            // Input token cost per token
-	CachedInput   float64 `mapstructure:"cached_input" json:"cached_input" yaml:"cached_input"`       // Cached input token cost per token
-	Output        float64 `mapstructure:"output" json:"output" yaml:"output"`                         // Output token cost per token
-	ContextWindow int     `mapstructure:"context_window" json:"context_window" yaml:"context_window"` // Maximum context window size
+	// Input token cost per token.
+	Input float64 `mapstructure:"input" json:"input" yaml:"input"`
+	// Cached input token cost per token.
+	CachedInput float64 `mapstructure:"cached_input" json:"cached_input" yaml:"cached_input"`
+	// Output token cost per token.
+	Output float64 `mapstructure:"output" json:"output" yaml:"output"`
+	// Long-context input token cost per token.
+	LongContextInput float64 `mapstructure:"long_context_input" json:"long_context_input,omitempty" yaml:"long_context_input,omitempty"`
+	// Long-context cached input token cost per token.
+	LongContextCachedInput float64 `mapstructure:"long_context_cached_input" json:"long_context_cached_input,omitempty" yaml:"long_context_cached_input,omitempty"`
+	// Long-context output token cost per token.
+	LongContextOutput float64 `mapstructure:"long_context_output" json:"long_context_output,omitempty" yaml:"long_context_output,omitempty"`
+	// Prompt token threshold for long-context pricing.
+	LongContextThreshold int `mapstructure:"long_context_threshold" json:"long_context_threshold,omitempty" yaml:"long_context_threshold,omitempty"`
+	// Maximum context window size.
+	ContextWindow int `mapstructure:"context_window" json:"context_window" yaml:"context_window"`
+}
+
+// ForPromptTokens returns long-context pricing when the configured prompt token
+// threshold is exceeded. OpenAI applies long-context rates to the full session,
+// not just the tokens above the threshold.
+func (p ModelPricing) ForPromptTokens(promptTokens int) ModelPricing {
+	if p.LongContextThreshold <= 0 || promptTokens <= p.LongContextThreshold {
+		return p
+	}
+
+	if p.LongContextInput > 0 {
+		p.Input = p.LongContextInput
+	}
+	if p.LongContextCachedInput > 0 {
+		p.CachedInput = p.LongContextCachedInput
+	}
+	if p.LongContextOutput > 0 {
+		p.Output = p.LongContextOutput
+	}
+	return p
 }
 
 // CustomPricing maps model names to their pricing information

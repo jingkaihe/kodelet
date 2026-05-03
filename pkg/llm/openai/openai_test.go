@@ -1098,3 +1098,36 @@ func TestUpdateUsageWithCachedTokens(t *testing.T) {
 	assert.InDelta(t, 0.000015, usage.CacheReadCost, 1e-12)
 	assert.InDelta(t, 0.00008, usage.OutputCost, 1e-12)
 }
+
+func TestUpdateUsageUsesLongContextPricing(t *testing.T) {
+	thread := &Thread{Thread: base.NewThread(llm.Config{}, "conv-test", base.CreateHookTrigger(context.Background(), llm.Config{}, "conv-test"))}
+	thread.customPricing = llm.CustomPricing{
+		"test-model": {
+			Input:                  1,
+			CachedInput:            0.1,
+			Output:                 2,
+			LongContextInput:       3,
+			LongContextCachedInput: 0.3,
+			LongContextOutput:      4,
+			LongContextThreshold:   272_000,
+			ContextWindow:          1_050_000,
+		},
+	}
+
+	thread.updateUsage(openai.Usage{
+		PromptTokens:     272_001,
+		CompletionTokens: 10,
+		PromptTokensDetails: &openai.PromptTokensDetails{
+			CachedTokens: 1,
+		},
+	}, "test-model")
+
+	usage := thread.GetUsage()
+	assert.Equal(t, 272000, usage.InputTokens)
+	assert.Equal(t, 1, usage.CacheReadInputTokens)
+	assert.Equal(t, 10, usage.OutputTokens)
+	assert.Equal(t, float64(272000)*3, usage.InputCost)
+	assert.Equal(t, 0.3, usage.CacheReadCost)
+	assert.Equal(t, 40.0, usage.OutputCost)
+	assert.Equal(t, 1_050_000, usage.MaxContextWindow)
+}

@@ -640,10 +640,14 @@ func TestGetConfigFromViperOpenAIPricingConfig(t *testing.T) {
 	// Create complex pricing configuration
 	pricingConfig := map[string]any{
 		"gpt-4": map[string]any{
-			"input":          0.00003,
-			"cached_input":   0.000015,
-			"output":         0.00006,
-			"context_window": 128000,
+			"input":                     0.00003,
+			"cached_input":              0.000015,
+			"output":                    0.00006,
+			"long_context_input":        0.00006,
+			"long_context_cached_input": 0.00003,
+			"long_context_output":       0.00009,
+			"long_context_threshold":    272000,
+			"context_window":            128000,
 		},
 		"o1-preview": map[string]any{
 			"input":          0.000015,
@@ -668,6 +672,10 @@ func TestGetConfigFromViperOpenAIPricingConfig(t *testing.T) {
 	assert.Equal(t, 0.00003, gpt4Pricing.Input)
 	assert.Equal(t, 0.000015, gpt4Pricing.CachedInput)
 	assert.Equal(t, 0.00006, gpt4Pricing.Output)
+	assert.Equal(t, 0.00006, gpt4Pricing.LongContextInput)
+	assert.Equal(t, 0.00003, gpt4Pricing.LongContextCachedInput)
+	assert.Equal(t, 0.00009, gpt4Pricing.LongContextOutput)
+	assert.Equal(t, 272000, gpt4Pricing.LongContextThreshold)
 	assert.Equal(t, 128000, gpt4Pricing.ContextWindow)
 
 	// Check o1-preview pricing
@@ -750,10 +758,13 @@ func TestGetConfigFromViperOpenAIFullConfig(t *testing.T) {
 
 	pricingConfig := map[string]any{
 		"gpt-4": map[string]any{
-			"input":          0.00003,
-			"cached_input":   0.000015,
-			"output":         0.00006,
-			"context_window": 128000,
+			"input":                  0.00003,
+			"cached_input":           0.000015,
+			"output":                 0.00006,
+			"long_context_input":     0.00006,
+			"long_context_output":    0.00009,
+			"long_context_threshold": 272000,
+			"context_window":         128000,
 		},
 		"o1-preview": map[string]any{
 			"input":          0.000015,
@@ -790,6 +801,9 @@ func TestGetConfigFromViperOpenAIFullConfig(t *testing.T) {
 	assert.Equal(t, 0.00003, gpt4Pricing.Input)
 	assert.Equal(t, 0.000015, gpt4Pricing.CachedInput)
 	assert.Equal(t, 0.00006, gpt4Pricing.Output)
+	assert.Equal(t, 0.00006, gpt4Pricing.LongContextInput)
+	assert.Equal(t, 0.00009, gpt4Pricing.LongContextOutput)
+	assert.Equal(t, 272000, gpt4Pricing.LongContextThreshold)
 	assert.Equal(t, 128000, gpt4Pricing.ContextWindow)
 
 	o1Pricing := config.OpenAI.Pricing["o1-preview"]

@@ -38,6 +38,11 @@ func TestViewImageTool_GenerateSchema(t *testing.T) {
 	schema = tool.GenerateSchema()
 	_, hasDetail = schema.Properties.Get("detail")
 	assert.True(t, hasDetail)
+
+	tool = NewViewImageTool("gpt-5.4-pro", "openai")
+	schema = tool.GenerateSchema()
+	_, hasDetail = schema.Properties.Get("detail")
+	assert.True(t, hasDetail)
 }
 
 func TestViewImageTool_ValidateInput(t *testing.T) {

@@ -33,3 +33,8 @@ func TestMakeViewImageResultUsesDecodedImageFormat(t *testing.T) {
 	assert.Equal(t, "image/png", result.MimeType)
 	assert.Contains(t, result.ImageURL, "data:image/png;base64,")
 }
+
+func TestSupportsViewImageOriginalDetailIncludesFlagshipProModels(t *testing.T) {
+	assert.True(t, SupportsViewImageOriginalDetail("gpt-5.5-pro"))
+	assert.True(t, SupportsViewImageOriginalDetail("gpt-5.4-pro"))
+}

@@ -199,6 +199,40 @@ func TestUpdateUsageAccumulatesCachedTokensLikeCodexTotals(t *testing.T) {
 	assert.Equal(t, 140, thread.Usage.CurrentContextWindow)
 }
 
+func TestUpdateUsageUsesLongContextPricing(t *testing.T) {
+	thread := &Thread{
+		Thread: base.NewThread(llmtypes.Config{Provider: "openai", Model: "test-model"}, "test", hooks.Trigger{}),
+		customPricing: map[string]llmtypes.ModelPricing{
+			"test-model": {
+				Input:                  1,
+				CachedInput:            0.1,
+				Output:                 2,
+				LongContextInput:       3,
+				LongContextCachedInput: 0.3,
+				LongContextOutput:      4,
+				LongContextThreshold:   272_000,
+				ContextWindow:          1_050_000,
+			},
+		},
+	}
+
+	thread.updateUsage(responses.ResponseUsage{
+		InputTokens:  272_001,
+		OutputTokens: 10,
+		InputTokensDetails: responses.ResponseUsageInputTokensDetails{
+			CachedTokens: 1,
+		},
+	})
+
+	assert.Equal(t, 272001, thread.Usage.InputTokens)
+	assert.Equal(t, 1, thread.Usage.CacheReadInputTokens)
+	assert.Equal(t, 10, thread.Usage.OutputTokens)
+	assert.Equal(t, float64(272000)*3, thread.Usage.InputCost)
+	assert.Equal(t, 0.3, thread.Usage.CacheReadCost)
+	assert.Equal(t, 40.0, thread.Usage.OutputCost)
+	assert.Equal(t, 1_050_000, thread.Usage.MaxContextWindow)
+}
+
 func TestProcessStreamReturnsErrorOnIncompleteResponse(t *testing.T) {
 	usage := map[string]any{
 		"input_tokens":  1,

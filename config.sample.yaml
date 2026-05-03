@@ -288,6 +288,15 @@ openai:
   #     input: 0.000003         # $3 per million tokens
   #     output: 0.000015        # $15 per million tokens
   #     context_window: 256000  # 256k tokens
+  #   gpt-5.4:
+  #     input: 0.0000025                    # $2.50 per million tokens
+  #     cached_input: 0.00000025            # $0.25 per million tokens
+  #     output: 0.000015                    # $15 per million tokens
+  #     long_context_input: 0.000005        # $5 per million tokens
+  #     long_context_cached_input: 0.0000005 # $0.50 per million tokens
+  #     long_context_output: 0.0000225      # $22.50 per million tokens
+  #     long_context_threshold: 272000      # >272k prompt tokens
+  #     context_window: 1050000             # 1.05M tokens
   #   grok-3:
   #     input: 0.000003         # $3 per million tokens
   #     output: 0.000015        # $15 per million tokens

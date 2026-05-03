@@ -931,6 +931,7 @@ func (t *Thread) updateUsage(usage openai.Usage, model string) {
 			ContextWindow: 1047576,
 		}
 	}
+	pricing = pricing.ForPromptTokens(usage.PromptTokens)
 
 	if nonCachedInput > 0 {
 		t.Usage.InputCost += float64(nonCachedInput) * pricing.Input

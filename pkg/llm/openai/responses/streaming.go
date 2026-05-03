@@ -545,6 +545,7 @@ func (t *Thread) updateUsage(usage responses.ResponseUsage) {
 	inputTokens := int(usage.InputTokens)
 	outputTokens := int(usage.OutputTokens)
 	cachedTokens := int(usage.InputTokensDetails.CachedTokens)
+	pricing = pricing.ForPromptTokens(inputTokens)
 
 	// Non-cached input tokens
 	nonCachedInput := inputTokens - cachedTokens

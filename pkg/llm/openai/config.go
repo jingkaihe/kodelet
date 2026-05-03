@@ -188,10 +188,14 @@ func loadOpenAIPlatformDefaults() (*llmtypes.CustomModels, llmtypes.CustomPricin
 	pricing := make(llmtypes.CustomPricing)
 	for model, openaiPricing := range openaipreset.Pricing {
 		pricing[model] = llmtypes.ModelPricing{
-			Input:         openaiPricing.Input,
-			CachedInput:   openaiPricing.CachedInput,
-			Output:        openaiPricing.Output,
-			ContextWindow: openaiPricing.ContextWindow,
+			Input:                  openaiPricing.Input,
+			CachedInput:            openaiPricing.CachedInput,
+			Output:                 openaiPricing.Output,
+			LongContextInput:       openaiPricing.LongContextInput,
+			LongContextCachedInput: openaiPricing.LongContextCachedInput,
+			LongContextOutput:      openaiPricing.LongContextOutput,
+			LongContextThreshold:   openaiPricing.LongContextThreshold,
+			ContextWindow:          openaiPricing.ContextWindow,
 		}
 	}
 
@@ -208,10 +212,14 @@ func loadXAIPlatformDefaults() (*llmtypes.CustomModels, llmtypes.CustomPricing) 
 	pricing := make(llmtypes.CustomPricing)
 	for model, xaiPricing := range xai.Pricing {
 		pricing[model] = llmtypes.ModelPricing{
-			Input:         xaiPricing.Input,
-			CachedInput:   xaiPricing.CachedInput,
-			Output:        xaiPricing.Output,
-			ContextWindow: xaiPricing.ContextWindow,
+			Input:                  xaiPricing.Input,
+			CachedInput:            xaiPricing.CachedInput,
+			Output:                 xaiPricing.Output,
+			LongContextInput:       xaiPricing.LongContextInput,
+			LongContextCachedInput: xaiPricing.LongContextCachedInput,
+			LongContextOutput:      xaiPricing.LongContextOutput,
+			LongContextThreshold:   xaiPricing.LongContextThreshold,
+			ContextWindow:          xaiPricing.ContextWindow,
 		}
 	}
 
@@ -227,10 +235,14 @@ func loadCodexPlatformDefaults() (*llmtypes.CustomModels, llmtypes.CustomPricing
 	pricing := make(llmtypes.CustomPricing)
 	for model, codexPricing := range codexpreset.Pricing {
 		pricing[model] = llmtypes.ModelPricing{
-			Input:         codexPricing.Input,
-			CachedInput:   codexPricing.CachedInput,
-			Output:        codexPricing.Output,
-			ContextWindow: codexPricing.ContextWindow,
+			Input:                  codexPricing.Input,
+			CachedInput:            codexPricing.CachedInput,
+			Output:                 codexPricing.Output,
+			LongContextInput:       codexPricing.LongContextInput,
+			LongContextCachedInput: codexPricing.LongContextCachedInput,
+			LongContextOutput:      codexPricing.LongContextOutput,
+			LongContextThreshold:   codexPricing.LongContextThreshold,
+			ContextWindow:          codexPricing.ContextWindow,
 		}
 	}
 
@@ -350,6 +362,18 @@ func validateCustomConfiguration(config llmtypes.Config) error {
 			}
 			if pricing.CachedInput < 0 {
 				return fmt.Errorf("invalid cached_input pricing for model '%s': must be >= 0", model)
+			}
+			if pricing.LongContextInput < 0 {
+				return fmt.Errorf("invalid long_context_input pricing for model '%s': must be >= 0", model)
+			}
+			if pricing.LongContextOutput < 0 {
+				return fmt.Errorf("invalid long_context_output pricing for model '%s': must be >= 0", model)
+			}
+			if pricing.LongContextCachedInput < 0 {
+				return fmt.Errorf("invalid long_context_cached_input pricing for model '%s': must be >= 0", model)
+			}
+			if pricing.LongContextThreshold < 0 {
+				return fmt.Errorf("invalid long_context_threshold for model '%s': must be >= 0", model)
 			}
 			if pricing.ContextWindow <= 0 {
 				return fmt.Errorf("invalid context_window for model '%s': must be > 0", model)

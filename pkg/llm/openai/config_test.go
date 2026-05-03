@@ -14,7 +14,10 @@ import (
 // Define expected OpenAI platform defaults once to avoid duplication
 var (
 	expectedOpenAIReasoningModels = []string{
+		"gpt-5.5",
+		"gpt-5.5-pro",
 		"gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano",
+		"gpt-5.4-pro",
 		"gpt-5.2", "gpt-5.2-pro",
 		"gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-chat-latest",
 		"gpt-5.3-codex", "gpt-5.2-codex",
@@ -866,15 +869,53 @@ func TestValidateCustomConfiguration(t *testing.T) {
 				OpenAI: &llmtypes.OpenAIConfig{
 					Pricing: map[string]llmtypes.ModelPricing{
 						"test-model": {
-							Input:         0.001,
-							Output:        0.002,
-							CachedInput:   0.0005,
-							ContextWindow: 128000,
+							Input:                  0.001,
+							Output:                 0.002,
+							CachedInput:            0.0005,
+							LongContextInput:       0.002,
+							LongContextOutput:      0.003,
+							LongContextCachedInput: 0.001,
+							LongContextThreshold:   272000,
+							ContextWindow:          128000,
 						},
 					},
 				},
 			},
 			expectError: false,
+		},
+		{
+			name: "invalid long context pricing",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					Pricing: map[string]llmtypes.ModelPricing{
+						"test-model": {
+							Input:            0.001,
+							Output:           0.002,
+							LongContextInput: -0.002,
+							ContextWindow:    128000,
+						},
+					},
+				},
+			},
+			expectError:   true,
+			errorContains: "invalid long_context_input pricing",
+		},
+		{
+			name: "invalid long context threshold",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					Pricing: map[string]llmtypes.ModelPricing{
+						"test-model": {
+							Input:                0.001,
+							Output:               0.002,
+							LongContextThreshold: -1,
+							ContextWindow:        128000,
+						},
+					},
+				},
+			},
+			expectError:   true,
+			errorContains: "invalid long_context_threshold",
 		},
 		{
 			name: "invalid input pricing",
