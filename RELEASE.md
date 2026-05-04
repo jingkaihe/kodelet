@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.4.1-beta (2026-05-04)
+
+Refined the chat empty state and message avatars with matching visual polish for the updated frontend treatment.
+
 ## 0.4.0-beta (2026-05-03)
 
 Added WebSocket streaming support for the OpenAI Responses API, including explicit failure handling and clean stream shutdown on terminal events.
