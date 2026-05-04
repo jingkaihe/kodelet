@@ -385,14 +385,11 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
   if (messages.length === 0) {
     return (
       <div className="flex min-h-full items-center justify-center px-6 py-12">
-        <div className="max-w-2xl text-center">
-          <p className="eyebrow-label mb-3 text-kodelet-orange">
-            Kodelet Chat
-          </p>
-          <h1 className="mb-4 text-4xl font-heading font-bold tracking-tight text-kodelet-dark md:text-6xl">
+        <div className="empty-state-copy-stack text-center">
+          <h1 className="empty-state-title">
             {emptyStateTitle}
           </h1>
-          <p className="mx-auto max-w-xl text-lg font-body italic leading-8 text-kodelet-dark/70">
+          <p className="empty-state-copy">
             Ask kodelet to inspect the repo, make changes, run tools, and keep the entire
             conversation threaded in one place.
           </p>

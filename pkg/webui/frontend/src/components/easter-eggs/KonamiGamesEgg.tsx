@@ -503,14 +503,14 @@ const KonamiGamesEgg: React.FC = () => {
       context.stroke();
       context.restore();
 
-      context.font = '700 13px "Poppins", "Helvetica Neue", sans-serif';
+      context.font = '700 13px "IBM Plex Sans", "Helvetica Neue", sans-serif';
       context.fillStyle = 'rgba(20, 20, 19, 0.46)';
       context.textAlign = 'left';
       context.fillText('YOU', 22, 30);
       context.textAlign = 'right';
       context.fillText('KODELET', width - 22, 30);
 
-      context.font = '600 42px "Poppins", "Helvetica Neue", sans-serif';
+      context.font = '600 42px "IBM Plex Sans", "Helvetica Neue", sans-serif';
       context.fillStyle = 'rgba(20, 20, 19, 0.13)';
       context.textAlign = 'center';
       context.fillText(`${state.playerScore}  ${state.kodeletScore}`, width / 2, 58);
@@ -635,7 +635,7 @@ const KonamiGamesEgg: React.FC = () => {
       context.restore();
       context.shadowBlur = 0;
 
-      context.font = '700 14px "Poppins", "Helvetica Neue", sans-serif';
+      context.font = '700 14px "IBM Plex Sans", "Helvetica Neue", sans-serif';
       context.fillStyle = 'rgba(20, 20, 19, 0.54)';
       context.textAlign = 'left';
       context.fillText(`score ${state.score}`, 22, 30);
@@ -643,7 +643,7 @@ const KonamiGamesEgg: React.FC = () => {
       context.fillText(`best ${state.best}`, width - 22, 30);
 
       if (state.gameOver) {
-        context.font = '700 24px "Poppins", "Helvetica Neue", sans-serif';
+        context.font = '700 24px "IBM Plex Sans", "Helvetica Neue", sans-serif';
         context.fillStyle = '#4d473f';
         context.textAlign = 'center';
         context.fillText('Press Space to try again', width / 2, height / 2);
@@ -702,12 +702,12 @@ const KonamiGamesEgg: React.FC = () => {
         });
       });
 
-      context.font = '700 18px "Poppins", "Helvetica Neue", sans-serif';
+      context.font = '700 18px "IBM Plex Sans", "Helvetica Neue", sans-serif';
       context.fillStyle = '#4d473f';
       context.textAlign = 'left';
       const sideX = boardX + boardPixelWidth + 34;
       context.fillText('Tetris', sideX, boardY + 6);
-      context.font = '600 13px "Poppins", "Helvetica Neue", sans-serif';
+      context.font = '600 13px "IBM Plex Sans", "Helvetica Neue", sans-serif';
       context.fillStyle = 'rgba(20, 20, 19, 0.58)';
       context.fillText(`Score ${currentState.score}`, sideX, boardY + 40);
       context.fillText(`Lines ${currentState.lines}`, sideX, boardY + 64);
@@ -724,10 +724,10 @@ const KonamiGamesEgg: React.FC = () => {
       });
 
       if (currentState.gameOver) {
-        context.font = '700 21px "Poppins", "Helvetica Neue", sans-serif';
+        context.font = '700 21px "IBM Plex Sans", "Helvetica Neue", sans-serif';
         context.fillStyle = '#d97757';
         context.fillText('Game over', sideX, boardY + 202);
-        context.font = '600 12px "Poppins", "Helvetica Neue", sans-serif';
+        context.font = '600 12px "IBM Plex Sans", "Helvetica Neue", sans-serif';
         context.fillStyle = 'rgba(20, 20, 19, 0.58)';
         context.fillText('Space restarts', sideX, boardY + 226);
       }
