@@ -422,14 +422,56 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
               <div className="mb-4 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <div
+                    aria-hidden="true"
                     className={cn(
-                      'flex h-10 w-10 items-center justify-center rounded-full font-heading text-sm font-semibold uppercase',
-                      isUser
-                        ? 'bg-kodelet-orange text-white'
-                        : 'bg-kodelet-dark text-kodelet-light'
+                      'message-avatar',
+                      isUser ? 'message-avatar-user' : 'message-avatar-kodelet'
                     )}
                   >
-                    {isUser ? 'You' : 'Ko'}
+                    {isUser ? (
+                      <svg
+                        className="h-5 w-5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        xmlns="http://www.w3.org/2000/svg"
+                      >
+                        <path
+                          d="M12 11.4a3.35 3.35 0 1 0 0-6.7 3.35 3.35 0 0 0 0 6.7Z"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="1.8"
+                        />
+                        <path
+                          d="M5.9 19.1c.78-3.02 2.9-4.52 6.1-4.52s5.32 1.5 6.1 4.52"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="1.8"
+                        />
+                      </svg>
+                    ) : (
+                      <svg
+                        className="h-5 w-5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        xmlns="http://www.w3.org/2000/svg"
+                      >
+                        <path
+                          d="m7.5 7.5 4.5 4.5-4.5 4.5"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="2"
+                        />
+                        <path
+                          d="M13.5 16.5h4.2"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeWidth="2"
+                        />
+                      </svg>
+                    )}
                   </div>
 					<div>
 						<p className="font-heading text-sm font-semibold tracking-tight text-kodelet-dark">
