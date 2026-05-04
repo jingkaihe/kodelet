@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 
-const KONAMI_SEQUENCE = [
+const ARCADE_UNLOCK_SEQUENCE = [
   'ArrowUp',
   'ArrowUp',
   'ArrowDown',
@@ -70,7 +70,17 @@ const TETRIS_SHAPES = [
 const normalizeKey = (key: string): string => key.toLowerCase();
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 
-const shouldIgnoreKonamiEvent = (event: KeyboardEvent): boolean => {
+const FOCUSABLE_SELECTOR = [
+  'button:not([disabled])',
+  'canvas[tabindex]',
+  '[href]',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',');
+
+const shouldIgnoreUnlockEvent = (event: KeyboardEvent): boolean => {
   if (event.repeat || event.metaKey || event.ctrlKey || event.altKey) {
     return true;
   }
@@ -82,6 +92,22 @@ const shouldIgnoreKonamiEvent = (event: KeyboardEvent): boolean => {
 const isTextEntryTarget = (event: KeyboardEvent): boolean => {
   const target = event.target as HTMLElement | null;
   return Boolean(target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA'));
+};
+
+const isInteractiveControlTarget = (event: KeyboardEvent): boolean => {
+  const target = event.target instanceof Element ? event.target : document.activeElement;
+  return Boolean(target?.closest('button, a, input, select, textarea, [role="button"]'));
+};
+
+const getInitialFocusTarget = (modal: HTMLElement): HTMLElement =>
+  modal.querySelector<HTMLElement>('[data-arcade-autofocus]') ||
+  modal.querySelector<HTMLElement>(FOCUSABLE_SELECTOR) ||
+  modal;
+
+const consumeKeyboardEvent = (event: KeyboardEvent): void => {
+  event.preventDefault();
+  event.stopPropagation();
+  event.stopImmediatePropagation();
 };
 
 const createPongState = (): PongState => ({
@@ -254,10 +280,12 @@ const gameHints: Record<GameId, string> = {
   flappy: 'Space, Up, or click to flap.',
 };
 
-const KonamiGamesEgg: React.FC = () => {
+const ArcadeGames: React.FC = () => {
   const [open, setOpen] = useState(false);
   const [selectedGame, setSelectedGame] = useState<GameId | null>(null);
+  const modalRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
   const sequenceIndexRef = useRef(0);
   const pongRef = useRef<PongState>(createPongState());
   const flappyRef = useRef<FlappyState>(createFlappyState());
@@ -289,61 +317,133 @@ const KonamiGamesEgg: React.FC = () => {
   };
 
   useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+
+    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+    window.setTimeout(() => {
+      const modal = modalRef.current;
+      if (!modal) {
+        return;
+      }
+      getInitialFocusTarget(modal).focus();
+    }, 0);
+
+    return () => {
+      const previousFocus = previousFocusRef.current;
+      previousFocusRef.current = null;
+      if (previousFocus?.isConnected) {
+        previousFocus.focus();
+      }
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (open && selectedGame) {
+      window.setTimeout(() => {
+        canvasRef.current?.focus();
+      }, 0);
+    }
+  }, [open, selectedGame]);
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (open) {
         if (event.key === 'Escape') {
+          consumeKeyboardEvent(event);
           close();
+          return;
+        }
+
+        if (event.key === 'Tab') {
+          const modal = modalRef.current;
+          if (!modal) {
+            consumeKeyboardEvent(event);
+            return;
+          }
+
+          const focusableElements = Array.from(modal.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+          if (focusableElements.length === 0) {
+            consumeKeyboardEvent(event);
+            modal.focus();
+            return;
+          }
+
+          const activeElement = event.target instanceof HTMLElement ? event.target : document.activeElement;
+          const firstElement = focusableElements[0];
+          const lastElement = focusableElements[focusableElements.length - 1];
+          if (!activeElement || !modal.contains(activeElement)) {
+            consumeKeyboardEvent(event);
+            getInitialFocusTarget(modal).focus();
+            return;
+          }
+          if (event.shiftKey && activeElement === firstElement) {
+            consumeKeyboardEvent(event);
+            lastElement.focus();
+            return;
+          }
+          if (!event.shiftKey && activeElement === lastElement) {
+            consumeKeyboardEvent(event);
+            firstElement.focus();
+            return;
+          }
           return;
         }
 
         if (!selectedGame) {
           const gameNumber = Number(event.key);
           if (gameNumber >= 1 && gameNumber <= GAME_OPTIONS.length) {
-            event.preventDefault();
+            consumeKeyboardEvent(event);
             startGame(GAME_OPTIONS[gameNumber - 1]);
           }
           return;
         }
 
+        if (isInteractiveControlTarget(event)) {
+          return;
+        }
+
         if (selectedGame === 'pong' && ['ArrowUp', 'ArrowDown', 'w', 'W', 's', 'S'].includes(event.key)) {
-          event.preventDefault();
+          consumeKeyboardEvent(event);
           pressedKeysRef.current.add(event.key.toLowerCase());
           return;
         }
 
         if (selectedGame === 'flappy' && [' ', 'ArrowUp', 'w', 'W'].includes(event.key)) {
-          event.preventDefault();
+          consumeKeyboardEvent(event);
           flap();
           return;
         }
 
         if (selectedGame === 'tetris') {
           if (event.key === 'ArrowLeft') {
-            event.preventDefault();
+            consumeKeyboardEvent(event);
             tetrisRef.current = moveTetrisPiece(tetrisRef.current, -1, 0);
           } else if (event.key === 'ArrowRight') {
-            event.preventDefault();
+            consumeKeyboardEvent(event);
             tetrisRef.current = moveTetrisPiece(tetrisRef.current, 1, 0);
           } else if (event.key === 'ArrowDown') {
-            event.preventDefault();
+            consumeKeyboardEvent(event);
             tetrisRef.current = moveTetrisPiece({ ...tetrisRef.current, score: tetrisRef.current.score + 1 }, 0, 1);
           } else if (event.key === 'ArrowUp') {
-            event.preventDefault();
+            consumeKeyboardEvent(event);
             tetrisRef.current = rotateTetrisPiece(tetrisRef.current);
           } else if (event.key === ' ') {
-            event.preventDefault();
+            consumeKeyboardEvent(event);
             tetrisRef.current = hardDropTetrisPiece(tetrisRef.current);
           }
           return;
         }
       }
 
-      if (shouldIgnoreKonamiEvent(event)) {
+      if (shouldIgnoreUnlockEvent(event)) {
         sequenceIndexRef.current = 0;
         return;
       }
 
-      const expectedKey = KONAMI_SEQUENCE[sequenceIndexRef.current];
+      const expectedKey = ARCADE_UNLOCK_SEQUENCE[sequenceIndexRef.current];
       const pressedKey = normalizeKey(event.key);
 
       if (pressedKey === normalizeKey(expectedKey)) {
@@ -353,7 +453,7 @@ const KonamiGamesEgg: React.FC = () => {
           event.preventDefault();
         }
 
-        if (sequenceIndexRef.current === KONAMI_SEQUENCE.length) {
+        if (sequenceIndexRef.current === ARCADE_UNLOCK_SEQUENCE.length) {
           sequenceIndexRef.current = 0;
           event.preventDefault();
           setSelectedGame(null);
@@ -362,17 +462,17 @@ const KonamiGamesEgg: React.FC = () => {
         return;
       }
 
-      sequenceIndexRef.current = pressedKey === normalizeKey(KONAMI_SEQUENCE[0]) ? 1 : 0;
+      sequenceIndexRef.current = pressedKey === normalizeKey(ARCADE_UNLOCK_SEQUENCE[0]) ? 1 : 0;
     };
 
     const handleKeyUp = (event: KeyboardEvent) => {
       pressedKeysRef.current.delete(event.key.toLowerCase());
     };
 
-    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
     window.addEventListener('keyup', handleKeyUp);
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keydown', handleKeyDown, true);
       window.removeEventListener('keyup', handleKeyUp);
     };
   }, [open, selectedGame]);
@@ -779,49 +879,51 @@ const KonamiGamesEgg: React.FC = () => {
   }
 
   return (
-    <div className="konami-egg-backdrop" data-testid="konami-egg-backdrop" onClick={close}>
+    <div className="arcade-games-backdrop" data-testid="arcade-games-backdrop" onClick={close}>
       <div
         aria-label="Kodelet games"
         aria-modal="true"
-        className="konami-egg-modal surface-panel"
-        data-testid="konami-egg-modal"
+        className="arcade-games-modal surface-panel"
+        data-testid="arcade-games-modal"
         onClick={(event) => event.stopPropagation()}
+        ref={modalRef}
         role="dialog"
+        tabIndex={-1}
       >
-        <div className="konami-egg-header">
-          <div className="konami-game-title-block">
-            <p className="konami-game-kicker">Select game</p>
-            <p className="konami-game-title">{selectedLabel || 'Hidden arcade'}</p>
+        <div className="arcade-games-header">
+          <div className="arcade-game-title-block">
+            <p className="arcade-game-kicker">Select game</p>
+            <p className="arcade-game-title">{selectedLabel || 'Hidden arcade'}</p>
           </div>
-          <div className="konami-game-header-actions">
+          <div className="arcade-game-header-actions">
             {selectedGame ? (
               <button className="composer-capsule" onClick={() => setSelectedGame(null)} type="button">
                 Games
               </button>
             ) : null}
-            <button className="composer-capsule konami-egg-close" onClick={close} type="button">
+            <button className="composer-capsule arcade-games-close" onClick={close} type="button">
               Close
             </button>
           </div>
         </div>
 
         {selectedGame ? (
-          <canvas className="konami-egg-canvas" data-testid="konami-egg-canvas" ref={canvasRef} />
+          <canvas aria-label={`${selectedLabel} play area`} className="arcade-games-canvas" data-arcade-autofocus="true" data-testid="arcade-games-canvas" ref={canvasRef} tabIndex={0} />
         ) : (
-          <div className="konami-game-picker" data-testid="konami-game-picker">
+          <div className="arcade-game-picker" data-testid="arcade-game-picker">
             {GAME_OPTIONS.map((game) => (
-              <button className="konami-game-card" key={game} onClick={() => startGame(game)} type="button">
-                <span className="konami-game-name">{gameLabels[game]}</span>
-                <span className="konami-game-copy">{gameHints[game]}</span>
+              <button className="arcade-game-card" data-arcade-autofocus={game === GAME_OPTIONS[0] ? 'true' : undefined} key={game} onClick={() => startGame(game)} type="button">
+                <span className="arcade-game-name">{gameLabels[game]}</span>
+                <span className="arcade-game-copy">{gameHints[game]}</span>
               </button>
             ))}
           </div>
         )}
 
-        <p className="konami-egg-hint">Esc or click outside to close.</p>
+        <p className="arcade-games-hint">Esc or click outside to close.</p>
       </div>
     </div>
   );
 };
 
-export default KonamiGamesEgg;
+export default ArcadeGames;

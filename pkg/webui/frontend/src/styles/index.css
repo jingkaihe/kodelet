@@ -3115,7 +3115,7 @@ input:focus-visible,
   }
 }
 
-.konami-egg-backdrop {
+.arcade-games-backdrop {
   position: fixed;
   inset: 0;
   z-index: 120;
@@ -3125,10 +3125,10 @@ input:focus-visible,
   padding: 1.5rem;
   background: rgba(20, 20, 19, 0.22);
   backdrop-filter: blur(8px);
-  animation: konamiEggBackdropIn 180ms ease-out;
+  animation: arcadeGamesBackdropIn 180ms ease-out;
 }
 
-.konami-egg-modal {
+.arcade-games-modal {
   width: min(42rem, calc(100vw - 2rem));
   overflow: hidden;
   border: 1px solid rgba(20, 20, 19, 0.08);
@@ -3136,10 +3136,10 @@ input:focus-visible,
   background: var(--kodelet-panel);
   box-shadow: 0 28px 70px rgba(20, 20, 19, 0.18);
   color: var(--kodelet-dark);
-  animation: konamiEggModalIn 240ms cubic-bezier(0.16, 1, 0.3, 1);
+  animation: arcadeGamesModalIn 240ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.konami-egg-header {
+.arcade-games-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3147,11 +3147,11 @@ input:focus-visible,
   padding: 1.15rem 1.15rem 0.85rem;
 }
 
-.konami-game-title-block {
+.arcade-game-title-block {
   min-width: 0;
 }
 
-.konami-game-kicker {
+.arcade-game-kicker {
   margin: 0 0 0.2rem;
   color: #7a756b;
   font-family: var(--font-heading);
@@ -3162,7 +3162,7 @@ input:focus-visible,
   text-transform: uppercase;
 }
 
-.konami-game-title {
+.arcade-game-title {
   margin: 0;
   color: var(--kodelet-dark);
   font-family: var(--font-heading);
@@ -3172,7 +3172,7 @@ input:focus-visible,
   line-height: 1.25;
 }
 
-.konami-game-header-actions {
+.arcade-game-header-actions {
   display: flex;
   flex: 0 0 auto;
   flex-wrap: wrap;
@@ -3180,11 +3180,11 @@ input:focus-visible,
   gap: 0.5rem;
 }
 
-.konami-egg-close {
+.arcade-games-close {
   flex: 0 0 auto;
 }
 
-.konami-egg-canvas {
+.arcade-games-canvas {
   display: block;
   width: calc(100% - 2.3rem);
   height: min(46vh, 22rem);
@@ -3197,7 +3197,7 @@ input:focus-visible,
     0 0 0 1px rgba(255, 255, 255, 0.7) inset;
 }
 
-.konami-game-picker {
+.arcade-game-picker {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: stretch;
@@ -3205,7 +3205,7 @@ input:focus-visible,
   margin: 0 1.15rem;
 }
 
-.konami-game-card {
+.arcade-game-card {
   display: flex;
   min-height: 8.5rem;
   height: 100%;
@@ -3226,15 +3226,15 @@ input:focus-visible,
     transform 140ms ease;
 }
 
-.konami-game-card:hover,
-.konami-game-card:focus-visible {
+.arcade-game-card:hover,
+.arcade-game-card:focus-visible {
   border-color: rgba(217, 119, 87, 0.22);
   background: rgba(217, 119, 87, 0.08);
   outline: none;
   transform: translateY(-1px);
 }
 
-.konami-game-name {
+.arcade-game-name {
   font-family: var(--font-heading);
   font-size: 0.96rem;
   font-weight: 600;
@@ -3242,7 +3242,7 @@ input:focus-visible,
   line-height: 1.2;
 }
 
-.konami-game-copy {
+.arcade-game-copy {
   color: rgba(20, 20, 19, 0.58);
   font-family: var(--font-heading);
   font-size: 0.7rem;
@@ -3250,7 +3250,7 @@ input:focus-visible,
   line-height: 1.5;
 }
 
-.konami-egg-hint {
+.arcade-games-hint {
   margin: 0;
   padding: 0.74rem 1.15rem 1rem;
   color: rgba(20, 20, 19, 0.54);
@@ -3260,7 +3260,7 @@ input:focus-visible,
   letter-spacing: 0.02em;
 }
 
-@keyframes konamiEggBackdropIn {
+@keyframes arcadeGamesBackdropIn {
   from {
     opacity: 0;
   }
@@ -3270,7 +3270,7 @@ input:focus-visible,
   }
 }
 
-@keyframes konamiEggModalIn {
+@keyframes arcadeGamesModalIn {
   from {
     opacity: 0;
     transform: translateY(14px) scale(0.98);
@@ -3283,27 +3283,27 @@ input:focus-visible,
 }
 
 @media (max-width: 640px) {
-  .konami-egg-backdrop {
+  .arcade-games-backdrop {
     padding: 0.75rem;
   }
 
-  .konami-egg-header {
+  .arcade-games-header {
     flex-direction: row;
   }
 
-  .konami-game-picker {
+  .arcade-game-picker {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .konami-game-card {
+  .arcade-game-card {
     min-height: 7rem;
   }
 
-  .konami-egg-close {
+  .arcade-games-close {
     align-self: auto;
   }
 
-  .konami-egg-canvas {
+  .arcade-games-canvas {
     height: min(54vh, 22rem);
   }
 }

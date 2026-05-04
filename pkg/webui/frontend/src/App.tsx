@@ -1,6 +1,6 @@
 
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import KonamiGamesEgg from './components/easter-eggs/KonamiGamesEgg';
+import ArcadeGames from './components/games/ArcadeGames';
 import ChatPage from './pages/ChatPage';
 
 function App() {
@@ -10,7 +10,7 @@ function App() {
       v7_relativeSplatPath: true
     }}>
       <div className="min-h-screen">
-        <KonamiGamesEgg />
+        <ArcadeGames />
         <Routes>
           <Route path="/" element={<ChatPage />} />
           <Route path="/c/:id" element={<ChatPage />} />
