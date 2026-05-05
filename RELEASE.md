@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.4.2-beta (2026-05-05)
+
+Improved the Web UI new-chat streaming flow so the browser URL is replaced as soon as the server emits the new conversation id, keeping the active stream and sidebar state attached to the started chat.
+
 ## 0.4.1-beta (2026-05-04)
 
 Refined the chat empty state and message avatars with matching visual polish for the updated frontend treatment.
