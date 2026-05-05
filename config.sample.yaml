@@ -70,7 +70,7 @@ profiles:
 
   openai:
     provider: "openai"
-    model: "gpt-5.4"
+    model: "gpt-5.5"
     weak_model: "gpt-5.4-mini"
     max_tokens: 16000
     reasoning_effort: "xhigh"
@@ -79,15 +79,6 @@ profiles:
     openai:
       platform: "copilot"
       api_mode: "responses"
-
-  xai:
-    provider: "openai"
-    model: "grok-3"
-    weak_model: "grok-3-mini"
-    max_tokens: 16000
-    reasoning_effort: "none"
-    openai:
-      platform: "xai"
 
   fireworks:
     provider: "openai"
@@ -108,7 +99,7 @@ profiles:
 
   openai-responses:
     provider: "openai"
-    model: "gpt-5.4"
+    model: "gpt-5.5"
     weak_model: "gpt-5.4-mini"
     max_tokens: 16000
     reasoning_effort: "xhigh"
@@ -182,6 +173,11 @@ allowed_commands: []
 #   - "git status"
 #   - "git log *"
 
+# Bash tool configuration
+bash:
+  # Maximum execution timeout for bash tool calls (default: 120s)
+  timeout: 120s
+
 # Domain Filtering Configuration
 # Path to file containing allowed domains for web_fetch tool (one domain per line)
 # Supports exact matches (github.com) and glob patterns (*.github.com)
@@ -194,7 +190,7 @@ allowed_domains_file: "~/.kodelet/allowed_domains.txt"
 # Meta tools (grep_tool and glob_tool) are always enabled for basic functionality unless
 # disable_fs_search_tools is set to true.
 # Available tools: bash, apply_patch, file_read, file_write, file_edit, thinking, subagent, grep_tool,
-#                  glob_tool, todo_read, todo_write, web_fetch, view_image
+#                  glob_tool, web_fetch, view_image
 # Tool interaction mode.
 # - full: standard tool access
 # - patch: removes file_read, file_write, and file_edit from both main-agent and subagent
@@ -221,22 +217,8 @@ allowed_tools: []
 #   - "subagent"
 #   - "grep_tool"      # Always enabled (meta tool)
 #   - "glob_tool"      # Always enabled (meta tool)
-#   - "todo_read"
-#   - "todo_write"
 #   - "web_fetch"
 #   - "view_image"
-
-# Commit Configuration
-# Configure coauthor attribution for commit messages
-commit:
-  coauthor:
-    # Enable or disable coauthor attribution (default: true)
-    enabled: true
-    # Coauthor name (default: "Kodelet")
-    name: "Kodelet"
-    # Coauthor email (default: "noreply@kodelet.com")
-    email: "noreply@kodelet.com"
-
 
 # Example OpenAI configuration (uncomment to use)
 # provider: "openai"
@@ -247,49 +229,63 @@ commit:
 # reasoning_effort: "medium"
 
 # OpenAI-compatible API configuration
-# Supports any OpenAI-compatible provider (xAI, Groq, Together AI, etc.)
+# Supports any OpenAI-compatible provider (Fireworks, Groq, Together AI, etc.)
 openai:
-  # Optional platform label used for built-in defaults/metadata (e.g., openai, xai, codex, fireworks)
-  # platform: "xai"
+  # Optional platform label used for built-in defaults/metadata (e.g., openai, codex, fireworks)
+  # platform: "fireworks"
 
   # Custom endpoint/auth configuration
-  # base_url: "https://api.x.ai/v1"  # Custom API endpoint
-  # api_key_env_var: "XAI_API_KEY"   # Environment variable name for API key (defaults to OPENAI_API_KEY)
+  # base_url: "https://api.fireworks.ai/inference/v1"  # Custom API endpoint
+  # api_key_env_var: "FIREWORK_API_KEY"                # Environment variable name for API key (defaults to OPENAI_API_KEY)
 
   # Select which OpenAI API surface to use.
-  # The Responses API offers multi-turn conversations via previous_response_id,
-  # native compaction support, and richer streaming events.
+  # Kodelet's Responses API path keeps conversation state locally by replaying
+  # input history with store: false and a stable prompt_cache_key, rather than
+  # relying on previous_response_id/server-stored conversation state.
   # api_mode: "responses"
+
+  # Optional request latency tier. Native OpenAI values are auto, default,
+  # flex, priority, and scale. Kodelet also accepts fast as a Codex-friendly
+  # alias that is sent upstream as priority.
+  # service_tier: "fast"
 
   # Enable OpenAI's native Responses web_search tool when talking to the real
   # OpenAI platform. This stays off for OpenAI-compatible platforms and custom
   # base URLs that may not support the built-in tool.
   # enable_search: true
 
+  # Use the Responses API WebSocket transport when supported to reduce end-to-end
+  # latency. Defaults to true for OpenAI/Codex Responses API calls; Kodelet still
+  # sends store: false. Set this to false to force HTTP streaming.
+  # websocket_mode: true
+
   # Enable manual prompt-cache affinity for Chat Completions.
   # When true, kodelet adds x-session-affinity header per conversation,
   # but only on calls where prompt caching is requested.
   # manual_cache: true
   # models:
-  #   # Models that support reasoning capabilities (o1, o3, grok reasoning models, etc.)
+  #   # Models that support reasoning capabilities
   #   reasoning:
-  #     - "grok-4-0709"
-  #     - "grok-3-mini"
-  #     - "grok-3-mini-fast"
+  #     - "accounts/fireworks/models/kimi-k2p5"
   #   # Non-reasoning models (auto-populated if not specified)
   #   non_reasoning:
-  #     - "grok-3"
-  #     - "grok-3-fast"
-  #     - "grok-2-vision-1212"
+  #     - "accounts/fireworks/models/llama-v3p1-8b-instruct"
   # pricing:
-  #   grok-4-0709:
-  #     input: 0.000003         # $3 per million tokens
-  #     output: 0.000015        # $15 per million tokens
-  #     context_window: 256000  # 256k tokens
-  #   grok-3:
-  #     input: 0.000003         # $3 per million tokens
-  #     output: 0.000015        # $15 per million tokens
-  #     context_window: 131072  # 131k tokens
+  #   accounts/fireworks/models/kimi-k2p5:
+  #     input: 0.0000006         # $0.6 per million tokens
+  #     cached_input: 0.0000001  # $0.1 per million tokens
+  #     output: 0.000003         # $3 per million tokens
+  #     context_window: 262000   # 262k tokens
+  #   # Optional long-context pricing fields are applied after the threshold.
+  #   gpt-5.4:
+  #     input: 0.0000025                    # $2.50 per million tokens
+  #     cached_input: 0.00000025            # $0.25 per million tokens
+  #     output: 0.000015                    # $15 per million tokens
+  #     long_context_input: 0.000005        # $5 per million tokens
+  #     long_context_cached_input: 0.0000005 # $0.50 per million tokens
+  #     long_context_output: 0.0000225      # $22.50 per million tokens
+  #     long_context_threshold: 272000      # >272k prompt tokens
+  #     context_window: 1050000             # 1.05M tokens
   #   # ... additional models
 
 # Subagent Configuration
@@ -346,12 +342,6 @@ subagent_args: ""
 # The system prompt will instruct the agent to use fd and rg via the bash tool instead.
 # Can also be set via the --disable-fs-search-tools CLI flag or per-profile.
 # disable_fs_search_tools: true
-#
-# Enable Todo Tools
-# Todo tools (todo_read and todo_write) are disabled by default for the main agent.
-# Set enable_todos to true (or pass --enable-todos) to re-enable them.
-# enable_todos: true
-#
 # Example: Profile with subagent disabled
 # profiles:
 #   no-subagent:
@@ -382,6 +372,18 @@ custom_tools:
   # tool_white_list:
   #   - "my-custom-tool"
   #   - "another-tool"
+
+  # Per-tool runtime configuration. Tool names match the name returned by
+  # `<tool> description`, without the custom_tool_ prefix.
+  # Explicit per-tool timeout overrides both the global timeout and any timeout
+  # returned by the optional `<tool> config` command.
+  # tools:
+  #   seer:
+  #     timeout: 30m
+  #     envs:
+  #       SEER_MODEL: gpt-5.5
+  #       # Bare/null values inherit from Kodelet's current process environment.
+  #       ANTHROPIC_API_KEY:
 
 # Agentic Skills Configuration
 # Skills are model-invoked capabilities that package domain expertise
@@ -450,15 +452,12 @@ tracing:
 # - KODELET_TRACING_SAMPLER: Sets the sampling strategy
 # - KODELET_TRACING_RATIO: Sets the sampling ratio
 # - KODELET_ALIASES_*: Define individual aliases (e.g., KODELET_ALIASES_SONNET46=claude-sonnet-4-6)
-# - KODELET_COMMIT_COAUTHOR_ENABLED: Enable/disable coauthor attribution in commits
-# - KODELET_COMMIT_COAUTHOR_NAME: Name for coauthor attribution
-# - KODELET_COMMIT_COAUTHOR_EMAIL: Email for coauthor attribution
 # - KODELET_OPENAI_API_MODE: OpenAI API mode (chat_completions or responses)
+# - KODELET_OPENAI_WEBSOCKET_MODE: Use Responses API WebSocket mode when supported (true/false)
 #
 # API Keys:
 # - ANTHROPIC_API_KEY: Required when using the Anthropic provider
 # - OPENAI_API_KEY: Required when using the OpenAI provider (default)
-# - XAI_API_KEY: Required when using the xAI platform
 # - OPENAI_API_BASE: Custom OpenAI API endpoint (overrides config base_url)
 # Note: The API key environment variable can be customized using the api_key_env_var setting
 #

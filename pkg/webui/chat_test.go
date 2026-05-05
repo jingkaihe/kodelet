@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
-	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/spf13/viper"
@@ -24,29 +23,6 @@ func (s *recordingChatSink) Send(event ChatEvent) error {
 	return nil
 }
 
-func TestBuildChatState_BindsTodoPathToConversationID(t *testing.T) {
-	customManager, err := tools.NewCustomToolManager()
-	require.NoError(t, err)
-
-	state, err := buildChatState(
-		context.Background(),
-		llmtypes.Config{
-			DisableSubagent: true,
-		},
-		"conv-web-123",
-		"/workspace/project",
-		nil,
-		customManager,
-	)
-	require.NoError(t, err)
-
-	todoPath, err := state.TodoFilePath()
-	require.NoError(t, err)
-
-	assert.Equal(t, "conv-web-123.json", filepath.Base(todoPath))
-	assert.Equal(t, "todos", filepath.Base(filepath.Dir(todoPath)))
-}
-
 func TestResolveWebChatConfigForExistingConversation_UsesStoredProfileAndMetadata(t *testing.T) {
 	originalSettings := viper.AllSettings()
 	defer func() {
@@ -60,11 +36,12 @@ func TestResolveWebChatConfigForExistingConversation_UsesStoredProfileAndMetadat
 	viper.Set("provider", "anthropic")
 	viper.Set("model", "base-model")
 	viper.Set("profiles", map[string]any{
-		"anthropic": map[string]any{
+		"codex": map[string]any{
 			"provider": "openai",
-			"model":    "gpt-4.1",
+			"model":    "gpt-5.5",
 			"openai": map[string]any{
-				"platform": "openai",
+				"platform": "codex",
+				"api_mode": "responses",
 			},
 		},
 	})
@@ -73,19 +50,21 @@ func TestResolveWebChatConfigForExistingConversation_UsesStoredProfileAndMetadat
 		ID:       "conv-123",
 		Provider: "openai",
 		Metadata: map[string]any{
-			"profile":  "anthropic",
-			"model":    "accounts/fireworks/models/kimi-k2",
-			"platform": "fireworks",
-			"api_mode": "responses",
+			"profile":      "codex",
+			"model":        "gpt-5.5",
+			"platform":     "codex",
+			"api_mode":     "responses",
+			"service_tier": "fast",
 		},
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "anthropic", config.Profile)
+	assert.Equal(t, "codex", config.Profile)
 	assert.Equal(t, "openai", config.Provider)
-	assert.Equal(t, "accounts/fireworks/models/kimi-k2", config.Model)
+	assert.Equal(t, "gpt-5.5", config.Model)
 	require.NotNil(t, config.OpenAI)
-	assert.Equal(t, "fireworks", config.OpenAI.Platform)
+	assert.Equal(t, "codex", config.OpenAI.Platform)
 	assert.Equal(t, llmtypes.OpenAIAPIMode("responses"), config.OpenAI.APIMode)
+	assert.Equal(t, llmtypes.OpenAIServiceTierFast, config.OpenAI.ServiceTier)
 }
 
 func TestResolveWebChatConfigForNewConversation_DefaultProfileNameIgnoresActiveProfile(t *testing.T) {
@@ -99,7 +78,7 @@ func TestResolveWebChatConfigForNewConversation_DefaultProfileNameIgnoresActiveP
 
 	viper.Reset()
 	viper.Set("provider", "openai")
-	viper.Set("model", "gpt-5.4")
+	viper.Set("model", "gpt-5.5")
 	viper.Set("profile", "work")
 	viper.Set("profiles", map[string]any{
 		"work": map[string]any{
@@ -111,7 +90,7 @@ func TestResolveWebChatConfigForNewConversation_DefaultProfileNameIgnoresActiveP
 	config, err := resolveWebChatConfigForNewConversation("default")
 	require.NoError(t, err)
 	assert.Equal(t, "openai", config.Provider)
-	assert.Equal(t, "gpt-5.4", config.Model)
+	assert.Equal(t, "gpt-5.5", config.Model)
 	assert.Equal(t, "default", config.Profile)
 }
 
@@ -126,7 +105,7 @@ func TestResolveWebChatConfigForExistingConversation_DefaultProfileIgnoresActive
 
 	viper.Reset()
 	viper.Set("provider", "openai")
-	viper.Set("model", "gpt-5.4")
+	viper.Set("model", "gpt-5.5")
 	viper.Set("profile", "work")
 	viper.Set("profiles", map[string]any{
 		"work": map[string]any{
@@ -144,7 +123,7 @@ func TestResolveWebChatConfigForExistingConversation_DefaultProfileIgnoresActive
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "openai", config.Provider)
-	assert.Equal(t, "gpt-5.4", config.Model)
+	assert.Equal(t, "gpt-5.5", config.Model)
 	assert.Equal(t, "default", config.Profile)
 }
 
@@ -163,7 +142,7 @@ func TestResolveWebChatConfig_ResolvesRelativeCWDFromDefaultWorkspace(t *testing
 
 	viper.Reset()
 	viper.Set("provider", "openai")
-	viper.Set("model", "gpt-5.4")
+	viper.Set("model", "gpt-5.5")
 
 	config, resolvedCWD, err := resolveWebChatConfig(
 		context.Background(),

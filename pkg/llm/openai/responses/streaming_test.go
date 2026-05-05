@@ -184,19 +184,116 @@ func TestUpdateUsageAccumulatesCachedTokensLikeCodexTotals(t *testing.T) {
 		InputTokensDetails: responses.ResponseUsageInputTokensDetails{
 			CachedTokens: 2400,
 		},
-	})
+	}, "gpt-4.1")
 	thread.updateUsage(responses.ResponseUsage{
 		InputTokens:  120,
 		OutputTokens: 20,
 		InputTokensDetails: responses.ResponseUsageInputTokensDetails{
 			CachedTokens: 143900,
 		},
-	})
+	}, "gpt-4.1")
 
 	assert.Equal(t, 220, thread.Usage.InputTokens)
 	assert.Equal(t, 30, thread.Usage.OutputTokens)
 	assert.Equal(t, 146300, thread.Usage.CacheReadInputTokens)
 	assert.Equal(t, 140, thread.Usage.CurrentContextWindow)
+}
+
+func TestUpdateUsageUsesLongContextPricing(t *testing.T) {
+	thread := &Thread{
+		Thread: base.NewThread(llmtypes.Config{Provider: "openai", Model: "test-model"}, "test", hooks.Trigger{}),
+		customPricing: map[string]llmtypes.ModelPricing{
+			"test-model": {
+				Input:                  1,
+				CachedInput:            0.1,
+				Output:                 2,
+				LongContextInput:       3,
+				LongContextCachedInput: 0.3,
+				LongContextOutput:      4,
+				LongContextThreshold:   272_000,
+				ContextWindow:          1_050_000,
+			},
+		},
+	}
+
+	thread.updateUsage(responses.ResponseUsage{
+		InputTokens:  272_001,
+		OutputTokens: 10,
+		InputTokensDetails: responses.ResponseUsageInputTokensDetails{
+			CachedTokens: 1,
+		},
+	}, "test-model")
+
+	assert.Equal(t, 272001, thread.Usage.InputTokens)
+	assert.Equal(t, 1, thread.Usage.CacheReadInputTokens)
+	assert.Equal(t, 10, thread.Usage.OutputTokens)
+	assert.Equal(t, float64(272000)*3, thread.Usage.InputCost)
+	assert.Equal(t, 0.3, thread.Usage.CacheReadCost)
+	assert.Equal(t, 40.0, thread.Usage.OutputCost)
+	assert.Equal(t, 1_050_000, thread.Usage.MaxContextWindow)
+}
+
+func TestProcessStreamUsesCallModelForLongContextPricing(t *testing.T) {
+	thread := &Thread{
+		Thread: base.NewThread(llmtypes.Config{Provider: "openai", Model: "main-model"}, "test", hooks.Trigger{}),
+		customPricing: map[string]llmtypes.ModelPricing{
+			"main-model": {
+				Input:                  10,
+				CachedInput:            1,
+				Output:                 20,
+				LongContextInput:       30,
+				LongContextCachedInput: 3,
+				LongContextOutput:      40,
+				LongContextThreshold:   100,
+				ContextWindow:          1_000_000,
+			},
+			"weak-model": {
+				Input:                  0.5,
+				CachedInput:            0.05,
+				Output:                 0.75,
+				LongContextInput:       1.5,
+				LongContextCachedInput: 0.15,
+				LongContextOutput:      2.5,
+				LongContextThreshold:   100,
+				ContextWindow:          200_000,
+			},
+		},
+	}
+
+	completedEvent := map[string]any{
+		"type": "response.completed",
+		"response": map[string]any{
+			"id":     "resp_weak_usage",
+			"status": "completed",
+			"usage": map[string]any{
+				"input_tokens":  101,
+				"output_tokens": 10,
+				"input_tokens_details": map[string]any{
+					"cached_tokens": 1,
+				},
+			},
+		},
+	}
+
+	payload, err := json.Marshal(completedEvent)
+	require.NoError(t, err)
+
+	decoder := &fakeDecoder{events: []ssestream.Event{{Data: payload}}}
+	stream := ssestream.NewStream[responses.ResponseStreamEventUnion](decoder, nil)
+
+	handler := &captureStreamHandler{}
+	streamResult, err := thread.processStream(context.Background(), stream, handler, "weak-model", llmtypes.MessageOpt{DisableUsageLog: true})
+	require.NoError(t, err)
+	assert.False(t, streamResult.toolsUsed)
+	assert.True(t, streamResult.responseCompleted)
+
+	assert.Equal(t, 101, thread.Usage.InputTokens)
+	assert.Equal(t, 1, thread.Usage.CacheReadInputTokens)
+	assert.Equal(t, 10, thread.Usage.OutputTokens)
+	assert.Equal(t, float64(100)*1.5, thread.Usage.InputCost)
+	assert.Equal(t, 0.15, thread.Usage.CacheReadCost)
+	assert.Equal(t, 25.0, thread.Usage.OutputCost)
+	assert.Equal(t, 200_000, thread.Usage.MaxContextWindow)
 }
 
 func TestProcessStreamReturnsErrorOnIncompleteResponse(t *testing.T) {

@@ -1,8 +1,24 @@
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ChatTranscript from './ChatTranscript';
 
+const { copyToClipboardMock } = vi.hoisted(() => ({
+  copyToClipboardMock: vi.fn(),
+}));
+
+vi.mock('../../utils', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../utils')>();
+  return {
+    ...actual,
+    copyToClipboard: copyToClipboardMock,
+  };
+});
+
 describe('ChatTranscript', () => {
+  beforeEach(() => {
+    copyToClipboardMock.mockReset();
+  });
+
   it('renders the supplied empty-state greeting', () => {
     render(
       <ChatTranscript
@@ -243,10 +259,55 @@ describe('ChatTranscript', () => {
     expect(button).toHaveClass(
       'opacity-0',
       'transition-opacity',
-      'group-hover:opacity-100',
-      'group-focus-within:opacity-100'
+      'group-hover/message:opacity-100',
+      'group-focus-within/message:opacity-100'
     );
     expect(screen.queryByRole('button', { name: 'Copy' })).not.toBeInTheDocument();
+  });
+
+  it('copies each assistant message block independently', () => {
+    render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[
+          {
+            role: 'assistant',
+            blocks: [
+              {
+                type: 'message',
+                content: 'First assistant message',
+              },
+              {
+                type: 'tools',
+                tools: [
+                  {
+                    callId: 'bash-1',
+                    name: 'bash',
+                    input: '{"command":"pwd"}',
+                  },
+                ],
+              },
+              {
+                type: 'message',
+                content: 'Second assistant message',
+              },
+            ],
+          },
+        ]}
+      />
+    );
+
+    const copyButtons = screen.getAllByRole('button', { name: 'Copy to clipboard' });
+
+    expect(copyButtons).toHaveLength(2);
+
+    fireEvent.click(copyButtons[1]);
+
+    expect(copyToClipboardMock).toHaveBeenCalledWith('Second assistant message');
+    expect(copyToClipboardMock).not.toHaveBeenCalledWith(
+      expect.stringContaining('First assistant message')
+    );
+    expect(copyToClipboardMock).not.toHaveBeenCalledWith(expect.stringContaining('Bash'));
   });
 
   it('uses a friendly transcript label for native OpenAI search tool calls', () => {

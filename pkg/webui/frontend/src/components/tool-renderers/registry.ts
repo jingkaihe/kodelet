@@ -11,7 +11,6 @@ import OpenAIWebSearchRenderer from './OpenAIWebSearchRenderer';
 import SkillRenderer from './SkillRenderer';
 import SubagentRenderer from './SubagentRenderer';
 import ThinkingRenderer from './ThinkingRenderer';
-import TodoRenderer from './TodoRenderer';
 import ViewImageRenderer from './ViewImageRenderer';
 import WebFetchRenderer from './WebFetchRenderer';
 import { normalizeToolName } from './reference';
@@ -31,8 +30,6 @@ const toolRendererRegistry: Record<string, ToolRendererRegistration> = {
   glob_tool: { component: GlobRenderer },
   web_fetch: { component: WebFetchRenderer },
   thinking: { component: ThinkingRenderer },
-  todo_read: { component: TodoRenderer },
-  todo_write: { component: TodoRenderer },
   subagent: { component: SubagentRenderer },
   view_image: { component: ViewImageRenderer },
   skill: { component: SkillRenderer },

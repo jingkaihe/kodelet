@@ -39,8 +39,6 @@ var toolRegistry = map[string]tooltypes.Tool{
 	"subagent":          NewSubAgentTool(nil, false, false),
 	"grep_tool":         &GrepTool{},
 	"glob_tool":         &GlobTool{},
-	"todo_read":         &TodoReadTool{},
-	"todo_write":        &TodoWriteTool{},
 	"web_fetch":         &WebFetchTool{},
 	"view_image":        NewViewImageTool("", ""),
 	"skill":             NewSkillTool(nil, false, false),
@@ -73,11 +71,6 @@ var defaultMainTools = []string{
 	"web_fetch",
 	"view_image",
 	"skill",
-}
-
-var todoTools = []string{
-	"todo_read",
-	"todo_write",
 }
 
 // defaultSubAgentTools are the default tools for subagent
@@ -242,7 +235,7 @@ func filterOutFSSearchTools(toolNames []string) []string {
 }
 
 // GetMainTools returns the main tools available for the agent
-func GetMainTools(ctx context.Context, allowedTools []string, enableTodos bool) []tooltypes.Tool {
+func GetMainTools(ctx context.Context, allowedTools []string) []tooltypes.Tool {
 	// Special case: "none" means no tools
 	if len(allowedTools) == 1 && allowedTools[0] == NoToolsMarker {
 		return nil
@@ -250,31 +243,18 @@ func GetMainTools(ctx context.Context, allowedTools []string, enableTodos bool) 
 
 	if len(allowedTools) == 0 {
 		allowedTools = append([]string{}, defaultMainTools...)
-		if enableTodos {
-			allowedTools = append(allowedTools, todoTools...)
-		}
-	} else if !enableTodos {
-		filteredTools := filterOutTodoTools(allowedTools)
-		if len(filteredTools) == 0 {
-			allowedTools = append([]string{}, metaTools...)
-		} else {
-			allowedTools = filteredTools
-		}
 	}
 
 	if err := ValidateTools(allowedTools); err != nil {
 		logger.G(ctx).WithError(err).Warn("Invalid main agent tool configuration, falling back to defaults")
 		allowedTools = append([]string{}, defaultMainTools...)
-		if enableTodos {
-			allowedTools = append(allowedTools, todoTools...)
-		}
 	}
 
 	return getToolsFromNamesWithOptions(allowedTools, false)
 }
 
 // GetMainToolsWithOptions returns the main tools available for the agent with feature toggles applied.
-func GetMainToolsWithOptions(ctx context.Context, allowedTools []string, enableTodos bool, disableFSSearchTools bool) []tooltypes.Tool {
+func GetMainToolsWithOptions(ctx context.Context, allowedTools []string, disableFSSearchTools bool) []tooltypes.Tool {
 	explicitAllowlist := len(allowedTools) > 0
 	if disableFSSearchTools {
 		allowedTools = filterOutFSSearchTools(allowedTools)
@@ -286,16 +266,6 @@ func GetMainToolsWithOptions(ctx context.Context, allowedTools []string, enableT
 	if len(allowedTools) == 0 {
 		if !explicitAllowlist {
 			allowedTools = append([]string{}, defaultMainTools...)
-			if enableTodos {
-				allowedTools = append(allowedTools, todoTools...)
-			}
-		}
-	} else if !enableTodos {
-		filteredTools := filterOutTodoTools(allowedTools)
-		if len(filteredTools) == 0 {
-			allowedTools = append([]string{}, metaToolsWithOptions(disableFSSearchTools)...)
-		} else {
-			allowedTools = filteredTools
 		}
 	}
 
@@ -306,9 +276,6 @@ func GetMainToolsWithOptions(ctx context.Context, allowedTools []string, enableT
 	if err := ValidateTools(allowedTools); err != nil {
 		logger.G(ctx).WithError(err).Warn("Invalid main agent tool configuration, falling back to defaults")
 		allowedTools = append([]string{}, defaultMainTools...)
-		if enableTodos {
-			allowedTools = append(allowedTools, todoTools...)
-		}
 		if disableFSSearchTools {
 			allowedTools = filterOutFSSearchTools(allowedTools)
 		}
@@ -373,16 +340,6 @@ func filterOutSubagent(tools []tooltypes.Tool) []tooltypes.Tool {
 	for _, t := range tools {
 		if t.Name() != "subagent" {
 			filtered = append(filtered, t)
-		}
-	}
-	return filtered
-}
-
-func filterOutTodoTools(toolNames []string) []string {
-	filtered := make([]string, 0, len(toolNames))
-	for _, toolName := range toolNames {
-		if toolName != "todo_read" && toolName != "todo_write" {
-			filtered = append(filtered, toolName)
 		}
 	}
 	return filtered

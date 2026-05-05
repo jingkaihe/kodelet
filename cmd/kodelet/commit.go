@@ -1,8 +1,6 @@
 package main
 
 import (
-	"context"
-	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -14,26 +12,25 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 type CommitConfig struct {
-	NoSign     bool
-	Template   string
-	Short      bool
-	NoConfirm  bool
-	NoCoauthor bool
-	NoSave     bool
+	NoSign    bool
+	Template  string
+	Short     bool
+	Prefix    string
+	NoConfirm bool
+	Save      bool
 }
 
 func NewCommitConfig() *CommitConfig {
 	return &CommitConfig{
-		NoSign:     false,
-		Template:   "",
-		Short:      false,
-		NoConfirm:  false,
-		NoCoauthor: false,
-		NoSave:     false,
+		NoSign:    false,
+		Template:  "",
+		Short:     true,
+		Prefix:    "",
+		NoConfirm: false,
+		Save:      false,
 	}
 }
 
@@ -100,9 +97,10 @@ You must stage your changes (using 'git add') before running this command.`,
 			PromptCache:        false,
 			NoToolUse:          true,
 			DisableUsageLog:    true,
-			NoSaveConversation: config.NoSave,
+			NoSaveConversation: !config.Save,
 		})
 		commitMsg = sanitizeCommitMessage(commitMsg)
+		commitMsg = prefixCommitMessage(commitMsg, config.Prefix)
 
 		presenter.Section("Generated Commit Message")
 		presenter.Info(commitMsg)
@@ -120,7 +118,7 @@ You must stage your changes (using 'git add') before running this command.`,
 			finalCommitMsg = editedMsg
 		}
 
-		if err := createCommit(ctx, finalCommitMsg, !config.NoSign, config); err != nil {
+		if err := createCommit(finalCommitMsg, !config.NoSign); err != nil {
 			presenter.Error(err, "Failed to create commit")
 			os.Exit(1)
 		}
@@ -134,9 +132,9 @@ func init() {
 	commitCmd.Flags().Bool("no-sign", defaults.NoSign, "Disable commit signing")
 	commitCmd.Flags().StringP("template", "t", defaults.Template, "Template for commit message")
 	commitCmd.Flags().Bool("short", defaults.Short, "Generate a short commit message with just a description, no bullet points")
+	commitCmd.Flags().String("prefix", defaults.Prefix, "Prefix to prepend to the generated commit message")
 	commitCmd.Flags().Bool("no-confirm", defaults.NoConfirm, "Skip confirmation prompt and create commit automatically")
-	commitCmd.Flags().Bool("no-coauthor", defaults.NoCoauthor, "Disable coauthor attribution in commit messages")
-	commitCmd.Flags().Bool("no-save", defaults.NoSave, "Disable conversation persistence")
+	commitCmd.Flags().Bool("save", defaults.Save, "Enable conversation persistence")
 }
 
 func getCommitConfigFromFlags(cmd *cobra.Command) *CommitConfig {
@@ -151,14 +149,14 @@ func getCommitConfigFromFlags(cmd *cobra.Command) *CommitConfig {
 	if short, err := cmd.Flags().GetBool("short"); err == nil {
 		config.Short = short
 	}
+	if prefix, err := cmd.Flags().GetString("prefix"); err == nil {
+		config.Prefix = prefix
+	}
 	if noConfirm, err := cmd.Flags().GetBool("no-confirm"); err == nil {
 		config.NoConfirm = noConfirm
 	}
-	if noCoauthor, err := cmd.Flags().GetBool("no-coauthor"); err == nil {
-		config.NoCoauthor = noCoauthor
-	}
-	if noSave, err := cmd.Flags().GetBool("no-save"); err == nil {
-		config.NoSave = noSave
+	if save, err := cmd.Flags().GetBool("save"); err == nil {
+		config.Save = save
 	}
 
 	return config
@@ -168,6 +166,18 @@ func sanitizeCommitMessage(message string) string {
 	message = strings.TrimPrefix(message, "```")
 	message = strings.TrimSuffix(message, "```")
 	return message
+}
+
+func prefixCommitMessage(message, prefix string) string {
+	prefix = strings.TrimSpace(prefix)
+	if prefix == "" {
+		return message
+	}
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return prefix
+	}
+	return prefix + " " + message
 }
 
 func isGitRepository() bool {
@@ -253,16 +263,7 @@ func getEditor() string {
 	return "vim"
 }
 
-func createCommit(_ context.Context, message string, sign bool, config *CommitConfig) error {
-	if !config.NoCoauthor {
-		coauthorEnabled := viper.GetBool("commit.coauthor.enabled")
-		if coauthorEnabled {
-			coauthorName := viper.GetString("commit.coauthor.name")
-			coauthorEmail := viper.GetString("commit.coauthor.email")
-			message = message + fmt.Sprintf("\n\nCo-authored-by: %s <%s>", coauthorName, coauthorEmail)
-		}
-	}
-
+func createCommit(message string, sign bool) error {
 	tempFile, err := os.CreateTemp("", "kodelet-commit-*.txt")
 	if err != nil {
 		return errors.Wrapf(err, "error creating temporary file")

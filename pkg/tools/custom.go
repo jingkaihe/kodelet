@@ -22,18 +22,26 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 	"go.opentelemetry.io/otel/attribute"
+	"gopkg.in/yaml.v3"
 )
 
 var _ tooltypes.Tool = &CustomTool{}
 
 // CustomToolConfig represents the configuration for custom tools
 type CustomToolConfig struct {
-	Enabled       bool          `mapstructure:"enabled" json:"enabled" yaml:"enabled"`
-	GlobalDir     string        `mapstructure:"global_dir" json:"global_dir" yaml:"global_dir"`
-	LocalDir      string        `mapstructure:"local_dir" json:"local_dir" yaml:"local_dir"`
-	Timeout       time.Duration `mapstructure:"timeout" json:"timeout" yaml:"timeout"`
-	MaxOutputSize int           `mapstructure:"max_output_size" json:"max_output_size" yaml:"max_output_size"`
-	ToolWhiteList []string      `mapstructure:"tool_white_list" json:"tool_white_list" yaml:"tool_white_list"`
+	Enabled       bool                               `mapstructure:"enabled" json:"enabled" yaml:"enabled"`
+	GlobalDir     string                             `mapstructure:"global_dir" json:"global_dir" yaml:"global_dir"`
+	LocalDir      string                             `mapstructure:"local_dir" json:"local_dir" yaml:"local_dir"`
+	Timeout       time.Duration                      `mapstructure:"timeout" json:"timeout" yaml:"timeout"`
+	MaxOutputSize int                                `mapstructure:"max_output_size" json:"max_output_size" yaml:"max_output_size"`
+	ToolWhiteList []string                           `mapstructure:"tool_white_list" json:"tool_white_list" yaml:"tool_white_list"`
+	Tools         map[string]CustomToolRuntimeConfig `mapstructure:"tools" json:"tools" yaml:"tools"`
+}
+
+// CustomToolRuntimeConfig represents per-tool custom tool configuration.
+type CustomToolRuntimeConfig struct {
+	Timeout time.Duration      `mapstructure:"timeout" json:"timeout" yaml:"timeout"`
+	Envs    map[string]*string `mapstructure:"envs" json:"envs" yaml:"envs"`
 }
 
 // CustomTool represents a custom executable tool
@@ -44,6 +52,7 @@ type CustomTool struct {
 	schema      *jsonschema.Schema
 	timeout     time.Duration
 	maxOutput   int
+	envs        map[string]*string
 }
 
 // CustomToolManager manages discovery and registration of custom tools
@@ -94,8 +103,74 @@ func LoadCustomToolConfig() CustomToolConfig {
 			logger.G(context.Background()).WithError(err).Warn("failed to load custom tools config, using defaults")
 		}
 	}
+	overlayCustomToolRuntimeConfigs(&config, loadCustomToolRuntimeConfigFromFiles())
 
 	return config
+}
+
+type customToolsFileConfig struct {
+	CustomTools struct {
+		Tools map[string]CustomToolRuntimeConfig `yaml:"tools"`
+	} `yaml:"custom_tools"`
+}
+
+func loadCustomToolRuntimeConfigFromFiles() map[string]CustomToolRuntimeConfig {
+	if viper.ConfigFileUsed() == "" {
+		return nil
+	}
+
+	configs := make(map[string]CustomToolRuntimeConfig)
+	for _, path := range []string{expandHomePath("~/.kodelet/config.yaml"), "kodelet-config.yaml"} {
+		toolConfigs := loadCustomToolRuntimeConfigFromFile(path)
+		for name, toolConfig := range toolConfigs {
+			current := configs[name]
+			if toolConfig.Timeout != 0 {
+				current.Timeout = toolConfig.Timeout
+			}
+			current.Envs = mergeCustomToolEnvs(current.Envs, toolConfig.Envs)
+			configs[name] = current
+		}
+	}
+
+	return configs
+}
+
+func loadCustomToolRuntimeConfigFromFile(path string) map[string]CustomToolRuntimeConfig {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			logger.G(context.Background()).WithError(err).WithField("path", path).Warn("failed to read custom tools config")
+		}
+		return nil
+	}
+
+	var config customToolsFileConfig
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		logger.G(context.Background()).WithError(err).WithField("path", path).Warn("failed to parse custom tools config")
+		return nil
+	}
+
+	return config.CustomTools.Tools
+}
+
+func overlayCustomToolRuntimeConfigs(config *CustomToolConfig, overrides map[string]CustomToolRuntimeConfig) {
+	if len(overrides) == 0 {
+		return
+	}
+	if config.Tools == nil {
+		config.Tools = make(map[string]CustomToolRuntimeConfig, len(overrides))
+	}
+
+	for name, override := range overrides {
+		current := config.Tools[name]
+		if override.Timeout != 0 {
+			current.Timeout = override.Timeout
+		}
+		if override.Envs != nil {
+			current.Envs = mergeCustomToolEnvs(nil, override.Envs)
+		}
+		config.Tools[name] = current
+	}
 }
 
 // expandHomePath expands ~ to the user's home directory
@@ -112,6 +187,85 @@ func expandHomePath(path string) string {
 
 func customToolWhiteListed(toolName string, whiteList []string) bool {
 	return len(whiteList) == 0 || slices.Contains(whiteList, toolName)
+}
+
+func mergeCustomToolEnvs(base map[string]*string, overrides map[string]*string) map[string]*string {
+	if len(base) == 0 && len(overrides) == 0 {
+		return nil
+	}
+
+	merged := make(map[string]*string, len(base)+len(overrides))
+	for key, value := range base {
+		merged[key] = value
+	}
+	for key, value := range overrides {
+		merged[key] = value
+	}
+	return merged
+}
+
+func appendCustomToolEnv(env []string, envs map[string]*string) []string {
+	if len(envs) == 0 {
+		return env
+	}
+
+	keys := make([]string, 0, len(envs))
+	for key := range envs {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	configuredKeys := make(map[string]struct{}, len(envs))
+	for _, key := range keys {
+		configuredKeys[key] = struct{}{}
+	}
+
+	filtered := env[:0]
+	for _, entry := range env {
+		key, _, ok := strings.Cut(entry, "=")
+		if ok {
+			if _, configured := configuredKeys[key]; configured {
+				continue
+			}
+		}
+		filtered = append(filtered, entry)
+	}
+
+	for _, key := range keys {
+		if envs[key] == nil {
+			if value, ok := os.LookupEnv(key); ok {
+				filtered = append(filtered, fmt.Sprintf("%s=%s", key, value))
+			}
+			continue
+		}
+		filtered = append(filtered, fmt.Sprintf("%s=%s", key, *envs[key]))
+	}
+	return filtered
+}
+
+func appendCustomToolContextEnv(ctx context.Context, env []string) []string {
+	toolContext := toolContextFromContext(ctx)
+	envs := make(map[string]*string)
+	if toolContext.ConversationID != "" {
+		envs["KODELET_CONVERSATION_ID"] = &toolContext.ConversationID
+	}
+	if toolContext.WorkingDir != "" {
+		envs["KODELET_WORKING_DIR"] = &toolContext.WorkingDir
+	}
+	if toolContext.Provider != "" {
+		envs["KODELET_PROVIDER"] = &toolContext.Provider
+	}
+	if toolContext.Model != "" {
+		envs["KODELET_MODEL"] = &toolContext.Model
+	}
+	if toolContext.Profile != "" {
+		envs["KODELET_PROFILE"] = &toolContext.Profile
+	}
+	if len(envs) == 0 {
+		return env
+	}
+
+	return appendCustomToolEnv(env, envs)
 }
 
 // DiscoverTools scans directories and discovers available custom tools
@@ -192,7 +346,11 @@ func (m *CustomToolManager) discoverToolsInDir(ctx context.Context, dir string, 
 			continue
 		}
 
-		execPath := filepath.Join(dir, entry.Name())
+		execPath, err := resolveCustomToolExecPath(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			logger.G(ctx).WithError(err).WithField("path", filepath.Join(dir, entry.Name())).Debug("failed to resolve tool path")
+			continue
+		}
 
 		info, err := entry.Info()
 		if err != nil {
@@ -203,14 +361,20 @@ func (m *CustomToolManager) discoverToolsInDir(ctx context.Context, dir string, 
 			continue
 		}
 
-		tool, err := m.validateTool(ctx, execPath)
+		metadata, err := customtools.Inspect(ctx, execPath, m.config.Timeout)
 		if err != nil {
 			logger.G(ctx).WithError(err).WithField("path", execPath).Debug("failed to validate tool")
 			continue
 		}
 
-		if !customToolWhiteListed(tool.name, m.config.ToolWhiteList) {
-			logger.G(ctx).WithField("name", tool.name).Debug("skipping tool, not in whitelist")
+		if !customToolWhiteListed(metadata.Name, m.config.ToolWhiteList) {
+			logger.G(ctx).WithField("name", metadata.Name).Debug("skipping tool, not in whitelist")
+			continue
+		}
+
+		tool, err := m.buildTool(ctx, execPath, metadata)
+		if err != nil {
+			logger.G(ctx).WithError(err).WithField("path", execPath).Debug("failed to validate tool")
 			continue
 		}
 
@@ -231,9 +395,47 @@ func (m *CustomToolManager) discoverToolsInDir(ctx context.Context, dir string, 
 
 // validateTool validates a tool by calling its description command
 func (m *CustomToolManager) validateTool(ctx context.Context, execPath string) (*CustomTool, error) {
+	execPath, err := resolveCustomToolExecPath(execPath)
+	if err != nil {
+		return nil, err
+	}
+
 	metadata, err := customtools.Inspect(ctx, execPath, m.config.Timeout)
 	if err != nil {
 		return nil, err
+	}
+
+	return m.buildTool(ctx, execPath, metadata)
+}
+
+func resolveCustomToolExecPath(execPath string) (string, error) {
+	absExecPath, err := filepath.Abs(execPath)
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to resolve custom tool path %s", execPath)
+	}
+	return absExecPath, nil
+}
+
+func (m *CustomToolManager) buildTool(ctx context.Context, execPath string, metadata *customtools.Metadata) (*CustomTool, error) {
+	execPath, err := resolveCustomToolExecPath(execPath)
+	if err != nil {
+		return nil, err
+	}
+
+	timeout := m.config.Timeout
+	envs := map[string]*string(nil)
+
+	if toolConfig, err := customtools.InspectConfig(ctx, execPath, 5*time.Second); err != nil {
+		return nil, err
+	} else if toolConfig.Timeout != 0 {
+		timeout = toolConfig.Timeout
+	}
+
+	if configured, ok := m.config.Tools[metadata.Name]; ok {
+		if configured.Timeout != 0 {
+			timeout = configured.Timeout
+		}
+		envs = mergeCustomToolEnvs(envs, configured.Envs)
 	}
 
 	tool := &CustomTool{
@@ -241,8 +443,9 @@ func (m *CustomToolManager) validateTool(ctx context.Context, execPath string) (
 		name:        metadata.Name,
 		description: metadata.Description,
 		schema:      metadata.Schema,
-		timeout:     m.config.Timeout,
+		timeout:     timeout,
 		maxOutput:   m.config.MaxOutputSize,
+		envs:        envs,
 	}
 
 	return tool, nil
@@ -357,6 +560,10 @@ func (t *CustomTool) Execute(ctx context.Context, _ tooltypes.State, parameters 
 	cmd := exec.CommandContext(execCtx, t.execPath, "run")
 	osutil.SetProcessGroup(cmd)
 	osutil.SetProcessGroupKill(cmd)
+	if workingDir := toolContextFromContext(ctx).WorkingDir; workingDir != "" {
+		cmd.Dir = workingDir
+	}
+	cmd.Env = appendCustomToolContextEnv(ctx, appendCustomToolEnv(os.Environ(), t.envs))
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

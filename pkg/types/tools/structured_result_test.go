@@ -106,27 +106,6 @@ func TestStructuredToolResult_JSONMarshaling(t *testing.T) {
 			},
 		},
 		{
-			name: "TodoMetadata",
-			result: StructuredToolResult{
-				ToolName:  "todo_read",
-				Success:   true,
-				Timestamp: time.Now(),
-				Metadata: TodoMetadata{
-					Action: "read",
-					TodoList: []TodoItem{
-						{ID: "1", Content: "Task 1", Status: "pending", Priority: "high"},
-						{ID: "2", Content: "Task 2", Status: "completed", Priority: "medium"},
-					},
-					Statistics: TodoStats{
-						Total:      2,
-						Completed:  1,
-						InProgress: 0,
-						Pending:    1,
-					},
-				},
-			},
-		},
-		{
 			name: "NoMetadata",
 			result: StructuredToolResult{
 				ToolName:  "unknown",
@@ -581,7 +560,6 @@ func TestExtractMetadata_AllTypes(t *testing.T) {
 		{"BashMetadata", BashMetadata{Command: "test"}, &BashMetadata{}},
 		{"GrepMetadata", GrepMetadata{Pattern: "test"}, &GrepMetadata{}},
 		{"GlobMetadata", GlobMetadata{Pattern: "*.go"}, &GlobMetadata{}},
-		{"TodoMetadata", TodoMetadata{Action: "read"}, &TodoMetadata{}},
 		{"SubAgentMetadata", SubAgentMetadata{Question: "test"}, &SubAgentMetadata{}},
 		{"ViewImageMetadata", ViewImageMetadata{Path: "/test.png"}, &ViewImageMetadata{}},
 		{"WebFetchMetadata", WebFetchMetadata{URL: "https://test"}, &WebFetchMetadata{}},

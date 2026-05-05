@@ -25,7 +25,7 @@ The script auto-launches Streamlit when run directly.
 - kodelet binary with ACP support (either `./bin/kodelet` from building or system-installed)
 - Valid API keys configured for kodelet (for the default example setup, `OPENAI_API_KEY`)
 
-By default this example launches `kodelet acp --provider openai --model gpt-5.4`.
+By default this example launches `kodelet acp --provider openai --model gpt-5.5`.
 
 ## How It Works
 

@@ -19,7 +19,7 @@ The script auto-launches Streamlit when run directly.
 
 ## How It Works
 
-The chatbot shells out to `kodelet run --headless --stream-deltas --provider openai --model gpt-5.4` for each message, parsing the JSON stream events:
+The chatbot shells out to `kodelet run --headless --stream-deltas --provider openai --model gpt-5.5` for each message, parsing the JSON stream events:
 
 | Event | Description |
 |-------|-------------|

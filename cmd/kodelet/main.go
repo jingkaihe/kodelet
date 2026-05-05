@@ -20,13 +20,15 @@ func init() {
 	viper.SetDefault("max_tokens", 8192)
 	viper.SetDefault("weak_model_max_tokens", 8192)
 	viper.SetDefault("thinking_budget_tokens", 4048)
-	viper.SetDefault("model", "gpt-5.4")
+	viper.SetDefault("model", "gpt-5.5")
 	viper.SetDefault("weak_model", "gpt-5.4-mini")
 	viper.SetDefault("provider", "openai")
 	viper.SetDefault("openai.api_mode", "responses")
 	viper.SetDefault("openai.enable_search", true)
+	viper.SetDefault("openai.websocket_mode", true)
 	viper.SetDefault("reasoning_effort", "medium")
 	viper.SetDefault("allowed_commands", []string{})
+	viper.SetDefault("bash.timeout", "120s")
 	viper.SetDefault("allowed_domains_file", "~/.kodelet/allowed_domains.txt")
 	viper.SetDefault("sysprompt", "")
 	viper.SetDefault("sysprompt_args", map[string]string{})
@@ -34,11 +36,6 @@ func init() {
 	viper.SetDefault("disable_fs_search_tools", true)
 	viper.SetDefault("conversation_summary_mode", "llm")
 	viper.SetDefault("anthropic_api_access", "auto")
-	viper.SetDefault("enable_todos", false)
-
-	viper.SetDefault("commit.coauthor.enabled", true)
-	viper.SetDefault("commit.coauthor.name", "Kodelet")
-	viper.SetDefault("commit.coauthor.email", "noreply@kodelet.com")
 
 	viper.SetDefault("mcp", map[string]tools.MCPConfig{})
 
@@ -105,7 +102,7 @@ func main() {
 	})
 
 	rootCmd.PersistentFlags().String("provider", "openai", "LLM provider to use (anthropic, openai)")
-	rootCmd.PersistentFlags().String("model", "gpt-5.4", "LLM model to use (overrides config)")
+	rootCmd.PersistentFlags().String("model", "gpt-5.5", "LLM model to use (overrides config)")
 	rootCmd.PersistentFlags().Int("max-tokens", 8192, "Maximum tokens for response (overrides config)")
 	rootCmd.PersistentFlags().Int("thinking-budget-tokens", 4048, "Thinking budget for non-adaptive Claude models; adaptive Claude models ignore this and use reasoning-effort instead (overrides config)")
 	rootCmd.PersistentFlags().String("weak-model", "gpt-5.4-mini", "Weak model to use (overrides config)")
@@ -127,7 +124,6 @@ func main() {
 	rootCmd.PersistentFlags().Bool("disable-fs-search-tools", false, "Disable filesystem search tools (glob_tool and grep_tool)")
 	rootCmd.PersistentFlags().String("conversation-summary-mode", "llm", "Conversation summary mode (llm, first_message)")
 	rootCmd.PersistentFlags().Bool("disable-subagent", false, "Disable the subagent tool and remove subagent-related system prompt context")
-	rootCmd.PersistentFlags().Bool("enable-todos", false, "Enable todo_read and todo_write tools for the main agent")
 	rootCmd.PersistentFlags().StringSlice("context-patterns", []string{"AGENTS.md"}, "Context file patterns to load (e.g. 'AGENTS.md,README.md')")
 
 	viper.BindPFlag("provider", rootCmd.PersistentFlags().Lookup("provider"))
@@ -154,7 +150,6 @@ func main() {
 	viper.BindPFlag("disable_fs_search_tools", rootCmd.PersistentFlags().Lookup("disable-fs-search-tools"))
 	viper.BindPFlag("conversation_summary_mode", rootCmd.PersistentFlags().Lookup("conversation-summary-mode"))
 	viper.BindPFlag("disable_subagent", rootCmd.PersistentFlags().Lookup("disable-subagent"))
-	viper.BindPFlag("enable_todos", rootCmd.PersistentFlags().Lookup("enable-todos"))
 	viper.BindPFlag("context.patterns", rootCmd.PersistentFlags().Lookup("context-patterns"))
 
 	rootCmd.AddCommand(runCmd)

@@ -2,15 +2,12 @@ package tools
 
 import (
 	"context"
-	"fmt"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
@@ -33,8 +30,6 @@ type contextInfo struct {
 type BasicState struct {
 	lastAccessed map[string]time.Time
 	mu           sync.RWMutex
-	sessionID    string
-	todoFilePath string
 	workingDir   string
 	tools        []tooltypes.Tool
 	mcpTools     []tooltypes.Tool
@@ -145,8 +140,6 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 
 	state := &BasicState{
 		lastAccessed: make(map[string]time.Time),
-		sessionID:    uuid.New().String(),
-		todoFilePath: "",
 		workingDir:   workingDir,
 		contextCache: make(map[string]*contextInfo),
 		contextDiscovery: &ContextDiscovery{
@@ -172,7 +165,7 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 			allowedTools = state.llmConfig.AllowedTools
 		}
 		allowedTools = enforceToolMode(allowedTools, state.llmConfig.ToolMode, defaultMainTools)
-		state.tools = GetMainToolsWithOptions(ctx, allowedTools, state.llmConfig.EnableTodos, state.llmConfig.DisableFSSearchTools)
+		state.tools = GetMainToolsWithOptions(ctx, allowedTools, state.llmConfig.DisableFSSearchTools)
 		state.tools = enforceToolModeOnResolvedTools(state.tools, allowedTools, state.llmConfig.ToolMode)
 	}
 	state.configureTools()
@@ -204,7 +197,7 @@ func WithMainTools() BasicStateOption {
 			allowedTools = s.llmConfig.AllowedTools
 		}
 		allowedTools = enforceToolMode(allowedTools, s.llmConfig.ToolMode, defaultMainTools)
-		s.tools = GetMainToolsWithOptions(ctx, allowedTools, s.llmConfig.EnableTodos, s.llmConfig.DisableFSSearchTools)
+		s.tools = GetMainToolsWithOptions(ctx, allowedTools, s.llmConfig.DisableFSSearchTools)
 		s.tools = enforceToolModeOnResolvedTools(s.tools, allowedTools, s.llmConfig.ToolMode)
 		if s.llmConfig.DisableSubagent {
 			s.tools = filterOutSubagent(s.tools)
@@ -287,17 +280,6 @@ func WithWorkingDirectory(workingDir string) BasicStateOption {
 		}
 		if s.llmConfig.WorkingDirectory == "" {
 			s.llmConfig.WorkingDirectory = s.workingDir
-		}
-		return nil
-	}
-}
-
-// WithSessionID returns an option that binds the state to a specific conversation session.
-func WithSessionID(sessionID string) BasicStateOption {
-	return func(_ context.Context, s *BasicState) error {
-		sessionID = strings.TrimSpace(sessionID)
-		if sessionID != "" {
-			s.sessionID = sessionID
 		}
 		return nil
 	}
@@ -491,31 +473,6 @@ func noToolsConfigured(config llmtypes.Config) bool {
 	return len(config.AllowedTools) == 1 && config.AllowedTools[0] == NoToolsMarker
 }
 
-// TodoFilePath returns the path to the todo file
-func (s *BasicState) TodoFilePath() (string, error) {
-	s.mu.RLock()
-	todoPath := s.todoFilePath
-	s.mu.RUnlock()
-
-	if todoPath != "" {
-		return todoPath, nil
-	}
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-
-	todoFilePath := path.Join(homeDir, ".kodelet", "todos", fmt.Sprintf("%s.json", s.sessionID))
-	return todoFilePath, nil
-}
-
-// SetTodoFilePath sets the path to the todo file
-func (s *BasicState) SetTodoFilePath(path string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.todoFilePath = path
-}
-
 // SetFileLastAccessed sets the last access time for a file
 func (s *BasicState) SetFileLastAccessed(path string, lastAccessed time.Time) error {
 	s.mu.Lock()
@@ -633,7 +590,7 @@ func (s *BasicState) configureToolSlice(tools []tooltypes.Tool) []tooltypes.Tool
 	for i, tool := range tools {
 		switch tool.Name() {
 		case "bash":
-			tools[i] = NewBashTool(s.llmConfig.AllowedCommands, s.llmConfig.DisableFSSearchTools)
+			tools[i] = NewBashToolWithTimeout(s.llmConfig.AllowedCommands, s.llmConfig.DisableFSSearchTools, s.llmConfig.BashTimeout())
 		case "code_execution":
 			if codeExecutionTool, ok := tool.(*CodeExecutionTool); ok {
 				tools[i] = NewCodeExecutionToolWithOptions(codeExecutionTool.runtime, s.llmConfig.ToolMode, s.llmConfig.DisableFSSearchTools)

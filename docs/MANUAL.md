@@ -151,8 +151,10 @@ This command analyzes your staged changes (`git diff --cached`) and uses AI to g
 Options:
 - `--no-sign`: Disable commit signing (commits are signed by default)
 - `--template` or `-t`: Use a template for the commit message
-- `--short`: Generate a short commit message
+- `--short`: Generate a short commit message (enabled by default)
+- `--prefix`: Prefix the generated commit message, such as `TICKET-123`
 - `--no-confirm`: Skip confirmation prompt
+- `--save`: Enable conversation persistence (disabled by default for commits)
 
 Create pull requests:
 
@@ -640,6 +642,10 @@ allowed_commands: []  # Empty means use default banned commands
 #   - "git status"
 #   - "git log *"
 
+bash:
+  # Maximum execution timeout for bash tool calls (default: 120s)
+  timeout: 120s
+
 # Tool behavior configuration
 # Tool interaction mode
 # - full: standard tool access
@@ -698,9 +704,6 @@ kodelet run --disable-fs-search-tools "query"
 # Use the first user message for persisted conversation summaries
 kodelet run --conversation-summary-mode first_message "query"
 
-# Enable todo tools for this run (disabled by default)
-kodelet run --enable-todos "query"
-
 # Use a custom system prompt template
 kodelet run --sysprompt ./sysprompt.tmpl "query"
 
@@ -752,15 +755,6 @@ profiles:
     enable_search: true
     openai:
       platform: copilot
-
-  xai:
-    provider: "openai"
-    model: "grok-3"
-    weak_model: "grok-3-mini"
-    max_tokens: 16000
-    reasoning_effort: "none"
-    openai:
-      platform: "xai"
 
   mix-n-match:
     # Main agent uses Claude
@@ -933,6 +927,21 @@ kodelet run --allowed-commands "ls *,pwd,echo *" "analyze this directory"
 - Patterns are matched against the entire command string, not just the command name
 - Use specific patterns rather than overly broad wildcards for better security
 
+### Bash Tool Timeout
+
+The `bash.timeout` configuration option controls the maximum timeout the agent can request for a bash command. It defaults to `120s` and accepts Go-style duration strings such as `120s`, `2m`, or `5m`.
+
+Configuration file:
+```yaml
+bash:
+  timeout: 5m
+```
+
+Environment variable:
+```bash
+export KODELET_BASH_TIMEOUT=5m
+```
+
 ## LLM Providers
 
 ### Anthropic Claude
@@ -990,6 +999,27 @@ including rolling windows and workspace credits.
 provider: openai
 openai:
   platform: codex
+  api_mode: responses
+  service_tier: fast
+  websocket_mode: true
+```
+
+`openai.service_tier` is optional. Kodelet accepts OpenAI's native values
+`auto`, `default`, `flex`, `priority`, and `scale`, plus Codex's
+user-facing `fast` alias. When you set `fast`, Kodelet sends
+`service_tier: priority` to the upstream API.
+
+`openai.websocket_mode` controls the Responses API WebSocket transport. It
+defaults to `true` for supported OpenAI and Codex Responses API endpoints to
+reduce end-to-end latency. Kodelet still sends `store: false` and replays local
+conversation state. If WebSocket setup or streaming fails while this is enabled,
+the request fails instead of silently retrying over HTTP.
+
+You can force HTTP streaming with:
+
+```yaml
+openai:
+  websocket_mode: false
 ```
 
 ## OpenAI Native Web Search
@@ -1093,7 +1123,7 @@ If a token is expired, run `kodelet anthropic login --alias <alias>` to re-authe
 
 ## Custom Tools
 
-Kodelet supports custom executable tools that extend its capabilities beyond the built-in tool set. Custom tools are standalone executables (scripts or binaries) that implement a simple two-command protocol and can be written in any programming language.
+Kodelet supports custom executable tools that extend its capabilities beyond the built-in tool set. Custom tools are standalone executables (scripts or binaries) that implement a simple executable protocol and can be written in any programming language.
 
 ### Direct CLI Invocation
 
@@ -1123,9 +1153,10 @@ kodelet custom-tool invoke hello --name Ada --input-json '{"config":{"verbose":t
 
 ### Creating Custom Tools
 
-Custom tools are executable files that respond to two commands:
+Custom tools are executable files that respond to two required commands and one optional command:
 - `<tool> description` - Returns a JSON schema describing the tool
 - `<tool> run` - Executes the tool with JSON input from stdin
+- `<tool> config` - Optional runtime defaults such as timeout
 
 **Basic Requirements:**
 1. **Executable**: The file must have execute permissions (`chmod +x`)
@@ -1171,6 +1202,22 @@ The tool receives JSON input via stdin and can:
 - **Error**: Write error message to stderr and exit with non-zero code
 - **JSON Error**: Write `{"error": "message"}` to stdout for structured errors
 
+When a custom tool is invoked by an agent conversation, Kodelet sets `KODELET_CONVERSATION_ID`, `KODELET_WORKING_DIR`, `KODELET_PROVIDER`, `KODELET_MODEL`, and `KODELET_PROFILE` in the tool process environment when available. It also runs the custom tool from `KODELET_WORKING_DIR` when an effective working directory is known. Direct CLI invocations do not synthesize these values; pass them explicitly in the environment if your tool requires them.
+
+**Optional Config Command:**
+```bash
+./my-tool config
+```
+
+If implemented, the tool can return runtime defaults:
+```json
+{
+  "timeout": "30m"
+}
+```
+
+The `timeout` value uses the same Go-style duration format as `custom_tools.timeout`. If the command is missing or exits non-zero, Kodelet ignores it and uses configured defaults.
+
 ### Directory Structure
 
 Custom tools are discovered from four locations in precedence order:
@@ -1203,6 +1250,20 @@ custom_tools:
   # Maximum output size (default: 100KB)
   max_output_size: 102400
 
+  # Per-tool runtime configuration. Tool names match the name returned by
+  # `<tool> description`, without the custom_tool_ prefix.
+  tools:
+    seer:
+      # Overrides the global timeout and any timeout returned by `seer config`
+      timeout: 30m
+
+      # Injected only when executing this tool
+      envs:
+        SEER_MODEL: gpt-5.5
+        SEER_CACHE_DIR: "/tmp/seer"
+        # Null or bare values inherit from the current Kodelet process environment
+        ANTHROPIC_API_KEY:
+
   # Tool whitelist - only specified tools will be loaded (empty means load all tools)
   # When the whitelist is empty, all discovered custom tools will be available
   # When specified, only tools with these exact names will be loaded
@@ -1211,6 +1272,14 @@ custom_tools:
     - "database-backup"
     - "deploy-script"
 ```
+
+Per-tool timeout resolution order is:
+1. `custom_tools.tools.<name>.timeout`
+2. Optional `<tool> config` timeout
+3. Global `custom_tools.timeout`
+4. Built-in default `120s`
+
+Per-tool `envs` are merged onto the current process environment and only apply to that tool's `run` process. If an injected key already exists in the process environment, the per-tool value wins. A bare or `null` env value means “copy this variable from Kodelet's current process environment”; for example, `ANTHROPIC_API_KEY:` behaves like `ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY` when that variable is set. Use `KEY: ""` when you intentionally want to pass an empty string.
 
 **Environment Variable Override:**
 You can override the custom tool timeout for a single process with `KODELET_CUSTOM_TOOLS_TIMEOUT`. Use the same duration format as the config value, for example `120s`, `2m`, or `5m`.
@@ -1557,16 +1626,6 @@ kodelet run --conversation-summary-mode first_message "your query"
 ```
 
 This can also be set via configuration file (`conversation_summary_mode: first_message`) or environment variable (`KODELET_CONVERSATION_SUMMARY_MODE=first_message`). The default is `llm`. This only affects short persisted conversation summaries/titles, not context compaction.
-
-### Enabling Todo Tools
-
-Todo tools (`todo_read` and `todo_write`) are disabled by default for the main agent. To enable them for a run:
-
-```bash
-kodelet run --enable-todos "your query"
-```
-
-You can also enable them via configuration (`enable_todos: true`) or environment variable (`KODELET_ENABLE_TODOS=true`).
 
 ### Custom System Prompt Template
 

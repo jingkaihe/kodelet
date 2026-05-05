@@ -23,8 +23,6 @@ type mockState struct{}
 func (m *mockState) SetFileLastAccessed(_ string, _ time.Time) error { return nil }
 func (m *mockState) GetFileLastAccessed(_ string) (time.Time, error) { return time.Time{}, nil }
 func (m *mockState) ClearFileLastAccessed(_ string) error            { return nil }
-func (m *mockState) TodoFilePath() (string, error)                   { return "", nil }
-func (m *mockState) SetTodoFilePath(_ string)                        {}
 func (m *mockState) SetFileLastAccess(_ map[string]time.Time)        {}
 func (m *mockState) FileLastAccess() map[string]time.Time            { return nil }
 func (m *mockState) BasicTools() []tooltypes.Tool                    { return nil }

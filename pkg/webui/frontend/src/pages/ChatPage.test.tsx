@@ -340,7 +340,7 @@ describe("ChatPage", () => {
 		await waitFor(() =>
 			expect(mockGetCWDHints).toHaveBeenCalledWith("/workspace/alt"),
 		);
-		fireEvent.click(screen.getByRole("button", { name: "Use these settings" }));
+		fireEvent.click(screen.getByRole("button", { name: "Start" }));
 
 		fireEvent.change(screen.getByPlaceholderText("Ask kodelet anything..."), {
 			target: { value: "hello" },
@@ -387,7 +387,11 @@ describe("ChatPage", () => {
 		fireEvent.mouseDown(screen.getByTestId("cwd-suggestion-0"));
 		fireEvent.click(screen.getByTestId("cwd-suggestion-0"));
 		expect(screen.getByTestId("new-chat-dialog")).toBeInTheDocument();
-		fireEvent.click(screen.getByRole("button", { name: "Use these settings" }));
+		expect(screen.queryByTestId("cwd-suggestions")).not.toBeInTheDocument();
+		expect(mockGetCWDHints).not.toHaveBeenLastCalledWith(
+			"/workspace/kodelet",
+		);
+		fireEvent.click(screen.getByRole("button", { name: "Start" }));
 		expect(screen.queryByTestId("new-chat-dialog")).not.toBeInTheDocument();
 		expect(
 			screen.getByText(/workspace\/kodelet/),
@@ -422,7 +426,7 @@ describe("ChatPage", () => {
 
 		fireEvent.keyDown(cwdInput, { key: "ArrowDown" });
 		fireEvent.keyDown(cwdInput, { key: "Enter" });
-		fireEvent.click(screen.getByRole("button", { name: "Use these settings" }));
+		fireEvent.click(screen.getByRole("button", { name: "Start" }));
 
 		expect(
 			screen.getByText(/workspace\/kodelet/),
@@ -457,7 +461,7 @@ describe("ChatPage", () => {
 		fireEvent.keyDown(cwdInput, { key: "Tab" });
 		expect(screen.queryByTestId("cwd-suggestions")).not.toBeInTheDocument();
 		expect(cwdInput).toHaveValue("/workspace/kodelet");
-		fireEvent.click(screen.getByRole("button", { name: "Use these settings" }));
+		fireEvent.click(screen.getByRole("button", { name: "Start" }));
 
 		expect(
 			screen.getByText(/workspace\/kodelet/),
@@ -543,7 +547,7 @@ describe("ChatPage", () => {
 		fireEvent.change(screen.getByLabelText("Working directory"), {
 			target: { value: "kodelet-website" },
 		});
-		fireEvent.click(screen.getByRole("button", { name: "Use these settings" }));
+		fireEvent.click(screen.getByRole("button", { name: "Start" }));
 		fireEvent.change(screen.getByPlaceholderText("Ask kodelet anything..."), {
 			target: { value: "hello" },
 		});
@@ -563,9 +567,137 @@ describe("ChatPage", () => {
 
 		fireEvent.click(screen.getByTestId("sidebar-new-chat-button"));
 		expect(screen.getByTestId("new-chat-dialog")).toBeInTheDocument();
+		await waitFor(() =>
+			expect(screen.getByLabelText("Working directory")).toHaveFocus(),
+		);
+		expect(screen.queryByTestId("cwd-suggestions")).not.toBeInTheDocument();
+		expect(screen.queryByText("Type a full path or nearby project name.")).not.toBeInTheDocument();
+
+		await new Promise((resolve) => window.setTimeout(resolve, 200));
+		expect(mockGetCWDHints).not.toHaveBeenCalledWith("/workspace/default");
 
 		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 		expect(screen.queryByTestId("new-chat-dialog")).not.toBeInTheDocument();
+	});
+
+	it("shows recent workspaces and applies a selected workspace", async () => {
+		mockGetConversations.mockResolvedValue({
+			conversations: [
+				{
+					id: "conv-1",
+					createdAt: "2023-01-01T00:00:00Z",
+					updatedAt: "2023-01-06T00:00:00Z",
+					messageCount: 1,
+					cwd: "/workspace/a",
+				},
+				{
+					id: "conv-2",
+					createdAt: "2023-01-01T00:00:00Z",
+					updatedAt: "2023-01-05T00:00:00Z",
+					messageCount: 1,
+					cwd: "/workspace/b",
+				},
+				{
+					id: "conv-3",
+					createdAt: "2023-01-01T00:00:00Z",
+					updatedAt: "2023-01-04T00:00:00Z",
+					messageCount: 1,
+					cwd: "/workspace/c",
+				},
+				{
+					id: "conv-4",
+					createdAt: "2023-01-01T00:00:00Z",
+					updatedAt: "2023-01-03T00:00:00Z",
+					messageCount: 1,
+					cwd: "/workspace/d",
+				},
+				{
+					id: "conv-5",
+					createdAt: "2023-01-01T00:00:00Z",
+					updatedAt: "2023-01-02T00:00:00Z",
+					messageCount: 1,
+					cwd: "/workspace/e",
+				},
+				{
+					id: "conv-6",
+					createdAt: "2023-01-01T00:00:00Z",
+					updatedAt: "2023-01-01T00:00:00Z",
+					messageCount: 1,
+					cwd: "/workspace/f",
+				},
+			],
+			hasMore: false,
+			total: 6,
+			limit: 10,
+			offset: 0,
+		});
+
+		render(<ChatPage />);
+
+		await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
+		fireEvent.click(screen.getByTestId("sidebar-new-chat-button"));
+
+		expect(screen.getByTestId("recent-workspaces")).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "/workspace/a" })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "/workspace/e" })).toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: "/workspace/f" })).not.toBeInTheDocument();
+
+		fireEvent.click(screen.getByRole("button", { name: "/workspace/b" }));
+		expect(screen.getByLabelText("Working directory")).toHaveValue(
+			"/workspace/b",
+		);
+	});
+
+	it("cancels pending cwd suggestions when applying a recent workspace", async () => {
+		vi.useFakeTimers();
+
+		mockGetConversations.mockResolvedValue({
+			conversations: [
+				{
+					id: "conv-1",
+					createdAt: "2023-01-01T00:00:00Z",
+					updatedAt: "2023-01-06T00:00:00Z",
+					messageCount: 1,
+					cwd: "/workspace/recent",
+				},
+			],
+			hasMore: false,
+			total: 1,
+			limit: 10,
+			offset: 0,
+		});
+		mockGetCWDHints.mockResolvedValue({
+			hints: [{ path: "/workspace/kodelet" }],
+		});
+
+		try {
+			render(<ChatPage />);
+
+			await act(async () => {
+				await Promise.resolve();
+				await Promise.resolve();
+			});
+
+			fireEvent.click(screen.getByTestId("sidebar-new-chat-button"));
+			const cwdInput = screen.getByLabelText("Working directory");
+			fireEvent.focus(cwdInput);
+			fireEvent.change(cwdInput, { target: { value: "/workspace/ko" } });
+			fireEvent.click(
+				screen.getByRole("button", { name: "/workspace/recent" }),
+			);
+
+			await act(async () => {
+				vi.advanceTimersByTime(150);
+				await Promise.resolve();
+				await Promise.resolve();
+			});
+
+			expect(mockGetCWDHints).not.toHaveBeenCalledWith("/workspace/ko");
+			expect(cwdInput).toHaveValue("/workspace/recent");
+			expect(screen.queryByTestId("cwd-suggestions")).not.toBeInTheDocument();
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("shows the cwd inside the inline context for existing conversations", async () => {
@@ -1181,7 +1313,7 @@ describe("ChatPage", () => {
 		await waitFor(() =>
 			expect(mockGetCWDHints).toHaveBeenCalledWith("/workspace/alt"),
 		);
-		fireEvent.click(screen.getByRole("button", { name: "Use these settings" }));
+		fireEvent.click(screen.getByRole("button", { name: "Start" }));
 
 		fireEvent.change(screen.getByPlaceholderText("Ask kodelet anything..."), {
 			target: { value: "hello" },
@@ -1499,6 +1631,82 @@ describe("ChatPage", () => {
 		});
 
 		expect(screen.getByText("stream continues")).toBeInTheDocument();
+	});
+
+	it("only auto-scrolls streamed updates while the transcript is at the bottom", async () => {
+		routeParams = { id: "conv-123" };
+
+		mockGetConversation.mockResolvedValue({
+			id: "conv-123",
+			createdAt: "2024-01-01T00:00:00Z",
+			updatedAt: "2024-01-01T00:00:00Z",
+			messageCount: 1,
+			messages: [
+				{
+					role: "user",
+					content: "Existing conversation",
+				},
+			],
+			toolResults: {},
+		});
+
+		let streamListener: ((event: ChatStreamEvent) => void) | null = null;
+		mockStreamConversation.mockImplementation(async (_id, options) => {
+			streamListener = (
+				options as { onEvent: (event: ChatStreamEvent) => void }
+			).onEvent;
+			return new Promise(() => undefined);
+		});
+
+		render(<ChatPage />);
+
+		await waitFor(() => expect(streamListener).not.toBeNull());
+
+		const scrollIntoView = vi.mocked(
+			window.HTMLElement.prototype.scrollIntoView,
+		);
+		scrollIntoView.mockClear();
+
+		const transcriptScroll = screen.getByTestId("chat-transcript-scroll");
+		Object.defineProperties(transcriptScroll, {
+			clientHeight: { configurable: true, value: 500 },
+			scrollHeight: { configurable: true, value: 1500 },
+			scrollTop: { configurable: true, value: 200 },
+		});
+
+		fireEvent.scroll(transcriptScroll);
+
+		await act(async () => {
+			streamListener?.({
+				kind: "text-delta",
+				conversation_id: "conv-123",
+				delta: "while reading earlier content",
+			});
+		});
+
+		expect(
+			screen.getByText("while reading earlier content"),
+		).toBeInTheDocument();
+		expect(scrollIntoView).not.toHaveBeenCalled();
+
+		Object.defineProperty(transcriptScroll, "scrollTop", {
+			configurable: true,
+			value: 1000,
+		});
+		fireEvent.scroll(transcriptScroll);
+
+		await act(async () => {
+			streamListener?.({
+				kind: "text-delta",
+				conversation_id: "conv-123",
+				delta: " after returning to bottom",
+			});
+		});
+
+		expect(scrollIntoView).toHaveBeenCalledWith({
+			behavior: "smooth",
+			block: "end",
+		});
 	});
 
 	it("disables delete for the active conversation while it is streaming", async () => {

@@ -37,8 +37,6 @@ func NewRendererRegistry() *RendererRegistry {
 	registry.Register("bash", &BashRenderer{})
 	registry.Register("grep_tool", &GrepRenderer{})
 	registry.Register("glob_tool", &GlobRenderer{})
-	registry.Register("todo_read", &TodoRenderer{})
-	registry.Register("todo_write", &TodoRenderer{})
 	registry.Register("subagent", &SubAgentRenderer{})
 	registry.Register("view_image", &ViewImageRenderer{})
 	registry.Register("openai_web_search", &OpenAIWebSearchRenderer{})

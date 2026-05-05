@@ -1,7 +1,9 @@
 package llm
 
 import (
+	"strings"
 	"testing"
+	"time"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/spf13/cobra"
@@ -36,6 +38,54 @@ func TestGetConfigFromViperDefaults(t *testing.T) {
 	// Verify
 	assert.Empty(t, config.Model)
 	assert.Zero(t, config.MaxTokens)
+	require.NotNil(t, config.Bash)
+	assert.Equal(t, llmtypes.DefaultBashTimeout, config.Bash.Timeout)
+}
+
+func TestGetConfigFromViper_BashTimeout(t *testing.T) {
+	viper.Reset()
+	viper.Set("bash.timeout", "5m")
+
+	config, err := GetConfigFromViper()
+	require.NoError(t, err)
+
+	require.NotNil(t, config.Bash)
+	assert.Equal(t, 5*time.Minute, config.Bash.Timeout)
+}
+
+func TestGetConfigFromViper_BashTimeoutFromNestedConfig(t *testing.T) {
+	viper.Reset()
+	viper.Set("bash", map[string]any{"timeout": "5m"})
+
+	config, err := GetConfigFromViper()
+	require.NoError(t, err)
+
+	require.NotNil(t, config.Bash)
+	assert.Equal(t, 5*time.Minute, config.Bash.Timeout)
+}
+
+func TestGetConfigFromViper_BashTimeoutFromEnv(t *testing.T) {
+	viper.Reset()
+	viper.SetDefault("bash.timeout", "120s")
+	viper.SetEnvPrefix("KODELET")
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	viper.AutomaticEnv()
+	t.Setenv("KODELET_BASH_TIMEOUT", "5m")
+
+	config, err := GetConfigFromViper()
+	require.NoError(t, err)
+
+	require.NotNil(t, config.Bash)
+	assert.Equal(t, 5*time.Minute, config.Bash.Timeout)
+}
+
+func TestGetConfigFromViper_BashTimeoutRejectsTooShortDuration(t *testing.T) {
+	viper.Reset()
+	viper.Set("bash.timeout", "5s")
+
+	_, err := GetConfigFromViper()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "bash.timeout must be at least 10s")
 }
 
 func TestGetConfigFromViper_ConversationSummaryMode(t *testing.T) {
@@ -493,8 +543,8 @@ func TestGetConfigFromViperOpenAIBasicConfig(t *testing.T) {
 	// Setup
 	viper.Reset()
 	viper.Set("provider", "openai")
-	viper.Set("openai.platform", "xai")
-	viper.Set("openai.base_url", "https://api.x.ai/v1")
+	viper.Set("openai.platform", "fireworks")
+	viper.Set("openai.base_url", "https://api.fireworks.ai/inference/v1")
 	viper.Set("openai.manual_cache", true)
 
 	// Execute
@@ -503,8 +553,8 @@ func TestGetConfigFromViperOpenAIBasicConfig(t *testing.T) {
 
 	// Verify
 	require.NotNil(t, config.OpenAI, "OpenAI config should not be nil")
-	assert.Equal(t, "xai", config.OpenAI.Platform)
-	assert.Equal(t, "https://api.x.ai/v1", config.OpenAI.BaseURL)
+	assert.Equal(t, "fireworks", config.OpenAI.Platform)
+	assert.Equal(t, "https://api.fireworks.ai/inference/v1", config.OpenAI.BaseURL)
 	assert.True(t, config.OpenAI.ManualCache)
 	assert.Nil(t, config.OpenAI.Models, "Models should be nil when not set")
 	assert.Nil(t, config.OpenAI.Pricing, "Pricing should be nil when not set")
@@ -532,6 +582,18 @@ func TestGetConfigFromViperOpenAISearchConfig(t *testing.T) {
 	require.NotNil(t, config.OpenAI)
 	require.NotNil(t, config.OpenAI.EnableSearch)
 	assert.False(t, *config.OpenAI.EnableSearch)
+}
+
+func TestGetConfigFromViperOpenAIWebSocketModeConfig(t *testing.T) {
+	viper.Reset()
+	viper.Set("provider", "openai")
+	viper.Set("openai.websocket_mode", false)
+
+	config, err := GetConfigFromViper()
+	require.NoError(t, err)
+	require.NotNil(t, config.OpenAI)
+	require.NotNil(t, config.OpenAI.WebSocketMode)
+	assert.False(t, *config.OpenAI.WebSocketMode)
 }
 
 func TestGetConfigFromViperOpenAIModelsConfig(t *testing.T) {
@@ -578,10 +640,14 @@ func TestGetConfigFromViperOpenAIPricingConfig(t *testing.T) {
 	// Create complex pricing configuration
 	pricingConfig := map[string]any{
 		"gpt-4": map[string]any{
-			"input":          0.00003,
-			"cached_input":   0.000015,
-			"output":         0.00006,
-			"context_window": 128000,
+			"input":                     0.00003,
+			"cached_input":              0.000015,
+			"output":                    0.00006,
+			"long_context_input":        0.00006,
+			"long_context_cached_input": 0.00003,
+			"long_context_output":       0.00009,
+			"long_context_threshold":    272000,
+			"context_window":            128000,
 		},
 		"o1-preview": map[string]any{
 			"input":          0.000015,
@@ -606,6 +672,10 @@ func TestGetConfigFromViperOpenAIPricingConfig(t *testing.T) {
 	assert.Equal(t, 0.00003, gpt4Pricing.Input)
 	assert.Equal(t, 0.000015, gpt4Pricing.CachedInput)
 	assert.Equal(t, 0.00006, gpt4Pricing.Output)
+	assert.Equal(t, 0.00006, gpt4Pricing.LongContextInput)
+	assert.Equal(t, 0.00003, gpt4Pricing.LongContextCachedInput)
+	assert.Equal(t, 0.00009, gpt4Pricing.LongContextOutput)
+	assert.Equal(t, 272000, gpt4Pricing.LongContextThreshold)
 	assert.Equal(t, 128000, gpt4Pricing.ContextWindow)
 
 	// Check o1-preview pricing
@@ -688,10 +758,13 @@ func TestGetConfigFromViperOpenAIFullConfig(t *testing.T) {
 
 	pricingConfig := map[string]any{
 		"gpt-4": map[string]any{
-			"input":          0.00003,
-			"cached_input":   0.000015,
-			"output":         0.00006,
-			"context_window": 128000,
+			"input":                  0.00003,
+			"cached_input":           0.000015,
+			"output":                 0.00006,
+			"long_context_input":     0.00006,
+			"long_context_output":    0.00009,
+			"long_context_threshold": 272000,
+			"context_window":         128000,
 		},
 		"o1-preview": map[string]any{
 			"input":          0.000015,
@@ -728,6 +801,9 @@ func TestGetConfigFromViperOpenAIFullConfig(t *testing.T) {
 	assert.Equal(t, 0.00003, gpt4Pricing.Input)
 	assert.Equal(t, 0.000015, gpt4Pricing.CachedInput)
 	assert.Equal(t, 0.00006, gpt4Pricing.Output)
+	assert.Equal(t, 0.00006, gpt4Pricing.LongContextInput)
+	assert.Equal(t, 0.00009, gpt4Pricing.LongContextOutput)
+	assert.Equal(t, 272000, gpt4Pricing.LongContextThreshold)
 	assert.Equal(t, 128000, gpt4Pricing.ContextWindow)
 
 	o1Pricing := config.OpenAI.Pricing["o1-preview"]

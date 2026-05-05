@@ -321,30 +321,15 @@ const extractContentText = (content: string | ContentBlock[] | undefined): strin
     .join('\n\n');
 };
 
-const getCopyText = (message: ChatRenderMessage): string => {
-  if (message.role === 'user') {
-    return extractContentText(message.content);
-  }
+const getMessageBlockCopyText = (content: string | ContentBlock[] | undefined): string =>
+  extractContentText(content);
 
-  return (message.blocks || [])
-    .map((block) => {
-      if (block.type === 'thinking') {
-        return `Thinking\n${extractContentText(block.content)}`.trim();
-      }
+const messageCopyButtonBaseClassName =
+  'pointer-events-none px-3 py-2 opacity-0 transition-opacity duration-200 focus-visible:pointer-events-auto focus-visible:opacity-100';
 
-      if (block.type === 'message') {
-        return extractContentText(block.content);
-      }
+const userMessageCopyButtonClassName = `${messageCopyButtonBaseClassName} group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100`;
 
-      if (block.type === 'tools') {
-        return block.tools.map((toolCall) => `- ${getToolSummary(toolCall)}`).join('\n');
-      }
-
-      return '';
-    })
-    .filter(Boolean)
-    .join('\n\n');
-};
+const assistantMessageCopyButtonClassName = `${messageCopyButtonBaseClassName} absolute right-0 top-0 z-10 group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100`;
 
 const STREAMING_INDICATOR_MESSAGES = [
   'Following the thread…',
@@ -400,14 +385,11 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
   if (messages.length === 0) {
     return (
       <div className="flex min-h-full items-center justify-center px-6 py-12">
-        <div className="max-w-2xl text-center">
-          <p className="eyebrow-label mb-3 text-kodelet-orange">
-            Kodelet Chat
-          </p>
-          <h1 className="mb-4 text-4xl font-heading font-bold tracking-tight text-kodelet-dark md:text-6xl">
+        <div className="empty-state-copy-stack text-center">
+          <h1 className="empty-state-title">
             {emptyStateTitle}
           </h1>
-          <p className="mx-auto max-w-xl text-lg font-body italic leading-8 text-kodelet-dark/70">
+          <p className="empty-state-copy">
             Ask kodelet to inspect the repo, make changes, run tools, and keep the entire
             conversation threaded in one place.
           </p>
@@ -440,14 +422,56 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
               <div className="mb-4 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <div
+                    aria-hidden="true"
                     className={cn(
-                      'flex h-10 w-10 items-center justify-center rounded-full font-heading text-sm font-semibold uppercase',
-                      isUser
-                        ? 'bg-kodelet-orange text-white'
-                        : 'bg-kodelet-dark text-kodelet-light'
+                      'message-avatar',
+                      isUser ? 'message-avatar-user' : 'message-avatar-kodelet'
                     )}
                   >
-                    {isUser ? 'You' : 'Ko'}
+                    {isUser ? (
+                      <svg
+                        className="h-5 w-5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        xmlns="http://www.w3.org/2000/svg"
+                      >
+                        <path
+                          d="M12 11.4a3.35 3.35 0 1 0 0-6.7 3.35 3.35 0 0 0 0 6.7Z"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="1.8"
+                        />
+                        <path
+                          d="M5.9 19.1c.78-3.02 2.9-4.52 6.1-4.52s5.32 1.5 6.1 4.52"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="1.8"
+                        />
+                      </svg>
+                    ) : (
+                      <svg
+                        className="h-5 w-5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        xmlns="http://www.w3.org/2000/svg"
+                      >
+                        <path
+                          d="m7.5 7.5 4.5 4.5-4.5 4.5"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="2"
+                        />
+                        <path
+                          d="M13.5 16.5h4.2"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeWidth="2"
+                        />
+                      </svg>
+                    )}
                   </div>
 					<div>
 						<p className="font-heading text-sm font-semibold tracking-tight text-kodelet-dark">
@@ -456,10 +480,12 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
 					</div>
 				</div>
 
-                <CopyButton
-                  className="pointer-events-none px-3 py-2 opacity-0 transition-opacity duration-200 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
-                  content={getCopyText(message)}
-                />
+                {isUser ? (
+                  <CopyButton
+                    className={userMessageCopyButtonClassName}
+                    content={getMessageBlockCopyText(message.content)}
+                  />
+                ) : null}
               </div>
 
               {isUser ? (
@@ -580,12 +606,21 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
                       );
                     }
 
+                    const copyText = getMessageBlockCopyText(block.content);
+
                     return (
-                      <div
-                        key={`message-${blockIndex}`}
-                        className="chat-prose max-w-none text-kodelet-dark"
-                        dangerouslySetInnerHTML={{ __html: renderContent(block.content) }}
-                      />
+                      <div key={`message-${blockIndex}`} className="group/message relative">
+                        {copyText.trim() ? (
+                          <CopyButton
+                            className={assistantMessageCopyButtonClassName}
+                            content={copyText}
+                          />
+                        ) : null}
+                        <div
+                          className="chat-prose max-w-none pr-12 text-kodelet-dark"
+                          dangerouslySetInnerHTML={{ __html: renderContent(block.content) }}
+                        />
+                      </div>
                     );
                   })}
 

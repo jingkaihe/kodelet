@@ -337,6 +337,9 @@ func resolveWebChatConfigForExistingConversation(record *conversationservice.Get
 			if apiMode, ok := record.Metadata["api_mode"].(string); ok && strings.TrimSpace(apiMode) != "" {
 				config.OpenAI.APIMode = llmtypes.OpenAIAPIMode(strings.TrimSpace(apiMode))
 			}
+			if serviceTier, ok := record.Metadata["service_tier"].(string); ok && strings.TrimSpace(serviceTier) != "" {
+				config.OpenAI.ServiceTier = llmtypes.OpenAIServiceTier(strings.TrimSpace(serviceTier))
+			}
 		}
 	}
 
@@ -413,7 +416,6 @@ func buildChatState(
 	customManager *tools.CustomToolManager,
 ) (*tools.BasicState, error) {
 	stateOpts := []tools.BasicStateOption{
-		tools.WithSessionID(sessionID),
 		tools.WithWorkingDirectory(workingDir),
 		tools.WithLLMConfig(llmConfig),
 		tools.WithCustomTools(customManager),

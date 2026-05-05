@@ -321,11 +321,13 @@ kodelet run --no-hooks "query"
 ```bash
 git add .
 # Recommended: fast, non-interactive, no conversation saved
-kodelet commit --short --no-confirm --no-save
+kodelet commit --no-confirm
+
+# Include a ticket prefix
+kodelet commit --prefix TICKET-123
 
 # Other options
 kodelet commit                  # Interactive with confirmation
-kodelet commit --short          # Shorter message with confirmation
 kodelet commit --no-confirm     # Skip confirmation only
 ```
 
@@ -388,8 +390,24 @@ kodelet custom-tool invoke hello --name Ada --input-json '{"config":{"verbose":t
 
 Flags after the tool name are reserved for the tool's schema-derived input. For runtime overrides such as timeout, use config or an environment variable instead of expecting a built-in `invoke` flag.
 
-**Timeout override:**
-Custom tools use `custom_tools.timeout` (`120s` by default). For one-off runs, override it per process with `KODELET_CUSTOM_TOOLS_TIMEOUT`:
+**Runtime configuration:**
+Custom tools use `custom_tools.timeout` (`120s` by default). Individual tools can override timeout and inject environment variables with `custom_tools.tools.<tool-name>`:
+
+```yaml
+custom_tools:
+  tools:
+    seer:
+      timeout: 30m
+      envs:
+        SEER_MODEL: gpt-5.5
+        ANTHROPIC_API_KEY:
+```
+
+Bare or `null` env values inherit from Kodelet's current process environment, so `ANTHROPIC_API_KEY:` behaves like `ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY` when that variable is set. Use `KEY: ""` to intentionally pass an empty string.
+
+Tool binaries may also optionally implement `./my-tool config` and return defaults such as `{"timeout":"30m"}`. Explicit `custom_tools.tools.<tool-name>.timeout` wins over the optional tool config.
+
+For one-off runs, override the global custom tool timeout per process with `KODELET_CUSTOM_TOOLS_TIMEOUT`:
 
 ```bash
 KODELET_CUSTOM_TOOLS_TIMEOUT=300s kodelet custom-tool invoke my-tool ...
@@ -408,6 +426,7 @@ kodelet run "Create a Kodelet custom tool that fetches weather without an API ke
 **Tool protocol:**
 ```bash
 ./my-tool description  # Returns JSON schema
+./my-tool config       # Optional runtime defaults
 ./my-tool run          # Executes with JSON input from stdin
 ```
 
@@ -495,7 +514,7 @@ profiles:
     openai-subagent:
         disable_fs_search_tools: true
         tool_mode: patch
-        model: gpt-5.4
+        model: gpt-5.5
         openai:
             api_mode: responses
         provider: openai
@@ -514,14 +533,6 @@ profiles:
         reasoning_effort: max
         weak_model: sonnet-46
         weak_model_max_tokens: 8192
-    xai:
-        max_tokens: 16000
-        model: grok-code-fast-1
-        openai:
-            platform: xai
-        provider: openai
-        reasoning_effort: none
-        weak_model: grok-code-fast-1
 ```
 
 ## LLM Providers
@@ -709,6 +720,19 @@ allowed_commands:
 Or via environment:
 ```bash
 export KODELET_ALLOWED_COMMANDS="ls *,pwd,git status"
+```
+
+### Bash Tool Timeout
+Set the maximum timeout the agent can request for a bash command. Defaults to `120s`.
+
+```yaml
+bash:
+  timeout: 5m
+```
+
+Or via environment:
+```bash
+export KODELET_BASH_TIMEOUT=5m
 ```
 
 ### Tool Restrictions

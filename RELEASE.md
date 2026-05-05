@@ -1,5 +1,57 @@
 # Kodelet
 
+## 0.4.1-beta (2026-05-04)
+
+Refined the chat empty state and message avatars with matching visual polish for the updated frontend treatment.
+
+## 0.4.0-beta (2026-05-03)
+
+Added WebSocket streaming support for the OpenAI Responses API, including explicit failure handling and clean stream shutdown on terminal events.
+
+Updated OpenAI configuration for newer flagship and long-context models, with streamed usage pricing now keyed to the actual call model.
+
+Removed the xAI platform preset and refreshed the related config, docs, and regression coverage around supported OpenAI-compatible platforms.
+
+## 0.3.51-beta (2026-05-02)
+
+Removed the built-in `todo_read` and `todo_write` tools, including the `--enable-todos`/`enable_todos` configuration path and the Web UI/ACP structured renderer plumbing for todo results.
+
+Improved custom tool execution so agent-invoked tools receive conversation context environment variables and run from the effective working directory when available.
+
+## 0.3.50-beta (2026-04-30)
+
+Added `bash.timeout` so the bash tool's maximum requested timeout can be configured beyond the previous fixed 120-second limit, with validation and schema/help text reflecting the configured cap.
+
+Added per-custom-tool runtime configuration for timeouts and environment-variable injection, plus an optional `<tool> config` command that lets custom tools expose default runtime settings.
+
+Updated the sample config, manual, and built-in `kodelet` skill with the new bash and custom tool runtime configuration options.
+
+## 0.3.49-beta (2026-04-28)
+
+Improved the Web UI new-chat dialog with recent workspace shortcuts, cleaner directory labels, cwd-first focus, and a shorter Start action.
+
+Hardened cwd autocomplete so pending suggestion requests are cancelled when dialogs close, conversations switch, or a recent workspace/manual path is applied.
+
+Refined chat UI styling around setup buttons, recent workspace chips, responsive dialog layout, and the sticky composer footer.
+
+Updated the embedded Web UI frontend's PostCSS dev dependency from `^8.4.35` to `^8.5.12`.
+
+## 0.3.48-beta (2026-04-27)
+
+Made `kodelet commit` faster and cleaner by defaulting to short commit messages, disabling conversation persistence unless `--save` is passed, and adding `--prefix` for ticket or issue identifiers.
+
+Removed the older commit coauthor configuration and refreshed the commit documentation/skill guidance around the simplified flow.
+
+Improved the Web UI transcript copy action so assistant message blocks can be copied independently without including neighboring messages or tool-call summaries.
+
+Adjusted Web UI chat auto-scroll behaviour. The transcript now tracks whether the user is near the bottom, only calls scrollIntoView when that is true, and resets to follow-bottom when switching conversations.
+
+## 0.3.47-beta (2026-04-23)
+
+Added `openai.service_tier` support for OpenAI and Codex requests, including validation, persistence across resumed CLI/Web UI conversations, and a Codex-friendly `fast` alias that is sent upstream as `priority`.
+
+Added `gpt-5.5` to the Codex platform model catalog and refreshed Codex docs/examples for newer `gpt-5.5`/`gpt-5.4` usage. Also ensured Codex platform profiles use the Codex system prompt even when model names do not include `codex`, and expanded original image detail support for newer GPT/Codex vision models.
+
 ## 0.3.46-beta (2026-04-22)
 
 Added direct CLI support for discovered custom tools with `kodelet custom-tool list`, `describe`, and `invoke`, plus the short `kodelet cti` alias. Per-tool help and flags are now generated at runtime from each tool's `input_schema`, with `--input-json` available for nested or advanced payloads that do not map cleanly to flags.

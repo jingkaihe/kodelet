@@ -14,7 +14,10 @@ import (
 // Define expected OpenAI platform defaults once to avoid duplication
 var (
 	expectedOpenAIReasoningModels = []string{
+		"gpt-5.5",
+		"gpt-5.5-pro",
 		"gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano",
+		"gpt-5.4-pro",
 		"gpt-5.2", "gpt-5.2-pro",
 		"gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-chat-latest",
 		"gpt-5.3-codex", "gpt-5.2-codex",
@@ -65,27 +68,6 @@ func TestLoadCustomConfiguration(t *testing.T) {
 			hasPricing: true,
 		},
 		{
-			name: "xai platform",
-			config: llmtypes.Config{
-				OpenAI: &llmtypes.OpenAIConfig{
-					Platform: "xai",
-				},
-			},
-			expected: &llmtypes.CustomModels{
-				Reasoning: []string{
-					"grok-code-fast-1",
-					"grok-4-0709",
-					"grok-3-mini",
-				},
-				NonReasoning: []string{
-					"grok-3",
-					"grok-2-image-1212",
-				},
-			},
-			hasModels:  true,
-			hasPricing: true,
-		},
-		{
 			name: "custom models only (no platform defaults)",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
@@ -104,22 +86,21 @@ func TestLoadCustomConfiguration(t *testing.T) {
 			hasPricing: false, // No platform defaults loaded when platform is explicitly empty
 		},
 		{
-			name: "xai platform with custom override",
+			name: "custom platform with custom override",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
-					Platform: "xai",
+					Platform: "custom-provider",
 					Models: &llmtypes.CustomModels{
 						Reasoning: []string{"custom-override-model"},
 					},
 				},
 			},
 			expected: &llmtypes.CustomModels{
-				Reasoning: []string{"custom-override-model"},
-				// Auto-populated from platform pricing since reasoning was overridden but non-reasoning wasn't
-				NonReasoning: []string{"grok-3", "grok-3-mini", "grok-2-image-1212", "grok-code-fast-1", "grok-4-0709"},
+				Reasoning:    []string{"custom-override-model"},
+				NonReasoning: nil,
 			},
 			hasModels:  true,
-			hasPricing: true,
+			hasPricing: false,
 		},
 		{
 			name: "auto-populate non-reasoning models",
@@ -166,34 +147,6 @@ func TestLoadCustomConfiguration(t *testing.T) {
 	}
 }
 
-func TestLoadXAIPlatformDefaults(t *testing.T) {
-	models, pricing := loadXAIPlatformDefaults()
-
-	require.NotNil(t, models)
-	require.NotNil(t, pricing)
-
-	// Check reasoning models
-	expectedReasoning := []string{"grok-code-fast-1", "grok-4-0709", "grok-3-mini"}
-	assert.ElementsMatch(t, expectedReasoning, models.Reasoning)
-
-	// Check non-reasoning models
-	expectedNonReasoning := []string{"grok-3", "grok-2-image-1212"}
-	assert.ElementsMatch(t, expectedNonReasoning, models.NonReasoning)
-
-	// Check pricing for a few key models
-	grok4Pricing, exists := pricing["grok-4-0709"]
-	require.True(t, exists)
-	assert.Equal(t, 0.000003, grok4Pricing.Input)
-	assert.Equal(t, 0.000015, grok4Pricing.Output)
-	assert.Equal(t, 256000, grok4Pricing.ContextWindow)
-
-	grok3MiniPricing, exists := pricing["grok-3-mini"]
-	require.True(t, exists)
-	assert.Equal(t, 0.0000003, grok3MiniPricing.Input)
-	assert.Equal(t, 0.0000005, grok3MiniPricing.Output)
-	assert.Equal(t, 131072, grok3MiniPricing.ContextWindow)
-}
-
 func TestLoadCodexPlatformDefaults(t *testing.T) {
 	models, pricing := loadCodexPlatformDefaults()
 
@@ -201,6 +154,7 @@ func TestLoadCodexPlatformDefaults(t *testing.T) {
 	require.NotNil(t, pricing)
 
 	expectedReasoning := []string{
+		"gpt-5.5",
 		"gpt-5.3-codex",
 		"gpt-5.4",
 		"gpt-5.4-mini",
@@ -212,6 +166,12 @@ func TestLoadCodexPlatformDefaults(t *testing.T) {
 	}
 	assert.ElementsMatch(t, expectedReasoning, models.Reasoning)
 	assert.Empty(t, models.NonReasoning)
+
+	gpt55Pricing, exists := pricing["gpt-5.5"]
+	require.True(t, exists)
+	assert.Equal(t, 0.0, gpt55Pricing.Input)
+	assert.Equal(t, 0.0, gpt55Pricing.Output)
+	assert.Equal(t, 272_000, gpt55Pricing.ContextWindow)
 
 	gpt54Pricing, exists := pricing["gpt-5.4"]
 	require.True(t, exists)
@@ -322,10 +282,6 @@ func TestGetPlatformBaseURL(t *testing.T) {
 			expected: "https://api.openai.com/v1",
 		},
 		{
-			platform: "xai",
-			expected: "https://api.x.ai/v1",
-		},
-		{
 			platform: "codex",
 			expected: "https://chatgpt.com/backend-api/codex",
 		},
@@ -355,10 +311,6 @@ func TestGetPlatformAPIKeyEnvVar(t *testing.T) {
 		{
 			platform: "openai",
 			expected: "OPENAI_API_KEY",
-		},
-		{
-			platform: "xai",
-			expected: "XAI_API_KEY",
 		},
 		{
 			platform: "codex",
@@ -408,17 +360,6 @@ func TestGetAPIKeyEnvVar(t *testing.T) {
 			expected: "OPENAI_API_KEY",
 		},
 		{
-			name: "xai platform uses XAI_API_KEY",
-			config: llmtypes.Config{
-				Provider: "openai",
-				Model:    "grok-3",
-				OpenAI: &llmtypes.OpenAIConfig{
-					Platform: "xai",
-				},
-			},
-			expected: "XAI_API_KEY",
-		},
-		{
 			name: "custom api_key_env_var overrides default",
 			config: llmtypes.Config{
 				Provider: "openai",
@@ -430,16 +371,16 @@ func TestGetAPIKeyEnvVar(t *testing.T) {
 			expected: "MY_CUSTOM_API_KEY",
 		},
 		{
-			name: "custom api_key_env_var overrides platform",
+			name: "custom api_key_env_var overrides custom platform",
 			config: llmtypes.Config{
 				Provider: "openai",
-				Model:    "grok-3",
+				Model:    "custom-model",
 				OpenAI: &llmtypes.OpenAIConfig{
-					Platform:     "xai",
-					APIKeyEnvVar: "MY_CUSTOM_XAI_KEY",
+					Platform:     "custom-provider",
+					APIKeyEnvVar: "MY_CUSTOM_API_KEY",
 				},
 			},
-			expected: "MY_CUSTOM_XAI_KEY",
+			expected: "MY_CUSTOM_API_KEY",
 		},
 		{
 			name: "codex platform uses OPENAI_API_KEY",
@@ -532,6 +473,41 @@ func TestResolveAPIMode(t *testing.T) {
 	}
 }
 
+func TestNormalizeServiceTier(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   llmtypes.Config
+		expected llmtypes.OpenAIServiceTier
+	}{
+		{
+			name:     "missing openai config",
+			config:   llmtypes.Config{},
+			expected: "",
+		},
+		{
+			name:     "fast tier preserved as config value",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{ServiceTier: llmtypes.OpenAIServiceTierFast}},
+			expected: llmtypes.OpenAIServiceTierFast,
+		},
+		{
+			name:     "whitespace and casing normalize",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{ServiceTier: llmtypes.OpenAIServiceTier(" Flex ")}},
+			expected: llmtypes.OpenAIServiceTierFlex,
+		},
+		{
+			name:     "invalid value ignored",
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{ServiceTier: llmtypes.OpenAIServiceTier("turbo")}},
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, normalizeServiceTier(tt.config))
+		})
+	}
+}
+
 func TestGetBaseURL(t *testing.T) {
 	os.Unsetenv("OPENAI_API_BASE")
 	defer os.Unsetenv("OPENAI_API_BASE")
@@ -548,18 +524,13 @@ func TestGetBaseURL(t *testing.T) {
 			expected: "https://api.openai.com/v1",
 		},
 		{
-			name:     "xai platform base",
-			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{Platform: "xai"}},
-			expected: "https://api.x.ai/v1",
-		},
-		{
 			name:     "codex platform base",
 			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{Platform: "codex"}},
 			expected: "https://chatgpt.com/backend-api/codex",
 		},
 		{
 			name:     "custom base overrides platform",
-			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{Platform: "xai", BaseURL: "https://custom.example/v1"}},
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{Platform: "custom-provider", BaseURL: "https://custom.example/v1"}},
 			expected: "https://custom.example/v1",
 		},
 		{
@@ -598,7 +569,7 @@ func TestGetConfiguredBaseURL(t *testing.T) {
 		},
 		{
 			name:     "platform default is not treated as explicit override",
-			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{Platform: "xai"}},
+			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{Platform: "codex"}},
 			expected: "",
 		},
 		{
@@ -644,7 +615,7 @@ func TestResolveClientBaseURL(t *testing.T) {
 		},
 		{
 			name:       "copilot ignores platform default endpoint",
-			config:     llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{Platform: "xai"}},
+			config:     llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{Platform: "codex"}},
 			useCopilot: true,
 			expected:   "https://api.githubcopilot.com",
 		},
@@ -708,15 +679,6 @@ func TestValidateCustomConfiguration(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "valid built-in platform xai",
-			config: llmtypes.Config{
-				OpenAI: &llmtypes.OpenAIConfig{
-					Platform: "xai",
-				},
-			},
-			expectError: false,
-		},
-		{
 			name: "valid built-in platform codex",
 			config: llmtypes.Config{
 				OpenAI: &llmtypes.OpenAIConfig{
@@ -751,6 +713,34 @@ func TestValidateCustomConfiguration(t *testing.T) {
 				},
 			},
 			expectError: false,
+		},
+		{
+			name: "valid service tier fast",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					ServiceTier: llmtypes.OpenAIServiceTierFast,
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "valid service tier priority",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					ServiceTier: llmtypes.OpenAIServiceTierPriority,
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "invalid service tier",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					ServiceTier: llmtypes.OpenAIServiceTier("turbo"),
+				},
+			},
+			expectError:   true,
+			errorContains: "invalid service_tier",
 		},
 		{
 			name: "invalid api mode",
@@ -796,15 +786,53 @@ func TestValidateCustomConfiguration(t *testing.T) {
 				OpenAI: &llmtypes.OpenAIConfig{
 					Pricing: map[string]llmtypes.ModelPricing{
 						"test-model": {
-							Input:         0.001,
-							Output:        0.002,
-							CachedInput:   0.0005,
-							ContextWindow: 128000,
+							Input:                  0.001,
+							Output:                 0.002,
+							CachedInput:            0.0005,
+							LongContextInput:       0.002,
+							LongContextOutput:      0.003,
+							LongContextCachedInput: 0.001,
+							LongContextThreshold:   272000,
+							ContextWindow:          128000,
 						},
 					},
 				},
 			},
 			expectError: false,
+		},
+		{
+			name: "invalid long context pricing",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					Pricing: map[string]llmtypes.ModelPricing{
+						"test-model": {
+							Input:            0.001,
+							Output:           0.002,
+							LongContextInput: -0.002,
+							ContextWindow:    128000,
+						},
+					},
+				},
+			},
+			expectError:   true,
+			errorContains: "invalid long_context_input pricing",
+		},
+		{
+			name: "invalid long context threshold",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					Pricing: map[string]llmtypes.ModelPricing{
+						"test-model": {
+							Input:                0.001,
+							Output:               0.002,
+							LongContextThreshold: -1,
+							ContextWindow:        128000,
+						},
+					},
+				},
+			},
+			expectError:   true,
+			errorContains: "invalid long_context_threshold",
 		},
 		{
 			name: "invalid input pricing",

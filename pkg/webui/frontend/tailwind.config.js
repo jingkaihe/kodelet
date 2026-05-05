@@ -7,9 +7,9 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        'heading': ['Poppins', 'Arial', 'sans-serif'],
-        'body': ['Lora', 'Georgia', 'serif'],
-        'mono': ['Monaco', 'Menlo', 'Ubuntu Mono', 'monospace'],
+        'heading': ['IBM Plex Sans', 'Helvetica Neue', 'sans-serif'],
+        'body': ['Crimson Pro', 'Georgia', 'serif'],
+        'mono': ['JetBrains Mono', 'SFMono-Regular', 'Consolas', 'monospace'],
       },
       colors: {
         // Kodelet Brand Colors

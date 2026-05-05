@@ -33,7 +33,7 @@ func TestBasicState(t *testing.T) {
 	assert.True(t, lastAccessed.IsZero())
 
 	tools := s.Tools()
-	mainTools := GetMainTools(context.Background(), []string{}, false)
+	mainTools := GetMainTools(context.Background(), []string{})
 	assert.Equal(t, len(mainTools), len(tools))
 	for i, tool := range tools {
 		assert.Equal(t, mainTools[i].Name(), tool.Name())
@@ -201,6 +201,28 @@ func TestBasicState_ConfigureBashTool_EmptyAllowedCommands(t *testing.T) {
 
 	assert.NotNil(t, bashTool)
 	assert.Equal(t, []string{}, bashTool.allowedCommands)
+}
+
+func TestBasicState_ConfigureBashTool_CustomTimeout(t *testing.T) {
+	config := llmtypes.Config{
+		Bash: &llmtypes.BashConfig{Timeout: 5 * time.Minute},
+	}
+
+	s := NewBasicState(context.TODO(), WithLLMConfig(config))
+
+	tools := s.BasicTools()
+	var bashTool *BashTool
+	for _, tool := range tools {
+		if tool.Name() == "bash" {
+			if bt, ok := tool.(*BashTool); ok {
+				bashTool = bt
+				break
+			}
+		}
+	}
+
+	assert.NotNil(t, bashTool)
+	assert.Equal(t, 5*time.Minute, bashTool.maxTimeout)
 }
 
 func TestBasicState_DiscoverContexts(t *testing.T) {
@@ -813,33 +835,6 @@ func TestWithMainTools(t *testing.T) {
 		}
 
 		assert.Contains(t, toolNames, "subagent", "Main tools should include subagent")
-	})
-
-	t.Run("todo tools disabled by default", func(t *testing.T) {
-		state := NewBasicState(ctx, WithMainTools())
-
-		toolNames := make([]string, len(state.Tools()))
-		for i, tool := range state.Tools() {
-			toolNames[i] = tool.Name()
-		}
-
-		assert.NotContains(t, toolNames, "todo_read")
-		assert.NotContains(t, toolNames, "todo_write")
-	})
-
-	t.Run("EnableTodos includes todo tools", func(t *testing.T) {
-		config := llmtypes.Config{
-			EnableTodos: true,
-		}
-		state := NewBasicState(ctx, WithLLMConfig(config), WithMainTools())
-
-		toolNames := make([]string, len(state.Tools()))
-		for i, tool := range state.Tools() {
-			toolNames[i] = tool.Name()
-		}
-
-		assert.Contains(t, toolNames, "todo_read")
-		assert.Contains(t, toolNames, "todo_write")
 	})
 
 	t.Run("respects allowed_tools from config", func(t *testing.T) {

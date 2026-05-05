@@ -51,6 +51,8 @@ func runCodexStatus() {
 		fmt.Println("  provider: openai")
 		fmt.Println("  openai:")
 		fmt.Println("    platform: codex")
+		fmt.Println("    api_mode: responses")
+		fmt.Println("    service_tier: fast  # optional")
 		return
 	}
 
