@@ -1157,6 +1157,15 @@ const ChatPage: React.FC = () => {
 	}, [conversation?.profile, conversationId, selectedProfile]);
 
 	const currentCWDLabel = useMemo(() => {
+		const isStartedConversationAwaitingLoad =
+			Boolean(conversationId) &&
+			loadedConversationId !== conversationId &&
+			conversationPathOverrideRef.current === `/c/${conversationId}`;
+
+		if (isStartedConversationAwaitingLoad) {
+			return selectedCWD || chatSettings.defaultCWD || "";
+		}
+
 		if (conversationId) {
 			return conversation?.cwd || chatSettings.defaultCWD || "";
 		}
@@ -1165,6 +1174,7 @@ const ChatPage: React.FC = () => {
 		chatSettings.defaultCWD,
 		conversation?.cwd,
 		conversationId,
+		loadedConversationId,
 		selectedCWD,
 	]);
 

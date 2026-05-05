@@ -1149,6 +1149,70 @@ describe("ChatPage", () => {
 		);
 	});
 
+	it("keeps using the selected cwd while a started conversation record is still loading", async () => {
+		let streamOptions: { onEvent: (event: ChatStreamEvent) => void } | null =
+			null;
+		mockGetConversation.mockResolvedValue({
+			id: "conv-123",
+			createdAt: "2024-01-01T00:00:00Z",
+			updatedAt: "2024-01-01T00:00:00Z",
+			messageCount: 1,
+			messages: [],
+			toolResults: {},
+			cwd: "/workspace/from-server",
+		});
+		mockStreamChat.mockImplementation(
+			async (_request, options) =>
+				new Promise<void>(() => {
+					streamOptions = options as {
+						onEvent: (event: ChatStreamEvent) => void;
+					};
+				}),
+		);
+
+		const { rerender } = render(<ChatPage />);
+
+		await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
+
+		fireEvent.click(screen.getByTestId("sidebar-new-chat-button"));
+		fireEvent.change(screen.getByLabelText("Working directory"), {
+			target: { value: "/workspace/alt" },
+		});
+		await waitFor(() =>
+			expect(mockGetCWDHints).toHaveBeenCalledWith("/workspace/alt"),
+		);
+		fireEvent.click(screen.getByRole("button", { name: "Use these settings" }));
+
+		fireEvent.change(screen.getByPlaceholderText("Ask kodelet anything..."), {
+			target: { value: "hello" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+		await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
+
+		await act(async () => {
+			streamOptions?.onEvent({
+				kind: "conversation",
+				conversation_id: "conv-123",
+			});
+		});
+
+		await waitFor(() =>
+			expect(mockNavigate).toHaveBeenCalledWith("/c/conv-123", {
+				replace: true,
+			}),
+		);
+
+		routeParams = { id: "conv-123" };
+		rerender(<ChatPage />);
+
+		fireEvent.click(screen.getByTestId("composer-git-diff-toggle"));
+
+		await waitFor(() =>
+			expect(mockGetGitDiff).toHaveBeenCalledWith("/workspace/alt"),
+		);
+	});
+
 	it("groups recent chats by cwd and lets directories collapse independently", async () => {
 		mockGetConversations
 			.mockResolvedValueOnce({
