@@ -1,5 +1,6 @@
 import React, {
 	startTransition,
+	useCallback,
 	useEffect,
 	useMemo,
 	useRef,
@@ -282,6 +283,8 @@ const ChatPage: React.FC = () => {
 	const cwdSuggestionRequestRef = useRef(0);
 	const cwdInputFocusedRef = useRef(false);
 	const viewedConversationIdRef = useRef<string | null>(conversationId);
+	const conversationPathOverrideRef = useRef<string | null>(null);
+	const routerConversationIdRef = useRef<string | null>(conversationId);
 	const sidebarResizeStartRef = useRef<{
 		startX: number;
 		startWidth: number;
@@ -291,7 +294,7 @@ const ChatPage: React.FC = () => {
 	const newChatDialogRef = useRef<HTMLDivElement | null>(null);
 	const newChatProfileSelectRef = useRef<HTMLSelectElement | null>(null);
 
-	const refreshConversations = async () => {
+	const refreshConversations = useCallback(async () => {
 		setSidebarLoading(true);
 		try {
 			const response = await apiService.getConversations({
@@ -305,7 +308,7 @@ const ChatPage: React.FC = () => {
 		} finally {
 			setSidebarLoading(false);
 		}
-	};
+	}, []);
 
 	useEffect(() => {
 		void refreshConversations();
@@ -322,7 +325,7 @@ const ChatPage: React.FC = () => {
 			.catch((error) => {
 				console.error("Failed to load chat settings", error);
 			});
-	}, []);
+	}, [refreshConversations]);
 
 	useEffect(() => {
 		return () => {
@@ -335,6 +338,7 @@ const ChatPage: React.FC = () => {
 
 	useEffect(() => {
 		viewedConversationIdRef.current = conversationId;
+		routerConversationIdRef.current = conversationId;
 	}, [conversationId]);
 
 	useEffect(() => {
@@ -469,6 +473,11 @@ const ChatPage: React.FC = () => {
 	}, [isResizingSidebar]);
 
 	useEffect(() => {
+		if (conversationId && conversationPathOverrideRef.current === `/c/${conversationId}`) {
+			return;
+		}
+		conversationPathOverrideRef.current = null;
+
 		sendStreamRef.current += 1;
 		abortControllerRef.current?.abort();
 		abortControllerRef.current = null;
@@ -782,6 +791,15 @@ const ChatPage: React.FC = () => {
 		setSidebarVisible(false);
 	};
 
+	const updatePathForStartedConversation = (streamedId: string) => {
+		const nextPath = `/c/${streamedId}`;
+
+		conversationPathOverrideRef.current = nextPath;
+		viewedConversationIdRef.current = streamedId;
+		routerConversationIdRef.current = streamedId;
+		startTransition(() => navigate(nextPath, { replace: true }));
+	};
+
 	const handleSubmit = async () => {
 		const prompt = draft.trim();
 		if ((!prompt && attachments.length === 0) || steering) {
@@ -854,20 +872,29 @@ const ChatPage: React.FC = () => {
 				{
 					signal: controller.signal,
 					onEvent: (event: ChatStreamEvent) => {
-						if (
-							sendStreamRef.current !== streamInstance ||
-							viewedConversationIdRef.current !== viewConversationIdAtStart ||
-							(viewConversationIdAtStart !== null &&
-								event.conversation_id &&
-								event.conversation_id !== viewConversationIdAtStart)
-						) {
+						const isStillCurrentStream =
+							sendStreamRef.current === streamInstance &&
+							(viewedConversationIdRef.current === viewConversationIdAtStart ||
+								(!viewConversationIdAtStart &&
+									streamedConversationId &&
+									viewedConversationIdRef.current === streamedConversationId)) &&
+							(viewConversationIdAtStart === null ||
+								!event.conversation_id ||
+								event.conversation_id === viewConversationIdAtStart);
+
+						if (!isStillCurrentStream) {
 							return;
 						}
 
 						if (event.kind === "conversation" && event.conversation_id) {
 							const streamedId = event.conversation_id;
+							const shouldUpdatePath =
+								!viewConversationIdAtStart && streamedId !== streamedConversationId;
 							streamedConversationId = streamedId;
 							setActiveConversationId(streamedId);
+							if (shouldUpdatePath) {
+								updatePathForStartedConversation(streamedId);
+							}
 							if (!viewConversationIdAtStart) {
 								const now = new Date().toISOString();
 								setConversations((currentConversations) =>
@@ -909,14 +936,22 @@ const ChatPage: React.FC = () => {
 				},
 			);
 
+			const finishedOnStartedConversation = Boolean(
+				!viewConversationIdAtStart &&
+				streamedConversationId &&
+				viewedConversationIdRef.current === streamedConversationId,
+			);
+
 			if (
 				sendStreamRef.current !== streamInstance ||
-				viewedConversationIdRef.current !== viewConversationIdAtStart
+				(viewedConversationIdRef.current !== viewConversationIdAtStart &&
+					!finishedOnStartedConversation)
 			) {
 				return;
 			}
 
 			if (streamedError) {
+				conversationPathOverrideRef.current = null;
 				showToast(streamedError, "error");
 				await refreshConversations();
 				return;
@@ -928,8 +963,11 @@ const ChatPage: React.FC = () => {
 				);
 				setConversation(latestConversation);
 				setMessages(conversationToChatMessages(latestConversation));
-				if (streamedConversationId !== conversationId) {
-					startTransition(() => navigate(`/c/${streamedConversationId}`));
+				if (streamedConversationId !== routerConversationIdRef.current) {
+					conversationPathOverrideRef.current = null;
+					startTransition(() =>
+						navigate(`/c/${streamedConversationId}`, { replace: true }),
+					);
 				}
 			}
 
@@ -939,23 +977,39 @@ const ChatPage: React.FC = () => {
 				return;
 			}
 
+			const failedOnStartedConversation = Boolean(
+				!viewConversationIdAtStart &&
+				streamedConversationId &&
+				viewedConversationIdRef.current === streamedConversationId,
+			);
+
 			if (
 				sendStreamRef.current !== streamInstance ||
-				viewedConversationIdRef.current !== viewConversationIdAtStart
+				(viewedConversationIdRef.current !== viewConversationIdAtStart &&
+					!failedOnStartedConversation)
 			) {
 				return;
 			}
 
+			conversationPathOverrideRef.current = null;
 			setAttachments(attachmentsForSend);
 			const message =
 				error instanceof Error ? error.message : "Failed to send message";
 			setStreamError(message);
 			showToast(message, "error");
 		} finally {
+			const finishedOnCurrentConversation =
+				viewedConversationIdRef.current === viewConversationIdAtStart ||
+				Boolean(
+					!viewConversationIdAtStart &&
+					streamedConversationId &&
+					viewedConversationIdRef.current === streamedConversationId,
+				);
+
 			if (
 				abortControllerRef.current === controller &&
 				sendStreamRef.current === streamInstance &&
-				viewedConversationIdRef.current === viewConversationIdAtStart
+				finishedOnCurrentConversation
 			) {
 				abortControllerRef.current = null;
 				setSending(false);

@@ -1107,11 +1107,17 @@ describe("ChatPage", () => {
 		expect(mockStopConversation).not.toHaveBeenCalled();
 	});
 
-	it("allows starting a new chat once streaming has a conversation id", async () => {
-		mockStreamChat.mockImplementation(async (_request, options) => {
-			options.onEvent({ kind: "conversation", conversation_id: "conv-123" });
-			return new Promise(() => undefined);
-		});
+	it("updates the URL as soon as a new chat receives a conversation id", async () => {
+		let streamOptions: { onEvent: (event: ChatStreamEvent) => void } | null =
+			null;
+		mockStreamChat.mockImplementation(
+			async (_request, options) =>
+				new Promise<void>(() => {
+					streamOptions = options as {
+						onEvent: (event: ChatStreamEvent) => void;
+					};
+				}),
+		);
 
 		render(<ChatPage />);
 
@@ -1123,14 +1129,24 @@ describe("ChatPage", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
 		await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
+		expect(mockNavigate).not.toHaveBeenCalledWith(
+			"/c/conv-123",
+			expect.anything(),
+		);
+
+		await act(async () => {
+			streamOptions?.onEvent({
+				kind: "conversation",
+				conversation_id: "conv-123",
+			});
+		});
+
+		expect(mockNavigate).toHaveBeenCalledWith("/c/conv-123", {
+			replace: true,
+		});
 		await waitFor(() =>
 			expect(screen.getByTestId("sidebar-new-chat-button")).toBeEnabled(),
 		);
-
-		fireEvent.click(screen.getByTestId("sidebar-new-chat-button"));
-
-		expect(mockNavigate).toHaveBeenCalledWith("/");
-		expect(screen.getByTestId("new-chat-dialog")).toBeInTheDocument();
 	});
 
 	it("groups recent chats by cwd and lets directories collapse independently", async () => {
