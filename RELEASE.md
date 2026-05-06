@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.4.3-beta (2026-05-06)
+
+Centralized automatic context compaction around the shared `compact_ratio` setting, with validation and CLI/config/env support across CLI, ACP, and Web UI flows.
+
+Removed the manual `compact` recipe and recipe-declared built-in hook handlers, moving auto-compaction to an internal prompt while keeping external lifecycle hooks focused on observation and control.
+
 ## 0.4.2-beta (2026-05-05)
 
 Improved the Web UI new-chat streaming flow so the browser URL is replaced as soon as the server emits the new conversation id, keeping the active stream and sidebar state attached to the started chat.
