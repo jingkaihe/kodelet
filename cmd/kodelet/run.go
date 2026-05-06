@@ -340,6 +340,11 @@ var runCmd = &cobra.Command{
 		llmConfig, resolvedCWD, err := loadResumeConversationConfig(ctx, cmd, config.ResumeConvID, config.CWD)
 		if err != nil {
 			presenter.Error(err, "Failed to load configuration")
+			if mcpManager != nil {
+				if closeErr := mcpManager.Close(ctx); closeErr != nil {
+					logger.G(ctx).WithError(closeErr).Debug("failed to close MCP manager after configuration error")
+				}
+			}
 			os.Exit(1)
 		}
 		llmConfig.WorkingDirectory = resolvedCWD

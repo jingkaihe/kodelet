@@ -149,7 +149,7 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 	s := &Server{
 		router:              mux.NewRouter(),
 		conversationService: conversationService,
-		chatRunner:          NewDefaultChatRunner(config.CWD, config.CompactRatio),
+		chatRunner:          NewDefaultChatRunner(config.CWD),
 		config:              config,
 		staticFS:            staticFS,
 		runCtx:              runCtx,
