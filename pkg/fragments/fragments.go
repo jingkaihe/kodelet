@@ -27,12 +27,6 @@ import (
 //go:embed recipes
 var embedFS embed.FS
 
-// HookConfig defines configuration for a recipe hook
-type HookConfig struct {
-	Handler string `yaml:"handler"`        // Built-in handler name (e.g., "swap_context")
-	Once    bool   `yaml:"once,omitempty"` // If true, only execute on the first turn
-}
-
 // ArgumentMeta defines metadata for a fragment argument
 type ArgumentMeta struct {
 	Description string `yaml:"description,omitempty"`
@@ -46,7 +40,6 @@ type Metadata struct {
 	AllowedTools    []string                `yaml:"allowed_tools,omitempty"`
 	AllowedCommands []string                `yaml:"allowed_commands,omitempty"`
 	Arguments       map[string]ArgumentMeta `yaml:"arguments,omitempty"` // Argument definitions with descriptions
-	Hooks           map[string]HookConfig   `yaml:"hooks,omitempty"`     // Lifecycle hooks -> handler config
 	Workflow        bool                    `yaml:"workflow,omitempty"`  // If true, this fragment can be used as a subagent workflow
 	Profile         string                  `yaml:"profile,omitempty"`   // Profile name to use for workflow execution
 }
@@ -270,27 +263,6 @@ func (fp *Processor) parseFrontmatter(content string) (Metadata, string, error) 
 							}
 						}
 						metadata.Arguments[argName] = argMeta
-					}
-				}
-			}
-		}
-
-		// Parse hooks (map of hook type -> hook config)
-		if hooksData := metaData["hooks"]; hooksData != nil {
-			if hooksMap, ok := hooksData.(map[any]any); ok {
-				metadata.Hooks = make(map[string]HookConfig)
-				for k, v := range hooksMap {
-					if hookType, ok := k.(string); ok {
-						if hookConfigMap, ok := v.(map[any]any); ok {
-							hookConfig := HookConfig{}
-							if handler, ok := hookConfigMap["handler"].(string); ok {
-								hookConfig.Handler = handler
-							}
-							if once, ok := hookConfigMap["once"].(bool); ok {
-								hookConfig.Once = once
-							}
-							metadata.Hooks[hookType] = hookConfig
-						}
 					}
 				}
 			}
@@ -575,24 +547,6 @@ func (fp *Processor) walkFragmentsDir(fragmentsFS fs.FS, dir string, pathConstru
 			*fragments = append(*fragments, fragment)
 		}
 	}
-}
-
-// LoadCompactPrompt loads the compact recipe and returns just the prompt content.
-// This allows CompactContext() to reuse the same prompt as manual compaction.
-func LoadCompactPrompt(ctx context.Context) (string, error) {
-	processor, err := NewFragmentProcessor()
-	if err != nil {
-		return "", err
-	}
-
-	fragment, err := processor.LoadFragment(ctx, &Config{
-		FragmentName: "compact",
-	})
-	if err != nil {
-		return "", err
-	}
-
-	return fragment.Content, nil
 }
 
 // ListFragmentsWithMetadata returns all available fragments from configured

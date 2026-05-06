@@ -514,7 +514,6 @@ func (t *Thread) executeToolCall(
 		t.HookTrigger,
 		t,
 		t.State,
-		t.GetRecipeHooks(),
 		t.RendererRegistry,
 		name,
 		arguments,

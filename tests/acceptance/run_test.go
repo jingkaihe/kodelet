@@ -54,9 +54,9 @@ func TestRunCommandWithInvalidFlags(t *testing.T) {
 	assert.True(t, strings.Contains(outputStr, "flag") || strings.Contains(outputStr, "unknown"), "Expected flag-related error message, got: %s", outputStr)
 }
 
-func TestRunCommandWithCompactFlags(t *testing.T) {
-	// Test run command with compact flags
-	cmd := exec.Command("kodelet", "run", "--compact-ratio=0.9", "--disable-auto-compact", "test query")
+func TestRunCommandWithCompactRatioFlag(t *testing.T) {
+	// Test run command with compact ratio flag
+	cmd := exec.Command("kodelet", "run", "--compact-ratio=0.9", "test query")
 	cmd.Env = commandEnv() // Keep minimal environment needed for runtime config
 	output, _ := cmd.CombinedOutput()
 
@@ -75,6 +75,11 @@ func TestRunCommandWithInvalidCompactRatio(t *testing.T) {
 		ratio       string
 		description string
 	}{
+		{
+			name:        "zero ratio",
+			ratio:       "0.0",
+			description: "should reject zero compact ratio",
+		},
 		{
 			name:        "negative ratio",
 			ratio:       "-0.5",
@@ -120,10 +125,7 @@ func TestRunCommandWithValidCompactRatio(t *testing.T) {
 		name  string
 		ratio string
 	}{
-		{
-			name:  "minimum valid ratio",
-			ratio: "0.0",
-		},
+		{name: "smallest practical ratio", ratio: "0.1"},
 		{
 			name:  "maximum valid ratio",
 			ratio: "1.0",

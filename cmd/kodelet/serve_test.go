@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestValidateServeConfig(t *testing.T) {
@@ -17,22 +17,25 @@ func TestValidateServeConfig(t *testing.T) {
 		{
 			name: "valid config",
 			config: &ServeConfig{
-				Host: "localhost",
-				Port: 8080,
+				Host:         "localhost",
+				Port:         8080,
+				CompactRatio: 0.8,
 			},
 		},
 		{
 			name: "valid IP address",
 			config: &ServeConfig{
-				Host: "127.0.0.1",
-				Port: 8080,
+				Host:         "127.0.0.1",
+				Port:         8080,
+				CompactRatio: 0.8,
 			},
 		},
 		{
 			name: "valid 0.0.0.0",
 			config: &ServeConfig{
-				Host: "0.0.0.0",
-				Port: 3000,
+				Host:         "0.0.0.0",
+				Port:         3000,
+				CompactRatio: 0.8,
 			},
 		},
 		{
@@ -78,8 +81,9 @@ func TestValidateServeConfig(t *testing.T) {
 		{
 			name: "privileged port warning",
 			config: &ServeConfig{
-				Host: "localhost",
-				Port: 80,
+				Host:         "localhost",
+				Port:         80,
+				CompactRatio: 0.8,
 			},
 			// No error expected, just a warning logged
 		},
@@ -90,7 +94,16 @@ func TestValidateServeConfig(t *testing.T) {
 				Port:         8080,
 				CompactRatio: 1.5,
 			},
-			expectedError: "compact-ratio must be between 0.0 and 1.0",
+			expectedError: "compact-ratio must be greater than 0.0 and less than or equal to 1.0",
+		},
+		{
+			name: "zero compact ratio",
+			config: &ServeConfig{
+				Host:         "localhost",
+				Port:         8080,
+				CompactRatio: 0,
+			},
+			expectedError: "compact-ratio must be greater than 0.0 and less than or equal to 1.0",
 		},
 	}
 
@@ -108,19 +121,24 @@ func TestValidateServeConfig(t *testing.T) {
 	}
 }
 
-func TestGetServeConfigFromFlags_ParsesAutoCompactFlags(t *testing.T) {
+func TestGetServeConfigFromFlags_UsesConfiguredCompactRatio(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	}()
+
+	viper.Reset()
+	viper.Set("compact_ratio", 0.65)
+
 	cmd := &cobra.Command{Use: "serve"}
 	defaults := NewServeConfig()
 	cmd.Flags().String("host", defaults.Host, "")
 	cmd.Flags().Int("port", defaults.Port, "")
 	cmd.Flags().String("cwd", defaults.CWD, "")
-	cmd.Flags().Float64("compact-ratio", defaults.CompactRatio, "")
-	cmd.Flags().Bool("disable-auto-compact", defaults.DisableAutoCompact, "")
-
-	require.NoError(t, cmd.Flags().Set("compact-ratio", "0.65"))
-	require.NoError(t, cmd.Flags().Set("disable-auto-compact", "true"))
 
 	config := getServeConfigFromFlags(cmd)
 	assert.Equal(t, 0.65, config.CompactRatio)
-	assert.True(t, config.DisableAutoCompact)
 }

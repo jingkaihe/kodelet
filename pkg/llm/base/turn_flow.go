@@ -20,7 +20,7 @@ func TriggerTurnEnd(
 	if finalOutput == "" {
 		return
 	}
-	trigger.TriggerTurnEnd(ctx, thread, finalOutput, turnCount, thread.GetRecipeHooks())
+	trigger.TriggerTurnEnd(ctx, finalOutput, turnCount)
 }
 
 // HandleAgentStopFollowUps checks agent_stop hooks and appends any follow-up user messages.
@@ -38,7 +38,7 @@ func HandleAgentStopFollowUps(
 		return false
 	}
 
-	followUps := trigger.TriggerAgentStop(ctx, thread, messages, thread.GetRecipeHooks())
+	followUps := trigger.TriggerAgentStop(ctx, messages)
 	if len(followUps) == 0 {
 		return false
 	}

@@ -38,8 +38,41 @@ func TestGetConfigFromViperDefaults(t *testing.T) {
 	// Verify
 	assert.Empty(t, config.Model)
 	assert.Zero(t, config.MaxTokens)
+	assert.Equal(t, llmtypes.DefaultCompactRatio, config.CompactRatio)
 	require.NotNil(t, config.Bash)
 	assert.Equal(t, llmtypes.DefaultBashTimeout, config.Bash.Timeout)
+}
+
+func TestGetConfigFromViper_CompactRatio(t *testing.T) {
+	viper.Reset()
+	viper.Set("compact_ratio", 0.65)
+
+	config, err := GetConfigFromViper()
+	require.NoError(t, err)
+
+	assert.Equal(t, 0.65, config.CompactRatio)
+}
+
+func TestGetConfigFromViper_InvalidCompactRatio(t *testing.T) {
+	tests := []struct {
+		name  string
+		ratio float64
+	}{
+		{name: "zero", ratio: 0.0},
+		{name: "negative", ratio: -0.1},
+		{name: "greater than one", ratio: 1.5},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			viper.Reset()
+			viper.Set("compact_ratio", tt.ratio)
+
+			_, err := GetConfigFromViper()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "compact_ratio must be greater than 0.0 and less than or equal to 1.0")
+		})
+	}
 }
 
 func TestGetConfigFromViper_BashTimeout(t *testing.T) {
@@ -123,6 +156,33 @@ func TestGetConfigFromViperWithCmd_ExplicitConversationSummaryModeOverridesProfi
 	config, err := GetConfigFromViperWithCmd(cmd)
 	require.NoError(t, err)
 	assert.Equal(t, llmtypes.ConversationSummaryModeLLM, config.ConversationSummaryMode)
+}
+
+func TestGetConfigFromViperWithCmd_ExplicitCompactRatioOverridesProfile(t *testing.T) {
+	originalConfig := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalConfig {
+			viper.Set(key, value)
+		}
+	}()
+
+	viper.Reset()
+	viper.Set("profile", "work")
+	viper.Set("profiles", map[string]any{
+		"work": map[string]any{
+			"compact_ratio": 0.9,
+		},
+	})
+
+	cmd := &cobra.Command{Use: "test"}
+	cmd.Flags().Float64("compact-ratio", llmtypes.DefaultCompactRatio, "Compact ratio")
+	err := cmd.Flags().Set("compact-ratio", "0.6")
+	require.NoError(t, err)
+
+	config, err := GetConfigFromViperWithCmd(cmd)
+	require.NoError(t, err)
+	assert.Equal(t, 0.6, config.CompactRatio)
 }
 
 func TestGetConfigFromViperWithCmd_ExplicitContextPatternsOverrideProfile(t *testing.T) {

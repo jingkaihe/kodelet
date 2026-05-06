@@ -47,7 +47,6 @@ type Thread struct {
 	RendererRegistry *renderers.RendererRegistry               // CLI renderer registry for structured tool results
 	HookTrigger      hooks.Trigger                             // Hook trigger for lifecycle hooks
 	LoadConversation LoadConversationFunc                      // Provider-specific callback for loading conversations
-	RecipeHooks      map[string]llmtypes.HookConfig            // Recipe hook configurations
 
 	Mu             sync.Mutex // Mutex for thread-safe operations on usage and tool results
 	ConversationMu sync.Mutex // Mutex for conversation-related operations
@@ -236,17 +235,6 @@ func (t *Thread) SetStructuredToolResults(results map[string]tooltypes.Structure
 	}
 }
 
-// SetRecipeHooks sets the recipe hook configurations for the thread.
-// These hooks are triggered at specific lifecycle events (e.g., turn_end).
-func (t *Thread) SetRecipeHooks(h map[string]llmtypes.HookConfig) {
-	t.RecipeHooks = h
-}
-
-// GetRecipeHooks returns the recipe hook configurations for the thread.
-func (t *Thread) GetRecipeHooks() map[string]llmtypes.HookConfig {
-	return t.RecipeHooks
-}
-
 // ShouldAutoCompact checks if auto-compact should be triggered based on context window utilization.
 // Returns true if the current context window utilization ratio >= compactRatio.
 // Returns false if compactRatio is invalid (<= 0 or > 1) or MaxContextWindow is 0.
@@ -264,15 +252,26 @@ func (t *Thread) ShouldAutoCompact(compactRatio float64) bool {
 	return utilizationRatio >= compactRatio
 }
 
+// CompactRatioOrDefault resolves the auto-compact threshold for a message.
+// A zero option value means "use the thread/configured default", not "disable".
+func (t *Thread) CompactRatioOrDefault(optionRatio float64) float64 {
+	if optionRatio > 0.0 {
+		return optionRatio
+	}
+	if t != nil && t.Config.CompactRatio > 0.0 {
+		return t.Config.CompactRatio
+	}
+	return llmtypes.DefaultCompactRatio
+}
+
 // TryAutoCompact triggers context compaction when auto-compact conditions are met.
 // compactFn should perform provider-specific compaction logic.
 func (t *Thread) TryAutoCompact(
 	ctx context.Context,
-	disableAutoCompact bool,
 	compactRatio float64,
 	compactFn func(context.Context) error,
 ) {
-	if disableAutoCompact || compactFn == nil {
+	if compactFn == nil {
 		return
 	}
 

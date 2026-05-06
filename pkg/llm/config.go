@@ -173,6 +173,12 @@ func loadConfigFromSettings(settings map[string]any) (llmtypes.Config, error) {
 	if err := validateConversationSummaryMode(config.ConversationSummaryMode); err != nil {
 		return config, err
 	}
+	if _, ok := settings["compact_ratio"]; !ok {
+		config.CompactRatio = llmtypes.DefaultCompactRatio
+	}
+	if err := validateCompactRatio(config.CompactRatio); err != nil {
+		return config, err
+	}
 
 	// Apply retry defaults if not set
 	if config.Retry.Attempts == 0 {
@@ -189,6 +195,13 @@ func validateConversationSummaryMode(mode llmtypes.ConversationSummaryMode) erro
 	default:
 		return fmt.Errorf("invalid conversation_summary_mode '%s', valid values are: llm, first_message", mode)
 	}
+}
+
+func validateCompactRatio(ratio float64) error {
+	if ratio <= 0.0 || ratio > 1.0 {
+		return fmt.Errorf("compact_ratio must be greater than 0.0 and less than or equal to 1.0")
+	}
+	return nil
 }
 
 func cloneSettings(settings map[string]any) map[string]any {

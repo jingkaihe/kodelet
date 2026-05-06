@@ -114,8 +114,9 @@ func TestServerConfig_Validate(t *testing.T) {
 		{
 			name: "valid config",
 			config: &ServerConfig{
-				Host: "localhost",
-				Port: 8080,
+				Host:         "localhost",
+				Port:         8080,
+				CompactRatio: 0.8,
 			},
 		},
 		{
@@ -149,7 +150,16 @@ func TestServerConfig_Validate(t *testing.T) {
 				Port:         8080,
 				CompactRatio: -0.1,
 			},
-			expectedError: "compact-ratio must be between 0.0 and 1.0",
+			expectedError: "compact-ratio must be greater than 0.0 and less than or equal to 1.0",
+		},
+		{
+			name: "zero compact ratio",
+			config: &ServerConfig{
+				Host:         "localhost",
+				Port:         8080,
+				CompactRatio: 0,
+			},
+			expectedError: "compact-ratio must be greater than 0.0 and less than or equal to 1.0",
 		},
 	}
 
@@ -168,9 +178,10 @@ func TestServerConfig_Validate(t *testing.T) {
 
 func TestServerConfig_Validate_RejectsInvalidCWD(t *testing.T) {
 	config := &ServerConfig{
-		Host: "localhost",
-		Port: 8080,
-		CWD:  filepath.Join(t.TempDir(), "missing"),
+		Host:         "localhost",
+		Port:         8080,
+		CWD:          filepath.Join(t.TempDir(), "missing"),
+		CompactRatio: 0.8,
 	}
 
 	err := config.Validate()

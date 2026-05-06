@@ -936,14 +936,14 @@ if [ "$1" == "run" ]; then echo '{"follow_up_messages":["done"]}'; exit 0; fi
 
 func TestTrigger_ZeroValue_TriggerUserMessageSend(t *testing.T) {
 	var trigger Trigger
-	blocked, reason := trigger.TriggerUserMessageSend(context.Background(), nil, "test message", nil)
+	blocked, reason := trigger.TriggerUserMessageSend(context.Background(), "test message")
 	assert.False(t, blocked)
 	assert.Empty(t, reason)
 }
 
 func TestTrigger_ZeroValue_TriggerBeforeToolCall(t *testing.T) {
 	var trigger Trigger
-	blocked, reason, input := trigger.TriggerBeforeToolCall(context.Background(), nil, "bash", `{"command":"ls"}`, "tool-123", nil)
+	blocked, reason, input := trigger.TriggerBeforeToolCall(context.Background(), "bash", `{"command":"ls"}`, "tool-123")
 	assert.False(t, blocked)
 	assert.Empty(t, reason)
 	assert.Equal(t, `{"command":"ls"}`, input)
@@ -951,20 +951,20 @@ func TestTrigger_ZeroValue_TriggerBeforeToolCall(t *testing.T) {
 
 func TestTrigger_ZeroValue_TriggerAfterToolCall(t *testing.T) {
 	var trigger Trigger
-	result := trigger.TriggerAfterToolCall(context.Background(), nil, "bash", `{"command":"ls"}`, "tool-123", tooltypes.StructuredToolResult{}, nil)
+	result := trigger.TriggerAfterToolCall(context.Background(), "bash", `{"command":"ls"}`, "tool-123", tooltypes.StructuredToolResult{})
 	assert.Nil(t, result)
 }
 
 func TestTrigger_ZeroValue_TriggerAgentStop(t *testing.T) {
 	var trigger Trigger
-	followUps := trigger.TriggerAgentStop(context.Background(), nil, nil, nil)
+	followUps := trigger.TriggerAgentStop(context.Background(), nil)
 	assert.Nil(t, followUps)
 }
 
 func TestTrigger_ZeroValue_TriggerTurnEnd(_ *testing.T) {
 	var trigger Trigger
 	// Should not panic with zero-value trigger
-	trigger.TriggerTurnEnd(context.Background(), nil, "response", 1, nil)
+	trigger.TriggerTurnEnd(context.Background(), "response", 1)
 }
 
 func TestTrigger_SetConversationID(t *testing.T) {

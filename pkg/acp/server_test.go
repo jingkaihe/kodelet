@@ -770,10 +770,9 @@ func TestServer_TransformSlashCommandPrompt(t *testing.T) {
 			{Type: acptypes.ContentTypeText, Text: "/init"},
 		}
 
-		result, fragment, err := server.transformSlashCommandPrompt("init", "", originalPrompt)
+		result, err := server.transformSlashCommandPrompt("init", "", originalPrompt)
 		require.NoError(t, err)
 		require.NotEmpty(t, result)
-		require.NotNil(t, fragment)
 		assert.Equal(t, acptypes.ContentTypeText, result[0].Type)
 		assert.NotEmpty(t, result[0].Text)
 	})
@@ -787,7 +786,7 @@ func TestServer_TransformSlashCommandPrompt(t *testing.T) {
 			{Type: acptypes.ContentTypeText, Text: "/init please focus on tests"},
 		}
 
-		result, _, err := server.transformSlashCommandPrompt("init", "please focus on tests", originalPrompt)
+		result, err := server.transformSlashCommandPrompt("init", "please focus on tests", originalPrompt)
 		require.NoError(t, err)
 		require.NotEmpty(t, result)
 		assert.Contains(t, result[0].Text, "Additional instructions:")
@@ -804,7 +803,7 @@ func TestServer_TransformSlashCommandPrompt(t *testing.T) {
 			{Type: acptypes.ContentTypeImage, Data: "base64imagedata", MimeType: "image/png"},
 		}
 
-		result, _, err := server.transformSlashCommandPrompt("init", "", originalPrompt)
+		result, err := server.transformSlashCommandPrompt("init", "", originalPrompt)
 		require.NoError(t, err)
 		require.Len(t, result, 2)
 		assert.Equal(t, acptypes.ContentTypeText, result[0].Type)
@@ -821,7 +820,7 @@ func TestServer_TransformSlashCommandPrompt(t *testing.T) {
 			{Type: acptypes.ContentTypeText, Text: "/nonexistent-recipe-xyz"},
 		}
 
-		_, _, err := server.transformSlashCommandPrompt("nonexistent-recipe-xyz", "", originalPrompt)
+		_, err := server.transformSlashCommandPrompt("nonexistent-recipe-xyz", "", originalPrompt)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unknown recipe '/nonexistent-recipe-xyz'")
 		assert.Contains(t, err.Error(), "Available recipes:")

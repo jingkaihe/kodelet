@@ -66,7 +66,6 @@ func UtilityPromptOptions(useWeakModel bool) llmtypes.MessageOpt {
 		UseWeakModel:       useWeakModel,
 		PromptCache:        false,
 		NoToolUse:          true,
-		DisableAutoCompact: true,
 		DisableUsageLog:    true,
 		NoSaveConversation: true,
 	}

@@ -29,14 +29,13 @@ func ExecuteTool(
 	trigger hooks.Trigger,
 	thread llmtypes.Thread,
 	state tooltypes.State,
-	recipeHooks map[string]llmtypes.HookConfig,
 	rendererRegistry *renderers.RendererRegistry,
 	toolName string,
 	toolInput string,
 	toolCallID string,
 ) ToolExecution {
 	blocked, reason, effectiveInput := trigger.TriggerBeforeToolCall(
-		ctx, thread, toolName, toolInput, toolCallID, recipeHooks,
+		ctx, toolName, toolInput, toolCallID,
 	)
 
 	var result tooltypes.ToolResult
@@ -58,7 +57,7 @@ func ExecuteTool(
 
 	structuredResult := result.StructuredData()
 	if modified := trigger.TriggerAfterToolCall(
-		ctx, thread, toolName, effectiveInput, toolCallID, structuredResult, recipeHooks,
+		ctx, toolName, effectiveInput, toolCallID, structuredResult,
 	); modified != nil {
 		structuredResult = *modified
 	}

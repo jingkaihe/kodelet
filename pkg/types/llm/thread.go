@@ -36,10 +36,9 @@ type MessageOpt struct {
 	// MaxTurns limits the number of turns within a single SendMessage call
 	// A value of 0 means no limit, and negative values are treated as 0
 	MaxTurns int
-	// CompactRatio is the ratio of context window at which to trigger auto-compact (0.0-1.0)
+	// CompactRatio is the ratio of context window at which to trigger auto-compact (>0.0-1.0).
+	// A zero value uses the thread/configured default; it does not disable auto-compaction.
 	CompactRatio float64
-	// DisableAutoCompact disables auto-compact functionality
-	DisableAutoCompact bool
 	// DisableUsageLog disables LLM usage logging for this message
 	DisableUsageLog bool
 }
@@ -73,13 +72,6 @@ func (o MessageOpt) WithTurnInitiator(turnCount int) MessageOpt {
 	return o
 }
 
-// HookConfig is a forward declaration of hooks.HookConfig to avoid circular imports.
-// The actual type is defined in pkg/hooks/builtin.go.
-type HookConfig struct {
-	Handler string // Built-in handler name (e.g., "swap_context")
-	Once    bool   // If true, only execute on the first turn
-}
-
 // Thread represents a conversation thread with an LLM
 type Thread interface {
 	// SetState sets the state for the thread
@@ -111,8 +103,4 @@ type Thread interface {
 	// AggregateSubagentUsage aggregates usage from a subagent into this thread's usage
 	// This aggregates token counts and costs but NOT context window (which should remain isolated)
 	AggregateSubagentUsage(usage Usage)
-	// SetRecipeHooks sets the recipe hook configurations for the thread
-	SetRecipeHooks(hooks map[string]HookConfig)
-	// GetRecipeHooks returns the recipe hook configurations for the thread
-	GetRecipeHooks() map[string]HookConfig
 }

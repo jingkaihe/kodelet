@@ -38,7 +38,6 @@ func TestNewManager_WithManagerConfig(t *testing.T) {
 			NoHooks:              true,
 			MaxTurns:             10,
 			CompactRatio:         0.7,
-			DisableAutoCompact:   true,
 		}
 		m := NewManager(cfg)
 

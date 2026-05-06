@@ -57,11 +57,9 @@ func (t Trigger) getCwd(ctx context.Context) string {
 	return t.WorkingDir
 }
 
-// TriggerUserMessageSend invokes user_message_send hooks including built-in handlers.
-// The thread parameter is passed to built-in handlers that need to modify thread state.
-// The recipeHooks parameter contains hook configurations from recipe metadata.
+// TriggerUserMessageSend invokes user_message_send hooks.
 // Returns (blocked, reason). A zero-value Trigger returns (false, "").
-func (t Trigger) TriggerUserMessageSend(ctx context.Context, thread llmtypes.Thread, message string, recipeHooks map[string]llmtypes.HookConfig) (bool, string) {
+func (t Trigger) TriggerUserMessageSend(ctx context.Context, message string) (bool, string) {
 	payload := UserMessageSendPayload{
 		BasePayload: BasePayload{
 			Event:      HookTypeUserMessageSend,
@@ -73,7 +71,6 @@ func (t Trigger) TriggerUserMessageSend(ctx context.Context, thread llmtypes.Thr
 		Message: message,
 	}
 
-	// First, execute external hooks (if any)
 	if t.Manager.HasHooks(HookTypeUserMessageSend) {
 		result, err := t.Manager.ExecuteUserMessageSend(ctx, payload)
 		if err == nil && result.Blocked {
@@ -81,28 +78,13 @@ func (t Trigger) TriggerUserMessageSend(ctx context.Context, thread llmtypes.Thr
 		}
 	}
 
-	// Then, execute built-in handler if specified in recipe
-	if hookConfig, ok := recipeHooks["user_message_send"]; ok {
-		registry := DefaultBuiltinRegistry()
-		if handler, exists := registry.Get(hookConfig.Handler); exists {
-			result, err := handler.HandleUserMessageSend(ctx, thread, payload)
-			if err != nil {
-				logger.G(ctx).WithError(err).WithField("handler", hookConfig.Handler).Error("built-in handler failed")
-			} else if result != nil && result.Blocked {
-				return result.Blocked, result.Reason
-			}
-		}
-	}
-
 	return false, ""
 }
 
-// TriggerBeforeToolCall invokes before_tool_call hooks including built-in handlers.
-// The thread parameter is passed to built-in handlers that need to modify thread state.
-// The recipeHooks parameter contains hook configurations from recipe metadata.
+// TriggerBeforeToolCall invokes before_tool_call hooks.
 // Returns (blocked, reason, input) - input is the potentially modified tool input.
 // A zero-value Trigger returns (false, "", toolInput).
-func (t Trigger) TriggerBeforeToolCall(ctx context.Context, thread llmtypes.Thread, toolName, toolInput, toolUserID string, recipeHooks map[string]llmtypes.HookConfig) (bool, string, string) {
+func (t Trigger) TriggerBeforeToolCall(ctx context.Context, toolName, toolInput, toolUserID string) (bool, string, string) {
 	payload := BeforeToolCallPayload{
 		BasePayload: BasePayload{
 			Event:      HookTypeBeforeToolCall,
@@ -118,7 +100,6 @@ func (t Trigger) TriggerBeforeToolCall(ctx context.Context, thread llmtypes.Thre
 
 	currentInput := toolInput
 
-	// First, execute external hooks (if any)
 	if t.Manager.HasHooks(HookTypeBeforeToolCall) {
 		result, err := t.Manager.ExecuteBeforeToolCall(ctx, payload)
 		if err == nil {
@@ -131,33 +112,13 @@ func (t Trigger) TriggerBeforeToolCall(ctx context.Context, thread llmtypes.Thre
 		}
 	}
 
-	// Then, execute built-in handler if specified in recipe
-	if hookConfig, ok := recipeHooks["before_tool_call"]; ok {
-		registry := DefaultBuiltinRegistry()
-		if handler, exists := registry.Get(hookConfig.Handler); exists {
-			result, err := handler.HandleBeforeToolCall(ctx, thread, payload)
-			if err != nil {
-				logger.G(ctx).WithError(err).WithField("handler", hookConfig.Handler).Error("built-in handler failed")
-			} else if result != nil {
-				if result.Blocked {
-					return true, result.Reason, ""
-				}
-				if len(result.Input) > 0 {
-					currentInput = string(result.Input)
-				}
-			}
-		}
-	}
-
 	return false, "", currentInput
 }
 
-// TriggerAfterToolCall invokes after_tool_call hooks including built-in handlers.
-// The thread parameter is passed to built-in handlers that need to modify thread state.
-// The recipeHooks parameter contains hook configurations from recipe metadata.
+// TriggerAfterToolCall invokes after_tool_call hooks.
 // Returns modified output or nil to use original.
 // A zero-value Trigger returns nil.
-func (t Trigger) TriggerAfterToolCall(ctx context.Context, thread llmtypes.Thread, toolName, toolInput, toolUserID string, toolOutput tooltypes.StructuredToolResult, recipeHooks map[string]llmtypes.HookConfig) *tooltypes.StructuredToolResult {
+func (t Trigger) TriggerAfterToolCall(ctx context.Context, toolName, toolInput, toolUserID string, toolOutput tooltypes.StructuredToolResult) *tooltypes.StructuredToolResult {
 	payload := AfterToolCallPayload{
 		BasePayload: BasePayload{
 			Event:      HookTypeAfterToolCall,
@@ -174,7 +135,6 @@ func (t Trigger) TriggerAfterToolCall(ctx context.Context, thread llmtypes.Threa
 
 	var currentOutput *tooltypes.StructuredToolResult
 
-	// First, execute external hooks (if any)
 	if t.Manager.HasHooks(HookTypeAfterToolCall) {
 		result, err := t.Manager.ExecuteAfterToolCall(ctx, payload)
 		if err == nil && result.Output != nil {
@@ -182,28 +142,13 @@ func (t Trigger) TriggerAfterToolCall(ctx context.Context, thread llmtypes.Threa
 		}
 	}
 
-	// Then, execute built-in handler if specified in recipe
-	if hookConfig, ok := recipeHooks["after_tool_call"]; ok {
-		registry := DefaultBuiltinRegistry()
-		if handler, exists := registry.Get(hookConfig.Handler); exists {
-			result, err := handler.HandleAfterToolCall(ctx, thread, payload)
-			if err != nil {
-				logger.G(ctx).WithError(err).WithField("handler", hookConfig.Handler).Error("built-in handler failed")
-			} else if result != nil && result.Output != nil {
-				currentOutput = result.Output
-			}
-		}
-	}
-
 	return currentOutput
 }
 
-// TriggerAgentStop invokes agent_stop hooks including built-in handlers.
-// The thread parameter is passed to built-in handlers that need to modify thread state.
-// The recipeHooks parameter contains hook configurations from recipe metadata.
+// TriggerAgentStop invokes agent_stop hooks.
 // Returns follow-up messages that can be appended to the conversation.
 // A zero-value Trigger returns nil.
-func (t Trigger) TriggerAgentStop(ctx context.Context, thread llmtypes.Thread, messages []llmtypes.Message, recipeHooks map[string]llmtypes.HookConfig) []string {
+func (t Trigger) TriggerAgentStop(ctx context.Context, messages []llmtypes.Message) []string {
 	payload := AgentStopPayload{
 		BasePayload: BasePayload{
 			Event:      HookTypeAgentStop,
@@ -217,7 +162,6 @@ func (t Trigger) TriggerAgentStop(ctx context.Context, thread llmtypes.Thread, m
 
 	var followUpMessages []string
 
-	// First, execute external hooks (if any)
 	if t.Manager.HasHooks(HookTypeAgentStop) {
 		result, err := t.Manager.ExecuteAgentStop(ctx, payload)
 		if err == nil && len(result.FollowUpMessages) > 0 {
@@ -225,27 +169,12 @@ func (t Trigger) TriggerAgentStop(ctx context.Context, thread llmtypes.Thread, m
 		}
 	}
 
-	// Then, execute built-in handler if specified in recipe
-	if hookConfig, ok := recipeHooks["agent_stop"]; ok {
-		registry := DefaultBuiltinRegistry()
-		if handler, exists := registry.Get(hookConfig.Handler); exists {
-			result, err := handler.HandleAgentStop(ctx, thread, payload)
-			if err != nil {
-				logger.G(ctx).WithError(err).WithField("handler", hookConfig.Handler).Error("built-in handler failed")
-			} else if result != nil && len(result.FollowUpMessages) > 0 {
-				followUpMessages = append(followUpMessages, result.FollowUpMessages...)
-			}
-		}
-	}
-
 	return followUpMessages
 }
 
-// TriggerTurnEnd invokes turn_end hooks including built-in handlers.
-// The recipeHooks parameter contains hook configurations from recipe metadata.
-// The thread parameter is passed to built-in handlers that need to modify thread state.
+// TriggerTurnEnd invokes turn_end hooks.
 // A zero-value Trigger is a no-op.
-func (t Trigger) TriggerTurnEnd(ctx context.Context, thread llmtypes.Thread, response string, turnNumber int, recipeHooks map[string]llmtypes.HookConfig) {
+func (t Trigger) TriggerTurnEnd(ctx context.Context, response string, turnNumber int) {
 	payload := TurnEndPayload{
 		BasePayload: BasePayload{
 			Event:      HookTypeTurnEnd,
@@ -258,24 +187,8 @@ func (t Trigger) TriggerTurnEnd(ctx context.Context, thread llmtypes.Thread, res
 		TurnNumber: turnNumber,
 	}
 
-	// First, execute external hooks (if any)
 	if t.Manager.HasHooks(HookTypeTurnEnd) {
 		t.Manager.ExecuteTurnEnd(ctx, payload)
-	}
-
-	// Then, execute built-in handler if specified in recipe
-	if hookConfig, ok := recipeHooks["turn_end"]; ok {
-		// Skip if once=true and not the first turn
-		if hookConfig.Once && turnNumber > 1 {
-			return
-		}
-
-		registry := DefaultBuiltinRegistry()
-		if handler, exists := registry.Get(hookConfig.Handler); exists {
-			if _, err := handler.HandleTurnEnd(ctx, thread, payload); err != nil {
-				logger.G(ctx).WithError(err).WithField("handler", hookConfig.Handler).Error("built-in handler failed")
-			}
-		}
 	}
 }
 

@@ -12,32 +12,9 @@ import (
 func TestCompactContextWithSummary(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("load prompt failure", func(t *testing.T) {
-		err := CompactContextWithSummary(
-			ctx,
-			func(context.Context) (string, error) {
-				return "", errors.New("load error")
-			},
-			func(context.Context, string, bool) (string, error) {
-				t.Fatal("runUtilityPrompt should not be called")
-				return "", nil
-			},
-			func(context.Context, string) error {
-				t.Fatal("swapContext should not be called")
-				return nil
-			},
-		)
-
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to load compact prompt")
-	})
-
 	t.Run("summary generation failure", func(t *testing.T) {
 		err := CompactContextWithSummary(
 			ctx,
-			func(context.Context) (string, error) {
-				return "compact prompt", nil
-			},
 			func(context.Context, string, bool) (string, error) {
 				return "", errors.New("run error")
 			},
@@ -55,9 +32,6 @@ func TestCompactContextWithSummary(t *testing.T) {
 		swapErr := errors.New("swap error")
 		err := CompactContextWithSummary(
 			ctx,
-			func(context.Context) (string, error) {
-				return "compact prompt", nil
-			},
 			func(context.Context, string, bool) (string, error) {
 				return "summary text", nil
 			},
@@ -77,9 +51,6 @@ func TestCompactContextWithSummary(t *testing.T) {
 
 		err := CompactContextWithSummary(
 			ctx,
-			func(context.Context) (string, error) {
-				return "compact prompt", nil
-			},
 			func(_ context.Context, prompt string, useWeak bool) (string, error) {
 				gotPrompt = prompt
 				gotUseWeak = useWeak
@@ -92,7 +63,7 @@ func TestCompactContextWithSummary(t *testing.T) {
 		)
 
 		require.NoError(t, err)
-		assert.Equal(t, "compact prompt", gotPrompt)
+		assert.Contains(t, gotPrompt, "Create a comprehensive summary")
 		assert.False(t, gotUseWeak)
 		assert.Equal(t, "summary text", gotSummary)
 	})

@@ -17,7 +17,6 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
-	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/steer"
@@ -256,7 +255,7 @@ func (t *Thread) SendMessage(
 	}
 
 	// Trigger user_message_send hook before adding user message
-	if blocked, reason := t.HookTrigger.TriggerUserMessageSend(ctx, t, message, t.GetRecipeHooks()); blocked {
+	if blocked, reason := t.HookTrigger.TriggerUserMessageSend(ctx, message); blocked {
 		return "", errors.Errorf("message blocked by hook: %s", reason)
 	}
 
@@ -291,7 +290,7 @@ OUTER:
 			}
 
 			// Check if auto-compact should be triggered before each exchange
-			t.TryAutoCompact(ctx, opt.DisableAutoCompact, opt.CompactRatio, t.CompactContext)
+			t.TryAutoCompact(ctx, t.CompactRatioOrDefault(opt.CompactRatio), t.CompactContext)
 
 			// Get relevant contexts from state and regenerate system prompt
 			var contexts map[string]string
@@ -434,7 +433,6 @@ func (t *Thread) executeToolsParallel(
 				t.HookTrigger,
 				t,
 				t.State,
-				t.GetRecipeHooks(),
 				t.RendererRegistry,
 				toolName,
 				tb.variant.JSON.Input.Raw(),
@@ -1130,7 +1128,6 @@ func conversationsFromAnthropic(msgs []StreamableMessage) []conversations.Stream
 }
 
 // SwapContext replaces the conversation history with a summary message.
-// This implements the hooks.ContextSwapper interface.
 func (t *Thread) SwapContext(_ context.Context, summary string) error {
 	t.Mu.Lock()
 	defer t.Mu.Unlock()
@@ -1151,7 +1148,7 @@ func (t *Thread) SwapContext(_ context.Context, summary string) error {
 
 // CompactContext performs comprehensive context compacting by creating a detailed summary
 func (t *Thread) CompactContext(ctx context.Context) error {
-	return base.CompactContextWithSummary(ctx, fragments.LoadCompactPrompt, t.runUtilityPrompt, t.SwapContext)
+	return base.CompactContextWithSummary(ctx, t.runUtilityPrompt, t.SwapContext)
 }
 
 // GetMessages returns the current messages in the thread

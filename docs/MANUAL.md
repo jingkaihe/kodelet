@@ -201,28 +201,17 @@ kodelet run --resume CONVERSATION_ID "more questions"
 
 ### Context Compaction
 
-As conversations grow longer, they may approach the context window limit. Kodelet automatically compacts context when utilization exceeds a threshold (default 80%), but you can also manually compact the context using the built-in `compact` recipe:
+As conversations grow longer, they may approach the context window limit. Kodelet automatically compacts context when utilization exceeds a configured threshold (default 80%). Compaction generates a comprehensive summary of the conversation history and replaces the active context with that summary, preserving essential details while reducing token usage.
 
 ```bash
-# Manually compact the current conversation
-kodelet run -r compact --follow
+# Use the default threshold
+kodelet run --follow "continue working on the feature"
 
-# Continue working with the compacted context
-kodelet run --follow "now implement the next feature"
+# Override the threshold for this invocation
+kodelet --compact-ratio 0.9 run --follow "continue working on the feature"
 ```
 
-The `compact` recipe generates a comprehensive summary of the conversation history, then replaces the conversation with that summary. This preserves all essential context while significantly reducing token usage.
-
-Auto-compaction settings are available in both CLI and web UI server modes via `--compact-ratio` and `--disable-auto-compact`.
-
-**When to use manual compaction:**
-- Before starting a new phase of work on a long-running task
-- When you notice responses slowing down due to large context
-- To create a checkpoint before major changes
-
-**Creating custom compaction recipes:**
-
-You can create custom compact recipes with different summarization strategies. See [Fragments/Recipes Documentation](./FRAGMENTS.md#recipe-hooks) for details.
+Auto-compaction uses the shared `compact_ratio` configuration in CLI, ACP, and web UI server modes. Configure it via `--compact-ratio`, `compact_ratio` in config, or `KODELET_COMPACT_RATIO` in the environment. The ratio must be greater than `0.0` and less than or equal to `1.0`. Manual context compaction recipes are no longer supported.
 
 ### Conversation Management
 
@@ -1626,6 +1615,16 @@ kodelet run --conversation-summary-mode first_message "your query"
 ```
 
 This can also be set via configuration file (`conversation_summary_mode: first_message`) or environment variable (`KODELET_CONVERSATION_SUMMARY_MODE=first_message`). The default is `llm`. This only affects short persisted conversation summaries/titles, not context compaction.
+
+### Context Compaction Ratio
+
+Kodelet automatically compacts conversation context when context-window utilization reaches the configured ratio:
+
+```bash
+kodelet --compact-ratio 0.9 run "your query"
+```
+
+This can also be set via configuration file (`compact_ratio: 0.9`) or environment variable (`KODELET_COMPACT_RATIO=0.9`). The default is `0.8`; values must be greater than `0.0` and less than or equal to `1.0`.
 
 ### Custom System Prompt Template
 

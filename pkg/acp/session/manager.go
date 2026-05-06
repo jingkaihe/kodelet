@@ -34,9 +34,8 @@ type Session struct {
 	CWD        string
 	MCPServers []acptypes.MCPServer
 
-	maxTurns           int
-	compactRatio       float64
-	disableAutoCompact bool
+	maxTurns     int
+	compactRatio float64
 
 	mu         sync.Mutex
 	cancelFunc context.CancelFunc
@@ -74,15 +73,8 @@ type UpdateSender interface {
 	SendUpdate(sessionID acptypes.SessionID, update any) error
 }
 
-// HookConfig mirrors fragments.HookConfig to avoid circular import
-type HookConfig struct {
-	Handler string
-	Once    bool
-}
-
 // HandlePrompt processes a prompt and returns the stop reason
-// The fragmentHooks parameter contains hook configurations from a recipe/fragment (if any)
-func (s *Session) HandlePrompt(ctx context.Context, prompt []acptypes.ContentBlock, sender UpdateSender, fragmentHooks map[string]HookConfig) (acptypes.StopReason, error) {
+func (s *Session) HandlePrompt(ctx context.Context, prompt []acptypes.ContentBlock, sender UpdateSender) (acptypes.StopReason, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	s.mu.Lock()
 	s.cancelFunc = cancel
@@ -99,30 +91,12 @@ func (s *Session) HandlePrompt(ctx context.Context, prompt []acptypes.ContentBlo
 
 	handler := bridge.NewACPMessageHandler(sender, s.ID)
 
-	// Set recipe hooks if provided
-	if len(fragmentHooks) > 0 {
-		llmHooks := make(map[string]llmtypes.HookConfig, len(fragmentHooks))
-		for k, v := range fragmentHooks {
-			llmHooks[k] = llmtypes.HookConfig{
-				Handler: v.Handler,
-				Once:    v.Once,
-			}
-		}
-		s.Thread.SetRecipeHooks(llmHooks)
-	}
-
 	_, err := s.Thread.SendMessage(ctx, message, handler, llmtypes.MessageOpt{
-		PromptCache:        true,
-		Images:             images,
-		MaxTurns:           s.maxTurns,
-		CompactRatio:       s.compactRatio,
-		DisableAutoCompact: s.disableAutoCompact,
+		PromptCache:  true,
+		Images:       images,
+		MaxTurns:     s.maxTurns,
+		CompactRatio: s.compactRatio,
 	})
-
-	// Clear recipe hooks after the prompt is processed
-	if len(fragmentHooks) > 0 {
-		s.Thread.SetRecipeHooks(nil)
-	}
 
 	if s.IsCancelled() {
 		return acptypes.StopReasonCancelled, nil
@@ -147,7 +121,6 @@ type ManagerConfig struct {
 	NoHooks              bool
 	MaxTurns             int
 	CompactRatio         float64
-	DisableAutoCompact   bool
 }
 
 // Manager manages ACP sessions
@@ -389,15 +362,14 @@ func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest
 	thread.EnablePersistence(ctx, true)
 
 	session := &Session{
-		ID:                 acptypes.SessionID(thread.GetConversationID()),
-		Thread:             thread,
-		State:              state,
-		MCPManager:         sessionMCPManager,
-		CWD:                req.CWD,
-		MCPServers:         req.MCPServers,
-		maxTurns:           m.config.MaxTurns,
-		compactRatio:       m.config.CompactRatio,
-		disableAutoCompact: m.config.DisableAutoCompact,
+		ID:           acptypes.SessionID(thread.GetConversationID()),
+		Thread:       thread,
+		State:        state,
+		MCPManager:   sessionMCPManager,
+		CWD:          req.CWD,
+		MCPServers:   req.MCPServers,
+		maxTurns:     m.config.MaxTurns,
+		compactRatio: m.config.CompactRatio,
 	}
 
 	m.storeSession(ctx, session)
@@ -451,15 +423,14 @@ func (m *Manager) LoadSession(ctx context.Context, req acptypes.LoadSessionReque
 	thread.EnablePersistence(ctx, true)
 
 	session := &Session{
-		ID:                 req.SessionID,
-		Thread:             thread,
-		State:              state,
-		MCPManager:         sessionMCPManager,
-		CWD:                req.CWD,
-		MCPServers:         req.MCPServers,
-		maxTurns:           m.config.MaxTurns,
-		compactRatio:       m.config.CompactRatio,
-		disableAutoCompact: m.config.DisableAutoCompact,
+		ID:           req.SessionID,
+		Thread:       thread,
+		State:        state,
+		MCPManager:   sessionMCPManager,
+		CWD:          req.CWD,
+		MCPServers:   req.MCPServers,
+		maxTurns:     m.config.MaxTurns,
+		compactRatio: m.config.CompactRatio,
 	}
 
 	m.storeSession(ctx, session)

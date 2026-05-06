@@ -510,6 +510,17 @@ func TestShouldAutoCompact_NilUsage(t *testing.T) {
 	assert.False(t, result)
 }
 
+func TestCompactRatioOrDefault(t *testing.T) {
+	bt := NewThread(llmtypes.Config{CompactRatio: 0.65}, "", hooks.Trigger{})
+
+	assert.Equal(t, 0.9, bt.CompactRatioOrDefault(0.9))
+	assert.Equal(t, 0.65, bt.CompactRatioOrDefault(0))
+	assert.Equal(t, 0.65, bt.CompactRatioOrDefault(-0.1))
+
+	bt.Config.CompactRatio = 0
+	assert.Equal(t, llmtypes.DefaultCompactRatio, bt.CompactRatioOrDefault(0))
+}
+
 func TestShouldAutoCompact_ConcurrentAccess(_ *testing.T) {
 	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
 	bt.Usage.CurrentContextWindow = 90000
@@ -1192,45 +1203,6 @@ func TestFinalizeMessageSpan_ZeroUsage(_ *testing.T) {
 
 	// Should not panic with zero values
 	bt.FinalizeMessageSpan(span, nil)
-}
-
-func TestSetRecipeHooks(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
-
-	hooks := map[string]llmtypes.HookConfig{
-		"turn_end": {
-			Handler: "swap_context",
-			Once:    true,
-		},
-		"before_tool_call": {
-			Handler: "audit_logger",
-			Once:    false,
-		},
-	}
-
-	bt.SetRecipeHooks(hooks)
-
-	require.NotNil(t, bt.RecipeHooks)
-	assert.Len(t, bt.RecipeHooks, 2)
-	assert.Equal(t, "swap_context", bt.RecipeHooks["turn_end"].Handler)
-	assert.True(t, bt.RecipeHooks["turn_end"].Once)
-	assert.Equal(t, "audit_logger", bt.RecipeHooks["before_tool_call"].Handler)
-}
-
-func TestGetRecipeHooks(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
-
-	expectedHooks := map[string]llmtypes.HookConfig{
-		"turn_end": {
-			Handler: "swap_context",
-			Once:    true,
-		},
-	}
-	bt.RecipeHooks = expectedHooks
-
-	result := bt.GetRecipeHooks()
-
-	assert.Equal(t, expectedHooks, result)
 }
 
 func TestEstimateContextWindowFromMessage(t *testing.T) {

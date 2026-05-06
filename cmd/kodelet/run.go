@@ -34,8 +34,6 @@ type RunConfig struct {
 	StreamDeltas         bool              // Stream partial text deltas in headless mode
 	Images               []string          // Image paths or URLs to include with the message
 	MaxTurns             int               // Maximum number of turns within a single SendMessage call
-	CompactRatio         float64           // Ratio of context window at which to trigger auto-compact (0.0-1.0)
-	DisableAutoCompact   bool              // Disable auto-compact functionality
 	FragmentName         string            // Name of fragment to use
 	FragmentArgs         map[string]string // Arguments to pass to fragment
 	FragmentDirs         []string          // Additional fragment directories
@@ -63,8 +61,6 @@ func NewRunConfig() *RunConfig {
 		Headless:             false,
 		Images:               []string{},
 		MaxTurns:             0,
-		CompactRatio:         0.8,
-		DisableAutoCompact:   false,
 		FragmentName:         "",
 		FragmentArgs:         make(map[string]string),
 		FragmentDirs:         []string{},
@@ -344,7 +340,7 @@ var runCmd = &cobra.Command{
 		llmConfig, resolvedCWD, err := loadResumeConversationConfig(ctx, cmd, config.ResumeConvID, config.CWD)
 		if err != nil {
 			presenter.Error(err, "Failed to load configuration")
-			return
+			os.Exit(1)
 		}
 		llmConfig.WorkingDirectory = resolvedCWD
 
@@ -452,11 +448,6 @@ var runCmd = &cobra.Command{
 			thread.SetConversationID(sessionID)
 			thread.EnablePersistence(ctx, !config.NoSave)
 
-			// Set recipe hooks if fragment was loaded
-			if fragmentMetadata != nil && len(fragmentMetadata.Hooks) > 0 {
-				thread.SetRecipeHooks(convertFragmentHooks(fragmentMetadata.Hooks))
-			}
-
 			streamer, closeFunc, err := llm.NewConversationStreamer(ctx)
 			if err != nil {
 				presenter.Error(err, "Failed to create conversation streamer")
@@ -475,12 +466,11 @@ var runCmd = &cobra.Command{
 					handler = &llmtypes.ConsoleMessageHandler{Silent: true}
 				}
 				_, err := thread.SendMessage(ctx, query, handler, llmtypes.MessageOpt{
-					PromptCache:        true,
-					Images:             config.Images,
-					MaxTurns:           config.MaxTurns,
-					CompactRatio:       config.CompactRatio,
-					DisableAutoCompact: config.DisableAutoCompact,
-					UseWeakModel:       config.UseWeakModel,
+					PromptCache:  true,
+					Images:       config.Images,
+					MaxTurns:     config.MaxTurns,
+					CompactRatio: llmConfig.CompactRatio,
+					UseWeakModel: config.UseWeakModel,
 				})
 				done <- err
 			}()
@@ -534,18 +524,12 @@ var runCmd = &cobra.Command{
 
 			thread.EnablePersistence(ctx, !config.NoSave)
 
-			// Set recipe hooks if fragment was loaded
-			if fragmentMetadata != nil && len(fragmentMetadata.Hooks) > 0 {
-				thread.SetRecipeHooks(convertFragmentHooks(fragmentMetadata.Hooks))
-			}
-
 			finalOutput, err := thread.SendMessage(ctx, query, handler, llmtypes.MessageOpt{
-				PromptCache:        true,
-				Images:             config.Images,
-				MaxTurns:           config.MaxTurns,
-				CompactRatio:       config.CompactRatio,
-				DisableAutoCompact: config.DisableAutoCompact,
-				UseWeakModel:       config.UseWeakModel,
+				PromptCache:  true,
+				Images:       config.Images,
+				MaxTurns:     config.MaxTurns,
+				CompactRatio: llmConfig.CompactRatio,
+				UseWeakModel: config.UseWeakModel,
 			})
 			if err != nil {
 				presenter.Error(err, "Failed to process query")
@@ -581,8 +565,6 @@ func init() {
 	runCmd.Flags().Bool("stream-deltas", defaults.StreamDeltas, "Stream partial text deltas in headless mode (requires --headless)")
 	runCmd.Flags().StringSliceP("image", "I", defaults.Images, "Add image input (can be used multiple times)")
 	runCmd.Flags().Int("max-turns", defaults.MaxTurns, "Maximum number of agentic turns (0 for no limit)")
-	runCmd.Flags().Float64("compact-ratio", defaults.CompactRatio, "Context window utilization ratio to trigger auto-compact (0.0-1.0)")
-	runCmd.Flags().Bool("disable-auto-compact", defaults.DisableAutoCompact, "Disable auto-compact functionality")
 	runCmd.Flags().StringP("recipe", "r", defaults.FragmentName, "Use a fragment/recipe template")
 	runCmd.Flags().StringToString("arg", defaults.FragmentArgs, "Arguments to pass to fragment (e.g., --arg name=John --arg occupation=Engineer)")
 	runCmd.Flags().StringSlice("fragment-dirs", defaults.FragmentDirs, "Additional fragment directories (e.g., --fragment-dirs ./project-fragments --fragment-dirs ./team-fragments)")
@@ -646,17 +628,6 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 	if maxTurns, err := cmd.Flags().GetInt("max-turns"); err == nil {
 		config.MaxTurns = max(maxTurns, 0)
 	}
-	if compactRatio, err := cmd.Flags().GetFloat64("compact-ratio"); err == nil {
-		// Validate compact ratio is between 0.0 and 1.0
-		if compactRatio < 0.0 || compactRatio > 1.0 {
-			presenter.Error(errors.New("invalid compact-ratio"), "compact-ratio must be between 0.0 and 1.0")
-			os.Exit(1)
-		}
-		config.CompactRatio = compactRatio
-	}
-	if disableAutoCompact, err := cmd.Flags().GetBool("disable-auto-compact"); err == nil {
-		config.DisableAutoCompact = disableAutoCompact
-	}
 	if fragmentName, err := cmd.Flags().GetString("recipe"); err == nil {
 		config.FragmentName = fragmentName
 	}
@@ -715,16 +686,4 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 	}
 
 	return config
-}
-
-// convertFragmentHooks converts fragment hook configurations to LLM thread hook configurations
-func convertFragmentHooks(fragmentHooks map[string]fragments.HookConfig) map[string]llmtypes.HookConfig {
-	result := make(map[string]llmtypes.HookConfig, len(fragmentHooks))
-	for k, v := range fragmentHooks {
-		result[k] = llmtypes.HookConfig{
-			Handler: v.Handler,
-			Once:    v.Once,
-		}
-	}
-	return result
 }

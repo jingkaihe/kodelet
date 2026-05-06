@@ -17,7 +17,6 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
-	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/llm/openai/copilotdefaults"
 	codexpreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/codex"
@@ -161,7 +160,7 @@ func NewThread(config llmtypes.Config) (*Thread, error) {
 	thread.compactFunc = thread.client.Responses.Compact
 	thread.compactRawFunc = thread.compactRawJSON
 	thread.compactWithSummaryFunc = func(ctx context.Context) error {
-		return base.CompactContextWithSummary(ctx, fragments.LoadCompactPrompt, thread.runUtilityPrompt, thread.SwapContext)
+		return base.CompactContextWithSummary(ctx, thread.runUtilityPrompt, thread.SwapContext)
 	}
 
 	// Set the LoadConversation callback for provider-specific loading
@@ -265,7 +264,7 @@ func (t *Thread) SendMessage(
 	}
 
 	// Trigger user_message_send hook before adding user message
-	if blocked, reason := t.HookTrigger.TriggerUserMessageSend(ctx, t, message, t.GetRecipeHooks()); blocked {
+	if blocked, reason := t.HookTrigger.TriggerUserMessageSend(ctx, message); blocked {
 		return "", errors.Errorf("message blocked by hook: %s", reason)
 	}
 
@@ -312,7 +311,7 @@ OUTER:
 			systemPrompt := sysprompt.SystemPrompt(model, t.Config, contexts)
 
 			// Check if auto-compact should be triggered
-			t.TryAutoCompact(ctx, opt.DisableAutoCompact, opt.CompactRatio, t.CompactContext)
+			t.TryAutoCompact(ctx, t.CompactRatioOrDefault(opt.CompactRatio), t.CompactContext)
 
 			exchangeOpt := opt.WithTurnInitiator(turnCount)
 
@@ -643,7 +642,6 @@ func (t *Thread) GetMessages() ([]llmtypes.Message, error) {
 }
 
 // SwapContext replaces the conversation history with a summary message.
-// This implements the hooks.ContextSwapper interface.
 func (t *Thread) SwapContext(_ context.Context, summary string) error {
 	t.Mu.Lock()
 	defer t.Mu.Unlock()
@@ -682,7 +680,7 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	compactWithSummary := t.compactWithSummaryFunc
 	if compactWithSummary == nil {
 		compactWithSummary = func(ctx context.Context) error {
-			return base.CompactContextWithSummary(ctx, fragments.LoadCompactPrompt, t.runUtilityPrompt, t.SwapContext)
+			return base.CompactContextWithSummary(ctx, t.runUtilityPrompt, t.SwapContext)
 		}
 	}
 

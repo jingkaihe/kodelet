@@ -207,6 +207,10 @@ tool_mode: full
 # This only affects short persisted conversation summaries/titles, not compact context generation.
 # conversation_summary_mode: "first_message"
 
+# Context-window utilization ratio that triggers automatic context compaction.
+# The default is 0.8, meaning compact at 80% of the model context window.
+# compact_ratio: 0.8
+
 allowed_tools: []
 # allowed_tools:
 #   - "bash"

@@ -42,7 +42,7 @@ Kodelet supports lifecycle hooks that allow external scripts to observe and cont
 | `after_tool_call` | After tool execution | No | Tool output |
 | `user_message_send` | When user sends message | Yes | N/A |
 | `agent_stop` | When agent would stop | No | Can return follow-up messages |
-| `turn_end` | After each assistant response | No | Thread state (via built-in handlers) |
+| `turn_end` | After each assistant response | No | N/A |
 
 ## Hook Protocol
 
@@ -115,7 +115,7 @@ interface BasePayload {
   conv_id: string;
   cwd: string;
   invoked_by: InvokedBy;
-  recipe_name?: string;  // Present when invoked via a recipe (e.g., "compact", "jingkaihe/recipes/init")
+  recipe_name?: string;  // Present when invoked via a recipe (e.g., "init", "jingkaihe/recipes/review")
 }
 
 // Conversation message structure
@@ -256,7 +256,7 @@ interface AgentStopResult {
 
 ### turn_end
 
-The `turn_end` hook fires after each assistant response, before the next user message. This hook is particularly useful for post-turn operations like context compaction.
+The `turn_end` hook fires after each assistant response, before the next user message. This hook is useful for post-turn operations such as logging, notifications, or external state synchronization.
 
 ```typescript
 // Input payload
@@ -283,37 +283,6 @@ interface TurnEndResult {
   "invoked_by": "main"
 }
 ```
-
-## Built-in Hook Handlers
-
-In addition to external hook scripts, Kodelet supports built-in handlers that can be invoked via recipe metadata. These handlers have direct access to the LLM thread state.
-
-### Available Built-in Handlers
-
-| Handler | Hook Event | Description |
-|---------|-----------|-------------|
-| `swap_context` | `turn_end` | Replaces the conversation history with the assistant's response (used for context compaction) |
-
-### Using Built-in Handlers in Recipes
-
-Built-in handlers are declared in recipe YAML frontmatter:
-
-```markdown
----
-name: compact
-description: Compact the conversation context
-hooks:
-  turn_end:
-    handler: swap_context
-    once: true
-allowed_tools: []
----
-Your prompt content here...
-```
-
-The `once: true` option ensures the handler only executes on the first turn, preventing repeated execution in follow-up conversations.
-
-See [Fragments/Recipes Documentation](./FRAGMENTS.md#recipe-hooks) for more details on recipe hooks.
 
 ## Example Hooks
 

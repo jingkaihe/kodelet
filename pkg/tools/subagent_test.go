@@ -687,11 +687,11 @@ func TestSubAgentTool_WorkflowFiltering(t *testing.T) {
 				Workflow:    false, // Not a workflow
 			},
 		},
-		"compact": {
-			ID: "compact",
+		"notes": {
+			ID: "notes",
 			Metadata: fragments.Metadata{
-				Name:        "Compact",
-				Description: "Compacts context",
+				Name:        "Notes",
+				Description: "Captures notes",
 				// Workflow not set (defaults to false)
 			},
 		},
@@ -710,7 +710,7 @@ func TestSubAgentTool_WorkflowFiltering(t *testing.T) {
 		assert.Contains(t, filteredWorkflows, "github/pr")
 		assert.Contains(t, filteredWorkflows, "init")
 		assert.NotContains(t, filteredWorkflows, "commit")
-		assert.NotContains(t, filteredWorkflows, "compact")
+		assert.NotContains(t, filteredWorkflows, "notes")
 	})
 
 	t.Run("subagent tool shows only workflows in description", func(t *testing.T) {
@@ -723,7 +723,7 @@ func TestSubAgentTool_WorkflowFiltering(t *testing.T) {
 
 		// Should NOT contain non-workflow fragments
 		assert.NotContains(t, desc, `<workflow name="commit">`)
-		assert.NotContains(t, desc, `<workflow name="compact">`)
+		assert.NotContains(t, desc, `<workflow name="notes">`)
 	})
 
 	t.Run("subagent validates only known workflows", func(t *testing.T) {

@@ -38,6 +38,9 @@ const (
 	ConversationSummaryModeLLM ConversationSummaryMode = "llm"
 	// ConversationSummaryModeFirstMessage uses the first user message as the summary.
 	ConversationSummaryModeFirstMessage ConversationSummaryMode = "first_message"
+
+	// DefaultCompactRatio is the default context window utilization threshold for automatic compaction.
+	DefaultCompactRatio = 0.8
 )
 
 // IsPatchMode reports whether the tool mode should use apply_patch-only workflows.
@@ -98,7 +101,8 @@ type Config struct {
 	DisableFSSearchTools    bool                    `mapstructure:"disable_fs_search_tools" json:"disable_fs_search_tools" yaml:"disable_fs_search_tools"`       // DisableFSSearchTools disables glob_tool and grep_tool and updates prompt/tool guidance accordingly
 	ConversationSummaryMode ConversationSummaryMode `mapstructure:"conversation_summary_mode" json:"conversation_summary_mode" yaml:"conversation_summary_mode"` // ConversationSummaryMode controls whether persisted conversation summaries come from the LLM or first user message
 	DisableSubagent         bool                    `mapstructure:"disable_subagent" json:"disable_subagent" yaml:"disable_subagent"`                            // DisableSubagent disables the subagent tool and removes subagent-related system prompt context
-	RecipeName              string                  `mapstructure:"recipe_name" json:"recipe_name" yaml:"recipe_name"`                                           // RecipeName is the active recipe/fragment name for hooks
+	RecipeName              string                  `mapstructure:"recipe_name" json:"recipe_name" yaml:"recipe_name"`                                           // RecipeName is the active recipe/fragment name for hook payload metadata
+	CompactRatio            float64                 `mapstructure:"compact_ratio" json:"compact_ratio" yaml:"compact_ratio"`                                     // CompactRatio is the context utilization threshold for automatic compaction (>0.0-1.0)
 }
 
 // BashConfig holds configuration for the bash tool.

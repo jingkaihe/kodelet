@@ -756,24 +756,6 @@ func TestAutoCompactTriggerLogic(t *testing.T) {
 			"Should not trigger auto-compact when ratio (0.75) below threshold (0.8)")
 	})
 
-	t.Run("auto-compact disabled when DisableAutoCompact is true", func(t *testing.T) {
-		thread, err := NewAnthropicThread(llmtypes.Config{})
-		require.NoError(t, err)
-
-		// Set up context window to trigger auto-compact
-		thread.Usage.CurrentContextWindow = 90 // 90% utilization
-		thread.Usage.MaxContextWindow = 100
-
-		// Even though context is high, ShouldAutoCompact should be bypassed
-		// when DisableAutoCompact is true (this is handled in SendMessage logic)
-		disableAutoCompact := true
-
-		// Simulate the logic from SendMessage
-		shouldTrigger := !disableAutoCompact && thread.ShouldAutoCompact(0.8)
-		assert.False(t, shouldTrigger,
-			"Should not trigger auto-compact when DisableAutoCompact is true")
-	})
-
 	t.Run("auto-compact respects different compact ratios", func(t *testing.T) {
 		tests := []struct {
 			name          string
