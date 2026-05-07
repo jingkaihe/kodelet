@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.4.4-beta (2026-05-08)
+
+Fixed OpenAI Responses streaming so thinking blocks are closed before text output when no explicit done event is received - This is an edge case identified from the Fireworks responses API.
+
 ## 0.4.3-beta (2026-05-06)
 
 Centralized automatic context compaction around the shared `compact_ratio` setting, with validation and CLI/config/env support across CLI, ACP, and Web UI flows.
