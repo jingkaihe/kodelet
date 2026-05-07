@@ -108,6 +108,10 @@ func (t *Thread) processStream(
 		case "response.output_text.delta":
 			// Text content delta
 			if event.Delta != "" {
+				if isStreaming && thinkingStarted {
+					streamHandler.HandleThinkingBlockEnd()
+					thinkingStarted = false
+				}
 				currentText.WriteString(event.Delta)
 				if isStreaming {
 					streamHandler.HandleTextDelta(event.Delta)
