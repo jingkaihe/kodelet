@@ -418,25 +418,27 @@ const renderCompletedThinkingGroup = (
   thinkingBlocks: Array<Extract<ChatAssistantBlock, { type: 'thinking' }>>,
   key: string
 ) => {
-  const summaryText = thinkingBlocks.length === 1 ? 'Thought' : `${thinkingBlocks.length} thoughts`;
+  const summaryText = thinkingBlocks.length === 1 ? 'Thought' : `${thinkingBlocks.length} Thoughts`;
 
   return (
-    <details key={key} className="activity-card activity-card-thinking">
-      <summary className="tool-summary activity-summary" title={summaryText}>
-        <span className="tool-summary-chevron" aria-hidden="true">
-          ›
-        </span>
-        <span className="activity-dot activity-dot-thinking" aria-hidden="true" />
-        <ActivitySummaryText summaryText={summaryText} />
-      </summary>
-      <div className="activity-detail-content thinking-group-content">
-        {thinkingBlocks.map((thinkingBlock, index) => (
-          <section className="thinking-group-item" key={`thought-${index}`}>
-            {renderThinkingContent(thinkingBlock.content)}
-          </section>
-        ))}
-      </div>
-    </details>
+    <div key={key} className="activity-stack activity-stack-thinking">
+      <details className="activity-card activity-card-thinking">
+        <summary className="tool-summary activity-summary" title={summaryText}>
+          <span className="tool-summary-chevron" aria-hidden="true">
+            ›
+          </span>
+          <span className="activity-dot activity-dot-thinking" aria-hidden="true" />
+          <ActivitySummaryText summaryText={summaryText} />
+        </summary>
+        <div className="activity-detail-content thinking-group-content">
+          {thinkingBlocks.map((thinkingBlock, index) => (
+            <section className="thinking-group-item" key={`thought-${index}`}>
+              {renderThinkingContent(thinkingBlock.content)}
+            </section>
+          ))}
+        </div>
+      </details>
+    </div>
   );
 };
 
@@ -614,23 +616,24 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
 
         const hasThinkingContent = extractContentText(block.content).trim().length > 0;
         renderedBlocks.push(
-          <div
-            key={`thinking-${blockIndex}`}
-            className="activity-card activity-card-thinking activity-card-live"
-            role="status"
-            aria-live="polite"
-          >
-            <div className="tool-summary activity-summary activity-summary-static">
-              <DustSpinner />
-              <span className="tool-summary-text" title="Thinking">
-                <span className="tool-summary-label">Thinking</span>
-              </span>
-            </div>
-            {hasThinkingContent ? (
-              <div className="activity-detail-content activity-detail-content-live">
-                {renderThinkingContent(block.content)}
+          <div key={`thinking-${blockIndex}`} className="activity-stack activity-stack-thinking">
+            <div
+              className="activity-card activity-card-thinking activity-card-live"
+              role="status"
+              aria-live="polite"
+            >
+              <div className="tool-summary activity-summary activity-summary-static">
+                <DustSpinner />
+                <span className="tool-summary-text" title="Thinking">
+                  <span className="tool-summary-label">Thinking</span>
+                </span>
               </div>
-            ) : null}
+              {hasThinkingContent ? (
+                <div className="activity-detail-content activity-detail-content-live">
+                  {renderThinkingContent(block.content)}
+                </div>
+              ) : null}
+            </div>
           </div>
         );
         continue;

@@ -2762,6 +2762,11 @@ code[class*="language-"] {
   );
 }
 
+.activity-stack-thinking {
+  margin-top: 0.1rem;
+  margin-bottom: 0.1rem;
+}
+
 .activity-card {
   position: relative;
   overflow: hidden;
@@ -2791,12 +2796,27 @@ code[class*="language-"] {
 }
 
 .activity-card-thinking {
-  border-color: rgba(106, 155, 204, 0.06);
-  background: rgba(106, 155, 204, 0.035);
+  border-color: transparent;
+  background: transparent;
+}
+
+.activity-card-thinking:hover,
+.activity-card-thinking[open] {
+  border-color: rgba(20, 20, 19, 0.045);
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .activity-card-live {
   background: rgba(255, 255, 255, 0.16);
+}
+
+.activity-card-thinking.activity-card-live {
+  border-color: transparent;
+  background: transparent;
+}
+
+.activity-card-thinking.activity-card-live:hover {
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .activity-card-error {
@@ -2837,8 +2857,10 @@ code[class*="language-"] {
 }
 
 .activity-dot-live {
-  background: #b95f74;
-  box-shadow: 0 0 0 3px rgba(185, 95, 116, 0.08);
+  background: #c79643;
+  box-shadow:
+    0 0 0 3px rgba(199, 150, 67, 0.1),
+    0 0 14px rgba(199, 150, 67, 0.16);
   animation: kodeletActivityPulse 1.5s ease-in-out infinite;
 }
 

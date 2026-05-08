@@ -215,7 +215,7 @@ describe('ChatTranscript', () => {
       />
     );
 
-    expect(screen.getByText('3 thoughts')).toBeInTheDocument();
+    expect(screen.getByText('3 Thoughts')).toBeInTheDocument();
     expect(screen.queryByText('thought 1')).not.toBeInTheDocument();
     expect(screen.queryByText('thought 2')).not.toBeInTheDocument();
     expect(screen.queryByText('thought 3')).not.toBeInTheDocument();
