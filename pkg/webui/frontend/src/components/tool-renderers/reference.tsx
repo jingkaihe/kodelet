@@ -306,14 +306,6 @@ export const ReferenceTerminal: React.FC<{ output: string }> = ({ output }) => {
       className="tool-terminal"
       dangerouslySetInnerHTML={{
         __html:
-          '<div class="tool-terminal-header">' +
-          '<div class="tool-terminal-lights">' +
-          '<span class="tool-terminal-light red"></span>' +
-          '<span class="tool-terminal-light yellow"></span>' +
-          '<span class="tool-terminal-light green"></span>' +
-          '</div>' +
-          '<div class="tool-terminal-label">terminal output</div>' +
-          '</div>' +
           `<div class="tool-terminal-body"><pre>${lines}</pre></div>`,
       }}
     />

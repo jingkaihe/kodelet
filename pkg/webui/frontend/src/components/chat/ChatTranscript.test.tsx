@@ -387,4 +387,43 @@ describe('ChatTranscript', () => {
     expect(container.querySelectorAll('details')).toHaveLength(2)
     expect(container.querySelector('.tool-summary-text')?.textContent).not.toContain('timeout')
   })
+
+  it('uses bash duration as the completed activity status', () => {
+    render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[
+          {
+            role: 'assistant',
+            blocks: [
+              {
+                type: 'tools',
+                tools: [
+                  {
+                    callId: 'bash-1',
+                    name: 'bash',
+                    input: '{"command":"pwd","description":"Print working directory"}',
+                    result: {
+                      toolName: 'bash',
+                      success: true,
+                      metadata: {
+                        command: 'pwd',
+                        exitCode: 0,
+                        output: '/workspace/kodelet',
+                        executionTime: 119000000,
+                        workingDir: '/workspace/kodelet',
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ]}
+      />
+    )
+
+    expect(screen.getByLabelText('Tool 119ms')).toHaveTextContent('119ms')
+    expect(screen.queryByLabelText('Tool done')).not.toBeInTheDocument()
+  })
 });

@@ -6,9 +6,10 @@ import { normalizeToolName } from './tool-renderers/reference';
 
 interface ToolRendererProps {
   toolResult: ToolResult;
+  toolInput?: string;
 }
 
-const ToolRenderer: React.FC<ToolRendererProps> = ({ toolResult }) => {
+const ToolRenderer: React.FC<ToolRendererProps> = ({ toolResult, toolInput }) => {
   const renderTool = () => {
     const normalizedToolName = normalizeToolName(toolResult.toolName);
     const rendererRegistration = getToolRendererRegistration(toolResult.toolName);
@@ -41,7 +42,7 @@ const ToolRenderer: React.FC<ToolRendererProps> = ({ toolResult }) => {
 
     if (rendererRegistration) {
       const Renderer = rendererRegistration.component;
-      return <Renderer toolResult={toolResult} />;
+      return <Renderer toolInput={toolInput} toolResult={toolResult} />;
     }
 
     return <FallbackRenderer toolResult={toolResult} />;

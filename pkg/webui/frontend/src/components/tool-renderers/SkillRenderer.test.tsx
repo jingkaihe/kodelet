@@ -1,18 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import SkillRenderer from './SkillRenderer';
 import { ToolResult, SkillMetadata } from '../../types';
-
-interface MockStatusBadgeProps {
-  text: string;
-  variant?: string;
-}
-
-vi.mock('./shared', () => ({
-  StatusBadge: ({ text, variant }: MockStatusBadgeProps) => (
-    <span data-testid="status-badge" data-variant={variant}>{text}</span>
-  ),
-}));
 
 describe('SkillRenderer', () => {
   const createToolResult = (metadata: SkillMetadata | null | undefined): ToolResult => ({
@@ -23,9 +12,9 @@ describe('SkillRenderer', () => {
     metadata: metadata as SkillMetadata | undefined,
   });
 
-  it('renders skill name in badge', () => {
+  it('renders a low-key lowercase skill name', () => {
     const metadata: SkillMetadata = {
-      skillName: 'pdf',
+      skillName: 'PDF',
       directory: '/home/user/.kodelet/skills/pdf',
     };
 
@@ -44,18 +33,6 @@ describe('SkillRenderer', () => {
     render(<SkillRenderer toolResult={createToolResult(metadata)} />);
 
     expect(screen.getByText('~/.kodelet/skills/kubernetes')).toBeInTheDocument();
-  });
-
-  it('shows success variant badge', () => {
-    const metadata: SkillMetadata = {
-      skillName: 'test',
-      directory: '/test',
-    };
-
-    render(<SkillRenderer toolResult={createToolResult(metadata)} />);
-
-    const badge = screen.getByTestId('status-badge');
-    expect(badge).toHaveAttribute('data-variant', 'success');
   });
 
   it('returns null when metadata is null', () => {

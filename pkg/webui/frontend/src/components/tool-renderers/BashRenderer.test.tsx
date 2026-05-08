@@ -35,8 +35,26 @@ describe('BashRenderer', () => {
     expect(screen.getByText('exit 0')).toBeInTheDocument();
     expect(screen.getByText('250ms')).toBeInTheDocument();
     expect(screen.getByText('/tmp/work')).toBeInTheDocument();
-    expect(container.querySelector('.tool-badge-success')).toBeInTheDocument();
+    expect(screen.getByText('shell command')).toBeInTheDocument();
+    expect(container.querySelector('.bash-tool-badge.is-success')).toBeInTheDocument();
     expect(container.querySelector('.tool-terminal')).toBeInTheDocument();
+  });
+
+  it('renders the tool-call description when provided', () => {
+    const toolResult = createToolResult({
+      command: 'pwd',
+      exitCode: 0,
+      output: '/tmp/work',
+    });
+
+    render(
+      <BashRenderer
+        toolInput='{"command":"pwd","description":"Print the working directory"}'
+        toolResult={toolResult}
+      />
+    );
+
+    expect(screen.getByText('Print the working directory')).toBeInTheDocument();
   });
 
   it('renders an error badge for non-zero exits', () => {
@@ -49,7 +67,7 @@ describe('BashRenderer', () => {
     const { container } = render(<BashRenderer toolResult={toolResult} />);
 
     expect(screen.getByText('exit 127')).toBeInTheDocument();
-    expect(container.querySelector('.tool-badge-error')).toBeInTheDocument();
+    expect(container.querySelector('.bash-tool-badge.is-error')).toBeInTheDocument();
   });
 
   it('renders failure details and output for unsuccessful commands', () => {

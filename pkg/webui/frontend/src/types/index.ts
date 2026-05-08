@@ -277,6 +277,7 @@ export interface ChatRenderToolCall {
 // Tool renderer types
 export interface ToolRenderProps {
   toolResult: ToolResult;
+  toolInput?: string;
 }
 
 export interface FileMetadata {

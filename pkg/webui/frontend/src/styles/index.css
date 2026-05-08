@@ -2424,6 +2424,122 @@ code[class*="language-"] {
   border-color: rgba(176, 174, 165, 0.24);
 }
 
+.bash-tool-brief {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.9rem;
+}
+
+.bash-tool-title {
+  font-family: var(--font-heading);
+  font-size: 0.88rem;
+  font-weight: 650;
+  line-height: 1.25;
+  color: rgba(20, 20, 19, 0.92);
+  text-transform: lowercase;
+}
+
+.bash-tool-description {
+  margin-top: 0.18rem;
+  font-family: var(--font-heading);
+  font-size: 0.76rem;
+  font-weight: 500;
+  line-height: 1.45;
+  color: rgba(20, 20, 19, 0.54);
+}
+
+.bash-tool-badges {
+  display: inline-flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.3rem;
+}
+
+.bash-tool-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  padding: 0.18rem 0.55rem;
+  font-family: var(--font-heading);
+  font-size: 0.68rem;
+  font-weight: 650;
+  line-height: 1;
+  color: #6f6a5f;
+}
+
+.bash-tool-badge.is-success {
+  border-color: rgba(120, 140, 93, 0.2);
+  background: rgba(120, 140, 93, 0.1);
+  color: #5f7247;
+}
+
+.bash-tool-badge.is-error {
+  border-color: rgba(191, 63, 63, 0.18);
+  background: rgba(191, 63, 63, 0.08);
+  color: #a63f3f;
+}
+
+.bash-tool-badge.is-neutral {
+  border-color: rgba(176, 174, 165, 0.2);
+  background: rgba(176, 174, 165, 0.11);
+}
+
+.bash-command-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.55;
+  color: rgba(20, 20, 19, 0.54);
+}
+
+.skill-tool-detail {
+  display: grid;
+  gap: 0.28rem;
+}
+
+.skill-tool-status {
+  display: inline-flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-family: var(--font-heading);
+  font-size: 0.75rem;
+  line-height: 1.3;
+}
+
+.skill-tool-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 650;
+  color: rgba(20, 20, 19, 0.64);
+}
+
+.skill-tool-loaded {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: rgba(122, 117, 107, 0.58);
+}
+
+.skill-tool-path {
+  width: fit-content;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.73rem;
+  color: rgba(20, 20, 19, 0.7);
+}
+
 .tool-kv-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -2471,18 +2587,136 @@ code[class*="language-"] {
   color: #5f5a50;
 }
 
+.activity-stack {
+  position: relative;
+  display: grid;
+  gap: 0.34rem;
+  padding-left: 1.4rem;
+}
+
+.activity-stack::before {
+  content: "";
+  position: absolute;
+  top: 0.72rem;
+  bottom: 0.72rem;
+  left: 0.34rem;
+  width: 1px;
+  background: linear-gradient(
+    180deg,
+    rgba(122, 117, 107, 0.06),
+    rgba(122, 117, 107, 0.2),
+    rgba(122, 117, 107, 0.06)
+  );
+}
+
+.activity-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0.65rem;
+  border: 1px solid transparent;
+  background: transparent;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease;
+}
+
+.activity-card::before {
+  content: "";
+  position: absolute;
+  left: 0.31rem;
+  top: 0.98rem;
+  width: 0.42rem;
+  height: 1px;
+  background: rgba(122, 117, 107, 0.18);
+  transform: translateX(-1.38rem);
+}
+
+.activity-card:hover,
+.activity-card[open] {
+  border-color: rgba(20, 20, 19, 0.06);
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.activity-card-thinking {
+  border-color: rgba(106, 155, 204, 0.06);
+  background: rgba(106, 155, 204, 0.035);
+}
+
+.activity-card-live {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.activity-card-error {
+  background: rgba(191, 63, 63, 0.035);
+}
+
+.activity-summary {
+  min-height: 2.15rem;
+  padding: 0.36rem 0.58rem;
+}
+
+.activity-summary-static {
+  cursor: default;
+}
+
+.activity-summary-static:hover {
+  background: transparent;
+}
+
+.activity-detail-content {
+  margin: 0 0.58rem 0.58rem 2.05rem;
+  padding-top: 0.64rem;
+  border-top: 1px solid rgba(20, 20, 19, 0.055);
+}
+
+.activity-detail-content-live {
+  margin-top: -0.15rem;
+  padding-top: 0.48rem;
+}
+
+.activity-dot {
+  flex: 0 0 auto;
+  width: 0.38rem;
+  height: 0.38rem;
+  border-radius: 9999px;
+  background: rgba(122, 117, 107, 0.5);
+  box-shadow: 0 0 0 3px rgba(122, 117, 107, 0.06);
+}
+
+.activity-dot-live {
+  background: #b95f74;
+  box-shadow: 0 0 0 3px rgba(185, 95, 116, 0.08);
+  animation: kodeletActivityPulse 1.5s ease-in-out infinite;
+}
+
+.activity-dot-thinking {
+  background: #6f91b5;
+  box-shadow: 0 0 0 3px rgba(106, 155, 204, 0.09);
+}
+
+.activity-dot-done {
+  background: rgba(122, 117, 107, 0.42);
+}
+
+.activity-dot-error {
+  background: #b04a4a;
+  box-shadow: 0 0 0 3px rgba(191, 63, 63, 0.08);
+}
+
 .tool-summary {
   display: flex;
   align-items: center;
-  gap: 0.72rem;
+  gap: 0.5rem;
   cursor: pointer;
   list-style: none;
-  padding: 0.9rem 1rem;
-  transition: background-color 160ms ease;
+  padding: 0.52rem 0.7rem;
+  transition:
+    background-color 160ms ease,
+    color 160ms ease;
 }
 
 .tool-summary:hover {
-  background: rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.16);
 }
 
 .tool-summary:focus-visible {
@@ -2493,8 +2727,8 @@ code[class*="language-"] {
 .tool-summary-chevron {
   flex: 0 0 auto;
   font-family: var(--font-heading);
-  font-size: 0.82rem;
-  color: #7a756b;
+  font-size: 0.72rem;
+  color: rgba(122, 117, 107, 0.56);
   transform: rotate(0deg);
   transform-origin: center;
   transition:
@@ -2502,20 +2736,50 @@ code[class*="language-"] {
     color 180ms ease;
 }
 
-.chat-subpanel[open] .tool-summary-chevron {
-  color: var(--kodelet-orange);
+.chat-subpanel[open] .tool-summary-chevron,
+.activity-card[open] .tool-summary-chevron {
+  color: rgba(122, 117, 107, 0.84);
   transform: rotate(90deg);
 }
 
 .tool-summary-text {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: baseline;
+  gap: 0.18rem;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--font-heading);
-  font-size: 0.84rem;
-  font-weight: 600;
-  color: var(--kodelet-dark);
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: rgba(20, 20, 19, 0.66);
+}
+
+.tool-summary-label {
+  flex: 0 0 auto;
+  color: rgba(20, 20, 19, 0.72);
+}
+
+.tool-summary-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: rgba(20, 20, 19, 0.52);
+}
+
+.tool-summary-status {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: rgba(122, 117, 107, 0.52);
 }
 
 .tool-item-label {
@@ -2572,59 +2836,18 @@ code[class*="language-"] {
 }
 
 .tool-terminal {
-  background: #171714;
+  background: rgba(23, 23, 20, 0.94);
   color: #d7e7c5;
-  border-radius: 10px;
-  border: 1px solid rgba(20, 20, 19, 0.14);
+  border-radius: 0.55rem;
+  border: 1px solid rgba(20, 20, 19, 0.1);
   overflow: hidden;
-  box-shadow: 0 10px 30px rgba(20, 20, 19, 0.08);
-}
-
-.tool-terminal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.5rem 0.75rem;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.tool-terminal-lights {
-  display: flex;
-  gap: 0.35rem;
-}
-
-.tool-terminal-light {
-  width: 0.62rem;
-  height: 0.62rem;
-  border-radius: 999px;
-  display: inline-block;
-}
-
-.tool-terminal-light.red {
-  background: #ff5f57;
-}
-
-.tool-terminal-light.yellow {
-  background: #febc2e;
-}
-
-.tool-terminal-light.green {
-  background: #28c840;
-}
-
-.tool-terminal-label {
-  font-family: var(--font-mono);
-  font-size: 0.71rem;
-  color: rgba(255, 255, 255, 0.66);
-  letter-spacing: 0.01em;
+  box-shadow: none;
 }
 
 .tool-terminal-body {
-  background: #171714;
+  background: transparent;
   color: #d7e7c5;
-  padding: 0.9rem;
+  padding: 0.72rem 0.82rem;
   max-height: 320px;
   overflow: auto;
 }
@@ -2634,7 +2857,7 @@ code[class*="language-"] {
   white-space: pre-wrap;
   word-break: break-word;
   font-family: var(--font-mono);
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   line-height: 1.45;
 }
 
@@ -2862,6 +3085,18 @@ code[class*="language-"] {
   50% {
     opacity: 1;
     transform: scale(1);
+  }
+}
+
+@keyframes kodeletActivityPulse {
+  0%,
+  100% {
+    opacity: 0.72;
+    transform: scale(0.92);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
   }
 }
 

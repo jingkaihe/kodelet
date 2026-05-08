@@ -3,7 +3,7 @@ import { marked } from 'marked';
 import type { ChatRenderMessage, ChatRenderToolCall, ContentBlock, ToolResult } from '../../types';
 import ToolRenderer from '../ToolRenderer';
 import { CopyButton } from '../tool-renderers/shared';
-import { cn } from '../../utils';
+import { cn, formatDuration } from '../../utils';
 import { normalizeToolName, ReferenceCodeBlock } from '../tool-renderers/reference';
 
 const renderContent = (content: string | ContentBlock[] | undefined): string => {
@@ -104,6 +104,20 @@ const getStringArrayField = (
   }
 
   return [];
+};
+
+const getNumberField = (
+  source: Record<string, unknown> | null,
+  ...keys: string[]
+): number | undefined => {
+  for (const key of keys) {
+    const value = source?.[key];
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+  }
+
+  return undefined;
 };
 
 const collapseWhitespace = (value: string): string => value.replace(/\s+/g, ' ').trim();
@@ -296,6 +310,60 @@ const getToolSummary = (toolCall: ChatRenderToolCall): string => {
   }
 };
 
+const splitActivitySummary = (summaryText: string): { label: string; detail?: string } => {
+  const separatorIndex = summaryText.indexOf(': ');
+
+  if (separatorIndex === -1) {
+    return { label: summaryText };
+  }
+
+  return {
+    label: summaryText.slice(0, separatorIndex),
+    detail: summaryText.slice(separatorIndex + 2),
+  };
+};
+
+const ActivitySummaryText: React.FC<{ summaryText: string }> = ({ summaryText }) => {
+  const { label, detail } = splitActivitySummary(summaryText);
+
+  return (
+    <span className="tool-summary-text" title={summaryText}>
+      {detail ? <span className="sr-only">{summaryText}</span> : null}
+      <span className="tool-summary-label" aria-hidden={detail ? 'true' : undefined}>
+        {detail ? `${label}:` : label}
+      </span>
+      {detail ? (
+        <span className="tool-summary-detail" aria-hidden="true">
+          {' '}{detail}
+        </span>
+      ) : null}
+    </span>
+  );
+};
+
+const getToolActivityStatus = (toolCall: ChatRenderToolCall): string => {
+  const normalizedToolName = normalizeToolName(toolCall.name);
+  const metadata = getMetadataRecord(toolCall.result);
+
+  if (normalizedToolName === 'bash') {
+    const duration = getNumberField(metadata, 'executionTime');
+    const durationText = duration !== undefined ? formatDuration(duration) : '';
+    if (durationText) {
+      return durationText;
+    }
+  }
+
+  if (!toolCall.result) {
+    return 'running';
+  }
+
+  if (!toolCall.result.success) {
+    return 'failed';
+  }
+
+  return 'done';
+};
+
 const extractContentText = (content: string | ContentBlock[] | undefined): string => {
   if (!content) {
     return '';
@@ -408,7 +476,8 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
           isActiveStreamingAssistant &&
           (message.blocks || []).some(
             (block) =>
-              (block.type === 'thinking' || block.type === 'message') && block.inProgress
+              ((block.type === 'thinking' || block.type === 'message') && block.inProgress) ||
+              (block.type === 'tools' && block.tools.some((toolCall) => !toolCall.result))
           );
 
         return (
@@ -508,12 +577,16 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
                         return (
                           <details
                             key={`thinking-${blockIndex}`}
-                            className="chat-subpanel overflow-hidden rounded-2xl"
+                            className="activity-card activity-card-thinking"
                           >
-                            <summary className="cursor-pointer list-none px-4 py-3 font-heading text-sm font-semibold text-kodelet-blue">
-                              {thinkingLabel}
+                            <summary className="tool-summary activity-summary" title={thinkingLabel}>
+                              <span className="tool-summary-chevron" aria-hidden="true">
+                                ›
+                              </span>
+                              <span className="activity-dot activity-dot-thinking" aria-hidden="true" />
+                              <ActivitySummaryText summaryText={thinkingLabel} />
                             </summary>
-                            <div className="border-t border-black/8 px-4 py-4">
+                            <div className="activity-detail-content">
                               {hasThinkingContent ? (
                                 <div
                                   className="chat-prose max-w-none text-kodelet-dark"
@@ -534,30 +607,24 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
                       return (
                         <div
                           key={`thinking-${blockIndex}`}
-                          className="chat-subpanel rounded-2xl px-4 py-4"
+                          className="activity-card activity-card-thinking activity-card-live"
+                          role="status"
+                          aria-live="polite"
                         >
-                          <div className="mb-3 flex items-center gap-2">
-                            <span
-                              className={cn(
-                                'font-heading text-sm font-semibold text-kodelet-blue',
-                                isActiveStreamingAssistant && block.inProgress && 'animate-pulse'
-                              )}
-                            >
-                              {thinkingLabel}
-                            </span>
+                          <div className="tool-summary activity-summary activity-summary-static">
+                            <span className="activity-dot activity-dot-live" aria-hidden="true" />
+                            <ActivitySummaryText summaryText={thinkingLabel} />
                           </div>
                           {hasThinkingContent ? (
-                            <div
-                              className="chat-prose max-w-none text-kodelet-dark"
-                              dangerouslySetInnerHTML={{
-                                __html: renderContent(normalizeThinkingMarkdown(block.content)),
-                              }}
-                            />
-                          ) : (
-                            <p className="text-sm italic text-kodelet-blue/80">
-                              Reasoning in progress…
-                            </p>
-                          )}
+                            <div className="activity-detail-content activity-detail-content-live">
+                              <div
+                                className="chat-prose max-w-none text-kodelet-dark"
+                                dangerouslySetInnerHTML={{
+                                  __html: renderContent(normalizeThinkingMarkdown(block.content)),
+                                }}
+                              />
+                            </div>
+                          ) : null}
                         </div>
                       );
                     }
@@ -568,25 +635,47 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
                       }
 
                       return (
-                        <div key={`tools-${blockIndex}`} className="space-y-3">
+                        <div key={`tools-${blockIndex}`} className="activity-stack">
                           {block.tools.map((toolCall, toolIndex) => {
                             const summaryText = getToolSummary(toolCall);
+                            const activityStatus = getToolActivityStatus(toolCall);
 
                             return (
                               <details
                                 key={toolCall.callId || `${toolCall.name}-${blockIndex}-${toolIndex}`}
-                                className="chat-subpanel overflow-hidden rounded-2xl"
+                                className={cn(
+                                  'activity-card',
+                                  activityStatus === 'running' && 'activity-card-live',
+                                  activityStatus === 'failed' && 'activity-card-error'
+                                )}
                               >
-                                <summary className="tool-summary" title={summaryText}>
+                                <summary className="tool-summary activity-summary" title={summaryText}>
                                   <span className="tool-summary-chevron" aria-hidden="true">
                                     ›
                                   </span>
-                                  <span className="tool-summary-text">{summaryText}</span>
+                                  <span
+                                    className={cn(
+                                      'activity-dot',
+                                      activityStatus === 'running'
+                                        ? 'activity-dot-live'
+                                        : activityStatus === 'failed'
+                                          ? 'activity-dot-error'
+                                          : 'activity-dot-done'
+                                    )}
+                                    aria-hidden="true"
+                                  />
+                                  <ActivitySummaryText summaryText={summaryText} />
+                                  <span className="tool-summary-status" aria-label={`Tool ${activityStatus}`}>
+                                    {activityStatus}
+                                  </span>
                                 </summary>
 
-                                <div className="space-y-2 border-t border-black/8 px-4 py-4">
+                                <div className="activity-detail-content space-y-2">
                                   {toolCall.result ? (
-                                    <ToolRenderer toolResult={toolCall.result} />
+                                    <ToolRenderer
+                                      toolInput={toolCall.input}
+                                      toolResult={toolCall.result}
+                                    />
                                   ) : (
                                     <>
                                       <p className="tool-awaiting">Awaiting tool result…</p>
