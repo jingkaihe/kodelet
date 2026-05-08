@@ -50,7 +50,7 @@ describe('ChatTranscript', () => {
       />
     );
 
-    expect(screen.getByText('Thinking')).toBeInTheDocument();
+    expect(screen.getByText('Thought')).toBeInTheDocument();
     expect(container.querySelector('details')).not.toHaveAttribute('open');
     expect(screen.getByText('Plan')).toBeInTheDocument();
     expect(container.querySelector('strong')?.textContent).toBe('Plan');
@@ -138,7 +138,8 @@ describe('ChatTranscript', () => {
     );
 
     expect(container.querySelector('details')).toBeNull();
-    expect(screen.getByText('Following the thread…')).toBeInTheDocument();
+    expect(screen.getByText('Thinking')).toBeInTheDocument();
+    expect(container.querySelector('.chat-streaming-mark')).toBeInTheDocument();
 
     rerender(
       <ChatTranscript
@@ -158,12 +159,12 @@ describe('ChatTranscript', () => {
       />
     );
 
-    expect(screen.getByText('Thinking')).toBeInTheDocument();
+    expect(screen.getByText('Thought')).toBeInTheDocument();
     expect(container.querySelector('details')).not.toHaveAttribute('open');
   });
 
-  it('uses the rotating streaming label on in-progress thinking blocks', () => {
-    render(
+  it('uses the dust spinner and stable label on in-progress thinking blocks', () => {
+    const { container } = render(
       <ChatTranscript
         isStreaming={true}
         messages={[
@@ -181,7 +182,47 @@ describe('ChatTranscript', () => {
       />
     );
 
-    expect(screen.getByText('Following the thread…')).toBeInTheDocument();
+    expect(screen.getByText('Thinking')).toBeInTheDocument();
+    expect(container.querySelector('.chat-streaming-mark')).toBeInTheDocument();
+  });
+
+  it('groups consecutive completed thinking blocks into one collapsible thoughts card', () => {
+    const { container } = render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[
+          {
+            role: 'assistant',
+            blocks: [
+              {
+                type: 'thinking',
+                content: 'First thought',
+                inProgress: false,
+              },
+              {
+                type: 'thinking',
+                content: 'Second thought',
+                inProgress: false,
+              },
+              {
+                type: 'thinking',
+                content: 'Third thought',
+                inProgress: false,
+              },
+            ],
+          },
+        ]}
+      />
+    );
+
+    expect(screen.getByText('3 thoughts')).toBeInTheDocument();
+    expect(screen.queryByText('thought 1')).not.toBeInTheDocument();
+    expect(screen.queryByText('thought 2')).not.toBeInTheDocument();
+    expect(screen.queryByText('thought 3')).not.toBeInTheDocument();
+    expect(screen.getByText('First thought')).toBeInTheDocument();
+    expect(screen.getByText('Second thought')).toBeInTheDocument();
+    expect(screen.getByText('Third thought')).toBeInTheDocument();
+    expect(container.querySelectorAll('details')).toHaveLength(1);
   });
 
   it('shows a streaming thinking indicator between assistant blocks', () => {

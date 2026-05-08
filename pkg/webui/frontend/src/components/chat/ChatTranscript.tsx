@@ -1,6 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { marked } from 'marked';
-import type { ChatRenderMessage, ChatRenderToolCall, ContentBlock, ToolResult } from '../../types';
+import type {
+  ChatAssistantBlock,
+  ChatRenderMessage,
+  ChatRenderToolCall,
+  ContentBlock,
+  ToolResult,
+} from '../../types';
 import ToolRenderer from '../ToolRenderer';
 import { CopyButton } from '../tool-renderers/shared';
 import { cn, formatDuration } from '../../utils';
@@ -387,6 +393,53 @@ const StreamingText: React.FC<{
   </span>
 );
 
+const renderThinkingContent = (content: string) => {
+  const hasThinkingContent = extractContentText(content).trim().length > 0;
+
+  if (!hasThinkingContent) {
+    return (
+      <p className="text-sm italic text-kodelet-blue/80">
+        Reasoning complete.
+      </p>
+    );
+  }
+
+  return (
+    <div
+      className="chat-prose max-w-none text-kodelet-dark"
+      dangerouslySetInnerHTML={{
+        __html: renderContent(normalizeThinkingMarkdown(content)),
+      }}
+    />
+  );
+};
+
+const renderCompletedThinkingGroup = (
+  thinkingBlocks: Array<Extract<ChatAssistantBlock, { type: 'thinking' }>>,
+  key: string
+) => {
+  const summaryText = thinkingBlocks.length === 1 ? 'Thought' : `${thinkingBlocks.length} thoughts`;
+
+  return (
+    <details key={key} className="activity-card activity-card-thinking">
+      <summary className="tool-summary activity-summary" title={summaryText}>
+        <span className="tool-summary-chevron" aria-hidden="true">
+          ›
+        </span>
+        <span className="activity-dot activity-dot-thinking" aria-hidden="true" />
+        <ActivitySummaryText summaryText={summaryText} />
+      </summary>
+      <div className="activity-detail-content thinking-group-content">
+        {thinkingBlocks.map((thinkingBlock, index) => (
+          <section className="thinking-group-item" key={`thought-${index}`}>
+            {renderThinkingContent(thinkingBlock.content)}
+          </section>
+        ))}
+      </div>
+    </details>
+  );
+};
+
 const getToolActivityStatus = (toolCall: ChatRenderToolCall): string => {
   const normalizedToolName = normalizeToolName(toolCall.name);
   const metadata = getMetadataRecord(toolCall.result);
@@ -533,6 +586,143 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
     streamingTextFrame
   );
 
+  const renderAssistantBlocks = (blocks: ChatAssistantBlock[]): React.ReactNode[] => {
+    const renderedBlocks: React.ReactNode[] = [];
+
+    for (let blockIndex = 0; blockIndex < blocks.length; blockIndex += 1) {
+      const block = blocks[blockIndex];
+
+      if (block.type === 'thinking') {
+        if (!block.inProgress) {
+          const thinkingBlocks: Array<Extract<ChatAssistantBlock, { type: 'thinking' }>> = [block];
+          let lookaheadIndex = blockIndex + 1;
+
+          while (lookaheadIndex < blocks.length) {
+            const nextBlock = blocks[lookaheadIndex];
+            if (nextBlock.type !== 'thinking' || nextBlock.inProgress) {
+              break;
+            }
+
+            thinkingBlocks.push(nextBlock);
+            lookaheadIndex += 1;
+          }
+
+          renderedBlocks.push(renderCompletedThinkingGroup(thinkingBlocks, `thinking-${blockIndex}`));
+          blockIndex = lookaheadIndex - 1;
+          continue;
+        }
+
+        const hasThinkingContent = extractContentText(block.content).trim().length > 0;
+        renderedBlocks.push(
+          <div
+            key={`thinking-${blockIndex}`}
+            className="activity-card activity-card-thinking activity-card-live"
+            role="status"
+            aria-live="polite"
+          >
+            <div className="tool-summary activity-summary activity-summary-static">
+              <DustSpinner />
+              <span className="tool-summary-text" title="Thinking">
+                <span className="tool-summary-label">Thinking</span>
+              </span>
+            </div>
+            {hasThinkingContent ? (
+              <div className="activity-detail-content activity-detail-content-live">
+                {renderThinkingContent(block.content)}
+              </div>
+            ) : null}
+          </div>
+        );
+        continue;
+      }
+
+      if (block.type === 'tools') {
+        if (block.tools.length === 0) {
+          continue;
+        }
+
+        renderedBlocks.push(
+          <div key={`tools-${blockIndex}`} className="activity-stack">
+            {block.tools.map((toolCall, toolIndex) => {
+              const summaryText = getToolSummary(toolCall);
+              const activityStatus = getToolActivityStatus(toolCall);
+
+              return (
+                <details
+                  key={toolCall.callId || `${toolCall.name}-${blockIndex}-${toolIndex}`}
+                  className={cn(
+                    'activity-card',
+                    activityStatus === 'running' && 'activity-card-live',
+                    activityStatus === 'failed' && 'activity-card-error'
+                  )}
+                >
+                  <summary className="tool-summary activity-summary" title={summaryText}>
+                    <span className="tool-summary-chevron" aria-hidden="true">
+                      ›
+                    </span>
+                    <span
+                      className={cn(
+                        'activity-dot',
+                        activityStatus === 'running'
+                          ? 'activity-dot-live'
+                          : activityStatus === 'failed'
+                            ? 'activity-dot-error'
+                            : 'activity-dot-done'
+                      )}
+                      aria-hidden="true"
+                    />
+                    <ActivitySummaryText summaryText={summaryText} />
+                    <span className="tool-summary-status" aria-label={`Tool ${activityStatus}`}>
+                      {activityStatus}
+                    </span>
+                  </summary>
+
+                  <div className="activity-detail-content space-y-2">
+                    {toolCall.result ? (
+                      <ToolRenderer
+                        toolInput={toolCall.input}
+                        toolResult={toolCall.result}
+                      />
+                    ) : (
+                      <>
+                        <p className="tool-awaiting">Awaiting tool result…</p>
+                        {toolCall.input ? (
+                          <ReferenceCodeBlock
+                            content={formatToolInput(toolCall.input)}
+                            language="json"
+                          />
+                        ) : null}
+                      </>
+                    )}
+                  </div>
+                </details>
+              );
+            })}
+          </div>
+        );
+        continue;
+      }
+
+      const copyText = getMessageBlockCopyText(block.content);
+      renderedBlocks.push(
+        <div key={`message-${blockIndex}`} className="group/message relative">
+          {copyText.trim() ? (
+            <CopyButton
+              className={assistantMessageCopyButtonClassName}
+              content={copyText}
+            />
+          ) : null}
+          <div
+            className="chat-prose max-w-none pr-12 text-kodelet-dark"
+            dangerouslySetInnerHTML={{ __html: renderContent(block.content) }}
+          />
+        </div>
+      );
+    }
+
+    return renderedBlocks;
+  };
+
   if (messages.length === 0) {
     return (
       <div className="flex min-h-full items-center justify-center px-6 py-12">
@@ -647,157 +837,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
                 />
               ) : (
                 <div className="space-y-4">
-                  {(message.blocks || []).map((block, blockIndex) => {
-                    if (block.type === 'thinking') {
-                      const stableThinkingLabel = animatedStreamingText.next;
-                      const thinkingLabel =
-                        isActiveStreamingAssistant && block.inProgress
-                          ? animatedStreamingText.current
-                          : 'Thinking';
-                      const hasThinkingContent =
-                        extractContentText(block.content).trim().length > 0;
-
-                      if (!block.inProgress) {
-                        return (
-                          <details
-                            key={`thinking-${blockIndex}`}
-                            className="activity-card activity-card-thinking"
-                          >
-                            <summary className="tool-summary activity-summary" title={thinkingLabel}>
-                              <span className="tool-summary-chevron" aria-hidden="true">
-                                ›
-                              </span>
-                              <span className="activity-dot activity-dot-thinking" aria-hidden="true" />
-                              <ActivitySummaryText summaryText={thinkingLabel} />
-                            </summary>
-                            <div className="activity-detail-content">
-                              {hasThinkingContent ? (
-                                <div
-                                  className="chat-prose max-w-none text-kodelet-dark"
-                                  dangerouslySetInnerHTML={{
-                                    __html: renderContent(normalizeThinkingMarkdown(block.content)),
-                                  }}
-                                />
-                              ) : (
-                                <p className="text-sm italic text-kodelet-blue/80">
-                                  Reasoning complete.
-                                </p>
-                              )}
-                            </div>
-                          </details>
-                        );
-                      }
-
-                      return (
-                        <div
-                          key={`thinking-${blockIndex}`}
-                          className="activity-card activity-card-thinking activity-card-live"
-                          role="status"
-                          aria-live="polite"
-                        >
-                          <div className="tool-summary activity-summary activity-summary-static">
-                            <span className="activity-dot activity-dot-live" aria-hidden="true" />
-                            <span className="tool-summary-text" title={stableThinkingLabel}>
-                              <StreamingText text={thinkingLabel} animation={animatedStreamingText} />
-                            </span>
-                          </div>
-                          {hasThinkingContent ? (
-                            <div className="activity-detail-content activity-detail-content-live">
-                              <div
-                                className="chat-prose max-w-none text-kodelet-dark"
-                                dangerouslySetInnerHTML={{
-                                  __html: renderContent(normalizeThinkingMarkdown(block.content)),
-                                }}
-                              />
-                            </div>
-                          ) : null}
-                        </div>
-                      );
-                    }
-
-                    if (block.type === 'tools') {
-                      if (block.tools.length === 0) {
-                        return null;
-                      }
-
-                      return (
-                        <div key={`tools-${blockIndex}`} className="activity-stack">
-                          {block.tools.map((toolCall, toolIndex) => {
-                            const summaryText = getToolSummary(toolCall);
-                            const activityStatus = getToolActivityStatus(toolCall);
-
-                            return (
-                              <details
-                                key={toolCall.callId || `${toolCall.name}-${blockIndex}-${toolIndex}`}
-                                className={cn(
-                                  'activity-card',
-                                  activityStatus === 'running' && 'activity-card-live',
-                                  activityStatus === 'failed' && 'activity-card-error'
-                                )}
-                              >
-                                <summary className="tool-summary activity-summary" title={summaryText}>
-                                  <span className="tool-summary-chevron" aria-hidden="true">
-                                    ›
-                                  </span>
-                                  <span
-                                    className={cn(
-                                      'activity-dot',
-                                      activityStatus === 'running'
-                                        ? 'activity-dot-live'
-                                        : activityStatus === 'failed'
-                                          ? 'activity-dot-error'
-                                          : 'activity-dot-done'
-                                    )}
-                                    aria-hidden="true"
-                                  />
-                                  <ActivitySummaryText summaryText={summaryText} />
-                                  <span className="tool-summary-status" aria-label={`Tool ${activityStatus}`}>
-                                    {activityStatus}
-                                  </span>
-                                </summary>
-
-                                <div className="activity-detail-content space-y-2">
-                                  {toolCall.result ? (
-                                    <ToolRenderer
-                                      toolInput={toolCall.input}
-                                      toolResult={toolCall.result}
-                                    />
-                                  ) : (
-                                    <>
-                                      <p className="tool-awaiting">Awaiting tool result…</p>
-                                      {toolCall.input ? (
-                                        <ReferenceCodeBlock
-                                          content={formatToolInput(toolCall.input)}
-                                          language="json"
-                                        />
-                                      ) : null}
-                                    </>
-                                  )}
-                                </div>
-                              </details>
-                            );
-                          })}
-                        </div>
-                      );
-                    }
-
-                    const copyText = getMessageBlockCopyText(block.content);
-
-                    return (
-                      <div key={`message-${blockIndex}`} className="group/message relative">
-                        {copyText.trim() ? (
-                          <CopyButton
-                            className={assistantMessageCopyButtonClassName}
-                            content={copyText}
-                          />
-                        ) : null}
-                        <div
-                          className="chat-prose max-w-none pr-12 text-kodelet-dark"
-                          dangerouslySetInnerHTML={{ __html: renderContent(block.content) }}
-                        />
-                      </div>
-                    );
-                  })}
+                  {renderAssistantBlocks(message.blocks || [])}
 
                   {isActiveStreamingAssistant && !hasVisibleInProgressBlock ? (
                     <div className="chat-streaming-indicator" aria-label="Kodelet is working">

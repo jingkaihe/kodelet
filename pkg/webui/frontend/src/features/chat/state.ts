@@ -128,6 +128,21 @@ const setMostRecentBlockProgress = (
   }
 };
 
+const getThinkingTexts = (message: Message): string[] => {
+  const texts = Array.isArray(message.thinkingTexts) ? message.thinkingTexts : [];
+  const normalizedTexts = texts
+    .filter((text): text is string => typeof text === 'string')
+    .map((text) => text.trim())
+    .filter(Boolean);
+
+  if (normalizedTexts.length > 0) {
+    return normalizedTexts;
+  }
+
+  const legacyText = message.thinkingText?.trim();
+  return legacyText ? [legacyText] : [];
+};
+
 export const conversationToChatMessages = (
   conversation: Conversation | null
 ): ChatRenderMessage[] => {
@@ -145,13 +160,13 @@ export const conversationToChatMessages = (
     }
 
     const blocks: ChatAssistantBlock[] = [];
-    if (message.thinkingText?.trim()) {
+    getThinkingTexts(message).forEach((thinkingText) => {
       blocks.push({
         type: 'thinking',
-        content: message.thinkingText,
+        content: thinkingText,
         inProgress: false,
       });
-    }
+    });
 
     const toolCalls = message.toolCalls || message.tool_calls || [];
     if (toolCalls.length > 0) {

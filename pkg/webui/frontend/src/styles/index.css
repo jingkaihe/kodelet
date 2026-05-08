@@ -316,6 +316,16 @@ h6 {
 .chat-streaming-label-dust span:nth-child(7) { left: 76%; top: 62%; animation-delay: -210ms; }
 .chat-streaming-label-dust span:nth-child(8) { left: 90%; top: 30%; animation-delay: -620ms; }
 
+.thinking-group-content {
+  display: grid;
+  gap: 0.95rem;
+}
+
+.thinking-group-item + .thinking-group-item {
+  padding-top: 0.95rem;
+  border-top: 1px solid rgba(20, 20, 19, 0.06);
+}
+
 .chat-uploaded-image {
   width: min(100%, 34rem);
   margin: 0.9rem 0;

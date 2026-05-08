@@ -6,6 +6,7 @@ export interface Message {
   toolCalls?: ToolCall[];
   tool_calls?: ToolCall[]; // Alternative format
   thinkingText?: string; // For Claude thinking blocks
+  thinkingTexts?: string[]; // Multiple persisted thinking blocks
 }
 
 export interface ContentBlock {

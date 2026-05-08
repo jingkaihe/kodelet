@@ -50,6 +50,7 @@ const normalizeConversation = (conversation: Conversation): Conversation => ({
 		content: message.content || "",
 		toolCalls: message.toolCalls || message.tool_calls || [],
 		thinkingText: message.thinkingText,
+		thinkingTexts: message.thinkingTexts || [],
 	})),
 	toolResults: conversation.toolResults || {},
 });

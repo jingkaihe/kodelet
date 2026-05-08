@@ -151,6 +151,52 @@ describe('conversationToChatMessages', () => {
       ],
     });
   });
+
+  it('preserves multiple persisted thinking texts as separate adjacent blocks', () => {
+    const conversation: Conversation = {
+      id: 'conv-thoughts',
+      createdAt: '2026-03-08T00:00:00Z',
+      updatedAt: '2026-03-08T00:00:00Z',
+      messageCount: 2,
+      messages: [
+        {
+          role: 'user',
+          content: 'think through this',
+        },
+        {
+          role: 'assistant',
+          content: 'Done.',
+          thinkingText: 'legacy combined thought',
+          thinkingTexts: ['First thought', 'Second thought', 'Third thought'],
+        },
+      ],
+    };
+
+    const messages = conversationToChatMessages(conversation);
+
+    expect(messages[1].blocks).toEqual([
+      {
+        type: 'thinking',
+        content: 'First thought',
+        inProgress: false,
+      },
+      {
+        type: 'thinking',
+        content: 'Second thought',
+        inProgress: false,
+      },
+      {
+        type: 'thinking',
+        content: 'Third thought',
+        inProgress: false,
+      },
+      {
+        type: 'message',
+        content: 'Done.',
+        inProgress: false,
+      },
+    ]);
+  });
 });
 
 describe('applyChatStreamEvent', () => {

@@ -587,10 +587,11 @@ const (
 
 // WebMessage represents a message with structured tool calls for the web UI
 type WebMessage struct {
-	Role         string        `json:"role"`
-	Content      any           `json:"content"`
-	ToolCalls    []WebToolCall `json:"toolCalls,omitempty"`
-	ThinkingText string        `json:"thinkingText,omitempty"`
+	Role          string        `json:"role"`
+	Content       any           `json:"content"`
+	ToolCalls     []WebToolCall `json:"toolCalls,omitempty"`
+	ThinkingText  string        `json:"thinkingText,omitempty"`
+	ThinkingTexts []string      `json:"thinkingTexts,omitempty"`
 }
 
 // WebContentBlock represents a typed content block rendered by the web UI.
@@ -1148,9 +1149,10 @@ func (s *Server) convertToWebMessages(rawMessages json.RawMessage, provider stri
 				webMsg.ToolCalls = toolCalls
 			}
 			// Extract thinking content using SDK
-			if content, thinkingText, err := s.extractAnthropicContent(rawMsg); err == nil {
+			if content, thinkingText, thinkingTexts, err := s.extractAnthropicContent(rawMsg); err == nil {
 				webMsg.Content = content
 				webMsg.ThinkingText = thinkingText
+				webMsg.ThinkingTexts = thinkingTexts
 			}
 		case "openai":
 			if toolCalls, err := s.extractOpenAIToolCalls(rawMsg); err == nil {
@@ -1160,6 +1162,9 @@ func (s *Server) convertToWebMessages(rawMessages json.RawMessage, provider stri
 			if content, thinkingText, err := s.extractOpenAIContent(rawMsg); err == nil {
 				webMsg.Content = content
 				webMsg.ThinkingText = thinkingText
+				if thinkingText != "" {
+					webMsg.ThinkingTexts = []string{thinkingText}
+				}
 			}
 		}
 
@@ -1204,6 +1209,7 @@ func (s *Server) convertOpenAIResponsesToWebMessages(rawMessages json.RawMessage
 			}
 		case "thinking":
 			webMsg.ThinkingText = msg.Content
+			webMsg.ThinkingTexts = []string{msg.Content}
 			if webMsg.Role == "" {
 				webMsg.Role = "assistant"
 			}
@@ -1291,16 +1297,17 @@ func (s *Server) extractOpenAIResponsesInputContent(rawMessage json.RawMessage) 
 }
 
 // extractAnthropicContent extracts both text content and thinking blocks using Anthropic SDK
-func (s *Server) extractAnthropicContent(rawMessage json.RawMessage) (any, string, error) {
+func (s *Server) extractAnthropicContent(rawMessage json.RawMessage) (any, string, []string, error) {
 	// Deserialize single message using the Anthropic SDK
 	var anthropicMessage anthropic.MessageParam
 	if err := json.Unmarshal(rawMessage, &anthropicMessage); err != nil {
-		return "", "", errors.Wrap(err, "failed to deserialize Anthropic message")
+		return "", "", nil, errors.Wrap(err, "failed to deserialize Anthropic message")
 	}
 
 	var textParts []string
 	var contentBlocks []WebContentBlock
 	var thinkingText string
+	var thinkingTexts []string
 
 	for _, contentBlock := range anthropicMessage.Content {
 		// Handle text blocks
@@ -1322,10 +1329,13 @@ func (s *Server) extractAnthropicContent(rawMessage json.RawMessage) (any, strin
 		// Handle thinking blocks
 		if thinkingBlock := contentBlock.OfThinking; thinkingBlock != nil {
 			thinkingText = thinkingBlock.Thinking
+			if strings.TrimSpace(thinkingBlock.Thinking) != "" {
+				thinkingTexts = append(thinkingTexts, thinkingBlock.Thinking)
+			}
 		}
 	}
 
-	return normalizeWebContent(textParts, contentBlocks), thinkingText, nil
+	return normalizeWebContent(textParts, contentBlocks), thinkingText, thinkingTexts, nil
 }
 
 // extractAnthropicToolCalls extracts tool calls from Anthropic content using SDK

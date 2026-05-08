@@ -1553,6 +1553,12 @@ func TestServer_convertToWebMessages(t *testing.T) {
 			expectedTool:  "TestTool",
 		},
 		{
+			name:         "openai responses preserves consecutive reasoning items",
+			rawMessages:  json.RawMessage(`[{"type":"message","role":"user","content":"Hello"},{"type":"reasoning","role":"assistant","content":"First thought"},{"type":"reasoning","role":"assistant","content":"Second thought"},{"type":"reasoning","role":"assistant","content":"Third thought"},{"type":"message","role":"assistant","content":"Done"}]`),
+			provider:     "openai-responses",
+			expectedMsgs: 5,
+		},
+		{
 			name:          "openai responses native web search tool calls",
 			rawMessages:   json.RawMessage(`[{"type":"message","role":"user","content":"Look up the latest notes"},{"type":"web_search_call","call_id":"search-123","status":"completed","action":"search","content":"kodelet web ui search"}]`),
 			provider:      "openai-responses",
@@ -1579,6 +1585,13 @@ func TestServer_convertToWebMessages(t *testing.T) {
 					}
 				}
 				assert.True(t, foundToolCall, "expected at least one message with tool calls")
+			}
+
+			if tt.name == "openai responses preserves consecutive reasoning items" {
+				require.Len(t, messages, 5)
+				assert.Equal(t, []string{"First thought"}, messages[1].ThinkingTexts)
+				assert.Equal(t, []string{"Second thought"}, messages[2].ThinkingTexts)
+				assert.Equal(t, []string{"Third thought"}, messages[3].ThinkingTexts)
 			}
 		})
 	}
