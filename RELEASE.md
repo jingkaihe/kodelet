@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.4.5-beta (2026-05-08)
+
+Refined the Web UI chat transcript with grouped reasoning cards, an animated streaming indicator, and compact expandable tool activity summaries.
+
+Improved bash, apply_patch, and skill tool renderers with cleaner details, command copy support, and focused patch change output.
+
+Preserved multiple persisted thinking blocks in Web UI conversations and fixed OpenAI Responses streaming so pending reasoning is flushed before function calls.
+
 ## 0.4.4-beta (2026-05-08)
 
 Fixed OpenAI Responses streaming so thinking blocks are closed before text output when no explicit done event is received - This is an edge case identified from the Fireworks responses API.
