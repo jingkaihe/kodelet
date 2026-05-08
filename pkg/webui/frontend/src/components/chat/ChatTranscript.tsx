@@ -446,20 +446,20 @@ const getToolActivityStatus = (toolCall: ChatRenderToolCall): string => {
   const normalizedToolName = normalizeToolName(toolCall.name);
   const metadata = getMetadataRecord(toolCall.result);
 
-  if (normalizedToolName === 'bash') {
-    const duration = getNumberField(metadata, 'executionTime');
-    const durationText = duration !== undefined ? formatDuration(duration) : '';
-    if (durationText) {
-      return durationText;
-    }
-  }
-
   if (!toolCall.result) {
     return 'running';
   }
 
   if (!toolCall.result.success) {
     return 'failed';
+  }
+
+  if (normalizedToolName === 'bash') {
+    const duration = getNumberField(metadata, 'executionTime');
+    const durationText = duration !== undefined ? formatDuration(duration) : '';
+    if (durationText) {
+      return durationText;
+    }
   }
 
   return 'done';

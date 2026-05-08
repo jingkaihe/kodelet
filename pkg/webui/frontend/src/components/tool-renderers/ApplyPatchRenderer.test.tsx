@@ -68,6 +68,27 @@ describe('ApplyPatchRenderer', () => {
     expect(container.querySelector('.diff-line-removed')).toBeInTheDocument();
   });
 
+  it('preserves diff content lines that look like file headers', () => {
+    const toolResult = createToolResult({
+      modified: ['/tmp/edit.txt'],
+      changes: [
+        {
+          path: '/tmp/edit.txt',
+          operation: 'update',
+          unifiedDiff:
+            '--- /tmp/edit.txt\n+++ /tmp/edit.txt\n@@ -1,2 +1,2 @@\n--- removed-literal\n+++ added-literal\n context',
+        },
+      ],
+    });
+
+    render(<ApplyPatchRenderer toolResult={toolResult} />);
+
+    expect(screen.queryByText('--- /tmp/edit.txt')).not.toBeInTheDocument();
+    expect(screen.queryByText('+++ /tmp/edit.txt')).not.toBeInTheDocument();
+    expect(screen.getByText('-- removed-literal')).toBeInTheDocument();
+    expect(screen.getByText('++ added-literal')).toBeInTheDocument();
+  });
+
   it('renders fallback diffs when unified diff is unavailable', () => {
     const toolResult = createToolResult({
       changes: [

@@ -467,4 +467,43 @@ describe('ChatTranscript', () => {
     expect(screen.getByLabelText('Tool 119ms')).toHaveTextContent('119ms')
     expect(screen.queryByLabelText('Tool done')).not.toBeInTheDocument()
   })
+
+  it('uses failed status for unsuccessful bash results with duration metadata', () => {
+    render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[
+          {
+            role: 'assistant',
+            blocks: [
+              {
+                type: 'tools',
+                tools: [
+                  {
+                    callId: 'bash-1',
+                    name: 'bash',
+                    input: '{"command":"false","description":"Run failing command"}',
+                    result: {
+                      toolName: 'bash',
+                      success: false,
+                      metadata: {
+                        command: 'false',
+                        exitCode: 1,
+                        output: '',
+                        executionTime: 119000000,
+                        workingDir: '/workspace/kodelet',
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ]}
+      />
+    )
+
+    expect(screen.getByLabelText('Tool failed')).toHaveTextContent('failed')
+    expect(screen.queryByLabelText('Tool 119ms')).not.toBeInTheDocument()
+  })
 });

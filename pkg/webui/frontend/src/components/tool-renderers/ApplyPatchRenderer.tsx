@@ -49,13 +49,16 @@ const buildDiffLines = (change: ApplyPatchChange): ReferenceDiffLine[] => {
     return buildFallbackDiff(change);
   }
 
+  let seenHunk = false;
+
   return change.unifiedDiff
     .split('\n')
     .map((line): ReferenceDiffLine | null => {
-      if (line.startsWith('---') || line.startsWith('+++')) {
+      if (!seenHunk && (line.startsWith('--- ') || line.startsWith('+++ '))) {
         return null;
       }
       if (line.startsWith('@@')) {
+        seenHunk = true;
         return { kind: 'header', content: line };
       }
       if (line.startsWith('+')) {

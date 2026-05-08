@@ -56,7 +56,8 @@ func (t *Thread) processStream(
 	var contentFinalized bool
 
 	flushPendingReasoning := func() {
-		if t.pendingReasoning.Len() == 0 {
+		if strings.TrimSpace(t.pendingReasoning.String()) == "" {
+			t.pendingReasoning.Reset()
 			return
 		}
 
@@ -138,6 +139,7 @@ func (t *Thread) processStream(
 				streamHandler.HandleThinkingBlockEnd()
 				thinkingStarted = false
 			}
+			flushPendingReasoning()
 
 		case "response.function_call_arguments.delta":
 			// Function call arguments delta

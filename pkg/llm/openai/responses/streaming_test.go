@@ -163,6 +163,81 @@ func TestProcessStreamThinkingEndsBeforeText(t *testing.T) {
 		"text_delta:Answer",
 		"content_block_end",
 	}, handler.events)
+	require.Len(t, thread.storedItems, 1)
+	assert.Equal(t, "reasoning", thread.storedItems[0].Type)
+	assert.Equal(t, "Thought", thread.storedItems[0].Content)
+}
+
+func TestProcessStreamPersistsMultipleReasoningBlocksSeparately(t *testing.T) {
+	usage := map[string]any{
+		"input_tokens":  1,
+		"output_tokens": 1,
+		"input_tokens_details": map[string]any{
+			"cached_tokens": 0,
+		},
+	}
+	completedEvent := map[string]any{
+		"type": "response.completed",
+		"response": map[string]any{
+			"id":     "resp_1",
+			"status": "completed",
+			"usage":  usage,
+		},
+	}
+
+	events := []map[string]any{
+		{"type": "response.reasoning_text.delta", "delta": "First thought"},
+		{"type": "response.reasoning_text.done"},
+		{"type": "response.reasoning_text.delta", "delta": "Second thought"},
+		{"type": "response.reasoning_text.done"},
+		{"type": "response.reasoning_text.delta", "delta": "Third thought"},
+		{"type": "response.reasoning_text.done"},
+		{"type": "response.output_text.delta", "delta": "Done"},
+		completedEvent,
+	}
+
+	streamEvents := make([]ssestream.Event, 0, len(events))
+	for _, event := range events {
+		payload, err := json.Marshal(event)
+		require.NoError(t, err)
+		streamEvents = append(streamEvents, ssestream.Event{Data: payload})
+	}
+
+	decoder := &fakeDecoder{events: streamEvents}
+	stream := ssestream.NewStream[responses.ResponseStreamEventUnion](decoder, nil)
+
+	thread := &Thread{
+		Thread:      base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test", hooks.Trigger{}),
+		storedItems: make([]StoredInputItem, 0),
+		inputItems:  make([]responses.ResponseInputItemUnionParam, 0),
+	}
+
+	handler := &captureStreamHandler{}
+
+	streamResult, err := thread.processStream(context.Background(), stream, handler, "gpt-5.5", llmtypes.MessageOpt{})
+	require.NoError(t, err)
+	assert.False(t, streamResult.toolsUsed)
+	assert.True(t, streamResult.responseCompleted)
+	assert.Equal(t, []string{
+		"thinking_start",
+		"thinking_delta:First thought",
+		"thinking_block_end",
+		"thinking_start",
+		"thinking_delta:Second thought",
+		"thinking_block_end",
+		"thinking_start",
+		"thinking_delta:Third thought",
+		"thinking_block_end",
+		"text_delta:Done",
+		"content_block_end",
+	}, handler.events)
+	require.Len(t, thread.storedItems, 3)
+	assert.Equal(t, "reasoning", thread.storedItems[0].Type)
+	assert.Equal(t, "First thought", thread.storedItems[0].Content)
+	assert.Equal(t, "reasoning", thread.storedItems[1].Type)
+	assert.Equal(t, "Second thought", thread.storedItems[1].Content)
+	assert.Equal(t, "reasoning", thread.storedItems[2].Type)
+	assert.Equal(t, "Third thought", thread.storedItems[2].Content)
 }
 
 func TestProcessStreamThinkingEndsBeforeTextWithoutDoneEvent(t *testing.T) {
