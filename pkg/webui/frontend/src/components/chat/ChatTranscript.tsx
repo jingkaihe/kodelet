@@ -393,6 +393,35 @@ const StreamingText: React.FC<{
   </span>
 );
 
+const StreamingIndicator: React.FC<{ assistantTurnCount: number }> = ({ assistantTurnCount }) => {
+  const [streamingTextFrame, setStreamingTextFrame] = useState(0);
+
+  useEffect(() => {
+    setStreamingTextFrame(0);
+
+    const intervalId = window.setInterval(() => {
+      setStreamingTextFrame((currentValue) => currentValue + 1);
+    }, 150);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [assistantTurnCount]);
+
+  const animatedStreamingText = getAnimatedStreamingText(
+    STREAMING_INDICATOR_MESSAGES,
+    assistantTurnCount,
+    streamingTextFrame
+  );
+
+  return (
+    <div className="chat-streaming-indicator" aria-label="Kodelet is working">
+      <DustSpinner />
+      <StreamingText text={animatedStreamingText.current} animation={animatedStreamingText} />
+    </div>
+  );
+};
+
 const renderThinkingContent = (content: string) => {
   const hasThinkingContent = extractContentText(content).trim().length > 0;
 
@@ -557,35 +586,9 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
   isStreaming,
   emptyStateTitle = 'Good morning',
 }) => {
-  const [streamingTextFrame, setStreamingTextFrame] = useState(0);
-
   const assistantTurnCount = useMemo(
     () => messages.filter((message) => message.role === 'assistant').length,
     [messages]
-  );
-
-  useEffect(() => {
-    setStreamingTextFrame(0);
-  }, [assistantTurnCount]);
-
-  useEffect(() => {
-    if (!isStreaming) {
-      return undefined;
-    }
-
-    const intervalId = window.setInterval(() => {
-      setStreamingTextFrame((currentValue) => currentValue + 1);
-    }, 150);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, [isStreaming]);
-
-  const animatedStreamingText = getAnimatedStreamingText(
-    STREAMING_INDICATOR_MESSAGES,
-    assistantTurnCount,
-    streamingTextFrame
   );
 
   const renderAssistantBlocks = (blocks: ChatAssistantBlock[]): React.ReactNode[] => {
@@ -843,10 +846,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
                   {renderAssistantBlocks(message.blocks || [])}
 
                   {isActiveStreamingAssistant && !hasVisibleInProgressBlock ? (
-                    <div className="chat-streaming-indicator" aria-label="Kodelet is working">
-                      <DustSpinner />
-                      <StreamingText text={animatedStreamingText.current} animation={animatedStreamingText} />
-                    </div>
+                    <StreamingIndicator assistantTurnCount={assistantTurnCount} />
                   ) : null}
                 </div>
               )}

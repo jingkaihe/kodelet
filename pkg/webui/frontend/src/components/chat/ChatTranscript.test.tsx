@@ -247,6 +247,40 @@ describe('ChatTranscript', () => {
     expect(screen.getByText('Following the thread…')).toBeInTheDocument();
   });
 
+  it('does not start the fallback label timer while an activity block is visible', () => {
+    const setIntervalSpy = vi.spyOn(window, 'setInterval');
+
+    try {
+      render(
+        <ChatTranscript
+          isStreaming={true}
+          messages={[
+            {
+              role: 'assistant',
+              blocks: [
+                {
+                  type: 'tools',
+                  tools: [
+                    {
+                      callId: 'bash-1',
+                      name: 'bash',
+                      input: '{"command":"sleep 10"}',
+                    },
+                  ],
+                },
+              ],
+            },
+          ]}
+        />
+      );
+
+      expect(screen.queryByLabelText('Kodelet is working')).not.toBeInTheDocument();
+      expect(setIntervalSpy).not.toHaveBeenCalled();
+    } finally {
+      setIntervalSpy.mockRestore();
+    }
+  });
+
   it('renders embedded base64 images in user content', () => {
     const { container } = render(
       <ChatTranscript
