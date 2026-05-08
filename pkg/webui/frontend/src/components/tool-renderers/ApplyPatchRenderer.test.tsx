@@ -19,7 +19,7 @@ describe('ApplyPatchRenderer', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('renders summary badges and changed file list', () => {
+  it('renders changed files as quiet rows without summary badges', () => {
     const toolResult = createToolResult({
       added: ['/tmp/new.txt'],
       modified: ['/tmp/edit.txt'],
@@ -29,13 +29,16 @@ describe('ApplyPatchRenderer', () => {
 
     render(<ApplyPatchRenderer toolResult={toolResult} />);
 
-    expect(screen.getByText('0 changes')).toBeInTheDocument();
-    expect(screen.getByText('A 1')).toBeInTheDocument();
-    expect(screen.getByText('M 1')).toBeInTheDocument();
-    expect(screen.getByText('D 1')).toBeInTheDocument();
-    expect(screen.getByText('A /tmp/new.txt')).toBeInTheDocument();
-    expect(screen.getByText('M /tmp/edit.txt')).toBeInTheDocument();
-    expect(screen.getByText('D /tmp/old.txt')).toBeInTheDocument();
+    expect(screen.queryByText('0 changes')).not.toBeInTheDocument();
+    expect(screen.queryByText('A 1')).not.toBeInTheDocument();
+    expect(screen.queryByText('M 1')).not.toBeInTheDocument();
+    expect(screen.queryByText('D 1')).not.toBeInTheDocument();
+    expect(screen.getByText('/tmp/new.txt')).toBeInTheDocument();
+    expect(screen.getByText('/tmp/edit.txt')).toBeInTheDocument();
+    expect(screen.getByText('/tmp/old.txt')).toBeInTheDocument();
+    expect(screen.getByText('Write')).toBeInTheDocument();
+    expect(screen.getByText('Update')).toBeInTheDocument();
+    expect(screen.getByText('Delete')).toBeInTheDocument();
   });
 
   it('renders unified diffs inline', () => {
@@ -54,7 +57,8 @@ describe('ApplyPatchRenderer', () => {
 
     const { container } = render(<ApplyPatchRenderer toolResult={toolResult} />);
 
-    expect(screen.getByText('Change: Update')).toBeInTheDocument();
+    expect(screen.getByText('Update')).toBeInTheDocument();
+    expect(screen.queryByText('Change: Update')).not.toBeInTheDocument();
     expect(screen.getByText('/tmp/edit.txt')).toBeInTheDocument();
     expect(screen.getByText('@@ -1,2 +1,2 @@')).toBeInTheDocument();
     expect(screen.getByText('old')).toBeInTheDocument();
@@ -77,14 +81,15 @@ describe('ApplyPatchRenderer', () => {
 
     const { container } = render(<ApplyPatchRenderer toolResult={toolResult} />);
 
-    expect(screen.getByText('Change: Add')).toBeInTheDocument();
+    expect(screen.getByText('Write')).toBeInTheDocument();
+    expect(screen.queryByText('Change: Add')).not.toBeInTheDocument();
     expect(screen.getByText('/tmp/new.txt')).toBeInTheDocument();
     expect(screen.getByText('line1')).toBeInTheDocument();
     expect(screen.getByText('line2')).toBeInTheDocument();
     expect(container.querySelectorAll('.diff-line-added')).toHaveLength(2);
   });
 
-  it('renders a focused preview for large added files', () => {
+  it('renders large added files without truncating the diff', () => {
     const lines = Array.from({ length: 20 }, (_, index) => `line${index + 1}`).join('\n');
     const toolResult = createToolResult({
       added: ['/tmp/large.txt'],
@@ -101,7 +106,7 @@ describe('ApplyPatchRenderer', () => {
 
     expect(screen.getByText('line1')).toBeInTheDocument();
     expect(screen.getByText('line20')).toBeInTheDocument();
-    expect(screen.getByText('... 6 more diff lines omitted ...')).toBeInTheDocument();
-    expect(screen.queryByText('line10')).not.toBeInTheDocument();
+    expect(screen.getByText('line10')).toBeInTheDocument();
+    expect(screen.queryByText('... 6 more diff lines omitted ...')).not.toBeInTheDocument();
   });
 });

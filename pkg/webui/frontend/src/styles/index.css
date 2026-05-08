@@ -2533,6 +2533,62 @@ code[class*="language-"] {
   color: rgba(20, 20, 19, 0.7);
 }
 
+.apply-patch-result {
+  display: grid;
+  gap: 0.72rem;
+}
+
+.apply-patch-change {
+  display: grid;
+  gap: 0.38rem;
+}
+
+.apply-patch-change-line {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 0.52rem;
+  font-family: var(--font-heading);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.apply-patch-operation {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 600;
+  color: rgba(122, 117, 107, 0.7);
+}
+
+.apply-patch-operation-add {
+  color: #5f7247;
+}
+
+.apply-patch-operation-update {
+  color: #537aa5;
+}
+
+.apply-patch-operation-delete {
+  color: #a63f3f;
+}
+
+.apply-patch-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.73rem;
+  color: rgba(20, 20, 19, 0.68);
+}
+
+.apply-patch-empty {
+  font-family: var(--font-heading);
+  font-size: 0.76rem;
+  color: rgba(20, 20, 19, 0.52);
+}
+
 .tool-kv-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

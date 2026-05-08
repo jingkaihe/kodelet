@@ -1,13 +1,8 @@
 import React from 'react';
 import { ApplyPatchChange, ApplyPatchMetadata, ToolResult } from '../../types';
 import {
-  compactDiffLines,
-  parseUnifiedDiff,
-  ReferenceCodeList,
   ReferenceDiffBlock,
   ReferenceDiffLine,
-  ReferenceToolHeader,
-  TOOL_ICONS,
 } from './reference';
 
 interface ApplyPatchRendererProps {
@@ -54,47 +49,56 @@ const buildDiffLines = (change: ApplyPatchChange): ReferenceDiffLine[] => {
     return buildFallbackDiff(change);
   }
 
-  return change.unifiedDiff.split('\n').map((line) => {
-    if (line.startsWith('@@')) {
-      return { kind: 'header', content: line };
-    }
-    if (line.startsWith('---') || line.startsWith('+++')) {
-      return { kind: 'meta', content: line };
-    }
-    if (line.startsWith('+')) {
-      return { kind: 'added', content: line.slice(1) };
-    }
-    if (line.startsWith('-')) {
-      return { kind: 'removed', content: line.slice(1) };
-    }
-    if (line.startsWith(' ')) {
-      return { kind: 'context', content: line.slice(1) };
-    }
-    return { kind: 'context', content: line };
-  });
+  return change.unifiedDiff
+    .split('\n')
+    .map((line): ReferenceDiffLine | null => {
+      if (line.startsWith('---') || line.startsWith('+++')) {
+        return null;
+      }
+      if (line.startsWith('@@')) {
+        return { kind: 'header', content: line };
+      }
+      if (line.startsWith('+')) {
+        return { kind: 'added', content: line.slice(1) };
+      }
+      if (line.startsWith('-')) {
+        return { kind: 'removed', content: line.slice(1) };
+      }
+      if (line.startsWith(' ')) {
+        return { kind: 'context', content: line.slice(1) };
+      }
+      return { kind: 'context', content: line };
+    })
+    .filter((line): line is ReferenceDiffLine => line !== null);
 };
 
-const buildFocusedDiffPreview = (lines: ReferenceDiffLine[]): ReferenceDiffLine[] => {
-  const compacted = compactDiffLines(lines, 1, 1, Number.MAX_SAFE_INTEGER);
-  const previewHead = 8;
-  const previewTail = 6;
+const normalizeOperation = (operation?: string): string => (operation || 'update').toLowerCase();
 
-  if (compacted.length <= previewHead + previewTail + 1) {
-    return compacted;
+const getOperationLabel = (operation: string): string => {
+  switch (operation) {
+    case 'add':
+    case 'write':
+      return 'Write';
+    case 'delete':
+      return 'Delete';
+    case 'move':
+      return 'Move';
+    case 'update':
+      return 'Update';
+    default:
+      return operation.charAt(0).toUpperCase() + operation.slice(1);
   }
-
-  return [
-    ...compacted.slice(0, previewHead),
-    {
-      kind: 'meta',
-      content: `... ${compacted.length - previewHead - previewTail} more diff lines omitted ...`,
-    },
-    ...compacted.slice(-previewTail),
-  ];
 };
 
-const titleCase = (value: string): string =>
-  value ? `${value.charAt(0).toUpperCase()}${value.slice(1)}` : value;
+const buildListOnlyChanges = (
+  added: string[],
+  modified: string[],
+  deleted: string[]
+): ApplyPatchChange[] => [
+  ...added.map((path) => ({ path, operation: 'add' })),
+  ...modified.map((path) => ({ path, operation: 'update' })),
+  ...deleted.map((path) => ({ path, operation: 'delete' })),
+];
 
 const ApplyPatchRenderer: React.FC<ApplyPatchRendererProps> = ({ toolResult }) => {
   const meta = toolResult.metadata as ApplyPatchMetadata;
@@ -104,48 +108,33 @@ const ApplyPatchRenderer: React.FC<ApplyPatchRendererProps> = ({ toolResult }) =
   const modified = meta.modified || [];
   const deleted = meta.deleted || [];
   const changes = meta.changes || [];
+  const displayChanges = changes.length > 0
+    ? changes
+    : buildListOnlyChanges(added, modified, deleted);
 
   return (
-    <div className="space-y-2">
-      <ReferenceToolHeader
-        badges={[
-          { text: `${changes.length} change${changes.length === 1 ? '' : 's'}`, variant: 'success' },
-          { text: `A ${added.length}`, variant: 'success' },
-          { text: `M ${modified.length}`, variant: 'info' },
-          { text: `D ${deleted.length}`, variant: 'error' },
-        ]}
-        title={`${TOOL_ICONS.apply_patch} Apply Patch`}
-      />
-
-      {(added.length > 0 || modified.length > 0 || deleted.length > 0) ? (
-        <ReferenceCodeList
-          items={[
-            ...added.map((path) => `A ${path}`),
-            ...modified.map((path) => `M ${path}`),
-            ...deleted.map((path) => `D ${path}`),
-          ]}
-        />
-      ) : null}
-
-      <div className="space-y-4">
-        {changes.map((change, index) => {
+    <div className="apply-patch-result">
+      {displayChanges.length > 0 ? (
+        displayChanges.map((change, index) => {
           const displayPath = change.movePath ? `${change.path} -> ${change.movePath}` : change.path;
-          const diffLines = buildFocusedDiffPreview(
-            change.unifiedDiff ? parseUnifiedDiff(change.unifiedDiff) : buildDiffLines(change)
-          );
+          const operation = normalizeOperation(change.operation);
+          const diffLines = buildDiffLines(change);
 
           return (
-            <div key={`${change.path}-${change.operation}-${index}`} className="space-y-2">
-              <ReferenceToolHeader
-                badges={[{ text: change.operation || 'update', variant: 'info' }]}
-                subtitle={displayPath}
-                title={`Change: ${titleCase(change.operation || 'update')}`}
-              />
-              <ReferenceDiffBlock lines={diffLines} />
+            <div key={`${change.path}-${change.operation}-${index}`} className="apply-patch-change">
+              <div className="apply-patch-change-line">
+                <span className={`apply-patch-operation apply-patch-operation-${operation}`}>
+                  {getOperationLabel(operation)}
+                </span>
+                <span className="apply-patch-path">{displayPath}</span>
+              </div>
+              {diffLines.length > 0 ? <ReferenceDiffBlock lines={diffLines} /> : null}
             </div>
           );
-        })}
-      </div>
+        })
+      ) : (
+        <div className="apply-patch-empty">patch applied</div>
+      )}
     </div>
   );
 };
