@@ -1,12 +1,10 @@
 import React from 'react';
 import { ToolResult, BashMetadata } from '../../types';
 import {
-  formatReferenceDuration,
-  formatReferenceSize,
   ReferenceTerminal,
-  ReferenceToolKVGrid,
   ReferenceToolNote,
 } from './reference';
+import { CopyButton } from './shared';
 
 interface BashRendererProps {
   toolResult: ToolResult;
@@ -42,37 +40,28 @@ const BashRenderer: React.FC<BashRendererProps> = ({ toolResult, toolInput }) =>
   const emptyOutputText = isFailure
     ? 'Command failed without output.'
     : 'Command completed without output.';
-  const outputSize = hasOutput
-    ? formatReferenceSize(new TextEncoder().encode(meta.output || '').length)
-    : 'no output';
 
   return (
     <div className="space-y-2">
       <div className="bash-tool-brief">
         <div className="min-w-0">
-          <div className="bash-tool-title">shell command</div>
-          {description ? <div className="bash-tool-description">{description}</div> : null}
+          {description ? (
+            <div className="bash-tool-description">{description}</div>
+          ) : (
+            <div className="bash-tool-description is-muted">command output</div>
+          )}
         </div>
-        <div className="bash-tool-badges">
+        <div className="bash-tool-actions">
+          <CopyButton className="bash-copy-command" content={meta.command} />
           <span className={isFailure ? 'bash-tool-badge is-error' : 'bash-tool-badge is-success'}>
             {statusBadgeText}
           </span>
-          <span className="bash-tool-badge is-neutral">{outputSize}</span>
         </div>
       </div>
-
-      <div className="bash-command-line" title={meta.command}>{meta.command}</div>
 
       {!toolResult.success && toolResult.error ? (
         <ReferenceToolNote text={toolResult.error} />
       ) : null}
-
-      <ReferenceToolKVGrid
-        items={[
-          { label: 'Working dir', value: meta.workingDir, monospace: true },
-          { label: 'Duration', value: formatReferenceDuration(meta.executionTime), monospace: true },
-        ]}
-      />
 
       {hasOutput ? (
         <ReferenceTerminal output={meta.output || ''} />

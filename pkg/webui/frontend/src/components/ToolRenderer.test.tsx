@@ -19,7 +19,8 @@ describe('ToolRenderer', () => {
 
     const { container } = render(<ToolRenderer toolResult={toolResult} />);
 
-    expect(screen.getByText('cat missing-file')).toBeInTheDocument();
+    expect(screen.queryByText('cat missing-file')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy to clipboard' })).toBeInTheDocument();
     expect(screen.getByText('exit 1')).toBeInTheDocument();
     expect(screen.getByText('cat: missing-file: No such file or directory')).toBeInTheDocument();
     expect(container.querySelector('.tool-terminal')).toBeInTheDocument();

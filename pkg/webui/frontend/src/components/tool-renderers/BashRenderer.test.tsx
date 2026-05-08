@@ -1,9 +1,22 @@
-import { describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import BashRenderer from './BashRenderer';
 import { BashMetadata, ToolResult } from '../../types';
+import * as utils from '../../utils';
+
+vi.mock('../../utils', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../utils')>();
+  return {
+    ...actual,
+    copyToClipboard: vi.fn(),
+  };
+});
 
 describe('BashRenderer', () => {
+  beforeEach(() => {
+    vi.mocked(utils.copyToClipboard).mockReset();
+  });
+
   const createToolResult = (metadata: Partial<BashMetadata>): ToolResult => ({
     toolName: 'bash',
     success: true,
@@ -20,7 +33,7 @@ describe('BashRenderer', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('renders command metadata and success badge', () => {
+  it('renders a compact result header and output', () => {
     const toolResult = createToolResult({
       command: 'ls -la',
       exitCode: 0,
@@ -31,13 +44,29 @@ describe('BashRenderer', () => {
 
     const { container } = render(<BashRenderer toolResult={toolResult} />);
 
-    expect(screen.getByText('ls -la')).toBeInTheDocument();
     expect(screen.getByText('exit 0')).toBeInTheDocument();
-    expect(screen.getByText('250ms')).toBeInTheDocument();
-    expect(screen.getByText('/tmp/work')).toBeInTheDocument();
-    expect(screen.getByText('shell command')).toBeInTheDocument();
+    expect(screen.getByText('command output')).toBeInTheDocument();
+    expect(screen.queryByText('ls -la')).not.toBeInTheDocument();
+    expect(screen.queryByText('250ms')).not.toBeInTheDocument();
+    expect(screen.queryByText('/tmp/work')).not.toBeInTheDocument();
+    expect(screen.queryByText('shell command')).not.toBeInTheDocument();
+    expect(screen.queryByText(/B$/)).not.toBeInTheDocument();
     expect(container.querySelector('.bash-tool-badge.is-success')).toBeInTheDocument();
     expect(container.querySelector('.tool-terminal')).toBeInTheDocument();
+  });
+
+  it('copies the command from the compact action', () => {
+    const toolResult = createToolResult({
+      command: 'ls -la',
+      exitCode: 0,
+      output: 'file1.txt',
+    });
+
+    render(<BashRenderer toolResult={toolResult} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy to clipboard' }));
+
+    expect(utils.copyToClipboard).toHaveBeenCalledWith('ls -la');
   });
 
   it('renders the tool-call description when provided', () => {

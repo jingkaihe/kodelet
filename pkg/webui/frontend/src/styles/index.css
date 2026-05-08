@@ -2428,74 +2428,67 @@ code[class*="language-"] {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 0.9rem;
-}
-
-.bash-tool-title {
-  font-family: var(--font-heading);
-  font-size: 0.88rem;
-  font-weight: 650;
-  line-height: 1.25;
-  color: rgba(20, 20, 19, 0.92);
-  text-transform: lowercase;
+  gap: 0.75rem;
 }
 
 .bash-tool-description {
-  margin-top: 0.18rem;
   font-family: var(--font-heading);
-  font-size: 0.76rem;
+  font-size: 0.82rem;
   font-weight: 500;
   line-height: 1.45;
-  color: rgba(20, 20, 19, 0.54);
+  color: rgba(20, 20, 19, 0.68);
 }
 
-.bash-tool-badges {
+.bash-tool-description.is-muted {
+  color: rgba(20, 20, 19, 0.44);
+}
+
+.bash-tool-actions {
   display: inline-flex;
   flex: 0 0 auto;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0.3rem;
+  align-items: center;
+  gap: 0.6rem;
 }
 
 .bash-tool-badge {
   display: inline-flex;
   align-items: center;
   width: fit-content;
-  border-radius: 999px;
-  border: 1px solid transparent;
-  padding: 0.18rem 0.55rem;
   font-family: var(--font-heading);
-  font-size: 0.68rem;
+  font-size: 0.72rem;
   font-weight: 650;
-  line-height: 1;
+  line-height: 1.2;
   color: #6f6a5f;
 }
 
 .bash-tool-badge.is-success {
-  border-color: rgba(120, 140, 93, 0.2);
-  background: rgba(120, 140, 93, 0.1);
   color: #5f7247;
 }
 
 .bash-tool-badge.is-error {
-  border-color: rgba(191, 63, 63, 0.18);
-  background: rgba(191, 63, 63, 0.08);
   color: #a63f3f;
 }
 
-.bash-tool-badge.is-neutral {
-  border-color: rgba(176, 174, 165, 0.2);
-  background: rgba(176, 174, 165, 0.11);
+.bash-copy-command {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: rgba(20, 20, 19, 0.42);
+  box-shadow: none;
 }
 
-.bash-command-line {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-  line-height: 1.55;
-  color: rgba(20, 20, 19, 0.54);
+.bash-copy-command:hover,
+.bash-copy-command:focus-visible {
+  border: 0;
+  background: transparent;
+  color: rgba(20, 20, 19, 0.72);
+  box-shadow: none;
+  transform: none;
+}
+
+.bash-copy-command svg {
+  width: 0.9rem;
+  height: 0.9rem;
 }
 
 .skill-tool-detail {
