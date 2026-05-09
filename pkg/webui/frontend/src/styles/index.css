@@ -545,7 +545,7 @@ h6 {
   display: flex;
   flex-shrink: 0;
   align-items: center;
-  gap: 0.7rem;
+  gap: 0.52rem;
 }
 
 .transcript-meta-strip-shell {
@@ -645,6 +645,96 @@ h6 {
   opacity: 0.55;
   transform: none;
   box-shadow: none;
+}
+
+.composer-action-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.48rem;
+  height: 2.48rem;
+  border-radius: 9999px;
+  color: rgba(255, 252, 244, 0.96);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 9px 22px rgba(20, 20, 19, 0.1);
+  transition:
+    background-color 160ms ease,
+    box-shadow 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.composer-action-icon-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 12px 28px rgba(20, 20, 19, 0.13);
+}
+
+.composer-action-icon-button:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 4px rgba(106, 155, 204, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 14px 32px rgba(20, 20, 19, 0.16);
+}
+
+.composer-action-icon-button:disabled {
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.composer-action-icon-button-ready {
+  background: rgba(20, 20, 19, 0.9);
+}
+
+.composer-action-icon-button-ready:hover:not(:disabled) {
+  background: rgba(20, 20, 19, 0.96);
+}
+
+.composer-action-submit-icon {
+  width: 1.3rem;
+  height: 1.3rem;
+  transform: translateY(-0.04rem);
+}
+
+.composer-action-icon-button-disabled {
+  background: var(--kodelet-mid-gray);
+  opacity: 0.62;
+}
+
+.composer-action-icon-button-stop {
+  border: 1px solid rgba(106, 155, 204, 0.14);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(250, 249, 245, 0.92)),
+    rgba(255, 255, 255, 0.88);
+  color: #a9544f;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    0 10px 24px rgba(20, 20, 19, 0.06);
+}
+
+.composer-action-icon-button-stop:hover:not(:disabled) {
+  border-color: rgba(169, 84, 79, 0.24);
+  color: #994743;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.76),
+    0 14px 30px rgba(20, 20, 19, 0.08);
+}
+
+.composer-action-icon-button-stop:focus-visible {
+  box-shadow:
+    0 0 0 4px rgba(169, 84, 79, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.76),
+    0 14px 30px rgba(20, 20, 19, 0.08);
+}
+
+.composer-action-stop-icon {
+  width: 0.86rem;
+  height: 0.86rem;
+  border-radius: 0.2rem;
 }
 
 .composer-profile-picker,
