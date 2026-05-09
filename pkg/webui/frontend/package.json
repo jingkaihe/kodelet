@@ -20,6 +20,7 @@
     "@xterm/xterm": "^5.5.0",
     "clsx": "^2.1.0",
     "date-fns": "^2.30.0",
+    "lucide-react": "^1.14.0",
     "marked": "^9.1.6",
     "prismjs": "^1.29.0",
     "react": "^18.2.0",

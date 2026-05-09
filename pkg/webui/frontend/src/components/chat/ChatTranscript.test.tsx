@@ -52,6 +52,8 @@ describe('ChatTranscript', () => {
 
     expect(screen.getByText('Thought')).toBeInTheDocument();
     expect(container.querySelector('details')).not.toHaveAttribute('open');
+    expect(container.querySelector('.lucide-brain')).toBeInTheDocument();
+    expect(container.querySelector('.activity-dot-thinking')).not.toBeInTheDocument();
     expect(screen.getByText('Plan')).toBeInTheDocument();
     expect(container.querySelector('strong')?.textContent).toBe('Plan');
     expect(screen.getByText('inspect repo')).toBeInTheDocument();
@@ -452,7 +454,7 @@ describe('ChatTranscript', () => {
       />
     )
 
-    expect(screen.getByText('Bash: rg -n "ChatTranscript" pkg/webui/frontend/src')).toBeInTheDocument()
+    expect(screen.getAllByTitle('Bash: rg -n "ChatTranscript" pkg/webui/frontend/src')).not.toHaveLength(0)
     expect(
       screen.getByText(
         'Read file: /home/jingkaihe/workspace/kodelet/pkg/webui/frontend/src/components/chat/ChatTranscript.tsx'
@@ -463,8 +465,76 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('.tool-summary-text')?.textContent).not.toContain('timeout')
   })
 
+  it('uses icons instead of text labels for common developer tools', () => {
+    const { container } = render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[
+          {
+            role: 'assistant',
+            blocks: [
+              {
+                type: 'tools',
+                tools: [
+                  {
+                    callId: 'bash-1',
+                    name: 'bash',
+                    input: '{"command":"pwd"}',
+                  },
+                  {
+                    callId: 'patch-1',
+                    name: 'apply_patch',
+                    input: '{"input":"*** Begin Patch\\n*** Update File: README.md\\n*** End Patch"}',
+                  },
+                  {
+                    callId: 'skill-1',
+                    name: 'skill',
+                    input: '{"skill_name":"frontend-design"}',
+                  },
+                ],
+              },
+            ],
+          },
+        ]}
+      />
+    )
+
+    expect(container.querySelector('.lucide-square-terminal')).toBeInTheDocument()
+    expect(container.querySelector('.lucide-pencil')).toBeInTheDocument()
+    expect(container.querySelector('.lucide-pocket-knife')).toBeInTheDocument()
+  })
+
+  it('uses the tool icon as the running status marker without adding a dot', () => {
+    const { container } = render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[
+          {
+            role: 'assistant',
+            blocks: [
+              {
+                type: 'tools',
+                tools: [
+                  {
+                    callId: 'bash-1',
+                    name: 'bash',
+                    input: '{"command":"sleep 10"}',
+                  },
+                ],
+              },
+            ],
+          },
+        ]}
+      />
+    )
+
+    expect(screen.getByLabelText('Tool running')).toHaveTextContent('running')
+    expect(container.querySelector('.activity-dot')).not.toBeInTheDocument()
+    expect(container.querySelector('.tool-summary-icon-running')).toBeInTheDocument()
+  })
+
   it('uses bash duration as the completed activity status', () => {
-    render(
+    const { container } = render(
       <ChatTranscript
         isStreaming={false}
         messages={[
@@ -500,10 +570,11 @@ describe('ChatTranscript', () => {
 
     expect(screen.getByLabelText('Tool 119ms')).toHaveTextContent('119ms')
     expect(screen.queryByLabelText('Tool done')).not.toBeInTheDocument()
+    expect(container.querySelector('.activity-dot')).not.toBeInTheDocument()
   })
 
   it('uses failed status for unsuccessful bash results with duration metadata', () => {
-    render(
+    const { container } = render(
       <ChatTranscript
         isStreaming={false}
         messages={[
@@ -538,6 +609,8 @@ describe('ChatTranscript', () => {
     )
 
     expect(screen.getByLabelText('Tool failed')).toHaveTextContent('failed')
+    expect(container.querySelector('.activity-dot')).not.toBeInTheDocument()
+    expect(container.querySelector('.tool-summary-icon-error')).toBeInTheDocument()
     expect(screen.queryByLabelText('Tool 119ms')).not.toBeInTheDocument()
   })
 });

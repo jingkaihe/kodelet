@@ -2847,37 +2847,6 @@ code[class*="language-"] {
   padding-top: 0.48rem;
 }
 
-.activity-dot {
-  flex: 0 0 auto;
-  width: 0.38rem;
-  height: 0.38rem;
-  border-radius: 9999px;
-  background: rgba(122, 117, 107, 0.5);
-  box-shadow: 0 0 0 3px rgba(122, 117, 107, 0.06);
-}
-
-.activity-dot-live {
-  background: #c79643;
-  box-shadow:
-    0 0 0 3px rgba(199, 150, 67, 0.1),
-    0 0 14px rgba(199, 150, 67, 0.16);
-  animation: kodeletActivityPulse 1.5s ease-in-out infinite;
-}
-
-.activity-dot-thinking {
-  background: #6f91b5;
-  box-shadow: 0 0 0 3px rgba(106, 155, 204, 0.09);
-}
-
-.activity-dot-done {
-  background: rgba(122, 117, 107, 0.42);
-}
-
-.activity-dot-error {
-  background: #b04a4a;
-  box-shadow: 0 0 0 3px rgba(191, 63, 63, 0.08);
-}
-
 .tool-summary {
   display: flex;
   align-items: center;
@@ -2935,6 +2904,30 @@ code[class*="language-"] {
 .tool-summary-label {
   flex: 0 0 auto;
   color: rgba(20, 20, 19, 0.72);
+}
+
+.tool-summary-icon {
+  flex: 0 0 auto;
+  align-self: center;
+  color: rgba(20, 20, 19, 0.58);
+  margin-right: 0.16rem;
+  stroke-width: 2.2;
+  transform: translateY(-0.02rem);
+}
+
+.tool-summary-icon-thinking {
+  color: #6f91b5;
+}
+
+.tool-summary-icon-running {
+  color: #c79643;
+  filter: drop-shadow(0 0 5px rgba(199, 150, 67, 0.16));
+  animation: kodeletActivityPulse 1.5s ease-in-out infinite;
+}
+
+.tool-summary-icon-error {
+  color: #b04a4a;
+  filter: drop-shadow(0 0 4px rgba(191, 63, 63, 0.14));
 }
 
 .tool-summary-detail {

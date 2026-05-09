@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { Brain, Pencil, PocketKnife, SquareTerminal, type LucideIcon } from 'lucide-react';
 import { marked } from 'marked';
 import type {
   ChatAssistantBlock,
@@ -329,15 +330,35 @@ const splitActivitySummary = (summaryText: string): { label: string; detail?: st
   };
 };
 
-const ActivitySummaryText: React.FC<{ summaryText: string }> = ({ summaryText }) => {
+const toolSummaryIcons: Record<string, LucideIcon> = {
+  'Apply patch': Pencil,
+  Bash: SquareTerminal,
+  Skill: PocketKnife,
+};
+
+const ActivitySummaryText: React.FC<{ summaryText: string; status?: string }> = ({ summaryText, status }) => {
   const { label, detail } = splitActivitySummary(summaryText);
+  const SummaryIcon = toolSummaryIcons[label];
 
   return (
     <span className="tool-summary-text" title={summaryText}>
       {detail ? <span className="sr-only">{summaryText}</span> : null}
-      <span className="tool-summary-label" aria-hidden={detail ? 'true' : undefined}>
-        {detail ? `${label}:` : label}
-      </span>
+      {SummaryIcon ? (
+        <SummaryIcon
+          aria-hidden="true"
+          className={cn(
+            'tool-summary-icon',
+            status === 'running' && 'tool-summary-icon-running',
+            status === 'failed' && 'tool-summary-icon-error'
+          )}
+          size={14}
+          strokeWidth={2.2}
+        />
+      ) : (
+        <span className="tool-summary-label" aria-hidden={detail ? 'true' : undefined}>
+          {detail ? `${label}:` : label}
+        </span>
+      )}
       {detail ? (
         <span className="tool-summary-detail" aria-hidden="true">
           {' '}{detail}
@@ -456,7 +477,12 @@ const renderCompletedThinkingGroup = (
           <span className="tool-summary-chevron" aria-hidden="true">
             ›
           </span>
-          <span className="activity-dot activity-dot-thinking" aria-hidden="true" />
+          <Brain
+            aria-hidden="true"
+            className="tool-summary-icon tool-summary-icon-thinking"
+            size={14}
+            strokeWidth={2.2}
+          />
           <ActivitySummaryText summaryText={summaryText} />
         </summary>
         <div className="activity-detail-content thinking-group-content">
@@ -666,18 +692,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
                     <span className="tool-summary-chevron" aria-hidden="true">
                       ›
                     </span>
-                    <span
-                      className={cn(
-                        'activity-dot',
-                        activityStatus === 'running'
-                          ? 'activity-dot-live'
-                          : activityStatus === 'failed'
-                            ? 'activity-dot-error'
-                            : 'activity-dot-done'
-                      )}
-                      aria-hidden="true"
-                    />
-                    <ActivitySummaryText summaryText={summaryText} />
+                    <ActivitySummaryText summaryText={summaryText} status={activityStatus} />
                     <span className="tool-summary-status" aria-label={`Tool ${activityStatus}`}>
                       {activityStatus}
                     </span>
