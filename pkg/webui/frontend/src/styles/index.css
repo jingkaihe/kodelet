@@ -186,20 +186,7 @@ h6 {
 }
 
 .chat-main-panel {
-  isolation: isolate;
-  background:
-    radial-gradient(circle at 18% 8%, rgba(255, 255, 255, 0.58), transparent 30rem),
-    linear-gradient(90deg, rgba(236, 231, 221, 0.5) 0, rgba(250, 248, 242, 0.96) 4.4rem, rgba(244, 239, 229, 0.88) 100%);
-}
-
-.chat-main-panel::before {
-  content: "";
-  position: absolute;
-  inset: 0 auto 0 0;
-  z-index: -1;
-  width: clamp(3.5rem, 8vw, 8rem);
-  background: linear-gradient(90deg, rgba(236, 231, 221, 0.5), rgba(255, 255, 255, 0));
-  pointer-events: none;
+  background: rgba(244, 239, 229, 0.78);
 }
 
 .chat-main-scroll {
