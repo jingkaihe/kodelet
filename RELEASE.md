@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.4.6-beta (2026-05-09)
+
+Refined the Web UI chat workspace with a calmer main surface, persistent composer dock, slimmer sidebar controls, refreshed collapsed-sidebar treatment, and icon-based composer actions backed by the new `lucide-react` dependency.
+
+Improved transcript activity rows by replacing status dots with contextual icons for thinking, bash, apply_patch, and skill activity while preserving running/error state styling and concise tool summaries.
+
 ## 0.4.5-beta (2026-05-08)
 
 Refined the Web UI chat transcript with grouped reasoning cards, an animated streaming indicator, and compact expandable tool activity summaries.
