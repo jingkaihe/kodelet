@@ -12,6 +12,7 @@ import {
 	ImageUp,
 	Maximize2,
 	Minimize2,
+	PanelLeftOpen,
 	Square,
 	SquareTerminal,
 } from "lucide-react";
@@ -1745,12 +1746,12 @@ const ChatPage: React.FC = () => {
 								/>
 
 						<div
-							aria-label="Resize sidebar"
-							aria-orientation="vertical"
-							className={cn(
-								"sidebar-splitter absolute bottom-0 right-0 top-[4.25rem] z-10 hidden translate-x-1/2 cursor-col-resize items-center justify-center lg:flex",
-								isResizingSidebar && "is-resizing",
-							)}
+								aria-label="Resize sidebar"
+								aria-orientation="vertical"
+								className={cn(
+									"sidebar-splitter absolute bottom-0 right-0 top-0 z-10 hidden translate-x-1/2 cursor-col-resize items-center justify-center lg:flex",
+									isResizingSidebar && "is-resizing",
+								)}
 							data-testid="chat-sidebar-resizer"
 							onDoubleClick={handleSidebarResizeDoubleClick}
 							onMouseDown={handleSidebarResizeStart}
@@ -1769,29 +1770,17 @@ const ChatPage: React.FC = () => {
 							className="sidebar-collapsed-rail hidden lg:sticky lg:top-0 lg:flex lg:h-[100dvh] lg:self-start"
 							data-testid="sidebar-collapsed-rail"
 						>
-							<button
-								aria-label="Show panel"
-								className="sidebar-toggle-button sidebar-toggle-button-collapsed"
-								data-testid="sidebar-attached-toggle"
-								onClick={handleSidebarToggle}
-								type="button"
-							>
-								<svg
-									aria-hidden="true"
-									className="h-4 w-4"
-									fill="none"
-									viewBox="0 0 24 24"
-									xmlns="http://www.w3.org/2000/svg"
+							<div className="sidebar-collapsed-actions">
+								<button
+									aria-label="Show panel"
+									className="sidebar-toggle-button sidebar-toggle-button-collapsed"
+									data-testid="sidebar-attached-toggle"
+									onClick={handleSidebarToggle}
+									type="button"
 								>
-									<path
-										d="m9 6 6 6-6 6"
-										stroke="currentColor"
-										strokeLinecap="round"
-										strokeLinejoin="round"
-										strokeWidth="1.8"
-									/>
-								</svg>
-							</button>
+									<PanelLeftOpen aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
+								</button>
+							</div>
 						</div>
 
 						<button
@@ -1801,21 +1790,7 @@ const ChatPage: React.FC = () => {
 							onClick={handleSidebarToggle}
 							type="button"
 						>
-							<svg
-								aria-hidden="true"
-								className="h-4 w-4"
-								fill="none"
-								viewBox="0 0 24 24"
-								xmlns="http://www.w3.org/2000/svg"
-							>
-								<path
-									d="m9 6 6 6-6 6"
-									stroke="currentColor"
-									strokeLinecap="round"
-									strokeLinejoin="round"
-									strokeWidth="1.8"
-								/>
-							</svg>
+							<PanelLeftOpen aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
 						</button>
 					</>
 				) : null}
