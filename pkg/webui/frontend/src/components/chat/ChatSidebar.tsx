@@ -197,7 +197,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 		<aside className="chat-sidebar-surface relative overflow-visible border-b border-black/8 px-6 py-6 lg:flex lg:h-screen lg:flex-col lg:border-b-0">
 			<div className="sidebar-header">
 				<div className="sidebar-brand" aria-label="Kodelet conversations">
-					kodelet
+					Kodelet
 				</div>
 
 				{onHide ? (

@@ -2450,9 +2450,9 @@ code[class*="language-"] {
   flex-shrink: 0;
   justify-content: center;
   align-items: flex-start;
-  border-right: 1px solid rgba(20, 20, 19, 0.08);
-  background: rgba(250, 249, 245, 0.92);
-  backdrop-filter: blur(10px);
+  border-right: 1px solid rgba(93, 83, 64, 0.08);
+  background: rgba(236, 231, 221, 0.52);
+  backdrop-filter: blur(2px);
 }
 
 .sidebar-collapsed-actions {
