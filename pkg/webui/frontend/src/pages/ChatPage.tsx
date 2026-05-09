@@ -1795,9 +1795,9 @@ const ChatPage: React.FC = () => {
 					</>
 				) : null}
 
-				<main className="relative flex h-[100dvh] min-w-0 flex-1 flex-col overflow-hidden">
+				<main className="chat-main-panel relative flex h-[100dvh] min-w-0 flex-1 flex-col overflow-hidden">
 					<div
-						className="min-h-0 flex-1 overflow-y-auto"
+						className="chat-main-scroll min-h-0 flex-1 overflow-y-auto"
 						data-testid="chat-transcript-scroll"
 						onScroll={handleTranscriptScroll}
 					>
@@ -1841,7 +1841,7 @@ const ChatPage: React.FC = () => {
 						)}
 					</div>
 
-					<div className="sticky bottom-0 z-10 shrink-0 bg-[color:var(--kodelet-panel-soft)]/95 px-4 py-2.5 pb-[calc(0.55rem+env(safe-area-inset-bottom))] backdrop-blur-sm md:px-8 md:py-3">
+					<div className="composer-dock sticky bottom-0 z-10 shrink-0 px-4 py-2.5 pb-[calc(0.55rem+env(safe-area-inset-bottom))] md:px-8 md:py-3">
 						<div className="mx-auto w-full max-w-5xl px-4 md:px-8">
 							{streamError ? (
 								<div className="surface-panel mb-3 rounded-2xl border-kodelet-orange/20 px-4 py-3 text-sm text-kodelet-dark">

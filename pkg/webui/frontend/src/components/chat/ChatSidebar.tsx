@@ -222,11 +222,11 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 					onClick={onNewChat}
 					type="button"
 				>
-					<SquarePen aria-hidden="true" className="sidebar-action-icon" strokeWidth={2.1} />
-					<span className="sidebar-action-label">New chat</span>
+					<SquarePen aria-hidden="true" className="sidebar-action-icon" strokeWidth={1.9} />
+					<span className="sidebar-action-label">New Chat</span>
 				</button>
 
-				<div className="sidebar-section-title">Recent chats</div>
+				<div className="sidebar-section-title">Recents</div>
 
 				<div className="conversation-list max-h-[calc(100vh-13.5rem)] overflow-y-auto pr-1">
 					{conversations.length === 0 && !showLoadingState ? (

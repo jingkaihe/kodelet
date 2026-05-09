@@ -185,6 +185,51 @@ h6 {
   box-shadow: 0 14px 34px rgba(20, 20, 19, 0.05);
 }
 
+.chat-main-panel {
+  isolation: isolate;
+  background:
+    radial-gradient(circle at 18% 8%, rgba(255, 255, 255, 0.58), transparent 30rem),
+    linear-gradient(90deg, rgba(236, 231, 221, 0.5) 0, rgba(250, 248, 242, 0.96) 4.4rem, rgba(244, 239, 229, 0.88) 100%);
+}
+
+.chat-main-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: -1;
+  width: clamp(3.5rem, 8vw, 8rem);
+  background: linear-gradient(90deg, rgba(236, 231, 221, 0.5), rgba(255, 255, 255, 0));
+  pointer-events: none;
+}
+
+.chat-main-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(157, 151, 139, 0.64) transparent;
+}
+
+.chat-main-scroll::-webkit-scrollbar {
+  width: 0.58rem;
+}
+
+.chat-main-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-main-scroll::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background: rgba(157, 151, 139, 0.42);
+}
+
+.chat-main-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(138, 132, 119, 0.58);
+}
+
+.composer-dock {
+  background:
+    linear-gradient(180deg, rgba(244, 239, 229, 0), rgba(244, 239, 229, 0.94) 24%, rgba(244, 239, 229, 0.98));
+  backdrop-filter: blur(10px);
+}
+
 .chat-message-panel {
   border: 1px solid rgba(20, 20, 19, 0.08);
   background: var(--kodelet-panel);
@@ -1927,12 +1972,11 @@ code[class*="language-"] {
 
 .sidebar-section-title {
   font-family: var(--font-heading);
-  font-size: 0.7rem;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: #8c8478;
-  margin: 1.4rem 0 0.85rem;
+  font-size: 0.86rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: #6f685e;
+  margin: 1.36rem 0 0.85rem;
 }
 
 .chat-sidebar-surface {
@@ -2145,10 +2189,9 @@ code[class*="language-"] {
   background: rgba(240, 234, 224, 0.28);
   padding: 0.34rem 0.62rem;
   font-family: var(--font-heading);
-  font-size: 0.66rem;
+  font-size: 0.72rem;
   font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  letter-spacing: -0.005em;
   color: #776f62;
   white-space: nowrap;
   box-shadow: none;
@@ -2157,12 +2200,6 @@ code[class*="language-"] {
     border-color 140ms ease,
     background-color 140ms ease,
     box-shadow 140ms ease;
-}
-
-.conversation-group-more + .conversation-group-more::before {
-  content: "·";
-  margin-right: 0.5rem;
-  color: rgba(138, 132, 119, 0.72);
 }
 
 .conversation-group-more:hover {
@@ -2180,8 +2217,8 @@ code[class*="language-"] {
 }
 
 .sidebar-action-icon {
-  height: 1.38rem;
-  width: 1.38rem;
+  height: 1.18rem;
+  width: 1.18rem;
   color: var(--kodelet-dark);
   flex-shrink: 0;
   transition:
