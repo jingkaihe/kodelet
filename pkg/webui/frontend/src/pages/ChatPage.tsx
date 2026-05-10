@@ -19,6 +19,7 @@ import {
 import { useNavigate, useParams } from "react-router-dom";
 import ChatSidebar from "../components/chat/ChatSidebar";
 import ChatTranscript from "../components/chat/ChatTranscript";
+import PendingSteerList from "../components/chat/PendingSteerList";
 import GitDiffModal from "../components/workspace/GitDiffModal";
 import TerminalModal from "../components/workspace/TerminalModal";
 import {
@@ -61,6 +62,10 @@ const normalizeConversation = (conversation: Conversation): Conversation => ({
 		toolCalls: message.toolCalls || message.tool_calls || [],
 		thinkingText: message.thinkingText,
 		thinkingTexts: message.thinkingTexts || [],
+	})),
+	pendingSteer: (conversation.pendingSteer || []).map((message) => ({
+		role: message.role || "user",
+		content: message.content || "",
 	})),
 	toolResults: conversation.toolResults || {},
 });
@@ -645,6 +650,14 @@ const ChatPage: React.FC = () => {
 						setSteerAvailable(true);
 					}
 
+					if (event.kind === "user-message") {
+						setConversation((currentConversation) =>
+							currentConversation
+								? { ...currentConversation, pendingSteer: [] }
+								: currentConversation,
+						);
+					}
+
 					setMessages((currentMessages) =>
 						applyChatStreamEvent(currentMessages, event),
 					);
@@ -926,10 +939,22 @@ const ChatPage: React.FC = () => {
 			setStreamError(null);
 
 			try {
+				const queuedContent = buildUserContent(prompt, attachmentsForSubmit);
 				await apiService.steerConversation(
 					activeConversationId,
 					prompt,
-					buildUserContent(prompt, attachmentsForSubmit),
+					queuedContent,
+				);
+				setConversation((currentConversation) =>
+					currentConversation
+						? {
+								...currentConversation,
+								pendingSteer: [
+									...(currentConversation.pendingSteer || []),
+									{ role: "user", content: queuedContent },
+								],
+							}
+						: currentConversation,
 				);
 				setDraft("");
 				setAttachments([]);
@@ -1039,6 +1064,14 @@ const ChatPage: React.FC = () => {
 
 						if (event.kind === "tool-use" || event.kind === "tool-result") {
 							setSteerAvailable(true);
+						}
+
+						if (event.kind === "user-message") {
+							setConversation((currentConversation) =>
+								currentConversation
+									? { ...currentConversation, pendingSteer: [] }
+									: currentConversation,
+							);
 						}
 
 						setMessages((currentMessages) =>
@@ -1488,6 +1521,7 @@ const ChatPage: React.FC = () => {
 
 		return parts.join(", ");
 	}, [conversation, statusTick]);
+	const pendingSteerMessages = conversation?.pendingSteer || [];
 
 	const handleCloseNewChatDialog = () => {
 		setNewChatProfileDraft(
@@ -1850,6 +1884,7 @@ const ChatPage: React.FC = () => {
 										</div>
 									</div>
 								) : null}
+								<PendingSteerList messages={pendingSteerMessages} />
 								<div ref={transcriptEndRef} />
 							</>
 						)}

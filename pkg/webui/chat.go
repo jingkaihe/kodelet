@@ -12,6 +12,7 @@ import (
 
 	conversationservice "github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
+	llmbase "github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/mcp"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -56,7 +57,7 @@ type ChatEvent struct {
 	ConversationID string                          `json:"conversation_id,omitempty"`
 	Role           string                          `json:"role,omitempty"`
 	Delta          string                          `json:"delta,omitempty"`
-	Content        string                          `json:"content,omitempty"`
+	Content        any                             `json:"content,omitempty"`
 	Usage          *llmtypes.Usage                 `json:"usage,omitempty"`
 	ToolName       string                          `json:"tool_name,omitempty"`
 	ToolCallID     string                          `json:"tool_call_id,omitempty"`
@@ -465,6 +466,69 @@ func (h *chatMessageHandler) HandleText(text string) {
 		Role:           "assistant",
 	}
 	h.sendEvent(event)
+}
+
+func (h *chatMessageHandler) HandleUserMessage(content string, images []string) {
+	contentBlocks := webContentBlocksForUserInput(content, images)
+
+	var eventContent any = content
+	if len(contentBlocks) > 0 {
+		eventContent = contentBlocks
+	}
+
+	h.sendEvent(ChatEvent{
+		Kind:           "user-message",
+		Content:        eventContent,
+		ConversationID: h.conversationID,
+		Role:           "user",
+	})
+}
+
+func webContentBlocksForUserInput(text string, imageInputs []string) []WebContentBlock {
+	hasImages := false
+	for _, imageInput := range imageInputs {
+		if strings.TrimSpace(imageInput) != "" {
+			hasImages = true
+			break
+		}
+	}
+	if !hasImages {
+		return nil
+	}
+
+	contentBlocks := make([]WebContentBlock, 0, len(imageInputs)+1)
+	if trimmed := strings.TrimSpace(text); trimmed != "" {
+		contentBlocks = append(contentBlocks, WebContentBlock{Type: "text", Text: trimmed})
+	}
+
+	for _, imageInput := range imageInputs {
+		imageInput = strings.TrimSpace(imageInput)
+		if imageInput == "" {
+			continue
+		}
+		if strings.HasPrefix(imageInput, "data:") {
+			if source, ok := parseDataURL(imageInput); ok {
+				contentBlocks = append(contentBlocks, WebContentBlock{Type: "image", Source: source})
+				continue
+			}
+		}
+		if !strings.HasPrefix(imageInput, "https://") {
+			dataURL, err := llmbase.ReadImageFileAsDataURL(strings.TrimPrefix(imageInput, "file://"))
+			if err == nil {
+				if source, ok := parseDataURL(dataURL); ok {
+					contentBlocks = append(contentBlocks, WebContentBlock{Type: "image", Source: source})
+					continue
+				}
+			}
+		}
+
+		contentBlocks = append(contentBlocks, WebContentBlock{
+			Type:     "image",
+			ImageURL: &WebImageURL{URL: imageInput},
+		})
+	}
+
+	return contentBlocks
 }
 
 func (h *chatMessageHandler) HandleToolUse(toolCallID string, toolName string, input string) {

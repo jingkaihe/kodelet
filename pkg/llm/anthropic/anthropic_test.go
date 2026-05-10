@@ -344,6 +344,47 @@ func TestProcessPendingSteerWithImages(t *testing.T) {
 	assert.False(t, steerStore.HasPendingSteer("conv-test"))
 }
 
+func TestProcessPendingSteerWithUserMessageHandler(t *testing.T) {
+	homeDir := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	require.NoError(t, os.Setenv("HOME", homeDir))
+	defer func() {
+		if originalHome == "" {
+			os.Unsetenv("HOME")
+			return
+		}
+		require.NoError(t, os.Setenv("HOME", originalHome))
+	}()
+
+	steerStore, err := steer.NewSteerStore()
+	require.NoError(t, err)
+	require.NoError(t, steerStore.WriteSteerWithImages("conv-test", "Use this image", []string{"data:image/png;base64,aGVsbG8="}))
+
+	thread := &Thread{
+		Thread: base.NewThread(llmtypes.Config{Provider: "anthropic", Model: "claude-sonnet-4-6"}, "conv-test", hooks.Trigger{}),
+	}
+	params := &anthropic.MessageNewParams{}
+	handler := &captureUserMessageHandler{}
+
+	err = thread.processPendingSteer(context.Background(), params, handler)
+	require.NoError(t, err)
+
+	assert.Equal(t, "Use this image", handler.content)
+	assert.Equal(t, []string{"data:image/png;base64,aGVsbG8="}, handler.images)
+	assert.Empty(t, handler.CollectedText())
+}
+
+type captureUserMessageHandler struct {
+	llmtypes.StringCollectorHandler
+	content string
+	images  []string
+}
+
+func (h *captureUserMessageHandler) HandleUserMessage(content string, images []string) {
+	h.content = content
+	h.images = append([]string(nil), images...)
+}
+
 func TestShouldAutoCompact(t *testing.T) {
 	tests := []struct {
 		name                 string

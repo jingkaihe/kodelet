@@ -712,7 +712,11 @@ func (t *Thread) processPendingSteer(ctx context.Context, messageParams *anthrop
 			userMessage := anthropic.NewUserMessage(contentBlocks...)
 			t.messages = append(t.messages, userMessage)
 			messageParams.Messages = append(messageParams.Messages, userMessage)
-			handler.HandleText(steer.FormatPendingNotice(steerMsg.Content, len(steerMsg.Images)))
+			if userHandler, ok := handler.(llmtypes.UserMessageHandler); ok {
+				userHandler.HandleUserMessage(steerMsg.Content, steerMsg.Images)
+			} else {
+				handler.HandleText(steer.FormatPendingNotice(steerMsg.Content, len(steerMsg.Images)))
+			}
 		}
 
 		if err := steerStore.ClearPendingSteer(t.ConversationID); err != nil {

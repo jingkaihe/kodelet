@@ -430,6 +430,25 @@ describe('ApiService', () => {
     });
   });
 
+  describe('getPendingSteer', () => {
+    it('fetches pending steering messages for a conversation', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ([
+          { role: 'user', content: 'Queued guidance' },
+        ]),
+      });
+
+      const result = await apiService.getPendingSteer('conv-123');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/conversations/conv-123/steer',
+        expect.objectContaining({ method: 'GET' })
+      );
+      expect(result).toEqual([{ role: 'user', content: 'Queued guidance' }]);
+    });
+  });
+
   describe('streamChat', () => {
     it('streams newline-delimited chat events', async () => {
       const onEvent = vi.fn();

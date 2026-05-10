@@ -53,6 +53,7 @@ export interface Usage {
 export interface Conversation {
   id: string;
   messages?: Message[]; // Optional for list view
+  pendingSteer?: Message[];
   toolResults?: Record<string, ToolResult>; // Optional for list view
   usage?: Usage; // Optional for list view
   createdAt: string;
@@ -231,6 +232,7 @@ export interface ChatStreamEvent {
     | 'text-delta'
     | 'content-end'
     | 'text'
+    | 'user-message'
     | 'tool-use'
     | 'tool-result'
     | 'done'
@@ -238,7 +240,7 @@ export interface ChatStreamEvent {
   conversation_id?: string;
   role?: 'user' | 'assistant';
   delta?: string;
-  content?: string;
+  content?: string | ContentBlock[];
   usage?: Usage;
   tool_name?: string;
   tool_call_id?: string;

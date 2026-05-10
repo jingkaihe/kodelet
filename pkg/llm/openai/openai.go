@@ -632,7 +632,11 @@ func (t *Thread) processPendingSteer(ctx context.Context, requestParams *openai.
 			userMessage := t.pendingSteerChatMessage(ctx, steerMsg)
 			t.messages = append(t.messages, userMessage)
 			requestParams.Messages = append(requestParams.Messages, userMessage)
-			handler.HandleText(steer.FormatPendingNotice(steerMsg.Content, len(steerMsg.Images)))
+			if userHandler, ok := handler.(llmtypes.UserMessageHandler); ok {
+				userHandler.HandleUserMessage(steerMsg.Content, steerMsg.Images)
+			} else {
+				handler.HandleText(steer.FormatPendingNotice(steerMsg.Content, len(steerMsg.Images)))
+			}
 		}
 
 		if err := steerStore.ClearPendingSteer(t.ConversationID); err != nil {

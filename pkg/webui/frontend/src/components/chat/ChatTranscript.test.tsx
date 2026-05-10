@@ -312,6 +312,37 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('.chat-uploaded-image-media')).toBeInTheDocument();
   });
 
+  it('renders streamed steering as a regular user block', () => {
+    render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Use this image' },
+              {
+                type: 'image',
+                source: {
+                  data: 'aGVsbG8=',
+                  media_type: 'image/png',
+                },
+              },
+            ],
+          },
+        ]}
+      />
+    );
+
+    expect(screen.getByText('You')).toBeInTheDocument();
+    expect(screen.getByText('Use this image')).toBeInTheDocument();
+    expect(screen.queryByText(/User steering/)).not.toBeInTheDocument();
+    expect(screen.getByAltText('Uploaded content')).toHaveAttribute(
+      'src',
+      'data:image/png;base64,aGVsbG8='
+    );
+  });
+
   it('uses an icon-only copy button with an accessible label', () => {
     render(
       <ChatTranscript

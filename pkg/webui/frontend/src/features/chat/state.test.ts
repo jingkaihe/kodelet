@@ -343,6 +343,39 @@ describe('applyChatStreamEvent', () => {
     expect(nextMessages).toEqual(messages);
   });
 
+  it('appends streamed user-message events as user blocks', () => {
+    const messages = applyChatStreamEvent([], {
+      kind: 'user-message',
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Use this image' },
+        {
+          type: 'image',
+          source: {
+            data: 'aGVsbG8=',
+            media_type: 'image/png',
+          },
+        },
+      ],
+    });
+
+    expect(messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Use this image' },
+          {
+            type: 'image',
+            source: {
+              data: 'aGVsbG8=',
+              media_type: 'image/png',
+            },
+          },
+        ],
+      },
+    ]);
+  });
+
   it('keeps later streamed text in the same assistant container after tool events', () => {
     let messages: ChatRenderMessage[] = [
       {

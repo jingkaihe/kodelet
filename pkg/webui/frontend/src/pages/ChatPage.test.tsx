@@ -885,12 +885,25 @@ describe("ChatPage", () => {
 			),
 		);
 
+		expect(await screen.findByTestId("pending-steer-list")).toBeInTheDocument();
+		expect(screen.getByText("Focus on tests")).toBeInTheDocument();
+
 		await act(async () => {
+			streamOptions?.onEvent({
+				kind: "user-message",
+				conversation_id: "conv-123",
+				role: "user",
+				content: "Focus on tests",
+			});
 			streamOptions?.onEvent({
 				kind: "conversation",
 				conversation_id: "conv-123",
 			});
 		});
+
+		await waitFor(() =>
+			expect(screen.queryByTestId("pending-steer-list")).not.toBeInTheDocument(),
+		);
 	});
 
 	it("includes image attachments when queueing steering", async () => {
@@ -993,6 +1006,12 @@ describe("ChatPage", () => {
 					}),
 				]),
 			),
+		);
+
+		expect(await screen.findByTestId("pending-steer-list")).toBeInTheDocument();
+		expect(screen.getByAltText("Uploaded content")).toHaveAttribute(
+			"src",
+			"data:image/png;base64,aGVsbG8=",
 		);
 
 		window.FileReader = originalFileReader;

@@ -599,6 +599,61 @@ h6 {
   color: rgba(20, 20, 19, 0.44);
 }
 
+.pending-steer-shell {
+  width: 100%;
+  padding: 0.2rem 0 0.85rem;
+}
+
+.pending-steer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  max-width: 64rem;
+  margin: 0 auto 0.65rem;
+  padding: 0 1rem;
+}
+
+.pending-steer-eyebrow {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(203, 90, 40, 0.92);
+}
+
+.pending-steer-copy {
+  margin: 0.18rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: rgba(20, 20, 19, 0.55);
+}
+
+.pending-steer-count {
+  flex-shrink: 0;
+  border-radius: 9999px;
+  border: 1px solid rgba(203, 90, 40, 0.18);
+  background: rgba(255, 247, 232, 0.86);
+  padding: 0.35rem 0.7rem;
+  font-family: var(--font-heading);
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: rgba(20, 20, 19, 0.58);
+}
+
+.pending-steer-transcript {
+  max-width: 64rem;
+  margin: 0 auto;
+  border-left: 2px solid rgba(203, 90, 40, 0.18);
+}
+
+.pending-steer-transcript > div {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
 .composer-leading-actions {
   display: inline-flex;
   flex-shrink: 0;

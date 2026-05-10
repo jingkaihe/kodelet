@@ -45,6 +45,12 @@ type MessageHandler interface {
 	HandleDone()
 }
 
+// UserMessageHandler can render user-authored messages that are injected during
+// an active turn, such as queued steering messages.
+type UserMessageHandler interface {
+	HandleUserMessage(content string, images []string)
+}
+
 // StreamingMessageHandler extends MessageHandler with delta streaming support.
 // Handlers implementing this interface will receive content as it streams from the LLM.
 type StreamingMessageHandler interface {

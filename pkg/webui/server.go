@@ -177,6 +177,7 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/conversations/{id}", s.handleGetConversation).Methods("GET")
 	api.HandleFunc("/conversations/{id}/stream", s.handleStreamConversation).Methods("GET")
 	api.HandleFunc("/conversations/{id}/fork", s.handleForkConversation).Methods("POST")
+	api.HandleFunc("/conversations/{id}/steer", s.handleGetPendingSteer).Methods("GET")
 	api.HandleFunc("/conversations/{id}/steer", s.handleSteerConversation).Methods("POST")
 	api.HandleFunc("/conversations/{id}/stop", s.handleStopConversation).Methods("POST")
 	api.HandleFunc("/conversations/{id}/tools/{toolCallId}", s.handleGetToolResult).Methods("GET")
@@ -547,6 +548,7 @@ type WebConversationResponse struct {
 	Summary       string       `json:"summary,omitempty"`
 	Usage         any          `json:"usage"`
 	Messages      []WebMessage `json:"messages"`
+	PendingSteer  []WebMessage `json:"pendingSteer,omitempty"`
 	ToolResults   any          `json:"toolResults,omitempty"`
 	MessageCount  int          `json:"messageCount"`
 }
@@ -1088,6 +1090,11 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	pendingSteer, err := pendingSteerWebMessages(id)
+	if err != nil {
+		logger.G(ctx).WithError(err).WithField("conversation_id", id).Warn("failed to read pending steering messages")
+	}
+
 	// Convert to web response format
 
 	webResponse := &WebConversationResponse{
@@ -1102,11 +1109,38 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 		Summary:       response.Summary,
 		Usage:         response.Usage,
 		Messages:      webMessages,
+		PendingSteer:  pendingSteer,
 		ToolResults:   response.ToolResults,
 		MessageCount:  len(webMessages),
 	}
 
 	s.writeJSONResponse(w, webResponse)
+}
+
+func pendingSteerWebMessages(conversationID string) ([]WebMessage, error) {
+	steerStore, err := steer.NewSteerStore()
+	if err != nil {
+		return nil, err
+	}
+
+	messages, err := steerStore.ReadPendingSteer(conversationID)
+	if err != nil {
+		return nil, err
+	}
+
+	webMessages := make([]WebMessage, 0, len(messages))
+	for _, message := range messages {
+		content := any(message.Content)
+		if blocks := webContentBlocksForUserInput(message.Content, message.Images); len(blocks) > 0 {
+			content = blocks
+		}
+		webMessages = append(webMessages, WebMessage{
+			Role:    "user",
+			Content: content,
+		})
+	}
+
+	return webMessages, nil
 }
 
 // convertToWebMessages converts raw messages to web messages with tool call structure
@@ -1504,6 +1538,23 @@ func (s *Server) handleStreamConversation(w http.ResponseWriter, r *http.Request
 			}
 		}
 	}
+}
+
+// handleGetPendingSteer handles GET /api/conversations/{id}/steer
+func (s *Server) handleGetPendingSteer(w http.ResponseWriter, r *http.Request) {
+	conversationID := strings.TrimSpace(mux.Vars(r)["id"])
+	if conversationID == "" {
+		s.writeErrorResponse(w, http.StatusBadRequest, "conversation ID is required", nil)
+		return
+	}
+
+	messages, err := pendingSteerWebMessages(conversationID)
+	if err != nil {
+		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to read pending steering messages", err)
+		return
+	}
+
+	s.writeJSONResponse(w, messages)
 }
 
 type steerConversationRequest struct {

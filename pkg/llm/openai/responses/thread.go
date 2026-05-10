@@ -591,7 +591,11 @@ func (t *Thread) processPendingSteer(ctx context.Context, handler llmtypes.Messa
 			RawItem: rawItem,
 		})
 
-		handler.HandleText(steer.FormatPendingNotice(steerMsg.Content, len(steerMsg.Images)))
+		if userHandler, ok := handler.(llmtypes.UserMessageHandler); ok {
+			userHandler.HandleUserMessage(steerMsg.Content, steerMsg.Images)
+		} else {
+			handler.HandleText(steer.FormatPendingNotice(steerMsg.Content, len(steerMsg.Images)))
+		}
 	}
 
 	if err := steerStore.ClearPendingSteer(t.ConversationID); err != nil {
