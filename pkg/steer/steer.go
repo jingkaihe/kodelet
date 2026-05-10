@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -90,6 +91,10 @@ func (s *Store) WriteSteerWithImages(conversationID, message string, images []st
 	defer s.mu.Unlock()
 
 	filePath := s.getSteerPath(conversationID)
+	normalizedImages, err := normalizeImageInputs(images)
+	if err != nil {
+		return err
+	}
 
 	return lockedfile.Transform(filePath, func(data []byte) ([]byte, error) {
 		// Parse existing steer data
@@ -105,7 +110,7 @@ func (s *Store) WriteSteerWithImages(conversationID, message string, images []st
 		newMessage := Message{
 			Role:      "user",
 			Content:   message,
-			Images:    append([]string(nil), images...),
+			Images:    normalizedImages,
 			Timestamp: time.Now(),
 		}
 		steerData.Messages = append(steerData.Messages, newMessage)
@@ -118,6 +123,38 @@ func (s *Store) WriteSteerWithImages(conversationID, message string, images []st
 
 		return result, nil
 	})
+}
+
+func normalizeImageInputs(images []string) ([]string, error) {
+	if len(images) == 0 {
+		return nil, nil
+	}
+
+	normalized := make([]string, 0, len(images))
+	for _, image := range images {
+		image = strings.TrimSpace(image)
+		if image == "" {
+			continue
+		}
+
+		if strings.HasPrefix(image, "https://") || strings.HasPrefix(image, "data:") {
+			normalized = append(normalized, image)
+			continue
+		}
+
+		filePath := image
+		if path, ok := strings.CutPrefix(filePath, "file://"); ok {
+			filePath = path
+		}
+
+		absPath, err := filepath.Abs(filePath)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to normalize image path %s", image)
+		}
+		normalized = append(normalized, absPath)
+	}
+
+	return normalized, nil
 }
 
 // ReadPendingSteer reads and returns pending steering messages

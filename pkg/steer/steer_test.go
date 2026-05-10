@@ -2,6 +2,7 @@ package steer
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -47,7 +48,7 @@ func TestWriteAndReadSteerWithImages(t *testing.T) {
 	require.NoError(t, err)
 
 	conversationID := "test-conversation-images"
-	images := []string{"/tmp/screenshot.png", "https://example.com/mockup.jpg"}
+	images := []string{"/tmp/screenshot.png", "https://example.com/mockup.jpg", "data:image/png;base64,aGVsbG8="}
 
 	err = store.WriteSteerWithImages(conversationID, "Use these images", images)
 	require.NoError(t, err)
@@ -59,10 +60,47 @@ func TestWriteAndReadSteerWithImages(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, messages, 1)
 	assert.Equal(t, "Use these images", messages[0].Content)
-	assert.Equal(t, []string{"/tmp/screenshot.png", "https://example.com/mockup.jpg"}, messages[0].Images)
+	assert.Equal(t, []string{"/tmp/screenshot.png", "https://example.com/mockup.jpg", "data:image/png;base64,aGVsbG8="}, messages[0].Images)
 
 	err = store.ClearPendingSteer(conversationID)
 	require.NoError(t, err)
+}
+
+func TestWriteSteerWithImagesNormalizesRelativePaths(t *testing.T) {
+	store, err := NewSteerStore()
+	require.NoError(t, err)
+
+	workingDir := t.TempDir()
+	originalWD, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(workingDir))
+	defer func() {
+		require.NoError(t, os.Chdir(originalWD))
+	}()
+
+	err = store.WriteSteerWithImages("test-conversation-relative-images", "Use this image", []string{"./screenshot.png"})
+	require.NoError(t, err)
+
+	messages, err := store.ReadPendingSteer("test-conversation-relative-images")
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	assert.Equal(t, []string{filepath.Join(workingDir, "screenshot.png")}, messages[0].Images)
+
+	err = store.ClearPendingSteer("test-conversation-relative-images")
+	require.NoError(t, err)
+}
+
+func TestNormalizeImageInputsPreservesRemoteAndDataURLs(t *testing.T) {
+	normalized, err := normalizeImageInputs([]string{
+		" https://example.com/mockup.jpg ",
+		"data:image/png;base64,aGVsbG8=",
+		"",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		"https://example.com/mockup.jpg",
+		"data:image/png;base64,aGVsbG8=",
+	}, normalized)
 }
 
 func TestMultipleSteerMessages(t *testing.T) {
