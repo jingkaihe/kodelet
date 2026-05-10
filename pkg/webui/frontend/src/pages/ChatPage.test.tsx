@@ -1336,7 +1336,7 @@ describe("ChatPage", () => {
 		expect(steerButton).toBeDisabled();
 
 		const textarea = screen.getByPlaceholderText(
-			"Steering becomes available if the agent starts another turn…",
+			"Add your guidance here...",
 		);
 		fireEvent.change(textarea, { target: { value: "Focus on tests" } });
 		fireEvent.keyDown(textarea, {

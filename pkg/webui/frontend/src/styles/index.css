@@ -606,22 +606,12 @@ h6 {
 
 .pending-steer-header {
   max-width: 64rem;
-  margin: 0 auto 0.42rem;
+  margin: 0 auto 0.38rem;
   padding: 0 1rem;
 }
 
-.pending-steer-eyebrow {
-  margin: 0;
-  font-family: var(--font-heading);
-  font-size: 0.64rem;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: rgba(203, 90, 40, 0.82);
-}
-
 .pending-steer-copy {
-  margin: 0.14rem 0 0;
+  margin: 0;
   font-size: 0.75rem;
   line-height: 1.4;
   color: rgba(20, 20, 19, 0.48);

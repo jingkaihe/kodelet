@@ -43,7 +43,6 @@ const PendingSteerList = ({ messages }: PendingSteerListProps) => {
   return (
     <section className="pending-steer-shell" data-testid="pending-steer-list">
       <div className="pending-steer-header">
-        <p className="pending-steer-eyebrow">Queued steering</p>
         <p className="pending-steer-copy">
           Kodelet will use this guidance as soon as it continues.
         </p>

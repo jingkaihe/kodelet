@@ -1956,9 +1956,9 @@ const ChatPage: React.FC = () => {
 									sending
 										? !hasActiveConversationTarget
 											? "Waiting for conversation to start…"
-											: canSteerActiveConversation
-												? "Steer the active conversation…"
-												: "Steering becomes available if the agent starts another turn…"
+										: canSteerActiveConversation
+											? "Steer the active conversation…"
+											: "Add your guidance here..."
 										: "Ask kodelet anything..."
 								}
 								value={draft}
