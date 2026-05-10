@@ -615,7 +615,10 @@ func pendingSteerInputItem(ctx context.Context, steerMsg steer.Message) response
 
 	imagePaths := steerMsg.Images
 	if len(imagePaths) > base.MaxImageCount {
-		logger.G(ctx).Warnf("Too many steering images provided (%d), maximum is %d. Only processing first %d images", len(imagePaths), base.MaxImageCount, base.MaxImageCount)
+		logger.G(ctx).
+			WithField("image_count", len(imagePaths)).
+			WithField("max_image_count", base.MaxImageCount).
+			Warn("too many steering images provided; truncating")
 		imagePaths = imagePaths[:base.MaxImageCount]
 	}
 
@@ -623,7 +626,10 @@ func pendingSteerInputItem(ctx context.Context, steerMsg steer.Message) response
 	for _, imagePath := range imagePaths {
 		imagePart, err := processImage(imagePath)
 		if err != nil {
-			logger.G(ctx).Warnf("Failed to process steering image %s: %v", imagePath, err)
+			logger.G(ctx).
+				WithError(err).
+				WithField("image_path", imagePath).
+				Warn("failed to process steering image")
 			continue
 		}
 		contentParts = append(contentParts, imagePart)

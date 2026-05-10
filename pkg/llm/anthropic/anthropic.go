@@ -728,7 +728,10 @@ func (t *Thread) processPendingSteer(ctx context.Context, messageParams *anthrop
 func (t *Thread) pendingSteerContentBlocks(ctx context.Context, steerMsg steer.Message) []anthropic.ContentBlockParamUnion {
 	imagePaths := steerMsg.Images
 	if len(imagePaths) > base.MaxImageCount {
-		logger.G(ctx).Warnf("Too many steering images provided (%d), maximum is %d. Only processing first %d images", len(imagePaths), base.MaxImageCount, base.MaxImageCount)
+		logger.G(ctx).
+			WithField("image_count", len(imagePaths)).
+			WithField("max_image_count", base.MaxImageCount).
+			Warn("too many steering images provided; truncating")
 		imagePaths = imagePaths[:base.MaxImageCount]
 	}
 
@@ -736,7 +739,10 @@ func (t *Thread) pendingSteerContentBlocks(ctx context.Context, steerMsg steer.M
 	for _, imagePath := range imagePaths {
 		imageBlock, err := t.processImage(imagePath)
 		if err != nil {
-			logger.G(ctx).Warnf("Failed to process steering image %s: %v", imagePath, err)
+			logger.G(ctx).
+				WithError(err).
+				WithField("image_path", imagePath).
+				Warn("failed to process steering image")
 			continue
 		}
 		contentBlocks = append(contentBlocks, *imageBlock)
