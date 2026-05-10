@@ -591,7 +591,7 @@ func (t *Thread) processPendingSteer(ctx context.Context, handler llmtypes.Messa
 			RawItem: rawItem,
 		})
 
-		handler.HandleText(formatPendingSteerNotice(steerMsg.Content, len(steerMsg.Images)))
+		handler.HandleText(steer.FormatPendingNotice(steerMsg.Content, len(steerMsg.Images)))
 	}
 
 	if err := steerStore.ClearPendingSteer(t.ConversationID); err != nil {
@@ -644,20 +644,6 @@ func pendingSteerInputItem(ctx context.Context, steerMsg steer.Message) response
 			Content: responses.EasyInputMessageContentUnionParam{OfInputItemContentList: contentParts},
 		},
 	}
-}
-
-func formatPendingSteerNotice(content string, imageCount int) string {
-	if imageCount > 0 {
-		return fmt.Sprintf("🗣️ User steering: %s (%d image%s)", content, imageCount, pluralSuffix(imageCount))
-	}
-	return fmt.Sprintf("🗣️ User steering: %s", content)
-}
-
-func pluralSuffix(count int) string {
-	if count == 1 {
-		return ""
-	}
-	return "s"
 }
 
 // GetMessages returns the messages from the thread in a common format.

@@ -712,7 +712,7 @@ func (t *Thread) processPendingSteer(ctx context.Context, messageParams *anthrop
 			userMessage := anthropic.NewUserMessage(contentBlocks...)
 			t.messages = append(t.messages, userMessage)
 			messageParams.Messages = append(messageParams.Messages, userMessage)
-			handler.HandleText(formatPendingSteerNotice(steerMsg.Content, len(steerMsg.Images)))
+			handler.HandleText(steer.FormatPendingNotice(steerMsg.Content, len(steerMsg.Images)))
 		}
 
 		if err := steerStore.ClearPendingSteer(t.ConversationID); err != nil {
@@ -750,20 +750,6 @@ func (t *Thread) pendingSteerContentBlocks(ctx context.Context, steerMsg steer.M
 
 	contentBlocks = append(contentBlocks, anthropic.NewTextBlock(steerMsg.Content))
 	return contentBlocks
-}
-
-func formatPendingSteerNotice(content string, imageCount int) string {
-	if imageCount > 0 {
-		return fmt.Sprintf("🗣️ User steering: %s (%d image%s)", content, imageCount, pluralSuffix(imageCount))
-	}
-	return fmt.Sprintf("🗣️ User steering: %s", content)
-}
-
-func pluralSuffix(count int) string {
-	if count == 1 {
-		return ""
-	}
-	return "s"
 }
 
 func (t *Thread) getModelAndTokens(opt llmtypes.MessageOpt) (anthropic.Model, int) {

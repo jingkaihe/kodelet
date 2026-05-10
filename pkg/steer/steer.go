@@ -18,6 +18,21 @@ import (
 
 const MaxMessageLength = 10000
 
+// FormatPendingNotice renders the user-facing notice shown when queued steering is injected.
+func FormatPendingNotice(content string, imageCount int) string {
+	if imageCount > 0 {
+		return fmt.Sprintf("🗣️ User steering: %s (%d image%s)", content, imageCount, pluralSuffix(imageCount))
+	}
+	return fmt.Sprintf("🗣️ User steering: %s", content)
+}
+
+func pluralSuffix(count int) string {
+	if count == 1 {
+		return ""
+	}
+	return "s"
+}
+
 // Message represents a steering message
 type Message struct {
 	Role      string    `json:"role"`

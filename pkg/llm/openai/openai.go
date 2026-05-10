@@ -632,7 +632,7 @@ func (t *Thread) processPendingSteer(ctx context.Context, requestParams *openai.
 			userMessage := t.pendingSteerChatMessage(ctx, steerMsg)
 			t.messages = append(t.messages, userMessage)
 			requestParams.Messages = append(requestParams.Messages, userMessage)
-			handler.HandleText(formatPendingSteerNotice(steerMsg.Content, len(steerMsg.Images)))
+			handler.HandleText(steer.FormatPendingNotice(steerMsg.Content, len(steerMsg.Images)))
 		}
 
 		if err := steerStore.ClearPendingSteer(t.ConversationID); err != nil {
@@ -683,20 +683,6 @@ func (t *Thread) pendingSteerChatMessage(ctx context.Context, steerMsg steer.Mes
 		Role:         openai.ChatMessageRoleUser,
 		MultiContent: contentParts,
 	}
-}
-
-func formatPendingSteerNotice(content string, imageCount int) string {
-	if imageCount > 0 {
-		return fmt.Sprintf("🗣️ User steering: %s (%d image%s)", content, imageCount, pluralSuffix(imageCount))
-	}
-	return fmt.Sprintf("🗣️ User steering: %s", content)
-}
-
-func pluralSuffix(count int) string {
-	if count == 1 {
-		return ""
-	}
-	return "s"
 }
 
 func (t *Thread) createChatCompletionWithRetry(
