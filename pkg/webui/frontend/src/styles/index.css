@@ -601,57 +601,72 @@ h6 {
 
 .pending-steer-shell {
   width: 100%;
-  padding: 0.2rem 0 0.85rem;
+  padding: 0.05rem 0 0.7rem;
 }
 
 .pending-steer-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
   max-width: 64rem;
-  margin: 0 auto 0.65rem;
+  margin: 0 auto 0.42rem;
   padding: 0 1rem;
 }
 
 .pending-steer-eyebrow {
   margin: 0;
   font-family: var(--font-heading);
-  font-size: 0.66rem;
+  font-size: 0.64rem;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: rgba(203, 90, 40, 0.92);
+  color: rgba(203, 90, 40, 0.82);
 }
 
 .pending-steer-copy {
-  margin: 0.18rem 0 0;
+  margin: 0.14rem 0 0;
   font-size: 0.75rem;
   line-height: 1.4;
-  color: rgba(20, 20, 19, 0.55);
+  color: rgba(20, 20, 19, 0.48);
 }
 
-.pending-steer-count {
-  flex-shrink: 0;
-  border-radius: 9999px;
-  border: 1px solid rgba(203, 90, 40, 0.18);
-  background: rgba(255, 247, 232, 0.86);
-  padding: 0.35rem 0.7rem;
-  font-family: var(--font-heading);
-  font-size: 0.68rem;
-  font-weight: 700;
-  color: rgba(20, 20, 19, 0.58);
-}
-
-.pending-steer-transcript {
+.pending-steer-lines {
+  display: flex;
   max-width: 64rem;
   margin: 0 auto;
-  border-left: 2px solid rgba(203, 90, 40, 0.18);
+  padding: 0 1rem;
+  flex-direction: column;
+  gap: 0.34rem;
 }
 
-.pending-steer-transcript > div {
-  padding-top: 0;
-  padding-bottom: 0;
+.pending-steer-line {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.46rem;
+  width: fit-content;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  border: 1px solid rgba(176, 174, 165, 0.18);
+  border-radius: 999px;
+  background: rgba(236, 229, 216, 0.46);
+  padding: 0.28rem 0.62rem 0.3rem 0.48rem;
+  color: rgba(20, 20, 19, 0.62);
+}
+
+.pending-steer-prompt {
+  flex: 0 0 auto;
+  font-family: var(--font-heading);
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: rgba(203, 90, 40, 0.58);
+}
+
+.pending-steer-message {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: inherit;
 }
 
 .composer-leading-actions {

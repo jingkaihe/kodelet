@@ -887,6 +887,7 @@ describe("ChatPage", () => {
 
 		expect(await screen.findByTestId("pending-steer-list")).toBeInTheDocument();
 		expect(screen.getByText("Focus on tests")).toBeInTheDocument();
+		expect(screen.getByTestId("pending-steer-list")).not.toHaveTextContent("You");
 
 		await act(async () => {
 			streamOptions?.onEvent({
@@ -1009,10 +1010,8 @@ describe("ChatPage", () => {
 		);
 
 		expect(await screen.findByTestId("pending-steer-list")).toBeInTheDocument();
-		expect(screen.getByAltText("Uploaded content")).toHaveAttribute(
-			"src",
-			"data:image/png;base64,aGVsbG8=",
-		);
+		expect(screen.getByText("Use this screenshot · with a screenshot")).toBeInTheDocument();
+		expect(screen.queryByAltText("Uploaded content")).not.toBeInTheDocument();
 
 		window.FileReader = originalFileReader;
 	});
