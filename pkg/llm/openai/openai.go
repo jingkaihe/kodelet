@@ -629,12 +629,10 @@ func (t *Thread) processPendingSteer(ctx context.Context, requestParams *openai.
 				continue
 			}
 
-			userMessage := openai.ChatCompletionMessage{
-				Role:    openai.ChatMessageRoleUser,
-				Content: steerMsg.Content,
-			}
+			userMessage := t.pendingSteerChatMessage(ctx, steerMsg)
+			t.messages = append(t.messages, userMessage)
 			requestParams.Messages = append(requestParams.Messages, userMessage)
-			handler.HandleText(fmt.Sprintf("🗣️ User steering: %s", steerMsg.Content))
+			handler.HandleText(formatPendingSteerNotice(steerMsg.Content, len(steerMsg.Images)))
 		}
 
 		if err := steerStore.ClearPendingSteer(t.ConversationID); err != nil {
@@ -645,6 +643,54 @@ func (t *Thread) processPendingSteer(ctx context.Context, requestParams *openai.
 	}
 
 	return nil
+}
+
+func (t *Thread) pendingSteerChatMessage(ctx context.Context, steerMsg steer.Message) openai.ChatCompletionMessage {
+	if len(steerMsg.Images) == 0 {
+		return openai.ChatCompletionMessage{
+			Role:    openai.ChatMessageRoleUser,
+			Content: steerMsg.Content,
+		}
+	}
+
+	imagePaths := steerMsg.Images
+	if len(imagePaths) > base.MaxImageCount {
+		logger.G(ctx).Warnf("Too many steering images provided (%d), maximum is %d. Only processing first %d images", len(imagePaths), base.MaxImageCount, base.MaxImageCount)
+		imagePaths = imagePaths[:base.MaxImageCount]
+	}
+
+	contentParts := make([]openai.ChatMessagePart, 0, len(imagePaths)+1)
+	for _, imagePath := range imagePaths {
+		imagePart, err := t.processImage(imagePath)
+		if err != nil {
+			logger.G(ctx).Warnf("Failed to process steering image %s: %v", imagePath, err)
+			continue
+		}
+		contentParts = append(contentParts, *imagePart)
+	}
+	contentParts = append(contentParts, openai.ChatMessagePart{
+		Type: openai.ChatMessagePartTypeText,
+		Text: steerMsg.Content,
+	})
+
+	return openai.ChatCompletionMessage{
+		Role:         openai.ChatMessageRoleUser,
+		MultiContent: contentParts,
+	}
+}
+
+func formatPendingSteerNotice(content string, imageCount int) string {
+	if imageCount > 0 {
+		return fmt.Sprintf("🗣️ User steering: %s (%d image%s)", content, imageCount, pluralSuffix(imageCount))
+	}
+	return fmt.Sprintf("🗣️ User steering: %s", content)
+}
+
+func pluralSuffix(count int) string {
+	if count == 1 {
+		return ""
+	}
+	return "s"
 }
 
 func (t *Thread) createChatCompletionWithRetry(

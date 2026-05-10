@@ -72,6 +72,7 @@ func TestSteerConfigFromFlags(t *testing.T) {
 			steerDefaults := NewSteerConfig()
 			cmd.Flags().StringVar(&steerDefaults.ConversationID, "conversation-id", steerDefaults.ConversationID, "ID of the conversation to steer")
 			cmd.Flags().BoolP("follow", "f", steerDefaults.Follow, "Steer the most recent conversation")
+			cmd.Flags().StringSliceP("image", "I", steerDefaults.Images, "Add image input")
 
 			// Parse the test args
 			err := cmd.ParseFlags(tt.args)
@@ -106,6 +107,9 @@ func TestSteerConfigFromFlags(t *testing.T) {
 			if follow, err := cmd.Flags().GetBool("follow"); err == nil {
 				config.Follow = follow
 			}
+			if images, err := cmd.Flags().GetStringSlice("image"); err == nil {
+				config.Images = images
+			}
 
 			if tt.expectedConfig != nil {
 				assert.Equal(t, tt.expectedConfig.Follow, config.Follow)
@@ -123,6 +127,7 @@ func TestNewSteerConfig(t *testing.T) {
 
 	assert.Equal(t, "", config.ConversationID)
 	assert.False(t, config.Follow)
+	assert.Empty(t, config.Images)
 }
 
 // TestSteerConfigDefaults tests the default steer configuration values
@@ -132,4 +137,22 @@ func TestSteerConfigDefaults(t *testing.T) {
 	// Test that defaults are properly set
 	assert.Equal(t, "", defaults.ConversationID, "Default conversation ID should be empty")
 	assert.False(t, defaults.Follow, "Default follow should be false")
+	assert.Empty(t, defaults.Images, "Default images should be empty")
+}
+
+func TestSteerConfigParsesImages(t *testing.T) {
+	cmd := &cobra.Command{Use: "test"}
+	steerDefaults := NewSteerConfig()
+	cmd.Flags().StringVar(&steerDefaults.ConversationID, "conversation-id", steerDefaults.ConversationID, "ID of the conversation to steer")
+	cmd.Flags().BoolP("follow", "f", steerDefaults.Follow, "Steer the most recent conversation")
+	cmd.Flags().StringSliceP("image", "I", steerDefaults.Images, "Add image input")
+
+	require.NoError(t, cmd.ParseFlags([]string{"--image", "one.png", "-I", "two.jpg"}))
+
+	config := NewSteerConfig()
+	images, err := cmd.Flags().GetStringSlice("image")
+	require.NoError(t, err)
+	config.Images = images
+
+	assert.Equal(t, []string{"one.png", "two.jpg"}, config.Images)
 }

@@ -47,6 +47,20 @@ func extractInputItemText(item openairesponses.ResponseInputItemUnionParam) stri
 	return text
 }
 
+func extractInputItemImageURLs(item openairesponses.ResponseInputItemUnionParam) []string {
+	if item.OfMessage == nil {
+		return nil
+	}
+
+	urls := make([]string, 0)
+	for _, part := range item.OfMessage.Content.OfInputItemContentList {
+		if part.OfInputImage != nil && part.OfInputImage.ImageURL.Valid() {
+			urls = append(urls, part.OfInputImage.ImageURL.Value)
+		}
+	}
+	return urls
+}
+
 func TestNewThread(t *testing.T) {
 	os.Setenv("OPENAI_API_KEY", "test-key")
 	defer os.Unsetenv("OPENAI_API_KEY")
@@ -1640,6 +1654,47 @@ func TestProcessMessageExchangeInjectsPendingSteer(t *testing.T) {
 	require.Len(t, thread.inputItems, 2)
 	require.Len(t, thread.storedItems, 2)
 	assert.Equal(t, "Please focus on error handling", thread.storedItems[1].Content)
+	assert.False(t, steerStore.HasPendingSteer("conv-test"))
+}
+
+func TestProcessMessageExchangeInjectsPendingSteerWithImages(t *testing.T) {
+	homeDir := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	require.NoError(t, os.Setenv("HOME", homeDir))
+	defer func() {
+		if originalHome == "" {
+			os.Unsetenv("HOME")
+			return
+		}
+		require.NoError(t, os.Setenv("HOME", originalHome))
+	}()
+
+	steerStore, err := steer.NewSteerStore()
+	require.NoError(t, err)
+	require.NoError(t, steerStore.WriteSteerWithImages("conv-test", "Use this image", []string{"data:image/png;base64,aGVsbG8="}))
+
+	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
+	thread := &Thread{
+		Thread: base.NewThread(config, "conv-test", hooks.Trigger{}),
+	}
+
+	var capturedParams openairesponses.ResponseNewParams
+	thread.newStreamingFunc = func(_ context.Context, params openairesponses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
+		capturedParams = params
+		return nil
+	}
+	thread.processStreamFunc = func(_ context.Context, _ *ssestream.Stream[openairesponses.ResponseStreamEventUnion], _ llmtypes.MessageHandler, _ string, _ llmtypes.MessageOpt) (processStreamResult, error) {
+		return processStreamResult{responseCompleted: true}, nil
+	}
+
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
+	_, _, _, err = thread.processMessageExchange(context.Background(), handler, "gpt-4.1", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
+	require.NoError(t, err)
+
+	require.Len(t, capturedParams.Input.OfInputItemList, 1)
+	assert.Equal(t, "Use this image", extractInputItemText(capturedParams.Input.OfInputItemList[0]))
+	assert.Equal(t, []string{"data:image/png;base64,aGVsbG8="}, extractInputItemImageURLs(capturedParams.Input.OfInputItemList[0]))
+	assert.Contains(t, handler.CollectedText(), "🗣️ User steering: Use this image (1 image)")
 	assert.False(t, steerStore.HasPendingSteer("conv-test"))
 }
 

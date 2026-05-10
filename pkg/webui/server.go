@@ -1507,7 +1507,8 @@ func (s *Server) handleStreamConversation(w http.ResponseWriter, r *http.Request
 }
 
 type steerConversationRequest struct {
-	Message string `json:"message"`
+	Message string             `json:"message"`
+	Content []ChatContentBlock `json:"content,omitempty"`
 }
 
 type steerConversationResponse struct {
@@ -1533,7 +1534,14 @@ func (s *Server) handleSteerConversation(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	message := strings.TrimSpace(req.Message)
+	message, imageInputs, err := normalizeChatRequest(ChatRequest{
+		Message: req.Message,
+		Content: req.Content,
+	})
+	if err != nil {
+		s.writeErrorResponse(w, http.StatusBadRequest, "invalid steer request", err)
+		return
+	}
 	if message == "" {
 		s.writeErrorResponse(w, http.StatusBadRequest, "message cannot be empty", nil)
 		return
@@ -1555,7 +1563,7 @@ func (s *Server) handleSteerConversation(w http.ResponseWriter, r *http.Request)
 	}
 
 	queued := steerStore.HasPendingSteer(conversationID)
-	if err := steerStore.WriteSteer(conversationID, message); err != nil {
+	if err := steerStore.WriteSteerWithImages(conversationID, message, imageInputs); err != nil {
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to queue steering message", err)
 		return
 	}

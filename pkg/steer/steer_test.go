@@ -34,9 +34,33 @@ func TestWriteAndReadSteer(t *testing.T) {
 	assert.Len(t, messages, 1)
 	assert.Equal(t, "user", messages[0].Role)
 	assert.Equal(t, message, messages[0].Content)
+	assert.Empty(t, messages[0].Images)
 	assert.WithinDuration(t, time.Now(), messages[0].Timestamp, 5*time.Second)
 
 	// Cleanup
+	err = store.ClearPendingSteer(conversationID)
+	require.NoError(t, err)
+}
+
+func TestWriteAndReadSteerWithImages(t *testing.T) {
+	store, err := NewSteerStore()
+	require.NoError(t, err)
+
+	conversationID := "test-conversation-images"
+	images := []string{"/tmp/screenshot.png", "https://example.com/mockup.jpg"}
+
+	err = store.WriteSteerWithImages(conversationID, "Use these images", images)
+	require.NoError(t, err)
+
+	// Mutate the caller's slice to ensure the store persisted its own copy.
+	images[0] = "/tmp/changed.png"
+
+	messages, err := store.ReadPendingSteer(conversationID)
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	assert.Equal(t, "Use these images", messages[0].Content)
+	assert.Equal(t, []string{"/tmp/screenshot.png", "https://example.com/mockup.jpg"}, messages[0].Images)
+
 	err = store.ClearPendingSteer(conversationID)
 	require.NoError(t, err)
 }

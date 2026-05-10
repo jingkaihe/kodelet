@@ -903,7 +903,13 @@ const ChatPage: React.FC = () => {
 
 	const handleSubmit = async () => {
 		const prompt = draft.trim();
+		const steeringSubmission = sending && canSteerActiveConversation;
+		const attachmentsForSubmit = attachments;
 		if ((!prompt && attachments.length === 0) || steering) {
+			return;
+		}
+		if (steeringSubmission && !prompt) {
+			showToast("Steering requires a text message", "error");
 			return;
 		}
 
@@ -920,8 +926,13 @@ const ChatPage: React.FC = () => {
 			setStreamError(null);
 
 			try {
-				await apiService.steerConversation(activeConversationId, prompt);
+				await apiService.steerConversation(
+					activeConversationId,
+					prompt,
+					buildUserContent(prompt, attachmentsForSubmit),
+				);
 				setDraft("");
+				setAttachments([]);
 				showToast("Steering queued for the active conversation", "success");
 			} catch (error) {
 				const message =
@@ -939,7 +950,7 @@ const ChatPage: React.FC = () => {
 
 		setDraft("");
 		setStreamError(null);
-		const attachmentsForSend = attachments;
+		const attachmentsForSend = attachmentsForSubmit;
 		setAttachments([]);
 		setMessages((currentMessages) => [
 			...currentMessages,
@@ -1209,7 +1220,7 @@ const ChatPage: React.FC = () => {
 	};
 
 	const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
-		if (sending) {
+		if (sending && !canSteerActiveConversation) {
 			return;
 		}
 
@@ -1233,7 +1244,7 @@ const ChatPage: React.FC = () => {
 		event.preventDefault();
 		setDragActive(false);
 
-		if (sending) {
+		if (sending && !canSteerActiveConversation) {
 			return;
 		}
 
@@ -1408,12 +1419,15 @@ const ChatPage: React.FC = () => {
 		[conversations],
 	);
 
-	const canSubmit = draft.trim().length > 0 || attachments.length > 0;
 	const hasActiveConversationTarget = Boolean(activeConversationId);
-	const canStopActiveConversation = sending && hasActiveConversationTarget;
-	const canStartNewChat = !sending || hasActiveConversationTarget;
 	const canSteerActiveConversation =
 		hasActiveConversationTarget && steerAvailable;
+	const isSteeringMode = sending && canSteerActiveConversation;
+	const canSubmit = isSteeringMode
+		? draft.trim().length > 0
+		: draft.trim().length > 0 || attachments.length > 0;
+	const canStopActiveConversation = sending && hasActiveConversationTarget;
+	const canStartNewChat = !sending || hasActiveConversationTarget;
 	const submitActionLabel = steering ? "Queueing…" : sending ? "Steer" : "Send";
 	const stopActionLabel = canStopActiveConversation ? "Stop" : "Starting…";
 	const composerMetaText = useMemo(() => {
@@ -1921,7 +1935,7 @@ const ChatPage: React.FC = () => {
 										<button
 											aria-label="Add image"
 											className="composer-icon-button"
-											disabled={sending || steering}
+											disabled={(sending && !canSteerActiveConversation) || steering}
 												onClick={() => fileInputRef.current?.click()}
 												type="button"
 										>

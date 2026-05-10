@@ -5,6 +5,7 @@ import {
   CWDHintsResponse,
   GitDiffResponse,
   ChatRequest,
+  ContentBlock,
   ChatStreamEvent,
   Conversation,
   ConversationListResponse,
@@ -146,10 +147,11 @@ class ApiService {
     });
   }
 
-  async steerConversation(id: string, message: string): Promise<SteerConversationResponse> {
+  async steerConversation(id: string, message: string, content?: ContentBlock[]): Promise<SteerConversationResponse> {
+    const body = content && content.length > 0 ? { message, content } : { message };
     return this.request<SteerConversationResponse>(`/api/conversations/${id}/steer`, {
       method: 'POST',
-      body: JSON.stringify({ message }),
+      body: JSON.stringify(body),
     });
   }
 

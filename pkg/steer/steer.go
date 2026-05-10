@@ -22,6 +22,7 @@ const MaxMessageLength = 10000
 type Message struct {
 	Role      string    `json:"role"`
 	Content   string    `json:"content"`
+	Images    []string  `json:"images,omitempty"`
 	Timestamp time.Time `json:"timestamp"`
 }
 
@@ -65,6 +66,11 @@ func (s *Store) getSteerPath(conversationID string) string {
 
 // WriteSteer writes a steering message to the steer file
 func (s *Store) WriteSteer(conversationID, message string) error {
+	return s.WriteSteerWithImages(conversationID, message, nil)
+}
+
+// WriteSteerWithImages writes a steering message with optional image inputs to the steer file.
+func (s *Store) WriteSteerWithImages(conversationID, message string, images []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -84,6 +90,7 @@ func (s *Store) WriteSteer(conversationID, message string) error {
 		newMessage := Message{
 			Role:      "user",
 			Content:   message,
+			Images:    append([]string(nil), images...),
 			Timestamp: time.Now(),
 		}
 		steerData.Messages = append(steerData.Messages, newMessage)

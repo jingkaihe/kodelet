@@ -120,6 +120,7 @@ export interface ChatRequest {
 
 export interface SteerConversationRequest {
   message: string;
+  content?: ContentBlock[];
 }
 
 export interface SteerConversationResponse {

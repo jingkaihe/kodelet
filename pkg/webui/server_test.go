@@ -1183,6 +1183,59 @@ func TestServer_handleSteerConversation(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, pending, 1)
 	assert.Equal(t, "Please focus on error handling", pending[0].Content)
+	assert.Empty(t, pending[0].Images)
+}
+
+func TestServer_handleSteerConversationWithImageContent(t *testing.T) {
+	homeDir := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	require.NoError(t, os.Setenv("HOME", homeDir))
+	defer func() {
+		if originalHome == "" {
+			os.Unsetenv("HOME")
+			return
+		}
+		require.NoError(t, os.Setenv("HOME", originalHome))
+	}()
+
+	server := &Server{
+		conversationService: &mockConversationService{},
+		router:              mux.NewRouter(),
+	}
+
+	reqBody := `{"message":"Use this screenshot","content":[{"type":"text","text":"Use this screenshot"},{"type":"image","source":{"data":"aGVsbG8=","media_type":"image/png"}}]}`
+	req := httptest.NewRequest("POST", "/api/conversations/conv-123/steer", strings.NewReader(reqBody))
+	req = mux.SetURLVars(req, map[string]string{"id": "conv-123"})
+	w := httptest.NewRecorder()
+
+	server.handleSteerConversation(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	steerStore, err := steer.NewSteerStore()
+	require.NoError(t, err)
+	pending, err := steerStore.ReadPendingSteer("conv-123")
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	assert.Equal(t, "Use this screenshot", pending[0].Content)
+	assert.Equal(t, []string{"data:image/png;base64,aGVsbG8="}, pending[0].Images)
+}
+
+func TestServer_handleSteerConversationRejectsImageOnlyContent(t *testing.T) {
+	server := &Server{
+		conversationService: &mockConversationService{},
+		router:              mux.NewRouter(),
+	}
+
+	reqBody := `{"message":"","content":[{"type":"image","source":{"data":"aGVsbG8=","media_type":"image/png"}}]}`
+	req := httptest.NewRequest("POST", "/api/conversations/conv-123/steer", strings.NewReader(reqBody))
+	req = mux.SetURLVars(req, map[string]string{"id": "conv-123"})
+	w := httptest.NewRecorder()
+
+	server.handleSteerConversation(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "message cannot be empty")
 }
 
 func TestServer_handleSteerConversationRequiresMessage(t *testing.T) {
