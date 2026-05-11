@@ -12,7 +12,7 @@ import {
   shell,
 } from 'electron';
 
-import { buildRemoteServerURL, getRemoteDisplayLabel, normalizeRemoteServerURL } from './lib/remote';
+import { buildRemoteServerURL, getRemoteDisplayLabel, normalizeRemoteServerURL, removeRemoteServerToken } from './lib/remote';
 import { canOpenExternalURL } from './lib/navigation';
 import { buildSidecarArgs, resolveSidecarBinary } from './lib/sidecar';
 import {
@@ -399,7 +399,7 @@ async function connectToRemote(remoteInput: string): Promise<void> {
   desktopState = saveDesktopState(app.getPath('userData'), {
     ...desktopState,
     connectionMode: 'remote',
-    remoteUrl,
+    remoteUrl: removeRemoteServerToken(remoteUrl),
   });
   await stopSidecar(previousSidecar);
 }

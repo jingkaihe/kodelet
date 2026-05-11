@@ -55,7 +55,25 @@ function normalizeState(state: Partial<DesktopState>): DesktopState {
   return {
     connectionMode: state.connectionMode === 'remote' ? 'remote' : 'local',
     workspacePath: typeof state.workspacePath === 'string' ? state.workspacePath.trim() : '',
-    remoteUrl: typeof state.remoteUrl === 'string' ? state.remoteUrl.trim() : '',
+    remoteUrl: sanitizeRemoteUrlForState(state.remoteUrl),
   };
 }
 
+function sanitizeRemoteUrlForState(remoteUrl: unknown): string {
+  if (typeof remoteUrl !== 'string') {
+    return '';
+  }
+
+  const trimmed = remoteUrl.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    parsed.searchParams.delete('token');
+    return parsed.toString().replace(/\/$/, '');
+  } catch {
+    return trimmed;
+  }
+}

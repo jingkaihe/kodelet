@@ -33,9 +33,13 @@ const (
 var terminalUpgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
-	CheckOrigin: func(r *http.Request) bool {
-		return terminalOriginAllowed(r)
-	},
+	CheckOrigin:     terminalOriginAllowed,
+}
+
+func (s *Server) terminalUpgrader() websocket.Upgrader {
+	upgrader := terminalUpgrader
+	upgrader.CheckOrigin = s.terminalOriginAllowed
+	return upgrader
 }
 
 type terminalMessage struct {
@@ -93,7 +97,8 @@ func (s *Server) handleTerminalWebsocket(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	conn, err := terminalUpgrader.Upgrade(w, r, nil)
+	upgrader := s.terminalUpgrader()
+	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		logger.G(r.Context()).WithError(err).Warn("failed to upgrade terminal websocket")
 		return
@@ -319,8 +324,20 @@ func parseTerminalSignal(name string) (syscall.Signal, bool) {
 }
 
 func terminalOriginAllowed(r *http.Request) bool {
+	return serverTerminalOriginAllowed(nil, r)
+}
+
+func (s *Server) terminalOriginAllowed(r *http.Request) bool {
+	return serverTerminalOriginAllowed(s, r)
+}
+
+func serverTerminalOriginAllowed(s *Server, r *http.Request) bool {
 	origin := strings.TrimSpace(r.Header.Get("Origin"))
 	if origin == "" {
+		return true
+	}
+
+	if s != nil && s.corsOriginAllowed(origin) {
 		return true
 	}
 

@@ -167,6 +167,12 @@ func TestTerminalOriginAllowedBranches(t *testing.T) {
 	req.Host = "localhost:8080"
 	req.Header.Set("Origin", "http://localhost:3000")
 	assert.False(t, terminalOriginAllowed(req))
+	assert.True(t, (&Server{config: &ServerConfig{}}).terminalOriginAllowed(req))
+
+	req = httptest.NewRequest("GET", "/api/terminal/ws", nil)
+	req.Host = "example.com:8080"
+	req.Header.Set("Origin", "https://app.example.com")
+	assert.True(t, (&Server{config: &ServerConfig{CORSOrigins: []string{"https://app.example.com"}}}).terminalOriginAllowed(req))
 
 	req = httptest.NewRequest("GET", "/api/terminal/ws", nil)
 	req.Host = "127.0.0.1:8080"

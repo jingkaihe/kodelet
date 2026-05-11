@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildRemoteServerURL, normalizeRemoteServerURL } from '../lib/remote';
+import { buildRemoteServerURL, normalizeRemoteServerURL, removeRemoteServerToken } from '../lib/remote';
 
 test('normalizeRemoteServerURL preserves explicit https origin', () => {
   assert.equal(normalizeRemoteServerURL('https://kodelet.example.com/'), 'https://kodelet.example.com');
@@ -29,5 +29,12 @@ test('buildRemoteServerURL forwards auth token to API endpoint', () => {
   assert.equal(
     buildRemoteServerURL('https://kodelet.example.com?token=secret', '/api/chat/settings'),
     'https://kodelet.example.com/api/chat/settings?token=secret',
+  );
+});
+
+test('removeRemoteServerToken strips auth token before persistence', () => {
+  assert.equal(
+    removeRemoteServerToken('https://kodelet.example.com?token=secret'),
+    'https://kodelet.example.com',
   );
 });

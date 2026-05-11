@@ -50,6 +50,12 @@ export function buildRemoteServerURL(baseUrl: string, path: string): string {
   return endpoint.toString();
 }
 
+export function removeRemoteServerToken(remoteUrl: string): string {
+  const parsed = new URL(remoteUrl);
+  parsed.searchParams.delete('token');
+  return parsed.toString().replace(/\/$/, '');
+}
+
 export function getRemoteDisplayLabel(remoteUrl: string): string {
   try {
     return new URL(remoteUrl).host;

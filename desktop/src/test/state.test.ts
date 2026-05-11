@@ -37,6 +37,21 @@ test('saveDesktopState persists connection details', () => {
   assert.ok(fs.existsSync(getStateFilePath(userDataPath)));
 });
 
+test('saveDesktopState does not persist remote URL auth tokens', () => {
+  const userDataPath = fs.mkdtempSync(path.join(os.tmpdir(), 'kodelet-desktop-state-'));
+  saveDesktopState(userDataPath, {
+    connectionMode: 'remote',
+    remoteUrl: 'https://kodelet.example.com?token=secret',
+  });
+
+  assert.deepEqual(loadDesktopState(userDataPath), {
+    connectionMode: 'remote',
+    workspacePath: '',
+    remoteUrl: 'https://kodelet.example.com',
+  });
+  assert.doesNotMatch(fs.readFileSync(getStateFilePath(userDataPath), 'utf8'), /secret/);
+});
+
 test('resolveInitialWorkspace falls back to home directory for missing paths', () => {
   assert.equal(resolveInitialWorkspace({ workspacePath: '/definitely/missing' }), os.homedir());
 });
@@ -46,4 +61,3 @@ test('shouldConnectToRemote requires remote mode and URL', () => {
   assert.equal(shouldConnectToRemote({ connectionMode: 'remote', remoteUrl: '' }), false);
   assert.equal(shouldConnectToRemote({ connectionMode: 'local', remoteUrl: 'https://kodelet.example.com' }), false);
 });
-
