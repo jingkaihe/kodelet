@@ -1,8 +1,22 @@
 # Kodelet
 
-## 0.4.6-beta (2026-05-11)
+## 0.4.8-beta (2026-05-11)
 
 Added a configurable MCP code-execution RPC transport, keeping Unix sockets as the default while allowing an ephemeral localhost HTTP endpoint for environments where sockets are impractical.
+
+## 0.4.7-beta (2026-05-10)
+
+Extended `kodelet steer` with image support via the new `--image / -I` flag, allowing users to attach local images or remote URLs to steering messages across CLI and Web UI.
+
+Added a PendingSteer UI in the Web UI transcript to display queued steering messages alongside pending images, and wired drag-and-drop image attachments into steering mode.
+
+Refactored the steering store to persist and retrieve images alongside text content, and added regression coverage across CLI flag parsing, Web UI server endpoints, and LLM provider message construction.
+
+## 0.4.6-beta (2026-05-09)
+
+Refined the Web UI chat workspace with a calmer main surface, persistent composer dock, slimmer sidebar controls, refreshed collapsed-sidebar treatment, and icon-based composer actions backed by the new `lucide-react` dependency.
+
+Improved transcript activity rows by replacing status dots with contextual icons for thinking, bash, apply_patch, and skill activity while preserving running/error state styling and concise tool summaries.
 
 ## 0.4.5-beta (2026-05-08)
 

@@ -175,6 +175,9 @@ kodelet run --image ./diagram.png --image https://example.com/mockup.jpg "Compar
 
 # Architecture diagram analysis
 kodelet run --image ./architecture.png "Review this system architecture and suggest improvements"
+
+# Steer a running conversation with image context
+kodelet steer --conversation-id 20231201T120000-a1b2c3d4e5f67890 --image ./screenshot.png "Use this screenshot as context"
 ```
 
 **Supported Features:**
@@ -182,6 +185,7 @@ kodelet run --image ./architecture.png "Review this system architecture and sugg
 - **Remote Images**: HTTPS URLs only (for security)
 - **Multiple Images**: Up to 10 images per message
 - **Size Limits**: Maximum 5MB per image file
+- **Steering**: `kodelet steer --image/-I` supports text + images; image-only steering is not supported.
 - **Provider Support**: Anthropic Claude models (OpenAI support planned)
 
 ### Conversation Continuation

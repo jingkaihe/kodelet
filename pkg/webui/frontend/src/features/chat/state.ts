@@ -319,7 +319,7 @@ export const applyChatStreamEvent = (
     }
 
     case 'thinking': {
-      const content = event.content || '';
+      const content = typeof event.content === 'string' ? event.content : '';
       if (!content) {
         return nextMessages;
       }
@@ -340,7 +340,7 @@ export const applyChatStreamEvent = (
     }
 
     case 'text': {
-      const content = event.content || '';
+      const content = typeof event.content === 'string' ? event.content : '';
       if (!content) {
         return nextMessages;
       }
@@ -356,6 +356,18 @@ export const applyChatStreamEvent = (
         type: 'message',
         content,
         inProgress: false,
+      });
+      return nextMessages;
+    }
+
+    case 'user-message': {
+      if (!hasRenderableContent(event.content)) {
+        return nextMessages;
+      }
+
+      nextMessages.push({
+        role: 'user',
+        content: event.content,
       });
       return nextMessages;
     }

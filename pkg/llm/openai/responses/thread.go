@@ -575,12 +575,7 @@ func (t *Thread) processPendingSteer(ctx context.Context, handler llmtypes.Messa
 			continue
 		}
 
-		inputItem := responses.ResponseInputItemUnionParam{
-			OfMessage: &responses.EasyInputMessageParam{
-				Role:    responses.EasyInputMessageRoleUser,
-				Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(steerMsg.Content)},
-			},
-		}
+		inputItem := pendingSteerInputItem(ctx, steerMsg)
 
 		t.inputItems = append(t.inputItems, inputItem)
 
@@ -596,7 +591,11 @@ func (t *Thread) processPendingSteer(ctx context.Context, handler llmtypes.Messa
 			RawItem: rawItem,
 		})
 
-		handler.HandleText(fmt.Sprintf("🗣️ User steering: %s", steerMsg.Content))
+		if userHandler, ok := handler.(llmtypes.UserMessageHandler); ok {
+			userHandler.HandleUserMessage(steerMsg.Content, steerMsg.Images)
+		} else {
+			handler.HandleText(steer.FormatPendingNotice(steerMsg.Content, len(steerMsg.Images)))
+		}
 	}
 
 	if err := steerStore.ClearPendingSteer(t.ConversationID); err != nil {
@@ -606,6 +605,49 @@ func (t *Thread) processPendingSteer(ctx context.Context, handler llmtypes.Messa
 	}
 
 	return nil
+}
+
+func pendingSteerInputItem(ctx context.Context, steerMsg steer.Message) responses.ResponseInputItemUnionParam {
+	if len(steerMsg.Images) == 0 {
+		return responses.ResponseInputItemUnionParam{
+			OfMessage: &responses.EasyInputMessageParam{
+				Role:    responses.EasyInputMessageRoleUser,
+				Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(steerMsg.Content)},
+			},
+		}
+	}
+
+	imagePaths := steerMsg.Images
+	if len(imagePaths) > base.MaxImageCount {
+		logger.G(ctx).
+			WithField("image_count", len(imagePaths)).
+			WithField("max_image_count", base.MaxImageCount).
+			Warn("too many steering images provided; truncating")
+		imagePaths = imagePaths[:base.MaxImageCount]
+	}
+
+	contentParts := make(responses.ResponseInputMessageContentListParam, 0, len(imagePaths)+1)
+	for _, imagePath := range imagePaths {
+		imagePart, err := processImage(imagePath)
+		if err != nil {
+			logger.G(ctx).
+				WithError(err).
+				WithField("image_path", imagePath).
+				Warn("failed to process steering image")
+			continue
+		}
+		contentParts = append(contentParts, imagePart)
+	}
+	contentParts = append(contentParts, responses.ResponseInputContentUnionParam{
+		OfInputText: &responses.ResponseInputTextParam{Text: steerMsg.Content},
+	})
+
+	return responses.ResponseInputItemUnionParam{
+		OfMessage: &responses.EasyInputMessageParam{
+			Role:    responses.EasyInputMessageRoleUser,
+			Content: responses.EasyInputMessageContentUnionParam{OfInputItemContentList: contentParts},
+		},
+	}
 }
 
 // GetMessages returns the messages from the thread in a common format.

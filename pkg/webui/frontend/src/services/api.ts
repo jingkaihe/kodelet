@@ -5,12 +5,14 @@ import {
   CWDHintsResponse,
   GitDiffResponse,
   ChatRequest,
+  ContentBlock,
   ChatStreamEvent,
   Conversation,
   ConversationListResponse,
   SearchFilters,
   ApiError,
   SteerConversationResponse,
+  Message,
   StopConversationResponse,
   ForkConversationResponse,
   ToolResult
@@ -146,10 +148,17 @@ class ApiService {
     });
   }
 
-  async steerConversation(id: string, message: string): Promise<SteerConversationResponse> {
+  async steerConversation(id: string, message: string, content?: ContentBlock[]): Promise<SteerConversationResponse> {
+    const body = content && content.length > 0 ? { message, content } : { message };
     return this.request<SteerConversationResponse>(`/api/conversations/${id}/steer`, {
       method: 'POST',
-      body: JSON.stringify({ message }),
+      body: JSON.stringify(body),
+    });
+  }
+
+  async getPendingSteer(id: string): Promise<Message[]> {
+    return this.request<Message[]>(`/api/conversations/${id}/steer`, {
+      method: 'GET',
     });
   }
 

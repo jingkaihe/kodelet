@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,10 +19,26 @@ import (
 
 const MaxMessageLength = 10000
 
+// FormatPendingNotice renders the user-facing notice shown when queued steering is injected.
+func FormatPendingNotice(content string, imageCount int) string {
+	if imageCount > 0 {
+		return fmt.Sprintf("🗣️ User steering: %s (%d image%s)", content, imageCount, pluralSuffix(imageCount))
+	}
+	return fmt.Sprintf("🗣️ User steering: %s", content)
+}
+
+func pluralSuffix(count int) string {
+	if count == 1 {
+		return ""
+	}
+	return "s"
+}
+
 // Message represents a steering message
 type Message struct {
 	Role      string    `json:"role"`
 	Content   string    `json:"content"`
+	Images    []string  `json:"images,omitempty"`
 	Timestamp time.Time `json:"timestamp"`
 }
 
@@ -65,10 +82,19 @@ func (s *Store) getSteerPath(conversationID string) string {
 
 // WriteSteer writes a steering message to the steer file
 func (s *Store) WriteSteer(conversationID, message string) error {
+	return s.WriteSteerWithImages(conversationID, message, nil)
+}
+
+// WriteSteerWithImages writes a steering message with optional image inputs to the steer file.
+func (s *Store) WriteSteerWithImages(conversationID, message string, images []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	filePath := s.getSteerPath(conversationID)
+	normalizedImages, err := normalizeImageInputs(images)
+	if err != nil {
+		return err
+	}
 
 	return lockedfile.Transform(filePath, func(data []byte) ([]byte, error) {
 		// Parse existing steer data
@@ -84,6 +110,7 @@ func (s *Store) WriteSteer(conversationID, message string) error {
 		newMessage := Message{
 			Role:      "user",
 			Content:   message,
+			Images:    normalizedImages,
 			Timestamp: time.Now(),
 		}
 		steerData.Messages = append(steerData.Messages, newMessage)
@@ -96,6 +123,38 @@ func (s *Store) WriteSteer(conversationID, message string) error {
 
 		return result, nil
 	})
+}
+
+func normalizeImageInputs(images []string) ([]string, error) {
+	if len(images) == 0 {
+		return nil, nil
+	}
+
+	normalized := make([]string, 0, len(images))
+	for _, image := range images {
+		image = strings.TrimSpace(image)
+		if image == "" {
+			continue
+		}
+
+		if strings.HasPrefix(image, "https://") || strings.HasPrefix(image, "data:") {
+			normalized = append(normalized, image)
+			continue
+		}
+
+		filePath := image
+		if path, ok := strings.CutPrefix(filePath, "file://"); ok {
+			filePath = path
+		}
+
+		absPath, err := filepath.Abs(filePath)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to normalize image path %s", image)
+		}
+		normalized = append(normalized, absPath)
+	}
+
+	return normalized, nil
 }
 
 // ReadPendingSteer reads and returns pending steering messages

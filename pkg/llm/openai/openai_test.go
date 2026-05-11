@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
+	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/sashabaranov/go-openai"
@@ -739,6 +741,43 @@ func TestAddUserMessageWithTooManyImages(t *testing.T) {
 	for i := 0; i < len(lastMessage.MultiContent)-1; i++ {
 		assert.Equal(t, openai.ChatMessagePartTypeImageURL, lastMessage.MultiContent[i].Type)
 	}
+}
+
+func TestProcessPendingSteerWithImages(t *testing.T) {
+	homeDir := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	require.NoError(t, os.Setenv("HOME", homeDir))
+	defer func() {
+		if originalHome == "" {
+			os.Unsetenv("HOME")
+			return
+		}
+		require.NoError(t, os.Setenv("HOME", originalHome))
+	}()
+
+	steerStore, err := steer.NewSteerStore()
+	require.NoError(t, err)
+	require.NoError(t, steerStore.WriteSteerWithImages("conv-test", "Use this image", []string{"data:image/png;base64,aGVsbG8="}))
+
+	thread := &Thread{
+		Thread: base.NewThread(llm.Config{Provider: "openai", Model: "gpt-4.1"}, "conv-test", hooks.Trigger{}),
+	}
+	requestParams := &openai.ChatCompletionRequest{}
+	handler := &llm.StringCollectorHandler{Silent: true}
+
+	err = thread.processPendingSteer(context.Background(), requestParams, handler)
+	require.NoError(t, err)
+
+	require.Len(t, requestParams.Messages, 1)
+	message := requestParams.Messages[0]
+	require.Len(t, message.MultiContent, 2)
+	assert.Equal(t, openai.ChatMessagePartTypeImageURL, message.MultiContent[0].Type)
+	require.NotNil(t, message.MultiContent[0].ImageURL)
+	assert.Equal(t, "data:image/png;base64,aGVsbG8=", message.MultiContent[0].ImageURL.URL)
+	assert.Equal(t, openai.ChatMessagePartTypeText, message.MultiContent[1].Type)
+	assert.Equal(t, "Use this image", message.MultiContent[1].Text)
+	assert.Contains(t, handler.CollectedText(), "🗣️ User steering: Use this image (1 image)")
+	assert.False(t, steerStore.HasPendingSteer("conv-test"))
 }
 
 func TestConstants(t *testing.T) {

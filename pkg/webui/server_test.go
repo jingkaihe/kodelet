@@ -489,6 +489,88 @@ func TestServer_handleGetConversationOpenAIChatCompletionsSkipsSystemAndPreserve
 	assert.Equal(t, "internal reasoning", response.Messages[1].ThinkingText)
 }
 
+func TestServer_handleGetConversationIncludesPendingSteer(t *testing.T) {
+	homeDir := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	require.NoError(t, os.Setenv("HOME", homeDir))
+	defer func() {
+		if originalHome == "" {
+			os.Unsetenv("HOME")
+			return
+		}
+		require.NoError(t, os.Setenv("HOME", originalHome))
+	}()
+
+	conversationID := "test-pending-steer"
+	steerStore, err := steer.NewSteerStore()
+	require.NoError(t, err)
+	require.NoError(t, steerStore.WriteSteerWithImages(conversationID, "Use this screenshot", []string{"data:image/png;base64,aGVsbG8="}))
+
+	mockService := &mockConversationService{
+		getFunc: func(_ context.Context, id string) (*conversations.GetConversationResponse, error) {
+			if id == conversationID {
+				return &conversations.GetConversationResponse{
+					ID:          conversationID,
+					Provider:    "openai",
+					RawMessages: json.RawMessage(`[{"role":"user","content":"hello"}]`),
+				}, nil
+			}
+			return nil, errors.New("conversation not found")
+		},
+	}
+
+	server := &Server{conversationService: mockService, router: mux.NewRouter()}
+	req := httptest.NewRequest("GET", "/api/conversations/"+conversationID, nil)
+	req = mux.SetURLVars(req, map[string]string{"id": conversationID})
+	w := httptest.NewRecorder()
+
+	server.handleGetConversation(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var response WebConversationResponse
+	err = json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	require.Len(t, response.PendingSteer, 1)
+	assert.Equal(t, "user", response.PendingSteer[0].Role)
+
+	contentBytes, err := json.Marshal(response.PendingSteer[0].Content)
+	require.NoError(t, err)
+	assert.Contains(t, string(contentBytes), `"text":"Use this screenshot"`)
+	assert.Contains(t, string(contentBytes), `"media_type":"image/png"`)
+}
+
+func TestServer_handleGetPendingSteer(t *testing.T) {
+	homeDir := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	require.NoError(t, os.Setenv("HOME", homeDir))
+	defer func() {
+		if originalHome == "" {
+			os.Unsetenv("HOME")
+			return
+		}
+		require.NoError(t, os.Setenv("HOME", originalHome))
+	}()
+
+	conversationID := "test-get-pending-steer"
+	steerStore, err := steer.NewSteerStore()
+	require.NoError(t, err)
+	require.NoError(t, steerStore.WriteSteer(conversationID, "Queued guidance"))
+
+	server := &Server{router: mux.NewRouter()}
+	req := httptest.NewRequest("GET", "/api/conversations/"+conversationID+"/steer", nil)
+	req = mux.SetURLVars(req, map[string]string{"id": conversationID})
+	w := httptest.NewRecorder()
+
+	server.handleGetPendingSteer(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var response []WebMessage
+	err = json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	require.Len(t, response, 1)
+	assert.Equal(t, "Queued guidance", response[0].Content)
+}
+
 func TestServer_handleGetChatSettings(t *testing.T) {
 	originalSettings := viper.AllSettings()
 	defer func() {
@@ -1183,6 +1265,59 @@ func TestServer_handleSteerConversation(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, pending, 1)
 	assert.Equal(t, "Please focus on error handling", pending[0].Content)
+	assert.Empty(t, pending[0].Images)
+}
+
+func TestServer_handleSteerConversationWithImageContent(t *testing.T) {
+	homeDir := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	require.NoError(t, os.Setenv("HOME", homeDir))
+	defer func() {
+		if originalHome == "" {
+			os.Unsetenv("HOME")
+			return
+		}
+		require.NoError(t, os.Setenv("HOME", originalHome))
+	}()
+
+	server := &Server{
+		conversationService: &mockConversationService{},
+		router:              mux.NewRouter(),
+	}
+
+	reqBody := `{"message":"Use this screenshot","content":[{"type":"text","text":"Use this screenshot"},{"type":"image","source":{"data":"aGVsbG8=","media_type":"image/png"}}]}`
+	req := httptest.NewRequest("POST", "/api/conversations/conv-123/steer", strings.NewReader(reqBody))
+	req = mux.SetURLVars(req, map[string]string{"id": "conv-123"})
+	w := httptest.NewRecorder()
+
+	server.handleSteerConversation(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	steerStore, err := steer.NewSteerStore()
+	require.NoError(t, err)
+	pending, err := steerStore.ReadPendingSteer("conv-123")
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	assert.Equal(t, "Use this screenshot", pending[0].Content)
+	assert.Equal(t, []string{"data:image/png;base64,aGVsbG8="}, pending[0].Images)
+}
+
+func TestServer_handleSteerConversationRejectsImageOnlyContent(t *testing.T) {
+	server := &Server{
+		conversationService: &mockConversationService{},
+		router:              mux.NewRouter(),
+	}
+
+	reqBody := `{"message":"","content":[{"type":"image","source":{"data":"aGVsbG8=","media_type":"image/png"}}]}`
+	req := httptest.NewRequest("POST", "/api/conversations/conv-123/steer", strings.NewReader(reqBody))
+	req = mux.SetURLVars(req, map[string]string{"id": "conv-123"})
+	w := httptest.NewRecorder()
+
+	server.handleSteerConversation(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "message cannot be empty")
 }
 
 func TestServer_handleSteerConversationRequiresMessage(t *testing.T) {

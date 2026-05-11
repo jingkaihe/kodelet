@@ -306,6 +306,48 @@ describe('ApiService', () => {
         queued: false,
       });
     });
+
+    it('includes image content in steering requests', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          success: true,
+          conversation_id: 'conv-123',
+          queued: false,
+        }),
+      });
+
+      await apiService.steerConversation('conv-123', 'Use this screenshot', [
+        { type: 'text', text: 'Use this screenshot' },
+        {
+          type: 'image',
+          source: {
+            data: 'aGVsbG8=',
+            media_type: 'image/png',
+          },
+        },
+      ]);
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/conversations/conv-123/steer',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            message: 'Use this screenshot',
+            content: [
+              { type: 'text', text: 'Use this screenshot' },
+              {
+                type: 'image',
+                source: {
+                  data: 'aGVsbG8=',
+                  media_type: 'image/png',
+                },
+              },
+            ],
+          }),
+        })
+      );
+    });
   });
 
   describe('getToolResult', () => {
@@ -385,6 +427,25 @@ describe('ApiService', () => {
         configurable: true,
         value: originalLocation,
       });
+    });
+  });
+
+  describe('getPendingSteer', () => {
+    it('fetches pending steering messages for a conversation', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ([
+          { role: 'user', content: 'Queued guidance' },
+        ]),
+      });
+
+      const result = await apiService.getPendingSteer('conv-123');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/conversations/conv-123/steer',
+        expect.objectContaining({ method: 'GET' })
+      );
+      expect(result).toEqual([{ role: 'user', content: 'Queued guidance' }]);
     });
   });
 

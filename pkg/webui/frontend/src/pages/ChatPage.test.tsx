@@ -325,7 +325,7 @@ describe("ChatPage", () => {
 
 		await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
 		expect(
-			screen.getByRole("button", { name: "New chat" }),
+			screen.getByRole("button", { name: "New Chat" }),
 		).toBe(screen.getByTestId("sidebar-new-chat-button"));
 		fireEvent.click(screen.getByTestId("sidebar-new-chat-button"));
 		expect(screen.getByTestId("new-chat-dialog")).toBeInTheDocument();
@@ -876,15 +876,144 @@ describe("ChatPage", () => {
 			expect(mockSteerConversation).toHaveBeenCalledWith(
 				"conv-123",
 				"Focus on tests",
+				expect.arrayContaining([
+					expect.objectContaining({
+						type: "text",
+						text: "Focus on tests",
+					}),
+				]),
 			),
 		);
 
+		expect(await screen.findByTestId("pending-steer-list")).toBeInTheDocument();
+		expect(screen.getByText("Focus on tests")).toBeInTheDocument();
+		expect(screen.getByTestId("pending-steer-list")).not.toHaveTextContent("You");
+
 		await act(async () => {
+			streamOptions?.onEvent({
+				kind: "user-message",
+				conversation_id: "conv-123",
+				role: "user",
+				content: "Focus on tests",
+			});
 			streamOptions?.onEvent({
 				kind: "conversation",
 				conversation_id: "conv-123",
 			});
 		});
+
+		await waitFor(() =>
+			expect(screen.queryByTestId("pending-steer-list")).not.toBeInTheDocument(),
+		);
+	});
+
+	it("includes image attachments when queueing steering", async () => {
+		routeParams = { id: "conv-123" };
+		mockGetConversation.mockResolvedValue({
+			id: "conv-123",
+			createdAt: "2023-01-01T00:00:00Z",
+			updatedAt: "2023-01-02T00:00:00Z",
+			messageCount: 1,
+			messages: [{ role: "user", content: "hello" }],
+			toolResults: {},
+		});
+
+		let streamOptions: { onEvent: (event: ChatStreamEvent) => void } | null =
+			null;
+		mockStreamChat.mockImplementation(async (_request, options) => {
+			streamOptions = options as { onEvent: (event: ChatStreamEvent) => void };
+			return new Promise(() => undefined);
+		});
+
+		const fileReaderResult = "data:image/png;base64,aGVsbG8=";
+		const originalFileReader = window.FileReader;
+
+		class MockFileReader {
+			result: string | ArrayBuffer | null = null;
+			error: DOMException | null = null;
+			onload: null | (() => void) = null;
+			onerror: null | (() => void) = null;
+
+			readAsDataURL() {
+				this.result = fileReaderResult;
+				this.onload?.();
+			}
+		}
+
+		// @ts-expect-error test shim
+		window.FileReader = MockFileReader;
+
+		render(<ChatPage />);
+
+		await waitFor(() =>
+			expect(mockGetConversation).toHaveBeenCalledWith("conv-123"),
+		);
+
+		fireEvent.change(screen.getByPlaceholderText("Ask kodelet anything..."), {
+			target: { value: "continue" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+		await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
+		await act(async () => {
+			streamOptions?.onEvent({
+				kind: "tool-use",
+				tool_call_id: "tool-1",
+				tool_name: "search",
+				input: "{}",
+			});
+		});
+
+		const textarea = screen.getByPlaceholderText(
+			"Steer the active conversation…",
+		);
+		fireEvent.change(textarea, { target: { value: "Use this screenshot" } });
+
+		const file = new File(["hello"], "steer.png", { type: "image/png" });
+		fireEvent.paste(textarea, {
+			clipboardData: {
+				items: [
+					{
+						kind: "file",
+						type: "image/png",
+						getAsFile: () => file,
+					},
+				],
+			},
+			preventDefault: vi.fn(),
+		});
+
+		await waitFor(() =>
+			expect(screen.getByAltText("steer.png")).toBeInTheDocument(),
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: "Steer" }));
+
+		await waitFor(() =>
+			expect(mockSteerConversation).toHaveBeenCalledWith(
+				"conv-123",
+				"Use this screenshot",
+				expect.arrayContaining([
+					expect.objectContaining({
+						type: "text",
+						text: "Use this screenshot",
+					}),
+					expect.objectContaining({
+						type: "image",
+						source: expect.objectContaining({
+							data: "aGVsbG8=",
+							media_type: "image/png",
+						}),
+					}),
+				]),
+			),
+		);
+
+		expect(await screen.findByTestId("pending-steer-list")).toBeInTheDocument();
+		expect(screen.getByText("Use this screenshot · with a screenshot")).toBeInTheDocument();
+		expect(screen.queryByAltText("Uploaded content")).not.toBeInTheDocument();
+
+		window.FileReader = originalFileReader;
 	});
 
 	it("allows sidebar navigation while a conversation is streaming", async () => {
@@ -1207,7 +1336,7 @@ describe("ChatPage", () => {
 		expect(steerButton).toBeDisabled();
 
 		const textarea = screen.getByPlaceholderText(
-			"Steering becomes available if the agent starts another turn…",
+			"Add your guidance here...",
 		);
 		fireEvent.change(textarea, { target: { value: "Focus on tests" } });
 		fireEvent.keyDown(textarea, {

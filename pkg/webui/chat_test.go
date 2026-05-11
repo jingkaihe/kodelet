@@ -191,3 +191,27 @@ func TestChatMessageHandler_HandleToolResultBackfillsToolName(t *testing.T) {
 		assert.Equal(t, "bash", sink.events[0].ToolResult.ToolName)
 	}
 }
+
+func TestChatMessageHandler_HandleUserMessageEmitsRenderableContent(t *testing.T) {
+	sink := &recordingChatSink{}
+	handler := &chatMessageHandler{
+		conversationID: "conv-123",
+		sink:           sink,
+	}
+
+	handler.HandleUserMessage("Use this screenshot", []string{"data:image/png;base64,aGVsbG8="})
+
+	require.Len(t, sink.events, 1)
+	assert.Equal(t, "user-message", sink.events[0].Kind)
+	assert.Equal(t, "user", sink.events[0].Role)
+
+	blocks, ok := sink.events[0].Content.([]WebContentBlock)
+	require.True(t, ok)
+	require.Len(t, blocks, 2)
+	assert.Equal(t, "text", blocks[0].Type)
+	assert.Equal(t, "Use this screenshot", blocks[0].Text)
+	assert.Equal(t, "image", blocks[1].Type)
+	require.NotNil(t, blocks[1].Source)
+	assert.Equal(t, "image/png", blocks[1].Source.MediaType)
+	assert.Equal(t, "aGVsbG8=", blocks[1].Source.Data)
+}

@@ -2,6 +2,7 @@ package steer
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -34,11 +35,72 @@ func TestWriteAndReadSteer(t *testing.T) {
 	assert.Len(t, messages, 1)
 	assert.Equal(t, "user", messages[0].Role)
 	assert.Equal(t, message, messages[0].Content)
+	assert.Empty(t, messages[0].Images)
 	assert.WithinDuration(t, time.Now(), messages[0].Timestamp, 5*time.Second)
 
 	// Cleanup
 	err = store.ClearPendingSteer(conversationID)
 	require.NoError(t, err)
+}
+
+func TestWriteAndReadSteerWithImages(t *testing.T) {
+	store, err := NewSteerStore()
+	require.NoError(t, err)
+
+	conversationID := "test-conversation-images"
+	images := []string{"/tmp/screenshot.png", "https://example.com/mockup.jpg", "data:image/png;base64,aGVsbG8="}
+
+	err = store.WriteSteerWithImages(conversationID, "Use these images", images)
+	require.NoError(t, err)
+
+	// Mutate the caller's slice to ensure the store persisted its own copy.
+	images[0] = "/tmp/changed.png"
+
+	messages, err := store.ReadPendingSteer(conversationID)
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	assert.Equal(t, "Use these images", messages[0].Content)
+	assert.Equal(t, []string{"/tmp/screenshot.png", "https://example.com/mockup.jpg", "data:image/png;base64,aGVsbG8="}, messages[0].Images)
+
+	err = store.ClearPendingSteer(conversationID)
+	require.NoError(t, err)
+}
+
+func TestWriteSteerWithImagesNormalizesRelativePaths(t *testing.T) {
+	store, err := NewSteerStore()
+	require.NoError(t, err)
+
+	workingDir := t.TempDir()
+	originalWD, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(workingDir))
+	defer func() {
+		require.NoError(t, os.Chdir(originalWD))
+	}()
+
+	err = store.WriteSteerWithImages("test-conversation-relative-images", "Use this image", []string{"./screenshot.png"})
+	require.NoError(t, err)
+
+	messages, err := store.ReadPendingSteer("test-conversation-relative-images")
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	assert.Equal(t, []string{filepath.Join(workingDir, "screenshot.png")}, messages[0].Images)
+
+	err = store.ClearPendingSteer("test-conversation-relative-images")
+	require.NoError(t, err)
+}
+
+func TestNormalizeImageInputsPreservesRemoteAndDataURLs(t *testing.T) {
+	normalized, err := normalizeImageInputs([]string{
+		" https://example.com/mockup.jpg ",
+		"data:image/png;base64,aGVsbG8=",
+		"",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		"https://example.com/mockup.jpg",
+		"data:image/png;base64,aGVsbG8=",
+	}, normalized)
 }
 
 func TestMultipleSteerMessages(t *testing.T) {

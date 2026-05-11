@@ -6,9 +6,20 @@ import React, {
 	useRef,
 	useState,
 } from "react";
+import {
+	ArrowUp,
+	GitCompareArrows,
+	ImageUp,
+	Maximize2,
+	Minimize2,
+	PanelLeftOpen,
+	Square,
+	SquareTerminal,
+} from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import ChatSidebar from "../components/chat/ChatSidebar";
 import ChatTranscript from "../components/chat/ChatTranscript";
+import PendingSteerList from "../components/chat/PendingSteerList";
 import GitDiffModal from "../components/workspace/GitDiffModal";
 import TerminalModal from "../components/workspace/TerminalModal";
 import {
@@ -51,6 +62,10 @@ const normalizeConversation = (conversation: Conversation): Conversation => ({
 		toolCalls: message.toolCalls || message.tool_calls || [],
 		thinkingText: message.thinkingText,
 		thinkingTexts: message.thinkingTexts || [],
+	})),
+	pendingSteer: (conversation.pendingSteer || []).map((message) => ({
+		role: message.role || "user",
+		content: message.content || "",
 	})),
 	toolResults: conversation.toolResults || {},
 });
@@ -635,6 +650,14 @@ const ChatPage: React.FC = () => {
 						setSteerAvailable(true);
 					}
 
+					if (event.kind === "user-message") {
+						setConversation((currentConversation) =>
+							currentConversation
+								? { ...currentConversation, pendingSteer: [] }
+								: currentConversation,
+						);
+					}
+
 					setMessages((currentMessages) =>
 						applyChatStreamEvent(currentMessages, event),
 					);
@@ -893,7 +916,13 @@ const ChatPage: React.FC = () => {
 
 	const handleSubmit = async () => {
 		const prompt = draft.trim();
+		const steeringSubmission = sending && canSteerActiveConversation;
+		const attachmentsForSubmit = attachments;
 		if ((!prompt && attachments.length === 0) || steering) {
+			return;
+		}
+		if (steeringSubmission && !prompt) {
+			showToast("Steering requires a text message", "error");
 			return;
 		}
 
@@ -910,8 +939,25 @@ const ChatPage: React.FC = () => {
 			setStreamError(null);
 
 			try {
-				await apiService.steerConversation(activeConversationId, prompt);
+				const queuedContent = buildUserContent(prompt, attachmentsForSubmit);
+				await apiService.steerConversation(
+					activeConversationId,
+					prompt,
+					queuedContent,
+				);
+				setConversation((currentConversation) =>
+					currentConversation
+						? {
+								...currentConversation,
+								pendingSteer: [
+									...(currentConversation.pendingSteer || []),
+									{ role: "user", content: queuedContent },
+								],
+							}
+						: currentConversation,
+				);
 				setDraft("");
+				setAttachments([]);
 				showToast("Steering queued for the active conversation", "success");
 			} catch (error) {
 				const message =
@@ -929,7 +975,7 @@ const ChatPage: React.FC = () => {
 
 		setDraft("");
 		setStreamError(null);
-		const attachmentsForSend = attachments;
+		const attachmentsForSend = attachmentsForSubmit;
 		setAttachments([]);
 		setMessages((currentMessages) => [
 			...currentMessages,
@@ -1018,6 +1064,14 @@ const ChatPage: React.FC = () => {
 
 						if (event.kind === "tool-use" || event.kind === "tool-result") {
 							setSteerAvailable(true);
+						}
+
+						if (event.kind === "user-message") {
+							setConversation((currentConversation) =>
+								currentConversation
+									? { ...currentConversation, pendingSteer: [] }
+									: currentConversation,
+							);
 						}
 
 						setMessages((currentMessages) =>
@@ -1199,7 +1253,7 @@ const ChatPage: React.FC = () => {
 	};
 
 	const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
-		if (sending) {
+		if (sending && !canSteerActiveConversation) {
 			return;
 		}
 
@@ -1223,7 +1277,7 @@ const ChatPage: React.FC = () => {
 		event.preventDefault();
 		setDragActive(false);
 
-		if (sending) {
+		if (sending && !canSteerActiveConversation) {
 			return;
 		}
 
@@ -1398,12 +1452,17 @@ const ChatPage: React.FC = () => {
 		[conversations],
 	);
 
-	const canSubmit = draft.trim().length > 0 || attachments.length > 0;
 	const hasActiveConversationTarget = Boolean(activeConversationId);
-	const canStopActiveConversation = sending && hasActiveConversationTarget;
-	const canStartNewChat = !sending || hasActiveConversationTarget;
 	const canSteerActiveConversation =
 		hasActiveConversationTarget && steerAvailable;
+	const isSteeringMode = sending && canSteerActiveConversation;
+	const canSubmit = isSteeringMode
+		? draft.trim().length > 0
+		: draft.trim().length > 0 || attachments.length > 0;
+	const canStopActiveConversation = sending && hasActiveConversationTarget;
+	const canStartNewChat = !sending || hasActiveConversationTarget;
+	const submitActionLabel = steering ? "Queueing…" : sending ? "Steer" : "Send";
+	const stopActionLabel = canStopActiveConversation ? "Stop" : "Starting…";
 	const composerMetaText = useMemo(() => {
 		if (!conversation) {
 			return "";
@@ -1462,6 +1521,7 @@ const ChatPage: React.FC = () => {
 
 		return parts.join(", ");
 	}, [conversation, statusTick]);
+	const pendingSteerMessages = conversation?.pendingSteer || [];
 
 	const handleCloseNewChatDialog = () => {
 		setNewChatProfileDraft(
@@ -1734,12 +1794,12 @@ const ChatPage: React.FC = () => {
 								/>
 
 						<div
-							aria-label="Resize sidebar"
-							aria-orientation="vertical"
-							className={cn(
-								"sidebar-splitter absolute bottom-0 right-0 top-[4.25rem] z-10 hidden translate-x-1/2 cursor-col-resize items-center justify-center lg:flex",
-								isResizingSidebar && "is-resizing",
-							)}
+								aria-label="Resize sidebar"
+								aria-orientation="vertical"
+								className={cn(
+									"sidebar-splitter absolute bottom-0 right-0 top-0 z-10 hidden translate-x-1/2 cursor-col-resize items-center justify-center lg:flex",
+									isResizingSidebar && "is-resizing",
+								)}
 							data-testid="chat-sidebar-resizer"
 							onDoubleClick={handleSidebarResizeDoubleClick}
 							onMouseDown={handleSidebarResizeStart}
@@ -1758,29 +1818,17 @@ const ChatPage: React.FC = () => {
 							className="sidebar-collapsed-rail hidden lg:sticky lg:top-0 lg:flex lg:h-[100dvh] lg:self-start"
 							data-testid="sidebar-collapsed-rail"
 						>
-							<button
-								aria-label="Show panel"
-								className="sidebar-toggle-button sidebar-toggle-button-collapsed"
-								data-testid="sidebar-attached-toggle"
-								onClick={handleSidebarToggle}
-								type="button"
-							>
-								<svg
-									aria-hidden="true"
-									className="h-4 w-4"
-									fill="none"
-									viewBox="0 0 24 24"
-									xmlns="http://www.w3.org/2000/svg"
+							<div className="sidebar-collapsed-actions">
+								<button
+									aria-label="Show panel"
+									className="sidebar-toggle-button sidebar-toggle-button-collapsed"
+									data-testid="sidebar-attached-toggle"
+									onClick={handleSidebarToggle}
+									type="button"
 								>
-									<path
-										d="m9 6 6 6-6 6"
-										stroke="currentColor"
-										strokeLinecap="round"
-										strokeLinejoin="round"
-										strokeWidth="1.8"
-									/>
-								</svg>
-							</button>
+									<PanelLeftOpen aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
+								</button>
+							</div>
 						</div>
 
 						<button
@@ -1790,28 +1838,14 @@ const ChatPage: React.FC = () => {
 							onClick={handleSidebarToggle}
 							type="button"
 						>
-							<svg
-								aria-hidden="true"
-								className="h-4 w-4"
-								fill="none"
-								viewBox="0 0 24 24"
-								xmlns="http://www.w3.org/2000/svg"
-							>
-								<path
-									d="m9 6 6 6-6 6"
-									stroke="currentColor"
-									strokeLinecap="round"
-									strokeLinejoin="round"
-									strokeWidth="1.8"
-								/>
-							</svg>
+							<PanelLeftOpen aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
 						</button>
 					</>
 				) : null}
 
-				<main className="relative flex h-[100dvh] min-w-0 flex-1 flex-col overflow-hidden">
+				<main className="chat-main-panel relative flex h-[100dvh] min-w-0 flex-1 flex-col overflow-hidden">
 					<div
-						className="min-h-0 flex-1 overflow-y-auto"
+						className="chat-main-scroll min-h-0 flex-1 overflow-y-auto"
 						data-testid="chat-transcript-scroll"
 						onScroll={handleTranscriptScroll}
 					>
@@ -1850,12 +1884,13 @@ const ChatPage: React.FC = () => {
 										</div>
 									</div>
 								) : null}
+								<PendingSteerList messages={pendingSteerMessages} />
 								<div ref={transcriptEndRef} />
 							</>
 						)}
 					</div>
 
-					<div className="sticky bottom-0 z-10 shrink-0 bg-[color:var(--kodelet-panel-soft)]/95 px-4 py-2.5 pb-[calc(0.55rem+env(safe-area-inset-bottom))] backdrop-blur-sm md:px-8 md:py-3">
+					<div className="composer-dock sticky bottom-0 z-10 shrink-0 px-4 py-2.5 pb-[calc(0.55rem+env(safe-area-inset-bottom))] md:px-8 md:py-3">
 						<div className="mx-auto w-full max-w-5xl px-4 md:px-8">
 							{streamError ? (
 								<div className="surface-panel mb-3 rounded-2xl border-kodelet-orange/20 px-4 py-3 text-sm text-kodelet-dark">
@@ -1921,9 +1956,9 @@ const ChatPage: React.FC = () => {
 									sending
 										? !hasActiveConversationTarget
 											? "Waiting for conversation to start…"
-											: canSteerActiveConversation
-												? "Steer the active conversation…"
-												: "Steering becomes available if the agent starts another turn…"
+										: canSteerActiveConversation
+											? "Steer the active conversation…"
+											: "Add your guidance here..."
 										: "Ask kodelet anything..."
 								}
 								value={draft}
@@ -1935,39 +1970,11 @@ const ChatPage: React.FC = () => {
 										<button
 											aria-label="Add image"
 											className="composer-icon-button"
-											disabled={sending || steering}
+											disabled={(sending && !canSteerActiveConversation) || steering}
 												onClick={() => fileInputRef.current?.click()}
 												type="button"
-											>
-												<svg
-													aria-hidden="true"
-													className="h-4 w-4"
-													fill="none"
-													viewBox="0 0 24 24"
-													xmlns="http://www.w3.org/2000/svg"
-												>
-													<path
-														d="M12 16.5v-9"
-														stroke="currentColor"
-														strokeLinecap="round"
-														strokeLinejoin="round"
-														strokeWidth="1.7"
-													/>
-													<path
-														d="M7.5 12 12 7.5 16.5 12"
-														stroke="currentColor"
-														strokeLinecap="round"
-														strokeLinejoin="round"
-														strokeWidth="1.7"
-													/>
-													<path
-														d="M5.5 18.5h13"
-														stroke="currentColor"
-														strokeLinecap="round"
-														strokeLinejoin="round"
-														strokeWidth="1.7"
-													/>
-											</svg>
+										>
+											<ImageUp aria-hidden="true" className="h-4 w-4" strokeWidth={1.8} />
 										</button>
 
 										<button
@@ -1978,42 +1985,7 @@ const ChatPage: React.FC = () => {
 											title="Show git diff"
 											type="button"
 										>
-											<svg
-												aria-hidden="true"
-												className="h-4 w-4"
-												fill="none"
-												viewBox="0 0 24 24"
-												xmlns="http://www.w3.org/2000/svg"
-											>
-												<path
-													d="M4 7h16"
-													stroke="currentColor"
-													strokeLinecap="round"
-													strokeLinejoin="round"
-													strokeWidth="1.7"
-												/>
-												<path
-													d="M4 12h7"
-													stroke="currentColor"
-													strokeLinecap="round"
-													strokeLinejoin="round"
-													strokeWidth="1.7"
-												/>
-												<path
-													d="M4 17h16"
-													stroke="currentColor"
-													strokeLinecap="round"
-													strokeLinejoin="round"
-													strokeWidth="1.7"
-												/>
-												<path
-													d="m15 10 2 2 3-4"
-													stroke="currentColor"
-													strokeLinecap="round"
-													strokeLinejoin="round"
-													strokeWidth="1.7"
-												/>
-											</svg>
+											<GitCompareArrows aria-hidden="true" className="h-4 w-4" strokeWidth={1.8} />
 										</button>
 
 										<button
@@ -2024,36 +1996,7 @@ const ChatPage: React.FC = () => {
 											title="Open terminal"
 											type="button"
 										>
-											<svg
-												aria-hidden="true"
-												className="h-4 w-4"
-												fill="none"
-												viewBox="0 0 24 24"
-												xmlns="http://www.w3.org/2000/svg"
-											>
-												<rect
-													x="3.5"
-													y="5"
-													width="17"
-													height="14"
-													rx="2.5"
-													stroke="currentColor"
-													strokeWidth="1.7"
-												/>
-												<path
-													d="m7.5 10.5 2.5 2.5-2.5 2.5"
-													stroke="currentColor"
-													strokeLinecap="round"
-													strokeLinejoin="round"
-													strokeWidth="1.7"
-												/>
-												<path
-													d="M13.5 15.5h3"
-													stroke="currentColor"
-													strokeLinecap="round"
-													strokeWidth="1.7"
-												/>
-											</svg>
+											<SquareTerminal aria-hidden="true" className="h-4 w-4" strokeWidth={1.8} />
 										</button>
 
 										<button
@@ -2063,79 +2006,13 @@ const ChatPage: React.FC = () => {
 												data-testid="composer-expand-toggle"
 												onClick={() => setComposerExpanded((currentValue) => !currentValue)}
 												type="button"
-											>
-												<svg
-													aria-hidden="true"
-													className="h-4 w-4"
-													fill="none"
-													viewBox="0 0 24 24"
-													xmlns="http://www.w3.org/2000/svg"
-												>
-													{composerExpanded ? (
-														<>
-															<path
-																d="M8 3H5a2 2 0 0 0-2 2v3"
-																stroke="currentColor"
-																strokeLinecap="round"
-																strokeLinejoin="round"
-																strokeWidth="1.7"
-															/>
-															<path
-																d="M16 3h3a2 2 0 0 1 2 2v3"
-																stroke="currentColor"
-																strokeLinecap="round"
-																strokeLinejoin="round"
-																strokeWidth="1.7"
-															/>
-															<path
-																d="M8 21H5a2 2 0 0 1-2-2v-3"
-																stroke="currentColor"
-																strokeLinecap="round"
-																strokeLinejoin="round"
-																strokeWidth="1.7"
-															/>
-															<path
-																d="M16 21h3a2 2 0 0 0 2-2v-3"
-																stroke="currentColor"
-																strokeLinecap="round"
-																strokeLinejoin="round"
-																strokeWidth="1.7"
-															/>
-														</>
-													) : (
-														<>
-															<path
-																d="M15 3h6v6"
-																stroke="currentColor"
-																strokeLinecap="round"
-																strokeLinejoin="round"
-																strokeWidth="1.7"
-															/>
-															<path
-																d="M9 21H3v-6"
-																stroke="currentColor"
-																strokeLinecap="round"
-																strokeLinejoin="round"
-																strokeWidth="1.7"
-															/>
-															<path
-																d="M21 3 14 10"
-																stroke="currentColor"
-																strokeLinecap="round"
-																strokeLinejoin="round"
-																strokeWidth="1.7"
-															/>
-															<path
-																d="M3 21 10 14"
-																stroke="currentColor"
-																strokeLinecap="round"
-																strokeLinejoin="round"
-																strokeWidth="1.7"
-															/>
-														</>
-													)}
-												</svg>
-											</button>
+										>
+											{composerExpanded ? (
+												<Minimize2 aria-hidden="true" className="h-4 w-4" strokeWidth={1.8} />
+											) : (
+												<Maximize2 aria-hidden="true" className="h-4 w-4" strokeWidth={1.8} />
+											)}
+										</button>
 										</div>
 
 										<div className="composer-context-cluster">
@@ -2175,36 +2052,49 @@ const ChatPage: React.FC = () => {
 									</div>
 
 										<div className="composer-status-actions">
-											{sending ? (
-												<button
-													className="composer-capsule"
-													disabled={!canStopActiveConversation}
-													onClick={handleStop}
-													type="button"
-												>
-													{canStopActiveConversation ? "Stop" : "Starting…"}
-												</button>
-											) : null}
-
+										{sending ? (
 											<button
-												className={cn(
-													"primary-pill-button",
-													steering ||
-														!canSubmit ||
-														(sending && !canSteerActiveConversation)
-														? "cursor-not-allowed bg-kodelet-mid-gray"
-														: "bg-kodelet-dark hover:bg-black",
-												)}
-												disabled={
-													steering ||
-													!canSubmit ||
-													(sending && !canSteerActiveConversation)
-												}
-												onClick={() => void handleSubmit()}
+												aria-label={stopActionLabel}
+												className="composer-action-icon-button composer-action-icon-button-stop"
+												disabled={!canStopActiveConversation}
+												onClick={handleStop}
+												title={stopActionLabel}
 												type="button"
 											>
-												{steering ? "Queueing…" : sending ? "Steer" : "Send"}
+											<Square
+												aria-hidden="true"
+												className="composer-action-stop-icon"
+												fill="currentColor"
+												strokeWidth={0}
+											/>
 											</button>
+										) : null}
+
+										<button
+											className={cn(
+												"composer-action-icon-button composer-action-icon-button-submit",
+												steering ||
+													!canSubmit ||
+													(sending && !canSteerActiveConversation)
+													? "composer-action-icon-button-disabled"
+													: "composer-action-icon-button-ready",
+											)}
+											aria-label={submitActionLabel}
+											disabled={
+												steering ||
+												!canSubmit ||
+													(sending && !canSteerActiveConversation)
+											}
+											onClick={() => void handleSubmit()}
+											title={submitActionLabel}
+											type="button"
+										>
+											<ArrowUp
+												aria-hidden="true"
+												className="composer-action-submit-icon"
+												strokeWidth={3}
+											/>
+										</button>
 										</div>
 									</div>
 								</div>

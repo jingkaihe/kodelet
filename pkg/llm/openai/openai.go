@@ -629,12 +629,14 @@ func (t *Thread) processPendingSteer(ctx context.Context, requestParams *openai.
 				continue
 			}
 
-			userMessage := openai.ChatCompletionMessage{
-				Role:    openai.ChatMessageRoleUser,
-				Content: steerMsg.Content,
-			}
+			userMessage := t.pendingSteerChatMessage(ctx, steerMsg)
+			t.messages = append(t.messages, userMessage)
 			requestParams.Messages = append(requestParams.Messages, userMessage)
-			handler.HandleText(fmt.Sprintf("🗣️ User steering: %s", steerMsg.Content))
+			if userHandler, ok := handler.(llmtypes.UserMessageHandler); ok {
+				userHandler.HandleUserMessage(steerMsg.Content, steerMsg.Images)
+			} else {
+				handler.HandleText(steer.FormatPendingNotice(steerMsg.Content, len(steerMsg.Images)))
+			}
 		}
 
 		if err := steerStore.ClearPendingSteer(t.ConversationID); err != nil {
@@ -645,6 +647,46 @@ func (t *Thread) processPendingSteer(ctx context.Context, requestParams *openai.
 	}
 
 	return nil
+}
+
+func (t *Thread) pendingSteerChatMessage(ctx context.Context, steerMsg steer.Message) openai.ChatCompletionMessage {
+	if len(steerMsg.Images) == 0 {
+		return openai.ChatCompletionMessage{
+			Role:    openai.ChatMessageRoleUser,
+			Content: steerMsg.Content,
+		}
+	}
+
+	imagePaths := steerMsg.Images
+	if len(imagePaths) > base.MaxImageCount {
+		logger.G(ctx).
+			WithField("image_count", len(imagePaths)).
+			WithField("max_image_count", base.MaxImageCount).
+			Warn("too many steering images provided; truncating")
+		imagePaths = imagePaths[:base.MaxImageCount]
+	}
+
+	contentParts := make([]openai.ChatMessagePart, 0, len(imagePaths)+1)
+	for _, imagePath := range imagePaths {
+		imagePart, err := t.processImage(imagePath)
+		if err != nil {
+			logger.G(ctx).
+				WithError(err).
+				WithField("image_path", imagePath).
+				Warn("failed to process steering image")
+			continue
+		}
+		contentParts = append(contentParts, *imagePart)
+	}
+	contentParts = append(contentParts, openai.ChatMessagePart{
+		Type: openai.ChatMessagePartTypeText,
+		Text: steerMsg.Content,
+	})
+
+	return openai.ChatCompletionMessage{
+		Role:         openai.ChatMessageRoleUser,
+		MultiContent: contentParts,
+	}
 }
 
 func (t *Thread) createChatCompletionWithRetry(

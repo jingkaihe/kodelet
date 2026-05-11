@@ -15,12 +15,14 @@ import (
 type SteerConfig struct {
 	ConversationID string
 	Follow         bool
+	Images         []string
 }
 
 func NewSteerConfig() *SteerConfig {
 	return &SteerConfig{
 		ConversationID: "",
 		Follow:         false,
+		Images:         []string{},
 	}
 }
 
@@ -34,13 +36,14 @@ in autonomous mode via 'kodelet run'.
 Example:
   kodelet steer --conversation-id 20231201T120000-a1b2c3d4e5f67890 "Please focus on error handling"
   kodelet steer --conversation-id 20231201T120000-a1b2c3d4e5f67890 "That approach looks good, continue"
+  kodelet steer --conversation-id 20231201T120000-a1b2c3d4e5f67890 --image ./screenshot.png "Use this screenshot as context"
   kodelet steer -f "Please focus on error handling"
   kodelet steer --follow "That approach looks good, continue"`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := cmd.Context()
 		config := getSteerConfigFromFlags(ctx, cmd)
-		sendSteerCmd(ctx, config.ConversationID, args[0], config.Follow)
+		sendSteerCmd(ctx, config.ConversationID, args[0], config.Follow, config.Images)
 	},
 }
 
@@ -48,6 +51,7 @@ func init() {
 	steerDefaults := NewSteerConfig()
 	steerCmd.Flags().StringVar(&steerDefaults.ConversationID, "conversation-id", steerDefaults.ConversationID, "ID of the conversation to steer")
 	steerCmd.Flags().BoolP("follow", "f", steerDefaults.Follow, "Steer the most recent conversation")
+	steerCmd.Flags().StringSliceP("image", "I", steerDefaults.Images, "Add image input (can be used multiple times)")
 }
 
 func getSteerConfigFromFlags(ctx context.Context, cmd *cobra.Command) *SteerConfig {
@@ -58,6 +62,9 @@ func getSteerConfigFromFlags(ctx context.Context, cmd *cobra.Command) *SteerConf
 	}
 	if follow, err := cmd.Flags().GetBool("follow"); err == nil {
 		config.Follow = follow
+	}
+	if images, err := cmd.Flags().GetStringSlice("image"); err == nil {
+		config.Images = images
 	}
 
 	if config.Follow {
@@ -77,7 +84,7 @@ func getSteerConfigFromFlags(ctx context.Context, cmd *cobra.Command) *SteerConf
 	return config
 }
 
-func sendSteerCmd(ctx context.Context, conversationID, message string, isFollow bool) {
+func sendSteerCmd(ctx context.Context, conversationID, message string, isFollow bool, images []string) {
 	if conversationID == "" {
 		presenter.Error(errors.New("conversation ID is required"), "Please provide a conversation ID using --conversation-id or use -f to target the most recent conversation")
 		os.Exit(1)
@@ -122,7 +129,7 @@ func sendSteerCmd(ctx context.Context, conversationID, message string, isFollow 
 		presenter.Warning("There is already pending steering for this conversation. The new message will be queued.")
 	}
 
-	err = steerStore.WriteSteer(conversationID, message)
+	err = steerStore.WriteSteerWithImages(conversationID, message, images)
 	if err != nil {
 		presenter.Error(err, "Failed to write steering message")
 		os.Exit(1)
@@ -134,6 +141,9 @@ func sendSteerCmd(ctx context.Context, conversationID, message string, isFollow 
 		presenter.Success(fmt.Sprintf("Steering sent to conversation %s", conversationID))
 	}
 	presenter.Info(fmt.Sprintf("Message: %s", message))
+	if len(images) > 0 {
+		presenter.Info(fmt.Sprintf("Images: %d", len(images)))
+	}
 
 	presenter.Info("The steering will be processed when the conversation makes its next API call.")
 	presenter.Info("If the conversation is not currently running, start it with:")

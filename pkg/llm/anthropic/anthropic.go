@@ -708,11 +708,15 @@ func (t *Thread) processPendingSteer(ctx context.Context, messageParams *anthrop
 				continue
 			}
 
-			userMessage := anthropic.NewUserMessage(
-				anthropic.NewTextBlock(steerMsg.Content),
-			)
+			contentBlocks := t.pendingSteerContentBlocks(ctx, steerMsg)
+			userMessage := anthropic.NewUserMessage(contentBlocks...)
+			t.messages = append(t.messages, userMessage)
 			messageParams.Messages = append(messageParams.Messages, userMessage)
-			handler.HandleText(fmt.Sprintf("🗣️ User steering: %s", steerMsg.Content))
+			if userHandler, ok := handler.(llmtypes.UserMessageHandler); ok {
+				userHandler.HandleUserMessage(steerMsg.Content, steerMsg.Images)
+			} else {
+				handler.HandleText(steer.FormatPendingNotice(steerMsg.Content, len(steerMsg.Images)))
+			}
 		}
 
 		if err := steerStore.ClearPendingSteer(t.ConversationID); err != nil {
@@ -723,6 +727,33 @@ func (t *Thread) processPendingSteer(ctx context.Context, messageParams *anthrop
 	}
 
 	return nil
+}
+
+func (t *Thread) pendingSteerContentBlocks(ctx context.Context, steerMsg steer.Message) []anthropic.ContentBlockParamUnion {
+	imagePaths := steerMsg.Images
+	if len(imagePaths) > base.MaxImageCount {
+		logger.G(ctx).
+			WithField("image_count", len(imagePaths)).
+			WithField("max_image_count", base.MaxImageCount).
+			Warn("too many steering images provided; truncating")
+		imagePaths = imagePaths[:base.MaxImageCount]
+	}
+
+	contentBlocks := make([]anthropic.ContentBlockParamUnion, 0, len(imagePaths)+1)
+	for _, imagePath := range imagePaths {
+		imageBlock, err := t.processImage(imagePath)
+		if err != nil {
+			logger.G(ctx).
+				WithError(err).
+				WithField("image_path", imagePath).
+				Warn("failed to process steering image")
+			continue
+		}
+		contentBlocks = append(contentBlocks, *imageBlock)
+	}
+
+	contentBlocks = append(contentBlocks, anthropic.NewTextBlock(steerMsg.Content))
+	return contentBlocks
 }
 
 func (t *Thread) getModelAndTokens(opt llmtypes.MessageOpt) (anthropic.Model, int) {

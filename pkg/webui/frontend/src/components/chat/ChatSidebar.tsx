@@ -1,4 +1,5 @@
 import React from "react";
+import { ChevronRight, PanelLeftClose, SquarePen } from "lucide-react";
 import type { Conversation } from "../../types";
 import { cn, truncateText } from "../../utils";
 
@@ -193,35 +194,27 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 	const showLoadingState = loading && conversations.length === 0;
 
 	return (
-		<aside className="chat-sidebar-surface relative overflow-visible border-b border-black/8 px-6 py-6 lg:flex lg:h-screen lg:flex-col lg:border-b-0 lg:border-r">
-			{onHide ? (
-				<button
-					aria-label="Hide panel"
-					className="sidebar-toggle-button sidebar-toggle-button-open"
-					data-testid="sidebar-hide-button"
-					disabled={disabled}
-					onClick={onHide}
-					type="button"
-				>
-					<svg
-						aria-hidden="true"
-						className="h-4 w-4"
-						fill="none"
-						viewBox="0 0 24 24"
-						xmlns="http://www.w3.org/2000/svg"
-					>
-						<path
-							d="M15 6 9 12l6 6"
-							stroke="currentColor"
-							strokeLinecap="round"
-							strokeLinejoin="round"
-							strokeWidth="1.8"
-						/>
-					</svg>
-				</button>
-			) : null}
+		<aside className="chat-sidebar-surface relative overflow-visible border-b border-black/8 px-6 py-6 lg:flex lg:h-screen lg:flex-col lg:border-b-0">
+			<div className="sidebar-header">
+				<div className="sidebar-brand" aria-label="Kodelet conversations">
+					Kodelet
+				</div>
 
-			<div className="min-h-0 flex-1 pt-8 lg:pt-2">
+				{onHide ? (
+					<button
+						aria-label="Hide panel"
+						className="sidebar-toggle-button sidebar-toggle-button-open"
+						data-testid="sidebar-hide-button"
+						disabled={disabled}
+						onClick={onHide}
+						type="button"
+					>
+						<PanelLeftClose aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
+					</button>
+				) : null}
+			</div>
+
+			<div className="min-h-0 flex-1">
 				<button
 					className="sidebar-action-link"
 					data-testid="sidebar-new-chat-button"
@@ -229,13 +222,11 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 					onClick={onNewChat}
 					type="button"
 				>
-					<span aria-hidden="true" className="sidebar-action-icon">
-						<span className="sidebar-action-plus">+</span>
-					</span>
-					<span className="sidebar-action-label">New chat</span>
+					<SquarePen aria-hidden="true" className="sidebar-action-icon" strokeWidth={1.9} />
+					<span className="sidebar-action-label">New Chat</span>
 				</button>
 
-				<div className="sidebar-section-title">Recent chats</div>
+				<div className="sidebar-section-title">Recents</div>
 
 				<div className="conversation-list max-h-[calc(100vh-13.5rem)] overflow-y-auto pr-1">
 					{conversations.length === 0 && !showLoadingState ? (
@@ -286,23 +277,13 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 								type="button"
 							>
 								<span className="conversation-group-chevron" aria-hidden="true">
-									<svg
+									<ChevronRight
 										className={cn(
 											"h-3.5 w-3.5",
 											expandedGroups[group.key] !== false && "rotate-90",
 										)}
-										fill="none"
-										viewBox="0 0 24 24"
-										xmlns="http://www.w3.org/2000/svg"
-									>
-										<path
-											d="m9 6 6 6-6 6"
-											stroke="currentColor"
-											strokeLinecap="round"
-											strokeLinejoin="round"
-											strokeWidth="1.8"
-										/>
-									</svg>
+										strokeWidth={1.9}
+									/>
 								</span>
 								<span
 									className="conversation-group-labels"
