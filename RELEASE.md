@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.4.6-beta (2026-05-11)
+
+Added a configurable MCP code-execution RPC transport, keeping Unix sockets as the default while allowing an ephemeral localhost HTTP endpoint for environments where sockets are impractical.
+
 ## 0.4.5-beta (2026-05-08)
 
 Refined the Web UI chat transcript with grouped reasoning cards, an animated streaming indicator, and compact expandable tool activity summaries.
