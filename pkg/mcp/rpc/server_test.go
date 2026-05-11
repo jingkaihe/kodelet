@@ -121,6 +121,33 @@ func TestNewMCPRPCServer(t *testing.T) {
 	}
 }
 
+func TestNewMCPHTTPRPCServer(t *testing.T) {
+	manager := createTestMCPManager(t)
+	server, err := NewMCPHTTPRPCServer(manager, "test-token")
+	require.NoError(t, err)
+	require.NotNil(t, server)
+
+	assert.Empty(t, server.SocketPath())
+	assert.Equal(t, "test-token", server.BearerToken())
+	assert.Regexp(t, `^http://127\.0\.0\.1:\d+/$`, server.EndpointURL())
+	assert.NotNil(t, server.listener)
+	assert.NotNil(t, server.server)
+	assert.Equal(t, manager, server.mcpManager)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = server.Shutdown(ctx)
+}
+
+func TestNewMCPHTTPRPCServer_RequiresBearerToken(t *testing.T) {
+	manager := createTestMCPManager(t)
+	server, err := NewMCPHTTPRPCServer(manager, " ")
+
+	require.Error(t, err)
+	assert.Nil(t, server)
+	assert.Contains(t, err.Error(), "bearer token cannot be empty")
+}
+
 func TestMCPRPCServer_HandleMCPCall_MethodNotAllowed(t *testing.T) {
 	manager := createTestMCPManager(t)
 	server := &MCPRPCServer{
@@ -148,6 +175,52 @@ func TestMCPRPCServer_HandleMCPCall_InvalidJSON(t *testing.T) {
 	server.handleMCPCall(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestMCPRPCServer_HandleMCPCall_Unauthorized(t *testing.T) {
+	manager := createTestMCPManager(t)
+	server := &MCPRPCServer{
+		mcpManager:  manager,
+		bearerToken: "test-token",
+	}
+
+	rpcReq := MCPRPCRequest{
+		Tool:      "test_tool",
+		Arguments: map[string]any{},
+	}
+	reqBody, err := json.Marshal(rpcReq)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBuffer(reqBody))
+	w := httptest.NewRecorder()
+
+	server.handleMCPCall(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.Contains(t, w.Body.String(), "unauthorized")
+}
+
+func TestMCPRPCServer_HandleMCPCall_Authorized(t *testing.T) {
+	manager := createTestMCPManager(t)
+	server := &MCPRPCServer{
+		mcpManager:  manager,
+		bearerToken: "test-token",
+	}
+
+	rpcReq := MCPRPCRequest{
+		Tool:      "test_tool",
+		Arguments: map[string]any{},
+	}
+	reqBody, err := json.Marshal(rpcReq)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBuffer(reqBody))
+	req.Header.Set("Authorization", "Bearer test-token")
+	w := httptest.NewRecorder()
+
+	server.handleMCPCall(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
 func TestMCPRPCServer_HandleMCPCall_ToolNotFound(t *testing.T) {
@@ -203,6 +276,16 @@ func TestMCPRPCServer_SocketPath(t *testing.T) {
 	}
 
 	assert.Equal(t, expectedPath, server.SocketPath())
+}
+
+func TestMCPRPCServer_EndpointURLAndBearerToken(t *testing.T) {
+	server := &MCPRPCServer{
+		endpointURL: "http://127.0.0.1:12345/",
+		bearerToken: "test-token",
+	}
+
+	assert.Equal(t, "http://127.0.0.1:12345/", server.EndpointURL())
+	assert.Equal(t, "test-token", server.BearerToken())
 }
 
 func TestMCPRPCServer_Shutdown(t *testing.T) {

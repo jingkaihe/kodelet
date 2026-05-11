@@ -4,9 +4,11 @@ package rpc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -18,10 +20,12 @@ import (
 
 // MCPRPCServer provides an RPC endpoint for code execution to call MCP tools
 type MCPRPCServer struct {
-	mcpManager *tools.MCPManager
-	listener   net.Listener
-	server     *http.Server
-	socketPath string
+	mcpManager  *tools.MCPManager
+	listener    net.Listener
+	server      *http.Server
+	socketPath  string
+	endpointURL string
+	bearerToken string
 }
 
 // MCPRPCRequest represents a request to call an MCP tool
@@ -50,10 +54,32 @@ func NewMCPRPCServer(mcpManager *tools.MCPManager, socketPath string) (*MCPRPCSe
 		return nil, errors.Wrap(err, "failed to create unix socket listener")
 	}
 
+	return newMCPRPCServer(mcpManager, listener, socketPath, "", ""), nil
+}
+
+// NewMCPHTTPRPCServer creates a new MCP RPC server bound to localhost over HTTP.
+func NewMCPHTTPRPCServer(mcpManager *tools.MCPManager, bearerToken string) (*MCPRPCServer, error) {
+	bearerToken = strings.TrimSpace(bearerToken)
+	if bearerToken == "" {
+		return nil, errors.New("bearer token cannot be empty")
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create http listener")
+	}
+
+	endpointURL := fmt.Sprintf("http://%s/", listener.Addr().String())
+	return newMCPRPCServer(mcpManager, listener, "", endpointURL, bearerToken), nil
+}
+
+func newMCPRPCServer(mcpManager *tools.MCPManager, listener net.Listener, socketPath, endpointURL, bearerToken string) *MCPRPCServer {
 	s := &MCPRPCServer{
-		mcpManager: mcpManager,
-		listener:   listener,
-		socketPath: socketPath,
+		mcpManager:  mcpManager,
+		listener:    listener,
+		socketPath:  socketPath,
+		endpointURL: endpointURL,
+		bearerToken: bearerToken,
 	}
 
 	mux := http.NewServeMux()
@@ -65,7 +91,7 @@ func NewMCPRPCServer(mcpManager *tools.MCPManager, socketPath string) (*MCPRPCSe
 		WriteTimeout: 30 * time.Second,
 	}
 
-	return s, nil
+	return s
 }
 
 // handleMCPCall handles an RPC call to an MCP tool
@@ -74,6 +100,11 @@ func (s *MCPRPCServer) handleMCPCall(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.bearerToken != "" && r.Header.Get("Authorization") != "Bearer "+s.bearerToken {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -134,7 +165,7 @@ func (s *MCPRPCServer) handleMCPCall(w http.ResponseWriter, r *http.Request) {
 
 // Start starts the RPC server
 func (s *MCPRPCServer) Start(ctx context.Context) error {
-	logger.G(ctx).WithField("socket", s.socketPath).Debug("Starting MCP RPC server")
+	logger.G(ctx).WithField("socket", s.socketPath).WithField("endpoint", s.endpointURL).Debug("Starting MCP RPC server")
 	if err := s.server.Serve(s.listener); err != nil && err != http.ErrServerClosed {
 		return errors.Wrap(err, "RPC server failed")
 	}
@@ -147,14 +178,25 @@ func (s *MCPRPCServer) Shutdown(ctx context.Context) error {
 	if err := s.server.Shutdown(ctx); err != nil {
 		return errors.Wrap(err, "failed to shutdown RPC server")
 	}
-	// Clean up socket file
-	if err := os.RemoveAll(s.socketPath); err != nil {
-		logger.G(ctx).WithError(err).Warn("failed to remove socket file")
+	if s.socketPath != "" {
+		if err := os.RemoveAll(s.socketPath); err != nil {
+			logger.G(ctx).WithError(err).Warn("failed to remove socket file")
+		}
 	}
 	return nil
 }
 
-// SocketPath returns the path to the Unix socket
+// SocketPath returns the path to the Unix socket.
 func (s *MCPRPCServer) SocketPath() string {
 	return s.socketPath
+}
+
+// EndpointURL returns the HTTP endpoint URL.
+func (s *MCPRPCServer) EndpointURL() string {
+	return s.endpointURL
+}
+
+// BearerToken returns the HTTP bearer token.
+func (s *MCPRPCServer) BearerToken() string {
+	return s.bearerToken
 }

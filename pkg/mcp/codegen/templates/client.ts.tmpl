@@ -7,6 +7,8 @@ import { fileURLToPath } from 'url';
 
 const CURRENT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const MCP_RPC_SOCKET = process.env.MCP_RPC_SOCKET || path.join(CURRENT_DIR, 'kodelet-mcp.sock');
+const MCP_RPC_URL = process.env.MCP_RPC_URL;
+const MCP_RPC_TOKEN = process.env.MCP_RPC_TOKEN;
 
 interface MCPRequest {
   server: string;
@@ -26,53 +28,70 @@ export async function callMCPTool<T>(serverName: string, toolName: string, args:
     tool: toolName,
     arguments: args,
   };
-  
+
   return new Promise((resolve, reject) => {
     const requestData = JSON.stringify(request);
-    
-    const options = {
-      socketPath: MCP_RPC_SOCKET,
-      path: '/',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(requestData),
-      },
+    const headers: Record<string, string | number> = {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(requestData),
     };
-    
+
+    if (MCP_RPC_TOKEN) {
+      headers['Authorization'] = `Bearer ${MCP_RPC_TOKEN}`;
+    }
+
+    const options = MCP_RPC_URL
+      ? (() => {
+          const url = new URL(MCP_RPC_URL);
+          return {
+            protocol: url.protocol,
+            hostname: url.hostname,
+            port: url.port,
+            path: `${url.pathname}${url.search}`,
+            method: 'POST',
+            headers,
+          };
+        })()
+      : {
+          socketPath: MCP_RPC_SOCKET,
+          path: '/',
+          method: 'POST',
+          headers,
+        };
+
     const req = http.request(options, (res) => {
       let data = '';
-      
+
       res.on('data', (chunk) => {
         data += chunk;
       });
-      
+
       res.on('end', () => {
         if (res.statusCode !== 200) {
           reject(new Error(`MCP tool ${toolName} failed: ${res.statusCode} ${data}`));
           return;
         }
-        
+
         try {
           const result: MCPResponse = JSON.parse(data);
-          
+
           if (result.isError) {
             reject(new Error(`MCP tool ${toolName} error: ${JSON.stringify(result.content)}`));
             return;
           }
-          
+
           // Prefer structured content if available (MCP 2025-06-18)
           if (result.structuredContent !== undefined) {
             resolve(result.structuredContent as T);
             return;
           }
-          
+
           // Fallback: extract text content and parse as JSON
           const textContent = result.content
             .filter(c => c.type === "text")
             .map(c => c.text)
             .join("");
-          
+
           try {
             resolve(JSON.parse(textContent) as T);
           } catch {
@@ -84,11 +103,11 @@ export async function callMCPTool<T>(serverName: string, toolName: string, args:
         }
       });
     });
-    
+
     req.on('error', (err) => {
       reject(new Error(`MCP RPC connection failed: ${err.message}`));
     });
-    
+
     req.write(requestData);
     req.end();
   });

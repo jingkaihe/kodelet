@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/pkg/errors"
 )
@@ -12,14 +13,25 @@ import (
 // NodeRuntime provides TypeScript/JavaScript execution via Node.js with tsx
 type NodeRuntime struct {
 	workspaceDir string
+	rpcTransport string
 	socketPath   string
+	endpointURL  string
+	bearerToken  string
 }
 
 // NewNodeRuntime creates a new Node.js runtime
 func NewNodeRuntime(workspaceDir string, socketPath string) *NodeRuntime {
+	return NewNodeRuntimeWithRPC(workspaceDir, "unix", socketPath, "", "")
+}
+
+// NewNodeRuntimeWithRPC creates a new Node.js runtime with explicit MCP RPC configuration.
+func NewNodeRuntimeWithRPC(workspaceDir, rpcTransport, socketPath, endpointURL, bearerToken string) *NodeRuntime {
 	return &NodeRuntime{
 		workspaceDir: workspaceDir,
+		rpcTransport: rpcTransport,
 		socketPath:   socketPath,
+		endpointURL:  endpointURL,
+		bearerToken:  bearerToken,
 	}
 }
 
@@ -30,8 +42,7 @@ func (n *NodeRuntime) Execute(ctx context.Context, codePath string) (string, err
 	cmd := exec.CommandContext(ctx, "npx", "tsx", codePath)
 	cmd.Dir = n.workspaceDir
 
-	// Set environment variable for MCP RPC socket
-	cmd.Env = append(os.Environ(), "MCP_RPC_SOCKET="+n.socketPath)
+	cmd.Env = n.env()
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -39,6 +50,31 @@ func (n *NodeRuntime) Execute(ctx context.Context, codePath string) (string, err
 	}
 
 	return string(output), nil
+}
+
+func (n *NodeRuntime) env() []string {
+	env := make([]string, 0, len(os.Environ())+4)
+	for _, entry := range os.Environ() {
+		if strings.HasPrefix(entry, "MCP_RPC_") {
+			continue
+		}
+		env = append(env, entry)
+	}
+
+	if n.rpcTransport != "" {
+		env = append(env, "MCP_RPC_TRANSPORT="+n.rpcTransport)
+	}
+	if n.socketPath != "" {
+		env = append(env, "MCP_RPC_SOCKET="+n.socketPath)
+	}
+	if n.endpointURL != "" {
+		env = append(env, "MCP_RPC_URL="+n.endpointURL)
+	}
+	if n.bearerToken != "" {
+		env = append(env, "MCP_RPC_TOKEN="+n.bearerToken)
+	}
+
+	return env
 }
 
 // WorkspaceDir returns the runtime workspace directory.

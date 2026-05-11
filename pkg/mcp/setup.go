@@ -3,7 +3,9 @@ package mcp
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -29,6 +31,8 @@ type ExecutionSetup struct {
 const (
 	shortHashLength          = 12
 	standaloneSocketFilename = "kodelet-mcp.sock"
+	rpcTransportUnix         = "unix"
+	rpcTransportHTTP         = "http"
 )
 
 // DefaultWorkspaceDir returns the default cache directory for generated MCP code.
@@ -105,6 +109,22 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
+func resolveRPCTransport() string {
+	transport := strings.ToLower(strings.TrimSpace(viper.GetString("mcp.code_execution.rpc_transport")))
+	if transport == "" {
+		return rpcTransportUnix
+	}
+	return transport
+}
+
+func newBearerToken() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", errors.Wrap(err, "failed to generate bearer token")
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
 // ErrDirectMode is returned when MCP is configured for direct mode instead of code execution mode
 var ErrDirectMode = errors.New("MCP configured for direct mode")
 
@@ -135,16 +155,39 @@ func SetupExecutionMode(ctx context.Context, mcpManager *tools.MCPManager, sessi
 		}
 	}
 
-	// Get socket path for this session
-	socketPath, err := GetSocketPath(sessionID)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to resolve socket path")
-	}
+	var (
+		rpcServer   *rpc.MCPRPCServer
+		socketPath  string
+		endpointURL string
+		bearerToken string
+	)
 
-	// Create RPC server
-	rpcServer, err := rpc.NewMCPRPCServer(mcpManager, socketPath)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to create MCP RPC server")
+	transport := resolveRPCTransport()
+	switch transport {
+	case rpcTransportUnix:
+		// Get socket path for this session
+		socketPath, err = GetSocketPath(sessionID)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to resolve socket path")
+		}
+
+		// Create RPC server
+		rpcServer, err = rpc.NewMCPRPCServer(mcpManager, socketPath)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to create MCP RPC server")
+		}
+	case rpcTransportHTTP:
+		bearerToken, err = newBearerToken()
+		if err != nil {
+			return nil, err
+		}
+		rpcServer, err = rpc.NewMCPHTTPRPCServer(mcpManager, bearerToken)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to create MCP HTTP RPC server")
+		}
+		endpointURL = rpcServer.EndpointURL()
+	default:
+		return nil, errors.Errorf("unsupported MCP RPC transport %q", transport)
 	}
 
 	// Start RPC server in background
@@ -160,7 +203,7 @@ func SetupExecutionMode(ctx context.Context, mcpManager *tools.MCPManager, sessi
 	}
 
 	// Create Node runtime and code_execution tool
-	nodeRuntime := runtime.NewNodeRuntime(workspaceDir, socketPath)
+	nodeRuntime := runtime.NewNodeRuntimeWithRPC(workspaceDir, transport, socketPath, endpointURL, bearerToken)
 	codeExecTool := tools.NewCodeExecutionTool(nodeRuntime)
 
 	// Add code_execution tool instead of MCP tools

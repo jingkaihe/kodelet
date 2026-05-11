@@ -68,3 +68,24 @@ func TestGetStandaloneSocketPath_WithOverride(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, expected, socketPath)
 }
+
+func TestResolveRPCTransport_DefaultsToUnix(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	assert.Equal(t, rpcTransportUnix, resolveRPCTransport())
+}
+
+func TestResolveRPCTransport_NormalizesConfiguredValue(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	viper.Set("mcp.code_execution.rpc_transport", " HTTP ")
+
+	assert.Equal(t, rpcTransportHTTP, resolveRPCTransport())
+}
+
+func TestNewBearerToken(t *testing.T) {
+	token, err := newBearerToken()
+	require.NoError(t, err)
+
+	assert.NotEmpty(t, token)
+	assert.NotContains(t, token, "=")
+}

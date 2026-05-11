@@ -212,3 +212,22 @@ func TestGenerateClient_UsesWorkspaceRelativeSocketDefault(t *testing.T) {
 	assert.Contains(t, string(clientTS), "path.join(CURRENT_DIR, 'kodelet-mcp.sock')")
 	assert.NotContains(t, string(clientTS), "/tmp/kodelet-mcp.sock")
 }
+
+func TestGenerateClient_SupportsHTTPRPCTransport(t *testing.T) {
+	outputDir := t.TempDir()
+	generator := NewMCPCodeGenerator(nil, outputDir)
+
+	err := generator.generateClient()
+	require.NoError(t, err)
+
+	clientTS, err := os.ReadFile(filepath.Join(outputDir, "client.ts"))
+	require.NoError(t, err)
+	client := string(clientTS)
+
+	assert.Contains(t, client, "const MCP_RPC_URL = process.env.MCP_RPC_URL;")
+	assert.Contains(t, client, "const MCP_RPC_TOKEN = process.env.MCP_RPC_TOKEN;")
+	assert.Contains(t, client, "headers['Authorization'] = `Bearer ${MCP_RPC_TOKEN}`;")
+	assert.Contains(t, client, "const url = new URL(MCP_RPC_URL);")
+	assert.Contains(t, client, "hostname: url.hostname")
+	assert.Contains(t, client, "socketPath: MCP_RPC_SOCKET")
+}
