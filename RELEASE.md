@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.4.9-beta (2026-05-11)
+
+Secured `kodelet serve` with generated or explicit Web UI access tokens, token login URLs, `--skip-auth`, and configurable CORS origins.
+
+Updated desktop remote connections and terminal websocket origin checks so tokenized remote Web UI URLs work without persisting secrets, while local sidecars continue to launch unauthenticated.
+
+Improved chat transcript Markdown rendering for links, lists, and long wrapping content.
+
 ## 0.4.8-beta (2026-05-11)
 
 Added a configurable MCP code-execution RPC transport, keeping Unix sockets as the default while allowing an ephemeral localhost HTTP endpoint for environments where sockets are impractical.
