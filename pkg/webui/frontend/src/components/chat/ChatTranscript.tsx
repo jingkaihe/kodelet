@@ -14,6 +14,16 @@ import { cn, formatDuration } from '../../utils';
 import { normalizeToolName, ReferenceCodeBlock } from '../tool-renderers/reference';
 
 const renderer = new marked.Renderer();
+const defaultRenderer = new marked.Renderer();
+
+renderer.link = (href, title, text) => {
+  const renderedLink = defaultRenderer.link(href, title, text);
+  if (!renderedLink.startsWith('<a ')) {
+    return renderedLink;
+  }
+
+  return renderedLink.replace('<a ', '<a class="chat-markdown-link" ');
+};
 
 renderer.list = (body, ordered, start) => {
   const tag = ordered ? 'ol' : 'ul';

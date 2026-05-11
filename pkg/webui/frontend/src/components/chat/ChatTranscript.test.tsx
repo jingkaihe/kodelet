@@ -146,6 +146,32 @@ describe('ChatTranscript', () => {
     expect(screen.getByText('second item')).toBeInTheDocument();
   });
 
+  it('renders long markdown links inside chat prose', () => {
+    const longURL = `https://example.com/${'very-long-path-segment'.repeat(12)}`;
+    const { container } = render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[
+          {
+            role: 'assistant',
+            blocks: [
+              {
+                type: 'message',
+                content: `[${longURL}](${longURL})`,
+              },
+            ],
+          },
+        ]}
+      />
+    );
+
+    const link = container.querySelector('.chat-prose a');
+
+    expect(link).toBeInTheDocument();
+    expect(link).toHaveClass('chat-markdown-link');
+    expect(link).toHaveAttribute('href', longURL);
+  });
+
   it('auto-collapses a thinking block when streaming finishes', () => {
     const { container, rerender } = render(
       <ChatTranscript

@@ -1769,10 +1769,13 @@ code[class*="language-"] {
 .prose,
 .chat-prose {
   max-width: none;
+  min-width: 0;
   color: var(--kodelet-dark);
   font-family: var(--font-body);
   font-size: 0.98rem;
   line-height: 1.75;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .prose > *:first-child,
@@ -1858,6 +1861,8 @@ code[class*="language-"] {
   text-decoration: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 0.16em;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .prose a:hover,
@@ -1926,10 +1931,13 @@ code[class*="language-"] {
 /* Enhanced prose styling for subagent and other technical content */
 .prose-enhanced {
   max-width: none;
+  min-width: 0;
   color: var(--kodelet-dark);
   font-family: var(--font-body);
   font-size: 0.95rem;
   line-height: 1.72;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .prose-enhanced p {
@@ -3357,6 +3365,8 @@ code[class*="language-"] {
   text-decoration: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 0.16em;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .prose-enhanced a:hover {
