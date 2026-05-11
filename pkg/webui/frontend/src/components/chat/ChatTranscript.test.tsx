@@ -120,6 +120,32 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('.chat-prose pre')).toBeNull();
   });
 
+  it('renders markdown lists from asterisk markers', () => {
+    const { container } = render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[
+          {
+            role: 'assistant',
+            blocks: [
+              {
+                type: 'message',
+                content: '* first item\n* second item',
+              },
+            ],
+          },
+        ]}
+      />
+    );
+
+    const list = container.querySelector('.chat-prose ul');
+
+    expect(list).toBeInTheDocument();
+    expect(list).toHaveClass('chat-markdown-list');
+    expect(screen.getByText('first item')).toBeInTheDocument();
+    expect(screen.getByText('second item')).toBeInTheDocument();
+  });
+
   it('auto-collapses a thinking block when streaming finishes', () => {
     const { container, rerender } = render(
       <ChatTranscript

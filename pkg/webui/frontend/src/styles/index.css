@@ -1828,6 +1828,16 @@ code[class*="language-"] {
   padding-left: 1.4rem;
 }
 
+.prose ul,
+.chat-prose ul {
+  list-style: disc outside;
+}
+
+.prose ol,
+.chat-prose ol {
+  list-style: decimal outside;
+}
+
 .prose li,
 .chat-prose li {
   margin-bottom: 0.4rem;
@@ -1997,6 +2007,14 @@ code[class*="language-"] {
 .prose-enhanced ol {
   margin: 1rem 0;
   padding-left: 1.5rem;
+}
+
+.prose-enhanced ul {
+  list-style: disc outside;
+}
+
+.prose-enhanced ol {
+  list-style: decimal outside;
 }
 
 .prose-enhanced li {

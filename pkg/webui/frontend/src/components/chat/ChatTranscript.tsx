@@ -13,19 +13,29 @@ import { CopyButton } from '../tool-renderers/shared';
 import { cn, formatDuration } from '../../utils';
 import { normalizeToolName, ReferenceCodeBlock } from '../tool-renderers/reference';
 
+const renderer = new marked.Renderer();
+
+renderer.list = (body, ordered, start) => {
+  const tag = ordered ? 'ol' : 'ul';
+  const startAttribute = ordered && typeof start === 'number' && start !== 1 ? ` start="${start}"` : '';
+  return `<${tag} class="chat-markdown-list"${startAttribute}>\n${body}</${tag}>\n`;
+};
+
+const parseMarkdown = (content: string): string => marked.parse(content, { renderer }) as string;
+
 const renderContent = (content: string | ContentBlock[] | undefined): string => {
   if (!content) {
     return '';
   }
 
   if (typeof content === 'string') {
-    return marked.parse(content) as string;
+    return parseMarkdown(content);
   }
 
   return content
     .map((block) => {
       if (block.type === 'text') {
-        return marked.parse(block.text || '') as string;
+        return parseMarkdown(block.text || '');
       }
 
       if (block.type === 'image') {
