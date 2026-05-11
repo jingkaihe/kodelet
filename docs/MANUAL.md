@@ -11,6 +11,7 @@ Kodelet is a lightweight agentic SWE Agent that runs as an interactive CLI tool 
 - [Usage Modes](#usage-modes)
   - [One-shot Mode](#one-shot-mode)
   - [Interactive Chat Mode (ACP)](#interactive-chat-mode-acp)
+  - [Web UI Server](#web-ui-server)
   - [Git Integration](#git-integration)
   - [Image Input Support](#image-input-support)
   - [Conversation Continuation](#conversation-continuation)
@@ -137,6 +138,29 @@ The ACP mode provides a rich interactive experience with features like:
 - Tool execution visualization
 - Conversation persistence
 - Multi-turn conversations
+
+### Web UI Server
+
+Start the browser-based chat UI with:
+
+```bash
+kodelet serve
+```
+
+By default, `kodelet serve` generates a random access token and prints a URL like
+`http://localhost:8080?token=...`. Opening that URL stores the token in an
+HTTP-only cookie for subsequent same-browser requests. You can also supply a
+stable token explicitly:
+
+```bash
+kodelet serve --auth-token "your-secret-token"
+```
+
+For trusted local-only use, disable the web UI token gate with:
+
+```bash
+kodelet serve --skip-auth
+```
 
 ### Git Integration
 

@@ -43,6 +43,7 @@ export function buildSidecarArgs(options: SidecarLaunchOptions): string[] {
     String(options.port),
     '--cwd',
     options.workspace,
+    '--skip-auth',
   ];
 }
 

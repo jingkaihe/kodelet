@@ -13,7 +13,7 @@ test('buildSidecarArgs creates serve invocation for workspace', () => {
       port: 43123,
       workspace: '/tmp/project',
     }),
-    ['serve', '--host', '127.0.0.1', '--port', '43123', '--cwd', '/tmp/project'],
+    ['serve', '--host', '127.0.0.1', '--port', '43123', '--cwd', '/tmp/project', '--skip-auth'],
   );
 });
 

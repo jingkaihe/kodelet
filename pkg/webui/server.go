@@ -6,7 +6,10 @@ package webui
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
 	"embed"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -90,6 +93,7 @@ type ServerConfig struct {
 	Port         int
 	CWD          string
 	CompactRatio float64
+	AuthToken    string
 }
 
 // Validate validates the server configuration
@@ -106,6 +110,10 @@ func (c *ServerConfig) Validate() error {
 
 	if c.CompactRatio <= 0.0 || c.CompactRatio > 1.0 {
 		return errors.New("compact-ratio must be greater than 0.0 and less than or equal to 1.0")
+	}
+
+	if c.AuthToken != "" && strings.TrimSpace(c.AuthToken) == "" {
+		return errors.New("auth-token cannot be empty")
 	}
 
 	if strings.TrimSpace(c.CWD) != "" {
@@ -131,6 +139,7 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 		}
 		config.CWD = normalizedCWD
 	}
+	config.AuthToken = strings.TrimSpace(config.AuthToken)
 
 	// Get the conversation service
 	conversationService, err := conversations.GetDefaultConversationService(ctx)
@@ -193,6 +202,7 @@ func (s *Server) setupRoutes() {
 	// Add middleware
 	s.router.Use(s.loggingMiddleware)
 	s.router.Use(s.corsMiddleware)
+	s.router.Use(s.authMiddleware)
 }
 
 // staticFileHandler serves static files from the embedded filesystem
@@ -251,6 +261,160 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+const webUIAuthCookieName = "kodelet_auth_token"
+
+// NewAuthToken generates a random token suitable for protecting the web UI.
+func NewAuthToken() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", errors.Wrap(err, "failed to generate auth token")
+	}
+
+	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+func (s *Server) authMiddleware(next http.Handler) http.Handler {
+	if s.config == nil {
+		return next
+	}
+
+	authToken := strings.TrimSpace(s.config.AuthToken)
+	if authToken == "" {
+		return next
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodOptions {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		queryToken, hasQueryToken := authQueryToken(r)
+		if hasQueryToken {
+			if !constantTimeStringEqual(queryToken, authToken) {
+				s.writeAuthError(w, r, http.StatusUnauthorized, "invalid authentication token")
+				return
+			}
+
+			setWebUIAuthCookie(w, r, authToken)
+			if shouldRedirectTokenRequest(r) {
+				http.Redirect(w, r, tokenlessURL(r), http.StatusFound)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		if requestHasAuthToken(r, authToken) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		s.writeAuthError(w, r, http.StatusUnauthorized, "authentication required")
+	})
+}
+
+func authQueryToken(r *http.Request) (string, bool) {
+	values, ok := r.URL.Query()["token"]
+	if !ok || len(values) == 0 {
+		return "", false
+	}
+
+	return values[0], true
+}
+
+func requestHasAuthToken(r *http.Request, authToken string) bool {
+	if headerToken := authHeaderToken(r.Header.Get("Authorization")); headerToken != "" {
+		return constantTimeStringEqual(headerToken, authToken)
+	}
+
+	cookie, err := r.Cookie(webUIAuthCookieName)
+	if err == nil && constantTimeStringEqual(cookie.Value, authToken) {
+		return true
+	}
+
+	return false
+}
+
+func authHeaderToken(headerValue string) string {
+	headerValue = strings.TrimSpace(headerValue)
+	if headerValue == "" {
+		return ""
+	}
+
+	for _, prefix := range []string{"Bearer ", "Token "} {
+		if len(headerValue) > len(prefix) && strings.EqualFold(headerValue[:len(prefix)], prefix) {
+			return strings.TrimSpace(headerValue[len(prefix):])
+		}
+	}
+
+	return headerValue
+}
+
+func shouldRedirectTokenRequest(r *http.Request) bool {
+	if r.Method != http.MethodGet || isWebsocketUpgrade(r) {
+		return false
+	}
+
+	path := r.URL.Path
+	return !strings.HasPrefix(path, "/api/") && !strings.HasPrefix(path, "/assets/")
+}
+
+func isWebsocketUpgrade(r *http.Request) bool {
+	return strings.EqualFold(strings.TrimSpace(r.Header.Get("Upgrade")), "websocket")
+}
+
+func tokenlessURL(r *http.Request) string {
+	redirectURL := *r.URL
+	query := redirectURL.Query()
+	query.Del("token")
+	redirectURL.RawQuery = query.Encode()
+	if redirectURL.Path == "" {
+		redirectURL.Path = "/"
+	}
+
+	return redirectURL.String()
+}
+
+func setWebUIAuthCookie(w http.ResponseWriter, r *http.Request, authToken string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     webUIAuthCookieName,
+		Value:    authToken,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   isHTTPSRequest(r),
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func isHTTPSRequest(r *http.Request) bool {
+	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+}
+
+func constantTimeStringEqual(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+}
+
+func (s *Server) writeAuthError(w http.ResponseWriter, r *http.Request, statusCode int, message string) {
+	if strings.HasPrefix(r.URL.Path, "/api/") {
+		s.writeErrorResponse(w, statusCode, message, nil)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(statusCode)
+	_, _ = fmt.Fprintf(
+		w,
+		"%s\n\nOpen the tokenized URL printed by `kodelet serve`, or restart with --skip-auth to disable web UI authentication.\n",
+		message,
+	)
 }
 
 // responseWriter wraps http.ResponseWriter to capture status code

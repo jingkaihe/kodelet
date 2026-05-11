@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { normalizeRemoteServerURL } from '../lib/remote';
+import { buildRemoteServerURL, normalizeRemoteServerURL } from '../lib/remote';
 
 test('normalizeRemoteServerURL preserves explicit https origin', () => {
   assert.equal(normalizeRemoteServerURL('https://kodelet.example.com/'), 'https://kodelet.example.com');
@@ -18,3 +18,16 @@ test('normalizeRemoteServerURL rejects path-prefixed servers', () => {
   );
 });
 
+test('normalizeRemoteServerURL preserves auth token query', () => {
+  assert.equal(
+    normalizeRemoteServerURL('https://kodelet.example.com/?token=secret&unused=value'),
+    'https://kodelet.example.com?token=secret',
+  );
+});
+
+test('buildRemoteServerURL forwards auth token to API endpoint', () => {
+  assert.equal(
+    buildRemoteServerURL('https://kodelet.example.com?token=secret', '/api/chat/settings'),
+    'https://kodelet.example.com/api/chat/settings?token=secret',
+  );
+});

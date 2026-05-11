@@ -105,6 +105,27 @@ func TestValidateServeConfig(t *testing.T) {
 			},
 			expectedError: "compact-ratio must be greater than 0.0 and less than or equal to 1.0",
 		},
+		{
+			name: "auth token conflicts with skip auth",
+			config: &ServeConfig{
+				Host:         "localhost",
+				Port:         8080,
+				CompactRatio: 0.8,
+				AuthToken:    "secret",
+				SkipAuth:     true,
+			},
+			expectedError: "--auth-token cannot be used with --skip-auth",
+		},
+		{
+			name: "whitespace auth token",
+			config: &ServeConfig{
+				Host:         "localhost",
+				Port:         8080,
+				CompactRatio: 0.8,
+				AuthToken:    "   ",
+			},
+			expectedError: "auth-token cannot be empty",
+		},
 	}
 
 	for _, tt := range tests {
@@ -119,6 +140,23 @@ func TestValidateServeConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestServeBaseURL(t *testing.T) {
+	assert.Equal(t, "http://localhost:8080", serveBaseURL("localhost", 8080))
+	assert.Equal(t, "http://localhost:8080", serveBaseURL("0.0.0.0", 8080))
+	assert.Equal(t, "http://[::1]:8080", serveBaseURL("::1", 8080))
+}
+
+func TestServeURLWithToken(t *testing.T) {
+	assert.Equal(t, "http://localhost:8080?token=abc123", serveURLWithToken("http://localhost:8080", "abc123"))
+}
+
+func TestIsSensitiveFlagName(t *testing.T) {
+	assert.True(t, isSensitiveFlagName("auth-token"))
+	assert.True(t, isSensitiveFlagName("api-key"))
+	assert.True(t, isSensitiveFlagName("password"))
+	assert.False(t, isSensitiveFlagName("host"))
 }
 
 func TestGetServeConfigFromFlags_UsesConfiguredCompactRatio(t *testing.T) {
@@ -138,6 +176,8 @@ func TestGetServeConfigFromFlags_UsesConfiguredCompactRatio(t *testing.T) {
 	cmd.Flags().String("host", defaults.Host, "")
 	cmd.Flags().Int("port", defaults.Port, "")
 	cmd.Flags().String("cwd", defaults.CWD, "")
+	cmd.Flags().String("auth-token", defaults.AuthToken, "")
+	cmd.Flags().Bool("skip-auth", defaults.SkipAuth, "")
 
 	config := getServeConfigFromFlags(cmd)
 	assert.Equal(t, 0.65, config.CompactRatio)

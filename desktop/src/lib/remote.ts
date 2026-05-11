@@ -25,11 +25,29 @@ export function normalizeRemoteServerURL(input: string): string {
     throw new Error('Remote server URL must include a hostname');
   }
 
+  const token = parsed.searchParams.get('token')?.trim() || '';
+
   parsed.pathname = '';
   parsed.search = '';
   parsed.hash = '';
 
-  return parsed.toString().replace(/\/$/, '');
+  if (token) {
+    parsed.searchParams.set('token', token);
+  }
+
+  return parsed.toString().replace(/\/(?=\?)/, '').replace(/\/$/, '');
+}
+
+export function buildRemoteServerURL(baseUrl: string, path: string): string {
+  const parsedBaseURL = new URL(baseUrl);
+  const endpoint = new URL(path, parsedBaseURL.origin);
+  const token = parsedBaseURL.searchParams.get('token');
+
+  if (token) {
+    endpoint.searchParams.set('token', token);
+  }
+
+  return endpoint.toString();
 }
 
 export function getRemoteDisplayLabel(remoteUrl: string): string {
@@ -55,4 +73,3 @@ function withDefaultProtocol(input: string): string {
 function looksLikeLocalAddress(input: string): boolean {
   return /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?:[:/]|$)/i.test(input);
 }
-

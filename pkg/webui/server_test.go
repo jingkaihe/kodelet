@@ -176,6 +176,89 @@ func TestServerConfig_Validate(t *testing.T) {
 	}
 }
 
+func TestServerConfig_Validate_RejectsWhitespaceAuthToken(t *testing.T) {
+	config := &ServerConfig{
+		Host:         "localhost",
+		Port:         8080,
+		CompactRatio: 0.8,
+		AuthToken:    "   ",
+	}
+
+	err := config.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "auth-token cannot be empty")
+}
+
+func TestNewAuthTokenGeneratesUsableToken(t *testing.T) {
+	token, err := NewAuthToken()
+
+	require.NoError(t, err)
+	assert.NotEmpty(t, token)
+	assert.NotContains(t, token, "=")
+}
+
+func TestServer_authMiddleware(t *testing.T) {
+	server := &Server{config: &ServerConfig{AuthToken: "secret-token"}}
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	handler := server.authMiddleware(next)
+
+	t.Run("rejects missing token", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/chat/settings", nil)
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Contains(t, w.Body.String(), "authentication required")
+	})
+
+	t.Run("allows bearer token", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/chat/settings", nil)
+		req.Header.Set("Authorization", "Bearer secret-token")
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNoContent, w.Code)
+	})
+
+	t.Run("sets cookie and redirects tokenized spa request", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/c/abc?token=secret-token&view=full", nil)
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusFound, w.Code)
+		assert.Equal(t, "/c/abc?view=full", w.Header().Get("Location"))
+		require.Len(t, w.Result().Cookies(), 1)
+		cookie := w.Result().Cookies()[0]
+		assert.Equal(t, webUIAuthCookieName, cookie.Name)
+		assert.Equal(t, "secret-token", cookie.Value)
+		assert.True(t, cookie.HttpOnly)
+	})
+
+	t.Run("allows cookie token", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/chat/settings", nil)
+		req.AddCookie(&http.Cookie{Name: webUIAuthCookieName, Value: "secret-token"})
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNoContent, w.Code)
+	})
+
+	t.Run("allows query token for api request", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/chat/settings?token=secret-token", nil)
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNoContent, w.Code)
+	})
+}
+
 func TestServerConfig_Validate_RejectsInvalidCWD(t *testing.T) {
 	config := &ServerConfig{
 		Host:         "localhost",

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
 	"github.com/jingkaihe/kodelet/pkg/version"
@@ -49,7 +50,7 @@ func withTracing(cmd *cobra.Command) *cobra.Command {
 		}
 
 		cmd.Flags().Visit(func(flag *pflag.Flag) {
-			if flag.Name != "password" && flag.Name != "token" && flag.Name != "key" {
+			if !isSensitiveFlagName(flag.Name) {
 				attrs = append(attrs, attribute.String("flag."+flag.Name, flag.Value.String()))
 			}
 		})
@@ -67,6 +68,11 @@ func withTracing(cmd *cobra.Command) *cobra.Command {
 	}
 
 	return cmd
+}
+
+func isSensitiveFlagName(name string) bool {
+	lowerName := strings.ToLower(name)
+	return strings.Contains(lowerName, "password") || strings.Contains(lowerName, "token") || strings.Contains(lowerName, "key")
 }
 
 func init() {

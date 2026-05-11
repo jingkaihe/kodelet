@@ -12,7 +12,7 @@ import {
   shell,
 } from 'electron';
 
-import { getRemoteDisplayLabel, normalizeRemoteServerURL } from './lib/remote';
+import { buildRemoteServerURL, getRemoteDisplayLabel, normalizeRemoteServerURL } from './lib/remote';
 import { canOpenExternalURL } from './lib/navigation';
 import { buildSidecarArgs, resolveSidecarBinary } from './lib/sidecar';
 import {
@@ -291,7 +291,7 @@ async function waitForChatSettingsReady(
   childProcess?: ChildProcessByStdio<null, Readable, Readable> | null,
 ): Promise<void> {
   const deadline = Date.now() + launchTimeoutMs;
-  const endpoint = `${baseUrl}/api/chat/settings`;
+  const endpoint = buildRemoteServerURL(baseUrl, '/api/chat/settings');
 
   while (Date.now() < deadline) {
     if (childProcess && childProcess.exitCode !== null) {
