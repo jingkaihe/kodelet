@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestValidateServeConfig(t *testing.T) {
@@ -126,6 +127,26 @@ func TestValidateServeConfig(t *testing.T) {
 			},
 			expectedError: "auth-token cannot be empty",
 		},
+		{
+			name: "auth token with cookie-unsafe characters",
+			config: &ServeConfig{
+				Host:         "localhost",
+				Port:         8080,
+				CompactRatio: 0.8,
+				AuthToken:    "secret;token",
+			},
+			expectedError: "auth-token can only contain letters, numbers, and URL-safe punctuation",
+		},
+		{
+			name: "invalid cors origin",
+			config: &ServeConfig{
+				Host:         "localhost",
+				Port:         8080,
+				CompactRatio: 0.8,
+				CORSOrigins:  []string{"https://example.com/app"},
+			},
+			expectedError: "invalid cors-origin",
+		},
 	}
 
 	for _, tt := range tests {
@@ -178,7 +199,23 @@ func TestGetServeConfigFromFlags_UsesConfiguredCompactRatio(t *testing.T) {
 	cmd.Flags().String("cwd", defaults.CWD, "")
 	cmd.Flags().String("auth-token", defaults.AuthToken, "")
 	cmd.Flags().Bool("skip-auth", defaults.SkipAuth, "")
+	cmd.Flags().StringSlice("cors-origins", defaults.CORSOrigins, "")
 
 	config := getServeConfigFromFlags(cmd)
 	assert.Equal(t, 0.65, config.CompactRatio)
+}
+
+func TestGetServeConfigFromFlags_UsesCommaSeparatedCORSOrigins(t *testing.T) {
+	cmd := &cobra.Command{Use: "serve"}
+	defaults := NewServeConfig()
+	cmd.Flags().String("host", defaults.Host, "")
+	cmd.Flags().Int("port", defaults.Port, "")
+	cmd.Flags().String("cwd", defaults.CWD, "")
+	cmd.Flags().String("auth-token", defaults.AuthToken, "")
+	cmd.Flags().Bool("skip-auth", defaults.SkipAuth, "")
+	cmd.Flags().StringSlice("cors-origins", defaults.CORSOrigins, "")
+	require.NoError(t, cmd.Flags().Set("cors-origins", "https://app.example.com,http://localhost:3000"))
+
+	config := getServeConfigFromFlags(cmd)
+	assert.Equal(t, []string{"https://app.example.com", "http://localhost:3000"}, config.CORSOrigins)
 }

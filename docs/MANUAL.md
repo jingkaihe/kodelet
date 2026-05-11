@@ -156,6 +156,17 @@ stable token explicitly:
 kodelet serve --auth-token "your-secret-token"
 ```
 
+Explicit tokens may contain only letters, numbers, and URL-safe punctuation
+(`-._~`) so they can be stored safely in the browser auth cookie.
+
+Same-origin Web UI requests do not require CORS. Browser requests from loopback
+origins are allowed by default for local development. To allow additional
+browser origins, pass `--cors-origins` with a comma-separated list:
+
+```bash
+kodelet serve --cors-origins https://app.example.com,https://admin.example.com
+```
+
 For trusted local-only use, disable the web UI token gate with:
 
 ```bash

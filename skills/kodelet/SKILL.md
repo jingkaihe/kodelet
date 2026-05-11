@@ -652,9 +652,12 @@ Browser-based interface:
 ```bash
 kodelet serve                   # Start on localhost:8080
 kodelet serve --host 0.0.0.0 --port 3000
+kodelet serve --cors-origins https://app.example.com,https://admin.example.com
 ```
 
-Access at `http://localhost:8080` for conversation management and chat interface.
+Access with the tokenized URL printed by `kodelet serve` for conversation
+management and chat interface. Loopback CORS origins are allowed by default;
+use `--cors-origins` for additional browser origins.
 
 ### IDE Integration (ACP)
 Kodelet implements the Agent Client Protocol (ACP) for integration with compatible IDEs like Zed and JetBrains:

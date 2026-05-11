@@ -189,12 +189,109 @@ func TestServerConfig_Validate_RejectsWhitespaceAuthToken(t *testing.T) {
 	assert.Contains(t, err.Error(), "auth-token cannot be empty")
 }
 
+func TestServerConfig_Validate_RejectsCookieUnsafeAuthToken(t *testing.T) {
+	config := &ServerConfig{
+		Host:         "localhost",
+		Port:         8080,
+		CompactRatio: 0.8,
+		AuthToken:    "secret;token",
+	}
+
+	err := config.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "auth-token can only contain letters, numbers, and URL-safe punctuation")
+}
+
+func TestServerConfig_Validate_RejectsInvalidCORSOrigin(t *testing.T) {
+	config := &ServerConfig{
+		Host:         "localhost",
+		Port:         8080,
+		CompactRatio: 0.8,
+		CORSOrigins:  []string{"https://example.com/app"},
+	}
+
+	err := config.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid cors-origin")
+}
+
 func TestNewAuthTokenGeneratesUsableToken(t *testing.T) {
 	token, err := NewAuthToken()
 
 	require.NoError(t, err)
 	assert.NotEmpty(t, token)
 	assert.NotContains(t, token, "=")
+}
+
+func TestValidateAuthTokenAcceptsGeneratedToken(t *testing.T) {
+	token, err := NewAuthToken()
+	require.NoError(t, err)
+
+	assert.NoError(t, ValidateAuthToken(token))
+}
+
+func TestServer_corsMiddleware(t *testing.T) {
+	server := &Server{config: &ServerConfig{CORSOrigins: []string{"https://app.example.com"}}}
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	handler := server.corsMiddleware(next)
+
+	t.Run("allows loopback origin by default", func(t *testing.T) {
+		req := httptest.NewRequest("OPTIONS", "/api/chat/settings", nil)
+		req.Header.Set("Origin", "http://localhost:3000")
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "http://localhost:3000", w.Header().Get("Access-Control-Allow-Origin"))
+		assert.Equal(t, "Origin", w.Header().Get("Vary"))
+	})
+
+	t.Run("allows ipv4 loopback origin by default", func(t *testing.T) {
+		req := httptest.NewRequest("OPTIONS", "/api/chat/settings", nil)
+		req.Header.Set("Origin", "http://127.0.0.1:3000")
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "http://127.0.0.1:3000", w.Header().Get("Access-Control-Allow-Origin"))
+	})
+
+	t.Run("allows ipv6 loopback origin by default", func(t *testing.T) {
+		req := httptest.NewRequest("OPTIONS", "/api/chat/settings", nil)
+		req.Header.Set("Origin", "http://[::1]:3000")
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "http://[::1]:3000", w.Header().Get("Access-Control-Allow-Origin"))
+	})
+
+	t.Run("allows configured origin", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/chat/settings", nil)
+		req.Header.Set("Origin", "https://app.example.com")
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNoContent, w.Code)
+		assert.Equal(t, "https://app.example.com", w.Header().Get("Access-Control-Allow-Origin"))
+	})
+
+	t.Run("rejects disallowed preflight", func(t *testing.T) {
+		req := httptest.NewRequest("OPTIONS", "/api/chat/settings", nil)
+		req.Header.Set("Origin", "https://evil.example.com")
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		assert.Empty(t, w.Header().Get("Access-Control-Allow-Origin"))
+	})
 }
 
 func TestServer_authMiddleware(t *testing.T) {

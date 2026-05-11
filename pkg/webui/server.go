@@ -15,6 +15,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -94,6 +95,7 @@ type ServerConfig struct {
 	CWD          string
 	CompactRatio float64
 	AuthToken    string
+	CORSOrigins  []string
 }
 
 // Validate validates the server configuration
@@ -112,8 +114,12 @@ func (c *ServerConfig) Validate() error {
 		return errors.New("compact-ratio must be greater than 0.0 and less than or equal to 1.0")
 	}
 
-	if c.AuthToken != "" && strings.TrimSpace(c.AuthToken) == "" {
-		return errors.New("auth-token cannot be empty")
+	if err := ValidateAuthToken(c.AuthToken); err != nil {
+		return err
+	}
+
+	if _, err := normalizeConfiguredCORSOrigins(c.CORSOrigins); err != nil {
+		return err
 	}
 
 	if strings.TrimSpace(c.CWD) != "" {
@@ -140,6 +146,11 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 		config.CWD = normalizedCWD
 	}
 	config.AuthToken = strings.TrimSpace(config.AuthToken)
+	normalizedCORSOrigins, err := normalizeConfiguredCORSOrigins(config.CORSOrigins)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid server configuration")
+	}
+	config.CORSOrigins = normalizedCORSOrigins
 
 	// Get the conversation service
 	conversationService, err := conversations.GetDefaultConversationService(ctx)
@@ -249,8 +260,29 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 // corsMiddleware adds CORS headers
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Only allow localhost for security
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := strings.TrimSpace(r.Header.Get("Origin"))
+		if origin == "" {
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		if !s.corsOriginAllowed(origin) {
+			if r.Method == http.MethodOptions {
+				http.Error(w, "CORS origin not allowed", http.StatusForbidden)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Vary", "Origin")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
@@ -263,6 +295,124 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+func (s *Server) corsOriginAllowed(origin string) bool {
+	normalizedOrigin, err := normalizeCORSOrigin(origin)
+	if err != nil {
+		return false
+	}
+
+	if isLoopbackOrigin(normalizedOrigin) {
+		return true
+	}
+
+	if s.config == nil {
+		return false
+	}
+
+	for _, allowedOrigin := range s.config.CORSOrigins {
+		if normalizedOrigin == allowedOrigin {
+			return true
+		}
+	}
+
+	return false
+}
+
+// ValidateCORSOrigins validates caller-provided CORS origins.
+func ValidateCORSOrigins(origins []string) error {
+	_, err := normalizeConfiguredCORSOrigins(origins)
+	return err
+}
+
+func normalizeConfiguredCORSOrigins(origins []string) ([]string, error) {
+	normalized := make([]string, 0, len(origins))
+	seen := map[string]struct{}{}
+
+	for _, rawOrigin := range origins {
+		origin := strings.TrimSpace(rawOrigin)
+		if origin == "" {
+			return nil, errors.New("cors-origin cannot be empty")
+		}
+
+		normalizedOrigin, err := normalizeCORSOrigin(origin)
+		if err != nil {
+			return nil, errors.Wrapf(err, "invalid cors-origin: %s", origin)
+		}
+
+		if _, ok := seen[normalizedOrigin]; ok {
+			continue
+		}
+		seen[normalizedOrigin] = struct{}{}
+		normalized = append(normalized, normalizedOrigin)
+	}
+
+	return normalized, nil
+}
+
+func normalizeCORSOrigin(origin string) (string, error) {
+	parsed, err := url.Parse(origin)
+	if err != nil {
+		return "", err
+	}
+
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", errors.New("origin must use http:// or https://")
+	}
+	if parsed.Host == "" {
+		return "", errors.New("origin must include a host")
+	}
+	if (parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.User != nil {
+		return "", errors.New("origin must not include path, query, fragment, or userinfo")
+	}
+
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
+	parsed.Host = normalizedURLHost(parsed.Host)
+	parsed.Path = ""
+	return parsed.String(), nil
+}
+
+func normalizedURLHost(host string) string {
+	if splitHost, splitPort, err := net.SplitHostPort(host); err == nil {
+		hostname := normalizedHostname(splitHost)
+		return net.JoinHostPort(hostname, splitPort)
+	}
+
+	if ip := net.ParseIP(strings.Trim(host, "[]")); ip != nil {
+		if strings.Contains(ip.String(), ":") {
+			return "[" + strings.ToLower(ip.String()) + "]"
+		}
+
+		return strings.ToLower(ip.String())
+	}
+
+	hostname := normalizedHostname(host)
+	if strings.Contains(hostname, ":") {
+		return "[" + hostname + "]"
+	}
+
+	return hostname
+}
+
+func isLoopbackOrigin(origin string) bool {
+	normalizedOrigin, err := normalizeCORSOrigin(origin)
+	if err != nil {
+		return false
+	}
+
+	parsed, err := url.Parse(normalizedOrigin)
+	if err != nil {
+		return false
+	}
+
+	hostname := parsed.Hostname()
+	if strings.EqualFold(hostname, "localhost") {
+		return true
+	}
+
+	ip := net.ParseIP(hostname)
+	return ip != nil && ip.IsLoopback()
+}
+
 const webUIAuthCookieName = "kodelet_auth_token"
 
 // NewAuthToken generates a random token suitable for protecting the web UI.
@@ -273,6 +423,35 @@ func NewAuthToken() (string, error) {
 	}
 
 	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+// ValidateAuthToken validates a caller-provided web UI auth token.
+func ValidateAuthToken(authToken string) error {
+	trimmed := strings.TrimSpace(authToken)
+	if authToken == "" {
+		return nil
+	}
+	if trimmed == "" {
+		return errors.New("auth-token cannot be empty")
+	}
+	if trimmed != authToken {
+		return errors.New("auth-token cannot contain leading or trailing whitespace")
+	}
+
+	for _, r := range authToken {
+		if !isAuthTokenRune(r) {
+			return errors.New("auth-token can only contain letters, numbers, and URL-safe punctuation (-._~)")
+		}
+	}
+
+	return nil
+}
+
+func isAuthTokenRune(r rune) bool {
+	return (r >= 'a' && r <= 'z') ||
+		(r >= 'A' && r <= 'Z') ||
+		(r >= '0' && r <= '9') ||
+		r == '-' || r == '.' || r == '_' || r == '~'
 }
 
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
