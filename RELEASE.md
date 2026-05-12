@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.4.10-beta (2026-05-12)
+
+Refactored OpenAI web search action handling with centralized `webSearchActionDetails` helpers so URL, query, and pattern extraction is consistent across streaming, storage, and transcript rendering. Fixed `open_page` and `find_in_page` metadata preservation so web search calls survive conversation replay.
+
+Added four new Web UI tool renderers: `read_conversation`, `code_execution`, `custom_tool`, and `mcp_tool`, with compact markdown layout, quiet detail grids, and safe circular-reference JSON formatting.
+
 ## 0.4.9-beta (2026-05-11)
 
 Secured `kodelet serve` with generated or explicit Web UI access tokens, token login URLs, `--skip-auth`, and configurable CORS origins.
