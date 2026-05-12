@@ -83,13 +83,13 @@ describe('SubagentRenderer', () => {
 
     render(<SubagentRenderer toolResult={toolResult} />);
 
-    expect(screen.queryByText('Question')).not.toBeInTheDocument();
-    expect(screen.queryByText('Response')).not.toBeInTheDocument();
+    expect(screen.queryByText('question')).not.toBeInTheDocument();
+    expect(screen.queryByText('42')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText('Show details'));
 
-    expect(screen.getByText('Question')).toBeInTheDocument();
-    expect(screen.getByText('Response')).toBeInTheDocument();
+    expect(screen.getByText('question')).toBeInTheDocument();
+    expect(screen.getByText('42')).toBeInTheDocument();
   });
 
   it('renders question and response in details view', () => {
@@ -102,11 +102,11 @@ describe('SubagentRenderer', () => {
 
     fireEvent.click(screen.getByText('Show details'));
 
-    expect(screen.getByText('Question')).toBeInTheDocument();
-    expect(screen.getByText('Response')).toBeInTheDocument();
+    expect(screen.getByText('question')).toBeInTheDocument();
+    expect(screen.getByText('Bug found in line 42')).toBeInTheDocument();
   });
 
-  it('renders workflow in details view when present', () => {
+  it('does not duplicate workflow in details view', () => {
     const toolResult = createToolResult({
       question: 'Create PR',
       response: 'PR created',
@@ -117,10 +117,11 @@ describe('SubagentRenderer', () => {
 
     fireEvent.click(screen.getByText('Show details'));
 
-    expect(screen.getAllByText('Workflow')).not.toHaveLength(0);
+    expect(screen.queryByText('Workflow')).not.toBeInTheDocument();
+    expect(screen.getByText('github/pr')).toBeInTheDocument();
   });
 
-  it('renders directory in details view when cwd is present', () => {
+  it('does not duplicate directory in details view', () => {
     const toolResult = createToolResult({
       question: 'Run tests',
       response: 'Tests passed',
@@ -131,7 +132,8 @@ describe('SubagentRenderer', () => {
 
     fireEvent.click(screen.getByText('Show details'));
 
-    expect(screen.getAllByText('Directory')).not.toHaveLength(0);
+    expect(screen.queryByText('Directory')).not.toBeInTheDocument();
+    expect(screen.getByText('/home/user/project')).toBeInTheDocument();
   });
 
   it('handles empty question gracefully', () => {
@@ -144,8 +146,8 @@ describe('SubagentRenderer', () => {
 
     fireEvent.click(screen.getByText('Show details'));
 
-    expect(screen.queryByText('Question')).not.toBeInTheDocument();
-    expect(screen.getByText('Response')).toBeInTheDocument();
+    expect(screen.queryByText('question')).not.toBeInTheDocument();
+    expect(screen.getByText('Workflow result')).toBeInTheDocument();
   });
 
   it('handles empty response gracefully', () => {
@@ -157,7 +159,21 @@ describe('SubagentRenderer', () => {
 
     fireEvent.click(screen.getByText('Show details'));
 
-    expect(screen.getByText('Question')).toBeInTheDocument();
-    expect(screen.queryByText('Response')).not.toBeInTheDocument();
+    expect(screen.getByText('question')).toBeInTheDocument();
+    expect(screen.queryByText('response')).not.toBeInTheDocument();
+  });
+
+  it('uses compact markdown containers for details', () => {
+    const toolResult = createToolResult({
+      question: 'Find the bug',
+      response: '## Findings\n\nFound the bug.',
+    });
+
+    const { container } = render(<SubagentRenderer toolResult={toolResult} />);
+
+    fireEvent.click(screen.getByText('Show details'));
+
+    expect(container.querySelectorAll('.tool-compact-markdown.subagent-response')).toHaveLength(2);
+    expect(container.querySelector('.prose-enhanced.subagent-response')).not.toBeInTheDocument();
   });
 });

@@ -41,35 +41,20 @@ const SubagentRenderer: React.FC<SubagentRendererProps> = ({ toolResult }) => {
 
       {showDetails && (
         <div className="quiet-tool-sections">
-          {meta.workflow && (
-            <div className="quiet-tool-keyline">
-              <span className="quiet-tool-key">Workflow</span>
-              <code>{meta.workflow}</code>
-            </div>
-          )}
-          {meta.cwd && (
-            <div className="quiet-tool-keyline">
-              <span className="quiet-tool-key">Directory</span>
-              <code title={meta.cwd}>{meta.cwd}</code>
-            </div>
-          )}
           {meta.question && (
             <div>
-              <div className="quiet-tool-section-title">Question</div>
+              <div className="quiet-tool-section-title">question</div>
               <div
-                className="tool-detail-panel prose-enhanced subagent-response text-sm"
+                className="tool-compact-markdown subagent-response"
                 dangerouslySetInnerHTML={{ __html: formatMarkdown(meta.question) }}
               />
             </div>
           )}
           {meta.response && (
-            <div>
-              <div className="quiet-tool-section-title">Response</div>
-              <div
-                className="tool-detail-panel prose-enhanced subagent-response max-h-64 overflow-y-auto text-sm"
-                dangerouslySetInnerHTML={{ __html: formatMarkdown(meta.response) }}
-              />
-            </div>
+            <div
+              className="tool-compact-markdown subagent-response"
+              dangerouslySetInnerHTML={{ __html: formatMarkdown(meta.response) }}
+            />
           )}
         </div>
       )}
