@@ -2848,6 +2848,142 @@ code[class*="language-"] {
   color: rgba(20, 20, 19, 0.68);
 }
 
+.read-conversation-detail {
+  gap: 0.52rem;
+}
+
+.read-conversation-goal {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.52rem;
+  align-items: baseline;
+  max-width: 100%;
+  font-size: 0.76rem;
+  line-height: 1.42;
+  color: rgba(20, 20, 19, 0.62);
+}
+
+.read-conversation-goal span:first-child {
+  font-family: var(--font-heading);
+  font-weight: 650;
+  color: rgba(122, 117, 107, 0.66);
+}
+
+.read-conversation-goal span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.tool-compact-markdown {
+  max-height: 26rem;
+  overflow: auto;
+  padding: 0.72rem 0.78rem;
+  border: 1px solid rgba(176, 174, 165, 0.16);
+  border-radius: 0.58rem;
+  background: rgba(247, 243, 235, 0.38);
+  color: rgba(20, 20, 19, 0.72);
+  font-family: var(--font-body);
+  font-size: 0.82rem;
+  line-height: 1.56;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.tool-compact-markdown > *:first-child {
+  margin-top: 0;
+}
+
+.tool-compact-markdown > *:last-child {
+  margin-bottom: 0;
+}
+
+.tool-compact-markdown p {
+  margin: 0 0 0.55rem;
+}
+
+.tool-compact-markdown h1,
+.tool-compact-markdown h2,
+.tool-compact-markdown h3,
+.tool-compact-markdown h4,
+.tool-compact-markdown h5,
+.tool-compact-markdown h6 {
+  margin: 0.72rem 0 0.34rem;
+  font-family: var(--font-heading);
+  font-weight: 650;
+  color: rgba(20, 20, 19, 0.72);
+}
+
+.tool-compact-markdown h1,
+.tool-compact-markdown h2 {
+  font-size: 0.9rem;
+}
+
+.tool-compact-markdown h3,
+.tool-compact-markdown h4,
+.tool-compact-markdown h5,
+.tool-compact-markdown h6 {
+  font-size: 0.84rem;
+}
+
+.tool-compact-markdown ul,
+.tool-compact-markdown ol {
+  margin: 0.42rem 0 0.62rem;
+  padding-left: 1.08rem;
+}
+
+.tool-compact-markdown ul {
+  list-style: disc outside;
+}
+
+.tool-compact-markdown ol {
+  list-style: decimal outside;
+}
+
+.tool-compact-markdown li {
+  margin-bottom: 0.28rem;
+}
+
+.tool-compact-markdown a {
+  color: #547ba6;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.16em;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.tool-compact-markdown a:hover {
+  color: var(--kodelet-orange);
+}
+
+.tool-compact-markdown code {
+  padding: 0.08rem 0.28rem;
+  border: 1px solid rgba(176, 174, 165, 0.2);
+  border-radius: 0.28rem;
+  background: rgba(232, 230, 220, 0.48);
+  font-family: var(--font-mono);
+  font-size: 0.75em;
+}
+
+.tool-compact-markdown pre {
+  max-height: 14rem;
+  overflow: auto;
+  margin: 0.6rem 0;
+  padding: 0.62rem;
+  border: 1px solid rgba(176, 174, 165, 0.18);
+  border-radius: 0.46rem;
+  background: rgba(232, 230, 220, 0.38);
+}
+
+.tool-compact-markdown pre code {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 0.74rem;
+  line-height: 1.44;
+  white-space: pre-wrap;
+}
+
 .apply-patch-result {
   display: grid;
   gap: 0.72rem;
@@ -3235,7 +3371,6 @@ code[class*="language-"] {
 
 .web-fetch-content {
   max-height: 34rem;
-  overflow: auto;
 }
 
 .web-fetch-content table {

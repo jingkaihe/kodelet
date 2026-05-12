@@ -62,7 +62,7 @@ const WebFetchRenderer: React.FC<WebFetchRendererProps> = ({ toolResult }) => {
 
       {meta.content ? (
         <div
-          className="tool-detail-panel prose-enhanced web-fetch-content text-sm"
+          className="tool-compact-markdown web-fetch-content"
           dangerouslySetInnerHTML={{ __html: renderWebFetchContent(meta.content, processedType) }}
         />
       ) : null}

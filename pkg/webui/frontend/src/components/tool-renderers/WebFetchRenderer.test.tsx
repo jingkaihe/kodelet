@@ -14,7 +14,7 @@ describe('WebFetchRenderer', () => {
         processedType: 'ai_extracted',
         contentType: 'text/html',
         size: 3072,
-        content: '## Top stories\n\n| Rank | Headline |\n|---:|---|\n| 1 | Story one |',
+        content: '## Top stories\n\n| Rank | Headline |\n|---:|---|\n| 1 | [Story one](https://example.com/story) |',
       },
     };
 
@@ -24,6 +24,11 @@ describe('WebFetchRenderer', () => {
     expect(screen.queryByText('ai extracted')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Top stories' })).toBeInTheDocument();
     expect(screen.getByRole('table')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Story one' })).toHaveAttribute(
+      'href',
+      'https://example.com/story'
+    );
+    expect(container.querySelector('.tool-compact-markdown.web-fetch-content')).toBeInTheDocument();
     expect(container.querySelector('.tool-code-block')).not.toBeInTheDocument();
   });
 });
