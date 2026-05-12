@@ -939,6 +939,61 @@ func TestStreamMessages(t *testing.T) {
 	assert.Equal(t, "tool-result", streamable[2].Kind)
 }
 
+func TestStreamMessagesWebSearchOpenPageUsesRawItemURL(t *testing.T) {
+	inputItems := `[
+		{
+			"type": "web_search_call",
+			"call_id": "ws_open",
+			"status": "completed",
+			"action": "open_page",
+			"raw_item": {
+				"id": "ws_open",
+				"type": "web_search_call",
+				"status": "completed",
+				"action": {
+					"type": "open_page",
+					"url": "https://example.com/story"
+				}
+			}
+		}
+	]`
+
+	streamable, err := StreamMessages(json.RawMessage(inputItems), nil)
+	require.NoError(t, err)
+	require.Len(t, streamable, 2)
+
+	assert.Equal(t, "tool-use", streamable[0].Kind)
+	assert.JSONEq(t, `{"status":"completed","type":"open_page","url":"https://example.com/story"}`, streamable[0].Input)
+}
+
+func TestStreamMessagesWebSearchFindInPageUsesRawItemDetails(t *testing.T) {
+	inputItems := `[
+		{
+			"type": "web_search_call",
+			"call_id": "ws_find",
+			"status": "completed",
+			"action": "find_in_page",
+			"raw_item": {
+				"id": "ws_find",
+				"type": "web_search_call",
+				"status": "completed",
+				"action": {
+					"type": "find_in_page",
+					"url": "https://example.com/docs",
+					"pattern": "installation"
+				}
+			}
+		}
+	]`
+
+	streamable, err := StreamMessages(json.RawMessage(inputItems), nil)
+	require.NoError(t, err)
+	require.Len(t, streamable, 2)
+
+	assert.Equal(t, "tool-use", streamable[0].Kind)
+	assert.JSONEq(t, `{"status":"completed","type":"find_in_page","url":"https://example.com/docs","pattern":"installation"}`, streamable[0].Input)
+}
+
 func TestExtractMessagesWithReasoning(t *testing.T) {
 	// Create sample input items with reasoning as a separate item
 	inputItems := `[

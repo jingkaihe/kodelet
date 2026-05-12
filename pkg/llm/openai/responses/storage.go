@@ -318,25 +318,22 @@ func inputItemFromRawItem(raw json.RawMessage) (responses.ResponseInputItemUnion
 }
 
 func webSearchActionParamFromStoredItem(item StoredInputItem) responses.ResponseFunctionWebSearchActionUnionParam {
+	details := webSearchDetailsFromStoredItem(item)
 	switch item.Action {
 	case "open_page":
 		return responses.ResponseFunctionWebSearchActionUnionParam{
-			OfOpenPage: &responses.ResponseFunctionWebSearchActionOpenPageParam{URL: param.NewOpt(item.Content)},
+			OfOpenPage: &responses.ResponseFunctionWebSearchActionOpenPageParam{URL: param.NewOpt(details.url)},
 		}
 	case "find_in_page":
 		return responses.ResponseFunctionWebSearchActionUnionParam{
 			OfFind: &responses.ResponseFunctionWebSearchActionFindParam{
-				URL:     item.Content,
-				Pattern: item.Arguments,
+				URL:     details.url,
+				Pattern: details.pattern,
 			},
 		}
 	default:
-		queries := []string{}
-		if strings.TrimSpace(item.Content) != "" {
-			queries = append(queries, item.Content)
-		}
 		return responses.ResponseFunctionWebSearchActionUnionParam{
-			OfSearch: &responses.ResponseFunctionWebSearchActionSearchParam{Queries: queries},
+			OfSearch: &responses.ResponseFunctionWebSearchActionSearchParam{Queries: details.queries},
 		}
 	}
 }

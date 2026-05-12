@@ -96,6 +96,7 @@ func webSearchStatusMessage(status string) string {
 }
 
 func webSearchInputJSON(action responses.ResponseFunctionWebSearchActionUnion, status string) string {
+	details := webSearchDetailsFromAction(action)
 	payload := map[string]any{
 		"status": webSearchStatusMessage(status),
 		"type":   action.Type,
@@ -103,23 +104,19 @@ func webSearchInputJSON(action responses.ResponseFunctionWebSearchActionUnion, s
 
 	switch action.Type {
 	case "search":
-		search := action.AsSearch()
-		queries := searchQueries(search.Query, search.Queries)
-		if len(queries) > 0 {
-			payload["queries"] = queries
+		if len(details.queries) > 0 {
+			payload["queries"] = details.queries
 		}
 	case "open_page":
-		openPage := action.AsOpenPage()
-		if openPage.URL != "" {
-			payload["url"] = openPage.URL
+		if details.url != "" {
+			payload["url"] = details.url
 		}
 	case "find_in_page":
-		find := action.AsFind()
-		if find.URL != "" {
-			payload["url"] = find.URL
+		if details.url != "" {
+			payload["url"] = details.url
 		}
-		if find.Pattern != "" {
-			payload["pattern"] = find.Pattern
+		if details.pattern != "" {
+			payload["pattern"] = details.pattern
 		}
 	}
 
@@ -131,6 +128,7 @@ func webSearchInputJSON(action responses.ResponseFunctionWebSearchActionUnion, s
 }
 
 func webSearchStructuredResult(callID string, item responses.ResponseFunctionWebSearch) tooltypes.StructuredToolResult {
+	details := webSearchDetailsFromAction(item.Action)
 	metadata := tooltypes.OpenAIWebSearchMetadata{
 		CallID: callID,
 		Status: string(item.Status),
@@ -140,19 +138,17 @@ func webSearchStructuredResult(callID string, item responses.ResponseFunctionWeb
 	switch item.Action.Type {
 	case "search":
 		search := item.Action.AsSearch()
-		metadata.Queries = searchQueries(search.Query, search.Queries)
+		metadata.Queries = details.queries
 		for _, source := range search.Sources {
 			if strings.TrimSpace(source.URL) != "" {
 				metadata.Sources = append(metadata.Sources, source.URL)
 			}
 		}
 	case "open_page":
-		openPage := item.Action.AsOpenPage()
-		metadata.URL = openPage.URL
+		metadata.URL = details.url
 	case "find_in_page":
-		find := item.Action.AsFind()
-		metadata.URL = find.URL
-		metadata.Pattern = find.Pattern
+		metadata.URL = details.url
+		metadata.Pattern = details.pattern
 	}
 
 	result := tooltypes.StructuredToolResult{
@@ -173,6 +169,17 @@ func extendWebSearchMetadataFromRawItem(metadata *tooltypes.OpenAIWebSearchMetad
 		return
 	}
 
+	details := webSearchDetailsFromRawItem(rawItem)
+	if metadata.URL == "" && details.url != "" {
+		metadata.URL = details.url
+	}
+	if metadata.Pattern == "" && details.pattern != "" {
+		metadata.Pattern = details.pattern
+	}
+	if len(metadata.Queries) == 0 && len(details.queries) > 0 {
+		metadata.Queries = details.queries
+	}
+
 	var payload struct {
 		Results []struct {
 			URL string `json:"url"`
@@ -191,10 +198,111 @@ func extendWebSearchMetadataFromRawItem(metadata *tooltypes.OpenAIWebSearchMetad
 
 func searchQueries(query string, queries []string) []string {
 	if len(queries) > 0 {
-		return append([]string(nil), queries...)
+		trimmedQueries := make([]string, 0, len(queries))
+		for _, query := range queries {
+			if trimmed := strings.TrimSpace(query); trimmed != "" {
+				trimmedQueries = append(trimmedQueries, trimmed)
+			}
+		}
+		return trimmedQueries
 	}
 	if strings.TrimSpace(query) == "" {
 		return nil
 	}
-	return []string{query}
+	return []string{strings.TrimSpace(query)}
+}
+
+type webSearchActionDetails struct {
+	url     string
+	pattern string
+	queries []string
+}
+
+func webSearchDetailsFromAction(action responses.ResponseFunctionWebSearchActionUnion) webSearchActionDetails {
+	details := webSearchActionDetails{}
+
+	switch action.Type {
+	case "search":
+		search := action.AsSearch()
+		details.queries = searchQueries(search.Query, search.Queries)
+		if len(details.queries) == 0 {
+			details.queries = searchQueries(action.Query, action.Queries)
+		}
+	case "open_page":
+		openPage := action.AsOpenPage()
+		details.url = strings.TrimSpace(openPage.URL)
+		if details.url == "" {
+			details.url = strings.TrimSpace(action.URL)
+		}
+	case "find_in_page":
+		find := action.AsFind()
+		details.url = strings.TrimSpace(find.URL)
+		details.pattern = strings.TrimSpace(find.Pattern)
+		if details.url == "" {
+			details.url = strings.TrimSpace(action.URL)
+		}
+		if details.pattern == "" {
+			details.pattern = strings.TrimSpace(action.Pattern)
+		}
+	}
+
+	return details
+}
+
+func webSearchDetailsFromRawItem(rawItem []byte) webSearchActionDetails {
+	var payload struct {
+		Content string `json:"content"`
+		Action  struct {
+			Type    string   `json:"type"`
+			URL     string   `json:"url"`
+			Pattern string   `json:"pattern"`
+			Query   string   `json:"query"`
+			Queries []string `json:"queries"`
+		} `json:"action"`
+	}
+
+	if err := json.Unmarshal(rawItem, &payload); err != nil {
+		return webSearchActionDetails{}
+	}
+
+	details := webSearchActionDetails{
+		url:     strings.TrimSpace(payload.Action.URL),
+		pattern: strings.TrimSpace(payload.Action.Pattern),
+		queries: searchQueries(payload.Action.Query, payload.Action.Queries),
+	}
+
+	if details.url == "" && (payload.Action.Type == "open_page" || payload.Action.Type == "find_in_page") {
+		details.url = strings.TrimSpace(payload.Content)
+	}
+	if len(details.queries) == 0 && payload.Action.Type == "search" && strings.TrimSpace(payload.Content) != "" {
+		details.queries = []string{strings.TrimSpace(payload.Content)}
+	}
+
+	return details
+}
+
+func webSearchDetailsFromStoredItem(item StoredInputItem) webSearchActionDetails {
+	details := webSearchDetailsFromRawItem(item.RawItem)
+	content := strings.TrimSpace(item.Content)
+	arguments := strings.TrimSpace(item.Arguments)
+
+	switch item.Action {
+	case "open_page":
+		if content != "" {
+			details.url = content
+		}
+	case "find_in_page":
+		if content != "" {
+			details.url = content
+		}
+		if arguments != "" {
+			details.pattern = arguments
+		}
+	default:
+		if content != "" {
+			details.queries = []string{content}
+		}
+	}
+
+	return details
 }

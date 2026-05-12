@@ -207,15 +207,15 @@ func (t *Thread) processStream(
 					Action:  webSearch.Action.Type,
 					RawItem: rawItem,
 				}
+				details := webSearchDetailsFromAction(webSearch.Action)
 				switch webSearch.Action.Type {
 				case "open_page":
-					storedItem.Content = webSearch.Action.AsOpenPage().URL
+					storedItem.Content = details.url
 				case "find_in_page":
-					find := webSearch.Action.AsFind()
-					storedItem.Content = find.URL
-					storedItem.Arguments = find.Pattern
+					storedItem.Content = details.url
+					storedItem.Arguments = details.pattern
 				default:
-					storedItem.Content = strings.Join(searchQueries(webSearch.Action.AsSearch().Query, webSearch.Action.AsSearch().Queries), ", ")
+					storedItem.Content = strings.Join(details.queries, ", ")
 				}
 				t.storedItems = append(t.storedItems, storedItem)
 				if inputItems := fromStoredItems([]StoredInputItem{storedItem}); len(inputItems) > 0 {

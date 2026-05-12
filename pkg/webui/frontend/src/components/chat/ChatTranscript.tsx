@@ -252,6 +252,30 @@ const summarizeApplyPatchResult = (metadata: Record<string, unknown> | null): st
   return summarizeList(operations);
 };
 
+const getOpenAIWebSearchSummary = (
+  input: Record<string, unknown> | null,
+  metadata: Record<string, unknown> | null
+): string => {
+  const actionType = getStringField(input, 'type', 'action') || getStringField(metadata, 'action');
+  const queries = [
+    ...getStringArrayField(input, 'queries'),
+    ...getStringArrayField(metadata, 'queries'),
+  ];
+  const query = queries[0] || getStringField(input, 'query', 'content') || getStringField(metadata, 'query', 'content');
+  const url = getStringField(input, 'url', 'URL') || getStringField(metadata, 'url', 'URL');
+  const pattern = getStringField(input, 'pattern') || getStringField(metadata, 'pattern');
+
+  if (actionType === 'open_page') {
+    return formatToolSummary('Open page', url || query || pattern || 'URL unavailable');
+  }
+
+  if (actionType === 'find_in_page') {
+    return formatToolSummary('Find in page', pattern && url ? `${pattern} in ${url}` : pattern || url || query || 'target unavailable');
+  }
+
+  return formatToolSummary('Web search', query || url || pattern);
+};
+
 const formatToolSummary = (label: string, value?: string): string => {
   if (!value) {
     return label;
@@ -329,16 +353,8 @@ const getToolSummary = (toolCall: ChatRenderToolCall): string => {
         getStringField(input, 'path') || getStringField(metadata, 'path')
       );
 
-    case 'openai_web_search': {
-      const queries = [
-        ...getStringArrayField(input, 'queries'),
-        ...getStringArrayField(metadata, 'queries'),
-      ];
-      const query = queries[0];
-      const location =
-        getStringField(metadata, 'url', 'pattern') || getStringField(input, 'url', 'pattern');
-      return formatToolSummary('Web search', query || location);
-    }
+    case 'openai_web_search':
+      return getOpenAIWebSearchSummary(input, metadata);
 
     case 'read_conversation':
       return formatToolSummary(
@@ -407,7 +423,7 @@ const splitActivitySummary = (summaryText: string): { label: string; detail?: st
   };
 };
 
-const toolSummaryIcons: Record<string, LucideIcon> = {
+const toolSummaryIcons: Partial<Record<string, LucideIcon>> = {
   'Apply patch': Pencil,
   Bash: SquareTerminal,
   'Code execution': FileCog,
@@ -415,7 +431,9 @@ const toolSummaryIcons: Record<string, LucideIcon> = {
   'Edit file': FilePen,
   'Fetch URL': Globe,
   'Find files': Search,
+  'Find in page': Search,
   'MCP tool': FileCog,
+  'Open page': Globe,
   'Read conversation': BookOpenText,
   'Read file': FileText,
   Search,
@@ -449,6 +467,9 @@ const ActivitySummaryText: React.FC<{ summaryText: string; status?: string }> = 
           {detail ? `${label}:` : label}
         </span>
       )}
+      {SummaryIcon && !detail ? (
+        <span className="tool-summary-label">{label}</span>
+      ) : null}
       {detail ? (
         <span className="tool-summary-detail" aria-hidden="true">
           {' '}{detail}

@@ -546,6 +546,71 @@ func TestProcessStreamWebSearchDoesNotTriggerFollowUpTurn(t *testing.T) {
 	require.NotNil(t, restoredItems[0].OfWebSearchCall)
 }
 
+func TestProcessStreamWebSearchOpenPagePreservesURL(t *testing.T) {
+	usage := map[string]any{
+		"input_tokens":  1,
+		"output_tokens": 1,
+		"input_tokens_details": map[string]any{
+			"cached_tokens": 0,
+		},
+	}
+	completedEvent := map[string]any{
+		"type": "response.completed",
+		"response": map[string]any{
+			"id":     "resp_open_page",
+			"status": "completed",
+			"usage":  usage,
+		},
+	}
+
+	events := []map[string]any{
+		{
+			"type": "response.output_item.done",
+			"item": map[string]any{
+				"id":     "ws_open_page",
+				"type":   "web_search_call",
+				"status": "completed",
+				"action": map[string]any{
+					"type": "open_page",
+					"url":  "https://example.com/story",
+				},
+			},
+		},
+		completedEvent,
+	}
+
+	streamEvents := make([]ssestream.Event, 0, len(events))
+	for _, event := range events {
+		payload, err := json.Marshal(event)
+		require.NoError(t, err)
+		streamEvents = append(streamEvents, ssestream.Event{Data: payload})
+	}
+
+	decoder := &fakeDecoder{events: streamEvents}
+	stream := ssestream.NewStream[responses.ResponseStreamEventUnion](decoder, nil)
+
+	thread := &Thread{
+		Thread:      base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test", hooks.Trigger{}),
+		storedItems: make([]StoredInputItem, 0),
+		inputItems:  make([]responses.ResponseInputItemUnionParam, 0),
+	}
+
+	handler := &captureStreamHandler{}
+
+	streamResult, err := thread.processStream(context.Background(), stream, handler, "gpt-5.5", llmtypes.MessageOpt{})
+	require.NoError(t, err)
+	assert.False(t, streamResult.toolsUsed)
+	require.Len(t, thread.storedItems, 1)
+	assert.Equal(t, "https://example.com/story", thread.storedItems[0].Content)
+	assert.JSONEq(t, `{"status":"completed","type":"open_page","url":"https://example.com/story"}`, webSearchStoredInput(thread.storedItems[0]))
+
+	result, ok := thread.GetStructuredToolResults()["ws_open_page"]
+	require.True(t, ok)
+	meta, ok := result.Metadata.(tooltypes.OpenAIWebSearchMetadata)
+	require.True(t, ok)
+	assert.Equal(t, "https://example.com/story", meta.URL)
+}
+
 func TestProcessStreamWebSearchFlushesReasoningIntoReplayState(t *testing.T) {
 	usage := map[string]any{
 		"input_tokens":  1,

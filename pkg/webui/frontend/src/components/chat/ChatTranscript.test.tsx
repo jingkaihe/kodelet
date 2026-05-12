@@ -508,6 +508,76 @@ describe('ChatTranscript', () => {
     expect(container.querySelectorAll('details')).toHaveLength(1)
   })
 
+  it('shows the searched or opened target for native OpenAI search actions', () => {
+    render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[
+          {
+            role: 'assistant',
+            blocks: [
+              {
+                type: 'tools',
+                tools: [
+                  {
+                    callId: 'search-1',
+                    name: 'openai_web_search',
+                    input: '{"type":"open_page","url":"https://example.com/story"}',
+                    result: {
+                      toolName: 'openai_web_search',
+                      success: true,
+                      metadata: {
+                        status: 'completed',
+                        action: 'open_page',
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ]}
+      />
+    )
+
+    expect(screen.getByText('Open page: https://example.com/story')).toBeInTheDocument()
+  })
+
+  it('makes missing OpenAI open-page URLs explicit', () => {
+    render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[
+          {
+            role: 'assistant',
+            blocks: [
+              {
+                type: 'tools',
+                tools: [
+                  {
+                    callId: 'search-1',
+                    name: 'openai_web_search',
+                    input: '{"type":"open_page","status":"completed"}',
+                    result: {
+                      toolName: 'openai_web_search',
+                      success: true,
+                      metadata: {
+                        status: 'completed',
+                        action: 'open_page',
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ]}
+      />
+    )
+
+    expect(screen.getByText('Open page: URL unavailable')).toBeInTheDocument()
+  })
+
   it('renders each tool as its own collapsible row with concise summaries', () => {
     const { container } = render(
       <ChatTranscript

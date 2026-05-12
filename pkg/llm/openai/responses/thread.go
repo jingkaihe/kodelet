@@ -902,16 +902,15 @@ func storedItemFromCompactOutput(output responses.ResponseOutputItemUnion, raw s
 		item.CallID = search.ID
 		item.Status = string(search.Status)
 		item.Action = search.Action.Type
+		details := webSearchDetailsFromAction(search.Action)
 		switch search.Action.Type {
 		case "open_page":
-			item.Content = search.Action.AsOpenPage().URL
+			item.Content = details.url
 		case "find_in_page":
-			find := search.Action.AsFind()
-			item.Content = find.URL
-			item.Arguments = find.Pattern
+			item.Content = details.url
+			item.Arguments = details.pattern
 		default:
-			queries := searchQueries(search.Action.AsSearch().Query, search.Action.AsSearch().Queries)
-			item.Content = strings.Join(queries, ", ")
+			item.Content = strings.Join(details.queries, ", ")
 		}
 	case "reasoning":
 		item.Role = "assistant"
@@ -1737,21 +1736,26 @@ func ExtractMessages(data []byte, toolResults map[string]tooltypes.StructuredToo
 }
 
 func webSearchStoredInput(item StoredInputItem) string {
+	details := webSearchDetailsFromStoredItem(item)
 	payload := map[string]any{
 		"status": webSearchStatusMessage(item.Status),
 		"type":   item.Action,
 	}
-	if item.Content != "" {
-		switch item.Action {
-		case "open_page":
-			payload["url"] = item.Content
-		case "find_in_page":
-			payload["url"] = item.Content
-			if item.Arguments != "" {
-				payload["pattern"] = item.Arguments
-			}
-		default:
-			payload["queries"] = []string{item.Content}
+	switch item.Action {
+	case "open_page":
+		if details.url != "" {
+			payload["url"] = details.url
+		}
+	case "find_in_page":
+		if details.url != "" {
+			payload["url"] = details.url
+		}
+		if details.pattern != "" {
+			payload["pattern"] = details.pattern
+		}
+	default:
+		if len(details.queries) > 0 {
+			payload["queries"] = details.queries
 		}
 	}
 	data, err := json.Marshal(payload)
