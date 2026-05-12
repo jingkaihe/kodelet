@@ -33,7 +33,7 @@ recipes/         # Sample fragment/recipe templates
 All commands use `mise run <task>`. Frontend is embedded via `go generate ./pkg/webui`.
 
 ## Engineering Principles
-1. **Always run linting**: `mise run lint` (Go), `mise run eslint` (frontend)
+1. **Always run linting**: `mise run lint` (Go), `mise run frontend-lint` (frontend)
 2. **Write tests**: Use testify for Go, Vitest for frontend
 3. **Document CLI changes**: Update docs when CLI interface changes
 

@@ -2,11 +2,10 @@ import React from 'react';
 import { ToolResult, WebFetchMetadata } from '../../types';
 import {
   formatReferenceSize,
+  ReferenceCodeBlock,
   ReferenceToolKVGrid,
-  renderMarkdown,
   truncateLines,
 } from './reference';
-import { escapeHtml } from '../../utils';
 
 interface WebFetchRendererProps {
   toolResult: ToolResult;
@@ -23,16 +22,6 @@ const processedTypeLabel = (processedType?: string): string => {
     default:
       return 'fetched page';
   }
-};
-
-const renderWebFetchContent = (content: string, processedType?: string): string => {
-  const truncatedContent = truncateLines(content, 80);
-
-  if (processedType === 'markdown' || processedType === 'ai_extracted') {
-    return renderMarkdown(truncatedContent);
-  }
-
-  return `<pre>${escapeHtml(truncatedContent)}</pre>`;
 };
 
 const WebFetchRenderer: React.FC<WebFetchRendererProps> = ({ toolResult }) => {
@@ -61,10 +50,7 @@ const WebFetchRenderer: React.FC<WebFetchRendererProps> = ({ toolResult }) => {
       />
 
       {meta.content ? (
-        <div
-          className="tool-compact-markdown web-fetch-content"
-          dangerouslySetInnerHTML={{ __html: renderWebFetchContent(meta.content, processedType) }}
-        />
+        <ReferenceCodeBlock content={truncateLines(meta.content, 80)} language="markdown" />
       ) : null}
     </div>
   );

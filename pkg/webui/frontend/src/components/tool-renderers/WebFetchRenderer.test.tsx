@@ -4,7 +4,7 @@ import WebFetchRenderer from './WebFetchRenderer';
 import { ToolResult } from '../../types';
 
 describe('WebFetchRenderer', () => {
-  it('uses a polished extracted-summary label and renders markdown content', () => {
+  it('uses a polished extracted-summary label and renders fetched content as escaped code', () => {
     const toolResult: ToolResult = {
       toolName: 'web_fetch',
       success: true,
@@ -14,7 +14,7 @@ describe('WebFetchRenderer', () => {
         processedType: 'ai_extracted',
         contentType: 'text/html',
         size: 3072,
-        content: '## Top stories\n\n| Rank | Headline |\n|---:|---|\n| 1 | [Story one](https://example.com/story) |',
+        content: '## Top stories\n\n<img src=x onerror=alert(1)>\n\n[Story one](javascript:alert(1))',
       },
     };
 
@@ -22,13 +22,12 @@ describe('WebFetchRenderer', () => {
 
     expect(screen.getByText('extracted summary')).toBeInTheDocument();
     expect(screen.queryByText('ai extracted')).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Top stories' })).toBeInTheDocument();
-    expect(screen.getByRole('table')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Story one' })).toHaveAttribute(
-      'href',
-      'https://example.com/story'
-    );
-    expect(container.querySelector('.tool-compact-markdown.web-fetch-content')).toBeInTheDocument();
-    expect(container.querySelector('.tool-code-block')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Top stories' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Story one' })).not.toBeInTheDocument();
+    expect(container.querySelector('.tool-compact-markdown.web-fetch-content')).not.toBeInTheDocument();
+    expect(container.querySelector('.tool-code-block')).toBeInTheDocument();
+    expect(container.querySelector('img')).not.toBeInTheDocument();
+    expect(screen.getByText(/<img src=x onerror=alert\(1\)>/)).toBeInTheDocument();
+    expect(screen.getByText(/\[Story one\]\(javascript:alert\(1\)\)/)).toBeInTheDocument();
   });
 });
