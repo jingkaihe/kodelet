@@ -1643,8 +1643,7 @@ h6 {
   font-size: 0.72rem;
   font-weight: 600;
   line-height: 1.2;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0.01em;
   color: var(--kodelet-blue);
   transition: color 140ms ease;
 }
@@ -1665,8 +1664,7 @@ h6 {
   font-size: 0.72rem;
   font-weight: 600;
   line-height: 1.2;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0.01em;
   color: #7a756b;
 }
 
@@ -2648,78 +2646,6 @@ code[class*="language-"] {
   }
 }
 
-.tool-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 0.75rem;
-  margin-bottom: 0.4rem;
-}
-
-.tool-title {
-  font-family: var(--font-heading);
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: var(--kodelet-dark);
-  line-height: 1.25;
-}
-
-.tool-subtitle {
-  font-family: var(--font-mono);
-  font-size: 0.74rem;
-  color: #6f6a5f;
-  margin-top: 0.2rem;
-  word-break: break-word;
-}
-
-.tool-badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  justify-content: flex-end;
-}
-
-.tool-badge {
-  display: inline-block;
-  border-radius: 999px;
-  padding: 0.16rem 0.55rem;
-  font-family: var(--font-heading);
-  font-size: 0.69rem;
-  font-weight: 600;
-  border: 1px solid transparent;
-  white-space: nowrap;
-}
-
-.tool-badge-success {
-  background: rgba(120, 140, 93, 0.12);
-  color: #5f7247;
-  border-color: rgba(120, 140, 93, 0.22);
-}
-
-.tool-badge-info {
-  background: rgba(106, 155, 204, 0.12);
-  color: #537aa5;
-  border-color: rgba(106, 155, 204, 0.22);
-}
-
-.tool-badge-warning {
-  background: rgba(217, 119, 87, 0.12);
-  color: #b15e45;
-  border-color: rgba(217, 119, 87, 0.22);
-}
-
-.tool-badge-error {
-  background: rgba(191, 63, 63, 0.1);
-  color: #a63f3f;
-  border-color: rgba(191, 63, 63, 0.2);
-}
-
-.tool-badge-neutral {
-  background: rgba(176, 174, 165, 0.16);
-  color: #6f6a5f;
-  border-color: rgba(176, 174, 165, 0.24);
-}
-
 .bash-tool-brief {
   display: flex;
   align-items: flex-start;
@@ -2829,6 +2755,99 @@ code[class*="language-"] {
   color: rgba(20, 20, 19, 0.7);
 }
 
+.quiet-tool-detail {
+  display: grid;
+  gap: 0.62rem;
+}
+
+.quiet-tool-line {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-family: var(--font-heading);
+  font-size: 0.76rem;
+  line-height: 1.35;
+  color: rgba(20, 20, 19, 0.66);
+}
+
+.quiet-tool-emphasis {
+  font-weight: 650;
+  color: rgba(20, 20, 19, 0.64);
+}
+
+.quiet-tool-muted {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(122, 117, 107, 0.68);
+}
+
+.quiet-tool-muted.mono,
+.quiet-tool-path,
+.quiet-tool-keyline code {
+  font-family: var(--font-mono);
+}
+
+.quiet-tool-warning {
+  font-weight: 650;
+  color: #a63f3f;
+}
+
+.quiet-tool-path {
+  width: fit-content;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.73rem;
+  color: rgba(20, 20, 19, 0.68);
+}
+
+.quiet-tool-empty {
+  font-family: var(--font-heading);
+  font-size: 0.76rem;
+  color: rgba(20, 20, 19, 0.52);
+}
+
+.quiet-tool-sections {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.quiet-tool-section-title {
+  font-family: var(--font-heading);
+  font-size: 0.75rem;
+  font-weight: 650;
+  color: rgba(20, 20, 19, 0.62);
+}
+
+.quiet-tool-keyline {
+  display: grid;
+  grid-template-columns: minmax(5.5rem, max-content) minmax(0, 1fr);
+  gap: 0.65rem;
+  align-items: baseline;
+  font-size: 0.78rem;
+  color: rgba(20, 20, 19, 0.68);
+}
+
+.quiet-tool-key {
+  font-family: var(--font-heading);
+  font-weight: 650;
+  color: rgba(122, 117, 107, 0.68);
+}
+
+.quiet-tool-keyline code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.75rem;
+  color: rgba(20, 20, 19, 0.68);
+}
+
 .apply-patch-result {
   display: grid;
   gap: 0.72rem;
@@ -2904,8 +2923,7 @@ code[class*="language-"] {
   font-family: var(--font-heading);
   font-size: 0.68rem;
   font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
+  letter-spacing: 0.01em;
   color: #7a756b;
   margin-bottom: 0.18rem;
 }
@@ -3188,7 +3206,7 @@ code[class*="language-"] {
   width: fit-content;
   background: rgba(232, 230, 220, 0.52);
   border: 1px solid rgba(176, 174, 165, 0.2);
-  border-radius: 6px;
+  border-radius: 4px;
   padding: 0.24rem 0.45rem;
   font-family: var(--font-mono);
   font-size: 0.76rem;

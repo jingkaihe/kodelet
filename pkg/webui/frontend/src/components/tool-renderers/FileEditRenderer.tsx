@@ -3,8 +3,6 @@ import { ToolResult } from '../../types';
 import {
   compactDiffLines,
   ReferenceDiffBlock,
-  ReferenceToolHeader,
-  TOOL_ICONS,
 } from './reference';
 
 interface FileEditMetadata {
@@ -65,16 +63,15 @@ const FileEditRenderer: React.FC<FileEditRendererProps> = ({ toolResult }) => {
     return diffLines;
   };
 
+  const replacementText = `${replacedCount} replacement${replacedCount !== 1 ? 's' : ''}`;
+
   return (
-    <div className="space-y-2">
-      <ReferenceToolHeader
-        badges={[
-          { text: `${replacedCount} replacement${replacedCount !== 1 ? 's' : ''}`, variant: 'info' },
-          { text: replaceAll ? 'replace all' : 'targeted edit', variant: 'neutral' },
-        ]}
-        subtitle={meta.filePath}
-        title={`${TOOL_ICONS.file_edit} File Edit`}
-      />
+    <div className="quiet-tool-detail">
+      <div className="quiet-tool-line">
+        <span className="quiet-tool-emphasis">{replacementText}</span>
+        <span className="quiet-tool-muted">{replaceAll ? 'replace all' : 'targeted edit'}</span>
+      </div>
+      <div className="quiet-tool-path">{meta.filePath}</div>
 
       <div className="space-y-3">
         {edits.map((edit, index) => {
@@ -85,7 +82,7 @@ const FileEditRenderer: React.FC<FileEditRendererProps> = ({ toolResult }) => {
 
           return (
             <div key={index} className="space-y-2">
-              <div className="font-heading text-sm font-semibold text-kodelet-dark">
+              <div className="quiet-tool-section-title">
                 Lines {edit.startLine}-{edit.endLine}
               </div>
               <ReferenceDiffBlock lines={diffLines} />

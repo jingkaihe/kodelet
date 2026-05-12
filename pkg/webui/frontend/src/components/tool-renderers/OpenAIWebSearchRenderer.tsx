@@ -2,10 +2,8 @@ import React from 'react';
 import { OpenAIWebSearchMetadata, ToolResult } from '../../types';
 import {
   ReferenceCodeList,
-  ReferenceToolHeader,
   ReferenceToolKVGrid,
   ReferenceToolNote,
-  TOOL_ICONS,
 } from './reference';
 import { ExternalLink } from './shared';
 
@@ -17,12 +15,6 @@ const ACTION_LABELS: Record<string, string> = {
   search: 'Search',
   open_page: 'Open page',
   find_in_page: 'Find in page',
-}
-
-const STATUS_VARIANTS: Record<string, 'success' | 'info' | 'error' | 'neutral'> = {
-  completed: 'success',
-  searching: 'info',
-  failed: 'error',
 }
 
 const prettifyLabel = (value?: string): string => {
@@ -50,31 +42,18 @@ const OpenAIWebSearchRenderer: React.FC<OpenAIWebSearchRendererProps> = ({ toolR
   const subtitle = queries[0] || meta.url || undefined
   const visibleSources = sources.slice(0, 6)
   const visibleResults = results.slice(0, 6)
+  const linkCount = sources.length + results.length
 
   return (
-    <div className="space-y-3">
-      <ReferenceToolHeader
-        title={`${TOOL_ICONS.openai_web_search} OpenAI Web Search`}
-        subtitle={subtitle}
-        badges={[
-          {
-            text: status || 'completed',
-            variant: STATUS_VARIANTS[meta.status || ''] || (toolResult.success ? 'success' : 'error'),
-          },
-          {
-            text: action,
-            variant: 'neutral',
-          },
-          ...(sources.length > 0 || results.length > 0
-            ? [
-                {
-                  text: `${sources.length + results.length} links`,
-                  variant: 'info' as const,
-                },
-              ]
-            : []),
-        ]}
-      />
+    <div className="quiet-tool-detail">
+      <div className="quiet-tool-line">
+        <span className={toolResult.success ? 'quiet-tool-emphasis' : 'quiet-tool-warning'}>
+          {status || 'completed'}
+        </span>
+        <span className="quiet-tool-muted">{action}</span>
+        {linkCount > 0 ? <span className="quiet-tool-muted">{linkCount} links</span> : null}
+      </div>
+      {subtitle ? <div className="quiet-tool-path">{subtitle}</div> : null}
 
       <ReferenceToolKVGrid
         items={[
@@ -85,14 +64,14 @@ const OpenAIWebSearchRenderer: React.FC<OpenAIWebSearchRendererProps> = ({ toolR
 
       {queries.length > 0 ? (
         <div className="space-y-2">
-          <div className="tool-kv-label">Queries</div>
+          <div className="quiet-tool-section-title">Queries</div>
           <ReferenceCodeList items={queries} />
         </div>
       ) : null}
 
       {visibleSources.length > 0 ? (
         <div className="space-y-2">
-          <div className="tool-kv-label">Sources</div>
+          <div className="quiet-tool-section-title">Sources</div>
           <div className="flex flex-col gap-1">
             {visibleSources.map((url) => (
               <ExternalLink key={url} href={url} className="break-all">
@@ -108,7 +87,7 @@ const OpenAIWebSearchRenderer: React.FC<OpenAIWebSearchRendererProps> = ({ toolR
 
       {visibleResults.length > 0 ? (
         <div className="space-y-2">
-          <div className="tool-kv-label">Results</div>
+          <div className="quiet-tool-section-title">Results</div>
           <div className="flex flex-col gap-1">
             {visibleResults.map((url) => (
               <ExternalLink key={url} href={url} className="break-all">

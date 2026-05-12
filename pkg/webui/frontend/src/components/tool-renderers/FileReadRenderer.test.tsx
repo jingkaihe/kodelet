@@ -59,7 +59,7 @@ describe('FileReadRenderer', () => {
 
     expect(screen.getByText('25 more')).toBeInTheDocument();
     expect(screen.getByText('Use offset=12 to continue reading this file.')).toBeInTheDocument();
-    expect(container.querySelector('.tool-badge-warning')).toBeInTheDocument();
+    expect(container.querySelector('.quiet-tool-warning')).toBeInTheDocument();
   });
 
   it('renders an empty file cleanly', () => {

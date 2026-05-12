@@ -3,10 +3,8 @@ import { ToolResult, GlobMetadata, FileInfo } from '../../types';
 import {
   formatReferenceSize,
   ReferenceFileList,
-  ReferenceToolHeader,
   ReferenceToolKVGrid,
   ReferenceToolNote,
-  TOOL_ICONS,
 } from './reference';
 
 interface GlobRendererProps {
@@ -21,17 +19,12 @@ const GlobRenderer: React.FC<GlobRendererProps> = ({ toolResult }) => {
   const displayFiles = files.slice(0, 24);
 
   return (
-    <div className="space-y-2">
-      <ReferenceToolHeader
-        badges={[
-          {
-            text: `${files.length} entries`,
-            variant: meta.truncated ? 'warning' : 'success',
-          },
-        ]}
-        subtitle={meta.pattern}
-        title={`${TOOL_ICONS.glob_tool} File Discovery`}
-      />
+    <div className="quiet-tool-detail">
+      <div className="quiet-tool-line">
+        <span className="quiet-tool-emphasis">{files.length} entries</span>
+        {meta.truncated ? <span className="quiet-tool-warning">truncated</span> : null}
+      </div>
+      <div className="quiet-tool-path">{meta.pattern}</div>
 
       <ReferenceToolKVGrid items={[{ label: 'Path', value: meta.path, monospace: true }]} />
 
@@ -46,7 +39,7 @@ const GlobRenderer: React.FC<GlobRendererProps> = ({ toolResult }) => {
           })}
         />
       ) : (
-        <div className="text-xs text-kodelet-mid-gray">No files found</div>
+        <div className="quiet-tool-empty">No files found</div>
       )}
 
       {files.length > 24 ? (

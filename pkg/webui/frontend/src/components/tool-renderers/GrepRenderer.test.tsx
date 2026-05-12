@@ -36,7 +36,6 @@ describe('GrepRenderer', () => {
 
     render(<GrepRenderer toolResult={toolResult} />);
 
-    expect(screen.getByText(':: Search Results')).toBeInTheDocument();
     expect(screen.getByText('2 matches')).toBeInTheDocument();
     expect(screen.getByText('1 files')).toBeInTheDocument();
     expect(screen.getByText('/src')).toBeInTheDocument();
@@ -93,7 +92,7 @@ describe('GrepRenderer', () => {
     const { container } = render(<GrepRenderer toolResult={toolResult} />);
 
     expect(screen.getByText('Truncated: max 25 files')).toBeInTheDocument();
-    expect(container.querySelector('.tool-badge-warning')).toBeInTheDocument();
+    expect(container.querySelector('.quiet-tool-warning')).toBeInTheDocument();
   });
 
   it('shows an empty state when no matches exist', () => {

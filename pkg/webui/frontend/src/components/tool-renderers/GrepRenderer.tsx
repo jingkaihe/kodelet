@@ -2,10 +2,8 @@ import React from 'react';
 import { ToolResult, GrepMetadata, GrepResult, GrepMatch } from '../../types';
 import {
   highlightPattern,
-  ReferenceToolHeader,
   ReferenceToolKVGrid,
   ReferenceToolNote,
-  TOOL_ICONS,
 } from './reference';
 
 interface GrepRendererProps {
@@ -37,21 +35,13 @@ const GrepRenderer: React.FC<GrepRendererProps> = ({ toolResult }) => {
   const truncationMessage = getTruncationMessage();
 
   return (
-    <div className="space-y-2">
-      <ReferenceToolHeader
-        badges={[
-          {
-            text: `${totalMatches} matches`,
-            variant: meta.truncated ? 'warning' : 'success',
-          },
-          {
-            text: `${results.length} files`,
-            variant: 'info',
-          },
-        ]}
-        subtitle={meta.pattern}
-        title={`${TOOL_ICONS.grep_tool} Search Results`}
-      />
+    <div className="quiet-tool-detail">
+      <div className="quiet-tool-line">
+        <span className="quiet-tool-emphasis">{totalMatches} matches</span>
+        <span className="quiet-tool-muted">{results.length} files</span>
+        {meta.truncated ? <span className="quiet-tool-warning">truncated</span> : null}
+      </div>
+      <div className="quiet-tool-path">{meta.pattern}</div>
 
       <ReferenceToolKVGrid
         items={[
@@ -103,7 +93,7 @@ const GrepRenderer: React.FC<GrepRendererProps> = ({ toolResult }) => {
           })}
         </div>
       ) : (
-        <div className="text-xs text-kodelet-mid-gray">No matches found</div>
+        <div className="quiet-tool-empty">No matches found</div>
       )}
 
       {truncationMessage ? <ReferenceToolNote text={truncationMessage} /> : null}

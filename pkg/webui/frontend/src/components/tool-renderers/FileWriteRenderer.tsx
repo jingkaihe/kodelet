@@ -4,9 +4,7 @@ import {
   estimateLanguageFromPath,
   formatReferenceSize,
   ReferenceCodeBlock,
-  ReferenceToolHeader,
   ReferenceToolKVGrid,
-  TOOL_ICONS,
   truncateLines,
 } from './reference';
 
@@ -27,17 +25,16 @@ const FileWriteRenderer: React.FC<FileWriteRendererProps> = ({ toolResult }) => 
   const lines = meta.content?.split('\n') || [];
 
   return (
-    <div className="space-y-2">
-      <ReferenceToolHeader
-        badges={[{ text: 'Written', variant: 'success' }]}
-        subtitle={meta.filePath}
-        title={`${TOOL_ICONS.file_write} File Write`}
-      />
+    <div className="quiet-tool-detail">
+      <div className="quiet-tool-line">
+        <span className="quiet-tool-emphasis">written</span>
+        {sizeText ? <span className="quiet-tool-muted">{sizeText}</span> : null}
+      </div>
+      <div className="quiet-tool-path">{meta.filePath}</div>
 
       <ReferenceToolKVGrid
         items={[
           { label: 'Language', value: language },
-          { label: 'Size', value: sizeText },
           { label: 'Lines', value: lines.length, monospace: true },
         ]}
       />

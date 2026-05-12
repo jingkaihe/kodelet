@@ -1,6 +1,15 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { ToolCard, Collapsible, CopyButton, CodeBlock, MetadataRow, ExternalLink } from './shared';
+import {
+  ToolCard,
+  Collapsible,
+  CopyButton,
+  CodeBlock,
+  MetadataRow,
+  ExternalLink,
+  formatJsonObjectOrArray,
+  safeStringify,
+} from './shared';
 import * as utils from '../../utils';
 
 // Mock utils
@@ -218,5 +227,30 @@ describe('ExternalLink', () => {
 
     const link = screen.getByRole('link');
     expect(link).toHaveAttribute('href', 'https://safe-url.com');
+  });
+});
+
+describe('safeStringify', () => {
+  it('pretty-prints objects and handles circular references', () => {
+    const value: Record<string, unknown> = { key: 'value' };
+    value.self = value;
+
+    expect(safeStringify(value)).toContain('[Circular]');
+    expect(safeStringify({ key: 'value' })).toBe('{\n  "key": "value"\n}');
+  });
+});
+
+describe('formatJsonObjectOrArray', () => {
+  it('formats valid JSON objects and arrays', () => {
+    expect(formatJsonObjectOrArray('{"key":"value"}')?.formatted).toBe(
+      '{\n  "key": "value"\n}'
+    );
+    expect(formatJsonObjectOrArray('[1,2]')?.formatted).toBe('[\n  1,\n  2\n]');
+  });
+
+  it('does not treat primitives or invalid JSON as formattable JSON output', () => {
+    expect(formatJsonObjectOrArray('"hello"')).toBeNull();
+    expect(formatJsonObjectOrArray('42')).toBeNull();
+    expect(formatJsonObjectOrArray('not json')).toBeNull();
   });
 });

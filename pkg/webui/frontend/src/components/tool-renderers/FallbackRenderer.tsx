@@ -1,31 +1,18 @@
 import React, { useState } from 'react';
 import { ToolResult } from '../../types';
-import { StatusBadge } from './shared';
+import { safeStringify } from './shared';
 
 interface FallbackRendererProps {
   toolResult: ToolResult;
 }
 
-const safeStringify = (obj: unknown): string => {
-  const seen = new WeakSet();
-  return JSON.stringify(obj, (_key, val) => {
-    if (val != null && typeof val === 'object') {
-      if (seen.has(val)) {
-        return '[Circular]';
-      }
-      seen.add(val);
-    }
-    return val;
-  }, 2);
-};
-
 const FallbackRenderer: React.FC<FallbackRendererProps> = ({ toolResult }) => {
   const [showRaw, setShowRaw] = useState(false);
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2 text-xs">
-        <StatusBadge text="Completed" variant="neutral" />
+    <div className="quiet-tool-detail">
+      <div className="quiet-tool-line">
+        <span className="quiet-tool-emphasis">completed</span>
       </div>
 
       {!showRaw ? (

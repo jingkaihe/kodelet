@@ -3,9 +3,7 @@ import { ToolResult, WebFetchMetadata } from '../../types';
 import {
   formatReferenceSize,
   ReferenceCodeBlock,
-  ReferenceToolHeader,
   ReferenceToolKVGrid,
-  TOOL_ICONS,
   truncateLines,
 } from './reference';
 
@@ -19,17 +17,15 @@ const WebFetchRenderer: React.FC<WebFetchRendererProps> = ({ toolResult }) => {
 
   const savedPath = meta.savedPath || meta.filePath;
   const processedType = meta.processedType || 'fetched';
+  const sizeText = formatReferenceSize(meta.size);
 
   return (
-    <div className="space-y-2">
-      <ReferenceToolHeader
-        badges={[
-          { text: processedType.replace('_', ' '), variant: 'success' },
-          { text: formatReferenceSize(meta.size), variant: 'neutral' },
-        ]}
-        subtitle={meta.url}
-        title={`${TOOL_ICONS.web_fetch} Web Fetch`}
-      />
+    <div className="quiet-tool-detail">
+      <div className="quiet-tool-line">
+        <span className="quiet-tool-emphasis">{processedType.replace('_', ' ')}</span>
+        {sizeText ? <span className="quiet-tool-muted">{sizeText}</span> : null}
+      </div>
+      <div className="quiet-tool-path">{meta.url}</div>
 
       <ReferenceToolKVGrid
         items={[

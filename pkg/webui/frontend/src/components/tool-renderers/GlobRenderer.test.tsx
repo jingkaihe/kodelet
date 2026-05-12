@@ -47,7 +47,7 @@ describe('GlobRenderer', () => {
 
     const { container } = render(<GlobRenderer toolResult={toolResult} />);
 
-    expect(container.querySelector('.tool-badge-warning')).toBeInTheDocument();
+    expect(container.querySelector('.quiet-tool-warning')).toBeInTheDocument();
   });
 
   it('shows a note when more than 24 files are matched', () => {

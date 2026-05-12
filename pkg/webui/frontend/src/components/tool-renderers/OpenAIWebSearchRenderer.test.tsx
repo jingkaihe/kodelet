@@ -20,7 +20,6 @@ describe('OpenAIWebSearchRenderer', () => {
 
     render(<OpenAIWebSearchRenderer toolResult={toolResult} />)
 
-    expect(screen.getByText(/OpenAI Web Search/)).toBeInTheDocument()
     expect(screen.getByText('completed')).toBeInTheDocument()
     expect(screen.getByText('Search')).toBeInTheDocument()
     expect(screen.getAllByText('kodelet web ui search tool')).toHaveLength(2)

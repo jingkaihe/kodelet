@@ -33,7 +33,7 @@ export interface ToolResult {
   toolName: string;
   success: boolean;
   error?: string;
-  metadata?: FileMetadata | ApplyPatchMetadata | BashMetadata | GrepMetadata | GlobMetadata | WebFetchMetadata | ThinkingMetadata | SubagentMetadata | BatchMetadata | ViewImageMetadata | BrowserMetadata | SkillMetadata | OpenAIWebSearchMetadata | Record<string, unknown>;
+  metadata?: FileMetadata | ApplyPatchMetadata | BashMetadata | GrepMetadata | GlobMetadata | WebFetchMetadata | ThinkingMetadata | SubagentMetadata | BatchMetadata | ViewImageMetadata | BrowserMetadata | SkillMetadata | OpenAIWebSearchMetadata | ReadConversationMetadata | CodeExecutionMetadata | CustomToolMetadata | MCPToolMetadata | Record<string, unknown>;
   timestamp?: string;
 }
 
@@ -426,6 +426,42 @@ export interface OpenAIWebSearchMetadata {
   results?: string[];
   url?: string;
   pattern?: string;
+}
+
+export interface ReadConversationMetadata {
+  conversationID?: string;
+  conversationId?: string;
+  goal?: string;
+  content?: string;
+}
+
+export interface CodeExecutionMetadata {
+  code?: string;
+  output?: string;
+  runtime?: string;
+}
+
+export interface CustomToolMetadata {
+  executionTime?: number;
+  output?: string;
+}
+
+export interface MCPContent {
+  type?: string;
+  text?: string;
+  data?: string;
+  mimeType?: string;
+  uri?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface MCPToolMetadata {
+  mcpToolName?: string;
+  serverName?: string;
+  parameters?: Record<string, unknown>;
+  content?: MCPContent[];
+  contentText?: string;
+  executionTime?: number;
 }
 
 // Component props

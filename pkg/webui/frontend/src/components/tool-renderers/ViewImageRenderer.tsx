@@ -1,7 +1,7 @@
 import React from 'react';
 import { ToolResult, ViewImageMetadata } from '../../types';
 import { getMetadataAny } from './utils';
-import { ReferenceToolHeader, ReferenceToolKVGrid, TOOL_ICONS } from './reference';
+import { ReferenceToolKVGrid } from './reference';
 
 interface ViewImageRendererProps {
   toolResult: ToolResult;
@@ -19,12 +19,12 @@ const ViewImageRenderer: React.FC<ViewImageRendererProps> = ({ toolResult }) => 
       : '';
 
   return (
-    <div className="space-y-2">
-      <ReferenceToolHeader
-        badges={mimeType ? [{ text: mimeType, variant: 'success' }] : []}
-        subtitle={imagePath}
-        title={`${TOOL_ICONS.view_image} View Image`}
-      />
+    <div className="quiet-tool-detail">
+      <div className="quiet-tool-line">
+        <span className="quiet-tool-emphasis">image inspected</span>
+        {mimeType ? <span className="quiet-tool-muted">{mimeType}</span> : null}
+      </div>
+      <div className="quiet-tool-path">{imagePath}</div>
 
       <ReferenceToolKVGrid
         items={[

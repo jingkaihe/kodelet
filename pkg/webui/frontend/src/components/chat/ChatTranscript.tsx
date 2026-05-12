@@ -1,5 +1,21 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Brain, Pencil, PocketKnife, SquareTerminal, type LucideIcon } from 'lucide-react';
+import {
+  BookOpenText,
+  Bot,
+  Brain,
+  FileCog,
+  FileImage,
+  FilePen,
+  FilePlus,
+  FileText,
+  Globe,
+  Pencil,
+  PocketKnife,
+  Search,
+  SquareTerminal,
+  Wrench,
+  type LucideIcon,
+} from 'lucide-react';
 import { marked } from 'marked';
 import type {
   ChatAssistantBlock,
@@ -313,6 +329,36 @@ const getToolSummary = (toolCall: ChatRenderToolCall): string => {
       return formatToolSummary('Web search', query || location);
     }
 
+    case 'read_conversation':
+      return formatToolSummary(
+        'Read conversation',
+        getStringField(input, 'conversation_id', 'conversationID', 'conversationId') ||
+          getStringField(metadata, 'conversationID', 'conversationId') ||
+          getStringField(input, 'goal') ||
+          getStringField(metadata, 'goal')
+      );
+
+    case 'code_execution':
+      return formatToolSummary(
+        'Code execution',
+        getStringField(input, 'description') ||
+          getStringField(input, 'code_path') ||
+          getStringField(metadata, 'runtime')
+      );
+
+    case 'custom_tool':
+      return formatToolSummary(
+        'Custom tool',
+        toolCall.name.replace(/^custom_tool_/, '')
+      );
+
+    case 'mcp_tool':
+      return formatToolSummary(
+        'MCP tool',
+        getStringField(metadata, 'mcpToolName') ||
+          toolCall.name.replace(/^mcp__?/, '').replace(/^mcp_/, '')
+      );
+
     case 'subagent':
       return formatToolSummary(
         'Subagent',
@@ -353,7 +399,20 @@ const splitActivitySummary = (summaryText: string): { label: string; detail?: st
 const toolSummaryIcons: Record<string, LucideIcon> = {
   'Apply patch': Pencil,
   Bash: SquareTerminal,
+  'Code execution': FileCog,
+  'Custom tool': Wrench,
+  'Edit file': FilePen,
+  'Fetch URL': Globe,
+  'Find files': Search,
+  'MCP tool': FileCog,
+  'Read conversation': BookOpenText,
+  'Read file': FileText,
+  Search,
   Skill: PocketKnife,
+  Subagent: Bot,
+  'View image': FileImage,
+  'Web search': Globe,
+  'Write file': FilePlus,
 };
 
 const ActivitySummaryText: React.FC<{ summaryText: string; status?: string }> = ({ summaryText, status }) => {

@@ -60,7 +60,6 @@ describe('ToolRenderer', () => {
 
     render(<ToolRenderer toolResult={toolResult} />);
 
-    expect(screen.getByText(/OpenAI Web Search/)).toBeInTheDocument();
     expect(screen.getByText('failed')).toBeInTheDocument();
     expect(screen.getAllByText('kodelet web ui search')).toHaveLength(2);
     expect(screen.getByText('https://example.com/source')).toBeInTheDocument();

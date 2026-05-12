@@ -3,10 +3,8 @@ import { ToolResult, FileMetadata } from '../../types';
 import {
   estimateLanguageFromPath,
   ReferenceCodeBlock,
-  ReferenceToolHeader,
   ReferenceToolKVGrid,
   ReferenceToolNote,
-  TOOL_ICONS,
 } from './reference';
 
 interface FileReadRendererProps {
@@ -42,20 +40,15 @@ const FileReadRenderer: React.FC<FileReadRendererProps> = ({ toolResult }) => {
   const displayLines = lines.slice(0, lastNonEmptyIndex + 1);
 
   return (
-    <div className="space-y-2">
-      <ReferenceToolHeader
-        badges={[
-          {
-            text: `${displayLines.length} lines`,
-            variant: meta.truncated ? 'warning' : 'success',
-          },
-          ...(remainingLines > 0
-            ? [{ text: `${remainingLines} more`, variant: 'info' as const }]
-            : []),
-        ]}
-        subtitle={meta.filePath}
-        title={`${TOOL_ICONS.file_read} File Read`}
-      />
+    <div className="quiet-tool-detail">
+      <div className="quiet-tool-line">
+        <span className="quiet-tool-emphasis">{displayLines.length} lines</span>
+        {remainingLines > 0 ? (
+          <span className="quiet-tool-muted">{remainingLines} more</span>
+        ) : null}
+        {meta.truncated ? <span className="quiet-tool-warning">truncated</span> : null}
+      </div>
+      <div className="quiet-tool-path">{meta.filePath}</div>
 
       <ReferenceToolKVGrid
         items={[

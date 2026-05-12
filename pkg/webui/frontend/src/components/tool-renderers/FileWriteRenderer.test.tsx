@@ -28,7 +28,7 @@ describe('FileWriteRenderer', () => {
     render(<FileWriteRenderer toolResult={toolResult} />);
 
     expect(screen.getByText('/src/app.js')).toBeInTheDocument();
-    expect(screen.getByText('Written')).toBeInTheDocument();
+    expect(screen.getByText('written')).toBeInTheDocument();
     expect(screen.getByText('javascript')).toBeInTheDocument();
     expect(screen.getByText('1.5 KB')).toBeInTheDocument();
   });

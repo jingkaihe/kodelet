@@ -3,17 +3,6 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import SubagentRenderer from './SubagentRenderer';
 import { ToolResult, SubagentMetadata } from '../../types';
 
-interface MockStatusBadgeProps {
-  text: string;
-  variant?: string;
-}
-
-vi.mock('./shared', () => ({
-  StatusBadge: ({ text, variant }: MockStatusBadgeProps) => (
-    <span data-testid="status-badge" data-variant={variant}>{text}</span>
-  ),
-}));
-
 vi.mock('marked', () => ({
   marked: {
     setOptions: vi.fn(),
@@ -37,7 +26,7 @@ describe('SubagentRenderer', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('renders delegated badge', () => {
+  it('renders delegated status text', () => {
     const toolResult = createToolResult({
       question: 'What is the answer?',
       response: '42',
@@ -45,7 +34,7 @@ describe('SubagentRenderer', () => {
 
     render(<SubagentRenderer toolResult={toolResult} />);
 
-    expect(screen.getByTestId('status-badge')).toHaveTextContent('Delegated');
+    expect(screen.getByText('delegated')).toBeInTheDocument();
   });
 
   it('renders workflow badge when workflow is present', () => {
@@ -94,13 +83,13 @@ describe('SubagentRenderer', () => {
 
     render(<SubagentRenderer toolResult={toolResult} />);
 
-    expect(screen.queryByText('Question:')).not.toBeInTheDocument();
-    expect(screen.queryByText('Response:')).not.toBeInTheDocument();
+    expect(screen.queryByText('Question')).not.toBeInTheDocument();
+    expect(screen.queryByText('Response')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText('Show details'));
 
-    expect(screen.getByText('Question:')).toBeInTheDocument();
-    expect(screen.getByText('Response:')).toBeInTheDocument();
+    expect(screen.getByText('Question')).toBeInTheDocument();
+    expect(screen.getByText('Response')).toBeInTheDocument();
   });
 
   it('renders question and response in details view', () => {
@@ -113,8 +102,8 @@ describe('SubagentRenderer', () => {
 
     fireEvent.click(screen.getByText('Show details'));
 
-    expect(screen.getByText('Question:')).toBeInTheDocument();
-    expect(screen.getByText('Response:')).toBeInTheDocument();
+    expect(screen.getByText('Question')).toBeInTheDocument();
+    expect(screen.getByText('Response')).toBeInTheDocument();
   });
 
   it('renders workflow in details view when present', () => {
@@ -128,7 +117,7 @@ describe('SubagentRenderer', () => {
 
     fireEvent.click(screen.getByText('Show details'));
 
-    expect(screen.getByText('Workflow:')).toBeInTheDocument();
+    expect(screen.getAllByText('Workflow')).not.toHaveLength(0);
   });
 
   it('renders directory in details view when cwd is present', () => {
@@ -142,7 +131,7 @@ describe('SubagentRenderer', () => {
 
     fireEvent.click(screen.getByText('Show details'));
 
-    expect(screen.getByText('Directory:')).toBeInTheDocument();
+    expect(screen.getAllByText('Directory')).not.toHaveLength(0);
   });
 
   it('handles empty question gracefully', () => {
@@ -155,8 +144,8 @@ describe('SubagentRenderer', () => {
 
     fireEvent.click(screen.getByText('Show details'));
 
-    expect(screen.queryByText('Question:')).not.toBeInTheDocument();
-    expect(screen.getByText('Response:')).toBeInTheDocument();
+    expect(screen.queryByText('Question')).not.toBeInTheDocument();
+    expect(screen.getByText('Response')).toBeInTheDocument();
   });
 
   it('handles empty response gracefully', () => {
@@ -168,7 +157,7 @@ describe('SubagentRenderer', () => {
 
     fireEvent.click(screen.getByText('Show details'));
 
-    expect(screen.getByText('Question:')).toBeInTheDocument();
-    expect(screen.queryByText('Response:')).not.toBeInTheDocument();
+    expect(screen.getByText('Question')).toBeInTheDocument();
+    expect(screen.queryByText('Response')).not.toBeInTheDocument();
   });
 });

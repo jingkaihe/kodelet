@@ -1,18 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import FallbackRenderer from './FallbackRenderer';
 import { ToolResult } from '../../types';
-
-interface MockStatusBadgeProps {
-  text: string;
-  variant?: string;
-}
-
-vi.mock('./shared', () => ({
-  StatusBadge: ({ text, variant }: MockStatusBadgeProps) => (
-    <span data-testid="status-badge" data-variant={variant}>{text}</span>
-  ),
-}));
 
 describe('FallbackRenderer', () => {
   const createToolResult = (toolName: string, metadata: Record<string, unknown> | null | undefined): ToolResult => ({
@@ -23,10 +12,10 @@ describe('FallbackRenderer', () => {
     metadata: metadata as Record<string, unknown> | undefined,
   });
 
-  it('shows Completed badge', () => {
+  it('shows completed status text', () => {
     const toolResult = createToolResult('arbitrary-tool', { key: 'value' });
     render(<FallbackRenderer toolResult={toolResult} />);
-    expect(screen.getByText('Completed')).toBeInTheDocument();
+    expect(screen.getByText('completed')).toBeInTheDocument();
   });
 
   it('shows "Show raw data" button', () => {

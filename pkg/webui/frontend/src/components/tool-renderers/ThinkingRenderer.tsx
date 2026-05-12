@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { ToolResult, ThinkingMetadata } from '../../types';
-import { StatusBadge } from './shared';
 import { marked } from 'marked';
 
 interface ThinkingRendererProps {
@@ -19,9 +18,9 @@ const ThinkingRenderer: React.FC<ThinkingRendererProps> = ({ toolResult }) => {
   };
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2 text-xs">
-        <StatusBadge text="Internal" variant="info" />
+    <div className="quiet-tool-detail">
+      <div className="quiet-tool-line">
+        <span className="quiet-tool-emphasis">internal</span>
         {!showThought && (
           <button
             onClick={() => setShowThought(true)}

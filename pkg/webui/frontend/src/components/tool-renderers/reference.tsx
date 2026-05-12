@@ -2,32 +2,6 @@ import React from 'react';
 import { marked } from 'marked';
 import { cn, detectLanguageFromPath, formatFileSize, formatDuration } from '../../utils';
 
-export const TOOL_LABELS: Record<string, string> = {
-  bash: 'Shell Command',
-  file_read: 'File Read',
-  file_write: 'File Write',
-  file_edit: 'File Edit',
-  apply_patch: 'Apply Patch',
-  grep_tool: 'Search Results',
-  glob_tool: 'File Discovery',
-  web_fetch: 'Web Fetch',
-  view_image: 'View Image',
-  openai_web_search: 'OpenAI Web Search',
-};
-
-export const TOOL_ICONS: Record<string, string> = {
-  bash: '▸',
-  file_read: '[]',
-  file_write: '<>',
-  file_edit: '//',
-  apply_patch: '+/-',
-  grep_tool: '::',
-  glob_tool: '**',
-  web_fetch: '//',
-  view_image: '◫',
-  openai_web_search: '>>',
-};
-
 export const normalizeToolName = (toolName: string): string => {
   if (toolName === 'grep') {
     return 'grep_tool';
@@ -35,49 +9,14 @@ export const normalizeToolName = (toolName: string): string => {
   if (toolName === 'glob') {
     return 'glob_tool';
   }
+  if (toolName.startsWith('custom_tool_')) {
+    return 'custom_tool';
+  }
+  if (toolName.startsWith('mcp__') || toolName.startsWith('mcp_')) {
+    return 'mcp_tool';
+  }
   return toolName;
 };
-
-type ToolBadgeVariant = 'success' | 'info' | 'warning' | 'error' | 'neutral';
-
-const badgeClassName: Record<ToolBadgeVariant, string> = {
-  success: 'tool-badge-success',
-  info: 'tool-badge-info',
-  warning: 'tool-badge-warning',
-  error: 'tool-badge-error',
-  neutral: 'tool-badge-neutral',
-};
-
-interface ToolHeaderProps {
-  title: string;
-  subtitle?: string | null;
-  badges?: Array<{ text: string; variant?: ToolBadgeVariant }>;
-}
-
-export const ReferenceToolHeader: React.FC<ToolHeaderProps> = ({
-  title,
-  subtitle,
-  badges = [],
-}) => (
-  <div className="tool-header">
-    <div>
-      <div className="tool-title">{title}</div>
-      {subtitle ? <div className="tool-subtitle">{subtitle}</div> : null}
-    </div>
-    {badges.length > 0 ? (
-      <div className="tool-badges">
-        {badges.map((badge, index) => (
-          <span
-            className={cn('tool-badge', badgeClassName[badge.variant || 'neutral'])}
-            key={`${badge.text}-${index}`}
-          >
-            {badge.text}
-          </span>
-        ))}
-      </div>
-    ) : null}
-  </div>
-);
 
 interface ToolKVGridProps {
   items: Array<{ label: string; value?: string | number | null; monospace?: boolean }>;

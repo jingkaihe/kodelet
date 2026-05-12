@@ -27,7 +27,7 @@ export const ToolCard: React.FC<ToolCardProps> = ({
         <div className="flex items-center gap-2">
           <h4 className="font-heading font-semibold text-sm text-kodelet-dark">{title}</h4>
           {badge && (
-            <div className={`inline-flex items-center rounded-full border px-2 py-1 text-[0.68rem] font-heading font-semibold uppercase tracking-[0.12em] ${badge.className || 'border-kodelet-blue/20 bg-kodelet-blue/10 text-kodelet-blue'}`}>
+            <div className={`inline-flex items-center rounded-md border px-2 py-1 text-[0.68rem] font-heading font-semibold tracking-[0.01em] ${badge.className || 'border-kodelet-blue/20 bg-kodelet-blue/10 text-kodelet-blue'}`}>
               {badge.text}
             </div>
           )}
@@ -68,12 +68,12 @@ export const Collapsible: React.FC<CollapsibleProps> = ({
       />
       <label
         htmlFor={collapseId}
-        className="collapse-title flex cursor-pointer items-center justify-between text-xs font-heading font-semibold uppercase tracking-[0.08em]"
+        className="collapse-title flex cursor-pointer items-center justify-between text-xs font-heading font-semibold tracking-[0.01em]"
       >
         <span className="text-kodelet-dark">{title}</span>
         {badge && (
           <div
-            className={`inline-flex items-center rounded-full border px-2 py-1 text-[0.68rem] font-heading font-semibold uppercase tracking-[0.12em] ${badge.className || 'border-kodelet-blue/20 bg-kodelet-blue/10 text-kodelet-blue'}`}
+            className={`inline-flex items-center rounded-md border px-2 py-1 text-[0.68rem] font-heading font-semibold tracking-[0.01em] ${badge.className || 'border-kodelet-blue/20 bg-kodelet-blue/10 text-kodelet-blue'}`}
             aria-label={badge.text}
           >
             {badge.text}
@@ -202,10 +202,50 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ text, variant = 'neutr
   };
 
   return (
-    <span className={`inline-flex items-center rounded-full border px-2 py-1 text-[0.68rem] font-heading font-semibold uppercase tracking-[0.12em] ${variantClasses[variant]}`}>
+    <span className={`inline-flex items-center rounded-md border px-2 py-1 text-[0.68rem] font-heading font-semibold tracking-[0.01em] ${variantClasses[variant]}`}>
       {text}
     </span>
   );
+};
+
+type JsonObjectOrArray = Record<string, unknown> | unknown[];
+
+export const safeStringify = (obj: unknown): string => {
+  const seen = new WeakSet();
+  return JSON.stringify(obj, (_key, val) => {
+    if (val != null && typeof val === 'object') {
+      if (seen.has(val)) {
+        return '[Circular]';
+      }
+      seen.add(val);
+    }
+    return val;
+  }, 2);
+};
+
+export interface FormattedJson {
+  formatted: string;
+  parsed: JsonObjectOrArray;
+}
+
+export const formatJsonObjectOrArray = (value?: string | null): FormattedJson | null => {
+  if (!value?.trim()) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    if (!parsed || typeof parsed !== 'object') {
+      return null;
+    }
+
+    return {
+      formatted: JSON.stringify(parsed, null, 2),
+      parsed: parsed as JsonObjectOrArray,
+    };
+  } catch {
+    return null;
+  }
 };
 
 interface ExternalLinkProps {
