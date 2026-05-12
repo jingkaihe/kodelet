@@ -3196,6 +3196,26 @@ code[class*="language-"] {
   color: var(--kodelet-dark);
 }
 
+.running-tool-input-preview .tool-code-block {
+  max-height: 8.5rem;
+  overflow: auto;
+  opacity: 0.82;
+}
+
+.running-tool-input-preview .tool-code-block code {
+  font-size: 0.72rem;
+  line-height: 1.42;
+}
+
+.web-fetch-content {
+  max-height: 34rem;
+  overflow: auto;
+}
+
+.web-fetch-content table {
+  min-width: 42rem;
+}
+
 .tool-code-list {
   display: grid;
   gap: 0.45rem;

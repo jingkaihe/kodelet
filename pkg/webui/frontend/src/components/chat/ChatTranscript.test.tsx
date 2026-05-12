@@ -616,6 +616,36 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('.tool-summary-icon-running')).toBeInTheDocument()
   })
 
+  it('keeps long running tool input previews compact', () => {
+    const longPrompt = 'x'.repeat(700)
+    const { container } = render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[
+          {
+            role: 'assistant',
+            blocks: [
+              {
+                type: 'tools',
+                tools: [
+                  {
+                    callId: 'web-fetch-1',
+                    name: 'web_fetch',
+                    input: JSON.stringify({ url: 'https://example.com/news', prompt: longPrompt }),
+                  },
+                ],
+              },
+            ],
+          },
+        ]}
+      />
+    )
+
+    expect(container.querySelector('.running-tool-input-preview')).toBeInTheDocument()
+    expect(screen.getByText(/more characters/)).toBeInTheDocument()
+    expect(screen.queryByText(longPrompt)).not.toBeInTheDocument()
+  })
+
   it('uses bash duration as the completed activity status', () => {
     const { container } = render(
       <ChatTranscript

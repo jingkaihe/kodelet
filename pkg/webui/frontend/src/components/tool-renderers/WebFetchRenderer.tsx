@@ -2,14 +2,38 @@ import React from 'react';
 import { ToolResult, WebFetchMetadata } from '../../types';
 import {
   formatReferenceSize,
-  ReferenceCodeBlock,
   ReferenceToolKVGrid,
+  renderMarkdown,
   truncateLines,
 } from './reference';
+import { escapeHtml } from '../../utils';
 
 interface WebFetchRendererProps {
   toolResult: ToolResult;
 }
+
+const processedTypeLabel = (processedType?: string): string => {
+  switch (processedType) {
+    case 'ai_extracted':
+      return 'extracted summary';
+    case 'markdown':
+      return 'markdown content';
+    case 'saved':
+      return 'saved page';
+    default:
+      return 'fetched page';
+  }
+};
+
+const renderWebFetchContent = (content: string, processedType?: string): string => {
+  const truncatedContent = truncateLines(content, 80);
+
+  if (processedType === 'markdown' || processedType === 'ai_extracted') {
+    return renderMarkdown(truncatedContent);
+  }
+
+  return `<pre>${escapeHtml(truncatedContent)}</pre>`;
+};
 
 const WebFetchRenderer: React.FC<WebFetchRendererProps> = ({ toolResult }) => {
   const meta = toolResult.metadata as WebFetchMetadata;
@@ -17,12 +41,13 @@ const WebFetchRenderer: React.FC<WebFetchRendererProps> = ({ toolResult }) => {
 
   const savedPath = meta.savedPath || meta.filePath;
   const processedType = meta.processedType || 'fetched';
+  const statusText = processedTypeLabel(processedType);
   const sizeText = formatReferenceSize(meta.size);
 
   return (
     <div className="quiet-tool-detail">
       <div className="quiet-tool-line">
-        <span className="quiet-tool-emphasis">{processedType.replace('_', ' ')}</span>
+        <span className="quiet-tool-emphasis">{statusText}</span>
         {sizeText ? <span className="quiet-tool-muted">{sizeText}</span> : null}
       </div>
       <div className="quiet-tool-path">{meta.url}</div>
@@ -36,7 +61,10 @@ const WebFetchRenderer: React.FC<WebFetchRendererProps> = ({ toolResult }) => {
       />
 
       {meta.content ? (
-        <ReferenceCodeBlock content={truncateLines(meta.content, 80)} language="markdown" />
+        <div
+          className="tool-detail-panel prose-enhanced web-fetch-content text-sm"
+          dangerouslySetInnerHTML={{ __html: renderWebFetchContent(meta.content, processedType) }}
+        />
       ) : null}
     </div>
   );

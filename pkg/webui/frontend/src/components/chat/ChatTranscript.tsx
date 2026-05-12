@@ -98,6 +98,17 @@ const formatToolInput = (input: string): string => {
   }
 };
 
+const TOOL_INPUT_PREVIEW_LIMIT = 320;
+
+const formatToolInputPreview = (input: string): string => {
+  const formattedInput = formatToolInput(input);
+  if (formattedInput.length <= TOOL_INPUT_PREVIEW_LIMIT) {
+    return formattedInput;
+  }
+
+  return `${formattedInput.slice(0, TOOL_INPUT_PREVIEW_LIMIT).trimEnd()}\n… (${formattedInput.length - TOOL_INPUT_PREVIEW_LIMIT} more characters)`;
+};
+
 const parseToolInput = (input: string): Record<string, unknown> | null => {
   try {
     const parsed = JSON.parse(input);
@@ -787,10 +798,12 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
                       <>
                         <p className="tool-awaiting">Awaiting tool result…</p>
                         {toolCall.input ? (
-                          <ReferenceCodeBlock
-                            content={formatToolInput(toolCall.input)}
-                            language="json"
-                          />
+                          <div className="running-tool-input-preview">
+                            <ReferenceCodeBlock
+                              content={formatToolInputPreview(toolCall.input)}
+                              language="json"
+                            />
+                          </div>
                         ) : null}
                       </>
                     )}
