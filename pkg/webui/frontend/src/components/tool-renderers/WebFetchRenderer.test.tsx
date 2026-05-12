@@ -25,6 +25,7 @@ describe('WebFetchRenderer', () => {
     expect(screen.queryByRole('heading', { name: 'Top stories' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Story one' })).not.toBeInTheDocument();
     expect(container.querySelector('.tool-compact-markdown.web-fetch-content')).not.toBeInTheDocument();
+    expect(container.querySelector('.web-fetch-code-preview')).toBeInTheDocument();
     expect(container.querySelector('.tool-code-block')).toBeInTheDocument();
     expect(container.querySelector('img')).not.toBeInTheDocument();
     expect(screen.getByText(/<img src=x onerror=alert\(1\)>/)).toBeInTheDocument();

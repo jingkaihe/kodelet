@@ -50,7 +50,9 @@ const WebFetchRenderer: React.FC<WebFetchRendererProps> = ({ toolResult }) => {
       />
 
       {meta.content ? (
-        <ReferenceCodeBlock content={truncateLines(meta.content, 80)} language="markdown" />
+        <div className="web-fetch-code-preview">
+          <ReferenceCodeBlock content={truncateLines(meta.content, 80)} language="markdown" />
+        </div>
       ) : null}
     </div>
   );
