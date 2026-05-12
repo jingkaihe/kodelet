@@ -3196,6 +3196,32 @@ code[class*="language-"] {
   color: var(--kodelet-dark);
 }
 
+.code-execution-preview .tool-code-block {
+  max-height: 24rem;
+  overflow: auto;
+  padding: 0.72rem;
+  background: rgba(247, 243, 235, 0.58);
+  box-shadow: none;
+}
+
+.code-execution-preview .tool-code-block code {
+  font-size: 0.74rem;
+  line-height: 1.44;
+}
+
+.code-execution-output .tool-code-block {
+  max-height: 24rem;
+  overflow: auto;
+  padding: 0.72rem;
+  background: rgba(247, 243, 235, 0.58);
+  box-shadow: none;
+}
+
+.code-execution-output .tool-code-block code {
+  font-size: 0.74rem;
+  line-height: 1.44;
+}
+
 .running-tool-input-preview .tool-code-block {
   max-height: 8.5rem;
   overflow: auto;
