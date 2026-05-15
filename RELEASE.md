@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.4.11-beta (2026-05-15)
+
+Added `anthropic.base_url` config field and `ANTHROPIC_BASE_URL` environment variable so the Anthropic API base URL can be overridden for proxies or custom endpoints. Explicit base URL overrides now take precedence over platform defaults.
+
 ## 0.4.10-beta (2026-05-12)
 
 Refactored OpenAI web search action handling with centralized `webSearchActionDetails` helpers so URL, query, and pattern extraction is consistent across streaming, storage, and transcript rendering. Fixed `open_page` and `find_in_page` metadata preservation so web search calls survive conversation replay.

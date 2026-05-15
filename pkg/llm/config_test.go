@@ -620,6 +620,20 @@ func TestGetConfigFromViperOpenAIBasicConfig(t *testing.T) {
 	assert.Nil(t, config.OpenAI.Pricing, "Pricing should be nil when not set")
 }
 
+func TestGetConfigFromViperAnthropicBasicConfig(t *testing.T) {
+	viper.Reset()
+	viper.Set("provider", "anthropic")
+	viper.Set("anthropic.platform", "copilot")
+	viper.Set("anthropic.base_url", "https://proxy.example")
+
+	config, err := GetConfigFromViper()
+	require.NoError(t, err)
+
+	require.NotNil(t, config.Anthropic, "Anthropic config should not be nil")
+	assert.Equal(t, "copilot", config.Anthropic.Platform)
+	assert.Equal(t, "https://proxy.example", config.Anthropic.BaseURL)
+}
+
 func TestGetConfigFromViperOpenAIApiModeConfig(t *testing.T) {
 	viper.Reset()
 	viper.Set("provider", "openai")

@@ -267,6 +267,7 @@ openai:
   # When true, kodelet adds x-session-affinity header per conversation,
   # but only on calls where prompt caching is requested.
   # manual_cache: true
+
   # models:
   #   # Models that support reasoning capabilities
   #   reasoning:

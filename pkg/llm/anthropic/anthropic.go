@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -50,6 +51,31 @@ func (t *Thread) Provider() string {
 	return "anthropic"
 }
 
+// GetConfiguredBaseURL returns only explicit base URL overrides from environment or config.
+func GetConfiguredBaseURL(config llmtypes.Config) string {
+	if baseURL := os.Getenv("ANTHROPIC_BASE_URL"); baseURL != "" {
+		return baseURL
+	}
+
+	if config.Anthropic != nil && config.Anthropic.BaseURL != "" {
+		return config.Anthropic.BaseURL
+	}
+
+	return ""
+}
+
+func resolveClientBaseURL(config llmtypes.Config, useCopilot bool) string {
+	if configuredBaseURL := GetConfiguredBaseURL(config); configuredBaseURL != "" {
+		return configuredBaseURL
+	}
+
+	if useCopilot {
+		return auth.CopilotBaseURL
+	}
+
+	return ""
+}
+
 // NewAnthropicThread creates a new thread with Anthropic's Claude API
 func NewAnthropicThread(config llmtypes.Config) (*Thread, error) {
 	// Apply defaults if not provided
@@ -78,11 +104,15 @@ func NewAnthropicThread(config llmtypes.Config) (*Thread, error) {
 
 		logger.Debug("using GitHub Copilot Anthropic-compatible API")
 		opts = append(opts, auth.AnthropicRequestOptionsWithAuthorizer(auth.CopilotAnthropicAuthorizer())...)
-		opts = append(opts, option.WithBaseURL(auth.CopilotBaseURL))
+		opts = append(opts, option.WithBaseURL(resolveClientBaseURL(config, true)))
 		client = anthropic.NewClient(opts...)
 		useSubscription = false
 		useCopilot = true
 	} else {
+		if baseURL := resolveClientBaseURL(config, false); baseURL != "" {
+			opts = append(opts, option.WithBaseURL(baseURL))
+		}
+
 		// Determine authentication method based on access mode configuration
 		switch config.AnthropicAPIAccess {
 		case llmtypes.AnthropicAPIAccessAPIKey:

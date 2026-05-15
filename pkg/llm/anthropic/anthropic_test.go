@@ -2,6 +2,8 @@ package anthropic
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,6 +11,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/invopop/jsonschema"
+	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/stretchr/testify/assert"
@@ -53,6 +56,139 @@ func TestGetMediaTypeFromExtension(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetConfiguredBaseURL(t *testing.T) {
+	t.Setenv("ANTHROPIC_BASE_URL", "")
+
+	tests := []struct {
+		name     string
+		config   llmtypes.Config
+		envBase  string
+		expected string
+	}{
+		{
+			name:     "no explicit base url",
+			config:   llmtypes.Config{},
+			expected: "",
+		},
+		{
+			name: "config base url override",
+			config: llmtypes.Config{Anthropic: &llmtypes.AnthropicConfig{
+				BaseURL: "https://custom.example",
+			}},
+			expected: "https://custom.example",
+		},
+		{
+			name: "env base url override",
+			config: llmtypes.Config{Anthropic: &llmtypes.AnthropicConfig{
+				BaseURL: "https://custom.example",
+			}},
+			envBase:  "https://env.example",
+			expected: "https://env.example",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("ANTHROPIC_BASE_URL", tt.envBase)
+			assert.Equal(t, tt.expected, GetConfiguredBaseURL(tt.config))
+		})
+	}
+}
+
+func TestResolveClientBaseURL(t *testing.T) {
+	t.Setenv("ANTHROPIC_BASE_URL", "")
+
+	tests := []struct {
+		name       string
+		config     llmtypes.Config
+		useCopilot bool
+		envBase    string
+		expected   string
+	}{
+		{
+			name:       "non-copilot uses SDK default base",
+			config:     llmtypes.Config{},
+			useCopilot: false,
+			expected:   "",
+		},
+		{
+			name:       "copilot uses copilot endpoint by default",
+			config:     llmtypes.Config{},
+			useCopilot: true,
+			expected:   "https://api.githubcopilot.com",
+		},
+		{
+			name: "copilot respects explicit config base override",
+			config: llmtypes.Config{Anthropic: &llmtypes.AnthropicConfig{
+				Platform: "copilot",
+				BaseURL:  "https://custom.example",
+			}},
+			useCopilot: true,
+			expected:   "https://custom.example",
+		},
+		{
+			name: "copilot respects env base override",
+			config: llmtypes.Config{Anthropic: &llmtypes.AnthropicConfig{
+				Platform: "copilot",
+				BaseURL:  "https://custom.example",
+			}},
+			useCopilot: true,
+			envBase:    "https://env.example",
+			expected:   "https://env.example",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("ANTHROPIC_BASE_URL", tt.envBase)
+			assert.Equal(t, tt.expected, resolveClientBaseURL(tt.config, tt.useCopilot))
+		})
+	}
+}
+
+func TestNewAnthropicThreadCopilotUsesConfiguredBaseURL(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("ANTHROPIC_BASE_URL", "")
+
+	_, err := auth.SaveCopilotCredentials(&auth.CopilotCredentials{
+		AccessToken:    "github-access-token",
+		CopilotToken:   "copilot-access-token",
+		Scope:          "copilot",
+		CopilotExpires: time.Now().Add(time.Hour).Unix(),
+	})
+	require.NoError(t, err)
+
+	var requestPath string
+	var authorization string
+	var userAgent string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestPath = r.URL.Path
+		authorization = r.Header.Get("Authorization")
+		userAgent = r.Header.Get("User-Agent")
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+
+	thread, err := NewAnthropicThread(llmtypes.Config{
+		Anthropic: &llmtypes.AnthropicConfig{
+			Platform: "copilot",
+			BaseURL:  server.URL,
+		},
+	})
+	require.NoError(t, err)
+
+	var response map[string]bool
+	err = thread.client.Post(context.Background(), "/v1/messages", map[string]string{"ping": "pong"}, &response)
+	require.NoError(t, err)
+
+	assert.Equal(t, "/v1/messages", requestPath)
+	assert.Equal(t, "Bearer copilot-access-token", authorization)
+	assert.Equal(t, "GitHubCopilotChat/0.26.7", userAgent)
+	assert.True(t, response["ok"])
 }
 
 func TestProcessImageURL(t *testing.T) {
