@@ -465,6 +465,44 @@ func TestCompactContextCodexUsesCompactEndpoint(t *testing.T) {
 	assert.False(t, fallbackCalled, "summary fallback should not run when compact succeeds")
 }
 
+func TestCompactContextCopilotUsesSummaryCompaction(t *testing.T) {
+	thread := &Thread{
+		Thread: base.NewThread(
+			llmtypes.Config{Provider: "openai", Model: "gpt-5", OpenAI: &llmtypes.OpenAIConfig{Platform: "copilot"}},
+			"conv-test",
+			hooks.Trigger{},
+		),
+		useCopilot: true,
+		inputItems: []openairesponses.ResponseInputItemUnionParam{
+			{
+				OfMessage: &openairesponses.EasyInputMessageParam{
+					Role:    openairesponses.EasyInputMessageRoleUser,
+					Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("hello")},
+				},
+			},
+		},
+	}
+
+	thread.compactFunc = func(_ context.Context, _ openairesponses.ResponseCompactParams, _ ...option.RequestOption) (*openairesponses.CompactedResponse, error) {
+		t.Fatal("native compact endpoint should not be used for Copilot")
+		return nil, errors.New("native compact endpoint should not be used for Copilot")
+	}
+	thread.compactRawFunc = func(_ context.Context, _ openairesponses.ResponseCompactParams, _ ...option.RequestOption) (*openairesponses.CompactedResponse, error) {
+		t.Fatal("raw native compact endpoint should not be used for Copilot")
+		return nil, errors.New("raw native compact endpoint should not be used for Copilot")
+	}
+
+	summaryCalled := false
+	thread.compactWithSummaryFunc = func(_ context.Context) error {
+		summaryCalled = true
+		return nil
+	}
+
+	err := thread.CompactContext(context.Background())
+	require.NoError(t, err)
+	assert.True(t, summaryCalled, "Copilot Responses compact should use in-harness summary compaction")
+}
+
 func TestCompactContextUsesRawJSONByDefault(t *testing.T) {
 	thread := &Thread{
 		Thread: base.NewThread(

@@ -711,9 +711,9 @@ func (t *Thread) SwapContext(_ context.Context, summary string) error {
 	return nil
 }
 
-// CompactContext compacts the conversation history using the Responses API compact endpoint.
-// The Compact API returns user messages plus a single compaction item containing encrypted
-// conversation state, which can be used to continue the conversation efficiently.
+// CompactContext compacts the conversation history. OpenAI-compatible providers that
+// do not support the native Responses compact endpoint, like GitHub Copilot, use
+// the in-harness summary compactor instead.
 func (t *Thread) CompactContext(ctx context.Context) error {
 	if len(t.inputItems) == 0 {
 		return nil
@@ -724,6 +724,9 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 		compactWithSummary = func(ctx context.Context) error {
 			return base.CompactContextWithSummary(ctx, t.runUtilityPrompt, t.SwapContext)
 		}
+	}
+	if t.useCopilot {
+		return compactWithSummary(ctx)
 	}
 
 	var contexts map[string]string
