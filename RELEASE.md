@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.4.12-beta (2026-05-17)
+
+OpenAI-compatible providers that do not support the native Responses compact endpoint (such as Copilot) now use in-harness summary compactor instead of attempting the unsupported native path. Added regression coverage to confirm the correct compaction route is taken for Copilot threads.
+
 ## 0.4.11-beta (2026-05-15)
 
 Added `anthropic.base_url` config field and `ANTHROPIC_BASE_URL` environment variable so the Anthropic API base URL can be overridden for proxies or custom endpoints. Explicit base URL overrides now take precedence over platform defaults.
