@@ -950,6 +950,7 @@ type WebMessage struct {
 type WebContentBlock struct {
 	Type     string          `json:"type"`
 	Text     string          `json:"text,omitempty"`
+	Command  string          `json:"command,omitempty"`
 	Source   *WebImageSource `json:"source,omitempty"`
 	ImageURL *WebImageURL    `json:"image_url,omitempty"`
 }
@@ -2144,7 +2145,7 @@ func applyWebContentDisplay(content any, metadata map[string]any) any {
 	switch value := content.(type) {
 	case string:
 		if display, ok := conversations.LookupMessageDisplay(metadata, value); ok {
-			return display.Text
+			return []WebContentBlock{webContentBlockForDisplay(display)}
 		}
 		return content
 	case []WebContentBlock:
@@ -2155,13 +2156,24 @@ func applyWebContentDisplay(content any, metadata map[string]any) any {
 			if display, ok := conversations.LookupMessageDisplay(metadata, block.Text); ok {
 				blocks := make([]WebContentBlock, len(value))
 				copy(blocks, value)
-				blocks[index].Text = display.Text
+				blocks[index] = webContentBlockForDisplay(display)
 				return blocks
 			}
 		}
 	}
 
 	return content
+}
+
+func webContentBlockForDisplay(display conversations.MessageDisplay) WebContentBlock {
+	if display.Kind == conversations.MessageDisplayKindSlashCommand {
+		return WebContentBlock{
+			Type:    conversations.MessageDisplayKindSlashCommand,
+			Text:    display.Text,
+			Command: display.Command,
+		}
+	}
+	return WebContentBlock{Type: "text", Text: display.Text}
 }
 
 func isEmptyWebContent(content any) bool {

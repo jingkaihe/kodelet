@@ -3,6 +3,7 @@ import {
   BookOpenText,
   Bot,
   Brain,
+  ChevronRight,
   FileCog,
   FileImage,
   FilePen,
@@ -13,6 +14,7 @@ import {
   PocketKnife,
   Search,
   SquareTerminal,
+  TerminalSquare,
   Wrench,
   type LucideIcon,
 } from 'lucide-react';
@@ -49,6 +51,17 @@ renderer.list = (body, ordered, start) => {
 
 const parseMarkdown = (content: string): string => marked.parse(content, { renderer }) as string;
 
+const isSlashCommandText = (text: string): boolean => /^\/[\w./-]+(?:\s|$)/.test(text.trim());
+
+const parseSlashInvocation = (text: string): { command: string; args: string } => {
+  const trimmed = text.trim();
+  const match = trimmed.match(/^\/(\S+)(?:\s+([\s\S]*))?$/);
+  return {
+    command: match?.[1] || trimmed.replace(/^\//, ''),
+    args: match?.[2]?.trim() || '',
+  };
+};
+
 const renderContent = (content: string | ContentBlock[] | undefined): string => {
   if (!content) {
     return '';
@@ -61,6 +74,10 @@ const renderContent = (content: string | ContentBlock[] | undefined): string => 
   return content
     .map((block) => {
       if (block.type === 'text') {
+        return parseMarkdown(block.text || '');
+      }
+
+      if (block.type === 'slash-command') {
         return parseMarkdown(block.text || '');
       }
 
@@ -646,6 +663,10 @@ const extractContentText = (content: string | ContentBlock[] | undefined): strin
         return block.text || '';
       }
 
+      if (block.type === 'slash-command') {
+        return block.text || '';
+      }
+
       if (block.type === 'image') {
         return '[image]';
       }
@@ -658,6 +679,70 @@ const extractContentText = (content: string | ContentBlock[] | undefined): strin
 
 const getMessageBlockCopyText = (content: string | ContentBlock[] | undefined): string =>
   extractContentText(content);
+
+const renderSlashCommandCard = (text: string, commandHint?: string) => {
+  const { command, args } = parseSlashInvocation(text);
+  const commandLabel = commandHint || command;
+
+  return (
+    <div className="slash-command-card" data-testid="slash-command-card">
+      <div className="slash-command-card-icon" aria-hidden="true">
+        <TerminalSquare className="h-4 w-4" />
+      </div>
+      <div className="slash-command-card-copy">
+        <div className="slash-command-card-kicker">
+          <span>Recipe</span>
+          <ChevronRight className="h-3 w-3" aria-hidden="true" />
+          <span>/{commandLabel}</span>
+        </div>
+        <code className="slash-command-card-command">/{command}{args ? ` ${args}` : ''}</code>
+      </div>
+    </div>
+  );
+};
+
+const renderUserContent = (content: string | ContentBlock[] | undefined): React.ReactNode => {
+  if (!content) {
+    return null;
+  }
+
+  if (typeof content === 'string') {
+    return isSlashCommandText(content) ? (
+      renderSlashCommandCard(content)
+    ) : (
+      <div
+        className="chat-prose max-w-none text-kodelet-dark"
+        dangerouslySetInnerHTML={{ __html: renderContent(content) }}
+      />
+    );
+  }
+
+  return content.map((block, index) => {
+    if (block.type === 'slash-command') {
+      return (
+        <React.Fragment key={`slash-${index}-${block.text || ''}`}>
+          {renderSlashCommandCard(block.text || '', block.command)}
+        </React.Fragment>
+      );
+    }
+
+    if (block.type === 'text' && block.text && isSlashCommandText(block.text)) {
+      return (
+        <React.Fragment key={`slash-text-${index}-${block.text}`}>
+          {renderSlashCommandCard(block.text)}
+        </React.Fragment>
+      );
+    }
+
+    return (
+      <div
+        key={`${block.type}-${index}`}
+        className="chat-prose max-w-none text-kodelet-dark"
+        dangerouslySetInnerHTML={{ __html: renderContent([block]) }}
+      />
+    );
+  });
+};
 
 const messageCopyButtonBaseClassName =
   'pointer-events-none px-3 py-2 opacity-0 transition-opacity duration-200 focus-visible:pointer-events-auto focus-visible:opacity-100';
@@ -965,10 +1050,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
               </div>
 
               {isUser ? (
-                <div
-                  className="chat-prose max-w-none text-kodelet-dark"
-                  dangerouslySetInnerHTML={{ __html: renderContent(message.content) }}
-                />
+                <div className="space-y-3">{renderUserContent(message.content)}</div>
               ) : (
                 <div className="space-y-4">
                   {renderAssistantBlocks(message.blocks || [])}

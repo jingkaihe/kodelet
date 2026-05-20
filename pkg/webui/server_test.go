@@ -1950,7 +1950,9 @@ func TestServer_convertToWebMessagesAppliesMessageDisplay(t *testing.T) {
 	blocks, ok := messages[0].Content.([]WebContentBlock)
 	require.True(t, ok)
 	require.Len(t, blocks, 1)
+	assert.Equal(t, "slash-command", blocks[0].Type)
 	assert.Equal(t, "/init focus", blocks[0].Text)
+	assert.Equal(t, "init", blocks[0].Command)
 }
 
 func TestServer_Close(t *testing.T) {

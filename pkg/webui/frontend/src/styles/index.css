@@ -402,6 +402,69 @@ h6 {
   color: var(--kodelet-light);
 }
 
+.slash-command-card {
+  display: inline-flex;
+  max-width: min(100%, 44rem);
+  align-items: center;
+  gap: 0.85rem;
+  border-radius: 1.15rem;
+  border: 1px solid rgba(106, 155, 204, 0.22);
+  background:
+    linear-gradient(135deg, rgba(106, 155, 204, 0.12), rgba(255, 255, 255, 0.74)),
+    rgba(255, 255, 255, 0.66);
+  padding: 0.72rem 0.88rem;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.68),
+    0 14px 28px rgba(20, 20, 19, 0.055);
+}
+
+.slash-command-card-icon {
+  display: inline-flex;
+  width: 2.05rem;
+  height: 2.05rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.75rem;
+  background: var(--kodelet-dark);
+  color: var(--kodelet-light);
+  box-shadow: 0 9px 18px rgba(20, 20, 19, 0.12);
+}
+
+.slash-command-card-copy {
+  display: grid;
+  min-width: 0;
+  gap: 0.16rem;
+}
+
+.slash-command-card-kicker {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.24rem;
+  font-family: var(--font-heading);
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(20, 20, 19, 0.5);
+}
+
+.slash-command-card-command {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 0.92rem;
+  font-weight: 650;
+  line-height: 1.35;
+  color: #315f8e;
+}
+
 .panel-action-button {
   display: inline-flex;
   align-items: center;

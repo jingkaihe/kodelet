@@ -10,8 +10,9 @@ export interface Message {
 }
 
 export interface ContentBlock {
-	type: "text" | "image";
+	type: "text" | "image" | "slash-command";
 	text?: string;
+	command?: string;
 	source?: {
 		data: string;
 		media_type: string;
@@ -169,6 +170,7 @@ export interface SlashCommandOption {
 	name: string;
 	description: string;
 	hint?: string;
+	placeholder?: string;
 }
 
 export interface SlashCommandsResponse {

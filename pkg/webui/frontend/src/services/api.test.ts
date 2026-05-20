@@ -252,6 +252,7 @@ describe("ApiService", () => {
 						name: "init",
 						description: "Initialise project",
 						hint: "additional instructions (optional)",
+						placeholder: "/init additional instructions (optional)",
 					},
 				],
 			};

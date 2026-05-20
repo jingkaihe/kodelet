@@ -270,6 +270,20 @@ const insertSlashCommand = (draft: string, commandName: string): string => {
 	return `${leadingWhitespace}/${commandName} `;
 };
 
+const getDraftSlashCommand = (draft: string): string | null => {
+	const trimmedStart = draft.trimStart();
+	if (!trimmedStart.startsWith("/")) {
+		return null;
+	}
+
+	const command = trimmedStart.slice(1).split(/\s+/, 1)[0];
+	return command || null;
+};
+
+const getSlashCommandPlaceholder = (command: SlashCommandOption): string =>
+	command.placeholder ||
+	`/${command.name}${command.hint ? ` ${command.hint}` : ""}`;
+
 const getWorkspaceLabelParts = (
 	workspace: string,
 ): { name: string; parent: string } => {
@@ -352,7 +366,7 @@ const ChatPage: React.FC = () => {
 	const [cwdSuggestionIndex, setCwdSuggestionIndex] = useState(-1);
 	const [draft, setDraft] = useState("");
 	const [slashCommands, setSlashCommands] = useState<SlashCommandOption[]>([]);
-	const [slashCommandIndex, setSlashCommandIndex] = useState(0);
+	const [slashCommandIndex, setSlashCommandIndex] = useState(-1);
 	const [sidebarLoading, setSidebarLoading] = useState(true);
 	const [conversationLoading, setConversationLoading] = useState(false);
 	const [conversationError, setConversationError] = useState<string | null>(
@@ -456,11 +470,26 @@ const ChatPage: React.FC = () => {
 	const slashCommandSuggestionsOpen =
 		!sending &&
 		!steering &&
-		slashCommandIndex >= 0 &&
 		slashCommandSuggestions.length > 0;
+	const activeSlashCommand = useMemo(() => {
+		const selectedSuggestion = slashCommandSuggestionsOpen
+			? slashCommandSuggestions[slashCommandIndex]
+			: undefined;
+		if (selectedSuggestion) {
+			return selectedSuggestion;
+		}
 
+		const draftCommand = getDraftSlashCommand(draft);
+		if (!draftCommand) {
+			return null;
+		}
+
+		return (
+			slashCommands.find((command) => command.name === draftCommand) || null
+		);
+	}, [draft, slashCommands, slashCommandIndex, slashCommandSuggestions, slashCommandSuggestionsOpen]);
 	useEffect(() => {
-		setSlashCommandIndex(0);
+		setSlashCommandIndex(-1);
 	}, [draft, slashCommands]);
 
 	useEffect(() => {
@@ -1241,9 +1270,7 @@ const ChatPage: React.FC = () => {
 			if (event.key === "ArrowDown") {
 				event.preventDefault();
 				setSlashCommandIndex((current) =>
-					current >= slashCommandSuggestions.length - 1 || current < 0
-						? 0
-						: current + 1,
+					current >= slashCommandSuggestions.length - 1 ? -1 : current + 1,
 				);
 				return;
 			}
@@ -1251,7 +1278,7 @@ const ChatPage: React.FC = () => {
 			if (event.key === "ArrowUp") {
 				event.preventDefault();
 				setSlashCommandIndex((current) =>
-					current <= 0 ? slashCommandSuggestions.length - 1 : current - 1,
+					current < 0 ? slashCommandSuggestions.length - 1 : current <= 0 ? -1 : current - 1,
 				);
 				return;
 			}
@@ -1266,14 +1293,14 @@ const ChatPage: React.FC = () => {
 					setDraft((currentDraft) =>
 						insertSlashCommand(currentDraft, command.name),
 					);
-					setSlashCommandIndex(0);
+					setSlashCommandIndex(-1);
 				}
 				return;
 			}
 
 			if (event.key === "Escape") {
 				event.preventDefault();
-				setSlashCommandIndex(-1);
+				setSlashCommands([]);
 				return;
 			}
 		}
@@ -1571,6 +1598,15 @@ const ChatPage: React.FC = () => {
 		: draft.trim().length > 0 || attachments.length > 0;
 	const canStopActiveConversation = sending && hasActiveConversationTarget;
 	const canStartNewChat = !sending || hasActiveConversationTarget;
+	const composerPlaceholder = sending
+		? !hasActiveConversationTarget
+			? "Waiting for conversation to start…"
+			: canSteerActiveConversation
+				? "Steer the active conversation…"
+				: "Add your guidance here..."
+		: activeSlashCommand
+			? getSlashCommandPlaceholder(activeSlashCommand)
+			: "Ask kodelet anything...";
 	const submitActionLabel = steering ? "Queueing…" : sending ? "Steer" : "Send";
 	const stopActionLabel = canStopActiveConversation ? "Stop" : "Starting…";
 	const composerMetaText = useMemo(() => {
@@ -2092,14 +2128,14 @@ const ChatPage: React.FC = () => {
 												key={command.name}
 												className={cn(
 													"composer-slash-suggestion",
-													index === slashCommandIndex && "is-active",
+											slashCommandIndex >= 0 && index === slashCommandIndex && "is-active",
 												)}
 												onClick={() => {
 													setDraft((currentDraft) =>
-														insertSlashCommand(currentDraft, command.name),
-													);
-													setSlashCommandIndex(0);
-												}}
+												insertSlashCommand(currentDraft, command.name),
+											);
+											setSlashCommandIndex(-1);
+										}}
 												onMouseDown={(event) => event.preventDefault()}
 												type="button"
 											>
@@ -2129,15 +2165,7 @@ const ChatPage: React.FC = () => {
 									onChange={(event) => setDraft(event.target.value)}
 									onKeyDown={handleDraftKeyDown}
 									onPaste={handlePaste}
-									placeholder={
-										sending
-											? !hasActiveConversationTarget
-												? "Waiting for conversation to start…"
-												: canSteerActiveConversation
-													? "Steer the active conversation…"
-													: "Add your guidance here..."
-											: "Ask kodelet anything..."
-									}
+									placeholder={composerPlaceholder}
 									value={draft}
 								/>
 

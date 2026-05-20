@@ -92,6 +92,7 @@ describe("ChatPage", () => {
 					name: "github/pr",
 					description: "Draft a pull request",
 					hint: "target=main additional instructions",
+					placeholder: "/github/pr target=main additional instructions",
 				},
 			],
 		});
@@ -298,11 +299,43 @@ describe("ChatPage", () => {
 			await screen.findByTestId("slash-command-suggestions"),
 		).toBeInTheDocument();
 		expect(screen.getByText("/init")).toBeInTheDocument();
+		expect(screen.getByText("/init").closest("button")).not.toHaveClass(
+			"is-active",
+		);
 
 		fireEvent.keyDown(textarea, { key: "ArrowDown" });
 		fireEvent.keyDown(textarea, { key: "Enter" });
 
-		expect(textarea).toHaveValue("/github/pr ");
+		expect(textarea).toHaveValue("/init ");
+	});
+
+	it("uses the selected slash command placeholder for argument hints", async () => {
+		render(<ChatPage />);
+
+		await waitFor(() => expect(mockGetSlashCommands).toHaveBeenCalled());
+
+		const textarea = screen.getByTestId("composer-textarea");
+		fireEvent.change(textarea, { target: { value: "/" } });
+		await screen.findByTestId("slash-command-suggestions");
+
+		expect(textarea).toHaveAttribute(
+			"placeholder",
+			"Ask kodelet anything...",
+		);
+
+		fireEvent.keyDown(textarea, { key: "ArrowDown" });
+
+		expect(textarea).toHaveAttribute(
+			"placeholder",
+			"/init additional instructions (optional)",
+		);
+
+		fireEvent.keyDown(textarea, { key: "ArrowDown" });
+
+		expect(textarea).toHaveAttribute(
+			"placeholder",
+			"/github/pr target=main additional instructions",
+		);
 	});
 
 	it("toggles the composer between expanded and restored states", async () => {

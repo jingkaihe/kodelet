@@ -63,3 +63,13 @@ func TestBuildCommandHint(t *testing.T) {
 	}
 	assert.Equal(t, "[draft=<value> target=main] additional instructions", BuildCommandHint(arguments))
 }
+
+func TestBuildCommandPlaceholder(t *testing.T) {
+	assert.Equal(t, "/init additional instructions (optional)", BuildCommandPlaceholder("init", nil))
+
+	arguments := map[string]fragments.ArgumentMeta{
+		"name":       {},
+		"occupation": {Default: "engineer"},
+	}
+	assert.Equal(t, "/intro [name=<value> occupation=engineer] additional instructions", BuildCommandPlaceholder("intro", arguments))
+}

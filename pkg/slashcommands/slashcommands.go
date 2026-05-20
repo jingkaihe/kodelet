@@ -19,6 +19,7 @@ type Command struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Hint        string `json:"hint,omitempty"`
+	Placeholder string `json:"placeholder,omitempty"`
 }
 
 // Expansion is the result of rendering a slash command.
@@ -166,6 +167,7 @@ func List(ctx context.Context, processor *fragments.Processor) []Command {
 			Name:        name,
 			Description: description,
 			Hint:        BuildCommandHint(frag.Metadata.Arguments),
+			Placeholder: BuildCommandPlaceholder(name, frag.Metadata.Arguments),
 		})
 	}
 
@@ -225,6 +227,15 @@ func AvailableRecipeNames(ctx context.Context, processor *fragments.Processor) s
 		names[i] = "/" + cmd.Name
 	}
 	return strings.Join(names, ", ")
+}
+
+// BuildCommandPlaceholder builds an example slash invocation for composer placeholders.
+func BuildCommandPlaceholder(command string, arguments map[string]fragments.ArgumentMeta) string {
+	placeholder := "/" + strings.TrimSpace(command)
+	if hint := BuildCommandHint(arguments); hint != "" {
+		placeholder += " " + hint
+	}
+	return strings.TrimSpace(placeholder)
 }
 
 // BuildCommandHint builds a hint string for a recipe based on its arguments.
