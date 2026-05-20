@@ -384,10 +384,8 @@ describe('ChatTranscript', () => {
     );
 
     expect(screen.getByTestId('slash-command-card')).toBeInTheDocument();
-    expect(screen.getByText('Recipe')).toBeInTheDocument();
-    expect(screen.getByText('/intro')).toBeInTheDocument();
     expect(screen.getByText('/intro my name is jingkai')).toBeInTheDocument();
-    expect(container.querySelector('.lucide-square-terminal')).toBeInTheDocument();
+    expect(container.querySelector('.lucide-square-slash')).toBeInTheDocument();
   });
 
   it('renders streamed steering as a regular user block', () => {

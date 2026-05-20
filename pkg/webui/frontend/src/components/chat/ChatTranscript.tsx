@@ -3,7 +3,6 @@ import {
   BookOpenText,
   Bot,
   Brain,
-  ChevronRight,
   FileCog,
   FileImage,
   FilePen,
@@ -13,8 +12,8 @@ import {
   Pencil,
   PocketKnife,
   Search,
+  SquareSlash,
   SquareTerminal,
-  TerminalSquare,
   Wrench,
   type LucideIcon,
 } from 'lucide-react';
@@ -52,15 +51,6 @@ renderer.list = (body, ordered, start) => {
 const parseMarkdown = (content: string): string => marked.parse(content, { renderer }) as string;
 
 const isSlashCommandText = (text: string): boolean => /^\/[\w./-]+(?:\s|$)/.test(text.trim());
-
-const parseSlashInvocation = (text: string): { command: string; args: string } => {
-  const trimmed = text.trim();
-  const match = trimmed.match(/^\/(\S+)(?:\s+([\s\S]*))?$/);
-  return {
-    command: match?.[1] || trimmed.replace(/^\//, ''),
-    args: match?.[2]?.trim() || '',
-  };
-};
 
 const renderContent = (content: string | ContentBlock[] | undefined): string => {
   if (!content) {
@@ -680,26 +670,12 @@ const extractContentText = (content: string | ContentBlock[] | undefined): strin
 const getMessageBlockCopyText = (content: string | ContentBlock[] | undefined): string =>
   extractContentText(content);
 
-const renderSlashCommandCard = (text: string, commandHint?: string) => {
-  const { command, args } = parseSlashInvocation(text);
-  const commandLabel = commandHint || command;
-
-  return (
-    <div className="slash-command-card" data-testid="slash-command-card">
-      <div className="slash-command-card-icon" aria-hidden="true">
-        <TerminalSquare className="h-4 w-4" />
-      </div>
-      <div className="slash-command-card-copy">
-        <div className="slash-command-card-kicker">
-          <span>Recipe</span>
-          <ChevronRight className="h-3 w-3" aria-hidden="true" />
-          <span>/{commandLabel}</span>
-        </div>
-        <code className="slash-command-card-command">/{command}{args ? ` ${args}` : ''}</code>
-      </div>
-    </div>
-  );
-};
+const renderSlashCommandCard = (text: string) => (
+  <div className="slash-command-card" data-testid="slash-command-card">
+    <SquareSlash aria-hidden="true" className="slash-command-card-icon" size={14} strokeWidth={2.2} />
+    <code className="slash-command-card-command">{text.trim()}</code>
+  </div>
+);
 
 const renderUserContent = (content: string | ContentBlock[] | undefined): React.ReactNode => {
   if (!content) {
@@ -721,7 +697,7 @@ const renderUserContent = (content: string | ContentBlock[] | undefined): React.
     if (block.type === 'slash-command') {
       return (
         <React.Fragment key={`slash-${index}-${block.text || ''}`}>
-          {renderSlashCommandCard(block.text || '', block.command)}
+          {renderSlashCommandCard(block.text || '')}
         </React.Fragment>
       );
     }

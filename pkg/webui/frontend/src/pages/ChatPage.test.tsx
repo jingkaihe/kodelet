@@ -94,6 +94,13 @@ describe("ChatPage", () => {
 					hint: "target=main additional instructions",
 					placeholder: "/github/pr target=main additional instructions",
 				},
+				{
+					name: "intro",
+					description: "Write a personal introduction",
+					hint: "[name=<value> occupation=<value>] additional instructions",
+					placeholder:
+						"/intro [name=<value> occupation=<value>] additional instructions",
+				},
 			],
 		});
 		mockSteerConversation.mockResolvedValue({
@@ -329,12 +336,31 @@ describe("ChatPage", () => {
 			"placeholder",
 			"/init additional instructions (optional)",
 		);
+		expect(screen.getByTestId("composer-slash-usage-hint")).toHaveTextContent(
+			"/init additional instructions (optional)",
+		);
 
 		fireEvent.keyDown(textarea, { key: "ArrowDown" });
 
 		expect(textarea).toHaveAttribute(
 			"placeholder",
 			"/github/pr target=main additional instructions",
+		);
+		expect(screen.getByTestId("composer-slash-usage-hint")).toHaveTextContent(
+			"/github/pr target=main additional instructions",
+		);
+	});
+
+	it("shows slash command usage while editing a typed command", async () => {
+		render(<ChatPage />);
+
+		await waitFor(() => expect(mockGetSlashCommands).toHaveBeenCalled());
+
+		const textarea = screen.getByTestId("composer-textarea");
+		fireEvent.change(textarea, { target: { value: "/intro " } });
+
+		expect(screen.getByTestId("composer-slash-usage-hint")).toHaveTextContent(
+			"/intro [name=<value> occupation=<value>] additional instructions",
 		);
 	});
 

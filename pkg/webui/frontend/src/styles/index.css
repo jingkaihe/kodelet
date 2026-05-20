@@ -403,55 +403,26 @@ h6 {
 }
 
 .slash-command-card {
-  display: inline-flex;
-  max-width: min(100%, 44rem);
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
   align-items: center;
-  gap: 0.85rem;
-  border-radius: 1.15rem;
-  border: 1px solid rgba(106, 155, 204, 0.22);
-  background:
-    linear-gradient(135deg, rgba(106, 155, 204, 0.12), rgba(255, 255, 255, 0.74)),
-    rgba(255, 255, 255, 0.66);
-  padding: 0.72rem 0.88rem;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.68),
-    0 14px 28px rgba(20, 20, 19, 0.055);
+  gap: 0.5rem;
+  margin-left: 3rem;
+  font-family: var(--font-heading);
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: rgba(20, 20, 19, 0.66);
 }
 
 .slash-command-card-icon {
-  display: inline-flex;
-  width: 2.05rem;
-  height: 2.05rem;
   flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  border-radius: 0.75rem;
-  background: var(--kodelet-dark);
-  color: var(--kodelet-light);
-  box-shadow: 0 9px 18px rgba(20, 20, 19, 0.12);
-}
-
-.slash-command-card-copy {
-  display: grid;
-  min-width: 0;
-  gap: 0.16rem;
-}
-
-.slash-command-card-kicker {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  gap: 0.24rem;
-  font-family: var(--font-heading);
-  font-size: 0.64rem;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: rgba(20, 20, 19, 0.5);
+  color: rgba(20, 20, 19, 0.58);
+  transform: translateY(-0.02rem);
 }
 
 .slash-command-card-command {
-  display: block;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -459,10 +430,9 @@ h6 {
   background: transparent;
   padding: 0;
   font-family: var(--font-mono);
-  font-size: 0.92rem;
-  font-weight: 650;
-  line-height: 1.35;
-  color: #315f8e;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: rgba(20, 20, 19, 0.52);
 }
 
 .panel-action-button {
@@ -814,6 +784,34 @@ h6 {
   font-family: var(--font-mono);
   font-size: 0.68rem;
   color: rgba(20, 20, 19, 0.48);
+}
+
+.composer-slash-usage-hint {
+  display: flex;
+  align-items: center;
+  gap: 0.42rem;
+  margin: -0.05rem 0.7rem 0;
+  color: #7d786d;
+}
+
+.composer-slash-usage-label {
+  flex-shrink: 0;
+  font-family: var(--font-heading);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: inherit;
+}
+
+.composer-slash-usage-hint code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: rgba(20, 20, 19, 0.5);
 }
 
 .composer-icon-button {
