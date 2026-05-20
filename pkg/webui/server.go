@@ -26,7 +26,6 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/gorilla/mux"
-	"github.com/jingkaihe/kodelet/pkg/conversationdisplay"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	openairesponses "github.com/jingkaihe/kodelet/pkg/llm/openai/responses"
@@ -1566,7 +1565,7 @@ func (s *Server) convertToWebMessages(rawMessages json.RawMessage, provider stri
 		}
 
 		if role == "user" {
-			webMsg.Content = applyWebContentDisplayOverrides(webMsg.Content, metadata)
+			webMsg.Content = applyWebContentDisplay(webMsg.Content, metadata)
 		}
 
 		// Skip empty messages (no content, no tool calls, and no thinking text)
@@ -1609,7 +1608,7 @@ func (s *Server) convertOpenAIResponsesToWebMessages(rawMessages json.RawMessage
 				webMsg.Content = msg.Content
 			}
 			if webMsg.Role == "user" {
-				webMsg.Content = applyWebContentDisplayOverrides(webMsg.Content, metadata)
+				webMsg.Content = applyWebContentDisplay(webMsg.Content, metadata)
 			}
 		case "thinking":
 			webMsg.ThinkingText = msg.Content
@@ -2137,15 +2136,15 @@ func normalizeWebContent(textParts []string, blocks []WebContentBlock) any {
 	return blocks
 }
 
-func applyWebContentDisplayOverrides(content any, metadata map[string]any) any {
+func applyWebContentDisplay(content any, metadata map[string]any) any {
 	if len(metadata) == 0 {
 		return content
 	}
 
 	switch value := content.(type) {
 	case string:
-		if override, ok := conversationdisplay.Lookup(metadata, value); ok {
-			return override.Display
+		if display, ok := conversations.LookupMessageDisplay(metadata, value); ok {
+			return display.Text
 		}
 		return content
 	case []WebContentBlock:
@@ -2153,10 +2152,10 @@ func applyWebContentDisplayOverrides(content any, metadata map[string]any) any {
 			if block.Type != "text" || strings.TrimSpace(block.Text) == "" {
 				continue
 			}
-			if override, ok := conversationdisplay.Lookup(metadata, block.Text); ok {
+			if display, ok := conversations.LookupMessageDisplay(metadata, block.Text); ok {
 				blocks := make([]WebContentBlock, len(value))
 				copy(blocks, value)
-				blocks[index].Text = override.Display
+				blocks[index].Text = display.Text
 				return blocks
 			}
 		}

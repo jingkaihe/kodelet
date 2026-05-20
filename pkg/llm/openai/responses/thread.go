@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
-	"github.com/jingkaihe/kodelet/pkg/conversationdisplay"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/llm/openai/copilotdefaults"
@@ -1056,7 +1055,7 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 		return errors.Wrap(err, "failed to parse conversation for summary")
 	}
 	metadata := t.GetMetadata()
-	summary := base.FirstUserMessageFallback(conversationdisplay.ApplyToStreamableMessages(conversationsFromResponses(messages), metadata))
+	summary := base.FirstUserMessageFallback(conversations.ApplyDisplayToStreamableMessages(conversationsFromResponses(messages), metadata))
 
 	// Generate a new summary if requested and enabled; otherwise keep the first user message.
 	if summarize {

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jingkaihe/kodelet/pkg/conversationdisplay"
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
@@ -122,7 +122,7 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 	// Clean up orphaned messages before saving
 	messagesToSave := cleanedOpenAIMessages(t.messages)
 	metadata := t.GetMetadata()
-	summary := base.FirstUserMessageFallback(conversationdisplay.ApplyToStreamableMessages(conversationsFromOpenAI(streamMessagesForSummary(messagesToSave, t.GetStructuredToolResults())), metadata))
+	summary := base.FirstUserMessageFallback(conversations.ApplyDisplayToStreamableMessages(conversationsFromOpenAI(streamMessagesForSummary(messagesToSave, t.GetStructuredToolResults())), metadata))
 
 	// Generate a new summary if requested and enabled; otherwise keep the first user message.
 	if summarize {

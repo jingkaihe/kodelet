@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/jingkaihe/kodelet/pkg/conversationdisplay"
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
@@ -88,7 +88,7 @@ func (t *Thread) SaveConversation(ctx context.Context, summarise bool) error {
 		return errors.Wrap(err, "failed to parse conversation messages for summary")
 	}
 	metadata := t.GetMetadata()
-	summary := base.FirstUserMessageFallback(conversationdisplay.ApplyToStreamableMessages(conversationsFromAnthropic(messages), metadata))
+	summary := base.FirstUserMessageFallback(conversations.ApplyDisplayToStreamableMessages(conversationsFromAnthropic(messages), metadata))
 
 	if summarise {
 		if t.Config.ConversationSummaryMode.UsesLLM() {

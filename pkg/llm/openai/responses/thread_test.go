@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/jingkaihe/kodelet/pkg/conversationdisplay"
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/steer"
@@ -1745,7 +1745,7 @@ func TestResponsesSaveConversationPreservesProviderNeutralMetadata(t *testing.T)
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
 	thread := &Thread{Thread: base.NewThread(config, "conv-test", hooks.Trigger{})}
 	thread.SetState(tools.NewBasicState(context.Background()))
-	metadata := conversationdisplay.AddSlashCommandOverride(nil, "expanded recipe prompt", "/init focus", "init")
+	metadata := conversations.AddSlashCommandDisplay(nil, "expanded recipe prompt", "/init focus", "init")
 	for key, value := range metadata {
 		thread.SetMetadataValue(key, value)
 	}
@@ -1757,7 +1757,7 @@ func TestResponsesSaveConversationPreservesProviderNeutralMetadata(t *testing.T)
 	err := thread.SaveConversation(context.Background(), false)
 	require.NoError(t, err)
 	require.Len(t, store.savedRecords, 1)
-	assert.Contains(t, store.savedRecords[0].Metadata, "message_display_overrides")
+	assert.Contains(t, store.savedRecords[0].Metadata, conversations.MessageDisplayMetadataKey)
 	assert.Equal(t, "responses", store.savedRecords[0].Metadata["api_mode"])
 	assert.Equal(t, "/init focus", store.savedRecords[0].Summary)
 }

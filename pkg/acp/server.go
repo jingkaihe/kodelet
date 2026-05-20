@@ -17,7 +17,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
 	"github.com/jingkaihe/kodelet/pkg/acp/session"
-	"github.com/jingkaihe/kodelet/pkg/conversationdisplay"
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
@@ -469,7 +469,7 @@ func (s *Server) handleSessionPrompt(req *acptypes.Request) error {
 		if err != nil {
 			return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, err.Error(), nil)
 		}
-		metadata := conversationdisplay.AddSlashCommandOverride(sess.Thread.GetMetadata(), expansion.Prompt, expansion.Display, expansion.Command)
+		metadata := conversations.AddSlashCommandDisplay(sess.Thread.GetMetadata(), expansion.Prompt, expansion.Display, expansion.Command)
 		for key, value := range metadata {
 			sess.Thread.SetMetadataValue(key, value)
 		}

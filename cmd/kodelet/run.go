@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
-	"github.com/jingkaihe/kodelet/pkg/conversationdisplay"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/llm"
@@ -46,7 +45,7 @@ type RunConfig struct {
 	NoTools              bool              // Disable all tools (for simple query-response usage)
 	DisableFSSearchTools bool              // Disable filesystem search tools (glob_tool and grep_tool)
 	DisableSubagent      bool              // Disable the subagent tool and remove subagent-related system prompt context
-	DisplayOverride      string            // User-facing compact text for persisted display
+	MessageDisplay       string            // User-facing compact text for persisted display
 	Sysprompt            string            // Path to custom system prompt template file
 	SyspromptArgs        map[string]string // Arguments passed to custom system prompt template
 	ResultOnly           bool              // Only print the final agent message, no intermediate output or usage stats
@@ -107,7 +106,7 @@ func processFragment(ctx context.Context, config *RunConfig, args []string) (str
 		return "", "", nil, errors.Wrap(err, "failed to load fragment")
 	}
 
-	display := strings.TrimSpace(config.DisplayOverride)
+	display := strings.TrimSpace(config.MessageDisplay)
 	if display == "" {
 		display = "/" + strings.TrimSpace(config.FragmentName)
 		if argDisplay := formatFragmentDisplayArgs(config.FragmentArgs); argDisplay != "" {
@@ -153,13 +152,13 @@ func formatFragmentDisplayArgs(args map[string]string) string {
 	return strings.Join(parts, " ")
 }
 
-func addRunDisplayOverride(thread llmtypes.Thread, query string, config *RunConfig) {
-	display := strings.TrimSpace(config.DisplayOverride)
+func addRunMessageDisplay(thread llmtypes.Thread, query string, config *RunConfig) {
+	display := strings.TrimSpace(config.MessageDisplay)
 	if display == "" || strings.TrimSpace(query) == "" {
 		return
 	}
 
-	metadata := conversationdisplay.AddSlashCommandOverride(thread.GetMetadata(), query, display, config.FragmentName)
+	metadata := conversations.AddSlashCommandDisplay(thread.GetMetadata(), query, display, config.FragmentName)
 	for key, value := range metadata {
 		thread.SetMetadataValue(key, value)
 	}
@@ -363,7 +362,7 @@ var runCmd = &cobra.Command{
 		var err error
 
 		if config.FragmentName != "" {
-			query, config.DisplayOverride, fragmentMetadata, err = processFragment(ctx, config, args)
+			query, config.MessageDisplay, fragmentMetadata, err = processFragment(ctx, config, args)
 			if err != nil {
 				presenter.Error(err, "Failed to process fragment")
 				return
@@ -502,7 +501,7 @@ var runCmd = &cobra.Command{
 			thread.SetState(appState)
 			thread.SetConversationID(sessionID)
 			thread.EnablePersistence(ctx, !config.NoSave)
-			addRunDisplayOverride(thread, query, config)
+			addRunMessageDisplay(thread, query, config)
 
 			streamer, closeFunc, err := llm.NewConversationStreamer(ctx)
 			if err != nil {
@@ -579,7 +578,7 @@ var runCmd = &cobra.Command{
 			}
 
 			thread.EnablePersistence(ctx, !config.NoSave)
-			addRunDisplayOverride(thread, query, config)
+			addRunMessageDisplay(thread, query, config)
 
 			finalOutput, err := thread.SendMessage(ctx, query, handler, llmtypes.MessageOpt{
 				PromptCache:  true,

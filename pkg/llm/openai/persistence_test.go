@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jingkaihe/kodelet/pkg/conversationdisplay"
+	conversationmeta "github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -607,7 +607,7 @@ func TestSaveConversationPreservesProviderNeutralMetadata(t *testing.T) {
 	thread.Store = store
 	thread.Persisted = true
 	thread.SetState(tools.NewBasicState(context.Background()))
-	metadata := conversationdisplay.AddSlashCommandOverride(nil, "expanded recipe prompt", "/init focus", "init")
+	metadata := conversationmeta.AddSlashCommandDisplay(nil, "expanded recipe prompt", "/init focus", "init")
 	for key, value := range metadata {
 		thread.SetMetadataValue(key, value)
 	}
@@ -618,7 +618,7 @@ func TestSaveConversationPreservesProviderNeutralMetadata(t *testing.T) {
 	require.NotEmpty(t, store.SavedRecords)
 
 	savedMetadata := store.SavedRecords[len(store.SavedRecords)-1].Metadata
-	assert.Contains(t, savedMetadata, "message_display_overrides")
+	assert.Contains(t, savedMetadata, conversationmeta.MessageDisplayMetadataKey)
 	assert.Equal(t, "chat_completions", savedMetadata["api_mode"])
 	assert.Equal(t, "/init focus", store.SavedRecords[len(store.SavedRecords)-1].Summary)
 }

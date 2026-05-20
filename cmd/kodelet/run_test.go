@@ -301,7 +301,7 @@ func TestApplyRunToolRestrictions_NoToolsWinsOverFragmentAllowedTools(t *testing
 	assert.Equal(t, []string{tools.NoToolsMarker}, llmConfig.AllowedTools)
 }
 
-func TestProcessFragmentBuildsDisplayOverride(t *testing.T) {
+func TestProcessFragmentBuildsMessageDisplay(t *testing.T) {
 	config := NewRunConfig()
 	config.FragmentName = "github/pr"
 	config.FragmentArgs = map[string]string{"target": "develop"}

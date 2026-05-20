@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jingkaihe/kodelet/pkg/conversationdisplay"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/pkg/errors"
 
@@ -96,7 +95,7 @@ func ExtractMessages(provider string, rawMessages []byte, metadata map[string]an
 	if err != nil {
 		return nil, err
 	}
-	return conversationdisplay.ApplyToLLMMessages(messages, metadata), nil
+	return conversations.ApplyDisplayToLLMMessages(messages, metadata), nil
 }
 
 // ExtractConversationEntries parses the raw messages from a conversation record into structured conversation entries.
@@ -131,5 +130,5 @@ func ExtractConversationEntries(provider string, rawMessages []byte, metadata ma
 	if err != nil {
 		return nil, err
 	}
-	return conversationdisplay.ApplyToStreamableMessages(messages, metadata), nil
+	return conversations.ApplyDisplayToStreamableMessages(messages, metadata), nil
 }

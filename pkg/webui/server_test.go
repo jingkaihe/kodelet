@@ -20,7 +20,6 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
-	"github.com/jingkaihe/kodelet/pkg/conversationdisplay"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
@@ -1935,10 +1934,10 @@ func TestServer_convertToWebMessages(t *testing.T) {
 	}
 }
 
-func TestServer_convertToWebMessagesAppliesDisplayOverride(t *testing.T) {
+func TestServer_convertToWebMessagesAppliesMessageDisplay(t *testing.T) {
 	server := &Server{}
 	expandedPrompt := "Full rendered recipe prompt"
-	metadata := conversationdisplay.AddSlashCommandOverride(nil, expandedPrompt, "/init focus", "init")
+	metadata := conversations.AddSlashCommandDisplay(nil, expandedPrompt, "/init focus", "init")
 
 	messages, err := server.convertToWebMessages(
 		json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"Full rendered recipe prompt"}]}]`),

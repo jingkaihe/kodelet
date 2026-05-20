@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/jingkaihe/kodelet/pkg/conversationdisplay"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm/anthropic"
 	"github.com/jingkaihe/kodelet/pkg/llm/openai"
@@ -27,7 +26,7 @@ func NewConversationStreamer(ctx context.Context) (streamer *conversations.Conve
 		if err != nil {
 			return nil, err
 		}
-		return conversationdisplay.ApplyToStreamableMessages(convertAnthropicStreamableMessages(msgs), metadata), nil
+		return conversations.ApplyDisplayToStreamableMessages(convertAnthropicStreamableMessages(msgs), metadata), nil
 	})
 
 	streamer.RegisterMessageParser("openai", func(rawMessages json.RawMessage, metadata map[string]any, toolResults map[string]tooltypes.StructuredToolResult) ([]conversations.StreamableMessage, error) {
@@ -36,14 +35,14 @@ func NewConversationStreamer(ctx context.Context) (streamer *conversations.Conve
 			if err != nil {
 				return nil, err
 			}
-			return conversationdisplay.ApplyToStreamableMessages(convertResponsesStreamableMessages(msgs), metadata), nil
+			return conversations.ApplyDisplayToStreamableMessages(convertResponsesStreamableMessages(msgs), metadata), nil
 		}
 
 		msgs, err := openai.StreamMessages(rawMessages, toolResults)
 		if err != nil {
 			return nil, err
 		}
-		return conversationdisplay.ApplyToStreamableMessages(convertOpenAIStreamableMessages(msgs), metadata), nil
+		return conversations.ApplyDisplayToStreamableMessages(convertOpenAIStreamableMessages(msgs), metadata), nil
 	})
 
 	return streamer, service.Close, nil

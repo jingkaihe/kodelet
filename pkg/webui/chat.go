@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/jingkaihe/kodelet/pkg/conversationdisplay"
 	conversationservice "github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/llm"
@@ -425,7 +424,7 @@ func expandWebChatSlashCommand(ctx context.Context, thread llmtypes.Thread, mess
 		return "", err
 	}
 
-	metadata := conversationdisplay.AddSlashCommandOverride(thread.GetMetadata(), expansion.Prompt, expansion.Display, expansion.Command)
+	metadata := conversationservice.AddSlashCommandDisplay(thread.GetMetadata(), expansion.Prompt, expansion.Display, expansion.Command)
 	for key, value := range metadata {
 		thread.SetMetadataValue(key, value)
 	}
