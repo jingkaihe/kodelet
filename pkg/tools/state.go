@@ -357,8 +357,16 @@ func discoverSkills(ctx context.Context, llmConfig llmtypes.Config) map[string]*
 // WithSubAgentTool returns an option that configures the subagent tool with discovered workflows
 func WithSubAgentTool() BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
-		if noToolsConfigured(s.llmConfig) {
+		if noToolsConfigured(s.llmConfig) || s.llmConfig.DisableSubagent {
+			s.tools = filterOutSubagent(s.tools)
 			return nil
+		}
+		if hasExplicitAllowedTools(s.llmConfig) {
+			allowed := allowedToolNameSet(s.llmConfig)
+			if _, ok := allowed["subagent"]; !ok {
+				s.tools = filterOutSubagent(s.tools)
+				return nil
+			}
 		}
 		discoveredWorkflows := discoverWorkflows(ctx)
 		subagentTool := NewSubAgentToolWithOptions(discoveredWorkflows, len(discoveredWorkflows) > 0, s.llmConfig.ToolMode, s.llmConfig.DisableFSSearchTools)

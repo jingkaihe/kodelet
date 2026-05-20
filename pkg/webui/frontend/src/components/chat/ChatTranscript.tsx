@@ -12,6 +12,7 @@ import {
   Pencil,
   PocketKnife,
   Search,
+  SquareSlash,
   SquareTerminal,
   Wrench,
   type LucideIcon,
@@ -49,6 +50,8 @@ renderer.list = (body, ordered, start) => {
 
 const parseMarkdown = (content: string): string => marked.parse(content, { renderer }) as string;
 
+const isSlashCommandText = (text: string): boolean => /^\/[\w./-]+(?:\s|$)/.test(text.trim());
+
 const renderContent = (content: string | ContentBlock[] | undefined): string => {
   if (!content) {
     return '';
@@ -61,6 +64,10 @@ const renderContent = (content: string | ContentBlock[] | undefined): string => 
   return content
     .map((block) => {
       if (block.type === 'text') {
+        return parseMarkdown(block.text || '');
+      }
+
+      if (block.type === 'slash-command') {
         return parseMarkdown(block.text || '');
       }
 
@@ -646,6 +653,10 @@ const extractContentText = (content: string | ContentBlock[] | undefined): strin
         return block.text || '';
       }
 
+      if (block.type === 'slash-command') {
+        return block.text || '';
+      }
+
       if (block.type === 'image') {
         return '[image]';
       }
@@ -658,6 +669,56 @@ const extractContentText = (content: string | ContentBlock[] | undefined): strin
 
 const getMessageBlockCopyText = (content: string | ContentBlock[] | undefined): string =>
   extractContentText(content);
+
+const renderSlashCommandCard = (text: string) => (
+  <div className="slash-command-card" data-testid="slash-command-card">
+    <SquareSlash aria-hidden="true" className="slash-command-card-icon" size={14} strokeWidth={2.2} />
+    <code className="slash-command-card-command">{text.trim()}</code>
+  </div>
+);
+
+const renderUserContent = (content: string | ContentBlock[] | undefined): React.ReactNode => {
+  if (!content) {
+    return null;
+  }
+
+  if (typeof content === 'string') {
+    return isSlashCommandText(content) ? (
+      renderSlashCommandCard(content)
+    ) : (
+      <div
+        className="chat-prose max-w-none text-kodelet-dark"
+        dangerouslySetInnerHTML={{ __html: renderContent(content) }}
+      />
+    );
+  }
+
+  return content.map((block, index) => {
+    if (block.type === 'slash-command') {
+      return (
+        <React.Fragment key={`slash-${index}-${block.text || ''}`}>
+          {renderSlashCommandCard(block.text || '')}
+        </React.Fragment>
+      );
+    }
+
+    if (block.type === 'text' && block.text && isSlashCommandText(block.text)) {
+      return (
+        <React.Fragment key={`slash-text-${index}-${block.text}`}>
+          {renderSlashCommandCard(block.text)}
+        </React.Fragment>
+      );
+    }
+
+    return (
+      <div
+        key={`${block.type}-${index}`}
+        className="chat-prose max-w-none text-kodelet-dark"
+        dangerouslySetInnerHTML={{ __html: renderContent([block]) }}
+      />
+    );
+  });
+};
 
 const messageCopyButtonBaseClassName =
   'pointer-events-none px-3 py-2 opacity-0 transition-opacity duration-200 focus-visible:pointer-events-auto focus-visible:opacity-100';
@@ -965,10 +1026,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
               </div>
 
               {isUser ? (
-                <div
-                  className="chat-prose max-w-none text-kodelet-dark"
-                  dangerouslySetInnerHTML={{ __html: renderContent(message.content) }}
-                />
+                <div className="space-y-3">{renderUserContent(message.content)}</div>
               ) : (
                 <div className="space-y-4">
                   {renderAssistantBlocks(message.blocks || [])}

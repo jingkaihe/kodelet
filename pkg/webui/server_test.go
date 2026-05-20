@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -777,6 +778,49 @@ func TestServer_handleGetChatSettings(t *testing.T) {
 	assert.Equal(t, "work", response.CurrentProfile)
 	require.NotEmpty(t, response.Profiles)
 	assert.Equal(t, "default", response.Profiles[0].Name)
+}
+
+func TestServer_handleGetSlashCommands(t *testing.T) {
+	server := &Server{router: mux.NewRouter()}
+	req := httptest.NewRequest("GET", "/api/chat/slash-commands", nil)
+	w := httptest.NewRecorder()
+
+	server.handleGetSlashCommands(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var response SlashCommandsResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	require.NotEmpty(t, response.Commands)
+	assert.NotEmpty(t, response.Commands[0].Name)
+}
+
+func TestServer_handleGetSlashCommandsUsesRequestedCWD(t *testing.T) {
+	workspace := t.TempDir()
+	recipeDir := filepath.Join(workspace, ".kodelet", "recipes")
+	require.NoError(t, os.MkdirAll(recipeDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(recipeDir, "workspace-only.md"),
+		[]byte("---\ndescription: Workspace-only recipe\n---\nWorkspace recipe\n"),
+		0o644,
+	))
+
+	server := &Server{config: &ServerConfig{CWD: t.TempDir()}}
+	req := httptest.NewRequest("GET", "/api/chat/slash-commands?cwd="+url.QueryEscape(workspace), nil)
+	w := httptest.NewRecorder()
+
+	server.handleGetSlashCommands(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var response SlashCommandsResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+
+	var names []string
+	for _, command := range response.Commands {
+		names = append(names, command.Name)
+	}
+	assert.Contains(t, names, "workspace-only")
 }
 
 func TestServer_handleGetConversationPreservesImageContent(t *testing.T) {
@@ -1893,7 +1937,7 @@ func TestServer_convertToWebMessages(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			messages, err := server.convertToWebMessages(tt.rawMessages, tt.provider, tt.toolResults)
+			messages, err := server.convertToWebMessages(tt.rawMessages, tt.provider, nil, tt.toolResults)
 			require.NoError(t, err)
 			assert.Equal(t, tt.expectedMsgs, len(messages))
 
@@ -1917,6 +1961,27 @@ func TestServer_convertToWebMessages(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestServer_convertToWebMessagesAppliesMessageDisplay(t *testing.T) {
+	server := &Server{}
+	expandedPrompt := "Full rendered recipe prompt"
+	metadata := conversations.AddSlashCommandDisplay(nil, expandedPrompt, "/init focus", "init")
+
+	messages, err := server.convertToWebMessages(
+		json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"Full rendered recipe prompt"}]}]`),
+		"anthropic",
+		metadata,
+		nil,
+	)
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	blocks, ok := messages[0].Content.([]WebContentBlock)
+	require.True(t, ok)
+	require.Len(t, blocks, 1)
+	assert.Equal(t, "slash-command", blocks[0].Type)
+	assert.Equal(t, "/init focus", blocks[0].Text)
+	assert.Equal(t, "init", blocks[0].Command)
 }
 
 func TestServer_Close(t *testing.T) {

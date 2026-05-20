@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/fragments"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/spf13/viper"
@@ -214,4 +215,77 @@ func TestChatMessageHandler_HandleUserMessageEmitsRenderableContent(t *testing.T
 	require.NotNil(t, blocks[1].Source)
 	assert.Equal(t, "image/png", blocks[1].Source.MediaType)
 	assert.Equal(t, "aGVsbG8=", blocks[1].Source.Data)
+}
+
+func TestExpandWebChatSlashCommandUsesResolvedCWD(t *testing.T) {
+	workspace := t.TempDir()
+	writeWebChatRecipe(t, workspace, "limited", `---
+description: Limited recipe
+allowed_tools:
+  - bash
+allowed_commands:
+  - git status
+---
+Hello {{.name}}
+`)
+
+	prompt, expansion, err := expandWebChatSlashCommand(context.Background(), "/limited name=Web check this", workspace)
+
+	require.NoError(t, err)
+	require.NotNil(t, expansion)
+	assert.Contains(t, prompt, "Hello Web")
+	assert.Contains(t, prompt, "Additional instructions:\ncheck this")
+	assert.Equal(t, []string{"bash"}, expansion.Metadata.AllowedTools)
+	assert.Equal(t, []string{"git status"}, expansion.Metadata.AllowedCommands)
+}
+
+func TestWebSlashCommandRestrictionsApplyBeforeBuildingState(t *testing.T) {
+	metadata := expandLimitedWebChatRecipe(t)
+
+	config := llmtypes.Config{}
+	applyWebFragmentRestrictions(context.Background(), &config, metadata)
+	assert.Equal(t, []string{"bash"}, config.AllowedTools)
+	assert.Equal(t, []string{"git status"}, config.AllowedCommands)
+
+	state, err := buildChatState(context.Background(), config, "session-1", t.TempDir(), nil, nil)
+	require.NoError(t, err)
+
+	var toolNames []string
+	for _, tool := range state.Tools() {
+		toolNames = append(toolNames, tool.Name())
+	}
+	assert.Contains(t, toolNames, "bash")
+	assert.NotContains(t, toolNames, "subagent")
+	assert.NotContains(t, toolNames, "file_write")
+	assert.NotContains(t, toolNames, "file_edit")
+	assert.NotContains(t, toolNames, "web_fetch")
+	assert.NotContains(t, toolNames, "view_image")
+	assert.NotContains(t, toolNames, "skill")
+}
+
+func expandLimitedWebChatRecipe(t *testing.T) *fragments.Metadata {
+	t.Helper()
+
+	workspace := t.TempDir()
+	writeWebChatRecipe(t, workspace, "limited", `---
+allowed_tools:
+  - bash
+allowed_commands:
+  - git status
+---
+Restricted prompt
+`)
+
+	_, expansion, err := expandWebChatSlashCommand(context.Background(), "/limited", workspace)
+	require.NoError(t, err)
+	require.NotNil(t, expansion)
+	return &expansion.Metadata
+}
+
+func writeWebChatRecipe(t *testing.T, workspace, name, content string) {
+	t.Helper()
+
+	recipeDir := filepath.Join(workspace, ".kodelet", "recipes")
+	require.NoError(t, os.MkdirAll(recipeDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(recipeDir, name+".md"), []byte(content), 0o644))
 }

@@ -7,6 +7,9 @@ import (
 	"testing"
 	"time"
 
+	conversationmeta "github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/hooks"
+	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/types/conversations"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -594,6 +597,30 @@ func TestSaveConversationMetadataIncludesPlatformAndAPIMode(t *testing.T) {
 	assert.Equal(t, "chat_completions", metadata["api_mode"])
 	assert.Equal(t, "priority", metadata["service_tier"])
 	assert.Equal(t, "accounts/fireworks/models/kimi-k2p5", metadata["model"])
+}
+
+func TestSaveConversationPreservesProviderNeutralMetadata(t *testing.T) {
+	thread := &Thread{
+		Thread: base.NewThread(llmtypes.Config{Model: "gpt-4.1", OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}, "conv-metadata", hooks.Trigger{}),
+	}
+	store := &MockConversationStore{}
+	thread.Store = store
+	thread.Persisted = true
+	thread.SetState(tools.NewBasicState(context.Background()))
+	metadata := conversationmeta.AddSlashCommandDisplay(nil, "expanded recipe prompt", "/init focus", "init")
+	for key, value := range metadata {
+		thread.SetMetadataValue(key, value)
+	}
+	thread.messages = []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: "expanded recipe prompt"}}
+
+	err := thread.SaveConversation(context.Background(), false)
+	require.NoError(t, err)
+	require.NotEmpty(t, store.SavedRecords)
+
+	savedMetadata := store.SavedRecords[len(store.SavedRecords)-1].Metadata
+	assert.Contains(t, savedMetadata, conversationmeta.MessageDisplayMetadataKey)
+	assert.Equal(t, "chat_completions", savedMetadata["api_mode"])
+	assert.Equal(t, "/init focus", store.SavedRecords[len(store.SavedRecords)-1].Summary)
 }
 
 func TestLoadConversation_CleansOrphanedTrailingToolCall(t *testing.T) {

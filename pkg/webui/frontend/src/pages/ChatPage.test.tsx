@@ -18,6 +18,7 @@ const mockNavigate = vi.fn();
 const mockGetConversations = vi.fn();
 const mockGetConversation = vi.fn();
 const mockGetChatSettings = vi.fn();
+const mockGetSlashCommands = vi.fn();
 const mockStreamChat = vi.fn();
 const mockStreamConversation = vi.fn();
 const mockGetCWDHints = vi.fn();
@@ -46,6 +47,7 @@ vi.mock("../services/api", () => ({
 		getConversations: (...args: unknown[]) => mockGetConversations(...args),
 		getConversation: (...args: unknown[]) => mockGetConversation(...args),
 		getChatSettings: (...args: unknown[]) => mockGetChatSettings(...args),
+		getSlashCommands: (...args: unknown[]) => mockGetSlashCommands(...args),
 		getCWDHints: (...args: unknown[]) => mockGetCWDHints(...args),
 		getGitDiff: (...args: unknown[]) => mockGetGitDiff(...args),
 		streamChat: (...args: unknown[]) => mockStreamChat(...args),
@@ -78,6 +80,28 @@ describe("ChatPage", () => {
 			total: 0,
 			limit: 10,
 			offset: 0,
+		});
+		mockGetSlashCommands.mockResolvedValue({
+			commands: [
+				{
+					name: "init",
+					description: "Initialize repository context",
+					hint: "additional instructions (optional)",
+				},
+				{
+					name: "github/pr",
+					description: "Draft a pull request",
+					hint: "target=main additional instructions",
+					placeholder: "/github/pr target=main additional instructions",
+				},
+				{
+					name: "intro",
+					description: "Write a personal introduction",
+					hint: "[name=<value> occupation=<value>] additional instructions",
+					placeholder:
+						"/intro [name=<value> occupation=<value>] additional instructions",
+				},
+			],
 		});
 		mockSteerConversation.mockResolvedValue({
 			success: true,
@@ -267,6 +291,76 @@ describe("ChatPage", () => {
 		expect(mockStreamChat).toHaveBeenCalledWith(
 			expect.objectContaining({ message: "hello from shortcut" }),
 			expect.any(Object),
+		);
+	});
+
+	it("suggests and inserts slash commands in the composer", async () => {
+		render(<ChatPage />);
+
+		await waitFor(() => expect(mockGetSlashCommands).toHaveBeenCalled());
+
+		const textarea = screen.getByTestId("composer-textarea");
+		fireEvent.change(textarea, { target: { value: "/" } });
+
+		expect(
+			await screen.findByTestId("slash-command-suggestions"),
+		).toBeInTheDocument();
+		expect(screen.getByText("/init")).toBeInTheDocument();
+		expect(screen.getByText("/init").closest("button")).not.toHaveClass(
+			"is-active",
+		);
+
+		fireEvent.keyDown(textarea, { key: "ArrowDown" });
+		fireEvent.keyDown(textarea, { key: "Enter" });
+
+		expect(textarea).toHaveValue("/init ");
+	});
+
+	it("uses the selected slash command placeholder for argument hints", async () => {
+		render(<ChatPage />);
+
+		await waitFor(() => expect(mockGetSlashCommands).toHaveBeenCalled());
+
+		const textarea = screen.getByTestId("composer-textarea");
+		fireEvent.change(textarea, { target: { value: "/" } });
+		await screen.findByTestId("slash-command-suggestions");
+
+		expect(textarea).toHaveAttribute(
+			"placeholder",
+			"Ask kodelet anything...",
+		);
+
+		fireEvent.keyDown(textarea, { key: "ArrowDown" });
+
+		expect(textarea).toHaveAttribute(
+			"placeholder",
+			"/init additional instructions (optional)",
+		);
+		expect(screen.getByTestId("composer-slash-usage-hint")).toHaveTextContent(
+			"/init additional instructions (optional)",
+		);
+
+		fireEvent.keyDown(textarea, { key: "ArrowDown" });
+
+		expect(textarea).toHaveAttribute(
+			"placeholder",
+			"/github/pr target=main additional instructions",
+		);
+		expect(screen.getByTestId("composer-slash-usage-hint")).toHaveTextContent(
+			"/github/pr target=main additional instructions",
+		);
+	});
+
+	it("shows slash command usage while editing a typed command", async () => {
+		render(<ChatPage />);
+
+		await waitFor(() => expect(mockGetSlashCommands).toHaveBeenCalled());
+
+		const textarea = screen.getByTestId("composer-textarea");
+		fireEvent.change(textarea, { target: { value: "/intro " } });
+
+		expect(screen.getByTestId("composer-slash-usage-hint")).toHaveTextContent(
+			"/intro [name=<value> occupation=<value>] additional instructions",
 		);
 	});
 

@@ -62,9 +62,24 @@ func TestNewThread(t *testing.T) {
 	assert.Equal(t, conversationID, bt.ConversationID)
 	assert.False(t, bt.Persisted)
 	assert.NotNil(t, bt.Usage)
+	assert.NotNil(t, bt.Metadata)
 	assert.NotNil(t, bt.ToolResults)
 	assert.NotNil(t, bt.RendererRegistry)
 	assert.Len(t, bt.ToolResults, 0)
+}
+
+func TestThreadMetadata(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
+
+	bt.SetMetadataValue("key", "value")
+	metadata := bt.GetMetadata()
+	assert.Equal(t, "value", metadata["key"])
+
+	metadata["key"] = "changed"
+	assert.Equal(t, "value", bt.GetMetadata()["key"])
+
+	bt.SetMetadata(map[string]any{"other": "entry"})
+	assert.Equal(t, map[string]any{"other": "entry"}, bt.GetMetadata())
 }
 
 func TestSetState(t *testing.T) {

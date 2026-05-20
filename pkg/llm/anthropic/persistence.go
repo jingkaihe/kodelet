@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
@@ -86,7 +87,8 @@ func (t *Thread) SaveConversation(ctx context.Context, summarise bool) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to parse conversation messages for summary")
 	}
-	summary := base.FirstUserMessageFallback(conversationsFromAnthropic(messages))
+	metadata := t.GetMetadata()
+	summary := base.FirstUserMessageFallback(conversations.ApplyDisplayToStreamableMessages(conversationsFromAnthropic(messages), metadata))
 
 	if summarise {
 		if t.Config.ConversationSummaryMode.UsesLLM() {
@@ -101,10 +103,10 @@ func (t *Thread) SaveConversation(ctx context.Context, summarise bool) error {
 	t.summary = summary
 
 	// Create a new conversation record
-	metadata := map[string]any{"model": t.Config.Model}
 	if profile := strings.TrimSpace(t.Config.Profile); profile != "" {
 		metadata["profile"] = profile
 	}
+	metadata["model"] = t.Config.Model
 
 	record := convtypes.ConversationRecord{
 		ID:             t.ConversationID,
@@ -155,6 +157,7 @@ func (t *Thread) loadConversation(ctx context.Context) {
 	// Restore usage statistics
 	t.Usage = &record.Usage
 	t.summary = record.Summary
+	t.SetMetadata(record.Metadata)
 	t.State.SetFileLastAccess(record.FileLastAccess)
 	// Restore structured tool results
 	t.SetStructuredToolResults(record.ToolResults)

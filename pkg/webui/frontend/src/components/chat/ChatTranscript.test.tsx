@@ -364,6 +364,30 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('.chat-uploaded-image-media')).toBeInTheDocument();
   });
 
+  it('renders slash commands as compact command cards', () => {
+    const { container } = render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'slash-command',
+                text: '/intro my name is jingkai',
+                command: 'intro',
+              },
+            ],
+          },
+        ]}
+      />
+    );
+
+    expect(screen.getByTestId('slash-command-card')).toBeInTheDocument();
+    expect(screen.getByText('/intro my name is jingkai')).toBeInTheDocument();
+    expect(container.querySelector('.lucide-square-slash')).toBeInTheDocument();
+  });
+
   it('renders streamed steering as a regular user block', () => {
     render(
       <ChatTranscript

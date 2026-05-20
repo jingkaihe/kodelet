@@ -778,6 +778,29 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 	}
 }
 
+func TestSaveConversationPreservesProviderNeutralMetadata(t *testing.T) {
+	thread, err := NewAnthropicThread(llmtypes.Config{Model: anthropic.ModelClaudeSonnet4_6})
+	require.NoError(t, err)
+	store := &MockConversationStore{}
+	thread.Store = store
+	thread.Persisted = true
+	thread.SetState(tools.NewBasicState(context.Background()))
+	metadata := conversations.AddSlashCommandDisplay(nil, "expanded recipe prompt", "/init focus", "init")
+	for key, value := range metadata {
+		thread.SetMetadataValue(key, value)
+	}
+	thread.messages = []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("expanded recipe prompt"))}
+
+	err = thread.SaveConversation(context.Background(), false)
+	require.NoError(t, err)
+	require.NotEmpty(t, store.SavedRecords)
+
+	savedMetadata := store.SavedRecords[len(store.SavedRecords)-1].Metadata
+	assert.Contains(t, savedMetadata, conversations.MessageDisplayMetadataKey)
+	assert.Equal(t, anthropic.ModelClaudeSonnet4_6, savedMetadata["model"])
+	assert.Equal(t, "/init focus", store.SavedRecords[len(store.SavedRecords)-1].Summary)
+}
+
 func TestExtractMessages(t *testing.T) {
 	// Test basic message extraction
 	rawMessages := `[

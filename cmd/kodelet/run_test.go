@@ -301,6 +301,26 @@ func TestApplyRunToolRestrictions_NoToolsWinsOverFragmentAllowedTools(t *testing
 	assert.Equal(t, []string{tools.NoToolsMarker}, llmConfig.AllowedTools)
 }
 
+func TestProcessFragmentBuildsMessageDisplay(t *testing.T) {
+	config := NewRunConfig()
+	config.FragmentName = "github/pr"
+	config.FragmentArgs = map[string]string{"target": "develop"}
+
+	query, display, metadata, err := processFragment(context.Background(), config, []string{"focus", "tests"})
+
+	require.NoError(t, err)
+	require.NotNil(t, metadata)
+	assert.Contains(t, query, "focus tests")
+	assert.Equal(t, "/github/pr target=develop focus tests", display)
+}
+
+func TestFormatFragmentDisplayArgs(t *testing.T) {
+	assert.Equal(t, `draft=true title="my feature"`, formatFragmentDisplayArgs(map[string]string{
+		"title": "my feature",
+		"draft": "true",
+	}))
+}
+
 func TestCreateRunToolManagers_NoToolsSkipsToolInitialization(t *testing.T) {
 	mcpManager, customManager, err := createRunToolManagers(context.Background(), &RunConfig{NoTools: true})
 

@@ -77,42 +77,58 @@ func SendMessageAndGetText(ctx context.Context, state tooltypes.State, query str
 
 // ExtractMessages parses the raw messages from a conversation record
 func ExtractMessages(provider string, rawMessages []byte, metadata map[string]any, toolResults map[string]tooltypes.StructuredToolResult) ([]llmtypes.Message, error) {
+	var messages []llmtypes.Message
+	var err error
+
 	switch provider {
 	case "anthropic":
-		return anthropic.ExtractMessages(rawMessages, toolResults)
+		messages, err = anthropic.ExtractMessages(rawMessages, toolResults)
 	case "openai":
 		if openai.RecordUsesResponsesMode(metadata, rawMessages) {
-			return openai.ExtractResponsesMessages(rawMessages, toolResults)
+			messages, err = openai.ExtractResponsesMessages(rawMessages, toolResults)
+		} else {
+			messages, err = openai.ExtractMessages(rawMessages, toolResults)
 		}
-		return openai.ExtractMessages(rawMessages, toolResults)
 	default:
 		return nil, errors.Errorf("unsupported provider: %s", provider)
 	}
+	if err != nil {
+		return nil, err
+	}
+	return conversations.ApplyDisplayToLLMMessages(messages, metadata), nil
 }
 
 // ExtractConversationEntries parses the raw messages from a conversation record into structured conversation entries.
 func ExtractConversationEntries(provider string, rawMessages []byte, metadata map[string]any, toolResults map[string]tooltypes.StructuredToolResult) ([]conversations.StreamableMessage, error) {
+	var messages []conversations.StreamableMessage
+	var err error
+
 	switch provider {
 	case "anthropic":
 		msgs, err := anthropic.StreamMessages(rawMessages, toolResults)
 		if err != nil {
 			return nil, err
 		}
-		return convertAnthropicStreamableMessages(msgs), nil
+		messages = convertAnthropicStreamableMessages(msgs)
 	case "openai":
 		if openai.RecordUsesResponsesMode(metadata, rawMessages) {
 			msgs, err := openai.StreamResponsesMessages(rawMessages, toolResults)
 			if err != nil {
 				return nil, err
 			}
-			return convertResponsesStreamableMessages(msgs), nil
+			messages = convertResponsesStreamableMessages(msgs)
+		} else {
+			msgs, err := openai.StreamMessages(rawMessages, toolResults)
+			if err != nil {
+				return nil, err
+			}
+			messages = convertOpenAIStreamableMessages(msgs)
 		}
-		msgs, err := openai.StreamMessages(rawMessages, toolResults)
-		if err != nil {
-			return nil, err
-		}
-		return convertOpenAIStreamableMessages(msgs), nil
 	default:
 		return nil, errors.Errorf("unsupported provider: %s", provider)
 	}
+	if err != nil {
+		return nil, err
+	}
+	return conversations.ApplyDisplayToStreamableMessages(messages, metadata), nil
 }

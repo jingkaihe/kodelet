@@ -1054,7 +1054,8 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to parse conversation for summary")
 	}
-	summary := base.FirstUserMessageFallback(conversationsFromResponses(messages))
+	metadata := t.GetMetadata()
+	summary := base.FirstUserMessageFallback(conversations.ApplyDisplayToStreamableMessages(conversationsFromResponses(messages), metadata))
 
 	// Generate a new summary if requested and enabled; otherwise keep the first user message.
 	if summarize {
@@ -1076,11 +1077,9 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 	}
 
 	// Build the conversation record
-	metadata := map[string]any{
-		"model":    t.Config.Model,
-		"api_mode": "responses",
-		"platform": resolvePlatformName(t.Config),
-	}
+	metadata["model"] = t.Config.Model
+	metadata["api_mode"] = "responses"
+	metadata["platform"] = resolvePlatformName(t.Config)
 	if serviceTier := normalizeServiceTier(t.Config); serviceTier != "" {
 		metadata["service_tier"] = string(serviceTier)
 	}
@@ -1140,6 +1139,7 @@ func (t *Thread) loadConversation(ctx context.Context) {
 	t.cleanupOrphanedItems()
 	t.Usage = &record.Usage
 	t.summary = record.Summary
+	t.SetMetadata(record.Metadata)
 	t.State.SetFileLastAccess(record.FileLastAccess)
 	t.SetStructuredToolResults(record.ToolResults)
 }

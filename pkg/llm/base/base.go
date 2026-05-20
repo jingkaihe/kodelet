@@ -42,6 +42,7 @@ type Thread struct {
 	Usage            *llmtypes.Usage                           // Token usage tracking
 	ConversationID   string                                    // Unique conversation identifier
 	Persisted        bool                                      // Whether conversation is being persisted
+	Metadata         map[string]any                            // Additional provider-neutral conversation metadata
 	Store            ConversationStore                         // Conversation persistence store
 	ToolResults      map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
 	RendererRegistry *renderers.RendererRegistry               // CLI renderer registry for structured tool results
@@ -63,11 +64,46 @@ func NewThread(
 		Config:           config,
 		ConversationID:   conversationID,
 		Persisted:        false,
+		Metadata:         make(map[string]any),
 		Usage:            &llmtypes.Usage{},
 		ToolResults:      make(map[string]tooltypes.StructuredToolResult),
 		RendererRegistry: renderers.NewRendererRegistry(),
 		HookTrigger:      hookTrigger,
 	}
+}
+
+// SetMetadataValue stores a provider-neutral conversation metadata value.
+// This method is thread-safe and uses mutex locking.
+func (t *Thread) SetMetadataValue(key string, value any) {
+	t.Mu.Lock()
+	defer t.Mu.Unlock()
+	if t.Metadata == nil {
+		t.Metadata = make(map[string]any)
+	}
+	t.Metadata[key] = value
+}
+
+// GetMetadata returns a copy of provider-neutral conversation metadata.
+// This method is thread-safe and uses mutex locking.
+func (t *Thread) GetMetadata() map[string]any {
+	t.Mu.Lock()
+	defer t.Mu.Unlock()
+	if t.Metadata == nil {
+		return make(map[string]any)
+	}
+	return maps.Clone(t.Metadata)
+}
+
+// SetMetadata replaces provider-neutral conversation metadata with a copy of metadata.
+// This method is thread-safe and uses mutex locking.
+func (t *Thread) SetMetadata(metadata map[string]any) {
+	t.Mu.Lock()
+	defer t.Mu.Unlock()
+	if metadata == nil {
+		t.Metadata = make(map[string]any)
+		return
+	}
+	t.Metadata = maps.Clone(metadata)
 }
 
 // SetState sets the state for the thread
