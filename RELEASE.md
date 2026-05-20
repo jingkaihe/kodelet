@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.4.14-beta (2026-05-20)
+
+Added recipe-backed slash commands to the Web UI composer, including cwd-scoped recipe discovery, autocomplete suggestions, and argument-driven usage hints/placeholders.
+
+Refined conversation display metadata handling across Anthropic/OpenAI persistence paths and updated the frontend `ws` override to `8.20.1`.
+
 ## 0.4.12-beta (2026-05-17)
 
 OpenAI-compatible providers that do not support the native Responses compact endpoint (such as Copilot) now use in-harness summary compactor instead of attempting the unsupported native path. Added regression coverage to confirm the correct compaction route is taken for Copilot threads.
