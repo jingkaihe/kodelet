@@ -121,6 +121,33 @@ func WithDefaultDirs() Option {
 	}
 }
 
+// WithDefaultDirsForCWD uses the default fragment lookup order rooted at the
+// provided working directory for repo-local recipes and plugins.
+func WithDefaultDirsForCWD(cwd string) Option {
+	return func(fp *Processor) error {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return errors.Wrap(err, "failed to get user home directory")
+		}
+
+		repoDir := strings.TrimSpace(cwd)
+		if repoDir == "" {
+			repoDir = "."
+		}
+
+		fp.fragmentDirs = []string{
+			filepath.Join(repoDir, ".kodelet", "recipes"),
+			filepath.Join(homeDir, ".kodelet", "recipes"),
+		}
+
+		fp.pluginDirs = []plugins.PluginDirConfig{}
+		fp.pluginDirs = append(fp.pluginDirs, plugins.ScanPluginSubdirs(filepath.Join(repoDir, ".kodelet", "plugins"), "recipes")...)
+		fp.pluginDirs = append(fp.pluginDirs, plugins.ScanPluginSubdirs(filepath.Join(homeDir, ".kodelet", "plugins"), "recipes")...)
+
+		return nil
+	}
+}
+
 // NewFragmentProcessor creates a new fragment processor with optional configuration
 func NewFragmentProcessor(opts ...Option) (*Processor, error) {
 	// Start with empty processor

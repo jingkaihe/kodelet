@@ -853,6 +853,21 @@ func TestWithMainTools(t *testing.T) {
 		assert.Contains(t, toolNames, "subagent")
 	})
 
+	t.Run("WithSubAgentTool respects allowed_tools without subagent", func(t *testing.T) {
+		config := llmtypes.Config{
+			AllowedTools: []string{"bash"},
+		}
+		state := NewBasicState(ctx, WithLLMConfig(config), WithMainTools(), WithSubAgentTool())
+
+		toolNames := make([]string, len(state.Tools()))
+		for i, tool := range state.Tools() {
+			toolNames[i] = tool.Name()
+		}
+
+		assert.Contains(t, toolNames, "bash")
+		assert.NotContains(t, toolNames, "subagent")
+	})
+
 	t.Run("no_tools with NoToolsMarker", func(t *testing.T) {
 		config := llmtypes.Config{
 			AllowedTools: []string{NoToolsMarker},

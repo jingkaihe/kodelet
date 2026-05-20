@@ -446,14 +446,6 @@ const ChatPage: React.FC = () => {
 				console.error("Failed to load chat settings", error);
 			});
 
-		void apiService
-			.getSlashCommands()
-			.then((response) => {
-				setSlashCommands(response.commands || []);
-			})
-			.catch((error) => {
-				console.error("Failed to load slash commands", error);
-			});
 	}, [refreshConversations]);
 
 	useEffect(() => {
@@ -1475,6 +1467,27 @@ const ChatPage: React.FC = () => {
 		loadedConversationId,
 		selectedCWD,
 	]);
+
+	useEffect(() => {
+		let cancelled = false;
+
+		void apiService
+			.getSlashCommands(currentCWDLabel || undefined)
+			.then((response) => {
+				if (!cancelled) {
+					setSlashCommands(response.commands || []);
+				}
+			})
+			.catch((error) => {
+				if (!cancelled) {
+					console.error("Failed to load slash commands", error);
+				}
+			});
+
+		return () => {
+			cancelled = true;
+		};
+	}, [currentCWDLabel]);
 
 	const applyCwdSuggestion = (path: string) => {
 		cwdSuggestionSkipQueryRef.current = path;

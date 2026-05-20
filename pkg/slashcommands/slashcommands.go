@@ -29,6 +29,7 @@ type Expansion struct {
 	Display      string
 	Arguments    map[string]string
 	Instructions string
+	Metadata     fragments.Metadata
 }
 
 // Parse parses a slash command from text. The command name is everything after
@@ -203,6 +204,7 @@ func Expand(ctx context.Context, processor *fragments.Processor, command, args s
 		Display:      BuildDisplay(command, args),
 		Arguments:    kvArgs,
 		Instructions: additionalText,
+		Metadata:     fragment.Metadata,
 	}, nil
 }
 

@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -792,6 +793,34 @@ func TestServer_handleGetSlashCommands(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, response.Commands)
 	assert.NotEmpty(t, response.Commands[0].Name)
+}
+
+func TestServer_handleGetSlashCommandsUsesRequestedCWD(t *testing.T) {
+	workspace := t.TempDir()
+	recipeDir := filepath.Join(workspace, ".kodelet", "recipes")
+	require.NoError(t, os.MkdirAll(recipeDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(recipeDir, "workspace-only.md"),
+		[]byte("---\ndescription: Workspace-only recipe\n---\nWorkspace recipe\n"),
+		0o644,
+	))
+
+	server := &Server{config: &ServerConfig{CWD: t.TempDir()}}
+	req := httptest.NewRequest("GET", "/api/chat/slash-commands?cwd="+url.QueryEscape(workspace), nil)
+	w := httptest.NewRecorder()
+
+	server.handleGetSlashCommands(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var response SlashCommandsResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+
+	var names []string
+	for _, command := range response.Commands {
+		names = append(names, command.Name)
+	}
+	assert.Contains(t, names, "workspace-only")
 }
 
 func TestServer_handleGetConversationPreservesImageContent(t *testing.T) {

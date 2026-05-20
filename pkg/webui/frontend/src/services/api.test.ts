@@ -270,6 +270,23 @@ describe("ApiService", () => {
 			);
 			expect(result).toEqual(mockResponse);
 		});
+
+		it("fetches slash commands for a cwd", async () => {
+			const mockResponse = { commands: [] };
+
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				json: async () => mockResponse,
+			});
+
+			const result = await apiService.getSlashCommands("/workspace/project");
+
+			expect(mockFetch).toHaveBeenCalledWith(
+				"/api/chat/slash-commands?cwd=%2Fworkspace%2Fproject",
+				expect.any(Object),
+			);
+			expect(result).toEqual(mockResponse);
+		});
 	});
 
 	describe("getCWDHints", () => {

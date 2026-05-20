@@ -114,8 +114,15 @@ class ApiService {
 		return this.request<ChatSettings>("/api/chat/settings");
 	}
 
-	async getSlashCommands(): Promise<SlashCommandsResponse> {
-		return this.request<SlashCommandsResponse>("/api/chat/slash-commands");
+	async getSlashCommands(cwd?: string): Promise<SlashCommandsResponse> {
+		const params = new URLSearchParams();
+		if (cwd) {
+			params.append("cwd", cwd);
+		}
+		const suffix = params.toString();
+		return this.request<SlashCommandsResponse>(
+			`/api/chat/slash-commands${suffix ? `?${suffix}` : ""}`,
+		);
 	}
 
 	async getCWDHints(query: string): Promise<CWDHintsResponse> {

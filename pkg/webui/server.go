@@ -27,7 +27,6 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/gorilla/mux"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
-	"github.com/jingkaihe/kodelet/pkg/fragments"
 	openairesponses "github.com/jingkaihe/kodelet/pkg/llm/openai/responses"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
@@ -1179,7 +1178,13 @@ func (s *Server) handleGetChatSettings(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleGetSlashCommands(w http.ResponseWriter, r *http.Request) {
-	processor, err := fragments.NewFragmentProcessor()
+	resolvedCWD, err := s.resolveRequestedCWD(r.URL.Query().Get("cwd"))
+	if err != nil {
+		s.writeErrorResponse(w, http.StatusBadRequest, "invalid cwd", err)
+		return
+	}
+
+	processor, err := newWebFragmentProcessor(resolvedCWD)
 	if err != nil {
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to initialize slash commands", err)
 		return

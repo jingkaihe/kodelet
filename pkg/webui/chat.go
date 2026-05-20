@@ -134,6 +134,15 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 	llmConfig.MCPWorkspaceDir = workspaceDir
 	llmConfig.WorkingDirectory = resolvedCWD
 
+	message, slashExpansion, err := expandWebChatSlashCommand(ctx, message, resolvedCWD)
+	if err != nil {
+		return sessionID, err
+	}
+	if slashExpansion != nil {
+		applyWebFragmentRestrictions(ctx, &llmConfig, &slashExpansion.Metadata)
+		llmConfig.RecipeName = slashExpansion.Command
+	}
+
 	appState, err := buildChatState(ctx, llmConfig, sessionID, resolvedCWD, mcpManager, customManager)
 	if err != nil {
 		return sessionID, err
@@ -147,9 +156,8 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 	thread.SetState(appState)
 	thread.SetConversationID(sessionID)
 	thread.EnablePersistence(ctx, true)
-	message, err = expandWebChatSlashCommand(ctx, thread, message)
-	if err != nil {
-		return sessionID, err
+	if slashExpansion != nil {
+		addWebChatSlashCommandDisplay(thread, slashExpansion)
 	}
 
 	if err := sink.Send(ChatEvent{
@@ -408,27 +416,56 @@ func normalizeChatRequest(req ChatRequest) (string, []string, error) {
 	return message, imageInputs, nil
 }
 
-func expandWebChatSlashCommand(ctx context.Context, thread llmtypes.Thread, message string) (string, error) {
+func newWebFragmentProcessor(cwd string) (*fragments.Processor, error) {
+	return fragments.NewFragmentProcessor(fragments.WithDefaultDirsForCWD(cwd))
+}
+
+func expandWebChatSlashCommand(ctx context.Context, message string, cwd string) (string, *slashcommands.Expansion, error) {
 	command, args, found := slashcommands.Parse(message)
 	if !found {
-		return message, nil
+		return message, nil, nil
 	}
 
-	processor, err := fragments.NewFragmentProcessor()
+	processor, err := newWebFragmentProcessor(cwd)
 	if err != nil {
-		return "", errors.Wrap(err, "failed to initialize slash commands")
+		return "", nil, errors.Wrap(err, "failed to initialize slash commands")
 	}
 
 	expansion, err := slashcommands.Expand(ctx, processor, command, args)
 	if err != nil {
-		return "", err
+		return "", nil, err
+	}
+
+	return expansion.Prompt, expansion, nil
+}
+
+func applyWebFragmentRestrictions(ctx context.Context, llmConfig *llmtypes.Config, fragmentMetadata *fragments.Metadata) {
+	if fragmentMetadata == nil {
+		return
+	}
+
+	if len(fragmentMetadata.AllowedTools) > 0 {
+		if err := tools.ValidateTools(fragmentMetadata.AllowedTools); err != nil {
+			logger.G(ctx).WithError(err).Warn("Invalid tools in fragment metadata, ignoring allowed_tools")
+		} else {
+			llmConfig.AllowedTools = fragmentMetadata.AllowedTools
+		}
+	}
+
+	if len(fragmentMetadata.AllowedCommands) > 0 {
+		llmConfig.AllowedCommands = fragmentMetadata.AllowedCommands
+	}
+}
+
+func addWebChatSlashCommandDisplay(thread llmtypes.Thread, expansion *slashcommands.Expansion) {
+	if thread == nil || expansion == nil {
+		return
 	}
 
 	metadata := conversationservice.AddSlashCommandDisplay(thread.GetMetadata(), expansion.Prompt, expansion.Display, expansion.Command)
 	for key, value := range metadata {
 		thread.SetMetadataValue(key, value)
 	}
-	return expansion.Prompt, nil
 }
 
 func buildChatState(
