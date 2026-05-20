@@ -10,11 +10,14 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/jingkaihe/kodelet/pkg/conversationdisplay"
 	conversationservice "github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	llmbase "github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/mcp"
+	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -145,6 +148,10 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 	thread.SetState(appState)
 	thread.SetConversationID(sessionID)
 	thread.EnablePersistence(ctx, true)
+	message, err = expandWebChatSlashCommand(ctx, thread, message)
+	if err != nil {
+		return sessionID, err
+	}
 
 	if err := sink.Send(ChatEvent{
 		Kind:           "conversation",
@@ -400,6 +407,29 @@ func normalizeChatRequest(req ChatRequest) (string, []string, error) {
 	}
 
 	return message, imageInputs, nil
+}
+
+func expandWebChatSlashCommand(ctx context.Context, thread llmtypes.Thread, message string) (string, error) {
+	command, args, found := slashcommands.Parse(message)
+	if !found {
+		return message, nil
+	}
+
+	processor, err := fragments.NewFragmentProcessor()
+	if err != nil {
+		return "", errors.Wrap(err, "failed to initialize slash commands")
+	}
+
+	expansion, err := slashcommands.Expand(ctx, processor, command, args)
+	if err != nil {
+		return "", err
+	}
+
+	metadata := conversationdisplay.AddSlashCommandOverride(thread.GetMetadata(), expansion.Prompt, expansion.Display, expansion.Command)
+	for key, value := range metadata {
+		thread.SetMetadataValue(key, value)
+	}
+	return expansion.Prompt, nil
 }
 
 func buildChatState(

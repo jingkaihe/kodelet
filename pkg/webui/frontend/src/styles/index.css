@@ -691,6 +691,68 @@ h6 {
   max-height: min(50vh, 28rem);
 }
 
+.composer-slash-suggestions {
+  margin: 0.25rem 0.25rem 0.35rem;
+  overflow: hidden;
+  border-radius: 1.1rem;
+  border: 1px solid rgba(20, 20, 19, 0.1);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(249, 246, 240, 0.96)),
+    rgba(255, 255, 255, 0.92);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    0 16px 34px rgba(20, 20, 19, 0.08);
+}
+
+.composer-slash-suggestion {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(7rem, auto) minmax(0, 1fr);
+  gap: 0.25rem 0.85rem;
+  border: 0;
+  border-bottom: 1px solid rgba(20, 20, 19, 0.06);
+  background: transparent;
+  padding: 0.72rem 0.9rem;
+  text-align: left;
+  transition: background-color 130ms ease, transform 130ms ease;
+}
+
+.composer-slash-suggestion:last-child {
+  border-bottom: 0;
+}
+
+.composer-slash-suggestion:hover,
+.composer-slash-suggestion.is-active {
+  background: rgba(106, 155, 204, 0.11);
+}
+
+.composer-slash-suggestion-command {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #4d74a0;
+}
+
+.composer-slash-suggestion-description {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-heading);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: rgba(20, 20, 19, 0.78);
+}
+
+.composer-slash-suggestion-hint {
+  grid-column: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: rgba(20, 20, 19, 0.48);
+}
+
 .composer-icon-button {
   display: inline-flex;
   align-items: center;

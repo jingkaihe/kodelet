@@ -4,7 +4,9 @@
 package conversations
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -86,6 +88,7 @@ func (cr *ConversationRecord) ToSummary() ConversationSummary {
 	// Extract first message by parsing the raw messages
 	firstMessage := ""
 	if len(cr.RawMessages) > 0 {
+		overrides := parseConversationDisplayOverrides(cr.Metadata)
 		var messages []map[string]any
 		if err := json.Unmarshal(cr.RawMessages, &messages); err == nil && len(messages) > 0 {
 			// Find first user message
@@ -94,7 +97,7 @@ func (cr *ConversationRecord) ToSummary() ConversationSummary {
 					if content, ok := msg["content"].([]any); ok && len(content) > 0 {
 						if block, ok := content[0].(map[string]any); ok {
 							if text, ok := block["text"].(string); ok {
-								firstMessage = text
+								firstMessage = applyConversationDisplayOverride(text, overrides)
 								// Truncate if too long
 								if len(firstMessage) > 100 {
 									firstMessage = firstMessage[:97] + "..."
@@ -127,6 +130,69 @@ func (cr *ConversationRecord) ToSummary() ConversationSummary {
 		CreatedAt:    cr.CreatedAt,
 		UpdatedAt:    cr.UpdatedAt,
 	}
+}
+
+func parseConversationDisplayOverrides(metadata map[string]any) map[string]string {
+	if len(metadata) == 0 {
+		return nil
+	}
+
+	rawRoot, ok := metadata["message_display_overrides"]
+	if !ok {
+		return nil
+	}
+
+	root, ok := rawRoot.(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	rawVersion, ok := root["v1"]
+	if !ok {
+		return nil
+	}
+
+	versionMap, ok := rawVersion.(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	overrides := make(map[string]string, len(versionMap))
+	for key, rawOverride := range versionMap {
+		display := conversationDisplayValue(rawOverride)
+		if strings.TrimSpace(key) == "" || strings.TrimSpace(display) == "" {
+			continue
+		}
+		overrides[key] = display
+	}
+	return overrides
+}
+
+func conversationDisplayValue(raw any) string {
+	switch value := raw.(type) {
+	case map[string]any:
+		if display, ok := value["display"]; ok && display != nil {
+			return fmt.Sprint(display)
+		}
+		return ""
+	case map[string]string:
+		return value["display"]
+	default:
+		return ""
+	}
+}
+
+func applyConversationDisplayOverride(text string, overrides map[string]string) string {
+	if len(overrides) == 0 || strings.TrimSpace(text) == "" {
+		return text
+	}
+
+	sum := sha256.Sum256([]byte(strings.TrimSpace(text)))
+	key := fmt.Sprintf("sha256:%x", sum[:])
+	if display, ok := overrides[key]; ok && strings.TrimSpace(display) != "" {
+		return display
+	}
+	return text
 }
 
 // GetID returns the conversation ID for usage.ConversationSummary compatibility

@@ -18,6 +18,7 @@ const mockNavigate = vi.fn();
 const mockGetConversations = vi.fn();
 const mockGetConversation = vi.fn();
 const mockGetChatSettings = vi.fn();
+const mockGetSlashCommands = vi.fn();
 const mockStreamChat = vi.fn();
 const mockStreamConversation = vi.fn();
 const mockGetCWDHints = vi.fn();
@@ -46,6 +47,7 @@ vi.mock("../services/api", () => ({
 		getConversations: (...args: unknown[]) => mockGetConversations(...args),
 		getConversation: (...args: unknown[]) => mockGetConversation(...args),
 		getChatSettings: (...args: unknown[]) => mockGetChatSettings(...args),
+		getSlashCommands: (...args: unknown[]) => mockGetSlashCommands(...args),
 		getCWDHints: (...args: unknown[]) => mockGetCWDHints(...args),
 		getGitDiff: (...args: unknown[]) => mockGetGitDiff(...args),
 		streamChat: (...args: unknown[]) => mockStreamChat(...args),
@@ -78,6 +80,20 @@ describe("ChatPage", () => {
 			total: 0,
 			limit: 10,
 			offset: 0,
+		});
+		mockGetSlashCommands.mockResolvedValue({
+			commands: [
+				{
+					name: "init",
+					description: "Initialize repository context",
+					hint: "additional instructions (optional)",
+				},
+				{
+					name: "github/pr",
+					description: "Draft a pull request",
+					hint: "target=main additional instructions",
+				},
+			],
 		});
 		mockSteerConversation.mockResolvedValue({
 			success: true,
@@ -268,6 +284,25 @@ describe("ChatPage", () => {
 			expect.objectContaining({ message: "hello from shortcut" }),
 			expect.any(Object),
 		);
+	});
+
+	it("suggests and inserts slash commands in the composer", async () => {
+		render(<ChatPage />);
+
+		await waitFor(() => expect(mockGetSlashCommands).toHaveBeenCalled());
+
+		const textarea = screen.getByTestId("composer-textarea");
+		fireEvent.change(textarea, { target: { value: "/" } });
+
+		expect(
+			await screen.findByTestId("slash-command-suggestions"),
+		).toBeInTheDocument();
+		expect(screen.getByText("/init")).toBeInTheDocument();
+
+		fireEvent.keyDown(textarea, { key: "ArrowDown" });
+		fireEvent.keyDown(textarea, { key: "Enter" });
+
+		expect(textarea).toHaveValue("/github/pr ");
 	});
 
 	it("toggles the composer between expanded and restored states", async () => {

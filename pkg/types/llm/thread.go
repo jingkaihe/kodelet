@@ -103,4 +103,8 @@ type Thread interface {
 	// AggregateSubagentUsage aggregates usage from a subagent into this thread's usage
 	// This aggregates token counts and costs but NOT context window (which should remain isolated)
 	AggregateSubagentUsage(usage Usage)
+	// SetMetadataValue stores provider-neutral conversation metadata for persistence.
+	SetMetadataValue(key string, value any)
+	// GetMetadata returns provider-neutral conversation metadata.
+	GetMetadata() map[string]any
 }

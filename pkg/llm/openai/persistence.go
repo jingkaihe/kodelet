@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/conversationdisplay"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
@@ -120,7 +121,8 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 
 	// Clean up orphaned messages before saving
 	messagesToSave := cleanedOpenAIMessages(t.messages)
-	summary := base.FirstUserMessageFallback(conversationsFromOpenAI(streamMessagesForSummary(messagesToSave, t.GetStructuredToolResults())))
+	metadata := t.GetMetadata()
+	summary := base.FirstUserMessageFallback(conversationdisplay.ApplyToStreamableMessages(conversationsFromOpenAI(streamMessagesForSummary(messagesToSave, t.GetStructuredToolResults())), metadata))
 
 	// Generate a new summary if requested and enabled; otherwise keep the first user message.
 	if summarize {
@@ -141,11 +143,9 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 		return errors.Wrap(err, "error marshaling messages")
 	}
 
-	metadata := map[string]any{
-		"model":    t.Config.Model,
-		"api_mode": "chat_completions",
-		"platform": resolvePlatformName(t.Config),
-	}
+	metadata["model"] = t.Config.Model
+	metadata["api_mode"] = "chat_completions"
+	metadata["platform"] = resolvePlatformName(t.Config)
 	if serviceTier := normalizeServiceTier(t.Config); serviceTier != "" {
 		metadata["service_tier"] = string(serviceTier)
 	}
@@ -214,6 +214,7 @@ func (t *Thread) loadConversation(ctx context.Context) {
 	t.messages = cleanedOpenAIMessages(messages)
 	t.Usage = &record.Usage
 	t.summary = record.Summary
+	t.SetMetadata(record.Metadata)
 	t.State.SetFileLastAccess(record.FileLastAccess)
 	// Restore structured tool results
 	t.SetStructuredToolResults(record.ToolResults)

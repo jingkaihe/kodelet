@@ -770,11 +770,13 @@ func TestServer_TransformSlashCommandPrompt(t *testing.T) {
 			{Type: acptypes.ContentTypeText, Text: "/init"},
 		}
 
-		result, err := server.transformSlashCommandPrompt("init", "", originalPrompt)
+		result, expansion, err := server.transformSlashCommandPrompt("init", "", originalPrompt)
 		require.NoError(t, err)
+		require.NotNil(t, expansion)
 		require.NotEmpty(t, result)
 		assert.Equal(t, acptypes.ContentTypeText, result[0].Type)
 		assert.NotEmpty(t, result[0].Text)
+		assert.Equal(t, "/init", expansion.Display)
 	})
 
 	t.Run("includes additional text", func(t *testing.T) {
@@ -786,11 +788,13 @@ func TestServer_TransformSlashCommandPrompt(t *testing.T) {
 			{Type: acptypes.ContentTypeText, Text: "/init please focus on tests"},
 		}
 
-		result, err := server.transformSlashCommandPrompt("init", "please focus on tests", originalPrompt)
+		result, expansion, err := server.transformSlashCommandPrompt("init", "please focus on tests", originalPrompt)
 		require.NoError(t, err)
+		require.NotNil(t, expansion)
 		require.NotEmpty(t, result)
 		assert.Contains(t, result[0].Text, "Additional instructions:")
 		assert.Contains(t, result[0].Text, "please focus on tests")
+		assert.Equal(t, "/init please focus on tests", expansion.Display)
 	})
 
 	t.Run("preserves non-text blocks", func(t *testing.T) {
@@ -803,7 +807,7 @@ func TestServer_TransformSlashCommandPrompt(t *testing.T) {
 			{Type: acptypes.ContentTypeImage, Data: "base64imagedata", MimeType: "image/png"},
 		}
 
-		result, err := server.transformSlashCommandPrompt("init", "", originalPrompt)
+		result, _, err := server.transformSlashCommandPrompt("init", "", originalPrompt)
 		require.NoError(t, err)
 		require.Len(t, result, 2)
 		assert.Equal(t, acptypes.ContentTypeText, result[0].Type)
@@ -820,7 +824,7 @@ func TestServer_TransformSlashCommandPrompt(t *testing.T) {
 			{Type: acptypes.ContentTypeText, Text: "/nonexistent-recipe-xyz"},
 		}
 
-		_, err := server.transformSlashCommandPrompt("nonexistent-recipe-xyz", "", originalPrompt)
+		_, _, err := server.transformSlashCommandPrompt("nonexistent-recipe-xyz", "", originalPrompt)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unknown recipe '/nonexistent-recipe-xyz'")
 		assert.Contains(t, err.Error(), "Available recipes:")

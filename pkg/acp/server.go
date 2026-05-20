@@ -11,21 +11,18 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
 	"github.com/jingkaihe/kodelet/pkg/acp/session"
+	"github.com/jingkaihe/kodelet/pkg/conversationdisplay"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/jingkaihe/kodelet/pkg/version"
 	pkgerrors "github.com/pkg/errors"
-)
-
-const (
-	additionalInstructionsHeader = "\n\n---\n\nAdditional instructions:\n"
 )
 
 // Server implements the ACP agent server.
@@ -468,9 +465,13 @@ func (s *Server) handleSessionPrompt(req *acptypes.Request) error {
 
 	prompt := params.Prompt
 	if command, args, found := parseSlashCommand(params.Prompt); found && s.fragmentProcessor != nil {
-		transformedPrompt, err := s.transformSlashCommandPrompt(command, args, params.Prompt)
+		transformedPrompt, expansion, err := s.transformSlashCommandPrompt(command, args, params.Prompt)
 		if err != nil {
 			return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, err.Error(), nil)
+		}
+		metadata := conversationdisplay.AddSlashCommandOverride(sess.Thread.GetMetadata(), expansion.Prompt, expansion.Display, expansion.Command)
+		for key, value := range metadata {
+			sess.Thread.SetMetadataValue(key, value)
 		}
 		prompt = transformedPrompt
 	}
@@ -498,32 +499,17 @@ func (s *Server) handleSessionPrompt(req *acptypes.Request) error {
 }
 
 // transformSlashCommandPrompt transforms a slash command into a prompt with recipe content.
-func (s *Server) transformSlashCommandPrompt(command, args string, originalPrompt []acptypes.ContentBlock) ([]acptypes.ContentBlock, error) {
-	kvArgs, additionalText := parseSlashCommandArgs(args)
-
-	config := &fragments.Config{
-		FragmentName: command,
-		Arguments:    kvArgs,
-	}
-
-	fragment, err := s.fragmentProcessor.LoadFragment(s.ctx, config)
+func (s *Server) transformSlashCommandPrompt(command, args string, originalPrompt []acptypes.ContentBlock) ([]acptypes.ContentBlock, *slashcommands.Expansion, error) {
+	expansion, err := slashcommands.Expand(s.ctx, s.fragmentProcessor, command, args)
 	if err != nil {
-		return nil, pkgerrors.Wrapf(err, "unknown recipe '/%s'. Available recipes: %s", command, s.getAvailableRecipeNames())
-	}
-
-	var promptBuilder strings.Builder
-	promptBuilder.WriteString(fragment.Content)
-
-	if additionalText != "" {
-		promptBuilder.WriteString(additionalInstructionsHeader)
-		promptBuilder.WriteString(additionalText)
+		return nil, nil, err
 	}
 
 	var newPrompt []acptypes.ContentBlock
 
 	newPrompt = append(newPrompt, acptypes.ContentBlock{
 		Type: acptypes.ContentTypeText,
-		Text: promptBuilder.String(),
+		Text: expansion.Prompt,
 	})
 
 	for _, block := range originalPrompt {
@@ -533,7 +519,7 @@ func (s *Server) transformSlashCommandPrompt(command, args string, originalPromp
 		newPrompt = append(newPrompt, block)
 	}
 
-	return newPrompt, nil
+	return newPrompt, expansion, nil
 }
 
 func (s *Server) handleSetMode(req *acptypes.Request) error {
@@ -672,45 +658,16 @@ func (s *Server) send(v any) error {
 	return err
 }
 
-// getAvailableRecipeNames returns a comma-separated list of available recipe names for error messages
-func (s *Server) getAvailableRecipeNames() string {
-	commands := s.getAvailableCommands()
-	if len(commands) == 0 {
-		return "(none available)"
-	}
-
-	names := make([]string, len(commands))
-	for i, cmd := range commands {
-		names[i] = "/" + cmd.Name
-	}
-	return strings.Join(names, ", ")
-}
-
 // getAvailableCommands returns available slash commands from the fragment/recipe system
 func (s *Server) getAvailableCommands() []acptypes.AvailableCommand {
-	if s.fragmentProcessor == nil {
-		return nil
-	}
-
-	frags, err := s.fragmentProcessor.ListFragmentsWithMetadata()
-	if err != nil {
-		logger.G(s.ctx).WithError(err).Warn("Failed to list fragments for slash commands")
-		return nil
-	}
-
-	var commands []acptypes.AvailableCommand
-	for _, frag := range frags {
-		name := frag.ID
-		description := frag.Metadata.Description
-		if description == "" {
-			description = "Run the " + frag.ID + " recipe"
-		}
-
+	availableCommands := slashcommands.List(s.ctx, s.fragmentProcessor)
+	commands := make([]acptypes.AvailableCommand, 0, len(availableCommands))
+	for _, availableCommand := range availableCommands {
 		cmd := acptypes.AvailableCommand{
-			Name:        name,
-			Description: description,
+			Name:        availableCommand.Name,
+			Description: availableCommand.Description,
 			Input: &acptypes.AvailableCommandInput{
-				Hint: buildCommandHint(frag.Metadata.Arguments),
+				Hint: availableCommand.Hint,
 			},
 		}
 		commands = append(commands, cmd)
@@ -782,109 +739,12 @@ func parseSlashCommand(prompt []acptypes.ContentBlock) (command string, args str
 //	"target=main fix the bug"        -> {"target": "main"}, "fix the bug"
 //	`title="my feature" draft=true`  -> {"title": "my feature", "draft": "true"}, ""
 func parseSlashCommandArgs(args string) (kvArgs map[string]string, additionalText string) {
-	kvArgs = make(map[string]string)
-	if args == "" {
-		return kvArgs, ""
-	}
-
-	var textParts []string
-	i := 0
-	for i < len(args) {
-		i = skipSpaces(args, i)
-		if i >= len(args) {
-			break
-		}
-
-		keyEnd := findKeyEnd(args, i)
-
-		if keyEnd < len(args) && args[keyEnd] == '=' {
-			key := args[i:keyEnd]
-			value, nextPos := parseValue(args, keyEnd+1)
-			kvArgs[key] = value
-			i = nextPos
-		} else {
-			wordEnd := findWordEnd(args, i)
-			textParts = append(textParts, args[i:wordEnd])
-			i = wordEnd
-		}
-	}
-
-	return kvArgs, strings.Join(textParts, " ")
-}
-
-func skipSpaces(s string, i int) int {
-	for i < len(s) && s[i] == ' ' {
-		i++
-	}
-	return i
-}
-
-func findKeyEnd(s string, start int) int {
-	i := start
-	for i < len(s) && s[i] != '=' && s[i] != ' ' {
-		i++
-	}
-	return i
-}
-
-func findWordEnd(s string, start int) int {
-	i := start
-	for i < len(s) && s[i] != ' ' {
-		i++
-	}
-	return i
-}
-
-func parseValue(s string, start int) (value string, nextPos int) {
-	if start >= len(s) {
-		return "", start
-	}
-
-	if s[start] == '"' {
-		return parseQuotedValue(s, start+1)
-	}
-	return parseUnquotedValue(s, start)
-}
-
-func parseQuotedValue(s string, start int) (value string, nextPos int) {
-	end := start
-	for end < len(s) && s[end] != '"' {
-		end++
-	}
-	if end < len(s) {
-		return s[start:end], end + 1
-	}
-	return s[start:end], end
-}
-
-func parseUnquotedValue(s string, start int) (value string, nextPos int) {
-	end := findWordEnd(s, start)
-	return s[start:end], end
+	return slashcommands.ParseArgs(args)
 }
 
 // buildCommandHint builds a hint string for a recipe based on its arguments
 func buildCommandHint(arguments map[string]fragments.ArgumentMeta) string {
-	if len(arguments) == 0 {
-		return "additional instructions (optional)"
-	}
-
-	keys := make([]string, 0, len(arguments))
-	for k := range arguments {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	var parts []string
-	for _, key := range keys {
-		argMeta := arguments[key]
-		if argMeta.Default != "" {
-			parts = append(parts, fmt.Sprintf("%s=%s", key, argMeta.Default))
-		} else {
-			parts = append(parts, fmt.Sprintf("%s=<value>", key))
-		}
-	}
-
-	return fmt.Sprintf("[%s] additional instructions", strings.Join(parts, " "))
+	return slashcommands.BuildCommandHint(arguments)
 }
 
 // Shutdown gracefully shuts down the server.

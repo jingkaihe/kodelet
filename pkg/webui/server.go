@@ -26,10 +26,13 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/gorilla/mux"
+	"github.com/jingkaihe/kodelet/pkg/conversationdisplay"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/fragments"
 	openairesponses "github.com/jingkaihe/kodelet/pkg/llm/openai/responses"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
+	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -190,6 +193,7 @@ func (s *Server) setupRoutes() {
 	// API routes
 	api := s.router.PathPrefix("/api").Subrouter()
 	api.HandleFunc("/chat/settings", s.handleGetChatSettings).Methods("GET")
+	api.HandleFunc("/chat/slash-commands", s.handleGetSlashCommands).Methods("GET")
 	api.HandleFunc("/chat/cwd-suggestions", s.handleGetCWDHints).Methods("GET")
 	api.HandleFunc("/git/diff", s.handleGetGitDiff).Methods("GET")
 	api.HandleFunc("/terminal/ws", s.handleTerminalWebsocket).Methods("GET")
@@ -910,6 +914,10 @@ type ChatSettingsResponse struct {
 	DefaultCWD     string              `json:"defaultCWD,omitempty"`
 }
 
+type SlashCommandsResponse struct {
+	Commands []slashcommands.Command `json:"commands"`
+}
+
 type CWDHint struct {
 	Path string `json:"path"`
 }
@@ -1170,6 +1178,18 @@ func (s *Server) handleGetChatSettings(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
+func (s *Server) handleGetSlashCommands(w http.ResponseWriter, r *http.Request) {
+	processor, err := fragments.NewFragmentProcessor()
+	if err != nil {
+		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to initialize slash commands", err)
+		return
+	}
+
+	s.writeJSONResponse(w, SlashCommandsResponse{
+		Commands: slashcommands.List(r.Context(), processor),
+	})
+}
+
 func (s *Server) handleGetCWDHints(w http.ResponseWriter, r *http.Request) {
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
 	defaultCWD, err := s.defaultCWD()
@@ -1427,7 +1447,7 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Convert to web messages with tool call structure preserved
-	webMessages, err := s.convertToWebMessages(response.RawMessages, providerForRender, response.ToolResults)
+	webMessages, err := s.convertToWebMessages(response.RawMessages, providerForRender, response.Metadata, response.ToolResults)
 	if err != nil {
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to parse conversation messages", err)
 		return
@@ -1487,9 +1507,9 @@ func pendingSteerWebMessages(conversationID string) ([]WebMessage, error) {
 }
 
 // convertToWebMessages converts raw messages to web messages with tool call structure
-func (s *Server) convertToWebMessages(rawMessages json.RawMessage, provider string, toolResults map[string]tooltypes.StructuredToolResult) ([]WebMessage, error) {
+func (s *Server) convertToWebMessages(rawMessages json.RawMessage, provider string, metadata map[string]any, toolResults map[string]tooltypes.StructuredToolResult) ([]WebMessage, error) {
 	if provider == "openai-responses" {
-		return s.convertOpenAIResponsesToWebMessages(rawMessages, toolResults)
+		return s.convertOpenAIResponsesToWebMessages(rawMessages, metadata, toolResults)
 	}
 
 	var messages []WebMessage
@@ -1545,6 +1565,10 @@ func (s *Server) convertToWebMessages(rawMessages json.RawMessage, provider stri
 			}
 		}
 
+		if role == "user" {
+			webMsg.Content = applyWebContentDisplayOverrides(webMsg.Content, metadata)
+		}
+
 		// Skip empty messages (no content, no tool calls, and no thinking text)
 		// pretty much neglecting the user tool call feedback as it is covered by the toolresult block at
 		if isEmptyWebContent(webMsg.Content) && len(webMsg.ToolCalls) == 0 && webMsg.ThinkingText == "" {
@@ -1558,7 +1582,7 @@ func (s *Server) convertToWebMessages(rawMessages json.RawMessage, provider stri
 }
 
 // convertOpenAIResponsesToWebMessages converts OpenAI Responses API stored items into web messages.
-func (s *Server) convertOpenAIResponsesToWebMessages(rawMessages json.RawMessage, toolResults map[string]tooltypes.StructuredToolResult) ([]WebMessage, error) {
+func (s *Server) convertOpenAIResponsesToWebMessages(rawMessages json.RawMessage, metadata map[string]any, toolResults map[string]tooltypes.StructuredToolResult) ([]WebMessage, error) {
 	streamableMessages, err := openairesponses.StreamMessages(rawMessages, toolResults)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to parse OpenAI Responses messages")
@@ -1583,6 +1607,9 @@ func (s *Server) convertOpenAIResponsesToWebMessages(rawMessages json.RawMessage
 				}
 			} else {
 				webMsg.Content = msg.Content
+			}
+			if webMsg.Role == "user" {
+				webMsg.Content = applyWebContentDisplayOverrides(webMsg.Content, metadata)
 			}
 		case "thinking":
 			webMsg.ThinkingText = msg.Content
@@ -2108,6 +2135,34 @@ func normalizeWebContent(textParts []string, blocks []WebContentBlock) any {
 		return strings.Join(textParts, "\n")
 	}
 	return blocks
+}
+
+func applyWebContentDisplayOverrides(content any, metadata map[string]any) any {
+	if len(metadata) == 0 {
+		return content
+	}
+
+	switch value := content.(type) {
+	case string:
+		if override, ok := conversationdisplay.Lookup(metadata, value); ok {
+			return override.Display
+		}
+		return content
+	case []WebContentBlock:
+		for index, block := range value {
+			if block.Type != "text" || strings.TrimSpace(block.Text) == "" {
+				continue
+			}
+			if override, ok := conversationdisplay.Lookup(metadata, block.Text); ok {
+				blocks := make([]WebContentBlock, len(value))
+				copy(blocks, value)
+				blocks[index].Text = override.Display
+				return blocks
+			}
+		}
+	}
+
+	return content
 }
 
 func isEmptyWebContent(content any) bool {

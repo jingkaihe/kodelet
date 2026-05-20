@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/jingkaihe/kodelet/pkg/conversationdisplay"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -104,6 +105,28 @@ func TestStringCollectorHandler(t *testing.T) {
 	handler = &llmtypes.StringCollectorHandler{Silent: false}
 	handler.HandleToolUse("call-1", "test-tool", "test-input")
 	handler.HandleToolResult("call-1", "test-tool", tooltypes.BaseToolResult{Result: "test-result"})
+}
+
+func TestExtractMessagesAppliesDisplayOverrides(t *testing.T) {
+	expanded := "Full rendered recipe prompt"
+	metadata := conversationdisplay.AddSlashCommandOverride(nil, expanded, "/init focus", "init")
+	rawMessages := []byte(`[{"role":"user","content":[{"type":"text","text":"Full rendered recipe prompt"}]}]`)
+
+	messages, err := ExtractMessages("anthropic", rawMessages, metadata, nil)
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	assert.Equal(t, "/init focus", messages[0].Content)
+}
+
+func TestExtractConversationEntriesAppliesDisplayOverrides(t *testing.T) {
+	expanded := "Full rendered recipe prompt"
+	metadata := conversationdisplay.AddSlashCommandOverride(nil, expanded, "/init focus", "init")
+	rawMessages := []byte(`[{"role":"user","content":[{"type":"text","text":"Full rendered recipe prompt"}]}]`)
+
+	messages, err := ExtractConversationEntries("anthropic", rawMessages, metadata, nil)
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	assert.Equal(t, "/init focus", messages[0].Content)
 }
 
 // Integration test for SendMessageAndGetText with real Anthropic client

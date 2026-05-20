@@ -35,6 +35,7 @@ import type {
 	Conversation,
 	GitDiffResponse,
 	PendingImageAttachment,
+	SlashCommandOption,
 } from "../types";
 import {
 	cn,
@@ -111,6 +112,7 @@ const SUPPORTED_IMAGE_TYPES = new Set([
 	"image/gif",
 	"image/webp",
 ]);
+const MAX_SLASH_COMMAND_SUGGESTIONS = 8;
 
 const attachmentId = (): string =>
 	typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -227,6 +229,47 @@ const getRecentWorkspaces = (conversations: Conversation[]): string[] => {
 	return Array.from(workspaces);
 };
 
+const getSlashCommandQuery = (draft: string): string | null => {
+	const trimmedStart = draft.trimStart();
+	if (!trimmedStart.startsWith("/")) {
+		return null;
+	}
+
+	const withoutSlash = trimmedStart.slice(1);
+	if (withoutSlash.includes(" ")) {
+		return null;
+	}
+
+	return withoutSlash.toLowerCase();
+};
+
+const filterSlashCommands = (
+	commands: SlashCommandOption[],
+	draft: string,
+): SlashCommandOption[] => {
+	const query = getSlashCommandQuery(draft);
+	if (query === null) {
+		return [];
+	}
+
+	return commands
+		.filter((command) => {
+			if (!query) {
+				return true;
+			}
+			return (
+				command.name.toLowerCase().includes(query) ||
+				command.description.toLowerCase().includes(query)
+			);
+		})
+		.slice(0, MAX_SLASH_COMMAND_SUGGESTIONS);
+};
+
+const insertSlashCommand = (draft: string, commandName: string): string => {
+	const leadingWhitespace = draft.match(/^\s*/)?.[0] || "";
+	return `${leadingWhitespace}/${commandName} `;
+};
+
 const getWorkspaceLabelParts = (
 	workspace: string,
 ): { name: string; parent: string } => {
@@ -237,7 +280,8 @@ const getWorkspaceLabelParts = (
 			: trimmedWorkspace;
 	const pathParts = normalizedWorkspace.split("/").filter(Boolean);
 	const name = pathParts[pathParts.length - 1] || normalizedWorkspace || "/";
-	const parent = pathParts.length > 1 ? `/${pathParts.slice(0, -1).join("/")}` : "";
+	const parent =
+		pathParts.length > 1 ? `/${pathParts.slice(0, -1).join("/")}` : "";
 
 	return { name, parent };
 };
@@ -307,6 +351,8 @@ const ChatPage: React.FC = () => {
 	const [cwdSuggestionsOpen, setCwdSuggestionsOpen] = useState(false);
 	const [cwdSuggestionIndex, setCwdSuggestionIndex] = useState(-1);
 	const [draft, setDraft] = useState("");
+	const [slashCommands, setSlashCommands] = useState<SlashCommandOption[]>([]);
+	const [slashCommandIndex, setSlashCommandIndex] = useState(0);
 	const [sidebarLoading, setSidebarLoading] = useState(true);
 	const [conversationLoading, setConversationLoading] = useState(false);
 	const [conversationError, setConversationError] = useState<string | null>(
@@ -383,6 +429,15 @@ const ChatPage: React.FC = () => {
 			.catch((error) => {
 				console.error("Failed to load chat settings", error);
 			});
+
+		void apiService
+			.getSlashCommands()
+			.then((response) => {
+				setSlashCommands(response.commands || []);
+			})
+			.catch((error) => {
+				console.error("Failed to load slash commands", error);
+			});
 	}, [refreshConversations]);
 
 	useEffect(() => {
@@ -393,6 +448,20 @@ const ChatPage: React.FC = () => {
 			resumeControllerRef.current?.abort();
 		};
 	}, []);
+
+	const slashCommandSuggestions = useMemo(
+		() => filterSlashCommands(slashCommands, draft),
+		[draft, slashCommands],
+	);
+	const slashCommandSuggestionsOpen =
+		!sending &&
+		!steering &&
+		slashCommandIndex >= 0 &&
+		slashCommandSuggestions.length > 0;
+
+	useEffect(() => {
+		setSlashCommandIndex(0);
+	}, [draft, slashCommands]);
 
 	useEffect(() => {
 		viewedConversationIdRef.current = conversationId;
@@ -1014,7 +1083,8 @@ const ChatPage: React.FC = () => {
 							(viewedConversationIdRef.current === viewConversationIdAtStart ||
 								(!viewConversationIdAtStart &&
 									streamedConversationId &&
-									viewedConversationIdRef.current === streamedConversationId)) &&
+									viewedConversationIdRef.current ===
+										streamedConversationId)) &&
 							(viewConversationIdAtStart === null ||
 								!event.conversation_id ||
 								event.conversation_id === viewConversationIdAtStart);
@@ -1026,7 +1096,8 @@ const ChatPage: React.FC = () => {
 						if (event.kind === "conversation" && event.conversation_id) {
 							const streamedId = event.conversation_id;
 							const shouldUpdatePath =
-								!viewConversationIdAtStart && streamedId !== streamedConversationId;
+								!viewConversationIdAtStart &&
+								streamedId !== streamedConversationId;
 							streamedConversationId = streamedId;
 							setActiveConversationId(streamedId);
 							if (shouldUpdatePath) {
@@ -1083,8 +1154,8 @@ const ChatPage: React.FC = () => {
 
 			const finishedOnStartedConversation = Boolean(
 				!viewConversationIdAtStart &&
-				streamedConversationId &&
-				viewedConversationIdRef.current === streamedConversationId,
+					streamedConversationId &&
+					viewedConversationIdRef.current === streamedConversationId,
 			);
 
 			if (
@@ -1124,8 +1195,8 @@ const ChatPage: React.FC = () => {
 
 			const failedOnStartedConversation = Boolean(
 				!viewConversationIdAtStart &&
-				streamedConversationId &&
-				viewedConversationIdRef.current === streamedConversationId,
+					streamedConversationId &&
+					viewedConversationIdRef.current === streamedConversationId,
 			);
 
 			if (
@@ -1147,8 +1218,8 @@ const ChatPage: React.FC = () => {
 				viewedConversationIdRef.current === viewConversationIdAtStart ||
 				Boolean(
 					!viewConversationIdAtStart &&
-					streamedConversationId &&
-					viewedConversationIdRef.current === streamedConversationId,
+						streamedConversationId &&
+						viewedConversationIdRef.current === streamedConversationId,
 				);
 
 			if (
@@ -1166,6 +1237,47 @@ const ChatPage: React.FC = () => {
 	const handleDraftKeyDown = (
 		event: React.KeyboardEvent<HTMLTextAreaElement>,
 	) => {
+		if (slashCommandSuggestionsOpen && slashCommandSuggestions.length > 0) {
+			if (event.key === "ArrowDown") {
+				event.preventDefault();
+				setSlashCommandIndex((current) =>
+					current >= slashCommandSuggestions.length - 1 || current < 0
+						? 0
+						: current + 1,
+				);
+				return;
+			}
+
+			if (event.key === "ArrowUp") {
+				event.preventDefault();
+				setSlashCommandIndex((current) =>
+					current <= 0 ? slashCommandSuggestions.length - 1 : current - 1,
+				);
+				return;
+			}
+
+			if (event.key === "Tab" || event.key === "Enter") {
+				event.preventDefault();
+				const command =
+					slashCommandSuggestions[
+						slashCommandIndex >= 0 ? slashCommandIndex : 0
+					] || slashCommandSuggestions[0];
+				if (command) {
+					setDraft((currentDraft) =>
+						insertSlashCommand(currentDraft, command.name),
+					);
+					setSlashCommandIndex(0);
+				}
+				return;
+			}
+
+			if (event.key === "Escape") {
+				event.preventDefault();
+				setSlashCommandIndex(-1);
+				return;
+			}
+		}
+
 		if (event.key === "Enter" && event.shiftKey) {
 			event.preventDefault();
 			void handleSubmit();
@@ -1380,9 +1492,7 @@ const ChatPage: React.FC = () => {
 		) {
 			event.preventDefault();
 			const suggestion =
-				cwdSuggestions[
-					cwdSuggestionIndex >= 0 ? cwdSuggestionIndex : 0
-				];
+				cwdSuggestions[cwdSuggestionIndex >= 0 ? cwdSuggestionIndex : 0];
 			if (suggestion) {
 				applyCwdSuggestion(suggestion.path);
 			}
@@ -1482,31 +1592,39 @@ const ChatPage: React.FC = () => {
 		const tokenParts: string[] = [];
 
 		if (inputTokens > 0) {
-			tokenParts.push(`in ${Intl.NumberFormat("en-US", {
-				notation: inputTokens >= 1000 ? "compact" : "standard",
-				maximumFractionDigits: inputTokens >= 1000 ? 1 : 0,
-			}).format(inputTokens)}`);
+			tokenParts.push(
+				`in ${Intl.NumberFormat("en-US", {
+					notation: inputTokens >= 1000 ? "compact" : "standard",
+					maximumFractionDigits: inputTokens >= 1000 ? 1 : 0,
+				}).format(inputTokens)}`,
+			);
 		}
 
 		if (outputTokens > 0) {
-			tokenParts.push(`out ${Intl.NumberFormat("en-US", {
-				notation: outputTokens >= 1000 ? "compact" : "standard",
-				maximumFractionDigits: outputTokens >= 1000 ? 1 : 0,
-			}).format(outputTokens)}`);
+			tokenParts.push(
+				`out ${Intl.NumberFormat("en-US", {
+					notation: outputTokens >= 1000 ? "compact" : "standard",
+					maximumFractionDigits: outputTokens >= 1000 ? 1 : 0,
+				}).format(outputTokens)}`,
+			);
 		}
 
 		if (cacheReadTokens > 0) {
-			tokenParts.push(`cr ${Intl.NumberFormat("en-US", {
-				notation: cacheReadTokens >= 1000 ? "compact" : "standard",
-				maximumFractionDigits: cacheReadTokens >= 1000 ? 1 : 0,
-			}).format(cacheReadTokens)}`);
+			tokenParts.push(
+				`cr ${Intl.NumberFormat("en-US", {
+					notation: cacheReadTokens >= 1000 ? "compact" : "standard",
+					maximumFractionDigits: cacheReadTokens >= 1000 ? 1 : 0,
+				}).format(cacheReadTokens)}`,
+			);
 		}
 
 		if (cacheWriteTokens > 0) {
-			tokenParts.push(`cw ${Intl.NumberFormat("en-US", {
-				notation: cacheWriteTokens >= 1000 ? "compact" : "standard",
-				maximumFractionDigits: cacheWriteTokens >= 1000 ? 1 : 0,
-			}).format(cacheWriteTokens)}`);
+			tokenParts.push(
+				`cw ${Intl.NumberFormat("en-US", {
+					notation: cacheWriteTokens >= 1000 ? "compact" : "standard",
+					maximumFractionDigits: cacheWriteTokens >= 1000 ? 1 : 0,
+				}).format(cacheWriteTokens)}`,
+			);
 		}
 
 		if (tokenParts.length > 0) {
@@ -1542,7 +1660,9 @@ const ChatPage: React.FC = () => {
 		setGitDiffError(null);
 
 		try {
-			const response = await apiService.getGitDiff(currentCWDLabel || undefined);
+			const response = await apiService.getGitDiff(
+				currentCWDLabel || undefined,
+			);
 			setGitDiff(response);
 		} catch (error) {
 			const message =
@@ -1560,7 +1680,10 @@ const ChatPage: React.FC = () => {
 	};
 
 	const newChatContextEditor = (
-		<div className="new-chat-context-panel" data-testid="new-chat-context-panel">
+		<div
+			className="new-chat-context-panel"
+			data-testid="new-chat-context-panel"
+		>
 			<div className="new-chat-dialog-grid">
 				<label className="new-chat-field">
 					<span className="composer-profile-label">Profile</span>
@@ -1677,11 +1800,16 @@ const ChatPage: React.FC = () => {
 										title={workspace}
 										type="button"
 									>
-										<span className="new-chat-recent-workspace-icon" aria-hidden="true">
+										<span
+											className="new-chat-recent-workspace-icon"
+											aria-hidden="true"
+										>
 											↳
 										</span>
 										<span className="new-chat-recent-workspace-text">
-											<span className="new-chat-recent-workspace-name">{name}</span>
+											<span className="new-chat-recent-workspace-name">
+												{name}
+											</span>
 											{parent ? (
 												<span className="new-chat-recent-workspace-parent">
 													{parent}
@@ -1713,7 +1841,9 @@ const ChatPage: React.FC = () => {
 	return (
 		<div className="h-[100dvh] bg-transparent">
 			<GitDiffModal
-				cwdLabel={currentCWDLabel || chatSettings.defaultCWD || "Default directory"}
+				cwdLabel={
+					currentCWDLabel || chatSettings.defaultCWD || "Default directory"
+				}
 				error={gitDiffError}
 				gitDiff={gitDiff}
 				loading={gitDiffLoading}
@@ -1724,7 +1854,9 @@ const ChatPage: React.FC = () => {
 				}}
 			/>
 			<TerminalModal
-				cwdLabel={currentCWDLabel || chatSettings.defaultCWD || "Default directory"}
+				cwdLabel={
+					currentCWDLabel || chatSettings.defaultCWD || "Default directory"
+				}
 				open={terminalOpen}
 				onClose={() => setTerminalOpen(false)}
 			/>
@@ -1780,26 +1912,26 @@ const ChatPage: React.FC = () => {
 							{ "--sidebar-width": `${sidebarWidth}px` } as React.CSSProperties
 						}
 					>
-								<ChatSidebar
-									activeConversationId={conversationId}
-									conversations={conversations}
-									disabled={!canStartNewChat}
-									loading={sidebarLoading}
-									runningConversationId={sending ? activeConversationId : null}
-									onDeleteConversation={handleDeleteConversation}
-									onForkConversation={handleForkConversation}
-									onHide={handleSidebarToggle}
-									onNewChat={handleNewChat}
-									onSelectConversation={handleSelectConversation}
-								/>
+						<ChatSidebar
+							activeConversationId={conversationId}
+							conversations={conversations}
+							disabled={!canStartNewChat}
+							loading={sidebarLoading}
+							runningConversationId={sending ? activeConversationId : null}
+							onDeleteConversation={handleDeleteConversation}
+							onForkConversation={handleForkConversation}
+							onHide={handleSidebarToggle}
+							onNewChat={handleNewChat}
+							onSelectConversation={handleSelectConversation}
+						/>
 
 						<div
-								aria-label="Resize sidebar"
-								aria-orientation="vertical"
-								className={cn(
-									"sidebar-splitter absolute bottom-0 right-0 top-0 z-10 hidden translate-x-1/2 cursor-col-resize items-center justify-center lg:flex",
-									isResizingSidebar && "is-resizing",
-								)}
+							aria-label="Resize sidebar"
+							aria-orientation="vertical"
+							className={cn(
+								"sidebar-splitter absolute bottom-0 right-0 top-0 z-10 hidden translate-x-1/2 cursor-col-resize items-center justify-center lg:flex",
+								isResizingSidebar && "is-resizing",
+							)}
 							data-testid="chat-sidebar-resizer"
 							onDoubleClick={handleSidebarResizeDoubleClick}
 							onMouseDown={handleSidebarResizeStart}
@@ -1826,7 +1958,11 @@ const ChatPage: React.FC = () => {
 									onClick={handleSidebarToggle}
 									type="button"
 								>
-									<PanelLeftOpen aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
+									<PanelLeftOpen
+										aria-hidden="true"
+										className="h-4 w-4"
+										strokeWidth={1.9}
+									/>
 								</button>
 							</div>
 						</div>
@@ -1838,7 +1974,11 @@ const ChatPage: React.FC = () => {
 							onClick={handleSidebarToggle}
 							type="button"
 						>
-							<PanelLeftOpen aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
+							<PanelLeftOpen
+								aria-hidden="true"
+								className="h-4 w-4"
+								strokeWidth={1.9}
+							/>
 						</button>
 					</>
 				) : null}
@@ -1917,7 +2057,7 @@ const ChatPage: React.FC = () => {
 									type="file"
 								/>
 
-							{attachments.length > 0 ? (
+								{attachments.length > 0 ? (
 									<div className="mb-2.5 flex flex-wrap gap-2.5 px-2.5 pt-1.5">
 										{attachments.map((attachment) => (
 											<div
@@ -1940,79 +2080,144 @@ const ChatPage: React.FC = () => {
 											</div>
 										))}
 									</div>
-							) : null}
+								) : null}
 
-							<textarea
-								className={cn(
-									"composer-editor",
-									composerExpanded && "composer-editor-expanded",
-								)}
-								data-testid="composer-textarea"
-								disabled={steering}
-								onChange={(event) => setDraft(event.target.value)}
-								onKeyDown={handleDraftKeyDown}
-								onPaste={handlePaste}
-								placeholder={
-									sending
-										? !hasActiveConversationTarget
-											? "Waiting for conversation to start…"
-										: canSteerActiveConversation
-											? "Steer the active conversation…"
-											: "Add your guidance here..."
-										: "Ask kodelet anything..."
-								}
-								value={draft}
-							/>
+								{slashCommandSuggestionsOpen ? (
+									<div
+										className="composer-slash-suggestions"
+										data-testid="slash-command-suggestions"
+									>
+										{slashCommandSuggestions.map((command, index) => (
+											<button
+												key={command.name}
+												className={cn(
+													"composer-slash-suggestion",
+													index === slashCommandIndex && "is-active",
+												)}
+												onClick={() => {
+													setDraft((currentDraft) =>
+														insertSlashCommand(currentDraft, command.name),
+													);
+													setSlashCommandIndex(0);
+												}}
+												onMouseDown={(event) => event.preventDefault()}
+												type="button"
+											>
+												<span className="composer-slash-suggestion-command">
+													/{command.name}
+												</span>
+												<span className="composer-slash-suggestion-description">
+													{command.description}
+												</span>
+												{command.hint ? (
+													<span className="composer-slash-suggestion-hint">
+														{command.hint}
+													</span>
+												) : null}
+											</button>
+										))}
+									</div>
+								) : null}
+
+								<textarea
+									className={cn(
+										"composer-editor",
+										composerExpanded && "composer-editor-expanded",
+									)}
+									data-testid="composer-textarea"
+									disabled={steering}
+									onChange={(event) => setDraft(event.target.value)}
+									onKeyDown={handleDraftKeyDown}
+									onPaste={handlePaste}
+									placeholder={
+										sending
+											? !hasActiveConversationTarget
+												? "Waiting for conversation to start…"
+												: canSteerActiveConversation
+													? "Steer the active conversation…"
+													: "Add your guidance here..."
+											: "Ask kodelet anything..."
+									}
+									value={draft}
+								/>
 
 								<div className="border-t border-black/8 px-2.5 pt-2">
 									<div className="composer-footer-row">
-									<div className="composer-leading-actions">
-										<button
-											aria-label="Add image"
-											className="composer-icon-button"
-											disabled={(sending && !canSteerActiveConversation) || steering}
+										<div className="composer-leading-actions">
+											<button
+												aria-label="Add image"
+												className="composer-icon-button"
+												disabled={
+													(sending && !canSteerActiveConversation) || steering
+												}
 												onClick={() => fileInputRef.current?.click()}
 												type="button"
-										>
-											<ImageUp aria-hidden="true" className="h-4 w-4" strokeWidth={1.8} />
-										</button>
+											>
+												<ImageUp
+													aria-hidden="true"
+													className="h-4 w-4"
+													strokeWidth={1.8}
+												/>
+											</button>
 
-										<button
-											aria-label="Show git diff"
-											className="composer-icon-button"
-											data-testid="composer-git-diff-toggle"
-											onClick={handleOpenGitDiff}
-											title="Show git diff"
-											type="button"
-										>
-											<GitCompareArrows aria-hidden="true" className="h-4 w-4" strokeWidth={1.8} />
-										</button>
+											<button
+												aria-label="Show git diff"
+												className="composer-icon-button"
+												data-testid="composer-git-diff-toggle"
+												onClick={handleOpenGitDiff}
+												title="Show git diff"
+												type="button"
+											>
+												<GitCompareArrows
+													aria-hidden="true"
+													className="h-4 w-4"
+													strokeWidth={1.8}
+												/>
+											</button>
 
-										<button
-											aria-label="Open terminal"
-											className="composer-icon-button"
-											data-testid="composer-terminal-toggle"
-											onClick={() => setTerminalOpen(true)}
-											title="Open terminal"
-											type="button"
-										>
-											<SquareTerminal aria-hidden="true" className="h-4 w-4" strokeWidth={1.8} />
-										</button>
+											<button
+												aria-label="Open terminal"
+												className="composer-icon-button"
+												data-testid="composer-terminal-toggle"
+												onClick={() => setTerminalOpen(true)}
+												title="Open terminal"
+												type="button"
+											>
+												<SquareTerminal
+													aria-hidden="true"
+													className="h-4 w-4"
+													strokeWidth={1.8}
+												/>
+											</button>
 
-										<button
-											aria-label={composerExpanded ? "Restore composer" : "Expand composer"}
-											aria-pressed={composerExpanded}
+											<button
+												aria-label={
+													composerExpanded
+														? "Restore composer"
+														: "Expand composer"
+												}
+												aria-pressed={composerExpanded}
 												className="composer-icon-button"
 												data-testid="composer-expand-toggle"
-												onClick={() => setComposerExpanded((currentValue) => !currentValue)}
+												onClick={() =>
+													setComposerExpanded((currentValue) => !currentValue)
+												}
 												type="button"
-										>
-											{composerExpanded ? (
-												<Minimize2 aria-hidden="true" className="h-4 w-4" strokeWidth={1.8} />
-											) : (
-												<Maximize2 aria-hidden="true" className="h-4 w-4" strokeWidth={1.8} />
-											)}
-										</button>
+											>
+												{composerExpanded ? (
+													<Minimize2
+														aria-hidden="true"
+														className="h-4 w-4"
+														strokeWidth={1.8}
+													/>
+												) : (
+													<Maximize2
+														aria-hidden="true"
+														className="h-4 w-4"
+														strokeWidth={1.8}
+													/>
+												)}
+											</button>
 										</div>
 
 										<div className="composer-context-cluster">
@@ -2034,7 +2239,9 @@ const ChatPage: React.FC = () => {
 													disabled={sending || steering}
 													onClick={() => {
 														setNewChatProfileDraft(currentProfileLabel);
-														setCwdQuery(selectedCWD || chatSettings.defaultCWD || "");
+														setCwdQuery(
+															selectedCWD || chatSettings.defaultCWD || "",
+														);
 														setNewChatDialogOpen(true);
 													}}
 													type="button"
@@ -2048,53 +2255,55 @@ const ChatPage: React.FC = () => {
 												</button>
 											)}
 
-										<p className="composer-status-inline">Shift+Enter to send</p>
-									</div>
+											<p className="composer-status-inline">
+												Shift+Enter to send
+											</p>
+										</div>
 
 										<div className="composer-status-actions">
-										{sending ? (
-											<button
-												aria-label={stopActionLabel}
-												className="composer-action-icon-button composer-action-icon-button-stop"
-												disabled={!canStopActiveConversation}
-												onClick={handleStop}
-												title={stopActionLabel}
-												type="button"
-											>
-											<Square
-												aria-hidden="true"
-												className="composer-action-stop-icon"
-												fill="currentColor"
-												strokeWidth={0}
-											/>
-											</button>
-										) : null}
+											{sending ? (
+												<button
+													aria-label={stopActionLabel}
+													className="composer-action-icon-button composer-action-icon-button-stop"
+													disabled={!canStopActiveConversation}
+													onClick={handleStop}
+													title={stopActionLabel}
+													type="button"
+												>
+													<Square
+														aria-hidden="true"
+														className="composer-action-stop-icon"
+														fill="currentColor"
+														strokeWidth={0}
+													/>
+												</button>
+											) : null}
 
-										<button
-											className={cn(
-												"composer-action-icon-button composer-action-icon-button-submit",
-												steering ||
+											<button
+												className={cn(
+													"composer-action-icon-button composer-action-icon-button-submit",
+													steering ||
+														!canSubmit ||
+														(sending && !canSteerActiveConversation)
+														? "composer-action-icon-button-disabled"
+														: "composer-action-icon-button-ready",
+												)}
+												aria-label={submitActionLabel}
+												disabled={
+													steering ||
 													!canSubmit ||
 													(sending && !canSteerActiveConversation)
-													? "composer-action-icon-button-disabled"
-													: "composer-action-icon-button-ready",
-											)}
-											aria-label={submitActionLabel}
-											disabled={
-												steering ||
-												!canSubmit ||
-													(sending && !canSteerActiveConversation)
-											}
-											onClick={() => void handleSubmit()}
-											title={submitActionLabel}
-											type="button"
-										>
-											<ArrowUp
-												aria-hidden="true"
-												className="composer-action-submit-icon"
-												strokeWidth={3}
-											/>
-										</button>
+												}
+												onClick={() => void handleSubmit()}
+												title={submitActionLabel}
+												type="button"
+											>
+												<ArrowUp
+													aria-hidden="true"
+													className="composer-action-submit-icon"
+													strokeWidth={3}
+												/>
+											</button>
 										</div>
 									</div>
 								</div>

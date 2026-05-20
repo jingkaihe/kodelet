@@ -1,7 +1,9 @@
 package conversations
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -21,6 +23,28 @@ func TestNewConversationRecord(t *testing.T) {
 	// Test creation with generated ID
 	record = NewConversationRecord("")
 	assert.NotEmpty(t, record.ID, "ID should be generated")
+}
+
+func TestToSummaryAppliesDisplayOverride(t *testing.T) {
+	expanded := "This is the full recipe prompt"
+	key := fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(expanded)))
+	record := NewConversationRecord("test-id")
+	record.RawMessages = json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"` + expanded + `"}]}]`)
+	record.Metadata = map[string]any{
+		"message_display_overrides": map[string]any{
+			"v1": map[string]any{
+				key: map[string]any{
+					"display": "/init focus",
+					"kind":    "slash-command",
+					"command": "init",
+				},
+			},
+		},
+	}
+
+	summary := record.ToSummary()
+
+	assert.Equal(t, "/init focus", summary.FirstMessage)
 }
 
 func TestToSummary(t *testing.T) {

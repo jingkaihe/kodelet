@@ -20,6 +20,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
+	"github.com/jingkaihe/kodelet/pkg/conversationdisplay"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
@@ -777,6 +778,21 @@ func TestServer_handleGetChatSettings(t *testing.T) {
 	assert.Equal(t, "work", response.CurrentProfile)
 	require.NotEmpty(t, response.Profiles)
 	assert.Equal(t, "default", response.Profiles[0].Name)
+}
+
+func TestServer_handleGetSlashCommands(t *testing.T) {
+	server := &Server{router: mux.NewRouter()}
+	req := httptest.NewRequest("GET", "/api/chat/slash-commands", nil)
+	w := httptest.NewRecorder()
+
+	server.handleGetSlashCommands(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var response SlashCommandsResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	require.NotEmpty(t, response.Commands)
+	assert.NotEmpty(t, response.Commands[0].Name)
 }
 
 func TestServer_handleGetConversationPreservesImageContent(t *testing.T) {
@@ -1893,7 +1909,7 @@ func TestServer_convertToWebMessages(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			messages, err := server.convertToWebMessages(tt.rawMessages, tt.provider, tt.toolResults)
+			messages, err := server.convertToWebMessages(tt.rawMessages, tt.provider, nil, tt.toolResults)
 			require.NoError(t, err)
 			assert.Equal(t, tt.expectedMsgs, len(messages))
 
@@ -1917,6 +1933,25 @@ func TestServer_convertToWebMessages(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestServer_convertToWebMessagesAppliesDisplayOverride(t *testing.T) {
+	server := &Server{}
+	expandedPrompt := "Full rendered recipe prompt"
+	metadata := conversationdisplay.AddSlashCommandOverride(nil, expandedPrompt, "/init focus", "init")
+
+	messages, err := server.convertToWebMessages(
+		json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"Full rendered recipe prompt"}]}]`),
+		"anthropic",
+		metadata,
+		nil,
+	)
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	blocks, ok := messages[0].Content.([]WebContentBlock)
+	require.True(t, ok)
+	require.Len(t, blocks, 1)
+	assert.Equal(t, "/init focus", blocks[0].Text)
 }
 
 func TestServer_Close(t *testing.T) {

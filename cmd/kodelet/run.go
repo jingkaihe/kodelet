@@ -6,11 +6,13 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
+	"github.com/jingkaihe/kodelet/pkg/conversationdisplay"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/llm"
@@ -44,6 +46,7 @@ type RunConfig struct {
 	NoTools              bool              // Disable all tools (for simple query-response usage)
 	DisableFSSearchTools bool              // Disable filesystem search tools (glob_tool and grep_tool)
 	DisableSubagent      bool              // Disable the subagent tool and remove subagent-related system prompt context
+	DisplayOverride      string            // User-facing compact text for persisted display
 	Sysprompt            string            // Path to custom system prompt template file
 	SyspromptArgs        map[string]string // Arguments passed to custom system prompt template
 	ResultOnly           bool              // Only print the final agent message, no intermediate output or usage stats
@@ -80,7 +83,7 @@ func NewRunConfig() *RunConfig {
 	}
 }
 
-func processFragment(ctx context.Context, config *RunConfig, args []string) (string, *fragments.Metadata, error) {
+func processFragment(ctx context.Context, config *RunConfig, args []string) (string, string, *fragments.Metadata, error) {
 	var validDirs []string
 	for _, dir := range config.FragmentDirs {
 		trimmed := strings.TrimSpace(dir)
@@ -91,7 +94,7 @@ func processFragment(ctx context.Context, config *RunConfig, args []string) (str
 
 	fragmentProcessor, err := fragments.NewFragmentProcessor(fragments.WithAdditionalDirs(validDirs...))
 	if err != nil {
-		return "", nil, errors.Wrap(err, "failed to create fragment processor")
+		return "", "", nil, errors.Wrap(err, "failed to create fragment processor")
 	}
 
 	fragmentConfig := &fragments.Config{
@@ -101,7 +104,18 @@ func processFragment(ctx context.Context, config *RunConfig, args []string) (str
 
 	fragment, err := fragmentProcessor.LoadFragment(ctx, fragmentConfig)
 	if err != nil {
-		return "", nil, errors.Wrap(err, "failed to load fragment")
+		return "", "", nil, errors.Wrap(err, "failed to load fragment")
+	}
+
+	display := strings.TrimSpace(config.DisplayOverride)
+	if display == "" {
+		display = "/" + strings.TrimSpace(config.FragmentName)
+		if argDisplay := formatFragmentDisplayArgs(config.FragmentArgs); argDisplay != "" {
+			display += " " + argDisplay
+		}
+		if argsContent := strings.TrimSpace(strings.Join(args, " ")); argsContent != "" {
+			display += " " + argsContent
+		}
 	}
 
 	var query string
@@ -112,7 +126,43 @@ func processFragment(ctx context.Context, config *RunConfig, args []string) (str
 		query = fragment.Content
 	}
 
-	return query, &fragment.Metadata, nil
+	return query, display, &fragment.Metadata, nil
+}
+
+func formatFragmentDisplayArgs(args map[string]string) string {
+	if len(args) == 0 {
+		return ""
+	}
+
+	keys := make([]string, 0, len(args))
+	for key := range args {
+		if strings.TrimSpace(key) != "" {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		value := args[key]
+		if strings.ContainsAny(value, " \t\n\r\"") {
+			value = fmt.Sprintf("%q", value)
+		}
+		parts = append(parts, fmt.Sprintf("%s=%s", key, value))
+	}
+	return strings.Join(parts, " ")
+}
+
+func addRunDisplayOverride(thread llmtypes.Thread, query string, config *RunConfig) {
+	display := strings.TrimSpace(config.DisplayOverride)
+	if display == "" || strings.TrimSpace(query) == "" {
+		return
+	}
+
+	metadata := conversationdisplay.AddSlashCommandOverride(thread.GetMetadata(), query, display, config.FragmentName)
+	for key, value := range metadata {
+		thread.SetMetadataValue(key, value)
+	}
 }
 
 func getQueryFromStdinOrArgs(args []string) (string, error) {
@@ -313,7 +363,7 @@ var runCmd = &cobra.Command{
 		var err error
 
 		if config.FragmentName != "" {
-			query, fragmentMetadata, err = processFragment(ctx, config, args)
+			query, config.DisplayOverride, fragmentMetadata, err = processFragment(ctx, config, args)
 			if err != nil {
 				presenter.Error(err, "Failed to process fragment")
 				return
@@ -452,6 +502,7 @@ var runCmd = &cobra.Command{
 			thread.SetState(appState)
 			thread.SetConversationID(sessionID)
 			thread.EnablePersistence(ctx, !config.NoSave)
+			addRunDisplayOverride(thread, query, config)
 
 			streamer, closeFunc, err := llm.NewConversationStreamer(ctx)
 			if err != nil {
@@ -528,6 +579,7 @@ var runCmd = &cobra.Command{
 			}
 
 			thread.EnablePersistence(ctx, !config.NoSave)
+			addRunDisplayOverride(thread, query, config)
 
 			finalOutput, err := thread.SendMessage(ctx, query, handler, llmtypes.MessageOpt{
 				PromptCache:  true,
