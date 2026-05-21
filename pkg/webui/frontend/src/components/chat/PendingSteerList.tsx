@@ -17,7 +17,7 @@ const textForContent = (content: string | ContentBlock[]): string => {
   }
 
   return content
-    .filter((block) => block.type === 'text' || block.type === 'slash-command')
+    .filter((block) => block.type === 'text' || block.type === 'slash-command' || block.type === 'goal')
     .map((block) => block.text?.trim() || '')
     .filter(Boolean)
     .join('\n');

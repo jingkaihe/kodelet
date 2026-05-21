@@ -56,3 +56,12 @@ type ReadConversationInput struct {
 	ConversationID string `json:"conversation_id" jsonschema:"description=The ID of the saved conversation to read"`
 	Goal           string `json:"goal" jsonschema:"description=What information to extract from the conversation"`
 }
+
+// GetGoalInput defines the input parameters for the get_goal tool.
+type GetGoalInput struct{}
+
+// UpdateGoalInput defines the input parameters for the update_goal tool.
+type UpdateGoalInput struct {
+	Status string `json:"status" jsonschema:"description=Required goal status to set,enum=active,enum=paused,enum=complete,enum=blocked,enum=cleared"`
+	Reason string `json:"reason,omitempty" jsonschema:"description=Optional concise evidence for why the goal is complete or blocked"`
+}

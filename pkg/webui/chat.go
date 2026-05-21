@@ -9,9 +9,11 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	conversationservice "github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
+	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	llmbase "github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -134,7 +136,7 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 	llmConfig.MCPWorkspaceDir = workspaceDir
 	llmConfig.WorkingDirectory = resolvedCWD
 
-	message, slashExpansion, err := expandWebChatSlashCommand(ctx, message, resolvedCWD)
+	message, slashExpansion, goalUpdate, err := transformWebChatSlashCommand(ctx, message, resolvedCWD)
 	if err != nil {
 		return sessionID, err
 	}
@@ -158,6 +160,9 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 	thread.EnablePersistence(ctx, true)
 	if slashExpansion != nil {
 		addWebChatSlashCommandDisplay(thread, slashExpansion)
+	}
+	if goalUpdate != nil {
+		addWebChatGoalDisplay(thread, goalUpdate)
 	}
 
 	if err := sink.Send(ChatEvent{
@@ -420,6 +425,24 @@ func newWebFragmentProcessor(cwd string) (*fragments.Processor, error) {
 	return fragments.NewFragmentProcessor(fragments.WithDefaultDirsForCWD(cwd))
 }
 
+func transformWebChatSlashCommand(ctx context.Context, message string, cwd string) (string, *slashcommands.Expansion, *goals.CommandUpdate, error) {
+	command, args, found := slashcommands.Parse(message)
+	if !found {
+		return message, nil, nil, nil
+	}
+
+	goalUpdate, handled, err := goals.ParseSlashCommand(command, args, time.Now())
+	if handled {
+		if err != nil {
+			return "", nil, nil, err
+		}
+		return goalUpdate.ModelPrompt, nil, &goalUpdate, nil
+	}
+
+	message, expansion, err := expandWebChatSlashCommand(ctx, message, cwd)
+	return message, expansion, nil, err
+}
+
 func expandWebChatSlashCommand(ctx context.Context, message string, cwd string) (string, *slashcommands.Expansion, error) {
 	command, args, found := slashcommands.Parse(message)
 	if !found {
@@ -463,6 +486,18 @@ func addWebChatSlashCommandDisplay(thread llmtypes.Thread, expansion *slashcomma
 	}
 
 	metadata := conversationservice.AddSlashCommandDisplay(thread.GetMetadata(), expansion.Prompt, expansion.Display, expansion.Command)
+	for key, value := range metadata {
+		thread.SetMetadataValue(key, value)
+	}
+}
+
+func addWebChatGoalDisplay(thread llmtypes.Thread, update *goals.CommandUpdate) {
+	if thread == nil || update == nil {
+		return
+	}
+
+	thread.SetMetadataValue(goals.MetadataKey, update.Goal)
+	metadata := conversationservice.AddMessageDisplay(thread.GetMetadata(), update.ModelPrompt, update.Display, conversationservice.MessageDisplayKindGoal, goals.SlashCommandName)
 	for key, value := range metadata {
 		thread.SetMetadataValue(key, value)
 	}

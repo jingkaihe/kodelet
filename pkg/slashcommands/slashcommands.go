@@ -146,6 +146,24 @@ func parseUnquotedValue(s string, start int) (value string, nextPos int) {
 
 // List returns available slash commands from the fragment/recipe system.
 func List(ctx context.Context, processor *fragments.Processor) []Command {
+	commands := append([]Command{}, BuiltIns()...)
+	commands = append(commands, recipeCommands(ctx, processor)...)
+	return commands
+}
+
+// BuiltIns returns slash commands implemented by Kodelet rather than recipes.
+func BuiltIns() []Command {
+	return []Command{
+		{
+			Name:        "goal",
+			Description: "Set the active goal for this thread",
+			Hint:        "objective",
+			Placeholder: "/goal <objective>",
+		},
+	}
+}
+
+func recipeCommands(ctx context.Context, processor *fragments.Processor) []Command {
 	if processor == nil {
 		return nil
 	}
@@ -219,7 +237,7 @@ func BuildDisplay(command, args string) string {
 
 // AvailableRecipeNames returns a comma-separated list of available recipe names.
 func AvailableRecipeNames(ctx context.Context, processor *fragments.Processor) string {
-	commands := List(ctx, processor)
+	commands := recipeCommands(ctx, processor)
 	if len(commands) == 0 {
 		return "(none available)"
 	}

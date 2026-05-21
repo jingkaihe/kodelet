@@ -18,6 +18,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/steer"
@@ -191,6 +192,11 @@ func NewAnthropicThread(config llmtypes.Config) (*Thread, error) {
 
 // AddUserMessage adds a user message with optional images to the thread
 func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths ...string) {
+	if goals.IsContextText(message) {
+		t.messages = append(t.messages, anthropic.NewUserMessage(anthropic.NewTextBlock(message)))
+		return
+	}
+
 	contentBlocks := []anthropic.ContentBlockParamUnion{}
 
 	// Validate image count
@@ -361,6 +367,9 @@ OUTER:
 			// If no tools were used, check for hook follow-ups before stopping
 			if !toolsUsed {
 				if base.HandleAgentStopFollowUps(ctx, t.HookTrigger, t, handler) {
+					continue OUTER
+				}
+				if !t.Config.IsSubAgent && (maxTurns == 0 || turnCount < maxTurns) && base.HandleGoalAutoContinuation(ctx, t) {
 					continue OUTER
 				}
 
@@ -557,7 +566,7 @@ func (t *Thread) processMessageExchange(
 	messageParams := anthropic.MessageNewParams{
 		MaxTokens: int64(maxTokens),
 		System:    systemPromptBlocks,
-		Messages:  t.messages,
+		Messages:  appendGoalContextMessage(t.messages, t.GetMetadata()),
 		Model:     model,
 		Tools:     toAnthropicTools(t.tools(opt), t.useSubscription),
 	}
@@ -671,6 +680,37 @@ func (t *Thread) processMessageExchange(
 
 	// Return whether tools were used in this exchange
 	return finalOutput, toolUseCount > 0, nil
+}
+
+func appendGoalContextMessage(messages []anthropic.MessageParam, metadata map[string]any) []anthropic.MessageParam {
+	goalContext, ok := goals.ContextFromMetadata(metadata)
+	if !ok {
+		return messages
+	}
+	if anthropicMessagesContainGoalContext(messages, goalContext) {
+		return messages
+	}
+
+	injected := make([]anthropic.MessageParam, 0, len(messages)+1)
+	injected = append(injected, messages...)
+	injected = append(injected, anthropic.NewUserMessage(anthropic.NewTextBlock(goalContext)))
+	return injected
+}
+
+func anthropicMessagesContainGoalContext(messages []anthropic.MessageParam, goalContext string) bool {
+	for _, message := range messages {
+		if anthropicMessageIsGoalContext(message, goalContext) {
+			return true
+		}
+	}
+	return false
+}
+
+func anthropicMessageIsGoalContext(message anthropic.MessageParam, goalContext string) bool {
+	if message.Role != anthropic.MessageParamRoleUser || len(message.Content) != 1 || message.Content[0].OfText == nil {
+		return false
+	}
+	return strings.TrimSpace(message.Content[0].OfText.Text) == strings.TrimSpace(goalContext)
 }
 
 func anthropicToolResultBlock(toolUseID string, result tooltypes.ToolResult) anthropic.ContentBlockParamUnion {

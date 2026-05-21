@@ -16,6 +16,7 @@ import (
 	"github.com/avast/retry-go/v4"
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	openaipreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/openai"
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -216,6 +217,11 @@ func NewOpenAIThread(config llmtypes.Config) (*Thread, error) {
 
 // AddUserMessage adds a user message with optional images to the thread
 func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths ...string) {
+	if goals.IsContextText(message) {
+		t.messages = append(t.messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: message})
+		return
+	}
+
 	contentParts := []openai.ChatMessagePart{}
 
 	// Validate image count
@@ -366,6 +372,9 @@ OUTER:
 				if base.HandleAgentStopFollowUps(ctx, t.HookTrigger, t, handler) {
 					continue OUTER
 				}
+				if !t.Config.IsSubAgent && (maxTurns == 0 || turnCount < maxTurns) && base.HandleGoalAutoContinuation(ctx, t) {
+					continue OUTER
+				}
 
 				break OUTER
 			}
@@ -409,7 +418,7 @@ func (t *Thread) processMessageExchange(
 	// Prepare completion parameters
 	requestParams := openai.ChatCompletionRequest{
 		Model:     model,
-		Messages:  t.messages,
+		Messages:  appendGoalContextChatMessages(t.messages, t.GetMetadata()),
 		MaxTokens: maxTokens,
 	}
 
@@ -598,6 +607,41 @@ func openAIChatFollowupImageMessage(parts []openai.ChatMessagePart) *openai.Chat
 		Role:         openai.ChatMessageRoleUser,
 		MultiContent: slices.Clone(parts),
 	}
+}
+
+func appendGoalContextChatMessages(messages []openai.ChatCompletionMessage, metadata map[string]any) []openai.ChatCompletionMessage {
+	goalContext, ok := goals.ContextFromMetadata(metadata)
+	if !ok {
+		return messages
+	}
+	if openAIChatMessagesContainGoalContext(messages, goalContext) {
+		return messages
+	}
+
+	goalMessage := openai.ChatCompletionMessage{
+		Role:    openai.ChatMessageRoleUser,
+		Content: goalContext,
+	}
+	injected := make([]openai.ChatCompletionMessage, 0, len(messages)+1)
+	injected = append(injected, messages...)
+	injected = append(injected, goalMessage)
+	return injected
+}
+
+func openAIChatMessagesContainGoalContext(messages []openai.ChatCompletionMessage, goalContext string) bool {
+	for _, message := range messages {
+		if openAIChatMessageIsGoalContext(message, goalContext) {
+			return true
+		}
+	}
+	return false
+}
+
+func openAIChatMessageIsGoalContext(message openai.ChatCompletionMessage, goalContext string) bool {
+	if message.Role != openai.ChatMessageRoleUser {
+		return false
+	}
+	return strings.TrimSpace(message.Content) == strings.TrimSpace(goalContext)
 }
 
 func openAIChatToolResultMessages(toolResults []openai.ChatCompletionMessage, followupParts []openai.ChatMessagePart) []openai.ChatCompletionMessage {

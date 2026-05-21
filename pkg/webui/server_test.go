@@ -1982,6 +1982,23 @@ func TestServer_convertToWebMessagesAppliesMessageDisplay(t *testing.T) {
 	assert.Equal(t, "slash-command", blocks[0].Type)
 	assert.Equal(t, "/init focus", blocks[0].Text)
 	assert.Equal(t, "init", blocks[0].Command)
+
+	goalPrompt := "<goal_context>\nContinue working toward the active thread goal.\n</goal_context>"
+	metadata = conversations.AddMessageDisplay(nil, goalPrompt, "Objective: find cores", conversations.MessageDisplayKindGoal, "goal")
+	messages, err = server.convertToWebMessages(
+		json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"<goal_context>\nContinue working toward the active thread goal.\n</goal_context>"}]}]`),
+		"anthropic",
+		metadata,
+		nil,
+	)
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	blocks, ok = messages[0].Content.([]WebContentBlock)
+	require.True(t, ok)
+	require.Len(t, blocks, 1)
+	assert.Equal(t, "goal", blocks[0].Type)
+	assert.Equal(t, "Objective: find cores", blocks[0].Text)
+	assert.Equal(t, "goal", blocks[0].Command)
 }
 
 func TestServer_Close(t *testing.T) {

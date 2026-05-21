@@ -27,6 +27,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/gorilla/mux"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/goals"
 	openairesponses "github.com/jingkaihe/kodelet/pkg/llm/openai/responses"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
@@ -2152,6 +2153,9 @@ func applyWebContentDisplay(content any, metadata map[string]any) any {
 		if display, ok := conversations.LookupMessageDisplay(metadata, value); ok {
 			return []WebContentBlock{webContentBlockForDisplay(display)}
 		}
+		if goals.IsContextText(value) {
+			return ""
+		}
 		return content
 	case []WebContentBlock:
 		for index, block := range value {
@@ -2164,6 +2168,12 @@ func applyWebContentDisplay(content any, metadata map[string]any) any {
 				blocks[index] = webContentBlockForDisplay(display)
 				return blocks
 			}
+			if goals.IsContextText(block.Text) {
+				blocks := make([]WebContentBlock, len(value))
+				copy(blocks, value)
+				blocks[index] = WebContentBlock{Type: "text"}
+				return blocks
+			}
 		}
 	}
 
@@ -2171,9 +2181,9 @@ func applyWebContentDisplay(content any, metadata map[string]any) any {
 }
 
 func webContentBlockForDisplay(display conversations.MessageDisplay) WebContentBlock {
-	if display.Kind == conversations.MessageDisplayKindSlashCommand {
+	if display.Kind == conversations.MessageDisplayKindSlashCommand || display.Kind == conversations.MessageDisplayKindGoal {
 		return WebContentBlock{
-			Type:    conversations.MessageDisplayKindSlashCommand,
+			Type:    display.Kind,
 			Text:    display.Text,
 			Command: display.Command,
 		}

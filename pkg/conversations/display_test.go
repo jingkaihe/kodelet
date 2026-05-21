@@ -22,6 +22,16 @@ func TestAddSlashCommandDisplayAndLookup(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestAddMessageDisplayGoalAndLookup(t *testing.T) {
+	metadata := AddMessageDisplay(nil, "Objective: find cores", "/goal find cores", MessageDisplayKindGoal, "goal")
+
+	display, ok := LookupMessageDisplay(metadata, "Objective: find cores")
+	require.True(t, ok)
+	assert.Equal(t, "/goal find cores", display.Text)
+	assert.Equal(t, MessageDisplayKindGoal, display.Kind)
+	assert.Equal(t, "goal", display.Command)
+}
+
 func TestLookupMessageDisplayReadsLegacyMetadata(t *testing.T) {
 	key := MessageDisplayKey("full recipe prompt")
 	metadata := map[string]any{
@@ -89,4 +99,13 @@ func TestApplyDisplayToLLMMessages(t *testing.T) {
 	got := ApplyDisplayToLLMMessages(messages, metadata)
 	assert.Equal(t, "/init focus", got[0].Content)
 	assert.Equal(t, "full recipe prompt", got[1].Content)
+}
+
+func TestApplyDisplayHidesGoalContextMessages(t *testing.T) {
+	goalContext := "<goal_context>\nContinue working.\n</goal_context>"
+	streamable := ApplyDisplayToStreamableMessages([]StreamableMessage{{Kind: "text", Role: "user", Content: goalContext}}, nil)
+	assert.Equal(t, "", streamable[0].Content)
+
+	llmMessages := ApplyDisplayToLLMMessages([]llmtypes.Message{{Role: "user", Content: goalContext}}, nil)
+	assert.Equal(t, "", llmMessages[0].Content)
 }

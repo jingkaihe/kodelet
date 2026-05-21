@@ -17,6 +17,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/llm/openai/copilotdefaults"
 	codexpreset "github.com/jingkaihe/kodelet/pkg/llm/openai/preset/codex"
@@ -177,6 +178,17 @@ func (t *Thread) Provider() string {
 
 // AddUserMessage adds a user message with optional images to the thread.
 func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths ...string) {
+	if goals.IsContextText(message) {
+		inputItem := responses.ResponseInputItemUnionParam{
+			OfMessage: &responses.EasyInputMessageParam{
+				Role:    responses.EasyInputMessageRoleUser,
+				Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(message)},
+			},
+		}
+		t.addInputItem(inputItem, message)
+		return
+	}
+
 	// Validate image count
 	if len(imagePaths) > base.MaxImageCount {
 		logger.G(ctx).Warnf("Too many images provided (%d), maximum is %d. Only processing first %d images",
@@ -224,16 +236,19 @@ func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths 
 		}
 	}
 
-	// Add to inputItems (for API calls) and storedItems (for persistence)
+	t.addInputItem(inputItem, message)
+}
+
+func (t *Thread) addInputItem(inputItem responses.ResponseInputItemUnionParam, content string) {
 	t.inputItems = append(t.inputItems, inputItem)
 	rawItem, err := json.Marshal(inputItem)
 	if err != nil {
-		logger.G(ctx).WithError(err).Warn("failed to marshal OpenAI Responses user input item for persistence")
+		logger.G(context.Background()).WithError(err).Warn("failed to marshal OpenAI Responses user input item for persistence")
 	}
 	t.storedItems = append(t.storedItems, StoredInputItem{
 		Type:    "message",
 		Role:    "user",
-		Content: message,
+		Content: content,
 		RawItem: rawItem,
 	})
 }
@@ -346,6 +361,9 @@ OUTER:
 				if base.HandleAgentStopFollowUps(ctx, t.HookTrigger, t, handler) {
 					continue OUTER
 				}
+				if !t.Config.IsSubAgent && (maxTurns == 0 || turnCount < maxTurns) && base.HandleGoalAutoContinuation(ctx, t) {
+					continue OUTER
+				}
 
 				break OUTER
 			}
@@ -409,6 +427,59 @@ func (t *Thread) applyCodexRestrictions(params *responses.ResponseNewParams) {
 	}
 }
 
+func appendGoalContextInputItems(inputItems []responses.ResponseInputItemUnionParam, metadata map[string]any) []responses.ResponseInputItemUnionParam {
+	goalContext, ok := goals.ContextFromMetadata(metadata)
+	if !ok {
+		return inputItems
+	}
+	if responseInputItemsContainGoalContext(inputItems, goalContext) {
+		return inputItems
+	}
+
+	goalItem := responses.ResponseInputItemUnionParam{
+		OfMessage: &responses.EasyInputMessageParam{
+			Role:    responses.EasyInputMessageRoleUser,
+			Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(goalContext)},
+		},
+	}
+	injected := make([]responses.ResponseInputItemUnionParam, 0, len(inputItems)+1)
+	injected = append(injected, inputItems...)
+	injected = append(injected, goalItem)
+	return injected
+}
+
+func responseInputItemsContainGoalContext(inputItems []responses.ResponseInputItemUnionParam, goalContext string) bool {
+	for _, item := range inputItems {
+		if responseInputItemIsGoalContext(item, goalContext) {
+			return true
+		}
+	}
+	return false
+}
+
+func responseInputItemIsGoalContext(item responses.ResponseInputItemUnionParam, goalContext string) bool {
+	if item.OfMessage == nil || item.OfMessage.Role != responses.EasyInputMessageRoleUser {
+		return false
+	}
+	return strings.TrimSpace(extractResponseInputMessageText(item.OfMessage)) == strings.TrimSpace(goalContext)
+}
+
+func extractResponseInputMessageText(message *responses.EasyInputMessageParam) string {
+	if message == nil {
+		return ""
+	}
+	if message.Content.OfString.Valid() {
+		return message.Content.OfString.Value
+	}
+	var builder strings.Builder
+	for _, part := range message.Content.OfInputItemContentList {
+		if part.OfInputText != nil {
+			builder.WriteString(part.OfInputText.Text)
+		}
+	}
+	return builder.String()
+}
+
 // processMessageExchange handles a single message exchange with the Responses API.
 func (t *Thread) processMessageExchange(
 	ctx context.Context,
@@ -442,7 +513,7 @@ func (t *Thread) processMessageExchange(
 	// not use previous_response_id here.
 	params := responses.ResponseNewParams{
 		Model:          model,
-		Input:          responses.ResponseNewParamsInputUnion{OfInputItemList: t.inputItems},
+		Input:          responses.ResponseNewParamsInputUnion{OfInputItemList: appendGoalContextInputItems(t.inputItems, t.GetMetadata())},
 		Instructions:   param.NewOpt(systemPrompt),
 		Tools:          tools,
 		Store:          param.NewOpt(false),

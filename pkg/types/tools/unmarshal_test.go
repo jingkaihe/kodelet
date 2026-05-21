@@ -89,7 +89,7 @@ func TestMetadataTypeRegistry_Completeness(t *testing.T) {
 		"grep_tool", "glob_tool", "bash", "mcp_tool",
 		"view_image", "subagent",
 		"openai_web_search",
-		"web_fetch", "read_conversation", "custom_tool",
+		"web_fetch", "read_conversation", "get_goal", "update_goal", "custom_tool",
 		"code_execution", "skill", "blocked",
 	}
 

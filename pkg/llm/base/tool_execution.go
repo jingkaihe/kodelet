@@ -49,7 +49,7 @@ func ExecuteTool(
 			}
 			ctx = tools.ContextWithToolContext(
 				ctx,
-				tools.ToolContextFromThreadState(thread.GetConfig(), thread.GetConversationID(), workingDir),
+				tools.ToolContextFromThreadState(thread.GetConfig(), thread.GetConversationID(), workingDir, thread),
 			)
 		}
 		result = tools.RunTool(ctx, state, toolName, effectiveInput)

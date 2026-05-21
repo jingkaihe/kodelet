@@ -9,17 +9,25 @@ import (
 
 type toolContextKey struct{}
 
+// MetadataStore exposes provider-neutral conversation metadata to tools that
+// need to inspect or mutate thread-level runtime state.
+type MetadataStore interface {
+	GetMetadata() map[string]any
+	SetMetadataValue(key string, value any)
+}
+
 type ToolContext struct {
 	ConversationID string
 	WorkingDir     string
 	Provider       string
 	Model          string
 	Profile        string
+	MetadataStore  MetadataStore
 }
 
 func ContextWithToolContext(ctx context.Context, toolContext ToolContext) context.Context {
 	toolContext = normalizeToolContext(toolContext)
-	if toolContext == (ToolContext{}) {
+	if toolContextIsEmpty(toolContext) {
 		return ctx
 	}
 	return context.WithValue(ctx, toolContextKey{}, toolContext)
@@ -29,13 +37,14 @@ func ContextWithConversationID(ctx context.Context, conversationID string) conte
 	return ContextWithToolContext(ctx, ToolContext{ConversationID: conversationID})
 }
 
-func ToolContextFromThreadState(threadConfig llmtypes.Config, conversationID string, stateWorkingDir string) ToolContext {
+func ToolContextFromThreadState(threadConfig llmtypes.Config, conversationID string, stateWorkingDir string, metadataStore MetadataStore) ToolContext {
 	return normalizeToolContext(ToolContext{
 		ConversationID: conversationID,
 		WorkingDir:     firstNonEmpty(stateWorkingDir, threadConfig.WorkingDirectory),
 		Provider:       threadConfig.Provider,
 		Model:          threadConfig.Model,
 		Profile:        threadConfig.Profile,
+		MetadataStore:  metadataStore,
 	})
 }
 
@@ -51,6 +60,15 @@ func normalizeToolContext(toolContext ToolContext) ToolContext {
 	toolContext.Model = strings.TrimSpace(toolContext.Model)
 	toolContext.Profile = strings.TrimSpace(toolContext.Profile)
 	return toolContext
+}
+
+func toolContextIsEmpty(toolContext ToolContext) bool {
+	return toolContext.ConversationID == "" &&
+		toolContext.WorkingDir == "" &&
+		toolContext.Provider == "" &&
+		toolContext.Model == "" &&
+		toolContext.Profile == "" &&
+		toolContext.MetadataStore == nil
 }
 
 func firstNonEmpty(values ...string) string {

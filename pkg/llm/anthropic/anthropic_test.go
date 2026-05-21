@@ -12,6 +12,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/auth"
+	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/stretchr/testify/assert"
@@ -22,6 +23,51 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
+
+func TestAppendGoalContextMessageAppendsHiddenUserContext(t *testing.T) {
+	metadata := map[string]any{goals.MetadataKey: goals.New("find server cores", time.Now())}
+	messages := []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("hello"))}
+
+	got := appendGoalContextMessage(messages, metadata)
+
+	require.Len(t, got, 2)
+	assert.Equal(t, anthropic.MessageParamRoleUser, got[0].Role)
+	require.NotEmpty(t, got[0].Content)
+	require.NotNil(t, got[0].Content[0].OfText)
+	assert.Equal(t, "hello", got[0].Content[0].OfText.Text)
+	assert.Contains(t, got[1].Content[0].OfText.Text, "<goal_context>")
+	require.Len(t, messages, 1, "hidden goal context should not mutate source messages")
+}
+
+func TestAppendGoalContextMessageDoesNotDuplicateExistingGoalContext(t *testing.T) {
+	goal := goals.New("find server cores", time.Now())
+	metadata := map[string]any{goals.MetadataKey: goal}
+	goalContext := goals.RenderContext(goal)
+	messages := []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(goalContext))}
+
+	got := appendGoalContextMessage(messages, metadata)
+
+	require.Len(t, got, 1)
+	assert.Equal(t, goalContext, got[0].Content[0].OfText.Text)
+}
+
+func TestAppendGoalContextMessageDoesNotDuplicateExistingMiddleGoalContext(t *testing.T) {
+	goal := goals.New("find server cores", time.Now())
+	metadata := map[string]any{goals.MetadataKey: goal}
+	goalContext := goals.RenderContext(goal)
+	messages := []anthropic.MessageParam{
+		anthropic.NewUserMessage(anthropic.NewTextBlock("hello")),
+		anthropic.NewUserMessage(anthropic.NewTextBlock(goalContext)),
+		anthropic.NewUserMessage(anthropic.NewTextBlock("follow up")),
+	}
+
+	got := appendGoalContextMessage(messages, metadata)
+
+	require.Len(t, got, 3)
+	assert.Equal(t, "hello", got[0].Content[0].OfText.Text)
+	assert.Equal(t, goalContext, got[1].Content[0].OfText.Text)
+	assert.Equal(t, "follow up", got[2].Content[0].OfText.Text)
+}
 
 func TestGetMediaTypeFromExtension(t *testing.T) {
 	tests := []struct {

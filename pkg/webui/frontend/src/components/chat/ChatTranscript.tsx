@@ -48,7 +48,7 @@ const renderContent = (content: string | ContentBlock[] | undefined): string => 
         return parseMarkdown(block.text || '');
       }
 
-      if (block.type === 'slash-command') {
+      if (block.type === 'slash-command' || block.type === 'goal') {
         return parseMarkdown(block.text || '');
       }
 
@@ -149,7 +149,7 @@ const extractContentText = (content: string | ContentBlock[] | undefined): strin
         return block.text || '';
       }
 
-      if (block.type === 'slash-command') {
+      if (block.type === 'slash-command' || block.type === 'goal') {
         return block.text || '';
       }
 
@@ -190,9 +190,9 @@ const renderUserContent = (content: string | ContentBlock[] | undefined): React.
   }
 
   return content.map((block, index) => {
-    if (block.type === 'slash-command') {
+    if (block.type === 'slash-command' || block.type === 'goal') {
       return (
-        <React.Fragment key={`slash-${index}-${block.text || ''}`}>
+        <React.Fragment key={`${block.type}-${index}-${block.text || ''}`}>
           {renderSlashCommandCard(block.text || '')}
         </React.Fragment>
       );

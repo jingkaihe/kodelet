@@ -14,10 +14,12 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
+	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/mcp"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
+	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -159,6 +161,18 @@ func addRunMessageDisplay(thread llmtypes.Thread, query string, config *RunConfi
 	}
 
 	metadata := conversations.AddSlashCommandDisplay(thread.GetMetadata(), query, display, config.FragmentName)
+	for key, value := range metadata {
+		thread.SetMetadataValue(key, value)
+	}
+}
+
+func addRunGoalDisplay(thread llmtypes.Thread, update *goals.CommandUpdate) {
+	if thread == nil || update == nil {
+		return
+	}
+
+	thread.SetMetadataValue(goals.MetadataKey, update.Goal)
+	metadata := conversations.AddMessageDisplay(thread.GetMetadata(), update.ModelPrompt, update.Display, conversations.MessageDisplayKindGoal, goals.SlashCommandName)
 	for key, value := range metadata {
 		thread.SetMetadataValue(key, value)
 	}
@@ -359,6 +373,7 @@ var runCmd = &cobra.Command{
 
 		var query string
 		var fragmentMetadata *fragments.Metadata
+		var goalUpdate *goals.CommandUpdate
 		var err error
 
 		if config.FragmentName != "" {
@@ -372,6 +387,18 @@ var runCmd = &cobra.Command{
 			if err != nil {
 				presenter.Error(err, "Please provide a query to execute")
 				return
+			}
+
+			if command, args, found := slashcommands.Parse(query); found {
+				update, handled, err := goals.ParseSlashCommand(command, args, time.Now())
+				if handled {
+					if err != nil {
+						presenter.Error(err, "Failed to process goal")
+						return
+					}
+					query = update.ModelPrompt
+					goalUpdate = &update
+				}
 			}
 		}
 
@@ -501,7 +528,11 @@ var runCmd = &cobra.Command{
 			thread.SetState(appState)
 			thread.SetConversationID(sessionID)
 			thread.EnablePersistence(ctx, !config.NoSave)
-			addRunMessageDisplay(thread, query, config)
+			if goalUpdate != nil {
+				addRunGoalDisplay(thread, goalUpdate)
+			} else {
+				addRunMessageDisplay(thread, query, config)
+			}
 
 			streamer, closeFunc, err := llm.NewConversationStreamer(ctx)
 			if err != nil {
@@ -578,7 +609,11 @@ var runCmd = &cobra.Command{
 			}
 
 			thread.EnablePersistence(ctx, !config.NoSave)
-			addRunMessageDisplay(thread, query, config)
+			if goalUpdate != nil {
+				addRunGoalDisplay(thread, goalUpdate)
+			} else {
+				addRunMessageDisplay(thread, query, config)
+			}
 
 			finalOutput, err := thread.SendMessage(ctx, query, handler, llmtypes.MessageOpt{
 				PromptCache:  true,

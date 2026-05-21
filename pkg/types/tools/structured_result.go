@@ -69,6 +69,8 @@ var metadataTypeRegistry = map[string]reflect.Type{
 	"openai_web_search": reflect.TypeOf(OpenAIWebSearchMetadata{}),
 	"web_fetch":         reflect.TypeOf(WebFetchMetadata{}),
 	"read_conversation": reflect.TypeOf(ReadConversationMetadata{}),
+	"get_goal":          reflect.TypeOf(GetGoalMetadata{}),
+	"update_goal":       reflect.TypeOf(UpdateGoalMetadata{}),
 	"code_execution":    reflect.TypeOf(CodeExecutionMetadata{}),
 	"skill":             reflect.TypeOf(SkillMetadata{}),
 	"blocked":           reflect.TypeOf(BlockedMetadata{}),
@@ -367,6 +369,31 @@ type ReadConversationMetadata struct {
 
 // ToolType returns the tool type identifier for read_conversation operations.
 func (m ReadConversationMetadata) ToolType() string { return "read_conversation" }
+
+// GetGoalMetadata contains metadata about a get_goal operation.
+type GetGoalMetadata struct {
+	Objective string    `json:"objective,omitempty"`
+	Status    string    `json:"status,omitempty"`
+	Reason    string    `json:"reason,omitempty"`
+	Active    bool      `json:"active"`
+	CreatedAt time.Time `json:"createdAt,omitempty"`
+	UpdatedAt time.Time `json:"updatedAt,omitempty"`
+}
+
+// ToolType returns the tool type identifier for get_goal operations.
+func (m GetGoalMetadata) ToolType() string { return "get_goal" }
+
+// UpdateGoalMetadata contains metadata about an update_goal operation.
+type UpdateGoalMetadata struct {
+	Objective string    `json:"objective,omitempty"`
+	Status    string    `json:"status,omitempty"`
+	Reason    string    `json:"reason,omitempty"`
+	CreatedAt time.Time `json:"createdAt,omitempty"`
+	UpdatedAt time.Time `json:"updatedAt,omitempty"`
+}
+
+// ToolType returns the tool type identifier for update_goal operations.
+func (m UpdateGoalMetadata) ToolType() string { return "update_goal" }
 
 // ExtractMetadata is a helper that handles both pointer and value type assertions
 // This is necessary because JSON unmarshaling creates value types, while

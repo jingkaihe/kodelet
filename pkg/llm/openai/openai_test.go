@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/steer"
@@ -175,6 +176,56 @@ func TestOpenAIChatToolResultMessages_AppendsFollowupAfterAllToolResults(t *test
 	require.Len(t, messages[2].MultiContent, 1)
 	assert.Equal(t, openai.ChatMessagePartTypeImageURL, messages[2].MultiContent[0].Type)
 	assert.Equal(t, openai.ImageURLDetailHigh, messages[2].MultiContent[0].ImageURL.Detail)
+}
+
+func TestAppendGoalContextChatMessagesAfterHistory(t *testing.T) {
+	metadata := map[string]any{goals.MetadataKey: goals.New("find server cores", time.Now())}
+	messages := []openai.ChatCompletionMessage{
+		{Role: openai.ChatMessageRoleSystem, Content: "system"},
+		{Role: openai.ChatMessageRoleUser, Content: "hello"},
+	}
+
+	got := appendGoalContextChatMessages(messages, metadata)
+
+	require.Len(t, got, 3)
+	assert.Equal(t, openai.ChatMessageRoleSystem, got[0].Role)
+	assert.Equal(t, "hello", got[1].Content)
+	assert.Equal(t, openai.ChatMessageRoleUser, got[2].Role)
+	assert.Contains(t, got[2].Content, "<goal_context>")
+	require.Len(t, messages, 2, "hidden goal context should not mutate source messages")
+}
+
+func TestAppendGoalContextChatMessagesDoesNotDuplicateExistingGoalContext(t *testing.T) {
+	goal := goals.New("find server cores", time.Now())
+	metadata := map[string]any{goals.MetadataKey: goal}
+	goalContext := goals.RenderContext(goal)
+	messages := []openai.ChatCompletionMessage{
+		{Role: openai.ChatMessageRoleSystem, Content: "system"},
+		{Role: openai.ChatMessageRoleUser, Content: goalContext},
+	}
+
+	got := appendGoalContextChatMessages(messages, metadata)
+
+	require.Len(t, got, 2)
+	assert.Equal(t, goalContext, got[1].Content)
+}
+
+func TestAppendGoalContextChatMessagesDoesNotDuplicateExistingMiddleGoalContext(t *testing.T) {
+	goal := goals.New("find server cores", time.Now())
+	metadata := map[string]any{goals.MetadataKey: goal}
+	goalContext := goals.RenderContext(goal)
+	messages := []openai.ChatCompletionMessage{
+		{Role: openai.ChatMessageRoleUser, Content: "hello"},
+		{Role: openai.ChatMessageRoleUser, Content: goalContext},
+		{Role: openai.ChatMessageRoleUser, Content: "follow up"},
+	}
+
+	got := appendGoalContextChatMessages(messages, metadata)
+
+	require.Len(t, got, 3)
+	assert.Equal(t, "hello", got[0].Content)
+	assert.Equal(t, goalContext, got[1].Content)
+	assert.Equal(t, "follow up", got[2].Content)
 }
 
 func TestExtractMessagesWithMultipleToolResults(t *testing.T) {

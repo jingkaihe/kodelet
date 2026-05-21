@@ -120,10 +120,17 @@ kodelet run --no-tools "what is the capital of France?"
 # Disable filesystem search tools and use fd/rg via bash instead
 kodelet run --disable-fs-search-tools "find references to SessionManager"
 
+# Set a persistent thread goal for goal-directed work
+kodelet run "/goal finish the migration and verify tests pass"
+
 # Headless mode for programmatic use
 kodelet run --headless "your query"          # outputs structured JSON stream
 kodelet run --headless --include-history "query"  # include historical data in stream
 ```
+
+### Thread Goals
+
+Use `/goal <objective>` in CLI, ACP, or the Web UI to set an active goal for the current thread. While the goal is active, Kodelet keeps future turns focused on that objective, including after conversation resume or compaction. The agent marks the goal complete when it is done, or blocked if it cannot make meaningful progress without user input.
 
 ### Interactive Chat Mode (ACP)
 

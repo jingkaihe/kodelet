@@ -40,6 +40,8 @@ var toolRegistry = map[string]tooltypes.Tool{
 	"grep_tool":         &GrepTool{},
 	"glob_tool":         &GlobTool{},
 	"web_fetch":         &WebFetchTool{},
+	"get_goal":          NewGetGoalTool(),
+	"update_goal":       NewUpdateGoalTool(),
 	"view_image":        NewViewImageTool("", ""),
 	"skill":             NewSkillTool(nil, false, false),
 }
@@ -69,8 +71,15 @@ var defaultMainTools = []string{
 	"grep_tool",
 	"glob_tool",
 	"web_fetch",
+	"get_goal",
+	"update_goal",
 	"view_image",
 	"skill",
+}
+
+var defaultGoalTools = []string{
+	"get_goal",
+	"update_goal",
 }
 
 // defaultSubAgentTools are the default tools for subagent
@@ -244,6 +253,7 @@ func GetMainTools(ctx context.Context, allowedTools []string) []tooltypes.Tool {
 	if len(allowedTools) == 0 {
 		allowedTools = append([]string{}, defaultMainTools...)
 	}
+	allowedTools = ensureGoalTools(allowedTools)
 
 	if err := ValidateTools(allowedTools); err != nil {
 		logger.G(ctx).WithError(err).Warn("Invalid main agent tool configuration, falling back to defaults")
@@ -268,6 +278,9 @@ func GetMainToolsWithOptions(ctx context.Context, allowedTools []string, disable
 			allowedTools = append([]string{}, defaultMainTools...)
 		}
 	}
+	if len(allowedTools) > 0 {
+		allowedTools = ensureGoalTools(allowedTools)
+	}
 
 	if disableFSSearchTools {
 		allowedTools = filterOutFSSearchTools(allowedTools)
@@ -282,6 +295,26 @@ func GetMainToolsWithOptions(ctx context.Context, allowedTools []string, disable
 	}
 
 	return getToolsFromNamesWithOptions(allowedTools, disableFSSearchTools)
+}
+
+func ensureGoalTools(toolNames []string) []string {
+	seen := make(map[string]struct{}, len(toolNames)+len(defaultGoalTools))
+	result := make([]string, 0, len(toolNames)+len(defaultGoalTools))
+	for _, toolName := range toolNames {
+		if _, ok := seen[toolName]; ok {
+			continue
+		}
+		seen[toolName] = struct{}{}
+		result = append(result, toolName)
+	}
+	for _, toolName := range defaultGoalTools {
+		if _, ok := seen[toolName]; ok {
+			continue
+		}
+		seen[toolName] = struct{}{}
+		result = append(result, toolName)
+	}
+	return result
 }
 
 // GetSubAgentTools returns the tools available for sub-agents

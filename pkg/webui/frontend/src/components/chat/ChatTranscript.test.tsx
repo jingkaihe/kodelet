@@ -388,6 +388,29 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('.lucide-square-slash')).toBeInTheDocument();
   });
 
+  it('renders goals as compact command cards', () => {
+    render(
+      <ChatTranscript
+        isStreaming={false}
+        messages={[
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'goal',
+                text: 'Objective: find server cores and ram',
+                command: 'goal',
+              },
+            ],
+          },
+        ]}
+      />
+    );
+
+    expect(screen.getByTestId('slash-command-card')).toBeInTheDocument();
+    expect(screen.getByText('Objective: find server cores and ram')).toBeInTheDocument();
+  });
+
   it('renders streamed steering as a regular user block', () => {
     render(
       <ChatTranscript

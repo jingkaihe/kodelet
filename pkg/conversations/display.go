@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jingkaihe/kodelet/pkg/goals"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
@@ -14,6 +15,7 @@ const (
 	legacyMessageDisplayMetadataKey = "message_display_overrides"
 	MessageDisplayVersion           = "v1"
 	MessageDisplayKindSlashCommand  = "slash-command"
+	MessageDisplayKindGoal          = "goal"
 )
 
 // MessageDisplay describes user-facing text for a model-facing message.
@@ -31,6 +33,11 @@ func MessageDisplayKey(text string) string {
 
 // AddSlashCommandDisplay records compact slash-command display text in metadata.
 func AddSlashCommandDisplay(metadata map[string]any, modelText, displayText, command string) map[string]any {
+	return AddMessageDisplay(metadata, modelText, displayText, MessageDisplayKindSlashCommand, command)
+}
+
+// AddMessageDisplay records user-facing display text in metadata.
+func AddMessageDisplay(metadata map[string]any, modelText, displayText, kind, command string) map[string]any {
 	if metadata == nil {
 		metadata = map[string]any{}
 	}
@@ -44,7 +51,7 @@ func AddSlashCommandDisplay(metadata map[string]any, modelText, displayText, com
 	}
 	displays[MessageDisplayKey(modelText)] = MessageDisplay{
 		Text:    strings.TrimSpace(displayText),
-		Kind:    MessageDisplayKindSlashCommand,
+		Kind:    strings.TrimSpace(kind),
 		Command: strings.TrimSpace(command),
 	}
 	metadata[MessageDisplayMetadataKey] = map[string]any{MessageDisplayVersion: rawMessageDisplays(displays)}
@@ -66,14 +73,11 @@ func LookupMessageDisplay(metadata map[string]any, modelText string) (MessageDis
 
 // ApplyDisplayToStreamableMessages returns a copy of messages with display metadata applied to user text messages.
 func ApplyDisplayToStreamableMessages(messages []StreamableMessage, metadata map[string]any) []StreamableMessage {
-	if len(messages) == 0 || len(metadata) == 0 {
+	if len(messages) == 0 {
 		return messages
 	}
 
 	displays := messageDisplays(metadata)
-	if len(displays) == 0 {
-		return messages
-	}
 
 	result := make([]StreamableMessage, len(messages))
 	copy(result, messages)
@@ -83,6 +87,11 @@ func ApplyDisplayToStreamableMessages(messages []StreamableMessage, metadata map
 		}
 		if display, ok := displays[MessageDisplayKey(result[i].Content)]; ok && strings.TrimSpace(display.Text) != "" {
 			result[i].Content = display.Text
+			continue
+		}
+		if goals.IsContextText(result[i].Content) {
+			result[i].Content = ""
+			continue
 		}
 	}
 	return result
@@ -90,14 +99,11 @@ func ApplyDisplayToStreamableMessages(messages []StreamableMessage, metadata map
 
 // ApplyDisplayToLLMMessages returns a copy of messages with display metadata applied to user messages.
 func ApplyDisplayToLLMMessages(messages []llmtypes.Message, metadata map[string]any) []llmtypes.Message {
-	if len(messages) == 0 || len(metadata) == 0 {
+	if len(messages) == 0 {
 		return messages
 	}
 
 	displays := messageDisplays(metadata)
-	if len(displays) == 0 {
-		return messages
-	}
 
 	result := make([]llmtypes.Message, len(messages))
 	copy(result, messages)
@@ -107,6 +113,11 @@ func ApplyDisplayToLLMMessages(messages []llmtypes.Message, metadata map[string]
 		}
 		if display, ok := displays[MessageDisplayKey(result[i].Content)]; ok && strings.TrimSpace(display.Text) != "" {
 			result[i].Content = display.Text
+			continue
+		}
+		if goals.IsContextText(result[i].Content) {
+			result[i].Content = ""
+			continue
 		}
 	}
 	return result

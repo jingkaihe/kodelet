@@ -239,6 +239,17 @@ Hello {{.name}}
 	assert.Equal(t, []string{"git status"}, expansion.Metadata.AllowedCommands)
 }
 
+func TestTransformWebChatSlashCommandHandlesGoal(t *testing.T) {
+	prompt, expansion, goalUpdate, err := transformWebChatSlashCommand(context.Background(), "/goal find server cores and ram", t.TempDir())
+
+	require.NoError(t, err)
+	assert.Nil(t, expansion)
+	require.NotNil(t, goalUpdate)
+	assert.Contains(t, prompt, "<goal_context>")
+	assert.Contains(t, prompt, "find server cores and ram")
+	assert.Equal(t, "Objective: find server cores and ram", goalUpdate.Display)
+}
+
 func TestWebSlashCommandRestrictionsApplyBeforeBuildingState(t *testing.T) {
 	metadata := expandLimitedWebChatRecipe(t)
 
