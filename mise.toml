@@ -120,6 +120,20 @@ run = [
   "cd pkg/webui/frontend && npm run test:coverage",
 ]
 
+[tasks.frontend-storybook]
+description = "Run the frontend Storybook"
+run = [
+  "echo 'Starting frontend Storybook...'",
+  "cd pkg/webui/frontend && npm run storybook",
+]
+
+[tasks.frontend-storybook-build]
+description = "Build the frontend Storybook"
+run = [
+  "echo 'Building frontend Storybook...'",
+  "cd pkg/webui/frontend && npm run storybook:build",
+]
+
 [tasks.cross-build]
 description = "Cross-compile for multiple platforms"
 depends = ["code-generation"]

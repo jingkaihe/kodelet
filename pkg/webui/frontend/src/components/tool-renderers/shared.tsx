@@ -1,4 +1,5 @@
 import React from 'react';
+import { Copy, ExternalLink as ExternalLinkIcon } from 'lucide-react';
 import { copyToClipboard, escapeUrl } from '../../utils';
 
 // Shared components for tool renderers
@@ -55,7 +56,8 @@ export const Collapsible: React.FC<CollapsibleProps> = ({
   collapsed = false,
   badge
 }) => {
-  const collapseId = `collapse-${Math.random().toString(36).substr(2, 9)}`;
+  const generatedId = React.useId();
+  const collapseId = `collapse-${generatedId.replace(/:/g, '')}`;
 
   return (
     <div className="collapse collapse-arrow mt-2 rounded-2xl border border-black/8 bg-white/70" role="region">
@@ -107,21 +109,7 @@ export const CopyButton: React.FC<CopyButtonProps> = ({
       title="Copy to clipboard"
       aria-label="Copy to clipboard"
     >
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        className="h-4 w-4"
-        fill="none"
-        viewBox="0 0 24 24"
-        stroke="currentColor"
-        aria-hidden="true"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="2"
-          d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-        />
-      </svg>
+      <Copy aria-hidden="true" className="h-4 w-4" strokeWidth={2} />
     </button>
   );
 };
@@ -270,21 +258,7 @@ export const ExternalLink: React.FC<ExternalLinkProps> = ({ href, children, clas
       aria-label="Open in new tab"
     >
       {children}
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        className="h-4 w-4 inline ml-1"
-        fill="none"
-        viewBox="0 0 24 24"
-        stroke="currentColor"
-        aria-hidden="true"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="2"
-          d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
-        />
-      </svg>
+      <ExternalLinkIcon aria-hidden="true" className="ml-1 inline h-4 w-4" strokeWidth={2} />
     </a>
   );
 };

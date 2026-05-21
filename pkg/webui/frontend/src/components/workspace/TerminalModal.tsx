@@ -7,7 +7,7 @@ import type {
   TerminalServerEvent,
 } from '../../types';
 import apiService from '../../services/api';
-import { cn, truncateMiddle } from '../../utils';
+import TerminalModalFrame, { type TerminalStatusVariant } from './TerminalModalFrame';
 
 interface TerminalModalProps {
   cwdLabel: string;
@@ -62,6 +62,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose }
     }
     return statusText === 'Connected' ? '' : statusText;
   }, [connectionError, exitCode, statusText]);
+  const statusVariant: TerminalStatusVariant = connectionError ? 'error' : exitCode !== null ? 'idle' : 'live';
 
   useEffect(() => {
     if (!open || !terminalHostRef.current) {
@@ -322,67 +323,26 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose }
   }
 
   return (
-    <div className="workspace-modal-backdrop" data-testid="terminal-modal-backdrop">
-      <div
-        aria-label="Terminal"
-        className="workspace-modal workspace-terminal-modal surface-panel"
-        data-testid="terminal-modal"
-        role="dialog"
-        style={{ width: terminalSize.width, height: terminalSize.height }}
-      >
-        <div className="workspace-modal-header workspace-terminal-header">
-          <div className="workspace-modal-heading-group">
-            <h2 className="workspace-modal-title">Terminal</h2>
-            <p className="workspace-modal-copy" title={cwdLabel}>
-              {truncateMiddle(cwdLabel, 92)}
-            </p>
-          </div>
-
-          <div className="workspace-modal-actions">
-            <button className="composer-capsule" onClick={onClose} type="button">
-              Close
-            </button>
-          </div>
-        </div>
-
-        {currentStatus ? (
-          <div className="workspace-terminal-status-bar">
-            <span className={cn('workspace-terminal-status-dot', connectionError ? 'is-error' : exitCode !== null ? 'is-idle' : 'is-live')} />
-            <span className="workspace-terminal-status-text">{currentStatus}</span>
-          </div>
-        ) : null}
-
-        <div className="workspace-terminal-shell">
-          <div className="workspace-terminal-host" data-testid="terminal-host" ref={terminalHostRef} />
-          <div className="workspace-terminal-footer">
-            <button
-              aria-label="Resize terminal"
-              className="workspace-terminal-resize-handle"
-              data-testid="terminal-resize-handle"
-              onPointerDown={(event) => {
-                dragStateRef.current = {
-                  startX: event.clientX,
-                  startY: event.clientY,
-                  startWidth: terminalSize.width,
-                  startHeight: terminalSize.height,
-                };
-                document.body.style.userSelect = 'none';
-                document.body.style.cursor = 'nwse-resize';
-                resizeHandleRef.current?.setPointerCapture(event.pointerId);
-              }}
-              ref={resizeHandleRef}
-              type="button"
-            >
-              <svg aria-hidden="true" className="h-4 w-4" fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path d="M8 16h8" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
-                <path d="M12 12h4" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
-                <path d="M16 8h0.01" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
-              </svg>
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+    <TerminalModalFrame
+      currentStatus={currentStatus}
+      cwdLabel={cwdLabel}
+      resizeHandleRef={resizeHandleRef}
+      statusVariant={statusVariant}
+      terminalHostRef={terminalHostRef}
+      terminalSize={terminalSize}
+      onClose={onClose}
+      onResizeStart={(event) => {
+        dragStateRef.current = {
+          startX: event.clientX,
+          startY: event.clientY,
+          startWidth: terminalSize.width,
+          startHeight: terminalSize.height,
+        };
+        document.body.style.userSelect = 'none';
+        document.body.style.cursor = 'nwse-resize';
+        resizeHandleRef.current?.setPointerCapture(event.pointerId);
+      }}
+    />
   );
 };
 

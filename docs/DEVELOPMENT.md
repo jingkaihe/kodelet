@@ -130,10 +130,10 @@ mise run e2e-test-docker
 mise run lint
 
 # Run frontend linter
-mise run eslint
+mise run frontend-lint
 
 # Run frontend linter with auto-fix
-mise run eslint-fix
+mise run frontend-lint-fix
 
 # Format code
 mise run format
@@ -168,6 +168,12 @@ mise run frontend-test-ui
 
 # Run frontend tests with coverage
 mise run frontend-test-coverage
+
+# Run Storybook for isolated component development
+mise run frontend-storybook
+
+# Build Storybook as a static artifact
+mise run frontend-storybook-build
 ```
 
 ### Desktop Development

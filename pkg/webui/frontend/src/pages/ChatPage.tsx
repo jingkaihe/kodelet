@@ -6,19 +6,12 @@ import React, {
 	useRef,
 	useState,
 } from "react";
-import {
-	ArrowUp,
-	GitCompareArrows,
-	ImageUp,
-	Maximize2,
-	Minimize2,
-	PanelLeftOpen,
-	Square,
-	SquareTerminal,
-} from "lucide-react";
+import { PanelLeftOpen } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
+import ChatComposer from "../components/chat/ChatComposer";
 import ChatSidebar from "../components/chat/ChatSidebar";
 import ChatTranscript from "../components/chat/ChatTranscript";
+import NewChatContextDialog from "../components/chat/NewChatContextDialog";
 import PendingSteerList from "../components/chat/PendingSteerList";
 import GitDiffModal from "../components/workspace/GitDiffModal";
 import TerminalModal from "../components/workspace/TerminalModal";
@@ -284,22 +277,6 @@ const getSlashCommandPlaceholder = (command: SlashCommandOption): string =>
 	command.placeholder ||
 	`/${command.name}${command.hint ? ` ${command.hint}` : ""}`;
 
-const getWorkspaceLabelParts = (
-	workspace: string,
-): { name: string; parent: string } => {
-	const trimmedWorkspace = workspace.trim();
-	const normalizedWorkspace =
-		trimmedWorkspace.length > 1
-			? trimmedWorkspace.replace(/\/+$/, "")
-			: trimmedWorkspace;
-	const pathParts = normalizedWorkspace.split("/").filter(Boolean);
-	const name = pathParts[pathParts.length - 1] || normalizedWorkspace || "/";
-	const parent =
-		pathParts.length > 1 ? `/${pathParts.slice(0, -1).join("/")}` : "";
-
-	return { name, parent };
-};
-
 const upsertConversationSummary = (
 	conversations: Conversation[],
 	nextConversation: Conversation,
@@ -410,7 +387,6 @@ const ChatPage: React.FC = () => {
 		startX: number;
 		startWidth: number;
 	} | null>(null);
-	const fileInputRef = useRef<HTMLInputElement | null>(null);
 	const cwdInputRef = useRef<HTMLInputElement | null>(null);
 	const newChatDialogRef = useRef<HTMLDivElement | null>(null);
 
@@ -1267,6 +1243,12 @@ const ChatPage: React.FC = () => {
 		}
 	};
 
+	const handleSelectSlashCommand = (commandName: string) => {
+		setDraft((currentDraft) => insertSlashCommand(currentDraft, commandName));
+		setSlashCommandIndex(-1);
+		setSlashSuggestionsDismissedDraft(null);
+	};
+
 	const handleDraftKeyDown = (
 		event: React.KeyboardEvent<HTMLTextAreaElement>,
 	) => {
@@ -1294,11 +1276,7 @@ const ChatPage: React.FC = () => {
 						slashCommandIndex >= 0 ? slashCommandIndex : 0
 					] || slashCommandSuggestions[0];
 				if (command) {
-					setDraft((currentDraft) =>
-						insertSlashCommand(currentDraft, command.name),
-					);
-					setSlashCommandIndex(-1);
-					setSlashSuggestionsDismissedDraft(null);
+					handleSelectSlashCommand(command.name);
 				}
 				return;
 			}
@@ -1362,14 +1340,6 @@ const ChatPage: React.FC = () => {
 				error instanceof Error ? error.message : "Failed to add image";
 			showToast(message, "error");
 		}
-	};
-
-	const handleFileInputChange = async (
-		event: React.ChangeEvent<HTMLInputElement>,
-	) => {
-		const files = Array.from(event.target.files || []);
-		await appendAttachments(files);
-		event.target.value = "";
 	};
 
 	const handleRemoveAttachment = (attachmentIdToRemove: string) => {
@@ -1746,153 +1716,6 @@ const ChatPage: React.FC = () => {
 		void fetchGitDiff();
 	};
 
-	const newChatContextEditor = (
-		<div
-			className="new-chat-context-panel"
-			data-testid="new-chat-context-panel"
-		>
-			<div className="new-chat-dialog-grid">
-				<label className="new-chat-field">
-					<span className="composer-profile-label">Profile</span>
-					<div className="new-chat-select-shell">
-						<select
-							aria-label="Profile"
-							className="new-chat-field-control new-chat-field-control-select"
-							data-testid="new-chat-profile-select"
-							onChange={(event) => setNewChatProfileDraft(event.target.value)}
-							value={newChatProfileDraft}
-						>
-							{availableProfiles.map((profile) => (
-								<option key={profile.name} value={profile.name}>
-									{profile.name}
-								</option>
-							))}
-						</select>
-						<span className="new-chat-select-chevron" aria-hidden="true">
-							<svg
-								className="h-4 w-4"
-								fill="none"
-								viewBox="0 0 24 24"
-								xmlns="http://www.w3.org/2000/svg"
-							>
-								<path
-									d="m6 9 6 6 6-6"
-									stroke="currentColor"
-									strokeLinecap="round"
-									strokeLinejoin="round"
-									strokeWidth="1.8"
-								/>
-							</svg>
-						</span>
-					</div>
-				</label>
-
-				<label className="new-chat-field new-chat-field-wide">
-					<span className="composer-profile-label">Directory</span>
-					<div className="new-chat-field-autocomplete">
-						<input
-							aria-autocomplete="list"
-							aria-expanded={cwdSuggestionsOpen && cwdSuggestions.length > 0}
-							aria-label="Working directory"
-							autoCapitalize="off"
-							autoComplete="off"
-							autoCorrect="off"
-							className="new-chat-field-control new-chat-field-control-mono"
-							data-testid="cwd-input"
-							onBlur={() => {
-								cwdInputFocusedRef.current = false;
-								window.setTimeout(() => {
-									setCwdSuggestionsOpen(false);
-									setCwdSuggestionIndex(-1);
-								}, 120);
-							}}
-							onChange={(event) => handleCwdInputChange(event.target.value)}
-							onFocus={() => {
-								cwdInputFocusedRef.current = true;
-								setCwdSuggestionsOpen(
-									cwdQuery.trim().length > 0 && cwdSuggestions.length > 0,
-								);
-							}}
-							onKeyDown={handleCwdInputKeyDown}
-							placeholder={chatSettings.defaultCWD || "/path/to/project"}
-							ref={cwdInputRef}
-							spellCheck={false}
-							type="text"
-							value={cwdQuery}
-						/>
-
-						{cwdSuggestionsOpen && cwdSuggestions.length > 0 ? (
-							<div
-								className="composer-cwd-suggestions composer-cwd-suggestions-inline"
-								data-testid="cwd-suggestions"
-							>
-								{cwdSuggestions.map((suggestion, index) => (
-									<button
-										className={cn(
-											"composer-cwd-suggestion",
-											index === cwdSuggestionIndex && "is-active",
-										)}
-										data-testid={`cwd-suggestion-${index}`}
-										key={suggestion.path}
-										onClick={() => {
-											applyCwdSuggestion(suggestion.path);
-										}}
-										onMouseDown={(event) => {
-											event.preventDefault();
-										}}
-										type="button"
-									>
-										<span className="composer-cwd-suggestion-path">
-											{suggestion.path}
-										</span>
-									</button>
-								))}
-							</div>
-						) : null}
-					</div>
-					{recentWorkspaces.length > 0 ? (
-						<div
-							className="new-chat-recent-workspaces"
-							data-testid="recent-workspaces"
-						>
-							{recentWorkspaces.map((workspace) => {
-								const { name, parent } = getWorkspaceLabelParts(workspace);
-
-								return (
-									<button
-										aria-label={workspace}
-										className="new-chat-recent-workspace"
-										key={workspace}
-										onClick={() => handleRecentWorkspaceSelect(workspace)}
-										title={workspace}
-										type="button"
-									>
-										<span
-											className="new-chat-recent-workspace-icon"
-											aria-hidden="true"
-										>
-											↳
-										</span>
-										<span className="new-chat-recent-workspace-text">
-											<span className="new-chat-recent-workspace-name">
-												{name}
-											</span>
-											{parent ? (
-												<span className="new-chat-recent-workspace-parent">
-													{parent}
-												</span>
-											) : null}
-										</span>
-									</button>
-								);
-							})}
-						</div>
-					) : null}
-				</label>
-			</div>
-		</div>
-	);
-
 	const handleCommitNewChatContext = () => {
 		setSelectedProfile(newChatProfileDraft || "default");
 		setSelectedCWD(cwdQuery.trim());
@@ -1929,34 +1752,38 @@ const ChatPage: React.FC = () => {
 			/>
 
 			{newChatDialogOpen ? (
-				<div className="new-chat-dialog-backdrop">
-					<div
-						aria-label="New chat settings"
-						className="new-chat-dialog surface-panel"
-						data-testid="new-chat-dialog"
-						ref={newChatDialogRef}
-						role="dialog"
-					>
-						{newChatContextEditor}
-
-						<div className="new-chat-dialog-actions">
-							<button
-								className="composer-capsule"
-								onClick={handleCloseNewChatDialog}
-								type="button"
-							>
-								Cancel
-							</button>
-							<button
-								className="composer-capsule composer-capsule-accent"
-								onClick={handleCommitNewChatContext}
-								type="button"
-							>
-								Start
-							</button>
-						</div>
-					</div>
-				</div>
+				<NewChatContextDialog
+					availableProfiles={availableProfiles}
+					cwdInputRef={cwdInputRef}
+					cwdQuery={cwdQuery}
+					cwdSuggestionIndex={cwdSuggestionIndex}
+					cwdSuggestions={cwdSuggestions}
+					cwdSuggestionsOpen={cwdSuggestionsOpen}
+					defaultCWD={chatSettings.defaultCWD}
+					profileDraft={newChatProfileDraft}
+					recentWorkspaces={recentWorkspaces}
+					ref={newChatDialogRef}
+					onCancel={handleCloseNewChatDialog}
+					onCommit={handleCommitNewChatContext}
+					onCwdInputBlur={() => {
+						cwdInputFocusedRef.current = false;
+						window.setTimeout(() => {
+							setCwdSuggestionsOpen(false);
+							setCwdSuggestionIndex(-1);
+						}, 120);
+					}}
+					onCwdInputChange={handleCwdInputChange}
+					onCwdInputFocus={() => {
+						cwdInputFocusedRef.current = true;
+						setCwdSuggestionsOpen(
+							cwdQuery.trim().length > 0 && cwdSuggestions.length > 0,
+						);
+					}}
+					onCwdInputKeyDown={handleCwdInputKeyDown}
+					onProfileDraftChange={setNewChatProfileDraft}
+					onRecentWorkspaceSelect={handleRecentWorkspaceSelect}
+					onSelectCwdSuggestion={applyCwdSuggestion}
+				/>
 			) : null}
 
 			{sidebarVisible ? (
@@ -2097,291 +1924,53 @@ const ChatPage: React.FC = () => {
 						)}
 					</div>
 
-					<div className="composer-dock sticky bottom-0 z-10 shrink-0 px-4 py-2.5 pb-[calc(0.55rem+env(safe-area-inset-bottom))] md:px-8 md:py-3">
-						<div className="mx-auto w-full max-w-5xl px-4 md:px-8">
-							{streamError ? (
-								<div className="surface-panel mb-3 rounded-2xl border-kodelet-orange/20 px-4 py-3 text-sm text-kodelet-dark">
-									{streamError}
-								</div>
-							) : null}
-
-							<div
-								className={cn(
-									"surface-panel w-full rounded-[1.45rem] p-2",
-									dragActive && "border-kodelet-blue/35 bg-kodelet-blue/5",
-								)}
-								onDragLeave={handleDragLeave}
-								onDragOver={handleDragOver}
-								onDrop={handleDrop}
-							>
-								<input
-									accept="image/png,image/jpeg,image/gif,image/webp"
-									className="hidden"
-									data-testid="composer-image-input"
-									multiple
-									onChange={handleFileInputChange}
-									ref={fileInputRef}
-									type="file"
-								/>
-
-								{attachments.length > 0 ? (
-									<div className="mb-2.5 flex flex-wrap gap-2.5 px-2.5 pt-1.5">
-										{attachments.map((attachment) => (
-											<div
-												key={attachment.id}
-												className="relative overflow-hidden rounded-2xl border border-black/8 bg-kodelet-light/80 p-2"
-											>
-												<img
-													alt={attachment.name}
-													className="h-20 w-20 rounded-xl object-cover"
-													src={attachment.previewUrl}
-												/>
-												<button
-													aria-label={`Remove ${attachment.name}`}
-													className="absolute right-2 top-2 inline-flex h-6 w-6 items-center justify-center rounded-full border border-black/8 bg-white/92 text-xs font-heading font-semibold text-kodelet-dark"
-													onClick={() => handleRemoveAttachment(attachment.id)}
-													type="button"
-												>
-													×
-												</button>
-											</div>
-										))}
-									</div>
-								) : null}
-
-								{slashCommandSuggestionsOpen ? (
-									<div
-										className="composer-slash-suggestions"
-										data-testid="slash-command-suggestions"
-									>
-										{slashCommandSuggestions.map((command, index) => (
-											<button
-												key={command.name}
-												className={cn(
-													"composer-slash-suggestion",
-													slashCommandIndex >= 0 &&
-														index === slashCommandIndex &&
-														"is-active",
-												)}
-												onClick={() => {
-													setDraft((currentDraft) =>
-														insertSlashCommand(currentDraft, command.name),
-													);
-													setSlashCommandIndex(-1);
-													setSlashSuggestionsDismissedDraft(null);
-												}}
-												onMouseDown={(event) => event.preventDefault()}
-												type="button"
-											>
-												<span className="composer-slash-suggestion-command">
-													/{command.name}
-												</span>
-												<span className="composer-slash-suggestion-description">
-													{command.description}
-												</span>
-												{command.hint ? (
-													<span className="composer-slash-suggestion-hint">
-														{command.hint}
-													</span>
-												) : null}
-											</button>
-										))}
-									</div>
-								) : null}
-
-								{composerSlashUsageHint ? (
-									<div
-										className="composer-slash-usage-hint"
-										data-testid="composer-slash-usage-hint"
-									>
-										<span className="composer-slash-usage-label">hint</span>
-										<code>{composerSlashUsageHint}</code>
-									</div>
-								) : null}
-
-								<textarea
-									className={cn(
-										"composer-editor",
-										composerExpanded && "composer-editor-expanded",
-									)}
-									data-testid="composer-textarea"
-									disabled={steering}
-									onChange={(event) => setDraft(event.target.value)}
-									onKeyDown={handleDraftKeyDown}
-									onPaste={handlePaste}
-									placeholder={composerPlaceholder}
-									value={draft}
-								/>
-
-								<div className="border-t border-black/8 px-2.5 pt-2">
-									<div className="composer-footer-row">
-										<div className="composer-leading-actions">
-											<button
-												aria-label="Add image"
-												className="composer-icon-button"
-												disabled={
-													(sending && !canSteerActiveConversation) || steering
-												}
-												onClick={() => fileInputRef.current?.click()}
-												type="button"
-											>
-												<ImageUp
-													aria-hidden="true"
-													className="h-4 w-4"
-													strokeWidth={1.8}
-												/>
-											</button>
-
-											<button
-												aria-label="Show git diff"
-												className="composer-icon-button"
-												data-testid="composer-git-diff-toggle"
-												onClick={handleOpenGitDiff}
-												title="Show git diff"
-												type="button"
-											>
-												<GitCompareArrows
-													aria-hidden="true"
-													className="h-4 w-4"
-													strokeWidth={1.8}
-												/>
-											</button>
-
-											<button
-												aria-label="Open terminal"
-												className="composer-icon-button"
-												data-testid="composer-terminal-toggle"
-												onClick={() => setTerminalOpen(true)}
-												title="Open terminal"
-												type="button"
-											>
-												<SquareTerminal
-													aria-hidden="true"
-													className="h-4 w-4"
-													strokeWidth={1.8}
-												/>
-											</button>
-
-											<button
-												aria-label={
-													composerExpanded
-														? "Restore composer"
-														: "Expand composer"
-												}
-												aria-pressed={composerExpanded}
-												className="composer-icon-button"
-												data-testid="composer-expand-toggle"
-												onClick={() =>
-													setComposerExpanded((currentValue) => !currentValue)
-												}
-												type="button"
-											>
-												{composerExpanded ? (
-													<Minimize2
-														aria-hidden="true"
-														className="h-4 w-4"
-														strokeWidth={1.8}
-													/>
-												) : (
-													<Maximize2
-														aria-hidden="true"
-														className="h-4 w-4"
-														strokeWidth={1.8}
-													/>
-												)}
-											</button>
-										</div>
-
-										<div className="composer-context-cluster">
-											{conversationId ? (
-												<div
-													className="composer-inline-context is-static"
-													data-testid="composer-inline-context"
-												>
-													<span
-														className="composer-inline-context-value"
-														title={composerContextText}
-													>
-														{composerContextText}
-													</span>
-												</div>
-											) : (
-												<button
-													className="composer-inline-context"
-													disabled={sending || steering}
-													onClick={() => {
-														setNewChatProfileDraft(currentProfileLabel);
-														setCwdQuery(
-															selectedCWD || chatSettings.defaultCWD || "",
-														);
-														setNewChatDialogOpen(true);
-													}}
-													type="button"
-												>
-													<span
-														className="composer-inline-context-value"
-														title={composerContextText}
-													>
-														{composerContextText}
-													</span>
-												</button>
-											)}
-
-											<p className="composer-status-inline">
-												Shift+Enter to send
-											</p>
-										</div>
-
-										<div className="composer-status-actions">
-											{sending ? (
-												<button
-													aria-label={stopActionLabel}
-													className="composer-action-icon-button composer-action-icon-button-stop"
-													disabled={!canStopActiveConversation}
-													onClick={handleStop}
-													title={stopActionLabel}
-													type="button"
-												>
-													<Square
-														aria-hidden="true"
-														className="composer-action-stop-icon"
-														fill="currentColor"
-														strokeWidth={0}
-													/>
-												</button>
-											) : null}
-
-											<button
-												className={cn(
-													"composer-action-icon-button composer-action-icon-button-submit",
-													steering ||
-														!canSubmit ||
-														(sending && !canSteerActiveConversation)
-														? "composer-action-icon-button-disabled"
-														: "composer-action-icon-button-ready",
-												)}
-												aria-label={submitActionLabel}
-												disabled={
-													steering ||
-													!canSubmit ||
-													(sending && !canSteerActiveConversation)
-												}
-												onClick={() => void handleSubmit()}
-												title={submitActionLabel}
-												type="button"
-											>
-												<ArrowUp
-													aria-hidden="true"
-													className="composer-action-submit-icon"
-													strokeWidth={3}
-												/>
-											</button>
-										</div>
-									</div>
-								</div>
-							</div>
-						</div>
-					</div>
+					<ChatComposer
+						addImageDisabled={
+							(sending && !canSteerActiveConversation) || steering
+						}
+						attachments={attachments}
+						canStop={canStopActiveConversation}
+						contextDisabled={sending || steering}
+						contextIsStatic={Boolean(conversationId)}
+						contextText={composerContextText}
+						dragActive={dragActive}
+						draft={draft}
+						expanded={composerExpanded}
+						placeholder={composerPlaceholder}
+						showStop={sending}
+						slashCommandIndex={slashCommandIndex}
+						slashCommandSuggestions={slashCommandSuggestions}
+						slashCommandSuggestionsOpen={slashCommandSuggestionsOpen}
+						slashUsageHint={composerSlashUsageHint}
+						stopActionLabel={stopActionLabel}
+						streamError={streamError}
+						submitActionLabel={submitActionLabel}
+						submitDisabled={
+							steering || !canSubmit || (sending && !canSteerActiveConversation)
+						}
+						textareaDisabled={steering}
+						onAttachImages={appendAttachments}
+						onContextOpen={() => {
+							setNewChatProfileDraft(currentProfileLabel);
+							setCwdQuery(selectedCWD || chatSettings.defaultCWD || "");
+							setNewChatDialogOpen(true);
+						}}
+						onDragLeave={handleDragLeave}
+						onDragOver={handleDragOver}
+						onDrop={handleDrop}
+						onDraftChange={setDraft}
+						onDraftKeyDown={handleDraftKeyDown}
+						onGitDiffOpen={handleOpenGitDiff}
+						onPaste={handlePaste}
+						onRemoveAttachment={handleRemoveAttachment}
+						onSelectSlashCommand={handleSelectSlashCommand}
+						onStop={handleStop}
+						onSubmit={handleSubmit}
+						onTerminalOpen={() => setTerminalOpen(true)}
+						onToggleExpanded={() =>
+							setComposerExpanded((currentValue) => !currentValue)
+						}
+					/>
 				</main>
 			</div>
 		</div>

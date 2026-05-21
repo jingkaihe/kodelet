@@ -27,6 +27,7 @@ bin/
 build/
 .build/
 dist/
+storybook-static/
 
 # Air development server
 tmp/
