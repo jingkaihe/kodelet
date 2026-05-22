@@ -1360,6 +1360,24 @@ func TestAddUserMessageWithImagesPersistsRawItem(t *testing.T) {
 	assert.Contains(t, string(streamable[0].RawItem), `"type":"input_image"`)
 }
 
+func TestAddUserMessageGoalContextWithImagesSeparatesAttachments(t *testing.T) {
+	thread := &Thread{
+		inputItems:  make([]openairesponses.ResponseInputItemUnionParam, 0),
+		storedItems: make([]StoredInputItem, 0),
+	}
+	goalContext := "<goal_context>\nContinue working.\n</goal_context>"
+
+	thread.AddUserMessage(context.Background(), goalContext, "data:image/png;base64,aGVsbG8=")
+
+	require.Len(t, thread.inputItems, 2)
+	require.Len(t, thread.storedItems, 2)
+	assert.Empty(t, extractInputItemText(thread.inputItems[0]))
+	assert.Equal(t, []string{"data:image/png;base64,aGVsbG8="}, extractInputItemImageURLs(thread.inputItems[0]))
+	assert.Equal(t, goalContext, extractInputItemText(thread.inputItems[1]))
+	assert.Empty(t, thread.storedItems[0].Content)
+	assert.Equal(t, goalContext, thread.storedItems[1].Content)
+}
+
 func mustJSON(t *testing.T, v any) json.RawMessage {
 	t.Helper()
 	b, err := json.Marshal(v)
@@ -2233,6 +2251,7 @@ func TestSendMessageAutoContinuesActiveGoalUntilMaxTurns(t *testing.T) {
 		inputItems:  make([]openairesponses.ResponseInputItemUnionParam, 0),
 		storedItems: make([]StoredInputItem, 0),
 	}
+	thread.SetState(tools.NewBasicState(context.Background(), tools.WithLLMConfig(config)))
 	thread.SetMetadataValue(goals.MetadataKey, goals.New("ship goal support", time.Now()))
 
 	exchangeCalls := 0
@@ -2249,12 +2268,42 @@ func TestSendMessageAutoContinuesActiveGoalUntilMaxTurns(t *testing.T) {
 	}
 
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	_, err := thread.SendMessage(context.Background(), "hello", handler, llmtypes.MessageOpt{NoToolUse: true, MaxTurns: 2})
+	_, err := thread.SendMessage(context.Background(), "hello", handler, llmtypes.MessageOpt{MaxTurns: 2})
 	require.NoError(t, err)
 	assert.Equal(t, 2, exchangeCalls)
 	require.Len(t, thread.inputItems, 2)
 	assert.Equal(t, "hello", extractInputItemText(thread.inputItems[0]))
 	assert.Contains(t, extractInputItemText(thread.inputItems[1]), "<goal_context>")
+}
+
+func TestSendMessageAutoContinuationStopsWhenUpdateGoalUnavailable(t *testing.T) {
+	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}
+	thread := &Thread{
+		Thread:      base.NewThread(config, "conv-test", hooks.Trigger{}),
+		inputItems:  make([]openairesponses.ResponseInputItemUnionParam, 0),
+		storedItems: make([]StoredInputItem, 0),
+	}
+	thread.SetMetadataValue(goals.MetadataKey, goals.New("ship goal support", time.Now()))
+
+	exchangeCalls := 0
+	thread.processMessageExchangeFunc = func(
+		_ context.Context,
+		_ llmtypes.MessageHandler,
+		_ string,
+		_ int,
+		_ string,
+		_ llmtypes.MessageOpt,
+	) (string, bool, bool, error) {
+		exchangeCalls++
+		return "progress", false, true, nil
+	}
+
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
+	_, err := thread.SendMessage(context.Background(), "hello", handler, llmtypes.MessageOpt{NoToolUse: true})
+	require.NoError(t, err)
+	assert.Equal(t, 1, exchangeCalls)
+	require.Len(t, thread.inputItems, 1)
+	assert.Equal(t, "hello", extractInputItemText(thread.inputItems[0]))
 }
 
 func TestSendMessageAutoContinuationCanRunUntilGoalCompletes(t *testing.T) {
@@ -2264,6 +2313,7 @@ func TestSendMessageAutoContinuationCanRunUntilGoalCompletes(t *testing.T) {
 		inputItems:  make([]openairesponses.ResponseInputItemUnionParam, 0),
 		storedItems: make([]StoredInputItem, 0),
 	}
+	thread.SetState(tools.NewBasicState(context.Background(), tools.WithLLMConfig(config)))
 	thread.SetMetadataValue(goals.MetadataKey, goals.New("ship goal support", time.Now()))
 
 	exchangeCalls := 0
@@ -2288,7 +2338,7 @@ func TestSendMessageAutoContinuationCanRunUntilGoalCompletes(t *testing.T) {
 	}
 
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	_, err := thread.SendMessage(context.Background(), "hello", handler, llmtypes.MessageOpt{NoToolUse: true})
+	_, err := thread.SendMessage(context.Background(), "hello", handler, llmtypes.MessageOpt{})
 	require.NoError(t, err)
 	assert.Equal(t, 3, exchangeCalls)
 	require.Len(t, thread.inputItems, 3)
@@ -2304,6 +2354,7 @@ func TestSendMessageAutoContinuationStopsWhenGoalPaused(t *testing.T) {
 		inputItems:  make([]openairesponses.ResponseInputItemUnionParam, 0),
 		storedItems: make([]StoredInputItem, 0),
 	}
+	thread.SetState(tools.NewBasicState(context.Background(), tools.WithLLMConfig(config)))
 	thread.SetMetadataValue(goals.MetadataKey, goals.New("ship goal support", time.Now()))
 
 	exchangeCalls := 0
@@ -2326,7 +2377,7 @@ func TestSendMessageAutoContinuationStopsWhenGoalPaused(t *testing.T) {
 	}
 
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	_, err := thread.SendMessage(context.Background(), "hello", handler, llmtypes.MessageOpt{NoToolUse: true, MaxTurns: 2})
+	_, err := thread.SendMessage(context.Background(), "hello", handler, llmtypes.MessageOpt{MaxTurns: 2})
 	require.NoError(t, err)
 	assert.Equal(t, 1, exchangeCalls)
 }

@@ -109,3 +109,22 @@ func TestApplyDisplayHidesGoalContextMessages(t *testing.T) {
 	llmMessages := ApplyDisplayToLLMMessages([]llmtypes.Message{{Role: "user", Content: goalContext}}, nil)
 	assert.Equal(t, "", llmMessages[0].Content)
 }
+
+func TestApplyDisplayConsumesGoalContextOverrideOnce(t *testing.T) {
+	goalContext := "<goal_context>\nContinue working.\n</goal_context>"
+	metadata := AddMessageDisplay(nil, goalContext, "Objective: find cores", MessageDisplayKindGoal, "goal")
+
+	streamable := ApplyDisplayToStreamableMessages([]StreamableMessage{
+		{Kind: "text", Role: "user", Content: goalContext},
+		{Kind: "text", Role: "user", Content: goalContext},
+	}, metadata)
+	assert.Equal(t, "Objective: find cores", streamable[0].Content)
+	assert.Equal(t, "", streamable[1].Content)
+
+	llmMessages := ApplyDisplayToLLMMessages([]llmtypes.Message{
+		{Role: "user", Content: goalContext},
+		{Role: "user", Content: goalContext},
+	}, metadata)
+	assert.Equal(t, "Objective: find cores", llmMessages[0].Content)
+	assert.Equal(t, "", llmMessages[1].Content)
+}

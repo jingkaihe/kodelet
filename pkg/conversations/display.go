@@ -78,6 +78,7 @@ func ApplyDisplayToStreamableMessages(messages []StreamableMessage, metadata map
 	}
 
 	displays := messageDisplays(metadata)
+	consumedDisplays := map[string]struct{}{}
 
 	result := make([]StreamableMessage, len(messages))
 	copy(result, messages)
@@ -85,12 +86,16 @@ func ApplyDisplayToStreamableMessages(messages []StreamableMessage, metadata map
 		if result[i].Kind != "text" || result[i].Role != "user" || strings.TrimSpace(result[i].Content) == "" {
 			continue
 		}
-		if display, ok := displays[MessageDisplayKey(result[i].Content)]; ok && strings.TrimSpace(display.Text) != "" {
-			result[i].Content = display.Text
+		if goals.IsContextText(result[i].Content) {
+			if display, ok := consumeDisplay(displays, consumedDisplays, result[i].Content); ok {
+				result[i].Content = display.Text
+				continue
+			}
+			result[i].Content = ""
 			continue
 		}
-		if goals.IsContextText(result[i].Content) {
-			result[i].Content = ""
+		if display, ok := displays[MessageDisplayKey(result[i].Content)]; ok && strings.TrimSpace(display.Text) != "" {
+			result[i].Content = display.Text
 			continue
 		}
 	}
@@ -104,6 +109,7 @@ func ApplyDisplayToLLMMessages(messages []llmtypes.Message, metadata map[string]
 	}
 
 	displays := messageDisplays(metadata)
+	consumedDisplays := map[string]struct{}{}
 
 	result := make([]llmtypes.Message, len(messages))
 	copy(result, messages)
@@ -111,16 +117,36 @@ func ApplyDisplayToLLMMessages(messages []llmtypes.Message, metadata map[string]
 		if result[i].Role != "user" || strings.TrimSpace(result[i].Content) == "" {
 			continue
 		}
+		if goals.IsContextText(result[i].Content) {
+			if display, ok := consumeDisplay(displays, consumedDisplays, result[i].Content); ok {
+				result[i].Content = display.Text
+				continue
+			}
+			result[i].Content = ""
+			continue
+		}
 		if display, ok := displays[MessageDisplayKey(result[i].Content)]; ok && strings.TrimSpace(display.Text) != "" {
 			result[i].Content = display.Text
 			continue
 		}
-		if goals.IsContextText(result[i].Content) {
-			result[i].Content = ""
-			continue
-		}
 	}
 	return result
+}
+
+func consumeDisplay(displays map[string]MessageDisplay, consumed map[string]struct{}, text string) (MessageDisplay, bool) {
+	if len(displays) == 0 || strings.TrimSpace(text) == "" {
+		return MessageDisplay{}, false
+	}
+	key := MessageDisplayKey(text)
+	if _, ok := consumed[key]; ok {
+		return MessageDisplay{}, false
+	}
+	display, ok := displays[key]
+	if !ok || strings.TrimSpace(display.Text) == "" {
+		return MessageDisplay{}, false
+	}
+	consumed[key] = struct{}{}
+	return display, true
 }
 
 func rawMessageDisplays(displays map[string]MessageDisplay) map[string]any {

@@ -758,6 +758,27 @@ func TestAddUserMessageWithImages(t *testing.T) {
 	}
 }
 
+func TestAddUserMessageGoalContextWithImagesSeparatesAttachments(t *testing.T) {
+	thread := &Thread{}
+	goalContext := "<goal_context>\nContinue working.\n</goal_context>"
+
+	thread.AddUserMessage(context.Background(), goalContext, "data:image/png;base64,aGVsbG8=")
+
+	require.Len(t, thread.messages, 2)
+	attachments := thread.messages[0]
+	assert.Equal(t, openai.ChatMessageRoleUser, attachments.Role)
+	assert.Empty(t, attachments.Content)
+	require.Len(t, attachments.MultiContent, 1)
+	assert.Equal(t, openai.ChatMessagePartTypeImageURL, attachments.MultiContent[0].Type)
+	require.NotNil(t, attachments.MultiContent[0].ImageURL)
+	assert.Equal(t, "data:image/png;base64,aGVsbG8=", attachments.MultiContent[0].ImageURL.URL)
+
+	goalMessage := thread.messages[1]
+	assert.Equal(t, openai.ChatMessageRoleUser, goalMessage.Role)
+	assert.Equal(t, goalContext, goalMessage.Content)
+	assert.Empty(t, goalMessage.MultiContent)
+}
+
 func TestAddUserMessageWithTooManyImages(t *testing.T) {
 	skipIfNoOpenAIAPIKey(t)
 

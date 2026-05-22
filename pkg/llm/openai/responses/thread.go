@@ -179,6 +179,9 @@ func (t *Thread) Provider() string {
 // AddUserMessage adds a user message with optional images to the thread.
 func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths ...string) {
 	if goals.IsContextText(message) {
+		if imageItem, ok := userImageInputItem(ctx, imagePaths); ok {
+			t.addInputItem(imageItem, "")
+		}
 		inputItem := responses.ResponseInputItemUnionParam{
 			OfMessage: &responses.EasyInputMessageParam{
 				Role:    responses.EasyInputMessageRoleUser,
@@ -189,28 +192,11 @@ func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths 
 		return
 	}
 
-	// Validate image count
-	if len(imagePaths) > base.MaxImageCount {
-		logger.G(ctx).Warnf("Too many images provided (%d), maximum is %d. Only processing first %d images",
-			len(imagePaths), base.MaxImageCount, base.MaxImageCount)
-		imagePaths = imagePaths[:base.MaxImageCount]
-	}
-
 	var inputItem responses.ResponseInputItemUnionParam
 
 	// Build content parts if we have images
 	if len(imagePaths) > 0 {
-		contentParts := responses.ResponseInputMessageContentListParam{}
-
-		// Process images and add them as content parts
-		for _, imagePath := range imagePaths {
-			imagePart, err := processImage(imagePath)
-			if err != nil {
-				logger.G(ctx).Warnf("Failed to process image %s: %v", imagePath, err)
-				continue
-			}
-			contentParts = append(contentParts, imagePart)
-		}
+		contentParts := userImageContentParts(ctx, imagePaths)
 
 		// Add text content
 		contentParts = append(contentParts, responses.ResponseInputContentUnionParam{
@@ -237,6 +223,40 @@ func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths 
 	}
 
 	t.addInputItem(inputItem, message)
+}
+
+func userImageInputItem(ctx context.Context, imagePaths []string) (responses.ResponseInputItemUnionParam, bool) {
+	contentParts := userImageContentParts(ctx, imagePaths)
+	if len(contentParts) == 0 {
+		return responses.ResponseInputItemUnionParam{}, false
+	}
+
+	return responses.ResponseInputItemUnionParam{
+		OfMessage: &responses.EasyInputMessageParam{
+			Role:    responses.EasyInputMessageRoleUser,
+			Content: responses.EasyInputMessageContentUnionParam{OfInputItemContentList: contentParts},
+		},
+	}, true
+}
+
+func userImageContentParts(ctx context.Context, imagePaths []string) responses.ResponseInputMessageContentListParam {
+	// Validate image count
+	if len(imagePaths) > base.MaxImageCount {
+		logger.G(ctx).Warnf("Too many images provided (%d), maximum is %d. Only processing first %d images",
+			len(imagePaths), base.MaxImageCount, base.MaxImageCount)
+		imagePaths = imagePaths[:base.MaxImageCount]
+	}
+
+	contentParts := responses.ResponseInputMessageContentListParam{}
+	for _, imagePath := range imagePaths {
+		imagePart, err := processImage(imagePath)
+		if err != nil {
+			logger.G(ctx).Warnf("Failed to process image %s: %v", imagePath, err)
+			continue
+		}
+		contentParts = append(contentParts, imagePart)
+	}
+	return contentParts
 }
 
 func (t *Thread) addInputItem(inputItem responses.ResponseInputItemUnionParam, content string) {
@@ -361,7 +381,7 @@ OUTER:
 				if base.HandleAgentStopFollowUps(ctx, t.HookTrigger, t, handler) {
 					continue OUTER
 				}
-				if !t.Config.IsSubAgent && (maxTurns == 0 || turnCount < maxTurns) && base.HandleGoalAutoContinuation(ctx, t) {
+				if !t.Config.IsSubAgent && (maxTurns == 0 || turnCount < maxTurns) && base.HandleGoalAutoContinuation(ctx, t, base.AvailableTools(t.State, opt.NoToolUse)) {
 					continue OUTER
 				}
 

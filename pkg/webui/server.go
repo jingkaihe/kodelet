@@ -1519,6 +1519,7 @@ func (s *Server) convertToWebMessages(rawMessages json.RawMessage, provider stri
 	}
 
 	var messages []WebMessage
+	consumedDisplays := map[string]struct{}{}
 
 	// Parse the raw JSON messages
 	var rawMsgs []json.RawMessage
@@ -1572,7 +1573,7 @@ func (s *Server) convertToWebMessages(rawMessages json.RawMessage, provider stri
 		}
 
 		if role == "user" {
-			webMsg.Content = applyWebContentDisplay(webMsg.Content, metadata)
+			webMsg.Content = applyWebContentDisplay(webMsg.Content, metadata, consumedDisplays)
 		}
 
 		// Skip empty messages (no content, no tool calls, and no thinking text)
@@ -1595,6 +1596,7 @@ func (s *Server) convertOpenAIResponsesToWebMessages(rawMessages json.RawMessage
 	}
 
 	messages := make([]WebMessage, 0, len(streamableMessages))
+	consumedDisplays := map[string]struct{}{}
 
 	for _, msg := range streamableMessages {
 		webMsg := WebMessage{
@@ -1615,7 +1617,7 @@ func (s *Server) convertOpenAIResponsesToWebMessages(rawMessages json.RawMessage
 				webMsg.Content = msg.Content
 			}
 			if webMsg.Role == "user" {
-				webMsg.Content = applyWebContentDisplay(webMsg.Content, metadata)
+				webMsg.Content = applyWebContentDisplay(webMsg.Content, metadata, consumedDisplays)
 			}
 		case "thinking":
 			webMsg.ThinkingText = msg.Content
@@ -2143,18 +2145,24 @@ func normalizeWebContent(textParts []string, blocks []WebContentBlock) any {
 	return blocks
 }
 
-func applyWebContentDisplay(content any, metadata map[string]any) any {
+func applyWebContentDisplay(content any, metadata map[string]any, consumedDisplays map[string]struct{}) any {
 	if len(metadata) == 0 {
 		return content
+	}
+	if consumedDisplays == nil {
+		consumedDisplays = map[string]struct{}{}
 	}
 
 	switch value := content.(type) {
 	case string:
+		if goals.IsContextText(value) {
+			if display, ok := consumeWebContentDisplay(metadata, consumedDisplays, value); ok {
+				return []WebContentBlock{webContentBlockForDisplay(display)}
+			}
+			return ""
+		}
 		if display, ok := conversations.LookupMessageDisplay(metadata, value); ok {
 			return []WebContentBlock{webContentBlockForDisplay(display)}
-		}
-		if goals.IsContextText(value) {
-			return ""
 		}
 		return content
 	case []WebContentBlock:
@@ -2162,22 +2170,39 @@ func applyWebContentDisplay(content any, metadata map[string]any) any {
 			if block.Type != "text" || strings.TrimSpace(block.Text) == "" {
 				continue
 			}
+			if goals.IsContextText(block.Text) {
+				blocks := make([]WebContentBlock, len(value))
+				copy(blocks, value)
+				if display, ok := consumeWebContentDisplay(metadata, consumedDisplays, block.Text); ok {
+					blocks[index] = webContentBlockForDisplay(display)
+				} else {
+					blocks[index] = WebContentBlock{Type: "text"}
+				}
+				return blocks
+			}
 			if display, ok := conversations.LookupMessageDisplay(metadata, block.Text); ok {
 				blocks := make([]WebContentBlock, len(value))
 				copy(blocks, value)
 				blocks[index] = webContentBlockForDisplay(display)
 				return blocks
 			}
-			if goals.IsContextText(block.Text) {
-				blocks := make([]WebContentBlock, len(value))
-				copy(blocks, value)
-				blocks[index] = WebContentBlock{Type: "text"}
-				return blocks
-			}
 		}
 	}
 
 	return content
+}
+
+func consumeWebContentDisplay(metadata map[string]any, consumed map[string]struct{}, text string) (conversations.MessageDisplay, bool) {
+	key := conversations.MessageDisplayKey(text)
+	if _, ok := consumed[key]; ok {
+		return conversations.MessageDisplay{}, false
+	}
+	display, ok := conversations.LookupMessageDisplay(metadata, text)
+	if !ok {
+		return conversations.MessageDisplay{}, false
+	}
+	consumed[key] = struct{}{}
+	return display, true
 }
 
 func webContentBlockForDisplay(display conversations.MessageDisplay) WebContentBlock {
@@ -2198,7 +2223,15 @@ func isEmptyWebContent(content any) bool {
 	case string:
 		return strings.TrimSpace(value) == ""
 	case []WebContentBlock:
-		return len(value) == 0
+		if len(value) == 0 {
+			return true
+		}
+		for _, block := range value {
+			if block.Type != "text" || strings.TrimSpace(block.Text) != "" {
+				return false
+			}
+		}
+		return true
 	default:
 		return false
 	}

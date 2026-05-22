@@ -218,10 +218,29 @@ func NewOpenAIThread(config llmtypes.Config) (*Thread, error) {
 // AddUserMessage adds a user message with optional images to the thread
 func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths ...string) {
 	if goals.IsContextText(message) {
+		if imageParts := t.userImageParts(ctx, imagePaths); len(imageParts) > 0 {
+			t.messages = append(t.messages, openai.ChatCompletionMessage{
+				Role:         openai.ChatMessageRoleUser,
+				MultiContent: imageParts,
+			})
+		}
 		t.messages = append(t.messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: message})
 		return
 	}
 
+	contentParts := t.userImageParts(ctx, imagePaths)
+	contentParts = append(contentParts, openai.ChatMessagePart{
+		Type: openai.ChatMessagePartTypeText,
+		Text: message,
+	})
+
+	t.messages = append(t.messages, openai.ChatCompletionMessage{
+		Role:         openai.ChatMessageRoleUser,
+		MultiContent: contentParts,
+	})
+}
+
+func (t *Thread) userImageParts(ctx context.Context, imagePaths []string) []openai.ChatMessagePart {
 	contentParts := []openai.ChatMessagePart{}
 
 	// Validate image count
@@ -239,15 +258,7 @@ func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths 
 		}
 		contentParts = append(contentParts, *imagePart)
 	}
-	contentParts = append(contentParts, openai.ChatMessagePart{
-		Type: openai.ChatMessagePartTypeText,
-		Text: message,
-	})
-
-	t.messages = append(t.messages, openai.ChatCompletionMessage{
-		Role:         openai.ChatMessageRoleUser,
-		MultiContent: contentParts,
-	})
+	return contentParts
 }
 
 // SendMessage sends a message to the LLM and processes the response
@@ -372,7 +383,7 @@ OUTER:
 				if base.HandleAgentStopFollowUps(ctx, t.HookTrigger, t, handler) {
 					continue OUTER
 				}
-				if !t.Config.IsSubAgent && (maxTurns == 0 || turnCount < maxTurns) && base.HandleGoalAutoContinuation(ctx, t) {
+				if !t.Config.IsSubAgent && (maxTurns == 0 || turnCount < maxTurns) && base.HandleGoalAutoContinuation(ctx, t, t.tools(opt)) {
 					continue OUTER
 				}
 

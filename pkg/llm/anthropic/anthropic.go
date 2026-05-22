@@ -193,10 +193,20 @@ func NewAnthropicThread(config llmtypes.Config) (*Thread, error) {
 // AddUserMessage adds a user message with optional images to the thread
 func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths ...string) {
 	if goals.IsContextText(message) {
+		if imageBlocks := t.userImageContentBlocks(ctx, imagePaths); len(imageBlocks) > 0 {
+			t.messages = append(t.messages, anthropic.NewUserMessage(imageBlocks...))
+		}
 		t.messages = append(t.messages, anthropic.NewUserMessage(anthropic.NewTextBlock(message)))
 		return
 	}
 
+	contentBlocks := t.userImageContentBlocks(ctx, imagePaths)
+	contentBlocks = append(contentBlocks, anthropic.NewTextBlock(message))
+
+	t.messages = append(t.messages, anthropic.NewUserMessage(contentBlocks...))
+}
+
+func (t *Thread) userImageContentBlocks(ctx context.Context, imagePaths []string) []anthropic.ContentBlockParamUnion {
 	contentBlocks := []anthropic.ContentBlockParamUnion{}
 
 	// Validate image count
@@ -214,9 +224,7 @@ func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths 
 		}
 		contentBlocks = append(contentBlocks, *imageBlock)
 	}
-	contentBlocks = append(contentBlocks, anthropic.NewTextBlock(message))
-
-	t.messages = append(t.messages, anthropic.NewUserMessage(contentBlocks...))
+	return contentBlocks
 }
 
 func (t *Thread) cacheMessages() {
@@ -369,7 +377,7 @@ OUTER:
 				if base.HandleAgentStopFollowUps(ctx, t.HookTrigger, t, handler) {
 					continue OUTER
 				}
-				if !t.Config.IsSubAgent && (maxTurns == 0 || turnCount < maxTurns) && base.HandleGoalAutoContinuation(ctx, t) {
+				if !t.Config.IsSubAgent && (maxTurns == 0 || turnCount < maxTurns) && base.HandleGoalAutoContinuation(ctx, t, t.tools(opt)) {
 					continue OUTER
 				}
 

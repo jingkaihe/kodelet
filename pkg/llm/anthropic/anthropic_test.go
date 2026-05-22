@@ -493,6 +493,25 @@ func TestAddUserMessage(t *testing.T) {
 	}
 }
 
+func TestAddUserMessageGoalContextWithImagesSeparatesAttachments(t *testing.T) {
+	thread := &Thread{}
+	goalContext := "<goal_context>\nContinue working.\n</goal_context>"
+
+	thread.AddUserMessage(context.Background(), goalContext, "data:image/png;base64,aGVsbG8=")
+
+	require.Len(t, thread.messages, 2)
+	attachments := thread.messages[0]
+	assert.Equal(t, anthropic.MessageParamRoleUser, attachments.Role)
+	require.Len(t, attachments.Content, 1)
+	assert.NotNil(t, attachments.Content[0].OfImage)
+
+	goalMessage := thread.messages[1]
+	assert.Equal(t, anthropic.MessageParamRoleUser, goalMessage.Role)
+	require.Len(t, goalMessage.Content, 1)
+	require.NotNil(t, goalMessage.Content[0].OfText)
+	assert.Equal(t, goalContext, goalMessage.Content[0].OfText.Text)
+}
+
 func TestProcessPendingSteerWithImages(t *testing.T) {
 	homeDir := t.TempDir()
 	originalHome := os.Getenv("HOME")
