@@ -80,24 +80,23 @@ func ApplyDisplayToStreamableMessages(messages []StreamableMessage, metadata map
 	displays := messageDisplays(metadata)
 	consumedDisplays := map[string]struct{}{}
 
-	result := make([]StreamableMessage, len(messages))
-	copy(result, messages)
-	for i := range result {
-		if result[i].Kind != "text" || result[i].Role != "user" || strings.TrimSpace(result[i].Content) == "" {
+	result := make([]StreamableMessage, 0, len(messages))
+	for _, message := range messages {
+		if message.Kind != "text" || message.Role != "user" || strings.TrimSpace(message.Content) == "" {
+			result = append(result, message)
 			continue
 		}
-		if goals.IsContextText(result[i].Content) {
-			if display, ok := consumeDisplay(displays, consumedDisplays, result[i].Content); ok {
-				result[i].Content = display.Text
-				continue
+		if goals.IsContextText(message.Content) {
+			if display, ok := consumeDisplay(displays, consumedDisplays, message.Content); ok {
+				message.Content = display.Text
+				result = append(result, message)
 			}
-			result[i].Content = ""
 			continue
 		}
-		if display, ok := displays[MessageDisplayKey(result[i].Content)]; ok && strings.TrimSpace(display.Text) != "" {
-			result[i].Content = display.Text
-			continue
+		if display, ok := displays[MessageDisplayKey(message.Content)]; ok && strings.TrimSpace(display.Text) != "" {
+			message.Content = display.Text
 		}
+		result = append(result, message)
 	}
 	return result
 }
@@ -111,24 +110,23 @@ func ApplyDisplayToLLMMessages(messages []llmtypes.Message, metadata map[string]
 	displays := messageDisplays(metadata)
 	consumedDisplays := map[string]struct{}{}
 
-	result := make([]llmtypes.Message, len(messages))
-	copy(result, messages)
-	for i := range result {
-		if result[i].Role != "user" || strings.TrimSpace(result[i].Content) == "" {
+	result := make([]llmtypes.Message, 0, len(messages))
+	for _, message := range messages {
+		if message.Role != "user" || strings.TrimSpace(message.Content) == "" {
+			result = append(result, message)
 			continue
 		}
-		if goals.IsContextText(result[i].Content) {
-			if display, ok := consumeDisplay(displays, consumedDisplays, result[i].Content); ok {
-				result[i].Content = display.Text
-				continue
+		if goals.IsContextText(message.Content) {
+			if display, ok := consumeDisplay(displays, consumedDisplays, message.Content); ok {
+				message.Content = display.Text
+				result = append(result, message)
 			}
-			result[i].Content = ""
 			continue
 		}
-		if display, ok := displays[MessageDisplayKey(result[i].Content)]; ok && strings.TrimSpace(display.Text) != "" {
-			result[i].Content = display.Text
-			continue
+		if display, ok := displays[MessageDisplayKey(message.Content)]; ok && strings.TrimSpace(display.Text) != "" {
+			message.Content = display.Text
 		}
+		result = append(result, message)
 	}
 	return result
 }

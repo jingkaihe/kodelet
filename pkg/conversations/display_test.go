@@ -83,6 +83,7 @@ func TestApplyDisplayToStreamableMessages(t *testing.T) {
 	}
 
 	got := ApplyDisplayToStreamableMessages(messages, metadata)
+	require.Len(t, got, 3)
 	assert.Equal(t, "/init focus", got[0].Content)
 	assert.Equal(t, "full recipe prompt", got[1].Content)
 	assert.Equal(t, "{}", got[2].Input)
@@ -97,6 +98,7 @@ func TestApplyDisplayToLLMMessages(t *testing.T) {
 	}
 
 	got := ApplyDisplayToLLMMessages(messages, metadata)
+	require.Len(t, got, 2)
 	assert.Equal(t, "/init focus", got[0].Content)
 	assert.Equal(t, "full recipe prompt", got[1].Content)
 }
@@ -104,10 +106,10 @@ func TestApplyDisplayToLLMMessages(t *testing.T) {
 func TestApplyDisplayHidesGoalContextMessages(t *testing.T) {
 	goalContext := "<goal_context>\nContinue working.\n</goal_context>"
 	streamable := ApplyDisplayToStreamableMessages([]StreamableMessage{{Kind: "text", Role: "user", Content: goalContext}}, nil)
-	assert.Equal(t, "", streamable[0].Content)
+	assert.Empty(t, streamable)
 
 	llmMessages := ApplyDisplayToLLMMessages([]llmtypes.Message{{Role: "user", Content: goalContext}}, nil)
-	assert.Equal(t, "", llmMessages[0].Content)
+	assert.Empty(t, llmMessages)
 }
 
 func TestApplyDisplayConsumesGoalContextOverrideOnce(t *testing.T) {
@@ -118,13 +120,13 @@ func TestApplyDisplayConsumesGoalContextOverrideOnce(t *testing.T) {
 		{Kind: "text", Role: "user", Content: goalContext},
 		{Kind: "text", Role: "user", Content: goalContext},
 	}, metadata)
+	require.Len(t, streamable, 1)
 	assert.Equal(t, "Objective: find cores", streamable[0].Content)
-	assert.Equal(t, "", streamable[1].Content)
 
 	llmMessages := ApplyDisplayToLLMMessages([]llmtypes.Message{
 		{Role: "user", Content: goalContext},
 		{Role: "user", Content: goalContext},
 	}, metadata)
+	require.Len(t, llmMessages, 1)
 	assert.Equal(t, "Objective: find cores", llmMessages[0].Content)
-	assert.Equal(t, "", llmMessages[1].Content)
 }
