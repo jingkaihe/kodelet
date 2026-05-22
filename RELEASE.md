@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.4.16-beta (2026-05-22)
+
+Added persistent `/goal` support across CLI, ACP, and the Web UI so threads can carry an active objective through future turns, resume, and compaction, with goal state managed through new model-facing tools.
+
+Refactored the Web UI chat workspace into focused composer, transcript, tool activity, context dialog, terminal, and arcade modal components, with Storybook stories and fixtures for isolated frontend development.
+
 ## 0.4.14-beta (2026-05-20)
 
 Added recipe-backed slash commands to the Web UI composer, including cwd-scoped recipe discovery, autocomplete suggestions, and argument-driven usage hints/placeholders.
