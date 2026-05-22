@@ -137,6 +137,26 @@ func TestConvertToStreamEntry(t *testing.T) {
 	}
 }
 
+func TestConvertToStreamEntryUsesRawItemForImageOnlyText(t *testing.T) {
+	streamer := NewConversationStreamer(&mockConversationService{})
+
+	entry := streamer.convertToStreamEntry(StreamableMessage{
+		Kind: "text",
+		Role: "user",
+		RawItem: json.RawMessage(`{
+			"role": "user",
+			"content": [
+				{"type": "input_image", "image_url": "data:image/png;base64,aGVsbG8="}
+			]
+		}`),
+	}, "test-conv")
+
+	assert.Equal(t, "text", entry.Kind)
+	assert.Equal(t, "user", entry.Role)
+	assert.Equal(t, "_Inline image input (image/png)._", entry.Content)
+	assert.Equal(t, "test-conv", entry.ConversationID)
+}
+
 func TestStreamLiveUpdates_WithHistory(t *testing.T) {
 	// Mock conversation response
 	rawMessages := json.RawMessage(`[{"role": "user", "content": "test"}]`)

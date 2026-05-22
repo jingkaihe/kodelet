@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
+	"github.com/jingkaihe/kodelet/pkg/acp/bridge"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/stretchr/testify/assert"
@@ -825,6 +826,11 @@ func TestServer_TransformSlashCommandPrompt(t *testing.T) {
 		originalPrompt := []acptypes.ContentBlock{
 			{Type: acptypes.ContentTypeText, Text: "/goal find server cores and ram"},
 			{Type: acptypes.ContentTypeImage, Data: "base64imagedata", MimeType: "image/png"},
+			{Type: acptypes.ContentTypeResource, Resource: &acptypes.EmbeddedResource{
+				URI:  "file:///details.txt",
+				Text: "resource text",
+			}},
+			{Type: acptypes.ContentTypeResourceLink, URI: "file:///linked.txt"},
 		}
 
 		result := transformGoalCommandPrompt(update, originalPrompt)
@@ -833,6 +839,10 @@ func TestServer_TransformSlashCommandPrompt(t *testing.T) {
 		assert.Contains(t, result[0].Text, "<goal_context>")
 		assert.Contains(t, result[0].Text, "find server cores and ram")
 		assert.Equal(t, acptypes.ContentTypeImage, result[1].Type)
+
+		message, images := bridge.ContentBlocksToMessage(result)
+		assert.Equal(t, update.ModelPrompt, message)
+		assert.Equal(t, []string{"data:image/png;base64,base64imagedata"}, images)
 	})
 
 	t.Run("returns error for unknown recipe with available recipes", func(t *testing.T) {

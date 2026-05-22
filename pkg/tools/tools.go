@@ -60,6 +60,12 @@ var metaTools = []string{
 	"glob_tool",
 }
 
+// mainAgentMetaTools are enabled for the main agent even when allowed_tools is restrictive.
+var mainAgentMetaTools = []string{
+	"get_goal",
+	"update_goal",
+}
+
 // defaultMainTools are the default tools for main agent
 var defaultMainTools = []string{
 	"bash",
@@ -75,11 +81,6 @@ var defaultMainTools = []string{
 	"update_goal",
 	"view_image",
 	"skill",
-}
-
-var defaultGoalTools = []string{
-	"get_goal",
-	"update_goal",
 }
 
 // defaultSubAgentTools are the default tools for subagent
@@ -193,12 +194,26 @@ func metaToolsWithOptions(disableFSSearchTools bool) []string {
 	return filterOutFSSearchTools(metaTools)
 }
 
+func mainAgentMetaToolsWithOptions(disableFSSearchTools bool) []string {
+	tools := append([]string{}, metaToolsWithOptions(disableFSSearchTools)...)
+	tools = append(tools, mainAgentMetaTools...)
+	return tools
+}
+
 // GetToolsFromNames returns a list of tools from the given tool names
 func GetToolsFromNames(toolNames []string) []tooltypes.Tool {
 	return getToolsFromNamesWithOptions(toolNames, false)
 }
 
 func getToolsFromNamesWithOptions(toolNames []string, disableFSSearchTools bool) []tooltypes.Tool {
+	return getToolsFromNamesWithMetaTools(toolNames, metaToolsWithOptions(disableFSSearchTools))
+}
+
+func getMainToolsFromNamesWithOptions(toolNames []string, disableFSSearchTools bool) []tooltypes.Tool {
+	return getToolsFromNamesWithMetaTools(toolNames, mainAgentMetaToolsWithOptions(disableFSSearchTools))
+}
+
+func getToolsFromNamesWithMetaTools(toolNames []string, metaTools []string) []tooltypes.Tool {
 	if len(toolNames) == 0 {
 		return nil
 	}
@@ -207,7 +222,7 @@ func getToolsFromNamesWithOptions(toolNames []string, disableFSSearchTools bool)
 	var orderedToolNames []string
 
 	// Always include meta tools first
-	for _, metaTool := range metaToolsWithOptions(disableFSSearchTools) {
+	for _, metaTool := range metaTools {
 		if !toolSet[metaTool] {
 			toolSet[metaTool] = true
 			orderedToolNames = append(orderedToolNames, metaTool)
@@ -253,14 +268,13 @@ func GetMainTools(ctx context.Context, allowedTools []string) []tooltypes.Tool {
 	if len(allowedTools) == 0 {
 		allowedTools = append([]string{}, defaultMainTools...)
 	}
-	allowedTools = ensureGoalTools(allowedTools)
 
 	if err := ValidateTools(allowedTools); err != nil {
 		logger.G(ctx).WithError(err).Warn("Invalid main agent tool configuration, falling back to defaults")
 		allowedTools = append([]string{}, defaultMainTools...)
 	}
 
-	return getToolsFromNamesWithOptions(allowedTools, false)
+	return getMainToolsFromNamesWithOptions(allowedTools, false)
 }
 
 // GetMainToolsWithOptions returns the main tools available for the agent with feature toggles applied.
@@ -278,10 +292,6 @@ func GetMainToolsWithOptions(ctx context.Context, allowedTools []string, disable
 			allowedTools = append([]string{}, defaultMainTools...)
 		}
 	}
-	if len(allowedTools) > 0 {
-		allowedTools = ensureGoalTools(allowedTools)
-	}
-
 	if disableFSSearchTools {
 		allowedTools = filterOutFSSearchTools(allowedTools)
 	}
@@ -294,27 +304,7 @@ func GetMainToolsWithOptions(ctx context.Context, allowedTools []string, disable
 		}
 	}
 
-	return getToolsFromNamesWithOptions(allowedTools, disableFSSearchTools)
-}
-
-func ensureGoalTools(toolNames []string) []string {
-	seen := make(map[string]struct{}, len(toolNames)+len(defaultGoalTools))
-	result := make([]string, 0, len(toolNames)+len(defaultGoalTools))
-	for _, toolName := range toolNames {
-		if _, ok := seen[toolName]; ok {
-			continue
-		}
-		seen[toolName] = struct{}{}
-		result = append(result, toolName)
-	}
-	for _, toolName := range defaultGoalTools {
-		if _, ok := seen[toolName]; ok {
-			continue
-		}
-		seen[toolName] = struct{}{}
-		result = append(result, toolName)
-	}
-	return result
+	return getMainToolsFromNamesWithOptions(allowedTools, disableFSSearchTools)
 }
 
 // GetSubAgentTools returns the tools available for sub-agents

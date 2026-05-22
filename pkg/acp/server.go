@@ -545,7 +545,10 @@ func transformGoalCommandPrompt(update goals.CommandUpdate, originalPrompt []acp
 	}
 
 	for _, block := range originalPrompt {
-		if block.Type == acptypes.ContentTypeText {
+		// Preserve media that does not alter the flattened user text. Resource
+		// blocks are text-like after bridge.ContentBlocksToMessage and would
+		// prevent the goal display metadata from matching the saved prompt.
+		if block.Type != acptypes.ContentTypeImage {
 			continue
 		}
 		newPrompt = append(newPrompt, block)

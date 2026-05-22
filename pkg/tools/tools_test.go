@@ -249,6 +249,45 @@ func TestGetMainTools_UsesValidTools(t *testing.T) {
 	}
 }
 
+func TestGetMainTools_ExplicitAllowlistIncludesGoalMetaTools(t *testing.T) {
+	tools := GetMainTools(context.Background(), []string{"bash"})
+
+	toolNames := make([]string, len(tools))
+	for i, tool := range tools {
+		toolNames[i] = tool.Name()
+	}
+
+	assert.Contains(t, toolNames, "bash")
+	assert.Contains(t, toolNames, "get_goal")
+	assert.Contains(t, toolNames, "update_goal")
+}
+
+func TestGetMainToolsWithOptions_ExplicitAllowlistIncludesGoalMetaTools(t *testing.T) {
+	tools := GetMainToolsWithOptions(context.Background(), []string{"bash"}, false)
+
+	toolNames := make([]string, len(tools))
+	for i, tool := range tools {
+		toolNames[i] = tool.Name()
+	}
+
+	assert.Contains(t, toolNames, "bash")
+	assert.Contains(t, toolNames, "get_goal")
+	assert.Contains(t, toolNames, "update_goal")
+}
+
+func TestGetSubAgentTools_ExplicitAllowlistDoesNotIncludeGoalMetaTools(t *testing.T) {
+	tools := GetSubAgentTools(context.Background(), []string{"bash"})
+
+	toolNames := make([]string, len(tools))
+	for i, tool := range tools {
+		toolNames[i] = tool.Name()
+	}
+
+	assert.Contains(t, toolNames, "bash")
+	assert.NotContains(t, toolNames, "get_goal")
+	assert.NotContains(t, toolNames, "update_goal")
+}
+
 func TestGetMainTools_NoToolsMarker(t *testing.T) {
 	// Test that NoToolsMarker returns nil (no tools)
 	tools := GetMainTools(context.Background(), []string{NoToolsMarker})

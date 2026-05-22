@@ -202,6 +202,16 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 				})
 			}
 
+			if imageBlock := contentBlock.OfImage; imageBlock != nil {
+				if imageText := anthropicImageDisplayString(imageBlock); imageText != "" {
+					streamable = append(streamable, StreamableMessage{
+						Kind:    "text",
+						Role:    string(msg.Role),
+						Content: imageText,
+					})
+				}
+			}
+
 			if toolUseBlock := contentBlock.OfToolUse; toolUseBlock != nil {
 				inputJSON, _ := json.Marshal(toolUseBlock.Input)
 				streamable = append(streamable, StreamableMessage{
@@ -272,6 +282,14 @@ func ExtractMessages(rawMessages json.RawMessage, toolResults map[string]tooltyp
 					Content: textBlock.Text,
 				})
 			}
+			if imageBlock := contentBlock.OfImage; imageBlock != nil {
+				if imageText := anthropicImageDisplayString(imageBlock); imageText != "" {
+					messages = append(messages, llm.Message{
+						Role:    string(msg.Role),
+						Content: imageText,
+					})
+				}
+			}
 			// Handle tool use blocks
 			if toolUseBlock := contentBlock.OfToolUse; toolUseBlock != nil {
 				inputJSON, err := json.Marshal(toolUseBlock.Input)
@@ -311,4 +329,24 @@ func ExtractMessages(rawMessages json.RawMessage, toolResults map[string]tooltyp
 	}
 
 	return messages, nil
+}
+
+func anthropicImageDisplayString(imageBlock *anthropic.ImageBlockParam) string {
+	if imageBlock == nil {
+		return ""
+	}
+
+	if imageBlock.Source.OfBase64 != nil {
+		mediaType := strings.TrimSpace(string(imageBlock.Source.OfBase64.MediaType))
+		if mediaType != "" {
+			return fmt.Sprintf("Inline image input (%s).", mediaType)
+		}
+		return "Inline image input."
+	}
+
+	if imageBlock.Source.OfURL != nil && strings.TrimSpace(imageBlock.Source.OfURL.URL) != "" {
+		return fmt.Sprintf("Image input: %s", imageBlock.Source.OfURL.URL)
+	}
+
+	return ""
 }

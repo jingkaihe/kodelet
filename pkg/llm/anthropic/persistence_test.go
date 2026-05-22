@@ -835,6 +835,23 @@ func TestExtractMessages(t *testing.T) {
 	assert.Equal(t, "Hi! How can I help you today?", messages[1].Content)
 }
 
+func TestExtractMessagesWithImageOnlyMessage(t *testing.T) {
+	messages := []anthropic.MessageParam{
+		anthropic.NewUserMessage(anthropic.NewImageBlock(anthropic.Base64ImageSourceParam{
+			MediaType: anthropic.Base64ImageSourceMediaTypeImagePNG,
+			Data:      "aGVsbG8=",
+		})),
+	}
+	rawMessages, err := json.Marshal(messages)
+	require.NoError(t, err)
+
+	extracted, err := ExtractMessages(rawMessages, nil)
+	require.NoError(t, err)
+	require.Len(t, extracted, 1)
+	assert.Equal(t, "user", extracted[0].Role)
+	assert.Equal(t, "Inline image input (image/png).", extracted[0].Content)
+}
+
 func TestExtractMessagesWithToolUse(t *testing.T) {
 	// Test with tool use and tool result
 	rawMessages := `[
@@ -1296,6 +1313,26 @@ func TestStreamMessages_SimpleTextMessage(t *testing.T) {
 	assert.Equal(t, "text", streamableMessages[1].Kind)
 	assert.Equal(t, "assistant", streamableMessages[1].Role)
 	assert.Equal(t, "I'm doing well, thank you!", streamableMessages[1].Content)
+}
+
+func TestStreamMessages_ImageOnlyMessage(t *testing.T) {
+	messages := []anthropic.MessageParam{
+		anthropic.NewUserMessage(anthropic.NewImageBlock(anthropic.Base64ImageSourceParam{
+			MediaType: anthropic.Base64ImageSourceMediaTypeImagePNG,
+			Data:      "aGVsbG8=",
+		})),
+	}
+
+	rawMessages, err := json.Marshal(messages)
+	require.NoError(t, err)
+
+	streamableMessages, err := StreamMessages(rawMessages, map[string]tooltypes.StructuredToolResult{})
+	require.NoError(t, err)
+	require.Len(t, streamableMessages, 1)
+
+	assert.Equal(t, "text", streamableMessages[0].Kind)
+	assert.Equal(t, "user", streamableMessages[0].Role)
+	assert.Equal(t, "Inline image input (image/png).", streamableMessages[0].Content)
 }
 
 func TestStreamMessages_ThinkingMessage(t *testing.T) {

@@ -227,6 +227,9 @@ func (cs *ConversationStreamer) convertToStreamEntry(msg StreamableMessage, conv
 	switch msg.Kind {
 	case "text", "thinking":
 		entry.Content = msg.Content
+		if entry.Content == "" {
+			entry.Content = renderOpenAIResponsesRawItemMarkdown(msg.RawItem)
+		}
 	case "tool-use":
 		entry.ToolName = msg.ToolName
 		entry.Input = msg.Input
