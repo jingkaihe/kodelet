@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.4.18-beta (2026-05-23)
+
+Hardened OpenAI Responses streaming with bounded retries for recoverable HTTP/WebSocket failures, better handshake diagnostics, and safer preservation of pending stream state across retry attempts.
+
+Expanded regression coverage across CLI commands, auth, ACP sessions, managed binaries, MCP/runtime paths, tool rendering, conversations, usage, and Web UI server flows, with `mise run test` now enforcing an 80% Go coverage gate.
+
 ## 0.4.16-beta (2026-05-22)
 
 Added persistent `/goal` support across CLI, ACP, and the Web UI so threads can carry an active objective through future turns, resume, and compaction, with goal state managed through new model-facing tools.
