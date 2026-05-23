@@ -27,6 +27,7 @@ func (t namedTool) Description() string                { return "test tool" }
 func (t namedTool) ValidateInput(tooltypes.State, string) error {
 	return nil
 }
+
 func (t namedTool) Execute(context.Context, tooltypes.State, string) tooltypes.ToolResult {
 	return tooltypes.BaseToolResult{Result: "ok"}
 }
@@ -58,6 +59,7 @@ func (t *threadStub) AddUserMessage(_ context.Context, message string, imagePath
 	t.userMessages = append(t.userMessages, message)
 	t.userImages = append(t.userImages, imagePaths)
 }
+
 func (t *threadStub) SendMessage(context.Context, string, llmtypes.MessageHandler, llmtypes.MessageOpt) (string, error) {
 	return "", nil
 }

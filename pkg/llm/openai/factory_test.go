@@ -140,4 +140,28 @@ func TestRecordUsesResponsesMode(t *testing.T) {
 	assert.False(t, RecordUsesResponsesMode(map[string]any{"api_mode": "chat_completions"}, responsesRaw))
 	assert.True(t, RecordUsesResponsesMode(nil, responsesRaw))
 	assert.False(t, RecordUsesResponsesMode(nil, chatRaw))
+	assert.False(t, RecordUsesResponsesMode(map[string]any{"api_mode": 123}, []byte(`not-json`)))
+	assert.False(t, RecordUsesResponsesMode(nil, []byte(`[]`)))
+}
+
+func TestResponsesMessageWrappers(t *testing.T) {
+	raw := []byte(`[
+		{"type":"message","role":"user","content":"hi"},
+		{"type":"reasoning","content":"thinking"},
+		{"type":"function_call","call_id":"call-1","name":"lookup","arguments":"{}"},
+		{"type":"function_call_output","call_id":"call-1","output":"done"}
+	]`)
+
+	messages, err := ExtractResponsesMessages(raw, nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, messages)
+	assert.Equal(t, "user", messages[0].Role)
+	assert.Equal(t, "hi", messages[0].Content)
+
+	streamable, err := StreamResponsesMessages(raw, nil)
+	require.NoError(t, err)
+	require.Len(t, streamable, 4)
+	assert.Equal(t, "tool-use", streamable[2].Kind)
+	assert.Equal(t, "lookup", streamable[2].ToolName)
+	assert.Equal(t, "tool-result", streamable[3].Kind)
 }

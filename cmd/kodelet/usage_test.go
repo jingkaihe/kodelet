@@ -841,7 +841,7 @@ func TestDateRangeFilteringWithSummaries(t *testing.T) {
 
 func TestRunUsageCmdWithTempSQLiteStore(t *testing.T) {
 	ctx := context.Background()
-	basePath := setupUsageTempStore(t, ctx)
+	basePath := setupUsageTempStore(ctx, t)
 	t.Setenv("KODELET_BASE_PATH", basePath)
 	t.Setenv("KODELET_CONVERSATION_STORE_TYPE", "sqlite")
 
@@ -850,13 +850,13 @@ func TestRunUsageCmdWithTempSQLiteStore(t *testing.T) {
 	defer func() { _ = store.Close() }()
 
 	now := time.Now().UTC()
-	saveUsageRecord(t, ctx, store, "usage-openai", "openai", now.Add(-24*time.Hour), llmtypes.Usage{
+	saveUsageRecord(ctx, t, store, "usage-openai", "openai", now.Add(-24*time.Hour), llmtypes.Usage{
 		InputTokens:  100,
 		OutputTokens: 50,
 		InputCost:    0.01,
 		OutputCost:   0.02,
 	})
-	saveUsageRecord(t, ctx, store, "usage-anthropic", "anthropic", now.Add(-2*24*time.Hour), llmtypes.Usage{
+	saveUsageRecord(ctx, t, store, "usage-anthropic", "anthropic", now.Add(-2*24*time.Hour), llmtypes.Usage{
 		InputTokens:              200,
 		OutputTokens:             75,
 		CacheCreationInputTokens: 10,
@@ -879,7 +879,7 @@ func TestRunUsageCmdWithTempSQLiteStore(t *testing.T) {
 
 func TestRunUsageCmdBreakdownWithTempSQLiteStore(t *testing.T) {
 	ctx := context.Background()
-	basePath := setupUsageTempStore(t, ctx)
+	basePath := setupUsageTempStore(ctx, t)
 	t.Setenv("KODELET_BASE_PATH", basePath)
 	t.Setenv("KODELET_CONVERSATION_STORE_TYPE", "sqlite")
 
@@ -888,8 +888,8 @@ func TestRunUsageCmdBreakdownWithTempSQLiteStore(t *testing.T) {
 	defer func() { _ = store.Close() }()
 
 	now := time.Now().UTC()
-	saveUsageRecord(t, ctx, store, "breakdown-openai", "openai", now.Add(-24*time.Hour), llmtypes.Usage{InputTokens: 10, OutputTokens: 5, InputCost: 0.01})
-	saveUsageRecord(t, ctx, store, "breakdown-anthropic", "anthropic", now.Add(-24*time.Hour), llmtypes.Usage{InputTokens: 20, OutputTokens: 6, InputCost: 0.02})
+	saveUsageRecord(ctx, t, store, "breakdown-openai", "openai", now.Add(-24*time.Hour), llmtypes.Usage{InputTokens: 10, OutputTokens: 5, InputCost: 0.01})
+	saveUsageRecord(ctx, t, store, "breakdown-anthropic", "anthropic", now.Add(-24*time.Hour), llmtypes.Usage{InputTokens: 20, OutputTokens: 6, InputCost: 0.02})
 
 	output := captureAllStdout(t, func() {
 		runUsageCmd(ctx, &UsageConfig{Since: "30d", Format: "json", Breakdown: true})
@@ -907,7 +907,7 @@ func TestRunUsageCmdBreakdownWithTempSQLiteStore(t *testing.T) {
 
 func TestRunUsageCmdNoConversationsWithTempSQLiteStore(t *testing.T) {
 	ctx := context.Background()
-	basePath := setupUsageTempStore(t, ctx)
+	basePath := setupUsageTempStore(ctx, t)
 	t.Setenv("KODELET_BASE_PATH", basePath)
 	t.Setenv("KODELET_CONVERSATION_STORE_TYPE", "sqlite")
 
@@ -918,7 +918,7 @@ func TestRunUsageCmdNoConversationsWithTempSQLiteStore(t *testing.T) {
 	assert.Contains(t, output, "No conversations found")
 }
 
-func setupUsageTempStore(t *testing.T, ctx context.Context) string {
+func setupUsageTempStore(ctx context.Context, t *testing.T) string {
 	t.Helper()
 
 	basePath := t.TempDir()
@@ -930,7 +930,7 @@ func setupUsageTempStore(t *testing.T, ctx context.Context) string {
 	return basePath
 }
 
-func saveUsageRecord(t *testing.T, ctx context.Context, store convstore.ConversationStore, id, provider string, when time.Time, usage llmtypes.Usage) {
+func saveUsageRecord(ctx context.Context, t *testing.T, store convstore.ConversationStore, id, provider string, when time.Time, usage llmtypes.Usage) {
 	t.Helper()
 
 	record := conversations.ConversationRecord{

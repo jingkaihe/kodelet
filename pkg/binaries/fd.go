@@ -23,7 +23,7 @@ var fdChecksums = map[string]string{
 	"windows/arm64": "bf9b1e31bcac71c1e95d49c56f0d872f525b95d03854e94b1d4dd6786f825cc5",
 }
 
-var fdCache BinaryPathCache
+var fdCache = &BinaryPathCache{}
 
 // FdSpec returns the BinarySpec for fd
 func FdSpec() BinarySpec {

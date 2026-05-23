@@ -58,9 +58,30 @@ description = "Run development server with auto-reload"
 run = ["echo 'Starting development server with auto-reload...'", "air"]
 
 [tasks.test]
-description = "Run Go tests"
+description = "Run Go tests with coverage gate"
 depends = ["code-generation"]
-run = ["bash -c 'set -euo pipefail; pkgs=$(go list ./pkg/... ./cmd/... | grep -v \"/node_modules/\" || true); test -n \"$pkgs\"; go test $pkgs'"]
+run = ['''
+set -euo pipefail
+
+threshold=80.0
+pkgs=$(go list ./pkg/... ./cmd/... | grep -v "/node_modules/" || true)
+test -n "$pkgs"
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+coverage="$tmp/coverage.out"
+
+go test -coverprofile="$coverage" $pkgs
+
+total=$(go tool cover -func="$coverage" | awk '/^total:/ {gsub(/%/, "", $3); print $3}')
+test -n "$total"
+
+printf 'Total coverage: %s%% (threshold: %.1f%%)\n' "$total" "$threshold"
+awk -v total="$total" -v threshold="$threshold" 'BEGIN { exit (total + 0 >= threshold + 0) ? 0 : 1 }' || {
+  printf 'Coverage %s%% is below required %.1f%%\n' "$total" "$threshold" >&2
+  exit 1
+}
+''']
 
 [tasks.format]
 description = "Format Go code with gofumpt"

@@ -47,20 +47,6 @@ func (m *trackingState) FileLastAccess() map[string]time.Time {
 	return m.fileLastAccess
 }
 
-type lockingTrackingState struct {
-	trackingState
-	locked   []string
-	unlocked []string
-}
-
-func (m *lockingTrackingState) LockFile(path string) {
-	m.locked = append(m.locked, path)
-}
-
-func (m *lockingTrackingState) UnlockFile(path string) {
-	m.unlocked = append(m.unlocked, path)
-}
-
 func TestNewThread(t *testing.T) {
 	config := llmtypes.Config{
 		Model:     "test-model",

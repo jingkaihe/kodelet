@@ -53,6 +53,9 @@ func TestGetGoalToolSchemaDescriptionAndEmptyStates(t *testing.T) {
 	require.NotNil(t, tool.GenerateSchema())
 	assert.NoError(t, tool.ValidateInput(nil, ""))
 	assert.Error(t, tool.ValidateInput(nil, `{`))
+	kvs, err := tool.TracingKVs(`{}`)
+	assert.NoError(t, err)
+	assert.Nil(t, kvs)
 
 	missingStore := tool.Execute(context.Background(), NewBasicState(context.Background()), `{}`)
 	require.True(t, missingStore.IsError())

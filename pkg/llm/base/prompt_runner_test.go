@@ -57,8 +57,10 @@ func (t *promptRunnerThread) SetMetadataValue(key string, value any)       { t.m
 func (t *promptRunnerThread) GetMetadata() map[string]any                  { return t.metadata }
 func (t *promptRunnerThread) PrepareUtilityMode(context.Context)           { t.prepareCalled = true }
 
-var _ llmtypes.Thread = (*promptRunnerThread)(nil)
-var _ UtilityThread = (*promptRunnerThread)(nil)
+var (
+	_ llmtypes.Thread = (*promptRunnerThread)(nil)
+	_ UtilityThread   = (*promptRunnerThread)(nil)
+)
 
 func TestRunPreparedPrompt(t *testing.T) {
 	thread := newPromptRunnerThread()

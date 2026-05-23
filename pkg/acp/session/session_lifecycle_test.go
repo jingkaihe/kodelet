@@ -453,7 +453,7 @@ func TestBuildSessionMCPStateOptsFallbacks(t *testing.T) {
 	t.Run("nil session MCP manager returns nil and skips setup", func(t *testing.T) {
 		setupMCPExecutionMode = func(context.Context, *tools.MCPManager, string, string) (*mcp.ExecutionSetup, error) {
 			t.Fatal("setupMCPExecutionMode should not be called for nil session MCP manager")
-			return nil, nil
+			return nil, errors.New("unexpected setupMCPExecutionMode call")
 		}
 
 		opts := (&Manager{}).buildSessionMCPStateOpts(context.Background(), "session-1", t.TempDir(), nil)
@@ -485,7 +485,7 @@ func TestBuildSessionMCPStateOptsFallbacks(t *testing.T) {
 
 	t.Run("nil setup result falls back to MCP tools", func(t *testing.T) {
 		setupMCPExecutionMode = func(context.Context, *tools.MCPManager, string, string) (*mcp.ExecutionSetup, error) {
-			return nil, nil
+			return nil, nil //nolint:nilnil // exercises fallback for a nil setup without an error
 		}
 
 		opts := (&Manager{}).buildSessionMCPStateOpts(context.Background(), "session-1", t.TempDir(), newEmptyMCPManager(t))

@@ -1,10 +1,13 @@
 package skills
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,6 +26,60 @@ func TestNewDiscovery(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, customDirs, discovery.skillDirs)
 	})
+}
+
+func TestInitializeDisabledBranches(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	viper.Reset()
+	t.Cleanup(func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	})
+
+	skills, enabled := Initialize(context.Background(), llmtypes.Config{Skills: &llmtypes.SkillsConfig{Enabled: false}})
+	assert.False(t, enabled)
+	assert.Nil(t, skills)
+
+	viper.Set("no_skills", true)
+	skills, enabled = Initialize(context.Background(), llmtypes.Config{})
+	assert.False(t, enabled)
+	assert.Nil(t, skills)
+}
+
+func TestInitializeDiscoverAndAllowlist(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	tmpDir := t.TempDir()
+	oldCWD, err := os.Getwd()
+	require.NoError(t, err)
+	viper.Reset()
+	t.Cleanup(func() {
+		require.NoError(t, os.Chdir(oldCWD))
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	})
+	require.NoError(t, os.Chdir(tmpDir))
+	t.Setenv("HOME", filepath.Join(tmpDir, "home"))
+
+	skillDir := filepath.Join(tmpDir, ".kodelet", "skills", "allowed-skill")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(`---
+name: allowed-skill
+description: Allowed skill
+---
+Skill body
+`), 0o644))
+
+	skills, enabled := Initialize(context.Background(), llmtypes.Config{
+		Skills: &llmtypes.SkillsConfig{Enabled: true, Allowed: []string{"allowed-skill"}},
+	})
+
+	assert.True(t, enabled)
+	require.Contains(t, skills, "allowed-skill")
+	assert.Equal(t, "Allowed skill", skills["allowed-skill"].Description)
 }
 
 func TestDiscoverSkills(t *testing.T) {

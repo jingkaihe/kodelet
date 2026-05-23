@@ -1,8 +1,10 @@
 package plugins
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -476,6 +478,101 @@ func TestPluginNameConversions(t *testing.T) {
 			assert.Equal(t, tt.wantUserName, PluginNameToUserFacing(tt.pluginName))
 		})
 	}
+}
+
+func TestInstallerInstallCopiesPluginContentsViaGH(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake gh script uses POSIX shell")
+	}
+
+	fixtureRepo := t.TempDir()
+	writePluginFixture(t, fixtureRepo, true)
+	fakeGH := writeFakeGH(t, fixtureRepo)
+	t.Setenv("PATH", filepath.Dir(fakeGH)+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	targetDir := filepath.Join(t.TempDir(), ".kodelet")
+	installer := &Installer{targetDir: targetDir}
+
+	result, err := installer.Install(context.Background(), "owner/repo", "v1.2.3")
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "owner@repo", result.PluginName)
+	assert.Equal(t, []string{"helper"}, result.Skills)
+	assert.Equal(t, []string{filepath.Join("workflows", "deploy")}, result.Recipes)
+	assert.Equal(t, []string{"runner"}, result.Tools)
+	assert.Equal(t, []string{"after_tool_call"}, result.Hooks)
+
+	pluginDir := filepath.Join(targetDir, pluginsSubdir, "owner@repo")
+	assert.FileExists(t, filepath.Join(pluginDir, skillsSubdir, "helper", skillFileName))
+	assert.FileExists(t, filepath.Join(pluginDir, recipesSubdir, "workflows", "deploy.md"))
+	assert.FileExists(t, filepath.Join(pluginDir, toolsSubdir, "runner"))
+	assert.FileExists(t, filepath.Join(pluginDir, hooksSubdir, "after_tool_call"))
+}
+
+func TestInstallerInstallErrorsWhenRepositoryHasNoPlugins(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake gh script uses POSIX shell")
+	}
+
+	fixtureRepo := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(fixtureRepo, "README.md"), []byte("empty"), 0o644))
+	fakeGH := writeFakeGH(t, fixtureRepo)
+	t.Setenv("PATH", filepath.Dir(fakeGH)+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	targetDir := filepath.Join(t.TempDir(), ".kodelet")
+	installer := &Installer{targetDir: targetDir}
+
+	result, err := installer.Install(context.Background(), "owner/empty", "")
+
+	require.ErrorContains(t, err, "no plugins found")
+	assert.Nil(t, result)
+	assert.NoDirExists(t, filepath.Join(targetDir, pluginsSubdir, "owner@empty"))
+}
+
+func writePluginFixture(t *testing.T, root string, includeExecutable bool) {
+	t.Helper()
+
+	skillDir := filepath.Join(root, skillsSubdir, "helper")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, skillFileName), []byte("---\nname: helper\ndescription: Helper\n---\n"), 0o644))
+
+	recipeDir := filepath.Join(root, recipesSubdir, "workflows")
+	require.NoError(t, os.MkdirAll(recipeDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(recipeDir, "deploy.md"), []byte("---\ndescription: Deploy\n---\n"), 0o644))
+
+	toolMode := os.FileMode(0o644)
+	if includeExecutable {
+		toolMode = 0o755
+	}
+	toolsDir := filepath.Join(root, toolsSubdir)
+	require.NoError(t, os.MkdirAll(toolsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(toolsDir, "runner"), []byte("#!/bin/sh\necho runner\n"), toolMode))
+
+	hooksDir := filepath.Join(root, hooksSubdir)
+	require.NoError(t, os.MkdirAll(hooksDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "after_tool_call"), []byte("#!/bin/sh\necho hook\n"), toolMode))
+}
+
+func writeFakeGH(t *testing.T, fixtureRepo string) string {
+	t.Helper()
+
+	binDir := t.TempDir()
+	path := filepath.Join(binDir, "gh")
+	script := `#!/bin/sh
+if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
+  exit 0
+fi
+if [ "$1" = "repo" ] && [ "$2" = "clone" ]; then
+  mkdir -p "$4"
+  cp -R "` + fixtureRepo + `/". "$4"
+  exit 0
+fi
+echo "unexpected gh invocation: $@" >&2
+exit 1
+`
+	require.NoError(t, os.WriteFile(path, []byte(script), 0o755))
+	return path
 }
 
 func TestInstallerFindRecipesDeepNesting(t *testing.T) {

@@ -1475,6 +1475,104 @@ func TestOpenAIProcessMessageExchangeErrorBranches(t *testing.T) {
 	})
 }
 
+func TestOpenAISendMessageTextResponse(t *testing.T) {
+	var capturedRequest openai.ChatCompletionRequest
+	client := openai.NewClientWithConfig(openAIHTTPClientConfig(func(req *http.Request) (*http.Response, error) {
+		capturedRequest = decodeOpenAIChatRequest(t, req)
+		return jsonOpenAIResponse(http.StatusOK, `{
+			"id":"chatcmpl-send",
+			"model":"gpt-4o",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"send response"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":11,"completion_tokens":5,"total_tokens":16}
+		}`), nil
+	}))
+	config := llm.Config{
+		Model:        "gpt-4o",
+		MaxTokens:    128,
+		NoHooks:      true,
+		IsSubAgent:   true,
+		WeakModel:    "gpt-4o-mini",
+		AllowedTools: []string{tools.NoToolsMarker},
+	}
+	thread := newTestOpenAIExchangeThread(client, config)
+	handler := &captureOpenAIMessageHandler{}
+
+	output, err := thread.SendMessage(context.Background(), "hello", handler, llm.MessageOpt{
+		MaxTurns:        1,
+		DisableUsageLog: true,
+		UseWeakModel:    true,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "send response", output)
+	assert.Equal(t, []string{"send response"}, handler.texts)
+	assert.Zero(t, handler.done, "subagent sends do not signal done")
+	assert.Equal(t, "gpt-4o-mini", capturedRequest.Model)
+	assert.Equal(t, 128, capturedRequest.MaxTokens)
+	require.Len(t, capturedRequest.Messages, 2)
+	assert.Equal(t, openai.ChatMessageRoleSystem, capturedRequest.Messages[0].Role)
+	assert.Equal(t, openai.ChatMessageRoleUser, capturedRequest.Messages[1].Role)
+	assert.Equal(t, 11, thread.GetUsage().InputTokens)
+	assert.Equal(t, 5, thread.GetUsage().OutputTokens)
+	require.Len(t, thread.messages, 3)
+	assert.Equal(t, openai.ChatMessageRoleSystem, thread.messages[0].Role)
+	assert.Equal(t, openai.ChatMessageRoleUser, thread.messages[1].Role)
+	assert.Equal(t, openai.ChatMessageRoleAssistant, thread.messages[2].Role)
+}
+
+func TestOpenAISendMessageRestoresMessagesWhenNoSaveConversation(t *testing.T) {
+	client := openai.NewClientWithConfig(openAIHTTPClientConfig(func(_ *http.Request) (*http.Response, error) {
+		return jsonOpenAIResponse(http.StatusOK, `{
+			"id":"chatcmpl-nosave",
+			"model":"gpt-4o",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"temporary response"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
+		}`), nil
+	}))
+	thread := newTestOpenAIExchangeThread(client, llm.Config{
+		Model:        "gpt-4o",
+		NoHooks:      true,
+		AllowedTools: []string{tools.NoToolsMarker},
+	})
+	originalMessages := []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: "previous"}}
+	thread.messages = append([]openai.ChatCompletionMessage(nil), originalMessages...)
+	handler := &captureOpenAIMessageHandler{}
+
+	output, err := thread.SendMessage(context.Background(), "transient", handler, llm.MessageOpt{
+		MaxTurns:           1,
+		NoSaveConversation: true,
+		DisableUsageLog:    true,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "temporary response", output)
+	assert.Equal(t, 1, handler.done)
+	assert.Equal(t, originalMessages, thread.messages)
+}
+
+func TestOpenAISendMessageStopsWhenContextCancelled(t *testing.T) {
+	client := openai.NewClientWithConfig(openAIHTTPClientConfig(func(_ *http.Request) (*http.Response, error) {
+		t.Fatal("cancelled send should not call OpenAI")
+		return nil, errors.New("unexpected OpenAI call")
+	}))
+	thread := newTestOpenAIExchangeThread(client, llm.Config{
+		Model:        "gpt-4o",
+		NoHooks:      true,
+		IsSubAgent:   true,
+		AllowedTools: []string{tools.NoToolsMarker},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	output, err := thread.SendMessage(ctx, "hello", &captureOpenAIMessageHandler{}, llm.MessageOpt{MaxTurns: 1, DisableUsageLog: true})
+
+	require.NoError(t, err)
+	assert.Empty(t, output)
+	require.Len(t, thread.messages, 2)
+	assert.Equal(t, openai.ChatMessageRoleSystem, thread.messages[0].Role)
+	assert.Equal(t, openai.ChatMessageRoleUser, thread.messages[1].Role)
+}
+
 func TestOpenAIConfigPlatformBranches(t *testing.T) {
 	assert.False(t, isCopilotPlatform(llm.Config{Provider: "anthropic"}))
 	assert.False(t, isCopilotPlatform(llm.Config{Provider: "anthropic", Anthropic: nil}))

@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/steer"
+	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/attribute"
@@ -640,6 +642,61 @@ func TestProcessPendingSteerWithUserMessageHandler(t *testing.T) {
 	assert.Empty(t, handler.CollectedText())
 }
 
+func TestExecuteToolsParallelStreamsAndOrdersResults(t *testing.T) {
+	firstBlock := anthropicToolUseBlockForTest(t, "toolu-first", map[string]any{"value": "first"}, "first_tool")
+	secondBlock := anthropicToolUseBlockForTest(t, "toolu-second", map[string]any{"value": "second"}, "second_tool")
+	state := tools.NewBasicState(
+		context.Background(),
+		tools.WithLLMConfig(llmtypes.Config{AllowedTools: []string{"first_tool", "second_tool"}}),
+		tools.WithExtraMCPTools([]tooltypes.Tool{testTool{name: "first_tool"}, testTool{name: "second_tool"}}),
+	)
+	thread := &Thread{
+		Thread: base.NewThread(llmtypes.Config{NoHooks: true}, "conv-test", hooks.Trigger{}),
+	}
+	thread.SetState(state)
+	handler := &captureAnthropicToolHandler{}
+
+	results, err := thread.executeToolsParallel(context.Background(), handler, []struct {
+		block   anthropic.ContentBlockUnion
+		variant anthropic.ToolUseBlock
+	}{
+		{block: firstBlock, variant: firstBlock.AsToolUse()},
+		{block: secondBlock, variant: secondBlock.AsToolUse()},
+	}, llmtypes.MessageOpt{})
+
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	assert.Equal(t, []string{
+		`toolu-first:first_tool:{"value":"first"}`,
+		`toolu-second:second_tool:{"value":"second"}`,
+	}, handler.toolUses)
+	assert.Equal(t, "toolu-first", results[0].blockID)
+	assert.Equal(t, "first_tool", results[0].toolName)
+	assert.Equal(t, `{"value":"first"}`, results[0].input)
+	assert.Equal(t, "toolu-second", results[1].blockID)
+	assert.Equal(t, "second_tool", results[1].toolName)
+	assert.ElementsMatch(t, []string{"toolu-first:first_tool", "toolu-second:second_tool"}, handler.toolResults)
+}
+
+func TestExecuteToolsParallelHandlesEmptyCancelledAndSubscriptionNames(t *testing.T) {
+	thread := &Thread{Thread: base.NewThread(llmtypes.Config{NoHooks: true}, "conv-test", hooks.Trigger{})}
+	results, err := thread.executeToolsParallel(context.Background(), &captureAnthropicToolHandler{}, nil, llmtypes.MessageOpt{})
+	require.NoError(t, err)
+	assert.Nil(t, results)
+
+	block := anthropicToolUseBlockForTest(t, "toolu-cancelled", map[string]any{}, "Missing_tool")
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	thread.useSubscription = true
+	results, err = thread.executeToolsParallel(cancelled, &captureAnthropicToolHandler{}, []struct {
+		block   anthropic.ContentBlockUnion
+		variant anthropic.ToolUseBlock
+	}{{block: block, variant: block.AsToolUse()}}, llmtypes.MessageOpt{})
+
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, results)
+}
+
 type captureUserMessageHandler struct {
 	llmtypes.StringCollectorHandler
 	content string
@@ -649,6 +706,40 @@ type captureUserMessageHandler struct {
 func (h *captureUserMessageHandler) HandleUserMessage(content string, images []string) {
 	h.content = content
 	h.images = append([]string(nil), images...)
+}
+
+type captureAnthropicToolHandler struct {
+	toolUses    []string
+	toolResults []string
+}
+
+func (h *captureAnthropicToolHandler) HandleText(string) {}
+
+func (h *captureAnthropicToolHandler) HandleToolUse(toolCallID, toolName, input string) {
+	h.toolUses = append(h.toolUses, toolCallID+":"+toolName+":"+input)
+}
+
+func (h *captureAnthropicToolHandler) HandleToolResult(toolCallID, toolName string, _ tooltypes.ToolResult) {
+	h.toolResults = append(h.toolResults, toolCallID+":"+toolName)
+}
+
+func (h *captureAnthropicToolHandler) HandleThinking(string) {}
+func (h *captureAnthropicToolHandler) HandleDone()           {}
+
+func anthropicToolUseBlockForTest(t *testing.T, id string, input any, name string) anthropic.ContentBlockUnion {
+	t.Helper()
+
+	data, err := json.Marshal(map[string]any{
+		"id":    id,
+		"type":  "tool_use",
+		"name":  name,
+		"input": input,
+	})
+	require.NoError(t, err)
+
+	var block anthropic.ContentBlockUnion
+	require.NoError(t, json.Unmarshal(data, &block))
+	return block
 }
 
 func TestShouldAutoCompact(t *testing.T) {

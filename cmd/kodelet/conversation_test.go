@@ -686,7 +686,7 @@ func TestValidateConversationRecord(t *testing.T) {
 
 func TestConversationCommandsWithSQLiteStore(t *testing.T) {
 	ctx := setupConversationCommandStore(t)
-	record := saveConversationCommandRecord(t, ctx, "conv-cmd-1")
+	record := saveConversationCommandRecord(ctx, t, "conv-cmd-1")
 
 	t.Run("list table and json", func(t *testing.T) {
 		tableOutput := captureStdout(t, func() {
@@ -773,14 +773,14 @@ func TestConversationCommandsWithSQLiteStore(t *testing.T) {
 			importConversationCmd(ctx, importPath, &ConversationImportConfig{})
 		})
 		assert.Contains(t, importOutput, "conv-imported imported successfully")
-		loadedImported := loadConversationCommandRecord(t, ctx, "conv-imported")
+		loadedImported := loadConversationCommandRecord(ctx, t, "conv-imported")
 		assert.Equal(t, "Conversation command summary", loadedImported.Summary)
 
 		forkOutput := captureAllStdout(t, func() {
 			forkConversationCmd(ctx, record.ID)
 		})
 		assert.Contains(t, forkOutput, "Conversation forked successfully")
-		list := queryConversationCommandRecords(t, ctx)
+		list := queryConversationCommandRecords(ctx, t)
 		assert.Len(t, list.ConversationSummaries, 3)
 
 		deleteOutput := captureAllStdout(t, func() {
@@ -798,7 +798,7 @@ func TestConversationEditCommandWithNoopEditor(t *testing.T) {
 	}
 
 	ctx := setupConversationCommandStore(t)
-	record := saveConversationCommandRecord(t, ctx, "conv-edit-1")
+	record := saveConversationCommandRecord(ctx, t, "conv-edit-1")
 	editorPath := filepath.Join(t.TempDir(), "editor.sh")
 	require.NoError(t, os.WriteFile(editorPath, []byte("#!/bin/sh\nexit 0\n"), 0o755))
 
@@ -807,7 +807,7 @@ func TestConversationEditCommandWithNoopEditor(t *testing.T) {
 	})
 
 	assert.Contains(t, output, "conv-edit-1 edited successfully")
-	loaded := loadConversationCommandRecord(t, ctx, record.ID)
+	loaded := loadConversationCommandRecord(ctx, t, record.ID)
 	assert.Equal(t, record.Summary, loaded.Summary)
 	assert.Equal(t, record.Provider, loaded.Provider)
 }
@@ -872,7 +872,7 @@ func setupConversationCommandStore(t *testing.T) context.Context {
 	return ctx
 }
 
-func saveConversationCommandRecord(t *testing.T, ctx context.Context, id string) convtypes.ConversationRecord {
+func saveConversationCommandRecord(ctx context.Context, t *testing.T, id string) convtypes.ConversationRecord {
 	t.Helper()
 
 	record := convtypes.NewConversationRecord(id)
@@ -908,7 +908,7 @@ func saveConversationCommandRecord(t *testing.T, ctx context.Context, id string)
 	return record
 }
 
-func loadConversationCommandRecord(t *testing.T, ctx context.Context, id string) convtypes.ConversationRecord {
+func loadConversationCommandRecord(ctx context.Context, t *testing.T, id string) convtypes.ConversationRecord {
 	t.Helper()
 
 	record, err := loadConversationCommandRecordWithError(ctx, id)
@@ -926,7 +926,7 @@ func loadConversationCommandRecordWithError(ctx context.Context, id string) (con
 	return store.Load(ctx, id)
 }
 
-func queryConversationCommandRecords(t *testing.T, ctx context.Context) convtypes.QueryResult {
+func queryConversationCommandRecords(ctx context.Context, t *testing.T) convtypes.QueryResult {
 	t.Helper()
 
 	store, err := conversations.GetConversationStore(ctx)

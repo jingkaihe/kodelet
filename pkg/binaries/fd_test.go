@@ -141,8 +141,8 @@ func TestEnsureFdAndRipgrepUseLibexecAndCachePaths(t *testing.T) {
 	oldFdCache := fdCache
 	oldRipgrepCache := ripgrepCache
 	libexecDir = filepath.Join(t.TempDir(), "libexec")
-	fdCache = BinaryPathCache{}
-	ripgrepCache = BinaryPathCache{}
+	fdCache = &BinaryPathCache{}
+	ripgrepCache = &BinaryPathCache{}
 	t.Cleanup(func() {
 		libexecDir = oldLibexecDir
 		fdCache = oldFdCache

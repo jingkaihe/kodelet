@@ -12,7 +12,7 @@ const (
 	ripgrepBaseURL = "https://github.com/BurntSushi/ripgrep/releases/download"
 )
 
-var ripgrepCache BinaryPathCache
+var ripgrepCache = &BinaryPathCache{}
 
 // RipgrepSpec returns the BinarySpec for ripgrep
 func RipgrepSpec() BinarySpec {
