@@ -40,7 +40,7 @@ func TestNodeRuntimeIdentityAndAvailability(t *testing.T) {
 
 	err := CheckAvailability(context.Background())
 	if err != nil {
-		assert.Contains(t, err.Error(), "Node.js/npx is not available")
+		assert.Contains(t, err.Error(), "Node.js/tsx is not available")
 	}
 }
 

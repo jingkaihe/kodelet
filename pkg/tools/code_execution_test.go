@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/mcp/runtime"
@@ -91,15 +90,16 @@ func TestCodeExecutionTool_ExecuteInputErrors(t *testing.T) {
 }
 
 func TestCodeExecutionTool_ExecuteSuccessIfNodeAvailable(t *testing.T) {
+	if err := runtime.CheckAvailability(context.Background()); err != nil {
+		t.Skip(err)
+	}
+
 	workspace := t.TempDir()
 	scriptPath := filepath.Join(workspace, "script.js")
 	require.NoError(t, os.WriteFile(scriptPath, []byte("console.log('hello from code execution')\n"), 0o644))
 
 	tool := NewCodeExecutionTool(runtime.NewNodeRuntime(workspace, ""))
 	result := tool.Execute(context.Background(), NewBasicState(context.Background()), `{"code_path":"script.js"}`)
-	if result.IsError() && (strings.Contains(result.GetError(), "npx") || strings.Contains(result.GetError(), "executable file not found")) {
-		t.Skip("npx/tsx is not available in this environment")
-	}
 
 	require.False(t, result.IsError())
 	assert.Contains(t, result.GetResult(), "hello from code execution")

@@ -38,8 +38,7 @@ func NewNodeRuntimeWithRPC(workspaceDir, rpcTransport, socketPath, endpointURL, 
 // Execute runs a TypeScript/JavaScript file using tsx.
 // codePath can be absolute or relative to workspaceDir.
 func (n *NodeRuntime) Execute(ctx context.Context, codePath string) (string, error) {
-	// npx tsx will auto-install if needed
-	cmd := exec.CommandContext(ctx, "npx", "tsx", codePath)
+	cmd := exec.CommandContext(ctx, "tsx", codePath)
 	cmd.Dir = n.workspaceDir
 
 	cmd.Env = n.env()
@@ -87,11 +86,11 @@ func (n *NodeRuntime) Name() string {
 	return "node-tsx"
 }
 
-// CheckAvailability checks if Node.js/npx is available
+// CheckAvailability checks if the Node.js/tsx runtime is available.
 func CheckAvailability(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "npx", "--version")
+	cmd := exec.CommandContext(ctx, "tsx", "--version")
 	if err := cmd.Run(); err != nil {
-		return errors.New("Node.js/npx is not available. Please install Node.js to use code execution mode")
+		return errors.New("Node.js/tsx is not available. Please install Node.js and tsx to use code execution mode")
 	}
 	return nil
 }
