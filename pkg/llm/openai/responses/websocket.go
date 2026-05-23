@@ -39,6 +39,7 @@ type responsesWebSocketTransport struct {
 type websocketHandshakeStatusError struct {
 	message    string
 	statusCode int
+	body       string
 	err        error
 }
 
@@ -213,8 +214,11 @@ func websocketHandshakeError(err error, resp *http.Response) error {
 	if resp == nil {
 		return errors.Wrap(err, "failed to connect Responses API websocket")
 	}
+	body := ""
 	if resp.Body != nil {
-		_, _ = io.Copy(io.Discard, resp.Body)
+		if bodyBytes, readErr := io.ReadAll(resp.Body); readErr == nil {
+			body = string(bodyBytes)
+		}
 		_ = resp.Body.Close()
 	}
 	message := fmt.Sprintf("failed to connect Responses API websocket: HTTP %d", resp.StatusCode)
@@ -222,9 +226,9 @@ func websocketHandshakeError(err error, resp *http.Response) error {
 		message += " " + statusText
 	}
 	if err == nil {
-		return &websocketHandshakeStatusError{message: message, statusCode: resp.StatusCode}
+		return &websocketHandshakeStatusError{message: message, statusCode: resp.StatusCode, body: body}
 	}
-	return &websocketHandshakeStatusError{message: message, statusCode: resp.StatusCode, err: err}
+	return &websocketHandshakeStatusError{message: message, statusCode: resp.StatusCode, body: body, err: err}
 }
 
 func writeWebSocketJSON(ctx context.Context, conn *websocket.Conn, payload any) error {

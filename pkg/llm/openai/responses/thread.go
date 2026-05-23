@@ -765,13 +765,38 @@ func isRetryableResponsesWebSocketError(err error) bool {
 
 	var statusErr *websocketHandshakeStatusError
 	if errors.As(err, &statusErr) {
-		return statusErr.statusCode == http.StatusRequestTimeout ||
-			statusErr.statusCode == http.StatusConflict ||
-			statusErr.statusCode == http.StatusTooManyRequests ||
-			statusErr.statusCode >= http.StatusInternalServerError
+		return isRetryableResponsesWebSocketHandshakeStatus(statusErr.statusCode, statusErr.body)
 	}
 
 	return true
+}
+
+func isRetryableResponsesWebSocketHandshakeStatus(statusCode int, body string) bool {
+	switch statusCode {
+	case http.StatusBadRequest, http.StatusTooManyRequests:
+		return false
+	case http.StatusServiceUnavailable:
+		code := responsesAPIErrorCodeFromBody(body)
+		return code != "server_is_overloaded" && code != "slow_down"
+	default:
+		return true
+	}
+}
+
+func responsesAPIErrorCodeFromBody(body string) string {
+	if strings.TrimSpace(body) == "" {
+		return ""
+	}
+
+	var payload struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(payload.Error.Code))
 }
 
 func logResponsesAPIRequestFailure(log *logrus.Entry, err error, model string, toolCount int, inputItemCount int) {

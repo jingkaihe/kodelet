@@ -23,7 +23,7 @@ import (
 
 func TestResponseCreateWebSocketRequestMarshalMirrorsResponsesCreateBody(t *testing.T) {
 	params := openairesponses.ResponseNewParams{
-		Model: "gpt-4.1",
+		Model: "gpt-5.5",
 		Input: openairesponses.ResponseNewParamsInputUnion{
 			OfInputItemList: openairesponses.ResponseInputParam{
 				{
@@ -51,7 +51,7 @@ func TestResponseCreateWebSocketRequestMarshalMirrorsResponsesCreateBody(t *test
 	require.NoError(t, json.Unmarshal(data, &payload))
 
 	assert.Equal(t, "response.create", payload["type"])
-	assert.Equal(t, "gpt-4.1", payload["model"])
+	assert.Equal(t, "gpt-5.5", payload["model"])
 	assert.Equal(t, "system", payload["instructions"])
 	assert.Equal(t, false, payload["store"])
 	assert.Equal(t, "conv-test", payload["prompt_cache_key"])
@@ -108,6 +108,33 @@ func TestWebSocketHandshakeErrorIsSafeToFormat(t *testing.T) {
 	err := websocketHandshakeError(assert.AnError, &http.Response{StatusCode: http.StatusUpgradeRequired})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "HTTP 426 Upgrade Required")
+}
+
+func TestIsRetryableResponsesWebSocketHandshakeStatusMatchesCodex(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		body       string
+		retryable  bool
+	}{
+		{name: "bad request does not retry", statusCode: http.StatusBadRequest, retryable: false},
+		{name: "forbidden retries as unexpected status", statusCode: http.StatusForbidden, retryable: true},
+		{name: "upgrade required retries without fallback", statusCode: http.StatusUpgradeRequired, retryable: true},
+		{name: "request timeout retries", statusCode: http.StatusRequestTimeout, retryable: true},
+		{name: "conflict retries", statusCode: http.StatusConflict, retryable: true},
+		{name: "too many requests does not retry", statusCode: http.StatusTooManyRequests, retryable: false},
+		{name: "internal server error retries", statusCode: http.StatusInternalServerError, retryable: true},
+		{name: "generic service unavailable retries", statusCode: http.StatusServiceUnavailable, retryable: true},
+		{name: "overloaded service unavailable does not retry", statusCode: http.StatusServiceUnavailable, body: `{"error":{"code":"server_is_overloaded"}}`, retryable: false},
+		{name: "slow down service unavailable does not retry", statusCode: http.StatusServiceUnavailable, body: `{"error":{"code":"slow_down"}}`, retryable: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := &websocketHandshakeStatusError{statusCode: tt.statusCode, body: tt.body}
+			assert.Equal(t, tt.retryable, isRetryableResponsesWebSocketError(err))
+		})
+	}
 }
 
 func TestResponsesWebSocketTransportSetsBetaHeader(t *testing.T) {
@@ -181,7 +208,7 @@ func TestWebSocketStreamDecoderClosesTransportAfterTerminalEvent(t *testing.T) {
 	defer server.Close()
 
 	transport := newResponsesWebSocketTransport("http" + strings.TrimPrefix(server.URL, "http") + "/v1")
-	stream, err := transport.Stream(context.Background(), openairesponses.ResponseNewParams{Model: "gpt-4.1"}, nil, nil)
+	stream, err := transport.Stream(context.Background(), openairesponses.ResponseNewParams{Model: "gpt-5.5"}, nil, nil)
 	require.NoError(t, err)
 	require.True(t, stream.Next())
 	assert.Equal(t, "response.completed", stream.Current().Type)
@@ -193,7 +220,7 @@ func TestWebSocketStreamDecoderClosesTransportAfterTerminalEvent(t *testing.T) {
 }
 
 func TestProcessMessageExchangeClosesWebSocketAfterStreamError(t *testing.T) {
-	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", Retry: llmtypes.RetryConfig{Attempts: 1}, OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
+	config := llmtypes.Config{Provider: "openai", Model: "gpt-5.5", Retry: llmtypes.RetryConfig{Attempts: 1}, OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
 	thread := &Thread{
 		Thread:       base.NewThread(config, "conv-test", hooks.Trigger{}),
 		useWebSocket: true,
@@ -221,13 +248,13 @@ func TestProcessMessageExchangeClosesWebSocketAfterStreamError(t *testing.T) {
 	}
 
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	_, _, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-4.1", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
+	_, _, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-5.5", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
 	require.Error(t, err)
 	assert.True(t, fakeStreamer.closed)
 }
 
 func TestProcessMessageExchangeFailsWhenWebSocketCreationFails(t *testing.T) {
-	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", Retry: llmtypes.RetryConfig{Attempts: 1}, OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
+	config := llmtypes.Config{Provider: "openai", Model: "gpt-5.5", Retry: llmtypes.RetryConfig{Attempts: 1}, OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
 	thread := &Thread{
 		Thread:       base.NewThread(config, "conv-test", hooks.Trigger{}),
 		useWebSocket: true,
@@ -252,7 +279,7 @@ func TestProcessMessageExchangeFailsWhenWebSocketCreationFails(t *testing.T) {
 	thread.webSocket = fakeStreamer
 
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	_, _, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-4.1", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
+	_, _, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-5.5", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to create Responses API websocket stream")
 	assert.True(t, fakeStreamer.closed)
@@ -261,7 +288,7 @@ func TestProcessMessageExchangeFailsWhenWebSocketCreationFails(t *testing.T) {
 func TestProcessMessageExchangeRetriesWebSocketCreationFailure(t *testing.T) {
 	config := llmtypes.Config{
 		Provider: "openai",
-		Model:    "gpt-4.1",
+		Model:    "gpt-5.5",
 		Retry: llmtypes.RetryConfig{
 			Attempts:     3,
 			InitialDelay: 1,
@@ -303,7 +330,58 @@ func TestProcessMessageExchangeRetriesWebSocketCreationFailure(t *testing.T) {
 	}
 
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	_, _, completed, err := thread.processMessageExchange(context.Background(), handler, "gpt-4.1", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
+	_, _, completed, err := thread.processMessageExchange(context.Background(), handler, "gpt-5.5", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
+	require.NoError(t, err)
+	assert.True(t, completed)
+	assert.Equal(t, 3, attempts)
+}
+
+func TestProcessMessageExchangeRetriesWebSocketForbiddenHandshakeFailure(t *testing.T) {
+	config := llmtypes.Config{
+		Provider: "openai",
+		Model:    "gpt-5.5",
+		Retry: llmtypes.RetryConfig{
+			Attempts:     3,
+			InitialDelay: 1,
+			MaxDelay:     1,
+			BackoffType:  "fixed",
+		},
+		OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"},
+	}
+	thread := &Thread{
+		Thread:       base.NewThread(config, "conv-test", hooks.Trigger{}),
+		useWebSocket: true,
+		inputItems: []openairesponses.ResponseInputItemUnionParam{
+			{
+				OfMessage: &openairesponses.EasyInputMessageParam{
+					Role: openairesponses.EasyInputMessageRoleUser,
+					Content: openairesponses.EasyInputMessageContentUnionParam{
+						OfString: param.NewOpt("hello"),
+					},
+				},
+			},
+		},
+		storedItems: []StoredInputItem{{Type: "message", Role: "user", Content: "hello"}},
+	}
+	thread.SetState(tools.NewBasicState(context.Background()))
+
+	attempts := 0
+	fakeStreamer := &fakeResponsesWebSocketStreamer{
+		streamFunc: func(context.Context, openairesponses.ResponseNewParams, []string, auth.HTTPAuthorizer) (*ssestream.Stream[openairesponses.ResponseStreamEventUnion], error) {
+			attempts++
+			if attempts < 3 {
+				return nil, &websocketHandshakeStatusError{message: "forbidden", statusCode: http.StatusForbidden}
+			}
+			return ssestream.NewStream[openairesponses.ResponseStreamEventUnion](emptyResponsesStreamDecoder{}, nil), nil
+		},
+	}
+	thread.webSocket = fakeStreamer
+	thread.processStreamFunc = func(context.Context, *ssestream.Stream[openairesponses.ResponseStreamEventUnion], llmtypes.MessageHandler, string, llmtypes.MessageOpt) (processStreamResult, error) {
+		return processStreamResult{responseCompleted: true}, nil
+	}
+
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
+	_, _, completed, err := thread.processMessageExchange(context.Background(), handler, "gpt-5.5", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
 	require.NoError(t, err)
 	assert.True(t, completed)
 	assert.Equal(t, 3, attempts)
@@ -312,7 +390,7 @@ func TestProcessMessageExchangeRetriesWebSocketCreationFailure(t *testing.T) {
 func TestProcessMessageExchangeRetriesWebSocketStreamAfterPresentationOnlyOutput(t *testing.T) {
 	config := llmtypes.Config{
 		Provider: "openai",
-		Model:    "gpt-4.1",
+		Model:    "gpt-5.5",
 		Retry: llmtypes.RetryConfig{
 			Attempts:     3,
 			InitialDelay: 1,
@@ -355,7 +433,7 @@ func TestProcessMessageExchangeRetriesWebSocketStreamAfterPresentationOnlyOutput
 	}
 
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	_, _, completed, err := thread.processMessageExchange(context.Background(), handler, "gpt-4.1", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
+	_, _, completed, err := thread.processMessageExchange(context.Background(), handler, "gpt-5.5", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
 	require.NoError(t, err)
 	assert.True(t, completed)
 	assert.Equal(t, 2, attempts)
@@ -365,7 +443,7 @@ func TestProcessMessageExchangeRetriesWebSocketStreamAfterPresentationOnlyOutput
 func TestProcessMessageExchangeRetriesWebSocketStreamAfterStateMutation(t *testing.T) {
 	config := llmtypes.Config{
 		Provider: "openai",
-		Model:    "gpt-4.1",
+		Model:    "gpt-5.5",
 		Retry: llmtypes.RetryConfig{
 			Attempts:     3,
 			InitialDelay: 1,
@@ -413,7 +491,7 @@ func TestProcessMessageExchangeRetriesWebSocketStreamAfterStateMutation(t *testi
 	}
 
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	output, _, completed, err := thread.processMessageExchange(context.Background(), handler, "gpt-4.1", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
+	output, _, completed, err := thread.processMessageExchange(context.Background(), handler, "gpt-5.5", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
 	require.NoError(t, err)
 	assert.True(t, completed)
 	assert.Equal(t, "first attempt", output)
@@ -423,7 +501,7 @@ func TestProcessMessageExchangeRetriesWebSocketStreamAfterStateMutation(t *testi
 func TestProcessMessageExchangeRetriesWebSocketStreamAfterPendingToolCallOnly(t *testing.T) {
 	config := llmtypes.Config{
 		Provider: "openai",
-		Model:    "gpt-4.1",
+		Model:    "gpt-5.5",
 		Retry: llmtypes.RetryConfig{
 			Attempts:     3,
 			InitialDelay: 1,
@@ -465,7 +543,7 @@ func TestProcessMessageExchangeRetriesWebSocketStreamAfterPendingToolCallOnly(t 
 	}
 
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	_, _, completed, err := thread.processMessageExchange(context.Background(), handler, "gpt-4.1", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
+	_, _, completed, err := thread.processMessageExchange(context.Background(), handler, "gpt-5.5", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
 	require.NoError(t, err)
 	assert.True(t, completed)
 	assert.Equal(t, 2, attempts)
