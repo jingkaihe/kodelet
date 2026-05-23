@@ -132,7 +132,7 @@ func TestIsRetryableResponsesWebSocketHandshakeStatusMatchesCodex(t *testing.T) 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := &websocketHandshakeStatusError{statusCode: tt.statusCode, body: tt.body}
-			assert.Equal(t, tt.retryable, isRetryableResponsesWebSocketError(err))
+			assert.Equal(t, tt.retryable, isRetryableResponsesStreamError(err))
 		})
 	}
 }

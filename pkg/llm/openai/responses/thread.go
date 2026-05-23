@@ -511,7 +511,6 @@ func (t *Thread) processMessageExchange(
 	opt llmtypes.MessageOpt,
 ) (string, bool, bool, error) {
 	log := logger.G(ctx)
-	var finalOutput string
 
 	saveConversation := func() {
 		if t.Persisted && t.Store != nil && !opt.NoSaveConversation {
@@ -585,67 +584,69 @@ func (t *Thread) processMessageExchange(
 		}
 	}
 	processStream := t.processStreamFunc
+	processStreamHandlesNilStream := processStream != nil
 	if processStream == nil {
 		processStream = t.processStream
 	}
 
+	var newResponsesStream responsesStreamFactory
+	closeResponsesStream := func(stream *ssestream.Stream[responses.ResponseStreamEventUnion]) {
+		if stream != nil {
+			_ = stream.Close()
+		}
+	}
+	transportName := "https"
 	if useWebSocket {
-		return t.processMessageExchangeWithWebSocketRetries(ctx, handler, model, params, tools, processStream, opt, saveConversation)
-	}
-
-	var stream *ssestream.Stream[responses.ResponseStreamEventUnion]
-	{
-		stream = newStreaming(ctx, params, requestOpts...)
-	}
-	log.Debug("stream created, processing events")
-
-	// Process stream events
-	streamResult, err := processStream(ctx, stream, handler, model, opt)
-	if err != nil {
-		if useWebSocket {
+		transportName = "websocket"
+		newResponsesStream = func(ctx context.Context, params responses.ResponseNewParams) (*ssestream.Stream[responses.ResponseStreamEventUnion], error) {
+			stream, err := t.webSocket.Stream(ctx, params, nil, t.authorizer)
+			if err != nil {
+				_ = t.webSocket.Close()
+				return nil, errors.Wrap(err, "failed to create Responses API websocket stream")
+			}
+			return stream, nil
+		}
+		closeResponsesStream = func(stream *ssestream.Stream[responses.ResponseStreamEventUnion]) {
+			if stream != nil {
+				_ = stream.Close()
+			}
 			_ = t.webSocket.Close()
 		}
-		// Log detailed error information for debugging
-		log.WithError(err).
-			WithField("model", model).
-			WithField("tool_count", len(tools)).
-			WithField("input_items", len(t.inputItems)).
-			Error("API request failed")
-		saveConversation()
-		return "", false, false, err
-	}
-
-	// Extract final text output from the last response
-	if len(t.inputItems) > 0 {
-		// Get text from the last assistant message
-		for i := len(t.inputItems) - 1; i >= 0; i-- {
-			item := t.inputItems[i]
-			if item.OfMessage != nil && item.OfMessage.Role == responses.EasyInputMessageRoleAssistant {
-				if item.OfMessage.Content.OfString.Valid() {
-					finalOutput = item.OfMessage.Content.OfString.Value
-					break
+	} else {
+		newResponsesStream = func(ctx context.Context, params responses.ResponseNewParams) (*ssestream.Stream[responses.ResponseStreamEventUnion], error) {
+			stream := newStreaming(ctx, params, requestOpts...)
+			if stream == nil && !processStreamHandlesNilStream {
+				return nil, errors.New("failed to create Responses API stream")
+			}
+			if stream != nil {
+				if err := stream.Err(); err != nil {
+					return nil, err
 				}
 			}
+			return stream, nil
 		}
 	}
 
-	saveConversation()
-
-	return finalOutput, streamResult.toolsUsed, streamResult.responseCompleted, nil
+	return t.processMessageExchangeWithStreamRetries(ctx, handler, model, params, tools, newResponsesStream, closeResponsesStream, processStream, opt, saveConversation, transportName)
 }
 
-func (t *Thread) processMessageExchangeWithWebSocketRetries(
+type responsesStreamFactory func(context.Context, responses.ResponseNewParams) (*ssestream.Stream[responses.ResponseStreamEventUnion], error)
+
+func (t *Thread) processMessageExchangeWithStreamRetries(
 	ctx context.Context,
 	handler llmtypes.MessageHandler,
 	model string,
 	params responses.ResponseNewParams,
 	tools []responses.ToolUnionParam,
+	newResponsesStream responsesStreamFactory,
+	closeResponsesStream func(*ssestream.Stream[responses.ResponseStreamEventUnion]),
 	processStream func(context.Context, *ssestream.Stream[responses.ResponseStreamEventUnion], llmtypes.MessageHandler, string, llmtypes.MessageOpt) (processStreamResult, error),
 	opt llmtypes.MessageOpt,
 	saveConversation func(),
+	transportName string,
 ) (string, bool, bool, error) {
 	log := logger.G(ctx)
-	retryConfig := responsesWebSocketRetryConfig(t.Config)
+	retryConfig := responsesStreamRetryConfig(t.Config)
 	var finalOutput string
 	var finalStreamResult processStreamResult
 	pendingReasoningBeforeAttempt := t.pendingReasoning.String()
@@ -657,17 +658,15 @@ func (t *Thread) processMessageExchangeWithWebSocketRetries(
 			attemptParams.Input = responses.ResponseNewParamsInputUnion{OfInputItemList: appendGoalContextInputItems(t.inputItems, t.GetMetadata())}
 			t.applyCodexRestrictions(&attemptParams)
 
-			stream, err := t.webSocket.Stream(ctx, attemptParams, nil, t.authorizer)
+			stream, err := newResponsesStream(ctx, attemptParams)
 			if err != nil {
-				_ = t.webSocket.Close()
-				wrappedErr := errors.Wrap(err, "failed to create Responses API websocket stream")
-				if !isRetryableResponsesWebSocketError(err) {
-					return retry.Unrecoverable(wrappedErr)
+				if !isRetryableResponsesStreamError(err) {
+					return retry.Unrecoverable(err)
 				}
-				return wrappedErr
+				return err
 			}
 
-			log.Debug("stream created, processing events")
+			log.WithField("transport", transportName).Debug("stream created, processing events")
 
 			streamResult, err := processStream(ctx, stream, handler, model, opt)
 			if err == nil {
@@ -676,8 +675,8 @@ func (t *Thread) processMessageExchangeWithWebSocketRetries(
 				return nil
 			}
 
-			_ = t.webSocket.Close()
-			if !isRetryableResponsesWebSocketError(err) {
+			closeResponsesStream(stream)
+			if !isRetryableResponsesStreamError(err) {
 				return retry.Unrecoverable(err)
 			}
 			return err
@@ -685,14 +684,15 @@ func (t *Thread) processMessageExchangeWithWebSocketRetries(
 		retry.RetryIf(retry.IsRecoverable),
 		retry.Attempts(uint(retryConfig.Attempts)),
 		retry.Delay(time.Duration(retryConfig.InitialDelay)*time.Millisecond),
-		retry.DelayType(responsesWebSocketRetryDelayType(retryConfig)),
+		retry.DelayType(responsesStreamRetryDelayType(retryConfig)),
 		retry.MaxDelay(time.Duration(retryConfig.MaxDelay)*time.Millisecond),
 		retry.Context(ctx),
 		retry.OnRetry(func(n uint, err error) {
 			log.WithError(err).
 				WithField("attempt", n+1).
 				WithField("max_attempts", retryConfig.Attempts).
-				Warn("retrying Responses API websocket request")
+				WithField("transport", transportName).
+				Warn("retrying Responses API stream request")
 		}),
 		retry.LastErrorOnly(true),
 	)
@@ -718,13 +718,13 @@ func (t *Thread) lastAssistantMessageText() string {
 	return ""
 }
 
-func responsesWebSocketRetryConfig(config llmtypes.Config) llmtypes.RetryConfig {
+func responsesStreamRetryConfig(config llmtypes.Config) llmtypes.RetryConfig {
 	retryConfig := config.Retry
 	if retryConfig.Attempts == 0 {
 		retryConfig = llmtypes.DefaultRetryConfig
 	}
 
-	// Keep Responses websocket behavior aligned with the OpenAI Go SDK default:
+	// Keep Responses stream behavior aligned with the OpenAI Go SDK default:
 	// one initial attempt plus at most two retries.
 	retryConfig.Attempts = min(max(retryConfig.Attempts, 1), 3)
 
@@ -741,7 +741,7 @@ func responsesWebSocketRetryConfig(config llmtypes.Config) llmtypes.RetryConfig 
 	return retryConfig
 }
 
-func responsesWebSocketRetryDelayType(retryConfig llmtypes.RetryConfig) retry.DelayTypeFunc {
+func responsesStreamRetryDelayType(retryConfig llmtypes.RetryConfig) retry.DelayTypeFunc {
 	if retryConfig.BackoffType == "fixed" {
 		return retry.FixedDelay
 	}
@@ -755,11 +755,15 @@ func resetPendingReasoning(builder *strings.Builder, value string) {
 	}
 }
 
-func isRetryableResponsesWebSocketError(err error) bool {
+func isRetryableResponsesStreamError(err error) bool {
 	if err == nil {
 		return false
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+
+	if !retry.IsRecoverable(err) {
 		return false
 	}
 
@@ -768,7 +772,26 @@ func isRetryableResponsesWebSocketError(err error) bool {
 		return isRetryableResponsesWebSocketHandshakeStatus(statusErr.statusCode, statusErr.body)
 	}
 
+	var apiErr *openai.Error
+	if errors.As(err, &apiErr) {
+		return isRetryableResponsesHTTPStatus(apiErr.StatusCode, apiErr.Code)
+	}
+
 	return true
+}
+
+func isRetryableResponsesHTTPStatus(statusCode int, errorCode string) bool {
+	switch statusCode {
+	case http.StatusBadRequest, http.StatusTooManyRequests:
+		return false
+	case http.StatusServiceUnavailable:
+		code := strings.ToLower(strings.TrimSpace(errorCode))
+		return code != "server_is_overloaded" && code != "slow_down"
+	case 0:
+		return true
+	default:
+		return statusCode >= http.StatusInternalServerError || statusCode == http.StatusRequestTimeout || statusCode == http.StatusConflict
+	}
 }
 
 func isRetryableResponsesWebSocketHandshakeStatus(statusCode int, body string) bool {
