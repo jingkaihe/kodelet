@@ -2386,6 +2386,172 @@ func TestProcessMessageExchangeRetriesHTTPSStreamError(t *testing.T) {
 	assert.Equal(t, 3, attempts)
 }
 
+func TestProcessMessageExchangeKeepsDurableStateBeforeHTTPSStreamRetry(t *testing.T) {
+	config := llmtypes.Config{
+		Provider:   "openai",
+		Model:      "gpt-5.5",
+		IsSubAgent: true,
+		Retry: llmtypes.RetryConfig{
+			Attempts:     3,
+			InitialDelay: 1,
+			MaxDelay:     1,
+			BackoffType:  "fixed",
+		},
+		OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"},
+	}
+	thread := &Thread{
+		Thread: base.NewThread(config, "conv-test", hooks.Trigger{}),
+		inputItems: []openairesponses.ResponseInputItemUnionParam{
+			{
+				OfMessage: &openairesponses.EasyInputMessageParam{
+					Role:    openairesponses.EasyInputMessageRoleUser,
+					Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("hello")},
+				},
+			},
+		},
+		storedItems: []StoredInputItem{{Type: "message", Role: "user", Content: "hello"}},
+	}
+	thread.SetState(tools.NewBasicState(context.Background()))
+	thread.SetStructuredToolResult("existing", tooltypes.StructuredToolResult{ToolName: "existing", Success: true})
+
+	attempts := 0
+	var inputLengths []int
+	thread.newStreamingFunc = func(_ context.Context, params openairesponses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
+		attempts++
+		inputLengths = append(inputLengths, len(params.Input.OfInputItemList))
+		return nil
+	}
+	thread.processStreamFunc = func(_ context.Context, _ *ssestream.Stream[openairesponses.ResponseStreamEventUnion], _ llmtypes.MessageHandler, _ string, _ llmtypes.MessageOpt) (processStreamResult, error) {
+		if attempts == 1 {
+			thread.pendingReasoning.WriteString("partial reasoning")
+			thread.inputItems = append(thread.inputItems, openairesponses.ResponseInputItemUnionParam{
+				OfMessage: &openairesponses.EasyInputMessageParam{
+					Role:    openairesponses.EasyInputMessageRoleAssistant,
+					Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("partial")},
+				},
+			})
+			thread.storedItems = append(thread.storedItems, StoredInputItem{Type: "message", Role: "assistant", Content: "partial"})
+			thread.SetStructuredToolResult("partial", tooltypes.StructuredToolResult{ToolName: "partial", Success: true})
+			return processStreamResult{}, errors.New("stream disconnected")
+		}
+		thread.inputItems = append(thread.inputItems, openairesponses.ResponseInputItemUnionParam{
+			OfMessage: &openairesponses.EasyInputMessageParam{
+				Role:    openairesponses.EasyInputMessageRoleAssistant,
+				Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("done")},
+			},
+		})
+		thread.storedItems = append(thread.storedItems, StoredInputItem{Type: "message", Role: "assistant", Content: "done"})
+		return processStreamResult{responseCompleted: true}, nil
+	}
+
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
+	output, _, completed, err := thread.processMessageExchange(context.Background(), handler, "gpt-5.5", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
+	require.NoError(t, err)
+	assert.True(t, completed)
+	assert.Equal(t, "done", output)
+	assert.Equal(t, []int{1, 2}, inputLengths)
+	require.Len(t, thread.storedItems, 3)
+	assert.Equal(t, "hello", thread.storedItems[0].Content)
+	assert.Equal(t, "partial", thread.storedItems[1].Content)
+	assert.Equal(t, "done", thread.storedItems[2].Content)
+	assert.Empty(t, thread.pendingReasoning.String())
+	toolResults := thread.GetStructuredToolResults()
+	assert.Contains(t, toolResults, "existing")
+	assert.Contains(t, toolResults, "partial")
+}
+
+func TestProcessMessageExchangeRetriesFromToolResultAfterLocalToolExecution(t *testing.T) {
+	config := llmtypes.Config{
+		Provider:   "openai",
+		Model:      "gpt-5.5",
+		IsSubAgent: true,
+		Retry: llmtypes.RetryConfig{
+			Attempts:     3,
+			InitialDelay: 1,
+			MaxDelay:     1,
+			BackoffType:  "fixed",
+		},
+		OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"},
+	}
+	thread := &Thread{
+		Thread: base.NewThread(config, "conv-test", hooks.Trigger{}),
+		inputItems: []openairesponses.ResponseInputItemUnionParam{
+			{
+				OfMessage: &openairesponses.EasyInputMessageParam{
+					Role:    openairesponses.EasyInputMessageRoleUser,
+					Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("hello")},
+				},
+			},
+		},
+		storedItems: []StoredInputItem{{Type: "message", Role: "user", Content: "hello"}},
+	}
+	thread.SetState(tools.NewBasicState(context.Background(), tools.WithExtraMCPTools([]tooltypes.Tool{responsesTestTool{name: "ok_tool"}})))
+
+	attempts := 0
+	var inputLengths []int
+	thread.newStreamingFunc = func(_ context.Context, params openairesponses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
+		attempts++
+		inputLengths = append(inputLengths, len(params.Input.OfInputItemList))
+		if attempts == 1 {
+			return responseStreamFromMaps(t, []map[string]any{
+				{
+					"type": "response.output_item.done",
+					"item": map[string]any{
+						"type":      "function_call",
+						"call_id":   "call_1",
+						"name":      "ok_tool",
+						"arguments": `{}`,
+					},
+				},
+			})
+		}
+
+		return responseStreamFromMaps(t, []map[string]any{
+			{
+				"type": "response.output_item.done",
+				"item": map[string]any{
+					"type":   "message",
+					"role":   "assistant",
+					"status": "completed",
+					"content": []map[string]any{
+						{"type": "output_text", "text": "done"},
+					},
+				},
+			},
+			{
+				"type": "response.completed",
+				"response": map[string]any{
+					"id":     "resp_2",
+					"status": "completed",
+					"usage": map[string]any{
+						"input_tokens":  1,
+						"output_tokens": 1,
+						"input_tokens_details": map[string]any{
+							"cached_tokens": 0,
+						},
+					},
+				},
+			},
+		})
+	}
+
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
+	output, toolsUsed, completed, err := thread.processMessageExchange(context.Background(), handler, "gpt-5.5", 256, "system", llmtypes.MessageOpt{})
+	require.NoError(t, err)
+	assert.True(t, completed)
+	assert.False(t, toolsUsed)
+	assert.Equal(t, "done", output)
+	assert.Equal(t, 2, attempts)
+	assert.Equal(t, []int{1, 3}, inputLengths)
+	require.Len(t, thread.storedItems, 4)
+	assert.Equal(t, "message", thread.storedItems[0].Type)
+	assert.Equal(t, "function_call", thread.storedItems[1].Type)
+	assert.Equal(t, "function_call_output", thread.storedItems[2].Type)
+	assert.Equal(t, "message", thread.storedItems[3].Type)
+	assert.Equal(t, "done", thread.storedItems[3].Content)
+	assert.Contains(t, thread.GetStructuredToolResults(), "call_1")
+}
+
 func TestProcessMessageExchangeDoesNotRetryHTTPSUnrecoverableStreamError(t *testing.T) {
 	config := llmtypes.Config{
 		Provider:   "openai",

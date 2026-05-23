@@ -440,7 +440,7 @@ func TestProcessMessageExchangeRetriesWebSocketStreamAfterPresentationOnlyOutput
 	assert.Empty(t, thread.pendingReasoning.String())
 }
 
-func TestProcessMessageExchangeRetriesWebSocketStreamAfterStateMutation(t *testing.T) {
+func TestProcessMessageExchangeKeepsWebSocketStreamDurableStateBeforeRetry(t *testing.T) {
 	config := llmtypes.Config{
 		Provider: "openai",
 		Model:    "gpt-5.5",
@@ -485,8 +485,16 @@ func TestProcessMessageExchangeRetriesWebSocketStreamAfterStateMutation(t *testi
 					Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("first attempt")},
 				},
 			})
+			thread.storedItems = append(thread.storedItems, StoredInputItem{Type: "message", Role: "assistant", Content: "first attempt"})
 			return processStreamResult{}, assert.AnError
 		}
+		thread.inputItems = append(thread.inputItems, openairesponses.ResponseInputItemUnionParam{
+			OfMessage: &openairesponses.EasyInputMessageParam{
+				Role:    openairesponses.EasyInputMessageRoleAssistant,
+				Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("second attempt")},
+			},
+		})
+		thread.storedItems = append(thread.storedItems, StoredInputItem{Type: "message", Role: "assistant", Content: "second attempt"})
 		return processStreamResult{responseCompleted: true}, nil
 	}
 
@@ -494,8 +502,12 @@ func TestProcessMessageExchangeRetriesWebSocketStreamAfterStateMutation(t *testi
 	output, _, completed, err := thread.processMessageExchange(context.Background(), handler, "gpt-5.5", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
 	require.NoError(t, err)
 	assert.True(t, completed)
-	assert.Equal(t, "first attempt", output)
+	assert.Equal(t, "second attempt", output)
 	assert.Equal(t, 2, attempts)
+	require.Len(t, thread.storedItems, 3)
+	assert.Equal(t, "hello", thread.storedItems[0].Content)
+	assert.Equal(t, "first attempt", thread.storedItems[1].Content)
+	assert.Equal(t, "second attempt", thread.storedItems[2].Content)
 }
 
 func TestProcessMessageExchangeRetriesWebSocketStreamAfterPendingToolCallOnly(t *testing.T) {
