@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -49,6 +50,162 @@ func (ts *testSetup) parseLogEntry(t *testing.T) map[string]any {
 func (ts *testSetup) assertLogMessage(t *testing.T, logEntry map[string]any) {
 	assert.Equal(t, "Turn completed", logEntry["msg"])
 	assert.Equal(t, "info", logEntry["level"])
+}
+
+type testConversationSummary struct {
+	id           string
+	createdAt    time.Time
+	updatedAt    time.Time
+	messageCount int
+	usage        llmtypes.Usage
+	provider     string
+}
+
+func (s testConversationSummary) GetID() string            { return s.id }
+func (s testConversationSummary) GetCreatedAt() time.Time  { return s.createdAt }
+func (s testConversationSummary) GetUpdatedAt() time.Time  { return s.updatedAt }
+func (s testConversationSummary) GetMessageCount() int     { return s.messageCount }
+func (s testConversationSummary) GetUsage() llmtypes.Usage { return s.usage }
+func (s testConversationSummary) GetProvider() string      { return s.provider }
+func testUsage(input, output, cacheWrite, cacheRead int) llmtypes.Usage {
+	return llmtypes.Usage{
+		InputTokens:              input,
+		OutputTokens:             output,
+		CacheCreationInputTokens: cacheWrite,
+		CacheReadInputTokens:     cacheRead,
+		InputCost:                float64(input) / 1000,
+		OutputCost:               float64(output) / 1000,
+		CacheCreationCost:        float64(cacheWrite) / 1000,
+		CacheReadCost:            float64(cacheRead) / 1000,
+	}
+}
+
+func TestCalculateUsageStatsAggregatesFiltersAndSortsByDay(t *testing.T) {
+	base := time.Date(2026, 5, 20, 10, 0, 0, 0, time.UTC)
+	summaries := []ConversationSummary{
+		testConversationSummary{id: "old", updatedAt: base.AddDate(0, 0, -2), usage: testUsage(1, 1, 1, 1)},
+		testConversationSummary{id: "a", updatedAt: base, usage: testUsage(100, 50, 10, 5)},
+		testConversationSummary{id: "b", updatedAt: base.Add(3 * time.Hour), usage: testUsage(200, 70, 20, 7)},
+		testConversationSummary{id: "c", updatedAt: base.AddDate(0, 0, 1), usage: testUsage(300, 90, 30, 9)},
+		testConversationSummary{id: "future", updatedAt: base.AddDate(0, 0, 3), usage: testUsage(999, 999, 999, 999)},
+	}
+
+	stats := CalculateUsageStats(summaries, base.Truncate(24*time.Hour), base.AddDate(0, 0, 1).Truncate(24*time.Hour))
+
+	require.Len(t, stats.Daily, 2)
+	assert.Equal(t, base.AddDate(0, 0, 1).Truncate(24*time.Hour), stats.Daily[0].Date)
+	assert.Equal(t, 1, stats.Daily[0].Conversations)
+	assert.Equal(t, 300, stats.Daily[0].Usage.InputTokens)
+	assert.Equal(t, base.Truncate(24*time.Hour), stats.Daily[1].Date)
+	assert.Equal(t, 2, stats.Daily[1].Conversations)
+	assert.Equal(t, 300, stats.Daily[1].Usage.InputTokens)
+	assert.Equal(t, 120, stats.Daily[1].Usage.OutputTokens)
+	assert.Equal(t, 30, stats.Daily[1].Usage.CacheCreationInputTokens)
+	assert.Equal(t, 12, stats.Daily[1].Usage.CacheReadInputTokens)
+
+	assert.Equal(t, 600, stats.Total.InputTokens)
+	assert.Equal(t, 210, stats.Total.OutputTokens)
+	assert.Equal(t, 60, stats.Total.CacheCreationInputTokens)
+	assert.Equal(t, 21, stats.Total.CacheReadInputTokens)
+	assert.InDelta(t, 0.6, stats.Total.InputCost, 0.0001)
+	assert.InDelta(t, 0.21, stats.Total.OutputCost, 0.0001)
+	assert.InDelta(t, 0.06, stats.Total.CacheCreationCost, 0.0001)
+	assert.InDelta(t, 0.021, stats.Total.CacheReadCost, 0.0001)
+}
+
+func TestCalculateConversationUsageStatsTotalsAllFields(t *testing.T) {
+	summaries := []ConversationSummary{
+		testConversationSummary{messageCount: 2, usage: llmtypes.Usage{InputTokens: 100, OutputTokens: 50, CacheReadInputTokens: 10, CacheCreationInputTokens: 5, InputCost: 0.01, OutputCost: 0.02, CacheReadCost: 0.001, CacheCreationCost: 0.002}},
+		testConversationSummary{messageCount: 3, usage: llmtypes.Usage{InputTokens: 200, OutputTokens: 60, CacheReadInputTokens: 20, CacheCreationInputTokens: 6, InputCost: 0.03, OutputCost: 0.04, CacheReadCost: 0.003, CacheCreationCost: 0.004}},
+	}
+
+	stats := CalculateConversationUsageStats(summaries)
+
+	assert.Equal(t, 2, stats.TotalConversations)
+	assert.Equal(t, 5, stats.TotalMessages)
+	assert.Equal(t, 451, stats.TotalTokens)
+	assert.Equal(t, 300, stats.InputTokens)
+	assert.Equal(t, 110, stats.OutputTokens)
+	assert.Equal(t, 30, stats.CacheReadTokens)
+	assert.Equal(t, 11, stats.CacheWriteTokens)
+	assert.InDelta(t, 0.04, stats.InputCost, 0.0001)
+	assert.InDelta(t, 0.06, stats.OutputCost, 0.0001)
+	assert.InDelta(t, 0.004, stats.CacheReadCost, 0.0001)
+	assert.InDelta(t, 0.006, stats.CacheWriteCost, 0.0001)
+	assert.InDelta(t, 0.11, stats.TotalCost, 0.0001)
+
+	empty := CalculateConversationUsageStats(nil)
+	assert.Equal(t, 0, empty.TotalConversations)
+	assert.Equal(t, 0, empty.TotalTokens)
+}
+
+func TestCalculateProviderBreakdownStatsAggregatesByProvider(t *testing.T) {
+	base := time.Date(2026, 5, 20, 0, 0, 0, 0, time.UTC)
+	summaries := []ConversationSummary{
+		testConversationSummary{updatedAt: base, provider: "anthropic", usage: testUsage(100, 10, 1, 2)},
+		testConversationSummary{updatedAt: base.Add(time.Hour), provider: "anthropic", usage: testUsage(200, 20, 2, 3)},
+		testConversationSummary{updatedAt: base.AddDate(0, 0, 1), provider: "openai", usage: testUsage(300, 30, 3, 4)},
+		testConversationSummary{updatedAt: base.AddDate(0, 0, -1), provider: "ignored", usage: testUsage(999, 999, 999, 999)},
+	}
+
+	stats := CalculateProviderBreakdownStats(summaries, base, time.Time{})
+
+	assert.Equal(t, 3, stats.TotalConversations)
+	assert.Equal(t, 600, stats.Total.InputTokens)
+	require.Contains(t, stats.ProviderStats, "anthropic")
+	require.Contains(t, stats.ProviderStats, "openai")
+	assert.Equal(t, 2, stats.ProviderStats["anthropic"].Conversations)
+	assert.Equal(t, 300, stats.ProviderStats["anthropic"].Usage.InputTokens)
+	assert.Equal(t, 1, stats.ProviderStats["openai"].Conversations)
+	assert.Equal(t, 300, stats.ProviderStats["openai"].Usage.InputTokens)
+	assert.NotContains(t, stats.ProviderStats, "ignored")
+}
+
+func TestCalculateDailyProviderBreakdownStatsAggregatesAndSorts(t *testing.T) {
+	base := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
+	summaries := []ConversationSummary{
+		testConversationSummary{updatedAt: base, provider: "anthropic", usage: testUsage(100, 10, 1, 2)},
+		testConversationSummary{updatedAt: base.Add(2 * time.Hour), provider: "openai", usage: testUsage(200, 20, 2, 3)},
+		testConversationSummary{updatedAt: base.AddDate(0, 0, 1), provider: "openai", usage: testUsage(300, 30, 3, 4)},
+	}
+
+	stats := CalculateDailyProviderBreakdownStats(summaries, time.Time{}, time.Time{})
+
+	require.Len(t, stats.Daily, 2)
+	assert.Equal(t, base.AddDate(0, 0, 1).Truncate(24*time.Hour), stats.Daily[0].Date)
+	assert.Equal(t, 1, stats.Daily[0].TotalConversations)
+	assert.Equal(t, 300, stats.Daily[0].TotalUsage.InputTokens)
+	assert.Equal(t, 300, stats.Daily[0].ProviderUsage["openai"].Usage.InputTokens)
+
+	assert.Equal(t, base.Truncate(24*time.Hour), stats.Daily[1].Date)
+	assert.Equal(t, 2, stats.Daily[1].TotalConversations)
+	assert.Equal(t, 300, stats.Daily[1].TotalUsage.InputTokens)
+	assert.Equal(t, 100, stats.Daily[1].ProviderUsage["anthropic"].Usage.InputTokens)
+	assert.Equal(t, 200, stats.Daily[1].ProviderUsage["openai"].Usage.InputTokens)
+
+	assert.Equal(t, 3, stats.TotalConversations)
+	assert.Equal(t, 600, stats.Total.InputTokens)
+}
+
+func TestFormatNumberAndCost(t *testing.T) {
+	assert.Equal(t, "999", FormatNumber(999))
+	assert.Equal(t, "1,000", FormatNumber(1000))
+	assert.Equal(t, "1,234,567", FormatNumber(1234567))
+	assert.Equal(t, "$1.2346", FormatCost(1.23456))
+}
+
+func TestDailyProviderBreakdownProviderKeys(t *testing.T) {
+	stats := CalculateDailyProviderBreakdownStats([]ConversationSummary{
+		testConversationSummary{updatedAt: time.Date(2026, 5, 20, 0, 0, 0, 0, time.UTC), provider: "zeta", usage: testUsage(1, 0, 0, 0)},
+		testConversationSummary{updatedAt: time.Date(2026, 5, 20, 1, 0, 0, 0, time.UTC), provider: "alpha", usage: testUsage(2, 0, 0, 0)},
+	}, time.Time{}, time.Time{})
+
+	keys := make([]string, 0, len(stats.Daily[0].ProviderUsage))
+	for key := range stats.Daily[0].ProviderUsage {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	assert.Equal(t, []string{"alpha", "zeta"}, keys)
 }
 
 func TestLogLLMUsage_NormalCase(t *testing.T) {

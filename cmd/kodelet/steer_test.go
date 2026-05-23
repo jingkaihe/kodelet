@@ -156,3 +156,19 @@ func TestSteerConfigParsesImages(t *testing.T) {
 
 	assert.Equal(t, []string{"one.png", "two.jpg"}, config.Images)
 }
+
+func TestGetSteerConfigFromFlags(t *testing.T) {
+	cmd := &cobra.Command{Use: "test"}
+	defaults := NewSteerConfig()
+	cmd.Flags().String("conversation-id", defaults.ConversationID, "")
+	cmd.Flags().BoolP("follow", "f", defaults.Follow, "")
+	cmd.Flags().StringSliceP("image", "I", defaults.Images, "")
+	require.NoError(t, cmd.Flags().Set("conversation-id", "conversation-12345"))
+	require.NoError(t, cmd.Flags().Set("image", "one.png,two.png"))
+
+	config := getSteerConfigFromFlags(cmd.Context(), cmd)
+
+	assert.Equal(t, "conversation-12345", config.ConversationID)
+	assert.False(t, config.Follow)
+	assert.Equal(t, []string{"one.png", "two.png"}, config.Images)
+}

@@ -78,6 +78,40 @@ func TestFileReadRenderer(t *testing.T) {
 	})
 }
 
+func TestFileReadRendererMarkdownVariants(t *testing.T) {
+	renderer := &FileReadRenderer{}
+	result := tools.StructuredToolResult{
+		ToolName:  "file_read",
+		Success:   true,
+		Timestamp: time.Now(),
+		Metadata: &tools.FileReadMetadata{
+			FilePath:       "/tmp/test.go",
+			Offset:         3,
+			LineLimit:      2,
+			Lines:          []string{"func main() {", "}"},
+			Language:       "go",
+			Truncated:      true,
+			RemainingLines: 9,
+		},
+	}
+
+	rendered := renderer.RenderMarkdown(result)
+	assert.Contains(t, rendered, "- **Path:** `/tmp/test.go`")
+	assert.Contains(t, rendered, "- **Offset:** 3")
+	assert.Contains(t, rendered, "- **Lines:** 2")
+	assert.Contains(t, rendered, "- **Language:** `go`")
+	assert.Contains(t, rendered, "- **Truncated:** yes (9 lines remaining)")
+	assert.Contains(t, rendered, "3: func main() {")
+
+	merged := renderer.RenderMergedMarkdown(result)
+	assert.Contains(t, merged, "- **Lines:** 2")
+	assert.NotContains(t, merged, "- **Path:**")
+	assert.NotContains(t, merged, "- **Offset:**")
+
+	assert.Contains(t, renderer.RenderMarkdown(tools.StructuredToolResult{ToolName: "file_read", Success: false, Error: "missing"}), "Error: missing")
+	assert.Contains(t, renderer.RenderMarkdown(tools.StructuredToolResult{ToolName: "file_read", Success: true, Metadata: &tools.FileWriteMetadata{}}), "Invalid metadata")
+}
+
 func TestFileEditRenderer(t *testing.T) {
 	renderer := &FileEditRenderer{}
 
@@ -318,6 +352,69 @@ func TestFileEditRendererRenderMarkdown(t *testing.T) {
 	assert.Contains(t, output, "```diff")
 	assert.NotContains(t, output, "####")
 	assert.NotContains(t, output, "- **Language:**")
+}
+
+func TestFileWriteRendererMarkdownVariants(t *testing.T) {
+	renderer := &FileWriteRenderer{}
+	result := tools.StructuredToolResult{
+		ToolName:  "file_write",
+		Success:   true,
+		Timestamp: time.Now(),
+		Metadata: &tools.FileWriteMetadata{
+			FilePath: "/tmp/test.go",
+			Content:  "package main\n",
+			Size:     13,
+			Language: "go",
+		},
+	}
+
+	rendered := renderer.RenderMarkdown(result)
+	assert.Contains(t, rendered, "- **Path:** `/tmp/test.go`")
+	assert.Contains(t, rendered, "- **Size:** 13 bytes")
+	assert.Contains(t, rendered, "- **Language:** `go`")
+	assert.Contains(t, rendered, "Written content")
+	assert.Contains(t, rendered, "```go\npackage main\n```")
+
+	merged := renderer.RenderMergedMarkdown(result)
+	assert.Contains(t, merged, "- **Size:** 13 bytes")
+	assert.NotContains(t, merged, "- **Path:**")
+	assert.NotContains(t, merged, "Written content")
+
+	assert.Contains(t, renderer.RenderMarkdown(tools.StructuredToolResult{ToolName: "file_write", Success: false, Error: "denied"}), "Error: denied")
+	assert.Contains(t, renderer.RenderMarkdown(tools.StructuredToolResult{ToolName: "file_write", Success: true, Metadata: &tools.FileReadMetadata{}}), "Invalid metadata")
+}
+
+func TestFileEditRendererMergedAndFallbackMarkdown(t *testing.T) {
+	renderer := &FileEditRenderer{}
+
+	noChanges := tools.StructuredToolResult{
+		ToolName: "file_edit",
+		Success:  true,
+		Metadata: &tools.FileEditMetadata{FilePath: "/tmp/test.go"},
+	}
+	assert.Contains(t, renderer.RenderMarkdown(noChanges), "- **Path:** `/tmp/test.go`")
+	assert.Equal(t, "- **Changes:** none", renderer.RenderMergedMarkdown(noChanges))
+
+	single := tools.StructuredToolResult{
+		ToolName: "file_edit",
+		Success:  true,
+		Metadata: &tools.FileEditMetadata{
+			FilePath: "/tmp/test.go",
+			Edits: []tools.Edit{{
+				StartLine:  1,
+				EndLine:    1,
+				OldContent: "old",
+				NewContent: "new",
+			}},
+		},
+	}
+	merged := renderer.RenderMergedMarkdown(single)
+	assert.Contains(t, merged, "Lines 1-1:")
+	assert.Contains(t, merged, "```diff")
+	assert.NotContains(t, merged, "File edited:")
+
+	assert.Contains(t, renderer.RenderMarkdown(tools.StructuredToolResult{ToolName: "file_edit", Success: false, Error: "missing old text"}), "Error: missing old text")
+	assert.Contains(t, renderer.RenderMarkdown(tools.StructuredToolResult{ToolName: "file_edit", Success: true, Metadata: &tools.FileReadMetadata{}}), "Invalid metadata")
 }
 
 func TestApplyPatchRendererRenderMarkdown(t *testing.T) {

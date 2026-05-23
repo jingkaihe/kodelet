@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestStringifyToolResult(t *testing.T) {
@@ -199,6 +200,56 @@ func TestStringifyToolResult_XMLFormatting(t *testing.T) {
 		assert.Less(t, errorStartPos, errorEndPos)
 		assert.Less(t, resultStartPos, resultEndPos)
 	})
+}
+
+func TestBaseToolResultMethodsAndStructuredData(t *testing.T) {
+	result := BaseToolResult{Result: "done"}
+
+	assert.Equal(t, `<result>
+done
+</result>
+`, result.AssistantFacing())
+	assert.False(t, result.IsError())
+	assert.Empty(t, result.GetError())
+	assert.Equal(t, "done", result.GetResult())
+
+	structured := result.StructuredData()
+	assert.Equal(t, "unknown", structured.ToolName)
+	assert.True(t, structured.Success)
+	assert.Empty(t, structured.Error)
+	assert.Nil(t, structured.Metadata)
+	assert.False(t, structured.Timestamp.IsZero())
+
+	errorResult := BaseToolResult{Error: "failed"}
+	assert.Equal(t, `<error>
+failed
+</error>
+`, errorResult.AssistantFacing())
+	assert.True(t, errorResult.IsError())
+	assert.Equal(t, "failed", errorResult.GetError())
+	assert.Empty(t, errorResult.GetResult())
+	assert.False(t, errorResult.StructuredData().Success)
+}
+
+func TestBlockedToolResultMethodsAndStructuredData(t *testing.T) {
+	result := NewBlockedToolResult("bash", "policy denied")
+
+	assert.Equal(t, "bash", result.ToolName)
+	assert.Equal(t, "policy denied", result.Reason)
+	assert.Contains(t, result.AssistantFacing(), "Tool execution was blocked by security hook: policy denied")
+	assert.True(t, result.IsError())
+	assert.Equal(t, "blocked by hook: policy denied", result.GetError())
+	assert.Empty(t, result.GetResult())
+
+	structured := result.StructuredData()
+	assert.Equal(t, "bash", structured.ToolName)
+	assert.False(t, structured.Success)
+	assert.Equal(t, "blocked by hook: policy denied", structured.Error)
+	require.IsType(t, BlockedMetadata{}, structured.Metadata)
+	metadata := structured.Metadata.(BlockedMetadata)
+	assert.Equal(t, "blocked", metadata.ToolType())
+	assert.Equal(t, "bash", metadata.ToolName)
+	assert.Equal(t, "policy denied", metadata.Reason)
 }
 
 // Helper function to find byte slice in byte slice

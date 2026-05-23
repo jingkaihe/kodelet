@@ -208,6 +208,36 @@ func TestInstallerFindTools(t *testing.T) {
 	assert.Equal(t, filepath.Join(toolsDir, "tool-a"), tools[0])
 }
 
+func TestInstallerFindHooks(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	hooksDir := filepath.Join(tmpDir, "hooks")
+	require.NoError(t, os.MkdirAll(hooksDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "after_tool_call"), []byte("#!/bin/sh\necho hook\n"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "README.md"), []byte("ignored"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(hooksDir, "nested"), 0o755))
+
+	installer := &Installer{}
+	hooks, err := installer.findHooks(hooksDir)
+	require.NoError(t, err)
+	require.Len(t, hooks, 1)
+	assert.Equal(t, filepath.Join(hooksDir, "after_tool_call"), hooks[0])
+}
+
+func TestInstallerFindHelpersMissingDirectoriesReturnError(t *testing.T) {
+	tmpDir := t.TempDir()
+	installer := &Installer{}
+
+	_, err := installer.findSkills(filepath.Join(tmpDir, "missing-skills"))
+	require.Error(t, err)
+	_, err = installer.findRecipes(filepath.Join(tmpDir, "missing-recipes"))
+	require.Error(t, err)
+	_, err = installer.findHooks(filepath.Join(tmpDir, "missing-hooks"))
+	require.Error(t, err)
+	_, err = installer.findTools(filepath.Join(tmpDir, "missing-tools"))
+	require.Error(t, err)
+}
+
 func TestInstallerCopyDir(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -409,6 +439,41 @@ func TestRepoToPluginName(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := repoToPluginName(tt.repo)
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestPluginNameConversions(t *testing.T) {
+	tests := []struct {
+		name         string
+		pluginName   string
+		wantPrefix   string
+		wantUserName string
+	}{
+		{
+			name:         "org repo plugin name",
+			pluginName:   "owner@repo",
+			wantPrefix:   "owner/repo/",
+			wantUserName: "owner/repo",
+		},
+		{
+			name:         "plain plugin name",
+			pluginName:   "plain-plugin",
+			wantPrefix:   "plain-plugin/",
+			wantUserName: "plain-plugin",
+		},
+		{
+			name:         "only first at is converted",
+			pluginName:   "owner@repo@extra",
+			wantPrefix:   "owner/repo@extra/",
+			wantUserName: "owner/repo@extra",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.wantPrefix, pluginNameToPrefix(tt.pluginName))
+			assert.Equal(t, tt.wantUserName, PluginNameToUserFacing(tt.pluginName))
 		})
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type mockSender struct {
@@ -128,6 +129,23 @@ func TestACPMessageHandler_HandleThinkingDelta(t *testing.T) {
 	assert.Len(t, sender.updates, 1)
 	update := sender.updates[0].(map[string]any)
 	assert.Equal(t, acptypes.UpdateThoughtChunk, update["sessionUpdate"])
+
+	content := update["content"].(map[string]any)
+	assert.Equal(t, acptypes.ContentTypeText, content["type"])
+	assert.Equal(t, "thinking...", content["text"])
+}
+
+func TestACPMessageHandler_LifecycleCallbacksAreNoOps(t *testing.T) {
+	sender := &mockSender{}
+	handler := NewACPMessageHandler(sender, "test-session")
+
+	assert.NotPanics(t, func() {
+		handler.HandleThinkingStart()
+		handler.HandleThinkingBlockEnd()
+		handler.HandleContentBlockEnd()
+		handler.HandleDone()
+	})
+	assert.Empty(t, sender.updates)
 }
 
 func TestToACPToolKind(t *testing.T) {
@@ -144,6 +162,7 @@ func TestToACPToolKind(t *testing.T) {
 		{"bash", acptypes.ToolKindOther},           // Currently mapped to other
 		{"code_execution", acptypes.ToolKindOther}, // Currently mapped to other
 		{"web_fetch", acptypes.ToolKindFetch},
+		{"view_image", acptypes.ToolKindRead},
 		{"thinking", acptypes.ToolKindThink},
 		{"subagent", acptypes.ToolKindSearch},
 		{"unknown_tool", acptypes.ToolKindOther},
@@ -245,6 +264,40 @@ func TestContentBlocksToMessage_Empty(t *testing.T) {
 	assert.Empty(t, images)
 }
 
+func TestContentBlocksToMessage_EdgeCases(t *testing.T) {
+	blocks := []acptypes.ContentBlock{
+		{Type: acptypes.ContentTypeText, Text: ""},
+		{Type: acptypes.ContentTypeText, Text: "First"},
+		{
+			Type:     acptypes.ContentTypeImage,
+			Data:     "base64data",
+			MimeType: "image/jpeg",
+			URI:      "file:///ignored.jpg",
+		},
+		{Type: acptypes.ContentTypeImage, URI: "file:///image.png"},
+		{Type: acptypes.ContentTypeResource},
+		{Type: acptypes.ContentTypeResource, Resource: &acptypes.EmbeddedResource{URI: "file:///empty.txt"}},
+		{Type: acptypes.ContentTypeResource, Resource: &acptypes.EmbeddedResource{URI: "file:///doc.md", Text: "Doc"}},
+		{Type: acptypes.ContentTypeResourceLink},
+		{Type: acptypes.ContentTypeAudio, Data: "ignored"},
+		{Type: "unknown", Text: "ignored"},
+	}
+
+	message, images := ContentBlocksToMessage(blocks)
+
+	assert.Equal(t, "First\n\n--- file:///doc.md ---\nDoc", message)
+	assert.Equal(t, []string{"data:image/jpeg;base64,base64data", "file:///image.png"}, images)
+}
+
+func TestContentBlocksToMessage_ImageDataWithoutMimeType(t *testing.T) {
+	blocks := []acptypes.ContentBlock{{Type: acptypes.ContentTypeImage, Data: "abc123"}}
+
+	message, images := ContentBlocksToMessage(blocks)
+
+	assert.Empty(t, message)
+	assert.Equal(t, []string{"data:;base64,abc123"}, images)
+}
+
 func TestDefaultTitleGenerator_EmptyInput(t *testing.T) {
 	gen := &DefaultTitleGenerator{}
 	title := gen.GenerateTitle("file_read", "")
@@ -307,6 +360,32 @@ func TestDefaultTitleGenerator_UnknownTool(t *testing.T) {
 	gen := &DefaultTitleGenerator{}
 	title := gen.GenerateTitle("unknown_tool", `{"some": "param"}`)
 	assert.Equal(t, "unknown_tool", title)
+}
+
+func TestDefaultTitleGenerator_AdditionalTools(t *testing.T) {
+	gen := &DefaultTitleGenerator{}
+
+	tests := []struct {
+		name     string
+		toolName string
+		input    string
+		expected string
+	}{
+		{name: "file_write", toolName: "file_write", input: `{"file_path":"/tmp/out.txt"}`, expected: "Write: /tmp/out.txt"},
+		{name: "file_edit", toolName: "file_edit", input: `{"file_path":"/tmp/edit.txt"}`, expected: "Edit: /tmp/edit.txt"},
+		{name: "glob_tool", toolName: "glob_tool", input: `{"pattern":"**/*.go"}`, expected: "Glob: **/*.go"},
+		{name: "web_fetch", toolName: "web_fetch", input: `{"url":"https://example.com"}`, expected: "Fetch: https://example.com"},
+		{name: "subagent workflow", toolName: "subagent", input: `{"workflow":"review","question":"ignored"}`, expected: "Subagent: review"},
+		{name: "subagent question", toolName: "subagent", input: `{"question":"Investigate"}`, expected: "Subagent: Investigate"},
+		{name: "view_image", toolName: "view_image", input: `{"path":"/tmp/img.png"}`, expected: "Image: /tmp/img.png"},
+		{name: "apply_patch no file", toolName: "apply_patch", input: `{"input":"*** Begin Patch\n*** End Patch"}`, expected: "Apply patch"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, gen.GenerateTitle(tt.toolName, tt.input))
+		})
+	}
 }
 
 func TestACPMessageHandler_HandleToolUse_FollowTheAgent(t *testing.T) {
@@ -472,6 +551,136 @@ func TestExtractLocationsFromInput(t *testing.T) {
 			} else {
 				assert.Equal(t, 0, locations[0].Line)
 			}
+		})
+	}
+}
+
+func TestACPMessageHandler_HandleToolResult_FollowTheAgentLocations(t *testing.T) {
+	tests := []struct {
+		name         string
+		result       tooltypes.StructuredToolResult
+		expectedPath string
+		expectedLine int
+	}{
+		{
+			name: "file_read offset",
+			result: tooltypes.StructuredToolResult{
+				ToolName: "file_read",
+				Success:  true,
+				Metadata: &tooltypes.FileReadMetadata{FilePath: "/repo/main.go", Offset: 12, Lines: []string{"package main"}},
+			},
+			expectedPath: "/repo/main.go",
+			expectedLine: 12,
+		},
+		{
+			name: "file_write",
+			result: tooltypes.StructuredToolResult{
+				ToolName: "file_write",
+				Success:  true,
+				Metadata: &tooltypes.FileWriteMetadata{FilePath: "/repo/new.go", Content: "package main"},
+			},
+			expectedPath: "/repo/new.go",
+		},
+		{
+			name: "file_edit start line",
+			result: tooltypes.StructuredToolResult{
+				ToolName: "file_edit",
+				Success:  true,
+				Metadata: &tooltypes.FileEditMetadata{
+					FilePath: "/repo/edit.go",
+					Edits:    []tooltypes.Edit{{StartLine: 7, OldContent: "old", NewContent: "new"}},
+				},
+			},
+			expectedPath: "/repo/edit.go",
+			expectedLine: 7,
+		},
+		{
+			name: "apply_patch move path deduplicated",
+			result: tooltypes.StructuredToolResult{
+				ToolName: "apply_patch",
+				Success:  true,
+				Metadata: &tooltypes.ApplyPatchMetadata{Changes: []tooltypes.ApplyPatchChange{
+					{Path: "", Operation: tooltypes.ApplyPatchOperationAdd},
+					{Path: "/repo/old.go", MovePath: "/repo/new.go", Operation: tooltypes.ApplyPatchOperationUpdate},
+					{Path: "/repo/new.go", Operation: tooltypes.ApplyPatchOperationUpdate},
+				}},
+			},
+			expectedPath: "/repo/new.go",
+		},
+		{
+			name: "bash working directory",
+			result: tooltypes.StructuredToolResult{
+				ToolName: "bash",
+				Success:  true,
+				Metadata: &tooltypes.BashMetadata{WorkingDir: "/repo", Output: "ok"},
+			},
+			expectedPath: "/repo",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sender := &mockSender{}
+			handler := NewACPMessageHandler(sender, "test-session")
+			result := &mockToolResult{structuredData: tt.result}
+
+			handler.HandleToolResult("call_1", tt.result.ToolName, result)
+
+			require.Len(t, sender.updates, 1)
+			update := sender.updates[0].(map[string]any)
+			locations := update["locations"].([]ToolCallLocation)
+			require.Len(t, locations, 1)
+			assert.Equal(t, tt.expectedPath, locations[0].Path)
+			assert.Equal(t, tt.expectedLine, locations[0].Line)
+		})
+	}
+}
+
+func TestExtractLocations_EdgeCases(t *testing.T) {
+	handler := NewACPMessageHandler(&mockSender{}, "test-session")
+
+	tests := []struct {
+		name   string
+		result tooltypes.StructuredToolResult
+	}{
+		{name: "unknown tool", result: tooltypes.StructuredToolResult{ToolName: "unknown_tool", Success: true}},
+		{name: "file_read no metadata", result: tooltypes.StructuredToolResult{ToolName: "file_read", Success: true}},
+		{name: "file_edit no edits still returns path", result: tooltypes.StructuredToolResult{ToolName: "file_edit", Success: true, Metadata: &tooltypes.FileEditMetadata{FilePath: "/repo/file.go"}}},
+		{name: "apply_patch no paths", result: tooltypes.StructuredToolResult{ToolName: "apply_patch", Success: true, Metadata: &tooltypes.ApplyPatchMetadata{Changes: []tooltypes.ApplyPatchChange{{Operation: tooltypes.ApplyPatchOperationUpdate}}}}},
+		{name: "bash no working directory", result: tooltypes.StructuredToolResult{ToolName: "bash", Success: true, Metadata: &tooltypes.BashMetadata{Output: "ok"}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			locations := handler.extractLocations(&mockToolResult{structuredData: tt.result})
+			if tt.name == "file_edit no edits still returns path" {
+				require.Len(t, locations, 1)
+				assert.Equal(t, "/repo/file.go", locations[0].Path)
+				assert.Zero(t, locations[0].Line)
+				return
+			}
+			assert.Nil(t, locations)
+		})
+	}
+}
+
+func TestExtractFirstApplyPatchPath(t *testing.T) {
+	tests := []struct {
+		name     string
+		params   map[string]any
+		expected string
+	}{
+		{name: "add", params: map[string]any{"input": "*** Begin Patch\n*** Add File: new.txt\n+hello\n*** End Patch"}, expected: "new.txt"},
+		{name: "delete", params: map[string]any{"input": "*** Begin Patch\n*** Delete File: old.txt\n*** End Patch"}, expected: "old.txt"},
+		{name: "update", params: map[string]any{"input": "*** Begin Patch\n*** Update File: edit.txt\n@@\n-old\n+new\n*** End Patch"}, expected: "edit.txt"},
+		{name: "missing input", params: map[string]any{}, expected: ""},
+		{name: "non-string input", params: map[string]any{"input": 42}, expected: ""},
+		{name: "no file operation", params: map[string]any{"input": "*** Begin Patch\n*** End Patch"}, expected: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, extractFirstApplyPatchPath(tt.params))
 		})
 	}
 }

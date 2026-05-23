@@ -216,6 +216,65 @@ func TestServerConfig_Validate_RejectsInvalidCORSOrigin(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid cors-origin")
 }
 
+func TestValidateCORSOriginsAndNormalization(t *testing.T) {
+	err := ValidateCORSOrigins([]string{"https://Example.COM:443", "https://example.com:443"})
+	require.NoError(t, err)
+
+	normalized, err := normalizeConfiguredCORSOrigins([]string{" https://Example.COM ", "https://example.com"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"https://example.com"}, normalized)
+
+	_, err = normalizeConfiguredCORSOrigins([]string{"   "})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cors-origin cannot be empty")
+
+	_, err = normalizeCORSOrigin("ftp://example.com")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "origin must use http:// or https://")
+
+	_, err = normalizeCORSOrigin("https://example.com/path")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "origin must not include path")
+
+	assert.Equal(t, "[::1]:3000", normalizedURLHost("[::1]:3000"))
+	assert.Equal(t, "[::1]", normalizedURLHost("::1"))
+	assert.Equal(t, "127.0.0.1", normalizedURLHost("127.0.0.1"))
+	assert.False(t, isLoopbackOrigin("not a url"))
+}
+
+func TestNewServerInitializesRoutesAndNormalizesConfig(t *testing.T) {
+	basePath := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", basePath)
+	t.Setenv("KODELET_CONVERSATION_STORE_TYPE", "sqlite")
+	defaultCWD := t.TempDir()
+	config := &ServerConfig{
+		Host:         "127.0.0.1",
+		Port:         1,
+		CWD:          defaultCWD,
+		CompactRatio: 0.8,
+		AuthToken:    "token",
+		CORSOrigins:  []string{"https://Example.com"},
+	}
+
+	server, err := NewServer(context.Background(), config)
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, server.Stop()) })
+
+	assert.NotNil(t, server.router)
+	assert.NotNil(t, server.conversationService)
+	assert.NotNil(t, server.chatRunner)
+	assert.Equal(t, defaultCWD, config.CWD)
+	assert.Equal(t, "token", config.AuthToken)
+	assert.Equal(t, []string{"https://example.com"}, config.CORSOrigins)
+
+	req := httptest.NewRequest("GET", "/", nil)
+	w := httptest.NewRecorder()
+	server.handleReactSPA(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "text/html; charset=utf-8", w.Header().Get("Content-Type"))
+	assert.Contains(t, w.Body.String(), "<html")
+}
+
 func TestNewAuthTokenGeneratesUsableToken(t *testing.T) {
 	token, err := NewAuthToken()
 
@@ -355,6 +414,76 @@ func TestServer_authMiddleware(t *testing.T) {
 
 		assert.Equal(t, http.StatusNoContent, w.Code)
 	})
+
+	t.Run("rejects bad query token on spa request with text response", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/app?token=bad-token", nil)
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Equal(t, "text/plain; charset=utf-8", w.Header().Get("Content-Type"))
+		assert.Contains(t, w.Body.String(), "invalid authentication token")
+	})
+
+	t.Run("passes options through without token", func(t *testing.T) {
+		req := httptest.NewRequest("OPTIONS", "/api/chat/settings", nil)
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNoContent, w.Code)
+	})
+
+	t.Run("allows raw token header and token auth scheme", func(t *testing.T) {
+		for _, header := range []string{"secret-token", "Token secret-token"} {
+			req := httptest.NewRequest("GET", "/api/chat/settings", nil)
+			req.Header.Set("Authorization", header)
+			w := httptest.NewRecorder()
+
+			handler.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusNoContent, w.Code)
+		}
+	})
+
+	t.Run("sets secure cookie for forwarded https token request", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/chat/settings?token=secret-token", nil)
+		req.Header.Set("X-Forwarded-Proto", "https")
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNoContent, w.Code)
+		require.Len(t, w.Result().Cookies(), 1)
+		assert.True(t, w.Result().Cookies()[0].Secure)
+	})
+}
+
+func TestAuthHelpersAdditionalBranches(t *testing.T) {
+	req := httptest.NewRequest("GET", "/?token=first&token=second", nil)
+	token, ok := authQueryToken(req)
+	assert.True(t, ok)
+	assert.Equal(t, "first", token)
+
+	assert.Equal(t, "bearer-value", authHeaderToken(" bearer bearer-value "))
+	assert.Equal(t, "token-value", authHeaderToken(" token token-value "))
+	assert.Equal(t, "raw-value", authHeaderToken(" raw-value "))
+	assert.Empty(t, authHeaderToken("   "))
+
+	assert.False(t, shouldRedirectTokenRequest(httptest.NewRequest("POST", "/app?token=x", nil)))
+	wsReq := httptest.NewRequest("GET", "/app?token=x", nil)
+	wsReq.Header.Set("Upgrade", "websocket")
+	assert.False(t, shouldRedirectTokenRequest(wsReq))
+	assert.False(t, shouldRedirectTokenRequest(httptest.NewRequest("GET", "/api/chat?token=x", nil)))
+	assert.False(t, shouldRedirectTokenRequest(httptest.NewRequest("GET", "/assets/main.js?token=x", nil)))
+
+	req = httptest.NewRequest("GET", "/?token=x", nil)
+	assert.Equal(t, "/", tokenlessURL(req))
+
+	assert.True(t, constantTimeStringEqual("same", "same"))
+	assert.False(t, constantTimeStringEqual("short", "longer"))
+	assert.False(t, constantTimeStringEqual("same", "diff"))
 }
 
 func TestServerConfig_Validate_RejectsInvalidCWD(t *testing.T) {
@@ -1405,6 +1534,21 @@ func TestResponseWriter_HijackDelegates(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, conn)
 	_ = conn.Close()
+}
+
+func TestResponseWriter_WriteHeaderAndHijackUnsupported(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	rw := &responseWriter{ResponseWriter: recorder, statusCode: http.StatusOK}
+
+	rw.WriteHeader(http.StatusCreated)
+	assert.Equal(t, http.StatusCreated, rw.statusCode)
+	assert.Equal(t, http.StatusCreated, recorder.Code)
+
+	conn, brw, err := rw.Hijack()
+	require.Error(t, err)
+	assert.Nil(t, conn)
+	assert.Nil(t, brw)
+	assert.Contains(t, err.Error(), "does not support hijacking")
 }
 
 func TestServer_handleGetToolResult(t *testing.T) {

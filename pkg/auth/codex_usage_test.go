@@ -2,8 +2,11 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -87,10 +90,117 @@ func TestGetCodexUsageStatsWithCredentials(t *testing.T) {
 		assert.Nil(t, secondary.Credits)
 	})
 
+	t.Run("returns response body for non-success status", func(t *testing.T) {
+		setDefaultHTTPClient(t, &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusTooManyRequests,
+				Status:     "429 Too Many Requests",
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("quota exceeded")),
+			}, nil
+		})})
+
+		stats, err := GetCodexUsageStatsWithCredentials(context.Background(), &CodexCredentials{
+			AccessToken: "test-access-token",
+			AccountID:   "account-123",
+		})
+		assert.Nil(t, stats)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to fetch Codex usage stats: 429 Too Many Requests: quota exceeded")
+	})
+
+	t.Run("uses status text when error body is empty", func(t *testing.T) {
+		setDefaultHTTPClient(t, &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusForbidden,
+				Status:     "403 Forbidden",
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("   \n")),
+			}, nil
+		})})
+
+		stats, err := GetCodexUsageStatsWithCredentials(context.Background(), &CodexCredentials{
+			AccessToken: "test-access-token",
+			AccountID:   "account-123",
+		})
+		assert.Nil(t, stats)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to fetch Codex usage stats: 403 Forbidden: Forbidden")
+	})
+
+	t.Run("wraps invalid JSON responses", func(t *testing.T) {
+		setDefaultHTTPClient(t, &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("not json")),
+			}, nil
+		})})
+
+		stats, err := GetCodexUsageStatsWithCredentials(context.Background(), &CodexCredentials{
+			AccessToken: "test-access-token",
+			AccountID:   "account-123",
+		})
+		assert.Nil(t, stats)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to decode Codex usage stats response")
+	})
+
+	t.Run("propagates transport errors", func(t *testing.T) {
+		setDefaultHTTPClient(t, &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			return nil, assert.AnError
+		})})
+
+		stats, err := GetCodexUsageStatsWithCredentials(context.Background(), &CodexCredentials{
+			AccessToken: "test-access-token",
+			AccountID:   "account-123",
+		})
+		assert.Nil(t, stats)
+		require.ErrorIs(t, err, assert.AnError)
+	})
+
 	t.Run("requires chatgpt oauth credentials", func(t *testing.T) {
 		stats, err := GetCodexUsageStatsWithCredentials(context.Background(), &CodexCredentials{})
 		assert.Nil(t, stats)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "chatgpt authentication required")
 	})
+}
+
+func TestGetCodexUsageStats(t *testing.T) {
+	setTestHome(t)
+
+	authData := CodexAuthFile{Tokens: CodexTokens{
+		AccessToken: "usage-access-token",
+		AccountID:   "usage-account-id",
+		ExpiresAt:   time.Now().Add(time.Hour).Unix(),
+	}}
+	kodeletDir := filepath.Join(os.Getenv("HOME"), ".kodelet")
+	require.NoError(t, os.MkdirAll(kodeletDir, 0o755))
+	data, err := json.Marshal(authData)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(kodeletDir, "codex-credentials.json"), data, 0o600))
+
+	setDefaultHTTPClient(t, &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		assert.Equal(t, codexUsageEndpoint, req.URL.String())
+		assert.Equal(t, "Bearer usage-access-token", req.Header.Get("Authorization"))
+		assert.Equal(t, "usage-account-id", req.Header.Get("ChatGPT-Account-ID"))
+
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"plan_type":"team","rate_limit":null}`)),
+		}, nil
+	})})
+
+	stats, err := GetCodexUsageStats(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, stats)
+	assert.Equal(t, "team", stats.PlanType)
+	require.Len(t, stats.Snapshots, 1)
+	assert.Equal(t, "codex", stats.Snapshots[0].LimitID)
+	assert.Nil(t, stats.Snapshots[0].Primary)
+	assert.Nil(t, stats.Snapshots[0].Secondary)
 }

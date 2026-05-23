@@ -193,6 +193,97 @@ func TestToolContentGenerator_GenerateCodeExecutionContent(t *testing.T) {
 		errContent := content[0]["content"].(map[string]any)
 		assert.Equal(t, "```\nsyntax error\n```", errContent["text"])
 	})
+
+	t.Run("code execution missing metadata returns raw structured error", func(t *testing.T) {
+		result := &mockToolResult{
+			err: "metadata unavailable",
+			structuredData: tooltypes.StructuredToolResult{
+				ToolName: "code_execution",
+				Success:  false,
+				Error:    "metadata unavailable",
+			},
+		}
+
+		content := gen.GenerateToolContent(result)
+		require.Len(t, content, 1)
+
+		textContent := content[0]["content"].(map[string]any)
+		assert.Equal(t, acptypes.ContentTypeText, textContent["type"])
+		assert.Equal(t, "metadata unavailable", textContent["text"])
+	})
+}
+
+func TestToolContentGenerator_GenerateViewImageContent(t *testing.T) {
+	gen := &ToolContentGenerator{}
+
+	t.Run("successful view image with mime type", func(t *testing.T) {
+		result := &mockToolResult{
+			structuredData: tooltypes.StructuredToolResult{
+				ToolName: "view_image",
+				Success:  true,
+				Metadata: &tooltypes.ViewImageMetadata{Path: "/tmp/image.png", MimeType: "image/png"},
+			},
+		}
+
+		content := gen.GenerateToolContent(result)
+		require.Len(t, content, 1)
+
+		assert.Equal(t, ToolCallContentTypeContent, content[0]["type"])
+		textContent := content[0]["content"].(map[string]any)
+		assert.Equal(t, acptypes.ContentTypeText, textContent["type"])
+		assert.Equal(t, "/tmp/image.png (image/png)", textContent["text"])
+	})
+
+	t.Run("successful view image without mime type", func(t *testing.T) {
+		result := &mockToolResult{
+			structuredData: tooltypes.StructuredToolResult{
+				ToolName: "view_image",
+				Success:  true,
+				Metadata: tooltypes.ViewImageMetadata{Path: "/tmp/image"},
+			},
+		}
+
+		content := gen.GenerateToolContent(result)
+		require.Len(t, content, 1)
+
+		textContent := content[0]["content"].(map[string]any)
+		assert.Equal(t, "/tmp/image", textContent["text"])
+	})
+
+	t.Run("view image error", func(t *testing.T) {
+		result := &mockToolResult{
+			err: "image not found",
+			structuredData: tooltypes.StructuredToolResult{
+				ToolName: "view_image",
+				Success:  false,
+				Error:    "image not found",
+				Metadata: &tooltypes.ViewImageMetadata{Path: "/tmp/missing.png", MimeType: "image/png"},
+			},
+		}
+
+		content := gen.GenerateToolContent(result)
+		require.Len(t, content, 1)
+
+		textContent := content[0]["content"].(map[string]any)
+		assert.Equal(t, "image not found", textContent["text"])
+	})
+
+	t.Run("view image missing metadata", func(t *testing.T) {
+		result := &mockToolResult{
+			err: "metadata unavailable",
+			structuredData: tooltypes.StructuredToolResult{
+				ToolName: "view_image",
+				Success:  false,
+				Error:    "metadata unavailable",
+			},
+		}
+
+		content := gen.GenerateToolContent(result)
+		require.Len(t, content, 1)
+
+		textContent := content[0]["content"].(map[string]any)
+		assert.Equal(t, "metadata unavailable", textContent["text"])
+	})
 }
 
 func TestToolContentGenerator_GenerateFileReadContent(t *testing.T) {
@@ -255,6 +346,37 @@ func TestToolContentGenerator_GenerateFileReadContent(t *testing.T) {
 		truncContent := content[1]["content"].(map[string]any)
 		assert.Contains(t, truncContent["text"], "500 lines remaining")
 	})
+
+	t.Run("file read error", func(t *testing.T) {
+		result := &mockToolResult{
+			err: "permission denied",
+			structuredData: tooltypes.StructuredToolResult{
+				ToolName: "file_read",
+				Success:  false,
+				Error:    "permission denied",
+				Metadata: &tooltypes.FileReadMetadata{FilePath: "/root/secret.txt"},
+			},
+		}
+
+		content := gen.GenerateToolContent(result)
+		require.Len(t, content, 1)
+
+		textContent := content[0]["content"].(map[string]any)
+		assert.Equal(t, "permission denied", textContent["text"])
+	})
+
+	t.Run("file read missing metadata", func(t *testing.T) {
+		result := &mockToolResult{
+			err:            "metadata missing",
+			structuredData: tooltypes.StructuredToolResult{ToolName: "file_read", Success: false, Error: "metadata missing"},
+		}
+
+		content := gen.GenerateToolContent(result)
+		require.Len(t, content, 1)
+
+		textContent := content[0]["content"].(map[string]any)
+		assert.Equal(t, "metadata missing", textContent["text"])
+	})
 }
 
 func TestToolContentGenerator_GenerateFileWriteContent(t *testing.T) {
@@ -283,6 +405,39 @@ func TestToolContentGenerator_GenerateFileWriteContent(t *testing.T) {
 		assert.Equal(t, "/home/user/new.txt", content[0]["path"])
 		assert.Nil(t, content[0]["oldText"])
 		assert.Equal(t, "new content", content[0]["newText"])
+	})
+
+	t.Run("file write error", func(t *testing.T) {
+		result := &mockToolResult{
+			err: "write denied",
+			structuredData: tooltypes.StructuredToolResult{
+				ToolName: "file_write",
+				Success:  false,
+				Error:    "write denied",
+				Metadata: &tooltypes.FileWriteMetadata{FilePath: "/tmp/new.txt", Content: "ignored"},
+			},
+		}
+
+		content := gen.GenerateToolContent(result)
+		require.Len(t, content, 1)
+
+		assert.Equal(t, ToolCallContentTypeContent, content[0]["type"])
+		textContent := content[0]["content"].(map[string]any)
+		assert.Equal(t, acptypes.ContentTypeText, textContent["type"])
+		assert.Equal(t, "write denied", textContent["text"])
+	})
+
+	t.Run("file write missing metadata", func(t *testing.T) {
+		result := &mockToolResult{
+			err:            "metadata missing",
+			structuredData: tooltypes.StructuredToolResult{ToolName: "file_write", Success: false, Error: "metadata missing"},
+		}
+
+		content := gen.GenerateToolContent(result)
+		require.Len(t, content, 1)
+
+		textContent := content[0]["content"].(map[string]any)
+		assert.Equal(t, "metadata missing", textContent["text"])
 	})
 }
 
@@ -354,6 +509,37 @@ func TestToolContentGenerator_GenerateFileEditContent(t *testing.T) {
 		summaryContent := content[3]["content"].(map[string]any)
 		assert.Contains(t, summaryContent["text"], "Replaced 3 occurrences")
 	})
+
+	t.Run("file edit error", func(t *testing.T) {
+		result := &mockToolResult{
+			err: "edit failed",
+			structuredData: tooltypes.StructuredToolResult{
+				ToolName: "file_edit",
+				Success:  false,
+				Error:    "edit failed",
+				Metadata: &tooltypes.FileEditMetadata{FilePath: "/tmp/edit.go"},
+			},
+		}
+
+		content := gen.GenerateToolContent(result)
+		require.Len(t, content, 1)
+
+		textContent := content[0]["content"].(map[string]any)
+		assert.Equal(t, "edit failed", textContent["text"])
+	})
+
+	t.Run("file edit missing metadata", func(t *testing.T) {
+		result := &mockToolResult{
+			err:            "metadata missing",
+			structuredData: tooltypes.StructuredToolResult{ToolName: "file_edit", Success: false, Error: "metadata missing"},
+		}
+
+		content := gen.GenerateToolContent(result)
+		require.Len(t, content, 1)
+
+		textContent := content[0]["content"].(map[string]any)
+		assert.Equal(t, "metadata missing", textContent["text"])
+	})
 }
 
 func TestToolContentGenerator_GenerateApplyPatchContent(t *testing.T) {
@@ -406,6 +592,93 @@ func TestToolContentGenerator_GenerateApplyPatchContent(t *testing.T) {
 		assert.Equal(t, "/tmp/old.txt", content[2]["path"])
 		assert.Equal(t, "bye\n", content[2]["oldText"])
 		assert.Nil(t, content[2]["newText"])
+	})
+
+	t.Run("update move path", func(t *testing.T) {
+		result := &mockToolResult{
+			structuredData: tooltypes.StructuredToolResult{
+				ToolName: "apply_patch",
+				Success:  true,
+				Metadata: &tooltypes.ApplyPatchMetadata{Changes: []tooltypes.ApplyPatchChange{
+					{
+						Path:       "/tmp/old.go",
+						MovePath:   "/tmp/new.go",
+						Operation:  tooltypes.ApplyPatchOperationUpdate,
+						OldContent: "old",
+						NewContent: "new",
+					},
+				}},
+			},
+		}
+
+		content := gen.GenerateToolContent(result)
+		require.Len(t, content, 1)
+		assert.Equal(t, "/tmp/new.go", content[0]["path"])
+		assert.Equal(t, "old", content[0]["oldText"])
+		assert.Equal(t, "new", content[0]["newText"])
+	})
+
+	t.Run("no changes", func(t *testing.T) {
+		result := &mockToolResult{
+			structuredData: tooltypes.StructuredToolResult{
+				ToolName: "apply_patch",
+				Success:  true,
+				Metadata: &tooltypes.ApplyPatchMetadata{},
+			},
+		}
+
+		content := gen.GenerateToolContent(result)
+		require.Len(t, content, 1)
+
+		textContent := content[0]["content"].(map[string]any)
+		assert.Equal(t, "No files were modified.", textContent["text"])
+	})
+
+	t.Run("unknown operation ignored", func(t *testing.T) {
+		result := &mockToolResult{
+			structuredData: tooltypes.StructuredToolResult{
+				ToolName: "apply_patch",
+				Success:  true,
+				Metadata: &tooltypes.ApplyPatchMetadata{Changes: []tooltypes.ApplyPatchChange{{Path: "/tmp/file", Operation: "unknown"}}},
+			},
+		}
+
+		content := gen.GenerateToolContent(result)
+		require.Len(t, content, 1)
+
+		textContent := content[0]["content"].(map[string]any)
+		assert.Equal(t, "No files were modified.", textContent["text"])
+	})
+
+	t.Run("apply patch error", func(t *testing.T) {
+		result := &mockToolResult{
+			err: "patch failed",
+			structuredData: tooltypes.StructuredToolResult{
+				ToolName: "apply_patch",
+				Success:  false,
+				Error:    "patch failed",
+				Metadata: &tooltypes.ApplyPatchMetadata{Changes: []tooltypes.ApplyPatchChange{{Path: "/tmp/file", Operation: tooltypes.ApplyPatchOperationUpdate}}},
+			},
+		}
+
+		content := gen.GenerateToolContent(result)
+		require.Len(t, content, 1)
+
+		textContent := content[0]["content"].(map[string]any)
+		assert.Equal(t, "patch failed", textContent["text"])
+	})
+
+	t.Run("apply patch missing metadata", func(t *testing.T) {
+		result := &mockToolResult{
+			err:            "metadata missing",
+			structuredData: tooltypes.StructuredToolResult{ToolName: "apply_patch", Success: false, Error: "metadata missing"},
+		}
+
+		content := gen.GenerateToolContent(result)
+		require.Len(t, content, 1)
+
+		textContent := content[0]["content"].(map[string]any)
+		assert.Equal(t, "metadata missing", textContent["text"])
 	})
 }
 
@@ -524,6 +797,19 @@ func TestToolContentGenerator_GenerateSubAgentContent(t *testing.T) {
 		errContent := content[0]["content"].(map[string]any)
 		assert.Contains(t, errContent["text"], "Subagent error: subagent failed")
 	})
+
+	t.Run("subagent missing metadata", func(t *testing.T) {
+		result := &mockToolResult{
+			err:            "metadata missing",
+			structuredData: tooltypes.StructuredToolResult{ToolName: "subagent", Success: false, Error: "metadata missing"},
+		}
+
+		content := gen.GenerateToolContent(result)
+		require.Len(t, content, 1)
+
+		textContent := content[0]["content"].(map[string]any)
+		assert.Equal(t, "metadata missing", textContent["text"])
+	})
 }
 
 func TestToolContentGenerator_GenerateCodeBlockContent(t *testing.T) {
@@ -625,6 +911,18 @@ func TestToolContentGenerator_GenerateDefaultContent(t *testing.T) {
 		assert.Equal(t, ToolCallContentTypeContent, content[0]["type"])
 		textContent := content[0]["content"].(map[string]any)
 		assert.Contains(t, textContent["text"], "Error:")
+	})
+
+	t.Run("empty success result", func(t *testing.T) {
+		result := &mockToolResult{
+			structuredData: tooltypes.StructuredToolResult{ToolName: "unknown_tool", Success: true},
+		}
+
+		content := gen.GenerateToolContent(result)
+		require.Len(t, content, 1)
+
+		textContent := content[0]["content"].(map[string]any)
+		assert.Equal(t, "", textContent["text"])
 	})
 }
 

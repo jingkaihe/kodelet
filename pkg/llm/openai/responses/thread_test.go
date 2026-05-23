@@ -64,6 +64,14 @@ func extractInputItemImageURLs(item openairesponses.ResponseInputItemUnionParam)
 	return urls
 }
 
+func compactOutputItemFromJSON(t *testing.T, raw string) openairesponses.ResponseOutputItemUnion {
+	t.Helper()
+
+	var item openairesponses.ResponseOutputItemUnion
+	require.NoError(t, json.Unmarshal([]byte(raw), &item))
+	return item
+}
+
 func TestNewThread(t *testing.T) {
 	os.Setenv("OPENAI_API_KEY", "test-key")
 	defer os.Unsetenv("OPENAI_API_KEY")
@@ -114,6 +122,146 @@ func TestNewThreadWithoutAPIKey(t *testing.T) {
 	_, err := NewThread(config)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "OPENAI_API_KEY")
+}
+
+func TestThreadSwapContextReplacesHistoryAndClearsState(t *testing.T) {
+	state := tools.NewBasicState(context.Background())
+	require.NoError(t, state.SetFileLastAccessed("old.go", time.Now()))
+	thread := &Thread{
+		Thread: base.NewThread(llmtypes.Config{Model: "gpt-4.1"}, "conv-swap", hooks.Trigger{}),
+		inputItems: []openairesponses.ResponseInputItemUnionParam{
+			openairesponses.ResponseInputItemParamOfMessage("old message", openairesponses.EasyInputMessageRoleUser),
+		},
+		storedItems: []StoredInputItem{{Type: "message", Role: "user", Content: "old message"}},
+	}
+	thread.SetState(state)
+	thread.SetStructuredToolResult("call-1", tooltypes.StructuredToolResult{ToolName: "bash", Success: true})
+
+	require.NoError(t, thread.SwapContext(context.Background(), "summary of prior context"))
+
+	require.Len(t, thread.inputItems, 1)
+	assert.Equal(t, "summary of prior context", extractInputItemText(thread.inputItems[0]))
+	assert.Equal(t, []StoredInputItem{{Type: "message", Role: "user", Content: "summary of prior context"}}, thread.storedItems)
+	assert.Empty(t, thread.GetStructuredToolResults())
+	assert.Empty(t, state.FileLastAccess())
+	assert.Greater(t, thread.GetUsage().CurrentContextWindow, 0)
+}
+
+func TestStoredItemFromCompactOutputAndParseStoredMessageRole(t *testing.T) {
+	messageOutput := compactOutputItemFromJSON(t, `{
+		"type":"message",
+		"role":"assistant",
+		"content":[
+			{"type":"output_text","text":"hello "},
+			{"type":"input_text","text":"world"},
+			{"type":"refusal","refusal":"nope"}
+		]
+	}`)
+	message := storedItemFromCompactOutput(messageOutput, `{"type":"message"}`)
+	assert.Equal(t, "message", message.Type)
+	assert.Equal(t, "assistant", message.Role)
+	assert.Equal(t, "hello world", message.Content)
+	assert.JSONEq(t, `{"type":"message"}`, string(message.RawItem))
+
+	functionCall := storedItemFromCompactOutput(compactOutputItemFromJSON(t, `{
+		"type":"function_call",
+		"call_id":"call-1",
+		"name":"bash",
+		"arguments":"{\"command\":\"true\"}"
+	}`), "")
+	assert.Equal(t, "call-1", functionCall.CallID)
+	assert.Equal(t, "bash", functionCall.Name)
+	assert.Equal(t, `{"command":"true"}`, functionCall.Arguments)
+
+	functionOutput := storedItemFromCompactOutput(compactOutputItemFromJSON(t, `{
+		"type":"function_call_output",
+		"call_id":"call-1",
+		"output":"ok"
+	}`), "")
+	assert.Equal(t, "ok", functionOutput.Output)
+
+	reasoning := storedItemFromCompactOutput(compactOutputItemFromJSON(t, `{
+		"type":"reasoning",
+		"summary":[{"type":"summary_text","text":"first"},{"type":"summary_text","text":"second"}]
+	}`), "")
+	assert.Equal(t, "assistant", reasoning.Role)
+	assert.Equal(t, "first\nsecond", reasoning.Content)
+
+	compaction := storedItemFromCompactOutput(compactOutputItemFromJSON(t, `{
+		"type":"compaction",
+		"encrypted_content":"encrypted"
+	}`), "")
+	assert.Equal(t, "encrypted", compaction.EncryptedContent)
+
+	compactionSummary := storedItemFromCompactOutput(compactOutputItemFromJSON(t, `{
+		"type":"compaction_summary",
+		"encrypted_content":"summary-encrypted"
+	}`), "")
+	assert.Equal(t, "summary-encrypted", compactionSummary.EncryptedContent)
+
+	for _, role := range []openairesponses.EasyInputMessageRole{
+		openairesponses.EasyInputMessageRoleUser,
+		openairesponses.EasyInputMessageRoleAssistant,
+		openairesponses.EasyInputMessageRoleSystem,
+		openairesponses.EasyInputMessageRoleDeveloper,
+	} {
+		parsed, ok := parseStoredMessageRole("  " + string(role) + "  ")
+		require.True(t, ok)
+		assert.Equal(t, role, parsed)
+	}
+	_, ok := parseStoredMessageRole("tool")
+	assert.False(t, ok)
+}
+
+func TestStoredItemsAndRawInputHelpers(t *testing.T) {
+	items := fromStoredItems([]StoredInputItem{
+		{Type: "reasoning", Content: "skip me"},
+		{Type: "message", Role: "user", Content: "hi"},
+		{Type: "message", Role: "assistant", Content: "hello", RawItem: json.RawMessage(`{"id":"msg-1","status":"in_progress","phase":"commentary"}`)},
+		{Type: "function_call", CallID: "call-1", Name: "bash", Arguments: `{"command":"true"}`},
+		{Type: "function_call_output", CallID: "call-1", Output: "ok"},
+		{Type: "function_call_output", CallID: "call-2", RawOutput: json.RawMessage(`[{"type":"input_text","text":"raw"}]`)},
+		{Type: "web_search_call", CallID: "search-1", Status: "completed", Action: "find_in_page", Content: "https://example.com", Arguments: "needle"},
+		{Type: "compaction", EncryptedContent: "encrypted"},
+		{Type: "unknown"},
+	})
+
+	require.Len(t, items, 7)
+	assert.NotNil(t, items[0].OfMessage)
+	assert.NotNil(t, items[1].OfOutputMessage)
+	assert.NotNil(t, items[2].OfFunctionCall)
+	assert.NotNil(t, items[3].OfFunctionCallOutput)
+	assert.Equal(t, "ok", items[3].OfFunctionCallOutput.Output.OfString.Value)
+	assert.NotNil(t, items[4].OfFunctionCallOutput)
+	assert.Len(t, items[4].OfFunctionCallOutput.Output.OfResponseFunctionCallOutputItemArray, 1)
+	assert.NotNil(t, items[5].OfWebSearchCall)
+	assert.NotNil(t, items[5].OfWebSearchCall.Action.OfFind)
+	assert.NotNil(t, items[6].OfCompaction)
+	assert.Equal(t, "encrypted", items[6].OfCompaction.EncryptedContent)
+
+	inputItem, ok := messageInputItemFromRawItem(json.RawMessage(`{"role":"user","content":[{"type":"input_text","text":"hello"},{"type":"input_image","image_url":"data:image/png;base64,abc"}]}`))
+	require.True(t, ok)
+	assert.NotNil(t, inputItem.OfMessage)
+	assert.Equal(t, "hello", extractInputItemText(inputItem))
+	assert.Equal(t, []string{"data:image/png;base64,abc"}, extractInputItemImageURLs(inputItem))
+
+	assistantItem, ok := messageInputItemFromRawItem(json.RawMessage(`{"role":"assistant","id":"msg-2","status":"incomplete","phase":"final_answer","content":[{"type":"input_text","text":"legacy assistant"}]}`))
+	require.True(t, ok)
+	assert.NotNil(t, assistantItem.OfOutputMessage)
+	assert.Equal(t, "legacy assistant", extractInputItemText(assistantItem))
+
+	_, ok = messageInputItemFromRawItem(json.RawMessage(`{"role":"","content":"no role"}`))
+	assert.False(t, ok)
+	_, ok = messageInputItemFromRawItem(json.RawMessage(`{"role":"user","content":[{"type":"unsupported"}]}`))
+	assert.False(t, ok)
+
+	compactionItem, ok := inputItemFromRawItem(json.RawMessage(`{"type":"compaction_summary","encrypted_content":"compact"}`))
+	require.True(t, ok)
+	assert.NotNil(t, compactionItem.OfCompaction)
+	assert.Equal(t, "compact", compactionItem.OfCompaction.EncryptedContent)
+
+	_, ok = inputItemFromRawItem(json.RawMessage(`{`))
+	assert.False(t, ok)
 }
 
 func TestNewThreadEnablesWebSocketByDefaultForOpenAIResponses(t *testing.T) {

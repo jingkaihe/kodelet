@@ -45,6 +45,38 @@ func TestRendererRegistryRenderToolUseMarkdown(t *testing.T) {
 		assert.Contains(t, rendered, "\"alpha\": 1")
 		assert.Contains(t, rendered, "\"beta\": \"two\"")
 	})
+
+	t.Run("file_read uses tool-owned invocation renderer", func(t *testing.T) {
+		rendered := registry.RenderToolUseMarkdown("file_read", `{"file_path":"/tmp/test.go","offset":3,"line_limit":10}`)
+
+		assert.Contains(t, rendered, "- **Path:** `/tmp/test.go`")
+		assert.Contains(t, rendered, "- **Offset:** 3")
+		assert.Contains(t, rendered, "- **Line limit:** 10")
+	})
+
+	t.Run("file_write uses tool-owned invocation renderer", func(t *testing.T) {
+		rendered := registry.RenderToolUseMarkdown("file_write", `{"file_path":"/tmp/test.go","text":"package main\n"}`)
+
+		assert.Contains(t, rendered, "- **Path:** `/tmp/test.go`")
+		assert.Contains(t, rendered, "Requested content")
+		assert.Contains(t, rendered, "```text\npackage main\n```")
+	})
+
+	t.Run("bash uses tool-owned invocation renderer", func(t *testing.T) {
+		rendered := registry.RenderToolUseMarkdown("bash", `{"command":"go test ./...","description":"Run tests","timeout":30}`)
+
+		assert.Contains(t, rendered, "- **Description:** Run tests")
+		assert.Contains(t, rendered, "- **Timeout:** 30 seconds")
+		assert.Contains(t, rendered, "**Command**")
+		assert.Contains(t, rendered, "```bash\ngo test ./...\n```")
+	})
+
+	t.Run("registered renderer invalid input falls back to raw json", func(t *testing.T) {
+		rendered := registry.RenderToolUseMarkdown("file_read", `{"file_path":`)
+
+		assert.Contains(t, rendered, "```json")
+		assert.Contains(t, rendered, `{"file_path":`)
+	})
 }
 
 func TestRendererRegistryRenderMergedMarkdown(t *testing.T) {
@@ -105,5 +137,43 @@ func TestRendererRegistryRenderMergedMarkdown(t *testing.T) {
 		assert.Contains(t, rendered, "Relevant excerpt")
 		assert.NotContains(t, rendered, "Conversation ID")
 		assert.NotContains(t, rendered, "Goal")
+	})
+
+	t.Run("unknown tools use merged fallback", func(t *testing.T) {
+		rendered := registry.RenderMergedMarkdown(tools.StructuredToolResult{
+			ToolName:  "future_tool",
+			Success:   true,
+			Timestamp: time.Date(2026, 5, 23, 1, 2, 3, 0, time.UTC),
+		})
+
+		assert.Contains(t, rendered, "Tool Result (future_tool):")
+		assert.Contains(t, rendered, "Success: true")
+		assert.NotContains(t, rendered, "- **Tool:**")
+	})
+}
+
+func TestRendererRegistryRenderMarkdownFallbacks(t *testing.T) {
+	registry := NewRendererRegistry()
+
+	t.Run("unknown tool markdown fallback", func(t *testing.T) {
+		rendered := registry.RenderMarkdown(tools.StructuredToolResult{
+			ToolName:  "future_tool",
+			Success:   true,
+			Timestamp: time.Date(2026, 5, 23, 1, 2, 3, 0, time.UTC),
+		})
+
+		assert.Contains(t, rendered, "- **Status:** success")
+		assert.Contains(t, rendered, "Tool Result (future_tool):")
+	})
+
+	t.Run("non-markdown renderer falls back to cli", func(t *testing.T) {
+		registry.Register("plain_tool", &TestRenderer{message: "plain output"})
+
+		rendered := registry.RenderMarkdown(tools.StructuredToolResult{ToolName: "plain_tool", Success: true})
+		assert.Contains(t, rendered, "- **Status:** success")
+		assert.Contains(t, rendered, "plain output")
+
+		merged := registry.RenderMergedMarkdown(tools.StructuredToolResult{ToolName: "plain_tool", Success: true})
+		assert.Equal(t, "- **Status:** success\n```text\nplain output\n```", merged)
 	})
 }

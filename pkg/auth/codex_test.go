@@ -6,11 +6,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -240,6 +243,78 @@ func TestGetCodexCredentials(t *testing.T) {
 		_, err = GetCodexCredentials()
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "no valid OAuth credentials")
+	})
+}
+
+func TestSaveDeleteAndAccessCodexCredentials(t *testing.T) {
+	setTestHome(t)
+
+	savedPath, err := SaveCodexCredentials(&CodexCredentials{
+		IDToken:      "id-token",
+		AccessToken:  "access-token",
+		RefreshToken: "refresh-token",
+		AccountID:    "acct_123",
+		ExpiresAt:    time.Now().Add(time.Hour).Unix(),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(os.Getenv("HOME"), ".kodelet", "codex-credentials.json"), savedPath)
+
+	info, err := os.Stat(savedPath)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+
+	tempFiles, err := filepath.Glob(filepath.Join(filepath.Dir(savedPath), "auth-*.tmp"))
+	require.NoError(t, err)
+	assert.Empty(t, tempFiles, "temporary auth files should not be left behind")
+
+	raw, err := os.ReadFile(savedPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(raw), "\n  \"tokens\": {")
+	assert.NotContains(t, string(raw), "OPENAI_API_KEY")
+
+	creds, err := GetCodexCredentials()
+	require.NoError(t, err)
+	assert.Equal(t, "id-token", creds.IDToken)
+	assert.Equal(t, "access-token", creds.AccessToken)
+	assert.Equal(t, "refresh-token", creds.RefreshToken)
+	assert.Equal(t, "acct_123", creds.AccountID)
+
+	accessToken, err := GetCodexAccessToken(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "access-token", accessToken)
+
+	require.NoError(t, DeleteCodexCredentials())
+	exists, err := GetCodexCredentialsExists()
+	require.NoError(t, err)
+	assert.False(t, exists)
+	assert.NoError(t, DeleteCodexCredentials(), "deleting missing Codex credentials should be idempotent")
+}
+
+func TestGetCodexCredentialsForRequestExpiredWithoutRefreshToken(t *testing.T) {
+	setTestHome(t)
+
+	_, err := SaveCodexCredentials(&CodexCredentials{
+		IDToken:     "id-token",
+		AccessToken: "expired-access-token",
+		AccountID:   "acct_123",
+		ExpiresAt:   time.Now().Add(time.Minute).Unix(),
+	})
+	require.NoError(t, err)
+
+	creds, err := GetCodexCredentialsForRequest(context.Background())
+	assert.Nil(t, creds)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "token expired and no refresh token available")
+}
+
+func TestGetCodexAccessToken(t *testing.T) {
+	t.Run("returns missing credentials error", func(t *testing.T) {
+		setTestHome(t)
+
+		token, err := GetCodexAccessToken(context.Background())
+		assert.Empty(t, token)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "codex auth file not found")
 	})
 }
 
@@ -513,6 +588,30 @@ func TestCodexHeaderWithCredentials(t *testing.T) {
 	})
 }
 
+func TestGenerateCodexAuthURL(t *testing.T) {
+	authURL, verifier, state, err := GenerateCodexAuthURL()
+	require.NoError(t, err)
+	assert.NotEmpty(t, verifier)
+	assert.NotEmpty(t, state)
+
+	u, err := url.Parse(authURL)
+	require.NoError(t, err)
+	assert.Equal(t, "auth.openai.com", u.Host)
+	assert.Equal(t, "/oauth/authorize", u.Path)
+
+	query := u.Query()
+	assert.Equal(t, "code", query.Get("response_type"))
+	assert.Equal(t, codexClientID, query.Get("client_id"))
+	assert.Equal(t, codexRedirectURI, query.Get("redirect_uri"))
+	assert.Equal(t, codexScope, query.Get("scope"))
+	assert.Equal(t, "S256", query.Get("code_challenge_method"))
+	assert.NotEmpty(t, query.Get("code_challenge"))
+	assert.Equal(t, state, query.Get("state"))
+	assert.Equal(t, "true", query.Get("id_token_add_organizations"))
+	assert.Equal(t, "true", query.Get("codex_cli_simplified_flow"))
+	assert.Equal(t, "kodelet", query.Get("originator"))
+}
+
 func TestIsCodexOAuthEnabled(t *testing.T) {
 	t.Run("nil credentials returns false", func(t *testing.T) {
 		assert.False(t, IsCodexOAuthEnabled(nil))
@@ -660,6 +759,11 @@ func TestParseCodexDeviceCodeInterval(t *testing.T) {
 	})
 }
 
+func TestBuildCodexIssuerURL(t *testing.T) {
+	assert.Equal(t, "https://auth.example.test/path", buildCodexIssuerURL("https://auth.example.test/", "/path"))
+	assert.Equal(t, "https://auth.example.test/path", buildCodexIssuerURL("https://auth.example.test", "/path"))
+}
+
 func TestRequestCodexDeviceCode(t *testing.T) {
 	t.Run("returns device code details", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -700,6 +804,45 @@ func TestRequestCodexDeviceCode(t *testing.T) {
 		_, err := requestCodexDeviceCode(context.Background(), server.URL)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "device code login is not enabled")
+	})
+
+	t.Run("missing fields are rejected", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"device_auth_id":"","user_code":"CODE-123"}`))
+		}))
+		defer server.Close()
+
+		deviceCode, err := requestCodexDeviceCode(context.Background(), server.URL)
+		assert.Nil(t, deviceCode)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "device code response missing required fields")
+	})
+
+	t.Run("invalid interval is wrapped", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"device_auth_id":"device-auth-123","user_code":"CODE-123","interval":{"bad":true}}`))
+		}))
+		defer server.Close()
+
+		deviceCode, err := requestCodexDeviceCode(context.Background(), server.URL)
+		assert.Nil(t, deviceCode)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to parse device code polling interval")
+	})
+
+	t.Run("server errors include response body", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "temporary outage", http.StatusServiceUnavailable)
+		}))
+		defer server.Close()
+
+		deviceCode, err := requestCodexDeviceCode(context.Background(), server.URL)
+		assert.Nil(t, deviceCode)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "device code request failed with status 503")
+		assert.Contains(t, err.Error(), "temporary outage")
 	})
 }
 
@@ -762,6 +905,202 @@ func TestCompleteCodexDeviceCodeLogin(t *testing.T) {
 	})
 }
 
+func TestPollCodexDeviceAuthorization(t *testing.T) {
+	t.Run("requires device code", func(t *testing.T) {
+		resp, err := pollCodexDeviceAuthorization(context.Background(), "https://auth.example.test", nil)
+		assert.Nil(t, resp)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "device code is required")
+	})
+
+	t.Run("context cancellation interrupts pending authorization", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "/api/accounts/deviceauth/token", r.URL.Path)
+			w.WriteHeader(http.StatusForbidden)
+		}))
+		defer server.Close()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		resp, err := pollCodexDeviceAuthorization(ctx, server.URL, &CodexDeviceCode{
+			UserCode:     "CODE-123",
+			deviceAuthID: "device-auth-123",
+			interval:     time.Hour,
+		})
+		assert.Nil(t, resp)
+		require.ErrorIs(t, err, context.Canceled)
+	})
+
+	t.Run("missing successful response fields are rejected", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"authorization_code":"auth-code-only"}`))
+		}))
+		defer server.Close()
+
+		resp, err := pollCodexDeviceAuthorization(context.Background(), server.URL, &CodexDeviceCode{
+			UserCode:     "CODE-123",
+			deviceAuthID: "device-auth-123",
+			interval:     0,
+		})
+		assert.Nil(t, resp)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "device authorization response missing required fields")
+	})
+}
+
+func TestCodexOAuthServerCallbacks(t *testing.T) {
+	t.Run("valid callback stores code and WaitForCode returns it", func(t *testing.T) {
+		srv := &CodexOAuthServer{state: "expected-state", done: make(chan struct{})}
+		recorder := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/auth/callback?state=expected-state&code=auth-code", nil)
+
+		srv.handleCallback(recorder, req)
+
+		assert.Equal(t, http.StatusOK, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), "Authentication successful")
+
+		code, err := srv.WaitForCode(time.Millisecond)
+		require.NoError(t, err)
+		assert.Equal(t, "auth-code", code)
+	})
+
+	t.Run("rejects state mismatch", func(t *testing.T) {
+		srv := &CodexOAuthServer{state: "expected-state", done: make(chan struct{})}
+		recorder := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/auth/callback?state=wrong&code=auth-code", nil)
+
+		srv.handleCallback(recorder, req)
+
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), "State mismatch")
+
+		_, err := srv.WaitForCode(time.Millisecond)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "timeout waiting for authorization code")
+	})
+
+	t.Run("rejects missing code", func(t *testing.T) {
+		srv := &CodexOAuthServer{state: "expected-state", done: make(chan struct{})}
+		recorder := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/auth/callback?state=expected-state", nil)
+
+		srv.handleCallback(recorder, req)
+
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), "Missing authorization code")
+	})
+
+	t.Run("cancel unblocks waiters", func(t *testing.T) {
+		srv := &CodexOAuthServer{state: "expected-state", done: make(chan struct{})}
+
+		srv.Cancel()
+		srv.Cancel()
+
+		code, err := srv.WaitForCode(time.Millisecond)
+		assert.Empty(t, code)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "OAuth flow was cancelled")
+	})
+}
+
+func TestExchangeCodexCode(t *testing.T) {
+	t.Run("sends form request and maps credentials", func(t *testing.T) {
+		accessToken := makeTestCodexJWT(t, "acct_exchange")
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, http.MethodPost, r.Method)
+			assert.Equal(t, "application/x-www-form-urlencoded", r.Header.Get("Content-Type"))
+			require.NoError(t, r.ParseForm())
+			assert.Equal(t, "authorization_code", r.Form.Get("grant_type"))
+			assert.Equal(t, codexClientID, r.Form.Get("client_id"))
+			assert.Equal(t, "auth-code", r.Form.Get("code"))
+			assert.Equal(t, "verifier", r.Form.Get("code_verifier"))
+			assert.Equal(t, "https://client.example.test/callback", r.Form.Get("redirect_uri"))
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"id_token":"id-token","access_token":%q,"refresh_token":"refresh-token","expires_in":3600}`, accessToken)
+		}))
+		defer server.Close()
+
+		creds, err := exchangeCodexCode(context.Background(), server.URL, "auth-code", "verifier", "https://client.example.test/callback")
+		require.NoError(t, err)
+		require.NotNil(t, creds)
+		assert.Equal(t, "id-token", creds.IDToken)
+		assert.Equal(t, accessToken, creds.AccessToken)
+		assert.Equal(t, "refresh-token", creds.RefreshToken)
+		assert.Equal(t, "acct_exchange", creds.AccountID)
+		assert.Greater(t, creds.ExpiresAt, time.Now().Add(30*time.Minute).Unix())
+	})
+
+	t.Run("requires refresh token", func(t *testing.T) {
+		accessToken := makeTestCodexJWT(t, "acct_exchange")
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"access_token":%q,"expires_in":3600}`, accessToken)
+		}))
+		defer server.Close()
+
+		creds, err := exchangeCodexCode(context.Background(), server.URL, "auth-code", "verifier", "https://client.example.test/callback")
+		assert.Nil(t, creds)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "token response missing required fields")
+	})
+}
+
+func TestRefreshCodexTokenErrors(t *testing.T) {
+	t.Run("missing access token is rejected", func(t *testing.T) {
+		setDefaultHTTPClient(t, &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"refresh_token":"new-refresh-token"}`)),
+			}, nil
+		})})
+
+		creds, err := RefreshCodexToken(context.Background(), "refresh-token")
+		assert.Nil(t, creds)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "refresh token response missing access token")
+	})
+
+	t.Run("access token without account ID is rejected", func(t *testing.T) {
+		accessToken := makeTestCodexJWTWithoutAccount(t)
+		setDefaultHTTPClient(t, &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(fmt.Sprintf(`{"access_token":%q}`, accessToken))),
+			}, nil
+		})})
+
+		creds, err := RefreshCodexToken(context.Background(), "refresh-token")
+		assert.Nil(t, creds)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to extract account ID from refreshed access token")
+	})
+}
+
+func TestExtractCodexAccountID(t *testing.T) {
+	t.Run("returns empty for malformed token", func(t *testing.T) {
+		assert.Empty(t, extractCodexAccountID("not-a-jwt"))
+	})
+
+	t.Run("returns empty for invalid payload encoding", func(t *testing.T) {
+		assert.Empty(t, extractCodexAccountID("header.!invalid!.sig"))
+	})
+
+	t.Run("returns empty for missing auth claim", func(t *testing.T) {
+		assert.Empty(t, extractCodexAccountID(makeTestCodexJWTWithoutAccount(t)))
+	})
+}
+
+func TestCodexExpiresAt(t *testing.T) {
+	assert.Zero(t, codexExpiresAt(0))
+	assert.Zero(t, codexExpiresAt(-1))
+	assert.GreaterOrEqual(t, codexExpiresAt(60), time.Now().Add(55*time.Second).Unix())
+}
+
 func makeTestCodexJWT(t *testing.T, accountID string) string {
 	t.Helper()
 
@@ -772,6 +1111,17 @@ func makeTestCodexJWT(t *testing.T, accountID string) string {
 			"chatgpt_account_id": accountID,
 		},
 	})
+	require.NoError(t, err)
+
+	return encodeJWTPart(header) + "." + encodeJWTPart(payload) + ".sig"
+}
+
+func makeTestCodexJWTWithoutAccount(t *testing.T) string {
+	t.Helper()
+
+	header, err := json.Marshal(map[string]string{"alg": "none", "typ": "JWT"})
+	require.NoError(t, err)
+	payload, err := json.Marshal(map[string]any{"sub": "user_123"})
 	require.NoError(t, err)
 
 	return encodeJWTPart(header) + "." + encodeJWTPart(payload) + ".sig"

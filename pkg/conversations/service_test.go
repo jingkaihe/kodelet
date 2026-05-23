@@ -17,6 +17,7 @@ import (
 type mockConversationStore struct {
 	conversations map[string]*conversations.ConversationRecord
 	summaries     []conversations.ConversationSummary
+	saveFunc      func(ctx context.Context, record conversations.ConversationRecord) error
 	queryFunc     func(ctx context.Context, options conversations.QueryOptions) (conversations.QueryResult, error)
 	loadFunc      func(ctx context.Context, id string) (*conversations.ConversationRecord, error)
 	deleteFunc    func(ctx context.Context, id string) error
@@ -31,7 +32,10 @@ func newMockConversationStore() *mockConversationStore {
 	}
 }
 
-func (m *mockConversationStore) Save(_ context.Context, record conversations.ConversationRecord) error {
+func (m *mockConversationStore) Save(ctx context.Context, record conversations.ConversationRecord) error {
+	if m.saveFunc != nil {
+		return m.saveFunc(ctx, record)
+	}
 	m.conversations[record.ID] = &record
 	return nil
 }
@@ -232,6 +236,63 @@ func TestConversationService_GetConversation(t *testing.T) {
 	}
 }
 
+func TestConversationService_GetToolResult(t *testing.T) {
+	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
+	record := &conversations.ConversationRecord{
+		ID:        "conv-1",
+		CreatedAt: now,
+		UpdatedAt: now,
+		Provider:  "anthropic",
+		ToolResults: map[string]tools.StructuredToolResult{
+			"tool-call-1": {
+				ToolName:  "bash",
+				Success:   true,
+				Timestamp: now,
+			},
+		},
+	}
+
+	t.Run("returns existing tool result", func(t *testing.T) {
+		mockStore := newMockConversationStore()
+		mockStore.conversations[record.ID] = record
+		service := NewConversationService(mockStore)
+
+		response, err := service.GetToolResult(context.Background(), "conv-1", "tool-call-1")
+
+		require.NoError(t, err)
+		require.NotNil(t, response)
+		assert.Equal(t, "tool-call-1", response.ToolCallID)
+		assert.Equal(t, "bash", response.Result.ToolName)
+		assert.True(t, response.Result.Success)
+	})
+
+	t.Run("reports missing tool result", func(t *testing.T) {
+		mockStore := newMockConversationStore()
+		mockStore.conversations[record.ID] = record
+		service := NewConversationService(mockStore)
+
+		response, err := service.GetToolResult(context.Background(), "conv-1", "missing")
+
+		assert.Nil(t, response)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "tool result not found")
+	})
+
+	t.Run("wraps load errors", func(t *testing.T) {
+		mockStore := newMockConversationStore()
+		mockStore.loadFunc = func(_ context.Context, _ string) (*conversations.ConversationRecord, error) {
+			return nil, assert.AnError
+		}
+		service := NewConversationService(mockStore)
+
+		response, err := service.GetToolResult(context.Background(), "conv-1", "tool-call-1")
+
+		assert.Nil(t, response)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to load conversation")
+	})
+}
+
 func TestConversationService_DeleteConversation(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -343,6 +404,32 @@ func TestConversationService_ForkConversation(t *testing.T) {
 		assert.Nil(t, response)
 		assert.Error(t, err)
 	})
+
+	t.Run("save error", func(t *testing.T) {
+		mockStore := newMockConversationStore()
+		mockStore.conversations[sourceRecord.ID] = &sourceRecord
+		mockStore.saveFunc = func(_ context.Context, _ conversations.ConversationRecord) error {
+			return assert.AnError
+		}
+
+		service := NewConversationService(mockStore)
+		response, err := service.ForkConversation(context.Background(), sourceRecord.ID)
+
+		assert.Nil(t, response)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to save forked conversation")
+	})
+}
+
+func TestGetDefaultConversationServiceUsesDefaultStore(t *testing.T) {
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	t.Setenv("KODELET_CONVERSATION_STORE_TYPE", "sqlite")
+
+	service, err := GetDefaultConversationService(context.Background())
+
+	require.NoError(t, err)
+	require.NotNil(t, service)
+	require.NoError(t, service.Close())
 }
 
 func TestConversationService_Close(t *testing.T) {

@@ -134,6 +134,41 @@ func TestBasicState_LLMConfig(t *testing.T) {
 	assert.Equal(t, config.AllowedCommands, llmConfig.AllowedCommands)
 }
 
+func TestToolContextHelpers(t *testing.T) {
+	ctx := ContextWithConversationID(context.Background(), "  conv-123  ")
+	toolCtx := toolContextFromContext(ctx)
+	assert.Equal(t, "conv-123", toolCtx.ConversationID)
+
+	emptyCtx := ContextWithToolContext(context.Background(), ToolContext{})
+	assert.Equal(t, ToolContext{}, toolContextFromContext(emptyCtx))
+
+	store := &testMetadataStore{metadata: map[string]any{"k": "v"}}
+	fromThread := ToolContextFromThreadState(
+		llmtypes.Config{Provider: " openai ", Model: " gpt-5 ", Profile: " work ", WorkingDirectory: " /repo "},
+		" conv-456 ",
+		" /state ",
+		store,
+	)
+	assert.Equal(t, "conv-456", fromThread.ConversationID)
+	assert.Equal(t, "/state", fromThread.WorkingDir)
+	assert.Equal(t, "openai", fromThread.Provider)
+	assert.Equal(t, "gpt-5", fromThread.Model)
+	assert.Equal(t, "work", fromThread.Profile)
+	assert.Same(t, store, fromThread.MetadataStore)
+
+	fromConfigWorkingDir := ToolContextFromThreadState(llmtypes.Config{WorkingDirectory: " /config "}, "", " ", nil)
+	assert.Equal(t, "/config", fromConfigWorkingDir.WorkingDir)
+}
+
+func TestBasicStateFileLastAccessMapHelpers(t *testing.T) {
+	s := NewBasicState(context.TODO())
+	accessedAt := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
+	fileAccess := map[string]time.Time{"/tmp/file.go": accessedAt}
+
+	s.SetFileLastAccess(fileAccess)
+	assert.Equal(t, fileAccess, s.FileLastAccess())
+}
+
 func TestBasicState_ConfigureBashTool(t *testing.T) {
 	allowedCommands := []string{"ls *", "pwd", "echo *", "git status"}
 	config := llmtypes.Config{

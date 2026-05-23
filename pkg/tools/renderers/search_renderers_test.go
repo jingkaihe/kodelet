@@ -288,6 +288,60 @@ func TestGrepRenderer(t *testing.T) {
 	})
 }
 
+func TestGrepRendererMarkdownVariants(t *testing.T) {
+	renderer := &GrepRenderer{}
+	result := tools.StructuredToolResult{
+		ToolName:  "grep_tool",
+		Success:   true,
+		Timestamp: time.Now(),
+		Metadata: &tools.GrepMetadata{
+			Pattern:          "target",
+			Path:             "/repo",
+			Include:          "*.go",
+			Truncated:        true,
+			TruncationReason: tools.GrepTruncatedByFileLimit,
+			MaxResults:       7,
+			Results: []tools.SearchResult{
+				{
+					FilePath: "/repo/main.go",
+					Matches: []tools.SearchMatch{
+						{LineNumber: 4, Content: "before", IsContext: true},
+						{LineNumber: 5, Content: "target()"},
+					},
+				},
+			},
+		},
+	}
+
+	rendered := renderer.RenderMarkdown(result)
+	assert.Contains(t, rendered, "- **Pattern:** `target`")
+	assert.Contains(t, rendered, "- **Path:** `/repo`")
+	assert.Contains(t, rendered, "- **Include:** `*.go`")
+	assert.Contains(t, rendered, "- **Files with matches:** 1")
+	assert.Contains(t, rendered, "- **Truncated:** truncated at 7 files")
+	assert.Contains(t, rendered, "#### `/repo/main.go`")
+	assert.Contains(t, rendered, "4- before")
+	assert.Contains(t, rendered, "5: target()")
+
+	merged := renderer.RenderMergedMarkdown(result)
+	assert.Contains(t, merged, "- **Files with matches:** 1")
+	assert.NotContains(t, merged, "- **Pattern:**")
+	assert.NotContains(t, merged, "- **Path:**")
+
+	toolUse := renderer.RenderToolUseMarkdown(`{"pattern":"target","path":"/repo","include":"*.go","surround_lines":2,"max_results":5,"fixed_strings":true,"ignore_case":true}`)
+	assert.Contains(t, toolUse, "- **Pattern:** `target`")
+	assert.Contains(t, toolUse, "- **Path:** `/repo`")
+	assert.Contains(t, toolUse, "- **Include:** `*.go`")
+	assert.Contains(t, toolUse, "- **Context lines:** 2")
+	assert.Contains(t, toolUse, "- **Max results:** 5")
+	assert.Contains(t, toolUse, "- **Fixed strings:** true")
+	assert.Contains(t, toolUse, "- **Ignore case:** true")
+	assert.Empty(t, renderer.RenderToolUseMarkdown(`{"pattern":`))
+
+	assert.Contains(t, renderer.RenderMarkdown(tools.StructuredToolResult{ToolName: "grep_tool", Success: false, Error: "bad pattern"}), "Error: bad pattern")
+	assert.Contains(t, renderer.RenderMarkdown(tools.StructuredToolResult{ToolName: "grep_tool", Success: true, Metadata: &tools.GlobMetadata{}}), "Invalid metadata")
+}
+
 func TestGlobRenderer(t *testing.T) {
 	renderer := &GlobRenderer{}
 
@@ -428,4 +482,46 @@ func TestGlobRenderer(t *testing.T) {
 
 		assert.Contains(t, output, "Error: Invalid metadata type for glob_tool")
 	})
+}
+
+func TestGlobRendererMarkdownVariants(t *testing.T) {
+	renderer := &GlobRenderer{}
+	result := tools.StructuredToolResult{
+		ToolName:  "glob_tool",
+		Success:   true,
+		Timestamp: time.Now(),
+		Metadata: &tools.GlobMetadata{
+			Pattern:   "**/*.go",
+			Path:      "/repo",
+			Truncated: true,
+			Files: []tools.FileInfo{
+				{Path: "/repo/main.go", Type: "file", Size: 123},
+				{Path: "/repo/pkg", Type: "directory", Size: 0},
+				{Path: "/repo/unknown", Size: 1},
+			},
+		},
+	}
+
+	rendered := renderer.RenderMarkdown(result)
+	assert.Contains(t, rendered, "- **Pattern:** `**/*.go`")
+	assert.Contains(t, rendered, "- **Path:** `/repo`")
+	assert.Contains(t, rendered, "- **Matches:** 3")
+	assert.Contains(t, rendered, "- **Truncated:** yes")
+	assert.Contains(t, rendered, "- `/repo/main.go` (file, 123 bytes)")
+	assert.Contains(t, rendered, "- `/repo/pkg/` (directory, 0 bytes)")
+	assert.Contains(t, rendered, "- `/repo/unknown` (file, 1 bytes)")
+
+	merged := renderer.RenderMergedMarkdown(result)
+	assert.Contains(t, merged, "- **Matches:** 3")
+	assert.NotContains(t, merged, "- **Pattern:**")
+	assert.NotContains(t, merged, "- **Path:**")
+
+	toolUse := renderer.RenderToolUseMarkdown(`{"pattern":"**/*.go","path":"/repo","ignore_gitignore":true}`)
+	assert.Contains(t, toolUse, "- **Pattern:** `**/*.go`")
+	assert.Contains(t, toolUse, "- **Path:** `/repo`")
+	assert.Contains(t, toolUse, "- **Ignore .gitignore:** true")
+	assert.Empty(t, renderer.RenderToolUseMarkdown(`{"pattern":`))
+
+	assert.Contains(t, renderer.RenderMarkdown(tools.StructuredToolResult{ToolName: "glob_tool", Success: false, Error: "bad glob"}), "Error: bad glob")
+	assert.Contains(t, renderer.RenderMarkdown(tools.StructuredToolResult{ToolName: "glob_tool", Success: true, Metadata: &tools.GrepMetadata{}}), "Invalid metadata")
 }

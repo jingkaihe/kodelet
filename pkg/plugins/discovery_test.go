@@ -1,6 +1,8 @@
 package plugins
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -307,3 +309,194 @@ description: A plugin skill
 	assert.Contains(t, names, "local-recipe")
 	assert.Contains(t, names, "my-plugin/plugin-skill")
 }
+
+func TestIsExecutableFile(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "executable"), []byte("#!/bin/sh\n"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "plain"), []byte("plain"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "directory"), 0o755))
+
+	entries, err := os.ReadDir(tmpDir)
+	require.NoError(t, err)
+	byName := make(map[string]fs.DirEntry)
+	for _, entry := range entries {
+		byName[entry.Name()] = entry
+	}
+
+	assert.True(t, IsExecutableFile(byName["executable"]))
+	assert.False(t, IsExecutableFile(byName["plain"]))
+	assert.False(t, IsExecutableFile(byName["directory"]))
+	assert.False(t, IsExecutableFile(errorDirEntry{}))
+}
+
+func TestSkillAndRecipeDirsIncludePluginDirsInPrecedenceOrder(t *testing.T) {
+	tmpDir := t.TempDir()
+	baseDir := filepath.Join(tmpDir, "repo")
+	homeDir := filepath.Join(tmpDir, "home")
+
+	repoPluginSkillsDir := filepath.Join(baseDir, "plugins", "org@skills", "skills")
+	repoPluginRecipesDir := filepath.Join(baseDir, "plugins", "org@recipes", "recipes")
+	globalPluginSkillsDir := filepath.Join(homeDir, kodeletDir, "plugins", "global@skills", "skills")
+	globalPluginRecipesDir := filepath.Join(homeDir, kodeletDir, "plugins", "global@recipes", "recipes")
+	require.NoError(t, os.MkdirAll(repoPluginSkillsDir, 0o755))
+	require.NoError(t, os.MkdirAll(repoPluginRecipesDir, 0o755))
+	require.NoError(t, os.MkdirAll(globalPluginSkillsDir, 0o755))
+	require.NoError(t, os.MkdirAll(globalPluginRecipesDir, 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(baseDir, "plugins", "no-skills-or-recipes"), 0o755))
+
+	discovery, err := NewDiscovery(
+		WithBaseDir(baseDir),
+		WithHomeDir(homeDir),
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{
+		filepath.Join(baseDir, "skills"),
+		repoPluginSkillsDir,
+		filepath.Join(homeDir, kodeletDir, "skills"),
+		globalPluginSkillsDir,
+	}, discovery.SkillDirs())
+	assert.Equal(t, []string{
+		filepath.Join(baseDir, "recipes"),
+		repoPluginRecipesDir,
+		filepath.Join(homeDir, kodeletDir, "recipes"),
+		globalPluginRecipesDir,
+	}, discovery.RecipeDirs())
+}
+
+func TestHookDirsIncludesStandaloneAndPluginDirsInPrecedenceOrder(t *testing.T) {
+	tmpDir := t.TempDir()
+	baseDir := filepath.Join(tmpDir, "repo")
+	homeDir := filepath.Join(tmpDir, "home")
+
+	repoPluginHooksDir := filepath.Join(baseDir, "plugins", "org@hooks", "hooks")
+	globalPluginHooksDir := filepath.Join(homeDir, kodeletDir, "plugins", "global@hooks", "hooks")
+	require.NoError(t, os.MkdirAll(repoPluginHooksDir, 0o755))
+	require.NoError(t, os.MkdirAll(globalPluginHooksDir, 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(baseDir, "plugins", "no-hooks"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(baseDir, "plugins", "file.txt"), []byte("ignored"), 0o644))
+
+	discovery, err := NewDiscovery(
+		WithBaseDir(baseDir),
+		WithHomeDir(homeDir),
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, []PluginDirConfig{
+		{Dir: filepath.Join(baseDir, "hooks"), Prefix: ""},
+		{Dir: repoPluginHooksDir, Prefix: "org/hooks/"},
+		{Dir: filepath.Join(homeDir, kodeletDir, "hooks"), Prefix: ""},
+		{Dir: globalPluginHooksDir, Prefix: "global/hooks/"},
+	}, discovery.HookDirs())
+}
+
+func TestDiscoverSkillsIncludesPluginSkillsWithUserFacingPrefix(t *testing.T) {
+	tmpDir := t.TempDir()
+	baseDir := filepath.Join(tmpDir, "repo")
+	homeDir := filepath.Join(tmpDir, "home")
+
+	localSkillDir := filepath.Join(baseDir, "plugins", "org@skills", "skills", "shared")
+	globalSkillDir := filepath.Join(homeDir, kodeletDir, "plugins", "org@skills", "skills", "shared")
+	writeSkill(t, localSkillDir, "shared", "Local plugin skill")
+	writeSkill(t, globalSkillDir, "shared", "Global plugin skill")
+
+	discovery, err := NewDiscovery(
+		WithBaseDir(baseDir),
+		WithHomeDir(homeDir),
+	)
+	require.NoError(t, err)
+
+	skills, err := discovery.DiscoverSkills()
+	require.NoError(t, err)
+
+	skill, ok := skills["org/skills/shared"]
+	require.True(t, ok)
+	assert.Equal(t, "Local plugin skill", skill.Description())
+	assert.Equal(t, localSkillDir, skill.Directory())
+}
+
+func TestDiscoverRecipesPrecedenceAndPluginRecipes(t *testing.T) {
+	tmpDir := t.TempDir()
+	baseDir := filepath.Join(tmpDir, "repo")
+	homeDir := filepath.Join(tmpDir, "home")
+
+	localRecipePath := filepath.Join(baseDir, "recipes", "shared.md")
+	globalRecipePath := filepath.Join(homeDir, kodeletDir, "recipes", "shared.md")
+	localPluginRecipePath := filepath.Join(baseDir, "plugins", "org@recipes", "recipes", "workflows", "deploy.md")
+	globalPluginRecipePath := filepath.Join(homeDir, kodeletDir, "plugins", "global@recipes", "recipes", "ops", "cleanup.md")
+	writeRecipe(t, localRecipePath, "Local recipe")
+	writeRecipe(t, globalRecipePath, "Global recipe")
+	writeRecipe(t, localPluginRecipePath, "Plugin recipe")
+	writeRecipe(t, globalPluginRecipePath, "Global plugin recipe")
+
+	discovery, err := NewDiscovery(
+		WithBaseDir(baseDir),
+		WithHomeDir(homeDir),
+	)
+	require.NoError(t, err)
+
+	recipes, err := discovery.DiscoverRecipes()
+	require.NoError(t, err)
+
+	shared, ok := recipes["shared"]
+	require.True(t, ok)
+	assert.Equal(t, "Local recipe", shared.Description())
+	assert.Equal(t, filepath.Dir(localRecipePath), shared.Directory())
+
+	pluginRecipe, ok := recipes["org/recipes/workflows/deploy"]
+	require.True(t, ok)
+	assert.Equal(t, "Plugin recipe", pluginRecipe.Description())
+	assert.Equal(t, filepath.Dir(localPluginRecipePath), pluginRecipe.Directory())
+
+	globalPluginRecipe, ok := recipes["global/recipes/ops/cleanup"]
+	require.True(t, ok)
+	assert.Equal(t, "Global plugin recipe", globalPluginRecipe.Description())
+	assert.Equal(t, filepath.Dir(globalPluginRecipePath), globalPluginRecipe.Directory())
+}
+
+func TestListInstalledPluginsIncludesExecutableHooksOnly(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	hooksDir := filepath.Join(tmpDir, "plugins", "org@hooks", "hooks")
+	require.NoError(t, os.MkdirAll(hooksDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "before_tool_call"), []byte("#!/bin/sh\n"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "README.md"), []byte("ignored"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(hooksDir, "nested"), 0o755))
+
+	discovery, err := NewDiscovery(
+		WithBaseDir(tmpDir),
+		WithHomeDir(tmpDir),
+	)
+	require.NoError(t, err)
+
+	plugins, err := discovery.ListInstalledPlugins(false)
+	require.NoError(t, err)
+	require.Len(t, plugins, 1)
+	assert.Equal(t, "org@hooks", plugins[0].Name)
+	assert.Equal(t, []string{"before_tool_call"}, plugins[0].Hooks)
+	assert.Empty(t, plugins[0].Skills)
+	assert.Empty(t, plugins[0].Recipes)
+	assert.Empty(t, plugins[0].Tools)
+}
+
+func writeSkill(t *testing.T, dir, name, description string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	content := "---\nname: " + name + "\ndescription: " + description + "\n---\n\n# " + name + "\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, skillFileName), []byte(content), 0o644))
+}
+
+func writeRecipe(t *testing.T, path, description string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	content := "---\ndescription: " + description + "\n---\n\n# Recipe\n"
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+}
+
+type errorDirEntry struct{}
+
+func (errorDirEntry) Name() string               { return "error" }
+func (errorDirEntry) IsDir() bool                { return false }
+func (errorDirEntry) Type() fs.FileMode          { return 0 }
+func (errorDirEntry) Info() (fs.FileInfo, error) { return nil, errors.New("stat failed") }

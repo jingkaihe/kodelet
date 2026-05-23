@@ -2,12 +2,20 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	convstore "github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/jingkaihe/kodelet/pkg/usage"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -194,9 +202,11 @@ func TestGetUsageConfigFromFlags(t *testing.T) {
 			name:  "default values",
 			flags: map[string]string{},
 			expected: &UsageConfig{
-				Since:  "10d",
-				Until:  "",
-				Format: "table",
+				Since:     "10d",
+				Until:     "",
+				Format:    "table",
+				Provider:  "",
+				Breakdown: false,
 			},
 		},
 		{
@@ -205,9 +215,11 @@ func TestGetUsageConfigFromFlags(t *testing.T) {
 				"since": "1w",
 			},
 			expected: &UsageConfig{
-				Since:  "1w",
-				Until:  "",
-				Format: "table",
+				Since:     "1w",
+				Until:     "",
+				Format:    "table",
+				Provider:  "",
+				Breakdown: false,
 			},
 		},
 		{
@@ -216,9 +228,11 @@ func TestGetUsageConfigFromFlags(t *testing.T) {
 				"until": "2025-06-01",
 			},
 			expected: &UsageConfig{
-				Since:  "10d",
-				Until:  "2025-06-01",
-				Format: "table",
+				Since:     "10d",
+				Until:     "2025-06-01",
+				Format:    "table",
+				Provider:  "",
+				Breakdown: false,
 			},
 		},
 		{
@@ -227,22 +241,42 @@ func TestGetUsageConfigFromFlags(t *testing.T) {
 				"format": "json",
 			},
 			expected: &UsageConfig{
-				Since:  "10d",
-				Until:  "",
-				Format: "json",
+				Since:     "10d",
+				Until:     "",
+				Format:    "json",
+				Provider:  "",
+				Breakdown: false,
+			},
+		},
+		{
+			name: "provider and breakdown",
+			flags: map[string]string{
+				"provider":  "openai",
+				"breakdown": "true",
+			},
+			expected: &UsageConfig{
+				Since:     "10d",
+				Until:     "",
+				Format:    "table",
+				Provider:  "openai",
+				Breakdown: true,
 			},
 		},
 		{
 			name: "all custom",
 			flags: map[string]string{
-				"since":  "2025-05-01",
-				"until":  "2025-06-01",
-				"format": "json",
+				"since":     "2025-05-01",
+				"until":     "2025-06-01",
+				"format":    "json",
+				"provider":  "anthropic",
+				"breakdown": "true",
 			},
 			expected: &UsageConfig{
-				Since:  "2025-05-01",
-				Until:  "2025-06-01",
-				Format: "json",
+				Since:     "2025-05-01",
+				Until:     "2025-06-01",
+				Format:    "json",
+				Provider:  "anthropic",
+				Breakdown: true,
 			},
 		},
 	}
@@ -256,6 +290,8 @@ func TestGetUsageConfigFromFlags(t *testing.T) {
 			cmd.Flags().String("since", defaults.Since, "")
 			cmd.Flags().String("until", defaults.Until, "")
 			cmd.Flags().String("format", defaults.Format, "")
+			cmd.Flags().String("provider", defaults.Provider, "")
+			cmd.Flags().Bool("breakdown", defaults.Breakdown, "")
 
 			// Set flag values
 			for key, value := range tt.flags {
@@ -497,12 +533,76 @@ func TestDisplayUsageJSON(t *testing.T) {
 	assert.True(t, strings.HasSuffix(strings.TrimSpace(output), "}"))
 }
 
+func TestDisplayDailyProviderBreakdownTable(t *testing.T) {
+	stats := &usage.DailyProviderBreakdownStats{
+		Daily: []usage.DailyProviderUsage{
+			{
+				Date: time.Date(2025, 6, 2, 0, 0, 0, 0, time.UTC),
+				ProviderUsage: map[string]*usage.ProviderUsageStats{
+					"custom":    {Conversations: 1, Usage: llmtypes.Usage{InputTokens: 10, OutputTokens: 1, InputCost: 0.01}},
+					"openai":    {Conversations: 2, Usage: llmtypes.Usage{InputTokens: 2000, OutputTokens: 200, InputCost: 0.02, OutputCost: 0.03}},
+					"anthropic": {Conversations: 3, Usage: llmtypes.Usage{InputTokens: 3000, OutputTokens: 300, CacheCreationInputTokens: 30, CacheReadInputTokens: 3, InputCost: 0.03}},
+				},
+			},
+			{
+				Date: time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC),
+				ProviderUsage: map[string]*usage.ProviderUsageStats{
+					"openai": {Conversations: 1, Usage: llmtypes.Usage{InputTokens: 1000, OutputTokens: 100, InputCost: 0.01}},
+				},
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	displayDailyProviderBreakdownTable(&buf, stats)
+
+	output := buf.String()
+	assert.Contains(t, output, "Anthropic")
+	assert.Contains(t, output, "OpenAI")
+	assert.Contains(t, output, "custom")
+	assert.Contains(t, output, "TOTAL")
+	assert.Contains(t, output, "3,000")
+	assert.Less(t, strings.Index(output, "Anthropic"), strings.Index(output, "OpenAI"))
+}
+
+func TestDisplayDailyProviderBreakdownJSON(t *testing.T) {
+	stats := &usage.DailyProviderBreakdownStats{
+		Daily: []usage.DailyProviderUsage{
+			{
+				Date:               time.Date(2025, 6, 2, 0, 0, 0, 0, time.UTC),
+				TotalConversations: 3,
+				TotalUsage:         llmtypes.Usage{InputCost: 0.09},
+				ProviderUsage: map[string]*usage.ProviderUsageStats{
+					"openai":    {Conversations: 1, Usage: llmtypes.Usage{InputTokens: 10, OutputTokens: 5, InputCost: 0.01}},
+					"anthropic": {Conversations: 2, Usage: llmtypes.Usage{InputTokens: 20, OutputTokens: 6, CacheCreationInputTokens: 2, CacheReadInputTokens: 1, InputCost: 0.02}},
+				},
+			},
+		},
+		TotalConversations: 3,
+		Total:              llmtypes.Usage{InputTokens: 30, OutputTokens: 11, CacheCreationInputTokens: 2, CacheReadInputTokens: 1, InputCost: 0.03},
+	}
+
+	var buf bytes.Buffer
+	displayDailyProviderBreakdownJSON(&buf, stats)
+
+	var output DailyProviderBreakdownJSONOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &output))
+	require.Len(t, output.Daily, 1)
+	assert.Equal(t, "2025-06-02", output.Daily[0].Date)
+	assert.Equal(t, 2, output.Daily[0].Providers["Anthropic"].Conversations)
+	assert.Equal(t, 1, output.Daily[0].Providers["OpenAI"].Conversations)
+	assert.Equal(t, 3, output.Total.Conversations)
+	assert.Equal(t, 30, output.Total.InputTokens)
+}
+
 func TestNewUsageConfig(t *testing.T) {
 	config := NewUsageConfig()
 
 	assert.Equal(t, "10d", config.Since)
 	assert.Equal(t, "", config.Until)
 	assert.Equal(t, "table", config.Format)
+	assert.Equal(t, "", config.Provider)
+	assert.False(t, config.Breakdown)
 }
 
 func TestDateRangeFiltering(t *testing.T) {
@@ -737,4 +837,117 @@ func TestDateRangeFilteringWithSummaries(t *testing.T) {
 				totalConversations, stats.Total.InputTokens, tt.description)
 		})
 	}
+}
+
+func TestRunUsageCmdWithTempSQLiteStore(t *testing.T) {
+	ctx := context.Background()
+	basePath := setupUsageTempStore(t, ctx)
+	t.Setenv("KODELET_BASE_PATH", basePath)
+	t.Setenv("KODELET_CONVERSATION_STORE_TYPE", "sqlite")
+
+	store, err := convstore.NewConversationStore(ctx, &convstore.Config{StoreType: "sqlite", BasePath: basePath})
+	require.NoError(t, err)
+	defer func() { _ = store.Close() }()
+
+	now := time.Now().UTC()
+	saveUsageRecord(t, ctx, store, "usage-openai", "openai", now.Add(-24*time.Hour), llmtypes.Usage{
+		InputTokens:  100,
+		OutputTokens: 50,
+		InputCost:    0.01,
+		OutputCost:   0.02,
+	})
+	saveUsageRecord(t, ctx, store, "usage-anthropic", "anthropic", now.Add(-2*24*time.Hour), llmtypes.Usage{
+		InputTokens:              200,
+		OutputTokens:             75,
+		CacheCreationInputTokens: 10,
+		CacheReadInputTokens:     5,
+		InputCost:                0.02,
+	})
+
+	output := captureAllStdout(t, func() {
+		runUsageCmd(ctx, &UsageConfig{Since: "30d", Format: "json", Provider: "openai"})
+	})
+
+	var parsed UsageJSONOutput
+	require.NoError(t, json.Unmarshal([]byte(output), &parsed))
+	require.Len(t, parsed.Daily, 1)
+	assert.Equal(t, 1, parsed.Total.Conversations)
+	assert.Equal(t, 100, parsed.Total.InputTokens)
+	assert.Equal(t, 50, parsed.Total.OutputTokens)
+	assert.Equal(t, 0.03, parsed.Total.TotalCost)
+}
+
+func TestRunUsageCmdBreakdownWithTempSQLiteStore(t *testing.T) {
+	ctx := context.Background()
+	basePath := setupUsageTempStore(t, ctx)
+	t.Setenv("KODELET_BASE_PATH", basePath)
+	t.Setenv("KODELET_CONVERSATION_STORE_TYPE", "sqlite")
+
+	store, err := convstore.NewConversationStore(ctx, &convstore.Config{StoreType: "sqlite", BasePath: basePath})
+	require.NoError(t, err)
+	defer func() { _ = store.Close() }()
+
+	now := time.Now().UTC()
+	saveUsageRecord(t, ctx, store, "breakdown-openai", "openai", now.Add(-24*time.Hour), llmtypes.Usage{InputTokens: 10, OutputTokens: 5, InputCost: 0.01})
+	saveUsageRecord(t, ctx, store, "breakdown-anthropic", "anthropic", now.Add(-24*time.Hour), llmtypes.Usage{InputTokens: 20, OutputTokens: 6, InputCost: 0.02})
+
+	output := captureAllStdout(t, func() {
+		runUsageCmd(ctx, &UsageConfig{Since: "30d", Format: "json", Breakdown: true})
+	})
+
+	var parsed DailyProviderBreakdownJSONOutput
+	require.NoError(t, json.Unmarshal([]byte(output), &parsed))
+	require.Len(t, parsed.Daily, 1)
+	assert.Equal(t, 2, parsed.Total.Conversations)
+	assert.Equal(t, 30, parsed.Total.InputTokens)
+	assert.Equal(t, 1, parsed.Daily[0].Providers["OpenAI"].Conversations)
+	assert.Equal(t, 1, parsed.Daily[0].Providers["Anthropic"].Conversations)
+	assert.Equal(t, 2, parsed.Daily[0].Total.Conversations)
+}
+
+func TestRunUsageCmdNoConversationsWithTempSQLiteStore(t *testing.T) {
+	ctx := context.Background()
+	basePath := setupUsageTempStore(t, ctx)
+	t.Setenv("KODELET_BASE_PATH", basePath)
+	t.Setenv("KODELET_CONVERSATION_STORE_TYPE", "sqlite")
+
+	output := captureAllStdout(t, func() {
+		runUsageCmd(ctx, &UsageConfig{Since: "30d", Format: "table"})
+	})
+
+	assert.Contains(t, output, "No conversations found")
+}
+
+func setupUsageTempStore(t *testing.T, ctx context.Context) string {
+	t.Helper()
+
+	basePath := t.TempDir()
+	sqlDB, err := db.Open(ctx, filepath.Join(basePath, "storage.db"))
+	require.NoError(t, err)
+	runner := db.NewMigrationRunner(sqlDB)
+	require.NoError(t, runner.Run(ctx, migrations.All()))
+	require.NoError(t, sqlDB.Close())
+	return basePath
+}
+
+func saveUsageRecord(t *testing.T, ctx context.Context, store convstore.ConversationStore, id, provider string, when time.Time, usage llmtypes.Usage) {
+	t.Helper()
+
+	record := conversations.ConversationRecord{
+		ID:        id,
+		Provider:  provider,
+		Usage:     usage,
+		CreatedAt: when,
+		UpdatedAt: when,
+		RawMessages: []byte(`[
+        {"role":"user","content":[{"type":"text","text":"hello"}]},
+        {"role":"assistant","content":[{"type":"text","text":"world"}]}
+      ]`),
+		FileLastAccess: map[string]time.Time{},
+		Metadata:       map[string]any{"provider": provider},
+	}
+	require.NoError(t, store.Save(ctx, record))
+
+	_, err := os.Stat(filepath.Join(os.Getenv("KODELET_BASE_PATH"), "storage.db"))
+	require.NoError(t, err)
 }

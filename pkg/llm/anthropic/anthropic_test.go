@@ -194,6 +194,71 @@ func TestResolveClientBaseURL(t *testing.T) {
 	}
 }
 
+func TestAnthropicThreadDeterministicHelpers(t *testing.T) {
+	thread := &Thread{}
+	assert.Equal(t, "anthropic", thread.Provider())
+
+	assert.False(t, isMessageToolUse(anthropic.NewUserMessage()))
+	assert.False(t, isMessageToolUse(anthropic.NewUserMessage(anthropic.NewTextBlock("hello"))))
+	assert.True(t, isMessageToolUse(anthropic.NewAssistantMessage(anthropic.NewToolUseBlock("toolu_1", map[string]any{"command": "pwd"}, "bash"))))
+
+	thread.messages = []anthropic.MessageParam{
+		anthropic.NewUserMessage(anthropic.NewTextBlock("first"), anthropic.NewToolResultBlock("toolu_old", "old", false)),
+		anthropic.NewUserMessage(anthropic.NewTextBlock("last")),
+	}
+	thread.messages[0].Content[0].OfText.CacheControl = anthropic.CacheControlEphemeralParam{Type: "ephemeral"}
+	thread.messages[0].Content[1].OfToolResult.CacheControl = anthropic.CacheControlEphemeralParam{Type: "ephemeral"}
+
+	thread.cacheMessages()
+
+	assert.Empty(t, thread.messages[0].Content[0].OfText.CacheControl.Type)
+	assert.Empty(t, thread.messages[0].Content[1].OfToolResult.CacheControl.Type)
+	assert.Equal(t, "ephemeral", string(thread.messages[1].Content[0].OfText.CacheControl.Type))
+}
+
+func TestAnthropicToolResultBlockUsesMultimodalPartsWhenAvailable(t *testing.T) {
+	result := fakeAnthropicMultiModalToolResult{
+		BaseToolResult: tooltypes.BaseToolResult{Result: "fallback"},
+		parts: []tooltypes.ToolResultContentPart{
+			{Type: tooltypes.ToolResultContentPartTypeText, Text: "  "},
+			{Type: tooltypes.ToolResultContentPartTypeText, Text: "caption"},
+			{Type: tooltypes.ToolResultContentPartTypeImage, ImageURL: "data:image/bmp;base64,ignored"},
+			{Type: tooltypes.ToolResultContentPartTypeImage, ImageURL: "data:image/png;base64,aGVsbG8="},
+		},
+	}
+
+	block := anthropicToolResultBlock("toolu_1", result)
+
+	require.NotNil(t, block.OfToolResult)
+	assert.Equal(t, "toolu_1", block.OfToolResult.ToolUseID)
+	assert.False(t, block.OfToolResult.IsError.Value)
+	require.Len(t, block.OfToolResult.Content, 2)
+	assert.Equal(t, "caption", block.OfToolResult.Content[0].OfText.Text)
+	require.NotNil(t, block.OfToolResult.Content[1].OfImage)
+	assert.Equal(t, "aGVsbG8=", block.OfToolResult.Content[1].OfImage.Source.OfBase64.Data)
+	assert.Equal(t, anthropic.Base64ImageSourceMediaTypeImagePNG, block.OfToolResult.Content[1].OfImage.Source.OfBase64.MediaType)
+}
+
+func TestAnthropicToolResultBlockFallsBackToAssistantFacing(t *testing.T) {
+	block := anthropicToolResultBlock("toolu_err", tooltypes.BaseToolResult{Error: "boom"})
+
+	require.NotNil(t, block.OfToolResult)
+	assert.True(t, block.OfToolResult.IsError.Value)
+	require.Len(t, block.OfToolResult.Content, 1)
+	assert.Contains(t, block.OfToolResult.Content[0].OfText.Text, "boom")
+}
+
+func TestGetModelPricingMatchesFamiliesAndDefault(t *testing.T) {
+	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeSonnet4_6], getModelPricing(anthropic.ModelClaudeSonnet4_6))
+	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeSonnet4_5], getModelPricing("claude-sonnet-4-5-latest"))
+	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeOpus4_7], getModelPricing("claude-opus-4-7-latest"))
+	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeOpus4_6], getModelPricing("claude-opus-4-6-custom"))
+	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeOpus4_5_20251101], getModelPricing("claude-opus-4-5-custom"))
+	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeOpus4_1_20250805], getModelPricing("claude-opus-4-1-custom"))
+	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeHaiku4_5], getModelPricing("claude-haiku-4-5-custom"))
+	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeSonnet4_6], getModelPricing("unknown-model"))
+}
+
 func TestNewAnthropicThreadCopilotUsesConfiguredBaseURL(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("ANTHROPIC_BASE_URL", "")
@@ -1278,6 +1343,15 @@ func TestToAnthropicTools(t *testing.T) {
 
 type testTool struct {
 	name string
+}
+
+type fakeAnthropicMultiModalToolResult struct {
+	tooltypes.BaseToolResult
+	parts []tooltypes.ToolResultContentPart
+}
+
+func (r fakeAnthropicMultiModalToolResult) ContentParts() []tooltypes.ToolResultContentPart {
+	return r.parts
 }
 
 func (t testTool) GenerateSchema() *jsonschema.Schema {

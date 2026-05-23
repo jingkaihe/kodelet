@@ -1,10 +1,12 @@
 package runtime
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNodeRuntimeEnv_UnixTransport(t *testing.T) {
@@ -28,6 +30,31 @@ func TestNodeRuntimeEnv_HTTPTransport(t *testing.T) {
 	assert.Contains(t, env, "MCP_RPC_URL=http://127.0.0.1:12345/")
 	assert.Contains(t, env, "MCP_RPC_TOKEN=test-token")
 	assert.False(t, containsPrefix(env, "MCP_RPC_SOCKET="))
+}
+
+func TestNodeRuntimeIdentityAndAvailability(t *testing.T) {
+	runtime := NewNodeRuntimeWithRPC("/workspace", "", "", "", "")
+
+	assert.Equal(t, "/workspace", runtime.WorkspaceDir())
+	assert.Equal(t, "node-tsx", runtime.Name())
+
+	err := CheckAvailability(context.Background())
+	if err != nil {
+		assert.Contains(t, err.Error(), "Node.js/npx is not available")
+	}
+}
+
+func TestNodeRuntimeExecuteMissingScriptReturnsOutputAndError(t *testing.T) {
+	if err := CheckAvailability(context.Background()); err != nil {
+		t.Skip(err)
+	}
+
+	runtime := NewNodeRuntimeWithRPC(t.TempDir(), "unix", "/tmp/test.sock", "", "")
+	output, err := runtime.Execute(context.Background(), "missing.ts")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "code execution failed")
+	assert.NotEmpty(t, output)
 }
 
 func containsPrefix(values []string, prefix string) bool {

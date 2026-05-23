@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -10,14 +11,63 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
+	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestGetQueryFromStdinOrArgs(t *testing.T) {
+	type result struct {
+		query string
+		err   error
+	}
+
+	t.Run("uses piped stdin", func(t *testing.T) {
+		got := withPipeStdin(t, "from stdin\n", func() result {
+			query, err := getQueryFromStdinOrArgs(nil)
+			return result{query: query, err: err}
+		})
+
+		require.NoError(t, got.err)
+		assert.Equal(t, "from stdin\n", got.query)
+	})
+
+	t.Run("combines args before piped stdin", func(t *testing.T) {
+		got := withPipeStdin(t, "details from stdin", func() result {
+			query, err := getQueryFromStdinOrArgs([]string{"summarize", "this"})
+			return result{query: query, err: err}
+		})
+
+		require.NoError(t, got.err)
+		assert.Equal(t, "summarize this\ndetails from stdin", got.query)
+	})
+
+	t.Run("uses args when stdin is terminal-like", func(t *testing.T) {
+		got := withDevNullStdin(t, func() result {
+			query, err := getQueryFromStdinOrArgs([]string{"hello", "world"})
+			return result{query: query, err: err}
+		})
+
+		require.NoError(t, got.err)
+		assert.Equal(t, "hello world", got.query)
+	})
+
+	t.Run("errors without args when stdin is terminal-like", func(t *testing.T) {
+		got := withDevNullStdin(t, func() result {
+			query, err := getQueryFromStdinOrArgs(nil)
+			return result{query: query, err: err}
+		})
+
+		assert.Error(t, got.err)
+		assert.Empty(t, got.query)
+	})
+}
 
 func TestLoadResumeConversationConfig_UsesStoredProfileAndMetadata(t *testing.T) {
 	originalSettings := viper.AllSettings()
@@ -319,6 +369,8 @@ func TestFormatFragmentDisplayArgs(t *testing.T) {
 		"title": "my feature",
 		"draft": "true",
 	}))
+	assert.Equal(t, "", formatFragmentDisplayArgs(nil))
+	assert.Equal(t, "b=2 c=3", formatFragmentDisplayArgs(map[string]string{"": "ignored", "c": "3", "b": "2"}))
 }
 
 func TestCreateRunToolManagers_NoToolsSkipsToolInitialization(t *testing.T) {
@@ -327,4 +379,221 @@ func TestCreateRunToolManagers_NoToolsSkipsToolInitialization(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, mcpManager)
 	assert.Nil(t, customManager)
+}
+
+func TestAddRunMessageDisplay(t *testing.T) {
+	thread := newFakeRunThread()
+	config := NewRunConfig()
+	config.MessageDisplay = " /commit short=true "
+	config.FragmentName = "commit"
+
+	addRunMessageDisplay(thread, "model-facing prompt", config)
+
+	display, ok := conversations.LookupMessageDisplay(thread.metadata, "model-facing prompt")
+	require.True(t, ok)
+	assert.Equal(t, "/commit short=true", display.Text)
+	assert.Equal(t, "commit", display.Command)
+}
+
+func TestAddRunMessageDisplaySkipsBlankInputs(t *testing.T) {
+	thread := newFakeRunThread()
+	config := NewRunConfig()
+	config.MessageDisplay = "display"
+
+	addRunMessageDisplay(thread, " ", config)
+	assert.Empty(t, thread.metadata)
+
+	config.MessageDisplay = " "
+	addRunMessageDisplay(thread, "query", config)
+	assert.Empty(t, thread.metadata)
+}
+
+func TestAddRunGoalDisplay(t *testing.T) {
+	thread := newFakeRunThread()
+	update, handled, err := goals.ParseSlashCommand("goal", "ship coverage", time.Date(2026, 5, 23, 0, 0, 0, 0, time.UTC))
+	require.NoError(t, err)
+	require.True(t, handled)
+
+	addRunGoalDisplay(thread, &update)
+
+	assert.Equal(t, update.Goal, thread.metadata[goals.MetadataKey])
+	display, ok := conversations.LookupMessageDisplay(thread.metadata, update.ModelPrompt)
+	require.True(t, ok)
+	assert.Equal(t, update.Display, display.Text)
+	assert.Equal(t, goals.SlashCommandName, display.Command)
+
+	addRunGoalDisplay(nil, &update)
+	addRunGoalDisplay(thread, nil)
+}
+
+func TestApplyFragmentRestrictions(t *testing.T) {
+	t.Run("applies valid restrictions", func(t *testing.T) {
+		config := llmtypes.Config{}
+		applyFragmentRestrictions(&config, &fragments.Metadata{
+			AllowedTools:    []string{"bash", "file_read"},
+			AllowedCommands: []string{"go test ./..."},
+		})
+
+		assert.Equal(t, []string{"bash", "file_read"}, config.AllowedTools)
+		assert.Equal(t, []string{"go test ./..."}, config.AllowedCommands)
+	})
+
+	t.Run("ignores invalid tools but applies commands", func(t *testing.T) {
+		config := llmtypes.Config{AllowedTools: []string{"existing"}}
+		applyFragmentRestrictions(&config, &fragments.Metadata{
+			AllowedTools:    []string{"not-a-real-tool"},
+			AllowedCommands: []string{"ls"},
+		})
+
+		assert.Equal(t, []string{"existing"}, config.AllowedTools)
+		assert.Equal(t, []string{"ls"}, config.AllowedCommands)
+	})
+
+	t.Run("nil metadata is no-op", func(t *testing.T) {
+		config := llmtypes.Config{AllowedTools: []string{"existing"}}
+		applyFragmentRestrictions(&config, nil)
+		assert.Equal(t, []string{"existing"}, config.AllowedTools)
+	})
+}
+
+func TestNormalizeConversationProfile(t *testing.T) {
+	assert.Equal(t, "", normalizeConversationProfile(""))
+	assert.Equal(t, "", normalizeConversationProfile(" default "))
+	assert.Equal(t, "work", normalizeConversationProfile(" work "))
+}
+
+func TestGetRunConfigFromFlags(t *testing.T) {
+	cmd := &cobra.Command{Use: "run"}
+	defaults := NewRunConfig()
+	cmd.Flags().String("resume", defaults.ResumeConvID, "")
+	cmd.Flags().String("cwd", defaults.CWD, "")
+	cmd.Flags().BoolP("follow", "f", defaults.Follow, "")
+	cmd.Flags().Bool("no-save", defaults.NoSave, "")
+	cmd.Flags().Bool("headless", defaults.Headless, "")
+	cmd.Flags().Bool("stream-deltas", defaults.StreamDeltas, "")
+	cmd.Flags().StringSliceP("image", "I", defaults.Images, "")
+	cmd.Flags().Int("max-turns", defaults.MaxTurns, "")
+	cmd.Flags().StringP("recipe", "r", defaults.FragmentName, "")
+	cmd.Flags().StringToString("arg", defaults.FragmentArgs, "")
+	cmd.Flags().StringSlice("fragment-dirs", defaults.FragmentDirs, "")
+	cmd.Flags().Bool("include-history", defaults.IncludeHistory, "")
+	cmd.Flags().Bool("no-hooks", defaults.NoHooks, "")
+	cmd.Flags().Bool("no-mcp", defaults.NoMCP, "")
+	cmd.Flags().Bool("no-tools", defaults.NoTools, "")
+	cmd.Flags().Bool("disable-fs-search-tools", defaults.DisableFSSearchTools, "")
+	cmd.Flags().Bool("disable-subagent", defaults.DisableSubagent, "")
+	cmd.Flags().String("sysprompt", defaults.Sysprompt, "")
+	cmd.Flags().StringToString("sysprompt-arg", defaults.SyspromptArgs, "")
+	cmd.Flags().Bool("result-only", defaults.ResultOnly, "")
+	cmd.Flags().Bool("use-weak-model", defaults.UseWeakModel, "")
+	cmd.Flags().String("account", defaults.Account, "")
+	cmd.Flags().Bool("as-subagent", defaults.AsSubagent, "")
+
+	require.NoError(t, cmd.Flags().Set("resume", "conv-1"))
+	require.NoError(t, cmd.Flags().Set("cwd", " /tmp/project "))
+	require.NoError(t, cmd.Flags().Set("no-save", "false"))
+	require.NoError(t, cmd.Flags().Set("stream-deltas", "true"))
+	require.NoError(t, cmd.Flags().Set("headless", "true"))
+	require.NoError(t, cmd.Flags().Set("image", "a.png,b.png"))
+	require.NoError(t, cmd.Flags().Set("max-turns", "-5"))
+	require.NoError(t, cmd.Flags().Set("recipe", "commit"))
+	require.NoError(t, cmd.Flags().Set("arg", "short=true,target=main"))
+	require.NoError(t, cmd.Flags().Set("fragment-dirs", "recipes,more-recipes"))
+	require.NoError(t, cmd.Flags().Set("include-history", "true"))
+	require.NoError(t, cmd.Flags().Set("no-hooks", "true"))
+	require.NoError(t, cmd.Flags().Set("no-mcp", "true"))
+	require.NoError(t, cmd.Flags().Set("no-tools", "true"))
+	require.NoError(t, cmd.Flags().Set("disable-fs-search-tools", "true"))
+	require.NoError(t, cmd.Flags().Set("disable-subagent", "true"))
+	require.NoError(t, cmd.Flags().Set("sysprompt", "prompt.md"))
+	require.NoError(t, cmd.Flags().Set("sysprompt-arg", "project=kodelet"))
+	require.NoError(t, cmd.Flags().Set("result-only", "true"))
+	require.NoError(t, cmd.Flags().Set("use-weak-model", "true"))
+	require.NoError(t, cmd.Flags().Set("account", "work"))
+	require.NoError(t, cmd.Flags().Set("as-subagent", "true"))
+
+	config := getRunConfigFromFlags(context.Background(), cmd)
+
+	assert.Equal(t, "conv-1", config.ResumeConvID)
+	assert.Equal(t, "/tmp/project", config.CWD)
+	assert.False(t, config.NoSave)
+	assert.True(t, config.Headless)
+	assert.True(t, config.StreamDeltas)
+	assert.Equal(t, []string{"a.png", "b.png"}, config.Images)
+	assert.Equal(t, 0, config.MaxTurns)
+	assert.Equal(t, "commit", config.FragmentName)
+	assert.Equal(t, map[string]string{"short": "true", "target": "main"}, config.FragmentArgs)
+	assert.Equal(t, []string{"recipes", "more-recipes"}, config.FragmentDirs)
+	assert.True(t, config.IncludeHistory)
+	assert.True(t, config.NoHooks)
+	assert.True(t, config.NoMCP)
+	assert.True(t, config.NoTools)
+	assert.True(t, config.DisableFSSearchTools)
+	assert.True(t, config.DisableSubagent)
+	assert.Equal(t, "prompt.md", config.Sysprompt)
+	assert.Equal(t, map[string]string{"project": "kodelet"}, config.SyspromptArgs)
+	assert.True(t, config.ResultOnly)
+	assert.True(t, config.UseWeakModel)
+	assert.Equal(t, "work", config.Account)
+	assert.True(t, config.AsSubagent)
+}
+
+type fakeRunThread struct {
+	metadata map[string]any
+}
+
+func newFakeRunThread() *fakeRunThread {
+	return &fakeRunThread{metadata: make(map[string]any)}
+}
+
+func (f *fakeRunThread) SetState(tooltypes.State)                          {}
+func (f *fakeRunThread) GetState() tooltypes.State                         { return nil }
+func (f *fakeRunThread) AddUserMessage(context.Context, string, ...string) {}
+func (f *fakeRunThread) SendMessage(context.Context, string, llmtypes.MessageHandler, llmtypes.MessageOpt) (string, error) {
+	return "", nil
+}
+func (f *fakeRunThread) GetUsage() llmtypes.Usage                     { return llmtypes.Usage{} }
+func (f *fakeRunThread) GetConversationID() string                    { return "conv" }
+func (f *fakeRunThread) SetConversationID(string)                     {}
+func (f *fakeRunThread) SaveConversation(context.Context, bool) error { return nil }
+func (f *fakeRunThread) IsPersisted() bool                            { return false }
+func (f *fakeRunThread) EnablePersistence(context.Context, bool)      {}
+func (f *fakeRunThread) Provider() string                             { return "fake" }
+func (f *fakeRunThread) GetMessages() ([]llmtypes.Message, error)     { return nil, nil }
+func (f *fakeRunThread) GetConfig() llmtypes.Config                   { return llmtypes.Config{} }
+func (f *fakeRunThread) AggregateSubagentUsage(llmtypes.Usage)        {}
+func (f *fakeRunThread) SetMetadataValue(key string, value any)       { f.metadata[key] = value }
+func (f *fakeRunThread) GetMetadata() map[string]any                  { return f.metadata }
+
+func withPipeStdin[T any](t *testing.T, input string, f func() T) T {
+	t.Helper()
+
+	oldStdin := os.Stdin
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	_, err = w.WriteString(input)
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+	os.Stdin = r
+	t.Cleanup(func() {
+		os.Stdin = oldStdin
+		_ = r.Close()
+	})
+
+	return f()
+}
+
+func withDevNullStdin[T any](t *testing.T, f func() T) T {
+	t.Helper()
+
+	oldStdin := os.Stdin
+	devNull, err := os.Open(os.DevNull)
+	require.NoError(t, err)
+	os.Stdin = devNull
+	t.Cleanup(func() {
+		os.Stdin = oldStdin
+		_ = devNull.Close()
+	})
+
+	return f()
 }

@@ -95,3 +95,69 @@ func TestUpdateStatusSupportsPauseResumeAndClear(t *testing.T) {
 	_, ok := ContextFromMetadata(clearedMetadata)
 	assert.False(t, ok)
 }
+
+func TestGoalPromptAndStatusHelpers(t *testing.T) {
+	prompt := ModelPrompt("  finish <coverage> & report  ")
+	assert.Contains(t, prompt, ContextStartMarker)
+	assert.Contains(t, prompt, "finish &lt;coverage&gt; &amp; report")
+
+	assert.True(t, IsContextText("  "+prompt+"  "))
+	assert.False(t, IsContextText("plain text"))
+
+	assert.True(t, IsTerminalStatus(StatusComplete))
+	assert.True(t, IsTerminalStatus(StatusBlocked))
+	assert.True(t, IsTerminalStatus(StatusCleared))
+	assert.False(t, IsTerminalStatus(StatusActive))
+
+	assert.True(t, IsValidStatus(StatusPaused))
+	assert.False(t, IsValidStatus(Status("unknown")))
+	assert.True(t, IsUpdateStatus(StatusBlocked))
+	assert.False(t, IsUpdateStatus(Status("unknown")))
+}
+
+func TestFromMetadataHandlesInvalidAndPointerValues(t *testing.T) {
+	now := time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)
+	goalValue := New("ship coverage", now)
+
+	goal, ok := FromMetadata(map[string]any{MetadataKey: &goalValue})
+	require.True(t, ok)
+	assert.Equal(t, "ship coverage", goal.Objective)
+
+	invalidCases := []map[string]any{
+		nil,
+		{MetadataKey: nil},
+		{MetadataKey: (*Goal)(nil)},
+		{MetadataKey: Goal{Status: StatusActive}},
+		{MetadataKey: Goal{Objective: "x", Status: Status("bad")}},
+		{MetadataKey: func() {}},
+	}
+
+	for _, metadata := range invalidCases {
+		_, ok := FromMetadata(metadata)
+		assert.False(t, ok)
+	}
+}
+
+func TestUpdateStatusRejectsInvalidTransitions(t *testing.T) {
+	metadata := map[string]any{MetadataKey: New("ship goal support", time.Now())}
+
+	_, _, err := UpdateStatus(metadata, StatusActive, "", time.Now())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "already active")
+
+	_, pausedMetadata, err := UpdateStatus(metadata, StatusPaused, "pause", time.Now())
+	require.NoError(t, err)
+	_, _, err = UpdateStatus(pausedMetadata, StatusComplete, "done", time.Now())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot mark goal complete")
+
+	_, clearedMetadata, err := UpdateStatus(pausedMetadata, StatusCleared, "clear", time.Now())
+	require.NoError(t, err)
+	_, _, err = UpdateStatus(clearedMetadata, StatusActive, "resume", time.Now())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "goal has been cleared")
+
+	_, _, err = UpdateStatus(nil, StatusComplete, "done", time.Now())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no goal")
+}

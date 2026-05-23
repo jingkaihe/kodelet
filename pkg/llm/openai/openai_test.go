@@ -4,20 +4,27 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/steer"
+	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/sashabaranov/go-openai"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // skipIfNoOpenAIAPIKey skips the test if OPENAI_API_KEY is not set
@@ -1247,4 +1254,142 @@ func TestUpdateUsageUsesLongContextPricing(t *testing.T) {
 	assert.Equal(t, 0.3, usage.CacheReadCost)
 	assert.Equal(t, 40.0, usage.OutputCost)
 	assert.Equal(t, 1_050_000, usage.MaxContextWindow)
+}
+
+func TestOpenAIThreadDeterministicHelperBranches(t *testing.T) {
+	cfg := llm.Config{Model: "custom-reasoning", OpenAI: &llm.OpenAIConfig{ManualCache: true}}
+	thread := &Thread{
+		Thread:       base.NewThread(cfg, "conv-helper", base.CreateHookTrigger(context.Background(), cfg, "conv-helper")),
+		customModels: &llm.CustomModels{Reasoning: []string{"custom-reasoning"}},
+		customPricing: llm.CustomPricing{
+			"priced-model": {Input: 1, Output: 2, ContextWindow: 3},
+		},
+	}
+
+	assert.True(t, thread.isReasoningModelDynamic("custom-reasoning"))
+	assert.False(t, thread.isReasoningModelDynamic("gpt-5.5"), "custom model list should override built-in reasoning list")
+	pricing, ok := thread.getPricing("priced-model")
+	require.True(t, ok)
+	assert.Equal(t, 3, pricing.ContextWindow)
+	_, ok = thread.getPricing("missing-model")
+	assert.False(t, ok)
+
+	assert.False(t, isToolResultMessage(openai.ChatCompletionMessage{Role: openai.ChatMessageRoleAssistant}))
+	assert.True(t, isToolResultMessage(openai.ChatCompletionMessage{Role: openai.ChatMessageRoleTool}))
+
+	thread.messages = []openai.ChatCompletionMessage{
+		{Role: openai.ChatMessageRoleSystem, Content: "system"},
+		{Role: openai.ChatMessageRoleUser, Content: "hello"},
+		{Role: openai.ChatMessageRoleAssistant, ToolCalls: []openai.ToolCall{{ID: "call-1", Type: openai.ToolTypeFunction, Function: openai.FunctionCall{Name: "bash", Arguments: `{"command":"pwd"}`}}}},
+		{Role: openai.ChatMessageRoleTool, ToolCallID: "call-1", Content: "ok"},
+	}
+	messages, err := thread.GetMessages()
+	require.NoError(t, err)
+	require.Len(t, messages, 3)
+	assert.Equal(t, "user", messages[0].Role)
+	assert.Equal(t, "hello", messages[0].Content)
+	assert.Equal(t, "assistant", messages[1].Role)
+	assert.Contains(t, messages[1].Content, "call-1")
+	assert.Equal(t, "tool", messages[2].Role)
+	assert.Equal(t, "ok", messages[2].Content)
+
+	state := tools.NewBasicState(context.Background(), tools.WithExtraMCPTools([]tooltypes.Tool{&testOpenAITool{name: "extra"}}))
+	thread.SetState(state)
+	assert.Contains(t, toolNamesForOpenAITest(thread.tools(llm.MessageOpt{})), "extra")
+	assert.Empty(t, thread.tools(llm.MessageOpt{NoToolUse: true}))
+
+	followup := openAIChatFollowupImageMessage(nil)
+	assert.Nil(t, followup)
+}
+
+func TestOpenAIProcessImageAndClientHelpers(t *testing.T) {
+	thread := &Thread{}
+
+	urlPart, err := thread.processImageURL("https://example.com/image.png")
+	require.NoError(t, err)
+	require.NotNil(t, urlPart.ImageURL)
+	assert.Equal(t, "https://example.com/image.png", urlPart.ImageURL.URL)
+	assert.Equal(t, openai.ChatMessagePartTypeImageURL, urlPart.Type)
+
+	_, err = thread.processImageURL("http://example.com/insecure.png")
+	require.Error(t, err)
+
+	dataPart, err := thread.processImageDataURL("data:image/png;base64,aGVsbG8=")
+	require.NoError(t, err)
+	assert.Equal(t, "data:image/png;base64,aGVsbG8=", dataPart.ImageURL.URL)
+
+	tmpDir := t.TempDir()
+	imagePath := filepath.Join(tmpDir, "pixel.png")
+	require.NoError(t, os.WriteFile(imagePath, []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}, 0o644))
+	filePart, err := thread.processImageFile(imagePath)
+	require.NoError(t, err)
+	require.NotNil(t, filePart.ImageURL)
+	assert.True(t, strings.HasPrefix(filePart.ImageURL.URL, "data:image/png;base64,"))
+	_, err = thread.processImageFile(filepath.Join(tmpDir, "missing.png"))
+	require.Error(t, err)
+
+	injecting := &headerInjectingHTTPClient{
+		base: roundTripHTTPDoer(func(req *http.Request) (*http.Response, error) {
+			assert.Equal(t, "original", req.Header.Get("X-Original"))
+			assert.Equal(t, "injected", req.Header.Get("X-Test"))
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("ok")), Header: make(http.Header)}, nil
+		}),
+		headers: map[string]string{"X-Test": "injected"},
+	}
+	req := httptest.NewRequest(http.MethodGet, "https://example.com", nil)
+	req.Header.Set("X-Original", "original")
+	resp, err := injecting.Do(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Empty(t, req.Header.Get("X-Test"), "original request should not be mutated")
+
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	cfg := llm.Config{OpenAI: &llm.OpenAIConfig{BaseURL: "https://openai.example/v1"}}
+	thread = &Thread{Thread: base.NewThread(cfg, "conv-helper", base.CreateHookTrigger(context.Background(), cfg, "conv-helper"))}
+	clientConfig := thread.buildClientConfig()
+	assert.Equal(t, "https://openai.example/v1", clientConfig.BaseURL)
+	require.NotNil(t, clientConfig.HTTPClient)
+	assert.Same(t, thread.client, thread.chatClientWithHeaders(nil))
+	assert.Same(t, thread.client, thread.chatClientWithHeaders(map[string]string{}))
+
+	thread.client = openai.NewClientWithConfig(clientConfig)
+	withHeaders := thread.chatClientWithHeaders(map[string]string{"X-Session-Affinity": "conv-helper"})
+	assert.NotSame(t, thread.client, withHeaders)
+}
+
+func TestOpenAIConfigPlatformBranches(t *testing.T) {
+	assert.False(t, isCopilotPlatform(llm.Config{Provider: "anthropic"}))
+	assert.False(t, isCopilotPlatform(llm.Config{Provider: "anthropic", Anthropic: nil}))
+	assert.True(t, isCopilotPlatform(llm.Config{Provider: "anthropic", Anthropic: &llm.AnthropicConfig{Platform: " CoPilot "}}))
+	assert.True(t, isCopilotPlatform(llm.Config{OpenAI: &llm.OpenAIConfig{Platform: "copilot"}}))
+	assert.False(t, isCopilotPlatform(llm.Config{OpenAI: &llm.OpenAIConfig{Platform: "openai"}}))
+
+	thread := &Thread{}
+	assert.True(t, thread.isReasoningModelDynamic("gpt-5.5"))
+	assert.False(t, thread.isReasoningModelDynamic("gpt-4o"))
+}
+
+type roundTripHTTPDoer func(*http.Request) (*http.Response, error)
+
+func (f roundTripHTTPDoer) Do(req *http.Request) (*http.Response, error) { return f(req) }
+
+type testOpenAITool struct{ name string }
+
+func (t *testOpenAITool) GenerateSchema() *jsonschema.Schema {
+	return jsonschema.Reflect(map[string]any{})
+}
+func (t *testOpenAITool) Name() string                                { return t.name }
+func (t *testOpenAITool) Description() string                         { return "test tool" }
+func (t *testOpenAITool) ValidateInput(tooltypes.State, string) error { return nil }
+func (t *testOpenAITool) Execute(context.Context, tooltypes.State, string) tooltypes.ToolResult {
+	return tooltypes.BaseToolResult{Result: "ok"}
+}
+func (t *testOpenAITool) TracingKVs(string) ([]attribute.KeyValue, error) { return nil, nil }
+
+func toolNamesForOpenAITest(tools []tooltypes.Tool) []string {
+	names := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		names = append(names, tool.Name())
+	}
+	return names
 }

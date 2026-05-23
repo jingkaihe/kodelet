@@ -6,14 +6,23 @@ import (
 	"encoding/json"
 	"io"
 	"maps"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -194,6 +203,108 @@ func TestConversationShowConfigDefaults(t *testing.T) {
 	assert.Equal(t, "text", config.Format)
 	assert.False(t, config.NoHeader)
 	assert.False(t, config.StatsOnly)
+	assert.False(t, config.TruncateToolResults)
+}
+
+func TestConversationConfigDefaults(t *testing.T) {
+	listConfig := NewConversationListConfig()
+	assert.Equal(t, 10, listConfig.Limit)
+	assert.Equal(t, "updated_at", listConfig.SortBy)
+	assert.Equal(t, "desc", listConfig.SortOrder)
+	assert.False(t, listConfig.JSONOutput)
+
+	assert.False(t, NewConversationDeleteConfig().NoConfirm)
+	assert.False(t, NewConversationImportConfig().Force)
+	assert.False(t, NewConversationExportConfig().UseGist)
+	assert.False(t, NewConversationExportConfig().UsePublicGist)
+	assert.Equal(t, "", NewConversationEditConfig().Editor)
+	assert.Equal(t, "", NewConversationEditConfig().EditArgs)
+	assert.False(t, NewConversationStreamConfig().IncludeHistory)
+	assert.False(t, NewConversationStreamConfig().HistoryOnly)
+}
+
+func TestConversationConfigFromFlags(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().String("start", "", "")
+	cmd.Flags().String("end", "", "")
+	cmd.Flags().String("search", "", "")
+	cmd.Flags().String("provider", "", "")
+	cmd.Flags().Int("limit", 10, "")
+	cmd.Flags().Int("offset", 0, "")
+	cmd.Flags().String("sort-by", "updated_at", "")
+	cmd.Flags().String("sort-order", "desc", "")
+	cmd.Flags().Bool("json", false, "")
+	require.NoError(t, cmd.Flags().Set("start", "2026-01-01"))
+	require.NoError(t, cmd.Flags().Set("end", "2026-01-31"))
+	require.NoError(t, cmd.Flags().Set("search", "golang"))
+	require.NoError(t, cmd.Flags().Set("provider", "openai"))
+	require.NoError(t, cmd.Flags().Set("limit", "20"))
+	require.NoError(t, cmd.Flags().Set("offset", "5"))
+	require.NoError(t, cmd.Flags().Set("sort-by", "created_at"))
+	require.NoError(t, cmd.Flags().Set("sort-order", "asc"))
+	require.NoError(t, cmd.Flags().Set("json", "true"))
+	listConfig := getConversationListConfigFromFlags(cmd)
+	assert.Equal(t, "2026-01-01", listConfig.StartDate)
+	assert.Equal(t, "2026-01-31", listConfig.EndDate)
+	assert.Equal(t, "golang", listConfig.Search)
+	assert.Equal(t, "openai", listConfig.Provider)
+	assert.Equal(t, 20, listConfig.Limit)
+	assert.Equal(t, 5, listConfig.Offset)
+	assert.Equal(t, "created_at", listConfig.SortBy)
+	assert.Equal(t, "asc", listConfig.SortOrder)
+	assert.True(t, listConfig.JSONOutput)
+
+	deleteCmd := &cobra.Command{}
+	deleteCmd.Flags().Bool("no-confirm", false, "")
+	require.NoError(t, deleteCmd.Flags().Set("no-confirm", "true"))
+	assert.True(t, getConversationDeleteConfigFromFlags(deleteCmd).NoConfirm)
+
+	showCmd := &cobra.Command{}
+	showCmd.Flags().String("format", "text", "")
+	showCmd.Flags().Bool("no-header", false, "")
+	showCmd.Flags().Bool("stats-only", false, "")
+	showCmd.Flags().Bool("truncate-tool-results", false, "")
+	require.NoError(t, showCmd.Flags().Set("format", "markdown"))
+	require.NoError(t, showCmd.Flags().Set("no-header", "true"))
+	require.NoError(t, showCmd.Flags().Set("stats-only", "true"))
+	require.NoError(t, showCmd.Flags().Set("truncate-tool-results", "true"))
+	showConfig := getConversationShowConfigFromFlags(showCmd)
+	assert.Equal(t, "markdown", showConfig.Format)
+	assert.True(t, showConfig.NoHeader)
+	assert.True(t, showConfig.StatsOnly)
+	assert.True(t, showConfig.TruncateToolResults)
+
+	importCmd := &cobra.Command{}
+	importCmd.Flags().Bool("force", false, "")
+	require.NoError(t, importCmd.Flags().Set("force", "true"))
+	assert.True(t, getConversationImportConfigFromFlags(importCmd).Force)
+
+	exportCmd := &cobra.Command{}
+	exportCmd.Flags().Bool("gist", false, "")
+	exportCmd.Flags().Bool("public-gist", false, "")
+	require.NoError(t, exportCmd.Flags().Set("gist", "true"))
+	require.NoError(t, exportCmd.Flags().Set("public-gist", "true"))
+	exportConfig := getConversationExportConfigFromFlags(exportCmd)
+	assert.True(t, exportConfig.UseGist)
+	assert.True(t, exportConfig.UsePublicGist)
+
+	streamCmd := &cobra.Command{}
+	streamCmd.Flags().Bool("include-history", false, "")
+	streamCmd.Flags().Bool("history-only", false, "")
+	require.NoError(t, streamCmd.Flags().Set("include-history", "true"))
+	require.NoError(t, streamCmd.Flags().Set("history-only", "true"))
+	streamConfig := getConversationStreamConfigFromFlags(streamCmd)
+	assert.True(t, streamConfig.IncludeHistory)
+	assert.True(t, streamConfig.HistoryOnly)
+
+	editCmd := &cobra.Command{}
+	editCmd.Flags().String("editor", "", "")
+	editCmd.Flags().String("edit-args", "", "")
+	require.NoError(t, editCmd.Flags().Set("editor", "code"))
+	require.NoError(t, editCmd.Flags().Set("edit-args", "--wait"))
+	editConfig := getConversationEditConfigFromFlags(editCmd)
+	assert.Equal(t, "code", editConfig.Editor)
+	assert.Equal(t, "--wait", editConfig.EditArgs)
 }
 
 func TestDisplayConversationHeader(t *testing.T) {
@@ -339,6 +450,72 @@ func TestConversationShowOutputJSONStatsOnly(t *testing.T) {
 	assert.NotContains(t, jsonStr, `"summary"`)
 }
 
+func TestConversationListOutputRenderTableAndJSON(t *testing.T) {
+	now := time.Date(2026, 1, 23, 10, 0, 0, 0, time.UTC)
+	summaries := []convtypes.ConversationSummary{
+		{
+			ID:           "conv-1",
+			CreatedAt:    now,
+			UpdatedAt:    now.Add(time.Hour),
+			MessageCount: 3,
+			Provider:     "openai-responses",
+			Summary:      "A summary\nwith newline and a long suffix that should be truncated in table output because it is too wide",
+			Usage:        llmtypes.Usage{InputCost: 0.01, OutputCost: 0.02, CurrentContextWindow: 1200, MaxContextWindow: 4000},
+		},
+		{
+			ID:           "conv-2",
+			CreatedAt:    now,
+			UpdatedAt:    now,
+			MessageCount: 1,
+			Provider:     "custom-provider",
+			FirstMessage: "first message",
+		},
+	}
+	metadata := map[string]map[string]any{
+		"conv-1": {"platform": "Codex", "api_mode": "chat"},
+	}
+
+	output := NewConversationListOutput(summaries, metadata, TableFormat)
+	require.Len(t, output.Conversations, 2)
+	assert.Equal(t, "OpenAI", output.Conversations[0].Provider)
+	assert.Equal(t, "codex", output.Conversations[0].Platform)
+	assert.Equal(t, "chat_completions", output.Conversations[0].APIMode)
+	assert.NotContains(t, output.Conversations[0].Preview, "\n")
+
+	var table bytes.Buffer
+	require.NoError(t, output.Render(&table))
+	assert.Contains(t, table.String(), "conv-1")
+	assert.Contains(t, table.String(), "$0.0300")
+	assert.Contains(t, table.String(), "1200/4000")
+	assert.Contains(t, table.String(), "...")
+
+	output.Format = JSONFormat
+	var jsonBuf bytes.Buffer
+	require.NoError(t, output.Render(&jsonBuf))
+	var parsed struct {
+		Conversations []ConversationSummaryOutput `json:"conversations"`
+	}
+	require.NoError(t, json.Unmarshal(jsonBuf.Bytes(), &parsed))
+	require.Len(t, parsed.Conversations, 2)
+	assert.Equal(t, "conv-2", parsed.Conversations[1].ID)
+}
+
+func TestDisplayConversation(t *testing.T) {
+	output := captureStdout(t, func() {
+		displayConversation([]llmtypes.Message{
+			{Role: "user", Content: "hello"},
+			{Role: "assistant", Content: "hi"},
+			{Role: "tool", Content: "result"},
+			{Role: "", Content: "blank role"},
+		})
+	})
+
+	assert.Contains(t, output, "hello")
+	assert.Contains(t, output, "hi")
+	assert.Contains(t, output, "result")
+	assert.Contains(t, output, "blank role")
+}
+
 func TestRenderConversationHeaderMarkdown(t *testing.T) {
 	record := convtypes.ConversationRecord{
 		ID:        "conv-md",
@@ -437,6 +614,328 @@ func TestExtractProviderMetadata(t *testing.T) {
 			assert.Equal(t, tt.expectedAPIMode, apiMode)
 		})
 	}
+}
+
+func TestMarkdownHelpers(t *testing.T) {
+	assert.Equal(t, "`plain`", inlineMarkdownCode("plain"))
+	assert.Equal(t, "``has`tick``", inlineMarkdownCode("has`tick"))
+	assert.Equal(t, "hello world", sanitizeMarkdownText("hello\nworld"))
+}
+
+func TestReadConversationDataFromFileAndURL(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "conversation.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"id":"file"}`), 0o644))
+
+	data, err := readConversationData(path)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"id":"file"}`, string(data))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/missing" {
+			http.Error(w, "missing", http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"url"}`))
+	}))
+	defer server.Close()
+
+	data, err = readConversationData(server.URL)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"id":"url"}`, string(data))
+
+	_, err = readConversationData(server.URL + "/missing")
+	assert.Error(t, err)
+}
+
+func TestValidateConversationRecord(t *testing.T) {
+	valid := []byte(`{
+		"id":"conv-1",
+		"provider":"openai",
+		"rawMessages":[{"role":"user","content":"hello"}],
+		"usage":{},
+		"fileLastAccess":{}
+	}`)
+
+	record, err := validateConversationRecord(valid)
+	require.NoError(t, err)
+	assert.Equal(t, "conv-1", record.ID)
+	assert.Equal(t, "openai", record.Provider)
+	assert.NotNil(t, record.ToolResults)
+	assert.False(t, record.CreatedAt.IsZero())
+	assert.False(t, record.UpdatedAt.IsZero())
+
+	invalidCases := []struct {
+		name string
+		data []byte
+	}{
+		{"invalid JSON", []byte(`{`)},
+		{"missing id", []byte(`{"provider":"openai","rawMessages":[]}`)},
+		{"missing provider", []byte(`{"id":"x","rawMessages":[]}`)},
+		{"unsupported provider", []byte(`{"id":"x","provider":"other","rawMessages":[]}`)},
+		{"missing messages", []byte(`{"id":"x","provider":"openai"}`)},
+		{"invalid messages", []byte(`{"id":"x","provider":"openai","rawMessages":{"bad":true}}`)},
+	}
+
+	for _, tt := range invalidCases {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := validateConversationRecord(tt.data)
+			assert.Error(t, err)
+		})
+	}
+}
+
+func TestConversationCommandsWithSQLiteStore(t *testing.T) {
+	ctx := setupConversationCommandStore(t)
+	record := saveConversationCommandRecord(t, ctx, "conv-cmd-1")
+
+	t.Run("list table and json", func(t *testing.T) {
+		tableOutput := captureStdout(t, func() {
+			listConversationsCmd(ctx, &ConversationListConfig{
+				Provider:  "openai",
+				Limit:     10,
+				SortBy:    "updatedAt",
+				SortOrder: "desc",
+			})
+		})
+		assert.Contains(t, tableOutput, "conv-cmd-1")
+		assert.Contains(t, tableOutput, "OpenAI")
+		assert.Contains(t, tableOutput, "codex")
+		assert.Contains(t, tableOutput, "chat")
+
+		jsonOutput := captureStdout(t, func() {
+			listConversationsCmd(ctx, &ConversationListConfig{
+				Limit:      10,
+				SortBy:     "updatedAt",
+				SortOrder:  "desc",
+				JSONOutput: true,
+			})
+		})
+		var parsed struct {
+			Conversations []ConversationSummaryOutput `json:"conversations"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(jsonOutput), &parsed))
+		require.Len(t, parsed.Conversations, 1)
+		assert.Equal(t, "conv-cmd-1", parsed.Conversations[0].ID)
+	})
+
+	t.Run("show supported formats", func(t *testing.T) {
+		rawOutput := captureStdout(t, func() {
+			showConversationCmd(ctx, record.ID, &ConversationShowConfig{Format: "raw"})
+		})
+		assert.Contains(t, rawOutput, `"id": "conv-cmd-1"`)
+		assert.Contains(t, rawOutput, `"provider": "openai"`)
+
+		jsonOutput := captureStdout(t, func() {
+			showConversationCmd(ctx, record.ID, &ConversationShowConfig{Format: "json"})
+		})
+		assert.Contains(t, jsonOutput, `"provider": "OpenAI"`)
+		assert.Contains(t, jsonOutput, `"content": "Hello from the user"`)
+
+		messagesOnlyOutput := captureStdout(t, func() {
+			showConversationCmd(ctx, record.ID, &ConversationShowConfig{Format: "json", NoHeader: true})
+		})
+		assert.Contains(t, messagesOnlyOutput, `"role": "assistant"`)
+		assert.NotContains(t, messagesOnlyOutput, `"usage"`)
+
+		statsOnlyOutput := captureStdout(t, func() {
+			showConversationCmd(ctx, record.ID, &ConversationShowConfig{Format: "text", StatsOnly: true})
+		})
+		assert.Contains(t, statsOnlyOutput, "conv-cmd-1")
+		assert.Contains(t, statsOnlyOutput, "Input Tokens")
+		assert.NotContains(t, statsOnlyOutput, "Hello from the user")
+
+		markdownOutput := captureStdout(t, func() {
+			showConversationCmd(ctx, record.ID, &ConversationShowConfig{Format: "markdown", TruncateToolResults: true})
+		})
+		assert.Contains(t, markdownOutput, "# Conversation")
+		assert.Contains(t, markdownOutput, "Hello from the user")
+	})
+
+	t.Run("export import fork and delete", func(t *testing.T) {
+		exportPath := filepath.Join(t.TempDir(), "conversation.json")
+		exportOutput := captureAllStdout(t, func() {
+			exportConversationCmd(ctx, record.ID, exportPath, &ConversationExportConfig{})
+		})
+		assert.Contains(t, exportOutput, "exported to")
+		exported, err := os.ReadFile(exportPath)
+		require.NoError(t, err)
+		assert.Contains(t, string(exported), `"id": "conv-cmd-1"`)
+
+		var imported convtypes.ConversationRecord
+		require.NoError(t, json.Unmarshal(exported, &imported))
+		imported.ID = "conv-imported"
+		importedData, err := json.Marshal(imported)
+		require.NoError(t, err)
+		importPath := filepath.Join(t.TempDir(), "import.json")
+		require.NoError(t, os.WriteFile(importPath, importedData, 0o644))
+
+		importOutput := captureAllStdout(t, func() {
+			importConversationCmd(ctx, importPath, &ConversationImportConfig{})
+		})
+		assert.Contains(t, importOutput, "conv-imported imported successfully")
+		loadedImported := loadConversationCommandRecord(t, ctx, "conv-imported")
+		assert.Equal(t, "Conversation command summary", loadedImported.Summary)
+
+		forkOutput := captureAllStdout(t, func() {
+			forkConversationCmd(ctx, record.ID)
+		})
+		assert.Contains(t, forkOutput, "Conversation forked successfully")
+		list := queryConversationCommandRecords(t, ctx)
+		assert.Len(t, list.ConversationSummaries, 3)
+
+		deleteOutput := captureAllStdout(t, func() {
+			deleteConversationCmd(ctx, "conv-imported", &ConversationDeleteConfig{NoConfirm: true})
+		})
+		assert.Contains(t, deleteOutput, "conv-imported deleted successfully")
+		_, err = loadConversationCommandRecordWithError(ctx, "conv-imported")
+		assert.Error(t, err)
+	})
+}
+
+func TestConversationEditCommandWithNoopEditor(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses /bin/sh script")
+	}
+
+	ctx := setupConversationCommandStore(t)
+	record := saveConversationCommandRecord(t, ctx, "conv-edit-1")
+	editorPath := filepath.Join(t.TempDir(), "editor.sh")
+	require.NoError(t, os.WriteFile(editorPath, []byte("#!/bin/sh\nexit 0\n"), 0o755))
+
+	output := captureAllStdout(t, func() {
+		editConversationCmd(ctx, record.ID, &ConversationEditConfig{Editor: editorPath, EditArgs: "--unused-flag"})
+	})
+
+	assert.Contains(t, output, "conv-edit-1 edited successfully")
+	loaded := loadConversationCommandRecord(t, ctx, record.ID)
+	assert.Equal(t, record.Summary, loaded.Summary)
+	assert.Equal(t, record.Provider, loaded.Provider)
+}
+
+func TestCreateGistInvokesGHWithExpectedVisibility(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses /bin/sh script")
+	}
+
+	tmpDir := t.TempDir()
+	binDir := filepath.Join(tmpDir, "bin")
+	require.NoError(t, os.MkdirAll(binDir, 0o755))
+	argsPath := filepath.Join(tmpDir, "args.txt")
+	ghPath := filepath.Join(binDir, "gh")
+	script := "#!/bin/sh\n" +
+		"printf '%s\n' \"$@\" > \"$GH_ARGS_FILE\"\n" +
+		"echo https://gist.github.com/test/gist-id\n"
+	require.NoError(t, os.WriteFile(ghPath, []byte(script), 0o755))
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("GH_ARGS_FILE", argsPath)
+
+	publicOutput := captureAllStdout(t, func() {
+		require.NoError(t, createGist("conv-gist", []byte(`{"id":"conv-gist"}`), false))
+	})
+	publicArgs := readGistArgs(t, argsPath)
+	assert.Contains(t, publicOutput, "https://gist.github.com/test/gist-id")
+	assert.Contains(t, publicOutput, "public gist")
+	assert.Contains(t, publicArgs, "--public")
+	assert.Contains(t, publicArgs, "--filename")
+	assert.Contains(t, publicArgs, "conversation_conv-gist.json")
+
+	privateOutput := captureAllStdout(t, func() {
+		require.NoError(t, createGist("conv-gist", []byte(`{"id":"conv-gist"}`), true))
+	})
+	privateArgs := readGistArgs(t, argsPath)
+	assert.Contains(t, privateOutput, "private gist")
+	assert.NotContains(t, privateArgs, "--public")
+	assert.Contains(t, privateArgs, "conversation_conv-gist.json")
+}
+
+func readGistArgs(t *testing.T, argsPath string) string {
+	t.Helper()
+
+	data, err := os.ReadFile(argsPath)
+	require.NoError(t, err)
+	return strings.TrimSpace(string(data))
+}
+
+func setupConversationCommandStore(t *testing.T) context.Context {
+	t.Helper()
+
+	ctx := context.Background()
+	basePath := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", basePath)
+	t.Setenv("KODELET_CONVERSATION_STORE_TYPE", "sqlite")
+
+	sqlDB, err := db.Open(ctx, filepath.Join(basePath, "storage.db"))
+	require.NoError(t, err)
+	require.NoError(t, db.NewMigrationRunner(sqlDB).Run(ctx, migrations.All()))
+	require.NoError(t, sqlDB.Close())
+
+	return ctx
+}
+
+func saveConversationCommandRecord(t *testing.T, ctx context.Context, id string) convtypes.ConversationRecord {
+	t.Helper()
+
+	record := convtypes.NewConversationRecord(id)
+	record.Provider = "openai"
+	record.Summary = "Conversation command summary"
+	record.CWD = "/tmp/kodelet"
+	record.RawMessages = json.RawMessage(`[
+		{"role":"system","content":"ignore"},
+		{"role":"user","content":"Hello from the user"},
+		{"role":"assistant","content":"Hello from the assistant"}
+	]`)
+	record.Usage = llmtypes.Usage{
+		InputTokens:          12,
+		OutputTokens:         8,
+		InputCost:            0.01,
+		OutputCost:           0.02,
+		CurrentContextWindow: 200,
+		MaxContextWindow:     1000,
+	}
+	record.Metadata = map[string]any{
+		"platform": "codex",
+		"api_mode": "chat_completions",
+	}
+	record.FileLastAccess = map[string]time.Time{
+		"main.go": time.Date(2026, 1, 23, 10, 0, 0, 0, time.UTC),
+	}
+
+	store, err := conversations.GetConversationStore(ctx)
+	require.NoError(t, err)
+	defer store.Close()
+	require.NoError(t, store.Save(ctx, record))
+
+	return record
+}
+
+func loadConversationCommandRecord(t *testing.T, ctx context.Context, id string) convtypes.ConversationRecord {
+	t.Helper()
+
+	record, err := loadConversationCommandRecordWithError(ctx, id)
+	require.NoError(t, err)
+	return record
+}
+
+func loadConversationCommandRecordWithError(ctx context.Context, id string) (convtypes.ConversationRecord, error) {
+	store, err := conversations.GetConversationStore(ctx)
+	if err != nil {
+		return convtypes.ConversationRecord{}, err
+	}
+	defer store.Close()
+
+	return store.Load(ctx, id)
+}
+
+func queryConversationCommandRecords(t *testing.T, ctx context.Context) convtypes.QueryResult {
+	t.Helper()
+
+	store, err := conversations.GetConversationStore(ctx)
+	require.NoError(t, err)
+	defer store.Close()
+
+	result, err := store.Query(ctx, convtypes.QueryOptions{Limit: 10, SortBy: "updatedAt", SortOrder: "desc"})
+	require.NoError(t, err)
+	return result
 }
 
 func captureStdout(t *testing.T, f func()) string {

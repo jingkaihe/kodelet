@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,4 +89,65 @@ func TestNewBearerToken(t *testing.T) {
 
 	assert.NotEmpty(t, token)
 	assert.NotContains(t, token, "=")
+}
+
+func TestShortHashAndFileExists(t *testing.T) {
+	hash := shortHash("project")
+	assert.Len(t, hash, shortHashLength)
+	assert.Equal(t, hash, shortHash("project"))
+	assert.NotEqual(t, hash, shortHash("other-project"))
+
+	path := filepath.Join(t.TempDir(), "client.ts")
+	assert.False(t, fileExists(path))
+	require.NoError(t, os.WriteFile(path, []byte("export {}"), 0o644))
+	assert.True(t, fileExists(path))
+}
+
+func TestDefaultWorkspaceDirUsesWorkingDirectoryWhenProjectDirEmpty(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	t.Setenv("HOME", home)
+
+	oldCWD, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(project))
+	t.Cleanup(func() {
+		require.NoError(t, os.Chdir(oldCWD))
+	})
+
+	workspaceDir, err := DefaultWorkspaceDir("   ")
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(home, ".kodelet", "mcp", "cache", shortHash(project)), workspaceDir)
+}
+
+func TestSocketPathOverrideAndSetupExecutionModeEarlyBranches(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	viper.Set("mcp.code_execution.socket_path", "./override.sock")
+
+	socketPath, err := GetSocketPath("session")
+	require.NoError(t, err)
+	expected, err := filepath.Abs("./override.sock")
+	require.NoError(t, err)
+	assert.Equal(t, expected, socketPath)
+
+	viper.Set("mcp.execution_mode", "direct")
+	setup, err := SetupExecutionMode(context.Background(), nil, "session", t.TempDir())
+	assert.Nil(t, setup)
+	require.ErrorIs(t, err, ErrDirectMode)
+}
+
+func TestSetupExecutionModeRejectsUnsupportedTransportAfterWorkspaceSetup(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	workspace := t.TempDir()
+	viper.Set("mcp.execution_mode", "code")
+	viper.Set("mcp.code_execution.workspace_dir", workspace)
+	viper.Set("mcp.code_execution.regenerate_on_startup", false)
+	viper.Set("mcp.code_execution.rpc_transport", "pipe")
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, "client.ts"), []byte("export {}"), 0o644))
+
+	setup, err := SetupExecutionMode(context.Background(), nil, "session", t.TempDir())
+
+	assert.Nil(t, setup)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unsupported MCP RPC transport "pipe"`)
 }

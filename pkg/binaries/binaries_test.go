@@ -143,6 +143,27 @@ func TestEnvWithPreferredBinDirsPrependsAndDeduplicatesPath(t *testing.T) {
 	}, strings.Split(pathValue, string(os.PathListSeparator)))
 }
 
+func TestEnvWithPreferredBinDirsAddsPathWhenMissing(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	oldLibexecDir := libexecDir
+	libexecDir = filepath.Join(tmpDir, "libexec")
+	t.Cleanup(func() { libexecDir = oldLibexecDir })
+
+	oldHome := os.Getenv("HOME")
+	homeDir := filepath.Join(tmpDir, "home")
+	require.NoError(t, os.Setenv("HOME", homeDir))
+	t.Cleanup(func() { _ = os.Setenv("HOME", oldHome) })
+
+	env, err := EnvWithPreferredBinDirs([]string{"FOO=bar"})
+	require.NoError(t, err)
+	assert.Contains(t, env, "FOO=bar")
+	assert.Contains(t, env, "PATH="+strings.Join([]string{
+		filepath.Join(tmpDir, "libexec"),
+		filepath.Join(homeDir, ".kodelet", "bin"),
+	}, string(os.PathListSeparator)))
+}
+
 func TestResolveBinaryPrefersLibexecOverManagedAndSystem(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("resolver precedence test uses Unix-style executable scripts")
@@ -263,6 +284,45 @@ func TestResolveBinaryUsesAlternateSystemName(t *testing.T) {
 	assert.Equal(t, filepath.Join(pathDir, pathBinaryName), resolved)
 }
 
+func TestResolveBinaryReturnsWrappedErrorWhenAllSourcesFail(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PATH isolation test uses Unix-style executable assumptions")
+	}
+
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	oldLibexecDir := libexecDir
+	libexecDir = filepath.Join(tmpDir, "missing-libexec")
+	t.Cleanup(func() { libexecDir = oldLibexecDir })
+
+	oldHome := os.Getenv("HOME")
+	homeDir := filepath.Join(tmpDir, "home")
+	require.NoError(t, os.Setenv("HOME", homeDir))
+	t.Cleanup(func() { _ = os.Setenv("HOME", oldHome) })
+
+	emptyPath := filepath.Join(tmpDir, "empty-path")
+	require.NoError(t, os.MkdirAll(emptyPath, 0o755))
+	setPathEnv(t, emptyPath)
+
+	spec := BinarySpec{
+		Name:        "missing-tool",
+		Version:     "1.0.0",
+		BinaryName:  "missing-tool",
+		SystemNames: []string{"missing-tool"},
+		GetDownloadURL: func(_, _, _ string) (string, error) {
+			return "", assert.AnError
+		},
+		GetVersionCmd: func(binaryPath string) ([]string, func(string) string) {
+			return []string{binaryPath, "--version"}, func(output string) string { return output }
+		},
+	}
+
+	_, err := ResolveBinary(ctx, spec)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to resolve missing-tool")
+}
+
 func TestFileExists(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -314,6 +374,17 @@ func TestFetchChecksumError(t *testing.T) {
 	_, err := fetchChecksum(context.Background(), server.URL)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "HTTP 404")
+}
+
+func TestFetchChecksumEmptyFile(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("   \n"))
+	}))
+	defer server.Close()
+
+	_, err := fetchChecksum(context.Background(), server.URL)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "empty checksum file")
 }
 
 func TestResolveDownloadMetadataUsesEmbeddedChecksum(t *testing.T) {
@@ -405,6 +476,17 @@ func TestDownloadFile(t *testing.T) {
 	assert.Equal(t, content, downloaded)
 }
 
+func TestDownloadFileHTTPError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	err := downloadFile(context.Background(), server.URL, filepath.Join(t.TempDir(), "downloaded.txt"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "HTTP 500")
+}
+
 func TestExtractFromTarGz(t *testing.T) {
 	tmpDir := t.TempDir()
 	archivePath := filepath.Join(tmpDir, "test.tar.gz")
@@ -469,6 +551,29 @@ func TestExtractBinaryUnsupportedFormat(t *testing.T) {
 	err := extractBinary("test.rar", "entry", "dest")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported archive format")
+}
+
+func TestExtractBinarySupportsTgzExtension(t *testing.T) {
+	tmpDir := t.TempDir()
+	archivePath := filepath.Join(tmpDir, "test.tgz")
+	destPath := filepath.Join(tmpDir, "extracted")
+	binaryContent := []byte("binary")
+
+	file, err := os.Create(archivePath)
+	require.NoError(t, err)
+	gzw := gzip.NewWriter(file)
+	tw := tar.NewWriter(gzw)
+	require.NoError(t, tw.WriteHeader(&tar.Header{Name: "pkg/fd", Mode: 0o755, Size: int64(len(binaryContent))}))
+	_, err = tw.Write(binaryContent)
+	require.NoError(t, err)
+	require.NoError(t, tw.Close())
+	require.NoError(t, gzw.Close())
+	require.NoError(t, file.Close())
+
+	require.NoError(t, extractBinary(archivePath, "fd", destPath))
+	extracted, err := os.ReadFile(destPath)
+	require.NoError(t, err)
+	assert.Equal(t, binaryContent, extracted)
 }
 
 func TestExtractFromTarGzEntryNotFound(t *testing.T) {

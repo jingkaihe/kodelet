@@ -3,16 +3,20 @@ package responses
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
+	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
+	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/openai/openai-go/v3/packages/ssestream"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 type fakeDecoder struct {
@@ -45,6 +49,37 @@ func (d *fakeDecoder) Close() error {
 
 func (d *fakeDecoder) Err() error {
 	return d.err
+}
+
+type responsesTestTool struct{ name string }
+
+func (t responsesTestTool) GenerateSchema() *jsonschema.Schema {
+	return jsonschema.Reflect(map[string]any{})
+}
+
+func (t responsesTestTool) Name() string { return t.name }
+
+func (t responsesTestTool) Description() string { return "responses test tool" }
+
+func (t responsesTestTool) ValidateInput(tooltypes.State, string) error { return nil }
+
+func (t responsesTestTool) Execute(context.Context, tooltypes.State, string) tooltypes.ToolResult {
+	return tooltypes.BaseToolResult{Result: "ok"}
+}
+
+func (t responsesTestTool) TracingKVs(string) ([]attribute.KeyValue, error) { return nil, nil }
+
+func responseStreamFromMaps(t *testing.T, events []map[string]any) *ssestream.Stream[responses.ResponseStreamEventUnion] {
+	t.Helper()
+
+	streamEvents := make([]ssestream.Event, 0, len(events))
+	for _, event := range events {
+		payload, err := json.Marshal(event)
+		require.NoError(t, err)
+		streamEvents = append(streamEvents, ssestream.Event{Data: payload})
+	}
+
+	return ssestream.NewStream[responses.ResponseStreamEventUnion](&fakeDecoder{events: streamEvents}, nil)
 }
 
 type captureStreamHandler struct {
@@ -110,6 +145,109 @@ func TestBuildStoredFunctionCallOutputKeepsAssistantSummary(t *testing.T) {
 	assert.Contains(t, string(rawOutput), `"image_url":"data:image/png;base64,aGVsbG8="`)
 }
 
+func TestStructuredResultToolResultMethods(t *testing.T) {
+	structured := tooltypes.StructuredToolResult{
+		ToolName: "unknown_for_fallback",
+		Success:  false,
+		Error:    "boom",
+	}
+
+	result := structuredToolResultToToolResult(structured)
+
+	assert.True(t, result.IsError())
+	assert.Equal(t, "boom", result.GetError())
+	assert.Contains(t, result.GetResult(), "boom")
+	assert.Contains(t, result.AssistantFacing(), "boom")
+	assert.Equal(t, structured, result.StructuredData())
+}
+
+func TestResponseFunctionCallOutputItemsFiltersAndPreservesDetail(t *testing.T) {
+	items := responseFunctionCallOutputItems([]tooltypes.ToolResultContentPart{
+		{Type: tooltypes.ToolResultContentPartTypeText, Text: "   "},
+		{Type: tooltypes.ToolResultContentPartTypeText, Text: "caption"},
+		{Type: tooltypes.ToolResultContentPartTypeImage},
+		{Type: tooltypes.ToolResultContentPartTypeImage, ImageURL: "data:image/png;base64,aGVsbG8=", Detail: "original"},
+	})
+
+	require.Len(t, items, 2)
+	assert.NotNil(t, items[0].OfInputText)
+	assert.Equal(t, "caption", items[0].OfInputText.Text)
+	require.NotNil(t, items[1].OfInputImage)
+	assert.Equal(t, "data:image/png;base64,aGVsbG8=", items[1].OfInputImage.ImageURL.Value)
+	assert.Equal(t, responses.ResponseInputImageContentDetailOriginal, items[1].OfInputImage.Detail)
+}
+
+func TestExecuteToolCallStoresStructuredResult(t *testing.T) {
+	thread := &Thread{
+		Thread: base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "conv-test", hooks.Trigger{}),
+	}
+	thread.SetState(tools.NewBasicState(context.Background(), tools.WithExtraMCPTools([]tooltypes.Tool{responsesTestTool{name: "ok_tool"}})))
+
+	result := thread.executeToolCall(context.Background(), "call-ok", "ok_tool", `{}`, &captureStreamHandler{})
+
+	require.False(t, result.IsError())
+	assert.Contains(t, result.AssistantFacing(), "ok")
+	structured := thread.GetStructuredToolResults()["call-ok"]
+	assert.Equal(t, "unknown", structured.ToolName)
+	assert.True(t, structured.Success)
+}
+
+func TestProcessStreamCompletesFunctionCallAndStoresToolOutput(t *testing.T) {
+	usage := map[string]any{
+		"input_tokens":  1,
+		"output_tokens": 1,
+		"input_tokens_details": map[string]any{
+			"cached_tokens": 0,
+		},
+	}
+	completedEvent := map[string]any{
+		"type": "response.completed",
+		"response": map[string]any{
+			"id":     "resp_1",
+			"status": "completed",
+			"usage":  usage,
+		},
+	}
+	events := []map[string]any{
+		{"type": "response.output_text.delta", "delta": "Before tool"},
+		{
+			"type": "response.output_item.done",
+			"item": map[string]any{
+				"type":      "function_call",
+				"call_id":   "call_1",
+				"name":      "ok_tool",
+				"arguments": `{}`,
+			},
+		},
+		completedEvent,
+	}
+
+	stream := responseStreamFromMaps(t, events)
+	thread := &Thread{
+		Thread:      base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test", hooks.Trigger{}),
+		storedItems: make([]StoredInputItem, 0),
+		inputItems:  make([]responses.ResponseInputItemUnionParam, 0),
+	}
+	thread.SetState(tools.NewBasicState(context.Background(), tools.WithExtraMCPTools([]tooltypes.Tool{responsesTestTool{name: "ok_tool"}})))
+	handler := &captureStreamHandler{}
+
+	streamResult, err := thread.processStream(context.Background(), stream, handler, "gpt-5.5", llmtypes.MessageOpt{})
+	require.NoError(t, err)
+	assert.True(t, streamResult.toolsUsed)
+	assert.True(t, streamResult.responseCompleted)
+	assert.Contains(t, handler.events, "text_delta:Before tool")
+	assert.Contains(t, handler.events, "content_block_end")
+	require.Len(t, thread.storedItems, 2)
+	assert.Equal(t, "function_call", thread.storedItems[0].Type)
+	assert.Equal(t, "call_1", thread.storedItems[0].CallID)
+	assert.Equal(t, "function_call_output", thread.storedItems[1].Type)
+	assert.Equal(t, "call_1", thread.storedItems[1].CallID)
+	assert.True(t, strings.Contains(thread.storedItems[1].Output, "ok"))
+	require.Len(t, thread.inputItems, 2)
+	require.NotNil(t, thread.inputItems[0].OfFunctionCall)
+	require.NotNil(t, thread.inputItems[1].OfFunctionCallOutput)
+}
+
 func TestProcessStreamThinkingEndsBeforeText(t *testing.T) {
 	usage := map[string]any{
 		"input_tokens":  1,
@@ -134,15 +272,7 @@ func TestProcessStreamThinkingEndsBeforeText(t *testing.T) {
 		completedEvent,
 	}
 
-	streamEvents := make([]ssestream.Event, 0, len(events))
-	for _, event := range events {
-		payload, err := json.Marshal(event)
-		require.NoError(t, err)
-		streamEvents = append(streamEvents, ssestream.Event{Data: payload})
-	}
-
-	decoder := &fakeDecoder{events: streamEvents}
-	stream := ssestream.NewStream[responses.ResponseStreamEventUnion](decoder, nil)
+	stream := responseStreamFromMaps(t, events)
 
 	thread := &Thread{
 		Thread:      base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test", hooks.Trigger{}),
@@ -196,15 +326,7 @@ func TestProcessStreamPersistsMultipleReasoningBlocksSeparately(t *testing.T) {
 		completedEvent,
 	}
 
-	streamEvents := make([]ssestream.Event, 0, len(events))
-	for _, event := range events {
-		payload, err := json.Marshal(event)
-		require.NoError(t, err)
-		streamEvents = append(streamEvents, ssestream.Event{Data: payload})
-	}
-
-	decoder := &fakeDecoder{events: streamEvents}
-	stream := ssestream.NewStream[responses.ResponseStreamEventUnion](decoder, nil)
+	stream := responseStreamFromMaps(t, events)
 
 	thread := &Thread{
 		Thread:      base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test", hooks.Trigger{}),

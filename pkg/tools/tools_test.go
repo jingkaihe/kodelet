@@ -5,11 +5,36 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/invopop/jsonschema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/attribute"
 
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
+
+type testTool struct {
+	name        string
+	description string
+	validateErr error
+	traceErr    error
+	result      tooltypes.ToolResult
+	executed    bool
+}
+
+func (t *testTool) GenerateSchema() *jsonschema.Schema              { return GenerateSchema[map[string]any]() }
+func (t *testTool) Name() string                                    { return t.name }
+func (t *testTool) Description() string                             { return t.description }
+func (t *testTool) ValidateInput(_ tooltypes.State, _ string) error { return t.validateErr }
+func (t *testTool) Execute(_ context.Context, _ tooltypes.State, _ string) tooltypes.ToolResult {
+	t.executed = true
+	if t.result != nil {
+		return t.result
+	}
+	return tooltypes.BaseToolResult{Result: "ok"}
+}
+func (t *testTool) TracingKVs(_ string) ([]attribute.KeyValue, error) { return nil, t.traceErr }
 
 func TestGetAvailableToolNames(t *testing.T) {
 	tools := getAvailableToolNames()
@@ -247,6 +272,50 @@ func TestGetMainTools_UsesValidTools(t *testing.T) {
 	for _, requestedTool := range validTools {
 		assert.Contains(t, toolNames, requestedTool, "Should contain requested tool: %s", requestedTool)
 	}
+}
+
+func TestGetToolsFromNamesAndOpenAIConversion(t *testing.T) {
+	tools := GetToolsFromNames([]string{"bash"})
+	toolNames := make([]string, len(tools))
+	for i, tool := range tools {
+		toolNames[i] = tool.Name()
+	}
+
+	assert.Contains(t, toolNames, "file_read")
+	assert.Contains(t, toolNames, "bash")
+	assert.NotContains(t, toolNames, "openai_web_search")
+
+	openAITools := ToOpenAITools(tools[:1])
+	require.Len(t, openAITools, 1)
+	assert.Equal(t, "function", string(openAITools[0].Type))
+	require.NotNil(t, openAITools[0].Function)
+	assert.Equal(t, tools[0].Name(), openAITools[0].Function.Name)
+	assert.NotNil(t, openAITools[0].Function.Parameters)
+}
+
+func TestRunToolFindsValidatesAndExecutesTool(t *testing.T) {
+	tool := &testTool{name: "test_tool", description: "test", result: tooltypes.BaseToolResult{Result: "ran"}}
+	state := NewBasicState(context.Background(), WithExtraMCPTools([]tooltypes.Tool{tool}))
+
+	result := RunTool(context.Background(), state, "test_tool", `{"ok":true}`)
+
+	require.False(t, result.IsError())
+	assert.Equal(t, "ran", result.GetResult())
+	assert.True(t, tool.executed)
+}
+
+func TestRunToolReturnsFindAndValidationErrors(t *testing.T) {
+	state := NewBasicState(context.Background(), WithLLMConfig(llmtypes.Config{AllowedTools: []string{NoToolsMarker}}))
+	missing := RunTool(context.Background(), state, "missing", `{}`)
+	require.True(t, missing.IsError())
+	assert.Contains(t, missing.GetError(), "failed to find tool")
+
+	tool := &testTool{name: "bad_tool", validateErr: assert.AnError}
+	state = NewBasicState(context.Background(), WithExtraMCPTools([]tooltypes.Tool{tool}))
+	invalid := RunTool(context.Background(), state, "bad_tool", `{}`)
+	require.True(t, invalid.IsError())
+	assert.Contains(t, invalid.GetError(), assert.AnError.Error())
+	assert.False(t, tool.executed)
 }
 
 func TestGetMainTools_ExplicitAllowlistIncludesGoalMetaTools(t *testing.T) {

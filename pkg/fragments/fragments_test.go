@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jingkaihe/kodelet/pkg/plugins"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -249,6 +250,89 @@ func TestFragmentProcessor_BuilderPattern(t *testing.T) {
 	_, err = NewFragmentProcessor(WithFragmentDirs())
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "at least one fragment directory must be specified")
+}
+
+func TestFragmentProcessor_DefaultDirsForCWDIncludesRepoHomeAndPlugins(t *testing.T) {
+	homeDir := t.TempDir()
+	repoDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	repoPluginRecipes := filepath.Join(repoDir, ".kodelet", "plugins", "owner@repo", "recipes")
+	homePluginRecipes := filepath.Join(homeDir, ".kodelet", "plugins", "global@recipes", "recipes")
+	require.NoError(t, os.MkdirAll(repoPluginRecipes, 0o755))
+	require.NoError(t, os.MkdirAll(homePluginRecipes, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(repoPluginRecipes, "ship.md"), []byte("---\nname: Repo Ship\n---\nrepo plugin"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(homePluginRecipes, "deploy.md"), []byte("global plugin"), 0o644))
+
+	processor, err := NewFragmentProcessor(WithDefaultDirsForCWD("  " + repoDir + "  "))
+	require.NoError(t, err)
+
+	assert.Equal(t, filepath.Join(repoDir, ".kodelet", "recipes"), processor.fragmentDirs[0])
+	assert.Equal(t, filepath.Join(homeDir, ".kodelet", "recipes"), processor.fragmentDirs[1])
+	require.Len(t, processor.pluginDirs, 2)
+	assert.Equal(t, plugins.PluginDirConfig{Dir: repoPluginRecipes, Prefix: "owner@repo/"}, processor.pluginDirs[0])
+	assert.Equal(t, plugins.PluginDirConfig{Dir: homePluginRecipes, Prefix: "global@recipes/"}, processor.pluginDirs[1])
+
+	fragment, err := processor.GetFragmentMetadata("owner@repo/ship")
+	require.NoError(t, err)
+	assert.Equal(t, "Repo Ship", fragment.Metadata.Name)
+	assert.Equal(t, "repo plugin", strings.TrimSpace(fragment.Content))
+
+	fragments, err := processor.ListFragmentsWithMetadata()
+	require.NoError(t, err)
+	assert.Contains(t, fragmentIDs(fragments), "owner@repo/ship")
+	assert.Contains(t, fragmentIDs(fragments), "global@recipes/deploy")
+}
+
+func TestFragmentProcessor_DefaultDirsForCWDUsesDotForBlankCWD(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	processor, err := NewFragmentProcessor(WithDefaultDirsForCWD(" \t\n "))
+	require.NoError(t, err)
+
+	assert.Equal(t, filepath.Join(".", ".kodelet", "recipes"), processor.fragmentDirs[0])
+	assert.Equal(t, filepath.Join(homeDir, ".kodelet", "recipes"), processor.fragmentDirs[1])
+}
+
+func TestFragmentProcessor_ReadEmbeddedAndPrefixedFragments(t *testing.T) {
+	pluginDir := t.TempDir()
+	nestedDir := filepath.Join(pluginDir, "ci")
+	require.NoError(t, os.MkdirAll(nestedDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(nestedDir, "build.md"), []byte("---\ndescription: Build CI\n---\nBuild {{.target}}"), 0o644))
+
+	processor, err := NewFragmentProcessor(WithFragmentDirs(t.TempDir()))
+	require.NoError(t, err)
+
+	embedded, err := processor.readEmbedded("commit.md")
+	require.NoError(t, err)
+	assert.Contains(t, string(embedded), "commit")
+
+	processor.pluginDirs = []plugins.PluginDirConfig{{Dir: pluginDir, Prefix: "owner/repo/"}}
+	fragments, err := processor.ListFragmentsWithMetadata()
+	require.NoError(t, err)
+	ids := fragmentIDs(fragments)
+	assert.Contains(t, ids, "owner/repo/ci/build")
+
+	var buildFragment *Fragment
+	for _, fragment := range fragments {
+		if fragment.ID == "owner/repo/ci/build" {
+			buildFragment = fragment
+			break
+		}
+	}
+	require.NotNil(t, buildFragment)
+	assert.Equal(t, "build", buildFragment.Metadata.Name)
+	assert.Equal(t, "Build CI", buildFragment.Metadata.Description)
+	assert.Equal(t, "Build {{.target}}", strings.TrimSpace(buildFragment.Content))
+}
+
+func fragmentIDs(fragments []*Fragment) []string {
+	ids := make([]string, 0, len(fragments))
+	for _, fragment := range fragments {
+		ids = append(ids, fragment.ID)
+	}
+	return ids
 }
 
 func TestFragmentProcessor_parseFrontmatter(t *testing.T) {

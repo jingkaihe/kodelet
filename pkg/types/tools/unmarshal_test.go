@@ -101,6 +101,41 @@ func TestMetadataTypeRegistry_Completeness(t *testing.T) {
 	assert.Equal(t, len(expectedTypes), len(metadataTypeRegistry))
 }
 
+func TestAllMetadataToolTypes(t *testing.T) {
+	tests := []struct {
+		name     string
+		metadata ToolMetadata
+		want     string
+	}{
+		{"FileReadMetadata", FileReadMetadata{}, "file_read"},
+		{"FileWriteMetadata", FileWriteMetadata{}, "file_write"},
+		{"FileEditMetadata", FileEditMetadata{}, "file_edit"},
+		{"ApplyPatchMetadata", ApplyPatchMetadata{}, "apply_patch"},
+		{"GrepMetadata", GrepMetadata{}, "grep_tool"},
+		{"GlobMetadata", GlobMetadata{}, "glob_tool"},
+		{"BashMetadata", BashMetadata{}, "bash"},
+		{"MCPToolMetadata", MCPToolMetadata{}, "mcp_tool"},
+		{"CustomToolMetadata", CustomToolMetadata{}, "custom_tool"},
+		{"ViewImageMetadata", ViewImageMetadata{}, "view_image"},
+		{"SubAgentMetadata", SubAgentMetadata{}, "subagent"},
+		{"WebFetchMetadata", WebFetchMetadata{}, "web_fetch"},
+		{"OpenAIWebSearchMetadata", OpenAIWebSearchMetadata{}, "openai_web_search"},
+		{"ReadConversationMetadata", ReadConversationMetadata{}, "read_conversation"},
+		{"GetGoalMetadata", GetGoalMetadata{}, "get_goal"},
+		{"UpdateGoalMetadata", UpdateGoalMetadata{}, "update_goal"},
+		{"CodeExecutionMetadata", CodeExecutionMetadata{}, "code_execution"},
+		{"SkillMetadata", SkillMetadata{}, "skill"},
+		{"BlockedMetadata", BlockedMetadata{}, "blocked"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.metadata.ToolType())
+			assert.Contains(t, metadataTypeRegistry, tt.want)
+		})
+	}
+}
+
 func BenchmarkUnmarshalJSON_Original(b *testing.B) {
 	// This would benchmark the original implementation if it existed
 	// For now, we'll benchmark the current implementation

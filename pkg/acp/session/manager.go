@@ -479,13 +479,19 @@ func (m *Manager) Close(ctx context.Context) error {
 		if session == nil {
 			continue
 		}
-		result = multierror.Append(result, session.Close(ctx))
+		if err := session.Close(ctx); err != nil {
+			result = multierror.Append(result, err)
+		}
 	}
 	if kodeletMCPManager != nil {
-		result = multierror.Append(result, kodeletMCPManager.Close(ctx))
+		if err := kodeletMCPManager.Close(ctx); err != nil {
+			result = multierror.Append(result, err)
+		}
 	}
 	if store != nil {
-		result = multierror.Append(result, store.Close())
+		if err := store.Close(); err != nil {
+			result = multierror.Append(result, err)
+		}
 	}
 
 	return result

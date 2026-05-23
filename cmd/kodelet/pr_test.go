@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/fragments"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -78,6 +81,36 @@ func TestPRConfigDefaults(t *testing.T) {
 	assert.Equal(t, "github", config.Provider, "Expected default Provider to be 'github'")
 	assert.Equal(t, "main", config.Target, "Expected default Target to be 'main'")
 	assert.Empty(t, config.TemplateFile, "Expected default TemplateFile to be empty")
+	assert.False(t, config.Draft, "Expected default Draft to be false")
+	assert.False(t, config.NoSave, "Expected default NoSave to be false")
+	assert.False(t, config.ResultOnly, "Expected default ResultOnly to be false")
+}
+
+func TestGetPRConfigFromFlags(t *testing.T) {
+	defaults := NewPRConfig()
+	cmd := &cobra.Command{}
+	cmd.Flags().StringP("provider", "p", defaults.Provider, "")
+	cmd.Flags().StringP("target", "t", defaults.Target, "")
+	cmd.Flags().String("template-file", defaults.TemplateFile, "")
+	cmd.Flags().BoolP("draft", "d", defaults.Draft, "")
+	cmd.Flags().Bool("no-save", defaults.NoSave, "")
+	cmd.Flags().Bool("result-only", defaults.ResultOnly, "")
+
+	require.NoError(t, cmd.Flags().Set("provider", "github"))
+	require.NoError(t, cmd.Flags().Set("target", "develop"))
+	require.NoError(t, cmd.Flags().Set("template-file", "/tmp/template.md"))
+	require.NoError(t, cmd.Flags().Set("draft", "true"))
+	require.NoError(t, cmd.Flags().Set("no-save", "true"))
+	require.NoError(t, cmd.Flags().Set("result-only", "true"))
+
+	config := getPRConfigFromFlags(cmd)
+
+	assert.Equal(t, "github", config.Provider)
+	assert.Equal(t, "develop", config.Target)
+	assert.Equal(t, "/tmp/template.md", config.TemplateFile)
+	assert.True(t, config.Draft)
+	assert.True(t, config.NoSave)
+	assert.True(t, config.ResultOnly)
 }
 
 func TestPRConfigValidation(t *testing.T) {
@@ -122,4 +155,47 @@ func TestPRConfigValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGhHelpersUsePathStubs(t *testing.T) {
+	t.Run("installed and authenticated", func(t *testing.T) {
+		stubDir := t.TempDir()
+		writeGHStub(t, stubDir, `#!/bin/sh
+if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
+  exit 0
+fi
+exit 0
+`)
+		t.Setenv("PATH", stubDir)
+
+		assert.True(t, isGhCliInstalled())
+		assert.True(t, isGhAuthenticated())
+	})
+
+	t.Run("installed but not authenticated", func(t *testing.T) {
+		stubDir := t.TempDir()
+		writeGHStub(t, stubDir, `#!/bin/sh
+if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
+  exit 1
+fi
+exit 0
+`)
+		t.Setenv("PATH", stubDir)
+
+		assert.True(t, isGhCliInstalled())
+		assert.False(t, isGhAuthenticated())
+	})
+
+	t.Run("missing gh", func(t *testing.T) {
+		t.Setenv("PATH", t.TempDir())
+
+		assert.False(t, isGhCliInstalled())
+		assert.False(t, isGhAuthenticated())
+	})
+}
+
+func writeGHStub(t *testing.T, dir, content string) {
+	t.Helper()
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "gh"), []byte(content), 0o755))
 }

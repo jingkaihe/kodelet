@@ -130,3 +130,59 @@ func TestApplyDisplayConsumesGoalContextOverrideOnce(t *testing.T) {
 	require.Len(t, llmMessages, 1)
 	assert.Equal(t, "Objective: find cores", llmMessages[0].Content)
 }
+
+func TestAddMessageDisplayIgnoresBlankInputs(t *testing.T) {
+	metadata := map[string]any{"preserve": "value"}
+
+	assert.Equal(t, metadata, AddMessageDisplay(metadata, " ", "/cmd", MessageDisplayKindSlashCommand, "cmd"))
+	assert.Equal(t, metadata, AddMessageDisplay(metadata, "expanded", " ", MessageDisplayKindSlashCommand, "cmd"))
+	assert.NotContains(t, metadata, MessageDisplayMetadataKey)
+}
+
+func TestLookupMessageDisplayParsesCurrentAndLegacyShapes(t *testing.T) {
+	legacyKey := MessageDisplayKey("legacy prompt")
+	currentKey := MessageDisplayKey("current prompt")
+	metadata := map[string]any{
+		legacyMessageDisplayMetadataKey: map[string]any{
+			MessageDisplayVersion: map[string]MessageDisplay{
+				legacyKey: {Text: "/legacy", Kind: MessageDisplayKindSlashCommand},
+			},
+		},
+		MessageDisplayMetadataKey: map[string]any{
+			MessageDisplayVersion: map[string]any{
+				currentKey: map[string]string{
+					"text":    "/current",
+					"kind":    MessageDisplayKindGoal,
+					"command": "goal",
+				},
+				"blank":       map[string]any{"text": "ignored"},
+				"unknown-raw": 123,
+			},
+		},
+	}
+
+	legacy, ok := LookupMessageDisplay(metadata, "legacy prompt")
+	require.True(t, ok)
+	assert.Equal(t, "/legacy", legacy.Text)
+
+	current, ok := LookupMessageDisplay(metadata, "current prompt")
+	require.True(t, ok)
+	assert.Equal(t, "/current", current.Text)
+	assert.Equal(t, MessageDisplayKindGoal, current.Kind)
+	assert.Equal(t, "goal", current.Command)
+
+	_, ok = LookupMessageDisplay(metadata, " ")
+	assert.False(t, ok)
+}
+
+func TestLookupMessageDisplayIgnoresMalformedMetadata(t *testing.T) {
+	for _, metadata := range []map[string]any{
+		{MessageDisplayMetadataKey: "not-a-map"},
+		{MessageDisplayMetadataKey: map[string]any{}},
+		{MessageDisplayMetadataKey: map[string]any{MessageDisplayVersion: "not-a-version-map"}},
+		{MessageDisplayMetadataKey: map[string]any{MessageDisplayVersion: map[string]any{MessageDisplayKey("prompt"): map[string]any{}}}},
+	} {
+		_, ok := LookupMessageDisplay(metadata, "prompt")
+		assert.False(t, ok)
+	}
+}
