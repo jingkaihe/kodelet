@@ -24,6 +24,53 @@ func TestBashConfigMarshalYAMLUsesDurationString(t *testing.T) {
 	assert.Equal(t, "timeout: 5m0s\n", string(data))
 }
 
+func TestToolModeIsPatchMode(t *testing.T) {
+	assert.True(t, ToolModePatch.IsPatchMode())
+	assert.False(t, ToolModeFull.IsPatchMode())
+	assert.False(t, ToolMode("").IsPatchMode())
+}
+
+func TestConversationSummaryModeUsesLLM(t *testing.T) {
+	assert.True(t, ConversationSummaryMode("").UsesLLM())
+	assert.True(t, ConversationSummaryModeLLM.UsesLLM())
+	assert.False(t, ConversationSummaryModeFirstMessage.UsesLLM())
+}
+
+func TestConfigBashTimeout(t *testing.T) {
+	assert.Equal(t, DefaultBashTimeout, Config{}.BashTimeout())
+	assert.Equal(t, DefaultBashTimeout, Config{Bash: &BashConfig{}}.BashTimeout())
+	assert.Equal(t, 30*time.Second, Config{Bash: &BashConfig{Timeout: 30 * time.Second}}.BashTimeout())
+}
+
+func TestOpenAIServiceTierParsingAndWireValue(t *testing.T) {
+	tier, ok := ParseOpenAIServiceTier(" FAST ")
+	require.True(t, ok)
+	assert.Equal(t, OpenAIServiceTierFast, tier)
+	assert.Equal(t, "priority", tier.WireValue())
+
+	tier, ok = ParseOpenAIServiceTier("scale")
+	require.True(t, ok)
+	assert.Equal(t, OpenAIServiceTierScale, tier)
+	assert.Equal(t, "scale", tier.WireValue())
+
+	tier, ok = ParseOpenAIServiceTier("")
+	assert.False(t, ok)
+	assert.Empty(t, tier)
+
+	tier, ok = ParseOpenAIServiceTier("unknown")
+	assert.False(t, ok)
+	assert.Empty(t, tier)
+	assert.Empty(t, OpenAIServiceTier("unknown").WireValue())
+}
+
+func TestDefaultContextPatterns(t *testing.T) {
+	patterns := DefaultContextPatterns()
+	assert.Equal(t, []string{"AGENTS.md"}, patterns)
+
+	patterns[0] = "changed"
+	assert.Equal(t, []string{"AGENTS.md"}, DefaultContextPatterns())
+}
+
 func TestModelPricingForPromptTokens(t *testing.T) {
 	pricing := ModelPricing{
 		Input:                  1,

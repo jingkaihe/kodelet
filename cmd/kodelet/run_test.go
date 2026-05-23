@@ -381,6 +381,54 @@ func TestCreateRunToolManagers_NoToolsSkipsToolInitialization(t *testing.T) {
 	assert.Nil(t, customManager)
 }
 
+func TestCreateRunToolManagersInitializesCustomToolsWithoutMCP(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	originalConfigFile := viper.ConfigFileUsed()
+	viper.Reset()
+	t.Cleanup(func() {
+		viper.Reset()
+		if originalConfigFile != "" {
+			viper.SetConfigFile(originalConfigFile)
+			_ = viper.ReadInConfig()
+		}
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	})
+
+	viper.Set("custom_tools.enabled", false)
+	mcpManager, customManager, err := createRunToolManagers(context.Background(), &RunConfig{NoMCP: true})
+
+	require.NoError(t, err)
+	assert.Nil(t, mcpManager)
+	require.NotNil(t, customManager)
+	assert.Empty(t, customManager.ListCustomTools())
+}
+
+func TestCreateRunToolManagersTreatsDisabledMCPAsNil(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	originalConfigFile := viper.ConfigFileUsed()
+	viper.Reset()
+	t.Cleanup(func() {
+		viper.Reset()
+		if originalConfigFile != "" {
+			viper.SetConfigFile(originalConfigFile)
+			_ = viper.ReadInConfig()
+		}
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	})
+
+	viper.Set("mcp.enabled", false)
+	viper.Set("custom_tools.enabled", false)
+	mcpManager, customManager, err := createRunToolManagers(context.Background(), NewRunConfig())
+
+	require.NoError(t, err)
+	assert.Nil(t, mcpManager)
+	require.NotNil(t, customManager)
+}
+
 func TestAddRunMessageDisplay(t *testing.T) {
 	thread := newFakeRunThread()
 	config := NewRunConfig()

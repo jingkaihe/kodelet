@@ -18,6 +18,7 @@ import (
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -237,6 +238,93 @@ func TestNormalizeChatRequestAdditionalBranches(t *testing.T) {
 			assert.Equal(t, tt.wantImages, images)
 		})
 	}
+}
+
+func TestResolveWebChatConfigForNewConversationProfileBranches(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	}()
+
+	viper.Reset()
+	viper.Set("provider", "anthropic")
+	viper.Set("model", "base-model")
+	viper.Set("profile", "active")
+	viper.Set("profiles", map[string]any{
+		"active": map[string]any{"provider": "openai", "model": "active-model"},
+		"work":   map[string]any{"provider": "openai", "model": "work-model"},
+	})
+
+	config, err := resolveWebChatConfigForNewConversation(" work ")
+	require.NoError(t, err)
+	assert.Equal(t, "openai", config.Provider)
+	assert.Equal(t, "work-model", config.Model)
+	assert.Equal(t, "work", config.Profile)
+
+	config, err = resolveWebChatConfigForNewConversation("   ")
+	require.NoError(t, err)
+	assert.Equal(t, "openai", config.Provider)
+	assert.Equal(t, "active-model", config.Model)
+	assert.Equal(t, "active", config.Profile)
+
+	_, err = resolveWebChatConfigForNewConversation("missing")
+	require.ErrorContains(t, err, "profile 'missing' not found")
+
+	assert.Equal(t, "", normalizeRequestedProfile(""))
+	assert.Equal(t, "", normalizeRequestedProfile(" default "))
+	assert.Equal(t, "team", normalizeRequestedProfile(" team "))
+}
+
+func TestResolveWebChatConfigForExistingConversationNilAndFallbackBranches(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	}()
+
+	viper.Reset()
+	viper.Set("provider", "anthropic")
+	viper.Set("model", "base-model")
+	viper.Set("profiles", map[string]any{
+		"work": map[string]any{"provider": "openai", "model": "work-model"},
+	})
+
+	config, err := resolveWebChatConfigForExistingConversation(nil)
+	require.NoError(t, err)
+	assert.Equal(t, "anthropic", config.Provider)
+	assert.Equal(t, "base-model", config.Model)
+
+	config, err = resolveWebChatConfigForExistingConversation(&conversations.GetConversationResponse{
+		ID:       "conv-123",
+		Provider: "  anthropic  ",
+		Metadata: map[string]any{"profile": " work ", "model": " stored-model "},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "anthropic", config.Provider)
+	assert.Equal(t, "stored-model", config.Model)
+	assert.Equal(t, "work", config.Profile)
+
+	_, err = resolveWebChatConfigForExistingConversation(&conversations.GetConversationResponse{
+		Metadata: map[string]any{"profile": "missing"},
+	})
+	require.ErrorContains(t, err, "profile 'missing' not found")
+}
+
+func TestServiceStoreAdapterLoadPropagatesServiceError(t *testing.T) {
+	wantErr := errors.New("conversation missing")
+	adapter := serviceStoreAdapter{service: &mockConversationService{
+		getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
+			return nil, wantErr
+		},
+	}}
+
+	_, err := adapter.Load(context.Background(), "missing")
+	assert.ErrorIs(t, err, wantErr)
 }
 
 func TestAddWebChatDisplayMetadata(t *testing.T) {

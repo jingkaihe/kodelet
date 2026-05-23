@@ -47,6 +47,20 @@ func (m *trackingState) FileLastAccess() map[string]time.Time {
 	return m.fileLastAccess
 }
 
+type lockingTrackingState struct {
+	trackingState
+	locked   []string
+	unlocked []string
+}
+
+func (m *lockingTrackingState) LockFile(path string) {
+	m.locked = append(m.locked, path)
+}
+
+func (m *lockingTrackingState) UnlockFile(path string) {
+	m.unlocked = append(m.unlocked, path)
+}
+
 func TestNewThread(t *testing.T) {
 	config := llmtypes.Config{
 		Model:     "test-model",
@@ -525,6 +539,37 @@ func TestShouldAutoCompact_NilUsage(t *testing.T) {
 	assert.False(t, result)
 }
 
+func TestTryAutoCompact(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
+	bt.Usage.CurrentContextWindow = 90
+	bt.Usage.MaxContextWindow = 100
+
+	called := 0
+	bt.TryAutoCompact(context.Background(), 0.8, func(ctx context.Context) error {
+		assert.NotNil(t, ctx)
+		called++
+		return nil
+	})
+	assert.Equal(t, 1, called)
+
+	bt.TryAutoCompact(context.Background(), 0.8, nil)
+	assert.Equal(t, 1, called)
+
+	bt.Usage.CurrentContextWindow = 10
+	bt.TryAutoCompact(context.Background(), 0.8, func(context.Context) error {
+		called++
+		return nil
+	})
+	assert.Equal(t, 1, called)
+
+	bt.Usage.CurrentContextWindow = 90
+	bt.TryAutoCompact(context.Background(), 0.8, func(context.Context) error {
+		called++
+		return errors.New("compact failed")
+	})
+	assert.Equal(t, 2, called)
+}
+
 func TestCompactRatioOrDefault(t *testing.T) {
 	bt := NewThread(llmtypes.Config{CompactRatio: 0.65}, "", hooks.Trigger{})
 
@@ -830,6 +875,19 @@ func TestEnablePersistence_DisablePersistence(t *testing.T) {
 	bt.EnablePersistence(context.Background(), false)
 
 	assert.False(t, bt.Persisted)
+}
+
+func TestPrepareUtilityModeDisablesPersistenceAndHooks(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "conv-123", hooks.Trigger{ConversationID: "conv-123"})
+	bt.Persisted = true
+	bt.Store = &mockConversationStore{}
+
+	bt.PrepareUtilityMode(context.Background())
+
+	assert.False(t, bt.Persisted)
+	assert.Empty(t, bt.HookTrigger.ConversationID)
+	assert.False(t, bt.HookTrigger.IsSubAgent)
+	assert.NotNil(t, bt.Store)
 }
 
 func TestEnablePersistence_WithExistingStore(t *testing.T) {
@@ -1258,4 +1316,26 @@ func TestFinalizeSwapContextLocked(t *testing.T) {
 	assert.NotNil(t, state.fileLastAccess)
 	assert.Empty(t, state.fileLastAccess)
 	assert.GreaterOrEqual(t, bt.GetUsage().CurrentContextWindow, 100)
+}
+
+func TestResetContextStateLockedHandlesNilState(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
+	bt.ToolResults["tool-call-1"] = tooltypes.StructuredToolResult{ToolName: "test-tool"}
+
+	bt.Mu.Lock()
+	bt.ResetContextStateLocked()
+	bt.Mu.Unlock()
+
+	assert.Empty(t, bt.ToolResults)
+	assert.NotNil(t, bt.ToolResults)
+}
+
+func TestEstimateContextWindowFromMessageNilUsage(t *testing.T) {
+	bt := NewThread(llmtypes.Config{}, "", hooks.Trigger{})
+	bt.Usage = nil
+
+	require.NotPanics(t, func() {
+		bt.EstimateContextWindowFromMessage("ignored")
+	})
+	assert.Nil(t, bt.Usage)
 }

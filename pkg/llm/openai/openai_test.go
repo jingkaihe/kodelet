@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1357,6 +1358,123 @@ func TestOpenAIProcessImageAndClientHelpers(t *testing.T) {
 	assert.NotSame(t, thread.client, withHeaders)
 }
 
+func TestOpenAIProcessMessageExchangeTextResponse(t *testing.T) {
+	var capturedRequest openai.ChatCompletionRequest
+	client := openai.NewClientWithConfig(openAIHTTPClientConfig(func(req *http.Request) (*http.Response, error) {
+		capturedRequest = decodeOpenAIChatRequest(t, req)
+		return jsonOpenAIResponse(http.StatusOK, `{
+			"id":"chatcmpl-test",
+			"model":"gpt-4o",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"hello","reasoning_content":"thinking"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":7,"completion_tokens":3,"total_tokens":10}
+		}`), nil
+	}))
+	thread := newTestOpenAIExchangeThread(client, llm.Config{
+		Model:     "gpt-4o",
+		MaxTokens: 64,
+		OpenAI:    &llm.OpenAIConfig{ServiceTier: llm.OpenAIServiceTierFast},
+	})
+	thread.messages = []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: "hi"}}
+	handler := &captureOpenAIMessageHandler{}
+
+	output, toolsUsed, err := thread.processMessageExchange(context.Background(), handler, "gpt-4o", 64, llm.MessageOpt{DisableUsageLog: true})
+
+	require.NoError(t, err)
+	assert.False(t, toolsUsed)
+	assert.Equal(t, "hello", output)
+	assert.Equal(t, []string{"hello"}, handler.texts)
+	assert.Equal(t, []string{"thinking"}, handler.thinking)
+	assert.Equal(t, openai.ServiceTierPriority, capturedRequest.ServiceTier)
+	assert.Equal(t, 64, capturedRequest.MaxTokens)
+	require.Len(t, capturedRequest.Messages, 1)
+	assert.Equal(t, "hi", capturedRequest.Messages[0].Content)
+	assert.Equal(t, 7, thread.GetUsage().InputTokens)
+	assert.Equal(t, 3, thread.GetUsage().OutputTokens)
+	require.Len(t, thread.messages, 2)
+	assert.Equal(t, openai.ChatMessageRoleAssistant, thread.messages[1].Role)
+}
+
+func TestOpenAIProcessMessageExchangeStreamingHandlerSkipsFullTextCallbacks(t *testing.T) {
+	client := openai.NewClientWithConfig(openAIHTTPClientConfig(func(_ *http.Request) (*http.Response, error) {
+		return sseOpenAIResponse("data: {\"id\":\"chatcmpl-stream\",\"model\":\"gpt-4o\",\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"stream thinking\"}}]}\n\n" +
+			"data: {\"id\":\"chatcmpl-stream\",\"model\":\"gpt-4o\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"streamed\"},\"finish_reason\":\"stop\"}]}\n\n" +
+			"data: {\"id\":\"chatcmpl-stream\",\"model\":\"gpt-4o\",\"choices\":[],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2,\"total_tokens\":3}}\n\n" +
+			"data: [DONE]\n\n"), nil
+	}))
+	thread := newTestOpenAIExchangeThread(client, llm.Config{Model: "gpt-4o"})
+	thread.messages = []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: "hi"}}
+	handler := &captureOpenAIStreamingHandler{}
+
+	output, toolsUsed, err := thread.processMessageExchange(context.Background(), handler, "gpt-4o", 32, llm.MessageOpt{DisableUsageLog: true})
+
+	require.NoError(t, err)
+	assert.False(t, toolsUsed)
+	assert.Equal(t, "streamed", output)
+	assert.Empty(t, handler.texts)
+	assert.Empty(t, handler.thinking)
+	assert.Equal(t, []string{"streamed"}, handler.textDeltas)
+	assert.Equal(t, []string{"stream thinking"}, handler.thinkingDeltas)
+	assert.Equal(t, 1, handler.thinkingStarts)
+	assert.Equal(t, 1, handler.thinkingBlockEnds)
+	assert.Equal(t, 1, handler.contentBlockEnds)
+}
+
+func TestOpenAIProcessMessageExchangeToolCall(t *testing.T) {
+	client := openai.NewClientWithConfig(openAIHTTPClientConfig(func(_ *http.Request) (*http.Response, error) {
+		return jsonOpenAIResponse(http.StatusOK, `{
+			"id":"chatcmpl-tool",
+			"model":"gpt-4o",
+			"choices":[{"index":0,"message":{"role":"assistant","tool_calls":[{"id":"call-1","type":"function","function":{"name":"missing_tool","arguments":"{}"}}]},"finish_reason":"tool_calls"}],
+			"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}
+		}`), nil
+	}))
+	thread := newTestOpenAIExchangeThread(client, llm.Config{Model: "gpt-4o"})
+	thread.messages = []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: "use tool"}}
+	handler := &captureOpenAIMessageHandler{}
+
+	output, toolsUsed, err := thread.processMessageExchange(context.Background(), handler, "gpt-4o", 32, llm.MessageOpt{DisableUsageLog: true})
+
+	require.NoError(t, err)
+	assert.True(t, toolsUsed)
+	assert.Empty(t, output)
+	assert.Equal(t, []string{"call-1:missing_tool:{}"}, handler.toolUses)
+	require.Len(t, handler.toolResults, 1)
+	assert.Contains(t, handler.toolResults[0].GetError(), "failed to find tool")
+	results := thread.GetStructuredToolResults()
+	assert.Contains(t, results, "call-1")
+	require.Len(t, thread.messages, 3)
+	assert.Equal(t, openai.ChatMessageRoleTool, thread.messages[2].Role)
+	assert.Equal(t, "call-1", thread.messages[2].ToolCallID)
+}
+
+func TestOpenAIProcessMessageExchangeErrorBranches(t *testing.T) {
+	t.Run("api error is wrapped", func(t *testing.T) {
+		client := openai.NewClientWithConfig(openAIHTTPClientConfig(func(_ *http.Request) (*http.Response, error) {
+			return jsonOpenAIResponse(http.StatusBadRequest, `{"error":{"message":"bad request","type":"invalid_request_error"}}`), nil
+		}))
+		thread := newTestOpenAIExchangeThread(client, llm.Config{Model: "gpt-4o", Retry: llm.RetryConfig{Attempts: 1}})
+		thread.messages = []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: "hi"}}
+
+		_, _, err := thread.processMessageExchange(context.Background(), &captureOpenAIMessageHandler{}, "gpt-4o", 32, llm.MessageOpt{DisableUsageLog: true})
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "error sending message to OpenAI")
+	})
+
+	t.Run("empty choices", func(t *testing.T) {
+		client := openai.NewClientWithConfig(openAIHTTPClientConfig(func(_ *http.Request) (*http.Response, error) {
+			return jsonOpenAIResponse(http.StatusOK, `{"id":"chatcmpl-empty","model":"gpt-4o","choices":[],"usage":{}}`), nil
+		}))
+		thread := newTestOpenAIExchangeThread(client, llm.Config{Model: "gpt-4o"})
+		thread.messages = []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: "hi"}}
+
+		_, _, err := thread.processMessageExchange(context.Background(), &captureOpenAIMessageHandler{}, "gpt-4o", 32, llm.MessageOpt{DisableUsageLog: true})
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no response choices")
+	})
+}
+
 func TestOpenAIConfigPlatformBranches(t *testing.T) {
 	assert.False(t, isCopilotPlatform(llm.Config{Provider: "anthropic"}))
 	assert.False(t, isCopilotPlatform(llm.Config{Provider: "anthropic", Anthropic: nil}))
@@ -1372,6 +1490,118 @@ func TestOpenAIConfigPlatformBranches(t *testing.T) {
 type roundTripHTTPDoer func(*http.Request) (*http.Response, error)
 
 func (f roundTripHTTPDoer) Do(req *http.Request) (*http.Response, error) { return f(req) }
+
+type captureOpenAIMessageHandler struct {
+	texts       []string
+	thinking    []string
+	toolUses    []string
+	toolResults []tooltypes.ToolResult
+	done        int
+	usage       []llm.Usage
+}
+
+func (h *captureOpenAIMessageHandler) HandleText(text string) {
+	h.texts = append(h.texts, text)
+}
+
+func (h *captureOpenAIMessageHandler) HandleToolUse(toolCallID string, toolName string, input string) {
+	h.toolUses = append(h.toolUses, toolCallID+":"+toolName+":"+input)
+}
+
+func (h *captureOpenAIMessageHandler) HandleToolResult(_ string, _ string, result tooltypes.ToolResult) {
+	h.toolResults = append(h.toolResults, result)
+}
+
+func (h *captureOpenAIMessageHandler) HandleThinking(thinking string) {
+	h.thinking = append(h.thinking, thinking)
+}
+
+func (h *captureOpenAIMessageHandler) HandleDone() {
+	h.done++
+}
+
+func (h *captureOpenAIMessageHandler) HandleUsage(usage llm.Usage) {
+	h.usage = append(h.usage, usage)
+}
+
+type captureOpenAIStreamingHandler struct {
+	captureOpenAIMessageHandler
+	textDeltas        []string
+	thinkingDeltas    []string
+	thinkingStarts    int
+	thinkingBlockEnds int
+	contentBlockEnds  int
+}
+
+func (h *captureOpenAIStreamingHandler) HandleTextDelta(delta string) {
+	h.textDeltas = append(h.textDeltas, delta)
+}
+
+func (h *captureOpenAIStreamingHandler) HandleThinkingStart() {
+	h.thinkingStarts++
+}
+
+func (h *captureOpenAIStreamingHandler) HandleThinkingDelta(delta string) {
+	h.thinkingDeltas = append(h.thinkingDeltas, delta)
+}
+
+func (h *captureOpenAIStreamingHandler) HandleThinkingBlockEnd() {
+	h.thinkingBlockEnds++
+}
+
+func (h *captureOpenAIStreamingHandler) HandleContentBlockEnd() {
+	h.contentBlockEnds++
+}
+
+func openAIHTTPClientConfig(do func(*http.Request) (*http.Response, error)) openai.ClientConfig {
+	config := openai.DefaultConfig("test-key")
+	config.HTTPClient = roundTripHTTPDoer(do)
+	return config
+}
+
+func jsonOpenAIResponse(status int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Status:     http.StatusText(status),
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+}
+
+func sseOpenAIResponse(body string) *http.Response {
+	resp := jsonOpenAIResponse(http.StatusOK, body)
+	resp.Header.Set("Content-Type", "text/event-stream")
+	return resp
+}
+
+func decodeOpenAIChatRequest(t *testing.T, req *http.Request) openai.ChatCompletionRequest {
+	t.Helper()
+
+	data, err := io.ReadAll(req.Body)
+	require.NoError(t, err)
+	require.NoError(t, req.Body.Close())
+	req.Body = io.NopCloser(bytes.NewReader(data))
+
+	var request openai.ChatCompletionRequest
+	require.NoError(t, json.Unmarshal(data, &request))
+	return request
+}
+
+func newTestOpenAIExchangeThread(client *openai.Client, config llm.Config) *Thread {
+	if config.Retry.Attempts == 0 {
+		config.Retry.Attempts = 1
+	}
+	if config.MaxTokens == 0 {
+		config.MaxTokens = 8192
+	}
+	thread := &Thread{
+		Thread:          base.NewThread(config, "conv-test", base.CreateHookTrigger(context.Background(), config, "conv-test")),
+		client:          client,
+		reasoningEffort: "medium",
+	}
+	thread.State = tools.NewBasicState(context.Background(), tools.WithLLMConfig(llm.Config{AllowedTools: []string{tools.NoToolsMarker}}))
+	return thread
+}
 
 type testOpenAITool struct{ name string }
 

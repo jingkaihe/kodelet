@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -418,6 +419,19 @@ func TestWebFetchToolResultInterfaces(t *testing.T) {
 		assert.Equal(t, "File content here", successResult.GetResult())
 		assert.Empty(t, successResult.GetError())
 		assert.False(t, successResult.IsError())
+		assert.Contains(t, successResult.AssistantFacing(), "File content here")
+
+		structured := successResult.StructuredData()
+		assert.Equal(t, "web_fetch", structured.ToolName)
+		assert.True(t, structured.Success)
+		var metadata tooltypes.WebFetchMetadata
+		require.True(t, tooltypes.ExtractMetadata(structured.Metadata, &metadata))
+		assert.Equal(t, "https://example.com/file.txt", metadata.URL)
+		assert.Equal(t, "extract info", metadata.Prompt)
+		assert.Equal(t, "saved", metadata.ProcessedType)
+		assert.Equal(t, "/path/to/saved/file.txt", metadata.SavedPath)
+		assert.Equal(t, int64(len("File content here")), metadata.Size)
+		assert.Equal(t, "File content here", metadata.Content)
 
 		// Test error result
 		errorResult := &WebFetchToolResult{
@@ -428,7 +442,33 @@ func TestWebFetchToolResultInterfaces(t *testing.T) {
 		assert.Empty(t, errorResult.GetResult())
 		assert.Equal(t, "Connection failed", errorResult.GetError())
 		assert.True(t, errorResult.IsError())
+		assert.Contains(t, errorResult.AssistantFacing(), "Connection failed")
+
+		errorStructured := errorResult.StructuredData()
+		assert.False(t, errorStructured.Success)
+		assert.Equal(t, "Connection failed", errorStructured.Error)
+		require.True(t, tooltypes.ExtractMetadata(errorStructured.Metadata, &metadata))
+		assert.Equal(t, "markdown", metadata.ProcessedType)
+		assert.Equal(t, "https://example.com/file.txt", metadata.URL)
 	})
+}
+
+func TestWebFetchToolResultStructuredDataProcessedTypes(t *testing.T) {
+	markdownResult := &WebFetchToolResult{
+		url:    "https://example.com/page.html",
+		result: "# Title",
+	}
+	var metadata tooltypes.WebFetchMetadata
+	require.True(t, tooltypes.ExtractMetadata(markdownResult.StructuredData().Metadata, &metadata))
+	assert.Equal(t, "markdown", metadata.ProcessedType)
+
+	aiResult := &WebFetchToolResult{
+		url:    "https://example.com/page.html",
+		prompt: "extract title",
+		result: "Title",
+	}
+	require.True(t, tooltypes.ExtractMetadata(aiResult.StructuredData().Metadata, &metadata))
+	assert.Equal(t, "ai_extracted", metadata.ProcessedType)
 }
 
 func TestWebFetchToolName(t *testing.T) {

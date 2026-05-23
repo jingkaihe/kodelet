@@ -25,6 +25,17 @@ func setupTestDB(t *testing.T, dbPath string) {
 	require.NoError(t, runner.Run(ctx, migrations.All()))
 }
 
+func TestGetDefaultStorage(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", tmpDir)
+	setupTestDB(t, filepath.Join(tmpDir, "storage.db"))
+
+	storage, err := GetDefaultStorage(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, storage)
+	require.NoError(t, storage.Close())
+}
+
 func TestStorage_AppendAndRead(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "sessions.db")

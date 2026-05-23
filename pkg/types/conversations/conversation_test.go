@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -23,6 +25,27 @@ func TestNewConversationRecord(t *testing.T) {
 	// Test creation with generated ID
 	record = NewConversationRecord("")
 	assert.NotEmpty(t, record.ID, "ID should be generated")
+}
+
+func TestConversationSummaryGetters(t *testing.T) {
+	createdAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	updatedAt := createdAt.Add(time.Hour)
+	usage := llmtypes.Usage{InputTokens: 10, OutputTokens: 5}
+	summary := ConversationSummary{
+		ID:           "conversation-id",
+		MessageCount: 3,
+		Provider:     "openai",
+		Usage:        usage,
+		CreatedAt:    createdAt,
+		UpdatedAt:    updatedAt,
+	}
+
+	assert.Equal(t, "conversation-id", summary.GetID())
+	assert.Equal(t, createdAt, summary.GetCreatedAt())
+	assert.Equal(t, updatedAt, summary.GetUpdatedAt())
+	assert.Equal(t, 3, summary.GetMessageCount())
+	assert.Equal(t, usage, summary.GetUsage())
+	assert.Equal(t, "openai", summary.GetProvider())
 }
 
 func TestToSummaryAppliesMessageDisplay(t *testing.T) {

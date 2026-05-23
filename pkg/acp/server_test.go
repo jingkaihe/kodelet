@@ -6,12 +6,15 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"io"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
 	"github.com/jingkaihe/kodelet/pkg/acp/bridge"
+	"github.com/jingkaihe/kodelet/pkg/acp/session"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/stretchr/testify/assert"
@@ -19,6 +22,87 @@ import (
 
 	_ "modernc.org/sqlite"
 )
+
+type storedAppend struct {
+	sessionID acptypes.SessionID
+	update    any
+}
+
+type fakeSessionStorage struct {
+	appendErr   error
+	readErr     error
+	flushErr    error
+	deleteErr   error
+	closeErr    error
+	readUpdates []session.StoredUpdate
+
+	appended      []storedAppend
+	reads         []acptypes.SessionID
+	flushed       []acptypes.SessionID
+	deleted       []acptypes.SessionID
+	closedSession []acptypes.SessionID
+	closed        bool
+}
+
+func (f *fakeSessionStorage) AppendUpdate(sessionID acptypes.SessionID, update any) error {
+	if f.appendErr != nil {
+		return f.appendErr
+	}
+	f.appended = append(f.appended, storedAppend{sessionID: sessionID, update: update})
+	return nil
+}
+
+func (f *fakeSessionStorage) ReadUpdates(sessionID acptypes.SessionID) ([]session.StoredUpdate, error) {
+	f.reads = append(f.reads, sessionID)
+	if f.readErr != nil {
+		return nil, f.readErr
+	}
+	return f.readUpdates, nil
+}
+
+func (f *fakeSessionStorage) Flush(sessionID acptypes.SessionID) error {
+	f.flushed = append(f.flushed, sessionID)
+	return f.flushErr
+}
+
+func (f *fakeSessionStorage) Delete(sessionID acptypes.SessionID) error {
+	f.deleted = append(f.deleted, sessionID)
+	return f.deleteErr
+}
+
+func (f *fakeSessionStorage) CloseSession(sessionID acptypes.SessionID) error {
+	f.closedSession = append(f.closedSession, sessionID)
+	return nil
+}
+
+func (f *fakeSessionStorage) Exists(acptypes.SessionID) bool {
+	return len(f.readUpdates) > 0
+}
+
+func (f *fakeSessionStorage) Close() error {
+	f.closed = true
+	return f.closeErr
+}
+
+func readJSONRPCMessage(t *testing.T, output *bytes.Buffer) map[string]any {
+	t.Helper()
+
+	scanner := bufio.NewScanner(output)
+	require.True(t, scanner.Scan())
+
+	var message map[string]any
+	require.NoError(t, json.Unmarshal(scanner.Bytes(), &message))
+	output.Reset()
+	return message
+}
+
+func assertRPCErrorCode(t *testing.T, message map[string]any, code int) {
+	t.Helper()
+
+	require.NotNil(t, message["error"])
+	errObj := message["error"].(map[string]any)
+	assert.Equal(t, float64(code), errObj["code"])
+}
 
 func lockServerTestDatabase(t *testing.T, dbPath string) func() {
 	t.Helper()
@@ -235,6 +319,227 @@ func TestServer_Authenticate(t *testing.T) {
 
 	assert.NotNil(t, resp["result"])
 	assert.Nil(t, resp["error"])
+}
+
+func TestServer_RunSkipsBlankLinesAndStopsOnEOF(t *testing.T) {
+	input := bytes.NewBufferString("\n" + `{"jsonrpc":"2.0","id":1,"method":"authenticate","params":{}}` + "\n")
+	output := bytes.NewBuffer(nil)
+
+	server := NewServer(
+		WithInput(input),
+		WithOutput(output),
+		WithContext(context.Background()),
+	)
+
+	require.NoError(t, server.Run())
+
+	resp := readJSONRPCMessage(t, output)
+	assert.Equal(t, "2.0", resp["jsonrpc"])
+	assert.Equal(t, float64(1), resp["id"])
+	assert.NotNil(t, resp["result"])
+	assert.Nil(t, resp["error"])
+}
+
+func TestServer_RequestHandlersReturnEarlyErrors(t *testing.T) {
+	output := bytes.NewBuffer(nil)
+	server := NewServer(
+		WithInput(bytes.NewBuffer(nil)),
+		WithOutput(output),
+		WithContext(context.Background()),
+	)
+
+	loadReq := &acptypes.Request{ID: json.RawMessage(`1`), Params: json.RawMessage(`{}`)}
+	require.NoError(t, server.handleSessionLoad(loadReq))
+	assertRPCErrorCode(t, readJSONRPCMessage(t, output), acptypes.ErrCodeInternalError)
+
+	promptReq := &acptypes.Request{ID: json.RawMessage(`2`), Params: json.RawMessage(`{}`)}
+	require.NoError(t, server.handleSessionPrompt(promptReq))
+	assertRPCErrorCode(t, readJSONRPCMessage(t, output), acptypes.ErrCodeInternalError)
+
+	server.initialized.Store(true)
+	require.NoError(t, server.handleSessionNew(&acptypes.Request{ID: json.RawMessage(`3`), Params: json.RawMessage(`{`)}))
+	assertRPCErrorCode(t, readJSONRPCMessage(t, output), acptypes.ErrCodeInvalidParams)
+
+	require.NoError(t, server.handleSessionLoad(&acptypes.Request{ID: json.RawMessage(`4`), Params: json.RawMessage(`{`)}))
+	assertRPCErrorCode(t, readJSONRPCMessage(t, output), acptypes.ErrCodeInvalidParams)
+
+	require.NoError(t, server.handleSessionPrompt(&acptypes.Request{ID: json.RawMessage(`5`), Params: json.RawMessage(`{`)}))
+	assertRPCErrorCode(t, readJSONRPCMessage(t, output), acptypes.ErrCodeInvalidParams)
+
+	require.NoError(t, server.handleSetMode(&acptypes.Request{ID: json.RawMessage(`6`)}))
+	assertRPCErrorCode(t, readJSONRPCMessage(t, output), acptypes.ErrCodeMethodNotFound)
+}
+
+func TestServer_WithConfigStoresServerConfig(t *testing.T) {
+	config := &ServerConfig{
+		Provider:             "openai",
+		Model:                "gpt-4.1",
+		MaxTokens:            1024,
+		NoSkills:             true,
+		NoWorkflows:          true,
+		DisableFSSearchTools: true,
+		DisableSubagent:      true,
+		NoHooks:              true,
+		MaxTurns:             3,
+		CompactRatio:         0.4,
+	}
+
+	server := NewServer(
+		WithInput(bytes.NewBuffer(nil)),
+		WithOutput(io.Discard),
+		WithContext(context.Background()),
+		WithConfig(config),
+	)
+
+	assert.Same(t, config, server.config)
+}
+
+func TestServer_StoreUpdatePersistsBestEffort(t *testing.T) {
+	storage := &fakeSessionStorage{}
+	server := NewServer(
+		WithInput(bytes.NewBuffer(nil)),
+		WithOutput(io.Discard),
+		WithContext(context.Background()),
+	)
+	server.sessionStorage = storage
+
+	update := map[string]any{"sessionUpdate": acptypes.UpdateUserMessageChunk}
+	server.storeUpdate(acptypes.SessionID("session-1"), update)
+
+	require.Len(t, storage.appended, 1)
+	assert.Equal(t, acptypes.SessionID("session-1"), storage.appended[0].sessionID)
+	assert.Equal(t, update, storage.appended[0].update)
+
+	storage.appendErr = errors.New("append failed")
+	require.NotPanics(t, func() {
+		server.storeUpdate(acptypes.SessionID("session-1"), update)
+	})
+	assert.Len(t, storage.appended, 1)
+}
+
+func TestServer_HandleResponseRoutesPendingClientCalls(t *testing.T) {
+	server := NewServer(
+		WithInput(bytes.NewBuffer(nil)),
+		WithOutput(io.Discard),
+		WithContext(context.Background()),
+	)
+	resultCh := make(chan json.RawMessage, 1)
+	server.pendingRequests["1"] = resultCh
+
+	require.NoError(t, server.handleResponse(json.RawMessage(`1`), json.RawMessage(`{"ok":true}`), nil))
+	assert.JSONEq(t, `{"ok":true}`, string(<-resultCh))
+	_, stillPending := server.pendingRequests["1"]
+	assert.False(t, stillPending)
+
+	server.pendingRequests["2"] = resultCh
+	require.NoError(t, server.handleResponse(json.RawMessage(`2`), nil, &acptypes.RPCError{Code: acptypes.ErrCodeInternalError, Message: "boom"}))
+	assert.Nil(t, <-resultCh)
+
+	require.NoError(t, server.handleResponse(json.RawMessage(`unknown`), json.RawMessage(`{}`), nil))
+}
+
+func TestServer_CallClientSendsRequestAndReceivesResponse(t *testing.T) {
+	output := bytes.NewBuffer(nil)
+	server := NewServer(
+		WithInput(bytes.NewBuffer(nil)),
+		WithOutput(output),
+		WithContext(context.Background()),
+	)
+
+	resultCh := make(chan json.RawMessage, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		result, err := server.CallClient(context.Background(), "client/test", map[string]any{"key": "value"})
+		if err != nil {
+			errCh <- err
+			return
+		}
+		resultCh <- result
+	}()
+
+	require.Eventually(t, func() bool {
+		server.pendingMu.Lock()
+		defer server.pendingMu.Unlock()
+		return len(server.pendingRequests) == 1
+	}, time.Second, 10*time.Millisecond)
+
+	request := readJSONRPCMessage(t, output)
+	assert.Equal(t, "2.0", request["jsonrpc"])
+	assert.Equal(t, float64(1), request["id"])
+	assert.Equal(t, "client/test", request["method"])
+
+	require.NoError(t, server.handleResponse(json.RawMessage(`1`), json.RawMessage(`{"answer":42}`), nil))
+	select {
+	case err := <-errCh:
+		require.NoError(t, err)
+	case result := <-resultCh:
+		assert.JSONEq(t, `{"answer":42}`, string(result))
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for client call")
+	}
+}
+
+func TestServer_CallClientHandlesClientErrorAndContextCancel(t *testing.T) {
+	server := NewServer(
+		WithInput(bytes.NewBuffer(nil)),
+		WithOutput(io.Discard),
+		WithContext(context.Background()),
+	)
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := server.CallClient(context.Background(), "client/error", nil)
+		errCh <- err
+	}()
+
+	require.Eventually(t, func() bool {
+		server.pendingMu.Lock()
+		defer server.pendingMu.Unlock()
+		return len(server.pendingRequests) == 1
+	}, time.Second, 10*time.Millisecond)
+	require.NoError(t, server.handleResponse(json.RawMessage(`1`), nil, &acptypes.RPCError{Code: acptypes.ErrCodeInternalError, Message: "boom"}))
+	assert.ErrorContains(t, <-errCh, "client returned error")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := server.CallClient(ctx, "client/cancel", nil)
+	assert.ErrorIs(t, err, context.Canceled)
+	server.pendingMu.Lock()
+	_, stillPending := server.pendingRequests["2"]
+	server.pendingMu.Unlock()
+	assert.False(t, stillPending)
+}
+
+func TestServer_ReplaySessionUpdates(t *testing.T) {
+	output := bytes.NewBuffer(nil)
+	storage := &fakeSessionStorage{
+		readUpdates: []session.StoredUpdate{
+			{Update: json.RawMessage(`{`)},
+			{Update: json.RawMessage(`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hello"}}`)},
+		},
+	}
+	server := NewServer(
+		WithInput(bytes.NewBuffer(nil)),
+		WithOutput(output),
+		WithContext(context.Background()),
+	)
+	server.sessionStorage = storage
+
+	require.NoError(t, server.replaySessionUpdates(acptypes.SessionID("session-1")))
+	assert.Equal(t, []acptypes.SessionID{"session-1"}, storage.reads)
+
+	notif := readJSONRPCMessage(t, output)
+	assert.Equal(t, "session/update", notif["method"])
+	params := notif["params"].(map[string]any)
+	assert.Equal(t, "session-1", params["sessionId"])
+	update := params["update"].(map[string]any)
+	assert.Equal(t, acptypes.UpdateAgentMessageChunk, update["sessionUpdate"])
+
+	storage.readErr = errors.New("read failed")
+	assert.ErrorContains(t, server.replaySessionUpdates(acptypes.SessionID("session-1")), "read failed")
+
+	server.sessionStorage = nil
+	assert.NoError(t, server.replaySessionUpdates(acptypes.SessionID("session-1")))
 }
 
 func TestServer_SendUpdate(t *testing.T) {
