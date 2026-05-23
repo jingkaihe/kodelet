@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/avast/retry-go/v4"
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/goals"
@@ -588,22 +589,12 @@ func (t *Thread) processMessageExchange(
 		processStream = t.processStream
 	}
 
-	var stream *ssestream.Stream[responses.ResponseStreamEventUnion]
 	if useWebSocket {
-		var err error
-		stream, err = t.webSocket.Stream(ctx, params, nil, t.authorizer)
-		if err != nil {
-			_ = t.webSocket.Close()
-			err = errors.Wrap(err, "failed to create Responses API websocket stream")
-			log.WithError(err).
-				WithField("model", model).
-				WithField("tool_count", len(tools)).
-				WithField("input_items", len(t.inputItems)).
-				Error("API request failed")
-			saveConversation()
-			return "", false, false, err
-		}
-	} else {
+		return t.processMessageExchangeWithWebSocketRetries(ctx, handler, model, params, tools, processStream, opt, saveConversation)
+	}
+
+	var stream *ssestream.Stream[responses.ResponseStreamEventUnion]
+	{
 		stream = newStreaming(ctx, params, requestOpts...)
 	}
 	log.Debug("stream created, processing events")
@@ -641,6 +632,154 @@ func (t *Thread) processMessageExchange(
 	saveConversation()
 
 	return finalOutput, streamResult.toolsUsed, streamResult.responseCompleted, nil
+}
+
+func (t *Thread) processMessageExchangeWithWebSocketRetries(
+	ctx context.Context,
+	handler llmtypes.MessageHandler,
+	model string,
+	params responses.ResponseNewParams,
+	tools []responses.ToolUnionParam,
+	processStream func(context.Context, *ssestream.Stream[responses.ResponseStreamEventUnion], llmtypes.MessageHandler, string, llmtypes.MessageOpt) (processStreamResult, error),
+	opt llmtypes.MessageOpt,
+	saveConversation func(),
+) (string, bool, bool, error) {
+	log := logger.G(ctx)
+	retryConfig := responsesWebSocketRetryConfig(t.Config)
+	var finalOutput string
+	var finalStreamResult processStreamResult
+	pendingReasoningBeforeAttempt := t.pendingReasoning.String()
+
+	err := retry.Do(
+		func() error {
+			resetPendingReasoning(&t.pendingReasoning, pendingReasoningBeforeAttempt)
+			attemptParams := params
+			attemptParams.Input = responses.ResponseNewParamsInputUnion{OfInputItemList: appendGoalContextInputItems(t.inputItems, t.GetMetadata())}
+			t.applyCodexRestrictions(&attemptParams)
+
+			stream, err := t.webSocket.Stream(ctx, attemptParams, nil, t.authorizer)
+			if err != nil {
+				_ = t.webSocket.Close()
+				wrappedErr := errors.Wrap(err, "failed to create Responses API websocket stream")
+				if !isRetryableResponsesWebSocketError(err) {
+					return retry.Unrecoverable(wrappedErr)
+				}
+				return wrappedErr
+			}
+
+			log.Debug("stream created, processing events")
+
+			streamResult, err := processStream(ctx, stream, handler, model, opt)
+			if err == nil {
+				finalOutput = t.lastAssistantMessageText()
+				finalStreamResult = streamResult
+				return nil
+			}
+
+			_ = t.webSocket.Close()
+			if !isRetryableResponsesWebSocketError(err) {
+				return retry.Unrecoverable(err)
+			}
+			return err
+		},
+		retry.RetryIf(retry.IsRecoverable),
+		retry.Attempts(uint(retryConfig.Attempts)),
+		retry.Delay(time.Duration(retryConfig.InitialDelay)*time.Millisecond),
+		retry.DelayType(responsesWebSocketRetryDelayType(retryConfig)),
+		retry.MaxDelay(time.Duration(retryConfig.MaxDelay)*time.Millisecond),
+		retry.Context(ctx),
+		retry.OnRetry(func(n uint, err error) {
+			log.WithError(err).
+				WithField("attempt", n+1).
+				WithField("max_attempts", retryConfig.Attempts).
+				Warn("retrying Responses API websocket request")
+		}),
+		retry.LastErrorOnly(true),
+	)
+	if err != nil {
+		logResponsesAPIRequestFailure(log, err, model, len(tools), len(t.inputItems))
+		saveConversation()
+		return "", false, false, err
+	}
+
+	saveConversation()
+	return finalOutput, finalStreamResult.toolsUsed, finalStreamResult.responseCompleted, nil
+}
+
+func (t *Thread) lastAssistantMessageText() string {
+	for i := len(t.inputItems) - 1; i >= 0; i-- {
+		item := t.inputItems[i]
+		if item.OfMessage != nil && item.OfMessage.Role == responses.EasyInputMessageRoleAssistant {
+			if item.OfMessage.Content.OfString.Valid() {
+				return item.OfMessage.Content.OfString.Value
+			}
+		}
+	}
+	return ""
+}
+
+func responsesWebSocketRetryConfig(config llmtypes.Config) llmtypes.RetryConfig {
+	retryConfig := config.Retry
+	if retryConfig.Attempts == 0 {
+		retryConfig = llmtypes.DefaultRetryConfig
+	}
+
+	// Keep Responses websocket behavior aligned with the OpenAI Go SDK default:
+	// one initial attempt plus at most two retries.
+	retryConfig.Attempts = min(max(retryConfig.Attempts, 1), 3)
+
+	if retryConfig.InitialDelay <= 0 {
+		retryConfig.InitialDelay = llmtypes.DefaultRetryConfig.InitialDelay
+	}
+	if retryConfig.MaxDelay <= 0 {
+		retryConfig.MaxDelay = llmtypes.DefaultRetryConfig.MaxDelay
+	}
+	if retryConfig.BackoffType == "" {
+		retryConfig.BackoffType = llmtypes.DefaultRetryConfig.BackoffType
+	}
+
+	return retryConfig
+}
+
+func responsesWebSocketRetryDelayType(retryConfig llmtypes.RetryConfig) retry.DelayTypeFunc {
+	if retryConfig.BackoffType == "fixed" {
+		return retry.FixedDelay
+	}
+	return retry.BackOffDelay
+}
+
+func resetPendingReasoning(builder *strings.Builder, value string) {
+	builder.Reset()
+	if value != "" {
+		builder.WriteString(value)
+	}
+}
+
+func isRetryableResponsesWebSocketError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+
+	var statusErr *websocketHandshakeStatusError
+	if errors.As(err, &statusErr) {
+		return statusErr.statusCode == http.StatusRequestTimeout ||
+			statusErr.statusCode == http.StatusConflict ||
+			statusErr.statusCode == http.StatusTooManyRequests ||
+			statusErr.statusCode >= http.StatusInternalServerError
+	}
+
+	return true
+}
+
+func logResponsesAPIRequestFailure(log *logrus.Entry, err error, model string, toolCount int, inputItemCount int) {
+	log.WithError(err).
+		WithField("model", model).
+		WithField("tool_count", toolCount).
+		WithField("input_items", inputItemCount).
+		Error("API request failed")
 }
 
 func (t *Thread) processPendingSteer(ctx context.Context, handler llmtypes.MessageHandler) error {

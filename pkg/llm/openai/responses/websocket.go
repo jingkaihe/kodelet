@@ -36,6 +36,29 @@ type responsesWebSocketTransport struct {
 	conn    *websocket.Conn
 }
 
+type websocketHandshakeStatusError struct {
+	message    string
+	statusCode int
+	err        error
+}
+
+func (e *websocketHandshakeStatusError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.err == nil {
+		return e.message
+	}
+	return e.message + ": " + e.err.Error()
+}
+
+func (e *websocketHandshakeStatusError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
+}
+
 type responseCreateWebSocketRequest struct {
 	Params responses.ResponseNewParams
 }
@@ -199,9 +222,9 @@ func websocketHandshakeError(err error, resp *http.Response) error {
 		message += " " + statusText
 	}
 	if err == nil {
-		return errors.New(message)
+		return &websocketHandshakeStatusError{message: message, statusCode: resp.StatusCode}
 	}
-	return errors.Wrap(err, message)
+	return &websocketHandshakeStatusError{message: message, statusCode: resp.StatusCode, err: err}
 }
 
 func writeWebSocketJSON(ctx context.Context, conn *websocket.Conn, payload any) error {

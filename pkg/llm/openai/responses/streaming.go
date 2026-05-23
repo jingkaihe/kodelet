@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/avast/retry-go/v4"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/telemetry"
@@ -67,6 +68,13 @@ func (t *Thread) processStream(
 			Content: t.pendingReasoning.String(),
 		})
 		t.pendingReasoning.Reset()
+	}
+
+	result := func() processStreamResult {
+		return processStreamResult{
+			toolsUsed:         toolsUsed,
+			responseCompleted: responseCompleted,
+		}
 	}
 
 	finalizeContentBlocks := func() {
@@ -348,14 +356,11 @@ func (t *Thread) processStream(
 
 		case "response.failed", "error":
 			// Handle errors
-			errMsg := event.Message
-			if errMsg == "" {
-				errMsg = "Unknown error"
+			errMsg := responseStreamEventErrorMessage(event)
+			if !isRetryableResponseStreamEventError(event) {
+				return result(), retry.Unrecoverable(errors.New(errMsg))
 			}
-			return processStreamResult{
-				toolsUsed:         toolsUsed,
-				responseCompleted: responseCompleted,
-			}, errors.New(errMsg)
+			return result(), errors.New(errMsg)
 
 		case "response.in_progress", "response.queued":
 			// Status updates - no action needed
@@ -376,10 +381,7 @@ func (t *Thread) processStream(
 				WithField("raw_json", apiErr.RawJSON()).
 				Debug("API error details")
 		}
-		return processStreamResult{
-			toolsUsed:         toolsUsed,
-			responseCompleted: responseCompleted,
-		}, errors.Wrap(err, "stream error")
+		return result(), errors.Wrap(err, "stream error")
 	}
 
 	// Update usage from final response
@@ -395,28 +397,66 @@ func (t *Thread) processStream(
 	}
 
 	if responseIncompleteReason != "" {
-		return processStreamResult{
-			toolsUsed:         toolsUsed,
-			responseCompleted: false,
-		}, errors.Errorf("response incomplete: %s", responseIncompleteReason)
+		return result(), errors.Errorf("response incomplete: %s", responseIncompleteReason)
 	}
 
 	if !responseCompleted {
-		return processStreamResult{
-			toolsUsed:         toolsUsed,
-			responseCompleted: false,
-		}, errors.New("response stream ended before response.completed event")
+		return result(), errors.New("response stream ended before response.completed event")
 	}
 
-	return processStreamResult{
-		toolsUsed:         toolsUsed,
-		responseCompleted: true,
-	}, nil
+	return result(), nil
 }
 
 type processStreamResult struct {
 	toolsUsed         bool
 	responseCompleted bool
+}
+
+func responseStreamEventErrorMessage(event responses.ResponseStreamEventUnion) string {
+	if strings.TrimSpace(event.Message) != "" {
+		return event.Message
+	}
+	if strings.TrimSpace(event.Response.Error.Message) != "" {
+		return event.Response.Error.Message
+	}
+	if event.Response.Error.Code != "" {
+		return string(event.Response.Error.Code)
+	}
+	return "Unknown error"
+}
+
+func isRetryableResponseStreamEventError(event responses.ResponseStreamEventUnion) bool {
+	code := strings.ToLower(strings.TrimSpace(firstNonEmpty(
+		event.Code,
+		string(event.Response.Error.Code),
+	)))
+
+	if code == "invalid_prompt" {
+		return false
+	}
+	if code == "context_length_exceeded" {
+		return false
+	}
+	if code == "insufficient_quota" || code == "usage_not_included" {
+		return false
+	}
+	if code == "cyber_policy" {
+		return false
+	}
+	if code == "server_is_overloaded" || code == "slow_down" {
+		return false
+	}
+
+	return true
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // toolCallState tracks the state of a pending tool call during streaming.

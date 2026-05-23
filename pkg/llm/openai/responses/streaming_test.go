@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/avast/retry-go/v4"
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
@@ -599,6 +600,69 @@ func TestProcessStreamReturnsErrorOnIncompleteResponse(t *testing.T) {
 		"text_delta:Partial",
 		"content_block_end",
 	}, handler.events)
+}
+
+func TestProcessStreamReturnsRetryableErrorOnIncompleteResponse(t *testing.T) {
+	stream := responseStreamFromMaps(t, []map[string]any{
+		{
+			"type": "response.incomplete",
+			"response": map[string]any{
+				"id":     "resp_incomplete",
+				"status": "incomplete",
+				"incomplete_details": map[string]any{
+					"reason": "max_output_tokens",
+				},
+			},
+		},
+	})
+	thread := &Thread{Thread: base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test", hooks.Trigger{})}
+	handler := &captureStreamHandler{}
+
+	_, err := thread.processStream(context.Background(), stream, handler, "gpt-5.5", llmtypes.MessageOpt{})
+	require.Error(t, err)
+	assert.True(t, retry.IsRecoverable(err))
+}
+
+func TestProcessStreamResponseFailedErrorRetryabilityMatchesCodex(t *testing.T) {
+	tests := []struct {
+		name        string
+		code        string
+		retryable   bool
+		errorString string
+	}{
+		{name: "generic failure retries", code: "server_error", retryable: true, errorString: "temporary"},
+		{name: "invalid prompt does not retry", code: "invalid_prompt", retryable: false, errorString: "bad prompt"},
+		{name: "context window does not retry", code: "context_length_exceeded", retryable: false, errorString: "too long"},
+		{name: "quota does not retry", code: "insufficient_quota", retryable: false, errorString: "quota"},
+		{name: "usage not included does not retry", code: "usage_not_included", retryable: false, errorString: "usage"},
+		{name: "cyber policy does not retry", code: "cyber_policy", retryable: false, errorString: "policy"},
+		{name: "server overloaded does not retry", code: "server_is_overloaded", retryable: false, errorString: "overloaded"},
+		{name: "slow down does not retry", code: "slow_down", retryable: false, errorString: "slow down"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stream := responseStreamFromMaps(t, []map[string]any{
+				{
+					"type": "response.failed",
+					"response": map[string]any{
+						"id":     "resp_failed",
+						"status": "failed",
+						"error": map[string]any{
+							"code":    tt.code,
+							"message": tt.errorString,
+						},
+					},
+				},
+			})
+			thread := &Thread{Thread: base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test", hooks.Trigger{})}
+			handler := &captureStreamHandler{}
+
+			_, err := thread.processStream(context.Background(), stream, handler, "gpt-5.5", llmtypes.MessageOpt{})
+			require.Error(t, err)
+			assert.Equal(t, tt.retryable, retry.IsRecoverable(err))
+		})
+	}
 }
 
 func TestProcessStreamWebSearchDoesNotTriggerFollowUpTurn(t *testing.T) {

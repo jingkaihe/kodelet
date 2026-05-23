@@ -193,7 +193,7 @@ func TestWebSocketStreamDecoderClosesTransportAfterTerminalEvent(t *testing.T) {
 }
 
 func TestProcessMessageExchangeClosesWebSocketAfterStreamError(t *testing.T) {
-	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
+	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", Retry: llmtypes.RetryConfig{Attempts: 1}, OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
 	thread := &Thread{
 		Thread:       base.NewThread(config, "conv-test", hooks.Trigger{}),
 		useWebSocket: true,
@@ -227,7 +227,7 @@ func TestProcessMessageExchangeClosesWebSocketAfterStreamError(t *testing.T) {
 }
 
 func TestProcessMessageExchangeFailsWhenWebSocketCreationFails(t *testing.T) {
-	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
+	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", Retry: llmtypes.RetryConfig{Attempts: 1}, OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
 	thread := &Thread{
 		Thread:       base.NewThread(config, "conv-test", hooks.Trigger{}),
 		useWebSocket: true,
@@ -256,4 +256,217 @@ func TestProcessMessageExchangeFailsWhenWebSocketCreationFails(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to create Responses API websocket stream")
 	assert.True(t, fakeStreamer.closed)
+}
+
+func TestProcessMessageExchangeRetriesWebSocketCreationFailure(t *testing.T) {
+	config := llmtypes.Config{
+		Provider: "openai",
+		Model:    "gpt-4.1",
+		Retry: llmtypes.RetryConfig{
+			Attempts:     3,
+			InitialDelay: 1,
+			MaxDelay:     1,
+			BackoffType:  "fixed",
+		},
+		OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"},
+	}
+	thread := &Thread{
+		Thread:       base.NewThread(config, "conv-test", hooks.Trigger{}),
+		useWebSocket: true,
+		inputItems: []openairesponses.ResponseInputItemUnionParam{
+			{
+				OfMessage: &openairesponses.EasyInputMessageParam{
+					Role: openairesponses.EasyInputMessageRoleUser,
+					Content: openairesponses.EasyInputMessageContentUnionParam{
+						OfString: param.NewOpt("hello"),
+					},
+				},
+			},
+		},
+		storedItems: []StoredInputItem{{Type: "message", Role: "user", Content: "hello"}},
+	}
+	thread.SetState(tools.NewBasicState(context.Background()))
+
+	attempts := 0
+	fakeStreamer := &fakeResponsesWebSocketStreamer{
+		streamFunc: func(context.Context, openairesponses.ResponseNewParams, []string, auth.HTTPAuthorizer) (*ssestream.Stream[openairesponses.ResponseStreamEventUnion], error) {
+			attempts++
+			if attempts < 3 {
+				return nil, assert.AnError
+			}
+			return ssestream.NewStream[openairesponses.ResponseStreamEventUnion](emptyResponsesStreamDecoder{}, nil), nil
+		},
+	}
+	thread.webSocket = fakeStreamer
+	thread.processStreamFunc = func(context.Context, *ssestream.Stream[openairesponses.ResponseStreamEventUnion], llmtypes.MessageHandler, string, llmtypes.MessageOpt) (processStreamResult, error) {
+		return processStreamResult{responseCompleted: true}, nil
+	}
+
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
+	_, _, completed, err := thread.processMessageExchange(context.Background(), handler, "gpt-4.1", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
+	require.NoError(t, err)
+	assert.True(t, completed)
+	assert.Equal(t, 3, attempts)
+}
+
+func TestProcessMessageExchangeRetriesWebSocketStreamAfterPresentationOnlyOutput(t *testing.T) {
+	config := llmtypes.Config{
+		Provider: "openai",
+		Model:    "gpt-4.1",
+		Retry: llmtypes.RetryConfig{
+			Attempts:     3,
+			InitialDelay: 1,
+			MaxDelay:     1,
+			BackoffType:  "fixed",
+		},
+		OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"},
+	}
+	thread := &Thread{
+		Thread:       base.NewThread(config, "conv-test", hooks.Trigger{}),
+		useWebSocket: true,
+		inputItems: []openairesponses.ResponseInputItemUnionParam{
+			{
+				OfMessage: &openairesponses.EasyInputMessageParam{
+					Role: openairesponses.EasyInputMessageRoleUser,
+					Content: openairesponses.EasyInputMessageContentUnionParam{
+						OfString: param.NewOpt("hello"),
+					},
+				},
+			},
+		},
+		storedItems: []StoredInputItem{{Type: "message", Role: "user", Content: "hello"}},
+	}
+	thread.SetState(tools.NewBasicState(context.Background()))
+
+	attempts := 0
+	fakeStreamer := &fakeResponsesWebSocketStreamer{
+		streamFunc: func(context.Context, openairesponses.ResponseNewParams, []string, auth.HTTPAuthorizer) (*ssestream.Stream[openairesponses.ResponseStreamEventUnion], error) {
+			attempts++
+			return ssestream.NewStream[openairesponses.ResponseStreamEventUnion](emptyResponsesStreamDecoder{}, nil), nil
+		},
+	}
+	thread.webSocket = fakeStreamer
+	thread.processStreamFunc = func(context.Context, *ssestream.Stream[openairesponses.ResponseStreamEventUnion], llmtypes.MessageHandler, string, llmtypes.MessageOpt) (processStreamResult, error) {
+		if attempts == 1 {
+			thread.pendingReasoning.WriteString("partial reasoning")
+			return processStreamResult{}, assert.AnError
+		}
+		return processStreamResult{responseCompleted: true}, nil
+	}
+
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
+	_, _, completed, err := thread.processMessageExchange(context.Background(), handler, "gpt-4.1", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
+	require.NoError(t, err)
+	assert.True(t, completed)
+	assert.Equal(t, 2, attempts)
+	assert.Empty(t, thread.pendingReasoning.String())
+}
+
+func TestProcessMessageExchangeRetriesWebSocketStreamAfterStateMutation(t *testing.T) {
+	config := llmtypes.Config{
+		Provider: "openai",
+		Model:    "gpt-4.1",
+		Retry: llmtypes.RetryConfig{
+			Attempts:     3,
+			InitialDelay: 1,
+			MaxDelay:     1,
+			BackoffType:  "fixed",
+		},
+		OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"},
+	}
+	thread := &Thread{
+		Thread:       base.NewThread(config, "conv-test", hooks.Trigger{}),
+		useWebSocket: true,
+		inputItems: []openairesponses.ResponseInputItemUnionParam{
+			{
+				OfMessage: &openairesponses.EasyInputMessageParam{
+					Role: openairesponses.EasyInputMessageRoleUser,
+					Content: openairesponses.EasyInputMessageContentUnionParam{
+						OfString: param.NewOpt("hello"),
+					},
+				},
+			},
+		},
+		storedItems: []StoredInputItem{{Type: "message", Role: "user", Content: "hello"}},
+	}
+	thread.SetState(tools.NewBasicState(context.Background()))
+
+	attempts := 0
+	fakeStreamer := &fakeResponsesWebSocketStreamer{
+		streamFunc: func(context.Context, openairesponses.ResponseNewParams, []string, auth.HTTPAuthorizer) (*ssestream.Stream[openairesponses.ResponseStreamEventUnion], error) {
+			attempts++
+			return ssestream.NewStream[openairesponses.ResponseStreamEventUnion](emptyResponsesStreamDecoder{}, nil), nil
+		},
+	}
+	thread.webSocket = fakeStreamer
+	thread.processStreamFunc = func(context.Context, *ssestream.Stream[openairesponses.ResponseStreamEventUnion], llmtypes.MessageHandler, string, llmtypes.MessageOpt) (processStreamResult, error) {
+		if attempts == 1 {
+			thread.inputItems = append(thread.inputItems, openairesponses.ResponseInputItemUnionParam{
+				OfMessage: &openairesponses.EasyInputMessageParam{
+					Role:    openairesponses.EasyInputMessageRoleAssistant,
+					Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("first attempt")},
+				},
+			})
+			return processStreamResult{}, assert.AnError
+		}
+		return processStreamResult{responseCompleted: true}, nil
+	}
+
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
+	output, _, completed, err := thread.processMessageExchange(context.Background(), handler, "gpt-4.1", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
+	require.NoError(t, err)
+	assert.True(t, completed)
+	assert.Equal(t, "first attempt", output)
+	assert.Equal(t, 2, attempts)
+}
+
+func TestProcessMessageExchangeRetriesWebSocketStreamAfterPendingToolCallOnly(t *testing.T) {
+	config := llmtypes.Config{
+		Provider: "openai",
+		Model:    "gpt-4.1",
+		Retry: llmtypes.RetryConfig{
+			Attempts:     3,
+			InitialDelay: 1,
+			MaxDelay:     1,
+			BackoffType:  "fixed",
+		},
+		OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"},
+	}
+	thread := &Thread{
+		Thread:       base.NewThread(config, "conv-test", hooks.Trigger{}),
+		useWebSocket: true,
+		inputItems: []openairesponses.ResponseInputItemUnionParam{
+			{
+				OfMessage: &openairesponses.EasyInputMessageParam{
+					Role: openairesponses.EasyInputMessageRoleUser,
+					Content: openairesponses.EasyInputMessageContentUnionParam{
+						OfString: param.NewOpt("hello"),
+					},
+				},
+			},
+		},
+		storedItems: []StoredInputItem{{Type: "message", Role: "user", Content: "hello"}},
+	}
+	thread.SetState(tools.NewBasicState(context.Background()))
+
+	attempts := 0
+	fakeStreamer := &fakeResponsesWebSocketStreamer{
+		streamFunc: func(context.Context, openairesponses.ResponseNewParams, []string, auth.HTTPAuthorizer) (*ssestream.Stream[openairesponses.ResponseStreamEventUnion], error) {
+			attempts++
+			return ssestream.NewStream[openairesponses.ResponseStreamEventUnion](emptyResponsesStreamDecoder{}, nil), nil
+		},
+	}
+	thread.webSocket = fakeStreamer
+	thread.processStreamFunc = func(context.Context, *ssestream.Stream[openairesponses.ResponseStreamEventUnion], llmtypes.MessageHandler, string, llmtypes.MessageOpt) (processStreamResult, error) {
+		if attempts == 1 {
+			return processStreamResult{toolsUsed: true}, assert.AnError
+		}
+		return processStreamResult{responseCompleted: true}, nil
+	}
+
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
+	_, _, completed, err := thread.processMessageExchange(context.Background(), handler, "gpt-4.1", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
+	require.NoError(t, err)
+	assert.True(t, completed)
+	assert.Equal(t, 2, attempts)
 }
