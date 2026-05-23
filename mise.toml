@@ -62,7 +62,7 @@ run = ["echo 'Starting development server with auto-reload...'", "air"]
 description = "Run Go tests with coverage gate"
 depends = ["code-generation"]
 run = ['''
-set -euo pipefail
+set -eu
 
 threshold=80.0
 pkgs=$(go list ./pkg/... ./cmd/... | grep -v "/node_modules/" || true)
