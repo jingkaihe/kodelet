@@ -1,5 +1,9 @@
 # Kodelet
 
+## Unreleased
+
+Refined Web UI typography and slash-command card styling so compact labels use a softer mixed-case treatment and long goal cards wrap cleanly in the transcript.
+
 ## 0.4.18-beta (2026-05-23)
 
 Hardened OpenAI Responses streaming with bounded retries for recoverable HTTP/WebSocket failures, better handshake diagnostics, and safer preservation of pending stream state across retry attempts.
