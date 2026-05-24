@@ -77,7 +77,6 @@ const ArcadeGamesModal: React.FC<ArcadeGamesModalProps> = ({
             {GAME_OPTIONS.map((game) => (
               <button
                 className="arcade-game-card"
-                data-arcade-autofocus={game === GAME_OPTIONS[0] ? 'true' : undefined}
                 key={game}
                 onClick={() => onSelectGame(game)}
                 type="button"

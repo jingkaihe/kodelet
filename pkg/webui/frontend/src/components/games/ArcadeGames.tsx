@@ -103,7 +103,6 @@ const isInteractiveControlTarget = (event: KeyboardEvent): boolean => {
 
 const getInitialFocusTarget = (modal: HTMLElement): HTMLElement =>
   modal.querySelector<HTMLElement>('[data-arcade-autofocus]') ||
-  modal.querySelector<HTMLElement>(FOCUSABLE_SELECTOR) ||
   modal;
 
 const consumeKeyboardEvent = (event: KeyboardEvent): void => {
@@ -369,6 +368,11 @@ const ArcadeGames: React.FC = () => {
             getInitialFocusTarget(modal).focus();
             return;
           }
+          if (activeElement === modal) {
+            consumeKeyboardEvent(event);
+            (event.shiftKey ? lastElement : firstElement).focus();
+            return;
+          }
           if (event.shiftKey && activeElement === firstElement) {
             consumeKeyboardEvent(event);
             lastElement.focus();
@@ -596,9 +600,9 @@ const ArcadeGames: React.FC = () => {
       context.font = '700 13px "IBM Plex Sans", "Helvetica Neue", sans-serif';
       context.fillStyle = 'rgba(20, 20, 19, 0.46)';
       context.textAlign = 'left';
-      context.fillText('YOU', 22, 30);
+      context.fillText('You', 22, 30);
       context.textAlign = 'right';
-      context.fillText('KODELET', width - 22, 30);
+      context.fillText('Kodelet', width - 22, 30);
 
       context.font = '600 42px "IBM Plex Sans", "Helvetica Neue", sans-serif';
       context.fillStyle = 'rgba(20, 20, 19, 0.13)';

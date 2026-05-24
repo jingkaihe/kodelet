@@ -389,7 +389,7 @@ describe('ChatTranscript', () => {
   });
 
   it('renders goals as compact command cards', () => {
-    render(
+    const { container } = render(
       <ChatTranscript
         isStreaming={false}
         messages={[
@@ -408,7 +408,9 @@ describe('ChatTranscript', () => {
     );
 
     expect(screen.getByTestId('slash-command-card')).toBeInTheDocument();
+    expect(screen.getByTestId('slash-command-card')).toHaveClass('slash-command-card-goal');
     expect(screen.getByText('Objective: find server cores and ram')).toBeInTheDocument();
+    expect(container.querySelector('.slash-command-card-command')).toBeInTheDocument();
   });
 
   it('renders streamed steering as a regular user block', () => {

@@ -166,8 +166,8 @@ const extractContentText = (content: string | ContentBlock[] | undefined): strin
 const getMessageBlockCopyText = (content: string | ContentBlock[] | undefined): string =>
   extractContentText(content);
 
-const renderSlashCommandCard = (text: string) => (
-  <div className="slash-command-card" data-testid="slash-command-card">
+const renderSlashCommandCard = (text: string, type: 'slash-command' | 'goal' = 'slash-command') => (
+  <div className={`slash-command-card slash-command-card-${type}`} data-testid="slash-command-card">
     <SquareSlash aria-hidden="true" className="slash-command-card-icon" size={14} strokeWidth={2.2} />
     <code className="slash-command-card-command">{text.trim()}</code>
   </div>
@@ -193,7 +193,7 @@ const renderUserContent = (content: string | ContentBlock[] | undefined): React.
     if (block.type === 'slash-command' || block.type === 'goal') {
       return (
         <React.Fragment key={`${block.type}-${index}-${block.text || ''}`}>
-          {renderSlashCommandCard(block.text || '')}
+          {renderSlashCommandCard(block.text || '', block.type)}
         </React.Fragment>
       );
     }

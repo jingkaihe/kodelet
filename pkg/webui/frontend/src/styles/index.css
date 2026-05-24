@@ -158,8 +158,8 @@ h6 {
   font-size: 0.68rem;
   font-weight: 600;
   line-height: 1.2;
-  letter-spacing: var(--tracking-eyebrow);
-  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  text-transform: none;
   color: #7a756b;
 }
 
@@ -174,8 +174,8 @@ h6 {
   font-size: 0.66rem;
   font-weight: 600;
   line-height: 1;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  text-transform: none;
   color: #6f6a5f;
 }
 
@@ -404,8 +404,8 @@ h6 {
 
 .slash-command-card {
   display: flex;
-  width: fit-content;
-  max-width: 100%;
+  width: auto;
+  max-width: calc(100% - 3rem);
   align-items: center;
   gap: 0.5rem;
   margin-left: 3rem;
@@ -433,6 +433,16 @@ h6 {
   font-size: 0.72rem;
   font-weight: 500;
   color: rgba(20, 20, 19, 0.52);
+}
+
+.slash-command-card-goal {
+  width: calc(100% - 3rem);
+}
+
+.slash-command-card-goal .slash-command-card-command {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .panel-action-button {
@@ -1045,8 +1055,8 @@ h6 {
   font-size: 0.5rem;
   font-weight: 600;
   line-height: 1.1;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  text-transform: none;
   color: #8a8477;
 }
 
@@ -1072,8 +1082,8 @@ h6 {
   font-size: 0.48rem;
   font-weight: 600;
   line-height: 1;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  text-transform: none;
 }
 
 .composer-profile-lock {
@@ -4142,6 +4152,14 @@ input:focus-visible,
   animation: arcadeGamesModalIn 240ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+.arcade-games-modal:focus {
+  outline: none;
+}
+
+.arcade-games-modal:focus-visible {
+  outline: none;
+}
+
 .arcade-games-header {
   display: flex;
   align-items: center;
@@ -4160,9 +4178,9 @@ input:focus-visible,
   font-family: var(--font-heading);
   font-size: 0.64rem;
   font-weight: 600;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.02em;
   line-height: 1.2;
-  text-transform: uppercase;
+  text-transform: none;
 }
 
 .arcade-game-title {
@@ -4229,12 +4247,19 @@ input:focus-visible,
     transform 140ms ease;
 }
 
-.arcade-game-card:hover,
-.arcade-game-card:focus-visible {
+.arcade-game-card:hover {
   border-color: rgba(217, 119, 87, 0.22);
   background: rgba(217, 119, 87, 0.08);
-  outline: none;
   transform: translateY(-1px);
+}
+
+.arcade-game-card:focus-visible {
+  border-color: rgba(217, 119, 87, 0.38);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.68), rgba(247, 243, 235, 0.46));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    0 0 0 3px rgba(217, 119, 87, 0.14);
+  outline: none;
 }
 
 .arcade-game-name {

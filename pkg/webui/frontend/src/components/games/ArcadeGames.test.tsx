@@ -86,7 +86,7 @@ describe('ArcadeGames', () => {
     enterUnlockSequence(input);
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Pong/ })).toHaveFocus();
+      expect(screen.getByTestId('arcade-games-modal')).toHaveFocus();
     });
 
     fireEvent.keyDown(window, { key: 'Escape' });
@@ -101,12 +101,17 @@ describe('ArcadeGames', () => {
     enterUnlockSequence();
 
     await screen.findByRole('button', { name: /Pong/ });
+    const modal = screen.getByTestId('arcade-games-modal');
     const closeButton = screen.getByText('Close');
     const lastGame = screen.getByRole('button', { name: /Flappy Bird/ });
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Pong/ })).toHaveFocus();
+      expect(modal).toHaveFocus();
     });
+
+    fireEvent.keyDown(modal, { key: 'Tab', code: 'Tab' });
+
+    expect(closeButton).toHaveFocus();
 
     closeButton.focus();
     fireEvent.keyDown(closeButton, { key: 'Tab', code: 'Tab', shiftKey: true });
