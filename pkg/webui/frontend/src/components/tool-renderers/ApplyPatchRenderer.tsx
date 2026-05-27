@@ -19,6 +19,19 @@ const stripTrailingEmptyLine = (text: string): string[] => {
 
 const buildFallbackDiff = (change: ApplyPatchChange): ReferenceDiffLine[] => {
   if (change.operation === 'add') {
+    const removed = (change.oldContent ? stripTrailingEmptyLine(change.oldContent) : []).map((line) => ({
+      kind: 'removed' as const,
+      content: line,
+    }));
+    const added = (change.newContent ? stripTrailingEmptyLine(change.newContent) : []).map((line) => ({
+      kind: 'added' as const,
+      content: line,
+    }));
+
+    return [...removed, ...added];
+  }
+
+  if (change.operation === 'write') {
     return (change.newContent ? stripTrailingEmptyLine(change.newContent) : []).map((line) => ({
       kind: 'added',
       content: line,

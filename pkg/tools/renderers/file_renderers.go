@@ -334,7 +334,7 @@ func (r *ApplyPatchRenderer) RenderCLI(result tools.StructuredToolResult) string
 		}
 		if change.Operation == tools.ApplyPatchOperationAdd && change.NewContent != "" {
 			output.WriteString("\n")
-			diff := udiff.Unified(change.Path, change.Path, "", change.NewContent)
+			diff := udiff.Unified(change.Path, change.Path, change.OldContent, change.NewContent)
 			output.WriteString(diff)
 		}
 		if change.Operation == tools.ApplyPatchOperationDelete && change.OldContent != "" {
@@ -412,7 +412,7 @@ func (r *ApplyPatchRenderer) renderMarkdown(result tools.StructuredToolResult) s
 			diff = change.UnifiedDiff
 		case tools.ApplyPatchOperationAdd:
 			if change.NewContent != "" {
-				diff = udiff.Unified(change.Path, change.Path, "", change.NewContent)
+				diff = udiff.Unified(change.Path, change.Path, change.OldContent, change.NewContent)
 			}
 		case tools.ApplyPatchOperationDelete:
 			if change.OldContent != "" {

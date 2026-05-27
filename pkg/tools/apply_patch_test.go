@@ -34,6 +34,8 @@ func TestApplyPatchTool_AddFile(t *testing.T) {
 
 	tool := &ApplyPatchTool{}
 	state := NewBasicState(context.Background())
+	require.NoError(t, tool.ValidateInput(state, params))
+
 	result := tool.Execute(context.Background(), state, params)
 
 	require.False(t, result.IsError())
@@ -50,7 +52,7 @@ func TestApplyPatchTool_AddFile(t *testing.T) {
 	assert.Equal(t, tooltypes.ApplyPatchOperationAdd, meta.Changes[0].Operation)
 }
 
-func TestApplyPatchTool_AddFileFailsWhenFileExists(t *testing.T) {
+func TestApplyPatchTool_AddFileOverwritesExistingFile(t *testing.T) {
 	tmp := t.TempDir()
 	oldWd, _ := os.Getwd()
 	defer os.Chdir(oldWd)
@@ -69,12 +71,51 @@ func TestApplyPatchTool_AddFileFailsWhenFileExists(t *testing.T) {
 	state := NewBasicState(context.Background())
 	result := tool.Execute(context.Background(), state, params)
 
-	require.True(t, result.IsError())
-	assert.Contains(t, result.GetError(), "already exists")
+	require.False(t, result.IsError())
+	assert.Contains(t, result.GetResult(), "A "+existingPath)
 
 	content, err := os.ReadFile(existingPath)
 	require.NoError(t, err)
-	assert.Equal(t, "existing\n", string(content))
+	assert.Equal(t, "new content\n", string(content))
+
+	structured := result.StructuredData()
+	var meta tooltypes.ApplyPatchMetadata
+	require.True(t, tooltypes.ExtractMetadata(structured.Metadata, &meta))
+	require.Len(t, meta.Changes, 1)
+	assert.Equal(t, tooltypes.ApplyPatchOperationAdd, meta.Changes[0].Operation)
+	assert.Equal(t, "existing\n", meta.Changes[0].OldContent)
+	assert.Equal(t, "new content\n", meta.Changes[0].NewContent)
+}
+
+func TestApplyPatchTool_DeleteThenAddSamePath(t *testing.T) {
+	tmp := t.TempDir()
+	oldWd, _ := os.Getwd()
+	defer os.Chdir(oldWd)
+	require.NoError(t, os.Chdir(tmp))
+
+	filePath := filepath.Join(tmp, "replace.txt")
+	require.NoError(t, os.WriteFile(filePath, []byte("old\n"), 0o644))
+
+	patch := `*** Begin Patch
+*** Delete File: replace.txt
+*** Add File: replace.txt
++new
+*** End Patch`
+	params := mustJSON(t, ApplyPatchInput{Input: patch})
+
+	tool := &ApplyPatchTool{}
+	state := NewBasicState(context.Background())
+	require.NoError(t, tool.ValidateInput(state, params))
+
+	result := tool.Execute(context.Background(), state, params)
+
+	require.False(t, result.IsError())
+	assert.Contains(t, result.GetResult(), "A "+filePath)
+	assert.Contains(t, result.GetResult(), "D "+filePath)
+
+	content, err := os.ReadFile(filePath)
+	require.NoError(t, err)
+	assert.Equal(t, "new\n", string(content))
 }
 
 func TestApplyPatchTool_AddEmptyFile(t *testing.T) {

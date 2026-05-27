@@ -137,7 +137,7 @@ func (t *ApplyPatchTool) ValidateInput(state tooltypes.State, parameters string)
 				if info.IsDir() {
 					return errors.Errorf("failed to add file %s: already exists and is a directory", hunk.path)
 				}
-				return errors.Errorf("failed to add file %s: already exists", hunk.path)
+				continue
 			}
 			if !os.IsNotExist(statErr) {
 				return errors.Wrapf(statErr, "failed to stat %s", hunk.path)
@@ -212,16 +212,20 @@ func applyAddHunk(state tooltypes.State, hunk parsedHunk, result *applyPatchTool
 			return errors.Wrapf(err, "failed to create parent directories for %s", hunk.path)
 		}
 	}
-	file, err := os.OpenFile(hunk.path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-	if err != nil {
-		if os.IsExist(err) {
-			return errors.Errorf("failed to add file %s: already exists", hunk.path)
-		}
-		return errors.Wrapf(err, "failed to create file %s", hunk.path)
-	}
-	defer file.Close()
 
-	if _, err := file.WriteString(hunk.contents); err != nil {
+	oldContent := ""
+	if info, err := os.Stat(hunk.path); err == nil {
+		if info.IsDir() {
+			return errors.Errorf("failed to add file %s: already exists and is a directory", hunk.path)
+		}
+		if bytes, readErr := os.ReadFile(hunk.path); readErr == nil {
+			oldContent = string(bytes)
+		}
+	} else if !os.IsNotExist(err) {
+		return errors.Wrapf(err, "failed to stat %s", hunk.path)
+	}
+
+	if err := os.WriteFile(hunk.path, []byte(hunk.contents), 0o644); err != nil {
 		return errors.Wrapf(err, "failed to write file %s", hunk.path)
 	}
 	_ = state.SetFileLastAccessed(hunk.path, time.Now())
@@ -230,6 +234,7 @@ func applyAddHunk(state tooltypes.State, hunk parsedHunk, result *applyPatchTool
 	result.changes = append(result.changes, tooltypes.ApplyPatchChange{
 		Path:       hunk.path,
 		Operation:  tooltypes.ApplyPatchOperationAdd,
+		OldContent: oldContent,
 		NewContent: hunk.contents,
 	})
 
