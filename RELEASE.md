@@ -1,8 +1,10 @@
 # Kodelet
 
-## Unreleased
+## 0.4.20-beta (2026-05-27)
 
 Refined Web UI typography and slash-command card styling so compact labels use a softer mixed-case treatment and long goal cards wrap cleanly in the transcript.
+
+`apply_patch` 'Add File' now allows regular-file overwrites and delete-then-add replacements while preserving directory safeguards.
 
 ## 0.4.18-beta (2026-05-23)
 
