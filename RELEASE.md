@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.4.22-beta (2026-05-28)
+
+Updated the recommended Anthropic setup and sample config to use Claude Opus 4.8, including refreshed SDK support, model aliases, thinking effort handling, and pricing metadata.
+
+Improved Anthropic prompt caching to use top-level automatic cache control and account for 5-minute versus 1-hour cache write costs in usage reporting.
+
+Keep goal context aligned with the persisted conversation history and avoid cache burst.
+
 ## 0.4.20-beta (2026-05-27)
 
 Refined Web UI typography and slash-command card styling so compact labels use a softer mixed-case treatment and long goal cards wrap cleanly in the transcript.
