@@ -448,59 +448,6 @@ func (t *Thread) applyCodexRestrictions(params *responses.ResponseNewParams) {
 	}
 }
 
-func appendGoalContextInputItems(inputItems []responses.ResponseInputItemUnionParam, metadata map[string]any) []responses.ResponseInputItemUnionParam {
-	goalContext, ok := goals.ContextFromMetadata(metadata)
-	if !ok {
-		return inputItems
-	}
-	if responseInputItemsContainGoalContext(inputItems, goalContext) {
-		return inputItems
-	}
-
-	goalItem := responses.ResponseInputItemUnionParam{
-		OfMessage: &responses.EasyInputMessageParam{
-			Role:    responses.EasyInputMessageRoleUser,
-			Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(goalContext)},
-		},
-	}
-	injected := make([]responses.ResponseInputItemUnionParam, 0, len(inputItems)+1)
-	injected = append(injected, inputItems...)
-	injected = append(injected, goalItem)
-	return injected
-}
-
-func responseInputItemsContainGoalContext(inputItems []responses.ResponseInputItemUnionParam, goalContext string) bool {
-	for _, item := range inputItems {
-		if responseInputItemIsGoalContext(item, goalContext) {
-			return true
-		}
-	}
-	return false
-}
-
-func responseInputItemIsGoalContext(item responses.ResponseInputItemUnionParam, goalContext string) bool {
-	if item.OfMessage == nil || item.OfMessage.Role != responses.EasyInputMessageRoleUser {
-		return false
-	}
-	return strings.TrimSpace(extractResponseInputMessageText(item.OfMessage)) == strings.TrimSpace(goalContext)
-}
-
-func extractResponseInputMessageText(message *responses.EasyInputMessageParam) string {
-	if message == nil {
-		return ""
-	}
-	if message.Content.OfString.Valid() {
-		return message.Content.OfString.Value
-	}
-	var builder strings.Builder
-	for _, part := range message.Content.OfInputItemContentList {
-		if part.OfInputText != nil {
-			builder.WriteString(part.OfInputText.Text)
-		}
-	}
-	return builder.String()
-}
-
 // processMessageExchange handles a single message exchange with the Responses API.
 func (t *Thread) processMessageExchange(
 	ctx context.Context,
@@ -533,7 +480,7 @@ func (t *Thread) processMessageExchange(
 	// not use previous_response_id here.
 	params := responses.ResponseNewParams{
 		Model:          model,
-		Input:          responses.ResponseNewParamsInputUnion{OfInputItemList: appendGoalContextInputItems(t.inputItems, t.GetMetadata())},
+		Input:          responses.ResponseNewParamsInputUnion{OfInputItemList: t.inputItems},
 		Instructions:   param.NewOpt(systemPrompt),
 		Tools:          tools,
 		Store:          param.NewOpt(false),
@@ -655,7 +602,7 @@ func (t *Thread) processMessageExchangeWithStreamRetries(
 		func() error {
 			resetPendingReasoning(&t.pendingReasoning, pendingReasoningBeforeAttempt)
 			attemptParams := params
-			attemptParams.Input = responses.ResponseNewParamsInputUnion{OfInputItemList: appendGoalContextInputItems(t.inputItems, t.GetMetadata())}
+			attemptParams.Input = responses.ResponseNewParamsInputUnion{OfInputItemList: t.inputItems}
 			t.applyCodexRestrictions(&attemptParams)
 
 			stream, err := newResponsesStream(ctx, attemptParams)

@@ -186,56 +186,6 @@ func TestOpenAIChatToolResultMessages_AppendsFollowupAfterAllToolResults(t *test
 	assert.Equal(t, openai.ImageURLDetailHigh, messages[2].MultiContent[0].ImageURL.Detail)
 }
 
-func TestAppendGoalContextChatMessagesAfterHistory(t *testing.T) {
-	metadata := map[string]any{goals.MetadataKey: goals.New("find server cores", time.Now())}
-	messages := []openai.ChatCompletionMessage{
-		{Role: openai.ChatMessageRoleSystem, Content: "system"},
-		{Role: openai.ChatMessageRoleUser, Content: "hello"},
-	}
-
-	got := appendGoalContextChatMessages(messages, metadata)
-
-	require.Len(t, got, 3)
-	assert.Equal(t, openai.ChatMessageRoleSystem, got[0].Role)
-	assert.Equal(t, "hello", got[1].Content)
-	assert.Equal(t, openai.ChatMessageRoleUser, got[2].Role)
-	assert.Contains(t, got[2].Content, "<goal_context>")
-	require.Len(t, messages, 2, "hidden goal context should not mutate source messages")
-}
-
-func TestAppendGoalContextChatMessagesDoesNotDuplicateExistingGoalContext(t *testing.T) {
-	goal := goals.New("find server cores", time.Now())
-	metadata := map[string]any{goals.MetadataKey: goal}
-	goalContext := goals.RenderContext(goal)
-	messages := []openai.ChatCompletionMessage{
-		{Role: openai.ChatMessageRoleSystem, Content: "system"},
-		{Role: openai.ChatMessageRoleUser, Content: goalContext},
-	}
-
-	got := appendGoalContextChatMessages(messages, metadata)
-
-	require.Len(t, got, 2)
-	assert.Equal(t, goalContext, got[1].Content)
-}
-
-func TestAppendGoalContextChatMessagesDoesNotDuplicateExistingMiddleGoalContext(t *testing.T) {
-	goal := goals.New("find server cores", time.Now())
-	metadata := map[string]any{goals.MetadataKey: goal}
-	goalContext := goals.RenderContext(goal)
-	messages := []openai.ChatCompletionMessage{
-		{Role: openai.ChatMessageRoleUser, Content: "hello"},
-		{Role: openai.ChatMessageRoleUser, Content: goalContext},
-		{Role: openai.ChatMessageRoleUser, Content: "follow up"},
-	}
-
-	got := appendGoalContextChatMessages(messages, metadata)
-
-	require.Len(t, got, 3)
-	assert.Equal(t, "hello", got[0].Content)
-	assert.Equal(t, goalContext, got[1].Content)
-	assert.Equal(t, "follow up", got[2].Content)
-}
-
 func TestExtractMessagesWithMultipleToolResults(t *testing.T) {
 	// Test with multiple tool calls and results
 	messagesWithMultipleToolsJSON := `[
@@ -1392,6 +1342,31 @@ func TestOpenAIProcessMessageExchangeTextResponse(t *testing.T) {
 	assert.Equal(t, 3, thread.GetUsage().OutputTokens)
 	require.Len(t, thread.messages, 2)
 	assert.Equal(t, openai.ChatMessageRoleAssistant, thread.messages[1].Role)
+}
+
+func TestOpenAIProcessMessageExchangeDoesNotInjectGoalContextFromMetadata(t *testing.T) {
+	var capturedRequest openai.ChatCompletionRequest
+	client := openai.NewClientWithConfig(openAIHTTPClientConfig(func(req *http.Request) (*http.Response, error) {
+		capturedRequest = decodeOpenAIChatRequest(t, req)
+		return jsonOpenAIResponse(http.StatusOK, `{
+			"id":"chatcmpl-test",
+			"model":"gpt-4o",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":7,"completion_tokens":3,"total_tokens":10}
+		}`), nil
+	}))
+	thread := newTestOpenAIExchangeThread(client, llm.Config{Model: "gpt-4o"})
+	thread.messages = []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: "hi"}}
+	thread.SetMetadataValue(goals.MetadataKey, goals.New("find server cores and ram", time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)))
+	handler := &captureOpenAIMessageHandler{}
+
+	_, toolsUsed, err := thread.processMessageExchange(context.Background(), handler, "gpt-4o", 64, llm.MessageOpt{DisableUsageLog: true})
+
+	require.NoError(t, err)
+	assert.False(t, toolsUsed)
+	require.Len(t, capturedRequest.Messages, 1)
+	assert.Equal(t, "hi", capturedRequest.Messages[0].Content)
+	assert.NotContains(t, capturedRequest.Messages[0].Content, "<goal_context>")
 }
 
 func TestOpenAIProcessMessageExchangeStreamingHandlerSkipsFullTextCallbacks(t *testing.T) {

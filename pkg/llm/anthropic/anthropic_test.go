@@ -3,6 +3,7 @@ package anthropic
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/goals"
@@ -25,51 +27,6 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
-
-func TestAppendGoalContextMessageAppendsHiddenUserContext(t *testing.T) {
-	metadata := map[string]any{goals.MetadataKey: goals.New("find server cores", time.Now())}
-	messages := []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("hello"))}
-
-	got := appendGoalContextMessage(messages, metadata)
-
-	require.Len(t, got, 2)
-	assert.Equal(t, anthropic.MessageParamRoleUser, got[0].Role)
-	require.NotEmpty(t, got[0].Content)
-	require.NotNil(t, got[0].Content[0].OfText)
-	assert.Equal(t, "hello", got[0].Content[0].OfText.Text)
-	assert.Contains(t, got[1].Content[0].OfText.Text, "<goal_context>")
-	require.Len(t, messages, 1, "hidden goal context should not mutate source messages")
-}
-
-func TestAppendGoalContextMessageDoesNotDuplicateExistingGoalContext(t *testing.T) {
-	goal := goals.New("find server cores", time.Now())
-	metadata := map[string]any{goals.MetadataKey: goal}
-	goalContext := goals.RenderContext(goal)
-	messages := []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(goalContext))}
-
-	got := appendGoalContextMessage(messages, metadata)
-
-	require.Len(t, got, 1)
-	assert.Equal(t, goalContext, got[0].Content[0].OfText.Text)
-}
-
-func TestAppendGoalContextMessageDoesNotDuplicateExistingMiddleGoalContext(t *testing.T) {
-	goal := goals.New("find server cores", time.Now())
-	metadata := map[string]any{goals.MetadataKey: goal}
-	goalContext := goals.RenderContext(goal)
-	messages := []anthropic.MessageParam{
-		anthropic.NewUserMessage(anthropic.NewTextBlock("hello")),
-		anthropic.NewUserMessage(anthropic.NewTextBlock(goalContext)),
-		anthropic.NewUserMessage(anthropic.NewTextBlock("follow up")),
-	}
-
-	got := appendGoalContextMessage(messages, metadata)
-
-	require.Len(t, got, 3)
-	assert.Equal(t, "hello", got[0].Content[0].OfText.Text)
-	assert.Equal(t, goalContext, got[1].Content[0].OfText.Text)
-	assert.Equal(t, "follow up", got[2].Content[0].OfText.Text)
-}
 
 func TestGetMediaTypeFromExtension(t *testing.T) {
 	tests := []struct {
@@ -208,15 +165,154 @@ func TestAnthropicThreadDeterministicHelpers(t *testing.T) {
 		anthropic.NewUserMessage(anthropic.NewTextBlock("first"), anthropic.NewToolResultBlock("toolu_old", "old", false)),
 		anthropic.NewUserMessage(anthropic.NewTextBlock("last")),
 	}
-	thread.messages[0].Content[0].OfText.CacheControl = cacheControlEphemeral5m()
-	thread.messages[0].Content[1].OfToolResult.CacheControl = cacheControlEphemeral5m()
+	thread.messages[0].Content[0].OfText.CacheControl = cacheControlEphemeralDefault()
+	thread.messages[0].Content[1].OfToolResult.CacheControl = cacheControlEphemeralDefault()
 
 	thread.cacheMessages()
 
 	assert.Empty(t, thread.messages[0].Content[0].OfText.CacheControl.Type)
 	assert.Empty(t, thread.messages[0].Content[1].OfToolResult.CacheControl.Type)
 	assert.Equal(t, "ephemeral", string(thread.messages[1].Content[0].OfText.CacheControl.Type))
-	assert.Equal(t, anthropic.CacheControlEphemeralTTLTTL5m, thread.messages[1].Content[0].OfText.CacheControl.TTL)
+	assert.Empty(t, thread.messages[1].Content[0].OfText.CacheControl.TTL)
+}
+
+func TestAnthropicPromptCachePolicyMatchesOpencodeAutoPlacement(t *testing.T) {
+	params := anthropic.MessageNewParams{
+		Tools: toAnthropicTools([]tooltypes.Tool{
+			testTool{name: "file_read"},
+			testTool{name: "bash"},
+		}, false),
+		System: []anthropic.TextBlockParam{
+			{Text: "first system"},
+			{Text: "last system"},
+		},
+		Messages: []anthropic.MessageParam{
+			anthropic.NewUserMessage(anthropic.NewTextBlock("first user")),
+			anthropic.NewAssistantMessage(anthropic.NewTextBlock("assistant")),
+			anthropic.NewUserMessage(anthropic.NewToolResultBlock("toolu_1", "tool result", false)),
+		},
+	}
+	params.Tools[0].OfTool.CacheControl = cacheControlEphemeralDefault()
+	params.System[0].CacheControl = cacheControlEphemeralDefault()
+	params.Messages[1].Content[0].OfText.CacheControl = cacheControlEphemeralDefault()
+
+	applyAnthropicPromptCachePolicy(&params)
+
+	assert.Empty(t, params.Tools[0].OfTool.CacheControl.Type)
+	assert.Equal(t, "ephemeral", string(params.Tools[1].OfTool.CacheControl.Type))
+	assert.Empty(t, params.Tools[1].OfTool.CacheControl.TTL)
+
+	assert.Empty(t, params.System[0].CacheControl.Type)
+	assert.Equal(t, "ephemeral", string(params.System[1].CacheControl.Type))
+	assert.Empty(t, params.System[1].CacheControl.TTL)
+
+	assert.Empty(t, params.Messages[0].Content[0].OfText.CacheControl.Type)
+	assert.Empty(t, params.Messages[1].Content[0].OfText.CacheControl.Type)
+	assert.Equal(t, "ephemeral", string(params.Messages[2].Content[0].OfToolResult.CacheControl.Type))
+	assert.Empty(t, params.Messages[2].Content[0].OfToolResult.CacheControl.TTL)
+}
+
+func TestAnthropicPromptCachePolicyFallsBackToLatestToolResultMessage(t *testing.T) {
+	params := anthropic.MessageNewParams{
+		Messages: []anthropic.MessageParam{
+			anthropic.NewUserMessage(anthropic.NewToolResultBlock("toolu_1", "first", false)),
+			anthropic.NewUserMessage(anthropic.NewToolResultBlock("toolu_2", "last", false)),
+		},
+	}
+
+	applyAnthropicPromptCachePolicy(&params)
+
+	assert.Empty(t, params.Messages[0].Content[0].OfToolResult.CacheControl.Type)
+	assert.Equal(t, "ephemeral", string(params.Messages[1].Content[0].OfToolResult.CacheControl.Type))
+	assert.Empty(t, params.Messages[1].Content[0].OfToolResult.CacheControl.TTL)
+}
+
+func TestAnthropicPromptCachePolicyCachesExplicitGoalContinuationMessage(t *testing.T) {
+	params := anthropic.MessageNewParams{
+		Messages: []anthropic.MessageParam{
+			anthropic.NewUserMessage(anthropic.NewTextBlock("user request")),
+			anthropic.NewUserMessage(anthropic.NewTextBlock(goals.RenderContext(goals.New("finish task", time.Now())))),
+		},
+	}
+
+	applyAnthropicPromptCachePolicy(&params)
+
+	assert.Empty(t, params.Messages[0].Content[0].OfText.CacheControl.Type)
+	assert.Equal(t, "ephemeral", string(params.Messages[1].Content[0].OfText.CacheControl.Type))
+}
+
+func TestAnthropicPromptCachePolicySkipsEmptyTextBlocks(t *testing.T) {
+	params := anthropic.MessageNewParams{
+		System: []anthropic.TextBlockParam{
+			{Text: "cacheable system"},
+			{Text: "   "},
+		},
+		Messages: []anthropic.MessageParam{
+			anthropic.NewUserMessage(
+				anthropic.NewTextBlock("cacheable user"),
+				anthropic.NewTextBlock("   "),
+			),
+		},
+	}
+
+	applyAnthropicPromptCachePolicy(&params)
+
+	assert.Equal(t, "ephemeral", string(params.System[0].CacheControl.Type))
+	assert.Empty(t, params.System[1].CacheControl.Type)
+	assert.Equal(t, "ephemeral", string(params.Messages[0].Content[0].OfText.CacheControl.Type))
+	assert.Empty(t, params.Messages[0].Content[1].OfText.CacheControl.Type)
+}
+
+func TestAnthropicProcessMessageExchangeDoesNotInjectGoalContextFromMetadata(t *testing.T) {
+	var capturedRequest struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"messages"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.NoError(t, r.Body.Close())
+		require.NoError(t, json.Unmarshal(data, &capturedRequest))
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: message_start\n" +
+			`data: {"type":"message_start","message":{"id":"msg_test","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}` + "\n\n" +
+			"event: content_block_start\n" +
+			`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}` + "\n\n" +
+			"event: content_block_delta\n" +
+			`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"done"}}` + "\n\n" +
+			"event: content_block_stop\n" +
+			`data: {"type":"content_block_stop","index":0}` + "\n\n" +
+			"event: message_delta\n" +
+			`data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":1,"output_tokens":1}}` + "\n\n" +
+			"event: message_stop\n" +
+			`data: {"type":"message_stop"}` + "\n\n"))
+	}))
+	defer server.Close()
+
+	thread := &Thread{
+		Thread: base.NewThread(llmtypes.Config{Provider: "anthropic", Model: "claude-sonnet-4-6"}, "conv-test", hooks.Trigger{}),
+		client: anthropic.NewClient(
+			option.WithBaseURL(server.URL),
+			option.WithAPIKey("test-key"),
+		),
+		messages: []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("hello"))},
+	}
+	thread.SetMetadataValue(goals.MetadataKey, goals.New("find server cores and ram", time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)))
+
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
+	_, _, err := thread.processMessageExchange(context.Background(), handler, "claude-sonnet-4-6", 256, "system", llmtypes.MessageOpt{NoToolUse: true, DisableUsageLog: true})
+	require.NoError(t, err)
+
+	require.Len(t, capturedRequest.Messages, 1)
+	require.Len(t, capturedRequest.Messages[0].Content, 1)
+	assert.Equal(t, "hello", capturedRequest.Messages[0].Content[0].Text)
+	assert.NotContains(t, capturedRequest.Messages[0].Content[0].Text, "<goal_context>")
 }
 
 func TestAnthropicToolResultBlockUsesMultimodalPartsWhenAvailable(t *testing.T) {

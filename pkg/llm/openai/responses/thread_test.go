@@ -2136,7 +2136,7 @@ func TestProcessMessageExchangeMirrorsCodexPromptCachingRequestShape(t *testing.
 	assert.False(t, capturedParams.Store.Value, "should mirror Codex by disabling stored conversation state")
 }
 
-func TestProcessMessageExchangeInjectsGoalContextWithoutPersisting(t *testing.T) {
+func TestProcessMessageExchangeDoesNotInjectGoalContextFromMetadata(t *testing.T) {
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
 	thread := &Thread{
 		Thread: base.NewThread(config, "conv-test", hooks.Trigger{}),
@@ -2165,14 +2165,11 @@ func TestProcessMessageExchangeInjectsGoalContextWithoutPersisting(t *testing.T)
 	_, _, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-4.1", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
 	require.NoError(t, err)
 
-	require.Len(t, capturedParams.Input.OfInputItemList, 2)
+	require.Len(t, capturedParams.Input.OfInputItemList, 1)
 	assert.Equal(t, "hello", extractInputItemText(capturedParams.Input.OfInputItemList[0]))
-	assert.Equal(t, openairesponses.EasyInputMessageRoleUser, capturedParams.Input.OfInputItemList[1].OfMessage.Role)
-	assert.Contains(t, extractInputItemText(capturedParams.Input.OfInputItemList[1]), "<goal_context>")
-	assert.Contains(t, extractInputItemText(capturedParams.Input.OfInputItemList[1]), "find server cores and ram")
-
-	require.Len(t, thread.inputItems, 1, "hidden goal context should not be persisted in live input history")
-	require.Len(t, thread.storedItems, 1, "hidden goal context should not be persisted in stored history")
+	assert.NotContains(t, extractInputItemText(capturedParams.Input.OfInputItemList[0]), "<goal_context>")
+	require.Len(t, thread.inputItems, 1)
+	require.Len(t, thread.storedItems, 1)
 }
 
 func TestProcessMessageExchangeDoesNotDuplicatePersistedGoalContext(t *testing.T) {

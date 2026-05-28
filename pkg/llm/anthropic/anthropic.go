@@ -47,10 +47,9 @@ type Thread struct {
 	useCopilot      bool   // Whether using GitHub Copilot Anthropic-compatible API
 }
 
-func cacheControlEphemeral5m() anthropic.CacheControlEphemeralParam {
+func cacheControlEphemeralDefault() anthropic.CacheControlEphemeralParam {
 	return anthropic.CacheControlEphemeralParam{
 		Type: "ephemeral",
-		TTL:  anthropic.CacheControlEphemeralTTLTTL5m,
 	}
 }
 
@@ -235,42 +234,96 @@ func (t *Thread) userImageContentBlocks(ctx context.Context, imagePaths []string
 }
 
 func (t *Thread) cacheMessages() {
-	cacheControl := cacheControlEphemeral5m()
+	t.messages = cacheLatestUserMessage(t.messages)
+}
+
+func applyAnthropicPromptCachePolicy(params *anthropic.MessageNewParams) {
+	params.Tools = cacheLastToolDefinition(params.Tools)
+	params.System = cacheLastSystemPart(params.System)
+	params.Messages = cacheLatestUserMessage(params.Messages)
+}
+
+func cacheLastToolDefinition(tools []anthropic.ToolUnionParam) []anthropic.ToolUnionParam {
+	noCacheControl := anthropic.CacheControlEphemeralParam{}
+	for i := range tools {
+		if cacheControl := tools[i].GetCacheControl(); cacheControl != nil {
+			*cacheControl = noCacheControl
+		}
+	}
+	if len(tools) == 0 {
+		return tools
+	}
+	cacheControlField := tools[len(tools)-1].GetCacheControl()
+	if cacheControlField == nil {
+		return tools
+	}
+	*cacheControlField = cacheControlEphemeralDefault()
+	return tools
+}
+
+func cacheLastSystemPart(system []anthropic.TextBlockParam) []anthropic.TextBlockParam {
+	noCacheControl := anthropic.CacheControlEphemeralParam{}
+	for i := range system {
+		system[i].CacheControl = noCacheControl
+	}
+	for i := len(system) - 1; i >= 0; i-- {
+		if strings.TrimSpace(system[i].Text) == "" {
+			continue
+		}
+		system[i].CacheControl = cacheControlEphemeralDefault()
+		break
+	}
+	return system
+}
+
+func cacheLatestUserMessage(messages []anthropic.MessageParam) []anthropic.MessageParam {
 	noCacheControl := anthropic.CacheControlEphemeralParam{}
 
-	// Clear all existing cache controls from user messages
-	for msgIdx, msg := range t.messages {
+	// Clear all existing cache controls from messages before applying the policy.
+	for msgIdx, msg := range messages {
 		for blkIdx, block := range msg.Content {
-			switch {
-			case block.OfText != nil:
-				block.OfText.CacheControl = noCacheControl
-			case block.OfImage != nil:
-				block.OfImage.CacheControl = noCacheControl
-			case block.OfToolResult != nil:
-				block.OfToolResult.CacheControl = noCacheControl
+			if cacheControl := block.GetCacheControl(); cacheControl != nil {
+				*cacheControl = noCacheControl
 			}
-			t.messages[msgIdx].Content[blkIdx] = block
+			messages[msgIdx].Content[blkIdx] = block
 		}
 	}
 
-	// Set cache control on the last content block of the last user message
-	if len(t.messages) > 0 {
-		lastMsgIdx := len(t.messages) - 1
-		lastMsg := t.messages[lastMsgIdx]
-		if len(lastMsg.Content) > 0 {
-			lastBlkIdx := len(lastMsg.Content) - 1
-			lastBlock := lastMsg.Content[lastBlkIdx]
-			switch {
-			case lastBlock.OfText != nil:
-				lastBlock.OfText.CacheControl = cacheControl
-			case lastBlock.OfImage != nil:
-				lastBlock.OfImage.CacheControl = cacheControl
-			case lastBlock.OfToolResult != nil:
-				lastBlock.OfToolResult.CacheControl = cacheControl
-			}
-			t.messages[lastMsgIdx].Content[lastBlkIdx] = lastBlock
+	// Set cache control on the last content block of the latest Anthropic user
+	// message. Anthropic represents tool_result messages as role=user, so this keeps
+	// the growing tool-loop transcript cached as the conversation advances.
+	for msgIdx := len(messages) - 1; msgIdx >= 0; msgIdx-- {
+		msg := messages[msgIdx]
+		if msg.Role != anthropic.MessageParamRoleUser || len(msg.Content) == 0 {
+			continue
 		}
+		lastBlkIdx := lastCacheableContentBlockIndex(msg.Content)
+		if lastBlkIdx == -1 {
+			continue
+		}
+		lastBlock := msg.Content[lastBlkIdx]
+		if cacheControlField := lastBlock.GetCacheControl(); cacheControlField != nil {
+			*cacheControlField = cacheControlEphemeralDefault()
+		}
+		messages[msgIdx].Content[lastBlkIdx] = lastBlock
+		return messages
 	}
+
+	return messages
+}
+
+func lastCacheableContentBlockIndex(content []anthropic.ContentBlockParamUnion) int {
+	for i := len(content) - 1; i >= 0; i-- {
+		block := content[i]
+		if block.GetCacheControl() == nil {
+			continue
+		}
+		if block.OfText != nil && strings.TrimSpace(block.OfText.Text) == "" {
+			continue
+		}
+		return i
+	}
+	return -1
 }
 
 // SendMessage sends a message to the LLM and processes the response
@@ -333,11 +386,6 @@ OUTER:
 					WithField("max_turns", maxTurns).
 					Warn("reached maximum turn limit, stopping interaction")
 				break OUTER
-			}
-
-			// Cache messages before each exchange (if enabled)
-			if opt.PromptCache {
-				t.cacheMessages()
 			}
 
 			// Check if auto-compact should be triggered before each exchange
@@ -566,10 +614,7 @@ func (t *Thread) processMessageExchange(
 	if t.useSubscription {
 		systemPromptBlocks = append(systemPromptBlocks, auth.AnthropicSystemPrompt()...)
 	}
-	systemPromptBlocks = append(systemPromptBlocks, anthropic.TextBlockParam{
-		Text:         systemPrompt,
-		CacheControl: cacheControlEphemeral5m(),
-	})
+	systemPromptBlocks = append(systemPromptBlocks, anthropic.TextBlockParam{Text: systemPrompt})
 
 	if err := t.validateThinkingConfigForModel(model); err != nil {
 		return "", false, err
@@ -579,7 +624,7 @@ func (t *Thread) processMessageExchange(
 	messageParams := anthropic.MessageNewParams{
 		MaxTokens: int64(maxTokens),
 		System:    systemPromptBlocks,
-		Messages:  appendGoalContextMessage(t.messages, t.GetMetadata()),
+		Messages:  t.messages,
 		Model:     model,
 		Tools:     toAnthropicTools(t.tools(opt), t.useSubscription),
 	}
@@ -594,6 +639,9 @@ func (t *Thread) processMessageExchange(
 		if err := t.processPendingSteer(ctx, &messageParams, handler); err != nil {
 			return "", false, errors.Wrap(err, "failed to process pending steer")
 		}
+	}
+	if opt.PromptCache {
+		applyAnthropicPromptCachePolicy(&messageParams)
 	}
 
 	// Add a tracing event for API call start
@@ -693,37 +741,6 @@ func (t *Thread) processMessageExchange(
 
 	// Return whether tools were used in this exchange
 	return finalOutput, toolUseCount > 0, nil
-}
-
-func appendGoalContextMessage(messages []anthropic.MessageParam, metadata map[string]any) []anthropic.MessageParam {
-	goalContext, ok := goals.ContextFromMetadata(metadata)
-	if !ok {
-		return messages
-	}
-	if anthropicMessagesContainGoalContext(messages, goalContext) {
-		return messages
-	}
-
-	injected := make([]anthropic.MessageParam, 0, len(messages)+1)
-	injected = append(injected, messages...)
-	injected = append(injected, anthropic.NewUserMessage(anthropic.NewTextBlock(goalContext)))
-	return injected
-}
-
-func anthropicMessagesContainGoalContext(messages []anthropic.MessageParam, goalContext string) bool {
-	for _, message := range messages {
-		if anthropicMessageIsGoalContext(message, goalContext) {
-			return true
-		}
-	}
-	return false
-}
-
-func anthropicMessageIsGoalContext(message anthropic.MessageParam, goalContext string) bool {
-	if message.Role != anthropic.MessageParamRoleUser || len(message.Content) != 1 || message.Content[0].OfText == nil {
-		return false
-	}
-	return strings.TrimSpace(message.Content[0].OfText.Text) == strings.TrimSpace(goalContext)
 }
 
 func anthropicToolResultBlock(toolUseID string, result tooltypes.ToolResult) anthropic.ContentBlockParamUnion {
