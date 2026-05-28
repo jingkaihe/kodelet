@@ -16,7 +16,7 @@ func recommendedSetupConfigYAML() string {
     opus-48: claude-opus-4-8
     sonnet-46: claude-sonnet-4-6
 disable_fs_search_tools: true
-max_tokens: 16000
+max_tokens: 128000
 model: gpt-5.5
 openai:
     api_mode: responses
@@ -30,7 +30,7 @@ profiles:
     openai:
         disable_fs_search_tools: true
         tool_mode: patch
-        max_tokens: 16000
+        max_tokens: 128000
         model: gpt-5.5
         openai:
             api_mode: responses

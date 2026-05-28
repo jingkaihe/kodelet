@@ -28,6 +28,7 @@ func TestRecommendedSetupConfigYAML_OpenAIProfilesUsePatchMode(t *testing.T) {
 	assert.Equal(t, "patch", openAIProfile["tool_mode"])
 	assert.Equal(t, true, openAIProfile["disable_fs_search_tools"])
 	assert.Equal(t, "openai", openAIProfile["provider"])
+	assert.Equal(t, 128000, openAIProfile["max_tokens"])
 
 	anthropicProfile, ok := config.Profiles["anthropic"]
 	require.True(t, ok)
