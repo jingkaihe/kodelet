@@ -337,7 +337,16 @@ func TestCacheCreationCostFallsBackToLegacyAggregateTokens(t *testing.T) {
 
 func TestNewAnthropicThreadCopilotUsesConfiguredBaseURL(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("ANTHROPIC_CONFIG_DIR", t.TempDir())
 	t.Setenv("ANTHROPIC_BASE_URL", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+	t.Setenv("ANTHROPIC_PROFILE", "")
+	t.Setenv("ANTHROPIC_FEDERATION_RULE_ID", "")
+	t.Setenv("ANTHROPIC_ORGANIZATION_ID", "")
+	t.Setenv("ANTHROPIC_IDENTITY_TOKEN_FILE", "")
+	t.Setenv("ANTHROPIC_IDENTITY_TOKEN", "")
 
 	_, err := auth.SaveCopilotCredentials(&auth.CopilotCredentials{
 		AccessToken:    "github-access-token",

@@ -90,7 +90,7 @@ func NewAnthropicThread(config llmtypes.Config) (*Thread, error) {
 		config.ReasoningEffort = "medium"
 	}
 
-	opts := []option.RequestOption{}
+	opts := []option.RequestOption{option.WithoutEnvironmentDefaults()}
 
 	logger := logger.G(context.Background())
 	var client anthropic.Client
