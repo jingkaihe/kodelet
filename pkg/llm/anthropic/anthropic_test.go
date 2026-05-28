@@ -1049,6 +1049,20 @@ func TestAnthropicReasoningEffortForModel(t *testing.T) {
 			ok:         true,
 		},
 		{
+			name:       "xhigh is preserved on opus 4.8",
+			model:      anthropic.ModelClaudeOpus4_8,
+			configured: "xhigh",
+			expected:   anthropic.OutputConfigEffortXhigh,
+			ok:         true,
+		},
+		{
+			name:       "xhigh falls back to high on opus 4.6",
+			model:      anthropic.ModelClaudeOpus4_6,
+			configured: "xhigh",
+			expected:   anthropic.OutputConfigEffortHigh,
+			ok:         true,
+		},
+		{
 			name:       "xhigh falls back to high on sonnet 4.6",
 			model:      anthropic.ModelClaudeSonnet4_6,
 			configured: "xhigh",

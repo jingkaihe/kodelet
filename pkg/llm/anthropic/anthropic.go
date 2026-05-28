@@ -849,7 +849,7 @@ func anthropicReasoningEffortForModel(model anthropic.Model, configured string) 
 	case "high":
 		return anthropic.OutputConfigEffortHigh, true
 	case "xhigh":
-		if model == anthropic.ModelClaudeOpus4_7 {
+		if isXhighEffortModel(model) {
 			return anthropic.OutputConfigEffortXhigh, true
 		}
 		return anthropic.OutputConfigEffortHigh, true
@@ -870,6 +870,15 @@ func isAdaptiveThinkingModel(model anthropic.Model) bool {
 	}
 
 	return slices.Contains(adaptiveThinkingModels, model)
+}
+
+func isXhighEffortModel(model anthropic.Model) bool {
+	xhighEffortModels := []anthropic.Model{
+		anthropic.ModelClaudeOpus4_8,
+		anthropic.ModelClaudeOpus4_7,
+	}
+
+	return slices.Contains(xhighEffortModels, model)
 }
 
 func isThinkingModel(model anthropic.Model) bool {
