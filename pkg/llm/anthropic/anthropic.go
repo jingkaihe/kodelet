@@ -47,6 +47,13 @@ type Thread struct {
 	useCopilot      bool   // Whether using GitHub Copilot Anthropic-compatible API
 }
 
+func cacheControlEphemeral5m() anthropic.CacheControlEphemeralParam {
+	return anthropic.CacheControlEphemeralParam{
+		Type: "ephemeral",
+		TTL:  anthropic.CacheControlEphemeralTTLTTL5m,
+	}
+}
+
 // Provider returns the provider name for this thread
 func (t *Thread) Provider() string {
 	return "anthropic"
@@ -228,7 +235,7 @@ func (t *Thread) userImageContentBlocks(ctx context.Context, imagePaths []string
 }
 
 func (t *Thread) cacheMessages() {
-	cacheControl := anthropic.CacheControlEphemeralParam{Type: "ephemeral"}
+	cacheControl := cacheControlEphemeral5m()
 	noCacheControl := anthropic.CacheControlEphemeralParam{}
 
 	// Clear all existing cache controls from user messages
@@ -560,10 +567,8 @@ func (t *Thread) processMessageExchange(
 		systemPromptBlocks = append(systemPromptBlocks, auth.AnthropicSystemPrompt()...)
 	}
 	systemPromptBlocks = append(systemPromptBlocks, anthropic.TextBlockParam{
-		Text: systemPrompt,
-		CacheControl: anthropic.CacheControlEphemeralParam{
-			Type: "ephemeral",
-		},
+		Text:         systemPrompt,
+		CacheControl: cacheControlEphemeral5m(),
 	})
 
 	if err := t.validateThinkingConfigForModel(model); err != nil {
@@ -935,6 +940,7 @@ func anthropicReasoningEffortForModel(model anthropic.Model, configured string) 
 
 func isAdaptiveThinkingModel(model anthropic.Model) bool {
 	adaptiveThinkingModels := []anthropic.Model{
+		anthropic.ModelClaudeOpus4_8,
 		anthropic.ModelClaudeOpus4_7,
 		anthropic.ModelClaudeMythosPreview,
 		anthropic.ModelClaudeOpus4_6,
@@ -957,6 +963,7 @@ func isThinkingModel(model anthropic.Model) bool {
 		anthropic.ModelClaudeSonnet4_5_20250929,
 		anthropic.ModelClaudeSonnet4_6,
 		// opus 4 models
+		anthropic.ModelClaudeOpus4_8,
 		anthropic.ModelClaudeOpus4_7,
 		anthropic.ModelClaudeOpus4_1,
 		anthropic.ModelClaudeOpus4_1_20250805,
@@ -1165,22 +1172,25 @@ func (t *Thread) updateUsage(response *anthropic.Message, model anthropic.Model)
 	// Calculate costs based on model pricing
 	pricing := getModelPricing(model)
 
-	// showing the usage regardless of subscription
-	var (
-		inputPricing         = pricing.Input
-		outputPricing        = pricing.Output
-		cacheCreationPricing = pricing.PromptCachingWrite
-		cacheReadPricing     = pricing.PromptCachingRead
-	)
-
-	// Calculate individual costs
-	t.Usage.InputCost += float64(response.Usage.InputTokens) * inputPricing
-	t.Usage.OutputCost += float64(response.Usage.OutputTokens) * outputPricing
-	t.Usage.CacheCreationCost += float64(response.Usage.CacheCreationInputTokens) * cacheCreationPricing
-	t.Usage.CacheReadCost += float64(response.Usage.CacheReadInputTokens) * cacheReadPricing
+	// Calculate individual costs and show usage regardless of subscription.
+	t.Usage.InputCost += float64(response.Usage.InputTokens) * pricing.Input
+	t.Usage.OutputCost += float64(response.Usage.OutputTokens) * pricing.Output
+	t.Usage.CacheCreationCost += cacheCreationCost(response.Usage, pricing)
+	t.Usage.CacheReadCost += float64(response.Usage.CacheReadInputTokens) * pricing.PromptCachingRead
 
 	t.Usage.CurrentContextWindow = int(response.Usage.InputTokens) + int(response.Usage.OutputTokens) + int(response.Usage.CacheCreationInputTokens) + int(response.Usage.CacheReadInputTokens)
 	t.Usage.MaxContextWindow = pricing.ContextWindow
+}
+
+func cacheCreationCost(usage anthropic.Usage, pricing ModelPricing) float64 {
+	cacheCreation5mTokens := usage.CacheCreation.Ephemeral5mInputTokens
+	cacheCreation1hTokens := usage.CacheCreation.Ephemeral1hInputTokens
+	if cacheCreation5mTokens == 0 && cacheCreation1hTokens == 0 {
+		cacheCreation5mTokens = usage.CacheCreationInputTokens
+	}
+
+	return float64(cacheCreation5mTokens)*pricing.PromptCachingWrite5m +
+		float64(cacheCreation1hTokens)*pricing.PromptCachingWrite1h
 }
 
 func (t *Thread) runUtilityPrompt(ctx context.Context, prompt string, useWeakModel bool) (string, error) {

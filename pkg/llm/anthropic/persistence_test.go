@@ -135,7 +135,7 @@ func TestDeserializeMessages(t *testing.T) {
 	assert.Equal(t, anthropic.MessageParamRoleUser, messages[0].Role)
 	assert.Equal(t, "ls -la", messages[0].Content[0].OfText.Text)
 	assert.Equal(t, "text", *messages[0].Content[0].GetType())
-	assert.Equal(t, anthropic.CacheControlEphemeralParam{Type: "ephemeral"}, messages[0].Content[0].OfText.CacheControl)
+	assert.Equal(t, "ephemeral", string(messages[0].Content[0].OfText.CacheControl.Type))
 
 	assert.Equal(t, anthropic.MessageParamRoleAssistant, thread.messages[1].Role)
 	assert.Equal(t, "I'll list all files in the current directory with detailed information.", thread.messages[1].Content[0].OfText.Text)

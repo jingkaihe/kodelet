@@ -4,7 +4,7 @@ go 1.26.2
 
 require (
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
-	github.com/anthropics/anthropic-sdk-go v1.37.0
+	github.com/anthropics/anthropic-sdk-go v1.46.0
 	github.com/avast/retry-go/v4 v4.6.1
 	github.com/aymanbagabas/go-udiff v0.2.0
 	github.com/creack/pty v1.1.24
@@ -68,6 +68,7 @@ require (
 	github.com/sourcegraph/conc v0.3.0 // indirect
 	github.com/spf13/afero v1.12.0 // indirect
 	github.com/spf13/cast v1.7.1 // indirect
+	github.com/standard-webhooks/standard-webhooks/libraries v0.0.1 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect

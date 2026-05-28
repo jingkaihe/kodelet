@@ -13,7 +13,7 @@ import (
 func recommendedSetupConfigYAML() string {
 	return `aliases:
     haiku-45: claude-haiku-4-5-20251001
-    opus-47: claude-opus-4-7
+    opus-48: claude-opus-4-8
     sonnet-46: claude-sonnet-4-6
 disable_fs_search_tools: true
 max_tokens: 16000
@@ -40,7 +40,7 @@ profiles:
     anthropic:
         disable_fs_search_tools: false
         max_tokens: 64000
-        model: opus-47
+        model: opus-48
         provider: anthropic
         reasoning_effort: max
         tool_mode: full

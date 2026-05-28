@@ -785,6 +785,7 @@ profile: "anthropic"  # Optional: specify the active profile
 # Profile definitions
 profiles:
   anthropic:
+    model: "opus-48" # alias to "claude-opus-4-8"
     weak_model: "sonnet-46" # alias to "claude-sonnet-4-6"
     max_tokens: 64000
     weak_model_max_tokens: 8192
@@ -822,7 +823,7 @@ profiles:
 # Model aliases work across all profiles
 aliases:
     haiku-45: claude-haiku-4-5-20251001
-    opus-47: claude-opus-4-7
+    opus-48: claude-opus-4-8
     sonnet-46: claude-sonnet-4-6
 ```
 

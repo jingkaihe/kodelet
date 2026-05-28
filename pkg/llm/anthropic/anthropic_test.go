@@ -208,14 +208,15 @@ func TestAnthropicThreadDeterministicHelpers(t *testing.T) {
 		anthropic.NewUserMessage(anthropic.NewTextBlock("first"), anthropic.NewToolResultBlock("toolu_old", "old", false)),
 		anthropic.NewUserMessage(anthropic.NewTextBlock("last")),
 	}
-	thread.messages[0].Content[0].OfText.CacheControl = anthropic.CacheControlEphemeralParam{Type: "ephemeral"}
-	thread.messages[0].Content[1].OfToolResult.CacheControl = anthropic.CacheControlEphemeralParam{Type: "ephemeral"}
+	thread.messages[0].Content[0].OfText.CacheControl = cacheControlEphemeral5m()
+	thread.messages[0].Content[1].OfToolResult.CacheControl = cacheControlEphemeral5m()
 
 	thread.cacheMessages()
 
 	assert.Empty(t, thread.messages[0].Content[0].OfText.CacheControl.Type)
 	assert.Empty(t, thread.messages[0].Content[1].OfToolResult.CacheControl.Type)
 	assert.Equal(t, "ephemeral", string(thread.messages[1].Content[0].OfText.CacheControl.Type))
+	assert.Equal(t, anthropic.CacheControlEphemeralTTLTTL5m, thread.messages[1].Content[0].OfText.CacheControl.TTL)
 }
 
 func TestAnthropicToolResultBlockUsesMultimodalPartsWhenAvailable(t *testing.T) {
@@ -253,12 +254,46 @@ func TestAnthropicToolResultBlockFallsBackToAssistantFacing(t *testing.T) {
 func TestGetModelPricingMatchesFamiliesAndDefault(t *testing.T) {
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeSonnet4_6], getModelPricing(anthropic.ModelClaudeSonnet4_6))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeSonnet4_5], getModelPricing("claude-sonnet-4-5-latest"))
+	assert.Equal(t, ModelPricingMap[modelClaudeSonnet4_0], getModelPricing("claude-sonnet-4-20250514"))
+	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeOpus4_8], getModelPricing("claude-opus-4-8-latest"))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeOpus4_7], getModelPricing("claude-opus-4-7-latest"))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeOpus4_6], getModelPricing("claude-opus-4-6-custom"))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeOpus4_5_20251101], getModelPricing("claude-opus-4-5-custom"))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeOpus4_1_20250805], getModelPricing("claude-opus-4-1-custom"))
+	assert.Equal(t, ModelPricingMap[modelClaudeOpus4_0], getModelPricing("claude-opus-4-20250514"))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeHaiku4_5], getModelPricing("claude-haiku-4-5-custom"))
+	assert.Equal(t, ModelPricingMap[modelClaude35Haiku], getModelPricing("claude-3-5-haiku-20241022"))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeSonnet4_6], getModelPricing("unknown-model"))
+}
+
+func TestOpus47PricingMatchesScreenshot(t *testing.T) {
+	pricing := ModelPricingMap[anthropic.ModelClaudeOpus4_7]
+
+	assert.Equal(t, 0.000005, pricing.Input)
+	assert.Equal(t, 0.00000625, pricing.PromptCachingWrite5m)
+	assert.Equal(t, 0.00001, pricing.PromptCachingWrite1h)
+	assert.Equal(t, 0.0000005, pricing.PromptCachingRead)
+	assert.Equal(t, 0.000025, pricing.Output)
+}
+
+func TestCacheCreationCostUsesTTLBreakdown(t *testing.T) {
+	pricing := ModelPricingMap[anthropic.ModelClaudeOpus4_7]
+	usage := anthropic.Usage{
+		CacheCreationInputTokens: 300,
+		CacheCreation: anthropic.CacheCreation{
+			Ephemeral5mInputTokens: 100,
+			Ephemeral1hInputTokens: 200,
+		},
+	}
+
+	assert.Equal(t, (100*pricing.PromptCachingWrite5m)+(200*pricing.PromptCachingWrite1h), cacheCreationCost(usage, pricing))
+}
+
+func TestCacheCreationCostFallsBackToLegacyAggregateTokens(t *testing.T) {
+	pricing := ModelPricingMap[anthropic.ModelClaudeOpus4_7]
+	usage := anthropic.Usage{CacheCreationInputTokens: 300}
+
+	assert.Equal(t, 300*pricing.PromptCachingWrite5m, cacheCreationCost(usage, pricing))
 }
 
 func TestNewAnthropicThreadCopilotUsesConfiguredBaseURL(t *testing.T) {
@@ -829,6 +864,11 @@ func TestIsThinkingModel(t *testing.T) {
 		model    anthropic.Model
 		expected bool
 	}{
+		{
+			name:     "opus 4.8 supports thinking",
+			model:    anthropic.ModelClaudeOpus4_8,
+			expected: true,
+		},
 		{
 			name:     "mythos preview supports thinking",
 			model:    anthropic.ModelClaudeMythosPreview,

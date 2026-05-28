@@ -46,7 +46,7 @@ sysprompt_args: {}
 aliases:
   sonnet-46: "claude-sonnet-4-6"
   haiku-45: "claude-haiku-4-5-20251001"
-  opus-47: "claude-opus-4-7"
+  opus-48: "claude-opus-4-8"
 
 # Active profile selection (uncomment to activate a specific profile)
 # profile: "anthropic"
@@ -55,7 +55,7 @@ aliases:
 # Each profile can override any configuration setting
 profiles:
   anthropic:
-    model: "claude-opus-4-7"
+    model: "claude-opus-4-8"
     weak_model: "claude-sonnet-4-6"
     max_tokens: 64000
     weak_model_max_tokens: 8192

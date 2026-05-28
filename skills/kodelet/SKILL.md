@@ -494,7 +494,7 @@ Example `config.yaml`:
 ```yaml
 aliases:
     haiku-45: claude-haiku-4-5-20251001
-    opus-47: claude-opus-4-7
+    opus-48: claude-opus-4-8
     sonnet-46: claude-sonnet-4-6
 max_tokens: 16000
 model: sonnet-46
@@ -529,7 +529,7 @@ profiles:
         weak_model: gpt-5
     anthropic:
         max_tokens: 64000
-        model: opus-47
+        model: opus-48
         reasoning_effort: max
         weak_model: sonnet-46
         weak_model_max_tokens: 8192

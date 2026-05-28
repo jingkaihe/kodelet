@@ -15,11 +15,13 @@ import (
 
 func TestRecommendedSetupConfigYAML_OpenAIProfilesUsePatchMode(t *testing.T) {
 	var config struct {
+		Aliases  map[string]string         `yaml:"aliases"`
 		Profiles map[string]map[string]any `yaml:"profiles"`
 	}
 
 	err := yaml.Unmarshal([]byte(recommendedSetupConfigYAML()), &config)
 	require.NoError(t, err)
+	assert.Equal(t, "claude-opus-4-8", config.Aliases["opus-48"])
 
 	openAIProfile, ok := config.Profiles["openai"]
 	require.True(t, ok)
@@ -33,6 +35,7 @@ func TestRecommendedSetupConfigYAML_OpenAIProfilesUsePatchMode(t *testing.T) {
 	assert.Equal(t, "full", anthropicProfile["tool_mode"])
 	assert.Equal(t, false, anthropicProfile["disable_fs_search_tools"])
 	assert.Equal(t, 64000, anthropicProfile["max_tokens"])
+	assert.Equal(t, "opus-48", anthropicProfile["model"])
 	assert.Equal(t, "max", anthropicProfile["reasoning_effort"])
 }
 
