@@ -146,7 +146,7 @@ run = [
 description = "Run TypeScript SDK typecheck and tests"
 run = [
   "echo 'Running extension SDK checks...'",
-  "cd sdk && npm run typecheck && npm test",
+  "cd sdk && npm run typecheck && npm run build && npm test && npm pack --dry-run",
 ]
 
 [tasks.frontend-storybook]
@@ -234,8 +234,10 @@ description = "Install all dependencies (Go modules and npm packages)"
 run = [
   "echo 'Installing Go modules...'",
   "go mod download",
-  "echo 'Installing npm dependencies...'",
+  "echo 'Installing frontend npm dependencies...'",
   "cd pkg/webui/frontend && npm install",
+  "echo 'Installing TypeScript SDK npm dependencies...'",
+  "cd sdk && npm install",
   "echo 'All dependencies installed successfully!'",
 ]
 

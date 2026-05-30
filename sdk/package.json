@@ -1,7 +1,6 @@
 {
   "name": "@jingkaihe/kodelet",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.4.22-beta",
   "description": "TypeScript SDK for authoring Kodelet extensions",
   "type": "module",
   "main": "./dist/index.js",
@@ -41,5 +40,14 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jingkaihe/kodelet.git",
+    "directory": "sdk"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

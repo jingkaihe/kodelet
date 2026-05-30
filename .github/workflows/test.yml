@@ -40,6 +40,9 @@ jobs:
       - name: Test Go code
         run: mise run test
 
+      - name: Test TypeScript SDK
+        run: mise run sdk-test
+
       - name: Lint frontend (Biome)
         run: mise run frontend-lint
 
