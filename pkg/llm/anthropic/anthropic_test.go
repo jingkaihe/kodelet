@@ -162,7 +162,7 @@ func TestAnthropicThreadDeterministicHelpers(t *testing.T) {
 	assert.True(t, isMessageToolUse(anthropic.NewAssistantMessage(anthropic.NewToolUseBlock("toolu_1", map[string]any{"command": "pwd"}, "bash"))))
 }
 
-func TestAnthropicPromptCachePolicyUsesTopLevelAutomaticCaching(t *testing.T) {
+func TestAnthropicPromptCachePolicyUsesExplicitBreakpoints(t *testing.T) {
 	params := anthropic.MessageNewParams{
 		Tools: toAnthropicTools([]tooltypes.Tool{
 			testTool{name: "file_read"},
@@ -178,29 +178,64 @@ func TestAnthropicPromptCachePolicyUsesTopLevelAutomaticCaching(t *testing.T) {
 			anthropic.NewUserMessage(anthropic.NewToolResultBlock("toolu_1", "tool result", false)),
 		},
 	}
+	params.Tools[0].OfTool.CacheControl = anthropic.NewCacheControlEphemeralParam()
+	params.System[0].CacheControl = anthropic.NewCacheControlEphemeralParam()
+	params.Messages[0].Content[0].OfText.CacheControl = anthropic.NewCacheControlEphemeralParam()
+	params.Messages[2].Content[0].OfToolResult.CacheControl = anthropic.NewCacheControlEphemeralParam()
 
 	applyAnthropicPromptCachePolicy(&params)
 
-	assert.Equal(t, "ephemeral", string(params.CacheControl.Type))
+	assert.Empty(t, params.CacheControl.Type)
 	assert.Empty(t, params.CacheControl.TTL)
 
 	assert.Empty(t, params.Tools[0].OfTool.CacheControl.Type)
-	assert.Empty(t, params.Tools[1].OfTool.CacheControl.Type)
+	assert.Equal(t, "ephemeral", string(params.Tools[1].OfTool.CacheControl.Type))
 
 	assert.Empty(t, params.System[0].CacheControl.Type)
-	assert.Empty(t, params.System[1].CacheControl.Type)
+	assert.Equal(t, "ephemeral", string(params.System[1].CacheControl.Type))
 
 	assert.Empty(t, params.Messages[0].Content[0].OfText.CacheControl.Type)
 	assert.Empty(t, params.Messages[1].Content[0].OfText.CacheControl.Type)
-	assert.Empty(t, params.Messages[2].Content[0].OfToolResult.CacheControl.Type)
+	assert.Equal(t, "ephemeral", string(params.Messages[2].Content[0].OfToolResult.CacheControl.Type))
 }
 
-func TestAnthropicProcessMessageExchangeDoesNotInjectGoalContextFromMetadata(t *testing.T) {
+func TestAnthropicPromptCachePolicyCachesLastCacheableMessageBlock(t *testing.T) {
+	params := anthropic.MessageNewParams{
+		Messages: []anthropic.MessageParam{
+			anthropic.NewUserMessage(anthropic.NewTextBlock("first"), anthropic.NewToolResultBlock("toolu_old", "old", false)),
+			anthropic.NewAssistantMessage(anthropic.ContentBlockParamUnion{OfThinking: &anthropic.ThinkingBlockParam{Thinking: "uncacheable thinking", Signature: "sig"}}),
+		},
+	}
+	params.Messages[0].Content[0].OfText.CacheControl = anthropic.NewCacheControlEphemeralParam()
+	params.Messages[0].Content[1].OfToolResult.CacheControl = anthropic.NewCacheControlEphemeralParam()
+
+	applyAnthropicPromptCachePolicy(&params)
+
+	assert.Empty(t, params.Messages[0].Content[0].OfText.CacheControl.Type)
+	assert.Equal(t, "ephemeral", string(params.Messages[0].Content[1].OfToolResult.CacheControl.Type))
+	assert.Nil(t, params.Messages[1].Content[0].GetCacheControl())
+}
+
+func TestAnthropicProcessMessageExchangeUsesManualPromptCaching(t *testing.T) {
 	var capturedRequest struct {
 		CacheControl struct {
 			Type string `json:"type"`
 			TTL  string `json:"ttl"`
 		} `json:"cache_control"`
+		Tools []struct {
+			Name         string `json:"name"`
+			CacheControl struct {
+				Type string `json:"type"`
+				TTL  string `json:"ttl"`
+			} `json:"cache_control"`
+		} `json:"tools"`
+		System []struct {
+			Text         string `json:"text"`
+			CacheControl struct {
+				Type string `json:"type"`
+				TTL  string `json:"ttl"`
+			} `json:"cache_control"`
+		} `json:"system"`
 		Messages []struct {
 			Role    string `json:"role"`
 			Content []struct {
@@ -244,17 +279,33 @@ func TestAnthropicProcessMessageExchangeDoesNotInjectGoalContextFromMetadata(t *
 		messages: []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("hello"))},
 	}
 	thread.SetMetadataValue(goals.MetadataKey, goals.New("find server cores and ram", time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)))
+	thread.SetState(tools.NewBasicState(
+		context.Background(),
+		tools.WithExtraMCPTools([]tooltypes.Tool{testTool{name: "first_tool"}, testTool{name: "second_tool"}}),
+	))
 
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
-	_, _, err := thread.processMessageExchange(context.Background(), handler, "claude-sonnet-4-6", 256, "system", llmtypes.MessageOpt{NoToolUse: true, PromptCache: true, DisableUsageLog: true})
+	_, _, err := thread.processMessageExchange(context.Background(), handler, "claude-sonnet-4-6", 256, "system", llmtypes.MessageOpt{PromptCache: true, DisableUsageLog: true})
 	require.NoError(t, err)
 
-	assert.Equal(t, "ephemeral", capturedRequest.CacheControl.Type)
+	assert.Empty(t, capturedRequest.CacheControl.Type)
 	assert.Empty(t, capturedRequest.CacheControl.TTL)
+
+	require.NotEmpty(t, capturedRequest.Tools)
+	for _, tool := range capturedRequest.Tools[:len(capturedRequest.Tools)-1] {
+		assert.Empty(t, tool.CacheControl.Type, "tool %s should not have an earlier cache breakpoint", tool.Name)
+	}
+	assert.Equal(t, "second_tool", capturedRequest.Tools[len(capturedRequest.Tools)-1].Name)
+	assert.Equal(t, "ephemeral", capturedRequest.Tools[len(capturedRequest.Tools)-1].CacheControl.Type)
+
+	require.Len(t, capturedRequest.System, 1)
+	assert.Equal(t, "system", capturedRequest.System[0].Text)
+	assert.Equal(t, "ephemeral", capturedRequest.System[0].CacheControl.Type)
+
 	require.Len(t, capturedRequest.Messages, 1)
 	require.Len(t, capturedRequest.Messages[0].Content, 1)
 	assert.Equal(t, "hello", capturedRequest.Messages[0].Content[0].Text)
-	assert.Empty(t, capturedRequest.Messages[0].Content[0].CacheControl.Type)
+	assert.Equal(t, "ephemeral", capturedRequest.Messages[0].Content[0].CacheControl.Type)
 	assert.NotContains(t, capturedRequest.Messages[0].Content[0].Text, "<goal_context>")
 }
 

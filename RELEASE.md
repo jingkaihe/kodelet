@@ -1,5 +1,10 @@
 # Kodelet
 
+## UNRELEASED
+
+Restored Anthropic prompt caching to use explicit cache-control breakpoints instead of the SDK top-level automatic cache parameter, because it is not widely supported by Anthropic-compatible endpoint. Also added prompt caching now marks the last tool definition, last system prompt block, and last cacheable user/tool-result message while clearing stale markers from earlier blocks.
+
+
 ## 0.4.22-beta (2026-05-28)
 
 Updated the recommended Anthropic setup and sample config to use Claude Opus 4.8, including refreshed SDK support, model aliases, thinking effort handling, and pricing metadata.
