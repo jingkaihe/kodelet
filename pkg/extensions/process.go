@@ -360,7 +360,11 @@ func (p *Process) closeProcessLocked() error {
 	p.closed = true
 	_ = p.stdin.Close()
 	_ = p.stdout.Close()
-	_ = p.cmd.Process.Kill()
+	if p.cmd.Cancel != nil {
+		_ = p.cmd.Cancel()
+	} else {
+		_ = p.cmd.Process.Kill()
+	}
 	_, err := p.cmd.Process.Wait()
 	if err != nil && strings.Contains(err.Error(), "process already finished") {
 		return nil

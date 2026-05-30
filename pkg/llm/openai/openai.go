@@ -328,8 +328,6 @@ OUTER:
 			logger.G(ctx).Info("stopping kodelet.llm.openai")
 			break OUTER
 		default:
-			base.DispatchTurnStart(ctx, t, turnCount+1)
-
 			// Check turn limit (0 means no limit)
 			logger.G(ctx).WithField("turn_count", turnCount).WithField("max_turns", maxTurns).Debug("checking turn limit")
 
@@ -340,6 +338,8 @@ OUTER:
 					Warn("reached maximum turn limit, stopping interaction")
 				break OUTER
 			}
+
+			base.DispatchTurnStart(ctx, t, turnCount+1)
 
 			// Get relevant contexts from state and regenerate system prompt
 			var contexts map[string]string

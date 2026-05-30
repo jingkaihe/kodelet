@@ -233,7 +233,7 @@ Extensions replace the old hook and executable custom-tool systems with one long
 
 **TypeScript SDK:**
 ```typescript
-import { z, defineExtension } from "@jingkaihe/kodelet";
+import { z, defineExtension } from "kodelet";
 
 const WeatherInput = z.object({ location: z.string() });
 

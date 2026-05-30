@@ -1,5 +1,5 @@
 {
-  "name": "@jingkaihe/kodelet",
+  "name": "kodelet",
   "version": "0.4.24-beta",
   "description": "TypeScript SDK for authoring Kodelet extensions",
   "type": "module",

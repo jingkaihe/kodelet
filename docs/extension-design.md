@@ -42,7 +42,7 @@ An extension is an executable process that registers tools, commands, and lifecy
 Example:
 
 ```typescript
-import { z, type ExtensionAPI } from "@jingkaihe/kodelet";
+import { z, type ExtensionAPI } from "kodelet";
 
 const WeatherInput = z.object({
   location: z.string().describe("Location to fetch weather for"),
@@ -96,7 +96,7 @@ export default function (ext: ExtensionAPI) {
 }
 ```
 
-For TypeScript extensions, `inputSchema` should accept a Zod schema. The `@jingkaihe/kodelet` SDK should re-export `z` from Zod so extension authors get an all-in-one import and do not need to depend on or import `zod` directly. The SDK converts Zod to JSON Schema during registration before sending metadata to Kodelet. Non-TypeScript extensions can still speak the protocol directly by returning JSON Schema in their `extension.initialize` result.
+For TypeScript extensions, `inputSchema` should accept a Zod schema. The `kodelet` SDK should re-export `z` from Zod so extension authors get an all-in-one import and do not need to depend on or import `zod` directly. The SDK converts Zod to JSON Schema during registration before sending metadata to Kodelet. Non-TypeScript extensions can still speak the protocol directly by returning JSON Schema in their `extension.initialize` result.
 
 The SDK should infer the handler input type from the schema, equivalent to:
 
@@ -885,7 +885,7 @@ No agent integration is required in this phase.
 
 ### Phase 3: TypeScript SDK
 
-Add an `@jingkaihe/kodelet` TypeScript SDK for authoring extensions.
+Add a `kodelet` TypeScript SDK for authoring extensions.
 
 Required SDK surface:
 
@@ -904,7 +904,7 @@ Required SDK surface:
 Example SDK entry point:
 
 ```typescript
-import { runExtension } from "@jingkaihe/kodelet/runtime";
+import { runExtension } from "kodelet/runtime";
 import extension from "./dist/index.js";
 
 runExtension(extension);

@@ -1171,10 +1171,10 @@ Extensions communicate with Kodelet over stdio JSON-RPC using `Content-Length` f
 
 ### Creating TypeScript Extensions
 
-The TypeScript SDK is exposed as `@jingkaihe/kodelet` and re-exports Zod as `z` so extension authors can define schemas and handlers from one package:
+The TypeScript SDK is exposed as `kodelet` and re-exports Zod as `z` so extension authors can define schemas and handlers from one package:
 
 ```typescript
-import { z, defineExtension } from "@jingkaihe/kodelet";
+import { z, defineExtension } from "kodelet";
 
 const WeatherInput = z.object({
   location: z.string().describe("Location to fetch weather for"),

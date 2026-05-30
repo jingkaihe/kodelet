@@ -349,8 +349,6 @@ OUTER:
 			logger.G(ctx).Info("stopping kodelet.llm.anthropic")
 			break OUTER
 		default:
-			base.DispatchTurnStart(ctx, t, turnCount+1)
-
 			// Check turn limit (0 means no limit)
 			logger.G(ctx).WithField("turn_count", turnCount).WithField("max_turns", maxTurns).Debug("checking turn limit")
 
@@ -361,6 +359,8 @@ OUTER:
 					Warn("reached maximum turn limit, stopping interaction")
 				break OUTER
 			}
+
+			base.DispatchTurnStart(ctx, t, turnCount+1)
 
 			// Check if auto-compact should be triggered before each exchange
 			t.TryAutoCompact(ctx, t.CompactRatioOrDefault(opt.CompactRatio), t.CompactContext)

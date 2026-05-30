@@ -362,6 +362,19 @@ func TestAddWebChatDisplayMetadata(t *testing.T) {
 	assert.Equal(t, expansion.Display, display.Text)
 	assert.Equal(t, expansion.Command, display.Command)
 
+	extensionResult := &extensions.RoutedCommandResult{
+		CommandName: "review-changes",
+		Prompt:      "Review the current diff",
+		Display:     "/changes target=HEAD",
+	}
+	addWebChatExtensionCommandDisplay(thread, extensionResult)
+
+	display, ok = conversations.LookupMessageDisplay(thread.metadata, extensionResult.Prompt)
+	require.True(t, ok)
+	assert.Equal(t, conversations.MessageDisplayKindSlashCommand, display.Kind)
+	assert.Equal(t, extensionResult.Display, display.Text)
+	assert.Equal(t, extensionResult.CommandName, display.Command)
+
 	goalUpdate := &goals.CommandUpdate{
 		ModelPrompt: goals.ModelPrompt("find cores"),
 		Display:     goals.DisplayText("find cores"),

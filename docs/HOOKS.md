@@ -13,10 +13,10 @@ Use an extension executable named `kodelet-extension-*` under one of the extensi
 ~/.kodelet/extensions/*/kodelet-extension-xxx
 ```
 
-Extensions are long-running subprocesses that communicate with Kodelet over stdio JSON-RPC. TypeScript extensions can use the `@jingkaihe/kodelet` SDK:
+Extensions are long-running subprocesses that communicate with Kodelet over stdio JSON-RPC. TypeScript extensions can use the `kodelet` SDK:
 
 ```typescript
-import { z, defineExtension } from "@jingkaihe/kodelet";
+import { z, defineExtension } from "kodelet";
 
 const Input = z.object({ location: z.string() });
 

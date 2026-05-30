@@ -161,6 +161,7 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 	}
 
 	expandSlashCommand := true
+	var extensionCommandResult *extensions.RoutedCommandResult
 	if commandResult, handled, err := tryWebExtensionCommand(ctx, message, extensionRuntime, llmConfig, sessionID, resolvedCWD); err != nil {
 		return sessionID, err
 	} else if handled {
@@ -178,6 +179,7 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 		case extensions.CommandActionRunAgent:
 			message = commandResult.Prompt
 			expandSlashCommand = false
+			extensionCommandResult = commandResult
 			if strings.TrimSpace(commandResult.RecipeName) != "" {
 				llmConfig.RecipeName = commandResult.RecipeName
 			}
@@ -210,6 +212,9 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 	thread.EnablePersistence(ctx, true)
 	if slashExpansion != nil {
 		addWebChatSlashCommandDisplay(thread, slashExpansion)
+	}
+	if extensionCommandResult != nil {
+		addWebChatExtensionCommandDisplay(thread, extensionCommandResult)
 	}
 	if goalUpdate != nil {
 		addWebChatGoalDisplay(thread, goalUpdate)
@@ -578,6 +583,17 @@ func addWebChatSlashCommandDisplay(thread llmtypes.Thread, expansion *slashcomma
 	}
 
 	metadata := conversationservice.AddSlashCommandDisplay(thread.GetMetadata(), expansion.Prompt, expansion.Display, expansion.Command)
+	for key, value := range metadata {
+		thread.SetMetadataValue(key, value)
+	}
+}
+
+func addWebChatExtensionCommandDisplay(thread llmtypes.Thread, result *extensions.RoutedCommandResult) {
+	if thread == nil || result == nil {
+		return
+	}
+
+	metadata := conversationservice.AddSlashCommandDisplay(thread.GetMetadata(), result.Prompt, result.Display, result.CommandName)
 	for key, value := range metadata {
 		thread.SetMetadataValue(key, value)
 	}
