@@ -1,6 +1,6 @@
 {
   "name": "kodelet",
-  "version": "0.4.24-beta",
+  "version": "0.0.0",
   "description": "TypeScript SDK for authoring Kodelet extensions",
   "type": "module",
   "main": "./dist/index.js",

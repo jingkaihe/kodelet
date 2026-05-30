@@ -54,14 +54,11 @@ jobs:
         run: npm ci
         working-directory: sdk
 
-      - name: Verify SDK version matches VERSION.txt
+      - name: Set SDK version from VERSION.txt
         run: |
-          expected="$(sed 's/^v//' VERSION.txt)"
-          actual="$(node -p "require('./sdk/package.json').version")"
-          if [ "$actual" != "$expected" ]; then
-            echo "SDK package version $actual does not match VERSION.txt $expected" >&2
-            exit 1
-          fi
+          version="$(sed 's/^v//' ../VERSION.txt)"
+          npm version "$version" --no-git-tag-version --allow-same-version
+        working-directory: sdk
 
       - name: Typecheck SDK
         run: npm run typecheck

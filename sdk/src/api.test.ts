@@ -1,19 +1,11 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import packageJson from "../package.json" with { type: "json" };
-
 import { createTestHarness, defineExtension, renderTemplate, z } from "./index.js";
-
-test("package version matches root VERSION.txt", async () => {
-  const version = (await readFile(path.resolve("..", "VERSION.txt"), "utf8")).trim().replace(/^v/, "");
-
-  assert.equal(packageJson.version, version);
-});
 
 test("registers tools, commands, events and executes handlers", async () => {
   const extension = defineExtension((ext) => {
