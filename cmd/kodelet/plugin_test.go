@@ -50,8 +50,7 @@ func TestOutputPluginsJSON(t *testing.T) {
 	assert.Equal(t, plugin.Path, info.Path)
 	assert.Equal(t, []SkillInfo{{Name: "helper", Description: "Short skill description"}}, info.Skills)
 	assert.Equal(t, []RecipeInfo{{Name: "build", Description: "Recipe description"}}, info.Recipes)
-	assert.Equal(t, []ToolInfo{{Name: "runner"}}, info.Tools)
-	assert.Equal(t, []HookInfo{{Name: "after_tool_call"}}, info.Hooks)
+	assert.Equal(t, []ExtensionInfo{{Name: "runner"}}, info.Extensions)
 }
 
 func TestOutputPluginShowJSON(t *testing.T) {
@@ -84,10 +83,8 @@ func TestOutputPluginShowTable(t *testing.T) {
 	assert.Contains(t, output, "  • helper - "+strings.Repeat("a", truncatedDescriptionLength)+"...")
 	assert.Contains(t, output, "Recipes (1):")
 	assert.Contains(t, output, "  • build - "+strings.Repeat("b", truncatedDescriptionLength)+"...")
-	assert.Contains(t, output, "Tools (1):")
+	assert.Contains(t, output, "Extensions (1):")
 	assert.Contains(t, output, "  • runner")
-	assert.Contains(t, output, "Hooks (1):")
-	assert.Contains(t, output, "  • after_tool_call")
 }
 
 func TestOutputPluginShowTableOmitsDescriptionsWhenMetadataMissing(t *testing.T) {
@@ -122,12 +119,11 @@ func setupPluginOutputTest(t *testing.T, skillDescription, recipeDescription str
 	require.NoError(t, err)
 
 	plugin := plugins.InstalledPlugin{
-		Name:    "owner@repo",
-		Path:    pluginPath,
-		Skills:  []string{"helper"},
-		Recipes: []string{"build"},
-		Tools:   []string{"runner"},
-		Hooks:   []string{"after_tool_call"},
+		Name:       "owner@repo",
+		Path:       pluginPath,
+		Skills:     []string{"helper"},
+		Recipes:    []string{"build"},
+		Extensions: []string{"runner"},
 	}
 	return discovery, plugin
 }

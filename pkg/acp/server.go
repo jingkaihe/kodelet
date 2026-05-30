@@ -71,10 +71,10 @@ type ServerConfig struct {
 	Model                string
 	MaxTokens            int
 	NoSkills             bool
+	NoExtensions         bool
 	NoWorkflows          bool
 	DisableFSSearchTools bool
 	DisableSubagent      bool
-	NoHooks              bool
 	MaxTurns             int
 	CompactRatio         float64
 }
@@ -127,10 +127,10 @@ func NewServer(opts ...Option) *Server {
 		Model:                s.config.Model,
 		MaxTokens:            s.config.MaxTokens,
 		NoSkills:             s.config.NoSkills,
+		NoExtensions:         s.config.NoExtensions,
 		NoWorkflows:          s.config.NoWorkflows,
 		DisableFSSearchTools: s.config.DisableFSSearchTools,
 		DisableSubagent:      s.config.DisableSubagent,
-		NoHooks:              s.config.NoHooks,
 		MaxTurns:             s.config.MaxTurns,
 		CompactRatio:         s.config.CompactRatio,
 	})

@@ -142,6 +142,13 @@ run = [
   "cd pkg/webui/frontend && npm run test:coverage",
 ]
 
+[tasks.sdk-test]
+description = "Run TypeScript SDK typecheck and tests"
+run = [
+  "echo 'Running extension SDK checks...'",
+  "cd sdk && npm run typecheck && npm test",
+]
+
 [tasks.frontend-storybook]
 description = "Run the frontend Storybook"
 run = [

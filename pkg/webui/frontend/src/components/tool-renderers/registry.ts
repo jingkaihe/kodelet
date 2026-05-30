@@ -3,7 +3,7 @@ import type { ToolRenderProps } from '../../types';
 import ApplyPatchRenderer from './ApplyPatchRenderer';
 import BashRenderer from './BashRenderer';
 import CodeExecutionRenderer from './CodeExecutionRenderer';
-import CustomToolRenderer from './CustomToolRenderer';
+import ExtensionToolRenderer from './ExtensionToolRenderer';
 import FileEditRenderer from './FileEditRenderer';
 import FileReadRenderer from './FileReadRenderer';
 import FileWriteRenderer from './FileWriteRenderer';
@@ -40,7 +40,7 @@ const toolRendererRegistry: Record<string, ToolRendererRegistration> = {
   openai_web_search: { component: OpenAIWebSearchRenderer, supportsFailureRendering: true },
   read_conversation: { component: ReadConversationRenderer },
   code_execution: { component: CodeExecutionRenderer, supportsFailureRendering: true },
-  custom_tool: { component: CustomToolRenderer },
+  extension_tool: { component: ExtensionToolRenderer },
   mcp_tool: { component: MCPToolRenderer },
 };
 

@@ -1,7 +1,6 @@
-// Package plugins provides a unified plugin system for managing skills
-// (model-invoked capabilities), recipes (user-invoked templates), hooks,
-// and plugin-bundled custom tools. It handles discovery, installation,
-// and removal of plugins from GitHub repositories.
+// Package plugins provides a unified plugin system for managing skills,
+// recipes, and extensions. It handles discovery, installation, and removal of
+// plugins from GitHub repositories.
 package plugins
 
 import (
@@ -14,9 +13,9 @@ type PluginType string
 
 // Plugin types
 const (
-	PluginTypeSkill  PluginType = "skill"
-	PluginTypeRecipe PluginType = "recipe"
-	PluginTypeHook   PluginType = "hook"
+	PluginTypeSkill     PluginType = "skill"
+	PluginTypeRecipe    PluginType = "recipe"
+	PluginTypeExtension PluginType = "extension"
 )
 
 // Plugin represents a discoverable plugin (skill or recipe)
@@ -89,14 +88,13 @@ func (r *RecipePlugin) Directory() string { return r.directory }
 // Type returns the plugin type (recipe)
 func (r *RecipePlugin) Type() PluginType { return PluginTypeRecipe }
 
-// InstalledPlugin represents a plugin package that may contain multiple skills, recipes, tools, and hooks.
+// InstalledPlugin represents a plugin package that may contain skills, recipes, and extensions.
 type InstalledPlugin struct {
-	Name    string   // Plugin package name (e.g., "my-plugin-repo")
-	Path    string   // Full path to the plugin directory
-	Skills  []string // List of skill names contained in this plugin
-	Recipes []string // List of recipe names contained in this plugin
-	Tools   []string // List of declared custom tool names contained in this plugin
-	Hooks   []string // List of hook names contained in this plugin
+	Name       string   // Plugin package name (e.g., "my-plugin-repo")
+	Path       string   // Full path to the plugin directory
+	Skills     []string // List of skill names contained in this plugin
+	Recipes    []string // List of recipe names contained in this plugin
+	Extensions []string // List of extension names contained in this plugin
 }
 
 // PluginDirConfig represents a plugin directory with its prefix for discovery.

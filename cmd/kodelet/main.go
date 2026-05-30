@@ -40,6 +40,12 @@ func init() {
 	viper.SetDefault("compact_ratio", llmtypes.DefaultCompactRatio)
 
 	viper.SetDefault("mcp", map[string]tools.MCPConfig{})
+	viper.SetDefault("extensions.enabled", true)
+	viper.SetDefault("extensions.global_dir", "~/.kodelet/extensions")
+	viper.SetDefault("extensions.local_dir", "./.kodelet/extensions")
+	viper.SetDefault("extensions.timeout", "30s")
+	viper.SetDefault("extensions.tool_timeout", "120s")
+	viper.SetDefault("extensions.max_output_size", 102400)
 
 	viper.SetDefault("tracing.enabled", false)
 	viper.SetDefault("tracing.sampler", "ratio")
@@ -169,8 +175,6 @@ func main() {
 	rootCmd.AddCommand(serveCmd)
 	rootCmd.AddCommand(steerCmd)
 	rootCmd.AddCommand(recipeCmd)
-	rootCmd.AddCommand(customToolCmd)
-	rootCmd.AddCommand(customToolInvokeAliasCmd)
 	rootCmd.AddCommand(profileCmd)
 	rootCmd.AddCommand(dbCmd)
 
@@ -216,8 +220,6 @@ func main() {
 	serveCmd = withTracing(serveCmd)
 	steerCmd = withTracing(steerCmd)
 	recipeCmd = withTracing(recipeCmd)
-	customToolCmd = withTracing(customToolCmd)
-	customToolInvokeAliasCmd = withTracing(customToolInvokeAliasCmd)
 
 	// Set the root command context to include the tracing context
 	rootCmd.SetContext(ctx)

@@ -101,8 +101,7 @@ type InstallResult struct {
 	PluginName string
 	Skills     []string
 	Recipes    []string
-	Tools      []string
-	Hooks      []string
+	Extensions []string
 }
 
 // Install installs plugins from a GitHub repository
@@ -166,39 +165,24 @@ func (i *Installer) Install(ctx context.Context, repo string, ref string) (*Inst
 		}
 	}
 
-	hooksDir := filepath.Join(tempDir, hooksSubdir)
-	if hooks, err := i.findHooks(hooksDir); err == nil && len(hooks) > 0 {
-		destHooksDir := filepath.Join(pluginDir, hooksSubdir)
-		if err := os.MkdirAll(destHooksDir, 0o755); err != nil {
-			return nil, errors.Wrap(err, "failed to create hooks directory")
+	extensionsDir := filepath.Join(tempDir, extensionsSubdir)
+	if extensions, err := i.findExtensions(extensionsDir); err == nil && len(extensions) > 0 {
+		destExtensionsDir := filepath.Join(pluginDir, extensionsSubdir)
+		if err := os.MkdirAll(destExtensionsDir, 0o755); err != nil {
+			return nil, errors.Wrap(err, "failed to create extensions directory")
 		}
-		for _, hook := range hooks {
-			hookName := filepath.Base(hook)
-			if err := i.copyFile(hook, filepath.Join(destHooksDir, hookName)); err != nil {
-				return nil, errors.Wrapf(err, "failed to install hook %s", hookName)
+		for _, extension := range extensions {
+			name, err := i.installExtension(extension, destExtensionsDir)
+			if err != nil {
+				return nil, errors.Wrapf(err, "failed to install extension %s", extension)
 			}
-			result.Hooks = append(result.Hooks, hookName)
+			result.Extensions = append(result.Extensions, name)
 		}
 	}
 
-	toolsDir := filepath.Join(tempDir, toolsSubdir)
-	if tools, err := i.findTools(toolsDir); err == nil && len(tools) > 0 {
-		destToolsDir := filepath.Join(pluginDir, toolsSubdir)
-		if err := os.MkdirAll(destToolsDir, 0o755); err != nil {
-			return nil, errors.Wrap(err, "failed to create tools directory")
-		}
-		for _, tool := range tools {
-			toolName := filepath.Base(tool)
-			if err := i.copyFile(tool, filepath.Join(destToolsDir, toolName)); err != nil {
-				return nil, errors.Wrapf(err, "failed to install tool %s", toolName)
-			}
-			result.Tools = append(result.Tools, toolName)
-		}
-	}
-
-	if len(result.Skills) == 0 && len(result.Recipes) == 0 && len(result.Tools) == 0 && len(result.Hooks) == 0 {
+	if len(result.Skills) == 0 && len(result.Recipes) == 0 && len(result.Extensions) == 0 {
 		os.RemoveAll(pluginDir)
-		return nil, errors.New("no plugins found in repository (expected skills/, recipes/, tools/, or hooks/ directories)")
+		return nil, errors.New("no plugins found in repository (expected skills/, recipes/, or extensions/ directories)")
 	}
 
 	return result, nil
@@ -268,34 +252,39 @@ func (i *Installer) findRecipes(dir string) ([]string, error) {
 	return recipes, nil
 }
 
-func (i *Installer) findHooks(dir string) ([]string, error) {
+func (i *Installer) findExtensions(dir string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
 
-	var hooks []string
+	var extensions []string
 	for _, entry := range entries {
-		if IsExecutableFile(entry) {
-			hooks = append(hooks, filepath.Join(dir, entry.Name()))
+		entryPath := filepath.Join(dir, entry.Name())
+		if entry.IsDir() {
+			if nestedExtensionName(entryPath, entry.Name()) != "" {
+				extensions = append(extensions, entryPath)
+			}
+			continue
+		}
+		if directExtensionName(entry) != "" {
+			extensions = append(extensions, entryPath)
 		}
 	}
-	return hooks, nil
+	return extensions, nil
 }
 
-func (i *Installer) findTools(dir string) ([]string, error) {
-	entries, err := os.ReadDir(dir)
+func (i *Installer) installExtension(srcPath, destExtensionsDir string) (string, error) {
+	info, err := os.Stat(srcPath)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-
-	var tools []string
-	for _, entry := range entries {
-		if IsExecutableFile(entry) {
-			tools = append(tools, filepath.Join(dir, entry.Name()))
-		}
+	if info.IsDir() {
+		name := filepath.Base(srcPath)
+		return name, i.copyDir(srcPath, filepath.Join(destExtensionsDir, name))
 	}
-	return tools, nil
+	name := strings.TrimPrefix(filepath.Base(srcPath), "kodelet-extension-")
+	return name, i.copyFile(srcPath, filepath.Join(destExtensionsDir, filepath.Base(srcPath)))
 }
 
 func (i *Installer) installRecipe(srcPath, recipesRoot, destRecipesDir string) error {
@@ -459,12 +448,11 @@ func (r *Remover) ListPlugins() ([]string, error) {
 			continue
 		}
 
-		// Check if this directory is a valid plugin (has skills/, recipes/, or hooks/)
+		// Check if this directory is a valid plugin (has skills/, recipes/, or extensions/)
 		pluginPath := filepath.Join(pluginsDir, entry.Name())
 		hasSkills := false
 		hasRecipes := false
-		hasTools := false
-		hasHooks := false
+		hasExtensions := false
 
 		if _, err := os.Stat(filepath.Join(pluginPath, skillsSubdir)); err == nil {
 			hasSkills = true
@@ -472,14 +460,11 @@ func (r *Remover) ListPlugins() ([]string, error) {
 		if _, err := os.Stat(filepath.Join(pluginPath, recipesSubdir)); err == nil {
 			hasRecipes = true
 		}
-		if _, err := os.Stat(filepath.Join(pluginPath, toolsSubdir)); err == nil {
-			hasTools = true
-		}
-		if _, err := os.Stat(filepath.Join(pluginPath, hooksSubdir)); err == nil {
-			hasHooks = true
+		if _, err := os.Stat(filepath.Join(pluginPath, extensionsSubdir)); err == nil {
+			hasExtensions = true
 		}
 
-		if hasSkills || hasRecipes || hasTools || hasHooks {
+		if hasSkills || hasRecipes || hasExtensions {
 			// Convert org@repo to org/repo for user-facing output
 			plugins = append(plugins, PluginNameToUserFacing(entry.Name()))
 		}

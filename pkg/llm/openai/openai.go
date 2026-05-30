@@ -195,10 +195,9 @@ func NewOpenAIThread(config llmtypes.Config) (*Thread, error) {
 	customModels, customPricing := loadCustomConfiguration(config)
 
 	conversationID := convtypes.GenerateID()
-	hookTrigger := base.CreateHookTrigger(context.Background(), config, conversationID)
 
 	// Create the base thread with shared functionality
-	baseThread := base.NewThread(config, conversationID, hookTrigger)
+	baseThread := base.NewThread(config, conversationID)
 
 	thread := &Thread{
 		Thread:          baseThread,
@@ -286,9 +285,9 @@ func (t *Thread) SendMessage(
 		copy(originalMessages, t.messages)
 	}
 
-	// Trigger user_message_send hook before adding user message
-	if blocked, reason := t.HookTrigger.TriggerUserMessageSend(ctx, message); blocked {
-		return "", errors.Errorf("message blocked by hook: %s", reason)
+	message, err = base.ProcessUserMessage(ctx, t, message)
+	if err != nil {
+		return "", err
 	}
 
 	if len(opt.Images) > 0 {
@@ -320,6 +319,7 @@ func (t *Thread) SendMessage(
 
 	turnCount := 0
 	maxTurns := max(opt.MaxTurns, 0)
+	base.DispatchAgentStart(ctx, t)
 
 OUTER:
 	for {
@@ -328,6 +328,8 @@ OUTER:
 			logger.G(ctx).Info("stopping kodelet.llm.openai")
 			break OUTER
 		default:
+			base.DispatchTurnStart(ctx, t, turnCount+1)
+
 			// Check turn limit (0 means no limit)
 			logger.G(ctx).WithField("turn_count", turnCount).WithField("max_turns", maxTurns).Debug("checking turn limit")
 
@@ -344,7 +346,7 @@ OUTER:
 			if t.State != nil {
 				contexts = t.State.DiscoverContexts()
 			}
-			systemPrompt := sysprompt.SystemPrompt(model, t.Config, contexts)
+			systemPrompt := base.ProcessSystemPrompt(ctx, t, sysprompt.SystemPrompt(model, t.Config, contexts))
 
 			// Update system message content
 			if len(t.messages) > 0 && t.messages[0].Role == openai.ChatMessageRoleSystem {
@@ -376,11 +378,11 @@ OUTER:
 			// Update finalOutput with the most recent output
 			finalOutput = exchangeOutput
 
-			base.TriggerTurnEnd(ctx, t.HookTrigger, t, finalOutput, turnCount)
+			base.TriggerTurnEnd(ctx, t, finalOutput, turnCount)
 
-			// If no tools were used, check for hook follow-ups before stopping
+			// If no tools were used, check for extension follow-ups before stopping
 			if !toolsUsed {
-				if base.HandleAgentStopFollowUps(ctx, t.HookTrigger, t, handler) {
+				if base.HandleAgentStopFollowUps(ctx, t, handler) {
 					continue OUTER
 				}
 				if !t.Config.IsSubAgent && (maxTurns == 0 || turnCount < maxTurns) && base.HandleGoalAutoContinuation(ctx, t, t.tools(opt)) {
@@ -540,7 +542,6 @@ func (t *Thread) processMessageExchange(
 
 		toolExecution := base.ExecuteTool(
 			ctx,
-			t.HookTrigger,
 			t,
 			t.State,
 			t.RendererRegistry,

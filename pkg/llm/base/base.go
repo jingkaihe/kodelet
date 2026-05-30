@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
-	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -46,7 +45,6 @@ type Thread struct {
 	Store            ConversationStore                         // Conversation persistence store
 	ToolResults      map[string]tooltypes.StructuredToolResult // Maps tool_call_id to structured result
 	RendererRegistry *renderers.RendererRegistry               // CLI renderer registry for structured tool results
-	HookTrigger      hooks.Trigger                             // Hook trigger for lifecycle hooks
 	LoadConversation LoadConversationFunc                      // Provider-specific callback for loading conversations
 
 	Mu             sync.Mutex // Mutex for thread-safe operations on usage and tool results
@@ -58,7 +56,6 @@ type Thread struct {
 func NewThread(
 	config llmtypes.Config,
 	conversationID string,
-	hookTrigger hooks.Trigger,
 ) *Thread {
 	return &Thread{
 		Config:           config,
@@ -68,7 +65,6 @@ func NewThread(
 		Usage:            &llmtypes.Usage{},
 		ToolResults:      make(map[string]tooltypes.StructuredToolResult),
 		RendererRegistry: renderers.NewRendererRegistry(),
-		HookTrigger:      hookTrigger,
 	}
 }
 
@@ -126,10 +122,9 @@ func (t *Thread) GetConversationID() string {
 	return t.ConversationID
 }
 
-// SetConversationID sets the conversation ID and updates the hook trigger
+// SetConversationID sets the conversation ID.
 func (t *Thread) SetConversationID(id string) {
 	t.ConversationID = id
-	t.HookTrigger.SetConversationID(id)
 }
 
 // IsPersisted returns whether this thread is being persisted
@@ -172,10 +167,9 @@ func (t *Thread) EnablePersistence(ctx context.Context, enabled bool) {
 }
 
 // PrepareUtilityMode configures a thread for internal utility calls such as summary generation.
-// Utility mode disables persistence and lifecycle hooks to avoid side effects.
+// Utility mode disables persistence to avoid side effects.
 func (t *Thread) PrepareUtilityMode(ctx context.Context) {
 	t.EnablePersistence(ctx, false)
-	t.HookTrigger = hooks.Trigger{}
 }
 
 // ResetContextStateLocked clears shared state after context replacement/compaction.

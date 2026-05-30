@@ -1,6 +1,6 @@
 // Package renderers provides CLI output rendering functionality for tool results.
 // It includes a registry system for managing tool renderers and supports
-// pattern-based matching for custom and MCP tools.
+// pattern-based matching for extension and MCP tools.
 package renderers
 
 import (
@@ -47,9 +47,7 @@ func NewRendererRegistry() *RendererRegistry {
 
 	// Register MCP tools - pattern matches any tool prefixed with "mcp_"
 	registry.RegisterPattern("mcp_*", &MCPToolRenderer{})
-
-	// Register Custom tools - pattern matches any tool prefixed with "custom_tool_"
-	registry.RegisterPattern("custom_tool_*", &CustomToolRenderer{})
+	registry.Register("extension_tool", &ExtensionToolRenderer{})
 
 	return registry
 }
@@ -66,6 +64,13 @@ func (r *RendererRegistry) RegisterPattern(pattern string, renderer CLIRenderer)
 
 // Render finds the appropriate renderer and renders the result
 func (r *RendererRegistry) Render(result tools.StructuredToolResult) string {
+	if _, ok := result.Metadata.(*tools.ExtensionToolMetadata); ok {
+		return (&ExtensionToolRenderer{}).RenderCLI(result)
+	}
+	if _, ok := result.Metadata.(tools.ExtensionToolMetadata); ok {
+		return (&ExtensionToolRenderer{}).RenderCLI(result)
+	}
+
 	renderer, exists := r.resolveRenderer(result.ToolName)
 	if exists {
 		return renderer.RenderCLI(result)

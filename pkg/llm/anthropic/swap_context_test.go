@@ -6,13 +6,11 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
-	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // mockState implements tooltypes.State for testing
@@ -52,7 +50,7 @@ func createTestThread() *Thread {
 		MaxTokens: 8192,
 	}
 
-	baseThread := base.NewThread(config, "test-conv-id", hooks.Trigger{})
+	baseThread := base.NewThread(config, "test-conv-id")
 
 	thread := &Thread{
 		Thread: baseThread,

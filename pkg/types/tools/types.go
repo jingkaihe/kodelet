@@ -123,7 +123,7 @@ func StringifyToolResult(result, err string) string {
 	return out
 }
 
-// BlockedToolResult represents a tool that was blocked by a lifecycle hook
+// BlockedToolResult represents a tool that was blocked by an extension policy.
 type BlockedToolResult struct {
 	ToolName string `json:"tool_name"`
 	Reason   string `json:"reason"`
@@ -137,7 +137,7 @@ func NewBlockedToolResult(toolName, reason string) BlockedToolResult {
 // AssistantFacing returns a formatted string representation of the blocked result for the LLM
 func (t BlockedToolResult) AssistantFacing() string {
 	return fmt.Sprintf(`<error>
-Tool execution was blocked by security hook: %s
+Tool execution was blocked by extension policy: %s
 </error>
 `, t.Reason)
 }
@@ -149,7 +149,7 @@ func (t BlockedToolResult) IsError() bool {
 
 // GetError returns the blocked reason as an error message
 func (t BlockedToolResult) GetError() string {
-	return fmt.Sprintf("blocked by hook: %s", t.Reason)
+	return fmt.Sprintf("blocked by extension: %s", t.Reason)
 }
 
 // GetResult returns an empty string as blocked tools have no result

@@ -2,14 +2,11 @@ package plugins
 
 import (
 	"bytes"
-	"context"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
-	"github.com/jingkaihe/kodelet/pkg/customtools"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/yuin/goldmark"
@@ -18,17 +15,16 @@ import (
 )
 
 const (
-	skillFileName = "SKILL.md"
-	pluginsSubdir = "plugins"
-	skillsSubdir  = "skills"
-	recipesSubdir = "recipes"
-	toolsSubdir   = "tools"
-	hooksSubdir   = "hooks"
-	kodeletDir    = ".kodelet"
+	skillFileName    = "SKILL.md"
+	pluginsSubdir    = "plugins"
+	skillsSubdir     = "skills"
+	recipesSubdir    = "recipes"
+	extensionsSubdir = "extensions"
+	kodeletDir       = ".kodelet"
 )
 
 // IsExecutableFile checks if a file entry is executable (has any execute bit set).
-// This is used for hook discovery across both installation and listing.
+// This is used for extension executable discovery across installation and listing.
 func IsExecutableFile(entry fs.DirEntry) bool {
 	if entry.IsDir() {
 		return false
@@ -155,57 +151,6 @@ func (d *Discovery) pluginRecipeDirs(baseDir string) []string {
 		recipeDir := filepath.Join(pluginsDir, entry.Name(), recipesSubdir)
 		if _, err := os.Stat(recipeDir); err == nil {
 			dirs = append(dirs, recipeDir)
-		}
-	}
-	return dirs
-}
-
-// HookDirs returns the hook discovery directories with prefix info in precedence order.
-// This is used by the hooks package for plugin-based hook discovery.
-func (d *Discovery) HookDirs() []PluginDirConfig {
-	var dirs []PluginDirConfig
-
-	// 1. Repo-local standalone (highest precedence)
-	dirs = append(dirs, PluginDirConfig{
-		Dir:    filepath.Join(d.baseDir, hooksSubdir),
-		Prefix: "",
-	})
-
-	// 2. Repo-local plugins
-	dirs = append(dirs, d.pluginHookDirs(d.baseDir)...)
-
-	// 3. Global standalone
-	dirs = append(dirs, PluginDirConfig{
-		Dir:    filepath.Join(d.homeDir, kodeletDir, hooksSubdir),
-		Prefix: "",
-	})
-
-	// 4. Global plugins (lowest precedence)
-	dirs = append(dirs, d.pluginHookDirs(filepath.Join(d.homeDir, kodeletDir))...)
-
-	return dirs
-}
-
-// pluginHookDirs returns hook directories from all plugins under baseDir
-// Plugin directories use "org@repo" naming format
-func (d *Discovery) pluginHookDirs(baseDir string) []PluginDirConfig {
-	pluginsDir := filepath.Join(baseDir, pluginsSubdir)
-	entries, err := os.ReadDir(pluginsDir)
-	if err != nil {
-		return nil
-	}
-
-	var dirs []PluginDirConfig
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		hookDir := filepath.Join(pluginsDir, entry.Name(), hooksSubdir)
-		if _, err := os.Stat(hookDir); err == nil {
-			dirs = append(dirs, PluginDirConfig{
-				Dir:    hookDir,
-				Prefix: pluginNameToPrefix(entry.Name()),
-			})
 		}
 	}
 	return dirs
@@ -613,27 +558,22 @@ func (d *Discovery) ListInstalledPlugins(global bool) ([]InstalledPlugin, error)
 		pluginPath := filepath.Join(pluginsDir, entry.Name())
 		skillsDir := filepath.Join(pluginPath, skillsSubdir)
 		recipesDir := filepath.Join(pluginPath, recipesSubdir)
-		toolsDir := filepath.Join(pluginPath, toolsSubdir)
-		hooksDir := filepath.Join(pluginPath, hooksSubdir)
+		extensionsDir := filepath.Join(pluginPath, extensionsSubdir)
 
 		hasSkills := false
 		hasRecipes := false
-		hasTools := false
-		hasHooks := false
+		hasExtensions := false
 		if _, err := os.Stat(skillsDir); err == nil {
 			hasSkills = true
 		}
 		if _, err := os.Stat(recipesDir); err == nil {
 			hasRecipes = true
 		}
-		if _, err := os.Stat(toolsDir); err == nil {
-			hasTools = true
-		}
-		if _, err := os.Stat(hooksDir); err == nil {
-			hasHooks = true
+		if _, err := os.Stat(extensionsDir); err == nil {
+			hasExtensions = true
 		}
 
-		if !hasSkills && !hasRecipes && !hasTools && !hasHooks {
+		if !hasSkills && !hasRecipes && !hasExtensions {
 			continue
 		}
 
@@ -675,37 +615,55 @@ func (d *Discovery) ListInstalledPlugins(global bool) ([]InstalledPlugin, error)
 			})
 		}
 
-		if hasTools {
-			if toolEntries, err := os.ReadDir(toolsDir); err == nil {
-				for _, toolEntry := range toolEntries {
-					if !IsExecutableFile(toolEntry) {
-						continue
-					}
-
-					toolPath := filepath.Join(toolsDir, toolEntry.Name())
-					toolMetadata, err := customtools.Inspect(context.Background(), toolPath, 5*time.Second)
-					if err != nil {
-						logrus.WithError(err).WithField("path", toolPath).Debug("failed to inspect plugin tool")
-						continue
-					}
-
-					plugin.Tools = append(plugin.Tools, toolMetadata.Name)
-				}
-			}
-		}
-
-		if hasHooks {
-			if hookEntries, err := os.ReadDir(hooksDir); err == nil {
-				for _, hookEntry := range hookEntries {
-					if IsExecutableFile(hookEntry) {
-						plugin.Hooks = append(plugin.Hooks, hookEntry.Name())
-					}
-				}
-			}
+		if hasExtensions {
+			plugin.Extensions = listExtensionNames(extensionsDir)
 		}
 
 		plugins = append(plugins, plugin)
 	}
 
 	return plugins, nil
+}
+
+func listExtensionNames(extensionsDir string) []string {
+	entries, err := os.ReadDir(extensionsDir)
+	if err != nil {
+		return nil
+	}
+
+	var extensions []string
+	for _, entry := range entries {
+		entryPath := filepath.Join(extensionsDir, entry.Name())
+		if entry.IsDir() {
+			if nested := nestedExtensionName(entryPath, entry.Name()); nested != "" {
+				extensions = append(extensions, nested)
+			}
+			continue
+		}
+		if name := directExtensionName(entry); name != "" {
+			extensions = append(extensions, name)
+		}
+	}
+	return extensions
+}
+
+func directExtensionName(entry fs.DirEntry) string {
+	const prefix = "kodelet-extension-"
+	if !IsExecutableFile(entry) || !strings.HasPrefix(entry.Name(), prefix) {
+		return ""
+	}
+	return strings.TrimPrefix(entry.Name(), prefix)
+}
+
+func nestedExtensionName(dir, fallback string) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	for _, entry := range entries {
+		if directExtensionName(entry) != "" {
+			return fallback
+		}
+	}
+	return ""
 }

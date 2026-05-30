@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -43,6 +44,21 @@ func TestNewRecipeListOutputUsesMetadataAndPathRules(t *testing.T) {
 
 	jsonOutput := NewRecipeListOutput(frags, RecipeJSONFormat, false)
 	assert.Equal(t, "/tmp/a.md", jsonOutput.Recipes[0].Path)
+}
+
+func TestAppendExtensionRecipeOutputs(t *testing.T) {
+	commands := []extensions.Command{
+		{ExtensionID: "reviewer", Registration: extensions.CommandRegistration{Name: "review", Description: "Run extension review", Kind: "recipe"}},
+		{ExtensionID: "doctor", Registration: extensions.CommandRegistration{Name: "doctor", Description: "Inspect health", Kind: "command"}},
+	}
+	output := &RecipeListOutput{Format: RecipeJSONFormat}
+
+	appendExtensionRecipeOutputs(output, commands, false)
+
+	require.Len(t, output.Recipes, 1)
+	assert.Equal(t, "review", output.Recipes[0].ID)
+	assert.Equal(t, "Run extension review", output.Recipes[0].Description)
+	assert.Equal(t, "extension:reviewer/review", output.Recipes[0].Path)
 }
 
 func TestRecipeListOutputRenderTable(t *testing.T) {

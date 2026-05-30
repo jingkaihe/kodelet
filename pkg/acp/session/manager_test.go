@@ -20,10 +20,10 @@ func TestNewManager_WithManagerConfig(t *testing.T) {
 		assert.Empty(t, m.config.Provider)
 		assert.Empty(t, m.config.Model)
 		assert.False(t, m.config.NoSkills)
+		assert.False(t, m.config.NoExtensions)
 		assert.False(t, m.config.NoWorkflows)
 		assert.False(t, m.config.DisableFSSearchTools)
 		assert.False(t, m.config.DisableSubagent)
-		assert.False(t, m.config.NoHooks)
 	})
 
 	t.Run("creates manager with all config fields", func(t *testing.T) {
@@ -32,10 +32,10 @@ func TestNewManager_WithManagerConfig(t *testing.T) {
 			Model:                "claude-sonnet-4-6",
 			MaxTokens:            4096,
 			NoSkills:             true,
+			NoExtensions:         true,
 			NoWorkflows:          true,
 			DisableFSSearchTools: true,
 			DisableSubagent:      true,
-			NoHooks:              true,
 			MaxTurns:             10,
 			CompactRatio:         0.7,
 		}
@@ -63,15 +63,6 @@ func TestManager_BuildLLMConfig(t *testing.T) {
 
 		llmConfig := m.buildLLMConfig("")
 		assert.True(t, llmConfig.DisableSubagent)
-	})
-
-	t.Run("propagates NoHooks to LLM config", func(t *testing.T) {
-		m := NewManager(ManagerConfig{
-			NoHooks: true,
-		})
-
-		llmConfig := m.buildLLMConfig("")
-		assert.True(t, llmConfig.NoHooks)
 	})
 
 	t.Run("propagates provider and model overrides", func(t *testing.T) {

@@ -10,7 +10,6 @@ import (
 	"github.com/avast/retry-go/v4"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/goals"
-	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -129,7 +128,7 @@ func TestThreadSwapContextReplacesHistoryAndClearsState(t *testing.T) {
 	state := tools.NewBasicState(context.Background())
 	require.NoError(t, state.SetFileLastAccessed("old.go", time.Now()))
 	thread := &Thread{
-		Thread: base.NewThread(llmtypes.Config{Model: "gpt-4.1"}, "conv-swap", hooks.Trigger{}),
+		Thread: base.NewThread(llmtypes.Config{Model: "gpt-4.1"}, "conv-swap"),
 		inputItems: []openairesponses.ResponseInputItemUnionParam{
 			openairesponses.ResponseInputItemParamOfMessage("old message", openairesponses.EasyInputMessageRoleUser),
 		},
@@ -543,7 +542,6 @@ func TestCompactContextIncludesInstructions(t *testing.T) {
 		Thread: base.NewThread(
 			llmtypes.Config{Provider: "openai", Model: "gpt-4.1"},
 			"conv-test",
-			hooks.Trigger{},
 		),
 		inputItems: []openairesponses.ResponseInputItemUnionParam{
 			{
@@ -578,7 +576,6 @@ func TestCompactContextCodexUsesCompactEndpoint(t *testing.T) {
 		Thread: base.NewThread(
 			llmtypes.Config{Provider: "openai", Model: "gpt-5.1-codex"},
 			"conv-test",
-			hooks.Trigger{},
 		),
 		isCodex: true,
 		inputItems: []openairesponses.ResponseInputItemUnionParam{
@@ -624,7 +621,6 @@ func TestCompactContextOpenAICompatiblePlatformsUseSummaryCompaction(t *testing.
 				Thread: base.NewThread(
 					llmtypes.Config{Provider: "openai", Model: "gpt-5", OpenAI: &llmtypes.OpenAIConfig{Platform: platform}},
 					"conv-test",
-					hooks.Trigger{},
 				),
 				useCopilot: platform == "copilot",
 				inputItems: []openairesponses.ResponseInputItemUnionParam{
@@ -704,7 +700,6 @@ func TestCompactContextUsesRawJSONByDefault(t *testing.T) {
 		Thread: base.NewThread(
 			llmtypes.Config{Provider: "openai", Model: "gpt-4.1"},
 			"conv-test",
-			hooks.Trigger{},
 		),
 		inputItems: []openairesponses.ResponseInputItemUnionParam{
 			{
@@ -719,7 +714,7 @@ func TestCompactContextUsesRawJSONByDefault(t *testing.T) {
 	compactCalled := false
 	thread.compactFunc = func(_ context.Context, _ openairesponses.ResponseCompactParams, _ ...option.RequestOption) (*openairesponses.CompactedResponse, error) {
 		compactCalled = true
-		return nil, errors.New("compact endpoint should not be used when raw JSON hook is available")
+		return nil, errors.New("compact endpoint should not be used when raw JSON compact function is available")
 	}
 
 	rawCalled := false
@@ -742,7 +737,7 @@ func TestCompactContextUsesRawJSONByDefault(t *testing.T) {
 	err := thread.CompactContext(context.Background())
 	require.NoError(t, err)
 	assert.True(t, rawCalled, "raw JSON compact should run by default")
-	assert.False(t, compactCalled, "typed compact hook should not run when raw JSON hook is available")
+	assert.False(t, compactCalled, "typed compact function should not run when raw JSON compact function is available")
 	assert.False(t, fallbackCalled, "summary fallback should not run when raw compact succeeds")
 }
 
@@ -751,7 +746,6 @@ func TestCompactContextFallsBackOnCompactError(t *testing.T) {
 		Thread: base.NewThread(
 			llmtypes.Config{Provider: "openai", Model: "gpt-4.1"},
 			"conv-test",
-			hooks.Trigger{},
 		),
 		inputItems: []openairesponses.ResponseInputItemUnionParam{
 			{
@@ -783,7 +777,6 @@ func TestCompactContextParsesCodexCompactionSummaryVariant(t *testing.T) {
 		Thread: base.NewThread(
 			llmtypes.Config{Provider: "openai", Model: "gpt-5.1-codex"},
 			"conv-test",
-			hooks.Trigger{},
 		),
 		isCodex: true,
 		inputItems: []openairesponses.ResponseInputItemUnionParam{
@@ -860,7 +853,6 @@ func TestCompactContextPreservesAssistantMessageFromCompactOutput(t *testing.T) 
 		Thread: base.NewThread(
 			llmtypes.Config{Provider: "openai", Model: "gpt-4.1"},
 			"conv-test",
-			hooks.Trigger{},
 		),
 		inputItems: []openairesponses.ResponseInputItemUnionParam{
 			{
@@ -933,7 +925,6 @@ func TestCompactContextUpdatesContextWindowEstimateAfterNativeCompaction(t *test
 		Thread: base.NewThread(
 			llmtypes.Config{Provider: "openai", Model: "gpt-4.1"},
 			"conv-test",
-			hooks.Trigger{},
 		),
 		inputItems: []openairesponses.ResponseInputItemUnionParam{
 			{
@@ -995,7 +986,6 @@ func TestCompactContextPreservesFunctionCallFromCompactOutput(t *testing.T) {
 		Thread: base.NewThread(
 			llmtypes.Config{Provider: "openai", Model: "gpt-4.1"},
 			"conv-test",
-			hooks.Trigger{},
 		),
 		inputItems: []openairesponses.ResponseInputItemUnionParam{
 			{
@@ -1065,7 +1055,6 @@ func TestCompactContextFallsBackWhenCompactOutputUnusable(t *testing.T) {
 		Thread: base.NewThread(
 			llmtypes.Config{Provider: "openai", Model: "gpt-4.1"},
 			"conv-test",
-			hooks.Trigger{},
 		),
 		inputItems: []openairesponses.ResponseInputItemUnionParam{
 			{
@@ -1869,7 +1858,7 @@ func (*mockResponsesConversationStore) Close() error {
 func TestProcessMessageExchangeSavesConversationPerTurn(t *testing.T) {
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", IsSubAgent: true, OpenAI: &llmtypes.OpenAIConfig{Platform: "openai", ServiceTier: llmtypes.OpenAIServiceTierFlex}}
 	thread := &Thread{
-		Thread: base.NewThread(config, "conv-test", hooks.Trigger{}),
+		Thread: base.NewThread(config, "conv-test"),
 	}
 	thread.SetState(tools.NewBasicState(context.Background()))
 
@@ -1912,7 +1901,7 @@ func TestProcessMessageExchangeSavesConversationPerTurn(t *testing.T) {
 
 func TestResponsesSaveConversationPreservesProviderNeutralMetadata(t *testing.T) {
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
-	thread := &Thread{Thread: base.NewThread(config, "conv-test", hooks.Trigger{})}
+	thread := &Thread{Thread: base.NewThread(config, "conv-test")}
 	thread.SetState(tools.NewBasicState(context.Background()))
 	metadata := conversations.AddSlashCommandDisplay(nil, "expanded recipe prompt", "/init focus", "init")
 	for key, value := range metadata {
@@ -1949,7 +1938,7 @@ func TestProcessMessageExchangeInjectsPendingSteer(t *testing.T) {
 
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
 	thread := &Thread{
-		Thread: base.NewThread(config, "conv-test", hooks.Trigger{}),
+		Thread: base.NewThread(config, "conv-test"),
 	}
 	thread.inputItems = []openairesponses.ResponseInputItemUnionParam{
 		{
@@ -2003,7 +1992,7 @@ func TestProcessMessageExchangeInjectsPendingSteerWithImages(t *testing.T) {
 
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
 	thread := &Thread{
-		Thread: base.NewThread(config, "conv-test", hooks.Trigger{}),
+		Thread: base.NewThread(config, "conv-test"),
 	}
 
 	var capturedParams openairesponses.ResponseNewParams
@@ -2036,7 +2025,7 @@ func TestProcessMessageExchangeRegistersNativeOpenAISearchToolInRequest(t *testi
 		},
 	}
 	thread := &Thread{
-		Thread: base.NewThread(config, "conv-test", hooks.Trigger{}),
+		Thread: base.NewThread(config, "conv-test"),
 	}
 	thread.SetState(tools.NewBasicState(context.Background(), tools.WithLLMConfig(config)))
 	thread.inputItems = []openairesponses.ResponseInputItemUnionParam{
@@ -2084,7 +2073,7 @@ func TestProcessMessageExchangeMirrorsCodexPromptCachingRequestShape(t *testing.
 		},
 	}
 	thread := &Thread{
-		Thread: base.NewThread(config, "conv-test", hooks.Trigger{}),
+		Thread: base.NewThread(config, "conv-test"),
 	}
 	thread.inputItems = []openairesponses.ResponseInputItemUnionParam{
 		{
@@ -2139,7 +2128,7 @@ func TestProcessMessageExchangeMirrorsCodexPromptCachingRequestShape(t *testing.
 func TestProcessMessageExchangeDoesNotInjectGoalContextFromMetadata(t *testing.T) {
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
 	thread := &Thread{
-		Thread: base.NewThread(config, "conv-test", hooks.Trigger{}),
+		Thread: base.NewThread(config, "conv-test"),
 	}
 	thread.inputItems = []openairesponses.ResponseInputItemUnionParam{
 		{
@@ -2175,7 +2164,7 @@ func TestProcessMessageExchangeDoesNotInjectGoalContextFromMetadata(t *testing.T
 func TestProcessMessageExchangeDoesNotDuplicatePersistedGoalContext(t *testing.T) {
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
 	thread := &Thread{
-		Thread: base.NewThread(config, "conv-test", hooks.Trigger{}),
+		Thread: base.NewThread(config, "conv-test"),
 	}
 	goal := goals.New("find server cores and ram", time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC))
 	goalContext := goals.RenderContext(goal)
@@ -2210,7 +2199,7 @@ func TestProcessMessageExchangeDoesNotDuplicatePersistedGoalContext(t *testing.T
 func TestProcessMessageExchangeDoesNotDuplicateExistingMiddleGoalContext(t *testing.T) {
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
 	thread := &Thread{
-		Thread: base.NewThread(config, "conv-test", hooks.Trigger{}),
+		Thread: base.NewThread(config, "conv-test"),
 	}
 	goal := goals.New("find server cores and ram", time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC))
 	goalContext := goals.RenderContext(goal)
@@ -2267,7 +2256,7 @@ func TestProcessMessageExchangeSetsConfiguredServiceTier(t *testing.T) {
 		},
 	}
 	thread := &Thread{
-		Thread: base.NewThread(config, "conv-test", hooks.Trigger{}),
+		Thread: base.NewThread(config, "conv-test"),
 	}
 	thread.inputItems = []openairesponses.ResponseInputItemUnionParam{
 		{
@@ -2298,7 +2287,7 @@ func TestProcessMessageExchangeSetsConfiguredServiceTier(t *testing.T) {
 func TestProcessMessageExchangeSavesConversationOnError(t *testing.T) {
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", IsSubAgent: true, Retry: llmtypes.RetryConfig{Attempts: 1}, OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
 	thread := &Thread{
-		Thread: base.NewThread(config, "conv-test", hooks.Trigger{}),
+		Thread: base.NewThread(config, "conv-test"),
 	}
 	thread.SetState(tools.NewBasicState(context.Background()))
 
@@ -2344,7 +2333,7 @@ func TestProcessMessageExchangeRetriesHTTPSStreamError(t *testing.T) {
 		OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"},
 	}
 	thread := &Thread{
-		Thread: base.NewThread(config, "conv-test", hooks.Trigger{}),
+		Thread: base.NewThread(config, "conv-test"),
 	}
 	thread.SetState(tools.NewBasicState(context.Background()))
 	thread.inputItems = []openairesponses.ResponseInputItemUnionParam{
@@ -2397,7 +2386,7 @@ func TestProcessMessageExchangeKeepsDurableStateBeforeHTTPSStreamRetry(t *testin
 		OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"},
 	}
 	thread := &Thread{
-		Thread: base.NewThread(config, "conv-test", hooks.Trigger{}),
+		Thread: base.NewThread(config, "conv-test"),
 		inputItems: []openairesponses.ResponseInputItemUnionParam{
 			{
 				OfMessage: &openairesponses.EasyInputMessageParam{
@@ -2471,7 +2460,7 @@ func TestProcessMessageExchangeRetriesFromToolResultAfterLocalToolExecution(t *t
 		OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"},
 	}
 	thread := &Thread{
-		Thread: base.NewThread(config, "conv-test", hooks.Trigger{}),
+		Thread: base.NewThread(config, "conv-test"),
 		inputItems: []openairesponses.ResponseInputItemUnionParam{
 			{
 				OfMessage: &openairesponses.EasyInputMessageParam{
@@ -2563,7 +2552,7 @@ func TestProcessMessageExchangeDoesNotRetryHTTPSUnrecoverableStreamError(t *test
 		OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"},
 	}
 	thread := &Thread{
-		Thread: base.NewThread(config, "conv-test", hooks.Trigger{}),
+		Thread: base.NewThread(config, "conv-test"),
 	}
 	thread.SetState(tools.NewBasicState(context.Background()))
 	thread.inputItems = []openairesponses.ResponseInputItemUnionParam{
@@ -2594,7 +2583,7 @@ func TestProcessMessageExchangeDoesNotRetryHTTPSUnrecoverableStreamError(t *test
 func TestProcessMessageExchangeCodexUsesDefaultStreamingOptions(t *testing.T) {
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-5.1-codex", OpenAI: &llmtypes.OpenAIConfig{Platform: "codex"}}
 	thread := &Thread{
-		Thread:  base.NewThread(config, "conv-test", hooks.Trigger{}),
+		Thread:  base.NewThread(config, "conv-test"),
 		isCodex: true,
 	}
 	thread.SetState(tools.NewBasicState(context.Background()))
@@ -2626,7 +2615,7 @@ func TestProcessMessageExchangeCodexUsesDefaultStreamingOptions(t *testing.T) {
 func TestSendMessageRequiresResponseCompletedEvent(t *testing.T) {
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", IsSubAgent: true}
 	thread := &Thread{
-		Thread:      base.NewThread(config, "conv-test", hooks.Trigger{}),
+		Thread:      base.NewThread(config, "conv-test"),
 		inputItems:  make([]openairesponses.ResponseInputItemUnionParam, 0),
 		storedItems: make([]StoredInputItem, 0),
 	}
@@ -2654,7 +2643,7 @@ func TestSendMessageRequiresResponseCompletedEvent(t *testing.T) {
 func TestSendMessageAutoContinuesActiveGoalUntilMaxTurns(t *testing.T) {
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}
 	thread := &Thread{
-		Thread:      base.NewThread(config, "conv-test", hooks.Trigger{}),
+		Thread:      base.NewThread(config, "conv-test"),
 		inputItems:  make([]openairesponses.ResponseInputItemUnionParam, 0),
 		storedItems: make([]StoredInputItem, 0),
 	}
@@ -2686,7 +2675,7 @@ func TestSendMessageAutoContinuesActiveGoalUntilMaxTurns(t *testing.T) {
 func TestSendMessageAutoContinuationStopsWhenUpdateGoalUnavailable(t *testing.T) {
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}
 	thread := &Thread{
-		Thread:      base.NewThread(config, "conv-test", hooks.Trigger{}),
+		Thread:      base.NewThread(config, "conv-test"),
 		inputItems:  make([]openairesponses.ResponseInputItemUnionParam, 0),
 		storedItems: make([]StoredInputItem, 0),
 	}
@@ -2716,7 +2705,7 @@ func TestSendMessageAutoContinuationStopsWhenUpdateGoalUnavailable(t *testing.T)
 func TestSendMessageAutoContinuationCanRunUntilGoalCompletes(t *testing.T) {
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}
 	thread := &Thread{
-		Thread:      base.NewThread(config, "conv-test", hooks.Trigger{}),
+		Thread:      base.NewThread(config, "conv-test"),
 		inputItems:  make([]openairesponses.ResponseInputItemUnionParam, 0),
 		storedItems: make([]StoredInputItem, 0),
 	}
@@ -2757,7 +2746,7 @@ func TestSendMessageAutoContinuationCanRunUntilGoalCompletes(t *testing.T) {
 func TestSendMessageAutoContinuationStopsWhenGoalPaused(t *testing.T) {
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}
 	thread := &Thread{
-		Thread:      base.NewThread(config, "conv-test", hooks.Trigger{}),
+		Thread:      base.NewThread(config, "conv-test"),
 		inputItems:  make([]openairesponses.ResponseInputItemUnionParam, 0),
 		storedItems: make([]StoredInputItem, 0),
 	}

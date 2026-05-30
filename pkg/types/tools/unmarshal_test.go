@@ -89,7 +89,7 @@ func TestMetadataTypeRegistry_Completeness(t *testing.T) {
 		"grep_tool", "glob_tool", "bash", "mcp_tool",
 		"view_image", "subagent",
 		"openai_web_search",
-		"web_fetch", "read_conversation", "get_goal", "update_goal", "custom_tool",
+		"web_fetch", "read_conversation", "get_goal", "update_goal", "extension_tool",
 		"code_execution", "skill", "blocked",
 	}
 
@@ -115,7 +115,7 @@ func TestAllMetadataToolTypes(t *testing.T) {
 		{"GlobMetadata", GlobMetadata{}, "glob_tool"},
 		{"BashMetadata", BashMetadata{}, "bash"},
 		{"MCPToolMetadata", MCPToolMetadata{}, "mcp_tool"},
-		{"CustomToolMetadata", CustomToolMetadata{}, "custom_tool"},
+		{"ExtensionToolMetadata", ExtensionToolMetadata{}, "extension_tool"},
 		{"ViewImageMetadata", ViewImageMetadata{}, "view_image"},
 		{"SubAgentMetadata", SubAgentMetadata{}, "subagent"},
 		{"WebFetchMetadata", WebFetchMetadata{}, "web_fetch"},

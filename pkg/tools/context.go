@@ -22,6 +22,7 @@ type ToolContext struct {
 	Provider       string
 	Model          string
 	Profile        string
+	RecipeName     string
 	MetadataStore  MetadataStore
 }
 
@@ -44,6 +45,7 @@ func ToolContextFromThreadState(threadConfig llmtypes.Config, conversationID str
 		Provider:       threadConfig.Provider,
 		Model:          threadConfig.Model,
 		Profile:        threadConfig.Profile,
+		RecipeName:     threadConfig.RecipeName,
 		MetadataStore:  metadataStore,
 	})
 }
@@ -53,12 +55,18 @@ func toolContextFromContext(ctx context.Context) ToolContext {
 	return normalizeToolContext(toolContext)
 }
 
+// ToolContextFromContext returns normalized tool execution context.
+func ToolContextFromContext(ctx context.Context) ToolContext {
+	return toolContextFromContext(ctx)
+}
+
 func normalizeToolContext(toolContext ToolContext) ToolContext {
 	toolContext.ConversationID = strings.TrimSpace(toolContext.ConversationID)
 	toolContext.WorkingDir = strings.TrimSpace(toolContext.WorkingDir)
 	toolContext.Provider = strings.TrimSpace(toolContext.Provider)
 	toolContext.Model = strings.TrimSpace(toolContext.Model)
 	toolContext.Profile = strings.TrimSpace(toolContext.Profile)
+	toolContext.RecipeName = strings.TrimSpace(toolContext.RecipeName)
 	return toolContext
 }
 
@@ -68,6 +76,7 @@ func toolContextIsEmpty(toolContext ToolContext) bool {
 		toolContext.Provider == "" &&
 		toolContext.Model == "" &&
 		toolContext.Profile == "" &&
+		toolContext.RecipeName == "" &&
 		toolContext.MetadataStore == nil
 }
 

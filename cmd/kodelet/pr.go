@@ -75,8 +75,6 @@ Use the --draft flag to create a draft pull request that is not ready for review
 			presenter.Error(err, "Failed to load configuration")
 			return
 		}
-		llmConfig.NoHooks = true // Disable hooks by default for pr command
-
 		config := getPRConfigFromFlags(cmd)
 
 		if !isGitRepository() {
@@ -137,14 +135,7 @@ Use the --draft flag to create a draft pull request that is not ready for review
 			}()
 		}
 
-		customManager, err := tools.CreateCustomToolManagerFromViper(ctx)
-		if err != nil {
-			_ = mcpManager.Close(ctx)
-			presenter.Error(err, "Failed to create custom tool manager")
-			os.Exit(1)
-		}
-
-		s := tools.NewBasicState(ctx, tools.WithLLMConfig(llmConfig), tools.WithMCPTools(mcpManager), tools.WithCustomTools(customManager))
+		s := tools.NewBasicState(ctx, tools.WithLLMConfig(llmConfig), tools.WithMCPTools(mcpManager))
 
 		if config.ResultOnly {
 			presenter.SetQuiet(true)

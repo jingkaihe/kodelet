@@ -28,13 +28,13 @@ type contextInfo struct {
 
 // BasicState implements the State interface with basic functionality
 type BasicState struct {
-	lastAccessed map[string]time.Time
-	mu           sync.RWMutex
-	workingDir   string
-	tools        []tooltypes.Tool
-	mcpTools     []tooltypes.Tool
-	customTools  []tooltypes.Tool
-	llmConfig    llmtypes.Config
+	lastAccessed   map[string]time.Time
+	mu             sync.RWMutex
+	workingDir     string
+	tools          []tooltypes.Tool
+	mcpTools       []tooltypes.Tool
+	extensionTools []tooltypes.Tool
+	llmConfig      llmtypes.Config
 
 	// Context discovery fields
 	contextCache     map[string]*contextInfo
@@ -241,14 +241,13 @@ func WithExtraMCPTools(tools []tooltypes.Tool) BasicStateOption {
 	}
 }
 
-// WithCustomTools returns an option that configures custom tools
-func WithCustomTools(customManager *CustomToolManager) BasicStateOption {
+// WithExtensionTools returns an option that configures extension-provided tools.
+func WithExtensionTools(extensionTools []tooltypes.Tool) BasicStateOption {
 	return func(_ context.Context, s *BasicState) error {
-		if noToolsConfigured(s.llmConfig) || customManager == nil {
+		if noToolsConfigured(s.llmConfig) || len(extensionTools) == 0 {
 			return nil
 		}
-		tools := filterDiscoveredToolsByAllowed(s.llmConfig, customManager.ListTools())
-		s.customTools = append(s.customTools, tools...)
+		s.extensionTools = append(s.extensionTools, filterDiscoveredToolsByAllowed(s.llmConfig, extensionTools)...)
 		return nil
 	}
 }
@@ -564,14 +563,21 @@ func (s *BasicState) MCPTools() []tooltypes.Tool {
 	return s.mcpTools
 }
 
+// ExtensionTools returns the list of extension-provided tools.
+func (s *BasicState) ExtensionTools() []tooltypes.Tool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.extensionTools
+}
+
 // Tools returns all available tools
 func (s *BasicState) Tools() []tooltypes.Tool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	tools := make([]tooltypes.Tool, 0, len(s.tools)+len(s.mcpTools)+len(s.customTools))
+	tools := make([]tooltypes.Tool, 0, len(s.tools)+len(s.mcpTools)+len(s.extensionTools))
 	tools = append(tools, s.tools...)
 	tools = append(tools, s.mcpTools...)
-	tools = append(tools, s.customTools...)
+	tools = append(tools, s.extensionTools...)
 	return tools
 }
 

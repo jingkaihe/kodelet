@@ -144,7 +144,7 @@ func TestToolContextHelpers(t *testing.T) {
 
 	store := &testMetadataStore{metadata: map[string]any{"k": "v"}}
 	fromThread := ToolContextFromThreadState(
-		llmtypes.Config{Provider: " openai ", Model: " gpt-5 ", Profile: " work ", WorkingDirectory: " /repo "},
+		llmtypes.Config{Provider: " openai ", Model: " gpt-5 ", Profile: " work ", RecipeName: " review ", WorkingDirectory: " /repo "},
 		" conv-456 ",
 		" /state ",
 		store,
@@ -154,6 +154,7 @@ func TestToolContextHelpers(t *testing.T) {
 	assert.Equal(t, "openai", fromThread.Provider)
 	assert.Equal(t, "gpt-5", fromThread.Model)
 	assert.Equal(t, "work", fromThread.Profile)
+	assert.Equal(t, "review", fromThread.RecipeName)
 	assert.Same(t, store, fromThread.MetadataStore)
 
 	fromConfigWorkingDir := ToolContextFromThreadState(llmtypes.Config{WorkingDirectory: " /config "}, "", " ", nil)
@@ -1084,12 +1085,11 @@ func TestNoToolsConfigured_PreventsAdditionalToolRegistration(t *testing.T) {
 	ctx := context.Background()
 	config := llmtypes.Config{AllowedTools: []string{NoToolsMarker}}
 
-	customManager := &CustomToolManager{}
 	state := NewBasicState(
 		ctx,
 		WithLLMConfig(config),
 		WithMainTools(),
-		WithCustomTools(customManager),
+		WithExtensionTools([]tooltypes.Tool{&testTool{name: "extension_tool"}}),
 		WithExtraMCPTools([]tooltypes.Tool{NewCodeExecutionTool(nil)}),
 		WithSkillTool(),
 		WithSubAgentTool(),
@@ -1140,19 +1140,13 @@ func TestWithSkillTool_RespectsExplicitAllowlist(t *testing.T) {
 	assert.NotContains(t, toolNames, "skill")
 }
 
-func TestWithCustomTools_RespectsExplicitAllowlist(t *testing.T) {
+func TestWithExtensionTools_RespectsExplicitAllowlist(t *testing.T) {
 	ctx := context.Background()
-	customManager := &CustomToolManager{
-		tools: map[string]*CustomTool{
-			"notallowedtool": {name: "notallowedtool"},
-		},
-	}
-
 	state := NewBasicState(
 		ctx,
 		WithLLMConfig(llmtypes.Config{AllowedTools: []string{"file_read", "grep_tool", "glob_tool"}}),
 		WithSubAgentToolsFromConfig(),
-		WithCustomTools(customManager),
+		WithExtensionTools([]tooltypes.Tool{&testTool{name: "not_allowed_extension_tool"}}),
 	)
 
 	toolNames := make([]string, len(state.Tools()))
@@ -1161,7 +1155,8 @@ func TestWithCustomTools_RespectsExplicitAllowlist(t *testing.T) {
 	}
 
 	assert.Equal(t, []string{"file_read", "grep_tool", "glob_tool"}, toolNames)
-	assert.NotContains(t, toolNames, "notallowedtool")
+	assert.Empty(t, state.ExtensionTools())
+	assert.NotContains(t, toolNames, "not_allowed_extension_tool")
 }
 
 func TestWithSkillTool_RespectsNoSkillsFlag(t *testing.T) {

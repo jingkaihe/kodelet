@@ -50,7 +50,7 @@ export interface ToolResult {
 		| OpenAIWebSearchMetadata
 		| ReadConversationMetadata
 		| CodeExecutionMetadata
-		| CustomToolMetadata
+		| ExtensionToolMetadata
 		| MCPToolMetadata
 		| Record<string, unknown>;
 	timestamp?: string;
@@ -478,9 +478,13 @@ export interface CodeExecutionMetadata {
 	runtime?: string;
 }
 
-export interface CustomToolMetadata {
+export interface ExtensionToolMetadata {
+	extensionID?: string;
+	extensionId?: string;
+	toolName?: string;
 	executionTime?: number;
 	output?: string;
+	data?: Record<string, unknown>;
 }
 
 export interface MCPContent {

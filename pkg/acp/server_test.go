@@ -376,10 +376,10 @@ func TestServer_WithConfigStoresServerConfig(t *testing.T) {
 		Model:                "gpt-4.1",
 		MaxTokens:            1024,
 		NoSkills:             true,
+		NoExtensions:         true,
 		NoWorkflows:          true,
 		DisableFSSearchTools: true,
 		DisableSubagent:      true,
-		NoHooks:              true,
 		MaxTurns:             3,
 		CompactRatio:         0.4,
 	}

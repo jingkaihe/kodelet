@@ -236,15 +236,15 @@ func TestBlockedToolResultMethodsAndStructuredData(t *testing.T) {
 
 	assert.Equal(t, "bash", result.ToolName)
 	assert.Equal(t, "policy denied", result.Reason)
-	assert.Contains(t, result.AssistantFacing(), "Tool execution was blocked by security hook: policy denied")
+	assert.Contains(t, result.AssistantFacing(), "Tool execution was blocked by extension policy: policy denied")
 	assert.True(t, result.IsError())
-	assert.Equal(t, "blocked by hook: policy denied", result.GetError())
+	assert.Equal(t, "blocked by extension: policy denied", result.GetError())
 	assert.Empty(t, result.GetResult())
 
 	structured := result.StructuredData()
 	assert.Equal(t, "bash", structured.ToolName)
 	assert.False(t, structured.Success)
-	assert.Equal(t, "blocked by hook: policy denied", structured.Error)
+	assert.Equal(t, "blocked by extension: policy denied", structured.Error)
 	require.IsType(t, BlockedMetadata{}, structured.Metadata)
 	metadata := structured.Metadata.(BlockedMetadata)
 	assert.Equal(t, "blocked", metadata.ToolType())

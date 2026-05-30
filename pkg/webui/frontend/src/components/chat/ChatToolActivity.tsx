@@ -307,10 +307,10 @@ export const getToolSummary = (toolCall: ChatRenderToolCall): string => {
           getStringField(metadata, 'runtime')
       );
 
-    case 'custom_tool':
+    case 'extension_tool':
       return formatToolSummary(
-        'Custom tool',
-        toolCall.name.replace(/^custom_tool_/, '')
+        'Extension tool',
+        getStringField(metadata, 'toolName') || toolCall.name
       );
 
     case 'mcp_tool':
@@ -384,8 +384,8 @@ const toolSummaryIcons: Partial<Record<string, LucideIcon>> = {
   'Apply patch': Pencil,
   Bash: SquareTerminal,
   'Code execution': FileCog,
-  'Custom tool': Wrench,
   'Edit file': FilePen,
+  'Extension tool': Wrench,
   'Fetch URL': Globe,
   'Find files': Search,
   'Find in page': Search,

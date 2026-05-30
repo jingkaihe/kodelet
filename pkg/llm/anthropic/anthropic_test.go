@@ -16,7 +16,6 @@ import (
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/goals"
-	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/stretchr/testify/assert"
@@ -271,7 +270,7 @@ func TestAnthropicProcessMessageExchangeUsesManualPromptCaching(t *testing.T) {
 	defer server.Close()
 
 	thread := &Thread{
-		Thread: base.NewThread(llmtypes.Config{Provider: "anthropic", Model: "claude-sonnet-4-6"}, "conv-test", hooks.Trigger{}),
+		Thread: base.NewThread(llmtypes.Config{Provider: "anthropic", Model: "claude-sonnet-4-6"}, "conv-test"),
 		client: anthropic.NewClient(
 			option.WithBaseURL(server.URL),
 			option.WithAPIKey("test-key"),
@@ -730,7 +729,7 @@ func TestProcessPendingSteerWithImages(t *testing.T) {
 	require.NoError(t, steerStore.WriteSteerWithImages("conv-test", "Use this image", []string{"data:image/png;base64,aGVsbG8="}))
 
 	thread := &Thread{
-		Thread: base.NewThread(llmtypes.Config{Provider: "anthropic", Model: "claude-sonnet-4-6"}, "conv-test", hooks.Trigger{}),
+		Thread: base.NewThread(llmtypes.Config{Provider: "anthropic", Model: "claude-sonnet-4-6"}, "conv-test"),
 	}
 	params := &anthropic.MessageNewParams{}
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
@@ -763,7 +762,7 @@ func TestProcessPendingSteerWithUserMessageHandler(t *testing.T) {
 	require.NoError(t, steerStore.WriteSteerWithImages("conv-test", "Use this image", []string{"data:image/png;base64,aGVsbG8="}))
 
 	thread := &Thread{
-		Thread: base.NewThread(llmtypes.Config{Provider: "anthropic", Model: "claude-sonnet-4-6"}, "conv-test", hooks.Trigger{}),
+		Thread: base.NewThread(llmtypes.Config{Provider: "anthropic", Model: "claude-sonnet-4-6"}, "conv-test"),
 	}
 	params := &anthropic.MessageNewParams{}
 	handler := &captureUserMessageHandler{}
@@ -785,7 +784,7 @@ func TestExecuteToolsParallelStreamsAndOrdersResults(t *testing.T) {
 		tools.WithExtraMCPTools([]tooltypes.Tool{testTool{name: "first_tool"}, testTool{name: "second_tool"}}),
 	)
 	thread := &Thread{
-		Thread: base.NewThread(llmtypes.Config{NoHooks: true}, "conv-test", hooks.Trigger{}),
+		Thread: base.NewThread(llmtypes.Config{}, "conv-test"),
 	}
 	thread.SetState(state)
 	handler := &captureAnthropicToolHandler{}
@@ -813,7 +812,7 @@ func TestExecuteToolsParallelStreamsAndOrdersResults(t *testing.T) {
 }
 
 func TestExecuteToolsParallelHandlesEmptyCancelledAndSubscriptionNames(t *testing.T) {
-	thread := &Thread{Thread: base.NewThread(llmtypes.Config{NoHooks: true}, "conv-test", hooks.Trigger{})}
+	thread := &Thread{Thread: base.NewThread(llmtypes.Config{}, "conv-test")}
 	results, err := thread.executeToolsParallel(context.Background(), &captureAnthropicToolHandler{}, nil, llmtypes.MessageOpt{})
 	require.NoError(t, err)
 	assert.Nil(t, results)

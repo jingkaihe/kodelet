@@ -222,97 +222,96 @@ kodelet run --conversation-summary-mode first_message "query"
 ```
 Also configurable via `conversation_summary_mode: first_message` in config or `KODELET_CONVERSATION_SUMMARY_MODE=first_message`.
 
-### Agent Lifecycle Hooks
-Hooks allow external scripts to observe and control agent behavior for audit logging, security controls, and monitoring.
+### Extensions
+Extensions replace the old hook and executable custom-tool systems with one long-running subprocess primitive. An extension can register model tools, prompt commands, dynamic recipes, and lifecycle event handlers.
 
-**Hook locations (in precedence order):**
-- `.kodelet/hooks/` - Repository-local standalone (highest precedence)
-- `.kodelet/plugins/<org@repo>/hooks/` - Repository-local plugin hooks
-- `~/.kodelet/hooks/` - User-global standalone
-- `~/.kodelet/plugins/<org@repo>/hooks/` - User-global plugin hooks (lowest precedence)
+**Extension locations (in precedence order):**
+- `.kodelet/extensions/kodelet-extension-xxx` or `.kodelet/extensions/*/kodelet-extension-xxx`
+- `.kodelet/plugins/<org@repo>/extensions/...`
+- `~/.kodelet/extensions/kodelet-extension-xxx` or `~/.kodelet/extensions/*/kodelet-extension-xxx`
+- `~/.kodelet/plugins/<org@repo>/extensions/...`
 
-Plugin hooks are prefixed with `org/repo/` (e.g., `jingkaihe/hooks/audit-logger`).
-
-**Hook protocol:**
-1. `./hook hook` - Discovery: returns the event type string
-2. `echo '<json_payload>' | ./hook run` - Execution: receives JSON payload via stdin, returns JSON result
-
-**Payload Types (TypeScript):**
+**TypeScript SDK:**
 ```typescript
-type HookType = "before_tool_call" | "after_tool_call" | "user_message_send" | "agent_stop";
-type InvokedBy = "main" | "subagent";
+import { z, defineExtension } from "@jingkaihe/kodelet";
 
-interface BasePayload {
-  event: HookType;
-  conv_id: string;
-  cwd: string;
-  invoked_by: InvokedBy;
-  recipe_name?: string;  // Present when invoked via a recipe
-}
+const WeatherInput = z.object({ location: z.string() });
 
-// before_tool_call: Can block or modify tool input
-interface BeforeToolCallPayload extends BasePayload {
-  event: "before_tool_call";
-  tool_name: string;
-  tool_input: Record<string, unknown>;
-  tool_user_id: string;
-}
-interface BeforeToolCallResult {
-  blocked: boolean;
-  reason?: string;
-  input?: Record<string, unknown>;
-}
+export default defineExtension((ext) => {
+  ext.registerTool({
+    name: "get_weather",
+    description: "Get weather for a location",
+    inputSchema: WeatherInput,
+    async execute(input, ctx) {
+      ctx.log.info(`Fetching weather for ${input.location}`);
+      return { content: `Weather for ${input.location}: cloudy` };
+    },
+  });
 
-// after_tool_call: Can modify tool output
-interface AfterToolCallPayload extends BasePayload {
-  event: "after_tool_call";
-  tool_name: string;
-  tool_input: Record<string, unknown>;
-  tool_output: { toolName: string; success: boolean; error?: string; timestamp: string };
-  tool_user_id: string;
-}
-interface AfterToolCallResult {
-  output?: { toolName: string; success: boolean; error?: string; timestamp: string };
-}
-
-// user_message_send: Can block message
-interface UserMessageSendPayload extends BasePayload {
-  event: "user_message_send";
-  message: string;
-}
-interface UserMessageSendResult {
-  blocked: boolean;
-  reason?: string;
-}
-
-// agent_stop: Can return follow-up messages
-interface AgentStopPayload extends BasePayload {
-  event: "agent_stop";
-  messages: Array<{ role: "user" | "assistant"; content: string }>;
-}
-interface AgentStopResult {
-  follow_up_messages?: string[];
-}
+  ext.on("tool.call", async (event) => {
+    if (event.tool.name === "bash" && JSON.stringify(event.tool.input).includes("rm -rf /")) {
+      return { block: { reason: "Dangerous command denied" } };
+    }
+  });
+});
 ```
 
-**Example hook (only acts for main agent):**
-```bash
-#!/bin/bash
-if [ "$1" == "hook" ]; then echo "agent_stop"; exit 0; fi
-if [ "$1" == "run" ]; then
-    payload=$(cat)
-    invoked_by=$(echo "$payload" | jq -r '.invoked_by')
-    if [ "$invoked_by" != "main" ]; then exit 0; fi
-    if [ -f "./cleanup-needed.txt" ]; then
-        echo '{"follow_up_messages":["Please clean up temporary files."]}'
-    fi
-    exit 0
-fi
+**Commands and dynamic recipes:**
+```typescript
+ext.registerCommand({
+  name: "review",
+  aliases: ["/review"],
+  description: "Run an extension-provided review recipe",
+  kind: "recipe",
+  inputSchema: z.object({ target: z.string().default("HEAD") }),
+  async execute(input) {
+    return {
+      action: "runAgent",
+      recipeName: "review",
+      prompt: `Review ${input.target}. Focus on correctness, simplicity, and tests.`,
+    };
+  },
+});
 ```
 
-**Disabling hooks:**
+Command result actions:
+- `pass`: decline handling and continue normal routing
+- `respond`: display a direct terminal/Web UI response; not fed into the LLM
+- `runAgent`: replace the prompt and run the normal agent flow; this prompt is LLM input
+
+Recipe-like commands use `kind: "recipe"`, appear in `kodelet recipe list`, can be invoked with `kodelet run -r review --arg target=main`, and can also be invoked directly as `/review target=main`.
+
+**Lifecycle events:**
+- `session.start`, `resources.discover`, `session.end`
+- `user.message`, `agent.init`, `agent.start`, `turn.start`, `turn.end`, `agent.end`
+- `tool.call`, `tool.result`
+
+**Configuration:**
+```yaml
+extensions:
+  enabled: true
+  global_dir: ~/.kodelet/extensions
+  local_dir: ./.kodelet/extensions
+  timeout: 30s
+  tool_timeout: 120s
+  allow:
+    - org@repo/security
+    - ./.kodelet/extensions/weather
+  deny:
+    - org@repo/experimental
+  tools:
+    get_weather:
+      enabled: true
+      timeout: 10s
+  events:
+    tool.call:
+      timeout: 5s
+```
+
+Disable extensions for one run with:
 ```bash
-kodelet run --no-hooks "query"
+kodelet run --no-extensions "query"
+kodelet acp --no-extensions
 ```
 
 ### Git Integration
@@ -352,83 +351,12 @@ kodelet run --image ./diagram.png --image ./mockup.jpg "Compare these designs"
 **Supported:** JPEG, PNG, GIF, WebP | **Max:** 5MB per image, 10 images per message
 **Provider Support:** All providers (Anthropic, OpenAI, Google) if the model supports multi-modal
 
-### Custom Tools
-Extend kodelet with executable tools in any language:
+### Extension Tools
+Extension tools are model-invoked tools registered by the extension runtime. They replace the removed executable custom-tool protocol.
 
-**Directory structure:**
-- `./.kodelet/tools/` - Repository-local standalone tools
-- `./.kodelet/plugins/<org@repo>/tools/` - Repository-local plugin tools
-- `~/.kodelet/tools/` - User-global standalone tools
-- `~/.kodelet/plugins/<org@repo>/tools/` - User-global plugin tools
+Use `ext.registerTool(...)` in a TypeScript extension, provide a Zod `inputSchema`, and return either a string or `{ content, data?, error? }`. Kodelet exposes registered extension tools alongside built-in and MCP tools.
 
-If the same tool name appears in multiple locations, precedence is local standalone > local plugin > global standalone > global plugin.
-
-**Direct CLI invocation:**
-Custom tools can be inspected and run directly without going through the agent:
-
-```bash
-# List discovered tools
-kodelet custom-tool list
-
-# Show description, executable path, and JSON schema
-kodelet custom-tool describe hello
-
-# Invoke a tool using flags generated from its input_schema
-kodelet custom-tool invoke hello --name Ada --age 36
-
-# Short alias
-kodelet cti hello --name Ada --age 36
-
-# Show dynamic per-tool help
-kodelet custom-tool invoke hello --help
-
-# Pass nested or advanced JSON that does not map cleanly to flags
-kodelet custom-tool invoke hello --name Ada --input-json '{"config":{"verbose":true}}'
-```
-
-`kodelet custom-tool invoke <tool> --help` is generated at runtime from the tool's `input_schema`. Strings, integers, numbers, booleans, and string/integer arrays are exposed as flags automatically. Use `--input-json` for nested or complex properties; when both flags and `--input-json` are provided, the JSON values are merged on top of the flag-derived input.
-
-Flags after the tool name are reserved for the tool's schema-derived input. For runtime overrides such as timeout, use config or an environment variable instead of expecting a built-in `invoke` flag.
-
-**Runtime configuration:**
-Custom tools use `custom_tools.timeout` (`120s` by default). Individual tools can override timeout and inject environment variables with `custom_tools.tools.<tool-name>`:
-
-```yaml
-custom_tools:
-  tools:
-    seer:
-      timeout: 30m
-      envs:
-        SEER_MODEL: gpt-5.5
-        ANTHROPIC_API_KEY:
-```
-
-Bare or `null` env values inherit from Kodelet's current process environment, so `ANTHROPIC_API_KEY:` behaves like `ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY` when that variable is set. Use `KEY: ""` to intentionally pass an empty string.
-
-Tool binaries may also optionally implement `./my-tool config` and return defaults such as `{"timeout":"30m"}`. Explicit `custom_tools.tools.<tool-name>.timeout` wins over the optional tool config.
-
-For one-off runs, override the global custom tool timeout per process with `KODELET_CUSTOM_TOOLS_TIMEOUT`:
-
-```bash
-KODELET_CUSTOM_TOOLS_TIMEOUT=300s kodelet custom-tool invoke my-tool ...
-```
-
-This environment variable also applies when `kodelet run ...` invokes a custom tool through the agent.
-
-**Generate custom tools:**
-Install the `custom-tool` skill from the `jingkaihe/skills` plugin, then ask for the tool in natural language:
-
-```bash
-kodelet plugin add jingkaihe/skills
-kodelet run "Create a Kodelet custom tool that fetches weather without an API key and save it locally."
-```
-
-**Tool protocol:**
-```bash
-./my-tool description  # Returns JSON schema
-./my-tool config       # Optional runtime defaults
-./my-tool run          # Executes with JSON input from stdin
-```
+Per-tool extension settings live under `extensions.tools.<tool-name>` rather than the removed `custom_tools` config block.
 
 ### MCP Integration
 Model Context Protocol for external integrations. Configure in `config.yaml`:

@@ -1,20 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import CustomToolRenderer from './CustomToolRenderer';
+import ExtensionToolRenderer from './ExtensionToolRenderer';
 import { ToolResult } from '../../types';
 
-describe('CustomToolRenderer', () => {
-  it('pretty-prints JSON output from custom tools', () => {
+describe('ExtensionToolRenderer', () => {
+  it('pretty-prints JSON output from extension tools', () => {
     const toolResult: ToolResult = {
-      toolName: 'custom_tool_git_info',
+      toolName: 'git_info',
       success: true,
       timestamp: '2026-05-12T00:00:00Z',
       metadata: {
+        type: 'extension_tool',
+        extensionID: 'git',
+        toolName: 'git_info',
         output: '{"branch":"main","changes":0}',
       },
     };
 
-    const { container } = render(<CustomToolRenderer toolResult={toolResult} />);
+    const { container } = render(<ExtensionToolRenderer toolResult={toolResult} />);
 
     expect(screen.getByText('git_info')).toBeInTheDocument();
     expect(container.querySelector('.tool-code-block code')?.textContent).toBe(

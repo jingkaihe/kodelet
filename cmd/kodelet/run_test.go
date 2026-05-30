@@ -1,15 +1,21 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -356,12 +362,38 @@ func TestProcessFragmentBuildsMessageDisplay(t *testing.T) {
 	config.FragmentName = "github/pr"
 	config.FragmentArgs = map[string]string{"target": "develop"}
 
-	query, display, metadata, err := processFragment(context.Background(), config, []string{"focus", "tests"})
+	query, display, metadata, err := processFragment(context.Background(), config, []string{"focus", "tests"}, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, metadata)
 	assert.Contains(t, query, "focus tests")
 	assert.Equal(t, "/github/pr target=develop focus tests", display)
+}
+
+func TestProcessFragmentRoutesExtensionRecipeWithArgs(t *testing.T) {
+	rootDir := t.TempDir()
+	writeRunExtensionExecutable(t, filepath.Join(rootDir, "reviewer", "kodelet-extension-reviewer"))
+	runtime, err := extensions.NewRuntime(
+		context.Background(),
+		extensions.WithConfig(extensions.DefaultConfig()),
+		extensions.WithWorkingDir(rootDir),
+		extensions.WithRoots(extensions.Root{Dir: rootDir, Kind: extensions.SourceKindLocalStandalone}),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, runtime.Close()) })
+
+	config := NewRunConfig()
+	config.FragmentName = "review"
+	config.FragmentArgs = map[string]string{"target": "main"}
+
+	query, display, metadata, err := processFragment(context.Background(), config, []string{"focus", "tests"}, runtime)
+
+	require.NoError(t, err)
+	require.NotNil(t, metadata)
+	assert.Equal(t, "Review main with focus tests", query)
+	assert.Equal(t, "/review target=main focus tests", display)
+	assert.Equal(t, "review", metadata.Name)
+	assert.Equal(t, "Run extension review", metadata.Description)
 }
 
 func TestFormatFragmentDisplayArgs(t *testing.T) {
@@ -374,14 +406,14 @@ func TestFormatFragmentDisplayArgs(t *testing.T) {
 }
 
 func TestCreateRunToolManagers_NoToolsSkipsToolInitialization(t *testing.T) {
-	mcpManager, customManager, err := createRunToolManagers(context.Background(), &RunConfig{NoTools: true})
+	mcpManager, extensionRuntime, err := createRunToolManagers(context.Background(), &RunConfig{NoTools: true})
 
 	require.NoError(t, err)
 	assert.Nil(t, mcpManager)
-	assert.Nil(t, customManager)
+	assert.Nil(t, extensionRuntime)
 }
 
-func TestCreateRunToolManagersInitializesCustomToolsWithoutMCP(t *testing.T) {
+func TestCreateRunToolManagersSkipsExtensionsWhenDisabled(t *testing.T) {
 	originalSettings := viper.AllSettings()
 	originalConfigFile := viper.ConfigFileUsed()
 	viper.Reset()
@@ -396,13 +428,11 @@ func TestCreateRunToolManagersInitializesCustomToolsWithoutMCP(t *testing.T) {
 		}
 	})
 
-	viper.Set("custom_tools.enabled", false)
-	mcpManager, customManager, err := createRunToolManagers(context.Background(), &RunConfig{NoMCP: true})
+	mcpManager, extensionRuntime, err := createRunToolManagers(context.Background(), &RunConfig{NoMCP: true, NoExtensions: true})
 
 	require.NoError(t, err)
 	assert.Nil(t, mcpManager)
-	require.NotNil(t, customManager)
-	assert.Empty(t, customManager.ListCustomTools())
+	assert.Nil(t, extensionRuntime)
 }
 
 func TestCreateRunToolManagersTreatsDisabledMCPAsNil(t *testing.T) {
@@ -421,12 +451,13 @@ func TestCreateRunToolManagersTreatsDisabledMCPAsNil(t *testing.T) {
 	})
 
 	viper.Set("mcp.enabled", false)
-	viper.Set("custom_tools.enabled", false)
-	mcpManager, customManager, err := createRunToolManagers(context.Background(), NewRunConfig())
+	config := NewRunConfig()
+	config.NoExtensions = true
+	mcpManager, extensionRuntime, err := createRunToolManagers(context.Background(), config)
 
 	require.NoError(t, err)
 	assert.Nil(t, mcpManager)
-	require.NotNil(t, customManager)
+	assert.Nil(t, extensionRuntime)
 }
 
 func TestAddRunMessageDisplay(t *testing.T) {
@@ -525,7 +556,7 @@ func TestGetRunConfigFromFlags(t *testing.T) {
 	cmd.Flags().StringToString("arg", defaults.FragmentArgs, "")
 	cmd.Flags().StringSlice("fragment-dirs", defaults.FragmentDirs, "")
 	cmd.Flags().Bool("include-history", defaults.IncludeHistory, "")
-	cmd.Flags().Bool("no-hooks", defaults.NoHooks, "")
+	cmd.Flags().Bool("no-extensions", defaults.NoExtensions, "")
 	cmd.Flags().Bool("no-mcp", defaults.NoMCP, "")
 	cmd.Flags().Bool("no-tools", defaults.NoTools, "")
 	cmd.Flags().Bool("disable-fs-search-tools", defaults.DisableFSSearchTools, "")
@@ -548,7 +579,7 @@ func TestGetRunConfigFromFlags(t *testing.T) {
 	require.NoError(t, cmd.Flags().Set("arg", "short=true,target=main"))
 	require.NoError(t, cmd.Flags().Set("fragment-dirs", "recipes,more-recipes"))
 	require.NoError(t, cmd.Flags().Set("include-history", "true"))
-	require.NoError(t, cmd.Flags().Set("no-hooks", "true"))
+	require.NoError(t, cmd.Flags().Set("no-extensions", "true"))
 	require.NoError(t, cmd.Flags().Set("no-mcp", "true"))
 	require.NoError(t, cmd.Flags().Set("no-tools", "true"))
 	require.NoError(t, cmd.Flags().Set("disable-fs-search-tools", "true"))
@@ -573,7 +604,7 @@ func TestGetRunConfigFromFlags(t *testing.T) {
 	assert.Equal(t, map[string]string{"short": "true", "target": "main"}, config.FragmentArgs)
 	assert.Equal(t, []string{"recipes", "more-recipes"}, config.FragmentDirs)
 	assert.True(t, config.IncludeHistory)
-	assert.True(t, config.NoHooks)
+	assert.True(t, config.NoExtensions)
 	assert.True(t, config.NoMCP)
 	assert.True(t, config.NoTools)
 	assert.True(t, config.DisableFSSearchTools)
@@ -612,6 +643,115 @@ func (f *fakeRunThread) GetConfig() llmtypes.Config                   { return l
 func (f *fakeRunThread) AggregateSubagentUsage(llmtypes.Usage)        {}
 func (f *fakeRunThread) SetMetadataValue(key string, value any)       { f.metadata[key] = value }
 func (f *fakeRunThread) GetMetadata() map[string]any                  { return f.metadata }
+
+func writeRunExtensionExecutable(t *testing.T, path string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	executable, err := os.Executable()
+	require.NoError(t, err)
+	script := fmt.Sprintf("#!/bin/sh\nKODELET_RUN_TEST_EXTENSION_HELPER=1 exec %q -test.run TestRunExtensionHelperProcess --\n", executable)
+	require.NoError(t, os.WriteFile(path, []byte(script), 0o755))
+}
+
+func TestRunExtensionHelperProcess(t *testing.T) {
+	t.Helper()
+	if os.Getenv("KODELET_RUN_TEST_EXTENSION_HELPER") != "1" {
+		return
+	}
+	runRunExtensionHelperProcess()
+	os.Exit(0)
+}
+
+func runRunExtensionHelperProcess() {
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		payload, err := extensionsReadFrame(reader)
+		if err != nil {
+			return
+		}
+
+		var request struct {
+			ID     int64           `json:"id"`
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		if err := json.Unmarshal(payload, &request); err != nil {
+			extensionsWriteRPCResponse(request.ID, nil, map[string]any{"code": -32700, "message": err.Error()})
+			continue
+		}
+
+		switch request.Method {
+		case "extension.initialize":
+			extensionsWriteRPCResponse(request.ID, extensions.InitializeResult{
+				Name:    "reviewer",
+				Version: "0.1.0",
+				Commands: []extensions.CommandRegistration{{
+					Name:        "review",
+					Aliases:     []string{"/review"},
+					Description: "Run extension review",
+					Kind:        "recipe",
+				}},
+			}, nil)
+		case "extension.command.execute":
+			var params struct {
+				Name  string         `json:"name"`
+				Input map[string]any `json:"input"`
+			}
+			if err := json.Unmarshal(request.Params, &params); err != nil {
+				extensionsWriteRPCResponse(request.ID, nil, map[string]any{"code": -32602, "message": err.Error()})
+				continue
+			}
+			target, _ := params.Input["target"].(string)
+			text, _ := params.Input["text"].(string)
+			if target == "" {
+				target = "HEAD"
+			}
+			prompt := "Review " + target
+			if text != "" {
+				prompt += " with " + text
+			}
+			extensionsWriteRPCResponse(request.ID, extensions.CommandResult{Action: extensions.CommandActionRunAgent, Prompt: prompt, RecipeName: "review"}, nil)
+		default:
+			extensionsWriteRPCResponse(request.ID, nil, map[string]any{"code": -32601, "message": "method not found"})
+		}
+	}
+}
+
+func extensionsReadFrame(reader *bufio.Reader) ([]byte, error) {
+	contentLength := -1
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return nil, err
+		}
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" {
+			break
+		}
+		key, value, ok := strings.Cut(line, ":")
+		if !ok || !strings.EqualFold(strings.TrimSpace(key), "Content-Length") {
+			continue
+		}
+		_, _ = fmt.Sscanf(strings.TrimSpace(value), "%d", &contentLength)
+	}
+	if contentLength < 0 {
+		return nil, fmt.Errorf("missing Content-Length header")
+	}
+	payload := make([]byte, contentLength)
+	_, err := io.ReadFull(reader, payload)
+	return payload, err
+}
+
+func extensionsWriteRPCResponse(id int64, result any, rpcErr map[string]any) {
+	response := map[string]any{"jsonrpc": "2.0", "id": id}
+	if rpcErr != nil {
+		response["error"] = rpcErr
+	} else {
+		response["result"] = result
+	}
+	payload, _ := json.Marshal(response)
+	fmt.Fprintf(os.Stdout, "Content-Length: %d\r\n\r\n%s", len(payload), payload)
+}
 
 func withPipeStdin[T any](t *testing.T, input string, f func() T) T {
 	t.Helper()

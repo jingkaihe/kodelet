@@ -12,6 +12,7 @@ import (
 	"time"
 
 	conversationservice "github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/llm"
@@ -103,11 +104,6 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 		return "", errors.New("message cannot be empty")
 	}
 
-	customManager, err := tools.CreateCustomToolManagerFromViper(ctx)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to initialize custom tools")
-	}
-
 	var mcpManager *tools.MCPManager
 	mcpManager, err = tools.CreateMCPManagerFromViper(ctx)
 	if err != nil && !stdErrors.Is(err, tools.ErrMCPDisabled) {
@@ -136,6 +132,41 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 	llmConfig.MCPWorkspaceDir = workspaceDir
 	llmConfig.WorkingDirectory = resolvedCWD
 
+	extensionRuntime, err := extensions.NewRuntimeFromViper(ctx, resolvedCWD)
+	if err != nil {
+		return sessionID, errors.Wrap(err, "failed to initialize extensions")
+	}
+	if extensionRuntime != nil {
+		defer func() {
+			_ = extensionRuntime.Close()
+		}()
+		llmConfig.Extensions = extensionRuntime
+	}
+
+	if commandResult, handled, err := tryWebExtensionCommand(ctx, message, extensionRuntime, llmConfig, sessionID, resolvedCWD); err != nil {
+		return sessionID, err
+	} else if handled {
+		switch commandResult.Action {
+		case extensions.CommandActionRespond:
+			if err := sink.Send(ChatEvent{Kind: "conversation", ConversationID: sessionID, Role: "assistant"}); err != nil {
+				logger.G(ctx).WithError(err).Debug("failed to send extension command conversation event")
+			}
+			if strings.TrimSpace(commandResult.Response) != "" {
+				if err := sink.Send(ChatEvent{Kind: "text", ConversationID: sessionID, Role: "assistant", Content: commandResult.Response}); err != nil {
+					return sessionID, err
+				}
+			}
+			return sessionID, nil
+		case extensions.CommandActionRunAgent:
+			message = commandResult.Prompt
+			if strings.TrimSpace(commandResult.RecipeName) != "" {
+				llmConfig.RecipeName = commandResult.RecipeName
+			}
+		default:
+			logger.G(ctx).WithField("command", commandResult.CommandName).WithField("action", commandResult.Action).Warn("extension command returned unknown action")
+		}
+	}
+
 	message, slashExpansion, goalUpdate, err := transformWebChatSlashCommand(ctx, message, resolvedCWD)
 	if err != nil {
 		return sessionID, err
@@ -145,7 +176,7 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 		llmConfig.RecipeName = slashExpansion.Command
 	}
 
-	appState, err := buildChatState(ctx, llmConfig, sessionID, resolvedCWD, mcpManager, customManager)
+	appState, err := buildChatState(ctx, llmConfig, sessionID, resolvedCWD, mcpManager, extensionRuntime)
 	if err != nil {
 		return sessionID, err
 	}
@@ -443,6 +474,41 @@ func transformWebChatSlashCommand(ctx context.Context, message string, cwd strin
 	return message, expansion, nil, err
 }
 
+func tryWebExtensionCommand(
+	ctx context.Context,
+	message string,
+	extensionRuntime *extensions.Runtime,
+	llmConfig llmtypes.Config,
+	conversationID string,
+	workingDir string,
+) (*extensions.RoutedCommandResult, bool, error) {
+	if extensionRuntime == nil {
+		return nil, false, nil
+	}
+
+	command, args, found := slashcommands.Parse(message)
+	if !found {
+		return nil, false, nil
+	}
+
+	result, err := extensionRuntime.TryCommand(ctx, message, command, args, extensions.ExtensionCallContext{
+		ConversationID: conversationID,
+		CWD:            workingDir,
+		Provider:       llmConfig.Provider,
+		Model:          llmConfig.Model,
+		Profile:        llmConfig.Profile,
+		RecipeName:     llmConfig.RecipeName,
+		InvokedBy:      "main",
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	if result == nil || !result.Matched {
+		return nil, false, nil
+	}
+	return result, true, nil
+}
+
 func expandWebChatSlashCommand(ctx context.Context, message string, cwd string) (string, *slashcommands.Expansion, error) {
 	command, args, found := slashcommands.Parse(message)
 	if !found {
@@ -509,14 +575,16 @@ func buildChatState(
 	sessionID string,
 	workingDir string,
 	mcpManager *tools.MCPManager,
-	customManager *tools.CustomToolManager,
+	extensionRuntime *extensions.Runtime,
 ) (*tools.BasicState, error) {
 	stateOpts := []tools.BasicStateOption{
 		tools.WithWorkingDirectory(workingDir),
 		tools.WithLLMConfig(llmConfig),
-		tools.WithCustomTools(customManager),
 		tools.WithMainTools(),
 		tools.WithSkillTool(),
+	}
+	if extensionRuntime != nil {
+		stateOpts = append(stateOpts, tools.WithExtensionTools(extensionRuntime.Tools()))
 	}
 
 	if !viper.GetBool("no_workflows") && !llmConfig.DisableSubagent {

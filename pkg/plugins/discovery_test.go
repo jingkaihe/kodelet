@@ -238,15 +238,9 @@ description: A skill
 	require.NoError(t, os.MkdirAll(recipesDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(recipesDir, "my-recipe.md"), []byte("# Recipe"), 0o644))
 
-	toolsDir := filepath.Join(pluginDir, "tools")
-	require.NoError(t, os.MkdirAll(toolsDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(toolsDir, "my-tool"), []byte(`#!/bin/bash
-if [ "$1" = "description" ]; then
-	echo '{"name":"my_tool","description":"A test tool","input_schema":{"type":"object"}}'
-else
-	echo hi
-fi
-`), 0o755))
+	extensionsDir := filepath.Join(pluginDir, extensionsSubdir, "my-extension")
+	require.NoError(t, os.MkdirAll(extensionsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(extensionsDir, "kodelet-extension-my-extension"), []byte("#!/bin/sh\n"), 0o755))
 
 	discovery, err := NewDiscovery(
 		WithBaseDir(tmpDir),
@@ -262,7 +256,7 @@ fi
 	assert.Equal(t, "test-plugin", plugin.Name)
 	assert.Equal(t, []string{"my-skill"}, plugin.Skills)
 	assert.Equal(t, []string{"my-recipe"}, plugin.Recipes)
-	assert.Equal(t, []string{"my_tool"}, plugin.Tools)
+	assert.Equal(t, []string{"my-extension"}, plugin.Extensions)
 }
 
 func TestDiscoverAll(t *testing.T) {
@@ -365,32 +359,6 @@ func TestSkillAndRecipeDirsIncludePluginDirsInPrecedenceOrder(t *testing.T) {
 	}, discovery.RecipeDirs())
 }
 
-func TestHookDirsIncludesStandaloneAndPluginDirsInPrecedenceOrder(t *testing.T) {
-	tmpDir := t.TempDir()
-	baseDir := filepath.Join(tmpDir, "repo")
-	homeDir := filepath.Join(tmpDir, "home")
-
-	repoPluginHooksDir := filepath.Join(baseDir, "plugins", "org@hooks", "hooks")
-	globalPluginHooksDir := filepath.Join(homeDir, kodeletDir, "plugins", "global@hooks", "hooks")
-	require.NoError(t, os.MkdirAll(repoPluginHooksDir, 0o755))
-	require.NoError(t, os.MkdirAll(globalPluginHooksDir, 0o755))
-	require.NoError(t, os.MkdirAll(filepath.Join(baseDir, "plugins", "no-hooks"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(baseDir, "plugins", "file.txt"), []byte("ignored"), 0o644))
-
-	discovery, err := NewDiscovery(
-		WithBaseDir(baseDir),
-		WithHomeDir(homeDir),
-	)
-	require.NoError(t, err)
-
-	assert.Equal(t, []PluginDirConfig{
-		{Dir: filepath.Join(baseDir, "hooks"), Prefix: ""},
-		{Dir: repoPluginHooksDir, Prefix: "org/hooks/"},
-		{Dir: filepath.Join(homeDir, kodeletDir, "hooks"), Prefix: ""},
-		{Dir: globalPluginHooksDir, Prefix: "global/hooks/"},
-	}, discovery.HookDirs())
-}
-
 func TestDiscoverSkillsIncludesPluginSkillsWithUserFacingPrefix(t *testing.T) {
 	tmpDir := t.TempDir()
 	baseDir := filepath.Join(tmpDir, "repo")
@@ -455,14 +423,14 @@ func TestDiscoverRecipesPrecedenceAndPluginRecipes(t *testing.T) {
 	assert.Equal(t, filepath.Dir(globalPluginRecipePath), globalPluginRecipe.Directory())
 }
 
-func TestListInstalledPluginsIncludesExecutableHooksOnly(t *testing.T) {
+func TestListInstalledPluginsIncludesExtensions(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	hooksDir := filepath.Join(tmpDir, "plugins", "org@hooks", "hooks")
-	require.NoError(t, os.MkdirAll(hooksDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "before_tool_call"), []byte("#!/bin/sh\n"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "README.md"), []byte("ignored"), 0o644))
-	require.NoError(t, os.MkdirAll(filepath.Join(hooksDir, "nested"), 0o755))
+	extensionsDir := filepath.Join(tmpDir, "plugins", "org@extensions", extensionsSubdir)
+	require.NoError(t, os.MkdirAll(filepath.Join(extensionsDir, "weather"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(extensionsDir, "kodelet-extension-direct"), []byte("#!/bin/sh\n"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(extensionsDir, "README.md"), []byte("ignored"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(extensionsDir, "weather", "kodelet-extension-weather"), []byte("#!/bin/sh\n"), 0o755))
 
 	discovery, err := NewDiscovery(
 		WithBaseDir(tmpDir),
@@ -473,11 +441,10 @@ func TestListInstalledPluginsIncludesExecutableHooksOnly(t *testing.T) {
 	plugins, err := discovery.ListInstalledPlugins(false)
 	require.NoError(t, err)
 	require.Len(t, plugins, 1)
-	assert.Equal(t, "org@hooks", plugins[0].Name)
-	assert.Equal(t, []string{"before_tool_call"}, plugins[0].Hooks)
+	assert.Equal(t, "org@extensions", plugins[0].Name)
+	assert.ElementsMatch(t, []string{"direct", "weather"}, plugins[0].Extensions)
 	assert.Empty(t, plugins[0].Skills)
 	assert.Empty(t, plugins[0].Recipes)
-	assert.Empty(t, plugins[0].Tools)
 }
 
 func writeSkill(t *testing.T, dir, name, description string) {

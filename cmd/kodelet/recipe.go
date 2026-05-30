@@ -9,6 +9,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/pkg/errors"
@@ -82,6 +83,27 @@ func NewRecipeListOutput(fragmentsWithMetadata []*fragments.Fragment, format Rec
 	}
 
 	return output
+}
+
+func appendExtensionRecipeOutputs(output *RecipeListOutput, commands []extensions.Command, showPath bool) {
+	if output == nil {
+		return
+	}
+	for _, command := range commands {
+		if command.Registration.Kind != "recipe" {
+			continue
+		}
+		name := command.Registration.Name
+		recipe := RecipeOutput{
+			ID:          name,
+			Name:        name,
+			Description: command.Registration.Description,
+		}
+		if showPath || output.Format == RecipeJSONFormat {
+			recipe.Path = "extension:" + command.ExtensionID + "/" + name
+		}
+		output.Recipes = append(output.Recipes, recipe)
+	}
 }
 
 func (o *RecipeListOutput) Render(w io.Writer) error {
@@ -199,7 +221,7 @@ func init() {
 	recipeShowCmd.Flags().StringSliceP("arg", "a", []string{}, "Template arguments in format key=value (can be specified multiple times)")
 }
 
-func runRecipeList(_ context.Context, config *RecipeListConfig) error {
+func runRecipeList(ctx context.Context, config *RecipeListConfig) error {
 	processor, err := fragments.NewFragmentProcessor()
 	if err != nil {
 		return errors.Wrap(err, "failed to create fragment processor")
@@ -210,17 +232,25 @@ func runRecipeList(_ context.Context, config *RecipeListConfig) error {
 		return errors.Wrap(err, "failed to list fragments")
 	}
 
-	if len(fragmentsWithMetadata) == 0 {
-		presenter.Info("No recipes found")
-		return nil
-	}
-
 	format := RecipeTableFormat
 	if config.JSONOutput {
 		format = RecipeJSONFormat
 	}
 
 	output := NewRecipeListOutput(fragmentsWithMetadata, format, config.ShowPath)
+	extensionRuntime, err := extensions.NewRuntimeFromViper(ctx, "")
+	if err != nil {
+		return errors.Wrap(err, "failed to initialize extensions")
+	}
+	if extensionRuntime != nil {
+		defer func() { _ = extensionRuntime.Close() }()
+		appendExtensionRecipeOutputs(output, extensionRuntime.Commands(), config.ShowPath)
+	}
+
+	if len(output.Recipes) == 0 {
+		presenter.Info("No recipes found")
+		return nil
+	}
 	if err := output.Render(os.Stdout); err != nil {
 		return errors.Wrap(err, "failed to render recipe list")
 	}
