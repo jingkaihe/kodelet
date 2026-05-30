@@ -1,8 +1,10 @@
 # Kodelet
 
-## UNRELEASED
+## 0.4.24-beta (2026-05-30)
 
-Restored Anthropic prompt caching to use explicit cache-control breakpoints instead of the SDK top-level automatic cache parameter, because it is not widely supported by Anthropic-compatible endpoint. Also added prompt caching now marks the last tool definition, last system prompt block, and last cacheable user/tool-result message while clearing stale markers from earlier blocks.
+Introduced the unified extension runtime, replacing standalone hooks and executable custom tools with long-running JSON-RPC extensions that can register tools, slash commands, lifecycle event handlers, and follow-up messages.
+
+Restored Anthropic prompt caching to use explicit cache-control breakpoints for Anthropic-compatible endpoints, marking the final tool definition, system block, and cacheable conversation block while clearing stale markers from earlier content.
 
 
 ## 0.4.22-beta (2026-05-28)
