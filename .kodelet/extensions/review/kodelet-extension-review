@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+exec "$ROOT/sdk/node_modules/.bin/tsx" --tsconfig "$ROOT/.kodelet/extensions/review/tsconfig.json" "$ROOT/sdk/src/bin/kodelet-extension-node.ts" "$ROOT/.kodelet/extensions/review/src/index.ts"

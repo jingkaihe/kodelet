@@ -2,6 +2,8 @@ export { z } from "zod";
 export { defineExtension, ExtensionHost } from "./api.js";
 export { runExtension } from "./runtime.js";
 export { createTestHarness } from "./test-harness.js";
+export { renderTemplate } from "./template.js";
+export type { RenderTemplateOptions, TemplateView } from "./template.js";
 export type {
   Awaitable,
   BaseCallContext,

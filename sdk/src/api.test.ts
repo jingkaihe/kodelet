@@ -7,7 +7,7 @@ import test from "node:test";
 
 import packageJson from "../package.json" with { type: "json" };
 
-import { createTestHarness, defineExtension, z } from "./index.js";
+import { createTestHarness, defineExtension, renderTemplate, z } from "./index.js";
 
 test("package version matches root VERSION.txt", async () => {
   const version = (await readFile(path.resolve("..", "VERSION.txt"), "utf8")).trim().replace(/^v/, "");
@@ -134,6 +134,10 @@ test("agent.init can patch the system prompt and tool list", async () => {
     systemPrompt: { append: "Use safe tools only." },
     tools: { disable: ["bash"], enable: ["get_weather"] },
   });
+});
+
+test("renders Mustache templates", () => {
+  assert.equal(renderTemplate("Review {{target}} with {{focus}}", { target: "main", focus: "correctness" }), "Review main with correctness");
 });
 
 test("command context includes workspace, storage, env and process helpers", async () => {
