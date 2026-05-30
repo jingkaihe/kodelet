@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "@jingkaihe/kodelet": ["../../../sdk/src/index.ts"],
+      "@jingkaihe/kodelet/runtime": ["../../../sdk/src/runtime.ts"]
+    },
+    "types": ["node"],
+    "typeRoots": ["../../../sdk/node_modules/@types"]
+  },
+  "include": ["src/**/*.ts"]
+}
