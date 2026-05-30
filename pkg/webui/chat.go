@@ -160,6 +160,7 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 		llmConfig.Extensions = extensionRuntime
 	}
 
+	expandSlashCommand := true
 	if commandResult, handled, err := tryWebExtensionCommand(ctx, message, extensionRuntime, llmConfig, sessionID, resolvedCWD); err != nil {
 		return sessionID, err
 	} else if handled {
@@ -176,6 +177,7 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 			return sessionID, nil
 		case extensions.CommandActionRunAgent:
 			message = commandResult.Prompt
+			expandSlashCommand = false
 			if strings.TrimSpace(commandResult.RecipeName) != "" {
 				llmConfig.RecipeName = commandResult.RecipeName
 			}
@@ -184,7 +186,7 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 		}
 	}
 
-	message, slashExpansion, goalUpdate, err := transformWebChatSlashCommand(ctx, message, resolvedCWD)
+	message, slashExpansion, goalUpdate, err := transformWebChatSlashCommandIfNeeded(ctx, message, resolvedCWD, expandSlashCommand)
 	if err != nil {
 		return sessionID, err
 	}
@@ -489,6 +491,13 @@ func transformWebChatSlashCommand(ctx context.Context, message string, cwd strin
 
 	message, expansion, err := expandWebChatSlashCommand(ctx, message, cwd)
 	return message, expansion, nil, err
+}
+
+func transformWebChatSlashCommandIfNeeded(ctx context.Context, message string, cwd string, enabled bool) (string, *slashcommands.Expansion, *goals.CommandUpdate, error) {
+	if !enabled {
+		return message, nil, nil, nil
+	}
+	return transformWebChatSlashCommand(ctx, message, cwd)
 }
 
 func tryWebExtensionCommand(

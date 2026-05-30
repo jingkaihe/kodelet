@@ -7,6 +7,8 @@ import (
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
+const extensionAllowedToolsMetadataKey = "allowed_tools"
+
 // AvailableTools returns tools from state while handling disabled tool use and nil state.
 func AvailableTools(state tooltypes.State, noToolUse bool) []tooltypes.Tool {
 	return availableTools(state, noToolUse, nil)
@@ -41,11 +43,11 @@ func currentAllowedTools(thread llmtypes.Thread) []string {
 		return nil
 	}
 	metadata := thread.GetMetadata()
-	allowed, ok := metadata["allowed_tools"].([]string)
+	allowed, ok := metadata[extensionAllowedToolsMetadataKey].([]string)
 	if ok {
 		return allowed
 	}
-	rawList, ok := metadata["allowed_tools"].([]any)
+	rawList, ok := metadata[extensionAllowedToolsMetadataKey].([]any)
 	if !ok {
 		return nil
 	}

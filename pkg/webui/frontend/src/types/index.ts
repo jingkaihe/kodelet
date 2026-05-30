@@ -32,6 +32,7 @@ export interface ToolCall {
 
 export interface ToolResult {
 	toolName: string;
+	metadataType?: string;
 	success: boolean;
 	error?: string;
 	metadata?:

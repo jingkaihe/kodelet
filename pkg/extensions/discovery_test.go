@@ -137,9 +137,38 @@ func TestDefaultRootsIncludeStandaloneAndPluginRoots(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, discovery.roots, 4)
 	assert.Equal(t, Root{Dir: ".kodelet/extensions", Kind: SourceKindLocalStandalone}, discovery.roots[0])
-	assert.Equal(t, Root{Dir: filepath.Join(".kodelet", "plugins", "org@repo", "extensions"), Kind: SourceKindLocalPlugin, PluginPrefix: "org@repo"}, discovery.roots[1])
+	assert.Equal(t, Root{Dir: localPluginExt, Kind: SourceKindLocalPlugin, PluginPrefix: "org@repo"}, discovery.roots[1])
 	assert.Equal(t, Root{Dir: "~/custom-extensions", Kind: SourceKindGlobalStandalone}, discovery.roots[2])
 	assert.Equal(t, Root{Dir: globalPluginExt, Kind: SourceKindGlobalPlugin, PluginPrefix: "global@plugin"}, discovery.roots[3])
+}
+
+func TestDefaultRootsResolveLocalPluginsAgainstWorkingDir(t *testing.T) {
+	processDir := t.TempDir()
+	workingDir := t.TempDir()
+	originalWD, err := os.Getwd()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, os.Chdir(originalWD)) })
+	require.NoError(t, os.Chdir(processDir))
+
+	processPluginExt := filepath.Join(processDir, ".kodelet", "plugins", "wrong@repo", "extensions")
+	require.NoError(t, os.MkdirAll(processPluginExt, 0o755))
+	workingPluginExt := filepath.Join(workingDir, ".kodelet", "plugins", "right@repo", "extensions")
+	extensionPath := writeExecutable(t, filepath.Join(workingPluginExt, "workspace", "kodelet-extension-workspace"), "#!/bin/sh\nexit 0\n")
+
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	config := DefaultConfig()
+	config.LocalDir = filepath.Join(workingDir, ".kodelet", "extensions")
+	config.GlobalDir = filepath.Join(homeDir, ".kodelet", "extensions")
+
+	discovery, err := NewDiscovery(WithConfig(config), WithWorkingDir(workingDir))
+	require.NoError(t, err)
+
+	discovered, err := discovery.Discover()
+	require.NoError(t, err)
+	require.Len(t, discovered, 1)
+	assert.Equal(t, "right@repo/workspace", discovered[0].ID)
+	assert.Equal(t, extensionPath, discovered[0].ExecPath)
 }
 
 func TestDiscoveryAllowsRelativeExecutablePathAndDirectoryPath(t *testing.T) {

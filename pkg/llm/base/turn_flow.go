@@ -56,6 +56,7 @@ type AgentInitDecision struct {
 // ProcessAgentInit dispatches agent.init and applies supported prompt/tool-list mutations.
 func ProcessAgentInit(ctx context.Context, thread llmtypes.Thread, systemPrompt string) AgentInitDecision {
 	decision := AgentInitDecision{SystemPrompt: systemPrompt}
+	clearAllowedToolsMetadata(thread)
 	if runtime := extensionRuntime(thread); runtime != nil {
 		config := thread.GetConfig()
 		state := threadState(thread)
@@ -64,10 +65,27 @@ func ProcessAgentInit(ctx context.Context, thread llmtypes.Thread, systemPrompt 
 		decision.AllowedTools = extensionDecision.AllowedTools
 		decision.ToolsModified = extensionDecision.ToolsModified
 		if extensionDecision.ToolsModified {
-			thread.SetMetadataValue("allowed_tools", extensionDecision.AllowedTools)
+			thread.SetMetadataValue(extensionAllowedToolsMetadataKey, extensionDecision.AllowedTools)
 		}
 	}
 	return decision
+}
+
+type metadataReplacer interface {
+	SetMetadata(map[string]any)
+}
+
+func clearAllowedToolsMetadata(thread llmtypes.Thread) {
+	if thread == nil {
+		return
+	}
+	if replacer, ok := thread.(metadataReplacer); ok {
+		metadata := thread.GetMetadata()
+		delete(metadata, extensionAllowedToolsMetadataKey)
+		replacer.SetMetadata(metadata)
+		return
+	}
+	thread.SetMetadataValue(extensionAllowedToolsMetadataKey, nil)
 }
 
 func agentInitAllowedTools(config llmtypes.Config, state tooltypes.State) []string {

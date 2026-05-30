@@ -255,6 +255,15 @@ func TestTransformWebChatSlashCommandHandlesGoal(t *testing.T) {
 	assert.Equal(t, "Objective: find server cores and ram", goalUpdate.Display)
 }
 
+func TestTransformWebChatSlashCommandIfNeededSkipsExtensionPrompt(t *testing.T) {
+	prompt, expansion, goalUpdate, err := transformWebChatSlashCommandIfNeeded(context.Background(), "/tmp/path/from-extension", t.TempDir(), false)
+
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/path/from-extension", prompt)
+	assert.Nil(t, expansion)
+	assert.Nil(t, goalUpdate)
+}
+
 func TestTryWebExtensionCommandRoutesCommand(t *testing.T) {
 	rootDir := t.TempDir()
 	extDir := filepath.Join(rootDir, "commands")

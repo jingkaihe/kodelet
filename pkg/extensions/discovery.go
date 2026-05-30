@@ -114,7 +114,7 @@ func (d *Discovery) defaultRoots() ([]Root, error) {
 	roots := []Root{
 		{Dir: d.config.LocalDir, Kind: SourceKindLocalStandalone},
 	}
-	roots = append(roots, pluginExtensionRoots(filepath.Join(".kodelet", "plugins"), SourceKindLocalPlugin)...)
+	roots = append(roots, pluginExtensionRoots(normalizePath(filepath.Join(".kodelet", "plugins"), d.workingDir), SourceKindLocalPlugin)...)
 	roots = append(roots, Root{Dir: d.config.GlobalDir, Kind: SourceKindGlobalStandalone})
 	roots = append(roots, pluginExtensionRoots(filepath.Join(homeDir, ".kodelet", "plugins"), SourceKindGlobalPlugin)...)
 	return roots, nil

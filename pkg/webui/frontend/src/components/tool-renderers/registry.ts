@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react';
-import type { ToolRenderProps } from '../../types';
+import type { ToolRenderProps, ToolResult } from '../../types';
 import ApplyPatchRenderer from './ApplyPatchRenderer';
 import BashRenderer from './BashRenderer';
 import CodeExecutionRenderer from './CodeExecutionRenderer';
@@ -44,5 +44,12 @@ const toolRendererRegistry: Record<string, ToolRendererRegistration> = {
   mcp_tool: { component: MCPToolRenderer },
 };
 
-export const getToolRendererRegistration = (toolName: string): ToolRendererRegistration | undefined =>
-  toolRendererRegistry[normalizeToolName(toolName)];
+export const getToolRendererRegistration = (toolResult: ToolResult): ToolRendererRegistration | undefined => {
+  if (toolResult.metadataType) {
+    const metadataRegistration = toolRendererRegistry[normalizeToolName(toolResult.metadataType)];
+    if (metadataRegistration) {
+      return metadataRegistration;
+    }
+  }
+  return toolRendererRegistry[normalizeToolName(toolResult.toolName)];
+};

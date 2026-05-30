@@ -81,6 +81,9 @@ func (t *threadStub) SetMetadataValue(key string, value any) {
 	t.metadata[key] = value
 }
 func (t *threadStub) GetMetadata() map[string]any { return t.metadata }
+func (t *threadStub) SetMetadata(metadata map[string]any) {
+	t.metadata = metadata
+}
 
 type recordingHandler struct {
 	texts []string
@@ -117,6 +120,35 @@ func TestAgentInitAllowedToolsUsesEffectiveStateToolsByDefault(t *testing.T) {
 	assert.Equal(t, []string{"file_read", "bash", "openai_web_search"}, agentInitAllowedTools(llmtypes.Config{}, state))
 	assert.Equal(t, []string{"file_read"}, agentInitAllowedTools(llmtypes.Config{AllowedTools: []string{"file_read"}}, state))
 	assert.Empty(t, agentInitAllowedTools(llmtypes.Config{}, nil))
+}
+
+func TestProcessAgentInitClearsStaleAllowedToolsWhenNoPatchApplies(t *testing.T) {
+	t.Run("no extension runtime", func(t *testing.T) {
+		thread := &threadStub{metadata: map[string]any{extensionAllowedToolsMetadataKey: []string{"bash"}}}
+
+		decision := ProcessAgentInit(context.Background(), thread, "base prompt")
+
+		assert.Equal(t, "base prompt", decision.SystemPrompt)
+		assert.False(t, decision.ToolsModified)
+		assert.Nil(t, currentAllowedTools(thread))
+		assert.NotContains(t, thread.metadata, extensionAllowedToolsMetadataKey)
+	})
+
+	t.Run("runtime without tools patch", func(t *testing.T) {
+		thread := &threadStub{
+			metadata: map[string]any{extensionAllowedToolsMetadataKey: []string{"bash"}},
+			config: llmtypes.Config{
+				Extensions: extensions.EmptyRuntime(),
+			},
+		}
+
+		decision := ProcessAgentInit(context.Background(), thread, "base prompt")
+
+		assert.Equal(t, "base prompt", decision.SystemPrompt)
+		assert.False(t, decision.ToolsModified)
+		assert.Nil(t, currentAllowedTools(thread))
+		assert.NotContains(t, thread.metadata, extensionAllowedToolsMetadataKey)
+	})
 }
 
 func TestBase64ImageSourceMediaType(t *testing.T) {
