@@ -29,6 +29,28 @@ const mockDeleteConversation = vi.fn();
 const mockForkConversation = vi.fn();
 let routeParams: { id?: string } = {};
 
+const flushAsyncUpdates = async () => {
+	await act(async () => {
+		await Promise.resolve();
+		await Promise.resolve();
+	});
+};
+
+const runCwdSuggestionDebounce = async () => {
+	await act(async () => {
+		vi.advanceTimersByTime(150);
+		await Promise.resolve();
+		await Promise.resolve();
+	});
+};
+
+const flushCwdBlurTimer = async () => {
+	await act(async () => {
+		vi.advanceTimersByTime(120);
+		await Promise.resolve();
+	});
+};
+
 vi.mock("react-router-dom", async () => {
 	const actual =
 		await vi.importActual<typeof import("react-router-dom")>(
@@ -449,6 +471,8 @@ describe("ChatPage", () => {
 	});
 
 	it("shows cwd suggestions and applies a clicked suggestion", async () => {
+		vi.useFakeTimers();
+
 		mockGetCWDHints.mockImplementation((query: string) => {
 			if (query === "/workspace/ko") {
 				return Promise.resolve({
@@ -461,38 +485,43 @@ describe("ChatPage", () => {
 		});
 		mockStreamChat.mockResolvedValue(undefined);
 
-		render(<ChatPage />);
+		try {
+			render(<ChatPage />);
+			await flushAsyncUpdates();
 
-		await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
+			expect(mockGetChatSettings).toHaveBeenCalled();
 
-		fireEvent.click(screen.getByTestId("sidebar-new-chat-button"));
-		const cwdInput = screen.getByLabelText("Working directory");
-		fireEvent.focus(cwdInput);
-		expect(screen.queryByTestId("cwd-suggestions")).not.toBeInTheDocument();
-		fireEvent.change(cwdInput, { target: { value: "/workspace/ko" } });
+			fireEvent.click(screen.getByTestId("sidebar-new-chat-button"));
+			const cwdInput = screen.getByLabelText("Working directory");
+			fireEvent.focus(cwdInput);
+			expect(screen.queryByTestId("cwd-suggestions")).not.toBeInTheDocument();
+			fireEvent.change(cwdInput, { target: { value: "/workspace/ko" } });
+			await runCwdSuggestionDebounce();
 
-		await waitFor(() =>
-			expect(mockGetCWDHints).toHaveBeenLastCalledWith("/workspace/ko"),
-		);
-		await waitFor(() =>
-			expect(screen.getByTestId("cwd-suggestions")).toBeInTheDocument(),
-		);
+			expect(mockGetCWDHints).toHaveBeenLastCalledWith("/workspace/ko");
+			expect(screen.getByTestId("cwd-suggestions")).toBeInTheDocument();
 
-		fireEvent.mouseDown(screen.getByTestId("cwd-suggestion-0"));
-		fireEvent.click(screen.getByTestId("cwd-suggestion-0"));
-		expect(screen.getByTestId("new-chat-dialog")).toBeInTheDocument();
-		expect(screen.queryByTestId("cwd-suggestions")).not.toBeInTheDocument();
-		expect(mockGetCWDHints).not.toHaveBeenLastCalledWith(
-			"/workspace/kodelet",
-		);
-		fireEvent.click(screen.getByRole("button", { name: "Start" }));
-		expect(screen.queryByTestId("new-chat-dialog")).not.toBeInTheDocument();
-		expect(
-			screen.getByText(/workspace\/kodelet/),
-		).toBeInTheDocument();
+			fireEvent.mouseDown(screen.getByTestId("cwd-suggestion-0"));
+			fireEvent.click(screen.getByTestId("cwd-suggestion-0"));
+			expect(screen.getByTestId("new-chat-dialog")).toBeInTheDocument();
+			expect(screen.queryByTestId("cwd-suggestions")).not.toBeInTheDocument();
+			expect(mockGetCWDHints).not.toHaveBeenLastCalledWith(
+				"/workspace/kodelet",
+			);
+			fireEvent.click(screen.getByRole("button", { name: "Start" }));
+			expect(screen.queryByTestId("new-chat-dialog")).not.toBeInTheDocument();
+			expect(
+				screen.getByText(/workspace\/kodelet/),
+			).toBeInTheDocument();
+			await flushCwdBlurTimer();
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("supports keyboard selection for cwd suggestions", async () => {
+		vi.useFakeTimers();
+
 		mockGetCWDHints.mockImplementation((query: string) => {
 			if (query === "/workspace/ko") {
 				return Promise.resolve({
@@ -504,30 +533,37 @@ describe("ChatPage", () => {
 			});
 		});
 
-		render(<ChatPage />);
+		try {
+			render(<ChatPage />);
+			await flushAsyncUpdates();
 
-		await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
+			expect(mockGetChatSettings).toHaveBeenCalled();
 
-		fireEvent.click(screen.getByTestId("sidebar-new-chat-button"));
-		const cwdInput = screen.getByLabelText("Working directory");
-		fireEvent.focus(cwdInput);
-		expect(screen.queryByTestId("cwd-suggestions")).not.toBeInTheDocument();
-		fireEvent.change(cwdInput, { target: { value: "/workspace/ko" } });
+			fireEvent.click(screen.getByTestId("sidebar-new-chat-button"));
+			const cwdInput = screen.getByLabelText("Working directory");
+			fireEvent.focus(cwdInput);
+			expect(screen.queryByTestId("cwd-suggestions")).not.toBeInTheDocument();
+			fireEvent.change(cwdInput, { target: { value: "/workspace/ko" } });
+			await runCwdSuggestionDebounce();
 
-		await waitFor(() =>
-			expect(screen.getByTestId("cwd-suggestions")).toBeInTheDocument(),
-		);
+			expect(screen.getByTestId("cwd-suggestions")).toBeInTheDocument();
 
-		fireEvent.keyDown(cwdInput, { key: "ArrowDown" });
-		fireEvent.keyDown(cwdInput, { key: "Enter" });
-		fireEvent.click(screen.getByRole("button", { name: "Start" }));
+			fireEvent.keyDown(cwdInput, { key: "ArrowDown" });
+			fireEvent.keyDown(cwdInput, { key: "Enter" });
+			fireEvent.click(screen.getByRole("button", { name: "Start" }));
 
-		expect(
-			screen.getByText(/workspace\/kodelet/),
-		).toBeInTheDocument();
+			expect(
+				screen.getByText(/workspace\/kodelet/),
+			).toBeInTheDocument();
+			await flushCwdBlurTimer();
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("supports tab completion for cwd suggestions", async () => {
+		vi.useFakeTimers();
+
 		mockGetCWDHints.mockImplementation((query: string) => {
 			if (query === "/workspace/ko") {
 				return Promise.resolve({
@@ -539,27 +575,32 @@ describe("ChatPage", () => {
 			});
 		});
 
-		render(<ChatPage />);
+		try {
+			render(<ChatPage />);
+			await flushAsyncUpdates();
 
-		await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
+			expect(mockGetChatSettings).toHaveBeenCalled();
 
-		fireEvent.click(screen.getByTestId("sidebar-new-chat-button"));
-		const cwdInput = screen.getByLabelText("Working directory");
-		fireEvent.focus(cwdInput);
-		fireEvent.change(cwdInput, { target: { value: "/workspace/ko" } });
+			fireEvent.click(screen.getByTestId("sidebar-new-chat-button"));
+			const cwdInput = screen.getByLabelText("Working directory");
+			fireEvent.focus(cwdInput);
+			fireEvent.change(cwdInput, { target: { value: "/workspace/ko" } });
+			await runCwdSuggestionDebounce();
 
-		await waitFor(() =>
-			expect(screen.getByTestId("cwd-suggestions")).toBeInTheDocument(),
-		);
+			expect(screen.getByTestId("cwd-suggestions")).toBeInTheDocument();
 
-		fireEvent.keyDown(cwdInput, { key: "Tab" });
-		expect(screen.queryByTestId("cwd-suggestions")).not.toBeInTheDocument();
-		expect(cwdInput).toHaveValue("/workspace/kodelet");
-		fireEvent.click(screen.getByRole("button", { name: "Start" }));
+			fireEvent.keyDown(cwdInput, { key: "Tab" });
+			expect(screen.queryByTestId("cwd-suggestions")).not.toBeInTheDocument();
+			expect(cwdInput).toHaveValue("/workspace/kodelet");
+			fireEvent.click(screen.getByRole("button", { name: "Start" }));
 
-		expect(
-			screen.getByText(/workspace\/kodelet/),
-		).toBeInTheDocument();
+			expect(
+				screen.getByText(/workspace\/kodelet/),
+			).toBeInTheDocument();
+			await flushCwdBlurTimer();
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("keeps the latest cwd suggestions when earlier requests resolve later", async () => {
