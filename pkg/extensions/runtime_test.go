@@ -254,6 +254,32 @@ func TestRuntimeTryCommandReturnsRunAgent(t *testing.T) {
 	assert.Equal(t, "review", result.RecipeName)
 }
 
+func TestRuntimeProcessSurvivesInitializationContextCancellation(t *testing.T) {
+	rootDir := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	extDir := filepath.Join(rootDir, "commands")
+	writeExecutable(t, filepath.Join(extDir, "kodelet-extension-commands"), helperExtensionScript(t))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	runtime, err := NewRuntime(
+		ctx,
+		WithConfig(DefaultConfig()),
+		WithWorkingDir(rootDir),
+		WithRoots(Root{Dir: rootDir, Kind: SourceKindLocalStandalone}),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, runtime.Close()) })
+	cancel()
+	time.Sleep(50 * time.Millisecond)
+
+	result, err := runtime.TryCommand(context.Background(), "/doctor", "doctor", "", ExtensionCallContext{ConversationID: "conv-after-cancel"})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.Matched)
+	assert.Equal(t, "All extensions are healthy for conv-after-cancel.", result.Response)
+}
+
 func TestProcessEnvUsesSanitizedBaseAndConfiguredOverrides(t *testing.T) {
 	t.Setenv("SECRET_TOKEN", "parent-secret")
 	t.Setenv("INHERITED_TOKEN", "parent-inherited")

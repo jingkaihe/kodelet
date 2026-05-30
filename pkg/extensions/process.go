@@ -53,7 +53,7 @@ func StartProcess(ctx context.Context, ext Extension, config Config) (*Process, 
 }
 
 func (p *Process) start(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, p.Extension.ExecPath)
+	cmd := exec.CommandContext(processContext(ctx), p.Extension.ExecPath)
 	cmd.Dir = p.Extension.Dir
 	cmd.Env = extensionEnv(p.config, p.Extension)
 	cmd.Stderr = os.Stderr
@@ -78,6 +78,13 @@ func (p *Process) start(ctx context.Context) error {
 	p.stdout = stdout
 	p.closed = false
 	return nil
+}
+
+func processContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return context.WithoutCancel(ctx)
 }
 
 func (p *Process) ensureRunning(ctx context.Context) error {

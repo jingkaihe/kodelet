@@ -68,6 +68,15 @@ func TestProcessRPCClientNilWhenClosedDisabledOrShutdown(t *testing.T) {
 	assert.Same(t, client, (&Process{client: client}).rpcClient())
 }
 
+func TestProcessContextIgnoresCallerCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	processCtx := processContext(ctx)
+
+	assert.NoError(t, processCtx.Err())
+}
+
 type ioDiscard struct{}
 
 func (ioDiscard) Write(payload []byte) (int, error) { return len(payload), nil }
