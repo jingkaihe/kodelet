@@ -846,14 +846,15 @@ func TestEnablePersistence_DisablePersistence(t *testing.T) {
 	assert.False(t, bt.Persisted)
 }
 
-func TestPrepareUtilityModeDisablesPersistence(t *testing.T) {
-	bt := NewThread(llmtypes.Config{}, "conv-123")
+func TestPrepareUtilityModeDisablesPersistenceAndExtensions(t *testing.T) {
+	bt := NewThread(llmtypes.Config{Extensions: "enabled"}, "conv-123")
 	bt.Persisted = true
 	bt.Store = &mockConversationStore{}
 
 	bt.PrepareUtilityMode(context.Background())
 
 	assert.False(t, bt.Persisted)
+	assert.Nil(t, bt.Config.Extensions)
 	assert.NotNil(t, bt.Store)
 }
 

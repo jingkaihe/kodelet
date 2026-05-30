@@ -68,8 +68,11 @@ func ExecuteTool(
 
 	structuredResult := result.StructuredData()
 	if runtime != nil {
-		structuredResult = runtime.DispatchToolResult(ctx, callContext, toolName, effectiveInput, toolCallID, structuredResult)
-		result = StructuredResultToolResult{Result: structuredResult, RendererRegistry: rendererRegistry}
+		var modified bool
+		structuredResult, modified = runtime.DispatchToolResult(ctx, callContext, toolName, effectiveInput, toolCallID, structuredResult)
+		if modified {
+			result = StructuredResultToolResult{Result: structuredResult, RendererRegistry: rendererRegistry}
+		}
 	}
 
 	if rendererRegistry == nil {

@@ -93,7 +93,7 @@ type processedFragment struct {
 	Responded bool
 }
 
-func processFragment(ctx context.Context, config *RunConfig, args []string, extensionRuntime *extensions.Runtime) (*processedFragment, error) {
+func processFragment(ctx context.Context, config *RunConfig, args []string, extensionRuntime *extensions.Runtime, callContext extensions.ExtensionCallContext) (*processedFragment, error) {
 	var validDirs []string
 	for _, dir := range config.FragmentDirs {
 		trimmed := strings.TrimSpace(dir)
@@ -133,12 +133,16 @@ func processFragment(ctx context.Context, config *RunConfig, args []string, exte
 	}
 
 	if extensionRuntime != nil {
+		if callContext.InvokedBy == "" {
+			callContext.InvokedBy = "main"
+		}
+		callContext.RecipeName = config.FragmentName
 		if commandResult, err := extensionRuntime.TryCommand(
 			ctx,
 			display,
 			config.FragmentName,
 			commandArgs,
-			extensions.ExtensionCallContext{InvokedBy: "main", RecipeName: config.FragmentName},
+			callContext,
 		); err != nil {
 			return nil, errors.Wrapf(err, "failed to execute extension recipe %s", config.FragmentName)
 		} else if commandResult != nil && commandResult.Matched {
@@ -273,7 +277,7 @@ func applyRunToolRestrictions(llmConfig *llmtypes.Config, fragmentMetadata *frag
 	}
 }
 
-func createRunToolManagers(ctx context.Context, config *RunConfig) (*tools.MCPManager, *extensions.Runtime, error) {
+func createRunToolManagers(ctx context.Context, config *RunConfig, workingDir string) (*tools.MCPManager, *extensions.Runtime, error) {
 	if config.NoTools {
 		return nil, nil, nil
 	}
@@ -289,7 +293,7 @@ func createRunToolManagers(ctx context.Context, config *RunConfig) (*tools.MCPMa
 
 	var extensionRuntime *extensions.Runtime
 	if !config.NoExtensions {
-		extensionRuntime, err = extensions.NewRuntimeFromViper(ctx, config.CWD)
+		extensionRuntime, err = extensions.NewRuntimeFromViper(ctx, workingDir)
 		if err != nil {
 			if mcpManager != nil {
 				_ = mcpManager.Close(ctx)
@@ -422,6 +426,8 @@ var runCmd = &cobra.Command{
 		var query string
 		var fragmentMetadata *fragments.Metadata
 		var goalUpdate *goals.CommandUpdate
+		var llmConfig llmtypes.Config
+		var resolvedCWD string
 		var err error
 
 		if config.FragmentName == "" {
@@ -444,7 +450,14 @@ var runCmd = &cobra.Command{
 			}
 		}
 
-		mcpManager, extensionRuntime, err := createRunToolManagers(ctx, config)
+		llmConfig, resolvedCWD, err = loadResumeConversationConfig(ctx, cmd, config.ResumeConvID, config.CWD)
+		if err != nil {
+			presenter.Error(err, "Failed to load configuration")
+			os.Exit(1)
+		}
+		llmConfig.WorkingDirectory = resolvedCWD
+
+		mcpManager, extensionRuntime, err := createRunToolManagers(ctx, config, resolvedCWD)
 		if err != nil {
 			presenter.Error(err, "Failed to initialize tools")
 			return
@@ -461,7 +474,14 @@ var runCmd = &cobra.Command{
 		}
 
 		if config.FragmentName != "" {
-			processed, err := processFragment(ctx, config, args, extensionRuntime)
+			processed, err := processFragment(ctx, config, args, extensionRuntime, extensions.ExtensionCallContext{
+				ConversationID: config.ResumeConvID,
+				CWD:            resolvedCWD,
+				Provider:       llmConfig.Provider,
+				Model:          llmConfig.Model,
+				Profile:        llmConfig.Profile,
+				InvokedBy:      "main",
+			})
 			if err != nil {
 				presenter.Error(err, "Failed to process fragment")
 				return
@@ -477,7 +497,14 @@ var runCmd = &cobra.Command{
 
 		if config.FragmentName == "" && goalUpdate == nil && extensionRuntime != nil {
 			if command, commandArgs, found := slashcommands.Parse(query); found {
-				commandResult, err := extensionRuntime.TryCommand(ctx, query, command, commandArgs, extensions.ExtensionCallContext{InvokedBy: "main"})
+				commandResult, err := extensionRuntime.TryCommand(ctx, query, command, commandArgs, extensions.ExtensionCallContext{
+					ConversationID: config.ResumeConvID,
+					CWD:            resolvedCWD,
+					Provider:       llmConfig.Provider,
+					Model:          llmConfig.Model,
+					Profile:        llmConfig.Profile,
+					InvokedBy:      "main",
+				})
 				if err != nil {
 					presenter.Error(err, "Failed to execute extension command")
 					return
@@ -499,18 +526,6 @@ var runCmd = &cobra.Command{
 				}
 			}
 		}
-
-		llmConfig, resolvedCWD, err := loadResumeConversationConfig(ctx, cmd, config.ResumeConvID, config.CWD)
-		if err != nil {
-			presenter.Error(err, "Failed to load configuration")
-			if mcpManager != nil {
-				if closeErr := mcpManager.Close(ctx); closeErr != nil {
-					logger.G(ctx).WithError(closeErr).Debug("failed to close MCP manager after configuration error")
-				}
-			}
-			os.Exit(1)
-		}
-		llmConfig.WorkingDirectory = resolvedCWD
 
 		if cmd.Flags().Changed("disable-fs-search-tools") {
 			llmConfig.DisableFSSearchTools = config.DisableFSSearchTools

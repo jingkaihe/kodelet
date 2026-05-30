@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -70,8 +71,12 @@ func TestEventTimeoutUsesSpecificAndDefaultTimeouts(t *testing.T) {
 
 func TestNilRuntimeDispatchersReturnDefaults(t *testing.T) {
 	var runtime *Runtime
+	toolResult := tooltypes.StructuredToolResult{ToolName: "tool", Success: true}
 
 	assert.Equal(t, UserMessageDecision{Message: "hello"}, runtime.DispatchUserMessage(context.Background(), ExtensionCallContext{}, "hello"))
 	assert.Equal(t, AgentInitDecision{SystemPrompt: "base", AllowedTools: []string{"bash"}}, runtime.DispatchAgentInitDecision(context.Background(), ExtensionCallContext{}, "base", []string{"bash"}))
 	assert.Equal(t, ToolCallDecision{Input: `{"x":1}`}, runtime.DispatchToolCall(context.Background(), ExtensionCallContext{}, "tool", `{"x":1}`, "call"))
+	modifiedResult, changed := runtime.DispatchToolResult(context.Background(), ExtensionCallContext{}, "tool", `{"x":1}`, "call", toolResult)
+	assert.False(t, changed)
+	assert.Equal(t, toolResult, modifiedResult)
 }

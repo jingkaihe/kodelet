@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
@@ -57,7 +58,8 @@ func ProcessAgentInit(ctx context.Context, thread llmtypes.Thread, systemPrompt 
 	decision := AgentInitDecision{SystemPrompt: systemPrompt}
 	if runtime := extensionRuntime(thread); runtime != nil {
 		config := thread.GetConfig()
-		extensionDecision := runtime.DispatchAgentInitDecision(ctx, buildExtensionCallContext(thread, threadState(thread)), systemPrompt, config.AllowedTools)
+		state := threadState(thread)
+		extensionDecision := runtime.DispatchAgentInitDecision(ctx, buildExtensionCallContext(thread, state), systemPrompt, agentInitAllowedTools(config, state))
 		decision.SystemPrompt = extensionDecision.SystemPrompt
 		decision.AllowedTools = extensionDecision.AllowedTools
 		decision.ToolsModified = extensionDecision.ToolsModified
@@ -66,6 +68,26 @@ func ProcessAgentInit(ctx context.Context, thread llmtypes.Thread, systemPrompt 
 		}
 	}
 	return decision
+}
+
+func agentInitAllowedTools(config llmtypes.Config, state tooltypes.State) []string {
+	if len(config.AllowedTools) > 0 {
+		return append([]string(nil), config.AllowedTools...)
+	}
+	if state == nil {
+		return nil
+	}
+	stateTools := state.Tools()
+	virtualTools := tools.VirtualToolNames()
+	allowedTools := make([]string, 0, len(stateTools)+len(virtualTools))
+	for _, tool := range stateTools {
+		if tool == nil {
+			continue
+		}
+		allowedTools = append(allowedTools, tool.Name())
+	}
+	allowedTools = append(allowedTools, virtualTools...)
+	return allowedTools
 }
 
 // TriggerTurnEnd notifies extension handlers when assistant output is finalized for a turn.

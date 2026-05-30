@@ -37,6 +37,24 @@ func TestRunExtensionListAndInspect(t *testing.T) {
 	assert.Equal(t, extensionPath, inspected.Path)
 }
 
+func TestRunExtensionListJSONEmpty(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	withTempHomeAndCWD(t, home, cwd)
+	restoreExtensionCommandViper(t, filepath.Join(home, ".kodelet", "extensions"))
+
+	listOutput := captureAllStdout(t, func() {
+		require.NoError(t, runExtensionList(context.Background(), ExtensionListConfig{JSONOutput: true}))
+	})
+
+	var payload struct {
+		Extensions []ExtensionOutput `json:"extensions"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(listOutput), &payload))
+	assert.Empty(t, payload.Extensions)
+	assert.NotContains(t, listOutput, "No extensions found")
+}
+
 func restoreExtensionCommandViper(t *testing.T, globalDir string) {
 	t.Helper()
 	originalSettings := viper.AllSettings()

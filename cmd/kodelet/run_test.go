@@ -362,7 +362,7 @@ func TestProcessFragmentBuildsMessageDisplay(t *testing.T) {
 	config.FragmentName = "github/pr"
 	config.FragmentArgs = map[string]string{"target": "develop"}
 
-	processed, err := processFragment(context.Background(), config, []string{"focus", "tests"}, nil)
+	processed, err := processFragment(context.Background(), config, []string{"focus", "tests"}, nil, extensions.ExtensionCallContext{})
 
 	require.NoError(t, err)
 	require.NotNil(t, processed.Metadata)
@@ -386,7 +386,7 @@ func TestProcessFragmentRoutesExtensionRecipeWithArgs(t *testing.T) {
 	config.FragmentName = "review"
 	config.FragmentArgs = map[string]string{"target": "main"}
 
-	processed, err := processFragment(context.Background(), config, []string{"focus", "tests"}, runtime)
+	processed, err := processFragment(context.Background(), config, []string{"focus", "tests"}, runtime, extensions.ExtensionCallContext{})
 
 	require.NoError(t, err)
 	require.NotNil(t, processed.Metadata)
@@ -395,6 +395,35 @@ func TestProcessFragmentRoutesExtensionRecipeWithArgs(t *testing.T) {
 	assert.Equal(t, "/review target=main focus tests", processed.Display)
 	assert.Equal(t, "review", processed.Metadata.Name)
 	assert.Equal(t, "Run extension review", processed.Metadata.Description)
+}
+
+func TestProcessFragmentPassesResolvedCallContextToExtensionRecipe(t *testing.T) {
+	rootDir := t.TempDir()
+	writeRunExtensionExecutable(t, filepath.Join(rootDir, "reviewer", "kodelet-extension-reviewer"))
+	runtime, err := extensions.NewRuntime(
+		context.Background(),
+		extensions.WithConfig(extensions.DefaultConfig()),
+		extensions.WithWorkingDir(rootDir),
+		extensions.WithRoots(extensions.Root{Dir: rootDir, Kind: extensions.SourceKindLocalStandalone}),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, runtime.Close()) })
+
+	config := NewRunConfig()
+	config.FragmentName = "review"
+	config.FragmentArgs = map[string]string{"target": "main"}
+
+	processed, err := processFragment(context.Background(), config, []string{"echo-context"}, runtime, extensions.ExtensionCallContext{
+		ConversationID: "conv-resume",
+		CWD:            rootDir,
+		Provider:       "anthropic",
+		Model:          "claude-test",
+		Profile:        "work",
+		InvokedBy:      "main",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "context cwd="+rootDir+" provider=anthropic model=claude-test profile=work recipe=review", processed.Query)
 }
 
 func TestProcessFragmentReturnsExtensionRecipeDirectResponse(t *testing.T) {
@@ -412,7 +441,7 @@ func TestProcessFragmentReturnsExtensionRecipeDirectResponse(t *testing.T) {
 	config := NewRunConfig()
 	config.FragmentName = "doctor"
 
-	processed, err := processFragment(context.Background(), config, nil, runtime)
+	processed, err := processFragment(context.Background(), config, nil, runtime, extensions.ExtensionCallContext{})
 
 	require.NoError(t, err)
 	require.NotNil(t, processed.Metadata)
@@ -432,7 +461,7 @@ func TestFormatFragmentDisplayArgs(t *testing.T) {
 }
 
 func TestCreateRunToolManagers_NoToolsSkipsToolInitialization(t *testing.T) {
-	mcpManager, extensionRuntime, err := createRunToolManagers(context.Background(), &RunConfig{NoTools: true})
+	mcpManager, extensionRuntime, err := createRunToolManagers(context.Background(), &RunConfig{NoTools: true}, "")
 
 	require.NoError(t, err)
 	assert.Nil(t, mcpManager)
@@ -454,7 +483,7 @@ func TestCreateRunToolManagersSkipsExtensionsWhenDisabled(t *testing.T) {
 		}
 	})
 
-	mcpManager, extensionRuntime, err := createRunToolManagers(context.Background(), &RunConfig{NoMCP: true, NoExtensions: true})
+	mcpManager, extensionRuntime, err := createRunToolManagers(context.Background(), &RunConfig{NoMCP: true, NoExtensions: true}, "")
 
 	require.NoError(t, err)
 	assert.Nil(t, mcpManager)
@@ -479,7 +508,7 @@ func TestCreateRunToolManagersTreatsDisabledMCPAsNil(t *testing.T) {
 	viper.Set("mcp.enabled", false)
 	config := NewRunConfig()
 	config.NoExtensions = true
-	mcpManager, extensionRuntime, err := createRunToolManagers(context.Background(), config)
+	mcpManager, extensionRuntime, err := createRunToolManagers(context.Background(), config, "")
 
 	require.NoError(t, err)
 	assert.Nil(t, mcpManager)
@@ -725,8 +754,9 @@ func runRunExtensionHelperProcess() {
 			}, nil)
 		case "extension.command.execute":
 			var params struct {
-				Name  string         `json:"name"`
-				Input map[string]any `json:"input"`
+				Name    string                          `json:"name"`
+				Input   map[string]any                  `json:"input"`
+				Context extensions.ExtensionCallContext `json:"context"`
 			}
 			if err := json.Unmarshal(request.Params, &params); err != nil {
 				extensionsWriteRPCResponse(request.ID, nil, map[string]any{"code": -32602, "message": err.Error()})
@@ -744,6 +774,9 @@ func runRunExtensionHelperProcess() {
 				prompt := "Review " + target
 				if text != "" {
 					prompt += " with " + text
+				}
+				if strings.Contains(text, "echo-context") {
+					prompt = fmt.Sprintf("context cwd=%s provider=%s model=%s profile=%s recipe=%s", params.Context.CWD, params.Context.Provider, params.Context.Model, params.Context.Profile, params.Context.RecipeName)
 				}
 				extensionsWriteRPCResponse(request.ID, extensions.CommandResult{Action: extensions.CommandActionRunAgent, Prompt: prompt, RecipeName: "review"}, nil)
 			default:

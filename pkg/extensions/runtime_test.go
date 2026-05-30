@@ -96,8 +96,9 @@ func TestRuntimeDispatchesToolCallAndToolResultEvents(t *testing.T) {
 			Output:      "Weather for Paris",
 		},
 	}
-	modified := runtime.DispatchToolResult(context.Background(), callContext, "get_weather", decision.Input, "call-1", original)
+	modified, changed := runtime.DispatchToolResult(context.Background(), callContext, "get_weather", decision.Input, "call-1", original)
 
+	require.True(t, changed)
 	require.True(t, modified.Success)
 	require.NotNil(t, modified.Metadata)
 	var metadata tooltypes.ExtensionToolMetadata
@@ -337,6 +338,7 @@ func TestRuntimeRejectsDuplicateToolRegistrations(t *testing.T) {
 	runtime, err := NewRuntime(
 		context.Background(),
 		WithConfig(DefaultConfig()),
+		WithWorkingDir(rootDir),
 		WithRoots(Root{Dir: rootDir, Kind: SourceKindLocalStandalone}),
 	)
 	if runtime != nil {
@@ -356,6 +358,7 @@ func TestRuntimeRejectsDuplicateCommandRegistrations(t *testing.T) {
 	runtime, err := NewRuntime(
 		context.Background(),
 		WithConfig(DefaultConfig()),
+		WithWorkingDir(rootDir),
 		WithRoots(Root{Dir: rootDir, Kind: SourceKindLocalStandalone}),
 	)
 	if runtime != nil {

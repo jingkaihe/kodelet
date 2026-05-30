@@ -11,6 +11,8 @@ go.work
 # Dependency directories
 vendor/
 bin/
+!sdk/src/bin/
+!sdk/src/bin/**
 
 # IDE and editor specific
 .idea/

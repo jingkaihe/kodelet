@@ -75,15 +75,16 @@ func runExtensionList(_ context.Context, config ExtensionListConfig) error {
 	if err != nil {
 		return err
 	}
-	if len(discovered) == 0 {
-		presenter.Info("No extensions found")
-		return nil
-	}
 
 	format := TableFormat
 	if config.JSONOutput {
 		format = JSONFormat
 	}
+	if len(discovered) == 0 && format != JSONFormat {
+		presenter.Info("No extensions found")
+		return nil
+	}
+
 	output := NewExtensionListOutput(discovered, format)
 	return output.Render(os.Stdout)
 }

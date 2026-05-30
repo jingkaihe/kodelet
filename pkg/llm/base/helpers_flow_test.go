@@ -111,6 +111,14 @@ func TestAvailableToolsForThreadHonorsExtensionAllowedTools(t *testing.T) {
 	assert.Equal(t, []tooltypes.Tool{tools[0], tools[2]}, available)
 }
 
+func TestAgentInitAllowedToolsUsesEffectiveStateToolsByDefault(t *testing.T) {
+	state := &toolState{tools: []tooltypes.Tool{namedTool("file_read"), nil, namedTool("bash")}}
+
+	assert.Equal(t, []string{"file_read", "bash", "openai_web_search"}, agentInitAllowedTools(llmtypes.Config{}, state))
+	assert.Equal(t, []string{"file_read"}, agentInitAllowedTools(llmtypes.Config{AllowedTools: []string{"file_read"}}, state))
+	assert.Empty(t, agentInitAllowedTools(llmtypes.Config{}, nil))
+}
+
 func TestBase64ImageSourceMediaType(t *testing.T) {
 	tests := []struct {
 		name      string

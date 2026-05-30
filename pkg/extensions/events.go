@@ -237,12 +237,13 @@ func (r *Runtime) DispatchToolCall(ctx context.Context, callContext ExtensionCal
 }
 
 // DispatchToolResult runs tool.result subscriptions sequentially.
-func (r *Runtime) DispatchToolResult(ctx context.Context, callContext ExtensionCallContext, toolName, toolInput, toolCallID string, output tooltypes.StructuredToolResult) tooltypes.StructuredToolResult {
+func (r *Runtime) DispatchToolResult(ctx context.Context, callContext ExtensionCallContext, toolName, toolInput, toolCallID string, output tooltypes.StructuredToolResult) (tooltypes.StructuredToolResult, bool) {
 	if r == nil {
-		return output
+		return output, false
 	}
 
 	currentOutput := output
+	modifiedOutput := false
 	input := json.RawMessage(toolInput)
 	for _, handler := range r.eventHandlers(EventToolResult) {
 		payload := toolResultPayload{Tool: toolResultPayloadTool{Name: toolName, CallID: toolCallID, Input: input, Output: currentOutput}}
@@ -260,9 +261,10 @@ func (r *Runtime) DispatchToolResult(ctx context.Context, callContext ExtensionC
 			continue
 		}
 		currentOutput = modified
+		modifiedOutput = true
 	}
 
-	return currentOutput
+	return currentOutput, modifiedOutput
 }
 
 // DispatchTurnEnd runs turn.end subscriptions.

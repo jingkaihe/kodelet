@@ -167,9 +167,10 @@ func (t *Thread) EnablePersistence(ctx context.Context, enabled bool) {
 }
 
 // PrepareUtilityMode configures a thread for internal utility calls such as summary generation.
-// Utility mode disables persistence to avoid side effects.
+// Utility mode disables persistence and extensions to avoid side effects.
 func (t *Thread) PrepareUtilityMode(ctx context.Context) {
 	t.EnablePersistence(ctx, false)
+	t.Config.Extensions = nil
 }
 
 // ResetContextStateLocked clears shared state after context replacement/compaction.
