@@ -10,7 +10,13 @@ import (
 func TestSlashCommandsConvertsCommandsAndRecipes(t *testing.T) {
 	converted := SlashCommands([]Command{
 		{Registration: CommandRegistration{Name: "/doctor"}},
-		{Registration: CommandRegistration{Name: "review", Description: "Review code", Kind: "recipe"}},
+		{Registration: CommandRegistration{Name: "review", Description: "Review code", Kind: "recipe", InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"target": map[string]any{"type": "string", "default": "HEAD"},
+				"focus":  map[string]any{"type": "string", "default": "correctness, tests"},
+			},
+		}}},
 		{Registration: CommandRegistration{Name: "   ", Description: "ignored"}},
 	})
 
@@ -21,8 +27,22 @@ func TestSlashCommandsConvertsCommandsAndRecipes(t *testing.T) {
 	assert.Equal(t, "/doctor arguments (optional)", converted[0].Placeholder)
 	assert.Equal(t, "review", converted[1].Name)
 	assert.Equal(t, "Review code", converted[1].Description)
-	assert.Equal(t, "additional instructions (optional)", converted[1].Hint)
-	assert.Equal(t, "/review additional instructions (optional)", converted[1].Placeholder)
+	assert.Equal(t, `[focus="correctness, tests" target=HEAD] additional instructions`, converted[1].Hint)
+	assert.Equal(t, `/review [focus="correctness, tests" target=HEAD] additional instructions`, converted[1].Placeholder)
+}
+
+func TestCommandHintUsesInputSchemaForCommandArguments(t *testing.T) {
+	registration := CommandRegistration{Name: "open", InputSchema: map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"path":    map[string]any{"type": "string", "default": "."},
+			"verbose": map[string]any{"type": "boolean", "default": false},
+		},
+	}}
+
+	assert.Equal(t, "[path=. verbose=false]", commandHint(registration))
+	assert.Equal(t, "additional instructions (optional)", commandHint(CommandRegistration{Kind: "recipe"}))
+	assert.Equal(t, "arguments (optional)", commandHint(CommandRegistration{}))
 }
 
 func TestRuntimeSlashCommandsHandlesNilRuntime(t *testing.T) {

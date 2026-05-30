@@ -22,6 +22,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -984,11 +985,15 @@ func TestServer_handleGetSlashCommandsIncludesExtensionCommands(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
 
-	var names []string
+	commandsByName := map[string]slashcommands.Command{}
 	for _, command := range response.Commands {
-		names = append(names, command.Name)
+		commandsByName[command.Name] = command
 	}
-	assert.Contains(t, names, "doctor")
+	assert.Contains(t, commandsByName, "doctor")
+	reviewCommand, ok := commandsByName["review-changes"]
+	require.True(t, ok)
+	assert.Equal(t, `[focus="correctness, tests" target=HEAD] additional instructions`, reviewCommand.Hint)
+	assert.Equal(t, `/review-changes [focus="correctness, tests" target=HEAD] additional instructions`, reviewCommand.Placeholder)
 }
 
 func TestServer_handleGetSlashCommandsReusesExtensionRuntime(t *testing.T) {
