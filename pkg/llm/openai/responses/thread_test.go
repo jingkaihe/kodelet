@@ -353,7 +353,7 @@ func TestBuildToolsIncludesNativeOpenAISearchWhenEligible(t *testing.T) {
 		},
 	}))
 
-	toolDefs := buildTools(state, false)
+	toolDefs := buildTools(state)
 	require.NotEmpty(t, toolDefs)
 	assert.NotNil(t, toolDefs[0].OfWebSearch)
 	assert.Equal(t, openairesponses.WebSearchToolTypeWebSearch, toolDefs[0].OfWebSearch.Type)
@@ -368,7 +368,7 @@ func TestBuildToolsSkipsNativeOpenAISearchForNonOpenAIPlatforms(t *testing.T) {
 		},
 	}))
 
-	toolDefs := buildTools(state, false)
+	toolDefs := buildTools(state)
 	for _, toolDef := range toolDefs {
 		assert.Nil(t, toolDef.OfWebSearch)
 	}
@@ -383,7 +383,7 @@ func TestBuildToolsIncludesNativeOpenAISearchForCodexPlatform(t *testing.T) {
 		},
 	}))
 
-	toolDefs := buildTools(state, false)
+	toolDefs := buildTools(state)
 	foundWebSearch := false
 	for _, toolDef := range toolDefs {
 		if toolDef.OfWebSearch != nil && toolDef.OfWebSearch.Type == openairesponses.WebSearchToolTypeWebSearch {
@@ -404,7 +404,7 @@ func TestBuildToolsSkipsNativeOpenAISearchWhenAllowlistExcludesIt(t *testing.T) 
 		},
 	}))
 
-	toolDefs := buildTools(state, false)
+	toolDefs := buildTools(state)
 	for _, toolDef := range toolDefs {
 		assert.Nil(t, toolDef.OfWebSearch)
 	}
@@ -420,7 +420,7 @@ func TestBuildToolsIncludesNativeOpenAISearchWhenAllowlistIncludesIt(t *testing.
 		},
 	}))
 
-	toolDefs := buildTools(state, false)
+	toolDefs := buildTools(state)
 	foundWebSearch := false
 	for _, toolDef := range toolDefs {
 		if toolDef.OfWebSearch != nil && toolDef.OfWebSearch.Type == openairesponses.WebSearchToolTypeWebSearch {
@@ -429,6 +429,24 @@ func TestBuildToolsIncludesNativeOpenAISearchWhenAllowlistIncludesIt(t *testing.
 		}
 	}
 	assert.True(t, foundWebSearch)
+}
+
+func TestBuildToolsForThreadHonorsExtensionAllowedTools(t *testing.T) {
+	state := tools.NewBasicState(context.Background(), tools.WithLLMConfig(llmtypes.Config{
+		Provider: "openai",
+		OpenAI: &llmtypes.OpenAIConfig{
+			Platform: "openai",
+			APIMode:  llmtypes.OpenAIAPIModeResponses,
+		},
+	}))
+	thread := &Thread{Thread: base.NewThread(llmtypes.Config{}, "conv-tools")}
+	thread.SetMetadataValue("allowed_tools", []string{"file_read"})
+
+	toolDefs := buildToolsForThread(thread, state, false)
+
+	require.Len(t, toolDefs, 1)
+	require.NotNil(t, toolDefs[0].OfFunction)
+	assert.Equal(t, "file_read", toolDefs[0].OfFunction.Name)
 }
 
 func TestIsReasoningModelDynamic(t *testing.T) {

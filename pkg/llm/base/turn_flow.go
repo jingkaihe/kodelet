@@ -42,10 +42,30 @@ func DispatchTurnStart(ctx context.Context, thread llmtypes.Thread, turnNumber i
 
 // ProcessSystemPrompt dispatches agent.init and returns the effective prompt.
 func ProcessSystemPrompt(ctx context.Context, thread llmtypes.Thread, systemPrompt string) string {
+	return ProcessAgentInit(ctx, thread, systemPrompt).SystemPrompt
+}
+
+// AgentInitDecision is the host-side result of processing agent.init handlers.
+type AgentInitDecision struct {
+	SystemPrompt  string
+	AllowedTools  []string
+	ToolsModified bool
+}
+
+// ProcessAgentInit dispatches agent.init and applies supported prompt/tool-list mutations.
+func ProcessAgentInit(ctx context.Context, thread llmtypes.Thread, systemPrompt string) AgentInitDecision {
+	decision := AgentInitDecision{SystemPrompt: systemPrompt}
 	if runtime := extensionRuntime(thread); runtime != nil {
-		return runtime.DispatchAgentInit(ctx, buildExtensionCallContext(thread, threadState(thread)), systemPrompt)
+		config := thread.GetConfig()
+		extensionDecision := runtime.DispatchAgentInitDecision(ctx, buildExtensionCallContext(thread, threadState(thread)), systemPrompt, config.AllowedTools)
+		decision.SystemPrompt = extensionDecision.SystemPrompt
+		decision.AllowedTools = extensionDecision.AllowedTools
+		decision.ToolsModified = extensionDecision.ToolsModified
+		if extensionDecision.ToolsModified {
+			thread.SetMetadataValue("allowed_tools", extensionDecision.AllowedTools)
+		}
 	}
-	return systemPrompt
+	return decision
 }
 
 // TriggerTurnEnd notifies extension handlers when assistant output is finalized for a turn.

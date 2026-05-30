@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,6 +22,8 @@ func TestRuntimeInitializesExtensionAndExecutesRegisteredTool(t *testing.T) {
 	rootDir := t.TempDir()
 	extDir := filepath.Join(rootDir, "weather")
 	writeExecutable(t, filepath.Join(extDir, "kodelet-extension-weather"), helperExtensionScript(t))
+	basePath := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", basePath)
 
 	config := DefaultConfig()
 	config.Timeout = 5 * time.Second
@@ -38,6 +41,7 @@ func TestRuntimeInitializesExtensionAndExecutesRegisteredTool(t *testing.T) {
 	require.Len(t, tools, 1)
 	assert.Equal(t, "get_weather", tools[0].Name())
 	assert.Equal(t, "get the current weather", tools[0].Description())
+	assert.DirExists(t, filepath.Join(basePath, "extensions", "data", "weather"))
 
 	ctx := kodelettools.ContextWithToolContext(context.Background(), kodelettools.ToolContext{
 		ConversationID: "conv-123",
@@ -64,6 +68,7 @@ func TestRuntimeInitializesExtensionAndExecutesRegisteredTool(t *testing.T) {
 
 func TestRuntimeDispatchesToolCallAndToolResultEvents(t *testing.T) {
 	rootDir := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	extDir := filepath.Join(rootDir, "events")
 	writeExecutable(t, filepath.Join(extDir, "kodelet-extension-events"), helperExtensionScript(t))
 
@@ -102,6 +107,7 @@ func TestRuntimeDispatchesToolCallAndToolResultEvents(t *testing.T) {
 
 func TestRuntimeDispatchToolCallCanBlock(t *testing.T) {
 	rootDir := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	extDir := filepath.Join(rootDir, "events")
 	writeExecutable(t, filepath.Join(extDir, "kodelet-extension-events"), helperExtensionScript(t))
 
@@ -123,6 +129,7 @@ func TestRuntimeDispatchToolCallCanBlock(t *testing.T) {
 
 func TestRuntimeDispatchesUserMessageEvent(t *testing.T) {
 	rootDir := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	extDir := filepath.Join(rootDir, "events")
 	writeExecutable(t, filepath.Join(extDir, "kodelet-extension-events"), helperExtensionScript(t))
 
@@ -147,6 +154,7 @@ func TestRuntimeDispatchesUserMessageEvent(t *testing.T) {
 
 func TestRuntimeDispatchesAgentInitAndEndEvents(t *testing.T) {
 	rootDir := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	extDir := filepath.Join(rootDir, "events")
 	writeExecutable(t, filepath.Join(extDir, "kodelet-extension-events"), helperExtensionScript(t))
 
@@ -163,6 +171,10 @@ func TestRuntimeDispatchesAgentInitAndEndEvents(t *testing.T) {
 	systemPrompt := runtime.DispatchAgentInit(context.Background(), callContext, "base prompt")
 	assert.Equal(t, "preface\nbase prompt\nappendix", systemPrompt)
 
+	agentInit := runtime.DispatchAgentInitDecision(context.Background(), callContext, "base prompt", []string{"bash", "file_read"})
+	assert.Equal(t, "preface\nbase prompt\nappendix", agentInit.SystemPrompt)
+	assert.Equal(t, []string{"file_read", "get_weather"}, agentInit.AllowedTools)
+
 	runtime.DispatchTurnEnd(context.Background(), callContext, "final response", 3)
 
 	followUps := runtime.DispatchAgentEnd(context.Background(), callContext, []llmtypes.Message{{Role: "assistant", Content: "done"}})
@@ -171,10 +183,10 @@ func TestRuntimeDispatchesAgentInitAndEndEvents(t *testing.T) {
 
 func TestRuntimeDispatchesSessionLifecycleEvents(t *testing.T) {
 	rootDir := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	statePath := filepath.Join(rootDir, "events.log")
 	extDir := filepath.Join(rootDir, "events")
 	writeExecutable(t, filepath.Join(extDir, "kodelet-extension-events"), helperExtensionScript(t))
-	t.Setenv("KODELET_TEST_EXTENSION_STATE", statePath)
 
 	runtime, err := NewRuntime(
 		context.Background(),
@@ -194,6 +206,7 @@ func TestRuntimeDispatchesSessionLifecycleEvents(t *testing.T) {
 
 func TestRuntimeTryCommandRoutesExtensionCommand(t *testing.T) {
 	rootDir := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	extDir := filepath.Join(rootDir, "commands")
 	writeExecutable(t, filepath.Join(extDir, "kodelet-extension-commands"), helperExtensionScript(t))
 
@@ -218,6 +231,7 @@ func TestRuntimeTryCommandRoutesExtensionCommand(t *testing.T) {
 
 func TestRuntimeTryCommandReturnsRunAgent(t *testing.T) {
 	rootDir := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	extDir := filepath.Join(rootDir, "commands")
 	writeExecutable(t, filepath.Join(extDir, "kodelet-extension-commands"), helperExtensionScript(t))
 
@@ -240,8 +254,57 @@ func TestRuntimeTryCommandReturnsRunAgent(t *testing.T) {
 	assert.Equal(t, "review", result.RecipeName)
 }
 
+func TestProcessEnvUsesSanitizedBaseAndConfiguredOverrides(t *testing.T) {
+	t.Setenv("SECRET_TOKEN", "parent-secret")
+	t.Setenv("INHERITED_TOKEN", "parent-inherited")
+	configured := "configured-secret"
+	config := DefaultConfig()
+	config.Processes = map[string]ExtensionConfig{
+		"weather": {Env: map[string]*string{
+			"SECRET_TOKEN":    &configured,
+			"INHERITED_TOKEN": nil,
+		}},
+	}
+
+	env := extensionEnv(config, Extension{ID: "weather"})
+
+	values := envMap(env)
+	assert.Equal(t, "configured-secret", values["SECRET_TOKEN"])
+	assert.Equal(t, "parent-inherited", values["INHERITED_TOKEN"])
+	assert.NotContains(t, values, "KODELET_TEST_EXTENSION_HELPER")
+}
+
+func TestProcessEnvSupportsPluginRefOverrides(t *testing.T) {
+	configured := "configured-plugin"
+	config := DefaultConfig()
+	config.Processes = map[string]ExtensionConfig{
+		"org@repo/weather": {Env: map[string]*string{"PLUGIN_TOKEN": &configured}},
+	}
+
+	env := extensionEnv(config, Extension{ID: "org@repo/weather", PluginRef: "org@repo/weather"})
+
+	assert.Equal(t, "configured-plugin", envMap(env)["PLUGIN_TOKEN"])
+}
+
+func TestSafeDataDirNamePreservesPluginIdentity(t *testing.T) {
+	assert.Equal(t, "org@repo_weather", safeDataDirName("org@repo/weather"))
+	assert.Equal(t, "extension", safeDataDirName("///"))
+}
+
+func envMap(env []string) map[string]string {
+	values := map[string]string{}
+	for _, entry := range env {
+		name, value, ok := strings.Cut(entry, "=")
+		if ok {
+			values[name] = value
+		}
+	}
+	return values
+}
+
 func TestRuntimeRejectsDuplicateToolRegistrations(t *testing.T) {
 	rootDir := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	writeExecutable(t, filepath.Join(rootDir, "first", "kodelet-extension-first"), helperExtensionScript(t))
 	writeExecutable(t, filepath.Join(rootDir, "second", "kodelet-extension-second"), helperExtensionScript(t))
 
@@ -258,6 +321,25 @@ func TestRuntimeRejectsDuplicateToolRegistrations(t *testing.T) {
 	assert.Contains(t, err.Error(), "duplicate extension tool registration: get_weather")
 }
 
+func TestRuntimeRejectsDuplicateCommandRegistrations(t *testing.T) {
+	rootDir := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	writeExecutable(t, filepath.Join(rootDir, "first", "kodelet-extension-first"), helperCommandOnlyExtensionScript(t))
+	writeExecutable(t, filepath.Join(rootDir, "second", "kodelet-extension-second"), helperCommandOnlyExtensionScript(t))
+
+	runtime, err := NewRuntime(
+		context.Background(),
+		WithConfig(DefaultConfig()),
+		WithRoots(Root{Dir: rootDir, Kind: SourceKindLocalStandalone}),
+	)
+	if runtime != nil {
+		_ = runtime.Close()
+	}
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "duplicate extension command registration: doctor")
+}
+
 func TestExtensionHelperProcess(t *testing.T) {
 	if os.Getenv("KODELET_TEST_EXTENSION_HELPER") != "1" {
 		return
@@ -266,11 +348,61 @@ func TestExtensionHelperProcess(t *testing.T) {
 	os.Exit(0)
 }
 
+func TestCommandOnlyExtensionHelperProcess(t *testing.T) {
+	if os.Getenv("KODELET_TEST_COMMAND_EXTENSION_HELPER") != "1" {
+		return
+	}
+	runCommandOnlyExtensionHelperProcess()
+	os.Exit(0)
+}
+
 func helperExtensionScript(t *testing.T) string {
 	t.Helper()
 	executable, err := os.Executable()
 	require.NoError(t, err)
 	return fmt.Sprintf("#!/bin/sh\nKODELET_TEST_EXTENSION_HELPER=1 exec %q -test.run TestExtensionHelperProcess --\n", executable)
+}
+
+func helperCommandOnlyExtensionScript(t *testing.T) string {
+	t.Helper()
+	executable, err := os.Executable()
+	require.NoError(t, err)
+	return fmt.Sprintf("#!/bin/sh\nKODELET_TEST_COMMAND_EXTENSION_HELPER=1 exec %q -test.run TestCommandOnlyExtensionHelperProcess --\n", executable)
+}
+
+func runCommandOnlyExtensionHelperProcess() {
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		payload, err := readFrame(reader)
+		if err != nil {
+			return
+		}
+
+		var request struct {
+			ID     int64  `json:"id"`
+			Method string `json:"method"`
+		}
+		if err := json.Unmarshal(payload, &request); err != nil {
+			writeHelperResponse(request.ID, nil, &rpcError{Code: -32700, Message: err.Error()})
+			continue
+		}
+
+		switch request.Method {
+		case "extension.initialize":
+			writeHelperResponse(request.ID, InitializeResult{
+				Name: "commands",
+				Commands: []CommandRegistration{{
+					Name:        "doctor",
+					Aliases:     []string{"/doctor"},
+					Description: "Inspect extension runtime health",
+				}},
+			}, nil)
+		case "extension.event.handle":
+			writeHelperResponse(request.ID, EventResult{}, nil)
+		default:
+			writeHelperResponse(request.ID, nil, &rpcError{Code: -32601, Message: "method not found"})
+		}
+	}
 }
 
 func runExtensionHelperProcess() {
@@ -384,7 +516,7 @@ func handleHelperCommand(params executeCommandParams) CommandResult {
 func handleHelperEvent(params eventParams) EventResult {
 	switch params.Event {
 	case EventSessionStart, EventResourcesDiscover, EventSessionEnd:
-		if path := os.Getenv("KODELET_TEST_EXTENSION_STATE"); path != "" {
+		if path := filepath.Join(params.Context.CWD, "events.log"); params.Context.CWD != "" {
 			file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 			if err == nil {
 				_, _ = file.WriteString(params.Event + "\n")
@@ -425,7 +557,10 @@ func handleHelperEvent(params eventParams) EventResult {
 	case EventAgentInit:
 		prepend := "preface"
 		appendix := "appendix"
-		return EventResult{SystemPrompt: &SystemPromptPatch{Prepend: &prepend, Append: &appendix}}
+		return EventResult{
+			SystemPrompt: &SystemPromptPatch{Prepend: &prepend, Append: &appendix},
+			Tools:        &ToolListPatch{Disable: []string{"bash"}, Enable: []string{"get_weather"}},
+		}
 	case EventTurnEnd:
 		return EventResult{}
 	case EventAgentEnd:

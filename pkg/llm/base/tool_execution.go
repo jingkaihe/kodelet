@@ -55,10 +55,13 @@ func ExecuteTool(
 			if state != nil {
 				workingDir = state.WorkingDirectory()
 			}
-			ctx = tools.ContextWithToolContext(
-				ctx,
-				tools.ToolContextFromThreadState(thread.GetConfig(), thread.GetConversationID(), workingDir, thread),
-			)
+			toolContext := tools.ToolContextFromThreadState(thread.GetConfig(), thread.GetConversationID(), workingDir, thread)
+			if toolContext.RecipeName == "" {
+				if metadataRecipeName, ok := thread.GetMetadata()["recipe_name"].(string); ok {
+					toolContext.RecipeName = metadataRecipeName
+				}
+			}
+			ctx = tools.ContextWithToolContext(ctx, toolContext)
 		}
 		result = tools.RunTool(ctx, state, toolName, effectiveInput)
 	}
@@ -140,13 +143,20 @@ func buildExtensionCallContext(thread llmtypes.Thread, state tooltypes.State) ex
 		invokedBy = "subagent"
 	}
 
+	recipeName := config.RecipeName
+	if recipeName == "" {
+		if metadataRecipeName, ok := thread.GetMetadata()["recipe_name"].(string); ok {
+			recipeName = metadataRecipeName
+		}
+	}
+
 	return extensions.ExtensionCallContext{
 		ConversationID: thread.GetConversationID(),
 		CWD:            workingDir,
 		Provider:       config.Provider,
 		Model:          config.Model,
 		Profile:        config.Profile,
-		RecipeName:     config.RecipeName,
+		RecipeName:     recipeName,
 		InvokedBy:      invokedBy,
 	}
 }

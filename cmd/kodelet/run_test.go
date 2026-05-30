@@ -362,12 +362,12 @@ func TestProcessFragmentBuildsMessageDisplay(t *testing.T) {
 	config.FragmentName = "github/pr"
 	config.FragmentArgs = map[string]string{"target": "develop"}
 
-	query, display, metadata, err := processFragment(context.Background(), config, []string{"focus", "tests"}, nil)
+	processed, err := processFragment(context.Background(), config, []string{"focus", "tests"}, nil)
 
 	require.NoError(t, err)
-	require.NotNil(t, metadata)
-	assert.Contains(t, query, "focus tests")
-	assert.Equal(t, "/github/pr target=develop focus tests", display)
+	require.NotNil(t, processed.Metadata)
+	assert.Contains(t, processed.Query, "focus tests")
+	assert.Equal(t, "/github/pr target=develop focus tests", processed.Display)
 }
 
 func TestProcessFragmentRoutesExtensionRecipeWithArgs(t *testing.T) {
@@ -386,14 +386,40 @@ func TestProcessFragmentRoutesExtensionRecipeWithArgs(t *testing.T) {
 	config.FragmentName = "review"
 	config.FragmentArgs = map[string]string{"target": "main"}
 
-	query, display, metadata, err := processFragment(context.Background(), config, []string{"focus", "tests"}, runtime)
+	processed, err := processFragment(context.Background(), config, []string{"focus", "tests"}, runtime)
 
 	require.NoError(t, err)
-	require.NotNil(t, metadata)
-	assert.Equal(t, "Review main with focus tests", query)
-	assert.Equal(t, "/review target=main focus tests", display)
-	assert.Equal(t, "review", metadata.Name)
-	assert.Equal(t, "Run extension review", metadata.Description)
+	require.NotNil(t, processed.Metadata)
+	assert.False(t, processed.Responded)
+	assert.Equal(t, "Review main with focus tests", processed.Query)
+	assert.Equal(t, "/review target=main focus tests", processed.Display)
+	assert.Equal(t, "review", processed.Metadata.Name)
+	assert.Equal(t, "Run extension review", processed.Metadata.Description)
+}
+
+func TestProcessFragmentReturnsExtensionRecipeDirectResponse(t *testing.T) {
+	rootDir := t.TempDir()
+	writeRunExtensionExecutable(t, filepath.Join(rootDir, "reviewer", "kodelet-extension-reviewer"))
+	runtime, err := extensions.NewRuntime(
+		context.Background(),
+		extensions.WithConfig(extensions.DefaultConfig()),
+		extensions.WithWorkingDir(rootDir),
+		extensions.WithRoots(extensions.Root{Dir: rootDir, Kind: extensions.SourceKindLocalStandalone}),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, runtime.Close()) })
+
+	config := NewRunConfig()
+	config.FragmentName = "doctor"
+
+	processed, err := processFragment(context.Background(), config, nil, runtime)
+
+	require.NoError(t, err)
+	require.NotNil(t, processed.Metadata)
+	assert.True(t, processed.Responded)
+	assert.Equal(t, "Doctor handled directly.", processed.Response)
+	assert.Empty(t, processed.Query)
+	assert.Equal(t, "doctor", processed.Metadata.Name)
 }
 
 func TestFormatFragmentDisplayArgs(t *testing.T) {
@@ -690,6 +716,11 @@ func runRunExtensionHelperProcess() {
 					Aliases:     []string{"/review"},
 					Description: "Run extension review",
 					Kind:        "recipe",
+				}, {
+					Name:        "doctor",
+					Aliases:     []string{"/doctor"},
+					Description: "Run extension doctor",
+					Kind:        "recipe",
 				}},
 			}, nil)
 		case "extension.command.execute":
@@ -701,16 +732,23 @@ func runRunExtensionHelperProcess() {
 				extensionsWriteRPCResponse(request.ID, nil, map[string]any{"code": -32602, "message": err.Error()})
 				continue
 			}
-			target, _ := params.Input["target"].(string)
-			text, _ := params.Input["text"].(string)
-			if target == "" {
-				target = "HEAD"
+			switch params.Name {
+			case "doctor":
+				extensionsWriteRPCResponse(request.ID, extensions.CommandResult{Action: extensions.CommandActionRespond, Response: "Doctor handled directly."}, nil)
+			case "review":
+				target, _ := params.Input["target"].(string)
+				text, _ := params.Input["text"].(string)
+				if target == "" {
+					target = "HEAD"
+				}
+				prompt := "Review " + target
+				if text != "" {
+					prompt += " with " + text
+				}
+				extensionsWriteRPCResponse(request.ID, extensions.CommandResult{Action: extensions.CommandActionRunAgent, Prompt: prompt, RecipeName: "review"}, nil)
+			default:
+				extensionsWriteRPCResponse(request.ID, extensions.CommandResult{Action: extensions.CommandActionPass}, nil)
 			}
-			prompt := "Review " + target
-			if text != "" {
-				prompt += " with " + text
-			}
-			extensionsWriteRPCResponse(request.ID, extensions.CommandResult{Action: extensions.CommandActionRunAgent, Prompt: prompt, RecipeName: "review"}, nil)
 		default:
 			extensionsWriteRPCResponse(request.ID, nil, map[string]any{"code": -32601, "message": "method not found"})
 		}

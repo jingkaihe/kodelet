@@ -135,6 +135,12 @@ Long-running executable extensions at `.kodelet/extensions/` or `~/.kodelet/exte
 
 See [docs/extension-design.md](docs/extension-design.md).
 
+Discovery helpers:
+```bash
+kodelet extension list
+kodelet extension inspect <name-or-id-or-path>
+```
+
 ## External Binary Management
 Managed binaries in `~/.kodelet/bin/`: ripgrep (15.1.0), fd (10.3.0). Auto-downloaded with checksum verification for standalone installs; packaged Linux builds bundle them in `/usr/libexec/kodelet/` and resolution prefers that location before falling back to managed or system binaries.
 

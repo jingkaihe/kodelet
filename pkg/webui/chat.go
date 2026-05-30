@@ -81,15 +81,25 @@ type ChatRunner interface {
 	Run(ctx context.Context, req ChatRequest, sink ChatEventSink) (string, error)
 }
 
+type extensionRuntimeProvider interface {
+	Runtime(ctx context.Context, cwd string) (*extensions.Runtime, error)
+}
+
 // DefaultChatRunner executes chat turns using the same LLM/tool stack as the CLI.
 type DefaultChatRunner struct {
-	defaultCWD string
+	defaultCWD        string
+	extensionRuntimes extensionRuntimeProvider
 }
 
 // NewDefaultChatRunner creates a chat runner for the web UI server.
-func NewDefaultChatRunner(defaultCWD string) *DefaultChatRunner {
+func NewDefaultChatRunner(defaultCWD string, extensionRuntimes ...extensionRuntimeProvider) *DefaultChatRunner {
+	var provider extensionRuntimeProvider
+	if len(extensionRuntimes) > 0 {
+		provider = extensionRuntimes[0]
+	}
 	return &DefaultChatRunner{
-		defaultCWD: defaultCWD,
+		defaultCWD:        defaultCWD,
+		extensionRuntimes: provider,
 	}
 }
 
@@ -132,14 +142,21 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 	llmConfig.MCPWorkspaceDir = workspaceDir
 	llmConfig.WorkingDirectory = resolvedCWD
 
-	extensionRuntime, err := extensions.NewRuntimeFromViper(ctx, resolvedCWD)
+	var extensionRuntime *extensions.Runtime
+	if r.extensionRuntimes != nil {
+		extensionRuntime, err = r.extensionRuntimes.Runtime(ctx, resolvedCWD)
+	} else {
+		extensionRuntime, err = extensions.NewRuntimeFromViper(ctx, resolvedCWD)
+		if extensionRuntime != nil {
+			defer func() {
+				_ = extensionRuntime.Close()
+			}()
+		}
+	}
 	if err != nil {
 		return sessionID, errors.Wrap(err, "failed to initialize extensions")
 	}
 	if extensionRuntime != nil {
-		defer func() {
-			_ = extensionRuntime.Close()
-		}()
 		llmConfig.Extensions = extensionRuntime
 	}
 

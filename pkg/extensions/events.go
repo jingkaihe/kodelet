@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -153,24 +154,43 @@ func (r *Runtime) DispatchUserMessage(ctx context.Context, callContext Extension
 
 // DispatchAgentInit runs agent.init subscriptions and applies system prompt patches.
 func (r *Runtime) DispatchAgentInit(ctx context.Context, callContext ExtensionCallContext, systemPrompt string) string {
+	result := r.DispatchAgentInitDecision(ctx, callContext, systemPrompt, nil)
+	return result.SystemPrompt
+}
+
+// AgentInitDecision is the result of dispatching agent.init handlers.
+type AgentInitDecision struct {
+	SystemPrompt  string
+	AllowedTools  []string
+	ToolsModified bool
+}
+
+// DispatchAgentInitDecision runs agent.init subscriptions and applies system prompt and tool-list patches.
+func (r *Runtime) DispatchAgentInitDecision(ctx context.Context, callContext ExtensionCallContext, systemPrompt string, allowedTools []string) AgentInitDecision {
+	decision := AgentInitDecision{SystemPrompt: systemPrompt, AllowedTools: append([]string(nil), allowedTools...)}
 	if r == nil {
-		return systemPrompt
+		return decision
 	}
 
-	currentPrompt := systemPrompt
 	for _, handler := range r.eventHandlers(EventAgentInit) {
-		result, err := r.dispatchEventToHandler(ctx, handler, EventAgentInit, agentInitPayload{SystemPrompt: currentPrompt}, callContext)
+		result, err := r.dispatchEventToHandler(ctx, handler, EventAgentInit, agentInitPayload{SystemPrompt: decision.SystemPrompt}, callContext)
 		if err != nil {
 			logger.G(ctx).WithError(err).WithField("extension", handler.process.Extension.ID).Warn("extension agent.init handler failed")
 			continue
 		}
-		if result == nil || result.SystemPrompt == nil {
+		if result == nil {
 			continue
 		}
-		currentPrompt = applySystemPromptPatch(currentPrompt, result.SystemPrompt)
+		if result.SystemPrompt != nil {
+			decision.SystemPrompt = applySystemPromptPatch(decision.SystemPrompt, result.SystemPrompt)
+		}
+		if result.Tools != nil {
+			decision.AllowedTools = applyToolListPatch(decision.AllowedTools, result.Tools)
+			decision.ToolsModified = true
+		}
 	}
 
-	return currentPrompt
+	return decision
 }
 
 // DispatchAgentStart runs agent.start subscriptions.
@@ -316,6 +336,28 @@ func joinPromptParts(first, second string) string {
 		return first
 	}
 	return first + "\n" + second
+}
+
+func applyToolListPatch(allowedTools []string, patch *ToolListPatch) []string {
+	if patch == nil {
+		return allowedTools
+	}
+	patched := append([]string(nil), allowedTools...)
+	for _, disabled := range patch.Disable {
+		disabled = strings.TrimSpace(disabled)
+		if disabled == "" {
+			continue
+		}
+		patched = slices.DeleteFunc(patched, func(name string) bool { return name == disabled })
+	}
+	for _, enabled := range patch.Enable {
+		enabled = strings.TrimSpace(enabled)
+		if enabled == "" || slices.Contains(patched, enabled) {
+			continue
+		}
+		patched = append(patched, enabled)
+	}
+	return patched
 }
 
 func (r *Runtime) dispatchEventToHandler(ctx context.Context, handler eventHandler, eventName string, payload any, callContext ExtensionCallContext) (*EventResult, error) {

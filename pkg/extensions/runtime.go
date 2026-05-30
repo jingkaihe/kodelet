@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
 )
@@ -72,16 +73,18 @@ func (r *Runtime) initialize(ctx context.Context, discovery *Discovery) error {
 		return err
 	}
 	for _, ext := range extensions {
-		proc, err := StartProcess(ctx, ext, r.config.Timeout)
+		proc, err := StartProcess(ctx, ext, r.config)
 		if err != nil {
-			return errors.Wrapf(err, "failed to start extension %s", ext.ID)
+			logger.G(ctx).WithError(err).WithField("extension", ext.ID).Warn("failed to start extension; disabling for this process")
+			continue
 		}
 		initCtx, cancel := context.WithTimeout(ctx, timeoutOrDefault(r.config.Timeout, DefaultConfig().Timeout))
 		result, err := proc.Initialize(initCtx, r.workingDir)
 		cancel()
 		if err != nil {
 			_ = proc.Close()
-			return errors.Wrapf(err, "failed to initialize extension %s", ext.ID)
+			logger.G(ctx).WithError(err).WithField("extension", ext.ID).Warn("failed to initialize extension; disabling for this process")
+			continue
 		}
 		r.processes = append(r.processes, proc)
 		if err := r.register(ctx, proc, result); err != nil {
@@ -113,6 +116,26 @@ func (r *Runtime) register(_ context.Context, proc *Process, result *InitializeR
 		r.tools[registration.Name] = tool
 	}
 	for _, command := range result.Commands {
+		if err := validateCommandRegistration(command); err != nil {
+			return err
+		}
+		seenNames := map[string]struct{}{}
+		primaryName := normalizeCommandName(command.Name)
+		seenNames[primaryName] = struct{}{}
+		if r.commandNameRegistered(command.Name) {
+			return errors.Errorf("duplicate extension command registration: %s", normalizeCommandName(command.Name))
+		}
+		for _, alias := range command.Aliases {
+			if normalizeCommandName(alias) == primaryName {
+				continue
+			}
+			if err := addCommandAlias(seenNames, alias); err != nil {
+				return err
+			}
+			if r.commandNameRegistered(alias) {
+				return errors.Errorf("duplicate extension command registration: %s", normalizeCommandName(alias))
+			}
+		}
 		r.commands = append(r.commands, Command{ExtensionID: proc.Extension.ID, Process: proc, Registration: command})
 	}
 	for _, subscription := range result.Subscriptions {
@@ -124,6 +147,46 @@ func (r *Runtime) register(_ context.Context, proc *Process, result *InitializeR
 		})
 	}
 	return nil
+}
+
+func addCommandAlias(names map[string]struct{}, name string) error {
+	name = normalizeCommandName(name)
+	if name == "" {
+		return nil
+	}
+	if _, ok := names[name]; ok {
+		return errors.Errorf("duplicate extension command registration: %s", name)
+	}
+	names[name] = struct{}{}
+	return nil
+}
+
+func validateCommandRegistration(command CommandRegistration) error {
+	if normalizeCommandName(command.Name) == "" {
+		return errors.New("extension command name is required")
+	}
+	if strings.TrimSpace(command.Description) == "" {
+		return errors.Errorf("extension command %s description is required", normalizeCommandName(command.Name))
+	}
+	return nil
+}
+
+func (r *Runtime) commandNameRegistered(name string) bool {
+	name = normalizeCommandName(name)
+	if name == "" {
+		return false
+	}
+	for _, command := range r.commands {
+		if commandNameMatches(command.Registration.Name, name) {
+			return true
+		}
+		for _, alias := range command.Registration.Aliases {
+			if commandNameMatches(alias, name) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (r *Runtime) toolEnabled(name string) bool {

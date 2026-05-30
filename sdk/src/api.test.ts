@@ -107,6 +107,27 @@ test("command validation can pass to the next route", async () => {
   assert.deepEqual(result, { action: "pass" });
 });
 
+test("agent.init can patch the system prompt and tool list", async () => {
+  const extension = defineExtension((ext) => {
+    ext.on("agent.init", () => ({
+      systemPrompt: { append: "Use safe tools only." },
+      tools: { disable: ["bash"], enable: ["get_weather"] },
+    }));
+  });
+
+  const harness = await createTestHarness(extension);
+  const result = await harness.handleEvent({
+    id: "evt_agent_init",
+    event: "agent.init",
+    payload: { systemPrompt: "base" },
+  });
+
+  assert.deepEqual(result, {
+    systemPrompt: { append: "Use safe tools only." },
+    tools: { disable: ["bash"], enable: ["get_weather"] },
+  });
+});
+
 test("command context includes workspace, storage, env and process helpers", async () => {
   const workspace = await mkdtemp(path.join(os.tmpdir(), "kodelet-sdk-workspace-"));
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "kodelet-sdk-data-"));

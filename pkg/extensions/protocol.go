@@ -23,6 +23,16 @@ type rpcRequest struct {
 	Params  any    `json:"params,omitempty"`
 }
 
+type rpcNotification struct {
+	JSONRPC string `json:"jsonrpc"`
+	Method  string `json:"method"`
+	Params  any    `json:"params,omitempty"`
+}
+
+type cancelRequestParams struct {
+	ID int64 `json:"id"`
+}
+
 type rpcResponse struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      int64           `json:"id"`
@@ -142,6 +152,7 @@ type EventResult struct {
 	Output           json.RawMessage    `json:"output,omitempty"`
 	Message          *string            `json:"message,omitempty"`
 	SystemPrompt     *SystemPromptPatch `json:"systemPrompt,omitempty"`
+	Tools            *ToolListPatch     `json:"tools,omitempty"`
 	FollowUpMessages []string           `json:"followUpMessages,omitempty"`
 }
 
@@ -155,6 +166,12 @@ type SystemPromptPatch struct {
 	Prepend *string `json:"prepend,omitempty"`
 	Append  *string `json:"append,omitempty"`
 	Replace *string `json:"replace,omitempty"`
+}
+
+// ToolListPatch describes an agent.init mutation to the tool allowlist.
+type ToolListPatch struct {
+	Disable []string `json:"disable,omitempty"`
+	Enable  []string `json:"enable,omitempty"`
 }
 
 type rpcClient struct {
@@ -210,6 +227,7 @@ func (c *rpcClient) call(ctx context.Context, method string, params any, result 
 
 	select {
 	case <-ctx.Done():
+		_ = c.cancel(req.ID)
 		return ctx.Err()
 	case err := <-errCh:
 		return err
@@ -228,6 +246,15 @@ func (c *rpcClient) call(ctx context.Context, method string, params any, result 
 		}
 		return nil
 	}
+}
+
+func (c *rpcClient) cancel(id int64) error {
+	notif := rpcNotification{JSONRPC: "2.0", Method: "$/cancelRequest", Params: cancelRequestParams{ID: id}}
+	payload, err := json.Marshal(notif)
+	if err != nil {
+		return errors.Wrap(err, "failed to marshal rpc cancel request")
+	}
+	return writeFrame(c.writer, payload)
 }
 
 func writeFrame(writer io.Writer, payload []byte) error {

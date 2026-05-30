@@ -211,6 +211,10 @@ export interface EventResult {
     prepend?: string;
     replace?: string;
   };
+  tools?: {
+    disable?: string[];
+    enable?: string[];
+  };
   resources?: unknown;
 }
 

@@ -30,6 +30,42 @@ type RoutedCommandResult struct {
 	Registration CommandRegistration
 }
 
+// SlashCommands returns extension command registrations in the shared slash
+// command shape used by CLI/ACP/web command discovery surfaces.
+func (r *Runtime) SlashCommands() []slashcommands.Command {
+	if r == nil {
+		return nil
+	}
+	return SlashCommands(r.Commands())
+}
+
+// SlashCommands converts extension command registrations to slash commands.
+func SlashCommands(commands []Command) []slashcommands.Command {
+	converted := make([]slashcommands.Command, 0, len(commands))
+	for _, command := range commands {
+		registration := command.Registration
+		name := normalizeCommandName(registration.Name)
+		if name == "" {
+			continue
+		}
+		description := strings.TrimSpace(registration.Description)
+		if description == "" {
+			description = "Run the " + name + " extension command"
+		}
+		hint := "arguments (optional)"
+		if registration.Kind == "recipe" {
+			hint = "additional instructions (optional)"
+		}
+		converted = append(converted, slashcommands.Command{
+			Name:        name,
+			Description: description,
+			Hint:        hint,
+			Placeholder: "/" + name + " " + hint,
+		})
+	}
+	return converted
+}
+
 // TryCommand routes a parsed slash command through extension command registrations.
 func (r *Runtime) TryCommand(ctx context.Context, rawPrompt, commandName, args string, callContext ExtensionCallContext) (*RoutedCommandResult, error) {
 	if r == nil {
@@ -75,7 +111,7 @@ func (r *Runtime) TryCommand(ctx context.Context, rawPrompt, commandName, args s
 }
 
 func (r *Runtime) matchingCommands(commandName string) []Command {
-	commandName = strings.TrimPrefix(strings.TrimSpace(commandName), "/")
+	commandName = normalizeCommandName(commandName)
 	if commandName == "" {
 		return nil
 	}
@@ -98,8 +134,11 @@ func (r *Runtime) matchingCommands(commandName string) []Command {
 }
 
 func commandNameMatches(candidate, commandName string) bool {
-	candidate = strings.TrimPrefix(strings.TrimSpace(candidate), "/")
-	return candidate == commandName
+	return normalizeCommandName(candidate) == normalizeCommandName(commandName)
+}
+
+func normalizeCommandName(name string) string {
+	return strings.TrimPrefix(strings.TrimSpace(name), "/")
 }
 
 func buildCommandInput(rawPrompt, commandName, args string) (map[string]any, CommandInvocation) {

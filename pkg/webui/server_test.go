@@ -952,6 +952,81 @@ func TestServer_handleGetSlashCommandsUsesRequestedCWD(t *testing.T) {
 	assert.Contains(t, names, "workspace-only")
 }
 
+func TestServer_handleGetSlashCommandsIncludesExtensionCommands(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	}()
+
+	workspace := t.TempDir()
+	writeWebExtensionExecutable(t, filepath.Join(workspace, ".kodelet", "extensions", "commands", "kodelet-extension-commands"))
+	viper.Reset()
+	viper.Set("extensions.enabled", true)
+	viper.Set("extensions.local_dir", "./.kodelet/extensions")
+	viper.Set("extensions.global_dir", filepath.Join(t.TempDir(), "global-extensions"))
+	viper.Set("extensions.timeout", "5s")
+	viper.Set("extensions.tool_timeout", "5s")
+	viper.Set("extensions.max_output_size", 102400)
+
+	extensionRuntimes := newWebExtensionRuntimeManager()
+	t.Cleanup(func() { assert.NoError(t, extensionRuntimes.Close()) })
+	server := &Server{config: &ServerConfig{CWD: t.TempDir()}, extensionRuntimes: extensionRuntimes}
+	req := httptest.NewRequest("GET", "/api/chat/slash-commands?cwd="+url.QueryEscape(workspace), nil)
+	w := httptest.NewRecorder()
+
+	server.handleGetSlashCommands(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var response SlashCommandsResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+
+	var names []string
+	for _, command := range response.Commands {
+		names = append(names, command.Name)
+	}
+	assert.Contains(t, names, "doctor")
+}
+
+func TestServer_handleGetSlashCommandsReusesExtensionRuntime(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	}()
+
+	workspace := t.TempDir()
+	writeWebExtensionExecutable(t, filepath.Join(workspace, ".kodelet", "extensions", "commands", "kodelet-extension-commands"))
+	viper.Reset()
+	viper.Set("extensions.enabled", true)
+	viper.Set("extensions.local_dir", "./.kodelet/extensions")
+	viper.Set("extensions.global_dir", filepath.Join(t.TempDir(), "global-extensions"))
+	viper.Set("extensions.timeout", "5s")
+	viper.Set("extensions.tool_timeout", "5s")
+	viper.Set("extensions.max_output_size", 102400)
+
+	extensionRuntimes := newWebExtensionRuntimeManager()
+	t.Cleanup(func() { assert.NoError(t, extensionRuntimes.Close()) })
+	server := &Server{config: &ServerConfig{CWD: t.TempDir()}, extensionRuntimes: extensionRuntimes}
+
+	for range 2 {
+		req := httptest.NewRequest("GET", "/api/chat/slash-commands?cwd="+url.QueryEscape(workspace), nil)
+		w := httptest.NewRecorder()
+		server.handleGetSlashCommands(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	}
+
+	extensionRuntimes.mu.Lock()
+	defer extensionRuntimes.mu.Unlock()
+	assert.Len(t, extensionRuntimes.runtimes, 1)
+}
+
 func TestServer_handleGetConversationPreservesImageContent(t *testing.T) {
 	conversationID := "test-image-conv"
 	mockService := &mockConversationService{

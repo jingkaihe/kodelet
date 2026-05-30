@@ -27,6 +27,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/gorilla/mux"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/goals"
 	openairesponses "github.com/jingkaihe/kodelet/pkg/llm/openai/responses"
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -56,6 +57,7 @@ type Server struct {
 	runCancel           context.CancelFunc
 	terminalSessions    *terminalSessionManager
 	terminalSessionsMu  sync.Mutex
+	extensionRuntimes   *webExtensionRuntimeManager
 	activeChats         map[string]*activeChatRun
 	activeChatsMu       sync.Mutex
 	chatSubscribers     map[string]map[*subscriberEventSink]struct{}
@@ -167,16 +169,18 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 	}
 
 	runCtx, runCancel := context.WithCancel(ctx)
+	extensionRuntimes := newWebExtensionRuntimeManager()
 
 	s := &Server{
 		router:              mux.NewRouter(),
 		conversationService: conversationService,
-		chatRunner:          NewDefaultChatRunner(config.CWD),
+		chatRunner:          NewDefaultChatRunner(config.CWD, extensionRuntimes),
 		config:              config,
 		staticFS:            staticFS,
 		runCtx:              runCtx,
 		runCancel:           runCancel,
 		terminalSessions:    newTerminalSessionManager(runCtx),
+		extensionRuntimes:   extensionRuntimes,
 		activeChats:         make(map[string]*activeChatRun),
 		chatSubscribers:     make(map[string]map[*subscriberEventSink]struct{}),
 	}
@@ -1191,9 +1195,23 @@ func (s *Server) handleGetSlashCommands(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	s.writeJSONResponse(w, SlashCommandsResponse{
-		Commands: slashcommands.List(r.Context(), processor),
-	})
+	commands := slashcommands.List(r.Context(), processor)
+	var extensionRuntime *extensions.Runtime
+	if s.extensionRuntimes != nil {
+		extensionRuntime, err = s.extensionRuntimes.Runtime(r.Context(), resolvedCWD)
+	} else {
+		extensionRuntime, err = extensions.NewRuntimeFromViper(r.Context(), resolvedCWD)
+		if extensionRuntime != nil {
+			defer func() { _ = extensionRuntime.Close() }()
+		}
+	}
+	if err != nil {
+		logger.G(r.Context()).WithError(err).Warn("Failed to initialize extensions for slash command discovery")
+	} else if extensionRuntime != nil {
+		commands = append(commands, extensionRuntime.SlashCommands()...)
+	}
+
+	s.writeJSONResponse(w, SlashCommandsResponse{Commands: commands})
 }
 
 func (s *Server) handleGetCWDHints(w http.ResponseWriter, r *http.Request) {
@@ -2126,16 +2144,24 @@ func (s *Server) Stop() error {
 	s.terminalSessionsMu.Lock()
 	terminalSessions := s.terminalSessions
 	s.terminalSessionsMu.Unlock()
+	var firstErr error
 	if terminalSessions != nil {
 		terminalSessions.Close()
+	}
+	if s.extensionRuntimes != nil {
+		if err := s.extensionRuntimes.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
 	}
 	if s.runCancel != nil {
 		s.runCancel()
 	}
 	if s.server != nil {
-		return s.server.Close()
+		if err := s.server.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
 	}
-	return nil
+	return firstErr
 }
 
 func normalizeWebContent(textParts []string, blocks []WebContentBlock) any {

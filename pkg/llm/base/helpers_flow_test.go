@@ -101,6 +101,16 @@ func TestAvailableTools(t *testing.T) {
 	assert.Equal(t, tools, AvailableTools(state, false))
 }
 
+func TestAvailableToolsForThreadHonorsExtensionAllowedTools(t *testing.T) {
+	tools := []tooltypes.Tool{namedTool("read_file"), namedTool("bash"), namedTool("update_goal")}
+	state := &toolState{tools: tools}
+	thread := &threadStub{metadata: map[string]any{"allowed_tools": []string{"read_file", "update_goal"}}}
+
+	available := AvailableToolsForThread(thread, state, false)
+
+	assert.Equal(t, []tooltypes.Tool{tools[0], tools[2]}, available)
+}
+
 func TestBase64ImageSourceMediaType(t *testing.T) {
 	tests := []struct {
 		name      string

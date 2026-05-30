@@ -1239,6 +1239,15 @@ Within each extension root, Kodelet loads either direct or nested executables:
 
 For a direct executable, the extension name defaults to `xxx`. For a nested executable, the extension name defaults to the parent directory. Plugin extensions are addressed as `org@repo/extension`. Standalone extensions are addressed by directory or executable path.
 
+Inspect discovered extensions with:
+
+```bash
+kodelet extension list
+kodelet extension list --json
+kodelet extension inspect weather
+kodelet extension inspect org@repo/weather --json
+```
+
 ### Extension Commands and Dynamic Recipes
 
 Extensions can register prompt-level commands. Commands are checked before the LLM sees a user prompt. A command result controls what Kodelet does next:
@@ -1302,7 +1311,7 @@ Extensions subscribe to dot-separated lifecycle events with `ext.on(...)`. Mutat
 | `session.start` | Extension runtime starts | No | No |
 | `resources.discover` | Extension resources are finalized | No | Resource registrations |
 | `user.message` | User prompt received | Yes | Message |
-| `agent.init` | System prompt built before first model request | No | System prompt |
+| `agent.init` | System prompt built before first model request | No | System prompt / tool list |
 | `agent.start` | Agent loop starts | No | No |
 | `turn.start` | Before a model turn | No | No |
 | `tool.call` | Before a tool runs | Yes | Tool input |
@@ -1350,6 +1359,11 @@ extensions:
     get_weather:
       enabled: true
       timeout: 10s
+
+  processes:
+    weather:
+      env:
+        WEATHER_API_KEY: null  # inherit from parent environment only when listed
 ```
 
 Use `kodelet run --no-extensions "query"` or `extensions.enabled: false` to disable extension loading.

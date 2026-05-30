@@ -85,7 +85,15 @@ func NewRunConfig() *RunConfig {
 	}
 }
 
-func processFragment(ctx context.Context, config *RunConfig, args []string, extensionRuntime *extensions.Runtime) (string, string, *fragments.Metadata, error) {
+type processedFragment struct {
+	Query     string
+	Display   string
+	Metadata  *fragments.Metadata
+	Response  string
+	Responded bool
+}
+
+func processFragment(ctx context.Context, config *RunConfig, args []string, extensionRuntime *extensions.Runtime) (*processedFragment, error) {
 	var validDirs []string
 	for _, dir := range config.FragmentDirs {
 		trimmed := strings.TrimSpace(dir)
@@ -96,7 +104,7 @@ func processFragment(ctx context.Context, config *RunConfig, args []string, exte
 
 	fragmentProcessor, err := fragments.NewFragmentProcessor(fragments.WithAdditionalDirs(validDirs...))
 	if err != nil {
-		return "", "", nil, errors.Wrap(err, "failed to create fragment processor")
+		return nil, errors.Wrap(err, "failed to create fragment processor")
 	}
 
 	fragmentConfig := &fragments.Config{
@@ -132,7 +140,7 @@ func processFragment(ctx context.Context, config *RunConfig, args []string, exte
 			commandArgs,
 			extensions.ExtensionCallContext{InvokedBy: "main", RecipeName: config.FragmentName},
 		); err != nil {
-			return "", "", nil, errors.Wrapf(err, "failed to execute extension recipe %s", config.FragmentName)
+			return nil, errors.Wrapf(err, "failed to execute extension recipe %s", config.FragmentName)
 		} else if commandResult != nil && commandResult.Matched {
 			switch commandResult.Action {
 			case extensions.CommandActionRunAgent:
@@ -140,20 +148,20 @@ func processFragment(ctx context.Context, config *RunConfig, args []string, exte
 					Name:        commandResult.Registration.Name,
 					Description: commandResult.Registration.Description,
 				}
-				return commandResult.Prompt, display, metadata, nil
+				return &processedFragment{Query: commandResult.Prompt, Display: display, Metadata: metadata}, nil
 			case extensions.CommandActionRespond:
 				metadata := &fragments.Metadata{
 					Name:        commandResult.Registration.Name,
 					Description: commandResult.Registration.Description,
 				}
-				return commandResult.Response, display, metadata, nil
+				return &processedFragment{Display: display, Metadata: metadata, Response: commandResult.Response, Responded: true}, nil
 			}
 		}
 	}
 
 	fragment, err := fragmentProcessor.LoadFragment(ctx, fragmentConfig)
 	if err != nil {
-		return "", "", nil, errors.Wrap(err, "failed to load fragment")
+		return nil, errors.Wrap(err, "failed to load fragment")
 	}
 
 	var query string
@@ -164,7 +172,7 @@ func processFragment(ctx context.Context, config *RunConfig, args []string, exte
 		query = fragment.Content
 	}
 
-	return query, display, &fragment.Metadata, nil
+	return &processedFragment{Query: query, Display: display, Metadata: &fragment.Metadata}, nil
 }
 
 func formatFragmentDisplayArgs(args map[string]string) string {
@@ -453,11 +461,18 @@ var runCmd = &cobra.Command{
 		}
 
 		if config.FragmentName != "" {
-			query, config.MessageDisplay, fragmentMetadata, err = processFragment(ctx, config, args, extensionRuntime)
+			processed, err := processFragment(ctx, config, args, extensionRuntime)
 			if err != nil {
 				presenter.Error(err, "Failed to process fragment")
 				return
 			}
+			if processed.Responded {
+				presenter.Info(processed.Response)
+				return
+			}
+			query = processed.Query
+			config.MessageDisplay = processed.Display
+			fragmentMetadata = processed.Metadata
 		}
 
 		if config.FragmentName == "" && goalUpdate == nil && extensionRuntime != nil {

@@ -384,7 +384,7 @@ OUTER:
 				if base.HandleAgentStopFollowUps(ctx, t, handler) {
 					continue OUTER
 				}
-				if !t.Config.IsSubAgent && (maxTurns == 0 || turnCount < maxTurns) && base.HandleGoalAutoContinuation(ctx, t, base.AvailableTools(t.State, opt.NoToolUse)) {
+				if !t.Config.IsSubAgent && (maxTurns == 0 || turnCount < maxTurns) && base.HandleGoalAutoContinuation(ctx, t, base.AvailableToolsForThread(t, t.State, opt.NoToolUse)) {
 					continue OUTER
 				}
 
@@ -474,7 +474,7 @@ func (t *Thread) processMessageExchange(
 	}
 
 	// Build tools
-	tools := buildTools(t.State, opt.NoToolUse)
+	tools := buildToolsForThread(t, t.State, opt.NoToolUse)
 	log.WithField("tool_count", len(tools)).Debug("built tools for request")
 
 	// Mirror Codex prompt caching on the HTTP Responses path by replaying the full

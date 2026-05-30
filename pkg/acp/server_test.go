@@ -7,16 +7,21 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
 	"github.com/jingkaihe/kodelet/pkg/acp/bridge"
 	"github.com/jingkaihe/kodelet/pkg/acp/session"
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/goals"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -96,12 +101,34 @@ func readJSONRPCMessage(t *testing.T, output *bytes.Buffer) map[string]any {
 	return message
 }
 
+func readJSONRPCMessages(t *testing.T, output *bytes.Buffer) []map[string]any {
+	t.Helper()
+
+	scanner := bufio.NewScanner(bytes.NewReader(output.Bytes()))
+	messages := []map[string]any{}
+	for scanner.Scan() {
+		var message map[string]any
+		require.NoError(t, json.Unmarshal(scanner.Bytes(), &message))
+		messages = append(messages, message)
+	}
+	require.NoError(t, scanner.Err())
+	output.Reset()
+	return messages
+}
+
 func assertRPCErrorCode(t *testing.T, message map[string]any, code int) {
 	t.Helper()
 
 	require.NotNil(t, message["error"])
 	errObj := message["error"].(map[string]any)
 	assert.Equal(t, float64(code), errObj["code"])
+}
+
+func mustJSONRawMessage(t *testing.T, value any) json.RawMessage {
+	t.Helper()
+	payload, err := json.Marshal(value)
+	require.NoError(t, err)
+	return payload
 }
 
 func lockServerTestDatabase(t *testing.T, dbPath string) func() {
@@ -910,6 +937,114 @@ func TestServer_SendAvailableCommands(t *testing.T) {
 	assert.Greater(t, len(availableCommands), 0)
 }
 
+func TestServer_ExtensionCommandsAreAvailableForSession(t *testing.T) {
+	workspace := newACPTestExtensionWorkspace(t)
+	server := NewServer(
+		WithInput(bytes.NewBuffer(nil)),
+		WithOutput(io.Discard),
+		WithContext(context.Background()),
+		WithConfig(&ServerConfig{Provider: "anthropic", Model: "claude-test", NoSkills: true, NoWorkflows: true, DisableSubagent: true}),
+	)
+	t.Cleanup(func() { server.Shutdown() })
+	sess, err := server.sessionManager.NewSession(context.Background(), acptypes.NewSessionRequest{CWD: workspace})
+	require.NoError(t, err)
+
+	commands := server.getAvailableCommandsForSession(sess.ID)
+	var names []string
+	for _, command := range commands {
+		names = append(names, command.Name)
+	}
+	assert.Contains(t, names, "doctor")
+}
+
+func TestServer_ExtensionRespondCommandBypassesAgent(t *testing.T) {
+	workspace := newACPTestExtensionWorkspace(t)
+	output := bytes.NewBuffer(nil)
+	server := NewServer(
+		WithInput(bytes.NewBuffer(nil)),
+		WithOutput(output),
+		WithContext(context.Background()),
+		WithConfig(&ServerConfig{Provider: "anthropic", Model: "claude-test", NoSkills: true, NoWorkflows: true, DisableSubagent: true}),
+	)
+	t.Cleanup(func() { server.Shutdown() })
+	server.initialized.Store(true)
+	storage := &fakeSessionStorage{}
+	server.sessionStorage = storage
+
+	sess, err := server.sessionManager.NewSession(context.Background(), acptypes.NewSessionRequest{CWD: workspace})
+	require.NoError(t, err)
+
+	req := &acptypes.Request{
+		ID: json.RawMessage(`7`),
+		Params: mustJSONRawMessage(t, acptypes.PromptRequest{
+			SessionID: sess.ID,
+			Prompt: []acptypes.ContentBlock{{
+				Type: acptypes.ContentTypeText,
+				Text: "/doctor verbose=true",
+			}},
+		}),
+	}
+
+	require.NoError(t, server.handleSessionPrompt(req))
+
+	messages := readJSONRPCMessages(t, output)
+	require.Len(t, messages, 2)
+	updateNotification := messages[0]
+	assert.Equal(t, "session/update", updateNotification["method"])
+	params := updateNotification["params"].(map[string]any)
+	update := params["update"].(map[string]any)
+	assert.Equal(t, acptypes.UpdateAgentMessageChunk, update["sessionUpdate"])
+	content := update["content"].(map[string]any)
+	assert.Equal(t, fmt.Sprintf("All extensions are healthy for %s.", sess.ID), content["text"])
+
+	response := messages[1]
+	assert.Equal(t, float64(7), response["id"])
+	result := response["result"].(map[string]any)
+	assert.Equal(t, string(acptypes.StopReasonEndTurn), result["stopReason"])
+	assert.Contains(t, storage.flushed, sess.ID)
+}
+
+func TestServer_ExtensionRunAgentCommandTransformsPrompt(t *testing.T) {
+	workspace := newACPTestExtensionWorkspace(t)
+	server := NewServer(
+		WithInput(bytes.NewBuffer(nil)),
+		WithOutput(io.Discard),
+		WithContext(context.Background()),
+		WithConfig(&ServerConfig{Provider: "anthropic", Model: "claude-test", NoSkills: true, NoWorkflows: true, DisableSubagent: true}),
+	)
+	t.Cleanup(func() { server.Shutdown() })
+	sess, err := server.sessionManager.NewSession(context.Background(), acptypes.NewSessionRequest{CWD: workspace})
+	require.NoError(t, err)
+
+	result, handled, err := server.tryExtensionCommand(
+		context.Background(),
+		sess,
+		[]acptypes.ContentBlock{{Type: acptypes.ContentTypeText, Text: "/review target=HEAD"}},
+		"review",
+		"target=HEAD",
+	)
+	require.NoError(t, err)
+	require.True(t, handled)
+
+	transformed, shouldReturn, err := server.applyExtensionCommandResult(
+		json.RawMessage(`1`),
+		sess.ID,
+		sess,
+		[]acptypes.ContentBlock{
+			{Type: acptypes.ContentTypeText, Text: "/review target=HEAD"},
+			{Type: acptypes.ContentTypeImage, Data: "image-data"},
+		},
+		result,
+	)
+
+	require.NoError(t, err)
+	assert.False(t, shouldReturn)
+	require.Len(t, transformed, 2)
+	assert.Equal(t, "Review HEAD", transformed[0].Text)
+	assert.Equal(t, acptypes.ContentTypeImage, transformed[1].Type)
+	assert.Equal(t, "review", sess.Thread.GetMetadata()["recipe_name"])
+}
+
 func TestParseSlashCommandArgs(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -1164,4 +1299,154 @@ func TestServer_TransformSlashCommandPrompt(t *testing.T) {
 		assert.Contains(t, err.Error(), "unknown recipe '/nonexistent-recipe-xyz'")
 		assert.Contains(t, err.Error(), "Available recipes:")
 	})
+}
+
+func newACPTestExtensionWorkspace(t *testing.T) string {
+	t.Helper()
+	workspace := t.TempDir()
+	writeACPTestExtensionExecutable(t, filepath.Join(workspace, ".kodelet", "extensions", "commands", "kodelet-extension-commands"))
+	return workspace
+}
+
+func writeACPTestExtensionExecutable(t *testing.T, path string) {
+	t.Helper()
+	restoreViperExtensionsForTest(t)
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	executable, err := os.Executable()
+	require.NoError(t, err)
+	script := fmt.Sprintf("#!/bin/sh\nKODELET_ACP_TEST_EXTENSION_HELPER=1 exec %q -test.run TestACPServerExtensionHelperProcess --\n", executable)
+	require.NoError(t, os.WriteFile(path, []byte(script), 0o755))
+}
+
+func restoreViperExtensionsForTest(t *testing.T) {
+	t.Helper()
+	originalSettings := viper.AllSettings()
+	t.Cleanup(func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	})
+	viper.Reset()
+	viper.Set("extensions.enabled", true)
+	viper.Set("extensions.local_dir", "./.kodelet/extensions")
+	viper.Set("extensions.global_dir", filepath.Join(t.TempDir(), "global-extensions"))
+	viper.Set("extensions.timeout", "5s")
+	viper.Set("extensions.tool_timeout", "5s")
+	viper.Set("extensions.max_output_size", 102400)
+}
+
+func TestACPServerExtensionHelperProcess(t *testing.T) {
+	if os.Getenv("KODELET_ACP_TEST_EXTENSION_HELPER") != "1" {
+		return
+	}
+	runACPServerExtensionHelperProcess()
+	os.Exit(0)
+}
+
+func runACPServerExtensionHelperProcess() {
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		payload, err := readACPServerRPCFrame(reader)
+		if err != nil {
+			return
+		}
+
+		var request struct {
+			JSONRPC string          `json:"jsonrpc"`
+			ID      int64           `json:"id"`
+			Method  string          `json:"method"`
+			Params  json.RawMessage `json:"params"`
+		}
+		if err := json.Unmarshal(payload, &request); err != nil {
+			writeACPServerRPCResponse(request.ID, nil, map[string]any{"code": -32700, "message": err.Error()})
+			continue
+		}
+
+		switch request.Method {
+		case "extension.initialize":
+			writeACPServerRPCResponse(request.ID, extensions.InitializeResult{
+				Name: "commands",
+				Commands: []extensions.CommandRegistration{
+					{
+						Name:        "doctor",
+						Aliases:     []string{"/doctor"},
+						Description: "Inspect extension runtime health",
+					},
+					{
+						Name:        "review",
+						Aliases:     []string{"/review"},
+						Description: "Run extension review",
+						Kind:        "recipe",
+					},
+				},
+			}, nil)
+		case "extension.command.execute":
+			var params struct {
+				Name    string                          `json:"name"`
+				Input   map[string]any                  `json:"input"`
+				Context extensions.ExtensionCallContext `json:"context"`
+			}
+			if err := json.Unmarshal(request.Params, &params); err != nil {
+				writeACPServerRPCResponse(request.ID, nil, map[string]any{"code": -32602, "message": err.Error()})
+				continue
+			}
+			writeACPServerRPCResponse(request.ID, handleACPServerExtensionCommand(params.Name, params.Input, params.Context), nil)
+		default:
+			writeACPServerRPCResponse(request.ID, nil, map[string]any{"code": -32601, "message": "method not found"})
+		}
+	}
+}
+
+func handleACPServerExtensionCommand(name string, input map[string]any, callContext extensions.ExtensionCallContext) extensions.CommandResult {
+	switch name {
+	case "doctor":
+		return extensions.CommandResult{
+			Action:   extensions.CommandActionRespond,
+			Response: fmt.Sprintf("All extensions are healthy for %s.", callContext.ConversationID),
+		}
+	case "review":
+		target, _ := input["target"].(string)
+		if strings.TrimSpace(target) == "" {
+			target = "HEAD"
+		}
+		return extensions.CommandResult{Action: extensions.CommandActionRunAgent, Prompt: "Review " + target, RecipeName: "review"}
+	default:
+		return extensions.CommandResult{Action: extensions.CommandActionPass}
+	}
+}
+
+func readACPServerRPCFrame(reader *bufio.Reader) ([]byte, error) {
+	contentLength := -1
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return nil, err
+		}
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" {
+			break
+		}
+		key, value, ok := strings.Cut(line, ":")
+		if ok && strings.EqualFold(strings.TrimSpace(key), "Content-Length") {
+			_, _ = fmt.Sscanf(strings.TrimSpace(value), "%d", &contentLength)
+		}
+	}
+	if contentLength < 0 {
+		return nil, fmt.Errorf("missing Content-Length")
+	}
+	payload := make([]byte, contentLength)
+	_, err := io.ReadFull(reader, payload)
+	return payload, err
+}
+
+func writeACPServerRPCResponse(id int64, result any, rpcErr any) {
+	response := map[string]any{"jsonrpc": "2.0", "id": id}
+	if rpcErr != nil {
+		response["error"] = rpcErr
+	} else {
+		response["result"] = result
+	}
+	payload, _ := json.Marshal(response)
+	fmt.Fprintf(os.Stdout, "Content-Length: %d\r\n\r\n%s", len(payload), payload)
 }

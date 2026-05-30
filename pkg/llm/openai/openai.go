@@ -923,7 +923,7 @@ func (t *Thread) createStreamingChatCompletionWithClient(
 }
 
 func (t *Thread) tools(opt llmtypes.MessageOpt) []tooltypes.Tool {
-	return base.AvailableTools(t.State, opt.NoToolUse)
+	return base.AvailableToolsForThread(t, t.State, opt.NoToolUse)
 }
 
 func (t *Thread) updateUsage(usage openai.Usage, model string) {

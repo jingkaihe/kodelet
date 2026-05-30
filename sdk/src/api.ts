@@ -63,10 +63,17 @@ export class ExtensionHost implements ExtensionAPI {
   }
 
   registerCommand<Schema extends AnyZodSchema | undefined = undefined>(registration: CommandRegistration<Schema>): void {
-    if (this.commands.has(registration.name)) {
+    const primaryName = normalizeCommandName(registration.name);
+    const names = [primaryName, ...(registration.aliases ?? []).map(normalizeCommandName).filter((name) => name && name !== primaryName)];
+    if (new Set(names).size !== names.length) {
       throw new Error(`Duplicate extension command registration: ${registration.name}`);
     }
-    this.commands.set(registration.name, {
+    for (const name of names) {
+      if (this.commands.has(name)) {
+        throw new Error(`Duplicate extension command registration: ${name}`);
+      }
+    }
+    this.commands.set(normalizeCommandName(registration.name), {
       registration: registration as CommandRegistration<AnyZodSchema | undefined>,
       inputSchema: registration.inputSchema ? zodSchemaToJsonSchema(registration.inputSchema) : undefined,
     });
@@ -127,7 +134,7 @@ export class ExtensionHost implements ExtensionAPI {
   }
 
   async executeCommand(params: ExecuteCommandParams): Promise<CommandResult> {
-    const command = this.commands.get(params.name);
+    const command = this.commands.get(normalizeCommandName(params.name));
     if (!command) {
       throw new Error(`Unknown extension command: ${params.name}`);
     }
@@ -179,6 +186,9 @@ export class ExtensionHost implements ExtensionAPI {
       }
       if (result.systemPrompt !== undefined) {
         aggregate.systemPrompt = result.systemPrompt;
+      }
+      if (result.tools !== undefined) {
+        aggregate.tools = mergeToolPatch(aggregate.tools, result.tools);
       }
       if (result.followUpMessages !== undefined) {
         aggregate.followUpMessages = [...(aggregate.followUpMessages ?? []), ...result.followUpMessages];
@@ -240,6 +250,23 @@ function setNestedToolField(event: Record<string, unknown>, field: "input" | "ou
   }
 }
 
+function mergeToolPatch(
+  current: EventResult["tools"] | undefined,
+  next: EventResult["tools"],
+): EventResult["tools"] {
+  if (!next) {
+    return current;
+  }
+  return {
+    disable: [...(current?.disable ?? []), ...(next.disable ?? [])],
+    enable: [...(current?.enable ?? []), ...(next.enable ?? [])],
+  };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeCommandName(name: string): string {
+  return name.trim().replace(/^\/+/, "");
 }

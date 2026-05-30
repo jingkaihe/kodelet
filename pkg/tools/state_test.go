@@ -1159,6 +1159,27 @@ func TestWithExtensionTools_RespectsExplicitAllowlist(t *testing.T) {
 	assert.NotContains(t, toolNames, "not_allowed_extension_tool")
 }
 
+func TestTools_RejectsExtensionToolCollisionWithBuiltIn(t *testing.T) {
+	ctx := context.Background()
+	state := NewBasicState(
+		ctx,
+		WithMainTools(),
+		WithExtensionTools([]tooltypes.Tool{&testTool{name: "bash"}, &testTool{name: "extension_unique"}}),
+	)
+
+	var bashCount int
+	var toolNames []string
+	for _, tool := range state.Tools() {
+		toolNames = append(toolNames, tool.Name())
+		if tool.Name() == "bash" {
+			bashCount++
+		}
+	}
+
+	assert.Equal(t, 1, bashCount)
+	assert.Contains(t, toolNames, "extension_unique")
+}
+
 func TestWithSkillTool_RespectsNoSkillsFlag(t *testing.T) {
 	ctx := context.Background()
 	viper.Set("no_skills", true)

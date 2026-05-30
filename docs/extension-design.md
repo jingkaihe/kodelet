@@ -221,6 +221,9 @@ extensions:
     get_weather:
       enabled: true
       timeout: 10s
+
+  processes:
+    weather:
       env:
         WEATHER_API_KEY: null
 ```
@@ -237,6 +240,7 @@ Configuration semantics:
 - `deny`: optional extension denylist using the same addressing rules as `allow`.
 - `events`: per-event runtime configuration.
 - `tools`: per-tool runtime configuration.
+- `processes`: per-extension process configuration. Environment entries can be literal strings or `null` to inherit that variable from Kodelet's parent environment.
 
 Allow/deny path entries are normalized before comparison:
 
@@ -789,101 +793,41 @@ This unifies recipes and commands without forcing all recipes to become extensio
 
 ## Lifecycle overview
 
-```diagram
-╭────────────────────╮
-│ kodelet starts     │
-╰─────────┬──────────╯
-          ▼
-╭────────────────────╮
-│ Discover extension │
-│ executables        │
-╰─────────┬──────────╯
-          ▼
-╭────────────────────╮
-│ Start subprocesses │
-│ initialize JSON-RPC│
-╰─────────┬──────────╯
-          ▼
-╭────────────────────╮
-│ session.start      │
-╰─────────┬──────────╯
-          ▼
-╭────────────────────╮
-│ resources.discover │
-╰─────────┬──────────╯
-          ▼
-╭────────────────────╮
-│ User prompt        │◀────────────────────────────────────────────╮
-╰─────────┬──────────╯                                             │
-          ▼                                                        │
-╭────────────────────╮                                             │
-│ Command routing    │                                             │
-│ registerCommand()  │                                             │
-╰────┬──────────┬────╯                                             │
-     │          │                                                  │
-     │          ├─ action: respond ────▶ ╭────────────────────╮    │
-     │          │                        │ Return response    │    │
-     │          │                        │ without LLM        │    │
-     │          │                        ╰────────────────────╯    │
-     │          │                                                  │
-     │          ├─ action: runAgent ─────────╮                     │
-     │          │                            │ generated prompt    │
-     │          ▼                            ▼                     │
-     │     ╭────────────────────────────────────╮                  │
-     ╰────▶│ user.message                       │                  │
-           │ can block / mutate                 │                  │
-           ╰──────────────┬─────────────────────╯                  │
-                          ▼                                        │
-           ╭────────────────────────────────────╮                  │
-           │ agent.init                         │                  │
-           │ can patch system prompt/tool list  │                  │
-           ╰──────────────┬─────────────────────╯                  │
-                          ▼                                        │
-           ╭────────────────────────────────────╮                  │
-           │ agent.start                        │                  │
-           ╰──────────────┬─────────────────────╯                  │
-                          ▼                                        │
-           ╭────────────────────────────────────╮                  │
-           │ turn loop                          │                  │
-           │                                    │                  │
-           │  ╭────────────╮                    │                  │
-           │  │ turn.start │                    │                  │
-           │  ╰─────┬──────╯                    │                  │
-           │        ▼                           │                  │
-           │  ╭────────────╮                    │                  │
-           │  │ LLM call   │                    │                  │
-           │  ╰─────┬──────╯                    │                  │
-           │        ▼                           │                  │
-           │  ╭────────────╮    no tool calls   │                  │
-           │  │ tool calls │────────────────────┤                  │
-           │  ╰─────┬──────╯                    │                  │
-           │        │ each tool                 │                  │
-           │        ▼                           │                  │
-           │  ╭────────────╮                    │                  │
-           │  │ tool.call  │ can block/mutate   │                  │
-           │  ╰─────┬──────╯                    │                  │
-           │        ▼                           │                  │
-           │  ╭────────────╮                    │                  │
-           │  │ run tool   │                    │                  │
-           │  ╰─────┬──────╯                    │                  │
-           │        ▼                           │                  │
-           │  ╭────────────╮                    │                  │
-           │  │tool.result │ can mutate result  │                  │
-           │  ╰─────┬──────╯                    │                  │
-           │        ▼                           │                  │
-           │  ╭────────────╮                    │                  │
-           │  │ turn.end   │                    │                  │
-           │  ╰─────┬──────╯                    │                  │
-           │        │ more tool turns           │                  │
-           │        ╰───────────────────────────╯                  │
-           ╰──────────────┬─────────────────────╯                  │
-                          ▼                                        │
-           ╭────────────────────────────────────╮                  │
-           │ agent.end                          │                  │
-           │ can request follow-up prompts      │                  │
-           ╰──────────────┬─────────────────────╯                  │
-                          │ follow-up or next user prompt           │
-                          ╰────────────────────────────────────────╯
+```mermaid
+flowchart TD
+    Start([kodelet starts])
+    Discover[Discover extension executables]
+    Initialize[Start subprocesses and initialize JSON-RPC]
+    SessionStart[session.start]
+    ResourcesDiscover[resources.discover]
+    Prompt[User prompt]
+    Commands{Extension command routing}
+    DirectResponse[Display response without LLM]
+    UserMessage[user.message\ncan block / mutate]
+    AgentInit[agent.init\ncan patch system prompt / tool list]
+    AgentStart[agent.start]
+    TurnStart[turn.start]
+    LLM[LLM call]
+    ToolCalls{Tool calls?}
+    ToolCall[tool.call\ncan block / mutate input]
+    RunTool[Run tool]
+    ToolResult[tool.result\ncan mutate result]
+    MoreTurns{More tool turns?}
+    TurnEnd[turn.end]
+    AgentEnd[agent.end\ncan request follow-up prompts]
+
+    Start --> Discover --> Initialize --> SessionStart --> ResourcesDiscover --> Prompt
+    Prompt --> Commands
+    Commands -- action: respond --> DirectResponse --> Prompt
+    Commands -- action: pass --> UserMessage
+    Commands -- action: runAgent / generated prompt --> UserMessage
+    UserMessage --> AgentInit --> AgentStart --> TurnStart --> LLM --> ToolCalls
+    ToolCalls -- yes, each tool --> ToolCall --> RunTool --> ToolResult --> MoreTurns
+    MoreTurns -- yes --> TurnStart
+    MoreTurns -- no --> TurnEnd
+    ToolCalls -- no --> TurnEnd
+    TurnEnd --> AgentEnd
+    AgentEnd -- follow-up or next user prompt --> Prompt
 ```
 
 ## Security model

@@ -86,6 +86,22 @@ func filterDiscoveredToolsByAllowed(config llmtypes.Config, tools []tooltypes.To
 	return filtered
 }
 
+func filterDuplicateTools(tools []tooltypes.Tool, reserved map[string]struct{}) []tooltypes.Tool {
+	if len(tools) == 0 {
+		return nil
+	}
+	filtered := make([]tooltypes.Tool, 0, len(tools))
+	for _, tool := range tools {
+		name := tool.Name()
+		if _, exists := reserved[name]; exists {
+			continue
+		}
+		reserved[name] = struct{}{}
+		filtered = append(filtered, tool)
+	}
+	return filtered
+}
+
 func skillsEnabledForConfig(config llmtypes.Config) bool {
 	if config.IsSubAgent {
 		return false
@@ -575,9 +591,10 @@ func (s *BasicState) Tools() []tooltypes.Tool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	tools := make([]tooltypes.Tool, 0, len(s.tools)+len(s.mcpTools)+len(s.extensionTools))
-	tools = append(tools, s.tools...)
-	tools = append(tools, s.mcpTools...)
-	tools = append(tools, s.extensionTools...)
+	reserved := map[string]struct{}{}
+	tools = append(tools, filterDuplicateTools(s.tools, reserved)...)
+	tools = append(tools, filterDuplicateTools(s.mcpTools, reserved)...)
+	tools = append(tools, filterDuplicateTools(s.extensionTools, reserved)...)
 	return tools
 }
 

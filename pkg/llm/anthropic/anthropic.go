@@ -1156,7 +1156,7 @@ func (t *Thread) getLastMessagesAttributes(messages []anthropic.MessageParam, la
 }
 
 func (t *Thread) tools(opt llmtypes.MessageOpt) []tooltypes.Tool {
-	return base.AvailableTools(t.State, opt.NoToolUse)
+	return base.AvailableToolsForThread(t, t.State, opt.NoToolUse)
 }
 
 func (t *Thread) updateUsage(response *anthropic.Message, model anthropic.Model) {

@@ -394,6 +394,14 @@ extensions:
   #   tool.call:
   #     timeout: 5s
 
+  # Per-extension process environment. Extension subprocesses receive a
+  # sanitized base environment; list extra variables here to pass literal
+  # values or use null to inherit from Kodelet's environment.
+  # processes:
+  #   weather:
+  #     env:
+  #       WEATHER_API_KEY: null
+
 # Agentic Skills Configuration
 # Skills are model-invoked capabilities that package domain expertise
 # Unlike fragments/recipes (user-invoked), skills are automatically invoked by Kodelet
