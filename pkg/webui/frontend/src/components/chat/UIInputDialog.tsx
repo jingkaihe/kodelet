@@ -40,7 +40,6 @@ const UIInputDialog: React.FC<UIInputDialogProps> = ({
 				role="dialog"
 			>
 				<div className="new-chat-dialog-header">
-					<p className="eyebrow-label text-kodelet-orange">Extension prompt</p>
 					<h2 className="new-chat-dialog-title">{trimmedTitle}</h2>
 					{request.helpText ? (
 						<p className="new-chat-dialog-copy ui-input-help-text">
@@ -50,7 +49,6 @@ const UIInputDialog: React.FC<UIInputDialogProps> = ({
 				</div>
 
 				<label className="new-chat-field">
-					<span className="composer-profile-label">Response</span>
 					<input
 						aria-label="Response"
 						className="new-chat-field-control"

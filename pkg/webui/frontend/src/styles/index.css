@@ -1533,6 +1533,29 @@ h6 {
   white-space: pre-wrap;
 }
 
+.ui-input-dialog .primary-pill-button {
+  border: 1px solid rgba(20, 20, 19, 0.86);
+  background:
+    linear-gradient(180deg, rgba(35, 34, 31, 0.98), rgba(20, 20, 19, 0.94)),
+    var(--kodelet-dark);
+  color: rgba(255, 252, 244, 0.96);
+}
+
+.ui-input-dialog .primary-pill-button:hover:not(:disabled) {
+  background:
+    linear-gradient(180deg, rgba(46, 44, 39, 0.98), rgba(20, 20, 19, 0.96)),
+    var(--kodelet-dark);
+}
+
+.ui-input-dialog .primary-pill-button:disabled {
+  cursor: not-allowed;
+  border-color: rgba(20, 20, 19, 0.08);
+  background: rgba(20, 20, 19, 0.08);
+  color: rgba(20, 20, 19, 0.34);
+  box-shadow: none;
+  transform: none;
+}
+
 .workspace-modal-backdrop {
   position: fixed;
   inset: 0;
