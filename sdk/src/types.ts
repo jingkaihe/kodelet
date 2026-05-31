@@ -90,6 +90,21 @@ export interface LogContext {
   error(message: string, fields?: Record<string, unknown>): void;
 }
 
+export interface UIInputRequest {
+  title: string;
+  helpText?: string;
+  placeholder?: string;
+  defaultValue?: string;
+  submitButtonText?: string;
+  cancelButtonText?: string;
+  required?: boolean;
+  secret?: boolean;
+}
+
+export interface UIContext {
+  input(request: UIInputRequest): Promise<string | undefined>;
+}
+
 export interface SharedContext extends Required<Pick<BaseCallContext, "cwd">>, Omit<BaseCallContext, "cwd"> {
   storage: StorageContext;
   path: PathContext;
@@ -97,6 +112,7 @@ export interface SharedContext extends Required<Pick<BaseCallContext, "cwd">>, O
   process: ProcessContext;
   env: EnvContext;
   log: LogContext;
+  ui: UIContext;
 }
 
 export interface ToolContext extends SharedContext {}

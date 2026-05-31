@@ -1521,6 +1521,18 @@ h6 {
   margin-top: 1rem;
 }
 
+.ui-input-dialog-backdrop {
+  z-index: 76;
+}
+
+.ui-input-dialog {
+  width: min(34rem, calc(100vw - 2rem));
+}
+
+.ui-input-help-text {
+  white-space: pre-wrap;
+}
+
 .workspace-modal-backdrop {
   position: fixed;
   inset: 0;

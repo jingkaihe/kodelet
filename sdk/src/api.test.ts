@@ -211,6 +211,41 @@ test("command context includes workspace, storage, env and process helpers", asy
   assert.deepEqual(result, { action: "respond", response: "true:README.md:ok" });
 });
 
+test("tool context can request host UI input", async () => {
+  const extension = defineExtension((ext) => {
+    ext.registerTool({
+      name: "ask",
+      description: "Ask for input",
+      inputSchema: z.object({}),
+      async execute(_, ctx) {
+        const answer = await ctx.ui.input({
+          title: "Pick one",
+          helpText: "1. A\n2. B",
+          submitButtonText: "Select",
+        });
+        return answer ? `answer=${answer}` : "dismissed";
+      },
+    });
+  });
+
+  const requests: Array<{ method: string; params?: unknown }> = [];
+  const harness = await createTestHarness(extension, {
+    async request(method, params) {
+      requests.push({ method, params });
+      return { status: "submitted", value: "2" };
+    },
+  });
+
+  const result = await harness.executeTool({ name: "ask", input: {} });
+  assert.deepEqual(result, { content: "answer=2" });
+  assert.equal(requests[0]?.method, "kodelet.ui.input");
+  assert.deepEqual(requests[0]?.params, {
+    title: "Pick one",
+    helpText: "1. A\n2. B",
+    submitButtonText: "Select",
+  });
+});
+
 test("runtime serves JSON-RPC over stdio", async (t) => {
   const extensionFile = path.join(await mkdtemp(path.join(os.tmpdir(), "kodelet-sdk-rpc-")), "extension.ts");
   await writeFile(
@@ -256,10 +291,57 @@ test("runtime serves JSON-RPC over stdio", async (t) => {
   assert.deepEqual(result, { content: "HELLO" });
 });
 
+test("runtime supports extension-initiated host RPC", async (t) => {
+  const extensionFile = path.join(await mkdtemp(path.join(os.tmpdir(), "kodelet-sdk-host-rpc-")), "extension.ts");
+  await writeFile(
+    extensionFile,
+    `
+      import { defineExtension, runExtension, z } from ${JSON.stringify(path.resolve("src/index.ts"))};
+
+      runExtension(defineExtension((ext) => {
+        ext.registerTool({
+          name: "ask",
+          description: "Ask user",
+          inputSchema: z.object({}),
+          async execute(_, ctx) {
+            const answer = await ctx.ui.input({ title: "Choose" });
+            return { content: answer ?? "none" };
+          },
+        });
+      }));
+    `,
+    "utf8",
+  );
+
+  const child = spawn(process.execPath, ["--import", "tsx", extensionFile], {
+    cwd: process.cwd(),
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  t.after(() => child.kill());
+
+  const client = new RpcTestClient(child.stdout, child.stdin);
+  const init = await client.call("extension.initialize", {
+    protocolVersion: "2026-05-30",
+    kodelet: { version: "test" },
+    extension: { id: "rpc-ui", cwd: process.cwd(), dataDir: "" },
+    capabilities: { ui: { input: true } },
+  });
+  assert.equal(init.tools[0].name, "ask");
+
+  const result = await client.call("extension.tool.execute", {
+    name: "ask",
+    input: {},
+    context: { conversationId: "conv-rpc", cwd: process.cwd() },
+  });
+  assert.deepEqual(client.hostRequests.map((request) => request.method), ["kodelet.ui.input"]);
+  assert.deepEqual(result, { content: "from-host" });
+});
+
 class RpcTestClient {
   private buffer = Buffer.alloc(0);
   private nextId = 0;
   private waiters = new Map<number, { resolve(value: any): void; reject(error: Error): void }>();
+  hostRequests: Array<{ id: number | string; method: string; params?: unknown }> = [];
 
   constructor(stdout: NodeJS.ReadableStream, private stdin: NodeJS.WritableStream) {
     stdout.on("data", (chunk: Buffer) => {
@@ -296,6 +378,13 @@ class RpcTestClient {
       }
       const response = JSON.parse(this.buffer.subarray(start, end).toString("utf8"));
       this.buffer = this.buffer.subarray(end);
+      if (response.method) {
+        this.hostRequests.push(response);
+        const result = response.method === "kodelet.ui.input" ? { status: "submitted", value: "from-host" } : undefined;
+        const payload = JSON.stringify({ jsonrpc: "2.0", id: response.id, result });
+        this.stdin.write(`Content-Length: ${Buffer.byteLength(payload)}\r\n\r\n${payload}`);
+        continue;
+      }
       const waiter = this.waiters.get(response.id);
       if (!waiter) {
         continue;

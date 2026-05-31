@@ -39,9 +39,22 @@ type rpcResponse struct {
 	Error   *rpcError       `json:"error,omitempty"`
 }
 
+type rpcIncomingMessage struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      json.RawMessage `json:"id,omitempty"`
+	Method  string          `json:"method,omitempty"`
+	Params  json.RawMessage `json:"params,omitempty"`
+	Result  json.RawMessage `json:"result,omitempty"`
+	Error   *rpcError       `json:"error,omitempty"`
+}
+
 type rpcError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
+}
+
+type rpcHostRequestHandler interface {
+	HandleRPCRequest(ctx context.Context, method string, params json.RawMessage) (any, *rpcError)
 }
 
 // ToolRegistration is returned by an extension during initialization.
@@ -74,6 +87,10 @@ type initializeParams struct {
 	Kodelet         map[string]any          `json:"kodelet"`
 	Extension       initializeExtensionInfo `json:"extension"`
 	Capabilities    map[string]any          `json:"capabilities"`
+}
+
+type uiInputCapability struct {
+	Input bool `json:"input"`
 }
 
 type initializeExtensionInfo struct {
@@ -191,6 +208,10 @@ func newRPCClient(reader io.Reader, writer io.Writer) *rpcClient {
 }
 
 func (c *rpcClient) call(ctx context.Context, method string, params any, result any) error {
+	return c.callWithHostHandler(ctx, method, params, result, nil)
+}
+
+func (c *rpcClient) callWithHostHandler(ctx context.Context, method string, params any, result any, handler rpcHostRequestHandler) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -205,38 +226,98 @@ func (c *rpcClient) call(ctx context.Context, method string, params any, result 
 		return err
 	}
 
-	respCh := make(chan rpcResponse, 1)
+	messageCh := make(chan rpcIncomingMessage, 1)
 	errCh := make(chan error, 1)
-	go func() {
-		resp, err := readResponse(c.reader)
-		if err != nil {
-			errCh <- err
-			return
-		}
-		respCh <- resp
-	}()
+	startRead := func() {
+		go func() {
+			msg, err := readIncomingMessage(c.reader)
+			if err != nil {
+				errCh <- err
+				return
+			}
+			messageCh <- msg
+		}()
+	}
+	startRead()
 
-	select {
-	case <-ctx.Done():
-		_ = c.cancel(req.ID)
-		return ctx.Err()
-	case err := <-errCh:
-		return err
-	case resp := <-respCh:
-		if resp.ID != req.ID {
-			return errors.Errorf("unexpected rpc response id %d, want %d", resp.ID, req.ID)
-		}
-		if resp.Error != nil {
-			return errors.Errorf("extension rpc error %d: %s", resp.Error.Code, resp.Error.Message)
-		}
-		if result == nil || len(resp.Result) == 0 {
+	for {
+		select {
+		case <-ctx.Done():
+			_ = c.cancel(req.ID)
+			return ctx.Err()
+		case err := <-errCh:
+			return err
+		case msg := <-messageCh:
+			messageCh = make(chan rpcIncomingMessage, 1)
+			errCh = make(chan error, 1)
+			if msg.Method != "" {
+				if err := c.handleIncomingRequest(ctx, msg, handler); err != nil {
+					return err
+				}
+				startRead()
+				continue
+			}
+
+			resp, err := incomingResponse(msg)
+			if err != nil {
+				return err
+			}
+			if resp.ID != req.ID {
+				return errors.Errorf("unexpected rpc response id %d, want %d", resp.ID, req.ID)
+			}
+			if resp.Error != nil {
+				return errors.Errorf("extension rpc error %d: %s", resp.Error.Code, resp.Error.Message)
+			}
+			if result == nil || len(resp.Result) == 0 {
+				return nil
+			}
+			if err := json.Unmarshal(resp.Result, result); err != nil {
+				return errors.Wrap(err, "failed to unmarshal rpc result")
+			}
 			return nil
 		}
-		if err := json.Unmarshal(resp.Result, result); err != nil {
-			return errors.Wrap(err, "failed to unmarshal rpc result")
-		}
+	}
+}
+
+func (c *rpcClient) handleIncomingRequest(ctx context.Context, msg rpcIncomingMessage, handler rpcHostRequestHandler) error {
+	if len(msg.ID) == 0 || string(msg.ID) == "null" {
 		return nil
 	}
+
+	var response rpcResponse
+	response.JSONRPC = "2.0"
+	if err := json.Unmarshal(msg.ID, &response.ID); err != nil {
+		response.Error = &rpcError{Code: -32600, Message: "invalid request id"}
+		return c.writeResponse(response)
+	}
+
+	if handler == nil {
+		response.Error = &rpcError{Code: -32601, Message: "host request method not found"}
+		return c.writeResponse(response)
+	}
+
+	result, rpcErr := handler.HandleRPCRequest(ctx, msg.Method, msg.Params)
+	if rpcErr != nil {
+		response.Error = rpcErr
+		return c.writeResponse(response)
+	}
+	if result != nil {
+		payload, err := json.Marshal(result)
+		if err != nil {
+			response.Error = &rpcError{Code: -32603, Message: err.Error()}
+			return c.writeResponse(response)
+		}
+		response.Result = payload
+	}
+	return c.writeResponse(response)
+}
+
+func (c *rpcClient) writeResponse(response rpcResponse) error {
+	payload, err := json.Marshal(response)
+	if err != nil {
+		return errors.Wrap(err, "failed to marshal rpc response")
+	}
+	return writeFrame(c.writer, payload)
 }
 
 func (c *rpcClient) cancel(id int64) error {
@@ -254,13 +335,35 @@ func writeFrame(writer io.Writer, payload []byte) error {
 }
 
 func readResponse(reader *bufio.Reader) (rpcResponse, error) {
-	payload, err := readFrame(reader)
+	msg, err := readIncomingMessage(reader)
 	if err != nil {
 		return rpcResponse{}, err
 	}
+	return incomingResponse(msg)
+}
+
+func readIncomingMessage(reader *bufio.Reader) (rpcIncomingMessage, error) {
+	payload, err := readFrame(reader)
+	if err != nil {
+		return rpcIncomingMessage{}, err
+	}
+	var msg rpcIncomingMessage
+	if err := json.Unmarshal(payload, &msg); err != nil {
+		return rpcIncomingMessage{}, errors.Wrap(err, "failed to unmarshal rpc response")
+	}
+	return msg, nil
+}
+
+func incomingResponse(msg rpcIncomingMessage) (rpcResponse, error) {
 	var resp rpcResponse
-	if err := json.Unmarshal(payload, &resp); err != nil {
-		return rpcResponse{}, errors.Wrap(err, "failed to unmarshal rpc response")
+	resp.JSONRPC = msg.JSONRPC
+	resp.Result = msg.Result
+	resp.Error = msg.Error
+	if len(msg.ID) == 0 {
+		return rpcResponse{}, errors.New("missing rpc response id")
+	}
+	if err := json.Unmarshal(msg.ID, &resp.ID); err != nil {
+		return rpcResponse{}, errors.Wrap(err, "failed to unmarshal rpc response id")
 	}
 	return resp, nil
 }

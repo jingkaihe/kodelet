@@ -1,6 +1,7 @@
 import nodeProcess from "node:process";
 
 import { createExtensionHost, type ExtensionHost } from "./api.js";
+import { setActiveHostRPCClient, type HostRPCClient } from "./context.js";
 import type { ExtensionEntrypoint } from "./types.js";
 
 interface JsonRpcRequest {
@@ -20,6 +21,41 @@ interface JsonRpcResponse {
   };
 }
 
+interface PendingRequest {
+  resolve(value: unknown): void;
+  reject(error: Error): void;
+}
+
+class StdioHostRPCClient implements HostRPCClient {
+  private nextId = 0;
+  private pending = new Map<number, PendingRequest>();
+
+  request(method: string, params?: unknown): Promise<unknown> {
+    const id = ++this.nextId;
+    writeMessage({ jsonrpc: "2.0", id, method, params });
+    return new Promise((resolve, reject) => {
+      this.pending.set(id, { resolve, reject });
+    });
+  }
+
+  handleResponse(response: JsonRpcResponse): boolean {
+    if (typeof response.id !== "number") {
+      return false;
+    }
+    const pending = this.pending.get(response.id);
+    if (!pending) {
+      return false;
+    }
+    this.pending.delete(response.id);
+    if (response.error) {
+      pending.reject(new Error(response.error.message));
+    } else {
+      pending.resolve(response.result);
+    }
+    return true;
+  }
+}
+
 export async function runExtension(entrypoint: ExtensionEntrypoint | { default: ExtensionEntrypoint }): Promise<void> {
   const resolvedEntrypoint = typeof entrypoint === "function" ? entrypoint : entrypoint.default;
   const host = await createExtensionHost(resolvedEntrypoint);
@@ -28,6 +64,8 @@ export async function runExtension(entrypoint: ExtensionEntrypoint | { default: 
 
 function runStdioServer(host: ExtensionHost): void {
   let buffer: Buffer<ArrayBufferLike> = Buffer.alloc(0);
+  const hostClient = new StdioHostRPCClient();
+  setActiveHostRPCClient(hostClient);
 
   nodeProcess.stdin.on("data", (chunk: Buffer) => {
     buffer = Buffer.concat([buffer, chunk]);
@@ -37,18 +75,22 @@ function runStdioServer(host: ExtensionHost): void {
         break;
       }
       buffer = frame.remaining;
-      void handleRequest(host, frame.payload);
+      void handleMessage(host, hostClient, frame.payload);
     }
   });
   nodeProcess.stdin.resume();
 }
 
-async function handleRequest(host: ExtensionHost, payload: Buffer): Promise<void> {
+async function handleMessage(host: ExtensionHost, hostClient: StdioHostRPCClient, payload: Buffer): Promise<void> {
   let request: JsonRpcRequest;
   try {
     request = JSON.parse(payload.toString("utf8")) as JsonRpcRequest;
   } catch (error) {
     writeResponse({ jsonrpc: "2.0", id: null, error: { code: -32700, message: errorMessage(error) } });
+    return;
+  }
+
+  if (!request.method && hostClient.handleResponse(request as JsonRpcResponse)) {
     return;
   }
 
@@ -117,7 +159,11 @@ function parseContentLength(header: string): number {
 }
 
 function writeResponse(response: JsonRpcResponse): void {
-  const payload = JSON.stringify(response);
+  writeMessage(response);
+}
+
+function writeMessage(message: JsonRpcRequest | JsonRpcResponse): void {
+  const payload = JSON.stringify(message);
   nodeProcess.stdout.write(`Content-Length: ${Buffer.byteLength(payload, "utf8")}\r\n\r\n${payload}`);
 }
 

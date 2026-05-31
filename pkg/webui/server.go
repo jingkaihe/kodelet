@@ -69,6 +69,7 @@ type activeChatRun struct {
 	done          chan struct{}
 	doneOnce      sync.Once
 	stopRequested bool
+	uiInput       *webUIInputBroker
 }
 
 func newActiveChatRun(cancel context.CancelFunc) *activeChatRun {
@@ -174,15 +175,21 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 	s := &Server{
 		router:              mux.NewRouter(),
 		conversationService: conversationService,
-		chatRunner:          NewDefaultChatRunner(config.CWD, extensionRuntimes),
-		config:              config,
-		staticFS:            staticFS,
-		runCtx:              runCtx,
-		runCancel:           runCancel,
-		terminalSessions:    newTerminalSessionManager(runCtx),
-		extensionRuntimes:   extensionRuntimes,
-		activeChats:         make(map[string]*activeChatRun),
-		chatSubscribers:     make(map[string]map[*subscriberEventSink]struct{}),
+		chatRunner: &webUIChatRunner{
+			defaultCWD:        config.CWD,
+			extensionRuntimes: extensionRuntimes,
+		},
+		config:            config,
+		staticFS:          staticFS,
+		runCtx:            runCtx,
+		runCancel:         runCancel,
+		terminalSessions:  newTerminalSessionManager(runCtx),
+		extensionRuntimes: extensionRuntimes,
+		activeChats:       make(map[string]*activeChatRun),
+		chatSubscribers:   make(map[string]map[*subscriberEventSink]struct{}),
+	}
+	if runner, ok := s.chatRunner.(*webUIChatRunner); ok {
+		runner.server = s
 	}
 
 	// Setup routes
@@ -207,6 +214,7 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/conversations/{id}/steer", s.handleGetPendingSteer).Methods("GET")
 	api.HandleFunc("/conversations/{id}/steer", s.handleSteerConversation).Methods("POST")
 	api.HandleFunc("/conversations/{id}/stop", s.handleStopConversation).Methods("POST")
+	api.HandleFunc("/conversations/{id}/ui-input/{requestId}", s.handleRespondUIInput).Methods("POST")
 	api.HandleFunc("/conversations/{id}/tools/{toolCallId}", s.handleGetToolResult).Methods("GET")
 	api.HandleFunc("/conversations/{id}", s.handleDeleteConversation).Methods("DELETE")
 	api.HandleFunc("/chat", s.handleChat).Methods("POST")
@@ -739,6 +747,25 @@ func (s *Server) hasActiveChatRun(conversationID string) bool {
 	defer s.activeChatsMu.Unlock()
 	run, ok := s.activeChats[conversationID]
 	return ok && run != nil
+}
+
+func (s *Server) uiInputBrokerForRun(conversationID string) *webUIInputBroker {
+	if strings.TrimSpace(conversationID) == "" {
+		return nil
+	}
+
+	s.activeChatsMu.Lock()
+	defer s.activeChatsMu.Unlock()
+	run, ok := s.activeChats[conversationID]
+	if !ok || run == nil || run.stopRequested {
+		return nil
+	}
+	return run.uiInput
+}
+
+func (s *Server) respondToUIInput(conversationID, requestID string, response extensions.UIInputResponse) bool {
+	broker := s.uiInputBrokerForRun(conversationID)
+	return broker != nil && broker.Respond(requestID, response)
 }
 
 func (s *Server) registerChatSubscriber(conversationID string, sink *subscriberEventSink) bool {
@@ -2036,6 +2063,46 @@ func (s *Server) handleStopConversation(w http.ResponseWriter, r *http.Request) 
 		ConversationID: conversationID,
 		Stopped:        stopped,
 	})
+}
+
+type uiInputResponseRequest struct {
+	Status string `json:"status"`
+	Value  string `json:"value,omitempty"`
+}
+
+func (s *Server) handleRespondUIInput(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	conversationID := strings.TrimSpace(vars["id"])
+	requestID := strings.TrimSpace(vars["requestId"])
+	if conversationID == "" || requestID == "" {
+		s.writeErrorResponse(w, http.StatusBadRequest, "conversation ID and request ID are required", nil)
+		return
+	}
+
+	var req uiInputResponseRequest
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		s.writeErrorResponse(w, http.StatusBadRequest, "invalid ui input response", err)
+		return
+	}
+	status := strings.TrimSpace(req.Status)
+	if status == "" {
+		status = extensions.UIInputStatusSubmitted
+	}
+	switch status {
+	case extensions.UIInputStatusSubmitted, extensions.UIInputStatusDismissed:
+	default:
+		s.writeErrorResponse(w, http.StatusBadRequest, "invalid ui input status", nil)
+		return
+	}
+
+	if !s.respondToUIInput(conversationID, requestID, extensions.UIInputResponse{Status: status, Value: req.Value}) {
+		s.writeErrorResponse(w, http.StatusNotFound, "ui input request not found", nil)
+		return
+	}
+
+	s.writeJSONResponse(w, map[string]bool{"success": true})
 }
 
 // handleForkConversation handles POST /api/conversations/{id}/fork

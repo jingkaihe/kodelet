@@ -63,6 +63,42 @@ func TestRuntimeInitializesExtensionAndExecutesRegisteredTool(t *testing.T) {
 	assert.Equal(t, "celsius", metadata.Data["unit"])
 }
 
+func TestRuntimeExtensionToolCanRequestUIInput(t *testing.T) {
+	rootDir := t.TempDir()
+	extDir := filepath.Join(rootDir, "ask")
+	writeExecutable(t, filepath.Join(extDir, "kodelet-extension-ask"), helperExtensionScript(t))
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+
+	runtime, err := NewRuntime(
+		context.Background(),
+		WithConfig(DefaultConfig()),
+		WithWorkingDir(rootDir),
+		WithRoots(Root{Dir: rootDir, Kind: SourceKindLocalStandalone}),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, runtime.Close()) })
+
+	tools := runtime.Tools()
+	require.Len(t, tools, 1)
+
+	ctx := ContextWithUIInputBroker(context.Background(), staticUIInputBroker{value: "2"})
+	result := tools[0].Execute(ctx, nil, `{"location":"AskUI"}`)
+
+	assert.False(t, result.IsError())
+	assert.Equal(t, "User answered 2", result.GetResult())
+}
+
+type staticUIInputBroker struct {
+	value string
+}
+
+func (b staticUIInputBroker) Input(_ context.Context, request UIInputRequest) (UIInputResponse, error) {
+	if request.Title == "" {
+		return UIInputResponse{Status: UIInputStatusDismissed}, nil
+	}
+	return UIInputResponse{Status: UIInputStatusSubmitted, Value: b.value}, nil
+}
+
 func TestRuntimeTimeoutPrecedence(t *testing.T) {
 	runtime := EmptyRuntime()
 	sdkToolTimeout := 15.0
@@ -523,6 +559,21 @@ func runExtensionHelperProcess() {
 				Location string `json:"location"`
 			}
 			_ = json.Unmarshal(params.Input, &input)
+			if input.Location == "AskUI" {
+				uiRequest := rpcRequest{JSONRPC: "2.0", ID: 99, Method: "kodelet.ui.input", Params: UIInputRequest{Title: "Choose option"}}
+				uiPayload, _ := json.Marshal(uiRequest)
+				_ = writeFrame(os.Stdout, uiPayload)
+				uiResponsePayload, err := readFrame(reader)
+				if err != nil {
+					return
+				}
+				var uiResponse rpcResponse
+				_ = json.Unmarshal(uiResponsePayload, &uiResponse)
+				var uiResult UIInputResponse
+				_ = json.Unmarshal(uiResponse.Result, &uiResult)
+				writeHelperResponse(request.ID, ToolExecutionResult{Content: "User answered " + uiResult.Value}, nil)
+				continue
+			}
 			result := ToolExecutionResult{
 				Content: fmt.Sprintf("Weather for %s from %s", input.Location, params.Context.ConversationID),
 				Data:    map[string]any{"unit": "celsius"},

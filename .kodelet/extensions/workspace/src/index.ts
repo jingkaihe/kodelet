@@ -8,6 +8,15 @@ const OpenInput = z.object({
   path: z.string().default(".").describe("Project-relative path to open"),
 });
 
+const AskQuestionInput = z.object({
+  question: z.string().min(1).describe("The question to ask the user"),
+  helpText: z.string().optional().describe("Additional context or instructions to show with the question"),
+  placeholder: z.string().optional().describe("Placeholder text for the response input"),
+  defaultValue: z.string().optional().describe("Default response value to use when the user submits an empty answer"),
+  submitButtonText: z.string().default("Submit").describe("Label for the submit button"),
+  required: z.boolean().default(false).describe("Whether the user must enter a non-empty response"),
+});
+
 export default defineExtension((ext) => {
   ext.setMetadata({ name: "workspace", version: "0.1.0" });
 
@@ -45,6 +54,35 @@ export default defineExtension((ext) => {
           changedFiles,
           entries: visibleEntries,
         },
+      };
+    },
+  });
+
+  ext.registerTool({
+    name: "ask_question",
+    description:
+      "Ask the user a short clarifying question during an agentic run. Use only when the answer is needed to choose the next step.",
+    inputSchema: AskQuestionInput,
+    async execute(input, ctx) {
+      const answer = await ctx.ui.input({
+        title: input.question,
+        helpText: input.helpText,
+        placeholder: input.placeholder,
+        defaultValue: input.defaultValue,
+        submitButtonText: input.submitButtonText,
+        required: input.required,
+      });
+
+      if (answer === undefined) {
+        return {
+          content: "User dismissed the question or interactive input is unavailable.",
+          data: { answered: false },
+        };
+      }
+
+      return {
+        content: `User answered: ${answer}`,
+        data: { answered: true, answer },
       };
     },
   });

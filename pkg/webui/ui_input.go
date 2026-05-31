@@ -1,0 +1,101 @@
+package webui
+
+import (
+	"context"
+	"strings"
+	"sync"
+
+	"github.com/jingkaihe/kodelet/pkg/extensions"
+)
+
+type webUIInputBroker struct {
+	conversationID string
+	sink           ChatEventSink
+	pending        map[string]chan extensions.UIInputResponse
+	mu             sync.Mutex
+}
+
+func newWebUIInputBroker(conversationID string, sink ChatEventSink) *webUIInputBroker {
+	return &webUIInputBroker{
+		conversationID: conversationID,
+		sink:           sink,
+		pending:        make(map[string]chan extensions.UIInputResponse),
+	}
+}
+
+func (b *webUIInputBroker) Input(ctx context.Context, request extensions.UIInputRequest) (extensions.UIInputResponse, error) {
+	if b == nil || b.sink == nil {
+		return extensions.UIInputResponse{Status: extensions.UIInputStatusUnavailable, Reason: "web ui input is not available"}, nil
+	}
+	request.ID = strings.TrimSpace(request.ID)
+	if request.ID == "" {
+		request.ID = extensions.NewUIInputRequestID()
+	}
+	responseCh := make(chan extensions.UIInputResponse, 1)
+
+	b.mu.Lock()
+	if previous, ok := b.pending[request.ID]; ok {
+		select {
+		case previous <- extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed}:
+		default:
+		}
+	}
+	b.pending[request.ID] = responseCh
+	b.mu.Unlock()
+	defer func() {
+		b.mu.Lock()
+		delete(b.pending, request.ID)
+		b.mu.Unlock()
+	}()
+
+	if err := b.sink.Send(ChatEvent{
+		Kind:           "ui-input-request",
+		ConversationID: b.conversationID,
+		Role:           "assistant",
+		UIInput: &UIInputEvent{
+			ID:               request.ID,
+			Title:            request.Title,
+			HelpText:         request.HelpText,
+			Placeholder:      request.Placeholder,
+			DefaultValue:     request.DefaultValue,
+			SubmitButtonText: request.SubmitButtonText,
+			CancelButtonText: request.CancelButtonText,
+			Required:         request.Required,
+			Secret:           request.Secret,
+		},
+	}); err != nil {
+		return extensions.UIInputResponse{}, err
+	}
+
+	select {
+	case <-ctx.Done():
+		return extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed}, ctx.Err()
+	case response := <-responseCh:
+		if response.Status == "" {
+			response.Status = extensions.UIInputStatusDismissed
+		}
+		return response, nil
+	}
+}
+
+func (b *webUIInputBroker) Respond(requestID string, response extensions.UIInputResponse) bool {
+	if b == nil {
+		return false
+	}
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return false
+	}
+	b.mu.Lock()
+	responseCh, ok := b.pending[requestID]
+	b.mu.Unlock()
+	if !ok {
+		return false
+	}
+	select {
+	case responseCh <- response:
+		return true
+	default:
+		return false
+	}
+}

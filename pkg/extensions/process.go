@@ -181,6 +181,7 @@ func (p *Process) initialize(ctx context.Context, cwd string) (*InitializeResult
 		Capabilities: map[string]any{
 			"tools":    true,
 			"commands": true,
+			"ui":       uiInputCapability{Input: true},
 			"events": []string{
 				"session.start",
 				"resources.discover",
@@ -259,7 +260,7 @@ func (p *Process) ExecuteTool(ctx context.Context, name string, input json.RawMe
 
 	params := executeToolParams{Name: name, Input: input, Context: callContext}
 	var result ToolExecutionResult
-	if err := client.call(ctx, "extension.tool.execute", params, &result); err != nil {
+	if err := client.callWithHostHandler(ctx, "extension.tool.execute", params, &result, p); err != nil {
 		if shouldRestartAfterCallError(err) {
 			p.closeForRestart()
 		}
@@ -280,7 +281,7 @@ func (p *Process) ExecuteCommand(ctx context.Context, name string, input map[str
 
 	params := executeCommandParams{Name: name, Input: input, Invocation: invocation, Context: callContext}
 	var result CommandResult
-	if err := client.call(ctx, "extension.command.execute", params, &result); err != nil {
+	if err := client.callWithHostHandler(ctx, "extension.command.execute", params, &result, p); err != nil {
 		if shouldRestartAfterCallError(err) {
 			p.closeForRestart()
 		}
@@ -301,13 +302,40 @@ func (p *Process) HandleEvent(ctx context.Context, eventID string, eventName str
 
 	params := eventParams{ID: eventID, Event: eventName, Context: callContext, Payload: payload}
 	var result EventResult
-	if err := client.call(ctx, "extension.event.handle", params, &result); err != nil {
+	if err := client.callWithHostHandler(ctx, "extension.event.handle", params, &result, p); err != nil {
 		if shouldRestartAfterCallError(err) {
 			p.closeForRestart()
 		}
 		return nil, err
 	}
 	return &result, nil
+}
+
+func (p *Process) HandleRPCRequest(ctx context.Context, method string, params json.RawMessage) (any, *rpcError) {
+	switch method {
+	case "kodelet.ui.input":
+		var request UIInputRequest
+		if err := json.Unmarshal(params, &request); err != nil {
+			return nil, &rpcError{Code: -32602, Message: err.Error()}
+		}
+		if request.ID == "" {
+			request.ID = NewUIInputRequestID()
+		}
+		broker, ok := UIInputBrokerFromContext(ctx)
+		if !ok {
+			return UIInputResponse{Status: UIInputStatusUnavailable, Reason: "ui input is not available"}, nil
+		}
+		response, err := broker.Input(ctx, request)
+		if err != nil {
+			return nil, &rpcError{Code: -32000, Message: err.Error()}
+		}
+		if response.Status == "" {
+			response.Status = UIInputStatusDismissed
+		}
+		return response, nil
+	default:
+		return nil, &rpcError{Code: -32601, Message: "host request method not found"}
+	}
 }
 
 func (p *Process) rpcClient() *rpcClient {

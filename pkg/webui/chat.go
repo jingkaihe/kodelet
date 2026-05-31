@@ -68,7 +68,21 @@ type ChatEvent struct {
 	ToolCallID     string                          `json:"tool_call_id,omitempty"`
 	Input          string                          `json:"input,omitempty"`
 	ToolResult     *tooltypes.StructuredToolResult `json:"tool_result,omitempty"`
+	UIInput        *UIInputEvent                   `json:"ui_input,omitempty"`
 	Error          string                          `json:"error,omitempty"`
+}
+
+// UIInputEvent describes an extension-requested input prompt for the Web UI.
+type UIInputEvent struct {
+	ID               string `json:"id"`
+	Title            string `json:"title"`
+	HelpText         string `json:"helpText,omitempty"`
+	Placeholder      string `json:"placeholder,omitempty"`
+	DefaultValue     string `json:"defaultValue,omitempty"`
+	SubmitButtonText string `json:"submitButtonText,omitempty"`
+	CancelButtonText string `json:"cancelButtonText,omitempty"`
+	Required         bool   `json:"required,omitempty"`
+	Secret           bool   `json:"secret,omitempty"`
 }
 
 // ChatEventSink receives streamed chat events.
@@ -105,6 +119,10 @@ func NewDefaultChatRunner(defaultCWD string, extensionRuntimes ...extensionRunti
 
 // Run executes a single persisted chat turn and streams events to the sink.
 func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatEventSink) (string, error) {
+	return runDefaultChat(ctx, req, sink, r.defaultCWD, r.extensionRuntimes)
+}
+
+func runDefaultChat(ctx context.Context, req ChatRequest, sink ChatEventSink, defaultCWD string, extensionRuntimes extensionRuntimeProvider) (string, error) {
 	message, imageInputs, err := normalizeChatRequest(req)
 	if err != nil {
 		return "", err
@@ -130,7 +148,7 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 		sessionID = convtypes.GenerateID()
 	}
 
-	llmConfig, resolvedCWD, err := resolveWebChatConfig(ctx, sessionID, strings.TrimSpace(req.Profile), strings.TrimSpace(req.CWD), r.defaultCWD)
+	llmConfig, resolvedCWD, err := resolveWebChatConfig(ctx, sessionID, strings.TrimSpace(req.Profile), strings.TrimSpace(req.CWD), defaultCWD)
 	if err != nil {
 		return sessionID, errors.Wrap(err, "failed to load configuration")
 	}
@@ -143,8 +161,8 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 	llmConfig.WorkingDirectory = resolvedCWD
 
 	var extensionRuntime *extensions.Runtime
-	if r.extensionRuntimes != nil {
-		extensionRuntime, err = r.extensionRuntimes.Runtime(ctx, resolvedCWD)
+	if extensionRuntimes != nil {
+		extensionRuntime, err = extensionRuntimes.Runtime(ctx, resolvedCWD)
 	} else {
 		extensionRuntime, err = extensions.NewRuntimeFromViper(ctx, resolvedCWD)
 		if extensionRuntime != nil {
@@ -232,7 +250,6 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 		conversationID: sessionID,
 		sink:           sink,
 	}
-
 	_, err = thread.SendMessage(ctx, message, handler, llmtypes.MessageOpt{
 		PromptCache: true,
 		Images:      imageInputs,
@@ -242,6 +259,25 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 	}
 
 	return sessionID, nil
+}
+
+type webUIChatRunner struct {
+	defaultCWD        string
+	extensionRuntimes extensionRuntimeProvider
+	server            *Server
+}
+
+func (r *webUIChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatEventSink) (string, error) {
+	conversationID := strings.TrimSpace(req.ConversationID)
+	if r != nil && r.server != nil && conversationID != "" {
+		if broker := r.server.uiInputBrokerForRun(conversationID); broker != nil {
+			ctx = extensions.ContextWithUIInputBroker(ctx, broker)
+		}
+	}
+	if r == nil {
+		return runDefaultChat(ctx, req, sink, "", nil)
+	}
+	return runDefaultChat(ctx, req, sink, r.defaultCWD, r.extensionRuntimes)
 }
 
 func resolveWebChatConfig(ctx context.Context, conversationID, requestedProfile, requestedCWD, defaultCWDInput string) (llmtypes.Config, string, error) {
@@ -973,6 +1009,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		broadcast:      s.broadcastChatEvent,
 		conversationID: conversationID,
 	}
+	run.uiInput = newWebUIInputBroker(conversationID, broadcastingSink)
 
 	conversationID, runErr := s.chatRunner.Run(ctx, req, broadcastingSink)
 	if runErr != nil {

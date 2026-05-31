@@ -472,6 +472,9 @@ var runCmd = &cobra.Command{
 				_ = extensionRuntime.Close()
 			}()
 		}
+		if !config.Headless && !config.ResultOnly {
+			ctx = extensions.ContextWithUIInputBroker(ctx, extensions.NewTerminalUIInputBroker(os.Stdin, os.Stderr))
+		}
 
 		if config.FragmentName != "" {
 			processed, err := processFragment(ctx, config, args, extensionRuntime, extensions.ExtensionCallContext{

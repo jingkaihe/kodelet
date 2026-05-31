@@ -156,6 +156,10 @@ export interface StopConversationResponse {
 	stopped: boolean;
 }
 
+export interface UIInputResponseResult {
+	success: boolean;
+}
+
 export interface ForkConversationResponse {
 	success: boolean;
 	conversation_id: string;
@@ -263,6 +267,7 @@ export interface ChatStreamEvent {
 	kind:
 		| "conversation"
 		| "usage"
+		| "ui-input-request"
 		| "thinking-start"
 		| "thinking-delta"
 		| "thinking-end"
@@ -284,7 +289,21 @@ export interface ChatStreamEvent {
 	tool_call_id?: string;
 	input?: string;
 	tool_result?: ToolResult;
+	ui_input?: UIInputRequestEvent;
 	error?: string;
+}
+
+export interface UIInputRequestEvent {
+	id: string;
+	conversationId?: string;
+	title: string;
+	helpText?: string;
+	placeholder?: string;
+	defaultValue?: string;
+	submitButtonText?: string;
+	cancelButtonText?: string;
+	required?: boolean;
+	secret?: boolean;
 }
 
 export interface ChatRenderMessage {

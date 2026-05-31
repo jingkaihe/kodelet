@@ -13,6 +13,7 @@ import ChatSidebar from "../components/chat/ChatSidebar";
 import ChatTranscript from "../components/chat/ChatTranscript";
 import NewChatContextDialog from "../components/chat/NewChatContextDialog";
 import PendingSteerList from "../components/chat/PendingSteerList";
+import UIInputDialog from "../components/chat/UIInputDialog";
 import GitDiffModal from "../components/workspace/GitDiffModal";
 import TerminalModal from "../components/workspace/TerminalModal";
 import {
@@ -29,6 +30,7 @@ import type {
 	GitDiffResponse,
 	PendingImageAttachment,
 	SlashCommandOption,
+	UIInputRequestEvent,
 } from "../types";
 import {
 	cn,
@@ -365,6 +367,9 @@ const ChatPage: React.FC = () => {
 	const [sidebarWidth, setSidebarWidth] = useState(readStoredSidebarWidth);
 	const [isResizingSidebar, setIsResizingSidebar] = useState(false);
 	const [newChatDialogOpen, setNewChatDialogOpen] = useState(false);
+	const [uiInputRequest, setUIInputRequest] =
+		useState<UIInputRequestEvent | null>(null);
+	const [uiInputSubmitting, setUIInputSubmitting] = useState(false);
 	const [statusTick, setStatusTick] = useState(0);
 	const loadedConversationId = conversation?.id ?? null;
 	const transcriptEndRef = useRef<HTMLDivElement | null>(null);
@@ -732,6 +737,10 @@ const ChatPage: React.FC = () => {
 						);
 					}
 
+					if (handleUIInputRequest(event)) {
+						return;
+					}
+
 					setMessages((currentMessages) =>
 						applyChatStreamEvent(currentMessages, event),
 					);
@@ -988,6 +997,50 @@ const ChatPage: React.FC = () => {
 		startTransition(() => navigate(nextPath, { replace: true }));
 	};
 
+	const handleUIInputRequest = (event: ChatStreamEvent) => {
+		if (event.kind !== "ui-input-request" || !event.ui_input) {
+			return false;
+		}
+		setUIInputRequest({
+			...event.ui_input,
+			conversationId: event.conversation_id,
+		});
+		setUIInputSubmitting(false);
+		return true;
+	};
+
+	const respondToUIInput = async (
+		request: UIInputRequestEvent,
+		response: { status: "submitted" | "dismissed"; value?: string },
+	) => {
+		const targetConversationId =
+			request.conversationId || activeConversationId || conversationId;
+		if (!targetConversationId) {
+			showToast("Cannot answer extension prompt before conversation starts", "error");
+			return;
+		}
+
+		setUIInputSubmitting(true);
+		try {
+			await apiService.respondToUIInput(
+				targetConversationId,
+				request.id,
+				response,
+			);
+			setUIInputRequest((currentRequest) =>
+				currentRequest?.id === request.id ? null : currentRequest,
+			);
+		} catch (error) {
+			const message =
+				error instanceof Error
+					? error.message
+					: "Failed to answer extension prompt";
+			showToast(message, "error");
+		} finally {
+			setUIInputSubmitting(false);
+		}
+	};
+
 	const handleSubmit = async () => {
 		const prompt = draft.trim();
 		const steeringSubmission = sending && canSteerActiveConversation;
@@ -1150,6 +1203,10 @@ const ChatPage: React.FC = () => {
 							);
 						}
 
+						if (handleUIInputRequest(event)) {
+							return;
+						}
+
 						setMessages((currentMessages) =>
 							applyChatStreamEvent(currentMessages, event),
 						);
@@ -1300,6 +1357,7 @@ const ChatPage: React.FC = () => {
 		abortControllerRef.current?.abort();
 		setSteering(false);
 		setSteerAvailable(false);
+		setUIInputRequest(null);
 		void apiService.stopConversation(conversationToStop).catch((error) => {
 			console.error("Failed to stop conversation", error);
 		});
@@ -1746,6 +1804,21 @@ const ChatPage: React.FC = () => {
 				open={terminalOpen}
 				onClose={() => setTerminalOpen(false)}
 			/>
+			{uiInputRequest ? (
+				<UIInputDialog
+					request={uiInputRequest}
+					submitting={uiInputSubmitting}
+					onCancel={() => {
+						void respondToUIInput(uiInputRequest, { status: "dismissed" });
+					}}
+					onSubmit={(value) => {
+						void respondToUIInput(uiInputRequest, {
+							status: "submitted",
+							value,
+						});
+					}}
+				/>
+			) : null}
 
 			{newChatDialogOpen ? (
 				<NewChatContextDialog

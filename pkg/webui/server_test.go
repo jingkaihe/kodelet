@@ -22,6 +22,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
@@ -1447,6 +1448,55 @@ func TestServer_handleStopConversation(t *testing.T) {
 	assert.True(t, response.Stopped)
 	assert.False(t, server.isActiveChat("conv-123"))
 	assert.True(t, server.activeChats["conv-123"].stopRequested)
+}
+
+func TestServer_handleRespondUIInput(t *testing.T) {
+	broker := newWebUIInputBroker("conv-123", &recordingChatSink{})
+	server := &Server{
+		conversationService: &mockConversationService{},
+		router:              mux.NewRouter(),
+		activeChats:         make(map[string]*activeChatRun),
+	}
+	server.activeChats["conv-123"] = &activeChatRun{
+		cancel:  func() {},
+		done:    make(chan struct{}),
+		uiInput: broker,
+	}
+
+	resultCh := make(chan extensions.UIInputResponse, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		result, err := broker.Input(context.Background(), extensions.UIInputRequest{ID: "input-1", Title: "Choose"})
+		if err != nil {
+			errCh <- err
+			return
+		}
+		resultCh <- result
+	}()
+
+	require.Eventually(t, func() bool {
+		broker.mu.Lock()
+		defer broker.mu.Unlock()
+		_, ok := broker.pending["input-1"]
+		return ok
+	}, time.Second, 10*time.Millisecond)
+
+	req := httptest.NewRequest("POST", "/api/conversations/conv-123/ui-input/input-1", strings.NewReader(`{"status":"submitted","value":"2"}`))
+	req = mux.SetURLVars(req, map[string]string{"id": "conv-123", "requestId": "input-1"})
+	w := httptest.NewRecorder()
+
+	server.handleRespondUIInput(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	select {
+	case err := <-errCh:
+		require.NoError(t, err)
+	case result := <-resultCh:
+		assert.Equal(t, extensions.UIInputStatusSubmitted, result.Status)
+		assert.Equal(t, "2", result.Value)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for ui input response")
+	}
 }
 
 func TestServer_handleStreamConversation(t *testing.T) {

@@ -66,6 +66,42 @@ func TestRPCClientCallHandlesErrorResponseAndUnexpectedID(t *testing.T) {
 	})
 }
 
+func TestRPCClientCallHandlesHostRequestBeforeResponse(t *testing.T) {
+	var outbound bytes.Buffer
+	var inbound bytes.Buffer
+	require.NoError(t, writeFrame(&inbound, []byte(`{"jsonrpc":"2.0","id":7,"method":"kodelet.ui.input","params":{"title":"Choose"}}`)))
+	require.NoError(t, writeFrame(&inbound, []byte(`{"jsonrpc":"2.0","id":1,"result":{"content":"done"}}`)))
+
+	client := newRPCClient(&inbound, &outbound)
+	var result ToolExecutionResult
+	err := client.callWithHostHandler(context.Background(), "extension.tool.execute", nil, &result, testHostRequestHandler{})
+
+	require.NoError(t, err)
+	assert.Equal(t, "done", result.Content)
+	frames := readAllTestFrames(t, outbound.Bytes())
+	require.Len(t, frames, 2)
+	var response rpcResponse
+	require.NoError(t, json.Unmarshal(frames[1], &response))
+	assert.Equal(t, int64(7), response.ID)
+	assert.JSONEq(t, `{"status":"submitted","value":"2"}`, string(response.Result))
+}
+
+type testHostRequestHandler struct{}
+
+func (testHostRequestHandler) HandleRPCRequest(_ context.Context, method string, params json.RawMessage) (any, *rpcError) {
+	if method != "kodelet.ui.input" {
+		return nil, &rpcError{Code: -32601, Message: "not found"}
+	}
+	var request UIInputRequest
+	if err := json.Unmarshal(params, &request); err != nil {
+		return nil, &rpcError{Code: -32602, Message: err.Error()}
+	}
+	if request.Title != "Choose" {
+		return nil, &rpcError{Code: -32602, Message: "bad title"}
+	}
+	return UIInputResponse{Status: UIInputStatusSubmitted, Value: "2"}, nil
+}
+
 func TestReadFrameValidationErrors(t *testing.T) {
 	tests := []struct {
 		name    string

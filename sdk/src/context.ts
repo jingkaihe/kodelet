@@ -16,9 +16,20 @@ import type {
   LogContext,
   SharedContext,
   ToolContext,
+  UIInputRequest,
 } from "./types.js";
 
 const execFileAsync = promisify(execFile);
+
+export interface HostRPCClient {
+  request(method: string, params?: unknown): Promise<unknown>;
+}
+
+let activeHostRPCClient: HostRPCClient | undefined;
+
+export function setActiveHostRPCClient(client: HostRPCClient | undefined): void {
+  activeHostRPCClient = client;
+}
 
 export function createToolContext(init: InitializeParams | undefined, context: BaseCallContext = {}): ToolContext {
   return createSharedContext(init, context);
@@ -183,6 +194,18 @@ function createSharedContext(init: InitializeParams | undefined, context: BaseCa
       },
     },
     log,
+    ui: {
+      async input(request: UIInputRequest) {
+        if (!activeHostRPCClient) {
+          return undefined;
+        }
+        const result = await activeHostRPCClient.request("kodelet.ui.input", request);
+        if (isRecord(result) && result.status === "submitted" && typeof result.value === "string") {
+          return result.value;
+        }
+        return undefined;
+      },
+    },
   };
 }
 
@@ -211,4 +234,8 @@ function isPathInside(target: string, parent: string): boolean {
 
 function isNotFound(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === "ENOENT";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

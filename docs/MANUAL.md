@@ -53,6 +53,7 @@ Kodelet is a lightweight agentic SWE Agent that runs as an interactive CLI tool 
   - [Account Status](#account-status)
 - [Extensions](#extensions)
   - [Creating TypeScript Extensions](#creating-typescript-extensions)
+  - [Requesting User Input from Extensions](#requesting-user-input-from-extensions)
   - [Extension Discovery](#extension-discovery)
   - [Extension Commands and Dynamic Recipes](#extension-commands-and-dynamic-recipes)
   - [Extension Events](#extension-events)
@@ -1221,6 +1222,37 @@ Example wrapper:
 #!/usr/bin/env bash
 exec kodelet-extension-node ./dist/index.js
 ```
+
+### Requesting User Input from Extensions
+
+Tool, command, and event handlers can ask the active Kodelet UI for one short text response with `ctx.ui.input(...)`. Kodelet routes the prompt to the interactive CLI terminal or to the Web UI conversation stream. In headless/result-only runs, or when no interactive UI is attached, the SDK resolves the call as `undefined`.
+
+```typescript
+ext.registerTool({
+  name: "ask_user_choice",
+  description: "Ask the user to choose between concrete options",
+  inputSchema: z.object({
+    question: z.string(),
+    options: z.array(z.string()).min(2).max(5),
+  }),
+  async execute(input, ctx) {
+    const choices = input.options.map((option, index) => `${index + 1}. ${option}`).join("\n");
+    const answer = await ctx.ui.input({
+      title: input.question,
+      helpText: `${choices}\n\nType the number of your choice`,
+      submitButtonText: "Select",
+      required: true,
+    });
+
+    if (!answer) {
+      return "User dismissed the question without choosing.";
+    }
+    return `User responded with: ${answer}`;
+  },
+});
+```
+
+Input prompts support `title`, `helpText`, `placeholder`, `defaultValue`, custom submit/cancel labels, `required`, and `secret` for password-style Web UI input. Extension authors should treat a missing return value as dismissal or unavailable UI and continue gracefully.
 
 ### Extension Discovery
 

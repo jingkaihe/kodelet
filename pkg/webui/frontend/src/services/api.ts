@@ -17,6 +17,7 @@ import {
 	StopConversationResponse,
 	ForkConversationResponse,
 	ToolResult,
+	UIInputResponseResult,
 } from "../types";
 
 class ApiService {
@@ -213,6 +214,20 @@ class ApiService {
 			`/api/conversations/${id}/stop`,
 			{
 				method: "POST",
+			},
+		);
+	}
+
+	async respondToUIInput(
+		conversationId: string,
+		requestId: string,
+		response: { status: "submitted" | "dismissed"; value?: string },
+	): Promise<UIInputResponseResult> {
+		return this.request<UIInputResponseResult>(
+			`/api/conversations/${conversationId}/ui-input/${requestId}`,
+			{
+				method: "POST",
+				body: JSON.stringify(response),
 			},
 		);
 	}
