@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"testing"
-	"time"
 
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
@@ -16,7 +15,7 @@ import (
 
 func TestNewToolValidationAndSchemaDefaults(t *testing.T) {
 	t.Run("default schema", func(t *testing.T) {
-		tool, err := newTool("weather", nil, ToolRegistration{Name: "weather", Description: "Weather"}, time.Second, 100)
+		tool, err := newTool("weather", nil, ToolRegistration{Name: "weather", Description: "Weather"}, 0, 100)
 		require.NoError(t, err)
 		require.NotNil(t, tool.GenerateSchema())
 		assert.Equal(t, "object", tool.GenerateSchema().Type)
@@ -27,21 +26,21 @@ func TestNewToolValidationAndSchemaDefaults(t *testing.T) {
 			Name:        "weather",
 			Description: "Weather",
 			InputSchema: map[string]any{"type": make(chan int)},
-		}, time.Second, 100)
+		}, 0, 100)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to marshal extension tool schema")
 	})
 
 	t.Run("missing name and description", func(t *testing.T) {
-		_, err := newTool("weather", nil, ToolRegistration{Description: "Weather"}, time.Second, 100)
+		_, err := newTool("weather", nil, ToolRegistration{Description: "Weather"}, 0, 100)
 		require.ErrorContains(t, err, "extension tool name is required")
-		_, err = newTool("weather", nil, ToolRegistration{Name: "weather"}, time.Second, 100)
+		_, err = newTool("weather", nil, ToolRegistration{Name: "weather"}, 0, 100)
 		require.ErrorContains(t, err, "extension tool description is required")
 	})
 }
 
 func TestToolValidateInputAndTracing(t *testing.T) {
-	tool, err := newTool("weather", nil, ToolRegistration{Name: "get_weather", Description: "Weather"}, time.Second, 100)
+	tool, err := newTool("weather", nil, ToolRegistration{Name: "get_weather", Description: "Weather"}, 0, 100)
 	require.NoError(t, err)
 
 	assert.NoError(t, tool.ValidateInput(nil, `{"location":"London"}`))

@@ -366,12 +366,6 @@ extensions:
   # Local extension directory (default: ./.kodelet/extensions)
   local_dir: "./.kodelet/extensions"
 
-  # Default request timeout for lifecycle events and initialization (default: 30s)
-  timeout: 30s
-
-  # Execution timeout for extension tools (default: 120s)
-  tool_timeout: 120s
-
   # Maximum output size for extension tool output (default: 100KB)
   max_output_size: 102400
 
@@ -384,15 +378,10 @@ extensions:
   #   - org@repo/experimental
 
   # Per-tool runtime configuration. Tool names match extension-registered names.
+  # Tool timeouts are controlled by SDK-declared timeoutInSec or the built-in 10m default.
   # tools:
   #   get_weather:
   #     enabled: true
-  #     timeout: 30s
-
-  # Per-event timeout overrides.
-  # events:
-  #   tool.call:
-  #     timeout: 5s
 
   # Per-extension process environment. Extension subprocesses receive a
   # sanitized base environment; list extra variables here to pass literal

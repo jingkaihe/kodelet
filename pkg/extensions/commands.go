@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/pkg/errors"
@@ -130,14 +131,7 @@ func (r *Runtime) TryCommand(ctx context.Context, rawPrompt, commandName, args s
 
 	for _, command := range r.matchingCommands(commandName) {
 		input, invocation := buildCommandInput(rawPrompt, commandName, args)
-		timeout := r.eventTimeout("command.execute")
-		callCtx := ctx
-		cancel := func() {}
-		if timeout > 0 {
-			var cancelFunc context.CancelFunc
-			callCtx, cancelFunc = context.WithTimeout(ctx, timeout)
-			cancel = cancelFunc
-		}
+		callCtx, cancel := contextWithOptionalDuration(ctx, commandTimeout(command.Registration))
 		result, err := command.Process.ExecuteCommand(callCtx, command.Registration.Name, input, invocation, callContext)
 		cancel()
 		if err != nil {
@@ -164,6 +158,10 @@ func (r *Runtime) TryCommand(ctx context.Context, rawPrompt, commandName, args s
 	}
 
 	return &RoutedCommandResult{}, nil
+}
+
+func commandTimeout(registration CommandRegistration) time.Duration {
+	return timeoutInSecDuration(registration.TimeoutInSec)
 }
 
 func (r *Runtime) matchingCommands(commandName string) []Command {

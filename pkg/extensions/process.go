@@ -73,7 +73,7 @@ func (p *Process) start(ctx context.Context) error {
 	}
 
 	p.cmd = cmd
-	p.client = newRPCClient(stdout, stdin, p.config.Timeout)
+	p.client = newRPCClient(stdout, stdin)
 	p.stdin = stdin
 	p.stdout = stdout
 	p.closed = false
@@ -132,13 +132,7 @@ func (p *Process) ensureRunning(ctx context.Context) error {
 		return err
 	}
 
-	initCtx := ctx
-	cancel := func() {}
-	if timeout := timeoutOrDefault(p.config.Timeout, DefaultConfig().Timeout); timeout > 0 {
-		var cancelFunc context.CancelFunc
-		initCtx, cancelFunc = context.WithTimeout(ctx, timeout)
-		cancel = cancelFunc
-	}
+	initCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	_, err := p.initialize(initCtx, p.cwd)
 	cancel()
 	if err != nil {

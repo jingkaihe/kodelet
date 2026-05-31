@@ -363,23 +363,19 @@ func applyToolListPatch(allowedTools []string, patch *ToolListPatch) []string {
 }
 
 func (r *Runtime) dispatchEventToHandler(ctx context.Context, handler eventHandler, eventName string, payload any, callContext ExtensionCallContext) (*EventResult, error) {
-	timeout := r.eventTimeout(eventName)
-	if timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
-	}
+	ctx, cancel := contextWithOptionalDuration(ctx, eventTimeout(handler))
+	defer cancel()
 	if handler.process != nil {
 		return handler.process.HandleEvent(ctx, nextEventID(), eventName, payload, callContext)
 	}
 	return &EventResult{}, nil
 }
 
-func (r *Runtime) eventTimeout(eventName string) time.Duration {
-	if eventConfig, ok := r.config.Events[eventName]; ok && eventConfig.Timeout > 0 {
-		return eventConfig.Timeout
+func eventTimeout(handler eventHandler) time.Duration {
+	if handler.sub.TimeoutInSec != nil {
+		return timeoutInSecDuration(handler.sub.TimeoutInSec)
 	}
-	return timeoutOrDefault(r.config.Timeout, DefaultConfig().Timeout)
+	return 30 * time.Second
 }
 
 func (r *Runtime) eventHandlers(eventName string) []eventHandler {

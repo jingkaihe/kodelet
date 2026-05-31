@@ -53,6 +53,7 @@ export default function (ext: ExtensionAPI) {
     name: "get_weather",
     description: "Get the current weather for a location",
     inputSchema: WeatherInput,
+    timeoutInSec: 600,
     async execute(input, ctx) {
       ctx.log.info(`Fetching weather for ${input.location}`);
 
@@ -67,7 +68,7 @@ export default function (ext: ExtensionAPI) {
     },
   });
 
-  ext.on("tool.call", async (event) => {
+  ext.on("tool.call", { timeoutInSec: 5 }, async (event) => {
     if (
       event.tool.name === "bash" &&
       typeof event.tool.input.command === "string" &&
@@ -195,8 +196,6 @@ extensions:
   global_dir: ~/.kodelet/extensions
   local_dir: ./.kodelet/extensions
 
-  timeout: 30s
-  tool_timeout: 120s
   max_output_size: 102400
 
   # Plugin extensions are addressed by plugin package and extension name.
@@ -211,16 +210,9 @@ extensions:
     - org@repo/experimental-extension
     - /absolute/path/to/kodelet-extension-experimental
 
-  events:
-    tool.call:
-      timeout: 5s
-    tool.result:
-      timeout: 5s
-
   tools:
     get_weather:
       enabled: true
-      timeout: 10s
 
   processes:
     weather:
@@ -233,14 +225,13 @@ Configuration semantics:
 - `enabled`: disables all extension discovery and execution when false.
 - `global_dir`: global standalone extension root.
 - `local_dir`: repo-local standalone extension root.
-- `timeout`: default request timeout for extension lifecycle events.
-- `tool_timeout`: default request timeout for extension tool executions.
 - `max_output_size`: max assistant-facing output accepted from extension tools.
 - `allow`: optional extension allowlist. Plugin entries use `org@repo/extension`; standalone entries use extension paths, either relative or absolute.
 - `deny`: optional extension denylist using the same addressing rules as `allow`.
-- `events`: per-event runtime configuration.
-- `tools`: per-tool runtime configuration.
+- `tools`: per-tool enablement configuration.
 - `processes`: per-extension process configuration. Environment entries can be literal strings or `null` to inherit that variable from Kodelet's parent environment.
+
+Timeouts are controlled by SDK-declared `timeoutInSec`. Events use SDK `timeoutInSec` or the built-in `30s` default, tools use SDK `timeoutInSec` or the built-in `10m` default, and commands use SDK `timeoutInSec` or no timeout.
 
 Allow/deny path entries are normalized before comparison:
 
@@ -331,7 +322,7 @@ Rules:
 
 - `stdout` is protocol only.
 - `stderr` is logs.
-- Every request has a timeout.
+- Requests use the effective timeout from config, SDK `timeoutInSec`, and runtime defaults. Extension commands may run without a timeout by default.
 - Cancellation uses `$/cancelRequest`.
 - If an extension hangs after cancellation, Kodelet kills and restarts it.
 - The host supervises processes with exponential backoff.
@@ -642,6 +633,7 @@ ext.registerCommand({
   description: "Run an extension-provided code review recipe",
   inputSchema: ReviewInput,
   kind: "recipe",
+  timeoutInSec: 1800,
   async execute(input, ctx) {
     return {
       action: "runAgent",

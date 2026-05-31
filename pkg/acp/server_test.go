@@ -1331,8 +1331,6 @@ func restoreViperExtensionsForTest(t *testing.T) {
 	viper.Set("extensions.enabled", true)
 	viper.Set("extensions.local_dir", "./.kodelet/extensions")
 	viper.Set("extensions.global_dir", filepath.Join(t.TempDir(), "global-extensions"))
-	viper.Set("extensions.timeout", "5s")
-	viper.Set("extensions.tool_timeout", "5s")
 	viper.Set("extensions.max_output_size", 102400)
 }
 

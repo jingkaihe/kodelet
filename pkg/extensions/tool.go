@@ -86,7 +86,7 @@ func (t *Tool) Execute(ctx context.Context, _ tooltypes.State, parameters string
 		InvokedBy:      "main",
 	}
 
-	execCtx, cancel := context.WithTimeout(ctx, t.timeout)
+	execCtx, cancel := contextWithOptionalDuration(ctx, t.timeout)
 	defer cancel()
 	result, err := t.process.ExecuteTool(execCtx, t.name, json.RawMessage(parameters), callCtx)
 	executionTime := time.Since(start)

@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/pkg/errors"
 )
@@ -47,24 +46,27 @@ type rpcError struct {
 
 // ToolRegistration is returned by an extension during initialization.
 type ToolRegistration struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	InputSchema map[string]any `json:"inputSchema"`
+	Name         string         `json:"name"`
+	Description  string         `json:"description"`
+	InputSchema  map[string]any `json:"inputSchema"`
+	TimeoutInSec *float64       `json:"timeoutInSec,omitempty"`
 }
 
 // CommandRegistration is returned by an extension during initialization.
 type CommandRegistration struct {
-	Name        string         `json:"name"`
-	Aliases     []string       `json:"aliases,omitempty"`
-	Description string         `json:"description"`
-	InputSchema map[string]any `json:"inputSchema,omitempty"`
-	Kind        string         `json:"kind,omitempty"`
+	Name         string         `json:"name"`
+	Aliases      []string       `json:"aliases,omitempty"`
+	Description  string         `json:"description"`
+	InputSchema  map[string]any `json:"inputSchema,omitempty"`
+	Kind         string         `json:"kind,omitempty"`
+	TimeoutInSec *float64       `json:"timeoutInSec,omitempty"`
 }
 
 // Subscription declares an event handler registered by an extension.
 type Subscription struct {
-	Event    string `json:"event"`
-	Priority int    `json:"priority,omitempty"`
+	Event        string   `json:"event"`
+	Priority     int      `json:"priority,omitempty"`
+	TimeoutInSec *float64 `json:"timeoutInSec,omitempty"`
 }
 
 type initializeParams struct {
@@ -175,33 +177,22 @@ type ToolListPatch struct {
 }
 
 type rpcClient struct {
-	reader  *bufio.Reader
-	writer  io.Writer
-	timeout time.Duration
-	nextID  int64
-	mu      sync.Mutex
+	reader *bufio.Reader
+	writer io.Writer
+	nextID int64
+	mu     sync.Mutex
 }
 
-func newRPCClient(reader io.Reader, writer io.Writer, timeout time.Duration) *rpcClient {
-	if timeout == 0 {
-		timeout = DefaultConfig().Timeout
-	}
+func newRPCClient(reader io.Reader, writer io.Writer) *rpcClient {
 	return &rpcClient{
-		reader:  bufio.NewReader(reader),
-		writer:  writer,
-		timeout: timeout,
+		reader: bufio.NewReader(reader),
+		writer: writer,
 	}
 }
 
 func (c *rpcClient) call(ctx context.Context, method string, params any, result any) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
-	if _, ok := ctx.Deadline(); !ok && c.timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, c.timeout)
-		defer cancel()
-	}
 
 	c.nextID++
 	req := rpcRequest{JSONRPC: "2.0", ID: c.nextID, Method: method, Params: params}

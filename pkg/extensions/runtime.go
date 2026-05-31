@@ -78,7 +78,7 @@ func (r *Runtime) initialize(ctx context.Context, discovery *Discovery) error {
 			logger.G(ctx).WithError(err).WithField("extension", ext.ID).Warn("failed to start extension; disabling for this process")
 			continue
 		}
-		initCtx, cancel := context.WithTimeout(ctx, timeoutOrDefault(r.config.Timeout, DefaultConfig().Timeout))
+		initCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		result, err := proc.Initialize(initCtx, r.workingDir)
 		cancel()
 		if err != nil {
@@ -108,8 +108,7 @@ func (r *Runtime) register(_ context.Context, proc *Process, result *InitializeR
 		if _, exists := r.tools[registration.Name]; exists {
 			return errors.Errorf("duplicate extension tool registration: %s", registration.Name)
 		}
-		toolTimeout := r.toolTimeout(registration.Name)
-		tool, err := newTool(proc.Extension.ID, proc, registration, toolTimeout, r.config.MaxOutputSize)
+		tool, err := newTool(proc.Extension.ID, proc, registration, r.toolTimeout(registration), r.config.MaxOutputSize)
 		if err != nil {
 			return errors.Wrapf(err, "failed to register extension tool %s", registration.Name)
 		}
@@ -194,18 +193,11 @@ func (r *Runtime) toolEnabled(name string) bool {
 	return !ok || toolConfig.Enabled == nil || *toolConfig.Enabled
 }
 
-func (r *Runtime) toolTimeout(name string) time.Duration {
-	if toolConfig, ok := r.config.Tools[name]; ok && toolConfig.Timeout > 0 {
-		return toolConfig.Timeout
+func (r *Runtime) toolTimeout(registration ToolRegistration) time.Duration {
+	if registration.TimeoutInSec != nil {
+		return timeoutInSecDuration(registration.TimeoutInSec)
 	}
-	return timeoutOrDefault(r.config.ToolTimeout, DefaultConfig().ToolTimeout)
-}
-
-func timeoutOrDefault(value, fallback time.Duration) time.Duration {
-	if value > 0 {
-		return value
-	}
-	return fallback
+	return 10 * time.Minute
 }
 
 // Tools returns registered extension tools sorted by name.

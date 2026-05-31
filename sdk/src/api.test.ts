@@ -16,6 +16,7 @@ test("registers tools, commands, events and executes handlers", async () => {
       name: "get_weather",
       description: "Get weather",
       inputSchema: WeatherInput,
+      timeoutInSec: 600,
       execute(input) {
         return {
           content: `Weather for ${input.location}`,
@@ -30,6 +31,7 @@ test("registers tools, commands, events and executes handlers", async () => {
       aliases: ["/doctor"],
       description: "Inspect extension health",
       inputSchema: DoctorInput,
+      timeoutInSec: 30,
       async execute(input, ctx) {
         return {
           action: "respond",
@@ -38,7 +40,7 @@ test("registers tools, commands, events and executes handlers", async () => {
       },
     });
 
-    ext.on("tool.call", { priority: 10 }, async (event) => {
+    ext.on("tool.call", { priority: 10, timeoutInSec: 5 }, async (event) => {
       if (event.tool.name === "get_weather") {
         return { input: { location: "Paris" } };
       }
@@ -53,10 +55,12 @@ test("registers tools, commands, events and executes handlers", async () => {
   assert.equal(init.name, "weather");
   assert.equal(init.version, "0.1.0");
   assert.equal(init.tools[0]?.name, "get_weather");
+  assert.equal(init.tools[0]?.timeoutInSec, 600);
   assert.equal(init.tools[0]?.inputSchema.type, "object");
   assert.equal(init.commands[0]?.name, "doctor");
+  assert.equal(init.commands[0]?.timeoutInSec, 30);
   assert.deepEqual(init.subscriptions, [
-    { event: "tool.call", priority: 10 },
+    { event: "tool.call", priority: 10, timeoutInSec: 5 },
     { event: "agent.end", priority: 0 },
   ]);
 

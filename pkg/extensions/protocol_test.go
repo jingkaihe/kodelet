@@ -8,7 +8,6 @@ import (
 	"io"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,7 +16,7 @@ import (
 func TestRPCClientCallWritesCancelNotificationOnContextCancel(t *testing.T) {
 	reader, writer := io.Pipe()
 	var outbound bytes.Buffer
-	client := newRPCClient(reader, &outbound, time.Second)
+	client := newRPCClient(reader, &outbound)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -44,7 +43,7 @@ func TestRPCClientCallHandlesErrorResponseAndUnexpectedID(t *testing.T) {
 		var inbound bytes.Buffer
 		require.NoError(t, writeFrame(&inbound, payload))
 
-		client := newRPCClient(&inbound, &outbound, time.Second)
+		client := newRPCClient(&inbound, &outbound)
 		err = client.call(context.Background(), "extension.test", nil, nil)
 
 		require.Error(t, err)
@@ -59,7 +58,7 @@ func TestRPCClientCallHandlesErrorResponseAndUnexpectedID(t *testing.T) {
 		var inbound bytes.Buffer
 		require.NoError(t, writeFrame(&inbound, payload))
 
-		client := newRPCClient(&inbound, &outbound, time.Second)
+		client := newRPCClient(&inbound, &outbound)
 		err = client.call(context.Background(), "extension.test", nil, nil)
 
 		require.Error(t, err)

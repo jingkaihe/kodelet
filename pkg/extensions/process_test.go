@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -64,7 +63,7 @@ func TestProcessRPCClientNilWhenClosedDisabledOrShutdown(t *testing.T) {
 	assert.Nil(t, (&Process{closed: true}).rpcClient())
 	assert.Nil(t, (&Process{disabled: true}).rpcClient())
 	assert.Nil(t, (&Process{shutdown: true}).rpcClient())
-	client := newRPCClient(stringsNewReader(""), ioDiscard{}, time.Second)
+	client := newRPCClient(stringsNewReader(""), ioDiscard{})
 	assert.Same(t, client, (&Process{client: client}).rpcClient())
 }
 

@@ -242,13 +242,14 @@ export default defineExtension((ext) => {
     name: "get_weather",
     description: "Get weather for a location",
     inputSchema: WeatherInput,
+    timeoutInSec: 600,
     async execute(input, ctx) {
       ctx.log.info(`Fetching weather for ${input.location}`);
       return { content: `Weather for ${input.location}: cloudy` };
     },
   });
 
-  ext.on("tool.call", async (event) => {
+  ext.on("tool.call", { timeoutInSec: 5 }, async (event) => {
     if (event.tool.name === "bash" && JSON.stringify(event.tool.input).includes("rm -rf /")) {
       return { block: { reason: "Dangerous command denied" } };
     }
@@ -264,6 +265,7 @@ ext.registerCommand({
   description: "Run an extension-provided review recipe",
   kind: "recipe",
   inputSchema: z.object({ target: z.string().default("HEAD") }),
+  timeoutInSec: 1800,
   async execute(input) {
     return {
       action: "runAgent",
@@ -292,8 +294,6 @@ extensions:
   enabled: true
   global_dir: ~/.kodelet/extensions
   local_dir: ./.kodelet/extensions
-  timeout: 30s
-  tool_timeout: 120s
   allow:
     - org@repo/security
     - ./.kodelet/extensions/weather
@@ -302,11 +302,9 @@ extensions:
   tools:
     get_weather:
       enabled: true
-      timeout: 10s
-  events:
-    tool.call:
-      timeout: 5s
 ```
+
+Timeouts are controlled by SDK-declared `timeoutInSec`. Events use SDK `timeoutInSec` or the built-in `30s` default, tools use SDK `timeoutInSec` or the built-in `10m` default, and commands use SDK `timeoutInSec` or no timeout.
 
 Disable extensions for one run with:
 ```bash
@@ -356,7 +354,7 @@ Extension tools are model-invoked tools registered by the extension runtime. The
 
 Use `ext.registerTool(...)` in a TypeScript extension, provide a Zod `inputSchema`, and return either a string or `{ content, data?, error? }`. Kodelet exposes registered extension tools alongside built-in and MCP tools.
 
-Per-tool extension settings live under `extensions.tools.<tool-name>` rather than the removed `custom_tools` config block.
+Per-tool extension enablement lives under `extensions.tools.<tool-name>.enabled`; tool timeouts are controlled by SDK `timeoutInSec` or the built-in 10m fallback.
 
 ### MCP Integration
 Model Context Protocol for external integrations. Configure in `config.yaml`:

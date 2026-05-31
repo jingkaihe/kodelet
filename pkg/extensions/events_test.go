@@ -61,12 +61,10 @@ func TestEventHandlersSortByPriorityThenRegistrationOrder(t *testing.T) {
 }
 
 func TestEventTimeoutUsesSpecificAndDefaultTimeouts(t *testing.T) {
-	runtime := EmptyRuntime()
-	runtime.config.Timeout = 11 * time.Second
-	runtime.config.Events = map[string]EventConfig{EventToolCall: {Timeout: 2 * time.Second}}
+	sdkTimeoutInSec := 3.0
 
-	assert.Equal(t, 2*time.Second, runtime.eventTimeout(EventToolCall))
-	assert.Equal(t, 11*time.Second, runtime.eventTimeout(EventToolResult))
+	assert.Equal(t, 3*time.Second, eventTimeout(eventHandler{sub: Subscription{TimeoutInSec: &sdkTimeoutInSec}}))
+	assert.Equal(t, 30*time.Second, eventTimeout(eventHandler{}))
 }
 
 func TestNilRuntimeDispatchersReturnDefaults(t *testing.T) {

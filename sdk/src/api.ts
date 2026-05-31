@@ -36,6 +36,7 @@ interface RegisteredCommand {
 interface RegisteredEventHandler {
   event: EventName;
   priority: number;
+  timeoutInSec?: number;
   order: number;
   handler: EventHandler<EventName>;
 }
@@ -94,6 +95,7 @@ export class ExtensionHost implements ExtensionAPI {
     this.handlers.push({
       event,
       priority: options.priority ?? 0,
+      timeoutInSec: options.timeoutInSec,
       order: this.order++,
       handler: handler as EventHandler<EventName>,
     });
@@ -108,6 +110,7 @@ export class ExtensionHost implements ExtensionAPI {
         name: registration.name,
         description: registration.description,
         inputSchema,
+        ...optionalTimeout(registration.timeoutInSec),
       })),
       commands: [...this.commands.values()].map(({ registration, inputSchema }) => ({
         name: registration.name,
@@ -115,6 +118,7 @@ export class ExtensionHost implements ExtensionAPI {
         description: registration.description,
         inputSchema,
         kind: registration.kind,
+        ...optionalTimeout(registration.timeoutInSec),
       })),
       subscriptions: this.subscriptions(),
     };
@@ -206,15 +210,41 @@ export class ExtensionHost implements ExtensionAPI {
   }
 
   private subscriptions(): InitializeResult["subscriptions"] {
-    const byEvent = new Map<string, number>();
+    const byEvent = new Map<string, { priority: number; timeoutInSec?: number }>();
     for (const handler of this.handlers) {
       const previous = byEvent.get(handler.event);
-      if (previous === undefined || handler.priority > previous) {
-        byEvent.set(handler.event, handler.priority);
+      if (previous === undefined) {
+        byEvent.set(handler.event, { priority: handler.priority, timeoutInSec: handler.timeoutInSec });
+        continue;
       }
+      byEvent.set(handler.event, {
+        priority: Math.max(previous.priority, handler.priority),
+        timeoutInSec: mergeTimeoutInSec(previous.timeoutInSec, handler.timeoutInSec),
+      });
     }
-    return [...byEvent.entries()].map(([event, priority]) => ({ event, priority }));
+    return [...byEvent.entries()].map(([event, options]) => ({
+      event,
+      priority: options.priority,
+      ...optionalTimeout(options.timeoutInSec),
+    }));
   }
+}
+
+function optionalTimeout(timeoutInSec: number | undefined): { timeoutInSec?: number } {
+  return timeoutInSec === undefined ? {} : { timeoutInSec };
+}
+
+function mergeTimeoutInSec(current: number | undefined, next: number | undefined): number | undefined {
+  if (current === 0 || next === 0) {
+    return 0;
+  }
+  if (current === undefined) {
+    return next;
+  }
+  if (next === undefined) {
+    return current;
+  }
+  return Math.max(current, next);
 }
 
 export function defineExtension(entrypoint: ExtensionEntrypoint): ExtensionEntrypoint {

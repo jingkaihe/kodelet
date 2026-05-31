@@ -1187,6 +1187,7 @@ export default defineExtension((ext) => {
     name: "get_weather",
     description: "Get the current weather for a location",
     inputSchema: WeatherInput,
+    timeoutInSec: 600,
     async execute(input, ctx) {
       ctx.log.info(`Fetching weather for ${input.location}`);
       return {
@@ -1196,7 +1197,7 @@ export default defineExtension((ext) => {
     },
   });
 
-  ext.on("tool.call", async (event) => {
+  ext.on("tool.call", { timeoutInSec: 5 }, async (event) => {
     if (event.tool.name === "bash" && JSON.stringify(event.tool.input).includes("rm -rf /")) {
       return { block: { reason: "Refusing dangerous shell command" } };
     }
@@ -1268,6 +1269,7 @@ ext.registerCommand({
   aliases: ["/open"],
   description: "Open a project-relative path in the configured editor",
   inputSchema: OpenInput,
+  timeoutInSec: 60,
   async execute(input, ctx) {
     const target = ctx.path.resolveWorkspacePath(input.path ?? ".");
     if (!(await ctx.fs.exists(target))) {
@@ -1339,8 +1341,6 @@ extensions:
   enabled: true
   global_dir: ~/.kodelet/extensions
   local_dir: ./.kodelet/extensions
-  timeout: 30s
-  tool_timeout: 120s
   max_output_size: 102400
 
   allow:
@@ -1351,20 +1351,17 @@ extensions:
     - org@repo/experimental
     - /absolute/path/to/kodelet-extension-experimental
 
-  events:
-    tool.call:
-      timeout: 5s
-
   tools:
     get_weather:
       enabled: true
-      timeout: 10s
 
   processes:
     weather:
       env:
         WEATHER_API_KEY: null  # inherit from parent environment only when listed
 ```
+
+Timeouts are controlled by SDK-declared `timeoutInSec`. Extension events use SDK `timeoutInSec` or the built-in `30s` default, extension tools use SDK `timeoutInSec` or the built-in `10m` default, and extension commands use SDK `timeoutInSec` or no timeout.
 
 Use `kodelet run --no-extensions "query"` or `extensions.enabled: false` to disable extension loading.
 

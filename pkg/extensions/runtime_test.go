@@ -25,12 +25,9 @@ func TestRuntimeInitializesExtensionAndExecutesRegisteredTool(t *testing.T) {
 	basePath := t.TempDir()
 	t.Setenv("KODELET_BASE_PATH", basePath)
 
-	config := DefaultConfig()
-	config.Timeout = 5 * time.Second
-	config.ToolTimeout = 5 * time.Second
 	runtime, err := NewRuntime(
 		context.Background(),
-		WithConfig(config),
+		WithConfig(DefaultConfig()),
 		WithWorkingDir(rootDir),
 		WithRoots(Root{Dir: rootDir, Kind: SourceKindLocalStandalone}),
 	)
@@ -64,6 +61,22 @@ func TestRuntimeInitializesExtensionAndExecutesRegisteredTool(t *testing.T) {
 	assert.Equal(t, "get_weather", metadata.ToolName)
 	assert.Equal(t, "Weather for London from conv-123", metadata.Output)
 	assert.Equal(t, "celsius", metadata.Data["unit"])
+}
+
+func TestRuntimeTimeoutPrecedence(t *testing.T) {
+	runtime := EmptyRuntime()
+	sdkToolTimeout := 15.0
+	sdkCommandTimeout := 20.0
+	sdkEventTimeout := 2.0
+
+	assert.Equal(t, 15*time.Second, runtime.toolTimeout(ToolRegistration{Name: "research", TimeoutInSec: &sdkToolTimeout}))
+	assert.Equal(t, 10*time.Minute, runtime.toolTimeout(ToolRegistration{Name: "default"}))
+
+	assert.Equal(t, 20*time.Second, commandTimeout(CommandRegistration{Name: "/research", TimeoutInSec: &sdkCommandTimeout}))
+	assert.Zero(t, commandTimeout(CommandRegistration{Name: "default"}))
+
+	assert.Equal(t, 2*time.Second, eventTimeout(eventHandler{sub: Subscription{Event: EventToolCall, TimeoutInSec: &sdkEventTimeout}}))
+	assert.Equal(t, 30*time.Second, eventTimeout(eventHandler{sub: Subscription{Event: EventToolCall}}))
 }
 
 func TestRuntimeDispatchesToolCallAndToolResultEvents(t *testing.T) {

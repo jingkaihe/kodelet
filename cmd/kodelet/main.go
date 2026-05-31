@@ -43,8 +43,6 @@ func init() {
 	viper.SetDefault("extensions.enabled", true)
 	viper.SetDefault("extensions.global_dir", "~/.kodelet/extensions")
 	viper.SetDefault("extensions.local_dir", "./.kodelet/extensions")
-	viper.SetDefault("extensions.timeout", "30s")
-	viper.SetDefault("extensions.tool_timeout", "120s")
 	viper.SetDefault("extensions.max_output_size", 102400)
 
 	viper.SetDefault("tracing.enabled", false)

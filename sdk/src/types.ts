@@ -111,6 +111,7 @@ export interface ToolRegistration<Schema extends AnyZodSchema = AnyZodSchema> {
   name: string;
   description: string;
   inputSchema: Schema;
+  timeoutInSec?: number;
   execute(input: InferInput<Schema>, ctx: ToolContext): Awaitable<ToolExecutionResult | string>;
 }
 
@@ -120,6 +121,7 @@ export interface CommandRegistration<Schema extends AnyZodSchema | undefined = u
   description: string;
   inputSchema?: Schema;
   kind?: CommandKind;
+  timeoutInSec?: number;
   execute(input: InferInput<Schema>, ctx: CommandContext): Awaitable<CommandResult | undefined>;
 }
 
@@ -220,6 +222,7 @@ export interface EventResult {
 
 export interface EventSubscriptionOptions {
   priority?: number;
+  timeoutInSec?: number;
 }
 
 export type EventHandler<Name extends EventName = EventName> = (
@@ -258,6 +261,7 @@ export interface InitializeResult {
     name: string;
     description: string;
     inputSchema: Record<string, unknown>;
+    timeoutInSec?: number;
   }>;
   commands: Array<{
     name: string;
@@ -265,10 +269,12 @@ export interface InitializeResult {
     description: string;
     inputSchema?: Record<string, unknown>;
     kind?: CommandKind;
+    timeoutInSec?: number;
   }>;
   subscriptions: Array<{
     event: string;
     priority?: number;
+    timeoutInSec?: number;
   }>;
 }
 
