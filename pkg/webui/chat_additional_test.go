@@ -363,9 +363,9 @@ func TestAddWebChatDisplayMetadata(t *testing.T) {
 	assert.Equal(t, expansion.Command, display.Command)
 
 	extensionResult := &extensions.RoutedCommandResult{
-		CommandName: "review-changes",
+		CommandName: "review",
 		Prompt:      "Review the current diff",
-		Display:     "/changes target=HEAD",
+		Display:     "/review target=HEAD",
 	}
 	addWebChatExtensionCommandDisplay(thread, extensionResult)
 

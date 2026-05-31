@@ -105,8 +105,6 @@ const SUPPORTED_IMAGE_TYPES = new Set([
 	"image/gif",
 	"image/webp",
 ]);
-const MAX_SLASH_COMMAND_SUGGESTIONS = 8;
-
 const attachmentId = (): string =>
 	typeof crypto !== "undefined" && "randomUUID" in crypto
 		? crypto.randomUUID()
@@ -245,8 +243,7 @@ const filterSlashCommands = (
 		return [];
 	}
 
-	return commands
-		.filter((command) => {
+	return commands.filter((command) => {
 			if (!query) {
 				return true;
 			}
@@ -254,8 +251,7 @@ const filterSlashCommands = (
 				command.name.toLowerCase().includes(query) ||
 				command.description.toLowerCase().includes(query)
 			);
-		})
-		.slice(0, MAX_SLASH_COMMAND_SUGGESTIONS);
+		});
 };
 
 const insertSlashCommand = (draft: string, commandName: string): string => {

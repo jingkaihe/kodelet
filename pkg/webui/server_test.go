@@ -988,10 +988,10 @@ func TestServer_handleGetSlashCommandsIncludesExtensionCommands(t *testing.T) {
 		commandsByName[command.Name] = command
 	}
 	assert.Contains(t, commandsByName, "doctor")
-	reviewCommand, ok := commandsByName["review-changes"]
+	reviewCommand, ok := commandsByName["review"]
 	require.True(t, ok)
 	assert.Equal(t, `[focus="correctness, tests" target=HEAD] additional instructions`, reviewCommand.Hint)
-	assert.Equal(t, `/review-changes [focus="correctness, tests" target=HEAD] additional instructions`, reviewCommand.Placeholder)
+	assert.Equal(t, `/review [focus="correctness, tests" target=HEAD] additional instructions`, reviewCommand.Placeholder)
 }
 
 func TestServer_handleGetSlashCommandsReusesExtensionRuntime(t *testing.T) {

@@ -106,6 +106,19 @@ describe("ChatPage", () => {
 		mockGetSlashCommands.mockResolvedValue({
 			commands: [
 				{
+					name: "goal",
+					description: "Set active goal",
+					hint: "objective",
+					placeholder: "/goal <objective>",
+				},
+				{
+					name: "review",
+					description: "Review local git changes",
+					hint: '[focus="correctness, tests" target=HEAD] additional instructions',
+					placeholder:
+						'/review [focus="correctness, tests" target=HEAD] additional instructions',
+				},
+				{
 					name: "init",
 					description: "Initialize repository context",
 					hint: "additional instructions (optional)",
@@ -327,15 +340,46 @@ describe("ChatPage", () => {
 		expect(
 			await screen.findByTestId("slash-command-suggestions"),
 		).toBeInTheDocument();
-		expect(screen.getByText("/init")).toBeInTheDocument();
-		expect(screen.getByText("/init").closest("button")).not.toHaveClass(
+		expect(screen.getByText("/review")).toBeInTheDocument();
+		expect(screen.getByText("/review").closest("button")).not.toHaveClass(
 			"is-active",
 		);
 
 		fireEvent.keyDown(textarea, { key: "ArrowDown" });
 		fireEvent.keyDown(textarea, { key: "Enter" });
 
-		expect(textarea).toHaveValue("/init ");
+		expect(textarea).toHaveValue("/goal ");
+	});
+
+	it("does not cap unfiltered slash command suggestions", async () => {
+		mockGetSlashCommands.mockResolvedValue({
+			commands: [
+				{
+					name: "goal",
+					description: "Set active goal",
+				},
+				...Array.from({ length: 12 }, (_, index) => ({
+					name: `workflow-${index}`,
+					description: `Workflow ${index}`,
+				})),
+				{
+					name: "review",
+					description: "Review local git changes",
+				},
+			],
+		});
+
+		render(<ChatPage />);
+
+		await waitFor(() => expect(mockGetSlashCommands).toHaveBeenCalled());
+
+		const textarea = screen.getByTestId("composer-textarea");
+		fireEvent.change(textarea, { target: { value: "/" } });
+
+		expect(
+			await screen.findByTestId("slash-command-suggestions"),
+		).toBeInTheDocument();
+		expect(screen.getByText("/review")).toBeInTheDocument();
 	});
 
 	it("uses the selected slash command placeholder for argument hints", async () => {
@@ -356,20 +400,20 @@ describe("ChatPage", () => {
 
 		expect(textarea).toHaveAttribute(
 			"placeholder",
-			"/init additional instructions (optional)",
+			"/goal <objective>",
 		);
 		expect(screen.getByTestId("composer-slash-usage-hint")).toHaveTextContent(
-			"/init additional instructions (optional)",
+			"/goal <objective>",
 		);
 
 		fireEvent.keyDown(textarea, { key: "ArrowDown" });
 
 		expect(textarea).toHaveAttribute(
 			"placeholder",
-			"/github/pr target=main additional instructions",
+			'/review [focus="correctness, tests" target=HEAD] additional instructions',
 		);
 		expect(screen.getByTestId("composer-slash-usage-hint")).toHaveTextContent(
-			"/github/pr target=main additional instructions",
+			'/review [focus="correctness, tests" target=HEAD] additional instructions',
 		);
 	});
 

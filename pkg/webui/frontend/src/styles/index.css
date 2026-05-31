@@ -736,7 +736,9 @@ h6 {
 
 .composer-slash-suggestions {
   margin: 0.25rem 0.25rem 0.35rem;
-  overflow: hidden;
+  max-height: min(42vh, 26rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border-radius: 1.1rem;
   border: 1px solid rgba(20, 20, 19, 0.1);
   background:
@@ -745,6 +747,24 @@ h6 {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.82),
     0 16px 34px rgba(20, 20, 19, 0.08);
+}
+
+.composer-slash-suggestions::-webkit-scrollbar {
+  width: 0.55rem;
+}
+
+.composer-slash-suggestions::-webkit-scrollbar-track {
+  background: rgba(20, 20, 19, 0.04);
+  border-radius: 999px;
+}
+
+.composer-slash-suggestions::-webkit-scrollbar-thumb {
+  background: rgba(77, 116, 160, 0.32);
+  border-radius: 999px;
+}
+
+.composer-slash-suggestions::-webkit-scrollbar-thumb:hover {
+  background: rgba(77, 116, 160, 0.46);
 }
 
 .composer-slash-suggestion {

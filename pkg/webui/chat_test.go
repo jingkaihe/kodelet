@@ -339,8 +339,8 @@ func runWebExtensionHelperProcess() {
 					Aliases:     []string{"/doctor"},
 					Description: "Inspect extension runtime health",
 				}, {
-					Name:        "review-changes",
-					Aliases:     []string{"/changes"},
+					Name:        "review",
+					Aliases:     []string{"/review"},
 					Description: "Review local git changes",
 					Kind:        "recipe",
 					InputSchema: map[string]any{
