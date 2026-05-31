@@ -66,16 +66,24 @@ func TestRuntimeInitializesExtensionAndExecutesRegisteredTool(t *testing.T) {
 func TestRuntimeTimeoutPrecedence(t *testing.T) {
 	runtime := EmptyRuntime()
 	sdkToolTimeout := 15.0
+	sdkToolNoTimeout := 0.0
+	sdkInvalidTimeout := -1.0
 	sdkCommandTimeout := 20.0
+	sdkCommandNoTimeout := 0.0
 	sdkEventTimeout := 2.0
+	sdkEventNoTimeout := 0.0
 
 	assert.Equal(t, 15*time.Second, runtime.toolTimeout(ToolRegistration{Name: "research", TimeoutInSec: &sdkToolTimeout}))
+	assert.Zero(t, runtime.toolTimeout(ToolRegistration{Name: "forever", TimeoutInSec: &sdkToolNoTimeout}))
+	assert.Zero(t, runtime.toolTimeout(ToolRegistration{Name: "invalid", TimeoutInSec: &sdkInvalidTimeout}))
 	assert.Equal(t, 10*time.Minute, runtime.toolTimeout(ToolRegistration{Name: "default"}))
 
 	assert.Equal(t, 20*time.Second, commandTimeout(CommandRegistration{Name: "/research", TimeoutInSec: &sdkCommandTimeout}))
+	assert.Zero(t, commandTimeout(CommandRegistration{Name: "/forever", TimeoutInSec: &sdkCommandNoTimeout}))
 	assert.Zero(t, commandTimeout(CommandRegistration{Name: "default"}))
 
 	assert.Equal(t, 2*time.Second, eventTimeout(eventHandler{sub: Subscription{Event: EventToolCall, TimeoutInSec: &sdkEventTimeout}}))
+	assert.Zero(t, eventTimeout(eventHandler{sub: Subscription{Event: EventToolCall, TimeoutInSec: &sdkEventNoTimeout}}))
 	assert.Equal(t, 30*time.Second, eventTimeout(eventHandler{sub: Subscription{Event: EventToolCall}}))
 }
 

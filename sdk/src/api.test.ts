@@ -111,6 +111,47 @@ test("command validation can pass to the next route", async () => {
   assert.deepEqual(result, { action: "pass" });
 });
 
+test("preserves explicit zero timeout and merges event timeout options", async () => {
+  const extension = defineExtension((ext) => {
+    ext.registerTool({
+      name: "forever_tool",
+      description: "Tool with no timeout",
+      inputSchema: z.object({}),
+      timeoutInSec: 0,
+      execute() {
+        return "ok";
+      },
+    });
+
+    ext.registerCommand({
+      name: "forever_command",
+      description: "Command with no timeout",
+      timeoutInSec: 0,
+      execute() {
+        return { action: "respond", response: "ok" };
+      },
+    });
+
+    ext.on("tool.result", { priority: 1, timeoutInSec: 2 }, async () => undefined);
+    ext.on("tool.result", { priority: 3, timeoutInSec: 0 }, async () => undefined);
+    ext.on("agent.end", { timeoutInSec: 4 }, async () => undefined);
+    ext.on("agent.end", { timeoutInSec: 6 }, async () => undefined);
+  });
+
+  const harness = await createTestHarness(extension);
+  const init = harness.initialize({ extension: { id: "timeouts", cwd: process.cwd() } });
+
+  assert.equal(init.tools[0]?.timeoutInSec, 0);
+  assert.equal(init.commands[0]?.timeoutInSec, 0);
+  assert.deepEqual(
+    init.subscriptions.sort((a, b) => a.event.localeCompare(b.event)),
+    [
+      { event: "agent.end", priority: 0, timeoutInSec: 6 },
+      { event: "tool.result", priority: 3, timeoutInSec: 0 },
+    ],
+  );
+});
+
 test("agent.init can patch the system prompt and tool list", async () => {
   const extension = defineExtension((ext) => {
     ext.on("agent.init", () => ({
