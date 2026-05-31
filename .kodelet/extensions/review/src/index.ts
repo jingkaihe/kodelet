@@ -16,8 +16,8 @@ export default defineExtension((ext) => {
   ext.setMetadata({ name: "review", version: "0.1.0" });
 
   ext.registerCommand({
-    name: "review-changes",
-    aliases: ["/review-changes", "/changes"],
+    name: "review",
+    aliases: ["/review"],
     description: "Review local git changes against a target ref",
     kind: "recipe",
     inputSchema: ReviewChangesInput,
@@ -28,7 +28,7 @@ export default defineExtension((ext) => {
 
       return {
         action: "runAgent",
-        recipeName: "review-changes",
+        recipeName: "review",
         prompt: renderTemplate(promptTemplate, {
           target: input.target,
           focus: input.focus,
