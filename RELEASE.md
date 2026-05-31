@@ -1,11 +1,12 @@
 # Kodelet
 
-## 0.4.24-alpha (2026-05-30)
+## 0.4.25-alpha (2026-05-30)
 
 Introduced the unified extension runtime, replacing standalone hooks and executable custom tools with long-running JSON-RPC extensions that can register tools, slash commands, lifecycle event handlers, and follow-up messages.
 
 Restored Anthropic prompt caching to use explicit cache-control breakpoints for Anthropic-compatible endpoints, marking the final tool definition, system block, and cacheable conversation block while clearing stale markers from earlier content.
 
+Added extension UI input prompt to allow extra input from the user during conversation
 
 ## 0.4.22-beta (2026-05-28)
 

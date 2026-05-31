@@ -1,121 +1,141 @@
 import { defineExtension, z } from "@jingkaihe/kodelet";
 
-const SummaryInput = z.object({
-  maxFiles: z.coerce.number().int().min(1).max(50).default(12).describe("Maximum number of top-level files to include"),
-});
+// const SummaryInput = z.object({
+//   maxFiles: z.coerce.number().int().min(1).max(50).default(12).describe("Maximum number of top-level files to include"),
+// });
 
-const OpenInput = z.object({
-  path: z.string().default(".").describe("Project-relative path to open"),
-});
+// const OpenInput = z.object({
+//   path: z.string().default(".").describe("Project-relative path to open"),
+// });
 
 const AskQuestionInput = z.object({
-  question: z.string().min(1).describe("The question to ask the user"),
-  helpText: z.string().optional().describe("Additional context or instructions to show with the question"),
-  placeholder: z.string().optional().describe("Placeholder text for the response input"),
-  defaultValue: z.string().optional().describe("Default response value to use when the user submits an empty answer"),
-  submitButtonText: z.string().default("Submit").describe("Label for the submit button"),
-  required: z.boolean().default(false).describe("Whether the user must enter a non-empty response"),
+    question: z.string().min(1).describe("The question to ask the user"),
+    helpText: z
+        .string()
+        .optional()
+        .describe(
+            "Additional context or instructions to show with the question",
+        ),
+    placeholder: z
+        .string()
+        .optional()
+        .describe("Placeholder text for the response input"),
+    defaultValue: z
+        .string()
+        .optional()
+        .describe(
+            "Default response value to use when the user submits an empty answer",
+        ),
+    submitButtonText: z
+        .string()
+        .default("Submit")
+        .describe("Label for the submit button"),
+    required: z
+        .boolean()
+        .default(false)
+        .describe("Whether the user must enter a non-empty response"),
 });
 
 export default defineExtension((ext) => {
-  ext.setMetadata({ name: "workspace", version: "0.1.0" });
+    ext.setMetadata({ name: "workspace", version: "0.1.0" });
 
-  ext.registerTool({
-    name: "workspace_summary",
-    description: "Summarize the current workspace with git branch, status, and top-level files",
-    inputSchema: SummaryInput,
-    async execute(input, ctx) {
-      const [branch, status, entries] = await Promise.all([
-        ctx.process.exec("git", ["branch", "--show-current"], { timeoutMs: 2_000 }),
-        ctx.process.exec("git", ["status", "--short"], { timeoutMs: 2_000 }),
-        ctx.fs.list("."),
-      ]);
+    // ext.registerTool({
+    //   name: "workspace_summary",
+    //   description: "Summarize the current workspace with git branch, status, and top-level files",
+    //   inputSchema: SummaryInput,
+    //   async execute(input, ctx) {
+    //     const [branch, status, entries] = await Promise.all([
+    //       ctx.process.exec("git", ["branch", "--show-current"], { timeoutMs: 2_000 }),
+    //       ctx.process.exec("git", ["status", "--short"], { timeoutMs: 2_000 }),
+    //       ctx.fs.list("."),
+    //     ]);
 
-      const visibleEntries = entries
-        .filter((entry) => !entry.name.startsWith("."))
-        .slice(0, input.maxFiles)
-        .map((entry) => `${entry.type === "dir" ? "dir " : "file"} ${entry.name}`);
-      const changedFiles = status.stdout
-        .split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean);
+    //     const visibleEntries = entries
+    //       .filter((entry) => !entry.name.startsWith("."))
+    //       .slice(0, input.maxFiles)
+    //       .map((entry) => `${entry.type === "dir" ? "dir " : "file"} ${entry.name}`);
+    //     const changedFiles = status.stdout
+    //       .split("\n")
+    //       .map((line) => line.trim())
+    //       .filter(Boolean);
 
-      return {
-        content: [
-          `Workspace: ${ctx.cwd}`,
-          `Branch: ${branch.stdout.trim() || "unknown"}`,
-          `Changed files: ${changedFiles.length}`,
-          "Top-level entries:",
-          ...visibleEntries,
-        ].join("\n"),
-        data: {
-          cwd: ctx.cwd,
-          branch: branch.stdout.trim() || undefined,
-          changedFiles,
-          entries: visibleEntries,
+    //     return {
+    //       content: [
+    //         `Workspace: ${ctx.cwd}`,
+    //         `Branch: ${branch.stdout.trim() || "unknown"}`,
+    //         `Changed files: ${changedFiles.length}`,
+    //         "Top-level entries:",
+    //         ...visibleEntries,
+    //       ].join("\n"),
+    //       data: {
+    //         cwd: ctx.cwd,
+    //         branch: branch.stdout.trim() || undefined,
+    //         changedFiles,
+    //         entries: visibleEntries,
+    //       },
+    //     };
+    //   },
+    // });
+
+    ext.registerTool({
+        name: "ask_question",
+        description:
+            "Ask the user a short clarifying question during an agentic run. Use only when the answer is needed to choose the next step.",
+        inputSchema: AskQuestionInput,
+        async execute(input, ctx) {
+            const answer = await ctx.ui.input({
+                title: input.question,
+                helpText: input.helpText,
+                placeholder: input.placeholder,
+                defaultValue: input.defaultValue,
+                submitButtonText: input.submitButtonText,
+                required: input.required,
+            });
+
+            if (answer === undefined) {
+                return {
+                    content:
+                        "User dismissed the question or interactive input is unavailable.",
+                    data: { answered: false },
+                };
+            }
+
+            return {
+                content: `User answered: ${answer}`,
+                data: { answered: true, answer },
+            };
         },
-      };
-    },
-  });
+    });
 
-  ext.registerTool({
-    name: "ask_question",
-    description:
-      "Ask the user a short clarifying question during an agentic run. Use only when the answer is needed to choose the next step.",
-    inputSchema: AskQuestionInput,
-    async execute(input, ctx) {
-      const answer = await ctx.ui.input({
-        title: input.question,
-        helpText: input.helpText,
-        placeholder: input.placeholder,
-        defaultValue: input.defaultValue,
-        submitButtonText: input.submitButtonText,
-        required: input.required,
-      });
+    // ext.registerCommand({
+    //   name: "open",
+    //   aliases: ["/open"],
+    //   description: "Open the current project or a project-relative path in the configured editor",
+    //   inputSchema: OpenInput,
+    //   async execute(input, ctx) {
+    //     const target = ctx.path.resolveWorkspacePath(input.path);
+    //     if (!(await ctx.fs.exists(target))) {
+    //       return {
+    //         action: "respond",
+    //         response: `Cannot open ${ctx.path.relativeToWorkspace(target)} because it does not exist.`,
+    //       };
+    //     }
 
-      if (answer === undefined) {
-        return {
-          content: "User dismissed the question or interactive input is unavailable.",
-          data: { answered: false },
-        };
-      }
+    //     const editor = ctx.env.get("EDITOR") ?? ctx.env.get("VISUAL") ?? "code";
+    //     const editorLookup = await ctx.process.exec("sh", ["-lc", `command -v ${JSON.stringify(editor)}`], { timeoutMs: 1_000 });
+    //     if (editorLookup.exitCode !== 0 || editorLookup.stdout.trim() === "") {
+    //       return {
+    //         action: "respond",
+    //         response: `Set EDITOR or install ${editor} to open ${ctx.path.relativeToWorkspace(target)}.`,
+    //       };
+    //     }
 
-      return {
-        content: `User answered: ${answer}`,
-        data: { answered: true, answer },
-      };
-    },
-  });
-
-  ext.registerCommand({
-    name: "open",
-    aliases: ["/open"],
-    description: "Open the current project or a project-relative path in the configured editor",
-    inputSchema: OpenInput,
-    async execute(input, ctx) {
-      const target = ctx.path.resolveWorkspacePath(input.path);
-      if (!(await ctx.fs.exists(target))) {
-        return {
-          action: "respond",
-          response: `Cannot open ${ctx.path.relativeToWorkspace(target)} because it does not exist.`,
-        };
-      }
-
-      const editor = ctx.env.get("EDITOR") ?? ctx.env.get("VISUAL") ?? "code";
-      const editorLookup = await ctx.process.exec("sh", ["-lc", `command -v ${JSON.stringify(editor)}`], { timeoutMs: 1_000 });
-      if (editorLookup.exitCode !== 0 || editorLookup.stdout.trim() === "") {
-        return {
-          action: "respond",
-          response: `Set EDITOR or install ${editor} to open ${ctx.path.relativeToWorkspace(target)}.`,
-        };
-      }
-
-      await ctx.process.spawn(editor, [target], { detach: true });
-      ctx.log.info("opened path in editor", { editor, target });
-      return {
-        action: "respond",
-        response: `Opened ${ctx.path.relativeToWorkspace(target)} in ${editor}.`,
-      };
-    },
-  });
+    //     await ctx.process.spawn(editor, [target], { detach: true });
+    //     ctx.log.info("opened path in editor", { editor, target });
+    //     return {
+    //       action: "respond",
+    //       response: `Opened ${ctx.path.relativeToWorkspace(target)} in ${editor}.`,
+    //     };
+    //   },
+    // });
 });
