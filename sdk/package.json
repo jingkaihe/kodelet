@@ -20,7 +20,7 @@
     }
   },
   "bin": {
-    "kodelet-extension-node": "./dist/bin/kodelet-extension-node.js"
+    "kodelet-extension-node": "dist/bin/kodelet-extension-node.js"
   },
   "files": [
     "dist"

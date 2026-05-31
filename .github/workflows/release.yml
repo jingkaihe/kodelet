@@ -58,6 +58,13 @@ jobs:
         run: |
           version="$(sed 's/^v//' ../VERSION.txt)"
           npm version "$version" --no-git-tag-version --allow-same-version
+          if [[ "$version" == *-* ]]; then
+            tag="${version#*-}"
+            tag="${tag%%.*}"
+          else
+            tag="latest"
+          fi
+          echo "NPM_PUBLISH_TAG=$tag" >> "$GITHUB_ENV"
         working-directory: sdk
 
       - name: Typecheck SDK
@@ -73,7 +80,7 @@ jobs:
         working-directory: sdk
 
       - name: Publish SDK
-        run: npm publish --provenance
+        run: npm publish --provenance --tag "$NPM_PUBLISH_TAG"
         working-directory: sdk
 
   # Desktop release is paused for now while the desktop app is still under active
