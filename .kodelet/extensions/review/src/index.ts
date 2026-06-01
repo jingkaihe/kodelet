@@ -2,7 +2,8 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { defineExtension, renderTemplate, z } from "@jingkaihe/kodelet";
+import { defineExtension, renderTemplate, z } from "kodelet";
+import { runExtension } from "kodelet/runtime";
 
 const extensionDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const promptPath = path.join(extensionDir, "reviewer-prompt.md");
@@ -12,7 +13,7 @@ const ReviewChangesInput = z.object({
   focus: z.string().default("correctness, tests, and maintainability").describe("What the review should emphasize"),
 });
 
-export default defineExtension((ext) => {
+const extension = defineExtension((ext) => {
   ext.setMetadata({ name: "review", version: "0.1.0" });
 
   ext.registerCommand({
@@ -39,3 +40,5 @@ export default defineExtension((ext) => {
     },
   });
 });
+
+await runExtension(extension);

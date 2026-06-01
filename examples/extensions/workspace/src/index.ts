@@ -1,4 +1,5 @@
-import { defineExtension, type EventContext, z } from "@jingkaihe/kodelet";
+import { defineExtension, type EventContext, z } from "kodelet";
+import { runExtension } from "kodelet/runtime";
 
 const BASH_POLICY_FILE = "bash-policy.json";
 const ALLOW_ONCE = "Allow once";
@@ -32,7 +33,7 @@ const AskUserChoiceInput = z.object({
         .describe("The options to choose from (2-5 items)"),
 });
 
-export default defineExtension((ext) => {
+const extension = defineExtension((ext) => {
     ext.setMetadata({ name: "workspace", version: "0.1.0" });
 
     ext.registerTool({
@@ -138,6 +139,8 @@ export default defineExtension((ext) => {
         },
     );
 });
+
+await runExtension(extension);
 
 function parseBashCommandDetails(
     input: unknown,
