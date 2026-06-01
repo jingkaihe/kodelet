@@ -181,7 +181,7 @@ func (p *Process) initialize(ctx context.Context, cwd string) (*InitializeResult
 		Capabilities: map[string]any{
 			"tools":    true,
 			"commands": true,
-			"ui":       uiInputCapability{Input: true},
+			"ui":       uiInputCapability{Input: true, Confirm: true, Select: true, Notify: true},
 			"events": []string{
 				"session.start",
 				"resources.discover",
@@ -331,6 +331,63 @@ func (p *Process) HandleRPCRequest(ctx context.Context, method string, params js
 		}
 		if response.Status == "" {
 			response.Status = UIInputStatusDismissed
+		}
+		return response, nil
+	case "kodelet.ui.confirm":
+		var request UIConfirmRequest
+		if err := json.Unmarshal(params, &request); err != nil {
+			return nil, &rpcError{Code: -32602, Message: err.Error()}
+		}
+		if request.ID == "" {
+			request.ID = NewUIInputRequestID()
+		}
+		broker, ok := UIConfirmBrokerFromContext(ctx)
+		if !ok {
+			return UIInputResponse{Status: UIInputStatusUnavailable, Reason: "ui confirm is not available"}, nil
+		}
+		response, err := broker.Confirm(ctx, request)
+		if err != nil {
+			return nil, &rpcError{Code: -32000, Message: err.Error()}
+		}
+		if response.Status == "" {
+			response.Status = UIInputStatusDismissed
+		}
+		return response, nil
+	case "kodelet.ui.select":
+		var request UISelectRequest
+		if err := json.Unmarshal(params, &request); err != nil {
+			return nil, &rpcError{Code: -32602, Message: err.Error()}
+		}
+		if request.ID == "" {
+			request.ID = NewUIInputRequestID()
+		}
+		broker, ok := UISelectBrokerFromContext(ctx)
+		if !ok {
+			return UIInputResponse{Status: UIInputStatusUnavailable, Reason: "ui select is not available"}, nil
+		}
+		response, err := broker.Select(ctx, request)
+		if err != nil {
+			return nil, &rpcError{Code: -32000, Message: err.Error()}
+		}
+		if response.Status == "" {
+			response.Status = UIInputStatusDismissed
+		}
+		return response, nil
+	case "kodelet.ui.notify":
+		var request UINotifyRequest
+		if err := json.Unmarshal(params, &request); err != nil {
+			return nil, &rpcError{Code: -32602, Message: err.Error()}
+		}
+		broker, ok := UINotifyBrokerFromContext(ctx)
+		if !ok {
+			return UIInputResponse{Status: UIInputStatusUnavailable, Reason: "ui notify is not available"}, nil
+		}
+		response, err := broker.Notify(ctx, request)
+		if err != nil {
+			return nil, &rpcError{Code: -32000, Message: err.Error()}
+		}
+		if response.Status == "" {
+			response.Status = UIInputStatusSubmitted
 		}
 		return response, nil
 	default:

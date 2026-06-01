@@ -90,7 +90,10 @@ type initializeParams struct {
 }
 
 type uiInputCapability struct {
-	Input bool `json:"input"`
+	Input   bool `json:"input"`
+	Confirm bool `json:"confirm"`
+	Select  bool `json:"select"`
+	Notify  bool `json:"notify"`
 }
 
 type initializeExtensionInfo struct {

@@ -99,6 +99,24 @@ func (b staticUIInputBroker) Input(_ context.Context, request UIInputRequest) (U
 	return UIInputResponse{Status: UIInputStatusSubmitted, Value: b.value}, nil
 }
 
+func (b staticUIInputBroker) Confirm(_ context.Context, request UIConfirmRequest) (UIInputResponse, error) {
+	if request.Title == "" {
+		return UIInputResponse{Status: UIInputStatusDismissed}, nil
+	}
+	return UIInputResponse{Status: UIInputStatusSubmitted, Confirmed: true}, nil
+}
+
+func (b staticUIInputBroker) Select(_ context.Context, request UISelectRequest) (UIInputResponse, error) {
+	if len(request.Options) == 0 {
+		return UIInputResponse{Status: UIInputStatusDismissed}, nil
+	}
+	return UIInputResponse{Status: UIInputStatusSubmitted, Value: request.Options[0]}, nil
+}
+
+func (b staticUIInputBroker) Notify(context.Context, UINotifyRequest) (UIInputResponse, error) {
+	return UIInputResponse{Status: UIInputStatusSubmitted}, nil
+}
+
 func TestRuntimeTimeoutPrecedence(t *testing.T) {
 	runtime := EmptyRuntime()
 	sdkToolTimeout := 15.0

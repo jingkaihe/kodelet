@@ -268,6 +268,9 @@ export interface ChatStreamEvent {
 		| "conversation"
 		| "usage"
 		| "ui-input-request"
+		| "ui-confirm-request"
+		| "ui-select-request"
+		| "ui-notification"
 		| "thinking-start"
 		| "thinking-delta"
 		| "thinking-end"
@@ -290,6 +293,9 @@ export interface ChatStreamEvent {
 	input?: string;
 	tool_result?: ToolResult;
 	ui_input?: UIInputRequestEvent;
+	ui_confirm?: UIConfirmRequestEvent;
+	ui_select?: UISelectRequestEvent;
+	ui_notify?: UINotifyEvent;
 	error?: string;
 }
 
@@ -298,12 +304,37 @@ export interface UIInputRequestEvent {
 	conversationId?: string;
 	title: string;
 	helpText?: string;
+	message?: string;
 	placeholder?: string;
 	defaultValue?: string;
 	submitButtonText?: string;
 	cancelButtonText?: string;
 	required?: boolean;
 	secret?: boolean;
+}
+
+export interface UIConfirmRequestEvent {
+	id: string;
+	conversationId?: string;
+	title: string;
+	message?: string;
+	confirmButtonText?: string;
+	cancelButtonText?: string;
+}
+
+export interface UISelectRequestEvent {
+	id: string;
+	conversationId?: string;
+	title: string;
+	message?: string;
+	options: string[];
+	submitButtonText?: string;
+	cancelButtonText?: string;
+}
+
+export interface UINotifyEvent {
+	title?: string;
+	message: string;
 }
 
 export interface ChatRenderMessage {

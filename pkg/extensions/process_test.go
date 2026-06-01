@@ -2,6 +2,7 @@ package extensions
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -74,6 +75,35 @@ func TestProcessContextIgnoresCallerCancellation(t *testing.T) {
 	processCtx := processContext(ctx)
 
 	assert.NoError(t, processCtx.Err())
+}
+
+func TestProcessHandleRPCRequestSupportsUIConfirmSelectAndNotify(t *testing.T) {
+	ctx := ContextWithUIInputBroker(context.Background(), staticUIInputBroker{value: "answer"})
+	process := &Process{}
+
+	confirmParams, err := json.Marshal(UIConfirmRequest{Title: "Allow?"})
+	require.NoError(t, err)
+	result, rpcErr := process.HandleRPCRequest(ctx, "kodelet.ui.confirm", confirmParams)
+	require.Nil(t, rpcErr)
+	confirm, ok := result.(UIInputResponse)
+	require.True(t, ok)
+	assert.True(t, confirm.Confirmed)
+
+	selectParams, err := json.Marshal(UISelectRequest{Title: "Pick", Options: []string{"Pasta", "Pizza"}})
+	require.NoError(t, err)
+	result, rpcErr = process.HandleRPCRequest(ctx, "kodelet.ui.select", selectParams)
+	require.Nil(t, rpcErr)
+	selection, ok := result.(UIInputResponse)
+	require.True(t, ok)
+	assert.Equal(t, "Pasta", selection.Value)
+
+	notifyParams, err := json.Marshal(UINotifyRequest{Message: "Done"})
+	require.NoError(t, err)
+	result, rpcErr = process.HandleRPCRequest(ctx, "kodelet.ui.notify", notifyParams)
+	require.Nil(t, rpcErr)
+	notification, ok := result.(UIInputResponse)
+	require.True(t, ok)
+	assert.Equal(t, UIInputStatusSubmitted, notification.Status)
 }
 
 type ioDiscard struct{}

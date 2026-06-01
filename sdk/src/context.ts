@@ -16,7 +16,10 @@ import type {
   LogContext,
   SharedContext,
   ToolContext,
+  UIConfirmRequest,
   UIInputRequest,
+  UINotifyRequest,
+  UISelectRequest,
 } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -204,6 +207,30 @@ function createSharedContext(init: InitializeParams | undefined, context: BaseCa
           return result.value;
         }
         return undefined;
+      },
+      async confirm(request: UIConfirmRequest) {
+        if (!activeHostRPCClient) {
+          return false;
+        }
+        const result = await activeHostRPCClient.request("kodelet.ui.confirm", request);
+        return isRecord(result) && result.status === "submitted" && result.confirmed === true;
+      },
+      async select(request: UISelectRequest) {
+        if (!activeHostRPCClient) {
+          return undefined;
+        }
+        const result = await activeHostRPCClient.request("kodelet.ui.select", request);
+        if (isRecord(result) && result.status === "submitted" && typeof result.value === "string") {
+          return result.value;
+        }
+        return undefined;
+      },
+      async notify(request: string | UINotifyRequest) {
+        if (!activeHostRPCClient) {
+          return;
+        }
+        const payload = typeof request === "string" ? { message: request } : request;
+        await activeHostRPCClient.request("kodelet.ui.notify", payload);
       },
     },
   };

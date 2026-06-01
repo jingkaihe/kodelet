@@ -8,32 +8,13 @@ import { defineExtension, z } from "@jingkaihe/kodelet";
 //   path: z.string().default(".").describe("Project-relative path to open"),
 // });
 
-const AskQuestionInput = z.object({
+const AskUserChoiceInput = z.object({
     question: z.string().min(1).describe("The question to ask the user"),
-    helpText: z
-        .string()
-        .optional()
-        .describe(
-            "Additional context or instructions to show with the question",
-        ),
-    placeholder: z
-        .string()
-        .optional()
-        .describe("Placeholder text for the response input"),
-    defaultValue: z
-        .string()
-        .optional()
-        .describe(
-            "Default response value to use when the user submits an empty answer",
-        ),
-    submitButtonText: z
-        .string()
-        .default("Submit")
-        .describe("Label for the submit button"),
-    required: z
-        .boolean()
-        .default(false)
-        .describe("Whether the user must enter a non-empty response"),
+    options: z
+        .array(z.string().min(1))
+        .min(2)
+        .max(5)
+        .describe("The options to choose from (2-5 items)"),
 });
 
 export default defineExtension((ext) => {
@@ -78,32 +59,29 @@ export default defineExtension((ext) => {
     // });
 
     ext.registerTool({
-        name: "ask_question",
+        name: "ask_user_choice",
         description:
-            "Ask the user a short clarifying question during an agentic run. Use only when the answer is needed to choose the next step.",
-        inputSchema: AskQuestionInput,
+            "Present user with multiple choices when there are several possible approaches and you need them to pick one. Use when you have 2-5 concrete options to choose from",
+        inputSchema: AskUserChoiceInput,
         async execute(input, ctx) {
+            const optionsList = input.options
+                .map((option, index) => `${index + 1}. ${option}`)
+                .join("\n");
             const answer = await ctx.ui.input({
                 title: input.question,
-                helpText: input.helpText,
-                placeholder: input.placeholder,
-                defaultValue: input.defaultValue,
-                submitButtonText: input.submitButtonText,
-                required: input.required,
+                helpText: `${optionsList}\n\nType the number of your choice`,
+                submitButtonText: "Select",
             });
 
-            if (answer === undefined) {
-                return {
-                    content:
-                        "User dismissed the question or interactive input is unavailable.",
-                    data: { answered: false },
-                };
+            if (!answer) {
+                return "User dismissed the question without choosing.";
             }
 
-            return {
-                content: `User answered: ${answer}`,
-                data: { answered: true, answer },
-            };
+            const index = parseInt(answer.trim(), 10) - 1;
+            if (index >= 0 && index < input.options.length) {
+                return `User selected option ${index + 1}: ${input.options[index]}`;
+            }
+            return `User responded with: ${answer}`;
         },
     });
 

@@ -211,11 +211,11 @@ test("command context includes workspace, storage, env and process helpers", asy
   assert.deepEqual(result, { action: "respond", response: "true:README.md:ok" });
 });
 
-test("tool context can request host UI input", async () => {
+test("tool context can request host UI interactions", async () => {
   const extension = defineExtension((ext) => {
     ext.registerTool({
       name: "ask",
-      description: "Ask for input",
+      description: "Ask for UI interactions",
       inputSchema: z.object({}),
       async execute(_, ctx) {
         const answer = await ctx.ui.input({
@@ -223,7 +223,10 @@ test("tool context can request host UI input", async () => {
           helpText: "1. A\n2. B",
           submitButtonText: "Select",
         });
-        return answer ? `answer=${answer}` : "dismissed";
+        const confirmed = await ctx.ui.confirm({ title: "Allow?", message: "A tool call incoming" });
+        const selection = await ctx.ui.select({ title: "Food", options: ["Pasta", "Pizza"] });
+        await ctx.ui.notify("Done");
+        return `answer=${answer};confirmed=${confirmed};selection=${selection}`;
       },
     });
   });
@@ -232,18 +235,32 @@ test("tool context can request host UI input", async () => {
   const harness = await createTestHarness(extension, {
     async request(method, params) {
       requests.push({ method, params });
+      if (method === "kodelet.ui.confirm") {
+        return { status: "submitted", confirmed: true };
+      }
+      if (method === "kodelet.ui.select") {
+        return { status: "submitted", value: "Pizza" };
+      }
       return { status: "submitted", value: "2" };
     },
   });
 
   const result = await harness.executeTool({ name: "ask", input: {} });
-  assert.deepEqual(result, { content: "answer=2" });
-  assert.equal(requests[0]?.method, "kodelet.ui.input");
+  assert.deepEqual(result, { content: "answer=2;confirmed=true;selection=Pizza" });
+  assert.deepEqual(requests.map((request) => request.method), [
+    "kodelet.ui.input",
+    "kodelet.ui.confirm",
+    "kodelet.ui.select",
+    "kodelet.ui.notify",
+  ]);
   assert.deepEqual(requests[0]?.params, {
     title: "Pick one",
     helpText: "1. A\n2. B",
     submitButtonText: "Select",
   });
+  assert.deepEqual(requests[1]?.params, { title: "Allow?", message: "A tool call incoming" });
+  assert.deepEqual(requests[2]?.params, { title: "Food", options: ["Pasta", "Pizza"] });
+  assert.deepEqual(requests[3]?.params, { message: "Done" });
 });
 
 test("runtime serves JSON-RPC over stdio", async (t) => {
@@ -305,7 +322,10 @@ test("runtime supports extension-initiated host RPC", async (t) => {
           inputSchema: z.object({}),
           async execute(_, ctx) {
             const answer = await ctx.ui.input({ title: "Choose" });
-            return { content: answer ?? "none" };
+            const confirmed = await ctx.ui.confirm({ title: "Allow?" });
+            const selection = await ctx.ui.select({ title: "Food", options: ["Pasta", "Pizza"] });
+            await ctx.ui.notify("Done");
+            return { content: [answer ?? "none", confirmed, selection ?? "none"].join(":") };
           },
         });
       }));
@@ -333,8 +353,13 @@ test("runtime supports extension-initiated host RPC", async (t) => {
     input: {},
     context: { conversationId: "conv-rpc", cwd: process.cwd() },
   });
-  assert.deepEqual(client.hostRequests.map((request) => request.method), ["kodelet.ui.input"]);
-  assert.deepEqual(result, { content: "from-host" });
+  assert.deepEqual(client.hostRequests.map((request) => request.method), [
+    "kodelet.ui.input",
+    "kodelet.ui.confirm",
+    "kodelet.ui.select",
+    "kodelet.ui.notify",
+  ]);
+  assert.deepEqual(result, { content: "from-host:true:Pizza" });
 });
 
 class RpcTestClient {
@@ -380,7 +405,21 @@ class RpcTestClient {
       this.buffer = this.buffer.subarray(end);
       if (response.method) {
         this.hostRequests.push(response);
-        const result = response.method === "kodelet.ui.input" ? { status: "submitted", value: "from-host" } : undefined;
+        let result: unknown;
+        switch (response.method) {
+          case "kodelet.ui.input":
+            result = { status: "submitted", value: "from-host" };
+            break;
+          case "kodelet.ui.confirm":
+            result = { status: "submitted", confirmed: true };
+            break;
+          case "kodelet.ui.select":
+            result = { status: "submitted", value: "Pizza" };
+            break;
+          case "kodelet.ui.notify":
+            result = { status: "submitted" };
+            break;
+        }
         const payload = JSON.stringify({ jsonrpc: "2.0", id: response.id, result });
         this.stdin.write(`Content-Length: ${Buffer.byteLength(payload)}\r\n\r\n${payload}`);
         continue;

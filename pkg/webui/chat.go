@@ -69,6 +69,9 @@ type ChatEvent struct {
 	Input          string                          `json:"input,omitempty"`
 	ToolResult     *tooltypes.StructuredToolResult `json:"tool_result,omitempty"`
 	UIInput        *UIInputEvent                   `json:"ui_input,omitempty"`
+	UIConfirm      *UIConfirmEvent                 `json:"ui_confirm,omitempty"`
+	UISelect       *UISelectEvent                  `json:"ui_select,omitempty"`
+	UINotify       *UINotifyEvent                  `json:"ui_notify,omitempty"`
 	Error          string                          `json:"error,omitempty"`
 }
 
@@ -77,12 +80,38 @@ type UIInputEvent struct {
 	ID               string `json:"id"`
 	Title            string `json:"title"`
 	HelpText         string `json:"helpText,omitempty"`
+	Message          string `json:"message,omitempty"`
 	Placeholder      string `json:"placeholder,omitempty"`
 	DefaultValue     string `json:"defaultValue,omitempty"`
 	SubmitButtonText string `json:"submitButtonText,omitempty"`
 	CancelButtonText string `json:"cancelButtonText,omitempty"`
 	Required         bool   `json:"required,omitempty"`
 	Secret           bool   `json:"secret,omitempty"`
+}
+
+// UIConfirmEvent describes an extension-requested confirmation prompt for the Web UI.
+type UIConfirmEvent struct {
+	ID                string `json:"id"`
+	Title             string `json:"title"`
+	Message           string `json:"message,omitempty"`
+	ConfirmButtonText string `json:"confirmButtonText,omitempty"`
+	CancelButtonText  string `json:"cancelButtonText,omitempty"`
+}
+
+// UISelectEvent describes an extension-requested single-choice prompt for the Web UI.
+type UISelectEvent struct {
+	ID               string   `json:"id"`
+	Title            string   `json:"title"`
+	Message          string   `json:"message,omitempty"`
+	Options          []string `json:"options"`
+	SubmitButtonText string   `json:"submitButtonText,omitempty"`
+	CancelButtonText string   `json:"cancelButtonText,omitempty"`
+}
+
+// UINotifyEvent describes an extension-requested Web UI notification.
+type UINotifyEvent struct {
+	Title   string `json:"title,omitempty"`
+	Message string `json:"message"`
 }
 
 // ChatEventSink receives streamed chat events.

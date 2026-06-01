@@ -31,24 +31,8 @@ func (b *webUIInputBroker) Input(ctx context.Context, request extensions.UIInput
 	if request.ID == "" {
 		request.ID = extensions.NewUIInputRequestID()
 	}
-	responseCh := make(chan extensions.UIInputResponse, 1)
 
-	b.mu.Lock()
-	if previous, ok := b.pending[request.ID]; ok {
-		select {
-		case previous <- extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed}:
-		default:
-		}
-	}
-	b.pending[request.ID] = responseCh
-	b.mu.Unlock()
-	defer func() {
-		b.mu.Lock()
-		delete(b.pending, request.ID)
-		b.mu.Unlock()
-	}()
-
-	if err := b.sink.Send(ChatEvent{
+	return b.prompt(ctx, request.ID, ChatEvent{
 		Kind:           "ui-input-request",
 		ConversationID: b.conversationID,
 		Role:           "assistant",
@@ -56,6 +40,7 @@ func (b *webUIInputBroker) Input(ctx context.Context, request extensions.UIInput
 			ID:               request.ID,
 			Title:            request.Title,
 			HelpText:         request.HelpText,
+			Message:          request.Message,
 			Placeholder:      request.Placeholder,
 			DefaultValue:     request.DefaultValue,
 			SubmitButtonText: request.SubmitButtonText,
@@ -63,7 +48,105 @@ func (b *webUIInputBroker) Input(ctx context.Context, request extensions.UIInput
 			Required:         request.Required,
 			Secret:           request.Secret,
 		},
+	})
+}
+
+func (b *webUIInputBroker) Confirm(ctx context.Context, request extensions.UIConfirmRequest) (extensions.UIInputResponse, error) {
+	if b == nil || b.sink == nil {
+		return extensions.UIInputResponse{Status: extensions.UIInputStatusUnavailable, Reason: "web ui confirm is not available"}, nil
+	}
+	request.ID = strings.TrimSpace(request.ID)
+	if request.ID == "" {
+		request.ID = extensions.NewUIInputRequestID()
+	}
+
+	return b.prompt(ctx, request.ID, ChatEvent{
+		Kind:           "ui-confirm-request",
+		ConversationID: b.conversationID,
+		Role:           "assistant",
+		UIConfirm: &UIConfirmEvent{
+			ID:                request.ID,
+			Title:             request.Title,
+			Message:           request.Message,
+			ConfirmButtonText: request.ConfirmButtonText,
+			CancelButtonText:  request.CancelButtonText,
+		},
+	})
+}
+
+func (b *webUIInputBroker) Select(ctx context.Context, request extensions.UISelectRequest) (extensions.UIInputResponse, error) {
+	if b == nil || b.sink == nil {
+		return extensions.UIInputResponse{Status: extensions.UIInputStatusUnavailable, Reason: "web ui select is not available"}, nil
+	}
+	request.ID = strings.TrimSpace(request.ID)
+	if request.ID == "" {
+		request.ID = extensions.NewUIInputRequestID()
+	}
+
+	return b.prompt(ctx, request.ID, ChatEvent{
+		Kind:           "ui-select-request",
+		ConversationID: b.conversationID,
+		Role:           "assistant",
+		UISelect: &UISelectEvent{
+			ID:               request.ID,
+			Title:            request.Title,
+			Message:          request.Message,
+			Options:          append([]string{}, request.Options...),
+			SubmitButtonText: request.SubmitButtonText,
+			CancelButtonText: request.CancelButtonText,
+		},
+	})
+}
+
+func (b *webUIInputBroker) Notify(ctx context.Context, request extensions.UINotifyRequest) (extensions.UIInputResponse, error) {
+	if b == nil || b.sink == nil {
+		return extensions.UIInputResponse{Status: extensions.UIInputStatusUnavailable, Reason: "web ui notify is not available"}, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return extensions.UIInputResponse{}, err
+	}
+	if err := b.sink.Send(ChatEvent{
+		Kind:           "ui-notification",
+		ConversationID: b.conversationID,
+		Role:           "assistant",
+		UINotify: &UINotifyEvent{
+			Title:   request.Title,
+			Message: request.Message,
+		},
 	}); err != nil {
+		return extensions.UIInputResponse{}, err
+	}
+	return extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted}, nil
+}
+
+func (b *webUIInputBroker) prompt(ctx context.Context, requestID string, event ChatEvent) (extensions.UIInputResponse, error) {
+	responseCh := make(chan extensions.UIInputResponse, 1)
+
+	b.mu.Lock()
+	if previous, ok := b.pending[requestID]; ok {
+		select {
+		case previous <- extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed}:
+		default:
+		}
+	}
+	b.pending[requestID] = responseCh
+	b.mu.Unlock()
+	defer func() {
+		b.mu.Lock()
+		delete(b.pending, requestID)
+		b.mu.Unlock()
+	}()
+
+	if event.Kind == "" {
+		event.Kind = "ui-input-request"
+	}
+	if event.ConversationID == "" {
+		event.ConversationID = b.conversationID
+	}
+	if event.Role == "" {
+		event.Role = "assistant"
+	}
+	if err := b.sink.Send(event); err != nil {
 		return extensions.UIInputResponse{}, err
 	}
 

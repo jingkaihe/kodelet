@@ -323,6 +323,7 @@ Rules:
 - `stdout` is protocol only.
 - `stderr` is logs.
 - Requests use the effective timeout from config, SDK `timeoutInSec`, and runtime defaults. Extension commands may run without a timeout by default.
+- Extensions can call back into the host for UI interactions using separate reverse-RPC methods: `kodelet.ui.input`, `kodelet.ui.confirm`, `kodelet.ui.select`, and `kodelet.ui.notify`.
 - Cancellation uses `$/cancelRequest`.
 - If an extension hangs after cancellation, Kodelet kills and restarts it.
 - The host supervises processes with exponential backoff.
@@ -350,6 +351,12 @@ Kodelet starts the extension executable, then sends:
     "capabilities": {
       "tools": true,
       "commands": true,
+      "ui": {
+        "input": true,
+        "confirm": true,
+        "select": true,
+        "notify": true
+      },
       "events": [
         "session.start",
         "resources.discover",

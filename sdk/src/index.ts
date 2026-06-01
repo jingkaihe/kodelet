@@ -38,4 +38,9 @@ export type {
   ToolContext,
   ToolExecutionResult,
   ToolRegistration,
+  UIConfirmRequest,
+  UIContext,
+  UIInputRequest,
+  UINotifyRequest,
+  UISelectRequest,
 } from "./types.js";

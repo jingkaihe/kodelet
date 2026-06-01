@@ -30,7 +30,9 @@ import type {
 	GitDiffResponse,
 	PendingImageAttachment,
 	SlashCommandOption,
+	UIConfirmRequestEvent,
 	UIInputRequestEvent,
+	UISelectRequestEvent,
 } from "../types";
 import {
 	cn,
@@ -107,6 +109,10 @@ const SUPPORTED_IMAGE_TYPES = new Set([
 	"image/gif",
 	"image/webp",
 ]);
+type UIRequestDialogState =
+	| { mode: "input"; request: UIInputRequestEvent }
+	| { mode: "confirm"; request: UIConfirmRequestEvent }
+	| { mode: "select"; request: UISelectRequestEvent };
 const attachmentId = (): string =>
 	typeof crypto !== "undefined" && "randomUUID" in crypto
 		? crypto.randomUUID()
@@ -367,8 +373,8 @@ const ChatPage: React.FC = () => {
 	const [sidebarWidth, setSidebarWidth] = useState(readStoredSidebarWidth);
 	const [isResizingSidebar, setIsResizingSidebar] = useState(false);
 	const [newChatDialogOpen, setNewChatDialogOpen] = useState(false);
-	const [uiInputRequest, setUIInputRequest] =
-		useState<UIInputRequestEvent | null>(null);
+	const [uiRequestDialog, setUIRequestDialog] =
+		useState<UIRequestDialogState | null>(null);
 	const [uiInputSubmitting, setUIInputSubmitting] = useState(false);
 	const [statusTick, setStatusTick] = useState(0);
 	const loadedConversationId = conversation?.id ?? null;
@@ -998,21 +1004,68 @@ const ChatPage: React.FC = () => {
 	};
 
 	const handleUIInputRequest = (event: ChatStreamEvent) => {
-		if (event.kind !== "ui-input-request" || !event.ui_input) {
-			return false;
+		if (event.kind === "ui-notification" && event.ui_notify) {
+			showToast(
+				event.ui_notify.title
+					? `${event.ui_notify.title}: ${event.ui_notify.message}`
+					: event.ui_notify.message,
+				"info",
+			);
+			return true;
 		}
-		setUIInputRequest({
-			...event.ui_input,
-			conversationId: event.conversation_id,
-		});
-		setUIInputSubmitting(false);
-		return true;
+
+		if (event.kind === "ui-input-request" && event.ui_input) {
+			setUIRequestDialog({
+				mode: "input",
+				request: {
+					...event.ui_input,
+					conversationId: event.conversation_id,
+				},
+			});
+			setUIInputSubmitting(false);
+			return true;
+		}
+
+		if (event.kind === "ui-confirm-request" && event.ui_confirm) {
+			setUIRequestDialog({
+				mode: "confirm",
+				request: {
+					...event.ui_confirm,
+					conversationId: event.conversation_id,
+				},
+			});
+			setUIInputSubmitting(false);
+			return true;
+		}
+
+		if (event.kind === "ui-select-request" && event.ui_select) {
+			setUIRequestDialog({
+				mode: "select",
+				request: {
+					...event.ui_select,
+					conversationId: event.conversation_id,
+				},
+			});
+			setUIInputSubmitting(false);
+			return true;
+		}
+
+		return false;
 	};
 
-	const respondToUIInput = async (
-		request: UIInputRequestEvent,
+	const respondToUIRequest = async (
+		dialog: UIRequestDialogState,
 		response: { status: "submitted" | "dismissed"; value?: string },
 	) => {
+		const request = dialog.request;
+		let payload = response;
+		if (dialog.mode === "confirm" && response.status === "submitted") {
+			payload = { ...response, value: "true" };
+		}
+		if (dialog.mode === "confirm" && response.status === "dismissed") {
+			payload = { ...response, value: "false" };
+		}
+
 		const targetConversationId =
 			request.conversationId || activeConversationId || conversationId;
 		if (!targetConversationId) {
@@ -1025,10 +1078,10 @@ const ChatPage: React.FC = () => {
 			await apiService.respondToUIInput(
 				targetConversationId,
 				request.id,
-				response,
+				payload,
 			);
-			setUIInputRequest((currentRequest) =>
-				currentRequest?.id === request.id ? null : currentRequest,
+			setUIRequestDialog((currentDialog) =>
+				currentDialog?.request.id === request.id ? null : currentDialog,
 			);
 		} catch (error) {
 			const message =
@@ -1357,7 +1410,7 @@ const ChatPage: React.FC = () => {
 		abortControllerRef.current?.abort();
 		setSteering(false);
 		setSteerAvailable(false);
-		setUIInputRequest(null);
+		setUIRequestDialog(null);
 		void apiService.stopConversation(conversationToStop).catch((error) => {
 			console.error("Failed to stop conversation", error);
 		});
@@ -1804,15 +1857,16 @@ const ChatPage: React.FC = () => {
 				open={terminalOpen}
 				onClose={() => setTerminalOpen(false)}
 			/>
-			{uiInputRequest ? (
+			{uiRequestDialog ? (
 				<UIInputDialog
-					request={uiInputRequest}
+					mode={uiRequestDialog.mode}
+					request={uiRequestDialog.request}
 					submitting={uiInputSubmitting}
 					onCancel={() => {
-						void respondToUIInput(uiInputRequest, { status: "dismissed" });
+						void respondToUIRequest(uiRequestDialog, { status: "dismissed" });
 					}}
 					onSubmit={(value) => {
-						void respondToUIInput(uiInputRequest, {
+						void respondToUIRequest(uiRequestDialog, {
 							status: "submitted",
 							value,
 						});

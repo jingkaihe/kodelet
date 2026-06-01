@@ -2097,7 +2097,12 @@ func (s *Server) handleRespondUIInput(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !s.respondToUIInput(conversationID, requestID, extensions.UIInputResponse{Status: status, Value: req.Value}) {
+	response := extensions.UIInputResponse{Status: status, Value: req.Value}
+	if strings.EqualFold(strings.TrimSpace(req.Value), "true") {
+		response.Confirmed = true
+	}
+
+	if !s.respondToUIInput(conversationID, requestID, response) {
 		s.writeErrorResponse(w, http.StatusNotFound, "ui input request not found", nil)
 		return
 	}

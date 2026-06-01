@@ -63,4 +63,80 @@ describe('UIInputDialog', () => {
     fireEvent.click(submitButton);
     expect(onSubmit).not.toHaveBeenCalled();
   });
+
+  it('renders confirmation prompts without a free-form input', () => {
+    const onCancel = vi.fn();
+    const onSubmit = vi.fn();
+    render(
+      <UIInputDialog
+        mode="confirm"
+        request={{
+          id: 'confirm-1',
+          title: 'Allow bash?',
+          message: 'A tool call incoming',
+          confirmButtonText: 'Allow',
+        }}
+        onCancel={onCancel}
+        onSubmit={onSubmit}
+      />
+    );
+
+    expect(screen.getByText('A tool call incoming')).toBeInTheDocument();
+    expect(screen.queryByTestId('ui-input-response')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(onSubmit).toHaveBeenCalledWith('');
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders select prompts and submits the selected option', async () => {
+    const onSubmit = vi.fn();
+    render(
+      <UIInputDialog
+        mode="select"
+        request={{
+          id: 'select-1',
+          title: 'What is your favourite food?',
+          message: 'Choose what you like.',
+          options: ['Pasta', 'Pizza', 'Focaccia'],
+        }}
+        onCancel={vi.fn()}
+        onSubmit={onSubmit}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('ui-select-response')).toHaveFocus();
+    });
+    fireEvent.change(screen.getByTestId('ui-select-response'), {
+      target: { value: 'Pizza' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Select' }));
+
+    expect(onSubmit).toHaveBeenCalledWith('Pizza');
+  });
+
+  it('disables select submission when no options are available', () => {
+    const onSubmit = vi.fn();
+    render(
+      <UIInputDialog
+        mode="select"
+        request={{
+          id: 'select-empty',
+          title: 'Pick one',
+          options: [],
+        }}
+        onCancel={vi.fn()}
+        onSubmit={onSubmit}
+      />
+    );
+
+    const submitButton = screen.getByRole('button', { name: 'Select' });
+    expect(submitButton).toBeDisabled();
+
+    fireEvent.click(submitButton);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
 });

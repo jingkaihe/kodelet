@@ -1225,7 +1225,7 @@ exec kodelet-extension-node ./dist/index.js
 
 ### Requesting User Input from Extensions
 
-Tool, command, and event handlers can ask the active Kodelet UI for one short text response with `ctx.ui.input(...)`. Kodelet routes the prompt to the interactive CLI terminal or to the Web UI conversation stream. In headless/result-only runs, or when no interactive UI is attached, the SDK resolves the call as `undefined`.
+Tool, command, and event handlers can ask the active Kodelet UI for user-facing prompts with `ctx.ui.input(...)`, `ctx.ui.confirm(...)`, `ctx.ui.select(...)`, and `ctx.ui.notify(...)`. Kodelet routes prompts to the interactive CLI terminal or to the Web UI conversation stream. In headless/result-only runs, or when no interactive UI is attached, the SDK resolves inputs/selects as `undefined` and confirmations as `false`.
 
 ```typescript
 ext.registerTool({
@@ -1247,12 +1247,47 @@ ext.registerTool({
     if (!answer) {
       return "User dismissed the question without choosing.";
     }
+
+    const index = parseInt(answer.trim(), 10) - 1;
+    if (index >= 0 && index < input.options.length) {
+      return `User selected option ${index + 1}: ${input.options[index]}`;
+    }
     return `User responded with: ${answer}`;
   },
 });
 ```
 
-Input prompts support `title`, `helpText`, `placeholder`, `defaultValue`, custom submit/cancel labels, `required`, and `secret` for password-style Web UI input. Extension authors should treat a missing return value as dismissal or unavailable UI and continue gracefully.
+Input prompts support `title`, `helpText`, `message`, `placeholder`, `defaultValue`, custom submit/cancel labels, `required`, and `secret` for password-style Web UI input. Extension authors should treat a missing return value as dismissal or unavailable UI and continue gracefully.
+
+Other UI helpers use separate host RPC methods and separate Web UI stream events, so clients can handle each concern independently:
+
+| SDK helper | Host RPC method | Web UI stream event | Result |
+|---|---|---|---|
+| `ctx.ui.input(request)` | `kodelet.ui.input` | `ui-input-request` with `ui_input` | `string \| undefined` |
+| `ctx.ui.confirm(request)` | `kodelet.ui.confirm` | `ui-confirm-request` with `ui_confirm` | `boolean` |
+| `ctx.ui.select(request)` | `kodelet.ui.select` | `ui-select-request` with `ui_select` | `string \| undefined` |
+| `ctx.ui.notify(messageOrRequest)` | `kodelet.ui.notify` | `ui-notification` with `ui_notify` | `void` |
+
+Examples:
+
+```typescript
+const confirmed = await ctx.ui.confirm({
+  title: `Allow ${event.tool.name}?`,
+  message: "A tool call incoming",
+  confirmButtonText: "Allow",
+});
+
+const choice = await ctx.ui.select({
+  title: "What is your favourite food?",
+  message: "Choose what you like.",
+  options: ["Pasta", "Pizza", "Focaccia"],
+});
+
+await ctx.ui.notify({
+  title: "Kitchen sink",
+  message: `Kitchen sink session.start for ${event.conversation_id}.`,
+});
+```
 
 ### Extension Discovery
 

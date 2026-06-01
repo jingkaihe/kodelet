@@ -93,6 +93,7 @@ export interface LogContext {
 export interface UIInputRequest {
   title: string;
   helpText?: string;
+  message?: string;
   placeholder?: string;
   defaultValue?: string;
   submitButtonText?: string;
@@ -101,8 +102,31 @@ export interface UIInputRequest {
   secret?: boolean;
 }
 
+export interface UIConfirmRequest {
+  title: string;
+  message?: string;
+  confirmButtonText?: string;
+  cancelButtonText?: string;
+}
+
+export interface UISelectRequest {
+  title: string;
+  message?: string;
+  options: string[];
+  submitButtonText?: string;
+  cancelButtonText?: string;
+}
+
+export interface UINotifyRequest {
+  title?: string;
+  message: string;
+}
+
 export interface UIContext {
   input(request: UIInputRequest): Promise<string | undefined>;
+  confirm(request: UIConfirmRequest): Promise<boolean>;
+  select(request: UISelectRequest): Promise<string | undefined>;
+  notify(request: string | UINotifyRequest): Promise<void>;
 }
 
 export interface SharedContext extends Required<Pick<BaseCallContext, "cwd">>, Omit<BaseCallContext, "cwd"> {
