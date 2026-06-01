@@ -1005,12 +1005,7 @@ const ChatPage: React.FC = () => {
 
 	const handleUIInputRequest = (event: ChatStreamEvent) => {
 		if (event.kind === "ui-notification" && event.ui_notify) {
-			showToast(
-				event.ui_notify.title
-					? `${event.ui_notify.title}: ${event.ui_notify.message}`
-					: event.ui_notify.message,
-				"info",
-			);
+			showToast(event.ui_notify.message, "info", event.ui_notify.title);
 			return true;
 		}
 

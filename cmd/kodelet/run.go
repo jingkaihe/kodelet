@@ -457,6 +457,10 @@ var runCmd = &cobra.Command{
 		}
 		llmConfig.WorkingDirectory = resolvedCWD
 
+		if !config.Headless && !config.ResultOnly {
+			ctx = extensions.ContextWithUIInputBroker(ctx, extensions.NewTerminalUIInputBroker(os.Stdin, os.Stderr))
+		}
+
 		mcpManager, extensionRuntime, err := createRunToolManagers(ctx, config, resolvedCWD)
 		if err != nil {
 			presenter.Error(err, "Failed to initialize tools")
@@ -471,9 +475,6 @@ var runCmd = &cobra.Command{
 			defer func() {
 				_ = extensionRuntime.Close()
 			}()
-		}
-		if !config.Headless && !config.ResultOnly {
-			ctx = extensions.ContextWithUIInputBroker(ctx, extensions.NewTerminalUIInputBroker(os.Stdin, os.Stderr))
 		}
 
 		if config.FragmentName != "" {

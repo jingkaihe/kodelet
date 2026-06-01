@@ -3794,15 +3794,16 @@ code[class*="language-"] {
   top: 1rem;
   right: 1rem;
   z-index: 9999;
+  width: min(28rem, calc(100vw - 2rem));
+  max-width: calc(100vw - 2rem);
   animation: slideIn 0.3s ease-out;
 }
 
-.toast .alert {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  min-width: 16rem;
-  max-width: min(28rem, calc(100vw - 2rem));
+.kodelet-toast-card {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  min-width: 0;
   padding: 0.85rem 1rem;
   border-radius: 16px;
   border: 1px solid rgba(20, 20, 19, 0.08);
@@ -3814,24 +3815,47 @@ code[class*="language-"] {
   font-size: 0.88rem;
   font-weight: 500;
   letter-spacing: -0.01em;
+  overflow: hidden;
+  white-space: normal;
 }
 
-.toast .alert-info {
+.kodelet-toast-card .toast-title {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  margin-bottom: 0.15rem;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+  color: inherit;
+}
+
+.kodelet-toast-card .toast-message {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+  line-height: 1.35;
+}
+
+.kodelet-toast-card.alert-info {
   background: rgba(244, 241, 234, 0.96);
   color: #4a463f;
 }
 
-.toast .alert-success {
+.kodelet-toast-card.alert-success {
   background: rgba(238, 244, 234, 0.96);
   color: #41503f;
 }
 
-.toast .alert-error {
+.kodelet-toast-card.alert-error {
   background: rgba(247, 236, 232, 0.97);
   color: #8c3f34;
 }
 
-.toast .alert-neutral {
+.kodelet-toast-card.alert-neutral {
   background: rgba(243, 240, 234, 0.98);
   color: #4d483f;
 }

@@ -155,10 +155,11 @@ export const copyToClipboard = async (text: string): Promise<void> => {
 // Toast notification utility
 export const showToast = (
   message: string,
-  type: 'info' | 'success' | 'error' | 'neutral' = 'info'
+  type: 'info' | 'success' | 'error' | 'neutral' = 'info',
+  title?: string
 ): void => {
   const toast = document.createElement('div');
-  toast.className = 'toast toast-top toast-end';
+  toast.className = 'toast kodelet-toast';
 
   const alertClass =
     type === 'error'
@@ -169,9 +170,15 @@ export const showToast = (
           ? 'neutral'
           : 'info';
 
+  const trimmedTitle = title?.trim();
+  const titleMarkup = trimmedTitle
+    ? `<strong class="toast-title">${escapeHtml(trimmedTitle)}</strong>`
+    : '';
+
   toast.innerHTML = `
-    <div class="alert alert-${alertClass}">
-      <span>${escapeHtml(message)}</span>
+    <div class="kodelet-toast-card alert-${alertClass}">
+      ${titleMarkup}
+      <span class="toast-message">${escapeHtml(message)}</span>
     </div>
   `;
 
