@@ -22,7 +22,7 @@ Examples now live with the skill under `examples/`:
 
 - `examples/streamlit/` — Streamlit chatbot around `kodelet run --headless --stream-deltas`.
 - `examples/streamlit-acp/` — Streamlit chatbot using Agent Client Protocol.
-- `examples/extensions/workspace/` — TypeScript extension with an `ask_question` tool and bash approval policy.
+- `examples/extensions/workspace/` — TypeScript extension with an `ask_user_question` tool and bash approval policy.
 
 When answering detailed or version-sensitive questions, prefer the current repository docs/source over memory. If the user asks to modify Kodelet itself, inspect the relevant code first and follow repository conventions from `AGENTS.md`.
 

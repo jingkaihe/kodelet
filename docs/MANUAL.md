@@ -1229,7 +1229,7 @@ Tool, command, and event handlers can ask the active Kodelet UI for user-facing 
 
 ```typescript
 ext.registerTool({
-  name: "ask_question",
+  name: "ask_user_question",
   description: "Ask the user to choose between concrete options",
   inputSchema: z.object({
     question: z.string(),

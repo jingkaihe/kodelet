@@ -244,6 +244,6 @@ Extension-provided tools, commands, and dynamic recipes load through the extensi
 
 See `examples/extensions/workspace/` in this skill. It includes:
 
-- `src/index.ts` — registers `ask_question`, shows UI prompts, handles `agent.start`, and intercepts `tool.call` for bash approval.
+- `src/index.ts` — registers `ask_user_question`, shows UI prompts, handles `agent.start`, and intercepts `tool.call` for bash approval.
 - `kodelet-extension-workspace` — executable wrapper.
 - `package.json` / `tsconfig.json` — TypeScript development setup.
