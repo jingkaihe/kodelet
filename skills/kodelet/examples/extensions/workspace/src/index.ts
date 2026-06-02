@@ -24,7 +24,7 @@ interface BashCommandDetails {
     timeout?: number;
 }
 
-const AskUserChoiceInput = z.object({
+const AskQuestionInput = z.object({
     question: z.string().min(1).describe("The question to ask the user"),
     options: z
         .array(z.string().min(1))
@@ -37,10 +37,10 @@ const extension = defineExtension((ext) => {
     ext.setMetadata({ name: "workspace", version: "0.1.0" });
 
     ext.registerTool({
-        name: "ask_user_choice",
+        name: "ask_question",
         description:
             "Present user with multiple choices when there are several possible approaches and you need them to pick one. Use when you have 2-5 concrete options to choose from",
-        inputSchema: AskUserChoiceInput,
+        inputSchema: AskQuestionInput,
         async execute(input, ctx) {
             const choice = await ctx.ui.select({
                 title: input.question,

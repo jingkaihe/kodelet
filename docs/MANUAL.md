@@ -1229,7 +1229,7 @@ Tool, command, and event handlers can ask the active Kodelet UI for user-facing 
 
 ```typescript
 ext.registerTool({
-  name: "ask_user_choice",
+  name: "ask_question",
   description: "Ask the user to choose between concrete options",
   inputSchema: z.object({
     question: z.string(),
@@ -1305,7 +1305,7 @@ Within each extension root, Kodelet loads either direct or nested executables:
 <extension-root>/*/kodelet-extension-xxx
 ```
 
-For a direct executable, the extension name defaults to `xxx`. For a nested executable, the extension name defaults to the parent directory. Plugin extensions are addressed as `org@repo/extension`. Standalone extensions are addressed by directory or executable path.
+The executable filename must be `kodelet-extension-xxx`. Kodelet derives the extension ID/name as `xxx` for a direct executable, or as the parent directory name for a nested executable. Plugin extension IDs are addressed as `org@repo/extension`. Standalone extensions are matched by directory or executable path in allow/deny config.
 
 Inspect discovered extensions with:
 
@@ -1451,8 +1451,10 @@ Skills are directories containing a `SKILL.md` file with YAML frontmatter:
 ```
 ~/.kodelet/skills/my-skill/
 ├── SKILL.md          (required)
-├── reference.md      (optional)
-├── examples.md       (optional)
+├── references/       (optional detailed docs)
+│   └── api.md
+├── examples/         (optional samples)
+│   └── sample.txt
 └── scripts/
     └── helper.py     (optional)
 ```
@@ -1469,9 +1471,11 @@ description: Brief description of what this skill does and when to use it
 ## Instructions
 Step-by-step guidance for the agent...
 
-## Examples
-Concrete usage examples...
+## References
+Read `references/api.md` only for API-specific tasks.
 ```
+
+Keep `SKILL.md` compact. Supporting files are available from the skill directory and can be inspected on demand, which avoids loading rarely needed details into context every time the skill is invoked.
 
 **Skill Locations:**
 - `./.kodelet/skills/<skill_name>/` - Repository-local (higher precedence)

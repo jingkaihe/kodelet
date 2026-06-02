@@ -132,9 +132,8 @@ The same matching rule applies to any configured global root or plugin extension
 
 Where:
 
-- `kodelet-extension-xxx` is an executable file.
-- The executable name is the extension process entry point.
-- The extension ID defaults to:
+- `kodelet-extension-xxx` is an executable file and the required extension process entry point name.
+- The extension ID/name is derived as:
   - `xxx` for `<root>/kodelet-extension-xxx`;
   - the parent directory name for `<root>/<name>/kodelet-extension-xxx`.
 - No manifest is required. Extension metadata is reported by the executable during JSON-RPC initialization.

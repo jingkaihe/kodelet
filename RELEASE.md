@@ -527,10 +527,10 @@ kodelet db rollback            # Rollback the last migration (with confirmation)
 kodelet db rollback --no-confirm  # Rollback without confirmation
 ```
 
-**Streamlit ACP chatbot example**: Added a full-featured Streamlit chatbot at `examples/streamlit-acp/` demonstrating ACP integration with conversation history, thinking visualization, tool call inspection, and image support. Run directly with:
+**Streamlit ACP chatbot example**: Added a full-featured Streamlit chatbot at `skills/kodelet/examples/streamlit-acp/` demonstrating ACP integration with conversation history, thinking visualization, tool call inspection, and image support. Run directly with:
 
 ```bash
-uv run https://raw.githubusercontent.com/jingkaihe/kodelet/refs/heads/main/examples/streamlit-acp/main.py
+uv run https://raw.githubusercontent.com/jingkaihe/kodelet/refs/heads/main/skills/kodelet/examples/streamlit-acp/main.py
 ```
 
 ### Bug Fixes
@@ -814,7 +814,7 @@ kodelet acp --compact-ratio 0.8          # Trigger compaction at 80% context usa
 kodelet acp --disable-auto-compact       # Disable auto-compaction entirely
 ```
 
-**Streamlit chatbot example**: Added a new example at `examples/streamlit/` demonstrating how to build a chat interface using kodelet's CLI with real-time streaming. Features include conversation persistence, thinking visualization, and tool call inspection.
+**Streamlit chatbot example**: Added a new example at `skills/kodelet/examples/streamlit/` demonstrating how to build a chat interface using kodelet's CLI with real-time streaming. Features include conversation persistence, thinking visualization, and tool call inspection.
 
 ### Bug Fixes
 

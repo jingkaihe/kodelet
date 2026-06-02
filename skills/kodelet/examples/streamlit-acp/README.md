@@ -7,7 +7,7 @@ A Streamlit chatbot interface that communicates with kodelet via the Agent Clien
 Run directly from GitHub without cloning:
 
 ```bash
-uv run https://raw.githubusercontent.com/jingkaihe/kodelet/refs/heads/main/examples/streamlit-acp/main.py
+uv run https://raw.githubusercontent.com/jingkaihe/kodelet/refs/heads/main/skills/kodelet/examples/streamlit-acp/main.py
 ```
 
 ## Local Usage

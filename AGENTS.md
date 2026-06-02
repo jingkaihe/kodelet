@@ -20,6 +20,7 @@ pkg/             # Core packages
 docs/            # Documentation (MANUAL.md, DEVELOPMENT.md, SKILLS.md, etc.)
 desktop/         # Desktop clients and shells
 skills/          # Built-in skills
+  └── kodelet/   # Kodelet skill docs, references, and examples
 recipes/         # Sample fragment/recipe templates
 ```
 

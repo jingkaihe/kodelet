@@ -240,7 +240,7 @@ run = [
   "cd sdk && npm install",
   "echo 'Installing bundled extension npm dependencies...'",
   "cd .kodelet/extensions/review && npm install",
-  "cd examples/extensions/workspace && npm install",
+  "cd skills/kodelet/examples/extensions/workspace && npm install",
   "echo 'All dependencies installed successfully!'",
 ]
 
