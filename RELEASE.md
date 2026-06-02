@@ -1,6 +1,6 @@
 # Kodelet
 
-## 0.4.25-alpha1 (2026-05-30)
+## 0.4.30-beta (2026-05-30)
 
 Introduced the unified extension runtime, replacing standalone hooks and executable custom tools with long-running JSON-RPC extensions that can register tools, slash commands, lifecycle event handlers, and follow-up messages.
 
