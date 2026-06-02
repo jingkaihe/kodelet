@@ -82,11 +82,11 @@ func TestRemoverListPlugins(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	pluginsDir := filepath.Join(tmpDir, "plugins")
-	// Create valid plugins with skills/ or recipes/ subdirectories
+	// Create valid plugins with skills/, recipes/, or extensions/ subdirectories
 	require.NoError(t, os.MkdirAll(filepath.Join(pluginsDir, "plugin-a", "skills"), 0o755))
 	require.NoError(t, os.MkdirAll(filepath.Join(pluginsDir, "plugin-b", "recipes"), 0o755))
-	require.NoError(t, os.MkdirAll(filepath.Join(pluginsDir, "plugin-c", "tools"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(pluginsDir, "plugin-c", "tools", "my-tool"), []byte("#!/bin/bash\necho tool\n"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(pluginsDir, "plugin-c", "extensions", "runner"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(pluginsDir, "plugin-c", "extensions", "runner", "kodelet-extension-runner"), []byte("#!/bin/bash\necho extension\n"), 0o755))
 	// This is not a valid plugin (no skills/ or recipes/)
 	require.NoError(t, os.MkdirAll(filepath.Join(pluginsDir, "not-a-plugin"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(pluginsDir, "file.txt"), []byte("file"), 0o644))
@@ -194,36 +194,21 @@ func TestInstallerFindRecipes(t *testing.T) {
 	assert.Len(t, recipes, 2)
 }
 
-func TestInstallerFindTools(t *testing.T) {
+func TestInstallerFindExtensions(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	toolsDir := filepath.Join(tmpDir, "tools")
-	require.NoError(t, os.MkdirAll(toolsDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(toolsDir, "tool-a"), []byte("#!/bin/bash\necho hi\n"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(toolsDir, "README.md"), []byte("ignored"), 0o644))
-	require.NoError(t, os.MkdirAll(filepath.Join(toolsDir, "nested"), 0o755))
+	extensionsDir := filepath.Join(tmpDir, "extensions")
+	require.NoError(t, os.MkdirAll(filepath.Join(extensionsDir, "weather"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(extensionsDir, "kodelet-extension-a"), []byte("#!/bin/bash\necho hi\n"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(extensionsDir, "README.md"), []byte("ignored"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(extensionsDir, "weather", "kodelet-extension-weather"), []byte("#!/bin/bash\necho hi\n"), 0o755))
 
 	installer := &Installer{}
-	tools, err := installer.findTools(toolsDir)
+	extensions, err := installer.findExtensions(extensionsDir)
 	require.NoError(t, err)
-	require.Len(t, tools, 1)
-	assert.Equal(t, filepath.Join(toolsDir, "tool-a"), tools[0])
-}
-
-func TestInstallerFindHooks(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	hooksDir := filepath.Join(tmpDir, "hooks")
-	require.NoError(t, os.MkdirAll(hooksDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "after_tool_call"), []byte("#!/bin/sh\necho hook\n"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "README.md"), []byte("ignored"), 0o644))
-	require.NoError(t, os.MkdirAll(filepath.Join(hooksDir, "nested"), 0o755))
-
-	installer := &Installer{}
-	hooks, err := installer.findHooks(hooksDir)
-	require.NoError(t, err)
-	require.Len(t, hooks, 1)
-	assert.Equal(t, filepath.Join(hooksDir, "after_tool_call"), hooks[0])
+	require.Len(t, extensions, 2)
+	assert.Contains(t, extensions, filepath.Join(extensionsDir, "kodelet-extension-a"))
+	assert.Contains(t, extensions, filepath.Join(extensionsDir, "weather"))
 }
 
 func TestInstallerFindHelpersMissingDirectoriesReturnError(t *testing.T) {
@@ -234,9 +219,7 @@ func TestInstallerFindHelpersMissingDirectoriesReturnError(t *testing.T) {
 	require.Error(t, err)
 	_, err = installer.findRecipes(filepath.Join(tmpDir, "missing-recipes"))
 	require.Error(t, err)
-	_, err = installer.findHooks(filepath.Join(tmpDir, "missing-hooks"))
-	require.Error(t, err)
-	_, err = installer.findTools(filepath.Join(tmpDir, "missing-tools"))
+	_, err = installer.findExtensions(filepath.Join(tmpDir, "missing-extensions"))
 	require.Error(t, err)
 }
 
@@ -500,14 +483,12 @@ func TestInstallerInstallCopiesPluginContentsViaGH(t *testing.T) {
 	assert.Equal(t, "owner@repo", result.PluginName)
 	assert.Equal(t, []string{"helper"}, result.Skills)
 	assert.Equal(t, []string{filepath.Join("workflows", "deploy")}, result.Recipes)
-	assert.Equal(t, []string{"runner"}, result.Tools)
-	assert.Equal(t, []string{"after_tool_call"}, result.Hooks)
+	assert.Equal(t, []string{"runner"}, result.Extensions)
 
 	pluginDir := filepath.Join(targetDir, pluginsSubdir, "owner@repo")
 	assert.FileExists(t, filepath.Join(pluginDir, skillsSubdir, "helper", skillFileName))
 	assert.FileExists(t, filepath.Join(pluginDir, recipesSubdir, "workflows", "deploy.md"))
-	assert.FileExists(t, filepath.Join(pluginDir, toolsSubdir, "runner"))
-	assert.FileExists(t, filepath.Join(pluginDir, hooksSubdir, "after_tool_call"))
+	assert.FileExists(t, filepath.Join(pluginDir, extensionsSubdir, "runner", "kodelet-extension-runner"))
 }
 
 func TestInstallerInstallErrorsWhenRepositoryHasNoPlugins(t *testing.T) {
@@ -541,17 +522,13 @@ func writePluginFixture(t *testing.T, root string, includeExecutable bool) {
 	require.NoError(t, os.MkdirAll(recipeDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(recipeDir, "deploy.md"), []byte("---\ndescription: Deploy\n---\n"), 0o644))
 
-	toolMode := os.FileMode(0o644)
+	extensionMode := os.FileMode(0o644)
 	if includeExecutable {
-		toolMode = 0o755
+		extensionMode = 0o755
 	}
-	toolsDir := filepath.Join(root, toolsSubdir)
-	require.NoError(t, os.MkdirAll(toolsDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(toolsDir, "runner"), []byte("#!/bin/sh\necho runner\n"), toolMode))
-
-	hooksDir := filepath.Join(root, hooksSubdir)
-	require.NoError(t, os.MkdirAll(hooksDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "after_tool_call"), []byte("#!/bin/sh\necho hook\n"), toolMode))
+	extensionDir := filepath.Join(root, extensionsSubdir, "runner")
+	require.NoError(t, os.MkdirAll(extensionDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(extensionDir, "kodelet-extension-runner"), []byte("#!/bin/sh\necho runner\n"), extensionMode))
 }
 
 func writeFakeGH(t *testing.T, fixtureRepo string) string {

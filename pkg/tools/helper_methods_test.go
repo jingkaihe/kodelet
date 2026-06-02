@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/invopop/jsonschema"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/mark3labs/mcp-go/client"
@@ -592,107 +591,6 @@ func TestCreateMCPManagerFromViperDisabled(t *testing.T) {
 	manager, err := CreateMCPManagerFromViper(context.Background())
 	require.ErrorIs(t, err, ErrMCPDisabled)
 	assert.Nil(t, manager)
-}
-
-func TestCustomToolAccessorsAndSortedListing(t *testing.T) {
-	schema := &jsonschema.Schema{Type: "object"}
-	tool := &CustomTool{
-		execPath:    "/tmp/custom-tool",
-		name:        "alpha",
-		description: "Alpha custom tool",
-		schema:      schema,
-	}
-
-	assert.Equal(t, "custom_tool_alpha", tool.Name())
-	assert.Equal(t, "alpha", tool.RawName())
-	assert.Equal(t, "/tmp/custom-tool", tool.ExecPath())
-	assert.Same(t, schema, tool.GenerateSchema())
-	assert.Same(t, schema, tool.InputSchema())
-
-	kvs, err := tool.TracingKVs(`{}`)
-	require.NoError(t, err)
-	attrs := attributeMap(kvs)
-	assert.Equal(t, "custom", attrs["tool.type"])
-	assert.Equal(t, "alpha", attrs["tool.name"])
-	assert.Equal(t, "/tmp/custom-tool", attrs["tool.exec_path"])
-
-	manager := &CustomToolManager{tools: map[string]*CustomTool{
-		"zeta":  {name: "zeta"},
-		"alpha": {name: "alpha"},
-	}}
-	tools := manager.ListCustomTools()
-	require.Len(t, tools, 2)
-	assert.Equal(t, []string{"alpha", "zeta"}, []string{tools[0].RawName(), tools[1].RawName()})
-}
-
-func TestCustomToolRuntimeConfigLoadInvalidYAML(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "config.yaml")
-	require.NoError(t, os.WriteFile(configPath, []byte(`custom_tools: [`), 0o644))
-
-	assert.Nil(t, loadCustomToolRuntimeConfigFromFile(configPath))
-}
-
-func TestLoadCustomToolConfigFromViperAndRuntimeFiles(t *testing.T) {
-	isolateViper(t)
-
-	workDir := t.TempDir()
-	homeDir := t.TempDir()
-	t.Setenv("HOME", homeDir)
-
-	oldWD, err := os.Getwd()
-	require.NoError(t, err)
-	require.NoError(t, os.Chdir(workDir))
-	t.Cleanup(func() { require.NoError(t, os.Chdir(oldWD)) })
-
-	globalConfigDir := filepath.Join(homeDir, ".kodelet")
-	require.NoError(t, os.MkdirAll(globalConfigDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(globalConfigDir, "config.yaml"), []byte(`custom_tools:
-  tools:
-    seer:
-      timeout: 30m
-      envs:
-        MODEL: global
-        GLOBAL_ONLY: yes
-`), 0o644))
-
-	repoConfigPath := filepath.Join(workDir, "kodelet-config.yaml")
-	require.NoError(t, os.WriteFile(repoConfigPath, []byte(`custom_tools:
-  enabled: true
-  timeout: 2m
-  max_output_size: 4096
-  tools:
-    seer:
-      timeout: 45m
-      envs:
-        MODEL: repo
-        REPO_ONLY: present
-`), 0o644))
-
-	viper.SetConfigFile(repoConfigPath)
-	require.NoError(t, viper.ReadInConfig())
-
-	config := LoadCustomToolConfig()
-	assert.True(t, config.Enabled)
-	assert.Equal(t, 2*time.Minute, config.Timeout)
-	assert.Equal(t, 4096, config.MaxOutputSize)
-	require.Contains(t, config.Tools, "seer")
-	assert.Equal(t, 45*time.Minute, config.Tools["seer"].Timeout)
-	assert.Equal(t, map[string]*string{
-		"GLOBAL_ONLY": strPtr("yes"),
-		"MODEL":       strPtr("repo"),
-		"REPO_ONLY":   strPtr("present"),
-	}, config.Tools["seer"].Envs)
-}
-
-func TestCreateCustomToolManagerFromViperDisabled(t *testing.T) {
-	isolateViper(t)
-	viper.Set("custom_tools.enabled", false)
-
-	manager, err := CreateCustomToolManagerFromViper(context.Background())
-	require.NoError(t, err)
-	require.NotNil(t, manager)
-	assert.False(t, manager.config.Enabled)
-	assert.Empty(t, manager.ListCustomTools())
 }
 
 func TestStateDeterministicHelpers(t *testing.T) {

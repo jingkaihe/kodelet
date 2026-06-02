@@ -13,6 +13,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/llm"
@@ -42,7 +43,7 @@ type RunConfig struct {
 	FragmentDirs         []string          // Additional fragment directories
 	IncludeHistory       bool              // Include historical conversation data in headless streaming
 	NoSkills             bool              // Disable agentic skills
-	NoHooks              bool              // Disable agent lifecycle hooks
+	NoExtensions         bool              // Disable extension runtime
 	NoMCP                bool              // Disable MCP tools
 	NoTools              bool              // Disable all tools (for simple query-response usage)
 	DisableFSSearchTools bool              // Disable filesystem search tools (glob_tool and grep_tool)
@@ -70,7 +71,7 @@ func NewRunConfig() *RunConfig {
 		FragmentDirs:         []string{},
 		IncludeHistory:       false,
 		NoSkills:             false,
-		NoHooks:              false,
+		NoExtensions:         false,
 		NoMCP:                false,
 		NoTools:              false,
 		DisableFSSearchTools: false,
@@ -84,7 +85,15 @@ func NewRunConfig() *RunConfig {
 	}
 }
 
-func processFragment(ctx context.Context, config *RunConfig, args []string) (string, string, *fragments.Metadata, error) {
+type processedFragment struct {
+	Query     string
+	Display   string
+	Metadata  *fragments.Metadata
+	Response  string
+	Responded bool
+}
+
+func processFragment(ctx context.Context, config *RunConfig, args []string, extensionRuntime *extensions.Runtime, callContext extensions.ExtensionCallContext) (*processedFragment, error) {
 	var validDirs []string
 	for _, dir := range config.FragmentDirs {
 		trimmed := strings.TrimSpace(dir)
@@ -95,17 +104,12 @@ func processFragment(ctx context.Context, config *RunConfig, args []string) (str
 
 	fragmentProcessor, err := fragments.NewFragmentProcessor(fragments.WithAdditionalDirs(validDirs...))
 	if err != nil {
-		return "", "", nil, errors.Wrap(err, "failed to create fragment processor")
+		return nil, errors.Wrap(err, "failed to create fragment processor")
 	}
 
 	fragmentConfig := &fragments.Config{
 		FragmentName: config.FragmentName,
 		Arguments:    config.FragmentArgs,
-	}
-
-	fragment, err := fragmentProcessor.LoadFragment(ctx, fragmentConfig)
-	if err != nil {
-		return "", "", nil, errors.Wrap(err, "failed to load fragment")
 	}
 
 	display := strings.TrimSpace(config.MessageDisplay)
@@ -119,6 +123,51 @@ func processFragment(ctx context.Context, config *RunConfig, args []string) (str
 		}
 	}
 
+	commandArgs := strings.Join(args, " ")
+	if argDisplay := formatFragmentDisplayArgs(config.FragmentArgs); argDisplay != "" {
+		parts := []string{argDisplay}
+		if argsContent := strings.TrimSpace(commandArgs); argsContent != "" {
+			parts = append(parts, argsContent)
+		}
+		commandArgs = strings.Join(parts, " ")
+	}
+
+	if extensionRuntime != nil {
+		if callContext.InvokedBy == "" {
+			callContext.InvokedBy = "main"
+		}
+		callContext.RecipeName = config.FragmentName
+		if commandResult, err := extensionRuntime.TryCommand(
+			ctx,
+			display,
+			config.FragmentName,
+			commandArgs,
+			callContext,
+		); err != nil {
+			return nil, errors.Wrapf(err, "failed to execute extension recipe %s", config.FragmentName)
+		} else if commandResult != nil && commandResult.Matched {
+			switch commandResult.Action {
+			case extensions.CommandActionRunAgent:
+				metadata := &fragments.Metadata{
+					Name:        commandResult.Registration.Name,
+					Description: commandResult.Registration.Description,
+				}
+				return &processedFragment{Query: commandResult.Prompt, Display: display, Metadata: metadata}, nil
+			case extensions.CommandActionRespond:
+				metadata := &fragments.Metadata{
+					Name:        commandResult.Registration.Name,
+					Description: commandResult.Registration.Description,
+				}
+				return &processedFragment{Display: display, Metadata: metadata, Response: commandResult.Response, Responded: true}, nil
+			}
+		}
+	}
+
+	fragment, err := fragmentProcessor.LoadFragment(ctx, fragmentConfig)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to load fragment")
+	}
+
 	var query string
 	if len(args) > 0 {
 		argsContent := strings.Join(args, " ")
@@ -127,7 +176,7 @@ func processFragment(ctx context.Context, config *RunConfig, args []string) (str
 		query = fragment.Content
 	}
 
-	return query, display, &fragment.Metadata, nil
+	return &processedFragment{Query: query, Display: display, Metadata: &fragment.Metadata}, nil
 }
 
 func formatFragmentDisplayArgs(args map[string]string) string {
@@ -228,7 +277,7 @@ func applyRunToolRestrictions(llmConfig *llmtypes.Config, fragmentMetadata *frag
 	}
 }
 
-func createRunToolManagers(ctx context.Context, config *RunConfig) (*tools.MCPManager, *tools.CustomToolManager, error) {
+func createRunToolManagers(ctx context.Context, config *RunConfig, workingDir string) (*tools.MCPManager, *extensions.Runtime, error) {
 	if config.NoTools {
 		return nil, nil, nil
 	}
@@ -242,15 +291,18 @@ func createRunToolManagers(ctx context.Context, config *RunConfig) (*tools.MCPMa
 		}
 	}
 
-	customManager, err := tools.CreateCustomToolManagerFromViper(ctx)
-	if err != nil {
-		if mcpManager != nil {
-			_ = mcpManager.Close(ctx)
+	var extensionRuntime *extensions.Runtime
+	if !config.NoExtensions {
+		extensionRuntime, err = extensions.NewRuntimeFromViper(ctx, workingDir)
+		if err != nil {
+			if mcpManager != nil {
+				_ = mcpManager.Close(ctx)
+			}
+			return nil, nil, err
 		}
-		return nil, nil, err
 	}
 
-	return mcpManager, customManager, nil
+	return mcpManager, extensionRuntime, nil
 }
 
 func normalizeConversationProfile(profile string) string {
@@ -374,23 +426,19 @@ var runCmd = &cobra.Command{
 		var query string
 		var fragmentMetadata *fragments.Metadata
 		var goalUpdate *goals.CommandUpdate
+		var llmConfig llmtypes.Config
+		var resolvedCWD string
 		var err error
 
-		if config.FragmentName != "" {
-			query, config.MessageDisplay, fragmentMetadata, err = processFragment(ctx, config, args)
-			if err != nil {
-				presenter.Error(err, "Failed to process fragment")
-				return
-			}
-		} else {
+		if config.FragmentName == "" {
 			query, err = getQueryFromStdinOrArgs(args)
 			if err != nil {
 				presenter.Error(err, "Please provide a query to execute")
 				return
 			}
 
-			if command, args, found := slashcommands.Parse(query); found {
-				update, handled, err := goals.ParseSlashCommand(command, args, time.Now())
+			if command, commandArgs, found := slashcommands.Parse(query); found {
+				update, handled, err := goals.ParseSlashCommand(command, commandArgs, time.Now())
 				if handled {
 					if err != nil {
 						presenter.Error(err, "Failed to process goal")
@@ -402,7 +450,18 @@ var runCmd = &cobra.Command{
 			}
 		}
 
-		mcpManager, customManager, err := createRunToolManagers(ctx, config)
+		llmConfig, resolvedCWD, err = loadResumeConversationConfig(ctx, cmd, config.ResumeConvID, config.CWD)
+		if err != nil {
+			presenter.Error(err, "Failed to load configuration")
+			os.Exit(1)
+		}
+		llmConfig.WorkingDirectory = resolvedCWD
+
+		if !config.Headless && !config.ResultOnly {
+			ctx = extensions.ContextWithUIInputBroker(ctx, extensions.NewTerminalUIInputBroker(os.Stdin, os.Stderr))
+		}
+
+		mcpManager, extensionRuntime, err := createRunToolManagers(ctx, config, resolvedCWD)
 		if err != nil {
 			presenter.Error(err, "Failed to initialize tools")
 			return
@@ -412,20 +471,66 @@ var runCmd = &cobra.Command{
 				_ = mcpManager.Close(ctx)
 			}()
 		}
+		if extensionRuntime != nil {
+			defer func() {
+				_ = extensionRuntime.Close()
+			}()
+		}
 
-		llmConfig, resolvedCWD, err := loadResumeConversationConfig(ctx, cmd, config.ResumeConvID, config.CWD)
-		if err != nil {
-			presenter.Error(err, "Failed to load configuration")
-			if mcpManager != nil {
-				if closeErr := mcpManager.Close(ctx); closeErr != nil {
-					logger.G(ctx).WithError(closeErr).Debug("failed to close MCP manager after configuration error")
+		if config.FragmentName != "" {
+			processed, err := processFragment(ctx, config, args, extensionRuntime, extensions.ExtensionCallContext{
+				ConversationID: config.ResumeConvID,
+				CWD:            resolvedCWD,
+				Provider:       llmConfig.Provider,
+				Model:          llmConfig.Model,
+				Profile:        llmConfig.Profile,
+				InvokedBy:      "main",
+			})
+			if err != nil {
+				presenter.Error(err, "Failed to process fragment")
+				return
+			}
+			if processed.Responded {
+				presenter.Info(processed.Response)
+				return
+			}
+			query = processed.Query
+			config.MessageDisplay = processed.Display
+			fragmentMetadata = processed.Metadata
+		}
+
+		if config.FragmentName == "" && goalUpdate == nil && extensionRuntime != nil {
+			if command, commandArgs, found := slashcommands.Parse(query); found {
+				commandResult, err := extensionRuntime.TryCommand(ctx, query, command, commandArgs, extensions.ExtensionCallContext{
+					ConversationID: config.ResumeConvID,
+					CWD:            resolvedCWD,
+					Provider:       llmConfig.Provider,
+					Model:          llmConfig.Model,
+					Profile:        llmConfig.Profile,
+					InvokedBy:      "main",
+				})
+				if err != nil {
+					presenter.Error(err, "Failed to execute extension command")
+					return
+				}
+				if commandResult != nil && commandResult.Matched {
+					switch commandResult.Action {
+					case extensions.CommandActionRespond:
+						presenter.Info(commandResult.Response)
+						return
+					case extensions.CommandActionRunAgent:
+						query = commandResult.Prompt
+						config.MessageDisplay = commandResult.Display
+						if commandResult.RecipeName != "" {
+							config.FragmentName = commandResult.RecipeName
+						}
+					default:
+						presenter.Warning(fmt.Sprintf("Extension command %s returned unknown action %q", commandResult.CommandName, commandResult.Action))
+					}
 				}
 			}
-			os.Exit(1)
 		}
-		llmConfig.WorkingDirectory = resolvedCWD
 
-		llmConfig.NoHooks = config.NoHooks
 		if cmd.Flags().Changed("disable-fs-search-tools") {
 			llmConfig.DisableFSSearchTools = config.DisableFSSearchTools
 		}
@@ -440,6 +545,7 @@ var runCmd = &cobra.Command{
 		}
 		llmConfig.IsSubAgent = config.AsSubagent
 		llmConfig.RecipeName = config.FragmentName
+		llmConfig.Extensions = extensionRuntime
 
 		// Set Anthropic account if specified
 		if config.Account != "" {
@@ -468,8 +574,8 @@ var runCmd = &cobra.Command{
 		stateOpts = append(stateOpts, tools.WithWorkingDirectory(llmConfig.WorkingDirectory))
 		stateOpts = append(stateOpts, tools.WithLLMConfig(llmConfig))
 		if !config.NoTools {
-			if customManager != nil {
-				stateOpts = append(stateOpts, tools.WithCustomTools(customManager))
+			if extensionRuntime != nil {
+				stateOpts = append(stateOpts, tools.WithExtensionTools(extensionRuntime.Tools()))
 			}
 
 			// When running as subagent, use subagent tools (excludes subagent tool to prevent recursion)
@@ -660,7 +766,7 @@ func init() {
 	runCmd.Flags().StringToString("arg", defaults.FragmentArgs, "Arguments to pass to fragment (e.g., --arg name=John --arg occupation=Engineer)")
 	runCmd.Flags().StringSlice("fragment-dirs", defaults.FragmentDirs, "Additional fragment directories (e.g., --fragment-dirs ./project-fragments --fragment-dirs ./team-fragments)")
 	runCmd.Flags().Bool("include-history", defaults.IncludeHistory, "Include historical conversation data in headless streaming")
-	runCmd.Flags().Bool("no-hooks", defaults.NoHooks, "Disable agent lifecycle hooks")
+	runCmd.Flags().Bool("no-extensions", defaults.NoExtensions, "Disable extension runtime")
 	runCmd.Flags().Bool("no-mcp", defaults.NoMCP, "Disable MCP tools")
 	runCmd.Flags().Bool("no-tools", defaults.NoTools, "Disable all tools (for simple query-response usage)")
 	runCmd.Flags().Bool("disable-fs-search-tools", defaults.DisableFSSearchTools, "Disable filesystem search tools (glob_tool and grep_tool)")
@@ -732,8 +838,8 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 		config.IncludeHistory = includeHistory
 	}
 
-	if noHooks, err := cmd.Flags().GetBool("no-hooks"); err == nil {
-		config.NoHooks = noHooks
+	if noExtensions, err := cmd.Flags().GetBool("no-extensions"); err == nil {
+		config.NoExtensions = noExtensions
 	}
 
 	if noMCP, err := cmd.Flags().GetBool("no-mcp"); err == nil {

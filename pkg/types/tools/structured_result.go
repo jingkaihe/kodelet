@@ -58,11 +58,11 @@ var metadataTypeRegistry = map[string]reflect.Type{
 	"file_edit":   reflect.TypeOf(FileEditMetadata{}),
 	"apply_patch": reflect.TypeOf(ApplyPatchMetadata{}),
 
-	"grep_tool":   reflect.TypeOf(GrepMetadata{}),
-	"glob_tool":   reflect.TypeOf(GlobMetadata{}),
-	"bash":        reflect.TypeOf(BashMetadata{}),
-	"mcp_tool":    reflect.TypeOf(MCPToolMetadata{}),
-	"custom_tool": reflect.TypeOf(CustomToolMetadata{}),
+	"grep_tool":      reflect.TypeOf(GrepMetadata{}),
+	"glob_tool":      reflect.TypeOf(GlobMetadata{}),
+	"bash":           reflect.TypeOf(BashMetadata{}),
+	"mcp_tool":       reflect.TypeOf(MCPToolMetadata{}),
+	"extension_tool": reflect.TypeOf(ExtensionToolMetadata{}),
 
 	"view_image":        reflect.TypeOf(ViewImageMetadata{}),
 	"subagent":          reflect.TypeOf(SubAgentMetadata{}),
@@ -290,16 +290,17 @@ type MCPContent struct {
 // ToolType returns the tool type identifier for MCP tool execution
 func (m MCPToolMetadata) ToolType() string { return "mcp_tool" }
 
-// Custom tool metadata
-
-// CustomToolMetadata contains metadata about a custom tool execution
-type CustomToolMetadata struct {
-	ExecutionTime time.Duration `json:"executionTime"`
-	Output        string        `json:"output"`
+// ExtensionToolMetadata contains metadata about an extension tool execution.
+type ExtensionToolMetadata struct {
+	ExtensionID   string         `json:"extensionId"`
+	ToolName      string         `json:"toolName"`
+	Output        string         `json:"output"`
+	Data          map[string]any `json:"data,omitempty"`
+	ExecutionTime time.Duration  `json:"executionTime"`
 }
 
-// ToolType returns the tool type identifier for custom tool execution
-func (m CustomToolMetadata) ToolType() string { return "custom_tool" }
+// ToolType returns the tool type identifier for extension tool execution.
+func (m ExtensionToolMetadata) ToolType() string { return "extension_tool" }
 
 // Additional tool metadata structures
 

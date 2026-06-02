@@ -50,6 +50,12 @@ var virtualToolNames = []string{
 	"openai_web_search",
 }
 
+// VirtualToolNames returns tool names that are exposed directly by providers
+// rather than through the executable tool registry.
+func VirtualToolNames() []string {
+	return append([]string(nil), virtualToolNames...)
+}
+
 // NoToolsMarker is a special value indicating no tools should be enabled
 const NoToolsMarker = "none"
 

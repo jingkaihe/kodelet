@@ -208,11 +208,14 @@ const examples: ToolExample[] = [
     },
   },
   {
-    title: 'Custom tool',
+    title: 'Extension tool',
     result: {
-      toolName: 'custom_tool_design_snapshot',
+      toolName: 'design_snapshot',
       success: true,
       metadata: {
+        type: 'extension_tool',
+        extensionID: 'design',
+        toolName: 'design_snapshot',
         executionTime: 0.42,
         output: '{"components":7,"stories":18}',
       },

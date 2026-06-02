@@ -15,7 +15,7 @@ Agentic Skills are model-invoked capabilities that package domain expertise into
 1. **Discovery**: At startup, Kodelet discovers skills from configured directories
 2. **Description**: Each skill has a name and description that help Kodelet decide when to use it
 3. **Invocation**: When a task matches a skill's domain, Kodelet automatically invokes it
-4. **Context Loading**: The skill's instructions and reference materials become available to Kodelet
+4. **Context Loading**: The skill's `SKILL.md` instructions are loaded; supporting files can be inspected on demand
 
 ## Creating a Skill
 
@@ -26,8 +26,10 @@ Each skill is a directory containing a `SKILL.md` file and optional supporting f
 ```
 ~/.kodelet/skills/my-skill/
 ├── SKILL.md          (required - skill definition and instructions)
-├── reference.md      (optional - additional documentation)
-├── examples.md       (optional - usage examples)
+├── references/       (optional - additional documentation for progressive disclosure)
+│   └── api.md
+├── examples/         (optional - usage examples and sample inputs/outputs)
+│   └── sample.txt
 ├── scripts/
 │   └── helper.py     (optional - utility scripts)
 └── templates/
@@ -66,7 +68,7 @@ Show a more complex example...
 
 ## Reference
 
-Link to or include relevant documentation, APIs, or standards.
+Point to supporting files under `references/` for details that are only needed for specific tasks.
 
 ## Common Pitfalls
 
@@ -211,9 +213,9 @@ kodelet run --no-skills "your query"
 
 ### Supporting Files
 
-Skills can include supporting files that Kodelet will read when needed:
+Skills can include supporting files that Kodelet will inspect when needed:
 
-- **Reference documentation**: Additional context and specifications
+- **Reference documentation**: Additional context and specifications, commonly under `references/`
 - **Example files**: Sample inputs/outputs for the domain
 - **Scripts**: Utility scripts that can be copied and executed
 - **Templates**: Starting points for generating output
@@ -315,10 +317,11 @@ When working with Kubernetes...
 ### Writing Effective Skills
 
 1. **Clear descriptions**: Write descriptions that help the model understand when to invoke the skill
-2. **Structured instructions**: Use clear headings and step-by-step guidance
-3. **Include examples**: Provide concrete examples for common use cases
-4. **Document pitfalls**: List common mistakes and how to avoid them
-5. **Keep focused**: Each skill should cover a specific domain, not be overly broad
+2. **Keep `SKILL.md` compact**: Put only the always-needed workflow in `SKILL.md`; move detailed topic references to `references/`
+3. **Structured instructions**: Use clear headings and step-by-step guidance
+4. **Include examples**: Provide concrete examples for common use cases, preferably under `examples/` when they are lengthy
+5. **Document pitfalls**: List common mistakes and how to avoid them
+6. **Keep focused**: Each skill should cover a specific domain, not be overly broad
 
 ### Organizing Skills
 

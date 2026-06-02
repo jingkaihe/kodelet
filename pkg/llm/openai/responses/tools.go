@@ -2,6 +2,7 @@ package responses
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -11,8 +12,17 @@ import (
 	"github.com/openai/openai-go/v3/responses"
 )
 
+// buildToolsForThread creates tool definitions and honors per-turn extension tool-list patches.
+func buildToolsForThread(thread llmtypes.Thread, state tooltypes.State, noToolUse bool) []responses.ToolUnionParam {
+	return buildToolsWithAllowed(state, noToolUse, currentAllowedTools(thread))
+}
+
 // buildTools creates the tool definitions for the Responses API.
-func buildTools(state tooltypes.State, noToolUse bool) []responses.ToolUnionParam {
+func buildTools(state tooltypes.State) []responses.ToolUnionParam {
+	return buildToolsWithAllowed(state, false, nil)
+}
+
+func buildToolsWithAllowed(state tooltypes.State, noToolUse bool, extensionAllowedTools []string) []responses.ToolUnionParam {
 	if noToolUse {
 		return nil
 	}
@@ -41,6 +51,10 @@ func buildTools(state tooltypes.State, noToolUse bool) []responses.ToolUnionPara
 	if state != nil {
 		availableTools = state.Tools()
 	}
+	if extensionAllowedTools != nil {
+		availableTools = filterAvailableTools(availableTools, extensionAllowedTools)
+		llmConfig.allowedTools = extensionAllowedTools
+	}
 
 	result := make([]responses.ToolUnionParam, 0, len(availableTools)+1)
 	if shouldEnableNativeOpenAISearch(llmConfig) && nativeOpenAISearchAllowed(llmConfig.allowedTools) {
@@ -56,6 +70,38 @@ func buildTools(state tooltypes.State, noToolUse bool) []responses.ToolUnionPara
 	}
 
 	return result
+}
+
+func filterAvailableTools(tools []tooltypes.Tool, allowed []string) []tooltypes.Tool {
+	filtered := make([]tooltypes.Tool, 0, len(tools))
+	for _, tool := range tools {
+		if tool != nil && slices.Contains(allowed, tool.Name()) {
+			filtered = append(filtered, tool)
+		}
+	}
+	return filtered
+}
+
+func currentAllowedTools(thread llmtypes.Thread) []string {
+	if thread == nil {
+		return nil
+	}
+	metadata := thread.GetMetadata()
+	allowed, ok := metadata["allowed_tools"].([]string)
+	if ok {
+		return allowed
+	}
+	rawList, ok := metadata["allowed_tools"].([]any)
+	if !ok {
+		return nil
+	}
+	converted := make([]string, 0, len(rawList))
+	for _, raw := range rawList {
+		if name, ok := raw.(string); ok {
+			converted = append(converted, name)
+		}
+	}
+	return converted
 }
 
 func nativeOpenAISearchAllowed(allowedTools []string) bool {

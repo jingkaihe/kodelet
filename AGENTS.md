@@ -20,6 +20,7 @@ pkg/             # Core packages
 docs/            # Documentation (MANUAL.md, DEVELOPMENT.md, SKILLS.md, etc.)
 desktop/         # Desktop clients and shells
 skills/          # Built-in skills
+  └── kodelet/   # Kodelet skill docs, references, and examples
 recipes/         # Sample fragment/recipe templates
 ```
 
@@ -126,13 +127,20 @@ kodelet plugin remove user/repo   # Remove plugin
 
 Plugins stored as `org@repo` format.
 
-## Agent Lifecycle Hooks
-Scripts at `.kodelet/hooks/` or `~/.kodelet/hooks/` that intercept agent operations.
+## Extensions
+Long-running executable extensions at `.kodelet/extensions/` or `~/.kodelet/extensions/` can register model tools, prompt commands, dynamic recipes, and lifecycle event handlers over stdio JSON-RPC.
 
-- **Types**: `before_tool_call`, `after_tool_call`, `user_message_send`, `agent_stop`
-- **Disable**: `--no-hooks` flag
+- **Discovery**: executables named `kodelet-extension-*` directly under an extension root or one level below it
+- **Events**: `user.message`, `agent.init`, `agent.start`, `turn.start`, `tool.call`, `tool.result`, `turn.end`, `agent.end`, plus session lifecycle events
+- **Disable**: `--no-extensions` flag or `extensions.enabled: false` in config
 
-See [docs/HOOKS.md](docs/HOOKS.md).
+See [docs/extension-design.md](docs/extension-design.md).
+
+Discovery helpers:
+```bash
+kodelet extension list
+kodelet extension inspect <name-or-id-or-path>
+```
 
 ## External Binary Management
 Managed binaries in `~/.kodelet/bin/`: ripgrep (15.1.0), fd (10.3.0). Auto-downloaded with checksum verification for standalone installs; packaged Linux builds bundle them in `/usr/libexec/kodelet/` and resolution prefers that location before falling back to managed or system binaries.
@@ -141,6 +149,6 @@ Managed binaries in `~/.kodelet/bin/`: ripgrep (15.1.0), fd (10.3.0). Auto-downl
 - [docs/MANUAL.md](docs/MANUAL.md) - CLI reference
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) - Development guide
 - [docs/SKILLS.md](docs/SKILLS.md) - Skills system
-- [docs/HOOKS.md](docs/HOOKS.md) - Hooks system
+- [docs/extension-design.md](docs/extension-design.md) - Extension system design
 - [docs/FRAGMENTS.md](docs/FRAGMENTS.md) - Template system
 - [docs/mcp.md](docs/mcp.md) - MCP integration

@@ -19,6 +19,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
 	"github.com/jingkaihe/kodelet/pkg/acp/session"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -71,10 +72,10 @@ type ServerConfig struct {
 	Model                string
 	MaxTokens            int
 	NoSkills             bool
+	NoExtensions         bool
 	NoWorkflows          bool
 	DisableFSSearchTools bool
 	DisableSubagent      bool
-	NoHooks              bool
 	MaxTurns             int
 	CompactRatio         float64
 }
@@ -127,10 +128,10 @@ func NewServer(opts ...Option) *Server {
 		Model:                s.config.Model,
 		MaxTokens:            s.config.MaxTokens,
 		NoSkills:             s.config.NoSkills,
+		NoExtensions:         s.config.NoExtensions,
 		NoWorkflows:          s.config.NoWorkflows,
 		DisableFSSearchTools: s.config.DisableFSSearchTools,
 		DisableSubagent:      s.config.DisableSubagent,
-		NoHooks:              s.config.NoHooks,
 		MaxTurns:             s.config.MaxTurns,
 		CompactRatio:         s.config.CompactRatio,
 	})
@@ -467,7 +468,17 @@ func (s *Server) handleSessionPrompt(req *acptypes.Request) error {
 
 	prompt := params.Prompt
 	if command, args, found := parseSlashCommand(params.Prompt); found {
-		if goalUpdate, handled, err := goals.ParseSlashCommand(command, args, time.Now()); handled {
+		commandResult, handled, err := s.tryExtensionCommand(promptCtx, sess, params.Prompt, command, args)
+		if err != nil {
+			return s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
+		}
+		if handled {
+			handledPrompt, shouldReturn, err := s.applyExtensionCommandResult(req.ID, params.SessionID, sess, params.Prompt, commandResult)
+			if err != nil || shouldReturn {
+				return err
+			}
+			prompt = handledPrompt
+		} else if goalUpdate, handled, err := goals.ParseSlashCommand(command, args, time.Now()); handled {
 			if err != nil {
 				return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, err.Error(), nil)
 			}
@@ -510,6 +521,89 @@ func (s *Server) handleSessionPrompt(req *acptypes.Request) error {
 		StopReason: stopReason,
 	}
 	return s.sendResult(req.ID, result)
+}
+
+func (s *Server) tryExtensionCommand(ctx context.Context, sess *session.Session, originalPrompt []acptypes.ContentBlock, command, args string) (*extensions.RoutedCommandResult, bool, error) {
+	if sess == nil || sess.Extensions == nil {
+		return nil, false, nil
+	}
+	rawPrompt := slashcommands.BuildDisplay(command, args)
+	for _, block := range originalPrompt {
+		if block.Type == acptypes.ContentTypeText && strings.TrimSpace(block.Text) != "" {
+			rawPrompt = strings.TrimSpace(block.Text)
+			break
+		}
+	}
+
+	threadConfig := sess.Thread.GetConfig()
+	result, err := sess.Extensions.TryCommand(ctx, rawPrompt, command, args, extensions.ExtensionCallContext{
+		ConversationID: string(sess.ID),
+		CWD:            sess.CWD,
+		Provider:       threadConfig.Provider,
+		Model:          threadConfig.Model,
+		Profile:        threadConfig.Profile,
+		RecipeName:     threadConfig.RecipeName,
+		InvokedBy:      "main",
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	return result, result != nil && result.Matched, nil
+}
+
+func (s *Server) applyExtensionCommandResult(reqID json.RawMessage, sessionID acptypes.SessionID, sess *session.Session, originalPrompt []acptypes.ContentBlock, result *extensions.RoutedCommandResult) ([]acptypes.ContentBlock, bool, error) {
+	if result == nil {
+		return originalPrompt, false, nil
+	}
+
+	switch result.Action {
+	case extensions.CommandActionRespond:
+		if strings.TrimSpace(result.Response) != "" {
+			if err := s.SendUpdate(sessionID, map[string]any{
+				"sessionUpdate": acptypes.UpdateAgentMessageChunk,
+				"content": map[string]any{
+					"type": acptypes.ContentTypeText,
+					"text": result.Response,
+				},
+			}); err != nil {
+				return nil, true, err
+			}
+		}
+		if s.sessionStorage != nil {
+			if err := s.sessionStorage.Flush(sessionID); err != nil {
+				logger.G(s.ctx).WithError(err).Warn("Failed to flush session storage")
+			}
+		}
+		return nil, true, s.sendResult(reqID, acptypes.PromptResponse{StopReason: acptypes.StopReasonEndTurn})
+	case extensions.CommandActionRunAgent:
+		if strings.TrimSpace(result.Prompt) == "" {
+			return originalPrompt, false, pkgerrors.Errorf("extension command %s returned runAgent without a prompt", result.CommandName)
+		}
+		metadata := conversations.AddSlashCommandDisplay(sess.Thread.GetMetadata(), result.Prompt, result.Display, result.CommandName)
+		for key, value := range metadata {
+			sess.Thread.SetMetadataValue(key, value)
+		}
+		if result.RecipeName != "" {
+			sess.Thread.SetMetadataValue("recipe_name", result.RecipeName)
+		}
+		return transformExtensionCommandPrompt(result.Prompt, originalPrompt), false, nil
+	case extensions.CommandActionPass, "":
+		return originalPrompt, false, nil
+	default:
+		logger.G(s.ctx).WithField("command", result.CommandName).WithField("action", result.Action).Warn("extension command returned unknown action")
+		return originalPrompt, false, nil
+	}
+}
+
+func transformExtensionCommandPrompt(prompt string, originalPrompt []acptypes.ContentBlock) []acptypes.ContentBlock {
+	newPrompt := []acptypes.ContentBlock{{Type: acptypes.ContentTypeText, Text: prompt}}
+	for _, block := range originalPrompt {
+		if block.Type == acptypes.ContentTypeText {
+			continue
+		}
+		newPrompt = append(newPrompt, block)
+	}
+	return newPrompt
 }
 
 // transformSlashCommandPrompt transforms a slash command into a prompt with recipe content.
@@ -695,7 +789,18 @@ func (s *Server) send(v any) error {
 
 // getAvailableCommands returns available slash commands from the fragment/recipe system
 func (s *Server) getAvailableCommands() []acptypes.AvailableCommand {
+	return s.availableCommandsFromSlashCommands(slashcommands.List(s.ctx, s.fragmentProcessor))
+}
+
+func (s *Server) getAvailableCommandsForSession(sessionID acptypes.SessionID) []acptypes.AvailableCommand {
 	availableCommands := slashcommands.List(s.ctx, s.fragmentProcessor)
+	if sess, err := s.sessionManager.GetSession(sessionID); err == nil && sess.Extensions != nil {
+		availableCommands = append(availableCommands, sess.Extensions.SlashCommands()...)
+	}
+	return s.availableCommandsFromSlashCommands(availableCommands)
+}
+
+func (s *Server) availableCommandsFromSlashCommands(availableCommands []slashcommands.Command) []acptypes.AvailableCommand {
 	commands := make([]acptypes.AvailableCommand, 0, len(availableCommands))
 	for _, availableCommand := range availableCommands {
 		cmd := acptypes.AvailableCommand{
@@ -713,7 +818,7 @@ func (s *Server) getAvailableCommands() []acptypes.AvailableCommand {
 
 // sendAvailableCommands sends the available_commands_update notification for a session
 func (s *Server) sendAvailableCommands(sessionID acptypes.SessionID) error {
-	commands := s.getAvailableCommands()
+	commands := s.getAvailableCommandsForSession(sessionID)
 	if len(commands) == 0 {
 		return nil
 	}

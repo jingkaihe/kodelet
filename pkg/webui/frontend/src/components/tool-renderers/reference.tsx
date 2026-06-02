@@ -9,9 +9,6 @@ export const normalizeToolName = (toolName: string): string => {
   if (toolName === 'glob') {
     return 'glob_tool';
   }
-  if (toolName.startsWith('custom_tool_')) {
-    return 'custom_tool';
-  }
   if (toolName.startsWith('mcp__') || toolName.startsWith('mcp_')) {
     return 'mcp_tool';
   }

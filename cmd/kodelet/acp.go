@@ -26,11 +26,14 @@ Example:
   # With custom model
   kodelet acp --model claude-sonnet-4-6
 
-  # Disable skills
-  kodelet acp --no-skills
+	# Disable skills
+	kodelet acp --no-skills
 
-  # Disable workflows
-  kodelet acp --no-workflows`,
+	# Disable extensions
+	kodelet acp --no-extensions
+
+	# Disable workflows
+	kodelet acp --no-workflows`,
 	RunE: runACP,
 }
 
@@ -42,10 +45,10 @@ func init() {
 	acpCmd.Flags().String("provider", "", "LLM provider (anthropic, openai)")
 	acpCmd.Flags().Int("max-tokens", 0, "Maximum tokens for LLM responses")
 	acpCmd.Flags().Bool("no-skills", defaults.NoSkills, "Disable agentic skills")
+	acpCmd.Flags().Bool("no-extensions", defaults.NoExtensions, "Disable extension runtime")
 	acpCmd.Flags().Bool("no-workflows", false, "Disable subagent workflows") // no RunConfig default — ACP-only flag
 	acpCmd.Flags().Bool("disable-fs-search-tools", defaults.DisableFSSearchTools, "Disable filesystem search tools (glob_tool and grep_tool)")
 	acpCmd.Flags().Bool("disable-subagent", false, "Disable the subagent tool and remove subagent-related system prompt context")
-	acpCmd.Flags().Bool("no-hooks", defaults.NoHooks, "Disable lifecycle hooks")
 	acpCmd.Flags().Int("max-turns", defaults.MaxTurns, "Maximum number of agentic turns (0 for no limit)")
 }
 
@@ -78,10 +81,10 @@ func buildACPServerConfig(cmd *cobra.Command) (*acp.ServerConfig, error) {
 	model, _ := cmd.Flags().GetString("model")
 	maxTokens, _ := cmd.Flags().GetInt("max-tokens")
 	noSkills, _ := cmd.Flags().GetBool("no-skills")
+	noExtensions, _ := cmd.Flags().GetBool("no-extensions")
 	noWorkflows, _ := cmd.Flags().GetBool("no-workflows")
 	disableFSSearchTools, _ := cmd.Flags().GetBool("disable-fs-search-tools")
 	disableSubagent, _ := cmd.Flags().GetBool("disable-subagent")
-	noHooks, _ := cmd.Flags().GetBool("no-hooks")
 	maxTurns, _ := cmd.Flags().GetInt("max-turns")
 	maxTurns = max(maxTurns, 0)
 
@@ -90,10 +93,10 @@ func buildACPServerConfig(cmd *cobra.Command) (*acp.ServerConfig, error) {
 		Model:                model,
 		MaxTokens:            maxTokens,
 		NoSkills:             noSkills,
+		NoExtensions:         noExtensions,
 		NoWorkflows:          noWorkflows,
 		DisableFSSearchTools: disableFSSearchTools || llmConfig.DisableFSSearchTools,
 		DisableSubagent:      disableSubagent || llmConfig.DisableSubagent,
-		NoHooks:              noHooks,
 		MaxTurns:             maxTurns,
 		CompactRatio:         llmConfig.CompactRatio,
 	}

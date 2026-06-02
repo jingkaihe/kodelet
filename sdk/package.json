@@ -1,0 +1,55 @@
+{
+  "name": "kodelet",
+  "version": "0.0.0",
+  "description": "TypeScript SDK for authoring Kodelet extensions",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime.d.ts",
+      "import": "./dist/runtime.js"
+    },
+    "./test-harness": {
+      "types": "./dist/test-harness.d.ts",
+      "import": "./dist/test-harness.js"
+    }
+  },
+  "bin": {
+    "kodelet-extension-node": "dist/bin/kodelet-extension-node.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsx --test src/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "mustache": "^4.2.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/mustache": "^4.2.6",
+    "@types/node": "^24.0.10",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.2"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jingkaihe/kodelet.git",
+    "directory": "sdk"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

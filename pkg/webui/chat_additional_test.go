@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
@@ -51,6 +52,16 @@ type failingChatSink struct {
 
 func (s failingChatSink) Send(ChatEvent) error {
 	return s.err
+}
+
+type fakeExtensionRuntimeProvider struct {
+	runtime *extensions.Runtime
+	calls   int
+}
+
+func (p *fakeExtensionRuntimeProvider) Runtime(context.Context, string) (*extensions.Runtime, error) {
+	p.calls++
+	return p.runtime, nil
 }
 
 type fakeMetadataThread struct {
@@ -103,6 +114,14 @@ func TestNewDefaultChatRunnerStoresDefaultCWD(t *testing.T) {
 
 	require.NotNil(t, runner)
 	assert.Equal(t, "/workspace", runner.defaultCWD)
+}
+
+func TestNewDefaultChatRunnerStoresExtensionRuntimeProvider(t *testing.T) {
+	provider := &fakeExtensionRuntimeProvider{}
+	runner := NewDefaultChatRunner("/workspace", provider)
+
+	require.NotNil(t, runner)
+	assert.Same(t, provider, runner.extensionRuntimes)
 }
 
 func TestServiceStoreAdapterLoadAndUnsupportedMethods(t *testing.T) {
@@ -342,6 +361,19 @@ func TestAddWebChatDisplayMetadata(t *testing.T) {
 	assert.Equal(t, conversations.MessageDisplayKindSlashCommand, display.Kind)
 	assert.Equal(t, expansion.Display, display.Text)
 	assert.Equal(t, expansion.Command, display.Command)
+
+	extensionResult := &extensions.RoutedCommandResult{
+		CommandName: "review",
+		Prompt:      "Review the current diff",
+		Display:     "/review target=HEAD",
+	}
+	addWebChatExtensionCommandDisplay(thread, extensionResult)
+
+	display, ok = conversations.LookupMessageDisplay(thread.metadata, extensionResult.Prompt)
+	require.True(t, ok)
+	assert.Equal(t, conversations.MessageDisplayKindSlashCommand, display.Kind)
+	assert.Equal(t, extensionResult.Display, display.Text)
+	assert.Equal(t, extensionResult.CommandName, display.Command)
 
 	goalUpdate := &goals.CommandUpdate{
 		ModelPrompt: goals.ModelPrompt("find cores"),

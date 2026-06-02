@@ -65,4 +65,26 @@ describe('ToolRenderer', () => {
     expect(screen.getByText('https://example.com/source')).toBeInTheDocument();
     expect(screen.queryByText('Error (openai_web_search):')).not.toBeInTheDocument();
   });
+
+  it('routes extension tools by metadata type instead of registered tool name', () => {
+    const toolResult: ToolResult = {
+      toolName: 'workspace_summary',
+      metadataType: 'extension_tool',
+      success: true,
+      timestamp: '2026-05-12T00:00:00Z',
+      metadata: {
+        extensionId: 'workspace',
+        toolName: 'workspace_summary',
+        output: '{"files":3}',
+      },
+    };
+
+    const { container } = render(<ToolRenderer toolResult={toolResult} />);
+
+    expect(screen.getByText('workspace_summary')).toBeInTheDocument();
+    expect(screen.queryByText('Show raw data')).not.toBeInTheDocument();
+    expect(container.querySelector('.tool-code-block code')?.textContent).toBe(
+      '{\n  "files": 3\n}'
+    );
+  });
 });

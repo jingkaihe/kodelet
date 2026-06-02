@@ -96,12 +96,12 @@ type Config struct {
 	// Context configuration
 	Context *ContextConfig `mapstructure:"context" json:"context,omitempty" yaml:"context,omitempty"` // Context configuration for context file discovery
 
-	// Hooks and feature toggle configuration
-	NoHooks                 bool                    `mapstructure:"no_hooks" json:"no_hooks" yaml:"no_hooks"`                                                    // NoHooks disables agent lifecycle hooks
+	// Runtime feature toggle configuration
+	Extensions              any                     `mapstructure:"-" json:"-" yaml:"-"`                                                                         // Extensions is the active extension runtime for lifecycle events
 	DisableFSSearchTools    bool                    `mapstructure:"disable_fs_search_tools" json:"disable_fs_search_tools" yaml:"disable_fs_search_tools"`       // DisableFSSearchTools disables glob_tool and grep_tool and updates prompt/tool guidance accordingly
 	ConversationSummaryMode ConversationSummaryMode `mapstructure:"conversation_summary_mode" json:"conversation_summary_mode" yaml:"conversation_summary_mode"` // ConversationSummaryMode controls whether persisted conversation summaries come from the LLM or first user message
 	DisableSubagent         bool                    `mapstructure:"disable_subagent" json:"disable_subagent" yaml:"disable_subagent"`                            // DisableSubagent disables the subagent tool and removes subagent-related system prompt context
-	RecipeName              string                  `mapstructure:"recipe_name" json:"recipe_name" yaml:"recipe_name"`                                           // RecipeName is the active recipe/fragment name for hook payload metadata
+	RecipeName              string                  `mapstructure:"recipe_name" json:"recipe_name" yaml:"recipe_name"`                                           // RecipeName is the active recipe/fragment name for extension context metadata
 	CompactRatio            float64                 `mapstructure:"compact_ratio" json:"compact_ratio" yaml:"compact_ratio"`                                     // CompactRatio is the context utilization threshold for automatic compaction (>0.0-1.0)
 }
 

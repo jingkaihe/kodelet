@@ -117,10 +117,9 @@ func NewThread(config llmtypes.Config) (*Thread, error) {
 	log.WithField("model", config.Model).Debug("creating OpenAI Responses API thread")
 
 	conversationID := convtypes.GenerateID()
-	hookTrigger := base.CreateHookTrigger(context.Background(), config, conversationID)
 
 	// Create the base thread with shared functionality
-	baseThread := base.NewThread(config, conversationID, hookTrigger)
+	baseThread := base.NewThread(config, conversationID)
 
 	// Build client options based on authentication mode
 	opts, authInfo, err := buildClientOptions(config, log)
@@ -299,9 +298,9 @@ func (t *Thread) SendMessage(
 		copy(originalInputItems, t.inputItems)
 	}
 
-	// Trigger user_message_send hook before adding user message
-	if blocked, reason := t.HookTrigger.TriggerUserMessageSend(ctx, message); blocked {
-		return "", errors.Errorf("message blocked by hook: %s", reason)
+	message, err = base.ProcessUserMessage(ctx, t, message)
+	if err != nil {
+		return "", err
 	}
 
 	if len(opt.Images) > 0 {
@@ -322,6 +321,7 @@ func (t *Thread) SendMessage(
 
 	turnCount := 0
 	maxTurns := max(opt.MaxTurns, 0)
+	base.DispatchAgentStart(ctx, t)
 
 OUTER:
 	for {
@@ -338,13 +338,15 @@ OUTER:
 				break OUTER
 			}
 
+			base.DispatchTurnStart(ctx, t, turnCount+1)
+
 			// Get relevant contexts from state and regenerate system prompt
 			var contexts map[string]string
 			if t.State != nil {
 				contexts = t.State.DiscoverContexts()
 			}
 
-			systemPrompt := sysprompt.SystemPrompt(model, t.Config, contexts)
+			systemPrompt := base.ProcessSystemPrompt(ctx, t, sysprompt.SystemPrompt(model, t.Config, contexts))
 
 			// Check if auto-compact should be triggered
 			t.TryAutoCompact(ctx, t.CompactRatioOrDefault(opt.CompactRatio), t.CompactContext)
@@ -375,14 +377,14 @@ OUTER:
 			turnCount++
 			finalOutput = exchangeOutput
 
-			base.TriggerTurnEnd(ctx, t.HookTrigger, t, finalOutput, turnCount)
+			base.TriggerTurnEnd(ctx, t, finalOutput, turnCount)
 
-			// If no tools were used, check for hook follow-ups before stopping
+			// If no tools were used, check for extension follow-ups before stopping
 			if !toolsUsed {
-				if base.HandleAgentStopFollowUps(ctx, t.HookTrigger, t, handler) {
+				if base.HandleAgentStopFollowUps(ctx, t, handler) {
 					continue OUTER
 				}
-				if !t.Config.IsSubAgent && (maxTurns == 0 || turnCount < maxTurns) && base.HandleGoalAutoContinuation(ctx, t, base.AvailableTools(t.State, opt.NoToolUse)) {
+				if !t.Config.IsSubAgent && (maxTurns == 0 || turnCount < maxTurns) && base.HandleGoalAutoContinuation(ctx, t, base.AvailableToolsForThread(t, t.State, opt.NoToolUse)) {
 					continue OUTER
 				}
 
@@ -472,7 +474,7 @@ func (t *Thread) processMessageExchange(
 	}
 
 	// Build tools
-	tools := buildTools(t.State, opt.NoToolUse)
+	tools := buildToolsForThread(t, t.State, opt.NoToolUse)
 	log.WithField("tool_count", len(tools)).Debug("built tools for request")
 
 	// Mirror Codex prompt caching on the HTTP Responses path by replaying the full
@@ -989,7 +991,7 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 	if compactRawFn != nil {
 		resp, err = compactRawFn(ctx, compactParams, compactOpts...)
 	} else {
-		// Fallback for tests that construct Thread manually without client/raw hook.
+		// Fallback for tests that construct Thread manually without a client/raw compact function.
 		compactFn := t.compactFunc
 		if compactFn == nil {
 			return errors.New("compact function is not initialized")

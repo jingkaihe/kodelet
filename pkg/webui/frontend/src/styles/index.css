@@ -736,7 +736,9 @@ h6 {
 
 .composer-slash-suggestions {
   margin: 0.25rem 0.25rem 0.35rem;
-  overflow: hidden;
+  max-height: min(42vh, 26rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border-radius: 1.1rem;
   border: 1px solid rgba(20, 20, 19, 0.1);
   background:
@@ -745,6 +747,24 @@ h6 {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.82),
     0 16px 34px rgba(20, 20, 19, 0.08);
+}
+
+.composer-slash-suggestions::-webkit-scrollbar {
+  width: 0.55rem;
+}
+
+.composer-slash-suggestions::-webkit-scrollbar-track {
+  background: rgba(20, 20, 19, 0.04);
+  border-radius: 999px;
+}
+
+.composer-slash-suggestions::-webkit-scrollbar-thumb {
+  background: rgba(77, 116, 160, 0.32);
+  border-radius: 999px;
+}
+
+.composer-slash-suggestions::-webkit-scrollbar-thumb:hover {
+  background: rgba(77, 116, 160, 0.46);
 }
 
 .composer-slash-suggestion {
@@ -1499,6 +1519,41 @@ h6 {
   justify-content: flex-end;
   gap: 0.65rem;
   margin-top: 1rem;
+}
+
+.ui-input-dialog-backdrop {
+  z-index: 76;
+}
+
+.ui-input-dialog {
+  width: min(34rem, calc(100vw - 2rem));
+}
+
+.ui-input-help-text {
+  white-space: pre-wrap;
+}
+
+.ui-input-dialog .primary-pill-button {
+  border: 1px solid rgba(20, 20, 19, 0.86);
+  background:
+    linear-gradient(180deg, rgba(35, 34, 31, 0.98), rgba(20, 20, 19, 0.94)),
+    var(--kodelet-dark);
+  color: rgba(255, 252, 244, 0.96);
+}
+
+.ui-input-dialog .primary-pill-button:hover:not(:disabled) {
+  background:
+    linear-gradient(180deg, rgba(46, 44, 39, 0.98), rgba(20, 20, 19, 0.96)),
+    var(--kodelet-dark);
+}
+
+.ui-input-dialog .primary-pill-button:disabled {
+  cursor: not-allowed;
+  border-color: rgba(20, 20, 19, 0.08);
+  background: rgba(20, 20, 19, 0.08);
+  color: rgba(20, 20, 19, 0.34);
+  box-shadow: none;
+  transform: none;
 }
 
 .workspace-modal-backdrop {
@@ -3739,15 +3794,16 @@ code[class*="language-"] {
   top: 1rem;
   right: 1rem;
   z-index: 9999;
+  width: min(28rem, calc(100vw - 2rem));
+  max-width: calc(100vw - 2rem);
   animation: slideIn 0.3s ease-out;
 }
 
-.toast .alert {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  min-width: 16rem;
-  max-width: min(28rem, calc(100vw - 2rem));
+.kodelet-toast-card {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  min-width: 0;
   padding: 0.85rem 1rem;
   border-radius: 16px;
   border: 1px solid rgba(20, 20, 19, 0.08);
@@ -3759,24 +3815,47 @@ code[class*="language-"] {
   font-size: 0.88rem;
   font-weight: 500;
   letter-spacing: -0.01em;
+  overflow: hidden;
+  white-space: normal;
 }
 
-.toast .alert-info {
+.kodelet-toast-card .toast-title {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  margin-bottom: 0.15rem;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+  color: inherit;
+}
+
+.kodelet-toast-card .toast-message {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+  line-height: 1.35;
+}
+
+.kodelet-toast-card.alert-info {
   background: rgba(244, 241, 234, 0.96);
   color: #4a463f;
 }
 
-.toast .alert-success {
+.kodelet-toast-card.alert-success {
   background: rgba(238, 244, 234, 0.96);
   color: #41503f;
 }
 
-.toast .alert-error {
+.kodelet-toast-card.alert-error {
   background: rgba(247, 236, 232, 0.97);
   color: #8c3f34;
 }
 
-.toast .alert-neutral {
+.kodelet-toast-card.alert-neutral {
   background: rgba(243, 240, 234, 0.98);
   color: #4d483f;
 }

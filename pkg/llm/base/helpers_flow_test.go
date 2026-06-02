@@ -2,15 +2,11 @@ package base
 
 import (
 	"context"
-	"encoding/json"
-	"os"
-	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/invopop/jsonschema"
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/goals"
-	"github.com/jingkaihe/kodelet/pkg/hooks"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
@@ -85,6 +81,9 @@ func (t *threadStub) SetMetadataValue(key string, value any) {
 	t.metadata[key] = value
 }
 func (t *threadStub) GetMetadata() map[string]any { return t.metadata }
+func (t *threadStub) SetMetadata(metadata map[string]any) {
+	t.metadata = metadata
+}
 
 type recordingHandler struct {
 	texts []string
@@ -103,6 +102,53 @@ func TestAvailableTools(t *testing.T) {
 	assert.Empty(t, AvailableTools(nil, false))
 	assert.Empty(t, AvailableTools(state, true))
 	assert.Equal(t, tools, AvailableTools(state, false))
+}
+
+func TestAvailableToolsForThreadHonorsExtensionAllowedTools(t *testing.T) {
+	tools := []tooltypes.Tool{namedTool("read_file"), namedTool("bash"), namedTool("update_goal")}
+	state := &toolState{tools: tools}
+	thread := &threadStub{metadata: map[string]any{"allowed_tools": []string{"read_file", "update_goal"}}}
+
+	available := AvailableToolsForThread(thread, state, false)
+
+	assert.Equal(t, []tooltypes.Tool{tools[0], tools[2]}, available)
+}
+
+func TestAgentInitAllowedToolsUsesEffectiveStateToolsByDefault(t *testing.T) {
+	state := &toolState{tools: []tooltypes.Tool{namedTool("file_read"), nil, namedTool("bash")}}
+
+	assert.Equal(t, []string{"file_read", "bash", "openai_web_search"}, agentInitAllowedTools(llmtypes.Config{}, state))
+	assert.Equal(t, []string{"file_read"}, agentInitAllowedTools(llmtypes.Config{AllowedTools: []string{"file_read"}}, state))
+	assert.Empty(t, agentInitAllowedTools(llmtypes.Config{}, nil))
+}
+
+func TestProcessAgentInitClearsStaleAllowedToolsWhenNoPatchApplies(t *testing.T) {
+	t.Run("no extension runtime", func(t *testing.T) {
+		thread := &threadStub{metadata: map[string]any{extensionAllowedToolsMetadataKey: []string{"bash"}}}
+
+		decision := ProcessAgentInit(context.Background(), thread, "base prompt")
+
+		assert.Equal(t, "base prompt", decision.SystemPrompt)
+		assert.False(t, decision.ToolsModified)
+		assert.Nil(t, currentAllowedTools(thread))
+		assert.NotContains(t, thread.metadata, extensionAllowedToolsMetadataKey)
+	})
+
+	t.Run("runtime without tools patch", func(t *testing.T) {
+		thread := &threadStub{
+			metadata: map[string]any{extensionAllowedToolsMetadataKey: []string{"bash"}},
+			config: llmtypes.Config{
+				Extensions: extensions.EmptyRuntime(),
+			},
+		}
+
+		decision := ProcessAgentInit(context.Background(), thread, "base prompt")
+
+		assert.Equal(t, "base prompt", decision.SystemPrompt)
+		assert.False(t, decision.ToolsModified)
+		assert.Nil(t, currentAllowedTools(thread))
+		assert.NotContains(t, thread.metadata, extensionAllowedToolsMetadataKey)
+	})
 }
 
 func TestBase64ImageSourceMediaType(t *testing.T) {
@@ -181,55 +227,32 @@ func TestHasTool(t *testing.T) {
 }
 
 func TestTriggerTurnEnd(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell hook script is POSIX-specific")
-	}
-
-	trigger, payloadPath := newTestHookTrigger(t, hooks.HookTypeTurnEnd, `{}`)
-
-	TriggerTurnEnd(context.Background(), trigger, nil, "", 3)
-	assert.NoFileExists(t, payloadPath)
-
-	TriggerTurnEnd(context.Background(), trigger, nil, "final response", 7)
-
-	payload := readJSONPayload(t, payloadPath)
-	assert.Equal(t, string(hooks.HookTypeTurnEnd), payload["event"])
-	assert.Equal(t, "conv-id", payload["conv_id"])
-	assert.Equal(t, "/work", payload["cwd"])
-	assert.Equal(t, "recipe", payload["recipe_name"])
-	assert.Equal(t, "final response", payload["response"])
-	assert.Equal(t, float64(7), payload["turn_number"])
+	thread := &threadStub{}
+	TriggerTurnEnd(context.Background(), thread, "final response", 7)
 }
 
 func TestHandleAgentStopFollowUps(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell hook script is POSIX-specific")
-	}
-
-	trigger, payloadPath := newTestHookTrigger(t, hooks.HookTypeAgentStop, `{"follow_up_messages":["inspect tests","update docs"]}`)
+	runtime := extensions.EmptyRuntime()
 	thread := &threadStub{
 		messages: []llmtypes.Message{{Role: "assistant", Content: "done"}},
+		config: llmtypes.Config{
+			Extensions: runtime,
+		},
 	}
 	handler := &recordingHandler{}
 
-	continued := HandleAgentStopFollowUps(context.Background(), trigger, thread, handler)
+	continued := HandleAgentStopFollowUps(context.Background(), thread, handler)
 
-	assert.True(t, continued)
-	assert.Equal(t, []string{"inspect tests", "update docs"}, thread.userMessages)
-	require.Len(t, handler.texts, 2)
-	assert.Contains(t, handler.texts[0], "📨 Hook follow-up: inspect tests")
-	assert.Contains(t, handler.texts[1], "📨 Hook follow-up: update docs")
-
-	payload := readJSONPayload(t, payloadPath)
-	assert.Equal(t, string(hooks.HookTypeAgentStop), payload["event"])
-	assert.Equal(t, []any{map[string]any{"role": "assistant", "content": "done"}}, payload["messages"])
+	assert.False(t, continued)
+	assert.Empty(t, thread.userMessages)
+	assert.Empty(t, handler.texts)
 }
 
 func TestHandleAgentStopFollowUpsReturnsFalse(t *testing.T) {
 	t.Run("message retrieval error", func(t *testing.T) {
 		thread := &threadStub{getMessagesErr: errors.New("boom")}
 
-		continued := HandleAgentStopFollowUps(context.Background(), hooks.Trigger{}, thread, &recordingHandler{})
+		continued := HandleAgentStopFollowUps(context.Background(), thread, &recordingHandler{})
 
 		assert.False(t, continued)
 	})
@@ -237,37 +260,9 @@ func TestHandleAgentStopFollowUpsReturnsFalse(t *testing.T) {
 	t.Run("no follow ups", func(t *testing.T) {
 		thread := &threadStub{messages: []llmtypes.Message{{Role: "assistant", Content: "done"}}}
 
-		continued := HandleAgentStopFollowUps(context.Background(), hooks.Trigger{}, thread, &recordingHandler{})
+		continued := HandleAgentStopFollowUps(context.Background(), thread, &recordingHandler{})
 
 		assert.False(t, continued)
 		assert.Empty(t, thread.userMessages)
 	})
-}
-
-func newTestHookTrigger(t *testing.T, hookType hooks.HookType, hookOutput string) (hooks.Trigger, string) {
-	t.Helper()
-
-	tempDir := t.TempDir()
-	payloadPath := filepath.Join(tempDir, "payload.json")
-	scriptPath := filepath.Join(tempDir, "test-hook")
-	script := "#!/bin/sh\n" +
-		"if [ \"$1\" = \"hook\" ]; then echo \"" + string(hookType) + "\"; exit 0; fi\n" +
-		"cat > \"" + payloadPath + "\"\n" +
-		"printf '%s' '" + hookOutput + "'\n"
-	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o755))
-
-	manager, err := hooks.NewHookManager(hooks.WithHookDirs(tempDir))
-	require.NoError(t, err)
-	return hooks.NewTrigger(manager, "conv-id", false, "/work", "recipe"), payloadPath
-}
-
-func readJSONPayload(t *testing.T, path string) map[string]any {
-	t.Helper()
-
-	payloadBytes, err := os.ReadFile(path)
-	require.NoError(t, err)
-
-	var payload map[string]any
-	require.NoError(t, json.Unmarshal(payloadBytes, &payload))
-	return payload
 }

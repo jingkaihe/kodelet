@@ -13,6 +13,7 @@ import ChatSidebar from "../components/chat/ChatSidebar";
 import ChatTranscript from "../components/chat/ChatTranscript";
 import NewChatContextDialog from "../components/chat/NewChatContextDialog";
 import PendingSteerList from "../components/chat/PendingSteerList";
+import UIInputDialog from "../components/chat/UIInputDialog";
 import GitDiffModal from "../components/workspace/GitDiffModal";
 import TerminalModal from "../components/workspace/TerminalModal";
 import {
@@ -29,6 +30,9 @@ import type {
 	GitDiffResponse,
 	PendingImageAttachment,
 	SlashCommandOption,
+	UIConfirmRequestEvent,
+	UIInputRequestEvent,
+	UISelectRequestEvent,
 } from "../types";
 import {
 	cn,
@@ -105,8 +109,10 @@ const SUPPORTED_IMAGE_TYPES = new Set([
 	"image/gif",
 	"image/webp",
 ]);
-const MAX_SLASH_COMMAND_SUGGESTIONS = 8;
-
+type UIRequestDialogState =
+	| { mode: "input"; request: UIInputRequestEvent }
+	| { mode: "confirm"; request: UIConfirmRequestEvent }
+	| { mode: "select"; request: UISelectRequestEvent };
 const attachmentId = (): string =>
 	typeof crypto !== "undefined" && "randomUUID" in crypto
 		? crypto.randomUUID()
@@ -245,8 +251,7 @@ const filterSlashCommands = (
 		return [];
 	}
 
-	return commands
-		.filter((command) => {
+	return commands.filter((command) => {
 			if (!query) {
 				return true;
 			}
@@ -254,8 +259,7 @@ const filterSlashCommands = (
 				command.name.toLowerCase().includes(query) ||
 				command.description.toLowerCase().includes(query)
 			);
-		})
-		.slice(0, MAX_SLASH_COMMAND_SUGGESTIONS);
+		});
 };
 
 const insertSlashCommand = (draft: string, commandName: string): string => {
@@ -369,6 +373,9 @@ const ChatPage: React.FC = () => {
 	const [sidebarWidth, setSidebarWidth] = useState(readStoredSidebarWidth);
 	const [isResizingSidebar, setIsResizingSidebar] = useState(false);
 	const [newChatDialogOpen, setNewChatDialogOpen] = useState(false);
+	const [uiRequestDialog, setUIRequestDialog] =
+		useState<UIRequestDialogState | null>(null);
+	const [uiInputSubmitting, setUIInputSubmitting] = useState(false);
 	const [statusTick, setStatusTick] = useState(0);
 	const loadedConversationId = conversation?.id ?? null;
 	const transcriptEndRef = useRef<HTMLDivElement | null>(null);
@@ -736,6 +743,10 @@ const ChatPage: React.FC = () => {
 						);
 					}
 
+					if (handleUIInputRequest(event)) {
+						return;
+					}
+
 					setMessages((currentMessages) =>
 						applyChatStreamEvent(currentMessages, event),
 					);
@@ -992,6 +1003,92 @@ const ChatPage: React.FC = () => {
 		startTransition(() => navigate(nextPath, { replace: true }));
 	};
 
+	const handleUIInputRequest = (event: ChatStreamEvent) => {
+		if (event.kind === "ui-notification" && event.ui_notify) {
+			showToast(event.ui_notify.message, "info", event.ui_notify.title);
+			return true;
+		}
+
+		if (event.kind === "ui-input-request" && event.ui_input) {
+			setUIRequestDialog({
+				mode: "input",
+				request: {
+					...event.ui_input,
+					conversationId: event.conversation_id,
+				},
+			});
+			setUIInputSubmitting(false);
+			return true;
+		}
+
+		if (event.kind === "ui-confirm-request" && event.ui_confirm) {
+			setUIRequestDialog({
+				mode: "confirm",
+				request: {
+					...event.ui_confirm,
+					conversationId: event.conversation_id,
+				},
+			});
+			setUIInputSubmitting(false);
+			return true;
+		}
+
+		if (event.kind === "ui-select-request" && event.ui_select) {
+			setUIRequestDialog({
+				mode: "select",
+				request: {
+					...event.ui_select,
+					conversationId: event.conversation_id,
+				},
+			});
+			setUIInputSubmitting(false);
+			return true;
+		}
+
+		return false;
+	};
+
+	const respondToUIRequest = async (
+		dialog: UIRequestDialogState,
+		response: { status: "submitted" | "dismissed"; value?: string },
+	) => {
+		const request = dialog.request;
+		let payload = response;
+		if (dialog.mode === "confirm" && response.status === "submitted") {
+			payload = { ...response, value: "true" };
+		}
+		if (dialog.mode === "confirm" && response.status === "dismissed") {
+			payload = { ...response, value: "false" };
+		}
+
+		const targetConversationId =
+			request.conversationId || activeConversationId || conversationId;
+		if (!targetConversationId) {
+			showToast("Cannot answer extension prompt before conversation starts", "error");
+			return;
+		}
+
+		setUIInputSubmitting(true);
+		try {
+			await apiService.respondToUIInput(
+				targetConversationId,
+				request.id,
+				payload,
+			);
+			setUIRequestDialog((currentDialog) =>
+				currentDialog?.request.id === request.id ? null : currentDialog,
+			);
+		} catch (error) {
+			const message =
+				error instanceof Error
+					? error.message
+					: "Failed to answer extension prompt";
+			showToast(message, "error");
+		} finally {
+			setUIInputSubmitting(false);
+		}
+	};
+
 	const handleSubmit = async () => {
 		const prompt = draft.trim();
 		const steeringSubmission = sending && canSteerActiveConversation;
@@ -1154,6 +1251,10 @@ const ChatPage: React.FC = () => {
 							);
 						}
 
+						if (handleUIInputRequest(event)) {
+							return;
+						}
+
 						setMessages((currentMessages) =>
 							applyChatStreamEvent(currentMessages, event),
 						);
@@ -1304,6 +1405,7 @@ const ChatPage: React.FC = () => {
 		abortControllerRef.current?.abort();
 		setSteering(false);
 		setSteerAvailable(false);
+		setUIRequestDialog(null);
 		void apiService.stopConversation(conversationToStop).catch((error) => {
 			console.error("Failed to stop conversation", error);
 		});
@@ -1750,6 +1852,22 @@ const ChatPage: React.FC = () => {
 				open={terminalOpen}
 				onClose={() => setTerminalOpen(false)}
 			/>
+			{uiRequestDialog ? (
+				<UIInputDialog
+					mode={uiRequestDialog.mode}
+					request={uiRequestDialog.request}
+					submitting={uiInputSubmitting}
+					onCancel={() => {
+						void respondToUIRequest(uiRequestDialog, { status: "dismissed" });
+					}}
+					onSubmit={(value) => {
+						void respondToUIRequest(uiRequestDialog, {
+							status: "submitted",
+							value,
+						});
+					}}
+				/>
+			) : null}
 
 			{newChatDialogOpen ? (
 				<NewChatContextDialog

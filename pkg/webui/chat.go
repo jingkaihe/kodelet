@@ -12,6 +12,7 @@ import (
 	"time"
 
 	conversationservice "github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/llm"
@@ -67,7 +68,50 @@ type ChatEvent struct {
 	ToolCallID     string                          `json:"tool_call_id,omitempty"`
 	Input          string                          `json:"input,omitempty"`
 	ToolResult     *tooltypes.StructuredToolResult `json:"tool_result,omitempty"`
+	UIInput        *UIInputEvent                   `json:"ui_input,omitempty"`
+	UIConfirm      *UIConfirmEvent                 `json:"ui_confirm,omitempty"`
+	UISelect       *UISelectEvent                  `json:"ui_select,omitempty"`
+	UINotify       *UINotifyEvent                  `json:"ui_notify,omitempty"`
 	Error          string                          `json:"error,omitempty"`
+}
+
+// UIInputEvent describes an extension-requested input prompt for the Web UI.
+type UIInputEvent struct {
+	ID               string `json:"id"`
+	Title            string `json:"title"`
+	HelpText         string `json:"helpText,omitempty"`
+	Message          string `json:"message,omitempty"`
+	Placeholder      string `json:"placeholder,omitempty"`
+	DefaultValue     string `json:"defaultValue,omitempty"`
+	SubmitButtonText string `json:"submitButtonText,omitempty"`
+	CancelButtonText string `json:"cancelButtonText,omitempty"`
+	Required         bool   `json:"required,omitempty"`
+	Secret           bool   `json:"secret,omitempty"`
+}
+
+// UIConfirmEvent describes an extension-requested confirmation prompt for the Web UI.
+type UIConfirmEvent struct {
+	ID                string `json:"id"`
+	Title             string `json:"title"`
+	Message           string `json:"message,omitempty"`
+	ConfirmButtonText string `json:"confirmButtonText,omitempty"`
+	CancelButtonText  string `json:"cancelButtonText,omitempty"`
+}
+
+// UISelectEvent describes an extension-requested single-choice prompt for the Web UI.
+type UISelectEvent struct {
+	ID               string   `json:"id"`
+	Title            string   `json:"title"`
+	Message          string   `json:"message,omitempty"`
+	Options          []string `json:"options"`
+	SubmitButtonText string   `json:"submitButtonText,omitempty"`
+	CancelButtonText string   `json:"cancelButtonText,omitempty"`
+}
+
+// UINotifyEvent describes an extension-requested Web UI notification.
+type UINotifyEvent struct {
+	Title   string `json:"title,omitempty"`
+	Message string `json:"message"`
 }
 
 // ChatEventSink receives streamed chat events.
@@ -80,20 +124,34 @@ type ChatRunner interface {
 	Run(ctx context.Context, req ChatRequest, sink ChatEventSink) (string, error)
 }
 
+type extensionRuntimeProvider interface {
+	Runtime(ctx context.Context, cwd string) (*extensions.Runtime, error)
+}
+
 // DefaultChatRunner executes chat turns using the same LLM/tool stack as the CLI.
 type DefaultChatRunner struct {
-	defaultCWD string
+	defaultCWD        string
+	extensionRuntimes extensionRuntimeProvider
 }
 
 // NewDefaultChatRunner creates a chat runner for the web UI server.
-func NewDefaultChatRunner(defaultCWD string) *DefaultChatRunner {
+func NewDefaultChatRunner(defaultCWD string, extensionRuntimes ...extensionRuntimeProvider) *DefaultChatRunner {
+	var provider extensionRuntimeProvider
+	if len(extensionRuntimes) > 0 {
+		provider = extensionRuntimes[0]
+	}
 	return &DefaultChatRunner{
-		defaultCWD: defaultCWD,
+		defaultCWD:        defaultCWD,
+		extensionRuntimes: provider,
 	}
 }
 
 // Run executes a single persisted chat turn and streams events to the sink.
 func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatEventSink) (string, error) {
+	return runDefaultChat(ctx, req, sink, r.defaultCWD, r.extensionRuntimes)
+}
+
+func runDefaultChat(ctx context.Context, req ChatRequest, sink ChatEventSink, defaultCWD string, extensionRuntimes extensionRuntimeProvider) (string, error) {
 	message, imageInputs, err := normalizeChatRequest(req)
 	if err != nil {
 		return "", err
@@ -101,11 +159,6 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 
 	if message == "" && len(imageInputs) == 0 {
 		return "", errors.New("message cannot be empty")
-	}
-
-	customManager, err := tools.CreateCustomToolManagerFromViper(ctx)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to initialize custom tools")
 	}
 
 	var mcpManager *tools.MCPManager
@@ -124,7 +177,7 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 		sessionID = convtypes.GenerateID()
 	}
 
-	llmConfig, resolvedCWD, err := resolveWebChatConfig(ctx, sessionID, strings.TrimSpace(req.Profile), strings.TrimSpace(req.CWD), r.defaultCWD)
+	llmConfig, resolvedCWD, err := resolveWebChatConfig(ctx, sessionID, strings.TrimSpace(req.Profile), strings.TrimSpace(req.CWD), defaultCWD)
 	if err != nil {
 		return sessionID, errors.Wrap(err, "failed to load configuration")
 	}
@@ -136,7 +189,53 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 	llmConfig.MCPWorkspaceDir = workspaceDir
 	llmConfig.WorkingDirectory = resolvedCWD
 
-	message, slashExpansion, goalUpdate, err := transformWebChatSlashCommand(ctx, message, resolvedCWD)
+	var extensionRuntime *extensions.Runtime
+	if extensionRuntimes != nil {
+		extensionRuntime, err = extensionRuntimes.Runtime(ctx, resolvedCWD)
+	} else {
+		extensionRuntime, err = extensions.NewRuntimeFromViper(ctx, resolvedCWD)
+		if extensionRuntime != nil {
+			defer func() {
+				_ = extensionRuntime.Close()
+			}()
+		}
+	}
+	if err != nil {
+		return sessionID, errors.Wrap(err, "failed to initialize extensions")
+	}
+	if extensionRuntime != nil {
+		llmConfig.Extensions = extensionRuntime
+	}
+
+	expandSlashCommand := true
+	var extensionCommandResult *extensions.RoutedCommandResult
+	if commandResult, handled, err := tryWebExtensionCommand(ctx, message, extensionRuntime, llmConfig, sessionID, resolvedCWD); err != nil {
+		return sessionID, err
+	} else if handled {
+		switch commandResult.Action {
+		case extensions.CommandActionRespond:
+			if err := sink.Send(ChatEvent{Kind: "conversation", ConversationID: sessionID, Role: "assistant"}); err != nil {
+				logger.G(ctx).WithError(err).Debug("failed to send extension command conversation event")
+			}
+			if strings.TrimSpace(commandResult.Response) != "" {
+				if err := sink.Send(ChatEvent{Kind: "text", ConversationID: sessionID, Role: "assistant", Content: commandResult.Response}); err != nil {
+					return sessionID, err
+				}
+			}
+			return sessionID, nil
+		case extensions.CommandActionRunAgent:
+			message = commandResult.Prompt
+			expandSlashCommand = false
+			extensionCommandResult = commandResult
+			if strings.TrimSpace(commandResult.RecipeName) != "" {
+				llmConfig.RecipeName = commandResult.RecipeName
+			}
+		default:
+			logger.G(ctx).WithField("command", commandResult.CommandName).WithField("action", commandResult.Action).Warn("extension command returned unknown action")
+		}
+	}
+
+	message, slashExpansion, goalUpdate, err := transformWebChatSlashCommandIfNeeded(ctx, message, resolvedCWD, expandSlashCommand)
 	if err != nil {
 		return sessionID, err
 	}
@@ -145,7 +244,7 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 		llmConfig.RecipeName = slashExpansion.Command
 	}
 
-	appState, err := buildChatState(ctx, llmConfig, sessionID, resolvedCWD, mcpManager, customManager)
+	appState, err := buildChatState(ctx, llmConfig, sessionID, resolvedCWD, mcpManager, extensionRuntime)
 	if err != nil {
 		return sessionID, err
 	}
@@ -160,6 +259,9 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 	thread.EnablePersistence(ctx, true)
 	if slashExpansion != nil {
 		addWebChatSlashCommandDisplay(thread, slashExpansion)
+	}
+	if extensionCommandResult != nil {
+		addWebChatExtensionCommandDisplay(thread, extensionCommandResult)
 	}
 	if goalUpdate != nil {
 		addWebChatGoalDisplay(thread, goalUpdate)
@@ -177,7 +279,6 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 		conversationID: sessionID,
 		sink:           sink,
 	}
-
 	_, err = thread.SendMessage(ctx, message, handler, llmtypes.MessageOpt{
 		PromptCache: true,
 		Images:      imageInputs,
@@ -187,6 +288,25 @@ func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatE
 	}
 
 	return sessionID, nil
+}
+
+type webUIChatRunner struct {
+	defaultCWD        string
+	extensionRuntimes extensionRuntimeProvider
+	server            *Server
+}
+
+func (r *webUIChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatEventSink) (string, error) {
+	conversationID := strings.TrimSpace(req.ConversationID)
+	if r != nil && r.server != nil && conversationID != "" {
+		if broker := r.server.uiInputBrokerForRun(conversationID); broker != nil {
+			ctx = extensions.ContextWithUIInputBroker(ctx, broker)
+		}
+	}
+	if r == nil {
+		return runDefaultChat(ctx, req, sink, "", nil)
+	}
+	return runDefaultChat(ctx, req, sink, r.defaultCWD, r.extensionRuntimes)
 }
 
 func resolveWebChatConfig(ctx context.Context, conversationID, requestedProfile, requestedCWD, defaultCWDInput string) (llmtypes.Config, string, error) {
@@ -443,6 +563,48 @@ func transformWebChatSlashCommand(ctx context.Context, message string, cwd strin
 	return message, expansion, nil, err
 }
 
+func transformWebChatSlashCommandIfNeeded(ctx context.Context, message string, cwd string, enabled bool) (string, *slashcommands.Expansion, *goals.CommandUpdate, error) {
+	if !enabled {
+		return message, nil, nil, nil
+	}
+	return transformWebChatSlashCommand(ctx, message, cwd)
+}
+
+func tryWebExtensionCommand(
+	ctx context.Context,
+	message string,
+	extensionRuntime *extensions.Runtime,
+	llmConfig llmtypes.Config,
+	conversationID string,
+	workingDir string,
+) (*extensions.RoutedCommandResult, bool, error) {
+	if extensionRuntime == nil {
+		return nil, false, nil
+	}
+
+	command, args, found := slashcommands.Parse(message)
+	if !found {
+		return nil, false, nil
+	}
+
+	result, err := extensionRuntime.TryCommand(ctx, message, command, args, extensions.ExtensionCallContext{
+		ConversationID: conversationID,
+		CWD:            workingDir,
+		Provider:       llmConfig.Provider,
+		Model:          llmConfig.Model,
+		Profile:        llmConfig.Profile,
+		RecipeName:     llmConfig.RecipeName,
+		InvokedBy:      "main",
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	if result == nil || !result.Matched {
+		return nil, false, nil
+	}
+	return result, true, nil
+}
+
 func expandWebChatSlashCommand(ctx context.Context, message string, cwd string) (string, *slashcommands.Expansion, error) {
 	command, args, found := slashcommands.Parse(message)
 	if !found {
@@ -491,6 +653,17 @@ func addWebChatSlashCommandDisplay(thread llmtypes.Thread, expansion *slashcomma
 	}
 }
 
+func addWebChatExtensionCommandDisplay(thread llmtypes.Thread, result *extensions.RoutedCommandResult) {
+	if thread == nil || result == nil {
+		return
+	}
+
+	metadata := conversationservice.AddSlashCommandDisplay(thread.GetMetadata(), result.Prompt, result.Display, result.CommandName)
+	for key, value := range metadata {
+		thread.SetMetadataValue(key, value)
+	}
+}
+
 func addWebChatGoalDisplay(thread llmtypes.Thread, update *goals.CommandUpdate) {
 	if thread == nil || update == nil {
 		return
@@ -509,14 +682,16 @@ func buildChatState(
 	sessionID string,
 	workingDir string,
 	mcpManager *tools.MCPManager,
-	customManager *tools.CustomToolManager,
+	extensionRuntime *extensions.Runtime,
 ) (*tools.BasicState, error) {
 	stateOpts := []tools.BasicStateOption{
 		tools.WithWorkingDirectory(workingDir),
 		tools.WithLLMConfig(llmConfig),
-		tools.WithCustomTools(customManager),
 		tools.WithMainTools(),
 		tools.WithSkillTool(),
+	}
+	if extensionRuntime != nil {
+		stateOpts = append(stateOpts, tools.WithExtensionTools(extensionRuntime.Tools()))
 	}
 
 	if !viper.GetBool("no_workflows") && !llmConfig.DisableSubagent {
@@ -863,6 +1038,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		broadcast:      s.broadcastChatEvent,
 		conversationID: conversationID,
 	}
+	run.uiInput = newWebUIInputBroker(conversationID, broadcastingSink)
 
 	conversationID, runErr := s.chatRunner.Run(ctx, req, broadcastingSink)
 	if runErr != nil {

@@ -238,6 +238,21 @@ describe('showToast', () => {
     expect(toast?.innerHTML).toContain('alert-neutral');
     expect(toast?.textContent).toContain('Conversation deleted');
   });
+
+  it('wraps long notification messages inside the toast body', () => {
+    showToast('Workspace extension started with a very-long-token-that-should-wrap-instead-of-overflowing-the-notification-box', 'info');
+
+    const message = document.querySelector('.toast-message');
+    expect(message).toBeTruthy();
+    expect(message?.textContent).toContain('very-long-token');
+  });
+
+  it('renders notification title and message separately', () => {
+    showToast('Workspace extension started. Remembered bash policy: 0 allowed, 0 denied.', 'info', 'Workspace extension ready');
+
+    expect(document.querySelector('.toast-title')?.textContent).toBe('Workspace extension ready');
+    expect(document.querySelector('.toast-message')?.textContent).toContain('Remembered bash policy');
+  });
 });
 
 describe('escapeHtml', () => {

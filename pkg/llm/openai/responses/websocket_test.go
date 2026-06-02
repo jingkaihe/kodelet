@@ -10,7 +10,6 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/jingkaihe/kodelet/pkg/auth"
-	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -222,7 +221,7 @@ func TestWebSocketStreamDecoderClosesTransportAfterTerminalEvent(t *testing.T) {
 func TestProcessMessageExchangeClosesWebSocketAfterStreamError(t *testing.T) {
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-5.5", Retry: llmtypes.RetryConfig{Attempts: 1}, OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
 	thread := &Thread{
-		Thread:       base.NewThread(config, "conv-test", hooks.Trigger{}),
+		Thread:       base.NewThread(config, "conv-test"),
 		useWebSocket: true,
 		inputItems: []openairesponses.ResponseInputItemUnionParam{
 			{
@@ -256,7 +255,7 @@ func TestProcessMessageExchangeClosesWebSocketAfterStreamError(t *testing.T) {
 func TestProcessMessageExchangeFailsWhenWebSocketCreationFails(t *testing.T) {
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-5.5", Retry: llmtypes.RetryConfig{Attempts: 1}, OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
 	thread := &Thread{
-		Thread:       base.NewThread(config, "conv-test", hooks.Trigger{}),
+		Thread:       base.NewThread(config, "conv-test"),
 		useWebSocket: true,
 		inputItems: []openairesponses.ResponseInputItemUnionParam{
 			{
@@ -298,7 +297,7 @@ func TestProcessMessageExchangeRetriesWebSocketCreationFailure(t *testing.T) {
 		OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"},
 	}
 	thread := &Thread{
-		Thread:       base.NewThread(config, "conv-test", hooks.Trigger{}),
+		Thread:       base.NewThread(config, "conv-test"),
 		useWebSocket: true,
 		inputItems: []openairesponses.ResponseInputItemUnionParam{
 			{
@@ -349,7 +348,7 @@ func TestProcessMessageExchangeRetriesWebSocketForbiddenHandshakeFailure(t *test
 		OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"},
 	}
 	thread := &Thread{
-		Thread:       base.NewThread(config, "conv-test", hooks.Trigger{}),
+		Thread:       base.NewThread(config, "conv-test"),
 		useWebSocket: true,
 		inputItems: []openairesponses.ResponseInputItemUnionParam{
 			{
@@ -400,7 +399,7 @@ func TestProcessMessageExchangeRetriesWebSocketStreamAfterPresentationOnlyOutput
 		OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"},
 	}
 	thread := &Thread{
-		Thread:       base.NewThread(config, "conv-test", hooks.Trigger{}),
+		Thread:       base.NewThread(config, "conv-test"),
 		useWebSocket: true,
 		inputItems: []openairesponses.ResponseInputItemUnionParam{
 			{
@@ -453,7 +452,7 @@ func TestProcessMessageExchangeKeepsWebSocketStreamDurableStateBeforeRetry(t *te
 		OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"},
 	}
 	thread := &Thread{
-		Thread:       base.NewThread(config, "conv-test", hooks.Trigger{}),
+		Thread:       base.NewThread(config, "conv-test"),
 		useWebSocket: true,
 		inputItems: []openairesponses.ResponseInputItemUnionParam{
 			{
@@ -523,7 +522,7 @@ func TestProcessMessageExchangeRetriesWebSocketStreamAfterPendingToolCallOnly(t 
 		OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"},
 	}
 	thread := &Thread{
-		Thread:       base.NewThread(config, "conv-test", hooks.Trigger{}),
+		Thread:       base.NewThread(config, "conv-test"),
 		useWebSocket: true,
 		inputItems: []openairesponses.ResponseInputItemUnionParam{
 			{

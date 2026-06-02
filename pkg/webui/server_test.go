@@ -22,6 +22,8 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/extensions"
+	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -952,6 +954,81 @@ func TestServer_handleGetSlashCommandsUsesRequestedCWD(t *testing.T) {
 	assert.Contains(t, names, "workspace-only")
 }
 
+func TestServer_handleGetSlashCommandsIncludesExtensionCommands(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	}()
+
+	workspace := t.TempDir()
+	writeWebExtensionExecutable(t, filepath.Join(workspace, ".kodelet", "extensions", "commands", "kodelet-extension-commands"))
+	viper.Reset()
+	viper.Set("extensions.enabled", true)
+	viper.Set("extensions.local_dir", "./.kodelet/extensions")
+	viper.Set("extensions.global_dir", filepath.Join(t.TempDir(), "global-extensions"))
+	viper.Set("extensions.max_output_size", 102400)
+
+	extensionRuntimes := newWebExtensionRuntimeManager()
+	t.Cleanup(func() { assert.NoError(t, extensionRuntimes.Close()) })
+	server := &Server{config: &ServerConfig{CWD: t.TempDir()}, extensionRuntimes: extensionRuntimes}
+	req := httptest.NewRequest("GET", "/api/chat/slash-commands?cwd="+url.QueryEscape(workspace), nil)
+	w := httptest.NewRecorder()
+
+	server.handleGetSlashCommands(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var response SlashCommandsResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+
+	commandsByName := map[string]slashcommands.Command{}
+	for _, command := range response.Commands {
+		commandsByName[command.Name] = command
+	}
+	assert.Contains(t, commandsByName, "doctor")
+	reviewCommand, ok := commandsByName["review"]
+	require.True(t, ok)
+	assert.Equal(t, `[focus="correctness, tests" target=HEAD] additional instructions`, reviewCommand.Hint)
+	assert.Equal(t, `/review [focus="correctness, tests" target=HEAD] additional instructions`, reviewCommand.Placeholder)
+}
+
+func TestServer_handleGetSlashCommandsReusesExtensionRuntime(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	}()
+
+	workspace := t.TempDir()
+	writeWebExtensionExecutable(t, filepath.Join(workspace, ".kodelet", "extensions", "commands", "kodelet-extension-commands"))
+	viper.Reset()
+	viper.Set("extensions.enabled", true)
+	viper.Set("extensions.local_dir", "./.kodelet/extensions")
+	viper.Set("extensions.global_dir", filepath.Join(t.TempDir(), "global-extensions"))
+	viper.Set("extensions.max_output_size", 102400)
+
+	extensionRuntimes := newWebExtensionRuntimeManager()
+	t.Cleanup(func() { assert.NoError(t, extensionRuntimes.Close()) })
+	server := &Server{config: &ServerConfig{CWD: t.TempDir()}, extensionRuntimes: extensionRuntimes}
+
+	for range 2 {
+		req := httptest.NewRequest("GET", "/api/chat/slash-commands?cwd="+url.QueryEscape(workspace), nil)
+		w := httptest.NewRecorder()
+		server.handleGetSlashCommands(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	}
+
+	extensionRuntimes.mu.Lock()
+	defer extensionRuntimes.mu.Unlock()
+	assert.Len(t, extensionRuntimes.runtimes, 1)
+}
+
 func TestServer_handleGetConversationPreservesImageContent(t *testing.T) {
 	conversationID := "test-image-conv"
 	mockService := &mockConversationService{
@@ -1371,6 +1448,55 @@ func TestServer_handleStopConversation(t *testing.T) {
 	assert.True(t, response.Stopped)
 	assert.False(t, server.isActiveChat("conv-123"))
 	assert.True(t, server.activeChats["conv-123"].stopRequested)
+}
+
+func TestServer_handleRespondUIInput(t *testing.T) {
+	broker := newWebUIInputBroker("conv-123", &recordingChatSink{})
+	server := &Server{
+		conversationService: &mockConversationService{},
+		router:              mux.NewRouter(),
+		activeChats:         make(map[string]*activeChatRun),
+	}
+	server.activeChats["conv-123"] = &activeChatRun{
+		cancel:  func() {},
+		done:    make(chan struct{}),
+		uiInput: broker,
+	}
+
+	resultCh := make(chan extensions.UIInputResponse, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		result, err := broker.Input(context.Background(), extensions.UIInputRequest{ID: "input-1", Title: "Choose"})
+		if err != nil {
+			errCh <- err
+			return
+		}
+		resultCh <- result
+	}()
+
+	require.Eventually(t, func() bool {
+		broker.mu.Lock()
+		defer broker.mu.Unlock()
+		_, ok := broker.pending["input-1"]
+		return ok
+	}, time.Second, 10*time.Millisecond)
+
+	req := httptest.NewRequest("POST", "/api/conversations/conv-123/ui-input/input-1", strings.NewReader(`{"status":"submitted","value":"2"}`))
+	req = mux.SetURLVars(req, map[string]string{"id": "conv-123", "requestId": "input-1"})
+	w := httptest.NewRecorder()
+
+	server.handleRespondUIInput(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	select {
+	case err := <-errCh:
+		require.NoError(t, err)
+	case result := <-resultCh:
+		assert.Equal(t, extensions.UIInputStatusSubmitted, result.Status)
+		assert.Equal(t, "2", result.Value)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for ui input response")
+	}
 }
 
 func TestServer_handleStreamConversation(t *testing.T) {

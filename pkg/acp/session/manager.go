@@ -11,6 +11,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
 	"github.com/jingkaihe/kodelet/pkg/acp/bridge"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/mcp"
@@ -31,6 +32,7 @@ type Session struct {
 	Thread     llmtypes.Thread
 	State      *tools.BasicState
 	MCPManager *tools.MCPManager
+	Extensions *extensions.Runtime
 	CWD        string
 	MCPServers []acptypes.MCPServer
 
@@ -62,10 +64,18 @@ func (s *Session) IsCancelled() bool {
 // Close releases session-scoped resources.
 func (s *Session) Close(ctx context.Context) error {
 	s.Cancel()
+	var result error
 	if s.MCPManager != nil {
-		return s.MCPManager.Close(ctx)
+		if err := s.MCPManager.Close(ctx); err != nil {
+			result = multierror.Append(result, err)
+		}
 	}
-	return nil
+	if s.Extensions != nil {
+		if err := s.Extensions.Close(); err != nil {
+			result = multierror.Append(result, err)
+		}
+	}
+	return result
 }
 
 // UpdateSender interface for sending session updates
@@ -115,10 +125,10 @@ type ManagerConfig struct {
 	Model                string
 	MaxTokens            int
 	NoSkills             bool
+	NoExtensions         bool
 	NoWorkflows          bool
 	DisableFSSearchTools bool
 	DisableSubagent      bool
-	NoHooks              bool
 	MaxTurns             int
 	CompactRatio         float64
 }
@@ -177,7 +187,6 @@ func (m *Manager) buildLLMConfig(projectDir string) llmtypes.Config {
 	if m.config.MaxTokens > 0 {
 		config.MaxTokens = m.config.MaxTokens
 	}
-	config.NoHooks = m.config.NoHooks
 	config.DisableFSSearchTools = m.config.DisableFSSearchTools
 	config.DisableSubagent = m.config.DisableSubagent
 	config.WorkingDirectory = projectDir
@@ -199,6 +208,18 @@ func (m *Manager) buildLLMConfig(projectDir string) llmtypes.Config {
 	config.MCPWorkspaceDir = workspaceDir
 
 	return config
+}
+
+func (m *Manager) buildExtensionRuntime(ctx context.Context, projectDir string) *extensions.Runtime {
+	if m.config.NoExtensions {
+		return nil
+	}
+	runtime, err := extensions.NewRuntimeFromViper(ctx, projectDir)
+	if err != nil {
+		logger.G(ctx).WithError(err).Warn("Failed to initialize extension runtime for ACP session")
+		return nil
+	}
+	return runtime
 }
 
 // convertMCPServers converts ACP MCP server definitions to kodelet's MCPConfig
@@ -332,9 +353,14 @@ func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest
 	m.initMCP(ctx)
 
 	llmConfig := m.buildLLMConfig(req.CWD)
+	extensionRuntime := m.buildExtensionRuntime(ctx, req.CWD)
+	llmConfig.Extensions = extensionRuntime
 
 	thread, err := llm.NewThread(llmConfig)
 	if err != nil {
+		if extensionRuntime != nil {
+			_ = extensionRuntime.Close()
+		}
 		return nil, pkgerrors.Wrap(err, "failed to create LLM thread")
 	}
 
@@ -356,6 +382,9 @@ func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest
 	if mcpOpts := m.buildSessionMCPStateOpts(ctx, thread.GetConversationID(), req.CWD, sessionMCPManager); mcpOpts != nil {
 		stateOpts = append(stateOpts, mcpOpts...)
 	}
+	if extensionRuntime != nil {
+		stateOpts = append(stateOpts, tools.WithExtensionTools(extensionRuntime.Tools()))
+	}
 
 	state := tools.NewBasicState(ctx, stateOpts...)
 	thread.SetState(state)
@@ -366,6 +395,7 @@ func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest
 		Thread:       thread,
 		State:        state,
 		MCPManager:   sessionMCPManager,
+		Extensions:   extensionRuntime,
 		CWD:          req.CWD,
 		MCPServers:   req.MCPServers,
 		maxTurns:     m.config.MaxTurns,
@@ -391,9 +421,14 @@ func (m *Manager) LoadSession(ctx context.Context, req acptypes.LoadSessionReque
 	m.initMCP(ctx)
 
 	llmConfig := m.buildLLMConfig(req.CWD)
+	extensionRuntime := m.buildExtensionRuntime(ctx, req.CWD)
+	llmConfig.Extensions = extensionRuntime
 
 	thread, err := llm.NewThread(llmConfig)
 	if err != nil {
+		if extensionRuntime != nil {
+			_ = extensionRuntime.Close()
+		}
 		return nil, pkgerrors.Wrap(err, "failed to create LLM thread")
 	}
 
@@ -417,6 +452,9 @@ func (m *Manager) LoadSession(ctx context.Context, req acptypes.LoadSessionReque
 	if mcpOpts := m.buildSessionMCPStateOpts(ctx, string(req.SessionID), req.CWD, sessionMCPManager); mcpOpts != nil {
 		stateOpts = append(stateOpts, mcpOpts...)
 	}
+	if extensionRuntime != nil {
+		stateOpts = append(stateOpts, tools.WithExtensionTools(extensionRuntime.Tools()))
+	}
 
 	state := tools.NewBasicState(ctx, stateOpts...)
 	thread.SetState(state)
@@ -427,6 +465,7 @@ func (m *Manager) LoadSession(ctx context.Context, req acptypes.LoadSessionReque
 		Thread:       thread,
 		State:        state,
 		MCPManager:   sessionMCPManager,
+		Extensions:   extensionRuntime,
 		CWD:          req.CWD,
 		MCPServers:   req.MCPServers,
 		maxTurns:     m.config.MaxTurns,

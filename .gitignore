@@ -11,6 +11,11 @@ go.work
 # Dependency directories
 vendor/
 bin/
+!sdk/src/bin/
+!sdk/src/bin/**
+.kodelet/extensions/*/node_modules/
+examples/extensions/*/node_modules/
+skills/kodelet/examples/extensions/*/node_modules/
 
 # IDE and editor specific
 .idea/

@@ -557,7 +557,6 @@ func (t *Thread) executeToolCall(
 ) tooltypes.ToolResult {
 	toolExecution := base.ExecuteTool(
 		ctx,
-		t.HookTrigger,
 		t,
 		t.State,
 		t.RendererRegistry,

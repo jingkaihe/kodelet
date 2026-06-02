@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.4.25-alpha1 (2026-05-30)
+
+Introduced the unified extension runtime, replacing standalone hooks and executable custom tools with long-running JSON-RPC extensions that can register tools, slash commands, lifecycle event handlers, and follow-up messages.
+
+Restored Anthropic prompt caching to use explicit cache-control breakpoints for Anthropic-compatible endpoints, marking the final tool definition, system block, and cacheable conversation block while clearing stale markers from earlier content.
+
+Added extension UI input, confirm, select, notify to allow extra input/output during conversation
+
 ## 0.4.22-beta (2026-05-28)
 
 Updated the recommended Anthropic setup and sample config to use Claude Opus 4.8, including refreshed SDK support, model aliases, thinking effort handling, and pricing metadata.
@@ -519,10 +527,10 @@ kodelet db rollback            # Rollback the last migration (with confirmation)
 kodelet db rollback --no-confirm  # Rollback without confirmation
 ```
 
-**Streamlit ACP chatbot example**: Added a full-featured Streamlit chatbot at `examples/streamlit-acp/` demonstrating ACP integration with conversation history, thinking visualization, tool call inspection, and image support. Run directly with:
+**Streamlit ACP chatbot example**: Added a full-featured Streamlit chatbot at `skills/kodelet/examples/streamlit-acp/` demonstrating ACP integration with conversation history, thinking visualization, tool call inspection, and image support. Run directly with:
 
 ```bash
-uv run https://raw.githubusercontent.com/jingkaihe/kodelet/refs/heads/main/examples/streamlit-acp/main.py
+uv run https://raw.githubusercontent.com/jingkaihe/kodelet/refs/heads/main/skills/kodelet/examples/streamlit-acp/main.py
 ```
 
 ### Bug Fixes
@@ -806,7 +814,7 @@ kodelet acp --compact-ratio 0.8          # Trigger compaction at 80% context usa
 kodelet acp --disable-auto-compact       # Disable auto-compaction entirely
 ```
 
-**Streamlit chatbot example**: Added a new example at `examples/streamlit/` demonstrating how to build a chat interface using kodelet's CLI with real-time streaming. Features include conversation persistence, thinking visualization, and tool call inspection.
+**Streamlit chatbot example**: Added a new example at `skills/kodelet/examples/streamlit/` demonstrating how to build a chat interface using kodelet's CLI with real-time streaming. Features include conversation persistence, thinking visualization, and tool call inspection.
 
 ### Bug Fixes
 

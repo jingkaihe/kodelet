@@ -112,7 +112,7 @@ func TestRenderConversationEntriesMarkdownTruncatesAmpToolFieldsOnly(t *testing.
 		{
 			Kind:       "tool-result",
 			Role:       "assistant",
-			ToolName:   "custom_tool_demo",
+			ToolName:   "extension_demo",
 			ToolCallID: "call_1",
 			Content:    `{"output":"` + longOutput + `","content":"` + longContent + `"}`,
 		},

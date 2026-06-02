@@ -172,10 +172,9 @@ func NewAnthropicThread(config llmtypes.Config) (*Thread, error) {
 	}
 
 	conversationID := convtypes.GenerateID()
-	hookTrigger := base.CreateHookTrigger(context.Background(), config, conversationID)
 
 	// Create the base thread with shared functionality
-	baseThread := base.NewThread(config, conversationID, hookTrigger)
+	baseThread := base.NewThread(config, conversationID)
 
 	thread := &Thread{
 		Thread:          baseThread,
@@ -228,7 +227,74 @@ func (t *Thread) userImageContentBlocks(ctx context.Context, imagePaths []string
 }
 
 func applyAnthropicPromptCachePolicy(params *anthropic.MessageNewParams) {
-	params.CacheControl = anthropic.NewCacheControlEphemeralParam()
+	// 3rd-party Anthropic-compatible endpoint does not yet support the
+	// SDK's top-level automatic cache_control parameter, so place explicit
+	// breakpoints on cacheable blocks instead.
+	params.CacheControl = anthropic.CacheControlEphemeralParam{}
+	cacheAnthropicToolDefinitions(params.Tools)
+	cacheAnthropicSystemPrompt(params.System)
+	cacheAnthropicMessages(params.Messages)
+}
+
+func cacheAnthropicToolDefinitions(tools []anthropic.ToolUnionParam) {
+	clearAnthropicToolCacheControls(tools)
+	if len(tools) == 0 {
+		return
+	}
+
+	cacheControl := tools[len(tools)-1].GetCacheControl()
+	if cacheControl == nil {
+		return
+	}
+	*cacheControl = anthropic.NewCacheControlEphemeralParam()
+}
+
+func clearAnthropicToolCacheControls(tools []anthropic.ToolUnionParam) {
+	for i := range tools {
+		cacheControl := tools[i].GetCacheControl()
+		if cacheControl == nil {
+			continue
+		}
+		*cacheControl = anthropic.CacheControlEphemeralParam{}
+	}
+}
+
+func cacheAnthropicSystemPrompt(system []anthropic.TextBlockParam) {
+	for i := range system {
+		system[i].CacheControl = anthropic.CacheControlEphemeralParam{}
+	}
+	if len(system) == 0 {
+		return
+	}
+
+	system[len(system)-1].CacheControl = anthropic.NewCacheControlEphemeralParam()
+}
+
+func cacheAnthropicMessages(messages []anthropic.MessageParam) {
+	clearAnthropicMessageCacheControls(messages)
+	for msgIdx := len(messages) - 1; msgIdx >= 0; msgIdx-- {
+		content := messages[msgIdx].Content
+		for blkIdx := len(content) - 1; blkIdx >= 0; blkIdx-- {
+			cacheControl := content[blkIdx].GetCacheControl()
+			if cacheControl == nil {
+				continue
+			}
+			*cacheControl = anthropic.NewCacheControlEphemeralParam()
+			return
+		}
+	}
+}
+
+func clearAnthropicMessageCacheControls(messages []anthropic.MessageParam) {
+	for msgIdx := range messages {
+		for blkIdx := range messages[msgIdx].Content {
+			cacheControl := messages[msgIdx].Content[blkIdx].GetCacheControl()
+			if cacheControl == nil {
+				continue
+			}
+			*cacheControl = anthropic.CacheControlEphemeralParam{}
+		}
+	}
 }
 
 // SendMessage sends a message to the LLM and processes the response
@@ -263,9 +329,9 @@ func (t *Thread) SendMessage(
 		copy(originalMessages, t.messages)
 	}
 
-	// Trigger user_message_send hook before adding user message
-	if blocked, reason := t.HookTrigger.TriggerUserMessageSend(ctx, message); blocked {
-		return "", errors.Errorf("message blocked by hook: %s", reason)
+	message, err = base.ProcessUserMessage(ctx, t, message)
+	if err != nil {
+		return "", err
 	}
 
 	t.AddUserMessage(ctx, message, opt.Images...)
@@ -274,6 +340,7 @@ func (t *Thread) SendMessage(
 
 	turnCount := 0
 	maxTurns := max(opt.MaxTurns, 0)
+	base.DispatchAgentStart(ctx, t)
 
 OUTER:
 	for {
@@ -293,6 +360,8 @@ OUTER:
 				break OUTER
 			}
 
+			base.DispatchTurnStart(ctx, t, turnCount+1)
+
 			// Check if auto-compact should be triggered before each exchange
 			t.TryAutoCompact(ctx, t.CompactRatioOrDefault(opt.CompactRatio), t.CompactContext)
 
@@ -301,7 +370,7 @@ OUTER:
 			if t.State != nil {
 				contexts = t.State.DiscoverContexts()
 			}
-			systemPrompt := sysprompt.SystemPrompt(model, t.Config, contexts)
+			systemPrompt := base.ProcessSystemPrompt(ctx, t, sysprompt.SystemPrompt(model, t.Config, contexts))
 
 			exchangeOpt := opt.WithTurnInitiator(turnCount)
 
@@ -330,11 +399,11 @@ OUTER:
 			// Update finalOutput with the most recent output
 			finalOutput = exchangeOutput
 
-			base.TriggerTurnEnd(ctx, t.HookTrigger, t, finalOutput, turnCount)
+			base.TriggerTurnEnd(ctx, t, finalOutput, turnCount)
 
-			// If no tools were used, check for hook follow-ups before stopping
+			// If no tools were used, check for extension follow-ups before stopping
 			if !toolsUsed {
-				if base.HandleAgentStopFollowUps(ctx, t.HookTrigger, t, handler) {
+				if base.HandleAgentStopFollowUps(ctx, t, handler) {
 					continue OUTER
 				}
 				if !t.Config.IsSubAgent && (maxTurns == 0 || turnCount < maxTurns) && base.HandleGoalAutoContinuation(ctx, t, t.tools(opt)) {
@@ -437,7 +506,6 @@ func (t *Thread) executeToolsParallel(
 
 			toolExecution := base.ExecuteTool(
 				gctx,
-				t.HookTrigger,
 				t,
 				t.State,
 				t.RendererRegistry,
@@ -1088,7 +1156,7 @@ func (t *Thread) getLastMessagesAttributes(messages []anthropic.MessageParam, la
 }
 
 func (t *Thread) tools(opt llmtypes.MessageOpt) []tooltypes.Tool {
-	return base.AvailableTools(t.State, opt.NoToolUse)
+	return base.AvailableToolsForThread(t, t.State, opt.NoToolUse)
 }
 
 func (t *Thread) updateUsage(response *anthropic.Message, model anthropic.Model) {

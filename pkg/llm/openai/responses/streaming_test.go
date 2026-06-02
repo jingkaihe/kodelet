@@ -8,7 +8,6 @@ import (
 
 	"github.com/avast/retry-go/v4"
 	"github.com/invopop/jsonschema"
-	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -180,7 +179,7 @@ func TestResponseFunctionCallOutputItemsFiltersAndPreservesDetail(t *testing.T) 
 
 func TestExecuteToolCallStoresStructuredResult(t *testing.T) {
 	thread := &Thread{
-		Thread: base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "conv-test", hooks.Trigger{}),
+		Thread: base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "conv-test"),
 	}
 	thread.SetState(tools.NewBasicState(context.Background(), tools.WithExtraMCPTools([]tooltypes.Tool{responsesTestTool{name: "ok_tool"}})))
 
@@ -225,7 +224,7 @@ func TestProcessStreamCompletesFunctionCallAndStoresToolOutput(t *testing.T) {
 
 	stream := responseStreamFromMaps(t, events)
 	thread := &Thread{
-		Thread:      base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test", hooks.Trigger{}),
+		Thread:      base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test"),
 		storedItems: make([]StoredInputItem, 0),
 		inputItems:  make([]responses.ResponseInputItemUnionParam, 0),
 	}
@@ -276,7 +275,7 @@ func TestProcessStreamThinkingEndsBeforeText(t *testing.T) {
 	stream := responseStreamFromMaps(t, events)
 
 	thread := &Thread{
-		Thread:      base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test", hooks.Trigger{}),
+		Thread:      base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test"),
 		storedItems: make([]StoredInputItem, 0),
 		inputItems:  make([]responses.ResponseInputItemUnionParam, 0),
 	}
@@ -330,7 +329,7 @@ func TestProcessStreamPersistsMultipleReasoningBlocksSeparately(t *testing.T) {
 	stream := responseStreamFromMaps(t, events)
 
 	thread := &Thread{
-		Thread:      base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test", hooks.Trigger{}),
+		Thread:      base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test"),
 		storedItems: make([]StoredInputItem, 0),
 		inputItems:  make([]responses.ResponseInputItemUnionParam, 0),
 	}
@@ -397,7 +396,7 @@ func TestProcessStreamThinkingEndsBeforeTextWithoutDoneEvent(t *testing.T) {
 	stream := ssestream.NewStream[responses.ResponseStreamEventUnion](decoder, nil)
 
 	thread := &Thread{
-		Thread:      base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test", hooks.Trigger{}),
+		Thread:      base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test"),
 		storedItems: make([]StoredInputItem, 0),
 		inputItems:  make([]responses.ResponseInputItemUnionParam, 0),
 	}
@@ -419,7 +418,7 @@ func TestProcessStreamThinkingEndsBeforeTextWithoutDoneEvent(t *testing.T) {
 
 func TestUpdateUsageAccumulatesCachedTokensLikeCodexTotals(t *testing.T) {
 	thread := &Thread{
-		Thread: base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test", hooks.Trigger{}),
+		Thread: base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test"),
 		customPricing: map[string]llmtypes.ModelPricing{
 			"gpt-4.1": {
 				Input:         1,
@@ -453,7 +452,7 @@ func TestUpdateUsageAccumulatesCachedTokensLikeCodexTotals(t *testing.T) {
 
 func TestUpdateUsageUsesLongContextPricing(t *testing.T) {
 	thread := &Thread{
-		Thread: base.NewThread(llmtypes.Config{Provider: "openai", Model: "test-model"}, "test", hooks.Trigger{}),
+		Thread: base.NewThread(llmtypes.Config{Provider: "openai", Model: "test-model"}, "test"),
 		customPricing: map[string]llmtypes.ModelPricing{
 			"test-model": {
 				Input:                  1,
@@ -487,7 +486,7 @@ func TestUpdateUsageUsesLongContextPricing(t *testing.T) {
 
 func TestProcessStreamUsesCallModelForLongContextPricing(t *testing.T) {
 	thread := &Thread{
-		Thread: base.NewThread(llmtypes.Config{Provider: "openai", Model: "main-model"}, "test", hooks.Trigger{}),
+		Thread: base.NewThread(llmtypes.Config{Provider: "openai", Model: "main-model"}, "test"),
 		customPricing: map[string]llmtypes.ModelPricing{
 			"main-model": {
 				Input:                  10,
@@ -584,7 +583,7 @@ func TestProcessStreamReturnsErrorOnIncompleteResponse(t *testing.T) {
 	stream := ssestream.NewStream[responses.ResponseStreamEventUnion](decoder, nil)
 
 	thread := &Thread{
-		Thread:      base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test", hooks.Trigger{}),
+		Thread:      base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test"),
 		storedItems: make([]StoredInputItem, 0),
 		inputItems:  make([]responses.ResponseInputItemUnionParam, 0),
 	}
@@ -615,7 +614,7 @@ func TestProcessStreamReturnsRetryableErrorOnIncompleteResponse(t *testing.T) {
 			},
 		},
 	})
-	thread := &Thread{Thread: base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test", hooks.Trigger{})}
+	thread := &Thread{Thread: base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test")}
 	handler := &captureStreamHandler{}
 
 	_, err := thread.processStream(context.Background(), stream, handler, "gpt-5.5", llmtypes.MessageOpt{})
@@ -655,7 +654,7 @@ func TestProcessStreamResponseFailedErrorRetryabilityMatchesCodex(t *testing.T) 
 					},
 				},
 			})
-			thread := &Thread{Thread: base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test", hooks.Trigger{})}
+			thread := &Thread{Thread: base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test")}
 			handler := &captureStreamHandler{}
 
 			_, err := thread.processStream(context.Background(), stream, handler, "gpt-5.5", llmtypes.MessageOpt{})
@@ -711,7 +710,7 @@ func TestProcessStreamWebSearchDoesNotTriggerFollowUpTurn(t *testing.T) {
 	stream := ssestream.NewStream[responses.ResponseStreamEventUnion](decoder, nil)
 
 	thread := &Thread{
-		Thread:      base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test", hooks.Trigger{}),
+		Thread:      base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test"),
 		storedItems: make([]StoredInputItem, 0),
 		inputItems:  make([]responses.ResponseInputItemUnionParam, 0),
 	}
@@ -776,7 +775,7 @@ func TestProcessStreamWebSearchOpenPagePreservesURL(t *testing.T) {
 	stream := ssestream.NewStream[responses.ResponseStreamEventUnion](decoder, nil)
 
 	thread := &Thread{
-		Thread:      base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test", hooks.Trigger{}),
+		Thread:      base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test"),
 		storedItems: make([]StoredInputItem, 0),
 		inputItems:  make([]responses.ResponseInputItemUnionParam, 0),
 	}
@@ -844,7 +843,7 @@ func TestProcessStreamWebSearchFlushesReasoningIntoReplayState(t *testing.T) {
 	stream := ssestream.NewStream[responses.ResponseStreamEventUnion](decoder, nil)
 
 	thread := &Thread{
-		Thread:      base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test", hooks.Trigger{}),
+		Thread:      base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test"),
 		storedItems: make([]StoredInputItem, 0),
 		inputItems:  make([]responses.ResponseInputItemUnionParam, 0),
 	}

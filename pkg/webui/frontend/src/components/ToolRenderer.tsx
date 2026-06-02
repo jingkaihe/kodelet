@@ -12,7 +12,7 @@ interface ToolRendererProps {
 const ToolRenderer: React.FC<ToolRendererProps> = ({ toolResult, toolInput }) => {
   const renderTool = () => {
     const normalizedToolName = normalizeToolName(toolResult.toolName);
-    const rendererRegistration = getToolRendererRegistration(toolResult.toolName);
+    const rendererRegistration = getToolRendererRegistration(toolResult);
 
     if (!toolResult.success && !(rendererRegistration?.supportsFailureRendering && toolResult.metadata)) {
       return (

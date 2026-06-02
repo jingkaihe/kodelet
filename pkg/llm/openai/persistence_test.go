@@ -8,7 +8,6 @@ import (
 	"time"
 
 	conversationmeta "github.com/jingkaihe/kodelet/pkg/conversations"
-	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	"github.com/jingkaihe/kodelet/pkg/types/conversations"
@@ -601,7 +600,7 @@ func TestSaveConversationMetadataIncludesPlatformAndAPIMode(t *testing.T) {
 
 func TestSaveConversationPreservesProviderNeutralMetadata(t *testing.T) {
 	thread := &Thread{
-		Thread: base.NewThread(llmtypes.Config{Model: "gpt-4.1", OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}, "conv-metadata", hooks.Trigger{}),
+		Thread: base.NewThread(llmtypes.Config{Model: "gpt-4.1", OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}, "conv-metadata"),
 	}
 	store := &MockConversationStore{}
 	thread.Store = store

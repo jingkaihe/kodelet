@@ -352,43 +352,44 @@ subagent_args: ""
 #   no-subagent:
 #     disable_subagent: true
 
-# Custom Tools Configuration
-# Kodelet can discover and execute custom executable tools from standalone directories
-# plus plugin directories like ./.kodelet/plugins/<org@repo>/tools and
-# ~/.kodelet/plugins/<org@repo>/tools using the same custom tool protocol.
-custom_tools:
-  # Enable/disable custom tools discovery (default: true)
+# Extensions Configuration
+# Kodelet can discover long-running extension executables from standalone
+# directories plus plugin directories like ./.kodelet/plugins/<org@repo>/extensions
+# and ~/.kodelet/plugins/<org@repo>/extensions.
+extensions:
+  # Enable/disable extension discovery (default: true)
   enabled: true
 
-  # Global custom tools directory (default: ~/.kodelet/tools)
-  global_dir: "~/.kodelet/tools"
+  # Global extension directory (default: ~/.kodelet/extensions)
+  global_dir: "~/.kodelet/extensions"
 
-  # Local custom tools directory (default: ./.kodelet/tools)
-  local_dir: "./.kodelet/tools"
+  # Local extension directory (default: ./.kodelet/extensions)
+  local_dir: "./.kodelet/extensions"
 
-  # Execution timeout for custom tools (default: 120s)
-  timeout: 120s
-
-  # Maximum output size for custom tools (default: 100KB)
+  # Maximum output size for extension tool output (default: 100KB)
   max_output_size: 102400
 
-  # Tool whitelist - only tools in this list will be loaded (empty means load all tools)
-  # When specified, only custom tools with these names will be available
-  # tool_white_list:
-  #   - "my-custom-tool"
-  #   - "another-tool"
+  # Optional allow/deny rules. Plugin extensions use org@repo/extension.
+  # Standalone extensions use their directory path or executable path.
+  # allow:
+  #   - org@repo/weather
+  #   - ./.kodelet/extensions/weather
+  # deny:
+  #   - org@repo/experimental
 
-  # Per-tool runtime configuration. Tool names match the name returned by
-  # `<tool> description`, without the custom_tool_ prefix.
-  # Explicit per-tool timeout overrides both the global timeout and any timeout
-  # returned by the optional `<tool> config` command.
+  # Per-tool runtime configuration. Tool names match extension-registered names.
+  # Tool timeouts are controlled by SDK-declared timeoutInSec or the built-in 10m default.
   # tools:
-  #   seer:
-  #     timeout: 30m
-  #     envs:
-  #       SEER_MODEL: gpt-5.5
-  #       # Bare/null values inherit from Kodelet's current process environment.
-  #       ANTHROPIC_API_KEY:
+  #   get_weather:
+  #     enabled: true
+
+  # Per-extension process environment. Extension subprocesses receive a
+  # sanitized base environment; list extra variables here to pass literal
+  # values or use null to inherit from Kodelet's environment.
+  # processes:
+  #   weather:
+  #     env:
+  #       WEATHER_API_KEY: null
 
 # Agentic Skills Configuration
 # Skills are model-invoked capabilities that package domain expertise

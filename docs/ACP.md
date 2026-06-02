@@ -48,7 +48,7 @@ kodelet acp [flags]
 | `--max-tokens` | Maximum tokens for LLM responses |
 | `--no-skills` | Disable agentic skills |
 | `--disable-fs-search-tools` | Disable `glob_tool` and `grep_tool`; use `fd`/`rg` via bash instead |
-| `--no-hooks` | Disable lifecycle hooks |
+| `--no-extensions` | Disable extension runtime |
 
 ## Protocol Overview
 

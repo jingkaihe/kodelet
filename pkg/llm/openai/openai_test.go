@@ -16,7 +16,6 @@ import (
 
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/goals"
-	"github.com/jingkaihe/kodelet/pkg/hooks"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -790,7 +789,7 @@ func TestProcessPendingSteerWithImages(t *testing.T) {
 	require.NoError(t, steerStore.WriteSteerWithImages("conv-test", "Use this image", []string{"data:image/png;base64,aGVsbG8="}))
 
 	thread := &Thread{
-		Thread: base.NewThread(llm.Config{Provider: "openai", Model: "gpt-4.1"}, "conv-test", hooks.Trigger{}),
+		Thread: base.NewThread(llm.Config{Provider: "openai", Model: "gpt-4.1"}, "conv-test"),
 	}
 	requestParams := &openai.ChatCompletionRequest{}
 	handler := &llm.StringCollectorHandler{Silent: true}
@@ -1106,7 +1105,7 @@ func TestIsRetryableError_EdgeCases(t *testing.T) {
 
 func TestGetPromptCacheHeaders(t *testing.T) {
 	configWithManualCache := llm.Config{OpenAI: &llm.OpenAIConfig{ManualCache: true}}
-	thread := &Thread{Thread: base.NewThread(configWithManualCache, "conv-test", base.CreateHookTrigger(context.Background(), configWithManualCache, "conv-test"))}
+	thread := &Thread{Thread: base.NewThread(configWithManualCache, "conv-test")}
 
 	headers := thread.getPromptCacheHeaders(llm.MessageOpt{PromptCache: true})
 	require.NotNil(t, headers)
@@ -1132,7 +1131,7 @@ func TestGetPromptCacheHeaders(t *testing.T) {
 func TestGetExtraHeadersAddsCopilotInitiatorAndManualCache(t *testing.T) {
 	config := llm.Config{OpenAI: &llm.OpenAIConfig{ManualCache: true}}
 	thread := &Thread{
-		Thread:     base.NewThread(config, "conv-test", base.CreateHookTrigger(context.Background(), config, "conv-test")),
+		Thread:     base.NewThread(config, "conv-test"),
 		useCopilot: true,
 	}
 
@@ -1147,7 +1146,7 @@ func TestGetExtraHeadersAddsCopilotInitiatorAndManualCache(t *testing.T) {
 }
 
 func TestUpdateUsageWithCachedTokens(t *testing.T) {
-	thread := &Thread{Thread: base.NewThread(llm.Config{}, "conv-test", base.CreateHookTrigger(context.Background(), llm.Config{}, "conv-test"))}
+	thread := &Thread{Thread: base.NewThread(llm.Config{}, "conv-test")}
 	thread.customPricing = llm.CustomPricing{
 		"test-model": {
 			Input:         0.000001,
@@ -1175,7 +1174,7 @@ func TestUpdateUsageWithCachedTokens(t *testing.T) {
 }
 
 func TestUpdateUsageUsesLongContextPricing(t *testing.T) {
-	thread := &Thread{Thread: base.NewThread(llm.Config{}, "conv-test", base.CreateHookTrigger(context.Background(), llm.Config{}, "conv-test"))}
+	thread := &Thread{Thread: base.NewThread(llm.Config{}, "conv-test")}
 	thread.customPricing = llm.CustomPricing{
 		"test-model": {
 			Input:                  1,
@@ -1210,7 +1209,7 @@ func TestUpdateUsageUsesLongContextPricing(t *testing.T) {
 func TestOpenAIThreadDeterministicHelperBranches(t *testing.T) {
 	cfg := llm.Config{Model: "custom-reasoning", OpenAI: &llm.OpenAIConfig{ManualCache: true}}
 	thread := &Thread{
-		Thread:       base.NewThread(cfg, "conv-helper", base.CreateHookTrigger(context.Background(), cfg, "conv-helper")),
+		Thread:       base.NewThread(cfg, "conv-helper"),
 		customModels: &llm.CustomModels{Reasoning: []string{"custom-reasoning"}},
 		customPricing: llm.CustomPricing{
 			"priced-model": {Input: 1, Output: 2, ContextWindow: 3},
@@ -1296,7 +1295,7 @@ func TestOpenAIProcessImageAndClientHelpers(t *testing.T) {
 
 	t.Setenv("OPENAI_API_KEY", "test-key")
 	cfg := llm.Config{OpenAI: &llm.OpenAIConfig{BaseURL: "https://openai.example/v1"}}
-	thread = &Thread{Thread: base.NewThread(cfg, "conv-helper", base.CreateHookTrigger(context.Background(), cfg, "conv-helper"))}
+	thread = &Thread{Thread: base.NewThread(cfg, "conv-helper")}
 	clientConfig := thread.buildClientConfig()
 	assert.Equal(t, "https://openai.example/v1", clientConfig.BaseURL)
 	require.NotNil(t, clientConfig.HTTPClient)
@@ -1464,7 +1463,6 @@ func TestOpenAISendMessageTextResponse(t *testing.T) {
 	config := llm.Config{
 		Model:        "gpt-4o",
 		MaxTokens:    128,
-		NoHooks:      true,
 		IsSubAgent:   true,
 		WeakModel:    "gpt-4o-mini",
 		AllowedTools: []string{tools.NoToolsMarker},
@@ -1506,7 +1504,6 @@ func TestOpenAISendMessageRestoresMessagesWhenNoSaveConversation(t *testing.T) {
 	}))
 	thread := newTestOpenAIExchangeThread(client, llm.Config{
 		Model:        "gpt-4o",
-		NoHooks:      true,
 		AllowedTools: []string{tools.NoToolsMarker},
 	})
 	originalMessages := []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: "previous"}}
@@ -1532,7 +1529,6 @@ func TestOpenAISendMessageStopsWhenContextCancelled(t *testing.T) {
 	}))
 	thread := newTestOpenAIExchangeThread(client, llm.Config{
 		Model:        "gpt-4o",
-		NoHooks:      true,
 		IsSubAgent:   true,
 		AllowedTools: []string{tools.NoToolsMarker},
 	})
@@ -1668,7 +1664,7 @@ func newTestOpenAIExchangeThread(client *openai.Client, config llm.Config) *Thre
 		config.MaxTokens = 8192
 	}
 	thread := &Thread{
-		Thread:          base.NewThread(config, "conv-test", base.CreateHookTrigger(context.Background(), config, "conv-test")),
+		Thread:          base.NewThread(config, "conv-test"),
 		client:          client,
 		reasoningEffort: "medium",
 	}

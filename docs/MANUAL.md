@@ -51,22 +51,18 @@ Kodelet is a lightweight agentic SWE Agent that runs as an interactive CLI tool 
   - [Managing Accounts](#managing-accounts)
   - [Using Accounts at Runtime](#using-accounts-at-runtime)
   - [Account Status](#account-status)
-- [Custom Tools](#custom-tools)
-  - [Creating Custom Tools](#creating-custom-tools)
-  - [Tool Protocol](#tool-protocol)
-  - [Directory Structure](#directory-structure)
-  - [Configuration](#custom-tools-configuration)
-  - [Examples](#custom-tools-examples)
+- [Extensions](#extensions)
+  - [Creating TypeScript Extensions](#creating-typescript-extensions)
+  - [Requesting User Input from Extensions](#requesting-user-input-from-extensions)
+  - [Extension Discovery](#extension-discovery)
+  - [Extension Commands and Dynamic Recipes](#extension-commands-and-dynamic-recipes)
+  - [Extension Events](#extension-events)
+  - [Extensions Configuration](#extensions-configuration)
 - [Agentic Skills](#agentic-skills)
   - [How Skills Work](#how-skills-work)
   - [Creating Skills](#creating-skills)
   - [Skills Configuration](#skills-configuration)
   - [Disabling Skills](#disabling-skills)
-- [Agent Lifecycle Hooks](#agent-lifecycle-hooks)
-  - [Hook Types](#hook-types)
-  - [Creating Hooks](#creating-hooks)
-  - [Hook Protocol](#hook-protocol)
-  - [Disabling Hooks](#disabling-hooks)
 - [Key Features](#key-features)
 - [Security & Limitations](#security--limitations)
   - [Image Input Security](#image-input-security)
@@ -1168,373 +1164,273 @@ The `kodelet anthropic accounts list` command shows token status:
 
 If a token is expired, run `kodelet anthropic login --alias <alias>` to re-authenticate.
 
-## Custom Tools
+## Extensions
 
-Kodelet supports custom executable tools that extend its capabilities beyond the built-in tool set. Custom tools are standalone executables (scripts or binaries) that implement a simple executable protocol and can be written in any programming language.
+Extensions are Kodelet's unified external extensibility primitive. They replace the old executable custom-tool and lifecycle-hook systems with one long-running subprocess that can register model tools, prompt commands, dynamic recipes, and lifecycle event handlers.
 
-### Direct CLI Invocation
+Extensions communicate with Kodelet over stdio JSON-RPC using `Content-Length` framing. `stdout` is reserved for protocol messages and `stderr` is used for logs.
 
-Custom tools can be invoked directly from the CLI without going through the agent:
+### Creating TypeScript Extensions
 
-```bash
-# List discovered tools
-kodelet custom-tool list
+The TypeScript SDK is exposed as `kodelet` and re-exports Zod as `z` so extension authors can define schemas and handlers from one package:
 
-# Show description, executable path, and JSON schema
-kodelet custom-tool describe hello
+```typescript
+import { z, defineExtension } from "kodelet";
 
-# Invoke a tool using dynamically generated flags from its JSON schema
-kodelet custom-tool invoke hello --name Ada --age 36
+const WeatherInput = z.object({
+  location: z.string().describe("Location to fetch weather for"),
+});
 
-# Short alias
-kodelet cti hello --name Ada --age 36
+export default defineExtension((ext) => {
+  ext.setMetadata({ name: "weather", version: "0.1.0" });
 
-# Show per-tool dynamic help
-kodelet custom-tool invoke hello --help
-
-# Pass complex nested input that doesn't map well to flags
-kodelet custom-tool invoke hello --name Ada --input-json '{"config":{"verbose":true}}'
-```
-
-`kodelet custom-tool invoke <tool> --help` is generated at runtime from the tool's `input_schema`. Simple schema properties such as strings, integers, numbers, booleans, and string/integer arrays are exposed as flags automatically. More complex properties such as nested objects should be passed via `--input-json`.
-
-### Creating Custom Tools
-
-Custom tools are executable files that respond to two required commands and one optional command:
-- `<tool> description` - Returns a JSON schema describing the tool
-- `<tool> run` - Executes the tool with JSON input from stdin
-- `<tool> config` - Optional runtime defaults such as timeout
-
-**Basic Requirements:**
-1. **Executable**: The file must have execute permissions (`chmod +x`)
-2. **Two Commands**: Must support `description` and `run` commands
-3. **JSON Protocol**: Uses JSON for both schema definition and input/output
-
-### Tool Protocol
-
-**Description Command:**
-```bash
-./my-tool description
-```
-
-Must return a JSON object with this structure:
-```json
-{
-  "name": "my_tool",
-  "description": "Brief description of what this tool does",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "param1": {
-        "type": "string",
-        "description": "Description of parameter"
-      },
-      "param2": {
-        "type": "integer",
-        "description": "Another parameter"
-      }
+  ext.registerTool({
+    name: "get_weather",
+    description: "Get the current weather for a location",
+    inputSchema: WeatherInput,
+    timeoutInSec: 600,
+    async execute(input, ctx) {
+      ctx.log.info(`Fetching weather for ${input.location}`);
+      return {
+        content: `Weather for ${input.location}: 18°C, cloudy`,
+        data: { location: input.location, temperatureC: 18 },
+      };
     },
-    "required": ["param1"]
-  }
-}
+  });
+
+  ext.on("tool.call", { timeoutInSec: 5 }, async (event) => {
+    if (event.tool.name === "bash" && JSON.stringify(event.tool.input).includes("rm -rf /")) {
+      return { block: { reason: "Refusing dangerous shell command" } };
+    }
+  });
+});
 ```
 
-**Run Command:**
-```bash
-echo '{"param1": "value", "param2": 42}' | ./my-tool run
+A typical extension directory contains a package, compiled JavaScript, and an executable wrapper:
+
+```text
+.kodelet/extensions/weather/
+  package.json
+  src/index.ts
+  dist/index.js
+  kodelet-extension-weather
 ```
 
-The tool receives JSON input via stdin and can:
-- **Success**: Write output to stdout and exit with code 0
-- **Error**: Write error message to stderr and exit with non-zero code
-- **JSON Error**: Write `{"error": "message"}` to stdout for structured errors
-
-When a custom tool is invoked by an agent conversation, Kodelet sets `KODELET_CONVERSATION_ID`, `KODELET_WORKING_DIR`, `KODELET_PROVIDER`, `KODELET_MODEL`, and `KODELET_PROFILE` in the tool process environment when available. It also runs the custom tool from `KODELET_WORKING_DIR` when an effective working directory is known. Direct CLI invocations do not synthesize these values; pass them explicitly in the environment if your tool requires them.
-
-**Optional Config Command:**
-```bash
-./my-tool config
-```
-
-If implemented, the tool can return runtime defaults:
-```json
-{
-  "timeout": "30m"
-}
-```
-
-The `timeout` value uses the same Go-style duration format as `custom_tools.timeout`. If the command is missing or exits non-zero, Kodelet ignores it and uses configured defaults.
-
-### Directory Structure
-
-Custom tools are discovered from four locations in precedence order:
-
-- `./.kodelet/tools/` - Repository-local standalone tools (highest precedence)
-- `./.kodelet/plugins/<org@repo>/tools/` - Repository-local plugin tools
-- `~/.kodelet/tools/` - User-global standalone tools
-- `~/.kodelet/plugins/<org@repo>/tools/` - User-global plugin tools (lowest precedence)
-
-All plugin tools use the same executable protocol as standalone custom tools. If multiple tools return the same tool name, the higher-precedence location wins.
-
-### Custom Tools Configuration
-
-Configure custom tools behavior in your `config.yaml` or `kodelet-config.yaml`:
-
-```yaml
-custom_tools:
-  # Enable/disable custom tools (default: true)
-  enabled: true
-
-  # Global tools directory (default: ~/.kodelet/tools)
-  global_dir: "~/.kodelet/tools"
-
-  # Local tools directory (default: ./.kodelet/tools)
-  local_dir: "./.kodelet/tools"
-
-  # Execution timeout (default: 120s)
-  timeout: 120s
-
-  # Maximum output size (default: 100KB)
-  max_output_size: 102400
-
-  # Per-tool runtime configuration. Tool names match the name returned by
-  # `<tool> description`, without the custom_tool_ prefix.
-  tools:
-    seer:
-      # Overrides the global timeout and any timeout returned by `seer config`
-      timeout: 30m
-
-      # Injected only when executing this tool
-      envs:
-        SEER_MODEL: gpt-5.5
-        SEER_CACHE_DIR: "/tmp/seer"
-        # Null or bare values inherit from the current Kodelet process environment
-        ANTHROPIC_API_KEY:
-
-  # Tool whitelist - only specified tools will be loaded (empty means load all tools)
-  # When the whitelist is empty, all discovered custom tools will be available
-  # When specified, only tools with these exact names will be loaded
-  tool_white_list:
-    - "my-custom-tool"
-    - "database-backup"
-    - "deploy-script"
-```
-
-Per-tool timeout resolution order is:
-1. `custom_tools.tools.<name>.timeout`
-2. Optional `<tool> config` timeout
-3. Global `custom_tools.timeout`
-4. Built-in default `120s`
-
-Per-tool `envs` are merged onto the current process environment and only apply to that tool's `run` process. If an injected key already exists in the process environment, the per-tool value wins. A bare or `null` env value means “copy this variable from Kodelet's current process environment”; for example, `ANTHROPIC_API_KEY:` behaves like `ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY` when that variable is set. Use `KEY: ""` when you intentionally want to pass an empty string.
-
-**Environment Variable Override:**
-You can override the custom tool timeout for a single process with `KODELET_CUSTOM_TOOLS_TIMEOUT`. Use the same duration format as the config value, for example `120s`, `2m`, or `5m`.
+Example wrapper:
 
 ```bash
-# Increase timeout for one direct invocation
-KODELET_CUSTOM_TOOLS_TIMEOUT=300s kodelet custom-tool invoke my-tool ...
-
-# The same override also applies when the agent invokes custom tools
-KODELET_CUSTOM_TOOLS_TIMEOUT=300s kodelet run "use my-tool ..."
+#!/usr/bin/env bash
+exec kodelet-extension-node ./dist/index.js
 ```
 
-**Tool Whitelisting:**
-The `tool_white_list` configuration allows you to control which custom tools are loaded and available for use. When the whitelist is empty or not specified, all discovered custom tools in the configured locations (including plugin `tools/` directories) will be available. When you specify tool names in the whitelist, only those exact tools will be loaded, providing granular control over which tools are accessible in your environment.
+### Requesting User Input from Extensions
 
-**Command Line Override:**
-```bash
-# Temporary disable custom tools
-kodelet run --config custom_tools.enabled=false "query"
-```
+Tool, command, and event handlers can ask the active Kodelet UI for user-facing prompts with `ctx.ui.input(...)`, `ctx.ui.confirm(...)`, `ctx.ui.select(...)`, and `ctx.ui.notify(...)`. Kodelet routes prompts to the interactive CLI terminal or to the Web UI conversation stream. In headless/result-only runs, or when no interactive UI is attached, the SDK resolves inputs/selects as `undefined` and confirmations as `false`.
 
-### Custom Tools Examples
+```typescript
+ext.registerTool({
+  name: "ask_user_question",
+  description: "Ask the user to choose between concrete options",
+  inputSchema: z.object({
+    question: z.string(),
+    options: z.array(z.string()).min(2).max(5),
+  }),
+  async execute(input, ctx) {
+    const choices = input.options.map((option, index) => `${index + 1}. ${option}`).join("\n");
+    const answer = await ctx.ui.input({
+      title: input.question,
+      helpText: `${choices}\n\nType the number of your choice`,
+      submitButtonText: "Select",
+      required: true,
+    });
 
-**1. Simple Hello Tool (Bash):**
-
-```bash
-#!/bin/bash
-# File: ~/.kodelet/tools/hello
-
-case "$1" in
-  "description")
-    cat <<EOF
-{
-  "name": "hello",
-  "description": "Say hello to a person",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "name": {
-        "type": "string",
-        "description": "The name of the person"
-      },
-      "age": {
-        "type": "integer",
-        "description": "The age of the person (optional)"
-      }
-    },
-    "required": ["name"]
-  }
-}
-EOF
-    ;;
-  "run")
-    # Read JSON from stdin
-    input=$(cat)
-    name=$(echo "$input" | jq -r '.name')
-    age=$(echo "$input" | jq -r '.age // empty')
-
-    if [ -n "$age" ]; then
-      echo "Hello, $name! You are $age years old."
-    else
-      echo "Hello, $name!"
-    fi
-    ;;
-  *)
-    echo "Usage: hello [description|run]" >&2
-    exit 1
-    ;;
-esac
-```
-
-**2. Git Info Tool (Advanced Bash):**
-
-```bash
-#!/bin/bash
-# File: ./.kodelet/tools/git_info
-
-case "$1" in
-  "description")
-    cat <<EOF
-{
-  "name": "git_info",
-  "description": "Get current git repository information",
-  "input_schema": {
-    "type": "object",
-    "properties": {}
-  }
-}
-EOF
-    ;;
-  "run")
-    if ! git rev-parse --git-dir >/dev/null 2>&1; then
-      echo '{"error": "Not in a git repository"}'
-      exit 0
-    fi
-
-    branch=$(git branch --show-current)
-    commit=$(git rev-parse HEAD)
-    uncommitted=$(git status --porcelain | wc -l)
-
-    cat <<EOF
-{
-  "branch": "$branch",
-  "commit": "$commit",
-  "uncommitted_changes": $uncommitted
-}
-EOF
-    ;;
-esac
-```
-
-**3. Python Tool Example:**
-
-```python
-#!/usr/bin/env python3
-# File: ~/.kodelet/tools/analyze_logs
-
-import json
-import sys
-import os
-
-def description():
-    return {
-        "name": "analyze_logs",
-        "description": "Analyze log files for errors and patterns",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "file_path": {
-                    "type": "string",
-                    "description": "Path to the log file"
-                },
-                "pattern": {
-                    "type": "string",
-                    "description": "Pattern to search for (optional)"
-                }
-            },
-            "required": ["file_path"]
-        }
+    if (!answer) {
+      return "User dismissed the question without choosing.";
     }
 
-def run():
-    try:
-        input_data = json.load(sys.stdin)
-        file_path = input_data['file_path']
-        pattern = input_data.get('pattern', 'ERROR')
-
-        if not os.path.exists(file_path):
-            print(json.dumps({"error": f"File not found: {file_path}"}))
-            return
-
-        with open(file_path, 'r') as f:
-            lines = f.readlines()
-
-        matches = [line.strip() for line in lines if pattern in line]
-
-        result = {
-            "total_lines": len(lines),
-            "matches": len(matches),
-            "pattern": pattern,
-            "sample_matches": matches[:10]  # First 10 matches
-        }
-
-        print(json.dumps(result, indent=2))
-
-    except Exception as e:
-        print(json.dumps({"error": str(e)}))
-
-if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: analyze_logs [description|run]", file=sys.stderr)
-        sys.exit(1)
-
-    command = sys.argv[1]
-    if command == "description":
-        print(json.dumps(description(), indent=2))
-    elif command == "run":
-        run()
-    else:
-        print(f"Unknown command: {command}", file=sys.stderr)
-        sys.exit(1)
+    const index = parseInt(answer.trim(), 10) - 1;
+    if (index >= 0 && index < input.options.length) {
+      return `User selected option ${index + 1}: ${input.options[index]}`;
+    }
+    return `User responded with: ${answer}`;
+  },
+});
 ```
 
-**Usage in Kodelet:**
+Input prompts support `title`, `helpText`, `message`, `placeholder`, `defaultValue`, custom submit/cancel labels, `required`, and `secret` for password-style Web UI input. Extension authors should treat a missing return value as dismissal or unavailable UI and continue gracefully.
 
-Once tools are created and made executable, Kodelet automatically discovers them and makes them available:
+Other UI helpers use separate host RPC methods and separate Web UI stream events, so clients can handle each concern independently:
+
+| SDK helper | Host RPC method | Web UI stream event | Result |
+|---|---|---|---|
+| `ctx.ui.input(request)` | `kodelet.ui.input` | `ui-input-request` with `ui_input` | `string \| undefined` |
+| `ctx.ui.confirm(request)` | `kodelet.ui.confirm` | `ui-confirm-request` with `ui_confirm` | `boolean` |
+| `ctx.ui.select(request)` | `kodelet.ui.select` | `ui-select-request` with `ui_select` | `string \| undefined` |
+| `ctx.ui.notify(messageOrRequest)` | `kodelet.ui.notify` | `ui-notification` with `ui_notify` | `void` |
+
+Examples:
+
+```typescript
+const confirmed = await ctx.ui.confirm({
+  title: `Allow ${event.tool.name}?`,
+  message: "A tool call incoming",
+  confirmButtonText: "Allow",
+});
+
+const choice = await ctx.ui.select({
+  title: "What is your favourite food?",
+  message: "Choose what you like.",
+  options: ["Pasta", "Pizza", "Focaccia"],
+});
+
+await ctx.ui.notify({
+  title: "Kitchen sink",
+  message: `Kitchen sink session.start for ${event.conversation_id}.`,
+});
+```
+
+### Extension Discovery
+
+Kodelet discovers executable files named `kodelet-extension-*` in these locations, in precedence order:
+
+1. `./.kodelet/extensions`
+2. `./.kodelet/plugins/<org@repo>/extensions`
+3. `~/.kodelet/extensions`
+4. `~/.kodelet/plugins/<org@repo>/extensions`
+
+Within each extension root, Kodelet loads either direct or nested executables:
+
+```text
+<extension-root>/kodelet-extension-xxx
+<extension-root>/*/kodelet-extension-xxx
+```
+
+The executable filename must be `kodelet-extension-xxx`. Kodelet derives the extension ID/name as `xxx` for a direct executable, or as the parent directory name for a nested executable. Plugin extension IDs are addressed as `org@repo/extension`. Standalone extensions are matched by directory or executable path in allow/deny config.
+
+Inspect discovered extensions with:
 
 ```bash
-# Kodelet will find and use your custom tools
-kodelet run "Say hello to Alice who is 25 years old"
-# Uses: custom_tool_hello
-
-kodelet run "What's the current git status of this repo?"
-# Uses: custom_tool_git_info
-
-kodelet run "Analyze the server logs for any ERROR patterns"
-# Uses: custom_tool_analyze_logs
+kodelet extension list
+kodelet extension list --json
+kodelet extension inspect weather
+kodelet extension inspect org@repo/weather --json
 ```
 
-**Best Practices:**
+### Extension Commands and Dynamic Recipes
 
-1. **Error Handling**: Always handle errors gracefully and provide helpful error messages
-2. **Input Validation**: Validate required parameters and provide clear error messages
-3. **Documentation**: Write clear descriptions and parameter documentation
-4. **Testing**: Test both `description` and `run` commands manually before use
-5. **Permissions**: Ensure tools have proper execute permissions (`chmod +x`)
-6. **Dependencies**: Document any external dependencies (jq, python, etc.)
-7. **Security**: Be careful with user input, especially when executing system commands
+Extensions can register prompt-level commands. Commands are checked before the LLM sees a user prompt. A command result controls what Kodelet does next:
+
+| Action | Meaning | LLM input? |
+|---|---|---:|
+| `pass` | Decline handling and continue normal routing | No |
+| `respond` | Display a direct terminal/Web UI response | No |
+| `runAgent` | Replace the prompt and run the normal agent flow | Yes |
+
+Direct-response example:
+
+```typescript
+const OpenInput = z.object({ path: z.string().optional() });
+
+ext.registerCommand({
+  name: "open",
+  aliases: ["/open"],
+  description: "Open a project-relative path in the configured editor",
+  inputSchema: OpenInput,
+  timeoutInSec: 60,
+  async execute(input, ctx) {
+    const target = ctx.path.resolveWorkspacePath(input.path ?? ".");
+    if (!(await ctx.fs.exists(target))) {
+      return { action: "respond", response: `Cannot open ${ctx.path.relativeToWorkspace(target)}.` };
+    }
+
+    const editor = ctx.env.get("EDITOR") ?? "code";
+    await ctx.process.spawn(editor, [target], { detach: true });
+    return { action: "respond", response: `Opened ${ctx.path.relativeToWorkspace(target)} in ${editor}.` };
+  },
+});
+```
+
+Recipe-like command example:
+
+```typescript
+ext.registerCommand({
+  name: "review",
+  aliases: ["/review"],
+  description: "Run an extension-provided code review recipe",
+  kind: "recipe",
+  inputSchema: z.object({ target: z.string().default("HEAD") }),
+  async execute(input) {
+    return {
+      action: "runAgent",
+      recipeName: "review",
+      prompt: `Review ${input.target}. Focus on correctness, simplicity, and tests.`,
+    };
+  },
+});
+```
+
+Recipe-like commands appear in `kodelet recipe list` and can be invoked through recipe UX such as `kodelet run -r review --arg target=main`. They can also be invoked directly as slash commands, for example `/review target=main`.
+
+### Extension Events
+
+Extensions subscribe to dot-separated lifecycle events with `ext.on(...)`. Mutating/blocking events run sequentially by priority, then discovery order, then registration order. The first blocking handler stops the operation.
+
+| Event | When | Can block? | Can mutate? |
+|---|---|---:|---:|
+| `session.start` | Extension runtime starts | No | No |
+| `resources.discover` | Extension resources are finalized | No | Resource registrations |
+| `user.message` | User prompt received | Yes | Message |
+| `agent.init` | System prompt built before first model request | No | System prompt / tool list |
+| `agent.start` | Agent loop starts | No | No |
+| `turn.start` | Before a model turn | No | No |
+| `tool.call` | Before a tool runs | Yes | Tool input |
+| `tool.result` | After a tool runs | No | Tool result |
+| `turn.end` | After one assistant turn completes | No | No |
+| `agent.end` | Agent loop completes | No | Follow-up messages |
+| `session.end` | Extension runtime shuts down | No | No |
+
+Migration map from removed hooks:
+
+| Removed hook | Extension event |
+|---|---|
+| `before_tool_call` | `tool.call` |
+| `after_tool_call` | `tool.result` |
+| `user_message_send` | `user.message` |
+| `agent_stop` | `agent.end` |
+| `turn_end` | `turn.end` |
+
+### Extensions Configuration
+
+Configure extensions in `~/.kodelet/config.yaml` or repository-level `kodelet-config.yaml`:
+
+```yaml
+extensions:
+  enabled: true
+  global_dir: ~/.kodelet/extensions
+  local_dir: ./.kodelet/extensions
+  max_output_size: 102400
+
+  allow:
+    - org@repo/security
+    - ./.kodelet/extensions/weather
+
+  deny:
+    - org@repo/experimental
+    - /absolute/path/to/kodelet-extension-experimental
+
+  tools:
+    get_weather:
+      enabled: true
+
+  processes:
+    weather:
+      env:
+        WEATHER_API_KEY: null  # inherit from parent environment only when listed
+```
+
+Timeouts are controlled by SDK-declared `timeoutInSec`. Extension events use SDK `timeoutInSec` or the built-in `30s` default, extension tools use SDK `timeoutInSec` or the built-in `10m` default, and extension commands use SDK `timeoutInSec` or no timeout.
+
+Use `kodelet run --no-extensions "query"` or `extensions.enabled: false` to disable extension loading.
 
 ## Agentic Skills
 
@@ -1555,8 +1451,10 @@ Skills are directories containing a `SKILL.md` file with YAML frontmatter:
 ```
 ~/.kodelet/skills/my-skill/
 ├── SKILL.md          (required)
-├── reference.md      (optional)
-├── examples.md       (optional)
+├── references/       (optional detailed docs)
+│   └── api.md
+├── examples/         (optional samples)
+│   └── sample.txt
 └── scripts/
     └── helper.py     (optional)
 ```
@@ -1573,9 +1471,11 @@ description: Brief description of what this skill does and when to use it
 ## Instructions
 Step-by-step guidance for the agent...
 
-## Examples
-Concrete usage examples...
+## References
+Read `references/api.md` only for API-specific tasks.
 ```
+
+Keep `SKILL.md` compact. Supporting files are available from the skill directory and can be inspected on demand, which avoids loading rarely needed details into context every time the skill is invoked.
 
 **Skill Locations:**
 - `./.kodelet/skills/<skill_name>/` - Repository-local (higher precedence)
@@ -1617,24 +1517,15 @@ kodelet plugin list
 kodelet plugin show orgname/skills
 ```
 
-Install the `custom-tool` skill from the `jingkaihe/skills` plugin if you want help scaffolding a Kodelet custom executable tool:
+Plugins can also provide extension executables under `extensions/`. Use the normal plugin commands to install and inspect them:
 
 ```bash
-kodelet plugin add jingkaihe/skills
+kodelet plugin add orgname/extensions
+kodelet plugin list
+kodelet plugin show orgname/extensions
 ```
 
-Then ask Kodelet to create the tool in natural language. The skill is model-invoked, so you do not run it with `-r`:
-
-```bash
-kodelet run "Create a Kodelet custom tool that fetches weather by location without requiring an API key. Save it in the local custom tools directory."
-
-# Or ask for a globally installed tool
-kodelet run "Create a Kodelet custom tool that formats and validates JSON. Save it in the global custom tools directory."
-```
-
-**Requirements:**
-- GitHub CLI (`gh`) must be installed and authenticated
-- Run `gh auth login` if not already authenticated
+Extension-provided tools, commands, and dynamic recipes are loaded through the extension runtime when extensions are enabled.
 
 ### Disabling Skills
 
@@ -1716,153 +1607,13 @@ If loading or parsing a custom template fails, Kodelet logs a warning and falls 
 
 For detailed skill creation guide, see [docs/SKILLS.md](SKILLS.md).
 
-## Agent Lifecycle Hooks
-
-Agent Lifecycle Hooks allow external scripts to observe and control agent behavior. Hooks are language-agnostic executables that receive JSON payloads and can block operations, modify inputs/outputs, or trigger follow-up actions.
-
-**Use Cases:**
-- **Audit logging**: Record all tool invocations and user interactions
-- **Security controls**: Block potentially harmful tool calls or inputs
-- **Monitoring & alerting**: Send notifications to external systems
-- **Compliance**: Enforce organizational policies on agent behavior
-
-### Hook Types
-
-| Hook Type | Trigger Point | Can Block | Can Modify |
-|-----------|--------------|-----------|------------|
-| `before_tool_call` | Before tool execution | Yes | Tool input |
-| `after_tool_call` | After tool execution | No | Tool output |
-| `user_message_send` | When user sends message | Yes | N/A |
-| `agent_stop` | When agent would stop | No | Follow-up messages |
-
-### Creating Hooks
-
-Hooks are executable files discovered from four directories (in precedence order):
-
-**Hook Locations:**
-- `.kodelet/hooks/` - Repository-local standalone (highest precedence)
-- `.kodelet/plugins/<org@repo>/hooks/` - Repository-local plugin hooks
-- `~/.kodelet/hooks/` - User-global standalone
-- `~/.kodelet/plugins/<org@repo>/hooks/` - User-global plugin hooks (lowest precedence)
-
-Plugin hooks are prefixed with `org/repo/` (e.g., `jingkaihe/hooks/audit-logger`).
-
-**Example Security Hook (Bash):**
-
-```bash
-#!/bin/bash
-# File: .kodelet/hooks/security_guardrail
-
-case "$1" in
-  "hook")
-    echo "before_tool_call"
-    ;;
-  "run")
-    # Read JSON payload from stdin
-    payload=$(cat)
-    tool_name=$(echo "$payload" | jq -r '.tool_name')
-
-    # Block dangerous commands
-    if [ "$tool_name" == "bash" ]; then
-      command=$(echo "$payload" | jq -r '.tool_input.command // ""')
-      if [[ "$command" == *"rm -rf"* ]]; then
-        echo '{"blocked":true,"reason":"rm -rf commands are not allowed"}'
-        exit 0
-      fi
-    fi
-
-    echo '{"blocked":false}'
-    ;;
-  *)
-    exit 1
-    ;;
-esac
-```
-
-**Example Audit Logger (Bash):**
-
-```bash
-#!/bin/bash
-# File: ~/.kodelet/hooks/audit_logger
-
-if [ "$1" == "hook" ]; then
-    echo "after_tool_call"
-    exit 0
-fi
-
-if [ "$1" == "run" ]; then
-    payload=$(cat)
-    echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) | $payload" >> ~/.kodelet/audit.log
-    # Empty output = no modification
-    exit 0
-fi
-
-exit 1
-```
-
-### Hook Protocol
-
-Hooks implement a simple two-command protocol:
-
-**Discovery Command:**
-```bash
-./my_hook hook
-# Output: hook type (e.g., "before_tool_call")
-```
-
-**Execution Command:**
-```bash
-echo '{"event":"before_tool_call","tool_name":"bash",...}' | ./my_hook run
-# Output: JSON result (or empty for no action)
-```
-
-**Payload Structure (before_tool_call):**
-```json
-{
-  "event": "before_tool_call",
-  "conv_id": "conversation-id",
-  "tool_name": "bash",
-  "tool_input": {"command": "ls -la"},
-  "tool_user_id": "tool-call-id",
-  "cwd": "/current/working/dir",
-  "invoked_by": "main"
-}
-```
-
-**Result Structure (before_tool_call):**
-```json
-{
-  "blocked": false,
-  "reason": "optional reason if blocked",
-  "input": {"modified": "input"}
-}
-```
-
-**Hook Behavior:**
-- Non-zero exit codes indicate hook failure (logged but doesn't halt agent)
-- Empty stdout with exit code 0 means "no action" (not blocked, no modification)
-- 30-second timeout prevents hung hooks from blocking the agent
-- Deny-fast semantics: if any hook blocks, execution stops immediately
-
-### Disabling Hooks
-
-To run without hooks for a single session:
-
-```bash
-kodelet run --no-hooks "your query"
-```
-
-Hooks are automatically disabled for `kodelet commit` and `kodelet pr` commands.
-
-For detailed hook creation guide including payload structures, example implementations, and debugging tips, see [HOOKS.md](HOOKS.md).
-
 ## Key Features
 
 - **Intelligent Engineering Assistant**: Automates software engineering tasks and production operations with agentic capabilities.
 - **Interactive Architecture Design**: Collaboratively design and refine system architectures through natural dialogue.
 - **Continuous Code Intelligence**: Analyzes, understands, and improves your codebase while answering technical questions in context.
 - **Agent Context Files**: Automatic loading of project-specific context from `AGENTS.md` files for enhanced project understanding.
-- **Custom Tools**: Extend Kodelet with your own executable tools written in any programming language using a simple JSON protocol.
+- **Extensions**: Extend Kodelet with long-running tools, prompt commands, dynamic recipes, and lifecycle event handlers over stdio JSON-RPC.
 - **Vision Capabilities**: Support for image inputs including screenshots, diagrams, and mockups (Anthropic Claude models).
 - **Multiple LLM Providers**: Supports both Anthropic Claude and OpenAI models, giving you flexibility in choosing the best model for your needs.
 

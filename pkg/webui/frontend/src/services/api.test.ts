@@ -518,6 +518,29 @@ describe("ApiService", () => {
 		});
 	});
 
+	describe("respondToUIInput", () => {
+		it("posts extension UI input responses", async () => {
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({ success: true }),
+			});
+
+			const result = await apiService.respondToUIInput("conv-123", "input-1", {
+				status: "submitted",
+				value: "2",
+			});
+
+			expect(mockFetch).toHaveBeenCalledWith(
+				"/api/conversations/conv-123/ui-input/input-1",
+				expect.objectContaining({
+					method: "POST",
+					body: JSON.stringify({ status: "submitted", value: "2" }),
+				}),
+			);
+			expect(result).toEqual({ success: true });
+		});
+	});
+
 	describe("streamChat", () => {
 		it("streams newline-delimited chat events", async () => {
 			const onEvent = vi.fn();

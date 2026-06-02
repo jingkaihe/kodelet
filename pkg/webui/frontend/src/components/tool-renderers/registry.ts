@@ -1,9 +1,9 @@
 import type { ComponentType } from 'react';
-import type { ToolRenderProps } from '../../types';
+import type { ToolRenderProps, ToolResult } from '../../types';
 import ApplyPatchRenderer from './ApplyPatchRenderer';
 import BashRenderer from './BashRenderer';
 import CodeExecutionRenderer from './CodeExecutionRenderer';
-import CustomToolRenderer from './CustomToolRenderer';
+import ExtensionToolRenderer from './ExtensionToolRenderer';
 import FileEditRenderer from './FileEditRenderer';
 import FileReadRenderer from './FileReadRenderer';
 import FileWriteRenderer from './FileWriteRenderer';
@@ -40,9 +40,16 @@ const toolRendererRegistry: Record<string, ToolRendererRegistration> = {
   openai_web_search: { component: OpenAIWebSearchRenderer, supportsFailureRendering: true },
   read_conversation: { component: ReadConversationRenderer },
   code_execution: { component: CodeExecutionRenderer, supportsFailureRendering: true },
-  custom_tool: { component: CustomToolRenderer },
+  extension_tool: { component: ExtensionToolRenderer },
   mcp_tool: { component: MCPToolRenderer },
 };
 
-export const getToolRendererRegistration = (toolName: string): ToolRendererRegistration | undefined =>
-  toolRendererRegistry[normalizeToolName(toolName)];
+export const getToolRendererRegistration = (toolResult: ToolResult): ToolRendererRegistration | undefined => {
+  if (toolResult.metadataType) {
+    const metadataRegistration = toolRendererRegistry[normalizeToolName(toolResult.metadataType)];
+    if (metadataRegistration) {
+      return metadataRegistration;
+    }
+  }
+  return toolRendererRegistry[normalizeToolName(toolResult.toolName)];
+};

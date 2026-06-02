@@ -93,6 +93,26 @@ func TestRendererRegistry_PatternMatches(t *testing.T) {
 	}
 }
 
+func TestRendererRegistry_ExtensionToolMetadata(t *testing.T) {
+	registry := NewRendererRegistry()
+	result := tools.StructuredToolResult{
+		ToolName:  "get_weather",
+		Success:   true,
+		Timestamp: time.Now(),
+		Metadata: &tools.ExtensionToolMetadata{
+			ExtensionID:   "weather",
+			ToolName:      "get_weather",
+			Output:        "Cloudy, 18C",
+			ExecutionTime: time.Second,
+		},
+	}
+
+	output := registry.Render(result)
+
+	assert.Contains(t, output, "Extension Tool: get_weather (weather)")
+	assert.Contains(t, output, "Cloudy, 18C")
+}
+
 func TestRendererRegistry_ErrorHandling(t *testing.T) {
 	registry := NewRendererRegistry()
 

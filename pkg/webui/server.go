@@ -27,6 +27,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/gorilla/mux"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/goals"
 	openairesponses "github.com/jingkaihe/kodelet/pkg/llm/openai/responses"
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -56,6 +57,7 @@ type Server struct {
 	runCancel           context.CancelFunc
 	terminalSessions    *terminalSessionManager
 	terminalSessionsMu  sync.Mutex
+	extensionRuntimes   *webExtensionRuntimeManager
 	activeChats         map[string]*activeChatRun
 	activeChatsMu       sync.Mutex
 	chatSubscribers     map[string]map[*subscriberEventSink]struct{}
@@ -67,6 +69,7 @@ type activeChatRun struct {
 	done          chan struct{}
 	doneOnce      sync.Once
 	stopRequested bool
+	uiInput       *webUIInputBroker
 }
 
 func newActiveChatRun(cancel context.CancelFunc) *activeChatRun {
@@ -167,18 +170,26 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 	}
 
 	runCtx, runCancel := context.WithCancel(ctx)
+	extensionRuntimes := newWebExtensionRuntimeManager()
 
 	s := &Server{
 		router:              mux.NewRouter(),
 		conversationService: conversationService,
-		chatRunner:          NewDefaultChatRunner(config.CWD),
-		config:              config,
-		staticFS:            staticFS,
-		runCtx:              runCtx,
-		runCancel:           runCancel,
-		terminalSessions:    newTerminalSessionManager(runCtx),
-		activeChats:         make(map[string]*activeChatRun),
-		chatSubscribers:     make(map[string]map[*subscriberEventSink]struct{}),
+		chatRunner: &webUIChatRunner{
+			defaultCWD:        config.CWD,
+			extensionRuntimes: extensionRuntimes,
+		},
+		config:            config,
+		staticFS:          staticFS,
+		runCtx:            runCtx,
+		runCancel:         runCancel,
+		terminalSessions:  newTerminalSessionManager(runCtx),
+		extensionRuntimes: extensionRuntimes,
+		activeChats:       make(map[string]*activeChatRun),
+		chatSubscribers:   make(map[string]map[*subscriberEventSink]struct{}),
+	}
+	if runner, ok := s.chatRunner.(*webUIChatRunner); ok {
+		runner.server = s
 	}
 
 	// Setup routes
@@ -203,6 +214,7 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/conversations/{id}/steer", s.handleGetPendingSteer).Methods("GET")
 	api.HandleFunc("/conversations/{id}/steer", s.handleSteerConversation).Methods("POST")
 	api.HandleFunc("/conversations/{id}/stop", s.handleStopConversation).Methods("POST")
+	api.HandleFunc("/conversations/{id}/ui-input/{requestId}", s.handleRespondUIInput).Methods("POST")
 	api.HandleFunc("/conversations/{id}/tools/{toolCallId}", s.handleGetToolResult).Methods("GET")
 	api.HandleFunc("/conversations/{id}", s.handleDeleteConversation).Methods("DELETE")
 	api.HandleFunc("/chat", s.handleChat).Methods("POST")
@@ -737,6 +749,25 @@ func (s *Server) hasActiveChatRun(conversationID string) bool {
 	return ok && run != nil
 }
 
+func (s *Server) uiInputBrokerForRun(conversationID string) *webUIInputBroker {
+	if strings.TrimSpace(conversationID) == "" {
+		return nil
+	}
+
+	s.activeChatsMu.Lock()
+	defer s.activeChatsMu.Unlock()
+	run, ok := s.activeChats[conversationID]
+	if !ok || run == nil || run.stopRequested {
+		return nil
+	}
+	return run.uiInput
+}
+
+func (s *Server) respondToUIInput(conversationID, requestID string, response extensions.UIInputResponse) bool {
+	broker := s.uiInputBrokerForRun(conversationID)
+	return broker != nil && broker.Respond(requestID, response)
+}
+
 func (s *Server) registerChatSubscriber(conversationID string, sink *subscriberEventSink) bool {
 	if strings.TrimSpace(conversationID) == "" || sink == nil {
 		return false
@@ -1191,9 +1222,23 @@ func (s *Server) handleGetSlashCommands(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	s.writeJSONResponse(w, SlashCommandsResponse{
-		Commands: slashcommands.List(r.Context(), processor),
-	})
+	commands := slashcommands.List(r.Context(), processor)
+	var extensionRuntime *extensions.Runtime
+	if s.extensionRuntimes != nil {
+		extensionRuntime, err = s.extensionRuntimes.Runtime(r.Context(), resolvedCWD)
+	} else {
+		extensionRuntime, err = extensions.NewRuntimeFromViper(r.Context(), resolvedCWD)
+		if extensionRuntime != nil {
+			defer func() { _ = extensionRuntime.Close() }()
+		}
+	}
+	if err != nil {
+		logger.G(r.Context()).WithError(err).Warn("Failed to initialize extensions for slash command discovery")
+	} else if extensionRuntime != nil {
+		commands = append(commands, extensionRuntime.SlashCommands()...)
+	}
+
+	s.writeJSONResponse(w, SlashCommandsResponse{Commands: commands})
 }
 
 func (s *Server) handleGetCWDHints(w http.ResponseWriter, r *http.Request) {
@@ -2020,6 +2065,51 @@ func (s *Server) handleStopConversation(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+type uiInputResponseRequest struct {
+	Status string `json:"status"`
+	Value  string `json:"value,omitempty"`
+}
+
+func (s *Server) handleRespondUIInput(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	conversationID := strings.TrimSpace(vars["id"])
+	requestID := strings.TrimSpace(vars["requestId"])
+	if conversationID == "" || requestID == "" {
+		s.writeErrorResponse(w, http.StatusBadRequest, "conversation ID and request ID are required", nil)
+		return
+	}
+
+	var req uiInputResponseRequest
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		s.writeErrorResponse(w, http.StatusBadRequest, "invalid ui input response", err)
+		return
+	}
+	status := strings.TrimSpace(req.Status)
+	if status == "" {
+		status = extensions.UIInputStatusSubmitted
+	}
+	switch status {
+	case extensions.UIInputStatusSubmitted, extensions.UIInputStatusDismissed:
+	default:
+		s.writeErrorResponse(w, http.StatusBadRequest, "invalid ui input status", nil)
+		return
+	}
+
+	response := extensions.UIInputResponse{Status: status, Value: req.Value}
+	if strings.EqualFold(strings.TrimSpace(req.Value), "true") {
+		response.Confirmed = true
+	}
+
+	if !s.respondToUIInput(conversationID, requestID, response) {
+		s.writeErrorResponse(w, http.StatusNotFound, "ui input request not found", nil)
+		return
+	}
+
+	s.writeJSONResponse(w, map[string]bool{"success": true})
+}
+
 // handleForkConversation handles POST /api/conversations/{id}/fork
 func (s *Server) handleForkConversation(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -2126,16 +2216,24 @@ func (s *Server) Stop() error {
 	s.terminalSessionsMu.Lock()
 	terminalSessions := s.terminalSessions
 	s.terminalSessionsMu.Unlock()
+	var firstErr error
 	if terminalSessions != nil {
 		terminalSessions.Close()
+	}
+	if s.extensionRuntimes != nil {
+		if err := s.extensionRuntimes.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
 	}
 	if s.runCancel != nil {
 		s.runCancel()
 	}
 	if s.server != nil {
-		return s.server.Close()
+		if err := s.server.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
 	}
-	return nil
+	return firstErr
 }
 
 func normalizeWebContent(textParts []string, blocks []WebContentBlock) any {
