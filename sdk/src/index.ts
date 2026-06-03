@@ -1,8 +1,26 @@
 export { z } from "zod";
+export { AgentRunError, Client, Profile, Session } from "./agent.js";
 export { defineExtension, ExtensionHost } from "./api.js";
 export { runExtension } from "./runtime.js";
 export { createTestHarness } from "./test-harness.js";
 export { renderTemplate } from "./template.js";
+export type {
+  AgentResponse,
+  AgentStreamEvent,
+  AgentUIHandlers,
+  AssistantMessageData,
+  AssistantMessageDeltaData,
+  AssistantThinkingDeltaData,
+  ClientOptions,
+  CreateSessionOptions,
+  ProfileInput,
+  RunOptions,
+  SessionEventMap,
+  SpawnFunction,
+  SpawnedProcess,
+  ToolCallData,
+  ToolResultData,
+} from "./agent.js";
 export type { RenderTemplateOptions, TemplateView } from "./template.js";
 export type {
   Awaitable,

@@ -13,7 +13,97 @@ Extensions communicate over stdio JSON-RPC using `Content-Length` framing. `stdo
 
 ## TypeScript SDK basics
 
-The SDK package is imported as `kodelet` and re-exports Zod as `z`.
+The SDK package is imported as `kodelet`. It provides both an agent client API and the extension-authoring API, and re-exports Zod as `z`.
+
+### Agent sessions
+
+Use `Client` to launch Kodelet from Node/TypeScript and run prompts programmatically. By default the client uses the normal `kodelet` executable and the user's default profile/configuration.
+
+```typescript
+import { Client } from "kodelet";
+
+const client = new Client();
+const session = await client.createSession();
+
+const response = await session.runAndWait({
+  message: "what is the meaning of life",
+});
+
+console.log(response.content);
+await client.close();
+```
+
+Streaming sessions emit typed SDK events derived from ACP `session/update` JSON-RPC notifications:
+
+```typescript
+import { Client, Profile, defineExtension, z } from "kodelet";
+
+const workspaceExtension = defineExtension((ext) => {
+  ext.setMetadata({ name: "workspace", version: "0.1.0" });
+
+  ext.registerTool({
+    name: "ask_user_question",
+    description: "Ask the user to choose one option.",
+    inputSchema: z.object({
+      question: z.string(),
+      options: z.array(z.string()).min(2).max(5),
+    }),
+    async execute(input, ctx) {
+      const choice = await ctx.ui.select({
+        title: input.question,
+        options: input.options,
+        submitButtonText: "Select",
+      });
+      return choice ? `User selected: ${choice}` : "User dismissed the question.";
+    },
+  });
+});
+
+const profile = new Profile({
+  name: "openai",
+  provider: "openai",
+  model: "gpt-5.5",
+  max_tokens: 128000,
+  reasoning_effort: "xhigh",
+  tool_mode: "patch",
+  weak_model: "gpt-5.4-mini",
+  weak_model_max_tokens: 8192,
+  disable_fs_search_tools: true,
+  openai: {
+    api_mode: "responses",
+    platform: "codex",
+    service_tier: "fast",
+  },
+});
+
+const client = new Client();
+const session = await client.createSession({
+  profile,
+  extensions: [workspaceExtension],
+  streaming: true,
+  ui: {
+    async select(request) {
+      console.error(request.title, request.options);
+      return request.options[0];
+    },
+  },
+});
+
+session.on("assistant.message_delta", (event) => {
+  process.stdout.write(event.data.deltaContent);
+});
+session.on("tool.call", (event) => {
+  console.error(`tool: ${event.data.toolName}`, event.data.input);
+});
+
+const response = await session.runAndWait({ message: "help me choose an approach" });
+console.log("\nfinal:", response.content);
+await client.close();
+```
+
+Inline extensions passed to `createSession({ extensions: [...] })` are exposed to Kodelet through a temporary JSON-RPC bridge for that session. Sessions without inline extensions use the normal `.kodelet/extensions` and plugin discovery flow.
+
+### Extension definitions
 
 ```typescript
 import { z, defineExtension } from "kodelet";
