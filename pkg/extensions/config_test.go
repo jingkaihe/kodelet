@@ -3,7 +3,6 @@ package extensions
 import (
 	"context"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -54,33 +53,6 @@ func TestLoadConfigFromViperLoadsExtensionConfig(t *testing.T) {
 	assert.Equal(t, []string{"org@repo/blocked"}, config.Deny)
 	requireFalse := false
 	assert.Equal(t, &requireFalse, config.Tools["get_weather"].Enabled)
-}
-
-func TestLoadConfigFromViperAppliesNestedEnvironmentOverrides(t *testing.T) {
-	originalSettings := viper.AllSettings()
-	defer restoreViperSettings(originalSettings)
-	t.Setenv("KODELET_EXTENSIONS_LOCAL_DIR", "/tmp/sdk-inline-extensions")
-	t.Setenv("KODELET_EXTENSIONS_ALLOW", "/tmp/sdk-inline-extensions")
-	t.Setenv("KODELET_EXTENSIONS_GLOBAL_DIR", "/tmp/global-extensions")
-	viper.Reset()
-	viper.SetEnvPrefix("KODELET")
-	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-	viper.AutomaticEnv()
-	viper.SetDefault("extensions.enabled", true)
-	viper.SetDefault("extensions.local_dir", "./.kodelet/extensions")
-	viper.SetDefault("extensions.global_dir", "~/.kodelet/extensions")
-	viper.SetDefault("extensions.max_output_size", 102400)
-	viper.SetDefault("extensions.allow", []string{})
-	viper.SetDefault("extensions.deny", []string{})
-
-	config := LoadConfigFromViper()
-
-	assert.True(t, config.Enabled)
-	assert.Equal(t, "/tmp/sdk-inline-extensions", config.LocalDir)
-	assert.Equal(t, "/tmp/global-extensions", config.GlobalDir)
-	assert.Equal(t, []string{"/tmp/sdk-inline-extensions"}, config.Allow)
-	assert.Empty(t, config.Deny)
-	assert.Equal(t, 102400, config.MaxOutputSize)
 }
 
 func TestExtensionConfigHasNoTimeoutConfigSurface(t *testing.T) {

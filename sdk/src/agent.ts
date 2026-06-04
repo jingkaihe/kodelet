@@ -141,8 +141,17 @@ export type SpawnFunction = (command: string, args: string[], options: SpawnOpti
 
 interface ResolvedProfile {
   args: string[];
-  env: NodeJS.ProcessEnv;
+  config?: ProfileInput;
 }
+
+interface LaunchConfig {
+  args: string[];
+  env: NodeJS.ProcessEnv;
+  tempConfig?: TempConfig;
+  configFileMode?: ConfigFileMode;
+}
+
+type ConfigFileMode = "merge" | "isolated";
 
 interface JsonRPCMessage {
   jsonrpc?: "2.0";
@@ -215,12 +224,12 @@ export class Profile {
 
   toLaunchConfig(): ResolvedProfile {
     if (this.name && this.isNamedOnly()) {
-      return { args: ["--profile", this.name], env: {} };
+      return { args: ["--profile", this.name] };
     }
 
     return {
-      args: profileCLIArgs(this.config),
-      env: profileEnv(this.config),
+      args: [],
+      config: this.config,
     };
   }
 }
@@ -271,16 +280,16 @@ export class Client {
       : undefined;
     const cwd = path.resolve(options.cwd ?? this.cwd);
     const profile = normalizeProfile(options.profile);
-    const launch = profile?.toLaunchConfig();
-    const env = cleanEnv({
-      ...this._baseEnv(),
-      ...launch?.env,
-      ...bridge?.env(),
-    });
-    const args = [...(launch?.args ?? []), "acp", ...acpServerArgs(options)];
+    let launch: LaunchConfig | undefined;
     let rpc: ACPRPCClient | undefined;
 
     try {
+      launch = await buildLaunchConfig(profile, bridge);
+      const env = cleanEnv({
+        ...this._baseEnv({ isolateKodeletEnv: launch.configFileMode === "isolated" }),
+        ...launch.env,
+      });
+      const args = [...launch.args, "acp", ...acpServerArgs(options)];
       rpc = new ACPRPCClient(this._spawn(args, { cwd, env, stdio: ["pipe", "pipe", "pipe"] }));
       await rpc.initialize();
       const sessionID = options.resume ? await rpc.loadSession(options.resume, cwd) : await rpc.createSession(cwd);
@@ -291,12 +300,14 @@ export class Client {
         sessionID,
         rpc,
         extensionBridge: bridge,
+        tempConfig: launch.tempConfig,
       });
       this.sessions.add(session);
       return session;
     } catch (error) {
       await rpc?.close();
       await bridge?.close();
+      await launch?.tempConfig?.close();
       throw error;
     }
   }
@@ -310,8 +321,16 @@ export class Client {
     return this.spawn(this.command, args, options);
   }
 
-  _baseEnv(): NodeJS.ProcessEnv {
-    return { ...process.env, ...this.env };
+  _baseEnv(options: { isolateKodeletEnv?: boolean } = {}): NodeJS.ProcessEnv {
+    const env = { ...process.env };
+    if (options.isolateKodeletEnv) {
+      for (const key of Object.keys(env)) {
+        if (key.startsWith("KODELET_")) {
+          delete env[key];
+        }
+      }
+    }
+    return { ...env, ...this.env };
   }
 
   _deleteSession(session: Session): void {
@@ -325,6 +344,7 @@ interface SessionInternalOptions extends CreateSessionOptions {
   sessionID: string;
   rpc: ACPRPCClient;
   extensionBridge?: InMemoryExtensionBridge;
+  tempConfig?: TempConfig;
 }
 
 export class Session extends EventEmitter {
@@ -333,6 +353,7 @@ export class Session extends EventEmitter {
   private readonly rpc: ACPRPCClient;
   private readonly maxTurns?: number;
   private readonly extensionBridge?: InMemoryExtensionBridge;
+  private readonly tempConfig?: TempConfig;
   private conversationId: string;
   private closed = false;
   private running = false;
@@ -345,6 +366,7 @@ export class Session extends EventEmitter {
     this.maxTurns = options.maxTurns;
     this.conversationId = options.sessionID;
     this.extensionBridge = options.extensionBridge;
+    this.tempConfig = options.tempConfig;
   }
 
   get id(): string {
@@ -431,6 +453,7 @@ export class Session extends EventEmitter {
     this.closed = true;
     await this.rpc.close();
     await this.extensionBridge?.close();
+    await this.tempConfig?.close();
     this.client._deleteSession(this);
   }
 
@@ -715,16 +738,31 @@ class InMemoryExtensionBridge {
     return new InMemoryExtensionBridge(rootDir, servers);
   }
 
-  env(): NodeJS.ProcessEnv {
+  config(): Record<string, unknown> {
     return {
-      KODELET_EXTENSIONS_ENABLED: "true",
-      KODELET_EXTENSIONS_LOCAL_DIR: this.rootDir,
-      KODELET_EXTENSIONS_ALLOW: this.rootDir,
+      enabled: true,
+      local_dir: this.rootDir,
+      allow: [this.rootDir],
     };
   }
 
   async close(): Promise<void> {
     await Promise.allSettled(this.servers.map((server) => server.close()));
+    await rm(this.rootDir, { recursive: true, force: true });
+  }
+}
+
+class TempConfig {
+  private constructor(private readonly rootDir: string, readonly path: string) {}
+
+  static async create(config: Record<string, unknown>): Promise<TempConfig> {
+    const rootDir = await mkdtemp(path.join(os.tmpdir(), "kodelet-sdk-config-"));
+    const configPath = path.join(rootDir, "kodelet-config.json");
+    await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+    return new TempConfig(rootDir, configPath);
+  }
+
+  async close(): Promise<void> {
     await rm(this.rootDir, { recursive: true, force: true });
   }
 }
@@ -939,31 +977,6 @@ function normalizeProfile(profile: CreateSessionOptions["profile"]): Profile | u
   return profile instanceof Profile ? profile : new Profile(profile);
 }
 
-function profileCLIArgs(config: ProfileInput): string[] {
-  const args: string[] = [];
-  addStringFlag(args, "--provider", config.provider);
-  addStringFlag(args, "--model", config.model);
-  addStringFlag(args, "--max-tokens", config.max_tokens);
-  addStringFlag(args, "--thinking-budget-tokens", config.thinking_budget_tokens);
-  addStringFlag(args, "--weak-model", config.weak_model);
-  addStringFlag(args, "--weak-model-max-tokens", config.weak_model_max_tokens);
-  addStringFlag(args, "--reasoning-effort", config.reasoning_effort);
-  addStringFlag(args, "--allowed-commands", joinList(config.allowed_commands));
-  addStringFlag(args, "--allowed-domains-file", config.allowed_domains_file);
-  addStringFlag(args, "--allowed-tools", joinList(config.allowed_tools));
-  addStringFlag(args, "--tool-mode", config.tool_mode);
-  addStringFlag(args, "--anthropic-api-access", config.anthropic_api_access);
-  addStringFlag(args, "--conversation-summary-mode", config.conversation_summary_mode);
-  addStringFlag(args, "--compact-ratio", config.compact_ratio);
-  if (config.disable_fs_search_tools === true) {
-    args.push("--disable-fs-search-tools");
-  }
-  if (config.disable_subagent === true) {
-    args.push("--disable-subagent");
-  }
-  return args;
-}
-
 function acpServerArgs(options: CreateSessionOptions): string[] {
   const args: string[] = [];
   if (options.maxTurns !== undefined && options.maxTurns > 0) {
@@ -972,29 +985,45 @@ function acpServerArgs(options: CreateSessionOptions): string[] {
   return args;
 }
 
-function profileEnv(config: ProfileInput): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  for (const [key, value] of Object.entries(config)) {
-    if (key === "name" || key === "profiler") {
-      continue;
-    }
-    writeEnvValue(env, [key], value);
+async function buildLaunchConfig(profile: Profile | undefined, bridge: InMemoryExtensionBridge | undefined): Promise<LaunchConfig> {
+  const resolved = profile?.toLaunchConfig();
+  const profileConfig = resolved?.config;
+  const config = pruneUndefined({
+    ...(profileConfig ?? {}),
+    ...(profileConfig && profileConfig.profile === undefined ? { profile: "default" } : {}),
+    ...(bridge ? { extensions: bridge.config() } : {}),
+  });
+
+  if (Object.keys(config).length === 0) {
+    return { args: resolved?.args ?? [], env: {} };
   }
-  return env;
+
+  const tempConfig = await TempConfig.create(config);
+  const configFileMode: ConfigFileMode = profileConfig ? "isolated" : "merge";
+  return {
+    args: resolved?.args ?? [],
+    env: {
+      KODELET_CONFIG_FILE: tempConfig.path,
+      KODELET_CONFIG_FILE_MODE: configFileMode,
+    },
+    tempConfig,
+    configFileMode,
+  };
 }
 
-function writeEnvValue(env: NodeJS.ProcessEnv, pathParts: string[], value: ProfileValue): void {
-  if (value === undefined) {
-    return;
-  }
-  if (isPlainObject(value)) {
-    for (const [key, nested] of Object.entries(value)) {
-      writeEnvValue(env, [...pathParts, key], nested);
+function pruneUndefined(value: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (item === undefined) {
+      continue;
     }
-    return;
+    if (isPlainObject(item)) {
+      result[key] = pruneUndefined(item as Record<string, unknown>);
+      continue;
+    }
+    result[key] = item;
   }
-  const envName = `KODELET_${pathParts.join("_").toUpperCase()}`;
-  env[envName] = Array.isArray(value) ? value.join(",") : String(value);
+  return result;
 }
 
 function buildPromptBlocks(options: RunOptions): ACPContentBlock[] {
@@ -1057,20 +1086,6 @@ function toolContentToText(content: unknown): string {
     }
   }
   return parts.join("\n");
-}
-
-function addStringFlag(args: string[], flag: string, value: unknown): void {
-  if (value === undefined || value === null || value === "") {
-    return;
-  }
-  args.push(flag, String(value));
-}
-
-function joinList(value: unknown): string | undefined {
-  if (Array.isArray(value)) {
-    return value.join(",");
-  }
-  return typeof value === "string" ? value : undefined;
 }
 
 function cleanEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {

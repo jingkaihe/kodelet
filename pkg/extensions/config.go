@@ -51,29 +51,7 @@ func LoadConfigFromViper() Config {
 			logger.G(context.Background()).WithError(err).Warn("failed to load extensions config, using defaults")
 		}
 	}
-	applyExtensionConfigOverrides(&config)
 	return config
-}
-
-func applyExtensionConfigOverrides(config *Config) {
-	if viper.IsSet("extensions.enabled") {
-		config.Enabled = viper.GetBool("extensions.enabled")
-	}
-	if viper.IsSet("extensions.global_dir") {
-		config.GlobalDir = viper.GetString("extensions.global_dir")
-	}
-	if viper.IsSet("extensions.local_dir") {
-		config.LocalDir = viper.GetString("extensions.local_dir")
-	}
-	if viper.IsSet("extensions.max_output_size") {
-		config.MaxOutputSize = viper.GetInt("extensions.max_output_size")
-	}
-	if viper.IsSet("extensions.allow") {
-		config.Allow = viper.GetStringSlice("extensions.allow")
-	}
-	if viper.IsSet("extensions.deny") {
-		config.Deny = viper.GetStringSlice("extensions.deny")
-	}
 }
 
 func extensionConfigDecodeHook() mapstructure.DecodeHookFunc {
