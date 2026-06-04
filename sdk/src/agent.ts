@@ -1,4 +1,5 @@
 import { spawn as spawnProcess, type SpawnOptions } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
@@ -186,6 +187,7 @@ interface ACPContentBlock {
 interface ACPToolCallUpdate {
   sessionUpdate?: string;
   toolCallId?: string;
+  toolName?: string;
   title?: string;
   kind?: string;
   status?: string;
@@ -572,13 +574,14 @@ class ACPRPCClient {
     child.stderr?.on("data", (chunk: Buffer | string) => {
       this.stderrChunks.push(String(chunk));
     });
+    child.once("error", (error: Error) => {
+      this.closed = true;
+      this.rejectPending(error);
+    });
     child.once("close", (code: number | null, signal: NodeJS.Signals | null) => {
       this.closed = true;
       const message = this.stderrChunks.join("").trim() || `kodelet acp exited with status ${code ?? "unknown"}${signal ? ` (${signal})` : ""}`;
-      for (const pending of this.pending.values()) {
-        pending.reject(new AgentRunError(message, { code, signal, stderr: this.stderrChunks.join("") }));
-      }
-      this.pending.clear();
+      this.rejectPending(new AgentRunError(message, { code, signal, stderr: this.stderrChunks.join("") }));
     });
   }
 
@@ -656,6 +659,13 @@ class ACPRPCClient {
     this.child.stdin?.write(`${JSON.stringify(message)}\n`);
   }
 
+  private rejectPending(error: Error): void {
+    for (const pending of this.pending.values()) {
+      pending.reject(error);
+    }
+    this.pending.clear();
+  }
+
   private handleLine(line: string): void {
     const trimmed = line.trim();
     if (!trimmed) {
@@ -714,11 +724,12 @@ class InMemoryExtensionBridge {
 
   static async create(entrypoints: ExtensionEntrypoint[], options: { ui?: AgentUIHandlers } = {}): Promise<InMemoryExtensionBridge> {
     const rootDir = await mkdtemp(path.join(os.tmpdir(), "kodelet-sdk-extensions-"));
+    const bridgeId = randomUUID().replace(/-/g, "").slice(0, 16);
     const servers: ExtensionSocketServer[] = [];
 
     try {
       for (const [index, entrypoint] of entrypoints.entries()) {
-        const id = `sdk-${index + 1}`;
+        const id = `sdk-${bridgeId}-${index + 1}`;
         const socketPath = extensionSocketPath(rootDir, id);
         const host = await createExtensionHost(entrypoint);
         const server = new ExtensionSocketServer(host, socketPath, options.ui);
@@ -1049,15 +1060,15 @@ function textFromACPContent(content: unknown): string {
   if (typeof content.text === "string") {
     return content.text;
   }
+  if (isRecord(content.resource) && typeof content.resource.text === "string") {
+    return content.resource.text;
+  }
   return "";
 }
 
 function toolNameFromUpdate(update: ACPToolCallUpdate): string {
-  if (typeof update.title === "string" && update.title.trim() !== "") {
-    return update.title;
-  }
-  if (typeof update.kind === "string" && update.kind.trim() !== "") {
-    return update.kind;
+  if (typeof update.toolName === "string" && update.toolName.trim() !== "") {
+    return update.toolName;
   }
   return "";
 }

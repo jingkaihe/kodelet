@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdtemp, readFile, stat } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Readable, Writable } from "node:stream";
@@ -116,6 +116,25 @@ class FakeACPProcess extends EventEmitter implements SpawnedProcess {
 
   private write(message: Record<string, unknown>): void {
     this.stdout.push(`${JSON.stringify(message)}\n`);
+  }
+}
+
+class FailingSpawnProcess extends EventEmitter implements SpawnedProcess {
+  stdin = new Writable({
+    write(_chunk, _encoding, callback) {
+      callback();
+    },
+  });
+  stdout = new Readable({ read() {} });
+  stderr = new Readable({ read() {} });
+
+  constructor(error: Error) {
+    super();
+    setImmediate(() => this.emit("error", error));
+  }
+
+  kill(): boolean {
+    return true;
   }
 }
 
@@ -245,9 +264,10 @@ test("Session runs kodelet ACP JSON-RPC and emits typed stream events", async ()
           update: {
             sessionUpdate: "tool_call",
             toolCallId: "call-1",
-            title: "bash",
-            kind: "execute",
-            rawInput: { command: "pwd" },
+            toolName: "file_read",
+            title: "Read: /tmp/example.txt",
+            kind: "read",
+            rawInput: { file_path: "/tmp/example.txt" },
           },
         });
         child.notify("session/update", {
@@ -256,7 +276,19 @@ test("Session runs kodelet ACP JSON-RPC and emits typed stream events", async ()
             sessionUpdate: "tool_call_update",
             toolCallId: "call-1",
             status: "completed",
-            content: [{ type: "content", content: { type: "text", text: "/tmp" } }],
+            content: [
+              {
+                type: "content",
+                content: {
+                  type: "resource",
+                  resource: {
+                    uri: "file:///tmp/example.txt",
+                    mimeType: "text/plain",
+                    text: "1 | hello",
+                  },
+                },
+              },
+            ],
           },
         });
       },
@@ -286,8 +318,8 @@ test("Session runs kodelet ACP JSON-RPC and emits typed stream events", async ()
   assert.equal(response.conversationId, "conv-1");
   assert.deepEqual(deltas, ["forty", " two"]);
   assert.deepEqual(thoughts, ["checking"]);
-  assert.equal(toolName, "bash");
-  assert.equal(toolResult, "/tmp");
+  assert.equal(toolName, "file_read");
+  assert.equal(toolResult, "1 | hello");
   assert.equal(response.stopReason, "end_turn");
   assert.equal(session.id, "conv-1");
   assert.equal(calls[0]?.command, "kodelet-test");
@@ -302,6 +334,13 @@ test("Session runs kodelet ACP JSON-RPC and emits typed stream events", async ()
   ]);
 
   await client.close();
+});
+
+test("Client rejects child spawn failures without crashing the process", async () => {
+  const spawn: SpawnFunction = () => new FailingSpawnProcess(new Error("spawn failed"));
+  const client = new Client({ spawn });
+
+  await assert.rejects(() => client.createSession(), /spawn failed/);
 });
 
 test("Session exposes in-process extensions through a temporary JSON-RPC bridge", async () => {
@@ -356,6 +395,10 @@ test("Session exposes in-process extensions through a temporary JSON-RPC bridge"
   assert.deepEqual(config.extensions?.allow, [extensionRoot]);
   const info = await stat(extensionRoot);
   assert.equal(info.isDirectory(), true);
+  const extensionExecutables = (await readdir(extensionRoot)).filter((entry) => entry.startsWith("kodelet-extension-"));
+  assert.equal(extensionExecutables.length, 1);
+  assert.match(extensionExecutables[0], /^kodelet-extension-sdk-[0-9a-f]{16}-1$/);
+  assert.notEqual(extensionExecutables[0], "kodelet-extension-sdk-1");
   assert.deepEqual(calls[0]?.args, ["acp"]);
 
   await client.close();
