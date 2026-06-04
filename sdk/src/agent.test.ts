@@ -343,6 +343,33 @@ test("Client rejects child spawn failures without crashing the process", async (
   await assert.rejects(() => client.createSession(), /spawn failed/);
 });
 
+test("Session rejects already-aborted run signals without starting a run", async () => {
+  const processes: FakeACPProcess[] = [];
+  const spawn: SpawnFunction = () => {
+    const process = new FakeACPProcess();
+    processes.push(process);
+    return process;
+  };
+  const client = new Client({ spawn });
+  const session = await client.createSession();
+  const emittedEvents: string[] = [];
+  session.on("event", (event) => emittedEvents.push(event.type));
+
+  const controller = new AbortController();
+  const abortReason = new Error("cancelled before run");
+  controller.abort(abortReason);
+
+  await assert.rejects(
+    () => session.runAndWait({ message: "hello", signal: controller.signal }),
+    (error) => error === abortReason,
+  );
+
+  assert.deepEqual(emittedEvents, []);
+  assert.deepEqual(processes[0]?.requests.map((request) => request.method), ["initialize", "session/new"]);
+
+  await client.close();
+});
+
 test("Session exposes in-process extensions through a temporary JSON-RPC bridge", async () => {
   const workspace = await mkdtemp(path.join(os.tmpdir(), "kodelet-agent-sdk-test-"));
   const calls: Array<{ args: string[]; env?: NodeJS.ProcessEnv }> = [];

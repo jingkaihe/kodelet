@@ -400,6 +400,7 @@ export class Session extends EventEmitter {
     if (options.maxTurns !== undefined && options.maxTurns !== this.maxTurns) {
       throw new Error("Per-run maxTurns is not supported by the RPC transport; set maxTurns in createSession instead");
     }
+    throwIfAlreadyAborted(options.signal);
 
     this.running = true;
     const events: AgentStreamEvent[] = [];
@@ -1043,6 +1044,16 @@ function buildPromptBlocks(options: RunOptions): ACPContentBlock[] {
     prompt.push(imageToContentBlock(image));
   }
   return prompt;
+}
+
+function throwIfAlreadyAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) {
+    return;
+  }
+  signal.throwIfAborted();
+  const error = new Error("The operation was aborted");
+  error.name = "AbortError";
+  throw error;
 }
 
 function imageToContentBlock(image: string): ACPContentBlock {
