@@ -52,6 +52,7 @@ Kodelet is a lightweight agentic SWE Agent that runs as an interactive CLI tool 
   - [Using Accounts at Runtime](#using-accounts-at-runtime)
   - [Account Status](#account-status)
 - [Extensions](#extensions)
+  - [TypeScript Agent SDK](#typescript-agent-sdk)
   - [Creating TypeScript Extensions](#creating-typescript-extensions)
   - [Requesting User Input from Extensions](#requesting-user-input-from-extensions)
   - [Extension Discovery](#extension-discovery)
@@ -1169,6 +1170,64 @@ If a token is expired, run `kodelet anthropic login --alias <alias>` to re-authe
 Extensions are Kodelet's unified external extensibility primitive. They replace the old executable custom-tool and lifecycle-hook systems with one long-running subprocess that can register model tools, prompt commands, dynamic recipes, and lifecycle event handlers.
 
 Extensions communicate with Kodelet over stdio JSON-RPC using `Content-Length` framing. `stdout` is reserved for protocol messages and `stderr` is used for logs.
+
+### TypeScript Agent SDK
+
+The `kodelet` TypeScript package can also launch and drive agent sessions from Node/TypeScript. It speaks to `kodelet acp` over stdio JSON-RPC, so it preserves normal profile resolution, conversation persistence, tools, skills, MCP, and extension behavior.
+
+```typescript
+import { Client } from "kodelet";
+
+const client = new Client();
+const session = await client.createSession();
+const response = await session.runAndWait({ message: "what is the meaning of life" });
+
+console.log(response.content);
+await client.close();
+```
+
+Create streaming sessions with an inline or named profile, and optionally pass in-process extension definitions. Inline extensions are exposed to Kodelet through a temporary JSON-RPC bridge for that session. The bridge uses a Unix domain socket (or Windows named pipe) by default; set `extensionTransport: "tcp"` to use an ephemeral loopback TCP port instead.
+
+```typescript
+import { Client, Profile, defineExtension, z } from "kodelet";
+
+const workspace = defineExtension((ext) => {
+  ext.setMetadata({ name: "workspace", version: "0.1.0" });
+  ext.registerTool({
+    name: "ask_user_question",
+    description: "Ask the user to choose one option.",
+    inputSchema: z.object({ question: z.string(), options: z.array(z.string()).min(2).max(5) }),
+    async execute(input, ctx) {
+      const choice = await ctx.ui.select({ title: input.question, options: input.options });
+      return choice ? `User selected: ${choice}` : "User dismissed the question.";
+    },
+  });
+});
+
+const profile = new Profile({
+  provider: "openai",
+  model: "gpt-5.5",
+  reasoning_effort: "xhigh",
+  tool_mode: "patch",
+  openai: { api_mode: "responses", platform: "codex", service_tier: "fast" },
+});
+
+const client = new Client();
+const session = await client.createSession({
+  profile,
+  extensions: [workspace],
+  streaming: true,
+  // Optional: use loopback TCP instead of the default socket/named-pipe bridge.
+  extensionTransport: "tcp",
+});
+
+session.on("assistant.message_delta", (event) => process.stdout.write(event.data.deltaContent));
+session.on("tool.call", (event) => console.error(event.data.toolName, event.data.input));
+
+const response = await session.runAndWait({ message: "help me choose an approach" });
+console.log("\nfinal:", response.content);
+await client.close();
+```
 
 ### Creating TypeScript Extensions
 

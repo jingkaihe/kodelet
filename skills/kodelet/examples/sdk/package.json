@@ -2,7 +2,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "basic": "tsx basic-agent-session.ts",
+    "streaming": "tsx streaming-agent-session.ts",
+    "inline-extension": "tsx inline-extension-session.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

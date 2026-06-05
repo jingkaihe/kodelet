@@ -298,6 +298,7 @@ const (
 type ToolCallUpdate struct {
 	SessionUpdate string            `json:"sessionUpdate"`
 	ToolCallID    string            `json:"toolCallId"`
+	ToolName      string            `json:"toolName,omitempty"`
 	Title         string            `json:"title,omitempty"`
 	Kind          ToolKind          `json:"kind,omitempty"`
 	Status        ToolCallStatus    `json:"status"`

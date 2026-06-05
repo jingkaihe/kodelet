@@ -1,6 +1,6 @@
 # Extensions
 
-Extensions are Kodelet's unified external extensibility primitive. They replace the old executable custom-tool and lifecycle-hook systems with one long-running subprocess that can register model tools, prompt commands, dynamic recipes, and lifecycle event handlers.
+Extensions are Kodelet's unified external extensibility primitive. They are long-running subprocess that can register model tools, prompt commands, dynamic recipes, and lifecycle event handlers.
 
 Extensions communicate over stdio JSON-RPC using `Content-Length` framing. `stdout` is reserved for protocol messages; `stderr` is used for logs.
 
@@ -11,9 +11,11 @@ Extensions communicate over stdio JSON-RPC using `Content-Length` framing. `stdo
 - **Dynamic recipes**: command registrations with `kind: "recipe"` that appear in recipe listings and can be run with `kodelet run -r`.
 - **Lifecycle event handlers**: observers/mutators/blockers for session, user, agent, turn, and tool events.
 
-## TypeScript SDK basics
+Use the TypeScript SDK to author extension subprocesses, or implement the JSON-RPC protocol directly. See `references/sdk.md` for SDK agent sessions and the full SDK API surface.
 
-The SDK package is imported as `kodelet` and re-exports Zod as `z`.
+## Authoring a standalone extension
+
+Most TypeScript extensions use `defineExtension(...)` and `runExtension(...)` from the `kodelet` package:
 
 ```typescript
 import { z, defineExtension } from "kodelet";
@@ -36,6 +38,22 @@ const extension = defineExtension((ext) => {
       return {
         content: `Weather for ${input.location}: cloudy`,
         data: { location: input.location, condition: "cloudy" },
+      };
+    },
+  });
+
+  ext.registerCommand({
+    name: "review",
+    aliases: ["/review"],
+    description: "Run an extension-provided review recipe",
+    kind: "recipe",
+    inputSchema: z.object({ target: z.string().default("HEAD") }),
+    timeoutInSec: 1800,
+    async execute(input) {
+      return {
+        action: "runAgent",
+        recipeName: "review",
+        prompt: `Review ${input.target}. Focus on correctness, simplicity, and tests.`,
       };
     },
   });
@@ -70,92 +88,30 @@ Wrapper example:
 exec kodelet-extension-node ./dist/index.js
 ```
 
-During local development, a wrapper can also run `tsx` against `src/index.ts` as shown in `examples/extensions/workspace/kodelet-extension-workspace`.
+During local development, a wrapper can run `tsx` against `src/index.ts`, as shown in `examples/extensions/workspace/kodelet-extension-workspace`.
 
-## Extension tools
+### Tools, commands, events, and UI helpers
 
-Register tools with `ext.registerTool(...)`, provide a Zod `inputSchema`, and return either a string or an object like:
+- Tools use `ext.registerTool(...)`, a Zod `inputSchema`, and return either a string or `{ content, data?, error? }`.
+- Prompt commands use `ext.registerCommand(...)` and return `pass`, `respond`, or `runAgent` actions.
+- Recipe-like commands use `kind: "recipe"`, appear in `kodelet recipe list`, and can be invoked through `kodelet run -r` or directly as `/name`.
+- Lifecycle handlers use `ext.on(...)` for events like `session.start`, `user.message`, `agent.init`, `turn.start`, `tool.call`, `tool.result`, and `agent.end`.
+- Tool and event contexts can call host UI helpers such as `ctx.ui.input`, `ctx.ui.confirm`, `ctx.ui.select`, and `ctx.ui.notify`.
 
-```typescript
-return {
-  content: "Assistant-facing result",
-  data: { structured: true },
-  error: undefined,
-};
-```
+Mutating/blocking event handlers run sequentially by priority, discovery order, then registration order. The first blocking handler stops the operation. Events use SDK `timeoutInSec` or the built-in 30 second default.
 
-Per-tool enablement lives under `extensions.tools.<tool-name>.enabled`. Tool timeouts use SDK `timeoutInSec` or the built-in 10 minute fallback.
-
-## User input from extensions
-
-Tool and event contexts can request UI input from the host:
-
-```typescript
-const choice = await ctx.ui.select({
-  title: "Choose an option",
-  message: "Pick one approach.",
-  options: ["Fast", "Safe", "Skip"],
-  submitButtonText: "Select",
-});
-
-const confirmed = await ctx.ui.confirm({
-  title: "Allow?",
-  message: "A tool call is about to run.",
-});
-```
-
-The workspace example uses this to ask users whether to allow or deny bash commands, and can remember exact command decisions in extension storage.
-
-## Commands and dynamic recipes
-
-Prompt commands are checked before the LLM receives user input.
-
-```typescript
-ext.registerCommand({
-  name: "review",
-  aliases: ["/review"],
-  description: "Run an extension-provided review recipe",
-  kind: "recipe",
-  inputSchema: z.object({ target: z.string().default("HEAD") }),
-  timeoutInSec: 1800,
-  async execute(input) {
-    return {
-      action: "runAgent",
-      recipeName: "review",
-      prompt: `Review ${input.target}. Focus on correctness, simplicity, and tests.`,
-    };
-  },
-});
-```
-
-Command result actions:
-
-- `pass`: decline handling and continue normal prompt routing.
-- `respond`: display a direct terminal/Web UI response; it is not fed into the LLM.
-- `runAgent`: replace the prompt and run the normal agent flow; this prompt becomes LLM input.
-
-Recipe-like commands use `kind: "recipe"`, appear in `kodelet recipe list`, can be invoked with `kodelet run -r review --arg target=main`, and can be invoked directly as `/review target=main`.
-
-## Lifecycle events
-
-Subscribe with `ext.on(...)`.
-
-Common events:
-
-- `session.start`, `resources.discover`, `session.end`.
-- `user.message`.
-- `agent.init`, `agent.start`, `agent.end`.
-- `turn.start`, `turn.end`.
-- `tool.call`, `tool.result`.
-
-Mutating/blocking events run sequentially by priority, discovery order, then registration order. The first blocking handler stops the operation. Events use SDK `timeoutInSec` or the built-in 30 second default.
-
-Legacy mapping:
+Legacy hook mapping:
 
 | Old concept | Extension event |
 | --- | --- |
 | `before_tool_call` | `tool.call` |
 | `after_tool_call` | `tool.result` |
+
+## Runtime protocol
+
+Extension subprocesses communicate with Kodelet over stdio JSON-RPC using `Content-Length` framing. Kodelet sends initialization, tool execution, command execution, and lifecycle event requests to the extension process. Extension code should reserve `stdout` for protocol messages and write logs to `stderr`.
+
+The TypeScript SDK's `runExtension(...)` helper implements this protocol for extensions. Non-SDK extensions can implement the same JSON-RPC methods directly.
 
 ## Discovery
 

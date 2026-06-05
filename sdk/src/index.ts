@@ -1,17 +1,45 @@
 export { z } from "zod";
+export { AgentRunError, Client, Profile, Session } from "./agent.js";
 export { defineExtension, ExtensionHost } from "./api.js";
 export { runExtension } from "./runtime.js";
 export { createTestHarness } from "./test-harness.js";
 export { renderTemplate } from "./template.js";
+export type {
+  AgentResponse,
+  AgentStreamEvent,
+  AgentUIHandlers,
+  AssistantMessageData,
+  AssistantMessageDeltaData,
+  AssistantThinkingDeltaData,
+  BridgeTransport,
+  ClientOptions,
+  CreateSessionOptions,
+  ProfileInput,
+  RunOptions,
+  SessionEventMap,
+  SpawnFunction,
+  SpawnedProcess,
+  ToolCallData,
+  ToolResultData,
+} from "./agent.js";
+export { runWithHostRPCClient, setActiveHostRPCClient } from "./context.js";
+export type { HostRPCClient } from "./context.js";
 export type { RenderTemplateOptions, TemplateView } from "./template.js";
 export type {
+  AgentEndEvent,
+  AgentInitEvent,
+  AgentStartEvent,
   Awaitable,
   BaseCallContext,
+  CommandFlagValue,
   CommandContext,
   CommandInvocation,
   CommandKind,
+  CommandPassResult,
   CommandRegistration,
+  CommandRespondResult,
   CommandResult,
+  CommandRunAgentResult,
   EnvContext,
   EmptyEvent,
   EventBlock,
@@ -33,14 +61,31 @@ export type {
   InitializeResult,
   LogContext,
   PathContext,
+  ProcessExecOptions,
   ProcessContext,
+  ProcessSpawnOptions,
+  ResourcesDiscoverEvent,
+  SessionEndEvent,
+  SessionStartEvent,
+  SharedContext,
   StorageContext,
+  SystemPromptPatch,
+  ToolCallDetails,
+  ToolCallEvent,
   ToolContext,
   ToolExecutionResult,
+  ToolListPatch,
   ToolRegistration,
+  ToolResultDetails,
+  ToolResultEvent,
+  TurnEndEvent,
+  TurnStartEvent,
   UIConfirmRequest,
   UIContext,
   UIInputRequest,
+  UIInputResponse,
+  UIInputStatus,
   UINotifyRequest,
   UISelectRequest,
+  UserMessageEvent,
 } from "./types.js";

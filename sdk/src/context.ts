@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { execFile, spawn as spawnProcess } from "node:child_process";
 import { promises as fs } from "node:fs";
 import os from "node:os";
@@ -29,9 +30,18 @@ export interface HostRPCClient {
 }
 
 let activeHostRPCClient: HostRPCClient | undefined;
+const hostRPCClientStorage = new AsyncLocalStorage<HostRPCClient | undefined>();
 
 export function setActiveHostRPCClient(client: HostRPCClient | undefined): void {
   activeHostRPCClient = client;
+}
+
+export async function runWithHostRPCClient<T>(client: HostRPCClient | undefined, fn: () => Promise<T>): Promise<T> {
+  return await hostRPCClientStorage.run(client, fn);
+}
+
+function currentHostRPCClient(): HostRPCClient | undefined {
+  return hostRPCClientStorage.getStore() ?? activeHostRPCClient;
 }
 
 export function createToolContext(init: InitializeParams | undefined, context: BaseCallContext = {}): ToolContext {
@@ -199,38 +209,42 @@ function createSharedContext(init: InitializeParams | undefined, context: BaseCa
     log,
     ui: {
       async input(request: UIInputRequest) {
-        if (!activeHostRPCClient) {
+        const client = currentHostRPCClient();
+        if (!client) {
           return undefined;
         }
-        const result = await activeHostRPCClient.request("kodelet.ui.input", request);
+        const result = await client.request("kodelet.ui.input", request);
         if (isRecord(result) && result.status === "submitted" && typeof result.value === "string") {
           return result.value;
         }
         return undefined;
       },
       async confirm(request: UIConfirmRequest) {
-        if (!activeHostRPCClient) {
+        const client = currentHostRPCClient();
+        if (!client) {
           return false;
         }
-        const result = await activeHostRPCClient.request("kodelet.ui.confirm", request);
+        const result = await client.request("kodelet.ui.confirm", request);
         return isRecord(result) && result.status === "submitted" && result.confirmed === true;
       },
       async select(request: UISelectRequest) {
-        if (!activeHostRPCClient) {
+        const client = currentHostRPCClient();
+        if (!client) {
           return undefined;
         }
-        const result = await activeHostRPCClient.request("kodelet.ui.select", request);
+        const result = await client.request("kodelet.ui.select", request);
         if (isRecord(result) && result.status === "submitted" && typeof result.value === "string") {
           return result.value;
         }
         return undefined;
       },
       async notify(request: string | UINotifyRequest) {
-        if (!activeHostRPCClient) {
+        const client = currentHostRPCClient();
+        if (!client) {
           return;
         }
         const payload = typeof request === "string" ? { message: request } : request;
-        await activeHostRPCClient.request("kodelet.ui.notify", payload);
+        await client.request("kodelet.ui.notify", payload);
       },
     },
   };

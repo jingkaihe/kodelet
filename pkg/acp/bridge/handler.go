@@ -96,6 +96,7 @@ func (h *ACPMessageHandler) HandleToolUse(toolCallID string, toolName string, in
 	toolCallUpdate := map[string]any{
 		"sessionUpdate": acptypes.UpdateToolCall,
 		"toolCallId":    toolCallID,
+		"toolName":      toolName,
 		"title":         title,
 		"kind":          ToACPToolKind(toolName),
 		"status":        acptypes.ToolStatusPending,

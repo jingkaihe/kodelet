@@ -1,7 +1,7 @@
 {
   "name": "kodelet",
   "version": "0.0.0",
-  "description": "TypeScript SDK for authoring Kodelet extensions",
+  "description": "TypeScript SDK for Kodelet agents and extensions",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -13,6 +13,10 @@
     "./runtime": {
       "types": "./dist/runtime.d.ts",
       "import": "./dist/runtime.js"
+    },
+    "./agent": {
+      "types": "./dist/agent.d.ts",
+      "import": "./dist/agent.js"
     },
     "./test-harness": {
       "types": "./dist/test-harness.d.ts",

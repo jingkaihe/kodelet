@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.4.32-beta (2026-06-05)
+
+Added a TypeScript Agent SDK that can launch `kodelet acp` sessions from Node, stream assistant/tool events, resume conversations, and run with named or inline profiles.
+
+Enabled SDK-provided in-process extensions for agent sessions through a temporary JSON-RPC bridge, including UI input, confirm, select, and notify handlers.
+
+Added override config file support for SDK-launched sessions and included ACP tool names in tool-call updates for richer programmatic event handling.
+
 ## 0.4.30-beta (2026-05-30)
 
 Introduced the unified extension runtime, replacing standalone hooks and executable custom tools with long-running JSON-RPC extensions that can register tools, slash commands, lifecycle event handlers, and follow-up messages.

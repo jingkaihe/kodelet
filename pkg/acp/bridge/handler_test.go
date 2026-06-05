@@ -70,6 +70,7 @@ func TestACPMessageHandler_HandleToolUse(t *testing.T) {
 	toolCall := sender.updates[0].(map[string]any)
 	assert.Equal(t, acptypes.UpdateToolCall, toolCall["sessionUpdate"])
 	assert.Equal(t, "file_read_title", toolCall["title"])
+	assert.Equal(t, "file_read", toolCall["toolName"])
 	assert.Equal(t, acptypes.ToolKindRead, toolCall["kind"])
 	assert.Equal(t, acptypes.ToolStatusPending, toolCall["status"])
 	assert.Equal(t, "call_1", toolCall["toolCallId"])

@@ -16,6 +16,9 @@ bin/
 .kodelet/extensions/*/node_modules/
 examples/extensions/*/node_modules/
 skills/kodelet/examples/extensions/*/node_modules/
+skills/kodelet/examples/extensions/*/package-lock.json
+skills/kodelet/examples/sdk/node_modules/
+skills/kodelet/examples/sdk/package-lock.json
 
 # IDE and editor specific
 .idea/

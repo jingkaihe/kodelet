@@ -17,6 +17,13 @@ import (
 	"github.com/spf13/viper"
 )
 
+const (
+	configFileEnv         = "KODELET_CONFIG_FILE"
+	configFileModeEnv     = "KODELET_CONFIG_FILE_MODE"
+	configFileModeMerge   = "merge"
+	configFileModeIsolate = "isolated"
+)
+
 func init() {
 	viper.SetDefault("max_tokens", 8192)
 	viper.SetDefault("weak_model_max_tokens", 8192)
@@ -59,6 +66,16 @@ func init() {
 	// e.g. KODELET_TRACING_ENABLED -> tracing.enabled
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
+	loadConfigFiles()
+}
+
+func loadConfigFiles() {
+	overrideConfigFile := strings.TrimSpace(os.Getenv(configFileEnv))
+	if overrideConfigFile != "" && configFileMode() == configFileModeIsolate {
+		readConfigFile(overrideConfigFile, "isolated override")
+		return
+	}
+
 	// Layered config: global first, then repo-level override
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
@@ -74,6 +91,41 @@ func init() {
 		if err := viper.MergeInConfig(); err == nil {
 			logger.G(context.TODO()).WithField("config_file", "kodelet-config.yaml").Debug("Merged repo-level config file")
 		}
+	}
+
+	if overrideConfigFile != "" {
+		mergeConfigFile(overrideConfigFile, "override")
+	}
+}
+
+func configFileMode() string {
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv(configFileModeEnv)))
+	switch mode {
+	case "", configFileModeMerge:
+		return configFileModeMerge
+	case configFileModeIsolate:
+		return configFileModeIsolate
+	default:
+		logger.G(context.TODO()).WithField("mode", mode).Warn("Unknown config file mode, using merge mode")
+		return configFileModeMerge
+	}
+}
+
+func readConfigFile(configFile, label string) {
+	viper.SetConfigFile(configFile)
+	if err := viper.ReadInConfig(); err == nil {
+		logger.G(context.TODO()).WithField("config_file", configFile).Debugf("Read %s config file", label)
+	} else {
+		logger.G(context.TODO()).WithField("config_file", configFile).WithError(err).Warnf("Failed to read %s config file", label)
+	}
+}
+
+func mergeConfigFile(configFile, label string) {
+	viper.SetConfigFile(configFile)
+	if err := viper.MergeInConfig(); err == nil {
+		logger.G(context.TODO()).WithField("config_file", configFile).Debugf("Merged %s config file", label)
+	} else {
+		logger.G(context.TODO()).WithField("config_file", configFile).WithError(err).Warnf("Failed to merge %s config file", label)
 	}
 }
 
