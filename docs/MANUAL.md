@@ -1186,7 +1186,7 @@ console.log(response.content);
 await client.close();
 ```
 
-Create streaming sessions with an inline or named profile, and optionally pass in-process extension definitions. Inline extensions are exposed to Kodelet through a temporary JSON-RPC bridge for that session.
+Create streaming sessions with an inline or named profile, and optionally pass in-process extension definitions. Inline extensions are exposed to Kodelet through a temporary JSON-RPC bridge for that session. The bridge uses a Unix domain socket (or Windows named pipe) by default; set `extensionTransport: "tcp"` to use an ephemeral loopback TCP port instead.
 
 ```typescript
 import { Client, Profile, defineExtension, z } from "kodelet";
@@ -1213,7 +1213,13 @@ const profile = new Profile({
 });
 
 const client = new Client();
-const session = await client.createSession({ profile, extensions: [workspace], streaming: true });
+const session = await client.createSession({
+  profile,
+  extensions: [workspace],
+  streaming: true,
+  // Optional: use loopback TCP instead of the default socket/named-pipe bridge.
+  extensionTransport: "tcp",
+});
 
 session.on("assistant.message_delta", (event) => process.stdout.write(event.data.deltaContent));
 session.on("tool.call", (event) => console.error(event.data.toolName, event.data.input));

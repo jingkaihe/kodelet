@@ -101,7 +101,7 @@ console.log("\nfinal:", response.content);
 await client.close();
 ```
 
-Inline extensions passed to `createSession({ extensions: [...] })` are exposed to Kodelet through a temporary JSON-RPC bridge for that session. Sessions without inline extensions use the normal `.kodelet/extensions` and plugin discovery flow.
+Inline extensions passed to `createSession({ extensions: [...] })` are exposed to Kodelet through a temporary JSON-RPC bridge for that session. The bridge uses a Unix domain socket (or Windows named pipe) by default; set `extensionTransport: "tcp"` to use an ephemeral loopback TCP port instead. Sessions without inline extensions use the normal `.kodelet/extensions` and plugin discovery flow.
 
 ### Extension definitions
 

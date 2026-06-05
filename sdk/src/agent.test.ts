@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn as spawnProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { mkdtemp, readFile, readdir, stat } from "node:fs/promises";
 import os from "node:os";
@@ -432,3 +433,138 @@ test("Session exposes in-process extensions through a temporary JSON-RPC bridge"
   await assert.rejects(() => stat(env.KODELET_CONFIG_FILE as string));
   await assert.rejects(() => stat(extensionRoot));
 });
+
+test("Session can expose in-process extensions over a TCP bridge", async (t) => {
+  const workspace = await mkdtemp(path.join(os.tmpdir(), "kodelet-agent-sdk-tcp-test-"));
+  const calls: Array<{ env?: NodeJS.ProcessEnv }> = [];
+  const spawn: SpawnFunction = (_command, _args, options) => {
+    calls.push({ env: options.env });
+    return new FakeACPProcess({ sessionId: "conv-tcp" });
+  };
+
+  const selectedValues: string[] = [];
+  const extension = defineExtension((ext) => {
+    ext.setMetadata({ name: "workspace" });
+    ext.registerTool({
+      name: "ask_user_question",
+      description: "Ask a question",
+      inputSchema: z.object({ question: z.string(), options: z.array(z.string()) }),
+      async execute(input, ctx) {
+        const selected = await ctx.ui.select({ title: input.question, options: input.options });
+        selectedValues.push(selected ?? "");
+        return selected ?? "dismissed";
+      },
+    });
+  });
+
+  const client = new Client({ cwd: workspace, spawn });
+  const session = await client.createSession({
+    extensions: [extension],
+    extensionTransport: "tcp",
+    ui: {
+      select(request) {
+        return request.options[1];
+      },
+    },
+  });
+
+  const env = calls[0]?.env ?? {};
+  const config = JSON.parse(await readFile(env.KODELET_CONFIG_FILE as string, "utf8")) as {
+    extensions?: { local_dir?: string };
+  };
+  const extensionRoot = config.extensions?.local_dir;
+  assert.ok(extensionRoot);
+  const executable = path.join(
+    extensionRoot,
+    (await readdir(extensionRoot)).find((entry) => entry.startsWith("kodelet-extension-")) ?? "",
+  );
+  const executableText = await readFile(executable, "utf8");
+  assert.match(executableText, /"transport":"tcp"/);
+  assert.match(executableText, /"host":"127\.0\.0\.1"/);
+  assert.match(executableText, /"port":\d+/);
+
+  const child = spawnProcess(executable, { stdio: ["pipe", "pipe", "pipe"] });
+  t.after(() => child.kill());
+  assert.ok(child.stdin);
+  assert.ok(child.stdout);
+  const bridge = new BridgeTestClient(child.stdout, child.stdin);
+
+  const init = await bridge.call("extension.initialize", {
+    protocolVersion: "2026-05-30",
+    kodelet: { version: "test" },
+    extension: { id: "workspace", cwd: workspace, dataDir: "" },
+    capabilities: {},
+  });
+  assert.equal((init as { name?: string }).name, "workspace");
+
+  const result = await bridge.call("extension.tool.execute", {
+    name: "ask_user_question",
+    input: { question: "Pick", options: ["A", "B"] },
+    context: { cwd: workspace },
+  });
+  assert.deepEqual(result, { content: "B" });
+  assert.deepEqual(selectedValues, ["B"]);
+
+  await client.close();
+});
+
+class BridgeTestClient {
+  private buffer = Buffer.alloc(0);
+  private nextId = 0;
+  private waiters = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>();
+
+  constructor(stdout: NodeJS.ReadableStream, private stdin: NodeJS.WritableStream) {
+    stdout.on("data", (chunk: Buffer) => {
+      this.buffer = Buffer.concat([this.buffer, chunk]);
+      this.drain();
+    });
+  }
+
+  call(method: string, params: unknown): Promise<unknown> {
+    const id = ++this.nextId;
+    const payload = JSON.stringify({ jsonrpc: "2.0", id, method, params });
+    this.stdin.write(`Content-Length: ${Buffer.byteLength(payload)}\r\n\r\n${payload}`);
+    return new Promise((resolve, reject) => {
+      this.waiters.set(id, { resolve, reject });
+    });
+  }
+
+  private drain(): void {
+    while (true) {
+      const headerEnd = this.buffer.indexOf("\r\n\r\n");
+      if (headerEnd === -1) {
+        return;
+      }
+      const header = this.buffer.subarray(0, headerEnd).toString("ascii");
+      const match = /Content-Length:\s*(\d+)/i.exec(header);
+      if (!match) {
+        throw new Error("missing Content-Length");
+      }
+      const length = Number.parseInt(match[1], 10);
+      const start = headerEnd + 4;
+      const end = start + length;
+      if (this.buffer.length < end) {
+        return;
+      }
+      const response = JSON.parse(this.buffer.subarray(start, end).toString("utf8")) as {
+        id?: number;
+        result?: unknown;
+        error?: { message?: string };
+      };
+      this.buffer = this.buffer.subarray(end);
+      if (typeof response.id !== "number") {
+        continue;
+      }
+      const waiter = this.waiters.get(response.id);
+      if (!waiter) {
+        continue;
+      }
+      this.waiters.delete(response.id);
+      if (response.error) {
+        waiter.reject(new Error(response.error.message ?? "JSON-RPC error"));
+      } else {
+        waiter.resolve(response.result);
+      }
+    }
+  }
+}

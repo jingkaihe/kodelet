@@ -2,7 +2,7 @@ import { spawn as spawnProcess, type SpawnOptions } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { createServer, type Server, type Socket } from "node:net";
+import { createServer, type AddressInfo, type Server, type Socket } from "node:net";
 import os from "node:os";
 import path from "node:path";
 
@@ -17,6 +17,8 @@ import type {
 } from "./types.js";
 
 const ACP_PROTOCOL_VERSION = 1;
+
+export type BridgeTransport = "unix" | "tcp";
 
 export type ProfileValue = string | number | boolean | string[] | number[] | boolean[] | ProfileObject | undefined;
 export interface ProfileObject {
@@ -63,6 +65,8 @@ export interface CreateSessionOptions {
   maxTurns?: number;
   /** SDK-provided UI handlers for in-process extensions. */
   ui?: AgentUIHandlers;
+  /** Transport used by the temporary inline-extension bridge. Defaults to unix domain sockets or Windows named pipes. */
+  extensionTransport?: BridgeTransport;
 }
 
 export interface RunOptions {
@@ -195,6 +199,13 @@ interface ACPToolCallUpdate {
   content?: unknown[];
 }
 
+interface ExtensionBridgeEndpoint {
+  transport: BridgeTransport;
+  path?: string;
+  host?: string;
+  port?: number;
+}
+
 export class Profile {
   readonly name?: string;
   readonly config: ProfileInput;
@@ -278,7 +289,10 @@ export class Client {
 
   async createSession(options: CreateSessionOptions = {}): Promise<Session> {
     const bridge = options.extensions?.length
-      ? await InMemoryExtensionBridge.create(options.extensions, { ui: options.ui })
+      ? await InMemoryExtensionBridge.create(options.extensions, {
+          ui: options.ui,
+          transport: normalizeBridgeTransport(options),
+        })
       : undefined;
     const cwd = path.resolve(options.cwd ?? this.cwd);
     const profile = normalizeProfile(options.profile);
@@ -723,22 +737,26 @@ class InMemoryExtensionBridge {
     private readonly servers: ExtensionSocketServer[],
   ) {}
 
-  static async create(entrypoints: ExtensionEntrypoint[], options: { ui?: AgentUIHandlers } = {}): Promise<InMemoryExtensionBridge> {
+  static async create(
+    entrypoints: ExtensionEntrypoint[],
+    options: { ui?: AgentUIHandlers; transport?: BridgeTransport } = {},
+  ): Promise<InMemoryExtensionBridge> {
     const rootDir = await mkdtemp(path.join(os.tmpdir(), "kodelet-sdk-extensions-"));
     const bridgeId = randomUUID().replace(/-/g, "").slice(0, 16);
+    const transport = options.transport ?? "unix";
     const servers: ExtensionSocketServer[] = [];
 
     try {
       for (const [index, entrypoint] of entrypoints.entries()) {
         const id = `sdk-${bridgeId}-${index + 1}`;
-        const socketPath = extensionSocketPath(rootDir, id);
+        const endpoint = extensionBridgeEndpoint(rootDir, id, transport);
         const host = await createExtensionHost(entrypoint);
-        const server = new ExtensionSocketServer(host, socketPath, options.ui);
+        const server = new ExtensionSocketServer(host, endpoint, options.ui);
         await server.listen();
         servers.push(server);
 
         const executablePath = path.join(rootDir, `kodelet-extension-${id}`);
-        await writeFile(executablePath, extensionBridgeExecutable(socketPath), "utf8");
+        await writeFile(executablePath, extensionBridgeExecutable(server.endpoint), "utf8");
         await chmod(executablePath, 0o755);
       }
     } catch (error) {
@@ -787,12 +805,17 @@ class ExtensionSocketServer implements HostRPCClient {
 
   constructor(
     private readonly host: ExtensionHost,
-    private readonly socketPath: string,
+    readonly endpoint: ExtensionBridgeEndpoint,
     private readonly ui?: AgentUIHandlers,
   ) {}
 
   async listen(): Promise<void> {
-    await rm(this.socketPath, { force: true });
+    if (this.endpoint.transport === "unix") {
+      if (!this.endpoint.path) {
+        throw new Error("Unix extension bridge endpoint is missing a socket path");
+      }
+      await rm(this.endpoint.path, { force: true });
+    }
     this.server = createServer((socket) => {
       this.socket = socket;
       const reader = new FrameReader();
@@ -810,10 +833,24 @@ class ExtensionSocketServer implements HostRPCClient {
 
     await new Promise<void>((resolve, reject) => {
       this.server?.once("error", reject);
-      this.server?.listen(this.socketPath, () => {
+      const onListening = () => {
         this.server?.off("error", reject);
+        if (this.endpoint.transport === "tcp") {
+          const address = this.server?.address();
+          if (!isAddressInfo(address)) {
+            reject(new Error("TCP extension bridge server did not expose a listening address"));
+            return;
+          }
+          this.endpoint.host = address.address;
+          this.endpoint.port = address.port;
+        }
         resolve();
-      });
+      };
+      if (this.endpoint.transport === "tcp") {
+        this.server?.listen(0, "127.0.0.1", onListening);
+      } else {
+        this.server?.listen(this.endpoint.path, onListening);
+      }
     });
   }
 
@@ -830,7 +867,9 @@ class ExtensionSocketServer implements HostRPCClient {
       }
       this.server.close(() => resolve());
     });
-    await rm(this.socketPath, { force: true });
+    if (this.endpoint.transport === "unix" && this.endpoint.path) {
+      await rm(this.endpoint.path, { force: true });
+    }
   }
 
   async request(method: string, params?: unknown): Promise<unknown> {
@@ -989,6 +1028,14 @@ function normalizeProfile(profile: CreateSessionOptions["profile"]): Profile | u
   return profile instanceof Profile ? profile : new Profile(profile);
 }
 
+function normalizeBridgeTransport(options: CreateSessionOptions): BridgeTransport {
+  const value = options.extensionTransport ?? "unix";
+  if (value === "unix" || value === "tcp") {
+    return value;
+  }
+  throw new Error("extensionTransport must be 'unix' or 'tcp'");
+}
+
 function acpServerArgs(options: CreateSessionOptions): string[] {
   const args: string[] = [];
   if (options.maxTurns !== undefined && options.maxTurns > 0) {
@@ -1127,6 +1174,10 @@ function isPlainObject(value: unknown): value is ProfileObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isAddressInfo(value: unknown): value is AddressInfo {
+  return isRecord(value) && typeof value.address === "string" && typeof value.port === "number";
+}
+
 function tryReadFrame(buffer: Buffer): { payload: Buffer; remaining: Buffer } | undefined {
   const headerEnd = buffer.indexOf("\r\n\r\n");
   const fallbackHeaderEnd = headerEnd === -1 ? buffer.indexOf("\n\n") : -1;
@@ -1173,15 +1224,37 @@ function extensionSocketPath(rootDir: string, id: string): string {
   return path.join(rootDir, `${id}.sock`);
 }
 
-function extensionBridgeExecutable(socketPath: string): string {
+function extensionBridgeEndpoint(rootDir: string, id: string, transport: BridgeTransport): ExtensionBridgeEndpoint {
+  if (transport === "tcp") {
+    return { transport };
+  }
+  return { transport, path: extensionSocketPath(rootDir, id) };
+}
+
+function extensionBridgeExecutable(endpoint: ExtensionBridgeEndpoint): string {
+  let endpointConfig: Record<string, unknown>;
+  if (endpoint.transport === "tcp") {
+    if (!endpoint.host || endpoint.port === undefined) {
+      throw new Error("TCP extension bridge endpoint is missing host/port");
+    }
+    endpointConfig = { transport: "tcp", host: endpoint.host, port: endpoint.port };
+  } else {
+    if (!endpoint.path) {
+      throw new Error("Unix extension bridge endpoint is missing a socket path");
+    }
+    endpointConfig = { transport: "unix", path: endpoint.path };
+  }
+
   return `#!/usr/bin/env node
 const net = require("node:net");
 const process = require("node:process");
-const SOCKET_PATH = ${JSON.stringify(socketPath)};
+const ENDPOINT = ${JSON.stringify(endpointConfig)};
 
 let stdinBuffer = Buffer.alloc(0);
 let socketBuffer = Buffer.alloc(0);
-const socket = net.createConnection(SOCKET_PATH);
+const socket = ENDPOINT.transport === "tcp"
+  ? net.createConnection({ host: ENDPOINT.host, port: ENDPOINT.port })
+  : net.createConnection(ENDPOINT.path);
 
 socket.on("data", (chunk) => {
   socketBuffer = Buffer.concat([socketBuffer, chunk]);
