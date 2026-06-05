@@ -68,6 +68,6 @@ kodelet serve
 - User asks about config, providers, models, command/tool restrictions, MCP → use `references/configuration.md`.
 - User asks about recipes, fragments, `AGENTS.md`, or subagent workflows → use `references/recipes.md`.
 - User asks about agentic skills, skill layout, or skill plugins → use `references/skills.md`.
-- User asks about extension discovery/runtime/config, plugins, or hooks/custom-tool replacement → use `references/extensions.md`.
+- User asks about extension discovery/runtime/config, plugins → use `references/extensions.md`.
 - User asks about the TypeScript SDK, SDK agent sessions, SDK extension tools/commands/events, or SDK UI prompts → use `references/sdk.md`.
 - User asks about history, JSON streams, programmatic usage, Streamlit examples → use `references/conversations-streaming.md`.

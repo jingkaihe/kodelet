@@ -1,6 +1,6 @@
 # Extensions
 
-Extensions are Kodelet's unified external extensibility primitive. They replace the old executable custom-tool and lifecycle-hook systems with one long-running subprocess that can register model tools, prompt commands, dynamic recipes, and lifecycle event handlers.
+Extensions are Kodelet's unified external extensibility primitive. They are long-running subprocess that can register model tools, prompt commands, dynamic recipes, and lifecycle event handlers.
 
 Extensions communicate over stdio JSON-RPC using `Content-Length` framing. `stdout` is reserved for protocol messages; `stderr` is used for logs.
 
