@@ -1,4 +1,4 @@
-import { Client } from "../src/index.js";
+import { Client } from "kodelet";
 
 const DEFAULT_MESSAGE =
     "What is the meaning of life? Answer in one short paragraph.";

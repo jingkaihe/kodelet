@@ -1,5 +1,5 @@
-import { Client, defineExtension, z } from "../src/index.js";
-import type { UINotifyRequest } from "../src/index.js";
+import { Client, defineExtension, z } from "kodelet";
+import type { UINotifyRequest } from "kodelet";
 
 const DEFAULT_MESSAGE =
     "Use the sdk_echo tool with text 'hello from the TypeScript SDK example', then summarize the tool result in one sentence.";

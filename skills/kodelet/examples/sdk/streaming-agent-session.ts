@@ -1,10 +1,10 @@
-import { Client } from "../src/index.js";
+import { Client } from "kodelet";
 import type {
     AgentStreamEvent,
     Session,
     ToolCallData,
     ToolResultData,
-} from "../src/index.js";
+} from "kodelet";
 
 const DEFAULT_MESSAGE =
     "Explain how to use the Kodelet TypeScript SDK in two bullet points.";

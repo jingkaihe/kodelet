@@ -31,10 +31,6 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "example:agent": "tsx examples/agent-session.ts",
-    "example:basic": "tsx examples/basic-agent-session.ts",
-    "example:streaming": "tsx examples/streaming-agent-session.ts",
-    "example:inline-extension": "tsx examples/inline-extension-session.ts",
     "test": "tsx --test src/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

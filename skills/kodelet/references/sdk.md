@@ -236,9 +236,8 @@ Legacy mapping:
 
 ## Examples
 
-Runnable TypeScript SDK examples live in `sdk/examples/`:
+Runnable TypeScript SDK examples live in `skills/kodelet/examples/sdk/`:
 
 - `basic-agent-session.ts` runs one prompt and prints the final response.
 - `streaming-agent-session.ts` streams assistant deltas as they arrive.
 - `inline-extension-session.ts` exposes an in-process TypeScript extension with an `sdk_echo` tool for the session.
-- `agent-session.ts` is a local smoke test that combines streaming with an inline extension.
