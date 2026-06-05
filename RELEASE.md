@@ -1,6 +1,6 @@
 # Kodelet
 
-## 0.4.31-alpha (2026-06-04)
+## 0.4.32-beta (2026-06-05)
 
 Added a TypeScript Agent SDK that can launch `kodelet acp` sessions from Node, stream assistant/tool events, resume conversations, and run with named or inline profiles.
 
