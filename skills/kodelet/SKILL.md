@@ -16,7 +16,8 @@ For details, choose the reference that matches the task:
 - `references/configuration.md` — config files, profiles, model/provider setup, security restrictions, MCP, bash timeout.
 - `references/recipes.md` — `AGENTS.md`, fragments/recipes, and subagent workflow recipes.
 - `references/skills.md` — agentic skills, skill layout, configuration, and skill plugins.
-- `references/extensions.md` — extension runtime, TypeScript SDK, tools, commands/dynamic recipes, lifecycle events, discovery, config, examples.
+- `references/extensions.md` — extension runtime, discovery, configuration, plugins, and operational behavior.
+- `references/sdk.md` — TypeScript SDK agent sessions, extension authoring API, tools, commands/dynamic recipes, lifecycle events, UI helpers, and examples.
 
 Examples now live with the skill under `examples/`:
 
@@ -67,5 +68,6 @@ kodelet serve
 - User asks about config, providers, models, command/tool restrictions, MCP → use `references/configuration.md`.
 - User asks about recipes, fragments, `AGENTS.md`, or subagent workflows → use `references/recipes.md`.
 - User asks about agentic skills, skill layout, or skill plugins → use `references/skills.md`.
-- User asks about extensions, extension tools, hooks/custom-tool replacement, dynamic recipes, lifecycle events, TypeScript SDK, UI prompts → use `references/extensions.md`.
+- User asks about extension discovery/runtime/config, plugins, or hooks/custom-tool replacement → use `references/extensions.md`.
+- User asks about the TypeScript SDK, SDK agent sessions, SDK extension tools/commands/events, or SDK UI prompts → use `references/sdk.md`.
 - User asks about history, JSON streams, programmatic usage, Streamlit examples → use `references/conversations-streaming.md`.
