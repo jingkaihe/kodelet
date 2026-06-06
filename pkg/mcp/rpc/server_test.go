@@ -5,15 +5,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -71,6 +76,24 @@ func filesystemMCPConfig(t *testing.T) tools.MCPConfig {
 			},
 		},
 	}
+}
+
+type autoOAuthRPCPrompter struct {
+	authURL atomic.Value
+}
+
+func (p *autoOAuthRPCPrompter) PromptMCPOAuth(ctx context.Context, _ string, authURL string) error {
+	p.authURL.Store(authURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, authURL, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return resp.Body.Close()
 }
 
 func TestNewMCPRPCServer(t *testing.T) {
@@ -409,6 +432,112 @@ func TestMCPRPCServer_HandleMCPCall_FullIntegration(t *testing.T) {
 			tt.validateResult(t, response)
 		})
 	}
+}
+
+func TestMCPRPCServer_HandleMCPCall_AutoOAuthHTTPServer(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	prompter := &autoOAuthRPCPrompter{}
+	t.Cleanup(tools.SetDefaultMCPOAuthPrompter(prompter))
+
+	const accessToken = "rpc-oauth-access-token"
+	mcpServer := server.NewMCPServer("test-rpc-http-oauth-server", "1.0.0")
+	mcpServer.AddTool(
+		mcp.NewTool("get_current_time", mcp.WithDescription("Get the current time")),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return mcp.NewToolResultText("2024-01-01T00:00:00Z"), nil
+		},
+	)
+	streamableHandler := server.NewStreamableHTTPServer(mcpServer)
+
+	var tokenRequestCount atomic.Int32
+	var testServer *httptest.Server
+	testServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/oauth-protected-resource":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"authorization_servers": []string{testServer.URL},
+				"resource":              testServer.URL,
+				"scopes_supported":      []string{"mcp.read"},
+			})
+			return
+		case "/.well-known/openid-configuration", "/.well-known/oauth-authorization-server":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"issuer":                 testServer.URL,
+				"authorization_endpoint": testServer.URL + "/authorize",
+				"token_endpoint":         testServer.URL + "/token",
+				"registration_endpoint":  testServer.URL + "/register",
+			})
+			return
+		case "/register":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{"client_id": "registered-client"})
+			return
+		case "/authorize":
+			redirectURI := r.URL.Query().Get("redirect_uri")
+			redirectURL, err := url.Parse(redirectURI)
+			require.NoError(t, err)
+			query := redirectURL.Query()
+			query.Set("code", "oauth-code")
+			query.Set("state", r.URL.Query().Get("state"))
+			query.Set("iss", testServer.URL)
+			redirectURL.RawQuery = query.Encode()
+			http.Redirect(w, r, redirectURL.String(), http.StatusFound)
+			return
+		case "/token":
+			tokenRequestCount.Add(1)
+			require.NoError(t, r.ParseForm())
+			assert.Equal(t, testServer.URL, r.Form.Get("resource"))
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"access_token":  accessToken,
+				"token_type":    "Bearer",
+				"refresh_token": "refresh-token",
+				"expires_in":    3600,
+			})
+			return
+		}
+
+		if r.Header.Get("Authorization") != "Bearer "+accessToken {
+			w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer realm="mcp", resource_metadata="%s/.well-known/oauth-protected-resource", scope="mcp.read"`, testServer.URL))
+			http.Error(w, "authorization required", http.StatusUnauthorized)
+			return
+		}
+
+		streamableHandler.ServeHTTP(w, r)
+	}))
+	defer testServer.Close()
+
+	manager, err := tools.NewMCPManager(tools.MCPConfig{
+		Servers: map[string]tools.MCPServerConfig{
+			"time": {
+				ServerType:    tools.MCPServerTypeHTTP,
+				BaseURL:       testServer.URL,
+				ToolWhiteList: []string{"get_current_time"},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	require.NoError(t, manager.Initialize(ctx))
+	defer func() { _ = manager.Close(ctx) }()
+
+	rpcServer := &MCPRPCServer{mcpManager: manager}
+	rpcReq := MCPRPCRequest{Server: "time", Tool: "get_current_time", Arguments: map[string]any{}}
+	reqBody, err := json.Marshal(rpcReq)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBuffer(reqBody))
+	w := httptest.NewRecorder()
+	rpcServer.handleMCPCall(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, int32(1), tokenRequestCount.Load())
+	assert.NotEmpty(t, prompter.authURL.Load())
+	assert.Contains(t, w.Body.String(), "2024-01-01T00:00:00Z")
 }
 
 func TestMCPRPCServer_HandleMCPCall_ResponseFormat(t *testing.T) {

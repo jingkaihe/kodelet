@@ -502,6 +502,20 @@ mcp:
     # the OS temp directory (for example: /tmp/mcp-<session-hash>.sock)
     # to avoid Unix socket path length limits.
 
+  # OAuth settings for remote HTTP/SSE MCP servers. OAuth is auto-detected
+  # from HTTP 401 Bearer challenges and does not require an auth.type flag.
+  oauth:
+    # Allow browser-based OAuth when a remote MCP server requests it.
+    # Set to "never" for headless/CI runs that should fail fast instead.
+    interactive: "auto"
+
+    # Attempt to open the default browser automatically. If false, Kodelet
+    # prints the authorization URL for manual opening.
+    open_browser: true
+
+    # Maximum time to wait for the local OAuth callback.
+    callback_timeout: "2m"
+
   # MCP servers configuration
   # Each server can be stdio, streamable HTTP, or deprecated SSE based
   servers:
@@ -514,8 +528,18 @@ mcp:
     # example-http:
     #   server_type: "http"
     #   base_url: "https://example.com/mcp"
+    #   # Optional static headers are still supported for API-key/bearer-token servers.
     #   headers:
     #     Authorization: "Bearer ${MCP_TOKEN}"
+    #   # Optional OAuth hints for providers that need pre-registered clients or
+    #   # non-standard discovery. These do not enable OAuth; OAuth is discovered
+    #   # automatically from the server challenge.
+    #   oauth:
+    #     client_id: "${MCP_CLIENT_ID}"
+    #     client_secret: "${MCP_CLIENT_SECRET}"
+    #     scopes: ["mcp.read", "mcp.write"]
+    #     redirect_uri: "http://127.0.0.1:1456/mcp/oauth/callback"
+    #     auth_server_metadata_url: "https://auth.example.com/.well-known/oauth-authorization-server"
     #   tool_white_list: ["tool1", "tool2"]
 
     # Example deprecated SSE server (uncomment to enable)

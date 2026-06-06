@@ -118,11 +118,24 @@ Configure Model Context Protocol servers in `config.yaml`:
 
 ```yaml
 mcp:
+  oauth:
+    # OAuth for remote HTTP/SSE servers is auto-detected from 401 Bearer
+    # challenges. No auth.type flag is required.
+    interactive: "auto" # auto | always | never
+    open_browser: true
+    callback_timeout: "2m"
   servers:
     fs:
       command: "npx"
       args: ["-y", "@modelcontextprotocol/server-filesystem", "/path"]
       tool_white_list: ["list_directory"]
+    remote:
+      server_type: "http"
+      base_url: "https://example.com/mcp"
+      # Optional OAuth hints only; OAuth itself is challenge-discovered.
+      oauth:
+        client_id: "${MCP_CLIENT_ID}"
+        scopes: ["mcp.read"]
 ```
 
 ## Command and tool restrictions

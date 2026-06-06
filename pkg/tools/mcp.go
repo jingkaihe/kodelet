@@ -51,7 +51,20 @@ type MCPServerConfig struct {
 	Envs          map[string]string `json:"envs" yaml:"envs"`                       // stdio: environment variables to set
 	BaseURL       string            `json:"base_url" yaml:"base_url"`               // http/sse: base URL of the server
 	Headers       map[string]string `json:"headers" yaml:"headers"`                 // http/sse: headers to send to the server
+	OAuth         MCPOAuthConfig    `json:"oauth" yaml:"oauth"`                     // optional OAuth hints; OAuth itself is auto-detected from server challenges
 	ToolWhiteList []string          `json:"tool_white_list" yaml:"tool_white_list"` // optional tool white list
+}
+
+// MCPOAuthConfig contains optional OAuth hints for remote MCP servers.
+// OAuth is intentionally auto-detected from HTTP 401 Bearer challenges; these
+// fields only fill gaps for providers that need pre-registered clients or
+// non-standard discovery hints.
+type MCPOAuthConfig struct {
+	ClientID              string   `json:"client_id" yaml:"client_id"`
+	ClientSecret          string   `json:"client_secret" yaml:"client_secret"`
+	Scopes                []string `json:"scopes" yaml:"scopes"`
+	RedirectURI           string   `json:"redirect_uri" yaml:"redirect_uri"`
+	AuthServerMetadataURL string   `json:"auth_server_metadata_url" yaml:"auth_server_metadata_url"`
 }
 
 func normalizeMCPServerType(serverType MCPServerType) MCPServerType {
@@ -84,19 +97,34 @@ type authenticatedStreamableHTTPTransport struct {
 }
 
 func newAuthenticatedStreamableHTTPTransport(
+	serverName string,
 	serverURL string,
 	headers map[string]string,
+	oauthConfig MCPOAuthConfig,
 ) (*authenticatedStreamableHTTPTransport, error) {
-	inner, err := transport.NewStreamableHTTP(serverURL, transport.WithHTTPHeaders(headers))
+	options := []transport.StreamableHTTPCOption{transport.WithHTTPHeaders(headers)}
+	oauthRT, err := newMCPOAuthRoundTripper(serverName, serverURL, oauthConfig)
 	if err != nil {
 		return nil, err
+	}
+	if oauthRT != nil {
+		options = append(options, transport.WithHTTPBasicClient(&http.Client{Transport: oauthRT}))
+	}
+
+	inner, err := transport.NewStreamableHTTP(serverURL, options...)
+	if err != nil {
+		return nil, err
+	}
+	var headerFunc transport.HTTPHeaderFunc
+	if oauthRT != nil {
+		headerFunc = oauthRT.HTTPHeaderFunc
 	}
 
 	return &authenticatedStreamableHTTPTransport{
 		inner:      inner,
 		serverURL:  serverURL,
 		headers:    mapsClone(headers),
-		headerFunc: nil,
+		headerFunc: headerFunc,
 	}, nil
 }
 
@@ -215,6 +243,10 @@ func mapsClone(headers map[string]string) map[string]string {
 }
 
 func newMCPClient(config MCPServerConfig) (*client.Client, error) {
+	return newMCPClientForServer("", config)
+}
+
+func newMCPClientForServer(serverName string, config MCPServerConfig) (*client.Client, error) {
 	if config.ServerType == "" {
 		if config.BaseURL != "" {
 			config.ServerType = MCPServerTypeSSE
@@ -243,7 +275,15 @@ func newMCPClient(config MCPServerConfig) (*client.Client, error) {
 		if config.BaseURL == "" {
 			return nil, errors.New("base_url is required for sse server")
 		}
-		tp, err := transport.NewSSE(config.BaseURL, transport.WithHeaders(config.Headers))
+		options := []transport.ClientOption{transport.WithHeaders(config.Headers)}
+		oauthRT, err := newMCPOAuthRoundTripper(serverName, config.BaseURL, config.OAuth)
+		if err != nil {
+			return nil, err
+		}
+		if oauthRT != nil {
+			options = append(options, transport.WithHTTPClient(&http.Client{Transport: oauthRT}))
+		}
+		tp, err := transport.NewSSE(config.BaseURL, options...)
 		if err != nil {
 			return nil, err
 		}
@@ -252,7 +292,7 @@ func newMCPClient(config MCPServerConfig) (*client.Client, error) {
 		if config.BaseURL == "" {
 			return nil, errors.New("base_url is required for http server")
 		}
-		tp, err := newAuthenticatedStreamableHTTPTransport(config.BaseURL, config.Headers)
+		tp, err := newAuthenticatedStreamableHTTPTransport(serverName, config.BaseURL, config.Headers, config.OAuth)
 		if err != nil {
 			return nil, err
 		}
@@ -278,7 +318,7 @@ func NewMCPManager(config MCPConfig) (*MCPManager, error) {
 		owned:     make(map[string]bool),
 	}
 	for name, config := range config.Servers {
-		client, err := newMCPClient(config)
+		client, err := newMCPClientForServer(name, config)
 		if err != nil {
 			return nil, err
 		}

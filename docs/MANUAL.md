@@ -702,6 +702,14 @@ mcp:
     # on 127.0.0.1 with a per-session bearer token injected into the runtime.
     rpc_transport: "unix"
 
+  oauth:
+    # Remote HTTP/SSE MCP OAuth is auto-detected from HTTP 401 Bearer
+    # challenges. Set interactive to "never" for headless/CI runs that should
+    # fail fast instead of opening a browser.
+    interactive: "auto" # auto | always | never
+    open_browser: true
+    callback_timeout: "2m"
+
   servers:
     fs:
       command: "npx" # Command to execute for stdio server
@@ -712,6 +720,12 @@ mcp:
       base_url: "https://example.com/mcp" # Base URL for streamable HTTP server
       headers: # Headers for HTTP requests
         Authorization: "Bearer token"
+      oauth: # Optional OAuth hints; OAuth itself is discovered automatically
+        client_id: "${MCP_CLIENT_ID}"
+        client_secret: "${MCP_CLIENT_SECRET}"
+        scopes: ["mcp.read", "mcp.write"]
+        redirect_uri: "http://127.0.0.1:1456/mcp/oauth/callback"
+        auth_server_metadata_url: "https://auth.example.com/.well-known/oauth-authorization-server"
       tool_white_list: ["tool1", "tool2"] # Optional tool white list
     some_sse_server: # deprecated SSE config
       server_type: "sse"
