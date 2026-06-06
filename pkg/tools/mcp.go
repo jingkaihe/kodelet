@@ -348,24 +348,47 @@ func (m *MCPManager) Initialize(ctx context.Context) error {
 		return err
 	}
 	var (
-		wg       sync.WaitGroup
-		mu       sync.Mutex
-		multiErr error
+		wg          sync.WaitGroup
+		mu          sync.Mutex
+		multiErr    error
+		failedNames []string
 	)
 	wg.Add(len(m.clients))
-	for _, c := range m.clients {
-		go func(c *client.Client) {
+	for name, c := range m.clients {
+		go func(name string, c *client.Client) {
 			defer wg.Done()
 			err := initClient(c)
 			if err != nil {
+				logger.G(ctx).WithField("name", name).WithError(err).Error("failed to initialize mcp client")
 				mu.Lock()
-				multiErr = multierror.Append(multiErr, err)
+				multiErr = multierror.Append(multiErr, errors.Wrapf(err, "server %s", name))
+				failedNames = append(failedNames, name)
 				mu.Unlock()
 			}
-		}(c)
+		}(name, c)
 	}
 	wg.Wait()
+
+	if len(failedNames) > 0 {
+		for _, name := range failedNames {
+			if c, ok := m.clients[name]; ok {
+				if err := c.Close(); err != nil {
+					logger.G(ctx).WithField("name", name).WithError(err).Warn("failed to close uninitialized mcp client")
+				}
+			}
+			delete(m.clients, name)
+			delete(m.whiteList, name)
+			delete(m.owned, name)
+		}
+	}
+
 	logger.G(ctx).WithField("time", time.Since(now)).Debug("mcp manager initialized")
+	if len(m.clients) == 0 {
+		return multiErr
+	}
+	if multiErr != nil {
+		logger.G(ctx).WithError(multiErr).Warn("some MCP servers failed to initialize and will be skipped")
+	}
 	return nil
 }
 

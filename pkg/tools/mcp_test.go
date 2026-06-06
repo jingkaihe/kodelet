@@ -334,6 +334,30 @@ func TestMCPManager_ListMCPTools(t *testing.T) {
 	})
 }
 
+func TestMCPManager_InitializeSkipsFailedServersWhenOthersSucceed(t *testing.T) {
+	config := goldenMCPConfig(t)
+	config.Servers["broken-http"] = MCPServerConfig{
+		ServerType: MCPServerTypeHTTP,
+		BaseURL:    "http://127.0.0.1:1/mcp",
+	}
+
+	manager, err := NewMCPManager(config)
+	require.NoError(t, err)
+
+	err = manager.Initialize(context.Background())
+	require.NoError(t, err)
+	defer manager.Close(context.Background())
+
+	_, exists := manager.clients["broken-http"]
+	assert.False(t, exists)
+	assert.Contains(t, manager.clients, "filesystem")
+	assert.Contains(t, manager.clients, "time")
+
+	mcpTools, err := manager.ListMCPTools(context.Background())
+	require.NoError(t, err)
+	assert.NotEmpty(t, mcpTools)
+}
+
 func TestMCPTool_GenerateSchema(t *testing.T) {
 	t.Run("valid config", func(t *testing.T) {
 		config := goldenMCPConfig(t)
