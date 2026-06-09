@@ -16,7 +16,7 @@ func recommendedSetupConfigYAML() string {
     haiku-45: claude-haiku-4-5-20251001
     opus-48: claude-opus-4-8
     sonnet-46: claude-sonnet-4-6
-disable_fs_search_tools: true
+enable_fs_search_tools: false
 max_tokens: 128000
 model: gpt-5.5
 openai:
@@ -29,7 +29,7 @@ weak_model: gpt-5.4-mini
 weak_model_max_tokens: 8192
 profiles:
     openai:
-        disable_fs_search_tools: true
+        enable_fs_search_tools: false
         tool_mode: patch
         max_tokens: 128000
         model: gpt-5.5
@@ -39,7 +39,7 @@ profiles:
         reasoning_effort: xhigh
         weak_model: gpt-5.4-mini
     anthropic:
-        disable_fs_search_tools: false
+        enable_fs_search_tools: true
         max_tokens: 64000
         model: opus-48
         provider: anthropic

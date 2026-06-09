@@ -76,7 +76,7 @@ profiles:
     max_tokens: 16000
     reasoning_effort: "xhigh"
     tool_mode: "patch"
-    disable_fs_search_tools: true
+    enable_fs_search_tools: false
     openai:
       platform: "copilot"
       api_mode: "responses"
@@ -105,7 +105,7 @@ profiles:
     max_tokens: 16000
     reasoning_effort: "xhigh"
     tool_mode: "patch"
-    disable_fs_search_tools: true
+    enable_fs_search_tools: false
     openai:
       api_mode: "responses"
 
@@ -123,7 +123,7 @@ profiles:
     model: "o3"
     reasoning_effort: "high"
     tool_mode: "patch"
-    disable_fs_search_tools: true
+    enable_fs_search_tools: false
 
 # OpenAI specific settings
 # Reasoning effort for supported reasoning/adaptive models
@@ -188,8 +188,8 @@ allowed_domains_file: "~/.kodelet/allowed_domains.txt"
 
 # Tool Configuration
 # Tools allowed for main agent (empty means use defaults)
-# Meta tools (grep_tool and glob_tool) are always enabled for basic functionality unless
-# disable_fs_search_tools is set to true.
+# Meta tools (grep_tool and glob_tool) are only available when
+# enable_fs_search_tools is set to true.
 # Available tools: bash, apply_patch, file_read, file_write, file_edit, thinking, subagent, grep_tool,
 #                  glob_tool, web_fetch, view_image
 # Tool interaction mode.
@@ -198,9 +198,9 @@ allowed_domains_file: "~/.kodelet/allowed_domains.txt"
 #   toolsets, and ensures apply_patch is available
 tool_mode: full
 
-# Disable built-in filesystem search tools (glob_tool and grep_tool).
-# When enabled, the agent is instructed to use fd/rg via the bash tool instead.
-# disable_fs_search_tools: true
+# Enable built-in filesystem search tools (glob_tool and grep_tool).
+# Disabled by default; the agent is instructed to use fd/rg via the bash tool instead.
+# enable_fs_search_tools: true
 
 # Conversation summary mode for persisted conversation titles.
 # - llm: generate a short summary with the weak model
@@ -318,7 +318,7 @@ subagent_args: ""
 #     model: "gpt-4o-mini"
 #     max_tokens: 2048
 #     tool_mode: "patch"
-#     disable_fs_search_tools: true
+#     enable_fs_search_tools: false
 #
 # subagent_args: "--profile openai-subagent"
 
@@ -343,11 +343,12 @@ subagent_args: ""
 # Can also be set via the --disable-subagent CLI flag or per-profile.
 # disable_subagent: true
 #
-# Disable Filesystem Search Tools
-# When set to true, glob_tool and grep_tool are removed from available tools.
-# The system prompt will instruct the agent to use fd and rg via the bash tool instead.
-# Can also be set via the --disable-fs-search-tools CLI flag or per-profile.
-# disable_fs_search_tools: true
+# Enable Filesystem Search Tools
+# When set to true, glob_tool and grep_tool are added to the available tools.
+# By default they are disabled and the system prompt instructs the agent to use
+# fd and rg via the bash tool instead.
+# Can also be set via the --enable-fs-search-tools CLI flag or per-profile.
+# enable_fs_search_tools: true
 # Example: Profile with subagent disabled
 # profiles:
 #   no-subagent:

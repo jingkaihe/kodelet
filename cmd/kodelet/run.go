@@ -30,58 +30,58 @@ import (
 )
 
 type RunConfig struct {
-	ResumeConvID         string
-	CWD                  string
-	Follow               bool
-	NoSave               bool
-	Headless             bool              // Use structured JSON output instead of console formatting
-	StreamDeltas         bool              // Stream partial text deltas in headless mode
-	Images               []string          // Image paths or URLs to include with the message
-	MaxTurns             int               // Maximum number of turns within a single SendMessage call
-	FragmentName         string            // Name of fragment to use
-	FragmentArgs         map[string]string // Arguments to pass to fragment
-	FragmentDirs         []string          // Additional fragment directories
-	IncludeHistory       bool              // Include historical conversation data in headless streaming
-	NoSkills             bool              // Disable agentic skills
-	NoExtensions         bool              // Disable extension runtime
-	NoMCP                bool              // Disable MCP tools
-	NoTools              bool              // Disable all tools (for simple query-response usage)
-	DisableFSSearchTools bool              // Disable filesystem search tools (glob_tool and grep_tool)
-	DisableSubagent      bool              // Disable the subagent tool and remove subagent-related system prompt context
-	MessageDisplay       string            // User-facing compact text for persisted display
-	Sysprompt            string            // Path to custom system prompt template file
-	SyspromptArgs        map[string]string // Arguments passed to custom system prompt template
-	ResultOnly           bool              // Only print the final agent message, no intermediate output or usage stats
-	UseWeakModel         bool              // Use weak model for SendMessage
-	Account              string            // Anthropic subscription account alias to use
-	AsSubagent           bool              // Run as subagent (disables subagent tool to prevent recursion)
+	ResumeConvID        string
+	CWD                 string
+	Follow              bool
+	NoSave              bool
+	Headless            bool              // Use structured JSON output instead of console formatting
+	StreamDeltas        bool              // Stream partial text deltas in headless mode
+	Images              []string          // Image paths or URLs to include with the message
+	MaxTurns            int               // Maximum number of turns within a single SendMessage call
+	FragmentName        string            // Name of fragment to use
+	FragmentArgs        map[string]string // Arguments to pass to fragment
+	FragmentDirs        []string          // Additional fragment directories
+	IncludeHistory      bool              // Include historical conversation data in headless streaming
+	NoSkills            bool              // Disable agentic skills
+	NoExtensions        bool              // Disable extension runtime
+	NoMCP               bool              // Disable MCP tools
+	NoTools             bool              // Disable all tools (for simple query-response usage)
+	EnableFSSearchTools bool              // Enable filesystem search tools (glob_tool and grep_tool)
+	DisableSubagent     bool              // Disable the subagent tool and remove subagent-related system prompt context
+	MessageDisplay      string            // User-facing compact text for persisted display
+	Sysprompt           string            // Path to custom system prompt template file
+	SyspromptArgs       map[string]string // Arguments passed to custom system prompt template
+	ResultOnly          bool              // Only print the final agent message, no intermediate output or usage stats
+	UseWeakModel        bool              // Use weak model for SendMessage
+	Account             string            // Anthropic subscription account alias to use
+	AsSubagent          bool              // Run as subagent (disables subagent tool to prevent recursion)
 }
 
 func NewRunConfig() *RunConfig {
 	return &RunConfig{
-		ResumeConvID:         "",
-		CWD:                  "",
-		Follow:               false,
-		NoSave:               false,
-		Headless:             false,
-		Images:               []string{},
-		MaxTurns:             0,
-		FragmentName:         "",
-		FragmentArgs:         make(map[string]string),
-		FragmentDirs:         []string{},
-		IncludeHistory:       false,
-		NoSkills:             false,
-		NoExtensions:         false,
-		NoMCP:                false,
-		NoTools:              false,
-		DisableFSSearchTools: false,
-		DisableSubagent:      false,
-		Sysprompt:            "",
-		SyspromptArgs:        make(map[string]string),
-		ResultOnly:           false,
-		UseWeakModel:         false,
-		Account:              "",
-		AsSubagent:           false,
+		ResumeConvID:        "",
+		CWD:                 "",
+		Follow:              false,
+		NoSave:              false,
+		Headless:            false,
+		Images:              []string{},
+		MaxTurns:            0,
+		FragmentName:        "",
+		FragmentArgs:        make(map[string]string),
+		FragmentDirs:        []string{},
+		IncludeHistory:      false,
+		NoSkills:            false,
+		NoExtensions:        false,
+		NoMCP:               false,
+		NoTools:             false,
+		EnableFSSearchTools: false,
+		DisableSubagent:     false,
+		Sysprompt:           "",
+		SyspromptArgs:       make(map[string]string),
+		ResultOnly:          false,
+		UseWeakModel:        false,
+		Account:             "",
+		AsSubagent:          false,
 	}
 }
 
@@ -531,8 +531,8 @@ var runCmd = &cobra.Command{
 			}
 		}
 
-		if cmd.Flags().Changed("disable-fs-search-tools") {
-			llmConfig.DisableFSSearchTools = config.DisableFSSearchTools
+		if cmd.Flags().Changed("enable-fs-search-tools") {
+			llmConfig.EnableFSSearchTools = config.EnableFSSearchTools
 		}
 		if cmd.Flags().Changed("disable-subagent") {
 			llmConfig.DisableSubagent = config.DisableSubagent
@@ -769,7 +769,7 @@ func init() {
 	runCmd.Flags().Bool("no-extensions", defaults.NoExtensions, "Disable extension runtime")
 	runCmd.Flags().Bool("no-mcp", defaults.NoMCP, "Disable MCP tools")
 	runCmd.Flags().Bool("no-tools", defaults.NoTools, "Disable all tools (for simple query-response usage)")
-	runCmd.Flags().Bool("disable-fs-search-tools", defaults.DisableFSSearchTools, "Disable filesystem search tools (glob_tool and grep_tool)")
+	runCmd.Flags().Bool("enable-fs-search-tools", defaults.EnableFSSearchTools, "Enable filesystem search tools (glob_tool and grep_tool)")
 	runCmd.Flags().Bool("disable-subagent", defaults.DisableSubagent, "Disable the subagent tool and remove subagent-related system prompt context")
 	runCmd.Flags().Bool("result-only", defaults.ResultOnly, "Only print the final agent message, suppressing all intermediate output and usage statistics")
 	runCmd.Flags().Bool("use-weak-model", defaults.UseWeakModel, "Use weak model for processing")
@@ -850,8 +850,8 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 		config.NoTools = noTools
 	}
 
-	if disableFSSearchTools, err := cmd.Flags().GetBool("disable-fs-search-tools"); err == nil {
-		config.DisableFSSearchTools = disableFSSearchTools
+	if enableFSSearchTools, err := cmd.Flags().GetBool("enable-fs-search-tools"); err == nil {
+		config.EnableFSSearchTools = enableFSSearchTools
 	}
 
 	if disableSubagent, err := cmd.Flags().GetBool("disable-subagent"); err == nil {

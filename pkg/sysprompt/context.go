@@ -25,9 +25,9 @@ type PromptContext struct {
 	ContextFiles map[string]string
 
 	// Active context file name (resolved from configured patterns)
-	ActiveContextFile    string
-	Args                 map[string]string
-	DisableFSSearchTools bool
+	ActiveContextFile   string
+	Args                map[string]string
+	EnableFSSearchTools bool
 
 	// MCP tools information
 	MCPExecutionMode string
@@ -63,18 +63,18 @@ func newPromptContext(contexts map[string]string, workingDirectory ...string) *P
 	}
 
 	return &PromptContext{
-		WorkingDirectory:     pwd,
-		IsGitRepo:            isGitRepo,
-		Platform:             platform,
-		OSVersion:            osVersion,
-		Date:                 date,
-		ContextFiles:         contextFiles,
-		ActiveContextFile:    AgentsMd,
-		Args:                 map[string]string{},
-		DisableFSSearchTools: false,
-		MCPExecutionMode:     "",
-		MCPWorkspaceDir:      "",
-		MCPServers:           []string{},
+		WorkingDirectory:    pwd,
+		IsGitRepo:           isGitRepo,
+		Platform:            platform,
+		OSVersion:           osVersion,
+		Date:                date,
+		ContextFiles:        contextFiles,
+		ActiveContextFile:   AgentsMd,
+		Args:                map[string]string{},
+		EnableFSSearchTools: true,
+		MCPExecutionMode:    "",
+		MCPWorkspaceDir:     "",
+		MCPServers:          []string{},
 	}
 }
 

@@ -77,10 +77,10 @@ func TestBuildRuntimeContext(t *testing.T) {
 		Context: &llmtypes.ContextConfig{
 			Patterns: []string{"README.md", "AGENTS.md"},
 		},
-		MCPExecutionMode:     "code",
-		MCPWorkspaceDir:      mcpWorkspace,
-		SyspromptArgs:        map[string]string{"project": "kodelet"},
-		DisableFSSearchTools: true,
+		MCPExecutionMode:    "code",
+		MCPWorkspaceDir:     mcpWorkspace,
+		SyspromptArgs:       map[string]string{"project": "kodelet"},
+		EnableFSSearchTools: true,
 	}
 
 	ctx := BuildRuntimeContext(config, contexts)
@@ -88,7 +88,7 @@ func TestBuildRuntimeContext(t *testing.T) {
 	assert.Equal(t, workingDir, ctx.WorkingDirectory)
 	assert.Equal(t, "README.md", ctx.ActiveContextFile)
 	assert.Equal(t, config.SyspromptArgs, ctx.Args)
-	assert.True(t, ctx.DisableFSSearchTools)
+	assert.True(t, ctx.EnableFSSearchTools)
 	assert.Equal(t, "code", ctx.MCPExecutionMode)
 	assert.Equal(t, mcpWorkspace, ctx.MCPWorkspaceDir)
 	assert.ElementsMatch(t, []string{"local"}, ctx.MCPServers)

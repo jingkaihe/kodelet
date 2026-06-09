@@ -756,13 +756,15 @@ func TestWithSubAgentToolsFromConfig(t *testing.T) {
 		// Should include basic tools
 		assert.Contains(t, toolNames, "bash")
 		assert.Contains(t, toolNames, "file_read")
-		assert.Contains(t, toolNames, "grep_tool")
-		assert.Contains(t, toolNames, "glob_tool")
+		// FS search tools are excluded unless enable_fs_search_tools is set
+		assert.NotContains(t, toolNames, "grep_tool")
+		assert.NotContains(t, toolNames, "glob_tool")
 	})
 
 	t.Run("respects allowed_tools from config", func(t *testing.T) {
 		config := llmtypes.Config{
-			AllowedTools: []string{"file_read", "grep_tool"},
+			AllowedTools:        []string{"file_read", "grep_tool"},
+			EnableFSSearchTools: true,
 		}
 		state := NewBasicState(ctx, WithLLMConfig(config), WithSubAgentToolsFromConfig())
 
@@ -824,8 +826,8 @@ func TestWithSubAgentToolsFromConfig(t *testing.T) {
 
 	t.Run("patch alias with disabled fs search tools keeps bash inspection and apply_patch", func(t *testing.T) {
 		config := llmtypes.Config{
-			ToolMode:             llmtypes.ToolModePatch,
-			DisableFSSearchTools: true,
+			ToolMode:            llmtypes.ToolModePatch,
+			EnableFSSearchTools: false,
 		}
 		state := NewBasicState(ctx, WithLLMConfig(config), WithSubAgentToolsFromConfig())
 
@@ -1126,7 +1128,7 @@ func TestWithSkillTool_RespectsExplicitAllowlist(t *testing.T) {
 	ctx := context.Background()
 	state := NewBasicState(
 		ctx,
-		WithLLMConfig(llmtypes.Config{AllowedTools: []string{"file_read", "grep_tool", "glob_tool"}}),
+		WithLLMConfig(llmtypes.Config{AllowedTools: []string{"file_read", "grep_tool", "glob_tool"}, EnableFSSearchTools: true}),
 		WithSubAgentToolsFromConfig(),
 		WithSkillTool(),
 	)
@@ -1144,7 +1146,7 @@ func TestWithExtensionTools_RespectsExplicitAllowlist(t *testing.T) {
 	ctx := context.Background()
 	state := NewBasicState(
 		ctx,
-		WithLLMConfig(llmtypes.Config{AllowedTools: []string{"file_read", "grep_tool", "glob_tool"}}),
+		WithLLMConfig(llmtypes.Config{AllowedTools: []string{"file_read", "grep_tool", "glob_tool"}, EnableFSSearchTools: true}),
 		WithSubAgentToolsFromConfig(),
 		WithExtensionTools([]tooltypes.Tool{&testTool{name: "not_allowed_extension_tool"}}),
 	)

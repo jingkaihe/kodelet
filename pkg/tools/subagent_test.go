@@ -14,7 +14,7 @@ import (
 )
 
 func TestSubAgentTool_BasicMethods(t *testing.T) {
-	tool := NewSubAgentTool(nil, false, false)
+	tool := NewSubAgentTool(nil, false, true)
 
 	assert.Equal(t, "subagent", tool.Name())
 	assert.NotNil(t, tool.GenerateSchema())
@@ -42,14 +42,14 @@ func TestSubAgentTool_DescriptionWithWorkflows(t *testing.T) {
 	}
 
 	t.Run("workflows disabled", func(t *testing.T) {
-		tool := NewSubAgentTool(workflows, false, false)
+		tool := NewSubAgentTool(workflows, false, true)
 		desc := tool.Description()
 		assert.Contains(t, desc, "<no_workflows_available />")
 		assert.NotContains(t, desc, "test-workflow")
 	})
 
 	t.Run("workflows enabled", func(t *testing.T) {
-		tool := NewSubAgentTool(workflows, true, false)
+		tool := NewSubAgentTool(workflows, true, true)
 		desc := tool.Description()
 		assert.Contains(t, desc, "<workflows>")
 		assert.Contains(t, desc, `<workflow name="test-workflow">`)
@@ -61,13 +61,13 @@ func TestSubAgentTool_DescriptionWithWorkflows(t *testing.T) {
 	})
 
 	t.Run("no workflows", func(t *testing.T) {
-		tool := NewSubAgentTool(nil, true, false)
+		tool := NewSubAgentTool(nil, true, true)
 		desc := tool.Description()
 		assert.Contains(t, desc, "<no_workflows_available />")
 	})
 
 	t.Run("fs search tools disabled", func(t *testing.T) {
-		tool := NewSubAgentTool(nil, true, true)
+		tool := NewSubAgentTool(nil, true, false)
 		desc := tool.Description()
 		assert.Contains(t, desc, "bash plus fd/rg and file_read")
 		assert.Contains(t, desc, "Use rg via ${bash} instead.")
@@ -75,7 +75,7 @@ func TestSubAgentTool_DescriptionWithWorkflows(t *testing.T) {
 	})
 
 	t.Run("patch avoids file_read guidance", func(t *testing.T) {
-		tool := NewSubAgentToolWithOptions(nil, true, llmtypes.ToolModePatch, false)
+		tool := NewSubAgentToolWithOptions(nil, true, llmtypes.ToolModePatch, true)
 		desc := tool.Description()
 		assert.Contains(t, desc, "grep_tool / glob_tool plus bash inspection")
 		assert.Contains(t, desc, "Use ${bash} with sed/cat instead.")
@@ -85,7 +85,7 @@ func TestSubAgentTool_DescriptionWithWorkflows(t *testing.T) {
 }
 
 func TestSubAgentTool_ValidateInput(t *testing.T) {
-	tool := NewSubAgentTool(nil, false, false)
+	tool := NewSubAgentTool(nil, false, true)
 	state := NewBasicState(context.TODO())
 
 	// Valid inputs
@@ -113,7 +113,7 @@ func TestSubAgentTool_ValidateInputWithWorkflows(t *testing.T) {
 			},
 		},
 	}
-	tool := NewSubAgentTool(workflows, true, false)
+	tool := NewSubAgentTool(workflows, true, true)
 	state := NewBasicState(context.TODO())
 
 	t.Run("valid workflow with question", func(t *testing.T) {
@@ -139,7 +139,7 @@ func TestSubAgentTool_ValidateInputWithWorkflows(t *testing.T) {
 }
 
 func TestSubAgentTool_ValidateInputCwd(t *testing.T) {
-	tool := NewSubAgentTool(nil, false, false)
+	tool := NewSubAgentTool(nil, false, true)
 	state := NewBasicState(context.TODO())
 
 	t.Run("valid absolute cwd", func(t *testing.T) {
@@ -185,7 +185,7 @@ func TestSubAgentTool_ValidateInputCwd(t *testing.T) {
 }
 
 func TestSubAgentTool_TracingKVs(t *testing.T) {
-	tool := NewSubAgentTool(nil, false, false)
+	tool := NewSubAgentTool(nil, false, true)
 
 	t.Run("with question only", func(t *testing.T) {
 		kvs, err := tool.TracingKVs(`{"question": "test question"}`)
@@ -643,18 +643,18 @@ func TestSubAgentTool_GetWorkflowsAndIsWorkflowEnabled(t *testing.T) {
 	}
 
 	t.Run("enabled with workflows", func(t *testing.T) {
-		tool := NewSubAgentTool(workflows, true, false)
+		tool := NewSubAgentTool(workflows, true, true)
 		assert.True(t, tool.IsWorkflowEnabled())
 		assert.Equal(t, workflows, tool.GetWorkflows())
 	})
 
 	t.Run("disabled", func(t *testing.T) {
-		tool := NewSubAgentTool(workflows, false, false)
+		tool := NewSubAgentTool(workflows, false, true)
 		assert.False(t, tool.IsWorkflowEnabled())
 	})
 
 	t.Run("nil workflows", func(t *testing.T) {
-		tool := NewSubAgentTool(nil, true, false)
+		tool := NewSubAgentTool(nil, true, true)
 		assert.True(t, tool.IsWorkflowEnabled())
 		assert.Nil(t, tool.GetWorkflows())
 	})
@@ -714,7 +714,7 @@ func TestSubAgentTool_WorkflowFiltering(t *testing.T) {
 	})
 
 	t.Run("subagent tool shows only workflows in description", func(t *testing.T) {
-		tool := NewSubAgentTool(filteredWorkflows, true, false)
+		tool := NewSubAgentTool(filteredWorkflows, true, true)
 		desc := tool.Description()
 
 		// Should contain workflow fragments
@@ -727,7 +727,7 @@ func TestSubAgentTool_WorkflowFiltering(t *testing.T) {
 	})
 
 	t.Run("subagent validates only known workflows", func(t *testing.T) {
-		tool := NewSubAgentTool(filteredWorkflows, true, false)
+		tool := NewSubAgentTool(filteredWorkflows, true, true)
 		state := NewBasicState(context.TODO())
 
 		// Valid workflow should pass
@@ -768,7 +768,7 @@ func TestSubAgentTool_DescriptionWithWorkflowField(t *testing.T) {
 		},
 	}
 
-	tool := NewSubAgentTool(workflows, true, false)
+	tool := NewSubAgentTool(workflows, true, true)
 	desc := tool.Description()
 
 	// Verify workflows section structure

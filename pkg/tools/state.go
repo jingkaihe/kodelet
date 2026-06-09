@@ -181,7 +181,7 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 			allowedTools = state.llmConfig.AllowedTools
 		}
 		allowedTools = enforceToolMode(allowedTools, state.llmConfig.ToolMode, defaultMainTools)
-		state.tools = GetMainToolsWithOptions(ctx, allowedTools, state.llmConfig.DisableFSSearchTools)
+		state.tools = GetMainToolsWithOptions(ctx, allowedTools, state.llmConfig.EnableFSSearchTools)
 		state.tools = enforceToolModeOnResolvedTools(state.tools, allowedTools, state.llmConfig.ToolMode)
 	}
 	state.configureTools()
@@ -198,7 +198,7 @@ func WithSubAgentToolsFromConfig() BasicStateOption {
 			allowedTools = s.llmConfig.AllowedTools
 		}
 		allowedTools = enforceToolMode(allowedTools, s.llmConfig.ToolMode, defaultSubAgentTools)
-		s.tools = GetSubAgentToolsWithOptions(ctx, allowedTools, s.llmConfig.DisableFSSearchTools)
+		s.tools = GetSubAgentToolsWithOptions(ctx, allowedTools, s.llmConfig.EnableFSSearchTools)
 		s.tools = enforceToolModeOnResolvedTools(s.tools, allowedTools, s.llmConfig.ToolMode)
 		s.configureTools()
 		return nil
@@ -213,7 +213,7 @@ func WithMainTools() BasicStateOption {
 			allowedTools = s.llmConfig.AllowedTools
 		}
 		allowedTools = enforceToolMode(allowedTools, s.llmConfig.ToolMode, defaultMainTools)
-		s.tools = GetMainToolsWithOptions(ctx, allowedTools, s.llmConfig.DisableFSSearchTools)
+		s.tools = GetMainToolsWithOptions(ctx, allowedTools, s.llmConfig.EnableFSSearchTools)
 		s.tools = enforceToolModeOnResolvedTools(s.tools, allowedTools, s.llmConfig.ToolMode)
 		if s.llmConfig.DisableSubagent {
 			s.tools = filterOutSubagent(s.tools)
@@ -322,7 +322,7 @@ func WithSkillTool() BasicStateOption {
 			s.tools = filterOutSkill(s.tools)
 			return nil
 		}
-		skillTool := NewSkillToolWithOptions(discoveredSkills, len(discoveredSkills) > 0, s.llmConfig.ToolMode, s.llmConfig.DisableFSSearchTools)
+		skillTool := NewSkillToolWithOptions(discoveredSkills, len(discoveredSkills) > 0, s.llmConfig.ToolMode, s.llmConfig.EnableFSSearchTools)
 		for i, tool := range s.tools {
 			if tool.Name() == "skill" {
 				s.tools[i] = skillTool
@@ -384,7 +384,7 @@ func WithSubAgentTool() BasicStateOption {
 			}
 		}
 		discoveredWorkflows := discoverWorkflows(ctx)
-		subagentTool := NewSubAgentToolWithOptions(discoveredWorkflows, len(discoveredWorkflows) > 0, s.llmConfig.ToolMode, s.llmConfig.DisableFSSearchTools)
+		subagentTool := NewSubAgentToolWithOptions(discoveredWorkflows, len(discoveredWorkflows) > 0, s.llmConfig.ToolMode, s.llmConfig.EnableFSSearchTools)
 		for i, tool := range s.tools {
 			if tool.Name() == "subagent" {
 				s.tools[i] = subagentTool
@@ -621,10 +621,10 @@ func (s *BasicState) configureToolSlice(tools []tooltypes.Tool) []tooltypes.Tool
 	for i, tool := range tools {
 		switch tool.Name() {
 		case "bash":
-			tools[i] = NewBashToolWithTimeout(s.llmConfig.AllowedCommands, s.llmConfig.DisableFSSearchTools, s.llmConfig.BashTimeout())
+			tools[i] = NewBashToolWithTimeout(s.llmConfig.AllowedCommands, s.llmConfig.EnableFSSearchTools, s.llmConfig.BashTimeout())
 		case "code_execution":
 			if codeExecutionTool, ok := tool.(*CodeExecutionTool); ok {
-				tools[i] = NewCodeExecutionToolWithOptions(codeExecutionTool.runtime, s.llmConfig.ToolMode, s.llmConfig.DisableFSSearchTools)
+				tools[i] = NewCodeExecutionToolWithOptions(codeExecutionTool.runtime, s.llmConfig.ToolMode, s.llmConfig.EnableFSSearchTools)
 			}
 		case "web_fetch":
 			tools[i] = NewWebFetchTool(s.llmConfig.AllowedDomainsFile)

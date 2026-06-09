@@ -62,8 +62,8 @@ Banned commands:
 - Do not run interactive commands.
 - For multiple commands, use ';' or '&&' on one line.
 - Avoid direct cd; use absolute paths or subshell: (cd /path && cmd).
-{{if .DisableFSSearchTools}}- For filesystem search activities, use fd and rg via this tool only.
-{{else}}- Prefer grep_tool/glob_tool over grep/find in bash.
+{{if .EnableFSSearchTools}}- Prefer grep_tool/glob_tool over grep/find in bash.
+{{else}}- For filesystem search activities, use fd and rg via this tool only.
 {{end}}- Do not use heredoc; use file_write or apply_patch instead.
 
 Examples:
@@ -78,19 +78,19 @@ const (
 
 // BashTool executes bash commands with configurable restrictions and timeout support
 type BashTool struct {
-	allowedCommands      []string
-	compiledGlobs        []glob.Glob
-	disableFSSearchTools bool
-	maxTimeout           time.Duration
+	allowedCommands     []string
+	compiledGlobs       []glob.Glob
+	enableFSSearchTools bool
+	maxTimeout          time.Duration
 }
 
 // NewBashTool creates a new BashTool with the specified allowed commands
-func NewBashTool(allowedCommands []string, disableFSSearchTools bool) *BashTool {
-	return NewBashToolWithTimeout(allowedCommands, disableFSSearchTools, llmtypes.DefaultBashTimeout)
+func NewBashTool(allowedCommands []string, enableFSSearchTools bool) *BashTool {
+	return NewBashToolWithTimeout(allowedCommands, enableFSSearchTools, llmtypes.DefaultBashTimeout)
 }
 
 // NewBashToolWithTimeout creates a BashTool with the specified maximum timeout.
-func NewBashToolWithTimeout(allowedCommands []string, disableFSSearchTools bool, maxTimeout time.Duration) *BashTool {
+func NewBashToolWithTimeout(allowedCommands []string, enableFSSearchTools bool, maxTimeout time.Duration) *BashTool {
 	globs := make([]glob.Glob, len(allowedCommands))
 	for i, pattern := range allowedCommands {
 		// Compile glob patterns without custom separators (default behavior)
@@ -100,10 +100,10 @@ func NewBashToolWithTimeout(allowedCommands []string, disableFSSearchTools bool,
 		maxTimeout = llmtypes.DefaultBashTimeout
 	}
 	return &BashTool{
-		allowedCommands:      allowedCommands,
-		compiledGlobs:        globs,
-		disableFSSearchTools: disableFSSearchTools,
-		maxTimeout:           maxTimeout,
+		allowedCommands:     allowedCommands,
+		compiledGlobs:       globs,
+		enableFSSearchTools: enableFSSearchTools,
+		maxTimeout:          maxTimeout,
 	}
 }
 
@@ -238,17 +238,17 @@ func (b *BashTool) Description() string {
 	}
 
 	data := struct {
-		AllowedCommands      []string
-		BannedCommands       []string
-		DisableFSSearchTools bool
-		MinTimeoutSeconds    int
-		MaxTimeoutSeconds    int
+		AllowedCommands     []string
+		BannedCommands      []string
+		EnableFSSearchTools bool
+		MinTimeoutSeconds   int
+		MaxTimeoutSeconds   int
 	}{
-		AllowedCommands:      b.allowedCommands,
-		BannedCommands:       BannedCommands,
-		DisableFSSearchTools: b.disableFSSearchTools,
-		MinTimeoutSeconds:    bashMinTimeoutSeconds,
-		MaxTimeoutSeconds:    b.maxTimeoutSeconds(),
+		AllowedCommands:     b.allowedCommands,
+		BannedCommands:      BannedCommands,
+		EnableFSSearchTools: b.enableFSSearchTools,
+		MinTimeoutSeconds:   bashMinTimeoutSeconds,
+		MaxTimeoutSeconds:   b.maxTimeoutSeconds(),
 	}
 
 	var buf bytes.Buffer

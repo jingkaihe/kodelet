@@ -147,7 +147,7 @@ test("Profile maps early profiler spelling and nested OpenAI config to launch co
     max_tokens: 128000,
     reasoning_effort: "xhigh",
     weak_model: "gpt-5.4-mini",
-    disable_fs_search_tools: true,
+    enable_fs_search_tools: true,
     openai: {
       api_mode: "responses",
       platform: "codex",
@@ -164,7 +164,7 @@ test("Profile maps early profiler spelling and nested OpenAI config to launch co
     max_tokens: 128000,
     reasoning_effort: "xhigh",
     weak_model: "gpt-5.4-mini",
-    disable_fs_search_tools: true,
+    enable_fs_search_tools: true,
     openai: {
       api_mode: "responses",
       platform: "codex",

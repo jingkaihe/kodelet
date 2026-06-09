@@ -27,7 +27,7 @@ func TestRecommendedSetupConfigYAML_OpenAIProfilesUsePatchMode(t *testing.T) {
 	openAIProfile, ok := config.Profiles["openai"]
 	require.True(t, ok)
 	assert.Equal(t, "patch", openAIProfile["tool_mode"])
-	assert.Equal(t, true, openAIProfile["disable_fs_search_tools"])
+	assert.Equal(t, false, openAIProfile["enable_fs_search_tools"])
 	assert.Equal(t, "openai", openAIProfile["provider"])
 	assert.Equal(t, 128000, openAIProfile["max_tokens"])
 
@@ -35,7 +35,7 @@ func TestRecommendedSetupConfigYAML_OpenAIProfilesUsePatchMode(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "anthropic", anthropicProfile["provider"])
 	assert.Equal(t, "full", anthropicProfile["tool_mode"])
-	assert.Equal(t, false, anthropicProfile["disable_fs_search_tools"])
+	assert.Equal(t, true, anthropicProfile["enable_fs_search_tools"])
 	assert.Equal(t, 64000, anthropicProfile["max_tokens"])
 	assert.Equal(t, "opus-48", anthropicProfile["model"])
 	assert.Equal(t, "max", anthropicProfile["reasoning_effort"])

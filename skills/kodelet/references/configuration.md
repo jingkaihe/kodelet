@@ -56,14 +56,14 @@ profiles:
     weak_model: gpt-5
     reasoning_effort: medium
     tool_mode: patch
-    disable_fs_search_tools: true
+    enable_fs_search_tools: false
 
   openai-subagent:
     provider: openai
     model: gpt-5.5
     reasoning_effort: high
     tool_mode: patch
-    disable_fs_search_tools: true
+    enable_fs_search_tools: false
     openai:
       api_mode: responses
 

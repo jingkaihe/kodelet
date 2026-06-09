@@ -399,16 +399,16 @@ func TestServer_RequestHandlersReturnEarlyErrors(t *testing.T) {
 
 func TestServer_WithConfigStoresServerConfig(t *testing.T) {
 	config := &ServerConfig{
-		Provider:             "openai",
-		Model:                "gpt-4.1",
-		MaxTokens:            1024,
-		NoSkills:             true,
-		NoExtensions:         true,
-		NoWorkflows:          true,
-		DisableFSSearchTools: true,
-		DisableSubagent:      true,
-		MaxTurns:             3,
-		CompactRatio:         0.4,
+		Provider:            "openai",
+		Model:               "gpt-4.1",
+		MaxTokens:           1024,
+		NoSkills:            true,
+		NoExtensions:        true,
+		NoWorkflows:         true,
+		EnableFSSearchTools: true,
+		DisableSubagent:     true,
+		MaxTurns:            3,
+		CompactRatio:        0.4,
 	}
 
 	server := NewServer(

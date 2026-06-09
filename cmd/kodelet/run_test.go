@@ -254,7 +254,7 @@ func TestLoadResumeConversationConfig_ProfiledConversationPreservesExplicitFlagO
 	assert.Equal(t, llmtypes.ToolModePatch, config.ToolMode)
 }
 
-func TestLoadResumeConversationConfig_ProfileCanDisableFSSearchToolsFromRootDefault(t *testing.T) {
+func TestLoadResumeConversationConfig_ProfileCanEnableFSSearchToolsFromRootDefault(t *testing.T) {
 	originalSettings := viper.AllSettings()
 	defer func() {
 		viper.Reset()
@@ -264,24 +264,24 @@ func TestLoadResumeConversationConfig_ProfileCanDisableFSSearchToolsFromRootDefa
 	}()
 
 	viper.Reset()
-	viper.Set("disable_fs_search_tools", true)
+	viper.Set("enable_fs_search_tools", false)
 	viper.Set("provider", "openai")
 	viper.Set("profile", "anthropic")
 	viper.Set("profiles", map[string]any{
 		"anthropic": map[string]any{
-			"provider":                "anthropic",
-			"disable_fs_search_tools": false,
+			"provider":               "anthropic",
+			"enable_fs_search_tools": true,
 		},
 	})
 
 	cmd := &cobra.Command{Use: "run"}
-	cmd.Flags().Bool("disable-fs-search-tools", false, "Disable filesystem search tools")
+	cmd.Flags().Bool("enable-fs-search-tools", false, "Enable filesystem search tools")
 
 	config, _, err := loadResumeConversationConfig(context.Background(), cmd, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "anthropic", config.Provider)
-	assert.False(t, config.DisableFSSearchTools)
-	assert.False(t, cmd.Flags().Changed("disable-fs-search-tools"))
+	assert.True(t, config.EnableFSSearchTools)
+	assert.False(t, cmd.Flags().Changed("enable-fs-search-tools"))
 }
 
 func TestLoadResumeConversationConfig_DefaultStoredProfileIgnoresActiveProfile(t *testing.T) {
@@ -614,7 +614,7 @@ func TestGetRunConfigFromFlags(t *testing.T) {
 	cmd.Flags().Bool("no-extensions", defaults.NoExtensions, "")
 	cmd.Flags().Bool("no-mcp", defaults.NoMCP, "")
 	cmd.Flags().Bool("no-tools", defaults.NoTools, "")
-	cmd.Flags().Bool("disable-fs-search-tools", defaults.DisableFSSearchTools, "")
+	cmd.Flags().Bool("enable-fs-search-tools", defaults.EnableFSSearchTools, "")
 	cmd.Flags().Bool("disable-subagent", defaults.DisableSubagent, "")
 	cmd.Flags().String("sysprompt", defaults.Sysprompt, "")
 	cmd.Flags().StringToString("sysprompt-arg", defaults.SyspromptArgs, "")
@@ -637,7 +637,7 @@ func TestGetRunConfigFromFlags(t *testing.T) {
 	require.NoError(t, cmd.Flags().Set("no-extensions", "true"))
 	require.NoError(t, cmd.Flags().Set("no-mcp", "true"))
 	require.NoError(t, cmd.Flags().Set("no-tools", "true"))
-	require.NoError(t, cmd.Flags().Set("disable-fs-search-tools", "true"))
+	require.NoError(t, cmd.Flags().Set("enable-fs-search-tools", "true"))
 	require.NoError(t, cmd.Flags().Set("disable-subagent", "true"))
 	require.NoError(t, cmd.Flags().Set("sysprompt", "prompt.md"))
 	require.NoError(t, cmd.Flags().Set("sysprompt-arg", "project=kodelet"))
@@ -662,7 +662,7 @@ func TestGetRunConfigFromFlags(t *testing.T) {
 	assert.True(t, config.NoExtensions)
 	assert.True(t, config.NoMCP)
 	assert.True(t, config.NoTools)
-	assert.True(t, config.DisableFSSearchTools)
+	assert.True(t, config.EnableFSSearchTools)
 	assert.True(t, config.DisableSubagent)
 	assert.Equal(t, "prompt.md", config.Sysprompt)
 	assert.Equal(t, map[string]string{"project": "kodelet"}, config.SyspromptArgs)
