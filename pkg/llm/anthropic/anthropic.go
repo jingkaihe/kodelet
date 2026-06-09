@@ -865,7 +865,7 @@ func (t *Thread) adaptiveThinkingDisabled(model anthropic.Model) bool {
 }
 
 func (t *Thread) validateThinkingConfigForModel(model anthropic.Model) error {
-	if model == anthropic.ModelClaudeMythosPreview && t.adaptiveThinkingDisabled(model) {
+	if isAlwaysOnAdaptiveThinkingModel(model) && t.adaptiveThinkingDisabled(model) {
 		return errors.Errorf("%s does not support disabling adaptive thinking with reasoning_effort=none", model)
 	}
 
@@ -930,9 +930,10 @@ func anthropicReasoningEffortForModel(model anthropic.Model, configured string) 
 
 func isAdaptiveThinkingModel(model anthropic.Model) bool {
 	adaptiveThinkingModels := []anthropic.Model{
+		anthropic.ModelClaudeFable5,
 		anthropic.ModelClaudeOpus4_8,
 		anthropic.ModelClaudeOpus4_7,
-		anthropic.ModelClaudeMythosPreview,
+		modelClaudeMythosPreview,
 		anthropic.ModelClaudeOpus4_6,
 		anthropic.ModelClaudeSonnet4_6,
 	}
@@ -940,8 +941,18 @@ func isAdaptiveThinkingModel(model anthropic.Model) bool {
 	return slices.Contains(adaptiveThinkingModels, model)
 }
 
+func isAlwaysOnAdaptiveThinkingModel(model anthropic.Model) bool {
+	alwaysOnAdaptiveThinkingModels := []anthropic.Model{
+		anthropic.ModelClaudeFable5,
+		modelClaudeMythosPreview,
+	}
+
+	return slices.Contains(alwaysOnAdaptiveThinkingModels, model)
+}
+
 func isXhighEffortModel(model anthropic.Model) bool {
 	xhighEffortModels := []anthropic.Model{
+		anthropic.ModelClaudeFable5,
 		anthropic.ModelClaudeOpus4_8,
 		anthropic.ModelClaudeOpus4_7,
 	}
@@ -951,7 +962,8 @@ func isXhighEffortModel(model anthropic.Model) bool {
 
 func isThinkingModel(model anthropic.Model) bool {
 	thinkingModels := []anthropic.Model{
-		anthropic.ModelClaudeMythosPreview,
+		anthropic.ModelClaudeFable5,
+		modelClaudeMythosPreview,
 
 		// haiku 4.5 models
 		anthropic.ModelClaudeHaiku4_5,
@@ -964,8 +976,8 @@ func isThinkingModel(model anthropic.Model) bool {
 		// opus 4 models
 		anthropic.ModelClaudeOpus4_8,
 		anthropic.ModelClaudeOpus4_7,
-		anthropic.ModelClaudeOpus4_1,
-		anthropic.ModelClaudeOpus4_1_20250805,
+		anthropic.Model("claude-opus-4-1"),
+		anthropic.Model("claude-opus-4-1-20250805"),
 		anthropic.ModelClaudeOpus4_5,
 		anthropic.ModelClaudeOpus4_5_20251101,
 		anthropic.ModelClaudeOpus4_6,

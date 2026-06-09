@@ -12,6 +12,7 @@ import (
 
 func recommendedSetupConfigYAML() string {
 	return `aliases:
+    fable-5: claude-fable-5
     haiku-45: claude-haiku-4-5-20251001
     opus-48: claude-opus-4-8
     sonnet-46: claude-sonnet-4-6

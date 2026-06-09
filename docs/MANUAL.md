@@ -819,6 +819,7 @@ profiles:
 
 # Model aliases work across all profiles
 aliases:
+    fable-5: claude-fable-5
     haiku-45: claude-haiku-4-5-20251001
     opus-48: claude-opus-4-8
     sonnet-46: claude-sonnet-4-6
@@ -991,6 +992,7 @@ export KODELET_BASH_TIMEOUT=5m
 ### Anthropic Claude
 
 Kodelet supports various Anthropic Claude models:
+- `claude-fable-5` (most capable widely released model for demanding reasoning and long-horizon agentic work)
 - `claude-sonnet-4-6` (recommended for standard tasks)
 - `claude-haiku-4-5-20251001` (recommended for lightweight tasks)
 - `claude-opus-4-5-20251101` (most intelligent model for building agents and coding)
