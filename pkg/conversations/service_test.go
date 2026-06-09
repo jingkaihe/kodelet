@@ -354,9 +354,6 @@ func TestConversationService_ForkConversation(t *testing.T) {
 			MaxContextWindow:     200000,
 		},
 		Metadata: map[string]any{"profile": "work"},
-		FileLastAccess: map[string]time.Time{
-			"/tmp/a.txt": now,
-		},
 		ToolResults: map[string]tools.StructuredToolResult{
 			"tool-1": {ToolName: "bash"},
 		},
@@ -389,7 +386,6 @@ func TestConversationService_ForkConversation(t *testing.T) {
 		assert.Equal(t, sourceRecord.Usage.MaxContextWindow, forkedRecord.Usage.MaxContextWindow)
 		assert.Equal(t, sourceRecord.Metadata, forkedRecord.Metadata)
 		assert.Equal(t, sourceRecord.ToolResults, forkedRecord.ToolResults)
-		assert.Equal(t, sourceRecord.FileLastAccess, forkedRecord.FileLastAccess)
 	})
 
 	t.Run("load error", func(t *testing.T) {

@@ -109,7 +109,7 @@ By default the file is created with 0644 permissions. You can change the permiss
 }
 
 // ValidateInput validates the input parameters for the tool
-func (t *FileWriteTool) ValidateInput(state tooltypes.State, parameters string) error {
+func (t *FileWriteTool) ValidateInput(_ tooltypes.State, parameters string) error {
 	var input FileWriteInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return errors.Wrap(err, "invalid input")
@@ -117,27 +117,6 @@ func (t *FileWriteTool) ValidateInput(state tooltypes.State, parameters string) 
 
 	if input.Text == "" {
 		return errors.New("text is required. run 'touch' command to create an empty file")
-	}
-
-	// check if the file exists
-	info, err := os.Stat(input.FilePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// if the file does not exist, we can create it
-			return nil
-		}
-		return errors.Wrap(err, "failed to check the file status")
-	}
-
-	// get the last modified time of the file
-	lastAccessed := info.ModTime()
-	lastRead, err := state.GetFileLastAccessed(input.FilePath)
-	if err != nil {
-		return errors.Wrap(err, "failed to get the last access time of the file")
-	}
-
-	if lastAccessed.After(lastRead) {
-		return errors.Errorf("file %s has been modified since the last read either by another tool or by the user, please read the file again", input.FilePath)
 	}
 
 	return nil
@@ -166,8 +145,6 @@ func (t *FileWriteTool) Execute(_ context.Context, state tooltypes.State, parame
 			err:      fmt.Sprintf("invalid input: %s", err.Error()),
 		}
 	}
-
-	state.SetFileLastAccessed(input.FilePath, time.Now())
 
 	err := os.WriteFile(input.FilePath, []byte(input.Text), 0o644)
 	if err != nil {

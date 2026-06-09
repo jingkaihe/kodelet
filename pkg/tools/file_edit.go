@@ -183,9 +183,6 @@ This tool takes four parameters:
 - replace_all: (optional, default: false) If true, replace all occurrences of old_text; if false, old_text must be unique
 
 # RULES
-## Read before editing
-You must read the file using the "FileRead" tool before making any edits.
-
 ## Validate after edit
 If the text edit is code or configuration related, you are encouraged to validate the edit via running the linting tool using bash.
 
@@ -225,7 +222,7 @@ func (t *FileEditTool) TracingKVs(parameters string) ([]attribute.KeyValue, erro
 }
 
 // ValidateInput validates the input parameters for the tool
-func (t *FileEditTool) ValidateInput(state tooltypes.State, parameters string) error {
+func (t *FileEditTool) ValidateInput(_ tooltypes.State, parameters string) error {
 	var input FileEditInput
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return errors.Wrap(err, "invalid input")
@@ -239,20 +236,6 @@ func (t *FileEditTool) ValidateInput(state tooltypes.State, parameters string) e
 		}
 		return errors.Wrap(err, "failed to check the file status")
 	}
-
-	// Check if file has been read before (required for single edits, not for replaceAll)
-	// replaceAll is a declarative global replacement that doesn't depend on prior context
-	if !input.ReplaceAll {
-		_, err = state.GetFileLastAccessed(input.FilePath)
-		if err != nil {
-			return errors.Wrap(err, "failed to get the last access time of the file")
-		}
-	}
-
-	// Note: The mtime check is performed inside Execute() within the locked section
-	// to support parallel file edits to the same file. This prevents race conditions
-	// where multiple edits are queued and would fail validation after the first edit
-	// updates the file's mtime.
 
 	// check if the old text exists (basic check, detailed check in Execute with lock)
 	content, err := os.ReadFile(input.FilePath)
@@ -433,34 +416,6 @@ func (t *FileEditTool) Execute(_ context.Context, state tooltypes.State, paramet
 	state.LockFile(input.FilePath)
 	defer state.UnlockFile(input.FilePath)
 
-	// Check if file has been modified since last read (inside lock for atomicity)
-	// This check is here instead of ValidateInput to support parallel file edits
-	info, err := os.Stat(input.FilePath)
-	if err != nil {
-		return &FileEditToolResult{
-			filename: input.FilePath,
-			err:      fmt.Sprintf("failed to stat the file: %s", err),
-		}
-	}
-	lastAccessed := info.ModTime()
-	// Skip last access check for replaceAll since it's a declarative global replacement
-	// that doesn't depend on positional context
-	if !input.ReplaceAll {
-		lastRead, err := state.GetFileLastAccessed(input.FilePath)
-		if err != nil {
-			return &FileEditToolResult{
-				filename: input.FilePath,
-				err:      fmt.Sprintf("failed to get the last access time: %s", err),
-			}
-		}
-		if lastAccessed.After(lastRead) {
-			return &FileEditToolResult{
-				filename: input.FilePath,
-				err:      fmt.Sprintf("file %s has been modified since the last read either by another tool or by the user, please read the file again", input.FilePath),
-			}
-		}
-	}
-
 	b, err := os.ReadFile(input.FilePath)
 	if err != nil {
 		return &FileEditToolResult{
@@ -526,7 +481,6 @@ func (t *FileEditTool) Execute(_ context.Context, state tooltypes.State, paramet
 			err:      fmt.Sprintf("failed to write the file: %s", err),
 		}
 	}
-	state.SetFileLastAccessed(input.FilePath, time.Now())
 
 	return &FileEditToolResult{
 		filename:      input.FilePath,

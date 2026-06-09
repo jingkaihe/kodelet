@@ -155,17 +155,16 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 
 	// Build the conversation record
 	record := convtypes.ConversationRecord{
-		ID:             t.ConversationID,
-		CWD:            t.Config.WorkingDirectory,
-		RawMessages:    messagesJSON,
-		Provider:       "openai",
-		Usage:          *t.Usage,
-		Metadata:       metadata,
-		Summary:        t.summary,
-		CreatedAt:      time.Now(),
-		UpdatedAt:      time.Now(),
-		FileLastAccess: t.State.FileLastAccess(),
-		ToolResults:    t.GetStructuredToolResults(),
+		ID:          t.ConversationID,
+		CWD:         t.Config.WorkingDirectory,
+		RawMessages: messagesJSON,
+		Provider:    "openai",
+		Usage:       *t.Usage,
+		Metadata:    metadata,
+		Summary:     t.summary,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+		ToolResults: t.GetStructuredToolResults(),
 	}
 
 	// Save to the store
@@ -215,7 +214,6 @@ func (t *Thread) loadConversation(ctx context.Context) {
 	t.Usage = &record.Usage
 	t.summary = record.Summary
 	t.SetMetadata(record.Metadata)
-	t.State.SetFileLastAccess(record.FileLastAccess)
 	// Restore structured tool results
 	t.SetStructuredToolResults(record.ToolResults)
 }

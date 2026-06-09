@@ -113,9 +113,6 @@ func TestConversationFork(t *testing.T) {
 			},
 		},
 	}
-	sourceRecord.FileLastAccess = map[string]time.Time{
-		"test.go": time.Now(),
-	}
 	sourceRecord.Metadata = map[string]any{
 		"test_key": "test_value",
 	}
@@ -135,11 +132,6 @@ func TestConversationFork(t *testing.T) {
 	forkedRecord.Provider = loadedSource.Provider
 	forkedRecord.Summary = loadedSource.Summary
 	forkedRecord.ToolResults = loadedSource.ToolResults
-
-	if loadedSource.FileLastAccess != nil {
-		forkedRecord.FileLastAccess = make(map[string]time.Time)
-		maps.Copy(forkedRecord.FileLastAccess, loadedSource.FileLastAccess)
-	}
 
 	if loadedSource.Metadata != nil {
 		forkedRecord.Metadata = make(map[string]any)
@@ -163,14 +155,6 @@ func TestConversationFork(t *testing.T) {
 	assert.Equal(t, loadedSource.Provider, loadedForked.Provider)
 	assert.Equal(t, loadedSource.Summary, loadedForked.Summary)
 	assert.Equal(t, loadedSource.ToolResults, loadedForked.ToolResults)
-
-	// Assert that FileLastAccess is copied (deep copy)
-	assert.Equal(t, len(loadedSource.FileLastAccess), len(loadedForked.FileLastAccess))
-	for k, v := range loadedSource.FileLastAccess {
-		forkedV, exists := loadedForked.FileLastAccess[k]
-		assert.True(t, exists)
-		assert.Equal(t, v.Unix(), forkedV.Unix()) // Compare Unix timestamps
-	}
 
 	// Assert that Metadata is copied (deep copy)
 	assert.Equal(t, loadedSource.Metadata, loadedForked.Metadata)
@@ -652,8 +636,7 @@ func TestValidateConversationRecord(t *testing.T) {
 		"id":"conv-1",
 		"provider":"openai",
 		"rawMessages":[{"role":"user","content":"hello"}],
-		"usage":{},
-		"fileLastAccess":{}
+		"usage":{}
 	}`)
 
 	record, err := validateConversationRecord(valid)
@@ -895,9 +878,6 @@ func saveConversationCommandRecord(ctx context.Context, t *testing.T, id string)
 	record.Metadata = map[string]any{
 		"platform": "codex",
 		"api_mode": "chat_completions",
-	}
-	record.FileLastAccess = map[string]time.Time{
-		"main.go": time.Date(2026, 1, 23, 10, 0, 0, 0, time.UTC),
 	}
 
 	store, err := conversations.GetConversationStore(ctx)

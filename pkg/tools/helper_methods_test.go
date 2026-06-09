@@ -617,10 +617,6 @@ func TestStateDeterministicHelpers(t *testing.T) {
 	state := NewBasicState(context.Background(), WithWorkingDirectory(workDir))
 	assert.Equal(t, filepath.Clean(workDir), state.WorkingDirectory())
 
-	accessTime := time.Now().Round(time.Second)
-	state.SetFileLastAccess(map[string]time.Time{"/tmp/demo.txt": accessTime})
-	assert.Equal(t, map[string]time.Time{"/tmp/demo.txt": accessTime}, state.FileLastAccess())
-
 	state = NewBasicState(context.Background(), WithLLMConfig(llmtypes.Config{WorkingDirectory: workDir}))
 	assert.Equal(t, filepath.Clean(workDir), state.WorkingDirectory())
 

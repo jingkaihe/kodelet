@@ -181,11 +181,11 @@ func (t *ApplyPatchTool) Execute(_ context.Context, state tooltypes.State, param
 		switch hunk.kind {
 		case patchHunkAdd:
 			unlock := lockPaths(state, hunk.path)
-			err = applyAddHunk(state, hunk, result)
+			err = applyAddHunk(hunk, result)
 			unlock()
 		case patchHunkDelete:
 			unlock := lockPaths(state, hunk.path)
-			err = applyDeleteHunk(state, hunk, result)
+			err = applyDeleteHunk(hunk, result)
 			unlock()
 		case patchHunkUpdate:
 			paths := []string{hunk.path}
@@ -193,7 +193,7 @@ func (t *ApplyPatchTool) Execute(_ context.Context, state tooltypes.State, param
 				paths = append(paths, hunk.movePath)
 			}
 			unlock := lockPaths(state, paths...)
-			err = applyUpdateHunk(state, hunk, result)
+			err = applyUpdateHunk(hunk, result)
 			unlock()
 		}
 
@@ -206,7 +206,7 @@ func (t *ApplyPatchTool) Execute(_ context.Context, state tooltypes.State, param
 	return result
 }
 
-func applyAddHunk(state tooltypes.State, hunk parsedHunk, result *applyPatchToolResult) error {
+func applyAddHunk(hunk parsedHunk, result *applyPatchToolResult) error {
 	if parent := filepath.Dir(hunk.path); parent != "" && parent != "." {
 		if err := os.MkdirAll(parent, 0o755); err != nil {
 			return errors.Wrapf(err, "failed to create parent directories for %s", hunk.path)
@@ -228,7 +228,6 @@ func applyAddHunk(state tooltypes.State, hunk parsedHunk, result *applyPatchTool
 	if err := os.WriteFile(hunk.path, []byte(hunk.contents), 0o644); err != nil {
 		return errors.Wrapf(err, "failed to write file %s", hunk.path)
 	}
-	_ = state.SetFileLastAccessed(hunk.path, time.Now())
 
 	result.added = append(result.added, hunk.path)
 	result.changes = append(result.changes, tooltypes.ApplyPatchChange{
@@ -241,7 +240,7 @@ func applyAddHunk(state tooltypes.State, hunk parsedHunk, result *applyPatchTool
 	return nil
 }
 
-func applyDeleteHunk(state tooltypes.State, hunk parsedHunk, result *applyPatchToolResult) error {
+func applyDeleteHunk(hunk parsedHunk, result *applyPatchToolResult) error {
 	oldContent, err := os.ReadFile(hunk.path)
 	if err != nil {
 		return errors.Wrapf(err, "failed to read %s", hunk.path)
@@ -249,7 +248,6 @@ func applyDeleteHunk(state tooltypes.State, hunk parsedHunk, result *applyPatchT
 	if err := os.Remove(hunk.path); err != nil {
 		return errors.Wrapf(err, "failed to delete file %s", hunk.path)
 	}
-	_ = state.ClearFileLastAccessed(hunk.path)
 
 	result.deleted = append(result.deleted, hunk.path)
 	result.changes = append(result.changes, tooltypes.ApplyPatchChange{
@@ -261,7 +259,7 @@ func applyDeleteHunk(state tooltypes.State, hunk parsedHunk, result *applyPatchT
 	return nil
 }
 
-func applyUpdateHunk(state tooltypes.State, hunk parsedHunk, result *applyPatchToolResult) error {
+func applyUpdateHunk(hunk parsedHunk, result *applyPatchToolResult) error {
 	oldContent, newContent, err := deriveUpdatedContent(hunk.path, hunk.chunks)
 	if err != nil {
 		return err
@@ -284,13 +282,11 @@ func applyUpdateHunk(state tooltypes.State, hunk parsedHunk, result *applyPatchT
 		if rmErr := os.Remove(hunk.path); rmErr != nil {
 			return errors.Wrapf(rmErr, "failed to remove original %s", hunk.path)
 		}
-		_ = state.ClearFileLastAccessed(hunk.path)
 	} else {
 		if writeErr := os.WriteFile(hunk.path, []byte(newContent), 0o644); writeErr != nil {
 			return errors.Wrapf(writeErr, "failed to write file %s", hunk.path)
 		}
 	}
-	_ = state.SetFileLastAccessed(targetPath, time.Now())
 
 	diff := udiff.Unified(hunk.path, targetPath, oldContent, newContent)
 

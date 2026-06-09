@@ -49,9 +49,6 @@ func TestStore_BasicOperations(t *testing.T) {
 		ID:          "test-conversation-1",
 		RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Hello world"}]}]`),
 		Provider:    "anthropic",
-		FileLastAccess: map[string]time.Time{
-			"test.txt": now,
-		},
 		Usage: llmtypes.Usage{
 			InputTokens:  100,
 			OutputTokens: 50,
@@ -555,11 +552,6 @@ func TestStore_DatabaseIntegration(t *testing.T) {
 		ID:          "integration-test",
 		RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Complex test with émoticônes 🚀"}]}]`),
 		Provider:    "anthropic",
-		FileLastAccess: map[string]time.Time{
-			"file1.txt":  now,
-			"file2.go":   now.Add(time.Hour),
-			"file3.json": now.Add(2 * time.Hour),
-		},
 		Usage: llmtypes.Usage{
 			InputTokens:              150,
 			OutputTokens:             75,
@@ -682,16 +674,15 @@ func TestStore_NullHandling(t *testing.T) {
 	// Test record with empty/null fields
 	now := time.Now().UTC().Truncate(time.Second)
 	record := conversations.ConversationRecord{
-		ID:             "null-test",
-		RawMessages:    json.RawMessage(`[]`),
-		Provider:       "anthropic",
-		FileLastAccess: map[string]time.Time{}, // Empty map
-		Usage:          llmtypes.Usage{},       // Zero values
-		Summary:        "",                     // Empty string (should become NULL)
-		CreatedAt:      now,
-		UpdatedAt:      now,
-		Metadata:       map[string]any{},                        // Empty map
-		ToolResults:    map[string]tools.StructuredToolResult{}, // Empty map
+		ID:          "null-test",
+		RawMessages: json.RawMessage(`[]`),
+		Provider:    "anthropic",
+		Usage:       llmtypes.Usage{}, // Zero values
+		Summary:     "",               // Empty string (should become NULL)
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		Metadata:    map[string]any{},                        // Empty map
+		ToolResults: map[string]tools.StructuredToolResult{}, // Empty map
 	}
 
 	// Save record
@@ -707,10 +698,9 @@ func TestStore_NullHandling(t *testing.T) {
 	// Load record and verify empty string is returned
 	loaded, err := store.Load(ctx, "null-test")
 	require.NoError(t, err)
-	assert.Equal(t, "", loaded.Summary)     // Should be empty string in domain model
-	assert.NotNil(t, loaded.FileLastAccess) // Should be empty map, not nil
-	assert.NotNil(t, loaded.Metadata)       // Should be empty map, not nil
-	assert.NotNil(t, loaded.ToolResults)    // Should be empty map, not nil
+	assert.Equal(t, "", loaded.Summary)  // Should be empty string in domain model
+	assert.NotNil(t, loaded.Metadata)    // Should be empty map, not nil
+	assert.NotNil(t, loaded.ToolResults) // Should be empty map, not nil
 }
 
 func TestStore_ConcurrentAccess(t *testing.T) {
@@ -744,9 +734,6 @@ func TestStore_ConcurrentAccess(t *testing.T) {
 					ID:          fmt.Sprintf("concurrent-%d-%d", routineID, j),
 					RawMessages: json.RawMessage(fmt.Sprintf(`[{"role": "user", "content": "Message from routine %d record %d"}]`, routineID, j)),
 					Provider:    "anthropic",
-					FileLastAccess: map[string]time.Time{
-						fmt.Sprintf("file-%d-%d.txt", routineID, j): now,
-					},
 					Usage: llmtypes.Usage{
 						InputTokens:  10 + routineID,
 						OutputTokens: 5 + j,
@@ -849,9 +836,6 @@ func TestStore_DirectDatabaseAccess(t *testing.T) {
 		ID:          "direct-test",
 		RawMessages: json.RawMessage(`[{"role": "user", "content": "Direct insert"}]`),
 		Provider:    "anthropic",
-		FileLastAccess: JSONField[map[string]time.Time]{
-			Data: map[string]time.Time{"direct.txt": now},
-		},
 		Usage: JSONField[llmtypes.Usage]{
 			Data: llmtypes.Usage{InputTokens: 100, OutputTokens: 50},
 		},
@@ -868,10 +852,10 @@ func TestStore_DirectDatabaseAccess(t *testing.T) {
 
 	query := `
 		INSERT INTO conversations (
-			id, raw_messages, provider, file_last_access, usage,
+			id, raw_messages, provider, usage,
 			summary, created_at, updated_at, metadata, tool_results
 		) VALUES (
-			:id, :raw_messages, :provider, :file_last_access, :usage,
+			:id, :raw_messages, :provider, :usage,
 			:summary, :created_at, :updated_at, :metadata, :tool_results
 		)
 	`
@@ -915,7 +899,7 @@ func TestStore_DirectDatabaseAccess(t *testing.T) {
 
 	// Test direct query using sqlx
 	var records []dbConversationRecord
-	err = store.db.Select(&records, `SELECT id, raw_messages, provider, file_last_access, usage,
+	err = store.db.Select(&records, `SELECT id, raw_messages, provider, usage,
 		summary, created_at, updated_at, metadata, tool_results
 		FROM conversations WHERE provider = ?`, "anthropic")
 	require.NoError(t, err)
@@ -944,9 +928,6 @@ func TestStore_TimestampBehavior(t *testing.T) {
 		ID:          "timestamp-test",
 		RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Initial message"}]}]`),
 		Provider:    "anthropic",
-		FileLastAccess: map[string]time.Time{
-			"test.txt": originalCreatedAt,
-		},
 		Usage: llmtypes.Usage{
 			InputTokens:  100,
 			OutputTokens: 50,

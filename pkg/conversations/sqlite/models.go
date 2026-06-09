@@ -42,17 +42,16 @@ func (j JSONField[T]) Value() (driver.Value, error) {
 
 // dbConversationRecord represents the conversations table structure
 type dbConversationRecord struct {
-	ID             string                                           `db:"id"`
-	CWD            *string                                          `db:"cwd"`
-	RawMessages    json.RawMessage                                  `db:"raw_messages"`
-	Provider       string                                           `db:"provider"`
-	FileLastAccess JSONField[map[string]time.Time]                  `db:"file_last_access"`
-	Usage          JSONField[llmtypes.Usage]                        `db:"usage"`
-	Summary        *string                                          `db:"summary"` // NULL in database
-	CreatedAt      time.Time                                        `db:"created_at"`
-	UpdatedAt      time.Time                                        `db:"updated_at"`
-	Metadata       JSONField[map[string]any]                        `db:"metadata"`
-	ToolResults    JSONField[map[string]tools.StructuredToolResult] `db:"tool_results"`
+	ID          string                                           `db:"id"`
+	CWD         *string                                          `db:"cwd"`
+	RawMessages json.RawMessage                                  `db:"raw_messages"`
+	Provider    string                                           `db:"provider"`
+	Usage       JSONField[llmtypes.Usage]                        `db:"usage"`
+	Summary     *string                                          `db:"summary"` // NULL in database
+	CreatedAt   time.Time                                        `db:"created_at"`
+	UpdatedAt   time.Time                                        `db:"updated_at"`
+	Metadata    JSONField[map[string]any]                        `db:"metadata"`
+	ToolResults JSONField[map[string]tools.StructuredToolResult] `db:"tool_results"`
 }
 
 // dbConversationSummary represents the conversation_summaries table structure
@@ -72,15 +71,14 @@ type dbConversationSummary struct {
 // ToConversationRecord converts database record to domain model
 func (dbr *dbConversationRecord) ToConversationRecord() conversations.ConversationRecord {
 	record := conversations.ConversationRecord{
-		ID:             dbr.ID,
-		RawMessages:    dbr.RawMessages,
-		Provider:       dbr.Provider,
-		FileLastAccess: dbr.FileLastAccess.Data,
-		Usage:          dbr.Usage.Data,
-		CreatedAt:      dbr.CreatedAt,
-		UpdatedAt:      dbr.UpdatedAt,
-		Metadata:       dbr.Metadata.Data,
-		ToolResults:    dbr.ToolResults.Data,
+		ID:          dbr.ID,
+		RawMessages: dbr.RawMessages,
+		Provider:    dbr.Provider,
+		Usage:       dbr.Usage.Data,
+		CreatedAt:   dbr.CreatedAt,
+		UpdatedAt:   dbr.UpdatedAt,
+		Metadata:    dbr.Metadata.Data,
+		ToolResults: dbr.ToolResults.Data,
 	}
 
 	if dbr.Summary != nil {
@@ -119,15 +117,14 @@ func (dbs *dbConversationSummary) ToConversationSummary() conversations.Conversa
 // fromConversationRecord converts domain model to database record
 func fromConversationRecord(record conversations.ConversationRecord) *dbConversationRecord {
 	dbRecord := &dbConversationRecord{
-		ID:             record.ID,
-		RawMessages:    record.RawMessages,
-		Provider:       record.Provider,
-		FileLastAccess: JSONField[map[string]time.Time]{Data: record.FileLastAccess},
-		Usage:          JSONField[llmtypes.Usage]{Data: record.Usage},
-		CreatedAt:      record.CreatedAt,
-		UpdatedAt:      record.UpdatedAt,
-		Metadata:       JSONField[map[string]any]{Data: record.Metadata},
-		ToolResults:    JSONField[map[string]tools.StructuredToolResult]{Data: record.ToolResults},
+		ID:          record.ID,
+		RawMessages: record.RawMessages,
+		Provider:    record.Provider,
+		Usage:       JSONField[llmtypes.Usage]{Data: record.Usage},
+		CreatedAt:   record.CreatedAt,
+		UpdatedAt:   record.UpdatedAt,
+		Metadata:    JSONField[map[string]any]{Data: record.Metadata},
+		ToolResults: JSONField[map[string]tools.StructuredToolResult]{Data: record.ToolResults},
 	}
 
 	if record.Summary != "" {

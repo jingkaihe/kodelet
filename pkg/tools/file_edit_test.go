@@ -6,7 +6,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
@@ -48,7 +47,6 @@ func TestFileEditTool_ValidateInput(t *testing.T) {
 	require.NoError(t, err)
 
 	mockState := NewBasicState(context.TODO())
-	mockState.SetFileLastAccessed(tmpfile.Name(), time.Now())
 
 	tool := &FileEditTool{}
 	tests := []struct {
@@ -131,7 +129,6 @@ func TestFileEditTool_Execute(t *testing.T) {
 		require.NoError(t, err)
 
 		mockState := NewBasicState(context.TODO())
-		mockState.SetFileLastAccessed(tmpfile.Name(), time.Now())
 
 		input := FileEditInput{
 			FilePath: tmpfile.Name(),
@@ -161,7 +158,7 @@ func TestFileEditTool_Execute(t *testing.T) {
 		params, _ := json.Marshal(input)
 		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
 
-		assert.Contains(t, result.GetError(), "failed to stat the file")
+		assert.Contains(t, result.GetError(), "failed to read the file")
 		assert.Empty(t, result.GetResult())
 	})
 
@@ -187,7 +184,6 @@ func TestFileEditTool_MultipleEdits(t *testing.T) {
 
 	tool := &FileEditTool{}
 	mockState := NewBasicState(context.TODO())
-	mockState.SetFileLastAccessed(tmpfile.Name(), time.Now())
 
 	// First edit
 	firstInput := FileEditInput{
@@ -199,7 +195,7 @@ func TestFileEditTool_MultipleEdits(t *testing.T) {
 	firstResult := tool.Execute(context.Background(), mockState, string(firstParams))
 	assert.False(t, firstResult.IsError())
 
-	// Second edit (lastAccessed was updated by first edit)
+	// Second edit
 	secondInput := FileEditInput{
 		FilePath: tmpfile.Name(),
 		OldText:  "Fourth line X",
@@ -305,7 +301,6 @@ func TestFileEditTool_ExecuteOutputsFormattedEdit(t *testing.T) {
 
 	tool := &FileEditTool{}
 	mockState := NewBasicState(context.TODO())
-	mockState.SetFileLastAccessed(tmpfile.Name(), time.Now())
 
 	// Edit the file
 	input := FileEditInput{
@@ -350,7 +345,6 @@ func main() {
 
 	tool := &FileEditTool{}
 	mockState := NewBasicState(context.TODO())
-	mockState.SetFileLastAccessed(tmpfile.Name(), time.Now())
 
 	// Edit the file - replace the data processing loop
 	oldText := `	// Process data
@@ -410,7 +404,6 @@ func TestFileEditTool_ReplaceAll(t *testing.T) {
 		require.NoError(t, err)
 
 		mockState := NewBasicState(context.TODO())
-		mockState.SetFileLastAccessed(tmpfile.Name(), time.Now())
 
 		input := FileEditInput{
 			FilePath:   tmpfile.Name(),
@@ -459,7 +452,6 @@ func test() {
 		require.NoError(t, err)
 
 		mockState := NewBasicState(context.TODO())
-		mockState.SetFileLastAccessed(tmpfile.Name(), time.Now())
 
 		input := FileEditInput{
 			FilePath: tmpfile.Name(),
@@ -501,7 +493,6 @@ func test() {
 		require.NoError(t, err)
 
 		mockState := NewBasicState(context.TODO())
-		mockState.SetFileLastAccessed(tmpfile.Name(), time.Now())
 
 		input := FileEditInput{
 			FilePath:   tmpfile.Name(),
@@ -533,7 +524,6 @@ func test() {
 		require.NoError(t, err)
 
 		mockState := NewBasicState(context.TODO())
-		mockState.SetFileLastAccessed(tmpfile.Name(), time.Now())
 
 		input := FileEditInput{
 			FilePath:   tmpfile.Name(),
@@ -568,7 +558,6 @@ func TestFileEditTool_ValidateInputReplaceAll(t *testing.T) {
 	require.NoError(t, err)
 
 	mockState := NewBasicState(context.TODO())
-	mockState.SetFileLastAccessed(tmpfile.Name(), time.Now())
 
 	tool := &FileEditTool{}
 
@@ -610,7 +599,7 @@ func TestFileEditTool_ValidateInputReplaceAll(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("replaceAll=false without prior read - should fail validation", func(t *testing.T) {
+	t.Run("replaceAll=false without prior read - should pass validation", func(t *testing.T) {
 		// Create a fresh file that hasn't been read
 		freshFile, err := os.CreateTemp("", "FileEditNoPriorReadTest")
 		require.NoError(t, err)
@@ -632,8 +621,7 @@ func TestFileEditTool_ValidateInputReplaceAll(t *testing.T) {
 		}
 		inputJSON, _ := json.Marshal(input)
 		err = tool.ValidateInput(freshState, string(inputJSON))
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "last access time")
+		assert.NoError(t, err)
 	})
 
 	t.Run("replaceAll=true without prior read - should pass validation", func(t *testing.T) {
@@ -753,12 +741,12 @@ func TestFindAllOccurrences(t *testing.T) {
 	}
 }
 
-func TestFileEditTool_ModifiedSinceLastRead(t *testing.T) {
+func TestFileEditTool_NoPriorReadRequired(t *testing.T) {
 	tool := &FileEditTool{}
 
-	t.Run("replaceAll=false should fail when file modified since last read", func(t *testing.T) {
+	t.Run("single edit works without prior file read", func(t *testing.T) {
 		content := []byte("Hello world\nHello everyone\n")
-		tmpfile, err := os.CreateTemp("", "FileEditModifiedTest")
+		tmpfile, err := os.CreateTemp("", "FileEditNoReadSingleTest")
 		require.NoError(t, err)
 		defer os.Remove(tmpfile.Name())
 
@@ -766,10 +754,6 @@ func TestFileEditTool_ModifiedSinceLastRead(t *testing.T) {
 		require.NoError(t, err)
 		err = tmpfile.Close()
 		require.NoError(t, err)
-
-		mockState := NewBasicState(context.TODO())
-		// Set last accessed time to 1 hour ago to simulate stale read
-		mockState.SetFileLastAccessed(tmpfile.Name(), time.Now().Add(-time.Hour))
 
 		input := FileEditInput{
 			FilePath:   tmpfile.Name(),
@@ -778,49 +762,16 @@ func TestFileEditTool_ModifiedSinceLastRead(t *testing.T) {
 			ReplaceAll: false,
 		}
 		params, _ := json.Marshal(input)
-		result := tool.Execute(context.Background(), mockState, string(params))
+		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
 
-		assert.True(t, result.IsError())
-		assert.Contains(t, result.GetError(), "has been modified since the last read")
-	})
-
-	t.Run("replaceAll=true should succeed even when file modified since last read", func(t *testing.T) {
-		content := []byte("Hello world\nHello everyone\n")
-		tmpfile, err := os.CreateTemp("", "FileEditModifiedReplaceAllTest")
-		require.NoError(t, err)
-		defer os.Remove(tmpfile.Name())
-
-		_, err = tmpfile.Write(content)
-		require.NoError(t, err)
-		err = tmpfile.Close()
-		require.NoError(t, err)
-
-		mockState := NewBasicState(context.TODO())
-		// Set last accessed time to 1 hour ago to simulate stale read
-		mockState.SetFileLastAccessed(tmpfile.Name(), time.Now().Add(-time.Hour))
-
-		input := FileEditInput{
-			FilePath:   tmpfile.Name(),
-			OldText:    "Hello",
-			NewText:    "Hi",
-			ReplaceAll: true,
-		}
-		params, _ := json.Marshal(input)
-		result := tool.Execute(context.Background(), mockState, string(params))
-
-		// Should succeed despite stale last access time
 		assert.False(t, result.IsError())
-		assert.Contains(t, result.GetResult(), "Replaced 2 occurrences")
 
-		// Verify the file was edited correctly
 		updatedContent, err := os.ReadFile(tmpfile.Name())
 		assert.NoError(t, err)
 		assert.Contains(t, string(updatedContent), "Hi world")
-		assert.Contains(t, string(updatedContent), "Hi everyone")
-		assert.NotContains(t, string(updatedContent), "Hello")
 	})
 
-	t.Run("replaceAll=true should work without any prior file read", func(t *testing.T) {
+	t.Run("replaceAll works without prior file read", func(t *testing.T) {
 		content := []byte("foo bar foo baz foo\n")
 		tmpfile, err := os.CreateTemp("", "FileEditNoReadTest")
 		require.NoError(t, err)
@@ -831,9 +782,6 @@ func TestFileEditTool_ModifiedSinceLastRead(t *testing.T) {
 		err = tmpfile.Close()
 		require.NoError(t, err)
 
-		mockState := NewBasicState(context.TODO())
-		// Don't set any last accessed time - simulating no prior read
-
 		input := FileEditInput{
 			FilePath:   tmpfile.Name(),
 			OldText:    "foo",
@@ -841,9 +789,8 @@ func TestFileEditTool_ModifiedSinceLastRead(t *testing.T) {
 			ReplaceAll: true,
 		}
 		params, _ := json.Marshal(input)
-		result := tool.Execute(context.Background(), mockState, string(params))
+		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
 
-		// Should succeed even without prior read
 		assert.False(t, result.IsError())
 		assert.Contains(t, result.GetResult(), "Replaced 3 occurrences")
 
@@ -868,7 +815,6 @@ func TestFileEditTool_ConcurrentEdits(t *testing.T) {
 	require.NoError(t, err)
 
 	// Simulate reading the file first
-	mockState.SetFileLastAccessed(tmpfile.Name(), time.Now())
 
 	done := make(chan bool, 4)
 	errors := make(chan error, 4)

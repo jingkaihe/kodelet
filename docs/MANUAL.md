@@ -479,7 +479,7 @@ Make sure that you sanity check the generated `AGENTS.md` file, and update it as
 
 ### Context File Priority
 
-Kodelet automatically detects and loads `AGENTS.md` context files from the current working directory and accessed subdirectories.
+Kodelet automatically detects and loads matching context files from the current working directory and the global `~/.kodelet` directory.
 
 You can configure custom context file patterns via:
 - CLI flag: `--context-patterns "AGENTS.md,README.md"`

@@ -14,7 +14,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/skills"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
-	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 )
 
@@ -28,7 +27,6 @@ type contextInfo struct {
 
 // BasicState implements the State interface with basic functionality
 type BasicState struct {
-	lastAccessed   map[string]time.Time
 	mu             sync.RWMutex
 	workingDir     string
 	tools          []tooltypes.Tool
@@ -155,7 +153,6 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 	}
 
 	state := &BasicState{
-		lastAccessed: make(map[string]time.Time),
 		workingDir:   workingDir,
 		contextCache: make(map[string]*contextInfo),
 		contextDiscovery: &ContextDiscovery{
@@ -496,50 +493,6 @@ func noToolsConfigured(config llmtypes.Config) bool {
 	return len(config.AllowedTools) == 1 && config.AllowedTools[0] == NoToolsMarker
 }
 
-// SetFileLastAccessed sets the last access time for a file
-func (s *BasicState) SetFileLastAccessed(path string, lastAccessed time.Time) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	path = osutil.CanonicalizePath(path)
-	s.lastAccessed[path] = lastAccessed
-	return nil
-}
-
-// FileLastAccess returns a map of file paths to their last access times
-func (s *BasicState) FileLastAccess() map[string]time.Time {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.lastAccessed
-}
-
-// SetFileLastAccess sets the file last access map
-func (s *BasicState) SetFileLastAccess(fileLastAccess map[string]time.Time) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.lastAccessed = fileLastAccess
-}
-
-// GetFileLastAccessed gets the last access time for a file
-func (s *BasicState) GetFileLastAccessed(path string) (time.Time, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	path = osutil.CanonicalizePath(path)
-	lastAccessed, ok := s.lastAccessed[path]
-	if !ok {
-		return time.Time{}, errors.Errorf("file %s has not been read yet", path)
-	}
-	return lastAccessed, nil
-}
-
-// ClearFileLastAccessed clears the last access time for a file
-func (s *BasicState) ClearFileLastAccessed(path string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	path = osutil.CanonicalizePath(path)
-	delete(s.lastAccessed, path)
-	return nil
-}
-
 // LockFile acquires an exclusive lock for the given file path.
 // This ensures atomic read-modify-write operations when editing files.
 func (s *BasicState) LockFile(path string) {
@@ -652,49 +605,7 @@ func (s *BasicState) DiscoverContexts() map[string]string {
 		contexts[ctx.Path] = ctx.Content
 	}
 
-	// 3. Add access-based contexts (discovers context files in subdirectories of accessed files)
-	for _, ctx := range s.discoverAccessBasedContexts() {
-		contexts[ctx.Path] = ctx.Content
-	}
-
 	return contexts
-}
-
-// discover contexts in the working directory hierarchy for files that have been accessed
-// only considers accessed files within the working directory
-// e.g. for /workdir/foo/bar/baz/code.py with /workdir as the working directory:
-// /workdir/foo/bar/baz/AGENTS.md, /workdir/foo/bar/AGENTS.md, /workdir/AGENTS.md will be discovered if they exist
-func (s *BasicState) discoverAccessBasedContexts() []contextInfo {
-	contexts := []contextInfo{}
-	visited := make(map[string]bool)
-
-	for path := range s.lastAccessed {
-		dir := filepath.Dir(path)
-		// Only process directories within the working directory
-		if strings.HasPrefix(dir, s.contextDiscovery.workingDir) {
-			ctxs := s.findContextsForPath(dir, visited)
-			contexts = append(contexts, ctxs...)
-		}
-	}
-
-	return contexts
-}
-
-// findContextsForPath searches up the directory tree from the given file path to find context files
-func (s *BasicState) findContextsForPath(dir string, visited map[string]bool) []contextInfo {
-	result := []contextInfo{}
-
-	for !visited[dir] && dir != filepath.Dir(dir) && dir != s.contextDiscovery.workingDir {
-		visited[dir] = true
-
-		if info := s.loadContextFromPatterns(dir); info != nil {
-			result = append(result, *info)
-		}
-
-		dir = filepath.Dir(dir)
-	}
-
-	return result
 }
 
 func (s *BasicState) loadContextFromPatterns(path string) *contextInfo {

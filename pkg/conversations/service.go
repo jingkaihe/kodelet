@@ -257,10 +257,6 @@ func (s *ConversationService) ForkConversation(ctx context.Context, id string) (
 		forkedRecord.ToolResults = maps.Clone(sourceRecord.ToolResults)
 	}
 
-	if sourceRecord.FileLastAccess != nil {
-		forkedRecord.FileLastAccess = maps.Clone(sourceRecord.FileLastAccess)
-	}
-
 	if sourceRecord.Metadata != nil {
 		forkedRecord.Metadata = maps.Clone(sourceRecord.Metadata)
 	}

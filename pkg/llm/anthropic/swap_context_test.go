@@ -3,7 +3,6 @@ package anthropic
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
@@ -12,37 +11,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// mockState implements tooltypes.State for testing
-type mockState struct {
-	fileLastAccess map[string]time.Time
-}
-
-func newMockState() *mockState {
-	return &mockState{
-		fileLastAccess: make(map[string]time.Time),
-	}
-}
-
-func (m *mockState) SetFileLastAccessed(path string, t time.Time) error {
-	m.fileLastAccess[path] = t
-	return nil
-}
-
-func (m *mockState) GetFileLastAccessed(path string) (time.Time, error) {
-	return m.fileLastAccess[path], nil
-}
-func (m *mockState) ClearFileLastAccessed(_ string) error       { return nil }
-func (m *mockState) SetFileLastAccess(fla map[string]time.Time) { m.fileLastAccess = fla }
-func (m *mockState) FileLastAccess() map[string]time.Time       { return m.fileLastAccess }
-func (m *mockState) BasicTools() []tooltypes.Tool               { return nil }
-func (m *mockState) MCPTools() []tooltypes.Tool                 { return nil }
-func (m *mockState) Tools() []tooltypes.Tool                    { return nil }
-func (m *mockState) DiscoverContexts() map[string]string        { return nil }
-func (m *mockState) GetLLMConfig() any                          { return nil }
-func (m *mockState) WorkingDirectory() string                   { return "" }
-func (m *mockState) LockFile(_ string)                          {}
-func (m *mockState) UnlockFile(_ string)                        {}
 
 func createTestThread() *Thread {
 	config := llmtypes.Config{
@@ -134,21 +102,6 @@ func TestSwapContext_UpdatesContextWindowEstimate(t *testing.T) {
 	expectedTokens := len(longSummary) / 4
 	assert.Greater(t, expectedTokens, 100, "Summary should produce more than 100 tokens")
 	assert.Equal(t, expectedTokens, thread.Usage.CurrentContextWindow)
-}
-
-func TestSwapContext_ClearsFileAccessTracking(t *testing.T) {
-	thread := createTestThread()
-
-	state := newMockState()
-	state.fileLastAccess["file1.go"] = time.Now()
-	state.fileLastAccess["file2.go"] = time.Now()
-	thread.State = state
-
-	err := thread.SwapContext(context.Background(), "summary")
-	require.NoError(t, err)
-
-	// File access tracking should be cleared
-	assert.Len(t, state.fileLastAccess, 0)
 }
 
 func TestSwapContext_HandlesNilState(t *testing.T) {
