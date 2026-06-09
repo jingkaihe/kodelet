@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.4.33-beta (2026-06-09)
+
+Added Claude Fable 5 model support, including adaptive-thinking validation, xhigh reasoning effort handling, and pricing metadata.
+
+Removed `file_read` from the default toolsets and cleaned up file-access tracking from tool state and persisted conversation records.
+
+Renamed the filesystem search tool toggle to opt-in `enable_fs_search_tools` / `--enable-fs-search-tools`, with docs, config samples, ACP, and SDK tests updated for the new behavior.
+
 ## 0.4.32-beta (2026-06-05)
 
 Added a TypeScript Agent SDK that can launch `kodelet acp` sessions from Node, stream assistant/tool events, resume conversations, and run with named or inline profiles.
