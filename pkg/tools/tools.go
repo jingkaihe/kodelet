@@ -61,7 +61,6 @@ const NoToolsMarker = "none"
 
 // metaTools are enabled by default for basic navigation unless feature toggles disable them.
 var metaTools = []string{
-	"file_read",
 	"grep_tool",
 	"glob_tool",
 }
@@ -75,7 +74,6 @@ var mainAgentMetaTools = []string{
 // defaultMainTools are the default tools for main agent
 var defaultMainTools = []string{
 	"bash",
-	"file_read",
 	"file_write",
 	"file_edit",
 	"read_conversation",
@@ -92,7 +90,6 @@ var defaultMainTools = []string{
 // defaultSubAgentTools are the default tools for subagent
 var defaultSubAgentTools = []string{
 	"bash",
-	"file_read",
 	"file_write",
 	"file_edit",
 	"read_conversation",

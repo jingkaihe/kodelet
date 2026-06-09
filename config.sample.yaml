@@ -190,7 +190,7 @@ allowed_domains_file: "~/.kodelet/allowed_domains.txt"
 # Tools allowed for main agent (empty means use defaults)
 # Meta tools (grep_tool and glob_tool) are only available when
 # enable_fs_search_tools is set to true.
-# Available tools: bash, apply_patch, file_read, file_write, file_edit, thinking, subagent, grep_tool,
+# Available tools: bash, apply_patch, file_read, file_write, file_edit, subagent, grep_tool,
 #                  glob_tool, web_fetch, view_image
 # Tool interaction mode.
 # - full: standard tool access
@@ -218,7 +218,6 @@ allowed_tools: []
 #   - "file_read"
 #   - "file_write"
 #   - "file_edit"
-#   - "thinking"       # Always enabled (meta tool)
 #   - "subagent"
 #   - "grep_tool"      # Always enabled (meta tool)
 #   - "glob_tool"      # Always enabled (meta tool)

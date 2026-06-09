@@ -524,7 +524,9 @@ func TestWithSubAgentToolsFromConfig(t *testing.T) {
 
 		// Should include basic tools
 		assert.Contains(t, toolNames, "bash")
-		assert.Contains(t, toolNames, "file_read")
+		assert.Contains(t, toolNames, "file_write")
+		// file_read is excluded unless explicitly allowed
+		assert.NotContains(t, toolNames, "file_read")
 		// FS search tools are excluded unless enable_fs_search_tools is set
 		assert.NotContains(t, toolNames, "grep_tool")
 		assert.NotContains(t, toolNames, "glob_tool")
@@ -907,7 +909,7 @@ func TestWithSkillTool_RespectsExplicitAllowlist(t *testing.T) {
 		toolNames[i] = tool.Name()
 	}
 
-	assert.Equal(t, []string{"file_read", "grep_tool", "glob_tool"}, toolNames)
+	assert.Equal(t, []string{"grep_tool", "glob_tool", "file_read"}, toolNames)
 	assert.NotContains(t, toolNames, "skill")
 }
 
@@ -925,7 +927,7 @@ func TestWithExtensionTools_RespectsExplicitAllowlist(t *testing.T) {
 		toolNames[i] = tool.Name()
 	}
 
-	assert.Equal(t, []string{"file_read", "grep_tool", "glob_tool"}, toolNames)
+	assert.Equal(t, []string{"grep_tool", "glob_tool", "file_read"}, toolNames)
 	assert.Empty(t, state.ExtensionTools())
 	assert.NotContains(t, toolNames, "not_allowed_extension_tool")
 }

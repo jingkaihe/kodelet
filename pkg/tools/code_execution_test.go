@@ -14,13 +14,13 @@ import (
 )
 
 func TestCodeExecutionTool_Description(t *testing.T) {
-	t.Run("full mode mentions file tools", func(t *testing.T) {
+	t.Run("full mode uses bash inspection and file write tools", func(t *testing.T) {
 		tool := NewCodeExecutionToolWithOptions(nil, llmtypes.ToolModeFull, false)
 		desc := tool.Description()
 
-		assert.Contains(t, desc, "Read generated files (`index.ts` + tool files) to get exact schemas.")
+		assert.Contains(t, desc, "Inspect generated files using shell commands such as `sed`, `cat`, or `rg` via the `bash` tool")
 		assert.Contains(t, desc, "using `file_write` / `file_edit` / `apply_patch`.")
-		assert.Contains(t, desc, "file_read /absolute/path/to/mcp-workspace/servers/lsp/index.ts")
+		assert.NotContains(t, desc, "file_read /absolute/path/to/mcp-workspace/servers/lsp/index.ts")
 		assert.Contains(t, desc, "file_write /absolute/path/to/mcp-workspace/check_diagnostics.ts")
 	})
 

@@ -47,8 +47,17 @@ func TestSkillTool_Description(t *testing.T) {
 	t.Run("with fs search tools disabled", func(t *testing.T) {
 		tool := NewSkillTool(nil, true, false)
 		desc := tool.Description()
-		assert.Contains(t, desc, "file_read or fd via bash")
-		assert.NotContains(t, desc, "file_read or glob_tool")
+		assert.Contains(t, desc, "inspect using fd/rg/sed/cat via bash")
+		assert.NotContains(t, desc, "glob_tool")
+		assert.NotContains(t, desc, "file_read")
+	})
+
+	t.Run("with fs search tools enabled", func(t *testing.T) {
+		tool := NewSkillTool(nil, true, true)
+		desc := tool.Description()
+		assert.Contains(t, desc, "locate with glob_tool and inspect via bash using sed/cat/rg")
+		assert.Contains(t, desc, "update it using file_edit")
+		assert.NotContains(t, desc, "file_read")
 	})
 
 	t.Run("patch avoids removed file tools", func(t *testing.T) {
@@ -56,8 +65,8 @@ func TestSkillTool_Description(t *testing.T) {
 		desc := tool.Description()
 		assert.Contains(t, desc, "locate with glob_tool and inspect via bash using sed/cat/rg")
 		assert.Contains(t, desc, "update it using apply_patch")
-		assert.NotContains(t, desc, "read using file_read")
-		assert.NotContains(t, desc, "file_edit tool")
+		assert.NotContains(t, desc, "file_read")
+		assert.NotContains(t, desc, "file_edit")
 	})
 }
 

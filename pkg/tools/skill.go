@@ -81,9 +81,9 @@ func (t *SkillTool) Description() string {
 - This is a BLOCKING REQUIREMENT: invoke the relevant Skill tool BEFORE generating any other response about the task
 - Only use skills listed in "Available Skills" below
 - Do not invoke a skill that is already running
-- Each skill has a directory containing supporting files (references, examples, scripts, templates) that you can {{if .PatchOnly}}{{if .EnableFSSearchTools}}locate with glob_tool and inspect via bash using sed/cat/rg{{else}}inspect using fd/rg/sed/cat via bash{{end}}{{else}}read using file_read{{if .EnableFSSearchTools}} or glob_tool{{else}} or fd via bash{{end}}{{end}}
+- Each skill has a directory containing supporting files (references, examples, scripts, templates) that you can {{if .EnableFSSearchTools}}locate with glob_tool and inspect via bash using sed/cat/rg{{else}}inspect using fd/rg/sed/cat via bash{{end}}
 - Do NOT modify any files in the skill directory - treat skill contents as read-only
-- If you need to modify a script or template from the skill directory, copy it to the working directory first{{if .PatchOnly}} and update it using apply_patch{{else}} then read it using file_read, and update using file_edit tool{{end}}
+- If you need to modify a script or template from the skill directory, copy it to the working directory first and update it using {{if .PatchOnly}}apply_patch{{else}}file_edit{{end}}
 - For Python scripts, use uv for managing dependencies, preferably uv with inline metadata dependencies if the script to run is a single file - do NOT install packages using system pip
 
 ## Available Skills

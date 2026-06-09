@@ -381,7 +381,7 @@ func WithSubAgentTool() BasicStateOption {
 			}
 		}
 		discoveredWorkflows := discoverWorkflows(ctx)
-		subagentTool := NewSubAgentToolWithOptions(discoveredWorkflows, len(discoveredWorkflows) > 0, s.llmConfig.ToolMode, s.llmConfig.EnableFSSearchTools)
+		subagentTool := NewSubAgentTool(discoveredWorkflows, len(discoveredWorkflows) > 0, s.llmConfig.EnableFSSearchTools)
 		for i, tool := range s.tools {
 			if tool.Name() == "subagent" {
 				s.tools[i] = subagentTool

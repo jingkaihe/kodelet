@@ -69,18 +69,19 @@ func TestSubAgentTool_DescriptionWithWorkflows(t *testing.T) {
 	t.Run("fs search tools disabled", func(t *testing.T) {
 		tool := NewSubAgentTool(nil, true, false)
 		desc := tool.Description()
-		assert.Contains(t, desc, "bash plus fd/rg and file_read")
+		assert.Contains(t, desc, "bash plus fd/rg/sed")
 		assert.Contains(t, desc, "Use rg via ${bash} instead.")
 		assert.Contains(t, desc, "Use fd via ${bash} instead.")
+		assert.Contains(t, desc, "Use ${bash} with sed/cat instead.")
+		assert.NotContains(t, desc, "file_read")
 	})
 
-	t.Run("patch avoids file_read guidance", func(t *testing.T) {
-		tool := NewSubAgentToolWithOptions(nil, true, llmtypes.ToolModePatch, true)
+	t.Run("fs search tools enabled avoids file_read guidance", func(t *testing.T) {
+		tool := NewSubAgentTool(nil, true, true)
 		desc := tool.Description()
 		assert.Contains(t, desc, "grep_tool / glob_tool plus bash inspection")
 		assert.Contains(t, desc, "Use ${bash} with sed/cat instead.")
-		assert.NotContains(t, desc, "Use ${file_read} tool instead.")
-		assert.NotContains(t, desc, "grep_tool and file_read")
+		assert.NotContains(t, desc, "file_read")
 	})
 }
 

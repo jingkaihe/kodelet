@@ -438,13 +438,13 @@ func TestBuildToolsForThreadHonorsExtensionAllowedTools(t *testing.T) {
 		},
 	}))
 	thread := &Thread{Thread: base.NewThread(llmtypes.Config{}, "conv-tools")}
-	thread.SetMetadataValue("allowed_tools", []string{"file_read"})
+	thread.SetMetadataValue("allowed_tools", []string{"file_write"})
 
 	toolDefs := buildToolsForThread(thread, state, false)
 
 	require.Len(t, toolDefs, 1)
 	require.NotNil(t, toolDefs[0].OfFunction)
-	assert.Equal(t, "file_read", toolDefs[0].OfFunction.Name)
+	assert.Equal(t, "file_write", toolDefs[0].OfFunction.Name)
 }
 
 func TestIsReasoningModelDynamic(t *testing.T) {
