@@ -1586,6 +1586,203 @@ describe("ChatPage", () => {
 		);
 	});
 
+	it("shows blocking UI prompts from a resumed stream after switching conversations", async () => {
+		mockGetConversations.mockResolvedValue({
+			conversations: [
+				{
+					id: "conv-123",
+					createdAt: "2024-01-01T00:00:00Z",
+					updatedAt: "2024-01-03T00:00:00Z",
+					messageCount: 1,
+					summary: "Running task",
+				},
+				{
+					id: "conv-456",
+					createdAt: "2024-01-01T00:00:00Z",
+					updatedAt: "2024-01-02T00:00:00Z",
+					messageCount: 1,
+					summary: "Other task",
+				},
+			],
+			hasMore: false,
+			total: 2,
+			limit: 40,
+			offset: 0,
+		});
+		mockGetConversation.mockImplementation(async (id: string) => ({
+			id,
+			createdAt: "2024-01-01T00:00:00Z",
+			updatedAt: "2024-01-01T00:00:00Z",
+			messageCount: 1,
+			summary: id === "conv-456" ? "Other task" : "Running task",
+			messages: [],
+			toolResults: {},
+		}));
+
+		let streamOptions: { onEvent: (event: ChatStreamEvent) => void } | null =
+			null;
+		mockStreamConversation.mockImplementation(
+			async (conversationId, options) =>
+				new Promise<void>(() => {
+					if (conversationId === "conv-123") {
+						streamOptions = options as {
+							onEvent: (event: ChatStreamEvent) => void;
+						};
+					}
+				}),
+		);
+		mockRespondToUIInput.mockResolvedValue({ success: true });
+
+		routeParams = { id: "conv-123" };
+		const { rerender } = render(<ChatPage />);
+
+		await waitFor(() =>
+			expect(mockStreamConversation).toHaveBeenCalledWith(
+				"conv-123",
+				expect.any(Object),
+			),
+		);
+
+		fireEvent.click(screen.getByText("Other task"));
+		expect(mockNavigate).toHaveBeenCalledWith("/c/conv-456");
+
+		routeParams = { id: "conv-456" };
+		rerender(<ChatPage />);
+
+		await waitFor(() =>
+			expect(mockGetConversation).toHaveBeenCalledWith("conv-456"),
+		);
+
+		await act(async () => {
+			streamOptions?.onEvent({
+				kind: "ui-input-request",
+				conversation_id: "conv-123",
+				ui_input: {
+					id: "input-1",
+					title: "Need resumed input",
+					message: "Answer for resumed run",
+				},
+			});
+		});
+
+		expect(screen.getByTestId("ui-input-dialog")).toBeInTheDocument();
+		expect(screen.getByText("Need resumed input")).toBeInTheDocument();
+
+		fireEvent.change(screen.getByTestId("ui-input-response"), {
+			target: { value: "ok" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+
+		await waitFor(() =>
+			expect(mockRespondToUIInput).toHaveBeenCalledWith(
+				"conv-123",
+				"input-1",
+				{ status: "submitted", value: "ok" },
+			),
+		);
+	});
+
+	it("shows blocking UI prompts from a local stream after switching conversations", async () => {
+		mockGetConversations.mockResolvedValue({
+			conversations: [
+				{
+					id: "conv-123",
+					createdAt: "2024-01-01T00:00:00Z",
+					updatedAt: "2024-01-03T00:00:00Z",
+					messageCount: 1,
+					summary: "Running task",
+				},
+				{
+					id: "conv-456",
+					createdAt: "2024-01-01T00:00:00Z",
+					updatedAt: "2024-01-02T00:00:00Z",
+					messageCount: 1,
+					summary: "Other task",
+				},
+			],
+			hasMore: false,
+			total: 2,
+			limit: 40,
+			offset: 0,
+		});
+		mockGetConversation.mockImplementation(async (id: string) => ({
+			id,
+			createdAt: "2024-01-01T00:00:00Z",
+			updatedAt: "2024-01-01T00:00:00Z",
+			messageCount: 1,
+			summary: id === "conv-456" ? "Other task" : "Running task",
+			messages: [],
+			toolResults: {},
+		}));
+
+		let streamOptions: { onEvent: (event: ChatStreamEvent) => void } | null =
+			null;
+		mockStreamChat.mockImplementation(
+			async (_request, options) =>
+				new Promise<void>(() => {
+					streamOptions = options as {
+						onEvent: (event: ChatStreamEvent) => void;
+					};
+				}),
+		);
+
+		const { rerender } = render(<ChatPage />);
+
+		await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
+
+		fireEvent.change(screen.getByPlaceholderText("Ask kodelet anything..."), {
+			target: { value: "start running task" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+		await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
+
+		await act(async () => {
+			streamOptions?.onEvent({
+				kind: "conversation",
+				conversation_id: "conv-123",
+			});
+		});
+
+		fireEvent.click(screen.getByText("Other task"));
+		expect(mockNavigate).toHaveBeenCalledWith("/c/conv-456");
+
+		routeParams = { id: "conv-456" };
+		rerender(<ChatPage />);
+
+		await waitFor(() =>
+			expect(mockGetConversation).toHaveBeenCalledWith("conv-456"),
+		);
+
+		await act(async () => {
+			streamOptions?.onEvent({
+				kind: "ui-input-request",
+				conversation_id: "conv-123",
+				ui_input: {
+					id: "input-1",
+					title: "Need switched input",
+					message: "Answer for switched run",
+				},
+			});
+		});
+
+		expect(screen.getByTestId("ui-input-dialog")).toBeInTheDocument();
+		expect(screen.getByText("Need switched input")).toBeInTheDocument();
+
+		fireEvent.change(screen.getByTestId("ui-input-response"), {
+			target: { value: "ok" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+
+		await waitFor(() =>
+			expect(mockRespondToUIInput).toHaveBeenCalledWith(
+				"conv-123",
+				"input-1",
+				{ status: "submitted", value: "ok" },
+			),
+		);
+	});
+
 	it("clears selected conversation running state when stream attach is stale", async () => {
 		routeParams = { id: "conv-123" };
 		mockGetConversations.mockResolvedValue({

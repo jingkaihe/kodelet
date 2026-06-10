@@ -936,10 +936,25 @@ const ChatPage: React.FC = () => {
 			.streamConversation(conversationId, {
 				signal: controller.signal,
 				onEvent: (event: ChatStreamEvent) => {
+					if (event.conversation_id && event.conversation_id !== conversationId) {
+						return;
+					}
+
+					const eventForConversation = event.conversation_id
+						? event
+						: { ...event, conversation_id: conversationId };
+
+					if (
+						isBlockingUIRequestEvent(event) &&
+						handleUIInputRequest(eventForConversation)
+					) {
+						sawEvent = true;
+						return;
+					}
+
 					if (
 						resumeStreamRef.current !== streamInstance ||
-						viewedConversationIdRef.current !== conversationId ||
-						(event.conversation_id && event.conversation_id !== conversationId)
+						viewedConversationIdRef.current !== conversationId
 					) {
 						return;
 					}
@@ -979,7 +994,7 @@ const ChatPage: React.FC = () => {
 						);
 					}
 
-					if (handleUIInputRequest(event)) {
+					if (handleUIInputRequest(eventForConversation)) {
 						return;
 					}
 
