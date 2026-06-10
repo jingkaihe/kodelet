@@ -212,8 +212,9 @@ type OpenAIConfig struct {
 
 // AnthropicConfig holds Anthropic-specific configuration including compatible platforms.
 type AnthropicConfig struct {
-	Platform string `mapstructure:"platform" json:"platform" yaml:"platform"` // Canonical platform name for Anthropic-compatible APIs (e.g., anthropic, copilot)
-	BaseURL  string `mapstructure:"base_url" json:"base_url" yaml:"base_url"` // Custom API base URL (overrides platform defaults)
+	Platform         string `mapstructure:"platform" json:"platform" yaml:"platform"`                                                // Canonical platform name for Anthropic-compatible APIs (e.g., anthropic, copilot)
+	BaseURL          string `mapstructure:"base_url" json:"base_url" yaml:"base_url"`                                                // Custom API base URL (overrides platform defaults)
+	AdaptiveThinking bool   `mapstructure:"adaptive_thinking" json:"adaptive_thinking,omitempty" yaml:"adaptive_thinking,omitempty"` // Forces Anthropic adaptive-thinking request plumbing for the configured custom model ID when true
 }
 
 // CustomModels holds model categorization for custom configurations

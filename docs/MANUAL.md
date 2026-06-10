@@ -776,6 +776,12 @@ weak_model_max_tokens: 8192
 # thinking_budget_tokens is only used on older Claude models that still use manual thinking.
 reasoning_effort: "medium"
 
+# Anthropic-compatible platforms can force adaptive-thinking plumbing for the configured
+# non-standard model IDs that Kodelet does not know about yet.
+anthropic:
+  # platform: copilot
+  # adaptive_thinking: true
+
 # Active profile selection
 profile: "anthropic"  # Optional: specify the active profile
 

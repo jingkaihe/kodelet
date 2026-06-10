@@ -844,11 +844,11 @@ func (t *Thread) getModelAndTokens(opt llmtypes.MessageOpt) (anthropic.Model, in
 }
 
 func (t *Thread) shouldUtiliseThinking(model anthropic.Model) bool {
+	if t.isAdaptiveThinkingModel(model) {
+		return !t.adaptiveThinkingDisabled(model)
+	}
 	if !isThinkingModel(model) {
 		return false
-	}
-	if isAdaptiveThinkingModel(model) {
-		return !t.adaptiveThinkingDisabled(model)
 	}
 	if t.Config.ThinkingBudgetTokens == 0 {
 		return false
@@ -857,7 +857,7 @@ func (t *Thread) shouldUtiliseThinking(model anthropic.Model) bool {
 }
 
 func (t *Thread) adaptiveThinkingDisabled(model anthropic.Model) bool {
-	if !isAdaptiveThinkingModel(model) {
+	if !t.isAdaptiveThinkingModel(model) {
 		return false
 	}
 
@@ -877,7 +877,7 @@ func (t *Thread) thinkingConfigForModel(model anthropic.Model) (anthropic.Thinki
 		return anthropic.ThinkingConfigParamUnion{}, false
 	}
 
-	if isAdaptiveThinkingModel(model) {
+	if t.isAdaptiveThinkingModel(model) {
 		return anthropic.ThinkingConfigParamUnion{
 			OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{
 				Type:    "adaptive",
@@ -896,7 +896,7 @@ func (t *Thread) thinkingConfigForModel(model anthropic.Model) (anthropic.Thinki
 }
 
 func (t *Thread) outputConfigForModel(model anthropic.Model) (anthropic.OutputConfigParam, bool) {
-	effort, ok := anthropicReasoningEffortForModel(model, t.Config.ReasoningEffort)
+	effort, ok := t.anthropicReasoningEffortForModel(model, t.Config.ReasoningEffort)
 	if !ok {
 		return anthropic.OutputConfigParam{}, false
 	}
@@ -904,11 +904,33 @@ func (t *Thread) outputConfigForModel(model anthropic.Model) (anthropic.OutputCo
 	return anthropic.OutputConfigParam{Effort: effort}, true
 }
 
+func (t *Thread) isAdaptiveThinkingModel(model anthropic.Model) bool {
+	if isAdaptiveThinkingModel(model) {
+		return true
+	}
+
+	return t.Config.Anthropic != nil &&
+		t.Config.Anthropic.AdaptiveThinking &&
+		model == t.Config.Model
+}
+
+func (t *Thread) anthropicReasoningEffortForModel(model anthropic.Model, configured string) (anthropic.OutputConfigEffort, bool) {
+	if !t.isAdaptiveThinkingModel(model) {
+		return "", false
+	}
+
+	return anthropicReasoningEffort(configured, isXhighEffortModel(model))
+}
+
 func anthropicReasoningEffortForModel(model anthropic.Model, configured string) (anthropic.OutputConfigEffort, bool) {
 	if !isAdaptiveThinkingModel(model) {
 		return "", false
 	}
 
+	return anthropicReasoningEffort(configured, isXhighEffortModel(model))
+}
+
+func anthropicReasoningEffort(configured string, supportsXhigh bool) (anthropic.OutputConfigEffort, bool) {
 	switch strings.ToLower(strings.TrimSpace(configured)) {
 	case "", "medium":
 		return anthropic.OutputConfigEffortMedium, true
@@ -917,7 +939,7 @@ func anthropicReasoningEffortForModel(model anthropic.Model, configured string) 
 	case "high":
 		return anthropic.OutputConfigEffortHigh, true
 	case "xhigh":
-		if isXhighEffortModel(model) {
+		if supportsXhigh {
 			return anthropic.OutputConfigEffortXhigh, true
 		}
 		return anthropic.OutputConfigEffortHigh, true

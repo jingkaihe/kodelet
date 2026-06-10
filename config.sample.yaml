@@ -131,6 +131,19 @@ profiles:
 # Anthropic adaptive thinking: none, low, medium, high, xhigh, max
 reasoning_effort: "medium"
 
+# Anthropic-specific settings
+anthropic:
+  # Canonical platform name for Anthropic-compatible APIs (e.g., anthropic, copilot)
+  # platform: "copilot"
+
+  # Custom Anthropic-compatible base URL (overrides platform defaults)
+  # base_url: "https://proxy.example"
+
+  # Force adaptive-thinking request plumbing for the configured custom Anthropic model ID.
+  # Useful when an Anthropic-compatible platform supports a non-standard ID like
+  # "claude-opus-4.6" but still accepts Anthropic output_config.effort.
+  # adaptive_thinking: true
+
 # API Retry Configuration
 # Controls retry behavior for API calls
 # - Anthropic: Only 'attempts' is used (relies on SDK's built-in retry)

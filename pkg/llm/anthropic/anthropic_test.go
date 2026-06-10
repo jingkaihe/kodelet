@@ -1085,6 +1085,20 @@ func TestThinkingConfigForModel(t *testing.T) {
 		assert.False(t, ok)
 		assert.Nil(t, config.GetType())
 	})
+
+	t.Run("config can force adaptive thinking for custom models", func(t *testing.T) {
+		customThread, err := NewAnthropicThread(llmtypes.Config{
+			Model:           "claude-opus-4.6",
+			ReasoningEffort: "max",
+			Anthropic:       &llmtypes.AnthropicConfig{AdaptiveThinking: true},
+		})
+		require.NoError(t, err)
+
+		config, ok := customThread.thinkingConfigForModel(anthropic.Model("claude-opus-4.6"))
+		require.True(t, ok)
+		require.NotNil(t, config.OfAdaptive)
+		assert.Equal(t, "adaptive", *config.GetType())
+	})
 }
 
 func TestValidateThinkingConfigForModel(t *testing.T) {
@@ -1235,6 +1249,23 @@ func TestOutputConfigForModel(t *testing.T) {
 		config, ok := disabledThread.outputConfigForModel(anthropic.ModelClaudeOpus4_7)
 		require.True(t, ok)
 		assert.Equal(t, anthropic.OutputConfigEffortLow, config.Effort)
+	})
+
+	t.Run("config can force adaptive output config for custom models", func(t *testing.T) {
+		customThread, err := NewAnthropicThread(llmtypes.Config{
+			Model:           "claude-opus-4.6",
+			ReasoningEffort: "max",
+			Anthropic:       &llmtypes.AnthropicConfig{AdaptiveThinking: true},
+		})
+		require.NoError(t, err)
+
+		config, ok := customThread.outputConfigForModel(anthropic.Model("claude-opus-4.6"))
+		require.True(t, ok)
+		assert.Equal(t, anthropic.OutputConfigEffortMax, config.Effort)
+
+		otherConfig, otherOK := customThread.outputConfigForModel(anthropic.Model("custom-weak-model"))
+		assert.False(t, otherOK)
+		assert.Equal(t, anthropic.OutputConfigEffort(""), otherConfig.Effort)
 	})
 }
 
