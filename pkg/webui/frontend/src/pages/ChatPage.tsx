@@ -281,6 +281,11 @@ const getSlashCommandPlaceholder = (command: SlashCommandOption): string =>
 	command.placeholder ||
 	`/${command.name}${command.hint ? ` ${command.hint}` : ""}`;
 
+const isBlockingUIRequestEvent = (event: ChatStreamEvent): boolean =>
+	event.kind === "ui-input-request" ||
+	event.kind === "ui-confirm-request" ||
+	event.kind === "ui-select-request";
+
 const upsertConversationSummary = (
 	conversations: Conversation[],
 	nextConversation: Conversation,
@@ -596,8 +601,19 @@ const ChatPage: React.FC = () => {
 							return;
 						}
 
+						const eventForConversation = event.conversation_id
+							? event
+							: { ...event, conversation_id: runningId };
+
 						if (event.kind === "conversation") {
 							markConversationRunning(runningId);
+							return;
+						}
+
+						if (
+							isBlockingUIRequestEvent(event) &&
+							handleUIInputRequest(eventForConversation)
+						) {
 							return;
 						}
 
@@ -988,7 +1004,10 @@ const ChatPage: React.FC = () => {
 					error instanceof Error
 						? error.message
 						: "Failed to resume conversation stream";
-				if (message !== "conversation is not actively streaming") {
+				if (message === "conversation is not actively streaming") {
+					clearRunningConversation(conversationId);
+					clearConversationSteerAvailable(conversationId);
+				} else {
 					console.error("Failed to resume conversation stream", error);
 				}
 			})
@@ -1464,6 +1483,17 @@ const ChatPage: React.FC = () => {
 							eventConversationId &&
 							viewedConversationIdRef.current === eventConversationId,
 						);
+						const eventForConversation =
+							event.conversation_id || !eventConversationId
+								? event
+								: { ...event, conversation_id: eventConversationId };
+
+						if (
+							isBlockingUIRequestEvent(event) &&
+							handleUIInputRequest(eventForConversation)
+						) {
+							return;
+						}
 
 						if (event.kind === "usage" && event.usage) {
 							if (shouldUpdateCurrentView) {

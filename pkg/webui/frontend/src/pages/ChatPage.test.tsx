@@ -27,6 +27,7 @@ const mockSteerConversation = vi.fn();
 const mockStopConversation = vi.fn();
 const mockDeleteConversation = vi.fn();
 const mockForkConversation = vi.fn();
+const mockRespondToUIInput = vi.fn();
 let routeParams: { id?: string } = {};
 
 const flushAsyncUpdates = async () => {
@@ -78,6 +79,7 @@ vi.mock("../services/api", () => ({
 		stopConversation: (...args: unknown[]) => mockStopConversation(...args),
 		deleteConversation: (...args: unknown[]) => mockDeleteConversation(...args),
 		forkConversation: (...args: unknown[]) => mockForkConversation(...args),
+		respondToUIInput: (...args: unknown[]) => mockRespondToUIInput(...args),
 	},
 }));
 
@@ -156,6 +158,7 @@ describe("ChatPage", () => {
 			success: true,
 			conversation_id: "conv-copy-123",
 		});
+		mockRespondToUIInput.mockResolvedValue({ success: true });
 		mockGetCWDHints.mockResolvedValue({
 			hints: [{ path: "/workspace/default" }],
 		});
@@ -1494,6 +1497,142 @@ describe("ChatPage", () => {
 				screen.queryByTestId("conversation-running-indicator-conv-123"),
 			).not.toBeInTheDocument(),
 		);
+	});
+
+	it("shows blocking UI prompts from background running conversations", async () => {
+		mockGetConversations.mockResolvedValue({
+			conversations: [
+				{
+					id: "conv-123",
+					createdAt: "2024-01-01T00:00:00Z",
+					updatedAt: "2024-01-03T00:00:00Z",
+					messageCount: 1,
+					summary: "Running task",
+					isRunning: true,
+				},
+				{
+					id: "conv-456",
+					createdAt: "2024-01-01T00:00:00Z",
+					updatedAt: "2024-01-02T00:00:00Z",
+					messageCount: 1,
+					summary: "Current task",
+				},
+			],
+			hasMore: false,
+			total: 2,
+			limit: 40,
+			offset: 0,
+		});
+		mockGetConversation.mockResolvedValue({
+			id: "conv-456",
+			createdAt: "2024-01-01T00:00:00Z",
+			updatedAt: "2024-01-01T00:00:00Z",
+			messageCount: 1,
+			summary: "Current task",
+			messages: [],
+			toolResults: {},
+		});
+
+		let streamOptions: { onEvent: (event: ChatStreamEvent) => void } | null =
+			null;
+		mockStreamConversation.mockImplementation(
+			async (conversationId, options) =>
+				new Promise<void>(() => {
+					if (conversationId === "conv-123") {
+						streamOptions = options as {
+							onEvent: (event: ChatStreamEvent) => void;
+						};
+					}
+				}),
+		);
+		mockRespondToUIInput.mockResolvedValue({ success: true });
+
+		routeParams = { id: "conv-456" };
+		render(<ChatPage />);
+
+		await waitFor(() =>
+			expect(mockStreamConversation).toHaveBeenCalledWith(
+				"conv-123",
+				expect.any(Object),
+			),
+		);
+
+		await act(async () => {
+			streamOptions?.onEvent({
+				kind: "ui-input-request",
+				conversation_id: "conv-123",
+				ui_input: {
+					id: "input-1",
+					title: "Need background input",
+					message: "Answer for background run",
+				},
+			});
+		});
+
+		expect(screen.getByTestId("ui-input-dialog")).toBeInTheDocument();
+		expect(screen.getByText("Need background input")).toBeInTheDocument();
+
+		fireEvent.change(screen.getByTestId("ui-input-response"), {
+			target: { value: "yes" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+
+		await waitFor(() =>
+			expect(mockRespondToUIInput).toHaveBeenCalledWith(
+				"conv-123",
+				"input-1",
+				{ status: "submitted", value: "yes" },
+			),
+		);
+	});
+
+	it("clears selected conversation running state when stream attach is stale", async () => {
+		routeParams = { id: "conv-123" };
+		mockGetConversations.mockResolvedValue({
+			conversations: [
+				{
+					id: "conv-123",
+					createdAt: "2024-01-01T00:00:00Z",
+					updatedAt: "2024-01-03T00:00:00Z",
+					messageCount: 1,
+					summary: "Stale running task",
+					isRunning: true,
+				},
+			],
+			hasMore: false,
+			total: 1,
+			limit: 40,
+			offset: 0,
+		});
+		mockGetConversation.mockResolvedValue({
+			id: "conv-123",
+			createdAt: "2024-01-01T00:00:00Z",
+			updatedAt: "2024-01-01T00:00:00Z",
+			messageCount: 1,
+			summary: "Stale running task",
+			messages: [],
+			toolResults: {},
+			isRunning: true,
+		});
+		mockStreamConversation.mockRejectedValue(
+			new Error("conversation is not actively streaming"),
+		);
+
+		render(<ChatPage />);
+
+		await waitFor(() =>
+			expect(mockStreamConversation).toHaveBeenCalledWith(
+				"conv-123",
+				expect.any(Object),
+			),
+		);
+		await waitFor(() =>
+			expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument(),
+		);
+		expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
+		expect(
+			screen.queryByTestId("conversation-running-indicator-conv-123"),
+		).not.toBeInTheDocument();
 	});
 
 	it("allows sending in another conversation while one conversation is streaming", async () => {
