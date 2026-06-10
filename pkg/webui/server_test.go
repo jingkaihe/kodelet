@@ -522,6 +522,7 @@ func TestServer_handleListConversations(t *testing.T) {
 	server := &Server{
 		conversationService: mockService,
 		router:              mux.NewRouter(),
+		activeChats:         map[string]*activeChatRun{"1": newActiveChatRun(func() {})},
 	}
 
 	req := httptest.NewRequest("GET", "/api/conversations?limit=10", nil)
@@ -538,9 +539,11 @@ func TestServer_handleListConversations(t *testing.T) {
 	assert.Equal(t, 2, len(response.Conversations))
 	assert.Equal(t, 2, response.Total)
 	assert.Equal(t, "OpenAI", response.Conversations[0].Provider)
+	assert.True(t, response.Conversations[0].IsRunning)
 	assert.Equal(t, "fireworks", response.Conversations[0].Metadata["platform"])
 	assert.Equal(t, "chat_completions", response.Conversations[0].Metadata["api_mode"])
 	assert.Equal(t, "Anthropic", response.Conversations[1].Provider)
+	assert.False(t, response.Conversations[1].IsRunning)
 }
 
 func TestServer_handleGetConversation(t *testing.T) {
@@ -564,6 +567,7 @@ func TestServer_handleGetConversation(t *testing.T) {
 	server := &Server{
 		conversationService: mockService,
 		router:              mux.NewRouter(),
+		activeChats:         map[string]*activeChatRun{conversationID: newActiveChatRun(func() {})},
 	}
 
 	req := httptest.NewRequest("GET", "/api/conversations/"+conversationID, nil)
@@ -584,6 +588,7 @@ func TestServer_handleGetConversation(t *testing.T) {
 	assert.True(t, response.CWDLocked)
 	assert.Equal(t, "codex", response.Profile)
 	assert.True(t, response.ProfileLocked)
+	assert.True(t, response.IsRunning)
 	assert.Equal(t, 1, response.MessageCount)
 }
 

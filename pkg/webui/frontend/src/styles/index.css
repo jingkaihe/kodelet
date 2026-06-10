@@ -2536,6 +2536,7 @@ code[class*="language-"] {
 }
 
 .conversation-link {
+  position: relative;
   display: flex;
   align-items: center;
   flex: 1 1 auto;
@@ -2585,6 +2586,7 @@ code[class*="language-"] {
 }
 
 .conversation-link-title {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2595,6 +2597,32 @@ code[class*="language-"] {
   font-weight: 500;
   letter-spacing: -0.01em;
   padding-right: 0.55rem;
+}
+
+.conversation-running-indicator {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 1.08rem;
+  height: 1.08rem;
+  margin-left: 0.18rem;
+  color: #756e63;
+}
+
+.conversation-running-wheel {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 9999px;
+  border: 1.5px solid rgba(117, 110, 99, 0.18);
+  border-top-color: currentColor;
+  border-right-color: rgba(117, 110, 99, 0.58);
+  animation: kodeletSpin 0.92s linear infinite;
+  transform-origin: 50% 50%;
+  will-change: transform;
 }
 
 .conversation-actions {

@@ -356,9 +356,10 @@ const ChatPage: React.FC = () => {
 		null,
 	);
 	const [streamError, setStreamError] = useState<string | null>(null);
-	const [sending, setSending] = useState(false);
 	const [steering, setSteering] = useState(false);
-	const [steerAvailable, setSteerAvailable] = useState(false);
+	const [startingNewConversation, setStartingNewConversation] = useState(false);
+	const [steerAvailableConversationIds, setSteerAvailableConversationIds] =
+		useState<string[]>([]);
 	const [attachments, setAttachments] = useState<PendingImageAttachment[]>([]);
 	const [dragActive, setDragActive] = useState(false);
 	const [composerExpanded, setComposerExpanded] = useState(false);
@@ -381,8 +382,11 @@ const ChatPage: React.FC = () => {
 	const transcriptEndRef = useRef<HTMLDivElement | null>(null);
 	const shouldAutoScrollRef = useRef(true);
 	const abortControllerRef = useRef<AbortController | null>(null);
+	const sendControllersRef = useRef<Record<string, AbortController>>({});
+	const runningSubscriptionControllersRef = useRef<
+		Record<string, AbortController>
+	>({});
 	const resumeControllerRef = useRef<AbortController | null>(null);
-	const sendStreamRef = useRef(0);
 	const resumeStreamRef = useRef(0);
 	const cwdSuggestionRequestRef = useRef(0);
 	const cwdInputFocusedRef = useRef(false);
@@ -397,6 +401,104 @@ const ChatPage: React.FC = () => {
 	const cwdInputRef = useRef<HTMLInputElement | null>(null);
 	const newChatDialogRef = useRef<HTMLDivElement | null>(null);
 
+	const setConversationRunning = useCallback(
+		(id: string | null | undefined, isRunning: boolean) => {
+			if (!id) {
+				return;
+			}
+
+			setConversations((currentConversations) =>
+				currentConversations.map((currentConversation) =>
+					currentConversation.id === id
+						? { ...currentConversation, isRunning }
+						: currentConversation,
+				),
+			);
+			setConversation((currentConversation) =>
+				currentConversation?.id === id
+					? { ...currentConversation, isRunning }
+					: currentConversation,
+			);
+		},
+		[],
+	);
+
+	const markConversationRunning = useCallback((id: string | null | undefined) => {
+		if (!id) {
+			return;
+		}
+
+		setConversationRunning(id, true);
+	}, [setConversationRunning]);
+
+	const clearRunningConversation = useCallback((id: string | null | undefined) => {
+		if (!id) {
+			return;
+		}
+
+		setConversationRunning(id, false);
+	}, [setConversationRunning]);
+
+	const replaceRunningConversation = useCallback(
+		(previousId: string | null | undefined, nextId: string | null | undefined) => {
+			clearRunningConversation(previousId);
+			markConversationRunning(nextId);
+		},
+		[clearRunningConversation, markConversationRunning],
+	);
+
+	const markConversationSteerAvailable = useCallback(
+		(id: string | null | undefined) => {
+			if (!id) {
+				return;
+			}
+
+			setSteerAvailableConversationIds((currentIds) =>
+				currentIds.includes(id) ? currentIds : [...currentIds, id],
+			);
+		},
+		[],
+	);
+
+	const clearConversationSteerAvailable = useCallback(
+		(id: string | null | undefined) => {
+			if (!id) {
+				return;
+			}
+
+			setSteerAvailableConversationIds((currentIds) =>
+				currentIds.filter((currentId) => currentId !== id),
+			);
+		},
+		[],
+	);
+
+	const registerSendController = useCallback(
+		(id: string | null | undefined, controller: AbortController) => {
+			if (!id) {
+				return;
+			}
+
+			sendControllersRef.current[id] = controller;
+		},
+		[],
+	);
+
+	const clearRunningConversationForController = useCallback(
+		(id: string | null | undefined, controller: AbortController) => {
+			if (!id) {
+				return;
+			}
+
+			if (sendControllersRef.current[id] === controller) {
+				delete sendControllersRef.current[id];
+				clearRunningConversation(id);
+				clearConversationSteerAvailable(id);
+			}
+		},
+		[clearConversationSteerAvailable, clearRunningConversation],
+	);
+
 	const refreshConversations = useCallback(async () => {
 		setSidebarLoading(true);
 		try {
@@ -405,7 +507,8 @@ const ChatPage: React.FC = () => {
 				sortBy: "updated",
 				sortOrder: "desc",
 			});
-			setConversations(response.conversations || []);
+			const nextConversations = response.conversations || [];
+			setConversations(nextConversations);
 		} catch (error) {
 			console.error("Failed to load conversations", error);
 		} finally {
@@ -433,19 +536,140 @@ const ChatPage: React.FC = () => {
 
 	useEffect(() => {
 		return () => {
-			sendStreamRef.current += 1;
 			resumeStreamRef.current += 1;
 			abortControllerRef.current?.abort();
+			Object.values(sendControllersRef.current).forEach((controller) => {
+				controller.abort();
+			});
+			sendControllersRef.current = {};
+			Object.values(runningSubscriptionControllersRef.current).forEach(
+				(controller) => {
+					controller.abort();
+				},
+			);
+			runningSubscriptionControllersRef.current = {};
 			resumeControllerRef.current?.abort();
 		};
 	}, []);
+
+	const runningConversationIds = useMemo(
+		() =>
+			conversations
+				.filter((listedConversation) => listedConversation.isRunning)
+				.map((listedConversation) => listedConversation.id),
+		[conversations],
+	);
+
+	useEffect(() => {
+		const runningIds = new Set(runningConversationIds);
+
+		Object.entries(runningSubscriptionControllersRef.current).forEach(
+			([runningId, controller]) => {
+				if (
+					!runningIds.has(runningId) ||
+					runningId === conversationId ||
+					sendControllersRef.current[runningId]
+				) {
+					controller.abort();
+					delete runningSubscriptionControllersRef.current[runningId];
+				}
+			},
+		);
+
+		runningConversationIds.forEach((runningId) => {
+			if (
+				runningId === conversationId ||
+				sendControllersRef.current[runningId] ||
+				runningSubscriptionControllersRef.current[runningId]
+			) {
+				return;
+			}
+
+			const controller = new AbortController();
+			runningSubscriptionControllersRef.current[runningId] = controller;
+
+			void apiService
+				.streamConversation(runningId, {
+					signal: controller.signal,
+					onEvent: (event: ChatStreamEvent) => {
+						if (event.conversation_id && event.conversation_id !== runningId) {
+							return;
+						}
+
+						if (event.kind === "conversation") {
+							markConversationRunning(runningId);
+							return;
+						}
+
+						if (event.kind === "tool-use" || event.kind === "tool-result") {
+							markConversationSteerAvailable(runningId);
+							return;
+						}
+
+						if (event.kind === "user-message") {
+							clearConversationSteerAvailable(runningId);
+							return;
+						}
+
+						if (event.kind === "done" || event.kind === "error") {
+							clearRunningConversation(runningId);
+							clearConversationSteerAvailable(runningId);
+						}
+					},
+				})
+				.catch((error) => {
+					if (controller.signal.aborted) {
+						return;
+					}
+
+					const message =
+						error instanceof Error
+							? error.message
+							: "Failed to monitor conversation stream";
+					if (message !== "conversation is not actively streaming") {
+						console.error("Failed to monitor conversation stream", error);
+					}
+				})
+				.finally(() => {
+					if (
+						runningSubscriptionControllersRef.current[runningId] === controller
+					) {
+						delete runningSubscriptionControllersRef.current[runningId];
+					}
+
+					if (!controller.signal.aborted) {
+						clearRunningConversation(runningId);
+						clearConversationSteerAvailable(runningId);
+					}
+				});
+		});
+	}, [
+		clearConversationSteerAvailable,
+		clearRunningConversation,
+		conversationId,
+		markConversationRunning,
+		markConversationSteerAvailable,
+		runningConversationIds,
+	]);
+
+	const selectedConversationId = conversationId || activeConversationId;
+	const activeRunningConversationId =
+		selectedConversationId &&
+		(runningConversationIds.includes(selectedConversationId) ||
+			(conversation?.id === selectedConversationId && conversation.isRunning))
+			? selectedConversationId
+			: null;
+	const currentConversationIsStarting =
+		startingNewConversation && !selectedConversationId;
+	const currentConversationIsStreaming =
+		Boolean(activeRunningConversationId) || currentConversationIsStarting;
 
 	const slashCommandSuggestions = useMemo(
 		() => filterSlashCommands(slashCommands, draft),
 		[draft, slashCommands],
 	);
 	const slashCommandSuggestionsOpen =
-		!sending &&
+		!currentConversationIsStreaming &&
 		!steering &&
 		slashSuggestionsDismissedDraft !== draft &&
 		slashCommandSuggestions.length > 0;
@@ -638,15 +862,9 @@ const ChatPage: React.FC = () => {
 		conversationPathOverrideRef.current = null;
 		shouldAutoScrollRef.current = true;
 
-		sendStreamRef.current += 1;
-		abortControllerRef.current?.abort();
-		abortControllerRef.current = null;
-
 		resumeStreamRef.current += 1;
 		setActiveConversationId(conversationId);
-		setSending(false);
 		setSteering(false);
-		setSteerAvailable(false);
 		setStreamError(null);
 
 		resumeControllerRef.current?.abort();
@@ -686,7 +904,8 @@ const ChatPage: React.FC = () => {
 		if (
 			!conversationId ||
 			conversationLoading ||
-			loadedConversationId !== conversationId
+			loadedConversationId !== conversationId ||
+			sendControllersRef.current[conversationId]
 		) {
 			return;
 		}
@@ -712,7 +931,7 @@ const ChatPage: React.FC = () => {
 					sawEvent = true;
 					if (event.kind === "conversation" && event.conversation_id) {
 						setActiveConversationId(event.conversation_id);
-						setSending(true);
+						markConversationRunning(event.conversation_id);
 						return;
 					}
 
@@ -724,7 +943,8 @@ const ChatPage: React.FC = () => {
 					}
 
 					if (event.kind === "done" || event.kind === "error") {
-						setSending(false);
+						clearRunningConversation(conversationId);
+						clearConversationSteerAvailable(conversationId);
 					}
 
 					if (event.kind === "error") {
@@ -732,7 +952,7 @@ const ChatPage: React.FC = () => {
 					}
 
 					if (event.kind === "tool-use" || event.kind === "tool-result") {
-						setSteerAvailable(true);
+						markConversationSteerAvailable(conversationId);
 					}
 
 					if (event.kind === "user-message") {
@@ -785,8 +1005,8 @@ const ChatPage: React.FC = () => {
 				}
 
 				if (sawEvent) {
-					setSending(false);
-					setSteerAvailable(false);
+					clearRunningConversation(conversationId);
+					clearConversationSteerAvailable(conversationId);
 				}
 			});
 
@@ -796,7 +1016,7 @@ const ChatPage: React.FC = () => {
 				resumeControllerRef.current = null;
 			}
 		};
-	}, [conversationId, conversationLoading, loadedConversationId]);
+	}, [clearConversationSteerAvailable, clearRunningConversation, conversationId, conversationLoading, loadedConversationId, markConversationRunning, markConversationSteerAvailable]);
 
 	const handleTranscriptScroll = (event: React.UIEvent<HTMLDivElement>) => {
 		shouldAutoScrollRef.current = isScrolledNearBottom(event.currentTarget);
@@ -811,10 +1031,10 @@ const ChatPage: React.FC = () => {
 			behavior: "smooth",
 			block: "end",
 		});
-	}, [messages, sending]);
+	}, [messages, currentConversationIsStreaming]);
 
 	const handleNewChat = () => {
-		if (sending && !activeConversationId) {
+		if (currentConversationIsStarting) {
 			return;
 		}
 
@@ -939,9 +1159,7 @@ const ChatPage: React.FC = () => {
 
 	const handleDeleteConversation = async (targetConversationId: string) => {
 		if (
-			sending &&
-			(targetConversationId === activeConversationId ||
-				targetConversationId === conversationId)
+			runningConversationIds.includes(targetConversationId)
 		) {
 			showToast("Stop the active conversation before deleting it", "info");
 			return;
@@ -952,17 +1170,25 @@ const ChatPage: React.FC = () => {
 
 			if (
 				targetConversationId === conversationId ||
-				targetConversationId === activeConversationId
+				targetConversationId === activeConversationId ||
+				runningConversationIds.includes(targetConversationId)
 			) {
-				abortControllerRef.current?.abort();
+				const sendController = sendControllersRef.current[targetConversationId];
+				if (sendController) {
+					sendController.abort();
+					delete sendControllersRef.current[targetConversationId];
+					if (abortControllerRef.current === sendController) {
+						abortControllerRef.current = null;
+					}
+				}
 				resumeControllerRef.current?.abort();
 				setConversation(null);
 				setActiveConversationId(null);
 				setMessages([]);
 				setConversationError(null);
 				setStreamError(null);
-				setSending(false);
-				setSteerAvailable(false);
+				clearRunningConversation(targetConversationId);
+				clearConversationSteerAvailable(targetConversationId);
 				startTransition(() => navigate("/"));
 			}
 
@@ -1091,7 +1317,8 @@ const ChatPage: React.FC = () => {
 
 	const handleSubmit = async () => {
 		const prompt = draft.trim();
-		const steeringSubmission = sending && canSteerActiveConversation;
+		const steeringSubmission =
+			currentConversationIsStreaming && canSteerActiveConversation;
 		const attachmentsForSubmit = attachments;
 		if ((!prompt && attachments.length === 0) || steering) {
 			return;
@@ -1101,12 +1328,13 @@ const ChatPage: React.FC = () => {
 			return;
 		}
 
-		if (sending) {
+		if (currentConversationIsStreaming) {
+			const targetConversationId = activeRunningConversationId;
 			if (!canSteerActiveConversation) {
 				return;
 			}
 
-			if (!activeConversationId) {
+			if (!targetConversationId) {
 				return;
 			}
 
@@ -1116,12 +1344,12 @@ const ChatPage: React.FC = () => {
 			try {
 				const queuedContent = buildUserContent(prompt, attachmentsForSubmit);
 				await apiService.steerConversation(
-					activeConversationId,
+					targetConversationId,
 					prompt,
 					queuedContent,
 				);
 				setConversation((currentConversation) =>
-					currentConversation
+					currentConversation?.id === targetConversationId
 						? {
 								...currentConversation,
 								pendingSteer: [
@@ -1133,6 +1361,7 @@ const ChatPage: React.FC = () => {
 				);
 				setDraft("");
 				setAttachments([]);
+				clearConversationSteerAvailable(targetConversationId);
 				showToast("Steering queued for the active conversation", "success");
 			} catch (error) {
 				const message =
@@ -1159,13 +1388,13 @@ const ChatPage: React.FC = () => {
 				content: buildUserContent(prompt, attachmentsForSend),
 			},
 		]);
-		setSending(true);
-		setSteerAvailable(false);
+		setStartingNewConversation(!conversationId);
+		clearConversationSteerAvailable(conversationId);
 
 		const controller = new AbortController();
 		abortControllerRef.current = controller;
-		const streamInstance = sendStreamRef.current + 1;
-		sendStreamRef.current = streamInstance;
+		registerSendController(conversationId, controller);
+		markConversationRunning(conversationId);
 		const viewConversationIdAtStart = conversationId;
 		const userPreview = buildConversationPreview(prompt, attachmentsForSend);
 
@@ -1184,28 +1413,31 @@ const ChatPage: React.FC = () => {
 				{
 					signal: controller.signal,
 					onEvent: (event: ChatStreamEvent) => {
-						const isStillCurrentStream =
-							sendStreamRef.current === streamInstance &&
-							(viewedConversationIdRef.current === viewConversationIdAtStart ||
-								(!viewConversationIdAtStart &&
-									streamedConversationId &&
-									viewedConversationIdRef.current ===
-										streamedConversationId)) &&
-							(viewConversationIdAtStart === null ||
-								!event.conversation_id ||
-								event.conversation_id === viewConversationIdAtStart);
-
-						if (!isStillCurrentStream) {
-							return;
-						}
-
 						if (event.kind === "conversation" && event.conversation_id) {
 							const streamedId = event.conversation_id;
+							const previousStreamedId = streamedConversationId;
+							const shouldAdoptStreamedConversation =
+								viewedConversationIdRef.current === viewConversationIdAtStart ||
+								(!viewConversationIdAtStart &&
+									viewedConversationIdRef.current === streamedId);
 							const shouldUpdatePath =
 								!viewConversationIdAtStart &&
-								streamedId !== streamedConversationId;
+								streamedId !== streamedConversationId &&
+								shouldAdoptStreamedConversation;
 							streamedConversationId = streamedId;
-							setActiveConversationId(streamedId);
+							if (shouldAdoptStreamedConversation) {
+								setActiveConversationId(streamedId);
+							}
+							if (
+								previousStreamedId &&
+								previousStreamedId !== streamedId &&
+								sendControllersRef.current[previousStreamedId] === controller
+							) {
+								delete sendControllersRef.current[previousStreamedId];
+							}
+							registerSendController(streamedId, controller);
+							replaceRunningConversation(previousStreamedId, streamedId);
+							setStartingNewConversation(false);
 							if (shouldUpdatePath) {
 								updatePathForStartedConversation(streamedId);
 							}
@@ -1221,43 +1453,59 @@ const ChatPage: React.FC = () => {
 										preview: userPreview,
 										cwd: currentCWDLabel,
 										profile: selectedProfile,
+										isRunning: true,
 									}),
 								);
 							}
 						}
 
+						const eventConversationId = event.conversation_id || streamedConversationId;
+						const shouldUpdateCurrentView = Boolean(
+							eventConversationId &&
+							viewedConversationIdRef.current === eventConversationId,
+						);
+
 						if (event.kind === "usage" && event.usage) {
-							setConversation((currentConversation) =>
-								mergeConversationUsage(currentConversation, event.usage),
-							);
+							if (shouldUpdateCurrentView) {
+								setConversation((currentConversation) =>
+									mergeConversationUsage(currentConversation, event.usage),
+								);
+							}
 							return;
 						}
 
 						if (event.kind === "error") {
 							streamedError = event.error || "Chat request failed";
-							setStreamError(streamedError);
+							if (shouldUpdateCurrentView) {
+								setStreamError(streamedError);
+							}
 							return;
 						}
 
 						if (event.kind === "tool-use" || event.kind === "tool-result") {
-							setSteerAvailable(true);
+							markConversationSteerAvailable(eventConversationId);
 						}
 
 						if (event.kind === "user-message") {
-							setConversation((currentConversation) =>
-								currentConversation
-									? { ...currentConversation, pendingSteer: [] }
-									: currentConversation,
-							);
+							clearConversationSteerAvailable(eventConversationId);
+							if (shouldUpdateCurrentView) {
+								setConversation((currentConversation) =>
+									currentConversation
+										? { ...currentConversation, pendingSteer: [] }
+										: currentConversation,
+								);
+							}
 						}
 
-						if (handleUIInputRequest(event)) {
+						if (shouldUpdateCurrentView && handleUIInputRequest(event)) {
 							return;
 						}
 
-						setMessages((currentMessages) =>
-							applyChatStreamEvent(currentMessages, event),
-						);
+						if (shouldUpdateCurrentView) {
+							setMessages((currentMessages) =>
+								applyChatStreamEvent(currentMessages, event),
+							);
+						}
 					},
 				},
 			);
@@ -1268,22 +1516,23 @@ const ChatPage: React.FC = () => {
 					viewedConversationIdRef.current === streamedConversationId,
 			);
 
-			if (
-				sendStreamRef.current !== streamInstance ||
-				(viewedConversationIdRef.current !== viewConversationIdAtStart &&
-					!finishedOnStartedConversation)
-			) {
-				return;
-			}
-
 			if (streamedError) {
-				conversationPathOverrideRef.current = null;
-				showToast(streamedError, "error");
+				if (
+					viewedConversationIdRef.current === viewConversationIdAtStart ||
+					finishedOnStartedConversation
+				) {
+					conversationPathOverrideRef.current = null;
+					showToast(streamedError, "error");
+				}
 				await refreshConversations();
 				return;
 			}
 
-			if (streamedConversationId) {
+			if (
+				streamedConversationId &&
+				(viewedConversationIdRef.current === streamedConversationId ||
+					finishedOnStartedConversation)
+			) {
 				const latestConversation = normalizeConversation(
 					await apiService.getConversation(streamedConversationId),
 				);
@@ -1300,6 +1549,10 @@ const ChatPage: React.FC = () => {
 			await refreshConversations();
 		} catch (error) {
 			if (error instanceof DOMException && error.name === "AbortError") {
+				clearRunningConversationForController(
+					streamedConversationId,
+					controller,
+				);
 				return;
 			}
 
@@ -1309,38 +1562,25 @@ const ChatPage: React.FC = () => {
 					viewedConversationIdRef.current === streamedConversationId,
 			);
 
-			if (
-				sendStreamRef.current !== streamInstance ||
-				(viewedConversationIdRef.current !== viewConversationIdAtStart &&
-					!failedOnStartedConversation)
-			) {
-				return;
-			}
-
-			conversationPathOverrideRef.current = null;
-			setAttachments(attachmentsForSend);
 			const message =
 				error instanceof Error ? error.message : "Failed to send message";
-			setStreamError(message);
-			showToast(message, "error");
-		} finally {
-			const finishedOnCurrentConversation =
-				viewedConversationIdRef.current === viewConversationIdAtStart ||
-				Boolean(
-					!viewConversationIdAtStart &&
-						streamedConversationId &&
-						viewedConversationIdRef.current === streamedConversationId,
-				);
-
 			if (
-				abortControllerRef.current === controller &&
-				sendStreamRef.current === streamInstance &&
-				finishedOnCurrentConversation
+				viewedConversationIdRef.current === viewConversationIdAtStart ||
+				failedOnStartedConversation
 			) {
-				abortControllerRef.current = null;
-				setSending(false);
-				setSteerAvailable(false);
+				conversationPathOverrideRef.current = null;
+				setAttachments(attachmentsForSend);
+				setStreamError(message);
+				showToast(message, "error");
 			}
+		} finally {
+			if (abortControllerRef.current === controller) {
+				abortControllerRef.current = null;
+			}
+			if (!streamedConversationId) {
+				setStartingNewConversation(false);
+			}
+			clearRunningConversationForController(streamedConversationId, controller);
 		}
 	};
 
@@ -1397,14 +1637,25 @@ const ChatPage: React.FC = () => {
 	};
 
 	const handleStop = () => {
-		const conversationToStop = activeConversationId;
+		const conversationToStop = activeRunningConversationId;
 		if (!conversationToStop) {
 			return;
 		}
 
-		abortControllerRef.current?.abort();
+		const sendController = sendControllersRef.current[conversationToStop];
+		if (sendController) {
+			sendController.abort();
+			delete sendControllersRef.current[conversationToStop];
+			if (abortControllerRef.current === sendController) {
+				abortControllerRef.current = null;
+			}
+		} else {
+			resumeControllerRef.current?.abort();
+		}
 		setSteering(false);
-		setSteerAvailable(false);
+		setStartingNewConversation(false);
+		clearRunningConversation(conversationToStop);
+		clearConversationSteerAvailable(conversationToStop);
 		setUIRequestDialog(null);
 		void apiService.stopConversation(conversationToStop).catch((error) => {
 			console.error("Failed to stop conversation", error);
@@ -1470,7 +1721,7 @@ const ChatPage: React.FC = () => {
 	};
 
 	const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
-		if (sending && !canSteerActiveConversation) {
+		if (currentConversationIsStreaming && !canSteerActiveConversation) {
 			return;
 		}
 
@@ -1494,7 +1745,7 @@ const ChatPage: React.FC = () => {
 		event.preventDefault();
 		setDragActive(false);
 
-		if (sending && !canSteerActiveConversation) {
+		if (currentConversationIsStreaming && !canSteerActiveConversation) {
 			return;
 		}
 
@@ -1688,17 +1939,23 @@ const ChatPage: React.FC = () => {
 		[conversations],
 	);
 
-	const hasActiveConversationTarget = Boolean(activeConversationId);
+	const hasActiveConversationTarget = Boolean(activeRunningConversationId);
 	const canSteerActiveConversation =
-		hasActiveConversationTarget && steerAvailable;
-	const isSteeringMode = sending && canSteerActiveConversation;
+		hasActiveConversationTarget &&
+		Boolean(
+			activeRunningConversationId &&
+				steerAvailableConversationIds.includes(activeRunningConversationId),
+		);
+	const isSteeringMode =
+		currentConversationIsStreaming && canSteerActiveConversation;
 	const canSubmit = isSteeringMode
 		? draft.trim().length > 0
 		: draft.trim().length > 0 || attachments.length > 0;
-	const canStopActiveConversation = sending && hasActiveConversationTarget;
-	const canStartNewChat = !sending || hasActiveConversationTarget;
-	const composerPlaceholder = sending
-		? !hasActiveConversationTarget
+	const canStopActiveConversation =
+		currentConversationIsStreaming && Boolean(activeRunningConversationId);
+	const canStartNewChat = !currentConversationIsStarting;
+	const composerPlaceholder = currentConversationIsStreaming
+		? !activeRunningConversationId
 			? "Waiting for conversation to start…"
 			: canSteerActiveConversation
 				? "Steer the active conversation…"
@@ -1707,10 +1964,14 @@ const ChatPage: React.FC = () => {
 			? getSlashCommandPlaceholder(activeSlashCommand)
 			: "Ask kodelet anything...";
 	const composerSlashUsageHint =
-		!sending && !steering && activeSlashCommand
+		!currentConversationIsStreaming && !steering && activeSlashCommand
 			? getSlashCommandPlaceholder(activeSlashCommand)
 			: "";
-	const submitActionLabel = steering ? "Queueing…" : sending ? "Steer" : "Send";
+	const submitActionLabel = steering
+		? "Queueing…"
+		: currentConversationIsStreaming
+			? "Steer"
+			: "Send";
 	const stopActionLabel = canStopActiveConversation ? "Stop" : "Starting…";
 	const composerMetaText = useMemo(() => {
 		if (!conversation) {
@@ -1929,7 +2190,6 @@ const ChatPage: React.FC = () => {
 							conversations={conversations}
 							disabled={!canStartNewChat}
 							loading={sidebarLoading}
-							runningConversationId={sending ? activeConversationId : null}
 							onDeleteConversation={handleDeleteConversation}
 							onForkConversation={handleForkConversation}
 							onHide={handleSidebarToggle}
@@ -2020,7 +2280,7 @@ const ChatPage: React.FC = () => {
 							<>
 								<ChatTranscript
 									emptyStateTitle={heading}
-									isStreaming={sending}
+									isStreaming={currentConversationIsStreaming}
 									messages={messages}
 								/>
 								{composerMetaText ? (
@@ -2044,18 +2304,19 @@ const ChatPage: React.FC = () => {
 
 					<ChatComposer
 						addImageDisabled={
-							(sending && !canSteerActiveConversation) || steering
+							(currentConversationIsStreaming && !canSteerActiveConversation) ||
+							steering
 						}
 						attachments={attachments}
 						canStop={canStopActiveConversation}
-						contextDisabled={sending || steering}
+						contextDisabled={currentConversationIsStreaming || steering}
 						contextIsStatic={Boolean(conversationId)}
 						contextText={composerContextText}
 						dragActive={dragActive}
 						draft={draft}
 						expanded={composerExpanded}
 						placeholder={composerPlaceholder}
-						showStop={sending}
+						showStop={currentConversationIsStreaming}
 						slashCommandIndex={slashCommandIndex}
 						slashCommandSuggestions={slashCommandSuggestions}
 						slashCommandSuggestionsOpen={slashCommandSuggestionsOpen}
@@ -2064,7 +2325,9 @@ const ChatPage: React.FC = () => {
 						streamError={streamError}
 						submitActionLabel={submitActionLabel}
 						submitDisabled={
-							steering || !canSubmit || (sending && !canSteerActiveConversation)
+							steering ||
+							!canSubmit ||
+							(currentConversationIsStreaming && !canSteerActiveConversation)
 						}
 						textareaDisabled={steering}
 						onAttachImages={appendAttachments}

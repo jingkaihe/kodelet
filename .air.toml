@@ -10,7 +10,7 @@ testdata_dir = "testdata"
 tmp_dir = "tmp"
 
 [build]
-  args_bin = ["serve", "--host", "0.0.0.0", "--port", "8080"]
+  args_bin = ["serve", "--host", "0.0.0.0", "--port", "7070", "--disable-subagent" ]
   bin = "./bin/kodelet"
   cmd = "mise run build"
   delay = 1000

@@ -9,7 +9,6 @@ const VISIBLE_CONVERSATIONS_STEP = 10;
 interface ChatSidebarProps {
 	conversations: Conversation[];
 	activeConversationId: string | null;
-	runningConversationId?: string | null;
 	loading: boolean;
 	disabled?: boolean;
 	onHide?: () => void;
@@ -99,7 +98,6 @@ const groupConversationsByCwd = (conversations: Conversation[]) => {
 const ChatSidebar: React.FC<ChatSidebarProps> = ({
 	conversations,
 	activeConversationId,
-	runningConversationId = null,
 	loading,
 	disabled = false,
 	onHide,
@@ -306,53 +304,68 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 							{expandedGroups[group.key] !== false ? (
 								<div className="conversation-group-list">
 									{visibleConversations.map((conversation) => {
-									const isActive = conversation.id === activeConversationId;
-									const isMenuOpen =
-										conversation.id === openMenuConversationId;
-									const isDeleteDisabled =
-										conversation.id === runningConversationId;
-									const preview = previewConversation(conversation);
+										const isActive = conversation.id === activeConversationId;
+										const isRunning = Boolean(conversation.isRunning);
+										const isMenuOpen =
+											conversation.id === openMenuConversationId;
+										const isDeleteDisabled = isRunning;
+										const preview = previewConversation(conversation);
 
-									return (
-										<div
-											key={conversation.id}
-											className={cn(
-												"conversation-link-row",
-												isActive && "active",
-												isMenuOpen && "menu-open",
-											)}
-											ref={isMenuOpen ? menuRef : undefined}
+										return (
+											<div
+												data-testid={`conversation-row-${conversation.id}`}
+												key={conversation.id}
+												className={cn(
+													"conversation-link-row",
+													isActive && "active",
+													isRunning && "running",
+													isMenuOpen && "menu-open",
+												)}
+												ref={isMenuOpen ? menuRef : undefined}
 										>
 											<button
-												className={cn("conversation-link", isActive && "active")}
-												disabled={disabled}
-												onClick={() => {
-													setOpenMenuConversationId(null);
-													onSelectConversation(conversation.id);
-												}}
-												type="button"
-											>
-												<span className="conversation-link-title">
-													{truncateText(preview, 80)}
-												</span>
-											</button>
-
-											<div className="conversation-actions">
-												<button
-													aria-expanded={isMenuOpen}
-													aria-haspopup="menu"
-													aria-label={`More actions for ${preview}`}
-													className="conversation-link-more-button"
+												className={cn(
+													"conversation-link",
+													isActive && "active",
+												)}
 													disabled={disabled}
 													onClick={() => {
-														setOpenMenuConversationId((currentId) =>
-															currentId === conversation.id ? null : conversation.id,
-														);
+														setOpenMenuConversationId(null);
+														onSelectConversation(conversation.id);
 													}}
 													type="button"
 												>
-													<span className="conversation-link-more">•••</span>
+													<span className="conversation-link-title">
+														{truncateText(preview, 80)}
+													</span>
+													{isRunning ? (
+														<span
+															className="conversation-running-indicator"
+															data-testid={`conversation-running-indicator-${conversation.id}`}
+															title="Conversation is running"
+														>
+															<span className="conversation-running-wheel" aria-hidden="true" />
+															<span className="sr-only">Running</span>
+														</span>
+													) : null}
 												</button>
+
+												<div className="conversation-actions">
+													<button
+														aria-expanded={isMenuOpen}
+														aria-haspopup="menu"
+														aria-label={`More actions for ${preview}`}
+														className="conversation-link-more-button"
+														disabled={disabled}
+														onClick={() => {
+															setOpenMenuConversationId((currentId) =>
+																currentId === conversation.id ? null : conversation.id,
+															);
+														}}
+														type="button"
+													>
+														<span className="conversation-link-more">•••</span>
+													</button>
 
 												{isMenuOpen ? (
 													<div className="conversation-action-menu" role="menu">

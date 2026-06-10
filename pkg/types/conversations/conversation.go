@@ -53,6 +53,7 @@ type ConversationSummary struct {
 	Usage        llmtypes.Usage `json:"usage"`
 	CreatedAt    time.Time      `json:"createdAt"`
 	UpdatedAt    time.Time      `json:"updatedAt"`
+	IsRunning    bool           `json:"isRunning,omitempty"`
 }
 
 // QueryResult represents the result of a query operation

@@ -898,6 +898,7 @@ func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request)
 		summary := &response.Conversations[i]
 		platform, apiMode := extractProviderMetadata(summary.Provider, summary.Metadata)
 		summary.Provider = displayProviderName(summary.Provider)
+		summary.IsRunning = s.isActiveChat(summary.ID)
 		if summary.Metadata == nil {
 			summary.Metadata = make(map[string]any)
 		}
@@ -923,6 +924,7 @@ type WebConversationResponse struct {
 	Profile       string       `json:"profile,omitempty"`
 	ProfileLocked bool         `json:"profileLocked,omitempty"`
 	Summary       string       `json:"summary,omitempty"`
+	IsRunning     bool         `json:"isRunning,omitempty"`
 	Usage         any          `json:"usage"`
 	Messages      []WebMessage `json:"messages"`
 	PendingSteer  []WebMessage `json:"pendingSteer,omitempty"`
@@ -1521,6 +1523,7 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 		Profile:       resolveConversationProfile(response.Metadata),
 		ProfileLocked: response.ID != "",
 		Summary:       response.Summary,
+		IsRunning:     s.isActiveChat(response.ID),
 		Usage:         response.Usage,
 		Messages:      webMessages,
 		PendingSteer:  pendingSteer,
