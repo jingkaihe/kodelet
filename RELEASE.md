@@ -1,6 +1,6 @@
 # Kodelet
 
-## 0.4.34-beta 
+## 0.4.35-beta 
 
 Added `anthropic.adaptive_thinking` so custom Anthropic-compatible model IDs can opt into adaptive-thinking and `output_config.effort` request plumbing, with sample config, manual, skill docs, and regression coverage updated for the new setting.
 
