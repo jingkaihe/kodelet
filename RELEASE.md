@@ -1,5 +1,9 @@
 # Kodelet
 
+## Unreleased
+
+Added `anthropic.adaptive_thinking` so custom Anthropic-compatible model IDs can opt into adaptive-thinking and `output_config.effort` request plumbing, with sample config, manual, skill docs, and regression coverage updated for the new setting.
+
 ## 0.4.33-beta (2026-06-09)
 
 Added Claude Fable 5 model support, including adaptive-thinking validation, xhigh reasoning effort handling, and pricing metadata.
