@@ -1,8 +1,10 @@
 # Kodelet
 
-## Unreleased
+## 0.4.34-beta 
 
 Added `anthropic.adaptive_thinking` so custom Anthropic-compatible model IDs can opt into adaptive-thinking and `output_config.effort` request plumbing, with sample config, manual, skill docs, and regression coverage updated for the new setting.
+
+Show running conversation status in sidebar and chat page.
 
 Updated the Node.js/npm toolchain baseline to Node.js 24.16.0 LTS and npm 11.16.0 across mise, release CI, development docs, and JavaScript package metadata.
 
