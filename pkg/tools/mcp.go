@@ -209,6 +209,9 @@ func (t *authenticatedStreamableHTTPTransport) closeWithHeaders() error {
 	}
 	if t.headerFunc != nil {
 		for k, v := range t.headerFunc(ctx) {
+			if req.Header.Get(k) != "" {
+				continue
+			}
 			req.Header.Set(k, v)
 		}
 	}
@@ -348,10 +351,11 @@ func (m *MCPManager) Initialize(ctx context.Context) error {
 		return err
 	}
 	var (
-		wg          sync.WaitGroup
-		mu          sync.Mutex
-		multiErr    error
-		failedNames []string
+		wg             sync.WaitGroup
+		mu             sync.Mutex
+		multiErr       error
+		initContextErr error
+		failedNames    []string
 	)
 	wg.Add(len(m.clients))
 	for name, c := range m.clients {
@@ -362,6 +366,15 @@ func (m *MCPManager) Initialize(ctx context.Context) error {
 				logger.G(ctx).WithField("name", name).WithError(err).Error("failed to initialize mcp client")
 				mu.Lock()
 				multiErr = multierror.Append(multiErr, errors.Wrapf(err, "server %s", name))
+				if isContextError(err) && initContextErr == nil {
+					if ctxErr := ctx.Err(); ctxErr != nil {
+						initContextErr = ctxErr
+					} else if errors.Is(err, context.DeadlineExceeded) {
+						initContextErr = context.DeadlineExceeded
+					} else {
+						initContextErr = context.Canceled
+					}
+				}
 				failedNames = append(failedNames, name)
 				mu.Unlock()
 			}
@@ -383,6 +396,9 @@ func (m *MCPManager) Initialize(ctx context.Context) error {
 	}
 
 	logger.G(ctx).WithField("time", time.Since(now)).Debug("mcp manager initialized")
+	if initContextErr != nil {
+		return initContextErr
+	}
 	if len(m.clients) == 0 {
 		return multiErr
 	}
@@ -390,6 +406,10 @@ func (m *MCPManager) Initialize(ctx context.Context) error {
 		logger.G(ctx).WithError(multiErr).Warn("some MCP servers failed to initialize and will be skipped")
 	}
 	return nil
+}
+
+func isContextError(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 // Close closes all MCP clients

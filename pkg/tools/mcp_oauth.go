@@ -181,13 +181,17 @@ func (rt *mcpOAuthRoundTripper) RoundTrip(req *http.Request) (*http.Response, er
 		return nil, err
 	}
 
-	if authHeader, err := rt.authorizationHeader(req.Context()); err != nil {
-		return nil, err
-	} else if authHeader != "" {
-		req.Header.Set("Authorization", authHeader)
+	hadConfiguredAuthHeader := req.Header.Get("Authorization") != ""
+	sentAuthHeader := hadConfiguredAuthHeader
+	if !hadConfiguredAuthHeader {
+		if authHeader, err := rt.authorizationHeader(req.Context()); err != nil {
+			return nil, err
+		} else if authHeader != "" {
+			req.Header.Set("Authorization", authHeader)
+			sentAuthHeader = true
+		}
 	}
 
-	hadAuthHeader := req.Header.Get("Authorization") != ""
 	resp, err := rt.base.RoundTrip(req)
 	if err != nil || resp == nil {
 		return resp, err
@@ -197,11 +201,14 @@ func (rt *mcpOAuthRoundTripper) RoundTrip(req *http.Request) (*http.Response, er
 	if resp.StatusCode != http.StatusUnauthorized || !challenge.bearer {
 		return resp, nil
 	}
+	if hadConfiguredAuthHeader {
+		return resp, nil
+	}
 
 	_, _ = io.Copy(io.Discard, resp.Body)
 	_ = resp.Body.Close()
 
-	if err := rt.authorize(req.Context(), challenge, hadAuthHeader); err != nil {
+	if err := rt.authorize(req.Context(), challenge, sentAuthHeader); err != nil {
 		return nil, err
 	}
 
@@ -212,10 +219,12 @@ func (rt *mcpOAuthRoundTripper) RoundTrip(req *http.Request) (*http.Response, er
 		retryReq.Body = nil
 		retryReq.ContentLength = 0
 	}
-	if authHeader, err := rt.authorizationHeader(req.Context()); err != nil {
-		return nil, err
-	} else if authHeader != "" {
-		retryReq.Header.Set("Authorization", authHeader)
+	if !hadConfiguredAuthHeader {
+		if authHeader, err := rt.authorizationHeader(req.Context()); err != nil {
+			return nil, err
+		} else if authHeader != "" {
+			retryReq.Header.Set("Authorization", authHeader)
+		}
 	}
 
 	return rt.base.RoundTrip(retryReq)

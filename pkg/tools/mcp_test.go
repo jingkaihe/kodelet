@@ -128,6 +128,52 @@ func withTestMCPOAuthPrompter(t *testing.T, prompter MCPOAuthPrompter) {
 	t.Cleanup(SetDefaultMCPOAuthPrompter(prompter))
 }
 
+type mcpInitializeTestTransport struct {
+	waitForContext bool
+	onNotification func(mcp.JSONRPCNotification)
+}
+
+func (t *mcpInitializeTestTransport) Start(ctx context.Context) error {
+	return nil
+}
+
+func (t *mcpInitializeTestTransport) SendRequest(ctx context.Context, request transport.JSONRPCRequest) (*transport.JSONRPCResponse, error) {
+	if t.waitForContext {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+
+	result, err := json.Marshal(mcp.InitializeResult{
+		ProtocolVersion: mcp.LATEST_PROTOCOL_VERSION,
+		ServerInfo: mcp.Implementation{
+			Name:    "test-server",
+			Version: "1.0.0",
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return transport.NewJSONRPCResultResponse(request.ID, result), nil
+}
+
+func (t *mcpInitializeTestTransport) SendNotification(ctx context.Context, notification mcp.JSONRPCNotification) error {
+	if t.onNotification != nil {
+		t.onNotification(notification)
+	}
+	return nil
+}
+
+func (t *mcpInitializeTestTransport) SetNotificationHandler(handler func(mcp.JSONRPCNotification)) {
+}
+
+func (t *mcpInitializeTestTransport) Close() error {
+	return nil
+}
+
+func (t *mcpInitializeTestTransport) GetSessionId() string { //nolint:revive,staticcheck // method name defined by mcp-go transport interface
+	return ""
+}
+
 func goldenMCPConfig(t *testing.T) MCPConfig {
 	t.Helper()
 	exe, err := os.Executable()
@@ -356,6 +402,38 @@ func TestMCPManager_InitializeSkipsFailedServersWhenOthersSucceed(t *testing.T) 
 	mcpTools, err := manager.ListMCPTools(context.Background())
 	require.NoError(t, err)
 	assert.NotEmpty(t, mcpTools)
+}
+
+func TestMCPManager_InitializeReturnsContextErrorAfterPartialCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	manager := &MCPManager{
+		clients: map[string]*client.Client{
+			"ready": client.NewClient(&mcpInitializeTestTransport{
+				onNotification: func(notification mcp.JSONRPCNotification) {
+					if notification.Method == "notifications/initialized" {
+						cancel()
+					}
+				},
+			}),
+			"blocked": client.NewClient(&mcpInitializeTestTransport{waitForContext: true}),
+		},
+		whiteList: map[string][]string{
+			"ready":   nil,
+			"blocked": nil,
+		},
+		owned: map[string]bool{
+			"ready":   true,
+			"blocked": true,
+		},
+	}
+
+	err := manager.Initialize(ctx)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Contains(t, manager.clients, "ready")
+	assert.NotContains(t, manager.clients, "blocked")
+	require.NoError(t, manager.Close(context.Background()))
 }
 
 func TestMCPTool_GenerateSchema(t *testing.T) {
@@ -779,6 +857,8 @@ func TestMCPManager_StreamableHTTPAutoOAuth(t *testing.T) {
 
 func TestMCPManager_StreamableHTTPClosePreservesHeaders(t *testing.T) {
 	const authHeader = "Bearer test-token"
+	const cachedAuthToken = "cached-oauth-token"
+	t.Setenv("HOME", t.TempDir())
 
 	mcpServer := server.NewMCPServer("test-http-server", "1.0.0")
 	mcpServer.AddTool(
@@ -804,6 +884,16 @@ func TestMCPManager_StreamableHTTPClosePreservesHeaders(t *testing.T) {
 		streamableHandler.ServeHTTP(w, r)
 	}))
 	defer testServer.Close()
+
+	store, err := newMCPOAuthCredentialStore("time", testServer.URL)
+	require.NoError(t, err)
+	require.NoError(t, store.Save(context.Background(), &mcpOAuthStoredCredentials{
+		Token: &transport.Token{
+			AccessToken: cachedAuthToken,
+			TokenType:   "Bearer",
+			ExpiresAt:   time.Now().Add(time.Hour),
+		},
+	}))
 
 	manager, err := NewMCPManager(MCPConfig{
 		Servers: map[string]MCPServerConfig{
