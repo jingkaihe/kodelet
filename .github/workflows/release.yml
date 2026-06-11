@@ -42,13 +42,13 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '22.17.0'
+          node-version: '24.16.0'
           registry-url: 'https://registry.npmjs.org'
           cache: npm
           cache-dependency-path: sdk/package-lock.json
 
       - name: Setup npm for trusted publishing
-        run: npm install -g npm@11.8.0
+        run: npm install -g npm@11.16.0
 
       - name: Install SDK dependencies
         run: npm ci

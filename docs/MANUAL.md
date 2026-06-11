@@ -114,8 +114,8 @@ kodelet run --result-only "what is 2+2"      # outputs just: 4
 # Disable all tools (for simple query-response usage)
 kodelet run --no-tools "what is the capital of France?"
 
-# Disable filesystem search tools and use fd/rg via bash instead
-kodelet run --disable-fs-search-tools "find references to SessionManager"
+# Enable filesystem search tools (glob_tool and grep_tool) instead of fd/rg via bash
+kodelet run --enable-fs-search-tools "find references to SessionManager"
 
 # Set a persistent thread goal for goal-directed work
 kodelet run "/goal finish the migration and verify tests pass"
@@ -479,7 +479,7 @@ Make sure that you sanity check the generated `AGENTS.md` file, and update it as
 
 ### Context File Priority
 
-Kodelet automatically detects and loads `AGENTS.md` context files from the current working directory and accessed subdirectories.
+Kodelet automatically detects and loads matching context files from the current working directory and the global `~/.kodelet` directory.
 
 You can configure custom context file patterns via:
 - CLI flag: `--context-patterns "AGENTS.md,README.md"`
@@ -755,8 +755,8 @@ kodelet run --allowed-commands "ls *,pwd,echo *" "query"
 # Disable subagent tool and related system prompt context
 kodelet run --disable-subagent "query"
 
-# Disable filesystem search tools (`glob_tool` and `grep_tool`)
-kodelet run --disable-fs-search-tools "query"
+# Enable filesystem search tools (`glob_tool` and `grep_tool`)
+kodelet run --enable-fs-search-tools "query"
 
 # Use the first user message for persisted conversation summaries
 kodelet run --conversation-summary-mode first_message "query"
@@ -790,6 +790,12 @@ weak_model_max_tokens: 8192
 # thinking_budget_tokens is only used on older Claude models that still use manual thinking.
 reasoning_effort: "medium"
 
+# Anthropic-compatible platforms can force adaptive-thinking plumbing for the configured
+# non-standard model IDs that Kodelet does not know about yet.
+anthropic:
+  # platform: copilot
+  # adaptive_thinking: true
+
 # Active profile selection
 profile: "anthropic"  # Optional: specify the active profile
 
@@ -809,7 +815,7 @@ profiles:
     max_tokens: 16000
     reasoning_effort: "medium"
     tool_mode: "patch"
-    disable_fs_search_tools: true
+    enable_fs_search_tools: false
     enable_search: true
     openai:
       platform: copilot
@@ -829,10 +835,11 @@ profiles:
     model: "o3"
     reasoning_effort: "high"
     tool_mode: "patch"
-    disable_fs_search_tools: true
+    enable_fs_search_tools: false
 
 # Model aliases work across all profiles
 aliases:
+    fable-5: claude-fable-5
     haiku-45: claude-haiku-4-5-20251001
     opus-48: claude-opus-4-8
     sonnet-46: claude-sonnet-4-6
@@ -1005,6 +1012,7 @@ export KODELET_BASH_TIMEOUT=5m
 ### Anthropic Claude
 
 Kodelet supports various Anthropic Claude models:
+- `claude-fable-5` (most capable widely released model for demanding reasoning and long-horizon agentic work)
 - `claude-sonnet-4-6` (recommended for standard tasks)
 - `claude-haiku-4-5-20251001` (recommended for lightweight tasks)
 - `claude-opus-4-5-20251101` (most intelligent model for building agents and coding)
@@ -1618,15 +1626,15 @@ kodelet run --disable-subagent "your query"
 
 This can also be set via configuration file (`disable_subagent: true`) or environment variable (`KODELET_DISABLE_SUBAGENT=true`). Other tools like `web_fetch` remain available when the subagent is disabled.
 
-### Disabling Filesystem Search Tools
+### Enabling Filesystem Search Tools
 
-To disable the built-in filesystem search tools (`glob_tool` and `grep_tool`):
+The built-in filesystem search tools (`glob_tool` and `grep_tool`) are disabled by default; the system prompt instructs the agent to use `fd` and `rg` via the `bash` tool for filesystem search tasks instead. To enable them:
 
 ```bash
-kodelet run --disable-fs-search-tools "your query"
+kodelet run --enable-fs-search-tools "your query"
 ```
 
-This can also be set via configuration file (`disable_fs_search_tools: true`) or environment variable (`KODELET_DISABLE_FS_SEARCH_TOOLS=true`). When enabled, the system prompt instructs the agent to use `fd` and `rg` via the `bash` tool for filesystem search tasks instead.
+This can also be set via configuration file (`enable_fs_search_tools: true`) or environment variable (`KODELET_ENABLE_FS_SEARCH_TOOLS=true`).
 
 ### Conversation Summary Mode
 

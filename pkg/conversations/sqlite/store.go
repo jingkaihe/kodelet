@@ -53,17 +53,16 @@ func (s *Store) Save(ctx context.Context, record conversations.ConversationRecor
 	// Insert or update conversation record with UPSERT to preserve created_at
 	conversationQuery := `
 		INSERT INTO conversations (
-			id, cwd, raw_messages, provider, file_last_access, usage,
+			id, cwd, raw_messages, provider, usage,
 			summary, created_at, updated_at, metadata, tool_results
 		) VALUES (
-			:id, :cwd, :raw_messages, :provider, :file_last_access, :usage,
+			:id, :cwd, :raw_messages, :provider, :usage,
 			:summary, :created_at, :updated_at, :metadata, :tool_results
 		)
 		ON CONFLICT(id) DO UPDATE SET
 			cwd = excluded.cwd,
 			raw_messages = excluded.raw_messages,
 			provider = excluded.provider,
-			file_last_access = excluded.file_last_access,
 			usage = excluded.usage,
 			summary = excluded.summary,
 			updated_at = excluded.updated_at,
@@ -104,7 +103,7 @@ func (s *Store) Save(ctx context.Context, record conversations.ConversationRecor
 func (s *Store) Load(ctx context.Context, id string) (conversations.ConversationRecord, error) {
 	var dbRecord dbConversationRecord
 
-	query := `SELECT id, cwd, raw_messages, provider, file_last_access, usage,
+	query := `SELECT id, cwd, raw_messages, provider, usage,
 		summary, created_at, updated_at, metadata, tool_results
 		FROM conversations WHERE id = ?`
 	err := s.db.GetContext(ctx, &dbRecord, query, id)

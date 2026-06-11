@@ -341,18 +341,36 @@ func TestAnthropicToolResultBlockFallsBackToAssistantFacing(t *testing.T) {
 }
 
 func TestGetModelPricingMatchesFamiliesAndDefault(t *testing.T) {
+	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeFable5], getModelPricing(anthropic.ModelClaudeFable5))
+	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeFable5], getModelPricing("claude-fable-5-latest"))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeSonnet4_6], getModelPricing(anthropic.ModelClaudeSonnet4_6))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeSonnet4_5], getModelPricing("claude-sonnet-4-5-latest"))
-	assert.Equal(t, ModelPricingMap[modelClaudeSonnet4_0], getModelPricing("claude-sonnet-4-20250514"))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeOpus4_8], getModelPricing("claude-opus-4-8-latest"))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeOpus4_7], getModelPricing("claude-opus-4-7-latest"))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeOpus4_6], getModelPricing("claude-opus-4-6-custom"))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeOpus4_5_20251101], getModelPricing("claude-opus-4-5-custom"))
-	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeOpus4_1_20250805], getModelPricing("claude-opus-4-1-custom"))
-	assert.Equal(t, ModelPricingMap[modelClaudeOpus4_0], getModelPricing("claude-opus-4-20250514"))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeHaiku4_5], getModelPricing("claude-haiku-4-5-custom"))
 	assert.Equal(t, ModelPricingMap[modelClaude35Haiku], getModelPricing("claude-3-5-haiku-20241022"))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeSonnet4_6], getModelPricing("unknown-model"))
+}
+
+func TestFable5Pricing(t *testing.T) {
+	pricing := ModelPricingMap[anthropic.ModelClaudeFable5]
+
+	assert.Equal(t, 0.000010, pricing.Input)
+	assert.Equal(t, 0.0000125, pricing.PromptCachingWrite5m)
+	assert.Equal(t, 0.000020, pricing.PromptCachingWrite1h)
+	assert.Equal(t, 0.000001, pricing.PromptCachingRead)
+	assert.Equal(t, 0.000050, pricing.Output)
+	assert.Equal(t, 1_000_000, pricing.ContextWindow)
+}
+
+func TestRemovedLegacyClaude4PricingFallsBackToDefault(t *testing.T) {
+	defaultPricing := ModelPricingMap[anthropic.ModelClaudeSonnet4_6]
+
+	assert.Equal(t, defaultPricing, getModelPricing("claude-opus-4-20250514"))
+	assert.Equal(t, defaultPricing, getModelPricing("claude-opus-4-1-20250805"))
+	assert.Equal(t, defaultPricing, getModelPricing("claude-sonnet-4-20250514"))
 }
 
 func TestOpus47PricingMatchesScreenshot(t *testing.T) {
@@ -963,13 +981,18 @@ func TestIsThinkingModel(t *testing.T) {
 		expected bool
 	}{
 		{
+			name:     "fable 5 supports thinking",
+			model:    anthropic.ModelClaudeFable5,
+			expected: true,
+		},
+		{
 			name:     "opus 4.8 supports thinking",
 			model:    anthropic.ModelClaudeOpus4_8,
 			expected: true,
 		},
 		{
 			name:     "mythos preview supports thinking",
-			model:    anthropic.ModelClaudeMythosPreview,
+			model:    modelClaudeMythosPreview,
 			expected: true,
 		},
 		{
@@ -1015,6 +1038,15 @@ func TestThinkingConfigForModel(t *testing.T) {
 		assert.Equal(t, anthropic.ThinkingConfigAdaptiveDisplaySummarized, config.OfAdaptive.Display)
 	})
 
+	t.Run("fable 5 uses adaptive thinking", func(t *testing.T) {
+		config, ok := thread.thinkingConfigForModel(anthropic.ModelClaudeFable5)
+		require.True(t, ok)
+		require.NotNil(t, config.OfAdaptive)
+		assert.Nil(t, config.GetBudgetTokens())
+		require.NotNil(t, config.GetType())
+		assert.Equal(t, "adaptive", *config.GetType())
+	})
+
 	t.Run("legacy models keep budgeted thinking", func(t *testing.T) {
 		config, ok := thread.thinkingConfigForModel(anthropic.ModelClaudeSonnet4_5)
 		require.True(t, ok)
@@ -1053,6 +1085,20 @@ func TestThinkingConfigForModel(t *testing.T) {
 		assert.False(t, ok)
 		assert.Nil(t, config.GetType())
 	})
+
+	t.Run("config can force adaptive thinking for custom models", func(t *testing.T) {
+		customThread, err := NewAnthropicThread(llmtypes.Config{
+			Model:           "claude-opus-4.6",
+			ReasoningEffort: "max",
+			Anthropic:       &llmtypes.AnthropicConfig{AdaptiveThinking: true},
+		})
+		require.NoError(t, err)
+
+		config, ok := customThread.thinkingConfigForModel(anthropic.Model("claude-opus-4.6"))
+		require.True(t, ok)
+		require.NotNil(t, config.OfAdaptive)
+		assert.Equal(t, "adaptive", *config.GetType())
+	})
 }
 
 func TestValidateThinkingConfigForModel(t *testing.T) {
@@ -1060,7 +1106,13 @@ func TestValidateThinkingConfigForModel(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("mythos rejects disabled adaptive thinking", func(t *testing.T) {
-		err := thread.validateThinkingConfigForModel(anthropic.ModelClaudeMythosPreview)
+		err := thread.validateThinkingConfigForModel(modelClaudeMythosPreview)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "does not support disabling adaptive thinking")
+	})
+
+	t.Run("fable 5 rejects disabled adaptive thinking", func(t *testing.T) {
+		err := thread.validateThinkingConfigForModel(anthropic.ModelClaudeFable5)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "does not support disabling adaptive thinking")
 	})
@@ -1101,6 +1153,13 @@ func TestAnthropicReasoningEffortForModel(t *testing.T) {
 			ok:         true,
 		},
 		{
+			name:       "fable 5 supports xhigh",
+			model:      anthropic.ModelClaudeFable5,
+			configured: "xhigh",
+			expected:   anthropic.OutputConfigEffortXhigh,
+			ok:         true,
+		},
+		{
 			name:       "xhigh is preserved on opus 4.7",
 			model:      anthropic.ModelClaudeOpus4_7,
 			configured: "xhigh",
@@ -1126,6 +1185,13 @@ func TestAnthropicReasoningEffortForModel(t *testing.T) {
 			model:      anthropic.ModelClaudeSonnet4_6,
 			configured: "xhigh",
 			expected:   anthropic.OutputConfigEffortHigh,
+			ok:         true,
+		},
+		{
+			name:       "fable 5 supports max effort",
+			model:      anthropic.ModelClaudeFable5,
+			configured: "max",
+			expected:   anthropic.OutputConfigEffortMax,
 			ok:         true,
 		},
 		{
@@ -1183,6 +1249,23 @@ func TestOutputConfigForModel(t *testing.T) {
 		config, ok := disabledThread.outputConfigForModel(anthropic.ModelClaudeOpus4_7)
 		require.True(t, ok)
 		assert.Equal(t, anthropic.OutputConfigEffortLow, config.Effort)
+	})
+
+	t.Run("config can force adaptive output config for custom models", func(t *testing.T) {
+		customThread, err := NewAnthropicThread(llmtypes.Config{
+			Model:           "claude-opus-4.6",
+			ReasoningEffort: "max",
+			Anthropic:       &llmtypes.AnthropicConfig{AdaptiveThinking: true},
+		})
+		require.NoError(t, err)
+
+		config, ok := customThread.outputConfigForModel(anthropic.Model("claude-opus-4.6"))
+		require.True(t, ok)
+		assert.Equal(t, anthropic.OutputConfigEffortMax, config.Effort)
+
+		otherConfig, otherOK := customThread.outputConfigForModel(anthropic.Model("custom-weak-model"))
+		assert.False(t, otherOK)
+		assert.Equal(t, anthropic.OutputConfigEffort(""), otherConfig.Effort)
 	})
 }
 

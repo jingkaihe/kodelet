@@ -24,9 +24,9 @@ var codeExecutionDescription string
 
 // CodeExecutionTool enables TypeScript code execution with MCP tool access
 type CodeExecutionTool struct {
-	runtime              *runtime.NodeRuntime
-	toolMode             llmtypes.ToolMode
-	disableFSSearchTools bool
+	runtime             *runtime.NodeRuntime
+	toolMode            llmtypes.ToolMode
+	enableFSSearchTools bool
 }
 
 // CodeExecutionInput represents the input parameters for code execution
@@ -86,11 +86,11 @@ func NewCodeExecutionTool(runtime *runtime.NodeRuntime) *CodeExecutionTool {
 }
 
 // NewCodeExecutionToolWithOptions creates a code execution tool with description rendering options.
-func NewCodeExecutionToolWithOptions(runtime *runtime.NodeRuntime, toolMode llmtypes.ToolMode, disableFSSearchTools bool) *CodeExecutionTool {
+func NewCodeExecutionToolWithOptions(runtime *runtime.NodeRuntime, toolMode llmtypes.ToolMode, enableFSSearchTools bool) *CodeExecutionTool {
 	return &CodeExecutionTool{
-		runtime:              runtime,
-		toolMode:             toolMode,
-		disableFSSearchTools: disableFSSearchTools,
+		runtime:             runtime,
+		toolMode:            toolMode,
+		enableFSSearchTools: enableFSSearchTools,
 	}
 }
 
@@ -107,11 +107,11 @@ func (t *CodeExecutionTool) Description() string {
 	}
 
 	data := struct {
-		PatchOnly            bool
-		DisableFSSearchTools bool
+		PatchOnly           bool
+		EnableFSSearchTools bool
 	}{
-		PatchOnly:            t.toolMode.IsPatchMode(),
-		DisableFSSearchTools: t.disableFSSearchTools,
+		PatchOnly:           t.toolMode.IsPatchMode(),
+		EnableFSSearchTools: t.enableFSSearchTools,
 	}
 
 	var rendered bytes.Buffer

@@ -126,7 +126,6 @@ func TestNewThreadWithoutAPIKey(t *testing.T) {
 
 func TestThreadSwapContextReplacesHistoryAndClearsState(t *testing.T) {
 	state := tools.NewBasicState(context.Background())
-	require.NoError(t, state.SetFileLastAccessed("old.go", time.Now()))
 	thread := &Thread{
 		Thread: base.NewThread(llmtypes.Config{Model: "gpt-4.1"}, "conv-swap"),
 		inputItems: []openairesponses.ResponseInputItemUnionParam{
@@ -143,7 +142,6 @@ func TestThreadSwapContextReplacesHistoryAndClearsState(t *testing.T) {
 	assert.Equal(t, "summary of prior context", extractInputItemText(thread.inputItems[0]))
 	assert.Equal(t, []StoredInputItem{{Type: "message", Role: "user", Content: "summary of prior context"}}, thread.storedItems)
 	assert.Empty(t, thread.GetStructuredToolResults())
-	assert.Empty(t, state.FileLastAccess())
 	assert.Greater(t, thread.GetUsage().CurrentContextWindow, 0)
 }
 
@@ -440,13 +438,13 @@ func TestBuildToolsForThreadHonorsExtensionAllowedTools(t *testing.T) {
 		},
 	}))
 	thread := &Thread{Thread: base.NewThread(llmtypes.Config{}, "conv-tools")}
-	thread.SetMetadataValue("allowed_tools", []string{"file_read"})
+	thread.SetMetadataValue("allowed_tools", []string{"file_write"})
 
 	toolDefs := buildToolsForThread(thread, state, false)
 
 	require.Len(t, toolDefs, 1)
 	require.NotNil(t, toolDefs[0].OfFunction)
-	assert.Equal(t, "file_read", toolDefs[0].OfFunction.Name)
+	assert.Equal(t, "file_write", toolDefs[0].OfFunction.Name)
 }
 
 func TestIsReasoningModelDynamic(t *testing.T) {

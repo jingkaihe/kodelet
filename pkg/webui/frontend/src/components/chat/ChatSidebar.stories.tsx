@@ -21,7 +21,6 @@ const meta = {
 		conversations: sampleConversations,
 		disabled: false,
 		loading: false,
-		runningConversationId: null,
 		onDeleteConversation: fn(),
 		onForkConversation: fn(),
 		onHide: fn(),
@@ -36,6 +35,16 @@ type Story = StoryObj<typeof meta>;
 
 export const GroupedConversations: Story = {};
 
+export const RunningConversation: Story = {
+	args: {
+		conversations: sampleConversations.map((conversation) =>
+			conversation.id === "conv-active"
+				? { ...conversation, isRunning: true }
+				: conversation,
+		),
+	},
+};
+
 export const Loading: Story = {
 	args: {
 		conversations: [],
@@ -46,6 +55,10 @@ export const Loading: Story = {
 export const DisabledDuringStartup: Story = {
 	args: {
 		disabled: true,
-		runningConversationId: "conv-active",
+		conversations: sampleConversations.map((conversation) =>
+			conversation.id === "conv-active"
+				? { ...conversation, isRunning: true }
+				: conversation,
+		),
 	},
 };

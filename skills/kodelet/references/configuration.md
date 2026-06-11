@@ -47,6 +47,9 @@ model: sonnet-46
 weak_model: haiku-45
 max_tokens: 16000
 reasoning_effort: medium
+anthropic:
+  # Optional: force adaptive-thinking request plumbing for custom Anthropic model IDs.
+  # adaptive_thinking: true
 conversation_summary_mode: llm
 
 profiles:
@@ -56,14 +59,14 @@ profiles:
     weak_model: gpt-5
     reasoning_effort: medium
     tool_mode: patch
-    disable_fs_search_tools: true
+    enable_fs_search_tools: false
 
   openai-subagent:
     provider: openai
     model: gpt-5.5
     reasoning_effort: high
     tool_mode: patch
-    disable_fs_search_tools: true
+    enable_fs_search_tools: false
     openai:
       api_mode: responses
 

@@ -109,17 +109,16 @@ func (t *Thread) SaveConversation(ctx context.Context, summarise bool) error {
 	metadata["model"] = t.Config.Model
 
 	record := convtypes.ConversationRecord{
-		ID:             t.ConversationID,
-		CWD:            t.Config.WorkingDirectory,
-		RawMessages:    rawMessages,
-		Provider:       "anthropic",
-		Usage:          *t.Usage,
-		Metadata:       metadata,
-		Summary:        t.summary,
-		CreatedAt:      time.Now(),
-		UpdatedAt:      time.Now(),
-		FileLastAccess: t.State.FileLastAccess(),
-		ToolResults:    toolResults,
+		ID:          t.ConversationID,
+		CWD:         t.Config.WorkingDirectory,
+		RawMessages: rawMessages,
+		Provider:    "anthropic",
+		Usage:       *t.Usage,
+		Metadata:    metadata,
+		Summary:     t.summary,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+		ToolResults: toolResults,
 	}
 
 	// Save the record
@@ -158,7 +157,6 @@ func (t *Thread) loadConversation(ctx context.Context) {
 	t.Usage = &record.Usage
 	t.summary = record.Summary
 	t.SetMetadata(record.Metadata)
-	t.State.SetFileLastAccess(record.FileLastAccess)
 	// Restore structured tool results
 	t.SetStructuredToolResults(record.ToolResults)
 }

@@ -17,21 +17,6 @@ import (
 func TestBasicState(t *testing.T) {
 	s := NewBasicState(context.TODO())
 
-	path := "test/file.txt"
-	now := time.Now()
-
-	err := s.SetFileLastAccessed(path, now)
-	assert.NoError(t, err)
-
-	lastAccessed, err := s.GetFileLastAccessed(path)
-	assert.NoError(t, err)
-	assert.True(t, lastAccessed.Equal(now))
-
-	nonExistentPath := "non/existent/file.txt"
-	lastAccessed, err = s.GetFileLastAccessed(nonExistentPath)
-	assert.Error(t, err)
-	assert.True(t, lastAccessed.IsZero())
-
 	tools := s.Tools()
 	mainTools := GetMainTools(context.Background(), []string{})
 	assert.Equal(t, len(mainTools), len(tools))
@@ -46,58 +31,6 @@ func TestBasicState(t *testing.T) {
 	for i, tool := range subAgentTools.Tools() {
 		assert.Equal(t, expectedSubAgentTools[i].Name(), tool.Name())
 	}
-}
-
-func TestClearFileLastAccessed(t *testing.T) {
-	s := NewBasicState(context.TODO())
-
-	path := "test/file.txt"
-	now := time.Now()
-
-	err := s.SetFileLastAccessed(path, now)
-	assert.NoError(t, err)
-
-	lastAccessed, err := s.GetFileLastAccessed(path)
-	assert.NoError(t, err)
-	assert.True(t, lastAccessed.Equal(now))
-
-	err = s.ClearFileLastAccessed(path)
-	assert.NoError(t, err)
-
-	lastAccessed, err = s.GetFileLastAccessed(path)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "has not been read yet")
-	assert.True(t, lastAccessed.IsZero())
-}
-
-func TestConcurrentAccess(t *testing.T) {
-	s := NewBasicState(context.TODO())
-
-	const numGoroutines = 100
-	const operationsPerGoroutine = 10
-
-	done := make(chan bool, numGoroutines)
-
-	for i := range numGoroutines {
-		go func(_ int) {
-			path := "test/file.txt"
-			for j := range operationsPerGoroutine {
-				now := time.Now()
-				_ = s.SetFileLastAccessed(path, now)
-				_, _ = s.GetFileLastAccessed(path)
-				if j%2 == 0 {
-					_ = s.ClearFileLastAccessed(path)
-				}
-			}
-			done <- true
-		}(i)
-	}
-
-	for range numGoroutines {
-		<-done
-	}
-
-	assert.True(t, true)
 }
 
 func TestBasicState_MCPTools(t *testing.T) {
@@ -159,15 +92,6 @@ func TestToolContextHelpers(t *testing.T) {
 
 	fromConfigWorkingDir := ToolContextFromThreadState(llmtypes.Config{WorkingDirectory: " /config "}, "", " ", nil)
 	assert.Equal(t, "/config", fromConfigWorkingDir.WorkingDir)
-}
-
-func TestBasicStateFileLastAccessMapHelpers(t *testing.T) {
-	s := NewBasicState(context.TODO())
-	accessedAt := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
-	fileAccess := map[string]time.Time{"/tmp/file.go": accessedAt}
-
-	s.SetFileLastAccess(fileAccess)
-	assert.Equal(t, fileAccess, s.FileLastAccess())
 }
 
 func TestBasicState_ConfigureBashTool(t *testing.T) {
@@ -291,27 +215,10 @@ func TestBasicState_DiscoverContexts(t *testing.T) {
 		assert.Equal(t, "# Root project context", contexts[rootAgents])
 	})
 
-	t.Run("access_based_context_discovery", func(t *testing.T) {
-		testFile := filepath.Join(subDir, "test.go")
-		state.SetFileLastAccessed(testFile, time.Now())
-
+	t.Run("nested_context_files_are_not_discovered", func(t *testing.T) {
 		contexts := state.DiscoverContexts()
 
-		assert.Len(t, contexts, 2)
-		assert.Contains(t, contexts, rootAgents)
-		assert.Contains(t, contexts, subAgents)
-		assert.Equal(t, "# Root project context", contexts[rootAgents])
-		assert.Equal(t, "# Submodule context", contexts[subAgents])
-	})
-
-	t.Run("deep_nested_access", func(t *testing.T) {
-		deepFile := filepath.Join(deepDir, "nested.go")
-		state.SetFileLastAccessed(deepFile, time.Now())
-
-		contexts := state.DiscoverContexts()
-
-		assert.Contains(t, contexts, subAgents)
-		assert.Equal(t, "# Submodule context", contexts[subAgents])
+		assert.NotContains(t, contexts, subAgents)
 	})
 }
 
@@ -433,144 +340,6 @@ func TestBasicState_ContextDiscoveryEdgeCases(t *testing.T) {
 		contexts := state.DiscoverContexts()
 
 		assert.Empty(t, contexts)
-	})
-
-	t.Run("file_access_outside_working_directory", func(t *testing.T) {
-		otherDir := filepath.Join(tmpDir, "other")
-		require.NoError(t, os.MkdirAll(otherDir, 0o755))
-
-		otherContext := filepath.Join(otherDir, "AGENTS.md")
-		require.NoError(t, os.WriteFile(otherContext, []byte("# Other context"), 0o644))
-
-		workDir := filepath.Join(tmpDir, "work")
-		require.NoError(t, os.MkdirAll(workDir, 0o755))
-
-		oldWd, _ := os.Getwd()
-		defer os.Chdir(oldWd)
-		require.NoError(t, os.Chdir(workDir))
-
-		state := NewBasicState(context.Background())
-
-		accessedFile := filepath.Join(otherDir, "test.go")
-		state.SetFileLastAccessed(accessedFile, time.Now())
-
-		contexts := state.DiscoverContexts()
-
-		// With the new behavior, files outside working directory should NOT have their contexts discovered
-		assert.NotContains(t, contexts, otherContext)
-		assert.Empty(t, contexts) // Should only find working directory contexts (none in this case)
-	})
-}
-
-func TestBasicState_ContextTraversalAndDeduplication(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	fooDir := filepath.Join(tmpDir, "foo")
-	barDir := filepath.Join(fooDir, "bar")
-	bazDir := filepath.Join(barDir, "baz")
-	require.NoError(t, os.MkdirAll(bazDir, 0o755))
-
-	fooAgents := filepath.Join(fooDir, "AGENTS.md")
-	barAgents := filepath.Join(barDir, "AGENTS.md")
-	bazAgents := filepath.Join(bazDir, "AGENTS.md")
-
-	require.NoError(t, os.WriteFile(fooAgents, []byte("# Foo context"), 0o644))
-	require.NoError(t, os.WriteFile(barAgents, []byte("# Bar context"), 0o644))
-	require.NoError(t, os.WriteFile(bazAgents, []byte("# Baz context"), 0o644))
-
-	oldWd, _ := os.Getwd()
-	defer os.Chdir(oldWd)
-	require.NoError(t, os.Chdir(fooDir))
-
-	ctx := context.Background()
-	state := NewBasicState(ctx)
-
-	t.Run("single_deep_file_access", func(t *testing.T) {
-		bazFile := filepath.Join(bazDir, "test.go")
-		state.SetFileLastAccessed(bazFile, time.Now())
-
-		contexts := state.DiscoverContexts()
-
-		// Should find:
-		// 1. Working directory context: fooAgents (from step 1 of DiscoverContexts)
-		// 2. Traversal contexts: bazAgents, barAgents (from step 2 - traverse up from baz to working dir boundary)
-		expectedContexts := []string{fooAgents, barAgents, bazAgents}
-
-		assert.Len(t, contexts, len(expectedContexts), "Should find exactly %d contexts", len(expectedContexts))
-		for _, expected := range expectedContexts {
-			assert.Contains(t, contexts, expected, "Should contain context file: %s", expected)
-		}
-
-		assert.Equal(t, "# Foo context", contexts[fooAgents])
-		assert.Equal(t, "# Bar context", contexts[barAgents])
-		assert.Equal(t, "# Baz context", contexts[bazAgents])
-	})
-
-	t.Run("multiple_file_access_with_deduplication", func(t *testing.T) {
-		state = NewBasicState(ctx)
-
-		barFile := filepath.Join(barDir, "service.go")
-		bazFile := filepath.Join(bazDir, "handler.go")
-		state.SetFileLastAccessed(barFile, time.Now())
-		state.SetFileLastAccessed(bazFile, time.Now())
-
-		contexts := state.DiscoverContexts()
-
-		// Should find:
-		// 1. Working directory context: fooAgents (from step 1)
-		// 2. From barFile traversal: barAgents (stops at working dir boundary)
-		// 3. From bazFile traversal: bazAgents, barAgents (but barAgents already found, should not duplicate)
-		expectedContexts := []string{fooAgents, barAgents, bazAgents}
-
-		assert.Len(t, contexts, len(expectedContexts), "Should find exactly %d unique contexts (no duplicates)", len(expectedContexts))
-		for _, expected := range expectedContexts {
-			assert.Contains(t, contexts, expected, "Should contain context file: %s", expected)
-		}
-
-		assert.Equal(t, "# Foo context", contexts[fooAgents])
-		assert.Equal(t, "# Bar context", contexts[barAgents])
-		assert.Equal(t, "# Baz context", contexts[bazAgents])
-	})
-
-	t.Run("traversal_stops_at_working_directory_boundary", func(t *testing.T) {
-		rootAgents := filepath.Join(tmpDir, "AGENTS.md")
-		require.NoError(t, os.WriteFile(rootAgents, []byte("# Root context"), 0o644))
-
-		state = NewBasicState(ctx)
-		bazFile := filepath.Join(bazDir, "deep.go")
-		state.SetFileLastAccessed(bazFile, time.Now())
-
-		contexts := state.DiscoverContexts()
-
-		// Should NOT find rootAgents because traversal stops at working directory boundary
-		assert.NotContains(t, contexts, rootAgents, "Should NOT traverse above working directory")
-
-		expectedContexts := []string{fooAgents, barAgents, bazAgents}
-		assert.Len(t, contexts, len(expectedContexts))
-		for _, expected := range expectedContexts {
-			assert.Contains(t, contexts, expected)
-		}
-
-		os.Remove(rootAgents)
-	})
-
-	t.Run("missing_intermediate_context_files", func(t *testing.T) {
-		require.NoError(t, os.Remove(barAgents))
-
-		state = NewBasicState(ctx)
-		bazFile := filepath.Join(bazDir, "missing.go")
-		state.SetFileLastAccessed(bazFile, time.Now())
-
-		contexts := state.DiscoverContexts()
-
-		// Should find fooAgents (working dir) and bazAgents (direct), but skip missing barAgents
-		expectedContexts := []string{fooAgents, bazAgents}
-		assert.Len(t, contexts, len(expectedContexts))
-		assert.Contains(t, contexts, fooAgents)
-		assert.Contains(t, contexts, bazAgents)
-		assert.NotContains(t, contexts, barAgents, "Should not find removed context file")
-
-		require.NoError(t, os.WriteFile(barAgents, []byte("# Bar context"), 0o644))
 	})
 }
 
@@ -755,14 +524,18 @@ func TestWithSubAgentToolsFromConfig(t *testing.T) {
 
 		// Should include basic tools
 		assert.Contains(t, toolNames, "bash")
-		assert.Contains(t, toolNames, "file_read")
-		assert.Contains(t, toolNames, "grep_tool")
-		assert.Contains(t, toolNames, "glob_tool")
+		assert.Contains(t, toolNames, "file_write")
+		// file_read is excluded unless explicitly allowed
+		assert.NotContains(t, toolNames, "file_read")
+		// FS search tools are excluded unless enable_fs_search_tools is set
+		assert.NotContains(t, toolNames, "grep_tool")
+		assert.NotContains(t, toolNames, "glob_tool")
 	})
 
 	t.Run("respects allowed_tools from config", func(t *testing.T) {
 		config := llmtypes.Config{
-			AllowedTools: []string{"file_read", "grep_tool"},
+			AllowedTools:        []string{"file_read", "grep_tool"},
+			EnableFSSearchTools: true,
 		}
 		state := NewBasicState(ctx, WithLLMConfig(config), WithSubAgentToolsFromConfig())
 
@@ -824,8 +597,8 @@ func TestWithSubAgentToolsFromConfig(t *testing.T) {
 
 	t.Run("patch alias with disabled fs search tools keeps bash inspection and apply_patch", func(t *testing.T) {
 		config := llmtypes.Config{
-			ToolMode:             llmtypes.ToolModePatch,
-			DisableFSSearchTools: true,
+			ToolMode:            llmtypes.ToolModePatch,
+			EnableFSSearchTools: false,
 		}
 		state := NewBasicState(ctx, WithLLMConfig(config), WithSubAgentToolsFromConfig())
 
@@ -1126,7 +899,7 @@ func TestWithSkillTool_RespectsExplicitAllowlist(t *testing.T) {
 	ctx := context.Background()
 	state := NewBasicState(
 		ctx,
-		WithLLMConfig(llmtypes.Config{AllowedTools: []string{"file_read", "grep_tool", "glob_tool"}}),
+		WithLLMConfig(llmtypes.Config{AllowedTools: []string{"file_read", "grep_tool", "glob_tool"}, EnableFSSearchTools: true}),
 		WithSubAgentToolsFromConfig(),
 		WithSkillTool(),
 	)
@@ -1136,7 +909,7 @@ func TestWithSkillTool_RespectsExplicitAllowlist(t *testing.T) {
 		toolNames[i] = tool.Name()
 	}
 
-	assert.Equal(t, []string{"file_read", "grep_tool", "glob_tool"}, toolNames)
+	assert.Equal(t, []string{"grep_tool", "glob_tool", "file_read"}, toolNames)
 	assert.NotContains(t, toolNames, "skill")
 }
 
@@ -1144,7 +917,7 @@ func TestWithExtensionTools_RespectsExplicitAllowlist(t *testing.T) {
 	ctx := context.Background()
 	state := NewBasicState(
 		ctx,
-		WithLLMConfig(llmtypes.Config{AllowedTools: []string{"file_read", "grep_tool", "glob_tool"}}),
+		WithLLMConfig(llmtypes.Config{AllowedTools: []string{"file_read", "grep_tool", "glob_tool"}, EnableFSSearchTools: true}),
 		WithSubAgentToolsFromConfig(),
 		WithExtensionTools([]tooltypes.Tool{&testTool{name: "not_allowed_extension_tool"}}),
 	)
@@ -1154,7 +927,7 @@ func TestWithExtensionTools_RespectsExplicitAllowlist(t *testing.T) {
 		toolNames[i] = tool.Name()
 	}
 
-	assert.Equal(t, []string{"file_read", "grep_tool", "glob_tool"}, toolNames)
+	assert.Equal(t, []string{"grep_tool", "glob_tool", "file_read"}, toolNames)
 	assert.Empty(t, state.ExtensionTools())
 	assert.NotContains(t, toolNames, "not_allowed_extension_tool")
 }

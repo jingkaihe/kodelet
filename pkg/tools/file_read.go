@@ -205,8 +205,6 @@ func (r *FileReadTool) Execute(_ context.Context, state tooltypes.State, paramet
 		input.LineLimit = MaxLineLimit
 	}
 
-	state.SetFileLastAccessed(input.FilePath, time.Now())
-
 	file, err := os.Open(input.FilePath)
 	if err != nil {
 		return &FileReadToolResult{

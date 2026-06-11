@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -13,8 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	conversations "github.com/jingkaihe/kodelet/pkg/conversations"
-	"github.com/jingkaihe/kodelet/pkg/db"
-	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -156,83 +153,6 @@ func TestDeserializeMessages(t *testing.T) {
 
 	assert.Equal(t, anthropic.MessageParamRoleAssistant, thread.messages[3].Role)
 	assert.Equal(t, 0, len(thread.messages[3].Content))
-}
-
-func TestSaveAndLoadConversationWithFileLastAccess(t *testing.T) {
-	// Create a unique temporary directory for this test
-	tempDir := t.TempDir()
-	// NewConversationStore creates storage.db in BasePath
-	dbPath := filepath.Join(tempDir, "storage.db")
-
-	// Run migrations before creating the store
-	ctx := context.Background()
-	sqlDB, err := db.Open(ctx, dbPath)
-	require.NoError(t, err)
-	runner := db.NewMigrationRunner(sqlDB)
-	require.NoError(t, runner.Run(ctx, migrations.All()))
-	sqlDB.Close()
-
-	// Create a conversation store directly with a unique database path
-	store, err := conversations.NewConversationStore(ctx, &conversations.Config{
-		StoreType: "sqlite",
-		BasePath:  tempDir,
-	})
-	require.NoError(t, err)
-	defer store.Close()
-
-	// Create a thread with a unique conversation ID
-	conversationID := fmt.Sprintf("test-file-last-access-%d", time.Now().UnixNano())
-	thread, err := NewAnthropicThread(llmtypes.Config{
-		Model: anthropic.ModelClaudeSonnet4_6,
-	})
-	require.NoError(t, err)
-	thread.SetConversationID(conversationID)
-
-	// Setup state with file access data
-	state := tools.NewBasicState(context.TODO())
-	thread.SetState(state)
-
-	// Manually set the store instead of using EnablePersistence
-	thread.Store = store
-	thread.Persisted = true
-
-	// Set file access times
-	now := time.Now()
-	yesterday := now.Add(-24 * time.Hour)
-
-	fileAccessMap := map[string]time.Time{
-		"/path/to/file1.txt": now,
-		"/path/to/file2.txt": yesterday,
-	}
-	state.SetFileLastAccess(fileAccessMap)
-
-	// Save the conversation
-	err = thread.SaveConversation(context.Background(), false)
-	assert.NoError(t, err)
-
-	// Create a new thread with the same conversation ID
-	newThread, err := NewAnthropicThread(llmtypes.Config{
-		Model: anthropic.ModelClaudeSonnet4_6,
-	})
-	require.NoError(t, err)
-	newThread.SetConversationID(conversationID)
-	newState := tools.NewBasicState(context.TODO())
-	newThread.SetState(newState)
-
-	// Manually set the store and enable persistence
-	newThread.Store = store
-	newThread.Persisted = true
-
-	// Load the conversation
-	newThread.loadConversation(context.Background())
-
-	// Verify the file last access data was preserved
-	loadedState := newThread.GetState()
-	loadedFileAccess := loadedState.FileLastAccess()
-
-	assert.Equal(t, 2, len(loadedFileAccess))
-	assert.Equal(t, now.Unix(), loadedFileAccess["/path/to/file1.txt"].Unix())
-	assert.Equal(t, yesterday.Unix(), loadedFileAccess["/path/to/file2.txt"].Unix())
 }
 
 func TestSaveConversationMessageCleanup(t *testing.T) {

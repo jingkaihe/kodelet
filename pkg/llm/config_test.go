@@ -625,6 +625,7 @@ func TestGetConfigFromViperAnthropicBasicConfig(t *testing.T) {
 	viper.Set("provider", "anthropic")
 	viper.Set("anthropic.platform", "copilot")
 	viper.Set("anthropic.base_url", "https://proxy.example")
+	viper.Set("anthropic.adaptive_thinking", true)
 
 	config, err := GetConfigFromViper()
 	require.NoError(t, err)
@@ -632,6 +633,7 @@ func TestGetConfigFromViperAnthropicBasicConfig(t *testing.T) {
 	require.NotNil(t, config.Anthropic, "Anthropic config should not be nil")
 	assert.Equal(t, "copilot", config.Anthropic.Platform)
 	assert.Equal(t, "https://proxy.example", config.Anthropic.BaseURL)
+	assert.True(t, config.Anthropic.AdaptiveThinking)
 }
 
 func TestGetConfigFromViperOpenAIApiModeConfig(t *testing.T) {

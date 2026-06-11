@@ -281,8 +281,8 @@ func TestGetToolsFromNamesAndOpenAIConversion(t *testing.T) {
 		toolNames[i] = tool.Name()
 	}
 
-	assert.Contains(t, toolNames, "file_read")
 	assert.Contains(t, toolNames, "bash")
+	assert.NotContains(t, toolNames, "file_read")
 	assert.NotContains(t, toolNames, "openai_web_search")
 
 	openAITools := ToOpenAITools(tools[:1])
@@ -332,7 +332,7 @@ func TestGetMainTools_ExplicitAllowlistIncludesGoalMetaTools(t *testing.T) {
 }
 
 func TestGetMainToolsWithOptions_ExplicitAllowlistIncludesGoalMetaTools(t *testing.T) {
-	tools := GetMainToolsWithOptions(context.Background(), []string{"bash"}, false)
+	tools := GetMainToolsWithOptions(context.Background(), []string{"bash"}, true)
 
 	toolNames := make([]string, len(tools))
 	for i, tool := range tools {
@@ -391,8 +391,46 @@ func TestGetSubAgentTools_ExcludesSubagentTool(t *testing.T) {
 
 	// Verify some expected tools ARE included
 	assert.Contains(t, toolNames, "bash", "Should include bash tool")
-	assert.Contains(t, toolNames, "file_read", "Should include file_read tool")
-	assert.Contains(t, toolNames, "grep_tool", "Should include grep_tool")
+	assert.Contains(t, toolNames, "file_write", "Should include file_write tool")
+	assert.NotContains(t, toolNames, "file_read", "file_read is excluded by default")
+	assert.NotContains(t, toolNames, "grep_tool", "FS search tools are excluded by default")
+}
+
+func TestFileReadExcludedFromDefaults(t *testing.T) {
+	t.Run("main tools exclude file_read by default", func(t *testing.T) {
+		tools := GetMainTools(context.Background(), []string{})
+
+		toolNames := make([]string, len(tools))
+		for i, tool := range tools {
+			toolNames[i] = tool.Name()
+		}
+
+		assert.NotContains(t, toolNames, "file_read")
+		assert.Contains(t, toolNames, "file_write")
+		assert.Contains(t, toolNames, "file_edit")
+	})
+
+	t.Run("file_read can be enabled via explicit allowlist", func(t *testing.T) {
+		tools := GetMainTools(context.Background(), []string{"bash", "file_read"})
+
+		toolNames := make([]string, len(tools))
+		for i, tool := range tools {
+			toolNames[i] = tool.Name()
+		}
+
+		assert.Contains(t, toolNames, "file_read")
+	})
+
+	t.Run("subagent file_read can be enabled via explicit allowlist", func(t *testing.T) {
+		tools := GetSubAgentTools(context.Background(), []string{"bash", "file_read"})
+
+		toolNames := make([]string, len(tools))
+		for i, tool := range tools {
+			toolNames[i] = tool.Name()
+		}
+
+		assert.Contains(t, toolNames, "file_read")
+	})
 }
 
 func TestGetMainTools_IncludesSubagentTool(t *testing.T) {
@@ -407,100 +445,100 @@ func TestGetMainTools_IncludesSubagentTool(t *testing.T) {
 	assert.Contains(t, toolNames, "subagent", "Main tools should include the subagent tool")
 }
 
-func TestGetMainToolsWithOptions_DisableFSSearchTools(t *testing.T) {
+func TestGetMainToolsWithOptions_FSSearchToolsDisabled(t *testing.T) {
 	t.Run("removes grep and glob from default main tools and meta tools", func(t *testing.T) {
-		tools := GetMainToolsWithOptions(context.Background(), nil, true)
+		tools := GetMainToolsWithOptions(context.Background(), nil, false)
 
 		toolNames := make([]string, len(tools))
 		for i, tool := range tools {
 			toolNames[i] = tool.Name()
 		}
 
-		assert.Contains(t, toolNames, "file_read")
+		assert.NotContains(t, toolNames, "file_read")
 		assert.Contains(t, toolNames, "bash")
 		assert.NotContains(t, toolNames, "grep_tool")
 		assert.NotContains(t, toolNames, "glob_tool")
 	})
 
 	t.Run("removes grep and glob even when explicitly requested", func(t *testing.T) {
-		tools := GetMainToolsWithOptions(context.Background(), []string{"bash", "grep_tool", "glob_tool"}, true)
+		tools := GetMainToolsWithOptions(context.Background(), []string{"bash", "grep_tool", "glob_tool"}, false)
 
 		toolNames := make([]string, len(tools))
 		for i, tool := range tools {
 			toolNames[i] = tool.Name()
 		}
 
-		assert.Contains(t, toolNames, "file_read")
+		assert.NotContains(t, toolNames, "file_read")
 		assert.Contains(t, toolNames, "bash")
 		assert.NotContains(t, toolNames, "grep_tool")
 		assert.NotContains(t, toolNames, "glob_tool")
 	})
 
 	t.Run("search-only allowlists do not fall back to defaults", func(t *testing.T) {
-		tools := GetMainToolsWithOptions(context.Background(), []string{"grep_tool", "glob_tool"}, true)
+		tools := GetMainToolsWithOptions(context.Background(), []string{"grep_tool", "glob_tool"}, false)
 
 		assert.Empty(t, tools)
 	})
 
 	t.Run("fallback after validation still keeps grep and glob disabled", func(t *testing.T) {
-		tools := GetMainToolsWithOptions(context.Background(), []string{"unknown_tool"}, true)
+		tools := GetMainToolsWithOptions(context.Background(), []string{"unknown_tool"}, false)
 
 		toolNames := make([]string, len(tools))
 		for i, tool := range tools {
 			toolNames[i] = tool.Name()
 		}
 
-		assert.Contains(t, toolNames, "file_read")
+		assert.NotContains(t, toolNames, "file_read")
 		assert.Contains(t, toolNames, "bash")
 		assert.NotContains(t, toolNames, "grep_tool")
 		assert.NotContains(t, toolNames, "glob_tool")
 	})
 }
 
-func TestGetSubAgentToolsWithOptions_DisableFSSearchTools(t *testing.T) {
+func TestGetSubAgentToolsWithOptions_FSSearchToolsDisabled(t *testing.T) {
 	t.Run("removes grep and glob from default subagent tools and meta tools", func(t *testing.T) {
-		tools := GetSubAgentToolsWithOptions(context.Background(), nil, true)
+		tools := GetSubAgentToolsWithOptions(context.Background(), nil, false)
 
 		toolNames := make([]string, len(tools))
 		for i, tool := range tools {
 			toolNames[i] = tool.Name()
 		}
 
-		assert.Contains(t, toolNames, "file_read")
+		assert.NotContains(t, toolNames, "file_read")
 		assert.Contains(t, toolNames, "bash")
 		assert.NotContains(t, toolNames, "grep_tool")
 		assert.NotContains(t, toolNames, "glob_tool")
 	})
 
 	t.Run("removes grep and glob even when explicitly requested", func(t *testing.T) {
-		tools := GetSubAgentToolsWithOptions(context.Background(), []string{"bash", "grep_tool", "glob_tool"}, true)
+		tools := GetSubAgentToolsWithOptions(context.Background(), []string{"bash", "grep_tool", "glob_tool"}, false)
 
 		toolNames := make([]string, len(tools))
 		for i, tool := range tools {
 			toolNames[i] = tool.Name()
 		}
 
-		assert.Contains(t, toolNames, "file_read")
+		assert.NotContains(t, toolNames, "file_read")
 		assert.Contains(t, toolNames, "bash")
 		assert.NotContains(t, toolNames, "grep_tool")
 		assert.NotContains(t, toolNames, "glob_tool")
 	})
 
 	t.Run("search-only allowlists do not fall back to defaults", func(t *testing.T) {
-		tools := GetSubAgentToolsWithOptions(context.Background(), []string{"grep_tool", "glob_tool"}, true)
+		tools := GetSubAgentToolsWithOptions(context.Background(), []string{"grep_tool", "glob_tool"}, false)
 
 		assert.Empty(t, tools)
 	})
 
 	t.Run("fallback after validation still keeps grep and glob disabled", func(t *testing.T) {
-		tools := GetSubAgentToolsWithOptions(context.Background(), []string{"unknown_tool"}, true)
+		tools := GetSubAgentToolsWithOptions(context.Background(), []string{"unknown_tool"}, false)
 
 		toolNames := make([]string, len(tools))
 		for i, tool := range tools {
 			toolNames[i] = tool.Name()
 		}
 
-		assert.Contains(t, toolNames, "file_read")
+		assert.NotContains(t, toolNames, "file_read")
 		assert.Contains(t, toolNames, "bash")
 		assert.NotContains(t, toolNames, "grep_tool")
 		assert.NotContains(t, toolNames, "glob_tool")
@@ -519,7 +557,7 @@ func TestFilterOutSubagent(t *testing.T) {
 
 		assert.NotContains(t, toolNames, "subagent")
 		assert.Contains(t, toolNames, "bash")
-		assert.Contains(t, toolNames, "file_read")
+		assert.Contains(t, toolNames, "file_write")
 		assert.Contains(t, toolNames, "web_fetch")
 		assert.Contains(t, toolNames, "view_image")
 		assert.Equal(t, len(tools)-1, len(filtered))

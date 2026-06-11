@@ -179,11 +179,6 @@ func (m BlockedMetadata) ToolType() string { return "blocked" }
 
 // State defines the interface for managing tool execution state and context
 type State interface {
-	SetFileLastAccessed(path string, lastAccessed time.Time) error
-	GetFileLastAccessed(path string) (time.Time, error)
-	ClearFileLastAccessed(path string) error
-	SetFileLastAccess(fileLastAccess map[string]time.Time)
-	FileLastAccess() map[string]time.Time
 	BasicTools() []Tool
 	MCPTools() []Tool
 	Tools() []Tool

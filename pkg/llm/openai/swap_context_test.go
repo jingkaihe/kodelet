@@ -3,7 +3,6 @@ package openai
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -12,37 +11,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// swapContextMockState implements tooltypes.State for testing SwapContext
-type swapContextMockState struct {
-	fileLastAccess map[string]time.Time
-}
-
-func newSwapContextMockState() *swapContextMockState {
-	return &swapContextMockState{
-		fileLastAccess: make(map[string]time.Time),
-	}
-}
-
-func (m *swapContextMockState) SetFileLastAccessed(path string, t time.Time) error {
-	m.fileLastAccess[path] = t
-	return nil
-}
-
-func (m *swapContextMockState) GetFileLastAccessed(path string) (time.Time, error) {
-	return m.fileLastAccess[path], nil
-}
-func (m *swapContextMockState) ClearFileLastAccessed(_ string) error       { return nil }
-func (m *swapContextMockState) SetFileLastAccess(fla map[string]time.Time) { m.fileLastAccess = fla }
-func (m *swapContextMockState) FileLastAccess() map[string]time.Time       { return m.fileLastAccess }
-func (m *swapContextMockState) BasicTools() []tooltypes.Tool               { return nil }
-func (m *swapContextMockState) MCPTools() []tooltypes.Tool                 { return nil }
-func (m *swapContextMockState) Tools() []tooltypes.Tool                    { return nil }
-func (m *swapContextMockState) DiscoverContexts() map[string]string        { return nil }
-func (m *swapContextMockState) GetLLMConfig() any                          { return nil }
-func (m *swapContextMockState) WorkingDirectory() string                   { return "" }
-func (m *swapContextMockState) LockFile(_ string)                          {}
-func (m *swapContextMockState) UnlockFile(_ string)                        {}
 
 func createTestThread() *Thread {
 	config := llmtypes.Config{
@@ -123,21 +91,6 @@ func TestSwapContext_UpdatesContextWindowEstimate(t *testing.T) {
 	expectedTokens := len(longSummary) / 4
 	assert.Greater(t, expectedTokens, 100, "Summary should produce more than 100 tokens")
 	assert.Equal(t, expectedTokens, thread.Usage.CurrentContextWindow)
-}
-
-func TestSwapContext_ClearsFileAccessTracking(t *testing.T) {
-	thread := createTestThread()
-
-	state := newSwapContextMockState()
-	state.fileLastAccess["file1.go"] = time.Now()
-	state.fileLastAccess["file2.go"] = time.Now()
-	thread.State = state
-
-	err := thread.SwapContext(context.Background(), "summary")
-	require.NoError(t, err)
-
-	// File access tracking should be cleared
-	assert.Len(t, state.fileLastAccess, 0)
 }
 
 func TestSwapContext_HandlesNilState(t *testing.T) {

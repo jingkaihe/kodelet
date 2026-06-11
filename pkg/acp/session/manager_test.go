@@ -22,22 +22,22 @@ func TestNewManager_WithManagerConfig(t *testing.T) {
 		assert.False(t, m.config.NoSkills)
 		assert.False(t, m.config.NoExtensions)
 		assert.False(t, m.config.NoWorkflows)
-		assert.False(t, m.config.DisableFSSearchTools)
+		assert.False(t, m.config.EnableFSSearchTools)
 		assert.False(t, m.config.DisableSubagent)
 	})
 
 	t.Run("creates manager with all config fields", func(t *testing.T) {
 		cfg := ManagerConfig{
-			Provider:             "anthropic",
-			Model:                "claude-sonnet-4-6",
-			MaxTokens:            4096,
-			NoSkills:             true,
-			NoExtensions:         true,
-			NoWorkflows:          true,
-			DisableFSSearchTools: true,
-			DisableSubagent:      true,
-			MaxTurns:             10,
-			CompactRatio:         0.7,
+			Provider:            "anthropic",
+			Model:               "claude-sonnet-4-6",
+			MaxTokens:           4096,
+			NoSkills:            true,
+			NoExtensions:        true,
+			NoWorkflows:         true,
+			EnableFSSearchTools: true,
+			DisableSubagent:     true,
+			MaxTurns:            10,
+			CompactRatio:        0.7,
 		}
 		m := NewManager(cfg)
 
@@ -47,13 +47,13 @@ func TestNewManager_WithManagerConfig(t *testing.T) {
 }
 
 func TestManager_BuildLLMConfig(t *testing.T) {
-	t.Run("propagates DisableFSSearchTools to LLM config", func(t *testing.T) {
+	t.Run("propagates EnableFSSearchTools to LLM config", func(t *testing.T) {
 		m := NewManager(ManagerConfig{
-			DisableFSSearchTools: true,
+			EnableFSSearchTools: true,
 		})
 
 		llmConfig := m.buildLLMConfig("")
-		assert.True(t, llmConfig.DisableFSSearchTools)
+		assert.True(t, llmConfig.EnableFSSearchTools)
 	})
 
 	t.Run("propagates DisableSubagent to LLM config", func(t *testing.T) {

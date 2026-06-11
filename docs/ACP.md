@@ -47,7 +47,7 @@ kodelet acp [flags]
 | `--provider` | LLM provider (anthropic, openai) |
 | `--max-tokens` | Maximum tokens for LLM responses |
 | `--no-skills` | Disable agentic skills |
-| `--disable-fs-search-tools` | Disable `glob_tool` and `grep_tool`; use `fd`/`rg` via bash instead |
+| `--enable-fs-search-tools` | Enable `glob_tool` and `grep_tool` (by default the agent uses `fd`/`rg` via bash) |
 | `--no-extensions` | Disable extension runtime |
 
 ## Protocol Overview

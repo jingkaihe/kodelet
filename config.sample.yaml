@@ -44,6 +44,7 @@ sysprompt_args: {}
 # Model aliases for easier reference
 # Allows using short names instead of full model identifiers
 aliases:
+  fable-5: "claude-fable-5"
   sonnet-46: "claude-sonnet-4-6"
   haiku-45: "claude-haiku-4-5-20251001"
   opus-48: "claude-opus-4-8"
@@ -75,7 +76,7 @@ profiles:
     max_tokens: 16000
     reasoning_effort: "xhigh"
     tool_mode: "patch"
-    disable_fs_search_tools: true
+    enable_fs_search_tools: false
     openai:
       platform: "copilot"
       api_mode: "responses"
@@ -104,7 +105,7 @@ profiles:
     max_tokens: 16000
     reasoning_effort: "xhigh"
     tool_mode: "patch"
-    disable_fs_search_tools: true
+    enable_fs_search_tools: false
     openai:
       api_mode: "responses"
 
@@ -122,13 +123,26 @@ profiles:
     model: "o3"
     reasoning_effort: "high"
     tool_mode: "patch"
-    disable_fs_search_tools: true
+    enable_fs_search_tools: false
 
 # OpenAI specific settings
 # Reasoning effort for supported reasoning/adaptive models
 # OpenAI: none, minimal, low, medium, high, xhigh
 # Anthropic adaptive thinking: none, low, medium, high, xhigh, max
 reasoning_effort: "medium"
+
+# Anthropic-specific settings
+anthropic:
+  # Canonical platform name for Anthropic-compatible APIs (e.g., anthropic, copilot)
+  # platform: "copilot"
+
+  # Custom Anthropic-compatible base URL (overrides platform defaults)
+  # base_url: "https://proxy.example"
+
+  # Force adaptive-thinking request plumbing for the configured custom Anthropic model ID.
+  # Useful when an Anthropic-compatible platform supports a non-standard ID like
+  # "claude-opus-4.6" but still accepts Anthropic output_config.effort.
+  # adaptive_thinking: true
 
 # API Retry Configuration
 # Controls retry behavior for API calls
@@ -187,9 +201,9 @@ allowed_domains_file: "~/.kodelet/allowed_domains.txt"
 
 # Tool Configuration
 # Tools allowed for main agent (empty means use defaults)
-# Meta tools (grep_tool and glob_tool) are always enabled for basic functionality unless
-# disable_fs_search_tools is set to true.
-# Available tools: bash, apply_patch, file_read, file_write, file_edit, thinking, subagent, grep_tool,
+# Meta tools (grep_tool and glob_tool) are only available when
+# enable_fs_search_tools is set to true.
+# Available tools: bash, apply_patch, file_read, file_write, file_edit, subagent, grep_tool,
 #                  glob_tool, web_fetch, view_image
 # Tool interaction mode.
 # - full: standard tool access
@@ -197,9 +211,9 @@ allowed_domains_file: "~/.kodelet/allowed_domains.txt"
 #   toolsets, and ensures apply_patch is available
 tool_mode: full
 
-# Disable built-in filesystem search tools (glob_tool and grep_tool).
-# When enabled, the agent is instructed to use fd/rg via the bash tool instead.
-# disable_fs_search_tools: true
+# Enable built-in filesystem search tools (glob_tool and grep_tool).
+# Disabled by default; the agent is instructed to use fd/rg via the bash tool instead.
+# enable_fs_search_tools: true
 
 # Conversation summary mode for persisted conversation titles.
 # - llm: generate a short summary with the weak model
@@ -217,7 +231,6 @@ allowed_tools: []
 #   - "file_read"
 #   - "file_write"
 #   - "file_edit"
-#   - "thinking"       # Always enabled (meta tool)
 #   - "subagent"
 #   - "grep_tool"      # Always enabled (meta tool)
 #   - "glob_tool"      # Always enabled (meta tool)
@@ -317,7 +330,7 @@ subagent_args: ""
 #     model: "gpt-4o-mini"
 #     max_tokens: 2048
 #     tool_mode: "patch"
-#     disable_fs_search_tools: true
+#     enable_fs_search_tools: false
 #
 # subagent_args: "--profile openai-subagent"
 
@@ -342,11 +355,12 @@ subagent_args: ""
 # Can also be set via the --disable-subagent CLI flag or per-profile.
 # disable_subagent: true
 #
-# Disable Filesystem Search Tools
-# When set to true, glob_tool and grep_tool are removed from available tools.
-# The system prompt will instruct the agent to use fd and rg via the bash tool instead.
-# Can also be set via the --disable-fs-search-tools CLI flag or per-profile.
-# disable_fs_search_tools: true
+# Enable Filesystem Search Tools
+# When set to true, glob_tool and grep_tool are added to the available tools.
+# By default they are disabled and the system prompt instructs the agent to use
+# fd and rg via the bash tool instead.
+# Can also be set via the --enable-fs-search-tools CLI flag or per-profile.
+# enable_fs_search_tools: true
 # Example: Profile with subagent disabled
 # profiles:
 #   no-subagent:

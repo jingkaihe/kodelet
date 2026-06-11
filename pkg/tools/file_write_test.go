@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -58,11 +57,6 @@ func TestFileWriteTool_ValidateInput(t *testing.T) {
 		err := os.WriteFile(testFilePath, []byte("initial content"), 0o644)
 		require.NoError(t, err)
 
-		fileInfo, err := os.Stat(testFilePath)
-		require.NoError(t, err)
-
-		state.SetFileLastAccessed(testFilePath, fileInfo.ModTime())
-
 		input := FileWriteInput{
 			FilePath: testFilePath,
 			Text:     "updated content",
@@ -73,26 +67,6 @@ func TestFileWriteTool_ValidateInput(t *testing.T) {
 
 		err = tool.ValidateInput(state, string(inputJSON))
 		assert.NoError(t, err)
-	})
-
-	t.Run("invalid input - file modified since last read", func(t *testing.T) {
-		// Create a test file
-		err := os.WriteFile(testFilePath, []byte("modified content"), 0o644)
-		require.NoError(t, err)
-
-		state.SetFileLastAccessed(testFilePath, time.Now().Add(-time.Hour))
-
-		input := FileWriteInput{
-			FilePath: testFilePath,
-			Text:     "updated content",
-		}
-
-		inputJSON, err := json.Marshal(input)
-		require.NoError(t, err)
-
-		err = tool.ValidateInput(state, string(inputJSON))
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "has been modified since the last read")
 	})
 
 	t.Run("invalid JSON input", func(t *testing.T) {
@@ -126,10 +100,6 @@ func TestFileWriteTool_Execute(t *testing.T) {
 		content, err := os.ReadFile(testFilePath)
 		require.NoError(t, err)
 		assert.Equal(t, "test content", string(content))
-
-		// Verify that the file's last accessed time was updated in the state
-		_, err = state.GetFileLastAccessed(testFilePath)
-		assert.NoError(t, err)
 	})
 
 	t.Run("overwrite existing file", func(t *testing.T) {

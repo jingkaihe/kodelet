@@ -7,10 +7,9 @@ This tool takes two parameters:
 # Required workflow
 1. Discover the MCP code workspace path from the system prompt.
 2. Discover available servers in `<mcp-workspace>/servers/`.
-{{if .PatchOnly}}3. Inspect generated files using shell commands such as `sed`, `cat`, or `rg` via the `bash` tool to get exact schemas.
-4. Create or update scripts in the MCP code workspace using `apply_patch` only.
-{{else}}3. Read generated files (`index.ts` + tool files) to get exact schemas.
-4. Write/update scripts in the MCP code workspace using `file_write` / `file_edit` / `apply_patch`.
+3. Inspect generated files using shell commands such as `sed`, `cat`, or `rg` via the `bash` tool to get exact schemas.
+{{if .PatchOnly}}4. Create or update scripts in the MCP code workspace using `apply_patch` only.
+{{else}}4. Write/update scripts in the MCP code workspace using `file_write` / `file_edit` / `apply_patch`.
 {{end}}5. Execute using `code_path`.
 
 # Key rules
@@ -49,21 +48,17 @@ if (out == null) {
 
 <good-example>
 # Discover and inspect schema first
-{{if .PatchOnly}}bash: (cd /absolute/path/to/mcp-workspace && sed -n '1,120p' servers/lsp/index.ts && sed -n '1,160p' servers/lsp/diagnostics.ts)
+bash: (cd /absolute/path/to/mcp-workspace && sed -n '1,120p' servers/lsp/index.ts && sed -n '1,160p' servers/lsp/diagnostics.ts)
 
 # Create script
-apply_patch to create /absolute/path/to/mcp-workspace/check_diagnostics.ts
+{{if .PatchOnly}}apply_patch to create /absolute/path/to/mcp-workspace/check_diagnostics.ts
 with:
 ```typescript
 import * as lsp from './servers/lsp/index.js';
 const result = await lsp.diagnostics({ filePath: './main.go' });
 console.log(Array.isArray(result) ? result.slice(0, 5) : result);
 ```
-{{else}}file_read /absolute/path/to/mcp-workspace/servers/lsp/index.ts
-file_read /absolute/path/to/mcp-workspace/servers/lsp/diagnostics.ts
-
-# Create script
-file_write /absolute/path/to/mcp-workspace/check_diagnostics.ts
+{{else}}file_write /absolute/path/to/mcp-workspace/check_diagnostics.ts
 ```typescript
 import * as lsp from './servers/lsp/index.js';
 const result = await lsp.diagnostics({ filePath: './main.go' });

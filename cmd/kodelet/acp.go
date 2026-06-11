@@ -47,7 +47,7 @@ func init() {
 	acpCmd.Flags().Bool("no-skills", defaults.NoSkills, "Disable agentic skills")
 	acpCmd.Flags().Bool("no-extensions", defaults.NoExtensions, "Disable extension runtime")
 	acpCmd.Flags().Bool("no-workflows", false, "Disable subagent workflows") // no RunConfig default — ACP-only flag
-	acpCmd.Flags().Bool("disable-fs-search-tools", defaults.DisableFSSearchTools, "Disable filesystem search tools (glob_tool and grep_tool)")
+	acpCmd.Flags().Bool("enable-fs-search-tools", defaults.EnableFSSearchTools, "Enable filesystem search tools (glob_tool and grep_tool)")
 	acpCmd.Flags().Bool("disable-subagent", false, "Disable the subagent tool and remove subagent-related system prompt context")
 	acpCmd.Flags().Int("max-turns", defaults.MaxTurns, "Maximum number of agentic turns (0 for no limit)")
 }
@@ -83,22 +83,22 @@ func buildACPServerConfig(cmd *cobra.Command) (*acp.ServerConfig, error) {
 	noSkills, _ := cmd.Flags().GetBool("no-skills")
 	noExtensions, _ := cmd.Flags().GetBool("no-extensions")
 	noWorkflows, _ := cmd.Flags().GetBool("no-workflows")
-	disableFSSearchTools, _ := cmd.Flags().GetBool("disable-fs-search-tools")
+	enableFSSearchTools, _ := cmd.Flags().GetBool("enable-fs-search-tools")
 	disableSubagent, _ := cmd.Flags().GetBool("disable-subagent")
 	maxTurns, _ := cmd.Flags().GetInt("max-turns")
 	maxTurns = max(maxTurns, 0)
 
 	config := &acp.ServerConfig{
-		Provider:             provider,
-		Model:                model,
-		MaxTokens:            maxTokens,
-		NoSkills:             noSkills,
-		NoExtensions:         noExtensions,
-		NoWorkflows:          noWorkflows,
-		DisableFSSearchTools: disableFSSearchTools || llmConfig.DisableFSSearchTools,
-		DisableSubagent:      disableSubagent || llmConfig.DisableSubagent,
-		MaxTurns:             maxTurns,
-		CompactRatio:         llmConfig.CompactRatio,
+		Provider:            provider,
+		Model:               model,
+		MaxTokens:           maxTokens,
+		NoSkills:            noSkills,
+		NoExtensions:        noExtensions,
+		NoWorkflows:         noWorkflows,
+		EnableFSSearchTools: enableFSSearchTools || llmConfig.EnableFSSearchTools,
+		DisableSubagent:     disableSubagent || llmConfig.DisableSubagent,
+		MaxTurns:            maxTurns,
+		CompactRatio:        llmConfig.CompactRatio,
 	}
 
 	return config, nil

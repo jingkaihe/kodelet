@@ -1,5 +1,21 @@
 # Kodelet
 
+## 0.4.35-beta 
+
+Added `anthropic.adaptive_thinking` so custom Anthropic-compatible model IDs can opt into adaptive-thinking and `output_config.effort` request plumbing, with sample config, manual, skill docs, and regression coverage updated for the new setting.
+
+Show running conversation status in sidebar and chat page.
+
+Updated the Node.js/npm toolchain baseline to Node.js 24.16.0 LTS and npm 11.16.0 across mise, release CI, development docs, and JavaScript package metadata.
+
+## 0.4.33-beta (2026-06-09)
+
+Added Claude Fable 5 model support, including adaptive-thinking validation, xhigh reasoning effort handling, and pricing metadata.
+
+Removed `file_read` from the default toolsets and cleaned up file-access tracking from tool state and persisted conversation records.
+
+Renamed the filesystem search tool toggle to opt-in `enable_fs_search_tools` / `--enable-fs-search-tools`, with docs, config samples, ACP, and SDK tests updated for the new behavior.
+
 ## 0.4.32-beta (2026-06-05)
 
 Added a TypeScript Agent SDK that can launch `kodelet acp` sessions from Node, stream assistant/tool events, resume conversations, and run with named or inline profiles.

@@ -37,7 +37,7 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^14.6.1",
-    "@types/node": "^24.0.10",
+    "@types/node": "^24.13.2",
     "@types/prismjs": "^1.26.3",
     "@types/react": "^18.2.56",
     "@types/react-dom": "^18.2.19",
@@ -56,5 +56,8 @@
   },
   "overrides": {
     "ws": "^8.20.1"
+  },
+  "allowScripts": {
+    "esbuild@0.25.5": true
   }
 }

@@ -95,8 +95,8 @@ func TestBashTool_Description_AllowedCommands(t *testing.T) {
 	assert.NotContains(t, desc, "Banned commands:")
 }
 
-func TestBashTool_Description_DisableFSSearchTools(t *testing.T) {
-	tool := NewBashTool(nil, true)
+func TestBashTool_Description_FSSearchToolsDisabled(t *testing.T) {
+	tool := NewBashTool(nil, false)
 	desc := tool.Description()
 
 	assert.Contains(t, desc, "use fd and rg via this tool only")

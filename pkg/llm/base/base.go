@@ -7,7 +7,6 @@ import (
 	"context"
 	"maps"
 	"sync"
-	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -178,11 +177,6 @@ func (t *Thread) PrepareUtilityMode(ctx context.Context) {
 func (t *Thread) ResetContextStateLocked() {
 	// Clear stale tool results - they reference tool calls that no longer exist.
 	t.ToolResults = make(map[string]tooltypes.StructuredToolResult)
-
-	// Clear file access tracking to start fresh with context retrieval.
-	if t.State != nil {
-		t.State.SetFileLastAccess(make(map[string]time.Time))
-	}
 }
 
 // FinalizeSwapContextLocked resets shared state after provider-specific context replacement.

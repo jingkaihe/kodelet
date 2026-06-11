@@ -199,9 +199,6 @@ func TestConversationRecord_ToConversations(t *testing.T) {
 		ID:          "test-id",
 		RawMessages: json.RawMessage(`[{"role": "user", "content": "test"}]`),
 		Provider:    "anthropic",
-		FileLastAccess: JSONField[map[string]time.Time]{
-			Data: map[string]time.Time{"file.txt": now},
-		},
 		Usage: JSONField[llmtypes.Usage]{
 			Data: llmtypes.Usage{InputTokens: 100, OutputTokens: 50},
 		},
@@ -231,7 +228,6 @@ func TestConversationRecord_ToConversations(t *testing.T) {
 	assert.Equal(t, now, record.CreatedAt)
 	assert.Equal(t, now.Add(time.Hour), record.UpdatedAt)
 	assert.Equal(t, map[string]any{"key": "value"}, record.Metadata)
-	assert.Contains(t, record.FileLastAccess, "file.txt")
 	assert.Equal(t, 100, record.Usage.InputTokens)
 	assert.Equal(t, 50, record.Usage.OutputTokens)
 	assert.Contains(t, record.ToolResults, "call1")
@@ -244,9 +240,6 @@ func TestDb_ConversationRecord_ToConversationRecord_NullSummary(t *testing.T) {
 		ID:          "test-id",
 		RawMessages: json.RawMessage(`[]`),
 		Provider:    "anthropic",
-		FileLastAccess: JSONField[map[string]time.Time]{
-			Data: map[string]time.Time{},
-		},
 		Usage: JSONField[llmtypes.Usage]{
 			Data: llmtypes.Usage{},
 		},
@@ -301,9 +294,6 @@ func TestFromConversationRecord(t *testing.T) {
 		ID:          "test-id",
 		RawMessages: json.RawMessage(`[{"role": "user", "content": "test"}]`),
 		Provider:    "anthropic",
-		FileLastAccess: map[string]time.Time{
-			"file.txt": now,
-		},
 		Usage: llmtypes.Usage{
 			InputTokens:  100,
 			OutputTokens: 50,
@@ -331,7 +321,6 @@ func TestFromConversationRecord(t *testing.T) {
 	assert.Equal(t, "Test summary", *dbRecord.Summary)
 	assert.Equal(t, now, dbRecord.CreatedAt)
 	assert.Equal(t, now.Add(time.Hour), dbRecord.UpdatedAt)
-	assert.Equal(t, map[string]time.Time{"file.txt": now}, dbRecord.FileLastAccess.Data)
 	assert.Equal(t, llmtypes.Usage{InputTokens: 100, OutputTokens: 50}, dbRecord.Usage.Data)
 	assert.Equal(t, map[string]any{"key": "value"}, dbRecord.Metadata.Data)
 	assert.Contains(t, dbRecord.ToolResults.Data, "call1")
@@ -341,16 +330,15 @@ func TestFromConversationRecord_EmptySummary(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 
 	record := conversations.ConversationRecord{
-		ID:             "test-id",
-		RawMessages:    json.RawMessage(`[]`),
-		Provider:       "anthropic",
-		FileLastAccess: map[string]time.Time{},
-		Usage:          llmtypes.Usage{},
-		Summary:        "", // Empty summary
-		CreatedAt:      now,
-		UpdatedAt:      now,
-		Metadata:       map[string]any{},
-		ToolResults:    map[string]tools.StructuredToolResult{},
+		ID:          "test-id",
+		RawMessages: json.RawMessage(`[]`),
+		Provider:    "anthropic",
+		Usage:       llmtypes.Usage{},
+		Summary:     "", // Empty summary
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		Metadata:    map[string]any{},
+		ToolResults: map[string]tools.StructuredToolResult{},
 	}
 
 	dbRecord := fromConversationRecord(record)
@@ -411,10 +399,6 @@ func TestRoundTripConversion(t *testing.T) {
 		ID:          "test-id",
 		RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Hello"}]}]`),
 		Provider:    "anthropic",
-		FileLastAccess: map[string]time.Time{
-			"file1.txt": now,
-			"file2.txt": now.Add(time.Hour),
-		},
 		Usage: llmtypes.Usage{
 			InputTokens:              100,
 			OutputTokens:             50,
@@ -469,14 +453,6 @@ func TestRoundTripConversion(t *testing.T) {
 	assert.Equal(t, originalRecord.Usage.OutputCost, convertedRecord.Usage.OutputCost)
 	assert.Equal(t, originalRecord.Usage.CurrentContextWindow, convertedRecord.Usage.CurrentContextWindow)
 	assert.Equal(t, originalRecord.Usage.MaxContextWindow, convertedRecord.Usage.MaxContextWindow)
-
-	// Compare FileLastAccess
-	assert.Equal(t, len(originalRecord.FileLastAccess), len(convertedRecord.FileLastAccess))
-	for file, originalTime := range originalRecord.FileLastAccess {
-		convertedTime, exists := convertedRecord.FileLastAccess[file]
-		assert.True(t, exists)
-		assert.Equal(t, originalTime.Format(time.RFC3339), convertedTime.Format(time.RFC3339))
-	}
 
 	// Compare Metadata
 	assert.Equal(t, originalRecord.Metadata, convertedRecord.Metadata)

@@ -55,7 +55,7 @@ const profile = new Profile({
   tool_mode: "patch",
   weak_model: "gpt-5.4-mini",
   weak_model_max_tokens: 8192,
-  disable_fs_search_tools: true,
+  enable_fs_search_tools: false,
   openai: {
     api_mode: "responses",
     platform: "codex",

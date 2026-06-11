@@ -943,8 +943,7 @@ func saveUsageRecord(ctx context.Context, t *testing.T, store convstore.Conversa
         {"role":"user","content":[{"type":"text","text":"hello"}]},
         {"role":"assistant","content":[{"type":"text","text":"world"}]}
       ]`),
-		FileLastAccess: map[string]time.Time{},
-		Metadata:       map[string]any{"provider": provider},
+		Metadata: map[string]any{"provider": provider},
 	}
 	require.NoError(t, store.Save(ctx, record))
 

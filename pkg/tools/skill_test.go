@@ -11,13 +11,13 @@ import (
 )
 
 func TestSkillTool_Name(t *testing.T) {
-	tool := NewSkillTool(nil, true, false)
+	tool := NewSkillTool(nil, true, true)
 	assert.Equal(t, "skill", tool.Name())
 }
 
 func TestSkillTool_Description(t *testing.T) {
 	t.Run("with no skills", func(t *testing.T) {
-		tool := NewSkillTool(nil, true, false)
+		tool := NewSkillTool(nil, true, true)
 		desc := tool.Description()
 		assert.Contains(t, desc, "Skills are currently not available")
 	})
@@ -26,7 +26,7 @@ func TestSkillTool_Description(t *testing.T) {
 		skills := map[string]*skills.Skill{
 			"test": {Name: "test", Description: "A test skill", Directory: "/test"},
 		}
-		tool := NewSkillTool(skills, false, false)
+		tool := NewSkillTool(skills, false, true)
 		desc := tool.Description()
 		assert.Contains(t, desc, "Skills are currently not available")
 	})
@@ -36,7 +36,7 @@ func TestSkillTool_Description(t *testing.T) {
 			"pdf":  {Name: "pdf", Description: "Handle PDF files", Directory: "/skills/pdf"},
 			"xlsx": {Name: "xlsx", Description: "Handle Excel files", Directory: "/skills/xlsx"},
 		}
-		tool := NewSkillTool(skillsMap, true, false)
+		tool := NewSkillTool(skillsMap, true, true)
 		desc := tool.Description()
 		assert.Contains(t, desc, "### pdf")
 		assert.Contains(t, desc, "Handle PDF files")
@@ -45,19 +45,28 @@ func TestSkillTool_Description(t *testing.T) {
 	})
 
 	t.Run("with fs search tools disabled", func(t *testing.T) {
+		tool := NewSkillTool(nil, true, false)
+		desc := tool.Description()
+		assert.Contains(t, desc, "inspect using fd/rg/sed/cat via bash")
+		assert.NotContains(t, desc, "glob_tool")
+		assert.NotContains(t, desc, "file_read")
+	})
+
+	t.Run("with fs search tools enabled", func(t *testing.T) {
 		tool := NewSkillTool(nil, true, true)
 		desc := tool.Description()
-		assert.Contains(t, desc, "file_read or fd via bash")
-		assert.NotContains(t, desc, "file_read or glob_tool")
+		assert.Contains(t, desc, "locate with glob_tool and inspect via bash using sed/cat/rg")
+		assert.Contains(t, desc, "update it using file_edit")
+		assert.NotContains(t, desc, "file_read")
 	})
 
 	t.Run("patch avoids removed file tools", func(t *testing.T) {
-		tool := NewSkillToolWithOptions(nil, true, llmtypes.ToolModePatch, false)
+		tool := NewSkillToolWithOptions(nil, true, llmtypes.ToolModePatch, true)
 		desc := tool.Description()
 		assert.Contains(t, desc, "locate with glob_tool and inspect via bash using sed/cat/rg")
 		assert.Contains(t, desc, "update it using apply_patch")
-		assert.NotContains(t, desc, "read using file_read")
-		assert.NotContains(t, desc, "file_edit tool")
+		assert.NotContains(t, desc, "file_read")
+		assert.NotContains(t, desc, "file_edit")
 	})
 }
 
@@ -67,27 +76,27 @@ func TestSkillTool_ValidateInput(t *testing.T) {
 	}
 
 	t.Run("valid input", func(t *testing.T) {
-		tool := NewSkillTool(skillsMap, true, false)
+		tool := NewSkillTool(skillsMap, true, true)
 		err := tool.ValidateInput(nil, `{"skill_name": "test"}`)
 		assert.NoError(t, err)
 	})
 
 	t.Run("missing skill_name", func(t *testing.T) {
-		tool := NewSkillTool(skillsMap, true, false)
+		tool := NewSkillTool(skillsMap, true, true)
 		err := tool.ValidateInput(nil, `{}`)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "skill_name is required")
 	})
 
 	t.Run("skills disabled", func(t *testing.T) {
-		tool := NewSkillTool(skillsMap, false, false)
+		tool := NewSkillTool(skillsMap, false, true)
 		err := tool.ValidateInput(nil, `{"skill_name": "test"}`)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "skills are disabled")
 	})
 
 	t.Run("unknown skill", func(t *testing.T) {
-		tool := NewSkillTool(skillsMap, true, false)
+		tool := NewSkillTool(skillsMap, true, true)
 		err := tool.ValidateInput(nil, `{"skill_name": "unknown"}`)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "unknown skill")
@@ -95,7 +104,7 @@ func TestSkillTool_ValidateInput(t *testing.T) {
 	})
 
 	t.Run("invalid JSON", func(t *testing.T) {
-		tool := NewSkillTool(skillsMap, true, false)
+		tool := NewSkillTool(skillsMap, true, true)
 		err := tool.ValidateInput(nil, `invalid json`)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid input")
@@ -113,7 +122,7 @@ func TestSkillTool_Execute(t *testing.T) {
 	}
 
 	t.Run("successful execution", func(t *testing.T) {
-		tool := NewSkillTool(skillsMap, true, false)
+		tool := NewSkillTool(skillsMap, true, true)
 		result := tool.Execute(context.Background(), nil, `{"skill_name": "test"}`)
 
 		assert.False(t, result.IsError())
@@ -124,7 +133,7 @@ func TestSkillTool_Execute(t *testing.T) {
 	})
 
 	t.Run("skill not found", func(t *testing.T) {
-		tool := NewSkillTool(skillsMap, true, false)
+		tool := NewSkillTool(skillsMap, true, true)
 		result := tool.Execute(context.Background(), nil, `{"skill_name": "unknown"}`)
 
 		assert.True(t, result.IsError())
@@ -132,7 +141,7 @@ func TestSkillTool_Execute(t *testing.T) {
 	})
 
 	t.Run("skill already active", func(t *testing.T) {
-		tool := NewSkillTool(skillsMap, true, false)
+		tool := NewSkillTool(skillsMap, true, true)
 
 		result1 := tool.Execute(context.Background(), nil, `{"skill_name": "test"}`)
 		assert.False(t, result1.IsError())
@@ -143,7 +152,7 @@ func TestSkillTool_Execute(t *testing.T) {
 	})
 
 	t.Run("reset active skills", func(t *testing.T) {
-		tool := NewSkillTool(skillsMap, true, false)
+		tool := NewSkillTool(skillsMap, true, true)
 
 		tool.Execute(context.Background(), nil, `{"skill_name": "test"}`)
 		assert.True(t, tool.IsActive("test"))
@@ -156,7 +165,7 @@ func TestSkillTool_Execute(t *testing.T) {
 	})
 
 	t.Run("invalid JSON", func(t *testing.T) {
-		tool := NewSkillTool(skillsMap, true, false)
+		tool := NewSkillTool(skillsMap, true, true)
 		result := tool.Execute(context.Background(), nil, `invalid`)
 
 		assert.True(t, result.IsError())
@@ -164,7 +173,7 @@ func TestSkillTool_Execute(t *testing.T) {
 }
 
 func TestSkillTool_TracingKVs(t *testing.T) {
-	tool := NewSkillTool(nil, true, false)
+	tool := NewSkillTool(nil, true, true)
 
 	t.Run("valid input", func(t *testing.T) {
 		kvs, err := tool.TracingKVs(`{"skill_name": "test"}`)
@@ -213,7 +222,7 @@ func TestSkillTool_GettersAndHelpers(t *testing.T) {
 		"test": {Name: "test", Description: "A test skill"},
 	}
 
-	tool := NewSkillTool(skillsMap, true, false)
+	tool := NewSkillTool(skillsMap, true, true)
 
 	assert.True(t, tool.IsEnabled())
 	assert.Equal(t, skillsMap, tool.GetSkills())

@@ -1219,12 +1219,7 @@ func forkConversationCmd(ctx context.Context, conversationID string) {
 	forkedRecord.Summary = sourceRecord.Summary
 	forkedRecord.ToolResults = sourceRecord.ToolResults
 
-	// Copy FileLastAccess and Metadata maps
-	if sourceRecord.FileLastAccess != nil {
-		forkedRecord.FileLastAccess = make(map[string]time.Time)
-		maps.Copy(forkedRecord.FileLastAccess, sourceRecord.FileLastAccess)
-	}
-
+	// Copy Metadata map
 	if sourceRecord.Metadata != nil {
 		forkedRecord.Metadata = make(map[string]any)
 		maps.Copy(forkedRecord.Metadata, sourceRecord.Metadata)

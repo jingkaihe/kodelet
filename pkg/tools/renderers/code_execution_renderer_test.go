@@ -17,7 +17,7 @@ func TestCodeExecutionRenderer(t *testing.T) {
 			Success:   true,
 			Timestamp: time.Now(),
 			Metadata: &tools.CodeExecutionMetadata{
-				Runtime: "Node.js v22.17.0",
+				Runtime: "Node.js v24.16.0",
 				Code:    "console.log('Hello, World!');",
 				Output:  "Hello, World!\n",
 			},
@@ -25,7 +25,7 @@ func TestCodeExecutionRenderer(t *testing.T) {
 
 		output := renderer.RenderCLI(result)
 
-		assert.Contains(t, output, "Runtime: Node.js v22.17.0", "Expected runtime in output")
+		assert.Contains(t, output, "Runtime: Node.js v24.16.0", "Expected runtime in output")
 		assert.Contains(t, output, "Code:", "Expected code section header in output")
 		assert.Contains(t, output, "console.log('Hello, World!');", "Expected code content in output")
 		assert.Contains(t, output, "Output:", "Expected output section header in output")

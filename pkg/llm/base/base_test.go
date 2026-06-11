@@ -4,7 +4,6 @@ import (
 	"context"
 	"sync"
 	"testing"
-	"time"
 
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -19,32 +18,14 @@ import (
 // mockState is a minimal mock implementation of tooltypes.State for testing
 type mockState struct{}
 
-func (m *mockState) SetFileLastAccessed(_ string, _ time.Time) error { return nil }
-func (m *mockState) GetFileLastAccessed(_ string) (time.Time, error) { return time.Time{}, nil }
-func (m *mockState) ClearFileLastAccessed(_ string) error            { return nil }
-func (m *mockState) SetFileLastAccess(_ map[string]time.Time)        {}
-func (m *mockState) FileLastAccess() map[string]time.Time            { return nil }
-func (m *mockState) BasicTools() []tooltypes.Tool                    { return nil }
-func (m *mockState) MCPTools() []tooltypes.Tool                      { return nil }
-func (m *mockState) Tools() []tooltypes.Tool                         { return nil }
-func (m *mockState) DiscoverContexts() map[string]string             { return nil }
-func (m *mockState) GetLLMConfig() any                               { return nil }
-func (m *mockState) WorkingDirectory() string                        { return "" }
-func (m *mockState) LockFile(_ string)                               {}
-func (m *mockState) UnlockFile(_ string)                             {}
-
-type trackingState struct {
-	mockState
-	fileLastAccess map[string]time.Time
-}
-
-func (m *trackingState) SetFileLastAccess(fileLastAccess map[string]time.Time) {
-	m.fileLastAccess = fileLastAccess
-}
-
-func (m *trackingState) FileLastAccess() map[string]time.Time {
-	return m.fileLastAccess
-}
+func (m *mockState) BasicTools() []tooltypes.Tool        { return nil }
+func (m *mockState) MCPTools() []tooltypes.Tool          { return nil }
+func (m *mockState) Tools() []tooltypes.Tool             { return nil }
+func (m *mockState) DiscoverContexts() map[string]string { return nil }
+func (m *mockState) GetLLMConfig() any                   { return nil }
+func (m *mockState) WorkingDirectory() string            { return "" }
+func (m *mockState) LockFile(_ string)                   {}
+func (m *mockState) UnlockFile(_ string)                 {}
 
 func TestNewThread(t *testing.T) {
 	config := llmtypes.Config{
@@ -1242,8 +1223,7 @@ func TestFinalizeSwapContextLocked(t *testing.T) {
 	bt := NewThread(llmtypes.Config{}, "")
 	bt.ToolResults["tool-call-1"] = tooltypes.StructuredToolResult{ToolName: "test-tool"}
 
-	state := &trackingState{}
-	bt.SetState(state)
+	bt.SetState(&mockState{})
 
 	bt.Mu.Lock()
 	bt.FinalizeSwapContextLocked("A compact summary of earlier conversation content.")
@@ -1251,8 +1231,6 @@ func TestFinalizeSwapContextLocked(t *testing.T) {
 
 	assert.Empty(t, bt.ToolResults)
 	assert.NotNil(t, bt.ToolResults)
-	assert.NotNil(t, state.fileLastAccess)
-	assert.Empty(t, state.fileLastAccess)
 	assert.GreaterOrEqual(t, bt.GetUsage().CurrentContextWindow, 100)
 }
 

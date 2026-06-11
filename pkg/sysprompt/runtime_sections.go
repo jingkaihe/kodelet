@@ -30,7 +30,7 @@ func BuildRuntimeContext(llmConfig llmtypes.Config, contexts map[string]string) 
 	promptCtx.ActiveContextFile = resolveActiveContextFile(promptCtx.WorkingDirectory, contexts, patterns)
 	promptCtx.WithMCPConfig(llmConfig.MCPExecutionMode, llmConfig.MCPWorkspaceDir)
 	promptCtx.Args = llmConfig.SyspromptArgs
-	promptCtx.DisableFSSearchTools = llmConfig.DisableFSSearchTools
+	promptCtx.EnableFSSearchTools = llmConfig.EnableFSSearchTools
 
 	return promptCtx
 }

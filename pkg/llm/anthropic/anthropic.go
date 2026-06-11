@@ -844,11 +844,11 @@ func (t *Thread) getModelAndTokens(opt llmtypes.MessageOpt) (anthropic.Model, in
 }
 
 func (t *Thread) shouldUtiliseThinking(model anthropic.Model) bool {
+	if t.isAdaptiveThinkingModel(model) {
+		return !t.adaptiveThinkingDisabled(model)
+	}
 	if !isThinkingModel(model) {
 		return false
-	}
-	if isAdaptiveThinkingModel(model) {
-		return !t.adaptiveThinkingDisabled(model)
 	}
 	if t.Config.ThinkingBudgetTokens == 0 {
 		return false
@@ -857,7 +857,7 @@ func (t *Thread) shouldUtiliseThinking(model anthropic.Model) bool {
 }
 
 func (t *Thread) adaptiveThinkingDisabled(model anthropic.Model) bool {
-	if !isAdaptiveThinkingModel(model) {
+	if !t.isAdaptiveThinkingModel(model) {
 		return false
 	}
 
@@ -865,7 +865,7 @@ func (t *Thread) adaptiveThinkingDisabled(model anthropic.Model) bool {
 }
 
 func (t *Thread) validateThinkingConfigForModel(model anthropic.Model) error {
-	if model == anthropic.ModelClaudeMythosPreview && t.adaptiveThinkingDisabled(model) {
+	if isAlwaysOnAdaptiveThinkingModel(model) && t.adaptiveThinkingDisabled(model) {
 		return errors.Errorf("%s does not support disabling adaptive thinking with reasoning_effort=none", model)
 	}
 
@@ -877,7 +877,7 @@ func (t *Thread) thinkingConfigForModel(model anthropic.Model) (anthropic.Thinki
 		return anthropic.ThinkingConfigParamUnion{}, false
 	}
 
-	if isAdaptiveThinkingModel(model) {
+	if t.isAdaptiveThinkingModel(model) {
 		return anthropic.ThinkingConfigParamUnion{
 			OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{
 				Type:    "adaptive",
@@ -896,7 +896,7 @@ func (t *Thread) thinkingConfigForModel(model anthropic.Model) (anthropic.Thinki
 }
 
 func (t *Thread) outputConfigForModel(model anthropic.Model) (anthropic.OutputConfigParam, bool) {
-	effort, ok := anthropicReasoningEffortForModel(model, t.Config.ReasoningEffort)
+	effort, ok := t.anthropicReasoningEffortForModel(model, t.Config.ReasoningEffort)
 	if !ok {
 		return anthropic.OutputConfigParam{}, false
 	}
@@ -904,11 +904,33 @@ func (t *Thread) outputConfigForModel(model anthropic.Model) (anthropic.OutputCo
 	return anthropic.OutputConfigParam{Effort: effort}, true
 }
 
+func (t *Thread) isAdaptiveThinkingModel(model anthropic.Model) bool {
+	if isAdaptiveThinkingModel(model) {
+		return true
+	}
+
+	return t.Config.Anthropic != nil &&
+		t.Config.Anthropic.AdaptiveThinking &&
+		model == t.Config.Model
+}
+
+func (t *Thread) anthropicReasoningEffortForModel(model anthropic.Model, configured string) (anthropic.OutputConfigEffort, bool) {
+	if !t.isAdaptiveThinkingModel(model) {
+		return "", false
+	}
+
+	return anthropicReasoningEffort(configured, isXhighEffortModel(model))
+}
+
 func anthropicReasoningEffortForModel(model anthropic.Model, configured string) (anthropic.OutputConfigEffort, bool) {
 	if !isAdaptiveThinkingModel(model) {
 		return "", false
 	}
 
+	return anthropicReasoningEffort(configured, isXhighEffortModel(model))
+}
+
+func anthropicReasoningEffort(configured string, supportsXhigh bool) (anthropic.OutputConfigEffort, bool) {
 	switch strings.ToLower(strings.TrimSpace(configured)) {
 	case "", "medium":
 		return anthropic.OutputConfigEffortMedium, true
@@ -917,7 +939,7 @@ func anthropicReasoningEffortForModel(model anthropic.Model, configured string) 
 	case "high":
 		return anthropic.OutputConfigEffortHigh, true
 	case "xhigh":
-		if isXhighEffortModel(model) {
+		if supportsXhigh {
 			return anthropic.OutputConfigEffortXhigh, true
 		}
 		return anthropic.OutputConfigEffortHigh, true
@@ -930,9 +952,10 @@ func anthropicReasoningEffortForModel(model anthropic.Model, configured string) 
 
 func isAdaptiveThinkingModel(model anthropic.Model) bool {
 	adaptiveThinkingModels := []anthropic.Model{
+		anthropic.ModelClaudeFable5,
 		anthropic.ModelClaudeOpus4_8,
 		anthropic.ModelClaudeOpus4_7,
-		anthropic.ModelClaudeMythosPreview,
+		modelClaudeMythosPreview,
 		anthropic.ModelClaudeOpus4_6,
 		anthropic.ModelClaudeSonnet4_6,
 	}
@@ -940,8 +963,18 @@ func isAdaptiveThinkingModel(model anthropic.Model) bool {
 	return slices.Contains(adaptiveThinkingModels, model)
 }
 
+func isAlwaysOnAdaptiveThinkingModel(model anthropic.Model) bool {
+	alwaysOnAdaptiveThinkingModels := []anthropic.Model{
+		anthropic.ModelClaudeFable5,
+		modelClaudeMythosPreview,
+	}
+
+	return slices.Contains(alwaysOnAdaptiveThinkingModels, model)
+}
+
 func isXhighEffortModel(model anthropic.Model) bool {
 	xhighEffortModels := []anthropic.Model{
+		anthropic.ModelClaudeFable5,
 		anthropic.ModelClaudeOpus4_8,
 		anthropic.ModelClaudeOpus4_7,
 	}
@@ -951,7 +984,8 @@ func isXhighEffortModel(model anthropic.Model) bool {
 
 func isThinkingModel(model anthropic.Model) bool {
 	thinkingModels := []anthropic.Model{
-		anthropic.ModelClaudeMythosPreview,
+		anthropic.ModelClaudeFable5,
+		modelClaudeMythosPreview,
 
 		// haiku 4.5 models
 		anthropic.ModelClaudeHaiku4_5,
@@ -964,8 +998,8 @@ func isThinkingModel(model anthropic.Model) bool {
 		// opus 4 models
 		anthropic.ModelClaudeOpus4_8,
 		anthropic.ModelClaudeOpus4_7,
-		anthropic.ModelClaudeOpus4_1,
-		anthropic.ModelClaudeOpus4_1_20250805,
+		anthropic.Model("claude-opus-4-1"),
+		anthropic.Model("claude-opus-4-1-20250805"),
 		anthropic.ModelClaudeOpus4_5,
 		anthropic.ModelClaudeOpus4_5_20251101,
 		anthropic.ModelClaudeOpus4_6,
