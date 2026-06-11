@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.4.36-alpha
+
+Added challenge-discovered OAuth for remote HTTP/SSE MCP servers, including browser-based authorization, token caching/refresh, optional client/discovery hints, and RPC integration coverage.
+
+Documented the new MCP OAuth configuration in the sample config, manual, and Kodelet skill reference.
+
 ## 0.4.35-beta 
 
 Added `anthropic.adaptive_thinking` so custom Anthropic-compatible model IDs can opt into adaptive-thinking and `output_config.effort` request plumbing, with sample config, manual, skill docs, and regression coverage updated for the new setting.
