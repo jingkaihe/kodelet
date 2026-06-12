@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/pkg/errors"
 	"github.com/rogpeppe/go-internal/lockedfile"
 )
@@ -151,6 +152,7 @@ func normalizeImageInputs(images []string) ([]string, error) {
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to normalize image path %s", image)
 		}
+		absPath = osutil.CanonicalizePath(absPath)
 		normalized = append(normalized, absPath)
 	}
 

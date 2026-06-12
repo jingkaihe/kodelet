@@ -16,6 +16,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/mcp/codegen"
 	"github.com/jingkaihe/kodelet/pkg/mcp/rpc"
 	"github.com/jingkaihe/kodelet/pkg/mcp/runtime"
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
@@ -56,6 +57,7 @@ func DefaultWorkspaceDir(projectDir string) (string, error) {
 	if err != nil {
 		return "", errors.Wrap(err, "failed to resolve project directory")
 	}
+	absProjectDir = osutil.CanonicalizePath(absProjectDir)
 
 	return filepath.Join(homeDir, ".kodelet", "mcp", "cache", shortHash(absProjectDir)), nil
 }

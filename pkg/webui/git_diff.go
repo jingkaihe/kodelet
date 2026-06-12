@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/pkg/errors"
 )
 
@@ -68,7 +69,7 @@ func resolveGitRoot(ctx context.Context, cwd string) (string, error) {
 		return "", errors.New("git root is empty")
 	}
 
-	return root, nil
+	return osutil.CanonicalizePath(root), nil
 }
 
 func gitDiff(ctx context.Context, cwd string) (string, int, error) {

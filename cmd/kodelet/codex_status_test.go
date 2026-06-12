@@ -39,7 +39,7 @@ func TestRunCodexStatusOAuthCredentialsUsageUnavailable(t *testing.T) {
 }
 
 func TestBuildCodexUsageBuckets(t *testing.T) {
-	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.Local)
 	stats := &auth.CodexUsageStats{
 		Snapshots: []auth.CodexUsageSnapshot{
 			{
