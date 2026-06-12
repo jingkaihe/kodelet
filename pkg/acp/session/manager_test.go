@@ -180,9 +180,14 @@ func TestConvertMCPServers_MapsHTTPAndSSETransports(t *testing.T) {
 			URL:        "https://example.com/sse",
 			AuthHeader: "Bearer sse-token",
 		},
+		{
+			Name:       "default-http-server",
+			URL:        "https://example.com/mcp",
+			AuthHeader: "Bearer default-http-token",
+		},
 	})
 
-	require.Len(t, config.Servers, 3)
+	require.Len(t, config.Servers, 4)
 
 	assert.Equal(t, tools.MCPServerTypeStdio, config.Servers["stdio-server"].ServerType)
 	assert.Equal(t, "npx", config.Servers["stdio-server"].Command)
@@ -197,6 +202,10 @@ func TestConvertMCPServers_MapsHTTPAndSSETransports(t *testing.T) {
 	assert.Equal(t, tools.MCPServerTypeSSE, config.Servers["sse-server"].ServerType)
 	assert.Equal(t, "https://example.com/sse", config.Servers["sse-server"].BaseURL)
 	assert.Equal(t, map[string]string{"Authorization": "Bearer sse-token"}, config.Servers["sse-server"].Headers)
+
+	assert.Equal(t, tools.MCPServerTypeHTTP, config.Servers["default-http-server"].ServerType)
+	assert.Equal(t, "https://example.com/mcp", config.Servers["default-http-server"].BaseURL)
+	assert.Equal(t, map[string]string{"Authorization": "Bearer default-http-token"}, config.Servers["default-http-server"].Headers)
 }
 
 func TestBuildSessionMCPManager_FallbackToConfiguredManagerReturnsClone(t *testing.T) {

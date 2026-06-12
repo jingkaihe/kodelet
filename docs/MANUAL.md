@@ -716,7 +716,7 @@ mcp:
       args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/files"]
       tool_white_list: ["list_directory"] # Optional tool white list
     some_http_server: # streamable HTTP config
-      server_type: "http"
+      server_type: "http" # Optional when base_url is set; this is the default URL transport
       base_url: "https://example.com/mcp" # Base URL for streamable HTTP server
       headers: # Headers for HTTP requests
         Authorization: "Bearer token"

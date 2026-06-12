@@ -531,7 +531,9 @@ mcp:
     callback_timeout: "2m"
 
   # MCP servers configuration
-  # Each server can be stdio, streamable HTTP, or deprecated SSE based
+  # Each server can be stdio, streamable HTTP, or deprecated SSE based.
+  # If server_type is omitted, servers with base_url default to streamable HTTP;
+  # deprecated SSE servers must set server_type: "sse" explicitly.
   servers:
     # Example stdio server (uncomment to enable)
     # filesystem:
@@ -540,7 +542,7 @@ mcp:
 
     # Example streamable HTTP server (uncomment to enable)
     # example-http:
-    #   server_type: "http"
+    #   server_type: "http"  # optional when base_url is set
     #   base_url: "https://example.com/mcp"
     #   # Optional static headers are still supported for API-key/bearer-token servers.
     #   headers:

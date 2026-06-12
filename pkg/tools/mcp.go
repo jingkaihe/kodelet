@@ -251,9 +251,9 @@ func newMCPClient(config MCPServerConfig) (*client.Client, error) {
 
 func newMCPClientForServer(serverName string, config MCPServerConfig) (*client.Client, error) {
 	if config.ServerType == "" {
-		if config.BaseURL != "" {
-			config.ServerType = MCPServerTypeSSE
-		} else if config.Command != "" {
+		if strings.TrimSpace(config.BaseURL) != "" {
+			config.ServerType = MCPServerTypeHTTP
+		} else if strings.TrimSpace(config.Command) != "" {
 			config.ServerType = MCPServerTypeStdio
 		} else {
 			return nil, errors.New("server_type is required")

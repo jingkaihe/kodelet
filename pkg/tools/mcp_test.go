@@ -750,6 +750,31 @@ func TestMCPManager_StreamableHTTPTransport(t *testing.T) {
 	assert.Contains(t, result.GetResult(), "2024-01-01T00:00:00Z")
 }
 
+func TestMCPManager_BaseURLDefaultsToStreamableHTTP(t *testing.T) {
+	serverURL := newStreamableHTTPTestServer(t)
+
+	config := MCPConfig{
+		Servers: map[string]MCPServerConfig{
+			"time": {
+				BaseURL:       serverURL,
+				ToolWhiteList: []string{"get_current_time"},
+			},
+		},
+	}
+
+	manager, err := NewMCPManager(config)
+	require.NoError(t, err)
+
+	err = manager.Initialize(context.Background())
+	require.NoError(t, err)
+	defer manager.Close(context.Background())
+
+	mcpTools, err := manager.ListMCPTools(context.Background())
+	require.NoError(t, err)
+	require.Len(t, mcpTools, 1)
+	assert.Equal(t, "mcp__time_get_current_time", mcpTools[0].Name())
+}
+
 func TestMCPManager_StreamableHTTPAutoOAuth(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
