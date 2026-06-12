@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.4.38-beta
+
+Simplified extension subprocess handling by removing per-process environment overrides; extensions now inherit the Kodelet process environment directly, with docs and config samples updated to match.
+
+Canonicalized workspace, image input, and git-root paths across MCP cache setup, steering image attachments, and Web UI git diff handling for more stable behavior with symlinks.
+
+Updated the Web UI frontend toolchain to newer Vite, React plugin, Storybook, and esbuild releases, and refreshed Vite vendor chunk splitting for the newer dependency layout.
+
 ## 0.4.37-beta
 
 Added challenge-discovered OAuth for remote HTTP/SSE MCP servers, including browser-based authorization, token caching/refresh, optional client/discovery hints, and RPC integration coverage.
