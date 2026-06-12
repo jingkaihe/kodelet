@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -55,7 +54,6 @@ func StartProcess(ctx context.Context, ext Extension, config Config) (*Process, 
 func (p *Process) start(ctx context.Context) error {
 	cmd := exec.CommandContext(processContext(ctx), p.Extension.ExecPath)
 	cmd.Dir = p.Extension.Dir
-	cmd.Env = extensionEnv(p.config, p.Extension)
 	cmd.Stderr = os.Stderr
 	osutil.SetProcessGroup(cmd)
 	osutil.SetProcessGroupKill(cmd)
@@ -449,82 +447,4 @@ func (p *Process) closeProcessLocked() error {
 		return nil
 	}
 	return err
-}
-
-func extensionEnv(config Config, ext Extension) []string {
-	env := sanitizedExtensionEnv()
-	if extensionConfig, ok := config.Processes[ext.ID]; ok {
-		env = applyEnvOverrides(env, extensionConfig.Env)
-	}
-	if ext.PluginRef != "" {
-		if extensionConfig, ok := config.Processes[ext.PluginRef]; ok {
-			env = applyEnvOverrides(env, extensionConfig.Env)
-		}
-	}
-	return env
-}
-
-func sanitizedExtensionEnv() []string {
-	allowedNames := map[string]struct{}{
-		"HOME":              {},
-		"PATH":              {},
-		"SHELL":             {},
-		"TMPDIR":            {},
-		"TEMP":              {},
-		"TMP":               {},
-		"USER":              {},
-		"USERNAME":          {},
-		"LOGNAME":           {},
-		"LANG":              {},
-		"LC_ALL":            {},
-		"NODE_OPTIONS":      {},
-		"KODELET_BASE_PATH": {},
-	}
-
-	env := []string{}
-	for _, entry := range os.Environ() {
-		name, _, ok := strings.Cut(entry, "=")
-		if !ok {
-			continue
-		}
-		if _, allowed := allowedNames[name]; allowed {
-			env = append(env, entry)
-		}
-	}
-	return env
-}
-
-func applyEnvOverrides(env []string, overrides map[string]*string) []string {
-	if len(overrides) == 0 {
-		return env
-	}
-	values := map[string]string{}
-	for _, entry := range env {
-		name, value, ok := strings.Cut(entry, "=")
-		if ok {
-			values[name] = value
-		}
-	}
-	for name, value := range overrides {
-		if strings.TrimSpace(name) == "" {
-			continue
-		}
-		if value == nil {
-			if inherited, ok := os.LookupEnv(name); ok {
-				values[name] = inherited
-			}
-			continue
-		}
-		values[name] = *value
-	}
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	merged := make([]string, 0, len(keys))
-	for _, key := range keys {
-		merged = append(merged, key+"="+values[key])
-	}
-	return merged
 }

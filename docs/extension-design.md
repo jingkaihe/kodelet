@@ -213,10 +213,6 @@ extensions:
     get_weather:
       enabled: true
 
-  processes:
-    weather:
-      env:
-        WEATHER_API_KEY: null
 ```
 
 Configuration semantics:
@@ -228,8 +224,6 @@ Configuration semantics:
 - `allow`: optional extension allowlist. Plugin entries use `org@repo/extension`; standalone entries use extension paths, either relative or absolute.
 - `deny`: optional extension denylist using the same addressing rules as `allow`.
 - `tools`: per-tool enablement configuration.
-- `processes`: per-extension process configuration. Environment entries can be literal strings or `null` to inherit that variable from Kodelet's parent environment.
-
 Timeouts are controlled by SDK-declared `timeoutInSec`. Events use SDK `timeoutInSec` or the built-in `30s` default, tools use SDK `timeoutInSec` or the built-in `10m` default, and commands use SDK `timeoutInSec` or no timeout.
 
 Allow/deny path entries are normalized before comparison:
@@ -834,9 +828,8 @@ Long-running repo-local executables are sensitive. Recommended defaults:
 
 1. Installed or downloaded extensions are considered trusted. There is no separate `trusted_extensions` database.
 2. Users control extension loading through `extensions.enabled`, `extensions.allow`, and `extensions.deny` in global or repo-local config.
-3. Extension processes should not inherit the full parent environment by default.
-4. Kodelet should pass only a sanitized base environment plus explicitly configured environment variables.
-5. Local repositories can opt into or out of extensions using `./kodelet-config.yaml`.
+3. Extension processes inherit the Kodelet process environment. Users should install only trusted extensions and use normal process environment controls for secrets.
+4. Local repositories can opt into or out of extensions using `./kodelet-config.yaml`.
 
 ## Failure and timeout policy
 

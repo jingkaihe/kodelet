@@ -16,21 +16,15 @@ type ToolConfig struct {
 	Enabled *bool `mapstructure:"enabled" json:"enabled" yaml:"enabled"`
 }
 
-// ExtensionConfig controls behavior for a specific extension process.
-type ExtensionConfig struct {
-	Env map[string]*string `mapstructure:"env" json:"env" yaml:"env"`
-}
-
 // Config contains extension runtime configuration.
 type Config struct {
-	Enabled       bool                       `mapstructure:"enabled" json:"enabled" yaml:"enabled"`
-	GlobalDir     string                     `mapstructure:"global_dir" json:"global_dir" yaml:"global_dir"`
-	LocalDir      string                     `mapstructure:"local_dir" json:"local_dir" yaml:"local_dir"`
-	MaxOutputSize int                        `mapstructure:"max_output_size" json:"max_output_size" yaml:"max_output_size"`
-	Allow         []string                   `mapstructure:"allow" json:"allow" yaml:"allow"`
-	Deny          []string                   `mapstructure:"deny" json:"deny" yaml:"deny"`
-	Tools         map[string]ToolConfig      `mapstructure:"tools" json:"tools" yaml:"tools"`
-	Processes     map[string]ExtensionConfig `mapstructure:"processes" json:"processes" yaml:"processes"`
+	Enabled       bool                  `mapstructure:"enabled" json:"enabled" yaml:"enabled"`
+	GlobalDir     string                `mapstructure:"global_dir" json:"global_dir" yaml:"global_dir"`
+	LocalDir      string                `mapstructure:"local_dir" json:"local_dir" yaml:"local_dir"`
+	MaxOutputSize int                   `mapstructure:"max_output_size" json:"max_output_size" yaml:"max_output_size"`
+	Allow         []string              `mapstructure:"allow" json:"allow" yaml:"allow"`
+	Deny          []string              `mapstructure:"deny" json:"deny" yaml:"deny"`
+	Tools         map[string]ToolConfig `mapstructure:"tools" json:"tools" yaml:"tools"`
 }
 
 // DefaultConfig returns the default extension runtime configuration.

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -356,52 +355,35 @@ func TestRuntimeProcessSurvivesInitializationContextCancellation(t *testing.T) {
 	assert.Equal(t, "All extensions are healthy for conv-after-cancel.", result.Response)
 }
 
-func TestProcessEnvUsesSanitizedBaseAndConfiguredOverrides(t *testing.T) {
-	t.Setenv("SECRET_TOKEN", "parent-secret")
-	t.Setenv("INHERITED_TOKEN", "parent-inherited")
-	configured := "configured-secret"
-	config := DefaultConfig()
-	config.Processes = map[string]ExtensionConfig{
-		"weather": {Env: map[string]*string{
-			"SECRET_TOKEN":    &configured,
-			"INHERITED_TOKEN": nil,
-		}},
-	}
-
-	env := extensionEnv(config, Extension{ID: "weather"})
-
-	values := envMap(env)
-	assert.Equal(t, "configured-secret", values["SECRET_TOKEN"])
-	assert.Equal(t, "parent-inherited", values["INHERITED_TOKEN"])
-	assert.NotContains(t, values, "KODELET_TEST_EXTENSION_HELPER")
-}
-
-func TestProcessEnvSupportsPluginRefOverrides(t *testing.T) {
-	configured := "configured-plugin"
-	config := DefaultConfig()
-	config.Processes = map[string]ExtensionConfig{
-		"org@repo/weather": {Env: map[string]*string{"PLUGIN_TOKEN": &configured}},
-	}
-
-	env := extensionEnv(config, Extension{ID: "org@repo/weather", PluginRef: "org@repo/weather"})
-
-	assert.Equal(t, "configured-plugin", envMap(env)["PLUGIN_TOKEN"])
-}
-
 func TestSafeDataDirNamePreservesPluginIdentity(t *testing.T) {
 	assert.Equal(t, "org@repo_weather", safeDataDirName("org@repo/weather"))
 	assert.Equal(t, "extension", safeDataDirName("///"))
 }
 
-func envMap(env []string) map[string]string {
-	values := map[string]string{}
-	for _, entry := range env {
-		name, value, ok := strings.Cut(entry, "=")
-		if ok {
-			values[name] = value
-		}
-	}
-	return values
+func TestExtensionProcessInheritsParentEnvironment(t *testing.T) {
+	rootDir := t.TempDir()
+	extDir := filepath.Join(rootDir, "weather")
+	writeExecutable(t, filepath.Join(extDir, "kodelet-extension-weather"), helperExtensionScript(t))
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	t.Setenv("EXTENSION_VISIBLE_TOKEN", "parent-secret")
+
+	runtime, err := NewRuntime(
+		context.Background(),
+		WithConfig(DefaultConfig()),
+		WithWorkingDir(rootDir),
+		WithRoots(Root{Dir: rootDir, Kind: SourceKindLocalStandalone}),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, runtime.Close()) })
+
+	tools := runtime.Tools()
+	require.Len(t, tools, 1)
+
+	ctx := kodelettools.ContextWithToolContext(context.Background(), kodelettools.ToolContext{WorkingDir: rootDir})
+	result := tools[0].Execute(ctx, nil, `{"location":"Env"}`)
+
+	assert.False(t, result.IsError())
+	assert.Equal(t, "parent-secret", result.GetResult())
 }
 
 func TestRuntimeRejectsDuplicateToolRegistrations(t *testing.T) {
@@ -577,6 +559,10 @@ func runExtensionHelperProcess() {
 				Location string `json:"location"`
 			}
 			_ = json.Unmarshal(params.Input, &input)
+			if input.Location == "Env" {
+				writeHelperResponse(request.ID, ToolExecutionResult{Content: os.Getenv("EXTENSION_VISIBLE_TOKEN")}, nil)
+				continue
+			}
 			if input.Location == "AskUI" {
 				uiRequest := rpcRequest{JSONRPC: "2.0", ID: 99, Method: "kodelet.ui.input", Params: UIInputRequest{Title: "Choose option"}}
 				uiPayload, _ := json.Marshal(uiRequest)

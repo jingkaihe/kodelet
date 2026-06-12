@@ -1503,11 +1503,9 @@ extensions:
     get_weather:
       enabled: true
 
-  processes:
-    weather:
-      env:
-        WEATHER_API_KEY: null  # inherit from parent environment only when listed
 ```
+
+Extension subprocesses inherit Kodelet's environment. Start Kodelet with any environment variables required by extension tools.
 
 Timeouts are controlled by SDK-declared `timeoutInSec`. Extension events use SDK `timeoutInSec` or the built-in `30s` default, extension tools use SDK `timeoutInSec` or the built-in `10m` default, and extension commands use SDK `timeoutInSec` or no timeout.
 

@@ -60,10 +60,12 @@ func TestExtensionConfigHasNoTimeoutConfigSurface(t *testing.T) {
 	_, hasTimeout := typeOfConfig.FieldByName("Timeout")
 	_, hasEvents := typeOfConfig.FieldByName("Events")
 	_, hasCommands := typeOfConfig.FieldByName("Commands")
+	_, hasProcesses := typeOfConfig.FieldByName("Processes")
 
 	assert.False(t, hasTimeout)
 	assert.False(t, hasEvents)
 	assert.False(t, hasCommands)
+	assert.False(t, hasProcesses)
 }
 
 func TestContextWithOptionalDuration(t *testing.T) {
