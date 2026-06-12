@@ -716,8 +716,8 @@ mcp:
       args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/files"]
       tool_white_list: ["list_directory"] # Optional tool white list
     some_http_server: # streamable HTTP config
-      server_type: "http" # Optional when base_url is set; this is the default URL transport
-      base_url: "https://example.com/mcp" # Base URL for streamable HTTP server
+      server_type: "http" # Optional when url is set; this is the default URL transport
+      url: "https://example.com/mcp" # URL for streamable HTTP server
       headers: # Headers for HTTP requests
         Authorization: "Bearer token"
       oauth: # Optional OAuth hints; OAuth itself is discovered automatically
@@ -729,7 +729,7 @@ mcp:
       tool_white_list: ["tool1", "tool2"] # Optional tool white list
     some_sse_server: # deprecated SSE config
       server_type: "sse"
-      base_url: "http://localhost:8000/sse" # Base URL for SSE server
+      url: "http://localhost:8000/sse" # URL for SSE server
       headers:
         Authorization: "Bearer token"
       tool_white_list: ["tool1", "tool2"]

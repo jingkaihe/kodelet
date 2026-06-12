@@ -196,15 +196,15 @@ func TestConvertMCPServers_MapsHTTPAndSSETransports(t *testing.T) {
 	assert.Empty(t, config.Servers["stdio-server"].Headers)
 
 	assert.Equal(t, tools.MCPServerTypeHTTP, config.Servers["http-server"].ServerType)
-	assert.Equal(t, "https://example.com/mcp", config.Servers["http-server"].BaseURL)
+	assert.Equal(t, "https://example.com/mcp", config.Servers["http-server"].URL)
 	assert.Equal(t, map[string]string{"Authorization": "Bearer http-token"}, config.Servers["http-server"].Headers)
 
 	assert.Equal(t, tools.MCPServerTypeSSE, config.Servers["sse-server"].ServerType)
-	assert.Equal(t, "https://example.com/sse", config.Servers["sse-server"].BaseURL)
+	assert.Equal(t, "https://example.com/sse", config.Servers["sse-server"].URL)
 	assert.Equal(t, map[string]string{"Authorization": "Bearer sse-token"}, config.Servers["sse-server"].Headers)
 
 	assert.Equal(t, tools.MCPServerTypeHTTP, config.Servers["default-http-server"].ServerType)
-	assert.Equal(t, "https://example.com/mcp", config.Servers["default-http-server"].BaseURL)
+	assert.Equal(t, "https://example.com/mcp", config.Servers["default-http-server"].URL)
 	assert.Equal(t, map[string]string{"Authorization": "Bearer default-http-token"}, config.Servers["default-http-server"].Headers)
 }
 

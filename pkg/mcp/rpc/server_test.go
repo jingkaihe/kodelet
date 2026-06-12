@@ -514,7 +514,7 @@ func TestMCPRPCServer_HandleMCPCall_AutoOAuthHTTPServer(t *testing.T) {
 		Servers: map[string]tools.MCPServerConfig{
 			"time": {
 				ServerType:    tools.MCPServerTypeHTTP,
-				BaseURL:       testServer.URL,
+				URL:           testServer.URL,
 				ToolWhiteList: []string{"get_current_time"},
 			},
 		},

@@ -49,7 +49,7 @@ type MCPServerConfig struct {
 	Command       string            `json:"command" yaml:"command"`                 // stdio: command to start the server
 	Args          []string          `json:"args" yaml:"args"`                       // stdio: arguments to pass to the server
 	Envs          map[string]string `json:"envs" yaml:"envs"`                       // stdio: environment variables to set
-	BaseURL       string            `json:"base_url" yaml:"base_url"`               // http/sse: base URL of the server
+	URL           string            `json:"url" yaml:"url"`                         // http/sse: URL of the server endpoint
 	Headers       map[string]string `json:"headers" yaml:"headers"`                 // http/sse: headers to send to the server
 	OAuth         MCPOAuthConfig    `json:"oauth" yaml:"oauth"`                     // optional OAuth hints; OAuth itself is auto-detected from server challenges
 	ToolWhiteList []string          `json:"tool_white_list" yaml:"tool_white_list"` // optional tool white list
@@ -251,7 +251,7 @@ func newMCPClient(config MCPServerConfig) (*client.Client, error) {
 
 func newMCPClientForServer(serverName string, config MCPServerConfig) (*client.Client, error) {
 	if config.ServerType == "" {
-		if strings.TrimSpace(config.BaseURL) != "" {
+		if strings.TrimSpace(config.URL) != "" {
 			config.ServerType = MCPServerTypeHTTP
 		} else if strings.TrimSpace(config.Command) != "" {
 			config.ServerType = MCPServerTypeStdio
@@ -275,27 +275,27 @@ func newMCPClientForServer(serverName string, config MCPServerConfig) (*client.C
 		tp := transport.NewStdio(config.Command, envArgs, config.Args...)
 		return client.NewClient(tp), nil
 	case MCPServerTypeSSE:
-		if config.BaseURL == "" {
-			return nil, errors.New("base_url is required for sse server")
+		if config.URL == "" {
+			return nil, errors.New("url is required for sse server")
 		}
 		options := []transport.ClientOption{transport.WithHeaders(config.Headers)}
-		oauthRT, err := newMCPOAuthRoundTripper(serverName, config.BaseURL, config.OAuth)
+		oauthRT, err := newMCPOAuthRoundTripper(serverName, config.URL, config.OAuth)
 		if err != nil {
 			return nil, err
 		}
 		if oauthRT != nil {
 			options = append(options, transport.WithHTTPClient(&http.Client{Transport: oauthRT}))
 		}
-		tp, err := transport.NewSSE(config.BaseURL, options...)
+		tp, err := transport.NewSSE(config.URL, options...)
 		if err != nil {
 			return nil, err
 		}
 		return client.NewClient(tp), nil
 	case MCPServerTypeHTTP:
-		if config.BaseURL == "" {
-			return nil, errors.New("base_url is required for http server")
+		if config.URL == "" {
+			return nil, errors.New("url is required for http server")
 		}
-		tp, err := newAuthenticatedStreamableHTTPTransport(serverName, config.BaseURL, config.Headers, config.OAuth)
+		tp, err := newAuthenticatedStreamableHTTPTransport(serverName, config.URL, config.Headers, config.OAuth)
 		if err != nil {
 			return nil, err
 		}

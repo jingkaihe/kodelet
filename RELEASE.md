@@ -1,6 +1,6 @@
 # Kodelet
 
-## 0.4.36-alpha1
+## 0.4.36-alpha2
 
 Added challenge-discovered OAuth for remote HTTP/SSE MCP servers, including browser-based authorization, token caching/refresh, optional client/discovery hints, and RPC integration coverage.
 

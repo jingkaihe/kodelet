@@ -231,7 +231,7 @@ func TestNewMCPManager(t *testing.T) {
 			Servers: map[string]MCPServerConfig{
 				"test-sse": {
 					ServerType: MCPServerTypeSSE,
-					BaseURL:    "http://example.com/sse",
+					URL:        "http://example.com/sse",
 					Headers: map[string]string{
 						"Authorization": "Bearer test-token",
 					},
@@ -252,7 +252,7 @@ func TestNewMCPManager(t *testing.T) {
 			Servers: map[string]MCPServerConfig{
 				"test-http": {
 					ServerType: MCPServerTypeHTTP,
-					BaseURL:    "http://example.com/mcp",
+					URL:        "http://example.com/mcp",
 					Headers: map[string]string{
 						"Authorization": "Bearer test-token",
 					},
@@ -270,7 +270,7 @@ func TestNewMCPManager(t *testing.T) {
 			Servers: map[string]MCPServerConfig{
 				"test-http": {
 					ServerType: "streamable_http",
-					BaseURL:    "http://example.com/mcp",
+					URL:        "http://example.com/mcp",
 				},
 			},
 		}
@@ -299,7 +299,7 @@ func TestNewMCPManager(t *testing.T) {
 			Servers: map[string]MCPServerConfig{
 				"missing-url": {
 					ServerType: MCPServerTypeSSE,
-					// Missing BaseURL
+					// Missing URL
 				},
 				"missing-command": {
 					ServerType: MCPServerTypeStdio,
@@ -384,7 +384,7 @@ func TestMCPManager_InitializeSkipsFailedServersWhenOthersSucceed(t *testing.T) 
 	config := goldenMCPConfig(t)
 	config.Servers["broken-http"] = MCPServerConfig{
 		ServerType: MCPServerTypeHTTP,
-		BaseURL:    "http://127.0.0.1:1/mcp",
+		URL:        "http://127.0.0.1:1/mcp",
 	}
 
 	manager, err := NewMCPManager(config)
@@ -727,7 +727,7 @@ func TestMCPManager_StreamableHTTPTransport(t *testing.T) {
 		Servers: map[string]MCPServerConfig{
 			"time": {
 				ServerType:    MCPServerTypeHTTP,
-				BaseURL:       serverURL,
+				URL:           serverURL,
 				ToolWhiteList: []string{"get_current_time"},
 			},
 		},
@@ -750,13 +750,13 @@ func TestMCPManager_StreamableHTTPTransport(t *testing.T) {
 	assert.Contains(t, result.GetResult(), "2024-01-01T00:00:00Z")
 }
 
-func TestMCPManager_BaseURLDefaultsToStreamableHTTP(t *testing.T) {
+func TestMCPManager_URLDefaultsToStreamableHTTP(t *testing.T) {
 	serverURL := newStreamableHTTPTestServer(t)
 
 	config := MCPConfig{
 		Servers: map[string]MCPServerConfig{
 			"time": {
-				BaseURL:       serverURL,
+				URL:           serverURL,
 				ToolWhiteList: []string{"get_current_time"},
 			},
 		},
@@ -859,7 +859,7 @@ func TestMCPManager_StreamableHTTPAutoOAuth(t *testing.T) {
 		Servers: map[string]MCPServerConfig{
 			"time": {
 				ServerType:    MCPServerTypeHTTP,
-				BaseURL:       testServer.URL,
+				URL:           testServer.URL,
 				ToolWhiteList: []string{"get_current_time"},
 			},
 		},
@@ -924,7 +924,7 @@ func TestMCPManager_StreamableHTTPClosePreservesHeaders(t *testing.T) {
 		Servers: map[string]MCPServerConfig{
 			"time": {
 				ServerType: MCPServerTypeHTTP,
-				BaseURL:    testServer.URL,
+				URL:        testServer.URL,
 				Headers: map[string]string{
 					"Authorization": authHeader,
 				},

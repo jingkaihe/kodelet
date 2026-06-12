@@ -239,7 +239,7 @@ func convertMCPServers(servers []acptypes.MCPServer) tools.MCPConfig {
 		case "":
 			if server.URL != "" {
 				serverConfig.ServerType = tools.MCPServerTypeHTTP
-				serverConfig.BaseURL = server.URL
+				serverConfig.URL = server.URL
 				if server.AuthHeader != "" {
 					serverConfig.Headers = map[string]string{
 						"Authorization": server.AuthHeader,
@@ -252,7 +252,7 @@ func convertMCPServers(servers []acptypes.MCPServer) tools.MCPConfig {
 			serverConfig.ServerType = tools.MCPServerTypeStdio
 		case "sse":
 			serverConfig.ServerType = tools.MCPServerTypeSSE
-			serverConfig.BaseURL = server.URL
+			serverConfig.URL = server.URL
 			if server.AuthHeader != "" {
 				serverConfig.Headers = map[string]string{
 					"Authorization": server.AuthHeader,
@@ -260,7 +260,7 @@ func convertMCPServers(servers []acptypes.MCPServer) tools.MCPConfig {
 			}
 		case "http", "streamable_http", "streamable-http":
 			serverConfig.ServerType = tools.MCPServerTypeHTTP
-			serverConfig.BaseURL = server.URL
+			serverConfig.URL = server.URL
 			if server.AuthHeader != "" {
 				serverConfig.Headers = map[string]string{
 					"Authorization": server.AuthHeader,

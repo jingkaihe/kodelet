@@ -553,7 +553,7 @@ func TestLoadMCPConfigFromViper(t *testing.T) {
   servers:
     docs:
       server_type: http
-      base_url: https://mcp.example.test
+      url: https://mcp.example.test
       headers:
         X-Test: token
       tool_white_list:
@@ -574,7 +574,7 @@ func TestLoadMCPConfigFromViper(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, config.Servers, "docs")
 	assert.Equal(t, MCPServerTypeHTTP, config.Servers["docs"].ServerType)
-	assert.Equal(t, "https://mcp.example.test", config.Servers["docs"].BaseURL)
+	assert.Equal(t, "https://mcp.example.test", config.Servers["docs"].URL)
 	assert.Equal(t, map[string]string{"X-Test": "token"}, config.Servers["docs"].Headers)
 	assert.Equal(t, []string{"lookup"}, config.Servers["docs"].ToolWhiteList)
 	require.Contains(t, config.Servers, "local")

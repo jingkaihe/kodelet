@@ -532,7 +532,7 @@ mcp:
 
   # MCP servers configuration
   # Each server can be stdio, streamable HTTP, or deprecated SSE based.
-  # If server_type is omitted, servers with base_url default to streamable HTTP;
+  # If server_type is omitted, servers with url default to streamable HTTP;
   # deprecated SSE servers must set server_type: "sse" explicitly.
   servers:
     # Example stdio server (uncomment to enable)
@@ -542,8 +542,8 @@ mcp:
 
     # Example streamable HTTP server (uncomment to enable)
     # example-http:
-    #   server_type: "http"  # optional when base_url is set
-    #   base_url: "https://example.com/mcp"
+    #   server_type: "http"  # optional when url is set
+    #   url: "https://example.com/mcp"
     #   # Optional static headers are still supported for API-key/bearer-token servers.
     #   headers:
     #     Authorization: "Bearer ${MCP_TOKEN}"
@@ -561,7 +561,7 @@ mcp:
     # Example deprecated SSE server (uncomment to enable)
     # example-sse:
     #   server_type: "sse"
-    #   base_url: "https://example.com/sse"
+    #   url: "https://example.com/sse"
     #   headers:
     #     Authorization: "Bearer ${MCP_TOKEN}"
     #   tool_white_list: ["tool1", "tool2"]
