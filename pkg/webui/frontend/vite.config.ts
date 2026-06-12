@@ -16,11 +16,19 @@ export default defineConfig({
     // Optimize chunks
     rollupOptions: {
       output: {
-        manualChunks: {
-          'react-vendor': ['react', 'react-dom'],
-          'router-vendor': ['react-router-dom'],
-          'markdown-vendor': ['marked', 'prismjs'],
-          'utils-vendor': ['date-fns', 'clsx']
+        manualChunks(id) {
+          if (id.includes('node_modules/react/') || id.includes('node_modules/react-dom/')) {
+            return 'react-vendor'
+          }
+          if (id.includes('node_modules/react-router-dom/')) {
+            return 'router-vendor'
+          }
+          if (id.includes('node_modules/marked/') || id.includes('node_modules/prismjs/')) {
+            return 'markdown-vendor'
+          }
+          if (id.includes('node_modules/date-fns/') || id.includes('node_modules/clsx/')) {
+            return 'utils-vendor'
+          }
         }
       }
     }
