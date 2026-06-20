@@ -129,6 +129,25 @@ kodelet run --headless --include-history "query"  # include historical data in s
 
 Use `/goal <objective>` in CLI, ACP, or the Web UI to set an active goal for the current thread. While the goal is active, Kodelet keeps future turns focused on that objective, including after conversation resume or compaction. The agent marks the goal complete when it is done, or blocked if it cannot make meaningful progress without user input.
 
+### Terminal Chat TUI
+
+For a minimal terminal UI, use `kodelet chat`:
+
+```bash
+kodelet chat                         # start a new TUI conversation
+kodelet chat --follow                # continue the most recent conversation
+kodelet chat -f                      # short form
+kodelet chat --resume CONVERSATION_ID  # resume a specific conversation
+kodelet chat -r CONVERSATION_ID        # short form
+kodelet chat --no-tools              # chat without tools
+kodelet chat --no-extensions         # disable extensions
+```
+
+The TUI streams assistant responses, collapses thinking and tool details by
+default, and lets you toggle details with `ctrl+t`, `alt+t`, or by clicking the
+detail header. It uses the same chat runner as the Web UI, so conversations are
+persisted and can be resumed by ID.
+
 ### Interactive Chat Mode (ACP)
 
 For extended conversations and complex tasks, use the Agent Client Protocol (ACP) with a compatible client like `toad`:
