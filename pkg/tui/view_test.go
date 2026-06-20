@@ -4,7 +4,9 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
+	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
@@ -31,6 +33,7 @@ func TestViewAndFormattingHelpers(t *testing.T) {
 	assert.Contains(t, view, "draft")
 	assert.Contains(t, view, "1.5K/3.0K (50%)")
 	assert.Contains(t, view, "work")
+	assert.Equal(t, 3, m.textarea.Height())
 	assert.True(t, strings.HasPrefix(plainLines[0], strings.Repeat(" ", tuiLeftMargin)))
 	assert.Equal(t, m.width-tuiRightMargin, tuiLeftMargin+m.inputOuterWidth())
 	assert.Equal(t, m.contentWidth(), m.viewport.Width)
@@ -62,15 +65,44 @@ func TestRunningIndicatorRendersInComposerBottomBorder(t *testing.T) {
 	m.refreshViewport(true)
 
 	transcript := xansi.Strip(m.viewport.View())
-	view := xansi.Strip(m.View())
+	rawView := m.View()
+	view := xansi.Strip(rawView)
 	lines := strings.Split(view, "\n")
 	bottomBorder := lines[len(lines)-1]
+	rawLines := strings.Split(rawView, "\n")
+	rawBottomBorder := rawLines[len(rawLines)-1]
 
 	assert.NotContains(t, transcript, "Following the thread…")
 	assert.NotContains(t, transcript, "working…")
+	assert.Contains(t, bottomBorder, "~ Following the thread…")
 	assert.Contains(t, bottomBorder, "Following the thread…")
 	assert.NotContains(t, bottomBorder, "working…")
 	assert.Contains(t, bottomBorder, displayCWD(m.cwd))
+	assert.Equal(t, 1, lipgloss.Width(m.flowingWaterFrame()))
+	assert.Equal(t, 1, utf8.RuneCountInString(m.flowingWaterFrame()))
+	flowStart, _ := styleSequences(composerFlowStyle)
+	labelStart, _ := styleSequences(composerLabelStyle)
+	assert.Contains(t, rawBottomBorder, flowStart+"~")
+	assert.Contains(t, rawBottomBorder, labelStart+" Following the thread…")
+	assert.Contains(t, rawBottomBorder, labelStart+" "+displayCWD(m.cwd))
+
+	m.workingFrame = 8
+	view = xansi.Strip(m.View())
+	lines = strings.Split(view, "\n")
+	bottomBorder = lines[len(lines)-1]
+
+	assert.Contains(t, bottomBorder, "≈ Following the thread…")
+	assert.Equal(t, 1, lipgloss.Width(m.flowingWaterFrame()))
+	assert.Equal(t, 1, utf8.RuneCountInString(m.flowingWaterFrame()))
+
+	m.workingFrame = 16
+	view = xansi.Strip(m.View())
+	lines = strings.Split(view, "\n")
+	bottomBorder = lines[len(lines)-1]
+
+	assert.Contains(t, bottomBorder, "≋ Following the thread…")
+	assert.Equal(t, 1, lipgloss.Width(m.flowingWaterFrame()))
+	assert.Equal(t, 1, utf8.RuneCountInString(m.flowingWaterFrame()))
 
 	m.workingFrame = 36
 	view = xansi.Strip(m.View())
@@ -98,6 +130,13 @@ func TestNewModelDefaultsToCatppuccinMochaTheme(t *testing.T) {
 
 	assert.Equal(t, DefaultThemeName, m.theme.Name)
 	assert.Equal(t, "#cdd6f4", themes[DefaultThemeName].Assistant)
+}
+
+func TestComposerLabelThemeColors(t *testing.T) {
+	for _, theme := range themes {
+		assert.Equal(t, theme.ThoughtBody, theme.ComposerLabel)
+		assert.NotEmpty(t, theme.ComposerFlow)
+	}
 }
 
 func TestNewModelUsesConfiguredTheme(t *testing.T) {

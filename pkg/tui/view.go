@@ -20,6 +20,12 @@ var tuiWorkingMessages = []string{
 	"Working through the details…",
 }
 
+var tuiFlowFrames = []string{
+	"~",
+	"≈",
+	"≋",
+}
+
 func (m *model) refreshViewport(scrollBottom bool) {
 	content, regions := m.renderTranscript()
 	m.detailRegions = regions
@@ -99,7 +105,7 @@ func renderLabeledBorder(left, right string, width int, label string) string {
 
 func renderLabeledBorderPair(left, right string, width int, leftLabel string, rightLabel string) string {
 	if strings.TrimSpace(leftLabel) == "" {
-		return renderLabeledBorder(left, right, width, rightLabel)
+		return renderStyledLabeledBorder(left, right, width, rightLabel, composerLabelStyle)
 	}
 
 	if width <= 2 {
@@ -147,11 +153,11 @@ func renderLabeledBorderPair(left, right string, width int, leftLabel string, ri
 	}
 
 	writeBorderFill(leftStart - position)
-	b.WriteString(inputLabelStyle.Render(leftText))
+	b.WriteString(renderComposerBottomLeftLabel(leftText))
 	position = leftStart + leftWidth
 	if rightText != "" {
 		writeBorderFill(rightStart - position)
-		b.WriteString(inputLabelStyle.Render(rightText))
+		b.WriteString(renderPersistentStyle(composerLabelStyle, rightText))
 		position = rightStart + rightWidth
 	}
 	writeBorderFill(fillWidth - position)
@@ -170,6 +176,58 @@ func formatBorderLabel(label string, width int) string {
 	return " " + fitVisible(label, width-2) + " "
 }
 
+func renderStyledLabeledBorder(left, right string, width int, label string, labelStyle lipgloss.Style) string {
+	if width <= 2 {
+		return inputBorderStyle.Render(left + right)
+	}
+
+	fillWidth := width - 2
+	label = strings.TrimSpace(label)
+	if label == "" || fillWidth <= 2 {
+		return inputBorderStyle.Render(left + strings.Repeat("─", fillWidth) + right)
+	}
+
+	label = " " + fitVisible(label, fillWidth-2) + " "
+	labelWidth := lipgloss.Width(label)
+	start := fillWidth - labelWidth - 1
+	if start < 0 {
+		start = 0
+	}
+	endWidth := fillWidth - start - labelWidth
+	if endWidth < 0 {
+		endWidth = 0
+	}
+
+	return inputBorderStyle.Render(left+strings.Repeat("─", start)) +
+		renderPersistentStyle(labelStyle, label) +
+		inputBorderStyle.Render(strings.Repeat("─", endWidth)+right)
+}
+
+func renderComposerBottomLeftLabel(label string) string {
+	flowStart := 0
+	for flowStart < len(label) && label[flowStart] == ' ' {
+		flowStart++
+	}
+	if flowStart >= len(label) {
+		return renderPersistentStyle(composerLabelStyle, label)
+	}
+
+	flowEnd := len(label)
+	if nextSpace := strings.IndexByte(label[flowStart:], ' '); nextSpace >= 0 {
+		flowEnd = flowStart + nextSpace
+	}
+
+	var b strings.Builder
+	if flowStart > 0 {
+		b.WriteString(renderPersistentStyle(composerLabelStyle, label[:flowStart]))
+	}
+	b.WriteString(composerFlowStyle.Render(label[flowStart:flowEnd]))
+	if flowEnd < len(label) {
+		b.WriteString(renderPersistentStyle(composerLabelStyle, label[flowEnd:]))
+	}
+	return b.String()
+}
+
 func (m model) inputTopRightLabel() string {
 	parts := []string{formatUsage(m.usage), m.profile}
 	return strings.Join(parts, " — ")
@@ -179,7 +237,19 @@ func (m model) inputBottomLeftLabel() string {
 	if !m.running {
 		return ""
 	}
-	return m.spinner.View() + " " + m.workingStatusText()
+	return m.flowingWaterFrame() + " " + m.workingStatusText()
+}
+
+func (m model) flowingWaterFrame() string {
+	if len(tuiFlowFrames) == 0 {
+		return "~"
+	}
+	const framesPerFlowStep = 8
+	frame := m.workingFrame
+	if frame < 0 {
+		frame = 0
+	}
+	return tuiFlowFrames[(frame/framesPerFlowStep)%len(tuiFlowFrames)]
 }
 
 func (m model) workingStatusText() string {

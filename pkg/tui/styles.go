@@ -31,6 +31,8 @@ type tuiTheme struct {
 	InputBorder      string
 	InputLabel       string
 	InputPlaceholder string
+	ComposerLabel    string
+	ComposerFlow     string
 	ComposerText     string
 	ComposerCursor   string
 	Markdown         markdownTheme
@@ -88,6 +90,8 @@ var themes = map[string]tuiTheme{
 		InputBorder:      "#cdd6f4", // text
 		InputLabel:       "#cdd6f4", // text
 		InputPlaceholder: "#9399b2", // overlay2
+		ComposerLabel:    "#9399b2", // overlay2
+		ComposerFlow:     "#89b4fa", // blue
 		ComposerText:     "#cdd6f4", // text
 		ComposerCursor:   "#cdd6f4", // text
 		Markdown: markdownTheme{
@@ -141,6 +145,8 @@ var themes = map[string]tuiTheme{
 		InputBorder:      "147",
 		InputLabel:       "147",
 		InputPlaceholder: "240",
+		ComposerLabel:    "244",
+		ComposerFlow:     "147",
 		ComposerText:     "252",
 		ComposerCursor:   "229",
 		Markdown: markdownTheme{
@@ -200,6 +206,8 @@ var (
 	inputBorderStyle      lipgloss.Style
 	inputLabelStyle       lipgloss.Style
 	inputPlaceholderStyle lipgloss.Style
+	composerLabelStyle    lipgloss.Style
+	composerFlowStyle     lipgloss.Style
 	composerTextStyle     lipgloss.Style
 	composerCursorStyle   lipgloss.Style
 )
@@ -253,6 +261,8 @@ func applyTheme(theme tuiTheme) {
 	inputBorderStyle = lipgloss.NewStyle().Foreground(themeColor(theme.InputBorder))
 	inputLabelStyle = lipgloss.NewStyle().Foreground(themeColor(theme.InputLabel))
 	inputPlaceholderStyle = lipgloss.NewStyle().Foreground(themeColor(theme.InputPlaceholder))
+	composerLabelStyle = lipgloss.NewStyle().Foreground(themeColor(theme.ComposerLabel))
+	composerFlowStyle = lipgloss.NewStyle().Foreground(themeColor(theme.ComposerFlow))
 	composerTextStyle = lipgloss.NewStyle().Foreground(themeColor(theme.ComposerText))
 	composerCursorStyle = lipgloss.NewStyle().Foreground(themeColor(theme.ComposerCursor))
 }
