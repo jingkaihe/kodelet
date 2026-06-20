@@ -363,10 +363,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.err = msg.err
 			m.status = "history load failed"
+			m.entries = append(m.entries, chatEntry{
+				kind: entryAssistant,
+				blocks: []assistantBlock{{
+					kind: blockText,
+					text: fmt.Sprintf("Failed to resume conversation: %v", msg.err),
+				}},
+			})
 		} else if len(msg.entries) > 0 {
-			m.entries = msg.entries
-			m.usage = msg.usage
-			m.status = fmt.Sprintf("resumed %s", shortID(m.conversationID))
+			if len(m.entries) == 0 {
+				m.entries = msg.entries
+				m.usage = msg.usage
+				m.status = fmt.Sprintf("resumed %s", shortID(m.conversationID))
+			}
 		}
 		m.refreshViewport(true)
 
