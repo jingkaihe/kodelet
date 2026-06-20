@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/aymanbagabas/go-udiff"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -81,12 +82,15 @@ type thoughtBlock struct {
 }
 
 type toolCall struct {
-	id     string
-	name   string
-	input  string
-	result string
-	done   bool
-	failed bool
+	id              string
+	name            string
+	input           string
+	result          string
+	done            bool
+	failed          bool
+	structured      *tooltypes.StructuredToolResult
+	expanded        bool
+	expandedChanges map[int]bool
 }
 
 type assistantBlockKind int
@@ -119,10 +123,13 @@ type chatEntry struct {
 }
 
 type detailRegion struct {
-	entryIndex int
-	blockIndex int
-	kind       detailKind
-	line       int
+	entryIndex  int
+	blockIndex  int
+	kind        detailKind
+	line        int
+	toolStart   int
+	toolEnd     int
+	changeIndex int
 }
 
 type model struct {
@@ -324,15 +331,33 @@ func entriesFromHistory(messages []conversations.StreamableMessage) []chatEntry 
 			entries[idx].blocks[blockIdx].tools = append(entries[idx].blocks[blockIdx].tools, toolCall{id: msg.ToolCallID, name: msg.ToolName, input: msg.Input})
 		case "tool-result":
 			idx := ensureAssistant()
+			structuredResult, hasStructuredResult := parseStructuredToolResult(msg.Content)
+			resultText := msg.Content
+			failed := false
+			if hasStructuredResult {
+				resultText = structuredToolResultText(structuredResult)
+				failed = !structuredResult.Success
+				if msg.ToolName == "" {
+					msg.ToolName = structuredResult.ToolName
+				}
+			}
 			if location, ok := toolIndex[msg.ToolCallID]; ok && location[0] < len(entries) {
 				blockIdx, toolIdx := findToolLocation(entries[location[0]], msg.ToolCallID)
 				if blockIdx >= 0 && toolIdx >= 0 {
-					entries[location[0]].blocks[blockIdx].tools[toolIdx].result = msg.Content
-					entries[location[0]].blocks[blockIdx].tools[toolIdx].done = true
+					tool := &entries[location[0]].blocks[blockIdx].tools[toolIdx]
+					tool.result = resultText
+					tool.done = true
+					tool.failed = failed
+					if hasStructuredResult {
+						tool.structured = structuredResult
+						if tool.name == "" {
+							tool.name = structuredResult.ToolName
+						}
+					}
 				}
 			} else {
 				blockIdx := appendToolBlock(&entries[idx])
-				entries[idx].blocks[blockIdx].tools = append(entries[idx].blocks[blockIdx].tools, toolCall{id: msg.ToolCallID, name: msg.ToolName, result: msg.Content, done: true})
+				entries[idx].blocks[blockIdx].tools = append(entries[idx].blocks[blockIdx].tools, toolCall{id: msg.ToolCallID, name: msg.ToolName, result: resultText, done: true, failed: failed, structured: structuredResult})
 			}
 		}
 	}
@@ -855,6 +880,7 @@ func (m *model) applyChatEvent(event webui.ChatEvent) {
 			tool.done = true
 			if event.ToolResult != nil {
 				tool.failed = !event.ToolResult.Success
+				tool.structured = event.ToolResult
 				if tool.name == "" {
 					tool.name = event.ToolResult.ToolName
 				}
@@ -872,6 +898,7 @@ func (m *model) applyChatEvent(event webui.ChatEvent) {
 					tool.done = true
 					if event.ToolResult != nil {
 						tool.failed = !event.ToolResult.Success
+						tool.structured = event.ToolResult
 						if tool.name == "" {
 							tool.name = event.ToolResult.ToolName
 						}
@@ -884,13 +911,18 @@ func (m *model) applyChatEvent(event webui.ChatEvent) {
 		if event.ToolResult != nil {
 			failed = !event.ToolResult.Success
 		}
+		toolName := event.ToolName
+		if event.ToolResult != nil && strings.TrimSpace(toolName) == "" {
+			toolName = event.ToolResult.ToolName
+		}
 		blockIdx := appendToolBlock(&m.entries[idx])
 		m.entries[idx].blocks[blockIdx].tools = append(m.entries[idx].blocks[blockIdx].tools, toolCall{
-			id:     event.ToolCallID,
-			name:   event.ToolName,
-			result: resultText,
-			done:   true,
-			failed: failed,
+			id:         event.ToolCallID,
+			name:       toolName,
+			result:     resultText,
+			done:       true,
+			failed:     failed,
+			structured: event.ToolResult,
 		})
 	case "usage":
 		if event.Usage != nil {
@@ -978,6 +1010,8 @@ func (m *model) renderTranscript() (string, []detailRegion) {
 					if block.expanded || hasActiveThought(block) {
 						body := indentText(m.renderMarkdown(joinThoughts(block.thoughts), m.transcriptTextWidth()-2, markdownThought), "  ")
 						if strings.TrimSpace(body) != "" {
+							b.WriteString("\n")
+							line++
 							rendered := thoughtBodyStyle.Render(body)
 							b.WriteString(rendered)
 							b.WriteString("\n")
@@ -988,19 +1022,25 @@ func (m *model) renderTranscript() (string, []detailRegion) {
 					if len(block.tools) == 0 {
 						continue
 					}
-					m.renderAssistantBlockSeparator(&b, &line, &renderedAssistantBlock)
-					header := m.renderToolHeader(block)
-					b.WriteString(header)
-					b.WriteString("\n")
-					regions = append(regions, detailRegion{entryIndex: i, blockIndex: blockIdx, kind: detailTools, line: line})
-					line++
-					if block.expanded || hasActiveTool(block) {
-						body := indentText(wrapText(joinTools(block.tools), m.transcriptTextWidth()-2), "  ")
-						if strings.TrimSpace(body) != "" {
-							rendered := toolBodyStyle.Render(body)
-							b.WriteString(rendered)
-							b.WriteString("\n")
-							line += lineCount(rendered)
+					for _, group := range m.toolRenderGroups(block) {
+						m.renderAssistantBlockSeparator(&b, &line, &renderedAssistantBlock)
+						header := m.renderToolGroupHeader(group)
+						b.WriteString(header)
+						b.WriteString("\n")
+						regions = append(regions, detailRegion{entryIndex: i, blockIndex: blockIdx, kind: detailTools, line: line, toolStart: group.toolStart, toolEnd: group.toolEnd, changeIndex: group.changeIndex})
+						line++
+						if group.expanded || group.active {
+							body := group.body
+							if group.wrapBody {
+								body = wrapText(body, m.transcriptTextWidth()-2)
+							}
+							body = indentText(body, "  ")
+							if strings.TrimSpace(body) != "" {
+								rendered := toolBodyStyle.Render(body)
+								b.WriteString(rendered)
+								b.WriteString("\n")
+								line += lineCount(rendered)
+							}
 						}
 					}
 				case blockText:
@@ -1078,25 +1118,439 @@ func (m model) renderThoughtHeader(block assistantBlock) string {
 	return thoughtHeaderStyle.Render(fmt.Sprintf("✓ Had %d %s %s", count, word, chevron))
 }
 
-func (m model) renderToolHeader(block assistantBlock) string {
-	active := hasActiveTool(block)
-	count := len(block.tools)
-	word := "Tools"
-	if count == 1 {
-		word = "Tool"
+func (m model) renderToolGroupHeader(group toolRenderGroup) string {
+	if group.active {
+		return toolHeaderStyle.Render(fmt.Sprintf("%s %s… ▾", m.spinner.View(), group.runningLabel))
 	}
-	if active {
-		return toolHeaderStyle.Render(fmt.Sprintf("%s Running %d %s… ▾", m.spinner.View(), count, word))
-	}
+
 	chevron := "▸"
-	if block.expanded {
+	if group.expanded {
 		chevron = "▾"
 	}
-	verb := "Ran"
-	if anyFailedTool(block) {
-		verb = "Ran"
+	return toolHeaderStyle.Render(fmt.Sprintf("✓ %s %s", group.label, chevron))
+}
+
+type toolRenderGroup struct {
+	toolStart    int
+	toolEnd      int
+	changeIndex  int
+	label        string
+	runningLabel string
+	body         string
+	wrapBody     bool
+	expanded     bool
+	active       bool
+}
+
+func (m model) toolRenderGroups(block assistantBlock) []toolRenderGroup {
+	groups := []toolRenderGroup{}
+
+	for idx := 0; idx < len(block.tools); {
+		tool := block.tools[idx]
+		switch {
+		case isBashTool(tool):
+			end := idx + 1
+			for end < len(block.tools) && isBashTool(block.tools[end]) {
+				end++
+			}
+			groups = append(groups, buildBashToolGroup(block, idx, end))
+			idx = end
+
+		case isApplyPatchTool(tool):
+			applyGroups := buildApplyPatchToolGroups(block, idx)
+			groups = append(groups, applyGroups...)
+			idx++
+
+		case isDedicatedBuiltinTool(tool):
+			groups = append(groups, buildDedicatedBuiltinToolGroup(block, idx))
+			idx++
+
+		default:
+			end := idx + 1
+			for end < len(block.tools) && isFallbackAggregateTool(block.tools[end]) {
+				end++
+			}
+			groups = append(groups, buildFallbackToolGroup(block, idx, end))
+			idx = end
+		}
 	}
-	return toolHeaderStyle.Render(fmt.Sprintf("✓ %s %d %s %s", verb, count, word, chevron))
+
+	return groups
+}
+
+func buildBashToolGroup(block assistantBlock, start, end int) toolRenderGroup {
+	count := end - start
+	return toolRenderGroup{
+		toolStart:    start,
+		toolEnd:      end - 1,
+		changeIndex:  -1,
+		label:        fmt.Sprintf("ran %d %s", count, pluralize(count, "command", "commands")),
+		runningLabel: fmt.Sprintf("running %d %s", count, pluralize(count, "command", "commands")),
+		body:         joinTools(block.tools[start:end]),
+		wrapBody:     true,
+		expanded:     block.expanded || anyExpandedTool(block.tools[start:end]),
+		active:       hasActiveToolRange(block.tools[start:end]),
+	}
+}
+
+func buildFallbackToolGroup(block assistantBlock, start, end int) toolRenderGroup {
+	count := end - start
+	return toolRenderGroup{
+		toolStart:    start,
+		toolEnd:      end - 1,
+		changeIndex:  -1,
+		label:        fmt.Sprintf("ran %d %s", count, pluralize(count, "tool", "tools")),
+		runningLabel: fmt.Sprintf("running %d %s", count, pluralize(count, "tool", "tools")),
+		body:         joinTools(block.tools[start:end]),
+		wrapBody:     true,
+		expanded:     block.expanded || anyExpandedTool(block.tools[start:end]),
+		active:       hasActiveToolRange(block.tools[start:end]),
+	}
+}
+
+func buildDedicatedBuiltinToolGroup(block assistantBlock, idx int) toolRenderGroup {
+	tool := block.tools[idx]
+	label, runningLabel := dedicatedBuiltinToolLabels(tool)
+	return toolRenderGroup{
+		toolStart:    idx,
+		toolEnd:      idx,
+		changeIndex:  -1,
+		label:        label,
+		runningLabel: runningLabel,
+		body:         joinTools([]toolCall{tool}),
+		wrapBody:     true,
+		expanded:     block.expanded || tool.expanded,
+		active:       !tool.done,
+	}
+}
+
+func buildApplyPatchToolGroups(block assistantBlock, idx int) []toolRenderGroup {
+	tool := block.tools[idx]
+	changes, hasMetadata := applyPatchChanges(tool)
+	if len(changes) == 0 {
+		label := "Applied patch"
+		if tool.failed {
+			label = "Apply patch failed"
+		}
+		return []toolRenderGroup{{
+			toolStart:    idx,
+			toolEnd:      idx,
+			changeIndex:  -1,
+			label:        label,
+			runningLabel: "Applying patch",
+			body:         joinTools([]toolCall{tool}),
+			wrapBody:     true,
+			expanded:     block.expanded || tool.expanded,
+			active:       !tool.done,
+		}}
+	}
+
+	groups := make([]toolRenderGroup, 0, len(changes))
+	for changeIdx, change := range changes {
+		body := applyPatchChangeDiff(change)
+		wrapBody := false
+		if strings.TrimSpace(body) == "" && !hasMetadata {
+			body = joinTools([]toolCall{tool})
+			wrapBody = true
+		}
+		if strings.TrimSpace(body) == "" && strings.TrimSpace(tool.result) != "" {
+			body = strings.TrimSpace(tool.result)
+			wrapBody = true
+		}
+
+		groups = append(groups, toolRenderGroup{
+			toolStart:    idx,
+			toolEnd:      idx,
+			changeIndex:  changeIdx,
+			label:        applyPatchChangeLabel(change),
+			runningLabel: "Applying patch",
+			body:         body,
+			wrapBody:     wrapBody,
+			expanded:     block.expanded || tool.expanded || tool.expandedChanges[changeIdx],
+			active:       !tool.done,
+		})
+	}
+
+	return groups
+}
+
+func applyPatchChanges(tool toolCall) ([]tooltypes.ApplyPatchChange, bool) {
+	if tool.structured == nil {
+		return nil, false
+	}
+
+	var meta tooltypes.ApplyPatchMetadata
+	if !tooltypes.ExtractMetadata(tool.structured.Metadata, &meta) {
+		return nil, false
+	}
+
+	if len(meta.Changes) > 0 {
+		return meta.Changes, true
+	}
+
+	changes := make([]tooltypes.ApplyPatchChange, 0, len(meta.Added)+len(meta.Modified)+len(meta.Deleted))
+	for _, path := range meta.Added {
+		changes = append(changes, tooltypes.ApplyPatchChange{Path: path, Operation: tooltypes.ApplyPatchOperationAdd})
+	}
+	for _, path := range meta.Modified {
+		changes = append(changes, tooltypes.ApplyPatchChange{Path: path, Operation: tooltypes.ApplyPatchOperationUpdate})
+	}
+	for _, path := range meta.Deleted {
+		changes = append(changes, tooltypes.ApplyPatchChange{Path: path, Operation: tooltypes.ApplyPatchOperationDelete})
+	}
+	return changes, true
+}
+
+func applyPatchChangeLabel(change tooltypes.ApplyPatchChange) string {
+	displayPath := change.Path
+	if strings.TrimSpace(change.MovePath) != "" {
+		displayPath = fmt.Sprintf("%s -> %s", change.Path, change.MovePath)
+	}
+
+	switch strings.ToLower(strings.TrimSpace(change.Operation)) {
+	case tooltypes.ApplyPatchOperationAdd, "write":
+		return fmt.Sprintf("write %s", displayPath)
+	case tooltypes.ApplyPatchOperationDelete:
+		return fmt.Sprintf("delete %s", displayPath)
+	case "move":
+		return fmt.Sprintf("move %s", displayPath)
+	default:
+		if strings.TrimSpace(change.MovePath) != "" {
+			return fmt.Sprintf("move %s", displayPath)
+		}
+		return fmt.Sprintf("edit %s", displayPath)
+	}
+}
+
+func applyPatchChangeDiff(change tooltypes.ApplyPatchChange) string {
+	if strings.TrimSpace(change.UnifiedDiff) != "" {
+		return strings.TrimSuffix(change.UnifiedDiff, "\n")
+	}
+
+	switch strings.ToLower(strings.TrimSpace(change.Operation)) {
+	case tooltypes.ApplyPatchOperationAdd, "write":
+		if change.OldContent != "" || change.NewContent != "" {
+			return strings.TrimSuffix(udiff.Unified(change.Path, change.Path, change.OldContent, change.NewContent), "\n")
+		}
+	case tooltypes.ApplyPatchOperationDelete:
+		if change.OldContent != "" {
+			return strings.TrimSuffix(udiff.Unified(change.Path, change.Path, change.OldContent, ""), "\n")
+		}
+	case "move", tooltypes.ApplyPatchOperationUpdate:
+		if change.OldContent != "" || change.NewContent != "" {
+			newPath := change.Path
+			if strings.TrimSpace(change.MovePath) != "" {
+				newPath = change.MovePath
+			}
+			return strings.TrimSuffix(udiff.Unified(change.Path, newPath, change.OldContent, change.NewContent), "\n")
+		}
+	}
+
+	return ""
+}
+
+func dedicatedBuiltinToolLabels(tool toolCall) (string, string) {
+	switch normalizedToolName(tool) {
+	case "openai_web_search", "web_search":
+		return webSearchToolLabel(tool), "Searching web"
+	case "web_fetch":
+		return webFetchToolLabel(tool), "Fetching web page"
+	case "view_image":
+		return viewImageToolLabel(tool), "Viewing image"
+	case "skill":
+		return skillToolLabel(tool), "Loading skill"
+	default:
+		name := normalizedToolName(tool)
+		if name == "" {
+			name = "tool"
+		}
+		return fmt.Sprintf("ran %s", name), fmt.Sprintf("running %s", name)
+	}
+}
+
+func webSearchToolLabel(tool toolCall) string {
+	if tool.structured != nil {
+		var meta tooltypes.OpenAIWebSearchMetadata
+		if tooltypes.ExtractMetadata(tool.structured.Metadata, &meta) {
+			switch strings.ToLower(strings.TrimSpace(meta.Action)) {
+			case "open_page":
+				return fmt.Sprintf("Opened %s", firstNonEmpty(meta.URL, "web page"))
+			case "find_in_page":
+				if meta.Pattern != "" {
+					return fmt.Sprintf("Searched %s for %q", firstNonEmpty(meta.URL, "web page"), meta.Pattern)
+				}
+				return fmt.Sprintf("Searched %s", firstNonEmpty(meta.URL, "web page"))
+			case "search":
+				if len(meta.Queries) > 0 {
+					return fmt.Sprintf("Searched web for %q", meta.Queries[0])
+				}
+			}
+		}
+	}
+
+	fields := toolInputFields(tool.input)
+	if queries, ok := stringSliceField(fields, "queries"); ok && len(queries) > 0 {
+		return fmt.Sprintf("Searched web for %q", queries[0])
+	}
+	if query := stringField(fields, "query"); query != "" {
+		return fmt.Sprintf("Searched web for %q", query)
+	}
+	if url := stringField(fields, "url"); url != "" {
+		return fmt.Sprintf("Opened %s", url)
+	}
+	return "Searched web"
+}
+
+func webFetchToolLabel(tool toolCall) string {
+	if tool.structured != nil {
+		var meta tooltypes.WebFetchMetadata
+		if tooltypes.ExtractMetadata(tool.structured.Metadata, &meta) && strings.TrimSpace(meta.URL) != "" {
+			return fmt.Sprintf("Fetched %s", meta.URL)
+		}
+	}
+	if url := stringField(toolInputFields(tool.input), "url"); url != "" {
+		return fmt.Sprintf("Fetched %s", url)
+	}
+	return "Fetched web page"
+}
+
+func viewImageToolLabel(tool toolCall) string {
+	if tool.structured != nil {
+		var meta tooltypes.ViewImageMetadata
+		if tooltypes.ExtractMetadata(tool.structured.Metadata, &meta) && strings.TrimSpace(meta.Path) != "" {
+			return fmt.Sprintf("Viewed image %s", meta.Path)
+		}
+	}
+	if path := stringField(toolInputFields(tool.input), "path"); path != "" {
+		return fmt.Sprintf("Viewed image %s", path)
+	}
+	return "Viewed image"
+}
+
+func skillToolLabel(tool toolCall) string {
+	if tool.structured != nil {
+		var meta tooltypes.SkillMetadata
+		if tooltypes.ExtractMetadata(tool.structured.Metadata, &meta) && strings.TrimSpace(meta.SkillName) != "" {
+			return fmt.Sprintf("Loaded skill %s", meta.SkillName)
+		}
+	}
+	if skillName := stringField(toolInputFields(tool.input), "skill_name"); skillName != "" {
+		return fmt.Sprintf("Loaded skill %s", skillName)
+	}
+	if skillName := stringField(toolInputFields(tool.input), "skillName"); skillName != "" {
+		return fmt.Sprintf("Loaded skill %s", skillName)
+	}
+	return "Loaded skill"
+}
+
+func isFallbackAggregateTool(tool toolCall) bool {
+	return !isBashTool(tool) && !isApplyPatchTool(tool) && !isDedicatedBuiltinTool(tool)
+}
+
+func isBashTool(tool toolCall) bool {
+	return normalizedToolName(tool) == "bash"
+}
+
+func isApplyPatchTool(tool toolCall) bool {
+	return normalizedToolName(tool) == "apply_patch"
+}
+
+func isDedicatedBuiltinTool(tool toolCall) bool {
+	switch normalizedToolName(tool) {
+	case "openai_web_search", "web_search", "web_fetch", "view_image", "skill":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizedToolName(tool toolCall) string {
+	if tool.structured != nil {
+		if tool.structured.Metadata != nil {
+			if metadataType := strings.TrimSpace(tool.structured.Metadata.ToolType()); metadataType != "" {
+				return strings.ToLower(metadataType)
+			}
+		}
+		if name := strings.TrimSpace(tool.structured.ToolName); name != "" {
+			return strings.ToLower(name)
+		}
+	}
+	return strings.ToLower(strings.TrimSpace(tool.name))
+}
+
+func anyExpandedTool(tools []toolCall) bool {
+	for _, tool := range tools {
+		if tool.expanded {
+			return true
+		}
+	}
+	return false
+}
+
+func hasActiveToolRange(tools []toolCall) bool {
+	for _, tool := range tools {
+		if !tool.done {
+			return true
+		}
+	}
+	return false
+}
+
+func pluralize(count int, singular, plural string) string {
+	if count == 1 {
+		return singular
+	}
+	return plural
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func toolInputFields(input string) map[string]any {
+	var fields map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(input)), &fields); err != nil {
+		return nil
+	}
+	return fields
+}
+
+func stringField(fields map[string]any, key string) string {
+	if len(fields) == 0 {
+		return ""
+	}
+	value, _ := fields[key].(string)
+	return strings.TrimSpace(value)
+}
+
+func stringSliceField(fields map[string]any, key string) ([]string, bool) {
+	if len(fields) == 0 {
+		return nil, false
+	}
+	value, ok := fields[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch typed := value.(type) {
+	case []string:
+		return typed, true
+	case []any:
+		items := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
+				items = append(items, strings.TrimSpace(text))
+			}
+		}
+		return items, len(items) > 0
+	default:
+		return nil, false
+	}
 }
 
 func (m model) renderInputBox() string {
@@ -1191,10 +1645,25 @@ func compactMarkdownStyle() ansi.StyleConfig {
 	style.Document.BlockSuffix = ""
 	style.Document.Color = nil
 	style.Document.Margin = uintPtr(0)
+	style.BlockQuote.Color = stringPtr("245")
 	style.Paragraph.Margin = uintPtr(0)
+	style.Heading.Color = stringPtr("147")
 	style.Heading.Margin = uintPtr(0)
 	style.H1.Margin = uintPtr(0)
+	style.H1.Color = stringPtr("183")
 	style.H1.BackgroundColor = nil
+	style.H2.Color = stringPtr("147")
+	style.H3.Color = stringPtr("147")
+	style.H4.Color = stringPtr("147")
+	style.H5.Color = stringPtr("147")
+	style.H6.Color = stringPtr("245")
+	style.HorizontalRule.Color = stringPtr("240")
+	style.Link.Color = stringPtr("147")
+	style.LinkText.Color = stringPtr("151")
+	style.Image.Color = stringPtr("147")
+	style.ImageText.Color = stringPtr("151")
+	style.Code.Color = stringPtr("151")
+	style.Code.BackgroundColor = nil
 	style.H2.Margin = uintPtr(0)
 	style.H3.Margin = uintPtr(0)
 	style.H4.Margin = uintPtr(0)
@@ -1202,10 +1671,46 @@ func compactMarkdownStyle() ansi.StyleConfig {
 	style.H6.Margin = uintPtr(0)
 	style.List.Margin = uintPtr(0)
 	style.CodeBlock.Margin = uintPtr(0)
+	style.CodeBlock.Color = stringPtr("248")
+	if style.CodeBlock.Chroma != nil {
+		chroma := *style.CodeBlock.Chroma
+		style.CodeBlock.Chroma = &chroma
+		style.CodeBlock.Chroma.Text.Color = stringPtr("252")
+		style.CodeBlock.Chroma.Error.Color = stringPtr("252")
+		style.CodeBlock.Chroma.Error.BackgroundColor = stringPtr("240")
+		style.CodeBlock.Chroma.Comment.Color = stringPtr("244")
+		style.CodeBlock.Chroma.CommentPreproc.Color = stringPtr("151")
+		style.CodeBlock.Chroma.Keyword.Color = stringPtr("147")
+		style.CodeBlock.Chroma.KeywordReserved.Color = stringPtr("147")
+		style.CodeBlock.Chroma.KeywordNamespace.Color = stringPtr("147")
+		style.CodeBlock.Chroma.KeywordType.Color = stringPtr("151")
+		style.CodeBlock.Chroma.Operator.Color = stringPtr("147")
+		style.CodeBlock.Chroma.Punctuation.Color = stringPtr("245")
+		style.CodeBlock.Chroma.Name.Color = stringPtr("252")
+		style.CodeBlock.Chroma.NameBuiltin.Color = stringPtr("151")
+		style.CodeBlock.Chroma.NameTag.Color = stringPtr("147")
+		style.CodeBlock.Chroma.NameAttribute.Color = stringPtr("151")
+		style.CodeBlock.Chroma.NameClass.Color = stringPtr("252")
+		style.CodeBlock.Chroma.NameClass.Underline = nil
+		style.CodeBlock.Chroma.NameClass.Bold = nil
+		style.CodeBlock.Chroma.NameDecorator.Color = stringPtr("151")
+		style.CodeBlock.Chroma.NameFunction.Color = stringPtr("151")
+		style.CodeBlock.Chroma.LiteralNumber.Color = stringPtr("183")
+		style.CodeBlock.Chroma.LiteralString.Color = stringPtr("187")
+		style.CodeBlock.Chroma.LiteralStringEscape.Color = stringPtr("151")
+		style.CodeBlock.Chroma.GenericDeleted.Color = stringPtr("183")
+		style.CodeBlock.Chroma.GenericInserted.Color = stringPtr("151")
+		style.CodeBlock.Chroma.GenericSubheading.Color = stringPtr("147")
+		style.CodeBlock.Chroma.Background.BackgroundColor = nil
+	}
 	return style
 }
 
 func uintPtr(value uint) *uint {
+	return &value
+}
+
+func stringPtr(value string) *string {
 	return &value
 }
 
@@ -1357,7 +1862,33 @@ func (m *model) toggleDetailAt(screenY int) bool {
 		if region.line != contentLine || region.entryIndex < 0 || region.entryIndex >= len(m.entries) || region.blockIndex < 0 || region.blockIndex >= len(m.entries[region.entryIndex].blocks) {
 			continue
 		}
-		m.entries[region.entryIndex].blocks[region.blockIndex].expanded = !m.entries[region.entryIndex].blocks[region.blockIndex].expanded
+		block := &m.entries[region.entryIndex].blocks[region.blockIndex]
+		if region.kind == detailTools && region.toolStart >= 0 && region.toolStart < len(block.tools) {
+			if region.changeIndex >= 0 {
+				tool := &block.tools[region.toolStart]
+				if tool.expandedChanges == nil {
+					tool.expandedChanges = map[int]bool{}
+				}
+				tool.expandedChanges[region.changeIndex] = !tool.expandedChanges[region.changeIndex]
+				return true
+			}
+
+			shouldExpand := true
+			end := min(region.toolEnd, len(block.tools)-1)
+			for toolIdx := region.toolStart; toolIdx <= end; toolIdx++ {
+				if !block.tools[toolIdx].expanded {
+					shouldExpand = true
+					break
+				}
+				shouldExpand = false
+			}
+			for toolIdx := region.toolStart; toolIdx <= end; toolIdx++ {
+				block.tools[toolIdx].expanded = shouldExpand
+			}
+			return true
+		}
+
+		block.expanded = !block.expanded
 		return true
 	}
 	return false
@@ -1370,15 +1901,6 @@ func hasActiveThought(block assistantBlock) bool {
 func hasActiveTool(block assistantBlock) bool {
 	for _, tool := range block.tools {
 		if !tool.done {
-			return true
-		}
-	}
-	return false
-}
-
-func anyFailedTool(block assistantBlock) bool {
-	for _, tool := range block.tools {
-		if tool.failed {
 			return true
 		}
 	}
@@ -1433,6 +1955,34 @@ func structuredToolResultText(result *tooltypes.StructuredToolResult) string {
 		return result.Error
 	}
 	return ""
+}
+
+func parseStructuredToolResult(content string) (*tooltypes.StructuredToolResult, bool) {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return nil, false
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(content), &raw); err != nil {
+		return nil, false
+	}
+	if _, ok := raw["success"].(bool); !ok {
+		return nil, false
+	}
+
+	var result tooltypes.StructuredToolResult
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return nil, false
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, false
+	}
+	if result.ToolName == "" && result.Metadata == nil {
+		return nil, false
+	}
+	return &result, true
 }
 
 func userMessageContentText(content any) string {

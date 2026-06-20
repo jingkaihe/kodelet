@@ -69,7 +69,7 @@ func TestCancelActiveRunFinishesActiveBlocks(t *testing.T) {
 	assert.False(t, hasActiveThought(m.entries[1].blocks[0]))
 	assert.False(t, hasActiveTool(m.entries[1].blocks[1]))
 	assert.Contains(t, content, "Had 1 Thought")
-	assert.Contains(t, content, "Ran 1 Tool")
+	assert.Contains(t, content, "ran 1 command")
 	assert.NotContains(t, content, "Thinking")
 }
 
@@ -466,7 +466,7 @@ func TestRenderTranscriptDetailsAndMouseToggle(t *testing.T) {
 	content, regions := m.renderTranscript()
 	require.Len(t, regions, 2)
 	assert.Contains(t, content, "Had 1 Thought")
-	assert.Contains(t, content, "Ran 1 Tool")
+	assert.Contains(t, content, "ran 1 command")
 	assert.NotContains(t, content, "hidden thought")
 
 	assert.True(t, m.toggleDetailAt(regions[0].line))
@@ -497,8 +497,119 @@ func TestRenderTranscriptAddsSpacingBetweenAssistantBlocks(t *testing.T) {
 	content, _ := m.renderTranscript()
 
 	assert.Contains(t, content, "Had 1 Thought ▸\n\n")
-	assert.Contains(t, content, "Ran 1 Tool ▸\n\n")
+	assert.Contains(t, content, "ran 1 command ▸\n\n")
 	assert.Contains(t, content, "\n\nfinal answer")
+}
+
+func TestRenderTranscriptGroupsToolBlocksByType(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 120
+	m.height = 40
+	m.resize()
+	m.entries = []chatEntry{{
+		kind: entryAssistant,
+		blocks: []assistantBlock{{
+			kind: blockTools,
+			tools: []toolCall{
+				{name: "bash", done: true},
+				{name: "bash", done: true},
+				{
+					name: "apply_patch",
+					done: true,
+					structured: &tooltypes.StructuredToolResult{
+						ToolName: "apply_patch",
+						Success:  true,
+						Metadata: &tooltypes.ApplyPatchMetadata{Changes: []tooltypes.ApplyPatchChange{
+							{Path: "edit.go", Operation: tooltypes.ApplyPatchOperationUpdate, UnifiedDiff: "@@ -1 +1 @@\n-old\n+new\n"},
+							{Path: "new.go", Operation: tooltypes.ApplyPatchOperationAdd, NewContent: "package main\n"},
+							{Path: "old.go", Operation: tooltypes.ApplyPatchOperationDelete, OldContent: "package old\n"},
+						}},
+					},
+				},
+				{
+					name:  "web_fetch",
+					input: `{"url":"https://example.com"}`,
+					done:  true,
+				},
+				{name: "grep_tool", done: true},
+				{name: "glob_tool", done: true},
+			},
+		}},
+	}}
+
+	content, regions := m.renderTranscript()
+
+	assert.Contains(t, content, "ran 2 commands")
+	assert.Contains(t, content, "edit edit.go")
+	assert.Contains(t, content, "write new.go")
+	assert.Contains(t, content, "delete old.go")
+	assert.Contains(t, content, "Fetched https://example.com")
+	assert.Contains(t, content, "ran 2 tools")
+	require.Len(t, regions, 6)
+}
+
+func TestRenderTranscriptApplyPatchDiffToggle(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 100
+	m.height = 30
+	m.resize()
+	m.entries = []chatEntry{{
+		kind: entryAssistant,
+		blocks: []assistantBlock{{
+			kind: blockTools,
+			tools: []toolCall{{
+				name: "apply_patch",
+				done: true,
+				structured: &tooltypes.StructuredToolResult{
+					ToolName: "apply_patch",
+					Success:  true,
+					Metadata: &tooltypes.ApplyPatchMetadata{Changes: []tooltypes.ApplyPatchChange{{
+						Path:        "edit.go",
+						Operation:   tooltypes.ApplyPatchOperationUpdate,
+						UnifiedDiff: "@@ -1 +1 @@\n-old\n+new\n",
+					}}},
+				},
+			}},
+		}},
+	}}
+
+	m.refreshViewport(true)
+	content, regions := m.renderTranscript()
+	require.Len(t, regions, 1)
+	m.detailRegions = regions
+	assert.Contains(t, content, "edit edit.go")
+	assert.NotContains(t, content, "@@ -1 +1 @@")
+
+	assert.True(t, m.toggleDetailAt(regions[0].line))
+	content, _ = m.renderTranscript()
+	assert.Contains(t, content, "@@ -1 +1 @@")
+	assert.Contains(t, content, "-old")
+	assert.Contains(t, content, "+new")
+}
+
+func TestEntriesFromHistoryPreservesStructuredToolResultMetadata(t *testing.T) {
+	structured := tooltypes.StructuredToolResult{
+		ToolName: "web_fetch",
+		Success:  true,
+		Metadata: &tooltypes.WebFetchMetadata{URL: "https://example.com", Content: "ok"},
+	}
+	data, err := structured.MarshalJSON()
+	require.NoError(t, err)
+
+	entries := entriesFromHistory([]conversations.StreamableMessage{
+		{Kind: "tool-use", Role: "assistant", ToolCallID: "call-1", ToolName: "web_fetch", Input: `{"url":"https://example.com"}`},
+		{Kind: "tool-result", Role: "user", ToolCallID: "call-1", Content: string(data)},
+	})
+
+	require.Len(t, entries, 1)
+	require.Len(t, entries[0].blocks, 1)
+	require.Len(t, entries[0].blocks[0].tools, 1)
+	tool := entries[0].blocks[0].tools[0]
+	require.NotNil(t, tool.structured)
+	assert.Equal(t, "web_fetch", tool.structured.ToolName)
+	assert.Contains(t, tool.result, "Web Fetch: https://example.com")
 }
 
 func TestRenderTranscriptRendersAssistantMarkdown(t *testing.T) {
