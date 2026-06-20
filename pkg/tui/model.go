@@ -9,12 +9,16 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/glamour/ansi"
+	"github.com/charmbracelet/glamour/styles"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
@@ -27,7 +31,10 @@ import (
 	"github.com/pkg/errors"
 )
 
-const inputHeight = 5
+const (
+	inputHeight            = 5
+	transcriptRefreshDelay = 16 * time.Millisecond
+)
 
 // Config configures the native chat TUI.
 type Config struct {
@@ -90,6 +97,13 @@ const (
 	blockTools
 )
 
+type markdownKind int
+
+const (
+	markdownAssistant markdownKind = iota
+	markdownThought
+)
+
 type assistantBlock struct {
 	kind     assistantBlockKind
 	text     string
@@ -128,8 +142,16 @@ type model struct {
 	height     int
 	autoFollow bool
 
+	pendingRefresh       bool
+	pendingRefreshBottom bool
+
 	entries []chatEntry
 	usage   llmtypes.Usage
+
+	assistantMarkdownRenderer      *glamour.TermRenderer
+	assistantMarkdownRendererWidth int
+	thoughtMarkdownRenderer        *glamour.TermRenderer
+	thoughtMarkdownRendererWidth   int
 
 	running     bool
 	activeRunID int
@@ -160,6 +182,8 @@ type initialHistoryMsg struct {
 	usage   llmtypes.Usage
 	err     error
 }
+
+type transcriptRefreshMsg struct{}
 
 type tuiSink struct {
 	ch    chan<- tea.Msg
@@ -234,6 +258,12 @@ func waitForMsg(ch <-chan tea.Msg) tea.Cmd {
 		}
 		return msg
 	}
+}
+
+func waitForTranscriptRefresh() tea.Cmd {
+	return tea.Tick(transcriptRefreshDelay, func(time.Time) tea.Msg {
+		return transcriptRefreshMsg{}
+	})
 }
 
 func loadInitialHistory(ctx context.Context, conversationID string) tea.Cmd {
@@ -489,7 +519,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cancelActiveRun()
 			}
 			return m, nil
-		case "ctrl+t", "alt+t":
+		case "ctrl+o":
 			m.toggleAllDetails()
 			m.refreshViewport(false)
 			return m, nil
@@ -520,6 +550,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, waitForMsg(m.runCh)
 		}
 		m.applyChatEvent(msg.event)
+		if shouldDebounceChatEvent(msg.event) {
+			return m, tea.Batch(waitForMsg(m.runCh), m.queueTranscriptRefresh(m.autoFollow))
+		}
 		m.refreshViewport(m.autoFollow)
 		return m, waitForMsg(m.runCh)
 
@@ -544,6 +577,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.refreshViewport(m.autoFollow)
 		return m, waitForMsg(m.runCh)
+
+	case transcriptRefreshMsg:
+		if m.pendingRefresh {
+			m.refreshViewport(m.pendingRefreshBottom)
+		}
+		m.pendingRefresh = false
+		m.pendingRefreshBottom = false
+		return m, nil
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -591,6 +632,24 @@ func isVerticalViewportNavigation(msg tea.Msg) bool {
 		return msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown
 	}
 	return false
+}
+
+func (m *model) queueTranscriptRefresh(scrollBottom bool) tea.Cmd {
+	m.pendingRefreshBottom = m.pendingRefreshBottom || scrollBottom
+	if m.pendingRefresh {
+		return nil
+	}
+	m.pendingRefresh = true
+	return waitForTranscriptRefresh()
+}
+
+func shouldDebounceChatEvent(event webui.ChatEvent) bool {
+	switch event.Kind {
+	case "text-delta", "thinking-delta":
+		return true
+	default:
+		return false
+	}
 }
 
 func (m *model) resize() {
@@ -857,6 +916,8 @@ func (m *model) refreshViewport(scrollBottom bool) {
 	content, regions := m.renderTranscript()
 	m.detailRegions = regions
 	m.viewport.SetContent(content)
+	m.pendingRefresh = false
+	m.pendingRefreshBottom = false
 	if scrollBottom {
 		m.autoFollow = true
 		m.viewport.GotoBottom()
@@ -873,7 +934,7 @@ func (m model) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, transcript, input)
 }
 
-func (m model) renderTranscript() (string, []detailRegion) {
+func (m *model) renderTranscript() (string, []detailRegion) {
 	var b strings.Builder
 	regions := []detailRegion{}
 	line := 0
@@ -901,19 +962,21 @@ func (m model) renderTranscript() (string, []detailRegion) {
 			b.WriteString("\n")
 			line += lineCount(block)
 		case entryAssistant:
+			renderedAssistantBlock := false
 			for blockIdx, block := range entry.blocks {
 				switch block.kind {
 				case blockThoughts:
 					if len(block.thoughts) == 0 {
 						continue
 					}
+					m.renderAssistantBlockSeparator(&b, &line, &renderedAssistantBlock)
 					header := m.renderThoughtHeader(block)
 					b.WriteString(header)
 					b.WriteString("\n")
 					regions = append(regions, detailRegion{entryIndex: i, blockIndex: blockIdx, kind: detailThoughts, line: line})
 					line++
 					if block.expanded || hasActiveThought(block) {
-						body := indentText(wrapText(joinThoughts(block.thoughts), m.transcriptTextWidth()-2), "  ")
+						body := indentText(m.renderMarkdown(joinThoughts(block.thoughts), m.transcriptTextWidth()-2, markdownThought), "  ")
 						if strings.TrimSpace(body) != "" {
 							rendered := thoughtBodyStyle.Render(body)
 							b.WriteString(rendered)
@@ -925,6 +988,7 @@ func (m model) renderTranscript() (string, []detailRegion) {
 					if len(block.tools) == 0 {
 						continue
 					}
+					m.renderAssistantBlockSeparator(&b, &line, &renderedAssistantBlock)
 					header := m.renderToolHeader(block)
 					b.WriteString(header)
 					b.WriteString("\n")
@@ -942,8 +1006,9 @@ func (m model) renderTranscript() (string, []detailRegion) {
 				case blockText:
 					trimmed := strings.TrimSpace(block.text)
 					if trimmed != "" {
-						wrapped := wrapText(trimmed, m.transcriptTextWidth())
-						rendered := assistantStyle.Render(wrapped)
+						m.renderAssistantBlockSeparator(&b, &line, &renderedAssistantBlock)
+						renderedMarkdown := m.renderMarkdown(trimmed, m.transcriptTextWidth(), markdownAssistant)
+						rendered := assistantStyle.Render(renderedMarkdown)
 						b.WriteString(rendered)
 						b.WriteString("\n")
 						line += lineCount(rendered)
@@ -964,6 +1029,15 @@ func (m model) renderTranscript() (string, []detailRegion) {
 	m.renderQueuedSteering(&b, &line)
 
 	return b.String(), regions
+}
+
+func (m model) renderAssistantBlockSeparator(b *strings.Builder, line *int, renderedBlock *bool) {
+	if !*renderedBlock {
+		*renderedBlock = true
+		return
+	}
+	b.WriteString("\n")
+	(*line)++
 }
 
 func (m model) renderQueuedSteering(b *strings.Builder, line *int) {
@@ -1058,6 +1132,81 @@ func (m model) transcriptTextWidth() int {
 		return max(20, m.viewport.Width-2)
 	}
 	return max(20, m.width-2)
+}
+
+func (m *model) renderMarkdown(text string, width int, kind markdownKind) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+
+	renderer, err := m.markdownRenderer(max(10, width), kind)
+	if err != nil {
+		return wrapText(text, width)
+	}
+	rendered, err := renderer.Render(text)
+	if err != nil {
+		return wrapText(text, width)
+	}
+	return strings.TrimSpace(rendered)
+}
+
+func (m *model) markdownRenderer(width int, kind markdownKind) (*glamour.TermRenderer, error) {
+	if kind == markdownThought {
+		if m.thoughtMarkdownRenderer != nil && m.thoughtMarkdownRendererWidth == width {
+			return m.thoughtMarkdownRenderer, nil
+		}
+		renderer, err := newMarkdownRenderer(width, thoughtMarkdownStyle)
+		if err != nil {
+			return nil, err
+		}
+		m.thoughtMarkdownRenderer = renderer
+		m.thoughtMarkdownRendererWidth = width
+		return renderer, nil
+	}
+
+	if m.assistantMarkdownRenderer != nil && m.assistantMarkdownRendererWidth == width {
+		return m.assistantMarkdownRenderer, nil
+	}
+	renderer, err := newMarkdownRenderer(width, assistantMarkdownStyle)
+	if err != nil {
+		return nil, err
+	}
+	m.assistantMarkdownRenderer = renderer
+	m.assistantMarkdownRendererWidth = width
+	return renderer, nil
+}
+
+func newMarkdownRenderer(width int, style ansi.StyleConfig) (*glamour.TermRenderer, error) {
+	return glamour.NewTermRenderer(
+		glamour.WithStyles(style),
+		glamour.WithWordWrap(max(10, width)),
+		glamour.WithPreservedNewLines(),
+	)
+}
+
+func compactMarkdownStyle() ansi.StyleConfig {
+	style := styles.DarkStyleConfig
+	style.Document.BlockPrefix = ""
+	style.Document.BlockSuffix = ""
+	style.Document.Color = nil
+	style.Document.Margin = uintPtr(0)
+	style.Paragraph.Margin = uintPtr(0)
+	style.Heading.Margin = uintPtr(0)
+	style.H1.Margin = uintPtr(0)
+	style.H1.BackgroundColor = nil
+	style.H2.Margin = uintPtr(0)
+	style.H3.Margin = uintPtr(0)
+	style.H4.Margin = uintPtr(0)
+	style.H5.Margin = uintPtr(0)
+	style.H6.Margin = uintPtr(0)
+	style.List.Margin = uintPtr(0)
+	style.CodeBlock.Margin = uintPtr(0)
+	return style
+}
+
+func uintPtr(value uint) *uint {
+	return &value
 }
 
 func rightLabeledBorder(left, right string, width int, label string) string {
@@ -1243,7 +1392,7 @@ func joinThoughts(thoughts []thoughtBlock) string {
 			parts = append(parts, trimmed)
 		}
 	}
-	return strings.Join(parts, "\n")
+	return strings.Join(parts, "\n\n")
 }
 
 func joinTools(tools []toolCall) string {
@@ -1499,6 +1648,9 @@ var (
 	userStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("114")).Italic(true)
 	assistantStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
 	mutedStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+
+	assistantMarkdownStyle = compactMarkdownStyle()
+	thoughtMarkdownStyle   = compactMarkdownStyle()
 
 	thoughtHeaderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("229"))
 	thoughtBodyStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)

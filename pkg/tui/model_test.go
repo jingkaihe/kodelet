@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -167,6 +168,29 @@ func TestRunningShiftEnterInsertsSteeringNewline(t *testing.T) {
 	assert.True(t, m.running)
 	assert.Equal(t, "first line\n", m.textarea.Value())
 	assert.Empty(t, m.queuedSteering)
+}
+
+func TestCtrlOTogglesDetails(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.resize()
+	m.entries = []chatEntry{{
+		kind: entryAssistant,
+		blocks: []assistantBlock{{
+			kind:     blockThoughts,
+			thoughts: []thoughtBlock{{text: "toggle me", done: true}},
+		}},
+	}}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+	m = updated.(model)
+	content, _ := m.renderTranscript()
+
+	assert.Nil(t, cmd)
+	assert.True(t, m.entries[0].blocks[0].expanded)
+	assert.Contains(t, content, "toggle me")
 }
 
 func TestRunningComposerQueuesSteering(t *testing.T) {
@@ -453,6 +477,104 @@ func TestRenderTranscriptDetailsAndMouseToggle(t *testing.T) {
 	content, _ = m.renderTranscript()
 	assert.Contains(t, content, "input: {\"cmd\":\"pwd\"}")
 	assert.Contains(t, content, "result: ok")
+}
+
+func TestRenderTranscriptAddsSpacingBetweenAssistantBlocks(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.resize()
+	m.entries = []chatEntry{{
+		kind: entryAssistant,
+		blocks: []assistantBlock{
+			{kind: blockThoughts, thoughts: []thoughtBlock{{text: "thought", done: true}}},
+			{kind: blockTools, tools: []toolCall{{name: "bash", done: true}}},
+			{kind: blockText, text: "final answer"},
+		},
+	}}
+
+	content, _ := m.renderTranscript()
+
+	assert.Contains(t, content, "Had 1 Thought ▸\n\n")
+	assert.Contains(t, content, "Ran 1 Tool ▸\n\n")
+	assert.Contains(t, content, "\n\nfinal answer")
+}
+
+func TestRenderTranscriptRendersAssistantMarkdown(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.resize()
+	m.entries = []chatEntry{{
+		kind: entryAssistant,
+		blocks: []assistantBlock{{
+			kind: blockText,
+			text: "Here is `code`:\n\n- first\n- second",
+		}},
+	}}
+
+	content, _ := m.renderTranscript()
+	plain := xansi.Strip(content)
+
+	assert.Contains(t, plain, "Here is")
+	assert.Contains(t, plain, "code")
+	assert.Contains(t, plain, "• first")
+	assert.Contains(t, plain, "• second")
+}
+
+func TestRenderTranscriptSeparatesThinkingMarkdownBlocks(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.resize()
+	m.entries = []chatEntry{{
+		kind: entryAssistant,
+		blocks: []assistantBlock{{
+			kind:     blockThoughts,
+			expanded: true,
+			thoughts: []thoughtBlock{
+				{text: "First thought"},
+				{text: "Second thought"},
+			},
+		}},
+	}}
+
+	content, _ := m.renderTranscript()
+	plain := xansi.Strip(content)
+
+	assert.Contains(t, joinThoughts(m.entries[0].blocks[0].thoughts), "First thought\n\nSecond thought")
+	assert.Contains(t, plain, "First thought")
+	assert.Regexp(t, `First thought\s*\n\s*\n\s*Second thought`, plain)
+}
+
+func TestStreamingDeltasAreDebouncedBeforeViewportRefresh(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.resize()
+	m.activeRunID = 1
+	m.running = true
+	m.refreshViewport(true)
+	initialContent := m.viewport.View()
+
+	updated, cmd := m.Update(chatEventMsg{runID: 1, event: webui.ChatEvent{Kind: "text-delta", Delta: "**hello**"}})
+	m = updated.(model)
+
+	require.NotNil(t, cmd)
+	require.True(t, m.pendingRefresh)
+	require.Len(t, m.entries, 1)
+	assert.Equal(t, "**hello**", m.entries[0].blocks[0].text)
+	assert.Equal(t, initialContent, m.viewport.View())
+
+	updated, _ = m.Update(transcriptRefreshMsg{})
+	m = updated.(model)
+
+	assert.False(t, m.pendingRefresh)
+	assert.Contains(t, xansi.Strip(m.viewport.View()), "hello")
 }
 
 func TestStreamingPreservesViewportAfterUserScrollsUp(t *testing.T) {
