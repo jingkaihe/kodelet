@@ -455,6 +455,72 @@ func TestRenderTranscriptDetailsAndMouseToggle(t *testing.T) {
 	assert.Contains(t, content, "result: ok")
 }
 
+func TestStreamingPreservesViewportAfterUserScrollsUp(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 14
+	m.resize()
+	m.entries = []chatEntry{{
+		kind:   entryAssistant,
+		blocks: []assistantBlock{{kind: blockText, text: numberedLines(30)}},
+	}}
+	m.refreshViewport(true)
+	bottomOffset := m.viewport.YOffset
+	require.Greater(t, bottomOffset, 0)
+	require.True(t, m.autoFollow)
+
+	updated, _ := m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
+	m = updated.(model)
+	scrolledOffset := m.viewport.YOffset
+	require.Less(t, scrolledOffset, bottomOffset)
+	assert.False(t, m.autoFollow)
+
+	m.running = true
+	m.activeRunID = 1
+	updated, _ = m.Update(chatEventMsg{runID: 1, event: webui.ChatEvent{Kind: "text-delta", Delta: "\nstill streaming"}})
+	m = updated.(model)
+
+	assert.Equal(t, scrolledOffset, m.viewport.YOffset)
+	assert.False(t, m.autoFollow)
+}
+
+func TestScrollingBackToBottomResumesStreamingAutoFollow(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 14
+	m.resize()
+	m.entries = []chatEntry{{
+		kind:   entryAssistant,
+		blocks: []assistantBlock{{kind: blockText, text: numberedLines(30)}},
+	}}
+	m.refreshViewport(true)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	m = updated.(model)
+	require.False(t, m.autoFollow)
+	require.False(t, m.viewport.AtBottom())
+
+	for range 10 {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+		m = updated.(model)
+		if m.viewport.AtBottom() {
+			break
+		}
+	}
+	require.True(t, m.viewport.AtBottom())
+	require.True(t, m.autoFollow)
+
+	m.running = true
+	m.activeRunID = 1
+	updated, _ = m.Update(chatEventMsg{runID: 1, event: webui.ChatEvent{Kind: "text-delta", Delta: "\nnew bottom line"}})
+	m = updated.(model)
+
+	assert.True(t, m.viewport.AtBottom())
+	assert.True(t, m.autoFollow)
+}
+
 func TestViewAndFormattingHelpers(t *testing.T) {
 	m := newModel(context.Background(), Config{Profile: " work ", CWD: ""})
 	t.Cleanup(m.cancel)
@@ -487,6 +553,32 @@ func TestViewAndFormattingHelpers(t *testing.T) {
 	assert.Equal(t, "  one\n  \n  two", indentText("one\n\ntwo", "  "))
 	assert.Equal(t, 2, lineCount("one\ntwo"))
 	assert.True(t, strings.HasPrefix(rightLabeledBorder("╭", "╮", 12, "label"), "╭"))
+}
+
+func TestRenderExitSummary(t *testing.T) {
+	summary := renderExitSummary(" conversation-123 ", llmtypes.Usage{
+		InputTokens:              1200,
+		OutputTokens:             300,
+		CacheCreationInputTokens: 40,
+		CacheReadInputTokens:     60,
+		InputCost:                0.01,
+		OutputCost:               0.02,
+		CacheCreationCost:        0.003,
+		CacheReadCost:            0.001,
+		CurrentContextWindow:     1600,
+		MaxContextWindow:         3200,
+	})
+
+	assert.Contains(t, summary, "Conversation ID: conversation-123")
+	assert.Contains(t, summary, "Token usage: 1.2K input · 300 output · 40 cache write · 60 cache read · 1.6K total")
+	assert.Contains(t, summary, "Context window: 1.6K/3.2K (50%)")
+	assert.Contains(t, summary, "Cost: $0.0340")
+	assert.Contains(t, summary, "Resume: kodelet chat -r conversation-123")
+	assert.Empty(t, renderExitSummary(" ", llmtypes.Usage{}))
+}
+
+func numberedLines(count int) string {
+	return strings.TrimRight(strings.Repeat("line\n", count), "\n")
 }
 
 var _ tea.Model = model{}

@@ -39,10 +39,18 @@ type Config struct {
 
 // Run starts the native Kodelet chat TUI.
 func Run(ctx context.Context, config Config) error {
-	model := newModel(ctx, config)
+	initialModel := newModel(ctx, config)
 
-	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
-	_, err := program.Run()
+	program := tea.NewProgram(initialModel, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	finalModel, err := program.Run()
+	if err != nil {
+		return err
+	}
+	if final, ok := finalModel.(model); ok {
+		if summary := renderExitSummary(final.conversationID, final.usage); summary != "" {
+			fmt.Fprintln(os.Stdout, summary)
+		}
+	}
 	return err
 }
 
@@ -116,8 +124,9 @@ type model struct {
 	textarea textarea.Model
 	spinner  spinner.Model
 
-	width  int
-	height int
+	width      int
+	height     int
+	autoFollow bool
 
 	entries []chatEntry
 	usage   llmtypes.Usage
@@ -202,6 +211,7 @@ func newModel(ctx context.Context, config Config) model {
 		viewport:       vp,
 		textarea:       ta,
 		spinner:        sp,
+		autoFollow:     true,
 		runCh:          make(chan tea.Msg, 256),
 		status:         "ready",
 	}
@@ -502,7 +512,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		var cmd tea.Cmd
-		m.viewport, cmd = m.viewport.Update(msg)
+		m.updateViewport(msg, &cmd)
 		return m, cmd
 
 	case chatEventMsg:
@@ -510,7 +520,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, waitForMsg(m.runCh)
 		}
 		m.applyChatEvent(msg.event)
-		m.refreshViewport(true)
+		m.refreshViewport(m.autoFollow)
 		return m, waitForMsg(m.runCh)
 
 	case chatDoneMsg:
@@ -532,14 +542,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.status = "ready"
 		}
-		m.refreshViewport(true)
+		m.refreshViewport(m.autoFollow)
 		return m, waitForMsg(m.runCh)
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		if m.running {
-			m.refreshViewport(true)
+			m.refreshViewport(m.autoFollow)
 		}
 		cmds = append(cmds, cmd)
 	}
@@ -549,10 +559,38 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, cmd)
 
 	var vpCmd tea.Cmd
-	m.viewport, vpCmd = m.viewport.Update(msg)
+	m.updateViewport(msg, &vpCmd)
 	cmds = append(cmds, vpCmd)
 
 	return m, tea.Batch(cmds...)
+}
+
+func (m *model) updateViewport(msg tea.Msg, cmd *tea.Cmd) {
+	before := m.viewport.YOffset
+	var vpCmd tea.Cmd
+	m.viewport, vpCmd = m.viewport.Update(msg)
+	if cmd != nil {
+		*cmd = vpCmd
+	}
+	if before != m.viewport.YOffset && isVerticalViewportNavigation(msg) {
+		m.autoFollow = m.viewport.AtBottom()
+	}
+}
+
+func isVerticalViewportNavigation(msg tea.Msg) bool {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "up", "pgup", "ctrl+u", "down", "pgdown":
+			return true
+		}
+	case tea.MouseMsg:
+		if msg.Action != tea.MouseActionPress || msg.Shift {
+			return false
+		}
+		return msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown
+	}
+	return false
 }
 
 func (m *model) resize() {
@@ -820,6 +858,7 @@ func (m *model) refreshViewport(scrollBottom bool) {
 	m.detailRegions = regions
 	m.viewport.SetContent(content)
 	if scrollBottom {
+		m.autoFollow = true
 		m.viewport.GotoBottom()
 	}
 }
@@ -1396,6 +1435,27 @@ func formatUsage(usage llmtypes.Usage) string {
 	return fmt.Sprintf("%s/%s (%.0f%%) · $%.2f", formatTokenCount(usage.CurrentContextWindow), formatTokenCount(usage.MaxContextWindow), pct, cost)
 }
 
+func renderExitSummary(conversationID string, usage llmtypes.Usage) string {
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
+		return ""
+	}
+
+	lines := []string{
+		fmt.Sprintf("Conversation ID: %s", conversationID),
+		fmt.Sprintf("Token usage: %s input · %s output · %s cache write · %s cache read · %s total", formatTokenCount(usage.InputTokens), formatTokenCount(usage.OutputTokens), formatTokenCount(usage.CacheCreationInputTokens), formatTokenCount(usage.CacheReadInputTokens), formatTokenCount(usage.TotalTokens())),
+	}
+	if usage.MaxContextWindow > 0 {
+		pct := float64(usage.CurrentContextWindow) / float64(usage.MaxContextWindow) * 100
+		lines = append(lines, fmt.Sprintf("Context window: %s/%s (%.0f%%)", formatTokenCount(usage.CurrentContextWindow), formatTokenCount(usage.MaxContextWindow), pct))
+	}
+	lines = append(lines,
+		fmt.Sprintf("Cost: $%.4f", usage.TotalCost()),
+		fmt.Sprintf("Resume: kodelet chat -r %s", conversationID),
+	)
+	return strings.Join(lines, "\n")
+}
+
 func formatTokenCount(tokens int) string {
 	switch {
 	case tokens >= 1_000_000:
@@ -1440,9 +1500,9 @@ var (
 	assistantStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
 	mutedStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 
-	thoughtHeaderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("229")).Bold(true)
+	thoughtHeaderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("229"))
 	thoughtBodyStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
-	toolHeaderStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("151")).Bold(true)
+	toolHeaderStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("151"))
 	toolBodyStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("246"))
 	steeringStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("183")).Italic(true)
 	steeringErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
