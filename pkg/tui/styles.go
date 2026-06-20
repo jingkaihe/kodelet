@@ -88,8 +88,8 @@ var themes = map[string]tuiTheme{
 		InputBorder:      "#cdd6f4", // text
 		InputLabel:       "#cdd6f4", // text
 		InputPlaceholder: "#9399b2", // overlay2
-		ComposerText:     "#f5e0dc", // rosewater
-		ComposerCursor:   "#fab387", // peach
+		ComposerText:     "#cdd6f4", // text
+		ComposerCursor:   "#cdd6f4", // text
 		Markdown: markdownTheme{
 			BlockQuote:            "#7f849c", // overlay1
 			Heading:               "#b4befe", // lavender
