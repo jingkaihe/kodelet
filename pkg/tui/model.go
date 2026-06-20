@@ -1036,7 +1036,7 @@ func (m *model) renderTranscript() (string, []detailRegion) {
 							}
 							body = indentText(body, "  ")
 							if strings.TrimSpace(body) != "" {
-								rendered := toolBodyStyle.Render(body)
+								rendered := renderToolGroupBody(body, group.diffBody)
 								b.WriteString(rendered)
 								b.WriteString("\n")
 								line += lineCount(rendered)
@@ -1138,6 +1138,7 @@ type toolRenderGroup struct {
 	runningLabel string
 	body         string
 	wrapBody     bool
+	diffBody     bool
 	expanded     bool
 	active       bool
 }
@@ -1184,8 +1185,8 @@ func buildBashToolGroup(block assistantBlock, start, end int) toolRenderGroup {
 		toolStart:    start,
 		toolEnd:      end - 1,
 		changeIndex:  -1,
-		label:        fmt.Sprintf("ran %d %s", count, pluralize(count, "command", "commands")),
-		runningLabel: fmt.Sprintf("running %d %s", count, pluralize(count, "command", "commands")),
+		label:        fmt.Sprintf("Ran %d %s", count, pluralize(count, "command", "commands")),
+		runningLabel: fmt.Sprintf("Running %d %s", count, pluralize(count, "command", "commands")),
 		body:         joinTools(block.tools[start:end]),
 		wrapBody:     true,
 		expanded:     block.expanded || anyExpandedTool(block.tools[start:end]),
@@ -1199,8 +1200,8 @@ func buildFallbackToolGroup(block assistantBlock, start, end int) toolRenderGrou
 		toolStart:    start,
 		toolEnd:      end - 1,
 		changeIndex:  -1,
-		label:        fmt.Sprintf("ran %d %s", count, pluralize(count, "tool", "tools")),
-		runningLabel: fmt.Sprintf("running %d %s", count, pluralize(count, "tool", "tools")),
+		label:        fmt.Sprintf("Ran %d %s", count, pluralize(count, "tool", "tools")),
+		runningLabel: fmt.Sprintf("Running %d %s", count, pluralize(count, "tool", "tools")),
 		body:         joinTools(block.tools[start:end]),
 		wrapBody:     true,
 		expanded:     block.expanded || anyExpandedTool(block.tools[start:end]),
@@ -1249,13 +1250,16 @@ func buildApplyPatchToolGroups(block assistantBlock, idx int) []toolRenderGroup 
 	for changeIdx, change := range changes {
 		body := applyPatchChangeDiff(change)
 		wrapBody := false
+		diffBody := strings.TrimSpace(body) != ""
 		if strings.TrimSpace(body) == "" && !hasMetadata {
 			body = joinTools([]toolCall{tool})
 			wrapBody = true
+			diffBody = false
 		}
 		if strings.TrimSpace(body) == "" && strings.TrimSpace(tool.result) != "" {
 			body = strings.TrimSpace(tool.result)
 			wrapBody = true
+			diffBody = false
 		}
 
 		groups = append(groups, toolRenderGroup{
@@ -1266,6 +1270,7 @@ func buildApplyPatchToolGroups(block assistantBlock, idx int) []toolRenderGroup 
 			runningLabel: "Applying patch",
 			body:         body,
 			wrapBody:     wrapBody,
+			diffBody:     diffBody,
 			expanded:     block.expanded || tool.expanded || tool.expandedChanges[changeIdx],
 			active:       !tool.done,
 		})
@@ -1309,16 +1314,16 @@ func applyPatchChangeLabel(change tooltypes.ApplyPatchChange) string {
 
 	switch strings.ToLower(strings.TrimSpace(change.Operation)) {
 	case tooltypes.ApplyPatchOperationAdd, "write":
-		return fmt.Sprintf("write %s", displayPath)
+		return fmt.Sprintf("Write %s", displayPath)
 	case tooltypes.ApplyPatchOperationDelete:
-		return fmt.Sprintf("delete %s", displayPath)
+		return fmt.Sprintf("Delete %s", displayPath)
 	case "move":
-		return fmt.Sprintf("move %s", displayPath)
+		return fmt.Sprintf("Move %s", displayPath)
 	default:
 		if strings.TrimSpace(change.MovePath) != "" {
-			return fmt.Sprintf("move %s", displayPath)
+			return fmt.Sprintf("Move %s", displayPath)
 		}
-		return fmt.Sprintf("edit %s", displayPath)
+		return fmt.Sprintf("Edit %s", displayPath)
 	}
 }
 
@@ -1349,6 +1354,32 @@ func applyPatchChangeDiff(change tooltypes.ApplyPatchChange) string {
 	return ""
 }
 
+func renderToolGroupBody(body string, diffBody bool) string {
+	if !diffBody {
+		return toolBodyStyle.Render(body)
+	}
+
+	lines := strings.Split(body, "\n")
+	for i, line := range lines {
+		lines[i] = renderDiffLine(line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func renderDiffLine(line string) string {
+	trimmed := strings.TrimSpace(line)
+	if strings.HasPrefix(trimmed, "+++") || strings.HasPrefix(trimmed, "---") {
+		return toolBodyStyle.Render(line)
+	}
+	if strings.HasPrefix(trimmed, "+") {
+		return diffAddedStyle.Render(line)
+	}
+	if strings.HasPrefix(trimmed, "-") {
+		return diffRemovedStyle.Render(line)
+	}
+	return toolBodyStyle.Render(line)
+}
+
 func dedicatedBuiltinToolLabels(tool toolCall) (string, string) {
 	switch normalizedToolName(tool) {
 	case "openai_web_search", "web_search":
@@ -1364,7 +1395,7 @@ func dedicatedBuiltinToolLabels(tool toolCall) (string, string) {
 		if name == "" {
 			name = "tool"
 		}
-		return fmt.Sprintf("ran %s", name), fmt.Sprintf("running %s", name)
+		return fmt.Sprintf("Ran %s", name), fmt.Sprintf("Running %s", name)
 	}
 }
 
@@ -2206,6 +2237,8 @@ var (
 	thoughtBodyStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
 	toolHeaderStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("151"))
 	toolBodyStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("246"))
+	diffAddedStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("114"))
+	diffRemovedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 	steeringStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("183")).Italic(true)
 	steeringErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 

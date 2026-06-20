@@ -69,7 +69,7 @@ func TestCancelActiveRunFinishesActiveBlocks(t *testing.T) {
 	assert.False(t, hasActiveThought(m.entries[1].blocks[0]))
 	assert.False(t, hasActiveTool(m.entries[1].blocks[1]))
 	assert.Contains(t, content, "Had 1 Thought")
-	assert.Contains(t, content, "ran 1 command")
+	assert.Contains(t, content, "Ran 1 command")
 	assert.NotContains(t, content, "Thinking")
 }
 
@@ -466,7 +466,7 @@ func TestRenderTranscriptDetailsAndMouseToggle(t *testing.T) {
 	content, regions := m.renderTranscript()
 	require.Len(t, regions, 2)
 	assert.Contains(t, content, "Had 1 Thought")
-	assert.Contains(t, content, "ran 1 command")
+	assert.Contains(t, content, "Ran 1 command")
 	assert.NotContains(t, content, "hidden thought")
 
 	assert.True(t, m.toggleDetailAt(regions[0].line))
@@ -497,7 +497,7 @@ func TestRenderTranscriptAddsSpacingBetweenAssistantBlocks(t *testing.T) {
 	content, _ := m.renderTranscript()
 
 	assert.Contains(t, content, "Had 1 Thought ▸\n\n")
-	assert.Contains(t, content, "ran 1 command ▸\n\n")
+	assert.Contains(t, content, "Ran 1 command ▸\n\n")
 	assert.Contains(t, content, "\n\nfinal answer")
 }
 
@@ -540,12 +540,12 @@ func TestRenderTranscriptGroupsToolBlocksByType(t *testing.T) {
 
 	content, regions := m.renderTranscript()
 
-	assert.Contains(t, content, "ran 2 commands")
-	assert.Contains(t, content, "edit edit.go")
-	assert.Contains(t, content, "write new.go")
-	assert.Contains(t, content, "delete old.go")
+	assert.Contains(t, content, "Ran 2 commands")
+	assert.Contains(t, content, "Edit edit.go")
+	assert.Contains(t, content, "Write new.go")
+	assert.Contains(t, content, "Delete old.go")
 	assert.Contains(t, content, "Fetched https://example.com")
-	assert.Contains(t, content, "ran 2 tools")
+	assert.Contains(t, content, "Ran 2 tools")
 	require.Len(t, regions, 6)
 }
 
@@ -579,7 +579,7 @@ func TestRenderTranscriptApplyPatchDiffToggle(t *testing.T) {
 	content, regions := m.renderTranscript()
 	require.Len(t, regions, 1)
 	m.detailRegions = regions
-	assert.Contains(t, content, "edit edit.go")
+	assert.Contains(t, content, "Edit edit.go")
 	assert.NotContains(t, content, "@@ -1 +1 @@")
 
 	assert.True(t, m.toggleDetailAt(regions[0].line))
@@ -587,6 +587,13 @@ func TestRenderTranscriptApplyPatchDiffToggle(t *testing.T) {
 	assert.Contains(t, content, "@@ -1 +1 @@")
 	assert.Contains(t, content, "-old")
 	assert.Contains(t, content, "+new")
+}
+
+func TestRenderDiffLineUsesAdditionAndRemovalStyles(t *testing.T) {
+	assert.Equal(t, diffAddedStyle.Render("  +new"), renderDiffLine("  +new"))
+	assert.Equal(t, diffRemovedStyle.Render("  -old"), renderDiffLine("  -old"))
+	assert.Equal(t, toolBodyStyle.Render("  +++ b/file.go"), renderDiffLine("  +++ b/file.go"))
+	assert.Equal(t, toolBodyStyle.Render("  --- a/file.go"), renderDiffLine("  --- a/file.go"))
 }
 
 func TestEntriesFromHistoryPreservesStructuredToolResultMetadata(t *testing.T) {
