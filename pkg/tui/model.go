@@ -119,10 +119,11 @@ type model struct {
 	entries []chatEntry
 	usage   llmtypes.Usage
 
-	running   bool
-	eventCh   chan tea.Msg
-	doneCh    chan tea.Msg
-	cancelRun context.CancelFunc
+	running      bool
+	cancelledRun bool
+	eventCh      chan tea.Msg
+	doneCh       chan tea.Msg
+	cancelRun    context.CancelFunc
 
 	detailRegions []detailRegion
 	status        string
@@ -156,9 +157,12 @@ func newModel(ctx context.Context, config Config) model {
 	mctx, cancel := context.WithCancel(ctx)
 
 	ta := textarea.New()
-	ta.Placeholder = ""
+	ta.Placeholder = "Ask kodelet..."
 	ta.Prompt = ""
 	ta.ShowLineNumbers = false
+	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	ta.FocusedStyle.Placeholder = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	ta.BlurredStyle.CursorLine = lipgloss.NewStyle()
 	ta.SetHeight(inputHeight)
 	ta.Focus()
 
@@ -366,11 +370,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		switch {
-		case msg.String() == "ctrl+c":
+		case msg.String() == "ctrl+c" || msg.String() == "ctrl+d":
 			if m.running {
+				if msg.String() == "ctrl+d" {
+					return m, nil
+				}
 				m.stopRun()
 				m.status = "cancelled"
 				m.running = false
+				m.cancelledRun = true
+				m.refreshViewport(true)
 				return m, nil
 			}
 			m.cancel()
@@ -380,12 +389,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.stopRun()
 				m.status = "cancelled"
 				m.running = false
+				m.cancelledRun = true
 				m.refreshViewport(true)
 			}
 			return m, nil
 		case msg.String() == "ctrl+t" || msg.String() == "alt+t":
 			m.toggleAllDetails()
 			m.refreshViewport(false)
+			return m, nil
+		case msg.String() == "shift+enter":
+			if !m.running {
+				m.textarea.InsertString("\n")
+			}
 			return m, nil
 		case msg.String() == "enter":
 			if !m.running {
@@ -410,11 +425,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case chatEventMsg:
+		if m.cancelledRun {
+			return m, waitForMsg(m.eventCh)
+		}
 		m.applyChatEvent(msg.event)
 		m.refreshViewport(true)
 		return m, waitForMsg(m.eventCh)
 
 	case chatDoneMsg:
+		if m.cancelledRun {
+			m.running = false
+			m.cancelRun = nil
+			m.cancelledRun = false
+			m.err = nil
+			m.status = "ready"
+			m.refreshViewport(true)
+			return m, waitForMsg(m.doneCh)
+		}
 		m.running = false
 		m.cancelRun = nil
 		if msg.err != nil {
@@ -475,6 +502,7 @@ func (m *model) submit() tea.Cmd {
 	m.textarea.Reset()
 	m.entries = append(m.entries, chatEntry{kind: entryUser, content: message})
 	m.running = true
+	m.cancelledRun = false
 	m.status = "working"
 	m.err = nil
 	m.refreshViewport(true)

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"io"
+	stdlog "log"
 	"os"
 	"strings"
 
@@ -47,6 +48,7 @@ var chatCmd = &cobra.Command{
 			viper.Set("allowed_tools", []string{"none"})
 		}
 		logger.SetLogOutput(io.Discard)
+		stdlog.SetOutput(io.Discard)
 
 		profile, _ := cmd.Flags().GetString("profile")
 		if strings.TrimSpace(profile) == "" {
