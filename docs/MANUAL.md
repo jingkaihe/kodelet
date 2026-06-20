@@ -146,7 +146,9 @@ kodelet chat --no-extensions         # disable extensions
 The TUI streams assistant responses, collapses thinking and tool details by
 default, and lets you toggle details with `ctrl+t`, `alt+t`, or by clicking the
 detail header. It uses the same chat runner as the Web UI, so conversations are
-persisted and can be resumed by ID.
+persisted and can be resumed by ID. While the assistant is working, the composer
+stays editable; press `Enter` to queue the typed text as steering for the active
+conversation. Kodelet applies queued steering on the next model API call.
 
 ### Interactive Chat Mode (ACP)
 

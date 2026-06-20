@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -17,7 +18,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
+	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/jingkaihe/kodelet/pkg/webui"
@@ -125,9 +128,11 @@ type model struct {
 	runCh       chan tea.Msg
 	cancelRun   context.CancelFunc
 
-	detailRegions []detailRegion
-	status        string
-	err           error
+	detailRegions  []detailRegion
+	queuedSteering []string
+	steerError     string
+	status         string
+	err            error
 }
 
 type chatEventMsg struct {
@@ -349,7 +354,84 @@ func trimEntryBlocks(entry *chatEntry) {
 	}
 }
 
+func isTextareaNewlineKey(key string) bool {
+	switch key {
+	case "shift+enter", "alt+enter", "ctrl+j":
+		return true
+	}
+	return isShiftEnterCSISequence(key)
+}
+
+func isShiftEnterCSISequence(key string) bool {
+	sequence, ok := decodeUnknownCSISequence(key)
+	if !ok || sequence == "" {
+		return false
+	}
+
+	final := sequence[len(sequence)-1]
+	params := strings.Split(sequence[:len(sequence)-1], ";")
+	switch final {
+	case 'u':
+		if len(params) < 2 {
+			return false
+		}
+		code, err := strconv.Atoi(params[0])
+		if err != nil || code != 13 {
+			return false
+		}
+		return hasShiftModifier(params[1])
+	case '~':
+		if len(params) == 2 {
+			code, err := strconv.Atoi(params[0])
+			if err != nil || code != 13 {
+				return false
+			}
+			return hasShiftModifier(params[1])
+		}
+		if len(params) == 3 && params[0] == "27" && params[2] == "13" {
+			return hasShiftModifier(params[1])
+		}
+	}
+	return false
+}
+
+func decodeUnknownCSISequence(key string) (string, bool) {
+	encoded, ok := strings.CutPrefix(key, "?CSI[")
+	if !ok {
+		return "", false
+	}
+	encoded, ok = strings.CutSuffix(encoded, "]?")
+	if !ok {
+		return "", false
+	}
+
+	var sequence strings.Builder
+	for _, field := range strings.Fields(encoded) {
+		value, err := strconv.Atoi(field)
+		if err != nil || value < 0 || value > 255 {
+			return "", false
+		}
+		sequence.WriteByte(byte(value))
+	}
+	return sequence.String(), true
+}
+
+func hasShiftModifier(value string) bool {
+	modifierText, _, _ := strings.Cut(value, ":")
+	modifier, err := strconv.Atoi(modifierText)
+	if err != nil {
+		return false
+	}
+	const shiftModifierBit = 1
+	return modifier > 1 && (modifier-1)&shiftModifierBit != 0
+}
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if stringer, ok := msg.(fmt.Stringer); ok && isTextareaNewlineKey(stringer.String()) {
+		m.insertTextareaNewline()
+		return m, nil
+	}
+
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
@@ -380,10 +462,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewport(true)
 
 	case tea.KeyMsg:
-		switch {
-		case msg.String() == "ctrl+c" || msg.String() == "ctrl+d":
+		key := msg.String()
+		switch key {
+		case "ctrl+c", "ctrl+d":
 			if m.running {
-				if msg.String() == "ctrl+d" {
+				if key == "ctrl+d" {
 					return m, nil
 				}
 				m.cancelActiveRun()
@@ -391,29 +474,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.cancel()
 			return m, tea.Quit
-		case msg.String() == "esc":
+		case "esc":
 			if m.running {
 				m.cancelActiveRun()
 			}
 			return m, nil
-		case msg.String() == "ctrl+t" || msg.String() == "alt+t":
+		case "ctrl+t", "alt+t":
 			m.toggleAllDetails()
 			m.refreshViewport(false)
 			return m, nil
-		case msg.String() == "shift+enter":
-			if !m.running {
-				m.textarea.InsertString("\n")
-			}
-			return m, nil
-		case msg.String() == "enter":
-			if !m.running {
-				if cmd := m.submit(); cmd != nil {
-					return m, cmd
-				}
+		case "enter":
+			if m.running {
+				m.submitSteering()
 				return m, nil
 			}
-		case msg.String() == "alt+enter" || msg.String() == "ctrl+j":
-			// Let textarea keep the newline binding.
+			if cmd := m.submit(); cmd != nil {
+				return m, cmd
+			}
+			return m, nil
 		}
 
 	case tea.MouseMsg:
@@ -466,11 +544,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	}
 
-	if !m.running {
-		var cmd tea.Cmd
-		m.textarea, cmd = m.textarea.Update(msg)
-		cmds = append(cmds, cmd)
-	}
+	var cmd tea.Cmd
+	m.textarea, cmd = m.textarea.Update(msg)
+	cmds = append(cmds, cmd)
 
 	var vpCmd tea.Cmd
 	m.viewport, vpCmd = m.viewport.Update(msg)
@@ -499,6 +575,9 @@ func (m *model) submit() tea.Cmd {
 	message := strings.TrimSpace(m.textarea.Value())
 	if message == "" {
 		return nil
+	}
+	if strings.TrimSpace(m.conversationID) == "" {
+		m.conversationID = convtypes.GenerateID()
 	}
 
 	m.textarea.Reset()
@@ -529,6 +608,48 @@ func (m *model) submit() tea.Cmd {
 		}()
 		return nil
 	}
+}
+
+func (m *model) submitSteering() {
+	message := strings.TrimSpace(m.textarea.Value())
+	if message == "" {
+		return
+	}
+
+	if len(message) > steer.MaxMessageLength {
+		m.err = errors.New("steering message too long")
+		m.steerError = "Steering message must be less than 10,000 characters."
+		m.status = "steering failed"
+		m.refreshViewport(true)
+		return
+	}
+
+	if strings.TrimSpace(m.conversationID) == "" {
+		m.conversationID = convtypes.GenerateID()
+	}
+
+	steerStore, err := steer.NewSteerStore()
+	if err != nil {
+		m.err = errors.Wrap(err, "failed to initialize steer store")
+		m.steerError = fmt.Sprintf("Failed to queue steering: %v", err)
+		m.status = "steering failed"
+		m.refreshViewport(true)
+		return
+	}
+
+	if err := steerStore.WriteSteer(m.conversationID, message); err != nil {
+		m.err = errors.Wrap(err, "failed to write steering message")
+		m.steerError = fmt.Sprintf("Failed to queue steering: %v", err)
+		m.status = "steering failed"
+		m.refreshViewport(true)
+		return
+	}
+
+	m.textarea.Reset()
+	m.queuedSteering = append(m.queuedSteering, message)
+	m.steerError = ""
+	m.status = "steering queued"
+	m.refreshViewport(true)
 }
 
 func (m *model) stopRun() {
@@ -577,7 +698,15 @@ func (m *model) applyChatEvent(event webui.ChatEvent) {
 	case "conversation":
 		return
 	case "user-message":
-		// The TUI already renders the submitted message immediately.
+		content := userMessageContentText(event.Content)
+		if content == "" {
+			return
+		}
+		m.removeQueuedSteering(content)
+		if m.hasLastUserEntry(content) {
+			return
+		}
+		m.entries = append(m.entries, chatEntry{kind: entryUser, content: content})
 		return
 	case "text", "text-delta":
 		idx := m.ensureAssistantEntry()
@@ -715,6 +844,8 @@ func (m model) renderTranscript() (string, []detailRegion) {
 		b.WriteString("\n")
 		b.WriteString(intro)
 		b.WriteString("\n")
+		line += lineCount(intro) + 2
+		m.renderQueuedSteering(&b, &line)
 		return b.String(), regions
 	}
 
@@ -788,9 +919,33 @@ func (m model) renderTranscript() (string, []detailRegion) {
 		b.WriteString("\n")
 		b.WriteString(lineText)
 		b.WriteString("\n")
+		line += lineCount(lineText) + 2
 	}
 
+	m.renderQueuedSteering(&b, &line)
+
 	return b.String(), regions
+}
+
+func (m model) renderQueuedSteering(b *strings.Builder, line *int) {
+	if len(m.queuedSteering) == 0 && strings.TrimSpace(m.steerError) == "" {
+		return
+	}
+
+	b.WriteString("\n")
+	(*line)++
+	for _, message := range m.queuedSteering {
+		rendered := steeringStyle.Render("↳ queued steering: " + wrapText(strings.TrimSpace(message), m.transcriptTextWidth()-20))
+		b.WriteString(rendered)
+		b.WriteString("\n")
+		*line += lineCount(rendered)
+	}
+	if trimmed := strings.TrimSpace(m.steerError); trimmed != "" {
+		rendered := steeringErrorStyle.Render("⚠ " + wrapText(trimmed, m.transcriptTextWidth()-2))
+		b.WriteString(rendered)
+		b.WriteString("\n")
+		*line += lineCount(rendered)
+	}
 }
 
 func (m model) renderThoughtHeader(block assistantBlock) string {
@@ -1092,6 +1247,96 @@ func structuredToolResultText(result *tooltypes.StructuredToolResult) string {
 	return ""
 }
 
+func userMessageContentText(content any) string {
+	switch content := content.(type) {
+	case string:
+		return strings.TrimSpace(content)
+	case []webui.WebContentBlock:
+		return strings.TrimSpace(textFromWebContentBlocks(content))
+	case []any:
+		return strings.TrimSpace(textFromAnyContentBlocks(content))
+	default:
+		return ""
+	}
+}
+
+func textFromWebContentBlocks(blocks []webui.WebContentBlock) string {
+	parts := make([]string, 0, len(blocks))
+	imageCount := 0
+	for _, block := range blocks {
+		switch block.Type {
+		case "text":
+			if text := strings.TrimSpace(block.Text); text != "" {
+				parts = append(parts, text)
+			}
+		case "image":
+			imageCount++
+		}
+	}
+	if imageCount > 0 {
+		parts = append(parts, fmt.Sprintf("[%d image%s]", imageCount, pluralSuffix(imageCount)))
+	}
+	return strings.Join(parts, "\n")
+}
+
+func textFromAnyContentBlocks(blocks []any) string {
+	parts := make([]string, 0, len(blocks))
+	imageCount := 0
+	for _, rawBlock := range blocks {
+		block, ok := rawBlock.(map[string]any)
+		if !ok {
+			continue
+		}
+		typeValue, _ := block["type"].(string)
+		switch typeValue {
+		case "text":
+			if text, _ := block["text"].(string); strings.TrimSpace(text) != "" {
+				parts = append(parts, strings.TrimSpace(text))
+			}
+		case "image":
+			imageCount++
+		}
+	}
+	if imageCount > 0 {
+		parts = append(parts, fmt.Sprintf("[%d image%s]", imageCount, pluralSuffix(imageCount)))
+	}
+	return strings.Join(parts, "\n")
+}
+
+func pluralSuffix(count int) string {
+	if count == 1 {
+		return ""
+	}
+	return "s"
+}
+
+func (m model) hasLastUserEntry(content string) bool {
+	content = strings.TrimSpace(content)
+	if content == "" || len(m.entries) == 0 {
+		return false
+	}
+	last := m.entries[len(m.entries)-1]
+	return last.kind == entryUser && strings.TrimSpace(last.content) == content
+}
+
+func (m *model) removeQueuedSteering(content string) {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return
+	}
+	for i, queued := range m.queuedSteering {
+		if strings.TrimSpace(queued) != content {
+			continue
+		}
+		m.queuedSteering = append(m.queuedSteering[:i], m.queuedSteering[i+1:]...)
+		return
+	}
+}
+
+func (m *model) insertTextareaNewline() {
+	m.textarea.InsertString("\n")
+}
+
 func compactJSON(input string) string {
 	var v any
 	if err := json.Unmarshal([]byte(input), &v); err != nil {
@@ -1199,6 +1444,8 @@ var (
 	thoughtBodyStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
 	toolHeaderStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("151")).Bold(true)
 	toolBodyStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("246"))
+	steeringStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("183")).Italic(true)
+	steeringErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 
 	inputBorderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("147"))
 )
