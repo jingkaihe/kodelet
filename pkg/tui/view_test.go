@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	xansi "github.com/charmbracelet/x/ansi"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
 )
@@ -25,10 +26,14 @@ func TestViewAndFormattingHelpers(t *testing.T) {
 	}
 	m.textarea.SetValue("draft")
 	view := m.View()
+	plainLines := strings.Split(view, "\n")
 
 	assert.Contains(t, view, "draft")
 	assert.Contains(t, view, "1.5K/3.0K (50%)")
 	assert.Contains(t, view, "work")
+	assert.True(t, strings.HasPrefix(plainLines[0], strings.Repeat(" ", tuiLeftMargin)))
+	assert.Equal(t, m.width-tuiRightMargin, tuiLeftMargin+m.inputOuterWidth())
+	assert.Equal(t, m.contentWidth(), m.viewport.Width)
 	assert.Equal(t, "default", displayProfile(""))
 	assert.Equal(t, "", profileForRequest("default"))
 	assert.Equal(t, "work", profileForRequest(" work "))
@@ -44,6 +49,47 @@ func TestViewAndFormattingHelpers(t *testing.T) {
 	assert.Equal(t, "  one\n  \n  two", indentText("one\n\ntwo", "  "))
 	assert.Equal(t, 2, lineCount("one\ntwo"))
 	assert.True(t, strings.HasPrefix(rightLabeledBorder("╭", "╮", 12, "label"), "╭"))
+}
+
+func TestRunningIndicatorRendersInComposerBottomBorder(t *testing.T) {
+	m := newModel(context.Background(), Config{CWD: "/tmp/kodelet-workspace"})
+	t.Cleanup(m.cancel)
+	m.width = 72
+	m.height = 12
+	m.resize()
+	m.running = true
+	m.entries = []chatEntry{{kind: entryUser, content: "hello"}}
+	m.refreshViewport(true)
+
+	transcript := xansi.Strip(m.viewport.View())
+	view := xansi.Strip(m.View())
+	lines := strings.Split(view, "\n")
+	bottomBorder := lines[len(lines)-1]
+
+	assert.NotContains(t, transcript, "Following the thread…")
+	assert.NotContains(t, transcript, "working…")
+	assert.Contains(t, bottomBorder, "Following the thread…")
+	assert.NotContains(t, bottomBorder, "working…")
+	assert.Contains(t, bottomBorder, displayCWD(m.cwd))
+
+	m.workingFrame = 36
+	view = xansi.Strip(m.View())
+	lines = strings.Split(view, "\n")
+	bottomBorder = lines[len(lines)-1]
+
+	assert.Contains(t, bottomBorder, "Gathering the next clue…")
+	assert.Contains(t, bottomBorder, displayCWD(m.cwd))
+
+	m.running = false
+	m.refreshViewport(true)
+	view = xansi.Strip(m.View())
+	lines = strings.Split(view, "\n")
+	bottomBorder = lines[len(lines)-1]
+
+	assert.NotContains(t, bottomBorder, "Following the thread…")
+	assert.NotContains(t, bottomBorder, "Gathering the next clue…")
+	assert.NotContains(t, bottomBorder, "working…")
+	assert.Contains(t, bottomBorder, displayCWD(m.cwd))
 }
 
 func TestNewModelDefaultsToCatppuccinMochaTheme(t *testing.T) {

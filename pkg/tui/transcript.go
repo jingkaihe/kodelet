@@ -97,14 +97,6 @@ func (m *model) renderTranscript() (string, []detailRegion) {
 		}
 	}
 
-	if m.running && len(m.entries) > 0 && m.entries[len(m.entries)-1].kind != entryAssistant {
-		lineText := mutedStyle.Render(m.spinner.View() + " working…")
-		b.WriteString("\n")
-		b.WriteString(lineText)
-		b.WriteString("\n")
-		line += lineCount(lineText) + 2
-	}
-
 	m.renderQueuedSteering(&b, &line)
 
 	return b.String(), regions

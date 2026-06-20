@@ -121,11 +121,12 @@ type model struct {
 	thoughtMarkdownRenderer        *glamour.TermRenderer
 	thoughtMarkdownRendererWidth   int
 
-	running     bool
-	activeRunID int
-	nextRunID   int
-	runCh       chan tea.Msg
-	cancelRun   context.CancelFunc
+	running      bool
+	activeRunID  int
+	nextRunID    int
+	workingFrame int
+	runCh        chan tea.Msg
+	cancelRun    context.CancelFunc
 
 	detailRegions  []detailRegion
 	queuedSteering []string

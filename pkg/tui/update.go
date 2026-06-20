@@ -227,6 +227,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		if m.running {
+			m.workingFrame++
 			m.refreshViewport(m.autoFollow)
 		}
 		cmds = append(cmds, cmd)
@@ -327,7 +328,7 @@ func (m *model) resize() {
 	if viewportHeight < 1 {
 		viewportHeight = 1
 	}
-	m.viewport.Width = m.width
+	m.viewport.Width = m.contentWidth()
 	m.viewport.Height = viewportHeight
 	m.textarea.SetWidth(max(1, m.inputContentWidth()))
 	m.textarea.SetHeight(inputHeight)
@@ -345,6 +346,7 @@ func (m *model) submit() tea.Cmd {
 	m.textarea.Reset()
 	m.entries = append(m.entries, chatEntry{kind: entryUser, content: message})
 	m.running = true
+	m.workingFrame = 0
 	m.nextRunID++
 	m.activeRunID = m.nextRunID
 	m.status = "working"
