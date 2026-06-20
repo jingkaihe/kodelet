@@ -4,8 +4,10 @@ import (
 	"context"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/muesli/termenv"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -298,6 +300,98 @@ func TestRenderTranscriptRendersAssistantMarkdown(t *testing.T) {
 	assert.Contains(t, plain, "code")
 	assert.Contains(t, plain, "• first")
 	assert.Contains(t, plain, "• second")
+}
+
+func TestRenderTranscriptRestylesAssistantTextAfterInlineCode(t *testing.T) {
+	withANSI256ColorProfile(t)
+
+	for _, tt := range []struct {
+		name     string
+		text     string
+		expected string
+	}{
+		{
+			name:     "code",
+			text:     "before `styles.go` after",
+			expected: "\x1b[38;5;151m styles.go \x1b[0m\x1b[38;5;252m after",
+		},
+		{
+			name:     "bold",
+			text:     "before **Tokyo Night Theme** after",
+			expected: "\x1b[1mTokyo Night Theme\x1b[0m\x1b[38;5;252m after",
+		},
+		{
+			name:     "link",
+			text:     "before [pkg/tui/styles.go](file:///tmp/styles.go#L1-L2), after",
+			expected: "\x1b[38;5;147;4mfile:///tmp/styles.go#L1-L2\x1b[0m\x1b[38;5;252m, after",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newModel(context.Background(), Config{})
+			t.Cleanup(m.cancel)
+			m.width = 160
+			m.height = 24
+			m.resize()
+			m.entries = []chatEntry{{
+				kind: entryAssistant,
+				blocks: []assistantBlock{{
+					kind: blockText,
+					text: tt.text,
+				}},
+			}}
+
+			m.refreshViewport(true)
+			content := m.viewport.View()
+
+			assert.Contains(t, content, tt.expected)
+		})
+	}
+}
+
+func TestRenderTranscriptRestylesThoughtTextAfterInlineCode(t *testing.T) {
+	withANSI256ColorProfile(t)
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.resize()
+	m.entries = []chatEntry{{
+		kind: entryAssistant,
+		blocks: []assistantBlock{{
+			kind:     blockThoughts,
+			expanded: true,
+			thoughts: []thoughtBlock{{text: "before `styles.go` after", done: true}},
+		}},
+	}}
+
+	content, _ := m.renderTranscript()
+
+	assert.Contains(t, content, "\x1b[38;5;151m styles.go \x1b[0m\x1b[3;38;5;244m after")
+}
+
+func TestRenderPersistentStyleRestylesAfterForegroundReset(t *testing.T) {
+	withANSI256ColorProfile(t)
+
+	rendered := renderPersistentStyle(assistantStyle, "before \x1b[38;5;151mcode\x1b[39m after")
+
+	assert.Contains(t, rendered, "\x1b[38;5;151mcode\x1b[39m\x1b[38;5;252m after")
+}
+
+func TestRenderPersistentStyleRestylesEachRenderedLine(t *testing.T) {
+	withANSI256ColorProfile(t)
+
+	rendered := renderPersistentStyle(assistantStyle, "first\nsecond \x1b[38;5;151mcode\x1b[0m after")
+
+	assert.Contains(t, rendered, "\n\x1b[38;5;252msecond \x1b[38;5;151mcode\x1b[0m\x1b[38;5;252m after")
+}
+
+func withANSI256ColorProfile(t *testing.T) {
+	t.Helper()
+	previous := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	t.Cleanup(func() {
+		lipgloss.SetColorProfile(previous)
+	})
 }
 
 func TestRenderTranscriptSeparatesThinkingMarkdownBlocks(t *testing.T) {

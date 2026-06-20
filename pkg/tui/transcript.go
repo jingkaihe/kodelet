@@ -51,7 +51,7 @@ func (m *model) renderTranscript() (string, []detailRegion) {
 						if strings.TrimSpace(body) != "" {
 							b.WriteString("\n")
 							line++
-							rendered := thoughtBodyStyle.Render(body)
+							rendered := renderPersistentStyle(thoughtBodyStyle, body)
 							b.WriteString(rendered)
 							b.WriteString("\n")
 							line += lineCount(rendered)
@@ -87,7 +87,7 @@ func (m *model) renderTranscript() (string, []detailRegion) {
 					if trimmed != "" {
 						m.renderAssistantBlockSeparator(&b, &line, &renderedAssistantBlock)
 						renderedMarkdown := m.renderMarkdown(trimmed, m.transcriptTextWidth(), markdownAssistant)
-						rendered := assistantStyle.Render(renderedMarkdown)
+						rendered := renderPersistentStyle(assistantStyle, renderedMarkdown)
 						b.WriteString(rendered)
 						b.WriteString("\n")
 						line += lineCount(rendered)
