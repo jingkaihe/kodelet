@@ -71,7 +71,7 @@ func (m *model) renderTranscript() (string, []detailRegion) {
 						if group.expanded || group.active {
 							body := group.body
 							if group.wrapBody {
-								body = wrapText(body, m.transcriptTextWidth()-2)
+								body = wrapPreservingWhitespace(body, m.transcriptTextWidth()-2)
 							}
 							body = indentText(body, "  ")
 							if strings.TrimSpace(body) != "" {

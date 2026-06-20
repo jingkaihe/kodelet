@@ -205,6 +205,44 @@ func TestCtrlOTogglesDetails(t *testing.T) {
 	assert.Contains(t, content, "toggle me")
 }
 
+func TestTypingInComposerDoesNotMoveViewport(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 14
+	m.resize()
+	m.entries = []chatEntry{{
+		kind:   entryAssistant,
+		blocks: []assistantBlock{{kind: blockText, text: numberedLines(30)}},
+	}}
+	m.refreshViewport(true)
+	bottomOffset := m.viewport.YOffset
+	require.Greater(t, bottomOffset, 0)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	m = updated.(model)
+	scrolledOffset := m.viewport.YOffset
+	require.Less(t, scrolledOffset, bottomOffset)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	m = updated.(model)
+	assert.Equal(t, scrolledOffset, m.viewport.YOffset)
+	assert.Equal(t, "x", m.textarea.Value())
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(model)
+	assert.Equal(t, scrolledOffset, m.viewport.YOffset)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+	m = updated.(model)
+	assert.Equal(t, scrolledOffset, m.viewport.YOffset)
+	assert.Empty(t, m.textarea.Value())
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	m = updated.(model)
+	assert.Greater(t, m.viewport.YOffset, scrolledOffset)
+}
+
 func TestSubmitStartsRunAndStreamsRunnerMessages(t *testing.T) {
 	runner := &recordingRunner{conversationID: "conversation-done"}
 	m := newModel(context.Background(), Config{ConversationID: "conversation-123", Profile: "work", CWD: "/tmp", Runner: runner})

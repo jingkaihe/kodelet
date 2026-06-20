@@ -67,6 +67,25 @@ func wrapText(text string, width int) string {
 	return strings.Join(wrapped, "\n")
 }
 
+func wrapPreservingWhitespace(text string, width int) string {
+	width = max(10, width)
+	lines := strings.Split(text, "\n")
+	wrapped := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if line == "" {
+			wrapped = append(wrapped, "")
+			continue
+		}
+		for lipgloss.Width(line) > width {
+			chunk, rest := splitVisible(line, width)
+			wrapped = append(wrapped, chunk)
+			line = rest
+		}
+		wrapped = append(wrapped, line)
+	}
+	return strings.Join(wrapped, "\n")
+}
+
 func wrapLine(line string, width int) []string {
 	words := strings.Fields(line)
 	if len(words) == 0 {

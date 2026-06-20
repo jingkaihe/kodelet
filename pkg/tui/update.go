@@ -236,11 +236,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.textarea, cmd = m.textarea.Update(msg)
 	cmds = append(cmds, cmd)
 
-	var vpCmd tea.Cmd
-	m.updateViewport(msg, &vpCmd)
-	cmds = append(cmds, vpCmd)
+	if shouldUpdateViewport(msg) {
+		var vpCmd tea.Cmd
+		m.updateViewport(msg, &vpCmd)
+		cmds = append(cmds, vpCmd)
+	}
 
 	return m, tea.Batch(cmds...)
+}
+
+func shouldUpdateViewport(msg tea.Msg) bool {
+	if isVerticalViewportNavigation(msg) {
+		return true
+	}
+
+	if msg, ok := msg.(tea.MouseMsg); ok {
+		return isHorizontalViewportMouseNavigation(msg)
+	}
+
+	return false
 }
 
 func (m *model) updateViewport(msg tea.Msg, cmd *tea.Cmd) {
@@ -259,7 +273,7 @@ func isVerticalViewportNavigation(msg tea.Msg) bool {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "up", "pgup", "ctrl+u", "down", "pgdown":
+		case "pgup", "pgdown":
 			return true
 		}
 	case tea.MouseMsg:
@@ -269,6 +283,20 @@ func isVerticalViewportNavigation(msg tea.Msg) bool {
 		return msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown
 	}
 	return false
+}
+
+func isHorizontalViewportMouseNavigation(msg tea.MouseMsg) bool {
+	if msg.Action != tea.MouseActionPress {
+		return false
+	}
+	switch msg.Button {
+	case tea.MouseButtonWheelLeft, tea.MouseButtonWheelRight:
+		return true
+	case tea.MouseButtonWheelUp, tea.MouseButtonWheelDown:
+		return msg.Shift
+	default:
+		return false
+	}
 }
 
 func (m *model) queueTranscriptRefresh(scrollBottom bool) tea.Cmd {

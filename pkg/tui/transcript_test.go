@@ -111,6 +111,33 @@ func TestRenderTranscriptGroupsToolBlocksByType(t *testing.T) {
 	require.Len(t, regions, 6)
 }
 
+func TestRenderTranscriptPreservesIndentedToolOutput(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 120
+	m.height = 40
+	m.resize()
+	m.entries = []chatEntry{{
+		kind: entryAssistant,
+		blocks: []assistantBlock{{
+			kind: blockTools,
+			tools: []toolCall{{
+				name:     "bash",
+				result:   "pkg/tui/model.go:\n    func indented()\n\treturn nil",
+				done:     true,
+				expanded: true,
+			}},
+		}},
+	}}
+
+	content, _ := m.renderTranscript()
+	plain := xansi.Strip(content)
+
+	assert.Contains(t, plain, "  result: pkg/tui/model.go:")
+	assert.Contains(t, plain, "      func indented()")
+	assert.Contains(t, plain, "      return nil")
+}
+
 func TestDedicatedBuiltinToolLabels(t *testing.T) {
 	tests := []struct {
 		name string
