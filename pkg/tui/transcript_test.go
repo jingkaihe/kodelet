@@ -313,17 +313,17 @@ func TestRenderTranscriptRestylesAssistantTextAfterInlineCode(t *testing.T) {
 		{
 			name:     "code",
 			text:     "before `styles.go` after",
-			expected: "\x1b[38;5;151m styles.go \x1b[0m\x1b[38;5;252m after",
+			expected: "\x1b[38;2;147;226;213mstyles.go\x1b[0m\x1b[38;5;189m after",
 		},
 		{
 			name:     "bold",
 			text:     "before **Tokyo Night Theme** after",
-			expected: "\x1b[1mTokyo Night Theme\x1b[0m\x1b[38;5;252m after",
+			expected: "\x1b[1mTokyo Night Theme\x1b[0m\x1b[38;5;189m after",
 		},
 		{
 			name:     "link",
 			text:     "before [pkg/tui/styles.go](file:///tmp/styles.go#L1-L2), after",
-			expected: "\x1b[38;5;147;4mfile:///tmp/styles.go#L1-L2\x1b[0m\x1b[38;5;252m, after",
+			expected: "\x1b[38;2;137;179;250;4mfile:///tmp/styles.go#L1-L2\x1b[0m\x1b[38;5;189m, after",
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -344,6 +344,11 @@ func TestRenderTranscriptRestylesAssistantTextAfterInlineCode(t *testing.T) {
 			content := m.viewport.View()
 
 			assert.Contains(t, content, tt.expected)
+			if tt.name == "code" {
+				plain := xansi.Strip(content)
+				assert.Contains(t, plain, "before styles.go after")
+				assert.NotContains(t, plain, "before  styles.go  after")
+			}
 		})
 	}
 }
@@ -366,23 +371,25 @@ func TestRenderTranscriptRestylesThoughtTextAfterInlineCode(t *testing.T) {
 
 	content, _ := m.renderTranscript()
 
-	assert.Contains(t, content, "\x1b[38;5;151m styles.go \x1b[0m\x1b[3;38;5;244m after")
+	assert.Contains(t, content, "\x1b[38;2;147;226;213mstyles.go\x1b[0m\x1b[3;38;5;103m after")
 }
 
 func TestRenderPersistentStyleRestylesAfterForegroundReset(t *testing.T) {
 	withANSI256ColorProfile(t)
 
 	rendered := renderPersistentStyle(assistantStyle, "before \x1b[38;5;151mcode\x1b[39m after")
+	start, _ := styleSequences(assistantStyle)
 
-	assert.Contains(t, rendered, "\x1b[38;5;151mcode\x1b[39m\x1b[38;5;252m after")
+	assert.Contains(t, rendered, "\x1b[38;5;151mcode\x1b[39m"+start+" after")
 }
 
 func TestRenderPersistentStyleRestylesEachRenderedLine(t *testing.T) {
 	withANSI256ColorProfile(t)
 
 	rendered := renderPersistentStyle(assistantStyle, "first\nsecond \x1b[38;5;151mcode\x1b[0m after")
+	start, _ := styleSequences(assistantStyle)
 
-	assert.Contains(t, rendered, "\n\x1b[38;5;252msecond \x1b[38;5;151mcode\x1b[0m\x1b[38;5;252m after")
+	assert.Contains(t, rendered, "\n"+start+"second \x1b[38;5;151mcode\x1b[0m"+start+" after")
 }
 
 func withANSI256ColorProfile(t *testing.T) {

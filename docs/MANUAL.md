@@ -139,16 +139,19 @@ kodelet chat --follow                # continue the most recent conversation
 kodelet chat -f                      # short form
 kodelet chat --resume CONVERSATION_ID  # resume a specific conversation
 kodelet chat -r CONVERSATION_ID        # short form
+kodelet chat --theme tokyo-night        # switch from the default catppuccin-mocha theme
 kodelet chat --no-tools              # chat without tools
 kodelet chat --no-extensions         # disable extensions
 ```
 
-The TUI streams assistant responses, collapses thinking and tool details by
-default, and lets you toggle details with `ctrl+o` or by clicking the
-detail header. It uses the same chat runner as the Web UI, so conversations are
-persisted and can be resumed by ID. While the assistant is working, the composer
-stays editable; press `Enter` to queue the typed text as steering for the active
-conversation. Kodelet applies queued steering on the next model API call.
+The TUI uses `catppuccin-mocha` by default. Use `--theme` to switch to another
+available theme such as `tokyo-night`. It streams assistant responses, collapses
+thinking and tool details by default, and lets you toggle details with `ctrl+o`
+or by clicking the detail header. It uses the same chat runner as the Web UI, so
+conversations are persisted and can be resumed by ID. While the assistant is
+working, the composer stays editable; press `Enter` to queue the typed text as
+steering for the active conversation. Kodelet applies queued steering on the next
+model API call.
 
 ### Interactive Chat Mode (ACP)
 

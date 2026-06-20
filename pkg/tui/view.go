@@ -36,12 +36,39 @@ func (m model) renderInputBox() string {
 		bodyLines = append(bodyLines, "")
 	}
 
-	lines := []string{inputBorderStyle.Render(rightLabeledBorder("╭", "╮", outerWidth, m.inputTopRightLabel()))}
+	lines := []string{renderLabeledBorder("╭", "╮", outerWidth, m.inputTopRightLabel())}
 	for i := 0; i < inputHeight; i++ {
 		lines = append(lines, inputBorderStyle.Render("│")+" "+padVisible(bodyLines[i], contentWidth)+" "+inputBorderStyle.Render("│"))
 	}
-	lines = append(lines, inputBorderStyle.Render(rightLabeledBorder("╰", "╯", outerWidth, displayCWD(m.cwd))))
+	lines = append(lines, renderLabeledBorder("╰", "╯", outerWidth, displayCWD(m.cwd)))
 	return strings.Join(lines, "\n")
+}
+
+func renderLabeledBorder(left, right string, width int, label string) string {
+	if width <= 2 {
+		return inputBorderStyle.Render(left + right)
+	}
+
+	fillWidth := width - 2
+	label = strings.TrimSpace(label)
+	if label == "" || fillWidth <= 2 {
+		return inputBorderStyle.Render(left + strings.Repeat("─", fillWidth) + right)
+	}
+
+	label = " " + fitVisible(label, fillWidth-2) + " "
+	labelWidth := lipgloss.Width(label)
+	start := fillWidth - labelWidth - 1
+	if start < 0 {
+		start = 0
+	}
+	endWidth := fillWidth - start - labelWidth
+	if endWidth < 0 {
+		endWidth = 0
+	}
+
+	return inputBorderStyle.Render(left+strings.Repeat("─", start)) +
+		inputLabelStyle.Render(label) +
+		inputBorderStyle.Render(strings.Repeat("─", endWidth)+right)
 }
 
 func (m model) inputTopRightLabel() string {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/jingkaihe/kodelet/pkg/tui"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -14,6 +15,7 @@ func TestGetChatConfigFromFlags(t *testing.T) {
 	defaults := NewChatConfig()
 	cmd.Flags().StringP("resume", "r", defaults.ResumeConvID, "")
 	cmd.Flags().String("cwd", defaults.CWD, "")
+	cmd.Flags().String("theme", tui.DefaultThemeName, "")
 	cmd.Flags().BoolP("follow", "f", defaults.Follow, "")
 	cmd.Flags().Bool("no-extensions", defaults.NoExtensions, "")
 	cmd.Flags().Bool("no-mcp", defaults.NoMCP, "")
@@ -21,6 +23,7 @@ func TestGetChatConfigFromFlags(t *testing.T) {
 
 	require.NoError(t, cmd.Flags().Set("resume", "conv-1"))
 	require.NoError(t, cmd.Flags().Set("cwd", " /tmp/project "))
+	require.NoError(t, cmd.Flags().Set("theme", " tokyo-night "))
 	require.NoError(t, cmd.Flags().Set("no-extensions", "true"))
 	require.NoError(t, cmd.Flags().Set("no-mcp", "true"))
 	require.NoError(t, cmd.Flags().Set("no-tools", "true"))
@@ -29,6 +32,7 @@ func TestGetChatConfigFromFlags(t *testing.T) {
 
 	assert.Equal(t, "conv-1", config.ResumeConvID)
 	assert.Equal(t, "/tmp/project", config.CWD)
+	assert.Equal(t, "tokyo-night", config.Theme)
 	assert.True(t, config.NoExtensions)
 	assert.True(t, config.NoMCP)
 	assert.True(t, config.NoTools)
@@ -39,6 +43,7 @@ func TestChatResumeShortFlag(t *testing.T) {
 	defaults := NewChatConfig()
 	cmd.Flags().StringP("resume", "r", defaults.ResumeConvID, "")
 	cmd.Flags().String("cwd", defaults.CWD, "")
+	cmd.Flags().String("theme", tui.DefaultThemeName, "")
 	cmd.Flags().BoolP("follow", "f", defaults.Follow, "")
 	cmd.Flags().Bool("no-extensions", defaults.NoExtensions, "")
 	cmd.Flags().Bool("no-mcp", defaults.NoMCP, "")
@@ -55,6 +60,7 @@ func TestChatNoToolsDisablesMCP(t *testing.T) {
 	defaults := NewChatConfig()
 	cmd.Flags().StringP("resume", "r", defaults.ResumeConvID, "")
 	cmd.Flags().String("cwd", defaults.CWD, "")
+	cmd.Flags().String("theme", tui.DefaultThemeName, "")
 	cmd.Flags().BoolP("follow", "f", defaults.Follow, "")
 	cmd.Flags().Bool("no-extensions", defaults.NoExtensions, "")
 	cmd.Flags().Bool("no-mcp", defaults.NoMCP, "")

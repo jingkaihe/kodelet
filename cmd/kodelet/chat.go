@@ -19,6 +19,7 @@ import (
 type ChatConfig struct {
 	ResumeConvID string
 	CWD          string
+	Theme        string
 	Follow       bool
 	NoExtensions bool
 	NoMCP        bool
@@ -47,6 +48,10 @@ var chatCmd = &cobra.Command{
 		if config.NoTools {
 			viper.Set("allowed_tools", []string{"none"})
 		}
+		if err := tui.ValidateThemeName(config.Theme); err != nil {
+			presenter.Error(err, "Invalid TUI theme")
+			os.Exit(1)
+		}
 		logger.SetLogOutput(io.Discard)
 		stdlog.SetOutput(io.Discard)
 
@@ -59,6 +64,7 @@ var chatCmd = &cobra.Command{
 			ConversationID: config.ResumeConvID,
 			Profile:        profile,
 			CWD:            config.CWD,
+			Theme:          config.Theme,
 		}); err != nil {
 			presenter.Error(err, "Chat failed")
 			os.Exit(1)
@@ -70,6 +76,7 @@ func init() {
 	defaults := NewChatConfig()
 	chatCmd.Flags().StringP("resume", "r", defaults.ResumeConvID, "Resume a specific conversation")
 	chatCmd.Flags().String("cwd", defaults.CWD, "Working directory to execute in (defaults to current shell directory for new chats)")
+	chatCmd.Flags().String("theme", tui.DefaultThemeName, "TUI theme (available: "+strings.Join(tui.AvailableThemeNames(), ", ")+")")
 	chatCmd.Flags().BoolP("follow", "f", defaults.Follow, "Follow the most recent conversation")
 	chatCmd.Flags().Bool("no-extensions", defaults.NoExtensions, "Disable extension runtime")
 	chatCmd.Flags().Bool("no-mcp", defaults.NoMCP, "Disable MCP tools")
@@ -84,6 +91,9 @@ func getChatConfigFromFlags(ctx context.Context, cmd *cobra.Command) *ChatConfig
 	}
 	if cwd, err := cmd.Flags().GetString("cwd"); err == nil {
 		config.CWD = strings.TrimSpace(cwd)
+	}
+	if theme, err := cmd.Flags().GetString("theme"); err == nil {
+		config.Theme = strings.TrimSpace(theme)
 	}
 	if follow, err := cmd.Flags().GetBool("follow"); err == nil {
 		config.Follow = follow

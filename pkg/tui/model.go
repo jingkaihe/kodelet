@@ -11,11 +11,16 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/jingkaihe/kodelet/pkg/webui"
 )
 
 func Run(ctx context.Context, config Config) error {
+	theme, ok := themeByName(config.Theme)
+	if !ok {
+		return ValidateThemeName(config.Theme)
+	}
+	applyTheme(theme)
+
 	initialModel := newModel(ctx, config)
 
 	program := tea.NewProgram(initialModel, tea.WithAltScreen(), tea.WithMouseCellMotion())
@@ -33,14 +38,30 @@ func Run(ctx context.Context, config Config) error {
 
 func newModel(ctx context.Context, config Config) model {
 	mctx, cancel := context.WithCancel(ctx)
+	theme, ok := themeByName(config.Theme)
+	if !ok {
+		theme = themes[DefaultThemeName]
+	}
+	applyTheme(theme)
 
 	ta := textarea.New()
 	ta.Placeholder = "Ask kodelet..."
 	ta.Prompt = ""
 	ta.ShowLineNumbers = false
-	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
-	ta.FocusedStyle.Placeholder = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	ta.BlurredStyle.CursorLine = lipgloss.NewStyle()
+	ta.FocusedStyle.Base = composerTextStyle
+	ta.FocusedStyle.CursorLine = composerTextStyle
+	ta.FocusedStyle.Placeholder = inputPlaceholderStyle
+	ta.FocusedStyle.Text = composerTextStyle
+	ta.FocusedStyle.EndOfBuffer = composerTextStyle
+	ta.FocusedStyle.Prompt = composerTextStyle
+	ta.BlurredStyle.Base = composerTextStyle
+	ta.BlurredStyle.CursorLine = composerTextStyle
+	ta.BlurredStyle.Placeholder = inputPlaceholderStyle
+	ta.BlurredStyle.Text = composerTextStyle
+	ta.BlurredStyle.EndOfBuffer = composerTextStyle
+	ta.BlurredStyle.Prompt = composerTextStyle
+	ta.Cursor.Style = composerCursorStyle
+	ta.Cursor.TextStyle = composerTextStyle
 	ta.SetHeight(inputHeight)
 	ta.Focus()
 
@@ -60,7 +81,6 @@ func newModel(ctx context.Context, config Config) model {
 			cwd = wd
 		}
 	}
-
 	return model{
 		ctx:            mctx,
 		cancel:         cancel,
@@ -68,6 +88,7 @@ func newModel(ctx context.Context, config Config) model {
 		conversationID: strings.TrimSpace(config.ConversationID),
 		profile:        displayProfile(config.Profile),
 		cwd:            cwd,
+		theme:          theme,
 		viewport:       vp,
 		textarea:       ta,
 		spinner:        sp,

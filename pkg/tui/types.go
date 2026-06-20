@@ -18,6 +18,7 @@ type Config struct {
 	ConversationID string
 	Profile        string
 	CWD            string
+	Theme          string
 	Runner         webui.ChatRunner
 }
 
@@ -99,6 +100,7 @@ type model struct {
 	conversationID string
 	profile        string
 	cwd            string
+	theme          tuiTheme
 
 	viewport viewport.Model
 	textarea textarea.Model

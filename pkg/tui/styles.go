@@ -1,35 +1,265 @@
 package tui
 
 import (
+	"sort"
 	"strings"
 
+	"github.com/charmbracelet/glamour/ansi"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/pkg/errors"
 )
 
 const (
+	DefaultThemeName            = "catppuccin-mocha"
 	ansiResetSequence           = "\x1b[0m"
 	ansiForegroundResetSequence = "\x1b[39m"
 )
 
+type tuiTheme struct {
+	Name             string
+	User             string
+	Assistant        string
+	Muted            string
+	ThoughtHeader    string
+	ThoughtBody      string
+	ToolHeader       string
+	ToolBody         string
+	DiffAdded        string
+	DiffRemoved      string
+	Steering         string
+	SteeringError    string
+	InputBorder      string
+	InputLabel       string
+	InputPlaceholder string
+	ComposerText     string
+	ComposerCursor   string
+	Markdown         markdownTheme
+}
+
+type markdownTheme struct {
+	BlockQuote            string
+	Heading               string
+	HeadingPrimary        string
+	HeadingMuted          string
+	HorizontalRule        string
+	Link                  string
+	LinkText              string
+	Image                 string
+	ImageText             string
+	Code                  string
+	CodeBlock             string
+	ChromaText            string
+	ChromaError           string
+	ChromaErrorBackground string
+	ChromaComment         string
+	ChromaCommentPreproc  string
+	ChromaKeyword         string
+	ChromaKeywordType     string
+	ChromaOperator        string
+	ChromaPunctuation     string
+	ChromaName            string
+	ChromaNameBuiltin     string
+	ChromaNameTag         string
+	ChromaNameAttribute   string
+	ChromaNameDecorator   string
+	ChromaNameFunction    string
+	ChromaNumber          string
+	ChromaString          string
+	ChromaStringEscape    string
+	ChromaGenericDeleted  string
+	ChromaGenericInserted string
+	ChromaGenericHeading  string
+}
+
+var themes = map[string]tuiTheme{
+	DefaultThemeName: {
+		Name:             DefaultThemeName,
+		User:             "#a6e3a1", // green
+		Assistant:        "#cdd6f4", // text
+		Muted:            "#7f849c", // overlay1
+		ThoughtHeader:    "#f9e2af", // yellow
+		ThoughtBody:      "#9399b2", // overlay2
+		ToolHeader:       "#94e2d5", // teal
+		ToolBody:         "#a6adc8", // subtext0
+		DiffAdded:        "#a6e3a1", // green
+		DiffRemoved:      "#f38ba8", // red
+		Steering:         "#cba6f7", // mauve
+		SteeringError:    "#f38ba8", // red
+		InputBorder:      "#cdd6f4", // text
+		InputLabel:       "#cdd6f4", // text
+		InputPlaceholder: "#9399b2", // overlay2
+		ComposerText:     "#f5e0dc", // rosewater
+		ComposerCursor:   "#fab387", // peach
+		Markdown: markdownTheme{
+			BlockQuote:            "#7f849c", // overlay1
+			Heading:               "#b4befe", // lavender
+			HeadingPrimary:        "#cba6f7", // mauve
+			HeadingMuted:          "#7f849c", // overlay1
+			HorizontalRule:        "#45475a", // surface1
+			Link:                  "#89b4fa", // blue
+			LinkText:              "#94e2d5", // teal
+			Image:                 "#89b4fa", // blue
+			ImageText:             "#94e2d5", // teal
+			Code:                  "#94e2d5", // teal
+			CodeBlock:             "#bac2de", // subtext1
+			ChromaText:            "#cdd6f4", // text
+			ChromaError:           "#f38ba8", // red
+			ChromaErrorBackground: "#45475a", // surface1
+			ChromaComment:         "#7f849c", // overlay1
+			ChromaCommentPreproc:  "#94e2d5", // teal
+			ChromaKeyword:         "#cba6f7", // mauve
+			ChromaKeywordType:     "#94e2d5", // teal
+			ChromaOperator:        "#cba6f7", // mauve
+			ChromaPunctuation:     "#9399b2", // overlay2
+			ChromaName:            "#cdd6f4", // text
+			ChromaNameBuiltin:     "#94e2d5", // teal
+			ChromaNameTag:         "#cba6f7", // mauve
+			ChromaNameAttribute:   "#94e2d5", // teal
+			ChromaNameDecorator:   "#94e2d5", // teal
+			ChromaNameFunction:    "#89b4fa", // blue
+			ChromaNumber:          "#fab387", // peach
+			ChromaString:          "#a6e3a1", // green
+			ChromaStringEscape:    "#94e2d5", // teal
+			ChromaGenericDeleted:  "#f38ba8", // red
+			ChromaGenericInserted: "#a6e3a1", // green
+			ChromaGenericHeading:  "#b4befe", // lavender
+		},
+	},
+	"tokyo-night": {
+		Name:             "tokyo-night",
+		User:             "114",
+		Assistant:        "252",
+		Muted:            "245",
+		ThoughtHeader:    "229",
+		ThoughtBody:      "244",
+		ToolHeader:       "151",
+		ToolBody:         "246",
+		DiffAdded:        "114",
+		DiffRemoved:      "203",
+		Steering:         "183",
+		SteeringError:    "203",
+		InputBorder:      "147",
+		InputLabel:       "147",
+		InputPlaceholder: "240",
+		ComposerText:     "252",
+		ComposerCursor:   "229",
+		Markdown: markdownTheme{
+			BlockQuote:            "245",
+			Heading:               "147",
+			HeadingPrimary:        "183",
+			HeadingMuted:          "245",
+			HorizontalRule:        "240",
+			Link:                  "147",
+			LinkText:              "151",
+			Image:                 "147",
+			ImageText:             "151",
+			Code:                  "151",
+			CodeBlock:             "248",
+			ChromaText:            "252",
+			ChromaError:           "252",
+			ChromaErrorBackground: "240",
+			ChromaComment:         "244",
+			ChromaCommentPreproc:  "151",
+			ChromaKeyword:         "147",
+			ChromaKeywordType:     "151",
+			ChromaOperator:        "147",
+			ChromaPunctuation:     "245",
+			ChromaName:            "252",
+			ChromaNameBuiltin:     "151",
+			ChromaNameTag:         "147",
+			ChromaNameAttribute:   "151",
+			ChromaNameDecorator:   "151",
+			ChromaNameFunction:    "151",
+			ChromaNumber:          "183",
+			ChromaString:          "187",
+			ChromaStringEscape:    "151",
+			ChromaGenericDeleted:  "183",
+			ChromaGenericInserted: "151",
+			ChromaGenericHeading:  "147",
+		},
+	},
+}
+
 var (
-	userStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("114")).Italic(true)
-	assistantStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
-	mutedStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	userStyle      lipgloss.Style
+	assistantStyle lipgloss.Style
+	mutedStyle     lipgloss.Style
 
-	assistantMarkdownStyle = compactMarkdownStyle()
-	thoughtMarkdownStyle   = compactMarkdownStyle()
+	assistantMarkdownStyle ansi.StyleConfig
+	thoughtMarkdownStyle   ansi.StyleConfig
 
-	thoughtHeaderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("229"))
-	thoughtBodyStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
-	toolHeaderStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("151"))
-	toolBodyStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("246"))
-	diffAddedStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("114"))
-	diffRemovedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
-	steeringStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("183")).Italic(true)
-	steeringErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
+	thoughtHeaderStyle lipgloss.Style
+	thoughtBodyStyle   lipgloss.Style
+	toolHeaderStyle    lipgloss.Style
+	toolBodyStyle      lipgloss.Style
+	diffAddedStyle     lipgloss.Style
+	diffRemovedStyle   lipgloss.Style
+	steeringStyle      lipgloss.Style
+	steeringErrorStyle lipgloss.Style
 
-	inputBorderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("147"))
+	inputBorderStyle      lipgloss.Style
+	inputLabelStyle       lipgloss.Style
+	inputPlaceholderStyle lipgloss.Style
+	composerTextStyle     lipgloss.Style
+	composerCursorStyle   lipgloss.Style
 )
+
+func init() {
+	applyTheme(themes[DefaultThemeName])
+}
+
+func AvailableThemeNames() []string {
+	names := make([]string, 0, len(themes))
+	for name := range themes {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func ValidateThemeName(name string) error {
+	if _, ok := themeByName(name); ok {
+		return nil
+	}
+	return errors.Errorf("unknown TUI theme %q (available: %s)", strings.TrimSpace(name), strings.Join(AvailableThemeNames(), ", "))
+}
+
+func themeByName(name string) (tuiTheme, bool) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		name = DefaultThemeName
+	}
+	theme, ok := themes[name]
+	return theme, ok
+}
+
+func applyTheme(theme tuiTheme) {
+	userStyle = lipgloss.NewStyle().Foreground(themeColor(theme.User)).Italic(true)
+	assistantStyle = lipgloss.NewStyle().Foreground(themeColor(theme.Assistant))
+	mutedStyle = lipgloss.NewStyle().Foreground(themeColor(theme.Muted))
+
+	assistantMarkdownStyle = compactMarkdownStyle(theme.Markdown)
+	thoughtMarkdownStyle = compactMarkdownStyle(theme.Markdown)
+
+	thoughtHeaderStyle = lipgloss.NewStyle().Foreground(themeColor(theme.ThoughtHeader))
+	thoughtBodyStyle = lipgloss.NewStyle().Foreground(themeColor(theme.ThoughtBody)).Italic(true)
+	toolHeaderStyle = lipgloss.NewStyle().Foreground(themeColor(theme.ToolHeader))
+	toolBodyStyle = lipgloss.NewStyle().Foreground(themeColor(theme.ToolBody))
+	diffAddedStyle = lipgloss.NewStyle().Foreground(themeColor(theme.DiffAdded))
+	diffRemovedStyle = lipgloss.NewStyle().Foreground(themeColor(theme.DiffRemoved))
+	steeringStyle = lipgloss.NewStyle().Foreground(themeColor(theme.Steering)).Italic(true)
+	steeringErrorStyle = lipgloss.NewStyle().Foreground(themeColor(theme.SteeringError))
+
+	inputBorderStyle = lipgloss.NewStyle().Foreground(themeColor(theme.InputBorder))
+	inputLabelStyle = lipgloss.NewStyle().Foreground(themeColor(theme.InputLabel))
+	inputPlaceholderStyle = lipgloss.NewStyle().Foreground(themeColor(theme.InputPlaceholder))
+	composerTextStyle = lipgloss.NewStyle().Foreground(themeColor(theme.ComposerText))
+	composerCursorStyle = lipgloss.NewStyle().Foreground(themeColor(theme.ComposerCursor))
+}
+
+func themeColor(color string) lipgloss.Color {
+	return lipgloss.Color(color)
+}
 
 func renderPersistentStyle(style lipgloss.Style, text string) string {
 	rendered := style.Render(text)
