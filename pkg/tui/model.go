@@ -119,11 +119,11 @@ type model struct {
 	entries []chatEntry
 	usage   llmtypes.Usage
 
-	running      bool
-	cancelledRun bool
-	eventCh      chan tea.Msg
-	doneCh       chan tea.Msg
-	cancelRun    context.CancelFunc
+	running     bool
+	activeRunID int
+	nextRunID   int
+	runCh       chan tea.Msg
+	cancelRun   context.CancelFunc
 
 	detailRegions []detailRegion
 	status        string
@@ -131,11 +131,14 @@ type model struct {
 }
 
 type chatEventMsg struct {
+	runID int
 	event webui.ChatEvent
 }
 
 type chatDoneMsg struct {
-	err error
+	runID          int
+	conversationID string
+	err            error
 }
 
 type initialHistoryMsg struct {
@@ -145,11 +148,12 @@ type initialHistoryMsg struct {
 }
 
 type tuiSink struct {
-	ch chan<- tea.Msg
+	ch    chan<- tea.Msg
+	runID int
 }
 
 func (s tuiSink) Send(event webui.ChatEvent) error {
-	s.ch <- chatEventMsg{event: event}
+	s.ch <- chatEventMsg{runID: s.runID, event: event}
 	return nil
 }
 
@@ -193,8 +197,7 @@ func newModel(ctx context.Context, config Config) model {
 		viewport:       vp,
 		textarea:       ta,
 		spinner:        sp,
-		eventCh:        make(chan tea.Msg, 256),
-		doneCh:         make(chan tea.Msg, 1),
+		runCh:          make(chan tea.Msg, 256),
 		status:         "ready",
 	}
 }
@@ -203,8 +206,7 @@ func (m model) Init() tea.Cmd {
 	return tea.Batch(
 		textarea.Blink,
 		m.spinner.Tick,
-		waitForMsg(m.eventCh),
-		waitForMsg(m.doneCh),
+		waitForMsg(m.runCh),
 		loadInitialHistory(m.ctx, m.conversationID),
 	)
 }
@@ -375,22 +377,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if msg.String() == "ctrl+d" {
 					return m, nil
 				}
-				m.stopRun()
-				m.status = "cancelled"
-				m.running = false
-				m.cancelledRun = true
-				m.refreshViewport(true)
+				m.cancelActiveRun()
 				return m, nil
 			}
 			m.cancel()
 			return m, tea.Quit
 		case msg.String() == "esc":
 			if m.running {
-				m.stopRun()
-				m.status = "cancelled"
-				m.running = false
-				m.cancelledRun = true
-				m.refreshViewport(true)
+				m.cancelActiveRun()
 			}
 			return m, nil
 		case msg.String() == "ctrl+t" || msg.String() == "alt+t":
@@ -425,25 +419,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case chatEventMsg:
-		if m.cancelledRun {
-			return m, waitForMsg(m.eventCh)
+		if msg.runID != m.activeRunID {
+			return m, waitForMsg(m.runCh)
 		}
 		m.applyChatEvent(msg.event)
 		m.refreshViewport(true)
-		return m, waitForMsg(m.eventCh)
+		return m, waitForMsg(m.runCh)
 
 	case chatDoneMsg:
-		if m.cancelledRun {
-			m.running = false
-			m.cancelRun = nil
-			m.cancelledRun = false
-			m.err = nil
-			m.status = "ready"
-			m.refreshViewport(true)
-			return m, waitForMsg(m.doneCh)
+		if msg.runID != m.activeRunID {
+			return m, waitForMsg(m.runCh)
 		}
+		if msg.conversationID != "" {
+			m.conversationID = msg.conversationID
+		}
+		m.finishActiveBlocks()
 		m.running = false
 		m.cancelRun = nil
+		m.activeRunID = 0
 		if msg.err != nil {
 			m.err = msg.err
 			m.status = "error"
@@ -453,7 +446,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "ready"
 		}
 		m.refreshViewport(true)
-		return m, waitForMsg(m.doneCh)
+		return m, waitForMsg(m.runCh)
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -502,15 +495,16 @@ func (m *model) submit() tea.Cmd {
 	m.textarea.Reset()
 	m.entries = append(m.entries, chatEntry{kind: entryUser, content: message})
 	m.running = true
-	m.cancelledRun = false
+	m.nextRunID++
+	m.activeRunID = m.nextRunID
 	m.status = "working"
 	m.err = nil
 	m.refreshViewport(true)
 
 	runCtx, cancel := context.WithCancel(m.ctx)
 	m.cancelRun = cancel
-	eventCh := m.eventCh
-	doneCh := m.doneCh
+	runID := m.activeRunID
+	runCh := m.runCh
 	runner := m.runner
 	req := webui.ChatRequest{
 		Message:        message,
@@ -521,11 +515,8 @@ func (m *model) submit() tea.Cmd {
 
 	return func() tea.Msg {
 		go func() {
-			conversationID, err := runner.Run(runCtx, req, tuiSink{ch: eventCh})
-			if strings.TrimSpace(conversationID) != "" {
-				eventCh <- chatEventMsg{event: webui.ChatEvent{Kind: "conversation", ConversationID: conversationID}}
-			}
-			doneCh <- chatDoneMsg{err: err}
+			conversationID, err := runner.Run(runCtx, req, tuiSink{ch: runCh, runID: runID})
+			runCh <- chatDoneMsg{runID: runID, conversationID: strings.TrimSpace(conversationID), err: err}
 		}()
 		return nil
 	}
@@ -535,6 +526,36 @@ func (m *model) stopRun() {
 	if m.cancelRun != nil {
 		m.cancelRun()
 		m.cancelRun = nil
+	}
+}
+
+func (m *model) cancelActiveRun() {
+	m.stopRun()
+	m.finishActiveBlocks()
+	m.status = "cancelled"
+	m.running = false
+	m.activeRunID = 0
+	m.refreshViewport(true)
+}
+
+func (m *model) finishActiveBlocks() {
+	for entryIdx := range m.entries {
+		if m.entries[entryIdx].kind != entryAssistant {
+			continue
+		}
+		for blockIdx := range m.entries[entryIdx].blocks {
+			block := &m.entries[entryIdx].blocks[blockIdx]
+			switch block.kind {
+			case blockThoughts:
+				for thoughtIdx := range block.thoughts {
+					block.thoughts[thoughtIdx].done = true
+				}
+			case blockTools:
+				for toolIdx := range block.tools {
+					block.tools[toolIdx].done = true
+				}
+			}
+		}
 	}
 }
 
