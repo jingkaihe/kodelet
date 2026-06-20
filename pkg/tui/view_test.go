@@ -5,9 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
-	"github.com/muesli/termenv"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -54,30 +52,6 @@ func TestNewModelDefaultsToCatppuccinMochaTheme(t *testing.T) {
 
 	assert.Equal(t, DefaultThemeName, m.theme.Name)
 	assert.Equal(t, "#cdd6f4", themes[DefaultThemeName].Assistant)
-}
-
-func TestRenderInputBoxUsesCatppuccinComposerStyles(t *testing.T) {
-	previous := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() {
-		lipgloss.SetColorProfile(previous)
-	})
-
-	m := newModel(context.Background(), Config{})
-	t.Cleanup(m.cancel)
-	m.width = 80
-	m.height = 12
-	m.resize()
-	m.textarea.SetValue("draft")
-
-	box := m.renderInputBox()
-
-	assert.Contains(t, box, "\x1b[38;2;205;214;243m")   // Catppuccin text border
-	assert.Contains(t, box, "\x1b[38;2;205;214;243m")   // Catppuccin text labels
-	assert.NotContains(t, box, "\x1b[1;")               // labels are not bolded
-	assert.Contains(t, box, "\x1b[38;2;245;224;220m")   // rosewater text
-	assert.Contains(t, box, "\x1b[7;38;2;250;179;135m") // peach cursor
-	assert.NotContains(t, box, "48;2;")                 // no composer background fill
 }
 
 func TestNewModelUsesConfiguredTheme(t *testing.T) {

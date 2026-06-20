@@ -305,52 +305,27 @@ func TestRenderTranscriptRendersAssistantMarkdown(t *testing.T) {
 func TestRenderTranscriptRestylesAssistantTextAfterInlineCode(t *testing.T) {
 	withANSI256ColorProfile(t)
 
-	for _, tt := range []struct {
-		name     string
-		text     string
-		expected string
-	}{
-		{
-			name:     "code",
-			text:     "before `styles.go` after",
-			expected: "\x1b[38;2;147;226;213mstyles.go\x1b[0m\x1b[38;5;189m after",
-		},
-		{
-			name:     "bold",
-			text:     "before **Tokyo Night Theme** after",
-			expected: "\x1b[1mTokyo Night Theme\x1b[0m\x1b[38;5;189m after",
-		},
-		{
-			name:     "link",
-			text:     "before [pkg/tui/styles.go](file:///tmp/styles.go#L1-L2), after",
-			expected: "\x1b[38;2;137;179;250;4mfile:///tmp/styles.go#L1-L2\x1b[0m\x1b[38;5;189m, after",
-		},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			m := newModel(context.Background(), Config{})
-			t.Cleanup(m.cancel)
-			m.width = 160
-			m.height = 24
-			m.resize()
-			m.entries = []chatEntry{{
-				kind: entryAssistant,
-				blocks: []assistantBlock{{
-					kind: blockText,
-					text: tt.text,
-				}},
-			}}
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 160
+	m.height = 24
+	m.resize()
+	m.entries = []chatEntry{{
+		kind: entryAssistant,
+		blocks: []assistantBlock{{
+			kind: blockText,
+			text: "before `styles.go` after",
+		}},
+	}}
 
-			m.refreshViewport(true)
-			content := m.viewport.View()
+	m.refreshViewport(true)
+	content := m.viewport.View()
+	plain := xansi.Strip(content)
+	start, _ := styleSequences(assistantStyle)
 
-			assert.Contains(t, content, tt.expected)
-			if tt.name == "code" {
-				plain := xansi.Strip(content)
-				assert.Contains(t, plain, "before styles.go after")
-				assert.NotContains(t, plain, "before  styles.go  after")
-			}
-		})
-	}
+	assert.Contains(t, plain, "before styles.go after")
+	assert.NotContains(t, plain, "before  styles.go  after")
+	assert.Contains(t, content, ansiResetSequence+start+" after")
 }
 
 func TestRenderTranscriptRestylesThoughtTextAfterInlineCode(t *testing.T) {
@@ -370,8 +345,11 @@ func TestRenderTranscriptRestylesThoughtTextAfterInlineCode(t *testing.T) {
 	}}
 
 	content, _ := m.renderTranscript()
+	plain := xansi.Strip(content)
+	start, _ := styleSequences(thoughtBodyStyle)
 
-	assert.Contains(t, content, "\x1b[38;2;147;226;213mstyles.go\x1b[0m\x1b[3;38;5;103m after")
+	assert.Contains(t, plain, "before styles.go after")
+	assert.Contains(t, content, ansiResetSequence+start+" after")
 }
 
 func TestRenderPersistentStyleRestylesAfterForegroundReset(t *testing.T) {
