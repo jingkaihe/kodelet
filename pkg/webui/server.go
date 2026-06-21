@@ -26,8 +26,10 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/gorilla/mux"
+	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
+	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/goals"
 	openairesponses "github.com/jingkaihe/kodelet/pkg/llm/openai/responses"
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -128,7 +130,7 @@ func (c *ServerConfig) Validate() error {
 	}
 
 	if strings.TrimSpace(c.CWD) != "" {
-		if _, err := resolveConfiguredDefaultCWD(c.CWD); err != nil {
+		if _, err := chat.ResolveConfiguredDefaultCWD(c.CWD); err != nil {
 			return errors.Wrap(err, "invalid cwd")
 		}
 	}
@@ -144,7 +146,7 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 	}
 
 	if strings.TrimSpace(config.CWD) != "" {
-		normalizedCWD, err := resolveConfiguredDefaultCWD(config.CWD)
+		normalizedCWD, err := chat.ResolveConfiguredDefaultCWD(config.CWD)
 		if err != nil {
 			return nil, errors.Wrap(err, "invalid server configuration")
 		}
@@ -980,24 +982,13 @@ type WebMessage struct {
 }
 
 // WebContentBlock represents a typed content block rendered by the web UI.
-type WebContentBlock struct {
-	Type     string          `json:"type"`
-	Text     string          `json:"text,omitempty"`
-	Command  string          `json:"command,omitempty"`
-	Source   *WebImageSource `json:"source,omitempty"`
-	ImageURL *WebImageURL    `json:"image_url,omitempty"`
-}
+type WebContentBlock = chat.ChatContentBlock
 
 // WebImageSource represents inline image data for a web content block.
-type WebImageSource struct {
-	Data      string `json:"data"`
-	MediaType string `json:"media_type"`
-}
+type WebImageSource = chat.ChatImageSource
 
 // WebImageURL represents a remote image URL for a web content block.
-type WebImageURL struct {
-	URL string `json:"url"`
-}
+type WebImageURL = chat.ChatImageURLSource
 
 // WebToolCall represents a tool call for the web UI
 type WebToolCall struct {
@@ -1218,7 +1209,7 @@ func (s *Server) handleGetSlashCommands(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	processor, err := newWebFragmentProcessor(resolvedCWD)
+	processor, err := fragments.NewFragmentProcessor(fragments.WithDefaultDirsForCWD(resolvedCWD))
 	if err != nil {
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to initialize slash commands", err)
 		return
@@ -1263,7 +1254,7 @@ func (s *Server) handleGetCWDHints(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if isNaturalDirectoryQuery(query) {
+	if chat.IsNaturalDirectoryQuery(query) {
 		siblingBaseDir, siblingErr := conversations.NormalizeCWD(filepath.Dir(defaultCWD))
 		if siblingErr == nil && siblingBaseDir != baseDir {
 			siblingHints, err := listDirectoryHints(siblingBaseDir, filter)
@@ -1286,7 +1277,7 @@ func (s *Server) defaultCWD() (string, error) {
 		configuredCWD = s.config.CWD
 	}
 
-	return resolveConfiguredDefaultCWD(configuredCWD)
+	return chat.ResolveConfiguredDefaultCWD(configuredCWD)
 }
 
 func (s *Server) resolveRequestedCWD(requestedCWD string) (string, error) {
@@ -1295,7 +1286,7 @@ func (s *Server) resolveRequestedCWD(requestedCWD string) (string, error) {
 		return "", err
 	}
 
-	expandedRequestedCWD, err := expandWebCWDInput(requestedCWD, defaultCWD)
+	expandedRequestedCWD, err := chat.ExpandCWDInput(requestedCWD, defaultCWD)
 	if err != nil {
 		return "", err
 	}
@@ -1307,17 +1298,8 @@ func (s *Server) resolveRequestedCWD(requestedCWD string) (string, error) {
 	return conversations.NormalizeCWD(expandedRequestedCWD)
 }
 
-func resolveConfiguredDefaultCWD(configuredCWD string) (string, error) {
-	trimmed := strings.TrimSpace(configuredCWD)
-	if trimmed == "" {
-		return conversations.CurrentWorkingDirectory()
-	}
-
-	return conversations.NormalizeCWD(trimmed)
-}
-
 func resolveSuggestionBaseDir(query, defaultCWD string) (string, string, error) {
-	expandedQuery, err := expandWebCWDInput(query, defaultCWD)
+	expandedQuery, err := chat.ExpandCWDInput(query, defaultCWD)
 	if err != nil {
 		return "", "", err
 	}
@@ -1344,46 +1326,6 @@ func resolveSuggestionBaseDir(query, defaultCWD string) (string, string, error) 
 	}
 
 	return baseDir, filter, nil
-}
-
-func expandWebCWDInput(query, defaultCWD string) (string, error) {
-	trimmed := strings.TrimSpace(query)
-	if trimmed == "" {
-		return "", nil
-	}
-
-	if strings.HasPrefix(trimmed, "~") {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return "", errors.Wrap(err, "failed to resolve home directory")
-		}
-		if trimmed == "~" {
-			return homeDir, nil
-		}
-		if strings.HasPrefix(trimmed, "~/") {
-			return filepath.Join(homeDir, strings.TrimPrefix(trimmed, "~/")), nil
-		}
-	}
-
-	if filepath.IsAbs(trimmed) {
-		return trimmed, nil
-	}
-
-	if isNaturalDirectoryQuery(trimmed) {
-		exactCandidates := []string{
-			filepath.Join(defaultCWD, trimmed),
-			filepath.Join(filepath.Dir(defaultCWD), trimmed),
-		}
-
-		for _, candidate := range exactCandidates {
-			resolved, err := conversations.NormalizeCWD(candidate)
-			if err == nil {
-				return resolved, nil
-			}
-		}
-	}
-
-	return filepath.Join(defaultCWD, trimmed), nil
 }
 
 func listDirectoryHints(baseDir, filter string) ([]CWDHint, error) {
@@ -1448,14 +1390,6 @@ func mergeDirectoryHints(groups ...[]CWDHint) []CWDHint {
 	}
 
 	return merged
-}
-
-func isNaturalDirectoryQuery(query string) bool {
-	trimmed := strings.TrimSpace(query)
-	return trimmed != "" &&
-		!strings.HasPrefix(trimmed, "~") &&
-		!filepath.IsAbs(trimmed) &&
-		!strings.ContainsRune(trimmed, os.PathSeparator)
 }
 
 func matchesDirectoryHint(name, filter string) bool {
@@ -1548,7 +1482,7 @@ func pendingSteerWebMessages(conversationID string) ([]WebMessage, error) {
 	webMessages := make([]WebMessage, 0, len(messages))
 	for _, message := range messages {
 		content := any(message.Content)
-		if blocks := webContentBlocksForUserInput(message.Content, message.Images); len(blocks) > 0 {
+		if blocks := chat.ContentBlocksForUserInput(message.Content, message.Images); len(blocks) > 0 {
 			content = blocks
 		}
 		webMessages = append(webMessages, WebMessage{
@@ -1740,7 +1674,7 @@ func (s *Server) extractOpenAIResponsesInputContent(rawMessage json.RawMessage) 
 				continue
 			}
 			if strings.HasPrefix(part.ImageURL, "data:") {
-				if source, ok := parseDataURL(part.ImageURL); ok {
+				if source, ok := chat.ParseDataURL(part.ImageURL); ok {
 					contentBlocks = append(contentBlocks, WebContentBlock{Type: "image", Source: source})
 					continue
 				}
@@ -1882,7 +1816,7 @@ func (s *Server) extractOpenAIContent(rawMessage json.RawMessage) (any, string, 
 		if part.Type == openai.ChatMessagePartTypeImageURL && part.ImageURL != nil {
 			imageURL := part.ImageURL.URL
 			if strings.HasPrefix(imageURL, "data:") {
-				if source, ok := parseDataURL(imageURL); ok {
+				if source, ok := chat.ParseDataURL(imageURL); ok {
 					contentBlocks = append(contentBlocks, WebContentBlock{Type: "image", Source: source})
 					continue
 				}
@@ -2011,7 +1945,7 @@ func (s *Server) handleSteerConversation(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	message, imageInputs, err := normalizeChatRequest(ChatRequest{
+	message, imageInputs, err := chat.NormalizeRequest(ChatRequest{
 		Message: req.Message,
 		Content: req.Content,
 	})
@@ -2336,29 +2270,6 @@ func isEmptyWebContent(content any) bool {
 	default:
 		return false
 	}
-}
-
-func parseDataURL(dataURL string) (*WebImageSource, bool) {
-	if !strings.HasPrefix(dataURL, "data:") {
-		return nil, false
-	}
-
-	prefix, data, found := strings.Cut(dataURL, ",")
-	if !found {
-		return nil, false
-	}
-
-	mediaType, hasBase64 := strings.CutPrefix(prefix, "data:")
-	if !hasBase64 {
-		return nil, false
-	}
-
-	mediaType = strings.TrimSuffix(mediaType, ";base64")
-	if mediaType == "" || !strings.HasSuffix(prefix, ";base64") {
-		return nil, false
-	}
-
-	return &WebImageSource{Data: data, MediaType: mediaType}, true
 }
 
 // Close closes the server and releases resources

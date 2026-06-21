@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jingkaihe/kodelet/pkg/webui"
+	chat "github.com/jingkaihe/kodelet/pkg/chat"
 )
 
-func (m *model) applyChatEvent(event webui.ChatEvent) {
+func (m *model) applyChatEvent(event chat.ChatEvent) {
 	if event.ConversationID != "" {
 		m.conversationID = event.ConversationID
 	}
@@ -144,7 +144,7 @@ func userMessageContentText(content any) string {
 	switch content := content.(type) {
 	case string:
 		return strings.TrimSpace(content)
-	case []webui.WebContentBlock:
+	case []chat.ChatContentBlock:
 		return strings.TrimSpace(textFromWebContentBlocks(content))
 	case []any:
 		return strings.TrimSpace(textFromAnyContentBlocks(content))
@@ -153,7 +153,7 @@ func userMessageContentText(content any) string {
 	}
 }
 
-func textFromWebContentBlocks(blocks []webui.WebContentBlock) string {
+func textFromWebContentBlocks(blocks []chat.ChatContentBlock) string {
 	parts := make([]string, 0, len(blocks))
 	imageCount := 0
 	for _, block := range blocks {

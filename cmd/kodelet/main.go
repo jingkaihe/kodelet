@@ -259,6 +259,7 @@ func main() {
 
 	rootCmd = withTracing(rootCmd)
 	runCmd = withTracing(runCmd)
+	chatCmd = withTracing(chatCmd)
 	versionCmd = withTracing(versionCmd)
 	commitCmd = withTracing(commitCmd)
 	setupCmd = withTracing(setupCmd)

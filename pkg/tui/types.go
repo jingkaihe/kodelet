@@ -8,9 +8,9 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
+	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
-	"github.com/jingkaihe/kodelet/pkg/webui"
 )
 
 // Config configures the native chat TUI.
@@ -19,7 +19,7 @@ type Config struct {
 	Profile        string
 	CWD            string
 	Theme          string
-	Runner         webui.ChatRunner
+	Runner         chat.ChatRunner
 }
 
 type entryKind int
@@ -95,7 +95,7 @@ type detailRegion struct {
 type model struct {
 	ctx    context.Context
 	cancel context.CancelFunc
-	runner webui.ChatRunner
+	runner chat.ChatRunner
 
 	conversationID string
 	profile        string
@@ -138,7 +138,7 @@ type model struct {
 
 type chatEventMsg struct {
 	runID int
-	event webui.ChatEvent
+	event chat.ChatEvent
 }
 
 type chatDoneMsg struct {
@@ -160,7 +160,7 @@ type tuiSink struct {
 	runID int
 }
 
-func (s tuiSink) Send(event webui.ChatEvent) error {
+func (s tuiSink) Send(event chat.ChatEvent) error {
 	s.ch <- chatEventMsg{runID: s.runID, event: event}
 	return nil
 }

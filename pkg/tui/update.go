@@ -9,9 +9,9 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
-	"github.com/jingkaihe/kodelet/pkg/webui"
 	"github.com/pkg/errors"
 )
 
@@ -309,7 +309,7 @@ func (m *model) queueTranscriptRefresh(scrollBottom bool) tea.Cmd {
 	return waitForTranscriptRefresh()
 }
 
-func shouldDebounceChatEvent(event webui.ChatEvent) bool {
+func shouldDebounceChatEvent(event chat.ChatEvent) bool {
 	switch event.Kind {
 	case "text-delta", "thinking-delta":
 		return true
@@ -358,7 +358,7 @@ func (m *model) submit() tea.Cmd {
 	runID := m.activeRunID
 	runCh := m.runCh
 	runner := m.runner
-	req := webui.ChatRequest{
+	req := chat.ChatRequest{
 		Message:        message,
 		ConversationID: m.conversationID,
 		Profile:        profileForRequest(m.profile),

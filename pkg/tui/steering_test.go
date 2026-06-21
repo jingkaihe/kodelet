@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/steer"
-	"github.com/jingkaihe/kodelet/pkg/webui"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -106,7 +106,7 @@ func TestConsumedSteeringRendersAsUserMessage(t *testing.T) {
 	m.entries = []chatEntry{{kind: entryAssistant, blocks: []assistantBlock{{kind: blockText, text: "still working"}}}}
 	m.queuedSteering = []string{"please focus on tests"}
 
-	updated, _ := m.Update(chatEventMsg{runID: 1, event: webui.ChatEvent{Kind: "user-message", Content: "please focus on tests"}})
+	updated, _ := m.Update(chatEventMsg{runID: 1, event: chat.ChatEvent{Kind: "user-message", Content: "please focus on tests"}})
 	m = updated.(model)
 
 	assert.Empty(t, m.queuedSteering)
@@ -126,7 +126,7 @@ func TestInitialSubmittedUserMessageEventIsStillIgnored(t *testing.T) {
 	m.resize()
 	m.entries = []chatEntry{{kind: entryUser, content: "go on"}}
 
-	m.applyChatEvent(webui.ChatEvent{Kind: "user-message", Content: "go on"})
+	m.applyChatEvent(chat.ChatEvent{Kind: "user-message", Content: "go on"})
 
 	require.Len(t, m.entries, 1)
 	assert.Equal(t, entryUser, m.entries[0].kind)
@@ -142,7 +142,7 @@ func TestDuplicateConsumedSteeringClearsQueuedIndicator(t *testing.T) {
 	m.entries = []chatEntry{{kind: entryUser, content: "repeat"}}
 	m.queuedSteering = []string{"repeat"}
 
-	m.applyChatEvent(webui.ChatEvent{Kind: "user-message", Content: "repeat"})
+	m.applyChatEvent(chat.ChatEvent{Kind: "user-message", Content: "repeat"})
 
 	assert.Empty(t, m.queuedSteering)
 	require.Len(t, m.entries, 1)

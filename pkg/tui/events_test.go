@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
+	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
-	"github.com/jingkaihe/kodelet/pkg/webui"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -19,7 +19,7 @@ func TestApplyChatEventUpdatesConversationAndBlocks(t *testing.T) {
 	m.resize()
 
 	usage := llmtypes.Usage{InputCost: 0.25, OutputCost: 0.75}
-	for _, event := range []webui.ChatEvent{
+	for _, event := range []chat.ChatEvent{
 		{Kind: "conversation", ConversationID: "conv-1"},
 		{Kind: "text-delta", Delta: "hello"},
 		{Kind: "thinking-start"},
@@ -56,7 +56,7 @@ func TestApplyChatEventPreservesWhitespaceOnlyTextDeltas(t *testing.T) {
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)
 
-	for _, event := range []webui.ChatEvent{
+	for _, event := range []chat.ChatEvent{
 		{Kind: "text-delta", Delta: "hello"},
 		{Kind: "text-delta", Delta: " "},
 		{Kind: "text-delta", Delta: "world"},
@@ -74,7 +74,7 @@ func TestApplyChatEventPreservesWhitespaceOnlyTextDeltas(t *testing.T) {
 
 func TestUserMessageContentTextHandlesStructuredBlocks(t *testing.T) {
 	assert.Equal(t, "hello", userMessageContentText(" hello "))
-	assert.Equal(t, "hello\n[2 images]", userMessageContentText([]webui.WebContentBlock{
+	assert.Equal(t, "hello\n[2 images]", userMessageContentText([]chat.ChatContentBlock{
 		{Type: "text", Text: " hello "},
 		{Type: "image"},
 		{Type: "image"},
@@ -91,7 +91,7 @@ func TestApplyChatEventRecordsStructuredOrphanToolResult(t *testing.T) {
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)
 
-	m.applyChatEvent(webui.ChatEvent{Kind: "tool-result", ToolCallID: "missing", ToolResult: &tooltypes.StructuredToolResult{
+	m.applyChatEvent(chat.ChatEvent{Kind: "tool-result", ToolCallID: "missing", ToolResult: &tooltypes.StructuredToolResult{
 		ToolName: "web_fetch",
 		Success:  false,
 		Error:    "fetch failed",

@@ -11,8 +11,12 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/jingkaihe/kodelet/pkg/webui"
+	chat "github.com/jingkaihe/kodelet/pkg/chat"
 )
+
+var newDefaultChatRunner = func(defaultCWD string) chat.ChatRunner {
+	return chat.NewDefaultChatRunner(defaultCWD)
+}
 
 func Run(ctx context.Context, config Config) error {
 	theme, ok := themeByName(config.Theme)
@@ -73,7 +77,9 @@ func newModel(ctx context.Context, config Config) model {
 
 	runner := config.Runner
 	if runner == nil {
-		runner = webui.NewDefaultChatRunner(config.CWD)
+		// The TUI sends --cwd as a per-request override below; leave the runner
+		// default empty so relative overrides resolve against the process cwd.
+		runner = newDefaultChatRunner("")
 	}
 	requestedCWD := strings.TrimSpace(config.CWD)
 	cwd := requestedCWD

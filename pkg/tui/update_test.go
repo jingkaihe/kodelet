@@ -7,20 +7,20 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	xansi "github.com/charmbracelet/x/ansi"
-	"github.com/jingkaihe/kodelet/pkg/webui"
+	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 type recordingRunner struct {
-	req            webui.ChatRequest
+	req            chat.ChatRequest
 	conversationID string
 	err            error
 }
 
-func (r *recordingRunner) Run(ctx context.Context, req webui.ChatRequest, sink webui.ChatEventSink) (string, error) {
+func (r *recordingRunner) Run(ctx context.Context, req chat.ChatRequest, sink chat.ChatEventSink) (string, error) {
 	r.req = req
-	if err := sink.Send(webui.ChatEvent{Kind: "text", Delta: "streamed"}); err != nil {
+	if err := sink.Send(chat.ChatEvent{Kind: "text", Delta: "streamed"}); err != nil {
 		return "", err
 	}
 	return r.conversationID, r.err
@@ -95,12 +95,12 @@ func TestUpdateIgnoresStaleRunEvents(t *testing.T) {
 	m.activeRunID = 2
 	m.running = true
 
-	updated, _ := m.Update(chatEventMsg{runID: 1, event: webui.ChatEvent{Kind: "text", Delta: "stale"}})
+	updated, _ := m.Update(chatEventMsg{runID: 1, event: chat.ChatEvent{Kind: "text", Delta: "stale"}})
 	m = updated.(model)
 	content, _ := m.renderTranscript()
 	assert.NotContains(t, content, "stale")
 
-	updated, _ = m.Update(chatEventMsg{runID: 2, event: webui.ChatEvent{Kind: "text", Delta: "fresh"}})
+	updated, _ = m.Update(chatEventMsg{runID: 2, event: chat.ChatEvent{Kind: "text", Delta: "fresh"}})
 	m = updated.(model)
 	content, _ = m.renderTranscript()
 	assert.Contains(t, content, "fresh")
@@ -276,12 +276,39 @@ func TestSubmitStartsRunAndStreamsRunnerMessages(t *testing.T) {
 	assert.Equal(t, "conversation-done", done.conversationID)
 	assert.NoError(t, done.err)
 
-	assert.Equal(t, webui.ChatRequest{
+	assert.Equal(t, chat.ChatRequest{
 		Message:        "hello",
 		ConversationID: "conversation-123",
 		Profile:        "work",
 		CWD:            "/tmp",
 	}, runner.req)
+}
+
+func TestSubmitWithDefaultRunnerKeepsRelativeCWDAsRequestOnly(t *testing.T) {
+	runner := &recordingRunner{conversationID: "conversation-done"}
+	capturedDefaultCWD := "unset"
+	previous := newDefaultChatRunner
+	newDefaultChatRunner = func(defaultCWD string) chat.ChatRunner {
+		capturedDefaultCWD = defaultCWD
+		return runner
+	}
+	t.Cleanup(func() {
+		newDefaultChatRunner = previous
+	})
+
+	m := newModel(context.Background(), Config{ConversationID: "conversation-123", CWD: "./backend"})
+	t.Cleanup(m.cancel)
+	m.textarea.SetValue("hello")
+
+	cmd := m.submit()
+	require.NotNil(t, cmd)
+	assert.Nil(t, cmd())
+
+	_ = receiveRunMsg(t, m.runCh)
+	_ = receiveRunMsg(t, m.runCh)
+
+	assert.Empty(t, capturedDefaultCWD)
+	assert.Equal(t, "./backend", runner.req.CWD)
 }
 
 func TestSubmitResumedChatWithoutExplicitCWDDoesNotSendCurrentDirectory(t *testing.T) {
@@ -326,7 +353,7 @@ func TestStreamingDeltasAreDebouncedBeforeViewportRefresh(t *testing.T) {
 	m.refreshViewport(true)
 	initialContent := m.viewport.View()
 
-	updated, cmd := m.Update(chatEventMsg{runID: 1, event: webui.ChatEvent{Kind: "text-delta", Delta: "**hello**"}})
+	updated, cmd := m.Update(chatEventMsg{runID: 1, event: chat.ChatEvent{Kind: "text-delta", Delta: "**hello**"}})
 	m = updated.(model)
 
 	require.NotNil(t, cmd)
@@ -365,7 +392,7 @@ func TestStreamingPreservesViewportAfterUserScrollsUp(t *testing.T) {
 
 	m.running = true
 	m.activeRunID = 1
-	updated, _ = m.Update(chatEventMsg{runID: 1, event: webui.ChatEvent{Kind: "text-delta", Delta: "\nstill streaming"}})
+	updated, _ = m.Update(chatEventMsg{runID: 1, event: chat.ChatEvent{Kind: "text-delta", Delta: "\nstill streaming"}})
 	m = updated.(model)
 
 	assert.Equal(t, scrolledOffset, m.viewport.YOffset)
@@ -401,7 +428,7 @@ func TestScrollingBackToBottomResumesStreamingAutoFollow(t *testing.T) {
 
 	m.running = true
 	m.activeRunID = 1
-	updated, _ = m.Update(chatEventMsg{runID: 1, event: webui.ChatEvent{Kind: "text-delta", Delta: "\nnew bottom line"}})
+	updated, _ = m.Update(chatEventMsg{runID: 1, event: chat.ChatEvent{Kind: "text-delta", Delta: "\nnew bottom line"}})
 	m = updated.(model)
 
 	assert.True(t, m.viewport.AtBottom())
