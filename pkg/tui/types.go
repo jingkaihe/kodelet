@@ -100,6 +100,7 @@ type model struct {
 	conversationID string
 	profile        string
 	cwd            string
+	requestedCWD   string
 	theme          tuiTheme
 
 	viewport viewport.Model

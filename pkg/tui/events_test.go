@@ -52,6 +52,26 @@ func TestApplyChatEventUpdatesConversationAndBlocks(t *testing.T) {
 	assert.Contains(t, m.entries[0].blocks[3].text, "model error")
 }
 
+func TestApplyChatEventPreservesWhitespaceOnlyTextDeltas(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+
+	for _, event := range []webui.ChatEvent{
+		{Kind: "text-delta", Delta: "hello"},
+		{Kind: "text-delta", Delta: " "},
+		{Kind: "text-delta", Delta: "world"},
+		{Kind: "text-delta", Delta: "\n\n"},
+		{Kind: "text-delta", Delta: "again"},
+	} {
+		m.applyChatEvent(event)
+	}
+
+	require.Len(t, m.entries, 1)
+	require.Len(t, m.entries[0].blocks, 1)
+	assert.Equal(t, "hello world\n\nagain", m.entries[0].blocks[0].text)
+	assert.Equal(t, "hello world\n\nagain", m.entries[0].content)
+}
+
 func TestUserMessageContentTextHandlesStructuredBlocks(t *testing.T) {
 	assert.Equal(t, "hello", userMessageContentText(" hello "))
 	assert.Equal(t, "hello\n[2 images]", userMessageContentText([]webui.WebContentBlock{

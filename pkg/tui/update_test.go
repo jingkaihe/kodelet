@@ -284,6 +284,24 @@ func TestSubmitStartsRunAndStreamsRunnerMessages(t *testing.T) {
 	}, runner.req)
 }
 
+func TestSubmitResumedChatWithoutExplicitCWDDoesNotSendCurrentDirectory(t *testing.T) {
+	runner := &recordingRunner{conversationID: "conversation-done"}
+	m := newModel(context.Background(), Config{ConversationID: "conversation-123", Runner: runner})
+	t.Cleanup(m.cancel)
+	m.textarea.SetValue("hello")
+
+	cmd := m.submit()
+	require.NotNil(t, cmd)
+	assert.Nil(t, cmd())
+
+	_ = receiveRunMsg(t, m.runCh)
+	_ = receiveRunMsg(t, m.runCh)
+
+	assert.Equal(t, "conversation-123", runner.req.ConversationID)
+	assert.Empty(t, runner.req.CWD)
+	assert.NotEmpty(t, m.cwd)
+}
+
 func TestSubmitIgnoresEmptyComposer(t *testing.T) {
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)

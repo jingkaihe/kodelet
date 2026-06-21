@@ -75,7 +75,8 @@ func newModel(ctx context.Context, config Config) model {
 	if runner == nil {
 		runner = webui.NewDefaultChatRunner(config.CWD)
 	}
-	cwd := strings.TrimSpace(config.CWD)
+	requestedCWD := strings.TrimSpace(config.CWD)
+	cwd := requestedCWD
 	if cwd == "" {
 		if wd, err := os.Getwd(); err == nil {
 			cwd = wd
@@ -88,6 +89,7 @@ func newModel(ctx context.Context, config Config) model {
 		conversationID: strings.TrimSpace(config.ConversationID),
 		profile:        displayProfile(config.Profile),
 		cwd:            cwd,
+		requestedCWD:   requestedCWD,
 		theme:          theme,
 		viewport:       vp,
 		textarea:       ta,

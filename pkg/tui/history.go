@@ -107,7 +107,7 @@ func entriesFromHistory(messages []conversations.StreamableMessage) []chatEntry 
 }
 
 func appendTextBlock(entry *chatEntry, text string) {
-	if strings.TrimSpace(text) == "" {
+	if text == "" {
 		return
 	}
 	if len(entry.blocks) > 0 && entry.blocks[len(entry.blocks)-1].kind == blockText {

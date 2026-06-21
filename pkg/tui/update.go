@@ -362,7 +362,7 @@ func (m *model) submit() tea.Cmd {
 		Message:        message,
 		ConversationID: m.conversationID,
 		Profile:        profileForRequest(m.profile),
-		CWD:            m.cwd,
+		CWD:            m.requestedCWD,
 	}
 
 	return func() tea.Msg {
