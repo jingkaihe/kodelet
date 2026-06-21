@@ -119,7 +119,7 @@ func joinTools(tools []toolCall) string {
 		if title == "" {
 			title = "tool"
 		}
-		part := fmt.Sprintf("%s — %s", title, status)
+		part := fmt.Sprintf("%s - %s", title, status)
 		if strings.TrimSpace(tool.input) != "" {
 			part += "\ninput: " + compactJSON(tool.input)
 		}

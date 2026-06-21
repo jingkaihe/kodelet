@@ -559,7 +559,7 @@ func (m model) renderInputTopLabel(visibleLabel string) string {
 
 	parts := []styledLabelPart{
 		{text: formatUsage(m.usage), style: inputLabelStyle},
-		{text: " — ", style: inputLabelStyle},
+		{text: " - ", style: inputLabelStyle},
 		{text: m.profile, style: m.profileStyle(m.profileIndex)},
 	}
 
@@ -806,7 +806,7 @@ func renderComposerBottomLeftLabel(label string) string {
 
 func (m model) inputTopRightLabel() string {
 	parts := []string{formatUsage(m.usage), m.profile}
-	return strings.Join(parts, " — ")
+	return strings.Join(parts, " - ")
 }
 
 func (m model) profileLabelBoundsInBlock() (startX, endX int, ok bool) {
