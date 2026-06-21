@@ -12,17 +12,61 @@ import (
 
 func displayProfile(profile string) string {
 	profile = strings.TrimSpace(profile)
-	if profile == "" {
+	if profile == "" || strings.EqualFold(profile, "default") {
 		return "default"
 	}
 	return profile
 }
 
 func profileForRequest(profile string) string {
-	if strings.TrimSpace(profile) == "default" {
+	if strings.EqualFold(strings.TrimSpace(profile), "default") {
 		return ""
 	}
 	return strings.TrimSpace(profile)
+}
+
+func normalizeProfileOptions(options []string, selected string) []string {
+	selected = displayProfile(selected)
+	seen := map[string]bool{}
+	normalized := make([]string, 0, len(options)+1)
+
+	appendOption := func(profile string) {
+		profile = displayProfile(profile)
+		key := strings.ToLower(profile)
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		normalized = append(normalized, profile)
+	}
+
+	appendOption("default")
+	for _, option := range options {
+		appendOption(option)
+	}
+	appendOption(selected)
+	return normalized
+}
+
+func profileOptionIndex(options []string, profile string) int {
+	profile = displayProfile(profile)
+	for i, option := range options {
+		if strings.EqualFold(displayProfile(option), profile) {
+			return i
+		}
+	}
+	return -1
+}
+
+func profileFromMetadata(metadata map[string]any) string {
+	if metadata == nil {
+		return ""
+	}
+	rawProfile, ok := metadata["profile"].(string)
+	if !ok {
+		return ""
+	}
+	return displayProfile(rawProfile)
 }
 
 func formatUsage(usage llmtypes.Usage) string {

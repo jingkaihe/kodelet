@@ -38,8 +38,12 @@ func TestViewAndFormattingHelpers(t *testing.T) {
 	assert.Equal(t, m.width-tuiRightMargin, tuiLeftMargin+m.inputOuterWidth())
 	assert.Equal(t, m.contentWidth(), m.viewport.Width)
 	assert.Equal(t, "default", displayProfile(""))
+	assert.Equal(t, "default", displayProfile(" DEFAULT "))
 	assert.Equal(t, "", profileForRequest("default"))
 	assert.Equal(t, "work", profileForRequest(" work "))
+	assert.Equal(t, []string{"default", "work", "prod"}, normalizeProfileOptions([]string{"default", "work", "work"}, "prod"))
+	assert.Equal(t, 1, profileOptionIndex([]string{"default", "work"}, " WORK "))
+	assert.Equal(t, "work", profileFromMetadata(map[string]any{"profile": " work "}))
 	assert.Equal(t, "abcdefgh", shortID("abcdefghi123"))
 	assert.Equal(t, "…", fitVisible("abcdef", 1))
 	assert.Equal(t, "abcdef", fitVisible("abcdef", 20))
@@ -52,6 +56,34 @@ func TestViewAndFormattingHelpers(t *testing.T) {
 	assert.Equal(t, "  one\n  \n  two", indentText("one\n\ntwo", "  "))
 	assert.Equal(t, 2, lineCount("one\ntwo"))
 	assert.True(t, strings.HasPrefix(rightLabeledBorder("╭", "╮", 12, "label"), "╭"))
+}
+
+func TestProfilePickerRendersAboveComposerWithThemeColors(t *testing.T) {
+	withANSI256ColorProfile(t)
+
+	m := newModel(context.Background(), Config{Profile: "work", ProfileOptions: []string{"default", "work", "prod"}, Theme: "tokyo-night"})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.resize()
+	m.openProfilePicker()
+	m.profilePickerIndex = 2
+	m.resize()
+	m.refreshViewport(true)
+
+	rawView := m.View()
+	view := xansi.Strip(rawView)
+	lines := strings.Split(view, "\n")
+	pickerLine := lines[m.viewport.Height+2]
+	composerTop := lines[m.viewport.Height+m.profilePickerHeight()]
+
+	assert.Contains(t, pickerLine, "prod")
+	assert.Contains(t, composerTop, "work")
+	assert.Contains(t, rawView, "\x1b[38;5;151mwork")
+	assert.Contains(t, rawView, "48;5;238")
+	assert.NotContains(t, view, "→")
+	assert.NotContains(t, view, "ACTIVE")
+	assert.NotContains(t, view, "repo")
 }
 
 func TestRunningIndicatorRendersInComposerBottomBorder(t *testing.T) {

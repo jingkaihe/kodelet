@@ -32,7 +32,7 @@ func loadInitialHistory(ctx context.Context, conversationID string) tea.Cmd {
 			return initialHistoryMsg{err: errors.Wrap(err, "failed to parse conversation")}
 		}
 
-		return initialHistoryMsg{entries: entriesFromHistory(messages), usage: response.Usage, cwd: strings.TrimSpace(response.CWD)}
+		return initialHistoryMsg{loaded: true, entries: entriesFromHistory(messages), usage: response.Usage, cwd: strings.TrimSpace(response.CWD), profile: profileFromMetadata(response.Metadata)}
 	}
 }
 

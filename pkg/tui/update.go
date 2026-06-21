@@ -122,6 +122,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.err = msg.err
 			m.status = "history load failed"
+			m.profilePickerOpen = false
 			m.entries = append(m.entries, chatEntry{
 				kind: entryAssistant,
 				blocks: []assistantBlock{{
@@ -129,7 +130,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					text: fmt.Sprintf("Failed to resume conversation: %v", msg.err),
 				}},
 			})
-		} else if len(m.entries) == 0 {
+		} else if msg.loaded {
+			if strings.TrimSpace(m.conversationID) != "" {
+				m.setProfile(msg.profile)
+				m.profilePickerOpen = false
+			}
+			if len(m.entries) != 0 {
+				m.refreshViewport(true)
+				break
+			}
 			if strings.TrimSpace(msg.cwd) != "" {
 				m.cwd = strings.TrimSpace(msg.cwd)
 			}
@@ -155,15 +164,46 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cancel()
 			return m, tea.Quit
 		case "esc":
+			if m.profilePickerOpen {
+				m.closeProfilePicker()
+				m.resize()
+				m.refreshViewport(false)
+				return m, nil
+			}
 			if m.running {
 				m.cancelActiveRun()
+			}
+			return m, nil
+		case "ctrl+t":
+			if m.canChangeProfile() {
+				m.toggleProfilePickerFromKeyboard()
+				m.resize()
+				m.refreshViewport(false)
 			}
 			return m, nil
 		case "ctrl+o":
 			m.toggleAllDetails()
 			m.refreshViewport(false)
 			return m, nil
+		case "up", "shift+tab":
+			if m.profilePickerOpen {
+				m.moveProfilePicker(-1)
+				m.refreshViewport(false)
+				return m, nil
+			}
+		case "down", "tab":
+			if m.profilePickerOpen {
+				m.moveProfilePicker(1)
+				m.refreshViewport(false)
+				return m, nil
+			}
 		case "enter":
+			if m.profilePickerOpen {
+				m.selectProfilePickerOption(m.profilePickerIndex)
+				m.resize()
+				m.refreshViewport(false)
+				return m, nil
+			}
 			if m.running {
 				m.submitSteering()
 				return m, nil
@@ -176,6 +216,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseMsg:
 		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+			if optionIndex, ok := m.profilePickerOptionAt(msg.X, msg.Y); ok {
+				m.selectProfilePickerOption(optionIndex)
+				m.resize()
+				m.refreshViewport(false)
+				return m, nil
+			}
+			if m.profileComposerRegionContains(msg.X, msg.Y) {
+				m.toggleProfilePickerFromClick()
+				m.resize()
+				m.refreshViewport(false)
+				return m, nil
+			}
+			if m.profilePickerOpen {
+				m.closeProfilePicker()
+				m.resize()
+				m.refreshViewport(false)
+				return m, nil
+			}
 			if m.toggleDetailAt(msg.Y) {
 				m.refreshViewport(false)
 				return m, nil
@@ -326,8 +384,9 @@ func (m *model) resize() {
 		return
 	}
 	inputOuterHeight := inputHeight + 2
+	profilePickerHeight := m.profilePickerHeight()
 	footerHeight := 0
-	viewportHeight := m.height - inputOuterHeight - footerHeight
+	viewportHeight := m.height - inputOuterHeight - profilePickerHeight - footerHeight
 	if viewportHeight < 1 {
 		viewportHeight = 1
 	}
@@ -342,6 +401,7 @@ func (m *model) submit() tea.Cmd {
 	if message == "" {
 		return nil
 	}
+	m.profilePickerOpen = false
 	if strings.TrimSpace(m.conversationID) == "" {
 		m.conversationID = convtypes.GenerateID()
 	}

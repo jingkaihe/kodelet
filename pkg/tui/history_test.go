@@ -44,6 +44,7 @@ func TestInitialHistoryDoesNotClobberLocalEntries(t *testing.T) {
 	}
 
 	updated, _ := m.Update(initialHistoryMsg{
+		loaded: true,
 		entries: []chatEntry{
 			{kind: entryUser, content: "old prompt"},
 			{kind: entryAssistant, blocks: []assistantBlock{{kind: blockText, text: "old answer"}}},
@@ -70,6 +71,7 @@ func TestInitialHistoryUpdatesDisplayedCWD(t *testing.T) {
 	m.resize()
 
 	updated, _ := m.Update(initialHistoryMsg{
+		loaded:  true,
 		entries: []chatEntry{{kind: entryUser, content: "old prompt"}},
 		cwd:     "/tmp/project",
 	})
@@ -78,11 +80,32 @@ func TestInitialHistoryUpdatesDisplayedCWD(t *testing.T) {
 	assert.Equal(t, "/tmp/project", m.cwd)
 }
 
+func TestInitialHistoryUpdatesDisplayedProfileAndLocksPicker(t *testing.T) {
+	m := newModel(context.Background(), Config{ConversationID: "conversation-123456789", Profile: "current", ProfileOptions: []string{"default", "current", "stored"}})
+	t.Cleanup(m.cancel)
+	m.width = 100
+	m.height = 30
+	m.resize()
+	m.profilePickerOpen = true
+
+	updated, _ := m.Update(initialHistoryMsg{
+		loaded:  true,
+		entries: []chatEntry{{kind: entryUser, content: "old prompt"}},
+		profile: "stored",
+	})
+	m = updated.(model)
+
+	assert.Equal(t, "stored", m.profile)
+	assert.Equal(t, 2, m.profileIndex)
+	assert.False(t, m.profilePickerOpen)
+	assert.False(t, m.canChangeProfile())
+}
+
 func TestInitialHistoryUpdatesDisplayedCWDForEmptyConversation(t *testing.T) {
 	m := newModel(context.Background(), Config{ConversationID: "conversation-123456789", CWD: "/tmp/shell"})
 	t.Cleanup(m.cancel)
 
-	updated, _ := m.Update(initialHistoryMsg{cwd: "/tmp/project"})
+	updated, _ := m.Update(initialHistoryMsg{loaded: true, cwd: "/tmp/project"})
 	m = updated.(model)
 
 	assert.Equal(t, "/tmp/project", m.cwd)
@@ -95,6 +118,7 @@ func TestInitialHistoryDoesNotClobberDisplayedCWDForActiveRun(t *testing.T) {
 	m.entries = []chatEntry{{kind: entryUser, content: "local prompt"}}
 
 	updated, _ := m.Update(initialHistoryMsg{
+		loaded:  true,
 		entries: []chatEntry{{kind: entryUser, content: "old prompt"}},
 		cwd:     "/tmp/project",
 	})
@@ -111,6 +135,7 @@ func TestInitialHistorySeedsEmptyTranscript(t *testing.T) {
 	m.resize()
 
 	updated, _ := m.Update(initialHistoryMsg{
+		loaded: true,
 		entries: []chatEntry{
 			{kind: entryUser, content: "old prompt"},
 			{kind: entryAssistant, blocks: []assistantBlock{{kind: blockText, text: "old answer"}}},

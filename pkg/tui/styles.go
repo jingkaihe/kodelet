@@ -35,6 +35,8 @@ type tuiTheme struct {
 	ComposerFlow     string
 	ComposerText     string
 	ComposerCursor   string
+	ProfileColors    []string
+	ProfileSelected  string
 	Markdown         markdownTheme
 }
 
@@ -94,6 +96,17 @@ var themes = map[string]tuiTheme{
 		ComposerFlow:     "#89b4fa", // blue
 		ComposerText:     "#cdd6f4", // text
 		ComposerCursor:   "#cdd6f4", // text
+		ProfileColors: []string{
+			"#89b4fa", // blue
+			"#a6e3a1", // green
+			"#f9e2af", // yellow
+			"#cba6f7", // mauve
+			"#94e2d5", // teal
+			"#fab387", // peach
+			"#f38ba8", // red
+			"#b4befe", // lavender
+		},
+		ProfileSelected: "#313244", // surface0
 		Markdown: markdownTheme{
 			BlockQuote:            "#7f849c", // overlay1
 			Heading:               "#b4befe", // lavender
@@ -149,6 +162,17 @@ var themes = map[string]tuiTheme{
 		ComposerFlow:     "147",
 		ComposerText:     "252",
 		ComposerCursor:   "229",
+		ProfileColors: []string{
+			"147",
+			"151",
+			"229",
+			"183",
+			"187",
+			"203",
+			"114",
+			"252",
+		},
+		ProfileSelected: "238",
 		Markdown: markdownTheme{
 			BlockQuote:            "245",
 			Heading:               "147",

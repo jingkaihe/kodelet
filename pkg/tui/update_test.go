@@ -205,6 +205,100 @@ func TestCtrlOTogglesDetails(t *testing.T) {
 	assert.Contains(t, content, "toggle me")
 }
 
+func TestCtrlTProfilePickerSelectsProfileForNewConversation(t *testing.T) {
+	runner := &recordingRunner{conversationID: "conversation-done"}
+	m := newModel(context.Background(), Config{Profile: "default", ProfileOptions: []string{"default", "work", "prod"}, Runner: runner})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.resize()
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	m = updated.(model)
+	require.Nil(t, cmd)
+	assert.True(t, m.profilePickerOpen)
+	assert.Equal(t, 0, m.profilePickerIndex)
+
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(model)
+	require.Nil(t, cmd)
+	assert.Equal(t, 1, m.profilePickerIndex)
+
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	require.Nil(t, cmd)
+	assert.False(t, m.profilePickerOpen)
+	assert.Equal(t, "work", m.profile)
+
+	m.textarea.SetValue("hello")
+	runCmd := m.submit()
+	require.NotNil(t, runCmd)
+	assert.Nil(t, runCmd())
+	_ = receiveRunMsg(t, m.runCh)
+	_ = receiveRunMsg(t, m.runCh)
+	assert.Equal(t, "work", runner.req.Profile)
+}
+
+func TestClickProfilePickerSelectsProfileForNewConversation(t *testing.T) {
+	m := newModel(context.Background(), Config{Profile: "default", ProfileOptions: []string{"default", "work", "prod"}})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.resize()
+
+	profileStart, _, ok := m.profileLabelBoundsInBlock()
+	require.True(t, ok)
+	updated, cmd := m.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+		X:      tuiLeftMargin + profileStart,
+		Y:      m.viewport.Height,
+	})
+	m = updated.(model)
+	require.Nil(t, cmd)
+	assert.True(t, m.profilePickerOpen)
+
+	pickerStart, _, ok := m.profilePickerBoundsInBlock()
+	require.True(t, ok)
+	updated, cmd = m.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+		X:      tuiLeftMargin + pickerStart,
+		Y:      m.viewport.Height + 2,
+	})
+	m = updated.(model)
+	require.Nil(t, cmd)
+	assert.False(t, m.profilePickerOpen)
+	assert.Equal(t, "prod", m.profile)
+}
+
+func TestProfilePickerLockedForExistingConversation(t *testing.T) {
+	m := newModel(context.Background(), Config{ConversationID: "conversation-123", Profile: "work", ProfileOptions: []string{"default", "work", "prod"}})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.resize()
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	m = updated.(model)
+	require.Nil(t, cmd)
+	assert.False(t, m.profilePickerOpen)
+	assert.Equal(t, "work", m.profile)
+
+	profileStart, _, ok := m.profileLabelBoundsInBlock()
+	require.True(t, ok)
+	updated, cmd = m.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+		X:      tuiLeftMargin + profileStart,
+		Y:      m.viewport.Height,
+	})
+	m = updated.(model)
+	require.Nil(t, cmd)
+	assert.False(t, m.profilePickerOpen)
+	assert.Equal(t, "work", m.profile)
+}
+
 func TestTypingInComposerDoesNotMoveViewport(t *testing.T) {
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)

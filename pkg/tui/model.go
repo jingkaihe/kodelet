@@ -88,12 +88,25 @@ func newModel(ctx context.Context, config Config) model {
 			cwd = wd
 		}
 	}
+	profile := displayProfile(config.Profile)
+	profileOptionsInput := config.ProfileOptions
+	if len(profileOptionsInput) == 0 {
+		profileOptionsInput = loadProfileOptions()
+	}
+	profileOptions := normalizeProfileOptions(profileOptionsInput, profile)
+	profileIndex := profileOptionIndex(profileOptions, profile)
+	if profileIndex < 0 {
+		profileIndex = 0
+	}
+
 	return model{
 		ctx:            mctx,
 		cancel:         cancel,
 		runner:         runner,
 		conversationID: strings.TrimSpace(config.ConversationID),
-		profile:        displayProfile(config.Profile),
+		profile:        profile,
+		profileOptions: profileOptions,
+		profileIndex:   profileIndex,
 		cwd:            cwd,
 		requestedCWD:   requestedCWD,
 		theme:          theme,

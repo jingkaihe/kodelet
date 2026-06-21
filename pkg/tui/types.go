@@ -17,6 +17,7 @@ import (
 type Config struct {
 	ConversationID string
 	Profile        string
+	ProfileOptions []string
 	CWD            string
 	Theme          string
 	Runner         chat.ChatRunner
@@ -99,9 +100,14 @@ type model struct {
 
 	conversationID string
 	profile        string
-	cwd            string
-	requestedCWD   string
-	theme          tuiTheme
+	profileOptions []string
+	profileIndex   int
+
+	profilePickerOpen  bool
+	profilePickerIndex int
+	cwd                string
+	requestedCWD       string
+	theme              tuiTheme
 
 	viewport viewport.Model
 	textarea textarea.Model
@@ -148,9 +154,11 @@ type chatDoneMsg struct {
 }
 
 type initialHistoryMsg struct {
+	loaded  bool
 	entries []chatEntry
 	usage   llmtypes.Usage
 	cwd     string
+	profile string
 	err     error
 }
 
