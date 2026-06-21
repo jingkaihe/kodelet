@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -93,7 +94,7 @@ func TestSlashCommandSuggestionsRenderAboveComposerWithThemeColors(t *testing.T)
 
 	m := newModel(context.Background(), Config{Theme: "tokyo-night"})
 	t.Cleanup(m.cancel)
-	m.width = 80
+	m.width = 160
 	m.height = 24
 	m.resize()
 	m.slashCommands = []slashcommands.Command{
@@ -113,10 +114,35 @@ func TestSlashCommandSuggestionsRenderAboveComposerWithThemeColors(t *testing.T)
 
 	assert.Contains(t, suggestionsTop, "/goal")
 	assert.Contains(t, suggestionsTop, "Set the active goal")
+	assert.NotContains(t, suggestionsTop, "objective")
 	assert.Contains(t, view, "/review")
+	assert.Contains(t, view, "target")
 	assert.Contains(t, composerTop, "default")
+	assert.LessOrEqual(t, lipgloss.Width(strings.TrimRight(suggestionsTop, " ")), slashCommandMaxWidth)
 	assert.Contains(t, rawView, "\x1b[38;5;183m/review")
 	assert.Contains(t, rawView, "48;5;")
+	assert.NotContains(t, suggestionsTop, "│")
+	assert.NotContains(t, suggestionsTop, "╰")
+}
+
+func TestSlashCommandSuggestionsUseCompactRowLimits(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 120
+	m.height = 40
+	m.resize()
+	for i := 0; i < 10; i++ {
+		m.slashCommands = append(m.slashCommands, slashcommands.Command{Name: fmt.Sprintf("cmd-%d", i), Description: "Command description"})
+	}
+	m.textarea.SetValue("/")
+	m.resize()
+
+	assert.Equal(t, slashCommandBareQueryMaxRows, m.slashCommandSuggestionsHeight())
+
+	m.textarea.SetValue("/cmd")
+	m.resize()
+
+	assert.Equal(t, slashCommandFilteredQueryMaxRows, m.slashCommandSuggestionsHeight())
 }
 
 func TestRunningIndicatorRendersInComposerBottomBorder(t *testing.T) {
@@ -201,8 +227,9 @@ func TestComposerLabelThemeColors(t *testing.T) {
 	for _, theme := range themes {
 		assert.Equal(t, theme.ThoughtBody, theme.ComposerLabel)
 		assert.NotEmpty(t, theme.ComposerFlow)
-		assert.NotEmpty(t, theme.SlashCommand.Border)
 		assert.NotEmpty(t, theme.SlashCommand.Selected)
+		assert.Equal(t, theme.ThoughtBody, theme.SlashCommand.Description)
+		assert.Equal(t, theme.ThoughtBody, theme.SlashCommand.Hint)
 	}
 	assert.Equal(t, themes[DefaultThemeName].Markdown.Code, themes[DefaultThemeName].SlashCommand.Command)
 }

@@ -42,7 +42,6 @@ type tuiTheme struct {
 }
 
 type slashCommandTheme struct {
-	Border      string
 	Selected    string
 	Command     string
 	Description string
@@ -107,10 +106,9 @@ var themes = map[string]tuiTheme{
 		ComposerText:     "#cdd6f4", // text
 		ComposerCursor:   "#cdd6f4", // text
 		SlashCommand: slashCommandTheme{
-			Border:      "#45475a", // surface1
 			Selected:    "#313244", // surface0
 			Command:     "#94e2d5", // teal (matches inline code)
-			Description: "#cdd6f4", // text
+			Description: "#9399b2", // overlay2
 			Hint:        "#9399b2", // overlay2
 			Error:       "#f38ba8", // red
 		},
@@ -181,11 +179,10 @@ var themes = map[string]tuiTheme{
 		ComposerText:     "#d0d0d0",
 		ComposerCursor:   "#ffffaf",
 		SlashCommand: slashCommandTheme{
-			Border:      "#444444",
 			Selected:    "#303030",
 			Command:     "#d7afff",
-			Description: "#d0d0d0",
-			Hint:        "#8a8a8a",
+			Description: "#808080",
+			Hint:        "#808080",
 			Error:       "#ff5f5f",
 		},
 		ProfileColors: []string{
@@ -260,7 +257,6 @@ var (
 	composerFlowStyle            lipgloss.Style
 	composerTextStyle            lipgloss.Style
 	composerCursorStyle          lipgloss.Style
-	slashCommandBorderStyle      lipgloss.Style
 	slashCommandSelectedStyle    lipgloss.Style
 	slashCommandNameStyle        lipgloss.Style
 	slashCommandDescriptionStyle lipgloss.Style
@@ -321,7 +317,6 @@ func applyTheme(theme tuiTheme) {
 	composerFlowStyle = lipgloss.NewStyle().Foreground(themeColor(theme.ComposerFlow))
 	composerTextStyle = lipgloss.NewStyle().Foreground(themeColor(theme.ComposerText))
 	composerCursorStyle = lipgloss.NewStyle().Foreground(themeColor(theme.ComposerCursor))
-	slashCommandBorderStyle = lipgloss.NewStyle().Foreground(themeColor(theme.SlashCommand.Border))
 	slashCommandSelectedStyle = lipgloss.NewStyle().Background(themeColor(theme.SlashCommand.Selected))
 	slashCommandNameStyle = lipgloss.NewStyle().Foreground(themeColor(theme.SlashCommand.Command))
 	slashCommandDescriptionStyle = lipgloss.NewStyle().Foreground(themeColor(theme.SlashCommand.Description))

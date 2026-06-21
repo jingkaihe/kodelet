@@ -8,8 +8,12 @@ import (
 )
 
 const (
-	tuiLeftMargin  = 1
-	tuiRightMargin = 1
+	tuiLeftMargin                     = 1
+	tuiRightMargin                    = 1
+	slashCommandMaxWidth              = 110
+	slashCommandBareQueryMaxRows      = 5
+	slashCommandFilteredQueryMaxRows  = 8
+	slashCommandMinimumDescriptionCol = 24
 )
 
 var tuiWorkingMessages = []string{
@@ -64,11 +68,11 @@ func (m model) renderSlashCommandSuggestions() string {
 		return ""
 	}
 
-	outerWidth := m.inputOuterWidth()
-	if outerWidth <= 2 {
+	outerWidth := m.slashCommandSuggestionsWidth()
+	if outerWidth <= 0 {
 		return ""
 	}
-	contentWidth := outerWidth - 2
+	contentWidth := outerWidth
 	if contentWidth <= 0 {
 		return ""
 	}
@@ -80,22 +84,21 @@ func (m model) renderSlashCommandSuggestions() string {
 	visibleSuggestions := visibleSlashCommandSuggestions(suggestions, m.slashCommandIndex, m.maxSlashCommandSuggestions())
 	lines := make([]string, 0, len(visibleSuggestions)+1)
 	for _, suggestion := range visibleSuggestions {
-		line := renderSlashCommandSuggestionLine(suggestion.command, contentWidth)
+		line := renderSlashCommandSuggestionLine(suggestion.command, contentWidth, suggestion.index == m.slashCommandIndex)
 		if suggestion.index == m.slashCommandIndex {
 			line = renderPersistentStyle(slashCommandSelectedStyle, padVisible(line, contentWidth))
 		} else {
 			line = padVisible(line, contentWidth)
 		}
-		lines = append(lines, slashCommandBorderStyle.Render("│")+line+slashCommandBorderStyle.Render("│"))
+		lines = append(lines, line)
 	}
 
 	if m.slashCommandErr != nil {
 		errorText := fitVisible("slash commands unavailable: "+m.slashCommandErr.Error(), max(1, contentWidth-2))
 		line := " " + renderPersistentStyle(slashCommandErrorStyle, errorText) + " "
-		lines = append(lines, slashCommandBorderStyle.Render("│")+padVisible(line, contentWidth)+slashCommandBorderStyle.Render("│"))
+		lines = append(lines, padVisible(line, contentWidth))
 	}
 
-	lines = append(lines, slashCommandBorderStyle.Render("╰"+strings.Repeat("─", contentWidth)+"╯"))
 	return strings.Join(lines, "\n")
 }
 
@@ -134,19 +137,22 @@ func visibleSlashCommandSuggestions(commands []slashcommands.Command, selectedIn
 	return visible
 }
 
-func renderSlashCommandSuggestionLine(command slashcommands.Command, width int) string {
+func renderSlashCommandSuggestionLine(command slashcommands.Command, width int, selected bool) string {
 	if width <= 0 {
 		return ""
 	}
 
 	name := "/" + strings.TrimSpace(command.Name)
 	description := strings.TrimSpace(command.Description)
-	hint := strings.TrimSpace(command.Hint)
-	if hint == "" && strings.TrimSpace(command.Placeholder) != "" {
-		hint = strings.TrimSpace(command.Placeholder)
+	hint := ""
+	if selected {
+		hint = strings.TrimSpace(command.Hint)
+		if hint == "" && strings.TrimSpace(command.Placeholder) != "" {
+			hint = strings.TrimSpace(command.Placeholder)
+		}
 	}
 
-	leftWidth := min(max(12, width/4), max(1, width/2))
+	leftWidth := min(max(14, width/3), max(1, width-slashCommandMinimumDescriptionCol))
 	if leftWidth >= width {
 		return renderPersistentStyle(slashCommandNameStyle, fitVisible(name, width))
 	}
@@ -176,12 +182,20 @@ func renderSlashCommandSuggestionLine(command slashcommands.Command, width int) 
 	return left + " " + right
 }
 
+func (m model) slashCommandSuggestionsWidth() int {
+	return min(m.inputOuterWidth(), slashCommandMaxWidth)
+}
+
 func (m model) maxSlashCommandSuggestions() int {
 	availableHeight := m.height - inputHeight - 2 - m.profilePickerHeight() - 1
 	if availableHeight < 1 {
 		return 1
 	}
-	return min(8, availableHeight)
+	rowLimit := slashCommandFilteredQueryMaxRows
+	if query, ok := m.slashCommandQuery(); ok && query == "" {
+		rowLimit = slashCommandBareQueryMaxRows
+	}
+	return min(rowLimit, availableHeight)
 }
 
 func (m model) slashCommandSuggestionsHeight() int {
@@ -192,7 +206,7 @@ func (m model) slashCommandSuggestionsHeight() int {
 	if suggestionCount == 0 {
 		return 0
 	}
-	height := suggestionCount + 1
+	height := suggestionCount
 	if m.slashCommandErr != nil {
 		height++
 	}

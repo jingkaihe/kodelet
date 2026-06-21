@@ -1,6 +1,6 @@
 ---
 name: Release Note Generator
-description: Generates comprehensive release notes by analyzing git changes since the previous release
+description: Create release notes by analysing changes since previous release
 workflow: true
 ---
 

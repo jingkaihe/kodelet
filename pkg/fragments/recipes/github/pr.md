@@ -1,6 +1,6 @@
 ---
 name: GitHub Pull Request Generator
-description: Creates pull requests with AI-generated title and description based on branch changes
+description: Creates pull request based on branch changes
 workflow: true
 arguments:
   target:
