@@ -260,7 +260,6 @@ var (
 	slashCommandSelectedStyle    lipgloss.Style
 	slashCommandNameStyle        lipgloss.Style
 	slashCommandDescriptionStyle lipgloss.Style
-	slashCommandHintStyle        lipgloss.Style
 	slashCommandErrorStyle       lipgloss.Style
 )
 
@@ -320,7 +319,6 @@ func applyTheme(theme tuiTheme) {
 	slashCommandSelectedStyle = lipgloss.NewStyle().Background(themeColor(theme.SlashCommand.Selected))
 	slashCommandNameStyle = lipgloss.NewStyle().Foreground(themeColor(theme.SlashCommand.Command))
 	slashCommandDescriptionStyle = lipgloss.NewStyle().Foreground(themeColor(theme.SlashCommand.Description))
-	slashCommandHintStyle = lipgloss.NewStyle().Foreground(themeColor(theme.SlashCommand.Hint))
 	slashCommandErrorStyle = lipgloss.NewStyle().Foreground(themeColor(theme.SlashCommand.Error))
 }
 

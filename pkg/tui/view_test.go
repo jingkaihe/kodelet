@@ -99,7 +99,7 @@ func TestSlashCommandSuggestionsRenderAboveComposerWithThemeColors(t *testing.T)
 	m.resize()
 	m.slashCommands = []slashcommands.Command{
 		{Name: "goal", Description: "Set the active goal", Hint: "objective"},
-		{Name: "review", Description: "Review changes", Hint: "target"},
+		{Name: "review", Description: "Review changes", Hint: "target", Placeholder: "/review target"},
 	}
 	m.textarea.SetValue("/")
 	m.slashCommandIndex = 1
@@ -116,13 +116,33 @@ func TestSlashCommandSuggestionsRenderAboveComposerWithThemeColors(t *testing.T)
 	assert.Contains(t, suggestionsTop, "Set the active goal")
 	assert.NotContains(t, suggestionsTop, "objective")
 	assert.Contains(t, view, "/review")
-	assert.Contains(t, view, "target")
+	assert.NotContains(t, view, "target")
 	assert.Contains(t, composerTop, "default")
-	assert.LessOrEqual(t, lipgloss.Width(strings.TrimRight(suggestionsTop, " ")), slashCommandMaxWidth)
+	assert.Equal(t, tuiLeftMargin+m.inputOuterWidth(), lipgloss.Width(suggestionsTop))
 	assert.Contains(t, rawView, "\x1b[38;5;183m/review")
 	assert.Contains(t, rawView, "48;5;")
 	assert.NotContains(t, suggestionsTop, "│")
 	assert.NotContains(t, suggestionsTop, "╰")
+}
+
+func TestSlashCommandUsageHintRendersInComposerPlaceholder(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 100
+	m.height = 24
+	m.resize()
+	m.slashCommands = []slashcommands.Command{{
+		Name:        "review",
+		Description: "Review changes",
+		Placeholder: "/review [target=HEAD] additional instructions",
+	}}
+	m.textarea.SetValue("/review ")
+	m.resize()
+
+	view := xansi.Strip(m.View())
+
+	assert.Contains(t, view, "/review [target=HEAD] additional instructions")
+	assert.NotContains(t, view, "/review \n")
 }
 
 func TestSlashCommandSuggestionsUseCompactRowLimits(t *testing.T) {

@@ -4,16 +4,15 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 )
 
 const (
-	tuiLeftMargin                     = 1
-	tuiRightMargin                    = 1
-	slashCommandMaxWidth              = 110
-	slashCommandBareQueryMaxRows      = 5
-	slashCommandFilteredQueryMaxRows  = 8
-	slashCommandMinimumDescriptionCol = 24
+	tuiLeftMargin                    = 1
+	tuiRightMargin                   = 1
+	slashCommandBareQueryMaxRows     = 5
+	slashCommandFilteredQueryMaxRows = 8
 )
 
 var tuiWorkingMessages = []string{
@@ -84,7 +83,7 @@ func (m model) renderSlashCommandSuggestions() string {
 	visibleSuggestions := visibleSlashCommandSuggestions(suggestions, m.slashCommandIndex, m.maxSlashCommandSuggestions())
 	lines := make([]string, 0, len(visibleSuggestions)+1)
 	for _, suggestion := range visibleSuggestions {
-		line := renderSlashCommandSuggestionLine(suggestion.command, contentWidth, suggestion.index == m.slashCommandIndex)
+		line := renderSlashCommandSuggestionLine(suggestion.command, contentWidth)
 		if suggestion.index == m.slashCommandIndex {
 			line = renderPersistentStyle(slashCommandSelectedStyle, padVisible(line, contentWidth))
 		} else {
@@ -137,22 +136,15 @@ func visibleSlashCommandSuggestions(commands []slashcommands.Command, selectedIn
 	return visible
 }
 
-func renderSlashCommandSuggestionLine(command slashcommands.Command, width int, selected bool) string {
+func renderSlashCommandSuggestionLine(command slashcommands.Command, width int) string {
 	if width <= 0 {
 		return ""
 	}
 
 	name := "/" + strings.TrimSpace(command.Name)
 	description := strings.TrimSpace(command.Description)
-	hint := ""
-	if selected {
-		hint = strings.TrimSpace(command.Hint)
-		if hint == "" && strings.TrimSpace(command.Placeholder) != "" {
-			hint = strings.TrimSpace(command.Placeholder)
-		}
-	}
 
-	leftWidth := min(max(14, width/3), max(1, width-slashCommandMinimumDescriptionCol))
+	leftWidth := min(max(14, width/4), max(1, width/2))
 	if leftWidth >= width {
 		return renderPersistentStyle(slashCommandNameStyle, fitVisible(name, width))
 	}
@@ -163,27 +155,17 @@ func renderSlashCommandSuggestionLine(command slashcommands.Command, width int, 
 
 	left := renderPersistentStyle(slashCommandNameStyle, padVisible(fitVisible(name, leftWidth), leftWidth))
 	rightText := description
-	if hint != "" {
-		if rightText != "" {
-			rightText += "  "
-		}
-		rightText += hint
-	}
 	if rightText == "" {
 		return left
 	}
 	rightText = fitVisible(rightText, rightWidth)
-
 	right := renderPersistentStyle(slashCommandDescriptionStyle, rightText)
-	if hint != "" && strings.Contains(rightText, hint) {
-		right = renderPersistentStyle(slashCommandDescriptionStyle, strings.TrimSuffix(rightText, hint)) + renderPersistentStyle(slashCommandHintStyle, hint)
-	}
 
 	return left + " " + right
 }
 
 func (m model) slashCommandSuggestionsWidth() int {
-	return min(m.inputOuterWidth(), slashCommandMaxWidth)
+	return m.inputOuterWidth()
 }
 
 func (m model) maxSlashCommandSuggestions() int {
@@ -220,6 +202,7 @@ func (m model) renderInputBox() string {
 	for len(bodyLines) < inputHeight {
 		bodyLines = append(bodyLines, "")
 	}
+	m.applySlashCommandUsageHint(bodyLines, contentWidth)
 
 	lines := []string{m.renderInputTopBorder()}
 	for i := 0; i < inputHeight; i++ {
@@ -227,6 +210,68 @@ func (m model) renderInputBox() string {
 	}
 	lines = append(lines, renderLabeledBorderPair("╰", "╯", outerWidth, m.inputBottomLeftLabel(), displayCWD(m.cwd)))
 	return strings.Join(lines, "\n")
+}
+
+func (m model) applySlashCommandUsageHint(bodyLines []string, contentWidth int) {
+	if len(bodyLines) == 0 || contentWidth <= 0 {
+		return
+	}
+	suffix, prefixWidth := m.activeSlashCommandPlaceholderSuffix()
+	if suffix == "" {
+		return
+	}
+	if prefixWidth >= contentWidth {
+		return
+	}
+	bodyLines[0] = xansi.Cut(bodyLines[0], 0, prefixWidth) + renderPersistentStyle(inputPlaceholderStyle, fitVisible(suffix, contentWidth-prefixWidth))
+}
+
+func (m model) activeSlashCommandPlaceholderSuffix() (string, int) {
+	value := strings.TrimLeft(m.textarea.Value(), " \t\r\n")
+	if !strings.Contains(value, " ") {
+		return "", 0
+	}
+	typed := strings.TrimRight(value, " \t\r\n")
+	if typed == "" {
+		return "", 0
+	}
+	typedForPrefix := value
+	if strings.HasSuffix(value, " ") || strings.HasSuffix(value, "\t") {
+		typedForPrefix = typed + " "
+	}
+
+	command, ok := m.activeSlashCommand()
+	if !ok {
+		return "", 0
+	}
+	placeholder := ""
+	if placeholderValue := strings.TrimSpace(command.Placeholder); placeholderValue != "" {
+		placeholder = placeholderValue
+	}
+	if placeholder == "" {
+		placeholder = "/" + strings.TrimSpace(command.Name)
+		if hint := strings.TrimSpace(command.Hint); hint != "" {
+			placeholder += " " + hint
+		}
+	}
+
+	if !strings.HasPrefix(placeholder, typedForPrefix) {
+		return "", 0
+	}
+	return strings.TrimPrefix(placeholder, typedForPrefix), lipgloss.Width(typedForPrefix)
+}
+
+func (m model) activeSlashCommand() (slashcommands.Command, bool) {
+	commandName, _, found := slashcommands.Parse(m.textarea.Value())
+	if !found {
+		return slashcommands.Command{}, false
+	}
+	for _, command := range m.slashCommands {
+		if command.Name == commandName {
+			return command, true
+		}
+	}
+	return slashcommands.Command{}, false
 }
 
 type styledLabelPart struct {
