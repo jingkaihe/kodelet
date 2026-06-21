@@ -138,13 +138,13 @@ var themes = map[string]tuiTheme{
 		},
 		ProfileSelected: "#313244", // surface0
 		UI: uiTheme{
-			DialogBorder:       "#b4befe", // lavender
-			DialogTitle:        "#cba6f7", // mauve
+			DialogBorder:       "#cdd6f4", // text, matches input border
+			DialogTitle:        "#94e2d5", // teal
 			DialogBody:         "#cdd6f4", // text
 			DialogMuted:        "#9399b2", // overlay2
 			DialogSelected:     "#313244", // surface0
 			DialogButton:       "#a6e3a1", // green
-			DialogCancel:       "#f38ba8", // red
+			DialogCancel:       "#fab387", // peach
 			NotificationBorder: "#89b4fa", // blue
 			NotificationTitle:  "#94e2d5", // teal
 			NotificationBody:   "#cdd6f4", // text

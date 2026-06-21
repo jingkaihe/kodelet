@@ -42,7 +42,7 @@ const extension = defineExtension((ext) => {
             "Present user with multiple choices when there are several possible approaches and you need them to pick one. Use when you have 2-5 concrete options to choose from",
         inputSchema: AskUserQuestionInput,
         async execute(input, ctx) {
-            const choice = await ctx.ui.select({
+            const choice = await ctx.ui?.select?.({
                 title: input.question,
                 message: "Choose one option.",
                 options: input.options,
@@ -63,7 +63,7 @@ const extension = defineExtension((ext) => {
 
     ext.on("agent.start", async (_event, ctx) => {
         const policy = await readBashPolicy(ctx);
-        await ctx.ui.notify({
+        await ctx.ui?.notify?.({
             title: "Workspace extension ready",
             message: `Workspace extension started. Remembered bash policy: ${policy.allowed.length} allowed, ${policy.denied.length} denied.`,
         });
@@ -94,7 +94,7 @@ const extension = defineExtension((ext) => {
                 return;
             }
 
-            const choice = await ctx.ui.select({
+            const choice = await ctx.ui?.select?.({
                 title: "Allow bash command?",
                 message: formatBashPrompt(details, policy),
                 options: [...BASH_DECISION_OPTIONS],
