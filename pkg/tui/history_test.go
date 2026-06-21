@@ -62,6 +62,47 @@ func TestInitialHistoryDoesNotClobberLocalEntries(t *testing.T) {
 	assert.Zero(t, m.usage.CurrentContextWindow)
 }
 
+func TestInitialHistoryUpdatesDisplayedCWD(t *testing.T) {
+	m := newModel(context.Background(), Config{ConversationID: "conversation-123456789", CWD: "/tmp/shell"})
+	t.Cleanup(m.cancel)
+	m.width = 100
+	m.height = 30
+	m.resize()
+
+	updated, _ := m.Update(initialHistoryMsg{
+		entries: []chatEntry{{kind: entryUser, content: "old prompt"}},
+		cwd:     "/tmp/project",
+	})
+	m = updated.(model)
+
+	assert.Equal(t, "/tmp/project", m.cwd)
+}
+
+func TestInitialHistoryUpdatesDisplayedCWDForEmptyConversation(t *testing.T) {
+	m := newModel(context.Background(), Config{ConversationID: "conversation-123456789", CWD: "/tmp/shell"})
+	t.Cleanup(m.cancel)
+
+	updated, _ := m.Update(initialHistoryMsg{cwd: "/tmp/project"})
+	m = updated.(model)
+
+	assert.Equal(t, "/tmp/project", m.cwd)
+}
+
+func TestInitialHistoryDoesNotClobberDisplayedCWDForActiveRun(t *testing.T) {
+	m := newModel(context.Background(), Config{ConversationID: "conversation-123456789", CWD: "/tmp/shell"})
+	t.Cleanup(m.cancel)
+	m.running = true
+	m.entries = []chatEntry{{kind: entryUser, content: "local prompt"}}
+
+	updated, _ := m.Update(initialHistoryMsg{
+		entries: []chatEntry{{kind: entryUser, content: "old prompt"}},
+		cwd:     "/tmp/project",
+	})
+	m = updated.(model)
+
+	assert.Equal(t, "/tmp/shell", m.cwd)
+}
+
 func TestInitialHistorySeedsEmptyTranscript(t *testing.T) {
 	m := newModel(context.Background(), Config{ConversationID: "conversation-123456789"})
 	t.Cleanup(m.cancel)

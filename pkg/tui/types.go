@@ -150,6 +150,7 @@ type chatDoneMsg struct {
 type initialHistoryMsg struct {
 	entries []chatEntry
 	usage   llmtypes.Usage
+	cwd     string
 	err     error
 }
 

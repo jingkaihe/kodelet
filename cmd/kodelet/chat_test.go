@@ -2,9 +2,15 @@ package main
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/tui"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -71,4 +77,52 @@ func TestChatNoToolsDisablesMCP(t *testing.T) {
 	config := getChatConfigFromFlags(context.Background(), cmd)
 	assert.True(t, config.NoTools)
 	assert.True(t, config.NoMCP)
+}
+
+func TestValidateChatResumeConversationRejectsMissingConversation(t *testing.T) {
+	setupChatConversationStore(t)
+
+	err := validateChatResumeConversation(context.Background(), "missing-conversation")
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "conversation not found: missing-conversation")
+}
+
+func TestValidateChatResumeConversationAcceptsExistingConversation(t *testing.T) {
+	basePath := setupChatConversationStore(t)
+	ctx := context.Background()
+	store, err := conversations.NewConversationStore(ctx, &conversations.Config{
+		StoreType: "sqlite",
+		BasePath:  basePath,
+	})
+	require.NoError(t, err)
+	defer func() { _ = store.Close() }()
+
+	record := convtypes.NewConversationRecord("conversation-123")
+	record.Provider = "openai"
+	record.UpdatedAt = time.Now()
+	require.NoError(t, store.Save(ctx, record))
+
+	require.NoError(t, validateChatResumeConversation(ctx, " conversation-123 "))
+}
+
+func TestValidateChatResumeConversationAllowsEmptyConversation(t *testing.T) {
+	require.NoError(t, validateChatResumeConversation(context.Background(), "   "))
+}
+
+func setupChatConversationStore(t *testing.T) string {
+	t.Helper()
+	t.Setenv("KODELET_CONVERSATION_STORE_TYPE", "sqlite")
+	basePath := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", basePath)
+
+	ctx := context.Background()
+	dbPath := filepath.Join(basePath, "storage.db")
+	sqlDB, err := db.Open(ctx, dbPath)
+	require.NoError(t, err)
+	runner := db.NewMigrationRunner(sqlDB)
+	require.NoError(t, runner.Run(ctx, migrations.All()))
+	require.NoError(t, sqlDB.Close())
+
+	return basePath
 }

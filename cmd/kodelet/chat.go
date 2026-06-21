@@ -52,6 +52,10 @@ var chatCmd = &cobra.Command{
 			presenter.Error(err, "Invalid TUI theme")
 			os.Exit(1)
 		}
+		if err := validateChatResumeConversation(ctx, config.ResumeConvID); err != nil {
+			presenter.Error(err, "Failed to resume conversation")
+			os.Exit(1)
+		}
 		logger.SetLogOutput(io.Discard)
 		stdlog.SetOutput(io.Discard)
 
@@ -123,4 +127,24 @@ func getChatConfigFromFlags(ctx context.Context, cmd *cobra.Command) *ChatConfig
 	}
 
 	return config
+}
+
+func validateChatResumeConversation(ctx context.Context, conversationID string) error {
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
+		return nil
+	}
+
+	service, err := conversations.GetDefaultConversationService(ctx)
+	if err != nil {
+		return errors.Wrap(err, "failed to open conversation store")
+	}
+	defer func() {
+		_ = service.Close()
+	}()
+
+	if _, err := service.GetConversation(ctx, conversationID); err != nil {
+		return errors.Wrapf(err, "conversation not found: %s", conversationID)
+	}
+	return nil
 }

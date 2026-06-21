@@ -65,6 +65,22 @@ func TestRenderTranscriptAddsSpacingBetweenAssistantBlocks(t *testing.T) {
 	assert.Contains(t, content, "\n\nfinal answer")
 }
 
+func TestRenderTranscriptUsesHeavyUserMessageBar(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 28
+	m.height = 24
+	m.resize()
+	m.entries = []chatEntry{{kind: entryUser, content: "please make this user message wrap"}}
+
+	content, _ := m.renderTranscript()
+	plain := xansi.Strip(content)
+
+	assert.Contains(t, plain, "┃ please make this user")
+	assert.Contains(t, plain, "┃ message wrap")
+	assert.NotContains(t, plain, "│ please")
+}
+
 func TestRenderTranscriptGroupsToolBlocksByType(t *testing.T) {
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)

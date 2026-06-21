@@ -129,8 +129,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					text: fmt.Sprintf("Failed to resume conversation: %v", msg.err),
 				}},
 			})
-		} else if len(msg.entries) > 0 {
-			if len(m.entries) == 0 {
+		} else if len(m.entries) == 0 {
+			if strings.TrimSpace(msg.cwd) != "" {
+				m.cwd = strings.TrimSpace(msg.cwd)
+			}
+			if len(msg.entries) > 0 {
 				m.entries = msg.entries
 				m.usage = msg.usage
 				m.status = fmt.Sprintf("resumed %s", shortID(m.conversationID))

@@ -28,7 +28,7 @@ func (m *model) renderTranscript() (string, []detailRegion) {
 
 		switch entry.kind {
 		case entryUser:
-			block := userStyle.Render("│ " + strings.ReplaceAll(wrapText(strings.TrimSpace(entry.content), m.transcriptTextWidth()-2), "\n", "\n│ "))
+			block := userStyle.Render("┃ " + strings.ReplaceAll(wrapText(strings.TrimSpace(entry.content), m.transcriptTextWidth()-2), "\n", "\n┃ "))
 			b.WriteString(block)
 			b.WriteString("\n")
 			line += lineCount(block)
