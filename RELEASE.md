@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.4.39-alpha
+
+Added `kodelet chat`, a native terminal chat TUI with streaming responses, conversation resume/follow support, selectable themes, and no-tools/no-extension startup options.
+
 ## 0.4.38-beta
 
 Simplified extension subprocess handling by removing per-process environment overrides; extensions now inherit the Kodelet process environment directly, with docs and config samples updated to match.
