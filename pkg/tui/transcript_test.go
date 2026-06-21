@@ -318,6 +318,28 @@ func TestRenderTranscriptRendersAssistantMarkdown(t *testing.T) {
 	assert.Contains(t, plain, "• second")
 }
 
+func TestRenderTranscriptRendersTokyoNightCodeBlock(t *testing.T) {
+	m := newModel(context.Background(), Config{Theme: "tokyo-night"})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.resize()
+	m.entries = []chatEntry{{
+		kind: entryAssistant,
+		blocks: []assistantBlock{{
+			kind: blockText,
+			text: "Here is code:\n\n```go\nfmt.Println(len(items))\n```",
+		}},
+	}}
+
+	content, _ := m.renderTranscript()
+	plain := xansi.Strip(content)
+
+	assert.Contains(t, plain, "Here is code:")
+	assert.Contains(t, plain, "fmt.Println")
+	assert.NotContains(t, plain, "```")
+}
+
 func TestRenderTranscriptRestylesAssistantTextAfterInlineCode(t *testing.T) {
 	withANSI256ColorProfile(t)
 

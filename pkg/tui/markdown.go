@@ -18,11 +18,23 @@ func (m *model) renderMarkdown(text string, width int, kind markdownKind) string
 	if err != nil {
 		return wrapText(text, width)
 	}
-	rendered, err := renderer.Render(text)
-	if err != nil {
+	rendered, ok := renderMarkdownWithRenderer(renderer, text)
+	if !ok {
 		return wrapText(text, width)
 	}
 	return strings.TrimSpace(rendered)
+}
+
+func renderMarkdownWithRenderer(renderer *glamour.TermRenderer, text string) (rendered string, ok bool) {
+	defer func() {
+		if recover() != nil {
+			rendered = ""
+			ok = false
+		}
+	}()
+
+	rendered, err := renderer.Render(text)
+	return rendered, err == nil
 }
 
 func (m *model) markdownRenderer(width int, kind markdownKind) (*glamour.TermRenderer, error) {
