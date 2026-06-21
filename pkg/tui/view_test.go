@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
+	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
 )
@@ -85,6 +86,37 @@ func TestProfilePickerRendersAboveComposerWithThemeColors(t *testing.T) {
 	assert.NotContains(t, view, "→")
 	assert.NotContains(t, view, "ACTIVE")
 	assert.NotContains(t, view, "repo")
+}
+
+func TestSlashCommandSuggestionsRenderAboveComposerWithThemeColors(t *testing.T) {
+	withANSI256ColorProfile(t)
+
+	m := newModel(context.Background(), Config{Theme: "tokyo-night"})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.resize()
+	m.slashCommands = []slashcommands.Command{
+		{Name: "goal", Description: "Set the active goal", Hint: "objective"},
+		{Name: "review", Description: "Review changes", Hint: "target"},
+	}
+	m.textarea.SetValue("/")
+	m.slashCommandIndex = 1
+	m.resize()
+	m.refreshViewport(true)
+
+	rawView := m.View()
+	view := xansi.Strip(rawView)
+	lines := strings.Split(view, "\n")
+	suggestionsTop := lines[m.viewport.Height]
+	composerTop := lines[m.viewport.Height+m.slashCommandSuggestionsHeight()]
+
+	assert.Contains(t, suggestionsTop, "/goal")
+	assert.Contains(t, suggestionsTop, "Set the active goal")
+	assert.Contains(t, view, "/review")
+	assert.Contains(t, composerTop, "default")
+	assert.Contains(t, rawView, "\x1b[38;5;183m/review")
+	assert.Contains(t, rawView, "48;5;")
 }
 
 func TestRunningIndicatorRendersInComposerBottomBorder(t *testing.T) {
@@ -169,7 +201,10 @@ func TestComposerLabelThemeColors(t *testing.T) {
 	for _, theme := range themes {
 		assert.Equal(t, theme.ThoughtBody, theme.ComposerLabel)
 		assert.NotEmpty(t, theme.ComposerFlow)
+		assert.NotEmpty(t, theme.SlashCommand.Border)
+		assert.NotEmpty(t, theme.SlashCommand.Selected)
 	}
+	assert.Equal(t, themes[DefaultThemeName].Markdown.Code, themes[DefaultThemeName].SlashCommand.Command)
 }
 
 func TestThemeColorsAreHex(t *testing.T) {

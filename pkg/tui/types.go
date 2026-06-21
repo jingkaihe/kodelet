@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
+	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
@@ -103,11 +104,15 @@ type model struct {
 	profileOptions []string
 	profileIndex   int
 
-	profilePickerOpen  bool
-	profilePickerIndex int
-	cwd                string
-	requestedCWD       string
-	theme              tuiTheme
+	profilePickerOpen   bool
+	profilePickerIndex  int
+	cwd                 string
+	requestedCWD        string
+	theme               tuiTheme
+	slashCommands       []slashcommands.Command
+	slashCommandIndex   int
+	slashCommandErr     error
+	slashDismissedDraft string
 
 	viewport viewport.Model
 	textarea textarea.Model
@@ -163,6 +168,13 @@ type initialHistoryMsg struct {
 }
 
 type transcriptRefreshMsg struct{}
+
+type slashCommandsMsg struct {
+	cwd            string
+	commands       []slashcommands.Command
+	extensionsOnly bool
+	err            error
+}
 
 type tuiSink struct {
 	ch    chan<- tea.Msg

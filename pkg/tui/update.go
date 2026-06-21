@@ -10,6 +10,8 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
+	"github.com/jingkaihe/kodelet/pkg/goals"
+	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/pkg/errors"
@@ -131,6 +133,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}},
 			})
 		} else if msg.loaded {
+			reloadSlashCommands := false
 			if strings.TrimSpace(m.conversationID) != "" {
 				m.setProfile(msg.profile)
 				m.profilePickerOpen = false
@@ -140,6 +143,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			if strings.TrimSpace(msg.cwd) != "" {
+				reloadSlashCommands = strings.TrimSpace(m.requestedCWD) == "" && strings.TrimSpace(m.cwd) != strings.TrimSpace(msg.cwd)
 				m.cwd = strings.TrimSpace(msg.cwd)
 			}
 			if len(msg.entries) > 0 {
@@ -147,8 +151,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.usage = msg.usage
 				m.status = fmt.Sprintf("resumed %s", shortID(m.conversationID))
 			}
+			if reloadSlashCommands {
+				cmds = append(cmds, loadSlashCommands(m.ctx, m.slashCommandCWD()))
+			}
 		}
 		m.refreshViewport(true)
+
+	case slashCommandsMsg:
+		if strings.TrimSpace(msg.cwd) != strings.TrimSpace(m.slashCommandCWD()) {
+			break
+		}
+		if msg.extensionsOnly {
+			m.slashCommands = mergeSlashCommands(m.slashCommands, msg.commands)
+		} else {
+			m.slashCommands = msg.commands
+			cmds = append(cmds, loadExtensionSlashCommands(m.ctx, m.slashCommandCWD()))
+		}
+		m.slashCommandErr = msg.err
+		m.resetSlashCommandIndex()
+		m.resize()
+		m.refreshViewport(false)
 
 	case tea.KeyMsg:
 		key := msg.String()
@@ -164,6 +186,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cancel()
 			return m, tea.Quit
 		case "esc":
+			if m.slashCommandSuggestionsOpen() {
+				m.dismissSlashCommandSuggestions()
+				m.resize()
+				m.refreshViewport(false)
+				return m, nil
+			}
 			if m.profilePickerOpen {
 				m.closeProfilePicker()
 				m.resize()
@@ -186,18 +214,40 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshViewport(false)
 			return m, nil
 		case "up", "shift+tab":
+			if m.slashCommandSuggestionsOpen() {
+				m.moveSlashCommandSelection(-1)
+				m.refreshViewport(false)
+				return m, nil
+			}
 			if m.profilePickerOpen {
 				m.moveProfilePicker(-1)
 				m.refreshViewport(false)
 				return m, nil
 			}
 		case "down", "tab":
+			if m.slashCommandSuggestionsOpen() {
+				if key == "tab" {
+					m.selectSlashCommand()
+					m.resize()
+					m.refreshViewport(false)
+				} else {
+					m.moveSlashCommandSelection(1)
+					m.refreshViewport(false)
+				}
+				return m, nil
+			}
 			if m.profilePickerOpen {
 				m.moveProfilePicker(1)
 				m.refreshViewport(false)
 				return m, nil
 			}
 		case "enter":
+			if m.slashCommandSuggestionsOpen() {
+				m.selectSlashCommand()
+				m.resize()
+				m.refreshViewport(false)
+				return m, nil
+			}
 			if m.profilePickerOpen {
 				m.selectProfilePickerOption(m.profilePickerIndex)
 				m.resize()
@@ -294,9 +344,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	}
 
+	previousTextareaValue := m.textarea.Value()
+	previousSlashCommandHeight := m.slashCommandSuggestionsHeight()
 	var cmd tea.Cmd
 	m.textarea, cmd = m.textarea.Update(msg)
 	cmds = append(cmds, cmd)
+	if m.textarea.Value() != previousTextareaValue {
+		if m.slashDismissedDraft != "" && m.slashDismissedDraft != m.textarea.Value() {
+			m.slashDismissedDraft = ""
+		}
+		m.slashCommandIndex = -1
+	}
+	if m.slashCommandSuggestionsHeight() != previousSlashCommandHeight {
+		m.resize()
+		m.refreshViewport(false)
+	}
 
 	if shouldUpdateViewport(msg) {
 		var vpCmd tea.Cmd
@@ -384,9 +446,10 @@ func (m *model) resize() {
 		return
 	}
 	inputOuterHeight := inputHeight + 2
+	slashCommandHeight := m.slashCommandSuggestionsHeight()
 	profilePickerHeight := m.profilePickerHeight()
 	footerHeight := 0
-	viewportHeight := m.height - inputOuterHeight - profilePickerHeight - footerHeight
+	viewportHeight := m.height - inputOuterHeight - slashCommandHeight - profilePickerHeight - footerHeight
 	if viewportHeight < 1 {
 		viewportHeight = 1
 	}
@@ -402,12 +465,13 @@ func (m *model) submit() tea.Cmd {
 		return nil
 	}
 	m.profilePickerOpen = false
+	m.dismissSlashCommandSuggestions()
 	if strings.TrimSpace(m.conversationID) == "" {
 		m.conversationID = convtypes.GenerateID()
 	}
 
 	m.textarea.Reset()
-	m.entries = append(m.entries, chatEntry{kind: entryUser, content: message})
+	m.entries = append(m.entries, chatEntry{kind: entryUser, content: userDisplayMessage(message)})
 	m.running = true
 	m.workingFrame = 0
 	m.nextRunID++
@@ -435,6 +499,147 @@ func (m *model) submit() tea.Cmd {
 		}()
 		return nil
 	}
+}
+
+func (m model) slashCommandQuery() (string, bool) {
+	draft := strings.TrimLeft(m.textarea.Value(), " \t\r\n")
+	if !strings.HasPrefix(draft, "/") {
+		return "", false
+	}
+	withoutSlash := strings.TrimPrefix(draft, "/")
+	if strings.ContainsAny(withoutSlash, " \t\r\n") {
+		return "", false
+	}
+	return strings.ToLower(withoutSlash), true
+}
+
+func (m model) slashCommandSuggestionsOpen() bool {
+	if m.running || m.profilePickerOpen {
+		return false
+	}
+	if m.textarea.Value() == m.slashDismissedDraft {
+		return false
+	}
+	_, ok := m.slashCommandQuery()
+	return ok && len(m.filteredSlashCommands()) > 0
+}
+
+func (m model) filteredSlashCommands() []slashcommands.Command {
+	query, ok := m.slashCommandQuery()
+	if !ok {
+		return nil
+	}
+	commands := make([]slashcommands.Command, 0, len(m.slashCommands))
+	for _, command := range m.slashCommands {
+		name := strings.ToLower(command.Name)
+		description := strings.ToLower(command.Description)
+		if query == "" || strings.Contains(name, query) || strings.Contains(description, query) {
+			commands = append(commands, command)
+		}
+	}
+	return commands
+}
+
+func (m *model) resetSlashCommandIndex() {
+	if len(m.filteredSlashCommands()) == 0 {
+		m.slashCommandIndex = -1
+		return
+	}
+	if m.slashCommandIndex >= len(m.filteredSlashCommands()) {
+		m.slashCommandIndex = -1
+	}
+}
+
+func (m *model) dismissSlashCommandSuggestions() {
+	m.slashCommandIndex = -1
+	m.slashDismissedDraft = m.textarea.Value()
+}
+
+func (m *model) moveSlashCommandSelection(delta int) {
+	suggestions := m.filteredSlashCommands()
+	if len(suggestions) == 0 {
+		m.slashCommandIndex = -1
+		return
+	}
+	next := m.slashCommandIndex + delta
+	if delta > 0 {
+		if next >= len(suggestions) {
+			next = -1
+		}
+	} else if delta < 0 {
+		if m.slashCommandIndex < 0 {
+			next = len(suggestions) - 1
+		} else if next < 0 {
+			next = -1
+		}
+	}
+	m.slashCommandIndex = next
+}
+
+func (m *model) selectSlashCommand() {
+	suggestions := m.filteredSlashCommands()
+	if len(suggestions) == 0 {
+		return
+	}
+	index := m.slashCommandIndex
+	if index < 0 || index >= len(suggestions) {
+		index = 0
+	}
+	m.textarea.SetValue(insertSlashCommand(m.textarea.Value(), suggestions[index].Name))
+	m.slashCommandIndex = -1
+	m.slashDismissedDraft = ""
+}
+
+func insertSlashCommand(draft, commandName string) string {
+	leadingWhitespaceLength := 0
+	for leadingWhitespaceLength < len(draft) {
+		switch draft[leadingWhitespaceLength] {
+		case ' ', '\t', '\r', '\n':
+			leadingWhitespaceLength++
+		default:
+			return draft[:leadingWhitespaceLength] + "/" + strings.TrimSpace(commandName) + " "
+		}
+	}
+	return draft[:leadingWhitespaceLength] + "/" + strings.TrimSpace(commandName) + " "
+}
+
+func userDisplayMessage(message string) string {
+	command, args, found := slashcommands.Parse(message)
+	if !found {
+		return strings.TrimSpace(message)
+	}
+
+	update, handled, err := goals.ParseSlashCommand(command, args, time.Now())
+	if handled && err == nil {
+		return update.Display
+	}
+
+	return strings.TrimSpace(message)
+}
+
+func mergeSlashCommands(base, additions []slashcommands.Command) []slashcommands.Command {
+	merged := make([]slashcommands.Command, 0, len(base)+len(additions))
+	seen := map[string]struct{}{}
+	for _, command := range base {
+		name := strings.TrimSpace(command.Name)
+		if name == "" {
+			continue
+		}
+		seen[name] = struct{}{}
+		merged = append(merged, command)
+	}
+	for _, command := range additions {
+		name := strings.TrimSpace(command.Name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		merged = append(merged, command)
+	}
+	return merged
 }
 
 func (m *model) submitSteering() {

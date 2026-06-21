@@ -12,6 +12,11 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
+	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/extensions"
+	"github.com/jingkaihe/kodelet/pkg/fragments"
+	"github.com/jingkaihe/kodelet/pkg/slashcommands"
+	"github.com/pkg/errors"
 )
 
 var newDefaultChatRunner = func(defaultCWD string) chat.ChatRunner {
@@ -100,22 +105,23 @@ func newModel(ctx context.Context, config Config) model {
 	}
 
 	return model{
-		ctx:            mctx,
-		cancel:         cancel,
-		runner:         runner,
-		conversationID: strings.TrimSpace(config.ConversationID),
-		profile:        profile,
-		profileOptions: profileOptions,
-		profileIndex:   profileIndex,
-		cwd:            cwd,
-		requestedCWD:   requestedCWD,
-		theme:          theme,
-		viewport:       vp,
-		textarea:       ta,
-		spinner:        sp,
-		autoFollow:     true,
-		runCh:          make(chan tea.Msg, 256),
-		status:         "ready",
+		ctx:               mctx,
+		cancel:            cancel,
+		runner:            runner,
+		conversationID:    strings.TrimSpace(config.ConversationID),
+		profile:           profile,
+		profileOptions:    profileOptions,
+		profileIndex:      profileIndex,
+		cwd:               cwd,
+		requestedCWD:      requestedCWD,
+		theme:             theme,
+		slashCommandIndex: -1,
+		viewport:          vp,
+		textarea:          ta,
+		spinner:           sp,
+		autoFollow:        true,
+		runCh:             make(chan tea.Msg, 256),
+		status:            "ready",
 	}
 }
 
@@ -125,5 +131,88 @@ func (m model) Init() tea.Cmd {
 		m.spinner.Tick,
 		waitForMsg(m.runCh),
 		loadInitialHistory(m.ctx, m.conversationID),
+		loadSlashCommands(m.ctx, m.slashCommandCWD()),
 	)
+}
+
+func loadSlashCommands(ctx context.Context, cwd string) tea.Cmd {
+	return func() tea.Msg {
+		commands, err := listBaseSlashCommands(ctx, cwd)
+		return slashCommandsMsg{cwd: strings.TrimSpace(cwd), commands: commands, err: err}
+	}
+}
+
+func loadExtensionSlashCommands(ctx context.Context, cwd string) tea.Cmd {
+	return func() tea.Msg {
+		commands, err := listExtensionSlashCommands(ctx, cwd)
+		return slashCommandsMsg{cwd: strings.TrimSpace(cwd), commands: commands, extensionsOnly: true, err: err}
+	}
+}
+
+func listSlashCommands(ctx context.Context, cwd string) ([]slashcommands.Command, error) {
+	commands, err := listBaseSlashCommands(ctx, cwd)
+	if err != nil {
+		return commands, err
+	}
+	extensionCommands, err := listExtensionSlashCommands(ctx, cwd)
+	if err != nil {
+		return commands, err
+	}
+	return append(commands, extensionCommands...), nil
+}
+
+func listBaseSlashCommands(ctx context.Context, cwd string) ([]slashcommands.Command, error) {
+	resolvedCWD, err := resolveSlashCommandCWD(cwd)
+	if err != nil {
+		return slashcommands.BuiltIns(), err
+	}
+
+	processor, err := fragments.NewFragmentProcessor(fragments.WithDefaultDirsForCWD(resolvedCWD))
+	if err != nil {
+		return slashcommands.BuiltIns(), errors.Wrap(err, "failed to initialize slash commands")
+	}
+
+	return slashcommands.List(ctx, processor), nil
+}
+
+func listExtensionSlashCommands(ctx context.Context, cwd string) ([]slashcommands.Command, error) {
+	resolvedCWD, err := resolveSlashCommandCWD(cwd)
+	if err != nil {
+		return nil, err
+	}
+
+	extensionRuntime, err := extensions.NewRuntimeFromViper(ctx, resolvedCWD)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to initialize extensions for slash commands")
+	}
+	if extensionRuntime == nil {
+		return nil, nil
+	}
+	defer func() { _ = extensionRuntime.Close() }()
+
+	return extensionRuntime.SlashCommands(), nil
+}
+
+func resolveSlashCommandCWD(cwd string) (string, error) {
+	defaultCWD, err := chat.ResolveConfiguredDefaultCWD("")
+	if err != nil {
+		return "", err
+	}
+
+	expandedCWD, err := chat.ExpandCWDInput(cwd, defaultCWD)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(expandedCWD) == "" {
+		expandedCWD = defaultCWD
+	}
+
+	return conversations.NormalizeCWD(expandedCWD)
+}
+
+func (m model) slashCommandCWD() string {
+	if strings.TrimSpace(m.requestedCWD) != "" {
+		return m.requestedCWD
+	}
+	return m.cwd
 }

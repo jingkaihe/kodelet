@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 )
 
 const (
@@ -44,14 +45,158 @@ func (m model) View() string {
 	}
 
 	transcript := m.viewport.View()
+	slashSuggestions := m.renderSlashCommandSuggestions()
 	picker := m.renderProfilePicker()
 	input := m.renderInputBox()
 	parts := []string{transcript}
+	if strings.TrimSpace(slashSuggestions) != "" {
+		parts = append(parts, slashSuggestions)
+	}
 	if strings.TrimSpace(picker) != "" {
 		parts = append(parts, picker)
 	}
 	parts = append(parts, input)
 	return leftMarginBlock(lipgloss.JoinVertical(lipgloss.Left, parts...), tuiLeftMargin)
+}
+
+func (m model) renderSlashCommandSuggestions() string {
+	if !m.slashCommandSuggestionsOpen() {
+		return ""
+	}
+
+	outerWidth := m.inputOuterWidth()
+	if outerWidth <= 2 {
+		return ""
+	}
+	contentWidth := outerWidth - 2
+	if contentWidth <= 0 {
+		return ""
+	}
+
+	suggestions := m.filteredSlashCommands()
+	if len(suggestions) == 0 {
+		return ""
+	}
+	visibleSuggestions := visibleSlashCommandSuggestions(suggestions, m.slashCommandIndex, m.maxSlashCommandSuggestions())
+	lines := make([]string, 0, len(visibleSuggestions)+1)
+	for _, suggestion := range visibleSuggestions {
+		line := renderSlashCommandSuggestionLine(suggestion.command, contentWidth)
+		if suggestion.index == m.slashCommandIndex {
+			line = renderPersistentStyle(slashCommandSelectedStyle, padVisible(line, contentWidth))
+		} else {
+			line = padVisible(line, contentWidth)
+		}
+		lines = append(lines, slashCommandBorderStyle.Render("│")+line+slashCommandBorderStyle.Render("│"))
+	}
+
+	if m.slashCommandErr != nil {
+		errorText := fitVisible("slash commands unavailable: "+m.slashCommandErr.Error(), max(1, contentWidth-2))
+		line := " " + renderPersistentStyle(slashCommandErrorStyle, errorText) + " "
+		lines = append(lines, slashCommandBorderStyle.Render("│")+padVisible(line, contentWidth)+slashCommandBorderStyle.Render("│"))
+	}
+
+	lines = append(lines, slashCommandBorderStyle.Render("╰"+strings.Repeat("─", contentWidth)+"╯"))
+	return strings.Join(lines, "\n")
+}
+
+type visibleSlashCommandSuggestion struct {
+	command slashcommands.Command
+	index   int
+}
+
+func visibleSlashCommandSuggestions(commands []slashcommands.Command, selectedIndex, limit int) []visibleSlashCommandSuggestion {
+	if limit <= 0 || len(commands) == 0 {
+		return nil
+	}
+	if len(commands) <= limit {
+		visible := make([]visibleSlashCommandSuggestion, 0, len(commands))
+		for i, command := range commands {
+			visible = append(visible, visibleSlashCommandSuggestion{command: command, index: i})
+		}
+		return visible
+	}
+
+	start := 0
+	if selectedIndex >= 0 {
+		start = selectedIndex - limit + 1
+		if start < 0 {
+			start = 0
+		}
+		if start+limit > len(commands) {
+			start = len(commands) - limit
+		}
+	}
+
+	visible := make([]visibleSlashCommandSuggestion, 0, limit)
+	for i := start; i < min(len(commands), start+limit); i++ {
+		visible = append(visible, visibleSlashCommandSuggestion{command: commands[i], index: i})
+	}
+	return visible
+}
+
+func renderSlashCommandSuggestionLine(command slashcommands.Command, width int) string {
+	if width <= 0 {
+		return ""
+	}
+
+	name := "/" + strings.TrimSpace(command.Name)
+	description := strings.TrimSpace(command.Description)
+	hint := strings.TrimSpace(command.Hint)
+	if hint == "" && strings.TrimSpace(command.Placeholder) != "" {
+		hint = strings.TrimSpace(command.Placeholder)
+	}
+
+	leftWidth := min(max(12, width/4), max(1, width/2))
+	if leftWidth >= width {
+		return renderPersistentStyle(slashCommandNameStyle, fitVisible(name, width))
+	}
+	rightWidth := width - leftWidth - 1
+	if rightWidth <= 0 {
+		return renderPersistentStyle(slashCommandNameStyle, fitVisible(name, width))
+	}
+
+	left := renderPersistentStyle(slashCommandNameStyle, padVisible(fitVisible(name, leftWidth), leftWidth))
+	rightText := description
+	if hint != "" {
+		if rightText != "" {
+			rightText += "  "
+		}
+		rightText += hint
+	}
+	if rightText == "" {
+		return left
+	}
+	rightText = fitVisible(rightText, rightWidth)
+
+	right := renderPersistentStyle(slashCommandDescriptionStyle, rightText)
+	if hint != "" && strings.Contains(rightText, hint) {
+		right = renderPersistentStyle(slashCommandDescriptionStyle, strings.TrimSuffix(rightText, hint)) + renderPersistentStyle(slashCommandHintStyle, hint)
+	}
+
+	return left + " " + right
+}
+
+func (m model) maxSlashCommandSuggestions() int {
+	availableHeight := m.height - inputHeight - 2 - m.profilePickerHeight() - 1
+	if availableHeight < 1 {
+		return 1
+	}
+	return min(8, availableHeight)
+}
+
+func (m model) slashCommandSuggestionsHeight() int {
+	if !m.slashCommandSuggestionsOpen() {
+		return 0
+	}
+	suggestionCount := min(len(m.filteredSlashCommands()), m.maxSlashCommandSuggestions())
+	if suggestionCount == 0 {
+		return 0
+	}
+	height := suggestionCount + 1
+	if m.slashCommandErr != nil {
+		height++
+	}
+	return height
 }
 
 func (m model) renderInputBox() string {

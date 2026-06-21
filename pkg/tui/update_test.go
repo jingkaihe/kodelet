@@ -2,12 +2,16 @@ package tui
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	xansi "github.com/charmbracelet/x/ansi"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
+	"github.com/jingkaihe/kodelet/pkg/slashcommands"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -239,6 +243,131 @@ func TestCtrlTProfilePickerSelectsProfileForNewConversation(t *testing.T) {
 	assert.Equal(t, "work", runner.req.Profile)
 }
 
+func TestSlashCommandKeyboardCompletion(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.resize()
+	m.slashCommands = []slashcommands.Command{
+		{Name: "goal", Description: "Set the active goal"},
+		{Name: "review", Description: "Review changes", Hint: "target"},
+	}
+	m.textarea.SetValue("/")
+	m.resize()
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(model)
+	require.Nil(t, cmd)
+	assert.Equal(t, 0, m.slashCommandIndex)
+
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(model)
+	require.Nil(t, cmd)
+	assert.Equal(t, 1, m.slashCommandIndex)
+
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	require.Nil(t, cmd)
+	assert.Equal(t, "/review ", m.textarea.Value())
+	assert.Equal(t, -1, m.slashCommandIndex)
+	assert.False(t, m.slashCommandSuggestionsOpen())
+}
+
+func TestSlashCommandTabSelectsFirstMatchAndPreservesIndent(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.resize()
+	m.slashCommands = []slashcommands.Command{
+		{Name: "goal", Description: "Set the active goal"},
+		{Name: "review", Description: "Review changes"},
+	}
+	m.textarea.SetValue("  /rev")
+	m.resize()
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(model)
+
+	require.Nil(t, cmd)
+	assert.Equal(t, "  /review ", m.textarea.Value())
+}
+
+func TestSlashCommandEscapeDismissesUntilDraftChanges(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.resize()
+	m.slashCommands = []slashcommands.Command{{Name: "goal", Description: "Set the active goal"}}
+	m.textarea.SetValue("/")
+	m.resize()
+	require.True(t, m.slashCommandSuggestionsOpen())
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(model)
+	require.Nil(t, cmd)
+	assert.False(t, m.slashCommandSuggestionsOpen())
+
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	m = updated.(model)
+	require.NotNil(t, cmd)
+	assert.Equal(t, "/g", m.textarea.Value())
+	assert.True(t, m.slashCommandSuggestionsOpen())
+}
+
+func TestSlashCommandLoaderUsesRequestedCWDRecipes(t *testing.T) {
+	workspace := t.TempDir()
+	writeTUIRecipe(t, workspace, "workspace-only", `---
+description: Workspace recipe
+---
+Body
+`)
+	withTUIViper(t, map[string]any{
+		"extensions.enabled":         false,
+		"extensions.local_dir":       filepath.Join(workspace, ".kodelet", "extensions"),
+		"extensions.global_dir":      filepath.Join(t.TempDir(), "global-extensions"),
+		"extensions.max_output_size": 102400,
+	})
+
+	commands, err := listSlashCommands(context.Background(), workspace)
+
+	require.NoError(t, err)
+	assert.Contains(t, slashCommandNames(commands), "goal")
+	assert.Contains(t, slashCommandNames(commands), "workspace-only")
+}
+
+func slashCommandNames(commands []slashcommands.Command) []string {
+	names := make([]string, 0, len(commands))
+	for _, command := range commands {
+		names = append(names, command.Name)
+	}
+	return names
+}
+
+func writeTUIRecipe(t *testing.T, workspace, name, content string) {
+	t.Helper()
+	recipeDir := filepath.Join(workspace, ".kodelet", "recipes")
+	require.NoError(t, os.MkdirAll(recipeDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(recipeDir, name+".md"), []byte(content), 0o644))
+}
+
+func withTUIViper(t *testing.T, values map[string]any) {
+	t.Helper()
+	snapshot := viper.AllSettings()
+	viper.Reset()
+	for key, value := range values {
+		viper.Set(key, value)
+	}
+	t.Cleanup(func() {
+		viper.Reset()
+		for key, value := range snapshot {
+			viper.Set(key, value)
+		}
+	})
+}
+
 func TestClickProfilePickerSelectsProfileForNewConversation(t *testing.T) {
 	m := newModel(context.Background(), Config{Profile: "default", ProfileOptions: []string{"default", "work", "prod"}})
 	t.Cleanup(m.cancel)
@@ -376,6 +505,26 @@ func TestSubmitStartsRunAndStreamsRunnerMessages(t *testing.T) {
 		Profile:        "work",
 		CWD:            "/tmp",
 	}, runner.req)
+}
+
+func TestSubmitGoalSlashCommandDisplaysObjectiveImmediately(t *testing.T) {
+	runner := &recordingRunner{conversationID: "conversation-done"}
+	m := newModel(context.Background(), Config{ConversationID: "conversation-123", Runner: runner})
+	t.Cleanup(m.cancel)
+	m.width = 100
+	m.height = 30
+	m.resize()
+	m.textarea.SetValue("/goal run ls -la")
+
+	cmd := m.submit()
+	require.NotNil(t, cmd)
+	require.Len(t, m.entries, 1)
+	assert.Equal(t, chatEntry{kind: entryUser, content: "Objective: run ls -la"}, m.entries[0])
+
+	assert.Nil(t, cmd())
+	_ = receiveRunMsg(t, m.runCh)
+	_ = receiveRunMsg(t, m.runCh)
+	assert.Equal(t, "/goal run ls -la", runner.req.Message)
 }
 
 func TestSubmitWithDefaultRunnerKeepsRelativeCWDAsRequestOnly(t *testing.T) {

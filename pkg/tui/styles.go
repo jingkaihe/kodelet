@@ -35,9 +35,19 @@ type tuiTheme struct {
 	ComposerFlow     string
 	ComposerText     string
 	ComposerCursor   string
+	SlashCommand     slashCommandTheme
 	ProfileColors    []string
 	ProfileSelected  string
 	Markdown         markdownTheme
+}
+
+type slashCommandTheme struct {
+	Border      string
+	Selected    string
+	Command     string
+	Description string
+	Hint        string
+	Error       string
 }
 
 type markdownTheme struct {
@@ -96,6 +106,14 @@ var themes = map[string]tuiTheme{
 		ComposerFlow:     "#89b4fa", // blue
 		ComposerText:     "#cdd6f4", // text
 		ComposerCursor:   "#cdd6f4", // text
+		SlashCommand: slashCommandTheme{
+			Border:      "#45475a", // surface1
+			Selected:    "#313244", // surface0
+			Command:     "#94e2d5", // teal (matches inline code)
+			Description: "#cdd6f4", // text
+			Hint:        "#9399b2", // overlay2
+			Error:       "#f38ba8", // red
+		},
 		ProfileColors: []string{
 			"#89b4fa", // blue
 			"#a6e3a1", // green
@@ -162,6 +180,14 @@ var themes = map[string]tuiTheme{
 		ComposerFlow:     "#afafff",
 		ComposerText:     "#d0d0d0",
 		ComposerCursor:   "#ffffaf",
+		SlashCommand: slashCommandTheme{
+			Border:      "#444444",
+			Selected:    "#303030",
+			Command:     "#d7afff",
+			Description: "#d0d0d0",
+			Hint:        "#8a8a8a",
+			Error:       "#ff5f5f",
+		},
 		ProfileColors: []string{
 			"#afafff",
 			"#afd7af",
@@ -227,13 +253,19 @@ var (
 	steeringStyle      lipgloss.Style
 	steeringErrorStyle lipgloss.Style
 
-	inputBorderStyle      lipgloss.Style
-	inputLabelStyle       lipgloss.Style
-	inputPlaceholderStyle lipgloss.Style
-	composerLabelStyle    lipgloss.Style
-	composerFlowStyle     lipgloss.Style
-	composerTextStyle     lipgloss.Style
-	composerCursorStyle   lipgloss.Style
+	inputBorderStyle             lipgloss.Style
+	inputLabelStyle              lipgloss.Style
+	inputPlaceholderStyle        lipgloss.Style
+	composerLabelStyle           lipgloss.Style
+	composerFlowStyle            lipgloss.Style
+	composerTextStyle            lipgloss.Style
+	composerCursorStyle          lipgloss.Style
+	slashCommandBorderStyle      lipgloss.Style
+	slashCommandSelectedStyle    lipgloss.Style
+	slashCommandNameStyle        lipgloss.Style
+	slashCommandDescriptionStyle lipgloss.Style
+	slashCommandHintStyle        lipgloss.Style
+	slashCommandErrorStyle       lipgloss.Style
 )
 
 func init() {
@@ -289,6 +321,12 @@ func applyTheme(theme tuiTheme) {
 	composerFlowStyle = lipgloss.NewStyle().Foreground(themeColor(theme.ComposerFlow))
 	composerTextStyle = lipgloss.NewStyle().Foreground(themeColor(theme.ComposerText))
 	composerCursorStyle = lipgloss.NewStyle().Foreground(themeColor(theme.ComposerCursor))
+	slashCommandBorderStyle = lipgloss.NewStyle().Foreground(themeColor(theme.SlashCommand.Border))
+	slashCommandSelectedStyle = lipgloss.NewStyle().Background(themeColor(theme.SlashCommand.Selected))
+	slashCommandNameStyle = lipgloss.NewStyle().Foreground(themeColor(theme.SlashCommand.Command))
+	slashCommandDescriptionStyle = lipgloss.NewStyle().Foreground(themeColor(theme.SlashCommand.Description))
+	slashCommandHintStyle = lipgloss.NewStyle().Foreground(themeColor(theme.SlashCommand.Hint))
+	slashCommandErrorStyle = lipgloss.NewStyle().Foreground(themeColor(theme.SlashCommand.Error))
 }
 
 func themeColor(color string) lipgloss.Color {
