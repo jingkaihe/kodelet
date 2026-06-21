@@ -71,7 +71,7 @@ func TestPRFragmentMetadata(t *testing.T) {
 
 	// Test metadata
 	assert.Equal(t, "GitHub Pull Request Generator", fragment.Metadata.Name, "Expected fragment name to be 'GitHub Pull Request Generator'")
-	assert.Contains(t, fragment.Metadata.Description, "pull requests", "Expected description to mention pull requests")
+	assert.Contains(t, fragment.Metadata.Description, "pull request", "Expected description to mention pull request")
 	assert.Contains(t, fragment.Path, "builtin:", "Expected path to indicate built-in fragment")
 }
 

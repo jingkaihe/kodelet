@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/jingkaihe/kodelet/pkg/steer"
@@ -106,7 +107,7 @@ func hasShiftModifier(value string) bool {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if stringer, ok := msg.(fmt.Stringer); ok && isTextareaNewlineKey(stringer.String()) {
+	if stringer, ok := msg.(fmt.Stringer); ok && m.activeUIPrompt == nil && isTextareaNewlineKey(stringer.String()) {
 		m.insertTextareaNewline()
 		return m, nil
 	}
@@ -119,6 +120,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.resize()
 		m.refreshViewport(true)
+
+	case uiPromptRequestMsg:
+		if msg.runID != m.activeRunID {
+			return m, waitForMsg(m.runCh)
+		}
+		cmd := m.openUIPrompt(msg.prompt)
+		return m, tea.Batch(waitForMsg(m.runCh), cmd)
+
+	case uiNotificationMsg:
+		if msg.runID != m.activeRunID {
+			return m, waitForMsg(m.runCh)
+		}
+		cmd := m.addUINotification(msg.notification)
+		return m, tea.Batch(waitForMsg(m.runCh), cmd)
+
+	case uiNotificationExpiredMsg:
+		m.removeUINotification(msg.id)
+		return m, nil
 
 	case initialHistoryMsg:
 		if msg.err != nil {
@@ -174,6 +193,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		key := msg.String()
+		if m.activeUIPrompt != nil {
+			cmd := m.updateUIPromptKey(msg)
+			return m, cmd
+		}
 		switch key {
 		case "ctrl+c", "ctrl+d":
 			if m.running {
@@ -265,6 +288,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseMsg:
+		if m.activeUIPrompt != nil {
+			return m, nil
+		}
 		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
 			if optionIndex, ok := m.profilePickerOptionAt(msg.X, msg.Y); ok {
 				m.selectProfilePickerOption(optionIndex)
@@ -297,6 +323,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.runID != m.activeRunID {
 			return m, waitForMsg(m.runCh)
 		}
+		if cmd, handled := m.handleUIChatEvent(msg.event); handled {
+			return m, tea.Batch(waitForMsg(m.runCh), cmd)
+		}
 		m.applyChatEvent(msg.event)
 		if shouldDebounceChatEvent(msg.event) {
 			return m, tea.Batch(waitForMsg(m.runCh), m.queueTranscriptRefresh(m.autoFollow))
@@ -310,6 +339,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.conversationID != "" {
 			m.conversationID = msg.conversationID
+		}
+		if m.activeUIPrompt != nil {
+			m.resolveUIPrompt(extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
 		}
 		m.finishActiveBlocks()
 		m.running = false
@@ -344,6 +376,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	}
 
+	if m.activeUIPrompt != nil {
+		if m.activeUIPrompt.mode == uiPromptInput {
+			var cmd tea.Cmd
+			m.activeUIPrompt.input, cmd = m.activeUIPrompt.input.Update(msg)
+			m.refreshViewport(false)
+			cmds = append(cmds, cmd)
+		}
+		return m, tea.Batch(cmds...)
+	}
+
 	previousTextareaValue := m.textarea.Value()
 	previousSlashCommandHeight := m.slashCommandSuggestionsHeight()
 	var cmd tea.Cmd
@@ -367,6 +409,60 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+func (m *model) updateUIPromptKey(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "esc", "ctrl+c", "ctrl+d":
+		m.dismissUIPrompt()
+		return nil
+	case "enter":
+		m.submitUIPrompt()
+		return nil
+	case "up", "shift+tab", "left":
+		if m.moveUISelect(-1) {
+			m.refreshViewport(false)
+			return nil
+		}
+	case "down", "tab", "right":
+		if m.moveUISelect(1) {
+			m.refreshViewport(false)
+			return nil
+		}
+	case "y", "Y":
+		if m.activeUIPrompt.mode == uiPromptConfirm {
+			m.submitUIPrompt()
+			return nil
+		}
+	case "n", "N":
+		if m.activeUIPrompt.mode == uiPromptConfirm {
+			m.dismissUIPrompt()
+			return nil
+		}
+	}
+
+	if m.activeUIPrompt.mode != uiPromptInput {
+		return nil
+	}
+	var cmd tea.Cmd
+	m.activeUIPrompt.input, cmd = m.activeUIPrompt.input.Update(msg)
+	m.refreshViewport(false)
+	return cmd
+}
+
+func (m *model) handleUIChatEvent(event chat.ChatEvent) (tea.Cmd, bool) {
+	if prompt, ok := promptFromChatEvent(event); ok {
+		return m.openUIPrompt(prompt), true
+	}
+	switch event.Kind {
+	case "ui-notify", "ui-notification":
+		if event.UINotify == nil {
+			return nil, false
+		}
+		return m.addUINotification(uiNotification{title: event.UINotify.Title, message: event.UINotify.Message}), true
+	default:
+		return nil, false
+	}
 }
 
 func shouldUpdateViewport(msg tea.Msg) bool {
@@ -457,6 +553,9 @@ func (m *model) resize() {
 	m.viewport.Height = viewportHeight
 	m.textarea.SetWidth(max(1, m.inputContentWidth()))
 	m.textarea.SetHeight(inputHeight)
+	if m.activeUIPrompt != nil && m.activeUIPrompt.mode == uiPromptInput {
+		m.activeUIPrompt.input.Width = m.uiDialogInputWidth()
+	}
 }
 
 func (m *model) submit() tea.Cmd {
@@ -485,6 +584,8 @@ func (m *model) submit() tea.Cmd {
 	runID := m.activeRunID
 	runCh := m.runCh
 	runner := m.runner
+	uiBroker := newTUIUIBroker(runCh, runID)
+	runCtx = extensions.ContextWithUIInputBroker(runCtx, uiBroker)
 	req := chat.ChatRequest{
 		Message:        message,
 		ConversationID: m.conversationID,
@@ -494,6 +595,7 @@ func (m *model) submit() tea.Cmd {
 
 	return func() tea.Msg {
 		go func() {
+			defer uiBroker.close()
 			conversationID, err := runner.Run(runCtx, req, tuiSink{ch: runCh, runID: runID})
 			runCh <- chatDoneMsg{runID: runID, conversationID: strings.TrimSpace(conversationID), err: err}
 		}()
@@ -693,6 +795,9 @@ func (m *model) stopRun() {
 
 func (m *model) cancelActiveRun() {
 	m.stopRun()
+	if m.activeUIPrompt != nil {
+		m.resolveUIPrompt(extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
+	}
 	m.finishActiveBlocks()
 	m.status = "cancelled"
 	m.running = false

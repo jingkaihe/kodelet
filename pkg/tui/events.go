@@ -124,9 +124,6 @@ func (m *model) applyChatEvent(event chat.ChatEvent) {
 		if event.Usage != nil {
 			m.usage = *event.Usage
 		}
-	case "ui-input", "ui-confirm", "ui-select", "ui-notify":
-		idx := m.ensureAssistantEntry()
-		appendTextBlock(&m.entries[idx], "Extension requested interactive input; TUI prompt handling is not implemented yet.")
 	case "error":
 		idx := m.ensureAssistantEntry()
 		appendTextBlock(&m.entries[idx], event.Error)

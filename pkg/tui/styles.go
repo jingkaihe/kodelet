@@ -38,6 +38,7 @@ type tuiTheme struct {
 	SlashCommand     slashCommandTheme
 	ProfileColors    []string
 	ProfileSelected  string
+	UI               uiTheme
 	Markdown         markdownTheme
 }
 
@@ -47,6 +48,19 @@ type slashCommandTheme struct {
 	Description string
 	Hint        string
 	Error       string
+}
+
+type uiTheme struct {
+	DialogBorder       string
+	DialogTitle        string
+	DialogBody         string
+	DialogMuted        string
+	DialogSelected     string
+	DialogButton       string
+	DialogCancel       string
+	NotificationBorder string
+	NotificationTitle  string
+	NotificationBody   string
 }
 
 type markdownTheme struct {
@@ -123,6 +137,18 @@ var themes = map[string]tuiTheme{
 			"#b4befe", // lavender
 		},
 		ProfileSelected: "#313244", // surface0
+		UI: uiTheme{
+			DialogBorder:       "#b4befe", // lavender
+			DialogTitle:        "#cba6f7", // mauve
+			DialogBody:         "#cdd6f4", // text
+			DialogMuted:        "#9399b2", // overlay2
+			DialogSelected:     "#313244", // surface0
+			DialogButton:       "#a6e3a1", // green
+			DialogCancel:       "#f38ba8", // red
+			NotificationBorder: "#89b4fa", // blue
+			NotificationTitle:  "#94e2d5", // teal
+			NotificationBody:   "#cdd6f4", // text
+		},
 		Markdown: markdownTheme{
 			BlockQuote:            "#7f849c", // overlay1
 			Heading:               "#b4befe", // lavender
@@ -196,6 +222,18 @@ var themes = map[string]tuiTheme{
 			"#d0d0d0",
 		},
 		ProfileSelected: "#444444",
+		UI: uiTheme{
+			DialogBorder:       "#afafff",
+			DialogTitle:        "#d7afff",
+			DialogBody:         "#d0d0d0",
+			DialogMuted:        "#808080",
+			DialogSelected:     "#303030",
+			DialogButton:       "#87d787",
+			DialogCancel:       "#ff5f5f",
+			NotificationBorder: "#afd7af",
+			NotificationTitle:  "#ffffaf",
+			NotificationBody:   "#d0d0d0",
+		},
 		Markdown: markdownTheme{
 			BlockQuote:            "#8a8a8a",
 			Heading:               "#afafff",
@@ -261,6 +299,16 @@ var (
 	slashCommandNameStyle        lipgloss.Style
 	slashCommandDescriptionStyle lipgloss.Style
 	slashCommandErrorStyle       lipgloss.Style
+	uiDialogBorderStyle          lipgloss.Style
+	uiDialogTitleStyle           lipgloss.Style
+	uiDialogBodyStyle            lipgloss.Style
+	uiDialogMutedStyle           lipgloss.Style
+	uiDialogSelectedStyle        lipgloss.Style
+	uiDialogButtonStyle          lipgloss.Style
+	uiDialogCancelStyle          lipgloss.Style
+	uiNotificationBorderStyle    lipgloss.Style
+	uiNotificationTitleStyle     lipgloss.Style
+	uiNotificationBodyStyle      lipgloss.Style
 )
 
 func init() {
@@ -320,6 +368,16 @@ func applyTheme(theme tuiTheme) {
 	slashCommandNameStyle = lipgloss.NewStyle().Foreground(themeColor(theme.SlashCommand.Command))
 	slashCommandDescriptionStyle = lipgloss.NewStyle().Foreground(themeColor(theme.SlashCommand.Description))
 	slashCommandErrorStyle = lipgloss.NewStyle().Foreground(themeColor(theme.SlashCommand.Error))
+	uiDialogBorderStyle = lipgloss.NewStyle().Foreground(themeColor(theme.UI.DialogBorder))
+	uiDialogTitleStyle = lipgloss.NewStyle().Foreground(themeColor(theme.UI.DialogTitle)).Bold(true)
+	uiDialogBodyStyle = lipgloss.NewStyle().Foreground(themeColor(theme.UI.DialogBody))
+	uiDialogMutedStyle = lipgloss.NewStyle().Foreground(themeColor(theme.UI.DialogMuted))
+	uiDialogSelectedStyle = lipgloss.NewStyle().Foreground(themeColor(theme.UI.DialogBody)).Background(themeColor(theme.UI.DialogSelected))
+	uiDialogButtonStyle = lipgloss.NewStyle().Foreground(themeColor(theme.UI.DialogButton))
+	uiDialogCancelStyle = lipgloss.NewStyle().Foreground(themeColor(theme.UI.DialogCancel))
+	uiNotificationBorderStyle = lipgloss.NewStyle().Foreground(themeColor(theme.UI.NotificationBorder))
+	uiNotificationTitleStyle = lipgloss.NewStyle().Foreground(themeColor(theme.UI.NotificationTitle)).Bold(true)
+	uiNotificationBodyStyle = lipgloss.NewStyle().Foreground(themeColor(theme.UI.NotificationBody))
 }
 
 func themeColor(color string) lipgloss.Color {

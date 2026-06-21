@@ -33,7 +33,6 @@ func TestApplyChatEventUpdatesConversationAndBlocks(t *testing.T) {
 			Metadata: &tooltypes.BashMetadata{},
 		}},
 		{Kind: "usage", Usage: &usage},
-		{Kind: "ui-input"},
 		{Kind: "error", Error: "model error"},
 	} {
 		m.applyChatEvent(event)
@@ -48,7 +47,6 @@ func TestApplyChatEventUpdatesConversationAndBlocks(t *testing.T) {
 	assert.Contains(t, joinThoughts(m.entries[0].blocks[1].thoughts), "think")
 	assert.True(t, m.entries[0].blocks[2].tools[0].failed)
 	assert.Contains(t, m.entries[0].blocks[2].tools[0].result, "boom")
-	assert.Contains(t, m.entries[0].blocks[3].text, "Extension requested interactive input")
 	assert.Contains(t, m.entries[0].blocks[3].text, "model error")
 }
 

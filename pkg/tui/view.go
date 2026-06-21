@@ -59,7 +59,64 @@ func (m model) View() string {
 		parts = append(parts, picker)
 	}
 	parts = append(parts, input)
-	return leftMarginBlock(lipgloss.JoinVertical(lipgloss.Left, parts...), tuiLeftMargin)
+	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
+	content = m.renderUIOverlays(content)
+	return leftMarginBlock(content, tuiLeftMargin)
+}
+
+func (m model) renderUIOverlays(content string) string {
+	lines := strings.Split(content, "\n")
+	for len(lines) < m.height {
+		lines = append(lines, "")
+	}
+	for i := range lines {
+		lines[i] = padVisible(lines[i], m.contentWidth())
+	}
+
+	if len(m.uiNotifications) > 0 {
+		lines = m.overlayUINotifications(lines)
+	}
+	if m.activeUIPrompt != nil {
+		lines = m.overlayUIDialog(lines)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m model) overlayUIDialog(lines []string) []string {
+	dialog := m.renderUIDialog()
+	if strings.TrimSpace(dialog) == "" {
+		return lines
+	}
+	dialogLines := strings.Split(dialog, "\n")
+	width := m.contentWidth()
+	dialogHeight := len(dialogLines)
+	startY := max(0, (m.height-dialogHeight)/2)
+	for i, line := range dialogLines {
+		row := startY + i
+		if row < 0 || row >= len(lines) {
+			continue
+		}
+		startX := max(0, (width-lipgloss.Width(line))/2)
+		lines[row] = padVisible(strings.Repeat(" ", startX)+line, width)
+	}
+	return lines
+}
+
+func (m model) overlayUINotifications(lines []string) []string {
+	notifications := m.renderUINotifications()
+	if strings.TrimSpace(notifications) == "" {
+		return lines
+	}
+	notificationLines := strings.Split(notifications, "\n")
+	width := m.contentWidth()
+	for i, line := range notificationLines {
+		if i >= len(lines) {
+			break
+		}
+		startX := max(0, width-lipgloss.Width(line))
+		lines[i] = padVisible(strings.Repeat(" ", startX)+line, width)
+	}
+	return lines
 }
 
 func (m model) renderSlashCommandSuggestions() string {
@@ -99,6 +156,193 @@ func (m model) renderSlashCommandSuggestions() string {
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+func (m model) renderUIDialog() string {
+	if m.activeUIPrompt == nil {
+		return ""
+	}
+	prompt := *m.activeUIPrompt
+	width := m.uiDialogWidth()
+	if width <= 4 {
+		return ""
+	}
+	contentWidth := max(1, width-4)
+
+	lines := []string{
+		renderPersistentStyle(uiDialogTitleStyle, fitVisible(uiPromptTitle(prompt.mode, prompt.title), contentWidth)),
+	}
+	for _, text := range []string{prompt.message, prompt.helpText} {
+		text = strings.TrimSpace(text)
+		if text == "" {
+			continue
+		}
+		for _, line := range strings.Split(wrapText(text, contentWidth), "\n") {
+			lines = append(lines, renderPersistentStyle(uiDialogBodyStyle, fitVisible(line, contentWidth)))
+		}
+	}
+
+	switch prompt.mode {
+	case uiPromptInput:
+		if len(lines) > 1 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, m.renderUIInputLine(prompt, contentWidth))
+		if prompt.required && strings.TrimSpace(prompt.input.Value()) == "" {
+			lines = append(lines, renderPersistentStyle(uiDialogMutedStyle, "Required"))
+		}
+	case uiPromptConfirm:
+		if len(lines) > 1 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, renderPersistentStyle(uiDialogMutedStyle, "Press Enter/Y to confirm or Esc/N to cancel."))
+	case uiPromptSelect:
+		if len(lines) > 1 {
+			lines = append(lines, "")
+		}
+		if len(prompt.options) == 0 {
+			lines = append(lines, renderPersistentStyle(uiDialogMutedStyle, "No options available."))
+		} else {
+			lines = append(lines, m.renderUISelectLines(prompt, contentWidth)...)
+		}
+	}
+
+	lines = append(lines, "", m.renderUIDialogActions(prompt, contentWidth))
+
+	top := uiDialogBorderStyle.Render("╭" + strings.Repeat("─", width-2) + "╮")
+	bottom := uiDialogBorderStyle.Render("╰" + strings.Repeat("─", width-2) + "╯")
+	boxLines := []string{top}
+	for _, line := range lines {
+		boxLines = append(boxLines, uiDialogBorderStyle.Render("│")+" "+padVisible(line, contentWidth)+" "+uiDialogBorderStyle.Render("│"))
+	}
+	boxLines = append(boxLines, bottom)
+	return strings.Join(boxLines, "\n")
+}
+
+func (m model) renderUIInputLine(prompt uiPromptState, width int) string {
+	input := prompt.input.View()
+	if lipgloss.Width(input) > width {
+		input = fitVisible(input, width)
+	}
+	return renderPersistentStyle(uiDialogBodyStyle, padVisible(input, width))
+}
+
+func (m model) renderUISelectLines(prompt uiPromptState, width int) []string {
+	maxRows := m.maxUISelectRows()
+	start := visibleUISelectStart(len(prompt.options), prompt.selectIndex, maxRows)
+	end := min(len(prompt.options), start+maxRows)
+	lines := make([]string, 0, end-start+2)
+	if start > 0 {
+		lines = append(lines, renderPersistentStyle(uiDialogMutedStyle, "↑ more"))
+	}
+	for index := start; index < end; index++ {
+		prefix := "  "
+		if index == prompt.selectIndex {
+			prefix = "› "
+		}
+		line := fitVisible(prefix+prompt.options[index], width)
+		if index == prompt.selectIndex {
+			line = renderPersistentStyle(uiDialogSelectedStyle, padVisible(line, width))
+		} else {
+			line = renderPersistentStyle(uiDialogBodyStyle, line)
+		}
+		lines = append(lines, line)
+	}
+	if end < len(prompt.options) {
+		lines = append(lines, renderPersistentStyle(uiDialogMutedStyle, "↓ more"))
+	}
+	return lines
+}
+
+func visibleUISelectStart(count, selected, limit int) int {
+	if count <= limit || limit <= 0 {
+		return 0
+	}
+	if selected < 0 {
+		selected = 0
+	}
+	start := selected - limit + 1
+	if start < 0 {
+		return 0
+	}
+	if start+limit > count {
+		return count - limit
+	}
+	return start
+}
+
+func (m model) renderUIDialogActions(prompt uiPromptState, width int) string {
+	cancel := "[Esc] " + uiPromptCancelLabel(prompt)
+	submit := "[Enter] " + uiPromptSubmitLabel(prompt)
+	if prompt.mode == uiPromptConfirm {
+		submit = "[Y] " + uiPromptSubmitLabel(prompt)
+		cancel = "[N] " + uiPromptCancelLabel(prompt)
+	}
+	line := renderPersistentStyle(uiDialogCancelStyle, cancel) + "  " + renderPersistentStyle(uiDialogButtonStyle, submit)
+	if lipgloss.Width(line) > width {
+		return fitVisible(cancel+"  "+submit, width)
+	}
+	return line
+}
+
+func (m model) renderUINotifications() string {
+	if len(m.uiNotifications) == 0 {
+		return ""
+	}
+	boxes := make([]string, 0, len(m.uiNotifications))
+	for _, notification := range m.uiNotifications {
+		box := m.renderUINotification(notification)
+		if strings.TrimSpace(box) != "" {
+			boxes = append(boxes, box)
+		}
+	}
+	return strings.Join(boxes, "\n")
+}
+
+func (m model) renderUINotification(notification uiNotification) string {
+	width := m.uiNotificationWidth()
+	if width <= 4 {
+		return ""
+	}
+	contentWidth := max(1, width-4)
+	lines := []string{}
+	if title := strings.TrimSpace(notification.title); title != "" {
+		lines = append(lines, renderPersistentStyle(uiNotificationTitleStyle, fitVisible(title, contentWidth)))
+	}
+	if message := strings.TrimSpace(notification.message); message != "" {
+		for _, line := range strings.Split(wrapText(message, contentWidth), "\n") {
+			lines = append(lines, renderPersistentStyle(uiNotificationBodyStyle, fitVisible(line, contentWidth)))
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+
+	top := uiNotificationBorderStyle.Render("╭" + strings.Repeat("─", width-2) + "╮")
+	bottom := uiNotificationBorderStyle.Render("╰" + strings.Repeat("─", width-2) + "╯")
+	boxLines := []string{top}
+	for _, line := range lines {
+		boxLines = append(boxLines, uiNotificationBorderStyle.Render("│")+" "+padVisible(line, contentWidth)+" "+uiNotificationBorderStyle.Render("│"))
+	}
+	boxLines = append(boxLines, bottom)
+	return strings.Join(boxLines, "\n")
+}
+
+func (m model) uiDialogWidth() int {
+	return max(4, min(m.contentWidth(), 72))
+}
+
+func (m model) uiDialogInputWidth() int {
+	return max(1, m.uiDialogWidth()-4)
+}
+
+func (m model) maxUISelectRows() int {
+	available := max(1, m.height-10)
+	return min(8, available)
+}
+
+func (m model) uiNotificationWidth() int {
+	return max(4, min(m.contentWidth(), 42))
 }
 
 type visibleSlashCommandSuggestion struct {

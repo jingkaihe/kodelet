@@ -145,6 +145,10 @@ type model struct {
 	steerError     string
 	status         string
 	err            error
+
+	activeUIPrompt       *uiPromptState
+	uiNotifications      []uiNotification
+	nextUINotificationID int
 }
 
 type chatEventMsg struct {
