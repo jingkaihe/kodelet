@@ -3,14 +3,92 @@ package tui
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	convdb "github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/migrations"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestLoadInitialHistorySkipsBlankConversationID(t *testing.T) {
+	msg, ok := loadInitialHistory(context.Background(), " \t\n ")().(initialHistoryMsg)
+
+	require.True(t, ok)
+	assert.False(t, msg.loaded)
+	assert.Empty(t, msg.entries)
+	assert.NoError(t, msg.err)
+}
+
+func TestLoadInitialHistoryLoadsStoredConversation(t *testing.T) {
+	ctx := context.Background()
+	basePath := setupTUIConversationStore(ctx, t)
+
+	store, err := conversations.GetConversationStore(ctx)
+	require.NoError(t, err)
+
+	record := convtypes.NewConversationRecord("conversation-history")
+	record.Provider = "anthropic"
+	record.CWD = t.TempDir()
+	record.Metadata = map[string]any{"profile": " stored "}
+	record.Usage = llmtypes.Usage{CurrentContextWindow: 42, MaxContextWindow: 100}
+	record.RawMessages = []byte(`[
+		{"role":"user","content":[{"type":"text","text":"old prompt"}]},
+		{"role":"assistant","content":[{"type":"text","text":"old answer"}]}
+	]`)
+	require.NoError(t, store.Save(ctx, record))
+	require.NoError(t, store.Close())
+
+	msg, ok := loadInitialHistory(ctx, record.ID)().(initialHistoryMsg)
+
+	require.True(t, ok)
+	require.NoError(t, msg.err)
+	assert.True(t, msg.loaded)
+	assert.Equal(t, record.CWD, msg.cwd)
+	assert.Equal(t, "stored", msg.profile)
+	assert.Equal(t, 42, msg.usage.CurrentContextWindow)
+	require.Len(t, msg.entries, 2)
+	assert.Equal(t, "old prompt", msg.entries[0].content)
+	assert.Equal(t, "old answer", msg.entries[1].blocks[0].text)
+	assert.FileExists(t, filepath.Join(basePath, "storage.db"))
+}
+
+func TestLoadInitialHistoryReportsLoadAndParseErrors(t *testing.T) {
+	ctx := context.Background()
+	setupTUIConversationStore(ctx, t)
+
+	missing, ok := loadInitialHistory(ctx, "missing-conversation")().(initialHistoryMsg)
+	require.True(t, ok)
+	assert.ErrorContains(t, missing.err, "failed to load conversation")
+
+	store, err := conversations.GetConversationStore(ctx)
+	require.NoError(t, err)
+	record := convtypes.NewConversationRecord("bad-provider")
+	record.Provider = "unsupported"
+	record.RawMessages = []byte(`[]`)
+	require.NoError(t, store.Save(ctx, record))
+	require.NoError(t, store.Close())
+
+	parsed, ok := loadInitialHistory(ctx, record.ID)().(initialHistoryMsg)
+	require.True(t, ok)
+	assert.ErrorContains(t, parsed.err, "failed to parse conversation")
+}
+
+func setupTUIConversationStore(ctx context.Context, t *testing.T) string {
+	t.Helper()
+	basePath := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", basePath)
+	database, err := convdb.Open(ctx, filepath.Join(basePath, "storage.db"))
+	require.NoError(t, err)
+	require.NoError(t, convdb.NewMigrationRunner(database).Run(ctx, migrations.All()))
+	require.NoError(t, database.Close())
+	return basePath
+}
 
 func TestInitialHistoryErrorIsVisibleInTranscript(t *testing.T) {
 	m := newModel(context.Background(), Config{ConversationID: "missing-conversation"})

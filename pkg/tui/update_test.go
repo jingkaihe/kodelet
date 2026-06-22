@@ -2,8 +2,10 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -87,6 +89,24 @@ func TestCancelActiveRunFinishesActiveBlocks(t *testing.T) {
 	assert.Contains(t, content, "Had 1 Thought")
 	assert.Contains(t, content, "Ran 1 command")
 	assert.NotContains(t, content, "Thinking")
+}
+
+func TestWaitForMsgAndInitCommands(t *testing.T) {
+	m := newModel(context.Background(), Config{CWD: t.TempDir()})
+	t.Cleanup(m.cancel)
+
+	cmd := waitForMsg(m.runCh)
+	m.runCh <- chatEventMsg{runID: 1, event: chat.ChatEvent{Kind: "text", Delta: "hello"}}
+	_, ok := cmd().(chatEventMsg)
+	assert.True(t, ok)
+
+	close(m.runCh)
+	assert.Nil(t, waitForMsg(m.runCh)())
+
+	initMsg := m.Init()()
+	batch, ok := initMsg.(tea.BatchMsg)
+	require.True(t, ok)
+	assert.Len(t, batch, 5)
 }
 
 func TestUpdateIgnoresStaleRunEvents(t *testing.T) {
@@ -276,6 +296,57 @@ func TestOpenComposerInEditorRequiresEditorAndIgnoresRunning(t *testing.T) {
 	assert.Contains(t, m.steerError, "while Kodelet is running")
 }
 
+func TestOpenComposerInEditorCreatesDraftAndClearsTransientUI(t *testing.T) {
+	m := newModel(context.Background(), Config{ProfileOptions: []string{"default", "work"}})
+	t.Cleanup(m.cancel)
+	beforeDrafts, err := filepath.Glob(filepath.Join(os.TempDir(), "kodelet-composer-*.md"))
+	require.NoError(t, err)
+	beforeDraftSet := map[string]struct{}{}
+	for _, path := range beforeDrafts {
+		beforeDraftSet[path] = struct{}{}
+	}
+	t.Cleanup(func() {
+		afterDrafts, err := filepath.Glob(filepath.Join(os.TempDir(), "kodelet-composer-*.md"))
+		if err != nil {
+			return
+		}
+		for _, path := range afterDrafts {
+			if _, ok := beforeDraftSet[path]; !ok {
+				_ = os.Remove(path)
+			}
+		}
+	})
+	m.width = 80
+	m.height = 24
+	m.resize()
+	m.textarea.SetValue("draft body")
+	m.profilePickerOpen = true
+	m.shortcutsOpen = true
+	m.slashDismissedDraft = "dismissed"
+	t.Setenv("EDITOR", "true")
+	t.Setenv("VISUAL", "")
+
+	cmd := m.openComposerInEditor()
+
+	require.NotNil(t, cmd)
+	assert.False(t, m.profilePickerOpen)
+	assert.False(t, m.shortcutsOpen)
+	assert.Empty(t, m.steerError)
+	assert.Equal(t, "editing", m.status)
+	msg := cmd()
+	assert.NotNil(t, msg)
+}
+
+func TestWriteComposerEditorFileRoundTripsDraft(t *testing.T) {
+	path, err := writeComposerEditorFile("draft body")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.Remove(path) })
+
+	content, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, "draft body", string(content))
+}
+
 func TestEditorShortcutUsesCtrlGAndCtrlEPreservesLineEnd(t *testing.T) {
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)
@@ -308,6 +379,34 @@ func TestEditorExecCommandParsesEditorArgs(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "vim", filepath.Base(cmd.Path))
 	assert.Equal(t, []string{"vim", "-n", "/tmp/kodelet-draft.md"}, cmd.Args)
+
+	_, err = editorExecCommand("  ", "/tmp/kodelet-draft.md")
+	assert.ErrorContains(t, err, "empty editor command")
+	_, err = editorExecCommand("'unterminated", "/tmp/kodelet-draft.md")
+	assert.Error(t, err)
+}
+
+func TestApplyEditorResultHandlesFailureAndReadError(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.resize()
+
+	failedPath := filepath.Join(t.TempDir(), "failed.md")
+	require.NoError(t, os.WriteFile(failedPath, []byte("ignored"), 0o644))
+	cmd := m.applyEditorResult(editorFinishedMsg{path: failedPath, err: errors.New("boom")})
+	assert.Nil(t, cmd)
+	assert.Equal(t, "ready", m.status)
+	assert.Contains(t, m.steerError, "Editor failed: boom")
+	_, err := os.Stat(failedPath)
+	assert.True(t, os.IsNotExist(err))
+
+	missingPath := filepath.Join(t.TempDir(), "missing.md")
+	cmd = m.applyEditorResult(editorFinishedMsg{path: missingPath})
+	assert.Nil(t, cmd)
+	assert.Equal(t, "ready", m.status)
+	assert.Contains(t, m.steerError, "Failed to read edited draft")
 }
 
 func TestCtrlTProfilePickerSelectsProfileForNewConversation(t *testing.T) {
@@ -439,6 +538,55 @@ Body
 	assert.Contains(t, slashCommandNames(commands), "workspace-only")
 }
 
+func TestSlashCommandLoadCommandsAndCWDHelpers(t *testing.T) {
+	workspace := t.TempDir()
+	withTUIViper(t, map[string]any{
+		"extensions.enabled":         false,
+		"extensions.local_dir":       filepath.Join(workspace, ".kodelet", "extensions"),
+		"extensions.global_dir":      filepath.Join(t.TempDir(), "global-extensions"),
+		"extensions.max_output_size": 102400,
+	})
+
+	baseMsg, ok := loadSlashCommands(context.Background(), "  "+workspace+"  ")().(slashCommandsMsg)
+	require.True(t, ok)
+	assert.Equal(t, workspace, baseMsg.cwd)
+	assert.NoError(t, baseMsg.err)
+	assert.Contains(t, slashCommandNames(baseMsg.commands), "goal")
+	assert.False(t, baseMsg.extensionsOnly)
+
+	extensionMsg, ok := loadExtensionSlashCommands(context.Background(), workspace)().(slashCommandsMsg)
+	require.True(t, ok)
+	assert.Equal(t, workspace, extensionMsg.cwd)
+	assert.True(t, extensionMsg.extensionsOnly)
+	assert.NoError(t, extensionMsg.err)
+	assert.Empty(t, extensionMsg.commands)
+
+	m := newModel(context.Background(), Config{CWD: workspace})
+	t.Cleanup(m.cancel)
+	assert.Equal(t, workspace, m.slashCommandCWD())
+	m.requestedCWD = "./requested"
+	assert.Equal(t, "./requested", m.slashCommandCWD())
+}
+
+func TestSlashCommandLoaderErrorsForInvalidCWD(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+
+	baseCommands, err := listBaseSlashCommands(context.Background(), missing)
+	assert.ErrorContains(t, err, "cwd directory does not exist")
+	assert.Contains(t, slashCommandNames(baseCommands), "goal")
+
+	extensionCommands, err := listExtensionSlashCommands(context.Background(), missing)
+	assert.ErrorContains(t, err, "cwd directory does not exist")
+	assert.Nil(t, extensionCommands)
+
+	combined, err := listSlashCommands(context.Background(), missing)
+	assert.ErrorContains(t, err, "cwd directory does not exist")
+	assert.Contains(t, slashCommandNames(combined), "goal")
+
+	_, err = resolveSlashCommandCWD(missing)
+	assert.ErrorContains(t, err, "cwd directory does not exist")
+}
+
 func slashCommandNames(commands []slashcommands.Command) []string {
 	names := make([]string, 0, len(commands))
 	for _, command := range commands {
@@ -529,6 +677,27 @@ func TestProfilePickerLockedForExistingConversation(t *testing.T) {
 	assert.Equal(t, "work", m.profile)
 }
 
+func TestProfilePickerToggleCloseAndWrap(t *testing.T) {
+	m := newModel(context.Background(), Config{Profile: "work", ProfileOptions: []string{"default", "work", "prod"}})
+	t.Cleanup(m.cancel)
+
+	m.toggleProfilePickerFromKeyboard()
+	require.True(t, m.profilePickerOpen)
+	m.moveProfilePicker(-1)
+	assert.Equal(t, 0, m.profilePickerIndex)
+	m.moveProfilePicker(-1)
+	assert.Equal(t, 2, m.profilePickerIndex)
+	m.toggleProfilePickerFromKeyboard()
+	assert.False(t, m.profilePickerOpen)
+	assert.Equal(t, "prod", m.profile)
+
+	m.toggleProfilePickerFromClick()
+	require.True(t, m.profilePickerOpen)
+	m.closeProfilePicker()
+	assert.False(t, m.profilePickerOpen)
+	assert.Equal(t, m.profileIndex, m.profilePickerIndex)
+}
+
 func TestTypingInComposerDoesNotMoveViewport(t *testing.T) {
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)
@@ -565,6 +734,15 @@ func TestTypingInComposerDoesNotMoveViewport(t *testing.T) {
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
 	m = updated.(model)
 	assert.Greater(t, m.viewport.YOffset, scrolledOffset)
+}
+
+func TestHorizontalViewportMouseNavigation(t *testing.T) {
+	assert.True(t, isHorizontalViewportMouseNavigation(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelLeft}))
+	assert.True(t, isHorizontalViewportMouseNavigation(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelRight}))
+	assert.True(t, isHorizontalViewportMouseNavigation(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp, Shift: true}))
+	assert.True(t, shouldUpdateViewport(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown, Shift: true}))
+	assert.False(t, isHorizontalViewportMouseNavigation(tea.MouseMsg{Action: tea.MouseActionRelease, Button: tea.MouseButtonWheelLeft}))
+	assert.False(t, isHorizontalViewportMouseNavigation(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}))
 }
 
 func TestSubmitStartsRunAndStreamsRunnerMessages(t *testing.T) {
@@ -684,6 +862,51 @@ func TestSubmitIgnoresEmptyComposer(t *testing.T) {
 	assert.False(t, m.running)
 	assert.Empty(t, m.entries)
 	assert.Empty(t, m.conversationID)
+}
+
+func TestSlashCommandIndexMovementAndMergeHelpers(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.slashCommands = []slashcommands.Command{{Name: "goal", Description: "Set goal"}, {Name: "review", Description: "Review"}}
+	m.textarea.SetValue("/")
+
+	m.resetSlashCommandIndex()
+	assert.Equal(t, -1, m.slashCommandIndex)
+	m.slashCommandIndex = 4
+	m.resetSlashCommandIndex()
+	assert.Equal(t, -1, m.slashCommandIndex)
+	m.moveSlashCommandSelection(-1)
+	assert.Equal(t, 1, m.slashCommandIndex)
+	m.moveSlashCommandSelection(-1)
+	assert.Equal(t, 0, m.slashCommandIndex)
+	m.moveSlashCommandSelection(-1)
+	assert.Equal(t, -1, m.slashCommandIndex)
+
+	m.textarea.SetValue("no slash")
+	m.moveSlashCommandSelection(1)
+	assert.Equal(t, -1, m.slashCommandIndex)
+
+	merged := mergeSlashCommands(
+		[]slashcommands.Command{{Name: "goal"}, {Name: " "}, {Name: "review"}},
+		[]slashcommands.Command{{Name: "review"}, {Name: "custom"}, {Name: ""}},
+	)
+	assert.Equal(t, []string{"goal", "review", "custom"}, slashCommandNames(merged))
+}
+
+func TestUnknownCSIAndModifierBranches(t *testing.T) {
+	assert.False(t, isShiftEnterCSISequence("not-csi"))
+	assert.False(t, isShiftEnterCSISequence("?CSI[49 51 117]?"))
+	assert.False(t, isShiftEnterCSISequence("?CSI[49 52 59 50 117]?"))
+	assert.False(t, isShiftEnterCSISequence("?CSI[49 51 59 49 117]?"))
+	assert.False(t, isShiftEnterCSISequence("?CSI[50 55 59 50 59 49 52 126]?"))
+	assert.False(t, hasShiftModifier("not-number"))
+	assert.False(t, hasShiftModifier("1"))
+	assert.True(t, hasShiftModifier("2:3"))
+}
+
+func TestUserDisplayMessageFallsBackForInvalidGoalCommand(t *testing.T) {
+	invalidGoal := "  /goal   "
+	assert.Equal(t, strings.TrimSpace(invalidGoal), userDisplayMessage(invalidGoal))
 }
 
 func TestStreamingDeltasAreDebouncedBeforeViewportRefresh(t *testing.T) {

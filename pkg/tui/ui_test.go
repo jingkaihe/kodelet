@@ -168,6 +168,105 @@ func TestTUIUIBrokerConfirmSelectAndNotify(t *testing.T) {
 	assert.Empty(t, m.uiNotifications)
 }
 
+func TestTUIUIBrokerUnavailableClosedAndContextCancellation(t *testing.T) {
+	ctx := context.Background()
+	var nilBroker *tuiUIBroker
+
+	input, err := nilBroker.Input(ctx, extensions.UIInputRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, extensions.UIInputStatusUnavailable, input.Status)
+	confirm, err := nilBroker.Confirm(ctx, extensions.UIConfirmRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, extensions.UIInputStatusUnavailable, confirm.Status)
+	selection, err := nilBroker.Select(ctx, extensions.UISelectRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, extensions.UIInputStatusUnavailable, selection.Status)
+	notification, err := nilBroker.Notify(ctx, extensions.UINotifyRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, extensions.UIInputStatusUnavailable, notification.Status)
+	assert.True(t, nilBroker.isClosed())
+	nilBroker.close()
+
+	broker := newTUIUIBroker(nil, 1)
+	input, err = broker.Input(ctx, extensions.UIInputRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, extensions.UIInputStatusUnavailable, input.Status)
+
+	broker = newTUIUIBroker(make(chan tea.Msg, 1), 2)
+	broker.close()
+	assert.True(t, broker.isClosed())
+	confirm, err = broker.Confirm(ctx, extensions.UIConfirmRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, extensions.UIInputStatusUnavailable, confirm.Status)
+
+	canceledCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	promptCh := make(chan tea.Msg, 1)
+	broker = newTUIUIBroker(promptCh, 3)
+	_, err = broker.Notify(canceledCtx, extensions.UINotifyRequest{Title: "ignored"})
+	assert.ErrorIs(t, err, context.Canceled)
+
+	resultCh := make(chan uiBrokerResult, 1)
+	promptCtx, cancelPrompt := context.WithCancel(ctx)
+	go func() {
+		response, err := broker.Input(promptCtx, extensions.UIInputRequest{Title: "Question"})
+		resultCh <- uiBrokerResult{response: response, err: err}
+	}()
+	msg, ok := receiveRunMsg(t, promptCh).(uiPromptRequestMsg)
+	require.True(t, ok)
+	assert.NotEmpty(t, msg.prompt.id)
+	cancelPrompt()
+	result := receiveUIBrokerResult(t, resultCh)
+	assert.ErrorIs(t, result.err, context.Canceled)
+	assert.Equal(t, extensions.UIInputStatusDismissed, result.response.Status)
+
+	manualPrompt := uiPromptState{response: make(chan extensions.UIInputResponse, 1)}
+	assert.False(t, broker.respond(uiPromptState{}, extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted}))
+	assert.True(t, broker.respond(manualPrompt, extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted}))
+	assert.False(t, broker.respond(manualPrompt, extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted}))
+}
+
+func TestUIPromptDefaultsRequiredDismissAndEmptySelect(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.resize()
+
+	responseCh := make(chan extensions.UIInputResponse, 1)
+	cmd := m.openUIPrompt(uiPromptState{mode: uiPromptInput, required: true, response: responseCh})
+	assert.NotNil(t, cmd)
+	assert.Equal(t, "Extension requested input", uiPromptTitle(uiPromptInput, ""))
+	assert.Equal(t, "Submit", uiPromptSubmitLabel(*m.activeUIPrompt))
+	m.submitUIPrompt()
+	assert.NotNil(t, m.activeUIPrompt)
+	assert.Empty(t, responseCh)
+	m.dismissUIPrompt()
+	assert.Nil(t, m.activeUIPrompt)
+	assert.Equal(t, "ready", m.status)
+	assert.Equal(t, extensions.UIInputStatusDismissed, (<-responseCh).Status)
+
+	responseCh = make(chan extensions.UIInputResponse, 1)
+	m.openUIPrompt(uiPromptState{mode: uiPromptConfirm, response: responseCh})
+	assert.Equal(t, "Extension requested confirmation", uiPromptTitle(uiPromptConfirm, ""))
+	assert.Equal(t, "Confirm", uiPromptSubmitLabel(*m.activeUIPrompt))
+	m.dismissUIPrompt()
+	confirm := <-responseCh
+	assert.Equal(t, extensions.UIInputStatusDismissed, confirm.Status)
+	assert.False(t, confirm.Confirmed)
+	assert.Equal(t, "false", confirm.Value)
+
+	responseCh = make(chan extensions.UIInputResponse, 1)
+	m.openUIPrompt(uiPromptState{mode: uiPromptSelect, response: responseCh})
+	assert.Equal(t, "Extension requested selection", uiPromptTitle(uiPromptSelect, ""))
+	assert.Equal(t, "Select", uiPromptSubmitLabel(*m.activeUIPrompt))
+	m.submitUIPrompt()
+	assert.NotNil(t, m.activeUIPrompt)
+	assert.Empty(t, responseCh)
+	assert.False(t, m.moveUISelect(1))
+	m.dismissUIPrompt()
+}
+
 type brokerCheckingRunner struct {
 	hasInput   bool
 	hasConfirm bool
@@ -235,6 +334,37 @@ func TestUIChatEventsOpenDialogsAndNotifications(t *testing.T) {
 	m = updated.(model)
 	require.Len(t, m.uiNotifications, 1)
 	assert.Contains(t, xansi.Strip(m.View()), "Heads up")
+}
+
+func TestPromptFromChatEventVariantsAndMissingPayloads(t *testing.T) {
+	for _, event := range []chat.ChatEvent{
+		{Kind: "ui-input"},
+		{Kind: "ui-confirm"},
+		{Kind: "ui-select"},
+		{Kind: "ui-notify"},
+	} {
+		prompt, ok := promptFromChatEvent(event)
+		assert.False(t, ok)
+		assert.Equal(t, uiPromptState{}, prompt)
+	}
+
+	input, ok := promptFromChatEvent(chat.ChatEvent{Kind: "ui-input", UIInput: &chat.UIInputEvent{ID: "input", DefaultValue: "value"}})
+	require.True(t, ok)
+	assert.Equal(t, uiPromptInput, input.mode)
+	assert.Equal(t, "value", input.defaultValue)
+
+	confirm, ok := promptFromChatEvent(chat.ChatEvent{Kind: "ui-confirm-request", UIConfirm: &chat.UIConfirmEvent{ID: "confirm", ConfirmButtonText: "Yes"}})
+	require.True(t, ok)
+	assert.Equal(t, uiPromptConfirm, confirm.mode)
+	assert.Equal(t, "Yes", confirm.submitButtonText)
+
+	selection, ok := promptFromChatEvent(chat.ChatEvent{Kind: "ui-select", UISelect: &chat.UISelectEvent{ID: "select", Options: []string{"one"}}})
+	require.True(t, ok)
+	assert.Equal(t, uiPromptSelect, selection.mode)
+	assert.Equal(t, []string{"one"}, selection.options)
+
+	_, ok = promptFromChatEvent(chat.ChatEvent{Kind: "unknown"})
+	assert.False(t, ok)
 }
 
 func TestUIThemeFieldsAreConfiguredForAllThemes(t *testing.T) {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
@@ -236,6 +237,33 @@ func TestSlashCommandSuggestionsUseCompactRowLimits(t *testing.T) {
 	m.resize()
 
 	assert.Equal(t, slashCommandFilteredQueryMaxRows, m.slashCommandSuggestionsHeight())
+}
+
+func TestUISelectDialogRendersVisibleWindowAndScrollMarkers(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 14
+	m.resize()
+	options := []string{"one", "two", "three", "four", "five", "six"}
+	m.openUIPrompt(uiPromptState{
+		mode:        uiPromptSelect,
+		title:       "Pick one",
+		message:     "Choose carefully",
+		options:     options,
+		selectIndex: 4,
+		response:    make(chan extensions.UIInputResponse, 1),
+	})
+	m.resize()
+
+	plain := xansi.Strip(m.renderUIDialog())
+
+	assert.Equal(t, 4, m.maxUISelectRows())
+	assert.Equal(t, 1, visibleUISelectStart(len(options), 4, m.maxUISelectRows()))
+	assert.Contains(t, plain, "↑ more")
+	assert.Contains(t, plain, "› five")
+	assert.Contains(t, plain, "↓ more")
+	assert.NotContains(t, plain, "│   one")
 }
 
 func TestRunningIndicatorRendersInComposerBottomBorder(t *testing.T) {
