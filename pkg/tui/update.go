@@ -255,7 +255,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toggleAllDetails()
 			m.refreshViewport(false)
 			return m, nil
-		case "ctrl+e":
+		case "ctrl+g":
 			if cmd := m.openComposerInEditor(); cmd != nil {
 				return m, cmd
 			}
@@ -584,7 +584,7 @@ func (m *model) openComposerInEditor() tea.Cmd {
 		editorCommand = strings.TrimSpace(os.Getenv("VISUAL"))
 	}
 	if editorCommand == "" {
-		m.steerError = "Set $EDITOR to use Ctrl+E."
+		m.steerError = "Set $EDITOR to use Ctrl+G."
 		m.refreshViewport(false)
 		return nil
 	}

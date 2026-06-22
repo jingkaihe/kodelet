@@ -144,7 +144,7 @@ func (m model) renderShortcutsDialog() string {
 	}{
 		{shortcut: "Enter", description: "Send message"},
 		{shortcut: "Shift+Enter", description: "Insert newline"},
-		{shortcut: "Ctrl+E", description: "Edit draft in $EDITOR"},
+		{shortcut: "Ctrl+G", description: "Edit draft in $EDITOR"},
 		{shortcut: "Ctrl+T", description: "Change profile before starting"},
 		{shortcut: "Ctrl+O", description: "Toggle thought/tool details"},
 		{shortcut: "PgUp/PgDown", description: "Scroll transcript"},
@@ -154,6 +154,7 @@ func (m model) renderShortcutsDialog() string {
 
 	lines := []string{
 		renderPersistentStyle(uiDialogTitleStyle, fitVisible("Shortcuts", contentWidth)),
+		"",
 	}
 	for _, row := range rows {
 		shortcut := renderPersistentStyle(uiDialogButtonStyle, padVisible(fitVisible(row.shortcut, shortcutWidth), shortcutWidth))

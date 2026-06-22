@@ -13,6 +13,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestViewAndFormattingHelpers(t *testing.T) {
@@ -117,14 +118,18 @@ func TestShortcutsDialogRendersWithThemeColors(t *testing.T) {
 			view := xansi.Strip(rawView)
 
 			assert.Contains(t, view, "Shortcuts")
-			assert.Contains(t, view, "Ctrl+E")
+			assert.Contains(t, view, "Ctrl+G")
 			assert.Contains(t, view, "Edit draft in $EDITOR")
 			assert.Contains(t, view, "Press Esc, Enter, ?, or q to close.")
+			dialogLines := strings.Split(xansi.Strip(m.renderShortcutsDialog()), "\n")
+			require.GreaterOrEqual(t, len(dialogLines), 3)
+			blankLine := strings.TrimSuffix(strings.TrimPrefix(dialogLines[2], "│"), "│")
+			assert.Empty(t, strings.TrimSpace(blankLine))
 			borderStart, _ := styleSequences(uiDialogBorderStyle)
 			buttonStart, _ := styleSequences(uiDialogButtonStyle)
 			assert.Contains(t, rawView, borderStart+"╭")
 			assert.Contains(t, rawView, uiDialogTitleStyle.Render("Shortcuts"))
-			assert.Contains(t, rawView, buttonStart+"Ctrl+E")
+			assert.Contains(t, rawView, buttonStart+"Ctrl+G")
 		})
 	}
 }

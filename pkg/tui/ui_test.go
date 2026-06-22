@@ -255,6 +255,6 @@ func TestCatppuccinMochaDialogThemeAvoidsPinkPurpleAccents(t *testing.T) {
 	theme := themes[DefaultThemeName]
 
 	assert.Equal(t, theme.InputBorder, theme.UI.DialogBorder)
-	assert.Equal(t, "#94e2d5", theme.UI.DialogTitle)
+	assert.Equal(t, theme.ComposerText, theme.UI.DialogTitle)
 	assert.Equal(t, "#fab387", theme.UI.DialogCancel)
 }

@@ -139,7 +139,7 @@ var themes = map[string]tuiTheme{
 		ProfileSelected: "#313244", // surface0
 		UI: uiTheme{
 			DialogBorder:       "#cdd6f4", // text, matches input border
-			DialogTitle:        "#94e2d5", // teal
+			DialogTitle:        "#cdd6f4", // text, matches composer text
 			DialogBody:         "#cdd6f4", // text
 			DialogMuted:        "#9399b2", // overlay2
 			DialogSelected:     "#313244", // surface0

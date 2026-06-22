@@ -276,6 +276,32 @@ func TestOpenComposerInEditorRequiresEditorAndIgnoresRunning(t *testing.T) {
 	assert.Contains(t, m.steerError, "while Kodelet is running")
 }
 
+func TestEditorShortcutUsesCtrlGAndCtrlEPreservesLineEnd(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.resize()
+	t.Setenv("EDITOR", "")
+	t.Setenv("VISUAL", "")
+	m.textarea.SetValue("hello")
+	m.textarea.SetCursor(0)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlE})
+	m = updated.(model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("!")})
+	m = updated.(model)
+
+	assert.Equal(t, "hello!", m.textarea.Value())
+	assert.Empty(t, m.steerError)
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
+	m = updated.(model)
+
+	assert.Nil(t, cmd)
+	assert.Contains(t, m.steerError, "Ctrl+G")
+}
+
 func TestEditorExecCommandParsesEditorArgs(t *testing.T) {
 	cmd, err := editorExecCommand("vim -n", "/tmp/kodelet-draft.md")
 
