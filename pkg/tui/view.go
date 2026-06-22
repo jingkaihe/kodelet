@@ -79,6 +79,9 @@ func (m model) renderUIOverlays(content string) string {
 	if m.activeUIPrompt != nil {
 		lines = m.overlayUIDialog(lines)
 	}
+	if m.shortcutsOpen {
+		lines = m.overlayShortcutsDialog(lines)
+	}
 	return strings.Join(lines, "\n")
 }
 
@@ -100,6 +103,73 @@ func (m model) overlayUIDialog(lines []string) []string {
 		lines[row] = padVisible(strings.Repeat(" ", startX)+line, width)
 	}
 	return lines
+}
+
+func (m model) overlayShortcutsDialog(lines []string) []string {
+	dialog := m.renderShortcutsDialog()
+	if strings.TrimSpace(dialog) == "" {
+		return lines
+	}
+	dialogLines := strings.Split(dialog, "\n")
+	width := m.contentWidth()
+	dialogHeight := len(dialogLines)
+	startY := max(0, (m.height-dialogHeight)/2)
+	for i, line := range dialogLines {
+		row := startY + i
+		if row < 0 || row >= len(lines) {
+			continue
+		}
+		startX := max(0, (width-lipgloss.Width(line))/2)
+		lines[row] = padVisible(strings.Repeat(" ", startX)+line, width)
+	}
+	return lines
+}
+
+func (m model) renderShortcutsDialog() string {
+	width := m.uiDialogWidth()
+	if width <= 4 {
+		return ""
+	}
+	contentWidth := max(1, width-4)
+	shortcutWidth := 14
+	if contentWidth < 32 {
+		shortcutWidth = 10
+	}
+	shortcutWidth = min(shortcutWidth, max(1, contentWidth/2))
+	descriptionWidth := max(1, contentWidth-shortcutWidth-2)
+
+	rows := []struct {
+		shortcut    string
+		description string
+	}{
+		{shortcut: "Enter", description: "Send message"},
+		{shortcut: "Shift+Enter", description: "Insert newline"},
+		{shortcut: "Ctrl+E", description: "Edit draft in $EDITOR"},
+		{shortcut: "Ctrl+T", description: "Change profile before starting"},
+		{shortcut: "Ctrl+O", description: "Toggle thought/tool details"},
+		{shortcut: "PgUp/PgDown", description: "Scroll transcript"},
+		{shortcut: "Esc", description: "Cancel or dismiss"},
+		{shortcut: "Ctrl+C", description: "Cancel run or quit"},
+	}
+
+	lines := []string{
+		renderPersistentStyle(uiDialogTitleStyle, fitVisible("Shortcuts", contentWidth)),
+	}
+	for _, row := range rows {
+		shortcut := renderPersistentStyle(uiDialogButtonStyle, padVisible(fitVisible(row.shortcut, shortcutWidth), shortcutWidth))
+		description := renderPersistentStyle(uiDialogBodyStyle, fitVisible(row.description, descriptionWidth))
+		lines = append(lines, shortcut+"  "+description)
+	}
+	lines = append(lines, "", renderPersistentStyle(uiDialogMutedStyle, fitVisible("Press Esc, Enter, ?, or q to close.", contentWidth)))
+
+	top := uiDialogBorderStyle.Render("╭" + strings.Repeat("─", width-2) + "╮")
+	bottom := uiDialogBorderStyle.Render("╰" + strings.Repeat("─", width-2) + "╯")
+	boxLines := []string{top}
+	for _, line := range lines {
+		boxLines = append(boxLines, uiDialogBorderStyle.Render("│")+" "+padVisible(line, contentWidth)+" "+uiDialogBorderStyle.Render("│"))
+	}
+	boxLines = append(boxLines, bottom)
+	return strings.Join(boxLines, "\n")
 }
 
 func (m model) overlayUINotifications(lines []string) []string {

@@ -145,6 +145,7 @@ type model struct {
 	steerError     string
 	status         string
 	err            error
+	shortcutsOpen  bool
 
 	activeUIPrompt       *uiPromptState
 	uiNotifications      []uiNotification
@@ -178,6 +179,11 @@ type slashCommandsMsg struct {
 	commands       []slashcommands.Command
 	extensionsOnly bool
 	err            error
+}
+
+type editorFinishedMsg struct {
+	path string
+	err  error
 }
 
 type tuiSink struct {

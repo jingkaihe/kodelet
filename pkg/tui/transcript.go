@@ -3,6 +3,8 @@ package tui
 import (
 	"fmt"
 	"strings"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 func (m *model) renderTranscript() (string, []detailRegion) {
@@ -11,11 +13,12 @@ func (m *model) renderTranscript() (string, []detailRegion) {
 	line := 0
 
 	if len(m.entries) == 0 {
-		intro := mutedStyle.Render("Hello! What would you like me to work on?")
-		b.WriteString("\n")
-		b.WriteString(intro)
-		b.WriteString("\n")
-		line += lineCount(intro) + 2
+		introLines := m.renderInitialMessage()
+		for _, introLine := range introLines {
+			b.WriteString(introLine)
+			b.WriteString("\n")
+		}
+		line += len(introLines)
 		m.renderQueuedSteering(&b, &line)
 		return b.String(), regions
 	}
@@ -100,6 +103,44 @@ func (m *model) renderTranscript() (string, []detailRegion) {
 	m.renderQueuedSteering(&b, &line)
 
 	return b.String(), regions
+}
+
+func (m model) renderInitialMessage() []string {
+	width := m.contentWidth()
+	if m.viewport.Width > 0 {
+		width = m.viewport.Width
+	}
+	width = max(1, width)
+	height := max(2, m.viewport.Height)
+
+	messageText := "Hello! What would you like me to work on?"
+	messageStart := max(0, (width-lipgloss.Width(messageText))/2)
+	message := renderPersistentStyle(assistantStyle, centerVisible(messageText, width))
+	shortcutHint := renderInitialShortcutHint(width, messageStart)
+	contentLines := []string{message, "", "", shortcutHint}
+
+	lines := make([]string, 0, height)
+	start := max(0, (height-len(contentLines))/2)
+	for range start {
+		lines = append(lines, "")
+	}
+	lines = append(lines, contentLines...)
+	return lines
+}
+
+func renderInitialShortcutHint(width, start int) string {
+	if width <= 0 {
+		return ""
+	}
+	if start >= width {
+		start = 0
+	}
+	text := fitVisible("? for shortcuts", width-start)
+	if !strings.HasPrefix(text, "?") {
+		return padVisible(strings.Repeat(" ", start)+renderPersistentStyle(mutedStyle, text), width)
+	}
+	hint := renderPersistentStyle(assistantStyle, "?") + renderPersistentStyle(mutedStyle, strings.TrimPrefix(text, "?"))
+	return padVisible(strings.Repeat(" ", start)+hint, width)
 }
 
 func (m model) renderAssistantBlockSeparator(b *strings.Builder, line *int, renderedBlock *bool) {

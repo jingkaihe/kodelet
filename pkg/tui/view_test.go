@@ -61,6 +61,74 @@ func TestViewAndFormattingHelpers(t *testing.T) {
 	assert.True(t, strings.HasPrefix(rightLabeledBorder("╭", "╮", 12, "label"), "╭"))
 }
 
+func TestInitialMessageRendersCenteredWithShortcutHint(t *testing.T) {
+	withANSI256ColorProfile(t)
+
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.resize()
+	m.refreshViewport(true)
+
+	view := xansi.Strip(m.View())
+	lines := strings.Split(view, "\n")
+	messageLine := ""
+	hintLine := ""
+	messageIndex := -1
+	hintIndex := -1
+	for i, line := range lines {
+		if strings.Contains(line, "Hello! What would you like me to work on?") {
+			messageLine = line
+			messageIndex = i
+		}
+		if strings.Contains(line, "? for shortcuts") {
+			hintLine = line
+			hintIndex = i
+		}
+	}
+
+	assert.NotEmpty(t, messageLine)
+	assert.NotEmpty(t, hintLine)
+	messageStart := strings.Index(messageLine, "Hello!")
+	hintStart := strings.Index(hintLine, "? for shortcuts")
+	assert.Greater(t, messageStart, 10)
+	assert.Equal(t, messageStart, hintStart)
+	assert.Equal(t, messageIndex+3, hintIndex)
+
+	rawView := m.View()
+	assistantStart, _ := styleSequences(assistantStyle)
+	assert.Contains(t, rawView, assistantStart+"?")
+}
+
+func TestShortcutsDialogRendersWithThemeColors(t *testing.T) {
+	withANSI256ColorProfile(t)
+
+	for _, themeName := range []string{DefaultThemeName, "tokyo-night"} {
+		t.Run(themeName, func(t *testing.T) {
+			m := newModel(context.Background(), Config{Theme: themeName})
+			t.Cleanup(m.cancel)
+			m.width = 96
+			m.height = 24
+			m.resize()
+			m.openShortcutsDialog()
+
+			rawView := m.View()
+			view := xansi.Strip(rawView)
+
+			assert.Contains(t, view, "Shortcuts")
+			assert.Contains(t, view, "Ctrl+E")
+			assert.Contains(t, view, "Edit draft in $EDITOR")
+			assert.Contains(t, view, "Press Esc, Enter, ?, or q to close.")
+			borderStart, _ := styleSequences(uiDialogBorderStyle)
+			buttonStart, _ := styleSequences(uiDialogButtonStyle)
+			assert.Contains(t, rawView, borderStart+"╭")
+			assert.Contains(t, rawView, uiDialogTitleStyle.Render("Shortcuts"))
+			assert.Contains(t, rawView, buttonStart+"Ctrl+E")
+		})
+	}
+}
+
 func TestProfilePickerRendersAboveComposerWithThemeColors(t *testing.T) {
 	withANSI256ColorProfile(t)
 

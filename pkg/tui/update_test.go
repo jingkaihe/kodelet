@@ -209,6 +209,81 @@ func TestCtrlOTogglesDetails(t *testing.T) {
 	assert.Contains(t, content, "toggle me")
 }
 
+func TestQuestionMarkOpensShortcutsDialogWhenComposerEmpty(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.resize()
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	m = updated.(model)
+	require.Nil(t, cmd)
+	assert.True(t, m.shortcutsOpen)
+	assert.Contains(t, xansi.Strip(m.View()), "Shortcuts")
+
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(model)
+	require.Nil(t, cmd)
+	assert.False(t, m.shortcutsOpen)
+
+	m.textarea.SetValue("what")
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	m = updated.(model)
+	assert.False(t, m.shortcutsOpen)
+	assert.Equal(t, "what?", m.textarea.Value())
+}
+
+func TestApplyEditorResultUpdatesComposerAndCleansUpFile(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.resize()
+
+	path := filepath.Join(t.TempDir(), "draft.md")
+	require.NoError(t, os.WriteFile(path, []byte("edited draft\n"), 0o644))
+
+	cmd := m.applyEditorResult(editorFinishedMsg{path: path})
+
+	assert.NotNil(t, cmd)
+	assert.Equal(t, "edited draft", m.textarea.Value())
+	assert.Equal(t, "ready", m.status)
+	assert.Empty(t, m.steerError)
+	_, err := os.Stat(path)
+	assert.True(t, os.IsNotExist(err))
+}
+
+func TestOpenComposerInEditorRequiresEditorAndIgnoresRunning(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.resize()
+	t.Setenv("EDITOR", "")
+	t.Setenv("VISUAL", "")
+
+	cmd := m.openComposerInEditor()
+
+	assert.Nil(t, cmd)
+	assert.Contains(t, m.steerError, "Set $EDITOR")
+
+	m.steerError = ""
+	m.running = true
+	cmd = m.openComposerInEditor()
+
+	assert.Nil(t, cmd)
+	assert.Contains(t, m.steerError, "while Kodelet is running")
+}
+
+func TestEditorExecCommandParsesEditorArgs(t *testing.T) {
+	cmd, err := editorExecCommand("vim -n", "/tmp/kodelet-draft.md")
+
+	require.NoError(t, err)
+	assert.Equal(t, "vim", filepath.Base(cmd.Path))
+	assert.Equal(t, []string{"vim", "-n", "/tmp/kodelet-draft.md"}, cmd.Args)
+}
+
 func TestCtrlTProfilePickerSelectsProfileForNewConversation(t *testing.T) {
 	runner := &recordingRunner{conversationID: "conversation-done"}
 	m := newModel(context.Background(), Config{Profile: "default", ProfileOptions: []string{"default", "work", "prod"}, Runner: runner})

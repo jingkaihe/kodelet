@@ -3,12 +3,17 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/google/shlex"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/goals"
@@ -139,6 +144,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.removeUINotification(msg.id)
 		return m, nil
 
+	case editorFinishedMsg:
+		cmd := m.applyEditorResult(msg)
+		return m, cmd
+
 	case initialHistoryMsg:
 		if msg.err != nil {
 			m.err = msg.err
@@ -193,6 +202,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		key := msg.String()
+		if m.shortcutsOpen {
+			switch key {
+			case "esc", "enter", "?", "q", "Q", "ctrl+c", "ctrl+d":
+				m.shortcutsOpen = false
+				m.refreshViewport(false)
+				return m, nil
+			default:
+				return m, nil
+			}
+		}
 		if m.activeUIPrompt != nil {
 			cmd := m.updateUIPromptKey(msg)
 			return m, cmd
@@ -236,6 +255,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toggleAllDetails()
 			m.refreshViewport(false)
 			return m, nil
+		case "ctrl+e":
+			if cmd := m.openComposerInEditor(); cmd != nil {
+				return m, cmd
+			}
+			return m, nil
+		case "?":
+			if strings.TrimSpace(m.textarea.Value()) == "" {
+				m.openShortcutsDialog()
+				return m, nil
+			}
 		case "up", "shift+tab":
 			if m.slashCommandSuggestionsOpen() {
 				m.moveSlashCommandSelection(-1)
@@ -288,6 +317,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseMsg:
+		if m.shortcutsOpen {
+			if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+				m.shortcutsOpen = false
+				m.refreshViewport(false)
+			}
+			return m, nil
+		}
 		if m.activeUIPrompt != nil {
 			return m, nil
 		}
@@ -526,6 +562,115 @@ func (m *model) queueTranscriptRefresh(scrollBottom bool) tea.Cmd {
 	}
 	m.pendingRefresh = true
 	return waitForTranscriptRefresh()
+}
+
+func (m *model) openShortcutsDialog() {
+	m.profilePickerOpen = false
+	m.dismissSlashCommandSuggestions()
+	m.shortcutsOpen = true
+	m.resize()
+	m.refreshViewport(false)
+}
+
+func (m *model) openComposerInEditor() tea.Cmd {
+	if m.running {
+		m.steerError = "Cannot edit in $EDITOR while Kodelet is running."
+		m.refreshViewport(false)
+		return nil
+	}
+
+	editorCommand := strings.TrimSpace(os.Getenv("EDITOR"))
+	if editorCommand == "" {
+		editorCommand = strings.TrimSpace(os.Getenv("VISUAL"))
+	}
+	if editorCommand == "" {
+		m.steerError = "Set $EDITOR to use Ctrl+E."
+		m.refreshViewport(false)
+		return nil
+	}
+
+	path, err := writeComposerEditorFile(m.textarea.Value())
+	if err != nil {
+		m.steerError = "Failed to prepare $EDITOR: " + err.Error()
+		m.refreshViewport(false)
+		return nil
+	}
+
+	cmd, err := editorExecCommand(editorCommand, path)
+	if err != nil {
+		_ = os.Remove(path)
+		m.steerError = "Failed to launch $EDITOR: " + err.Error()
+		m.refreshViewport(false)
+		return nil
+	}
+	m.profilePickerOpen = false
+	m.dismissSlashCommandSuggestions()
+	m.shortcutsOpen = false
+	m.steerError = ""
+	m.status = "editing"
+	m.refreshViewport(false)
+
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		return editorFinishedMsg{path: path, err: err}
+	})
+}
+
+func writeComposerEditorFile(value string) (string, error) {
+	file, err := os.CreateTemp("", "kodelet-composer-*.md")
+	if err != nil {
+		return "", err
+	}
+	path := file.Name()
+	if _, err := file.WriteString(value); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return "", err
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", err
+	}
+	return path, nil
+}
+
+func editorExecCommand(editorCommand, path string) (*exec.Cmd, error) {
+	parts, err := shlex.Split(editorCommand)
+	if err != nil {
+		return nil, err
+	}
+	if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
+		return nil, errors.New("empty editor command")
+	}
+	args := append([]string{}, parts[1:]...)
+	args = append(args, path)
+	cmd := exec.Command(parts[0], args...) //nolint:gosec // user-provided editor command is intentional.
+	return cmd, nil
+}
+
+func (m *model) applyEditorResult(msg editorFinishedMsg) tea.Cmd {
+	defer func() { _ = os.Remove(msg.path) }()
+
+	if msg.err != nil {
+		m.status = "ready"
+		m.steerError = "Editor failed: " + msg.err.Error()
+		m.refreshViewport(false)
+		return nil
+	}
+
+	content, err := os.ReadFile(filepath.Clean(msg.path))
+	if err != nil {
+		m.status = "ready"
+		m.steerError = "Failed to read edited draft: " + err.Error()
+		m.refreshViewport(false)
+		return nil
+	}
+
+	m.status = "ready"
+	m.steerError = ""
+	m.textarea.SetValue(strings.TrimRight(string(content), "\n"))
+	m.resize()
+	m.refreshViewport(false)
+	return textarea.Blink
 }
 
 func shouldDebounceChatEvent(event chat.ChatEvent) bool {

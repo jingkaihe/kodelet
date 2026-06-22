@@ -39,6 +39,15 @@ func padVisible(text string, width int) string {
 	return text + strings.Repeat(" ", width-textWidth)
 }
 
+func centerVisible(text string, width int) string {
+	textWidth := lipgloss.Width(text)
+	if textWidth >= width {
+		return text
+	}
+	leftPadding := (width - textWidth) / 2
+	return padVisible(strings.Repeat(" ", leftPadding)+text, width)
+}
+
 func fitVisible(text string, width int) string {
 	if width <= 0 || lipgloss.Width(text) <= width {
 		return text
