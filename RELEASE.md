@@ -1,6 +1,6 @@
 # Kodelet
 
-## 0.4.39-alpha1
+## 0.4.40-beta
 
 Added `kodelet chat`, a native terminal chat TUI with streaming responses, conversation resume/follow support, selectable themes, and no-tools/no-extension startup options.
 
