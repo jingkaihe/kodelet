@@ -2316,3 +2316,115 @@ func TestServer_Close(t *testing.T) {
 	assert.NoError(t, err)
 	assert.True(t, closeCalled)
 }
+
+func writeWebExtensionExecutable(t *testing.T, path string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	executable, err := os.Executable()
+	require.NoError(t, err)
+	script := fmt.Sprintf("#!/bin/sh\nKODELET_WEBUI_TEST_EXTENSION_HELPER=1 exec %q -test.run TestWebExtensionHelperProcess --\n", executable)
+	require.NoError(t, os.WriteFile(path, []byte(script), 0o755))
+}
+
+func TestWebExtensionHelperProcess(t *testing.T) {
+	if os.Getenv("KODELET_WEBUI_TEST_EXTENSION_HELPER") != "1" {
+		return
+	}
+	runWebExtensionHelperProcess()
+	os.Exit(0)
+}
+
+func runWebExtensionHelperProcess() {
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		payload, err := readWebRPCFrame(reader)
+		if err != nil {
+			return
+		}
+
+		var request struct {
+			JSONRPC string          `json:"jsonrpc"`
+			ID      int64           `json:"id"`
+			Method  string          `json:"method"`
+			Params  json.RawMessage `json:"params"`
+		}
+		if err := json.Unmarshal(payload, &request); err != nil {
+			writeWebRPCResponse(request.ID, nil, map[string]any{"code": -32700, "message": err.Error()})
+			continue
+		}
+
+		switch request.Method {
+		case "extension.initialize":
+			writeWebRPCResponse(request.ID, extensions.InitializeResult{
+				Name: "commands",
+				Commands: []extensions.CommandRegistration{{
+					Name:        "doctor",
+					Aliases:     []string{"/doctor"},
+					Description: "Inspect extension runtime health",
+				}, {
+					Name:        "review",
+					Aliases:     []string{"/review"},
+					Description: "Review local git changes",
+					Kind:        "recipe",
+					InputSchema: map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"target": map[string]any{"type": "string", "default": "HEAD"},
+							"focus":  map[string]any{"type": "string", "default": "correctness, tests"},
+						},
+					},
+				}},
+			}, nil)
+		case "extension.command.execute":
+			var params struct {
+				Name    string                          `json:"name"`
+				Context extensions.ExtensionCallContext `json:"context"`
+			}
+			if err := json.Unmarshal(request.Params, &params); err != nil {
+				writeWebRPCResponse(request.ID, nil, map[string]any{"code": -32602, "message": err.Error()})
+				continue
+			}
+			writeWebRPCResponse(request.ID, extensions.CommandResult{
+				Action:   extensions.CommandActionRespond,
+				Response: fmt.Sprintf("All extensions are healthy for %s.", params.Context.ConversationID),
+			}, nil)
+		default:
+			writeWebRPCResponse(request.ID, nil, map[string]any{"code": -32601, "message": "method not found"})
+		}
+	}
+}
+
+func readWebRPCFrame(reader *bufio.Reader) ([]byte, error) {
+	contentLength := -1
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return nil, err
+		}
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" {
+			break
+		}
+		key, value, ok := strings.Cut(line, ":")
+		if ok && strings.EqualFold(strings.TrimSpace(key), "Content-Length") {
+			_, _ = fmt.Sscanf(strings.TrimSpace(value), "%d", &contentLength)
+		}
+	}
+	if contentLength < 0 {
+		return nil, fmt.Errorf("missing Content-Length")
+	}
+	payload := make([]byte, contentLength)
+	_, err := reader.Read(payload)
+	return payload, err
+}
+
+func writeWebRPCResponse(id int64, result any, rpcErr any) {
+	response := map[string]any{"jsonrpc": "2.0", "id": id}
+	if rpcErr != nil {
+		response["error"] = rpcErr
+	} else {
+		response["result"] = result
+	}
+	payload, _ := json.Marshal(response)
+	fmt.Fprintf(os.Stdout, "Content-Length: %d\r\n\r\n%s", len(payload), payload)
+}

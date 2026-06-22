@@ -1,6 +1,6 @@
 ---
 name: Personal Introduction
-description: A recipe to generate a personal introduction based on name and occupation
+description: Generate a personal introduction based on name and occupation
 allowed_tools: "file_write"
 allowed_commands: []
 arguments:

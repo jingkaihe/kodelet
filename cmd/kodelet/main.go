@@ -213,6 +213,7 @@ func main() {
 	viper.BindPFlag("compact_ratio", rootCmd.PersistentFlags().Lookup("compact-ratio"))
 
 	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(chatCmd)
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(commitCmd)
 	rootCmd.AddCommand(setupCmd)
@@ -258,6 +259,7 @@ func main() {
 
 	rootCmd = withTracing(rootCmd)
 	runCmd = withTracing(runCmd)
+	chatCmd = withTracing(chatCmd)
 	versionCmd = withTracing(versionCmd)
 	commitCmd = withTracing(commitCmd)
 	setupCmd = withTracing(setupCmd)
