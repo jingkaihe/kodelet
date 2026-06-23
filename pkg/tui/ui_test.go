@@ -377,6 +377,10 @@ func TestUIThemeFieldsAreConfiguredForAllThemes(t *testing.T) {
 			assert.NotEmpty(t, theme.UI.NotificationBorder)
 			assert.NotEmpty(t, theme.UI.NotificationTitle)
 			assert.NotEmpty(t, theme.UI.NotificationBody)
+			assert.NotEmpty(t, theme.UI.NotificationWarningBorder)
+			assert.NotEmpty(t, theme.UI.NotificationWarningTitle)
+			assert.NotEmpty(t, theme.UI.NotificationErrorBorder)
+			assert.NotEmpty(t, theme.UI.NotificationErrorTitle)
 		})
 	}
 }

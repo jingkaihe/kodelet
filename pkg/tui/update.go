@@ -574,9 +574,7 @@ func (m *model) openShortcutsDialog() {
 
 func (m *model) openComposerInEditor() tea.Cmd {
 	if m.running {
-		m.steerError = "Cannot edit in $EDITOR while Kodelet is running."
-		m.refreshViewport(false)
-		return nil
+		return m.notifyEditorWarning("Cannot edit in $EDITOR while Kodelet is running.")
 	}
 
 	editorCommand := strings.TrimSpace(os.Getenv("EDITOR"))
@@ -584,24 +582,18 @@ func (m *model) openComposerInEditor() tea.Cmd {
 		editorCommand = strings.TrimSpace(os.Getenv("VISUAL"))
 	}
 	if editorCommand == "" {
-		m.steerError = "Set $EDITOR to use Ctrl+G."
-		m.refreshViewport(false)
-		return nil
+		return m.notifyEditorWarning("Set $EDITOR or $VISUAL to use Ctrl+G.")
 	}
 
 	path, err := writeComposerEditorFile(m.textarea.Value())
 	if err != nil {
-		m.steerError = "Failed to prepare $EDITOR: " + err.Error()
-		m.refreshViewport(false)
-		return nil
+		return m.notifyEditorError("Failed to prepare $EDITOR: " + err.Error())
 	}
 
 	cmd, err := editorExecCommand(editorCommand, path)
 	if err != nil {
 		_ = os.Remove(path)
-		m.steerError = "Failed to launch $EDITOR: " + err.Error()
-		m.refreshViewport(false)
-		return nil
+		return m.notifyEditorError("Failed to launch $EDITOR: " + err.Error())
 	}
 	m.profilePickerOpen = false
 	m.dismissSlashCommandSuggestions()
@@ -613,6 +605,16 @@ func (m *model) openComposerInEditor() tea.Cmd {
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		return editorFinishedMsg{path: path, err: err}
 	})
+}
+
+func (m *model) notifyEditorError(message string) tea.Cmd {
+	m.steerError = ""
+	return m.addUINotification(uiNotification{level: uiNotificationError, title: "Editor failed", message: message})
+}
+
+func (m *model) notifyEditorWarning(message string) tea.Cmd {
+	m.steerError = ""
+	return m.addUINotification(uiNotification{level: uiNotificationWarning, title: "Editor unavailable", message: message})
 }
 
 func writeComposerEditorFile(value string) (string, error) {
@@ -652,17 +654,16 @@ func (m *model) applyEditorResult(msg editorFinishedMsg) tea.Cmd {
 
 	if msg.err != nil {
 		m.status = "ready"
-		m.steerError = "Editor failed: " + msg.err.Error()
-		m.refreshViewport(false)
-		return nil
+		if errors.Is(msg.err, exec.ErrNotFound) {
+			return m.notifyEditorWarning("Editor command not found: " + msg.err.Error())
+		}
+		return m.notifyEditorError(msg.err.Error())
 	}
 
 	content, err := os.ReadFile(filepath.Clean(msg.path))
 	if err != nil {
 		m.status = "ready"
-		m.steerError = "Failed to read edited draft: " + err.Error()
-		m.refreshViewport(false)
-		return nil
+		return m.notifyEditorError("Failed to read edited draft: " + err.Error())
 	}
 
 	m.status = "ready"

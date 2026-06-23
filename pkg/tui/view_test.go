@@ -135,6 +135,38 @@ func TestShortcutsDialogRendersWithThemeColors(t *testing.T) {
 	}
 }
 
+func TestNotificationSeverityUsesThemeColors(t *testing.T) {
+	withANSI256ColorProfile(t)
+
+	for _, themeName := range []string{DefaultThemeName, "tokyo-night"} {
+		t.Run(themeName, func(t *testing.T) {
+			m := newModel(context.Background(), Config{Theme: themeName})
+			t.Cleanup(m.cancel)
+			m.width = 96
+			m.height = 24
+			m.resize()
+
+			info := m.renderUINotification(uiNotification{level: uiNotificationInfo, title: "Info", message: "Done"})
+			warning := m.renderUINotification(uiNotification{level: uiNotificationWarning, title: "Warning", message: "Check config"})
+			errorBox := m.renderUINotification(uiNotification{level: uiNotificationError, title: "Error", message: "Launch failed"})
+
+			infoBorderStart, _ := styleSequences(uiNotificationBorderStyle)
+			infoTitleStart, _ := styleSequences(uiNotificationTitleStyle)
+			warningBorderStart, _ := styleSequences(uiNotificationWarningBorderStyle)
+			warningTitleStart, _ := styleSequences(uiNotificationWarningTitleStyle)
+			errorBorderStart, _ := styleSequences(uiNotificationErrorBorderStyle)
+			errorTitleStart, _ := styleSequences(uiNotificationErrorTitleStyle)
+
+			assert.Contains(t, info, infoBorderStart+"╭")
+			assert.Contains(t, info, infoTitleStart+"Info")
+			assert.Contains(t, warning, warningBorderStart+"╭")
+			assert.Contains(t, warning, warningTitleStart+"Warning")
+			assert.Contains(t, errorBox, errorBorderStart+"╭")
+			assert.Contains(t, errorBox, errorTitleStart+"Error")
+		})
+	}
+}
+
 func TestProfilePickerRendersAboveComposerWithThemeColors(t *testing.T) {
 	withANSI256ColorProfile(t)
 

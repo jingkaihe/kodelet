@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -285,15 +286,24 @@ func TestOpenComposerInEditorRequiresEditorAndIgnoresRunning(t *testing.T) {
 
 	cmd := m.openComposerInEditor()
 
-	assert.Nil(t, cmd)
-	assert.Contains(t, m.steerError, "Set $EDITOR")
+	assert.NotNil(t, cmd)
+	assert.Empty(t, m.steerError)
+	require.Len(t, m.uiNotifications, 1)
+	assert.Equal(t, uiNotificationWarning, m.uiNotifications[0].level)
+	assert.Equal(t, "Editor unavailable", m.uiNotifications[0].title)
+	assert.Contains(t, m.uiNotifications[0].message, "Set $EDITOR or $VISUAL")
 
 	m.steerError = ""
+	m.uiNotifications = nil
 	m.running = true
 	cmd = m.openComposerInEditor()
 
-	assert.Nil(t, cmd)
-	assert.Contains(t, m.steerError, "while Kodelet is running")
+	assert.NotNil(t, cmd)
+	assert.Empty(t, m.steerError)
+	require.Len(t, m.uiNotifications, 1)
+	assert.Equal(t, uiNotificationWarning, m.uiNotifications[0].level)
+	assert.Equal(t, "Editor unavailable", m.uiNotifications[0].title)
+	assert.Contains(t, m.uiNotifications[0].message, "while Kodelet is running")
 }
 
 func TestOpenComposerInEditorCreatesDraftAndClearsTransientUI(t *testing.T) {
@@ -369,8 +379,11 @@ func TestEditorShortcutUsesCtrlGAndCtrlEPreservesLineEnd(t *testing.T) {
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
 	m = updated.(model)
 
-	assert.Nil(t, cmd)
-	assert.Contains(t, m.steerError, "Ctrl+G")
+	assert.NotNil(t, cmd)
+	assert.Empty(t, m.steerError)
+	require.Len(t, m.uiNotifications, 1)
+	assert.Equal(t, uiNotificationWarning, m.uiNotifications[0].level)
+	assert.Contains(t, m.uiNotifications[0].message, "Ctrl+G")
 }
 
 func TestEditorExecCommandParsesEditorArgs(t *testing.T) {
@@ -396,17 +409,40 @@ func TestApplyEditorResultHandlesFailureAndReadError(t *testing.T) {
 	failedPath := filepath.Join(t.TempDir(), "failed.md")
 	require.NoError(t, os.WriteFile(failedPath, []byte("ignored"), 0o644))
 	cmd := m.applyEditorResult(editorFinishedMsg{path: failedPath, err: errors.New("boom")})
-	assert.Nil(t, cmd)
+	assert.NotNil(t, cmd)
 	assert.Equal(t, "ready", m.status)
-	assert.Contains(t, m.steerError, "Editor failed: boom")
+	assert.Empty(t, m.steerError)
+	require.Len(t, m.uiNotifications, 1)
+	assert.Equal(t, uiNotificationError, m.uiNotifications[0].level)
+	assert.Equal(t, "Editor failed", m.uiNotifications[0].title)
+	assert.Contains(t, m.uiNotifications[0].message, "boom")
 	_, err := os.Stat(failedPath)
 	assert.True(t, os.IsNotExist(err))
+	m.uiNotifications = nil
+
+	notFoundPath := filepath.Join(t.TempDir(), "not-found.md")
+	require.NoError(t, os.WriteFile(notFoundPath, []byte("ignored"), 0o644))
+	cmd = m.applyEditorResult(editorFinishedMsg{path: notFoundPath, err: &exec.Error{Name: "missing-editor", Err: exec.ErrNotFound}})
+	assert.NotNil(t, cmd)
+	assert.Equal(t, "ready", m.status)
+	assert.Empty(t, m.steerError)
+	require.Len(t, m.uiNotifications, 1)
+	assert.Equal(t, uiNotificationWarning, m.uiNotifications[0].level)
+	assert.Equal(t, "Editor unavailable", m.uiNotifications[0].title)
+	assert.Contains(t, m.uiNotifications[0].message, "not found")
+	_, err = os.Stat(notFoundPath)
+	assert.True(t, os.IsNotExist(err))
+	m.uiNotifications = nil
 
 	missingPath := filepath.Join(t.TempDir(), "missing.md")
 	cmd = m.applyEditorResult(editorFinishedMsg{path: missingPath})
-	assert.Nil(t, cmd)
+	assert.NotNil(t, cmd)
 	assert.Equal(t, "ready", m.status)
-	assert.Contains(t, m.steerError, "Failed to read edited draft")
+	assert.Empty(t, m.steerError)
+	require.Len(t, m.uiNotifications, 1)
+	assert.Equal(t, uiNotificationError, m.uiNotifications[0].level)
+	assert.Equal(t, "Editor failed", m.uiNotifications[0].title)
+	assert.Contains(t, m.uiNotifications[0].message, "Failed to read edited draft")
 }
 
 func TestCtrlTProfilePickerSelectsProfileForNewConversation(t *testing.T) {

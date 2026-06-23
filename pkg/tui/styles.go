@@ -51,16 +51,20 @@ type slashCommandTheme struct {
 }
 
 type uiTheme struct {
-	DialogBorder       string
-	DialogTitle        string
-	DialogBody         string
-	DialogMuted        string
-	DialogSelected     string
-	DialogButton       string
-	DialogCancel       string
-	NotificationBorder string
-	NotificationTitle  string
-	NotificationBody   string
+	DialogBorder              string
+	DialogTitle               string
+	DialogBody                string
+	DialogMuted               string
+	DialogSelected            string
+	DialogButton              string
+	DialogCancel              string
+	NotificationBorder        string
+	NotificationTitle         string
+	NotificationBody          string
+	NotificationWarningBorder string
+	NotificationWarningTitle  string
+	NotificationErrorBorder   string
+	NotificationErrorTitle    string
 }
 
 type markdownTheme struct {
@@ -138,16 +142,20 @@ var themes = map[string]tuiTheme{
 		},
 		ProfileSelected: "#313244", // surface0
 		UI: uiTheme{
-			DialogBorder:       "#cdd6f4", // text, matches input border
-			DialogTitle:        "#cdd6f4", // text, matches composer text
-			DialogBody:         "#cdd6f4", // text
-			DialogMuted:        "#9399b2", // overlay2
-			DialogSelected:     "#313244", // surface0
-			DialogButton:       "#a6e3a1", // green
-			DialogCancel:       "#fab387", // peach
-			NotificationBorder: "#89b4fa", // blue
-			NotificationTitle:  "#94e2d5", // teal
-			NotificationBody:   "#cdd6f4", // text
+			DialogBorder:              "#cdd6f4", // text, matches input border
+			DialogTitle:               "#cdd6f4", // text, matches composer text
+			DialogBody:                "#cdd6f4", // text
+			DialogMuted:               "#9399b2", // overlay2
+			DialogSelected:            "#313244", // surface0
+			DialogButton:              "#a6e3a1", // green
+			DialogCancel:              "#fab387", // peach
+			NotificationBorder:        "#89b4fa", // blue
+			NotificationTitle:         "#94e2d5", // teal
+			NotificationBody:          "#cdd6f4", // text
+			NotificationWarningBorder: "#fab387", // peach
+			NotificationWarningTitle:  "#f9e2af", // yellow
+			NotificationErrorBorder:   "#f38ba8", // red
+			NotificationErrorTitle:    "#f38ba8", // red
 		},
 		Markdown: markdownTheme{
 			BlockQuote:            "#7f849c", // overlay1
@@ -223,16 +231,20 @@ var themes = map[string]tuiTheme{
 		},
 		ProfileSelected: "#444444",
 		UI: uiTheme{
-			DialogBorder:       "#afafff",
-			DialogTitle:        "#d7afff",
-			DialogBody:         "#d0d0d0",
-			DialogMuted:        "#808080",
-			DialogSelected:     "#303030",
-			DialogButton:       "#87d787",
-			DialogCancel:       "#ff5f5f",
-			NotificationBorder: "#afd7af",
-			NotificationTitle:  "#ffffaf",
-			NotificationBody:   "#d0d0d0",
+			DialogBorder:              "#afafff",
+			DialogTitle:               "#d7afff",
+			DialogBody:                "#d0d0d0",
+			DialogMuted:               "#808080",
+			DialogSelected:            "#303030",
+			DialogButton:              "#87d787",
+			DialogCancel:              "#ff5f5f",
+			NotificationBorder:        "#afd7af",
+			NotificationTitle:         "#ffffaf",
+			NotificationBody:          "#d0d0d0",
+			NotificationWarningBorder: "#ffffaf",
+			NotificationWarningTitle:  "#ffffaf",
+			NotificationErrorBorder:   "#ff5f5f",
+			NotificationErrorTitle:    "#ff5f5f",
 		},
 		Markdown: markdownTheme{
 			BlockQuote:            "#8a8a8a",
@@ -288,27 +300,31 @@ var (
 	steeringStyle      lipgloss.Style
 	steeringErrorStyle lipgloss.Style
 
-	inputBorderStyle             lipgloss.Style
-	inputLabelStyle              lipgloss.Style
-	inputPlaceholderStyle        lipgloss.Style
-	composerLabelStyle           lipgloss.Style
-	composerFlowStyle            lipgloss.Style
-	composerTextStyle            lipgloss.Style
-	composerCursorStyle          lipgloss.Style
-	slashCommandSelectedStyle    lipgloss.Style
-	slashCommandNameStyle        lipgloss.Style
-	slashCommandDescriptionStyle lipgloss.Style
-	slashCommandErrorStyle       lipgloss.Style
-	uiDialogBorderStyle          lipgloss.Style
-	uiDialogTitleStyle           lipgloss.Style
-	uiDialogBodyStyle            lipgloss.Style
-	uiDialogMutedStyle           lipgloss.Style
-	uiDialogSelectedStyle        lipgloss.Style
-	uiDialogButtonStyle          lipgloss.Style
-	uiDialogCancelStyle          lipgloss.Style
-	uiNotificationBorderStyle    lipgloss.Style
-	uiNotificationTitleStyle     lipgloss.Style
-	uiNotificationBodyStyle      lipgloss.Style
+	inputBorderStyle                 lipgloss.Style
+	inputLabelStyle                  lipgloss.Style
+	inputPlaceholderStyle            lipgloss.Style
+	composerLabelStyle               lipgloss.Style
+	composerFlowStyle                lipgloss.Style
+	composerTextStyle                lipgloss.Style
+	composerCursorStyle              lipgloss.Style
+	slashCommandSelectedStyle        lipgloss.Style
+	slashCommandNameStyle            lipgloss.Style
+	slashCommandDescriptionStyle     lipgloss.Style
+	slashCommandErrorStyle           lipgloss.Style
+	uiDialogBorderStyle              lipgloss.Style
+	uiDialogTitleStyle               lipgloss.Style
+	uiDialogBodyStyle                lipgloss.Style
+	uiDialogMutedStyle               lipgloss.Style
+	uiDialogSelectedStyle            lipgloss.Style
+	uiDialogButtonStyle              lipgloss.Style
+	uiDialogCancelStyle              lipgloss.Style
+	uiNotificationBorderStyle        lipgloss.Style
+	uiNotificationTitleStyle         lipgloss.Style
+	uiNotificationBodyStyle          lipgloss.Style
+	uiNotificationWarningBorderStyle lipgloss.Style
+	uiNotificationWarningTitleStyle  lipgloss.Style
+	uiNotificationErrorBorderStyle   lipgloss.Style
+	uiNotificationErrorTitleStyle    lipgloss.Style
 )
 
 func init() {
@@ -378,6 +394,10 @@ func applyTheme(theme tuiTheme) {
 	uiNotificationBorderStyle = lipgloss.NewStyle().Foreground(themeColor(theme.UI.NotificationBorder))
 	uiNotificationTitleStyle = lipgloss.NewStyle().Foreground(themeColor(theme.UI.NotificationTitle)).Bold(true)
 	uiNotificationBodyStyle = lipgloss.NewStyle().Foreground(themeColor(theme.UI.NotificationBody))
+	uiNotificationWarningBorderStyle = lipgloss.NewStyle().Foreground(themeColor(theme.UI.NotificationWarningBorder))
+	uiNotificationWarningTitleStyle = lipgloss.NewStyle().Foreground(themeColor(theme.UI.NotificationWarningTitle)).Bold(true)
+	uiNotificationErrorBorderStyle = lipgloss.NewStyle().Foreground(themeColor(theme.UI.NotificationErrorBorder))
+	uiNotificationErrorTitleStyle = lipgloss.NewStyle().Foreground(themeColor(theme.UI.NotificationErrorTitle)).Bold(true)
 }
 
 func themeColor(color string) lipgloss.Color {

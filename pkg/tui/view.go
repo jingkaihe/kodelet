@@ -377,8 +377,9 @@ func (m model) renderUINotification(notification uiNotification) string {
 	}
 	contentWidth := max(1, width-4)
 	lines := []string{}
+	borderStyle, titleStyle := uiNotificationStyles(notification.level)
 	if title := strings.TrimSpace(notification.title); title != "" {
-		lines = append(lines, renderPersistentStyle(uiNotificationTitleStyle, fitVisible(title, contentWidth)))
+		lines = append(lines, renderPersistentStyle(titleStyle, fitVisible(title, contentWidth)))
 	}
 	if message := strings.TrimSpace(notification.message); message != "" {
 		for _, line := range strings.Split(wrapText(message, contentWidth), "\n") {
@@ -389,14 +390,25 @@ func (m model) renderUINotification(notification uiNotification) string {
 		return ""
 	}
 
-	top := uiNotificationBorderStyle.Render("╭" + strings.Repeat("─", width-2) + "╮")
-	bottom := uiNotificationBorderStyle.Render("╰" + strings.Repeat("─", width-2) + "╯")
+	top := borderStyle.Render("╭" + strings.Repeat("─", width-2) + "╮")
+	bottom := borderStyle.Render("╰" + strings.Repeat("─", width-2) + "╯")
 	boxLines := []string{top}
 	for _, line := range lines {
-		boxLines = append(boxLines, uiNotificationBorderStyle.Render("│")+" "+padVisible(line, contentWidth)+" "+uiNotificationBorderStyle.Render("│"))
+		boxLines = append(boxLines, borderStyle.Render("│")+" "+padVisible(line, contentWidth)+" "+borderStyle.Render("│"))
 	}
 	boxLines = append(boxLines, bottom)
 	return strings.Join(boxLines, "\n")
+}
+
+func uiNotificationStyles(level uiNotificationLevel) (lipgloss.Style, lipgloss.Style) {
+	switch level {
+	case uiNotificationWarning:
+		return uiNotificationWarningBorderStyle, uiNotificationWarningTitleStyle
+	case uiNotificationError:
+		return uiNotificationErrorBorderStyle, uiNotificationErrorTitleStyle
+	default:
+		return uiNotificationBorderStyle, uiNotificationTitleStyle
+	}
 }
 
 func (m model) uiDialogWidth() int {

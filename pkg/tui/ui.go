@@ -45,9 +45,18 @@ type uiPromptState struct {
 
 type uiNotification struct {
 	id      int
+	level   uiNotificationLevel
 	title   string
 	message string
 }
+
+type uiNotificationLevel int
+
+const (
+	uiNotificationInfo uiNotificationLevel = iota
+	uiNotificationWarning
+	uiNotificationError
+)
 
 type uiPromptRequestMsg struct {
 	runID  int
