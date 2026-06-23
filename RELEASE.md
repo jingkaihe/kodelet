@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.4.41-beta
+
+Improved `kodelet chat` editor shortcut feedback by showing themed in-app notifications when `$EDITOR`/`$VISUAL` is unavailable, Kodelet is running, or the editor launch/read fails.
+
+Added severity-specific notification styling for info, warning, and error states in the terminal UI, with coverage for both bundled themes.
+
 ## 0.4.40-beta
 
 Added `kodelet chat`, a native terminal chat TUI with streaming responses, conversation resume/follow support, selectable themes, and no-tools/no-extension startup options.
