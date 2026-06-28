@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.4.42-beta
+
+Removed the unused Electron desktop shell, including desktop-specific source, packaging tasks, release workflow stubs, and development documentation.
+
 ## 0.4.41-beta
 
 Improved `kodelet chat` editor shortcut feedback by showing themed in-app notifications when `$EDITOR`/`$VISUAL` is unavailable, Kodelet is running, or the editor launch/read fails.
