@@ -57,6 +57,6 @@
     "access": "public"
   },
   "allowScripts": {
-    "esbuild@0.28.0": true
+    "esbuild@0.28.1": true
   }
 }

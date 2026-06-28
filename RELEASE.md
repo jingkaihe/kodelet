@@ -4,6 +4,8 @@
 
 Removed the unused Electron desktop shell, including desktop-specific source, packaging tasks, release workflow stubs, and development documentation.
 
+Updated the SDK's transitive `esbuild` dependency to 0.28.1 to address GHSA-g7r4-m6w7-qqqr.
+
 ## 0.4.41-beta
 
 Improved `kodelet chat` editor shortcut feedback by showing themed in-app notifications when `$EDITOR`/`$VISUAL` is unavailable, Kodelet is running, or the editor launch/read fails.
