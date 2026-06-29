@@ -23,6 +23,7 @@ require (
 	github.com/invopop/jsonschema v0.14.0
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/mark3labs/mcp-go v0.43.0
+	github.com/muesli/termenv v0.16.0
 	github.com/openai/openai-go/v3 v3.25.0
 	github.com/pkg/errors v0.9.1
 	github.com/rogpeppe/go-internal v1.14.1
@@ -85,7 +86,6 @@ require (
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/reflow v0.3.0 // indirect
-	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.3 // indirect
