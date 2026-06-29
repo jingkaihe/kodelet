@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -46,6 +47,64 @@ func TestStorePrunesToMaxEntriesPerScope(t *testing.T) {
 	require.Len(t, entries, MaxEntriesPerScope)
 	assert.Equal(t, "message-0005", entries[0].Text)
 	assert.Equal(t, fmt.Sprintf("message-%04d", MaxEntriesPerScope+4), entries[len(entries)-1].Text)
+}
+
+func TestStoreHandlesLargePersistedRecords(t *testing.T) {
+	ctx := context.Background()
+	store := NewStoreWithBasePath(t.TempDir())
+	scope := t.TempDir()
+	largeText := strings.Repeat("x", 1024*1024+64)
+
+	require.NoError(t, store.Append(ctx, Entry{ScopeCWD: scope, Text: largeText}))
+
+	entries, err := store.List(ctx, scope, MaxEntriesPerScope)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Len(t, entries[0].Text, len(largeText))
+
+	require.NoError(t, store.Append(ctx, Entry{ScopeCWD: scope, Text: "after large record"}))
+
+	entries, err = store.List(ctx, scope, MaxEntriesPerScope)
+	require.NoError(t, err)
+	require.Len(t, entries, 2)
+	assert.Len(t, entries[0].Text, len(largeText))
+	assert.Equal(t, "after large record", entries[1].Text)
+}
+
+func TestStoreSerializesConcurrentAppends(t *testing.T) {
+	ctx := context.Background()
+	store := NewStoreWithBasePath(t.TempDir())
+	scope := t.TempDir()
+	const count = 50
+
+	start := make(chan struct{})
+	errs := make(chan error, count)
+	var wg sync.WaitGroup
+	for i := 0; i < count; i++ {
+		text := fmt.Sprintf("message-%03d", i)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errs <- store.Append(ctx, Entry{ScopeCWD: scope, Text: text})
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	entries, err := store.List(ctx, scope, MaxEntriesPerScope)
+	require.NoError(t, err)
+	require.Len(t, entries, count)
+
+	expected := make([]string, 0, count)
+	for i := 0; i < count; i++ {
+		expected = append(expected, fmt.Sprintf("message-%03d", i))
+	}
+	assert.ElementsMatch(t, expected, entryTexts(entries))
 }
 
 func TestStoreUsesPrivatePermissions(t *testing.T) {

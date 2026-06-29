@@ -3,7 +3,7 @@
 package messagehistory
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -17,6 +17,7 @@ import (
 	conversationstore "github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/pkg/errors"
+	"github.com/rogpeppe/go-internal/lockedfile"
 )
 
 const (
@@ -97,19 +98,28 @@ func (s *Store) Append(ctx context.Context, entry Entry) error {
 		entry.Source = "tui"
 	}
 
-	entries, err := s.readEntries(entry.ScopeCWD)
-	if err != nil {
-		return err
-	}
-	if len(entries) > 0 && entries[len(entries)-1].Text == entry.Text {
-		return nil
-	}
-	entries = append(entries, entry)
-	if len(entries) > MaxEntriesPerScope {
-		entries = entries[len(entries)-MaxEntriesPerScope:]
+	path := s.pathForScope(entry.ScopeCWD)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return errors.Wrap(err, "failed to create message history directory")
 	}
 
-	return s.writeEntries(entry.ScopeCWD, entries)
+	if err := lockedfile.Transform(path, func(data []byte) ([]byte, error) {
+		entries := parseEntries(data)
+		if len(entries) > 0 && entries[len(entries)-1].Text == entry.Text {
+			return data, nil
+		}
+		entries = append(entries, entry)
+		if len(entries) > MaxEntriesPerScope {
+			entries = entries[len(entries)-MaxEntriesPerScope:]
+		}
+		return marshalEntries(entries)
+	}); err != nil {
+		return errors.Wrap(err, "failed to update message history")
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return errors.Wrap(err, "failed to set message history permissions")
+	}
+	return nil
 }
 
 // List returns up to limit newest entries for scopeCWD, in chronological order.
@@ -140,26 +150,26 @@ func (s *Store) List(ctx context.Context, scopeCWD string, limit int) ([]Entry, 
 
 func (s *Store) readEntries(scopeCWD string) ([]Entry, error) {
 	path := s.pathForScope(scopeCWD)
-	file, err := os.Open(path)
+	data, err := lockedfile.Read(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
-		return nil, errors.Wrap(err, "failed to open message history")
+		return nil, errors.Wrap(err, "failed to read message history")
 	}
-	defer file.Close()
 
+	return parseEntries(data), nil
+}
+
+func parseEntries(data []byte) []Entry {
 	entries := make([]Entry, 0)
-	scanner := bufio.NewScanner(file)
-	buffer := make([]byte, 0, 64*1024)
-	scanner.Buffer(buffer, 1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
+	for _, line := range bytes.Split(data, []byte{'\n'}) {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
 			continue
 		}
 		var entry Entry
-		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+		if err := json.Unmarshal(line, &entry); err != nil {
 			continue
 		}
 		entry.ScopeCWD = strings.TrimSpace(entry.ScopeCWD)
@@ -169,62 +179,24 @@ func (s *Store) readEntries(scopeCWD string) ([]Entry, error) {
 		}
 		entries = append(entries, entry)
 	}
-	if err := scanner.Err(); err != nil {
-		return nil, errors.Wrap(err, "failed to read message history")
-	}
-	return entries, nil
+	return entries
 }
 
-func (s *Store) writeEntries(scopeCWD string, entries []Entry) error {
-	path := s.pathForScope(scopeCWD)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return errors.Wrap(err, "failed to create message history directory")
-	}
-
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*.jsonl")
-	if err != nil {
-		return errors.Wrap(err, "failed to create message history temp file")
-	}
-	tmpPath := tmp.Name()
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.Remove(tmpPath)
-		}
-	}()
-
-	writer := bufio.NewWriter(tmp)
+func marshalEntries(entries []Entry) ([]byte, error) {
+	var buffer bytes.Buffer
 	for _, entry := range entries {
 		data, err := json.Marshal(entry)
 		if err != nil {
-			_ = tmp.Close()
-			return errors.Wrap(err, "failed to encode message history entry")
+			return nil, errors.Wrap(err, "failed to encode message history entry")
 		}
-		if _, err := writer.Write(data); err != nil {
-			_ = tmp.Close()
-			return errors.Wrap(err, "failed to write message history entry")
+		if _, err := buffer.Write(data); err != nil {
+			return nil, errors.Wrap(err, "failed to write message history entry")
 		}
-		if err := writer.WriteByte('\n'); err != nil {
-			_ = tmp.Close()
-			return errors.Wrap(err, "failed to write message history newline")
+		if err := buffer.WriteByte('\n'); err != nil {
+			return nil, errors.Wrap(err, "failed to write message history newline")
 		}
 	}
-	if err := writer.Flush(); err != nil {
-		_ = tmp.Close()
-		return errors.Wrap(err, "failed to flush message history")
-	}
-	if err := tmp.Chmod(0o600); err != nil {
-		_ = tmp.Close()
-		return errors.Wrap(err, "failed to set message history permissions")
-	}
-	if err := tmp.Close(); err != nil {
-		return errors.Wrap(err, "failed to close message history temp file")
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return errors.Wrap(err, "failed to replace message history")
-	}
-	cleanup = false
-	return nil
+	return buffer.Bytes(), nil
 }
 
 func (s *Store) pathForScope(scopeCWD string) string {

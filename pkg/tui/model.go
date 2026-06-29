@@ -95,7 +95,12 @@ func newModel(ctx context.Context, config Config) model {
 		}
 	}
 	messageHistoryStore, _ := messagehistory.NewStore()
-	messageHistoryScopeCWD, _ := messagehistory.ResolveScopeCWD(cwd)
+	conversationID := strings.TrimSpace(config.ConversationID)
+	initialHistoryPending := conversationID != ""
+	var messageHistoryScopeCWD string
+	if !initialHistoryPending {
+		messageHistoryScopeCWD, _ = messagehistory.ResolveScopeCWD(cwd)
+	}
 	profile := displayProfile(config.Profile)
 	profileOptionsInput := config.ProfileOptions
 	if len(profileOptionsInput) == 0 {
@@ -111,7 +116,7 @@ func newModel(ctx context.Context, config Config) model {
 		ctx:                    mctx,
 		cancel:                 cancel,
 		runner:                 runner,
-		conversationID:         strings.TrimSpace(config.ConversationID),
+		conversationID:         conversationID,
 		profile:                profile,
 		profileOptions:         profileOptions,
 		profileIndex:           profileIndex,
@@ -119,6 +124,7 @@ func newModel(ctx context.Context, config Config) model {
 		requestedCWD:           requestedCWD,
 		messageHistoryStore:    messageHistoryStore,
 		messageHistoryScopeCWD: messageHistoryScopeCWD,
+		initialHistoryPending:  initialHistoryPending,
 		theme:                  theme,
 		slashCommandIndex:      -1,
 		viewport:               vp,

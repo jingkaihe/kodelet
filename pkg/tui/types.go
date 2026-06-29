@@ -124,6 +124,7 @@ type model struct {
 
 	messageHistoryStore    *messagehistory.Store
 	messageHistoryScopeCWD string
+	initialHistoryPending  bool
 	messageHistory         []string
 	historySearch          *historySearchState
 

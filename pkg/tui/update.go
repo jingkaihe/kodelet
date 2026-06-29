@@ -149,6 +149,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case initialHistoryMsg:
+		m.initialHistoryPending = false
 		if msg.err != nil {
 			m.err = msg.err
 			m.status = "history load failed"
@@ -167,14 +168,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.setProfile(msg.profile)
 				m.profilePickerOpen = false
 			}
-			if len(m.entries) != 0 {
-				m.refreshViewport(true)
-				break
-			}
 			if strings.TrimSpace(msg.cwd) != "" {
 				reloadSlashCommands = strings.TrimSpace(m.requestedCWD) == "" && strings.TrimSpace(m.cwd) != strings.TrimSpace(msg.cwd)
 				m.cwd = strings.TrimSpace(msg.cwd)
-				reloadMessageHistory = m.updateMessageHistoryScopeForCWD()
+				reloadMessageHistory = m.updateMessageHistoryScope(m.cwd)
+			}
+			if len(m.entries) != 0 {
+				m.refreshViewport(true)
+				if reloadSlashCommands {
+					cmds = append(cmds, loadSlashCommands(m.ctx, m.slashCommandCWD()))
+				}
+				if reloadMessageHistory != nil {
+					cmds = append(cmds, reloadMessageHistory)
+				}
+				break
 			}
 			if len(msg.entries) > 0 {
 				m.entries = msg.entries

@@ -9,6 +9,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	convdb "github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
+	"github.com/jingkaihe/kodelet/pkg/messagehistory"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -189,20 +190,66 @@ func TestInitialHistoryUpdatesDisplayedCWDForEmptyConversation(t *testing.T) {
 	assert.Equal(t, "/tmp/project", m.cwd)
 }
 
-func TestInitialHistoryDoesNotClobberDisplayedCWDForActiveRun(t *testing.T) {
-	m := newModel(context.Background(), Config{ConversationID: "conversation-123456789", CWD: "/tmp/shell"})
+func TestInitialHistoryRefreshesCWDAndScopeForActiveRun(t *testing.T) {
+	shell := t.TempDir()
+	project := t.TempDir()
+	projectScope, err := messagehistory.ResolveScopeCWD(project)
+	require.NoError(t, err)
+
+	m := newModel(context.Background(), Config{ConversationID: "conversation-123456789", CWD: shell})
 	t.Cleanup(m.cancel)
 	m.running = true
 	m.entries = []chatEntry{{kind: entryUser, content: "local prompt"}}
+	m.messageHistory = []string{"local prompt"}
+	m.historySearch = &historySearchState{query: "local"}
 
 	updated, _ := m.Update(initialHistoryMsg{
 		loaded:  true,
 		entries: []chatEntry{{kind: entryUser, content: "old prompt"}},
-		cwd:     "/tmp/project",
+		cwd:     project,
 	})
 	m = updated.(model)
 
-	assert.Equal(t, "/tmp/shell", m.cwd)
+	assert.Equal(t, project, m.cwd)
+	assert.Equal(t, projectScope, m.messageHistoryScopeCWD)
+	assert.Nil(t, m.messageHistory)
+	assert.Nil(t, m.historySearch)
+	assert.Equal(t, []chatEntry{{kind: entryUser, content: "local prompt"}}, m.entries)
+}
+
+func TestFastSubmitBeforeInitialHistoryPersistsToStoredConversationScope(t *testing.T) {
+	ctx := context.Background()
+	basePath := setupTUIConversationStore(ctx, t)
+	shell := t.TempDir()
+	project := t.TempDir()
+
+	store, err := conversations.GetConversationStore(ctx)
+	require.NoError(t, err)
+	record := convtypes.NewConversationRecord("conversation-123456789")
+	record.CWD = project
+	require.NoError(t, store.Save(ctx, record))
+	require.NoError(t, store.Close())
+
+	runner := &recordingRunner{conversationID: record.ID}
+	m := newModel(ctx, Config{ConversationID: record.ID, CWD: shell, Runner: runner})
+	t.Cleanup(m.cancel)
+	assert.True(t, m.initialHistoryPending)
+	assert.Empty(t, m.messageHistoryScopeCWD)
+
+	m.textarea.SetValue(" fast prompt ")
+	cmd := m.submit()
+	require.NotNil(t, cmd)
+	_ = cmd()
+
+	historyStore := messagehistory.NewStoreWithBasePath(basePath)
+	projectEntries, err := historyStore.List(ctx, project, messagehistory.MaxEntriesPerScope)
+	require.NoError(t, err)
+	require.Len(t, projectEntries, 1)
+	assert.Equal(t, "fast prompt", projectEntries[0].Text)
+
+	shellEntries, err := historyStore.List(ctx, shell, messagehistory.MaxEntriesPerScope)
+	require.NoError(t, err)
+	assert.Empty(t, shellEntries)
 }
 
 func TestInitialHistorySeedsEmptyTranscript(t *testing.T) {

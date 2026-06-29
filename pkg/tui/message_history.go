@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/messagehistory"
 )
 
@@ -32,8 +33,8 @@ func loadMessageHistory(ctx context.Context, store *messagehistory.Store, scopeC
 	}
 }
 
-func (m *model) updateMessageHistoryScopeForCWD() tea.Cmd {
-	scopeCWD, err := messagehistory.ResolveScopeCWD(m.cwd)
+func (m *model) updateMessageHistoryScope(cwd string) tea.Cmd {
+	scopeCWD, err := messagehistory.ResolveScopeCWD(cwd)
 	if err != nil || strings.TrimSpace(scopeCWD) == "" || scopeCWD == m.messageHistoryScopeCWD {
 		return nil
 	}
@@ -48,7 +49,7 @@ func (m *model) appendSubmittedMessageToHistory(message string) {
 	if message == "" {
 		return
 	}
-	if strings.TrimSpace(m.messageHistoryScopeCWD) == "" {
+	if strings.TrimSpace(m.messageHistoryScopeCWD) == "" && !m.initialHistoryPending {
 		if scopeCWD, err := messagehistory.ResolveScopeCWD(m.cwd); err == nil {
 			m.messageHistoryScopeCWD = scopeCWD
 		}
@@ -60,22 +61,46 @@ func (m *model) persistSubmittedMessageCommand(message string) tea.Cmd {
 	message = strings.TrimSpace(message)
 	store := m.messageHistoryStore
 	scopeCWD := strings.TrimSpace(m.messageHistoryScopeCWD)
-	if store == nil || scopeCWD == "" || message == "" {
+	if store == nil || message == "" {
 		return nil
 	}
+	conversationID := strings.TrimSpace(m.conversationID)
+	profile := strings.TrimSpace(m.profile)
 
-	entry := messagehistory.Entry{
-		CreatedAt:      time.Now().UTC(),
-		ScopeCWD:       scopeCWD,
-		ConversationID: strings.TrimSpace(m.conversationID),
-		Profile:        strings.TrimSpace(m.profile),
-		Source:         "tui",
-		Text:           message,
-	}
 	return func() tea.Msg {
+		if scopeCWD == "" {
+			scopeCWD = resolveStoredMessageHistoryScope(context.Background(), conversationID)
+		}
+		if scopeCWD == "" {
+			return nil
+		}
+		entry := messagehistory.Entry{
+			CreatedAt:      time.Now().UTC(),
+			ScopeCWD:       scopeCWD,
+			ConversationID: conversationID,
+			Profile:        profile,
+			Source:         "tui",
+			Text:           message,
+		}
 		_ = store.Append(context.Background(), entry)
 		return nil
 	}
+}
+
+func resolveStoredMessageHistoryScope(ctx context.Context, conversationID string) string {
+	if strings.TrimSpace(conversationID) != "" {
+		service, err := conversations.GetDefaultConversationService(ctx)
+		if err == nil {
+			response, loadErr := service.GetConversation(ctx, conversationID)
+			_ = service.Close()
+			if loadErr == nil && strings.TrimSpace(response.CWD) != "" {
+				if scopeCWD, err := messagehistory.ResolveScopeCWD(response.CWD); err == nil {
+					return scopeCWD
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func (m *model) prependMessageHistoryTexts(messages []string) {
