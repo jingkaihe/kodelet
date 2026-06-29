@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.4.43-beta
+
+Added persistent message history for `kodelet chat`, including Ctrl+R reverse search so previous sent messages can be found and reused from the terminal UI.
+
+Updated Codex platform pricing metadata with standard and fast/priority service-tier rates, while keeping flat short-context pricing for the ChatGPT-backed Codex endpoint.
+
+Improved Web UI streaming controls by preallocating new conversation IDs, enabling stop/steer controls immediately for locally running conversations, and keeping sidebar running state in sync.
+
 ## 0.4.42-beta
 
 Removed the unused Electron desktop shell, including desktop-specific source, packaging tasks, release workflow stubs, and development documentation.
