@@ -1627,6 +1627,39 @@ func TestLoadCustomConfigurationDefaultPlatform(t *testing.T) {
 	assert.True(t, hasGPT4o, "gpt-4o pricing should be present")
 }
 
+func TestLoadCustomConfigurationCodexPlatformUsesConfiguredServiceTierPricing(t *testing.T) {
+	standardModels, standardPricing := loadCustomConfiguration(llmtypes.Config{
+		OpenAI: &llmtypes.OpenAIConfig{Platform: "codex"},
+	})
+	fastModels, fastPricing := loadCustomConfiguration(llmtypes.Config{
+		OpenAI: &llmtypes.OpenAIConfig{
+			Platform:    "codex",
+			ServiceTier: llmtypes.OpenAIServiceTierFast,
+		},
+	})
+
+	assert.Equal(t, "reasoning", standardModels["gpt-5.3-codex"])
+	assert.Equal(t, standardModels, fastModels)
+
+	standardCodex := standardPricing["gpt-5.3-codex"]
+	assert.Equal(t, 0.00000175, standardCodex.Input)
+	assert.Equal(t, 0.000000175, standardCodex.CachedInput)
+	assert.Equal(t, 0.000014, standardCodex.Output)
+	assert.Equal(t, 0, standardCodex.LongContextThreshold)
+
+	fastCodex := fastPricing["gpt-5.3-codex"]
+	assert.Equal(t, 0.0000035, fastCodex.Input)
+	assert.Equal(t, 0.00000035, fastCodex.CachedInput)
+	assert.Equal(t, 0.000028, fastCodex.Output)
+	assert.Equal(t, 272_000, fastCodex.ContextWindow)
+
+	fastGPT55 := fastPricing["gpt-5.5"]
+	assert.Equal(t, 0.0000125, fastGPT55.Input)
+	assert.Equal(t, 0.00000125, fastGPT55.CachedInput)
+	assert.Equal(t, 0.000075, fastGPT55.Output)
+	assert.Equal(t, 0, fastGPT55.LongContextThreshold)
+}
+
 func TestAddUserMessageAppendsInputItems(t *testing.T) {
 	os.Setenv("OPENAI_API_KEY", "test-key")
 	defer os.Unsetenv("OPENAI_API_KEY")

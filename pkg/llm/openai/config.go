@@ -104,7 +104,7 @@ func loadCustomConfiguration(config llmtypes.Config) (*llmtypes.CustomModels, ll
 
 	platformName := resolvePlatformForLoading(config)
 	if platformName != "" {
-		platformModels, platformPricing := loadPlatformDefaults(platformName)
+		platformModels, platformPricing := loadPlatformDefaultsForConfig(platformName, config)
 		models = platformModels
 		pricing = platformPricing
 	}
@@ -146,11 +146,19 @@ func loadCustomConfiguration(config llmtypes.Config) (*llmtypes.CustomModels, ll
 
 // loadPlatformDefaults loads built-in defaults for known OpenAI-compatible platforms.
 func loadPlatformDefaults(platformName string) (*llmtypes.CustomModels, llmtypes.CustomPricing) {
+	return loadPlatformDefaultsForServiceTier(platformName, "")
+}
+
+func loadPlatformDefaultsForConfig(platformName string, config llmtypes.Config) (*llmtypes.CustomModels, llmtypes.CustomPricing) {
+	return loadPlatformDefaultsForServiceTier(platformName, normalizeServiceTier(config))
+}
+
+func loadPlatformDefaultsForServiceTier(platformName string, serviceTier llmtypes.OpenAIServiceTier) (*llmtypes.CustomModels, llmtypes.CustomPricing) {
 	switch normalizePlatformName(platformName) {
 	case "openai":
 		return loadOpenAIPlatformDefaults()
 	case "codex":
-		return loadCodexPlatformDefaults()
+		return loadCodexPlatformDefaultsForServiceTier(serviceTier)
 	case "copilot":
 		return loadCopilotPlatformDefaults()
 	default:
@@ -200,13 +208,17 @@ func loadOpenAIPlatformDefaults() (*llmtypes.CustomModels, llmtypes.CustomPricin
 }
 
 func loadCodexPlatformDefaults() (*llmtypes.CustomModels, llmtypes.CustomPricing) {
+	return loadCodexPlatformDefaultsForServiceTier("")
+}
+
+func loadCodexPlatformDefaultsForServiceTier(serviceTier llmtypes.OpenAIServiceTier) (*llmtypes.CustomModels, llmtypes.CustomPricing) {
 	models := &llmtypes.CustomModels{
 		Reasoning:    codexpreset.Models.Reasoning,
 		NonReasoning: codexpreset.Models.NonReasoning,
 	}
 
 	pricing := make(llmtypes.CustomPricing)
-	for model, codexPricing := range codexpreset.Pricing {
+	for model, codexPricing := range codexpreset.PricingForServiceTier(serviceTier) {
 		pricing[model] = llmtypes.ModelPricing{
 			Input:                  codexPricing.Input,
 			CachedInput:            codexPricing.CachedInput,

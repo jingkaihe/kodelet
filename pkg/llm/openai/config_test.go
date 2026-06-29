@@ -169,38 +169,71 @@ func TestLoadCodexPlatformDefaults(t *testing.T) {
 
 	gpt55Pricing, exists := pricing["gpt-5.5"]
 	require.True(t, exists)
-	assert.Equal(t, 0.0, gpt55Pricing.Input)
-	assert.Equal(t, 0.0, gpt55Pricing.Output)
+	assert.Equal(t, 0.000005, gpt55Pricing.Input)
+	assert.Equal(t, 0.0000005, gpt55Pricing.CachedInput)
+	assert.Equal(t, 0.00003, gpt55Pricing.Output)
+	assert.Equal(t, 0, gpt55Pricing.LongContextThreshold)
 	assert.Equal(t, 272_000, gpt55Pricing.ContextWindow)
 
 	gpt54Pricing, exists := pricing["gpt-5.4"]
 	require.True(t, exists)
-	assert.Equal(t, 0.0, gpt54Pricing.Input)
-	assert.Equal(t, 0.0, gpt54Pricing.Output)
+	assert.Equal(t, 0.0000025, gpt54Pricing.Input)
+	assert.Equal(t, 0.00000025, gpt54Pricing.CachedInput)
+	assert.Equal(t, 0.000015, gpt54Pricing.Output)
+	assert.Equal(t, 0, gpt54Pricing.LongContextThreshold)
 	assert.Equal(t, 272_000, gpt54Pricing.ContextWindow)
 
 	miniPricing, exists := pricing["gpt-5.4-mini"]
 	require.True(t, exists)
-	assert.Equal(t, 0.0, miniPricing.Input)
-	assert.Equal(t, 0.0, miniPricing.Output)
+	assert.Equal(t, 0.00000075, miniPricing.Input)
+	assert.Equal(t, 0.000000075, miniPricing.CachedInput)
+	assert.Equal(t, 0.0000045, miniPricing.Output)
 	assert.Equal(t, 272_000, miniPricing.ContextWindow)
 
 	sparkPricing, exists := pricing["gpt-5.3-codex-spark"]
 	require.True(t, exists)
-	assert.Equal(t, 0.0, sparkPricing.Input)
-	assert.Equal(t, 0.0, sparkPricing.Output)
+	assert.Equal(t, 0.00000175, sparkPricing.Input)
+	assert.Equal(t, 0.000000175, sparkPricing.CachedInput)
+	assert.Equal(t, 0.000014, sparkPricing.Output)
 	assert.Equal(t, 128_000, sparkPricing.ContextWindow)
 
 	legacyPricing, exists := pricing["gpt-5.1-codex-mini"]
 	require.True(t, exists)
-	assert.Equal(t, 0.0, legacyPricing.Input)
-	assert.Equal(t, 0.0, legacyPricing.Output)
+	assert.Equal(t, 0.00000025, legacyPricing.Input)
+	assert.Equal(t, 0.000000025, legacyPricing.CachedInput)
+	assert.Equal(t, 0.000002, legacyPricing.Output)
 	assert.Equal(t, 272_000, legacyPricing.ContextWindow)
 
 	for _, model := range models.Reasoning {
 		_, exists := pricing[model]
 		assert.True(t, exists, "Model %s should have pricing information", model)
 	}
+}
+
+func TestLoadCodexPlatformDefaultsFastTier(t *testing.T) {
+	models, pricing := loadCustomConfiguration(llmtypes.Config{
+		OpenAI: &llmtypes.OpenAIConfig{
+			Platform:    "codex",
+			ServiceTier: llmtypes.OpenAIServiceTierFast,
+		},
+	})
+
+	require.NotNil(t, models)
+	require.NotNil(t, pricing)
+
+	gpt53CodexPricing, exists := pricing["gpt-5.3-codex"]
+	require.True(t, exists)
+	assert.Equal(t, 0.0000035, gpt53CodexPricing.Input)
+	assert.Equal(t, 0.00000035, gpt53CodexPricing.CachedInput)
+	assert.Equal(t, 0.000028, gpt53CodexPricing.Output)
+	assert.Equal(t, 272_000, gpt53CodexPricing.ContextWindow)
+
+	gpt55Pricing, exists := pricing["gpt-5.5"]
+	require.True(t, exists)
+	assert.Equal(t, 0.0000125, gpt55Pricing.Input)
+	assert.Equal(t, 0.00000125, gpt55Pricing.CachedInput)
+	assert.Equal(t, 0.000075, gpt55Pricing.Output)
+	assert.Equal(t, 0, gpt55Pricing.LongContextThreshold)
 }
 
 func TestBuildCopilotPlatformDefaults(t *testing.T) {

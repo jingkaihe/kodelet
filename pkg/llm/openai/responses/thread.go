@@ -1529,7 +1529,7 @@ func loadCustomConfiguration(config llmtypes.Config) (map[string]string, map[str
 
 	platformName := resolvePlatformForLoading(config)
 	if platformName != "" {
-		platformModels, platformPricing := loadPlatformDefaults(platformName)
+		platformModels, platformPricing := loadPlatformDefaultsForConfig(platformName, config)
 		for model, category := range platformModels {
 			customModels[model] = category
 		}
@@ -1689,11 +1689,19 @@ func errorLoggingMiddleware(log *logrus.Entry) option.RequestOption {
 
 // loadPlatformDefaults loads built-in defaults for known OpenAI-compatible platforms.
 func loadPlatformDefaults(platformName string) (map[string]string, map[string]llmtypes.ModelPricing) {
+	return loadPlatformDefaultsForServiceTier(platformName, "")
+}
+
+func loadPlatformDefaultsForConfig(platformName string, config llmtypes.Config) (map[string]string, map[string]llmtypes.ModelPricing) {
+	return loadPlatformDefaultsForServiceTier(platformName, normalizeServiceTier(config))
+}
+
+func loadPlatformDefaultsForServiceTier(platformName string, serviceTier llmtypes.OpenAIServiceTier) (map[string]string, map[string]llmtypes.ModelPricing) {
 	switch normalizePlatformName(platformName) {
 	case "openai":
 		return loadPlatformDefaultsFromConfig(openaipreset.Models, openaipreset.Pricing)
 	case "codex":
-		return loadPlatformDefaultsFromConfig(codexpreset.Models, codexpreset.Pricing)
+		return loadPlatformDefaultsFromConfig(codexpreset.Models, codexpreset.PricingForServiceTier(serviceTier))
 	case "copilot":
 		models, pricing, err := copilotdefaults.LoadPlatformDefaults(context.Background())
 		if err == nil {
