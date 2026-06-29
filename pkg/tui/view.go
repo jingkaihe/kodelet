@@ -245,13 +245,13 @@ func (m model) renderHistorySearch() string {
 
 	query := m.historySearch.query
 	labelText := "reverse-i-search: "
-	label := renderPersistentStyle(composerLabelStyle, labelText)
+	label := renderPersistentStyle(historySearchLabelStyle, labelText)
 	available := max(1, width-lipgloss.Width(labelText))
 	queryDisplay := query
 	if strings.TrimSpace(query) != "" && len(m.historySearch.matches) == 0 {
-		queryDisplay = query + "  " + renderPersistentStyle(slashCommandErrorStyle, "no matches")
+		queryDisplay = query + "  " + renderPersistentStyle(historySearchErrorStyle, "no matches")
 	}
-	queryText := renderPersistentStyle(composerTextStyle, fitVisible(queryDisplay, available))
+	queryText := renderPersistentStyle(historySearchQueryStyle, fitVisible(queryDisplay, available))
 	return padVisible(label+queryText, width)
 }
 

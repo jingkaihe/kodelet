@@ -938,14 +938,16 @@ func TestHistorySearchRenderingUsesSingleThemedLine(t *testing.T) {
 	assert.NotContains(t, rendered, "1/1")
 	assert.NotContains(t, rendered, "run themed tests")
 	assert.NotContains(t, rendered, "\n")
-	labelStart, _ := styleSequences(composerLabelStyle)
+	labelStart, _ := styleSequences(historySearchLabelStyle)
 	assert.Contains(t, rendered, labelStart)
+	queryStart, _ := styleSequences(historySearchQueryStyle)
+	assert.Contains(t, rendered, queryStart)
 
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" missing")})
 	m = updated.(model)
 	rendered = m.renderHistorySearch()
 	assert.Contains(t, rendered, "no matches")
-	errorStart, _ := styleSequences(slashCommandErrorStyle)
+	errorStart, _ := styleSequences(historySearchErrorStyle)
 	assert.Contains(t, rendered, errorStart)
 }
 

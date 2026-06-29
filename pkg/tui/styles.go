@@ -36,6 +36,7 @@ type tuiTheme struct {
 	ComposerText     string
 	ComposerCursor   string
 	SlashCommand     slashCommandTheme
+	HistorySearch    historySearchTheme
 	ProfileColors    []string
 	ProfileSelected  string
 	UI               uiTheme
@@ -48,6 +49,12 @@ type slashCommandTheme struct {
 	Description string
 	Hint        string
 	Error       string
+}
+
+type historySearchTheme struct {
+	Label string
+	Query string
+	Error string
 }
 
 type uiTheme struct {
@@ -129,6 +136,11 @@ var themes = map[string]tuiTheme{
 			Description: "#9399b2", // overlay2
 			Hint:        "#9399b2", // overlay2
 			Error:       "#f38ba8", // red
+		},
+		HistorySearch: historySearchTheme{
+			Label: "#9399b2", // overlay2
+			Query: "#cdd6f4", // text
+			Error: "#f38ba8", // red
 		},
 		ProfileColors: []string{
 			"#89b4fa", // blue
@@ -218,6 +230,11 @@ var themes = map[string]tuiTheme{
 			Description: "#808080",
 			Hint:        "#808080",
 			Error:       "#ff5f5f",
+		},
+		HistorySearch: historySearchTheme{
+			Label: "#808080",
+			Query: "#d0d0d0",
+			Error: "#ff5f5f",
 		},
 		ProfileColors: []string{
 			"#afafff",
@@ -311,6 +328,9 @@ var (
 	slashCommandNameStyle            lipgloss.Style
 	slashCommandDescriptionStyle     lipgloss.Style
 	slashCommandErrorStyle           lipgloss.Style
+	historySearchLabelStyle          lipgloss.Style
+	historySearchQueryStyle          lipgloss.Style
+	historySearchErrorStyle          lipgloss.Style
 	uiDialogBorderStyle              lipgloss.Style
 	uiDialogTitleStyle               lipgloss.Style
 	uiDialogBodyStyle                lipgloss.Style
@@ -384,6 +404,9 @@ func applyTheme(theme tuiTheme) {
 	slashCommandNameStyle = lipgloss.NewStyle().Foreground(themeColor(theme.SlashCommand.Command))
 	slashCommandDescriptionStyle = lipgloss.NewStyle().Foreground(themeColor(theme.SlashCommand.Description))
 	slashCommandErrorStyle = lipgloss.NewStyle().Foreground(themeColor(theme.SlashCommand.Error))
+	historySearchLabelStyle = lipgloss.NewStyle().Foreground(themeColor(theme.HistorySearch.Label))
+	historySearchQueryStyle = lipgloss.NewStyle().Foreground(themeColor(theme.HistorySearch.Query))
+	historySearchErrorStyle = lipgloss.NewStyle().Foreground(themeColor(theme.HistorySearch.Error))
 	uiDialogBorderStyle = lipgloss.NewStyle().Foreground(themeColor(theme.UI.DialogBorder))
 	uiDialogTitleStyle = lipgloss.NewStyle().Foreground(themeColor(theme.UI.DialogTitle)).Bold(true)
 	uiDialogBodyStyle = lipgloss.NewStyle().Foreground(themeColor(theme.UI.DialogBody))
