@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	xansi "github.com/charmbracelet/x/ansi"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
+	"github.com/jingkaihe/kodelet/pkg/messagehistory"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -107,7 +108,7 @@ func TestWaitForMsgAndInitCommands(t *testing.T) {
 	initMsg := m.Init()()
 	batch, ok := initMsg.(tea.BatchMsg)
 	require.True(t, ok)
-	assert.Len(t, batch, 5)
+	assert.Len(t, batch, 6)
 }
 
 func TestUpdateIgnoresStaleRunEvents(t *testing.T) {
@@ -820,6 +821,132 @@ func TestSubmitStartsRunAndStreamsRunnerMessages(t *testing.T) {
 		Profile:        "work",
 		CWD:            "/tmp",
 	}, runner.req)
+}
+
+func TestSubmitRecordsAndPersistsRawMessageHistory(t *testing.T) {
+	basePath := t.TempDir()
+	workspace := t.TempDir()
+	runner := &recordingRunner{conversationID: "conversation-done"}
+	m := newModel(context.Background(), Config{ConversationID: "conversation-123", Profile: "work", CWD: workspace, Runner: runner})
+	t.Cleanup(m.cancel)
+	m.messageHistoryStore = messagehistory.NewStoreWithBasePath(basePath)
+	m.messageHistoryScopeCWD = workspace
+	m.width = 100
+	m.height = 30
+	m.resize()
+	m.textarea.SetValue(" /goal ship raw history ")
+
+	cmd := m.submit()
+	require.NotNil(t, cmd)
+
+	assert.Equal(t, []string{"/goal ship raw history"}, m.messageHistory)
+	assert.Equal(t, chatEntry{kind: entryUser, content: "Objective: ship raw history"}, m.entries[0])
+
+	assert.Nil(t, cmd())
+	entries, err := m.messageHistoryStore.List(context.Background(), workspace, messagehistory.MaxEntriesPerScope)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "/goal ship raw history", entries[0].Text)
+	assert.Equal(t, "conversation-123", entries[0].ConversationID)
+	assert.Equal(t, "work", entries[0].Profile)
+}
+
+func TestHistorySearchOpensSearchesCyclesAcceptsAndCancels(t *testing.T) {
+	m := newModel(context.Background(), Config{CWD: t.TempDir()})
+	t.Cleanup(m.cancel)
+	m.width = 100
+	m.height = 30
+	m.messageHistory = []string{
+		"run unit tests",
+		"check git status",
+		"run frontend tests",
+		"run unit tests",
+		"how many cores and rams on this machine?",
+	}
+	m.textarea.SetValue("draft")
+	m.resize()
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	m = updated.(model)
+	assert.Nil(t, cmd)
+	require.NotNil(t, m.historySearch)
+	assert.Equal(t, "draft", m.textarea.Value())
+	assert.Equal(t, 1, m.historySearchHeight())
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("run")})
+	m = updated.(model)
+	assert.Equal(t, "run unit tests", m.textarea.Value())
+	require.NotNil(t, m.historySearch)
+	assert.Equal(t, []string{"run unit tests", "run frontend tests"}, m.historySearch.matches)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	m = updated.(model)
+	assert.Equal(t, "run frontend tests", m.textarea.Value())
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(model)
+	assert.Equal(t, "run unit tests", m.textarea.Value())
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	m = updated.(model)
+	assert.Equal(t, "run frontend tests", m.textarea.Value())
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	assert.Nil(t, m.historySearch)
+	assert.Equal(t, "run frontend tests", m.textarea.Value())
+
+	m.textarea.SetValue("another draft")
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	m = updated.(model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("missing")})
+	m = updated.(model)
+	assert.Equal(t, "another draft", m.textarea.Value())
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(model)
+	assert.Nil(t, m.historySearch)
+	assert.Equal(t, "another draft", m.textarea.Value())
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	m = updated.(model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("many")})
+	m = updated.(model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune(" ")})
+	m = updated.(model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("cores")})
+	m = updated.(model)
+	assert.Equal(t, "many cores", m.historySearch.query)
+	assert.Equal(t, "how many cores and rams on this machine?", m.textarea.Value())
+}
+
+func TestHistorySearchRenderingUsesSingleThemedLine(t *testing.T) {
+	m := newModel(context.Background(), Config{CWD: t.TempDir(), Theme: "tokyo-night"})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.messageHistory = []string{"run themed tests"}
+	m.resize()
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	m = updated.(model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("theme")})
+	m = updated.(model)
+
+	rendered := m.renderHistorySearch()
+	assert.Contains(t, rendered, "reverse-i-search:")
+	assert.Contains(t, rendered, "theme")
+	assert.NotContains(t, rendered, "1/1")
+	assert.NotContains(t, rendered, "run themed tests")
+	assert.NotContains(t, rendered, "\n")
+	labelStart, _ := styleSequences(composerLabelStyle)
+	assert.Contains(t, rendered, labelStart)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" missing")})
+	m = updated.(model)
+	rendered = m.renderHistorySearch()
+	assert.Contains(t, rendered, "no matches")
+	errorStart, _ := styleSequences(slashCommandErrorStyle)
+	assert.Contains(t, rendered, errorStart)
 }
 
 func TestSubmitGoalSlashCommandDisplaysObjectiveImmediately(t *testing.T) {

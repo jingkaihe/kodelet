@@ -162,6 +162,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 		} else if msg.loaded {
 			reloadSlashCommands := false
+			var reloadMessageHistory tea.Cmd
 			if strings.TrimSpace(m.conversationID) != "" {
 				m.setProfile(msg.profile)
 				m.profilePickerOpen = false
@@ -173,14 +174,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if strings.TrimSpace(msg.cwd) != "" {
 				reloadSlashCommands = strings.TrimSpace(m.requestedCWD) == "" && strings.TrimSpace(m.cwd) != strings.TrimSpace(msg.cwd)
 				m.cwd = strings.TrimSpace(msg.cwd)
+				reloadMessageHistory = m.updateMessageHistoryScopeForCWD()
 			}
 			if len(msg.entries) > 0 {
 				m.entries = msg.entries
 				m.usage = msg.usage
 				m.status = fmt.Sprintf("resumed %s", shortID(m.conversationID))
+				m.prependMessageHistoryTexts(userMessagesFromEntries(msg.entries))
 			}
 			if reloadSlashCommands {
 				cmds = append(cmds, loadSlashCommands(m.ctx, m.slashCommandCWD()))
+			}
+			if reloadMessageHistory != nil {
+				cmds = append(cmds, reloadMessageHistory)
 			}
 		}
 		m.refreshViewport(true)
@@ -200,6 +206,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resize()
 		m.refreshViewport(false)
 
+	case messageHistoryMsg:
+		if strings.TrimSpace(msg.scopeCWD) != strings.TrimSpace(m.messageHistoryScopeCWD) {
+			break
+		}
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = "history unavailable"
+			break
+		}
+		m.appendMessageHistoryTexts(msg.messages)
+
 	case tea.KeyMsg:
 		key := msg.String()
 		if m.shortcutsOpen {
@@ -216,6 +233,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd := m.updateUIPromptKey(msg)
 			return m, cmd
 		}
+		if m.historySearch != nil {
+			m.updateHistorySearchKey(msg)
+			m.resize()
+			return m, nil
+		}
 		switch key {
 		case "ctrl+c", "ctrl+d":
 			if m.running {
@@ -228,6 +250,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cancel()
 			return m, tea.Quit
 		case "esc":
+			if m.historySearch != nil {
+				m.cancelHistorySearch()
+				m.resize()
+				m.refreshViewport(false)
+				return m, nil
+			}
 			if m.slashCommandSuggestionsOpen() {
 				m.dismissSlashCommandSuggestions()
 				m.resize()
@@ -259,6 +287,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if cmd := m.openComposerInEditor(); cmd != nil {
 				return m, cmd
 			}
+			return m, nil
+		case "ctrl+r":
+			m.openHistorySearch()
+			m.resize()
+			m.refreshViewport(false)
 			return m, nil
 		case "?":
 			if strings.TrimSpace(m.textarea.Value()) == "" {
@@ -688,10 +721,11 @@ func (m *model) resize() {
 		return
 	}
 	inputOuterHeight := inputHeight + 2
+	historySearchHeight := m.historySearchHeight()
 	slashCommandHeight := m.slashCommandSuggestionsHeight()
 	profilePickerHeight := m.profilePickerHeight()
 	footerHeight := 0
-	viewportHeight := m.height - inputOuterHeight - slashCommandHeight - profilePickerHeight - footerHeight
+	viewportHeight := m.height - inputOuterHeight - historySearchHeight - slashCommandHeight - profilePickerHeight - footerHeight
 	if viewportHeight < 1 {
 		viewportHeight = 1
 	}
@@ -716,6 +750,8 @@ func (m *model) submit() tea.Cmd {
 	}
 
 	m.textarea.Reset()
+	m.appendSubmittedMessageToHistory(message)
+	persistMessageHistory := m.persistSubmittedMessageCommand(message)
 	m.entries = append(m.entries, chatEntry{kind: entryUser, content: userDisplayMessage(message)})
 	m.running = true
 	m.workingFrame = 0
@@ -740,6 +776,9 @@ func (m *model) submit() tea.Cmd {
 	}
 
 	return func() tea.Msg {
+		if persistMessageHistory != nil {
+			_ = persistMessageHistory()
+		}
 		go func() {
 			defer uiBroker.close()
 			conversationID, err := runner.Run(runCtx, req, tuiSink{ch: runCh, runID: runID})
@@ -762,7 +801,7 @@ func (m model) slashCommandQuery() (string, bool) {
 }
 
 func (m model) slashCommandSuggestionsOpen() bool {
-	if m.running || m.profilePickerOpen {
+	if m.running || m.profilePickerOpen || m.historySearch != nil {
 		return false
 	}
 	if m.textarea.Value() == m.slashDismissedDraft {

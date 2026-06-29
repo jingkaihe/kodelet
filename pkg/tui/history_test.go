@@ -229,6 +229,26 @@ func TestInitialHistorySeedsEmptyTranscript(t *testing.T) {
 	assert.Contains(t, content, "old answer")
 }
 
+func TestInitialHistoryPrependsUserMessagesToSearchHistory(t *testing.T) {
+	m := newModel(context.Background(), Config{ConversationID: "conversation-123456789"})
+	t.Cleanup(m.cancel)
+	m.messageHistory = []string{"newer persisted prompt"}
+	m.width = 100
+	m.height = 30
+	m.resize()
+
+	updated, _ := m.Update(initialHistoryMsg{
+		loaded: true,
+		entries: []chatEntry{
+			{kind: entryUser, content: "old prompt"},
+			{kind: entryAssistant, blocks: []assistantBlock{{kind: blockText, text: "old answer"}}},
+		},
+	})
+	m = updated.(model)
+
+	assert.Equal(t, []string{"old prompt", "newer persisted prompt"}, m.messageHistory)
+}
+
 func TestEntriesFromHistoryBuildsTextThinkingAndToolBlocks(t *testing.T) {
 	entries := entriesFromHistory([]conversations.StreamableMessage{
 		{Kind: "text", Role: "user", Content: "  hello  "},

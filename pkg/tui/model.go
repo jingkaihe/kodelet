@@ -15,6 +15,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
+	"github.com/jingkaihe/kodelet/pkg/messagehistory"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/pkg/errors"
 )
@@ -93,6 +94,8 @@ func newModel(ctx context.Context, config Config) model {
 			cwd = wd
 		}
 	}
+	messageHistoryStore, _ := messagehistory.NewStore()
+	messageHistoryScopeCWD, _ := messagehistory.ResolveScopeCWD(cwd)
 	profile := displayProfile(config.Profile)
 	profileOptionsInput := config.ProfileOptions
 	if len(profileOptionsInput) == 0 {
@@ -105,23 +108,25 @@ func newModel(ctx context.Context, config Config) model {
 	}
 
 	return model{
-		ctx:               mctx,
-		cancel:            cancel,
-		runner:            runner,
-		conversationID:    strings.TrimSpace(config.ConversationID),
-		profile:           profile,
-		profileOptions:    profileOptions,
-		profileIndex:      profileIndex,
-		cwd:               cwd,
-		requestedCWD:      requestedCWD,
-		theme:             theme,
-		slashCommandIndex: -1,
-		viewport:          vp,
-		textarea:          ta,
-		spinner:           sp,
-		autoFollow:        true,
-		runCh:             make(chan tea.Msg, 256),
-		status:            "ready",
+		ctx:                    mctx,
+		cancel:                 cancel,
+		runner:                 runner,
+		conversationID:         strings.TrimSpace(config.ConversationID),
+		profile:                profile,
+		profileOptions:         profileOptions,
+		profileIndex:           profileIndex,
+		cwd:                    cwd,
+		requestedCWD:           requestedCWD,
+		messageHistoryStore:    messageHistoryStore,
+		messageHistoryScopeCWD: messageHistoryScopeCWD,
+		theme:                  theme,
+		slashCommandIndex:      -1,
+		viewport:               vp,
+		textarea:               ta,
+		spinner:                sp,
+		autoFollow:             true,
+		runCh:                  make(chan tea.Msg, 256),
+		status:                 "ready",
 	}
 }
 
@@ -131,6 +136,7 @@ func (m model) Init() tea.Cmd {
 		m.spinner.Tick,
 		waitForMsg(m.runCh),
 		loadInitialHistory(m.ctx, m.conversationID),
+		loadMessageHistory(m.ctx, m.messageHistoryStore, m.messageHistoryScopeCWD),
 		loadSlashCommands(m.ctx, m.slashCommandCWD()),
 	)
 }

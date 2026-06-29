@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
+	"github.com/jingkaihe/kodelet/pkg/messagehistory"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -84,6 +85,13 @@ type chatEntry struct {
 	blocks  []assistantBlock
 }
 
+type historySearchState struct {
+	originalDraft string
+	query         string
+	matches       []string
+	selected      int
+}
+
 type detailRegion struct {
 	entryIndex  int
 	blockIndex  int
@@ -113,6 +121,11 @@ type model struct {
 	slashCommandIndex   int
 	slashCommandErr     error
 	slashDismissedDraft string
+
+	messageHistoryStore    *messagehistory.Store
+	messageHistoryScopeCWD string
+	messageHistory         []string
+	historySearch          *historySearchState
 
 	viewport viewport.Model
 	textarea textarea.Model
@@ -179,6 +192,12 @@ type slashCommandsMsg struct {
 	commands       []slashcommands.Command
 	extensionsOnly bool
 	err            error
+}
+
+type messageHistoryMsg struct {
+	scopeCWD string
+	messages []string
+	err      error
 }
 
 type editorFinishedMsg struct {

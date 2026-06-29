@@ -1687,11 +1687,6 @@ func errorLoggingMiddleware(log *logrus.Entry) option.RequestOption {
 	})
 }
 
-// loadPlatformDefaults loads built-in defaults for known OpenAI-compatible platforms.
-func loadPlatformDefaults(platformName string) (map[string]string, map[string]llmtypes.ModelPricing) {
-	return loadPlatformDefaultsForServiceTier(platformName, "")
-}
-
 func loadPlatformDefaultsForConfig(platformName string, config llmtypes.Config) (map[string]string, map[string]llmtypes.ModelPricing) {
 	return loadPlatformDefaultsForServiceTier(platformName, normalizeServiceTier(config))
 }

@@ -48,10 +48,14 @@ func (m model) View() string {
 	}
 
 	transcript := m.viewport.View()
+	historySearch := m.renderHistorySearch()
 	slashSuggestions := m.renderSlashCommandSuggestions()
 	picker := m.renderProfilePicker()
 	input := m.renderInputBox()
 	parts := []string{transcript}
+	if strings.TrimSpace(historySearch) != "" {
+		parts = append(parts, historySearch)
+	}
 	if strings.TrimSpace(slashSuggestions) != "" {
 		parts = append(parts, slashSuggestions)
 	}
@@ -145,6 +149,7 @@ func (m model) renderShortcutsDialog() string {
 		{shortcut: "Enter", description: "Send message"},
 		{shortcut: "Shift+Enter", description: "Insert newline"},
 		{shortcut: "Ctrl+G", description: "Edit draft in $EDITOR"},
+		{shortcut: "Ctrl+R", description: "Search previous sent messages"},
 		{shortcut: "Ctrl+T", description: "Change profile before starting"},
 		{shortcut: "Ctrl+O", description: "Toggle thought/tool details"},
 		{shortcut: "PgUp/PgDown", description: "Scroll transcript"},
@@ -227,6 +232,27 @@ func (m model) renderSlashCommandSuggestions() string {
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+func (m model) renderHistorySearch() string {
+	if m.historySearch == nil {
+		return ""
+	}
+	width := m.historySearchWidth()
+	if width <= 0 {
+		return ""
+	}
+
+	query := m.historySearch.query
+	labelText := "reverse-i-search: "
+	label := renderPersistentStyle(composerLabelStyle, labelText)
+	available := max(1, width-lipgloss.Width(labelText))
+	queryDisplay := query
+	if strings.TrimSpace(query) != "" && len(m.historySearch.matches) == 0 {
+		queryDisplay = query + "  " + renderPersistentStyle(slashCommandErrorStyle, "no matches")
+	}
+	queryText := renderPersistentStyle(composerTextStyle, fitVisible(queryDisplay, available))
+	return padVisible(label+queryText, width)
 }
 
 func (m model) renderUIDialog() string {
@@ -495,8 +521,19 @@ func (m model) slashCommandSuggestionsWidth() int {
 	return m.inputOuterWidth()
 }
 
+func (m model) historySearchWidth() int {
+	return m.inputOuterWidth()
+}
+
+func (m model) historySearchHeight() int {
+	if m.historySearch == nil {
+		return 0
+	}
+	return 1
+}
+
 func (m model) maxSlashCommandSuggestions() int {
-	availableHeight := m.height - inputHeight - 2 - m.profilePickerHeight() - 1
+	availableHeight := m.height - inputHeight - 2 - m.profilePickerHeight() - m.historySearchHeight() - 1
 	if availableHeight < 1 {
 		return 1
 	}

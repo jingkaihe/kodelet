@@ -144,11 +144,6 @@ func loadCustomConfiguration(config llmtypes.Config) (*llmtypes.CustomModels, ll
 	return models, pricing
 }
 
-// loadPlatformDefaults loads built-in defaults for known OpenAI-compatible platforms.
-func loadPlatformDefaults(platformName string) (*llmtypes.CustomModels, llmtypes.CustomPricing) {
-	return loadPlatformDefaultsForServiceTier(platformName, "")
-}
-
 func loadPlatformDefaultsForConfig(platformName string, config llmtypes.Config) (*llmtypes.CustomModels, llmtypes.CustomPricing) {
 	return loadPlatformDefaultsForServiceTier(platformName, normalizeServiceTier(config))
 }
