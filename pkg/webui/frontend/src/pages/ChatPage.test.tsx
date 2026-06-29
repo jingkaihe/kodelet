@@ -2078,7 +2078,7 @@ describe("ChatPage", () => {
 		await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/"));
 	});
 
-	it("does not queue steering before the stream shows another backend turn is possible", async () => {
+	it("queues steering immediately while a conversation is streaming", async () => {
 		routeParams = { id: "conv-123" };
 		mockGetConversation.mockResolvedValue({
 			id: "conv-123",
@@ -2111,23 +2111,31 @@ describe("ChatPage", () => {
 
 		await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
 
-		const steerButton = screen.getByRole("button", { name: "Steer" });
+		const steerButton = await screen.findByRole("button", { name: "Steer" });
 		expect(steerButton).toBeDisabled();
 
 		const textarea = screen.getByPlaceholderText(
-			"Add your guidance here...",
+			"Steer the active conversation…",
 		);
 		fireEvent.change(textarea, { target: { value: "Focus on tests" } });
-		fireEvent.keyDown(textarea, {
-			key: "Enter",
-			shiftKey: false,
-			preventDefault: vi.fn(),
-		});
+		await waitFor(() => expect(steerButton).toBeEnabled());
+		fireEvent.click(steerButton);
 
-		expect(mockSteerConversation).not.toHaveBeenCalled();
+		await waitFor(() =>
+			expect(mockSteerConversation).toHaveBeenCalledWith(
+				"conv-123",
+				"Focus on tests",
+				expect.arrayContaining([
+					expect.objectContaining({
+						type: "text",
+						text: "Focus on tests",
+					}),
+				]),
+			),
+		);
 	});
 
-	it("keeps stop unavailable until a new conversation receives a server id", async () => {
+	it("preallocates a conversation id for a new conversation", async () => {
 		mockStreamChat.mockImplementation(async () => new Promise(() => undefined));
 
 		render(<ChatPage />);
@@ -2141,9 +2149,15 @@ describe("ChatPage", () => {
 
 		await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
 
-		expect(mockStreamChat.mock.calls[0]?.[0]?.conversationId).toBeUndefined();
-		expect(screen.getByRole("button", { name: "Starting…" })).toBeDisabled();
-		expect(screen.getByTestId("sidebar-new-chat-button")).toBeDisabled();
+		const preallocatedId = mockStreamChat.mock.calls[0]?.[0]?.conversationId;
+		expect(preallocatedId).toMatch(/^\d{8}T\d{6}-[a-f0-9]{16}$/);
+		expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
+		expect(mockNavigate).toHaveBeenCalledWith(`/c/${preallocatedId}`, {
+			replace: true,
+		});
+		await waitFor(() =>
+			expect(screen.getByTestId("sidebar-new-chat-button")).toBeEnabled(),
+		);
 		expect(mockStopConversation).not.toHaveBeenCalled();
 	});
 
