@@ -426,6 +426,8 @@ const ChatPage: React.FC = () => {
 		startX: number;
 		startWidth: number;
 	} | null>(null);
+	const sidebarWidthRef = useRef(sidebarWidth);
+	const sidebarShellRef = useRef<HTMLDivElement | null>(null);
 	const cwdInputRef = useRef<HTMLInputElement | null>(null);
 	const newChatDialogRef = useRef<HTMLDivElement | null>(null);
 
@@ -834,11 +836,16 @@ const ChatPage: React.FC = () => {
 			const nextWidth = clampSidebarWidth(
 				resizeStart.startWidth + (event.clientX - resizeStart.startX),
 			);
-			setSidebarWidth(nextWidth);
+			sidebarWidthRef.current = nextWidth;
+			sidebarShellRef.current?.style.setProperty(
+				"--sidebar-width",
+				`${nextWidth}px`,
+			);
 		};
 
 		const stopResizing = () => {
 			sidebarResizeStartRef.current = null;
+			setSidebarWidth(sidebarWidthRef.current);
 			setIsResizingSidebar(false);
 		};
 
@@ -1233,6 +1240,7 @@ const ChatPage: React.FC = () => {
 
 	const handleSidebarResizeStart = (event: React.MouseEvent<HTMLElement>) => {
 		event.preventDefault();
+		sidebarWidthRef.current = sidebarWidth;
 		sidebarResizeStartRef.current = {
 			startX: event.clientX,
 			startWidth: sidebarWidth,
@@ -2235,6 +2243,7 @@ const ChatPage: React.FC = () => {
 					<div
 						className="fixed inset-y-0 left-0 z-40 w-[min(85vw,360px)] max-w-full shrink-0 lg:sticky lg:top-0 lg:relative lg:z-20 lg:h-[100dvh] lg:w-[var(--sidebar-width)] lg:self-start"
 						data-testid="chat-sidebar-shell"
+						ref={sidebarShellRef}
 						style={
 							{ "--sidebar-width": `${sidebarWidth}px` } as React.CSSProperties
 						}
