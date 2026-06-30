@@ -190,25 +190,12 @@ h6 {
 }
 
 .chat-main-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(157, 151, 139, 0.64) transparent;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 .chat-main-scroll::-webkit-scrollbar {
-  width: 0.58rem;
-}
-
-.chat-main-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.chat-main-scroll::-webkit-scrollbar-thumb {
-  border-radius: 9999px;
-  background: rgba(157, 151, 139, 0.42);
-}
-
-.chat-main-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(138, 132, 119, 0.58);
+  display: none;
 }
 
 .composer-dock {
@@ -2504,28 +2491,12 @@ code[class*="language-"] {
   flex-direction: column;
   gap: 0.35rem;
   margin-bottom: 0.4rem;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(157, 151, 139, 0.72) transparent;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 .conversation-list::-webkit-scrollbar {
-  width: 0.55rem;
-}
-
-.conversation-list::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.conversation-list::-webkit-scrollbar-thumb {
-  border-radius: 9999px;
-  border: 2px solid transparent;
-  background: rgba(157, 151, 139, 0.68);
-  background-clip: padding-box;
-}
-
-.conversation-list::-webkit-scrollbar-thumb:hover {
-  background: rgba(134, 128, 117, 0.84);
-  background-clip: padding-box;
+  display: none;
 }
 
 .conversation-link-row {
@@ -2820,46 +2791,6 @@ code[class*="language-"] {
   top: 1rem;
   left: 0.75rem;
   z-index: 40;
-}
-
-.sidebar-splitter {
-  width: 1.35rem;
-  z-index: 10;
-}
-
-.sidebar-splitter-rail {
-  position: absolute;
-  inset-block: 0;
-  left: 50%;
-  width: 1px;
-  transform: translateX(-50%);
-  background: rgba(20, 20, 19, 0.08);
-}
-
-.sidebar-splitter-grip {
-  position: relative;
-  width: 0.5rem;
-  height: 5.25rem;
-  border-radius: 999px;
-  background: rgb(236 231 220);
-  box-shadow: 0 0 0 1px rgba(20, 20, 19, 0.1);
-  transition:
-    background-color 140ms ease,
-    box-shadow 140ms ease,
-    transform 140ms ease;
-}
-
-.sidebar-splitter:hover .sidebar-splitter-grip,
-.sidebar-splitter.is-resizing .sidebar-splitter-grip {
-  background: rgb(229 221 208);
-  box-shadow: 0 0 0 1px rgba(20, 20, 19, 0.16);
-  transform: scaleX(1.08);
-}
-
-@media (min-width: 1024px) {
-  .sidebar-splitter:hover {
-    cursor: col-resize;
-  }
 }
 
 .bash-tool-brief {

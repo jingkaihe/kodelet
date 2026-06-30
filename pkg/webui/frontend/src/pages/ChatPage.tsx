@@ -35,7 +35,6 @@ import type {
 	UISelectRequestEvent,
 } from "../types";
 import {
-	cn,
 	debounce,
 	formatCompactRelativeTime,
 	formatContextWindow,
@@ -93,10 +92,6 @@ const getGreeting = (): string => {
 	return "Good evening";
 };
 
-const DEFAULT_SIDEBAR_WIDTH = 320;
-const MIN_SIDEBAR_WIDTH = 260;
-const MAX_SIDEBAR_WIDTH = 520;
-const SIDEBAR_WIDTH_STORAGE_KEY = "kodelet.chat.sidebar.width";
 const SIDEBAR_VISIBLE_STORAGE_KEY = "kodelet.chat.sidebar.visible";
 const MAX_IMAGE_ATTACHMENTS = 10;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -193,9 +188,6 @@ const buildUserContent = (
 		},
 	})),
 ];
-
-const clampSidebarWidth = (width: number): number =>
-	Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, width));
 
 const isScrolledNearBottom = (element: HTMLElement): boolean =>
 	element.scrollHeight - element.scrollTop - element.clientHeight <=
@@ -327,22 +319,6 @@ const upsertConversationSummary = (
 	return merged;
 };
 
-const readStoredSidebarWidth = (): number => {
-	if (typeof window === "undefined") {
-		return DEFAULT_SIDEBAR_WIDTH;
-	}
-
-	const storedWidth = window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
-	if (storedWidth === null) {
-		return DEFAULT_SIDEBAR_WIDTH;
-	}
-
-	const parsedWidth = Number(storedWidth);
-	return Number.isFinite(parsedWidth)
-		? clampSidebarWidth(parsedWidth)
-		: DEFAULT_SIDEBAR_WIDTH;
-};
-
 const readStoredSidebarVisible = (): boolean => {
 	if (typeof window === "undefined") {
 		return true;
@@ -399,8 +375,6 @@ const ChatPage: React.FC = () => {
 	const [sidebarVisible, setSidebarVisible] = useState(
 		readStoredSidebarVisible,
 	);
-	const [sidebarWidth, setSidebarWidth] = useState(readStoredSidebarWidth);
-	const [isResizingSidebar, setIsResizingSidebar] = useState(false);
 	const [newChatDialogOpen, setNewChatDialogOpen] = useState(false);
 	const [uiRequestDialog, setUIRequestDialog] =
 		useState<UIRequestDialogState | null>(null);
@@ -422,10 +396,6 @@ const ChatPage: React.FC = () => {
 	const viewedConversationIdRef = useRef<string | null>(conversationId);
 	const conversationPathOverrideRef = useRef<string | null>(null);
 	const routerConversationIdRef = useRef<string | null>(conversationId);
-	const sidebarResizeStartRef = useRef<{
-		startX: number;
-		startWidth: number;
-	} | null>(null);
 	const cwdInputRef = useRef<HTMLInputElement | null>(null);
 	const newChatDialogRef = useRef<HTMLDivElement | null>(null);
 
@@ -809,13 +779,6 @@ const ChatPage: React.FC = () => {
 	}, [sidebarVisible]);
 
 	useEffect(() => {
-		window.localStorage.setItem(
-			SIDEBAR_WIDTH_STORAGE_KEY,
-			String(sidebarWidth),
-		);
-	}, [sidebarWidth]);
-
-	useEffect(() => {
 		const interval = window.setInterval(() => {
 			setStatusTick((current) => current + 1);
 		}, 30000);
@@ -824,44 +787,6 @@ const ChatPage: React.FC = () => {
 			window.clearInterval(interval);
 		};
 	}, []);
-
-	useEffect(() => {
-		if (!isResizingSidebar) {
-			return undefined;
-		}
-
-		const previousUserSelect = document.body.style.userSelect;
-		const previousCursor = document.body.style.cursor;
-		document.body.style.userSelect = "none";
-		document.body.style.cursor = "col-resize";
-
-		const handleMouseMove = (event: MouseEvent) => {
-			const resizeStart = sidebarResizeStartRef.current;
-			if (!resizeStart) {
-				return;
-			}
-
-			const nextWidth = clampSidebarWidth(
-				resizeStart.startWidth + (event.clientX - resizeStart.startX),
-			);
-			setSidebarWidth(nextWidth);
-		};
-
-		const stopResizing = () => {
-			sidebarResizeStartRef.current = null;
-			setIsResizingSidebar(false);
-		};
-
-		window.addEventListener("mousemove", handleMouseMove);
-		window.addEventListener("mouseup", stopResizing);
-
-		return () => {
-			document.body.style.userSelect = previousUserSelect;
-			document.body.style.cursor = previousCursor;
-			window.removeEventListener("mousemove", handleMouseMove);
-			window.removeEventListener("mouseup", stopResizing);
-		};
-	}, [isResizingSidebar]);
 
 	useEffect(() => {
 		if (
@@ -1229,19 +1154,6 @@ const ChatPage: React.FC = () => {
 
 	const handleSidebarToggle = () => {
 		setSidebarVisible((currentValue) => !currentValue);
-	};
-
-	const handleSidebarResizeStart = (event: React.MouseEvent<HTMLElement>) => {
-		event.preventDefault();
-		sidebarResizeStartRef.current = {
-			startX: event.clientX,
-			startWidth: sidebarWidth,
-		};
-		setIsResizingSidebar(true);
-	};
-
-	const handleSidebarResizeDoubleClick = () => {
-		setSidebarVisible(false);
 	};
 
 	const updatePathForStartedConversation = (streamedId: string) => {
@@ -2234,16 +2146,11 @@ const ChatPage: React.FC = () => {
 				/>
 			) : null}
 
-			<div
-				className={cn("h-[100dvh] lg:flex", isResizingSidebar && "select-none")}
-			>
+			<div className="h-[100dvh] lg:flex">
 				{sidebarVisible ? (
 					<div
-						className="fixed inset-y-0 left-0 z-40 w-[min(85vw,360px)] max-w-full shrink-0 lg:sticky lg:top-0 lg:relative lg:z-20 lg:h-[100dvh] lg:self-start lg:w-[var(--sidebar-width)]"
+						className="fixed inset-y-0 left-0 z-40 w-[min(85vw,360px)] max-w-full shrink-0 lg:sticky lg:top-0 lg:relative lg:z-20 lg:h-[100dvh] lg:w-80 lg:self-start"
 						data-testid="chat-sidebar-shell"
-						style={
-							{ "--sidebar-width": `${sidebarWidth}px` } as React.CSSProperties
-						}
 					>
 						<ChatSidebar
 							activeConversationId={conversationId}
@@ -2256,23 +2163,6 @@ const ChatPage: React.FC = () => {
 							onNewChat={handleNewChat}
 							onSelectConversation={handleSelectConversation}
 						/>
-
-						<div
-							aria-label="Resize sidebar"
-							aria-orientation="vertical"
-							className={cn(
-								"sidebar-splitter absolute bottom-0 right-0 top-0 z-10 hidden translate-x-1/2 cursor-col-resize items-center justify-center lg:flex",
-								isResizingSidebar && "is-resizing",
-							)}
-							data-testid="chat-sidebar-resizer"
-							onDoubleClick={handleSidebarResizeDoubleClick}
-							onMouseDown={handleSidebarResizeStart}
-							role="separator"
-							tabIndex={-1}
-						>
-							<span className="sidebar-splitter-rail" />
-							<span className="sidebar-splitter-grip" />
-						</div>
 					</div>
 				) : null}
 
