@@ -1584,7 +1584,7 @@ h6 {
   background:
     linear-gradient(90deg, rgba(20, 20, 19, 0.035), transparent 0.75rem),
     linear-gradient(180deg, rgba(247, 243, 235, 0.8), rgba(238, 232, 221, 0.9));
-  padding: 0.6rem 0.62rem 0.6rem 0.72rem;
+  padding: 0.42rem 0.62rem 0.6rem 0.72rem;
 }
 
 .workspace-tools-rail {
@@ -1610,14 +1610,14 @@ h6 {
   align-items: center;
   gap: 0.35rem;
   border-bottom: 1px solid rgba(20, 20, 19, 0.055);
-  padding: 0.1rem 0.15rem 0.45rem;
+  padding: 0 0.15rem 0.28rem;
 }
 
 .workspace-tools-tab {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 2.15rem;
+  min-height: 1.8rem;
   border: 0;
   border-radius: 0.75rem;
   background: transparent;
@@ -1988,7 +1988,7 @@ h6 {
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1023px) {
   .new-chat-dialog-grid {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -2005,7 +2005,7 @@ h6 {
   .workspace-tools-shell.is-open {
     position: fixed;
     inset: 0 0 0 auto;
-    z-index: 70;
+    z-index: 60;
     width: 3.25rem;
     max-width: none;
     flex-basis: auto;
