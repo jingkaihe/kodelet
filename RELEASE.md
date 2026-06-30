@@ -1,8 +1,14 @@
 # Kodelet
 
-## unreleased
+## 0.4.45-beta
 
 Added Claude Sonnet 5 pricing metadata with family-based alias matching and updated Anthropic SDK support.
+
+Moved the Web UI terminal and git diff from composer-launched modals into a right-side workspace tools panel with terminal/changes tabs and a compact toggle rail.
+
+Improved the embedded Web UI terminal sizing so it refits to the side panel after layout, resize, replay, and font-load changes.
+
+Refined chat sidebar resizing, collapsed-rail spacing, empty-state typography, and hidden scrollbars for a cleaner workspace layout.
 
 Refined the Web UI chat composer dock spacing so the sticky footer relies on the inner content container for horizontal padding.
 
