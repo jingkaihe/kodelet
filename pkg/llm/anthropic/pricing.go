@@ -24,7 +24,6 @@ type ModelPricing struct {
 
 // ModelPricingMap maps model names to their pricing information
 var ModelPricingMap = map[anthropic.Model]ModelPricing{
-	// Claude Sonnet 5 standard pricing, effective September 1, 2026.
 	anthropic.ModelClaudeSonnet5: {
 		Input:                0.000003,   // $3.00 per million tokens
 		Output:               0.000015,   // $15.00 per million tokens

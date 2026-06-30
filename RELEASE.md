@@ -1,5 +1,11 @@
 # Kodelet
 
+## unreleased
+
+Added Claude Sonnet 5 pricing metadata with family-based alias matching and updated Anthropic SDK support.
+
+Refined the Web UI chat composer dock spacing so the sticky footer relies on the inner content container for horizontal padding.
+
 ## 0.4.43-beta
 
 Added persistent message history for `kodelet chat`, including Ctrl+R reverse search so previous sent messages can be found and reused from the terminal UI.
