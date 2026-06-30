@@ -200,6 +200,37 @@ describe("ChatPage", () => {
 		expect(screen.getByTestId("chat-sidebar-shell")).toBeInTheDocument();
 	});
 
+	it("resizes the sidebar width from the transparent edge handle", async () => {
+		render(<ChatPage />);
+
+		await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
+
+		const sidebarShell = screen.getByTestId("chat-sidebar-shell");
+		expect(sidebarShell.style.getPropertyValue("--sidebar-width")).toBe(
+			"320px",
+		);
+		expect(screen.getByTestId("chat-sidebar-resizer")).toHaveClass(
+			"sidebar-resize-edge",
+		);
+
+		fireEvent.mouseDown(screen.getByTestId("chat-sidebar-resizer"), {
+			clientX: 320,
+		});
+
+		await waitFor(() => expect(document.body.style.cursor).toBe("col-resize"));
+
+		fireEvent.mouseMove(window, { clientX: 420 });
+		fireEvent.mouseUp(window);
+
+		await waitFor(() =>
+			expect(
+				screen
+					.getByTestId("chat-sidebar-shell")
+					.style.getPropertyValue("--sidebar-width"),
+			).toBe("420px"),
+		);
+	});
+
 	it("includes pasted image attachments in the streamed chat request", async () => {
 		mockStreamChat.mockResolvedValue(undefined);
 
