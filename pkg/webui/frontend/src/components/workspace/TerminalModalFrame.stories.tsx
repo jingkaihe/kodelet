@@ -12,7 +12,7 @@ const terminalPreview = (
 );
 
 const meta = {
-  title: 'Workspace/TerminalModalFrame',
+  title: 'Workspace/TerminalPanelFrame',
   component: TerminalModalFrame,
   parameters: {
     layout: 'fullscreen',
@@ -22,12 +22,7 @@ const meta = {
     currentStatus: 'Connected',
     cwdLabel: '/home/jingkaihe/workspace/kodelet',
     statusVariant: 'live',
-    terminalSize: {
-      width: 980,
-      height: 620,
-    },
     onClose: fn(),
-    onResizeStart: fn(),
   },
 } satisfies Meta<typeof TerminalModalFrame>;
 

@@ -1,24 +1,23 @@
 import React from 'react';
-import { copyToClipboard, truncateMiddle } from '../../utils';
+import { Copy, RefreshCw } from 'lucide-react';
+import { copyToClipboard } from '../../utils';
 import { parseUnifiedDiff, ReferenceDiffBlock } from '../tool-renderers/reference';
 import type { GitDiffResponse } from '../../types';
 
 interface GitDiffModalProps {
-  cwdLabel: string;
+  cwdLabel?: string;
   error: string | null;
   gitDiff: GitDiffResponse | null;
   loading: boolean;
-  onClose: () => void;
+  onClose?: () => void;
   open: boolean;
   onRefresh: () => void;
 }
 
 const GitDiffModal: React.FC<GitDiffModalProps> = ({
-  cwdLabel,
   error,
   gitDiff,
   loading,
-  onClose,
   open,
   onRefresh,
 }) => {
@@ -30,55 +29,50 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({
   const diffLines = diffText ? parseUnifiedDiff(diffText) : [];
 
   return (
-    <div className="workspace-modal-backdrop" data-testid="git-diff-modal-backdrop">
-      <div
-        aria-label="Git diff"
-        className="workspace-modal workspace-modal-wide surface-panel"
-        data-testid="git-diff-modal"
-        role="dialog"
-      >
-        <div className="workspace-modal-header">
-          <div className="workspace-modal-heading-group">
-            <h2 className="workspace-modal-title">Git diff</h2>
-            <p className="workspace-modal-copy" title={cwdLabel}>
-              {truncateMiddle(cwdLabel, 92)}
-            </p>
-          </div>
+    <section
+      aria-label="Changes"
+      className="workspace-side-panel workspace-diff-panel surface-panel"
+      data-testid="git-diff-panel"
+      role="complementary"
+    >
+      {error ? (
+        <div className="surface-panel rounded-2xl border-kodelet-orange/20 px-4 py-3 text-sm text-kodelet-dark" role="alert">
+          {error}
+        </div>
+      ) : null}
 
-          <div className="workspace-modal-actions">
-            {gitDiff?.has_diff && !loading ? (
-              <button className="composer-capsule" onClick={() => void copyToClipboard(diffText)} type="button">
-                Copy diff
+      <div className="workspace-modal-body workspace-side-panel-body">
+        {loading ? (
+          <div className="workspace-modal-placeholder">Loading diff…</div>
+        ) : gitDiff?.has_diff ? (
+          <div className="workspace-modal-scroll-region" data-testid="git-diff-content">
+            <div className="workspace-diff-floating-actions" aria-label="Diff actions">
+              <button
+                aria-label="Copy diff"
+                className="workspace-diff-icon-button"
+                onClick={() => void copyToClipboard(diffText)}
+                title="Copy diff"
+                type="button"
+              >
+                <Copy aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
               </button>
-            ) : null}
-            <button className="composer-capsule" onClick={onRefresh} type="button">
-              Refresh
-            </button>
-            <button className="composer-capsule" onClick={onClose} type="button">
-              Close
-            </button>
-          </div>
-        </div>
-
-        {error ? (
-          <div className="surface-panel rounded-2xl border-kodelet-orange/20 px-4 py-3 text-sm text-kodelet-dark" role="alert">
-            {error}
-          </div>
-        ) : null}
-
-        <div className="workspace-modal-body">
-          {loading ? (
-            <div className="workspace-modal-placeholder">Loading diff…</div>
-          ) : gitDiff?.has_diff ? (
-            <div className="workspace-modal-scroll-region" data-testid="git-diff-content">
-              <ReferenceDiffBlock lines={diffLines} />
+              <button
+                aria-label="Refresh diff"
+                className="workspace-diff-icon-button"
+                onClick={onRefresh}
+                title="Refresh diff"
+                type="button"
+              >
+                <RefreshCw aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
+              </button>
             </div>
-          ) : (
-            <div className="workspace-modal-placeholder">No working tree changes in this repository.</div>
-          )}
-        </div>
+            <ReferenceDiffBlock lines={diffLines} />
+          </div>
+        ) : (
+          <div className="workspace-modal-placeholder">No working tree changes in this repository.</div>
+        )}
       </div>
-    </div>
+    </section>
   );
 };
 

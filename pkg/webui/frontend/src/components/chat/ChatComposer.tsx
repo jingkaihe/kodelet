@@ -1,12 +1,10 @@
 import React from "react";
 import {
 	ArrowUp,
-	GitCompareArrows,
 	ImageUp,
 	Maximize2,
 	Minimize2,
 	Square,
-	SquareTerminal,
 	X,
 } from "lucide-react";
 import type { PendingImageAttachment, SlashCommandOption } from "../../types";
@@ -41,13 +39,11 @@ interface ChatComposerProps {
 	onDrop: (event: React.DragEvent<HTMLDivElement>) => void;
 	onDraftChange: (value: string) => void;
 	onDraftKeyDown: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void;
-	onGitDiffOpen: () => void;
 	onPaste: (event: React.ClipboardEvent<HTMLTextAreaElement>) => void;
 	onRemoveAttachment: (attachmentId: string) => void;
 	onSelectSlashCommand: (commandName: string) => void;
 	onStop: () => void;
 	onSubmit: () => void | Promise<void>;
-	onTerminalOpen: () => void;
 	onToggleExpanded: () => void;
 }
 
@@ -80,13 +76,11 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
 	onDrop,
 	onDraftChange,
 	onDraftKeyDown,
-	onGitDiffOpen,
 	onPaste,
 	onRemoveAttachment,
 	onSelectSlashCommand,
 	onStop,
 	onSubmit,
-	onTerminalOpen,
 	onToggleExpanded,
 }) => {
 	const fileInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -221,36 +215,6 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
 									type="button"
 								>
 									<ImageUp
-										aria-hidden="true"
-										className="h-4 w-4"
-										strokeWidth={1.8}
-									/>
-								</button>
-
-								<button
-									aria-label="Show git diff"
-									className="composer-icon-button"
-									data-testid="composer-git-diff-toggle"
-									onClick={onGitDiffOpen}
-									title="Show git diff"
-									type="button"
-								>
-									<GitCompareArrows
-										aria-hidden="true"
-										className="h-4 w-4"
-										strokeWidth={1.8}
-									/>
-								</button>
-
-								<button
-									aria-label="Open terminal"
-									className="composer-icon-button"
-									data-testid="composer-terminal-toggle"
-									onClick={onTerminalOpen}
-									title="Open terminal"
-									type="button"
-								>
-									<SquareTerminal
 										aria-hidden="true"
 										className="h-4 w-4"
 										strokeWidth={1.8}

@@ -6,7 +6,13 @@ import React, {
 	useRef,
 	useState,
 } from "react";
-import { PanelLeftOpen } from "lucide-react";
+import {
+	GitCompareArrows,
+	PanelLeftOpen,
+	PanelRightClose,
+	PanelRightOpen,
+	SquareTerminal,
+} from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import ChatComposer from "../components/chat/ChatComposer";
 import ChatSidebar from "../components/chat/ChatSidebar";
@@ -113,6 +119,7 @@ type UIRequestDialogState =
 	| { mode: "input"; request: UIInputRequestEvent }
 	| { mode: "confirm"; request: UIConfirmRequestEvent }
 	| { mode: "select"; request: UISelectRequestEvent };
+type WorkspacePanelView = "diff" | "terminal";
 const attachmentId = (): string =>
 	typeof crypto !== "undefined" && "randomUUID" in crypto
 		? crypto.randomUUID()
@@ -391,11 +398,11 @@ const ChatPage: React.FC = () => {
 	const [attachments, setAttachments] = useState<PendingImageAttachment[]>([]);
 	const [dragActive, setDragActive] = useState(false);
 	const [composerExpanded, setComposerExpanded] = useState(false);
-	const [gitDiffOpen, setGitDiffOpen] = useState(false);
 	const [gitDiffLoading, setGitDiffLoading] = useState(false);
 	const [gitDiffError, setGitDiffError] = useState<string | null>(null);
 	const [gitDiff, setGitDiff] = useState<GitDiffResponse | null>(null);
-	const [terminalOpen, setTerminalOpen] = useState(false);
+	const [workspacePanelView, setWorkspacePanelView] =
+		useState<WorkspacePanelView | null>(null);
 	const [sidebarVisible, setSidebarVisible] = useState(
 		readStoredSidebarVisible,
 	);
@@ -2138,9 +2145,26 @@ const ChatPage: React.FC = () => {
 		}
 	};
 
-	const handleOpenGitDiff = () => {
-		setGitDiffOpen(true);
+	const handleToggleWorkspacePanel = () => {
+		if (workspacePanelView === null) {
+			setWorkspacePanelView("terminal");
+			return;
+		}
+
+		setWorkspacePanelView(null);
+	};
+
+	const handleSelectGitDiffPanel = () => {
+		if (workspacePanelView === "diff") {
+			return;
+		}
+
+		setWorkspacePanelView("diff");
 		void fetchGitDiff();
+	};
+
+	const handleSelectTerminalPanel = () => {
+		setWorkspacePanelView("terminal");
 	};
 
 	const handleCommitNewChatContext = () => {
@@ -2155,28 +2179,12 @@ const ChatPage: React.FC = () => {
 		setNewChatDialogOpen(false);
 	};
 
+	const workspacePanelCWDLabel =
+		currentCWDLabel || chatSettings.defaultCWD || "";
+	const workspacePanelOpen = workspacePanelView !== null;
+
 	return (
 		<div className="h-[100dvh] bg-transparent">
-			<GitDiffModal
-				cwdLabel={
-					currentCWDLabel || chatSettings.defaultCWD || "Default directory"
-				}
-				error={gitDiffError}
-				gitDiff={gitDiff}
-				loading={gitDiffLoading}
-				onClose={() => setGitDiffOpen(false)}
-				open={gitDiffOpen}
-				onRefresh={() => {
-					void fetchGitDiff();
-				}}
-			/>
-			<TerminalModal
-				cwdLabel={
-					currentCWDLabel || chatSettings.defaultCWD || "Default directory"
-				}
-				open={terminalOpen}
-				onClose={() => setTerminalOpen(false)}
-			/>
 			{uiRequestDialog ? (
 				<UIInputDialog
 					mode={uiRequestDialog.mode}
@@ -2396,18 +2404,97 @@ const ChatPage: React.FC = () => {
 						onDrop={handleDrop}
 						onDraftChange={setDraft}
 						onDraftKeyDown={handleDraftKeyDown}
-						onGitDiffOpen={handleOpenGitDiff}
 						onPaste={handlePaste}
 						onRemoveAttachment={handleRemoveAttachment}
 						onSelectSlashCommand={handleSelectSlashCommand}
 						onStop={handleStop}
 						onSubmit={handleSubmit}
-						onTerminalOpen={() => setTerminalOpen(true)}
 						onToggleExpanded={() =>
 							setComposerExpanded((currentValue) => !currentValue)
 						}
 					/>
 				</main>
+
+				<aside
+					aria-label="Workspace tools"
+					className={cn(
+						"workspace-tools-shell",
+						workspacePanelOpen && "is-open",
+					)}
+					data-testid="workspace-tools-shell"
+				>
+					{workspacePanelOpen ? (
+						<div className="workspace-tools-dock" data-testid="workspace-tools-dock">
+							<div className="workspace-tools-tabs" role="tablist" aria-label="Workspace views">
+								<button
+									aria-label="Show terminal"
+									aria-selected={workspacePanelView === "terminal"}
+									className={cn(
+										"workspace-tools-tab",
+										workspacePanelView === "terminal" && "is-active",
+									)}
+									data-testid="workspace-tools-terminal-tab"
+									onClick={handleSelectTerminalPanel}
+									role="tab"
+									type="button"
+								>
+									<SquareTerminal aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
+									<span>Terminal</span>
+								</button>
+
+								<button
+									aria-label="Show changes"
+									aria-selected={workspacePanelView === "diff"}
+									className={cn(
+										"workspace-tools-tab",
+										workspacePanelView === "diff" && "is-active",
+									)}
+									data-testid="workspace-tools-diff-tab"
+									onClick={handleSelectGitDiffPanel}
+									role="tab"
+									type="button"
+								>
+									<GitCompareArrows aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
+									<span>Changes</span>
+								</button>
+							</div>
+
+							<div className="workspace-tools-content">
+								<TerminalModal
+									cwdLabel={workspacePanelCWDLabel}
+									open={workspacePanelView === "terminal"}
+									onClose={handleToggleWorkspacePanel}
+								/>
+								<GitDiffModal
+									error={gitDiffError}
+									gitDiff={gitDiff}
+									loading={gitDiffLoading}
+									open={workspacePanelView === "diff"}
+									onRefresh={() => {
+										void fetchGitDiff();
+									}}
+								/>
+							</div>
+						</div>
+					) : null}
+
+					<div className="workspace-tools-rail" data-testid="workspace-tools-rail">
+						<button
+							aria-label={workspacePanelOpen ? "Hide workspace panel" : "Show workspace panel"}
+							aria-pressed={workspacePanelOpen}
+							className="sidebar-toggle-button workspace-tools-toggle"
+							data-testid="workspace-tools-toggle"
+							onClick={handleToggleWorkspacePanel}
+							type="button"
+						>
+							{workspacePanelOpen ? (
+								<PanelRightClose aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
+							) : (
+								<PanelRightOpen aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
+							)}
+						</button>
+					</div>
+				</aside>
 			</div>
 		</div>
 	);

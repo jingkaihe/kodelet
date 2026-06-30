@@ -35,13 +35,11 @@ const renderComposer = (
     onDrop: vi.fn(),
     onDraftChange: vi.fn(),
     onDraftKeyDown: vi.fn(),
-    onGitDiffOpen: vi.fn(),
     onPaste: vi.fn(),
     onRemoveAttachment: vi.fn(),
     onSelectSlashCommand: vi.fn(),
     onStop: vi.fn(),
     onSubmit: vi.fn(),
-    onTerminalOpen: vi.fn(),
     onToggleExpanded: vi.fn(),
     ...overrides,
   };
@@ -59,15 +57,11 @@ describe('ChatComposer', () => {
       target: { value: 'next draft' },
     });
     fireEvent.click(screen.getByLabelText('Send'));
-    fireEvent.click(screen.getByTestId('composer-git-diff-toggle'));
-    fireEvent.click(screen.getByTestId('composer-terminal-toggle'));
     fireEvent.click(screen.getByTestId('composer-expand-toggle'));
     fireEvent.click(screen.getByText('default · kodelet'));
 
     expect(props.onDraftChange).toHaveBeenCalledWith('next draft');
     expect(props.onSubmit).toHaveBeenCalledTimes(1);
-    expect(props.onGitDiffOpen).toHaveBeenCalledTimes(1);
-    expect(props.onTerminalOpen).toHaveBeenCalledTimes(1);
     expect(props.onToggleExpanded).toHaveBeenCalledTimes(1);
     expect(props.onContextOpen).toHaveBeenCalledTimes(1);
   });

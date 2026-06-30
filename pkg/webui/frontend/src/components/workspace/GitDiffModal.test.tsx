@@ -70,16 +70,19 @@ describe('GitDiffModal', () => {
       />
     );
 
-    expect(screen.getByRole('heading', { name: 'Git diff' })).toBeInTheDocument();
-    expect(screen.getByText('/tmp/project')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Changes' })).not.toBeInTheDocument();
+    expect(screen.queryByText('/tmp/project')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy diff' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Refresh diff' })).toBeInTheDocument();
+    expect(screen.getByTestId('git-diff-panel')).toHaveAttribute('role', 'complementary');
+    expect(screen.queryByTestId('git-diff-modal-backdrop')).not.toBeInTheDocument();
     expect(screen.queryByText('Workspace')).not.toBeInTheDocument();
     expect(screen.queryByText(/Uncommitted changes|Working tree clean/)).not.toBeInTheDocument();
     expect(screen.queryByText(/^Repo /)).not.toBeInTheDocument();
     expect(screen.queryByText(/git diff --no-ext-diff/)).not.toBeInTheDocument();
   });
 
-  it('copies the full diff from the header action', () => {
+  it('copies the full diff from the floating icon action', () => {
     const diff = 'diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new';
 
     render(

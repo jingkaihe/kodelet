@@ -1,5 +1,5 @@
 import type React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import TerminalModalFrame from './TerminalModalFrame';
 
@@ -10,9 +10,7 @@ const renderFrame = (
     currentStatus: 'Connected',
     cwdLabel: '/tmp/project',
     statusVariant: 'live',
-    terminalSize: { width: 980, height: 620 },
     onClose: vi.fn(),
-    onResizeStart: vi.fn(),
     ...overrides,
   };
 
@@ -27,20 +25,12 @@ describe('TerminalModalFrame', () => {
   it('renders terminal chrome without requiring xterm', () => {
     renderFrame();
 
-    expect(screen.getByRole('heading', { name: 'Terminal' })).toBeInTheDocument();
-    expect(screen.getByText('/tmp/project')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Terminal' })).not.toBeInTheDocument();
+    expect(screen.queryByText('/tmp/project')).not.toBeInTheDocument();
     expect(screen.getByText('Connected')).toBeInTheDocument();
     expect(screen.getByText('terminal preview')).toBeInTheDocument();
-  });
-
-  it('keeps close and resize behavior external', () => {
-    const { props } = renderFrame();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-    fireEvent.pointerDown(screen.getByTestId('terminal-resize-handle'));
-
-    expect(props.onClose).toHaveBeenCalledTimes(1);
-    expect(props.onResizeStart).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('terminal-panel')).toHaveAttribute('role', 'complementary');
+    expect(screen.queryByTestId('terminal-modal-backdrop')).not.toBeInTheDocument();
   });
 
   it('renders error status styling from props', () => {

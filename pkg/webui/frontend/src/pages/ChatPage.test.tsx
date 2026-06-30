@@ -11,7 +11,7 @@ import type { ChatStreamEvent } from "../types";
 
 vi.mock("../components/workspace/TerminalModal", () => ({
 	default: ({ open }: { open: boolean }) =>
-		open ? <div data-testid="terminal-modal">Terminal</div> : null,
+		open ? <div data-testid="terminal-panel">Terminal</div> : null,
 }));
 
 const mockNavigate = vi.fn();
@@ -461,27 +461,57 @@ describe("ChatPage", () => {
 		expect(textarea).not.toHaveClass("composer-editor-expanded");
 	});
 
-	it("opens the git diff modal from the composer toolbar", async () => {
+	it("opens terminal in the workspace side panel from the right rail by default", async () => {
+		render(<ChatPage />);
+
+		await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
+
+		expect(screen.getByTestId("workspace-tools-shell")).toBeInTheDocument();
+		expect(screen.queryByTestId("workspace-tools-dock")).not.toBeInTheDocument();
+
+		fireEvent.click(screen.getByTestId("workspace-tools-toggle"));
+
+		expect(screen.getByTestId("workspace-tools-dock")).toBeInTheDocument();
+		expect(screen.getByTestId("terminal-panel")).toBeInTheDocument();
+		expect(screen.getByTestId("composer-textarea")).toBeInTheDocument();
+		expect(screen.queryByTestId("terminal-modal-backdrop")).not.toBeInTheDocument();
+	});
+
+	it("switches to changes in the workspace side panel", async () => {
 		render(<ChatPage />);
 
 		await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
 		await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
 
-		fireEvent.click(screen.getByTestId("composer-git-diff-toggle"));
+		fireEvent.click(screen.getByTestId("workspace-tools-toggle"));
+		await waitFor(() => expect(screen.getByTestId("terminal-panel")).toBeInTheDocument());
+		fireEvent.click(screen.getByTestId("workspace-tools-diff-tab"));
 
 		await waitFor(() => expect(mockGetGitDiff).toHaveBeenCalledWith("/workspace/default"));
-		expect(screen.getByTestId("git-diff-modal")).toBeInTheDocument();
-		expect(screen.getByText("Git diff")).toBeInTheDocument();
+		expect(screen.getByTestId("workspace-tools-dock")).toBeInTheDocument();
+		expect(screen.getByTestId("git-diff-panel")).toBeInTheDocument();
+		expect(screen.queryByRole("heading", { name: "Changes" })).not.toBeInTheDocument();
+		expect(screen.getByTestId("composer-textarea")).toBeInTheDocument();
+		expect(screen.queryByTestId("git-diff-modal-backdrop")).not.toBeInTheDocument();
 	});
 
-	it("opens the terminal modal from the composer toolbar", async () => {
+	it("switches and closes the workspace side panel", async () => {
 		render(<ChatPage />);
 
 		await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
+		await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
 
-		fireEvent.click(screen.getByTestId("composer-terminal-toggle"));
+		fireEvent.click(screen.getByTestId("workspace-tools-toggle"));
+		await waitFor(() => expect(screen.getByTestId("terminal-panel")).toBeInTheDocument());
 
-		expect(screen.getByTestId("terminal-modal")).toBeInTheDocument();
+		fireEvent.click(screen.getByTestId("workspace-tools-diff-tab"));
+		await waitFor(() => expect(screen.getByTestId("git-diff-panel")).toBeInTheDocument());
+		expect(screen.queryByTestId("terminal-panel")).not.toBeInTheDocument();
+
+		fireEvent.click(screen.getByTestId("workspace-tools-toggle"));
+		expect(screen.queryByTestId("workspace-tools-dock")).not.toBeInTheDocument();
+		expect(screen.getByTestId("workspace-tools-rail")).toBeInTheDocument();
+		expect(screen.getByTestId("composer-textarea")).toBeInTheDocument();
 	});
 
 	it("allows selecting a profile for a new conversation", async () => {
@@ -2263,7 +2293,8 @@ describe("ChatPage", () => {
 		routeParams = { id: "conv-123" };
 		rerender(<ChatPage />);
 
-		fireEvent.click(screen.getByTestId("composer-git-diff-toggle"));
+		fireEvent.click(screen.getByTestId("workspace-tools-toggle"));
+		fireEvent.click(screen.getByTestId("workspace-tools-diff-tab"));
 
 		await waitFor(() =>
 			expect(mockGetGitDiff).toHaveBeenCalledWith("/workspace/alt"),

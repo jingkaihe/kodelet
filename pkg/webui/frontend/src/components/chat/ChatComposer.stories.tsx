@@ -73,13 +73,11 @@ const meta = {
 		onDrop: fn(),
 		onDraftChange: fn(),
 		onDraftKeyDown: fn(),
-		onGitDiffOpen: fn(),
 		onPaste: fn(),
 		onRemoveAttachment: fn(),
 		onSelectSlashCommand: fn(),
 		onStop: fn(),
 		onSubmit: fn(),
-		onTerminalOpen: fn(),
 		onToggleExpanded: fn(),
 	},
 } satisfies Meta<typeof ChatComposer>;

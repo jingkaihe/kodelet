@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import type {
@@ -15,11 +15,8 @@ interface TerminalModalProps {
   onClose: () => void;
 }
 
-const MIN_TERMINAL_WIDTH = 520;
-const MIN_TERMINAL_HEIGHT = 320;
-const DEFAULT_TERMINAL_WIDTH = 980;
-const DEFAULT_TERMINAL_HEIGHT = 620;
 const FALLBACK_TERMINAL_FONT_FAMILY = '"SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Ubuntu Mono", monospace';
+const TERMINAL_BOTTOM_RESERVED_ROWS = 1;
 
 const isTerminalServerEvent = (value: unknown): value is TerminalServerEvent => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -35,23 +32,35 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose }
   const fitAddonRef = useRef<FitAddon | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
-  const resizeHandleRef = useRef<HTMLButtonElement | null>(null);
   const replayPendingWritesRef = useRef(0);
   const replayCompleteReceivedRef = useRef(false);
   const suppressTerminalInputRef = useRef(true);
-  const dragStateRef = useRef<{
-    startX: number;
-    startY: number;
-    startWidth: number;
-    startHeight: number;
-  } | null>(null);
   const [statusText, setStatusText] = useState('Connecting…');
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [exitCode, setExitCode] = useState<number | null>(null);
-  const [terminalSize, setTerminalSize] = useState({
-    width: DEFAULT_TERMINAL_WIDTH,
-    height: DEFAULT_TERMINAL_HEIGHT,
-  });
+
+  const fitTerminalToPanel = useCallback(() => {
+    const terminal = terminalRef.current;
+    const fitAddon = fitAddonRef.current;
+
+    if (!terminal || !fitAddon) {
+      return false;
+    }
+
+    const proposedDimensions = fitAddon.proposeDimensions();
+    if (!proposedDimensions || Number.isNaN(proposedDimensions.cols) || Number.isNaN(proposedDimensions.rows)) {
+      return false;
+    }
+
+    const cols = Math.max(2, proposedDimensions.cols);
+    const rows = Math.max(1, proposedDimensions.rows - TERMINAL_BOTTOM_RESERVED_ROWS);
+
+    if (terminal.cols !== cols || terminal.rows !== rows) {
+      terminal.resize(cols, rows);
+    }
+
+    return true;
+  }, []);
 
   const currentStatus = useMemo(() => {
     if (connectionError) {
@@ -112,10 +121,10 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose }
 
     terminal.loadAddon(fitAddon);
     terminal.open(terminalHostRef.current);
-    fitAddon.fit();
-    terminal.focus();
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
+    fitTerminalToPanel();
+    terminal.focus();
     replayPendingWritesRef.current = 0;
     replayCompleteReceivedRef.current = false;
     suppressTerminalInputRef.current = true;
@@ -139,16 +148,44 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose }
       socketRef.current.send(JSON.stringify(message));
     };
 
+    let cancelled = false;
+    const pendingTimeouts: number[] = [];
+    const pendingAnimationFrames: number[] = [];
+
     const sendResize = () => {
       if (!terminalRef.current) {
         return;
       }
-      fitAddon.fit();
+      fitTerminalToPanel();
       sendMessage({
         type: 'resize',
         rows: terminalRef.current.rows,
         cols: terminalRef.current.cols,
       });
+    };
+
+    const scheduleSettledResize = (delay = 0) => {
+      const timeout = window.setTimeout(() => {
+        if (cancelled) {
+          return;
+        }
+
+        const firstFrame = window.requestAnimationFrame(() => {
+          if (cancelled) {
+            return;
+          }
+
+          const secondFrame = window.requestAnimationFrame(() => {
+            if (!cancelled) {
+              sendResize();
+            }
+          });
+          pendingAnimationFrames.push(secondFrame);
+        });
+        pendingAnimationFrames.push(firstFrame);
+      }, delay);
+
+      pendingTimeouts.push(timeout);
     };
 
     const socket = apiService.createTerminalWebSocket({
@@ -160,7 +197,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose }
     socketRef.current = socket;
 
     socket.addEventListener('open', () => {
-      sendResize();
+      scheduleSettledResize();
     });
 
     socket.addEventListener('message', (event) => {
@@ -173,7 +210,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose }
 
           if (payload.type === 'ready') {
             setStatusText('Restoring session…');
-            window.setTimeout(() => sendResize(), 0);
+            scheduleSettledResize();
             return;
           }
 
@@ -250,9 +287,33 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose }
 
     const handleWindowResize = () => sendResize();
     window.addEventListener('resize', handleWindowResize);
+    const resizeObserver = typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(() => sendResize());
+    if (resizeObserver) {
+      resizeObserver.observe(terminalHostRef.current);
+    }
+
+    scheduleSettledResize();
+    scheduleSettledResize(100);
+    if ('fonts' in document) {
+      void document.fonts.ready.then(() => {
+        if (!cancelled) {
+          scheduleSettledResize();
+        }
+      });
+    }
 
     return () => {
+      cancelled = true;
+      pendingTimeouts.forEach((timeout) => {
+        window.clearTimeout(timeout);
+      });
+      pendingAnimationFrames.forEach((animationFrame) => {
+        window.cancelAnimationFrame(animationFrame);
+      });
       window.removeEventListener('resize', handleWindowResize);
+      resizeObserver?.disconnect();
       disposableResize.dispose();
       disposableData.dispose();
       socket.close();
@@ -261,39 +322,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose }
       terminalRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [cwdLabel, open]);
-
-  useEffect(() => {
-    if (!open) {
-      return undefined;
-    }
-
-    const handlePointerMove = (event: PointerEvent) => {
-      const dragState = dragStateRef.current;
-      if (!dragState) {
-        return;
-      }
-
-      const nextWidth = Math.max(MIN_TERMINAL_WIDTH, dragState.startWidth + (event.clientX - dragState.startX));
-      const nextHeight = Math.max(MIN_TERMINAL_HEIGHT, dragState.startHeight + (event.clientY - dragState.startY));
-      setTerminalSize({ width: nextWidth, height: nextHeight });
-    };
-
-    const stopDragging = () => {
-      dragStateRef.current = null;
-      document.body.style.userSelect = '';
-      document.body.style.cursor = '';
-      window.setTimeout(() => fitAddonRef.current?.fit(), 0);
-    };
-
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', stopDragging);
-
-    return () => {
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', stopDragging);
-    };
-  }, [open]);
+  }, [cwdLabel, fitTerminalToPanel, open]);
 
   useEffect(() => {
     if (!open) {
@@ -311,13 +340,6 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose }
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [open, onClose]);
 
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    window.setTimeout(() => fitAddonRef.current?.fit(), 0);
-  }, [open, terminalSize.width, terminalSize.height]);
-
   if (!open) {
     return null;
   }
@@ -326,22 +348,9 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose }
     <TerminalModalFrame
       currentStatus={currentStatus}
       cwdLabel={cwdLabel}
-      resizeHandleRef={resizeHandleRef}
       statusVariant={statusVariant}
       terminalHostRef={terminalHostRef}
-      terminalSize={terminalSize}
       onClose={onClose}
-      onResizeStart={(event) => {
-        dragStateRef.current = {
-          startX: event.clientX,
-          startY: event.clientY,
-          startWidth: terminalSize.width,
-          startHeight: terminalSize.height,
-        };
-        document.body.style.userSelect = 'none';
-        document.body.style.cursor = 'nwse-resize';
-        resizeHandleRef.current?.setPointerCapture(event.pointerId);
-      }}
     />
   );
 };

@@ -1,10 +1,11 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import TerminalModal from './TerminalModal';
 
 const { MockFitAddon, MockTerminal, createTerminalWebSocketMock } = vi.hoisted(() => {
   class HoistedMockFitAddon {
     fit = vi.fn();
+    proposeDimensions = vi.fn(() => ({ cols: 80, rows: 24 }));
   }
 
   type MockDataHandler = (data: string) => void;
@@ -23,6 +24,10 @@ const { MockFitAddon, MockTerminal, createTerminalWebSocketMock } = vi.hoisted((
     loadAddon = vi.fn();
     open = vi.fn();
     focus = vi.fn();
+    resize = vi.fn((cols: number, rows: number) => {
+      this.cols = cols;
+      this.rows = rows;
+    });
     dispose = vi.fn();
     attachCustomKeyEventHandler = vi.fn(() => true);
     hasSelection = vi.fn(() => false);
@@ -128,27 +133,28 @@ describe('TerminalModal', () => {
     expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'input', data: 'ls\n' }));
   });
 
+  it('reserves bottom space when fitting the terminal panel', () => {
+    const socket = new MockWebSocket();
+    createTerminalWebSocketMock.mockReturnValue(socket);
+
+    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open />);
+
+    const terminal = MockTerminal.instances[0];
+    expect(terminal.resize).toHaveBeenCalledWith(80, 23);
+  });
+
   it('renders a simplified header', () => {
     const socket = new MockWebSocket();
     createTerminalWebSocketMock.mockReturnValue(socket);
 
     render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open />);
 
-    expect(screen.getByRole('heading', { name: 'Terminal' })).toBeInTheDocument();
-    expect(screen.getByText('/tmp/project')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Terminal' })).not.toBeInTheDocument();
+    expect(screen.queryByText('/tmp/project')).not.toBeInTheDocument();
+    expect(screen.getByTestId('terminal-panel')).toBeInTheDocument();
+    expect(screen.queryByTestId('terminal-modal-backdrop')).not.toBeInTheDocument();
     expect(screen.queryByText('Workspace')).not.toBeInTheDocument();
     expect(screen.queryByText('shell')).not.toBeInTheDocument();
   });
 
-  it('closes from the header button', () => {
-    const socket = new MockWebSocket();
-    const onClose = vi.fn();
-    createTerminalWebSocketMock.mockReturnValue(socket);
-
-    render(<TerminalModal cwdLabel="/tmp/project" onClose={onClose} open />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-
-    expect(onClose).toHaveBeenCalledTimes(1);
-  });
 });

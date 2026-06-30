@@ -4,7 +4,7 @@ import GitDiffModal from "./GitDiffModal";
 import { sampleGitDiff } from "../../stories/fixtures";
 
 const meta = {
-	title: "Workspace/GitDiffModal",
+	title: "Workspace/GitDiffPanel",
 	component: GitDiffModal,
 	parameters: {
 		layout: "fullscreen",
