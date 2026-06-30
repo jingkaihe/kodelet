@@ -341,6 +341,8 @@ func TestAnthropicToolResultBlockFallsBackToAssistantFacing(t *testing.T) {
 }
 
 func TestGetModelPricingMatchesFamiliesAndDefault(t *testing.T) {
+	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeSonnet5], getModelPricing(anthropic.ModelClaudeSonnet5))
+	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeSonnet5], getModelPricing("claude-sonnet-5-latest"))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeFable5], getModelPricing(anthropic.ModelClaudeFable5))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeFable5], getModelPricing("claude-fable-5-latest"))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeSonnet4_6], getModelPricing(anthropic.ModelClaudeSonnet4_6))
@@ -362,6 +364,17 @@ func TestFable5Pricing(t *testing.T) {
 	assert.Equal(t, 0.000020, pricing.PromptCachingWrite1h)
 	assert.Equal(t, 0.000001, pricing.PromptCachingRead)
 	assert.Equal(t, 0.000050, pricing.Output)
+	assert.Equal(t, 1_000_000, pricing.ContextWindow)
+}
+
+func TestSonnet5PricingUsesStandardSeptember2026Pricing(t *testing.T) {
+	pricing := ModelPricingMap[anthropic.ModelClaudeSonnet5]
+
+	assert.Equal(t, 0.000003, pricing.Input)
+	assert.Equal(t, 0.00000375, pricing.PromptCachingWrite5m)
+	assert.Equal(t, 0.000006, pricing.PromptCachingWrite1h)
+	assert.Equal(t, 0.0000003, pricing.PromptCachingRead)
+	assert.Equal(t, 0.000015, pricing.Output)
 	assert.Equal(t, 1_000_000, pricing.ContextWindow)
 }
 
