@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.4.46-beta
+
+Replaced the embedded Web UI terminal renderer with `ghostty-web`, including bundled WASM assets for the embedded frontend.
+
+Added a Web UI terminal pop-out route so workspace terminals can open in a dedicated browser window for the current working directory.
+
+Improved terminal interaction handling with better Escape-key behavior, mouse-wheel reporting for full-screen terminal apps, and refined terminal panel styling.
+
 ## 0.4.45-beta
 
 Added Claude Sonnet 5 pricing metadata with family-based alias matching and updated Anthropic SDK support.
