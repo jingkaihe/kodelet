@@ -2051,6 +2051,10 @@ h6 {
   border-radius: 0;
 }
 
+.terminal-popout-page .workspace-terminal-host {
+  padding: 1.15rem 1rem 1rem 1.45rem;
+}
+
 @media (max-width: 1180px) {
   .workspace-tools-shell.is-open {
     flex-basis: calc(clamp(26rem, 42vw, 34rem) + 3.25rem);
