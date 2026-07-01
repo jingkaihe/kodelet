@@ -183,4 +183,23 @@ describe('TerminalModal', () => {
     expect(screen.queryByText('shell')).not.toBeInTheDocument();
   });
 
+  it('opens the terminal pop-out window for the current cwd', async () => {
+    const socket = new MockWebSocket();
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
+    createTerminalWebSocketMock.mockReturnValue(socket);
+
+    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open />);
+
+    await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
+    screen.getByRole('button', { name: 'Open terminal in new window' }).click();
+
+    expect(openSpy).toHaveBeenCalledWith(
+      'http://localhost:3000/terminal?cwd=%2Ftmp%2Fproject',
+      'kodelet-terminal',
+      'popup=yes,width=1120,height=760,resizable=yes,scrollbars=no'
+    );
+
+    openSpy.mockRestore();
+  });
+
 });

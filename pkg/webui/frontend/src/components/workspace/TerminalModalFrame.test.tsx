@@ -1,5 +1,5 @@
 import type React from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import TerminalModalFrame from './TerminalModalFrame';
 
@@ -43,5 +43,15 @@ describe('TerminalModalFrame', () => {
     expect(container.querySelector('.workspace-terminal-status-dot')).toHaveClass(
       'is-error'
     );
+  });
+
+  it('renders an optional pop-out action', () => {
+    const onPopOut = vi.fn();
+
+    renderFrame({ onPopOut });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open terminal in new window' }));
+
+    expect(onPopOut).toHaveBeenCalledTimes(1);
   });
 });

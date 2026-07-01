@@ -13,6 +13,7 @@ interface TerminalModalProps {
   cwdLabel: string;
   open: boolean;
   onClose: () => void;
+  showPopOut?: boolean;
 }
 
 const FALLBACK_TERMINAL_FONT_FAMILY = '"SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Ubuntu Mono", monospace';
@@ -34,7 +35,7 @@ const isTerminalServerEvent = (value: unknown): value is TerminalServerEvent => 
   return type === 'ready' || type === 'exit' || type === 'info' || type === 'replay-complete';
 };
 
-const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose }) => {
+const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose, showPopOut = true }) => {
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
@@ -379,6 +380,19 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose }
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [open, onClose]);
 
+  const handlePopOut = useCallback(() => {
+    const url = new URL('/terminal', window.location.origin);
+    if (cwdLabel) {
+      url.searchParams.set('cwd', cwdLabel);
+    }
+
+    window.open(
+      url.toString(),
+      'kodelet-terminal',
+      'popup=yes,width=1120,height=760,resizable=yes,scrollbars=no'
+    );
+  }, [cwdLabel]);
+
   if (!open) {
     return null;
   }
@@ -390,6 +404,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose }
       statusVariant={statusVariant}
       terminalHostRef={terminalHostRef}
       onClose={onClose}
+      onPopOut={showPopOut ? handlePopOut : undefined}
     />
   );
 };

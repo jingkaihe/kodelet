@@ -1962,8 +1962,55 @@ h6 {
   overflow: hidden;
   border-radius: 0;
   border: 0;
-  background: transparent;
+  background: #171512;
   box-shadow: none;
+}
+
+.workspace-terminal-toolbar {
+  flex: 0 0 2.15rem;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  justify-content: flex-end;
+  padding: 0.26rem 0.45rem 0 0.55rem;
+}
+
+.workspace-terminal-icon-button {
+  display: inline-flex;
+  width: 1.65rem;
+  height: 1.65rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: rgba(244, 238, 227, 0.02);
+  color: rgba(244, 238, 227, 0.34);
+  opacity: 0.58;
+  backdrop-filter: blur(10px);
+  transition:
+    color 140ms ease,
+    opacity 140ms ease,
+    background-color 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.workspace-terminal-icon-button:hover {
+  border-color: rgba(244, 238, 227, 0.14);
+  background: rgba(244, 238, 227, 0.08);
+  color: #fffaf1;
+  opacity: 1;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.14);
+}
+
+.workspace-terminal-icon-button:focus-visible {
+  outline: none;
+  border-color: rgba(217, 119, 87, 0.5);
+  color: #fffaf1;
+  opacity: 1;
+  box-shadow:
+    0 0 0 4px rgba(217, 119, 87, 0.16),
+    0 8px 18px rgba(0, 0, 0, 0.18);
 }
 
 .workspace-terminal-host {
@@ -1975,7 +2022,7 @@ h6 {
   justify-content: flex-start;
   min-height: 0;
   overflow: hidden;
-  padding: 0.28rem 0 0 0.55rem;
+  padding: 0 0 0 0.55rem;
   background: #171512;
 }
 
@@ -1985,6 +2032,17 @@ h6 {
 
 .workspace-terminal-host canvas {
   display: block;
+}
+
+.terminal-popout-page {
+  display: flex;
+  min-height: 100vh;
+  background: #171512;
+}
+
+.terminal-popout-page .workspace-terminal-panel.workspace-side-panel {
+  border: 0;
+  border-radius: 0;
 }
 
 @media (max-width: 1180px) {
