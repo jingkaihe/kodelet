@@ -197,6 +197,35 @@ describe('TerminalModal', () => {
     expect(terminal.handleKey(new KeyboardEvent('keydown', { key: 'a' }))).toBe(false);
   });
 
+  it('does not close when Escape is pressed inside the terminal', async () => {
+    const socket = new MockWebSocket();
+    const onClose = vi.fn();
+    createTerminalWebSocketMock.mockReturnValue(socket);
+
+    render(<TerminalModal cwdLabel="/tmp/project" onClose={onClose} open />);
+
+    await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
+    screen.getByTestId('terminal-host').dispatchEvent(new KeyboardEvent('keydown', {
+      bubbles: true,
+      key: 'Escape',
+    }));
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('closes when Escape is pressed outside the terminal', async () => {
+    const socket = new MockWebSocket();
+    const onClose = vi.fn();
+    createTerminalWebSocketMock.mockReturnValue(socket);
+
+    render(<TerminalModal cwdLabel="/tmp/project" onClose={onClose} open />);
+
+    await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('reports wheel events to mouse-tracking terminal apps', async () => {
     const socket = new MockWebSocket();
     createTerminalWebSocketMock.mockReturnValue(socket);

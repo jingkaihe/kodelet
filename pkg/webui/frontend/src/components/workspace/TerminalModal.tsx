@@ -465,10 +465,17 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose, 
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onClose();
+      if (event.key !== 'Escape' || event.defaultPrevented) {
+        return;
       }
+
+      const target = event.target;
+      if (target instanceof Node && terminalHostRef.current?.contains(target)) {
+        return;
+      }
+
+      event.preventDefault();
+      onClose();
     };
 
     window.addEventListener('keydown', handleKeyDown);
