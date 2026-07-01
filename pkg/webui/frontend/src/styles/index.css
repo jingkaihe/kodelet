@@ -1894,10 +1894,15 @@ h6 {
 }
 
 .workspace-terminal-panel.workspace-side-panel {
-  background: #171512;
-  border: 1px solid rgba(20, 20, 19, 0.12);
+  background:
+    linear-gradient(180deg, rgba(255, 250, 241, 0.025), transparent 28%),
+    linear-gradient(180deg, #1f1a14 0%, #17130f 100%);
+  border: 1px solid rgba(93, 83, 64, 0.16);
   border-radius: 0.9rem;
   overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 250, 241, 0.04),
+    0 16px 34px rgba(20, 20, 19, 0.08);
 }
 
 .workspace-terminal-header {
@@ -1962,17 +1967,18 @@ h6 {
   overflow: hidden;
   border-radius: 0;
   border: 0;
-  background: #171512;
+  background: #18140f;
   box-shadow: none;
 }
 
 .workspace-terminal-toolbar {
-  flex: 0 0 2.15rem;
+  flex: 0 0 1.85rem;
   display: flex;
   align-items: center;
   gap: 0.3rem;
   justify-content: flex-end;
-  padding: 0.26rem 0.45rem 0 0.55rem;
+  padding: 0.22rem 0.5rem 0 0.7rem;
+  background: linear-gradient(180deg, rgba(244, 238, 227, 0.035), transparent 82%);
 }
 
 .workspace-terminal-icon-button {
@@ -1983,9 +1989,9 @@ h6 {
   justify-content: center;
   border-radius: 999px;
   border: 1px solid transparent;
-  background: rgba(244, 238, 227, 0.02);
-  color: rgba(244, 238, 227, 0.34);
-  opacity: 0.58;
+  background: rgba(244, 238, 227, 0.015);
+  color: rgba(244, 238, 227, 0.28);
+  opacity: 0.44;
   backdrop-filter: blur(10px);
   transition:
     color 140ms ease,
@@ -2022,8 +2028,8 @@ h6 {
   justify-content: flex-start;
   min-height: 0;
   overflow: hidden;
-  padding: 0 0 0 0.55rem;
-  background: #171512;
+  padding: 0.12rem 0 0 0.7rem;
+  background: #18140f;
 }
 
 .workspace-terminal-host[contenteditable='true'] {
@@ -2037,7 +2043,7 @@ h6 {
 .terminal-popout-page {
   display: flex;
   min-height: 100vh;
-  background: #171512;
+  background: #18140f;
 }
 
 .terminal-popout-page .workspace-terminal-panel.workspace-side-panel {

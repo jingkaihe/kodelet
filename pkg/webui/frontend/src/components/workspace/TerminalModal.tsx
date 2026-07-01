@@ -18,12 +18,28 @@ interface TerminalModalProps {
 
 const FALLBACK_TERMINAL_FONT_FAMILY = '"SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Ubuntu Mono", monospace';
 const TERMINAL_BOTTOM_RESERVED_ROWS = 1;
+const TERMINAL_FONT_SIZE = 13;
+const SGR_MOUSE_MODE = 1006;
+const WHEEL_BUTTON_UP = 64;
+const WHEEL_BUTTON_DOWN = 65;
+const WHEEL_BUTTON_LEFT = 66;
+const WHEEL_BUTTON_RIGHT = 67;
+const WHEEL_PIXEL_FALLBACK = 33;
 
 let ghosttyLoadPromise: Promise<Ghostty> | null = null;
 
 const loadGhostty = () => {
   ghosttyLoadPromise ??= Ghostty.load(ghosttyWasmUrl);
   return ghosttyLoadPromise;
+};
+
+const loadTerminalFont = async (fontFamily: string) => {
+  if (!('fonts' in document)) {
+    return;
+  }
+
+  await document.fonts.load(`${TERMINAL_FONT_SIZE}px ${fontFamily}`);
+  await document.fonts.ready;
 };
 
 const isTerminalServerEvent = (value: unknown): value is TerminalServerEvent => {
@@ -33,6 +49,52 @@ const isTerminalServerEvent = (value: unknown): value is TerminalServerEvent => 
 
   const type = (value as { type?: unknown }).type;
   return type === 'ready' || type === 'exit' || type === 'info' || type === 'replay-complete';
+};
+
+const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+
+const getWheelRepeatCount = (event: WheelEvent, cellHeight: number, rows: number) => {
+  const isHorizontal = Math.abs(event.deltaX) > Math.abs(event.deltaY);
+  const delta = isHorizontal ? event.deltaX : event.deltaY;
+  if (delta === 0) {
+    return 0;
+  }
+
+  let unitDelta: number;
+  switch (event.deltaMode) {
+    case 1:
+      unitDelta = Math.abs(delta);
+      break;
+    case 2:
+      unitDelta = Math.abs(delta) * rows;
+      break;
+    default:
+      unitDelta = Math.abs(delta) / Math.max(1, cellHeight || WHEEL_PIXEL_FALLBACK);
+      break;
+  }
+
+  return clamp(Math.max(1, Math.round(unitDelta)), 1, 5);
+};
+
+const getSGRWheelButton = (event: WheelEvent) => {
+  if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
+    return event.deltaX > 0 ? WHEEL_BUTTON_RIGHT : WHEEL_BUTTON_LEFT;
+  }
+  return event.deltaY > 0 ? WHEEL_BUTTON_DOWN : WHEEL_BUTTON_UP;
+};
+
+const getSGRMouseModifiers = (event: WheelEvent) => {
+  let modifiers = 0;
+  if (event.shiftKey) {
+    modifiers += 4;
+  }
+  if (event.altKey) {
+    modifiers += 8;
+  }
+  if (event.ctrlKey) {
+    modifiers += 16;
+  }
+  return modifiers;
 };
 
 const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose, showPopOut = true }) => {
@@ -157,8 +219,8 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose, 
       pendingTimeouts.push(timeout);
     };
 
-    void loadGhostty()
-      .then((ghostty) => {
+    void Promise.all([loadGhostty(), loadTerminalFont(resolvedMonoFontFamily)])
+      .then(([ghostty]) => {
         if (cancelled || !terminalHostRef.current) {
           return;
         }
@@ -170,14 +232,15 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose, 
           cursorBlink: true,
           cursorStyle: 'block',
           fontFamily: resolvedMonoFontFamily,
-          fontSize: 12,
+          fontSize: TERMINAL_FONT_SIZE,
           scrollback: 5000,
           theme: {
-            background: '#171512',
+            background: '#18140f',
             foreground: '#f4eee3',
             cursor: '#d97757',
             cursorAccent: '#171512',
-            selectionBackground: 'rgba(217, 119, 87, 0.26)',
+            selectionBackground: '#624733',
+            selectionForeground: '#fffaf1',
             black: '#171512',
             red: '#df7c5e',
             green: '#8ea267',
@@ -307,6 +370,38 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose, 
             return false;
           }
           return false;
+        });
+
+        terminal.attachCustomWheelEventHandler((event) => {
+          if (
+            suppressTerminalInputRef.current ||
+            !terminal?.wasmTerm?.isAlternateScreen() ||
+            !terminal.wasmTerm.hasMouseTracking() ||
+            !terminal.wasmTerm.getMode(SGR_MOUSE_MODE, false)
+          ) {
+            return false;
+          }
+
+          const canvas = terminal.renderer?.getCanvas();
+          const metrics = terminal.renderer?.getMetrics();
+          if (!canvas || !metrics || metrics.width <= 0 || metrics.height <= 0) {
+            return false;
+          }
+
+          const repeatCount = getWheelRepeatCount(event, metrics.height, terminal.rows);
+          if (repeatCount === 0) {
+            return false;
+          }
+
+          const rect = canvas.getBoundingClientRect();
+          const col = clamp(Math.floor((event.clientX - rect.left) / metrics.width) + 1, 1, terminal.cols);
+          const row = clamp(Math.floor((event.clientY - rect.top) / metrics.height) + 1, 1, terminal.rows);
+          const button = getSGRWheelButton(event) + getSGRMouseModifiers(event);
+
+          event.preventDefault();
+          event.stopPropagation();
+          sendMessage({ type: 'input', data: `\x1b[<${button};${col};${row}M`.repeat(repeatCount) });
+          return true;
         });
 
         handleWindowResize = () => sendResize();

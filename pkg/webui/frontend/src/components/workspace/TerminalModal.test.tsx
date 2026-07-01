@@ -32,11 +32,37 @@ const { MockFitAddon, MockGhosttyLoad, MockTerminal, createTerminalWebSocketMock
     attachCustomKeyEventHandler = vi.fn((handler: (event: KeyboardEvent) => boolean) => {
       this.customKeyEventHandler = handler;
     });
+    attachCustomWheelEventHandler = vi.fn((handler: (event: WheelEvent) => boolean) => {
+      this.customWheelEventHandler = handler;
+    });
     hasSelection = vi.fn(() => false);
+    renderer = {
+      getCanvas: vi.fn(() => ({
+        getBoundingClientRect: () => ({
+          bottom: 505,
+          height: 500,
+          left: 5,
+          right: 805,
+          top: 5,
+          width: 800,
+          x: 5,
+          y: 5,
+          toJSON: () => ({}),
+        }),
+      })),
+      getMetrics: vi.fn(() => ({ width: 10, height: 20, baseline: 16 })),
+      remeasureFont: vi.fn(),
+    };
+    wasmTerm = {
+      getMode: vi.fn(() => true),
+      hasMouseTracking: vi.fn(() => true),
+      isAlternateScreen: vi.fn(() => true),
+    };
 
     private dataHandler?: MockDataHandler;
     private resizeHandler?: MockResizeHandler;
     private customKeyEventHandler?: (event: KeyboardEvent) => boolean;
+    private customWheelEventHandler?: (event: WheelEvent) => boolean;
 
     constructor() {
       HoistedMockTerminal.instances.push(this);
@@ -62,6 +88,10 @@ const { MockFitAddon, MockGhosttyLoad, MockTerminal, createTerminalWebSocketMock
 
     handleKey(event: KeyboardEvent) {
       return this.customKeyEventHandler?.(event);
+    }
+
+    handleWheel(event: WheelEvent) {
+      return this.customWheelEventHandler?.(event);
     }
   }
 
@@ -165,6 +195,41 @@ describe('TerminalModal', () => {
     });
 
     expect(terminal.handleKey(new KeyboardEvent('keydown', { key: 'a' }))).toBe(false);
+  });
+
+  it('reports wheel events to mouse-tracking terminal apps', async () => {
+    const socket = new MockWebSocket();
+    createTerminalWebSocketMock.mockReturnValue(socket);
+
+    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open />);
+
+    await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
+    const terminal = MockTerminal.instances[0];
+    act(() => {
+      socket.emit('message', { data: JSON.stringify({ type: 'replay-complete' }) });
+    });
+
+    const event = new WheelEvent('wheel', {
+      clientX: 25,
+      clientY: 45,
+      deltaY: 10,
+    });
+
+    expect(terminal.handleWheel(event)).toBe(true);
+    expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'input', data: '\x1b[<65;3;3M' }));
+  });
+
+  it('leaves normal terminal scrollback handling to ghostty-web', async () => {
+    const socket = new MockWebSocket();
+    createTerminalWebSocketMock.mockReturnValue(socket);
+
+    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open />);
+
+    await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
+    const terminal = MockTerminal.instances[0];
+    terminal.wasmTerm.isAlternateScreen.mockReturnValue(false);
+
+    expect(terminal.handleWheel(new WheelEvent('wheel', { deltaY: 10 }))).toBe(false);
   });
 
   it('renders a simplified header', async () => {
