@@ -57,6 +57,14 @@
   --noise-texture: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' /%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.05'/%3E%3C/svg%3E");
 }
 
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
 /* Base Typography Styling */
 body {
   font-family: var(--font-heading);
@@ -85,7 +93,7 @@ body::before {
 }
 
 #root {
-  min-height: 100vh;
+  min-height: 100%;
   position: relative;
   z-index: 1;
 }
@@ -1562,6 +1570,7 @@ h6 {
   height: 100dvh;
   min-width: 0;
   align-self: stretch;
+  overflow: hidden;
   border-left: 1px solid rgba(20, 20, 19, 0.045);
   background: rgba(238, 232, 221, 0.46);
 }
@@ -1885,9 +1894,7 @@ h6 {
 }
 
 .workspace-terminal-panel.workspace-side-panel {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 18%),
-    linear-gradient(180deg, #231f19 0%, #171411 100%);
+  background: #171512;
   border: 1px solid rgba(20, 20, 19, 0.12);
   border-radius: 0.9rem;
   overflow: hidden;
@@ -1963,17 +1970,21 @@ h6 {
   box-sizing: border-box;
   width: 100%;
   flex: 1 1 auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
   min-height: 0;
   overflow: hidden;
-  padding: 0.5rem 0.6rem 0.85rem;
+  padding: 0.28rem 0 0 0.55rem;
+  background: #171512;
 }
 
-.workspace-terminal-host .xterm {
-  height: 100%;
+.workspace-terminal-host[contenteditable='true'] {
+  outline: none;
 }
 
-.workspace-terminal-host .xterm-viewport {
-  border-radius: 0.55rem;
+.workspace-terminal-host canvas {
+  display: block;
 }
 
 @media (max-width: 1180px) {

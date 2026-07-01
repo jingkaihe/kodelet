@@ -44,7 +44,7 @@ import (
 )
 
 //go:generate bash -c "cd frontend && npm install && npm run build"
-//go:embed dist/*
+//go:embed all:dist/*
 var embedFS embed.FS
 
 // Server represents the web UI server

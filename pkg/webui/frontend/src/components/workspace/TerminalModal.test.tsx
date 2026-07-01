@@ -1,8 +1,8 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import TerminalModal from './TerminalModal';
 
-const { MockFitAddon, MockTerminal, createTerminalWebSocketMock } = vi.hoisted(() => {
+const { MockFitAddon, MockGhosttyLoad, MockTerminal, createTerminalWebSocketMock } = vi.hoisted(() => {
   class HoistedMockFitAddon {
     fit = vi.fn();
     proposeDimensions = vi.fn(() => ({ cols: 80, rows: 24 }));
@@ -29,11 +29,14 @@ const { MockFitAddon, MockTerminal, createTerminalWebSocketMock } = vi.hoisted((
       this.rows = rows;
     });
     dispose = vi.fn();
-    attachCustomKeyEventHandler = vi.fn(() => true);
+    attachCustomKeyEventHandler = vi.fn((handler: (event: KeyboardEvent) => boolean) => {
+      this.customKeyEventHandler = handler;
+    });
     hasSelection = vi.fn(() => false);
 
     private dataHandler?: MockDataHandler;
     private resizeHandler?: MockResizeHandler;
+    private customKeyEventHandler?: (event: KeyboardEvent) => boolean;
 
     constructor() {
       HoistedMockTerminal.instances.push(this);
@@ -56,10 +59,15 @@ const { MockFitAddon, MockTerminal, createTerminalWebSocketMock } = vi.hoisted((
     emitResize(rows: number, cols: number) {
       this.resizeHandler?.({ rows, cols });
     }
+
+    handleKey(event: KeyboardEvent) {
+      return this.customKeyEventHandler?.(event);
+    }
   }
 
   return {
     MockFitAddon: HoistedMockFitAddon,
+    MockGhosttyLoad: vi.fn(() => Promise.resolve({})),
     MockTerminal: HoistedMockTerminal,
     createTerminalWebSocketMock: vi.fn(),
   };
@@ -71,12 +79,12 @@ vi.mock('../../services/api', () => ({
   },
 }));
 
-vi.mock('@xterm/addon-fit', () => ({
-  FitAddon: MockFitAddon,
-}));
-
-vi.mock('@xterm/xterm', () => ({
+vi.mock('ghostty-web', () => ({
   Terminal: MockTerminal,
+  FitAddon: MockFitAddon,
+  Ghostty: {
+    load: MockGhosttyLoad,
+  },
 }));
 
 class MockWebSocket {
@@ -108,14 +116,14 @@ describe('TerminalModal', () => {
     createTerminalWebSocketMock.mockReset();
   });
 
-  it('suppresses parser-generated input until replay completes', () => {
+  it('suppresses parser-generated input until replay completes', async () => {
     const socket = new MockWebSocket();
     createTerminalWebSocketMock.mockReturnValue(socket);
 
     render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open />);
 
+    await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
     const terminal = MockTerminal.instances[0];
-    expect(terminal).toBeDefined();
 
     act(() => {
       socket.emit('open');
@@ -133,21 +141,39 @@ describe('TerminalModal', () => {
     expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'input', data: 'ls\n' }));
   });
 
-  it('reserves bottom space when fitting the terminal panel', () => {
+  it('reserves bottom space when fitting the terminal panel', async () => {
     const socket = new MockWebSocket();
     createTerminalWebSocketMock.mockReturnValue(socket);
 
     render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open />);
 
+    await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
     const terminal = MockTerminal.instances[0];
     expect(terminal.resize).toHaveBeenCalledWith(80, 23);
   });
 
-  it('renders a simplified header', () => {
+  it('allows ghostty-web to process terminal keystrokes', async () => {
     const socket = new MockWebSocket();
     createTerminalWebSocketMock.mockReturnValue(socket);
 
     render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open />);
+
+    await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
+    const terminal = MockTerminal.instances[0];
+    act(() => {
+      socket.emit('message', { data: JSON.stringify({ type: 'replay-complete' }) });
+    });
+
+    expect(terminal.handleKey(new KeyboardEvent('keydown', { key: 'a' }))).toBe(false);
+  });
+
+  it('renders a simplified header', async () => {
+    const socket = new MockWebSocket();
+    createTerminalWebSocketMock.mockReturnValue(socket);
+
+    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open />);
+
+    await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
 
     expect(screen.queryByRole('heading', { name: 'Terminal' })).not.toBeInTheDocument();
     expect(screen.queryByText('/tmp/project')).not.toBeInTheDocument();
