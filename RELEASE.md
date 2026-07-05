@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.4.49-beta
+
+Added dynamic terminal tab titles in `kodelet chat`, including workspace labels, a running spinner, action-required flashing, and cleanup on exit.
+
+Improved Web UI terminal handling by forwarding `ghostty-web` generated responses back to the PTY and keeping slow terminal clients from closing attachments.
+
+Updated the embedded Web UI terminal renderer to the pinned `ghostty-web` 0.4.0-next.20.g1858a59 build.
+
 ## 0.4.47-beta
 
 Updated `golang.org/x/net` to v0.55.0 to resolve GHSA-5cv4-jp36-h3mw / CVE-2026-25680.
