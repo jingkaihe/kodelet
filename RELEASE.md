@@ -8,6 +8,8 @@ Improved Web UI terminal handling by forwarding `ghostty-web` generated response
 
 Updated the embedded Web UI terminal renderer to the pinned `ghostty-web` 0.4.0-next.20.g1858a59 build.
 
+Updated `golang.org/x/image` to v0.41.0 to resolve GHSA-q675-qj96-32m9 / CVE-2026-46599.
+
 ## 0.4.47-beta
 
 Updated `golang.org/x/net` to v0.55.0 to resolve GHSA-5cv4-jp36-h3mw / CVE-2026-25680.
