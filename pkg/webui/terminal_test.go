@@ -53,6 +53,13 @@ func TestWebsocketWriterRejectsNilConnection(t *testing.T) {
 	require.ErrorContains(t, writer.Write(websocket.TextMessage, nil), "websocket writer is not initialized")
 }
 
+func TestTerminalAttachmentErrorClosesIgnoresSlowClients(t *testing.T) {
+	assert.False(t, terminalAttachmentErrorCloses(errTerminalClientSlow))
+	assert.True(t, terminalAttachmentErrorCloses(nil))
+	assert.True(t, terminalAttachmentErrorCloses(errTerminalSessionClosed))
+	assert.True(t, terminalAttachmentErrorCloses(assert.AnError))
+}
+
 func TestReadTerminalWebsocketForwardsMessagesAndReadErrors(t *testing.T) {
 	serverReadCh := make(chan terminalSocketRead, 3)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -178,6 +178,9 @@ func (s *Server) handleTerminalWebsocket(w http.ResponseWriter, r *http.Request)
 			_ = writer.writeJSON(terminalMessage{Type: "exit", Code: code})
 			return
 		case asyncErr := <-attachment.errCh:
+			if !terminalAttachmentErrorCloses(asyncErr) {
+				continue
+			}
 			if asyncErr != nil && !errors.Is(asyncErr, errTerminalSessionClosed) {
 				var closeErr *websocket.CloseError
 				if !errors.As(asyncErr, &closeErr) {
@@ -221,6 +224,10 @@ func (s *Server) handleTerminalWebsocket(w http.ResponseWriter, r *http.Request)
 			}
 		}
 	}
+}
+
+func terminalAttachmentErrorCloses(err error) bool {
+	return err == nil || !errors.Is(err, errTerminalClientSlow)
 }
 
 func readTerminalWebsocket(ctx context.Context, conn *websocket.Conn, readCh chan<- terminalSocketRead) {

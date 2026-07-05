@@ -20,7 +20,7 @@
   "dependencies": {
     "clsx": "^2.1.0",
     "date-fns": "^2.30.0",
-    "ghostty-web": "^0.4.0",
+    "ghostty-web": "0.4.0-next.20.g1858a59",
     "lucide-react": "^1.14.0",
     "marked": "^9.1.6",
     "prismjs": "^1.29.0",

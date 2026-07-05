@@ -97,6 +97,23 @@ const getSGRMouseModifiers = (event: WheelEvent) => {
   return modifiers;
 };
 
+const drainTerminalResponses = (terminal: Terminal, onResponse: (data: string) => void) => {
+  const wasmTerm = terminal.wasmTerm;
+  if (!wasmTerm || typeof wasmTerm.readResponse !== 'function') {
+    return;
+  }
+
+  while (true) {
+    const response = wasmTerm.readResponse();
+    if (response === null) {
+      return;
+    }
+    if (response !== '') {
+      onResponse(response);
+    }
+  }
+};
+
 const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose, showPopOut = true }) => {
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -181,6 +198,18 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose, 
         return;
       }
       socketRef.current.send(JSON.stringify(message));
+    };
+
+    const sendTerminalInput = (data: string) => {
+      if (suppressTerminalInputRef.current) {
+        return;
+      }
+      sendMessage({ type: 'input', data });
+    };
+
+    const writeTerminalOutput = (targetTerminal: Terminal, data: Uint8Array, callback?: () => void) => {
+      targetTerminal.write(data, callback);
+      drainTerminalResponses(targetTerminal, sendTerminalInput);
     };
 
     const sendResize = () => {
@@ -327,14 +356,14 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose, 
           if (event.data instanceof ArrayBuffer) {
             if (!replayCompleteReceivedRef.current) {
               replayPendingWritesRef.current += 1;
-              terminal.write(new Uint8Array(event.data), () => {
+              writeTerminalOutput(terminal, new Uint8Array(event.data), () => {
                 replayPendingWritesRef.current = Math.max(0, replayPendingWritesRef.current - 1);
                 releaseReplaySuppressionIfReady();
               });
               return;
             }
 
-            terminal.write(new Uint8Array(event.data));
+            writeTerminalOutput(terminal, new Uint8Array(event.data));
           }
         });
 
@@ -347,10 +376,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose, 
         });
 
         disposableData = terminal.onData((data) => {
-          if (suppressTerminalInputRef.current) {
-            return;
-          }
-          sendMessage({ type: 'input', data });
+          sendTerminalInput(data);
         });
 
         disposableResize = terminal.onResize(({ rows, cols }) => {
@@ -400,7 +426,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose, 
 
           event.preventDefault();
           event.stopPropagation();
-          sendMessage({ type: 'input', data: `\x1b[<${button};${col};${row}M`.repeat(repeatCount) });
+          sendTerminalInput(`\x1b[<${button};${col};${row}M`.repeat(repeatCount));
           return true;
         });
 
