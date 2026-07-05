@@ -21,6 +21,12 @@ func TestSanitizeTerminalTitleStripsInvisibleFormatChars(t *testing.T) {
 	assert.Equal(t, "Project Title", sanitized)
 }
 
+func TestSanitizeTerminalTitleStripsFormatCategoryChars(t *testing.T) {
+	// Cf codepoints: tag char, Arabic number sign, musical format control.
+	sanitized := sanitizeTerminalTitle("re\U000E0067po\u0600na\U0001D173me")
+	assert.Equal(t, "reponame", sanitized)
+}
+
 func TestSanitizeTerminalTitleTruncates(t *testing.T) {
 	sanitized := sanitizeTerminalTitle(strings.Repeat("a", maxTerminalTitleChars+10))
 	assert.Equal(t, maxTerminalTitleChars, utf8.RuneCountInString(sanitized))

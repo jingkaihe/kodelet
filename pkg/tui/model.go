@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	xansi "github.com/charmbracelet/x/ansi"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
@@ -36,10 +37,15 @@ func Run(ctx context.Context, config Config) error {
 
 	program := tea.NewProgram(initialModel, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	finalModel, err := program.Run()
+	final, isModel := finalModel.(model)
+	// Cleared here so signal-driven exits also reset the title.
+	if isModel && final.terminalTitleWritten {
+		fmt.Fprint(os.Stdout, xansi.SetWindowTitle(""))
+	}
 	if err != nil {
 		return err
 	}
-	if final, ok := finalModel.(model); ok {
+	if isModel {
 		if summary := renderExitSummary(final.conversationID, final.usage); summary != "" {
 			fmt.Fprintln(os.Stdout, summary)
 		}

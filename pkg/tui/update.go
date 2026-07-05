@@ -255,7 +255,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.cancel()
-			return m, tea.Sequence(m.clearTerminalTitle(), tea.Quit)
+			return m, tea.Quit
 		case "esc":
 			if m.historySearch != nil {
 				m.cancelHistorySearch()

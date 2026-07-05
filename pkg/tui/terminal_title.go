@@ -23,8 +23,7 @@ const (
 	terminalTitleActionRequiredPrefixAlt = "[ ? ] Action Required"
 )
 
-// refreshTerminalTitle returns a command that rewrites the title, or nil when
-// it is already current.
+// refreshTerminalTitle rewrites the title, or returns nil when it is current.
 func (m *model) refreshTerminalTitle(now time.Time) tea.Cmd {
 	title := sanitizeTerminalTitle(m.terminalTitleText(now))
 	if title == "" {
@@ -38,8 +37,7 @@ func (m *model) refreshTerminalTitle(now time.Time) tea.Cmd {
 	return tea.SetWindowTitle(title)
 }
 
-// clearTerminalTitle clears the title kodelet last wrote, if any; restoring
-// the shell's previous title is not portable across terminals.
+// clearTerminalTitle clears the title kodelet last wrote, if any.
 func (m *model) clearTerminalTitle() tea.Cmd {
 	if !m.terminalTitleWritten {
 		return nil
@@ -96,8 +94,8 @@ func terminalTitleActionRequiredPrefixAt(origin, now time.Time) string {
 	return terminalTitleActionRequiredPrefixAlt
 }
 
-// sanitizeTerminalTitle drops disallowed codepoints, collapses whitespace runs
-// to single spaces, and caps the result at maxTerminalTitleChars runes.
+// sanitizeTerminalTitle drops disallowed codepoints, collapses whitespace,
+// and caps the length in runes.
 func sanitizeTerminalTitle(title string) string {
 	var sanitized strings.Builder
 	charsWritten := 0
@@ -126,24 +124,17 @@ func sanitizeTerminalTitle(title string) string {
 	return sanitized.String()
 }
 
-// isDisallowedTerminalTitleChar reports whether r is a control character or an
-// invisible/bidi formatting codepoint that must not reach the title sequence.
+// isDisallowedTerminalTitleChar reports whether r is a control or invisible
+// formatting codepoint.
 func isDisallowedTerminalTitleChar(r rune) bool {
-	if unicode.IsControl(r) {
+	if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
 		return true
 	}
+	// Invisible codepoints outside the Cf category.
 	switch {
-	case r == '\u00AD', // soft hyphen
-		r == '\u034F',                  // combining grapheme joiner
-		r == '\u061C',                  // arabic letter mark
-		r == '\u180E',                  // mongolian vowel separator
-		r >= '\u200B' && r <= '\u200F', // zero-width spaces/joiners, LRM/RLM
-		r >= '\u202A' && r <= '\u202E', // bidi embedding/override controls
-		r >= '\u2060' && r <= '\u206F', // word joiner, invisible operators, bidi isolates
+	case r == '\u034F', // combining grapheme joiner
+		r == '\u2065',                  // unassigned, inside the invisible-operator block
 		r >= '\uFE00' && r <= '\uFE0F', // variation selectors
-		r == '\uFEFF',                  // zero-width no-break space / BOM
-		r >= '\uFFF9' && r <= '\uFFFB', // interlinear annotation controls
-		r >= 0x1BCA0 && r <= 0x1BCA3,   // shorthand format controls
 		r >= 0xE0100 && r <= 0xE01EF:   // variation selector supplement
 		return true
 	}
