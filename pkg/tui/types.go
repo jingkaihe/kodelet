@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -153,6 +154,10 @@ type model struct {
 	workingFrame int
 	runCh        chan tea.Msg
 	cancelRun    context.CancelFunc
+
+	terminalTitleEpoch   time.Time
+	lastTerminalTitle    string
+	terminalTitleWritten bool
 
 	detailRegions  []detailRegion
 	queuedSteering []string

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -133,6 +134,7 @@ func newModel(ctx context.Context, config Config) model {
 		autoFollow:             true,
 		runCh:                  make(chan tea.Msg, 256),
 		status:                 "ready",
+		terminalTitleEpoch:     time.Now(),
 	}
 }
 
