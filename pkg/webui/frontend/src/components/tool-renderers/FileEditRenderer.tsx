@@ -1,7 +1,6 @@
 import React from 'react';
 import { ToolResult } from '../../types';
 import {
-  compactDiffLines,
   ReferenceDiffBlock,
 } from './reference';
 
@@ -77,7 +76,7 @@ const FileEditRenderer: React.FC<FileEditRendererProps> = ({ toolResult }) => {
         {edits.map((edit, index) => {
           const diffLines =
             edit.oldContent || edit.newContent
-              ? compactDiffLines(createUnifiedDiff(edit.oldContent || '', edit.newContent || ''))
+              ? createUnifiedDiff(edit.oldContent || '', edit.newContent || '')
               : [];
 
           return (

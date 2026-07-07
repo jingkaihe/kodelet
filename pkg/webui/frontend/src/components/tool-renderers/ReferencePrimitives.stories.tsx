@@ -7,23 +7,20 @@ import {
   ReferenceTerminal,
   ReferenceToolKVGrid,
   ReferenceToolNote,
-  compactDiffLines,
   parseUnifiedDiff,
 } from './reference';
 
-const diffLines = compactDiffLines(
-  parseUnifiedDiff(
-    [
-      '--- a/pkg/webui/frontend/src/components/chat/ChatTranscript.tsx',
-      '+++ b/pkg/webui/frontend/src/components/chat/ChatTranscript.tsx',
-      '@@ -1,5 +1,6 @@',
-      ' import React from "react";',
-      '+import ChatMessageFrame from "./ChatMessageFrame";',
-      ' import ToolRenderer from "../ToolRenderer";',
-      '-const renderFrame = () => null;',
-      '+const renderFrame = () => <ChatMessageFrame role="assistant" />;',
-    ].join('\n')
-  )
+const diffLines = parseUnifiedDiff(
+  [
+    '--- a/pkg/webui/frontend/src/components/chat/ChatTranscript.tsx',
+    '+++ b/pkg/webui/frontend/src/components/chat/ChatTranscript.tsx',
+    '@@ -1,5 +1,6 @@',
+    ' import React from "react";',
+    '+import ChatMessageFrame from "./ChatMessageFrame";',
+    ' import ToolRenderer from "../ToolRenderer";',
+    '-const renderFrame = () => null;',
+    '+const renderFrame = () => <ChatMessageFrame role="assistant" />;',
+  ].join('\n')
 );
 
 const ReferencePrimitiveGallery = () => (

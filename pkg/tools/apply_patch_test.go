@@ -39,7 +39,7 @@ func TestApplyPatchTool_AddFile(t *testing.T) {
 	result := tool.Execute(context.Background(), state, params)
 
 	require.False(t, result.IsError())
-	assert.Contains(t, result.GetResult(), "A "+filepath.Join(tmp, "hello.txt"))
+	assert.Contains(t, result.GetResult(), "Write "+filepath.Join(tmp, "hello.txt")+" (+2 -0)")
 
 	content, err := os.ReadFile(filepath.Join(tmp, "hello.txt"))
 	require.NoError(t, err)
@@ -72,7 +72,7 @@ func TestApplyPatchTool_AddFileOverwritesExistingFile(t *testing.T) {
 	result := tool.Execute(context.Background(), state, params)
 
 	require.False(t, result.IsError())
-	assert.Contains(t, result.GetResult(), "A "+existingPath)
+	assert.Contains(t, result.GetResult(), "Write "+existingPath+" (+1 -1)")
 
 	content, err := os.ReadFile(existingPath)
 	require.NoError(t, err)
@@ -110,8 +110,8 @@ func TestApplyPatchTool_DeleteThenAddSamePath(t *testing.T) {
 	result := tool.Execute(context.Background(), state, params)
 
 	require.False(t, result.IsError())
-	assert.Contains(t, result.GetResult(), "A "+filePath)
-	assert.Contains(t, result.GetResult(), "D "+filePath)
+	assert.Contains(t, result.GetResult(), "Delete "+filePath+" (+0 -1)")
+	assert.Contains(t, result.GetResult(), "Write "+filePath+" (+1 -0)")
 
 	content, err := os.ReadFile(filePath)
 	require.NoError(t, err)
@@ -134,7 +134,7 @@ func TestApplyPatchTool_AddEmptyFile(t *testing.T) {
 	result := tool.Execute(context.Background(), state, params)
 
 	require.False(t, result.IsError())
-	assert.Contains(t, result.GetResult(), "A "+filepath.Join(tmp, "empty.txt"))
+	assert.Contains(t, result.GetResult(), "Write "+filepath.Join(tmp, "empty.txt")+" (+0 -0)")
 
 	content, err := os.ReadFile(filepath.Join(tmp, "empty.txt"))
 	require.NoError(t, err)
@@ -165,8 +165,8 @@ func TestApplyPatchTool_UpdateAndDelete(t *testing.T) {
 	result := tool.Execute(context.Background(), state, params)
 
 	require.False(t, result.IsError())
-	assert.Contains(t, result.GetResult(), "M "+filepath.Join(tmp, "edit.txt"))
-	assert.Contains(t, result.GetResult(), "D "+filepath.Join(tmp, "gone.txt"))
+	assert.Contains(t, result.GetResult(), "Edit "+filepath.Join(tmp, "edit.txt")+" (+1 -1)")
+	assert.Contains(t, result.GetResult(), "Delete "+filepath.Join(tmp, "gone.txt")+" (+0 -1)")
 
 	content, err := os.ReadFile(filepath.Join(tmp, "edit.txt"))
 	require.NoError(t, err)
@@ -199,7 +199,7 @@ func TestApplyPatchTool_MoveFile(t *testing.T) {
 	result := tool.Execute(context.Background(), state, params)
 
 	require.False(t, result.IsError())
-	assert.Contains(t, result.GetResult(), "M "+filepath.Join(tmp, "renamed", "name.txt"))
+	assert.Contains(t, result.GetResult(), "Move "+filepath.Join(tmp, "old", "name.txt")+" → "+filepath.Join(tmp, "renamed", "name.txt")+" (+1 -1)")
 
 	_, err := os.Stat(filepath.Join(tmp, "old", "name.txt"))
 	assert.True(t, os.IsNotExist(err))
@@ -232,7 +232,7 @@ func TestApplyPatchTool_MoveToSamePathIsInPlaceUpdate(t *testing.T) {
 	result := tool.Execute(context.Background(), state, params)
 
 	require.False(t, result.IsError())
-	assert.Contains(t, result.GetResult(), "M "+filePath)
+	assert.Contains(t, result.GetResult(), "Edit "+filePath+" (+1 -1)")
 
 	content, err := os.ReadFile(filePath)
 	require.NoError(t, err)
@@ -340,9 +340,9 @@ func TestApplyPatchTool_MultipleOperations(t *testing.T) {
 	result := tool.Execute(context.Background(), state, params)
 
 	require.False(t, result.IsError())
-	assert.Contains(t, result.GetResult(), "A "+filepath.Join(tmp, "nested", "new.txt"))
-	assert.Contains(t, result.GetResult(), "M "+filepath.Join(tmp, "modify.txt"))
-	assert.Contains(t, result.GetResult(), "D "+filepath.Join(tmp, "remove.txt"))
+	assert.Contains(t, result.GetResult(), "Write "+filepath.Join(tmp, "nested", "new.txt")+" (+1 -0)")
+	assert.Contains(t, result.GetResult(), "Edit "+filepath.Join(tmp, "modify.txt")+" (+1 -1)")
+	assert.Contains(t, result.GetResult(), "Delete "+filepath.Join(tmp, "remove.txt")+" (+0 -1)")
 
 	modified, err := os.ReadFile(filepath.Join(tmp, "modify.txt"))
 	require.NoError(t, err)

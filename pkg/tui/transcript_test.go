@@ -202,35 +202,71 @@ func TestDedicatedBuiltinToolLabels(t *testing.T) {
 	}
 }
 
-func TestApplyPatchGroupsHandleFallbackMetadataAndMoveLabels(t *testing.T) {
-	metadataOnly := toolCall{
+func TestApplyPatchGroupsRenderMoveLabelsCountsAndLineGutter(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.resize()
+
+	patchTool := toolCall{
 		name: "apply_patch",
 		done: true,
 		structured: &tooltypes.StructuredToolResult{
 			ToolName: "apply_patch",
 			Success:  true,
 			Metadata: &tooltypes.ApplyPatchMetadata{
-				Added:    []string{"added.go"},
-				Modified: []string{"edited.go"},
-				Deleted:  []string{"deleted.go"},
+				Changes: []tooltypes.ApplyPatchChange{{
+					Path:        "old.go",
+					MovePath:    "new.go",
+					Operation:   tooltypes.ApplyPatchOperationUpdate,
+					UnifiedDiff: "--- old.go\n+++ new.go\n@@ -1,2 +1,2 @@\n old context\n-old\n+new\n",
+				}},
 			},
 		},
 	}
 
-	groups := buildApplyPatchToolGroups(assistantBlock{tools: []toolCall{metadataOnly}}, 0)
-	require.Len(t, groups, 3)
-	assert.Equal(t, "Write added.go", groups[0].label)
-	assert.Equal(t, "Edit edited.go", groups[1].label)
-	assert.Equal(t, "Delete deleted.go", groups[2].label)
+	groups := m.buildApplyPatchToolGroups(assistantBlock{tools: []toolCall{patchTool}}, 0)
+	require.Len(t, groups, 1)
+	assert.Equal(t, "Move old.go → new.go (+1 -1)", groups[0].label)
+	body := xansi.Strip(renderDiffRenderedLines(groups[0].bodyLines))
+	assert.Contains(t, body, "1 1 │  old context")
+	assert.Contains(t, body, "2   │ -old")
+	assert.Contains(t, body, "  2 │ +new")
+}
 
-	assert.Equal(t, "Move old.go -> new.go", applyPatchChangeLabel(tooltypes.ApplyPatchChange{Path: "old.go", MovePath: "new.go"}))
-	assert.Contains(t, applyPatchChangeDiff(tooltypes.ApplyPatchChange{
-		Path:       "old.go",
-		MovePath:   "new.go",
-		Operation:  "move",
-		OldContent: "old\n",
-		NewContent: "new\n",
-	}), "new.go")
+func TestApplyPatchGroupsRenderPartialDiffAndErrorOnFailure(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.resize()
+
+	patchTool := toolCall{
+		name:   "apply_patch",
+		done:   true,
+		failed: true,
+		result: "Patch failed (+1 -1):\nEdit edit.go (+1 -1)\n@@ -1 +1 @@\n-old\n+new\n\nError: could not apply hunk",
+		structured: &tooltypes.StructuredToolResult{
+			ToolName: "apply_patch",
+			Success:  false,
+			Error:    "could not apply hunk",
+			Metadata: &tooltypes.ApplyPatchMetadata{Changes: []tooltypes.ApplyPatchChange{{
+				Path:        "edit.go",
+				Operation:   tooltypes.ApplyPatchOperationUpdate,
+				UnifiedDiff: "@@ -1 +1 @@\n-old\n+new\n",
+			}}},
+		},
+	}
+
+	groups := m.buildApplyPatchToolGroups(assistantBlock{tools: []toolCall{patchTool}}, 0)
+	require.Len(t, groups, 1)
+	assert.Equal(t, "Edit edit.go (+1 -1)", groups[0].label)
+	body := xansi.Strip(renderDiffRenderedLines(groups[0].bodyLines))
+	assert.Contains(t, body, "1   │ -old")
+	assert.Contains(t, body, "  1 │ +new")
+	assert.Contains(t, body, "could not apply hunk")
+	assert.NotContains(t, body, "Patch failed (+1 -1):")
 }
 
 func TestRenderTranscriptShowsQueuedSteeringErrorOnEmptyTranscript(t *testing.T) {
@@ -286,13 +322,6 @@ func TestRenderTranscriptApplyPatchDiffToggle(t *testing.T) {
 	assert.Contains(t, content, "@@ -1 +1 @@")
 	assert.Contains(t, content, "-old")
 	assert.Contains(t, content, "+new")
-}
-
-func TestRenderDiffLineUsesAdditionAndRemovalStyles(t *testing.T) {
-	assert.Equal(t, diffAddedStyle.Render("  +new"), renderDiffLine("  +new"))
-	assert.Equal(t, diffRemovedStyle.Render("  -old"), renderDiffLine("  -old"))
-	assert.Equal(t, toolBodyStyle.Render("  +++ b/file.go"), renderDiffLine("  +++ b/file.go"))
-	assert.Equal(t, toolBodyStyle.Render("  --- a/file.go"), renderDiffLine("  --- a/file.go"))
 }
 
 func TestRenderTranscriptRendersAssistantMarkdown(t *testing.T) {

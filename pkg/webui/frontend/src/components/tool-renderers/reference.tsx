@@ -98,83 +98,77 @@ type DiffKind = 'context' | 'added' | 'removed' | 'header' | 'meta';
 export interface ReferenceDiffLine {
   kind: DiffKind;
   content: string;
+  oldLine?: number;
+  newLine?: number;
 }
 
-export const parseUnifiedDiff = (unifiedDiff: string): ReferenceDiffLine[] =>
-  unifiedDiff.split('\n').map((line) => {
-    if (line.startsWith('@@')) {
-      return { kind: 'header', content: line };
-    }
-    if (line.startsWith('+++') || line.startsWith('---')) {
-      return { kind: 'meta', content: line };
-    }
-    if (line.startsWith('+')) {
-      return { kind: 'added', content: line.slice(1) };
-    }
-    if (line.startsWith('-')) {
-      return { kind: 'removed', content: line.slice(1) };
-    }
-    if (line.startsWith(' ')) {
-      return { kind: 'context', content: line.slice(1) };
-    }
-    return { kind: 'context', content: line };
-  });
+const hunkHeaderPattern = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
 
-export const compactDiffLines = (
-  lines: ReferenceDiffLine[],
-  keepStart = 1,
-  keepEnd = 1,
-  maxTotalLines = 48
-): ReferenceDiffLine[] => {
-  const compacted: ReferenceDiffLine[] = [];
-  let contextRun: ReferenceDiffLine[] = [];
+const splitDiffLines = (text: string): string[] => {
+  const lines = text.split('\n');
+  if (lines.length > 0 && lines[lines.length - 1] === '') {
+    return lines.slice(0, -1);
+  }
+  return lines;
+};
 
-  const flushContextRun = () => {
-    if (contextRun.length === 0) {
+export const parseUnifiedDiff = (unifiedDiff: string): ReferenceDiffLine[] => {
+  const parsedLines: ReferenceDiffLine[] = [];
+  let oldLine = 0;
+  let newLine = 0;
+  let seenHunk = false;
+
+  splitDiffLines(unifiedDiff).forEach((line) => {
+    if (!seenHunk && (line.startsWith('+++ ') || line.startsWith('--- '))) {
       return;
     }
-
-    if (contextRun.length <= keepStart + keepEnd + 1) {
-      compacted.push(...contextRun);
-    } else {
-      compacted.push(...contextRun.slice(0, keepStart));
-      compacted.push({
-        kind: 'meta',
-        content: `... ${contextRun.length - keepStart - keepEnd} unchanged lines ...`,
-      });
-      compacted.push(...contextRun.slice(-keepEnd));
+    if (line.startsWith('@@')) {
+      const match = line.match(hunkHeaderPattern);
+      oldLine = match ? Number(match[1]) : 0;
+      newLine = match ? Number(match[2]) : 0;
+      seenHunk = true;
+      parsedLines.push({ kind: 'header', content: line });
+      return;
     }
-    contextRun = [];
-  };
-
-  for (const line of lines) {
-    if (line.kind === 'context') {
-      contextRun.push(line);
-      continue;
+    if (line.startsWith('\\ No newline')) {
+      parsedLines.push({ kind: 'meta', content: line });
+      return;
     }
-    flushContextRun();
-    compacted.push(line);
-  }
+    if (!seenHunk) {
+      parsedLines.push({ kind: 'meta', content: line });
+      return;
+    }
+    if (line.startsWith('+')) {
+      parsedLines.push({ kind: 'added', content: line.slice(1), newLine });
+      newLine += 1;
+      return;
+    }
+    if (line.startsWith('-')) {
+      parsedLines.push({ kind: 'removed', content: line.slice(1), oldLine });
+      oldLine += 1;
+      return;
+    }
+    if (line.startsWith(' ')) {
+      parsedLines.push({ kind: 'context', content: line.slice(1), oldLine, newLine });
+      oldLine += 1;
+      newLine += 1;
+      return;
+    }
+    parsedLines.push({ kind: 'context', content: line, oldLine, newLine });
+    oldLine += 1;
+    newLine += 1;
+  });
 
-  flushContextRun();
-
-  if (compacted.length <= maxTotalLines) {
-    return compacted;
-  }
-
-  return [
-    ...compacted.slice(0, maxTotalLines - 1),
-    {
-      kind: 'meta',
-      content: `... ${compacted.length - maxTotalLines + 1} more diff lines omitted ...`,
-    },
-  ];
+  return parsedLines;
 };
 
 export const ReferenceDiffBlock: React.FC<{ lines: ReferenceDiffLine[] }> = ({ lines }) => {
   if (lines.length === 0) {
     return null;
   }
+
+  const oldWidth = Math.max(1, ...lines.map((line) => String(line.oldLine || '').length));
+  const newWidth = Math.max(1, ...lines.map((line) => String(line.newLine || '').length));
 
   return (
     <div className="diff-block">
@@ -185,7 +179,7 @@ export const ReferenceDiffBlock: React.FC<{ lines: ReferenceDiffLine[] }> = ({ l
             : line.kind === 'removed'
               ? '-'
               : line.kind === 'header'
-                ? '@@'
+                ? ' '
                 : line.kind === 'meta'
                   ? '›'
                   : ' ';
@@ -197,7 +191,12 @@ export const ReferenceDiffBlock: React.FC<{ lines: ReferenceDiffLine[] }> = ({ l
               line.kind !== 'context' && `diff-line-${line.kind}`
             )}
             key={`${line.kind}-${index}`}
+            style={{
+              gridTemplateColumns: `${oldWidth}ch ${newWidth}ch 1.2rem minmax(0, 1fr)`,
+            }}
           >
+            <span className="diff-line-number">{line.oldLine || ''}</span>
+            <span className="diff-line-number">{line.newLine || ''}</span>
             <span className="diff-sign">{sign}</span>
             <span className="diff-content">{line.content || '\u00A0'}</span>
           </div>

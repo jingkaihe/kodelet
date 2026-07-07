@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/aymanbagabas/go-udiff"
+	"github.com/jingkaihe/kodelet/pkg/diffview"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
 )
@@ -306,42 +307,31 @@ type ApplyPatchRenderer struct{}
 
 // RenderCLI renders apply_patch results with a summary and unified diffs.
 func (r *ApplyPatchRenderer) RenderCLI(result tools.StructuredToolResult) string {
-	if !result.Success {
-		return fmt.Sprintf("Error: %s", result.Error)
-	}
-
 	var meta tools.ApplyPatchMetadata
 	if !tools.ExtractMetadata(result.Metadata, &meta) {
+		if !result.Success {
+			return fmt.Sprintf("Error: %s", result.Error)
+		}
 		return "Error: Invalid metadata type for apply_patch"
 	}
 
-	var output bytes.Buffer
-	output.WriteString("Success. Updated the following files:\n")
-	for _, path := range meta.Added {
-		fmt.Fprintf(&output, "A %s\n", path)
+	var output strings.Builder
+	if result.Success {
+		output.WriteString("Success. Updated files")
+	} else {
+		output.WriteString("Patch failed")
 	}
-	for _, path := range meta.Modified {
-		fmt.Fprintf(&output, "M %s\n", path)
-	}
-	for _, path := range meta.Deleted {
-		fmt.Fprintf(&output, "D %s\n", path)
-	}
+	summary := diffview.FromApplyPatchMetadata(meta)
+	fmt.Fprintf(&output, " (+%d -%d):", summary.Added, summary.Removed)
 
-	for _, change := range meta.Changes {
-		if change.Operation == tools.ApplyPatchOperationUpdate && change.UnifiedDiff != "" {
-			output.WriteString("\n")
-			output.WriteString(change.UnifiedDiff)
-		}
-		if change.Operation == tools.ApplyPatchOperationAdd && change.NewContent != "" {
-			output.WriteString("\n")
-			diff := udiff.Unified(change.Path, change.Path, change.OldContent, change.NewContent)
-			output.WriteString(diff)
-		}
-		if change.Operation == tools.ApplyPatchOperationDelete && change.OldContent != "" {
-			output.WriteString("\n")
-			diff := udiff.Unified(change.Path, change.Path, change.OldContent, "")
-			output.WriteString(diff)
-		}
+	rendered := diffview.RenderedText(diffview.RenderSummary(summary))
+	if strings.TrimSpace(rendered) != "" {
+		output.WriteString("\n")
+		output.WriteString(rendered)
+	}
+	if !result.Success && strings.TrimSpace(result.Error) != "" {
+		output.WriteString("\n\nError: ")
+		output.WriteString(strings.TrimSpace(result.Error))
 	}
 
 	return strings.TrimSuffix(output.String(), "\n")
@@ -381,51 +371,31 @@ func (r *ApplyPatchRenderer) RenderMergedMarkdown(result tools.StructuredToolRes
 }
 
 func (r *ApplyPatchRenderer) renderMarkdown(result tools.StructuredToolResult) string {
-	if !result.Success {
-		return renderMarkdownFromCLI(result, r.RenderCLI(result))
-	}
-
 	var meta tools.ApplyPatchMetadata
 	if !tools.ExtractMetadata(result.Metadata, &meta) {
 		return renderMarkdownFromCLI(result, r.RenderCLI(result))
 	}
 
 	var output strings.Builder
-	output.WriteString("Success. Updated the following files:\n")
-
-	if len(meta.Added)+len(meta.Modified)+len(meta.Deleted) > 0 {
-		for _, path := range meta.Added {
-			fmt.Fprintf(&output, "A %s\n", path)
-		}
-		for _, path := range meta.Modified {
-			fmt.Fprintf(&output, "M %s\n", path)
-		}
-		for _, path := range meta.Deleted {
-			fmt.Fprintf(&output, "D %s\n", path)
-		}
+	summary := diffview.FromApplyPatchMetadata(meta)
+	if result.Success {
+		fmt.Fprintf(&output, "Success. Updated files (+%d -%d).", summary.Added, summary.Removed)
+	} else {
+		fmt.Fprintf(&output, "Patch failed (+%d -%d).", summary.Added, summary.Removed)
 	}
 
-	for _, change := range meta.Changes {
-		var diff string
-		switch change.Operation {
-		case tools.ApplyPatchOperationUpdate:
-			diff = change.UnifiedDiff
-		case tools.ApplyPatchOperationAdd:
-			if change.NewContent != "" {
-				diff = udiff.Unified(change.Path, change.Path, change.OldContent, change.NewContent)
-			}
-		case tools.ApplyPatchOperationDelete:
-			if change.OldContent != "" {
-				diff = udiff.Unified(change.Path, change.Path, change.OldContent, "")
-			}
-		}
-
-		if strings.TrimSpace(diff) == "" {
-			continue
-		}
-
+	for _, file := range summary.Files {
 		output.WriteString("\n")
-		output.WriteString(fencedCodeBlock("diff", diff))
+		output.WriteString("\n")
+		fmt.Fprintf(&output, "- **%s**\n", file.Header())
+		body := diffview.RenderedText(diffview.RenderFileBody(file))
+		if strings.TrimSpace(body) != "" {
+			output.WriteString(fencedCodeBlock("diff", body))
+		}
+	}
+	if !result.Success && strings.TrimSpace(result.Error) != "" {
+		output.WriteString("\n\n")
+		fmt.Fprintf(&output, "**Error:** %s", strings.TrimSpace(result.Error))
 	}
 
 	return strings.TrimSpace(output.String())

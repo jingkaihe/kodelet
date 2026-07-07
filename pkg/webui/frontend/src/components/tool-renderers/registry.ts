@@ -28,7 +28,7 @@ const toolRendererRegistry: Record<string, ToolRendererRegistration> = {
   file_read: { component: FileReadRenderer },
   file_write: { component: FileWriteRenderer },
   file_edit: { component: FileEditRenderer },
-  apply_patch: { component: ApplyPatchRenderer },
+  apply_patch: { component: ApplyPatchRenderer, supportsFailureRendering: true },
   bash: { component: BashRenderer, supportsFailureRendering: true },
   grep_tool: { component: GrepRenderer },
   glob_tool: { component: GlobRenderer },

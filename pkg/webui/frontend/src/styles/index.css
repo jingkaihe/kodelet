@@ -3454,6 +3454,20 @@ code[class*="language-"] {
   gap: 0.72rem;
 }
 
+.apply-patch-result-failed {
+  border-left: 2px solid rgba(166, 63, 63, 0.36);
+  padding-left: 0.72rem;
+}
+
+.apply-patch-error {
+  border-radius: 10px;
+  background: rgba(191, 63, 63, 0.08);
+  padding: 0.46rem 0.62rem;
+  font-family: var(--font-heading);
+  font-size: 0.76rem;
+  color: #8d3e3e;
+}
+
 .apply-patch-change {
   display: grid;
   gap: 0.38rem;
@@ -3489,6 +3503,10 @@ code[class*="language-"] {
   color: #a63f3f;
 }
 
+.apply-patch-operation-move {
+  color: #8b6a2b;
+}
+
 .apply-patch-path {
   min-width: 0;
   overflow: hidden;
@@ -3497,6 +3515,23 @@ code[class*="language-"] {
   font-family: var(--font-mono);
   font-size: 0.73rem;
   color: rgba(20, 20, 19, 0.68);
+}
+
+.apply-patch-counts {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 0.32rem;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  margin-left: auto;
+}
+
+.apply-patch-count-added {
+  color: #5f7247;
+}
+
+.apply-patch-count-removed {
+  color: #a63f3f;
 }
 
 .apply-patch-empty {
@@ -3922,12 +3957,18 @@ code[class*="language-"] {
 
 .diff-line {
   display: grid;
-  grid-template-columns: 1.6rem 1fr;
   gap: 0.5rem;
   padding: 0.22rem 0.55rem;
   font-family: var(--font-mono);
   font-size: 0.76rem;
   line-height: 1.45;
+}
+
+.diff-line-number {
+  color: rgba(20, 20, 19, 0.32);
+  text-align: right;
+  user-select: none;
+  font-variant-numeric: tabular-nums;
 }
 
 .diff-line-added {
@@ -4271,19 +4312,6 @@ code[class*="language-"] {
 /* Tool result specific styling */
 .tool-result-header {
   @apply border-b border-gray-200 pb-2 mb-2;
-}
-
-/* Diff styling */
-.diff-line-added {
-  @apply bg-green-100 text-green-800;
-}
-
-.diff-line-removed {
-  @apply bg-red-100 text-red-800;
-}
-
-.diff-line-context {
-  @apply bg-gray-50 text-gray-600;
 }
 
 /* Force light color scheme - kodelet uses a fixed light theme */

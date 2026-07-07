@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/aymanbagabas/go-udiff"
+	"github.com/jingkaihe/kodelet/pkg/diffview"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
@@ -16,8 +16,8 @@ type toolRenderGroup struct {
 	label        string
 	runningLabel string
 	body         string
+	bodyLines    []diffview.RenderedLine
 	wrapBody     bool
-	diffBody     bool
 	expanded     bool
 	active       bool
 }
@@ -37,7 +37,7 @@ func (m model) toolRenderGroups(block assistantBlock) []toolRenderGroup {
 			idx = end
 
 		case isApplyPatchTool(tool):
-			applyGroups := buildApplyPatchToolGroups(block, idx)
+			applyGroups := m.buildApplyPatchToolGroups(block, idx)
 			groups = append(groups, applyGroups...)
 			idx++
 
@@ -104,10 +104,10 @@ func buildDedicatedBuiltinToolGroup(block assistantBlock, idx int) toolRenderGro
 	}
 }
 
-func buildApplyPatchToolGroups(block assistantBlock, idx int) []toolRenderGroup {
+func (m model) buildApplyPatchToolGroups(block assistantBlock, idx int) []toolRenderGroup {
 	tool := block.tools[idx]
-	changes, hasMetadata := applyPatchChanges(tool)
-	if len(changes) == 0 {
+	summary := applyPatchSummary(tool)
+	if len(summary.Files) == 0 {
 		label := "Applied patch"
 		if tool.failed {
 			label = "Apply patch failed"
@@ -125,31 +125,30 @@ func buildApplyPatchToolGroups(block assistantBlock, idx int) []toolRenderGroup 
 		}}
 	}
 
-	groups := make([]toolRenderGroup, 0, len(changes))
-	for changeIdx, change := range changes {
-		body := applyPatchChangeDiff(change)
+	groups := make([]toolRenderGroup, 0, len(summary.Files))
+	for changeIdx, file := range summary.Files {
+		bodyLines := diffview.RenderFileBodyWidth(file, m.transcriptTextWidth()-2)
+		body := diffview.RenderedText(bodyLines)
 		wrapBody := false
-		diffBody := strings.TrimSpace(body) != ""
-		if strings.TrimSpace(body) == "" && !hasMetadata {
-			body = joinTools([]toolCall{tool})
-			wrapBody = true
-			diffBody = false
-		}
-		if strings.TrimSpace(body) == "" && strings.TrimSpace(tool.result) != "" {
-			body = strings.TrimSpace(tool.result)
-			wrapBody = true
-			diffBody = false
+		if tool.failed {
+			errorText := applyPatchErrorText(tool)
+			if strings.TrimSpace(errorText) != "" {
+				bodyLines = append(bodyLines, diffview.RenderedLine{Kind: diffview.LinePlain, Text: ""})
+				bodyLines = append(bodyLines, diffview.RenderedLine{Kind: diffview.LineMeta, Text: strings.TrimSpace(errorText)})
+				body = diffview.RenderedText(bodyLines)
+				wrapBody = false
+			}
 		}
 
 		groups = append(groups, toolRenderGroup{
 			toolStart:    idx,
 			toolEnd:      idx,
 			changeIndex:  changeIdx,
-			label:        applyPatchChangeLabel(change),
+			label:        file.Header(),
 			runningLabel: "Applying patch",
 			body:         body,
+			bodyLines:    bodyLines,
 			wrapBody:     wrapBody,
-			diffBody:     diffBody,
 			expanded:     block.expanded || tool.expanded || tool.expandedChanges[changeIdx],
 			active:       !tool.done,
 		})
@@ -158,105 +157,43 @@ func buildApplyPatchToolGroups(block assistantBlock, idx int) []toolRenderGroup 
 	return groups
 }
 
-func applyPatchChanges(tool toolCall) ([]tooltypes.ApplyPatchChange, bool) {
+func applyPatchSummary(tool toolCall) diffview.Summary {
 	if tool.structured == nil {
-		return nil, false
+		return diffview.Summary{}
 	}
 
 	var meta tooltypes.ApplyPatchMetadata
 	if !tooltypes.ExtractMetadata(tool.structured.Metadata, &meta) {
-		return nil, false
+		return diffview.Summary{}
 	}
 
-	if len(meta.Changes) > 0 {
-		return meta.Changes, true
-	}
-
-	changes := make([]tooltypes.ApplyPatchChange, 0, len(meta.Added)+len(meta.Modified)+len(meta.Deleted))
-	for _, path := range meta.Added {
-		changes = append(changes, tooltypes.ApplyPatchChange{Path: path, Operation: tooltypes.ApplyPatchOperationAdd})
-	}
-	for _, path := range meta.Modified {
-		changes = append(changes, tooltypes.ApplyPatchChange{Path: path, Operation: tooltypes.ApplyPatchOperationUpdate})
-	}
-	for _, path := range meta.Deleted {
-		changes = append(changes, tooltypes.ApplyPatchChange{Path: path, Operation: tooltypes.ApplyPatchOperationDelete})
-	}
-	return changes, true
+	return diffview.FromApplyPatchMetadata(meta)
 }
 
-func applyPatchChangeLabel(change tooltypes.ApplyPatchChange) string {
-	displayPath := change.Path
-	if strings.TrimSpace(change.MovePath) != "" {
-		displayPath = fmt.Sprintf("%s -> %s", change.Path, change.MovePath)
+func applyPatchErrorText(tool toolCall) string {
+	if tool.structured != nil && strings.TrimSpace(tool.structured.Error) != "" {
+		return strings.TrimSpace(tool.structured.Error)
 	}
+	return strings.TrimSpace(tool.result)
+}
 
-	switch strings.ToLower(strings.TrimSpace(change.Operation)) {
-	case tooltypes.ApplyPatchOperationAdd, "write":
-		return fmt.Sprintf("Write %s", displayPath)
-	case tooltypes.ApplyPatchOperationDelete:
-		return fmt.Sprintf("Delete %s", displayPath)
-	case "move":
-		return fmt.Sprintf("Move %s", displayPath)
+func renderDiffRenderedLines(lines []diffview.RenderedLine) string {
+	rendered := make([]string, 0, len(lines))
+	for _, line := range lines {
+		rendered = append(rendered, renderDiffRenderedLine(line))
+	}
+	return strings.Join(rendered, "\n")
+}
+
+func renderDiffRenderedLine(line diffview.RenderedLine) string {
+	switch line.Kind {
+	case diffview.LineAdded:
+		return diffAddedStyle.Render(line.Text)
+	case diffview.LineRemoved:
+		return diffRemovedStyle.Render(line.Text)
 	default:
-		if strings.TrimSpace(change.MovePath) != "" {
-			return fmt.Sprintf("Move %s", displayPath)
-		}
-		return fmt.Sprintf("Edit %s", displayPath)
+		return toolBodyStyle.Render(line.Text)
 	}
-}
-
-func applyPatchChangeDiff(change tooltypes.ApplyPatchChange) string {
-	if strings.TrimSpace(change.UnifiedDiff) != "" {
-		return strings.TrimSuffix(change.UnifiedDiff, "\n")
-	}
-
-	switch strings.ToLower(strings.TrimSpace(change.Operation)) {
-	case tooltypes.ApplyPatchOperationAdd, "write":
-		if change.OldContent != "" || change.NewContent != "" {
-			return strings.TrimSuffix(udiff.Unified(change.Path, change.Path, change.OldContent, change.NewContent), "\n")
-		}
-	case tooltypes.ApplyPatchOperationDelete:
-		if change.OldContent != "" {
-			return strings.TrimSuffix(udiff.Unified(change.Path, change.Path, change.OldContent, ""), "\n")
-		}
-	case "move", tooltypes.ApplyPatchOperationUpdate:
-		if change.OldContent != "" || change.NewContent != "" {
-			newPath := change.Path
-			if strings.TrimSpace(change.MovePath) != "" {
-				newPath = change.MovePath
-			}
-			return strings.TrimSuffix(udiff.Unified(change.Path, newPath, change.OldContent, change.NewContent), "\n")
-		}
-	}
-
-	return ""
-}
-
-func renderToolGroupBody(body string, diffBody bool) string {
-	if !diffBody {
-		return toolBodyStyle.Render(body)
-	}
-
-	lines := strings.Split(body, "\n")
-	for i, line := range lines {
-		lines[i] = renderDiffLine(line)
-	}
-	return strings.Join(lines, "\n")
-}
-
-func renderDiffLine(line string) string {
-	trimmed := strings.TrimSpace(line)
-	if strings.HasPrefix(trimmed, "+++") || strings.HasPrefix(trimmed, "---") {
-		return toolBodyStyle.Render(line)
-	}
-	if strings.HasPrefix(trimmed, "+") {
-		return diffAddedStyle.Render(line)
-	}
-	if strings.HasPrefix(trimmed, "-") {
-		return diffRemovedStyle.Render(line)
-	}
-	return toolBodyStyle.Render(line)
 }
 
 func dedicatedBuiltinToolLabels(tool toolCall) (string, string) {

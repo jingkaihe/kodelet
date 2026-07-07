@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/jingkaihe/kodelet/pkg/diffview"
 )
 
 func (m *model) renderTranscript() (string, []detailRegion) {
@@ -76,9 +77,21 @@ func (m *model) renderTranscript() (string, []detailRegion) {
 							if group.wrapBody {
 								body = wrapPreservingWhitespace(body, m.transcriptTextWidth()-2)
 							}
+							if len(group.bodyLines) > 0 {
+								indentedLines := make([]diffview.RenderedLine, 0, len(group.bodyLines))
+								for _, line := range group.bodyLines {
+									line.Text = "  " + line.Text
+									indentedLines = append(indentedLines, line)
+								}
+								rendered := renderDiffRenderedLines(indentedLines)
+								b.WriteString(rendered)
+								b.WriteString("\n")
+								line += lineCount(rendered)
+								continue
+							}
 							body = indentText(body, "  ")
 							if strings.TrimSpace(body) != "" {
-								rendered := renderToolGroupBody(body, group.diffBody)
+								rendered := toolBodyStyle.Render(body)
 								b.WriteString(rendered)
 								b.WriteString("\n")
 								line += lineCount(rendered)

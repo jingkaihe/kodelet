@@ -13,6 +13,7 @@ import (
 
 	"github.com/aymanbagabas/go-udiff"
 	"github.com/invopop/jsonschema"
+	"github.com/jingkaihe/kodelet/pkg/diffview"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
@@ -49,21 +50,25 @@ type applyPatchToolResult struct {
 }
 
 func (r *applyPatchToolResult) GetResult() string {
-	if r.IsError() {
+	summary := diffview.FromApplyPatchMetadata(tooltypes.ApplyPatchMetadata{Changes: r.changes})
+	if len(summary.Files) == 0 {
 		return ""
 	}
+
 	var b strings.Builder
-	b.WriteString("Success. Updated the following files:\n")
-	for _, path := range r.added {
-		fmt.Fprintf(&b, "A %s\n", path)
+	if r.IsError() {
+		b.WriteString("Patch failed")
+	} else {
+		b.WriteString("Success. Updated files")
 	}
-	for _, path := range r.modified {
-		fmt.Fprintf(&b, "M %s\n", path)
+	fmt.Fprintf(&b, " (+%d -%d):", summary.Added, summary.Removed)
+
+	rendered := diffview.RenderedText(diffview.RenderSummary(summary))
+	if strings.TrimSpace(rendered) != "" {
+		b.WriteString("\n")
+		b.WriteString(rendered)
 	}
-	for _, path := range r.deleted {
-		fmt.Fprintf(&b, "D %s\n", path)
-	}
-	return b.String()
+	return strings.TrimSuffix(b.String(), "\n")
 }
 
 func (r *applyPatchToolResult) GetError() string {
@@ -231,10 +236,11 @@ func applyAddHunk(hunk parsedHunk, result *applyPatchToolResult) error {
 
 	result.added = append(result.added, hunk.path)
 	result.changes = append(result.changes, tooltypes.ApplyPatchChange{
-		Path:       hunk.path,
-		Operation:  tooltypes.ApplyPatchOperationAdd,
-		OldContent: oldContent,
-		NewContent: hunk.contents,
+		Path:        hunk.path,
+		Operation:   tooltypes.ApplyPatchOperationAdd,
+		OldContent:  oldContent,
+		NewContent:  hunk.contents,
+		UnifiedDiff: udiff.Unified(hunk.path, hunk.path, oldContent, hunk.contents),
 	})
 
 	return nil
@@ -251,9 +257,10 @@ func applyDeleteHunk(hunk parsedHunk, result *applyPatchToolResult) error {
 
 	result.deleted = append(result.deleted, hunk.path)
 	result.changes = append(result.changes, tooltypes.ApplyPatchChange{
-		Path:       hunk.path,
-		Operation:  tooltypes.ApplyPatchOperationDelete,
-		OldContent: string(oldContent),
+		Path:        hunk.path,
+		Operation:   tooltypes.ApplyPatchOperationDelete,
+		OldContent:  string(oldContent),
+		UnifiedDiff: udiff.Unified(hunk.path, hunk.path, string(oldContent), ""),
 	})
 
 	return nil

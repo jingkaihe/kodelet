@@ -219,13 +219,15 @@ func TestAssistantFacingForDeterministicResults(t *testing.T) {
 
 	t.Run("apply patch success and error", func(t *testing.T) {
 		success := (&applyPatchToolResult{
-			added:    []string{"added.go"},
-			modified: []string{"modified.go"},
-			deleted:  []string{"deleted.go"},
+			changes: []tooltypes.ApplyPatchChange{
+				{Path: "added.go", Operation: tooltypes.ApplyPatchOperationAdd, UnifiedDiff: "@@ -0,0 +1,1 @@\n+added\n"},
+				{Path: "modified.go", Operation: tooltypes.ApplyPatchOperationUpdate, UnifiedDiff: "@@ -1 +1 @@\n-old\n+new\n"},
+				{Path: "deleted.go", Operation: tooltypes.ApplyPatchOperationDelete, UnifiedDiff: "@@ -1,1 +0,0 @@\n-deleted\n"},
+			},
 		}).AssistantFacing()
-		assert.Contains(t, success, "A added.go")
-		assert.Contains(t, success, "M modified.go")
-		assert.Contains(t, success, "D deleted.go")
+		assert.Contains(t, success, "Write added.go (+1 -0)")
+		assert.Contains(t, success, "Edit modified.go (+1 -1)")
+		assert.Contains(t, success, "Delete deleted.go (+0 -1)")
 
 		errorOutput := (&applyPatchToolResult{err: "bad patch"}).AssistantFacing()
 		assert.Contains(t, errorOutput, "bad patch")

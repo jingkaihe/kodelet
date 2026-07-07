@@ -190,6 +190,10 @@ func TestRenderConversationEntriesMarkdownMergesApplyPatchToolCallAndResult(t *t
 						Path:       "hello.txt",
 						Operation:  tooltypes.ApplyPatchOperationAdd,
 						NewContent: "hello\n",
+						UnifiedDiff: "--- /dev/null\n" +
+							"+++ hello.txt\n" +
+							"@@ -0,0 +1,1 @@\n" +
+							"+hello\n",
 					},
 				},
 			},
@@ -201,7 +205,9 @@ func TestRenderConversationEntriesMarkdownMergesApplyPatchToolCallAndResult(t *t
 	assert.Contains(t, markdown, "### Assistant · Tool")
 	assert.Contains(t, markdown, "- **Patch operations:** 1")
 	assert.Contains(t, markdown, "**Result**")
-	assert.Contains(t, markdown, "Success. Updated the following files:")
+	assert.Contains(t, markdown, "Success. Updated files (+1 -0).")
+	assert.Contains(t, markdown, "- **Write hello.txt (+1 -0)**")
+	assert.Contains(t, markdown, "  1 │ +hello")
 	assert.NotContains(t, markdown, "### Assistant · Tool Result")
 	assert.Equal(t, 1, strings.Count(markdown, "### Assistant · Tool"))
 	assert.Equal(t, 1, strings.Count(markdown, "- **Tool:** `apply_patch`"))

@@ -547,7 +547,7 @@ func TestToolContentGenerator_GenerateApplyPatchContent(t *testing.T) {
 
 	t.Run("multiple changes", func(t *testing.T) {
 		result := &mockToolResult{
-			result: "Success. Updated the following files:\nA /tmp/new.txt\nM /tmp/edit.go\nD /tmp/old.txt",
+			result: "Success. Updated files (+2 -2):\nWrite /tmp/new.txt (+1 -0)\nEdit /tmp/edit.go (+1 -1)\nDelete /tmp/old.txt (+0 -1)",
 			structuredData: tooltypes.StructuredToolResult{
 				ToolName:  "apply_patch",
 				Success:   true,
@@ -555,20 +555,23 @@ func TestToolContentGenerator_GenerateApplyPatchContent(t *testing.T) {
 				Metadata: &tooltypes.ApplyPatchMetadata{
 					Changes: []tooltypes.ApplyPatchChange{
 						{
-							Path:       "/tmp/new.txt",
-							Operation:  tooltypes.ApplyPatchOperationAdd,
-							NewContent: "hello\n",
+							Path:        "/tmp/new.txt",
+							Operation:   tooltypes.ApplyPatchOperationAdd,
+							NewContent:  "hello\n",
+							UnifiedDiff: "@@ -0,0 +1,1 @@\n+hello\n",
 						},
 						{
-							Path:       "/tmp/edit.go",
-							Operation:  tooltypes.ApplyPatchOperationUpdate,
-							OldContent: "old\n",
-							NewContent: "new\n",
+							Path:        "/tmp/edit.go",
+							Operation:   tooltypes.ApplyPatchOperationUpdate,
+							OldContent:  "old\n",
+							NewContent:  "new\n",
+							UnifiedDiff: "@@ -1 +1 @@\n-old\n+new\n",
 						},
 						{
-							Path:       "/tmp/old.txt",
-							Operation:  tooltypes.ApplyPatchOperationDelete,
-							OldContent: "bye\n",
+							Path:        "/tmp/old.txt",
+							Operation:   tooltypes.ApplyPatchOperationDelete,
+							OldContent:  "bye\n",
+							UnifiedDiff: "@@ -1,1 +0,0 @@\n-bye\n",
 						},
 					},
 				},
