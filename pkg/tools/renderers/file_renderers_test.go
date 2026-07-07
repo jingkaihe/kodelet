@@ -272,9 +272,6 @@ func TestApplyPatchRenderer(t *testing.T) {
 			Success:   true,
 			Timestamp: time.Now(),
 			Metadata: &tools.ApplyPatchMetadata{
-				Added:    []string{"/tmp/new.txt"},
-				Modified: []string{"/tmp/edit.go"},
-				Deleted:  []string{"/tmp/old.txt"},
 				Changes: []tools.ApplyPatchChange{
 					{
 						Path:       "/tmp/new.txt",
@@ -454,9 +451,6 @@ func TestApplyPatchRendererRenderMarkdown(t *testing.T) {
 		Success:   true,
 		Timestamp: time.Now(),
 		Metadata: &tools.ApplyPatchMetadata{
-			Added:    []string{"/tmp/new.txt"},
-			Modified: []string{"/tmp/edit.go"},
-			Deleted:  []string{"/tmp/old.txt"},
 			Changes: []tools.ApplyPatchChange{
 				{
 					Path:       "/tmp/new.txt",

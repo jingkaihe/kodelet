@@ -42,11 +42,8 @@ type ApplyPatchInput tooltypes.ApplyPatchInput
 var applyPatchDescription string
 
 type applyPatchToolResult struct {
-	added    []string
-	modified []string
-	deleted  []string
-	changes  []tooltypes.ApplyPatchChange
-	err      string
+	changes []tooltypes.ApplyPatchChange
+	err     string
 }
 
 func (r *applyPatchToolResult) GetResult() string {
@@ -89,10 +86,7 @@ func (r *applyPatchToolResult) StructuredData() tooltypes.StructuredToolResult {
 		Success:   !r.IsError(),
 		Timestamp: time.Now(),
 		Metadata: &tooltypes.ApplyPatchMetadata{
-			Changes:  r.changes,
-			Added:    r.added,
-			Modified: r.modified,
-			Deleted:  r.deleted,
+			Changes: r.changes,
 		},
 	}
 	if r.IsError() {
@@ -234,7 +228,6 @@ func applyAddHunk(hunk parsedHunk, result *applyPatchToolResult) error {
 		return errors.Wrapf(err, "failed to write file %s", hunk.path)
 	}
 
-	result.added = append(result.added, hunk.path)
 	result.changes = append(result.changes, tooltypes.ApplyPatchChange{
 		Path:        hunk.path,
 		Operation:   tooltypes.ApplyPatchOperationAdd,
@@ -255,7 +248,6 @@ func applyDeleteHunk(hunk parsedHunk, result *applyPatchToolResult) error {
 		return errors.Wrapf(err, "failed to delete file %s", hunk.path)
 	}
 
-	result.deleted = append(result.deleted, hunk.path)
 	result.changes = append(result.changes, tooltypes.ApplyPatchChange{
 		Path:        hunk.path,
 		Operation:   tooltypes.ApplyPatchOperationDelete,
@@ -297,7 +289,6 @@ func applyUpdateHunk(hunk parsedHunk, result *applyPatchToolResult) error {
 
 	diff := udiff.Unified(hunk.path, targetPath, oldContent, newContent)
 
-	result.modified = append(result.modified, targetPath)
 	result.changes = append(result.changes, tooltypes.ApplyPatchChange{
 		Path:        hunk.path,
 		Operation:   tooltypes.ApplyPatchOperationUpdate,

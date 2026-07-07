@@ -165,10 +165,7 @@ func (m FileEditMetadata) ToolType() string { return "file_edit" }
 
 // ApplyPatchMetadata contains metadata about an apply_patch operation.
 type ApplyPatchMetadata struct {
-	Changes  []ApplyPatchChange `json:"changes"`
-	Added    []string           `json:"added,omitempty"`
-	Modified []string           `json:"modified,omitempty"`
-	Deleted  []string           `json:"deleted,omitempty"`
+	Changes []ApplyPatchChange `json:"changes"`
 }
 
 // ApplyPatchChange describes one file-level change from an apply_patch invocation.

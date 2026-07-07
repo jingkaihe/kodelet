@@ -184,7 +184,6 @@ func TestRenderConversationEntriesMarkdownMergesApplyPatchToolCallAndResult(t *t
 			Success:   true,
 			Timestamp: time.Now(),
 			Metadata: &tooltypes.ApplyPatchMetadata{
-				Added: []string{"hello.txt"},
 				Changes: []tooltypes.ApplyPatchChange{
 					{
 						Path:       "hello.txt",

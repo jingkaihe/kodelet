@@ -87,9 +87,6 @@ describe('ApplyPatchRenderer', () => {
 
   it('renders unified diffs inline', () => {
     const toolResult = createToolResult({
-      added: [],
-      modified: ['/tmp/edit.txt'],
-      deleted: [],
       changes: [
         {
           path: '/tmp/edit.txt',
@@ -114,7 +111,6 @@ describe('ApplyPatchRenderer', () => {
 
   it('preserves diff content lines that look like file headers', () => {
     const toolResult = createToolResult({
-      modified: ['/tmp/edit.txt'],
       changes: [
         {
           path: '/tmp/edit.txt',

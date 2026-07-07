@@ -387,9 +387,6 @@ export interface FileMetadata {
 
 export interface ApplyPatchMetadata {
 	changes: ApplyPatchChange[];
-	added?: string[];
-	modified?: string[];
-	deleted?: string[];
 }
 
 export interface ApplyPatchChange {
