@@ -14,12 +14,18 @@ type toolRenderGroup struct {
 	toolEnd      int
 	changeIndex  int
 	label        string
+	labelParts   []toolRenderLabelPart
 	runningLabel string
 	body         string
 	bodyLines    []diffview.RenderedLine
 	wrapBody     bool
 	expanded     bool
 	active       bool
+}
+
+type toolRenderLabelPart struct {
+	kind diffview.LineKind
+	text string
 }
 
 func (m model) toolRenderGroups(block assistantBlock) []toolRenderGroup {
@@ -145,6 +151,7 @@ func (m model) buildApplyPatchToolGroups(block assistantBlock, idx int) []toolRe
 			toolEnd:      idx,
 			changeIndex:  changeIdx,
 			label:        file.Header(),
+			labelParts:   applyPatchLabelParts(file),
 			runningLabel: "Applying patch",
 			body:         body,
 			bodyLines:    bodyLines,
@@ -155,6 +162,16 @@ func (m model) buildApplyPatchToolGroups(block assistantBlock, idx int) []toolRe
 	}
 
 	return groups
+}
+
+func applyPatchLabelParts(file diffview.FileDiff) []toolRenderLabelPart {
+	return []toolRenderLabelPart{
+		{kind: diffview.LinePlain, text: fmt.Sprintf("%s %s (", file.OperationLabel(), file.DisplayPath())},
+		{kind: diffview.LineAdded, text: fmt.Sprintf("+%d", file.Added)},
+		{kind: diffview.LinePlain, text: " "},
+		{kind: diffview.LineRemoved, text: fmt.Sprintf("-%d", file.Removed)},
+		{kind: diffview.LinePlain, text: ")"},
+	}
 }
 
 func applyPatchSummary(tool toolCall) diffview.Summary {

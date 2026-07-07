@@ -235,6 +235,46 @@ func TestApplyPatchGroupsRenderMoveLabelsCountsAndLineGutter(t *testing.T) {
 	assert.Contains(t, body, "  2 │ +new")
 }
 
+func TestApplyPatchHeaderStylesCountsWithThemeDiffColors(t *testing.T) {
+	withANSI256ColorProfile(t)
+
+	for _, themeName := range []string{DefaultThemeName, "tokyo-night"} {
+		t.Run(themeName, func(t *testing.T) {
+			m := newModel(context.Background(), Config{Theme: themeName})
+			t.Cleanup(m.cancel)
+			m.width = 80
+			m.height = 24
+			m.resize()
+
+			patchTool := toolCall{
+				name: "apply_patch",
+				done: true,
+				structured: &tooltypes.StructuredToolResult{
+					ToolName: "apply_patch",
+					Success:  true,
+					Metadata: &tooltypes.ApplyPatchMetadata{Changes: []tooltypes.ApplyPatchChange{{
+						Path:        "new.go",
+						Operation:   tooltypes.ApplyPatchOperationAdd,
+						UnifiedDiff: "--- /dev/null\n+++ new.go\n@@ -0,0 +1,1 @@\n+package main\n",
+					}}},
+				},
+			}
+
+			groups := m.buildApplyPatchToolGroups(assistantBlock{tools: []toolCall{patchTool}}, 0)
+			require.Len(t, groups, 1)
+
+			header := m.renderToolGroupHeader(groups[0])
+			plain := xansi.Strip(header)
+			addedStart, _ := styleSequences(diffAddedStyle)
+			removedStart, _ := styleSequences(diffRemovedStyle)
+
+			assert.Contains(t, plain, "Write new.go (+1 -0) ▸")
+			assert.Contains(t, header, addedStart+"+1")
+			assert.Contains(t, header, removedStart+"-0")
+		})
+	}
+}
+
 func TestApplyPatchGroupsRenderPartialDiffAndErrorOnFailure(t *testing.T) {
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)

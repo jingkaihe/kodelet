@@ -2,7 +2,7 @@
 
 ## 0.4.50-beta
 
-Added shared structured diff rendering for `apply_patch`, including line numbers, per-file add/remove counts, wrapped terminal output, and consistent CLI/TUI/Markdown presentation.
+Added shared structured diff rendering for `apply_patch`, including line numbers, theme-colored per-file add/remove counts, wrapped terminal output, and consistent CLI/TUI/Markdown presentation.
 
 Improved Web UI apply-patch rendering with parsed unified diffs, move labels, failure details, and clearer empty-result messaging.
 

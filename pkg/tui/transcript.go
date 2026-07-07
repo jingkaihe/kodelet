@@ -212,5 +212,29 @@ func (m model) renderToolGroupHeader(group toolRenderGroup) string {
 	if group.expanded {
 		chevron = "▾"
 	}
+	if len(group.labelParts) > 0 {
+		return renderToolGroupHeaderParts(group.labelParts, chevron)
+	}
 	return toolHeaderStyle.Render(fmt.Sprintf("✓ %s %s", group.label, chevron))
+}
+
+func renderToolGroupHeaderParts(parts []toolRenderLabelPart, chevron string) string {
+	var b strings.Builder
+	b.WriteString(renderPersistentStyle(toolHeaderStyle, "✓ "))
+	for _, part := range parts {
+		b.WriteString(renderToolGroupLabelPart(part))
+	}
+	b.WriteString(renderPersistentStyle(toolHeaderStyle, " "+chevron))
+	return b.String()
+}
+
+func renderToolGroupLabelPart(part toolRenderLabelPart) string {
+	switch part.kind {
+	case diffview.LineAdded:
+		return renderPersistentStyle(diffAddedStyle, part.text)
+	case diffview.LineRemoved:
+		return renderPersistentStyle(diffRemovedStyle, part.text)
+	default:
+		return renderPersistentStyle(toolHeaderStyle, part.text)
+	}
 }
