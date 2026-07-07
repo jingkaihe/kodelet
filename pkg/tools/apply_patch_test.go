@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -85,6 +86,239 @@ func TestApplyPatchTool_AddFileOverwritesExistingFile(t *testing.T) {
 	assert.Equal(t, tooltypes.ApplyPatchOperationAdd, meta.Changes[0].Operation)
 	assert.Equal(t, "existing\n", meta.Changes[0].OldContent)
 	assert.Equal(t, "new content\n", meta.Changes[0].NewContent)
+}
+
+func TestApplyPatchUnifiedDiffKeepsOriginMainTestChangesSeparate(t *testing.T) {
+	oldContent := `func TestApplyPatchRenderer(t *testing.T) {
+	renderer := &ApplyPatchRenderer{}
+
+	t.Run("successful apply patch", func(t *testing.T) {
+		result := tools.StructuredToolResult{
+			ToolName:  "apply_patch",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata: &tools.ApplyPatchMetadata{
+				Added:    []string{"/tmp/new.txt"},
+				Modified: []string{"/tmp/edit.go"},
+				Deleted:  []string{"/tmp/old.txt"},
+				Changes: []tools.ApplyPatchChange{
+					{
+						Path:       "/tmp/new.txt",
+						Operation:  tools.ApplyPatchOperationAdd,
+						NewContent: "hello\n",
+					},
+					{
+						Path:        "/tmp/edit.go",
+						Operation:   tools.ApplyPatchOperationUpdate,
+						OldContent:  "old\n",
+						NewContent:  "new\n",
+						UnifiedDiff: "@@ -1 +1 @@\n-old\n+new\n",
+					},
+					{
+						Path:       "/tmp/old.txt",
+						Operation:  tools.ApplyPatchOperationDelete,
+						OldContent: "bye\n",
+					},
+				},
+			},
+		}
+
+		output := renderer.RenderCLI(result)
+		assert.Contains(t, output, "Success. Updated the following files:")
+		assert.Contains(t, output, "A /tmp/new.txt")
+		assert.Contains(t, output, "M /tmp/edit.go")
+		assert.Contains(t, output, "D /tmp/old.txt")
+		assert.Contains(t, output, "@@ -1 +1 @@")
+	})
+}
+
+func TestFileEditRendererRenderMarkdown(t *testing.T) {
+	renderer := &FileEditRenderer{}
+	_ = renderer
+}
+
+func TestFileWriteRendererMarkdownVariants(t *testing.T) {
+	renderer := &FileWriteRenderer{}
+	_ = renderer
+}
+
+func TestFileEditRendererMergedAndFallbackMarkdown(t *testing.T) {
+	renderer := &FileEditRenderer{}
+	_ = renderer
+}
+
+func TestApplyPatchRendererRenderMarkdown(t *testing.T) {
+	renderer := &ApplyPatchRenderer{}
+	result := tools.StructuredToolResult{
+		ToolName:  "apply_patch",
+		Success:   true,
+		Timestamp: time.Now(),
+		Metadata: &tools.ApplyPatchMetadata{
+			Added:    []string{"/tmp/new.txt"},
+			Modified: []string{"/tmp/edit.go"},
+			Deleted:  []string{"/tmp/old.txt"},
+			Changes: []tools.ApplyPatchChange{
+				{
+					Path:       "/tmp/new.txt",
+					Operation:  tools.ApplyPatchOperationAdd,
+					NewContent: "hello\n",
+				},
+				{
+					Path:        "/tmp/edit.go",
+					Operation:   tools.ApplyPatchOperationUpdate,
+					UnifiedDiff: "@@ -1 +1 @@\n-old\n+new\n",
+				},
+			},
+		},
+	}
+
+	output := renderer.RenderMarkdown(result)
+	assert.Contains(t, output, "Success. Updated the following files:")
+	assert.Contains(t, output, "A /tmp/new.txt")
+	assert.Contains(t, output, "M /tmp/edit.go")
+	assert.Contains(t, output, "D /tmp/old.txt")
+	assert.Contains(t, output, "@@ -1 +1 @@")
+	assert.NotContains(t, output, "####")
+	assert.NotContains(t, output, "- **Added:**")
+}
+`
+	newContent := `func TestApplyPatchRenderer(t *testing.T) {
+	renderer := &ApplyPatchRenderer{}
+
+	t.Run("successful apply patch", func(t *testing.T) {
+		result := tools.StructuredToolResult{
+			ToolName:  "apply_patch",
+			Success:   true,
+			Timestamp: time.Now(),
+			Metadata: &tools.ApplyPatchMetadata{
+				Changes: []tools.ApplyPatchChange{
+					{
+						Path:       "/tmp/new.txt",
+						Operation:  tools.ApplyPatchOperationAdd,
+						NewContent: "hello\n",
+						UnifiedDiff: "--- /dev/null\n" +
+							"+++ /tmp/new.txt\n" +
+							"@@ -0,0 +1,1 @@\n" +
+							"+hello\n",
+					},
+					{
+						Path:        "/tmp/edit.go",
+						Operation:   tools.ApplyPatchOperationUpdate,
+						OldContent:  "old\n",
+						NewContent:  "new\n",
+						UnifiedDiff: "@@ -1 +1 @@\n-old\n+new\n",
+					},
+					{
+						Path:       "/tmp/old.txt",
+						Operation:  tools.ApplyPatchOperationDelete,
+						OldContent: "bye\n",
+						UnifiedDiff: "--- /tmp/old.txt\n" +
+							"+++ /dev/null\n" +
+							"@@ -1,1 +0,0 @@\n" +
+							"-bye\n",
+					},
+				},
+			},
+		}
+
+		output := renderer.RenderCLI(result)
+		assert.Contains(t, output, "Success. Updated files (+2 -2):")
+		assert.Contains(t, output, "Write /tmp/new.txt (+1 -0)")
+		assert.Contains(t, output, "Edit /tmp/edit.go (+1 -1)")
+		assert.Contains(t, output, "Delete /tmp/old.txt (+0 -1)")
+		assert.Contains(t, output, "  1 │ +hello")
+		assert.Contains(t, output, "1   │ -old")
+		assert.Contains(t, output, "  1 │ +new")
+		assert.Contains(t, output, "@@ -1 +1 @@")
+	})
+
+	t.Run("error with partial metadata", func(t *testing.T) {
+		result := tools.StructuredToolResult{
+			ToolName:  "apply_patch",
+			Success:   false,
+			Error:     "patch failed after first file",
+			Timestamp: time.Now(),
+			Metadata: &tools.ApplyPatchMetadata{Changes: []tools.ApplyPatchChange{{
+				Path:        "/tmp/partial.go",
+				Operation:   tools.ApplyPatchOperationUpdate,
+				UnifiedDiff: "@@ -1 +1 @@\n-old\n+new\n",
+			}}},
+		}
+
+		output := renderer.RenderCLI(result)
+		assert.Contains(t, output, "Patch failed (+1 -1):")
+		assert.Contains(t, output, "Edit /tmp/partial.go (+1 -1)")
+		assert.Contains(t, output, "Error: patch failed after first file")
+	})
+}
+
+func TestFileEditRendererRenderMarkdown(t *testing.T) {
+	renderer := &FileEditRenderer{}
+	_ = renderer
+}
+
+func TestFileWriteRendererMarkdownVariants(t *testing.T) {
+	renderer := &FileWriteRenderer{}
+	_ = renderer
+}
+
+func TestFileEditRendererMergedAndFallbackMarkdown(t *testing.T) {
+	renderer := &FileEditRenderer{}
+	_ = renderer
+}
+
+func TestApplyPatchRendererRenderMarkdown(t *testing.T) {
+	renderer := &ApplyPatchRenderer{}
+	result := tools.StructuredToolResult{
+		ToolName:  "apply_patch",
+		Success:   true,
+		Timestamp: time.Now(),
+		Metadata: &tools.ApplyPatchMetadata{
+			Changes: []tools.ApplyPatchChange{
+				{
+					Path:       "/tmp/new.txt",
+					Operation:  tools.ApplyPatchOperationAdd,
+					NewContent: "hello\n",
+					UnifiedDiff: "--- /dev/null\n" +
+						"+++ /tmp/new.txt\n" +
+						"@@ -0,0 +1,1 @@\n" +
+						"+hello\n",
+				},
+				{
+					Path:        "/tmp/edit.go",
+					Operation:   tools.ApplyPatchOperationUpdate,
+					UnifiedDiff: "@@ -1 +1 @@\n-old\n+new\n",
+				},
+			},
+		},
+	}
+
+	output := renderer.RenderMarkdown(result)
+	assert.Contains(t, output, "Success. Updated files (+2 -1).")
+	assert.Contains(t, output, "- **Write /tmp/new.txt (+1 -0)**")
+	assert.Contains(t, output, "- **Edit /tmp/edit.go (+1 -1)**")
+	assert.Contains(t, output, "@@ -1 +1 @@")
+	assert.Contains(t, output, "1   │ -old")
+	assert.Contains(t, output, "  1 │ +new")
+	assert.NotContains(t, output, "####")
+	assert.NotContains(t, output, "- **Added:**")
+}
+`
+
+	diff := applyPatchUnifiedDiff("pkg/tools/renderers/file_renderers_test.go", "pkg/tools/renderers/file_renderers_test.go", oldContent, newContent)
+
+	hunks := 0
+	for _, line := range strings.Split(diff, "\n") {
+		if strings.HasPrefix(line, "@@ -") {
+			hunks++
+		}
+	}
+	assert.Equal(t, 4, hunks, diff)
+	assert.Contains(t, diff, "-\t\t\t\tAdded:    []string{\"/tmp/new.txt\"},")
+	assert.Contains(t, diff, "+\t\tassert.Contains(t, output, \"Patch failed (+1 -1):\")")
+	assert.Contains(t, diff, "+\tassert.Contains(t, output, \"Success. Updated files (+2 -1).\")")
+	assert.NotContains(t, diff, "func TestFileEditRendererRenderMarkdown")
+	assert.NotContains(t, diff, "func TestFileWriteRendererMarkdownVariants")
 }
 
 func TestApplyPatchTool_DeleteThenAddSamePath(t *testing.T) {

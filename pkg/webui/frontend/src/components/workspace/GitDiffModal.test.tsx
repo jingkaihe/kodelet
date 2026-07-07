@@ -82,6 +82,51 @@ describe('GitDiffModal', () => {
     expect(screen.queryByText(/git diff --no-ext-diff/)).not.toBeInTheDocument();
   });
 
+  it('does not classify subsequent file headers as changed lines', () => {
+    const diff = [
+      'diff --git a/one.txt b/one.txt',
+      'index 1111111..2222222 100644',
+      '--- a/one.txt',
+      '+++ b/one.txt',
+      '@@ -1 +1 @@',
+      '-old one',
+      '+new one',
+      'diff --git a/two.txt b/two.txt',
+      'index 3333333..4444444 100644',
+      '--- a/two.txt',
+      '+++ b/two.txt',
+      '@@ -10 +20 @@',
+      '-old two',
+      '+new two',
+    ].join('\n');
+
+    const { container } = render(
+      <GitDiffModal
+        cwdLabel="/tmp/project"
+        error={null}
+        gitDiff={{
+          cwd: '/tmp/project',
+          diff,
+          exit_code: 0,
+          git_root: '/tmp/project',
+          has_diff: true,
+        }}
+        loading={false}
+        onClose={vi.fn()}
+        onRefresh={vi.fn()}
+        open
+      />
+    );
+
+    const addedContents = Array.from(container.querySelectorAll('.diff-line-added .diff-content'))
+      .map((element) => element.textContent);
+    const removedContents = Array.from(container.querySelectorAll('.diff-line-removed .diff-content'))
+      .map((element) => element.textContent);
+
+    expect(addedContents).toEqual(['new one', 'new two']);
+    expect(removedContents).toEqual(['old one', 'old two']);
+  });
+
   it('copies the full diff from the floating icon action', () => {
     const diff = 'diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new';
 

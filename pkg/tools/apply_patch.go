@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aymanbagabas/go-udiff"
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/diffview"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
+	"github.com/pmezard/go-difflib/difflib"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -233,7 +233,7 @@ func applyAddHunk(hunk parsedHunk, result *applyPatchToolResult) error {
 		Operation:   tooltypes.ApplyPatchOperationAdd,
 		OldContent:  oldContent,
 		NewContent:  hunk.contents,
-		UnifiedDiff: udiff.Unified(hunk.path, hunk.path, oldContent, hunk.contents),
+		UnifiedDiff: applyPatchUnifiedDiff(hunk.path, hunk.path, oldContent, hunk.contents),
 	})
 
 	return nil
@@ -252,7 +252,7 @@ func applyDeleteHunk(hunk parsedHunk, result *applyPatchToolResult) error {
 		Path:        hunk.path,
 		Operation:   tooltypes.ApplyPatchOperationDelete,
 		OldContent:  string(oldContent),
-		UnifiedDiff: udiff.Unified(hunk.path, hunk.path, string(oldContent), ""),
+		UnifiedDiff: applyPatchUnifiedDiff(hunk.path, hunk.path, string(oldContent), ""),
 	})
 
 	return nil
@@ -287,7 +287,7 @@ func applyUpdateHunk(hunk parsedHunk, result *applyPatchToolResult) error {
 		}
 	}
 
-	diff := udiff.Unified(hunk.path, targetPath, oldContent, newContent)
+	diff := applyPatchUnifiedDiff(hunk.path, targetPath, oldContent, newContent)
 
 	result.changes = append(result.changes, tooltypes.ApplyPatchChange{
 		Path:        hunk.path,
@@ -299,6 +299,32 @@ func applyUpdateHunk(hunk parsedHunk, result *applyPatchToolResult) error {
 	})
 
 	return nil
+}
+
+func applyPatchUnifiedDiff(oldLabel, newLabel, oldContent, newContent string) string {
+	if oldContent == newContent {
+		return ""
+	}
+
+	diff, _ := difflib.GetUnifiedDiffString(difflib.UnifiedDiff{
+		A:        splitUnifiedDiffLines(oldContent),
+		B:        splitUnifiedDiffLines(newContent),
+		FromFile: oldLabel,
+		ToFile:   newLabel,
+		Context:  3,
+	})
+	return diff
+}
+
+func splitUnifiedDiffLines(content string) []string {
+	if content == "" {
+		return nil
+	}
+	lines := strings.SplitAfter(content, "\n")
+	if lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
 }
 
 func lockPaths(state tooltypes.State, paths ...string) func() {

@@ -119,6 +119,11 @@ export const parseUnifiedDiff = (unifiedDiff: string): ReferenceDiffLine[] => {
   let seenHunk = false;
 
   splitDiffLines(unifiedDiff).forEach((line) => {
+    if (line.startsWith('diff --git ')) {
+      seenHunk = false;
+      parsedLines.push({ kind: 'meta', content: line });
+      return;
+    }
     if (!seenHunk && (line.startsWith('+++ ') || line.startsWith('--- '))) {
       return;
     }
