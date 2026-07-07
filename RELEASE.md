@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.4.50-beta
+
+Added shared structured diff rendering for `apply_patch`, including line numbers, per-file add/remove counts, wrapped terminal output, and consistent CLI/TUI/Markdown presentation.
+
+Improved Web UI apply-patch rendering with parsed unified diffs, move labels, failure details, and clearer empty-result messaging.
+
+Fixed multi-file Web UI git diff parsing so subsequent file headers are not misclassified as added or removed lines.
+
 ## 0.4.49-beta
 
 Added dynamic terminal tab titles in `kodelet chat`, including workspace labels, a running spinner, action-required flashing, and cleanup on exit.
