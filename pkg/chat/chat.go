@@ -18,7 +18,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	llmbase "github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/logger"
-	"github.com/jingkaihe/kodelet/pkg/mcp"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
@@ -200,12 +199,6 @@ func RunDefaultChat(ctx context.Context, req ChatRequest, sink ChatEventSink, de
 	if err != nil {
 		return sessionID, errors.Wrap(err, "failed to load configuration")
 	}
-	workspaceDir, err := mcp.ResolveWorkspaceDir(resolvedCWD)
-	if err != nil {
-		return sessionID, errors.Wrap(err, "failed to resolve MCP workspace directory")
-	}
-	llmConfig.MCPExecutionMode = viper.GetString("mcp.execution_mode")
-	llmConfig.MCPWorkspaceDir = workspaceDir
 	llmConfig.WorkingDirectory = resolvedCWD
 
 	var extensionRuntime *extensions.Runtime
@@ -699,16 +692,7 @@ func BuildState(
 	}
 
 	if mcpManager != nil {
-		mcpSetup, err := mcp.SetupExecutionMode(ctx, mcpManager, sessionID, workingDir)
-		if err != nil && !stdErrors.Is(err, mcp.ErrDirectMode) {
-			return nil, errors.Wrap(err, "failed to set up MCP execution mode")
-		}
-
-		if err == nil && mcpSetup != nil {
-			stateOpts = append(stateOpts, mcpSetup.StateOpts...)
-		} else {
-			stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
-		}
+		stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
 	}
 
 	return tools.NewBasicState(ctx, stateOpts...), nil

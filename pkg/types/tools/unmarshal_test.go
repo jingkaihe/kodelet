@@ -90,7 +90,7 @@ func TestMetadataTypeRegistry_Completeness(t *testing.T) {
 		"view_image", "subagent",
 		"openai_web_search",
 		"web_fetch", "read_conversation", "get_goal", "update_goal", "extension_tool",
-		"code_execution", "skill", "blocked",
+		"skill", "blocked",
 	}
 
 	for _, typeName := range expectedTypes {
@@ -123,7 +123,6 @@ func TestAllMetadataToolTypes(t *testing.T) {
 		{"ReadConversationMetadata", ReadConversationMetadata{}, "read_conversation"},
 		{"GetGoalMetadata", GetGoalMetadata{}, "get_goal"},
 		{"UpdateGoalMetadata", UpdateGoalMetadata{}, "update_goal"},
-		{"CodeExecutionMetadata", CodeExecutionMetadata{}, "code_execution"},
 		{"SkillMetadata", SkillMetadata{}, "skill"},
 		{"BlockedMetadata", BlockedMetadata{}, "blocked"},
 	}

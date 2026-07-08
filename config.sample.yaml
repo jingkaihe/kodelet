@@ -484,30 +484,6 @@ mcp:
   # Set to false to completely disable MCP
   enabled: true
 
-  # Execution mode for MCP tools
-  # - "direct": Traditional direct tool calling (default)
-  # - "code": Code execution with filesystem API (more efficient for multi-tool workflows)
-  execution_mode: "direct"
-
-  # Code execution settings (only used when execution_mode = "code")
-  code_execution:
-    # Directory where MCP tool TypeScript files are generated.
-    # Default: ~/.kodelet/mcp/cache/<project-hash>
-    # Set explicitly if you want repo-local generated files instead.
-    workspace_dir: ""
-
-    # Whether to regenerate tool files on startup
-    regenerate_on_startup: false
-
-    # RPC transport used by code_execution to call generated MCP wrappers.
-    # - "unix": HTTP over a Unix socket (default)
-    # - "http": HTTP on 127.0.0.1 with an ephemeral port and per-session bearer token
-    rpc_transport: "unix"
-
-    # Note: Socket path is now automatically generated per-session under
-    # the OS temp directory (for example: /tmp/mcp-<session-hash>.sock)
-    # to avoid Unix socket path length limits.
-
   # OAuth settings for remote HTTP/SSE MCP servers. OAuth is auto-detected
   # from HTTP 401 Bearer challenges and does not require an auth.type flag.
   oauth:

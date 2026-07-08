@@ -28,11 +28,6 @@ type PromptContext struct {
 	ActiveContextFile   string
 	Args                map[string]string
 	EnableFSSearchTools bool
-
-	// MCP tools information
-	MCPExecutionMode string
-	MCPWorkspaceDir  string
-	MCPServers       []string // List of available MCP server names
 }
 
 type contextEntry struct {
@@ -72,20 +67,7 @@ func newPromptContext(contexts map[string]string, workingDirectory ...string) *P
 		ActiveContextFile:   AgentsMd,
 		Args:                map[string]string{},
 		EnableFSSearchTools: true,
-		MCPExecutionMode:    "",
-		MCPWorkspaceDir:     "",
-		MCPServers:          []string{},
 	}
-}
-
-// WithMCPConfig adds MCP configuration to the prompt context
-func (ctx *PromptContext) WithMCPConfig(executionMode, workspaceDir string) *PromptContext {
-	ctx.MCPExecutionMode = executionMode
-	ctx.MCPWorkspaceDir = workspaceDir
-	if executionMode == "code" && workspaceDir != "" {
-		ctx.MCPServers = loadMCPServers(workspaceDir)
-	}
-	return ctx
 }
 
 func (ctx *PromptContext) contextEntries() []contextEntry {
@@ -117,14 +99,6 @@ func (ctx *PromptContext) contextEntries() []contextEntry {
 
 func (ctx *PromptContext) hasContextEntries() bool {
 	return len(ctx.ContextFiles) > 0
-}
-
-func (ctx *PromptContext) hasMCPServers() bool {
-	return ctx.MCPExecutionMode == "code" && len(ctx.MCPServers) > 0
-}
-
-func (ctx *PromptContext) mcpServersCSV() string {
-	return strings.Join(ctx.MCPServers, ", ")
 }
 
 func (ctx *PromptContext) formatContexts() string {
@@ -193,56 +167,6 @@ func getOSVersion() string {
 	return runtime.GOOS
 }
 
-// loadMCPServers reads the MCP servers directory and returns a list of server names
-func loadMCPServers(workspaceDir string) []string {
-	ctx := context.Background()
-	log := logger.G(ctx)
-
-	var servers []string
-
-	if workspaceDir == "" {
-		return servers
-	}
-
-	serversDir := filepath.Join(workspaceDir, "servers")
-
-	// Check if servers directory exists
-	if _, err := os.Stat(serversDir); os.IsNotExist(err) {
-		log.WithField("servers_dir", serversDir).Debug("MCP servers directory does not exist")
-		return servers
-	}
-
-	// Read server directories
-	entries, err := os.ReadDir(serversDir)
-	if err != nil {
-		log.WithError(err).WithField("servers_dir", serversDir).Warn("Failed to read MCP servers directory")
-		return servers
-	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-
-		serverName := entry.Name()
-		indexFile := filepath.Join(serversDir, serverName, "index.ts")
-
-		// Check if index.ts exists
-		if _, err := os.Stat(indexFile); os.IsNotExist(err) {
-			continue
-		}
-
-		servers = append(servers, serverName)
-		log.WithField("server", serverName).Debug("Found MCP server")
-	}
-
-	return servers
-}
-
-func (ctx *PromptContext) formatMCPServers() string {
-	return ctx.formatMCPServersWithRenderer(defaultRenderer)
-}
-
 func (ctx *PromptContext) renderSectionWithRenderer(renderer *Renderer, templateName string) string {
 	if renderer == nil {
 		logger.G(context.Background()).WithField("template", templateName).Warn("failed to render sysprompt context section")
@@ -266,8 +190,4 @@ func (ctx *PromptContext) formatSystemInfoWithRenderer(renderer *Renderer) strin
 
 func (ctx *PromptContext) formatContextsWithRenderer(renderer *Renderer) string {
 	return ctx.renderSectionWithRenderer(renderer, "templates/sections/runtime_loaded_contexts.tmpl")
-}
-
-func (ctx *PromptContext) formatMCPServersWithRenderer(renderer *Renderer) string {
-	return ctx.renderSectionWithRenderer(renderer, "templates/sections/runtime_mcp_servers.tmpl")
 }

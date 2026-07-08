@@ -5,9 +5,7 @@ import (
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
-	"github.com/jingkaihe/kodelet/pkg/mcp"
 	"github.com/jingkaihe/kodelet/pkg/tools"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -114,48 +112,6 @@ func TestManager_BuildLLMConfig(t *testing.T) {
 		llmConfig := m.buildLLMConfig("")
 		assert.False(t, llmConfig.DisableSubagent)
 	})
-}
-
-func TestBuildSessionMCPStateOpts_UsesSessionProjectDirForCodeExecution(t *testing.T) {
-	t.Cleanup(viper.Reset)
-	viper.Set("mcp.execution_mode", "code")
-
-	originalSetup := setupMCPExecutionMode
-	t.Cleanup(func() {
-		setupMCPExecutionMode = originalSetup
-	})
-
-	var (
-		gotSessionID  string
-		gotProjectDir string
-	)
-	setupMCPExecutionMode = func(_ context.Context, manager *tools.MCPManager, sessionID string, projectDir string) (*mcp.ExecutionSetup, error) {
-		gotSessionID = sessionID
-		gotProjectDir = projectDir
-		require.NotNil(t, manager)
-		return &mcp.ExecutionSetup{
-			StateOpts: []tools.BasicStateOption{},
-		}, nil
-	}
-
-	kodeletMCPManager, err := tools.NewMCPManager(tools.MCPConfig{
-		Servers: map[string]tools.MCPServerConfig{},
-	})
-	require.NoError(t, err)
-
-	manager := &Manager{
-		kodeletMCPManager: kodeletMCPManager,
-	}
-
-	sessionMCPManager := manager.buildSessionMCPManager(context.Background(), nil)
-	require.NotNil(t, sessionMCPManager)
-	require.NotSame(t, kodeletMCPManager, sessionMCPManager)
-
-	opts := manager.buildSessionMCPStateOpts(context.Background(), "session-123", "/tmp/worktree", sessionMCPManager)
-
-	assert.NotNil(t, opts)
-	assert.Equal(t, "session-123", gotSessionID)
-	assert.Equal(t, "/tmp/worktree", gotProjectDir)
 }
 
 func TestConvertMCPServers_MapsHTTPAndSSETransports(t *testing.T) {

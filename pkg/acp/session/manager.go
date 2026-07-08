@@ -14,17 +14,13 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
-	"github.com/jingkaihe/kodelet/pkg/mcp"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	pkgerrors "github.com/pkg/errors"
-	"github.com/spf13/viper"
 )
 
 // ErrNoMCPServers is returned when there are no MCP servers to connect to
 var ErrNoMCPServers = errors.New("no MCP servers provided")
-
-var setupMCPExecutionMode = mcp.SetupExecutionMode
 
 // Session represents an ACP session wrapping a kodelet thread
 type Session struct {
@@ -198,15 +194,6 @@ func (m *Manager) buildLLMConfig(projectDir string) llmtypes.Config {
 		config.Skills.Enabled = false
 	}
 
-	executionMode := viper.GetString("mcp.execution_mode")
-	workspaceDir, err := mcp.ResolveWorkspaceDir(projectDir)
-	if err != nil {
-		logger.G(context.Background()).WithError(err).Warn("failed to resolve MCP workspace directory, using empty workspace")
-		workspaceDir = ""
-	}
-	config.MCPExecutionMode = executionMode
-	config.MCPWorkspaceDir = workspaceDir
-
 	return config
 }
 
@@ -331,17 +318,7 @@ func (m *Manager) buildSessionMCPStateOpts(ctx context.Context, sessionID string
 		return nil
 	}
 
-	mcpSetup, err := setupMCPExecutionMode(ctx, sessionMCPManager, sessionID, projectDir)
-	if err != nil && !errors.Is(err, mcp.ErrDirectMode) {
-		logger.G(ctx).WithError(err).Warn("Failed to set up MCP execution mode for ACP session")
-		return []tools.BasicStateOption{tools.WithMCPTools(sessionMCPManager)}
-	}
-
-	if err == nil && mcpSetup != nil {
-		logger.G(ctx).WithField("session_id", sessionID).Info("MCP code execution mode initialized for ACP session")
-		return mcpSetup.StateOpts
-	}
-
+	logger.G(ctx).WithField("session_id", sessionID).WithField("project_dir", projectDir).Debug("MCP tools initialized for ACP session")
 	return []tools.BasicStateOption{tools.WithMCPTools(sessionMCPManager)}
 }
 

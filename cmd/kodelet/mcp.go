@@ -10,13 +10,11 @@ var mcpCmd = &cobra.Command{
 	Long: `Commands for working with MCP servers and tools.
 
 MCP provides a standard way to connect AI agents to external systems.
-These commands help you manage MCP servers, generate code, and call tools.`,
+These commands help you manage MCP servers and call tools.`,
 }
 
 func init() {
-	mcpCmd.AddCommand(mcpGenerateCmd)
 	mcpCmd.AddCommand(mcpListCmd)
 	mcpCmd.AddCommand(mcpCallCmd)
-	mcpCmd.AddCommand(mcpServeCmd)
 	rootCmd.AddCommand(mcpCmd)
 }

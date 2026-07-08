@@ -715,17 +715,6 @@ conversation_summary_mode: llm
 
 # MCP configuration
 mcp:
-  # execution_mode can be "direct" (default) or "code". In code mode,
-  # Kodelet generates TypeScript wrappers and exposes MCP calls through the
-  # code_execution tool.
-  execution_mode: "direct"
-
-  code_execution:
-    # RPC transport used by generated TypeScript wrappers in code mode.
-    # "unix" is the default. Use "http" to bind an ephemeral loopback endpoint
-    # on 127.0.0.1 with a per-session bearer token injected into the runtime.
-    rpc_transport: "unix"
-
   oauth:
     # Remote HTTP/SSE MCP OAuth is auto-detected from HTTP 401 Bearer
     # challenges. Set interactive to "never" for headless/CI runs that should

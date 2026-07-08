@@ -2,7 +2,6 @@ import type { ComponentType } from 'react';
 import type { ToolRenderProps, ToolResult } from '../../types';
 import ApplyPatchRenderer from './ApplyPatchRenderer';
 import BashRenderer from './BashRenderer';
-import CodeExecutionRenderer from './CodeExecutionRenderer';
 import ExtensionToolRenderer from './ExtensionToolRenderer';
 import FileEditRenderer from './FileEditRenderer';
 import FileReadRenderer from './FileReadRenderer';
@@ -39,7 +38,6 @@ const toolRendererRegistry: Record<string, ToolRendererRegistration> = {
   skill: { component: SkillRenderer },
   openai_web_search: { component: OpenAIWebSearchRenderer, supportsFailureRendering: true },
   read_conversation: { component: ReadConversationRenderer },
-  code_execution: { component: CodeExecutionRenderer, supportsFailureRendering: true },
   extension_tool: { component: ExtensionToolRenderer },
   mcp_tool: { component: MCPToolRenderer },
 };

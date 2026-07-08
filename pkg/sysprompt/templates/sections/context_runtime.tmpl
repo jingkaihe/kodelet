@@ -20,17 +20,6 @@ Note that the contexts in $HOME/.kodelet/ are universally applicable.
 {{end}}{{end}}
 {{- end -}}
 
-{{- define "templates/sections/runtime_mcp_servers.tmpl" -}}
-{{if hasMCPServers .}}
-# MCP Servers Available
-When using MCP tools in 'code' execution mode, the following MCP servers are available:
-
-{{mcpServersCSV .}}
-
-You can import and use tools from these servers in your TypeScript code. Check the generated TypeScript API in {{.MCPWorkspaceDir}}/servers/ for available functions.
-{{end}}
-{{- end -}}
-
 # Context
 If the current working directory contains a `{{.ActiveContextFile}}` file, it will be automatically loaded as a context. Use it for:
 * Understanding the structure, organisation and tech stack of the project.
@@ -48,5 +37,3 @@ For filesystem search activities, use `fd` for file discovery and `rg` for conte
 {{include "templates/sections/runtime_system_info.tmpl" .}}
 
 {{include "templates/sections/runtime_loaded_contexts.tmpl" .}}
-
-{{include "templates/sections/runtime_mcp_servers.tmpl" .}}

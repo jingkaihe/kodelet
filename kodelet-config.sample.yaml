@@ -1,7 +1,4 @@
 mcp:
-    execution_mode: code
-    code_execution:
-        rpc_transport: "http"
     servers:
         playwright:
             command: "npx"

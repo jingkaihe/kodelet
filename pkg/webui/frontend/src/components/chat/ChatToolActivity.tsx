@@ -299,15 +299,7 @@ export const getToolSummary = (toolCall: ChatRenderToolCall): string => {
           getStringField(metadata, 'goal')
       );
 
-    case 'code_execution':
-      return formatToolSummary(
-        'Code execution',
-        getStringField(input, 'description') ||
-          getStringField(input, 'code_path') ||
-          getStringField(metadata, 'runtime')
-      );
-
-    case 'extension_tool':
+	case 'extension_tool':
       return formatToolSummary(
         'Extension tool',
         getStringField(metadata, 'toolName') || toolCall.name

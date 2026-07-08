@@ -386,10 +386,6 @@ func (g *DefaultTitleGenerator) GenerateTitle(toolName string, input string) str
 			escaped := strings.ReplaceAll(cmd, "`", "\\`")
 			title = "`" + escaped + "`"
 		}
-	case "code_execution":
-		if codePath, ok := params["code_path"].(string); ok {
-			title = fmt.Sprintf("Execute: %s", codePath)
-		}
 	case "grep_tool":
 		if pattern, ok := params["pattern"].(string); ok {
 			title = fmt.Sprintf("Grep: %s", pattern)

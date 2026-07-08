@@ -71,7 +71,6 @@ var metadataTypeRegistry = map[string]reflect.Type{
 	"read_conversation": reflect.TypeOf(ReadConversationMetadata{}),
 	"get_goal":          reflect.TypeOf(GetGoalMetadata{}),
 	"update_goal":       reflect.TypeOf(UpdateGoalMetadata{}),
-	"code_execution":    reflect.TypeOf(CodeExecutionMetadata{}),
 	"skill":             reflect.TypeOf(SkillMetadata{}),
 	"blocked":           reflect.TypeOf(BlockedMetadata{}),
 }
@@ -423,16 +422,6 @@ func ExtractMetadata(metadata ToolMetadata, target any) bool {
 	targetElem.Set(metadataValue)
 	return true
 }
-
-// CodeExecutionMetadata contains metadata about a code execution operation
-type CodeExecutionMetadata struct {
-	Code    string `json:"code"`
-	Output  string `json:"output"`
-	Runtime string `json:"runtime"`
-}
-
-// ToolType returns the tool type identifier for code execution operations
-func (m CodeExecutionMetadata) ToolType() string { return "code_execution" }
 
 // SkillMetadata contains metadata about a skill invocation
 type SkillMetadata struct {

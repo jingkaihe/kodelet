@@ -192,22 +192,6 @@ const examples: ToolExample[] = [
     },
   },
   {
-    title: 'Code execution',
-    input: {
-      description: 'Check story exports',
-      code_path: 'scripts/check-stories.ts',
-    },
-    result: {
-      toolName: 'code_execution',
-      success: true,
-      metadata: {
-        runtime: 'node',
-        code: 'console.log(["ChatComposer", "TerminalModalFrame"].join("\\n"));',
-        output: 'ChatComposer\nTerminalModalFrame',
-      },
-    },
-  },
-  {
     title: 'Extension tool',
     result: {
       toolName: 'design_snapshot',

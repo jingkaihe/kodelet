@@ -72,8 +72,6 @@ type Config struct {
 	AnthropicAccount     string             `mapstructure:"anthropic_account" json:"anthropic_account" yaml:"anthropic_account"`            // AnthropicAccount specifies which Anthropic subscription account to use
 	Aliases              map[string]string  `mapstructure:"aliases" json:"aliases,omitempty" yaml:"aliases,omitempty"`                      // Aliases maps short model names to full model names
 	Retry                RetryConfig        `mapstructure:"retry" json:"retry" yaml:"retry"`                                                // Retry configuration for API calls
-	MCPExecutionMode     string             `mapstructure:"mcp_execution_mode" json:"mcp_execution_mode" yaml:"mcp_execution_mode"`         // MCP execution mode (code, direct, or empty)
-	MCPWorkspaceDir      string             `mapstructure:"mcp_workspace_dir" json:"mcp_workspace_dir" yaml:"mcp_workspace_dir"`            // MCP workspace directory for code execution mode
 	Sysprompt            string             `mapstructure:"sysprompt" json:"sysprompt,omitempty" yaml:"sysprompt,omitempty"`                // Sysprompt is the path to a custom system prompt template file
 	SyspromptArgs        map[string]string  `mapstructure:"sysprompt_args" json:"sysprompt_args,omitempty" yaml:"sysprompt_args,omitempty"` // SyspromptArgs are custom template arguments for system prompt rendering
 	Bash                 *BashConfig        `mapstructure:"bash" json:"bash,omitempty" yaml:"bash,omitempty"`                               // Bash contains bash tool configuration

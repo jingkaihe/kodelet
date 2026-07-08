@@ -42,7 +42,6 @@ func NewRendererRegistry() *RendererRegistry {
 	registry.Register("openai_web_search", &OpenAIWebSearchRenderer{})
 	registry.Register("web_fetch", &WebFetchRenderer{})
 	registry.Register("read_conversation", &ReadConversationRenderer{})
-	registry.Register("code_execution", &CodeExecutionRenderer{})
 	registry.Register("skill", &SkillRenderer{})
 
 	// Register MCP tools - pattern matches any tool prefixed with "mcp_"

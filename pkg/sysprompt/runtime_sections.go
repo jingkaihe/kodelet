@@ -2,7 +2,7 @@ package sysprompt
 
 import llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 
-// RenderRuntimeSections renders system-info, loaded-contexts, and MCP-server sections.
+// RenderRuntimeSections renders system-info and loaded-contexts sections.
 func RenderRuntimeSections(ctx *PromptContext, renderer *Renderer) []string {
 	if ctx == nil {
 		return nil
@@ -16,7 +16,6 @@ func RenderRuntimeSections(ctx *PromptContext, renderer *Renderer) []string {
 	return []string{
 		ctx.formatSystemInfoWithRenderer(resolvedRenderer),
 		ctx.formatContextsWithRenderer(resolvedRenderer),
-		ctx.formatMCPServersWithRenderer(resolvedRenderer),
 	}
 }
 
@@ -28,7 +27,6 @@ func BuildRuntimeContext(llmConfig llmtypes.Config, contexts map[string]string) 
 		patterns = llmConfig.Context.Patterns
 	}
 	promptCtx.ActiveContextFile = resolveActiveContextFile(promptCtx.WorkingDirectory, contexts, patterns)
-	promptCtx.WithMCPConfig(llmConfig.MCPExecutionMode, llmConfig.MCPWorkspaceDir)
 	promptCtx.Args = llmConfig.SyspromptArgs
 	promptCtx.EnableFSSearchTools = llmConfig.EnableFSSearchTools
 

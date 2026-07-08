@@ -50,7 +50,6 @@ export interface ToolResult {
 		| SkillMetadata
 		| OpenAIWebSearchMetadata
 		| ReadConversationMetadata
-		| CodeExecutionMetadata
 		| ExtensionToolMetadata
 		| MCPToolMetadata
 		| Record<string, unknown>;
@@ -519,12 +518,6 @@ export interface ReadConversationMetadata {
 	conversationId?: string;
 	goal?: string;
 	content?: string;
-}
-
-export interface CodeExecutionMetadata {
-	code?: string;
-	output?: string;
-	runtime?: string;
 }
 
 export interface ExtensionToolMetadata {

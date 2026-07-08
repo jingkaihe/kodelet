@@ -18,7 +18,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
-	"github.com/jingkaihe/kodelet/pkg/mcp"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -559,17 +558,6 @@ var runCmd = &cobra.Command{
 
 		applyRunToolRestrictions(&llmConfig, fragmentMetadata, config.NoTools)
 
-		if !config.NoTools {
-			workspaceDir, err := mcp.ResolveWorkspaceDir(llmConfig.WorkingDirectory)
-			if err != nil {
-				presenter.Error(err, "Failed to resolve MCP workspace directory")
-				return
-			}
-
-			llmConfig.MCPExecutionMode = viper.GetString("mcp.execution_mode")
-			llmConfig.MCPWorkspaceDir = workspaceDir
-		}
-
 		var stateOpts []tools.BasicStateOption
 		stateOpts = append(stateOpts, tools.WithWorkingDirectory(llmConfig.WorkingDirectory))
 		stateOpts = append(stateOpts, tools.WithLLMConfig(llmConfig))
@@ -600,21 +588,8 @@ var runCmd = &cobra.Command{
 			sessionID = convtypes.GenerateID()
 		}
 
-		// Set up MCP execution mode
 		if !config.NoTools && mcpManager != nil {
-			mcpSetup, err := mcp.SetupExecutionMode(ctx, mcpManager, sessionID, llmConfig.WorkingDirectory)
-			if err != nil && !errors.Is(err, mcp.ErrDirectMode) {
-				presenter.Error(err, "Failed to set up MCP execution mode")
-				return
-			}
-
-			if err == nil && mcpSetup != nil {
-				// Code execution mode
-				stateOpts = append(stateOpts, mcpSetup.StateOpts...)
-			} else {
-				// Direct mode - add MCP tools directly
-				stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
-			}
+			stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
 		}
 
 		appState := tools.NewBasicState(ctx, stateOpts...)

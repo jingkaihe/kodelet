@@ -160,8 +160,7 @@ func TestToACPToolKind(t *testing.T) {
 		{"file_write", acptypes.ToolKindEdit},
 		{"file_edit", acptypes.ToolKindEdit},
 		{"apply_patch", acptypes.ToolKindEdit},
-		{"bash", acptypes.ToolKindOther},           // Currently mapped to other
-		{"code_execution", acptypes.ToolKindOther}, // Currently mapped to other
+		{"bash", acptypes.ToolKindOther}, // Currently mapped to other
 		{"web_fetch", acptypes.ToolKindFetch},
 		{"view_image", acptypes.ToolKindRead},
 		{"thinking", acptypes.ToolKindThink},
@@ -331,12 +330,6 @@ func TestDefaultTitleGenerator_BashLongCommand(t *testing.T) {
 	assert.True(t, strings.HasPrefix(title, "`"))
 	assert.True(t, strings.HasSuffix(title, "`"))
 	assert.Equal(t, "`"+longCmd+"`", title)
-}
-
-func TestDefaultTitleGenerator_CodeExecution(t *testing.T) {
-	gen := &DefaultTitleGenerator{}
-	title := gen.GenerateTitle("code_execution", `{"code_path": "scripts/analyze.ts"}`)
-	assert.Equal(t, "Execute: scripts/analyze.ts", title)
 }
 
 func TestDefaultTitleGenerator_Grep(t *testing.T) {

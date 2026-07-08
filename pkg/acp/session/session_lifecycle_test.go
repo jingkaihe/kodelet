@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
-	"github.com/jingkaihe/kodelet/pkg/mcp"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	conversationtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -445,49 +444,13 @@ func TestManagerCloseReturnsStoreCloseError(t *testing.T) {
 }
 
 func TestBuildSessionMCPStateOptsFallbacks(t *testing.T) {
-	originalSetup := setupMCPExecutionMode
-	t.Cleanup(func() {
-		setupMCPExecutionMode = originalSetup
-	})
-
 	t.Run("nil session MCP manager returns nil and skips setup", func(t *testing.T) {
-		setupMCPExecutionMode = func(context.Context, *tools.MCPManager, string, string) (*mcp.ExecutionSetup, error) {
-			t.Fatal("setupMCPExecutionMode should not be called for nil session MCP manager")
-			return nil, errors.New("unexpected setupMCPExecutionMode call")
-		}
-
 		opts := (&Manager{}).buildSessionMCPStateOpts(context.Background(), "session-1", t.TempDir(), nil)
 
 		assert.Nil(t, opts)
 	})
 
-	t.Run("direct mode falls back to MCP tools", func(t *testing.T) {
-		setupMCPExecutionMode = func(context.Context, *tools.MCPManager, string, string) (*mcp.ExecutionSetup, error) {
-			return nil, mcp.ErrDirectMode
-		}
-
-		opts := (&Manager{}).buildSessionMCPStateOpts(context.Background(), "session-1", t.TempDir(), newEmptyMCPManager(t))
-
-		require.Len(t, opts, 1)
-		assert.NotNil(t, opts[0])
-	})
-
-	t.Run("setup error falls back to MCP tools", func(t *testing.T) {
-		setupMCPExecutionMode = func(context.Context, *tools.MCPManager, string, string) (*mcp.ExecutionSetup, error) {
-			return &mcp.ExecutionSetup{StateOpts: []tools.BasicStateOption{func(context.Context, *tools.BasicState) error { return nil }}}, errors.New("setup failed")
-		}
-
-		opts := (&Manager{}).buildSessionMCPStateOpts(context.Background(), "session-1", t.TempDir(), newEmptyMCPManager(t))
-
-		require.Len(t, opts, 1)
-		assert.NotNil(t, opts[0])
-	})
-
-	t.Run("nil setup result falls back to MCP tools", func(t *testing.T) {
-		setupMCPExecutionMode = func(context.Context, *tools.MCPManager, string, string) (*mcp.ExecutionSetup, error) {
-			return nil, nil //nolint:nilnil // exercises fallback for a nil setup without an error
-		}
-
+	t.Run("MCP manager returns direct MCP tools", func(t *testing.T) {
 		opts := (&Manager{}).buildSessionMCPStateOpts(context.Background(), "session-1", t.TempDir(), newEmptyMCPManager(t))
 
 		require.Len(t, opts, 1)

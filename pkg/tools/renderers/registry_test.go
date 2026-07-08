@@ -29,7 +29,6 @@ func TestRendererRegistry_ExactMatches(t *testing.T) {
 		{"View Image", "view_image", true, false},
 		{"Subagent", "subagent", true, false},
 		{"Web Fetch", "web_fetch", true, false},
-		{"Code Execution", "code_execution", true, false},
 
 		{"Unknown Tool", "unknown_tool", true, false}, // Should fallback to default
 	}

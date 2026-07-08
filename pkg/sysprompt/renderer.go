@@ -82,18 +82,6 @@ func parseTemplates(templateFS fs.FS, overrides map[string]string) (*template.Te
 			}
 			return ctx.contextEntries()
 		},
-		"hasMCPServers": func(ctx *PromptContext) bool {
-			if ctx == nil {
-				return false
-			}
-			return ctx.hasMCPServers()
-		},
-		"mcpServersCSV": func(ctx *PromptContext) string {
-			if ctx == nil {
-				return ""
-			}
-			return ctx.mcpServersCSV()
-		},
 		"bash":    createBashFunc(context.Background()),
 		"default": createDefaultFunc(),
 	})

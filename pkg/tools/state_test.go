@@ -831,29 +831,6 @@ func TestWithMainTools(t *testing.T) {
 	})
 }
 
-func TestNewBasicState_ReconfiguresExtraMCPTools(t *testing.T) {
-	ctx := context.Background()
-	state := NewBasicState(
-		ctx,
-		WithLLMConfig(llmtypes.Config{ToolMode: llmtypes.ToolModePatch}),
-		WithMainTools(),
-		WithExtraMCPTools([]tooltypes.Tool{NewCodeExecutionTool(nil)}),
-	)
-
-	var description string
-	for _, tool := range state.Tools() {
-		if tool.Name() == "code_execution" {
-			description = tool.Description()
-			break
-		}
-	}
-
-	require.NotEmpty(t, description)
-	assert.Contains(t, description, "Inspect generated files using shell commands such as `sed`, `cat`, or `rg` via the `bash` tool")
-	assert.Contains(t, description, "Create or update scripts in the MCP code workspace using `apply_patch` only.")
-	assert.NotContains(t, description, "using `file_write` / `file_edit` / `apply_patch`.")
-}
-
 func TestNoToolsConfigured_PreventsAdditionalToolRegistration(t *testing.T) {
 	ctx := context.Background()
 	config := llmtypes.Config{AllowedTools: []string{NoToolsMarker}}
@@ -863,7 +840,7 @@ func TestNoToolsConfigured_PreventsAdditionalToolRegistration(t *testing.T) {
 		WithLLMConfig(config),
 		WithMainTools(),
 		WithExtensionTools([]tooltypes.Tool{&testTool{name: "extension_tool"}}),
-		WithExtraMCPTools([]tooltypes.Tool{NewCodeExecutionTool(nil)}),
+		WithExtraMCPTools([]tooltypes.Tool{&testTool{name: "mcp_test"}}),
 		WithSkillTool(),
 		WithSubAgentTool(),
 	)
