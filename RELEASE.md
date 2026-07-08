@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.4.51-beta
+
+Removed  MCP code-execution mode, including generated TypeScript wrappers, standalone MCP RPC serving, and the `mcp generate` / `mcp serve` commands.
+
 ## 0.4.50-beta
 
 Added shared structured diff rendering for `apply_patch`, including line numbers, theme-colored per-file add/remove counts, wrapped terminal output, and consistent CLI/TUI/Markdown presentation.
