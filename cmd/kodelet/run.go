@@ -25,7 +25,6 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 type RunConfig struct {
@@ -43,17 +42,14 @@ type RunConfig struct {
 	IncludeHistory      bool              // Include historical conversation data in headless streaming
 	NoSkills            bool              // Disable agentic skills
 	NoExtensions        bool              // Disable extension runtime
-	NoMCP               bool              // Disable MCP tools
 	NoTools             bool              // Disable all tools (for simple query-response usage)
 	EnableFSSearchTools bool              // Enable filesystem search tools (glob_tool and grep_tool)
-	DisableSubagent     bool              // Disable the subagent tool and remove subagent-related system prompt context
 	MessageDisplay      string            // User-facing compact text for persisted display
 	Sysprompt           string            // Path to custom system prompt template file
 	SyspromptArgs       map[string]string // Arguments passed to custom system prompt template
 	ResultOnly          bool              // Only print the final agent message, no intermediate output or usage stats
 	UseWeakModel        bool              // Use weak model for SendMessage
 	Account             string            // Anthropic subscription account alias to use
-	AsSubagent          bool              // Run as subagent (disables subagent tool to prevent recursion)
 }
 
 func NewRunConfig() *RunConfig {
@@ -71,16 +67,13 @@ func NewRunConfig() *RunConfig {
 		IncludeHistory:      false,
 		NoSkills:            false,
 		NoExtensions:        false,
-		NoMCP:               false,
 		NoTools:             false,
 		EnableFSSearchTools: false,
-		DisableSubagent:     false,
 		Sysprompt:           "",
 		SyspromptArgs:       make(map[string]string),
 		ResultOnly:          false,
 		UseWeakModel:        false,
 		Account:             "",
-		AsSubagent:          false,
 	}
 }
 
@@ -276,32 +269,17 @@ func applyRunToolRestrictions(llmConfig *llmtypes.Config, fragmentMetadata *frag
 	}
 }
 
-func createRunToolManagers(ctx context.Context, config *RunConfig, workingDir string) (*tools.MCPManager, *extensions.Runtime, error) {
-	if config.NoTools {
-		return nil, nil, nil
-	}
-
-	var mcpManager *tools.MCPManager
-	var err error
-	if !config.NoMCP {
-		mcpManager, err = tools.CreateMCPManagerFromViper(ctx)
-		if err != nil && !errors.Is(err, tools.ErrMCPDisabled) {
-			return nil, nil, err
-		}
-	}
-
+func createRunToolManagers(ctx context.Context, config *RunConfig, workingDir string) (*extensions.Runtime, error) {
 	var extensionRuntime *extensions.Runtime
-	if !config.NoExtensions {
+	if !config.NoTools && !config.NoExtensions {
+		var err error
 		extensionRuntime, err = extensions.NewRuntimeFromViper(ctx, workingDir)
 		if err != nil {
-			if mcpManager != nil {
-				_ = mcpManager.Close(ctx)
-			}
-			return nil, nil, err
+			return nil, err
 		}
 	}
 
-	return mcpManager, extensionRuntime, nil
+	return extensionRuntime, nil
 }
 
 func normalizeConversationProfile(profile string) string {
@@ -460,15 +438,10 @@ var runCmd = &cobra.Command{
 			ctx = extensions.ContextWithUIInputBroker(ctx, extensions.NewTerminalUIInputBroker(os.Stdin, os.Stderr))
 		}
 
-		mcpManager, extensionRuntime, err := createRunToolManagers(ctx, config, resolvedCWD)
+		extensionRuntime, err := createRunToolManagers(ctx, config, resolvedCWD)
 		if err != nil {
 			presenter.Error(err, "Failed to initialize tools")
 			return
-		}
-		if mcpManager != nil {
-			defer func() {
-				_ = mcpManager.Close(ctx)
-			}()
 		}
 		if extensionRuntime != nil {
 			defer func() {
@@ -533,16 +506,12 @@ var runCmd = &cobra.Command{
 		if cmd.Flags().Changed("enable-fs-search-tools") {
 			llmConfig.EnableFSSearchTools = config.EnableFSSearchTools
 		}
-		if cmd.Flags().Changed("disable-subagent") {
-			llmConfig.DisableSubagent = config.DisableSubagent
-		}
 		if strings.TrimSpace(config.Sysprompt) != "" {
 			llmConfig.Sysprompt = strings.TrimSpace(config.Sysprompt)
 		}
 		if len(config.SyspromptArgs) > 0 {
 			llmConfig.SyspromptArgs = config.SyspromptArgs
 		}
-		llmConfig.IsSubAgent = config.AsSubagent
 		llmConfig.RecipeName = config.FragmentName
 		llmConfig.Extensions = extensionRuntime
 
@@ -566,30 +535,17 @@ var runCmd = &cobra.Command{
 				stateOpts = append(stateOpts, tools.WithExtensionTools(extensionRuntime.Tools()))
 			}
 
-			// When running as subagent, use subagent tools (excludes subagent tool to prevent recursion)
-			if config.AsSubagent {
-				stateOpts = append(stateOpts, tools.WithSubAgentToolsFromConfig())
-			} else {
-				stateOpts = append(stateOpts, tools.WithMainTools())
-			}
+			stateOpts = append(stateOpts, tools.WithMainTools())
 
 			// Initialize skills (discovery happens inside WithSkillTool)
 			stateOpts = append(stateOpts, tools.WithSkillTool())
 
-			// Initialize workflows for subagent (only for main agent, not subagent, and if not disabled)
-			if !config.AsSubagent && !viper.GetBool("no_workflows") && !llmConfig.DisableSubagent {
-				stateOpts = append(stateOpts, tools.WithSubAgentTool())
-			}
 		}
 
-		// Generate session ID for MCP socket (use resume ID if available, otherwise new ID)
+		// Generate session ID (use resume ID if available, otherwise new ID)
 		sessionID := config.ResumeConvID
 		if sessionID == "" {
 			sessionID = convtypes.GenerateID()
-		}
-
-		if !config.NoTools && mcpManager != nil {
-			stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
 		}
 
 		appState := tools.NewBasicState(ctx, stateOpts...)
@@ -742,14 +698,11 @@ func init() {
 	runCmd.Flags().StringSlice("fragment-dirs", defaults.FragmentDirs, "Additional fragment directories (e.g., --fragment-dirs ./project-fragments --fragment-dirs ./team-fragments)")
 	runCmd.Flags().Bool("include-history", defaults.IncludeHistory, "Include historical conversation data in headless streaming")
 	runCmd.Flags().Bool("no-extensions", defaults.NoExtensions, "Disable extension runtime")
-	runCmd.Flags().Bool("no-mcp", defaults.NoMCP, "Disable MCP tools")
 	runCmd.Flags().Bool("no-tools", defaults.NoTools, "Disable all tools (for simple query-response usage)")
 	runCmd.Flags().Bool("enable-fs-search-tools", defaults.EnableFSSearchTools, "Enable filesystem search tools (glob_tool and grep_tool)")
-	runCmd.Flags().Bool("disable-subagent", defaults.DisableSubagent, "Disable the subagent tool and remove subagent-related system prompt context")
 	runCmd.Flags().Bool("result-only", defaults.ResultOnly, "Only print the final agent message, suppressing all intermediate output and usage statistics")
 	runCmd.Flags().Bool("use-weak-model", defaults.UseWeakModel, "Use weak model for processing")
 	runCmd.Flags().String("account", defaults.Account, "Anthropic subscription account alias to use (see 'kodelet accounts list')")
-	runCmd.Flags().Bool("as-subagent", defaults.AsSubagent, "Run as subagent (disables subagent tool to prevent recursion)")
 }
 
 func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
@@ -817,20 +770,12 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 		config.NoExtensions = noExtensions
 	}
 
-	if noMCP, err := cmd.Flags().GetBool("no-mcp"); err == nil {
-		config.NoMCP = noMCP
-	}
-
 	if noTools, err := cmd.Flags().GetBool("no-tools"); err == nil {
 		config.NoTools = noTools
 	}
 
 	if enableFSSearchTools, err := cmd.Flags().GetBool("enable-fs-search-tools"); err == nil {
 		config.EnableFSSearchTools = enableFSSearchTools
-	}
-
-	if disableSubagent, err := cmd.Flags().GetBool("disable-subagent"); err == nil {
-		config.DisableSubagent = disableSubagent
 	}
 
 	if sysprompt, err := cmd.Flags().GetString("sysprompt"); err == nil {
@@ -851,10 +796,6 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 
 	if account, err := cmd.Flags().GetString("account"); err == nil {
 		config.Account = account
-	}
-
-	if asSubagent, err := cmd.Flags().GetBool("as-subagent"); err == nil {
-		config.AsSubagent = asSubagent
 	}
 
 	return config

@@ -765,9 +765,6 @@ kodelet run --provider "openai" --model "gpt-4.1" --max-tokens 4096 --reasoning-
 # Command restriction example
 kodelet run --allowed-commands "ls *,pwd,echo *" "query"
 
-# Disable subagent tool and related system prompt context
-kodelet run --disable-subagent "query"
-
 # Enable filesystem search tools (`glob_tool` and `grep_tool`)
 kodelet run --enable-fs-search-tools "query"
 
@@ -1208,7 +1205,7 @@ Extensions communicate with Kodelet over stdio JSON-RPC using `Content-Length` f
 
 ### TypeScript Agent SDK
 
-The `kodelet` TypeScript package can also launch and drive agent sessions from Node/TypeScript. It speaks to `kodelet acp` over stdio JSON-RPC, so it preserves normal profile resolution, conversation persistence, tools, skills, MCP, and extension behavior.
+The `kodelet` TypeScript package can also launch and drive agent sessions from Node/TypeScript. It speaks to `kodelet acp` over stdio JSON-RPC, so it preserves normal profile resolution, conversation persistence, built-in tools, skills, and extension behavior.
 
 ```typescript
 import { Client } from "kodelet";
@@ -1627,15 +1624,9 @@ To run without skills for a single session:
 kodelet run --no-skills "your query"
 ```
 
-### Disabling Subagent
+### Subagent Tool
 
-To disable the subagent tool and remove subagent-related context from the system prompt:
-
-```bash
-kodelet run --disable-subagent "your query"
-```
-
-This can also be set via configuration file (`disable_subagent: true`) or environment variable (`KODELET_DISABLE_SUBAGENT=true`). Other tools like `web_fetch` remain available when the subagent is disabled.
+The subagent tool is provided by the SDK core-tools extension. To disable extension-provided tools for a single run, use `--no-extensions`; to disable only the SDK subagent tool, set `disable_subagent: true` in configuration or `KODELET_DISABLE_SUBAGENT=true` in the environment.
 
 ### Enabling Filesystem Search Tools
 

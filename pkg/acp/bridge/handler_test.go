@@ -164,7 +164,6 @@ func TestToACPToolKind(t *testing.T) {
 		{"web_fetch", acptypes.ToolKindFetch},
 		{"view_image", acptypes.ToolKindRead},
 		{"thinking", acptypes.ToolKindThink},
-		{"subagent", acptypes.ToolKindSearch},
 		{"unknown_tool", acptypes.ToolKindOther},
 	}
 
@@ -369,8 +368,6 @@ func TestDefaultTitleGenerator_AdditionalTools(t *testing.T) {
 		{name: "file_edit", toolName: "file_edit", input: `{"file_path":"/tmp/edit.txt"}`, expected: "Edit: /tmp/edit.txt"},
 		{name: "glob_tool", toolName: "glob_tool", input: `{"pattern":"**/*.go"}`, expected: "Glob: **/*.go"},
 		{name: "web_fetch", toolName: "web_fetch", input: `{"url":"https://example.com"}`, expected: "Fetch: https://example.com"},
-		{name: "subagent workflow", toolName: "subagent", input: `{"workflow":"review","question":"ignored"}`, expected: "Subagent: review"},
-		{name: "subagent question", toolName: "subagent", input: `{"question":"Investigate"}`, expected: "Subagent: Investigate"},
 		{name: "view_image", toolName: "view_image", input: `{"path":"/tmp/img.png"}`, expected: "Image: /tmp/img.png"},
 		{name: "apply_patch no file", toolName: "apply_patch", input: `{"input":"*** Begin Patch\n*** End Patch"}`, expected: "Apply patch"},
 	}

@@ -10,13 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
-	"github.com/mark3labs/mcp-go/client"
-	"github.com/mark3labs/mcp-go/client/transport"
-	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -434,167 +430,6 @@ func TestReadConversationToolMetadataAndTracing(t *testing.T) {
 	assert.Equal(t, "missing conversation", structured.Error)
 }
 
-func TestMCPToolDeterministicMethods(t *testing.T) {
-	mcpDefinition := mcp.NewTool(
-		"lookup",
-		mcp.WithDescription("Lookup docs"),
-		mcp.WithString("query", mcp.Required(), mcp.Description("Search query")),
-	)
-	tool := NewMCPTool(nil, mcpDefinition, "docs")
-
-	assert.Equal(t, "docs", tool.ServerName())
-	assert.Equal(t, "lookup", tool.MCPToolName())
-	assert.Equal(t, "mcp__docs_lookup", tool.Name())
-	assert.Equal(t, "Lookup docs", tool.Description())
-
-	schema := tool.GenerateSchema()
-	require.NotNil(t, schema)
-	assert.Equal(t, "object", schema.Type)
-	assert.Contains(t, schema.Required, "query")
-	querySchema, ok := schema.Properties.Get("query")
-	require.True(t, ok)
-	assert.Equal(t, "string", querySchema.Type)
-
-	kvs, err := tool.TracingKVs(`{"query":"coverage"}`)
-	require.NoError(t, err)
-	assert.Nil(t, kvs)
-	assert.NoError(t, tool.ValidateInput(nil, `{"query":"coverage"}`))
-
-	badSchemaTool := &MCPTool{mcpToolInputSchema: mcp.ToolInputSchema{
-		Type:       "object",
-		Properties: map[string]any{"bad": make(chan int)},
-	}}
-	assert.Nil(t, badSchemaTool.GenerateSchema())
-}
-
-func TestAuthenticatedStreamableHTTPTransportGetSessionID(t *testing.T) {
-	inner, err := transport.NewStreamableHTTP("https://example.test/mcp", transport.WithSession("session-123"))
-	require.NoError(t, err)
-
-	wrapped := &authenticatedStreamableHTTPTransport{inner: inner}
-	assert.Equal(t, "session-123", wrapped.GetSessionId())
-}
-
-func TestMCPToolResultMethods(t *testing.T) {
-	result := &MCPToolResult{
-		toolName:      "mcp__docs_lookup",
-		mcpToolName:   "lookup",
-		serverName:    "docs",
-		parameters:    map[string]any{"query": "coverage"},
-		content:       []tooltypes.MCPContent{{Type: "text", Text: "answer"}},
-		contentText:   "answer",
-		executionTime: 25 * time.Millisecond,
-		result:        "answer",
-	}
-
-	assert.Equal(t, "answer", result.GetResult())
-	assert.Empty(t, result.GetError())
-	assert.False(t, result.IsError())
-	assert.Contains(t, result.AssistantFacing(), "answer")
-
-	structured := result.StructuredData()
-	assert.Equal(t, "mcp__docs_lookup", structured.ToolName)
-	assert.True(t, structured.Success)
-	var meta tooltypes.MCPToolMetadata
-	require.True(t, tooltypes.ExtractMetadata(structured.Metadata, &meta))
-	assert.Equal(t, "lookup", meta.MCPToolName)
-	assert.Equal(t, "docs", meta.ServerName)
-	assert.Equal(t, map[string]any{"query": "coverage"}, meta.Parameters)
-	assert.Equal(t, []tooltypes.MCPContent{{Type: "text", Text: "answer"}}, meta.Content)
-	assert.Equal(t, "answer", meta.ContentText)
-	assert.Equal(t, 25*time.Millisecond, meta.ExecutionTime)
-
-	errorResult := &MCPToolResult{toolName: "mcp__docs_lookup", mcpToolName: "lookup", err: "boom"}
-	assert.Empty(t, errorResult.GetResult())
-	assert.Equal(t, "boom", errorResult.GetError())
-	assert.True(t, errorResult.IsError())
-	assert.Contains(t, errorResult.AssistantFacing(), "boom")
-
-	structured = errorResult.StructuredData()
-	assert.Equal(t, "mcp__docs_lookup", structured.ToolName)
-	assert.False(t, structured.Success)
-	assert.Equal(t, "boom", structured.Error)
-	assert.Nil(t, structured.Metadata)
-}
-
-func TestMCPManagerGetClientAndViperCreateEmpty(t *testing.T) {
-	isolateViper(t)
-
-	configPath := filepath.Join(t.TempDir(), "config.yaml")
-	require.NoError(t, os.WriteFile(configPath, []byte(`mcp:
-  servers: {}
-`), 0o644))
-	viper.SetConfigFile(configPath)
-	require.NoError(t, viper.ReadInConfig())
-
-	manager, err := CreateMCPManagerFromViper(context.Background())
-	require.NoError(t, err)
-	require.NotNil(t, manager)
-	assert.Empty(t, manager.clients)
-
-	manager.clients["docs"] = &client.Client{}
-	c, err := manager.GetMCPClient("docs")
-	require.NoError(t, err)
-	assert.Same(t, manager.clients["docs"], c)
-
-	c, err = manager.GetMCPClient("missing")
-	require.Error(t, err)
-	assert.Nil(t, c)
-	assert.Contains(t, err.Error(), "client not found")
-}
-
-func TestLoadMCPConfigFromViper(t *testing.T) {
-	isolateViper(t)
-
-	config, err := LoadMCPConfigFromViper()
-	require.NoError(t, err)
-	assert.Empty(t, config.Servers)
-
-	configPath := filepath.Join(t.TempDir(), "config.yaml")
-	require.NoError(t, os.WriteFile(configPath, []byte(`mcp:
-  servers:
-    docs:
-      server_type: http
-      url: https://mcp.example.test
-      headers:
-        X-Test: token
-      tool_white_list:
-        - lookup
-    local:
-      server_type: stdio
-      command: /bin/echo
-      args:
-        - hello
-      envs:
-        TOKEN: literal
-`), 0o644))
-
-	viper.SetConfigFile(configPath)
-	require.NoError(t, viper.ReadInConfig())
-
-	config, err = LoadMCPConfigFromViper()
-	require.NoError(t, err)
-	require.Contains(t, config.Servers, "docs")
-	assert.Equal(t, MCPServerTypeHTTP, config.Servers["docs"].ServerType)
-	assert.Equal(t, "https://mcp.example.test", config.Servers["docs"].URL)
-	assert.Equal(t, map[string]string{"X-Test": "token"}, config.Servers["docs"].Headers)
-	assert.Equal(t, []string{"lookup"}, config.Servers["docs"].ToolWhiteList)
-	require.Contains(t, config.Servers, "local")
-	assert.Equal(t, MCPServerTypeStdio, config.Servers["local"].ServerType)
-	assert.Equal(t, "/bin/echo", config.Servers["local"].Command)
-	assert.Equal(t, []string{"hello"}, config.Servers["local"].Args)
-	assert.Equal(t, map[string]string{"TOKEN": "literal"}, config.Servers["local"].Envs)
-}
-
-func TestCreateMCPManagerFromViperDisabled(t *testing.T) {
-	isolateViper(t)
-	viper.Set("mcp.enabled", false)
-
-	manager, err := CreateMCPManagerFromViper(context.Background())
-	require.ErrorIs(t, err, ErrMCPDisabled)
-	assert.Nil(t, manager)
-}
-
 func TestStateDeterministicHelpers(t *testing.T) {
 	assert.Nil(t, allowedToolNameSet(llmtypes.Config{}))
 	assert.Equal(t, map[string]struct{}{"bash": {}, "file_read": {}}, allowedToolNameSet(llmtypes.Config{
@@ -613,7 +448,6 @@ func TestStateDeterministicHelpers(t *testing.T) {
 	assert.True(t, skillsEnabledForConfig(llmtypes.Config{}))
 
 	assert.Empty(t, filterOutSkill([]tooltypes.Tool{NewSkillTool(nil, false, false)}))
-	assert.Empty(t, filterOutSubagent([]tooltypes.Tool{NewSubAgentTool(nil, false, false)}))
 
 	workDir := t.TempDir()
 	state := NewBasicState(context.Background(), WithWorkingDirectory(workDir))
@@ -640,21 +474,6 @@ func TestStateDiscoveryHelpersWithTempDirs(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.Chdir(workDir))
 	t.Cleanup(func() { require.NoError(t, os.Chdir(oldWD)) })
-
-	recipeDir := filepath.Join(workDir, ".kodelet", "recipes")
-	require.NoError(t, os.MkdirAll(recipeDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(recipeDir, "audit.md"), []byte(`---
-name: Audit
-description: Audit workflow
-workflow: true
----
-Audit the requested code.
-`), 0o644))
-
-	workflows := discoverWorkflows(context.Background())
-	require.Contains(t, workflows, "audit")
-	assert.True(t, workflows["audit"].Metadata.Workflow)
-	assert.Equal(t, "Audit workflow", workflows["audit"].Metadata.Description)
 
 	skillDir := filepath.Join(workDir, ".kodelet", "skills", "review")
 	require.NoError(t, os.MkdirAll(skillDir, 0o755))

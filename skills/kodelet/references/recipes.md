@@ -89,17 +89,7 @@ arguments:
 Instructions for the workflow...
 ```
 
-Disable workflow discovery or subagent use:
-
-```bash
-kodelet run --no-workflows "query"
-kodelet acp --no-workflows
-
-kodelet run --disable-subagent "query"
-kodelet acp --disable-subagent
-```
-
-Config/env equivalents:
+Disable the SDK core-tools subagent tool with config or environment:
 
 ```yaml
 disable_subagent: true
@@ -136,4 +126,3 @@ my-plugin-repo/
 ```
 
 Plugin recipes are prefixed with `org/repo/` to avoid collisions.
-

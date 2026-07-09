@@ -73,9 +73,7 @@ type ServerConfig struct {
 	MaxTokens           int
 	NoSkills            bool
 	NoExtensions        bool
-	NoWorkflows         bool
 	EnableFSSearchTools bool
-	DisableSubagent     bool
 	MaxTurns            int
 	CompactRatio        float64
 }
@@ -129,9 +127,7 @@ func NewServer(opts ...Option) *Server {
 		MaxTokens:           s.config.MaxTokens,
 		NoSkills:            s.config.NoSkills,
 		NoExtensions:        s.config.NoExtensions,
-		NoWorkflows:         s.config.NoWorkflows,
 		EnableFSSearchTools: s.config.EnableFSSearchTools,
-		DisableSubagent:     s.config.DisableSubagent,
 		MaxTurns:            s.config.MaxTurns,
 		CompactRatio:        s.config.CompactRatio,
 	})
@@ -314,10 +310,6 @@ func (s *Server) handleInitialize(req *acptypes.Request) error {
 				Image:           true,
 				Audio:           false,
 				EmbeddedContext: true,
-			},
-			MCPCapabilities: &acptypes.MCPCapabilities{
-				HTTP: true,
-				SSE:  false,
 			},
 			SessionCapabilities: &acptypes.SessionCapabilities{
 				SetMode: false,

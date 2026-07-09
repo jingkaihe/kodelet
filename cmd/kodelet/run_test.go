@@ -461,10 +461,9 @@ func TestFormatFragmentDisplayArgs(t *testing.T) {
 }
 
 func TestCreateRunToolManagers_NoToolsSkipsToolInitialization(t *testing.T) {
-	mcpManager, extensionRuntime, err := createRunToolManagers(context.Background(), &RunConfig{NoTools: true}, "")
+	extensionRuntime, err := createRunToolManagers(context.Background(), &RunConfig{NoTools: true}, "")
 
 	require.NoError(t, err)
-	assert.Nil(t, mcpManager)
 	assert.Nil(t, extensionRuntime)
 }
 
@@ -483,35 +482,9 @@ func TestCreateRunToolManagersSkipsExtensionsWhenDisabled(t *testing.T) {
 		}
 	})
 
-	mcpManager, extensionRuntime, err := createRunToolManagers(context.Background(), &RunConfig{NoMCP: true, NoExtensions: true}, "")
+	extensionRuntime, err := createRunToolManagers(context.Background(), &RunConfig{NoExtensions: true}, "")
 
 	require.NoError(t, err)
-	assert.Nil(t, mcpManager)
-	assert.Nil(t, extensionRuntime)
-}
-
-func TestCreateRunToolManagersTreatsDisabledMCPAsNil(t *testing.T) {
-	originalSettings := viper.AllSettings()
-	originalConfigFile := viper.ConfigFileUsed()
-	viper.Reset()
-	t.Cleanup(func() {
-		viper.Reset()
-		if originalConfigFile != "" {
-			viper.SetConfigFile(originalConfigFile)
-			_ = viper.ReadInConfig()
-		}
-		for key, value := range originalSettings {
-			viper.Set(key, value)
-		}
-	})
-
-	viper.Set("mcp.enabled", false)
-	config := NewRunConfig()
-	config.NoExtensions = true
-	mcpManager, extensionRuntime, err := createRunToolManagers(context.Background(), config, "")
-
-	require.NoError(t, err)
-	assert.Nil(t, mcpManager)
 	assert.Nil(t, extensionRuntime)
 }
 
@@ -612,16 +585,13 @@ func TestGetRunConfigFromFlags(t *testing.T) {
 	cmd.Flags().StringSlice("fragment-dirs", defaults.FragmentDirs, "")
 	cmd.Flags().Bool("include-history", defaults.IncludeHistory, "")
 	cmd.Flags().Bool("no-extensions", defaults.NoExtensions, "")
-	cmd.Flags().Bool("no-mcp", defaults.NoMCP, "")
 	cmd.Flags().Bool("no-tools", defaults.NoTools, "")
 	cmd.Flags().Bool("enable-fs-search-tools", defaults.EnableFSSearchTools, "")
-	cmd.Flags().Bool("disable-subagent", defaults.DisableSubagent, "")
 	cmd.Flags().String("sysprompt", defaults.Sysprompt, "")
 	cmd.Flags().StringToString("sysprompt-arg", defaults.SyspromptArgs, "")
 	cmd.Flags().Bool("result-only", defaults.ResultOnly, "")
 	cmd.Flags().Bool("use-weak-model", defaults.UseWeakModel, "")
 	cmd.Flags().String("account", defaults.Account, "")
-	cmd.Flags().Bool("as-subagent", defaults.AsSubagent, "")
 
 	require.NoError(t, cmd.Flags().Set("resume", "conv-1"))
 	require.NoError(t, cmd.Flags().Set("cwd", " /tmp/project "))
@@ -635,16 +605,13 @@ func TestGetRunConfigFromFlags(t *testing.T) {
 	require.NoError(t, cmd.Flags().Set("fragment-dirs", "recipes,more-recipes"))
 	require.NoError(t, cmd.Flags().Set("include-history", "true"))
 	require.NoError(t, cmd.Flags().Set("no-extensions", "true"))
-	require.NoError(t, cmd.Flags().Set("no-mcp", "true"))
 	require.NoError(t, cmd.Flags().Set("no-tools", "true"))
 	require.NoError(t, cmd.Flags().Set("enable-fs-search-tools", "true"))
-	require.NoError(t, cmd.Flags().Set("disable-subagent", "true"))
 	require.NoError(t, cmd.Flags().Set("sysprompt", "prompt.md"))
 	require.NoError(t, cmd.Flags().Set("sysprompt-arg", "project=kodelet"))
 	require.NoError(t, cmd.Flags().Set("result-only", "true"))
 	require.NoError(t, cmd.Flags().Set("use-weak-model", "true"))
 	require.NoError(t, cmd.Flags().Set("account", "work"))
-	require.NoError(t, cmd.Flags().Set("as-subagent", "true"))
 
 	config := getRunConfigFromFlags(context.Background(), cmd)
 
@@ -660,16 +627,13 @@ func TestGetRunConfigFromFlags(t *testing.T) {
 	assert.Equal(t, []string{"recipes", "more-recipes"}, config.FragmentDirs)
 	assert.True(t, config.IncludeHistory)
 	assert.True(t, config.NoExtensions)
-	assert.True(t, config.NoMCP)
 	assert.True(t, config.NoTools)
 	assert.True(t, config.EnableFSSearchTools)
-	assert.True(t, config.DisableSubagent)
 	assert.Equal(t, "prompt.md", config.Sysprompt)
 	assert.Equal(t, map[string]string{"project": "kodelet"}, config.SyspromptArgs)
 	assert.True(t, config.ResultOnly)
 	assert.True(t, config.UseWeakModel)
 	assert.Equal(t, "work", config.Account)
-	assert.True(t, config.AsSubagent)
 }
 
 type fakeRunThread struct {

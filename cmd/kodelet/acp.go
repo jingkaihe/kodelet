@@ -30,10 +30,7 @@ Example:
 	kodelet acp --no-skills
 
 	# Disable extensions
-	kodelet acp --no-extensions
-
-	# Disable workflows
-	kodelet acp --no-workflows`,
+	kodelet acp --no-extensions`,
 	RunE: runACP,
 }
 
@@ -46,9 +43,7 @@ func init() {
 	acpCmd.Flags().Int("max-tokens", 0, "Maximum tokens for LLM responses")
 	acpCmd.Flags().Bool("no-skills", defaults.NoSkills, "Disable agentic skills")
 	acpCmd.Flags().Bool("no-extensions", defaults.NoExtensions, "Disable extension runtime")
-	acpCmd.Flags().Bool("no-workflows", false, "Disable subagent workflows") // no RunConfig default — ACP-only flag
 	acpCmd.Flags().Bool("enable-fs-search-tools", defaults.EnableFSSearchTools, "Enable filesystem search tools (glob_tool and grep_tool)")
-	acpCmd.Flags().Bool("disable-subagent", false, "Disable the subagent tool and remove subagent-related system prompt context")
 	acpCmd.Flags().Int("max-turns", defaults.MaxTurns, "Maximum number of agentic turns (0 for no limit)")
 }
 
@@ -82,9 +77,7 @@ func buildACPServerConfig(cmd *cobra.Command) (*acp.ServerConfig, error) {
 	maxTokens, _ := cmd.Flags().GetInt("max-tokens")
 	noSkills, _ := cmd.Flags().GetBool("no-skills")
 	noExtensions, _ := cmd.Flags().GetBool("no-extensions")
-	noWorkflows, _ := cmd.Flags().GetBool("no-workflows")
 	enableFSSearchTools, _ := cmd.Flags().GetBool("enable-fs-search-tools")
-	disableSubagent, _ := cmd.Flags().GetBool("disable-subagent")
 	maxTurns, _ := cmd.Flags().GetInt("max-turns")
 	maxTurns = max(maxTurns, 0)
 
@@ -94,9 +87,7 @@ func buildACPServerConfig(cmd *cobra.Command) (*acp.ServerConfig, error) {
 		MaxTokens:           maxTokens,
 		NoSkills:            noSkills,
 		NoExtensions:        noExtensions,
-		NoWorkflows:         noWorkflows,
 		EnableFSSearchTools: enableFSSearchTools || llmConfig.EnableFSSearchTools,
-		DisableSubagent:     disableSubagent || llmConfig.DisableSubagent,
 		MaxTurns:            maxTurns,
 		CompactRatio:        llmConfig.CompactRatio,
 	}

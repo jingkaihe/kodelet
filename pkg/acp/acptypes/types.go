@@ -61,7 +61,6 @@ type Implementation struct {
 type AgentCapabilities struct {
 	LoadSession         bool                 `json:"loadSession,omitempty"`
 	PromptCapabilities  *PromptCapabilities  `json:"promptCapabilities,omitempty"`
-	MCPCapabilities     *MCPCapabilities     `json:"mcpCapabilities,omitempty"`
 	SessionCapabilities *SessionCapabilities `json:"sessionCapabilities,omitempty"`
 	Meta                map[string]any       `json:"_meta,omitempty"`
 }
@@ -71,12 +70,6 @@ type PromptCapabilities struct {
 	Image           bool `json:"image,omitempty"`
 	Audio           bool `json:"audio,omitempty"`
 	EmbeddedContext bool `json:"embeddedContext,omitempty"`
-}
-
-// MCPCapabilities describes MCP transport support
-type MCPCapabilities struct {
-	HTTP bool `json:"http,omitempty"`
-	SSE  bool `json:"sse,omitempty"`
 }
 
 // SessionCapabilities describes session features
@@ -117,52 +110,10 @@ type AuthMethod struct {
 	Type string `json:"type"`
 }
 
-// EnvMap is a custom type that can unmarshal from both map and array formats.
-// It accepts either {"KEY": "VALUE"} or [{"name": "KEY", "value": "VALUE"}].
-type EnvMap map[string]string
-
-// UnmarshalJSON implements custom unmarshaling for EnvMap.
-func (e *EnvMap) UnmarshalJSON(data []byte) error {
-	// Try map format first: {"KEY": "VALUE"}
-	var mapFormat map[string]string
-	if err := json.Unmarshal(data, &mapFormat); err == nil {
-		*e = mapFormat
-		return nil
-	}
-
-	// Try array format: [{"name": "KEY", "value": "VALUE"}]
-	var arrayFormat []struct {
-		Name  string `json:"name"`
-		Value string `json:"value"`
-	}
-	if err := json.Unmarshal(data, &arrayFormat); err != nil {
-		return err
-	}
-
-	result := make(map[string]string)
-	for _, item := range arrayFormat {
-		result[item.Name] = item.Value
-	}
-	*e = result
-	return nil
-}
-
-// MCPServer describes an MCP server provided by the client
-type MCPServer struct {
-	Name       string   `json:"name"`
-	Type       string   `json:"type,omitempty"` // stdio, sse, http (streamable HTTP)
-	Command    string   `json:"command,omitempty"`
-	Args       []string `json:"args,omitempty"`
-	Env        EnvMap   `json:"env,omitempty"`
-	URL        string   `json:"url,omitempty"`
-	AuthHeader string   `json:"authHeader,omitempty"`
-}
-
 // NewSessionRequest creates a new session
 type NewSessionRequest struct {
-	CWD        string         `json:"cwd"`
-	MCPServers []MCPServer    `json:"mcpServers,omitempty"`
-	Meta       map[string]any `json:"_meta,omitempty"`
+	CWD  string         `json:"cwd"`
+	Meta map[string]any `json:"_meta,omitempty"`
 }
 
 // NewSessionResponse returns the new session ID
@@ -180,10 +131,9 @@ type SessionModeState struct {
 
 // LoadSessionRequest loads an existing session
 type LoadSessionRequest struct {
-	SessionID  SessionID      `json:"sessionId"`
-	CWD        string         `json:"cwd"`
-	MCPServers []MCPServer    `json:"mcpServers,omitempty"`
-	Meta       map[string]any `json:"_meta,omitempty"`
+	SessionID SessionID      `json:"sessionId"`
+	CWD       string         `json:"cwd"`
+	Meta      map[string]any `json:"_meta,omitempty"`
 }
 
 // LoadSessionResponse returns the loaded session info

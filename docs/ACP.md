@@ -72,8 +72,6 @@ Kodelet advertises the following ACP capabilities:
 | `loadSession` | Resume previous conversations |
 | `promptCapabilities.image` | Support image inputs |
 | `promptCapabilities.embeddedContext` | Inline file contents |
-| `mcpCapabilities.http` | Connect to streamable HTTP MCP servers |
-
 ## Session Lifecycle
 
 ### Creating a New Session
@@ -169,7 +167,8 @@ All kodelet tools are exposed through ACP tool calls:
 | `glob_tool` | read | Find files by pattern |
 | `web_fetch` | fetch | Fetch web content |
 | `thinking` | think | Extended reasoning |
-| `subagent` | search | Code search agent |
+
+Extensions may register additional tools; those are reported with kind `other` unless they map to a built-in kind.
 
 ## Session Persistence
 

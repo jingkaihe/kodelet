@@ -131,7 +131,6 @@ func (h *ACPMessageHandler) HandleToolUse(toolCallID string, toolName string, in
 // - file_read: Resource content with file URI and mime type
 // - file_write: Diff with null oldText (new file)
 // - file_edit: Diff with oldText and newText
-// - subagent: Question and response as text content
 func (h *ACPMessageHandler) HandleToolResult(toolCallID string, _ string, result tooltypes.ToolResult) {
 	status := acptypes.ToolStatusCompleted
 	if result.IsError() {
@@ -307,8 +306,6 @@ func ToACPToolKind(toolName string) acptypes.ToolKind {
 		return acptypes.ToolKindRead
 	case "thinking":
 		return acptypes.ToolKindThink
-	case "subagent":
-		return acptypes.ToolKindSearch
 	default:
 		return acptypes.ToolKindOther
 	}
@@ -397,12 +394,6 @@ func (g *DefaultTitleGenerator) GenerateTitle(toolName string, input string) str
 	case "web_fetch":
 		if url, ok := params["url"].(string); ok {
 			title = fmt.Sprintf("Fetch: %s", url)
-		}
-	case "subagent":
-		if workflow, ok := params["workflow"].(string); ok && workflow != "" {
-			title = fmt.Sprintf("Subagent: %s", workflow)
-		} else if question, ok := params["question"].(string); ok {
-			title = fmt.Sprintf("Subagent: %s", question)
 		}
 	case "view_image":
 		if path, ok := params["path"].(string); ok {

@@ -35,8 +35,6 @@ func (g *ToolContentGenerator) GenerateToolContent(result tooltypes.ToolResult) 
 		return g.generateFileEditContent(structured)
 	case "apply_patch":
 		return g.generateApplyPatchContent(structured)
-	case "subagent":
-		return g.generateSubAgentContent(structured)
 	case "view_image":
 		return g.generateViewImageContent(structured)
 	case "grep_tool", "glob_tool":
@@ -279,62 +277,6 @@ func (g *ToolContentGenerator) generateApplyPatchContent(structured tooltypes.St
 
 	if len(content) == 0 {
 		return g.generateTextContent("No files were modified.")
-	}
-
-	return content
-}
-
-// generateSubAgentContent generates content for subagent results
-func (g *ToolContentGenerator) generateSubAgentContent(structured tooltypes.StructuredToolResult) []map[string]any {
-	var meta tooltypes.SubAgentMetadata
-	if !tooltypes.ExtractMetadata(structured.Metadata, &meta) {
-		return g.generateTextContent(structured.Error)
-	}
-
-	if structured.Error != "" {
-		return g.generateTextContent(fmt.Sprintf("Subagent error: %s", structured.Error))
-	}
-
-	content := []map[string]any{}
-
-	if meta.Workflow != "" {
-		content = append(content, map[string]any{
-			"type": ToolCallContentTypeContent,
-			"content": map[string]any{
-				"type": acptypes.ContentTypeText,
-				"text": fmt.Sprintf("Workflow: %s", meta.Workflow),
-			},
-		})
-	}
-
-	if meta.Cwd != "" {
-		content = append(content, map[string]any{
-			"type": ToolCallContentTypeContent,
-			"content": map[string]any{
-				"type": acptypes.ContentTypeText,
-				"text": fmt.Sprintf("Directory: %s", meta.Cwd),
-			},
-		})
-	}
-
-	if meta.Question != "" {
-		content = append(content, map[string]any{
-			"type": ToolCallContentTypeContent,
-			"content": map[string]any{
-				"type": acptypes.ContentTypeText,
-				"text": fmt.Sprintf("Question: %s", meta.Question),
-			},
-		})
-	}
-
-	if meta.Response != "" {
-		content = append(content, map[string]any{
-			"type": ToolCallContentTypeContent,
-			"content": map[string]any{
-				"type": acptypes.ContentTypeText,
-				"text": meta.Response,
-			},
-		})
 	}
 
 	return content

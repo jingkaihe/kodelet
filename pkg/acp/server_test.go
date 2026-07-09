@@ -404,9 +404,7 @@ func TestServer_WithConfigStoresServerConfig(t *testing.T) {
 		MaxTokens:           1024,
 		NoSkills:            true,
 		NoExtensions:        true,
-		NoWorkflows:         true,
 		EnableFSSearchTools: true,
-		DisableSubagent:     true,
 		MaxTurns:            3,
 		CompactRatio:        0.4,
 	}
@@ -943,7 +941,7 @@ func TestServer_ExtensionCommandsAreAvailableForSession(t *testing.T) {
 		WithInput(bytes.NewBuffer(nil)),
 		WithOutput(io.Discard),
 		WithContext(context.Background()),
-		WithConfig(&ServerConfig{Provider: "anthropic", Model: "claude-test", NoSkills: true, NoWorkflows: true, DisableSubagent: true}),
+		WithConfig(&ServerConfig{Provider: "anthropic", Model: "claude-test", NoSkills: true}),
 	)
 	t.Cleanup(func() { server.Shutdown() })
 	sess, err := server.sessionManager.NewSession(context.Background(), acptypes.NewSessionRequest{CWD: workspace})
@@ -964,7 +962,7 @@ func TestServer_ExtensionRespondCommandBypassesAgent(t *testing.T) {
 		WithInput(bytes.NewBuffer(nil)),
 		WithOutput(output),
 		WithContext(context.Background()),
-		WithConfig(&ServerConfig{Provider: "anthropic", Model: "claude-test", NoSkills: true, NoWorkflows: true, DisableSubagent: true}),
+		WithConfig(&ServerConfig{Provider: "anthropic", Model: "claude-test", NoSkills: true}),
 	)
 	t.Cleanup(func() { server.Shutdown() })
 	server.initialized.Store(true)
@@ -1010,7 +1008,7 @@ func TestServer_ExtensionRunAgentCommandTransformsPrompt(t *testing.T) {
 		WithInput(bytes.NewBuffer(nil)),
 		WithOutput(io.Discard),
 		WithContext(context.Background()),
-		WithConfig(&ServerConfig{Provider: "anthropic", Model: "claude-test", NoSkills: true, NoWorkflows: true, DisableSubagent: true}),
+		WithConfig(&ServerConfig{Provider: "anthropic", Model: "claude-test", NoSkills: true}),
 	)
 	t.Cleanup(func() { server.Shutdown() })
 	sess, err := server.sessionManager.NewSession(context.Background(), acptypes.NewSessionRequest{CWD: workspace})

@@ -19,7 +19,6 @@ import (
 type mockState struct{}
 
 func (m *mockState) BasicTools() []tooltypes.Tool        { return nil }
-func (m *mockState) MCPTools() []tooltypes.Tool          { return nil }
 func (m *mockState) Tools() []tooltypes.Tool             { return nil }
 func (m *mockState) DiscoverContexts() map[string]string { return nil }
 func (m *mockState) GetLLMConfig() any                   { return nil }

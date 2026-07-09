@@ -180,7 +180,6 @@ func (m BlockedMetadata) ToolType() string { return "blocked" }
 // State defines the interface for managing tool execution state and context
 type State interface {
 	BasicTools() []Tool
-	MCPTools() []Tool
 	Tools() []Tool
 
 	// Context discovery

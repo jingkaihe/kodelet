@@ -363,14 +363,14 @@ async def run_acp_prompt(
             # Load or create session
             if session_id and can_load_session:
                 try:
-                    await conn.load_session(session_id=session_id, cwd=os.getcwd(), mcp_servers=[])
+                    await conn.load_session(session_id=session_id, cwd=os.getcwd())
                     await asyncio.sleep(0)  # Yield to let history callbacks complete
                     result_session_id = session_id
                 except Exception:
-                    session = await conn.new_session(cwd=os.getcwd(), mcp_servers=[])
+                    session = await conn.new_session(cwd=os.getcwd())
                     result_session_id = session.session_id
             else:
-                session = await conn.new_session(cwd=os.getcwd(), mcp_servers=[])
+                session = await conn.new_session(cwd=os.getcwd())
                 result_session_id = session.session_id
 
             # Build prompt and stream response
@@ -564,7 +564,7 @@ async def load_history_via_acp(session_id: str) -> list[dict]:
             init_resp = await conn.initialize(protocol_version=PROTOCOL_VERSION, client_capabilities={})
             if not supports_load_session(init_resp):
                 return []
-            await conn.load_session(session_id=session_id, cwd=os.getcwd(), mcp_servers=[])
+            await conn.load_session(session_id=session_id, cwd=os.getcwd())
             await asyncio.sleep(0)  # Yield to ensure all callbacks complete
             if current_msg:
                 messages.append(current_msg)

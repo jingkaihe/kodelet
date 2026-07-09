@@ -414,7 +414,7 @@ func TestWebSlashCommandRestrictionsApplyBeforeBuildingState(t *testing.T) {
 	assert.Equal(t, []string{"bash"}, config.AllowedTools)
 	assert.Equal(t, []string{"git status"}, config.AllowedCommands)
 
-	state, err := BuildState(context.Background(), config, "session-1", t.TempDir(), nil, nil)
+	state, err := BuildState(context.Background(), config, "session-1", t.TempDir(), nil)
 	require.NoError(t, err)
 
 	var toolNames []string

@@ -2520,7 +2520,7 @@ func TestProcessMessageExchangeRetriesFromToolResultAfterLocalToolExecution(t *t
 		},
 		storedItems: []StoredInputItem{{Type: "message", Role: "user", Content: "hello"}},
 	}
-	thread.SetState(tools.NewBasicState(context.Background(), tools.WithExtraMCPTools([]tooltypes.Tool{responsesTestTool{name: "ok_tool"}})))
+	thread.SetState(tools.NewBasicState(context.Background(), tools.WithExtensionTools([]tooltypes.Tool{responsesTestTool{name: "ok_tool"}})))
 
 	attempts := 0
 	var inputLengths []int

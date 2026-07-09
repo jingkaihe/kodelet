@@ -11,7 +11,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/logger"
-	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -46,7 +45,6 @@ func init() {
 	viper.SetDefault("anthropic_api_access", "auto")
 	viper.SetDefault("compact_ratio", llmtypes.DefaultCompactRatio)
 
-	viper.SetDefault("mcp", map[string]tools.MCPConfig{})
 	viper.SetDefault("extensions.enabled", true)
 	viper.SetDefault("extensions.global_dir", "~/.kodelet/extensions")
 	viper.SetDefault("extensions.local_dir", "./.kodelet/extensions")
@@ -178,10 +176,8 @@ func main() {
 	rootCmd.PersistentFlags().String("anthropic-api-access", "auto", "Anthropic API access mode (auto, subscription, api-key)")
 	rootCmd.PersistentFlags().String("profile", "", "Configuration profile to use (overrides config file)")
 	rootCmd.PersistentFlags().Bool("no-skills", false, "Disable agentic skills")
-	rootCmd.PersistentFlags().Bool("no-workflows", false, "Disable subagent workflows")
 	rootCmd.PersistentFlags().Bool("enable-fs-search-tools", false, "Enable filesystem search tools (glob_tool and grep_tool)")
 	rootCmd.PersistentFlags().String("conversation-summary-mode", "llm", "Conversation summary mode (llm, first_message)")
-	rootCmd.PersistentFlags().Bool("disable-subagent", false, "Disable the subagent tool and remove subagent-related system prompt context")
 	rootCmd.PersistentFlags().StringSlice("context-patterns", []string{"AGENTS.md"}, "Context file patterns to load (e.g. 'AGENTS.md,README.md')")
 	rootCmd.PersistentFlags().Float64("compact-ratio", llmtypes.DefaultCompactRatio, "Context window utilization ratio to trigger auto-compact (>0.0-1.0)")
 
@@ -205,10 +201,8 @@ func main() {
 	viper.BindPFlag("anthropic_api_access", rootCmd.PersistentFlags().Lookup("anthropic-api-access"))
 	viper.BindPFlag("profile", rootCmd.PersistentFlags().Lookup("profile"))
 	viper.BindPFlag("no_skills", rootCmd.PersistentFlags().Lookup("no-skills"))
-	viper.BindPFlag("no_workflows", rootCmd.PersistentFlags().Lookup("no-workflows"))
 	viper.BindPFlag("enable_fs_search_tools", rootCmd.PersistentFlags().Lookup("enable-fs-search-tools"))
 	viper.BindPFlag("conversation_summary_mode", rootCmd.PersistentFlags().Lookup("conversation-summary-mode"))
-	viper.BindPFlag("disable_subagent", rootCmd.PersistentFlags().Lookup("disable-subagent"))
 	viper.BindPFlag("context.patterns", rootCmd.PersistentFlags().Lookup("context-patterns"))
 	viper.BindPFlag("compact_ratio", rootCmd.PersistentFlags().Lookup("compact-ratio"))
 

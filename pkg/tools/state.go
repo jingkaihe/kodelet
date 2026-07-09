@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/skills"
@@ -30,7 +29,6 @@ type BasicState struct {
 	mu             sync.RWMutex
 	workingDir     string
 	tools          []tooltypes.Tool
-	mcpTools       []tooltypes.Tool
 	extensionTools []tooltypes.Tool
 	llmConfig      llmtypes.Config
 
@@ -186,22 +184,6 @@ func NewBasicState(ctx context.Context, opts ...BasicStateOption) *BasicState {
 	return state
 }
 
-// WithSubAgentToolsFromConfig returns an option that configures sub-agent tools using the state's llmConfig
-// This is used when running kodelet with --as-subagent flag
-func WithSubAgentToolsFromConfig() BasicStateOption {
-	return func(ctx context.Context, s *BasicState) error {
-		var allowedTools []string
-		if s.llmConfig.AllowedTools != nil {
-			allowedTools = s.llmConfig.AllowedTools
-		}
-		allowedTools = enforceToolMode(allowedTools, s.llmConfig.ToolMode, defaultSubAgentTools)
-		s.tools = GetSubAgentToolsWithOptions(ctx, allowedTools, s.llmConfig.EnableFSSearchTools)
-		s.tools = enforceToolModeOnResolvedTools(s.tools, allowedTools, s.llmConfig.ToolMode)
-		s.configureTools()
-		return nil
-	}
-}
-
 // WithMainTools returns an option that configures main tools
 func WithMainTools() BasicStateOption {
 	return func(ctx context.Context, s *BasicState) error {
@@ -212,44 +194,10 @@ func WithMainTools() BasicStateOption {
 		allowedTools = enforceToolMode(allowedTools, s.llmConfig.ToolMode, defaultMainTools)
 		s.tools = GetMainToolsWithOptions(ctx, allowedTools, s.llmConfig.EnableFSSearchTools)
 		s.tools = enforceToolModeOnResolvedTools(s.tools, allowedTools, s.llmConfig.ToolMode)
-		if s.llmConfig.DisableSubagent {
-			s.tools = filterOutSubagent(s.tools)
-		}
 		if !skillsEnabledForConfig(s.llmConfig) {
 			s.tools = filterOutSkill(s.tools)
 		}
 		s.configureTools()
-		return nil
-	}
-}
-
-// WithMCPTools returns an option that configures MCP tools
-func WithMCPTools(mcpManager *MCPManager) BasicStateOption {
-	return func(ctx context.Context, s *BasicState) error {
-		if noToolsConfigured(s.llmConfig) || mcpManager == nil {
-			return nil
-		}
-		tools, err := mcpManager.ListMCPTools(ctx)
-		if err != nil {
-			return err
-		}
-		for _, tool := range tools {
-			if len(filterDiscoveredToolsByAllowed(s.llmConfig, []tooltypes.Tool{&tool})) == 0 {
-				continue
-			}
-			s.mcpTools = append(s.mcpTools, &tool)
-		}
-		return nil
-	}
-}
-
-// WithExtraMCPTools returns an option that adds extra MCP tools
-func WithExtraMCPTools(tools []tooltypes.Tool) BasicStateOption {
-	return func(_ context.Context, s *BasicState) error {
-		if noToolsConfigured(s.llmConfig) {
-			return nil
-		}
-		s.mcpTools = append(s.mcpTools, filterDiscoveredToolsByAllowed(s.llmConfig, tools)...)
 		return nil
 	}
 }
@@ -366,59 +314,6 @@ func discoverSkills(ctx context.Context, llmConfig llmtypes.Config) map[string]*
 	return allSkills
 }
 
-// WithSubAgentTool returns an option that configures the subagent tool with discovered workflows
-func WithSubAgentTool() BasicStateOption {
-	return func(ctx context.Context, s *BasicState) error {
-		if noToolsConfigured(s.llmConfig) || s.llmConfig.DisableSubagent {
-			s.tools = filterOutSubagent(s.tools)
-			return nil
-		}
-		if hasExplicitAllowedTools(s.llmConfig) {
-			allowed := allowedToolNameSet(s.llmConfig)
-			if _, ok := allowed["subagent"]; !ok {
-				s.tools = filterOutSubagent(s.tools)
-				return nil
-			}
-		}
-		discoveredWorkflows := discoverWorkflows(ctx)
-		subagentTool := NewSubAgentTool(discoveredWorkflows, len(discoveredWorkflows) > 0, s.llmConfig.EnableFSSearchTools)
-		for i, tool := range s.tools {
-			if tool.Name() == "subagent" {
-				s.tools[i] = subagentTool
-				return nil
-			}
-		}
-		s.tools = append(s.tools, subagentTool)
-		return nil
-	}
-}
-
-// discoverWorkflows discovers available workflow fragments for the subagent tool
-func discoverWorkflows(ctx context.Context) map[string]*fragments.Fragment {
-	processor, err := fragments.NewFragmentProcessor()
-	if err != nil {
-		logger.G(ctx).WithError(err).Debug("Failed to create fragment processor for workflow discovery")
-		return nil
-	}
-
-	frags, err := processor.ListFragmentsWithMetadata()
-	if err != nil {
-		logger.G(ctx).WithError(err).Debug("Failed to list fragments for workflow discovery")
-		return nil
-	}
-
-	workflows := make(map[string]*fragments.Fragment)
-	for _, frag := range frags {
-		// Only include fragments explicitly marked as workflows
-		if frag.Metadata.Workflow {
-			workflows[frag.ID] = frag
-		}
-	}
-
-	logger.G(ctx).WithField("count", len(workflows)).Debug("Discovered workflows for subagent")
-	return workflows
-}
-
 func enforceToolMode(allowedTools []string, toolMode llmtypes.ToolMode, defaultTools []string) []string {
 	if !toolMode.IsPatchMode() {
 		return allowedTools
@@ -525,13 +420,6 @@ func (s *BasicState) BasicTools() []tooltypes.Tool {
 	return s.tools
 }
 
-// MCPTools returns the list of MCP tools
-func (s *BasicState) MCPTools() []tooltypes.Tool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.mcpTools
-}
-
 // ExtensionTools returns the list of extension-provided tools.
 func (s *BasicState) ExtensionTools() []tooltypes.Tool {
 	s.mu.RLock()
@@ -543,10 +431,9 @@ func (s *BasicState) ExtensionTools() []tooltypes.Tool {
 func (s *BasicState) Tools() []tooltypes.Tool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	tools := make([]tooltypes.Tool, 0, len(s.tools)+len(s.mcpTools)+len(s.extensionTools))
+	tools := make([]tooltypes.Tool, 0, len(s.tools)+len(s.extensionTools))
 	reserved := map[string]struct{}{}
 	tools = append(tools, filterDuplicateTools(s.tools, reserved)...)
-	tools = append(tools, filterDuplicateTools(s.mcpTools, reserved)...)
 	tools = append(tools, filterDuplicateTools(s.extensionTools, reserved)...)
 	return tools
 }
@@ -567,7 +454,6 @@ func (s *BasicState) WorkingDirectory() string {
 
 func (s *BasicState) configureTools() {
 	s.tools = s.configureToolSlice(s.tools)
-	s.mcpTools = s.configureToolSlice(s.mcpTools)
 }
 
 func (s *BasicState) configureToolSlice(tools []tooltypes.Tool) []tooltypes.Tool {

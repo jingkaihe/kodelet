@@ -203,8 +203,8 @@ allowed_domains_file: "~/.kodelet/allowed_domains.txt"
 # Tools allowed for main agent (empty means use defaults)
 # Meta tools (grep_tool and glob_tool) are only available when
 # enable_fs_search_tools is set to true.
-# Available tools: bash, apply_patch, file_read, file_write, file_edit, subagent, grep_tool,
-#                  glob_tool, web_fetch, view_image
+# Available built-in tools: bash, apply_patch, file_read, file_write, file_edit,
+#                  grep_tool, glob_tool, web_fetch, view_image
 # Tool interaction mode.
 # - full: standard tool access
 # - patch: removes file_read, file_write, and file_edit from both main-agent and subagent
@@ -231,7 +231,6 @@ allowed_tools: []
 #   - "file_read"
 #   - "file_write"
 #   - "file_edit"
-#   - "subagent"
 #   - "grep_tool"      # Always enabled (meta tool)
 #   - "glob_tool"      # Always enabled (meta tool)
 #   - "web_fetch"
@@ -307,8 +306,8 @@ openai:
   #   # ... additional models
 
 # Subagent Configuration
-# Subagents are spawned as separate processes using shell-out pattern.
-# Configure subagent behavior using CLI arguments passed to the subprocess.
+# The subagent tool is provided by the SDK core-tools extension.
+# Configure subagent behavior using arguments consumed by that extension.
 #
 # subagent_args: CLI arguments to pass when spawning subagents
 # Common patterns:
@@ -349,10 +348,7 @@ subagent_args: ""
 # subagent_args: "--profile cheap-openai"
 
 # Disable Subagent
-# When set to true, the subagent tool is removed from available tools and
-# subagent-related context is excluded from the system prompt.
-# Other tools like web_fetch remain available.
-# Can also be set via the --disable-subagent CLI flag or per-profile.
+# When set to true, the SDK core-tools extension does not register the subagent tool.
 # disable_subagent: true
 #
 # Enable Filesystem Search Tools
@@ -361,11 +357,6 @@ subagent_args: ""
 # fd and rg via the bash tool instead.
 # Can also be set via the --enable-fs-search-tools CLI flag or per-profile.
 # enable_fs_search_tools: true
-# Example: Profile with subagent disabled
-# profiles:
-#   no-subagent:
-#     disable_subagent: true
-
 # Extensions Configuration
 # Kodelet can discover long-running extension executables from standalone
 # directories plus plugin directories like ./.kodelet/plugins/<org@repo>/extensions
@@ -458,7 +449,7 @@ tracing:
 # - KODELET_RETRY_BACKOFF_TYPE: Overrides the retry.backoff_type setting (fixed, exponential)
 # - KODELET_ALLOWED_COMMANDS: Comma-separated list of allowed command patterns
 # - KODELET_ALLOWED_TOOLS: Comma-separated list of allowed tools for main agent
-# - KODELET_DISABLE_SUBAGENT: Disables the subagent tool and related system prompt context (true/false)
+# - KODELET_DISABLE_SUBAGENT: Prevents the SDK core-tools extension from registering the subagent tool (true/false)
 # - KODELET_CONTEXT_PATTERNS: Comma-separated list of context file patterns (e.g., "AGENTS.md,README.md")
 # - KODELET_TRACING_ENABLED: Enables/disables tracing
 # - KODELET_TRACING_SAMPLER: Sets the sampling strategy
@@ -479,6 +470,7 @@ tracing:
 # - OTEL_RESOURCE_ATTRIBUTES: Additional resource attributes to include
 
 # MCP (Model Context Protocol) Configuration
+# MCP tools are registered by the SDK core-tools extension, not by the Go core.
 mcp:
   # Enable/disable MCP tools globally (default: true when not specified)
   # Set to false to completely disable MCP

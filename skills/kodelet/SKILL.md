@@ -57,7 +57,7 @@ kodelet serve
 - Context files: Kodelet automatically loads `AGENTS.md`; bootstrap one with `kodelet run -r init`.
 - Recipes/fragments: User-invoked prompt templates in `./recipes/` or `~/.kodelet/recipes/`; list with `kodelet recipe list`, inspect with `kodelet recipe show <name>`, run with `kodelet run -r <name>`.
 - Skills: Model-invoked domain guidance in `.kodelet/skills/<name>/SKILL.md`, plugins, or global skill dirs; disable with `--no-skills`.
-- Workflows/subagents: Recipes with `workflow: true` can be delegated through the subagent tool; disable with `--no-workflows` or `--disable-subagent`.
+- Workflows/subagents: Recipes with `workflow: true` can be delegated through the SDK core-tools subagent extension; disable extension tools with `--no-extensions`.
 - Extensions: Long-running subprocesses can register model tools, prompt commands/dynamic recipes, and lifecycle event handlers; inspect with `kodelet extension list` and disable with `--no-extensions`.
 - Plugins: Install bundled skills, recipes, and extensions with `kodelet plugin add org/repo`; inspect with `kodelet plugin list` and `kodelet plugin show org/repo`.
 - Conversations: Use `kodelet conversation list/show/stream/delete/fork` for persisted runs.

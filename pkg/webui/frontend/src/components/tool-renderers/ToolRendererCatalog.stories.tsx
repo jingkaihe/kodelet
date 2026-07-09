@@ -206,25 +206,6 @@ const examples: ToolExample[] = [
     },
   },
   {
-    title: 'MCP tool',
-    result: {
-      toolName: 'mcp__storybook__list_stories',
-      success: true,
-      metadata: {
-        mcpToolName: 'list_stories',
-        serverName: 'storybook',
-        parameters: { group: 'Chat' },
-        content: [
-          {
-            type: 'text',
-            text: 'ChatComposer, ChatSidebar, ChatTranscript',
-          },
-        ],
-        executionTime: 0.18,
-      },
-    },
-  },
-  {
     title: 'Skill',
     result: {
       toolName: 'skill',
@@ -232,19 +213,6 @@ const examples: ToolExample[] = [
       metadata: {
         skillName: 'storybook-ui',
         directory: '.kodelet/skills/storybook-ui',
-      },
-    },
-  },
-  {
-    title: 'Subagent',
-    result: {
-      toolName: 'subagent',
-      success: true,
-      metadata: {
-        workflow: 'component audit',
-        cwd: '/home/jingkaihe/workspace/kodelet',
-        question: 'Find UI pieces that are still hard to story.',
-        response: 'TerminalModal mixes presentation with xterm and websocket setup.',
       },
     },
   },

@@ -22,18 +22,3 @@ func TestACPRespectsProfileEnableFSSearchTools(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, config.EnableFSSearchTools)
 }
-
-func TestACPRespectsProfileDisableSubagent(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	viper.Set("profile", "openai")
-	viper.Set("profiles", map[string]any{
-		"openai": map[string]any{
-			"disable_subagent": true,
-		},
-	})
-
-	config, err := buildACPServerConfig(acpCmd)
-	require.NoError(t, err)
-	assert.True(t, config.DisableSubagent)
-}

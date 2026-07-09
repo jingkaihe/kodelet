@@ -117,7 +117,7 @@ kodelet acp --no-extensions
 
 ## MCP integration
 
-Configure Model Context Protocol servers in `config.yaml`:
+Configure Model Context Protocol servers in `config.yaml`. MCP tools are registered by the SDK core-tools extension when extensions are enabled:
 
 ```yaml
 mcp:

@@ -280,7 +280,7 @@ func TestAnthropicProcessMessageExchangeUsesManualPromptCaching(t *testing.T) {
 	thread.SetMetadataValue(goals.MetadataKey, goals.New("find server cores and ram", time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)))
 	thread.SetState(tools.NewBasicState(
 		context.Background(),
-		tools.WithExtraMCPTools([]tooltypes.Tool{testTool{name: "first_tool"}, testTool{name: "second_tool"}}),
+		tools.WithExtensionTools([]tooltypes.Tool{testTool{name: "first_tool"}, testTool{name: "second_tool"}}),
 	))
 
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
@@ -812,7 +812,7 @@ func TestExecuteToolsParallelStreamsAndOrdersResults(t *testing.T) {
 	state := tools.NewBasicState(
 		context.Background(),
 		tools.WithLLMConfig(llmtypes.Config{AllowedTools: []string{"first_tool", "second_tool"}}),
-		tools.WithExtraMCPTools([]tooltypes.Tool{testTool{name: "first_tool"}, testTool{name: "second_tool"}}),
+		tools.WithExtensionTools([]tooltypes.Tool{testTool{name: "first_tool"}, testTool{name: "second_tool"}}),
 	)
 	thread := &Thread{
 		Thread: base.NewThread(llmtypes.Config{}, "conv-test"),

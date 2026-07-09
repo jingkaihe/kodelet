@@ -36,7 +36,6 @@ var toolRegistry = map[string]tooltypes.Tool{
 	"file_write":        &FileWriteTool{},
 	"file_edit":         &FileEditTool{},
 	"read_conversation": NewReadConversationTool(),
-	"subagent":          NewSubAgentTool(nil, false, false),
 	"grep_tool":         &GrepTool{},
 	"glob_tool":         &GlobTool{},
 	"web_fetch":         &WebFetchTool{},
@@ -77,7 +76,6 @@ var defaultMainTools = []string{
 	"file_write",
 	"file_edit",
 	"read_conversation",
-	"subagent",
 	"grep_tool",
 	"glob_tool",
 	"web_fetch",
@@ -87,34 +85,11 @@ var defaultMainTools = []string{
 	"skill",
 }
 
-// defaultSubAgentTools are the default tools for subagent
-var defaultSubAgentTools = []string{
-	"bash",
-	"file_write",
-	"file_edit",
-	"read_conversation",
-	"grep_tool",
-	"glob_tool",
-	"web_fetch",
-}
-
 // getAvailableToolNames returns a list of all available tool names
 func getAvailableToolNames() []string {
 	var tools []string
 	for toolName := range toolRegistry {
 		tools = append(tools, toolName)
-	}
-	tools = append(tools, virtualToolNames...)
-	return tools
-}
-
-// getAvailableSubAgentToolNames returns a list of available tool names for subagents (excluding subagent tool)
-func getAvailableSubAgentToolNames() []string {
-	var tools []string
-	for toolName := range toolRegistry {
-		if toolName != "subagent" {
-			tools = append(tools, toolName)
-		}
 	}
 	tools = append(tools, virtualToolNames...)
 	return tools
@@ -141,41 +116,6 @@ func ValidateTools(toolNames []string) error {
 			return errors.Errorf("unknown tool: %s\nAvailable tools: %s", unknownTools[0], strings.Join(availableTools, ", "))
 		}
 		return errors.Errorf("unknown tools: %s\nAvailable tools: %s", strings.Join(unknownTools, ", "), strings.Join(availableTools, ", "))
-	}
-	return nil
-}
-
-// ValidateSubAgentTools validates that all sub-agent tool names are available
-func ValidateSubAgentTools(toolNames []string) error {
-	var invalidTools []string
-	var subagentToolFound bool
-
-	for _, toolName := range toolNames {
-		if toolName == "subagent" {
-			subagentToolFound = true
-			invalidTools = append(invalidTools, toolName)
-		} else if isVirtualToolName(toolName) {
-			continue
-		} else if _, exists := toolRegistry[toolName]; !exists {
-			invalidTools = append(invalidTools, toolName)
-		}
-	}
-
-	if len(invalidTools) > 0 {
-		availableTools := getAvailableSubAgentToolNames()
-
-		if subagentToolFound && len(invalidTools) == 1 {
-			return errors.Errorf("subagent tool cannot be used by subagent to prevent infinite recursion\nAvailable tools: %s", strings.Join(availableTools, ", "))
-		}
-
-		if subagentToolFound {
-			return errors.Errorf("invalid tools: %s (subagent tool cannot be used by subagent to prevent infinite recursion)\nAvailable tools: %s", strings.Join(invalidTools, ", "), strings.Join(availableTools, ", "))
-		}
-
-		if len(invalidTools) == 1 {
-			return errors.Errorf("unknown tool: %s\nAvailable tools: %s", invalidTools[0], strings.Join(availableTools, ", "))
-		}
-		return errors.Errorf("unknown tools: %s\nAvailable tools: %s", strings.Join(invalidTools, ", "), strings.Join(availableTools, ", "))
 	}
 	return nil
 }
@@ -294,53 +234,6 @@ func GetMainToolsWithOptions(ctx context.Context, allowedTools []string, enableF
 	}
 
 	return getMainToolsFromNamesWithOptions(allowedTools, enableFSSearchTools)
-}
-
-// GetSubAgentTools returns the tools available for sub-agents
-func GetSubAgentTools(ctx context.Context, allowedTools []string) []tooltypes.Tool {
-	return GetSubAgentToolsWithOptions(ctx, allowedTools, false)
-}
-
-// GetSubAgentToolsWithOptions returns the sub-agent tools with feature toggles applied.
-func GetSubAgentToolsWithOptions(ctx context.Context, allowedTools []string, enableFSSearchTools bool) []tooltypes.Tool {
-	explicitAllowlist := len(allowedTools) > 0
-	if !enableFSSearchTools {
-		allowedTools = filterOutFSSearchTools(allowedTools)
-	}
-	if len(allowedTools) == 1 && allowedTools[0] == NoToolsMarker {
-		return nil
-	}
-
-	if len(allowedTools) == 0 {
-		if !explicitAllowlist {
-			allowedTools = append([]string{}, defaultSubAgentTools...)
-		}
-	}
-
-	if !enableFSSearchTools {
-		allowedTools = filterOutFSSearchTools(allowedTools)
-	}
-
-	if err := ValidateSubAgentTools(allowedTools); err != nil {
-		logger.G(ctx).WithError(err).Warn("Invalid subagent tool configuration, falling back to defaults")
-		allowedTools = append([]string{}, defaultSubAgentTools...)
-		if !enableFSSearchTools {
-			allowedTools = filterOutFSSearchTools(allowedTools)
-		}
-	}
-
-	return getToolsFromNamesWithOptions(allowedTools, enableFSSearchTools)
-}
-
-// filterOutSubagent removes the subagent tool from a tool list
-func filterOutSubagent(tools []tooltypes.Tool) []tooltypes.Tool {
-	filtered := make([]tooltypes.Tool, 0, len(tools))
-	for _, t := range tools {
-		if t.Name() != "subagent" {
-			filtered = append(filtered, t)
-		}
-	}
-	return filtered
 }
 
 var tracer = telemetry.Tracer("kodelet.tools")

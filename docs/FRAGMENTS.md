@@ -285,18 +285,6 @@ When workflows are enabled, the subagent tool's description includes available w
 
 The `question` parameter becomes optional when a workflow is specified - the workflow's predefined instructions are used instead.
 
-#### Disabling Workflows
-
-You can disable workflow support for security or debugging:
-
-```bash
-# Disable workflows for run command
-kodelet run --no-workflows "query"
-
-# Disable workflows for ACP mode
-kodelet acp --no-workflows
-```
-
 #### When to Create a Workflow
 
 Create a workflow when:

@@ -305,7 +305,7 @@ func (r *Runtime) DispatchEvent(ctx context.Context, event Event) (EventResult, 
 func (r *Runtime) Shutdown(ctx context.Context) error
 ```
 
-An `ExtensionTool` implements the existing `tooltypes.Tool` interface so extension tools can join the normal tool list alongside built-ins and MCP tools.
+An `ExtensionTool` implements the existing `tooltypes.Tool` interface so extension tools can join the normal tool list alongside built-ins.
 
 ## JSON-RPC protocol
 
@@ -914,7 +914,7 @@ The SDK is part of the core implementation, not follow-up polish. Without it, th
 
 Implement `ExtensionTool` as `tooltypes.Tool`.
 
-Wire extension tools into state construction alongside existing built-in and MCP tools.
+Wire extension tools into state construction alongside existing built-in tools.
 
 Add structured metadata and renderer fallback for `extension_tool`.
 

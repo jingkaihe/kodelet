@@ -38,8 +38,8 @@ Please create a {{if eq .draft "true"}}draft {{end}}pull request following the s
 - Break down the changes into a few bullet points
 
 5. Create a pull request against the target branch {{.target}}:
-- **MUST USE** the 'mcp_create_pull_request' MCP tool if it is available in your tool list
-- The 'mcp_create_pull_request' tool requires: owner, repo, title, body, head (current branch), base (target branch){{if eq .draft "true"}}
+- **MUST USE** a GitHub MCP create-pull-request tool if it is available in your tool list (for example, an extension tool named like `mcp__github_create_pull_request`)
+- The MCP create-pull-request tool requires: owner, repo, title, body, head (current branch), base (target branch){{if eq .draft "true"}}
 - **IMPORTANT**: Create this pull request as a DRAFT by setting the draft parameter to true when using the MCP tool{{end}}
 - Only use 'gh pr create ...' bash command as a last resort fallback if the MCP tool is not available{{if eq .draft "true"}}
 - If using gh CLI as fallback, add the '--draft' flag to create a draft pull request{{end}}
