@@ -61,20 +61,6 @@ profiles:
     tool_mode: patch
     enable_fs_search_tools: false
 
-  openai-subagent:
-    provider: openai
-    model: gpt-5.5
-    reasoning_effort: high
-    tool_mode: patch
-    enable_fs_search_tools: false
-    openai:
-      api_mode: responses
-
-  hybrid:
-    provider: anthropic
-    model: sonnet-46
-    weak_model: haiku-45
-    subagent_args: "--profile openai-subagent"
 ```
 
 Profiles are useful for switching model/provider/tool-mode combinations. Note that profile switching may be constrained by provider compatibility in a given command flow.
@@ -117,7 +103,7 @@ kodelet acp --no-extensions
 
 ## MCP integration
 
-Configure Model Context Protocol servers in `config.yaml`. MCP tools are registered by the SDK core-tools extension when extensions are enabled:
+Configure Model Context Protocol servers in `config.yaml`. MCP tools are registered by the SDK builtin extension when extensions are enabled:
 
 ```yaml
 mcp:

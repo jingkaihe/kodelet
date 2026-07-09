@@ -51,7 +51,7 @@ For user documentation, see the [User Manual](MANUAL.md).
    export OPENAI_API_KEY="sk-..."
    ```
 
-5. (Optional) Set up MCP tools configuration for the SDK core-tools extension:
+5. (Optional) Set up MCP tools configuration for the SDK builtin extension:
    ```bash
    # Copy the sample configuration to configure MCP extension tools
    cp ./kodelet-config.sample.yaml ./kodelet-config.yaml

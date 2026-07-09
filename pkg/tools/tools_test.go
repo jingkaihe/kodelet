@@ -272,18 +272,6 @@ func TestFileReadExcludedFromDefaults(t *testing.T) {
 	})
 }
 
-func TestGetMainTools_ExcludesSubagentTool(t *testing.T) {
-	// Subagent is provided by the SDK core-tools extension, not the Go registry.
-	tools := GetMainTools(context.Background(), []string{})
-
-	toolNames := make([]string, len(tools))
-	for i, tool := range tools {
-		toolNames[i] = tool.Name()
-	}
-
-	assert.NotContains(t, toolNames, "subagent", "Main tools should not include the extension-provided subagent tool")
-}
-
 func TestGetMainToolsWithOptions_FSSearchToolsDisabled(t *testing.T) {
 	t.Run("removes grep and glob from default main tools and meta tools", func(t *testing.T) {
 		tools := GetMainToolsWithOptions(context.Background(), nil, false)

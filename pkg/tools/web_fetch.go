@@ -464,7 +464,7 @@ IMPORTANT: Make sure that you preserve all the links in the content including hy
 	// Note: query is passed via stdin, not as an argument, to avoid CLI length limits
 	args := []string{"run", "--result-only", "--no-save", "--no-extensions", "--no-skills", "--use-weak-model", "--no-tools"}
 
-	// Execute the subagent with full prompt passed via stdin
+	// Execute the helper run with full prompt passed via stdin
 	cmd := exec.CommandContext(ctx, exe, args...)
 	cmd.Stdin = strings.NewReader(extractionPrompt)
 

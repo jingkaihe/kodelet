@@ -221,8 +221,6 @@ func (t *GrepTool) Description() string {
 - fixed_strings: If true, treat pattern as a literal string instead of regex. Useful when searching for strings containing special characters like "foo.bar()" or "[test]".
 - surround_lines: Number of lines to show before and after each match for context. Default is 0 (no context lines).
 - max_results: Number of files to return results from (1-%d). Default and maximum is %d. Use a smaller value to reduce output size when searching large codebases.
-
-If you need to do multi-turn search using grep_tool and glob_tool, use subagentTool instead.
 `, grepMaxSearchResults, grepMaxSearchResults, grepMaxSearchResults)
 }
 

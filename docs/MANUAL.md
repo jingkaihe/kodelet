@@ -830,23 +830,6 @@ profiles:
     openai:
       platform: copilot
 
-  mix-n-match:
-    # Main agent uses Claude
-    provider: "anthropic"
-    model: "claude-sonnet-4-6"
-    weak_model: "claude-haiku-4-5-20251001"
-    max_tokens: 16000
-    # Subagent uses OpenAI profile for cross-provider support
-    subagent_args: "--profile openai-subagent"
-
-  # Subagent profile for mix-n-match (cross-provider example)
-  openai-subagent:
-    provider: "openai"
-    model: "o3"
-    reasoning_effort: "high"
-    tool_mode: "patch"
-    enable_fs_search_tools: false
-
 # Model aliases work across all profiles
 aliases:
     fable-5: claude-fable-5
@@ -1623,10 +1606,6 @@ To run without skills for a single session:
 ```bash
 kodelet run --no-skills "your query"
 ```
-
-### Subagent Tool
-
-The subagent tool is provided by the SDK core-tools extension. To disable extension-provided tools for a single run, use `--no-extensions`; to disable only the SDK subagent tool, set `disable_subagent: true` in configuration or `KODELET_DISABLE_SUBAGENT=true` in the environment.
 
 ### Enabling Filesystem Search Tools
 

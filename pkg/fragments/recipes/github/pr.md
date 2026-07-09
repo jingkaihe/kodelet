@@ -1,7 +1,6 @@
 ---
 name: GitHub Pull Request Generator
 description: Creates pull request based on branch changes
-workflow: true
 arguments:
   target:
     description: Target branch to merge into

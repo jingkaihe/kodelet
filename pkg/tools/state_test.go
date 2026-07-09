@@ -456,17 +456,6 @@ func TestNewBasicState_ErrorHandling(t *testing.T) {
 func TestWithMainTools(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("excludes extension-provided subagent tool from core tools", func(t *testing.T) {
-		state := NewBasicState(ctx, WithMainTools())
-
-		toolNames := make([]string, len(state.Tools()))
-		for i, tool := range state.Tools() {
-			toolNames[i] = tool.Name()
-		}
-
-		assert.NotContains(t, toolNames, "subagent", "subagent is provided by the SDK core-tools extension")
-	})
-
 	t.Run("respects allowed_tools from config", func(t *testing.T) {
 		config := llmtypes.Config{
 			AllowedTools: []string{"bash", "file_read"},
