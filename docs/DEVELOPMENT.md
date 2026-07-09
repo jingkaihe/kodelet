@@ -51,13 +51,16 @@ For user documentation, see the [User Manual](MANUAL.md).
    export OPENAI_API_KEY="sk-..."
    ```
 
-5. (Optional) Set up MCP tools configuration for the SDK builtin extension:
+5. (Optional) Set up MCP tools configuration for the SDK MCP extension:
    ```bash
-   # Copy the sample configuration to configure MCP extension tools
-   cp ./kodelet-config.sample.yaml ./kodelet-config.yaml
+   cat > ./mcp.json <<'JSON'
+   {
+     "mcpServers": {}
+   }
+   JSON
    ```
 
-   Adjust the configuration in `kodelet-config.yaml` based on your requirements and usage. In most cases you don't want to enable all the tools as it will bloat the context window.
+   Add MCP servers to `mcp.json` based on your requirements and usage. In most cases you don't want to enable all the tools as it will bloat the context window.
 
 That's it! mise automatically manages all tool versions and ensures everyone on the team uses the same versions of Go, Node.js, npm, and other development tools.
 

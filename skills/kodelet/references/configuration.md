@@ -103,29 +103,28 @@ kodelet acp --no-extensions
 
 ## MCP integration
 
-Configure Model Context Protocol servers in `config.yaml`. MCP tools are registered by the SDK builtin extension when extensions are enabled:
+Configure Model Context Protocol servers in `./mcp.json` or `~/.kodelet/mcp.json`. MCP tools are registered by the SDK MCP extension when extensions are enabled. The file uses the standard `mcpServers` JSON shape:
 
-```yaml
-mcp:
-  oauth:
-    # OAuth for remote HTTP/SSE servers is auto-detected from 401 Bearer
-    # challenges. No auth.type flag is required.
-    interactive: "auto" # auto | always | never
-    open_browser: true
-    callback_timeout: "2m"
-  servers:
-    fs:
-      command: "npx"
-      args: ["-y", "@modelcontextprotocol/server-filesystem", "/path"]
-      tool_white_list: ["list_directory"]
-    remote:
-      server_type: "http"
-      base_url: "https://example.com/mcp"
-      # Optional OAuth hints only; OAuth itself is challenge-discovered.
-      oauth:
-        client_id: "${MCP_CLIENT_ID}"
-        scopes: ["mcp.read"]
+```json
+{
+  "mcpServers": {
+    "fs": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path"],
+      "tool_white_list": ["list_directory"]
+    },
+    "remote": {
+      "type": "http",
+      "url": "https://example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer token"
+      }
+    }
+  }
+}
 ```
+
+The standard MCP JSON fields are `command`, `args`, and `env` for stdio servers. Kodelet also accepts `url`, `type` (`http` or `sse`), `headers`, and `tool_white_list` for remote servers/tool filtering. The current SDK MCP extension supports static headers for remote authentication; it does not currently implement an interactive OAuth flow.
 
 ## Command and tool restrictions
 

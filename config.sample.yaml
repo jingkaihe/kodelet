@@ -406,59 +406,6 @@ tracing:
 # - OTEL_EXPORTER_OTLP_HEADERS: Headers to use when sending telemetry data (for auth)
 # - OTEL_RESOURCE_ATTRIBUTES: Additional resource attributes to include
 
-# MCP (Model Context Protocol) Configuration
-# MCP tools are registered by the SDK builtin extension, not by the Go core.
-mcp:
-  # Enable/disable MCP tools globally (default: true when not specified)
-  # Set to false to completely disable MCP
-  enabled: true
-
-  # OAuth settings for remote HTTP/SSE MCP servers. OAuth is auto-detected
-  # from HTTP 401 Bearer challenges and does not require an auth.type flag.
-  oauth:
-    # Allow browser-based OAuth when a remote MCP server requests it.
-    # Set to "never" for headless/CI runs that should fail fast instead.
-    interactive: "auto"
-
-    # Attempt to open the default browser automatically. If false, Kodelet
-    # prints the authorization URL for manual opening.
-    open_browser: true
-
-    # Maximum time to wait for the local OAuth callback.
-    callback_timeout: "2m"
-
-  # MCP servers configuration
-  # Each server can be stdio, streamable HTTP, or deprecated SSE based.
-  # If server_type is omitted, servers with url default to streamable HTTP;
-  # deprecated SSE servers must set server_type: "sse" explicitly.
-  servers:
-    # Example stdio server (uncomment to enable)
-    # filesystem:
-    #   command: "npx"
-    #   args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/directory"]
-
-    # Example streamable HTTP server (uncomment to enable)
-    # example-http:
-    #   server_type: "http"  # optional when url is set
-    #   url: "https://example.com/mcp"
-    #   # Optional static headers are still supported for API-key/bearer-token servers.
-    #   headers:
-    #     Authorization: "Bearer ${MCP_TOKEN}"
-    #   # Optional OAuth hints for providers that need pre-registered clients or
-    #   # non-standard discovery. These do not enable OAuth; OAuth is discovered
-    #   # automatically from the server challenge.
-    #   oauth:
-    #     client_id: "${MCP_CLIENT_ID}"
-    #     client_secret: "${MCP_CLIENT_SECRET}"
-    #     scopes: ["mcp.read", "mcp.write"]
-    #     redirect_uri: "http://127.0.0.1:1456/mcp/oauth/callback"
-    #     auth_server_metadata_url: "https://auth.example.com/.well-known/oauth-authorization-server"
-    #   tool_white_list: ["tool1", "tool2"]
-
-    # Example deprecated SSE server (uncomment to enable)
-    # example-sse:
-    #   server_type: "sse"
-    #   url: "https://example.com/sse"
-    #   headers:
-    #     Authorization: "Bearer ${MCP_TOKEN}"
-    #   tool_white_list: ["tool1", "tool2"]
+# MCP (Model Context Protocol) servers are configured outside the core Kodelet
+# config. The SDK MCP extension reads standard `mcpServers` JSON from either
+# `./mcp.json` or `~/.kodelet/mcp.json`.

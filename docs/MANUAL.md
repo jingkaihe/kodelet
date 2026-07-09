@@ -712,41 +712,41 @@ tool_mode: full
 # - llm: generate a short summary with the weak model
 # - first_message: use the first user message directly
 conversation_summary_mode: llm
-
-# MCP configuration
-mcp:
-  oauth:
-    # Remote HTTP/SSE MCP OAuth is auto-detected from HTTP 401 Bearer
-    # challenges. Set interactive to "never" for headless/CI runs that should
-    # fail fast instead of opening a browser.
-    interactive: "auto" # auto | always | never
-    open_browser: true
-    callback_timeout: "2m"
-
-  servers:
-    fs:
-      command: "npx" # Command to execute for stdio server
-      args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/files"]
-      tool_white_list: ["list_directory"] # Optional tool white list
-    some_http_server: # streamable HTTP config
-      server_type: "http" # Optional when url is set; this is the default URL transport
-      url: "https://example.com/mcp" # URL for streamable HTTP server
-      headers: # Headers for HTTP requests
-        Authorization: "Bearer token"
-      oauth: # Optional OAuth hints; OAuth itself is discovered automatically
-        client_id: "${MCP_CLIENT_ID}"
-        client_secret: "${MCP_CLIENT_SECRET}"
-        scopes: ["mcp.read", "mcp.write"]
-        redirect_uri: "http://127.0.0.1:1456/mcp/oauth/callback"
-        auth_server_metadata_url: "https://auth.example.com/.well-known/oauth-authorization-server"
-      tool_white_list: ["tool1", "tool2"] # Optional tool white list
-    some_sse_server: # deprecated SSE config
-      server_type: "sse"
-      url: "http://localhost:8000/sse" # URL for SSE server
-      headers:
-        Authorization: "Bearer token"
-      tool_white_list: ["tool1", "tool2"]
 ```
+
+MCP servers are configured separately from `config.yaml`. The SDK MCP extension reads the standard `mcpServers` JSON shape from `./mcp.json` and `~/.kodelet/mcp.json`; repository config overrides global config by server name.
+
+Example `mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "fs": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/files"],
+      "tool_white_list": ["list_directory"]
+    },
+    "some_http_server": {
+      "type": "http",
+      "url": "https://example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer token"
+      },
+      "tool_white_list": ["tool1", "tool2"]
+    },
+    "some_sse_server": {
+      "type": "sse",
+      "url": "http://localhost:8000/sse",
+      "headers": {
+        "Authorization": "Bearer token"
+      },
+      "tool_white_list": ["tool1", "tool2"]
+    }
+  }
+}
+```
+
+The standard MCP JSON fields are `command`, `args`, and `env` for stdio servers. Kodelet also accepts `url`, `type` (`http` or `sse`), `headers`, and `tool_white_list` for remote servers/tool filtering. The current SDK MCP extension supports static headers for remote authentication; it does not currently implement an interactive OAuth flow.
 
 ### Command Line Flags
 
