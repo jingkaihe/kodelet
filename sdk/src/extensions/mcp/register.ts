@@ -109,7 +109,7 @@ function buildTransport(
       const provider = oauthProvider ?? new KodeletMCPOAuthProvider({ serverName, serverUrl: config.url, config: config.oauth, globalConfig: globalOAuth });
       return { transport: new SSEClientTransport(new URL(config.url), {
         authProvider: provider,
-        requestInit: { headers: config.headers },
+        requestInit: { headers: resolveConfigValues(config.headers) },
       }), oauthProvider: provider };
     }
     case "http": {
@@ -119,7 +119,7 @@ function buildTransport(
       const provider = oauthProvider ?? new KodeletMCPOAuthProvider({ serverName, serverUrl: config.url, config: config.oauth, globalConfig: globalOAuth });
       return { transport: new StreamableHTTPClientTransport(new URL(config.url), {
         authProvider: provider,
-        requestInit: { headers: config.headers },
+        requestInit: { headers: resolveConfigValues(config.headers) },
       }), oauthProvider: provider };
     }
   }
@@ -148,14 +148,22 @@ function normalizeServerType(config: MCPServerConfig): "stdio" | "sse" | "http" 
 }
 
 function resolveEnv(envs: Record<string, string> | undefined): Record<string, string> | undefined {
-  if (!envs) {
+  return resolveConfigValues(envs);
+}
+
+function resolveConfigValues(values: Record<string, string> | undefined): Record<string, string> | undefined {
+  if (!values) {
     return undefined;
   }
   const resolved: Record<string, string> = {};
-  for (const [key, value] of Object.entries(envs)) {
-    resolved[key] = value.startsWith("$") ? (process.env[value.slice(1)] ?? "") : value;
+  for (const [key, value] of Object.entries(values)) {
+    resolved[key] = expandEnvValue(value);
   }
   return resolved;
+}
+
+function expandEnvValue(value: string): string {
+  return value.replace(/\$\{([^}]+)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (_match, braced: string | undefined, bare: string | undefined) => process.env[braced ?? bare ?? ""] ?? "");
 }
 
 async function registerServerTools(ext: ExtensionAPI, server: ConnectedServer): Promise<void> {

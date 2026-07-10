@@ -37,7 +37,9 @@ export interface MCPConfig {
   mcpServers?: Record<string, MCPServerConfig>;
 }
 
-export async function loadMCPConfig(cwd = process.cwd()): Promise<MCPConfig> {
+const workspaceCWDEnvKey = "KODELET_EXTENSION_WORKSPACE_CWD";
+
+export async function loadMCPConfig(cwd = defaultMCPConfigCWD()): Promise<MCPConfig> {
   const merged: MCPConfig = {};
   const home = process.env.HOME || process.env.USERPROFILE;
   if (home) {
@@ -45,6 +47,10 @@ export async function loadMCPConfig(cwd = process.cwd()): Promise<MCPConfig> {
   }
   mergeConfig(merged, await readJsonIfExists(path.join(cwd, "mcp.json")));
   return merged;
+}
+
+function defaultMCPConfigCWD(): string {
+  return process.env[workspaceCWDEnvKey] || process.cwd();
 }
 
 async function readJsonIfExists(filePath: string): Promise<Record<string, unknown> | undefined> {

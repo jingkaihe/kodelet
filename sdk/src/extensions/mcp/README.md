@@ -102,13 +102,13 @@ Standard stdio server fields:
 
 - `command`: executable to launch.
 - `args`: arguments passed to the executable.
-- `env`: environment variables for the server process.
+- `env`: environment variables for the server process. String values support `$VAR` and `${VAR}` environment expansion.
 
 Kodelet extension fields:
 
 - `type`: `stdio`, `http`, or `sse`. If omitted, servers with `url` default to `http`; otherwise they default to `stdio`.
 - `url`: remote HTTP/SSE MCP server URL.
-- `headers`: static headers for remote HTTP/SSE transports.
+- `headers`: headers for remote HTTP/SSE transports. String values support `$VAR` and `${VAR}` environment expansion.
 - `tool_white_list`: optional list of MCP tool names to expose. If omitted, all server tools are exposed.
 - `oauth`: per-server OAuth hints for remote HTTP/SSE servers.
 

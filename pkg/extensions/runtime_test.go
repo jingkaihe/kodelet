@@ -62,6 +62,32 @@ func TestRuntimeInitializesExtensionAndExecutesRegisteredTool(t *testing.T) {
 	assert.Equal(t, "celsius", metadata.Data["unit"])
 }
 
+func TestRuntimePassesWorkingDirToExtensionProcessEnvironment(t *testing.T) {
+	rootDir := t.TempDir()
+	extDir := filepath.Join(rootDir, "env")
+	writeExecutable(t, filepath.Join(extDir, "kodelet-extension-env"), helperEnvExtensionScript(t))
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	t.Setenv(workspaceCWDEnvKey, "/stale/workspace")
+
+	runtime, err := NewRuntime(
+		context.Background(),
+		WithConfig(DefaultConfig()),
+		WithWorkingDir(rootDir),
+		WithRoots(Root{Dir: rootDir, Kind: SourceKindLocalStandalone}),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, runtime.Close()) })
+
+	tools := runtime.Tools()
+	require.Len(t, tools, 1)
+	assert.Equal(t, "workspace_cwd", tools[0].Name())
+
+	result := tools[0].Execute(context.Background(), nil, `{}`)
+
+	assert.False(t, result.IsError())
+	assert.Equal(t, rootDir, result.GetResult())
+}
+
 func TestRuntimeExtensionToolCanRequestUIInput(t *testing.T) {
 	rootDir := t.TempDir()
 	extDir := filepath.Join(rootDir, "ask")
@@ -442,6 +468,14 @@ func TestCommandOnlyExtensionHelperProcess(t *testing.T) {
 	os.Exit(0)
 }
 
+func TestEnvExtensionHelperProcess(t *testing.T) {
+	if os.Getenv("KODELET_TEST_ENV_EXTENSION_HELPER") != "1" {
+		return
+	}
+	runEnvExtensionHelperProcess()
+	os.Exit(0)
+}
+
 func helperExtensionScript(t *testing.T) string {
 	t.Helper()
 	executable, err := os.Executable()
@@ -454,6 +488,51 @@ func helperCommandOnlyExtensionScript(t *testing.T) string {
 	executable, err := os.Executable()
 	require.NoError(t, err)
 	return fmt.Sprintf("#!/bin/sh\nKODELET_TEST_COMMAND_EXTENSION_HELPER=1 exec %q -test.run TestCommandOnlyExtensionHelperProcess --\n", executable)
+}
+
+func helperEnvExtensionScript(t *testing.T) string {
+	t.Helper()
+	executable, err := os.Executable()
+	require.NoError(t, err)
+	return fmt.Sprintf("#!/bin/sh\nKODELET_TEST_ENV_EXTENSION_HELPER=1 exec %q -test.run TestEnvExtensionHelperProcess --\n", executable)
+}
+
+func runEnvExtensionHelperProcess() {
+	workspaceCWD := os.Getenv(workspaceCWDEnvKey)
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		payload, err := readFrame(reader)
+		if err != nil {
+			return
+		}
+
+		var request struct {
+			ID     int64  `json:"id"`
+			Method string `json:"method"`
+		}
+		if err := json.Unmarshal(payload, &request); err != nil {
+			writeHelperResponse(request.ID, nil, &rpcError{Code: -32700, Message: err.Error()})
+			continue
+		}
+
+		switch request.Method {
+		case "extension.initialize":
+			writeHelperResponse(request.ID, InitializeResult{
+				Name: "env",
+				Tools: []ToolRegistration{{
+					Name:        "workspace_cwd",
+					Description: "report workspace cwd",
+					InputSchema: map[string]any{"type": "object"},
+				}},
+			}, nil)
+		case "extension.tool.execute":
+			writeHelperResponse(request.ID, ToolExecutionResult{Content: workspaceCWD}, nil)
+		case "extension.event.handle":
+			writeHelperResponse(request.ID, EventResult{}, nil)
+		default:
+			writeHelperResponse(request.ID, nil, &rpcError{Code: -32601, Message: "method not found"})
+		}
+	}
 }
 
 func runCommandOnlyExtensionHelperProcess() {

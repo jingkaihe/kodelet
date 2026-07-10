@@ -5,8 +5,7 @@ import { registerMCP } from "./register.js";
 export default defineExtension(async (ext) => {
   ext.setMetadata({ name: "kodelet-mcp" });
 
-  const cwd = process.cwd();
-  const config = await loadMCPConfig(cwd);
+  const config = await loadMCPConfig();
 
   await registerMCP(ext, config);
 });
