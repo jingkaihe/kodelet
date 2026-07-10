@@ -406,6 +406,6 @@ tracing:
 # - OTEL_EXPORTER_OTLP_HEADERS: Headers to use when sending telemetry data (for auth)
 # - OTEL_RESOURCE_ATTRIBUTES: Additional resource attributes to include
 
-# MCP (Model Context Protocol) servers are configured outside the core Kodelet
-# config. The SDK MCP extension reads standard `mcpServers` JSON from either
-# `./mcp.json` or `~/.kodelet/mcp.json`.
+# MCP (Model Context Protocol) servers are not configured in the core Kodelet
+# config. The SDK MCP extension reads `./mcp.json` or `~/.kodelet/mcp.json`.
+# See `sdk/src/extensions/mcp/README.md`.

@@ -714,39 +714,7 @@ tool_mode: full
 conversation_summary_mode: llm
 ```
 
-MCP servers are configured separately from `config.yaml`. The SDK MCP extension reads the standard `mcpServers` JSON shape from `./mcp.json` and `~/.kodelet/mcp.json`; repository config overrides global config by server name.
-
-Example `mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "fs": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/files"],
-      "tool_white_list": ["list_directory"]
-    },
-    "some_http_server": {
-      "type": "http",
-      "url": "https://example.com/mcp",
-      "headers": {
-        "Authorization": "Bearer token"
-      },
-      "tool_white_list": ["tool1", "tool2"]
-    },
-    "some_sse_server": {
-      "type": "sse",
-      "url": "http://localhost:8000/sse",
-      "headers": {
-        "Authorization": "Bearer token"
-      },
-      "tool_white_list": ["tool1", "tool2"]
-    }
-  }
-}
-```
-
-The standard MCP JSON fields are `command`, `args`, and `env` for stdio servers. Kodelet also accepts `url`, `type` (`http` or `sse`), `headers`, and `tool_white_list` for remote servers/tool filtering. The current SDK MCP extension supports static headers for remote authentication; it does not currently implement an interactive OAuth flow.
+MCP servers are configured outside Kodelet's core `config.yaml`. MCP is provided by the SDK MCP extension, which reads `./mcp.json` and `~/.kodelet/mcp.json`. See the [SDK MCP extension README](../sdk/src/extensions/mcp/README.md) for local installation, `mcp.json` examples, remote HTTP/SSE, OAuth, and tool filtering.
 
 ### Command Line Flags
 

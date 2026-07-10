@@ -60,7 +60,7 @@ For user documentation, see the [User Manual](MANUAL.md).
    JSON
    ```
 
-   Add MCP servers to `mcp.json` based on your requirements and usage. In most cases you don't want to enable all the tools as it will bloat the context window.
+   Add MCP servers to `mcp.json` based on your requirements and usage. In most cases you don't want to enable all the tools as it will bloat the context window. For local source installation and complete MCP extension configuration, see [`sdk/src/extensions/mcp/README.md`](../sdk/src/extensions/mcp/README.md).
 
 That's it! mise automatically manages all tool versions and ensures everyone on the team uses the same versions of Go, Node.js, npm, and other development tools.
 

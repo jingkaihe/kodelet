@@ -101,31 +101,6 @@ kodelet run --no-extensions "query"
 kodelet acp --no-extensions
 ```
 
-## MCP integration
-
-Configure Model Context Protocol servers in `./mcp.json` or `~/.kodelet/mcp.json`. MCP tools are registered by the SDK MCP extension when extensions are enabled. The file uses the standard `mcpServers` JSON shape:
-
-```json
-{
-  "mcpServers": {
-    "fs": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path"],
-      "tool_white_list": ["list_directory"]
-    },
-    "remote": {
-      "type": "http",
-      "url": "https://example.com/mcp",
-      "headers": {
-        "Authorization": "Bearer token"
-      }
-    }
-  }
-}
-```
-
-The standard MCP JSON fields are `command`, `args`, and `env` for stdio servers. Kodelet also accepts `url`, `type` (`http` or `sse`), `headers`, and `tool_white_list` for remote servers/tool filtering. The current SDK MCP extension supports static headers for remote authentication; it does not currently implement an interactive OAuth flow.
-
 ## Command and tool restrictions
 
 Restrict bash commands:
