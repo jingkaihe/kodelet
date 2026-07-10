@@ -207,8 +207,14 @@ function normalizeServerType(config: MCPServerConfig): "stdio" | "sse" | "http" 
   throw new Error(`invalid server type: ${config.type ?? config.server_type}`);
 }
 
-function resolveEnv(envs: Record<string, string> | undefined): Record<string, string> | undefined {
-  return resolveConfigValues(envs);
+function resolveEnv(envs: Record<string, string> | undefined): Record<string, string> {
+  const resolved: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined) {
+      resolved[key] = value;
+    }
+  }
+  return { ...resolved, ...resolveConfigValues(envs) };
 }
 
 function resolveConfigValues(values: Record<string, string> | undefined): Record<string, string> | undefined {
@@ -227,7 +233,7 @@ function expandEnvValue(value: string): string {
 }
 
 async function registerServerTools(ext: ExtensionAPI, server: ConnectedServer): Promise<void> {
-  const result = await server.client.listTools();
+  const result = await requestWithAuthorization(server, () => server.client.listTools());
   for (const tool of result.tools) {
     if (!toolWhiteListed(tool, server.whiteList)) {
       continue;
@@ -268,9 +274,13 @@ async function registerServerTools(ext: ExtensionAPI, server: ConnectedServer): 
 }
 
 async function callServerTool(server: ConnectedServer, toolName: string, input: Record<string, unknown>) {
+  return await requestWithAuthorization(server, () => requestServerTool(server, toolName, input));
+}
+
+async function requestWithAuthorization<Result>(server: ConnectedServer, request: () => Promise<Result>): Promise<Result> {
   const authorizationGeneration = server.authorizationGeneration;
   try {
-    return await requestServerTool(server, toolName, input);
+    return await request();
   } catch (error) {
     if (!server.oauthProvider || !supportsFinishAuth(server.transport) || !isUnauthorizedError(error)) {
       throw error;
@@ -280,7 +290,7 @@ async function callServerTool(server: ConnectedServer, toolName: string, input: 
     } else if (server.authorization) {
       await server.authorization;
     }
-    return await requestServerTool(server, toolName, input);
+    return await request();
   }
 }
 

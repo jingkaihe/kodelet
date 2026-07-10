@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -67,23 +68,119 @@ func TestRPCClientCallHandlesErrorResponseAndUnexpectedID(t *testing.T) {
 }
 
 func TestRPCClientCallHandlesHostRequestBeforeResponse(t *testing.T) {
-	var outbound bytes.Buffer
-	var inbound bytes.Buffer
-	require.NoError(t, writeFrame(&inbound, []byte(`{"jsonrpc":"2.0","id":7,"method":"kodelet.ui.input","params":{"title":"Choose"}}`)))
-	require.NoError(t, writeFrame(&inbound, []byte(`{"jsonrpc":"2.0","id":1,"result":{"content":"done"}}`)))
-
-	client := newRPCClient(&inbound, &outbound)
+	clientReader, serverWriter := io.Pipe()
+	serverReader, clientWriter := io.Pipe()
+	t.Cleanup(func() {
+		_ = clientReader.Close()
+		_ = serverWriter.Close()
+		_ = serverReader.Close()
+		_ = clientWriter.Close()
+	})
+	client := newRPCClient(clientReader, clientWriter)
 	var result ToolExecutionResult
-	err := client.callWithHostHandler(context.Background(), "extension.tool.execute", nil, &result, testHostRequestHandler{})
+	callDone := make(chan error, 1)
+	go func() {
+		callDone <- client.callWithHostHandler(context.Background(), "extension.tool.execute", nil, &result, testHostRequestHandler{})
+	}()
 
+	outbound := bufio.NewReader(serverReader)
+	requestPayload, err := readFrame(outbound)
 	require.NoError(t, err)
+	var request rpcRequest
+	require.NoError(t, json.Unmarshal(requestPayload, &request))
+	require.NoError(t, writeFrame(serverWriter, []byte(`{"jsonrpc":"2.0","id":7,"method":"kodelet.ui.input","params":{"title":"Choose"}}`)))
+
+	hostResponsePayload, err := readFrame(outbound)
+	require.NoError(t, err)
+	var hostResponse rpcResponse
+	require.NoError(t, json.Unmarshal(hostResponsePayload, &hostResponse))
+	assert.Equal(t, int64(7), hostResponse.ID)
+	assert.JSONEq(t, `{"status":"submitted","value":"2"}`, string(hostResponse.Result))
+
+	responsePayload, err := json.Marshal(rpcResponse{JSONRPC: "2.0", ID: request.ID, Result: json.RawMessage(`{"content":"done"}`)})
+	require.NoError(t, err)
+	require.NoError(t, writeFrame(serverWriter, responsePayload))
+
+	require.NoError(t, <-callDone)
 	assert.Equal(t, "done", result.Content)
-	frames := readAllTestFrames(t, outbound.Bytes())
-	require.Len(t, frames, 2)
-	var response rpcResponse
-	require.NoError(t, json.Unmarshal(frames[1], &response))
-	assert.Equal(t, int64(7), response.ID)
-	assert.JSONEq(t, `{"status":"submitted","value":"2"}`, string(response.Result))
+}
+
+func TestRPCClientCallsRunConcurrentlyAndRouteHostRequests(t *testing.T) {
+	clientReader, serverWriter := io.Pipe()
+	serverReader, clientWriter := io.Pipe()
+	t.Cleanup(func() {
+		_ = clientReader.Close()
+		_ = serverWriter.Close()
+		_ = serverReader.Close()
+		_ = clientWriter.Close()
+	})
+	client := newRPCClient(clientReader, clientWriter)
+	type callResult struct {
+		label   string
+		content string
+		err     error
+	}
+	results := make(chan callResult, 2)
+	for _, label := range []string{"first", "second"} {
+		go func() {
+			ctx := context.WithValue(context.Background(), rpcCallContextKey{}, label)
+			var result ToolExecutionResult
+			err := client.callWithHostHandler(
+				ctx,
+				"extension.tool.execute",
+				map[string]string{"label": label},
+				&result,
+				contextHostRequestHandler{},
+			)
+			results <- callResult{label: label, content: result.Content, err: err}
+		}()
+	}
+
+	outbound := bufio.NewReader(serverReader)
+	requestIDs := make(map[string]int64, 2)
+	for range 2 {
+		payload, err := readFrame(outbound)
+		require.NoError(t, err)
+		var request struct {
+			ID     int64 `json:"id"`
+			Params struct {
+				Label string `json:"label"`
+			} `json:"params"`
+		}
+		require.NoError(t, json.Unmarshal(payload, &request))
+		requestIDs[request.Params.Label] = request.ID
+	}
+	require.NotZero(t, requestIDs["first"])
+	require.NotZero(t, requestIDs["second"])
+
+	hostRequest := []byte(`{"jsonrpc":"2.0","id":77,"parentId":` + strconv.FormatInt(requestIDs["second"], 10) + `,"method":"kodelet.ui.input","params":{"title":"Choose"}}`)
+	require.NoError(t, writeFrame(serverWriter, hostRequest))
+	hostResponsePayload, err := readFrame(outbound)
+	require.NoError(t, err)
+	var hostResponse rpcResponse
+	require.NoError(t, json.Unmarshal(hostResponsePayload, &hostResponse))
+	assert.Equal(t, int64(77), hostResponse.ID)
+	assert.JSONEq(t, `{"status":"submitted","value":"second"}`, string(hostResponse.Result))
+
+	for _, label := range []string{"second", "first"} {
+		responsePayload, err := json.Marshal(rpcResponse{
+			JSONRPC: "2.0",
+			ID:      requestIDs[label],
+			Result:  json.RawMessage(`{"content":` + strconv.Quote(label+" done") + `}`),
+		})
+		require.NoError(t, err)
+		require.NoError(t, writeFrame(serverWriter, responsePayload))
+	}
+
+	got := make(map[string]callResult, 2)
+	for range 2 {
+		result := <-results
+		got[result.label] = result
+	}
+	require.NoError(t, got["first"].err)
+	require.NoError(t, got["second"].err)
+	assert.Equal(t, "first done", got["first"].content)
+	assert.Equal(t, "second done", got["second"].content)
 }
 
 type testHostRequestHandler struct{}
@@ -100,6 +197,18 @@ func (testHostRequestHandler) HandleRPCRequest(_ context.Context, method string,
 		return nil, &rpcError{Code: -32602, Message: "bad title"}
 	}
 	return UIInputResponse{Status: UIInputStatusSubmitted, Value: "2"}, nil
+}
+
+type rpcCallContextKey struct{}
+
+type contextHostRequestHandler struct{}
+
+func (contextHostRequestHandler) HandleRPCRequest(ctx context.Context, method string, _ json.RawMessage) (any, *rpcError) {
+	if method != "kodelet.ui.input" {
+		return nil, &rpcError{Code: -32601, Message: "not found"}
+	}
+	value, _ := ctx.Value(rpcCallContextKey{}).(string)
+	return UIInputResponse{Status: UIInputStatusSubmitted, Value: value}, nil
 }
 
 func TestReadFrameValidationErrors(t *testing.T) {

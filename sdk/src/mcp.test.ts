@@ -172,7 +172,7 @@ process.stdin.on('data', (chunk) => {
         'x-mcp-extension': { enabled: true }
       } }] };
     } else if (request.method === 'tools/call') {
-      result = { content: [{ type: 'text', text: JSON.stringify({ cwd: process.cwd(), bare: process.env.FROM_BARE, braced: process.env.FROM_BRACED, mixed: process.env.FROM_MIXED }) }] };
+      result = { content: [{ type: 'text', text: JSON.stringify({ cwd: process.cwd(), inherited: process.env.MCP_TEST_ENV_VALUE, bare: process.env.FROM_BARE, braced: process.env.FROM_BRACED, mixed: process.env.FROM_MIXED }) }] };
     }
     process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }) + '\\n');
   }
@@ -218,7 +218,7 @@ process.stdin.on('data', (chunk) => {
         "x-mcp-extension": { enabled: true },
       });
       const result = await host.executeTool({ name: "mcp__workspace_ping", input: {}, context: { cwd: workspace } });
-      assert.equal(result.content, JSON.stringify({ cwd: workspace, bare: "expanded-value", braced: "expanded-value", mixed: "prefix-expanded-value-suffix" }));
+      assert.equal(result.content, JSON.stringify({ cwd: workspace, inherited: "expanded-value", bare: "expanded-value", braced: "expanded-value", mixed: "prefix-expanded-value-suffix" }));
       await host.handleEvent({ id: "session-end", event: "session.end", context: { cwd: workspace } });
     } finally {
       process.chdir(oldCwd);
@@ -388,7 +388,7 @@ test("MCP configured headers are scoped and do not override OAuth", async () => 
   assert.equal(requests[3]?.headers["x-mcp-secret"], undefined);
 });
 
-test("MCP tool calls complete OAuth challenges and retry", async () => {
+test("MCP discovery and tool calls complete OAuth challenges and retry", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "kodelet-mcp-tool-oauth-"));
   const oldHome = process.env.HOME;
   const oldUserProfile = process.env.USERPROFILE;
@@ -397,6 +397,7 @@ test("MCP tool calls complete OAuth challenges and retry", async () => {
   let host: Awaited<ReturnType<typeof createExtensionHost>> | undefined;
   let mcpUrl = "";
   let authUrl = "";
+  let toolListAttempts = 0;
   let toolCallAttempts = 0;
   let tokenExchanges = 0;
 
@@ -423,7 +424,7 @@ test("MCP tool calls complete OAuth challenges and retry", async () => {
     if (req.method === "POST" && req.url === "/token") {
       tokenExchanges++;
       res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({
-        access_token: "reauthorized-token",
+        access_token: tokenExchanges === 1 ? "discovery-token" : "reauthorized-token",
         token_type: "Bearer",
       }));
       return;
@@ -451,7 +452,15 @@ test("MCP tool calls complete OAuth challenges and retry", async () => {
         res.writeHead(202).end();
         return;
       }
-      if (message.method === "tools/call") {
+      if (message.method === "tools/list") {
+        toolListAttempts++;
+        if (req.headers.authorization !== "Bearer discovery-token") {
+          res.writeHead(401, {
+            "www-authenticate": `Bearer resource_metadata="${authUrl}/resource-metadata"`,
+          }).end();
+          return;
+        }
+      } else if (message.method === "tools/call") {
         toolCallAttempts++;
         if (req.headers.authorization !== "Bearer reauthorized-token") {
           res.writeHead(401, {
@@ -537,29 +546,55 @@ test("MCP tool calls complete OAuth challenges and retry", async () => {
       },
     }), "utf8");
 
-    let resolveAuthorizationUrl!: (url: URL) => void;
-    const authorizationUrlPromise = new Promise<URL>((resolve) => {
-      resolveAuthorizationUrl = resolve;
-    });
+    const queuedAuthorizationUrls: URL[] = [];
+    const authorizationWaiters: Array<(url: URL) => void> = [];
+    const nextAuthorizationUrl = async (): Promise<URL> => {
+      const queued = queuedAuthorizationUrls.shift();
+      if (queued) {
+        return queued;
+      }
+      return await new Promise<URL>((resolve, reject) => {
+        let timeout: NodeJS.Timeout;
+        const waiter = (url: URL) => {
+          clearTimeout(timeout);
+          resolve(url);
+        };
+        authorizationWaiters.push(waiter);
+        timeout = setTimeout(() => {
+          const index = authorizationWaiters.indexOf(waiter);
+          if (index >= 0) {
+            authorizationWaiters.splice(index, 1);
+          }
+          reject(new Error("timed out waiting for authorization URL"));
+        }, 2000);
+      });
+    };
     process.stderr.write = ((chunk: string | Uint8Array) => {
       const match = String(chunk).match(/https?:\/\/\S+/g)?.find((value) => value.startsWith(`${authUrl}/authorize`));
       if (match) {
-        resolveAuthorizationUrl(new URL(match));
+        const authorizationUrl = new URL(match);
+        const waiter = authorizationWaiters.shift();
+        if (waiter) {
+          waiter(authorizationUrl);
+        } else {
+          queuedAuthorizationUrls.push(authorizationUrl);
+        }
       }
       return true;
     }) as typeof process.stderr.write;
 
-    host = await createExtensionHost(mcpExtension);
+    const hostPromise = createExtensionHost(mcpExtension);
+    const discoveryAuthorizationUrl = await nextAuthorizationUrl();
+    const discoveryCallbackUrl = new URL(redirectUri);
+    discoveryCallbackUrl.searchParams.set("code", "discovery-code");
+    discoveryCallbackUrl.searchParams.set("state", discoveryAuthorizationUrl.searchParams.get("state") ?? "");
+    discoveryCallbackUrl.searchParams.set("iss", authUrl);
+    const discoveryCallbackResponse = await fetch(discoveryCallbackUrl);
+    assert.equal(discoveryCallbackResponse.status, 200);
+
+    host = await hostPromise;
     const execution = host.executeTool({ name: "mcp__secure_secure", input: {}, context: { cwd: workspace } });
-    let authorizationTimeout: NodeJS.Timeout | undefined;
-    const authorizationUrl = await Promise.race([
-      authorizationUrlPromise,
-      new Promise<URL>((_, reject) => {
-        authorizationTimeout = setTimeout(() => reject(new Error("timed out waiting for authorization URL")), 2000);
-      }),
-    ]).finally(() => {
-      if (authorizationTimeout) clearTimeout(authorizationTimeout);
-    });
+    const authorizationUrl = await nextAuthorizationUrl();
     const callbackUrl = new URL(redirectUri);
     callbackUrl.searchParams.set("code", "tool-call-code");
     callbackUrl.searchParams.set("state", authorizationUrl.searchParams.get("state") ?? "");
@@ -569,8 +604,9 @@ test("MCP tool calls complete OAuth challenges and retry", async () => {
 
     const result = await execution;
     assert.equal(result.content, "reauthorized");
+    assert.equal(toolListAttempts, 2);
     assert.equal(toolCallAttempts, 2);
-    assert.equal(tokenExchanges, 1);
+    assert.equal(tokenExchanges, 2);
   } finally {
     process.stderr.write = originalStderrWrite;
     await host?.handleEvent({ id: "session-end", event: "session.end", context: {} }).catch(() => undefined);

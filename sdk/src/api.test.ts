@@ -406,6 +406,7 @@ test("runtime supports extension-initiated host RPC", async (t) => {
     "kodelet.ui.select",
     "kodelet.ui.notify",
   ]);
+  assert.deepEqual(client.hostRequests.map((request) => request.parentId), [2, 2, 2, 2]);
   assert.deepEqual(result, { content: "from-host:true:Pizza" });
 });
 
@@ -413,7 +414,7 @@ class RpcTestClient {
   private buffer = Buffer.alloc(0);
   private nextId = 0;
   private waiters = new Map<number, { resolve(value: any): void; reject(error: Error): void }>();
-  hostRequests: Array<{ id: number | string; method: string; params?: unknown }> = [];
+  hostRequests: Array<{ id: number | string; parentId?: number | string; method: string; params?: unknown }> = [];
 
   constructor(stdout: NodeJS.ReadableStream, private stdin: NodeJS.WritableStream) {
     stdout.on("data", (chunk: Buffer) => {

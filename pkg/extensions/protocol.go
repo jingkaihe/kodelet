@@ -40,12 +40,13 @@ type rpcResponse struct {
 }
 
 type rpcIncomingMessage struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id,omitempty"`
-	Method  string          `json:"method,omitempty"`
-	Params  json.RawMessage `json:"params,omitempty"`
-	Result  json.RawMessage `json:"result,omitempty"`
-	Error   *rpcError       `json:"error,omitempty"`
+	JSONRPC  string          `json:"jsonrpc"`
+	ID       json.RawMessage `json:"id,omitempty"`
+	ParentID json.RawMessage `json:"parentId,omitempty"`
+	Method   string          `json:"method,omitempty"`
+	Params   json.RawMessage `json:"params,omitempty"`
+	Result   json.RawMessage `json:"result,omitempty"`
+	Error    *rpcError       `json:"error,omitempty"`
 }
 
 type rpcError struct {
@@ -197,16 +198,32 @@ type ToolListPatch struct {
 }
 
 type rpcClient struct {
-	reader *bufio.Reader
-	writer io.Writer
-	nextID int64
-	mu     sync.Mutex
+	reader   *bufio.Reader
+	writer   io.Writer
+	writeMu  sync.Mutex
+	stateMu  sync.Mutex
+	readOnce sync.Once
+	nextID   int64
+	pending  map[int64]*rpcPendingCall
+	terminal error
+}
+
+type rpcPendingCall struct {
+	ctx      context.Context
+	handler  rpcHostRequestHandler
+	response chan rpcCallResult
+}
+
+type rpcCallResult struct {
+	response rpcResponse
+	err      error
 }
 
 func newRPCClient(reader io.Reader, writer io.Writer) *rpcClient {
 	return &rpcClient{
-		reader: bufio.NewReader(reader),
-		writer: writer,
+		reader:  bufio.NewReader(reader),
+		writer:  writer,
+		pending: make(map[int64]*rpcPendingCall),
 	}
 }
 
@@ -215,70 +232,164 @@ func (c *rpcClient) call(ctx context.Context, method string, params any, result 
 }
 
 func (c *rpcClient) callWithHostHandler(ctx context.Context, method string, params any, result any, handler rpcHostRequestHandler) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.nextID++
-	req := rpcRequest{JSONRPC: "2.0", ID: c.nextID, Method: method, Params: params}
+	req, pending, err := c.registerCall(ctx, method, params, handler)
+	if err != nil {
+		return err
+	}
 	payload, err := json.Marshal(req)
 	if err != nil {
+		c.removePending(req.ID, pending)
 		return errors.Wrap(err, "failed to marshal rpc request")
 	}
 
-	if err := writeFrame(c.writer, payload); err != nil {
+	if err := c.writePayload(payload); err != nil {
+		c.fail(err)
+		return err
+	}
+	c.readOnce.Do(func() { go c.readLoop() })
+
+	select {
+	case <-ctx.Done():
+		if c.removePending(req.ID, pending) {
+			_ = c.cancel(req.ID)
+		}
+		return ctx.Err()
+	case callResult := <-pending.response:
+		if callResult.err != nil {
+			return callResult.err
+		}
+		resp := callResult.response
+		if resp.Error != nil {
+			return errors.Errorf("extension rpc error %d: %s", resp.Error.Code, resp.Error.Message)
+		}
+		if result == nil || len(resp.Result) == 0 {
+			return nil
+		}
+		if err := json.Unmarshal(resp.Result, result); err != nil {
+			return errors.Wrap(err, "failed to unmarshal rpc result")
+		}
+		return nil
+	}
+}
+
+func (c *rpcClient) registerCall(ctx context.Context, method string, params any, handler rpcHostRequestHandler) (rpcRequest, *rpcPendingCall, error) {
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+	if c.terminal != nil {
+		return rpcRequest{}, nil, c.terminal
+	}
+	c.nextID++
+	pending := &rpcPendingCall{
+		ctx:      ctx,
+		handler:  handler,
+		response: make(chan rpcCallResult, 1),
+	}
+	c.pending[c.nextID] = pending
+	return rpcRequest{JSONRPC: "2.0", ID: c.nextID, Method: method, Params: params}, pending, nil
+}
+
+func (c *rpcClient) removePending(id int64, expected *rpcPendingCall) bool {
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+	pending, ok := c.pending[id]
+	if !ok || pending != expected {
+		return false
+	}
+	delete(c.pending, id)
+	return true
+}
+
+func (c *rpcClient) readLoop() {
+	for {
+		msg, err := readIncomingMessage(c.reader)
+		if err != nil {
+			c.fail(err)
+			return
+		}
+		if msg.Method != "" {
+			go c.dispatchIncomingRequest(msg)
+			continue
+		}
+		if err := c.dispatchResponse(msg); err != nil {
+			c.fail(err)
+			return
+		}
+	}
+}
+
+func (c *rpcClient) dispatchResponse(msg rpcIncomingMessage) error {
+	resp, err := incomingResponse(msg)
+	if err != nil {
 		return err
 	}
 
-	messageCh := make(chan rpcIncomingMessage, 1)
-	errCh := make(chan error, 1)
-	startRead := func() {
-		go func() {
-			msg, err := readIncomingMessage(c.reader)
-			if err != nil {
-				errCh <- err
-				return
-			}
-			messageCh <- msg
-		}()
+	c.stateMu.Lock()
+	pending := c.pending[resp.ID]
+	if pending != nil {
+		delete(c.pending, resp.ID)
 	}
-	startRead()
+	nextID := c.nextID
+	c.stateMu.Unlock()
 
-	for {
-		select {
-		case <-ctx.Done():
-			_ = c.cancel(req.ID)
-			return ctx.Err()
-		case err := <-errCh:
-			return err
-		case msg := <-messageCh:
-			messageCh = make(chan rpcIncomingMessage, 1)
-			errCh = make(chan error, 1)
-			if msg.Method != "" {
-				if err := c.handleIncomingRequest(ctx, msg, handler); err != nil {
-					return err
-				}
-				startRead()
-				continue
-			}
+	if pending != nil {
+		pending.response <- rpcCallResult{response: resp}
+		return nil
+	}
+	if resp.ID > nextID {
+		return errors.Errorf("unexpected rpc response id %d", resp.ID)
+	}
+	return nil
+}
 
-			resp, err := incomingResponse(msg)
-			if err != nil {
-				return err
-			}
-			if resp.ID != req.ID {
-				return errors.Errorf("unexpected rpc response id %d, want %d", resp.ID, req.ID)
-			}
-			if resp.Error != nil {
-				return errors.Errorf("extension rpc error %d: %s", resp.Error.Code, resp.Error.Message)
-			}
-			if result == nil || len(resp.Result) == 0 {
-				return nil
-			}
-			if err := json.Unmarshal(resp.Result, result); err != nil {
-				return errors.Wrap(err, "failed to unmarshal rpc result")
-			}
-			return nil
+func (c *rpcClient) dispatchIncomingRequest(msg rpcIncomingMessage) {
+	ctx, handler := c.hostRequestTarget(msg.ParentID)
+	if err := c.handleIncomingRequest(ctx, msg, handler); err != nil {
+		c.fail(err)
+	}
+}
+
+func (c *rpcClient) hostRequestTarget(parentID json.RawMessage) (context.Context, rpcHostRequestHandler) {
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+
+	if len(parentID) > 0 && string(parentID) != "null" {
+		var id int64
+		if err := json.Unmarshal(parentID, &id); err != nil {
+			return context.Background(), nil
 		}
+		if pending := c.pending[id]; pending != nil {
+			return pending.ctx, pending.handler
+		}
+		return context.Background(), nil
+	}
+
+	var selectedID int64
+	var selected *rpcPendingCall
+	for id, pending := range c.pending {
+		if pending.handler != nil && (selected == nil || id < selectedID) {
+			selectedID = id
+			selected = pending
+		}
+	}
+	if selected == nil {
+		return context.Background(), nil
+	}
+	return selected.ctx, selected.handler
+}
+
+func (c *rpcClient) fail(err error) {
+	c.stateMu.Lock()
+	if c.terminal != nil {
+		c.stateMu.Unlock()
+		return
+	}
+	c.terminal = err
+	pending := c.pending
+	c.pending = make(map[int64]*rpcPendingCall)
+	c.stateMu.Unlock()
+
+	for _, call := range pending {
+		call.response <- rpcCallResult{err: err}
 	}
 }
 
@@ -320,7 +431,7 @@ func (c *rpcClient) writeResponse(response rpcResponse) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to marshal rpc response")
 	}
-	return writeFrame(c.writer, payload)
+	return c.writePayload(payload)
 }
 
 func (c *rpcClient) cancel(id int64) error {
@@ -329,6 +440,12 @@ func (c *rpcClient) cancel(id int64) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to marshal rpc cancel request")
 	}
+	return c.writePayload(payload)
+}
+
+func (c *rpcClient) writePayload(payload []byte) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
 	return writeFrame(c.writer, payload)
 }
 
