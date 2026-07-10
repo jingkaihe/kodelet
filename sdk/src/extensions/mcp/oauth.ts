@@ -46,6 +46,7 @@ export class KodeletMCPOAuthProvider implements OAuthClientProvider {
   private readonly store: OAuthCredentialStore;
   private readonly config: MCPOAuthConfig;
   private callback?: CallbackServer;
+  private callbackStart?: Promise<CallbackServer>;
   private pendingAuth?: Promise<CallbackResult>;
   private pendingState?: string;
 
@@ -71,6 +72,7 @@ export class KodeletMCPOAuthProvider implements OAuthClientProvider {
   }
 
   async state(): Promise<string> {
+    await this.ensureCallbackServer();
     this.pendingState = randomUrlSafeString(32);
     return this.pendingState;
   }
@@ -82,7 +84,11 @@ export class KodeletMCPOAuthProvider implements OAuthClientProvider {
         ...(this.config.client_secret ? { client_secret: this.config.client_secret } : {}),
       };
     }
-    return (await this.store.load()).clientInformation;
+    const clientInformation = (await this.store.load()).clientInformation;
+    if (!clientInformation) {
+      await this.ensureCallbackServer();
+    }
+    return clientInformation;
   }
 
   async saveClientInformation(clientInformation: OAuthClientInformationMixed): Promise<void> {
@@ -106,10 +112,7 @@ export class KodeletMCPOAuthProvider implements OAuthClientProvider {
       throw new Error(`MCP server ${JSON.stringify(this.options.serverName)} requires OAuth authorization; run in an interactive session or set oauth.interactive to allow browser authorization`);
     }
 
-    if (!this.callback) {
-      this.callback = await startCallbackServer(this.config.redirect_uri, this.config.callback_timeout);
-    }
-    const callback = this.callback;
+    const callback = await this.ensureCallbackServer();
     this.pendingAuth = (async () => {
       const result = await callback.wait();
       if (result.error) {
@@ -125,15 +128,6 @@ export class KodeletMCPOAuthProvider implements OAuthClientProvider {
     })();
 
     await promptAuthorization(this.options.serverName, authorizationUrl, this.config.open_browser);
-  }
-
-  async prepare(): Promise<void> {
-    if (this.config.flow === "device") {
-      throw new Error("MCP OAuth device flow is not supported by the SDK MCP extension yet");
-    }
-    if (!this.callback) {
-      this.callback = await startCallbackServer(this.config.redirect_uri, this.config.callback_timeout);
-    }
   }
 
   async saveCodeVerifier(codeVerifier: string): Promise<void> {
@@ -214,12 +208,32 @@ export class KodeletMCPOAuthProvider implements OAuthClientProvider {
   }
 
   async close(): Promise<void> {
-    await this.callback?.close();
+    const callback = this.callback ?? await this.callbackStart?.catch(() => undefined);
+    await callback?.close();
     this.callback = undefined;
+    this.callbackStart = undefined;
+    this.pendingAuth = undefined;
+    this.pendingState = undefined;
   }
 
   private clientName(): string {
     return this.options.serverName.trim() ? `kodelet-${this.options.serverName.trim()}` : "kodelet";
+  }
+
+  private async ensureCallbackServer(): Promise<CallbackServer> {
+    if (this.config.flow === "device") {
+      throw new Error("MCP OAuth device flow is not supported by the SDK MCP extension yet");
+    }
+    if (this.callback) {
+      return this.callback;
+    }
+    this.callbackStart ??= startCallbackServer(this.config.redirect_uri, this.config.callback_timeout);
+    try {
+      this.callback = await this.callbackStart;
+      return this.callback;
+    } finally {
+      this.callbackStart = undefined;
+    }
   }
 }
 

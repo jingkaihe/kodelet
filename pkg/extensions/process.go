@@ -33,10 +33,11 @@ type Process struct {
 }
 
 const (
-	workspaceCWDEnvKey = "KODELET_EXTENSION_WORKSPACE_CWD"
-	maxProcessFailures = 3
-	restartBackoffBase = 100 * time.Millisecond
-	restartBackoffMax  = 2 * time.Second
+	workspaceCWDEnvKey         = "KODELET_EXTENSION_WORKSPACE_CWD"
+	extensionInitializeTimeout = 3 * time.Minute
+	maxProcessFailures         = 3
+	restartBackoffBase         = 100 * time.Millisecond
+	restartBackoffMax          = 2 * time.Second
 )
 
 // StartProcess starts an extension subprocess and initializes its JSON-RPC client.
@@ -148,7 +149,7 @@ func (p *Process) ensureRunning(ctx context.Context) error {
 		return err
 	}
 
-	initCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	initCtx, cancel := context.WithTimeout(ctx, extensionInitializeTimeout)
 	_, err := p.initialize(initCtx, p.workspaceCWD)
 	cancel()
 	if err != nil {

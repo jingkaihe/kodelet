@@ -4,7 +4,6 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
-import { z, type ZodTypeAny } from "zod";
 
 import type { ExtensionAPI } from "../../types.js";
 import type { MCPConfig, MCPOAuthGlobalConfig, MCPServerConfig } from "./config.js";
@@ -51,9 +50,6 @@ async function closeConnectedServer(server: ConnectedServer): Promise<void> {
 
 async function connectServer(serverName: string, config: MCPServerConfig, globalOAuth: MCPOAuthGlobalConfig | undefined): Promise<ConnectedServer> {
   const initial = buildTransport(serverName, config, globalOAuth);
-  if (initial.oauthProvider) {
-    await initial.oauthProvider.prepare();
-  }
 
   let client = new Client({ name: "kodelet", version: "dev" });
   try {
@@ -64,9 +60,12 @@ async function connectServer(serverName: string, config: MCPServerConfig, global
       throw error;
     }
 
-    const authorizationCode = await initial.oauthProvider.waitForAuthorizationCode();
-    await initial.transport.finishAuth(authorizationCode);
-    await client.close().catch(() => undefined);
+    try {
+      const authorizationCode = await initial.oauthProvider.waitForAuthorizationCode();
+      await initial.transport.finishAuth(authorizationCode);
+    } finally {
+      await Promise.allSettled([initial.oauthProvider.close(), client.close()]);
+    }
 
     client = new Client({ name: "kodelet", version: "dev" });
     const retry = buildTransport(serverName, config, globalOAuth, initial.oauthProvider);
@@ -173,11 +172,10 @@ async function registerServerTools(ext: ExtensionAPI, server: ConnectedServer): 
       continue;
     }
     const toolName = extensionToolName(server.name, tool.name);
-    const inputSchema = jsonSchemaToZod(tool.inputSchema);
     ext.registerTool({
       name: toolName,
       description: tool.description ?? "",
-      inputSchema,
+      inputSchema: tool.inputSchema,
       timeoutInSec: 600,
       async execute(input) {
         const start = Date.now();
@@ -214,35 +212,6 @@ function toolWhiteListed(tool: Tool, whiteList: string[]): boolean {
 
 function extensionToolName(serverName: string, toolName: string): string {
   return `mcp__${serverName}_${toolName}`;
-}
-
-function jsonSchemaToZod(schema: unknown): ZodTypeAny {
-  if (!isRecord(schema)) {
-    return z.object({}).loose();
-  }
-  if (schema.type === "object" || isRecord(schema.properties)) {
-    const properties = isRecord(schema.properties) ? schema.properties : {};
-    const required = Array.isArray(schema.required) ? schema.required.filter((value): value is string => typeof value === "string") : [];
-    const shape: Record<string, ZodTypeAny> = {};
-    for (const [key, value] of Object.entries(properties)) {
-      const propertySchema = jsonSchemaToZod(value);
-      shape[key] = required.includes(key) ? propertySchema : propertySchema.optional();
-    }
-    return z.object(shape).loose();
-  }
-  if (schema.type === "array") {
-    return z.array(jsonSchemaToZod(schema.items));
-  }
-  if (schema.type === "string") {
-    return z.string();
-  }
-  if (schema.type === "number" || schema.type === "integer") {
-    return z.number();
-  }
-  if (schema.type === "boolean") {
-    return z.boolean();
-  }
-  return z.any();
 }
 
 function normalizeContentBlock(block: unknown): Record<string, string> {

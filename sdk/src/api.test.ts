@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { createTestHarness, defineExtension, renderTemplate, z } from "./index.js";
+import { createTestHarness, defineExtension, renderTemplate, z, type JSONSchema } from "./index.js";
 
 test("registers tools, commands, events and executes handlers", async () => {
   const extension = defineExtension((ext) => {
@@ -88,6 +88,53 @@ test("registers tools, commands, events and executes handlers", async () => {
     payload: { messages: [{ role: "assistant", content: "done" }] },
   });
   assert.deepEqual(agentEndResult, { followUpMessages: ["inspect tests"] });
+});
+
+test("registerTool preserves and validates raw JSON Schema", async () => {
+  const inputSchema = {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    description: "A constrained search request",
+    properties: {
+      mode: {
+        description: "Search strategy",
+        enum: ["fast", "thorough"],
+      },
+      query: {
+        type: "string",
+        pattern: "^[a-z]+$",
+        minLength: 3,
+      },
+      limit: {
+        anyOf: [
+          { type: "integer", minimum: 1, maximum: 10 },
+          { const: "all" },
+        ],
+      },
+    },
+    required: ["mode", "query"],
+    additionalProperties: false,
+  } satisfies JSONSchema;
+
+  const extension = defineExtension((ext) => {
+    ext.registerTool({
+      name: "raw_schema",
+      description: "Use a raw JSON Schema",
+      inputSchema,
+      execute(input) {
+        return JSON.stringify(input);
+      },
+    });
+  });
+
+  const harness = await createTestHarness(extension);
+  const init = harness.initialize({ extension: { id: "raw-schema", cwd: process.cwd() } });
+  assert.deepEqual(init.tools[0]?.inputSchema, inputSchema);
+
+  const valid = { mode: "fast", query: "code", limit: 3 };
+  assert.equal((await harness.executeTool({ name: "raw_schema", input: valid })).content, JSON.stringify(valid));
+  await assert.rejects(harness.executeTool({ name: "raw_schema", input: { mode: "invalid", query: "code" } }), /Invalid tool input/);
+  await assert.rejects(harness.executeTool({ name: "raw_schema", input: { mode: "fast", query: "code", extra: true } }), /Invalid tool input/);
 });
 
 test("command validation can pass to the next route", async () => {

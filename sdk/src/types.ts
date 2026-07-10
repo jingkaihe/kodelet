@@ -2,6 +2,8 @@ import type { z } from "zod";
 
 export type Awaitable<T> = T | Promise<T>;
 export type AnyZodSchema = z.ZodTypeAny;
+export type JSONSchema = Record<string, unknown>;
+export type ToolInputSchema = AnyZodSchema | JSONSchema;
 export type InferInput<Schema> = Schema extends z.ZodTypeAny ? z.infer<Schema> : Record<string, unknown>;
 
 export interface ExtensionMetadata {
@@ -174,7 +176,7 @@ export interface CommandContext extends SharedContext {
 
 export interface EventContext extends SharedContext {}
 
-export interface ToolRegistration<Schema extends AnyZodSchema = AnyZodSchema> {
+export interface ToolRegistration<Schema extends ToolInputSchema = ToolInputSchema> {
   name: string;
   description: string;
   inputSchema: Schema;
@@ -321,7 +323,7 @@ export type EventHandler<Name extends EventName = EventName> = (
 
 export interface ExtensionAPI {
   setMetadata(metadata: ExtensionMetadata): void;
-  registerTool<Schema extends AnyZodSchema>(registration: ToolRegistration<Schema>): void;
+  registerTool<Schema extends ToolInputSchema>(registration: ToolRegistration<Schema>): void;
   registerCommand<Schema extends AnyZodSchema | undefined = undefined>(
     registration: CommandRegistration<Schema>,
   ): void;

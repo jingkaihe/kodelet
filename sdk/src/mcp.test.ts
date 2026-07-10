@@ -156,7 +156,11 @@ process.stdin.on('data', (chunk) => {
     if (request.method === 'initialize') {
       result = { protocolVersion: request.params?.protocolVersion ?? '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'fake', version: '1.0.0' } };
     } else if (request.method === 'tools/list') {
-      result = { tools: [{ name: 'ping', description: 'Ping from workspace config', inputSchema: { type: 'object' } }] };
+      result = { tools: [{ name: 'ping', description: 'Ping from workspace config', inputSchema: {
+        type: 'object',
+        properties: { mode: { type: 'string', description: 'Ping mode', enum: ['fast', 'safe'] } },
+        additionalProperties: false
+      } }] };
     } else if (request.method === 'tools/call') {
       result = { content: [{ type: 'text', text: JSON.stringify({ bare: process.env.FROM_BARE, braced: process.env.FROM_BRACED, mixed: process.env.FROM_MIXED }) }] };
     }
@@ -193,6 +197,11 @@ process.stdin.on('data', (chunk) => {
         extension: { id: "mcp", cwd: workspace, dataDir: path.join(root, "data") },
       });
       assert.deepEqual(init.tools.map((tool) => tool.name), ["mcp__workspace_ping"]);
+      assert.deepEqual(init.tools[0]?.inputSchema, {
+        type: "object",
+        properties: { mode: { type: "string", description: "Ping mode", enum: ["fast", "safe"] } },
+        additionalProperties: false,
+      });
       const result = await host.executeTool({ name: "mcp__workspace_ping", input: {}, context: { cwd: workspace } });
       assert.equal(result.content, JSON.stringify({ bare: "expanded-value", braced: "expanded-value", mixed: "prefix-expanded-value-suffix" }));
       await host.handleEvent({ id: "session-end", event: "session.end", context: { cwd: workspace } });
@@ -215,6 +224,7 @@ test("MCP remote HTTP headers expand environment variables", async () => {
   const oldWorkspaceCWD = process.env.KODELET_EXTENSION_WORKSPACE_CWD;
   const oldToken = process.env.MCP_TEST_HEADER_TOKEN;
   const receivedAuthHeaders: string[] = [];
+  const callbackPortHolder = http.createServer((_req, res) => res.writeHead(204).end());
 
   const server = http.createServer((req, res) => {
     if (req.method !== "POST") {
@@ -272,6 +282,15 @@ test("MCP remote HTTP headers expand environment variables", async () => {
     });
     const address = server.address();
     assert(address && typeof address === "object");
+    await new Promise<void>((resolve, reject) => {
+      callbackPortHolder.once("error", reject);
+      callbackPortHolder.listen(0, "127.0.0.1", () => {
+        callbackPortHolder.off("error", reject);
+        resolve();
+      });
+    });
+    const callbackAddress = callbackPortHolder.address();
+    assert(callbackAddress && typeof callbackAddress === "object");
 
     await writeFile(
       path.join(workspace, "mcp.json"),
@@ -281,6 +300,7 @@ test("MCP remote HTTP headers expand environment variables", async () => {
             type: "http",
             url: `http://127.0.0.1:${address.port}/mcp`,
             headers: { Authorization: "Bearer ${MCP_TEST_HEADER_TOKEN}" },
+            oauth: { redirect_uri: `http://127.0.0.1:${callbackAddress.port}/mcp/oauth/callback` },
           },
         },
       }),
@@ -300,10 +320,81 @@ test("MCP remote HTTP headers expand environment variables", async () => {
     await new Promise<void>((resolve, reject) => {
       server.close((error) => error ? reject(error) : resolve());
     }).catch(() => undefined);
+    await new Promise<void>((resolve, reject) => {
+      callbackPortHolder.close((error) => error ? reject(error) : resolve());
+    }).catch(() => undefined);
     restoreEnv("HOME", oldHome);
     restoreEnv("USERPROFILE", oldUserProfile);
     restoreEnv("KODELET_EXTENSION_WORKSPACE_CWD", oldWorkspaceCWD);
     restoreEnv("MCP_TEST_HEADER_TOKEN", oldToken);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("MCP OAuth callback listener is lazy and can be released after authorization", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "kodelet-mcp-oauth-callback-"));
+  const oldHome = process.env.HOME;
+  const oldUserProfile = process.env.USERPROFILE;
+  const portProbe = http.createServer((_req, res) => res.writeHead(204).end());
+  let provider: KodeletMCPOAuthProvider | undefined;
+  try {
+    process.env.HOME = root;
+    delete process.env.USERPROFILE;
+
+    await new Promise<void>((resolve, reject) => {
+      portProbe.once("error", reject);
+      portProbe.listen(0, "127.0.0.1", () => {
+        portProbe.off("error", reject);
+        resolve();
+      });
+    });
+    const address = portProbe.address();
+    assert(address && typeof address === "object");
+    const redirectUri = `http://127.0.0.1:${address.port}/mcp/oauth/callback`;
+    await new Promise<void>((resolve, reject) => portProbe.close((error) => error ? reject(error) : resolve()));
+
+    provider = new KodeletMCPOAuthProvider({
+      serverName: "callback",
+      serverUrl: "https://mcp.example/mcp",
+      config: {
+        client_id: "configured-client",
+        redirect_uri: redirectUri,
+        interactive: true,
+        open_browser: false,
+        callback_timeout: "1s",
+      },
+    });
+
+    const availableBeforeAuth = http.createServer((_req, res) => res.writeHead(204).end());
+    await new Promise<void>((resolve, reject) => {
+      availableBeforeAuth.once("error", reject);
+      availableBeforeAuth.listen(address.port, "127.0.0.1", () => {
+        availableBeforeAuth.off("error", reject);
+        resolve();
+      });
+    });
+    await new Promise<void>((resolve, reject) => availableBeforeAuth.close((error) => error ? reject(error) : resolve()));
+
+    const state = await provider.state();
+    assert.equal(String(provider.redirectUrl), redirectUri);
+    await provider.redirectToAuthorization(new URL(`https://auth.example/authorize?state=${state}`));
+    const response = await fetch(`${redirectUri}?code=authorization-code&state=${state}`);
+    assert.equal(response.status, 200);
+    assert.equal(await provider.waitForAuthorizationCode(), "authorization-code");
+    await provider.close();
+
+    await new Promise<void>((resolve, reject) => {
+      portProbe.once("error", reject);
+      portProbe.listen(address.port, "127.0.0.1", () => {
+        portProbe.off("error", reject);
+        resolve();
+      });
+    });
+  } finally {
+    await provider?.close().catch(() => undefined);
+    await new Promise<void>((resolve, reject) => portProbe.close((error) => error ? reject(error) : resolve())).catch(() => undefined);
+    restoreEnv("HOME", oldHome);
+    restoreEnv("USERPROFILE", oldUserProfile);
     await rm(root, { recursive: true, force: true });
   }
 });

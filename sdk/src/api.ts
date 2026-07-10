@@ -1,3 +1,7 @@
+import AjvImport, { type ErrorObject, type ValidateFunction } from "ajv";
+import Ajv2019Import from "ajv/dist/2019.js";
+import Ajv2020Import from "ajv/dist/2020.js";
+import addFormatsImport from "ajv-formats";
 import { z } from "zod";
 
 import { createCommandContext, createEventContext, createToolContext } from "./context.js";
@@ -19,14 +23,29 @@ import type {
   HandleEventParams,
   InitializeParams,
   InitializeResult,
+  JSONSchema,
   ToolExecutionResult,
+  ToolInputSchema,
   ToolRegistration,
 } from "./types.js";
 
 interface RegisteredTool {
-  registration: ToolRegistration<AnyZodSchema>;
+  registration: ToolRegistration<ToolInputSchema>;
   inputSchema: Record<string, unknown>;
+  parseInput(input: unknown): Promise<unknown>;
 }
+
+interface JSONSchemaValidator {
+  compile(schema: JSONSchema): ValidateFunction<unknown>;
+  errorsText(errors?: ErrorObject[] | null, options?: { separator?: string }): string;
+}
+
+type JSONSchemaValidatorConstructor = new (options?: Record<string, unknown>) => JSONSchemaValidator;
+
+const Ajv = AjvImport as unknown as JSONSchemaValidatorConstructor;
+const Ajv2019 = Ajv2019Import as unknown as JSONSchemaValidatorConstructor;
+const Ajv2020 = Ajv2020Import as unknown as JSONSchemaValidatorConstructor;
+const addFormats = addFormatsImport as unknown as (validator: JSONSchemaValidator) => void;
 
 interface RegisteredCommand {
   registration: CommandRegistration<AnyZodSchema | undefined>;
@@ -53,13 +72,17 @@ export class ExtensionHost implements ExtensionAPI {
     this.metadata = { ...this.metadata, ...metadata };
   }
 
-  registerTool<Schema extends AnyZodSchema>(registration: ToolRegistration<Schema>): void {
+  registerTool<Schema extends ToolInputSchema>(registration: ToolRegistration<Schema>): void {
     if (this.tools.has(registration.name)) {
       throw new Error(`Duplicate extension tool registration: ${registration.name}`);
     }
+    const inputSchema = registration.inputSchema;
     this.tools.set(registration.name, {
-      registration: registration as ToolRegistration<AnyZodSchema>,
-      inputSchema: zodSchemaToJsonSchema(registration.inputSchema),
+      registration: registration as ToolRegistration<ToolInputSchema>,
+      inputSchema: isZodSchema(inputSchema) ? zodSchemaToJsonSchema(inputSchema) : inputSchema,
+      parseInput: isZodSchema(inputSchema)
+        ? (input) => inputSchema.parseAsync(input)
+        : jsonSchemaInputParser(inputSchema),
     });
   }
 
@@ -129,8 +152,8 @@ export class ExtensionHost implements ExtensionAPI {
     if (!tool) {
       throw new Error(`Unknown extension tool: ${params.name}`);
     }
-    const input = await tool.registration.inputSchema.parseAsync(params.input);
-    const result = await tool.registration.execute(input, createToolContext(this.initParams, params.context));
+    const input = await tool.parseInput(params.input);
+    const result = await tool.registration.execute(input as never, createToolContext(this.initParams, params.context));
     if (typeof result === "string") {
       return { content: result };
     }
@@ -267,6 +290,32 @@ export function zodSchemaToJsonSchema(schema: AnyZodSchema): Record<string, unkn
     }
   }
   return { type: "object", additionalProperties: true };
+}
+
+function jsonSchemaInputParser(schema: JSONSchema): (input: unknown) => Promise<unknown> {
+  const ajv = jsonSchemaValidator(schema);
+  const validate = ajv.compile(schema) as ValidateFunction<unknown>;
+  return async (input: unknown) => {
+    if (!validate(input)) {
+      throw new Error(`Invalid tool input: ${ajv.errorsText(validate.errors, { separator: "; " })}`);
+    }
+    return input;
+  };
+}
+
+function jsonSchemaValidator(schema: JSONSchema): JSONSchemaValidator {
+  const dialect = typeof schema.$schema === "string" ? schema.$schema.toLowerCase() : "";
+  const ajv = dialect.includes("2019-09")
+    ? new Ajv2019({ allErrors: true, strict: false })
+    : dialect.includes("draft-07") || dialect.includes("draft-7")
+      ? new Ajv({ allErrors: true, strict: false })
+      : new Ajv2020({ allErrors: true, strict: false });
+  addFormats(ajv);
+  return ajv;
+}
+
+function isZodSchema(schema: ToolInputSchema): schema is AnyZodSchema {
+  return "_zod" in schema && typeof schema.parseAsync === "function";
 }
 
 function clonePayload<T>(payload: T): T {

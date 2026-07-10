@@ -78,7 +78,7 @@ func (r *Runtime) initialize(ctx context.Context, discovery *Discovery) error {
 			logger.G(ctx).WithError(err).WithField("extension", ext.ID).Warn("failed to start extension; disabling for this process")
 			continue
 		}
-		initCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		initCtx, cancel := context.WithTimeout(ctx, extensionInitializeTimeout)
 		result, err := proc.Initialize(initCtx, r.workingDir)
 		cancel()
 		if err != nil {
