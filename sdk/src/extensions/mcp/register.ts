@@ -12,6 +12,9 @@ import { KodeletMCPOAuthProvider } from "./oauth.js";
 
 type MCPTransport = StdioClientTransport | StreamableHTTPClientTransport | SSEClientTransport;
 
+export const mcpToolTimeoutInSec = 600;
+export const mcpToolRequestTimeoutMs = mcpToolTimeoutInSec * 1000;
+
 interface TransportBundle {
   transport: MCPTransport;
   oauthProvider?: KodeletMCPOAuthProvider;
@@ -23,6 +26,8 @@ interface ConnectedServer {
   transport: MCPTransport;
   whiteList: string[];
   oauthProvider?: KodeletMCPOAuthProvider;
+  authorization?: Promise<void>;
+  authorizationGeneration: number;
 }
 
 export async function registerMCP(ext: ExtensionAPI, config: MCPConfig): Promise<void> {
@@ -85,6 +90,7 @@ async function connectServer(serverName: string, config: MCPServerConfig, global
     transport: activeTransport,
     whiteList: config.tool_white_list ?? [],
     oauthProvider: initial.oauthProvider,
+    authorizationGeneration: 0,
   };
 }
 
@@ -231,10 +237,10 @@ async function registerServerTools(ext: ExtensionAPI, server: ConnectedServer): 
       name: toolName,
       description: tool.description?.trim() || tool.title?.trim() || tool.name,
       inputSchema: tool.inputSchema,
-      timeoutInSec: 600,
+      timeoutInSec: mcpToolTimeoutInSec,
       async execute(input) {
         const start = Date.now();
-        const result = await server.client.callTool({ name: tool.name, arguments: input as Record<string, unknown> });
+        const result = await callServerTool(server, tool.name, input as Record<string, unknown>);
         if ("toolResult" in result) {
           const content = stringifyUnknown(result.toolResult);
           return {
@@ -258,6 +264,63 @@ async function registerServerTools(ext: ExtensionAPI, server: ConnectedServer): 
         };
       },
     });
+  }
+}
+
+async function callServerTool(server: ConnectedServer, toolName: string, input: Record<string, unknown>) {
+  const authorizationGeneration = server.authorizationGeneration;
+  try {
+    return await requestServerTool(server, toolName, input);
+  } catch (error) {
+    if (!server.oauthProvider || !supportsFinishAuth(server.transport) || !isUnauthorizedError(error)) {
+      throw error;
+    }
+    if (authorizationGeneration === server.authorizationGeneration) {
+      await authorizeConnectedServer(server);
+    } else if (server.authorization) {
+      await server.authorization;
+    }
+    return await requestServerTool(server, toolName, input);
+  }
+}
+
+async function requestServerTool(server: ConnectedServer, toolName: string, input: Record<string, unknown>) {
+  return await server.client.callTool(
+    { name: toolName, arguments: input },
+    undefined,
+    { timeout: mcpToolRequestTimeoutMs },
+  );
+}
+
+async function authorizeConnectedServer(server: ConnectedServer): Promise<void> {
+  if (server.authorization) {
+    return await server.authorization;
+  }
+  if (!server.oauthProvider || !supportsFinishAuth(server.transport)) {
+    throw new Error(`MCP server ${JSON.stringify(server.name)} cannot complete OAuth authorization`);
+  }
+  const authorization = completeAuthorization(server.oauthProvider, server.transport).then(() => {
+    server.authorizationGeneration++;
+  });
+  server.authorization = authorization;
+  try {
+    await authorization;
+  } finally {
+    if (server.authorization === authorization) {
+      server.authorization = undefined;
+    }
+  }
+}
+
+async function completeAuthorization(
+  provider: KodeletMCPOAuthProvider,
+  transport: StreamableHTTPClientTransport | SSEClientTransport,
+): Promise<void> {
+  try {
+    const authorizationCode = await provider.waitForAuthorizationCode();
+    await transport.finishAuth(authorizationCode);
+  } finally {
+    await provider.close();
   }
 }
 

@@ -8,8 +8,13 @@ import test from "node:test";
 import mcpExtension from "./extensions/mcp/index.js";
 import { loadMCPConfig } from "./extensions/mcp/config.js";
 import { KodeletMCPOAuthProvider } from "./extensions/mcp/oauth.js";
-import { scopedMCPFetch } from "./extensions/mcp/register.js";
+import { mcpToolRequestTimeoutMs, mcpToolTimeoutInSec, scopedMCPFetch } from "./extensions/mcp/register.js";
 import { createExtensionHost } from "./api.js";
+
+test("keeps the MCP request timeout aligned with the extension tool timeout", () => {
+  assert.equal(mcpToolTimeoutInSec, 600);
+  assert.equal(mcpToolRequestTimeoutMs, 600_000);
+});
 
 test("loads standard mcpServers from global and cwd mcp.json", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "kodelet-mcp-config-"));
@@ -383,6 +388,201 @@ test("MCP configured headers are scoped and do not override OAuth", async () => 
   assert.equal(requests[3]?.headers["x-mcp-secret"], undefined);
 });
 
+test("MCP tool calls complete OAuth challenges and retry", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "kodelet-mcp-tool-oauth-"));
+  const oldHome = process.env.HOME;
+  const oldUserProfile = process.env.USERPROFILE;
+  const oldWorkspaceCWD = process.env.KODELET_EXTENSION_WORKSPACE_CWD;
+  const originalStderrWrite = process.stderr.write;
+  let host: Awaited<ReturnType<typeof createExtensionHost>> | undefined;
+  let mcpUrl = "";
+  let authUrl = "";
+  let toolCallAttempts = 0;
+  let tokenExchanges = 0;
+
+  const authServer = http.createServer((req, res) => {
+    if (req.method === "GET" && req.url === "/resource-metadata") {
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({
+        resource: mcpUrl,
+        authorization_servers: [authUrl],
+        scopes_supported: ["mcp.read"],
+      }));
+      return;
+    }
+    if (req.method === "GET" && req.url?.startsWith("/.well-known/oauth-authorization-server")) {
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({
+        issuer: authUrl,
+        authorization_endpoint: `${authUrl}/authorize`,
+        token_endpoint: `${authUrl}/token`,
+        response_types_supported: ["code"],
+        code_challenge_methods_supported: ["S256"],
+        token_endpoint_auth_methods_supported: ["none"],
+      }));
+      return;
+    }
+    if (req.method === "POST" && req.url === "/token") {
+      tokenExchanges++;
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({
+        access_token: "reauthorized-token",
+        token_type: "Bearer",
+      }));
+      return;
+    }
+    res.writeHead(404).end();
+  });
+
+  const mcpServer = http.createServer((req, res) => {
+    if (req.method === "GET") {
+      res.writeHead(405).end();
+      return;
+    }
+    if (req.method !== "POST") {
+      res.writeHead(405).end();
+      return;
+    }
+    let body = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk) => {
+      body += chunk;
+    });
+    req.on("end", () => {
+      const message = JSON.parse(body) as { id?: string | number; method?: string; params?: Record<string, unknown> };
+      if (message.id === undefined) {
+        res.writeHead(202).end();
+        return;
+      }
+      if (message.method === "tools/call") {
+        toolCallAttempts++;
+        if (req.headers.authorization !== "Bearer reauthorized-token") {
+          res.writeHead(401, {
+            "www-authenticate": `Bearer resource_metadata="${authUrl}/resource-metadata"`,
+          }).end();
+          return;
+        }
+      }
+
+      let result: Record<string, unknown> = {};
+      if (message.method === "initialize") {
+        result = {
+          protocolVersion: message.params?.protocolVersion ?? "2025-03-26",
+          capabilities: { tools: {} },
+          serverInfo: { name: "oauth-tool-server", version: "1.0.0" },
+        };
+      } else if (message.method === "tools/list") {
+        result = { tools: [{ name: "secure", description: "Secure tool", inputSchema: { type: "object" } }] };
+      } else if (message.method === "tools/call") {
+        result = { content: [{ type: "text", text: "reauthorized" }] };
+      }
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
+    });
+  });
+
+  try {
+    const home = path.join(root, "home");
+    const workspace = path.join(root, "workspace");
+    await mkdir(home, { recursive: true });
+    await mkdir(workspace, { recursive: true });
+    process.env.HOME = home;
+    delete process.env.USERPROFILE;
+    process.env.KODELET_EXTENSION_WORKSPACE_CWD = workspace;
+
+    await new Promise<void>((resolve, reject) => {
+      authServer.once("error", reject);
+      authServer.listen(0, "127.0.0.1", () => {
+        authServer.off("error", reject);
+        resolve();
+      });
+    });
+    const authAddress = authServer.address();
+    assert(authAddress && typeof authAddress === "object");
+    authUrl = `http://127.0.0.1:${authAddress.port}`;
+
+    await new Promise<void>((resolve, reject) => {
+      mcpServer.once("error", reject);
+      mcpServer.listen(0, "127.0.0.1", () => {
+        mcpServer.off("error", reject);
+        resolve();
+      });
+    });
+    const mcpAddress = mcpServer.address();
+    assert(mcpAddress && typeof mcpAddress === "object");
+    mcpUrl = `http://127.0.0.1:${mcpAddress.port}/mcp`;
+
+    const callbackProbe = http.createServer();
+    await new Promise<void>((resolve, reject) => {
+      callbackProbe.once("error", reject);
+      callbackProbe.listen(0, "127.0.0.1", () => {
+        callbackProbe.off("error", reject);
+        resolve();
+      });
+    });
+    const callbackAddress = callbackProbe.address();
+    assert(callbackAddress && typeof callbackAddress === "object");
+    const redirectUri = `http://127.0.0.1:${callbackAddress.port}/mcp/oauth/callback`;
+    await new Promise<void>((resolve, reject) => callbackProbe.close((error) => error ? reject(error) : resolve()));
+
+    await writeFile(path.join(workspace, "mcp.json"), JSON.stringify({
+      mcpServers: {
+        secure: {
+          type: "http",
+          url: mcpUrl,
+          oauth: {
+            client_id: "configured-client",
+            redirect_uri: redirectUri,
+            interactive: true,
+            open_browser: false,
+            callback_timeout: "2s",
+          },
+        },
+      },
+    }), "utf8");
+
+    let resolveAuthorizationUrl!: (url: URL) => void;
+    const authorizationUrlPromise = new Promise<URL>((resolve) => {
+      resolveAuthorizationUrl = resolve;
+    });
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      const match = String(chunk).match(/https?:\/\/\S+/g)?.find((value) => value.startsWith(`${authUrl}/authorize`));
+      if (match) {
+        resolveAuthorizationUrl(new URL(match));
+      }
+      return true;
+    }) as typeof process.stderr.write;
+
+    host = await createExtensionHost(mcpExtension);
+    const execution = host.executeTool({ name: "mcp__secure_secure", input: {}, context: { cwd: workspace } });
+    let authorizationTimeout: NodeJS.Timeout | undefined;
+    const authorizationUrl = await Promise.race([
+      authorizationUrlPromise,
+      new Promise<URL>((_, reject) => {
+        authorizationTimeout = setTimeout(() => reject(new Error("timed out waiting for authorization URL")), 2000);
+      }),
+    ]).finally(() => {
+      if (authorizationTimeout) clearTimeout(authorizationTimeout);
+    });
+    const callbackUrl = new URL(redirectUri);
+    callbackUrl.searchParams.set("code", "tool-call-code");
+    callbackUrl.searchParams.set("state", authorizationUrl.searchParams.get("state") ?? "");
+    callbackUrl.searchParams.set("iss", authUrl);
+    const callbackResponse = await fetch(callbackUrl);
+    assert.equal(callbackResponse.status, 200);
+
+    const result = await execution;
+    assert.equal(result.content, "reauthorized");
+    assert.equal(toolCallAttempts, 2);
+    assert.equal(tokenExchanges, 1);
+  } finally {
+    process.stderr.write = originalStderrWrite;
+    await host?.handleEvent({ id: "session-end", event: "session.end", context: {} }).catch(() => undefined);
+    await new Promise<void>((resolve, reject) => mcpServer.close((error) => error ? reject(error) : resolve())).catch(() => undefined);
+    await new Promise<void>((resolve, reject) => authServer.close((error) => error ? reject(error) : resolve())).catch(() => undefined);
+    restoreEnv("HOME", oldHome);
+    restoreEnv("USERPROFILE", oldUserProfile);
+    restoreEnv("KODELET_EXTENSION_WORKSPACE_CWD", oldWorkspaceCWD);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("MCP OAuth callback listener is lazy and can be released after authorization", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "kodelet-mcp-oauth-callback-"));
   const oldHome = process.env.HOME;
@@ -416,6 +616,15 @@ test("MCP OAuth callback listener is lazy and can be released after authorizatio
         callback_timeout: "1s",
       },
     });
+    await provider.saveDiscoveryState({
+      authorizationServerUrl: "https://auth.example",
+      authorizationServerMetadata: {
+        issuer: "https://auth.example",
+        authorization_endpoint: "https://auth.example/authorize",
+        token_endpoint: "https://auth.example/token",
+        response_types_supported: ["code"],
+      },
+    });
 
     const availableBeforeAuth = http.createServer((_req, res) => res.writeHead(204).end());
     await new Promise<void>((resolve, reject) => {
@@ -430,9 +639,20 @@ test("MCP OAuth callback listener is lazy and can be released after authorizatio
     const state = await provider.state();
     assert.equal(String(provider.redirectUrl), redirectUri);
     await provider.redirectToAuthorization(new URL(`https://auth.example/authorize?state=${state}`));
-    const response = await fetch(`${redirectUri}?code=authorization-code&state=${state}`);
+    const response = await fetch(`${redirectUri}?code=authorization-code&state=${state}&iss=${encodeURIComponent("https://auth.example")}`);
     assert.equal(response.status, 200);
     assert.equal(await provider.waitForAuthorizationCode(), "authorization-code");
+    await provider.close();
+
+    const mismatchedState = await provider.state();
+    await provider.redirectToAuthorization(new URL(`https://auth.example/authorize?state=${mismatchedState}`));
+    const mismatchedAuthorization = assert.rejects(
+      provider.waitForAuthorizationCode(),
+      /invalid OAuth issuer in authorization response/,
+    );
+    const mismatchedResponse = await fetch(`${redirectUri}?code=wrong-code&state=${mismatchedState}&iss=${encodeURIComponent("https://attacker.example")}`);
+    assert.equal(mismatchedResponse.status, 200);
+    await mismatchedAuthorization;
     await provider.close();
 
     await new Promise<void>((resolve, reject) => {

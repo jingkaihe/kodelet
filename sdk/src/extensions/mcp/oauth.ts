@@ -49,10 +49,12 @@ export class KodeletMCPOAuthProvider implements OAuthClientProvider {
   private callbackStart?: Promise<CallbackServer>;
   private pendingAuth?: Promise<CallbackResult>;
   private pendingState?: string;
+  private expectedIssuer?: string;
 
   constructor(private readonly options: MCPOAuthProviderOptions) {
     this.config = expandOAuthConfig({ ...(options.globalConfig ?? {}), ...(options.config ?? {}) });
     this.store = new OAuthCredentialStore(options.serverName, options.serverUrl);
+    this.addClientAuthentication = this.addClientAuthentication.bind(this);
   }
 
   get redirectUrl(): string | URL | undefined {
@@ -113,6 +115,7 @@ export class KodeletMCPOAuthProvider implements OAuthClientProvider {
     }
 
     const callback = await this.ensureCallbackServer();
+    const expectedIssuer = this.expectedIssuer;
     this.pendingAuth = (async () => {
       const result = await callback.wait();
       if (result.error) {
@@ -120,6 +123,9 @@ export class KodeletMCPOAuthProvider implements OAuthClientProvider {
       }
       if (this.pendingState && result.state !== this.pendingState) {
         throw new Error("invalid OAuth state parameter, possible CSRF attack");
+      }
+      if (result.issuer && expectedIssuer && result.issuer !== expectedIssuer) {
+        throw new Error("invalid OAuth issuer in authorization response");
       }
       if (!result.code) {
         throw new Error("OAuth authorization callback did not include an authorization code");
@@ -161,25 +167,32 @@ export class KodeletMCPOAuthProvider implements OAuthClientProvider {
     stored.discoveryState = configuredMetadataUrl
       ? await discoveryStateForMetadataURL(configuredMetadataUrl)
       : discoveryState;
+    this.expectedIssuer = authorizationServerIssuer(stored.discoveryState);
     await this.store.save(stored);
   }
 
   async discoveryState(): Promise<OAuthDiscoveryState | undefined> {
     if (this.config.auth_server_metadata_url) {
-      return discoveryStateForMetadataURL(this.config.auth_server_metadata_url);
+      const state = await discoveryStateForMetadataURL(this.config.auth_server_metadata_url);
+      this.expectedIssuer = authorizationServerIssuer(state);
+      return state;
     }
     const stored = await this.store.load();
     if (stored.discoveryState) {
+      this.expectedIssuer = authorizationServerIssuer(stored.discoveryState);
       return stored.discoveryState;
     }
     if (stored.authServerMetadataUrl) {
-      return discoveryStateForMetadataURL(stored.authServerMetadataUrl);
+      const state = await discoveryStateForMetadataURL(stored.authServerMetadataUrl);
+      this.expectedIssuer = authorizationServerIssuer(state);
+      return state;
     }
     return undefined;
   }
 
   async invalidateCredentials(scope: "all" | "client" | "tokens" | "verifier" | "discovery"): Promise<void> {
     if (scope === "all") {
+      this.expectedIssuer = undefined;
       await this.store.clear();
       return;
     }
@@ -192,6 +205,7 @@ export class KodeletMCPOAuthProvider implements OAuthClientProvider {
       delete stored.codeVerifier;
     } else if (scope === "discovery") {
       delete stored.discoveryState;
+      this.expectedIssuer = undefined;
     }
     await this.store.save(stored);
   }
@@ -386,6 +400,11 @@ async function discoveryStateForMetadataURL(metadataUrl: string): Promise<OAuthD
     authorizationServerUrl: metadata?.issuer ?? metadataUrl,
     authorizationServerMetadata: metadata,
   };
+}
+
+function authorizationServerIssuer(discoveryState: OAuthDiscoveryState): string | undefined {
+  const issuer = discoveryState.authorizationServerMetadata?.issuer;
+  return typeof issuer === "string" && issuer ? issuer : undefined;
 }
 
 function expandOAuthConfig(config: MCPOAuthConfig): MCPOAuthConfig {
