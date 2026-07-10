@@ -22,6 +22,7 @@ type Tool struct {
 	name        string
 	description string
 	schema      *jsonschema.Schema
+	rawSchema   map[string]any
 	timeout     time.Duration
 	maxOutput   int
 }
@@ -31,11 +32,16 @@ func newTool(extensionID string, process *Process, registration ToolRegistration
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to marshal extension tool schema")
 	}
-	var schema jsonschema.Schema
+	var rawSchema map[string]any
 	if len(schemaBytes) == 0 || string(schemaBytes) == "null" {
+		schemaBytes = []byte(`{"type":"object"}`)
+	}
+	if err := json.Unmarshal(schemaBytes, &rawSchema); err != nil {
+		return nil, errors.Wrap(err, "failed to parse raw extension tool schema")
+	}
+	var schema jsonschema.Schema
+	if err := json.Unmarshal(schemaBytes, &schema); err != nil {
 		schema.Type = "object"
-	} else if err := json.Unmarshal(schemaBytes, &schema); err != nil {
-		return nil, errors.Wrap(err, "failed to parse extension tool schema")
 	}
 	if registration.Name == "" {
 		return nil, errors.New("extension tool name is required")
@@ -49,6 +55,7 @@ func newTool(extensionID string, process *Process, registration ToolRegistration
 		name:        registration.Name,
 		description: registration.Description,
 		schema:      &schema,
+		rawSchema:   rawSchema,
 		timeout:     timeout,
 		maxOutput:   maxOutput,
 	}, nil
@@ -60,8 +67,11 @@ func (t *Tool) Name() string { return t.name }
 // Description returns the extension tool description.
 func (t *Tool) Description() string { return t.description }
 
-// GenerateSchema returns the extension-provided schema.
+// GenerateSchema returns a typed compatibility view of the extension schema.
 func (t *Tool) GenerateSchema() *jsonschema.Schema { return t.schema }
+
+// RawInputSchema returns the extension-provided schema without narrowing it.
+func (t *Tool) RawInputSchema() map[string]any { return t.rawSchema }
 
 // ValidateInput validates JSON syntax. Schema validation is delegated to the extension SDK/runtime.
 func (t *Tool) ValidateInput(_ tooltypes.State, parameters string) error {

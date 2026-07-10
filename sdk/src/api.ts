@@ -1,7 +1,3 @@
-import AjvImport, { type ErrorObject, type ValidateFunction } from "ajv";
-import Ajv2019Import from "ajv/dist/2019.js";
-import Ajv2020Import from "ajv/dist/2020.js";
-import addFormatsImport from "ajv-formats";
 import { z } from "zod";
 
 import { createCommandContext, createEventContext, createToolContext } from "./context.js";
@@ -23,7 +19,6 @@ import type {
   HandleEventParams,
   InitializeParams,
   InitializeResult,
-  JSONSchema,
   ToolExecutionResult,
   ToolInputSchema,
   ToolRegistration,
@@ -34,18 +29,6 @@ interface RegisteredTool {
   inputSchema: Record<string, unknown>;
   parseInput(input: unknown): Promise<unknown>;
 }
-
-interface JSONSchemaValidator {
-  compile(schema: JSONSchema): ValidateFunction<unknown>;
-  errorsText(errors?: ErrorObject[] | null, options?: { separator?: string }): string;
-}
-
-type JSONSchemaValidatorConstructor = new (options?: Record<string, unknown>) => JSONSchemaValidator;
-
-const Ajv = AjvImport as unknown as JSONSchemaValidatorConstructor;
-const Ajv2019 = Ajv2019Import as unknown as JSONSchemaValidatorConstructor;
-const Ajv2020 = Ajv2020Import as unknown as JSONSchemaValidatorConstructor;
-const addFormats = addFormatsImport as unknown as (validator: JSONSchemaValidator) => void;
 
 interface RegisteredCommand {
   registration: CommandRegistration<AnyZodSchema | undefined>;
@@ -82,7 +65,7 @@ export class ExtensionHost implements ExtensionAPI {
       inputSchema: isZodSchema(inputSchema) ? zodSchemaToJsonSchema(inputSchema) : inputSchema,
       parseInput: isZodSchema(inputSchema)
         ? (input) => inputSchema.parseAsync(input)
-        : jsonSchemaInputParser(inputSchema),
+        : async (input) => input,
     });
   }
 
@@ -290,28 +273,6 @@ export function zodSchemaToJsonSchema(schema: AnyZodSchema): Record<string, unkn
     }
   }
   return { type: "object", additionalProperties: true };
-}
-
-function jsonSchemaInputParser(schema: JSONSchema): (input: unknown) => Promise<unknown> {
-  const ajv = jsonSchemaValidator(schema);
-  const validate = ajv.compile(schema) as ValidateFunction<unknown>;
-  return async (input: unknown) => {
-    if (!validate(input)) {
-      throw new Error(`Invalid tool input: ${ajv.errorsText(validate.errors, { separator: "; " })}`);
-    }
-    return input;
-  };
-}
-
-function jsonSchemaValidator(schema: JSONSchema): JSONSchemaValidator {
-  const dialect = typeof schema.$schema === "string" ? schema.$schema.toLowerCase() : "";
-  const ajv = dialect.includes("2019-09")
-    ? new Ajv2019({ allErrors: true, strict: false })
-    : dialect.includes("draft-07") || dialect.includes("draft-7")
-      ? new Ajv({ allErrors: true, strict: false })
-      : new Ajv2020({ allErrors: true, strict: false });
-  addFormats(ajv);
-  return ajv;
 }
 
 function isZodSchema(schema: ToolInputSchema): schema is AnyZodSchema {

@@ -97,7 +97,7 @@ export default function (ext: ExtensionAPI) {
 }
 ```
 
-For TypeScript extensions, `inputSchema` accepts either a Zod schema or a raw JSON Schema object. The `kodelet` SDK re-exports `z` from Zod so extension authors get an all-in-one import and do not need to depend on or import `zod` directly. The SDK converts Zod during registration and passes raw JSON Schema through unchanged. Raw schemas are validated with AJV before the tool handler runs. Non-TypeScript extensions can still speak the protocol directly by returning JSON Schema in their `extension.initialize` result.
+For TypeScript extensions, `inputSchema` accepts either a Zod schema or a raw JSON Schema object. The `kodelet` SDK re-exports `z` from Zod so extension authors get an all-in-one import and do not need to depend on or import `zod` directly. The SDK converts and validates Zod schemas during registration and execution, while raw JSON Schema is passed through unchanged and its input is left for the tool handler or upstream server to validate. Non-TypeScript extensions can still speak the protocol directly by returning JSON Schema in their `extension.initialize` result.
 
 The SDK should infer the handler input type from the schema, equivalent to:
 

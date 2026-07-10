@@ -48,12 +48,13 @@ func TestNewToolValidationAndSchemaDefaults(t *testing.T) {
 				"target": map[string]any{
 					"anyOf": []any{
 						map[string]any{"const": "workspace"},
-						map[string]any{"type": "string", "pattern": "^file:"},
+						map[string]any{"type": []any{"string", "null"}, "pattern": "^file:"},
 					},
 				},
 			},
 			"required":             []any{"mode"},
 			"additionalProperties": false,
+			"x-mcp-extension":      map[string]any{"enabled": true},
 		}
 		tool, err := newTool("search", nil, ToolRegistration{
 			Name:        "search",
@@ -62,11 +63,8 @@ func TestNewToolValidationAndSchemaDefaults(t *testing.T) {
 		}, 0, 100)
 		require.NoError(t, err)
 
-		schemaJSON, err := json.Marshal(tool.GenerateSchema())
-		require.NoError(t, err)
-		var schema map[string]any
-		require.NoError(t, json.Unmarshal(schemaJSON, &schema))
-		assert.Equal(t, inputSchema, schema)
+		assert.Equal(t, inputSchema, tooltypes.JSONSchemaForTool(tool))
+		assert.Equal(t, "object", tool.GenerateSchema().Type)
 	})
 
 	t.Run("missing name and description", func(t *testing.T) {

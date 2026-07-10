@@ -5,6 +5,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -20,6 +21,32 @@ type Tool interface {
 	ValidateInput(state State, parameters string) error
 	Execute(ctx context.Context, state State, parameters string) ToolResult
 	TracingKVs(parameters string) ([]attribute.KeyValue, error)
+}
+
+// RawInputSchemaProvider lets tools preserve JSON Schema constructs that the
+// typed jsonschema representation cannot express.
+type RawInputSchemaProvider interface {
+	RawInputSchema() map[string]any
+}
+
+// JSONSchemaForTool returns the model-facing schema without narrowing raw
+// extension schemas through the typed jsonschema representation.
+func JSONSchemaForTool(tool Tool) map[string]any {
+	if provider, ok := tool.(RawInputSchemaProvider); ok {
+		if schema := provider.RawInputSchema(); schema != nil {
+			return schema
+		}
+	}
+
+	payload, err := json.Marshal(tool.GenerateSchema())
+	if err != nil {
+		return map[string]any{"type": "object"}
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(payload, &schema); err != nil || schema == nil {
+		return map[string]any{"type": "object"}
+	}
+	return schema
 }
 
 // ToolResult represents the outcome of a tool execution

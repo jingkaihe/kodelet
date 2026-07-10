@@ -90,7 +90,7 @@ test("registers tools, commands, events and executes handlers", async () => {
   assert.deepEqual(agentEndResult, { followUpMessages: ["inspect tests"] });
 });
 
-test("registerTool preserves and validates raw JSON Schema", async () => {
+test("registerTool preserves raw JSON Schema and passes input through", async () => {
   const inputSchema = {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
@@ -133,8 +133,8 @@ test("registerTool preserves and validates raw JSON Schema", async () => {
 
   const valid = { mode: "fast", query: "code", limit: 3 };
   assert.equal((await harness.executeTool({ name: "raw_schema", input: valid })).content, JSON.stringify(valid));
-  await assert.rejects(harness.executeTool({ name: "raw_schema", input: { mode: "invalid", query: "code" } }), /Invalid tool input/);
-  await assert.rejects(harness.executeTool({ name: "raw_schema", input: { mode: "fast", query: "code", extra: true } }), /Invalid tool input/);
+  const unconstrained = { mode: "server-validates", extra: true };
+  assert.equal((await harness.executeTool({ name: "raw_schema", input: unconstrained })).content, JSON.stringify(unconstrained));
 });
 
 test("command validation can pass to the next route", async () => {

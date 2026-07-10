@@ -1,7 +1,6 @@
 package responses
 
 import (
-	"encoding/json"
 	"slices"
 	"strings"
 
@@ -123,18 +122,11 @@ func toResponsesAPITools(internalTools []tooltypes.Tool) []responses.ToolUnionPa
 	result := make([]responses.ToolUnionParam, len(internalTools))
 
 	for i, tool := range internalTools {
-		schema := tool.GenerateSchema()
-
-		// Convert to JSON and back to map[string]any
-		schemaBytes, _ := json.Marshal(schema)
-		var jsonSchema map[string]any
-		json.Unmarshal(schemaBytes, &jsonSchema)
-
 		result[i] = responses.ToolUnionParam{
 			OfFunction: &responses.FunctionToolParam{
 				Name:        tool.Name(),
 				Description: param.NewOpt(tool.Description()),
-				Parameters:  jsonSchema,
+				Parameters:  tooltypes.JSONSchemaForTool(tool),
 				// Note: Strict mode requires ALL properties to be in 'required' array.
 				// Our tools have optional parameters, so we disable strict mode.
 				Strict: param.NewOpt(false),

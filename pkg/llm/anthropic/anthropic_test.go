@@ -1678,10 +1678,32 @@ func TestToAnthropicTools(t *testing.T) {
 		assert.Equal(t, "Bash", tools[1].OfTool.Name)
 		assert.Equal(t, "Grep_tool", tools[2].OfTool.Name)
 	})
+
+	t.Run("raw JSON Schema", func(t *testing.T) {
+		rawSchema := map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"target": map[string]any{"type": []any{"string", "null"}},
+			},
+			"required":             []any{"target"},
+			"additionalProperties": false,
+			"x-mcp-extension":      map[string]any{"enabled": true},
+		}
+		tools := toAnthropicTools([]tooltypes.Tool{testTool{name: "raw", rawSchema: rawSchema}}, false)
+		require.Len(t, tools, 1)
+		require.NotNil(t, tools[0].OfTool)
+
+		payload, err := json.Marshal(tools[0].OfTool.InputSchema)
+		require.NoError(t, err)
+		var schema map[string]any
+		require.NoError(t, json.Unmarshal(payload, &schema))
+		assert.Equal(t, rawSchema, schema)
+	})
 }
 
 type testTool struct {
-	name string
+	name      string
+	rawSchema map[string]any
 }
 
 type fakeAnthropicMultiModalToolResult struct {
@@ -1696,6 +1718,8 @@ func (r fakeAnthropicMultiModalToolResult) ContentParts() []tooltypes.ToolResult
 func (t testTool) GenerateSchema() *jsonschema.Schema {
 	return &jsonschema.Schema{}
 }
+
+func (t testTool) RawInputSchema() map[string]any { return t.rawSchema }
 
 func (t testTool) Name() string {
 	return t.name

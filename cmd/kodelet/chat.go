@@ -38,12 +38,7 @@ var chatCmd = &cobra.Command{
 		ctx := cmd.Context()
 		config := getChatConfigFromFlags(ctx, cmd)
 
-		if config.NoExtensions {
-			viper.Set("extensions.enabled", false)
-		}
-		if config.NoTools {
-			viper.Set("allowed_tools", []string{"none"})
-		}
+		applyChatRuntimeRestrictions(config)
 		if err := tui.ValidateThemeName(config.Theme); err != nil {
 			presenter.Error(err, "Invalid TUI theme")
 			os.Exit(1)
@@ -70,6 +65,15 @@ var chatCmd = &cobra.Command{
 			os.Exit(1)
 		}
 	},
+}
+
+func applyChatRuntimeRestrictions(config *ChatConfig) {
+	if config.NoExtensions || config.NoTools {
+		viper.Set("extensions.enabled", false)
+	}
+	if config.NoTools {
+		viper.Set("allowed_tools", []string{"none"})
+	}
 }
 
 func init() {

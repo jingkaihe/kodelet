@@ -8,6 +8,7 @@ import test from "node:test";
 import mcpExtension from "./extensions/mcp/index.js";
 import { loadMCPConfig } from "./extensions/mcp/config.js";
 import { KodeletMCPOAuthProvider } from "./extensions/mcp/oauth.js";
+import { scopedMCPFetch } from "./extensions/mcp/register.js";
 import { createExtensionHost } from "./api.js";
 
 test("loads standard mcpServers from global and cwd mcp.json", async () => {
@@ -128,7 +129,7 @@ test("MCP extension entrypoint loads config from workspace cwd env", async () =>
     const home = path.join(root, "home");
     const workspace = path.join(root, "workspace");
     const extensionDir = path.join(root, "plugin", "extension");
-    const fakeServer = path.join(root, "fake-mcp-server.mjs");
+    const fakeServer = path.join(workspace, "fake-mcp-server.mjs");
     await mkdir(path.join(home, ".kodelet"), { recursive: true });
     await mkdir(workspace, { recursive: true });
     await mkdir(extensionDir, { recursive: true });
@@ -156,13 +157,17 @@ process.stdin.on('data', (chunk) => {
     if (request.method === 'initialize') {
       result = { protocolVersion: request.params?.protocolVersion ?? '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'fake', version: '1.0.0' } };
     } else if (request.method === 'tools/list') {
-      result = { tools: [{ name: 'ping', description: 'Ping from workspace config', inputSchema: {
+      result = { tools: [{ name: 'ping', title: 'Workspace Ping', inputSchema: {
         type: 'object',
-        properties: { mode: { type: 'string', description: 'Ping mode', enum: ['fast', 'safe'] } },
-        additionalProperties: false
+        properties: {
+          mode: { type: 'string', description: 'Ping mode', enum: ['fast', 'safe'] },
+          target: { type: ['string', 'null'] }
+        },
+        additionalProperties: false,
+        'x-mcp-extension': { enabled: true }
       } }] };
     } else if (request.method === 'tools/call') {
-      result = { content: [{ type: 'text', text: JSON.stringify({ bare: process.env.FROM_BARE, braced: process.env.FROM_BRACED, mixed: process.env.FROM_MIXED }) }] };
+      result = { content: [{ type: 'text', text: JSON.stringify({ cwd: process.cwd(), bare: process.env.FROM_BARE, braced: process.env.FROM_BRACED, mixed: process.env.FROM_MIXED }) }] };
     }
     process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }) + '\\n');
   }
@@ -176,7 +181,7 @@ process.stdin.on('data', (chunk) => {
         mcpServers: {
           workspace: {
             command: process.execPath,
-            args: [fakeServer],
+            args: ["fake-mcp-server.mjs"],
             env: {
               FROM_BARE: "$MCP_TEST_ENV_VALUE",
               FROM_BRACED: "${MCP_TEST_ENV_VALUE}",
@@ -197,13 +202,18 @@ process.stdin.on('data', (chunk) => {
         extension: { id: "mcp", cwd: workspace, dataDir: path.join(root, "data") },
       });
       assert.deepEqual(init.tools.map((tool) => tool.name), ["mcp__workspace_ping"]);
+      assert.equal(init.tools[0]?.description, "Workspace Ping");
       assert.deepEqual(init.tools[0]?.inputSchema, {
         type: "object",
-        properties: { mode: { type: "string", description: "Ping mode", enum: ["fast", "safe"] } },
+        properties: {
+          mode: { type: "string", description: "Ping mode", enum: ["fast", "safe"] },
+          target: { type: ["string", "null"] },
+        },
         additionalProperties: false,
+        "x-mcp-extension": { enabled: true },
       });
       const result = await host.executeTool({ name: "mcp__workspace_ping", input: {}, context: { cwd: workspace } });
-      assert.equal(result.content, JSON.stringify({ bare: "expanded-value", braced: "expanded-value", mixed: "prefix-expanded-value-suffix" }));
+      assert.equal(result.content, JSON.stringify({ cwd: workspace, bare: "expanded-value", braced: "expanded-value", mixed: "prefix-expanded-value-suffix" }));
       await host.handleEvent({ id: "session-end", event: "session.end", context: { cwd: workspace } });
     } finally {
       process.chdir(oldCwd);
@@ -224,9 +234,16 @@ test("MCP remote HTTP headers expand environment variables", async () => {
   const oldWorkspaceCWD = process.env.KODELET_EXTENSION_WORKSPACE_CWD;
   const oldToken = process.env.MCP_TEST_HEADER_TOKEN;
   const receivedAuthHeaders: string[] = [];
+  const terminatedSessionIDs: string[] = [];
   const callbackPortHolder = http.createServer((_req, res) => res.writeHead(204).end());
 
   const server = http.createServer((req, res) => {
+    if (req.method === "DELETE") {
+      receivedAuthHeaders.push(req.headers.authorization ?? "");
+      terminatedSessionIDs.push(req.headers["mcp-session-id"]?.toString() ?? "");
+      res.writeHead(200).end();
+      return;
+    }
     if (req.method !== "POST") {
       res.writeHead(405).end();
       return;
@@ -258,7 +275,10 @@ test("MCP remote HTTP headers expand environment variables", async () => {
         result = { tools: [{ name: "ping", description: "Ping from HTTP config", inputSchema: { type: "object" } }] };
       }
 
-      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
+      res.writeHead(200, {
+        "content-type": "application/json",
+        ...(message.method === "initialize" ? { "mcp-session-id": "session-123" } : {}),
+      }).end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
     });
   });
 
@@ -316,6 +336,8 @@ test("MCP remote HTTP headers expand environment variables", async () => {
     assert(receivedAuthHeaders.length >= 2);
     assert(receivedAuthHeaders.every((header) => header === "Bearer expanded-token"));
     await host.handleEvent({ id: "session-end", event: "session.end", context: { cwd: workspace } });
+    assert.deepEqual(terminatedSessionIDs, ["session-123"]);
+    assert.equal(receivedAuthHeaders.at(-1), "Bearer expanded-token");
   } finally {
     await new Promise<void>((resolve, reject) => {
       server.close((error) => error ? reject(error) : resolve());
@@ -329,6 +351,36 @@ test("MCP remote HTTP headers expand environment variables", async () => {
     restoreEnv("MCP_TEST_HEADER_TOKEN", oldToken);
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("MCP configured headers are scoped and do not override OAuth", async () => {
+  const requests: Array<{ url: string; headers: Record<string, string> }> = [];
+  const baseFetch = async (url: string | URL, init?: RequestInit): Promise<Response> => {
+    requests.push({ url: String(url), headers: Object.fromEntries(new Headers(init?.headers).entries()) });
+    return new Response(null, { status: 204 });
+  };
+  const mcpUrl = new URL("https://mcp.example/rpc");
+  const scopedFetch = scopedMCPFetch(mcpUrl, {
+    Authorization: "Bearer configured-token",
+    "X-MCP-Secret": "secret",
+  }, baseFetch);
+
+  await scopedFetch(mcpUrl, { headers: { Authorization: "Bearer oauth-token" } });
+  await scopedFetch("https://auth.example/token", { method: "POST", body: "grant_type=authorization_code" });
+  await scopedFetch("https://mcp.example/messages", {
+    method: "POST",
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call" }),
+  });
+  await scopedFetch("https://mcp.example/oauth/token", { method: "POST", body: "grant_type=refresh_token" });
+
+  assert.equal(requests[0]?.headers.authorization, "Bearer oauth-token");
+  assert.equal(requests[0]?.headers["x-mcp-secret"], "secret");
+  assert.equal(requests[1]?.headers.authorization, undefined);
+  assert.equal(requests[1]?.headers["x-mcp-secret"], undefined);
+  assert.equal(requests[2]?.headers.authorization, "Bearer configured-token");
+  assert.equal(requests[2]?.headers["x-mcp-secret"], "secret");
+  assert.equal(requests[3]?.headers.authorization, undefined);
+  assert.equal(requests[3]?.headers["x-mcp-secret"], undefined);
 });
 
 test("MCP OAuth callback listener is lazy and can be released after authorization", async () => {

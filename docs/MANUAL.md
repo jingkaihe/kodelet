@@ -1248,7 +1248,7 @@ export default defineExtension((ext) => {
 });
 ```
 
-`registerTool` also accepts a raw JSON Schema object as `inputSchema`. Raw schemas are sent to the model unchanged and validated with AJV before `execute` runs; Zod schemas retain inferred handler input types and Zod parsing behavior.
+`registerTool` also accepts a raw JSON Schema object as `inputSchema`. Raw schemas are sent to the model unchanged and their inputs are passed directly to `execute`; the handler or upstream server is responsible for validation. Zod schemas retain inferred handler input types and Zod parsing behavior.
 
 A typical extension directory contains a package, compiled JavaScript, and an executable wrapper:
 

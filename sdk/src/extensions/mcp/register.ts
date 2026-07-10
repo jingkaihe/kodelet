@@ -3,6 +3,7 @@ import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 import type { ExtensionAPI } from "../../types.js";
@@ -19,6 +20,7 @@ interface TransportBundle {
 interface ConnectedServer {
   name: string;
   client: Client;
+  transport: MCPTransport;
   whiteList: string[];
   oauthProvider?: KodeletMCPOAuthProvider;
 }
@@ -45,11 +47,15 @@ export async function registerMCP(ext: ExtensionAPI, config: MCPConfig): Promise
 }
 
 async function closeConnectedServer(server: ConnectedServer): Promise<void> {
+  if (server.transport instanceof StreamableHTTPClientTransport) {
+    await Promise.allSettled([server.transport.terminateSession()]);
+  }
   await Promise.allSettled([server.client.close(), server.oauthProvider?.close()]);
 }
 
 async function connectServer(serverName: string, config: MCPServerConfig, globalOAuth: MCPOAuthGlobalConfig | undefined): Promise<ConnectedServer> {
   const initial = buildTransport(serverName, config, globalOAuth);
+  let activeTransport = initial.transport;
 
   let client = new Client({ name: "kodelet", version: "dev" });
   try {
@@ -70,11 +76,13 @@ async function connectServer(serverName: string, config: MCPServerConfig, global
     client = new Client({ name: "kodelet", version: "dev" });
     const retry = buildTransport(serverName, config, globalOAuth, initial.oauthProvider);
     await client.connect(retry.transport);
+    activeTransport = retry.transport;
   }
 
   return {
     name: serverName,
     client,
+    transport: activeTransport,
     whiteList: config.tool_white_list ?? [],
     oauthProvider: initial.oauthProvider,
   };
@@ -98,6 +106,7 @@ function buildTransport(
           args: config.args ?? [],
           env: resolveEnv(config.env ?? config.envs),
           stderr: "inherit",
+          cwd: extensionWorkspaceCWD(),
         }),
       };
     }
@@ -106,9 +115,10 @@ function buildTransport(
         throw new Error("url is required for sse server");
       }
       const provider = oauthProvider ?? new KodeletMCPOAuthProvider({ serverName, serverUrl: config.url, config: config.oauth, globalConfig: globalOAuth });
-      return { transport: new SSEClientTransport(new URL(config.url), {
+      const url = new URL(config.url);
+      return { transport: new SSEClientTransport(url, {
         authProvider: provider,
-        requestInit: { headers: resolveConfigValues(config.headers) },
+        fetch: scopedMCPFetch(url, resolveConfigValues(config.headers)),
       }), oauthProvider: provider };
     }
     case "http": {
@@ -116,12 +126,57 @@ function buildTransport(
         throw new Error("url is required for http server");
       }
       const provider = oauthProvider ?? new KodeletMCPOAuthProvider({ serverName, serverUrl: config.url, config: config.oauth, globalConfig: globalOAuth });
-      return { transport: new StreamableHTTPClientTransport(new URL(config.url), {
+      const url = new URL(config.url);
+      return { transport: new StreamableHTTPClientTransport(url, {
         authProvider: provider,
-        requestInit: { headers: resolveConfigValues(config.headers) },
+        fetch: scopedMCPFetch(url, resolveConfigValues(config.headers)),
       }), oauthProvider: provider };
     }
   }
+}
+
+export function scopedMCPFetch(
+  serverUrl: URL,
+  configuredHeaders: Record<string, string> | undefined,
+  baseFetch: FetchLike = fetch,
+): FetchLike {
+  const entries = Object.entries(configuredHeaders ?? {});
+  if (entries.length === 0) {
+    return baseFetch;
+  }
+  return async (url, init) => {
+    if (!isMCPRequest(serverUrl, url, init)) {
+      return await baseFetch(url, init);
+    }
+    const headers = new Headers(init?.headers);
+    for (const [name, value] of entries) {
+      if (!headers.has(name)) {
+        headers.set(name, value);
+      }
+    }
+    return await baseFetch(url, { ...init, headers });
+  };
+}
+
+function isMCPRequest(serverUrl: URL, requestUrl: string | URL, init: RequestInit | undefined): boolean {
+  const url = new URL(requestUrl);
+  if (url.href === serverUrl.href) {
+    return true;
+  }
+  if (url.origin !== serverUrl.origin || typeof init?.body !== "string") {
+    return false;
+  }
+  try {
+    const body = JSON.parse(init.body) as unknown;
+    const messages = Array.isArray(body) ? body : [body];
+    return messages.length > 0 && messages.every((message) => isRecord(message) && message.jsonrpc === "2.0");
+  } catch {
+    return false;
+  }
+}
+
+function extensionWorkspaceCWD(): string {
+  return process.env.KODELET_EXTENSION_WORKSPACE_CWD || process.cwd();
 }
 
 function supportsFinishAuth(transport: MCPTransport): transport is StreamableHTTPClientTransport | SSEClientTransport {
@@ -174,7 +229,7 @@ async function registerServerTools(ext: ExtensionAPI, server: ConnectedServer): 
     const toolName = extensionToolName(server.name, tool.name);
     ext.registerTool({
       name: toolName,
-      description: tool.description ?? "",
+      description: tool.description?.trim() || tool.title?.trim() || tool.name,
       inputSchema: tool.inputSchema,
       timeoutInSec: 600,
       async execute(input) {

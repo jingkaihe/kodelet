@@ -51,11 +51,16 @@ func (d *fakeDecoder) Err() error {
 	return d.err
 }
 
-type responsesTestTool struct{ name string }
+type responsesTestTool struct {
+	name      string
+	rawSchema map[string]any
+}
 
 func (t responsesTestTool) GenerateSchema() *jsonschema.Schema {
 	return jsonschema.Reflect(map[string]any{})
 }
+
+func (t responsesTestTool) RawInputSchema() map[string]any { return t.rawSchema }
 
 func (t responsesTestTool) Name() string { return t.name }
 

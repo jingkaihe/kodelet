@@ -21,9 +21,11 @@ type testTool struct {
 	traceErr    error
 	result      tooltypes.ToolResult
 	executed    bool
+	rawSchema   map[string]any
 }
 
 func (t *testTool) GenerateSchema() *jsonschema.Schema              { return GenerateSchema[map[string]any]() }
+func (t *testTool) RawInputSchema() map[string]any                  { return t.rawSchema }
 func (t *testTool) Name() string                                    { return t.name }
 func (t *testTool) Description() string                             { return t.description }
 func (t *testTool) ValidateInput(_ tooltypes.State, _ string) error { return t.validateErr }
@@ -180,6 +182,22 @@ func TestGetToolsFromNamesAndOpenAIConversion(t *testing.T) {
 	require.NotNil(t, openAITools[0].Function)
 	assert.Equal(t, tools[0].Name(), openAITools[0].Function.Name)
 	assert.NotNil(t, openAITools[0].Function.Parameters)
+}
+
+func TestOpenAIConversionPreservesRawJSONSchema(t *testing.T) {
+	rawSchema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"target": map[string]any{"type": []any{"string", "null"}},
+		},
+		"additionalProperties": false,
+		"x-mcp-extension":      true,
+	}
+	converted := ToOpenAITools([]tooltypes.Tool{&testTool{name: "raw", description: "raw", rawSchema: rawSchema}})
+
+	require.Len(t, converted, 1)
+	require.NotNil(t, converted[0].Function)
+	assert.Equal(t, rawSchema, converted[0].Function.Parameters)
 }
 
 func TestRunToolFindsValidatesAndExecutesTool(t *testing.T) {

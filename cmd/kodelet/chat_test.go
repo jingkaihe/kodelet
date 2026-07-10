@@ -9,9 +9,11 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/tui"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -71,6 +73,23 @@ func TestChatNoToolsFlag(t *testing.T) {
 
 	config := getChatConfigFromFlags(context.Background(), cmd)
 	assert.True(t, config.NoTools)
+}
+
+func TestChatNoToolsDisablesExtensionStartup(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	viper.Reset()
+	t.Cleanup(func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	})
+
+	applyChatRuntimeRestrictions(&ChatConfig{NoTools: true})
+
+	assert.False(t, viper.GetBool("extensions.enabled"))
+	assert.Equal(t, []string{"none"}, viper.GetStringSlice("allowed_tools"))
+	assert.False(t, extensions.LoadConfigFromViper().Enabled)
 }
 
 func TestValidateChatResumeConversationRejectsMissingConversation(t *testing.T) {

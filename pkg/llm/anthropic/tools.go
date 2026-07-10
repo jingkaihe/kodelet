@@ -39,12 +39,45 @@ func toAnthropicTools(tools []tooltypes.Tool, useSubscription bool) []anthropic.
 			OfTool: &anthropic.ToolParam{
 				Name:        name,
 				Description: anthropic.String(tool.Description()),
-				InputSchema: anthropic.ToolInputSchemaParam{
-					Properties: tool.GenerateSchema().Properties,
-				},
+				InputSchema: anthropicInputSchema(tool),
 			},
 		}
 	}
 
 	return anthropicTools
+}
+
+func anthropicInputSchema(tool tooltypes.Tool) anthropic.ToolInputSchemaParam {
+	raw := tooltypes.JSONSchemaForTool(tool)
+	schema := anthropic.ToolInputSchemaParam{
+		Properties:  raw["properties"],
+		Required:    schemaRequiredStrings(raw["required"]),
+		ExtraFields: make(map[string]any),
+	}
+	for key, value := range raw {
+		switch key {
+		case "type", "properties", "required":
+			continue
+		default:
+			schema.ExtraFields[key] = value
+		}
+	}
+	return schema
+}
+
+func schemaRequiredStrings(value any) []string {
+	values, ok := value.([]any)
+	if !ok {
+		if strings, ok := value.([]string); ok {
+			return strings
+		}
+		return nil
+	}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if item, ok := value.(string); ok {
+			result = append(result, item)
+		}
+	}
+	return result
 }
