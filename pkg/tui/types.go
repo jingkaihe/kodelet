@@ -148,12 +148,14 @@ type model struct {
 	thoughtMarkdownRenderer        *glamour.TermRenderer
 	thoughtMarkdownRendererWidth   int
 
-	running      bool
-	activeRunID  int
-	nextRunID    int
-	workingFrame int
-	runCh        chan tea.Msg
-	cancelRun    context.CancelFunc
+	running       bool
+	runCancelling bool
+	quitAfterRun  bool
+	activeRunID   int
+	nextRunID     int
+	workingFrame  int
+	runCh         chan tea.Msg
+	cancelRun     context.CancelFunc
 
 	terminalTitleEpoch   time.Time
 	lastTerminalTitle    string

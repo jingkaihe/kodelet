@@ -83,14 +83,68 @@ func TestCancelActiveRunFinishesActiveBlocks(t *testing.T) {
 	content, _ := m.renderTranscript()
 
 	assert.True(t, cancelled)
-	assert.False(t, m.running)
-	assert.Equal(t, 0, m.activeRunID)
-	assert.Equal(t, "cancelled", m.status)
+	assert.True(t, m.running)
+	assert.True(t, m.runCancelling)
+	assert.Equal(t, 1, m.activeRunID)
+	assert.Equal(t, "cancelling", m.status)
 	assert.False(t, hasActiveThought(m.entries[1].blocks[0]))
 	assert.False(t, hasActiveTool(m.entries[1].blocks[1]))
 	assert.Contains(t, content, "Had 1 Thought")
 	assert.Contains(t, content, "Ran 1 command")
 	assert.NotContains(t, content, "Thinking")
+}
+
+func TestCancelledRunFinishesOnDone(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 100
+	m.height = 30
+	m.resize()
+	m.activeRunID = 1
+	m.running = true
+	m.runCancelling = true
+
+	updated, cmd := m.Update(chatDoneMsg{runID: 1, conversationID: "conv-1", err: context.Canceled})
+	m = updated.(model)
+
+	assert.NotNil(t, cmd)
+	assert.False(t, m.running)
+	assert.False(t, m.runCancelling)
+	assert.Equal(t, 0, m.activeRunID)
+	assert.Equal(t, "conv-1", m.conversationID)
+	assert.Equal(t, "cancelled", m.status)
+	assert.NoError(t, m.err)
+}
+
+func TestCtrlCAfterCancelQuitsAfterRunCleanup(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 100
+	m.height = 30
+	m.resize()
+	m.activeRunID = 1
+	m.running = true
+	m.runCancelling = true
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	m = updated.(model)
+
+	assert.Nil(t, cmd)
+	assert.True(t, m.running)
+	assert.True(t, m.runCancelling)
+	assert.True(t, m.quitAfterRun)
+	assert.Equal(t, "exiting", m.status)
+
+	updated, cmd = m.Update(chatDoneMsg{runID: 1, err: context.Canceled})
+	m = updated.(model)
+
+	assert.False(t, m.running)
+	assert.False(t, m.runCancelling)
+	assert.False(t, m.quitAfterRun)
+	assert.Equal(t, "cancelled", m.status)
+	require.NotNil(t, cmd)
+	_, ok := cmd().(tea.QuitMsg)
+	assert.True(t, ok)
 }
 
 func TestWaitForMsgAndInitCommands(t *testing.T) {
