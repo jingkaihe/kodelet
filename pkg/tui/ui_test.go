@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -231,6 +232,35 @@ func TestDiagnosticNotificationMessageIsBounded(t *testing.T) {
 	require.True(t, ok)
 	assert.Len(t, []rune(notification.message), diagnosticNotificationMaxRunes)
 	assert.True(t, strings.HasSuffix(notification.message, "…"))
+}
+
+func TestTUIDiagnosticSinkCacheIsBoundedAndOnlyRecordsEnqueuedMessages(t *testing.T) {
+	fullChannel := make(chan tea.Msg, 1)
+	fullChannel <- struct{}{}
+	sink := newTUIDiagnosticSink(fullChannel)
+	diagnostic := extensions.Diagnostic{
+		Level:     extensions.DiagnosticLevelWarning,
+		Extension: "mcp",
+		Message:   "failed to initialize",
+	}
+
+	sink.ReportDiagnostic(context.Background(), diagnostic)
+	assert.Empty(t, sink.recent)
+
+	<-fullChannel
+	sink.ReportDiagnostic(context.Background(), diagnostic)
+	assert.Len(t, sink.recent, 1)
+
+	channel := make(chan tea.Msg, diagnosticNotificationCacheSize*2)
+	sink = newTUIDiagnosticSink(channel)
+	for i := range diagnosticNotificationCacheSize * 2 {
+		sink.ReportDiagnostic(context.Background(), extensions.Diagnostic{
+			Level:     extensions.DiagnosticLevelWarning,
+			Extension: "mcp",
+			Message:   fmt.Sprintf("warning-%d", i),
+		})
+	}
+	assert.Len(t, sink.recent, diagnosticNotificationCacheSize)
 }
 
 func TestTUIUIBrokerUnavailableClosedAndContextCancellation(t *testing.T) {

@@ -14,9 +14,10 @@ import (
 )
 
 const (
-	uiNotificationTTL              = 5 * time.Second
-	diagnosticNotificationCooldown = 30 * time.Second
-	diagnosticNotificationMaxRunes = 320
+	uiNotificationTTL               = 5 * time.Second
+	diagnosticNotificationCooldown  = 30 * time.Second
+	diagnosticNotificationMaxRunes  = 320
+	diagnosticNotificationCacheSize = 128
 )
 
 type uiPromptMode int
@@ -84,12 +85,27 @@ type uiDiagnosticMsg struct {
 type tuiDiagnosticSink struct {
 	ch chan<- tea.Msg
 
-	mu     sync.Mutex
-	recent map[string]time.Time
+	// recent and entries form a fixed-size FIFO dedupe cache. A diagnostic is
+	// recorded only after its notification has been enqueued successfully.
+	mu      sync.Mutex
+	recent  map[diagnosticCacheKey]time.Time
+	entries [diagnosticNotificationCacheSize]diagnosticCacheEntry
+	next    int
+}
+
+type diagnosticCacheKey struct {
+	level   uiNotificationLevel
+	title   string
+	message string
+}
+
+type diagnosticCacheEntry struct {
+	key    diagnosticCacheKey
+	seenAt time.Time
 }
 
 func newTUIDiagnosticSink(ch chan<- tea.Msg) *tuiDiagnosticSink {
-	return &tuiDiagnosticSink{ch: ch, recent: map[string]time.Time{}}
+	return &tuiDiagnosticSink{ch: ch, recent: map[diagnosticCacheKey]time.Time{}}
 }
 
 func (s *tuiDiagnosticSink) ReportDiagnostic(_ context.Context, diagnostic extensions.Diagnostic) {
@@ -97,31 +113,41 @@ func (s *tuiDiagnosticSink) ReportDiagnostic(_ context.Context, diagnostic exten
 		return
 	}
 	notification, ok := notificationFromDiagnostic(diagnostic)
-	if !ok || s.duplicate(notification) {
+	if !ok {
 		return
 	}
-	select {
-	case s.ch <- uiDiagnosticMsg{notification: notification}:
-	default:
-	}
+	s.enqueue(notification)
 }
 
-func (s *tuiDiagnosticSink) duplicate(notification uiNotification) bool {
+func (s *tuiDiagnosticSink) enqueue(notification uiNotification) {
 	now := time.Now()
-	key := fmt.Sprintf("%d\x00%s\x00%s", notification.level, notification.title, notification.message)
+	key := diagnosticCacheKey{
+		level:   notification.level,
+		title:   notification.title,
+		message: notification.message,
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if last, ok := s.recent[key]; ok && now.Sub(last) < diagnosticNotificationCooldown {
-		return true
+		return
 	}
-	for existing, seenAt := range s.recent {
-		if now.Sub(seenAt) >= diagnosticNotificationCooldown {
-			delete(s.recent, existing)
-		}
+
+	select {
+	case s.ch <- uiDiagnosticMsg{notification: notification}:
+		s.rememberLocked(key, now)
+	default:
 	}
-	s.recent[key] = now
-	return false
+}
+
+func (s *tuiDiagnosticSink) rememberLocked(key diagnosticCacheKey, seenAt time.Time) {
+	evicted := s.entries[s.next]
+	if current, ok := s.recent[evicted.key]; ok && current.Equal(evicted.seenAt) {
+		delete(s.recent, evicted.key)
+	}
+	s.entries[s.next] = diagnosticCacheEntry{key: key, seenAt: seenAt}
+	s.next = (s.next + 1) % len(s.entries)
+	s.recent[key] = seenAt
 }
 
 func notificationFromDiagnostic(diagnostic extensions.Diagnostic) (uiNotification, bool) {
