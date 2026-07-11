@@ -460,33 +460,106 @@ func TestUpdateUsageUsesLongContextPricing(t *testing.T) {
 		Thread: base.NewThread(llmtypes.Config{Provider: "openai", Model: "test-model"}, "test"),
 		customPricing: map[string]llmtypes.ModelPricing{
 			"test-model": {
-				Input:                  1,
-				CachedInput:            0.1,
-				Output:                 2,
-				LongContextInput:       3,
-				LongContextCachedInput: 0.3,
-				LongContextOutput:      4,
-				LongContextThreshold:   272_000,
-				ContextWindow:          1_050_000,
+				Input:                      1,
+				CachedInput:                0.1,
+				CacheWriteInput:            1.25,
+				Output:                     2,
+				LongContextInput:           3,
+				LongContextCachedInput:     0.3,
+				LongContextCacheWriteInput: 3.75,
+				LongContextOutput:          4,
+				LongContextThreshold:       272_000,
+				ContextWindow:              1_050_000,
 			},
 		},
 	}
 
-	thread.updateUsage(responses.ResponseUsage{
-		InputTokens:  272_001,
-		OutputTokens: 10,
-		InputTokensDetails: responses.ResponseUsageInputTokensDetails{
-			CachedTokens: 1,
-		},
-	}, "test-model")
+	usageJSON := `{
+		"input_tokens": 272001,
+		"output_tokens": 10,
+		"input_tokens_details": {
+			"cached_tokens": 1,
+			"cache_write_tokens": 2
+		}
+	}`
+	var usage responses.ResponseUsage
+	require.NoError(t, json.Unmarshal([]byte(usageJSON), &usage))
+
+	thread.updateUsage(usage, "test-model")
 
 	assert.Equal(t, 272001, thread.Usage.InputTokens)
 	assert.Equal(t, 1, thread.Usage.CacheReadInputTokens)
+	assert.Equal(t, 2, thread.Usage.CacheCreationInputTokens)
 	assert.Equal(t, 10, thread.Usage.OutputTokens)
-	assert.Equal(t, float64(272000)*3, thread.Usage.InputCost)
+	assert.Equal(t, float64(271998)*3, thread.Usage.InputCost)
 	assert.Equal(t, 0.3, thread.Usage.CacheReadCost)
+	assert.Equal(t, 7.5, thread.Usage.CacheCreationCost)
 	assert.Equal(t, 40.0, thread.Usage.OutputCost)
 	assert.Equal(t, 1_050_000, thread.Usage.MaxContextWindow)
+}
+
+func TestUpdateUsageAccountsCacheWriteTokensOnlyWithConfiguredRate(t *testing.T) {
+	thread := &Thread{
+		Thread: base.NewThread(llmtypes.Config{Provider: "openai", Model: "test-model"}, "test"),
+		customPricing: map[string]llmtypes.ModelPricing{
+			"test-model": {
+				Input:         1,
+				CachedInput:   0.1,
+				Output:        2,
+				ContextWindow: 128_000,
+			},
+		},
+	}
+
+	usageJSON := `{
+		"input_tokens": 100,
+		"output_tokens": 10,
+		"input_tokens_details": {
+			"cached_tokens": 20,
+			"cache_write_tokens": 30
+		}
+	}`
+	var usage responses.ResponseUsage
+	require.NoError(t, json.Unmarshal([]byte(usageJSON), &usage))
+
+	thread.updateUsage(responses.ResponseUsage{
+		InputTokens:  usage.InputTokens,
+		OutputTokens: usage.OutputTokens,
+		InputTokensDetails: responses.ResponseUsageInputTokensDetails{
+			CachedTokens: usage.InputTokensDetails.CachedTokens,
+		},
+	}, "test-model")
+
+	assert.Equal(t, 100, thread.Usage.InputTokens)
+	assert.Equal(t, 20, thread.Usage.CacheReadInputTokens)
+	assert.Equal(t, 0, thread.Usage.CacheCreationInputTokens)
+	assert.Equal(t, float64(80), thread.Usage.InputCost)
+	assert.Equal(t, 2.0, thread.Usage.CacheReadCost)
+	assert.Equal(t, 0.0, thread.Usage.CacheCreationCost)
+
+	thread = &Thread{
+		Thread: base.NewThread(llmtypes.Config{Provider: "openai", Model: "test-model"}, "test"),
+		customPricing: map[string]llmtypes.ModelPricing{
+			"test-model": {
+				Input:         1,
+				CachedInput:   0.1,
+				Output:        2,
+				ContextWindow: 128_000,
+			},
+		},
+	}
+
+	thread.updateUsage(usage, "test-model")
+
+	assert.Equal(t, 100, thread.Usage.InputTokens)
+	assert.Equal(t, 20, thread.Usage.CacheReadInputTokens)
+	assert.Equal(t, 30, thread.Usage.CacheCreationInputTokens)
+	assert.Equal(t, 10, thread.Usage.OutputTokens)
+	assert.Equal(t, float64(50), thread.Usage.InputCost)
+	assert.Equal(t, 2.0, thread.Usage.CacheReadCost)
+	assert.Equal(t, 0.0, thread.Usage.CacheCreationCost)
+	assert.Equal(t, 20.0, thread.Usage.OutputCost)
+	assert.Equal(t, 128_000, thread.Usage.MaxContextWindow)
 }
 
 func TestProcessStreamUsesCallModelForLongContextPricing(t *testing.T) {

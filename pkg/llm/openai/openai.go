@@ -145,6 +145,7 @@ func NewOpenAIThread(config llmtypes.Config) (*Thread, error) {
 	if reasoningEffort == "" {
 		reasoningEffort = "medium" // Default reasoning effort
 	}
+	reasoningEffort = openAIReasoningEffortForChatRequest(reasoningEffort)
 
 	// Validate custom configuration
 	if err := validateCustomConfiguration(config); err != nil {
@@ -441,7 +442,7 @@ func (t *Thread) processMessageExchange(
 
 	if t.isReasoningModelDynamic(model) {
 		if t.reasoningEffort != "none" {
-			requestParams.ReasoningEffort = t.reasoningEffort
+			requestParams.ReasoningEffort = openAIReasoningEffortForChatRequest(t.reasoningEffort)
 		}
 		requestParams.MaxTokens = 0
 	}

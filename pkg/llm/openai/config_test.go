@@ -14,6 +14,7 @@ import (
 // Define expected OpenAI platform defaults once to avoid duplication
 var (
 	expectedOpenAIReasoningModels = []string{
+		"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
 		"gpt-5.5",
 		"gpt-5.5-pro",
 		"gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano",
@@ -154,6 +155,9 @@ func TestLoadCodexPlatformDefaults(t *testing.T) {
 	require.NotNil(t, pricing)
 
 	expectedReasoning := []string{
+		"gpt-5.6-sol",
+		"gpt-5.6-terra",
+		"gpt-5.6-luna",
 		"gpt-5.5",
 		"gpt-5.3-codex",
 		"gpt-5.4",
@@ -166,6 +170,14 @@ func TestLoadCodexPlatformDefaults(t *testing.T) {
 	}
 	assert.ElementsMatch(t, expectedReasoning, models.Reasoning)
 	assert.Empty(t, models.NonReasoning)
+
+	gpt56SolPricing, exists := pricing["gpt-5.6-sol"]
+	require.True(t, exists)
+	assert.Equal(t, 0.000005, gpt56SolPricing.Input)
+	assert.Equal(t, 0.0000005, gpt56SolPricing.CachedInput)
+	assert.Equal(t, 0.00000625, gpt56SolPricing.CacheWriteInput)
+	assert.Equal(t, 0.00003, gpt56SolPricing.Output)
+	assert.Equal(t, 372_000, gpt56SolPricing.ContextWindow)
 
 	gpt55Pricing, exists := pricing["gpt-5.5"]
 	require.True(t, exists)
@@ -234,6 +246,14 @@ func TestLoadCodexPlatformDefaultsFastTier(t *testing.T) {
 	assert.Equal(t, 0.00000125, gpt55Pricing.CachedInput)
 	assert.Equal(t, 0.000075, gpt55Pricing.Output)
 	assert.Equal(t, 0, gpt55Pricing.LongContextThreshold)
+
+	gpt56SolPricing, exists := pricing["gpt-5.6-sol"]
+	require.True(t, exists)
+	assert.Equal(t, 0.00001, gpt56SolPricing.Input)
+	assert.Equal(t, 0.000001, gpt56SolPricing.CachedInput)
+	assert.Equal(t, 0.0000125, gpt56SolPricing.CacheWriteInput)
+	assert.Equal(t, 0.00006, gpt56SolPricing.Output)
+	assert.Equal(t, 372_000, gpt56SolPricing.ContextWindow)
 }
 
 func TestBuildCopilotPlatformDefaults(t *testing.T) {
@@ -276,6 +296,15 @@ func TestLoadOpenAIPlatformDefaults(t *testing.T) {
 	assert.ElementsMatch(t, expectedOpenAINonReasoningModels, models.NonReasoning)
 
 	// Check pricing for key models
+	gpt56SolPricing, exists := pricing["gpt-5.6-sol"]
+	require.True(t, exists)
+	assert.Equal(t, 0.000005, gpt56SolPricing.Input)
+	assert.Equal(t, 0.0000005, gpt56SolPricing.CachedInput)
+	assert.Equal(t, 0.00000625, gpt56SolPricing.CacheWriteInput)
+	assert.Equal(t, 0.00003, gpt56SolPricing.Output)
+	assert.Equal(t, 0.0000125, gpt56SolPricing.LongContextCacheWriteInput)
+	assert.Equal(t, 1_050_000, gpt56SolPricing.ContextWindow)
+
 	gpt41Pricing, exists := pricing["gpt-4.1"]
 	require.True(t, exists)
 	assert.Equal(t, 0.000002, gpt41Pricing.Input)
@@ -303,6 +332,25 @@ func TestLoadOpenAIPlatformDefaults(t *testing.T) {
 		_, exists := pricing[model]
 		assert.True(t, exists, "Model %s should have pricing information", model)
 	}
+}
+
+func TestLoadOpenAIPlatformDefaultsUsesConfiguredServiceTierPricing(t *testing.T) {
+	_, standardPricing := loadOpenAIPlatformDefaults()
+	_, priorityPricing := loadOpenAIPlatformDefaultsForServiceTier(llmtypes.OpenAIServiceTierPriority)
+
+	standardGPT56Sol, exists := standardPricing["gpt-5.6-sol"]
+	require.True(t, exists)
+	assert.Equal(t, 0.000005, standardGPT56Sol.Input)
+	assert.Equal(t, 0.00000625, standardGPT56Sol.CacheWriteInput)
+	assert.Equal(t, 0.0000125, standardGPT56Sol.LongContextCacheWriteInput)
+
+	priorityGPT56Sol, exists := priorityPricing["gpt-5.6-sol"]
+	require.True(t, exists)
+	assert.Equal(t, 0.00001, priorityGPT56Sol.Input)
+	assert.Equal(t, 0.0000125, priorityGPT56Sol.CacheWriteInput)
+	assert.Equal(t, 0, priorityGPT56Sol.LongContextThreshold)
+
+	assert.Equal(t, standardPricing["gpt-4.1"], priorityPricing["gpt-4.1"])
 }
 
 func TestGetPlatformBaseURL(t *testing.T) {
@@ -477,6 +525,22 @@ func TestResolveAPIMode(t *testing.T) {
 			expected: llmtypes.OpenAIAPIModeChatCompletions,
 		},
 		{
+			name:     "gpt-5.6 model family defaults to responses",
+			config:   llmtypes.Config{Model: "gpt-5.6-sol"},
+			expected: llmtypes.OpenAIAPIModeResponses,
+		},
+		{
+			name:     "gpt-5.6 ignores explicit chat completions api_mode",
+			config:   llmtypes.Config{Model: "gpt-5.6-sol", OpenAI: &llmtypes.OpenAIConfig{APIMode: llmtypes.OpenAIAPIModeChatCompletions}},
+			expected: llmtypes.OpenAIAPIModeResponses,
+		},
+		{
+			name:     "gpt-5.6 ignores chat completions env override",
+			config:   llmtypes.Config{Model: "gpt-5.6-luna"},
+			envMode:  "chat_completions",
+			expected: llmtypes.OpenAIAPIModeResponses,
+		},
+		{
 			name:     "api_mode responses",
 			config:   llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{APIMode: llmtypes.OpenAIAPIModeResponses}},
 			expected: llmtypes.OpenAIAPIModeResponses,
@@ -539,6 +603,12 @@ func TestNormalizeServiceTier(t *testing.T) {
 			assert.Equal(t, tt.expected, normalizeServiceTier(tt.config))
 		})
 	}
+}
+
+func TestOpenAIReasoningEffortForChatRequest(t *testing.T) {
+	assert.Equal(t, "max", openAIReasoningEffortForChatRequest(" MAX "))
+	assert.Equal(t, "xhigh", openAIReasoningEffortForChatRequest("xhigh"))
+	assert.Equal(t, "", openAIReasoningEffortForChatRequest(""))
 }
 
 func TestGetBaseURL(t *testing.T) {
@@ -819,14 +889,16 @@ func TestValidateCustomConfiguration(t *testing.T) {
 				OpenAI: &llmtypes.OpenAIConfig{
 					Pricing: map[string]llmtypes.ModelPricing{
 						"test-model": {
-							Input:                  0.001,
-							Output:                 0.002,
-							CachedInput:            0.0005,
-							LongContextInput:       0.002,
-							LongContextOutput:      0.003,
-							LongContextCachedInput: 0.001,
-							LongContextThreshold:   272000,
-							ContextWindow:          128000,
+							Input:                      0.001,
+							Output:                     0.002,
+							CachedInput:                0.0005,
+							CacheWriteInput:            0.00125,
+							LongContextInput:           0.002,
+							LongContextOutput:          0.003,
+							LongContextCachedInput:     0.001,
+							LongContextCacheWriteInput: 0.0025,
+							LongContextThreshold:       272000,
+							ContextWindow:              128000,
 						},
 					},
 				},
@@ -882,6 +954,40 @@ func TestValidateCustomConfiguration(t *testing.T) {
 			},
 			expectError:   true,
 			errorContains: "invalid input pricing",
+		},
+		{
+			name: "invalid cache write pricing",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					Pricing: map[string]llmtypes.ModelPricing{
+						"test-model": {
+							Input:           0.001,
+							CacheWriteInput: -0.00125,
+							Output:          0.002,
+							ContextWindow:   128000,
+						},
+					},
+				},
+			},
+			expectError:   true,
+			errorContains: "invalid cache_write_input pricing",
+		},
+		{
+			name: "invalid long context cache write pricing",
+			config: llmtypes.Config{
+				OpenAI: &llmtypes.OpenAIConfig{
+					Pricing: map[string]llmtypes.ModelPricing{
+						"test-model": {
+							Input:                      0.001,
+							LongContextCacheWriteInput: -0.0025,
+							Output:                     0.002,
+							ContextWindow:              128000,
+						},
+					},
+				},
+			},
+			expectError:   true,
+			errorContains: "invalid long_context_cache_write_input pricing",
 		},
 		{
 			name: "invalid context window",

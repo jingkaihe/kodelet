@@ -224,7 +224,7 @@ func webSearchDetailsFromAction(action responses.ResponseFunctionWebSearchAction
 	switch action.Type {
 	case "search":
 		search := action.AsSearch()
-		details.queries = searchQueries(search.Query, search.Queries)
+		details.queries = searchQueries("", search.Queries)
 		if len(details.queries) == 0 {
 			details.queries = searchQueries(action.Query, action.Queries)
 		}

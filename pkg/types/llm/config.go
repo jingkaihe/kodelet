@@ -222,12 +222,16 @@ type ModelPricing struct {
 	Input float64 `mapstructure:"input" json:"input" yaml:"input"`
 	// Cached input token cost per token.
 	CachedInput float64 `mapstructure:"cached_input" json:"cached_input" yaml:"cached_input"`
+	// Cache write input token cost per token.
+	CacheWriteInput float64 `mapstructure:"cache_write_input" json:"cache_write_input" yaml:"cache_write_input"`
 	// Output token cost per token.
 	Output float64 `mapstructure:"output" json:"output" yaml:"output"`
 	// Long-context input token cost per token.
 	LongContextInput float64 `mapstructure:"long_context_input" json:"long_context_input,omitempty" yaml:"long_context_input,omitempty"`
 	// Long-context cached input token cost per token.
 	LongContextCachedInput float64 `mapstructure:"long_context_cached_input" json:"long_context_cached_input,omitempty" yaml:"long_context_cached_input,omitempty"`
+	// Long-context cache write input token cost per token.
+	LongContextCacheWriteInput float64 `mapstructure:"long_context_cache_write_input" json:"long_context_cache_write_input,omitempty" yaml:"long_context_cache_write_input,omitempty"`
 	// Long-context output token cost per token.
 	LongContextOutput float64 `mapstructure:"long_context_output" json:"long_context_output,omitempty" yaml:"long_context_output,omitempty"`
 	// Prompt token threshold for long-context pricing.
@@ -249,6 +253,9 @@ func (p ModelPricing) ForPromptTokens(promptTokens int) ModelPricing {
 	}
 	if p.LongContextCachedInput > 0 {
 		p.CachedInput = p.LongContextCachedInput
+	}
+	if p.LongContextCacheWriteInput > 0 {
+		p.CacheWriteInput = p.LongContextCacheWriteInput
 	}
 	if p.LongContextOutput > 0 {
 		p.Output = p.LongContextOutput

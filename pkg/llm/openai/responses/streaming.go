@@ -581,6 +581,10 @@ func (t *Thread) updateUsage(usage responses.ResponseUsage, model string) {
 	if usage.InputTokensDetails.CachedTokens > 0 {
 		t.Usage.CacheReadInputTokens += int(usage.InputTokensDetails.CachedTokens)
 	}
+	cacheWriteTokens := int(usage.InputTokensDetails.CacheWriteTokens)
+	if cacheWriteTokens > 0 {
+		t.Usage.CacheCreationInputTokens += cacheWriteTokens
+	}
 
 	// Calculate costs based on model pricing
 	pricing := t.getPricing(model)
@@ -592,7 +596,7 @@ func (t *Thread) updateUsage(usage responses.ResponseUsage, model string) {
 	pricing = pricing.ForPromptTokens(inputTokens)
 
 	// Non-cached input tokens
-	nonCachedInput := inputTokens - cachedTokens
+	nonCachedInput := inputTokens - cachedTokens - cacheWriteTokens
 	if nonCachedInput > 0 {
 		t.Usage.InputCost += float64(nonCachedInput) * pricing.Input
 	}
@@ -600,6 +604,12 @@ func (t *Thread) updateUsage(usage responses.ResponseUsage, model string) {
 	// Cached input tokens (typically cheaper)
 	if cachedTokens > 0 {
 		t.Usage.CacheReadCost += float64(cachedTokens) * pricing.CachedInput
+	}
+
+	// Cache write tokens are billed separately from regular input when pricing
+	// provides a cache-write rate.
+	if cacheWriteTokens > 0 {
+		t.Usage.CacheCreationCost += float64(cacheWriteTokens) * pricing.CacheWriteInput
 	}
 
 	// Output tokens

@@ -79,21 +79,32 @@ func resolveAPIMode(config llmtypes.Config) llmtypes.OpenAIAPIMode {
 		return llmtypes.OpenAIAPIModeResponses
 	}
 
+	if isGPT56Model(config.Model) || isGPT56Model(config.WeakModel) {
+		return llmtypes.OpenAIAPIModeResponses
+	}
+
 	if envMode := os.Getenv("KODELET_OPENAI_API_MODE"); envMode != "" {
 		if mode, ok := parseAPIMode(envMode); ok {
 			return mode
 		}
 	}
 
-	if config.OpenAI == nil {
-		return llmtypes.OpenAIAPIModeChatCompletions
-	}
-
-	if mode, ok := parseAPIMode(string(config.OpenAI.APIMode)); ok {
-		return mode
+	if config.OpenAI != nil {
+		if mode, ok := parseAPIMode(string(config.OpenAI.APIMode)); ok {
+			return mode
+		}
 	}
 
 	return llmtypes.OpenAIAPIModeChatCompletions
+}
+
+func isGPT56Model(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(model, "gpt-5.6-")
+}
+
+func openAIReasoningEffortForChatRequest(effort string) string {
+	return strings.ToLower(strings.TrimSpace(effort))
 }
 
 // loadCustomConfiguration loads custom models and pricing from configuration.
@@ -151,7 +162,7 @@ func loadPlatformDefaultsForConfig(platformName string, config llmtypes.Config) 
 func loadPlatformDefaultsForServiceTier(platformName string, serviceTier llmtypes.OpenAIServiceTier) (*llmtypes.CustomModels, llmtypes.CustomPricing) {
 	switch normalizePlatformName(platformName) {
 	case "openai":
-		return loadOpenAIPlatformDefaults()
+		return loadOpenAIPlatformDefaultsForServiceTier(serviceTier)
 	case "codex":
 		return loadCodexPlatformDefaultsForServiceTier(serviceTier)
 	case "copilot":
@@ -180,22 +191,30 @@ func buildCopilotPlatformDefaults(entries []auth.CopilotModelCatalogEntry) (*llm
 
 // loadOpenAIPlatformDefaults loads the complete OpenAI platform defaults.
 func loadOpenAIPlatformDefaults() (*llmtypes.CustomModels, llmtypes.CustomPricing) {
+	return loadOpenAIPlatformDefaultsForServiceTier("")
+}
+
+// loadOpenAIPlatformDefaultsForServiceTier loads OpenAI platform defaults for a
+// configured service tier when explicit tier pricing is published.
+func loadOpenAIPlatformDefaultsForServiceTier(serviceTier llmtypes.OpenAIServiceTier) (*llmtypes.CustomModels, llmtypes.CustomPricing) {
 	models := &llmtypes.CustomModels{
 		Reasoning:    openaipreset.Models.Reasoning,
 		NonReasoning: openaipreset.Models.NonReasoning,
 	}
 
 	pricing := make(llmtypes.CustomPricing)
-	for model, openaiPricing := range openaipreset.Pricing {
+	for model, openaiPricing := range openaipreset.PricingForServiceTier(serviceTier) {
 		pricing[model] = llmtypes.ModelPricing{
-			Input:                  openaiPricing.Input,
-			CachedInput:            openaiPricing.CachedInput,
-			Output:                 openaiPricing.Output,
-			LongContextInput:       openaiPricing.LongContextInput,
-			LongContextCachedInput: openaiPricing.LongContextCachedInput,
-			LongContextOutput:      openaiPricing.LongContextOutput,
-			LongContextThreshold:   openaiPricing.LongContextThreshold,
-			ContextWindow:          openaiPricing.ContextWindow,
+			Input:                      openaiPricing.Input,
+			CachedInput:                openaiPricing.CachedInput,
+			CacheWriteInput:            openaiPricing.CacheWriteInput,
+			Output:                     openaiPricing.Output,
+			LongContextInput:           openaiPricing.LongContextInput,
+			LongContextCachedInput:     openaiPricing.LongContextCachedInput,
+			LongContextCacheWriteInput: openaiPricing.LongContextCacheWriteInput,
+			LongContextOutput:          openaiPricing.LongContextOutput,
+			LongContextThreshold:       openaiPricing.LongContextThreshold,
+			ContextWindow:              openaiPricing.ContextWindow,
 		}
 	}
 
@@ -215,14 +234,16 @@ func loadCodexPlatformDefaultsForServiceTier(serviceTier llmtypes.OpenAIServiceT
 	pricing := make(llmtypes.CustomPricing)
 	for model, codexPricing := range codexpreset.PricingForServiceTier(serviceTier) {
 		pricing[model] = llmtypes.ModelPricing{
-			Input:                  codexPricing.Input,
-			CachedInput:            codexPricing.CachedInput,
-			Output:                 codexPricing.Output,
-			LongContextInput:       codexPricing.LongContextInput,
-			LongContextCachedInput: codexPricing.LongContextCachedInput,
-			LongContextOutput:      codexPricing.LongContextOutput,
-			LongContextThreshold:   codexPricing.LongContextThreshold,
-			ContextWindow:          codexPricing.ContextWindow,
+			Input:                      codexPricing.Input,
+			CachedInput:                codexPricing.CachedInput,
+			CacheWriteInput:            codexPricing.CacheWriteInput,
+			Output:                     codexPricing.Output,
+			LongContextInput:           codexPricing.LongContextInput,
+			LongContextCachedInput:     codexPricing.LongContextCachedInput,
+			LongContextCacheWriteInput: codexPricing.LongContextCacheWriteInput,
+			LongContextOutput:          codexPricing.LongContextOutput,
+			LongContextThreshold:       codexPricing.LongContextThreshold,
+			ContextWindow:              codexPricing.ContextWindow,
 		}
 	}
 
@@ -333,6 +354,9 @@ func validateCustomConfiguration(config llmtypes.Config) error {
 			if pricing.Input < 0 {
 				return fmt.Errorf("invalid input pricing for model '%s': must be >= 0", model)
 			}
+			if pricing.CacheWriteInput < 0 {
+				return fmt.Errorf("invalid cache_write_input pricing for model '%s': must be >= 0", model)
+			}
 			if pricing.Output < 0 {
 				return fmt.Errorf("invalid output pricing for model '%s': must be >= 0", model)
 			}
@@ -347,6 +371,9 @@ func validateCustomConfiguration(config llmtypes.Config) error {
 			}
 			if pricing.LongContextCachedInput < 0 {
 				return fmt.Errorf("invalid long_context_cached_input pricing for model '%s': must be >= 0", model)
+			}
+			if pricing.LongContextCacheWriteInput < 0 {
+				return fmt.Errorf("invalid long_context_cache_write_input pricing for model '%s': must be >= 0", model)
 			}
 			if pricing.LongContextThreshold < 0 {
 				return fmt.Errorf("invalid long_context_threshold for model '%s': must be >= 0", model)

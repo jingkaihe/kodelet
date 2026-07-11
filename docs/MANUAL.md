@@ -616,7 +616,7 @@ export OPENAI_API_KEY="sk-..."
 export KODELET_PROVIDER="openai"
 export KODELET_MODEL="gpt-4.1"
 export KODELET_MAX_TOKENS="8192"
-export KODELET_REASONING_EFFORT="medium"  # OpenAI: none|minimal|low|medium|high|xhigh; Anthropic adaptive thinking: none|low|medium|high|xhigh|max
+export KODELET_REASONING_EFFORT="medium"  # OpenAI: none|minimal|low|medium|high|xhigh|max; Anthropic adaptive thinking: none|low|medium|high|xhigh|max
 
 # Profile configuration
 export KODELET_PROFILE="anthropic"  # Use a specific profile
@@ -986,12 +986,15 @@ Features:
 
 ### OpenAI
 
-Kodelet supports OpenAI models:
-- `gpt-4.1` (latest GPT-4 model)
-- `gpt-4.1-mini` (lightweight variant)
+Kodelet supports OpenAI models including:
+- `gpt-5.6-sol` (GPT-5.6 Sol)
+- `gpt-5.6-terra` (GPT-5.6 Terra)
+- `gpt-5.6-luna` (GPT-5.6 Luna)
+- `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`
+- `gpt-4.1`, `gpt-4.1-mini`
 
 Features:
-- Reasoning effort control (none, minimal, low, medium, high, xhigh)
+- Reasoning effort control (OpenAI: none, minimal, low, medium, high, xhigh, max)
 - Function calling capabilities
 - Vision support (planned)
 
@@ -1189,8 +1192,8 @@ const workspace = defineExtension((ext) => {
 
 const profile = new Profile({
   provider: "openai",
-  model: "gpt-5.5",
-  reasoning_effort: "xhigh",
+  model: "gpt-5.6-sol",
+  reasoning_effort: "max",
   tool_mode: "patch",
   openai: { api_mode: "responses", platform: "codex", service_tier: "fast" },
 });

@@ -6,6 +6,9 @@ import "github.com/jingkaihe/kodelet/pkg/types/llm"
 // Models defines the OpenAI model categorization for reasoning and non-reasoning models
 var Models = llm.CustomModels{
 	Reasoning: []string{
+		"gpt-5.6-sol",
+		"gpt-5.6-terra",
+		"gpt-5.6-luna",
 		"gpt-5.5",
 		"gpt-5.5-pro",
 		"gpt-5.4",
@@ -55,6 +58,42 @@ var Models = llm.CustomModels{
 
 // Pricing defines the pricing information for all OpenAI models
 var Pricing = llm.CustomPricing{
+	"gpt-5.6-sol": llm.ModelPricing{
+		Input:                      0.000005,   // $5.00 per million tokens
+		CachedInput:                0.0000005,  // $0.50 per million tokens
+		CacheWriteInput:            0.00000625, // $6.25 per million tokens
+		Output:                     0.00003,    // $30.00 per million tokens
+		LongContextInput:           0.00001,    // $10.00 per million tokens
+		LongContextCachedInput:     0.000001,   // $1.00 per million tokens
+		LongContextCacheWriteInput: 0.0000125,  // $12.50 per million tokens
+		LongContextOutput:          0.000045,   // $45.00 per million tokens
+		LongContextThreshold:       272_000,
+		ContextWindow:              1_050_000,
+	},
+	"gpt-5.6-terra": llm.ModelPricing{
+		Input:                      0.0000025,   // $2.50 per million tokens
+		CachedInput:                0.00000025,  // $0.25 per million tokens
+		CacheWriteInput:            0.000003125, // $3.125 per million tokens
+		Output:                     0.000015,    // $15.00 per million tokens
+		LongContextInput:           0.000005,    // $5.00 per million tokens
+		LongContextCachedInput:     0.0000005,   // $0.50 per million tokens
+		LongContextCacheWriteInput: 0.00000625,  // $6.25 per million tokens
+		LongContextOutput:          0.0000225,   // $22.50 per million tokens
+		LongContextThreshold:       272_000,
+		ContextWindow:              1_050_000,
+	},
+	"gpt-5.6-luna": llm.ModelPricing{
+		Input:                      0.000001,   // $1.00 per million tokens
+		CachedInput:                0.0000001,  // $0.10 per million tokens
+		CacheWriteInput:            0.00000125, // $1.25 per million tokens
+		Output:                     0.000006,   // $6.00 per million tokens
+		LongContextInput:           0.000002,   // $2.00 per million tokens
+		LongContextCachedInput:     0.0000002,  // $0.20 per million tokens
+		LongContextCacheWriteInput: 0.0000025,  // $2.50 per million tokens
+		LongContextOutput:          0.000009,   // $9.00 per million tokens
+		LongContextThreshold:       272_000,
+		ContextWindow:              1_050_000,
+	},
 	"gpt-5.5": llm.ModelPricing{
 		Input:                  0.000005,  // $5.00 per million tokens
 		CachedInput:            0.0000005, // $0.50 per million tokens
@@ -309,6 +348,54 @@ var Pricing = llm.CustomPricing{
 		Output:        0.000008,  // $8.00 per million tokens
 		ContextWindow: 200_000,
 	},
+}
+
+// PriorityPricing defines explicit priority-tier pricing for models where
+// OpenAI's pricing table publishes a separate priority rate. Models absent from
+// this map use their standard pricing.
+var PriorityPricing = llm.CustomPricing{
+	"gpt-5.6-sol": llm.ModelPricing{
+		Input:           0.00001,   // $10.00 per million tokens
+		CachedInput:     0.000001,  // $1.00 per million tokens
+		CacheWriteInput: 0.0000125, // $12.50 per million tokens
+		Output:          0.00006,   // $60.00 per million tokens
+		ContextWindow:   1_050_000,
+	},
+	"gpt-5.6-terra": llm.ModelPricing{
+		Input:           0.000005,  // $5.00 per million tokens
+		CachedInput:     0.0000005, // $0.50 per million tokens
+		CacheWriteInput: 0.00000625,
+		Output:          0.00003, // $30.00 per million tokens
+		ContextWindow:   1_050_000,
+	},
+	"gpt-5.6-luna": llm.ModelPricing{
+		Input:           0.000002,  // $2.00 per million tokens
+		CachedInput:     0.0000002, // $0.20 per million tokens
+		CacheWriteInput: 0.0000025, // $2.50 per million tokens
+		Output:          0.000012,  // $12.00 per million tokens
+		ContextWindow:   1_050_000,
+	},
+}
+
+func PricingForServiceTier(serviceTier llm.OpenAIServiceTier) llm.CustomPricing {
+	pricing := make(llm.CustomPricing, len(Pricing))
+	for model, modelPricing := range Pricing {
+		pricing[model] = modelPricing
+	}
+
+	tier, ok := llm.ParseOpenAIServiceTier(string(serviceTier))
+	if !ok {
+		return pricing
+	}
+
+	switch tier {
+	case llm.OpenAIServiceTierFast, llm.OpenAIServiceTierPriority:
+		for model, modelPricing := range PriorityPricing {
+			pricing[model] = modelPricing
+		}
+	}
+
+	return pricing
 }
 
 // BaseURL is the API endpoint for OpenAI models

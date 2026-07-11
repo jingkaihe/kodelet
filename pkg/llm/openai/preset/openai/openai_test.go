@@ -3,6 +3,7 @@ package openai
 import (
 	"testing"
 
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -12,6 +13,9 @@ func TestModels(t *testing.T) {
 	require.NotNil(t, Models)
 
 	// Test reasoning models
+	assert.Contains(t, Models.Reasoning, "gpt-5.6-sol")
+	assert.Contains(t, Models.Reasoning, "gpt-5.6-terra")
+	assert.Contains(t, Models.Reasoning, "gpt-5.6-luna")
 	assert.Contains(t, Models.Reasoning, "gpt-5.5")
 	assert.Contains(t, Models.Reasoning, "gpt-5.5-pro")
 	assert.Contains(t, Models.Reasoning, "gpt-5.4")
@@ -52,6 +56,45 @@ func TestPricing(t *testing.T) {
 	require.NotNil(t, Pricing)
 
 	// Test some key models have pricing
+	gpt56Sol, exists := Pricing["gpt-5.6-sol"]
+	require.True(t, exists, "gpt-5.6-sol pricing should exist")
+	assert.Equal(t, 0.000005, gpt56Sol.Input)
+	assert.Equal(t, 0.0000005, gpt56Sol.CachedInput)
+	assert.Equal(t, 0.00000625, gpt56Sol.CacheWriteInput)
+	assert.Equal(t, 0.00003, gpt56Sol.Output)
+	assert.Equal(t, 0.00001, gpt56Sol.LongContextInput)
+	assert.Equal(t, 0.000001, gpt56Sol.LongContextCachedInput)
+	assert.Equal(t, 0.0000125, gpt56Sol.LongContextCacheWriteInput)
+	assert.Equal(t, 0.000045, gpt56Sol.LongContextOutput)
+	assert.Equal(t, 272_000, gpt56Sol.LongContextThreshold)
+	assert.Equal(t, 1_050_000, gpt56Sol.ContextWindow)
+
+	gpt56Terra, exists := Pricing["gpt-5.6-terra"]
+	require.True(t, exists, "gpt-5.6-terra pricing should exist")
+	assert.Equal(t, 0.0000025, gpt56Terra.Input)
+	assert.Equal(t, 0.00000025, gpt56Terra.CachedInput)
+	assert.Equal(t, 0.000003125, gpt56Terra.CacheWriteInput)
+	assert.Equal(t, 0.000015, gpt56Terra.Output)
+	assert.Equal(t, 0.000005, gpt56Terra.LongContextInput)
+	assert.Equal(t, 0.0000005, gpt56Terra.LongContextCachedInput)
+	assert.Equal(t, 0.00000625, gpt56Terra.LongContextCacheWriteInput)
+	assert.Equal(t, 0.0000225, gpt56Terra.LongContextOutput)
+	assert.Equal(t, 272_000, gpt56Terra.LongContextThreshold)
+	assert.Equal(t, 1_050_000, gpt56Terra.ContextWindow)
+
+	gpt56Luna, exists := Pricing["gpt-5.6-luna"]
+	require.True(t, exists, "gpt-5.6-luna pricing should exist")
+	assert.Equal(t, 0.000001, gpt56Luna.Input)
+	assert.Equal(t, 0.0000001, gpt56Luna.CachedInput)
+	assert.Equal(t, 0.00000125, gpt56Luna.CacheWriteInput)
+	assert.Equal(t, 0.000006, gpt56Luna.Output)
+	assert.Equal(t, 0.000002, gpt56Luna.LongContextInput)
+	assert.Equal(t, 0.0000002, gpt56Luna.LongContextCachedInput)
+	assert.Equal(t, 0.0000025, gpt56Luna.LongContextCacheWriteInput)
+	assert.Equal(t, 0.000009, gpt56Luna.LongContextOutput)
+	assert.Equal(t, 272_000, gpt56Luna.LongContextThreshold)
+	assert.Equal(t, 1_050_000, gpt56Luna.ContextWindow)
+
 	gpt55, exists := Pricing["gpt-5.5"]
 	require.True(t, exists, "gpt-5.5 pricing should exist")
 	assert.Equal(t, 0.000005, gpt55.Input)
@@ -131,13 +174,47 @@ func TestPricing(t *testing.T) {
 	for model, pricing := range Pricing {
 		assert.GreaterOrEqual(t, pricing.Input, 0.0, "Input pricing for %s should be >= 0", model)
 		assert.GreaterOrEqual(t, pricing.CachedInput, 0.0, "CachedInput pricing for %s should be >= 0", model)
+		assert.GreaterOrEqual(t, pricing.CacheWriteInput, 0.0, "CacheWriteInput pricing for %s should be >= 0", model)
 		assert.GreaterOrEqual(t, pricing.Output, 0.0, "Output pricing for %s should be >= 0", model)
 		assert.GreaterOrEqual(t, pricing.LongContextInput, 0.0, "LongContextInput pricing for %s should be >= 0", model)
 		assert.GreaterOrEqual(t, pricing.LongContextCachedInput, 0.0, "LongContextCachedInput pricing for %s should be >= 0", model)
+		assert.GreaterOrEqual(t, pricing.LongContextCacheWriteInput, 0.0, "LongContextCacheWriteInput pricing for %s should be >= 0", model)
 		assert.GreaterOrEqual(t, pricing.LongContextOutput, 0.0, "LongContextOutput pricing for %s should be >= 0", model)
 		assert.GreaterOrEqual(t, pricing.LongContextThreshold, 0, "LongContextThreshold for %s should be >= 0", model)
 		assert.Greater(t, pricing.ContextWindow, 0, "ContextWindow for %s should be > 0", model)
 	}
+}
+
+func TestPricingForServiceTier(t *testing.T) {
+	standard := PricingForServiceTier(llmtypes.OpenAIServiceTierDefault)
+	priority := PricingForServiceTier(llmtypes.OpenAIServiceTierPriority)
+	fast := PricingForServiceTier(llmtypes.OpenAIServiceTierFast)
+
+	require.Equal(t, priority["gpt-5.6-sol"], fast["gpt-5.6-sol"])
+
+	assert.Equal(t, 0.000005, standard["gpt-5.6-sol"].Input)
+	assert.Equal(t, 0.0000005, standard["gpt-5.6-sol"].CachedInput)
+	assert.Equal(t, 0.00000625, standard["gpt-5.6-sol"].CacheWriteInput)
+	assert.Equal(t, 0.00003, standard["gpt-5.6-sol"].Output)
+	assert.Equal(t, 0.0000125, standard["gpt-5.6-sol"].LongContextCacheWriteInput)
+
+	assert.Equal(t, 0.00001, priority["gpt-5.6-sol"].Input)
+	assert.Equal(t, 0.000001, priority["gpt-5.6-sol"].CachedInput)
+	assert.Equal(t, 0.0000125, priority["gpt-5.6-sol"].CacheWriteInput)
+	assert.Equal(t, 0.00006, priority["gpt-5.6-sol"].Output)
+	assert.Equal(t, 0, priority["gpt-5.6-sol"].LongContextThreshold)
+
+	assert.Equal(t, 0.000005, priority["gpt-5.6-terra"].Input)
+	assert.Equal(t, 0.0000005, priority["gpt-5.6-terra"].CachedInput)
+	assert.Equal(t, 0.00000625, priority["gpt-5.6-terra"].CacheWriteInput)
+	assert.Equal(t, 0.00003, priority["gpt-5.6-terra"].Output)
+
+	assert.Equal(t, 0.000002, priority["gpt-5.6-luna"].Input)
+	assert.Equal(t, 0.0000002, priority["gpt-5.6-luna"].CachedInput)
+	assert.Equal(t, 0.0000025, priority["gpt-5.6-luna"].CacheWriteInput)
+	assert.Equal(t, 0.000012, priority["gpt-5.6-luna"].Output)
+
+	assert.Equal(t, Pricing["gpt-4.1"], priority["gpt-4.1"])
 }
 
 func TestBaseURL(t *testing.T) {

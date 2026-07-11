@@ -24,7 +24,7 @@ require (
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/mattn/go-runewidth v0.0.19
 	github.com/muesli/termenv v0.16.0
-	github.com/openai/openai-go/v3 v3.25.0
+	github.com/openai/openai-go/v3 v3.41.2-0.20260710202558-35501ce5ec04
 	github.com/pkg/errors v0.9.1
 	github.com/pmezard/go-difflib v1.0.0
 	github.com/rogpeppe/go-internal v1.14.1

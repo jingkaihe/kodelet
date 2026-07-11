@@ -8,7 +8,8 @@ var codexCmd = &cobra.Command{
 	Long: `Manage OpenAI Codex authentication for accessing ChatGPT-backed Codex models.
 
 Kodelet can authenticate directly with OpenAI to access the ChatGPT backend API.
-This enables access to Codex-optimized models like gpt-5.5 and gpt-5.4.
+This enables access to Codex-optimized models like gpt-5.6-sol, gpt-5.6-terra,
+gpt-5.6-luna, gpt-5.5, and gpt-5.4.
 
 To use Codex authentication:
 1. Run 'kodelet codex login' to authenticate with your ChatGPT account

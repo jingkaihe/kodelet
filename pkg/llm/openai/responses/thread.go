@@ -131,11 +131,10 @@ func NewThread(config llmtypes.Config) (*Thread, error) {
 	client := openai.NewClient(opts...)
 
 	// Determine reasoning effort from config or default
-	reasoningEffort := shared.ReasoningEffort(config.ReasoningEffort)
+	reasoningEffort := shared.ReasoningEffort(strings.ToLower(strings.TrimSpace(config.ReasoningEffort)))
 	if reasoningEffort == "" {
 		reasoningEffort = shared.ReasoningEffortMedium
 	}
-
 	// Load custom models and pricing
 	customModels, customPricing := loadCustomConfiguration(config)
 
@@ -491,6 +490,7 @@ func (t *Thread) processMessageExchange(
 			OfToolChoiceMode: param.NewOpt(responses.ToolChoiceOptionsAuto),
 		},
 	}
+	applyGPT56PromptCacheOptions(&params, model)
 
 	if serviceTier := normalizeServiceTier(t.Config).WireValue(); serviceTier != "" {
 		params.ServiceTier = responses.ResponseNewParamsServiceTier(serviceTier)
@@ -507,6 +507,7 @@ func (t *Thread) processMessageExchange(
 		if opt.UseWeakModel {
 			reasoningEffort = shared.ReasoningEffortMedium
 		}
+		reasoningEffort = openAIReasoningEffortForRequest(reasoningEffort)
 		params.Reasoning = shared.ReasoningParam{
 			Effort:  reasoningEffort,
 			Summary: shared.ReasoningSummaryAuto,
@@ -577,6 +578,26 @@ func (t *Thread) processMessageExchange(
 	}
 
 	return t.processMessageExchangeWithStreamRetries(ctx, handler, model, params, tools, newResponsesStream, closeResponsesStream, processStream, opt, saveConversation, transportName)
+}
+
+func applyGPT56PromptCacheOptions(params *responses.ResponseNewParams, model string) {
+	if !isGPT56Model(model) {
+		return
+	}
+
+	params.PromptCacheOptions = responses.ResponseNewParamsPromptCacheOptions{
+		Mode: "implicit",
+		Ttl:  "30m",
+	}
+}
+
+func isGPT56Model(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(model, "gpt-5.6-")
+}
+
+func openAIReasoningEffortForRequest(effort shared.ReasoningEffort) shared.ReasoningEffort {
+	return shared.ReasoningEffort(strings.ToLower(strings.TrimSpace(string(effort))))
 }
 
 type responsesStreamFactory func(context.Context, responses.ResponseNewParams) (*ssestream.Stream[responses.ResponseStreamEventUnion], error)
@@ -1694,7 +1715,7 @@ func loadPlatformDefaultsForConfig(platformName string, config llmtypes.Config) 
 func loadPlatformDefaultsForServiceTier(platformName string, serviceTier llmtypes.OpenAIServiceTier) (map[string]string, map[string]llmtypes.ModelPricing) {
 	switch normalizePlatformName(platformName) {
 	case "openai":
-		return loadPlatformDefaultsFromConfig(openaipreset.Models, openaipreset.Pricing)
+		return loadPlatformDefaultsFromConfig(openaipreset.Models, openaipreset.PricingForServiceTier(serviceTier))
 	case "codex":
 		return loadPlatformDefaultsFromConfig(codexpreset.Models, codexpreset.PricingForServiceTier(serviceTier))
 	case "copilot":

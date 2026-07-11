@@ -71,8 +71,8 @@ profiles:
 
   openai:
     provider: "openai"
-    model: "gpt-5.5"
-    weak_model: "gpt-5.4-mini"
+    model: "gpt-5.6-sol"
+    weak_model: "gpt-5.6-luna"
     max_tokens: 16000
     reasoning_effort: "xhigh"
     tool_mode: "patch"
@@ -100,8 +100,8 @@ profiles:
 
   openai-responses:
     provider: "openai"
-    model: "gpt-5.5"
-    weak_model: "gpt-5.4-mini"
+    model: "gpt-5.6-sol"
+    weak_model: "gpt-5.6-luna"
     max_tokens: 16000
     reasoning_effort: "xhigh"
     tool_mode: "patch"
@@ -111,7 +111,7 @@ profiles:
 
 # OpenAI specific settings
 # Reasoning effort for supported reasoning/adaptive models
-# OpenAI: none, minimal, low, medium, high, xhigh
+# OpenAI: none, minimal, low, medium, high, xhigh, max
 # Anthropic adaptive thinking: none, low, medium, high, xhigh, max
 reasoning_effort: "medium"
 
@@ -222,9 +222,9 @@ allowed_tools: []
 
 # Example OpenAI configuration (uncomment to use)
 # provider: "openai"
-# model: "gpt-4.1"
+# model: "gpt-5.6-sol"
 # max_tokens: 8192
-# weak_model: "gpt-4.1-mini"
+# weak_model: "gpt-5.6-luna"
 # weak_model_max_tokens: 4096
 # reasoning_effort: "medium"
 
@@ -278,12 +278,14 @@ openai:
   #     output: 0.000003         # $3 per million tokens
   #     context_window: 262000   # 262k tokens
   #   # Optional long-context pricing fields are applied after the threshold.
-  #   gpt-5.4:
+  #   gpt-5.6-terra:
   #     input: 0.0000025                    # $2.50 per million tokens
   #     cached_input: 0.00000025            # $0.25 per million tokens
+  #     cache_write_input: 0.000003125      # $3.125 per million tokens
   #     output: 0.000015                    # $15 per million tokens
   #     long_context_input: 0.000005        # $5 per million tokens
   #     long_context_cached_input: 0.0000005 # $0.50 per million tokens
+  #     long_context_cache_write_input: 0.00000625 # $6.25 per million tokens
   #     long_context_output: 0.0000225      # $22.50 per million tokens
   #     long_context_threshold: 272000      # >272k prompt tokens
   #     context_window: 1050000             # 1.05M tokens

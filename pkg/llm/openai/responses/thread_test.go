@@ -20,6 +20,7 @@ import (
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/packages/ssestream"
 	openairesponses "github.com/openai/openai-go/v3/responses"
+	"github.com/openai/openai-go/v3/shared"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1676,6 +1677,33 @@ func TestLoadCustomConfigurationCodexPlatformUsesConfiguredServiceTierPricing(t 
 	assert.Equal(t, 0, fastGPT55.LongContextThreshold)
 }
 
+func TestLoadCustomConfigurationOpenAIPlatformUsesConfiguredServiceTierPricing(t *testing.T) {
+	standardModels, standardPricing := loadCustomConfiguration(llmtypes.Config{
+		OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"},
+	})
+	priorityModels, priorityPricing := loadCustomConfiguration(llmtypes.Config{
+		OpenAI: &llmtypes.OpenAIConfig{
+			Platform:    "openai",
+			ServiceTier: llmtypes.OpenAIServiceTierPriority,
+		},
+	})
+
+	assert.Equal(t, "reasoning", standardModels["gpt-5.6-sol"])
+	assert.Equal(t, standardModels, priorityModels)
+
+	standardGPT56Sol := standardPricing["gpt-5.6-sol"]
+	assert.Equal(t, 0.000005, standardGPT56Sol.Input)
+	assert.Equal(t, 0.00000625, standardGPT56Sol.CacheWriteInput)
+	assert.Equal(t, 0.0000125, standardGPT56Sol.LongContextCacheWriteInput)
+
+	priorityGPT56Sol := priorityPricing["gpt-5.6-sol"]
+	assert.Equal(t, 0.00001, priorityGPT56Sol.Input)
+	assert.Equal(t, 0.0000125, priorityGPT56Sol.CacheWriteInput)
+	assert.Equal(t, 0, priorityGPT56Sol.LongContextThreshold)
+
+	assert.Equal(t, standardPricing["gpt-4.1"], priorityPricing["gpt-4.1"])
+}
+
 func TestAddUserMessageAppendsInputItems(t *testing.T) {
 	os.Setenv("OPENAI_API_KEY", "test-key")
 	defer os.Unsetenv("OPENAI_API_KEY")
@@ -2188,6 +2216,24 @@ func TestProcessMessageExchangeMirrorsCodexPromptCachingRequestShape(t *testing.
 	assert.False(t, capturedParams.PreviousResponseID.Valid(), "should not use previous_response_id")
 	assert.True(t, capturedParams.Store.Valid())
 	assert.False(t, capturedParams.Store.Value, "should mirror Codex by disabling stored conversation state")
+}
+
+func TestApplyGPT56PromptCacheOptions(t *testing.T) {
+	params := openairesponses.ResponseNewParams{}
+	applyGPT56PromptCacheOptions(&params, "gpt-5.6-sol")
+
+	assert.Equal(t, "implicit", params.PromptCacheOptions.Mode)
+	assert.Equal(t, "30m", params.PromptCacheOptions.Ttl)
+
+	params = openairesponses.ResponseNewParams{}
+	applyGPT56PromptCacheOptions(&params, "gpt-5.5")
+	assert.Empty(t, params.PromptCacheOptions.Mode)
+	assert.Empty(t, params.PromptCacheOptions.Ttl)
+}
+
+func TestOpenAIReasoningEffortForRequest(t *testing.T) {
+	assert.Equal(t, shared.ReasoningEffortMax, openAIReasoningEffortForRequest(shared.ReasoningEffortMax))
+	assert.Equal(t, shared.ReasoningEffortXhigh, openAIReasoningEffortForRequest(shared.ReasoningEffort("XHIGH")))
 }
 
 func TestProcessMessageExchangeDoesNotInjectGoalContextFromMetadata(t *testing.T) {
