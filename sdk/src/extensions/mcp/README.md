@@ -4,49 +4,67 @@ The MCP integration is implemented as a Kodelet extension built with the TypeScr
 
 The extension keeps MCP out of the Go core: MCP servers become normal extension-registered tools.
 
-## Install from source
+## Installation
 
-From the repository root:
+Requirements: Kodelet CLI with extensions enabled, and Node.js 20+ available as `node`.
+
+Install from npm:
+
+```bash
+npm install -g kodelet
+```
+
+The npm package runs the MCP installer automatically. If you need to regenerate the wrapper, run:
+
+```bash
+kodelet-mcp-install
+```
+
+Set `KODELET_SKIP_MCP_PLUGIN_INSTALL=1` to skip the automatic npm postinstall step.
+
+Install from a source checkout:
 
 ```bash
 (cd sdk && npm ci && npm run build)
 node sdk/dist/extensions/mcp/install.js
 ```
 
-The installer writes this executable wrapper:
+Both paths create this plugin wrapper:
 
 ```text
 ~/.kodelet/plugins/kodelet@mcp/extensions/mcp/kodelet-extension-mcp
 ```
 
-That wrapper points at the built files in your current checkout:
-
-```text
-sdk/dist/bin/kodelet-extension-node.js
-sdk/dist/extensions/mcp/index.js
-```
-
-After editing the extension source, rerun:
-
-```bash
-(cd sdk && npm run build)
-```
-
-You only need to rerun `node sdk/dist/extensions/mcp/install.js` if the checkout path moves or the generated wrapper is removed.
-
-To verify discovery:
+Verify discovery:
 
 ```bash
 kodelet extension list
+kodelet extension inspect kodelet@mcp/mcp
 ```
 
-To remove the local install:
+Uninstall:
 
 ```bash
 rm -rf ~/.kodelet/plugins/kodelet@mcp
 ```
 
-The npm `postinstall` script also runs the installer when `dist/extensions/mcp/install.js` exists. For local source checkouts, `npm ci` usually runs before `dist` exists, so the explicit install command above is the reliable path. Set `KODELET_SKIP_MCP_PLUGIN_INSTALL=1` to skip automatic installation.
+After installation, add MCP servers to `~/.kodelet/mcp.json` or a workspace-local `./mcp.json` as described below.
+
+Upgrade from npm:
+
+```bash
+npm install -g kodelet@latest
+```
+
+Upgrade from source:
+
+```bash
+git pull
+(cd sdk && npm ci && npm run build)
+node sdk/dist/extensions/mcp/install.js
+```
+
+Restart any running Kodelet sessions after upgrading.
 
 ## Configuration
 
