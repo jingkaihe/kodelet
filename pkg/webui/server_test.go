@@ -94,6 +94,23 @@ func (m *mockChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatEven
 	return "", nil
 }
 
+type cancellationCheckingChatRunner struct {
+	runCtx      context.Context
+	closeCalled atomic.Bool
+}
+
+func (r *cancellationCheckingChatRunner) Run(context.Context, ChatRequest, ChatEventSink) (string, error) {
+	return "", nil
+}
+
+func (r *cancellationCheckingChatRunner) Close() error {
+	r.closeCalled.Store(true)
+	if r.runCtx.Err() == nil {
+		return errors.New("chat runner closed before run context was canceled")
+	}
+	return nil
+}
+
 func (m *mockConversationService) GetToolResult(ctx context.Context, conversationID, toolCallID string) (*conversations.GetToolResultResponse, error) {
 	if m.getToolFunc != nil {
 		return m.getToolFunc(ctx, conversationID, toolCallID)
@@ -177,6 +194,22 @@ func TestServerConfig_Validate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestServerStopCancelsRunContextBeforeClosingChatRunner(t *testing.T) {
+	runCtx, runCancel := context.WithCancel(context.Background())
+	defer runCancel()
+
+	runner := &cancellationCheckingChatRunner{runCtx: runCtx}
+	server := &Server{
+		chatRunner: runner,
+		runCtx:     runCtx,
+		runCancel:  runCancel,
+	}
+
+	require.NoError(t, server.Stop())
+	assert.ErrorIs(t, runCtx.Err(), context.Canceled)
+	assert.True(t, runner.closeCalled.Load())
 }
 
 func TestServerConfig_Validate_RejectsWhitespaceAuthToken(t *testing.T) {

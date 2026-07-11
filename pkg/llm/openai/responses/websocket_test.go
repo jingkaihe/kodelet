@@ -141,6 +141,48 @@ func TestIsRetryableResponsesWebSocketHandshakeStatusMatchesCodex(t *testing.T) 
 	}
 }
 
+func TestParseResponsesWebSocketEventErrorSupportsStandardAndWrappedFields(t *testing.T) {
+	tests := []struct {
+		name       string
+		payload    string
+		statusCode int
+		code       string
+		message    string
+		retryable  bool
+	}{
+		{
+			name:      "standard top-level fields",
+			payload:   `{"type":"error","code":"invalid_prompt","message":"bad prompt","param":null,"sequence_number":1}`,
+			code:      "invalid_prompt",
+			message:   "bad prompt",
+			retryable: false,
+		},
+		{
+			name:       "transport-wrapped fields",
+			payload:    `{"type":"error","status":400,"error":{"code":"websocket_connection_limit_reached","message":"connection reached 60 minute limit"}}`,
+			statusCode: http.StatusBadRequest,
+			code:       "websocket_connection_limit_reached",
+			message:    "connection reached 60 minute limit",
+			retryable:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := parseResponsesWebSocketEventError([]byte(tt.payload))
+			require.Error(t, err)
+
+			var eventErr *responsesWebSocketEventError
+			require.ErrorAs(t, err, &eventErr)
+			assert.Equal(t, tt.statusCode, eventErr.statusCode)
+			assert.Equal(t, tt.code, eventErr.code)
+			assert.Equal(t, tt.message, eventErr.message)
+			assert.Equal(t, tt.message, eventErr.Error())
+			assert.Equal(t, tt.retryable, isRetryableResponsesStreamError(err))
+		})
+	}
+}
+
 func TestResponsesWebSocketTransportSetsBetaHeader(t *testing.T) {
 	tests := []struct {
 		name       string

@@ -162,6 +162,90 @@ func TestDefaultChatRunnerReusesAndClosesConversationThread(t *testing.T) {
 	require.NoError(t, runner.Close())
 }
 
+func TestAcquireChatThreadRejectsSessionDetachedDuringClose(t *testing.T) {
+	config := llmtypes.Config{Provider: "unsupported", Model: "test"}
+	fingerprint, err := chatThreadConfigFingerprint(config)
+	require.NoError(t, err)
+	thread := &fakeMetadataThread{}
+	runner := NewDefaultChatRunner("/workspace")
+	session := &defaultChatSession{
+		thread:            thread,
+		configFingerprint: fingerprint,
+		lastUsed:          time.Now(),
+	}
+	runner.sessions["conv-1"] = session
+
+	session.mu.Lock()
+	sessionLocked := true
+	defer func() {
+		if sessionLocked {
+			session.mu.Unlock()
+		}
+	}()
+
+	type acquireResult struct {
+		thread    llmtypes.Thread
+		newThread bool
+		err       error
+	}
+	acquireDone := make(chan acquireResult, 1)
+	go func() {
+		acquired, newThread, release, acquireErr := acquireChatThread(runner, "conv-1", config)
+		if release != nil {
+			release()
+		}
+		acquireDone <- acquireResult{thread: acquired, newThread: newThread, err: acquireErr}
+	}()
+
+	require.Eventually(t, func() bool {
+		runner.sessionsMu.Lock()
+		defer runner.sessionsMu.Unlock()
+		return session.inUse == 1
+	}, time.Second, time.Millisecond)
+
+	closeDone := make(chan error, 1)
+	go func() {
+		closeDone <- runner.Close()
+	}()
+	require.Eventually(t, func() bool {
+		runner.sessionsMu.Lock()
+		defer runner.sessionsMu.Unlock()
+		return runner.closed && len(runner.sessions) == 0
+	}, time.Second, time.Millisecond)
+
+	session.mu.Unlock()
+	sessionLocked = false
+
+	var result acquireResult
+	require.Eventually(t, func() bool {
+		select {
+		case result = <-acquireDone:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
+	require.Error(t, result.err)
+	assert.ErrorContains(t, result.err, "chat runner is closed")
+	assert.Nil(t, result.thread)
+	assert.False(t, result.newThread)
+
+	var closeErr error
+	require.Eventually(t, func() bool {
+		select {
+		case closeErr = <-closeDone:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
+	require.NoError(t, closeErr)
+	assert.True(t, thread.closed)
+	runner.sessionsMu.Lock()
+	assert.Equal(t, 0, session.inUse)
+	runner.sessionsMu.Unlock()
+}
+
 func TestDefaultChatRunnerEvictsIdleConversationThreads(t *testing.T) {
 	runner := NewDefaultChatRunner("/workspace")
 	defer func() { require.NoError(t, runner.Close()) }()

@@ -2154,6 +2154,10 @@ func (s *Server) Start(ctx context.Context) error {
 
 // Stop stops the web server
 func (s *Server) Stop() error {
+	if s.runCancel != nil {
+		s.runCancel()
+	}
+
 	s.terminalSessionsMu.Lock()
 	terminalSessions := s.terminalSessions
 	s.terminalSessionsMu.Unlock()
@@ -2170,9 +2174,6 @@ func (s *Server) Stop() error {
 		if err := s.extensionRuntimes.Close(); err != nil && firstErr == nil {
 			firstErr = err
 		}
-	}
-	if s.runCancel != nil {
-		s.runCancel()
 	}
 	if s.server != nil {
 		if err := s.server.Close(); err != nil && firstErr == nil {

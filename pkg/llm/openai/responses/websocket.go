@@ -557,6 +557,8 @@ func parseResponsesWebSocketEventError(data []byte) error {
 		Type       string `json:"type"`
 		Status     int    `json:"status"`
 		StatusCode int    `json:"status_code"`
+		Code       string `json:"code"`
+		Message    string `json:"message"`
 		Error      struct {
 			Code    string `json:"code"`
 			Message string `json:"message"`
@@ -571,8 +573,8 @@ func parseResponsesWebSocketEventError(data []byte) error {
 	}
 	return &responsesWebSocketEventError{
 		statusCode: statusCode,
-		code:       payload.Error.Code,
-		message:    payload.Error.Message,
+		code:       firstNonEmpty(payload.Code, payload.Error.Code),
+		message:    firstNonEmpty(payload.Message, payload.Error.Message),
 		body:       string(data),
 	}
 }

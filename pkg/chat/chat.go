@@ -410,6 +410,23 @@ func acquireChatThread(
 	}
 
 	session.mu.Lock()
+	// Close and CloseConversation detach sessions before waiting on session.mu.
+	// Revalidate after acquiring it so a run cannot escape the owner's cache.
+	owner.sessionsMu.Lock()
+	runnerClosed := owner.closed
+	sessionAttached := owner.sessions[sessionID] == session
+	if runnerClosed || !sessionAttached {
+		session.inUse--
+		session.lastUsed = time.Now()
+		owner.sessionsMu.Unlock()
+		session.mu.Unlock()
+		if runnerClosed {
+			return nil, false, func() {}, errors.New("chat runner is closed")
+		}
+		return nil, false, func() {}, errors.New("chat session is closed")
+	}
+	owner.sessionsMu.Unlock()
+
 	release = func() {
 		session.mu.Unlock()
 		owner.sessionsMu.Lock()
