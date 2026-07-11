@@ -3,6 +3,7 @@
 package extensions
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,10 +14,45 @@ import (
 	"testing"
 	"time"
 
+	"github.com/creack/pty"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestProcessDoesNotExposeTerminalStderrToExtension(t *testing.T) {
+	ptmx, tty, err := pty.Open()
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = ptmx.Close()
+		_ = tty.Close()
+	})
+
+	rootDir := t.TempDir()
+	extDir := filepath.Join(rootDir, "stderr")
+	execPath := writeExecutable(t, filepath.Join(extDir, "kodelet-extension-stderr"), helperEnvExtensionScript(t))
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+
+	var process *Process
+	originalStderr := os.Stderr
+	func() {
+		os.Stderr = tty
+		defer func() { os.Stderr = originalStderr }()
+
+		process, err = StartProcess(context.Background(), Extension{
+			ID:       "stderr",
+			Name:     "stderr",
+			ExecPath: execPath,
+			Dir:      extDir,
+		}, DefaultConfig(), rootDir)
+	}()
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, process.Close()) })
+
+	result, err := process.Initialize(context.Background(), rootDir)
+	require.NoError(t, err)
+	assert.Equal(t, "env;stderr_tty=false", result.Name)
+}
 
 func TestProcessCloseUsesCommandCancelForProcessGroup(t *testing.T) {
 	tempDir := t.TempDir()

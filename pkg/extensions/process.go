@@ -32,6 +32,15 @@ type Process struct {
 	failures     int
 }
 
+// extensionStderrWriter deliberately hides an underlying *os.File from
+// os/exec. This makes os/exec give the child a pipe while still forwarding
+// extension diagnostics to the configured writer. In particular, extensions
+// must not inherit the TUI's controlling terminal and later restore a raw
+// terminal state captured while the TUI was running.
+type extensionStderrWriter struct {
+	io.Writer
+}
+
 const (
 	workspaceCWDEnvKey         = "KODELET_EXTENSION_WORKSPACE_CWD"
 	extensionInitializeTimeout = 3 * time.Minute
@@ -58,7 +67,7 @@ func (p *Process) start(ctx context.Context) error {
 	cmd := exec.CommandContext(processContext(ctx), p.Extension.ExecPath)
 	cmd.Dir = p.Extension.Dir
 	cmd.Env = extensionProcessEnv(p.workspaceCWD)
-	cmd.Stderr = os.Stderr
+	cmd.Stderr = extensionStderrWriter{Writer: os.Stderr}
 	osutil.SetProcessGroup(cmd)
 	osutil.SetProcessGroupKill(cmd)
 
@@ -461,7 +470,11 @@ func (p *Process) closeProcessLocked() error {
 	} else {
 		_ = p.cmd.Process.Kill()
 	}
-	_, err := p.cmd.Process.Wait()
+	err := p.cmd.Wait()
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return nil
+	}
 	if err != nil && strings.Contains(err.Error(), "process already finished") {
 		return nil
 	}

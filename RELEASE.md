@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.4.53-beta
+
+Fixed `kodelet chat` terminal restoration when exiting during extension discovery, preventing invisible shell input after Ctrl+C.
+
+Isolated extension stderr from the controlling TTY while preserving forwarded diagnostics, with PTY regression coverage for extension process startup and shutdown.
+
 ## 0.4.52-beta
 
 Removed MCP and subagent built-in tool surfaces from the CLI, ACP, Web UI, docs, config samples, and tool renderer catalogs.

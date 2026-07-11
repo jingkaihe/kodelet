@@ -518,7 +518,7 @@ func runEnvExtensionHelperProcess() {
 		switch request.Method {
 		case "extension.initialize":
 			writeHelperResponse(request.ID, InitializeResult{
-				Name: "env",
+				Name: fmt.Sprintf("env;stderr_tty=%t", readerIsTerminal(os.Stderr)),
 				Tools: []ToolRegistration{{
 					Name:        "workspace_cwd",
 					Description: "report workspace cwd",
