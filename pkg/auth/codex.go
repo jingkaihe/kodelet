@@ -51,18 +51,16 @@ const (
 
 	// CodexOriginator identifies the client making requests.
 	// Using the official Codex CLI originator for compatibility.
-	CodexOriginator = "codex_cli_rs"
+	CodexOriginator = "kodelet"
 
 	// OAuth configuration for OpenAI Codex
-	codexAuthIssuer    = "https://auth.openai.com"
-	codexClientID      = "app_EMoamEEZ73f0CkXaXp7hrann"
-	codexAuthorizeURL  = "https://auth.openai.com/oauth/authorize"
-	codexTokenURL      = "https://auth.openai.com/oauth/token"
-	codexRedirectURI   = "http://localhost:1455/auth/callback"
-	codexScope         = "openid profile email offline_access"
-	codexJWTClaimPath  = "https://api.openai.com/auth"
-	codexUserAgent     = "codex_cli_rs/0.144.1"
-	codexClientVersion = "0.144.1"
+	codexAuthIssuer   = "https://auth.openai.com"
+	codexClientID     = "app_EMoamEEZ73f0CkXaXp7hrann"
+	codexAuthorizeURL = "https://auth.openai.com/oauth/authorize"
+	codexTokenURL     = "https://auth.openai.com/oauth/token"
+	codexRedirectURI  = "http://localhost:1455/auth/callback"
+	codexScope        = "openid profile email offline_access"
+	codexJWTClaimPath = "https://api.openai.com/auth"
 
 	// codexTokenRefreshThreshold is the duration before token expiry when we should refresh
 	codexTokenRefreshThreshold = 10 * time.Minute
@@ -211,8 +209,6 @@ func CodexHeaderWithCredentials(creds *CodexCredentials) []option.RequestOption 
 			option.WithHeader("ChatGPT-Account-ID", creds.AccountID),
 			option.WithHeader("OpenAI-Beta", "responses=experimental"),
 			option.WithHeader("originator", CodexOriginator),
-			option.WithHeader("user-agent", codexUserAgent),
-			option.WithHeader("version", codexClientVersion),
 		}
 	}
 
