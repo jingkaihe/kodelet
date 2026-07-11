@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.4.54-beta
+
+Added GPT-5.6 Sol, Terra, and Luna support across OpenAI and Codex, including default aliasing, Responses API routing, prompt caching, and tier-aware pricing.
+
+Reused persistent Responses API WebSocket connections across compatible chat turns with incremental continuation, reconnect recovery, and structured error handling.
+
+Improved thread lifecycle cleanup across CLI, ACP, TUI, and Web UI, while accounting for cache-write and compaction usage in token cost reporting.
+
 ## 0.4.53-beta
 
 Fixed `kodelet chat` terminal restoration when exiting during extension discovery, preventing invisible shell input after Ctrl+C.
