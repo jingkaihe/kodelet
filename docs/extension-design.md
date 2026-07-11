@@ -315,6 +315,9 @@ Rules:
 
 - `stdout` is protocol only.
 - `stderr` is logs.
+- Interactive hosts may surface newline-delimited structured `warn` and `error`
+  log entries as UI notifications; unstructured stderr and lower-severity logs
+  remain diagnostics only.
 - Requests use the effective timeout from config, SDK `timeoutInSec`, and runtime defaults. Extension commands may run without a timeout by default.
 - Extensions can call back into the host for UI interactions using separate reverse-RPC methods: `kodelet.ui.input`, `kodelet.ui.confirm`, `kodelet.ui.select`, and `kodelet.ui.notify`.
 - Reverse-RPC requests can include the originating host request ID as `parentId` so callbacks retain the correct context when extension requests execute concurrently.

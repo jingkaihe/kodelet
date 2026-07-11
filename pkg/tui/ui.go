@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -12,7 +13,11 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 )
 
-const uiNotificationTTL = 5 * time.Second
+const (
+	uiNotificationTTL              = 5 * time.Second
+	diagnosticNotificationCooldown = 30 * time.Second
+	diagnosticNotificationMaxRunes = 320
+)
 
 type uiPromptMode int
 
@@ -70,6 +75,102 @@ type uiNotificationMsg struct {
 
 type uiNotificationExpiredMsg struct {
 	id int
+}
+
+type uiDiagnosticMsg struct {
+	notification uiNotification
+}
+
+type tuiDiagnosticSink struct {
+	ch chan<- tea.Msg
+
+	mu     sync.Mutex
+	recent map[string]time.Time
+}
+
+func newTUIDiagnosticSink(ch chan<- tea.Msg) *tuiDiagnosticSink {
+	return &tuiDiagnosticSink{ch: ch, recent: map[string]time.Time{}}
+}
+
+func (s *tuiDiagnosticSink) ReportDiagnostic(_ context.Context, diagnostic extensions.Diagnostic) {
+	if s == nil || s.ch == nil {
+		return
+	}
+	notification, ok := notificationFromDiagnostic(diagnostic)
+	if !ok || s.duplicate(notification) {
+		return
+	}
+	select {
+	case s.ch <- uiDiagnosticMsg{notification: notification}:
+	default:
+	}
+}
+
+func (s *tuiDiagnosticSink) duplicate(notification uiNotification) bool {
+	now := time.Now()
+	key := fmt.Sprintf("%d\x00%s\x00%s", notification.level, notification.title, notification.message)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if last, ok := s.recent[key]; ok && now.Sub(last) < diagnosticNotificationCooldown {
+		return true
+	}
+	for existing, seenAt := range s.recent {
+		if now.Sub(seenAt) >= diagnosticNotificationCooldown {
+			delete(s.recent, existing)
+		}
+	}
+	s.recent[key] = now
+	return false
+}
+
+func notificationFromDiagnostic(diagnostic extensions.Diagnostic) (uiNotification, bool) {
+	var level uiNotificationLevel
+	switch diagnostic.Level {
+	case extensions.DiagnosticLevelWarning:
+		level = uiNotificationWarning
+	case extensions.DiagnosticLevelError:
+		level = uiNotificationError
+	default:
+		return uiNotification{}, false
+	}
+
+	source := strings.TrimSpace(diagnostic.Extension)
+	if strings.EqualFold(source, "mcp") {
+		source = "MCP"
+	}
+	if source == "" {
+		source = "Extension"
+	}
+	title := fmt.Sprintf("%s %s", source, diagnostic.Level)
+	message := strings.TrimSpace(diagnostic.Message)
+	if server := diagnosticStringField(diagnostic.Fields, "server"); server != "" {
+		message = fmt.Sprintf("%s %q", message, server)
+	}
+	if detail := diagnosticStringField(diagnostic.Fields, "error"); detail != "" {
+		if message != "" {
+			message += ": "
+		}
+		message += detail
+	}
+	message = truncateDiagnosticNotification(message)
+	return uiNotification{level: level, title: title, message: message}, true
+}
+
+func diagnosticStringField(fields map[string]any, name string) string {
+	value, ok := fields[name].(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(value)
+}
+
+func truncateDiagnosticNotification(message string) string {
+	runes := []rune(message)
+	if len(runes) <= diagnosticNotificationMaxRunes {
+		return message
+	}
+	return string(runes[:diagnosticNotificationMaxRunes-1]) + "…"
 }
 
 type tuiUIBroker struct {

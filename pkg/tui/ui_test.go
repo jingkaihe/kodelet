@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -166,6 +167,70 @@ func TestTUIUIBrokerConfirmSelectAndNotify(t *testing.T) {
 	updated, _ = m.Update(uiNotificationExpiredMsg{id: m.uiNotifications[0].id})
 	m = updated.(model)
 	assert.Empty(t, m.uiNotifications)
+}
+
+func TestExtensionDiagnosticsBecomeTUIWarningsAndErrors(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 100
+	m.height = 30
+	m.resize()
+
+	sink, ok := extensions.DiagnosticSinkFromContext(m.ctx)
+	require.True(t, ok)
+	warning := extensions.Diagnostic{
+		Level:     extensions.DiagnosticLevelWarning,
+		Extension: "mcp",
+		Message:   "failed to initialize MCP server",
+		Fields: map[string]any{
+			"server": "playwright",
+			"error":  "spawn npxx ENOENT",
+		},
+	}
+	sink.ReportDiagnostic(context.Background(), warning)
+
+	msg, ok := receiveRunMsg(t, m.runCh).(uiDiagnosticMsg)
+	require.True(t, ok)
+	assert.Equal(t, uiNotificationWarning, msg.notification.level)
+	assert.Equal(t, "MCP warning", msg.notification.title)
+	assert.Equal(t, `failed to initialize MCP server "playwright": spawn npxx ENOENT`, msg.notification.message)
+	updated, _ := m.Update(msg)
+	m = updated.(model)
+	require.Len(t, m.uiNotifications, 1)
+	view := xansi.Strip(m.View())
+	assert.Contains(t, view, "MCP warning")
+	assert.Contains(t, view, "spawn npxx ENOENT")
+
+	// Identical diagnostics are suppressed briefly because extension discovery
+	// can initialize the same MCP configuration more than once.
+	sink.ReportDiagnostic(context.Background(), warning)
+	select {
+	case duplicate := <-m.runCh:
+		t.Fatalf("unexpected duplicate diagnostic: %#v", duplicate)
+	default:
+	}
+
+	sink.ReportDiagnostic(context.Background(), extensions.Diagnostic{
+		Level:     extensions.DiagnosticLevelError,
+		Extension: "weather",
+		Message:   "extension stopped",
+	})
+	errorMsg, ok := receiveRunMsg(t, m.runCh).(uiDiagnosticMsg)
+	require.True(t, ok)
+	assert.Equal(t, uiNotificationError, errorMsg.notification.level)
+	assert.Equal(t, "weather error", errorMsg.notification.title)
+}
+
+func TestDiagnosticNotificationMessageIsBounded(t *testing.T) {
+	notification, ok := notificationFromDiagnostic(extensions.Diagnostic{
+		Level:     extensions.DiagnosticLevelError,
+		Extension: "weather",
+		Message:   strings.Repeat("x", diagnosticNotificationMaxRunes+20),
+	})
+
+	require.True(t, ok)
+	assert.Len(t, []rune(notification.message), diagnosticNotificationMaxRunes)
+	assert.True(t, strings.HasSuffix(notification.message, "…"))
 }
 
 func TestTUIUIBrokerUnavailableClosedAndContextCancellation(t *testing.T) {

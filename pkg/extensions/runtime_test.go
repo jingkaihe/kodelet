@@ -499,6 +499,9 @@ func helperEnvExtensionScript(t *testing.T) string {
 
 func runEnvExtensionHelperProcess() {
 	workspaceCWD := os.Getenv(workspaceCWDEnvKey)
+	if diagnostic := os.Getenv("KODELET_TEST_EXTENSION_STDERR"); diagnostic != "" {
+		fmt.Fprintln(os.Stderr, diagnostic)
+	}
 	reader := bufio.NewReader(os.Stdin)
 	for {
 		payload, err := readFrame(reader)

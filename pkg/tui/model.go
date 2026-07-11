@@ -60,6 +60,8 @@ func Run(ctx context.Context, config Config) error {
 
 func newModel(ctx context.Context, config Config) model {
 	mctx, cancel := context.WithCancel(ctx)
+	runCh := make(chan tea.Msg, 256)
+	mctx = extensions.ContextWithDiagnosticSink(mctx, newTUIDiagnosticSink(runCh))
 	theme, ok := themeByName(config.Theme)
 	if !ok {
 		theme = themes[DefaultThemeName]
@@ -143,7 +145,7 @@ func newModel(ctx context.Context, config Config) model {
 		textarea:               ta,
 		spinner:                sp,
 		autoFollow:             true,
-		runCh:                  make(chan tea.Msg, 256),
+		runCh:                  runCh,
 		status:                 "ready",
 		terminalTitleEpoch:     time.Now(),
 	}

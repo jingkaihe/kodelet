@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
 	conversationtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/pkg/errors"
@@ -30,15 +31,6 @@ type Process struct {
 	shutdown     bool
 	disabled     bool
 	failures     int
-}
-
-// extensionStderrWriter deliberately hides an underlying *os.File from
-// os/exec. This makes os/exec give the child a pipe while still forwarding
-// extension diagnostics to the configured writer. In particular, extensions
-// must not inherit the TUI's controlling terminal and later restore a raw
-// terminal state captured while the TUI was running.
-type extensionStderrWriter struct {
-	io.Writer
 }
 
 const (
@@ -64,10 +56,13 @@ func StartProcess(ctx context.Context, ext Extension, config Config, workspaceCW
 }
 
 func (p *Process) start(ctx context.Context) error {
-	cmd := exec.CommandContext(processContext(ctx), p.Extension.ExecPath)
+	processCtx := processContext(ctx)
+	cmd := exec.CommandContext(processCtx, p.Extension.ExecPath)
 	cmd.Dir = p.Extension.Dir
 	cmd.Env = extensionProcessEnv(p.workspaceCWD)
-	cmd.Stderr = extensionStderrWriter{Writer: os.Stderr}
+	// Keep extension diagnostics on the host's configured log sink so a
+	// full-screen UI can redirect them without replacing the process stderr.
+	cmd.Stderr = newExtensionStderrWriter(processCtx, p.Extension.ID, logger.G(processCtx).Logger.Out)
 	osutil.SetProcessGroup(cmd)
 	osutil.SetProcessGroupKill(cmd)
 

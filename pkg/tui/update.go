@@ -146,6 +146,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := m.addUINotification(msg.notification)
 		return m, tea.Batch(waitForMsg(m.runCh), cmd)
 
+	case uiDiagnosticMsg:
+		cmd := m.addUINotification(msg.notification)
+		return m, tea.Batch(waitForMsg(m.runCh), cmd)
+
 	case uiNotificationExpiredMsg:
 		m.removeUINotification(msg.id)
 		return m, nil

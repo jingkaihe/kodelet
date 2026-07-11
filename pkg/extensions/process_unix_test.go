@@ -3,6 +3,7 @@
 package extensions
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -10,12 +11,15 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
+	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -32,6 +36,14 @@ func TestProcessDoesNotExposeTerminalStderrToExtension(t *testing.T) {
 	extDir := filepath.Join(rootDir, "stderr")
 	execPath := writeExecutable(t, filepath.Join(extDir, "kodelet-extension-stderr"), helperEnvExtensionScript(t))
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	diagnosticLine := `{"level":"warn","extension":"mcp","message":"failed to initialize MCP server","server":"playwright","error":"spawn npxx ENOENT"}`
+	t.Setenv("KODELET_TEST_EXTENSION_STDERR", diagnosticLine)
+
+	var logOutput lockedBuffer
+	testLogger := logrus.New()
+	testLogger.SetOutput(&logOutput)
+	sink := newRecordingDiagnosticSink()
+	ctx := ContextWithDiagnosticSink(logger.WithLogger(context.Background(), logrus.NewEntry(testLogger)), sink)
 
 	var process *Process
 	originalStderr := os.Stderr
@@ -39,7 +51,7 @@ func TestProcessDoesNotExposeTerminalStderrToExtension(t *testing.T) {
 		os.Stderr = tty
 		defer func() { os.Stderr = originalStderr }()
 
-		process, err = StartProcess(context.Background(), Extension{
+		process, err = StartProcess(ctx, Extension{
 			ID:       "stderr",
 			Name:     "stderr",
 			ExecPath: execPath,
@@ -52,6 +64,30 @@ func TestProcessDoesNotExposeTerminalStderrToExtension(t *testing.T) {
 	result, err := process.Initialize(context.Background(), rootDir)
 	require.NoError(t, err)
 	assert.Equal(t, "env;stderr_tty=false", result.Name)
+	assert.Eventually(t, func() bool {
+		return strings.Contains(logOutput.String(), diagnosticLine)
+	}, time.Second, 10*time.Millisecond)
+	diagnostic := receiveDiagnostic(t, sink.ch)
+	assert.Equal(t, DiagnosticLevelWarning, diagnostic.Level)
+	assert.Equal(t, "mcp", diagnostic.Extension)
+	assert.Equal(t, "playwright", diagnostic.Fields["server"])
+}
+
+type lockedBuffer struct {
+	mu sync.Mutex
+	bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(payload []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.Buffer.Write(payload)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.Buffer.String()
 }
 
 func TestProcessCloseUsesCommandCancelForProcessGroup(t *testing.T) {
