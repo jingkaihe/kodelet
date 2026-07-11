@@ -774,6 +774,64 @@ func TestCompactContextUsesRawJSONByDefault(t *testing.T) {
 	assert.False(t, fallbackCalled, "summary fallback should not run when raw compact succeeds")
 }
 
+func TestCompactContextAccountsCacheWriteUsage(t *testing.T) {
+	config := llmtypes.Config{
+		Provider: "openai",
+		Model:    "gpt-5.6-sol",
+		OpenAI: &llmtypes.OpenAIConfig{
+			Platform:    "openai",
+			ServiceTier: llmtypes.OpenAIServiceTierDefault,
+		},
+	}
+	_, customPricing := loadCustomConfiguration(config)
+	thread := &Thread{
+		Thread:        base.NewThread(config, "conv-test"),
+		customPricing: customPricing,
+		inputItems: []openairesponses.ResponseInputItemUnionParam{
+			{
+				OfMessage: &openairesponses.EasyInputMessageParam{
+					Role:    openairesponses.EasyInputMessageRoleUser,
+					Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("hello")},
+				},
+			},
+		},
+	}
+
+	var captured openairesponses.ResponseCompactParams
+	thread.compactFunc = func(_ context.Context, params openairesponses.ResponseCompactParams, _ ...option.RequestOption) (*openairesponses.CompactedResponse, error) {
+		captured = params
+		return &openairesponses.CompactedResponse{
+			Output: []openairesponses.ResponseOutputItemUnion{
+				{Type: "compaction", EncryptedContent: "enc"},
+			},
+			Usage: openairesponses.ResponseUsage{
+				InputTokens:  100,
+				OutputTokens: 10,
+				InputTokensDetails: openairesponses.ResponseUsageInputTokensDetails{
+					CachedTokens:     20,
+					CacheWriteTokens: 30,
+				},
+			},
+		}, nil
+	}
+
+	err := thread.CompactContext(context.Background())
+	require.NoError(t, err)
+
+	assert.Equal(t, openairesponses.ResponseCompactParamsServiceTierDefault, captured.ServiceTier)
+	assert.Equal(t, 70, thread.Usage.InputTokens)
+	assert.Equal(t, 20, thread.Usage.CacheReadInputTokens)
+	assert.Equal(t, 30, thread.Usage.CacheCreationInputTokens)
+	assert.Equal(t, 10, thread.Usage.OutputTokens)
+	assert.Equal(t, 130, thread.Usage.TotalTokens())
+	assert.InDelta(t, 50*0.000005, thread.Usage.InputCost, 1e-12)
+	assert.InDelta(t, 20*0.0000005, thread.Usage.CacheReadCost, 1e-12)
+	assert.InDelta(t, 30*0.00000625, thread.Usage.CacheCreationCost, 1e-12)
+	assert.InDelta(t, 10*0.00003, thread.Usage.OutputCost, 1e-12)
+	assert.Equal(t, 1, thread.Usage.CurrentContextWindow)
+	assert.Equal(t, 1_050_000, thread.Usage.MaxContextWindow)
+}
+
 func TestCompactContextFallsBackOnCompactError(t *testing.T) {
 	thread := &Thread{
 		Thread: base.NewThread(
@@ -2219,21 +2277,56 @@ func TestProcessMessageExchangeMirrorsCodexPromptCachingRequestShape(t *testing.
 }
 
 func TestApplyGPT56PromptCacheOptions(t *testing.T) {
-	params := openairesponses.ResponseNewParams{}
-	applyGPT56PromptCacheOptions(&params, "gpt-5.6")
+	tests := []struct {
+		name         string
+		config       llmtypes.Config
+		model        string
+		expectOption bool
+	}{
+		{
+			name:         "OpenAI GPT-5.6 alias",
+			config:       llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}},
+			model:        "gpt-5.6",
+			expectOption: true,
+		},
+		{
+			name:         "OpenAI GPT-5.6 variant",
+			config:       llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}},
+			model:        "gpt-5.6-sol",
+			expectOption: true,
+		},
+		{
+			name:   "Codex GPT-5.6 variant",
+			config: llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{Platform: "codex"}},
+			model:  "gpt-5.6-luna",
+		},
+		{
+			name:   "Copilot GPT-5.6 variant",
+			config: llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{Platform: "copilot"}},
+			model:  "gpt-5.6-luna",
+		},
+		{
+			name:   "OpenAI earlier model",
+			config: llmtypes.Config{OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}},
+			model:  "gpt-5.5",
+		},
+	}
 
-	assert.Equal(t, "implicit", params.PromptCacheOptions.Mode)
-	assert.Equal(t, "30m", params.PromptCacheOptions.Ttl)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			params := openairesponses.ResponseNewParams{}
+			applyGPT56PromptCacheOptions(&params, tt.config, tt.model)
 
-	params = openairesponses.ResponseNewParams{}
-	applyGPT56PromptCacheOptions(&params, "gpt-5.6-sol")
-	assert.Equal(t, "implicit", params.PromptCacheOptions.Mode)
-	assert.Equal(t, "30m", params.PromptCacheOptions.Ttl)
+			if tt.expectOption {
+				assert.Equal(t, "implicit", params.PromptCacheOptions.Mode)
+				assert.Equal(t, "30m", params.PromptCacheOptions.Ttl)
+				return
+			}
 
-	params = openairesponses.ResponseNewParams{}
-	applyGPT56PromptCacheOptions(&params, "gpt-5.5")
-	assert.Empty(t, params.PromptCacheOptions.Mode)
-	assert.Empty(t, params.PromptCacheOptions.Ttl)
+			assert.Empty(t, params.PromptCacheOptions.Mode)
+			assert.Empty(t, params.PromptCacheOptions.Ttl)
+		})
+	}
 }
 
 func TestOpenAIReasoningEffortForRequest(t *testing.T) {

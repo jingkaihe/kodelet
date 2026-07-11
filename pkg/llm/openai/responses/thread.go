@@ -490,7 +490,7 @@ func (t *Thread) processMessageExchange(
 			OfToolChoiceMode: param.NewOpt(responses.ToolChoiceOptionsAuto),
 		},
 	}
-	applyGPT56PromptCacheOptions(&params, model)
+	applyGPT56PromptCacheOptions(&params, t.Config, model)
 
 	if serviceTier := normalizeServiceTier(t.Config).WireValue(); serviceTier != "" {
 		params.ServiceTier = responses.ResponseNewParamsServiceTier(serviceTier)
@@ -580,8 +580,8 @@ func (t *Thread) processMessageExchange(
 	return t.processMessageExchangeWithStreamRetries(ctx, handler, model, params, tools, newResponsesStream, closeResponsesStream, processStream, opt, saveConversation, transportName)
 }
 
-func applyGPT56PromptCacheOptions(params *responses.ResponseNewParams, model string) {
-	if !isGPT56Model(model) {
+func applyGPT56PromptCacheOptions(params *responses.ResponseNewParams, config llmtypes.Config, model string) {
+	if resolvePlatformName(config) != defaultOpenAIPlatform || !isGPT56Model(model) {
 		return
 	}
 
@@ -991,6 +991,10 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 		Model:        responses.ResponseCompactParamsModel(t.Config.Model),
 		Instructions: param.NewOpt(systemPrompt),
 	}
+	serviceTier := normalizeServiceTier(t.Config)
+	if wireServiceTier := serviceTier.WireValue(); wireServiceTier != "" {
+		compactParams.ServiceTier = responses.ResponseCompactParamsServiceTier(wireServiceTier)
+	}
 
 	compactOpts := []option.RequestOption{}
 	if t.isCodex {
@@ -1028,11 +1032,9 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 		return nil
 	}
 
-	// Update usage metrics
-	t.Mu.Lock()
-	t.Usage.InputTokens += int(resp.Usage.InputTokens)
-	t.Usage.OutputTokens += int(resp.Usage.OutputTokens)
-	t.Mu.Unlock()
+	// Account for compaction like any other model response, including cache reads,
+	// cache writes, and their associated costs.
+	t.updateUsage(resp.Usage, t.Config.Model, serviceTier)
 
 	// Convert compacted output items to persisted/input items while preserving
 	// the original output payload for forward compatibility.
