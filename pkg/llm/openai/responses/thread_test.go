@@ -2220,8 +2220,13 @@ func TestProcessMessageExchangeMirrorsCodexPromptCachingRequestShape(t *testing.
 
 func TestApplyGPT56PromptCacheOptions(t *testing.T) {
 	params := openairesponses.ResponseNewParams{}
-	applyGPT56PromptCacheOptions(&params, "gpt-5.6-sol")
+	applyGPT56PromptCacheOptions(&params, "gpt-5.6")
 
+	assert.Equal(t, "implicit", params.PromptCacheOptions.Mode)
+	assert.Equal(t, "30m", params.PromptCacheOptions.Ttl)
+
+	params = openairesponses.ResponseNewParams{}
+	applyGPT56PromptCacheOptions(&params, "gpt-5.6-sol")
 	assert.Equal(t, "implicit", params.PromptCacheOptions.Mode)
 	assert.Equal(t, "30m", params.PromptCacheOptions.Ttl)
 

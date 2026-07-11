@@ -505,6 +505,7 @@ func TestGetConfigFromViperWithAliases(t *testing.T) {
 				},
 			},
 			expectedAliases: map[string]string{
+				"gpt-5.6":   "gpt-5.6-sol",
 				"sonnet-46": "claude-sonnet-4-6",
 				"haiku-45":  "claude-haiku-4-5-20251001",
 				"gpt41":     "gpt-4.1",
@@ -518,8 +519,8 @@ func TestGetConfigFromViperWithAliases(t *testing.T) {
 				"model":      "claude-sonnet-4-6",
 				"max_tokens": 8192,
 			},
-			expectedAliases: nil,
-			description:     "should handle missing aliases configuration",
+			expectedAliases: map[string]string{"gpt-5.6": "gpt-5.6-sol"},
+			description:     "should include default aliases when aliases are omitted",
 		},
 	}
 
@@ -583,6 +584,29 @@ func TestConfigAliasIntegrationWithNewThread(t *testing.T) {
 
 	// Verify the original config was not modified (passed by value to NewThread)
 	assert.Equal(t, originalModel, config.Model, "original config should not be modified")
+}
+
+func TestGetConfigFromViperIncludesDefaultGPT56Alias(t *testing.T) {
+	// Save original viper state
+	originalConfig := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalConfig {
+			viper.Set(key, value)
+		}
+	}()
+
+	viper.Reset()
+	viper.Set("provider", "openai")
+	viper.Set("model", "gpt-5.6")
+	viper.Set("weak_model", "gpt-5.6")
+
+	config, err := GetConfigFromViper()
+	require.NoError(t, err)
+
+	assert.Equal(t, "gpt-5.6-sol", config.Aliases["gpt-5.6"])
+	assert.Equal(t, "gpt-5.6-sol", config.Model)
+	assert.Equal(t, "gpt-5.6-sol", config.WeakModel)
 }
 
 func TestGetConfigFromViperOpenAINotSet(t *testing.T) {

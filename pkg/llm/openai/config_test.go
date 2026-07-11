@@ -526,6 +526,11 @@ func TestResolveAPIMode(t *testing.T) {
 		},
 		{
 			name:     "gpt-5.6 model family defaults to responses",
+			config:   llmtypes.Config{Model: "gpt-5.6"},
+			expected: llmtypes.OpenAIAPIModeResponses,
+		},
+		{
+			name:     "gpt-5.6 variant model family defaults to responses",
 			config:   llmtypes.Config{Model: "gpt-5.6-sol"},
 			expected: llmtypes.OpenAIAPIModeResponses,
 		},

@@ -22,6 +22,7 @@ func TestRecommendedSetupConfigYAML_OpenAIProfilesUsePatchMode(t *testing.T) {
 	err := yaml.Unmarshal([]byte(recommendedSetupConfigYAML()), &config)
 	require.NoError(t, err)
 	assert.Equal(t, "claude-fable-5", config.Aliases["fable-5"])
+	assert.Equal(t, "gpt-5.6-sol", config.Aliases["gpt-5.6"])
 	assert.Equal(t, "claude-opus-4-8", config.Aliases["opus-48"])
 
 	openAIProfile, ok := config.Profiles["openai"]

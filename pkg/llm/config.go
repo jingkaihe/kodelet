@@ -91,6 +91,8 @@ func getConfigFromViperWithProfileAndCmd(profileName string, cmd *cobra.Command,
 		config.Profile = activeProfile
 	}
 
+	config.Aliases = withDefaultModelAliases(config.Aliases)
+
 	// Resolve model aliases
 	config.Model = resolveModelAlias(config.Model, config.Aliases)
 	config.WeakModel = resolveModelAlias(config.WeakModel, config.Aliases)

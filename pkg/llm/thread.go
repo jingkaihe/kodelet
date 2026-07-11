@@ -18,17 +18,31 @@ import (
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
-// resolveModelAlias resolves a model name through the configured aliases
-// If the model name exists as an alias, returns the mapped full name
-// Otherwise returns the original model name unchanged
+var defaultModelAliases = map[string]string{
+	"gpt-5.6": "gpt-5.6-sol",
+}
+
+func withDefaultModelAliases(aliases map[string]string) map[string]string {
+	merged := make(map[string]string, len(defaultModelAliases)+len(aliases))
+	for alias, model := range defaultModelAliases {
+		merged[alias] = model
+	}
+	for alias, model := range aliases {
+		merged[alias] = model
+	}
+	return merged
+}
+
+// resolveModelAlias resolves a model name through configured aliases plus
+// built-in defaults. User-configured aliases take precedence over defaults.
+// If the model name exists as an alias, returns the mapped full name.
+// Otherwise returns the original model name unchanged.
 func resolveModelAlias(modelName string, aliases map[string]string) string {
+	aliases = withDefaultModelAliases(aliases)
+
 	logger.G(context.TODO()).
 		WithField("modelName", modelName).
 		WithField("aliases", aliases).Debug("Resolving model alias")
-
-	if aliases == nil {
-		return modelName
-	}
 
 	if resolvedName, exists := aliases[modelName]; exists {
 		return resolvedName
@@ -40,6 +54,7 @@ func resolveModelAlias(modelName string, aliases map[string]string) string {
 // NewThread creates a new thread based on the model specified in the config
 func NewThread(config llmtypes.Config) (llmtypes.Thread, error) {
 	config.Model = resolveModelAlias(config.Model, config.Aliases)
+	config.WeakModel = resolveModelAlias(config.WeakModel, config.Aliases)
 
 	// Create thread based on provider
 	switch strings.ToLower(config.Provider) {

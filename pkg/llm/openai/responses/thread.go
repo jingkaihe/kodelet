@@ -593,7 +593,7 @@ func applyGPT56PromptCacheOptions(params *responses.ResponseNewParams, model str
 
 func isGPT56Model(model string) bool {
 	model = strings.ToLower(strings.TrimSpace(model))
-	return strings.HasPrefix(model, "gpt-5.6-")
+	return model == "gpt-5.6" || strings.HasPrefix(model, "gpt-5.6-")
 }
 
 func openAIReasoningEffortForRequest(effort shared.ReasoningEffort) shared.ReasoningEffort {
@@ -1764,6 +1764,32 @@ func (t *Thread) getPricing(model string) llmtypes.ModelPricing {
 		Output:        0.000008,  // $8.00 per million tokens
 		ContextWindow: 1047576,
 	}
+}
+
+// getPricingForServiceTier selects built-in pricing using the processing tier
+// reported by the API. Explicit pricing from configuration remains authoritative.
+func (t *Thread) getPricingForServiceTier(model string, serviceTier llmtypes.OpenAIServiceTier) llmtypes.ModelPricing {
+	if t.Config.OpenAI != nil && t.Config.OpenAI.Pricing != nil {
+		if pricing, ok := t.Config.OpenAI.Pricing[model]; ok {
+			return pricing
+		}
+	}
+
+	tier, ok := llmtypes.ParseOpenAIServiceTier(string(serviceTier))
+	if !ok {
+		return t.getPricing(model)
+	}
+
+	platformName := resolvePlatformForLoading(t.Config)
+	switch normalizePlatformName(platformName) {
+	case "openai", "codex":
+		_, tierPricing := loadPlatformDefaultsForServiceTier(platformName, tier)
+		if pricing, ok := tierPricing[model]; ok {
+			return pricing
+		}
+	}
+
+	return t.getPricing(model)
 }
 
 // isReasoningModelDynamic checks if a model supports reasoning using loaded platform defaults/config.

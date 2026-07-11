@@ -45,6 +45,7 @@ sysprompt_args: {}
 # Allows using short names instead of full model identifiers
 aliases:
   fable-5: "claude-fable-5"
+  gpt-5.6: "gpt-5.6-sol"
   sonnet-46: "claude-sonnet-4-6"
   haiku-45: "claude-haiku-4-5-20251001"
   opus-48: "claude-opus-4-8"

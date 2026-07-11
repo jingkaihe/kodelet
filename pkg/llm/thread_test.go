@@ -363,7 +363,19 @@ func TestResolveModelAlias(t *testing.T) {
 			expected: "claude-sonnet-4-6",
 		},
 		{
-			name:     "handles nil aliases map",
+			name:     "resolves built-in default alias",
+			model:    "gpt-5.6",
+			aliases:  nil,
+			expected: "gpt-5.6-sol",
+		},
+		{
+			name:     "user aliases override built-in default alias",
+			model:    "gpt-5.6",
+			aliases:  map[string]string{"gpt-5.6": "gpt-5.6-terra"},
+			expected: "gpt-5.6-terra",
+		},
+		{
+			name:     "handles nil aliases map with no matching default",
 			model:    "claude-sonnet-4-6",
 			aliases:  nil,
 			expected: "claude-sonnet-4-6",
@@ -414,6 +426,15 @@ func TestNewThreadWithAliases(t *testing.T) {
 				},
 			},
 			description: "should resolve gpt41 alias to full OpenAI model name",
+		},
+		{
+			name: "resolves built-in GPT-5.6 alias for OpenAI main and weak models",
+			config: llmtypes.Config{
+				Provider:  "openai",
+				Model:     "gpt-5.6",
+				WeakModel: "gpt-5.6",
+			},
+			description: "should resolve gpt-5.6 alias to gpt-5.6-sol",
 		},
 		{
 			name: "uses full model name when no alias exists",

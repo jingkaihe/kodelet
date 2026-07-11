@@ -386,7 +386,7 @@ func (t *Thread) processStream(
 
 	// Update usage from final response
 	if finalResponse != nil {
-		t.updateUsage(finalResponse.Usage, model)
+		t.updateUsage(finalResponse.Usage, model, llmtypes.OpenAIServiceTier(finalResponse.ServiceTier))
 		if usageHandler, ok := handler.(llmtypes.UsageMessageHandler); ok {
 			usageHandler.HandleUsage(t.GetUsage())
 		}
@@ -570,28 +570,31 @@ func (t *Thread) executeToolCall(
 }
 
 // updateUsage updates the thread's usage statistics from a response.
-func (t *Thread) updateUsage(usage responses.ResponseUsage, model string) {
+func (t *Thread) updateUsage(usage responses.ResponseUsage, model string, serviceTier llmtypes.OpenAIServiceTier) {
 	t.Mu.Lock()
 	defer t.Mu.Unlock()
 
-	t.Usage.InputTokens += int(usage.InputTokens)
-	t.Usage.OutputTokens += int(usage.OutputTokens)
+	inputTokens := int(usage.InputTokens)
+	outputTokens := int(usage.OutputTokens)
+	cacheWriteTokens := int(usage.InputTokensDetails.CacheWriteTokens)
+
+	// Cache-write tokens are included in the response's input token count, but
+	// Usage.TotalTokens treats cache creation as a separate category.
+	t.Usage.InputTokens += max(inputTokens-cacheWriteTokens, 0)
+	t.Usage.OutputTokens += outputTokens
 
 	// Update cached tokens if available
 	if usage.InputTokensDetails.CachedTokens > 0 {
 		t.Usage.CacheReadInputTokens += int(usage.InputTokensDetails.CachedTokens)
 	}
-	cacheWriteTokens := int(usage.InputTokensDetails.CacheWriteTokens)
 	if cacheWriteTokens > 0 {
 		t.Usage.CacheCreationInputTokens += cacheWriteTokens
 	}
 
 	// Calculate costs based on model pricing
-	pricing := t.getPricing(model)
+	pricing := t.getPricingForServiceTier(model, serviceTier)
 
 	// Calculate individual costs
-	inputTokens := int(usage.InputTokens)
-	outputTokens := int(usage.OutputTokens)
 	cachedTokens := int(usage.InputTokensDetails.CachedTokens)
 	pricing = pricing.ForPromptTokens(inputTokens)
 

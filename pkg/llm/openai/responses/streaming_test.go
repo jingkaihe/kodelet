@@ -440,14 +440,14 @@ func TestUpdateUsageAccumulatesCachedTokensLikeCodexTotals(t *testing.T) {
 		InputTokensDetails: responses.ResponseUsageInputTokensDetails{
 			CachedTokens: 2400,
 		},
-	}, "gpt-4.1")
+	}, "gpt-4.1", "")
 	thread.updateUsage(responses.ResponseUsage{
 		InputTokens:  120,
 		OutputTokens: 20,
 		InputTokensDetails: responses.ResponseUsageInputTokensDetails{
 			CachedTokens: 143900,
 		},
-	}, "gpt-4.1")
+	}, "gpt-4.1", "")
 
 	assert.Equal(t, 220, thread.Usage.InputTokens)
 	assert.Equal(t, 30, thread.Usage.OutputTokens)
@@ -485,12 +485,14 @@ func TestUpdateUsageUsesLongContextPricing(t *testing.T) {
 	var usage responses.ResponseUsage
 	require.NoError(t, json.Unmarshal([]byte(usageJSON), &usage))
 
-	thread.updateUsage(usage, "test-model")
+	thread.updateUsage(usage, "test-model", "")
 
-	assert.Equal(t, 272001, thread.Usage.InputTokens)
+	assert.Equal(t, 271999, thread.Usage.InputTokens)
 	assert.Equal(t, 1, thread.Usage.CacheReadInputTokens)
 	assert.Equal(t, 2, thread.Usage.CacheCreationInputTokens)
 	assert.Equal(t, 10, thread.Usage.OutputTokens)
+	assert.Equal(t, 272012, thread.Usage.TotalTokens())
+	assert.Equal(t, 272011, thread.Usage.CurrentContextWindow)
 	assert.Equal(t, float64(271998)*3, thread.Usage.InputCost)
 	assert.Equal(t, 0.3, thread.Usage.CacheReadCost)
 	assert.Equal(t, 7.5, thread.Usage.CacheCreationCost)
@@ -528,7 +530,7 @@ func TestUpdateUsageAccountsCacheWriteTokensOnlyWithConfiguredRate(t *testing.T)
 		InputTokensDetails: responses.ResponseUsageInputTokensDetails{
 			CachedTokens: usage.InputTokensDetails.CachedTokens,
 		},
-	}, "test-model")
+	}, "test-model", "")
 
 	assert.Equal(t, 100, thread.Usage.InputTokens)
 	assert.Equal(t, 20, thread.Usage.CacheReadInputTokens)
@@ -536,6 +538,7 @@ func TestUpdateUsageAccountsCacheWriteTokensOnlyWithConfiguredRate(t *testing.T)
 	assert.Equal(t, float64(80), thread.Usage.InputCost)
 	assert.Equal(t, 2.0, thread.Usage.CacheReadCost)
 	assert.Equal(t, 0.0, thread.Usage.CacheCreationCost)
+	assert.Equal(t, 130, thread.Usage.TotalTokens())
 
 	thread = &Thread{
 		Thread: base.NewThread(llmtypes.Config{Provider: "openai", Model: "test-model"}, "test"),
@@ -549,12 +552,14 @@ func TestUpdateUsageAccountsCacheWriteTokensOnlyWithConfiguredRate(t *testing.T)
 		},
 	}
 
-	thread.updateUsage(usage, "test-model")
+	thread.updateUsage(usage, "test-model", "")
 
-	assert.Equal(t, 100, thread.Usage.InputTokens)
+	assert.Equal(t, 70, thread.Usage.InputTokens)
 	assert.Equal(t, 20, thread.Usage.CacheReadInputTokens)
 	assert.Equal(t, 30, thread.Usage.CacheCreationInputTokens)
 	assert.Equal(t, 10, thread.Usage.OutputTokens)
+	assert.Equal(t, 130, thread.Usage.TotalTokens())
+	assert.Equal(t, 110, thread.Usage.CurrentContextWindow)
 	assert.Equal(t, float64(50), thread.Usage.InputCost)
 	assert.Equal(t, 2.0, thread.Usage.CacheReadCost)
 	assert.Equal(t, 0.0, thread.Usage.CacheCreationCost)
@@ -623,6 +628,110 @@ func TestProcessStreamUsesCallModelForLongContextPricing(t *testing.T) {
 	assert.Equal(t, 0.15, thread.Usage.CacheReadCost)
 	assert.Equal(t, 25.0, thread.Usage.OutputCost)
 	assert.Equal(t, 200_000, thread.Usage.MaxContextWindow)
+}
+
+func TestProcessStreamUsesReturnedServiceTierForPricing(t *testing.T) {
+	tests := []struct {
+		name                  string
+		configuredTier        llmtypes.OpenAIServiceTier
+		returnedTier          string
+		expectedInputCost     float64
+		expectedCacheReadCost float64
+		expectedOutputCost    float64
+	}{
+		{
+			name:                  "auto served as priority",
+			configuredTier:        llmtypes.OpenAIServiceTierAuto,
+			returnedTier:          "priority",
+			expectedInputCost:     80 * 0.00001,
+			expectedCacheReadCost: 20 * 0.000001,
+			expectedOutputCost:    10 * 0.00006,
+		},
+		{
+			name:                  "priority served as default",
+			configuredTier:        llmtypes.OpenAIServiceTierPriority,
+			returnedTier:          "default",
+			expectedInputCost:     80 * 0.000005,
+			expectedCacheReadCost: 20 * 0.0000005,
+			expectedOutputCost:    10 * 0.00003,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := llmtypes.Config{
+				Provider: "openai",
+				Model:    "gpt-5.6-sol",
+				OpenAI: &llmtypes.OpenAIConfig{
+					Platform:    "openai",
+					ServiceTier: tt.configuredTier,
+				},
+			}
+			_, configuredPricing := loadCustomConfiguration(config)
+			thread := &Thread{
+				Thread:        base.NewThread(config, "test"),
+				customPricing: configuredPricing,
+			}
+
+			stream := responseStreamFromMaps(t, []map[string]any{
+				{
+					"type": "response.completed",
+					"response": map[string]any{
+						"id":           "resp_tier_usage",
+						"status":       "completed",
+						"service_tier": tt.returnedTier,
+						"usage": map[string]any{
+							"input_tokens":  100,
+							"output_tokens": 10,
+							"input_tokens_details": map[string]any{
+								"cached_tokens": 20,
+							},
+						},
+					},
+				},
+			})
+
+			streamResult, err := thread.processStream(
+				context.Background(),
+				stream,
+				&captureStreamHandler{},
+				"gpt-5.6-sol",
+				llmtypes.MessageOpt{DisableUsageLog: true},
+			)
+			require.NoError(t, err)
+			assert.True(t, streamResult.responseCompleted)
+			assert.InDelta(t, tt.expectedInputCost, thread.Usage.InputCost, 1e-12)
+			assert.InDelta(t, tt.expectedCacheReadCost, thread.Usage.CacheReadCost, 1e-12)
+			assert.InDelta(t, tt.expectedOutputCost, thread.Usage.OutputCost, 1e-12)
+			assert.Equal(t, 1_050_000, thread.Usage.MaxContextWindow)
+		})
+	}
+}
+
+func TestGetPricingForServiceTierPreservesConfiguredOverride(t *testing.T) {
+	override := llmtypes.ModelPricing{
+		Input:         1,
+		CachedInput:   2,
+		Output:        3,
+		ContextWindow: 4,
+	}
+	config := llmtypes.Config{
+		Provider: "openai",
+		Model:    "gpt-5.6-sol",
+		OpenAI: &llmtypes.OpenAIConfig{
+			Platform: "openai",
+			Pricing: map[string]llmtypes.ModelPricing{
+				"gpt-5.6-sol": override,
+			},
+		},
+	}
+	_, configuredPricing := loadCustomConfiguration(config)
+	thread := &Thread{
+		Thread:        base.NewThread(config, "test"),
+		customPricing: configuredPricing,
+	}
+
+	assert.Equal(t, override, thread.getPricingForServiceTier("gpt-5.6-sol", llmtypes.OpenAIServiceTierPriority))
 }
 
 func TestProcessStreamReturnsErrorOnIncompleteResponse(t *testing.T) {

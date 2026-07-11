@@ -100,7 +100,7 @@ func resolveAPIMode(config llmtypes.Config) llmtypes.OpenAIAPIMode {
 
 func isGPT56Model(model string) bool {
 	model = strings.ToLower(strings.TrimSpace(model))
-	return strings.HasPrefix(model, "gpt-5.6-")
+	return model == "gpt-5.6" || strings.HasPrefix(model, "gpt-5.6-")
 }
 
 func openAIReasoningEffortForChatRequest(effort string) string {
