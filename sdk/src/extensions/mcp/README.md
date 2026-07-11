@@ -11,7 +11,7 @@ Requirements: Kodelet CLI with extensions enabled, and Node.js 20+ available as 
 Install from npm:
 
 ```bash
-npm install -g kodelet
+npm install -g kodelet --allow-scripts=kodelet
 ```
 
 The npm package runs the MCP installer automatically. If you need to regenerate the wrapper, run:
