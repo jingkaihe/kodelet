@@ -43,6 +43,11 @@ func RunPreparedPromptTyped[T llmtypes.Thread](
 	if err != nil {
 		return "", err
 	}
+	if closer, ok := any(thread).(interface{ Close() error }); ok {
+		defer func() {
+			_ = closer.Close()
+		}()
+	}
 
 	if prepareThread != nil {
 		if err := prepareThread(thread); err != nil {

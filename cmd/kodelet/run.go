@@ -562,6 +562,7 @@ var runCmd = &cobra.Command{
 				presenter.Error(err, "Failed to create LLM thread")
 				return
 			}
+			defer func() { _ = llm.CloseThread(thread) }()
 			thread.SetState(appState)
 			thread.SetConversationID(sessionID)
 			thread.EnablePersistence(ctx, !config.NoSave)
@@ -638,6 +639,7 @@ var runCmd = &cobra.Command{
 				presenter.Error(err, "Failed to create LLM thread")
 				return
 			}
+			defer func() { _ = llm.CloseThread(thread) }()
 			thread.SetState(appState)
 			thread.SetConversationID(sessionID)
 

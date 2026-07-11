@@ -67,7 +67,9 @@ func (p *fakeExtensionRuntimeProvider) Runtime(context.Context, string) (*extens
 }
 
 type fakeMetadataThread struct {
-	metadata map[string]any
+	metadata   map[string]any
+	closed     bool
+	extensions any
 }
 
 func (f *fakeMetadataThread) SetState(tooltypes.State) {}
@@ -111,6 +113,15 @@ func (f *fakeMetadataThread) GetMetadata() map[string]any {
 	return f.metadata
 }
 
+func (f *fakeMetadataThread) Close() error {
+	f.closed = true
+	return nil
+}
+
+func (f *fakeMetadataThread) SetExtensions(runtime any) {
+	f.extensions = runtime
+}
+
 func TestNewDefaultChatRunnerStoresDefaultCWD(t *testing.T) {
 	runner := NewDefaultChatRunner("/workspace")
 
@@ -124,6 +135,66 @@ func TestNewDefaultChatRunnerStoresExtensionRuntimeProvider(t *testing.T) {
 
 	require.NotNil(t, runner)
 	assert.Same(t, provider, runner.extensionRuntimes)
+}
+
+func TestDefaultChatRunnerReusesAndClosesConversationThread(t *testing.T) {
+	config := llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}
+	fingerprint, err := chatThreadConfigFingerprint(config)
+	require.NoError(t, err)
+	thread := &fakeMetadataThread{}
+	runner := NewDefaultChatRunner("/workspace")
+	runner.sessions["conv-1"] = &defaultChatSession{
+		thread:            thread,
+		configFingerprint: fingerprint,
+		lastUsed:          time.Now(),
+	}
+
+	acquired, newThread, release, err := acquireChatThread(runner, "conv-1", config)
+	require.NoError(t, err)
+	assert.Same(t, thread, acquired)
+	assert.False(t, newThread)
+	release()
+	assert.Equal(t, 0, runner.sessions["conv-1"].inUse)
+
+	require.NoError(t, runner.Close())
+	assert.True(t, thread.closed)
+	assert.Empty(t, runner.sessions)
+	require.NoError(t, runner.Close())
+}
+
+func TestDefaultChatRunnerEvictsIdleConversationThreads(t *testing.T) {
+	runner := NewDefaultChatRunner("/workspace")
+	defer func() { require.NoError(t, runner.Close()) }()
+	idleThread := &fakeMetadataThread{}
+	runner.sessions["idle"] = &defaultChatSession{
+		thread:   idleThread,
+		lastUsed: time.Now().Add(-defaultChatSessionIdleTTL - time.Minute),
+	}
+	runner.sessions["active"] = &defaultChatSession{
+		thread:   &fakeMetadataThread{},
+		lastUsed: time.Now().Add(-defaultChatSessionIdleTTL - time.Minute),
+		inUse:    1,
+	}
+
+	runner.sessionsMu.Lock()
+	evicted := runner.evictIdleSessionsLocked("new", time.Now())
+	runner.sessionsMu.Unlock()
+	require.Len(t, evicted, 1)
+	require.NoError(t, closeDefaultChatSession(evicted[0]))
+	assert.True(t, idleThread.closed)
+	assert.NotContains(t, runner.sessions, "idle")
+	assert.Contains(t, runner.sessions, "active")
+}
+
+func TestDefaultChatRunnerClosesDeletedConversationThread(t *testing.T) {
+	runner := NewDefaultChatRunner("/workspace")
+	defer func() { require.NoError(t, runner.Close()) }()
+	thread := &fakeMetadataThread{}
+	runner.sessions["conv-1"] = &defaultChatSession{thread: thread, lastUsed: time.Now()}
+
+	require.NoError(t, runner.CloseConversation(" conv-1 "))
+	assert.True(t, thread.closed)
+	assert.NotContains(t, runner.sessions, "conv-1")
 }
 
 func TestServiceStoreAdapterLoadAndUnsupportedMethods(t *testing.T) {

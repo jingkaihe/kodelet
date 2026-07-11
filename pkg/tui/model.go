@@ -34,6 +34,11 @@ func Run(ctx context.Context, config Config) error {
 	applyTheme(theme)
 
 	initialModel := newModel(ctx, config)
+	if closer, ok := initialModel.runner.(interface{ Close() error }); ok {
+		defer func() {
+			_ = closer.Close()
+		}()
+	}
 
 	program := tea.NewProgram(initialModel, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	finalModel, err := program.Run()

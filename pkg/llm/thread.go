@@ -67,12 +67,28 @@ func NewThread(config llmtypes.Config) (llmtypes.Thread, error) {
 	}
 }
 
+// CloseThread releases provider-specific resources owned by a thread. Providers
+// without explicit resources do not need to implement Close.
+func CloseThread(thread llmtypes.Thread) error {
+	if thread == nil {
+		return nil
+	}
+	closer, ok := thread.(interface{ Close() error })
+	if !ok {
+		return nil
+	}
+	return closer.Close()
+}
+
 // SendMessageAndGetTextWithUsage is a convenience method for one-shot queries that returns the response as a string and usage information
 func SendMessageAndGetTextWithUsage(ctx context.Context, state tooltypes.State, query string, config llmtypes.Config, silent bool, opt llmtypes.MessageOpt) (string, llmtypes.Usage) {
 	thread, err := NewThread(config)
 	if err != nil {
 		return fmt.Sprintf("Error creating thread: %v", err), llmtypes.Usage{}
 	}
+	defer func() {
+		_ = CloseThread(thread)
+	}()
 	thread.SetState(state)
 	thread.EnablePersistence(ctx, !opt.NoSaveConversation)
 

@@ -90,9 +90,10 @@ type Thread struct {
 	// useCopilot indicates if this thread authenticates through GitHub Copilot.
 	useCopilot bool
 	// useWebSocket indicates whether Responses API websocket transport is enabled.
-	useWebSocket bool
-	authorizer   auth.HTTPAuthorizer
-	webSocket    responsesWebSocketStreamer
+	useWebSocket          bool
+	authorizer            auth.HTTPAuthorizer
+	webSocket             responsesWebSocketStreamer
+	webSocketContinuation responsesWebSocketContinuation
 
 	processMessageExchangeFunc func(
 		ctx context.Context,
@@ -173,6 +174,15 @@ func NewThread(config llmtypes.Config) (*Thread, error) {
 // Provider returns the provider identifier for this thread.
 func (t *Thread) Provider() string {
 	return "openai"
+}
+
+// Close releases the persistent Responses API WebSocket, if one was opened.
+func (t *Thread) Close() error {
+	if t == nil || t.webSocket == nil {
+		return nil
+	}
+	t.webSocketContinuation.reset()
+	return t.webSocket.Close()
 }
 
 // AddUserMessage adds a user message with optional images to the thread.
@@ -476,9 +486,9 @@ func (t *Thread) processMessageExchange(
 	tools := buildToolsForThread(t, t.State, opt.NoToolUse)
 	log.WithField("tool_count", len(tools)).Debug("built tools for request")
 
-	// Mirror Codex prompt caching on the HTTP Responses path by replaying the full
-	// input history every time with a stable prompt_cache_key. We intentionally do
-	// not use previous_response_id here.
+	// Keep a complete local input history for persistence, HTTP prompt caching, and
+	// WebSocket reconnect recovery. The WebSocket path derives an incremental input
+	// from this full request only while its connection-local continuation is valid.
 	params := responses.ResponseNewParams{
 		Model:          model,
 		Input:          responses.ResponseNewParamsInputUnion{OfInputItemList: t.inputItems},
@@ -540,30 +550,36 @@ func (t *Thread) processMessageExchange(
 	}
 
 	var newResponsesStream responsesStreamFactory
-	closeResponsesStream := func(stream *ssestream.Stream[responses.ResponseStreamEventUnion]) {
+	closeResponsesStream := func(stream *ssestream.Stream[responses.ResponseStreamEventUnion]) error {
 		if stream != nil {
-			_ = stream.Close()
+			return stream.Close()
 		}
+		return nil
 	}
 	transportName := "https"
 	if useWebSocket {
 		transportName = "websocket"
-		newResponsesStream = func(ctx context.Context, params responses.ResponseNewParams) (*ssestream.Stream[responses.ResponseStreamEventUnion], error) {
-			stream, err := t.webSocket.Stream(ctx, params, nil, t.authorizer)
+		newResponsesStream = func(ctx context.Context, params responses.ResponseNewParams) (*responsesStreamAttempt, error) {
+			stream, generation, err := t.webSocket.Stream(
+				ctx,
+				func(connectionGeneration uint64) responses.ResponseNewParams {
+					return t.webSocketContinuation.prepare(params, connectionGeneration)
+				},
+				nil,
+				t.authorizer,
+			)
 			if err != nil {
-				_ = t.webSocket.Close()
+				t.webSocketContinuation.reset()
 				return nil, errors.Wrap(err, "failed to create Responses API websocket stream")
 			}
-			return stream, nil
-		}
-		closeResponsesStream = func(stream *ssestream.Stream[responses.ResponseStreamEventUnion]) {
-			if stream != nil {
-				_ = stream.Close()
-			}
-			_ = t.webSocket.Close()
+			return &responsesStreamAttempt{
+				stream:                     stream,
+				webSocketGeneration:        generation,
+				fullWebSocketRequestParams: params,
+			}, nil
 		}
 	} else {
-		newResponsesStream = func(ctx context.Context, params responses.ResponseNewParams) (*ssestream.Stream[responses.ResponseStreamEventUnion], error) {
+		newResponsesStream = func(ctx context.Context, params responses.ResponseNewParams) (*responsesStreamAttempt, error) {
 			stream := newStreaming(ctx, params, requestOpts...)
 			if stream == nil && !processStreamHandlesNilStream {
 				return nil, errors.New("failed to create Responses API stream")
@@ -573,7 +589,7 @@ func (t *Thread) processMessageExchange(
 					return nil, err
 				}
 			}
-			return stream, nil
+			return &responsesStreamAttempt{stream: stream}, nil
 		}
 	}
 
@@ -600,7 +616,13 @@ func openAIReasoningEffortForRequest(effort shared.ReasoningEffort) shared.Reaso
 	return shared.ReasoningEffort(strings.ToLower(strings.TrimSpace(string(effort))))
 }
 
-type responsesStreamFactory func(context.Context, responses.ResponseNewParams) (*ssestream.Stream[responses.ResponseStreamEventUnion], error)
+type responsesStreamAttempt struct {
+	stream                     *ssestream.Stream[responses.ResponseStreamEventUnion]
+	webSocketGeneration        uint64
+	fullWebSocketRequestParams responses.ResponseNewParams
+}
+
+type responsesStreamFactory func(context.Context, responses.ResponseNewParams) (*responsesStreamAttempt, error)
 
 func (t *Thread) processMessageExchangeWithStreamRetries(
 	ctx context.Context,
@@ -609,7 +631,7 @@ func (t *Thread) processMessageExchangeWithStreamRetries(
 	params responses.ResponseNewParams,
 	tools []responses.ToolUnionParam,
 	newResponsesStream responsesStreamFactory,
-	closeResponsesStream func(*ssestream.Stream[responses.ResponseStreamEventUnion]),
+	closeResponsesStream func(*ssestream.Stream[responses.ResponseStreamEventUnion]) error,
 	processStream func(context.Context, *ssestream.Stream[responses.ResponseStreamEventUnion], llmtypes.MessageHandler, string, llmtypes.MessageOpt) (processStreamResult, error),
 	opt llmtypes.MessageOpt,
 	saveConversation func(),
@@ -625,10 +647,12 @@ func (t *Thread) processMessageExchangeWithStreamRetries(
 		func() error {
 			resetPendingReasoning(&t.pendingReasoning, pendingReasoningBeforeAttempt)
 			attemptParams := params
-			attemptParams.Input = responses.ResponseNewParamsInputUnion{OfInputItemList: t.inputItems}
+			attemptParams.Input = responses.ResponseNewParamsInputUnion{
+				OfInputItemList: cloneResponsesInputItems(t.inputItems),
+			}
 			t.applyCodexRestrictions(&attemptParams)
 
-			stream, err := newResponsesStream(ctx, attemptParams)
+			attempt, err := newResponsesStream(ctx, attemptParams)
 			if err != nil {
 				if !isRetryableResponsesStreamError(err) {
 					return retry.Unrecoverable(err)
@@ -638,14 +662,26 @@ func (t *Thread) processMessageExchangeWithStreamRetries(
 
 			log.WithField("transport", transportName).Debug("stream created, processing events")
 
-			streamResult, err := processStream(ctx, stream, handler, model, opt)
+			streamResult, err := processStream(ctx, attempt.stream, handler, model, opt)
+			if closeErr := closeResponsesStream(attempt.stream); err == nil && closeErr != nil {
+				err = errors.Wrap(closeErr, "failed to close Responses API stream")
+			}
 			if err == nil {
+				if attempt.webSocketGeneration != 0 {
+					t.webSocketContinuation.commit(
+						attempt.webSocketGeneration,
+						attempt.fullWebSocketRequestParams,
+						streamResult,
+					)
+				}
 				finalOutput = t.lastAssistantMessageText()
 				finalStreamResult = streamResult
 				return nil
 			}
 
-			closeResponsesStream(stream)
+			if attempt.webSocketGeneration != 0 {
+				t.webSocketContinuation.reset()
+			}
 			if !isRetryableResponsesStreamError(err) {
 				return retry.Unrecoverable(err)
 			}
@@ -740,6 +776,21 @@ func isRetryableResponsesStreamError(err error) bool {
 	var statusErr *websocketHandshakeStatusError
 	if errors.As(err, &statusErr) {
 		return isRetryableResponsesWebSocketHandshakeStatus(statusErr.statusCode, statusErr.body)
+	}
+
+	var eventErr *responsesWebSocketEventError
+	if errors.As(err, &eventErr) {
+		code := strings.ToLower(strings.TrimSpace(eventErr.code))
+		switch code {
+		case "websocket_connection_limit_reached", "previous_response_not_found":
+			return true
+		case "invalid_prompt", "context_length_exceeded", "insufficient_quota", "usage_not_included", "cyber_policy", "server_is_overloaded", "slow_down":
+			return false
+		}
+		if eventErr.statusCode != 0 {
+			return isRetryableResponsesHTTPStatus(eventErr.statusCode, code)
+		}
+		return true
 	}
 
 	var apiErr *openai.Error

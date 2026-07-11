@@ -3,6 +3,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -131,7 +132,23 @@ type ExtensionRuntimeProvider interface {
 type DefaultChatRunner struct {
 	defaultCWD        string
 	extensionRuntimes ExtensionRuntimeProvider
+	sessionsMu        sync.Mutex
+	sessions          map[string]*defaultChatSession
+	closed            bool
 }
+
+type defaultChatSession struct {
+	mu                sync.Mutex
+	thread            llmtypes.Thread
+	configFingerprint string
+	lastUsed          time.Time
+	inUse             int
+}
+
+const (
+	defaultChatSessionLimit   = 64
+	defaultChatSessionIdleTTL = 30 * time.Minute
+)
 
 // NewDefaultChatRunner creates a default chat runner.
 func NewDefaultChatRunner(defaultCWD string, extensionRuntimes ...ExtensionRuntimeProvider) *DefaultChatRunner {
@@ -142,12 +159,60 @@ func NewDefaultChatRunner(defaultCWD string, extensionRuntimes ...ExtensionRunti
 	return &DefaultChatRunner{
 		defaultCWD:        defaultCWD,
 		extensionRuntimes: provider,
+		sessions:          make(map[string]*defaultChatSession),
 	}
 }
 
 // Run executes a single persisted chat turn and streams events to the sink.
 func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatEventSink) (string, error) {
-	return RunDefaultChat(ctx, req, sink, r.defaultCWD, r.extensionRuntimes)
+	if r == nil {
+		return runDefaultChat(ctx, req, sink, "", nil, nil)
+	}
+	return runDefaultChat(ctx, req, sink, r.defaultCWD, r.extensionRuntimes, r)
+}
+
+// Close releases cached conversation threads and their persistent transports.
+func (r *DefaultChatRunner) Close() error {
+	if r == nil {
+		return nil
+	}
+
+	r.sessionsMu.Lock()
+	if r.closed {
+		r.sessionsMu.Unlock()
+		return nil
+	}
+	r.closed = true
+	sessions := make([]*defaultChatSession, 0, len(r.sessions))
+	for _, session := range r.sessions {
+		sessions = append(sessions, session)
+	}
+	r.sessions = make(map[string]*defaultChatSession)
+	r.sessionsMu.Unlock()
+
+	var firstErr error
+	for _, session := range sessions {
+		if err := closeDefaultChatSession(session); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+// CloseConversation releases a cached thread when its conversation is removed.
+func (r *DefaultChatRunner) CloseConversation(conversationID string) error {
+	if r == nil {
+		return nil
+	}
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
+		return nil
+	}
+	r.sessionsMu.Lock()
+	session := r.sessions[conversationID]
+	delete(r.sessions, conversationID)
+	r.sessionsMu.Unlock()
+	return closeDefaultChatSession(session)
 }
 
 // DefaultCWD returns the runner's configured default working directory.
@@ -168,6 +233,17 @@ func (r *DefaultChatRunner) ExtensionRuntimeProvider() ExtensionRuntimeProvider 
 
 // RunDefaultChat executes a single persisted chat turn and streams events to the sink.
 func RunDefaultChat(ctx context.Context, req ChatRequest, sink ChatEventSink, defaultCWD string, extensionRuntimes ExtensionRuntimeProvider) (string, error) {
+	return runDefaultChat(ctx, req, sink, defaultCWD, extensionRuntimes, nil)
+}
+
+func runDefaultChat(
+	ctx context.Context,
+	req ChatRequest,
+	sink ChatEventSink,
+	defaultCWD string,
+	extensionRuntimes ExtensionRuntimeProvider,
+	threadOwner *DefaultChatRunner,
+) (string, error) {
 	message, imageInputs, err := NormalizeRequest(req)
 	if err != nil {
 		return "", err
@@ -248,14 +324,20 @@ func RunDefaultChat(ctx context.Context, req ChatRequest, sink ChatEventSink, de
 		return sessionID, err
 	}
 
-	thread, err := llm.NewThread(llmConfig)
+	thread, newThread, releaseThread, err := acquireChatThread(threadOwner, sessionID, llmConfig)
 	if err != nil {
 		return sessionID, errors.Wrap(err, "failed to create LLM thread")
+	}
+	defer releaseThread()
+	if extensionSetter, ok := thread.(interface{ SetExtensions(any) }); ok {
+		extensionSetter.SetExtensions(extensionRuntime)
 	}
 
 	thread.SetState(appState)
 	thread.SetConversationID(sessionID)
-	thread.EnablePersistence(ctx, true)
+	if newThread {
+		thread.EnablePersistence(ctx, true)
+	}
 	if slashExpansion != nil {
 		AddSlashCommandDisplay(thread, slashExpansion)
 	}
@@ -287,6 +369,125 @@ func RunDefaultChat(ctx context.Context, req ChatRequest, sink ChatEventSink, de
 	}
 
 	return sessionID, nil
+}
+
+func acquireChatThread(
+	owner *DefaultChatRunner,
+	sessionID string,
+	config llmtypes.Config,
+) (thread llmtypes.Thread, newThread bool, release func(), err error) {
+	if owner == nil {
+		thread, err = llm.NewThread(config)
+		if err != nil {
+			return nil, false, func() {}, err
+		}
+		return thread, true, func() {
+			_ = llm.CloseThread(thread)
+		}, nil
+	}
+
+	fingerprint, err := chatThreadConfigFingerprint(config)
+	if err != nil {
+		return nil, false, func() {}, err
+	}
+
+	owner.sessionsMu.Lock()
+	if owner.closed {
+		owner.sessionsMu.Unlock()
+		return nil, false, func() {}, errors.New("chat runner is closed")
+	}
+	now := time.Now()
+	evicted := owner.evictIdleSessionsLocked(sessionID, now)
+	session := owner.sessions[sessionID]
+	if session == nil {
+		session = &defaultChatSession{lastUsed: now}
+		owner.sessions[sessionID] = session
+	}
+	session.inUse++
+	owner.sessionsMu.Unlock()
+	for _, staleSession := range evicted {
+		_ = closeDefaultChatSession(staleSession)
+	}
+
+	session.mu.Lock()
+	release = func() {
+		session.mu.Unlock()
+		owner.sessionsMu.Lock()
+		session.inUse--
+		session.lastUsed = time.Now()
+		owner.sessionsMu.Unlock()
+	}
+	if session.thread != nil && session.configFingerprint == fingerprint {
+		return session.thread, false, release, nil
+	}
+	oldThread := session.thread
+	session.thread = nil
+	session.configFingerprint = ""
+	if err := llm.CloseThread(oldThread); err != nil {
+		release()
+		return nil, false, func() {}, err
+	}
+
+	thread, err = llm.NewThread(config)
+	if err != nil {
+		release()
+		return nil, false, func() {}, err
+	}
+	session.thread = thread
+	session.configFingerprint = fingerprint
+	return thread, true, release, nil
+}
+
+func chatThreadConfigFingerprint(config llmtypes.Config) (string, error) {
+	config.Extensions = nil
+	data, err := json.Marshal(config)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to fingerprint chat LLM configuration")
+	}
+	return string(data), nil
+}
+
+func (r *DefaultChatRunner) evictIdleSessionsLocked(currentID string, now time.Time) []*defaultChatSession {
+	evicted := make([]*defaultChatSession, 0)
+	for id, session := range r.sessions {
+		if id == currentID || session.inUse != 0 || now.Sub(session.lastUsed) < defaultChatSessionIdleTTL {
+			continue
+		}
+		delete(r.sessions, id)
+		evicted = append(evicted, session)
+	}
+
+	for len(r.sessions) >= defaultChatSessionLimit {
+		var oldestID string
+		var oldest *defaultChatSession
+		for id, session := range r.sessions {
+			if id == currentID || session.inUse != 0 {
+				continue
+			}
+			if oldest == nil || session.lastUsed.Before(oldest.lastUsed) {
+				oldestID = id
+				oldest = session
+			}
+		}
+		if oldest == nil {
+			break
+		}
+		delete(r.sessions, oldestID)
+		evicted = append(evicted, oldest)
+	}
+	return evicted
+}
+
+func closeDefaultChatSession(session *defaultChatSession) error {
+	if session == nil {
+		return nil
+	}
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	err := llm.CloseThread(session.thread)
+	session.thread = nil
+	session.configFingerprint = ""
+	return err
 }
 
 func ResolveConfig(ctx context.Context, conversationID, requestedProfile, requestedCWD, defaultCWDInput string) (llmtypes.Config, string, error) {

@@ -3,16 +3,21 @@ package responses
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/packages/ssestream"
 	openairesponses "github.com/openai/openai-go/v3/responses"
@@ -170,16 +175,22 @@ func TestResponsesWebSocketTransportSetsBetaHeader(t *testing.T) {
 
 type fakeResponsesWebSocketStreamer struct {
 	streamFunc func(context.Context, openairesponses.ResponseNewParams, []string, auth.HTTPAuthorizer) (*ssestream.Stream[openairesponses.ResponseStreamEventUnion], error)
+	generation uint64
 	closed     bool
 }
 
 func (f *fakeResponsesWebSocketStreamer) Stream(
 	ctx context.Context,
-	params openairesponses.ResponseNewParams,
+	paramsFactory responsesWebSocketParamsFactory,
 	requestHeaders []string,
 	authorizer auth.HTTPAuthorizer,
-) (*ssestream.Stream[openairesponses.ResponseStreamEventUnion], error) {
-	return f.streamFunc(ctx, params, requestHeaders, authorizer)
+) (*ssestream.Stream[openairesponses.ResponseStreamEventUnion], uint64, error) {
+	generation := f.generation
+	if generation == 0 {
+		generation = 1
+	}
+	stream, err := f.streamFunc(ctx, paramsFactory(generation), requestHeaders, authorizer)
+	return stream, generation, err
 }
 
 func (f *fakeResponsesWebSocketStreamer) Close() error {
@@ -194,7 +205,8 @@ func (emptyResponsesStreamDecoder) Next() bool             { return false }
 func (emptyResponsesStreamDecoder) Close() error           { return nil }
 func (emptyResponsesStreamDecoder) Err() error             { return nil }
 
-func TestWebSocketStreamDecoderClosesTransportAfterTerminalEvent(t *testing.T) {
+func TestWebSocketStreamDecoderKeepsTransportAfterCompletedEvent(t *testing.T) {
+	releaseServer := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		upgrader := websocket.Upgrader{}
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -203,22 +215,401 @@ func TestWebSocketStreamDecoderClosesTransportAfterTerminalEvent(t *testing.T) {
 		_, _, err = conn.ReadMessage()
 		require.NoError(t, err)
 		require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"response.completed","response":{"id":"resp_test","status":"completed","usage":{"input_tokens":1,"input_tokens_details":{"cached_tokens":0},"output_tokens":1,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":2}}}`)))
+		<-releaseServer
 	}))
 	defer server.Close()
 
 	transport := newResponsesWebSocketTransport("http" + strings.TrimPrefix(server.URL, "http") + "/v1")
-	stream, err := transport.Stream(context.Background(), openairesponses.ResponseNewParams{Model: "gpt-5.5"}, nil, nil)
+	defer func() { require.NoError(t, transport.Close()) }()
+	stream, _, err := transport.Stream(
+		context.Background(),
+		func(uint64) openairesponses.ResponseNewParams {
+			return openairesponses.ResponseNewParams{Model: "gpt-5.5"}
+		},
+		nil,
+		nil,
+	)
 	require.NoError(t, err)
 	require.True(t, stream.Next())
 	assert.Equal(t, "response.completed", stream.Current().Type)
 	require.NoError(t, stream.Err())
+	require.NoError(t, stream.Close())
 
 	transport.mu.Lock()
-	defer transport.mu.Unlock()
-	assert.Nil(t, transport.conn)
+	assert.NotNil(t, transport.conn)
+	transport.mu.Unlock()
+	close(releaseServer)
 }
 
-func TestProcessMessageExchangeClosesWebSocketAfterStreamError(t *testing.T) {
+func TestResponsesWebSocketTransportReusesConnectionAndHandlesIdlePing(t *testing.T) {
+	var handshakes atomic.Int32
+	requests := make(chan map[string]any, 2)
+	pongSeen := make(chan struct{})
+	var pongOnce sync.Once
+	releaseServer := make(chan struct{})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upgrader := websocket.Upgrader{}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if !assert.NoError(t, err) {
+			return
+		}
+		defer conn.Close()
+		handshakes.Add(1)
+		conn.SetPongHandler(func(string) error {
+			pongOnce.Do(func() { close(pongSeen) })
+			return nil
+		})
+
+		for i := 1; i <= 2; i++ {
+			_, data, err := conn.ReadMessage()
+			if !assert.NoError(t, err) {
+				return
+			}
+			var payload map[string]any
+			if !assert.NoError(t, json.Unmarshal(data, &payload)) {
+				return
+			}
+			requests <- payload
+			if !assert.NoError(t, conn.WriteMessage(websocket.TextMessage, completedWebSocketEvent(fmt.Sprintf("resp_%d", i)))) {
+				return
+			}
+			if i == 1 {
+				if !assert.NoError(t, conn.WriteControl(websocket.PingMessage, []byte("idle"), time.Now().Add(time.Second))) {
+					return
+				}
+			}
+		}
+		<-releaseServer
+	}))
+	defer server.Close()
+
+	transport := newResponsesWebSocketTransport("http" + strings.TrimPrefix(server.URL, "http") + "/v1")
+	defer func() { require.NoError(t, transport.Close()) }()
+	paramsFactory := func(uint64) openairesponses.ResponseNewParams {
+		return openairesponses.ResponseNewParams{Model: "gpt-5.5"}
+	}
+
+	first, firstGeneration, err := transport.Stream(context.Background(), paramsFactory, nil, nil)
+	require.NoError(t, err)
+	require.True(t, first.Next())
+	assert.Equal(t, "response.completed", first.Current().Type)
+	assert.False(t, first.Next())
+	require.NoError(t, first.Err())
+	require.NoError(t, first.Close())
+
+	select {
+	case <-pongSeen:
+	case <-time.After(time.Second):
+		t.Fatal("persistent websocket did not answer an idle ping")
+	}
+
+	second, secondGeneration, err := transport.Stream(context.Background(), paramsFactory, nil, nil)
+	require.NoError(t, err)
+	require.True(t, second.Next())
+	assert.Equal(t, "response.completed", second.Current().Type)
+	assert.False(t, second.Next())
+	require.NoError(t, second.Err())
+	require.NoError(t, second.Close())
+
+	assert.Equal(t, firstGeneration, secondGeneration)
+	assert.Equal(t, int32(1), handshakes.Load())
+	firstRequest := <-requests
+	secondRequest := <-requests
+	assert.Equal(t, "response.create", firstRequest["type"])
+	assert.Equal(t, "response.create", secondRequest["type"])
+	close(releaseServer)
+}
+
+func TestResponsesThreadReusesConnectionWithIncrementalToolOutput(t *testing.T) {
+	var handshakes atomic.Int32
+	requests := make(chan map[string]any, 2)
+	releaseServer := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upgrader := websocket.Upgrader{}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if !assert.NoError(t, err) {
+			return
+		}
+		defer conn.Close()
+		handshakes.Add(1)
+
+		for requestIndex := 0; requestIndex < 2; requestIndex++ {
+			_, data, err := conn.ReadMessage()
+			if !assert.NoError(t, err) {
+				return
+			}
+			var payload map[string]any
+			if !assert.NoError(t, json.Unmarshal(data, &payload)) {
+				return
+			}
+			requests <- payload
+
+			if requestIndex == 0 {
+				functionCall := []byte(`{"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_1","name":"ok_tool","arguments":"{}"}}`)
+				if !assert.NoError(t, conn.WriteMessage(websocket.TextMessage, functionCall)) {
+					return
+				}
+			}
+			if !assert.NoError(t, conn.WriteMessage(websocket.TextMessage, completedWebSocketEvent(fmt.Sprintf("resp_%d", requestIndex+1)))) {
+				return
+			}
+		}
+		<-releaseServer
+	}))
+	defer server.Close()
+
+	config := llmtypes.Config{
+		Provider: "openai",
+		Model:    "gpt-5.5",
+		Retry:    llmtypes.RetryConfig{Attempts: 1},
+		OpenAI:   &llmtypes.OpenAIConfig{Platform: "openai"},
+	}
+	transport := newResponsesWebSocketTransport("http" + strings.TrimPrefix(server.URL, "http") + "/v1")
+	thread := &Thread{
+		Thread:       base.NewThread(config, "conv-test"),
+		useWebSocket: true,
+		webSocket:    transport,
+		inputItems: []openairesponses.ResponseInputItemUnionParam{
+			responseMessageItem(openairesponses.EasyInputMessageRoleUser, "run a command"),
+		},
+		storedItems: []StoredInputItem{{Type: "message", Role: "user", Content: "run a command"}},
+	}
+	defer func() { require.NoError(t, thread.Close()) }()
+	thread.SetState(tools.NewBasicState(context.Background(), tools.WithExtensionTools([]tooltypes.Tool{responsesTestTool{name: "ok_tool"}})))
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
+
+	_, toolsUsed, completed, err := thread.processMessageExchange(context.Background(), handler, "gpt-5.5", 256, "system", llmtypes.MessageOpt{})
+	require.NoError(t, err)
+	assert.True(t, toolsUsed)
+	assert.True(t, completed)
+	_, _, completed, err = thread.processMessageExchange(context.Background(), handler, "gpt-5.5", 256, "system", llmtypes.MessageOpt{})
+	require.NoError(t, err)
+	assert.True(t, completed)
+
+	firstRequest := <-requests
+	secondRequest := <-requests
+	assert.NotContains(t, firstRequest, "previous_response_id")
+	assert.Equal(t, "resp_1", secondRequest["previous_response_id"])
+	secondInput, ok := secondRequest["input"].([]any)
+	require.True(t, ok)
+	require.Len(t, secondInput, 1)
+	toolOutput, ok := secondInput[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "function_call_output", toolOutput["type"])
+	assert.Equal(t, "call_1", toolOutput["call_id"])
+	assert.Equal(t, int32(1), handshakes.Load())
+	close(releaseServer)
+}
+
+func TestResponsesWebSocketTransportSerializesInFlightResponses(t *testing.T) {
+	firstRequestSeen := make(chan struct{})
+	allowFirstCompletion := make(chan struct{})
+	secondRequestSeen := make(chan struct{})
+	releaseServer := make(chan struct{})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upgrader := websocket.Upgrader{}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if !assert.NoError(t, err) {
+			return
+		}
+		defer conn.Close()
+
+		if _, _, err := conn.ReadMessage(); !assert.NoError(t, err) {
+			return
+		}
+		close(firstRequestSeen)
+		<-allowFirstCompletion
+		if !assert.NoError(t, conn.WriteMessage(websocket.TextMessage, completedWebSocketEvent("resp_1"))) {
+			return
+		}
+
+		if _, _, err := conn.ReadMessage(); !assert.NoError(t, err) {
+			return
+		}
+		close(secondRequestSeen)
+		if !assert.NoError(t, conn.WriteMessage(websocket.TextMessage, completedWebSocketEvent("resp_2"))) {
+			return
+		}
+		<-releaseServer
+	}))
+	defer server.Close()
+
+	transport := newResponsesWebSocketTransport("http" + strings.TrimPrefix(server.URL, "http") + "/v1")
+	defer func() { require.NoError(t, transport.Close()) }()
+	paramsFactory := func(uint64) openairesponses.ResponseNewParams {
+		return openairesponses.ResponseNewParams{Model: "gpt-5.5"}
+	}
+
+	first, _, err := transport.Stream(context.Background(), paramsFactory, nil, nil)
+	require.NoError(t, err)
+	<-firstRequestSeen
+
+	secondResult := make(chan *ssestream.Stream[openairesponses.ResponseStreamEventUnion], 1)
+	secondErr := make(chan error, 1)
+	go func() {
+		stream, _, err := transport.Stream(context.Background(), paramsFactory, nil, nil)
+		secondResult <- stream
+		secondErr <- err
+	}()
+
+	select {
+	case <-secondRequestSeen:
+		t.Fatal("second response.create was sent while the first response was in flight")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(allowFirstCompletion)
+	require.True(t, first.Next())
+	assert.False(t, first.Next())
+	require.NoError(t, first.Err())
+	require.NoError(t, first.Close())
+
+	second := <-secondResult
+	require.NoError(t, <-secondErr)
+	select {
+	case <-secondRequestSeen:
+	case <-time.After(time.Second):
+		t.Fatal("second response.create was not sent after the first response completed")
+	}
+	require.True(t, second.Next())
+	assert.False(t, second.Next())
+	require.NoError(t, second.Err())
+	require.NoError(t, second.Close())
+	close(releaseServer)
+}
+
+func TestResponsesWebSocketTransportReconnectsAfterConnectionLimit(t *testing.T) {
+	var handshakes atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upgrader := websocket.Upgrader{}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if !assert.NoError(t, err) {
+			return
+		}
+		defer conn.Close()
+		connection := handshakes.Add(1)
+		if _, _, err := conn.ReadMessage(); !assert.NoError(t, err) {
+			return
+		}
+		if connection == 1 {
+			err = conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","status":400,"error":{"code":"websocket_connection_limit_reached","message":"connection reached 60 minute limit"}}`))
+		} else {
+			err = conn.WriteMessage(websocket.TextMessage, completedWebSocketEvent("resp_reconnected"))
+		}
+		assert.NoError(t, err)
+		if connection > 1 {
+			select {
+			case <-r.Context().Done():
+			case <-time.After(100 * time.Millisecond):
+			}
+		}
+	}))
+	defer server.Close()
+
+	transport := newResponsesWebSocketTransport("http" + strings.TrimPrefix(server.URL, "http") + "/v1")
+	defer func() { require.NoError(t, transport.Close()) }()
+	paramsFactory := func(uint64) openairesponses.ResponseNewParams {
+		return openairesponses.ResponseNewParams{Model: "gpt-5.5"}
+	}
+
+	first, firstGeneration, err := transport.Stream(context.Background(), paramsFactory, nil, nil)
+	require.NoError(t, err)
+	assert.False(t, first.Next())
+	var eventErr *responsesWebSocketEventError
+	require.ErrorAs(t, first.Err(), &eventErr)
+	assert.Equal(t, "websocket_connection_limit_reached", eventErr.code)
+	assert.True(t, isRetryableResponsesStreamError(first.Err()))
+	require.NoError(t, first.Close())
+
+	second, secondGeneration, err := transport.Stream(context.Background(), paramsFactory, nil, nil)
+	require.NoError(t, err)
+	require.True(t, second.Next())
+	assert.False(t, second.Next())
+	require.NoError(t, second.Err())
+	require.NoError(t, second.Close())
+
+	assert.NotEqual(t, firstGeneration, secondGeneration)
+	assert.Equal(t, int32(2), handshakes.Load())
+}
+
+func TestResponsesWebSocketTransportReconnectsAfterCancellation(t *testing.T) {
+	var handshakes atomic.Int32
+	firstRequestSeen := make(chan struct{})
+	releaseSecond := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upgrader := websocket.Upgrader{}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if !assert.NoError(t, err) {
+			return
+		}
+		defer conn.Close()
+		connection := handshakes.Add(1)
+		if _, _, err := conn.ReadMessage(); !assert.NoError(t, err) {
+			return
+		}
+		if connection == 1 {
+			close(firstRequestSeen)
+			_, _, _ = conn.ReadMessage()
+			return
+		}
+		if !assert.NoError(t, conn.WriteMessage(websocket.TextMessage, completedWebSocketEvent("resp_after_cancel"))) {
+			return
+		}
+		<-releaseSecond
+	}))
+	defer server.Close()
+
+	transport := newResponsesWebSocketTransport("http" + strings.TrimPrefix(server.URL, "http") + "/v1")
+	defer func() { require.NoError(t, transport.Close()) }()
+	paramsFactory := func(uint64) openairesponses.ResponseNewParams {
+		return openairesponses.ResponseNewParams{Model: "gpt-5.5"}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	first, firstGeneration, err := transport.Stream(ctx, paramsFactory, nil, nil)
+	require.NoError(t, err)
+	<-firstRequestSeen
+	cancel()
+	assert.False(t, first.Next())
+	assert.ErrorIs(t, first.Err(), context.Canceled)
+	require.NoError(t, first.Close())
+
+	second, secondGeneration, err := transport.Stream(context.Background(), paramsFactory, nil, nil)
+	require.NoError(t, err)
+	require.True(t, second.Next())
+	assert.False(t, second.Next())
+	require.NoError(t, second.Err())
+	require.NoError(t, second.Close())
+	assert.NotEqual(t, firstGeneration, secondGeneration)
+	assert.Equal(t, int32(2), handshakes.Load())
+	close(releaseSecond)
+}
+
+func TestResponsesThreadCloseClosesPersistentWebSocket(t *testing.T) {
+	fakeStreamer := &fakeResponsesWebSocketStreamer{}
+	thread := &Thread{
+		webSocket: fakeStreamer,
+		webSocketContinuation: responsesWebSocketContinuation{
+			connectionGeneration: 1,
+			responseID:           "resp_1",
+		},
+	}
+
+	require.NoError(t, thread.Close())
+	assert.True(t, fakeStreamer.closed)
+	assert.Empty(t, thread.webSocketContinuation.responseID)
+}
+
+func completedWebSocketEvent(responseID string) []byte {
+	return []byte(fmt.Sprintf(
+		`{"type":"response.completed","response":{"id":%q,"status":"completed","usage":{"input_tokens":1,"input_tokens_details":{"cached_tokens":0},"output_tokens":1,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":2}}}`,
+		responseID,
+	))
+}
+
+func TestProcessMessageExchangeDoesNotCloseWebSocketTransportAfterStreamError(t *testing.T) {
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-5.5", Retry: llmtypes.RetryConfig{Attempts: 1}, OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
 	thread := &Thread{
 		Thread:       base.NewThread(config, "conv-test"),
@@ -249,7 +640,7 @@ func TestProcessMessageExchangeClosesWebSocketAfterStreamError(t *testing.T) {
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
 	_, _, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-5.5", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
 	require.Error(t, err)
-	assert.True(t, fakeStreamer.closed)
+	assert.False(t, fakeStreamer.closed)
 }
 
 func TestProcessMessageExchangeFailsWhenWebSocketCreationFails(t *testing.T) {
@@ -281,7 +672,7 @@ func TestProcessMessageExchangeFailsWhenWebSocketCreationFails(t *testing.T) {
 	_, _, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-5.5", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to create Responses API websocket stream")
-	assert.True(t, fakeStreamer.closed)
+	assert.False(t, fakeStreamer.closed)
 }
 
 func TestProcessMessageExchangeRetriesWebSocketCreationFailure(t *testing.T) {

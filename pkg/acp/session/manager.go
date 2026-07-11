@@ -55,6 +55,9 @@ func (s *Session) IsCancelled() bool {
 func (s *Session) Close(ctx context.Context) error {
 	s.Cancel()
 	var result error
+	if err := llm.CloseThread(s.Thread); err != nil {
+		result = multierror.Append(result, err)
+	}
 	if s.Extensions != nil {
 		if err := s.Extensions.Close(); err != nil {
 			result = multierror.Append(result, err)

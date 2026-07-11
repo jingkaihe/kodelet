@@ -255,9 +255,11 @@ openai:
   # base URLs that may not support the built-in tool.
   # enable_search: true
 
-  # Use the Responses API WebSocket transport when supported to reduce end-to-end
-  # latency. Defaults to true for OpenAI/Codex Responses API calls; Kodelet still
-  # sends store: false. Set this to false to force HTTP streaming.
+  # Use a persistent Responses API WebSocket when supported. Sequential model/tool
+  # exchanges reuse one connection and continue with previous_response_id plus only
+  # new input items. Kodelet still sends store: false and automatically reconnects
+  # with full local context when connection-local state is unavailable. Defaults to
+  # true for OpenAI/Codex Responses API calls; set false to force HTTP streaming.
   # websocket_mode: true
 
   # Enable manual prompt-cache affinity for Chat Completions.

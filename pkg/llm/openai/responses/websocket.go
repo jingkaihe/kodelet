@@ -26,14 +26,36 @@ const (
 )
 
 type responsesWebSocketStreamer interface {
-	Stream(context.Context, responses.ResponseNewParams, []string, auth.HTTPAuthorizer) (*ssestream.Stream[responses.ResponseStreamEventUnion], error)
+	Stream(context.Context, responsesWebSocketParamsFactory, []string, auth.HTTPAuthorizer) (*ssestream.Stream[responses.ResponseStreamEventUnion], uint64, error)
 	Close() error
 }
 
+type responsesWebSocketParamsFactory func(connectionGeneration uint64) responses.ResponseNewParams
+
 type responsesWebSocketTransport struct {
-	baseURL string
-	mu      sync.Mutex
-	conn    *websocket.Conn
+	baseURL        string
+	mu             sync.Mutex
+	conn           *responsesWebSocketConnection
+	nextGeneration uint64
+	closed         bool
+	requestPermit  chan struct{}
+}
+
+type responsesWebSocketConnection struct {
+	generation uint64
+	conn       *websocket.Conn
+	messages   chan responsesWebSocketMessage
+	stop       chan struct{}
+	done       chan struct{}
+	writeMu    sync.Mutex
+	closeOnce  sync.Once
+	closeErr   error
+}
+
+type responsesWebSocketMessage struct {
+	messageType int
+	data        []byte
+	err         error
 }
 
 type websocketHandshakeStatusError struct {
@@ -85,35 +107,57 @@ func (r responseCreateWebSocketRequest) MarshalJSON() ([]byte, error) {
 }
 
 func newResponsesWebSocketTransport(baseURL string) *responsesWebSocketTransport {
-	return &responsesWebSocketTransport{baseURL: baseURL}
+	requestPermit := make(chan struct{}, 1)
+	requestPermit <- struct{}{}
+	return &responsesWebSocketTransport{
+		baseURL:       baseURL,
+		requestPermit: requestPermit,
+	}
 }
 
 func (t *responsesWebSocketTransport) Stream(
 	ctx context.Context,
-	params responses.ResponseNewParams,
+	paramsFactory responsesWebSocketParamsFactory,
 	requestHeaders []string,
 	authorizer auth.HTTPAuthorizer,
-) (*ssestream.Stream[responses.ResponseStreamEventUnion], error) {
+) (*ssestream.Stream[responses.ResponseStreamEventUnion], uint64, error) {
 	if t == nil {
-		return nil, errors.New("responses websocket transport is not initialized")
+		return nil, 0, errors.New("responses websocket transport is not initialized")
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if paramsFactory == nil {
+		return nil, 0, errors.New("responses websocket request factory is not initialized")
+	}
+
+	if err := t.acquireRequest(ctx); err != nil {
+		return nil, 0, err
+	}
+	releaseRequest := true
+	defer func() {
+		if releaseRequest {
+			t.releaseRequest()
+		}
+	}()
 
 	t.mu.Lock()
-	defer t.mu.Unlock()
-
 	conn, err := t.connectionLocked(ctx, requestHeaders, authorizer)
+	t.mu.Unlock()
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	request := responseCreateWebSocketRequest{Params: params}
+	request := responseCreateWebSocketRequest{Params: paramsFactory(conn.generation)}
 
 	if err := writeWebSocketJSON(ctx, conn, request); err != nil {
-		t.closeLocked()
-		return nil, err
+		t.invalidateConnection(conn)
+		return nil, 0, err
 	}
 
-	return ssestream.NewStream[responses.ResponseStreamEventUnion](newWebSocketStreamDecoder(ctx, conn, t, responsesWebSocketIdleTimeout), nil), nil
+	releaseRequest = false
+	decoder := newWebSocketStreamDecoder(ctx, conn, t, responsesWebSocketIdleTimeout)
+	return ssestream.NewStream[responses.ResponseStreamEventUnion](decoder, nil), conn.generation, nil
 }
 
 func (t *responsesWebSocketTransport) Close() error {
@@ -122,13 +166,40 @@ func (t *responsesWebSocketTransport) Close() error {
 	}
 
 	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.closeLocked()
+	t.closed = true
+	conn := t.conn
+	t.conn = nil
+	t.mu.Unlock()
+	if conn == nil {
+		return nil
+	}
+	return conn.close()
 }
 
-func (t *responsesWebSocketTransport) connectionLocked(ctx context.Context, requestHeaders []string, authorizer auth.HTTPAuthorizer) (*websocket.Conn, error) {
+func (t *responsesWebSocketTransport) acquireRequest(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.requestPermit:
+		return nil
+	}
+}
+
+func (t *responsesWebSocketTransport) releaseRequest() {
+	t.requestPermit <- struct{}{}
+}
+
+func (t *responsesWebSocketTransport) connectionLocked(ctx context.Context, requestHeaders []string, authorizer auth.HTTPAuthorizer) (*responsesWebSocketConnection, error) {
+	if t.closed {
+		return nil, errors.New("responses websocket transport is closed")
+	}
 	if t.conn != nil {
-		_ = t.closeLocked()
+		select {
+		case <-t.conn.done:
+			t.conn = nil
+		default:
+			return t.conn, nil
+		}
 	}
 
 	wsURL, err := responsesWebSocketURL(t.baseURL)
@@ -165,23 +236,76 @@ func (t *responsesWebSocketTransport) connectionLocked(ctx context.Context, requ
 	headers.Set("OpenAI-Beta", responsesWebSocketBetaHeaderValue)
 
 	dialer := websocket.Dialer{HandshakeTimeout: 30 * time.Second}
-	conn, resp, err := dialer.DialContext(ctx, wsURL, headers)
+	socket, resp, err := dialer.DialContext(ctx, wsURL, headers)
 	if err != nil {
 		return nil, websocketHandshakeError(err, resp)
 	}
 
+	t.nextGeneration++
+	conn := &responsesWebSocketConnection{
+		generation: t.nextGeneration,
+		conn:       socket,
+		messages:   make(chan responsesWebSocketMessage, 1600),
+		stop:       make(chan struct{}),
+		done:       make(chan struct{}),
+	}
 	t.conn = conn
-	logger.G(ctx).WithField("url", wsURL).Debug("connected to Responses API websocket")
+	t.startReader(conn)
+	logger.G(ctx).
+		WithField("url", wsURL).
+		WithField("generation", conn.generation).
+		Debug("connected to Responses API websocket")
 	return t.conn, nil
 }
 
-func (t *responsesWebSocketTransport) closeLocked() error {
-	if t.conn == nil {
+func (t *responsesWebSocketTransport) startReader(conn *responsesWebSocketConnection) {
+	go func() {
+		defer func() {
+			close(conn.messages)
+			close(conn.done)
+			t.mu.Lock()
+			if t.conn == conn {
+				t.conn = nil
+			}
+			t.mu.Unlock()
+		}()
+
+		for {
+			messageType, data, err := conn.conn.ReadMessage()
+			message := responsesWebSocketMessage{messageType: messageType, data: data, err: err}
+			select {
+			case <-conn.stop:
+				return
+			case conn.messages <- message:
+			}
+			if err != nil || messageType == websocket.CloseMessage {
+				return
+			}
+		}
+	}()
+}
+
+func (t *responsesWebSocketTransport) invalidateConnection(conn *responsesWebSocketConnection) {
+	if t == nil || conn == nil {
+		return
+	}
+	t.mu.Lock()
+	if t.conn == conn {
+		t.conn = nil
+	}
+	t.mu.Unlock()
+	_ = conn.close()
+}
+
+func (c *responsesWebSocketConnection) close() error {
+	if c == nil {
 		return nil
 	}
-	err := t.conn.Close()
-	t.conn = nil
-	return err
+	c.closeOnce.Do(func() {
+		close(c.stop)
+		c.closeErr = c.conn.Close()
+	})
+	return c.closeErr
 }
 
 func responsesWebSocketURL(baseURL string) (string, error) {
@@ -231,28 +355,31 @@ func websocketHandshakeError(err error, resp *http.Response) error {
 	return &websocketHandshakeStatusError{message: message, statusCode: resp.StatusCode, body: body, err: err}
 }
 
-func writeWebSocketJSON(ctx context.Context, conn *websocket.Conn, payload any) error {
+func writeWebSocketJSON(ctx context.Context, conn *responsesWebSocketConnection, payload any) error {
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return errors.Wrap(err, "failed to encode Responses API websocket request")
 	}
 
+	conn.writeMu.Lock()
+	defer conn.writeMu.Unlock()
+
 	if deadline, ok := ctx.Deadline(); ok {
-		_ = conn.SetWriteDeadline(deadline)
+		_ = conn.conn.SetWriteDeadline(deadline)
 	} else {
-		_ = conn.SetWriteDeadline(time.Now().Add(responsesWebSocketIdleTimeout))
+		_ = conn.conn.SetWriteDeadline(time.Now().Add(responsesWebSocketIdleTimeout))
 	}
-	if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-		_ = conn.SetWriteDeadline(time.Time{})
+	if err := conn.conn.WriteMessage(websocket.TextMessage, data); err != nil {
+		_ = conn.conn.SetWriteDeadline(time.Time{})
 		return errors.Wrap(err, "failed to send Responses API websocket request")
 	}
-	_ = conn.SetWriteDeadline(time.Time{})
+	_ = conn.conn.SetWriteDeadline(time.Time{})
 	return nil
 }
 
 type webSocketStreamDecoder struct {
 	ctx         context.Context
-	conn        *websocket.Conn
+	conn        *responsesWebSocketConnection
 	transport   *responsesWebSocketTransport
 	idleTimeout time.Duration
 	event       ssestream.Event
@@ -260,10 +387,10 @@ type webSocketStreamDecoder struct {
 	closed      bool
 	done        bool
 	stopCancel  chan struct{}
-	stopOnce    sync.Once
+	finishOnce  sync.Once
 }
 
-func newWebSocketStreamDecoder(ctx context.Context, conn *websocket.Conn, transport *responsesWebSocketTransport, idleTimeout time.Duration) ssestream.Decoder {
+func newWebSocketStreamDecoder(ctx context.Context, conn *responsesWebSocketConnection, transport *responsesWebSocketTransport, idleTimeout time.Duration) ssestream.Decoder {
 	decoder := &webSocketStreamDecoder{
 		ctx:         ctx,
 		conn:        conn,
@@ -275,7 +402,7 @@ func newWebSocketStreamDecoder(ctx context.Context, conn *websocket.Conn, transp
 		go func() {
 			select {
 			case <-ctx.Done():
-				decoder.closeTransport()
+				decoder.finish(true)
 			case <-decoder.stopCancel:
 			}
 		}()
@@ -288,62 +415,165 @@ func (d *webSocketStreamDecoder) Next() bool {
 		return false
 	}
 
-	for {
-		if d.ctx == nil {
-			if d.idleTimeout > 0 {
-				_ = d.conn.SetReadDeadline(time.Now().Add(d.idleTimeout))
-			}
-		} else if deadline, ok := d.ctx.Deadline(); ok {
-			_ = d.conn.SetReadDeadline(deadline)
-		} else if d.idleTimeout > 0 {
-			_ = d.conn.SetReadDeadline(time.Now().Add(d.idleTimeout))
+	message, ok := d.nextMessage()
+	if !ok {
+		return false
+	}
+	if message.err != nil {
+		if d.ctx != nil && d.ctx.Err() != nil {
+			d.err = d.ctx.Err()
+		} else {
+			d.err = errors.Wrap(message.err, "failed to read Responses API websocket event")
 		}
+		d.finish(true)
+		return false
+	}
 
-		messageType, data, err := d.conn.ReadMessage()
-		if err != nil {
-			if d.ctx != nil && d.ctx.Err() != nil {
-				d.err = d.ctx.Err()
-			} else {
-				d.err = errors.Wrap(err, "failed to read Responses API websocket event")
+	switch message.messageType {
+	case websocket.TextMessage:
+		d.event = ssestream.Event{Data: bytes.TrimSpace(message.data)}
+		disposition := classifyWebSocketResponseEvent(d.event.Data)
+		switch disposition {
+		case webSocketResponseCompleted:
+			d.done = true
+			d.finish(false)
+		case webSocketResponseFailed:
+			d.done = true
+			d.finish(true)
+			if eventErr := parseResponsesWebSocketEventError(d.event.Data); eventErr != nil {
+				d.err = eventErr
+				return false
 			}
-			d.closeTransport()
-			return false
 		}
-
-		switch messageType {
-		case websocket.TextMessage:
-			d.event = ssestream.Event{Data: bytes.TrimSpace(data)}
-			d.done = isTerminalWebSocketResponseEvent(d.event.Data)
-			if d.done {
-				d.closeTransport()
-			}
-			return true
-		case websocket.BinaryMessage:
-			d.err = errors.New("unexpected binary Responses API websocket event")
-			d.closeTransport()
-			return false
-		case websocket.CloseMessage:
-			d.err = errors.New("Responses API websocket closed before response.completed")
-			d.closeTransport()
-			return false
-		case websocket.PingMessage:
-			_ = d.conn.WriteControl(websocket.PongMessage, nil, time.Now().Add(time.Second))
-		}
+		return true
+	case websocket.BinaryMessage:
+		d.err = errors.New("unexpected binary Responses API websocket event")
+		d.finish(true)
+		return false
+	case websocket.CloseMessage:
+		d.err = errors.New("Responses API websocket closed before response.completed")
+		d.finish(true)
+		return false
+	default:
+		d.err = errors.Errorf("unexpected Responses API websocket message type %d", message.messageType)
+		d.finish(true)
+		return false
 	}
 }
 
-func isTerminalWebSocketResponseEvent(data []byte) bool {
+func (d *webSocketStreamDecoder) nextMessage() (responsesWebSocketMessage, bool) {
+	var timeout <-chan time.Time
+	var timer *time.Timer
+	if d.idleTimeout > 0 {
+		timer = time.NewTimer(d.idleTimeout)
+		timeout = timer.C
+		defer timer.Stop()
+	}
+
+	if d.ctx == nil {
+		select {
+		case message, ok := <-d.conn.messages:
+			if !ok {
+				d.err = errors.New("Responses API websocket closed before response.completed")
+				d.finish(true)
+			}
+			return message, ok
+		case <-timeout:
+			d.err = errors.New("idle timeout waiting for Responses API websocket event")
+			d.finish(true)
+			return responsesWebSocketMessage{}, false
+		}
+	}
+
+	select {
+	case message, ok := <-d.conn.messages:
+		if !ok {
+			if d.ctx.Err() != nil {
+				d.err = d.ctx.Err()
+			} else {
+				d.err = errors.New("Responses API websocket closed before response.completed")
+			}
+			d.finish(true)
+		}
+		return message, ok
+	case <-d.ctx.Done():
+		d.err = d.ctx.Err()
+		d.finish(true)
+		return responsesWebSocketMessage{}, false
+	case <-timeout:
+		d.err = errors.New("idle timeout waiting for Responses API websocket event")
+		d.finish(true)
+		return responsesWebSocketMessage{}, false
+	}
+}
+
+type webSocketResponseDisposition int
+
+const (
+	webSocketResponseInProgress webSocketResponseDisposition = iota
+	webSocketResponseCompleted
+	webSocketResponseFailed
+)
+
+func classifyWebSocketResponseEvent(data []byte) webSocketResponseDisposition {
 	var payload struct {
 		Type string `json:"type"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
-		return false
+		return webSocketResponseInProgress
 	}
 	switch payload.Type {
-	case "response.completed", "response.incomplete", "response.failed", "error":
-		return true
+	case "response.completed":
+		return webSocketResponseCompleted
+	case "response.incomplete", "response.failed", "error":
+		return webSocketResponseFailed
 	default:
-		return false
+		return webSocketResponseInProgress
+	}
+}
+
+type responsesWebSocketEventError struct {
+	statusCode int
+	code       string
+	message    string
+	body       string
+}
+
+func (e *responsesWebSocketEventError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if strings.TrimSpace(e.message) != "" {
+		return e.message
+	}
+	if strings.TrimSpace(e.code) != "" {
+		return e.code
+	}
+	return "Responses API websocket error"
+}
+
+func parseResponsesWebSocketEventError(data []byte) error {
+	var payload struct {
+		Type       string `json:"type"`
+		Status     int    `json:"status"`
+		StatusCode int    `json:"status_code"`
+		Error      struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil || payload.Type != "error" {
+		return nil
+	}
+	statusCode := payload.Status
+	if statusCode == 0 {
+		statusCode = payload.StatusCode
+	}
+	return &responsesWebSocketEventError{
+		statusCode: statusCode,
+		code:       payload.Error.Code,
+		message:    payload.Error.Message,
+		body:       string(data),
 	}
 }
 
@@ -353,11 +583,7 @@ func (d *webSocketStreamDecoder) Event() ssestream.Event {
 
 func (d *webSocketStreamDecoder) Close() error {
 	d.closed = true
-	if d.done {
-		d.stopCancelWatch()
-		return nil
-	}
-	d.closeTransport()
+	d.finish(!d.done)
 	return nil
 }
 
@@ -365,18 +591,16 @@ func (d *webSocketStreamDecoder) Err() error {
 	return d.err
 }
 
-func (d *webSocketStreamDecoder) closeTransport() {
-	d.stopCancelWatch()
-	if d.transport == nil {
-		return
-	}
-	_ = d.transport.Close()
-}
-
-func (d *webSocketStreamDecoder) stopCancelWatch() {
-	d.stopOnce.Do(func() {
+func (d *webSocketStreamDecoder) finish(invalidate bool) {
+	d.finishOnce.Do(func() {
 		if d.stopCancel != nil {
 			close(d.stopCancel)
+		}
+		if invalidate && d.transport != nil {
+			d.transport.invalidateConnection(d.conn)
+		}
+		if d.transport != nil {
+			d.transport.releaseRequest()
 		}
 	})
 }

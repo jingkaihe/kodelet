@@ -178,8 +178,7 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 		router:              mux.NewRouter(),
 		conversationService: conversationService,
 		chatRunner: &webUIChatRunner{
-			defaultCWD:        config.CWD,
-			extensionRuntimes: extensionRuntimes,
+			runner: chat.NewDefaultChatRunner(config.CWD, extensionRuntimes),
 		},
 		config:            config,
 		staticFS:          staticFS,
@@ -2085,6 +2084,11 @@ func (s *Server) handleDeleteConversation(w http.ResponseWriter, r *http.Request
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to delete conversation", err)
 		return
 	}
+	if closer, ok := s.chatRunner.(interface{ CloseConversation(string) error }); ok {
+		if err := closer.CloseConversation(id); err != nil {
+			logger.G(ctx).WithError(err).WithField("conversation_id", id).Warn("failed to close cached conversation thread")
+		}
+	}
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -2156,6 +2160,11 @@ func (s *Server) Stop() error {
 	var firstErr error
 	if terminalSessions != nil {
 		terminalSessions.Close()
+	}
+	if closer, ok := s.chatRunner.(interface{ Close() error }); ok {
+		if err := closer.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
 	}
 	if s.extensionRuntimes != nil {
 		if err := s.extensionRuntimes.Close(); err != nil && firstErr == nil {

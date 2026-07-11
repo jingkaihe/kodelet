@@ -1041,9 +1041,18 @@ user-facing `fast` alias. When you set `fast`, Kodelet sends
 
 `openai.websocket_mode` controls the Responses API WebSocket transport. It
 defaults to `true` for supported OpenAI and Codex Responses API endpoints to
-reduce end-to-end latency. Kodelet still sends `store: false` and replays local
-conversation state. If WebSocket setup or streaming fails while this is enabled,
-the request fails instead of silently retrying over HTTP.
+reduce end-to-end latency. Sequential Responses requests reuse one connection;
+interactive chat sessions retain that connection across compatible conversation
+turns. After a successful response, Kodelet continues with `previous_response_id`
+and sends only new input items when the request is a compatible extension of the
+previous one.
+
+Kodelet still sends `store: false` and retains complete local conversation state.
+If the socket closes, reaches its server-enforced lifetime, or its connection-local
+response state is unavailable, Kodelet reconnects and retries with the complete
+local input context. Only one response is in flight on each socket. If WebSocket
+setup or streaming fails while this is enabled, the request fails after the
+configured retries instead of silently switching to HTTP.
 
 You can force HTTP streaming with:
 

@@ -31,6 +31,7 @@ type fakeThread struct {
 	lastMessage string
 	lastHandler llmtypes.MessageHandler
 	lastOpt     llmtypes.MessageOpt
+	closed      bool
 }
 
 func (f *fakeThread) SetState(s tooltypes.State) {
@@ -101,6 +102,19 @@ func (f *fakeThread) EnablePersistence(_ context.Context, enabled bool) {
 }
 
 func (f *fakeThread) Provider() string { return "fake" }
+
+func (f *fakeThread) Close() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.closed = true
+	return nil
+}
+
+func (f *fakeThread) isClosed() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.closed
+}
 
 func (f *fakeThread) GetMessages() ([]llmtypes.Message, error) {
 	f.mu.Lock()
@@ -227,11 +241,13 @@ func TestSessionCancelAndIsCancelled(t *testing.T) {
 
 func TestSessionCloseCancelsAndClosesResources(t *testing.T) {
 	t.Run("without extensions", func(t *testing.T) {
-		session := &Session{}
+		thread := &fakeThread{}
+		session := &Session{Thread: thread}
 
 		require.NoError(t, session.Close(context.Background()))
 
 		assert.True(t, session.IsCancelled())
+		assert.True(t, thread.isClosed())
 	})
 }
 

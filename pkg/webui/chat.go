@@ -17,27 +17,25 @@ import (
 )
 
 type (
-	ChatRequest              = chat.ChatRequest
-	ChatContentBlock         = chat.ChatContentBlock
-	ChatImageSource          = chat.ChatImageSource
-	ChatImageURLSource       = chat.ChatImageURLSource
-	ChatEvent                = chat.ChatEvent
-	UIInputEvent             = chat.UIInputEvent
-	UIConfirmEvent           = chat.UIConfirmEvent
-	UISelectEvent            = chat.UISelectEvent
-	UINotifyEvent            = chat.UINotifyEvent
-	ChatEventSink            = chat.ChatEventSink
-	ChatRunner               = chat.ChatRunner
-	extensionRuntimeProvider = chat.ExtensionRuntimeProvider
-	DefaultChatRunner        = chat.DefaultChatRunner
+	ChatRequest        = chat.ChatRequest
+	ChatContentBlock   = chat.ChatContentBlock
+	ChatImageSource    = chat.ChatImageSource
+	ChatImageURLSource = chat.ChatImageURLSource
+	ChatEvent          = chat.ChatEvent
+	UIInputEvent       = chat.UIInputEvent
+	UIConfirmEvent     = chat.UIConfirmEvent
+	UISelectEvent      = chat.UISelectEvent
+	UINotifyEvent      = chat.UINotifyEvent
+	ChatEventSink      = chat.ChatEventSink
+	ChatRunner         = chat.ChatRunner
+	DefaultChatRunner  = chat.DefaultChatRunner
 )
 
 var NewDefaultChatRunner = chat.NewDefaultChatRunner
 
 type webUIChatRunner struct {
-	defaultCWD        string
-	extensionRuntimes extensionRuntimeProvider
-	server            *Server
+	runner *chat.DefaultChatRunner
+	server *Server
 }
 
 func (r *webUIChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatEventSink) (string, error) {
@@ -50,7 +48,24 @@ func (r *webUIChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatEve
 	if r == nil {
 		return chat.RunDefaultChat(ctx, req, sink, "", nil)
 	}
-	return chat.RunDefaultChat(ctx, req, sink, r.defaultCWD, r.extensionRuntimes)
+	if r.runner == nil {
+		return chat.RunDefaultChat(ctx, req, sink, "", nil)
+	}
+	return r.runner.Run(ctx, req, sink)
+}
+
+func (r *webUIChatRunner) Close() error {
+	if r == nil || r.runner == nil {
+		return nil
+	}
+	return r.runner.Close()
+}
+
+func (r *webUIChatRunner) CloseConversation(conversationID string) error {
+	if r == nil || r.runner == nil {
+		return nil
+	}
+	return r.runner.CloseConversation(conversationID)
 }
 
 type ndjsonEventSink struct {

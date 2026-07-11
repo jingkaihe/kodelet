@@ -172,6 +172,13 @@ func (t *Thread) PrepareUtilityMode(ctx context.Context) {
 	t.Config.Extensions = nil
 }
 
+// SetExtensions updates the turn-scoped extension runtime used by tool execution.
+func (t *Thread) SetExtensions(runtime any) {
+	t.ConversationMu.Lock()
+	defer t.ConversationMu.Unlock()
+	t.Config.Extensions = runtime
+}
+
 // ResetContextStateLocked clears shared state after context replacement/compaction.
 // Caller must hold t.Mu.
 func (t *Thread) ResetContextStateLocked() {

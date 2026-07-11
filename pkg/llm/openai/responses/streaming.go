@@ -45,6 +45,8 @@ func (t *Thread) processStream(
 	var thinkingStarted bool   // Track if thinking block has started
 	var responseCompleted bool
 	var responseIncompleteReason string
+	var responseID string
+	var serverKnownItems []responses.ResponseInputItemUnionParam
 
 	// Track pending tool calls
 	pendingToolCalls := make(map[string]*toolCallState)
@@ -74,6 +76,8 @@ func (t *Thread) processStream(
 		return processStreamResult{
 			toolsUsed:         toolsUsed,
 			responseCompleted: responseCompleted,
+			responseID:        responseID,
+			serverKnownItems:  cloneResponsesInputItems(serverKnownItems),
 		}
 	}
 
@@ -228,6 +232,7 @@ func (t *Thread) processStream(
 				t.storedItems = append(t.storedItems, storedItem)
 				if inputItems := fromStoredItems([]StoredInputItem{storedItem}); len(inputItems) > 0 {
 					t.inputItems = append(t.inputItems, inputItems[0])
+					serverKnownItems = append(serverKnownItems, inputItems[0])
 				}
 
 				result := webSearchStructuredResult(callID, webSearch)
@@ -260,14 +265,18 @@ func (t *Thread) processStream(
 				// Flush pending reasoning to storedItems before adding function call
 				flushPendingReasoning()
 
-				// Add to inputItems (for API) and storedItems (for persistence)
-				t.inputItems = append(t.inputItems, responses.ResponseInputItemUnionParam{
+				// Add to inputItems (for API) and storedItems (for persistence).
+				// The function call itself is already present in the server's response
+				// state; only its locally produced output is incremental input.
+				functionCallItem := responses.ResponseInputItemUnionParam{
 					OfFunctionCall: &responses.ResponseFunctionToolCallParam{
 						CallID:    funcCall.CallID,
 						Name:      funcCall.Name,
 						Arguments: funcCall.Arguments,
 					},
-				})
+				}
+				t.inputItems = append(t.inputItems, functionCallItem)
+				serverKnownItems = append(serverKnownItems, functionCallItem)
 				t.storedItems = append(t.storedItems, StoredInputItem{
 					Type:      "function_call",
 					CallID:    funcCall.CallID,
@@ -316,12 +325,14 @@ func (t *Thread) processStream(
 						// Flush pending reasoning to storedItems before adding message
 						flushPendingReasoning()
 
-						t.inputItems = append(t.inputItems, responses.ResponseInputItemUnionParam{
+						messageItem := responses.ResponseInputItemUnionParam{
 							OfMessage: &responses.EasyInputMessageParam{
 								Role:    responses.EasyInputMessageRoleAssistant,
 								Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(textContent)},
 							},
-						})
+						}
+						t.inputItems = append(t.inputItems, messageItem)
+						serverKnownItems = append(serverKnownItems, messageItem)
 						t.storedItems = append(t.storedItems, StoredInputItem{
 							Type:    "message",
 							Role:    "assistant",
@@ -335,6 +346,7 @@ func (t *Thread) processStream(
 			// Response completed
 			finalResponse = &event.Response
 			responseCompleted = true
+			responseID = event.Response.ID
 			telemetry.AddEvent(ctx, "response_completed",
 				attribute.String("response_id", event.Response.ID),
 				attribute.String("status", string(event.Response.Status)),
@@ -410,6 +422,8 @@ func (t *Thread) processStream(
 type processStreamResult struct {
 	toolsUsed         bool
 	responseCompleted bool
+	responseID        string
+	serverKnownItems  []responses.ResponseInputItemUnionParam
 }
 
 func responseStreamEventErrorMessage(event responses.ResponseStreamEventUnion) string {
