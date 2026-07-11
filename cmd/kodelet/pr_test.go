@@ -32,7 +32,7 @@ func TestPRFragmentContent(t *testing.T) {
 	assert.Contains(t, prompt, "Create a pull request", "Expected PR creation instruction")
 	assert.Contains(t, prompt, "git status", "Expected git status instruction")
 	assert.Contains(t, prompt, "git diff origin/main...HEAD", "Expected target branch diff instruction")
-	assert.Contains(t, prompt, "mcp_create_pull_request", "Expected MCP tool instruction")
+	assert.Contains(t, prompt, "mcp__github_create_pull_request", "Expected MCP tool instruction")
 	assert.Contains(t, prompt, "## Description", "Expected default template")
 	assert.Contains(t, prompt, "## Changes", "Expected default template")
 	assert.Contains(t, prompt, "## Impact", "Expected default template")

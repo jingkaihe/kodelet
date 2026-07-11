@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import nodeProcess from "node:process";
 
 import { createExtensionHost, type ExtensionHost } from "./api.js";
@@ -7,6 +8,7 @@ import type { ExtensionEntrypoint } from "./types.js";
 interface JsonRpcRequest {
   jsonrpc: "2.0";
   id?: number | string | null;
+  parentId?: number | string;
   method: string;
   params?: unknown;
 }
@@ -29,10 +31,15 @@ interface PendingRequest {
 class StdioHostRPCClient implements HostRPCClient {
   private nextId = 0;
   private pending = new Map<number, PendingRequest>();
+  private parentRequestStorage = new AsyncLocalStorage<number | string>();
+
+  async runForRequest<Result>(requestId: number | string, fn: () => Promise<Result>): Promise<Result> {
+    return await this.parentRequestStorage.run(requestId, fn);
+  }
 
   request(method: string, params?: unknown): Promise<unknown> {
     const id = ++this.nextId;
-    writeMessage({ jsonrpc: "2.0", id, method, params });
+    writeMessage({ jsonrpc: "2.0", id, parentId: this.parentRequestStorage.getStore(), method, params });
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
     });
@@ -99,7 +106,7 @@ async function handleMessage(host: ExtensionHost, hostClient: StdioHostRPCClient
   }
 
   try {
-    const result = await dispatch(host, request);
+    const result = await hostClient.runForRequest(request.id, () => dispatch(host, request));
     writeResponse({ jsonrpc: "2.0", id: request.id, result });
   } catch (error) {
     writeResponse({ jsonrpc: "2.0", id: request.id, error: { code: -32000, message: errorMessage(error) } });

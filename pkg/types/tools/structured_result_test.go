@@ -255,20 +255,16 @@ func TestStructuredToolResult_ComplexMetadata(t *testing.T) {
 		result StructuredToolResult
 	}{
 		{
-			name: "MCPToolMetadata with content array",
+			name: "ExtensionToolMetadata with data map",
 			result: StructuredToolResult{
-				ToolName:  "mcp_definition",
+				ToolName:  "extension_demo",
 				Success:   true,
 				Timestamp: time.Now(),
-				Metadata: &MCPToolMetadata{
-					MCPToolName: "definition",
-					ServerName:  "language-server",
-					Parameters:  map[string]any{"symbol": "TestFunction"},
-					Content: []MCPContent{
-						{Type: "text", Text: "function definition here"},
-						{Type: "code", Text: "func TestFunction() {}", MimeType: "text/x-go"},
-					},
-					ContentText:   "function definition here\nfunc TestFunction() {}",
+				Metadata: &ExtensionToolMetadata{
+					ExtensionID:   "demo",
+					ToolName:      "extension_demo",
+					Output:        "function definition here\nfunc TestFunction() {}",
+					Data:          map[string]any{"symbol": "TestFunction", "matches": []any{"one", "two"}},
 					ExecutionTime: 50 * time.Millisecond,
 				},
 			},
@@ -508,30 +504,6 @@ func TestExtractMetadata(t *testing.T) {
 			target:   &BashMetadata{},
 			want:     false,
 		},
-		{
-			name: "metadata with slices and maps",
-			metadata: &MCPToolMetadata{
-				MCPToolName: "test_tool",
-				ServerName:  "test_server",
-				Parameters: map[string]any{
-					"key1": "value1",
-					"key2": 42,
-				},
-				Content: []MCPContent{
-					{Type: "text", Text: "content1"},
-					{Type: "code", Text: "content2"},
-				},
-			},
-			target: &MCPToolMetadata{},
-			want:   true,
-			validate: func(t *testing.T, target any) {
-				result := target.(*MCPToolMetadata)
-				assert.Equal(t, "test_tool", result.MCPToolName, "MCPToolName mismatch")
-				assert.Equal(t, 2, len(result.Parameters), "Parameters length mismatch")
-				assert.Equal(t, "value1", result.Parameters["key1"], "Parameters[key1] mismatch")
-				assert.Equal(t, 2, len(result.Content), "Content length mismatch")
-			},
-		},
 	}
 
 	for _, tt := range tests {
@@ -560,10 +532,9 @@ func TestExtractMetadata_AllTypes(t *testing.T) {
 		{"BashMetadata", BashMetadata{Command: "test"}, &BashMetadata{}},
 		{"GrepMetadata", GrepMetadata{Pattern: "test"}, &GrepMetadata{}},
 		{"GlobMetadata", GlobMetadata{Pattern: "*.go"}, &GlobMetadata{}},
-		{"SubAgentMetadata", SubAgentMetadata{Question: "test"}, &SubAgentMetadata{}},
 		{"ViewImageMetadata", ViewImageMetadata{Path: "/test.png"}, &ViewImageMetadata{}},
 		{"WebFetchMetadata", WebFetchMetadata{URL: "https://test"}, &WebFetchMetadata{}},
-		{"MCPToolMetadata", MCPToolMetadata{MCPToolName: "test"}, &MCPToolMetadata{}},
+		{"ExtensionToolMetadata", ExtensionToolMetadata{ToolName: "test"}, &ExtensionToolMetadata{}},
 	}
 
 	for _, tt := range metadataTypes {

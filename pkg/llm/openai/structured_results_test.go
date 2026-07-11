@@ -220,7 +220,6 @@ func (m *mockConversationStore) Query(_ context.Context, options conversations.Q
 type mockState struct{}
 
 func (m *mockState) BasicTools() []tooltypes.Tool        { return nil }
-func (m *mockState) MCPTools() []tooltypes.Tool          { return nil }
 func (m *mockState) Tools() []tooltypes.Tool             { return nil }
 func (m *mockState) DiscoverContexts() map[string]string { return map[string]string{} }
 func (m *mockState) GetLLMConfig() any                   { return nil }

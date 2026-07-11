@@ -61,11 +61,9 @@ var metadataTypeRegistry = map[string]reflect.Type{
 	"grep_tool":      reflect.TypeOf(GrepMetadata{}),
 	"glob_tool":      reflect.TypeOf(GlobMetadata{}),
 	"bash":           reflect.TypeOf(BashMetadata{}),
-	"mcp_tool":       reflect.TypeOf(MCPToolMetadata{}),
 	"extension_tool": reflect.TypeOf(ExtensionToolMetadata{}),
 
 	"view_image":        reflect.TypeOf(ViewImageMetadata{}),
-	"subagent":          reflect.TypeOf(SubAgentMetadata{}),
 	"openai_web_search": reflect.TypeOf(OpenAIWebSearchMetadata{}),
 	"web_fetch":         reflect.TypeOf(WebFetchMetadata{}),
 	"read_conversation": reflect.TypeOf(ReadConversationMetadata{}),
@@ -261,31 +259,6 @@ type BashMetadata struct {
 // ToolType returns the tool type identifier for bash command execution
 func (m BashMetadata) ToolType() string { return "bash" }
 
-// MCP tool metadata
-
-// MCPToolMetadata contains metadata about an MCP tool execution
-type MCPToolMetadata struct {
-	MCPToolName   string         `json:"mcpToolName"`
-	ServerName    string         `json:"serverName,omitempty"`
-	Parameters    map[string]any `json:"parameters,omitempty"`
-	Content       []MCPContent   `json:"content"`
-	ContentText   string         `json:"contentText"`
-	ExecutionTime time.Duration  `json:"executionTime"`
-}
-
-// MCPContent represents a content block returned by an MCP tool
-type MCPContent struct {
-	Type     string         `json:"type"`
-	Text     string         `json:"text,omitempty"`
-	Data     string         `json:"data,omitempty"`
-	MimeType string         `json:"mimeType,omitempty"`
-	URI      string         `json:"uri,omitempty"`
-	Metadata map[string]any `json:"metadata,omitempty"`
-}
-
-// ToolType returns the tool type identifier for MCP tool execution
-func (m MCPToolMetadata) ToolType() string { return "mcp_tool" }
-
 // ExtensionToolMetadata contains metadata about an extension tool execution.
 type ExtensionToolMetadata struct {
 	ExtensionID   string         `json:"extensionId"`
@@ -316,17 +289,6 @@ type ImageDimensions struct {
 
 // ToolType returns the tool type identifier for view_image operations.
 func (m ViewImageMetadata) ToolType() string { return "view_image" }
-
-// SubAgentMetadata contains metadata about a sub-agent invocation
-type SubAgentMetadata struct {
-	Question string `json:"question"`
-	Response string `json:"response"`
-	Workflow string `json:"workflow,omitempty"`
-	Cwd      string `json:"cwd,omitempty"`
-}
-
-// ToolType returns the tool type identifier for sub-agent operations
-func (m SubAgentMetadata) ToolType() string { return "subagent" }
 
 // WebFetchMetadata contains metadata about a web fetch operation
 type WebFetchMetadata struct {

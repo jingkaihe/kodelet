@@ -43,7 +43,6 @@ export interface ToolResult {
 		| GlobMetadata
 		| WebFetchMetadata
 		| ThinkingMetadata
-		| SubagentMetadata
 		| BatchMetadata
 		| ViewImageMetadata
 		| BrowserMetadata
@@ -51,7 +50,6 @@ export interface ToolResult {
 		| OpenAIWebSearchMetadata
 		| ReadConversationMetadata
 		| ExtensionToolMetadata
-		| MCPToolMetadata
 		| Record<string, unknown>;
 	timestamp?: string;
 }
@@ -460,13 +458,6 @@ export interface ThinkingMetadata {
 	thought: string;
 }
 
-export interface SubagentMetadata {
-	question: string;
-	response?: string;
-	workflow?: string;
-	cwd?: string;
-}
-
 export interface BatchMetadata {
 	description: string;
 	subResults: ToolResult[];
@@ -527,24 +518,6 @@ export interface ExtensionToolMetadata {
 	executionTime?: number;
 	output?: string;
 	data?: Record<string, unknown>;
-}
-
-export interface MCPContent {
-	type?: string;
-	text?: string;
-	data?: string;
-	mimeType?: string;
-	uri?: string;
-	metadata?: Record<string, unknown>;
-}
-
-export interface MCPToolMetadata {
-	mcpToolName?: string;
-	serverName?: string;
-	parameters?: Record<string, unknown>;
-	content?: MCPContent[];
-	contentText?: string;
-	executionTime?: number;
 }
 
 // Component props

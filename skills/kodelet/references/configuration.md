@@ -61,20 +61,6 @@ profiles:
     tool_mode: patch
     enable_fs_search_tools: false
 
-  openai-subagent:
-    provider: openai
-    model: gpt-5.5
-    reasoning_effort: high
-    tool_mode: patch
-    enable_fs_search_tools: false
-    openai:
-      api_mode: responses
-
-  hybrid:
-    provider: anthropic
-    model: sonnet-46
-    weak_model: haiku-45
-    subagent_args: "--profile openai-subagent"
 ```
 
 Profiles are useful for switching model/provider/tool-mode combinations. Note that profile switching may be constrained by provider compatibility in a given command flow.
@@ -113,32 +99,6 @@ Disable for one run:
 ```bash
 kodelet run --no-extensions "query"
 kodelet acp --no-extensions
-```
-
-## MCP integration
-
-Configure Model Context Protocol servers in `config.yaml`:
-
-```yaml
-mcp:
-  oauth:
-    # OAuth for remote HTTP/SSE servers is auto-detected from 401 Bearer
-    # challenges. No auth.type flag is required.
-    interactive: "auto" # auto | always | never
-    open_browser: true
-    callback_timeout: "2m"
-  servers:
-    fs:
-      command: "npx"
-      args: ["-y", "@modelcontextprotocol/server-filesystem", "/path"]
-      tool_white_list: ["list_directory"]
-    remote:
-      server_type: "http"
-      base_url: "https://example.com/mcp"
-      # Optional OAuth hints only; OAuth itself is challenge-discovered.
-      oauth:
-        client_id: "${MCP_CLIENT_ID}"
-        scopes: ["mcp.read"]
 ```
 
 ## Command and tool restrictions

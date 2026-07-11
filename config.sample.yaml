@@ -109,22 +109,6 @@ profiles:
     openai:
       api_mode: "responses"
 
-  mix-n-match:
-    provider: "anthropic"
-    model: "sonnet-46"
-    weak_model: "haiku-45"
-    max_tokens: 16000
-    # Use OpenAI subagent profile for cross-provider support
-    subagent_args: "--profile openai-subagent"
-
-  # Subagent profile for mix-n-match (cross-provider example)
-  openai-subagent:
-    provider: "openai"
-    model: "o3"
-    reasoning_effort: "high"
-    tool_mode: "patch"
-    enable_fs_search_tools: false
-
 # OpenAI specific settings
 # Reasoning effort for supported reasoning/adaptive models
 # OpenAI: none, minimal, low, medium, high, xhigh
@@ -203,12 +187,12 @@ allowed_domains_file: "~/.kodelet/allowed_domains.txt"
 # Tools allowed for main agent (empty means use defaults)
 # Meta tools (grep_tool and glob_tool) are only available when
 # enable_fs_search_tools is set to true.
-# Available tools: bash, apply_patch, file_read, file_write, file_edit, subagent, grep_tool,
-#                  glob_tool, web_fetch, view_image
+# Available built-in tools: bash, apply_patch, file_read, file_write, file_edit,
+#                  grep_tool, glob_tool, web_fetch, view_image
 # Tool interaction mode.
 # - full: standard tool access
-# - patch: removes file_read, file_write, and file_edit from both main-agent and subagent
-#   toolsets, and ensures apply_patch is available
+# - patch: removes file_read, file_write, and file_edit from the main-agent
+#   toolset, and ensures apply_patch is available
 tool_mode: full
 
 # Enable built-in filesystem search tools (glob_tool and grep_tool).
@@ -231,7 +215,6 @@ allowed_tools: []
 #   - "file_read"
 #   - "file_write"
 #   - "file_edit"
-#   - "subagent"
 #   - "grep_tool"      # Always enabled (meta tool)
 #   - "glob_tool"      # Always enabled (meta tool)
 #   - "web_fetch"
@@ -306,66 +289,12 @@ openai:
   #     context_window: 1050000             # 1.05M tokens
   #   # ... additional models
 
-# Subagent Configuration
-# Subagents are spawned as separate processes using shell-out pattern.
-# Configure subagent behavior using CLI arguments passed to the subprocess.
-#
-# subagent_args: CLI arguments to pass when spawning subagents
-# Common patterns:
-#   - "--use-weak-model"           # Use weak model (same provider as parent)
-#   - "--profile cheap"            # Use a different profile
-#   - "--profile openai-subagent"  # Use cross-provider profile
-#
-# Empty value means subagent uses default config (same as parent)
-subagent_args: ""
-
-# Example: Use weak model for subagents (cost optimization)
-# subagent_args: "--use-weak-model"
-
-# Example: Use a different profile for subagents (cross-provider)
-# First define the profile, then reference it:
-# profiles:
-#   openai-subagent:
-#     provider: "openai"
-#     model: "gpt-4o-mini"
-#     max_tokens: 2048
-#     tool_mode: "patch"
-#     enable_fs_search_tools: false
-#
-# subagent_args: "--profile openai-subagent"
-
-# Example configurations for common scenarios:
-
-# Scenario 1: Use weak model for subagents (same provider, cost optimization)
-# subagent_args: "--use-weak-model"
-
-# Scenario 2: Cross-provider subagents via profiles
-# profiles:
-#   cheap-openai:
-#     provider: "openai"
-#     model: "gpt-4o-mini"
-#     max_tokens: 2048
-#
-# subagent_args: "--profile cheap-openai"
-
-# Disable Subagent
-# When set to true, the subagent tool is removed from available tools and
-# subagent-related context is excluded from the system prompt.
-# Other tools like web_fetch remain available.
-# Can also be set via the --disable-subagent CLI flag or per-profile.
-# disable_subagent: true
-#
 # Enable Filesystem Search Tools
 # When set to true, glob_tool and grep_tool are added to the available tools.
 # By default they are disabled and the system prompt instructs the agent to use
 # fd and rg via the bash tool instead.
 # Can also be set via the --enable-fs-search-tools CLI flag or per-profile.
 # enable_fs_search_tools: true
-# Example: Profile with subagent disabled
-# profiles:
-#   no-subagent:
-#     disable_subagent: true
-
 # Extensions Configuration
 # Kodelet can discover long-running extension executables from standalone
 # directories plus plugin directories like ./.kodelet/plugins/<org@repo>/extensions
@@ -458,7 +387,6 @@ tracing:
 # - KODELET_RETRY_BACKOFF_TYPE: Overrides the retry.backoff_type setting (fixed, exponential)
 # - KODELET_ALLOWED_COMMANDS: Comma-separated list of allowed command patterns
 # - KODELET_ALLOWED_TOOLS: Comma-separated list of allowed tools for main agent
-# - KODELET_DISABLE_SUBAGENT: Disables the subagent tool and related system prompt context (true/false)
 # - KODELET_CONTEXT_PATTERNS: Comma-separated list of context file patterns (e.g., "AGENTS.md,README.md")
 # - KODELET_TRACING_ENABLED: Enables/disables tracing
 # - KODELET_TRACING_SAMPLER: Sets the sampling strategy
@@ -478,58 +406,6 @@ tracing:
 # - OTEL_EXPORTER_OTLP_HEADERS: Headers to use when sending telemetry data (for auth)
 # - OTEL_RESOURCE_ATTRIBUTES: Additional resource attributes to include
 
-# MCP (Model Context Protocol) Configuration
-mcp:
-  # Enable/disable MCP tools globally (default: true when not specified)
-  # Set to false to completely disable MCP
-  enabled: true
-
-  # OAuth settings for remote HTTP/SSE MCP servers. OAuth is auto-detected
-  # from HTTP 401 Bearer challenges and does not require an auth.type flag.
-  oauth:
-    # Allow browser-based OAuth when a remote MCP server requests it.
-    # Set to "never" for headless/CI runs that should fail fast instead.
-    interactive: "auto"
-
-    # Attempt to open the default browser automatically. If false, Kodelet
-    # prints the authorization URL for manual opening.
-    open_browser: true
-
-    # Maximum time to wait for the local OAuth callback.
-    callback_timeout: "2m"
-
-  # MCP servers configuration
-  # Each server can be stdio, streamable HTTP, or deprecated SSE based.
-  # If server_type is omitted, servers with url default to streamable HTTP;
-  # deprecated SSE servers must set server_type: "sse" explicitly.
-  servers:
-    # Example stdio server (uncomment to enable)
-    # filesystem:
-    #   command: "npx"
-    #   args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/directory"]
-
-    # Example streamable HTTP server (uncomment to enable)
-    # example-http:
-    #   server_type: "http"  # optional when url is set
-    #   url: "https://example.com/mcp"
-    #   # Optional static headers are still supported for API-key/bearer-token servers.
-    #   headers:
-    #     Authorization: "Bearer ${MCP_TOKEN}"
-    #   # Optional OAuth hints for providers that need pre-registered clients or
-    #   # non-standard discovery. These do not enable OAuth; OAuth is discovered
-    #   # automatically from the server challenge.
-    #   oauth:
-    #     client_id: "${MCP_CLIENT_ID}"
-    #     client_secret: "${MCP_CLIENT_SECRET}"
-    #     scopes: ["mcp.read", "mcp.write"]
-    #     redirect_uri: "http://127.0.0.1:1456/mcp/oauth/callback"
-    #     auth_server_metadata_url: "https://auth.example.com/.well-known/oauth-authorization-server"
-    #   tool_white_list: ["tool1", "tool2"]
-
-    # Example deprecated SSE server (uncomment to enable)
-    # example-sse:
-    #   server_type: "sse"
-    #   url: "https://example.com/sse"
-    #   headers:
-    #     Authorization: "Bearer ${MCP_TOKEN}"
-    #   tool_white_list: ["tool1", "tool2"]
+# MCP (Model Context Protocol) servers are not configured in the core Kodelet
+# config. The SDK MCP extension reads `./mcp.json` or `~/.kodelet/mcp.json`.
+# See `sdk/src/extensions/mcp/README.md`.

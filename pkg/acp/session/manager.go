@@ -4,7 +4,6 @@ package session
 
 import (
 	"context"
-	"errors"
 	"sync"
 
 	"github.com/hashicorp/go-multierror"
@@ -19,18 +18,13 @@ import (
 	pkgerrors "github.com/pkg/errors"
 )
 
-// ErrNoMCPServers is returned when there are no MCP servers to connect to
-var ErrNoMCPServers = errors.New("no MCP servers provided")
-
 // Session represents an ACP session wrapping a kodelet thread
 type Session struct {
 	ID         acptypes.SessionID
 	Thread     llmtypes.Thread
 	State      *tools.BasicState
-	MCPManager *tools.MCPManager
 	Extensions *extensions.Runtime
 	CWD        string
-	MCPServers []acptypes.MCPServer
 
 	maxTurns     int
 	compactRatio float64
@@ -61,11 +55,6 @@ func (s *Session) IsCancelled() bool {
 func (s *Session) Close(ctx context.Context) error {
 	s.Cancel()
 	var result error
-	if s.MCPManager != nil {
-		if err := s.MCPManager.Close(ctx); err != nil {
-			result = multierror.Append(result, err)
-		}
-	}
 	if s.Extensions != nil {
 		if err := s.Extensions.Close(); err != nil {
 			result = multierror.Append(result, err)
@@ -122,9 +111,7 @@ type ManagerConfig struct {
 	MaxTokens           int
 	NoSkills            bool
 	NoExtensions        bool
-	NoWorkflows         bool
 	EnableFSSearchTools bool
-	DisableSubagent     bool
 	MaxTurns            int
 	CompactRatio        float64
 }
@@ -136,9 +123,6 @@ type Manager struct {
 	sessions map[acptypes.SessionID]*Session
 	store    conversations.ConversationStore
 	mu       sync.RWMutex
-
-	kodeletMCPManager *tools.MCPManager
-	mcpInitOnce       sync.Once
 }
 
 // NewManager creates a new session manager
@@ -156,21 +140,6 @@ func NewManager(cfg ManagerConfig) *Manager {
 	}
 }
 
-// initMCP initializes kodelet's configured MCP servers (once)
-func (m *Manager) initMCP(ctx context.Context) {
-	m.mcpInitOnce.Do(func() {
-		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
-		if err != nil {
-			if !errors.Is(err, tools.ErrMCPDisabled) {
-				logger.G(ctx).WithError(err).Debug("No configured MCP servers")
-			}
-			return
-		}
-
-		m.kodeletMCPManager = mcpManager
-	})
-}
-
 func (m *Manager) buildLLMConfig(projectDir string) llmtypes.Config {
 	config, _ := llm.GetConfigFromViper()
 
@@ -184,7 +153,6 @@ func (m *Manager) buildLLMConfig(projectDir string) llmtypes.Config {
 		config.MaxTokens = m.config.MaxTokens
 	}
 	config.EnableFSSearchTools = m.config.EnableFSSearchTools
-	config.DisableSubagent = m.config.DisableSubagent
 	config.WorkingDirectory = projectDir
 
 	if m.config.NoSkills {
@@ -209,119 +177,6 @@ func (m *Manager) buildExtensionRuntime(ctx context.Context, projectDir string) 
 	return runtime
 }
 
-// convertMCPServers converts ACP MCP server definitions to kodelet's MCPConfig
-func convertMCPServers(servers []acptypes.MCPServer) tools.MCPConfig {
-	config := tools.MCPConfig{
-		Servers: make(map[string]tools.MCPServerConfig),
-	}
-
-	for _, server := range servers {
-		serverConfig := tools.MCPServerConfig{
-			Command: server.Command,
-			Args:    server.Args,
-			Envs:    server.Env,
-		}
-
-		switch server.Type {
-		case "":
-			if server.URL != "" {
-				serverConfig.ServerType = tools.MCPServerTypeHTTP
-				serverConfig.URL = server.URL
-				if server.AuthHeader != "" {
-					serverConfig.Headers = map[string]string{
-						"Authorization": server.AuthHeader,
-					}
-				}
-			} else {
-				serverConfig.ServerType = tools.MCPServerTypeStdio
-			}
-		case "stdio":
-			serverConfig.ServerType = tools.MCPServerTypeStdio
-		case "sse":
-			serverConfig.ServerType = tools.MCPServerTypeSSE
-			serverConfig.URL = server.URL
-			if server.AuthHeader != "" {
-				serverConfig.Headers = map[string]string{
-					"Authorization": server.AuthHeader,
-				}
-			}
-		case "http", "streamable_http", "streamable-http":
-			serverConfig.ServerType = tools.MCPServerTypeHTTP
-			serverConfig.URL = server.URL
-			if server.AuthHeader != "" {
-				serverConfig.Headers = map[string]string{
-					"Authorization": server.AuthHeader,
-				}
-			}
-		}
-
-		config.Servers[server.Name] = serverConfig
-	}
-
-	return config
-}
-
-// connectMCPServers creates an MCPManager from ACP MCP server definitions
-func (m *Manager) connectMCPServers(ctx context.Context, servers []acptypes.MCPServer) (*tools.MCPManager, error) {
-	if len(servers) == 0 {
-		return nil, ErrNoMCPServers
-	}
-
-	config := convertMCPServers(servers)
-
-	manager, err := tools.NewMCPManager(config)
-	if err != nil {
-		return nil, pkgerrors.Wrap(err, "failed to create MCP manager")
-	}
-
-	if err := manager.Initialize(ctx); err != nil {
-		_ = manager.Close(ctx)
-		return nil, pkgerrors.Wrap(err, "failed to initialize MCP servers")
-	}
-
-	return manager, nil
-}
-
-func (m *Manager) buildSessionMCPManager(ctx context.Context, servers []acptypes.MCPServer) *tools.MCPManager {
-	switch {
-	case m.kodeletMCPManager == nil && len(servers) == 0:
-		return nil
-	case m.kodeletMCPManager == nil:
-		clientMCPManager, err := m.connectMCPServers(ctx, servers)
-		if err != nil {
-			if !errors.Is(err, ErrNoMCPServers) {
-				logger.G(ctx).WithError(err).Warn("Failed to connect to client MCP servers")
-			}
-			return nil
-		}
-		return clientMCPManager
-	case len(servers) == 0:
-		return m.kodeletMCPManager.Clone()
-	}
-
-	clientMCPManager, err := m.connectMCPServers(ctx, servers)
-	if err != nil {
-		if !errors.Is(err, ErrNoMCPServers) {
-			logger.G(ctx).WithError(err).Warn("Failed to connect to client MCP servers")
-		}
-		return m.kodeletMCPManager.Clone()
-	}
-
-	combinedManager := m.kodeletMCPManager.Clone()
-	combinedManager.Merge(clientMCPManager)
-	return combinedManager
-}
-
-// buildSessionMCPStateOpts returns session-scoped MCP state options.
-func (m *Manager) buildSessionMCPStateOpts(ctx context.Context, sessionID string, projectDir string, sessionMCPManager *tools.MCPManager) []tools.BasicStateOption {
-	if sessionMCPManager == nil {
-		return nil
-	}
-
-	logger.G(ctx).WithField("session_id", sessionID).WithField("project_dir", projectDir).Debug("MCP tools initialized for ACP session")
-	return []tools.BasicStateOption{tools.WithMCPTools(sessionMCPManager)}
-}
-
 func (m *Manager) storeSession(ctx context.Context, session *Session) {
 	var previous *Session
 
@@ -339,8 +194,6 @@ func (m *Manager) storeSession(ctx context.Context, session *Session) {
 
 // NewSession creates a new session
 func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest) (*Session, error) {
-	m.initMCP(ctx)
-
 	llmConfig := m.buildLLMConfig(req.CWD)
 	extensionRuntime := m.buildExtensionRuntime(ctx, req.CWD)
 	llmConfig.Extensions = extensionRuntime
@@ -362,15 +215,6 @@ func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest
 		stateOpts = append(stateOpts, tools.WithSkillTool())
 	}
 
-	// Initialize workflows for subagent (if not disabled)
-	if !m.config.NoWorkflows && !m.config.DisableSubagent {
-		stateOpts = append(stateOpts, tools.WithSubAgentTool())
-	}
-
-	sessionMCPManager := m.buildSessionMCPManager(ctx, req.MCPServers)
-	if mcpOpts := m.buildSessionMCPStateOpts(ctx, thread.GetConversationID(), req.CWD, sessionMCPManager); mcpOpts != nil {
-		stateOpts = append(stateOpts, mcpOpts...)
-	}
 	if extensionRuntime != nil {
 		stateOpts = append(stateOpts, tools.WithExtensionTools(extensionRuntime.Tools()))
 	}
@@ -383,10 +227,8 @@ func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest
 		ID:           acptypes.SessionID(thread.GetConversationID()),
 		Thread:       thread,
 		State:        state,
-		MCPManager:   sessionMCPManager,
 		Extensions:   extensionRuntime,
 		CWD:          req.CWD,
-		MCPServers:   req.MCPServers,
 		maxTurns:     m.config.MaxTurns,
 		compactRatio: m.config.CompactRatio,
 	}
@@ -406,8 +248,6 @@ func (m *Manager) LoadSession(ctx context.Context, req acptypes.LoadSessionReque
 	if err != nil {
 		return nil, pkgerrors.Wrap(err, "failed to load conversation")
 	}
-
-	m.initMCP(ctx)
 
 	llmConfig := m.buildLLMConfig(req.CWD)
 	extensionRuntime := m.buildExtensionRuntime(ctx, req.CWD)
@@ -432,15 +272,6 @@ func (m *Manager) LoadSession(ctx context.Context, req acptypes.LoadSessionReque
 		stateOpts = append(stateOpts, tools.WithSkillTool())
 	}
 
-	// Initialize workflows for subagent (if not disabled)
-	if !m.config.NoWorkflows && !m.config.DisableSubagent {
-		stateOpts = append(stateOpts, tools.WithSubAgentTool())
-	}
-
-	sessionMCPManager := m.buildSessionMCPManager(ctx, req.MCPServers)
-	if mcpOpts := m.buildSessionMCPStateOpts(ctx, string(req.SessionID), req.CWD, sessionMCPManager); mcpOpts != nil {
-		stateOpts = append(stateOpts, mcpOpts...)
-	}
 	if extensionRuntime != nil {
 		stateOpts = append(stateOpts, tools.WithExtensionTools(extensionRuntime.Tools()))
 	}
@@ -453,10 +284,8 @@ func (m *Manager) LoadSession(ctx context.Context, req acptypes.LoadSessionReque
 		ID:           req.SessionID,
 		Thread:       thread,
 		State:        state,
-		MCPManager:   sessionMCPManager,
 		Extensions:   extensionRuntime,
 		CWD:          req.CWD,
-		MCPServers:   req.MCPServers,
 		maxTurns:     m.config.MaxTurns,
 		compactRatio: m.config.CompactRatio,
 	}
@@ -488,7 +317,7 @@ func (m *Manager) Cancel(id acptypes.SessionID) error {
 	return nil
 }
 
-// Close releases session-scoped resources, shared MCP clients, and conversation storage.
+// Close releases session-scoped resources and conversation storage.
 func (m *Manager) Close(ctx context.Context) error {
 	m.mu.Lock()
 	sessions := make([]*Session, 0, len(m.sessions))
@@ -496,8 +325,6 @@ func (m *Manager) Close(ctx context.Context) error {
 		sessions = append(sessions, session)
 	}
 	m.sessions = make(map[acptypes.SessionID]*Session)
-	kodeletMCPManager := m.kodeletMCPManager
-	m.kodeletMCPManager = nil
 	store := m.store
 	m.store = nil
 	m.mu.Unlock()
@@ -508,11 +335,6 @@ func (m *Manager) Close(ctx context.Context) error {
 			continue
 		}
 		if err := session.Close(ctx); err != nil {
-			result = multierror.Append(result, err)
-		}
-	}
-	if kodeletMCPManager != nil {
-		if err := kodeletMCPManager.Close(ctx); err != nil {
 			result = multierror.Append(result, err)
 		}
 	}

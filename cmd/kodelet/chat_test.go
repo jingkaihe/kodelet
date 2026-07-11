@@ -9,9 +9,11 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/tui"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -24,14 +26,12 @@ func TestGetChatConfigFromFlags(t *testing.T) {
 	cmd.Flags().String("theme", tui.DefaultThemeName, "")
 	cmd.Flags().BoolP("follow", "f", defaults.Follow, "")
 	cmd.Flags().Bool("no-extensions", defaults.NoExtensions, "")
-	cmd.Flags().Bool("no-mcp", defaults.NoMCP, "")
 	cmd.Flags().Bool("no-tools", defaults.NoTools, "")
 
 	require.NoError(t, cmd.Flags().Set("resume", "conv-1"))
 	require.NoError(t, cmd.Flags().Set("cwd", " /tmp/project "))
 	require.NoError(t, cmd.Flags().Set("theme", " tokyo-night "))
 	require.NoError(t, cmd.Flags().Set("no-extensions", "true"))
-	require.NoError(t, cmd.Flags().Set("no-mcp", "true"))
 	require.NoError(t, cmd.Flags().Set("no-tools", "true"))
 
 	config := getChatConfigFromFlags(context.Background(), cmd)
@@ -40,7 +40,6 @@ func TestGetChatConfigFromFlags(t *testing.T) {
 	assert.Equal(t, "/tmp/project", config.CWD)
 	assert.Equal(t, "tokyo-night", config.Theme)
 	assert.True(t, config.NoExtensions)
-	assert.True(t, config.NoMCP)
 	assert.True(t, config.NoTools)
 }
 
@@ -52,7 +51,6 @@ func TestChatResumeShortFlag(t *testing.T) {
 	cmd.Flags().String("theme", tui.DefaultThemeName, "")
 	cmd.Flags().BoolP("follow", "f", defaults.Follow, "")
 	cmd.Flags().Bool("no-extensions", defaults.NoExtensions, "")
-	cmd.Flags().Bool("no-mcp", defaults.NoMCP, "")
 	cmd.Flags().Bool("no-tools", defaults.NoTools, "")
 
 	require.NoError(t, cmd.ParseFlags([]string{"-r", "conv-short"}))
@@ -61,7 +59,7 @@ func TestChatResumeShortFlag(t *testing.T) {
 	assert.Equal(t, "conv-short", config.ResumeConvID)
 }
 
-func TestChatNoToolsDisablesMCP(t *testing.T) {
+func TestChatNoToolsFlag(t *testing.T) {
 	cmd := &cobra.Command{Use: "chat"}
 	defaults := NewChatConfig()
 	cmd.Flags().StringP("resume", "r", defaults.ResumeConvID, "")
@@ -69,14 +67,29 @@ func TestChatNoToolsDisablesMCP(t *testing.T) {
 	cmd.Flags().String("theme", tui.DefaultThemeName, "")
 	cmd.Flags().BoolP("follow", "f", defaults.Follow, "")
 	cmd.Flags().Bool("no-extensions", defaults.NoExtensions, "")
-	cmd.Flags().Bool("no-mcp", defaults.NoMCP, "")
 	cmd.Flags().Bool("no-tools", defaults.NoTools, "")
 
 	require.NoError(t, cmd.Flags().Set("no-tools", "true"))
 
 	config := getChatConfigFromFlags(context.Background(), cmd)
 	assert.True(t, config.NoTools)
-	assert.True(t, config.NoMCP)
+}
+
+func TestChatNoToolsDisablesExtensionStartup(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	viper.Reset()
+	t.Cleanup(func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	})
+
+	applyChatRuntimeRestrictions(&ChatConfig{NoTools: true})
+
+	assert.False(t, viper.GetBool("extensions.enabled"))
+	assert.Equal(t, []string{"none"}, viper.GetStringSlice("allowed_tools"))
+	assert.False(t, extensions.LoadConfigFromViper().Enabled)
 }
 
 func TestValidateChatResumeConversationRejectsMissingConversation(t *testing.T) {

@@ -165,8 +165,6 @@ func (t *GlobTool) Description() string {
 - path: The absolute path to a DIRECTORY to search in (not a file path). Defaults to current working directory if not specified.
 - ignore_gitignore: (optional) If true, do not respect .gitignore rules. Default is false (respects .gitignore).
 
-If you need to do multi-turn search using grep_tool and glob_tool, use subagentTool instead.
-
 `
 }
 

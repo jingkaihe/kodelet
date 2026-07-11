@@ -12,10 +12,7 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/google/shlex"
 	"github.com/invopop/jsonschema"
-	"github.com/jingkaihe/kodelet/pkg/logger"
-	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
@@ -218,15 +215,7 @@ func defaultConversationExtractor(ctx context.Context, state tooltypes.State, ma
 		return "", errors.Wrap(err, "failed to get executable path")
 	}
 
-	args := []string{"run", "--result-only", "--as-subagent", "--use-weak-model", "--no-tools"}
-	if llmConfig, ok := state.GetLLMConfig().(llmtypes.Config); ok && llmConfig.SubagentArgs != "" {
-		parsedArgs, err := shlex.Split(llmConfig.SubagentArgs)
-		if err != nil {
-			logger.G(ctx).WithError(err).Warn("failed to parse subagent_args, ignoring")
-		} else {
-			args = append(args, parsedArgs...)
-		}
-	}
+	args := []string{"run", "--result-only", "--no-save", "--no-extensions", "--no-skills", "--use-weak-model", "--no-tools"}
 
 	prompt, err := buildReadConversationPrompt(markdown, goal)
 	if err != nil {

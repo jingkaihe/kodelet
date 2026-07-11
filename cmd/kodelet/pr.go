@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -124,18 +125,23 @@ Use the --draft flag to create a draft pull request that is not ready for review
 
 		prompt := fragment.Content
 
-		mcpManager, err := tools.CreateMCPManagerFromViper(ctx)
-		if err != nil && !errors.Is(err, tools.ErrMCPDisabled) {
-			presenter.Error(err, "Failed to create MCP manager")
+		extensionRuntime, err := extensions.NewRuntimeFromViper(ctx, "")
+		if err != nil {
+			presenter.Error(err, "Failed to initialize extensions")
 			os.Exit(1)
 		}
-		if mcpManager != nil {
+		if extensionRuntime != nil {
 			defer func() {
-				_ = mcpManager.Close(ctx)
+				_ = extensionRuntime.Close()
 			}()
+			llmConfig.Extensions = extensionRuntime
 		}
 
-		s := tools.NewBasicState(ctx, tools.WithLLMConfig(llmConfig), tools.WithMCPTools(mcpManager))
+		stateOpts := []tools.BasicStateOption{tools.WithLLMConfig(llmConfig), tools.WithMainTools(), tools.WithSkillTool()}
+		if extensionRuntime != nil {
+			stateOpts = append(stateOpts, tools.WithExtensionTools(extensionRuntime.Tools()))
+		}
+		s := tools.NewBasicState(ctx, stateOpts...)
 
 		if config.ResultOnly {
 			presenter.SetQuiet(true)

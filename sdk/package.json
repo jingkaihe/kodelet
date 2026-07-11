@@ -24,17 +24,20 @@
     }
   },
   "bin": {
-    "kodelet-extension-node": "dist/bin/kodelet-extension-node.js"
+    "kodelet-extension-node": "dist/bin/kodelet-extension-node.js",
+    "kodelet-mcp-install": "dist/extensions/mcp/install.js"
   },
   "files": [
     "dist"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "postinstall": "node -e \"const fs=require('fs');const p='./dist/extensions/mcp/install.js';if(fs.existsSync(p))import(p).catch(e=>{console.error(e);process.exit(1)})\"",
     "test": "tsx --test src/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "mustache": "^4.2.0",
     "zod": "^4.4.3"
   },

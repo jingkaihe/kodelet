@@ -97,7 +97,7 @@ export default function (ext: ExtensionAPI) {
 }
 ```
 
-For TypeScript extensions, `inputSchema` should accept a Zod schema. The `kodelet` SDK should re-export `z` from Zod so extension authors get an all-in-one import and do not need to depend on or import `zod` directly. The SDK converts Zod to JSON Schema during registration before sending metadata to Kodelet. Non-TypeScript extensions can still speak the protocol directly by returning JSON Schema in their `extension.initialize` result.
+For TypeScript extensions, `inputSchema` accepts either a Zod schema or a raw JSON Schema object. The `kodelet` SDK re-exports `z` from Zod so extension authors get an all-in-one import and do not need to depend on or import `zod` directly. The SDK converts and validates Zod schemas during registration and execution, while raw JSON Schema is passed through unchanged and its input is left for the tool handler or upstream server to validate. Non-TypeScript extensions can still speak the protocol directly by returning JSON Schema in their `extension.initialize` result.
 
 The SDK should infer the handler input type from the schema, equivalent to:
 
@@ -305,7 +305,7 @@ func (r *Runtime) DispatchEvent(ctx context.Context, event Event) (EventResult, 
 func (r *Runtime) Shutdown(ctx context.Context) error
 ```
 
-An `ExtensionTool` implements the existing `tooltypes.Tool` interface so extension tools can join the normal tool list alongside built-ins and MCP tools.
+An `ExtensionTool` implements the existing `tooltypes.Tool` interface so extension tools can join the normal tool list alongside built-ins.
 
 ## JSON-RPC protocol
 
@@ -317,6 +317,7 @@ Rules:
 - `stderr` is logs.
 - Requests use the effective timeout from config, SDK `timeoutInSec`, and runtime defaults. Extension commands may run without a timeout by default.
 - Extensions can call back into the host for UI interactions using separate reverse-RPC methods: `kodelet.ui.input`, `kodelet.ui.confirm`, `kodelet.ui.select`, and `kodelet.ui.notify`.
+- Reverse-RPC requests can include the originating host request ID as `parentId` so callbacks retain the correct context when extension requests execute concurrently.
 - Cancellation uses `$/cancelRequest`.
 - If an extension hangs after cancellation, Kodelet kills and restarts it.
 - The host supervises processes with exponential backoff.
@@ -914,7 +915,7 @@ The SDK is part of the core implementation, not follow-up polish. Without it, th
 
 Implement `ExtensionTool` as `tooltypes.Tool`.
 
-Wire extension tools into state construction alongside existing built-in and MCP tools.
+Wire extension tools into state construction alongside existing built-in tools.
 
 Add structured metadata and renderer fallback for `extension_tool`.
 

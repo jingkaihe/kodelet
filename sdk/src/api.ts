@@ -20,12 +20,14 @@ import type {
   InitializeParams,
   InitializeResult,
   ToolExecutionResult,
+  ToolInputSchema,
   ToolRegistration,
 } from "./types.js";
 
 interface RegisteredTool {
-  registration: ToolRegistration<AnyZodSchema>;
+  registration: ToolRegistration<ToolInputSchema>;
   inputSchema: Record<string, unknown>;
+  parseInput(input: unknown): Promise<unknown>;
 }
 
 interface RegisteredCommand {
@@ -53,13 +55,17 @@ export class ExtensionHost implements ExtensionAPI {
     this.metadata = { ...this.metadata, ...metadata };
   }
 
-  registerTool<Schema extends AnyZodSchema>(registration: ToolRegistration<Schema>): void {
+  registerTool<Schema extends ToolInputSchema>(registration: ToolRegistration<Schema>): void {
     if (this.tools.has(registration.name)) {
       throw new Error(`Duplicate extension tool registration: ${registration.name}`);
     }
+    const inputSchema = registration.inputSchema;
     this.tools.set(registration.name, {
-      registration: registration as ToolRegistration<AnyZodSchema>,
-      inputSchema: zodSchemaToJsonSchema(registration.inputSchema),
+      registration: registration as ToolRegistration<ToolInputSchema>,
+      inputSchema: isZodSchema(inputSchema) ? zodSchemaToJsonSchema(inputSchema) : inputSchema,
+      parseInput: isZodSchema(inputSchema)
+        ? (input) => inputSchema.parseAsync(input)
+        : async (input) => input,
     });
   }
 
@@ -129,8 +135,8 @@ export class ExtensionHost implements ExtensionAPI {
     if (!tool) {
       throw new Error(`Unknown extension tool: ${params.name}`);
     }
-    const input = await tool.registration.inputSchema.parseAsync(params.input);
-    const result = await tool.registration.execute(input, createToolContext(this.initParams, params.context));
+    const input = await tool.parseInput(params.input);
+    const result = await tool.registration.execute(input as never, createToolContext(this.initParams, params.context));
     if (typeof result === "string") {
       return { content: result };
     }
@@ -267,6 +273,10 @@ export function zodSchemaToJsonSchema(schema: AnyZodSchema): Record<string, unkn
     }
   }
   return { type: "object", additionalProperties: true };
+}
+
+function isZodSchema(schema: ToolInputSchema): schema is AnyZodSchema {
+  return "_zod" in schema && typeof schema.parseAsync === "function";
 }
 
 function clonePayload<T>(payload: T): T {

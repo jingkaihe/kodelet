@@ -8,11 +8,9 @@ import FileReadRenderer from './FileReadRenderer';
 import FileWriteRenderer from './FileWriteRenderer';
 import GlobRenderer from './GlobRenderer';
 import GrepRenderer from './GrepRenderer';
-import MCPToolRenderer from './MCPToolRenderer';
 import OpenAIWebSearchRenderer from './OpenAIWebSearchRenderer';
 import ReadConversationRenderer from './ReadConversationRenderer';
 import SkillRenderer from './SkillRenderer';
-import SubagentRenderer from './SubagentRenderer';
 import ThinkingRenderer from './ThinkingRenderer';
 import ViewImageRenderer from './ViewImageRenderer';
 import WebFetchRenderer from './WebFetchRenderer';
@@ -33,13 +31,11 @@ const toolRendererRegistry: Record<string, ToolRendererRegistration> = {
   glob_tool: { component: GlobRenderer },
   web_fetch: { component: WebFetchRenderer },
   thinking: { component: ThinkingRenderer },
-  subagent: { component: SubagentRenderer },
   view_image: { component: ViewImageRenderer },
   skill: { component: SkillRenderer },
   openai_web_search: { component: OpenAIWebSearchRenderer, supportsFailureRendering: true },
   read_conversation: { component: ReadConversationRenderer },
   extension_tool: { component: ExtensionToolRenderer },
-  mcp_tool: { component: MCPToolRenderer },
 };
 
 export const getToolRendererRegistration = (toolResult: ToolResult): ToolRendererRegistration | undefined => {

@@ -1,8 +1,6 @@
 package tools
 
 import (
-	"encoding/json"
-
 	"github.com/sashabaranov/go-openai"
 
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -12,19 +10,12 @@ import (
 func ToOpenAITools(tools []tooltypes.Tool) []openai.Tool {
 	openaiTools := make([]openai.Tool, len(tools))
 	for i, tool := range tools {
-		schema := tool.GenerateSchema()
-
-		// Convert to JSON
-		schemaBytes, _ := json.Marshal(schema)
-		var jsonSchema map[string]any
-		json.Unmarshal(schemaBytes, &jsonSchema)
-
 		openaiTools[i] = openai.Tool{
 			Type: "function",
 			Function: &openai.FunctionDefinition{
 				Name:        tool.Name(),
 				Description: tool.Description(),
-				Parameters:  jsonSchema,
+				Parameters:  tooltypes.JSONSchemaForTool(tool),
 			},
 		}
 	}

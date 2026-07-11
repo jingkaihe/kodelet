@@ -357,6 +357,22 @@ func TestBuildToolsIncludesNativeOpenAISearchWhenEligible(t *testing.T) {
 	assert.Equal(t, openairesponses.WebSearchToolTypeWebSearch, toolDefs[0].OfWebSearch.Type)
 }
 
+func TestResponsesToolConversionPreservesRawJSONSchema(t *testing.T) {
+	rawSchema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"target": map[string]any{"type": []any{"string", "null"}},
+		},
+		"additionalProperties": false,
+		"x-mcp-extension":      true,
+	}
+	converted := toResponsesAPITools([]tooltypes.Tool{responsesTestTool{name: "raw", rawSchema: rawSchema}})
+
+	require.Len(t, converted, 1)
+	require.NotNil(t, converted[0].OfFunction)
+	assert.Equal(t, rawSchema, converted[0].OfFunction.Parameters)
+}
+
 func TestBuildToolsSkipsNativeOpenAISearchForNonOpenAIPlatforms(t *testing.T) {
 	state := tools.NewBasicState(context.Background(), tools.WithLLMConfig(llmtypes.Config{
 		Provider: "openai",
@@ -2520,7 +2536,7 @@ func TestProcessMessageExchangeRetriesFromToolResultAfterLocalToolExecution(t *t
 		},
 		storedItems: []StoredInputItem{{Type: "message", Role: "user", Content: "hello"}},
 	}
-	thread.SetState(tools.NewBasicState(context.Background(), tools.WithExtraMCPTools([]tooltypes.Tool{responsesTestTool{name: "ok_tool"}})))
+	thread.SetState(tools.NewBasicState(context.Background(), tools.WithExtensionTools([]tooltypes.Tool{responsesTestTool{name: "ok_tool"}})))
 
 	attempts := 0
 	var inputLengths []int

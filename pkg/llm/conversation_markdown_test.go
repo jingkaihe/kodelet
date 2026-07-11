@@ -133,7 +133,7 @@ func TestRenderConversationEntriesMarkdownDropsImageItemsBeforeTruncation(t *tes
 		{
 			Kind:       "tool-result",
 			Role:       "assistant",
-			ToolName:   "mcp_tool_demo",
+			ToolName:   "extension_tool_demo",
 			ToolCallID: "call_1",
 			Content: `[
 				{"type":"image","data":"ignored"},

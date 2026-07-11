@@ -1243,7 +1243,7 @@ func TestOpenAIThreadDeterministicHelperBranches(t *testing.T) {
 	assert.Equal(t, "tool", messages[2].Role)
 	assert.Equal(t, "ok", messages[2].Content)
 
-	state := tools.NewBasicState(context.Background(), tools.WithExtraMCPTools([]tooltypes.Tool{&testOpenAITool{name: "extra"}}))
+	state := tools.NewBasicState(context.Background(), tools.WithExtensionTools([]tooltypes.Tool{&testOpenAITool{name: "extra"}}))
 	thread.SetState(state)
 	assert.Contains(t, toolNamesForOpenAITest(thread.tools(llm.MessageOpt{})), "extra")
 	assert.Empty(t, thread.tools(llm.MessageOpt{NoToolUse: true}))

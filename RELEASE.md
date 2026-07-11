@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.4.52-beta
+
+Removed MCP and subagent built-in tool surfaces from the CLI, ACP, Web UI, docs, config samples, and tool renderer catalogs.
+
+Added a TypeScript SDK MCP extension with config loading, installation helpers, OAuth registration, and tool-call retry support for reauthorization flows.
+
+Improved extension runtime handling for concurrent reverse RPC callbacks, parent request IDs, raw JSON Schema tool inputs, workspace cwd propagation, environment expansion, and chat/run shutdown behavior.
+
 ## 0.4.51-beta
 
 Removed  MCP code-execution mode, including generated TypeScript wrappers, standalone MCP RPC serving, and the `mcp generate` / `mcp serve` commands.

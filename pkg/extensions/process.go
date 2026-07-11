@@ -18,32 +18,35 @@ import (
 
 // Process is a running extension subprocess.
 type Process struct {
-	Extension Extension
-	cmd       *exec.Cmd
-	client    *rpcClient
-	stdin     io.WriteCloser
-	stdout    io.ReadCloser
-	config    Config
-	cwd       string
-	mu        sync.Mutex
-	closed    bool
-	shutdown  bool
-	disabled  bool
-	failures  int
+	Extension    Extension
+	cmd          *exec.Cmd
+	client       *rpcClient
+	stdin        io.WriteCloser
+	stdout       io.ReadCloser
+	config       Config
+	workspaceCWD string
+	mu           sync.Mutex
+	closed       bool
+	shutdown     bool
+	disabled     bool
+	failures     int
 }
 
 const (
-	maxProcessFailures = 3
-	restartBackoffBase = 100 * time.Millisecond
-	restartBackoffMax  = 2 * time.Second
+	workspaceCWDEnvKey         = "KODELET_EXTENSION_WORKSPACE_CWD"
+	extensionInitializeTimeout = 3 * time.Minute
+	maxProcessFailures         = 3
+	restartBackoffBase         = 100 * time.Millisecond
+	restartBackoffMax          = 2 * time.Second
 )
 
 // StartProcess starts an extension subprocess and initializes its JSON-RPC client.
-func StartProcess(ctx context.Context, ext Extension, config Config) (*Process, error) {
+func StartProcess(ctx context.Context, ext Extension, config Config, workspaceCWD string) (*Process, error) {
 	p := &Process{
-		Extension: ext,
-		config:    config,
-		closed:    true,
+		Extension:    ext,
+		config:       config,
+		workspaceCWD: workspaceCWD,
+		closed:       true,
 	}
 	if err := p.start(ctx); err != nil {
 		return nil, err
@@ -54,6 +57,7 @@ func StartProcess(ctx context.Context, ext Extension, config Config) (*Process, 
 func (p *Process) start(ctx context.Context) error {
 	cmd := exec.CommandContext(processContext(ctx), p.Extension.ExecPath)
 	cmd.Dir = p.Extension.Dir
+	cmd.Env = extensionProcessEnv(p.workspaceCWD)
 	cmd.Stderr = os.Stderr
 	osutil.SetProcessGroup(cmd)
 	osutil.SetProcessGroupKill(cmd)
@@ -83,6 +87,21 @@ func processContext(ctx context.Context) context.Context {
 		return context.Background()
 	}
 	return context.WithoutCancel(ctx)
+}
+
+func extensionProcessEnv(workspaceCWD string) []string {
+	env := os.Environ()
+	if strings.TrimSpace(workspaceCWD) == "" {
+		return env
+	}
+	entry := workspaceCWDEnvKey + "=" + workspaceCWD
+	for i, existing := range env {
+		if strings.HasPrefix(existing, workspaceCWDEnvKey+"=") {
+			env[i] = entry
+			return env
+		}
+	}
+	return append(env, entry)
 }
 
 func (p *Process) ensureRunning(ctx context.Context) error {
@@ -130,8 +149,8 @@ func (p *Process) ensureRunning(ctx context.Context) error {
 		return err
 	}
 
-	initCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	_, err := p.initialize(initCtx, p.cwd)
+	initCtx, cancel := context.WithTimeout(ctx, extensionInitializeTimeout)
+	_, err := p.initialize(initCtx, p.workspaceCWD)
 	cancel()
 	if err != nil {
 		p.closeProcessLocked()
@@ -155,7 +174,7 @@ func (p *Process) recordFailureLocked() {
 // Initialize initializes the extension process and returns its registrations.
 func (p *Process) Initialize(ctx context.Context, cwd string) (*InitializeResult, error) {
 	p.mu.Lock()
-	p.cwd = cwd
+	p.workspaceCWD = cwd
 	p.mu.Unlock()
 	return p.initialize(ctx, cwd)
 }

@@ -23,29 +23,6 @@ func TestBasicState(t *testing.T) {
 	for i, tool := range tools {
 		assert.Equal(t, mainTools[i].Name(), tool.Name())
 	}
-
-	// Test subagent tools configuration via WithSubAgentToolsFromConfig
-	subAgentTools := NewBasicState(context.TODO(), WithSubAgentToolsFromConfig())
-	expectedSubAgentTools := GetSubAgentTools(context.Background(), []string{})
-	assert.Equal(t, len(expectedSubAgentTools), len(subAgentTools.Tools()))
-	for i, tool := range subAgentTools.Tools() {
-		assert.Equal(t, expectedSubAgentTools[i].Name(), tool.Name())
-	}
-}
-
-func TestBasicState_MCPTools(t *testing.T) {
-	config := goldenMCPConfig(t)
-	manager, err := NewMCPManager(config)
-	assert.NoError(t, err)
-
-	err = manager.Initialize(context.Background())
-	assert.NoError(t, err)
-
-	s := NewBasicState(context.TODO(), WithMCPTools(manager))
-
-	tools := s.MCPTools()
-	assert.NotNil(t, tools)
-	assert.Equal(t, len(tools), 3)
 }
 
 func TestBasicState_LLMConfig(t *testing.T) {
@@ -101,30 +78,6 @@ func TestBasicState_ConfigureBashTool(t *testing.T) {
 	}
 
 	s := NewBasicState(context.TODO(), WithLLMConfig(config))
-
-	tools := s.BasicTools()
-	var bashTool *BashTool
-	for _, tool := range tools {
-		if tool.Name() == "bash" {
-			if bt, ok := tool.(*BashTool); ok {
-				bashTool = bt
-				break
-			}
-		}
-	}
-
-	assert.NotNil(t, bashTool)
-	assert.Equal(t, allowedCommands, bashTool.allowedCommands)
-}
-
-func TestBasicState_ConfigureBashTool_WithSubAgentTools(t *testing.T) {
-	allowedCommands := []string{"npm *", "yarn *"}
-	config := llmtypes.Config{
-		AllowedCommands: allowedCommands,
-		IsSubAgent:      true,
-	}
-
-	s := NewBasicState(context.TODO(), WithLLMConfig(config), WithSubAgentToolsFromConfig())
 
 	tools := s.BasicTools()
 	var bashTool *BashTool
@@ -500,155 +453,12 @@ func TestNewBasicState_ErrorHandling(t *testing.T) {
 	})
 }
 
-func TestWithSubAgentToolsFromConfig(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("excludes subagent tool", func(t *testing.T) {
-		state := NewBasicState(ctx, WithSubAgentToolsFromConfig())
-
-		toolNames := make([]string, len(state.Tools()))
-		for i, tool := range state.Tools() {
-			toolNames[i] = tool.Name()
-		}
-
-		assert.NotContains(t, toolNames, "subagent", "Subagent tools should not contain subagent to prevent recursion")
-	})
-
-	t.Run("includes expected tools", func(t *testing.T) {
-		state := NewBasicState(ctx, WithSubAgentToolsFromConfig())
-
-		toolNames := make([]string, len(state.Tools()))
-		for i, tool := range state.Tools() {
-			toolNames[i] = tool.Name()
-		}
-
-		// Should include basic tools
-		assert.Contains(t, toolNames, "bash")
-		assert.Contains(t, toolNames, "file_write")
-		// file_read is excluded unless explicitly allowed
-		assert.NotContains(t, toolNames, "file_read")
-		// FS search tools are excluded unless enable_fs_search_tools is set
-		assert.NotContains(t, toolNames, "grep_tool")
-		assert.NotContains(t, toolNames, "glob_tool")
-	})
-
-	t.Run("respects allowed_tools from config", func(t *testing.T) {
-		config := llmtypes.Config{
-			AllowedTools:        []string{"file_read", "grep_tool"},
-			EnableFSSearchTools: true,
-		}
-		state := NewBasicState(ctx, WithLLMConfig(config), WithSubAgentToolsFromConfig())
-
-		toolNames := make([]string, len(state.Tools()))
-		for i, tool := range state.Tools() {
-			toolNames[i] = tool.Name()
-		}
-
-		// Should include requested tools plus meta tools
-		assert.Contains(t, toolNames, "file_read")
-		assert.Contains(t, toolNames, "grep_tool")
-		assert.Contains(t, toolNames, "glob_tool") // meta tool always included
-	})
-
-	t.Run("no_tools with NoToolsMarker", func(t *testing.T) {
-		config := llmtypes.Config{
-			AllowedTools: []string{NoToolsMarker},
-		}
-		state := NewBasicState(ctx, WithLLMConfig(config), WithSubAgentToolsFromConfig())
-
-		assert.Empty(t, state.Tools(), "NoToolsMarker should result in no tools")
-	})
-
-	t.Run("patch removes file_read file_write and file_edit", func(t *testing.T) {
-		config := llmtypes.Config{
-			ToolMode:     llmtypes.ToolModePatch,
-			AllowedTools: []string{"file_read", "file_write", "file_edit"},
-		}
-		state := NewBasicState(ctx, WithLLMConfig(config), WithSubAgentToolsFromConfig())
-
-		toolNames := make([]string, len(state.Tools()))
-		for i, tool := range state.Tools() {
-			toolNames[i] = tool.Name()
-		}
-
-		assert.Contains(t, toolNames, "apply_patch")
-		assert.NotContains(t, toolNames, "file_read")
-		assert.NotContains(t, toolNames, "file_write")
-		assert.NotContains(t, toolNames, "file_edit")
-	})
-
-	t.Run("patch still removes file_read file_write and file_edit after fallback", func(t *testing.T) {
-		config := llmtypes.Config{
-			ToolMode:     llmtypes.ToolModePatch,
-			AllowedTools: []string{"file_read", "unknown_tool"},
-		}
-		state := NewBasicState(ctx, WithLLMConfig(config), WithSubAgentToolsFromConfig())
-
-		toolNames := make([]string, len(state.Tools()))
-		for i, tool := range state.Tools() {
-			toolNames[i] = tool.Name()
-		}
-
-		assert.Contains(t, toolNames, "apply_patch")
-		assert.NotContains(t, toolNames, "file_read")
-		assert.NotContains(t, toolNames, "file_write")
-		assert.NotContains(t, toolNames, "file_edit")
-	})
-
-	t.Run("patch alias with disabled fs search tools keeps bash inspection and apply_patch", func(t *testing.T) {
-		config := llmtypes.Config{
-			ToolMode:            llmtypes.ToolModePatch,
-			EnableFSSearchTools: false,
-		}
-		state := NewBasicState(ctx, WithLLMConfig(config), WithSubAgentToolsFromConfig())
-
-		toolNames := make([]string, len(state.Tools()))
-		for i, tool := range state.Tools() {
-			toolNames[i] = tool.Name()
-		}
-
-		assert.Contains(t, toolNames, "bash")
-		assert.Contains(t, toolNames, "apply_patch")
-		assert.Contains(t, toolNames, "web_fetch")
-		assert.NotContains(t, toolNames, "file_read")
-		assert.NotContains(t, toolNames, "grep_tool")
-		assert.NotContains(t, toolNames, "glob_tool")
-	})
-
-	t.Run("full mode removes apply_patch from allowed_tools", func(t *testing.T) {
-		config := llmtypes.Config{
-			ToolMode:     llmtypes.ToolModeFull,
-			AllowedTools: []string{"file_read", "apply_patch"},
-		}
-		state := NewBasicState(ctx, WithLLMConfig(config), WithSubAgentToolsFromConfig())
-
-		toolNames := make([]string, len(state.Tools()))
-		for i, tool := range state.Tools() {
-			toolNames[i] = tool.Name()
-		}
-
-		assert.Contains(t, toolNames, "file_read")
-		assert.NotContains(t, toolNames, "apply_patch")
-	})
-}
-
 func TestWithMainTools(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("includes subagent tool", func(t *testing.T) {
-		state := NewBasicState(ctx, WithMainTools())
-
-		toolNames := make([]string, len(state.Tools()))
-		for i, tool := range state.Tools() {
-			toolNames[i] = tool.Name()
-		}
-
-		assert.Contains(t, toolNames, "subagent", "Main tools should include subagent")
-	})
-
 	t.Run("respects allowed_tools from config", func(t *testing.T) {
 		config := llmtypes.Config{
-			AllowedTools: []string{"bash", "file_read", "subagent"},
+			AllowedTools: []string{"bash", "file_read"},
 		}
 		state := NewBasicState(ctx, WithLLMConfig(config), WithMainTools())
 
@@ -659,21 +469,6 @@ func TestWithMainTools(t *testing.T) {
 
 		assert.Contains(t, toolNames, "bash")
 		assert.Contains(t, toolNames, "file_read")
-		assert.Contains(t, toolNames, "subagent")
-	})
-
-	t.Run("WithSubAgentTool respects allowed_tools without subagent", func(t *testing.T) {
-		config := llmtypes.Config{
-			AllowedTools: []string{"bash"},
-		}
-		state := NewBasicState(ctx, WithLLMConfig(config), WithMainTools(), WithSubAgentTool())
-
-		toolNames := make([]string, len(state.Tools()))
-		for i, tool := range state.Tools() {
-			toolNames[i] = tool.Name()
-		}
-
-		assert.Contains(t, toolNames, "bash")
 		assert.NotContains(t, toolNames, "subagent")
 	})
 
@@ -684,54 +479,6 @@ func TestWithMainTools(t *testing.T) {
 		state := NewBasicState(ctx, WithLLMConfig(config), WithMainTools())
 
 		assert.Empty(t, state.Tools(), "NoToolsMarker should result in no tools")
-	})
-
-	t.Run("DisableSubagent excludes subagent tool", func(t *testing.T) {
-		config := llmtypes.Config{
-			DisableSubagent: true,
-		}
-		state := NewBasicState(ctx, WithLLMConfig(config), WithMainTools())
-
-		toolNames := make([]string, len(state.Tools()))
-		for i, tool := range state.Tools() {
-			toolNames[i] = tool.Name()
-		}
-
-		assert.NotContains(t, toolNames, "subagent", "DisableSubagent should exclude subagent tool")
-		assert.Contains(t, toolNames, "bash", "Other tools should remain")
-		assert.Contains(t, toolNames, "web_fetch", "web_fetch should remain when subagent is disabled")
-		assert.Contains(t, toolNames, "view_image", "view_image should remain when subagent is disabled")
-	})
-
-	t.Run("DisableSubagent with allowed_tools still excludes subagent", func(t *testing.T) {
-		config := llmtypes.Config{
-			DisableSubagent: true,
-			AllowedTools:    []string{"bash", "file_read", "subagent", "web_fetch"},
-		}
-		state := NewBasicState(ctx, WithLLMConfig(config), WithMainTools())
-
-		toolNames := make([]string, len(state.Tools()))
-		for i, tool := range state.Tools() {
-			toolNames[i] = tool.Name()
-		}
-
-		assert.NotContains(t, toolNames, "subagent", "DisableSubagent should exclude subagent even from allowed_tools")
-		assert.Contains(t, toolNames, "bash")
-		assert.Contains(t, toolNames, "web_fetch")
-	})
-
-	t.Run("DisableSubagent false keeps subagent tool", func(t *testing.T) {
-		config := llmtypes.Config{
-			DisableSubagent: false,
-		}
-		state := NewBasicState(ctx, WithLLMConfig(config), WithMainTools())
-
-		toolNames := make([]string, len(state.Tools()))
-		for i, tool := range state.Tools() {
-			toolNames[i] = tool.Name()
-		}
-
-		assert.Contains(t, toolNames, "subagent", "subagent should remain when DisableSubagent is false")
 	})
 
 	t.Run("patch removes file_read file_write and file_edit from defaults", func(t *testing.T) {
@@ -840,36 +587,10 @@ func TestNoToolsConfigured_PreventsAdditionalToolRegistration(t *testing.T) {
 		WithLLMConfig(config),
 		WithMainTools(),
 		WithExtensionTools([]tooltypes.Tool{&testTool{name: "extension_tool"}}),
-		WithExtraMCPTools([]tooltypes.Tool{&testTool{name: "mcp_test"}}),
 		WithSkillTool(),
-		WithSubAgentTool(),
 	)
 
 	assert.Empty(t, state.Tools(), "NoToolsMarker should block all later tool registration")
-	assert.Empty(t, state.MCPTools(), "NoToolsMarker should block MCP tool registration")
-}
-
-func TestGetLLMConfig_ReturnsSubagentArgs(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("returns config with subagent_args", func(t *testing.T) {
-		config := llmtypes.Config{
-			SubagentArgs: "--profile cheap --use-weak-model",
-		}
-		state := NewBasicState(ctx, WithLLMConfig(config))
-
-		retrievedConfig, ok := state.GetLLMConfig().(llmtypes.Config)
-		assert.True(t, ok, "GetLLMConfig should return llmtypes.Config")
-		assert.Equal(t, "--profile cheap --use-weak-model", retrievedConfig.SubagentArgs)
-	})
-
-	t.Run("returns empty subagent_args by default", func(t *testing.T) {
-		state := NewBasicState(ctx)
-
-		retrievedConfig, ok := state.GetLLMConfig().(llmtypes.Config)
-		assert.True(t, ok, "GetLLMConfig should return llmtypes.Config")
-		assert.Empty(t, retrievedConfig.SubagentArgs)
-	})
 }
 
 func TestWithSkillTool_RespectsExplicitAllowlist(t *testing.T) {
@@ -877,7 +598,7 @@ func TestWithSkillTool_RespectsExplicitAllowlist(t *testing.T) {
 	state := NewBasicState(
 		ctx,
 		WithLLMConfig(llmtypes.Config{AllowedTools: []string{"file_read", "grep_tool", "glob_tool"}, EnableFSSearchTools: true}),
-		WithSubAgentToolsFromConfig(),
+		WithMainTools(),
 		WithSkillTool(),
 	)
 
@@ -886,7 +607,7 @@ func TestWithSkillTool_RespectsExplicitAllowlist(t *testing.T) {
 		toolNames[i] = tool.Name()
 	}
 
-	assert.Equal(t, []string{"grep_tool", "glob_tool", "file_read"}, toolNames)
+	assert.Equal(t, []string{"grep_tool", "glob_tool", "get_goal", "update_goal", "file_read"}, toolNames)
 	assert.NotContains(t, toolNames, "skill")
 }
 
@@ -895,7 +616,7 @@ func TestWithExtensionTools_RespectsExplicitAllowlist(t *testing.T) {
 	state := NewBasicState(
 		ctx,
 		WithLLMConfig(llmtypes.Config{AllowedTools: []string{"file_read", "grep_tool", "glob_tool"}, EnableFSSearchTools: true}),
-		WithSubAgentToolsFromConfig(),
+		WithMainTools(),
 		WithExtensionTools([]tooltypes.Tool{&testTool{name: "not_allowed_extension_tool"}}),
 	)
 
@@ -904,7 +625,7 @@ func TestWithExtensionTools_RespectsExplicitAllowlist(t *testing.T) {
 		toolNames[i] = tool.Name()
 	}
 
-	assert.Equal(t, []string{"grep_tool", "glob_tool", "file_read"}, toolNames)
+	assert.Equal(t, []string{"grep_tool", "glob_tool", "get_goal", "update_goal", "file_read"}, toolNames)
 	assert.Empty(t, state.ExtensionTools())
 	assert.NotContains(t, toolNames, "not_allowed_extension_tool")
 }
@@ -957,7 +678,7 @@ func TestWithSkillTool_SkipsSubagents(t *testing.T) {
 	state := NewBasicState(
 		ctx,
 		WithLLMConfig(llmtypes.Config{IsSubAgent: true}),
-		WithSubAgentToolsFromConfig(),
+		WithMainTools(),
 		WithSkillTool(),
 	)
 

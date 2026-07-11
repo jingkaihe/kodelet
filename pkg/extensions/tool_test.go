@@ -31,6 +31,42 @@ func TestNewToolValidationAndSchemaDefaults(t *testing.T) {
 		assert.Contains(t, err.Error(), "failed to marshal extension tool schema")
 	})
 
+	t.Run("preserves JSON Schema constraints", func(t *testing.T) {
+		inputSchema := map[string]any{
+			"type":        "object",
+			"description": "Constrained request",
+			"properties": map[string]any{
+				"mode": map[string]any{
+					"description": "Execution mode",
+					"enum":        []any{"fast", "safe"},
+				},
+				"limit": map[string]any{
+					"type":    "integer",
+					"minimum": float64(1),
+					"maximum": float64(10),
+				},
+				"target": map[string]any{
+					"anyOf": []any{
+						map[string]any{"const": "workspace"},
+						map[string]any{"type": []any{"string", "null"}, "pattern": "^file:"},
+					},
+				},
+			},
+			"required":             []any{"mode"},
+			"additionalProperties": false,
+			"x-mcp-extension":      map[string]any{"enabled": true},
+		}
+		tool, err := newTool("search", nil, ToolRegistration{
+			Name:        "search",
+			Description: "Search",
+			InputSchema: inputSchema,
+		}, 0, 100)
+		require.NoError(t, err)
+
+		assert.Equal(t, inputSchema, tooltypes.JSONSchemaForTool(tool))
+		assert.Equal(t, "object", tool.GenerateSchema().Type)
+	})
+
 	t.Run("missing name and description", func(t *testing.T) {
 		_, err := newTool("weather", nil, ToolRegistration{Description: "Weather"}, 0, 100)
 		require.ErrorContains(t, err, "extension tool name is required")

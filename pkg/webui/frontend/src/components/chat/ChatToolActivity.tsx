@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   BookOpenText,
-  Bot,
   FileCog,
   FileImage,
   FilePen,
@@ -299,26 +298,10 @@ export const getToolSummary = (toolCall: ChatRenderToolCall): string => {
           getStringField(metadata, 'goal')
       );
 
-	case 'extension_tool':
+    case 'extension_tool':
       return formatToolSummary(
         'Extension tool',
         getStringField(metadata, 'toolName') || toolCall.name
-      );
-
-    case 'mcp_tool':
-      return formatToolSummary(
-        'MCP tool',
-        getStringField(metadata, 'mcpToolName') ||
-          toolCall.name.replace(/^mcp__?/, '').replace(/^mcp_/, '')
-      );
-
-    case 'subagent':
-      return formatToolSummary(
-        'Subagent',
-        getStringField(input, 'workflow') ||
-          getStringField(metadata, 'workflow') ||
-          getStringField(input, 'question') ||
-          getStringField(metadata, 'question')
       );
 
     case 'skill':
@@ -381,13 +364,11 @@ const toolSummaryIcons: Partial<Record<string, LucideIcon>> = {
   'Fetch URL': Globe,
   'Find files': Search,
   'Find in page': Search,
-  'MCP tool': FileCog,
   'Open page': Globe,
   'Read conversation': BookOpenText,
   'Read file': FileText,
   Search,
   Skill: PocketKnife,
-  Subagent: Bot,
   'View image': FileImage,
   'Web search': Globe,
   'Write file': FilePlus,

@@ -21,9 +21,11 @@ type testTool struct {
 	traceErr    error
 	result      tooltypes.ToolResult
 	executed    bool
+	rawSchema   map[string]any
 }
 
 func (t *testTool) GenerateSchema() *jsonschema.Schema              { return GenerateSchema[map[string]any]() }
+func (t *testTool) RawInputSchema() map[string]any                  { return t.rawSchema }
 func (t *testTool) Name() string                                    { return t.name }
 func (t *testTool) Description() string                             { return t.description }
 func (t *testTool) ValidateInput(_ tooltypes.State, _ string) error { return t.validateErr }
@@ -42,26 +44,10 @@ func TestGetAvailableToolNames(t *testing.T) {
 	// Should include all tools from toolRegistry
 	assert.Contains(t, tools, "bash")
 	assert.Contains(t, tools, "file_read")
-	assert.Contains(t, tools, "subagent")
 	assert.Contains(t, tools, "openai_web_search")
 
 	// Should have the expected number of tools (registry tools plus virtual tools)
 	assert.Equal(t, len(toolRegistry)+len(virtualToolNames), len(tools))
-}
-
-func TestGetAvailableSubAgentToolNames(t *testing.T) {
-	tools := getAvailableSubAgentToolNames()
-
-	// Should include most tools from toolRegistry except subagent
-	assert.Contains(t, tools, "bash")
-	assert.Contains(t, tools, "file_read")
-	assert.Contains(t, tools, "openai_web_search")
-
-	// Should NOT include subagent tool
-	assert.NotContains(t, tools, "subagent")
-
-	// Should have one less registry tool than toolRegistry (excluding subagent), plus virtual tools
-	assert.Equal(t, len(toolRegistry)-1+len(virtualToolNames), len(tools))
 }
 
 func TestValidateTools_ValidTools(t *testing.T) {
@@ -113,69 +99,6 @@ func TestValidateTools_MixedValidAndInvalidTools(t *testing.T) {
 	assert.NotContains(t, err.Error(), "bash, unknown_tool")
 }
 
-func TestValidateSubAgentTools_ValidTools(t *testing.T) {
-	validTools := []string{"bash", "file_read", "file_write"}
-	err := ValidateSubAgentTools(validTools)
-	assert.NoError(t, err)
-}
-
-func TestValidateSubAgentTools_AllowsVirtualOpenAIWebSearch(t *testing.T) {
-	err := ValidateSubAgentTools([]string{"bash", "openai_web_search"})
-	assert.NoError(t, err)
-}
-
-func TestValidateSubAgentTools_EmptyList(t *testing.T) {
-	err := ValidateSubAgentTools([]string{})
-	assert.NoError(t, err)
-}
-
-func TestValidateSubAgentTools_SubagentToolOnly(t *testing.T) {
-	invalidTools := []string{"subagent"}
-	err := ValidateSubAgentTools(invalidTools)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "subagent tool cannot be used by subagent to prevent infinite recursion")
-	assert.Contains(t, err.Error(), "Available tools:")
-	assert.Contains(t, err.Error(), "bash")
-	assert.Contains(t, err.Error(), "file_read")
-	// Should not include subagent in available tools
-	assert.NotContains(t, err.Error(), "subagent,")
-	assert.NotContains(t, err.Error(), ", subagent")
-}
-
-func TestValidateSubAgentTools_SubagentToolWithOthers(t *testing.T) {
-	invalidTools := []string{"bash", "subagent", "unknown_tool"}
-	err := ValidateSubAgentTools(invalidTools)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid tools: subagent, unknown_tool")
-	assert.Contains(t, err.Error(), "subagent tool cannot be used by subagent to prevent infinite recursion")
-	assert.Contains(t, err.Error(), "Available tools:")
-}
-
-func TestValidateSubAgentTools_UnknownToolOnly(t *testing.T) {
-	invalidTools := []string{"unknown_tool"}
-	err := ValidateSubAgentTools(invalidTools)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unknown tool: unknown_tool")
-	assert.Contains(t, err.Error(), "Available tools:")
-	assert.Contains(t, err.Error(), "bash")
-	assert.Contains(t, err.Error(), "file_read")
-	// Should not include subagent in available tools
-	assert.NotContains(t, err.Error(), "subagent,")
-	assert.NotContains(t, err.Error(), ", subagent")
-}
-
-func TestValidateSubAgentTools_MultipleUnknownTools(t *testing.T) {
-	invalidTools := []string{"unknown_tool1", "unknown_tool2"}
-	err := ValidateSubAgentTools(invalidTools)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unknown tools: unknown_tool1, unknown_tool2")
-	assert.Contains(t, err.Error(), "Available tools:")
-}
-
 func TestErrorMessageFormat(t *testing.T) {
 	// Test that error messages are properly formatted and include all necessary information
 	t.Run("single unknown tool error format", func(t *testing.T) {
@@ -204,21 +127,6 @@ func TestErrorMessageFormat(t *testing.T) {
 		assert.True(t, strings.HasPrefix(lines[0], "unknown tools: nonexistent1, nonexistent2"))
 		assert.True(t, strings.HasPrefix(lines[1], "Available tools: "))
 	})
-
-	t.Run("subagent tool error format", func(t *testing.T) {
-		err := ValidateSubAgentTools([]string{"subagent"})
-		require.Error(t, err)
-
-		errMsg := err.Error()
-		lines := strings.Split(errMsg, "\n")
-		assert.Len(t, lines, 2, "Error message should have exactly 2 lines")
-		assert.Contains(t, lines[0], "subagent tool cannot be used by subagent to prevent infinite recursion")
-		assert.True(t, strings.HasPrefix(lines[1], "Available tools: "))
-
-		// Verify subagent is not in the available tools list
-		availableToolsLine := lines[1]
-		assert.NotContains(t, availableToolsLine, "subagent")
-	})
 }
 
 func TestGetMainTools_FallsBackOnValidationErrors(t *testing.T) {
@@ -236,23 +144,6 @@ func TestGetMainTools_FallsBackOnValidationErrors(t *testing.T) {
 		toolNames[i] = tool.Name()
 	}
 	assert.NotContains(t, toolNames, "unknown_tool", "Should not contain unknown tool")
-}
-
-func TestGetSubAgentTools_FallsBackOnValidationErrors(t *testing.T) {
-	// Test with subagent tool (invalid for subagents)
-	invalidTools := []string{"bash", "subagent", "file_read"}
-	tools := GetSubAgentTools(context.Background(), invalidTools)
-
-	// Should fallback to default tools
-	defaultTools := GetSubAgentTools(context.Background(), []string{})
-	assert.Equal(t, len(defaultTools), len(tools), "Should fallback to default tools")
-
-	// Verify we got the default tools, not the invalid ones
-	toolNames := make([]string, len(tools))
-	for i, tool := range tools {
-		toolNames[i] = tool.Name()
-	}
-	assert.NotContains(t, toolNames, "subagent", "Should not contain subagent tool")
 }
 
 func TestGetMainTools_UsesValidTools(t *testing.T) {
@@ -293,9 +184,25 @@ func TestGetToolsFromNamesAndOpenAIConversion(t *testing.T) {
 	assert.NotNil(t, openAITools[0].Function.Parameters)
 }
 
+func TestOpenAIConversionPreservesRawJSONSchema(t *testing.T) {
+	rawSchema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"target": map[string]any{"type": []any{"string", "null"}},
+		},
+		"additionalProperties": false,
+		"x-mcp-extension":      true,
+	}
+	converted := ToOpenAITools([]tooltypes.Tool{&testTool{name: "raw", description: "raw", rawSchema: rawSchema}})
+
+	require.Len(t, converted, 1)
+	require.NotNil(t, converted[0].Function)
+	assert.Equal(t, rawSchema, converted[0].Function.Parameters)
+}
+
 func TestRunToolFindsValidatesAndExecutesTool(t *testing.T) {
 	tool := &testTool{name: "test_tool", description: "test", result: tooltypes.BaseToolResult{Result: "ran"}}
-	state := NewBasicState(context.Background(), WithExtraMCPTools([]tooltypes.Tool{tool}))
+	state := NewBasicState(context.Background(), WithExtensionTools([]tooltypes.Tool{tool}))
 
 	result := RunTool(context.Background(), state, "test_tool", `{"ok":true}`)
 
@@ -311,7 +218,7 @@ func TestRunToolReturnsFindAndValidationErrors(t *testing.T) {
 	assert.Contains(t, missing.GetError(), "failed to find tool")
 
 	tool := &testTool{name: "bad_tool", validateErr: assert.AnError}
-	state = NewBasicState(context.Background(), WithExtraMCPTools([]tooltypes.Tool{tool}))
+	state = NewBasicState(context.Background(), WithExtensionTools([]tooltypes.Tool{tool}))
 	invalid := RunTool(context.Background(), state, "bad_tool", `{}`)
 	require.True(t, invalid.IsError())
 	assert.Contains(t, invalid.GetError(), assert.AnError.Error())
@@ -344,19 +251,6 @@ func TestGetMainToolsWithOptions_ExplicitAllowlistIncludesGoalMetaTools(t *testi
 	assert.Contains(t, toolNames, "update_goal")
 }
 
-func TestGetSubAgentTools_ExplicitAllowlistDoesNotIncludeGoalMetaTools(t *testing.T) {
-	tools := GetSubAgentTools(context.Background(), []string{"bash"})
-
-	toolNames := make([]string, len(tools))
-	for i, tool := range tools {
-		toolNames[i] = tool.Name()
-	}
-
-	assert.Contains(t, toolNames, "bash")
-	assert.NotContains(t, toolNames, "get_goal")
-	assert.NotContains(t, toolNames, "update_goal")
-}
-
 func TestGetMainTools_NoToolsMarker(t *testing.T) {
 	// Test that NoToolsMarker returns nil (no tools)
 	tools := GetMainTools(context.Background(), []string{NoToolsMarker})
@@ -365,35 +259,9 @@ func TestGetMainTools_NoToolsMarker(t *testing.T) {
 	assert.Len(t, tools, 0, "NoToolsMarker should return zero tools")
 }
 
-func TestGetSubAgentTools_NoToolsMarker(t *testing.T) {
-	// Test that NoToolsMarker returns nil (no tools)
-	tools := GetSubAgentTools(context.Background(), []string{NoToolsMarker})
-
-	assert.Nil(t, tools, "NoToolsMarker should return nil tools")
-	assert.Len(t, tools, 0, "NoToolsMarker should return zero tools")
-}
-
 func TestNoToolsMarker_Constant(t *testing.T) {
 	// Ensure the constant value is correct
 	assert.Equal(t, "none", NoToolsMarker, "NoToolsMarker should be 'none'")
-}
-
-func TestGetSubAgentTools_ExcludesSubagentTool(t *testing.T) {
-	// Verify that default subagent tools don't include the subagent tool
-	tools := GetSubAgentTools(context.Background(), []string{})
-
-	toolNames := make([]string, len(tools))
-	for i, tool := range tools {
-		toolNames[i] = tool.Name()
-	}
-
-	assert.NotContains(t, toolNames, "subagent", "Subagent tools should not include the subagent tool to prevent recursion")
-
-	// Verify some expected tools ARE included
-	assert.Contains(t, toolNames, "bash", "Should include bash tool")
-	assert.Contains(t, toolNames, "file_write", "Should include file_write tool")
-	assert.NotContains(t, toolNames, "file_read", "file_read is excluded by default")
-	assert.NotContains(t, toolNames, "grep_tool", "FS search tools are excluded by default")
 }
 
 func TestFileReadExcludedFromDefaults(t *testing.T) {
@@ -420,29 +288,6 @@ func TestFileReadExcludedFromDefaults(t *testing.T) {
 
 		assert.Contains(t, toolNames, "file_read")
 	})
-
-	t.Run("subagent file_read can be enabled via explicit allowlist", func(t *testing.T) {
-		tools := GetSubAgentTools(context.Background(), []string{"bash", "file_read"})
-
-		toolNames := make([]string, len(tools))
-		for i, tool := range tools {
-			toolNames[i] = tool.Name()
-		}
-
-		assert.Contains(t, toolNames, "file_read")
-	})
-}
-
-func TestGetMainTools_IncludesSubagentTool(t *testing.T) {
-	// Verify that main tools DO include the subagent tool
-	tools := GetMainTools(context.Background(), []string{})
-
-	toolNames := make([]string, len(tools))
-	for i, tool := range tools {
-		toolNames[i] = tool.Name()
-	}
-
-	assert.Contains(t, toolNames, "subagent", "Main tools should include the subagent tool")
 }
 
 func TestGetMainToolsWithOptions_FSSearchToolsDisabled(t *testing.T) {
@@ -492,94 +337,5 @@ func TestGetMainToolsWithOptions_FSSearchToolsDisabled(t *testing.T) {
 		assert.Contains(t, toolNames, "bash")
 		assert.NotContains(t, toolNames, "grep_tool")
 		assert.NotContains(t, toolNames, "glob_tool")
-	})
-}
-
-func TestGetSubAgentToolsWithOptions_FSSearchToolsDisabled(t *testing.T) {
-	t.Run("removes grep and glob from default subagent tools and meta tools", func(t *testing.T) {
-		tools := GetSubAgentToolsWithOptions(context.Background(), nil, false)
-
-		toolNames := make([]string, len(tools))
-		for i, tool := range tools {
-			toolNames[i] = tool.Name()
-		}
-
-		assert.NotContains(t, toolNames, "file_read")
-		assert.Contains(t, toolNames, "bash")
-		assert.NotContains(t, toolNames, "grep_tool")
-		assert.NotContains(t, toolNames, "glob_tool")
-	})
-
-	t.Run("removes grep and glob even when explicitly requested", func(t *testing.T) {
-		tools := GetSubAgentToolsWithOptions(context.Background(), []string{"bash", "grep_tool", "glob_tool"}, false)
-
-		toolNames := make([]string, len(tools))
-		for i, tool := range tools {
-			toolNames[i] = tool.Name()
-		}
-
-		assert.NotContains(t, toolNames, "file_read")
-		assert.Contains(t, toolNames, "bash")
-		assert.NotContains(t, toolNames, "grep_tool")
-		assert.NotContains(t, toolNames, "glob_tool")
-	})
-
-	t.Run("search-only allowlists do not fall back to defaults", func(t *testing.T) {
-		tools := GetSubAgentToolsWithOptions(context.Background(), []string{"grep_tool", "glob_tool"}, false)
-
-		assert.Empty(t, tools)
-	})
-
-	t.Run("fallback after validation still keeps grep and glob disabled", func(t *testing.T) {
-		tools := GetSubAgentToolsWithOptions(context.Background(), []string{"unknown_tool"}, false)
-
-		toolNames := make([]string, len(tools))
-		for i, tool := range tools {
-			toolNames[i] = tool.Name()
-		}
-
-		assert.NotContains(t, toolNames, "file_read")
-		assert.Contains(t, toolNames, "bash")
-		assert.NotContains(t, toolNames, "grep_tool")
-		assert.NotContains(t, toolNames, "glob_tool")
-	})
-}
-
-func TestFilterOutSubagent(t *testing.T) {
-	t.Run("removes subagent from tool list", func(t *testing.T) {
-		tools := GetMainTools(context.Background(), []string{})
-		filtered := filterOutSubagent(tools)
-
-		toolNames := make([]string, len(filtered))
-		for i, tool := range filtered {
-			toolNames[i] = tool.Name()
-		}
-
-		assert.NotContains(t, toolNames, "subagent")
-		assert.Contains(t, toolNames, "bash")
-		assert.Contains(t, toolNames, "file_write")
-		assert.Contains(t, toolNames, "web_fetch")
-		assert.Contains(t, toolNames, "view_image")
-		assert.Equal(t, len(tools)-1, len(filtered))
-	})
-
-	t.Run("preserves all tools when subagent not present", func(t *testing.T) {
-		tools := GetSubAgentTools(context.Background(), []string{})
-		filtered := filterOutSubagent(tools)
-
-		assert.Equal(t, len(tools), len(filtered))
-	})
-
-	t.Run("handles empty tool list", func(t *testing.T) {
-		var tools []tooltypes.Tool
-		filtered := filterOutSubagent(tools)
-
-		assert.Empty(t, filtered)
-	})
-
-	t.Run("handles nil tool list", func(t *testing.T) {
-		filtered := filterOutSubagent(nil)
-
-		assert.Empty(t, filtered)
 	})
 }

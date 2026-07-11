@@ -73,12 +73,12 @@ func (r *Runtime) initialize(ctx context.Context, discovery *Discovery) error {
 		return err
 	}
 	for _, ext := range extensions {
-		proc, err := StartProcess(ctx, ext, r.config)
+		proc, err := StartProcess(ctx, ext, r.config, r.workingDir)
 		if err != nil {
 			logger.G(ctx).WithError(err).WithField("extension", ext.ID).Warn("failed to start extension; disabling for this process")
 			continue
 		}
-		initCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		initCtx, cancel := context.WithTimeout(ctx, extensionInitializeTimeout)
 		result, err := proc.Initialize(initCtx, r.workingDir)
 		cancel()
 		if err != nil {

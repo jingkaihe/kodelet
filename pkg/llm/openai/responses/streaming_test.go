@@ -51,11 +51,16 @@ func (d *fakeDecoder) Err() error {
 	return d.err
 }
 
-type responsesTestTool struct{ name string }
+type responsesTestTool struct {
+	name      string
+	rawSchema map[string]any
+}
 
 func (t responsesTestTool) GenerateSchema() *jsonschema.Schema {
 	return jsonschema.Reflect(map[string]any{})
 }
+
+func (t responsesTestTool) RawInputSchema() map[string]any { return t.rawSchema }
 
 func (t responsesTestTool) Name() string { return t.name }
 
@@ -181,7 +186,7 @@ func TestExecuteToolCallStoresStructuredResult(t *testing.T) {
 	thread := &Thread{
 		Thread: base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "conv-test"),
 	}
-	thread.SetState(tools.NewBasicState(context.Background(), tools.WithExtraMCPTools([]tooltypes.Tool{responsesTestTool{name: "ok_tool"}})))
+	thread.SetState(tools.NewBasicState(context.Background(), tools.WithExtensionTools([]tooltypes.Tool{responsesTestTool{name: "ok_tool"}})))
 
 	result := thread.executeToolCall(context.Background(), "call-ok", "ok_tool", `{}`, &captureStreamHandler{})
 
@@ -228,7 +233,7 @@ func TestProcessStreamCompletesFunctionCallAndStoresToolOutput(t *testing.T) {
 		storedItems: make([]StoredInputItem, 0),
 		inputItems:  make([]responses.ResponseInputItemUnionParam, 0),
 	}
-	thread.SetState(tools.NewBasicState(context.Background(), tools.WithExtraMCPTools([]tooltypes.Tool{responsesTestTool{name: "ok_tool"}})))
+	thread.SetState(tools.NewBasicState(context.Background(), tools.WithExtensionTools([]tooltypes.Tool{responsesTestTool{name: "ok_tool"}})))
 	handler := &captureStreamHandler{}
 
 	streamResult, err := thread.processStream(context.Background(), stream, handler, "gpt-5.5", llmtypes.MessageOpt{})

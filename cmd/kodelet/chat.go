@@ -22,7 +22,6 @@ type ChatConfig struct {
 	Theme        string
 	Follow       bool
 	NoExtensions bool
-	NoMCP        bool
 	NoTools      bool
 }
 
@@ -39,15 +38,7 @@ var chatCmd = &cobra.Command{
 		ctx := cmd.Context()
 		config := getChatConfigFromFlags(ctx, cmd)
 
-		if config.NoExtensions {
-			viper.Set("extensions.enabled", false)
-		}
-		if config.NoMCP || config.NoTools {
-			viper.Set("mcp.enabled", false)
-		}
-		if config.NoTools {
-			viper.Set("allowed_tools", []string{"none"})
-		}
+		applyChatRuntimeRestrictions(config)
 		if err := tui.ValidateThemeName(config.Theme); err != nil {
 			presenter.Error(err, "Invalid TUI theme")
 			os.Exit(1)
@@ -76,6 +67,15 @@ var chatCmd = &cobra.Command{
 	},
 }
 
+func applyChatRuntimeRestrictions(config *ChatConfig) {
+	if config.NoExtensions || config.NoTools {
+		viper.Set("extensions.enabled", false)
+	}
+	if config.NoTools {
+		viper.Set("allowed_tools", []string{"none"})
+	}
+}
+
 func init() {
 	defaults := NewChatConfig()
 	chatCmd.Flags().StringP("resume", "r", defaults.ResumeConvID, "Resume a specific conversation")
@@ -83,7 +83,6 @@ func init() {
 	chatCmd.Flags().String("theme", tui.DefaultThemeName, "TUI theme (available: "+strings.Join(tui.AvailableThemeNames(), ", ")+")")
 	chatCmd.Flags().BoolP("follow", "f", defaults.Follow, "Follow the most recent conversation")
 	chatCmd.Flags().Bool("no-extensions", defaults.NoExtensions, "Disable extension runtime")
-	chatCmd.Flags().Bool("no-mcp", defaults.NoMCP, "Disable MCP tools")
 	chatCmd.Flags().Bool("no-tools", defaults.NoTools, "Disable all tools (for simple query-response usage)")
 }
 
@@ -116,14 +115,8 @@ func getChatConfigFromFlags(ctx context.Context, cmd *cobra.Command) *ChatConfig
 	if noExtensions, err := cmd.Flags().GetBool("no-extensions"); err == nil {
 		config.NoExtensions = noExtensions
 	}
-	if noMCP, err := cmd.Flags().GetBool("no-mcp"); err == nil {
-		config.NoMCP = noMCP
-	}
 	if noTools, err := cmd.Flags().GetBool("no-tools"); err == nil {
 		config.NoTools = noTools
-	}
-	if config.NoTools && !config.NoMCP {
-		config.NoMCP = true
 	}
 
 	return config

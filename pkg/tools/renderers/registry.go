@@ -1,6 +1,6 @@
 // Package renderers provides CLI output rendering functionality for tool results.
 // It includes a registry system for managing tool renderers and supports
-// pattern-based matching for extension and MCP tools.
+// pattern-based matching for extension tools.
 package renderers
 
 import (
@@ -37,15 +37,12 @@ func NewRendererRegistry() *RendererRegistry {
 	registry.Register("bash", &BashRenderer{})
 	registry.Register("grep_tool", &GrepRenderer{})
 	registry.Register("glob_tool", &GlobRenderer{})
-	registry.Register("subagent", &SubAgentRenderer{})
 	registry.Register("view_image", &ViewImageRenderer{})
 	registry.Register("openai_web_search", &OpenAIWebSearchRenderer{})
 	registry.Register("web_fetch", &WebFetchRenderer{})
 	registry.Register("read_conversation", &ReadConversationRenderer{})
 	registry.Register("skill", &SkillRenderer{})
 
-	// Register MCP tools - pattern matches any tool prefixed with "mcp_"
-	registry.RegisterPattern("mcp_*", &MCPToolRenderer{})
 	registry.Register("extension_tool", &ExtensionToolRenderer{})
 
 	return registry
@@ -56,7 +53,7 @@ func (r *RendererRegistry) Register(toolName string, renderer CLIRenderer) {
 	r.renderers[toolName] = renderer
 }
 
-// RegisterPattern adds a renderer for a pattern (e.g., "mcp_*")
+// RegisterPattern adds a renderer for a pattern (e.g., "prefix_*")
 func (r *RendererRegistry) RegisterPattern(pattern string, renderer CLIRenderer) {
 	r.patterns[pattern] = renderer
 }

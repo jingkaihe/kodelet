@@ -712,41 +712,9 @@ tool_mode: full
 # - llm: generate a short summary with the weak model
 # - first_message: use the first user message directly
 conversation_summary_mode: llm
-
-# MCP configuration
-mcp:
-  oauth:
-    # Remote HTTP/SSE MCP OAuth is auto-detected from HTTP 401 Bearer
-    # challenges. Set interactive to "never" for headless/CI runs that should
-    # fail fast instead of opening a browser.
-    interactive: "auto" # auto | always | never
-    open_browser: true
-    callback_timeout: "2m"
-
-  servers:
-    fs:
-      command: "npx" # Command to execute for stdio server
-      args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/files"]
-      tool_white_list: ["list_directory"] # Optional tool white list
-    some_http_server: # streamable HTTP config
-      server_type: "http" # Optional when url is set; this is the default URL transport
-      url: "https://example.com/mcp" # URL for streamable HTTP server
-      headers: # Headers for HTTP requests
-        Authorization: "Bearer token"
-      oauth: # Optional OAuth hints; OAuth itself is discovered automatically
-        client_id: "${MCP_CLIENT_ID}"
-        client_secret: "${MCP_CLIENT_SECRET}"
-        scopes: ["mcp.read", "mcp.write"]
-        redirect_uri: "http://127.0.0.1:1456/mcp/oauth/callback"
-        auth_server_metadata_url: "https://auth.example.com/.well-known/oauth-authorization-server"
-      tool_white_list: ["tool1", "tool2"] # Optional tool white list
-    some_sse_server: # deprecated SSE config
-      server_type: "sse"
-      url: "http://localhost:8000/sse" # URL for SSE server
-      headers:
-        Authorization: "Bearer token"
-      tool_white_list: ["tool1", "tool2"]
 ```
+
+MCP servers are configured outside Kodelet's core `config.yaml`. MCP is provided by the SDK MCP extension, which reads `./mcp.json` and `~/.kodelet/mcp.json`. See the [SDK MCP extension README](../sdk/src/extensions/mcp/README.md) for local installation, `mcp.json` examples, remote HTTP/SSE, OAuth, and tool filtering.
 
 ### Command Line Flags
 
@@ -764,9 +732,6 @@ kodelet run --provider "openai" --model "gpt-4.1" --max-tokens 4096 --reasoning-
 
 # Command restriction example
 kodelet run --allowed-commands "ls *,pwd,echo *" "query"
-
-# Disable subagent tool and related system prompt context
-kodelet run --disable-subagent "query"
 
 # Enable filesystem search tools (`glob_tool` and `grep_tool`)
 kodelet run --enable-fs-search-tools "query"
@@ -832,23 +797,6 @@ profiles:
     enable_search: true
     openai:
       platform: copilot
-
-  mix-n-match:
-    # Main agent uses Claude
-    provider: "anthropic"
-    model: "claude-sonnet-4-6"
-    weak_model: "claude-haiku-4-5-20251001"
-    max_tokens: 16000
-    # Subagent uses OpenAI profile for cross-provider support
-    subagent_args: "--profile openai-subagent"
-
-  # Subagent profile for mix-n-match (cross-provider example)
-  openai-subagent:
-    provider: "openai"
-    model: "o3"
-    reasoning_effort: "high"
-    tool_mode: "patch"
-    enable_fs_search_tools: false
 
 # Model aliases work across all profiles
 aliases:
@@ -1208,7 +1156,7 @@ Extensions communicate with Kodelet over stdio JSON-RPC using `Content-Length` f
 
 ### TypeScript Agent SDK
 
-The `kodelet` TypeScript package can also launch and drive agent sessions from Node/TypeScript. It speaks to `kodelet acp` over stdio JSON-RPC, so it preserves normal profile resolution, conversation persistence, tools, skills, MCP, and extension behavior.
+The `kodelet` TypeScript package can also launch and drive agent sessions from Node/TypeScript. It speaks to `kodelet acp` over stdio JSON-RPC, so it preserves normal profile resolution, conversation persistence, built-in tools, skills, and extension behavior.
 
 ```typescript
 import { Client } from "kodelet";
@@ -1299,6 +1247,8 @@ export default defineExtension((ext) => {
   });
 });
 ```
+
+`registerTool` also accepts a raw JSON Schema object as `inputSchema`. Raw schemas are sent to the model unchanged and their inputs are passed directly to `execute`; the handler or upstream server is responsible for validation. Zod schemas retain inferred handler input types and Zod parsing behavior.
 
 A typical extension directory contains a package, compiled JavaScript, and an executable wrapper:
 
@@ -1626,16 +1576,6 @@ To run without skills for a single session:
 ```bash
 kodelet run --no-skills "your query"
 ```
-
-### Disabling Subagent
-
-To disable the subagent tool and remove subagent-related context from the system prompt:
-
-```bash
-kodelet run --disable-subagent "your query"
-```
-
-This can also be set via configuration file (`disable_subagent: true`) or environment variable (`KODELET_DISABLE_SUBAGENT=true`). Other tools like `web_fetch` remain available when the subagent is disabled.
 
 ### Enabling Filesystem Search Tools
 

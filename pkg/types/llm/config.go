@@ -84,10 +84,6 @@ type Config struct {
 	OpenAI    *OpenAIConfig    `mapstructure:"openai" json:"openai,omitempty" yaml:"openai,omitempty"`          // OpenAI-specific configuration including compatible providers
 	Anthropic *AnthropicConfig `mapstructure:"anthropic" json:"anthropic,omitempty" yaml:"anthropic,omitempty"` // Anthropic-specific configuration including compatible providers
 
-	// SubagentArgs is CLI arguments to pass when spawning subagents via shell-out
-	// Example: "--profile cheap" or "--use-weak-model"
-	SubagentArgs string `mapstructure:"subagent_args" json:"subagent_args,omitempty" yaml:"subagent_args,omitempty"`
-
 	// Skills configuration
 	Skills *SkillsConfig `mapstructure:"skills" json:"skills,omitempty" yaml:"skills,omitempty"` // Skills configuration for agentic skills system
 
@@ -98,7 +94,6 @@ type Config struct {
 	Extensions              any                     `mapstructure:"-" json:"-" yaml:"-"`                                                                         // Extensions is the active extension runtime for lifecycle events
 	EnableFSSearchTools     bool                    `mapstructure:"enable_fs_search_tools" json:"enable_fs_search_tools" yaml:"enable_fs_search_tools"`          // EnableFSSearchTools enables glob_tool and grep_tool and updates prompt/tool guidance accordingly
 	ConversationSummaryMode ConversationSummaryMode `mapstructure:"conversation_summary_mode" json:"conversation_summary_mode" yaml:"conversation_summary_mode"` // ConversationSummaryMode controls whether persisted conversation summaries come from the LLM or first user message
-	DisableSubagent         bool                    `mapstructure:"disable_subagent" json:"disable_subagent" yaml:"disable_subagent"`                            // DisableSubagent disables the subagent tool and removes subagent-related system prompt context
 	RecipeName              string                  `mapstructure:"recipe_name" json:"recipe_name" yaml:"recipe_name"`                                           // RecipeName is the active recipe/fragment name for extension context metadata
 	CompactRatio            float64                 `mapstructure:"compact_ratio" json:"compact_ratio" yaml:"compact_ratio"`                                     // CompactRatio is the context utilization threshold for automatic compaction (>0.0-1.0)
 }

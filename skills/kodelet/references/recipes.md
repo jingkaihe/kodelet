@@ -1,4 +1,4 @@
-# Recipes and subagent workflows
+# Recipes
 
 ## Agent context files
 
@@ -34,8 +34,6 @@ Recipe capabilities:
 - Bash substitution: `{{bash "git" "branch" "--show-current"}}`.
 - Frontmatter arguments with descriptions/defaults.
 - `allowed_tools` and `allowed_commands` restrictions.
-- `workflow: true` to expose a recipe to the subagent tool.
-
 Example:
 
 ```markdown
@@ -61,52 +59,6 @@ Current branch: {{bash "git" "branch" "--show-current"}}
 Project: {{.project}}
 
 Please analyze {{.focus_area}}.
-```
-
-## Subagent workflows
-
-Recipes with `workflow: true` can be invoked by the subagent tool for delegated tasks such as PR creation or issue resolution.
-
-Built-in workflow examples:
-
-- `github/pr` — create pull requests with AI-generated descriptions.
-- `init` — bootstrap `AGENTS.md`.
-- `commit` — generate commit messages.
-
-Workflow recipe example:
-
-```markdown
----
-name: My Workflow
-description: A workflow that can be invoked by the subagent
-workflow: true
-arguments:
-  target:
-    description: Target branch
-    default: "main"
----
-
-Instructions for the workflow...
-```
-
-Disable workflow discovery or subagent use:
-
-```bash
-kodelet run --no-workflows "query"
-kodelet acp --no-workflows
-
-kodelet run --disable-subagent "query"
-kodelet acp --disable-subagent
-```
-
-Config/env equivalents:
-
-```yaml
-disable_subagent: true
-```
-
-```bash
-export KODELET_DISABLE_SUBAGENT=true
 ```
 
 ## Recipe plugins
@@ -136,4 +88,3 @@ my-plugin-repo/
 ```
 
 Plugin recipes are prefixed with `org/repo/` to avoid collisions.
-

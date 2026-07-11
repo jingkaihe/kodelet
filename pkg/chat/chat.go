@@ -3,7 +3,6 @@ package chat
 
 import (
 	"context"
-	stdErrors "errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,7 +23,6 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
-	"github.com/spf13/viper"
 )
 
 // ChatRequest is the payload for a streamed chat turn.
@@ -179,17 +177,6 @@ func RunDefaultChat(ctx context.Context, req ChatRequest, sink ChatEventSink, de
 		return "", errors.New("message cannot be empty")
 	}
 
-	var mcpManager *tools.MCPManager
-	mcpManager, err = tools.CreateMCPManagerFromViper(ctx)
-	if err != nil && !stdErrors.Is(err, tools.ErrMCPDisabled) {
-		return "", errors.Wrap(err, "failed to initialize MCP manager")
-	}
-	if mcpManager != nil {
-		defer func() {
-			_ = mcpManager.Close(ctx)
-		}()
-	}
-
 	sessionID := strings.TrimSpace(req.ConversationID)
 	if sessionID == "" {
 		sessionID = convtypes.GenerateID()
@@ -256,7 +243,7 @@ func RunDefaultChat(ctx context.Context, req ChatRequest, sink ChatEventSink, de
 		llmConfig.RecipeName = slashExpansion.Command
 	}
 
-	appState, err := BuildState(ctx, llmConfig, sessionID, resolvedCWD, mcpManager, extensionRuntime)
+	appState, err := BuildState(ctx, llmConfig, sessionID, resolvedCWD, extensionRuntime)
 	if err != nil {
 		return sessionID, err
 	}
@@ -674,7 +661,6 @@ func BuildState(
 	llmConfig llmtypes.Config,
 	sessionID string,
 	workingDir string,
-	mcpManager *tools.MCPManager,
 	extensionRuntime *extensions.Runtime,
 ) (*tools.BasicState, error) {
 	stateOpts := []tools.BasicStateOption{
@@ -685,14 +671,6 @@ func BuildState(
 	}
 	if extensionRuntime != nil {
 		stateOpts = append(stateOpts, tools.WithExtensionTools(extensionRuntime.Tools()))
-	}
-
-	if !viper.GetBool("no_workflows") && !llmConfig.DisableSubagent {
-		stateOpts = append(stateOpts, tools.WithSubAgentTool())
-	}
-
-	if mcpManager != nil {
-		stateOpts = append(stateOpts, tools.WithMCPTools(mcpManager))
 	}
 
 	return tools.NewBasicState(ctx, stateOpts...), nil

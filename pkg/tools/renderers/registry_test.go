@@ -27,7 +27,6 @@ func TestRendererRegistry_ExactMatches(t *testing.T) {
 		{"Thinking", "thinking", true, false},
 		{"Batch", "batch", true, false},
 		{"View Image", "view_image", true, false},
-		{"Subagent", "subagent", true, false},
 		{"Web Fetch", "web_fetch", true, false},
 
 		{"Unknown Tool", "unknown_tool", true, false}, // Should fallback to default
@@ -48,46 +47,6 @@ func TestRendererRegistry_ExactMatches(t *testing.T) {
 			} else {
 				assert.Empty(t, output, "Expected no render output for %s", tt.toolName)
 			}
-		})
-	}
-}
-
-func TestRendererRegistry_PatternMatches(t *testing.T) {
-	registry := NewRendererRegistry()
-
-	tests := []struct {
-		name     string
-		toolName string
-		expected string
-	}{
-		{"MCP Definition", "mcp_definition", "MCP Tool: mcp_definition"},
-		{"MCP References", "mcp_references", "MCP Tool: mcp_references"},
-		{"MCP Hover", "mcp_hover", "MCP Tool: mcp_hover"},
-		{"MCP Rename", "mcp_rename_symbol", "MCP Tool: mcp_rename_symbol"},
-		{"MCP Edit", "mcp_edit_file", "MCP Tool: mcp_edit_file"},
-		{"MCP Diagnostics", "mcp_diagnostics", "MCP Tool: mcp_diagnostics"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := tools.StructuredToolResult{
-				ToolName:  tt.toolName,
-				Success:   true,
-				Timestamp: time.Now(),
-				Metadata: &tools.MCPToolMetadata{
-					MCPToolName: tt.toolName,
-					ServerName:  "test-server",
-					Parameters:  map[string]any{"test": "value"},
-					Content: []tools.MCPContent{
-						{Type: "text", Text: "MCP response"},
-					},
-					ContentText: "MCP response",
-				},
-			}
-
-			output := registry.Render(result)
-
-			assert.Contains(t, output, tt.expected, "Expected output to contain %q for %s", tt.expected, tt.toolName)
 		})
 	}
 }

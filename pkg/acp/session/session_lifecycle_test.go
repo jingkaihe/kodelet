@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
-	"github.com/jingkaihe/kodelet/pkg/tools"
 	conversationtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -214,13 +213,6 @@ func (f *fakeConversationStore) isClosed() bool {
 	return f.closed
 }
 
-func newEmptyMCPManager(t *testing.T) *tools.MCPManager {
-	t.Helper()
-	mcpManager, err := tools.NewMCPManager(tools.MCPConfig{Servers: map[string]tools.MCPServerConfig{}})
-	require.NoError(t, err)
-	return mcpManager
-}
-
 func TestSessionCancelAndIsCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	session := &Session{cancelFunc: cancel}
@@ -234,16 +226,8 @@ func TestSessionCancelAndIsCancelled(t *testing.T) {
 }
 
 func TestSessionCloseCancelsAndClosesResources(t *testing.T) {
-	t.Run("without MCP manager", func(t *testing.T) {
+	t.Run("without extensions", func(t *testing.T) {
 		session := &Session{}
-
-		require.NoError(t, session.Close(context.Background()))
-
-		assert.True(t, session.IsCancelled())
-	})
-
-	t.Run("with MCP manager", func(t *testing.T) {
-		session := &Session{MCPManager: newEmptyMCPManager(t)}
 
 		require.NoError(t, session.Close(context.Background()))
 
@@ -405,16 +389,15 @@ func TestManagerCancel(t *testing.T) {
 	})
 }
 
-func TestManagerCloseClosesSessionsStoreAndSharedMCPManager(t *testing.T) {
+func TestManagerCloseClosesSessionsAndStore(t *testing.T) {
 	store := &fakeConversationStore{}
-	session := &Session{ID: "session-1", MCPManager: newEmptyMCPManager(t)}
+	session := &Session{ID: "session-1"}
 	manager := &Manager{
 		sessions: map[acptypes.SessionID]*Session{
 			session.ID: session,
 			"nil":      nil,
 		},
-		store:             store,
-		kodeletMCPManager: newEmptyMCPManager(t),
+		store: store,
 	}
 
 	require.NoError(t, manager.Close(context.Background()))
@@ -423,7 +406,6 @@ func TestManagerCloseClosesSessionsStoreAndSharedMCPManager(t *testing.T) {
 	assert.True(t, store.isClosed())
 	assert.Empty(t, manager.sessions)
 	assert.Nil(t, manager.store)
-	assert.Nil(t, manager.kodeletMCPManager)
 
 	got, err := manager.GetSession(session.ID)
 	assert.Nil(t, got)
@@ -441,19 +423,4 @@ func TestManagerCloseReturnsStoreCloseError(t *testing.T) {
 
 	assert.ErrorIs(t, err, expectedErr)
 	assert.Nil(t, manager.store)
-}
-
-func TestBuildSessionMCPStateOptsFallbacks(t *testing.T) {
-	t.Run("nil session MCP manager returns nil and skips setup", func(t *testing.T) {
-		opts := (&Manager{}).buildSessionMCPStateOpts(context.Background(), "session-1", t.TempDir(), nil)
-
-		assert.Nil(t, opts)
-	})
-
-	t.Run("MCP manager returns direct MCP tools", func(t *testing.T) {
-		opts := (&Manager{}).buildSessionMCPStateOpts(context.Background(), "session-1", t.TempDir(), newEmptyMCPManager(t))
-
-		require.Len(t, opts, 1)
-		assert.NotNil(t, opts[0])
-	})
 }

@@ -130,11 +130,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.runID != m.activeRunID {
 			return m, waitForMsg(m.runCh)
 		}
+		if m.runCancelling {
+			return m, waitForMsg(m.runCh)
+		}
 		cmd := m.openUIPrompt(msg.prompt)
 		return m, tea.Batch(waitForMsg(m.runCh), cmd)
 
 	case uiNotificationMsg:
 		if msg.runID != m.activeRunID {
+			return m, waitForMsg(m.runCh)
+		}
+		if m.runCancelling {
 			return m, waitForMsg(m.runCh)
 		}
 		cmd := m.addUINotification(msg.notification)
@@ -251,6 +257,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if key == "ctrl+d" {
 					return m, nil
 				}
+				if m.runCancelling {
+					m.quitAfterRun = true
+					m.status = "exiting"
+					m.refreshViewport(true)
+					return m, nil
+				}
 				m.cancelActiveRun()
 				return m, nil
 			}
@@ -275,7 +287,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refreshViewport(false)
 				return m, nil
 			}
-			if m.running {
+			if m.running && !m.runCancelling {
 				m.cancelActiveRun()
 			}
 			return m, nil
@@ -347,6 +359,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if m.running {
+				if m.runCancelling {
+					return m, nil
+				}
 				m.submitSteering()
 				return m, nil
 			}
@@ -399,6 +414,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.runID != m.activeRunID {
 			return m, waitForMsg(m.runCh)
 		}
+		if m.runCancelling {
+			return m, waitForMsg(m.runCh)
+		}
 		if cmd, handled := m.handleUIChatEvent(msg.event); handled {
 			return m, tea.Batch(waitForMsg(m.runCh), cmd)
 		}
@@ -413,6 +431,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.runID != m.activeRunID {
 			return m, waitForMsg(m.runCh)
 		}
+		wasCancelling := m.runCancelling
 		if msg.conversationID != "" {
 			m.conversationID = msg.conversationID
 		}
@@ -421,17 +440,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.finishActiveBlocks()
 		m.running = false
+		m.runCancelling = false
 		m.cancelRun = nil
 		m.activeRunID = 0
-		if msg.err != nil {
+		if msg.err != nil && !wasCancelling {
 			m.err = msg.err
 			m.status = "error"
 			idx := m.ensureAssistantEntry()
 			appendTextBlock(&m.entries[idx], fmt.Sprintf("Error: %v", msg.err))
+		} else if wasCancelling {
+			m.status = "cancelled"
 		} else {
 			m.status = "ready"
 		}
 		m.refreshViewport(m.autoFollow)
+		if m.quitAfterRun {
+			m.quitAfterRun = false
+			m.cancel()
+			return m, tea.Quit
+		}
 		return m, waitForMsg(m.runCh)
 
 	case transcriptRefreshMsg:
@@ -748,7 +775,7 @@ func (m *model) resize() {
 
 func (m *model) submit() tea.Cmd {
 	message := strings.TrimSpace(m.textarea.Value())
-	if message == "" {
+	if message == "" || m.running {
 		return nil
 	}
 	m.profilePickerOpen = false
@@ -987,14 +1014,17 @@ func (m *model) stopRun() {
 }
 
 func (m *model) cancelActiveRun() {
+	if m.runCancelling {
+		return
+	}
 	m.stopRun()
 	if m.activeUIPrompt != nil {
 		m.resolveUIPrompt(extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
 	}
 	m.finishActiveBlocks()
-	m.status = "cancelled"
-	m.running = false
-	m.activeRunID = 0
+	m.status = "cancelling"
+	m.runCancelling = true
+	m.running = true
 	m.refreshViewport(true)
 }
 
