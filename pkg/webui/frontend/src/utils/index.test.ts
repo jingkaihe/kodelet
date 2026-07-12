@@ -462,6 +462,18 @@ describe('deepClone', () => {
     expect(cloned).not.toBe(obj);
     expect(cloned.b).not.toBe(obj.b);
   });
+
+  it('does not clone inherited properties', () => {
+    const prototype = { inherited: { value: 1 } };
+    const obj = Object.assign(Object.create(prototype), {
+      own: { value: 2 },
+    }) as { own: { value: number }; inherited?: { value: number } };
+
+    const cloned = deepClone(obj);
+
+    expect(cloned).toEqual({ own: { value: 2 } });
+    expect(cloned).not.toHaveProperty('inherited');
+  });
 });
 
 describe('cn', () => {
