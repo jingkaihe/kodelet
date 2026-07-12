@@ -468,3 +468,26 @@ func TestNewThreadWithAliases(t *testing.T) {
 		})
 	}
 }
+
+func TestNewThreadDoesNotRemapSnapshotModels(t *testing.T) {
+	snapshot := &llmtypes.ConversationConfigSnapshot{
+		Version:         llmtypes.ConversationConfigSnapshotVersion,
+		Provider:        "anthropic",
+		Model:           "gpt-5.6",
+		WeakModel:       "persisted-weak",
+		ReasoningEffort: "medium",
+	}
+	config, err := snapshot.Apply(llmtypes.Config{
+		Aliases: map[string]string{
+			"gpt-5.6":        "remapped-main",
+			"persisted-weak": "remapped-weak",
+		},
+	})
+	require.NoError(t, err)
+
+	thread, err := NewThread(config)
+	require.NoError(t, err)
+	require.NotNil(t, thread)
+	assert.Equal(t, "gpt-5.6", thread.GetConfig().Model, "built-in aliases must not remap snapshot models")
+	assert.Equal(t, "persisted-weak", thread.GetConfig().WeakModel, "live aliases must not remap snapshot weak models")
+}

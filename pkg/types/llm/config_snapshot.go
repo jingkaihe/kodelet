@@ -157,6 +157,11 @@ func (s *ConversationConfigSnapshot) Apply(config Config) (Config, error) {
 	config.Provider = strings.ToLower(strings.TrimSpace(s.Provider))
 	config.Model = strings.TrimSpace(s.Model)
 	config.WeakModel = strings.TrimSpace(s.WeakModel)
+	// Snapshot model names are already the effective identifiers used by the
+	// original thread. Discard live aliases and prevent NewThread from applying
+	// user-configured or built-in aliases to them again.
+	config.Aliases = nil
+	config.ModelAliasesResolved = true
 	config.MaxTokens = s.MaxTokens
 	config.WeakModelMaxTokens = s.WeakModelMaxTokens
 	config.ThinkingBudgetTokens = s.ThinkingBudgetTokens

@@ -91,6 +91,10 @@ func TestConversationConfigSnapshotApplyPreservesLivePolicy(t *testing.T) {
 		ReasoningEffort:         "low",
 		AllowedReasoningEfforts: []string{"low"},
 		AllowedTools:            []string{"file_read"},
+		Aliases: map[string]string{
+			"gpt-snapshot": "remapped-main",
+			"gpt-weak":     "remapped-weak",
+		},
 		OpenAI: &OpenAIConfig{
 			BaseURL:      "https://live.example",
 			APIKeyEnvVar: "LIVE_ENV",
@@ -103,6 +107,8 @@ func TestConversationConfigSnapshotApplyPreservesLivePolicy(t *testing.T) {
 	assert.Equal(t, "gpt-snapshot", applied.Model)
 	assert.Equal(t, "high", applied.ReasoningEffort)
 	assert.Empty(t, applied.AllowedReasoningEfforts)
+	assert.Empty(t, applied.Aliases)
+	assert.True(t, applied.ModelAliasesResolved)
 	assert.Equal(t, []string{"file_read"}, applied.AllowedTools)
 	require.NotNil(t, applied.OpenAI)
 	assert.Nil(t, applied.Anthropic)

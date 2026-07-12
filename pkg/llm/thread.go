@@ -53,8 +53,10 @@ func resolveModelAlias(modelName string, aliases map[string]string) string {
 
 // NewThread creates a new thread based on the model specified in the config
 func NewThread(config llmtypes.Config) (llmtypes.Thread, error) {
-	config.Model = resolveModelAlias(config.Model, config.Aliases)
-	config.WeakModel = resolveModelAlias(config.WeakModel, config.Aliases)
+	if !config.ModelAliasesResolved {
+		config.Model = resolveModelAlias(config.Model, config.Aliases)
+		config.WeakModel = resolveModelAlias(config.WeakModel, config.Aliases)
+	}
 	if err := llmtypes.NormalizeReasoningConfig(&config); err != nil {
 		return nil, err
 	}
