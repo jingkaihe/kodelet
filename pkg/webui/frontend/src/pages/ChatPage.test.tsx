@@ -472,7 +472,7 @@ describe("ChatPage", () => {
 		fireEvent.click(screen.getByTestId("workspace-tools-toggle"));
 
 		expect(screen.getByTestId("workspace-tools-dock")).toBeInTheDocument();
-		expect(screen.getByTestId("terminal-panel")).toBeInTheDocument();
+		expect(await screen.findByTestId("terminal-panel")).toBeInTheDocument();
 		expect(screen.getByTestId("composer-textarea")).toBeInTheDocument();
 		expect(screen.queryByTestId("terminal-modal-backdrop")).not.toBeInTheDocument();
 	});

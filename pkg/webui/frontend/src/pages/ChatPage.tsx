@@ -1,4 +1,6 @@
 import React, {
+	lazy,
+	Suspense,
 	startTransition,
 	useCallback,
 	useEffect,
@@ -20,8 +22,6 @@ import ChatTranscript from "../components/chat/ChatTranscript";
 import NewChatContextDialog from "../components/chat/NewChatContextDialog";
 import PendingSteerList from "../components/chat/PendingSteerList";
 import UIInputDialog from "../components/chat/UIInputDialog";
-import GitDiffModal from "../components/workspace/GitDiffModal";
-import TerminalModal from "../components/workspace/TerminalModal";
 import {
 	applyChatStreamEvent,
 	conversationToChatMessages,
@@ -49,6 +49,13 @@ import {
 	showToast,
 	truncateMiddle,
 } from "../utils";
+
+const GitDiffModal = lazy(
+	() => import("../components/workspace/GitDiffModal"),
+);
+const TerminalModal = lazy(
+	() => import("../components/workspace/TerminalModal"),
+);
 
 const normalizeConversation = (conversation: Conversation): Conversation => ({
 	...conversation,
@@ -2460,20 +2467,31 @@ const ChatPage: React.FC = () => {
 							</div>
 
 							<div className="workspace-tools-content">
-								<TerminalModal
-									cwdLabel={workspacePanelCWDLabel}
-									open={workspacePanelView === "terminal"}
-									onClose={handleToggleWorkspacePanel}
-								/>
-								<GitDiffModal
-									error={gitDiffError}
-									gitDiff={gitDiff}
-									loading={gitDiffLoading}
-									open={workspacePanelView === "diff"}
-									onRefresh={() => {
-										void fetchGitDiff();
-									}}
-								/>
+								<Suspense
+									fallback={
+										<div className="workspace-modal-placeholder" role="status">
+											Loading workspace tool…
+										</div>
+									}
+								>
+									{workspacePanelView === "terminal" ? (
+										<TerminalModal
+											cwdLabel={workspacePanelCWDLabel}
+											open
+											onClose={handleToggleWorkspacePanel}
+										/>
+									) : (
+										<GitDiffModal
+											error={gitDiffError}
+											gitDiff={gitDiff}
+											loading={gitDiffLoading}
+											open
+											onRefresh={() => {
+												void fetchGitDiff();
+											}}
+										/>
+									)}
+								</Suspense>
 							</div>
 						</div>
 					) : null}
