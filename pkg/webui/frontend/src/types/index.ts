@@ -134,6 +134,7 @@ export interface ChatRequest {
 	content?: ContentBlock[];
 	conversationId?: string;
 	profile?: string;
+	reasoningEffort?: string;
 	cwd?: string;
 }
 

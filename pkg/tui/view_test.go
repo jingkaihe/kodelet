@@ -44,7 +44,7 @@ func TestViewAndFormattingHelpers(t *testing.T) {
 	assert.Equal(t, m.contentWidth(), m.viewport.Width)
 	assert.Equal(t, "default", displayProfile(""))
 	assert.Equal(t, "default", displayProfile(" DEFAULT "))
-	assert.Equal(t, "", profileForRequest("default"))
+	assert.Equal(t, "default", profileForRequest("default"))
 	assert.Equal(t, "work", profileForRequest(" work "))
 	assert.Equal(t, []string{"default", "work", "prod"}, normalizeProfileOptions([]string{"default", "work", "work"}, "prod"))
 	assert.Equal(t, 1, profileOptionIndex([]string{"default", "work"}, " WORK "))
@@ -193,6 +193,35 @@ func TestProfilePickerRendersAboveComposerWithThemeColors(t *testing.T) {
 	assert.NotContains(t, view, "→")
 	assert.NotContains(t, view, "ACTIVE")
 	assert.NotContains(t, view, "repo")
+}
+
+func TestReasoningPickerRendersBesideProfile(t *testing.T) {
+	withANSI256ColorProfile(t)
+
+	m := newModel(context.Background(), Config{
+		Profile:                "work",
+		ProfileOptions:         []string{"default", "work"},
+		ReasoningEffort:        "medium",
+		ReasoningEffortOptions: []string{"low", "medium", "high"},
+		Theme:                  "tokyo-night",
+	})
+	t.Cleanup(m.cancel)
+	m.width = 100
+	m.height = 24
+	m.resize()
+	m.openReasoningPicker()
+	m.reasoningPickerIndex = 2
+	m.resize()
+	m.refreshViewport(true)
+
+	view := xansi.Strip(m.View())
+	lines := strings.Split(view, "\n")
+	pickerLine := lines[m.viewport.Height+2]
+	composerTop := lines[m.viewport.Height+m.reasoningPickerHeight()]
+
+	assert.Contains(t, pickerLine, "high")
+	assert.Contains(t, composerTop, "work")
+	assert.Contains(t, composerTop, "effort:medium")
 }
 
 func TestSlashCommandSuggestionsRenderAboveComposerWithThemeColors(t *testing.T) {

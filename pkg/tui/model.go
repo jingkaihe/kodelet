@@ -31,6 +31,11 @@ func Run(ctx context.Context, config Config) error {
 	if !ok {
 		return ValidateThemeName(config.Theme)
 	}
+	if strings.TrimSpace(config.ConversationID) == "" {
+		if _, _, _, err := resolveReasoningSettings(displayProfile(config.Profile), config.ReasoningEffort); err != nil {
+			return errors.Wrap(err, "invalid reasoning effort configuration")
+		}
+	}
 	applyTheme(theme)
 
 	initialModel := newModel(ctx, config)
@@ -110,6 +115,7 @@ func newModel(ctx context.Context, config Config) model {
 	}
 	messageHistoryStore, _ := messagehistory.NewStore()
 	conversationID := strings.TrimSpace(config.ConversationID)
+	conversationWasResumed := conversationID != ""
 	initialHistoryPending := conversationID != ""
 	var messageHistoryScopeCWD string
 	if !initialHistoryPending {
@@ -125,29 +131,49 @@ func newModel(ctx context.Context, config Config) model {
 	if profileIndex < 0 {
 		profileIndex = 0
 	}
+	reasoningEffort := strings.TrimSpace(config.ReasoningEffort)
+	reasoningEffortOptions := append([]string(nil), config.ReasoningEffortOptions...)
+	if resolvedEffort, resolvedOptions, _, err := resolveReasoningSettings(profile, reasoningEffort); err == nil {
+		reasoningEffort = resolvedEffort
+		if len(reasoningEffortOptions) == 0 {
+			reasoningEffortOptions = resolvedOptions
+		}
+	}
+	reasoningEffort = normalizeReasoningEffort(reasoningEffort)
+	reasoningEffortOptions = normalizeReasoningEffortOptions(reasoningEffortOptions, reasoningEffort)
+	reasoningEffortIndex := reasoningEffortOptionIndex(reasoningEffortOptions, reasoningEffort)
+	if reasoningEffortIndex < 0 {
+		reasoningEffortIndex = 0
+	}
 
 	return model{
-		ctx:                    mctx,
-		cancel:                 cancel,
-		runner:                 runner,
-		conversationID:         conversationID,
-		profile:                profile,
-		profileOptions:         profileOptions,
-		profileIndex:           profileIndex,
-		cwd:                    cwd,
-		requestedCWD:           requestedCWD,
-		messageHistoryStore:    messageHistoryStore,
-		messageHistoryScopeCWD: messageHistoryScopeCWD,
-		initialHistoryPending:  initialHistoryPending,
-		theme:                  theme,
-		slashCommandIndex:      -1,
-		viewport:               vp,
-		textarea:               ta,
-		spinner:                sp,
-		autoFollow:             true,
-		runCh:                  runCh,
-		status:                 "ready",
-		terminalTitleEpoch:     time.Now(),
+		ctx:                     mctx,
+		cancel:                  cancel,
+		runner:                  runner,
+		conversationID:          conversationID,
+		conversationWasResumed:  conversationWasResumed,
+		profile:                 profile,
+		profileOptions:          profileOptions,
+		profileIndex:            profileIndex,
+		reasoningEffort:         reasoningEffort,
+		reasoningEffortOptions:  reasoningEffortOptions,
+		reasoningEffortIndex:    reasoningEffortIndex,
+		reasoningEffortExplicit: config.ReasoningEffortExplicit,
+		reasoningPickerIndex:    reasoningEffortIndex,
+		cwd:                     cwd,
+		requestedCWD:            requestedCWD,
+		messageHistoryStore:     messageHistoryStore,
+		messageHistoryScopeCWD:  messageHistoryScopeCWD,
+		initialHistoryPending:   initialHistoryPending,
+		theme:                   theme,
+		slashCommandIndex:       -1,
+		viewport:                vp,
+		textarea:                ta,
+		spinner:                 sp,
+		autoFollow:              true,
+		runCh:                   runCh,
+		status:                  "ready",
+		terminalTitleEpoch:      time.Now(),
 	}
 }
 

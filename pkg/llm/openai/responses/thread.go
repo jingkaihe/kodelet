@@ -110,7 +110,13 @@ type Thread struct {
 // NewThread creates a new Responses API thread with the given configuration.
 func NewThread(config llmtypes.Config) (*Thread, error) {
 	log := logger.G(context.Background())
+	if err := llmtypes.NormalizeReasoningConfig(&config); err != nil {
+		return nil, err
+	}
 
+	if config.Provider == "" {
+		config.Provider = "openai"
+	}
 	if config.Model == "" {
 		config.Model = "gpt-5.5"
 	}
@@ -1386,6 +1392,18 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 	}
 	if profile := strings.TrimSpace(t.Config.Profile); profile != "" {
 		metadata["profile"] = profile
+	}
+	snapshotConfig := t.Config
+	if strings.TrimSpace(snapshotConfig.Provider) == "" {
+		snapshotConfig.Provider = "openai"
+	}
+	if snapshotConfig.OpenAI == nil {
+		snapshotConfig.OpenAI = &llmtypes.OpenAIConfig{}
+	}
+	snapshotConfig.OpenAI.APIMode = llmtypes.OpenAIAPIModeResponses
+	metadata, err = conversations.AddConfigSnapshot(metadata, snapshotConfig)
+	if err != nil {
+		return errors.Wrap(err, "failed to persist conversation config snapshot")
 	}
 
 	record := convtypes.ConversationRecord{

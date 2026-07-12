@@ -154,6 +154,7 @@ func userMessagesFromEntries(entries []chatEntry) []string {
 
 func (m *model) openHistorySearch() {
 	m.profilePickerOpen = false
+	m.reasoningPickerOpen = false
 	m.dismissSlashCommandSuggestions()
 	m.shortcutsOpen = false
 	m.historySearch = &historySearchState{originalDraft: m.textarea.Value()}

@@ -254,6 +254,122 @@ func TestLoadResumeConversationConfig_ProfiledConversationPreservesExplicitFlagO
 	assert.Equal(t, llmtypes.ToolModePatch, config.ToolMode)
 }
 
+func TestLoadResumeConversationConfig_SnapshotLocksReasoningAndSurvivesMissingProfile(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	t.Setenv("KODELET_CONVERSATION_STORE_TYPE", "sqlite")
+	basePath := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", basePath)
+	defer func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	}()
+
+	viper.Reset()
+	viper.Set("provider", "anthropic")
+	viper.Set("model", "current-model")
+	viper.Set("reasoning_effort", "low")
+	viper.Set("allowed_reasoning_efforts", []string{"low"})
+	viper.Set("allowed_tools", []string{"file_read"})
+
+	ctx := context.Background()
+	dbPath := filepath.Join(basePath, "storage.db")
+	sqlDB, err := db.Open(ctx, dbPath)
+	require.NoError(t, err)
+	require.NoError(t, db.NewMigrationRunner(sqlDB).Run(ctx, migrations.All()))
+	require.NoError(t, sqlDB.Close())
+
+	store, err := conversations.NewConversationStore(ctx, &conversations.Config{
+		StoreType: "sqlite",
+		BasePath:  basePath,
+	})
+	require.NoError(t, err)
+	defer func() { _ = store.Close() }()
+
+	metadata, err := conversations.AddConfigSnapshot(map[string]any{"profile": "removed"}, llmtypes.Config{
+		Profile:         "removed",
+		Provider:        "openai",
+		Model:           "persisted-model",
+		WeakModel:       "persisted-weak",
+		MaxTokens:       16000,
+		ReasoningEffort: "max",
+		OpenAI:          &llmtypes.OpenAIConfig{APIMode: llmtypes.OpenAIAPIModeResponses},
+	})
+	require.NoError(t, err)
+	conversationID := convtypes.GenerateID()
+	require.NoError(t, store.Save(ctx, convtypes.ConversationRecord{
+		ID:          conversationID,
+		Provider:    "openai",
+		RawMessages: []byte(`[]`),
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+		Metadata:    metadata,
+	}))
+
+	cmd := &cobra.Command{Use: "run"}
+	cmd.Flags().String("reasoning-effort", "medium", "Reasoning effort")
+	require.NoError(t, cmd.Flags().Set("reasoning-effort", "max"))
+
+	config, _, err := loadResumeConversationConfig(ctx, cmd, conversationID, "")
+	require.NoError(t, err)
+	assert.Equal(t, "openai", config.Provider)
+	assert.Equal(t, "persisted-model", config.Model)
+	assert.Equal(t, "max", config.ReasoningEffort)
+	assert.Equal(t, []string{"file_read"}, config.AllowedTools)
+	assert.Equal(t, "removed", config.Profile)
+
+	require.NoError(t, cmd.Flags().Set("reasoning-effort", "low"))
+	_, _, err = loadResumeConversationConfig(ctx, cmd, conversationID, "")
+	require.ErrorContains(t, err, "locked to \"max\"")
+}
+
+func TestLoadResumeConversationConfig_LegacyConversationRejectsReasoningOverride(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	t.Setenv("KODELET_CONVERSATION_STORE_TYPE", "sqlite")
+	basePath := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", basePath)
+	defer func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	}()
+
+	viper.Reset()
+	viper.Set("provider", "openai")
+	viper.Set("model", "gpt-4.1")
+	viper.Set("reasoning_effort", "medium")
+
+	ctx := context.Background()
+	dbPath := filepath.Join(basePath, "storage.db")
+	sqlDB, err := db.Open(ctx, dbPath)
+	require.NoError(t, err)
+	require.NoError(t, db.NewMigrationRunner(sqlDB).Run(ctx, migrations.All()))
+	require.NoError(t, sqlDB.Close())
+
+	store, err := conversations.NewConversationStore(ctx, &conversations.Config{StoreType: "sqlite", BasePath: basePath})
+	require.NoError(t, err)
+	defer func() { _ = store.Close() }()
+
+	conversationID := convtypes.GenerateID()
+	require.NoError(t, store.Save(ctx, convtypes.ConversationRecord{
+		ID:          conversationID,
+		Provider:    "openai",
+		RawMessages: []byte(`[]`),
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+		Metadata:    map[string]any{"model": "gpt-4.1"},
+	}))
+
+	cmd := &cobra.Command{Use: "run"}
+	cmd.Flags().String("reasoning-effort", "medium", "Reasoning effort")
+	require.NoError(t, cmd.Flags().Set("reasoning-effort", "high"))
+
+	_, _, err = loadResumeConversationConfig(ctx, cmd, conversationID, "")
+	require.ErrorContains(t, err, "legacy conversation without config_snapshot")
+}
+
 func TestLoadResumeConversationConfig_ProfileCanEnableFSSearchToolsFromRootDefault(t *testing.T) {
 	originalSettings := viper.AllSettings()
 	defer func() {

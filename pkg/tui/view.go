@@ -50,7 +50,8 @@ func (m model) View() string {
 	transcript := m.viewport.View()
 	historySearch := m.renderHistorySearch()
 	slashSuggestions := m.renderSlashCommandSuggestions()
-	picker := m.renderProfilePicker()
+	profilePicker := m.renderProfilePicker()
+	reasoningPicker := m.renderReasoningPicker()
 	input := m.renderInputBox()
 	parts := []string{transcript}
 	if strings.TrimSpace(historySearch) != "" {
@@ -59,8 +60,11 @@ func (m model) View() string {
 	if strings.TrimSpace(slashSuggestions) != "" {
 		parts = append(parts, slashSuggestions)
 	}
-	if strings.TrimSpace(picker) != "" {
-		parts = append(parts, picker)
+	if strings.TrimSpace(profilePicker) != "" {
+		parts = append(parts, profilePicker)
+	}
+	if strings.TrimSpace(reasoningPicker) != "" {
+		parts = append(parts, reasoningPicker)
 	}
 	parts = append(parts, input)
 	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
@@ -151,6 +155,7 @@ func (m model) renderShortcutsDialog() string {
 		{shortcut: "Ctrl+G", description: "Edit draft in $EDITOR"},
 		{shortcut: "Ctrl+R", description: "Search previous sent messages"},
 		{shortcut: "Ctrl+T", description: "Change profile before starting"},
+		{shortcut: "Ctrl+Y", description: "Change reasoning effort before starting"},
 		{shortcut: "Ctrl+O", description: "Toggle thought/tool details"},
 		{shortcut: "PgUp/PgDown", description: "Scroll transcript"},
 		{shortcut: "Esc", description: "Cancel or dismiss"},
@@ -533,7 +538,7 @@ func (m model) historySearchHeight() int {
 }
 
 func (m model) maxSlashCommandSuggestions() int {
-	availableHeight := m.height - inputHeight - 2 - m.profilePickerHeight() - m.historySearchHeight() - 1
+	availableHeight := m.height - inputHeight - 2 - m.profilePickerHeight() - m.reasoningPickerHeight() - m.historySearchHeight() - 1
 	if availableHeight < 1 {
 		return 1
 	}
@@ -682,6 +687,12 @@ func (m model) renderInputTopLabel(visibleLabel string) string {
 		{text: " - ", style: inputLabelStyle},
 		{text: m.profile, style: m.profileStyle(m.profileIndex)},
 	}
+	if strings.HasSuffix(fullLabel, " - "+m.reasoningEffortLabel()) {
+		parts = append(parts,
+			styledLabelPart{text: " - ", style: inputLabelStyle},
+			styledLabelPart{text: m.reasoningEffortLabel(), style: m.reasoningEffortStyle(m.reasoningEffortIndex)},
+		)
+	}
 
 	var b strings.Builder
 	for _, part := range parts {
@@ -739,6 +750,100 @@ func (m model) profilePickerHeight() int {
 	return len(m.profileOptions)
 }
 
+func (m model) renderReasoningPicker() string {
+	if !m.reasoningPickerOpen || len(m.reasoningEffortOptions) == 0 {
+		return ""
+	}
+
+	_, effortEnd, ok := m.reasoningEffortLabelBoundsInBlock()
+	if !ok {
+		effortEnd = m.inputOuterWidth() - 1
+	}
+	optionWidth := m.reasoningPickerWidth()
+	start := effortEnd - optionWidth
+	if start < 0 {
+		start = 0
+	}
+	if start+optionWidth > m.inputOuterWidth() {
+		start = max(0, m.inputOuterWidth()-optionWidth)
+	}
+
+	lines := make([]string, 0, len(m.reasoningEffortOptions))
+	for index, effort := range m.reasoningEffortOptions {
+		label := fitVisible(effort, optionWidth)
+		style := m.reasoningEffortStyle(index)
+		if index == m.reasoningPickerIndex {
+			style = style.Background(themeColor(m.theme.ProfileSelected))
+		}
+		line := strings.Repeat(" ", start) + renderPersistentStyle(style, padVisible(label, optionWidth))
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m model) reasoningPickerWidth() int {
+	width := lipgloss.Width(m.reasoningEffortLabel())
+	for _, effort := range m.reasoningEffortOptions {
+		width = max(width, lipgloss.Width(effort))
+	}
+	return max(1, min(width, m.inputOuterWidth()))
+}
+
+func (m model) reasoningPickerHeight() int {
+	if !m.reasoningPickerOpen || len(m.reasoningEffortOptions) == 0 {
+		return 0
+	}
+	return len(m.reasoningEffortOptions)
+}
+
+func (m model) reasoningPickerBoundsInBlock() (startX, endX int, ok bool) {
+	if !m.reasoningPickerOpen || len(m.reasoningEffortOptions) == 0 {
+		return 0, 0, false
+	}
+	_, effortEnd, effortOK := m.reasoningEffortLabelBoundsInBlock()
+	if !effortOK {
+		effortEnd = m.inputOuterWidth() - 1
+	}
+	width := m.reasoningPickerWidth()
+	start := effortEnd - width
+	if start < 0 {
+		start = 0
+	}
+	if start+width > m.inputOuterWidth() {
+		start = max(0, m.inputOuterWidth()-width)
+	}
+	return start, start + width, width > 0
+}
+
+func (m model) reasoningPickerOptionAt(screenX, screenY int) (int, bool) {
+	if !m.reasoningPickerOpen {
+		return 0, false
+	}
+	blockX := screenX - tuiLeftMargin
+	startX, endX, ok := m.reasoningPickerBoundsInBlock()
+	if !ok || blockX < startX || blockX >= endX {
+		return 0, false
+	}
+	optionIndex := screenY - m.viewport.Height
+	if optionIndex < 0 || optionIndex >= len(m.reasoningEffortOptions) {
+		return 0, false
+	}
+	return optionIndex, true
+}
+
+func (m model) reasoningComposerRegionContains(screenX, screenY int) bool {
+	if !m.canChangeReasoningEffort() {
+		return false
+	}
+	blockX := screenX - tuiLeftMargin
+	inputTopY := m.viewport.Height + m.profilePickerHeight() + m.reasoningPickerHeight()
+	if screenY != inputTopY {
+		return false
+	}
+	startX, endX, ok := m.reasoningEffortLabelBoundsInBlock()
+	return ok && blockX >= startX && blockX < endX
+}
+
 func (m model) profilePickerBoundsInBlock() (startX, endX int, ok bool) {
 	if !m.profilePickerOpen || len(m.profileOptions) == 0 {
 		return 0, 0, false
@@ -779,7 +884,7 @@ func (m model) profileComposerRegionContains(screenX, screenY int) bool {
 		return false
 	}
 	blockX := screenX - tuiLeftMargin
-	inputTopY := m.viewport.Height + m.profilePickerHeight()
+	inputTopY := m.viewport.Height + m.profilePickerHeight() + m.reasoningPickerHeight()
 	if screenY != inputTopY {
 		return false
 	}
@@ -925,8 +1030,12 @@ func renderComposerBottomLeftLabel(label string) string {
 }
 
 func (m model) inputTopRightLabel() string {
-	parts := []string{formatUsage(m.usage), m.profile}
-	return strings.Join(parts, " - ")
+	base := strings.Join([]string{formatUsage(m.usage), m.profile}, " - ")
+	full := base + " - " + m.reasoningEffortLabel()
+	if lipgloss.Width(full) <= max(1, m.inputOuterWidth()-6) {
+		return full
+	}
+	return base
 }
 
 func (m model) profileLabelBoundsInBlock() (startX, endX int, ok bool) {
@@ -942,8 +1051,8 @@ func (m model) profileLabelBoundsInBlock() (startX, endX int, ok bool) {
 
 	plainLabel := m.inputTopRightLabel()
 	visibleLabel := fitVisible(plainLabel, fillWidth-2)
-	profile := m.profile
-	if !strings.HasSuffix(visibleLabel, profile) {
+	prefix := formatUsage(m.usage) + " - "
+	if visibleLabel != plainLabel {
 		return 0, 0, false
 	}
 
@@ -952,9 +1061,42 @@ func (m model) profileLabelBoundsInBlock() (startX, endX int, ok bool) {
 	if labelStart < 0 {
 		labelStart = 0
 	}
-	profileOffset := lipgloss.Width(strings.TrimSuffix(visibleLabel, profile))
+	profileOffset := lipgloss.Width(prefix)
 	startX = 1 + labelStart + 1 + profileOffset
-	endX = startX + lipgloss.Width(profile)
+	endX = startX + lipgloss.Width(m.profile)
+	return startX, endX, startX < endX
+}
+
+func (m model) reasoningEffortLabel() string {
+	return "effort:" + normalizeReasoningEffort(m.reasoningEffort)
+}
+
+func (m model) reasoningEffortLabelBoundsInBlock() (startX, endX int, ok bool) {
+	outerWidth := m.inputOuterWidth()
+	if outerWidth <= 2 {
+		return 0, 0, false
+	}
+	fillWidth := outerWidth - 2
+	if fillWidth <= 2 {
+		return 0, 0, false
+	}
+
+	plainLabel := m.inputTopRightLabel()
+	if !strings.HasSuffix(plainLabel, " - "+m.reasoningEffortLabel()) {
+		return 0, 0, false
+	}
+	visibleLabel := fitVisible(plainLabel, fillWidth-2)
+	if visibleLabel != plainLabel {
+		return 0, 0, false
+	}
+	labelWidth := lipgloss.Width(visibleLabel) + 2
+	labelStart := fillWidth - labelWidth - 1
+	if labelStart < 0 {
+		labelStart = 0
+	}
+	prefix := formatUsage(m.usage) + " - " + m.profile + " - "
+	startX = 1 + labelStart + 1 + lipgloss.Width(prefix)
+	endX = startX + lipgloss.Width(m.reasoningEffortLabel())
 	return startX, endX, startX < endX
 }
 
@@ -967,6 +1109,10 @@ func (m model) profileStyle(index int) lipgloss.Style {
 		index = 0
 	}
 	return lipgloss.NewStyle().Foreground(themeColor(colors[index%len(colors)]))
+}
+
+func (m model) reasoningEffortStyle(index int) lipgloss.Style {
+	return m.profileStyle(index + 1)
 }
 
 func (m model) inputBottomLeftLabel() string {

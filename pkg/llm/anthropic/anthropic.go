@@ -79,7 +79,13 @@ func resolveClientBaseURL(config llmtypes.Config, useCopilot bool) string {
 
 // NewAnthropicThread creates a new thread with Anthropic's Claude API
 func NewAnthropicThread(config llmtypes.Config) (*Thread, error) {
+	if err := llmtypes.NormalizeReasoningConfig(&config); err != nil {
+		return nil, err
+	}
 	// Apply defaults if not provided
+	if config.Provider == "" {
+		config.Provider = "anthropic"
+	}
 	if config.Model == "" {
 		config.Model = anthropic.ModelClaudeOpus4_7
 	}

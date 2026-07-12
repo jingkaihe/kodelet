@@ -28,11 +28,12 @@ import (
 
 // ChatRequest is the payload for a streamed chat turn.
 type ChatRequest struct {
-	Message        string             `json:"message"`
-	Content        []ChatContentBlock `json:"content,omitempty"`
-	ConversationID string             `json:"conversationId,omitempty"`
-	Profile        string             `json:"profile,omitempty"`
-	CWD            string             `json:"cwd,omitempty"`
+	Message         string             `json:"message"`
+	Content         []ChatContentBlock `json:"content,omitempty"`
+	ConversationID  string             `json:"conversationId,omitempty"`
+	Profile         string             `json:"profile,omitempty"`
+	ReasoningEffort string             `json:"reasoningEffort,omitempty"`
+	CWD             string             `json:"cwd,omitempty"`
 }
 
 // ChatContentBlock represents a typed chat content block.
@@ -258,7 +259,7 @@ func runDefaultChat(
 		sessionID = convtypes.GenerateID()
 	}
 
-	llmConfig, resolvedCWD, err := ResolveConfig(ctx, sessionID, strings.TrimSpace(req.Profile), strings.TrimSpace(req.CWD), defaultCWD)
+	llmConfig, resolvedCWD, err := ResolveConfigWithReasoning(ctx, sessionID, strings.TrimSpace(req.Profile), strings.TrimSpace(req.ReasoningEffort), strings.TrimSpace(req.CWD), defaultCWD)
 	if err != nil {
 		return sessionID, errors.Wrap(err, "failed to load configuration")
 	}
@@ -457,6 +458,9 @@ func acquireChatThread(
 
 func chatThreadConfigFingerprint(config llmtypes.Config) (string, error) {
 	config.Extensions = nil
+	config.Profiles = nil
+	config.Aliases = nil
+	config.AllowedReasoningEfforts = nil
 	data, err := json.Marshal(config)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to fingerprint chat LLM configuration")
@@ -508,6 +512,10 @@ func closeDefaultChatSession(session *defaultChatSession) error {
 }
 
 func ResolveConfig(ctx context.Context, conversationID, requestedProfile, requestedCWD, defaultCWDInput string) (llmtypes.Config, string, error) {
+	return ResolveConfigWithReasoning(ctx, conversationID, requestedProfile, "", requestedCWD, defaultCWDInput)
+}
+
+func ResolveConfigWithReasoning(ctx context.Context, conversationID, requestedProfile, requestedReasoningEffort, requestedCWD, defaultCWDInput string) (llmtypes.Config, string, error) {
 	defaultCWD, err := ResolveConfiguredDefaultCWD(defaultCWDInput)
 	if err != nil {
 		return llmtypes.Config{}, "", err
@@ -519,7 +527,7 @@ func ResolveConfig(ctx context.Context, conversationID, requestedProfile, reques
 	}
 
 	if strings.TrimSpace(conversationID) == "" {
-		config, err := ResolveConfigForNewConversation(requestedProfile)
+		config, err := ResolveConfigForNewConversation(requestedProfile, requestedReasoningEffort)
 		if err != nil {
 			return llmtypes.Config{}, "", err
 		}
@@ -546,7 +554,7 @@ func ResolveConfig(ctx context.Context, conversationID, requestedProfile, reques
 
 	record, err := service.GetConversation(ctx, conversationID)
 	if err != nil {
-		config, newErr := ResolveConfigForNewConversation(requestedProfile)
+		config, newErr := ResolveConfigForNewConversation(requestedProfile, requestedReasoningEffort)
 		if newErr != nil {
 			return llmtypes.Config{}, "", newErr
 		}
@@ -554,7 +562,7 @@ func ResolveConfig(ctx context.Context, conversationID, requestedProfile, reques
 		return config, resolution.CWD, nil
 	}
 
-	config, err := ResolveConfigForExistingConversation(record)
+	config, err := ResolveConfigForExistingConversation(record, requestedReasoningEffort)
 	if err != nil {
 		return llmtypes.Config{}, "", err
 	}
@@ -599,26 +607,78 @@ func (s ServiceStoreAdapter) Load(ctx context.Context, id string) (convtypes.Con
 	}, nil
 }
 
-func ResolveConfigForNewConversation(requestedProfile string) (llmtypes.Config, error) {
+func ResolveConfigForNewConversation(requestedProfile string, requestedReasoningEfforts ...string) (llmtypes.Config, error) {
+	requestedReasoningEffort := ""
+	if len(requestedReasoningEfforts) > 0 {
+		requestedReasoningEffort = requestedReasoningEfforts[0]
+	}
 	requestedProfile = strings.TrimSpace(requestedProfile)
+	var (
+		config llmtypes.Config
+		err    error
+	)
 	if strings.EqualFold(requestedProfile, "default") {
-		config, err := llm.GetConfigFromViperWithoutProfile()
-		if err != nil {
-			return llmtypes.Config{}, err
-		}
+		config, err = llm.GetConfigFromViperWithoutProfile()
 		config.Profile = "default"
-		return config, nil
+	} else {
+		profileName := NormalizeRequestedProfile(requestedProfile)
+		if profileName != "" {
+			config, err = llm.GetConfigFromViperWithProfile(profileName)
+		} else {
+			config, err = llm.GetConfigFromViper()
+		}
 	}
-
-	profileName := NormalizeRequestedProfile(requestedProfile)
-	if profileName != "" {
-		return llm.GetConfigFromViperWithProfile(profileName)
+	if err != nil {
+		return llmtypes.Config{}, err
 	}
-
-	return llm.GetConfigFromViper()
+	if strings.TrimSpace(requestedReasoningEffort) != "" {
+		config.ReasoningEffort = requestedReasoningEffort
+	}
+	if err := llmtypes.NormalizeReasoningConfig(&config); err != nil {
+		return llmtypes.Config{}, err
+	}
+	return config, nil
 }
 
-func ResolveConfigForExistingConversation(record *conversationservice.GetConversationResponse) (llmtypes.Config, error) {
+func ResolveConfigForExistingConversation(record *conversationservice.GetConversationResponse, requestedReasoningEfforts ...string) (llmtypes.Config, error) {
+	requestedReasoningEffort := ""
+	if len(requestedReasoningEfforts) > 0 {
+		requestedReasoningEffort = requestedReasoningEfforts[0]
+	}
+	if record != nil {
+		snapshot, hasSnapshot, err := conversationservice.ConfigSnapshotFromMetadata(record.Metadata)
+		if err != nil {
+			return llmtypes.Config{}, errors.Wrap(err, "failed to load conversation config snapshot")
+		}
+		if hasSnapshot {
+			if strings.TrimSpace(requestedReasoningEffort) != "" {
+				requested, err := llmtypes.NormalizeReasoningEffort(requestedReasoningEffort)
+				if err != nil {
+					return llmtypes.Config{}, err
+				}
+				stored, err := llmtypes.NormalizeReasoningEffort(snapshot.ReasoningEffort)
+				if err != nil {
+					return llmtypes.Config{}, err
+				}
+				if requested != stored {
+					return llmtypes.Config{}, errors.Errorf("conversation reasoning_effort is locked to %q; cannot resume with %q", stored, requested)
+				}
+			}
+
+			profileName := NormalizeRequestedProfile(snapshot.Profile)
+			var config llmtypes.Config
+			if profileName != "" && llm.HasConfiguredProfile(profileName) {
+				config, err = llm.GetConfigFromViperWithProfile(profileName)
+			} else {
+				config, err = llm.GetConfigFromViperWithoutProfile()
+			}
+			if err != nil {
+				return llmtypes.Config{}, err
+			}
+			return snapshot.Apply(config)
+		}
+	}
+
 	profileName := ""
 	hasStoredProfile := false
 	if record != nil && record.Metadata != nil {
@@ -679,6 +739,9 @@ func ResolveConfigForExistingConversation(record *conversationservice.GetConvers
 		config.Profile = "default"
 	} else {
 		config.Profile = profileName
+	}
+	if strings.TrimSpace(requestedReasoningEffort) != "" {
+		return llmtypes.Config{}, errors.New("cannot override reasoning_effort when resuming a legacy conversation without config_snapshot metadata")
 	}
 	return config, nil
 }

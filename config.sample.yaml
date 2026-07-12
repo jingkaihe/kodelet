@@ -62,6 +62,7 @@ profiles:
     max_tokens: 64000
     weak_model_max_tokens: 8192
     reasoning_effort: "max"
+    allowed_reasoning_efforts: ["medium", "high", "xhigh", "max"]
 
   fast:
     model: "haiku-45"
@@ -76,6 +77,7 @@ profiles:
     weak_model: "gpt-5.6-luna"
     max_tokens: 16000
     reasoning_effort: "xhigh"
+    allowed_reasoning_efforts: ["low", "medium", "high", "xhigh"]
     tool_mode: "patch"
     enable_fs_search_tools: false
     openai:
@@ -105,6 +107,7 @@ profiles:
     weak_model: "gpt-5.6-luna"
     max_tokens: 16000
     reasoning_effort: "xhigh"
+    allowed_reasoning_efforts: ["low", "medium", "high", "xhigh"]
     tool_mode: "patch"
     enable_fs_search_tools: false
     openai:
@@ -115,6 +118,11 @@ profiles:
 # OpenAI: none, minimal, low, medium, high, xhigh, max
 # Anthropic adaptive thinking: none, low, medium, high, xhigh, max
 reasoning_effort: "medium"
+
+# Optional policy for reasoning efforts that users may select when creating a
+# conversation. Profiles may override this list. Existing conversations keep
+# their persisted effort even if this policy later changes.
+# allowed_reasoning_efforts: ["low", "medium", "high"]
 
 # Anthropic-specific settings
 anthropic:
@@ -384,7 +392,8 @@ tracing:
 # - KODELET_THINKING_BUDGET_TOKENS: Overrides the thinking_budget_tokens setting
 # - KODELET_WEAK_MODEL: Overrides the weak_model setting
 # - KODELET_WEAK_MODEL_MAX_TOKENS: Overrides the weak_model_max_tokens setting
-# - KODELET_REASONING_EFFORT: Overrides the reasoning_effort setting (OpenAI)
+# - KODELET_REASONING_EFFORT: Overrides the reasoning_effort setting
+# - KODELET_ALLOWED_REASONING_EFFORTS: Overrides allowed_reasoning_efforts
 # - KODELET_WEAK_REASONING_EFFORT: Overrides the weak_reasoning_effort setting (OpenAI)
 # - KODELET_RETRY_ATTEMPTS: Overrides the retry.attempts setting
 # - KODELET_RETRY_INITIAL_DELAY: Overrides the retry.initial_delay setting (milliseconds)

@@ -2048,6 +2048,13 @@ func TestProcessMessageExchangeSavesConversationPerTurn(t *testing.T) {
 	assert.Equal(t, "responses", store.savedRecords[0].Metadata["api_mode"])
 	assert.Equal(t, "openai", store.savedRecords[0].Metadata["platform"])
 	assert.Equal(t, "flex", store.savedRecords[0].Metadata["service_tier"])
+	snapshot, ok, err := conversations.ConfigSnapshotFromMetadata(store.savedRecords[0].Metadata)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, "openai", snapshot.Provider)
+	assert.Equal(t, "gpt-4.1", snapshot.Model)
+	require.NotNil(t, snapshot.OpenAI)
+	assert.Equal(t, llmtypes.OpenAIAPIModeResponses, snapshot.OpenAI.APIMode)
 }
 
 func TestResponsesSaveConversationPreservesProviderNeutralMetadata(t *testing.T) {

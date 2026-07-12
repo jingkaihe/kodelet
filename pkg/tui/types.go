@@ -18,12 +18,15 @@ import (
 
 // Config configures the native chat TUI.
 type Config struct {
-	ConversationID string
-	Profile        string
-	ProfileOptions []string
-	CWD            string
-	Theme          string
-	Runner         chat.ChatRunner
+	ConversationID          string
+	Profile                 string
+	ProfileOptions          []string
+	ReasoningEffort         string
+	ReasoningEffortOptions  []string
+	ReasoningEffortExplicit bool
+	CWD                     string
+	Theme                   string
+	Runner                  chat.ChatRunner
 }
 
 type entryKind int
@@ -108,20 +111,27 @@ type model struct {
 	cancel context.CancelFunc
 	runner chat.ChatRunner
 
-	conversationID string
-	profile        string
-	profileOptions []string
-	profileIndex   int
+	conversationID          string
+	conversationWasResumed  bool
+	profile                 string
+	profileOptions          []string
+	profileIndex            int
+	reasoningEffort         string
+	reasoningEffortOptions  []string
+	reasoningEffortIndex    int
+	reasoningEffortExplicit bool
 
-	profilePickerOpen   bool
-	profilePickerIndex  int
-	cwd                 string
-	requestedCWD        string
-	theme               tuiTheme
-	slashCommands       []slashcommands.Command
-	slashCommandIndex   int
-	slashCommandErr     error
-	slashDismissedDraft string
+	profilePickerOpen    bool
+	profilePickerIndex   int
+	reasoningPickerOpen  bool
+	reasoningPickerIndex int
+	cwd                  string
+	requestedCWD         string
+	theme                tuiTheme
+	slashCommands        []slashcommands.Command
+	slashCommandIndex    int
+	slashCommandErr      error
+	slashDismissedDraft  string
 
 	messageHistoryStore    *messagehistory.Store
 	messageHistoryScopeCWD string
@@ -185,12 +195,13 @@ type chatDoneMsg struct {
 }
 
 type initialHistoryMsg struct {
-	loaded  bool
-	entries []chatEntry
-	usage   llmtypes.Usage
-	cwd     string
-	profile string
-	err     error
+	loaded          bool
+	entries         []chatEntry
+	usage           llmtypes.Usage
+	cwd             string
+	profile         string
+	reasoningEffort string
+	err             error
 }
 
 type transcriptRefreshMsg struct{}

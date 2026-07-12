@@ -50,6 +50,16 @@ Example Zed-style configuration:
 
 ACP supports session persistence, image input, embedded file context, streaming responses, and tool-call visualization in compatible clients.
 
+### Terminal chat TUI
+
+```bash
+kodelet chat
+kodelet chat --profile openai --reasoning-effort high
+kodelet chat --resume CONVERSATION_ID
+```
+
+Before sending the first message, use `Ctrl+T` to change profile and `Ctrl+Y` or the clickable `effort:` label to choose an allowed reasoning effort. Persisted conversations restore and lock their configuration snapshot on resume.
+
 ### Web UI
 
 ```bash

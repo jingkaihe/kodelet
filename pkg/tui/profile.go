@@ -121,6 +121,7 @@ func (m *model) openProfilePicker() {
 	if !m.canChangeProfile() {
 		return
 	}
+	m.reasoningPickerOpen = false
 	m.profilePickerOpen = true
 	m.profilePickerIndex = m.profileIndex
 }
@@ -145,5 +146,6 @@ func (m *model) selectProfilePickerOption(index int) {
 		return
 	}
 	m.setProfile(m.profileOptions[index])
+	m.refreshReasoningSettingsForProfile()
 	m.profilePickerOpen = false
 }

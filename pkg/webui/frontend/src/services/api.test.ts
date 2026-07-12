@@ -635,7 +635,7 @@ describe("ApiService", () => {
 			);
 		});
 
-		it("sends profile when provided", async () => {
+		it("sends profile and reasoning effort when provided", async () => {
 			const encoder = new TextEncoder();
 			const stream = new ReadableStream({
 				start(controller) {
@@ -657,6 +657,7 @@ describe("ApiService", () => {
 				{
 					message: "hello",
 					profile: "anthropic",
+					reasoningEffort: "high",
 				},
 				{
 					onEvent: vi.fn(),
@@ -666,7 +667,11 @@ describe("ApiService", () => {
 			expect(mockFetch).toHaveBeenCalledWith(
 				"/api/chat",
 				expect.objectContaining({
-					body: JSON.stringify({ message: "hello", profile: "anthropic" }),
+					body: JSON.stringify({
+						message: "hello",
+						profile: "anthropic",
+						reasoningEffort: "high",
+					}),
 				}),
 			);
 		});

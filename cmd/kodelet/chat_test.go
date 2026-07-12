@@ -12,6 +12,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/tui"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -117,6 +118,39 @@ func TestValidateChatResumeConversationAcceptsExistingConversation(t *testing.T)
 	require.NoError(t, store.Save(ctx, record))
 
 	require.NoError(t, validateChatResumeConversation(ctx, " conversation-123 "))
+}
+
+func TestValidateChatResumeConversationRejectsReasoningConflict(t *testing.T) {
+	basePath := setupChatConversationStore(t)
+	ctx := context.Background()
+	store, err := conversations.NewConversationStore(ctx, &conversations.Config{
+		StoreType: "sqlite",
+		BasePath:  basePath,
+	})
+	require.NoError(t, err)
+	defer func() { _ = store.Close() }()
+
+	metadata, err := conversations.AddConfigSnapshot(nil, llmtypes.Config{
+		Provider:        "openai",
+		Model:           "gpt-5",
+		ReasoningEffort: "high",
+	})
+	require.NoError(t, err)
+	record := convtypes.NewConversationRecord("conversation-reasoning")
+	record.Provider = "openai"
+	record.Metadata = metadata
+	require.NoError(t, store.Save(ctx, record))
+
+	require.NoError(t, validateChatResumeConversation(ctx, record.ID, "high"))
+	err = validateChatResumeConversation(ctx, record.ID, "low")
+	require.ErrorContains(t, err, "locked to \"high\"")
+
+	legacy := convtypes.NewConversationRecord("legacy-conversation-reasoning")
+	legacy.Provider = "openai"
+	legacy.Metadata = map[string]any{"model": "gpt-4.1"}
+	require.NoError(t, store.Save(ctx, legacy))
+	err = validateChatResumeConversation(ctx, legacy.ID, "high")
+	require.ErrorContains(t, err, "legacy conversation without config_snapshot")
 }
 
 func TestValidateChatResumeConversationAllowsEmptyConversation(t *testing.T) {

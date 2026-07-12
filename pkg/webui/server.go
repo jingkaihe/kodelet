@@ -1050,6 +1050,13 @@ func resolveConversationProfile(metadata map[string]any) string {
 	if metadata == nil {
 		return ""
 	}
+	if snapshot, hasSnapshot, err := conversations.ConfigSnapshotFromMetadata(metadata); err == nil && hasSnapshot {
+		profile := strings.TrimSpace(snapshot.Profile)
+		if profile == "" || strings.EqualFold(profile, "default") {
+			return ""
+		}
+		return profile
+	}
 	rawProfile, ok := metadata["profile"]
 	if !ok {
 		return ""

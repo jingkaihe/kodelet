@@ -290,6 +290,35 @@ func normalizeConversationProfile(profile string) string {
 	return profile
 }
 
+func loadRunConfigForStoredProfile(profileName string, cmd *cobra.Command) (llmtypes.Config, error) {
+	if profileName == "" || !llm.HasConfiguredProfile(profileName) {
+		return llm.GetConfigFromViperWithoutProfileAndCmdIgnoringFlags(cmd, "reasoning-effort")
+	}
+	return llm.GetConfigFromViperWithProfileAndCmdIgnoringFlags(profileName, cmd, "reasoning-effort")
+}
+
+func validateRunReasoningEffortSnapshot(cmd *cobra.Command, snapshot *llmtypes.ConversationConfigSnapshot) error {
+	if cmd == nil || snapshot == nil || !cmd.Flags().Changed("reasoning-effort") {
+		return nil
+	}
+	requested, err := cmd.Flags().GetString("reasoning-effort")
+	if err != nil {
+		return errors.Wrap(err, "failed to read reasoning-effort override")
+	}
+	requested, err = llmtypes.NormalizeReasoningEffort(requested)
+	if err != nil {
+		return err
+	}
+	stored, err := llmtypes.NormalizeReasoningEffort(snapshot.ReasoningEffort)
+	if err != nil {
+		return err
+	}
+	if requested != stored {
+		return errors.Errorf("conversation reasoning_effort is locked to %q; cannot resume with %q", stored, requested)
+	}
+	return nil
+}
+
 func loadResumeConversationConfig(ctx context.Context, cmd *cobra.Command, conversationID string, requestedCWD string) (llmtypes.Config, string, error) {
 	defaultCWD, err := conversations.CurrentWorkingDirectory()
 	if err != nil {
@@ -328,9 +357,20 @@ func loadResumeConversationConfig(ctx context.Context, cmd *cobra.Command, conve
 		return llmtypes.Config{}, "", errors.Wrap(err, "failed to load conversation")
 	}
 
+	snapshot, hasSnapshot, err := conversations.ConfigSnapshotFromMetadata(record.Metadata)
+	if err != nil {
+		return llmtypes.Config{}, "", errors.Wrap(err, "failed to load conversation config snapshot")
+	}
+	if !hasSnapshot && cmd != nil && cmd.Flags().Changed("reasoning-effort") {
+		return llmtypes.Config{}, "", errors.New("cannot override reasoning_effort when resuming a legacy conversation without config_snapshot metadata")
+	}
+
 	profileName := ""
 	hasStoredProfile := false
-	if record.Metadata != nil {
+	if hasSnapshot {
+		profileName = normalizeConversationProfile(snapshot.Profile)
+		hasStoredProfile = true
+	} else if record.Metadata != nil {
 		if rawProfile, ok := record.Metadata["profile"].(string); ok {
 			hasStoredProfile = true
 			profileName = normalizeConversationProfile(rawProfile)
@@ -338,44 +378,53 @@ func loadResumeConversationConfig(ctx context.Context, cmd *cobra.Command, conve
 	}
 
 	var config llmtypes.Config
-	if hasStoredProfile {
-		config, err = llm.GetConfigFromViperWithProfileAndCmd(profileName, cmd)
+	if hasSnapshot {
+		if err := validateRunReasoningEffortSnapshot(cmd, snapshot); err != nil {
+			return llmtypes.Config{}, "", err
+		}
+		config, err = loadRunConfigForStoredProfile(profileName, cmd)
+		if err == nil {
+			config, err = snapshot.Apply(config)
+		}
 	} else {
-		config, err = llm.GetConfigFromViperWithCmd(cmd)
+		if hasStoredProfile {
+			config, err = llm.GetConfigFromViperWithProfileAndCmd(profileName, cmd)
+		} else {
+			config, err = llm.GetConfigFromViperWithCmd(cmd)
+		}
+		if err == nil {
+			if strings.TrimSpace(record.Provider) != "" {
+				config.Provider = strings.TrimSpace(record.Provider)
+			}
+			if record.Metadata != nil {
+				if model, ok := record.Metadata["model"].(string); ok && strings.TrimSpace(model) != "" {
+					config.Model = strings.TrimSpace(model)
+				}
+
+				if strings.EqualFold(config.Provider, "openai") {
+					if config.OpenAI == nil {
+						config.OpenAI = &llmtypes.OpenAIConfig{}
+					}
+					if platform, ok := record.Metadata["platform"].(string); ok && strings.TrimSpace(platform) != "" {
+						config.OpenAI.Platform = strings.TrimSpace(platform)
+					}
+					if apiMode, ok := record.Metadata["api_mode"].(string); ok && strings.TrimSpace(apiMode) != "" {
+						config.OpenAI.APIMode = llmtypes.OpenAIAPIMode(strings.TrimSpace(apiMode))
+					}
+					if serviceTier, ok := record.Metadata["service_tier"].(string); ok && strings.TrimSpace(serviceTier) != "" {
+						config.OpenAI.ServiceTier = llmtypes.OpenAIServiceTier(strings.TrimSpace(serviceTier))
+					}
+				}
+			}
+			if hasStoredProfile && profileName == "" {
+				config.Profile = "default"
+			} else {
+				config.Profile = profileName
+			}
+		}
 	}
 	if err != nil {
 		return llmtypes.Config{}, "", err
-	}
-
-	if strings.TrimSpace(record.Provider) != "" {
-		config.Provider = strings.TrimSpace(record.Provider)
-	}
-
-	if record.Metadata != nil {
-		if model, ok := record.Metadata["model"].(string); ok && strings.TrimSpace(model) != "" {
-			config.Model = strings.TrimSpace(model)
-		}
-
-		if strings.EqualFold(config.Provider, "openai") {
-			if config.OpenAI == nil {
-				config.OpenAI = &llmtypes.OpenAIConfig{}
-			}
-			if platform, ok := record.Metadata["platform"].(string); ok && strings.TrimSpace(platform) != "" {
-				config.OpenAI.Platform = strings.TrimSpace(platform)
-			}
-			if apiMode, ok := record.Metadata["api_mode"].(string); ok && strings.TrimSpace(apiMode) != "" {
-				config.OpenAI.APIMode = llmtypes.OpenAIAPIMode(strings.TrimSpace(apiMode))
-			}
-			if serviceTier, ok := record.Metadata["service_tier"].(string); ok && strings.TrimSpace(serviceTier) != "" {
-				config.OpenAI.ServiceTier = llmtypes.OpenAIServiceTier(strings.TrimSpace(serviceTier))
-			}
-		}
-	}
-
-	if hasStoredProfile && profileName == "" {
-		config.Profile = "default"
-	} else {
-		config.Profile = profileName
 	}
 	config.WorkingDirectory = resolution.CWD
 	return config, resolution.CWD, nil

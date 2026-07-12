@@ -56,7 +56,16 @@ func TestStore_BasicOperations(t *testing.T) {
 		Summary:   "Test conversation",
 		CreatedAt: now,
 		UpdatedAt: now,
-		Metadata:  map[string]any{"test": "value"},
+		Metadata: map[string]any{
+			"test": "value",
+			"config_snapshot": map[string]any{
+				"version":          float64(llmtypes.ConversationConfigSnapshotVersion),
+				"profile":          "work",
+				"provider":         "openai",
+				"model":            "gpt-5",
+				"reasoning_effort": "high",
+			},
+		},
 		ToolResults: map[string]tools.StructuredToolResult{
 			"test_call": {
 				ToolName:  "test_tool",
@@ -77,6 +86,7 @@ func TestStore_BasicOperations(t *testing.T) {
 	assert.Equal(t, record.Provider, loaded.Provider)
 	assert.Equal(t, record.Summary, loaded.Summary)
 	assert.Equal(t, record.Usage.InputTokens, loaded.Usage.InputTokens)
+	assert.Equal(t, record.Metadata, loaded.Metadata)
 	assert.Equal(t, record.Usage.OutputTokens, loaded.Usage.OutputTokens)
 	assert.Equal(t, string(record.RawMessages), string(loaded.RawMessages))
 
@@ -92,6 +102,7 @@ func TestStore_BasicOperations(t *testing.T) {
 	assert.Len(t, summaries, 1)
 	assert.Equal(t, "test-conversation-1", summaries[0].ID)
 	assert.Equal(t, "Hello world", summaries[0].FirstMessage)
+	assert.Equal(t, record.Metadata, summaries[0].Metadata)
 
 	// Test Delete
 	err = store.Delete(ctx, "test-conversation-1")

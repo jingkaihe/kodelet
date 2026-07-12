@@ -140,18 +140,12 @@ kodelet chat -f                      # short form
 kodelet chat --resume CONVERSATION_ID  # resume a specific conversation
 kodelet chat -r CONVERSATION_ID        # short form
 kodelet chat --theme tokyo-night        # switch from the default catppuccin-mocha theme
+kodelet chat --profile openai --reasoning-effort high
 kodelet chat --no-tools              # chat without tools
 kodelet chat --no-extensions         # disable extensions
 ```
 
-The TUI uses `catppuccin-mocha` by default. Use `--theme` to switch to another
-available theme such as `tokyo-night`. It streams assistant responses, collapses
-thinking and tool details by default, and lets you toggle details with `ctrl+o`
-or by clicking the detail header. It uses the same chat runner as the Web UI, so
-conversations are persisted and can be resumed by ID. While the assistant is
-working, the composer stays editable; press `Enter` to queue the typed text as
-steering for the active conversation. Kodelet applies queued steering on the next
-model API call.
+The TUI uses `catppuccin-mocha` by default. Use `--theme` to switch to another available theme such as `tokyo-night`. It streams assistant responses, collapses thinking and tool details by default, and lets you toggle details with `ctrl+o` or by clicking the detail header. It uses the same chat runner as the Web UI, so conversations are persisted and can be resumed by ID. While the assistant is working, the composer stays editable; press `Enter` to queue the typed text as steering for the active conversation. Kodelet applies queued steering on the next model API call. Before the first message, use `Ctrl+T` to select a profile and `Ctrl+Y` (or click the `effort:` label beside the profile) to select one of the profile's `allowed_reasoning_efforts`. Both controls are locked after the conversation starts, and the selected effort is restored when it is resumed.
 
 ### Interactive Chat Mode (ACP)
 
@@ -681,6 +675,7 @@ weak_model_max_tokens: 8192
 # weak_model: "gpt-4.1-mini"
 # weak_model_max_tokens: 4096
 # reasoning_effort: "medium"
+# allowed_reasoning_efforts: ["low", "medium", "high"]
 # weak_reasoning_effort: "low"
 # Anthropic adaptive-thinking models also use reasoning_effort via output_config.effort.
 
@@ -767,6 +762,7 @@ weak_model_max_tokens: 8192
 # On adaptive Claude models, reasoning_effort controls adaptive thinking.
 # thinking_budget_tokens is only used on older Claude models that still use manual thinking.
 reasoning_effort: "medium"
+allowed_reasoning_efforts: ["low", "medium", "high"]
 
 # Anthropic-compatible platforms can force adaptive-thinking plumbing for the configured
 # non-standard model IDs that Kodelet does not know about yet.
@@ -785,6 +781,7 @@ profiles:
     max_tokens: 64000
     weak_model_max_tokens: 8192
     reasoning_effort: "max"
+    allowed_reasoning_efforts: ["medium", "high", "xhigh", "max"]
 
   openai:
     provider: "openai"
@@ -792,6 +789,7 @@ profiles:
     weak_model: "gpt-4.1-mini"
     max_tokens: 16000
     reasoning_effort: "medium"
+    allowed_reasoning_efforts: ["low", "medium", "high"]
     tool_mode: "patch"
     enable_fs_search_tools: false
     enable_search: true
@@ -805,6 +803,8 @@ aliases:
     opus-48: claude-opus-4-8
     sonnet-46: claude-sonnet-4-6
 ```
+
+`allowed_reasoning_efforts` controls which values may be selected for a new conversation through CLI/chat overrides and the TUI effort picker. When the list is omitted, direct overrides remain unrestricted for compatibility, while the TUI exposes only the configured default. Once a conversation is created, Kodelet stores a versioned `config_snapshot` in its metadata. Resuming the conversation restores the snapshotted provider, model, token/reasoning settings, and provider request mode; a conflicting reasoning effort override is rejected. For legacy conversations without a snapshot, an explicit reasoning-effort override is rejected because the original value cannot be verified. Credentials, endpoints, prompt/context inputs, and live tool/security policy are intentionally not stored in the snapshot.
 
 ### Profile Management Commands
 

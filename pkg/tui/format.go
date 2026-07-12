@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
@@ -20,7 +21,7 @@ func displayProfile(profile string) string {
 
 func profileForRequest(profile string) string {
 	if strings.EqualFold(strings.TrimSpace(profile), "default") {
-		return ""
+		return "default"
 	}
 	return strings.TrimSpace(profile)
 }
@@ -62,11 +63,14 @@ func profileFromMetadata(metadata map[string]any) string {
 	if metadata == nil {
 		return ""
 	}
-	rawProfile, ok := metadata["profile"].(string)
-	if !ok {
-		return ""
+	if snapshot, hasSnapshot, err := conversations.ConfigSnapshotFromMetadata(metadata); err == nil && hasSnapshot {
+		return displayProfile(snapshot.Profile)
 	}
-	return displayProfile(rawProfile)
+	rawProfile, ok := metadata["profile"].(string)
+	if ok {
+		return displayProfile(rawProfile)
+	}
+	return ""
 }
 
 func formatUsage(usage llmtypes.Usage) string {

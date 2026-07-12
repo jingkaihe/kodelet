@@ -107,6 +107,14 @@ func (t *Thread) SaveConversation(ctx context.Context, summarise bool) error {
 		metadata["profile"] = profile
 	}
 	metadata["model"] = t.Config.Model
+	snapshotConfig := t.Config
+	if strings.TrimSpace(snapshotConfig.Provider) == "" {
+		snapshotConfig.Provider = "anthropic"
+	}
+	metadata, err = conversations.AddConfigSnapshot(metadata, snapshotConfig)
+	if err != nil {
+		return errors.Wrap(err, "failed to persist conversation config snapshot")
+	}
 
 	record := convtypes.ConversationRecord{
 		ID:          t.ConversationID,

@@ -364,6 +364,7 @@ func (m *model) openUIPrompt(prompt uiPromptState) tea.Cmd {
 		m.resolveUIPrompt(extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
 	}
 	m.profilePickerOpen = false
+	m.reasoningPickerOpen = false
 	m.dismissSlashCommandSuggestions()
 	if prompt.mode == uiPromptInput {
 		prompt = newInputPromptModel(prompt, m.uiDialogInputWidth())

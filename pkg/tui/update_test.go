@@ -534,6 +534,31 @@ func TestCtrlTProfilePickerSelectsProfileForNewConversation(t *testing.T) {
 	assert.Equal(t, "work", runner.req.Profile)
 }
 
+func TestProfileSelectionRefreshesReasoningEffortOptions(t *testing.T) {
+	withTUIViper(t, map[string]any{
+		"provider":                  "openai",
+		"model":                     "base-model",
+		"reasoning_effort":          "medium",
+		"allowed_reasoning_efforts": []string{"low", "medium"},
+		"profiles": map[string]any{
+			"work": map[string]any{
+				"model":                     "work-model",
+				"reasoning_effort":          "max",
+				"allowed_reasoning_efforts": []string{"high", "max"},
+			},
+		},
+	})
+	m := newModel(context.Background(), Config{Profile: "default", ProfileOptions: []string{"default", "work"}})
+	t.Cleanup(m.cancel)
+
+	m.openProfilePicker()
+	m.selectProfilePickerOption(1)
+
+	assert.Equal(t, "work", m.profile)
+	assert.Equal(t, "max", m.reasoningEffort)
+	assert.Equal(t, []string{"high", "max"}, m.reasoningEffortOptions)
+}
+
 func TestSlashCommandKeyboardCompletion(t *testing.T) {
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)
@@ -741,6 +766,42 @@ func TestClickProfilePickerSelectsProfileForNewConversation(t *testing.T) {
 	assert.Equal(t, "prod", m.profile)
 }
 
+func TestClickReasoningPickerSelectsEffortForNewConversation(t *testing.T) {
+	m := newModel(context.Background(), Config{
+		ReasoningEffort:        "medium",
+		ReasoningEffortOptions: []string{"low", "medium", "high"},
+	})
+	t.Cleanup(m.cancel)
+	m.width = 100
+	m.height = 24
+	m.resize()
+
+	effortStart, _, ok := m.reasoningEffortLabelBoundsInBlock()
+	require.True(t, ok)
+	updated, cmd := m.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+		X:      tuiLeftMargin + effortStart,
+		Y:      m.viewport.Height,
+	})
+	m = updated.(model)
+	require.Nil(t, cmd)
+	assert.True(t, m.reasoningPickerOpen)
+
+	pickerStart, _, ok := m.reasoningPickerBoundsInBlock()
+	require.True(t, ok)
+	updated, cmd = m.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+		X:      tuiLeftMargin + pickerStart,
+		Y:      m.viewport.Height + 2,
+	})
+	m = updated.(model)
+	require.Nil(t, cmd)
+	assert.False(t, m.reasoningPickerOpen)
+	assert.Equal(t, "high", m.reasoningEffort)
+}
+
 func TestProfilePickerLockedForExistingConversation(t *testing.T) {
 	m := newModel(context.Background(), Config{ConversationID: "conversation-123", Profile: "work", ProfileOptions: []string{"default", "work", "prod"}})
 	t.Cleanup(m.cancel)
@@ -875,6 +936,62 @@ func TestSubmitStartsRunAndStreamsRunnerMessages(t *testing.T) {
 		Profile:        "work",
 		CWD:            "/tmp",
 	}, runner.req)
+}
+
+func TestCtrlYReasoningPickerSelectsEffortForNewConversation(t *testing.T) {
+	runner := &recordingRunner{conversationID: "conversation-done"}
+	m := newModel(context.Background(), Config{
+		Profile:                "default",
+		ProfileOptions:         []string{"default", "work"},
+		ReasoningEffort:        "medium",
+		ReasoningEffortOptions: []string{"low", "medium", "high"},
+		Runner:                 runner,
+	})
+	t.Cleanup(m.cancel)
+	m.width = 100
+	m.height = 30
+	m.resize()
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlY})
+	m = updated.(model)
+	require.Nil(t, cmd)
+	assert.True(t, m.reasoningPickerOpen)
+	assert.Equal(t, 1, m.reasoningPickerIndex)
+
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(model)
+	require.Nil(t, cmd)
+	assert.Equal(t, 2, m.reasoningPickerIndex)
+
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	require.Nil(t, cmd)
+	assert.False(t, m.reasoningPickerOpen)
+	assert.Equal(t, "high", m.reasoningEffort)
+
+	m.textarea.SetValue("hello")
+	runCmd := m.submit()
+	require.NotNil(t, runCmd)
+	assert.Nil(t, runCmd())
+	_ = receiveRunMsg(t, m.runCh)
+	_ = receiveRunMsg(t, m.runCh)
+	assert.Equal(t, "high", runner.req.ReasoningEffort)
+}
+
+func TestReasoningPickerLockedForExistingConversation(t *testing.T) {
+	m := newModel(context.Background(), Config{
+		ConversationID:         "conversation-123",
+		ReasoningEffort:        "high",
+		ReasoningEffortOptions: []string{"low", "high"},
+	})
+	t.Cleanup(m.cancel)
+
+	assert.False(t, m.canChangeReasoningEffort())
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlY})
+	m = updated.(model)
+	require.Nil(t, cmd)
+	assert.False(t, m.reasoningPickerOpen)
+	assert.Equal(t, "high", m.reasoningEffort)
 }
 
 func TestSubmitRecordsAndPersistsRawMessageHistory(t *testing.T) {

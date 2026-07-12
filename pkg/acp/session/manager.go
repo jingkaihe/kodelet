@@ -4,6 +4,7 @@ package session
 
 import (
 	"context"
+	"strings"
 	"sync"
 
 	"github.com/hashicorp/go-multierror"
@@ -14,6 +15,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	pkgerrors "github.com/pkg/errors"
 )
@@ -145,7 +147,10 @@ func NewManager(cfg ManagerConfig) *Manager {
 
 func (m *Manager) buildLLMConfig(projectDir string) llmtypes.Config {
 	config, _ := llm.GetConfigFromViper()
+	return m.applyManagerConfig(config, projectDir)
+}
 
+func (m *Manager) applyManagerConfig(config llmtypes.Config, projectDir string) llmtypes.Config {
 	if m.config.Provider != "" {
 		config.Provider = m.config.Provider
 	}
@@ -166,6 +171,36 @@ func (m *Manager) buildLLMConfig(projectDir string) llmtypes.Config {
 	}
 
 	return config
+}
+
+func (m *Manager) buildLLMConfigForRecord(record convtypes.ConversationRecord, projectDir string) (llmtypes.Config, error) {
+	snapshot, hasSnapshot, err := conversations.ConfigSnapshotFromMetadata(record.Metadata)
+	if err != nil {
+		return llmtypes.Config{}, pkgerrors.Wrap(err, "failed to load conversation config snapshot")
+	}
+	if hasSnapshot {
+		profileName := strings.TrimSpace(snapshot.Profile)
+		var config llmtypes.Config
+		if profileName != "" && !strings.EqualFold(profileName, "default") && llm.HasConfiguredProfile(profileName) {
+			config, err = llm.GetConfigFromViperWithProfile(profileName)
+		} else {
+			config, err = llm.GetConfigFromViperWithoutProfile()
+		}
+		if err != nil {
+			return llmtypes.Config{}, err
+		}
+		config = m.applyManagerConfig(config, projectDir)
+		return snapshot.Apply(config)
+	}
+
+	config := m.buildLLMConfig(projectDir)
+	if strings.TrimSpace(record.Provider) != "" {
+		config.Provider = strings.TrimSpace(record.Provider)
+	}
+	if model, ok := record.Metadata["model"].(string); ok && strings.TrimSpace(model) != "" {
+		config.Model = strings.TrimSpace(model)
+	}
+	return config, nil
 }
 
 func (m *Manager) buildExtensionRuntime(ctx context.Context, projectDir string) *extensions.Runtime {
@@ -247,12 +282,15 @@ func (m *Manager) LoadSession(ctx context.Context, req acptypes.LoadSessionReque
 		return nil, pkgerrors.New("conversation store not available")
 	}
 
-	_, err := m.store.Load(ctx, string(req.SessionID))
+	record, err := m.store.Load(ctx, string(req.SessionID))
 	if err != nil {
 		return nil, pkgerrors.Wrap(err, "failed to load conversation")
 	}
 
-	llmConfig := m.buildLLMConfig(req.CWD)
+	llmConfig, err := m.buildLLMConfigForRecord(record, req.CWD)
+	if err != nil {
+		return nil, err
+	}
 	extensionRuntime := m.buildExtensionRuntime(ctx, req.CWD)
 	llmConfig.Extensions = extensionRuntime
 

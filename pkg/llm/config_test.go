@@ -429,8 +429,10 @@ func TestGetConfigFromViperWithProfileAndCmd_ExplicitFlagsOverrideExplicitProfil
 			"context": map[string]any{
 				"patterns": []string{"README.md"},
 			},
-			"allowed_tools": []string{"bash"},
-			"tool_mode":     "full",
+			"allowed_tools":             []string{"bash"},
+			"tool_mode":                 "full",
+			"reasoning_effort":          "max",
+			"allowed_reasoning_efforts": []string{"low", "max"},
 		},
 	})
 
@@ -444,6 +446,9 @@ func TestGetConfigFromViperWithProfileAndCmd_ExplicitFlagsOverrideExplicitProfil
 	cmd.Flags().String("tool-mode", "full", "Tool mode")
 	err = cmd.Flags().Set("tool-mode", "patch")
 	require.NoError(t, err)
+	cmd.Flags().String("reasoning-effort", "medium", "Reasoning effort")
+	err = cmd.Flags().Set("reasoning-effort", "low")
+	require.NoError(t, err)
 
 	config, err := GetConfigFromViperWithProfileAndCmd("premium", cmd)
 	require.NoError(t, err)
@@ -453,6 +458,8 @@ func TestGetConfigFromViperWithProfileAndCmd_ExplicitFlagsOverrideExplicitProfil
 	assert.Equal(t, []string{"CODING.md", "README.md"}, config.Context.Patterns)
 	assert.Equal(t, []string{"grep_tool", "file_read"}, config.AllowedTools)
 	assert.Equal(t, llmtypes.ToolModePatch, config.ToolMode)
+	assert.Equal(t, "low", config.ReasoningEffort)
+	assert.Equal(t, []string{"low", "max"}, config.AllowedReasoningEfforts)
 }
 
 func TestGetConfigFromViperWithProfile_ProfileNotFound(t *testing.T) {

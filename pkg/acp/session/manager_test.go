@@ -3,7 +3,12 @@ package session
 import (
 	"testing"
 
+	"github.com/jingkaihe/kodelet/pkg/conversations"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewManager_WithManagerConfig(t *testing.T) {
@@ -86,4 +91,45 @@ func TestManager_BuildLLMConfig(t *testing.T) {
 		assert.NotNil(t, llmConfig.Skills)
 		assert.False(t, llmConfig.Skills.Enabled)
 	})
+}
+
+func TestManagerBuildLLMConfigForRecordAppliesSnapshot(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	}()
+	viper.Reset()
+	viper.Set("provider", "anthropic")
+	viper.Set("model", "current-model")
+	viper.Set("reasoning_effort", "low")
+	viper.Set("allowed_tools", []string{"file_read"})
+
+	metadata, err := conversations.AddConfigSnapshot(nil, llmtypes.Config{
+		Profile:         "removed-profile",
+		Provider:        "openai",
+		Model:           "persisted-model",
+		MaxTokens:       16000,
+		ReasoningEffort: "high",
+		OpenAI:          &llmtypes.OpenAIConfig{APIMode: llmtypes.OpenAIAPIModeResponses},
+	})
+	require.NoError(t, err)
+
+	manager := &Manager{config: ManagerConfig{Provider: "anthropic", Model: "manager-model", EnableFSSearchTools: true, NoSkills: true}}
+	config, err := manager.buildLLMConfigForRecord(convtypes.ConversationRecord{
+		Provider: "openai",
+		Metadata: metadata,
+	}, "/tmp/project")
+	require.NoError(t, err)
+	assert.Equal(t, "openai", config.Provider)
+	assert.Equal(t, "persisted-model", config.Model)
+	assert.Equal(t, "high", config.ReasoningEffort)
+	assert.Equal(t, 16000, config.MaxTokens)
+	assert.Equal(t, []string{"file_read"}, config.AllowedTools)
+	assert.True(t, config.EnableFSSearchTools)
+	assert.Equal(t, "/tmp/project", config.WorkingDirectory)
+	require.NotNil(t, config.Skills)
+	assert.False(t, config.Skills.Enabled)
 }

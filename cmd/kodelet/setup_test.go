@@ -15,8 +15,9 @@ import (
 
 func TestRecommendedSetupConfigYAML_OpenAIProfilesUsePatchMode(t *testing.T) {
 	var config struct {
-		Aliases  map[string]string         `yaml:"aliases"`
-		Profiles map[string]map[string]any `yaml:"profiles"`
+		Aliases                 map[string]string         `yaml:"aliases"`
+		AllowedReasoningEfforts []string                  `yaml:"allowed_reasoning_efforts"`
+		Profiles                map[string]map[string]any `yaml:"profiles"`
 	}
 
 	err := yaml.Unmarshal([]byte(recommendedSetupConfigYAML()), &config)
@@ -24,6 +25,7 @@ func TestRecommendedSetupConfigYAML_OpenAIProfilesUsePatchMode(t *testing.T) {
 	assert.Equal(t, "claude-fable-5", config.Aliases["fable-5"])
 	assert.Equal(t, "gpt-5.6-sol", config.Aliases["gpt-5.6"])
 	assert.Equal(t, "claude-opus-4-8", config.Aliases["opus-48"])
+	assert.Equal(t, []string{"low", "medium", "high", "xhigh"}, config.AllowedReasoningEfforts)
 
 	openAIProfile, ok := config.Profiles["openai"]
 	require.True(t, ok)
@@ -31,6 +33,7 @@ func TestRecommendedSetupConfigYAML_OpenAIProfilesUsePatchMode(t *testing.T) {
 	assert.Equal(t, false, openAIProfile["enable_fs_search_tools"])
 	assert.Equal(t, "openai", openAIProfile["provider"])
 	assert.Equal(t, 128000, openAIProfile["max_tokens"])
+	assert.Equal(t, []any{"low", "medium", "high", "xhigh"}, openAIProfile["allowed_reasoning_efforts"])
 
 	anthropicProfile, ok := config.Profiles["anthropic"]
 	require.True(t, ok)
@@ -40,6 +43,7 @@ func TestRecommendedSetupConfigYAML_OpenAIProfilesUsePatchMode(t *testing.T) {
 	assert.Equal(t, 64000, anthropicProfile["max_tokens"])
 	assert.Equal(t, "opus-48", anthropicProfile["model"])
 	assert.Equal(t, "max", anthropicProfile["reasoning_effort"])
+	assert.Equal(t, []any{"low", "medium", "high", "xhigh", "max"}, anthropicProfile["allowed_reasoning_efforts"])
 }
 
 func TestSetupCommandCreatesConfig(t *testing.T) {

@@ -596,6 +596,14 @@ func TestSaveConversationMetadataIncludesPlatformAndAPIMode(t *testing.T) {
 	assert.Equal(t, "chat_completions", metadata["api_mode"])
 	assert.Equal(t, "priority", metadata["service_tier"])
 	assert.Equal(t, "accounts/fireworks/models/kimi-k2p5", metadata["model"])
+	snapshot, ok, err := conversationmeta.ConfigSnapshotFromMetadata(metadata)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, "openai", snapshot.Provider)
+	assert.Equal(t, "accounts/fireworks/models/kimi-k2p5", snapshot.Model)
+	require.NotNil(t, snapshot.OpenAI)
+	assert.Equal(t, "fireworks", snapshot.OpenAI.Platform)
+	assert.Equal(t, llmtypes.OpenAIServiceTierPriority, snapshot.OpenAI.ServiceTier)
 }
 
 func TestSaveConversationPreservesProviderNeutralMetadata(t *testing.T) {

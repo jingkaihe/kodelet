@@ -164,6 +164,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 			m.status = "history load failed"
 			m.profilePickerOpen = false
+			m.reasoningPickerOpen = false
 			m.entries = append(m.entries, chatEntry{
 				kind: entryAssistant,
 				blocks: []assistantBlock{{
@@ -177,6 +178,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if strings.TrimSpace(m.conversationID) != "" {
 				m.setProfile(msg.profile)
 				m.profilePickerOpen = false
+				if strings.TrimSpace(msg.reasoningEffort) != "" {
+					m.reasoningEffortOptions = []string{msg.reasoningEffort}
+					m.setReasoningEffort(msg.reasoningEffort, false)
+				}
+				m.reasoningPickerOpen = false
 			}
 			if strings.TrimSpace(msg.cwd) != "" {
 				reloadSlashCommands = strings.TrimSpace(m.requestedCWD) == "" && strings.TrimSpace(m.cwd) != strings.TrimSpace(msg.cwd)
@@ -291,6 +297,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refreshViewport(false)
 				return m, nil
 			}
+			if m.reasoningPickerOpen {
+				m.closeReasoningPicker()
+				m.resize()
+				m.refreshViewport(false)
+				return m, nil
+			}
 			if m.running && !m.runCancelling {
 				m.cancelActiveRun()
 			}
@@ -298,6 +310,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+t":
 			if m.canChangeProfile() {
 				m.toggleProfilePickerFromKeyboard()
+				m.resize()
+				m.refreshViewport(false)
+			}
+			return m, nil
+		case "ctrl+y":
+			if m.canChangeReasoningEffort() {
+				m.toggleReasoningPickerFromKeyboard()
 				m.resize()
 				m.refreshViewport(false)
 			}
@@ -332,6 +351,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refreshViewport(false)
 				return m, nil
 			}
+			if m.reasoningPickerOpen {
+				m.moveReasoningPicker(-1)
+				m.refreshViewport(false)
+				return m, nil
+			}
 		case "down", "tab":
 			if m.slashCommandSuggestionsOpen() {
 				if key == "tab" {
@@ -349,6 +373,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refreshViewport(false)
 				return m, nil
 			}
+			if m.reasoningPickerOpen {
+				m.moveReasoningPicker(1)
+				m.refreshViewport(false)
+				return m, nil
+			}
 		case "enter":
 			if m.slashCommandSuggestionsOpen() {
 				m.selectSlashCommand()
@@ -358,6 +387,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.profilePickerOpen {
 				m.selectProfilePickerOption(m.profilePickerIndex)
+				m.resize()
+				m.refreshViewport(false)
+				return m, nil
+			}
+			if m.reasoningPickerOpen {
+				m.selectReasoningPickerOption(m.reasoningPickerIndex)
 				m.resize()
 				m.refreshViewport(false)
 				return m, nil
@@ -399,8 +434,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refreshViewport(false)
 				return m, nil
 			}
+			if optionIndex, ok := m.reasoningPickerOptionAt(msg.X, msg.Y); ok {
+				m.selectReasoningPickerOption(optionIndex)
+				m.resize()
+				m.refreshViewport(false)
+				return m, nil
+			}
+			if m.reasoningComposerRegionContains(msg.X, msg.Y) {
+				m.toggleReasoningPickerFromClick()
+				m.resize()
+				m.refreshViewport(false)
+				return m, nil
+			}
 			if m.profilePickerOpen {
 				m.closeProfilePicker()
+				m.resize()
+				m.refreshViewport(false)
+				return m, nil
+			}
+			if m.reasoningPickerOpen {
+				m.closeReasoningPicker()
 				m.resize()
 				m.refreshViewport(false)
 				return m, nil
@@ -638,6 +691,7 @@ func (m *model) queueTranscriptRefresh(scrollBottom bool) tea.Cmd {
 
 func (m *model) openShortcutsDialog() {
 	m.profilePickerOpen = false
+	m.reasoningPickerOpen = false
 	m.dismissSlashCommandSuggestions()
 	m.shortcutsOpen = true
 	m.resize()
@@ -668,6 +722,7 @@ func (m *model) openComposerInEditor() tea.Cmd {
 		return m.notifyEditorError("Failed to launch $EDITOR: " + err.Error())
 	}
 	m.profilePickerOpen = false
+	m.reasoningPickerOpen = false
 	m.dismissSlashCommandSuggestions()
 	m.shortcutsOpen = false
 	m.steerError = ""
@@ -762,9 +817,9 @@ func (m *model) resize() {
 	inputOuterHeight := inputHeight + 2
 	historySearchHeight := m.historySearchHeight()
 	slashCommandHeight := m.slashCommandSuggestionsHeight()
-	profilePickerHeight := m.profilePickerHeight()
+	settingsPickerHeight := m.profilePickerHeight() + m.reasoningPickerHeight()
 	footerHeight := 0
-	viewportHeight := m.height - inputOuterHeight - historySearchHeight - slashCommandHeight - profilePickerHeight - footerHeight
+	viewportHeight := m.height - inputOuterHeight - historySearchHeight - slashCommandHeight - settingsPickerHeight - footerHeight
 	if viewportHeight < 1 {
 		viewportHeight = 1
 	}
@@ -783,6 +838,7 @@ func (m *model) submit() tea.Cmd {
 		return nil
 	}
 	m.profilePickerOpen = false
+	m.reasoningPickerOpen = false
 	m.dismissSlashCommandSuggestions()
 	if strings.TrimSpace(m.conversationID) == "" {
 		m.conversationID = convtypes.GenerateID()
@@ -813,6 +869,9 @@ func (m *model) submit() tea.Cmd {
 		Profile:        profileForRequest(m.profile),
 		CWD:            m.requestedCWD,
 	}
+	if !m.conversationWasResumed {
+		req.ReasoningEffort = m.reasoningEffort
+	}
 
 	return func() tea.Msg {
 		if persistMessageHistory != nil {
@@ -840,7 +899,7 @@ func (m model) slashCommandQuery() (string, bool) {
 }
 
 func (m model) slashCommandSuggestionsOpen() bool {
-	if m.running || m.profilePickerOpen || m.historySearch != nil {
+	if m.running || m.profilePickerOpen || m.reasoningPickerOpen || m.historySearch != nil {
 		return false
 	}
 	if m.textarea.Value() == m.slashDismissedDraft {

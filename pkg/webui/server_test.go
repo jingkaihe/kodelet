@@ -585,11 +585,23 @@ func TestServer_handleGetConversation(t *testing.T) {
 		getFunc: func(_ context.Context, id string) (*conversations.GetConversationResponse, error) {
 			if id == conversationID {
 				return &conversations.GetConversationResponse{
-					ID:          conversationID,
-					CWD:         "/workspace/project",
-					Summary:     "Test conversation",
-					Provider:    "openai",
-					Metadata:    map[string]any{"platform": "codex", "api_mode": "responses", "profile": "codex", "service_tier": "fast"},
+					ID:       conversationID,
+					CWD:      "/workspace/project",
+					Summary:  "Test conversation",
+					Provider: "openai",
+					Metadata: map[string]any{
+						"platform":     "codex",
+						"api_mode":     "responses",
+						"profile":      "legacy-profile",
+						"service_tier": "fast",
+						conversations.ConfigSnapshotMetadataKey: map[string]any{
+							"version":          llmtypes.ConversationConfigSnapshotVersion,
+							"profile":          "codex",
+							"provider":         "openai",
+							"model":            "gpt-test",
+							"reasoning_effort": "high",
+						},
+					},
 					RawMessages: json.RawMessage(`[{"type":"message","role":"user","content":"hello"}]`),
 				}, nil
 			}
@@ -1366,13 +1378,14 @@ func TestServer_handleChatWithProfile(t *testing.T) {
 		router: mux.NewRouter(),
 	}
 
-	req := httptest.NewRequest("POST", "/api/chat", strings.NewReader(`{"message":"hello","profile":"anthropic"}`))
+	req := httptest.NewRequest("POST", "/api/chat", strings.NewReader(`{"message":"hello","profile":"anthropic","reasoningEffort":"high"}`))
 	w := httptest.NewRecorder()
 
 	server.handleChat(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "anthropic", capturedRequest.Profile)
+	assert.Equal(t, "high", capturedRequest.ReasoningEffort)
 }
 
 func TestServer_handleChatRunnerError(t *testing.T) {

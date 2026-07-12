@@ -47,6 +47,7 @@ model: sonnet-46
 weak_model: haiku-45
 max_tokens: 16000
 reasoning_effort: medium
+allowed_reasoning_efforts: [low, medium, high]
 anthropic:
   # Optional: force adaptive-thinking request plumbing for custom Anthropic model IDs.
   # adaptive_thinking: true
@@ -58,12 +59,15 @@ profiles:
     model: gpt-5
     weak_model: gpt-5
     reasoning_effort: medium
+    allowed_reasoning_efforts: [low, medium, high]
     tool_mode: patch
     enable_fs_search_tools: false
 
 ```
 
 Profiles are useful for switching model/provider/tool-mode combinations. Note that profile switching may be constrained by provider compatibility in a given command flow.
+
+`allowed_reasoning_efforts` restricts the effort values selectable for new conversations. When omitted, direct overrides remain unrestricted while the TUI offers only the configured default. The effective model/provider configuration is stored as a versioned `config_snapshot` in conversation metadata, so resumed conversations retain their model and reasoning behavior even if the source profile changes. Explicit reasoning overrides are rejected when resuming legacy conversations that do not yet have a snapshot.
 
 ## Skills config
 

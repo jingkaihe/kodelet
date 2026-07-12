@@ -133,6 +133,106 @@ func TestResolveWebChatConfigForExistingConversation_DefaultProfileIgnoresActive
 	assert.Equal(t, "default", config.Profile)
 }
 
+func TestResolveConfigForNewConversationReasoningOverrideRespectsPolicy(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	}()
+
+	viper.Reset()
+	viper.Set("provider", "openai")
+	viper.Set("model", "base-model")
+	viper.Set("reasoning_effort", "medium")
+	viper.Set("profiles", map[string]any{
+		"work": map[string]any{
+			"model":                     "work-model",
+			"reasoning_effort":          "max",
+			"allowed_reasoning_efforts": []string{"low", "max"},
+		},
+	})
+
+	config, err := ResolveConfigForNewConversation("work", "low")
+	require.NoError(t, err)
+	assert.Equal(t, "low", config.ReasoningEffort)
+	assert.Equal(t, []string{"low", "max"}, config.AllowedReasoningEfforts)
+
+	_, err = ResolveConfigForNewConversation("work", "high")
+	require.ErrorContains(t, err, "not included in allowed_reasoning_efforts")
+}
+
+func TestResolveConfigForExistingConversationUsesSnapshotAndLocksReasoning(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	}()
+
+	viper.Reset()
+	viper.Set("provider", "anthropic")
+	viper.Set("model", "current-base")
+	viper.Set("reasoning_effort", "low")
+	viper.Set("allowed_reasoning_efforts", []string{"low"})
+	viper.Set("allowed_tools", []string{"file_read"})
+	viper.Set("profiles", map[string]any{
+		"work": map[string]any{
+			"provider":         "anthropic",
+			"model":            "changed-model",
+			"reasoning_effort": "low",
+			"allowed_tools":    []string{"bash"},
+		},
+	})
+
+	metadata, err := conversations.AddConfigSnapshot(map[string]any{"profile": "work"}, llmtypes.Config{
+		Profile:         "work",
+		Provider:        "openai",
+		Model:           "persisted-model",
+		WeakModel:       "persisted-weak",
+		MaxTokens:       16000,
+		ReasoningEffort: "max",
+		OpenAI: &llmtypes.OpenAIConfig{
+			Platform: "codex",
+			APIMode:  llmtypes.OpenAIAPIModeResponses,
+		},
+	})
+	require.NoError(t, err)
+	record := &conversations.GetConversationResponse{ID: "conv-snapshot", Provider: "openai", Metadata: metadata}
+
+	config, err := ResolveConfigForExistingConversation(record, "max")
+	require.NoError(t, err)
+	assert.Equal(t, "openai", config.Provider)
+	assert.Equal(t, "persisted-model", config.Model)
+	assert.Equal(t, "max", config.ReasoningEffort)
+	assert.Equal(t, []string{"bash"}, config.AllowedTools, "live profile policy remains current")
+	assert.Empty(t, config.AllowedReasoningEfforts)
+	require.NotNil(t, config.OpenAI)
+	assert.Equal(t, llmtypes.OpenAIAPIModeResponses, config.OpenAI.APIMode)
+
+	_, err = ResolveConfigForExistingConversation(record, "low")
+	require.ErrorContains(t, err, "locked to \"max\"")
+
+	delete(viper.GetStringMap("profiles"), "work")
+	viper.Set("profiles", map[string]any{})
+	config, err = ResolveConfigForExistingConversation(record)
+	require.NoError(t, err)
+	assert.Equal(t, "persisted-model", config.Model)
+}
+
+func TestResolveConfigForExistingLegacyConversationRejectsReasoningOverride(t *testing.T) {
+	record := &conversations.GetConversationResponse{
+		ID:       "legacy-conversation",
+		Provider: "openai",
+		Metadata: map[string]any{"model": "gpt-4.1"},
+	}
+
+	_, err := ResolveConfigForExistingConversation(record, "high")
+	require.ErrorContains(t, err, "legacy conversation without config_snapshot")
+}
+
 func TestResolveWebChatConfig_ResolvesRelativeCWDFromDefaultWorkspace(t *testing.T) {
 	originalSettings := viper.AllSettings()
 	defer func() {

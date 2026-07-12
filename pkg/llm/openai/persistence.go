@@ -152,6 +152,18 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 	if profile := strings.TrimSpace(t.Config.Profile); profile != "" {
 		metadata["profile"] = profile
 	}
+	snapshotConfig := t.Config
+	if strings.TrimSpace(snapshotConfig.Provider) == "" {
+		snapshotConfig.Provider = "openai"
+	}
+	if snapshotConfig.OpenAI == nil {
+		snapshotConfig.OpenAI = &llmtypes.OpenAIConfig{}
+	}
+	snapshotConfig.OpenAI.APIMode = llmtypes.OpenAIAPIModeChatCompletions
+	metadata, err = conversations.AddConfigSnapshot(metadata, snapshotConfig)
+	if err != nil {
+		return errors.Wrap(err, "failed to persist conversation config snapshot")
+	}
 
 	// Build the conversation record
 	record := convtypes.ConversationRecord{

@@ -55,26 +55,27 @@ func (m ConversationSummaryMode) UsesLLM() bool {
 
 // Config holds the configuration for the LLM client
 type Config struct {
-	IsSubAgent           bool               `mapstructure:"is_sub_agent" json:"is_sub_agent" yaml:"is_sub_agent"` // IsSubAgent is true if the LLM is a sub-agent
-	Provider             string             `mapstructure:"provider" json:"provider" yaml:"provider"`             // Provider is the LLM provider (anthropic, openai)
-	Model                string             `mapstructure:"model" json:"model" yaml:"model"`                      // Model is the main driver
-	WeakModel            string             `mapstructure:"weak_model" json:"weak_model" yaml:"weak_model"`       // WeakModel is the less capable but faster model to use
-	MaxTokens            int                `mapstructure:"max_tokens" json:"max_tokens" yaml:"max_tokens"`
-	WeakModelMaxTokens   int                `mapstructure:"weak_model_max_tokens" json:"weak_model_max_tokens" yaml:"weak_model_max_tokens"`    // WeakModelMaxTokens is the maximum tokens for the weak model
-	ThinkingBudgetTokens int                `mapstructure:"thinking_budget_tokens" json:"thinking_budget_tokens" yaml:"thinking_budget_tokens"` // ThinkingBudgetTokens is sent as Anthropic manual budget_tokens on non-adaptive Claude models; adaptive Claude models ignore it
-	ReasoningEffort      string             `mapstructure:"reasoning_effort" json:"reasoning_effort" yaml:"reasoning_effort"`                   // ReasoningEffort controls supported provider effort settings (e.g. OpenAI reasoning models, Anthropic adaptive thinking models where "none" disables adaptive thinking)
-	AllowedCommands      []string           `mapstructure:"allowed_commands" json:"allowed_commands" yaml:"allowed_commands"`                   // AllowedCommands is a list of allowed command patterns for the bash tool
-	AllowedDomainsFile   string             `mapstructure:"allowed_domains_file" json:"allowed_domains_file" yaml:"allowed_domains_file"`       // AllowedDomainsFile is the path to the file containing allowed domains for web_fetch tool
-	AllowedTools         []string           `mapstructure:"allowed_tools" json:"allowed_tools" yaml:"allowed_tools"`                            // AllowedTools is a list of allowed tools for the main agent (empty means use defaults)
-	WorkingDirectory     string             `mapstructure:"working_directory" json:"working_directory" yaml:"working_directory"`
-	ToolMode             ToolMode           `mapstructure:"tool_mode" json:"tool_mode" yaml:"tool_mode"`                                    // ToolMode controls file-interaction behavior (e.g. full or patch)
-	AnthropicAPIAccess   AnthropicAPIAccess `mapstructure:"anthropic_api_access" json:"anthropic_api_access" yaml:"anthropic_api_access"`   // AnthropicAPIAccess controls how to authenticate with Anthropic API
-	AnthropicAccount     string             `mapstructure:"anthropic_account" json:"anthropic_account" yaml:"anthropic_account"`            // AnthropicAccount specifies which Anthropic subscription account to use
-	Aliases              map[string]string  `mapstructure:"aliases" json:"aliases,omitempty" yaml:"aliases,omitempty"`                      // Aliases maps short model names to full model names
-	Retry                RetryConfig        `mapstructure:"retry" json:"retry" yaml:"retry"`                                                // Retry configuration for API calls
-	Sysprompt            string             `mapstructure:"sysprompt" json:"sysprompt,omitempty" yaml:"sysprompt,omitempty"`                // Sysprompt is the path to a custom system prompt template file
-	SyspromptArgs        map[string]string  `mapstructure:"sysprompt_args" json:"sysprompt_args,omitempty" yaml:"sysprompt_args,omitempty"` // SyspromptArgs are custom template arguments for system prompt rendering
-	Bash                 *BashConfig        `mapstructure:"bash" json:"bash,omitempty" yaml:"bash,omitempty"`                               // Bash contains bash tool configuration
+	IsSubAgent              bool               `mapstructure:"is_sub_agent" json:"is_sub_agent" yaml:"is_sub_agent"` // IsSubAgent is true if the LLM is a sub-agent
+	Provider                string             `mapstructure:"provider" json:"provider" yaml:"provider"`             // Provider is the LLM provider (anthropic, openai)
+	Model                   string             `mapstructure:"model" json:"model" yaml:"model"`                      // Model is the main driver
+	WeakModel               string             `mapstructure:"weak_model" json:"weak_model" yaml:"weak_model"`       // WeakModel is the less capable but faster model to use
+	MaxTokens               int                `mapstructure:"max_tokens" json:"max_tokens" yaml:"max_tokens"`
+	WeakModelMaxTokens      int                `mapstructure:"weak_model_max_tokens" json:"weak_model_max_tokens" yaml:"weak_model_max_tokens"`                                 // WeakModelMaxTokens is the maximum tokens for the weak model
+	ThinkingBudgetTokens    int                `mapstructure:"thinking_budget_tokens" json:"thinking_budget_tokens" yaml:"thinking_budget_tokens"`                              // ThinkingBudgetTokens is sent as Anthropic manual budget_tokens on non-adaptive Claude models; adaptive Claude models ignore it
+	ReasoningEffort         string             `mapstructure:"reasoning_effort" json:"reasoning_effort" yaml:"reasoning_effort"`                                                // ReasoningEffort controls supported provider effort settings (e.g. OpenAI reasoning models, Anthropic adaptive thinking models where "none" disables adaptive thinking)
+	AllowedReasoningEfforts []string           `mapstructure:"allowed_reasoning_efforts" json:"allowed_reasoning_efforts,omitempty" yaml:"allowed_reasoning_efforts,omitempty"` // AllowedReasoningEfforts restricts selectable reasoning efforts for new conversations (empty means unrestricted)
+	AllowedCommands         []string           `mapstructure:"allowed_commands" json:"allowed_commands" yaml:"allowed_commands"`                                                // AllowedCommands is a list of allowed command patterns for the bash tool
+	AllowedDomainsFile      string             `mapstructure:"allowed_domains_file" json:"allowed_domains_file" yaml:"allowed_domains_file"`                                    // AllowedDomainsFile is the path to the file containing allowed domains for web_fetch tool
+	AllowedTools            []string           `mapstructure:"allowed_tools" json:"allowed_tools" yaml:"allowed_tools"`                                                         // AllowedTools is a list of allowed tools for the main agent (empty means use defaults)
+	WorkingDirectory        string             `mapstructure:"working_directory" json:"working_directory" yaml:"working_directory"`
+	ToolMode                ToolMode           `mapstructure:"tool_mode" json:"tool_mode" yaml:"tool_mode"`                                    // ToolMode controls file-interaction behavior (e.g. full or patch)
+	AnthropicAPIAccess      AnthropicAPIAccess `mapstructure:"anthropic_api_access" json:"anthropic_api_access" yaml:"anthropic_api_access"`   // AnthropicAPIAccess controls how to authenticate with Anthropic API
+	AnthropicAccount        string             `mapstructure:"anthropic_account" json:"anthropic_account" yaml:"anthropic_account"`            // AnthropicAccount specifies which Anthropic subscription account to use
+	Aliases                 map[string]string  `mapstructure:"aliases" json:"aliases,omitempty" yaml:"aliases,omitempty"`                      // Aliases maps short model names to full model names
+	Retry                   RetryConfig        `mapstructure:"retry" json:"retry" yaml:"retry"`                                                // Retry configuration for API calls
+	Sysprompt               string             `mapstructure:"sysprompt" json:"sysprompt,omitempty" yaml:"sysprompt,omitempty"`                // Sysprompt is the path to a custom system prompt template file
+	SyspromptArgs           map[string]string  `mapstructure:"sysprompt_args" json:"sysprompt_args,omitempty" yaml:"sysprompt_args,omitempty"` // SyspromptArgs are custom template arguments for system prompt rendering
+	Bash                    *BashConfig        `mapstructure:"bash" json:"bash,omitempty" yaml:"bash,omitempty"`                               // Bash contains bash tool configuration
 
 	// Profile system configuration
 	Profile  string                   `mapstructure:"profile" json:"profile,omitempty" yaml:"profile,omitempty"`    // Active profile name

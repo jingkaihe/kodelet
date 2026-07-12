@@ -133,7 +133,13 @@ func isCopilotPlatform(config llmtypes.Config) bool {
 
 // NewOpenAIThread creates a new thread with OpenAI's API
 func NewOpenAIThread(config llmtypes.Config) (*Thread, error) {
+	if err := llmtypes.NormalizeReasoningConfig(&config); err != nil {
+		return nil, err
+	}
 	// Apply defaults if not provided
+	if config.Provider == "" {
+		config.Provider = "openai"
+	}
 	if config.Model == "" {
 		config.Model = "gpt-5.5" // Default to GPT-5.5
 	}

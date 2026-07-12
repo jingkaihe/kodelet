@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	chatpkg "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
@@ -43,7 +44,12 @@ var chatCmd = &cobra.Command{
 			presenter.Error(err, "Invalid TUI theme")
 			os.Exit(1)
 		}
-		if err := validateChatResumeConversation(ctx, config.ResumeConvID); err != nil {
+		reasoningEffort := ""
+		reasoningEffortExplicit := cmd.Flags().Changed("reasoning-effort")
+		if reasoningEffortExplicit {
+			reasoningEffort, _ = cmd.Flags().GetString("reasoning-effort")
+		}
+		if err := validateChatResumeConversation(ctx, config.ResumeConvID, reasoningEffort); err != nil {
 			presenter.Error(err, "Failed to resume conversation")
 			os.Exit(1)
 		}
@@ -56,10 +62,12 @@ var chatCmd = &cobra.Command{
 		}
 
 		if err := tui.Run(ctx, tui.Config{
-			ConversationID: config.ResumeConvID,
-			Profile:        profile,
-			CWD:            config.CWD,
-			Theme:          config.Theme,
+			ConversationID:          config.ResumeConvID,
+			Profile:                 profile,
+			ReasoningEffort:         reasoningEffort,
+			ReasoningEffortExplicit: reasoningEffortExplicit,
+			CWD:                     config.CWD,
+			Theme:                   config.Theme,
 		}); err != nil {
 			presenter.Error(err, "Chat failed")
 			os.Exit(1)
@@ -122,7 +130,11 @@ func getChatConfigFromFlags(ctx context.Context, cmd *cobra.Command) *ChatConfig
 	return config
 }
 
-func validateChatResumeConversation(ctx context.Context, conversationID string) error {
+func validateChatResumeConversation(ctx context.Context, conversationID string, requestedReasoningEfforts ...string) error {
+	requestedReasoningEffort := ""
+	if len(requestedReasoningEfforts) > 0 {
+		requestedReasoningEffort = requestedReasoningEfforts[0]
+	}
 	conversationID = strings.TrimSpace(conversationID)
 	if conversationID == "" {
 		return nil
@@ -136,8 +148,10 @@ func validateChatResumeConversation(ctx context.Context, conversationID string) 
 		_ = service.Close()
 	}()
 
-	if _, err := service.GetConversation(ctx, conversationID); err != nil {
+	record, err := service.GetConversation(ctx, conversationID)
+	if err != nil {
 		return errors.Wrapf(err, "conversation not found: %s", conversationID)
 	}
-	return nil
+	_, err = chatpkg.ResolveConfigForExistingConversation(record, requestedReasoningEffort)
+	return err
 }

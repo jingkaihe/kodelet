@@ -657,6 +657,7 @@ func TestValidateConversationRecord(t *testing.T) {
 		{"unsupported provider", []byte(`{"id":"x","provider":"other","rawMessages":[]}`)},
 		{"missing messages", []byte(`{"id":"x","provider":"openai"}`)},
 		{"invalid messages", []byte(`{"id":"x","provider":"openai","rawMessages":{"bad":true}}`)},
+		{"invalid config snapshot", []byte(`{"id":"x","provider":"openai","rawMessages":[],"metadata":{"config_snapshot":{"version":99}}}`)},
 	}
 
 	for _, tt := range invalidCases {
@@ -743,6 +744,7 @@ func TestConversationCommandsWithSQLiteStore(t *testing.T) {
 		exported, err := os.ReadFile(exportPath)
 		require.NoError(t, err)
 		assert.Contains(t, string(exported), `"id": "conv-cmd-1"`)
+		assert.Contains(t, string(exported), `"config_snapshot"`)
 
 		var imported convtypes.ConversationRecord
 		require.NoError(t, json.Unmarshal(exported, &imported))
@@ -758,6 +760,10 @@ func TestConversationCommandsWithSQLiteStore(t *testing.T) {
 		assert.Contains(t, importOutput, "conv-imported imported successfully")
 		loadedImported := loadConversationCommandRecord(ctx, t, "conv-imported")
 		assert.Equal(t, "Conversation command summary", loadedImported.Summary)
+		importedSnapshot, ok, err := conversations.ConfigSnapshotFromMetadata(loadedImported.Metadata)
+		require.NoError(t, err)
+		require.True(t, ok)
+		assert.Equal(t, "high", importedSnapshot.ReasoningEffort)
 
 		forkOutput := captureAllStdout(t, func() {
 			forkConversationCmd(ctx, record.ID)
@@ -765,6 +771,15 @@ func TestConversationCommandsWithSQLiteStore(t *testing.T) {
 		assert.Contains(t, forkOutput, "Conversation forked successfully")
 		list := queryConversationCommandRecords(ctx, t)
 		assert.Len(t, list.ConversationSummaries, 3)
+		for _, summary := range list.ConversationSummaries {
+			if summary.ID == record.ID || summary.ID == "conv-imported" {
+				continue
+			}
+			forkedSnapshot, ok, err := conversations.ConfigSnapshotFromMetadata(summary.Metadata)
+			require.NoError(t, err)
+			require.True(t, ok)
+			assert.Equal(t, "high", forkedSnapshot.ReasoningEffort)
+		}
 
 		deleteOutput := captureAllStdout(t, func() {
 			deleteConversationCmd(ctx, "conv-imported", &ConversationDeleteConfig{NoConfirm: true})
@@ -875,10 +890,18 @@ func saveConversationCommandRecord(ctx context.Context, t *testing.T, id string)
 		CurrentContextWindow: 200,
 		MaxContextWindow:     1000,
 	}
-	record.Metadata = map[string]any{
+	metadata, err := conversations.AddConfigSnapshot(map[string]any{
 		"platform": "codex",
 		"api_mode": "chat_completions",
-	}
+	}, llmtypes.Config{
+		Profile:         "codex",
+		Provider:        "openai",
+		Model:           "gpt-test",
+		ReasoningEffort: "high",
+		OpenAI:          &llmtypes.OpenAIConfig{Platform: "codex", APIMode: llmtypes.OpenAIAPIModeChatCompletions},
+	})
+	require.NoError(t, err)
+	record.Metadata = metadata
 
 	store, err := conversations.GetConversationStore(ctx)
 	require.NoError(t, err)

@@ -338,6 +338,13 @@ func TestConversationService_DeleteConversation(t *testing.T) {
 
 func TestConversationService_ForkConversation(t *testing.T) {
 	now := time.Now().UTC()
+	metadata, err := AddConfigSnapshot(map[string]any{"profile": "work"}, llm.Config{
+		Profile:         "work",
+		Provider:        "anthropic",
+		Model:           "claude-test",
+		ReasoningEffort: "max",
+	})
+	require.NoError(t, err)
 	sourceRecord := conversations.ConversationRecord{
 		ID:          "source-id",
 		CreatedAt:   now.Add(-time.Hour),
@@ -353,7 +360,7 @@ func TestConversationService_ForkConversation(t *testing.T) {
 			CurrentContextWindow: 64000,
 			MaxContextWindow:     200000,
 		},
-		Metadata: map[string]any{"profile": "work"},
+		Metadata: metadata,
 		ToolResults: map[string]tools.StructuredToolResult{
 			"tool-1": {ToolName: "bash"},
 		},
@@ -385,6 +392,10 @@ func TestConversationService_ForkConversation(t *testing.T) {
 		assert.Equal(t, sourceRecord.Usage.CurrentContextWindow, forkedRecord.Usage.CurrentContextWindow)
 		assert.Equal(t, sourceRecord.Usage.MaxContextWindow, forkedRecord.Usage.MaxContextWindow)
 		assert.Equal(t, sourceRecord.Metadata, forkedRecord.Metadata)
+		snapshot, ok, err := ConfigSnapshotFromMetadata(forkedRecord.Metadata)
+		require.NoError(t, err)
+		require.True(t, ok)
+		assert.Equal(t, "max", snapshot.ReasoningEffort)
 		assert.Equal(t, sourceRecord.ToolResults, forkedRecord.ToolResults)
 	})
 

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/pkg/errors"
@@ -32,7 +33,16 @@ func loadInitialHistory(ctx context.Context, conversationID string) tea.Cmd {
 			return initialHistoryMsg{err: errors.Wrap(err, "failed to parse conversation")}
 		}
 
-		return initialHistoryMsg{loaded: true, entries: entriesFromHistory(messages), usage: response.Usage, cwd: strings.TrimSpace(response.CWD), profile: profileFromMetadata(response.Metadata)}
+		reasoningEffort := ""
+		if snapshot, ok, snapshotErr := conversations.ConfigSnapshotFromMetadata(response.Metadata); snapshotErr != nil {
+			return initialHistoryMsg{err: errors.Wrap(snapshotErr, "failed to load conversation config snapshot")}
+		} else if ok {
+			reasoningEffort = snapshot.ReasoningEffort
+		} else if config, configErr := chat.ResolveConfigForExistingConversation(response, ""); configErr == nil {
+			reasoningEffort = config.ReasoningEffort
+		}
+
+		return initialHistoryMsg{loaded: true, entries: entriesFromHistory(messages), usage: response.Usage, cwd: strings.TrimSpace(response.CWD), profile: profileFromMetadata(response.Metadata), reasoningEffort: reasoningEffort}
 	}
 }
 

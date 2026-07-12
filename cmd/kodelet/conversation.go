@@ -1026,6 +1026,9 @@ func validateConversationRecord(data []byte) (*convtypes.ConversationRecord, err
 	if record.ToolResults == nil {
 		record.ToolResults = make(map[string]tools.StructuredToolResult)
 	}
+	if _, _, err := conversations.ConfigSnapshotFromMetadata(record.Metadata); err != nil {
+		return nil, errors.Wrap(err, "invalid conversation config snapshot")
+	}
 
 	_, err := llm.ExtractMessages(record.Provider, record.RawMessages, record.Metadata, record.ToolResults)
 	if err != nil {

@@ -25,6 +25,18 @@ func GetConfigFromViperWithoutProfile() (llmtypes.Config, error) {
 	return getConfigFromViperWithProfileAndCmd("", nil, true)
 }
 
+// GetConfigFromViperWithoutProfileAndCmd loads configuration without an active
+// profile, then reapplies explicitly changed Cobra flags.
+func GetConfigFromViperWithoutProfileAndCmd(cmd *cobra.Command) (llmtypes.Config, error) {
+	return getConfigFromViperWithProfileAndCmd("", cmd, true)
+}
+
+// GetConfigFromViperWithoutProfileAndCmdIgnoringFlags is the request-scoped
+// variant used when persisted conversation fields must remain authoritative.
+func GetConfigFromViperWithoutProfileAndCmdIgnoringFlags(cmd *cobra.Command, ignoredFlags ...string) (llmtypes.Config, error) {
+	return getConfigFromViperWithProfileAndCmd("", cmd, true, ignoredFlags...)
+}
+
 // GetConfigFromViperWithProfile loads configuration from Viper while applying the
 // provided profile name instead of the globally active viper profile. This is
 // useful for request-scoped profile selection (for example, in the web UI)
@@ -40,6 +52,12 @@ func GetConfigFromViperWithProfileAndCmd(profileName string, cmd *cobra.Command)
 	return getConfigFromViperWithProfileAndCmd(profileName, cmd, true)
 }
 
+// GetConfigFromViperWithProfileAndCmdIgnoringFlags applies a named profile and
+// all explicit Cobra flags except the supplied persisted-field flags.
+func GetConfigFromViperWithProfileAndCmdIgnoringFlags(profileName string, cmd *cobra.Command, ignoredFlags ...string) (llmtypes.Config, error) {
+	return getConfigFromViperWithProfileAndCmd(profileName, cmd, true, ignoredFlags...)
+}
+
 // GetConfigFromViperWithCmd loads the LLM configuration from Viper with command context.
 // When a cobra.Command is provided, CLI flags that were explicitly changed take priority
 // over profile settings.
@@ -47,7 +65,18 @@ func GetConfigFromViperWithCmd(cmd *cobra.Command) (llmtypes.Config, error) {
 	return getConfigFromViperWithProfileAndCmd("", cmd, false)
 }
 
-func getConfigFromViperWithProfileAndCmd(profileName string, cmd *cobra.Command, ignoreActiveProfile bool) (llmtypes.Config, error) {
+// HasConfiguredProfile reports whether a named profile exists in the merged
+// Viper configuration.
+func HasConfiguredProfile(profileName string) bool {
+	profileName = strings.TrimSpace(profileName)
+	if profileName == "" {
+		return false
+	}
+	_, exists := viper.GetStringMap("profiles")[profileName]
+	return exists
+}
+
+func getConfigFromViperWithProfileAndCmd(profileName string, cmd *cobra.Command, ignoreActiveProfile bool, ignoredFlags ...string) (llmtypes.Config, error) {
 	settings := cloneSettings(viper.AllSettings())
 	if ignoreActiveProfile {
 		delete(settings, "profile")
@@ -78,12 +107,15 @@ func getConfigFromViperWithProfileAndCmd(profileName string, cmd *cobra.Command,
 
 	// Apply explicitly changed CLI flags to viper (highest priority)
 	if cmd != nil {
-		applyExplicitFlagsToSettings(cmd, settings)
+		applyExplicitFlagsToSettings(cmd, settings, ignoredFlags...)
 	}
 
 	// Re-load config with all overrides applied
 	config, err = loadConfigFromSettings(settings)
 	if err != nil {
+		return config, err
+	}
+	if err := llmtypes.NormalizeReasoningConfig(&config); err != nil {
 		return config, err
 	}
 
@@ -101,9 +133,16 @@ func getConfigFromViperWithProfileAndCmd(profileName string, cmd *cobra.Command,
 }
 
 // applyExplicitFlagsToSettings sets explicitly changed CLI flag values into a local settings map.
-func applyExplicitFlagsToSettings(cmd *cobra.Command, settings map[string]any) {
+func applyExplicitFlagsToSettings(cmd *cobra.Command, settings map[string]any, ignoredFlags ...string) {
+	ignored := make(map[string]struct{}, len(ignoredFlags))
+	for _, flagName := range ignoredFlags {
+		ignored[flagName] = struct{}{}
+	}
 	cmd.Flags().VisitAll(func(flag *pflag.Flag) {
 		if flag.Changed {
+			if _, skip := ignored[flag.Name]; skip {
+				return
+			}
 			viperKey := explicitFlagViperKey(flag.Name)
 			if sliceValue, ok := flag.Value.(pflag.SliceValue); ok {
 				setSetting(settings, viperKey, sliceValue.GetSlice())

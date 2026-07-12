@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.4.56-beta
+
+Added conversation configuration snapshots and `allowed_reasoning_efforts`, preserving model and reasoning behavior across resumes while keeping credentials and live tool policy current.
+
+Added a reasoning-effort picker beside the profile in `kodelet chat`, available before the first message through `Ctrl+Y` or mouse selection.
+
 ## 0.4.54-beta
 
 Added GPT-5.6 Sol, Terra, and Luna support across OpenAI and Codex, including default aliasing, Responses API routing, prompt caching, and tier-aware pricing.

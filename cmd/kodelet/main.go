@@ -34,6 +34,7 @@ func init() {
 	viper.SetDefault("openai.enable_search", true)
 	viper.SetDefault("openai.websocket_mode", true)
 	viper.SetDefault("reasoning_effort", "medium")
+	viper.SetDefault("allowed_reasoning_efforts", []string{})
 	viper.SetDefault("allowed_commands", []string{})
 	viper.SetDefault("bash.timeout", "120s")
 	viper.SetDefault("allowed_domains_file", "~/.kodelet/allowed_domains.txt")

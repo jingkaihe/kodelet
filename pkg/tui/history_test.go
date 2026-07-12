@@ -36,7 +36,13 @@ func TestLoadInitialHistoryLoadsStoredConversation(t *testing.T) {
 	record := convtypes.NewConversationRecord("conversation-history")
 	record.Provider = "anthropic"
 	record.CWD = t.TempDir()
-	record.Metadata = map[string]any{"profile": " stored "}
+	record.Metadata, err = conversations.AddConfigSnapshot(map[string]any{"profile": " legacy "}, llmtypes.Config{
+		Profile:         "stored",
+		Provider:        "anthropic",
+		Model:           "claude-test",
+		ReasoningEffort: "high",
+	})
+	require.NoError(t, err)
 	record.Usage = llmtypes.Usage{CurrentContextWindow: 42, MaxContextWindow: 100}
 	record.RawMessages = []byte(`[
 		{"role":"user","content":[{"type":"text","text":"old prompt"}]},
@@ -52,6 +58,7 @@ func TestLoadInitialHistoryLoadsStoredConversation(t *testing.T) {
 	assert.True(t, msg.loaded)
 	assert.Equal(t, record.CWD, msg.cwd)
 	assert.Equal(t, "stored", msg.profile)
+	assert.Equal(t, "high", msg.reasoningEffort)
 	assert.Equal(t, 42, msg.usage.CurrentContextWindow)
 	require.Len(t, msg.entries, 2)
 	assert.Equal(t, "old prompt", msg.entries[0].content)
@@ -168,9 +175,10 @@ func TestInitialHistoryUpdatesDisplayedProfileAndLocksPicker(t *testing.T) {
 	m.profilePickerOpen = true
 
 	updated, _ := m.Update(initialHistoryMsg{
-		loaded:  true,
-		entries: []chatEntry{{kind: entryUser, content: "old prompt"}},
-		profile: "stored",
+		loaded:          true,
+		entries:         []chatEntry{{kind: entryUser, content: "old prompt"}},
+		profile:         "stored",
+		reasoningEffort: "max",
 	})
 	m = updated.(model)
 
@@ -178,6 +186,9 @@ func TestInitialHistoryUpdatesDisplayedProfileAndLocksPicker(t *testing.T) {
 	assert.Equal(t, 2, m.profileIndex)
 	assert.False(t, m.profilePickerOpen)
 	assert.False(t, m.canChangeProfile())
+	assert.Equal(t, "max", m.reasoningEffort)
+	assert.False(t, m.reasoningPickerOpen)
+	assert.False(t, m.canChangeReasoningEffort())
 }
 
 func TestInitialHistoryUpdatesDisplayedCWDForEmptyConversation(t *testing.T) {

@@ -25,6 +25,11 @@ openai:
 profile: default
 provider: openai
 reasoning_effort: xhigh
+allowed_reasoning_efforts:
+    - low
+    - medium
+    - high
+    - xhigh
 tool_mode: patch
 weak_model: gpt-5.6-luna
 weak_model_max_tokens: 8192
@@ -38,6 +43,11 @@ profiles:
             api_mode: responses
         provider: openai
         reasoning_effort: xhigh
+        allowed_reasoning_efforts:
+            - low
+            - medium
+            - high
+            - xhigh
         weak_model: gpt-5.6-luna
     anthropic:
         enable_fs_search_tools: true
@@ -45,6 +55,12 @@ profiles:
         model: opus-48
         provider: anthropic
         reasoning_effort: max
+        allowed_reasoning_efforts:
+            - low
+            - medium
+            - high
+            - xhigh
+            - max
         tool_mode: full
         weak_model: haiku-45
         weak_model_max_tokens: 8192

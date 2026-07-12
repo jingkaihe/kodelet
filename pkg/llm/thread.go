@@ -55,6 +55,9 @@ func resolveModelAlias(modelName string, aliases map[string]string) string {
 func NewThread(config llmtypes.Config) (llmtypes.Thread, error) {
 	config.Model = resolveModelAlias(config.Model, config.Aliases)
 	config.WeakModel = resolveModelAlias(config.WeakModel, config.Aliases)
+	if err := llmtypes.NormalizeReasoningConfig(&config); err != nil {
+		return nil, err
+	}
 
 	// Create thread based on provider
 	switch strings.ToLower(config.Provider) {

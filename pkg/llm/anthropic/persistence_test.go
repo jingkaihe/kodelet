@@ -718,6 +718,12 @@ func TestSaveConversationPreservesProviderNeutralMetadata(t *testing.T) {
 	savedMetadata := store.SavedRecords[len(store.SavedRecords)-1].Metadata
 	assert.Contains(t, savedMetadata, conversations.MessageDisplayMetadataKey)
 	assert.Equal(t, anthropic.ModelClaudeSonnet4_6, savedMetadata["model"])
+	snapshot, ok, err := conversations.ConfigSnapshotFromMetadata(savedMetadata)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, "anthropic", snapshot.Provider)
+	assert.Equal(t, anthropic.ModelClaudeSonnet4_6, snapshot.Model)
+	assert.Equal(t, "medium", snapshot.ReasoningEffort)
 	assert.Equal(t, "/init focus", store.SavedRecords[len(store.SavedRecords)-1].Summary)
 }
 
