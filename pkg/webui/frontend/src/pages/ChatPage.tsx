@@ -412,6 +412,7 @@ const ChatPage: React.FC = () => {
 		reasoningEffort: DEFAULT_REASONING_EFFORT,
 		reasoningEffortOptions: [DEFAULT_REASONING_EFFORT],
 	});
+	const [chatSettingsLoaded, setChatSettingsLoaded] = useState(false);
 	const [selectedProfile, setSelectedProfile] = useState("default");
 	const [newChatProfileDraft, setNewChatProfileDraft] = useState("default");
 	const [selectedReasoningEffort, setSelectedReasoningEffort] = useState(
@@ -598,6 +599,7 @@ const ChatPage: React.FC = () => {
 				const reasoningSettings =
 					reasoningSettingsFromChatSettings(settings);
 				setChatSettings(settings);
+				setChatSettingsLoaded(true);
 				setSelectedProfile(settings.currentProfile || "default");
 				setNewChatProfileDraft(settings.currentProfile || "default");
 				setSelectedReasoningEffort(reasoningSettings.effort);
@@ -612,6 +614,7 @@ const ChatPage: React.FC = () => {
 			})
 			.catch((error) => {
 				console.error("Failed to load chat settings", error);
+				setChatSettingsLoaded(false);
 			});
 
 	}, [refreshConversations]);
@@ -1522,7 +1525,9 @@ const ChatPage: React.FC = () => {
 				preview: userPreview,
 				cwd: currentCWDLabel,
 				profile: selectedProfile,
-				reasoningEffort: selectedReasoningEffort,
+				reasoningEffort: chatSettingsLoaded
+					? selectedReasoningEffort
+					: undefined,
 				isRunning: true,
 				messages: [{ role: "user" as const, content: initialUserContent }],
 				pendingSteer: [],
@@ -1544,7 +1549,7 @@ const ChatPage: React.FC = () => {
 					content: initialUserContent,
 					conversationId: targetConversationId,
 					profile: conversationId ? undefined : selectedProfile,
-					reasoningEffort: conversationId
+					reasoningEffort: conversationId || !chatSettingsLoaded
 						? undefined
 						: selectedReasoningEffort,
 					cwd: conversationId ? undefined : currentCWDLabel || undefined,
@@ -2107,6 +2112,12 @@ const ChatPage: React.FC = () => {
 				}
 
 				console.error("Failed to load profile reasoning settings", error);
+				setNewChatProfileDraft(
+					selectedProfile || chatSettings.currentProfile || "default",
+				);
+				setNewChatReasoningEffortDraft(selectedReasoningEffort);
+				setNewChatReasoningEffortOptions(selectedReasoningEffortOptions);
+				setNewChatReasoningEffortExplicit(selectedReasoningEffortExplicit);
 				setReasoningSettingsLoading(false);
 			});
 	};
@@ -2304,7 +2315,7 @@ const ChatPage: React.FC = () => {
 	};
 
 	const handleCommitNewChatContext = () => {
-		if (reasoningSettingsLoading) {
+		if (reasoningSettingsLoading || !chatSettingsLoaded) {
 			return;
 		}
 
@@ -2356,7 +2367,9 @@ const ChatPage: React.FC = () => {
 					defaultCWD={chatSettings.defaultCWD}
 					profileDraft={newChatProfileDraft}
 					reasoningEffortDraft={newChatReasoningEffortDraft}
-					reasoningEffortLoading={reasoningSettingsLoading}
+					reasoningEffortLoading={
+						reasoningSettingsLoading || !chatSettingsLoaded
+					}
 					reasoningEffortOptions={newChatReasoningEffortOptions}
 					recentWorkspaces={recentWorkspaces}
 					ref={newChatDialogRef}

@@ -549,6 +549,55 @@ describe("ChatPage", () => {
 		expect(screen.getByTestId("composer-textarea")).toBeInTheDocument();
 	});
 
+	it("omits reasoning effort while initial chat settings are loading", async () => {
+		mockGetChatSettings.mockReturnValue(new Promise(() => {}));
+		mockStreamChat.mockResolvedValue(undefined);
+
+		render(<ChatPage />);
+
+		fireEvent.change(screen.getByPlaceholderText("Ask kodelet anything..."), {
+			target: { value: "hello" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+		await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
+		expect(mockStreamChat).toHaveBeenCalledWith(
+			expect.not.objectContaining({ reasoningEffort: expect.anything() }),
+			expect.any(Object),
+		);
+	});
+
+	it("omits reasoning effort when initial chat settings fail", async () => {
+		const consoleError = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => undefined);
+		mockGetChatSettings.mockRejectedValue(new Error("settings unavailable"));
+		mockStreamChat.mockResolvedValue(undefined);
+
+		try {
+			render(<ChatPage />);
+
+			await waitFor(() =>
+				expect(consoleError).toHaveBeenCalledWith(
+					"Failed to load chat settings",
+					expect.any(Error),
+				),
+			);
+			fireEvent.change(screen.getByPlaceholderText("Ask kodelet anything..."), {
+				target: { value: "hello" },
+			});
+			fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+			await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
+			expect(mockStreamChat).toHaveBeenCalledWith(
+				expect.not.objectContaining({ reasoningEffort: expect.anything() }),
+				expect.any(Object),
+			);
+		} finally {
+			consoleError.mockRestore();
+		}
+	});
+
 	it("allows selecting a profile for a new conversation", async () => {
 		mockStreamChat.mockResolvedValue(undefined);
 
@@ -615,6 +664,50 @@ describe("ChatPage", () => {
 			expect(screen.getByLabelText("Reasoning effort")).toHaveValue("low"),
 		);
 		expect(screen.getByLabelText("Reasoning effort")).toBeDisabled();
+	});
+
+	it("reverts the profile when its reasoning settings fail to load", async () => {
+		const consoleError = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => undefined);
+		mockStreamChat.mockResolvedValue(undefined);
+
+		try {
+			render(<ChatPage />);
+
+			await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalledTimes(1));
+			fireEvent.click(screen.getByTestId("sidebar-new-chat-button"));
+			mockGetChatSettings.mockRejectedValueOnce(
+				new Error("profile settings unavailable"),
+			);
+			fireEvent.change(screen.getByTestId("new-chat-profile-select"), {
+				target: { value: "restricted" },
+			});
+
+			await waitFor(() =>
+				expect(screen.getByTestId("new-chat-profile-select")).toHaveValue(
+					"work",
+				),
+			);
+			expect(screen.getByLabelText("Reasoning effort")).toHaveValue("medium");
+			expect(screen.getByRole("button", { name: "Start" })).toBeEnabled();
+			fireEvent.click(screen.getByRole("button", { name: "Start" }));
+			fireEvent.change(screen.getByPlaceholderText("Ask kodelet anything..."), {
+				target: { value: "hello" },
+			});
+			fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+			await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
+			expect(mockStreamChat).toHaveBeenCalledWith(
+				expect.objectContaining({
+					profile: "work",
+					reasoningEffort: "medium",
+				}),
+				expect.any(Object),
+			);
+		} finally {
+			consoleError.mockRestore();
+		}
 	});
 
 	it("shows cwd suggestions and applies a clicked suggestion", async () => {
