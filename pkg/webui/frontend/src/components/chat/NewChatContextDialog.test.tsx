@@ -1,5 +1,5 @@
 import type React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import NewChatContextDialog from './NewChatContextDialog';
 import {
@@ -50,6 +50,32 @@ const renderDialog = (
 };
 
 describe('NewChatContextDialog', () => {
+  it('presents a labeled modal and highlights the current workspace', () => {
+    const props = renderDialog({
+      cwdQuery: '~/workspace/kodelet',
+      recentWorkspaces: ['~/workspace/kodelet', '~/workspace/comet'],
+    });
+
+    expect(screen.getByRole('dialog', { name: 'New chat' })).toHaveAttribute(
+      'aria-modal',
+      'true'
+    );
+
+    const selectedWorkspace = screen.getByRole('button', {
+      name: '~/workspace/kodelet',
+    });
+    expect(selectedWorkspace).toHaveAttribute('aria-pressed', 'true');
+    expect(within(selectedWorkspace).getByText('~/workspace')).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: '~/workspace/comet' })
+    ).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Close new chat dialog' })
+    );
+    expect(props.onCancel).toHaveBeenCalledTimes(1);
+  });
+
   it('emits profile and directory changes without owning page state', () => {
     const props = renderDialog();
 
