@@ -6,6 +6,8 @@ Added conversation configuration snapshots and `allowed_reasoning_efforts`, pres
 
 Added a reasoning-effort picker beside the profile in `kodelet chat`, available before the first message through `Ctrl+Y` or mouse selection.
 
+Optimized Web UI loading with lazy route and workspace chunks, Rolldown vendor splitting, and externalized `ghostty-web` WASM to eliminate oversized JavaScript bundles.
+
 ## 0.4.54-beta
 
 Added GPT-5.6 Sol, Terra, and Luna support across OpenAI and Codex, including default aliasing, Responses API routing, prompt caching, and tier-aware pricing.
