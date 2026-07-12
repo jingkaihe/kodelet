@@ -535,6 +535,11 @@ func TestServerConfig_Validate_RejectsInvalidCWD(t *testing.T) {
 }
 
 func TestServer_handleListConversations(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
+	conversationCWD := filepath.Join(homeDir, "workspace", "kodelet")
+
 	mockService := &mockConversationService{
 		listFunc: func(_ context.Context, _ *conversations.ListConversationsRequest) (*conversations.ListConversationsResponse, error) {
 			return &conversations.ListConversationsResponse{
@@ -543,6 +548,7 @@ func TestServer_handleListConversations(t *testing.T) {
 						ID:       "1",
 						Summary:  "Test 1",
 						Provider: "openai",
+						CWD:      conversationCWD,
 						Metadata: map[string]any{"platform": "fireworks", "api_mode": "chat_completions"},
 					},
 					{ID: "2", Summary: "Test 2", Provider: "anthropic"},
@@ -572,6 +578,7 @@ func TestServer_handleListConversations(t *testing.T) {
 	assert.Equal(t, 2, len(response.Conversations))
 	assert.Equal(t, 2, response.Total)
 	assert.Equal(t, "OpenAI", response.Conversations[0].Provider)
+	assert.Equal(t, "~/workspace/kodelet", response.Conversations[0].CWD)
 	assert.True(t, response.Conversations[0].IsRunning)
 	assert.Equal(t, "fireworks", response.Conversations[0].Metadata["platform"])
 	assert.Equal(t, "chat_completions", response.Conversations[0].Metadata["api_mode"])
@@ -580,13 +587,17 @@ func TestServer_handleListConversations(t *testing.T) {
 }
 
 func TestServer_handleGetConversation(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
+	conversationCWD := filepath.Join(homeDir, "workspace", "project")
 	conversationID := "test-id-123"
 	mockService := &mockConversationService{
 		getFunc: func(_ context.Context, id string) (*conversations.GetConversationResponse, error) {
 			if id == conversationID {
 				return &conversations.GetConversationResponse{
 					ID:       conversationID,
-					CWD:      "/workspace/project",
+					CWD:      conversationCWD,
 					Summary:  "Test conversation",
 					Provider: "openai",
 					Metadata: map[string]any{
@@ -629,7 +640,7 @@ func TestServer_handleGetConversation(t *testing.T) {
 	assert.Equal(t, conversationID, response.ID)
 	assert.Equal(t, "Test conversation", response.Summary)
 	assert.Equal(t, "OpenAI", response.Provider)
-	assert.Equal(t, "/workspace/project", response.CWD)
+	assert.Equal(t, "~/workspace/project", response.CWD)
 	assert.True(t, response.CWDLocked)
 	assert.Equal(t, "codex", response.Profile)
 	assert.True(t, response.ProfileLocked)
@@ -640,7 +651,11 @@ func TestServer_handleGetConversation(t *testing.T) {
 }
 
 func TestServer_handleGetChatSettings_IncludesDefaultCWD(t *testing.T) {
-	tmpDir := t.TempDir()
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
+	tmpDir := filepath.Join(homeDir, "workspace", "kodelet")
+	require.NoError(t, os.MkdirAll(tmpDir, 0o755))
 	server := &Server{
 		config: &ServerConfig{CWD: tmpDir},
 	}
@@ -655,7 +670,7 @@ func TestServer_handleGetChatSettings_IncludesDefaultCWD(t *testing.T) {
 	var response ChatSettingsResponse
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
-	assert.Equal(t, tmpDir, response.DefaultCWD)
+	assert.Equal(t, "~/workspace/kodelet", response.DefaultCWD)
 }
 
 func TestServer_defaultCWD_ReturnsErrorForInvalidConfiguredCWD(t *testing.T) {
@@ -670,7 +685,11 @@ func TestServer_defaultCWD_ReturnsErrorForInvalidConfiguredCWD(t *testing.T) {
 }
 
 func TestServer_handleGetCWDHints(t *testing.T) {
-	tmpDir := t.TempDir()
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
+	tmpDir := filepath.Join(homeDir, "workspace")
+	require.NoError(t, os.Mkdir(tmpDir, 0o755))
 	require.NoError(t, os.Mkdir(filepath.Join(tmpDir, "kodelet"), 0o755))
 	require.NoError(t, os.Mkdir(filepath.Join(tmpDir, "koala"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("x"), 0o644))
@@ -690,12 +709,15 @@ func TestServer_handleGetCWDHints(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
 	require.Len(t, response.Hints, 2)
-	assert.Equal(t, filepath.Join(tmpDir, "koala"), response.Hints[0].Path)
-	assert.Equal(t, filepath.Join(tmpDir, "kodelet"), response.Hints[1].Path)
+	assert.Equal(t, "~/workspace/koala", response.Hints[0].Path)
+	assert.Equal(t, "~/workspace/kodelet", response.Hints[1].Path)
+	assert.Equal(t, "~/workspace", response.BaseDir)
 }
 
 func TestServer_handleGetCWDHints_NaturalSiblingQuery(t *testing.T) {
 	parentDir := t.TempDir()
+	t.Setenv("HOME", parentDir)
+	t.Setenv("USERPROFILE", parentDir)
 	defaultDir := filepath.Join(parentDir, "workspace")
 	require.NoError(t, os.Mkdir(defaultDir, 0o755))
 	require.NoError(t, os.Mkdir(filepath.Join(parentDir, "kodelet"), 0o755))
@@ -716,12 +738,14 @@ func TestServer_handleGetCWDHints_NaturalSiblingQuery(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
 	require.Len(t, response.Hints, 2)
-	assert.Equal(t, filepath.Join(parentDir, "kodelet"), response.Hints[0].Path)
-	assert.Equal(t, filepath.Join(parentDir, "kodelet-website"), response.Hints[1].Path)
+	assert.Equal(t, "~/kodelet", response.Hints[0].Path)
+	assert.Equal(t, "~/kodelet-website", response.Hints[1].Path)
 }
 
 func TestServer_resolveRequestedCWD(t *testing.T) {
 	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir)
 	server := &Server{config: &ServerConfig{CWD: tmpDir}}
 
 	resolved, err := server.resolveRequestedCWD("")
@@ -732,6 +756,10 @@ func TestServer_resolveRequestedCWD(t *testing.T) {
 	require.NoError(t, os.Mkdir(childDir, 0o755))
 
 	resolved, err = server.resolveRequestedCWD("child")
+	require.NoError(t, err)
+	assert.Equal(t, childDir, resolved)
+
+	resolved, err = server.resolveRequestedCWD("~/child")
 	require.NoError(t, err)
 	assert.Equal(t, childDir, resolved)
 }
@@ -2200,6 +2228,17 @@ func TestDisplayProviderName(t *testing.T) {
 			assert.Equal(t, tt.expected, displayProviderName(tt.provider))
 		})
 	}
+}
+
+func TestCompactPathForHome(t *testing.T) {
+	homeDir := t.TempDir()
+	outsideHome := filepath.Join(filepath.Dir(homeDir), filepath.Base(homeDir)+"-other", "project")
+
+	assert.Equal(t, "~", compactPathForHome(homeDir, homeDir))
+	assert.Equal(t, "~/workspace/project", compactPathForHome(filepath.Join(homeDir, "workspace", "project"), homeDir))
+	assert.Equal(t, outsideHome, compactPathForHome(outsideHome, homeDir))
+	assert.Equal(t, "relative/project", compactPathForHome("relative/project", homeDir))
+	assert.Equal(t, "~/already-compact", compactPathForHome("~/already-compact", homeDir))
 }
 
 func TestExtractProviderMetadata(t *testing.T) {

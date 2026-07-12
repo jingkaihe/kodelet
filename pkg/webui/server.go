@@ -899,6 +899,7 @@ func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request)
 		summary := &response.Conversations[i]
 		platform, apiMode := extractProviderMetadata(summary.Provider, summary.Metadata)
 		summary.Provider = displayProviderName(summary.Provider)
+		summary.CWD = compactHomePath(summary.CWD)
 		summary.IsRunning = s.isActiveChat(summary.ID)
 		if summary.Metadata == nil {
 			summary.Metadata = make(map[string]any)
@@ -1048,6 +1049,40 @@ func displayProviderName(provider string) string {
 	default:
 		return provider
 	}
+}
+
+func compactHomePath(path string) string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return strings.TrimSpace(path)
+	}
+	return compactPathForHome(path, homeDir)
+}
+
+func compactPathForHome(path, homeDir string) string {
+	path = strings.TrimSpace(path)
+	homeDir = strings.TrimSpace(homeDir)
+	if path == "" || homeDir == "" || path == "~" || strings.HasPrefix(path, "~/") {
+		return path
+	}
+	if !filepath.IsAbs(path) || !filepath.IsAbs(homeDir) {
+		return path
+	}
+
+	cleanPath := filepath.Clean(path)
+	cleanHomeDir := filepath.Clean(homeDir)
+	pathFromHome, err := filepath.Rel(cleanHomeDir, cleanPath)
+	if err != nil {
+		return path
+	}
+	if pathFromHome == "." {
+		return "~"
+	}
+	if pathFromHome == ".." || strings.HasPrefix(pathFromHome, ".."+string(filepath.Separator)) {
+		return path
+	}
+
+	return "~/" + filepath.ToSlash(pathFromHome)
 }
 
 func resolveConversationProfile(metadata map[string]any) string {
@@ -1242,7 +1277,7 @@ func (s *Server) handleGetChatSettings(w http.ResponseWriter, r *http.Request) {
 		Profiles:               getWebUIProfileOptions(),
 		ReasoningEffort:        config.ReasoningEffort,
 		ReasoningEffortOptions: llmtypes.ReasoningEffortOptions(config),
-		DefaultCWD:             defaultCWD,
+		DefaultCWD:             compactHomePath(defaultCWD),
 	})
 }
 
@@ -1307,10 +1342,13 @@ func (s *Server) handleGetCWDHints(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	for i := range hints {
+		hints[i].Path = compactHomePath(hints[i].Path)
+	}
 
 	s.writeJSONResponse(w, CWDHintsResponse{
-		BaseDir: baseDir,
-		Query:   query,
+		BaseDir: compactHomePath(baseDir),
+		Query:   compactHomePath(query),
 		Hints:   hints,
 	})
 }
@@ -1496,7 +1534,7 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:             response.CreatedAt,
 		UpdatedAt:             response.UpdatedAt,
 		Provider:              providerLabel,
-		CWD:                   response.CWD,
+		CWD:                   compactHomePath(response.CWD),
 		CWDLocked:             response.ID != "" && strings.TrimSpace(response.CWD) != "",
 		Profile:               resolveConversationProfile(response.Metadata),
 		ProfileLocked:         response.ID != "",

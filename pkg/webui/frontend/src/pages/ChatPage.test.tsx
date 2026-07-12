@@ -94,18 +94,18 @@ describe("ChatPage", () => {
 			const reasoningSettings =
 				selectedProfile === "anthropic"
 					? {
-						reasoningEffort: "max",
-						reasoningEffortOptions: ["medium", "high", "max"],
-					}
+							reasoningEffort: "max",
+							reasoningEffortOptions: ["medium", "high", "max"],
+						}
 					: selectedProfile === "restricted"
 						? {
-							reasoningEffort: "low",
-							reasoningEffortOptions: ["low"],
-						}
+								reasoningEffort: "low",
+								reasoningEffortOptions: ["low"],
+							}
 						: {
-							reasoningEffort: "medium",
-							reasoningEffortOptions: ["low", "medium", "high"],
-						};
+								reasoningEffort: "medium",
+								reasoningEffortOptions: ["low", "medium", "high"],
+							};
 
 			return Promise.resolve({
 				currentProfile: selectedProfile,
@@ -418,17 +418,11 @@ describe("ChatPage", () => {
 		fireEvent.change(textarea, { target: { value: "/" } });
 		await screen.findByTestId("slash-command-suggestions");
 
-		expect(textarea).toHaveAttribute(
-			"placeholder",
-			"Ask kodelet anything...",
-		);
+		expect(textarea).toHaveAttribute("placeholder", "Ask kodelet anything...");
 
 		fireEvent.keyDown(textarea, { key: "ArrowDown" });
 
-		expect(textarea).toHaveAttribute(
-			"placeholder",
-			"/goal <objective>",
-		);
+		expect(textarea).toHaveAttribute("placeholder", "/goal <objective>");
 		expect(screen.getByTestId("composer-slash-usage-hint")).toHaveTextContent(
 			"/goal <objective>",
 		);
@@ -488,14 +482,18 @@ describe("ChatPage", () => {
 		await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
 
 		expect(screen.getByTestId("workspace-tools-shell")).toBeInTheDocument();
-		expect(screen.queryByTestId("workspace-tools-dock")).not.toBeInTheDocument();
+		expect(
+			screen.queryByTestId("workspace-tools-dock"),
+		).not.toBeInTheDocument();
 
 		fireEvent.click(screen.getByTestId("workspace-tools-toggle"));
 
 		expect(screen.getByTestId("workspace-tools-dock")).toBeInTheDocument();
 		expect(await screen.findByTestId("terminal-panel")).toBeInTheDocument();
 		expect(screen.getByTestId("composer-textarea")).toBeInTheDocument();
-		expect(screen.queryByTestId("terminal-modal-backdrop")).not.toBeInTheDocument();
+		expect(
+			screen.queryByTestId("terminal-modal-backdrop"),
+		).not.toBeInTheDocument();
 	});
 
 	it("switches to changes in the workspace side panel", async () => {
@@ -505,17 +503,25 @@ describe("ChatPage", () => {
 		await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
 
 		fireEvent.click(screen.getByTestId("workspace-tools-toggle"));
-		await waitFor(() => expect(screen.getByTestId("terminal-panel")).toBeInTheDocument());
+		await waitFor(() =>
+			expect(screen.getByTestId("terminal-panel")).toBeInTheDocument(),
+		);
 		fireEvent.click(screen.getByTestId("workspace-tools-diff-tab"));
 
-		await waitFor(() => expect(mockGetGitDiff).toHaveBeenCalledWith("/workspace/default"));
+		await waitFor(() =>
+			expect(mockGetGitDiff).toHaveBeenCalledWith("/workspace/default"),
+		);
 		expect(screen.getByTestId("workspace-tools-dock")).toBeInTheDocument();
 		await waitFor(() =>
 			expect(screen.getByTestId("git-diff-panel")).toBeInTheDocument(),
 		);
-		expect(screen.queryByRole("heading", { name: "Changes" })).not.toBeInTheDocument();
+		expect(
+			screen.queryByRole("heading", { name: "Changes" }),
+		).not.toBeInTheDocument();
 		expect(screen.getByTestId("composer-textarea")).toBeInTheDocument();
-		expect(screen.queryByTestId("git-diff-modal-backdrop")).not.toBeInTheDocument();
+		expect(
+			screen.queryByTestId("git-diff-modal-backdrop"),
+		).not.toBeInTheDocument();
 	});
 
 	it("switches and closes the workspace side panel", async () => {
@@ -525,14 +531,20 @@ describe("ChatPage", () => {
 		await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
 
 		fireEvent.click(screen.getByTestId("workspace-tools-toggle"));
-		await waitFor(() => expect(screen.getByTestId("terminal-panel")).toBeInTheDocument());
+		await waitFor(() =>
+			expect(screen.getByTestId("terminal-panel")).toBeInTheDocument(),
+		);
 
 		fireEvent.click(screen.getByTestId("workspace-tools-diff-tab"));
-		await waitFor(() => expect(screen.getByTestId("git-diff-panel")).toBeInTheDocument());
+		await waitFor(() =>
+			expect(screen.getByTestId("git-diff-panel")).toBeInTheDocument(),
+		);
 		expect(screen.queryByTestId("terminal-panel")).not.toBeInTheDocument();
 
 		fireEvent.click(screen.getByTestId("workspace-tools-toggle"));
-		expect(screen.queryByTestId("workspace-tools-dock")).not.toBeInTheDocument();
+		expect(
+			screen.queryByTestId("workspace-tools-dock"),
+		).not.toBeInTheDocument();
 		expect(screen.getByTestId("workspace-tools-rail")).toBeInTheDocument();
 		expect(screen.getByTestId("composer-textarea")).toBeInTheDocument();
 	});
@@ -543,9 +555,9 @@ describe("ChatPage", () => {
 		render(<ChatPage />);
 
 		await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
-		expect(
-			screen.getByRole("button", { name: "New Chat" }),
-		).toBe(screen.getByTestId("sidebar-new-chat-button"));
+		expect(screen.getByRole("button", { name: "New Chat" })).toBe(
+			screen.getByTestId("sidebar-new-chat-button"),
+		);
 		fireEvent.click(screen.getByTestId("sidebar-new-chat-button"));
 		expect(screen.getByTestId("new-chat-dialog")).toBeInTheDocument();
 		expect(screen.getByLabelText("Reasoning effort")).toHaveValue("medium");
@@ -645,9 +657,7 @@ describe("ChatPage", () => {
 			);
 			fireEvent.click(screen.getByRole("button", { name: "Start" }));
 			expect(screen.queryByTestId("new-chat-dialog")).not.toBeInTheDocument();
-			expect(
-				screen.getByText(/workspace\/kodelet/),
-			).toBeInTheDocument();
+			expect(screen.getByText(/workspace\/kodelet/)).toBeInTheDocument();
 			await flushCwdBlurTimer();
 		} finally {
 			vi.useRealTimers();
@@ -687,9 +697,7 @@ describe("ChatPage", () => {
 			fireEvent.keyDown(cwdInput, { key: "Enter" });
 			fireEvent.click(screen.getByRole("button", { name: "Start" }));
 
-			expect(
-				screen.getByText(/workspace\/kodelet/),
-			).toBeInTheDocument();
+			expect(screen.getByText(/workspace\/kodelet/)).toBeInTheDocument();
 			await flushCwdBlurTimer();
 		} finally {
 			vi.useRealTimers();
@@ -729,9 +737,7 @@ describe("ChatPage", () => {
 			expect(cwdInput).toHaveValue("/workspace/kodelet");
 			fireEvent.click(screen.getByRole("button", { name: "Start" }));
 
-			expect(
-				screen.getByText(/workspace\/kodelet/),
-			).toBeInTheDocument();
+			expect(screen.getByText(/workspace\/kodelet/)).toBeInTheDocument();
 			await flushCwdBlurTimer();
 		} finally {
 			vi.useRealTimers();
@@ -841,7 +847,9 @@ describe("ChatPage", () => {
 			expect(screen.getByLabelText("Working directory")).toHaveFocus(),
 		);
 		expect(screen.queryByTestId("cwd-suggestions")).not.toBeInTheDocument();
-		expect(screen.queryByText("Type a full path or nearby project name.")).not.toBeInTheDocument();
+		expect(
+			screen.queryByText("Type a full path or nearby project name."),
+		).not.toBeInTheDocument();
 
 		await new Promise((resolve) => window.setTimeout(resolve, 200));
 		expect(mockGetCWDHints).not.toHaveBeenCalledWith("/workspace/default");
@@ -908,9 +916,15 @@ describe("ChatPage", () => {
 		fireEvent.click(screen.getByTestId("sidebar-new-chat-button"));
 
 		expect(screen.getByTestId("recent-workspaces")).toBeInTheDocument();
-		expect(screen.getByRole("button", { name: "/workspace/a" })).toBeInTheDocument();
-		expect(screen.getByRole("button", { name: "/workspace/e" })).toBeInTheDocument();
-		expect(screen.queryByRole("button", { name: "/workspace/f" })).not.toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: "/workspace/a" }),
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: "/workspace/e" }),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: "/workspace/f" }),
+		).not.toBeInTheDocument();
 
 		fireEvent.click(screen.getByRole("button", { name: "/workspace/b" }));
 		expect(screen.getByLabelText("Working directory")).toHaveValue(
@@ -1038,9 +1052,7 @@ describe("ChatPage", () => {
 			"effort:high",
 		);
 		expect(screen.queryByLabelText("Profile")).not.toBeInTheDocument();
-		expect(
-			screen.queryByLabelText("Reasoning effort"),
-		).not.toBeInTheDocument();
+		expect(screen.queryByLabelText("Reasoning effort")).not.toBeInTheDocument();
 
 		fireEvent.change(screen.getByPlaceholderText("Ask kodelet anything..."), {
 			target: { value: "continue" },
@@ -1130,7 +1142,10 @@ describe("ChatPage", () => {
 
 		await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
 		expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
-		expect(screen.getByRole("button", { name: "Steer" })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Steer" })).toHaveAttribute(
+			"title",
+			"Steer (Shift+Enter)",
+		);
 
 		await act(async () => {
 			streamOptions?.onEvent({
@@ -1169,7 +1184,9 @@ describe("ChatPage", () => {
 
 		expect(await screen.findByTestId("pending-steer-list")).toBeInTheDocument();
 		expect(screen.getByText("Focus on tests")).toBeInTheDocument();
-		expect(screen.getByTestId("pending-steer-list")).not.toHaveTextContent("You");
+		expect(screen.getByTestId("pending-steer-list")).not.toHaveTextContent(
+			"You",
+		);
 
 		await act(async () => {
 			streamOptions?.onEvent({
@@ -1185,7 +1202,9 @@ describe("ChatPage", () => {
 		});
 
 		await waitFor(() =>
-			expect(screen.queryByTestId("pending-steer-list")).not.toBeInTheDocument(),
+			expect(
+				screen.queryByTestId("pending-steer-list"),
+			).not.toBeInTheDocument(),
 		);
 	});
 
@@ -1292,7 +1311,9 @@ describe("ChatPage", () => {
 		);
 
 		expect(await screen.findByTestId("pending-steer-list")).toBeInTheDocument();
-		expect(screen.getByText("Use this screenshot · with a screenshot")).toBeInTheDocument();
+		expect(
+			screen.getByText("Use this screenshot · with a screenshot"),
+		).toBeInTheDocument();
 		expect(screen.queryByAltText("Uploaded content")).not.toBeInTheDocument();
 
 		window.FileReader = originalFileReader;
@@ -1499,9 +1520,9 @@ describe("ChatPage", () => {
 		expect(
 			screen.getByTestId("conversation-running-indicator-conv-123"),
 		).toBeInTheDocument();
-		expect(
-			screen.getByTestId("conversation-row-conv-123"),
-		).toHaveClass("running");
+		expect(screen.getByTestId("conversation-row-conv-123")).toHaveClass(
+			"running",
+		);
 		expect(
 			screen.queryByTestId("conversation-running-indicator-conv-456"),
 		).not.toBeInTheDocument();
@@ -1531,7 +1552,9 @@ describe("ChatPage", () => {
 			limit: 40,
 			offset: 0,
 		});
-		mockStreamConversation.mockImplementation(async () => new Promise(() => undefined));
+		mockStreamConversation.mockImplementation(
+			async () => new Promise(() => undefined),
+		);
 
 		render(<ChatPage />);
 
@@ -1678,11 +1701,10 @@ describe("ChatPage", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Submit" }));
 
 		await waitFor(() =>
-			expect(mockRespondToUIInput).toHaveBeenCalledWith(
-				"conv-123",
-				"input-1",
-				{ status: "submitted", value: "yes" },
-			),
+			expect(mockRespondToUIInput).toHaveBeenCalledWith("conv-123", "input-1", {
+				status: "submitted",
+				value: "yes",
+			}),
 		);
 	});
 
@@ -1774,11 +1796,10 @@ describe("ChatPage", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Submit" }));
 
 		await waitFor(() =>
-			expect(mockRespondToUIInput).toHaveBeenCalledWith(
-				"conv-123",
-				"input-1",
-				{ status: "submitted", value: "ok" },
-			),
+			expect(mockRespondToUIInput).toHaveBeenCalledWith("conv-123", "input-1", {
+				status: "submitted",
+				value: "ok",
+			}),
 		);
 	});
 
@@ -1875,11 +1896,10 @@ describe("ChatPage", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Submit" }));
 
 		await waitFor(() =>
-			expect(mockRespondToUIInput).toHaveBeenCalledWith(
-				"conv-123",
-				"input-1",
-				{ status: "submitted", value: "ok" },
-			),
+			expect(mockRespondToUIInput).toHaveBeenCalledWith("conv-123", "input-1", {
+				status: "submitted",
+				value: "ok",
+			}),
 		);
 	});
 
@@ -1924,7 +1944,9 @@ describe("ChatPage", () => {
 			),
 		);
 		await waitFor(() =>
-			expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument(),
+			expect(
+				screen.queryByRole("button", { name: "Stop" }),
+			).not.toBeInTheDocument(),
 		);
 		expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
 		expect(
@@ -1971,9 +1993,11 @@ describe("ChatPage", () => {
 		mockStreamChat.mockImplementation(
 			async (_request, options) =>
 				new Promise<void>(() => {
-					streamOptionsByCall.push(options as {
-						onEvent: (event: ChatStreamEvent) => void;
-					});
+					streamOptionsByCall.push(
+						options as {
+							onEvent: (event: ChatStreamEvent) => void;
+						},
+					);
 				}),
 		);
 
@@ -2002,7 +2026,9 @@ describe("ChatPage", () => {
 			expect(mockGetConversation).toHaveBeenCalledWith("conv-456"),
 		);
 
-		expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: "Stop" }),
+		).not.toBeInTheDocument();
 		expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
 
 		fireEvent.change(screen.getByPlaceholderText("Ask kodelet anything..."), {
@@ -2369,26 +2395,25 @@ describe("ChatPage", () => {
 	});
 
 	it("groups recent chats by cwd and lets directories collapse independently", async () => {
-		mockGetConversations
-			.mockResolvedValueOnce({
-				conversations: Array.from({ length: 12 }, (_, index) => ({
-					id: `conv-${index + 1}`,
-					createdAt: `2024-01-${String(index + 1).padStart(2, "0")}T00:00:00Z`,
-					updatedAt: `2024-01-${String(index + 1).padStart(2, "0")}T00:00:00Z`,
-					messageCount: 1,
-					summary: `Conversation ${index + 1}`,
-					cwd:
-						index < 6
-							? "/workspace/a"
-							: index < 10
-								? "/workspace/b"
-								: "/workspace/c",
-				})),
-				hasMore: false,
-				total: 12,
-				limit: 100,
-				offset: 0,
-			});
+		mockGetConversations.mockResolvedValueOnce({
+			conversations: Array.from({ length: 12 }, (_, index) => ({
+				id: `conv-${index + 1}`,
+				createdAt: `2024-01-${String(index + 1).padStart(2, "0")}T00:00:00Z`,
+				updatedAt: `2024-01-${String(index + 1).padStart(2, "0")}T00:00:00Z`,
+				messageCount: 1,
+				summary: `Conversation ${index + 1}`,
+				cwd:
+					index < 6
+						? "/workspace/a"
+						: index < 10
+							? "/workspace/b"
+							: "/workspace/c",
+			})),
+			hasMore: false,
+			total: 12,
+			limit: 100,
+			offset: 0,
+		});
 
 		render(<ChatPage />);
 
@@ -2398,10 +2423,14 @@ describe("ChatPage", () => {
 		expect(screen.getByText("/workspace/c")).toBeInTheDocument();
 
 		fireEvent.click(screen.getByRole("button", { name: /\/workspace\/a 6/i }));
-		await waitFor(() => expect(screen.getByText("Conversation 1")).toBeInTheDocument());
+		await waitFor(() =>
+			expect(screen.getByText("Conversation 1")).toBeInTheDocument(),
+		);
 
 		fireEvent.click(screen.getByRole("button", { name: /\/workspace\/b 4/i }));
-		await waitFor(() => expect(screen.getByText("Conversation 7")).toBeInTheDocument());
+		await waitFor(() =>
+			expect(screen.getByText("Conversation 7")).toBeInTheDocument(),
+		);
 
 		fireEvent.click(screen.getByRole("button", { name: /\/workspace\/b/i }));
 
@@ -2411,10 +2440,12 @@ describe("ChatPage", () => {
 		expect(screen.getByText("Conversation 1")).toBeInTheDocument();
 
 		fireEvent.click(screen.getByRole("button", { name: /\/workspace\/b/i }));
-		await waitFor(() => expect(screen.getByText("Conversation 7")).toBeInTheDocument());
+		await waitFor(() =>
+			expect(screen.getByText("Conversation 7")).toBeInTheDocument(),
+		);
 	});
 
-	it("shows the full cwd label in recent chats and hides sidebar metadata", async () => {
+	it("shows a compact home cwd label in recent chats and hides sidebar metadata", async () => {
 		mockGetConversations.mockResolvedValue({
 			conversations: [
 				{
@@ -2423,7 +2454,7 @@ describe("ChatPage", () => {
 					updatedAt: "2024-01-01T00:00:00Z",
 					messageCount: 1,
 					summary: "Conversation 1",
-					cwd: "/home/jingkaihe/workspace/kodelet",
+					cwd: "~/workspace/kodelet",
 				},
 			],
 			hasMore: false,
@@ -2436,9 +2467,7 @@ describe("ChatPage", () => {
 		render(<ChatPage />);
 
 		await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
-		expect(
-			screen.getByText("/home/jingkaihe/workspace/kodelet"),
-		).toBeInTheDocument();
+		expect(screen.getByText("~/workspace/kodelet")).toBeInTheDocument();
 		expect(screen.queryByText(/^ID:/)).not.toBeInTheDocument();
 		expect(screen.queryByText(/^Mode:/)).not.toBeInTheDocument();
 	});
@@ -2464,13 +2493,19 @@ describe("ChatPage", () => {
 		await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
 		expect(screen.getByText("Conversation 10")).toBeInTheDocument();
 		expect(screen.queryByText("Conversation 11")).not.toBeInTheDocument();
-		expect(screen.getByRole("button", { name: "Show 2 more" })).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: "Show 2 more" }),
+		).toBeInTheDocument();
 
 		fireEvent.click(screen.getByRole("button", { name: "Show 2 more" }));
 
-		await waitFor(() => expect(screen.getByText("Conversation 11")).toBeInTheDocument());
+		await waitFor(() =>
+			expect(screen.getByText("Conversation 11")).toBeInTheDocument(),
+		);
 		expect(screen.getByText("Conversation 12")).toBeInTheDocument();
-		expect(screen.getByRole("button", { name: "Show less" })).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: "Show less" }),
+		).toBeInTheDocument();
 	});
 
 	it("lets an expanded directory show less before all conversations are revealed", async () => {
@@ -2492,31 +2527,61 @@ describe("ChatPage", () => {
 		render(<ChatPage />);
 
 		await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
-		expect(screen.getByRole("button", { name: "Show 10 more" })).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: "Show 10 more" }),
+		).toBeInTheDocument();
 
 		fireEvent.click(screen.getByRole("button", { name: "Show 10 more" }));
 
-		await waitFor(() => expect(screen.getByText("Conversation 20")).toBeInTheDocument());
+		await waitFor(() =>
+			expect(screen.getByText("Conversation 20")).toBeInTheDocument(),
+		);
 		expect(screen.queryByText("Conversation 21")).not.toBeInTheDocument();
-		expect(screen.getByRole("button", { name: "Show less" })).toBeInTheDocument();
-		expect(screen.getByRole("button", { name: "Show 5 more" })).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: "Show less" }),
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: "Show 5 more" }),
+		).toBeInTheDocument();
 
 		fireEvent.click(screen.getByRole("button", { name: "Show less" }));
 
 		await waitFor(() =>
 			expect(screen.queryByText("Conversation 11")).not.toBeInTheDocument(),
 		);
-		expect(screen.getByRole("button", { name: "Show 10 more" })).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: "Show 10 more" }),
+		).toBeInTheDocument();
 	});
 
 	it("shows compact new chat context text in the composer", async () => {
+		mockGetChatSettings.mockResolvedValue({
+			currentProfile: "work",
+			defaultCWD: "~/workspace/kodelet",
+			profiles: [
+				{ name: "default", scope: "built-in" },
+				{ name: "work", scope: "repo" },
+			],
+			reasoningEffort: "medium",
+			reasoningEffortOptions: ["low", "medium", "high"],
+		});
 		render(<ChatPage />);
 
 		await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
 		expect(
-			screen.getByText(/work · effort:medium · \/workspace\/default/),
+			screen.getByText(/work · effort:medium · ~\/workspace\/kodelet/),
 		).toBeInTheDocument();
-		expect(screen.getByText("Shift+Enter to send")).toBeInTheDocument();
+		expect(screen.queryByText("Shift+Enter to send")).not.toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Send" })).toHaveAttribute(
+			"title",
+			"Send (Shift+Enter)",
+		);
+		fireEvent.click(
+			screen.getByText(/work · effort:medium · ~\/workspace\/kodelet/),
+		);
+		expect(screen.getByLabelText("Working directory")).toHaveValue(
+			"~/workspace/kodelet",
+		);
 	});
 
 	it("shows compact usage metadata below the transcript when available", async () => {
@@ -2561,7 +2626,9 @@ describe("ChatPage", () => {
 		expect(meta).toHaveTextContent("cr 8K");
 		expect(meta).toHaveTextContent("cw 2.2K");
 		expect(meta).toHaveTextContent("$0.0000");
-		expect(meta.textContent).toContain(", in 1.2K, out 340, cr 8K, cw 2.2K, $0.0000,");
+		expect(meta.textContent).toContain(
+			", in 1.2K, out 340, cr 8K, cw 2.2K, $0.0000,",
+		);
 		expect(meta.textContent).toMatch(/\d+m ago|just now/);
 	});
 
@@ -2831,7 +2898,9 @@ describe("ChatPage", () => {
 		await waitFor(() =>
 			expect(mockStopConversation).toHaveBeenCalledWith("conv-123"),
 		);
-		expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: "Stop" }),
+		).not.toBeInTheDocument();
 		expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
 
 		await act(async () => {

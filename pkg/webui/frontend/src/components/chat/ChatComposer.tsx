@@ -26,7 +26,6 @@ interface ChatComposerProps {
 	slashCommandSuggestions: SlashCommandOption[];
 	slashCommandSuggestionsOpen: boolean;
 	slashUsageHint: string;
-	statusText?: string;
 	stopActionLabel: string;
 	streamError: string | null;
 	submitActionLabel: string;
@@ -63,7 +62,6 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
 	slashCommandSuggestions,
 	slashCommandSuggestionsOpen,
 	slashUsageHint,
-	statusText = "Shift+Enter to send",
 	stopActionLabel,
 	streamError,
 	submitActionLabel,
@@ -139,7 +137,11 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
 										onClick={() => onRemoveAttachment(attachment.id)}
 										type="button"
 									>
-										<X aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={2} />
+										<X
+											aria-hidden="true"
+											className="h-3.5 w-3.5"
+											strokeWidth={2}
+										/>
 									</button>
 								</div>
 							))}
@@ -273,8 +275,6 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
 										</span>
 									</button>
 								)}
-
-								<p className="composer-status-inline">{statusText}</p>
 							</div>
 
 							<div className="composer-status-actions">
@@ -306,7 +306,7 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
 									aria-label={submitActionLabel}
 									disabled={submitDisabled}
 									onClick={() => void onSubmit()}
-									title={submitActionLabel}
+									title={`${submitActionLabel} (Shift+Enter)`}
 									type="button"
 								>
 									<ArrowUp
