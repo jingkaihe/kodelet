@@ -230,6 +230,8 @@ describe("ApiService", () => {
 					currentProfile: "work",
 					defaultCWD: "/workspace/default",
 					profiles: [{ name: "default", scope: "built-in" }],
+					reasoningEffort: "high",
+					reasoningEffortOptions: ["low", "medium", "high"],
 				}),
 			});
 
@@ -241,6 +243,31 @@ describe("ApiService", () => {
 			);
 			expect(result.currentProfile).toBe("work");
 			expect(result.defaultCWD).toBe("/workspace/default");
+			expect(result.reasoningEffort).toBe("high");
+		});
+
+		it("fetches reasoning settings for a selected profile", async () => {
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({
+					currentProfile: "anthropic",
+					profiles: [],
+					reasoningEffort: "max",
+					reasoningEffortOptions: ["medium", "high", "max"],
+				}),
+			});
+
+			const result = await apiService.getChatSettings("anthropic");
+
+			expect(mockFetch).toHaveBeenCalledWith(
+				"/api/chat/settings?profile=anthropic",
+				expect.any(Object),
+			);
+			expect(result.reasoningEffortOptions).toEqual([
+				"medium",
+				"high",
+				"max",
+			]);
 		});
 	});
 

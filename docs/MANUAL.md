@@ -804,7 +804,7 @@ aliases:
     sonnet-46: claude-sonnet-4-6
 ```
 
-`allowed_reasoning_efforts` controls which values may be selected for a new conversation through CLI/chat overrides and the TUI effort picker. When the list is omitted or empty, direct overrides remain unrestricted and the TUI exposes every reasoning effort supported by the configured provider. A non-empty list is the authoritative ordered subset shown by the TUI and accepted by overrides. Once a conversation is created, Kodelet stores a versioned `config_snapshot` in its metadata. Resuming the conversation restores the snapshotted provider, model, token/reasoning settings, and provider request mode; a conflicting reasoning effort override is rejected. For legacy conversations without a snapshot, an explicit reasoning-effort override is rejected because the original value cannot be verified. Credentials, endpoints, prompt/context inputs, and live tool/security policy are intentionally not stored in the snapshot.
+`allowed_reasoning_efforts` defines the ordered reasoning-effort choices available for new conversations in the TUI and Web UI. When omitted or empty, all efforts supported by the configured provider are available.
 
 ### Profile Management Commands
 

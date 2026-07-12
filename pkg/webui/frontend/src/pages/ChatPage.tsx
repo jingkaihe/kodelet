@@ -57,6 +57,31 @@ const TerminalModal = lazy(
 	() => import("../components/workspace/TerminalModal"),
 );
 
+const DEFAULT_REASONING_EFFORT = "medium";
+
+const reasoningSettingsFromChatSettings = (
+	settings: Partial<ChatSettings>,
+): { effort: string; options: string[] } => {
+	const effort =
+		typeof settings.reasoningEffort === "string" &&
+		settings.reasoningEffort.trim()
+			? settings.reasoningEffort.trim().toLowerCase()
+			: DEFAULT_REASONING_EFFORT;
+	const options = Array.from(
+		new Set(
+			(settings.reasoningEffortOptions || [])
+				.map((option) => option.trim().toLowerCase())
+				.filter(Boolean),
+		),
+	);
+
+	if (!options.includes(effort)) {
+		options.push(effort);
+	}
+
+	return { effort, options };
+};
+
 const normalizeConversation = (conversation: Conversation): Conversation => ({
 	...conversation,
 	cwd:
@@ -66,6 +91,11 @@ const normalizeConversation = (conversation: Conversation): Conversation => ({
 	profile:
 		typeof conversation.profile === "string" && conversation.profile.trim()
 			? conversation.profile.trim()
+			: undefined,
+	reasoningEffort:
+		typeof conversation.reasoningEffort === "string" &&
+		conversation.reasoningEffort.trim()
+			? conversation.reasoningEffort.trim().toLowerCase()
 			: undefined,
 	messages: (conversation.messages || []).map((message) => ({
 		role: message.role || "user",
@@ -379,9 +409,26 @@ const ChatPage: React.FC = () => {
 	>(conversationId);
 	const [chatSettings, setChatSettings] = useState<ChatSettings>({
 		profiles: [],
+		reasoningEffort: DEFAULT_REASONING_EFFORT,
+		reasoningEffortOptions: [DEFAULT_REASONING_EFFORT],
 	});
 	const [selectedProfile, setSelectedProfile] = useState("default");
 	const [newChatProfileDraft, setNewChatProfileDraft] = useState("default");
+	const [selectedReasoningEffort, setSelectedReasoningEffort] = useState(
+		DEFAULT_REASONING_EFFORT,
+	);
+	const [selectedReasoningEffortOptions, setSelectedReasoningEffortOptions] =
+		useState<string[]>([DEFAULT_REASONING_EFFORT]);
+	const [selectedReasoningEffortExplicit, setSelectedReasoningEffortExplicit] =
+		useState(false);
+	const [newChatReasoningEffortDraft, setNewChatReasoningEffortDraft] =
+		useState(DEFAULT_REASONING_EFFORT);
+	const [newChatReasoningEffortOptions, setNewChatReasoningEffortOptions] =
+		useState<string[]>([DEFAULT_REASONING_EFFORT]);
+	const [newChatReasoningEffortExplicit, setNewChatReasoningEffortExplicit] =
+		useState(false);
+	const [reasoningSettingsLoading, setReasoningSettingsLoading] =
+		useState(false);
 	const [selectedCWD, setSelectedCWD] = useState("");
 	const [cwdQuery, setCwdQuery] = useState("");
 	const [cwdSuggestions, setCwdSuggestions] = useState<CWDHint[]>([]);
@@ -430,6 +477,7 @@ const ChatPage: React.FC = () => {
 	>({});
 	const resumeControllerRef = useRef<AbortController | null>(null);
 	const resumeStreamRef = useRef(0);
+	const reasoningSettingsRequestRef = useRef(0);
 	const cwdSuggestionRequestRef = useRef(0);
 	const cwdInputFocusedRef = useRef(false);
 	const cwdSuggestionSkipQueryRef = useRef<string | null>(null);
@@ -547,9 +595,18 @@ const ChatPage: React.FC = () => {
 		void apiService
 			.getChatSettings()
 			.then((settings) => {
+				const reasoningSettings =
+					reasoningSettingsFromChatSettings(settings);
 				setChatSettings(settings);
 				setSelectedProfile(settings.currentProfile || "default");
 				setNewChatProfileDraft(settings.currentProfile || "default");
+				setSelectedReasoningEffort(reasoningSettings.effort);
+				setSelectedReasoningEffortOptions(reasoningSettings.options);
+				setSelectedReasoningEffortExplicit(false);
+				setNewChatReasoningEffortDraft(reasoningSettings.effort);
+				setNewChatReasoningEffortOptions(reasoningSettings.options);
+				setNewChatReasoningEffortExplicit(false);
+				setReasoningSettingsLoading(false);
 				setSelectedCWD(settings.defaultCWD || "");
 				setCwdQuery("");
 			})
@@ -562,6 +619,7 @@ const ChatPage: React.FC = () => {
 	useEffect(() => {
 		return () => {
 			resumeStreamRef.current += 1;
+			reasoningSettingsRequestRef.current += 1;
 			abortControllerRef.current?.abort();
 			Object.values(sendControllersRef.current).forEach((controller) => {
 				controller.abort();
@@ -1091,6 +1149,15 @@ const ChatPage: React.FC = () => {
 		setStreamError(null);
 		setSelectedProfile(chatSettings.currentProfile || "default");
 		setNewChatProfileDraft(chatSettings.currentProfile || "default");
+		const reasoningSettings = reasoningSettingsFromChatSettings(chatSettings);
+		setSelectedReasoningEffort(reasoningSettings.effort);
+		setSelectedReasoningEffortOptions(reasoningSettings.options);
+		setSelectedReasoningEffortExplicit(false);
+		setNewChatReasoningEffortDraft(reasoningSettings.effort);
+		setNewChatReasoningEffortOptions(reasoningSettings.options);
+		setNewChatReasoningEffortExplicit(false);
+		reasoningSettingsRequestRef.current += 1;
+		setReasoningSettingsLoading(false);
 		setSelectedCWD(chatSettings.defaultCWD || "");
 		const defaultCWD = chatSettings.defaultCWD || "";
 		cwdSuggestionSkipQueryRef.current = defaultCWD;
@@ -1455,6 +1522,7 @@ const ChatPage: React.FC = () => {
 				preview: userPreview,
 				cwd: currentCWDLabel,
 				profile: selectedProfile,
+				reasoningEffort: selectedReasoningEffort,
 				isRunning: true,
 				messages: [{ role: "user" as const, content: initialUserContent }],
 				pendingSteer: [],
@@ -1476,6 +1544,9 @@ const ChatPage: React.FC = () => {
 					content: initialUserContent,
 					conversationId: targetConversationId,
 					profile: conversationId ? undefined : selectedProfile,
+					reasoningEffort: conversationId
+						? undefined
+						: selectedReasoningEffort,
 					cwd: conversationId ? undefined : currentCWDLabel || undefined,
 				},
 				{
@@ -1852,6 +1923,13 @@ const ChatPage: React.FC = () => {
 		return selectedProfile || "default";
 	}, [conversation?.profile, conversationId, selectedProfile]);
 
+	const currentReasoningEffortLabel = useMemo(() => {
+		if (conversationId) {
+			return conversation?.reasoningEffort || "";
+		}
+		return selectedReasoningEffort;
+	}, [conversation?.reasoningEffort, conversationId, selectedReasoningEffort]);
+
 	const currentCWDLabel = useMemo(() => {
 		const isStartedConversationAwaitingLoad =
 			Boolean(conversationId) &&
@@ -1992,6 +2070,47 @@ const ChatPage: React.FC = () => {
 		}
 	};
 
+	const handleNewChatProfileDraftChange = (profileName: string) => {
+		const previousEffort = newChatReasoningEffortDraft;
+		const previousEffortWasExplicit = newChatReasoningEffortExplicit;
+		const requestId = reasoningSettingsRequestRef.current + 1;
+		reasoningSettingsRequestRef.current = requestId;
+
+		setNewChatProfileDraft(profileName);
+		setReasoningSettingsLoading(true);
+
+		void apiService
+			.getChatSettings(profileName)
+			.then((settings) => {
+				if (reasoningSettingsRequestRef.current !== requestId) {
+					return;
+				}
+
+				const reasoningSettings =
+					reasoningSettingsFromChatSettings(settings);
+				const preserveExplicitEffort =
+					previousEffortWasExplicit &&
+					reasoningSettings.options.includes(previousEffort);
+
+				setNewChatReasoningEffortOptions(reasoningSettings.options);
+				setNewChatReasoningEffortDraft(
+					preserveExplicitEffort
+						? previousEffort
+						: reasoningSettings.effort,
+				);
+				setNewChatReasoningEffortExplicit(preserveExplicitEffort);
+				setReasoningSettingsLoading(false);
+			})
+			.catch((error) => {
+				if (reasoningSettingsRequestRef.current !== requestId) {
+					return;
+				}
+
+				console.error("Failed to load profile reasoning settings", error);
+				setReasoningSettingsLoading(false);
+			});
+	};
+
 	const availableProfiles = useMemo(() => {
 		const configuredProfiles = chatSettings.profiles || [];
 		if (
@@ -2013,9 +2132,14 @@ const ChatPage: React.FC = () => {
 		const directoryLabel = currentCWDLabel
 			? truncateMiddle(currentCWDLabel, 46)
 			: "Default directory";
+		const contextParts = [currentProfileLabel];
+		if (currentReasoningEffortLabel) {
+			contextParts.push(`effort:${currentReasoningEffortLabel}`);
+		}
+		contextParts.push(directoryLabel);
 
-		return `${currentProfileLabel} · ${directoryLabel}`;
-	}, [currentCWDLabel, currentProfileLabel]);
+		return contextParts.join(" · ");
+	}, [currentCWDLabel, currentProfileLabel, currentReasoningEffortLabel]);
 
 	const recentWorkspaces = useMemo(
 		() => getRecentWorkspaces(conversations),
@@ -2120,9 +2244,14 @@ const ChatPage: React.FC = () => {
 	const pendingSteerMessages = conversation?.pendingSteer || [];
 
 	const handleCloseNewChatDialog = () => {
+		reasoningSettingsRequestRef.current += 1;
+		setReasoningSettingsLoading(false);
 		setNewChatProfileDraft(
 			selectedProfile || chatSettings.currentProfile || "default",
 		);
+		setNewChatReasoningEffortDraft(selectedReasoningEffort);
+		setNewChatReasoningEffortOptions(selectedReasoningEffortOptions);
+		setNewChatReasoningEffortExplicit(selectedReasoningEffortExplicit);
 		cwdSuggestionSkipQueryRef.current = null;
 		requestCwdSuggestions.cancel();
 		cwdSuggestionRequestRef.current += 1;
@@ -2175,7 +2304,14 @@ const ChatPage: React.FC = () => {
 	};
 
 	const handleCommitNewChatContext = () => {
+		if (reasoningSettingsLoading) {
+			return;
+		}
+
 		setSelectedProfile(newChatProfileDraft || "default");
+		setSelectedReasoningEffort(newChatReasoningEffortDraft);
+		setSelectedReasoningEffortOptions(newChatReasoningEffortOptions);
+		setSelectedReasoningEffortExplicit(newChatReasoningEffortExplicit);
 		setSelectedCWD(cwdQuery.trim());
 		cwdSuggestionSkipQueryRef.current = null;
 		requestCwdSuggestions.cancel();
@@ -2219,6 +2355,9 @@ const ChatPage: React.FC = () => {
 					cwdSuggestionsOpen={cwdSuggestionsOpen}
 					defaultCWD={chatSettings.defaultCWD}
 					profileDraft={newChatProfileDraft}
+					reasoningEffortDraft={newChatReasoningEffortDraft}
+					reasoningEffortLoading={reasoningSettingsLoading}
+					reasoningEffortOptions={newChatReasoningEffortOptions}
 					recentWorkspaces={recentWorkspaces}
 					ref={newChatDialogRef}
 					onCancel={handleCloseNewChatDialog}
@@ -2238,7 +2377,11 @@ const ChatPage: React.FC = () => {
 						);
 					}}
 					onCwdInputKeyDown={handleCwdInputKeyDown}
-					onProfileDraftChange={setNewChatProfileDraft}
+					onProfileDraftChange={handleNewChatProfileDraftChange}
+					onReasoningEffortDraftChange={(reasoningEffort) => {
+						setNewChatReasoningEffortDraft(reasoningEffort);
+						setNewChatReasoningEffortExplicit(true);
+					}}
 					onRecentWorkspaceSelect={handleRecentWorkspaceSelect}
 					onSelectCwdSuggestion={applyCwdSuggestion}
 				/>
@@ -2403,6 +2546,15 @@ const ChatPage: React.FC = () => {
 						onAttachImages={appendAttachments}
 						onContextOpen={() => {
 							setNewChatProfileDraft(currentProfileLabel);
+							setNewChatReasoningEffortDraft(selectedReasoningEffort);
+							setNewChatReasoningEffortOptions(
+								selectedReasoningEffortOptions,
+							);
+							setNewChatReasoningEffortExplicit(
+								selectedReasoningEffortExplicit,
+							);
+							reasoningSettingsRequestRef.current += 1;
+							setReasoningSettingsLoading(false);
 							setCwdQuery(selectedCWD || chatSettings.defaultCWD || "");
 							setNewChatDialogOpen(true);
 						}}

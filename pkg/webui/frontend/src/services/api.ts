@@ -111,8 +111,15 @@ class ApiService {
 		return this.request<Conversation>(`/api/conversations/${id}`);
 	}
 
-	async getChatSettings(): Promise<ChatSettings> {
-		return this.request<ChatSettings>("/api/chat/settings");
+	async getChatSettings(profile?: string): Promise<ChatSettings> {
+		const params = new URLSearchParams();
+		if (profile) {
+			params.append("profile", profile);
+		}
+		const suffix = params.toString();
+		return this.request<ChatSettings>(
+			`/api/chat/settings${suffix ? `?${suffix}` : ""}`,
+		);
 	}
 
 	async getSlashCommands(cwd?: string): Promise<SlashCommandsResponse> {

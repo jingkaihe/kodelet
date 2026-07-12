@@ -12,6 +12,9 @@ interface NewChatContextDialogProps {
 	cwdSuggestionsOpen: boolean;
 	defaultCWD?: string;
 	profileDraft: string;
+	reasoningEffortDraft: string;
+	reasoningEffortLoading: boolean;
+	reasoningEffortOptions: string[];
 	recentWorkspaces: string[];
 	onCancel: () => void;
 	onCommit: () => void;
@@ -20,6 +23,7 @@ interface NewChatContextDialogProps {
 	onCwdInputFocus: () => void;
 	onCwdInputKeyDown: (event: React.KeyboardEvent<HTMLInputElement>) => void;
 	onProfileDraftChange: (profileName: string) => void;
+	onReasoningEffortDraftChange: (reasoningEffort: string) => void;
 	onRecentWorkspaceSelect: (path: string) => void;
 	onSelectCwdSuggestion: (path: string) => void;
 }
@@ -54,6 +58,9 @@ const NewChatContextDialog = React.forwardRef<
 			cwdSuggestionsOpen,
 			defaultCWD,
 			profileDraft,
+			reasoningEffortDraft,
+			reasoningEffortLoading,
+			reasoningEffortOptions,
 			recentWorkspaces,
 			onCancel,
 			onCommit,
@@ -62,6 +69,7 @@ const NewChatContextDialog = React.forwardRef<
 			onCwdInputFocus,
 			onCwdInputKeyDown,
 			onProfileDraftChange,
+			onReasoningEffortDraftChange,
 			onRecentWorkspaceSelect,
 			onSelectCwdSuggestion,
 		},
@@ -95,6 +103,35 @@ const NewChatContextDialog = React.forwardRef<
 									{availableProfiles.map((profile) => (
 										<option key={profile.name} value={profile.name}>
 											{profile.name}
+										</option>
+									))}
+								</select>
+								<span className="new-chat-select-chevron" aria-hidden="true">
+									<ChevronDown className="h-4 w-4" strokeWidth={1.8} />
+								</span>
+							</div>
+						</label>
+
+						<label className="new-chat-field">
+							<span className="composer-profile-label">Reasoning effort</span>
+							<div className="new-chat-select-shell">
+								<select
+									aria-busy={reasoningEffortLoading}
+									aria-label="Reasoning effort"
+									className="new-chat-field-control new-chat-field-control-select"
+									data-testid="new-chat-reasoning-effort-select"
+									disabled={
+										reasoningEffortLoading ||
+										reasoningEffortOptions.length <= 1
+									}
+									onChange={(event) =>
+										onReasoningEffortDraftChange(event.target.value)
+									}
+									value={reasoningEffortDraft}
+								>
+									{reasoningEffortOptions.map((effort) => (
+										<option key={effort} value={effort}>
+											{effort}
 										</option>
 									))}
 								</select>
@@ -203,6 +240,7 @@ const NewChatContextDialog = React.forwardRef<
 					</button>
 					<button
 						className="composer-capsule composer-capsule-accent"
+						disabled={reasoningEffortLoading}
 						onClick={onCommit}
 						type="button"
 					>

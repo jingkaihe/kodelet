@@ -1379,7 +1379,7 @@ h6 {
 
 .new-chat-dialog-grid {
   display: grid;
-  grid-template-columns: minmax(0, 12rem) minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.9rem;
 }
 
@@ -1391,6 +1391,7 @@ h6 {
 }
 
 .new-chat-field-wide {
+  grid-column: 1 / -1;
   min-width: 0;
 }
 
@@ -1425,6 +1426,11 @@ h6 {
   outline: none;
   border-color: rgba(217, 119, 87, 0.32);
   box-shadow: 0 0 0 4px rgba(217, 119, 87, 0.1);
+}
+
+.new-chat-field-control:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
 }
 
 .new-chat-select-chevron {

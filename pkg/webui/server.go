@@ -916,21 +916,23 @@ func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request)
 
 // WebConversationResponse represents a conversation response for the web UI.
 type WebConversationResponse struct {
-	ID            string       `json:"id"`
-	CreatedAt     time.Time    `json:"createdAt"`
-	UpdatedAt     time.Time    `json:"updatedAt"`
-	Provider      string       `json:"provider"`
-	CWD           string       `json:"cwd,omitempty"`
-	CWDLocked     bool         `json:"cwdLocked,omitempty"`
-	Profile       string       `json:"profile,omitempty"`
-	ProfileLocked bool         `json:"profileLocked,omitempty"`
-	Summary       string       `json:"summary,omitempty"`
-	IsRunning     bool         `json:"isRunning,omitempty"`
-	Usage         any          `json:"usage"`
-	Messages      []WebMessage `json:"messages"`
-	PendingSteer  []WebMessage `json:"pendingSteer,omitempty"`
-	ToolResults   any          `json:"toolResults,omitempty"`
-	MessageCount  int          `json:"messageCount"`
+	ID                    string       `json:"id"`
+	CreatedAt             time.Time    `json:"createdAt"`
+	UpdatedAt             time.Time    `json:"updatedAt"`
+	Provider              string       `json:"provider"`
+	CWD                   string       `json:"cwd,omitempty"`
+	CWDLocked             bool         `json:"cwdLocked,omitempty"`
+	Profile               string       `json:"profile,omitempty"`
+	ProfileLocked         bool         `json:"profileLocked,omitempty"`
+	ReasoningEffort       string       `json:"reasoningEffort,omitempty"`
+	ReasoningEffortLocked bool         `json:"reasoningEffortLocked,omitempty"`
+	Summary               string       `json:"summary,omitempty"`
+	IsRunning             bool         `json:"isRunning,omitempty"`
+	Usage                 any          `json:"usage"`
+	Messages              []WebMessage `json:"messages"`
+	PendingSteer          []WebMessage `json:"pendingSteer,omitempty"`
+	ToolResults           any          `json:"toolResults,omitempty"`
+	MessageCount          int          `json:"messageCount"`
 }
 
 // ChatProfileOption represents a selectable profile in the web UI.
@@ -940,11 +942,13 @@ type ChatProfileOption struct {
 	Active bool   `json:"active,omitempty"`
 }
 
-// ChatSettingsResponse contains profile settings for the web chat composer.
+// ChatSettingsResponse contains new-conversation settings for the web chat composer.
 type ChatSettingsResponse struct {
-	CurrentProfile string              `json:"currentProfile,omitempty"`
-	Profiles       []ChatProfileOption `json:"profiles"`
-	DefaultCWD     string              `json:"defaultCWD,omitempty"`
+	CurrentProfile         string              `json:"currentProfile,omitempty"`
+	Profiles               []ChatProfileOption `json:"profiles"`
+	ReasoningEffort        string              `json:"reasoningEffort"`
+	ReasoningEffortOptions []string            `json:"reasoningEffortOptions"`
+	DefaultCWD             string              `json:"defaultCWD,omitempty"`
 }
 
 type SlashCommandsResponse struct {
@@ -1072,6 +1076,25 @@ func resolveConversationProfile(metadata map[string]any) string {
 	return profile
 }
 
+func resolveConversationReasoningEffort(response *conversations.GetConversationResponse) string {
+	if response == nil {
+		return ""
+	}
+
+	if snapshot, hasSnapshot, err := conversations.ConfigSnapshotFromMetadata(response.Metadata); err == nil && hasSnapshot {
+		effort, normalizeErr := llmtypes.NormalizeReasoningEffort(snapshot.ReasoningEffort)
+		if normalizeErr == nil {
+			return effort
+		}
+	}
+
+	config, err := chat.ResolveConfigForExistingConversation(response)
+	if err != nil {
+		return ""
+	}
+	return config.ReasoningEffort
+}
+
 func getGlobalProfiles() map[string]llmtypes.ProfileConfig {
 	v := viper.New()
 	v.SetConfigName("config")
@@ -1195,16 +1218,31 @@ func getCurrentWebUIProfile() string {
 }
 
 // handleGetChatSettings handles GET /api/chat/settings.
-func (s *Server) handleGetChatSettings(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleGetChatSettings(w http.ResponseWriter, r *http.Request) {
+	profile := strings.TrimSpace(r.URL.Query().Get("profile"))
+	if profile == "" {
+		profile = getCurrentWebUIProfile()
+	} else if strings.EqualFold(profile, "default") {
+		profile = "default"
+	}
+
+	config, err := chat.ResolveConfigForNewConversation(profile)
+	if err != nil {
+		s.writeErrorResponse(w, http.StatusBadRequest, "failed to resolve chat settings", err)
+		return
+	}
+
 	defaultCWD, err := s.defaultCWD()
 	if err != nil {
 		defaultCWD = ""
 	}
 
 	s.writeJSONResponse(w, ChatSettingsResponse{
-		CurrentProfile: getCurrentWebUIProfile(),
-		Profiles:       getWebUIProfileOptions(),
-		DefaultCWD:     defaultCWD,
+		CurrentProfile:         profile,
+		Profiles:               getWebUIProfileOptions(),
+		ReasoningEffort:        config.ReasoningEffort,
+		ReasoningEffortOptions: llmtypes.ReasoningEffortOptions(config),
+		DefaultCWD:             defaultCWD,
 	})
 }
 
@@ -1454,21 +1492,23 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 	// Convert to web response format
 
 	webResponse := &WebConversationResponse{
-		ID:            response.ID,
-		CreatedAt:     response.CreatedAt,
-		UpdatedAt:     response.UpdatedAt,
-		Provider:      providerLabel,
-		CWD:           response.CWD,
-		CWDLocked:     response.ID != "" && strings.TrimSpace(response.CWD) != "",
-		Profile:       resolveConversationProfile(response.Metadata),
-		ProfileLocked: response.ID != "",
-		Summary:       response.Summary,
-		IsRunning:     s.isActiveChat(response.ID),
-		Usage:         response.Usage,
-		Messages:      webMessages,
-		PendingSteer:  pendingSteer,
-		ToolResults:   response.ToolResults,
-		MessageCount:  len(webMessages),
+		ID:                    response.ID,
+		CreatedAt:             response.CreatedAt,
+		UpdatedAt:             response.UpdatedAt,
+		Provider:              providerLabel,
+		CWD:                   response.CWD,
+		CWDLocked:             response.ID != "" && strings.TrimSpace(response.CWD) != "",
+		Profile:               resolveConversationProfile(response.Metadata),
+		ProfileLocked:         response.ID != "",
+		ReasoningEffort:       resolveConversationReasoningEffort(response),
+		ReasoningEffortLocked: response.ID != "",
+		Summary:               response.Summary,
+		IsRunning:             s.isActiveChat(response.ID),
+		Usage:                 response.Usage,
+		Messages:              webMessages,
+		PendingSteer:          pendingSteer,
+		ToolResults:           response.ToolResults,
+		MessageCount:          len(webMessages),
 	}
 
 	s.writeJSONResponse(w, webResponse)

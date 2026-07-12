@@ -2,9 +2,11 @@
 
 ## 0.4.56-beta
 
-Added conversation configuration snapshots and `allowed_reasoning_efforts`, preserving model and reasoning behavior across resumes while keeping credentials and live tool policy current; an empty allowlist exposes all provider-supported efforts in the TUI.
+Added conversation configuration snapshots and `allowed_reasoning_efforts`, preserving model and reasoning behavior across resumes while keeping credentials and live tool policy current; an empty allowlist exposes all provider-supported efforts in the TUI and Web UI.
 
 Added a reasoning-effort picker beside the profile in `kodelet chat`, available before the first message through `Ctrl+Y` or mouse selection.
+
+Added reasoning-effort selection to the Web UI new-chat settings, including profile-specific allowed options and locked effort display for existing conversations.
 
 Optimized Web UI loading with lazy route and workspace chunks, Rolldown vendor splitting, and externalized `ghostty-web` WASM to eliminate oversized JavaScript bundles.
 

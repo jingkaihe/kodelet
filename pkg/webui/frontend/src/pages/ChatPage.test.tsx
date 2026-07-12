@@ -89,14 +89,35 @@ describe("ChatPage", () => {
 		routeParams = {};
 		window.localStorage.clear();
 		window.HTMLElement.prototype.scrollIntoView = vi.fn();
-		mockGetChatSettings.mockResolvedValue({
-			currentProfile: "work",
-			defaultCWD: "/workspace/default",
-			profiles: [
-				{ name: "default", scope: "built-in" },
-				{ name: "work", scope: "repo" },
-				{ name: "anthropic", scope: "global" },
-			],
+		mockGetChatSettings.mockImplementation((profile?: string) => {
+			const selectedProfile = profile || "work";
+			const reasoningSettings =
+				selectedProfile === "anthropic"
+					? {
+						reasoningEffort: "max",
+						reasoningEffortOptions: ["medium", "high", "max"],
+					}
+					: selectedProfile === "restricted"
+						? {
+							reasoningEffort: "low",
+							reasoningEffortOptions: ["low"],
+						}
+						: {
+							reasoningEffort: "medium",
+							reasoningEffortOptions: ["low", "medium", "high"],
+						};
+
+			return Promise.resolve({
+				currentProfile: selectedProfile,
+				defaultCWD: "/workspace/default",
+				profiles: [
+					{ name: "default", scope: "built-in" },
+					{ name: "work", scope: "repo" },
+					{ name: "anthropic", scope: "global" },
+					{ name: "restricted", scope: "global" },
+				],
+				...reasoningSettings,
+			});
 		});
 		mockGetConversations.mockResolvedValue({
 			conversations: [],
@@ -489,7 +510,9 @@ describe("ChatPage", () => {
 
 		await waitFor(() => expect(mockGetGitDiff).toHaveBeenCalledWith("/workspace/default"));
 		expect(screen.getByTestId("workspace-tools-dock")).toBeInTheDocument();
-		expect(screen.getByTestId("git-diff-panel")).toBeInTheDocument();
+		await waitFor(() =>
+			expect(screen.getByTestId("git-diff-panel")).toBeInTheDocument(),
+		);
 		expect(screen.queryByRole("heading", { name: "Changes" })).not.toBeInTheDocument();
 		expect(screen.getByTestId("composer-textarea")).toBeInTheDocument();
 		expect(screen.queryByTestId("git-diff-modal-backdrop")).not.toBeInTheDocument();
@@ -525,10 +548,20 @@ describe("ChatPage", () => {
 		).toBe(screen.getByTestId("sidebar-new-chat-button"));
 		fireEvent.click(screen.getByTestId("sidebar-new-chat-button"));
 		expect(screen.getByTestId("new-chat-dialog")).toBeInTheDocument();
+		expect(screen.getByLabelText("Reasoning effort")).toHaveValue("medium");
+		fireEvent.change(screen.getByLabelText("Reasoning effort"), {
+			target: { value: "high" },
+		});
 
 		fireEvent.change(screen.getByTestId("new-chat-profile-select"), {
 			target: { value: "anthropic" },
 		});
+		await waitFor(() =>
+			expect(mockGetChatSettings).toHaveBeenLastCalledWith("anthropic"),
+		);
+		await waitFor(() =>
+			expect(screen.getByLabelText("Reasoning effort")).toHaveValue("high"),
+		);
 		fireEvent.change(screen.getByLabelText("Working directory"), {
 			target: { value: "/workspace/alt" },
 		});
@@ -545,9 +578,31 @@ describe("ChatPage", () => {
 
 		await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
 		expect(mockStreamChat).toHaveBeenCalledWith(
-			expect.objectContaining({ profile: "anthropic", cwd: "/workspace/alt" }),
+			expect.objectContaining({
+				profile: "anthropic",
+				reasoningEffort: "high",
+				cwd: "/workspace/alt",
+			}),
 			expect.any(Object),
 		);
+	});
+
+	it("resets an unsupported explicit effort when the profile changes", async () => {
+		render(<ChatPage />);
+
+		await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
+		fireEvent.click(screen.getByTestId("sidebar-new-chat-button"));
+		fireEvent.change(screen.getByLabelText("Reasoning effort"), {
+			target: { value: "high" },
+		});
+		fireEvent.change(screen.getByTestId("new-chat-profile-select"), {
+			target: { value: "restricted" },
+		});
+
+		await waitFor(() =>
+			expect(screen.getByLabelText("Reasoning effort")).toHaveValue("low"),
+		);
+		expect(screen.getByLabelText("Reasoning effort")).toBeDisabled();
 	});
 
 	it("shows cwd suggestions and applies a clicked suggestion", async () => {
@@ -957,6 +1012,8 @@ describe("ChatPage", () => {
 			messageCount: 1,
 			profile: "anthropic",
 			profileLocked: true,
+			reasoningEffort: "high",
+			reasoningEffortLocked: true,
 			messages: [
 				{
 					role: "user",
@@ -977,7 +1034,13 @@ describe("ChatPage", () => {
 		expect(screen.getByTestId("composer-inline-context")).toHaveTextContent(
 			"anthropic",
 		);
+		expect(screen.getByTestId("composer-inline-context")).toHaveTextContent(
+			"effort:high",
+		);
 		expect(screen.queryByLabelText("Profile")).not.toBeInTheDocument();
+		expect(
+			screen.queryByLabelText("Reasoning effort"),
+		).not.toBeInTheDocument();
 
 		fireEvent.change(screen.getByPlaceholderText("Ask kodelet anything..."), {
 			target: { value: "continue" },
@@ -987,6 +1050,10 @@ describe("ChatPage", () => {
 		await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
 		expect(mockStreamChat).toHaveBeenCalledWith(
 			expect.not.objectContaining({ profile: expect.anything() }),
+			expect.any(Object),
+		);
+		expect(mockStreamChat).toHaveBeenCalledWith(
+			expect.not.objectContaining({ reasoningEffort: expect.anything() }),
 			expect.any(Object),
 		);
 	});
@@ -2447,7 +2514,7 @@ describe("ChatPage", () => {
 
 		await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
 		expect(
-			screen.getByText(/work · \/workspace\/default/),
+			screen.getByText(/work · effort:medium · \/workspace\/default/),
 		).toBeInTheDocument();
 		expect(screen.getByText("Shift+Enter to send")).toBeInTheDocument();
 	});

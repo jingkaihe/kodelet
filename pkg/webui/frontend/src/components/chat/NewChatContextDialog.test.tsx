@@ -27,6 +27,9 @@ const renderDialog = (
     cwdSuggestionsOpen: true,
     defaultCWD: '/home/jingkaihe/workspace/kodelet',
     profileDraft: 'default',
+    reasoningEffortDraft: 'medium',
+    reasoningEffortLoading: false,
+    reasoningEffortOptions: ['low', 'medium', 'high'],
     recentWorkspaces,
     onCancel: vi.fn(),
     onCommit: vi.fn(),
@@ -35,6 +38,7 @@ const renderDialog = (
     onCwdInputFocus: vi.fn(),
     onCwdInputKeyDown: vi.fn(),
     onProfileDraftChange: vi.fn(),
+    onReasoningEffortDraftChange: vi.fn(),
     onRecentWorkspaceSelect: vi.fn(),
     onSelectCwdSuggestion: vi.fn(),
     ...overrides,
@@ -52,6 +56,9 @@ describe('NewChatContextDialog', () => {
     fireEvent.change(screen.getByTestId('new-chat-profile-select'), {
       target: { value: 'code-review' },
     });
+    fireEvent.change(screen.getByTestId('new-chat-reasoning-effort-select'), {
+      target: { value: 'high' },
+    });
     fireEvent.change(screen.getByTestId('cwd-input'), {
       target: { value: '/tmp/project' },
     });
@@ -59,6 +66,7 @@ describe('NewChatContextDialog', () => {
     fireEvent.click(screen.getByLabelText('/home/jingkaihe/workspace/plugins'));
 
     expect(props.onProfileDraftChange).toHaveBeenCalledWith('code-review');
+    expect(props.onReasoningEffortDraftChange).toHaveBeenCalledWith('high');
     expect(props.onCwdInputChange).toHaveBeenCalledWith('/tmp/project');
     expect(props.onSelectCwdSuggestion).toHaveBeenCalledWith(
       '/home/jingkaihe/workspace/kodelet/pkg/webui/frontend'
@@ -76,5 +84,12 @@ describe('NewChatContextDialog', () => {
 
     expect(props.onCancel).toHaveBeenCalledTimes(1);
     expect(props.onCommit).toHaveBeenCalledTimes(1);
+  });
+
+  it('prevents starting while reasoning settings are loading', () => {
+    renderDialog({ reasoningEffortLoading: true });
+
+    expect(screen.getByLabelText('Reasoning effort')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
   });
 });

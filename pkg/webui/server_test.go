@@ -633,6 +633,8 @@ func TestServer_handleGetConversation(t *testing.T) {
 	assert.True(t, response.CWDLocked)
 	assert.Equal(t, "codex", response.Profile)
 	assert.True(t, response.ProfileLocked)
+	assert.Equal(t, "high", response.ReasoningEffort)
+	assert.True(t, response.ReasoningEffortLocked)
 	assert.True(t, response.IsRunning)
 	assert.Equal(t, 1, response.MessageCount)
 }
@@ -944,6 +946,20 @@ func TestServer_handleGetChatSettings(t *testing.T) {
 
 	viper.Reset()
 	viper.Set("profile", "work")
+	viper.Set("provider", "openai")
+	viper.Set("reasoning_effort", "medium")
+	viper.Set("allowed_reasoning_efforts", []string{"medium"})
+	viper.Set("profiles", map[string]any{
+		"work": map[string]any{
+			"reasoning_effort":          "high",
+			"allowed_reasoning_efforts": []string{"low", "high"},
+		},
+		"anthropic": map[string]any{
+			"provider":                  "anthropic",
+			"reasoning_effort":          "max",
+			"allowed_reasoning_efforts": []string{"medium", "max"},
+		},
+	})
 
 	server := &Server{router: mux.NewRouter()}
 	req := httptest.NewRequest("GET", "/api/chat/settings", nil)
@@ -957,8 +973,49 @@ func TestServer_handleGetChatSettings(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
 	assert.Equal(t, "work", response.CurrentProfile)
+	assert.Equal(t, "high", response.ReasoningEffort)
+	assert.Equal(t, []string{"low", "high"}, response.ReasoningEffortOptions)
 	require.NotEmpty(t, response.Profiles)
 	assert.Equal(t, "default", response.Profiles[0].Name)
+
+	req = httptest.NewRequest("GET", "/api/chat/settings?profile=anthropic", nil)
+	w = httptest.NewRecorder()
+
+	server.handleGetChatSettings(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	err = json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	assert.Equal(t, "anthropic", response.CurrentProfile)
+	assert.Equal(t, "max", response.ReasoningEffort)
+	assert.Equal(t, []string{"medium", "max"}, response.ReasoningEffortOptions)
+}
+
+func TestServer_handleGetChatSettingsUsesProviderReasoningEffortsWithoutAllowlist(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	}()
+
+	viper.Reset()
+	viper.Set("provider", "anthropic")
+	viper.Set("reasoning_effort", "medium")
+
+	server := &Server{router: mux.NewRouter()}
+	req := httptest.NewRequest("GET", "/api/chat/settings", nil)
+	w := httptest.NewRecorder()
+
+	server.handleGetChatSettings(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var response ChatSettingsResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	assert.Equal(t, "medium", response.ReasoningEffort)
+	assert.Equal(t, []string{"none", "low", "medium", "high", "xhigh", "max"}, response.ReasoningEffortOptions)
 }
 
 func TestServer_handleGetSlashCommands(t *testing.T) {

@@ -82,6 +82,8 @@ export interface Conversation {
 	cwdLocked?: boolean;
 	profile?: string;
 	profileLocked?: boolean;
+	reasoningEffort?: string;
+	reasoningEffortLocked?: boolean;
 	platform?: string;
 	api_mode?: string;
 	metadata?: Record<string, unknown>;
@@ -184,6 +186,8 @@ export interface SlashCommandsResponse {
 export interface ChatSettings {
 	currentProfile?: string;
 	profiles: ChatProfileOption[];
+	reasoningEffort: string;
+	reasoningEffortOptions: string[];
 	defaultCWD?: string;
 }
 

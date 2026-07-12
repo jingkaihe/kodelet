@@ -22,6 +22,9 @@ const recentWorkspaces = Array.from(
 
 const InteractiveDialog = (args: NewChatContextDialogStoryProps) => {
 	const [profileDraft, setProfileDraft] = React.useState(args.profileDraft);
+	const [reasoningEffortDraft, setReasoningEffortDraft] = React.useState(
+		args.reasoningEffortDraft,
+	);
 	const [cwdQuery, setCwdQuery] = React.useState(args.cwdQuery);
 	const [cwdSuggestionsOpen, setCwdSuggestionsOpen] = React.useState(
 		args.cwdSuggestionsOpen,
@@ -33,6 +36,7 @@ const InteractiveDialog = (args: NewChatContextDialogStoryProps) => {
 			cwdQuery={cwdQuery}
 			cwdSuggestionsOpen={cwdSuggestionsOpen}
 			profileDraft={profileDraft}
+			reasoningEffortDraft={reasoningEffortDraft}
 			onCwdInputBlur={() => {
 				setCwdSuggestionsOpen(false);
 				args.onCwdInputBlur();
@@ -49,6 +53,10 @@ const InteractiveDialog = (args: NewChatContextDialogStoryProps) => {
 			onProfileDraftChange={(profileName) => {
 				setProfileDraft(profileName);
 				args.onProfileDraftChange(profileName);
+			}}
+			onReasoningEffortDraftChange={(reasoningEffort) => {
+				setReasoningEffortDraft(reasoningEffort);
+				args.onReasoningEffortDraftChange(reasoningEffort);
 			}}
 			onRecentWorkspaceSelect={(path) => {
 				setCwdQuery(path);
@@ -78,6 +86,9 @@ const meta = {
 		cwdSuggestionsOpen: true,
 		defaultCWD: "/home/jingkaihe/workspace/kodelet",
 		profileDraft: "default",
+		reasoningEffortDraft: "medium",
+		reasoningEffortLoading: false,
+		reasoningEffortOptions: ["low", "medium", "high"],
 		recentWorkspaces,
 		onCancel: fn(),
 		onCommit: fn(),
@@ -86,6 +97,7 @@ const meta = {
 		onCwdInputFocus: fn(),
 		onCwdInputKeyDown: fn(),
 		onProfileDraftChange: fn(),
+		onReasoningEffortDraftChange: fn(),
 		onRecentWorkspaceSelect: fn(),
 		onSelectCwdSuggestion: fn(),
 	},
