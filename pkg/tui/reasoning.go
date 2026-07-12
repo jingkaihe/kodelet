@@ -47,12 +47,12 @@ func reasoningEffortOptionIndex(options []string, selected string) int {
 	return -1
 }
 
-func resolveReasoningSettings(profile, requested string) (string, []string, bool, error) {
+func resolveReasoningSettings(profile, requested string) (string, []string, error) {
 	config, err := chat.ResolveConfigForNewConversation(profileForRequest(profile), requested)
 	if err != nil {
-		return "", nil, false, err
+		return "", nil, err
 	}
-	return config.ReasoningEffort, llmtypes.ReasoningEffortOptions(config), len(config.AllowedReasoningEfforts) > 0, nil
+	return config.ReasoningEffort, llmtypes.ReasoningEffortOptions(config), nil
 }
 
 func (m model) canChangeReasoningEffort() bool {
@@ -72,11 +72,11 @@ func (m *model) setReasoningEffort(effort string, explicit bool) {
 }
 
 func (m *model) refreshReasoningSettingsForProfile() {
-	profileDefault, options, restricted, err := resolveReasoningSettings(m.profile, "")
+	profileDefault, options, err := resolveReasoningSettings(m.profile, "")
 	if err != nil {
 		return
 	}
-	if m.reasoningEffortExplicit && (!restricted || slices.Contains(options, m.reasoningEffort)) {
+	if m.reasoningEffortExplicit && slices.Contains(options, m.reasoningEffort) {
 		m.reasoningEffortOptions = normalizeReasoningEffortOptions(options, m.reasoningEffort)
 		m.setReasoningEffort(m.reasoningEffort, true)
 		return

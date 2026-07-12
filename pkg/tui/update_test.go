@@ -559,6 +559,66 @@ func TestProfileSelectionRefreshesReasoningEffortOptions(t *testing.T) {
 	assert.Equal(t, []string{"high", "max"}, m.reasoningEffortOptions)
 }
 
+func TestEmptyAllowedReasoningEffortsUsesProviderOptions(t *testing.T) {
+	withTUIViper(t, map[string]any{
+		"provider":                  "openai",
+		"model":                     "base-model",
+		"reasoning_effort":          "medium",
+		"allowed_reasoning_efforts": []string{"medium"},
+		"profiles": map[string]any{
+			"unrestricted": map[string]any{
+				"provider":                  "anthropic",
+				"model":                     "claude-test",
+				"reasoning_effort":          "high",
+				"allowed_reasoning_efforts": []string{},
+			},
+		},
+	})
+	m := newModel(context.Background(), Config{Profile: "default", ProfileOptions: []string{"default", "unrestricted"}})
+	t.Cleanup(m.cancel)
+
+	assert.Equal(t, []string{"medium"}, m.reasoningEffortOptions)
+	assert.False(t, m.canChangeReasoningEffort())
+
+	m.openProfilePicker()
+	m.selectProfilePickerOption(1)
+
+	assert.Equal(t, "unrestricted", m.profile)
+	assert.Equal(t, "high", m.reasoningEffort)
+	assert.Equal(t, []string{"none", "low", "medium", "high", "xhigh", "max"}, m.reasoningEffortOptions)
+	assert.True(t, m.canChangeReasoningEffort())
+}
+
+func TestProfileSelectionDropsUnsupportedExplicitReasoningEffort(t *testing.T) {
+	withTUIViper(t, map[string]any{
+		"provider":                  "openai",
+		"model":                     "gpt-test",
+		"reasoning_effort":          "medium",
+		"allowed_reasoning_efforts": []string{},
+		"profiles": map[string]any{
+			"anthropic": map[string]any{
+				"provider":                  "anthropic",
+				"model":                     "claude-test",
+				"reasoning_effort":          "high",
+				"allowed_reasoning_efforts": []string{},
+			},
+		},
+	})
+	m := newModel(context.Background(), Config{Profile: "default", ProfileOptions: []string{"default", "anthropic"}})
+	t.Cleanup(m.cancel)
+
+	m.setReasoningEffort("minimal", true)
+	assert.Equal(t, "minimal", m.reasoningEffort)
+
+	m.openProfilePicker()
+	m.selectProfilePickerOption(1)
+
+	assert.Equal(t, "anthropic", m.profile)
+	assert.Equal(t, "high", m.reasoningEffort)
+	assert.False(t, m.reasoningEffortExplicit)
+	assert.Equal(t, []string{"none", "low", "medium", "high", "xhigh", "max"}, m.reasoningEffortOptions)
+}
+
 func TestSlashCommandKeyboardCompletion(t *testing.T) {
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)

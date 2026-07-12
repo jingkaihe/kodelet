@@ -2,7 +2,7 @@
 
 ## 0.4.56-beta
 
-Added conversation configuration snapshots and `allowed_reasoning_efforts`, preserving model and reasoning behavior across resumes while keeping credentials and live tool policy current.
+Added conversation configuration snapshots and `allowed_reasoning_efforts`, preserving model and reasoning behavior across resumes while keeping credentials and live tool policy current; an empty allowlist exposes all provider-supported efforts in the TUI.
 
 Added a reasoning-effort picker beside the profile in `kodelet chat`, available before the first message through `Ctrl+Y` or mouse selection.
 

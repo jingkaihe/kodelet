@@ -32,7 +32,7 @@ func Run(ctx context.Context, config Config) error {
 		return ValidateThemeName(config.Theme)
 	}
 	if strings.TrimSpace(config.ConversationID) == "" {
-		if _, _, _, err := resolveReasoningSettings(displayProfile(config.Profile), config.ReasoningEffort); err != nil {
+		if _, _, err := resolveReasoningSettings(displayProfile(config.Profile), config.ReasoningEffort); err != nil {
 			return errors.Wrap(err, "invalid reasoning effort configuration")
 		}
 	}
@@ -133,7 +133,7 @@ func newModel(ctx context.Context, config Config) model {
 	}
 	reasoningEffort := strings.TrimSpace(config.ReasoningEffort)
 	reasoningEffortOptions := append([]string(nil), config.ReasoningEffortOptions...)
-	if resolvedEffort, resolvedOptions, _, err := resolveReasoningSettings(profile, reasoningEffort); err == nil {
+	if resolvedEffort, resolvedOptions, err := resolveReasoningSettings(profile, reasoningEffort); err == nil {
 		reasoningEffort = resolvedEffort
 		if len(reasoningEffortOptions) == 0 {
 			reasoningEffortOptions = resolvedOptions

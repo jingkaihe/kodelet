@@ -67,7 +67,7 @@ profiles:
 
 Profiles are useful for switching model/provider/tool-mode combinations. Note that profile switching may be constrained by provider compatibility in a given command flow.
 
-`allowed_reasoning_efforts` restricts the effort values selectable for new conversations. When omitted, direct overrides remain unrestricted while the TUI offers only the configured default. The effective model/provider configuration is stored as a versioned `config_snapshot` in conversation metadata, so resumed conversations retain their model and reasoning behavior even if the source profile changes. Explicit reasoning overrides are rejected when resuming legacy conversations that do not yet have a snapshot.
+`allowed_reasoning_efforts` restricts the effort values selectable for new conversations. When omitted or empty, direct overrides remain unrestricted and the TUI offers every effort supported by the configured provider. A non-empty list is the authoritative ordered subset. The effective model/provider configuration is stored as a versioned `config_snapshot` in conversation metadata, so resumed conversations retain their model and reasoning behavior even if the source profile changes. Explicit reasoning overrides are rejected when resuming legacy conversations that do not yet have a snapshot.
 
 ## Skills config
 

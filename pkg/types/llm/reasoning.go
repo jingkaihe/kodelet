@@ -19,6 +19,26 @@ var validReasoningEfforts = []string{
 	"max",
 }
 
+var providerReasoningEfforts = map[string][]string{
+	"openai": {
+		"none",
+		"minimal",
+		"low",
+		"medium",
+		"high",
+		"xhigh",
+		"max",
+	},
+	"anthropic": {
+		"none",
+		"low",
+		"medium",
+		"high",
+		"xhigh",
+		"max",
+	},
+}
+
 // NormalizeReasoningEffort normalizes and validates a reasoning effort value.
 func NormalizeReasoningEffort(raw string) (string, error) {
 	normalized := strings.ToLower(strings.TrimSpace(raw))
@@ -73,15 +93,25 @@ func NormalizeReasoningConfig(config *Config) error {
 }
 
 // ReasoningEffortOptions returns the selectable efforts for a new conversation.
-// Without an explicit policy, only the configured value is exposed to UIs while
-// direct CLI/API overrides retain their historical unrestricted behavior.
+// An explicit policy is authoritative. Without one, all efforts supported by
+// the configured provider are exposed; unknown providers fall back to the
+// configured value.
 func ReasoningEffortOptions(config Config) []string {
 	if len(config.AllowedReasoningEfforts) > 0 {
 		return append([]string(nil), config.AllowedReasoningEfforts...)
 	}
-	effort := strings.TrimSpace(config.ReasoningEffort)
+
+	effort, err := NormalizeReasoningEffort(config.ReasoningEffort)
+	if err != nil {
+		effort = ""
+	}
 	if effort == "" {
 		effort = DefaultReasoningEffort
 	}
-	return []string{effort}
+
+	options, ok := providerReasoningEfforts[strings.ToLower(strings.TrimSpace(config.Provider))]
+	if !ok {
+		return []string{effort}
+	}
+	return append([]string(nil), options...)
 }

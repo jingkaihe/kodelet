@@ -120,8 +120,9 @@ profiles:
 reasoning_effort: "medium"
 
 # Optional policy for reasoning efforts that users may select when creating a
-# conversation. Profiles may override this list. Existing conversations keep
-# their persisted effort even if this policy later changes.
+# conversation. Empty exposes every effort supported by the provider. Profiles
+# may override this list. Existing conversations keep their persisted effort
+# even if this policy later changes.
 # allowed_reasoning_efforts: ["low", "medium", "high"]
 
 # Anthropic-specific settings

@@ -34,6 +34,23 @@ func TestNormalizeReasoningConfigDefaultsAndValidatesPolicy(t *testing.T) {
 	require.ErrorContains(t, err, "invalid reasoning_effort")
 }
 
+func TestReasoningEffortOptionsUsesProviderDefaultsWithoutPolicy(t *testing.T) {
+	openAI := Config{Provider: "openai", ReasoningEffort: "medium"}
+	assert.Equal(t, []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}, ReasoningEffortOptions(openAI))
+
+	anthropic := Config{Provider: "anthropic", ReasoningEffort: "medium"}
+	assert.Equal(t, []string{"none", "low", "medium", "high", "xhigh", "max"}, ReasoningEffortOptions(anthropic))
+
+	anthropic.ReasoningEffort = "minimal"
+	assert.Equal(t, []string{"none", "low", "medium", "high", "xhigh", "max"}, ReasoningEffortOptions(anthropic))
+
+	unknown := Config{Provider: "custom", ReasoningEffort: "high"}
+	assert.Equal(t, []string{"high"}, ReasoningEffortOptions(unknown))
+
+	restricted := Config{Provider: "openai", ReasoningEffort: "high", AllowedReasoningEfforts: []string{"low", "high"}}
+	assert.Equal(t, []string{"low", "high"}, ReasoningEffortOptions(restricted))
+}
+
 func TestConversationConfigSnapshotApplyPreservesLivePolicy(t *testing.T) {
 	config := Config{
 		Profile:                 "work",
