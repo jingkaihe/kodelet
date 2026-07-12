@@ -641,7 +641,7 @@ describe('ChatTranscript', () => {
                   {
                     callId: 'bash-1',
                     name: 'bash',
-                    input: '{"command":"rg -n \\\"ChatTranscript\\\" pkg/webui/frontend/src","timeout":30,"description":"Search transcript component"}',
+                    input: '{"command":"rg -n \\"ChatTranscript\\" pkg/webui/frontend/src","timeout":30,"description":"Search transcript component"}',
                   },
                   {
                     callId: 'read-1',
