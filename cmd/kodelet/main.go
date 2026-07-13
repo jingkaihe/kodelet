@@ -31,6 +31,9 @@ func init() {
 	viper.SetDefault("weak_model", "gpt-5.4-mini")
 	viper.SetDefault("provider", "openai")
 	viper.SetDefault("openai.api_mode", "responses")
+	// Keep the configured value empty so request construction can distinguish an
+	// explicit opt-in from the upstream API default.
+	viper.SetDefault("openai.text_verbosity", "")
 	viper.SetDefault("openai.enable_search", true)
 	viper.SetDefault("openai.websocket_mode", true)
 	viper.SetDefault("reasoning_effort", "medium")

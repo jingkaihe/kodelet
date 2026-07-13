@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
+
+	"github.com/pkg/errors"
 )
 
 // AnthropicAPIAccess defines the mode for Anthropic API access
@@ -139,6 +141,9 @@ type OpenAIAPIMode string
 // alias, which is sent to the API as `priority`.
 type OpenAIServiceTier string
 
+// OpenAITextVerbosity controls the detail level of generated OpenAI text.
+type OpenAITextVerbosity string
+
 const (
 	// OpenAIAPIModeChatCompletions routes requests via chat completions API.
 	OpenAIAPIModeChatCompletions OpenAIAPIMode = "chat_completions"
@@ -157,6 +162,13 @@ const (
 	OpenAIServiceTierPriority OpenAIServiceTier = "priority"
 	// OpenAIServiceTierScale requests scale processing when supported.
 	OpenAIServiceTierScale OpenAIServiceTier = "scale"
+
+	// OpenAITextVerbosityLow requests concise text responses.
+	OpenAITextVerbosityLow OpenAITextVerbosity = "low"
+	// OpenAITextVerbosityMedium requests moderately detailed text responses.
+	OpenAITextVerbosityMedium OpenAITextVerbosity = "medium"
+	// OpenAITextVerbosityHigh requests verbose text responses.
+	OpenAITextVerbosityHigh OpenAITextVerbosity = "high"
 )
 
 // ParseOpenAIServiceTier normalizes and validates a configured service tier.
@@ -191,12 +203,63 @@ func (t OpenAIServiceTier) WireValue() string {
 	return ""
 }
 
+// ParseOpenAITextVerbosity normalizes and validates a configured text verbosity.
+func ParseOpenAITextVerbosity(raw string) (OpenAITextVerbosity, bool) {
+	normalized := OpenAITextVerbosity(strings.ToLower(strings.TrimSpace(raw)))
+	switch normalized {
+	case OpenAITextVerbosityLow, OpenAITextVerbosityMedium, OpenAITextVerbosityHigh:
+		return normalized, true
+	default:
+		return "", false
+	}
+}
+
+// ConfiguredOpenAITextVerbosity returns an explicitly configured text
+// verbosity. The boolean is false when the setting is absent, allowing the
+// upstream API to apply its default.
+func ConfiguredOpenAITextVerbosity(config Config) (OpenAITextVerbosity, bool, error) {
+	if config.OpenAI == nil {
+		return "", false, nil
+	}
+	raw := strings.TrimSpace(string(config.OpenAI.TextVerbosity))
+	if raw == "" {
+		return "", false, nil
+	}
+	verbosity, ok := ParseOpenAITextVerbosity(raw)
+	if !ok {
+		return "", false, errors.Errorf("invalid openai.text_verbosity %q, valid values are: low, medium, high", config.OpenAI.TextVerbosity)
+	}
+	return verbosity, true, nil
+}
+
+// NormalizeOpenAITextVerbosity validates and canonicalizes an explicitly
+// configured text verbosity while preserving the unset state.
+func NormalizeOpenAITextVerbosity(config *Config) error {
+	if config == nil {
+		return errors.New("cannot normalize OpenAI text verbosity on a nil config")
+	}
+	if config.OpenAI == nil {
+		return nil
+	}
+	verbosity, configured, err := ConfiguredOpenAITextVerbosity(*config)
+	if err != nil {
+		return err
+	}
+	if !configured {
+		config.OpenAI.TextVerbosity = ""
+		return nil
+	}
+	config.OpenAI.TextVerbosity = verbosity
+	return nil
+}
+
 // OpenAIConfig holds OpenAI-specific configuration including support for compatible APIs
 type OpenAIConfig struct {
 	Platform      string                  `mapstructure:"platform" json:"platform" yaml:"platform"`                                       // Canonical platform name for OpenAI-compatible APIs (e.g., openai, codex, fireworks)
 	BaseURL       string                  `mapstructure:"base_url" json:"base_url" yaml:"base_url"`                                       // Custom API base URL (overrides platform defaults)
 	APIKeyEnvVar  string                  `mapstructure:"api_key_env_var" json:"api_key_env_var" yaml:"api_key_env_var"`                  // Environment variable name for API key (overrides platform default)
 	APIMode       OpenAIAPIMode           `mapstructure:"api_mode" json:"api_mode" yaml:"api_mode"`                                       // Preferred API mode selection (chat_completions or responses)
+	TextVerbosity OpenAITextVerbosity     `mapstructure:"text_verbosity" json:"text_verbosity" yaml:"text_verbosity"`                     // Optional text response verbosity (low, medium, or high); omitted values use the upstream default
 	ServiceTier   OpenAIServiceTier       `mapstructure:"service_tier" json:"service_tier" yaml:"service_tier"`                           // Optional service tier hint (e.g. auto, default, fast, flex, priority, scale)
 	EnableSearch  *bool                   `mapstructure:"enable_search" json:"enable_search,omitempty" yaml:"enable_search,omitempty"`    // Enable native OpenAI Responses web_search tool when supported (defaults to true)
 	WebSocketMode *bool                   `mapstructure:"websocket_mode" json:"websocket_mode,omitempty" yaml:"websocket_mode,omitempty"` // Use Responses API WebSocket transport when supported (defaults to true)

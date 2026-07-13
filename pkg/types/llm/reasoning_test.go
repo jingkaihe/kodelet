@@ -64,12 +64,13 @@ func TestConversationConfigSnapshotApplyPreservesLivePolicy(t *testing.T) {
 		AllowedReasoningEfforts: []string{"medium", "high"},
 		CompactRatio:            0.7,
 		OpenAI: &OpenAIConfig{
-			Platform:     "codex",
-			BaseURL:      "https://do-not-snapshot.example",
-			APIKeyEnvVar: "SECRET_ENV",
-			APIMode:      OpenAIAPIModeResponses,
-			ServiceTier:  OpenAIServiceTierFast,
-			ManualCache:  true,
+			Platform:      "codex",
+			BaseURL:       "https://do-not-snapshot.example",
+			APIKeyEnvVar:  "SECRET_ENV",
+			APIMode:       OpenAIAPIModeResponses,
+			TextVerbosity: OpenAITextVerbosityHigh,
+			ServiceTier:   OpenAIServiceTierFast,
+			ManualCache:   true,
 		},
 		AllowedTools: []string{"bash"},
 	}
@@ -80,8 +81,10 @@ func TestConversationConfigSnapshotApplyPreservesLivePolicy(t *testing.T) {
 	assert.Equal(t, "high", snapshot.ReasoningEffort)
 	require.NotNil(t, snapshot.OpenAI)
 	assert.Equal(t, OpenAIAPIModeResponses, snapshot.OpenAI.APIMode)
+	assert.Equal(t, OpenAITextVerbosityHigh, snapshot.OpenAI.TextVerbosity)
 	rawSnapshot, err := json.Marshal(snapshot)
 	require.NoError(t, err)
+	assert.Contains(t, string(rawSnapshot), `"text_verbosity":"high"`)
 	assert.NotContains(t, string(rawSnapshot), "do-not-snapshot.example")
 	assert.NotContains(t, string(rawSnapshot), "SECRET_ENV")
 
@@ -114,6 +117,7 @@ func TestConversationConfigSnapshotApplyPreservesLivePolicy(t *testing.T) {
 	assert.Nil(t, applied.Anthropic)
 	assert.Equal(t, "https://live.example", applied.OpenAI.BaseURL)
 	assert.Equal(t, "LIVE_ENV", applied.OpenAI.APIKeyEnvVar)
+	assert.Equal(t, OpenAITextVerbosityHigh, applied.OpenAI.TextVerbosity)
 }
 
 func TestConversationConfigSnapshotCapturesProviderDefaults(t *testing.T) {
@@ -137,4 +141,19 @@ func TestConversationConfigSnapshotCapturesProviderDefaults(t *testing.T) {
 	assert.Empty(t, applied.Anthropic.Platform)
 	assert.False(t, applied.Anthropic.AdaptiveThinking)
 	assert.Equal(t, "https://live.example", applied.Anthropic.BaseURL)
+}
+
+func TestConversationConfigSnapshotPreservesUnsetOpenAITextVerbosity(t *testing.T) {
+	snapshot, err := NewConversationConfigSnapshot(Config{
+		Provider:        "openai",
+		Model:           "gpt-test",
+		ReasoningEffort: "medium",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, snapshot.OpenAI)
+	assert.Empty(t, snapshot.OpenAI.TextVerbosity)
+
+	rawSnapshot, err := json.Marshal(snapshot)
+	require.NoError(t, err)
+	assert.NotContains(t, string(rawSnapshot), "text_verbosity")
 }

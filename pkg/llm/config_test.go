@@ -646,6 +646,7 @@ func TestGetConfigFromViperOpenAIBasicConfig(t *testing.T) {
 	require.NotNil(t, config.OpenAI, "OpenAI config should not be nil")
 	assert.Equal(t, "fireworks", config.OpenAI.Platform)
 	assert.Equal(t, "https://api.fireworks.ai/inference/v1", config.OpenAI.BaseURL)
+	assert.Empty(t, config.OpenAI.TextVerbosity)
 	assert.True(t, config.OpenAI.ManualCache)
 	assert.Nil(t, config.OpenAI.Models, "Models should be nil when not set")
 	assert.Nil(t, config.OpenAI.Pricing, "Pricing should be nil when not set")
@@ -677,6 +678,40 @@ func TestGetConfigFromViperOpenAIApiModeConfig(t *testing.T) {
 	require.NotNil(t, config.OpenAI)
 
 	assert.Equal(t, llmtypes.OpenAIAPIModeResponses, config.OpenAI.APIMode)
+}
+
+func TestGetConfigFromViperOpenAITextVerbosityConfig(t *testing.T) {
+	viper.Reset()
+	viper.Set("provider", "openai")
+	viper.Set("openai.text_verbosity", " HIGH ")
+
+	config, err := GetConfigFromViper()
+	require.NoError(t, err)
+	require.NotNil(t, config.OpenAI)
+	assert.Equal(t, llmtypes.OpenAITextVerbosityHigh, config.OpenAI.TextVerbosity)
+}
+
+func TestGetConfigFromViperOpenAITextVerbosityFromEnv(t *testing.T) {
+	viper.Reset()
+	viper.SetDefault("openai.text_verbosity", "")
+	viper.SetEnvPrefix("KODELET")
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	viper.AutomaticEnv()
+	t.Setenv("KODELET_OPENAI_TEXT_VERBOSITY", "high")
+
+	config, err := GetConfigFromViper()
+	require.NoError(t, err)
+	require.NotNil(t, config.OpenAI)
+	assert.Equal(t, llmtypes.OpenAITextVerbosityHigh, config.OpenAI.TextVerbosity)
+}
+
+func TestGetConfigFromViperRejectsInvalidOpenAITextVerbosity(t *testing.T) {
+	viper.Reset()
+	viper.Set("provider", "openai")
+	viper.Set("openai.text_verbosity", "extreme")
+
+	_, err := GetConfigFromViper()
+	require.ErrorContains(t, err, "invalid openai.text_verbosity")
 }
 
 func TestGetConfigFromViperOpenAISearchConfig(t *testing.T) {

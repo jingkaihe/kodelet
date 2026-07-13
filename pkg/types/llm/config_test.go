@@ -63,6 +63,48 @@ func TestOpenAIServiceTierParsingAndWireValue(t *testing.T) {
 	assert.Empty(t, OpenAIServiceTier("unknown").WireValue())
 }
 
+func TestOpenAITextVerbosityParsing(t *testing.T) {
+	verbosity, ok := ParseOpenAITextVerbosity(" HIGH ")
+	require.True(t, ok)
+	assert.Equal(t, OpenAITextVerbosityHigh, verbosity)
+
+	verbosity, ok = ParseOpenAITextVerbosity("unknown")
+	assert.False(t, ok)
+	assert.Empty(t, verbosity)
+}
+
+func TestConfiguredOpenAITextVerbosity(t *testing.T) {
+	verbosity, configured, err := ConfiguredOpenAITextVerbosity(Config{})
+	require.NoError(t, err)
+	assert.False(t, configured)
+	assert.Empty(t, verbosity)
+
+	verbosity, configured, err = ConfiguredOpenAITextVerbosity(Config{OpenAI: &OpenAIConfig{TextVerbosity: " HIGH "}})
+	require.NoError(t, err)
+	assert.True(t, configured)
+	assert.Equal(t, OpenAITextVerbosityHigh, verbosity)
+
+	_, _, err = ConfiguredOpenAITextVerbosity(Config{OpenAI: &OpenAIConfig{TextVerbosity: "unknown"}})
+	require.ErrorContains(t, err, "invalid openai.text_verbosity")
+}
+
+func TestNormalizeOpenAITextVerbosityPreservesUnsetState(t *testing.T) {
+	config := Config{}
+	require.NoError(t, NormalizeOpenAITextVerbosity(&config))
+	assert.Nil(t, config.OpenAI)
+
+	config.OpenAI = &OpenAIConfig{}
+	require.NoError(t, NormalizeOpenAITextVerbosity(&config))
+	assert.Empty(t, config.OpenAI.TextVerbosity)
+
+	config.OpenAI.TextVerbosity = " HIGH "
+	require.NoError(t, NormalizeOpenAITextVerbosity(&config))
+	assert.Equal(t, OpenAITextVerbosityHigh, config.OpenAI.TextVerbosity)
+
+	config.OpenAI.TextVerbosity = "unknown"
+	require.ErrorContains(t, NormalizeOpenAITextVerbosity(&config), "invalid openai.text_verbosity")
+}
+
 func TestDefaultContextPatterns(t *testing.T) {
 	patterns := DefaultContextPatterns()
 	assert.Equal(t, []string{"AGENTS.md"}, patterns)

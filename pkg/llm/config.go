@@ -192,6 +192,11 @@ func loadConfigFromSettings(settings map[string]any) (llmtypes.Config, error) {
 	if err := v.Unmarshal(&config); err != nil {
 		return config, errors.Wrap(err, "failed to unmarshal configuration")
 	}
+	if config.OpenAI != nil {
+		if err := llmtypes.NormalizeOpenAITextVerbosity(&config); err != nil {
+			return config, err
+		}
+	}
 
 	if config.Bash == nil {
 		config.Bash = &llmtypes.BashConfig{Timeout: llmtypes.DefaultBashTimeout}

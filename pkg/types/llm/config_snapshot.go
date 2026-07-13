@@ -31,12 +31,13 @@ type ConversationConfigSnapshot struct {
 // ConversationOpenAISnapshot captures OpenAI request semantics that must remain
 // stable to interpret and continue a persisted thread.
 type ConversationOpenAISnapshot struct {
-	Platform    string                  `json:"platform,omitempty" yaml:"platform,omitempty"`
-	APIMode     OpenAIAPIMode           `json:"api_mode,omitempty" yaml:"api_mode,omitempty"`
-	ServiceTier OpenAIServiceTier       `json:"service_tier,omitempty" yaml:"service_tier,omitempty"`
-	ManualCache bool                    `json:"manual_cache,omitempty" yaml:"manual_cache,omitempty"`
-	Models      *CustomModels           `json:"models,omitempty" yaml:"models,omitempty"`
-	Pricing     map[string]ModelPricing `json:"pricing,omitempty" yaml:"pricing,omitempty"`
+	Platform      string                  `json:"platform,omitempty" yaml:"platform,omitempty"`
+	APIMode       OpenAIAPIMode           `json:"api_mode,omitempty" yaml:"api_mode,omitempty"`
+	TextVerbosity OpenAITextVerbosity     `json:"text_verbosity,omitempty" yaml:"text_verbosity,omitempty"`
+	ServiceTier   OpenAIServiceTier       `json:"service_tier,omitempty" yaml:"service_tier,omitempty"`
+	ManualCache   bool                    `json:"manual_cache,omitempty" yaml:"manual_cache,omitempty"`
+	Models        *CustomModels           `json:"models,omitempty" yaml:"models,omitempty"`
+	Pricing       map[string]ModelPricing `json:"pricing,omitempty" yaml:"pricing,omitempty"`
 }
 
 // ConversationAnthropicSnapshot captures Anthropic request semantics that must
@@ -74,10 +75,14 @@ func NewConversationConfigSnapshot(config Config) (*ConversationConfigSnapshot, 
 	}
 	switch snapshot.Provider {
 	case "openai":
+		if err := NormalizeOpenAITextVerbosity(&config); err != nil {
+			return nil, errors.Wrap(err, "failed to snapshot OpenAI configuration")
+		}
 		snapshot.OpenAI = &ConversationOpenAISnapshot{}
 		if config.OpenAI != nil {
 			snapshot.OpenAI.Platform = strings.TrimSpace(config.OpenAI.Platform)
 			snapshot.OpenAI.APIMode = config.OpenAI.APIMode
+			snapshot.OpenAI.TextVerbosity = config.OpenAI.TextVerbosity
 			snapshot.OpenAI.ServiceTier = config.OpenAI.ServiceTier
 			snapshot.OpenAI.ManualCache = config.OpenAI.ManualCache
 			snapshot.OpenAI.Models = cloneCustomModels(config.OpenAI.Models)
@@ -132,6 +137,11 @@ func (s *ConversationConfigSnapshot) Validate() error {
 		if s.OpenAI.APIMode != "" && s.OpenAI.APIMode != OpenAIAPIModeChatCompletions && s.OpenAI.APIMode != OpenAIAPIModeResponses {
 			return errors.Errorf("invalid conversation config snapshot OpenAI api_mode %q", s.OpenAI.APIMode)
 		}
+		if s.OpenAI.TextVerbosity != "" {
+			if _, ok := ParseOpenAITextVerbosity(string(s.OpenAI.TextVerbosity)); !ok {
+				return errors.Errorf("invalid conversation config snapshot OpenAI text_verbosity %q", s.OpenAI.TextVerbosity)
+			}
+		}
 		if s.OpenAI.ServiceTier != "" {
 			if _, ok := ParseOpenAIServiceTier(string(s.OpenAI.ServiceTier)); !ok {
 				return errors.Errorf("invalid conversation config snapshot OpenAI service_tier %q", s.OpenAI.ServiceTier)
@@ -182,6 +192,10 @@ func (s *ConversationConfigSnapshot) Apply(config Config) (Config, error) {
 		}
 		config.OpenAI.Platform = strings.TrimSpace(openAI.Platform)
 		config.OpenAI.APIMode = openAI.APIMode
+		config.OpenAI.TextVerbosity = ""
+		if openAI.TextVerbosity != "" {
+			config.OpenAI.TextVerbosity, _ = ParseOpenAITextVerbosity(string(openAI.TextVerbosity))
+		}
 		config.OpenAI.ServiceTier = openAI.ServiceTier
 		config.OpenAI.ManualCache = openAI.ManualCache
 		config.OpenAI.Models = cloneCustomModels(openAI.Models)

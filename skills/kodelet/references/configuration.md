@@ -33,6 +33,13 @@ kodelet run --provider openai --model gpt-5 "query"
 
 OpenAI supports reasoning effort values such as `none`, `minimal`, `low`, `medium`, `high`, and `xhigh` when supported by the selected model/API mode.
 
+OpenAI text verbosity applies to both Responses and Chat Completions. Kodelet omits the field unless it is explicitly configured, so the upstream default applies (`medium` on OpenAI). Set `openai.text_verbosity` to `low`, `medium`, or `high`:
+
+```yaml
+openai:
+  text_verbosity: high
+```
+
 ## Example config
 
 ```yaml

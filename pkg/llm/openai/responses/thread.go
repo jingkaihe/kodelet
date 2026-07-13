@@ -113,6 +113,9 @@ func NewThread(config llmtypes.Config) (*Thread, error) {
 	if err := llmtypes.NormalizeReasoningConfig(&config); err != nil {
 		return nil, err
 	}
+	if err := llmtypes.NormalizeOpenAITextVerbosity(&config); err != nil {
+		return nil, err
+	}
 
 	if config.Provider == "" {
 		config.Provider = "openai"
@@ -475,6 +478,10 @@ func (t *Thread) processMessageExchange(
 	opt llmtypes.MessageOpt,
 ) (string, bool, bool, error) {
 	log := logger.G(ctx)
+	textVerbosity, sendTextVerbosity, err := llmtypes.ConfiguredOpenAITextVerbosity(t.Config)
+	if err != nil {
+		return "", false, false, err
+	}
 
 	saveConversation := func() {
 		if t.Persisted && t.Store != nil && !opt.NoSaveConversation {
@@ -505,6 +512,11 @@ func (t *Thread) processMessageExchange(
 		ToolChoice: responses.ResponseNewParamsToolChoiceUnion{
 			OfToolChoiceMode: param.NewOpt(responses.ToolChoiceOptionsAuto),
 		},
+	}
+	if sendTextVerbosity {
+		params.Text = responses.ResponseTextConfigParam{
+			Verbosity: responses.ResponseTextConfigVerbosity(textVerbosity),
+		}
 	}
 	applyGPT56PromptCacheOptions(&params, t.Config, model)
 

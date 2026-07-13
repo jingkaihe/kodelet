@@ -1334,6 +1334,7 @@ func TestOpenAIProcessMessageExchangeTextResponse(t *testing.T) {
 	assert.Equal(t, []string{"hello"}, handler.texts)
 	assert.Equal(t, []string{"thinking"}, handler.thinking)
 	assert.Equal(t, openai.ServiceTierPriority, capturedRequest.ServiceTier)
+	assert.Empty(t, capturedRequest.Verbosity)
 	assert.Equal(t, 64, capturedRequest.MaxTokens)
 	require.Len(t, capturedRequest.Messages, 1)
 	assert.Equal(t, "hi", capturedRequest.Messages[0].Content)
@@ -1341,6 +1342,55 @@ func TestOpenAIProcessMessageExchangeTextResponse(t *testing.T) {
 	assert.Equal(t, 3, thread.GetUsage().OutputTokens)
 	require.Len(t, thread.messages, 2)
 	assert.Equal(t, openai.ChatMessageRoleAssistant, thread.messages[1].Role)
+}
+
+func TestOpenAIProcessMessageExchangeUsesConfiguredTextVerbosity(t *testing.T) {
+	var capturedRequest openai.ChatCompletionRequest
+	var capturedBody string
+	client := openai.NewClientWithConfig(openAIHTTPClientConfig(func(req *http.Request) (*http.Response, error) {
+		capturedRequest, capturedBody = decodeOpenAIChatRequestWithBody(t, req)
+		return jsonOpenAIResponse(http.StatusOK, `{
+			"id":"chatcmpl-test",
+			"model":"gpt-5",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
+		}`), nil
+	}))
+	thread := newTestOpenAIExchangeThread(client, llm.Config{
+		Model: "gpt-5",
+		OpenAI: &llm.OpenAIConfig{
+			TextVerbosity: llm.OpenAITextVerbosityHigh,
+		},
+	})
+	thread.messages = []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: "hi"}}
+
+	_, _, err := thread.processMessageExchange(context.Background(), &captureOpenAIMessageHandler{}, "gpt-5", 64, llm.MessageOpt{DisableUsageLog: true})
+
+	require.NoError(t, err)
+	assert.Equal(t, string(llm.OpenAITextVerbosityHigh), capturedRequest.Verbosity)
+	assert.Contains(t, capturedBody, `"verbosity":"high"`)
+}
+
+func TestOpenAIProcessMessageExchangeOmitsUnsetGPT5TextVerbosity(t *testing.T) {
+	var capturedRequest openai.ChatCompletionRequest
+	var capturedBody string
+	client := openai.NewClientWithConfig(openAIHTTPClientConfig(func(req *http.Request) (*http.Response, error) {
+		capturedRequest, capturedBody = decodeOpenAIChatRequestWithBody(t, req)
+		return jsonOpenAIResponse(http.StatusOK, `{
+			"id":"chatcmpl-test",
+			"model":"gpt-5",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
+		}`), nil
+	}))
+	thread := newTestOpenAIExchangeThread(client, llm.Config{Model: "gpt-5"})
+	thread.messages = []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: "hi"}}
+
+	_, _, err := thread.processMessageExchange(context.Background(), &captureOpenAIMessageHandler{}, "gpt-5", 64, llm.MessageOpt{DisableUsageLog: true})
+
+	require.NoError(t, err)
+	assert.Empty(t, capturedRequest.Verbosity)
+	assert.NotContains(t, capturedBody, `"verbosity"`)
 }
 
 func TestOpenAIProcessMessageExchangeDoesNotInjectGoalContextFromMetadata(t *testing.T) {
@@ -1644,6 +1694,11 @@ func sseOpenAIResponse(body string) *http.Response {
 }
 
 func decodeOpenAIChatRequest(t *testing.T, req *http.Request) openai.ChatCompletionRequest {
+	request, _ := decodeOpenAIChatRequestWithBody(t, req)
+	return request
+}
+
+func decodeOpenAIChatRequestWithBody(t *testing.T, req *http.Request) (openai.ChatCompletionRequest, string) {
 	t.Helper()
 
 	data, err := io.ReadAll(req.Body)
@@ -1653,7 +1708,7 @@ func decodeOpenAIChatRequest(t *testing.T, req *http.Request) openai.ChatComplet
 
 	var request openai.ChatCompletionRequest
 	require.NoError(t, json.Unmarshal(data, &request))
-	return request
+	return request, string(data)
 }
 
 func newTestOpenAIExchangeThread(client *openai.Client, config llm.Config) *Thread {

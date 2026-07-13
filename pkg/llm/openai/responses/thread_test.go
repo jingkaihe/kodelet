@@ -2500,6 +2500,64 @@ func TestProcessMessageExchangeSetsConfiguredServiceTier(t *testing.T) {
 	assert.Equal(t, openairesponses.ResponseNewParamsServiceTierPriority, capturedParams.ServiceTier)
 }
 
+func TestProcessMessageExchangeSetsTextVerbosity(t *testing.T) {
+	tests := []struct {
+		name       string
+		model      string
+		configured llmtypes.OpenAITextVerbosity
+		expected   openairesponses.ResponseTextConfigVerbosity
+		present    bool
+	}{
+		{name: "GPT-5 omits unset verbosity", model: "gpt-5.5"},
+		{name: "GPT-5 uses configured value", model: "gpt-5.5", configured: llmtypes.OpenAITextVerbosityHigh, expected: openairesponses.ResponseTextConfigVerbosityHigh, present: true},
+		{name: "older model omits verbosity", model: "gpt-4.1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := llmtypes.Config{
+				Provider: "openai",
+				Model:    tt.model,
+				OpenAI: &llmtypes.OpenAIConfig{
+					Platform:      "openai",
+					APIMode:       llmtypes.OpenAIAPIModeResponses,
+					TextVerbosity: tt.configured,
+				},
+			}
+			thread := &Thread{Thread: base.NewThread(config, "conv-test")}
+			thread.inputItems = []openairesponses.ResponseInputItemUnionParam{
+				{
+					OfMessage: &openairesponses.EasyInputMessageParam{
+						Role:    openairesponses.EasyInputMessageRoleUser,
+						Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("hello")},
+					},
+				},
+			}
+
+			var capturedParams openairesponses.ResponseNewParams
+			thread.newStreamingFunc = func(_ context.Context, params openairesponses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
+				capturedParams = params
+				return nil
+			}
+			thread.processStreamFunc = func(_ context.Context, _ *ssestream.Stream[openairesponses.ResponseStreamEventUnion], _ llmtypes.MessageHandler, _ string, _ llmtypes.MessageOpt) (processStreamResult, error) {
+				return processStreamResult{responseCompleted: true}, nil
+			}
+
+			_, _, _, err := thread.processMessageExchange(context.Background(), &llmtypes.StringCollectorHandler{Silent: true}, tt.model, 256, "system", llmtypes.MessageOpt{NoToolUse: true})
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, capturedParams.Text.Verbosity)
+
+			body, err := capturedParams.MarshalJSON()
+			require.NoError(t, err)
+			if tt.present {
+				assert.Contains(t, string(body), `"text":{"verbosity":"high"}`)
+			} else {
+				assert.NotContains(t, string(body), `"text"`)
+			}
+		})
+	}
+}
+
 func TestProcessMessageExchangeSavesConversationOnError(t *testing.T) {
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", IsSubAgent: true, Retry: llmtypes.RetryConfig{Attempts: 1}, OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
 	thread := &Thread{
