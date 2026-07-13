@@ -611,7 +611,7 @@ export KODELET_PROVIDER="openai"
 export KODELET_MODEL="gpt-4.1"
 export KODELET_MAX_TOKENS="8192"
 export KODELET_REASONING_EFFORT="medium"  # OpenAI: none|minimal|low|medium|high|xhigh|max; Anthropic adaptive thinking: none|low|medium|high|xhigh|max
-export KODELET_OPENAI_TEXT_VERBOSITY="low"  # low|medium|high
+export KODELET_OPENAI_TEXT_VERBOSITY="low"  # Responses API only: low|medium|high
 
 # Profile configuration
 export KODELET_PROFILE="anthropic"  # Use a specific profile
@@ -996,11 +996,11 @@ Kodelet supports OpenAI models including:
 
 Features:
 - Reasoning effort control (OpenAI: none, minimal, low, medium, high, xhigh, max)
-- Configurable text verbosity for Responses and Chat Completions (low, medium, high)
+- Configurable Responses API text verbosity (low, medium, high)
 - Function calling capabilities
 - Vision support (planned)
 
-Configure OpenAI text verbosity under the provider block. Kodelet omits the field unless it is explicitly configured, so the upstream default applies (`medium` on OpenAI). The same policy applies to both the Responses API and Chat Completions API:
+Configure OpenAI Responses API text verbosity under the provider block. Kodelet omits the field unless it is explicitly configured, so the upstream default applies (`medium` on OpenAI). Chat Completions requests do not send this setting:
 
 ```yaml
 openai:

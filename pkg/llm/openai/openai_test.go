@@ -1344,7 +1344,7 @@ func TestOpenAIProcessMessageExchangeTextResponse(t *testing.T) {
 	assert.Equal(t, openai.ChatMessageRoleAssistant, thread.messages[1].Role)
 }
 
-func TestOpenAIProcessMessageExchangeUsesConfiguredTextVerbosity(t *testing.T) {
+func TestOpenAIProcessMessageExchangeIgnoresConfiguredTextVerbosity(t *testing.T) {
 	var capturedRequest openai.ChatCompletionRequest
 	var capturedBody string
 	client := openai.NewClientWithConfig(openAIHTTPClientConfig(func(req *http.Request) (*http.Response, error) {
@@ -1362,28 +1362,6 @@ func TestOpenAIProcessMessageExchangeUsesConfiguredTextVerbosity(t *testing.T) {
 			TextVerbosity: llm.OpenAITextVerbosityHigh,
 		},
 	})
-	thread.messages = []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: "hi"}}
-
-	_, _, err := thread.processMessageExchange(context.Background(), &captureOpenAIMessageHandler{}, "gpt-5", 64, llm.MessageOpt{DisableUsageLog: true})
-
-	require.NoError(t, err)
-	assert.Equal(t, string(llm.OpenAITextVerbosityHigh), capturedRequest.Verbosity)
-	assert.Contains(t, capturedBody, `"verbosity":"high"`)
-}
-
-func TestOpenAIProcessMessageExchangeOmitsUnsetGPT5TextVerbosity(t *testing.T) {
-	var capturedRequest openai.ChatCompletionRequest
-	var capturedBody string
-	client := openai.NewClientWithConfig(openAIHTTPClientConfig(func(req *http.Request) (*http.Response, error) {
-		capturedRequest, capturedBody = decodeOpenAIChatRequestWithBody(t, req)
-		return jsonOpenAIResponse(http.StatusOK, `{
-			"id":"chatcmpl-test",
-			"model":"gpt-5",
-			"choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}],
-			"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
-		}`), nil
-	}))
-	thread := newTestOpenAIExchangeThread(client, llm.Config{Model: "gpt-5"})
 	thread.messages = []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: "hi"}}
 
 	_, _, err := thread.processMessageExchange(context.Background(), &captureOpenAIMessageHandler{}, "gpt-5", 64, llm.MessageOpt{DisableUsageLog: true})

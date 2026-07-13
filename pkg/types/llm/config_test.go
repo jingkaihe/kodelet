@@ -105,6 +105,21 @@ func TestNormalizeOpenAITextVerbosityPreservesUnsetState(t *testing.T) {
 	require.ErrorContains(t, NormalizeOpenAITextVerbosity(&config), "invalid openai.text_verbosity")
 }
 
+func TestNormalizeOpenAITextVerbosityCopiesOpenAIConfig(t *testing.T) {
+	original := &OpenAIConfig{
+		Platform:      "openai",
+		TextVerbosity: " HIGH ",
+	}
+	config := Config{OpenAI: original}
+
+	require.NoError(t, NormalizeOpenAITextVerbosity(&config))
+
+	assert.NotSame(t, original, config.OpenAI)
+	assert.Equal(t, OpenAITextVerbosity(" HIGH "), original.TextVerbosity)
+	assert.Equal(t, OpenAITextVerbosityHigh, config.OpenAI.TextVerbosity)
+	assert.Equal(t, "openai", config.OpenAI.Platform)
+}
+
 func TestDefaultContextPatterns(t *testing.T) {
 	patterns := DefaultContextPatterns()
 	assert.Equal(t, []string{"AGENTS.md"}, patterns)

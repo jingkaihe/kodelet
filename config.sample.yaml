@@ -254,7 +254,7 @@ openai:
   # relying on previous_response_id/server-stored conversation state.
   # api_mode: "responses"
 
-  # Control generated text detail for both Responses and Chat Completions.
+  # Control generated text detail for the Responses API.
   # Supported values are low, medium, and high. The field is omitted unless
   # explicitly configured, so the upstream default applies (medium on OpenAI).
   # text_verbosity: "low"
@@ -413,7 +413,7 @@ tracing:
 # - KODELET_TRACING_RATIO: Sets the sampling ratio
 # - KODELET_ALIASES_*: Define individual aliases (e.g., KODELET_ALIASES_SONNET46=claude-sonnet-4-6)
 # - KODELET_OPENAI_API_MODE: OpenAI API mode (chat_completions or responses)
-# - KODELET_OPENAI_TEXT_VERBOSITY: OpenAI text response verbosity (low, medium, or high)
+# - KODELET_OPENAI_TEXT_VERBOSITY: OpenAI Responses text verbosity (low, medium, or high)
 # - KODELET_OPENAI_WEBSOCKET_MODE: Use Responses API WebSocket mode when supported (true/false)
 #
 # API Keys:

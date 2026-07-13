@@ -68,7 +68,7 @@ func TestConversationConfigSnapshotApplyPreservesLivePolicy(t *testing.T) {
 			BaseURL:       "https://do-not-snapshot.example",
 			APIKeyEnvVar:  "SECRET_ENV",
 			APIMode:       OpenAIAPIModeResponses,
-			TextVerbosity: OpenAITextVerbosityHigh,
+			TextVerbosity: " HIGH ",
 			ServiceTier:   OpenAIServiceTierFast,
 			ManualCache:   true,
 		},
@@ -77,6 +77,7 @@ func TestConversationConfigSnapshotApplyPreservesLivePolicy(t *testing.T) {
 
 	snapshot, err := NewConversationConfigSnapshot(config)
 	require.NoError(t, err)
+	assert.Equal(t, OpenAITextVerbosity(" HIGH "), config.OpenAI.TextVerbosity)
 	assert.Equal(t, ConversationConfigSnapshotVersion, snapshot.Version)
 	assert.Equal(t, "high", snapshot.ReasoningEffort)
 	require.NotNil(t, snapshot.OpenAI)

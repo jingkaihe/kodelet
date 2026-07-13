@@ -136,9 +136,6 @@ func NewOpenAIThread(config llmtypes.Config) (*Thread, error) {
 	if err := llmtypes.NormalizeReasoningConfig(&config); err != nil {
 		return nil, err
 	}
-	if err := llmtypes.NormalizeOpenAITextVerbosity(&config); err != nil {
-		return nil, err
-	}
 	// Apply defaults if not provided
 	if config.Provider == "" {
 		config.Provider = "openai"
@@ -437,19 +434,12 @@ func (t *Thread) processMessageExchange(
 	opt llmtypes.MessageOpt,
 ) (string, bool, error) {
 	var finalOutput string
-	textVerbosity, sendTextVerbosity, err := llmtypes.ConfiguredOpenAITextVerbosity(t.Config)
-	if err != nil {
-		return "", false, err
-	}
 
 	// Prepare completion parameters
 	requestParams := openai.ChatCompletionRequest{
 		Model:     model,
 		Messages:  t.messages,
 		MaxTokens: maxTokens,
-	}
-	if sendTextVerbosity {
-		requestParams.Verbosity = string(textVerbosity)
 	}
 
 	if serviceTier := normalizeServiceTier(t.Config).WireValue(); serviceTier != "" {
