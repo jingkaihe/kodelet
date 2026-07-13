@@ -1,5 +1,11 @@
 # Kodelet
 
+## 0.5.0-beta
+
+Added configurable OpenAI Responses API text verbosity with `low`, `medium`, and `high` values, including environment-variable support and persistence across resumed conversations.
+
+Updated the Go toolchain baseline to 1.26.5 and ignored local `mcp.json` configuration files.
+
 ## 0.4.56-beta
 
 Added conversation configuration snapshots and `allowed_reasoning_efforts`, preserving model and reasoning behavior across resumes while keeping credentials and live tool policy current; an empty allowlist exposes all provider-supported efforts in the TUI and Web UI.
