@@ -126,14 +126,15 @@ func (m *model) handleLocalSlashCommand(message string) (tea.Cmd, bool) {
 	m.textarea.Reset()
 	m.dismissSlashCommandSuggestions()
 	if name := strings.TrimSpace(args); name != "" {
-		if err := m.setThemeSelection(name); err != nil {
+		cmd, err := m.setThemeSelection(name)
+		if err != nil {
 			return m.addUINotification(uiNotification{
 				level:   uiNotificationError,
 				title:   "Theme unavailable",
 				message: err.Error(),
 			}), true
 		}
-		return nil, true
+		return cmd, true
 	}
 
 	return m.openThemePicker(), true
@@ -170,30 +171,31 @@ func themePickerOptions(current string) (labels []string, values []string, selec
 	return labels, values, selected
 }
 
-func (m *model) setThemeSelection(name string) error {
+func (m *model) setThemeSelection(name string) (tea.Cmd, error) {
 	selection := normalizedThemeSelection(name)
 	theme, err := resolveTheme(selection)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	applyTheme(theme)
 	m.theme = theme
 	m.themeSelection = selection
-	applyThemeToTextarea(&m.textarea)
+	cmd := applyThemeToTextarea(&m.textarea)
 	m.assistantMarkdownRenderer = nil
 	m.assistantMarkdownRendererWidth = 0
 	m.thoughtMarkdownRenderer = nil
 	m.thoughtMarkdownRendererWidth = 0
 	m.status = "ready"
 	m.refreshViewport(false)
-	return nil
+	return cmd, nil
 }
 
-func applyThemeToTextarea(input *textarea.Model) {
+func applyThemeToTextarea(input *textarea.Model) tea.Cmd {
 	if input == nil {
-		return
+		return nil
 	}
+	focused := input.Focused()
 	input.FocusedStyle.Base = composerTextStyle
 	input.FocusedStyle.CursorLine = composerTextStyle
 	input.FocusedStyle.Placeholder = inputPlaceholderStyle
@@ -208,6 +210,15 @@ func applyThemeToTextarea(input *textarea.Model) {
 	input.BlurredStyle.Prompt = composerTextStyle
 	input.Cursor.Style = composerCursorStyle
 	input.Cursor.TextStyle = composerTextStyle
+
+	// Bubbles keeps a private pointer to the active style. Rebind it after
+	// replacing the exported styles so copied textarea models render the new
+	// theme immediately.
+	if focused {
+		return input.Focus()
+	}
+	input.Blur()
+	return nil
 }
 
 func discoverThemes() themeRegistry {

@@ -91,6 +91,7 @@ func TestThemeSlashCommandOpensPickerWithoutStartingConversation(t *testing.T) {
 
 func TestThemePickerSelectionAppliesThemeImmediately(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	withANSI256ColorProfile(t)
 	m := newModel(context.Background(), Config{Theme: DefaultThemeName})
 	t.Cleanup(m.cancel)
 	m.width = 80
@@ -98,6 +99,7 @@ func TestThemePickerSelectionAppliesThemeImmediately(t *testing.T) {
 	m.resize()
 	require.NotEmpty(t, m.renderMarkdown("`code`", 40, markdownAssistant))
 	require.NotNil(t, m.assistantMarkdownRenderer)
+	previousComposerStyle, _ := styleSequences(composerTextStyle)
 
 	m.openThemePicker()
 	require.NotNil(t, m.activeUIPrompt)
@@ -107,7 +109,7 @@ func TestThemePickerSelectionAppliesThemeImmediately(t *testing.T) {
 
 	cmd := m.submitUIPrompt()
 
-	assert.Nil(t, cmd)
+	assert.NotNil(t, cmd)
 	assert.Nil(t, m.activeUIPrompt)
 	assert.Equal(t, LightThemeName, m.themeSelection)
 	assert.Equal(t, LightThemeName, m.theme.Name)
@@ -116,6 +118,11 @@ func TestThemePickerSelectionAppliesThemeImmediately(t *testing.T) {
 	assert.Nil(t, m.thoughtMarkdownRenderer)
 	assert.Equal(t, composerTextStyle, m.textarea.FocusedStyle.Text)
 	assert.Equal(t, composerCursorStyle, m.textarea.Cursor.Style)
+	m.textarea.SetValue("draft")
+	composer := m.textarea.View()
+	currentComposerStyle, _ := styleSequences(composerTextStyle)
+	assert.Contains(t, composer, currentComposerStyle+"draft")
+	assert.NotContains(t, composer, previousComposerStyle+"draft")
 }
 
 func TestThemeSlashCommandAcceptsDirectThemeName(t *testing.T) {
@@ -129,7 +136,7 @@ func TestThemeSlashCommandAcceptsDirectThemeName(t *testing.T) {
 
 	cmd := m.submit()
 
-	assert.Nil(t, cmd)
+	assert.NotNil(t, cmd)
 	assert.Nil(t, m.activeUIPrompt)
 	assert.Equal(t, LightThemeName, m.themeSelection)
 	assert.Equal(t, LightThemeName, m.theme.Name)

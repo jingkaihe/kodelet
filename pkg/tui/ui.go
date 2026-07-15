@@ -438,13 +438,15 @@ func (m *model) submitUIPrompt() tea.Cmd {
 		}
 		m.resolveUIPrompt(extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted, Value: value})
 		if prompt.origin == uiPromptTheme {
-			if err := m.setThemeSelection(value); err != nil {
+			cmd, err := m.setThemeSelection(value)
+			if err != nil {
 				return m.addUINotification(uiNotification{
 					level:   uiNotificationError,
 					title:   "Theme unavailable",
 					message: err.Error(),
 				})
 			}
+			return cmd
 		}
 	}
 	return nil
