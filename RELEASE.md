@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-Added terminal-profile-aware TUI themes, selecting Catppuccin Latte on light backgrounds and Catppuccin Mocha on dark backgrounds, plus custom YAML themes from `~/.kodelet/themes`.
+Added automatic light/dark TUI themes, custom themes from `~/.kodelet/themes`, and a `/theme` picker with a ` (current)` marker.
 
 ## 0.5.0-beta
 

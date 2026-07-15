@@ -9,12 +9,18 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textarea"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/pkg/errors"
 	"gopkg.in/yaml.v3"
 )
 
-const customThemeExtension = ".theme"
+const (
+	customThemeExtension = ".theme"
+	currentThemeSuffix   = " (current)"
+)
 
 type customThemeFile struct {
 	Base  string   `yaml:"base"`
@@ -87,6 +93,121 @@ func automaticThemeName(hasDarkBackground bool) string {
 
 func normalizeThemeName(name string) string {
 	return strings.ToLower(strings.TrimSpace(name))
+}
+
+func normalizedThemeSelection(name string) string {
+	name = normalizeThemeName(name)
+	if name == "" {
+		return AutoThemeName
+	}
+	return name
+}
+
+func tuiBuiltInSlashCommands() []slashcommands.Command {
+	return []slashcommands.Command{{
+		Name:        "theme",
+		Description: "Select the TUI theme",
+		Hint:        "name (optional)",
+		Placeholder: "/theme [name]",
+	}}
+}
+
+func withTUIBuiltInSlashCommands(commands []slashcommands.Command) []slashcommands.Command {
+	builtIns := mergeSlashCommands(slashcommands.BuiltIns(), tuiBuiltInSlashCommands())
+	return mergeSlashCommands(builtIns, commands)
+}
+
+func (m *model) handleLocalSlashCommand(message string) (tea.Cmd, bool) {
+	command, args, found := slashcommands.Parse(message)
+	if !found || !strings.EqualFold(command, "theme") {
+		return nil, false
+	}
+
+	m.textarea.Reset()
+	m.dismissSlashCommandSuggestions()
+	if name := strings.TrimSpace(args); name != "" {
+		if err := m.setThemeSelection(name); err != nil {
+			return m.addUINotification(uiNotification{
+				level:   uiNotificationError,
+				title:   "Theme unavailable",
+				message: err.Error(),
+			}), true
+		}
+		return nil, true
+	}
+
+	return m.openThemePicker(), true
+}
+
+func (m *model) openThemePicker() tea.Cmd {
+	labels, values, selected := themePickerOptions(m.themeSelection)
+	return m.openUIPrompt(uiPromptState{
+		mode:             uiPromptSelect,
+		origin:           uiPromptTheme,
+		title:            "Select Theme",
+		message:          "Choose a theme for this TUI session.",
+		helpText:         "Auto follows the terminal's light or dark profile.",
+		options:          labels,
+		optionValues:     values,
+		selectIndex:      selected,
+		submitButtonText: "Apply",
+	})
+}
+
+func themePickerOptions(current string) (labels []string, values []string, selected int) {
+	current = normalizedThemeSelection(current)
+	values = AvailableThemeNames()
+	labels = make([]string, 0, len(values))
+	selected = 0
+	for index, name := range values {
+		label := name
+		if name == current {
+			label += currentThemeSuffix
+			selected = index
+		}
+		labels = append(labels, label)
+	}
+	return labels, values, selected
+}
+
+func (m *model) setThemeSelection(name string) error {
+	selection := normalizedThemeSelection(name)
+	theme, err := resolveTheme(selection)
+	if err != nil {
+		return err
+	}
+
+	applyTheme(theme)
+	m.theme = theme
+	m.themeSelection = selection
+	applyThemeToTextarea(&m.textarea)
+	m.assistantMarkdownRenderer = nil
+	m.assistantMarkdownRendererWidth = 0
+	m.thoughtMarkdownRenderer = nil
+	m.thoughtMarkdownRendererWidth = 0
+	m.status = "ready"
+	m.refreshViewport(false)
+	return nil
+}
+
+func applyThemeToTextarea(input *textarea.Model) {
+	if input == nil {
+		return
+	}
+	input.FocusedStyle.Base = composerTextStyle
+	input.FocusedStyle.CursorLine = composerTextStyle
+	input.FocusedStyle.Placeholder = inputPlaceholderStyle
+	input.FocusedStyle.Text = composerTextStyle
+	input.FocusedStyle.EndOfBuffer = composerTextStyle
+	input.FocusedStyle.Prompt = composerTextStyle
+	input.BlurredStyle.Base = composerTextStyle
+	input.BlurredStyle.CursorLine = composerTextStyle
+	input.BlurredStyle.Placeholder = inputPlaceholderStyle
+	input.BlurredStyle.Text = composerTextStyle
+	input.BlurredStyle.EndOfBuffer = composerTextStyle
+	input.BlurredStyle.Prompt = composerTextStyle
+	input.Cursor.Style = composerCursorStyle
+	input.Cursor.TextStyle = composerTextStyle
 }
 
 func discoverThemes() themeRegistry {

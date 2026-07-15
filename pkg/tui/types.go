@@ -128,6 +128,7 @@ type model struct {
 	cwd                  string
 	requestedCWD         string
 	theme                tuiTheme
+	themeSelection       string
 	slashCommands        []slashcommands.Command
 	slashCommandIndex    int
 	slashCommandErr      error

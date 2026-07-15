@@ -578,8 +578,7 @@ func (m *model) updateUIPromptKey(msg tea.KeyMsg) tea.Cmd {
 		m.dismissUIPrompt()
 		return nil
 	case "enter":
-		m.submitUIPrompt()
-		return nil
+		return m.submitUIPrompt()
 	case "up", "shift+tab", "left":
 		if m.moveUISelect(-1) {
 			m.refreshViewport(false)
@@ -836,6 +835,9 @@ func (m *model) submit() tea.Cmd {
 	message := strings.TrimSpace(m.textarea.Value())
 	if message == "" || m.running {
 		return nil
+	}
+	if cmd, handled := m.handleLocalSlashCommand(message); handled {
+		return cmd
 	}
 	m.profilePickerOpen = false
 	m.reasoningPickerOpen = false

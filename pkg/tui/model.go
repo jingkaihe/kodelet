@@ -67,9 +67,11 @@ func newModel(ctx context.Context, config Config) model {
 	mctx, cancel := context.WithCancel(ctx)
 	runCh := make(chan tea.Msg, 256)
 	mctx = extensions.ContextWithDiagnosticSink(mctx, newTUIDiagnosticSink(runCh))
-	theme, err := resolveTheme(config.Theme)
+	themeSelection := normalizedThemeSelection(config.Theme)
+	theme, err := resolveTheme(themeSelection)
 	if err != nil {
 		theme = themes[DefaultThemeName]
+		themeSelection = DefaultThemeName
 	}
 	applyTheme(theme)
 
@@ -77,20 +79,7 @@ func newModel(ctx context.Context, config Config) model {
 	ta.Placeholder = "Ask kodelet..."
 	ta.Prompt = ""
 	ta.ShowLineNumbers = false
-	ta.FocusedStyle.Base = composerTextStyle
-	ta.FocusedStyle.CursorLine = composerTextStyle
-	ta.FocusedStyle.Placeholder = inputPlaceholderStyle
-	ta.FocusedStyle.Text = composerTextStyle
-	ta.FocusedStyle.EndOfBuffer = composerTextStyle
-	ta.FocusedStyle.Prompt = composerTextStyle
-	ta.BlurredStyle.Base = composerTextStyle
-	ta.BlurredStyle.CursorLine = composerTextStyle
-	ta.BlurredStyle.Placeholder = inputPlaceholderStyle
-	ta.BlurredStyle.Text = composerTextStyle
-	ta.BlurredStyle.EndOfBuffer = composerTextStyle
-	ta.BlurredStyle.Prompt = composerTextStyle
-	ta.Cursor.Style = composerCursorStyle
-	ta.Cursor.TextStyle = composerTextStyle
+	applyThemeToTextarea(&ta)
 	ta.SetHeight(inputHeight)
 	ta.Focus()
 
@@ -166,6 +155,7 @@ func newModel(ctx context.Context, config Config) model {
 		messageHistoryScopeCWD:  messageHistoryScopeCWD,
 		initialHistoryPending:   initialHistoryPending,
 		theme:                   theme,
+		themeSelection:          themeSelection,
 		slashCommandIndex:       -1,
 		viewport:                vp,
 		textarea:                ta,
@@ -211,21 +201,21 @@ func listSlashCommands(ctx context.Context, cwd string) ([]slashcommands.Command
 	if err != nil {
 		return commands, err
 	}
-	return append(commands, extensionCommands...), nil
+	return mergeSlashCommands(commands, extensionCommands), nil
 }
 
 func listBaseSlashCommands(ctx context.Context, cwd string) ([]slashcommands.Command, error) {
 	resolvedCWD, err := resolveSlashCommandCWD(cwd)
 	if err != nil {
-		return slashcommands.BuiltIns(), err
+		return withTUIBuiltInSlashCommands(slashcommands.BuiltIns()), err
 	}
 
 	processor, err := fragments.NewFragmentProcessor(fragments.WithDefaultDirsForCWD(resolvedCWD))
 	if err != nil {
-		return slashcommands.BuiltIns(), errors.Wrap(err, "failed to initialize slash commands")
+		return withTUIBuiltInSlashCommands(slashcommands.BuiltIns()), errors.Wrap(err, "failed to initialize slash commands")
 	}
 
-	return slashcommands.List(ctx, processor), nil
+	return withTUIBuiltInSlashCommands(slashcommands.List(ctx, processor)), nil
 }
 
 func listExtensionSlashCommands(ctx context.Context, cwd string) ([]slashcommands.Command, error) {

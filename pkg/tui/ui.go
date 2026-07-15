@@ -28,8 +28,16 @@ const (
 	uiPromptSelect
 )
 
+type uiPromptOrigin int
+
+const (
+	uiPromptExtension uiPromptOrigin = iota
+	uiPromptTheme
+)
+
 type uiPromptState struct {
 	mode     uiPromptMode
+	origin   uiPromptOrigin
 	id       string
 	title    string
 	message  string
@@ -42,8 +50,9 @@ type uiPromptState struct {
 	required         bool
 	secret           bool
 
-	options     []string
-	selectIndex int
+	options      []string
+	optionValues []string
+	selectIndex  int
 
 	input    textinput.Model
 	response chan extensions.UIInputResponse
@@ -401,30 +410,44 @@ func (m *model) resolveUIPrompt(response extensions.UIInputResponse) {
 	m.refreshViewport(false)
 }
 
-func (m *model) submitUIPrompt() {
+func (m *model) submitUIPrompt() tea.Cmd {
 	if m.activeUIPrompt == nil {
-		return
+		return nil
 	}
 	prompt := m.activeUIPrompt
 	switch prompt.mode {
 	case uiPromptInput:
 		value := prompt.input.Value()
 		if prompt.required && strings.TrimSpace(value) == "" {
-			return
+			return nil
 		}
 		m.resolveUIPrompt(extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted, Value: value})
 	case uiPromptConfirm:
 		m.resolveUIPrompt(extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted, Confirmed: true, Value: "true"})
 	case uiPromptSelect:
 		if len(prompt.options) == 0 {
-			return
+			return nil
 		}
 		index := prompt.selectIndex
 		if index < 0 || index >= len(prompt.options) {
 			index = 0
 		}
-		m.resolveUIPrompt(extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted, Value: prompt.options[index]})
+		value := prompt.options[index]
+		if len(prompt.optionValues) == len(prompt.options) {
+			value = prompt.optionValues[index]
+		}
+		m.resolveUIPrompt(extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted, Value: value})
+		if prompt.origin == uiPromptTheme {
+			if err := m.setThemeSelection(value); err != nil {
+				return m.addUINotification(uiNotification{
+					level:   uiNotificationError,
+					title:   "Theme unavailable",
+					message: err.Error(),
+				})
+			}
+		}
 	}
+	return nil
 }
 
 func (m *model) dismissUIPrompt() {
