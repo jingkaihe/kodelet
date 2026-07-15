@@ -56,9 +56,10 @@ ACP supports session persistence, image input, embedded file context, streaming 
 kodelet chat
 kodelet chat --profile openai --reasoning-effort high
 kodelet chat --resume CONVERSATION_ID
+kodelet chat --theme catppuccin-latte
 ```
 
-Before sending the first message, use `Ctrl+T` to change profile and `Ctrl+Y` or the clickable `effort:` label to choose an allowed reasoning effort. Persisted conversations restore and lock their configuration snapshot on resume.
+The default `auto` theme selects Catppuccin Latte for light terminal profiles and Catppuccin Mocha for dark terminal profiles. Bundled themes can be forced with `--theme`, and custom YAML `*.theme` files can be installed under `~/.kodelet/themes`. Before sending the first message, use `Ctrl+T` to change profile and `Ctrl+Y` or the clickable `effort:` label to choose an allowed reasoning effort. Persisted conversations restore and lock their configuration snapshot on resume.
 
 ### Web UI
 

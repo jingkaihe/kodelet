@@ -71,8 +71,11 @@ func newMarkdownRenderer(width int, style ansi.StyleConfig) (*glamour.TermRender
 	)
 }
 
-func compactMarkdownStyle(theme markdownTheme) ansi.StyleConfig {
-	style := styles.DarkStyleConfig
+func compactMarkdownStyle(theme markdownTheme, dark bool) ansi.StyleConfig {
+	style := styles.LightStyleConfig
+	if dark {
+		style = styles.DarkStyleConfig
+	}
 	style.Document.BlockPrefix = ""
 	style.Document.BlockSuffix = ""
 	style.Document.Color = nil

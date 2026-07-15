@@ -238,7 +238,7 @@ func TestApplyPatchGroupsRenderMoveLabelsCountsAndLineGutter(t *testing.T) {
 func TestApplyPatchHeaderStylesCountsWithThemeDiffColors(t *testing.T) {
 	withANSI256ColorProfile(t)
 
-	for _, themeName := range []string{DefaultThemeName, "tokyo-night"} {
+	for _, themeName := range []string{DefaultThemeName, LightThemeName, "tokyo-night"} {
 		t.Run(themeName, func(t *testing.T) {
 			m := newModel(context.Background(), Config{Theme: themeName})
 			t.Cleanup(m.cancel)

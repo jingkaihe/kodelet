@@ -139,13 +139,44 @@ kodelet chat --follow                # continue the most recent conversation
 kodelet chat -f                      # short form
 kodelet chat --resume CONVERSATION_ID  # resume a specific conversation
 kodelet chat -r CONVERSATION_ID        # short form
-kodelet chat --theme tokyo-night        # switch from the default catppuccin-mocha theme
+kodelet chat --theme catppuccin-mocha   # force the bundled dark theme
+kodelet chat --theme catppuccin-latte   # force the bundled light theme
+kodelet chat --theme tokyo-night        # select another bundled theme
 kodelet chat --profile openai --reasoning-effort high
 kodelet chat --no-tools              # chat without tools
 kodelet chat --no-extensions         # disable extensions
 ```
 
-The TUI uses `catppuccin-mocha` by default. Use `--theme` to switch to another available theme such as `tokyo-night`. It streams assistant responses, collapses thinking and tool details by default, and lets you toggle details with `ctrl+o` or by clicking the detail header. It uses the same chat runner as the Web UI, so conversations are persisted and can be resumed by ID. While the assistant is working, the composer stays editable; press `Enter` to queue the typed text as steering for the active conversation. Kodelet applies queued steering on the next model API call. Before the first message, use `Ctrl+T` to select a profile and `Ctrl+Y` (or click the `effort:` label beside the profile) to select one of the profile's `allowed_reasoning_efforts`. Both controls are locked after the conversation starts, and the selected effort is restored when it is resumed.
+The TUI uses `auto` theme selection by default. It detects whether the terminal profile has a light or dark background and selects `catppuccin-latte` for light profiles or `catppuccin-mocha` for dark profiles; unavailable detection falls back to Mocha. Use `--theme` to force a bundled or custom theme. The TUI streams assistant responses, collapses thinking and tool details by default, and lets you toggle details with `ctrl+o` or by clicking the detail header. It uses the same chat runner as the Web UI, so conversations are persisted and can be resumed by ID. While the assistant is working, the composer stays editable; press `Enter` to queue the typed text as steering for the active conversation. Kodelet applies queued steering on the next model API call. Before the first message, use `Ctrl+T` to select a profile and `Ctrl+Y` (or click the `effort:` label beside the profile) to select one of the profile's `allowed_reasoning_efforts`. Both controls are locked after the conversation starts, and the selected effort is restored when it is resumed.
+
+#### Custom TUI themes
+
+Place YAML theme files in `~/.kodelet/themes` with a `.theme` extension. The filename stem becomes the theme name, so `~/.kodelet/themes/forest.theme` is selected with `kodelet chat --theme forest`. Custom themes inherit from a bundled theme and only need to declare the colors they want to change; `base` defaults to `catppuccin-mocha`. Bundled theme names take precedence over files with the same name.
+
+```yaml
+# ~/.kodelet/themes/forest.theme
+base: catppuccin-latte
+dark: false
+assistant: "#2f3e46"
+user: "#2a9d8f"
+diff_added: "#2a9d8f"
+diff_removed: "#c1121f"
+profile_colors:
+  - "#2a9d8f"
+  - "#457b9d"
+  - "#e9c46a"
+slash_command:
+  command: "#457b9d"
+ui:
+  dialog_border: "#2f3e46"
+  dialog_selected: "#dce5e5"
+markdown:
+  heading_primary: "#457b9d"
+  code: "#2a9d8f"
+  chroma_keyword: "#7b2cbf"
+```
+
+Theme colors must use `#rrggbb` notation. Supported top-level color keys are `user`, `assistant`, `muted`, `thought_header`, `thought_body`, `tool_header`, `tool_body`, `diff_added`, `diff_removed`, `steering`, `steering_error`, `input_border`, `input_label`, `input_placeholder`, `composer_label`, `composer_flow`, `composer_text`, `composer_cursor`, `profile_colors`, and `profile_selected`. Nested groups are `slash_command` (`selected`, `command`, `description`, `hint`, `error`), `history_search` (`label`, `query`, `error`), `ui` (`dialog_border`, `dialog_title`, `dialog_body`, `dialog_muted`, `dialog_selected`, `dialog_button`, `dialog_cancel`, `notification_border`, `notification_title`, `notification_body`, `notification_warning_border`, `notification_warning_title`, `notification_error_border`, `notification_error_title`), and `markdown` (`block_quote`, `heading`, `heading_primary`, `heading_muted`, `horizontal_rule`, `link`, `link_text`, `image`, `image_text`, `code`, `code_block`, and the `chroma_*` syntax-color fields demonstrated above). Unknown keys and invalid colors are rejected when the theme is selected.
 
 ### Interactive Chat Mode (ACP)
 

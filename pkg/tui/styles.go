@@ -1,117 +1,119 @@
 package tui
 
 import (
-	"sort"
 	"strings"
 
 	"github.com/charmbracelet/glamour/ansi"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/pkg/errors"
 )
 
 const (
+	AutoThemeName               = "auto"
 	DefaultThemeName            = "catppuccin-mocha"
+	LightThemeName              = "catppuccin-latte"
 	ansiResetSequence           = "\x1b[0m"
 	ansiForegroundResetSequence = "\x1b[39m"
 )
 
 type tuiTheme struct {
-	Name             string
-	User             string
-	Assistant        string
-	Muted            string
-	ThoughtHeader    string
-	ThoughtBody      string
-	ToolHeader       string
-	ToolBody         string
-	DiffAdded        string
-	DiffRemoved      string
-	Steering         string
-	SteeringError    string
-	InputBorder      string
-	InputLabel       string
-	InputPlaceholder string
-	ComposerLabel    string
-	ComposerFlow     string
-	ComposerText     string
-	ComposerCursor   string
-	SlashCommand     slashCommandTheme
-	HistorySearch    historySearchTheme
-	ProfileColors    []string
-	ProfileSelected  string
-	UI               uiTheme
-	Markdown         markdownTheme
+	Name             string             `yaml:"-"`
+	Dark             bool               `yaml:"dark"`
+	User             string             `yaml:"user"`
+	Assistant        string             `yaml:"assistant"`
+	Muted            string             `yaml:"muted"`
+	ThoughtHeader    string             `yaml:"thought_header"`
+	ThoughtBody      string             `yaml:"thought_body"`
+	ToolHeader       string             `yaml:"tool_header"`
+	ToolBody         string             `yaml:"tool_body"`
+	DiffAdded        string             `yaml:"diff_added"`
+	DiffRemoved      string             `yaml:"diff_removed"`
+	Steering         string             `yaml:"steering"`
+	SteeringError    string             `yaml:"steering_error"`
+	InputBorder      string             `yaml:"input_border"`
+	InputLabel       string             `yaml:"input_label"`
+	InputPlaceholder string             `yaml:"input_placeholder"`
+	ComposerLabel    string             `yaml:"composer_label"`
+	ComposerFlow     string             `yaml:"composer_flow"`
+	ComposerText     string             `yaml:"composer_text"`
+	ComposerCursor   string             `yaml:"composer_cursor"`
+	SlashCommand     slashCommandTheme  `yaml:"slash_command"`
+	HistorySearch    historySearchTheme `yaml:"history_search"`
+	ProfileColors    []string           `yaml:"profile_colors"`
+	ProfileSelected  string             `yaml:"profile_selected"`
+	UI               uiTheme            `yaml:"ui"`
+	Markdown         markdownTheme      `yaml:"markdown"`
 }
 
 type slashCommandTheme struct {
-	Selected    string
-	Command     string
-	Description string
-	Hint        string
-	Error       string
+	Selected    string `yaml:"selected"`
+	Command     string `yaml:"command"`
+	Description string `yaml:"description"`
+	Hint        string `yaml:"hint"`
+	Error       string `yaml:"error"`
 }
 
 type historySearchTheme struct {
-	Label string
-	Query string
-	Error string
+	Label string `yaml:"label"`
+	Query string `yaml:"query"`
+	Error string `yaml:"error"`
 }
 
 type uiTheme struct {
-	DialogBorder              string
-	DialogTitle               string
-	DialogBody                string
-	DialogMuted               string
-	DialogSelected            string
-	DialogButton              string
-	DialogCancel              string
-	NotificationBorder        string
-	NotificationTitle         string
-	NotificationBody          string
-	NotificationWarningBorder string
-	NotificationWarningTitle  string
-	NotificationErrorBorder   string
-	NotificationErrorTitle    string
+	DialogBorder              string `yaml:"dialog_border"`
+	DialogTitle               string `yaml:"dialog_title"`
+	DialogBody                string `yaml:"dialog_body"`
+	DialogMuted               string `yaml:"dialog_muted"`
+	DialogSelected            string `yaml:"dialog_selected"`
+	DialogButton              string `yaml:"dialog_button"`
+	DialogCancel              string `yaml:"dialog_cancel"`
+	NotificationBorder        string `yaml:"notification_border"`
+	NotificationTitle         string `yaml:"notification_title"`
+	NotificationBody          string `yaml:"notification_body"`
+	NotificationWarningBorder string `yaml:"notification_warning_border"`
+	NotificationWarningTitle  string `yaml:"notification_warning_title"`
+	NotificationErrorBorder   string `yaml:"notification_error_border"`
+	NotificationErrorTitle    string `yaml:"notification_error_title"`
 }
 
 type markdownTheme struct {
-	BlockQuote            string
-	Heading               string
-	HeadingPrimary        string
-	HeadingMuted          string
-	HorizontalRule        string
-	Link                  string
-	LinkText              string
-	Image                 string
-	ImageText             string
-	Code                  string
-	CodeBlock             string
-	ChromaText            string
-	ChromaError           string
-	ChromaErrorBackground string
-	ChromaComment         string
-	ChromaCommentPreproc  string
-	ChromaKeyword         string
-	ChromaKeywordType     string
-	ChromaOperator        string
-	ChromaPunctuation     string
-	ChromaName            string
-	ChromaNameBuiltin     string
-	ChromaNameTag         string
-	ChromaNameAttribute   string
-	ChromaNameDecorator   string
-	ChromaNameFunction    string
-	ChromaNumber          string
-	ChromaString          string
-	ChromaStringEscape    string
-	ChromaGenericDeleted  string
-	ChromaGenericInserted string
-	ChromaGenericHeading  string
+	BlockQuote            string `yaml:"block_quote"`
+	Heading               string `yaml:"heading"`
+	HeadingPrimary        string `yaml:"heading_primary"`
+	HeadingMuted          string `yaml:"heading_muted"`
+	HorizontalRule        string `yaml:"horizontal_rule"`
+	Link                  string `yaml:"link"`
+	LinkText              string `yaml:"link_text"`
+	Image                 string `yaml:"image"`
+	ImageText             string `yaml:"image_text"`
+	Code                  string `yaml:"code"`
+	CodeBlock             string `yaml:"code_block"`
+	ChromaText            string `yaml:"chroma_text"`
+	ChromaError           string `yaml:"chroma_error"`
+	ChromaErrorBackground string `yaml:"chroma_error_background"`
+	ChromaComment         string `yaml:"chroma_comment"`
+	ChromaCommentPreproc  string `yaml:"chroma_comment_preproc"`
+	ChromaKeyword         string `yaml:"chroma_keyword"`
+	ChromaKeywordType     string `yaml:"chroma_keyword_type"`
+	ChromaOperator        string `yaml:"chroma_operator"`
+	ChromaPunctuation     string `yaml:"chroma_punctuation"`
+	ChromaName            string `yaml:"chroma_name"`
+	ChromaNameBuiltin     string `yaml:"chroma_name_builtin"`
+	ChromaNameTag         string `yaml:"chroma_name_tag"`
+	ChromaNameAttribute   string `yaml:"chroma_name_attribute"`
+	ChromaNameDecorator   string `yaml:"chroma_name_decorator"`
+	ChromaNameFunction    string `yaml:"chroma_name_function"`
+	ChromaNumber          string `yaml:"chroma_number"`
+	ChromaString          string `yaml:"chroma_string"`
+	ChromaStringEscape    string `yaml:"chroma_string_escape"`
+	ChromaGenericDeleted  string `yaml:"chroma_generic_deleted"`
+	ChromaGenericInserted string `yaml:"chroma_generic_inserted"`
+	ChromaGenericHeading  string `yaml:"chroma_generic_heading"`
 }
 
 var themes = map[string]tuiTheme{
 	DefaultThemeName: {
 		Name:             DefaultThemeName,
+		Dark:             true,
 		User:             "#a6e3a1", // green
 		Assistant:        "#cdd6f4", // text
 		Muted:            "#7f849c", // overlay1
@@ -204,8 +206,104 @@ var themes = map[string]tuiTheme{
 			ChromaGenericHeading:  "#b4befe", // lavender
 		},
 	},
+	LightThemeName: {
+		Name:             LightThemeName,
+		Dark:             false,
+		User:             "#40a02b", // green
+		Assistant:        "#4c4f69", // text
+		Muted:            "#8c8fa1", // overlay1
+		ThoughtHeader:    "#df8e1d", // yellow
+		ThoughtBody:      "#7c7f93", // overlay2
+		ToolHeader:       "#179299", // teal
+		ToolBody:         "#6c6f85", // subtext0
+		DiffAdded:        "#40a02b", // green
+		DiffRemoved:      "#d20f39", // red
+		Steering:         "#8839ef", // mauve
+		SteeringError:    "#d20f39", // red
+		InputBorder:      "#4c4f69", // text
+		InputLabel:       "#4c4f69", // text
+		InputPlaceholder: "#7c7f93", // overlay2
+		ComposerLabel:    "#7c7f93", // overlay2
+		ComposerFlow:     "#1e66f5", // blue
+		ComposerText:     "#4c4f69", // text
+		ComposerCursor:   "#4c4f69", // text
+		SlashCommand: slashCommandTheme{
+			Selected:    "#ccd0da", // surface0
+			Command:     "#179299", // teal (matches inline code)
+			Description: "#7c7f93", // overlay2
+			Hint:        "#7c7f93", // overlay2
+			Error:       "#d20f39", // red
+		},
+		HistorySearch: historySearchTheme{
+			Label: "#7c7f93", // overlay2
+			Query: "#4c4f69", // text
+			Error: "#d20f39", // red
+		},
+		ProfileColors: []string{
+			"#1e66f5", // blue
+			"#40a02b", // green
+			"#df8e1d", // yellow
+			"#8839ef", // mauve
+			"#179299", // teal
+			"#fe640b", // peach
+			"#d20f39", // red
+			"#7287fd", // lavender
+		},
+		ProfileSelected: "#ccd0da", // surface0
+		UI: uiTheme{
+			DialogBorder:              "#4c4f69", // text, matches input border
+			DialogTitle:               "#4c4f69", // text, matches composer text
+			DialogBody:                "#4c4f69", // text
+			DialogMuted:               "#7c7f93", // overlay2
+			DialogSelected:            "#ccd0da", // surface0
+			DialogButton:              "#40a02b", // green
+			DialogCancel:              "#fe640b", // peach
+			NotificationBorder:        "#1e66f5", // blue
+			NotificationTitle:         "#179299", // teal
+			NotificationBody:          "#4c4f69", // text
+			NotificationWarningBorder: "#fe640b", // peach
+			NotificationWarningTitle:  "#df8e1d", // yellow
+			NotificationErrorBorder:   "#d20f39", // red
+			NotificationErrorTitle:    "#d20f39", // red
+		},
+		Markdown: markdownTheme{
+			BlockQuote:            "#8c8fa1", // overlay1
+			Heading:               "#7287fd", // lavender
+			HeadingPrimary:        "#8839ef", // mauve
+			HeadingMuted:          "#8c8fa1", // overlay1
+			HorizontalRule:        "#bcc0cc", // surface1
+			Link:                  "#1e66f5", // blue
+			LinkText:              "#179299", // teal
+			Image:                 "#1e66f5", // blue
+			ImageText:             "#179299", // teal
+			Code:                  "#179299", // teal
+			CodeBlock:             "#5c5f77", // subtext1
+			ChromaText:            "#4c4f69", // text
+			ChromaError:           "#d20f39", // red
+			ChromaErrorBackground: "#bcc0cc", // surface1
+			ChromaComment:         "#8c8fa1", // overlay1
+			ChromaCommentPreproc:  "#179299", // teal
+			ChromaKeyword:         "#8839ef", // mauve
+			ChromaKeywordType:     "#179299", // teal
+			ChromaOperator:        "#8839ef", // mauve
+			ChromaPunctuation:     "#7c7f93", // overlay2
+			ChromaName:            "#4c4f69", // text
+			ChromaNameBuiltin:     "#179299", // teal
+			ChromaNameTag:         "#8839ef", // mauve
+			ChromaNameAttribute:   "#179299", // teal
+			ChromaNameDecorator:   "#179299", // teal
+			ChromaNameFunction:    "#1e66f5", // blue
+			ChromaNumber:          "#fe640b", // peach
+			ChromaString:          "#40a02b", // green
+			ChromaStringEscape:    "#179299", // teal
+			ChromaGenericDeleted:  "#d20f39", // red
+			ChromaGenericInserted: "#40a02b", // green
+			ChromaGenericHeading:  "#7287fd", // lavender
+		},
+	},
 	"tokyo-night": {
 		Name:             "tokyo-night",
+		Dark:             true,
 		User:             "#87d787",
 		Assistant:        "#d0d0d0",
 		Muted:            "#8a8a8a",
@@ -351,38 +449,13 @@ func init() {
 	applyTheme(themes[DefaultThemeName])
 }
 
-func AvailableThemeNames() []string {
-	names := make([]string, 0, len(themes))
-	for name := range themes {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
-}
-
-func ValidateThemeName(name string) error {
-	if _, ok := themeByName(name); ok {
-		return nil
-	}
-	return errors.Errorf("unknown TUI theme %q (available: %s)", strings.TrimSpace(name), strings.Join(AvailableThemeNames(), ", "))
-}
-
-func themeByName(name string) (tuiTheme, bool) {
-	name = strings.ToLower(strings.TrimSpace(name))
-	if name == "" {
-		name = DefaultThemeName
-	}
-	theme, ok := themes[name]
-	return theme, ok
-}
-
 func applyTheme(theme tuiTheme) {
 	userStyle = lipgloss.NewStyle().Foreground(themeColor(theme.User)).Italic(true)
 	assistantStyle = lipgloss.NewStyle().Foreground(themeColor(theme.Assistant))
 	mutedStyle = lipgloss.NewStyle().Foreground(themeColor(theme.Muted))
 
-	assistantMarkdownStyle = compactMarkdownStyle(theme.Markdown)
-	thoughtMarkdownStyle = compactMarkdownStyle(theme.Markdown)
+	assistantMarkdownStyle = compactMarkdownStyle(theme.Markdown, theme.Dark)
+	thoughtMarkdownStyle = compactMarkdownStyle(theme.Markdown, theme.Dark)
 
 	thoughtHeaderStyle = lipgloss.NewStyle().Foreground(themeColor(theme.ThoughtHeader))
 	thoughtBodyStyle = lipgloss.NewStyle().Foreground(themeColor(theme.ThoughtBody)).Italic(true)

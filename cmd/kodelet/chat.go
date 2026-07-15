@@ -88,7 +88,7 @@ func init() {
 	defaults := NewChatConfig()
 	chatCmd.Flags().StringP("resume", "r", defaults.ResumeConvID, "Resume a specific conversation")
 	chatCmd.Flags().String("cwd", defaults.CWD, "Working directory to execute in (defaults to current shell directory for new chats)")
-	chatCmd.Flags().String("theme", tui.DefaultThemeName, "TUI theme (available: "+strings.Join(tui.AvailableThemeNames(), ", ")+")")
+	chatCmd.Flags().String("theme", tui.AutoThemeName, "TUI theme (available: "+strings.Join(tui.AvailableThemeNames(), ", ")+")")
 	chatCmd.Flags().BoolP("follow", "f", defaults.Follow, "Follow the most recent conversation")
 	chatCmd.Flags().Bool("no-extensions", defaults.NoExtensions, "Disable extension runtime")
 	chatCmd.Flags().Bool("no-tools", defaults.NoTools, "Disable all tools (for simple query-response usage)")

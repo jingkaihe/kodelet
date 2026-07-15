@@ -106,7 +106,7 @@ func TestInitialMessageRendersCenteredWithShortcutHint(t *testing.T) {
 func TestShortcutsDialogRendersWithThemeColors(t *testing.T) {
 	withANSI256ColorProfile(t)
 
-	for _, themeName := range []string{DefaultThemeName, "tokyo-night"} {
+	for _, themeName := range []string{DefaultThemeName, LightThemeName, "tokyo-night"} {
 		t.Run(themeName, func(t *testing.T) {
 			m := newModel(context.Background(), Config{Theme: themeName})
 			t.Cleanup(m.cancel)
@@ -138,7 +138,7 @@ func TestShortcutsDialogRendersWithThemeColors(t *testing.T) {
 func TestNotificationSeverityUsesThemeColors(t *testing.T) {
 	withANSI256ColorProfile(t)
 
-	for _, themeName := range []string{DefaultThemeName, "tokyo-night"} {
+	for _, themeName := range []string{DefaultThemeName, LightThemeName, "tokyo-night"} {
 		t.Run(themeName, func(t *testing.T) {
 			m := newModel(context.Background(), Config{Theme: themeName})
 			t.Cleanup(m.cancel)
@@ -397,14 +397,6 @@ func TestRunningIndicatorRendersInComposerBottomBorder(t *testing.T) {
 	assert.Contains(t, bottomBorder, displayCWD(m.cwd))
 }
 
-func TestNewModelDefaultsToCatppuccinMochaTheme(t *testing.T) {
-	m := newModel(context.Background(), Config{})
-	t.Cleanup(m.cancel)
-
-	assert.Equal(t, DefaultThemeName, m.theme.Name)
-	assert.Equal(t, "#cdd6f4", themes[DefaultThemeName].Assistant)
-}
-
 func TestComposerLabelThemeColors(t *testing.T) {
 	for _, theme := range themes {
 		assert.Equal(t, theme.ThoughtBody, theme.ComposerLabel)
@@ -485,6 +477,8 @@ func TestNewModelUsesConfiguredTheme(t *testing.T) {
 
 func TestValidateThemeName(t *testing.T) {
 	assert.NoError(t, ValidateThemeName(DefaultThemeName))
+	assert.NoError(t, ValidateThemeName(LightThemeName))
+	assert.NoError(t, ValidateThemeName(AutoThemeName))
 	assert.NoError(t, ValidateThemeName(""))
 	assert.ErrorContains(t, ValidateThemeName("missing-theme"), "unknown TUI theme")
 }

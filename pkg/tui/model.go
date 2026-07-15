@@ -27,9 +27,9 @@ var newDefaultChatRunner = func(defaultCWD string) chat.ChatRunner {
 }
 
 func Run(ctx context.Context, config Config) error {
-	theme, ok := themeByName(config.Theme)
-	if !ok {
-		return ValidateThemeName(config.Theme)
+	theme, err := resolveTheme(config.Theme)
+	if err != nil {
+		return err
 	}
 	if strings.TrimSpace(config.ConversationID) == "" {
 		if _, _, err := resolveReasoningSettings(displayProfile(config.Profile), config.ReasoningEffort); err != nil {
@@ -67,8 +67,8 @@ func newModel(ctx context.Context, config Config) model {
 	mctx, cancel := context.WithCancel(ctx)
 	runCh := make(chan tea.Msg, 256)
 	mctx = extensions.ContextWithDiagnosticSink(mctx, newTUIDiagnosticSink(runCh))
-	theme, ok := themeByName(config.Theme)
-	if !ok {
+	theme, err := resolveTheme(config.Theme)
+	if err != nil {
 		theme = themes[DefaultThemeName]
 	}
 	applyTheme(theme)

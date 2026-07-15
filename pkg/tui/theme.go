@@ -1,0 +1,259 @@
+package tui
+
+import (
+	"bytes"
+	"io"
+	"os"
+	"path/filepath"
+	"reflect"
+	"sort"
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/pkg/errors"
+	"gopkg.in/yaml.v3"
+)
+
+const customThemeExtension = ".theme"
+
+type customThemeFile struct {
+	Base  string   `yaml:"base"`
+	Theme tuiTheme `yaml:",inline"`
+}
+
+type themeRegistry struct {
+	themes       map[string]tuiTheme
+	invalid      map[string]error
+	discoveryErr error
+}
+
+// AvailableThemeNames returns automatic selection, bundled themes, and valid
+// custom themes discovered under ~/.kodelet/themes.
+func AvailableThemeNames() []string {
+	return availableThemeNames(discoverThemes())
+}
+
+func availableThemeNames(registry themeRegistry) []string {
+	names := make([]string, 0, len(registry.themes)+1)
+	names = append(names, AutoThemeName)
+	for name := range registry.themes {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// ValidateThemeName checks automatic, bundled, and user-installed themes.
+func ValidateThemeName(name string) error {
+	_, err := resolveTheme(name)
+	return err
+}
+
+func resolveTheme(name string) (tuiTheme, error) {
+	requestedName := normalizeThemeName(name)
+	if requestedName == "" {
+		requestedName = AutoThemeName
+	}
+
+	registry := discoverThemes()
+	resolvedName := requestedName
+	if requestedName == AutoThemeName {
+		resolvedName = automaticThemeName(lipgloss.HasDarkBackground())
+	}
+	if theme, ok := registry.themes[resolvedName]; ok {
+		return cloneTheme(theme), nil
+	}
+	if err, ok := registry.invalid[requestedName]; ok {
+		return tuiTheme{}, errors.Wrapf(err, "failed to load custom TUI theme %q", requestedName)
+	}
+	if registry.discoveryErr != nil {
+		return tuiTheme{}, errors.Wrap(registry.discoveryErr, "failed to discover custom TUI themes")
+	}
+
+	return tuiTheme{}, errors.Errorf(
+		"unknown TUI theme %q (available: %s; custom themes: ~/.kodelet/themes/*%s)",
+		strings.TrimSpace(name),
+		strings.Join(availableThemeNames(registry), ", "),
+		customThemeExtension,
+	)
+}
+
+func automaticThemeName(hasDarkBackground bool) string {
+	if hasDarkBackground {
+		return DefaultThemeName
+	}
+	return LightThemeName
+}
+
+func normalizeThemeName(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
+}
+
+func discoverThemes() themeRegistry {
+	registry := themeRegistry{
+		themes:  make(map[string]tuiTheme, len(themes)),
+		invalid: make(map[string]error),
+	}
+	for name, theme := range themes {
+		registry.themes[name] = cloneTheme(theme)
+	}
+
+	themesDir, err := customThemesDir()
+	if err != nil {
+		registry.discoveryErr = err
+		return registry
+	}
+	entries, err := os.ReadDir(themesDir)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			registry.discoveryErr = errors.Wrapf(err, "failed to read %s", themesDir)
+		}
+		return registry
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.EqualFold(filepath.Ext(entry.Name()), customThemeExtension) {
+			continue
+		}
+		name := normalizeThemeName(strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name())))
+		if name == "" || name == AutoThemeName {
+			continue
+		}
+		if _, bundled := themes[name]; bundled {
+			continue
+		}
+		if _, loaded := registry.themes[name]; loaded {
+			continue
+		}
+
+		path := filepath.Join(themesDir, entry.Name())
+		theme, err := loadCustomTheme(path, name)
+		if err != nil {
+			registry.invalid[name] = errors.Wrapf(err, "%s is invalid", path)
+			continue
+		}
+		registry.themes[name] = theme
+	}
+
+	return registry
+}
+
+func customThemesDir() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", errors.Wrap(err, "failed to resolve home directory")
+	}
+	return filepath.Join(homeDir, ".kodelet", "themes"), nil
+}
+
+func loadCustomTheme(path, name string) (tuiTheme, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return tuiTheme{}, errors.Wrap(err, "failed to read theme file")
+	}
+
+	var header struct {
+		Base string `yaml:"base"`
+	}
+	if err := yaml.Unmarshal(data, &header); err != nil {
+		return tuiTheme{}, errors.Wrap(err, "failed to parse theme file")
+	}
+	baseName := normalizeThemeName(header.Base)
+	if baseName == "" {
+		baseName = DefaultThemeName
+	}
+	baseTheme, ok := themes[baseName]
+	if !ok {
+		return tuiTheme{}, errors.Errorf("unknown base theme %q (available bundled bases: %s)", baseName, strings.Join(bundledThemeNames(), ", "))
+	}
+
+	file := customThemeFile{
+		Base:  baseName,
+		Theme: cloneTheme(baseTheme),
+	}
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&file); err != nil {
+		return tuiTheme{}, errors.Wrap(err, "failed to parse theme file")
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return tuiTheme{}, errors.New("theme file must contain exactly one YAML document")
+		}
+		return tuiTheme{}, errors.Wrap(err, "failed to parse trailing theme content")
+	}
+
+	file.Theme.Name = name
+	if err := validateTheme(file.Theme); err != nil {
+		return tuiTheme{}, err
+	}
+	return file.Theme, nil
+}
+
+func bundledThemeNames() []string {
+	names := make([]string, 0, len(themes))
+	for name := range themes {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func cloneTheme(theme tuiTheme) tuiTheme {
+	theme.ProfileColors = append([]string(nil), theme.ProfileColors...)
+	return theme
+}
+
+func validateTheme(theme tuiTheme) error {
+	if strings.TrimSpace(theme.Name) == "" {
+		return errors.New("theme name must not be empty")
+	}
+	if len(theme.ProfileColors) == 0 {
+		return errors.New("profile_colors must contain at least one color")
+	}
+	return validateThemeValue(reflect.ValueOf(theme), "theme")
+}
+
+func validateThemeValue(value reflect.Value, path string) error {
+	switch value.Kind() {
+	case reflect.Struct:
+		typ := value.Type()
+		for i := range value.NumField() {
+			field := typ.Field(i)
+			if field.Name == "Name" || field.Name == "Dark" {
+				continue
+			}
+			if err := validateThemeValue(value.Field(i), path+"."+field.Name); err != nil {
+				return err
+			}
+		}
+	case reflect.Slice:
+		for i := range value.Len() {
+			if err := validateThemeValue(value.Index(i), path); err != nil {
+				return err
+			}
+		}
+	case reflect.String:
+		color := value.String()
+		if color == "" {
+			return errors.Errorf("%s must not be empty", path)
+		}
+		if !isThemeHexColor(color) {
+			return errors.Errorf("%s must be a #rrggbb color, got %q", path, color)
+		}
+	}
+	return nil
+}
+
+func isThemeHexColor(value string) bool {
+	if len(value) != 7 || value[0] != '#' {
+		return false
+	}
+	for _, r := range value[1:] {
+		if !strings.ContainsRune("0123456789abcdefABCDEF", r) {
+			return false
+		}
+	}
+	return true
+}

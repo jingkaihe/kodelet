@@ -1,5 +1,9 @@
 # Kodelet
 
+## Unreleased
+
+Added terminal-profile-aware TUI themes, selecting Catppuccin Latte on light backgrounds and Catppuccin Mocha on dark backgrounds, plus custom YAML themes from `~/.kodelet/themes`.
+
 ## 0.5.0-beta
 
 Added configurable OpenAI Responses API text verbosity with `low`, `medium`, and `high` values, including environment-variable support and persistence across resumed conversations.
