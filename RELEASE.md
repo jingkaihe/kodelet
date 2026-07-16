@@ -1,6 +1,6 @@
 # Kodelet
 
-## Unreleased
+## 0.5.1-beta 
 
 Added automatic light/dark TUI themes, custom themes from `~/.kodelet/themes`, and a `/theme` picker with a ` (current)` marker.
 
