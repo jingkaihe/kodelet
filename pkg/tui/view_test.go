@@ -476,6 +476,8 @@ func TestNewModelUsesConfiguredTheme(t *testing.T) {
 }
 
 func TestValidateThemeName(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
 	assert.NoError(t, ValidateThemeName(DefaultThemeName))
 	assert.NoError(t, ValidateThemeName(LightThemeName))
 	assert.NoError(t, ValidateThemeName(AutoThemeName))
