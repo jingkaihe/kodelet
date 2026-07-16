@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
+	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -161,6 +162,33 @@ func TestThemeSlashCommandReportsInvalidDirectTheme(t *testing.T) {
 	assert.Equal(t, "Theme unavailable", m.uiNotifications[0].title)
 	assert.ErrorContains(t, ValidateThemeName("missing-theme"), "unknown TUI theme")
 	assert.Equal(t, DefaultThemeName, m.themeSelection)
+}
+
+func TestMixedCaseThemeRecipeSlashCommandIsForwardedToRunner(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	runner := &recordingRunner{conversationID: "conversation-done"}
+	m := newModel(context.Background(), Config{Theme: DefaultThemeName, Runner: runner})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.resize()
+	m.slashCommands = withTUIBuiltInSlashCommands([]slashcommands.Command{{
+		Name:        "Theme",
+		Description: "Run the Theme recipe",
+	}})
+	m.textarea.SetValue("/Theme")
+
+	assert.Contains(t, slashCommandNames(m.slashCommands), "theme")
+	assert.Contains(t, slashCommandNames(m.slashCommands), "Theme")
+	runCmd := m.submit()
+
+	require.NotNil(t, runCmd)
+	assert.Nil(t, m.activeUIPrompt)
+	assert.True(t, m.running)
+	assert.Nil(t, runCmd())
+	_ = receiveRunMsg(t, m.runCh)
+	_ = receiveRunMsg(t, m.runCh)
+	assert.Equal(t, "/Theme", runner.req.Message)
 }
 
 func TestBundledThemesAreValid(t *testing.T) {

@@ -119,7 +119,7 @@ func withTUIBuiltInSlashCommands(commands []slashcommands.Command) []slashcomman
 
 func (m *model) handleLocalSlashCommand(message string) (tea.Cmd, bool) {
 	command, args, found := slashcommands.Parse(message)
-	if !found || !strings.EqualFold(command, "theme") {
+	if !found || command != "theme" {
 		return nil, false
 	}
 
