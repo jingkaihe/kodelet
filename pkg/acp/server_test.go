@@ -483,12 +483,16 @@ func TestServer_CallClientSendsRequestAndReceivesResponse(t *testing.T) {
 	}()
 
 	require.Eventually(t, func() bool {
-		server.pendingMu.Lock()
-		defer server.pendingMu.Unlock()
-		return len(server.pendingRequests) == 1
+		server.outputMu.Lock()
+		defer server.outputMu.Unlock()
+		return output.Len() > 0
 	}, time.Second, 10*time.Millisecond)
 
-	request := readJSONRPCMessage(t, output)
+	request := func() map[string]any {
+		server.outputMu.Lock()
+		defer server.outputMu.Unlock()
+		return readJSONRPCMessage(t, output)
+	}()
 	assert.Equal(t, "2.0", request["jsonrpc"])
 	assert.Equal(t, float64(1), request["id"])
 	assert.Equal(t, "client/test", request["method"])
