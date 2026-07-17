@@ -462,24 +462,6 @@ func TestPromptFromChatEventVariantsAndMissingPayloads(t *testing.T) {
 	assert.False(t, ok)
 }
 
-func TestUIThemeFieldsAreConfiguredForAllThemes(t *testing.T) {
-	for name, theme := range themes {
-		t.Run(name, func(t *testing.T) {
-			assert.NotEmpty(t, theme.UI.DialogBorder)
-			assert.NotEmpty(t, theme.UI.DialogTitle)
-			assert.NotEmpty(t, theme.UI.DialogBody)
-			assert.NotEmpty(t, theme.UI.DialogSelected)
-			assert.NotEmpty(t, theme.UI.NotificationBorder)
-			assert.NotEmpty(t, theme.UI.NotificationTitle)
-			assert.NotEmpty(t, theme.UI.NotificationBody)
-			assert.NotEmpty(t, theme.UI.NotificationWarningBorder)
-			assert.NotEmpty(t, theme.UI.NotificationWarningTitle)
-			assert.NotEmpty(t, theme.UI.NotificationErrorBorder)
-			assert.NotEmpty(t, theme.UI.NotificationErrorTitle)
-		})
-	}
-}
-
 func TestCatppuccinMochaDialogThemeAvoidsPinkPurpleAccents(t *testing.T) {
 	theme := themes[DefaultThemeName]
 

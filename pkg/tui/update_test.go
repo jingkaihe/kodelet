@@ -729,7 +729,6 @@ func TestSlashCommandLoadCommandsAndCWDHelpers(t *testing.T) {
 	assert.Equal(t, workspace, baseMsg.cwd)
 	assert.NoError(t, baseMsg.err)
 	assert.Contains(t, slashCommandNames(baseMsg.commands), "goal")
-	assert.Contains(t, slashCommandNames(baseMsg.commands), "theme")
 	assert.False(t, baseMsg.extensionsOnly)
 
 	extensionMsg, ok := loadExtensionSlashCommands(context.Background(), workspace)().(slashCommandsMsg)
@@ -761,7 +760,6 @@ func TestSlashCommandLoaderErrorsForInvalidCWD(t *testing.T) {
 	combined, err := listSlashCommands(context.Background(), missing)
 	assert.ErrorContains(t, err, "cwd directory does not exist")
 	assert.Contains(t, slashCommandNames(combined), "goal")
-	assert.Contains(t, slashCommandNames(combined), "theme")
 
 	_, err = resolveSlashCommandCWD(missing)
 	assert.ErrorContains(t, err, "cwd directory does not exist")

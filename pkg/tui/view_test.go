@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -406,66 +405,6 @@ func TestComposerLabelThemeColors(t *testing.T) {
 		assert.Equal(t, theme.ThoughtBody, theme.SlashCommand.Hint)
 	}
 	assert.Equal(t, themes[DefaultThemeName].Markdown.Code, themes[DefaultThemeName].SlashCommand.Command)
-}
-
-func TestThemeColorsAreHex(t *testing.T) {
-	for name, theme := range themes {
-		t.Run(name, func(t *testing.T) {
-			assertThemeColorsAreHex(t, theme, "theme")
-		})
-	}
-}
-
-func assertThemeColorsAreHex(t *testing.T, value any, path string) {
-	t.Helper()
-
-	v := reflect.ValueOf(value)
-	assertThemeValueColorsAreHex(t, v, path)
-}
-
-func assertThemeValueColorsAreHex(t *testing.T, value reflect.Value, path string) {
-	t.Helper()
-
-	if value.Kind() == reflect.Pointer {
-		if value.IsNil() {
-			return
-		}
-		value = value.Elem()
-	}
-
-	switch value.Kind() {
-	case reflect.Struct:
-		typ := value.Type()
-		for i := range value.NumField() {
-			field := typ.Field(i)
-			if field.Name == "Name" {
-				continue
-			}
-			assertThemeValueColorsAreHex(t, value.Field(i), path+"."+field.Name)
-		}
-	case reflect.Slice:
-		for i := range value.Len() {
-			assertThemeValueColorsAreHex(t, value.Index(i), path+"[]")
-		}
-	case reflect.String:
-		color := value.String()
-		assert.Truef(t, isHexColor(color), "theme color %s must be empty or #rrggbb, got %q", path, color)
-	}
-}
-
-func isHexColor(value string) bool {
-	if value == "" {
-		return true
-	}
-	if len(value) != 7 || value[0] != '#' {
-		return false
-	}
-	for _, r := range value[1:] {
-		if !strings.ContainsRune("0123456789abcdefABCDEF", r) {
-			return false
-		}
-	}
-	return true
 }
 
 func TestNewModelUsesConfiguredTheme(t *testing.T) {

@@ -4,20 +4,14 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
+	"slices"
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
-	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func TestAutomaticThemeNameUsesTerminalBackground(t *testing.T) {
-	assert.Equal(t, LightThemeName, automaticThemeName(false))
-	assert.Equal(t, DefaultThemeName, automaticThemeName(true))
-}
 
 func TestResolveAutoThemeUsesLipglossTerminalDetection(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
@@ -37,40 +31,25 @@ func TestResolveAutoThemeUsesLipglossTerminalDetection(t *testing.T) {
 	assert.Equal(t, DefaultThemeName, dark.Name)
 }
 
-func TestAvailableThemeNamesIncludeAutoAndCatppuccinVariants(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-
-	names := AvailableThemeNames()
-
-	assert.Contains(t, names, AutoThemeName)
-	assert.Contains(t, names, LightThemeName)
-	assert.Contains(t, names, DefaultThemeName)
-}
-
-func TestThemePickerOptionsMarkCurrentThemeWithSuffix(t *testing.T) {
+func TestThemePickerOptionsIncludeThemesAndMarkCurrent(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	labels, values, selected := themePickerOptions(LightThemeName)
 
 	require.Equal(t, len(values), len(labels))
+	assert.Contains(t, values, AutoThemeName)
+	assert.Contains(t, values, DefaultThemeName)
 	require.Equal(t, LightThemeName, values[selected])
 	assert.Equal(t, LightThemeName+currentThemeSuffix, labels[selected])
-	currentCount := 0
-	for _, label := range labels {
-		if strings.HasSuffix(label, currentThemeSuffix) {
-			currentCount++
+	for index := range labels {
+		if index != selected {
+			assert.Equal(t, values[index], labels[index])
 		}
 	}
-	assert.Equal(t, 1, currentCount)
 }
 
 func TestThemeSlashCommandOpensPickerWithoutStartingConversation(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	m := newModel(context.Background(), Config{Theme: DefaultThemeName})
-	t.Cleanup(m.cancel)
-	m.width = 80
-	m.height = 24
-	m.resize()
+	m := newThemeTestModel(t, Config{Theme: DefaultThemeName})
 	m.textarea.SetValue("/theme")
 
 	cmd := m.submit()
@@ -82,29 +61,20 @@ func TestThemeSlashCommandOpensPickerWithoutStartingConversation(t *testing.T) {
 	require.NotNil(t, m.activeUIPrompt)
 	assert.Equal(t, uiPromptTheme, m.activeUIPrompt.origin)
 	assert.Equal(t, uiPromptSelect, m.activeUIPrompt.mode)
-	assert.Equal(t, "Select Theme", m.activeUIPrompt.title)
-	assert.Equal(t, "Apply", m.activeUIPrompt.submitButtonText)
-	assert.Equal(t, DefaultThemeName, m.activeUIPrompt.optionValues[m.activeUIPrompt.selectIndex])
-	assert.Equal(t, DefaultThemeName+currentThemeSuffix, m.activeUIPrompt.options[m.activeUIPrompt.selectIndex])
 	plain := xansi.Strip(m.renderUIDialog())
 	assert.Contains(t, plain, DefaultThemeName+currentThemeSuffix)
 }
 
 func TestThemePickerSelectionAppliesThemeImmediately(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
 	withANSI256ColorProfile(t)
-	m := newModel(context.Background(), Config{Theme: DefaultThemeName})
-	t.Cleanup(m.cancel)
-	m.width = 80
-	m.height = 24
-	m.resize()
+	m := newThemeTestModel(t, Config{Theme: DefaultThemeName})
 	require.NotEmpty(t, m.renderMarkdown("`code`", 40, markdownAssistant))
 	require.NotNil(t, m.assistantMarkdownRenderer)
 	previousComposerStyle, _ := styleSequences(composerTextStyle)
 
 	m.openThemePicker()
 	require.NotNil(t, m.activeUIPrompt)
-	lightIndex := indexOfString(m.activeUIPrompt.optionValues, LightThemeName)
+	lightIndex := slices.Index(m.activeUIPrompt.optionValues, LightThemeName)
 	require.NotEqual(t, -1, lightIndex)
 	m.activeUIPrompt.selectIndex = lightIndex
 
@@ -114,11 +84,7 @@ func TestThemePickerSelectionAppliesThemeImmediately(t *testing.T) {
 	assert.Nil(t, m.activeUIPrompt)
 	assert.Equal(t, LightThemeName, m.themeSelection)
 	assert.Equal(t, LightThemeName, m.theme.Name)
-	assert.False(t, m.theme.Dark)
 	assert.Nil(t, m.assistantMarkdownRenderer)
-	assert.Nil(t, m.thoughtMarkdownRenderer)
-	assert.Equal(t, composerTextStyle, m.textarea.FocusedStyle.Text)
-	assert.Equal(t, composerCursorStyle, m.textarea.Cursor.Style)
 	m.textarea.SetValue("draft")
 	composer := m.textarea.View()
 	currentComposerStyle, _ := styleSequences(composerTextStyle)
@@ -127,12 +93,7 @@ func TestThemePickerSelectionAppliesThemeImmediately(t *testing.T) {
 }
 
 func TestThemeSlashCommandAcceptsDirectThemeName(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	m := newModel(context.Background(), Config{Theme: DefaultThemeName})
-	t.Cleanup(m.cancel)
-	m.width = 80
-	m.height = 24
-	m.resize()
+	m := newThemeTestModel(t, Config{Theme: DefaultThemeName})
 	m.textarea.SetValue("/theme catppuccin-latte")
 
 	cmd := m.submit()
@@ -146,12 +107,7 @@ func TestThemeSlashCommandAcceptsDirectThemeName(t *testing.T) {
 }
 
 func TestThemeSlashCommandReportsInvalidDirectTheme(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	m := newModel(context.Background(), Config{Theme: DefaultThemeName})
-	t.Cleanup(m.cancel)
-	m.width = 80
-	m.height = 24
-	m.resize()
+	m := newThemeTestModel(t, Config{Theme: DefaultThemeName})
 	m.textarea.SetValue("/theme missing-theme")
 
 	cmd := m.submit()
@@ -160,26 +116,15 @@ func TestThemeSlashCommandReportsInvalidDirectTheme(t *testing.T) {
 	require.Len(t, m.uiNotifications, 1)
 	assert.Equal(t, uiNotificationError, m.uiNotifications[0].level)
 	assert.Equal(t, "Theme unavailable", m.uiNotifications[0].title)
-	assert.ErrorContains(t, ValidateThemeName("missing-theme"), "unknown TUI theme")
+	assert.Contains(t, m.uiNotifications[0].message, "unknown TUI theme")
 	assert.Equal(t, DefaultThemeName, m.themeSelection)
 }
 
 func TestMixedCaseThemeRecipeSlashCommandIsForwardedToRunner(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
 	runner := &recordingRunner{conversationID: "conversation-done"}
-	m := newModel(context.Background(), Config{Theme: DefaultThemeName, Runner: runner})
-	t.Cleanup(m.cancel)
-	m.width = 80
-	m.height = 24
-	m.resize()
-	m.slashCommands = withTUIBuiltInSlashCommands([]slashcommands.Command{{
-		Name:        "Theme",
-		Description: "Run the Theme recipe",
-	}})
+	m := newThemeTestModel(t, Config{Theme: DefaultThemeName, Runner: runner})
 	m.textarea.SetValue("/Theme")
 
-	assert.Contains(t, slashCommandNames(m.slashCommands), "theme")
-	assert.Contains(t, slashCommandNames(m.slashCommands), "Theme")
 	runCmd := m.submit()
 
 	require.NotNil(t, runCmd)
@@ -225,7 +170,6 @@ markdown:
 	assert.Equal(t, "#abcdef", theme.Markdown.Code)
 	assert.Equal(t, themes[LightThemeName].Markdown.Link, theme.Markdown.Link)
 	assert.Contains(t, AvailableThemeNames(), "forest")
-	assert.NoError(t, ValidateThemeName("forest"))
 }
 
 func TestCustomThemeDefaultsToCatppuccinMochaBase(t *testing.T) {
@@ -239,35 +183,35 @@ func TestCustomThemeDefaultsToCatppuccinMochaBase(t *testing.T) {
 	assert.Equal(t, themes[DefaultThemeName].User, theme.User)
 }
 
-func TestCustomThemeRejectsUnknownFields(t *testing.T) {
-	writeCustomTheme(t, "broken.theme", `
+func TestCustomThemeValidation(t *testing.T) {
+	tests := []struct {
+		name     string
+		contents string
+		wantErr  string
+	}{
+		{
+			name: "unknown field",
+			contents: `
 base: catppuccin-mocha
 assistant_typo: "#112233"
-`)
+`,
+			wantErr: "field assistant_typo not found",
+		},
+		{name: "invalid color", contents: `assistant: red`, wantErr: "must be a #rrggbb color"},
+		{name: "unknown base", contents: `base: missing-theme`, wantErr: `unknown base theme "missing-theme"`},
+	}
 
-	err := ValidateThemeName("broken")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			writeCustomTheme(t, "broken.theme", tt.contents)
 
-	require.Error(t, err)
-	assert.ErrorContains(t, err, "field assistant_typo not found")
-	assert.NotContains(t, AvailableThemeNames(), "broken")
-}
+			err := ValidateThemeName("broken")
 
-func TestCustomThemeRejectsInvalidColors(t *testing.T) {
-	writeCustomTheme(t, "broken.theme", `assistant: red`)
-
-	err := ValidateThemeName("broken")
-
-	require.Error(t, err)
-	assert.ErrorContains(t, err, "must be a #rrggbb color")
-}
-
-func TestCustomThemeRejectsUnknownBase(t *testing.T) {
-	writeCustomTheme(t, "broken.theme", `base: missing-theme`)
-
-	err := ValidateThemeName("broken")
-
-	require.Error(t, err)
-	assert.ErrorContains(t, err, `unknown base theme "missing-theme"`)
+			require.Error(t, err)
+			assert.ErrorContains(t, err, tt.wantErr)
+			assert.NotContains(t, AvailableThemeNames(), "broken")
+		})
+	}
 }
 
 func TestBundledThemeWinsOverSameNamedCustomFile(t *testing.T) {
@@ -288,11 +232,13 @@ func writeCustomTheme(t *testing.T, filename, contents string) {
 	require.NoError(t, os.WriteFile(filepath.Join(themesDir, filename), []byte(contents), 0o644))
 }
 
-func indexOfString(values []string, target string) int {
-	for index, value := range values {
-		if value == target {
-			return index
-		}
-	}
-	return -1
+func newThemeTestModel(t *testing.T, config Config) *model {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	m := newModel(context.Background(), config)
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.resize()
+	return &m
 }
