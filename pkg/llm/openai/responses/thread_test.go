@@ -9,8 +9,6 @@ import (
 
 	"github.com/avast/retry-go/v4"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
-	"github.com/jingkaihe/kodelet/pkg/db"
-	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/steer"
@@ -2081,19 +2079,6 @@ func TestResponsesSaveConversationPreservesProviderNeutralMetadata(t *testing.T)
 }
 
 func TestProcessMessageExchangeInjectsPendingSteer(t *testing.T) {
-	homeDir := t.TempDir()
-	t.Setenv("KODELET_BASE_PATH", homeDir)
-	require.NoError(t, db.RunMigrations(context.Background(), migrations.All()))
-	originalHome := os.Getenv("HOME")
-	require.NoError(t, os.Setenv("HOME", homeDir))
-	defer func() {
-		if originalHome == "" {
-			os.Unsetenv("HOME")
-			return
-		}
-		require.NoError(t, os.Setenv("HOME", originalHome))
-	}()
-
 	steerStore, err := steer.NewSteerStore(context.Background())
 	require.NoError(t, err)
 	defer steerStore.Close()
@@ -2141,19 +2126,6 @@ func TestProcessMessageExchangeInjectsPendingSteer(t *testing.T) {
 }
 
 func TestProcessMessageExchangeInjectsPendingSteerWithImages(t *testing.T) {
-	homeDir := t.TempDir()
-	t.Setenv("KODELET_BASE_PATH", homeDir)
-	require.NoError(t, db.RunMigrations(context.Background(), migrations.All()))
-	originalHome := os.Getenv("HOME")
-	require.NoError(t, os.Setenv("HOME", homeDir))
-	defer func() {
-		if originalHome == "" {
-			os.Unsetenv("HOME")
-			return
-		}
-		require.NoError(t, os.Setenv("HOME", originalHome))
-	}()
-
 	steerStore, err := steer.NewSteerStore(context.Background())
 	require.NoError(t, err)
 	defer steerStore.Close()
@@ -2925,11 +2897,6 @@ func TestSendMessageRequiresResponseCompletedEvent(t *testing.T) {
 }
 
 func TestSendMessageContinuesForSteerQueuedBeforeStop(t *testing.T) {
-	basePath := t.TempDir()
-	t.Setenv("HOME", basePath)
-	t.Setenv("KODELET_BASE_PATH", basePath)
-	require.NoError(t, db.RunMigrations(context.Background(), migrations.All()))
-
 	steerStore, err := steer.NewSteerStore(context.Background())
 	require.NoError(t, err)
 	defer steerStore.Close()
