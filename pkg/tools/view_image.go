@@ -19,7 +19,7 @@ import (
 // ViewImageInput defines the input parameters for the view_image tool.
 type ViewImageInput struct {
 	Path   string `json:"path" jsonschema:"description=Local filesystem path to an image file. Absolute paths are preferred."`
-	Detail string `json:"detail,omitempty" jsonschema:"description=Optional detail override. The only supported value is 'original'; omit this field for default resized behavior."`
+	Detail string `json:"detail,omitempty" jsonschema:"description=Optional. Set to 'original' for maximum detail."`
 }
 
 // ViewImageToolResult represents the result of a view_image operation.
@@ -100,7 +100,7 @@ func (t *ViewImageTool) GenerateSchema() *jsonschema.Schema {
 func (t *ViewImageTool) Description() string {
 	detailText := "This model does not support the optional `detail` field; omit it."
 	if vision.SupportsViewImageOriginalDetail(t.model) {
-		detailText = "The optional `detail` field is available for this model and supports only `original`. Use it when high-fidelity image perception or precise localization is needed."
+		detailText = "The optional `detail` field is available for this model and supports only `original`. Use it when high-fidelity image perception or precise localization is needed. Original resolution is preserved within safe image limits; oversized images are proportionally downscaled."
 	}
 	return "View a local image from the filesystem (only use if given a full filepath by the user, and the image isn't already attached in the conversation context).\n\n" + detailText
 }

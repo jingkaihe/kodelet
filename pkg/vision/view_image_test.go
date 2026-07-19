@@ -115,6 +115,46 @@ func TestMakeViewImageResultResizesAndPreservesOriginalWhenRequested(t *testing.
 	assert.Equal(t, "original", original.Detail)
 }
 
+func TestMakeViewImageResultBoundsOversizedOriginalDetail(t *testing.T) {
+	dir := t.TempDir()
+	imagePath := filepath.Join(dir, "oversized-original.png")
+	writeVisionPNG(t, imagePath, viewImageOriginalMaxDimension+401, 100)
+
+	result, err := MakeViewImageResult(imagePath, "original", "gpt-5.5", "openai")
+	require.NoError(t, err)
+	assert.Equal(t, viewImageOriginalMaxDimension, result.Width)
+	assert.Equal(t, 94, result.Height)
+	assert.Equal(t, "original", result.Detail)
+}
+
+func TestViewImageOutputDimensionsForLimits(t *testing.T) {
+	tests := []struct {
+		name           string
+		width          int
+		height         int
+		expectedWidth  int
+		expectedHeight int
+	}{
+		{name: "within limits", width: 2304, height: 864, expectedWidth: 2304, expectedHeight: 864},
+		{name: "maximum dimension", width: 6401, height: 100, expectedWidth: 6000, expectedHeight: 94},
+		{name: "patch budget", width: 3201, height: 3201, expectedWidth: 3200, expectedHeight: 3200},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			width, height := viewImageOutputDimensionsForLimits(
+				tt.width,
+				tt.height,
+				viewImageOriginalMaxDimension,
+				viewImageOriginalMaxPatches,
+			)
+			assert.Equal(t, tt.expectedWidth, width)
+			assert.Equal(t, tt.expectedHeight, height)
+			assert.True(t, viewImageDimensionsFit(width, height, viewImageOriginalMaxDimension, viewImageOriginalMaxPatches))
+		})
+	}
+}
+
 func TestMetadataFromResult(t *testing.T) {
 	assert.Nil(t, MetadataFromResult(nil))
 

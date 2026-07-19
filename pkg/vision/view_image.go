@@ -31,9 +31,12 @@ var modelsSupportingOriginalImageDetail = map[string]struct{}{
 }
 
 const (
-	maxImageFileSize   = 5 * 1024 * 1024
-	ViewImageMaxWidth  = 2048
-	ViewImageMaxHeight = 768
+	maxImageFileSize              = 5 * 1024 * 1024
+	ViewImageMaxWidth             = 2048
+	ViewImageMaxHeight            = 768
+	viewImagePatchSize            = 32
+	viewImageOriginalMaxDimension = 6000
+	viewImageOriginalMaxPatches   = 10_000
 )
 
 // Result stores the processed image payload used across providers.
@@ -135,10 +138,20 @@ func MakeViewImageResult(path string, detail string, model string, provider stri
 	outputHeight := originalHeight
 	useOriginal := normalizedDetail == "original"
 
-	if !useOriginal && (originalWidth > ViewImageMaxWidth || originalHeight > ViewImageMaxHeight) {
+	if useOriginal {
+		outputWidth, outputHeight = viewImageOutputDimensionsForLimits(
+			originalWidth,
+			originalHeight,
+			viewImageOriginalMaxDimension,
+			viewImageOriginalMaxPatches,
+		)
+	} else if originalWidth > ViewImageMaxWidth || originalHeight > ViewImageMaxHeight {
 		scale := math.Min(float64(ViewImageMaxWidth)/float64(originalWidth), float64(ViewImageMaxHeight)/float64(originalHeight))
 		outputWidth = maxInt(1, int(math.Floor(float64(originalWidth)*scale)))
 		outputHeight = maxInt(1, int(math.Floor(float64(originalHeight)*scale)))
+	}
+
+	if outputWidth != originalWidth || outputHeight != originalHeight {
 		resized := resizeImageNearest(img, outputWidth, outputHeight)
 		outputBytes, mimeType, err = encodeImageBytes(resized, mimeType)
 		if err != nil {
@@ -242,6 +255,42 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func viewImageOutputDimensionsForLimits(width, height, maxDimension, maxPatches int) (int, int) {
+	width = maxInt(1, width)
+	height = maxInt(1, height)
+	if viewImageDimensionsFit(width, height, maxDimension, maxPatches) {
+		return width, height
+	}
+
+	maxDimensionScale := math.Min(float64(maxDimension)/float64(maxInt(width, height)), 1)
+	width = maxInt(1, int(math.Round(float64(width)*maxDimensionScale)))
+	height = maxInt(1, int(math.Round(float64(height)*maxDimensionScale)))
+	if viewImageDimensionsFit(width, height, maxDimension, maxPatches) {
+		return width, height
+	}
+
+	widthFloat := float64(width)
+	heightFloat := float64(height)
+	patchSize := float64(viewImagePatchSize)
+	scale := math.Sqrt(patchSize * patchSize * float64(maxPatches) / widthFloat / heightFloat)
+	scaledPatchesWide := widthFloat * scale / patchSize
+	scaledPatchesHigh := heightFloat * scale / patchSize
+	scale *= math.Min(
+		math.Floor(scaledPatchesWide)/scaledPatchesWide,
+		math.Floor(scaledPatchesHigh)/scaledPatchesHigh,
+	)
+
+	return maxInt(1, int(math.Floor(widthFloat*scale))), maxInt(1, int(math.Floor(heightFloat*scale)))
+}
+
+func viewImageDimensionsFit(width, height, maxDimension, maxPatches int) bool {
+	patchesWide := (uint64(width) + viewImagePatchSize - 1) / viewImagePatchSize
+	patchesHigh := (uint64(height) + viewImagePatchSize - 1) / viewImagePatchSize
+	return width <= maxDimension &&
+		height <= maxDimension &&
+		patchesWide*patchesHigh <= uint64(maxPatches)
 }
 
 func dataURLFromBase64Payload(mimeType, base64Data string) string {
