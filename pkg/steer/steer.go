@@ -1,21 +1,19 @@
-// Package steer provides functionality for managing user steering messages
-// for autonomous conversations in kodelet. It handles storing, loading and
-// managing steering messages with file-based persistence.
+// Package steer provides persistent user steering for autonomous conversations.
 package steer
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
+	"sort"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
+	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
-	"github.com/rogpeppe/go-internal/lockedfile"
 )
 
 const MaxMessageLength = 10000
@@ -35,7 +33,7 @@ func pluralSuffix(count int) string {
 	return "s"
 }
 
-// Message represents a steering message
+// Message represents a queued steering message.
 type Message struct {
 	Role      string    `json:"role"`
 	Content   string    `json:"content"`
@@ -43,87 +41,204 @@ type Message struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
-// Store manages persistent storage of user steering messages for autonomous
-// conversations. It provides thread-safe operations for writing, reading, and
-// clearing steering data with file-based persistence.
+// Store manages the steering queue in Kodelet's shared SQLite database.
 type Store struct {
-	steerDir string
-	mu       sync.RWMutex
+	db *sqlx.DB
 }
 
-// Data represents the structure of the steer JSON file containing
-// a collection of steering messages.
-type Data struct {
-	Messages []Message `json:"messages"`
+type storeConfig struct {
+	dbPath string
 }
 
-// NewSteerStore creates a new steer store
-func NewSteerStore() (*Store, error) {
-	homeDir, err := os.UserHomeDir()
+// StoreOption configures a steering store.
+type StoreOption func(*storeConfig)
+
+// WithDBPath overrides the shared database path. It is primarily useful for tests.
+func WithDBPath(dbPath string) StoreOption {
+	return func(config *storeConfig) {
+		config.dbPath = dbPath
+	}
+}
+
+// NewSteerStore opens the shared SQLite database.
+// Database migrations must be applied before the store is used.
+func NewSteerStore(ctx context.Context, opts ...StoreOption) (*Store, error) {
+	config := storeConfig{}
+	for _, opt := range opts {
+		opt(&config)
+	}
+
+	if strings.TrimSpace(config.dbPath) == "" {
+		dbPath, err := db.DefaultDBPath()
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to resolve steering database path")
+		}
+		config.dbPath = dbPath
+	}
+
+	database, err := db.Open(ctx, config.dbPath)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to get user home directory")
+		return nil, errors.Wrap(err, "failed to open steering database")
 	}
 
-	steerDir := filepath.Join(homeDir, ".kodelet", "steer")
+	return &Store{db: database}, nil
+}
 
-	// Ensure steer directory exists
-	if err := os.MkdirAll(steerDir, 0o755); err != nil {
-		return nil, errors.Wrap(err, "failed to create steer directory")
+// Close releases the store's database connection.
+func (s *Store) Close() error {
+	if s == nil || s.db == nil {
+		return nil
 	}
-
-	return &Store{
-		steerDir: steerDir,
-	}, nil
+	return s.db.Close()
 }
 
-// getSteerPath returns the path to the steer file for a conversation
-func (s *Store) getSteerPath(conversationID string) string {
-	return filepath.Join(s.steerDir, fmt.Sprintf("steer-%s.json", conversationID))
-}
-
-// WriteSteer writes a steering message to the steer file
-func (s *Store) WriteSteer(conversationID, message string) error {
-	return s.WriteSteerWithImages(conversationID, message, nil)
-}
-
-// WriteSteerWithImages writes a steering message with optional image inputs to the steer file.
-func (s *Store) WriteSteerWithImages(conversationID, message string, images []string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	filePath := s.getSteerPath(conversationID)
+// Enqueue appends a steering message and reports whether messages were already queued.
+func (s *Store) Enqueue(ctx context.Context, conversationID, content string, images []string) (bool, error) {
 	normalizedImages, err := normalizeImageInputs(images)
 	if err != nil {
-		return err
+		return false, err
+	}
+	if normalizedImages == nil {
+		normalizedImages = []string{}
 	}
 
-	return lockedfile.Transform(filePath, func(data []byte) ([]byte, error) {
-		// Parse existing steer data
-		steerData := &Data{Messages: []Message{}}
-		if len(data) > 0 {
-			if err := json.Unmarshal(data, steerData); err != nil {
-				logger.G(nil).WithError(err).Warn("failed to unmarshal existing steer data, creating new")
-				steerData = &Data{Messages: []Message{}}
-			}
-		}
+	imagesJSON, err := json.Marshal(normalizedImages)
+	if err != nil {
+		return false, errors.Wrap(err, "failed to marshal steering images")
+	}
 
-		// Append new message
-		newMessage := Message{
-			Role:      "user",
-			Content:   message,
-			Images:    normalizedImages,
-			Timestamp: time.Now(),
-		}
-		steerData.Messages = append(steerData.Messages, newMessage)
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, errors.Wrap(err, "failed to begin steering enqueue transaction")
+	}
+	defer tx.Rollback()
 
-		// Marshal back to JSON
-		result, err := json.MarshalIndent(steerData, "", "  ")
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to marshal steer data")
-		}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO steering_messages (conversation_id, content, images_json, created_at)
+		VALUES (?, ?, ?, ?)
+	`, conversationID, content, string(imagesJSON), time.Now().UTC()); err != nil {
+		return false, errors.Wrap(err, "failed to enqueue steering message")
+	}
 
-		return result, nil
+	var count int
+	if err := tx.GetContext(ctx, &count, `
+		SELECT COUNT(*) FROM steering_messages WHERE conversation_id = ?
+	`, conversationID); err != nil {
+		return false, errors.Wrap(err, "failed to count queued steering messages")
+	}
+
+	if err := tx.Commit(); err != nil {
+		return false, errors.Wrap(err, "failed to commit steering message")
+	}
+
+	return count > 1, nil
+}
+
+// Peek returns pending steering messages without consuming them.
+func (s *Store) Peek(ctx context.Context, conversationID string) ([]Message, error) {
+	rows, err := s.db.QueryxContext(ctx, `
+		SELECT id, content, images_json, created_at
+		FROM steering_messages
+		WHERE conversation_id = ?
+		ORDER BY id ASC
+	`, conversationID)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to query pending steering messages")
+	}
+	defer rows.Close()
+
+	messages, err := scanMessages(rows)
+	if err != nil {
+		return nil, err
+	}
+	return messages, nil
+}
+
+// Consume atomically removes and returns all pending steering messages for a conversation.
+func (s *Store) Consume(ctx context.Context, conversationID string) ([]Message, error) {
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to begin steering consume transaction")
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.QueryxContext(ctx, `
+		DELETE FROM steering_messages
+		WHERE conversation_id = ?
+		RETURNING id, content, images_json, created_at
+	`, conversationID)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to consume pending steering messages")
+	}
+
+	messages, scanErr := scanMessages(rows)
+	closeErr := rows.Close()
+	if scanErr != nil {
+		return nil, scanErr
+	}
+	if closeErr != nil {
+		return nil, errors.Wrap(closeErr, "failed to close consumed steering rows")
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, errors.Wrap(err, "failed to commit consumed steering messages")
+	}
+
+	return messages, nil
+}
+
+// HasPending reports whether a conversation has queued steering messages.
+func (s *Store) HasPending(ctx context.Context, conversationID string) (bool, error) {
+	var pending bool
+	if err := s.db.GetContext(ctx, &pending, `
+		SELECT EXISTS(
+			SELECT 1 FROM steering_messages WHERE conversation_id = ?
+		)
+	`, conversationID); err != nil {
+		return false, errors.Wrap(err, "failed to check pending steering messages")
+	}
+	return pending, nil
+}
+
+type messageRow struct {
+	id         int64
+	content    string
+	imagesJSON string
+	createdAt  time.Time
+}
+
+func scanMessages(rows *sqlx.Rows) ([]Message, error) {
+	messageRows := make([]messageRow, 0)
+	for rows.Next() {
+		var row messageRow
+		if err := rows.Scan(&row.id, &row.content, &row.imagesJSON, &row.createdAt); err != nil {
+			return nil, errors.Wrap(err, "failed to scan steering message")
+		}
+		messageRows = append(messageRows, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, errors.Wrap(err, "failed to iterate steering messages")
+	}
+
+	sort.Slice(messageRows, func(i, j int) bool {
+		return messageRows[i].id < messageRows[j].id
 	})
+
+	messages := make([]Message, 0, len(messageRows))
+	for _, row := range messageRows {
+		var images []string
+		if err := json.Unmarshal([]byte(row.imagesJSON), &images); err != nil {
+			return nil, errors.Wrap(err, "failed to unmarshal steering images")
+		}
+		messages = append(messages, Message{
+			Role:      "user",
+			Content:   row.content,
+			Images:    images,
+			Timestamp: row.createdAt,
+		})
+	}
+
+	return messages, nil
 }
 
 func normalizeImageInputs(images []string) ([]string, error) {
@@ -157,73 +272,4 @@ func normalizeImageInputs(images []string) ([]string, error) {
 	}
 
 	return normalized, nil
-}
-
-// ReadPendingSteer reads and returns pending steering messages
-func (s *Store) ReadPendingSteer(conversationID string) ([]Message, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	filePath := s.getSteerPath(conversationID)
-
-	// Check if steer file exists
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		return []Message{}, nil
-	}
-
-	// Read steer data with locked file
-	data, err := lockedfile.Read(filePath)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to read steer file")
-	}
-
-	var steerData Data
-	if err := json.Unmarshal(data, &steerData); err != nil {
-		return nil, errors.Wrap(err, "failed to unmarshal steer data")
-	}
-
-	return steerData.Messages, nil
-}
-
-// ClearPendingSteer clears all pending steering messages
-func (s *Store) ClearPendingSteer(conversationID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	filePath := s.getSteerPath(conversationID)
-
-	// Remove the steer file (os.Remove is atomic)
-	if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
-		return errors.Wrap(err, "failed to remove steer file")
-	}
-	return nil
-}
-
-// HasPendingSteer checks if there are pending steering messages
-func (s *Store) HasPendingSteer(conversationID string) bool {
-	filePath := s.getSteerPath(conversationID)
-
-	// Check if steer file exists and has content
-	if info, err := os.Stat(filePath); err == nil && info.Size() > 0 {
-		return true
-	}
-
-	return false
-}
-
-// ListSteerFiles returns all steer files for debugging
-func (s *Store) ListSteerFiles() ([]string, error) {
-	entries, err := os.ReadDir(s.steerDir)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to read steer directory")
-	}
-
-	var files []string
-	for _, entry := range entries {
-		if !entry.IsDir() && filepath.Ext(entry.Name()) == ".json" {
-			files = append(files, entry.Name())
-		}
-	}
-
-	return files, nil
 }

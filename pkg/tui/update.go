@@ -1047,7 +1047,7 @@ func (m *model) submitSteering() {
 		m.conversationID = convtypes.GenerateID()
 	}
 
-	steerStore, err := steer.NewSteerStore()
+	steerStore, err := steer.NewSteerStore(m.ctx)
 	if err != nil {
 		m.err = errors.Wrap(err, "failed to initialize steer store")
 		m.steerError = fmt.Sprintf("Failed to queue steering: %v", err)
@@ -1055,8 +1055,9 @@ func (m *model) submitSteering() {
 		m.refreshViewport(true)
 		return
 	}
+	defer steerStore.Close()
 
-	if err := steerStore.WriteSteer(m.conversationID, message); err != nil {
+	if _, err := steerStore.Enqueue(m.ctx, m.conversationID, message, nil); err != nil {
 		m.err = errors.Wrap(err, "failed to write steering message")
 		m.steerError = fmt.Sprintf("Failed to queue steering: %v", err)
 		m.status = "steering failed"

@@ -635,14 +635,15 @@ func openAIChatToolResultMessages(toolResults []openai.ChatCompletionMessage, fo
 }
 
 func (t *Thread) processPendingSteer(ctx context.Context, requestParams *openai.ChatCompletionRequest, handler llmtypes.MessageHandler) error {
-	steerStore, err := steer.NewSteerStore()
+	steerStore, err := steer.NewSteerStore(ctx)
 	if err != nil {
 		return errors.Wrap(err, "failed to create steer store")
 	}
+	defer steerStore.Close()
 
-	pendingSteer, err := steerStore.ReadPendingSteer(t.ConversationID)
+	pendingSteer, err := steerStore.Consume(ctx, t.ConversationID)
 	if err != nil {
-		return errors.Wrap(err, "failed to read pending steer")
+		return errors.Wrap(err, "failed to consume pending steer")
 	}
 
 	if len(pendingSteer) > 0 {
@@ -662,12 +663,6 @@ func (t *Thread) processPendingSteer(ctx context.Context, requestParams *openai.
 			} else {
 				handler.HandleText(steer.FormatPendingNotice(steerMsg.Content, len(steerMsg.Images)))
 			}
-		}
-
-		if err := steerStore.ClearPendingSteer(t.ConversationID); err != nil {
-			logger.G(ctx).WithError(err).Warn("failed to clear pending steer, may be processed again")
-		} else {
-			logger.G(ctx).Debug("successfully cleared pending steer")
 		}
 	}
 

@@ -119,20 +119,20 @@ func sendSteerCmd(ctx context.Context, conversationID, message string, isFollow 
 		os.Exit(1)
 	}
 
-	steerStore, err := steer.NewSteerStore()
+	steerStore, err := steer.NewSteerStore(ctx)
 	if err != nil {
 		presenter.Error(err, "Failed to initialize steer store")
 		os.Exit(1)
 	}
+	defer steerStore.Close()
 
-	if steerStore.HasPendingSteer(conversationID) {
-		presenter.Warning("There is already pending steering for this conversation. The new message will be queued.")
-	}
-
-	err = steerStore.WriteSteerWithImages(conversationID, message, images)
+	queued, err := steerStore.Enqueue(ctx, conversationID, message, images)
 	if err != nil {
 		presenter.Error(err, "Failed to write steering message")
 		os.Exit(1)
+	}
+	if queued {
+		presenter.Warning("There is already pending steering for this conversation. The new message will be queued.")
 	}
 
 	if isFollow {

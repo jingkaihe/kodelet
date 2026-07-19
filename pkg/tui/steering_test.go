@@ -2,8 +2,6 @@ package tui
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -15,7 +13,7 @@ import (
 )
 
 func TestRunningComposerQueuesSteering(t *testing.T) {
-	homeDir := t.TempDir()
+	homeDir := setupTUIConversationStore(context.Background(), t)
 	t.Setenv("HOME", homeDir)
 
 	m := newModel(context.Background(), Config{ConversationID: "conversation-123456789"})
@@ -43,16 +41,17 @@ func TestRunningComposerQueuesSteering(t *testing.T) {
 	assert.Contains(t, content, "queued steering")
 	assert.Contains(t, content, "please focus on tests")
 
-	steerStore, err := steer.NewSteerStore()
+	steerStore, err := steer.NewSteerStore(context.Background())
 	require.NoError(t, err)
-	pending, err := steerStore.ReadPendingSteer("conversation-123456789")
+	defer steerStore.Close()
+	pending, err := steerStore.Peek(context.Background(), "conversation-123456789")
 	require.NoError(t, err)
 	require.Len(t, pending, 1)
 	assert.Equal(t, "please focus on tests", pending[0].Content)
 }
 
 func TestRunningComposerGeneratesConversationBeforeQueueingSteering(t *testing.T) {
-	homeDir := t.TempDir()
+	homeDir := setupTUIConversationStore(context.Background(), t)
 	t.Setenv("HOME", homeDir)
 
 	m := newModel(context.Background(), Config{})
@@ -69,9 +68,13 @@ func TestRunningComposerGeneratesConversationBeforeQueueingSteering(t *testing.T
 
 	assert.Nil(t, cmd)
 	require.NotEmpty(t, m.conversationID)
-	steerPath := filepath.Join(homeDir, ".kodelet", "steer", "steer-"+m.conversationID+".json")
-	_, err := os.Stat(steerPath)
-	assert.NoError(t, err)
+	steerStore, err := steer.NewSteerStore(context.Background())
+	require.NoError(t, err)
+	defer steerStore.Close()
+	pending, err := steerStore.Peek(context.Background(), m.conversationID)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	assert.Equal(t, "new chat steering", pending[0].Content)
 }
 
 func TestRunningComposerRejectsOverlongSteering(t *testing.T) {

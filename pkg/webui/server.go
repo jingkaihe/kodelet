@@ -1522,7 +1522,7 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pendingSteer, err := pendingSteerWebMessages(id)
+	pendingSteer, err := pendingSteerWebMessages(ctx, id)
 	if err != nil {
 		logger.G(ctx).WithError(err).WithField("conversation_id", id).Warn("failed to read pending steering messages")
 	}
@@ -1552,13 +1552,14 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 	s.writeJSONResponse(w, webResponse)
 }
 
-func pendingSteerWebMessages(conversationID string) ([]WebMessage, error) {
-	steerStore, err := steer.NewSteerStore()
+func pendingSteerWebMessages(ctx context.Context, conversationID string) ([]WebMessage, error) {
+	steerStore, err := steer.NewSteerStore(ctx)
 	if err != nil {
 		return nil, err
 	}
+	defer steerStore.Close()
 
-	messages, err := steerStore.ReadPendingSteer(conversationID)
+	messages, err := steerStore.Peek(ctx, conversationID)
 	if err != nil {
 		return nil, err
 	}
@@ -1992,7 +1993,7 @@ func (s *Server) handleGetPendingSteer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	messages, err := pendingSteerWebMessages(conversationID)
+	messages, err := pendingSteerWebMessages(r.Context(), conversationID)
 	if err != nil {
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to read pending steering messages", err)
 		return
@@ -2014,6 +2015,7 @@ type steerConversationResponse struct {
 
 // handleSteerConversation handles POST /api/conversations/{id}/steer
 func (s *Server) handleSteerConversation(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	vars := mux.Vars(r)
 	conversationID := strings.TrimSpace(vars["id"])
 	if conversationID == "" {
@@ -2051,14 +2053,15 @@ func (s *Server) handleSteerConversation(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	steerStore, err := steer.NewSteerStore()
+	steerStore, err := steer.NewSteerStore(ctx)
 	if err != nil {
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to initialize steer store", err)
 		return
 	}
+	defer steerStore.Close()
 
-	queued := steerStore.HasPendingSteer(conversationID)
-	if err := steerStore.WriteSteerWithImages(conversationID, message, imageInputs); err != nil {
+	queued, err := steerStore.Enqueue(ctx, conversationID, message, imageInputs)
+	if err != nil {
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to queue steering message", err)
 		return
 	}

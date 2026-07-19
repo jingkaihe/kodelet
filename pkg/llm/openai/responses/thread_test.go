@@ -9,6 +9,8 @@ import (
 
 	"github.com/avast/retry-go/v4"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	"github.com/jingkaihe/kodelet/pkg/steer"
@@ -2080,6 +2082,8 @@ func TestResponsesSaveConversationPreservesProviderNeutralMetadata(t *testing.T)
 
 func TestProcessMessageExchangeInjectsPendingSteer(t *testing.T) {
 	homeDir := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", homeDir)
+	require.NoError(t, db.RunMigrations(context.Background(), migrations.All()))
 	originalHome := os.Getenv("HOME")
 	require.NoError(t, os.Setenv("HOME", homeDir))
 	defer func() {
@@ -2090,9 +2094,11 @@ func TestProcessMessageExchangeInjectsPendingSteer(t *testing.T) {
 		require.NoError(t, os.Setenv("HOME", originalHome))
 	}()
 
-	steerStore, err := steer.NewSteerStore()
+	steerStore, err := steer.NewSteerStore(context.Background())
 	require.NoError(t, err)
-	require.NoError(t, steerStore.WriteSteer("conv-test", "Please focus on error handling"))
+	defer steerStore.Close()
+	_, err = steerStore.Enqueue(context.Background(), "conv-test", "Please focus on error handling", nil)
+	require.NoError(t, err)
 
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
 	thread := &Thread{
@@ -2129,11 +2135,15 @@ func TestProcessMessageExchangeInjectsPendingSteer(t *testing.T) {
 	require.Len(t, thread.inputItems, 2)
 	require.Len(t, thread.storedItems, 2)
 	assert.Equal(t, "Please focus on error handling", thread.storedItems[1].Content)
-	assert.False(t, steerStore.HasPendingSteer("conv-test"))
+	hasPending, err := steerStore.HasPending(context.Background(), "conv-test")
+	require.NoError(t, err)
+	assert.False(t, hasPending)
 }
 
 func TestProcessMessageExchangeInjectsPendingSteerWithImages(t *testing.T) {
 	homeDir := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", homeDir)
+	require.NoError(t, db.RunMigrations(context.Background(), migrations.All()))
 	originalHome := os.Getenv("HOME")
 	require.NoError(t, os.Setenv("HOME", homeDir))
 	defer func() {
@@ -2144,9 +2154,11 @@ func TestProcessMessageExchangeInjectsPendingSteerWithImages(t *testing.T) {
 		require.NoError(t, os.Setenv("HOME", originalHome))
 	}()
 
-	steerStore, err := steer.NewSteerStore()
+	steerStore, err := steer.NewSteerStore(context.Background())
 	require.NoError(t, err)
-	require.NoError(t, steerStore.WriteSteerWithImages("conv-test", "Use this image", []string{"data:image/png;base64,aGVsbG8="}))
+	defer steerStore.Close()
+	_, err = steerStore.Enqueue(context.Background(), "conv-test", "Use this image", []string{"data:image/png;base64,aGVsbG8="})
+	require.NoError(t, err)
 
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
 	thread := &Thread{
@@ -2170,7 +2182,9 @@ func TestProcessMessageExchangeInjectsPendingSteerWithImages(t *testing.T) {
 	assert.Equal(t, "Use this image", extractInputItemText(capturedParams.Input.OfInputItemList[0]))
 	assert.Equal(t, []string{"data:image/png;base64,aGVsbG8="}, extractInputItemImageURLs(capturedParams.Input.OfInputItemList[0]))
 	assert.Contains(t, handler.CollectedText(), "🗣️ User steering: Use this image (1 image)")
-	assert.False(t, steerStore.HasPendingSteer("conv-test"))
+	hasPending, err := steerStore.HasPending(context.Background(), "conv-test")
+	require.NoError(t, err)
+	assert.False(t, hasPending)
 }
 
 func TestProcessMessageExchangeRegistersNativeOpenAISearchToolInRequest(t *testing.T) {
@@ -2911,10 +2925,14 @@ func TestSendMessageRequiresResponseCompletedEvent(t *testing.T) {
 }
 
 func TestSendMessageContinuesForSteerQueuedBeforeStop(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	basePath := t.TempDir()
+	t.Setenv("HOME", basePath)
+	t.Setenv("KODELET_BASE_PATH", basePath)
+	require.NoError(t, db.RunMigrations(context.Background(), migrations.All()))
 
-	steerStore, err := steer.NewSteerStore()
+	steerStore, err := steer.NewSteerStore(context.Background())
 	require.NoError(t, err)
+	defer steerStore.Close()
 
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}
 	thread := &Thread{
@@ -2938,7 +2956,7 @@ func TestSendMessageContinuesForSteerQueuedBeforeStop(t *testing.T) {
 
 		exchangeCalls++
 		if exchangeCalls == 1 {
-			if err := steerStore.WriteSteer("conv-test", "Please include the queued correction"); err != nil {
+			if _, err := steerStore.Enqueue(ctx, "conv-test", "Please include the queued correction", nil); err != nil {
 				return "", false, false, err
 			}
 			return "first response", false, true, nil
@@ -2956,7 +2974,9 @@ func TestSendMessageContinuesForSteerQueuedBeforeStop(t *testing.T) {
 	assert.Equal(t, "hello", extractInputItemText(thread.inputItems[0]))
 	assert.Equal(t, "Please include the queued correction", extractInputItemText(thread.inputItems[1]))
 	assert.Contains(t, handler.CollectedText(), "🗣️ User steering: Please include the queued correction")
-	assert.False(t, steerStore.HasPendingSteer("conv-test"))
+	hasPending, err := steerStore.HasPending(context.Background(), "conv-test")
+	require.NoError(t, err)
+	assert.False(t, hasPending)
 }
 
 func TestSendMessageAutoContinuesActiveGoalUntilMaxTurns(t *testing.T) {

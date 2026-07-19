@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/invopop/jsonschema"
+	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/steer"
@@ -233,13 +235,18 @@ func TestTriggerTurnEnd(t *testing.T) {
 }
 
 func TestHasPendingSteer(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	basePath := t.TempDir()
+	t.Setenv("HOME", basePath)
+	t.Setenv("KODELET_BASE_PATH", basePath)
+	require.NoError(t, db.RunMigrations(context.Background(), migrations.All()))
 
 	assert.False(t, HasPendingSteer(context.Background(), "conv-test"))
 
-	steerStore, err := steer.NewSteerStore()
+	steerStore, err := steer.NewSteerStore(context.Background())
 	require.NoError(t, err)
-	require.NoError(t, steerStore.WriteSteer("conv-test", "keep going"))
+	defer steerStore.Close()
+	_, err = steerStore.Enqueue(context.Background(), "conv-test", "keep going", nil)
+	require.NoError(t, err)
 
 	assert.True(t, HasPendingSteer(context.Background(), "conv-test"))
 }

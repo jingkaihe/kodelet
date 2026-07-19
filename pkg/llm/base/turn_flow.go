@@ -127,24 +127,24 @@ func TriggerTurnEnd(
 // HasPendingSteer reports whether steering arrived while the current model turn was in flight.
 // Providers use this before stopping so the next exchange can inject the queued messages.
 func HasPendingSteer(ctx context.Context, conversationID string) bool {
-	steerStore, err := steer.NewSteerStore()
+	steerStore, err := steer.NewSteerStore(ctx)
 	if err != nil {
 		logger.G(ctx).WithError(err).Warn("failed to check for pending steer before agent stop")
 		return false
 	}
+	defer steerStore.Close()
 
-	pendingSteer, err := steerStore.ReadPendingSteer(conversationID)
+	hasPendingSteer, err := steerStore.HasPending(ctx, conversationID)
 	if err != nil {
-		logger.G(ctx).WithError(err).Warn("failed to read pending steer before agent stop")
+		logger.G(ctx).WithError(err).Warn("failed to query pending steer before agent stop")
 		return false
 	}
-	if len(pendingSteer) == 0 {
+	if !hasPendingSteer {
 		return false
 	}
 
 	logger.G(ctx).
 		WithField("conversation_id", conversationID).
-		WithField("steer_count", len(pendingSteer)).
 		Info("pending steer detected before agent stop, continuing conversation")
 	return true
 }

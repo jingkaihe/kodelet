@@ -15,6 +15,8 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/auth"
+	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -745,6 +747,8 @@ func TestAddUserMessageGoalContextWithImagesSeparatesAttachments(t *testing.T) {
 
 func TestProcessPendingSteerWithImages(t *testing.T) {
 	homeDir := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", homeDir)
+	require.NoError(t, db.RunMigrations(context.Background(), migrations.All()))
 	originalHome := os.Getenv("HOME")
 	require.NoError(t, os.Setenv("HOME", homeDir))
 	defer func() {
@@ -755,9 +759,11 @@ func TestProcessPendingSteerWithImages(t *testing.T) {
 		require.NoError(t, os.Setenv("HOME", originalHome))
 	}()
 
-	steerStore, err := steer.NewSteerStore()
+	steerStore, err := steer.NewSteerStore(context.Background())
 	require.NoError(t, err)
-	require.NoError(t, steerStore.WriteSteerWithImages("conv-test", "Use this image", []string{"data:image/png;base64,aGVsbG8="}))
+	defer steerStore.Close()
+	_, err = steerStore.Enqueue(context.Background(), "conv-test", "Use this image", []string{"data:image/png;base64,aGVsbG8="})
+	require.NoError(t, err)
 
 	thread := &Thread{
 		Thread: base.NewThread(llmtypes.Config{Provider: "anthropic", Model: "claude-sonnet-4-6"}, "conv-test"),
@@ -773,11 +779,15 @@ func TestProcessPendingSteerWithImages(t *testing.T) {
 	assert.NotNil(t, params.Messages[0].Content[0].OfImage)
 	assert.Equal(t, "Use this image", params.Messages[0].Content[1].OfText.Text)
 	assert.Contains(t, handler.CollectedText(), "🗣️ User steering: Use this image (1 image)")
-	assert.False(t, steerStore.HasPendingSteer("conv-test"))
+	hasPending, err := steerStore.HasPending(context.Background(), "conv-test")
+	require.NoError(t, err)
+	assert.False(t, hasPending)
 }
 
 func TestProcessPendingSteerWithUserMessageHandler(t *testing.T) {
 	homeDir := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", homeDir)
+	require.NoError(t, db.RunMigrations(context.Background(), migrations.All()))
 	originalHome := os.Getenv("HOME")
 	require.NoError(t, os.Setenv("HOME", homeDir))
 	defer func() {
@@ -788,9 +798,11 @@ func TestProcessPendingSteerWithUserMessageHandler(t *testing.T) {
 		require.NoError(t, os.Setenv("HOME", originalHome))
 	}()
 
-	steerStore, err := steer.NewSteerStore()
+	steerStore, err := steer.NewSteerStore(context.Background())
 	require.NoError(t, err)
-	require.NoError(t, steerStore.WriteSteerWithImages("conv-test", "Use this image", []string{"data:image/png;base64,aGVsbG8="}))
+	defer steerStore.Close()
+	_, err = steerStore.Enqueue(context.Background(), "conv-test", "Use this image", []string{"data:image/png;base64,aGVsbG8="})
+	require.NoError(t, err)
 
 	thread := &Thread{
 		Thread: base.NewThread(llmtypes.Config{Provider: "anthropic", Model: "claude-sonnet-4-6"}, "conv-test"),

@@ -1,75 +1,91 @@
 package steer
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewSteerStore(t *testing.T) {
-	store, err := NewSteerStore()
+func TestNewSteerStoreUsesMigratedSchema(t *testing.T) {
+	store, _ := newTestStore(t)
+
+	var tableCount int
+	err := store.db.Get(&tableCount, `
+		SELECT COUNT(*) FROM sqlite_master
+		WHERE type = 'table' AND name = 'steering_messages'
+	`)
 	require.NoError(t, err)
-	assert.NotNil(t, store)
-	assert.NotEmpty(t, store.steerDir)
+	assert.Equal(t, 1, tableCount)
+
+	var indexCount int
+	err = store.db.Get(&indexCount, `
+		SELECT COUNT(*) FROM sqlite_master
+		WHERE type = 'index' AND name = 'idx_steering_messages_conversation_id'
+	`)
+	require.NoError(t, err)
+	assert.Equal(t, 1, indexCount)
 }
 
-func TestWriteAndReadSteer(t *testing.T) {
-	store, err := NewSteerStore()
-	require.NoError(t, err)
-
+func TestEnqueuePeekAndConsume(t *testing.T) {
+	ctx := context.Background()
+	store, _ := newTestStore(t)
 	conversationID := "test-conversation-123"
-	message := "Test steer message"
 
-	// Write steer
-	err = store.WriteSteer(conversationID, message)
+	alreadyPending, err := store.Enqueue(ctx, conversationID, "First message", nil)
 	require.NoError(t, err)
+	assert.False(t, alreadyPending)
 
-	// Read steer
-	messages, err := store.ReadPendingSteer(conversationID)
+	alreadyPending, err = store.Enqueue(ctx, conversationID, "Second message", nil)
 	require.NoError(t, err)
-	assert.Len(t, messages, 1)
-	assert.Equal(t, "user", messages[0].Role)
-	assert.Equal(t, message, messages[0].Content)
-	assert.Empty(t, messages[0].Images)
-	assert.WithinDuration(t, time.Now(), messages[0].Timestamp, 5*time.Second)
+	assert.True(t, alreadyPending)
 
-	// Cleanup
-	err = store.ClearPendingSteer(conversationID)
+	pending, err := store.Peek(ctx, conversationID)
 	require.NoError(t, err)
+	require.Len(t, pending, 2)
+	assert.Equal(t, "user", pending[0].Role)
+	assert.Equal(t, "First message", pending[0].Content)
+	assert.Equal(t, "Second message", pending[1].Content)
+	assert.Empty(t, pending[0].Images)
+	assert.WithinDuration(t, time.Now(), pending[0].Timestamp, 5*time.Second)
+
+	consumed, err := store.Consume(ctx, conversationID)
+	require.NoError(t, err)
+	require.Len(t, consumed, 2)
+	assert.Equal(t, "First message", consumed[0].Content)
+	assert.Equal(t, "Second message", consumed[1].Content)
+
+	hasPending, err := store.HasPending(ctx, conversationID)
+	require.NoError(t, err)
+	assert.False(t, hasPending)
 }
 
-func TestWriteAndReadSteerWithImages(t *testing.T) {
-	store, err := NewSteerStore()
-	require.NoError(t, err)
-
-	conversationID := "test-conversation-images"
+func TestEnqueuePersistsNormalizedImages(t *testing.T) {
+	ctx := context.Background()
+	store, _ := newTestStore(t)
 	images := []string{"/tmp/screenshot.png", "https://example.com/mockup.jpg", "data:image/png;base64,aGVsbG8="}
 
-	err = store.WriteSteerWithImages(conversationID, "Use these images", images)
+	_, err := store.Enqueue(ctx, "test-conversation-images", "Use these images", images)
 	require.NoError(t, err)
 
-	// Mutate the caller's slice to ensure the store persisted its own copy.
 	images[0] = "/tmp/changed.png"
-
-	messages, err := store.ReadPendingSteer(conversationID)
+	pending, err := store.Peek(ctx, "test-conversation-images")
 	require.NoError(t, err)
-	require.Len(t, messages, 1)
-	assert.Equal(t, "Use these images", messages[0].Content)
-	assert.Equal(t, []string{"/tmp/screenshot.png", "https://example.com/mockup.jpg", "data:image/png;base64,aGVsbG8="}, messages[0].Images)
-
-	err = store.ClearPendingSteer(conversationID)
-	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	assert.Equal(t, []string{"/tmp/screenshot.png", "https://example.com/mockup.jpg", "data:image/png;base64,aGVsbG8="}, pending[0].Images)
 }
 
-func TestWriteSteerWithImagesNormalizesRelativePaths(t *testing.T) {
-	store, err := NewSteerStore()
-	require.NoError(t, err)
-
+func TestEnqueueNormalizesRelativeImagePaths(t *testing.T) {
+	ctx := context.Background()
+	store, _ := newTestStore(t)
 	workingDir := t.TempDir()
 	originalWD, err := os.Getwd()
 	require.NoError(t, err)
@@ -78,16 +94,13 @@ func TestWriteSteerWithImagesNormalizesRelativePaths(t *testing.T) {
 		require.NoError(t, os.Chdir(originalWD))
 	}()
 
-	err = store.WriteSteerWithImages("test-conversation-relative-images", "Use this image", []string{"./screenshot.png"})
+	_, err = store.Enqueue(ctx, "test-conversation-relative-images", "Use this image", []string{"./screenshot.png"})
 	require.NoError(t, err)
 
-	messages, err := store.ReadPendingSteer("test-conversation-relative-images")
+	pending, err := store.Peek(ctx, "test-conversation-relative-images")
 	require.NoError(t, err)
-	require.Len(t, messages, 1)
-	assert.Equal(t, []string{filepath.Join(workingDir, "screenshot.png")}, messages[0].Images)
-
-	err = store.ClearPendingSteer("test-conversation-relative-images")
-	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	assert.Equal(t, []string{filepath.Join(workingDir, "screenshot.png")}, pending[0].Images)
 }
 
 func TestNormalizeImageInputsPreservesRemoteAndDataURLs(t *testing.T) {
@@ -103,148 +116,140 @@ func TestNormalizeImageInputsPreservesRemoteAndDataURLs(t *testing.T) {
 	}, normalized)
 }
 
-func TestMultipleSteerMessages(t *testing.T) {
-	store, err := NewSteerStore()
+func TestQueueSeparatesConversations(t *testing.T) {
+	ctx := context.Background()
+	store, _ := newTestStore(t)
+
+	_, err := store.Enqueue(ctx, "conversation-a", "Message A", nil)
+	require.NoError(t, err)
+	_, err = store.Enqueue(ctx, "conversation-b", "Message B", nil)
 	require.NoError(t, err)
 
-	conversationID := "test-conversation-multiple"
-	messages := []string{"Message 1", "Message 2", "Message 3"}
-
-	// Write multiple steer messages
-	for _, msg := range messages {
-		err = store.WriteSteer(conversationID, msg)
-		require.NoError(t, err)
-	}
-
-	// Read all steer messages
-	steerMessages, err := store.ReadPendingSteer(conversationID)
+	consumed, err := store.Consume(ctx, "conversation-a")
 	require.NoError(t, err)
-	assert.Len(t, steerMessages, 3)
+	require.Len(t, consumed, 1)
+	assert.Equal(t, "Message A", consumed[0].Content)
 
-	for i, msg := range steerMessages {
-		assert.Equal(t, "user", msg.Role)
-		assert.Equal(t, messages[i], msg.Content)
-	}
-
-	// Cleanup
-	err = store.ClearPendingSteer(conversationID)
+	pending, err := store.Peek(ctx, "conversation-b")
 	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	assert.Equal(t, "Message B", pending[0].Content)
 }
 
-func TestHasPendingSteer(t *testing.T) {
-	store, err := NewSteerStore()
+func TestEmptyQueue(t *testing.T) {
+	ctx := context.Background()
+	store, _ := newTestStore(t)
+
+	pending, err := store.Peek(ctx, "missing-conversation")
 	require.NoError(t, err)
+	assert.Empty(t, pending)
 
-	conversationID := "test-conversation-pending"
-
-	// Initially no steer
-	assert.False(t, store.HasPendingSteer(conversationID))
-
-	// Write steer
-	err = store.WriteSteer(conversationID, "Test message")
+	consumed, err := store.Consume(ctx, "missing-conversation")
 	require.NoError(t, err)
+	assert.Empty(t, consumed)
 
-	// Now has steer
-	assert.True(t, store.HasPendingSteer(conversationID))
-
-	// Clear steer
-	err = store.ClearPendingSteer(conversationID)
+	hasPending, err := store.HasPending(ctx, "missing-conversation")
 	require.NoError(t, err)
-
-	// No longer has steer
-	assert.False(t, store.HasPendingSteer(conversationID))
+	assert.False(t, hasPending)
 }
 
-func TestReadNonExistentSteer(t *testing.T) {
-	store, err := NewSteerStore()
-	require.NoError(t, err)
+func TestConcurrentEnqueueDoesNotLoseMessages(t *testing.T) {
+	ctx := context.Background()
+	store, _ := newTestStore(t)
+	const goroutines = 10
+	const messagesPerGoroutine = 5
 
-	conversationID := "non-existent-conversation"
-
-	// Reading non-existent steer should return empty slice
-	messages, err := store.ReadPendingSteer(conversationID)
-	require.NoError(t, err)
-	assert.Empty(t, messages)
-}
-
-func TestClearNonExistentSteer(t *testing.T) {
-	store, err := NewSteerStore()
-	require.NoError(t, err)
-
-	conversationID := "non-existent-conversation"
-
-	// Clearing non-existent steer should not error
-	err = store.ClearPendingSteer(conversationID)
-	require.NoError(t, err)
-}
-
-func TestListSteerFiles(t *testing.T) {
-	store, err := NewSteerStore()
-	require.NoError(t, err)
-
-	// Create some test steer files
-	conversationIDs := []string{"test-1", "test-2", "test-3"}
-	for _, id := range conversationIDs {
-		err = store.WriteSteer(id, "Test message")
-		require.NoError(t, err)
-	}
-
-	// List steer files
-	files, err := store.ListSteerFiles()
-	require.NoError(t, err)
-	assert.GreaterOrEqual(t, len(files), 3)
-
-	// Cleanup
-	for _, id := range conversationIDs {
-		err = store.ClearPendingSteer(id)
-		require.NoError(t, err)
-	}
-}
-
-func TestConcurrentAccess(t *testing.T) {
-	store, err := NewSteerStore()
-	require.NoError(t, err)
-
-	conversationID := "test-concurrent"
-	numGoroutines := 10
-	messagesPerGoroutine := 5
-
-	// Use a channel to coordinate goroutines
-	done := make(chan bool, numGoroutines)
-
-	// Start multiple goroutines writing steer
-	for i := 0; i < numGoroutines; i++ {
+	var wg sync.WaitGroup
+	errCh := make(chan error, goroutines*messagesPerGoroutine)
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
 		go func(id int) {
+			defer wg.Done()
 			for j := 0; j < messagesPerGoroutine; j++ {
-				err := store.WriteSteer(conversationID, fmt.Sprintf("Message from goroutine %d, iteration %d", id, j))
-				assert.NoError(t, err)
+				_, err := store.Enqueue(ctx, "test-concurrent", fmt.Sprintf("Message %d-%d", id, j), nil)
+				errCh <- err
 			}
-			done <- true
 		}(i)
 	}
-
-	// Wait for all goroutines to complete
-	for i := 0; i < numGoroutines; i++ {
-		<-done
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		require.NoError(t, err)
 	}
 
-	// Read all messages
-	messages, err := store.ReadPendingSteer(conversationID)
+	pending, err := store.Peek(ctx, "test-concurrent")
 	require.NoError(t, err)
-	assert.Len(t, messages, numGoroutines*messagesPerGoroutine)
-
-	// Cleanup
-	err = store.ClearPendingSteer(conversationID)
-	require.NoError(t, err)
+	assert.Len(t, pending, goroutines*messagesPerGoroutine)
 }
 
-func TestGetSteerPath(t *testing.T) {
-	store, err := NewSteerStore()
+func TestCompetingConsumersDoNotDuplicateMessages(t *testing.T) {
+	ctx := context.Background()
+	firstStore, dbPath := newTestStore(t)
+	secondStore, err := NewSteerStore(ctx, WithDBPath(dbPath))
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = secondStore.Close() })
 
-	conversationID := "test-path"
-	expectedPath := filepath.Join(store.steerDir, "steer-test-path.json")
-	actualPath := store.getSteerPath(conversationID)
+	for i := 0; i < 5; i++ {
+		_, err := firstStore.Enqueue(ctx, "test-consumers", fmt.Sprintf("Message %d", i), nil)
+		require.NoError(t, err)
+	}
 
-	assert.Equal(t, expectedPath, actualPath)
+	type consumeResult struct {
+		messages []Message
+		err      error
+	}
+	resultCh := make(chan consumeResult, 2)
+	for _, store := range []*Store{firstStore, secondStore} {
+		go func(store *Store) {
+			messages, err := store.Consume(ctx, "test-consumers")
+			resultCh <- consumeResult{messages: messages, err: err}
+		}(store)
+	}
+
+	seen := make(map[string]struct{})
+	for i := 0; i < 2; i++ {
+		result := <-resultCh
+		require.NoError(t, result.err)
+		for _, message := range result.messages {
+			_, duplicate := seen[message.Content]
+			assert.False(t, duplicate)
+			seen[message.Content] = struct{}{}
+		}
+	}
+	assert.Len(t, seen, 5)
+}
+
+func TestConsumeFailureReturnsNoMessages(t *testing.T) {
+	ctx := context.Background()
+	store, dbPath := newTestStore(t)
+	_, err := store.Enqueue(ctx, "test-failure", "Keep me queued", nil)
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+
+	messages, err := store.Consume(ctx, "test-failure")
+	require.Error(t, err)
+	assert.Empty(t, messages)
+
+	reopened, err := NewSteerStore(ctx, WithDBPath(dbPath))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = reopened.Close() })
+	pending, err := reopened.Peek(ctx, "test-failure")
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	assert.Equal(t, "Keep me queued", pending[0].Content)
+}
+
+func newTestStore(t *testing.T) (*Store, string) {
+	t.Helper()
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "storage.db")
+	database, err := db.Open(ctx, dbPath)
+	require.NoError(t, err)
+	require.NoError(t, db.NewMigrationRunner(database).Run(ctx, migrations.All()))
+	require.NoError(t, database.Close())
+
+	store, err := NewSteerStore(ctx, WithDBPath(dbPath))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	return store, dbPath
 }

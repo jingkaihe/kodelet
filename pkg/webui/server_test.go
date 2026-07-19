@@ -22,6 +22,8 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/jingkaihe/kodelet/pkg/steer"
@@ -883,6 +885,8 @@ func TestServer_handleGetConversationOpenAIChatCompletionsSkipsSystemAndPreserve
 
 func TestServer_handleGetConversationIncludesPendingSteer(t *testing.T) {
 	homeDir := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", homeDir)
+	require.NoError(t, db.RunMigrations(context.Background(), migrations.All()))
 	originalHome := os.Getenv("HOME")
 	require.NoError(t, os.Setenv("HOME", homeDir))
 	defer func() {
@@ -894,9 +898,11 @@ func TestServer_handleGetConversationIncludesPendingSteer(t *testing.T) {
 	}()
 
 	conversationID := "test-pending-steer"
-	steerStore, err := steer.NewSteerStore()
+	steerStore, err := steer.NewSteerStore(context.Background())
 	require.NoError(t, err)
-	require.NoError(t, steerStore.WriteSteerWithImages(conversationID, "Use this screenshot", []string{"data:image/png;base64,aGVsbG8="}))
+	defer steerStore.Close()
+	_, err = steerStore.Enqueue(context.Background(), conversationID, "Use this screenshot", []string{"data:image/png;base64,aGVsbG8="})
+	require.NoError(t, err)
 
 	mockService := &mockConversationService{
 		getFunc: func(_ context.Context, id string) (*conversations.GetConversationResponse, error) {
@@ -933,6 +939,8 @@ func TestServer_handleGetConversationIncludesPendingSteer(t *testing.T) {
 
 func TestServer_handleGetPendingSteer(t *testing.T) {
 	homeDir := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", homeDir)
+	require.NoError(t, db.RunMigrations(context.Background(), migrations.All()))
 	originalHome := os.Getenv("HOME")
 	require.NoError(t, os.Setenv("HOME", homeDir))
 	defer func() {
@@ -944,9 +952,11 @@ func TestServer_handleGetPendingSteer(t *testing.T) {
 	}()
 
 	conversationID := "test-get-pending-steer"
-	steerStore, err := steer.NewSteerStore()
+	steerStore, err := steer.NewSteerStore(context.Background())
 	require.NoError(t, err)
-	require.NoError(t, steerStore.WriteSteer(conversationID, "Queued guidance"))
+	defer steerStore.Close()
+	_, err = steerStore.Enqueue(context.Background(), conversationID, "Queued guidance", nil)
+	require.NoError(t, err)
 
 	server := &Server{router: mux.NewRouter()}
 	req := httptest.NewRequest("GET", "/api/conversations/"+conversationID+"/steer", nil)
@@ -1855,6 +1865,8 @@ func TestServer_handleGetToolResult(t *testing.T) {
 
 func TestServer_handleSteerConversation(t *testing.T) {
 	homeDir := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", homeDir)
+	require.NoError(t, db.RunMigrations(context.Background(), migrations.All()))
 	originalHome := os.Getenv("HOME")
 	require.NoError(t, os.Setenv("HOME", homeDir))
 	defer func() {
@@ -1889,9 +1901,10 @@ func TestServer_handleSteerConversation(t *testing.T) {
 	assert.Equal(t, "conv-123", response.ConversationID)
 	assert.False(t, response.Queued)
 
-	steerStore, err := steer.NewSteerStore()
+	steerStore, err := steer.NewSteerStore(context.Background())
 	require.NoError(t, err)
-	pending, err := steerStore.ReadPendingSteer("conv-123")
+	defer steerStore.Close()
+	pending, err := steerStore.Peek(context.Background(), "conv-123")
 	require.NoError(t, err)
 	require.Len(t, pending, 1)
 	assert.Equal(t, "Please focus on error handling", pending[0].Content)
@@ -1900,6 +1913,8 @@ func TestServer_handleSteerConversation(t *testing.T) {
 
 func TestServer_handleSteerConversationWithImageContent(t *testing.T) {
 	homeDir := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", homeDir)
+	require.NoError(t, db.RunMigrations(context.Background(), migrations.All()))
 	originalHome := os.Getenv("HOME")
 	require.NoError(t, os.Setenv("HOME", homeDir))
 	defer func() {
@@ -1924,9 +1939,10 @@ func TestServer_handleSteerConversationWithImageContent(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	steerStore, err := steer.NewSteerStore()
+	steerStore, err := steer.NewSteerStore(context.Background())
 	require.NoError(t, err)
-	pending, err := steerStore.ReadPendingSteer("conv-123")
+	defer steerStore.Close()
+	pending, err := steerStore.Peek(context.Background(), "conv-123")
 	require.NoError(t, err)
 	require.Len(t, pending, 1)
 	assert.Equal(t, "Use this screenshot", pending[0].Content)
