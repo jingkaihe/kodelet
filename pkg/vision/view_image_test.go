@@ -37,14 +37,42 @@ func TestMakeViewImageResultUsesDecodedImageFormat(t *testing.T) {
 	assert.Contains(t, result.ImageURL, "data:image/png;base64,")
 }
 
-func TestSupportsViewImageOriginalDetailIncludesFlagshipProModels(t *testing.T) {
-	assert.True(t, SupportsViewImageOriginalDetail("gpt-5.5-pro"))
-	assert.True(t, SupportsViewImageOriginalDetail("gpt-5.4-pro"))
+func TestSupportsViewImageOriginalDetail(t *testing.T) {
+	for _, model := range []string{
+		"gpt-5.6-sol",
+		"gpt-5.6-terra",
+		"gpt-5.6-luna",
+		"gpt-5.5-pro",
+		"gpt-5.5",
+		"gpt-5.4-pro",
+		"gpt-5.4",
+		"gpt-5.4-mini",
+		"gpt-5.3-codex",
+		"claude-fable-5",
+		"claude-mythos-5",
+		"claude-opus-4-8",
+		"claude-opus-4-7",
+		"claude-sonnet-5",
+	} {
+		t.Run(model, func(t *testing.T) {
+			assert.True(t, SupportsViewImageOriginalDetail(model))
+		})
+	}
+
+	for _, model := range []string{
+		"gpt-5",
+		"gpt-5.4-nano",
+		"claude-sonnet-4-6",
+	} {
+		t.Run(model, func(t *testing.T) {
+			assert.False(t, SupportsViewImageOriginalDetail(model))
+		})
+	}
 }
 
 func TestVisionSupportAndDetailHelpers(t *testing.T) {
 	assert.True(t, SupportsImageInputs("any", "model"))
-	assert.True(t, SupportsViewImageOriginalDetail(" GPT-5.4-MINI "))
+	assert.True(t, SupportsViewImageOriginalDetail(" GPT-5.6-SOL "))
 	assert.False(t, SupportsViewImageOriginalDetail("gpt-5"))
 
 	detail, err := NormalizeViewImageDetail("", "gpt-5")
@@ -52,6 +80,10 @@ func TestVisionSupportAndDetailHelpers(t *testing.T) {
 	assert.Empty(t, detail)
 
 	detail, err = NormalizeViewImageDetail(" original ", "gpt-5.5")
+	require.NoError(t, err)
+	assert.Equal(t, "original", detail)
+
+	detail, err = NormalizeViewImageDetail("original", "claude-opus-4-8")
 	require.NoError(t, err)
 	assert.Equal(t, "original", detail)
 

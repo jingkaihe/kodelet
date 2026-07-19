@@ -34,7 +34,7 @@ func TestViewImageTool_GenerateSchema(t *testing.T) {
 	_, hasDetail = schema.Properties.Get("detail")
 	assert.True(t, hasDetail)
 
-	tool = NewViewImageTool("gpt-5.5", "openai")
+	tool = NewViewImageTool("gpt-5.6-terra", "openai")
 	schema = tool.GenerateSchema()
 	_, hasDetail = schema.Properties.Get("detail")
 	assert.True(t, hasDetail)
@@ -43,11 +43,16 @@ func TestViewImageTool_GenerateSchema(t *testing.T) {
 	schema = tool.GenerateSchema()
 	_, hasDetail = schema.Properties.Get("detail")
 	assert.True(t, hasDetail)
+
+	tool = NewViewImageTool("claude-opus-4-8", "anthropic")
+	schema = tool.GenerateSchema()
+	_, hasDetail = schema.Properties.Get("detail")
+	assert.True(t, hasDetail)
 }
 
 func TestViewImageTool_ValidateInput(t *testing.T) {
-	tool := NewViewImageTool("gpt-5.3-codex", "openai")
-	state := NewBasicState(t.Context(), WithLLMConfig(llmtypes.Config{Model: "gpt-5.3-codex"}))
+	tool := NewViewImageTool("gpt-5.6-sol", "openai")
+	state := NewBasicState(t.Context(), WithLLMConfig(llmtypes.Config{Model: "gpt-5.6-sol"}))
 
 	assert.NoError(t, tool.ValidateInput(state, `{"path":"/tmp/test.png"}`))
 	assert.NoError(t, tool.ValidateInput(state, `{"path":"/tmp/test.png","detail":"original"}`))
@@ -61,6 +66,12 @@ func TestViewImageTool_ValidateInput(t *testing.T) {
 	assert.Contains(t, err.Error(), "compatible models")
 
 	err = tool.ValidateInput(NewBasicState(t.Context(), WithLLMConfig(llmtypes.Config{Model: "gpt-5.5"})), `{"path":"/tmp/test.png","detail":"original"}`)
+	assert.NoError(t, err)
+
+	err = tool.ValidateInput(NewBasicState(t.Context(), WithLLMConfig(llmtypes.Config{Model: "gpt-5.4-mini"})), `{"path":"/tmp/test.png","detail":"original"}`)
+	assert.NoError(t, err)
+
+	err = tool.ValidateInput(NewBasicState(t.Context(), WithLLMConfig(llmtypes.Config{Model: "claude-opus-4-8"})), `{"path":"/tmp/test.png","detail":"original"}`)
 	assert.NoError(t, err)
 }
 
@@ -95,7 +106,7 @@ func TestViewImageTool_ExecuteAndStructuredData(t *testing.T) {
 }
 
 func TestViewImageTool_TracingKVs(t *testing.T) {
-	tool := NewViewImageTool("gpt-5.3-codex", "openai")
+	tool := NewViewImageTool("gpt-5.6-sol", "openai")
 	kvs, err := tool.TracingKVs(`{"path":"/tmp/demo.png","detail":"original"}`)
 	require.NoError(t, err)
 	require.Len(t, kvs, 2)

@@ -22,12 +22,22 @@ import (
 )
 
 var modelsSupportingOriginalImageDetail = map[string]struct{}{
+	// OpenAI API or Codex platform models with an `original` image detail level.
+	"gpt-5.6-sol":   {},
+	"gpt-5.6-terra": {},
+	"gpt-5.6-luna":  {},
 	"gpt-5.5-pro":   {},
 	"gpt-5.5":       {},
 	"gpt-5.4-pro":   {},
 	"gpt-5.4":       {},
 	"gpt-5.4-mini":  {},
 	"gpt-5.3-codex": {},
+	// Anthropic models with automatic high-resolution image input.
+	"claude-fable-5":  {},
+	"claude-mythos-5": {},
+	"claude-opus-4-8": {},
+	"claude-opus-4-7": {},
+	"claude-sonnet-5": {},
 }
 
 const (
