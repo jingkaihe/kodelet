@@ -392,7 +392,7 @@ OUTER:
 				if base.HandleAgentStopFollowUps(ctx, t, handler) {
 					continue OUTER
 				}
-				if !t.Config.IsSubAgent && (maxTurns == 0 || turnCount < maxTurns) && base.HandleGoalAutoContinuation(ctx, t, t.tools(opt)) {
+				if (maxTurns == 0 || turnCount < maxTurns) && base.HandleGoalAutoContinuation(ctx, t, t.tools(opt)) {
 					continue OUTER
 				}
 
@@ -408,14 +408,10 @@ OUTER:
 	// Save conversation state after completing the interaction
 	if t.Persisted && t.Store != nil && !opt.NoSaveConversation {
 		saveCtx := context.Background() // use new context to avoid cancellation
-		// Skip LLM-based summary generation for subagent runs to avoid unnecessary API calls
-		t.SaveConversation(saveCtx, !t.Config.IsSubAgent)
+		t.SaveConversation(saveCtx, true)
 	}
 
-	if !t.Config.IsSubAgent {
-		// only main agent can signal done
-		handler.HandleDone()
-	}
+	handler.HandleDone()
 	return finalOutput, nil
 }
 
@@ -462,10 +458,8 @@ func (t *Thread) processMessageExchange(
 		}
 	}
 
-	if !t.Config.IsSubAgent {
-		if err := t.processPendingSteer(ctx, &requestParams, handler); err != nil {
-			return "", false, errors.Wrap(err, "failed to process pending steer")
-		}
+	if err := t.processPendingSteer(ctx, &requestParams, handler); err != nil {
+		return "", false, errors.Wrap(err, "failed to process pending steer")
 	}
 
 	extraHeaders := t.getExtraHeaders(opt)
@@ -529,8 +523,8 @@ func (t *Thread) processMessageExchange(
 	// Check for tool calls
 	toolCalls := assistantMessage.ToolCalls
 	if len(toolCalls) == 0 {
-		// Log structured LLM usage when no tool calls are made (main agent only)
-		if !t.Config.IsSubAgent && !opt.DisableUsageLog {
+		// Log structured LLM usage when no tool calls are made
+		if !opt.DisableUsageLog {
 			usage.LogLLMUsage(ctx, t.GetUsage(), model, apiStartTime, response.Usage.CompletionTokens)
 		}
 		return finalOutput, false, nil
@@ -586,8 +580,8 @@ func (t *Thread) processMessageExchange(
 	}
 	t.messages = append(t.messages, openAIChatToolResultMessages(toolResultMessages, followupImageParts)...)
 
-	// Log structured LLM usage after all content processing is complete (main agent only)
-	if !t.Config.IsSubAgent && !opt.DisableUsageLog {
+	// Log structured LLM usage after all content processing is complete
+	if !opt.DisableUsageLog {
 		usage.LogLLMUsage(ctx, t.GetUsage(), model, apiStartTime, response.Usage.CompletionTokens)
 	}
 

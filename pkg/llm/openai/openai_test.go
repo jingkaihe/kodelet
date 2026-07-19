@@ -1491,7 +1491,6 @@ func TestOpenAISendMessageTextResponse(t *testing.T) {
 	config := llm.Config{
 		Model:        "gpt-4o",
 		MaxTokens:    128,
-		IsSubAgent:   true,
 		WeakModel:    "gpt-4o-mini",
 		AllowedTools: []string{tools.NoToolsMarker},
 	}
@@ -1507,7 +1506,7 @@ func TestOpenAISendMessageTextResponse(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "send response", output)
 	assert.Equal(t, []string{"send response"}, handler.texts)
-	assert.Zero(t, handler.done, "subagent sends do not signal done")
+	assert.Equal(t, 1, handler.done)
 	assert.Equal(t, "gpt-4o-mini", capturedRequest.Model)
 	assert.Equal(t, 128, capturedRequest.MaxTokens)
 	require.Len(t, capturedRequest.Messages, 2)
@@ -1557,7 +1556,6 @@ func TestOpenAISendMessageStopsWhenContextCancelled(t *testing.T) {
 	}))
 	thread := newTestOpenAIExchangeThread(client, llm.Config{
 		Model:        "gpt-4o",
-		IsSubAgent:   true,
 		AllowedTools: []string{tools.NoToolsMarker},
 	})
 	ctx, cancel := context.WithCancel(context.Background())

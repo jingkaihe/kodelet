@@ -412,7 +412,7 @@ OUTER:
 				if base.HandleAgentStopFollowUps(ctx, t, handler) {
 					continue OUTER
 				}
-				if !t.Config.IsSubAgent && (maxTurns == 0 || turnCount < maxTurns) && base.HandleGoalAutoContinuation(ctx, t, t.tools(opt)) {
+				if (maxTurns == 0 || turnCount < maxTurns) && base.HandleGoalAutoContinuation(ctx, t, t.tools(opt)) {
 					continue OUTER
 				}
 
@@ -428,14 +428,10 @@ OUTER:
 	// Save conversation state after completing the interaction
 	if t.Persisted && t.Store != nil && !opt.NoSaveConversation {
 		saveCtx := context.Background() // use new context to avoid cancellation
-		// Skip LLM-based summary generation for subagent runs to avoid unnecessary API calls
-		t.SaveConversation(saveCtx, !t.Config.IsSubAgent)
+		t.SaveConversation(saveCtx, true)
 	}
 
-	if !t.Config.IsSubAgent {
-		// only main agaent can signal done
-		handler.HandleDone()
-	}
+	handler.HandleDone()
 	return finalOutput, nil
 }
 
@@ -614,10 +610,8 @@ func (t *Thread) processMessageExchange(
 		messageParams.OutputConfig = outputConfig
 	}
 
-	if !t.Config.IsSubAgent {
-		if err := t.processPendingSteer(ctx, &messageParams, handler); err != nil {
-			return "", false, errors.Wrap(err, "failed to process pending steer")
-		}
+	if err := t.processPendingSteer(ctx, &messageParams, handler); err != nil {
+		return "", false, errors.Wrap(err, "failed to process pending steer")
 	}
 	if opt.PromptCache {
 		applyAnthropicPromptCachePolicy(&messageParams)
@@ -709,8 +703,8 @@ func (t *Thread) processMessageExchange(
 
 	toolUseCount := len(toolResults)
 
-	// Log structured LLM usage after all content processing is complete (main agent only)
-	if !t.Config.IsSubAgent && !opt.DisableUsageLog {
+	// Log structured LLM usage after all content processing is complete
+	if !opt.DisableUsageLog {
 		usage.LogLLMUsage(ctx, t.GetUsage(), model, apiStartTime, int(response.Usage.OutputTokens))
 	}
 

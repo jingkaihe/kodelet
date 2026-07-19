@@ -99,9 +99,6 @@ func filterDuplicateTools(tools []tooltypes.Tool, reserved map[string]struct{}) 
 }
 
 func skillsEnabledForConfig(config llmtypes.Config) bool {
-	if config.IsSubAgent {
-		return false
-	}
 	if config.Skills != nil && !config.Skills.Enabled {
 		return false
 	}
@@ -281,10 +278,6 @@ func WithSkillTool() BasicStateOption {
 
 // discoverSkills discovers available skills based on configuration
 func discoverSkills(ctx context.Context, llmConfig llmtypes.Config) map[string]*skills.Skill {
-	if llmConfig.IsSubAgent {
-		return nil
-	}
-
 	// Check if skills are disabled via config
 	if llmConfig.Skills != nil && !llmConfig.Skills.Enabled {
 		return nil

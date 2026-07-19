@@ -672,20 +672,3 @@ func TestWithSkillTool_RespectsNoSkillsFlag(t *testing.T) {
 
 	assert.NotContains(t, toolNames, "skill")
 }
-
-func TestWithSkillTool_SkipsSubagents(t *testing.T) {
-	ctx := context.Background()
-	state := NewBasicState(
-		ctx,
-		WithLLMConfig(llmtypes.Config{IsSubAgent: true}),
-		WithMainTools(),
-		WithSkillTool(),
-	)
-
-	toolNames := make([]string, len(state.Tools()))
-	for i, tool := range state.Tools() {
-		toolNames[i] = tool.Name()
-	}
-
-	assert.NotContains(t, toolNames, "skill")
-}

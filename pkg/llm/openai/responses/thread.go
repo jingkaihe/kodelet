@@ -402,7 +402,7 @@ OUTER:
 				if base.HandleAgentStopFollowUps(ctx, t, handler) {
 					continue OUTER
 				}
-				if !t.Config.IsSubAgent && (maxTurns == 0 || turnCount < maxTurns) && base.HandleGoalAutoContinuation(ctx, t, base.AvailableToolsForThread(t, t.State, opt.NoToolUse)) {
+				if (maxTurns == 0 || turnCount < maxTurns) && base.HandleGoalAutoContinuation(ctx, t, base.AvailableToolsForThread(t, t.State, opt.NoToolUse)) {
 					continue OUTER
 				}
 
@@ -418,13 +418,10 @@ OUTER:
 	// Save conversation state
 	if t.Persisted && t.Store != nil && !opt.NoSaveConversation {
 		saveCtx := context.Background()
-		// Skip LLM-based summary generation for subagent runs to avoid unnecessary API calls
-		t.SaveConversation(saveCtx, !t.Config.IsSubAgent)
+		t.SaveConversation(saveCtx, true)
 	}
 
-	if !t.Config.IsSubAgent {
-		handler.HandleDone()
-	}
+	handler.HandleDone()
 
 	return finalOutput, nil
 }
@@ -489,10 +486,8 @@ func (t *Thread) processMessageExchange(
 		}
 	}
 
-	if !t.Config.IsSubAgent {
-		if err := t.processPendingSteer(ctx, handler); err != nil {
-			return "", false, false, errors.Wrap(err, "failed to process pending steer")
-		}
+	if err := t.processPendingSteer(ctx, handler); err != nil {
+		return "", false, false, errors.Wrap(err, "failed to process pending steer")
 	}
 
 	// Build tools

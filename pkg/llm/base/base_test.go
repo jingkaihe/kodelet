@@ -561,7 +561,6 @@ func TestCreateMessageSpan(t *testing.T) {
 		Model:              "claude-sonnet-4-6",
 		MaxTokens:          4096,
 		WeakModelMaxTokens: 2048,
-		IsSubAgent:         false,
 	}
 	bt := NewThread(config, "test-conv-123")
 	bt.Persisted = true
@@ -1024,7 +1023,6 @@ func TestNewThread_InitializesAllFields(t *testing.T) {
 		MaxTokens:            8192,
 		WeakModelMaxTokens:   2048,
 		ThinkingBudgetTokens: 1000,
-		IsSubAgent:           true,
 	}
 	conversationID := "conv-comprehensive-test"
 
@@ -1164,7 +1162,6 @@ func TestCreateMessageSpan_AllCommonAttributes(t *testing.T) {
 		Model:              "claude-sonnet-4-6",
 		MaxTokens:          8192,
 		WeakModelMaxTokens: 2048,
-		IsSubAgent:         true,
 	}
 	bt := NewThread(config, "attr-test-conv")
 	bt.Persisted = true

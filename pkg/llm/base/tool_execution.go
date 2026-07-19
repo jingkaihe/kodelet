@@ -141,10 +141,6 @@ func buildExtensionCallContext(thread llmtypes.Thread, state tooltypes.State) ex
 	if state != nil && state.WorkingDirectory() != "" {
 		workingDir = state.WorkingDirectory()
 	}
-	invokedBy := "main"
-	if config.IsSubAgent {
-		invokedBy = "subagent"
-	}
 
 	recipeName := config.RecipeName
 	if recipeName == "" {
@@ -160,7 +156,7 @@ func buildExtensionCallContext(thread llmtypes.Thread, state tooltypes.State) ex
 		Model:          config.Model,
 		Profile:        config.Profile,
 		RecipeName:     recipeName,
-		InvokedBy:      invokedBy,
+		InvokedBy:      "main",
 	}
 }
 

@@ -2007,7 +2007,7 @@ func (*mockResponsesConversationStore) Close() error {
 }
 
 func TestProcessMessageExchangeSavesConversationPerTurn(t *testing.T) {
-	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", IsSubAgent: true, OpenAI: &llmtypes.OpenAIConfig{Platform: "openai", ServiceTier: llmtypes.OpenAIServiceTierFlex}}
+	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", OpenAI: &llmtypes.OpenAIConfig{Platform: "openai", ServiceTier: llmtypes.OpenAIServiceTierFlex}}
 	thread := &Thread{
 		Thread: base.NewThread(config, "conv-test"),
 	}
@@ -2559,7 +2559,7 @@ func TestProcessMessageExchangeSetsTextVerbosity(t *testing.T) {
 }
 
 func TestProcessMessageExchangeSavesConversationOnError(t *testing.T) {
-	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", IsSubAgent: true, Retry: llmtypes.RetryConfig{Attempts: 1}, OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
+	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", Retry: llmtypes.RetryConfig{Attempts: 1}, OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
 	thread := &Thread{
 		Thread: base.NewThread(config, "conv-test"),
 	}
@@ -2595,9 +2595,8 @@ func TestProcessMessageExchangeSavesConversationOnError(t *testing.T) {
 
 func TestProcessMessageExchangeRetriesHTTPSStreamError(t *testing.T) {
 	config := llmtypes.Config{
-		Provider:   "openai",
-		Model:      "gpt-5.5",
-		IsSubAgent: true,
+		Provider: "openai",
+		Model:    "gpt-5.5",
 		Retry: llmtypes.RetryConfig{
 			Attempts:     3,
 			InitialDelay: 1,
@@ -2648,9 +2647,8 @@ func TestProcessMessageExchangeRetriesHTTPSStreamError(t *testing.T) {
 
 func TestProcessMessageExchangeKeepsDurableStateBeforeHTTPSStreamRetry(t *testing.T) {
 	config := llmtypes.Config{
-		Provider:   "openai",
-		Model:      "gpt-5.5",
-		IsSubAgent: true,
+		Provider: "openai",
+		Model:    "gpt-5.5",
 		Retry: llmtypes.RetryConfig{
 			Attempts:     3,
 			InitialDelay: 1,
@@ -2722,9 +2720,8 @@ func TestProcessMessageExchangeKeepsDurableStateBeforeHTTPSStreamRetry(t *testin
 
 func TestProcessMessageExchangeRetriesFromToolResultAfterLocalToolExecution(t *testing.T) {
 	config := llmtypes.Config{
-		Provider:   "openai",
-		Model:      "gpt-5.5",
-		IsSubAgent: true,
+		Provider: "openai",
+		Model:    "gpt-5.5",
 		Retry: llmtypes.RetryConfig{
 			Attempts:     3,
 			InitialDelay: 1,
@@ -2814,9 +2811,8 @@ func TestProcessMessageExchangeRetriesFromToolResultAfterLocalToolExecution(t *t
 
 func TestProcessMessageExchangeDoesNotRetryHTTPSUnrecoverableStreamError(t *testing.T) {
 	config := llmtypes.Config{
-		Provider:   "openai",
-		Model:      "gpt-5.5",
-		IsSubAgent: true,
+		Provider: "openai",
+		Model:    "gpt-5.5",
 		Retry: llmtypes.RetryConfig{
 			Attempts:     3,
 			InitialDelay: 1,
@@ -2887,7 +2883,7 @@ func TestProcessMessageExchangeCodexUsesDefaultStreamingOptions(t *testing.T) {
 }
 
 func TestSendMessageRequiresResponseCompletedEvent(t *testing.T) {
-	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", IsSubAgent: true}
+	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}
 	thread := &Thread{
 		Thread:      base.NewThread(config, "conv-test"),
 		inputItems:  make([]openairesponses.ResponseInputItemUnionParam, 0),

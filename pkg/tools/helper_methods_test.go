@@ -443,7 +443,6 @@ func TestStateDeterministicHelpers(t *testing.T) {
 	assert.Empty(t, filterDiscoveredToolsByAllowed(llmtypes.Config{AllowedTools: []string{"   "}}, tools))
 	assert.Equal(t, tools, filterDiscoveredToolsByAllowed(llmtypes.Config{}, tools))
 
-	assert.False(t, skillsEnabledForConfig(llmtypes.Config{IsSubAgent: true}))
 	assert.False(t, skillsEnabledForConfig(llmtypes.Config{Skills: &llmtypes.SkillsConfig{Enabled: false}}))
 	assert.True(t, skillsEnabledForConfig(llmtypes.Config{}))
 

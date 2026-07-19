@@ -344,7 +344,7 @@ func (t *Thread) EstimateContextWindowFromMessage(msg string) {
 // provider-specific attributes to be passed in.
 //
 // Common attributes included:
-//   - model, max_tokens, weak_model_max_tokens, is_sub_agent
+//   - model, max_tokens, weak_model_max_tokens
 //   - conversation_id, is_persisted, message_length, use_weak_model
 //
 // Provider-specific attributes (passed via extraAttributes):
@@ -363,7 +363,6 @@ func (t *Thread) CreateMessageSpan(
 		attribute.Int("max_tokens", t.Config.MaxTokens),
 		attribute.Int("weak_model_max_tokens", t.Config.WeakModelMaxTokens),
 		attribute.Bool("use_weak_model", opt.UseWeakModel),
-		attribute.Bool("is_sub_agent", t.Config.IsSubAgent),
 		attribute.String("conversation_id", t.ConversationID),
 		attribute.Bool("is_persisted", t.Persisted),
 		attribute.Int("message_length", len(message)),

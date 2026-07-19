@@ -403,7 +403,7 @@ func (t *Thread) processStream(
 			usageHandler.HandleUsage(t.GetUsage())
 		}
 
-		if !t.Config.IsSubAgent && !opt.DisableUsageLog {
+		if !opt.DisableUsageLog {
 			usage.LogLLMUsage(ctx, t.GetUsage(), model, apiStartTime, int(finalResponse.Usage.OutputTokens))
 		}
 	}

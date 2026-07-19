@@ -499,7 +499,7 @@ interface ExtensionContext {
   model: string;
   profile?: string;
   recipeName?: string;
-  invokedBy: "main" | "subagent";
+  invokedBy: "main";
   turnNumber?: number;
 }
 
