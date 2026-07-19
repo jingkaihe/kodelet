@@ -1,5 +1,15 @@
 # Kodelet
 
+## 0.5.2-beta
+
+Persisted steering messages in a SQLite-backed queue so guidance is durable and consistently available across the CLI, TUI, and Web UI.
+
+Continued active Anthropic and OpenAI conversations when new steering arrives, allowing queued guidance to be incorporated before the agent stops.
+
+Removed remaining subagent-specific LLM behavior.
+
+Bound oversized `view_image` requests while preserving high-detail image input within safe limits.
+
 ## 0.5.1-beta 
 
 Added automatic light/dark TUI themes, custom themes from `~/.kodelet/themes`, and a `/theme` picker with a ` (current)` marker.
