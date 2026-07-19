@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -121,6 +122,31 @@ func TriggerTurnEnd(
 	if runtime := extensionRuntime(thread); runtime != nil {
 		runtime.DispatchTurnEnd(ctx, buildExtensionCallContext(thread, threadState(thread)), finalOutput, turnCount)
 	}
+}
+
+// HasPendingSteer reports whether steering arrived while the current model turn was in flight.
+// Providers use this before stopping so the next exchange can inject the queued messages.
+func HasPendingSteer(ctx context.Context, conversationID string) bool {
+	steerStore, err := steer.NewSteerStore()
+	if err != nil {
+		logger.G(ctx).WithError(err).Warn("failed to check for pending steer before agent stop")
+		return false
+	}
+
+	pendingSteer, err := steerStore.ReadPendingSteer(conversationID)
+	if err != nil {
+		logger.G(ctx).WithError(err).Warn("failed to read pending steer before agent stop")
+		return false
+	}
+	if len(pendingSteer) == 0 {
+		return false
+	}
+
+	logger.G(ctx).
+		WithField("conversation_id", conversationID).
+		WithField("steer_count", len(pendingSteer)).
+		Info("pending steer detected before agent stop, continuing conversation")
+	return true
 }
 
 // HandleAgentStopFollowUps checks agent.end extension handlers and appends any follow-up user messages.

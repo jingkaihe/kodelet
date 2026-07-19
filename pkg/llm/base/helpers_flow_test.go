@@ -7,6 +7,7 @@ import (
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/goals"
+	"github.com/jingkaihe/kodelet/pkg/steer"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
@@ -229,6 +230,18 @@ func TestHasTool(t *testing.T) {
 func TestTriggerTurnEnd(t *testing.T) {
 	thread := &threadStub{}
 	TriggerTurnEnd(context.Background(), thread, "final response", 7)
+}
+
+func TestHasPendingSteer(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	assert.False(t, HasPendingSteer(context.Background(), "conv-test"))
+
+	steerStore, err := steer.NewSteerStore()
+	require.NoError(t, err)
+	require.NoError(t, steerStore.WriteSteer("conv-test", "keep going"))
+
+	assert.True(t, HasPendingSteer(context.Background(), "conv-test"))
 }
 
 func TestHandleAgentStopFollowUps(t *testing.T) {

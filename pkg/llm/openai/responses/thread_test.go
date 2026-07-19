@@ -2910,6 +2910,55 @@ func TestSendMessageRequiresResponseCompletedEvent(t *testing.T) {
 	assert.Equal(t, 1, exchangeCalls)
 }
 
+func TestSendMessageContinuesForSteerQueuedBeforeStop(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	steerStore, err := steer.NewSteerStore()
+	require.NoError(t, err)
+
+	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}
+	thread := &Thread{
+		Thread:      base.NewThread(config, "conv-test"),
+		inputItems:  make([]openairesponses.ResponseInputItemUnionParam, 0),
+		storedItems: make([]StoredInputItem, 0),
+	}
+
+	exchangeCalls := 0
+	thread.processMessageExchangeFunc = func(
+		ctx context.Context,
+		handler llmtypes.MessageHandler,
+		_ string,
+		_ int,
+		_ string,
+		_ llmtypes.MessageOpt,
+	) (string, bool, bool, error) {
+		if err := thread.processPendingSteer(ctx, handler); err != nil {
+			return "", false, false, err
+		}
+
+		exchangeCalls++
+		if exchangeCalls == 1 {
+			if err := steerStore.WriteSteer("conv-test", "Please include the queued correction"); err != nil {
+				return "", false, false, err
+			}
+			return "first response", false, true, nil
+		}
+
+		return "corrected response", false, true, nil
+	}
+
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
+	output, err := thread.SendMessage(context.Background(), "hello", handler, llmtypes.MessageOpt{NoToolUse: true, MaxTurns: 2})
+	require.NoError(t, err)
+	assert.Equal(t, "corrected response", output)
+	assert.Equal(t, 2, exchangeCalls)
+	require.Len(t, thread.inputItems, 2)
+	assert.Equal(t, "hello", extractInputItemText(thread.inputItems[0]))
+	assert.Equal(t, "Please include the queued correction", extractInputItemText(thread.inputItems[1]))
+	assert.Contains(t, handler.CollectedText(), "🗣️ User steering: Please include the queued correction")
+	assert.False(t, steerStore.HasPendingSteer("conv-test"))
+}
+
 func TestSendMessageAutoContinuesActiveGoalUntilMaxTurns(t *testing.T) {
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}
 	thread := &Thread{

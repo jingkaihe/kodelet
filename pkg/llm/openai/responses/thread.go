@@ -397,12 +397,15 @@ OUTER:
 
 			base.TriggerTurnEnd(ctx, t, finalOutput, turnCount)
 
-			// If no tools were used, check for extension follow-ups before stopping
+			// If no tools were used, check for queued continuations before stopping
 			if !toolsUsed {
 				if base.HandleAgentStopFollowUps(ctx, t, handler) {
 					continue OUTER
 				}
 				if (maxTurns == 0 || turnCount < maxTurns) && base.HandleGoalAutoContinuation(ctx, t, base.AvailableToolsForThread(t, t.State, opt.NoToolUse)) {
+					continue OUTER
+				}
+				if (maxTurns == 0 || turnCount < maxTurns) && base.HasPendingSteer(ctx, t.ConversationID) {
 					continue OUTER
 				}
 
