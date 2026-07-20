@@ -414,7 +414,7 @@ func TestBashOutputAccumulatorKeepsUTF8BoundariesValid(t *testing.T) {
 	snapshot := accumulator.finish()
 	require.True(t, snapshot.truncated)
 	assert.True(t, utf8.ValidString(snapshot.output))
-	assert.NotContains(t, snapshot.output, "�")
+	assert.NotContains(t, snapshot.output, "\uFFFD")
 	if snapshot.fullOutputPath != "" {
 		t.Cleanup(func() { _ = os.Remove(snapshot.fullOutputPath) })
 	}
@@ -448,7 +448,7 @@ func TestBashOutputAccumulatorOmitsIncompleteUTF8FromTruncatedTail(t *testing.T)
 	partial := accumulator.snapshot()
 	require.True(t, partial.truncated)
 	assert.True(t, utf8.ValidString(partial.output))
-	assert.NotContains(t, partial.output, "�")
+	assert.NotContains(t, partial.output, "\uFFFD")
 
 	_, err = accumulator.Write(emoji[len(emoji)-1:])
 	require.NoError(t, err)
