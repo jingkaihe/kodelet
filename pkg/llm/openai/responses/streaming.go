@@ -125,6 +125,10 @@ func (t *Thread) processStream(
 					streamHandler.HandleThinkingBlockEnd()
 					thinkingStarted = false
 				}
+				if contentBlockEnded {
+					currentText.Reset()
+					contentBlockEnded = false
+				}
 				currentText.WriteString(event.Delta)
 				if isStreaming {
 					streamHandler.HandleTextDelta(event.Delta)
@@ -322,22 +326,36 @@ func (t *Thread) processStream(
 						}
 					}
 					if textContent != "" {
+						if isStreaming && !contentBlockEnded && currentText.Len() > 0 {
+							streamHandler.HandleContentBlockEnd()
+							contentBlockEnded = true
+						} else if !isStreaming {
+							handler.HandleText(textContent)
+						}
+
 						// Flush pending reasoning to storedItems before adding message
 						flushPendingReasoning()
 
-						messageItem := responses.ResponseInputItemUnionParam{
-							OfMessage: &responses.EasyInputMessageParam{
-								Role:    responses.EasyInputMessageRoleAssistant,
-								Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(textContent)},
-							},
+						rawItem := json.RawMessage(item.RawJSON())
+						if len(rawItem) == 0 {
+							if marshaled, err := json.Marshal(item); err == nil {
+								rawItem = marshaled
+							}
 						}
-						t.inputItems = append(t.inputItems, messageItem)
-						serverKnownItems = append(serverKnownItems, messageItem)
-						t.storedItems = append(t.storedItems, StoredInputItem{
+						storedItem := StoredInputItem{
 							Type:    "message",
 							Role:    "assistant",
 							Content: textContent,
-						})
+							RawItem: rawItem,
+						}
+						t.storedItems = append(t.storedItems, storedItem)
+						if inputItems := fromStoredItems([]StoredInputItem{storedItem}); len(inputItems) > 0 {
+							t.inputItems = append(t.inputItems, inputItems[0])
+							serverKnownItems = append(serverKnownItems, inputItems[0])
+						}
+
+						currentText.Reset()
+						contentBlockEnded = false
 					}
 				}
 			}
@@ -567,9 +585,9 @@ func (t *Thread) executeToolCall(
 	callID string,
 	name string,
 	arguments string,
-	_ llmtypes.MessageHandler,
+	handler llmtypes.MessageHandler,
 ) tooltypes.ToolResult {
-	toolExecution := base.ExecuteTool(
+	toolExecution := base.ExecuteToolWithHandler(
 		ctx,
 		t,
 		t.State,
@@ -577,6 +595,7 @@ func (t *Thread) executeToolCall(
 		name,
 		arguments,
 		callID,
+		handler,
 	)
 
 	t.SetStructuredToolResult(callID, toolExecution.StructuredResult)

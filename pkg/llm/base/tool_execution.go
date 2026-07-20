@@ -2,6 +2,7 @@ package base
 
 import (
 	"context"
+	"sync"
 
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/tools"
@@ -33,6 +34,34 @@ func ExecuteTool(
 	toolInput string,
 	toolCallID string,
 ) ToolExecution {
+	return executeTool(ctx, thread, state, rendererRegistry, toolName, toolInput, toolCallID, nil)
+}
+
+// ExecuteToolWithHandler runs one complete tool lifecycle and forwards
+// transient tool snapshots to handlers that implement ToolUpdateMessageHandler.
+func ExecuteToolWithHandler(
+	ctx context.Context,
+	thread llmtypes.Thread,
+	state tooltypes.State,
+	rendererRegistry *renderers.RendererRegistry,
+	toolName string,
+	toolInput string,
+	toolCallID string,
+	handler llmtypes.MessageHandler,
+) ToolExecution {
+	return executeTool(ctx, thread, state, rendererRegistry, toolName, toolInput, toolCallID, handler)
+}
+
+func executeTool(
+	ctx context.Context,
+	thread llmtypes.Thread,
+	state tooltypes.State,
+	rendererRegistry *renderers.RendererRegistry,
+	toolName string,
+	toolInput string,
+	toolCallID string,
+	handler llmtypes.MessageHandler,
+) ToolExecution {
 	effectiveInput := toolInput
 	blocked := false
 	reason := ""
@@ -63,7 +92,46 @@ func ExecuteTool(
 			}
 			ctx = tools.ContextWithToolContext(ctx, toolContext)
 		}
-		result = tools.RunTool(ctx, state, toolName, effectiveInput)
+
+		var updateMu sync.Mutex
+		acceptUpdates := true
+		var onUpdate tooltypes.ToolUpdateCallback
+		if updateHandler, ok := handler.(llmtypes.ToolUpdateMessageHandler); ok && (runtime == nil || runtime.CanStreamToolUpdates()) {
+			onUpdate = func(partialResult tooltypes.ToolResult) {
+				if partialResult == nil {
+					return
+				}
+
+				updateMu.Lock()
+				defer updateMu.Unlock()
+				if !acceptUpdates {
+					return
+				}
+
+				if runtime != nil {
+					structuredUpdate := partialResult.StructuredData()
+					if structuredUpdate.ToolName == "" || structuredUpdate.ToolName == "unknown" {
+						structuredUpdate.ToolName = toolName
+					}
+					var modified, accepted bool
+					structuredUpdate, modified, accepted = runtime.DispatchToolUpdate(ctx, callContext, toolName, effectiveInput, toolCallID, structuredUpdate)
+					if !accepted {
+						return
+					}
+					if modified {
+						partialResult = StructuredResultToolResult{Result: structuredUpdate, RendererRegistry: rendererRegistry}
+					}
+				}
+				updateHandler.HandleToolUpdate(toolCallID, toolName, partialResult)
+			}
+		}
+
+		result = tools.RunToolWithUpdates(ctx, state, toolName, effectiveInput, onUpdate)
+		if onUpdate != nil {
+			updateMu.Lock()
+			acceptUpdates = false
+			updateMu.Unlock()
+		}
 	}
 
 	structuredResult := result.StructuredData()

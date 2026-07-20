@@ -23,6 +23,18 @@ type Tool interface {
 	TracingKVs(parameters string) ([]attribute.KeyValue, error)
 }
 
+// ToolUpdateCallback receives the latest accumulated result snapshot while a
+// streaming tool is still running.
+type ToolUpdateCallback func(ToolResult)
+
+// StreamingTool is optionally implemented by tools that can report transient
+// result snapshots during execution. Only the final return value is persisted
+// or sent back to the model.
+type StreamingTool interface {
+	Tool
+	ExecuteStreaming(ctx context.Context, state State, parameters string, onUpdate ToolUpdateCallback) ToolResult
+}
+
 // RawInputSchemaProvider lets tools preserve JSON Schema constructs that the
 // typed jsonschema representation cannot express.
 type RawInputSchemaProvider interface {

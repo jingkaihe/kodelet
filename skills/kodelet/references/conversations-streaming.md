@@ -71,7 +71,7 @@ kodelet conversation stream ID | jq 'select(.kind == "tool-use") | .tool_name'
 
 ## Partial streaming with `--stream-deltas`
 
-`--stream-deltas` streams partial text/thinking chunks as they are generated, while still emitting complete messages for clients that ignore deltas.
+`--stream-deltas` streams partial text/thinking chunks and accumulated tool output snapshots as they are generated, while still emitting complete messages for clients that ignore partial events.
 
 ```bash
 kodelet run --headless --stream-deltas "explain how TCP works"
@@ -92,6 +92,7 @@ Delta event kinds:
 | `thinking-start` | Thinking block begins. |
 | `thinking-end` | Thinking block ends. |
 | `content-end` | Content block ends. |
+| `tool-update` | Latest accumulated tool result snapshot; replace the previous snapshot for the same `tool_call_id`. |
 
 Example delta stream:
 
@@ -99,11 +100,16 @@ Example delta stream:
 {"kind":"thinking-start","conversation_id":"abc123","role":"assistant"}
 {"kind":"thinking-delta","delta":"Let me analyze...","conversation_id":"abc123","role":"assistant"}
 {"kind":"thinking-end","conversation_id":"abc123","role":"assistant"}
+{"kind":"tool-use","tool_name":"bash","tool_call_id":"call-1","input":"{\"command\":\"printf hello; sleep 1; printf world\"}","conversation_id":"abc123","role":"assistant"}
+{"kind":"tool-update","tool_name":"bash","tool_call_id":"call-1","result":"hello","conversation_id":"abc123","role":"assistant"}
+{"kind":"tool-result","tool_name":"bash","tool_call_id":"call-1","result":"{\"toolName\":\"bash\",\"success\":true,...}","tool_result":{"toolName":"bash","success":true,"metadataType":"bash","metadata":{"output":"helloworld"}},"conversation_id":"abc123","role":"assistant"}
 {"kind":"text-delta","delta":"The answer","conversation_id":"abc123","role":"assistant"}
 {"kind":"text-delta","delta":" is 42.","conversation_id":"abc123","role":"assistant"}
 {"kind":"content-end","conversation_id":"abc123","role":"assistant"}
 {"kind":"text","content":"The answer is 42.","conversation_id":"abc123","role":"assistant"}
 ```
+
+Delta-mode complete events remain ordered with their partial events. Prefer the decoded `tool_result` object on final tool events because `tool-result.result` retains the existing serialized structured-result format.
 
 ## Steering autonomous work
 

@@ -544,7 +544,7 @@ func (t *Thread) processMessageExchange(
 			attribute.String("tool_name", toolCall.Function.Name),
 		)
 
-		toolExecution := base.ExecuteTool(
+		toolExecution := base.ExecuteToolWithHandler(
 			ctx,
 			t,
 			t.State,
@@ -552,6 +552,7 @@ func (t *Thread) processMessageExchange(
 			toolCall.Function.Name,
 			toolCall.Function.Arguments,
 			toolCall.ID,
+			handler,
 		)
 		output := toolExecution.Result
 		structuredResult := toolExecution.StructuredResult
@@ -737,6 +738,9 @@ func (t *Thread) createChatCompletionWithRetry(
 	err := retry.Do(
 		func() error {
 			var apiErr error
+			if attemptHandler, ok := streamHandler.(llmtypes.StreamingAttemptMessageHandler); ok {
+				attemptHandler.HandleStreamingAttemptStart()
+			}
 			client := t.client
 			if len(extraHeaders) > 0 {
 				client = t.chatClientWithHeaders(extraHeaders)

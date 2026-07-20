@@ -322,6 +322,138 @@ describe('applyChatStreamEvent', () => {
     ]);
   });
 
+  it('replaces accumulated tool updates with the final tool result', () => {
+    let messages: ChatRenderMessage[] = [];
+
+    messages = applyChatStreamEvent(messages, {
+      kind: 'tool-use',
+      tool_call_id: 'tool-1',
+      tool_name: 'bash',
+      input: '{"command":"printf hello"}',
+      role: 'assistant',
+    });
+    messages = applyChatStreamEvent(messages, {
+      kind: 'tool-update',
+      tool_call_id: 'tool-1',
+      tool_name: 'bash',
+      role: 'assistant',
+      tool_result: {
+        toolName: 'bash',
+        success: true,
+        metadata: {
+          command: 'printf hello',
+          output: 'hel',
+          exitCode: 0,
+        },
+      },
+    });
+
+    expect(messages[0].blocks?.[0]).toEqual({
+      type: 'tools',
+      tools: [
+        {
+          callId: 'tool-1',
+          name: 'bash',
+          input: '{"command":"printf hello"}',
+          inProgress: true,
+          result: {
+            toolName: 'bash',
+            success: true,
+            metadata: {
+              command: 'printf hello',
+              output: 'hel',
+              exitCode: 0,
+            },
+          },
+        },
+      ],
+    });
+
+    messages = applyChatStreamEvent(messages, {
+      kind: 'tool-result',
+      tool_call_id: 'tool-1',
+      tool_name: 'bash',
+      role: 'assistant',
+      tool_result: {
+        toolName: 'bash',
+        success: true,
+        metadata: {
+          command: 'printf hello',
+          output: 'hello',
+          exitCode: 0,
+        },
+      },
+    });
+
+    expect(messages[0].blocks?.[0]).toEqual({
+      type: 'tools',
+      tools: [
+        {
+          callId: 'tool-1',
+          name: 'bash',
+          input: '{"command":"printf hello"}',
+          result: {
+            toolName: 'bash',
+            success: true,
+            metadata: {
+              command: 'printf hello',
+              output: 'hello',
+              exitCode: 0,
+            },
+          },
+        },
+      ],
+    });
+  });
+
+  it('upserts tool updates when a reconnect missed the tool-use event', () => {
+    let messages: ChatRenderMessage[] = [];
+
+    messages = applyChatStreamEvent(messages, {
+      kind: 'tool-update',
+      tool_call_id: 'tool-1',
+      tool_name: 'bash',
+      role: 'assistant',
+      tool_result: {
+        toolName: 'bash',
+        success: true,
+        metadata: {
+          command: 'echo hello',
+          output: 'hello',
+          exitCode: 0,
+        },
+      },
+    });
+
+    expect(messages).toEqual([
+      {
+        role: 'assistant',
+        blocks: [
+          {
+            type: 'tools',
+            tools: [
+              {
+                callId: 'tool-1',
+                name: 'bash',
+                input: '{"command":"echo hello"}',
+                inProgress: true,
+                result: {
+                  toolName: 'bash',
+                  success: true,
+                  metadata: {
+                    command: 'echo hello',
+                    output: 'hello',
+                    exitCode: 0,
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+  });
+
   it('ignores usage events for transcript rendering', () => {
     const messages: ChatRenderMessage[] = [
       {

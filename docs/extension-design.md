@@ -87,6 +87,11 @@ export default function (ext: ExtensionAPI) {
     return;
   });
 
+  ext.on("tool.update", async (event) => {
+    // Apply the same redaction policy to transient accumulated snapshots.
+    return;
+  });
+
   ext.on("agent.init", async () => {
     return {
       systemPrompt: {
@@ -362,6 +367,7 @@ Kodelet starts the extension executable, then sends:
         "agent.start",
         "turn.start",
         "tool.call",
+        "tool.update",
         "tool.result",
         "turn.end",
         "agent.end"
@@ -396,6 +402,7 @@ The extension responds with registrations:
     "commands": [],
     "subscriptions": [
       { "event": "tool.call", "priority": 0 },
+      { "event": "tool.update", "priority": 0 },
       { "event": "tool.result", "priority": 0 },
       { "event": "agent.init", "priority": 0 }
     ]
@@ -471,6 +478,7 @@ Use dot-separated event names.
 | `agent.start` | Agent loop starts | No | No |
 | `turn.start` | Before each model call | No | Maybe later |
 | `tool.call` | Before a tool runs | Yes | Yes, tool input |
+| `tool.update` | While a streaming tool runs, before delivery to clients | No | Yes, accumulated result snapshot |
 | `tool.result` | After tool runs, before render/model ingestion | No | Yes, tool result |
 | `turn.end` | After one assistant turn completes | No | No initially |
 | `agent.end` | Agent has completed | No | Yes, follow-up messages |
@@ -485,6 +493,8 @@ Breaking-change replacement mapping from the removed hook system:
 | `user_message_send` | `user.message` |
 | `agent_stop` | `agent.end` |
 | `turn_end` | `turn.end` |
+
+Extensions that subscribe to `tool.result` for sanitization or policy enforcement should also subscribe to `tool.update` and apply the same policy to transient snapshots. For backward safety, Kodelet suppresses tool-output streaming when an extension has a `tool.result` subscription without a matching `tool.update` subscription. Once enabled, transient delivery fails closed: if any subscribed `tool.update` handler errors or returns invalid output, that snapshot is dropped.
 
 ### Event envelope
 
@@ -807,6 +817,7 @@ flowchart TD
     ToolCalls{Tool calls?}
     ToolCall[tool.call\ncan block / mutate input]
     RunTool[Run tool]
+    ToolUpdate[tool.update\ncan mutate snapshot]
     ToolResult[tool.result\ncan mutate result]
     MoreTurns{More tool turns?}
     TurnEnd[turn.end]
@@ -818,7 +829,9 @@ flowchart TD
     Commands -- action: pass --> UserMessage
     Commands -- action: runAgent / generated prompt --> UserMessage
     UserMessage --> AgentInit --> AgentStart --> TurnStart --> LLM --> ToolCalls
-    ToolCalls -- yes, each tool --> ToolCall --> RunTool --> ToolResult --> MoreTurns
+    ToolCalls -- yes, each tool --> ToolCall --> RunTool
+    RunTool -- streaming snapshots --> ToolUpdate --> RunTool
+    RunTool -- complete --> ToolResult --> MoreTurns
     MoreTurns -- yes --> TurnStart
     MoreTurns -- no --> TurnEnd
     ToolCalls -- no --> TurnEnd
@@ -995,7 +1008,7 @@ The first implementation should aim for:
 - TypeScript SDK with `ExtensionAPI`, `registerTool`, `registerCommand`, event handlers, Zod re-export, Zod-to-JSON-Schema conversion, and stdio runner.
 - Extension tool registration.
 - Extension tool execution.
-- `tool.call` and `tool.result` event dispatch.
+- `tool.call`, `tool.update`, and `tool.result` event dispatch.
 - `--no-extensions`.
 - Removal of the old hooks and executable custom-tool systems.
 

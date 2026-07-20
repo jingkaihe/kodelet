@@ -181,6 +181,7 @@ test("preserves explicit zero timeout and merges event timeout options", async (
 
     ext.on("tool.result", { priority: 1, timeoutInSec: 2 }, async () => undefined);
     ext.on("tool.result", { priority: 3, timeoutInSec: 0 }, async () => undefined);
+    ext.on("tool.update", { priority: 2, timeoutInSec: 1 }, async () => undefined);
     ext.on("agent.end", { timeoutInSec: 4 }, async () => undefined);
     ext.on("agent.end", { timeoutInSec: 6 }, async () => undefined);
   });
@@ -195,6 +196,7 @@ test("preserves explicit zero timeout and merges event timeout options", async (
     [
       { event: "agent.end", priority: 0, timeoutInSec: 6 },
       { event: "tool.result", priority: 3, timeoutInSec: 0 },
+      { event: "tool.update", priority: 2, timeoutInSec: 1 },
     ],
   );
 });

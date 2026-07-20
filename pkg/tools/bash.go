@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"text/template"
 	"time"
 	"unicode/utf8"
@@ -74,6 +76,7 @@ Examples:
 const (
 	bashApproxBytesPerToken = 4
 	bashMinTimeoutSeconds   = int(llmtypes.MinBashTimeout / time.Second)
+	bashToolUpdateInterval  = 100 * time.Millisecond
 )
 
 // BashTool executes bash commands with configurable restrictions and timeout support
@@ -83,6 +86,8 @@ type BashTool struct {
 	enableFSSearchTools bool
 	maxTimeout          time.Duration
 }
+
+var _ tooltypes.StreamingTool = (*BashTool)(nil)
 
 // NewBashTool creates a new BashTool with the specified allowed commands
 func NewBashTool(allowedCommands []string, enableFSSearchTools bool) *BashTool {
@@ -274,16 +279,26 @@ func (b *BashTool) maxTimeoutSeconds() int {
 
 // BashToolResult represents the result of a bash command execution
 type BashToolResult struct {
-	command        string
-	combinedOutput string
-	error          string
-	exitCode       int
-	executionTime  time.Duration
-	workingDir     string
+	command            string
+	combinedOutput     string
+	error              string
+	exitCode           int
+	executionTime      time.Duration
+	workingDir         string
+	outputTruncated    bool
+	outputTotalLines   int
+	outputTotalBytes   int64
+	fullOutputPath     string
+	fullOutputComplete bool
 }
 
 // GetResult returns the command output
 func (r *BashToolResult) GetResult() string {
+	if r.outputTruncated && r.fullOutputComplete && r.fullOutputPath != "" {
+		if output, err := os.ReadFile(r.fullOutputPath); err == nil {
+			return string(output)
+		}
+	}
 	return r.combinedOutput
 }
 
@@ -297,9 +312,16 @@ func (r *BashToolResult) IsError() bool {
 	return r.error != ""
 }
 
+func (r *BashToolResult) outputForModel() string {
+	if r.outputTruncated {
+		return r.combinedOutput
+	}
+	return truncateBashOutputForModel(r.combinedOutput)
+}
+
 // AssistantFacing returns the string representation for the AI assistant
 func (r *BashToolResult) AssistantFacing() string {
-	return tooltypes.StringifyToolResult(truncateBashOutputForModel(r.combinedOutput), r.GetError())
+	return tooltypes.StringifyToolResult(r.outputForModel(), r.GetError())
 }
 
 // StructuredData returns structured metadata about the tool execution
@@ -311,13 +333,25 @@ func (r *BashToolResult) StructuredData() tooltypes.StructuredToolResult {
 	}
 
 	// Always populate metadata, even for errors
-	result.Metadata = &tooltypes.BashMetadata{
+	metadata := &tooltypes.BashMetadata{
 		Command:       r.command,
-		Output:        truncateBashOutputForModel(r.combinedOutput),
+		Output:        r.outputForModel(),
 		ExitCode:      r.exitCode,
 		ExecutionTime: r.executionTime,
 		WorkingDir:    r.workingDir,
 	}
+	if r.outputTruncated {
+		metadata.Truncation = &tooltypes.BashOutputTruncation{
+			Truncated:  true,
+			TotalLines: r.outputTotalLines,
+			TotalBytes: r.outputTotalBytes,
+			MaxBytes:   approxBytesForTokens(bashMaxOutputTokens),
+		}
+		if r.fullOutputComplete {
+			metadata.FullOutputPath = r.fullOutputPath
+		}
+	}
+	result.Metadata = metadata
 
 	if r.IsError() {
 		result.Error = r.GetError()
@@ -328,6 +362,26 @@ func (r *BashToolResult) StructuredData() tooltypes.StructuredToolResult {
 
 // Execute runs the bash command and returns the result
 func (b *BashTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
+	return b.execute(ctx, state, parameters, nil)
+}
+
+// ExecuteStreaming runs the bash command and emits accumulated output snapshots
+// while stdout and stderr are still being produced.
+func (b *BashTool) ExecuteStreaming(
+	ctx context.Context,
+	state tooltypes.State,
+	parameters string,
+	onUpdate tooltypes.ToolUpdateCallback,
+) tooltypes.ToolResult {
+	return b.execute(ctx, state, parameters, onUpdate)
+}
+
+func (b *BashTool) execute(
+	ctx context.Context,
+	state tooltypes.State,
+	parameters string,
+	onUpdate tooltypes.ToolUpdateCallback,
+) tooltypes.ToolResult {
 	input := &BashInput{}
 	err := json.Unmarshal([]byte(parameters), input)
 	if err != nil {
@@ -338,10 +392,15 @@ func (b *BashTool) Execute(ctx context.Context, state tooltypes.State, parameter
 			error:      err.Error(),
 		}
 	}
-	return b.executeForeground(ctx, input, state.WorkingDirectory())
+	return b.executeForeground(ctx, input, state.WorkingDirectory(), onUpdate)
 }
 
-func (b *BashTool) executeForeground(ctx context.Context, input *BashInput, cwd string) tooltypes.ToolResult {
+func (b *BashTool) executeForeground(
+	ctx context.Context,
+	input *BashInput,
+	cwd string,
+	onUpdate tooltypes.ToolUpdateCallback,
+) tooltypes.ToolResult {
 	startTime := time.Now()
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(input.Timeout)*time.Second)
 	defer cancel()
@@ -359,43 +418,354 @@ func (b *BashTool) executeForeground(ctx context.Context, input *BashInput, cwd 
 	osutil.SetProcessGroup(cmd)
 	osutil.SetProcessGroupKill(cmd)
 
-	output, err := cmd.CombinedOutput()
+	output := newBashOutputAccumulator(approxBytesForTokens(bashMaxOutputTokens))
+	var completedExecutionTime atomic.Int64
+	currentResult := func() tooltypes.ToolResult {
+		executionTime := time.Since(startTime)
+		if completed := completedExecutionTime.Load(); completed > 0 {
+			executionTime = time.Duration(completed)
+		}
+		return newBashToolResult(input.Command, workingDir, executionTime, output.snapshot(), false)
+	}
+
+	var emitter *bashUpdateEmitter
+	if onUpdate != nil {
+		emitter = newBashUpdateEmitter(onUpdate, currentResult, currentResult())
+		output.onWrite = emitter.markDirty
+	}
+
+	cmd.Stdout = output
+	cmd.Stderr = output
+	err := cmd.Start()
+	if err == nil {
+		err = cmd.Wait()
+	}
+	timedOut := ctx.Err() == context.DeadlineExceeded
 	executionTime := time.Since(startTime)
+	completedExecutionTime.Store(int64(executionTime))
+	finalSnapshot := output.finish()
+	if emitter != nil {
+		emitter.stopAndFlush()
+	}
+	result := newBashToolResult(input.Command, workingDir, executionTime, finalSnapshot, true)
 
 	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return &BashToolResult{
-				command:       input.Command,
-				executionTime: executionTime,
-				workingDir:    workingDir,
-				error:         "Command timed out after " + strconv.Itoa(input.Timeout) + " seconds",
-			}
+		if timedOut {
+			result.error = "Command timed out after " + strconv.Itoa(input.Timeout) + " seconds"
+			return result
 		}
 		if status, ok := err.(*exec.ExitError); ok {
-			return &BashToolResult{
-				command:        input.Command,
-				combinedOutput: string(output),
-				exitCode:       status.ExitCode(),
-				executionTime:  executionTime,
-				workingDir:     workingDir,
-				error:          fmt.Sprintf("Command exited with status %d", status.ExitCode()),
-			}
+			result.exitCode = status.ExitCode()
+			result.error = fmt.Sprintf("Command exited with status %d", status.ExitCode())
+			return result
 		}
-		return &BashToolResult{
-			command:       input.Command,
-			executionTime: executionTime,
-			workingDir:    workingDir,
-			error:         err.Error(),
+		result.error = err.Error()
+		return result
+	}
+
+	return result
+}
+
+type bashOutputSnapshot struct {
+	output         string
+	truncated      bool
+	totalLines     int
+	totalBytes     int64
+	fullOutputPath string
+}
+
+type bashOutputAccumulator struct {
+	mu             sync.Mutex
+	maxBytes       int
+	prefixLimit    int
+	tailLimit      int
+	prefix         []byte
+	tail           []byte
+	full           []byte
+	totalBytes     int64
+	newlineCount   int
+	lastByte       byte
+	hasOutput      bool
+	spillAttempted bool
+	spillFile      *os.File
+	fullOutputPath string
+	closed         bool
+	onWrite        func()
+}
+
+func newBashOutputAccumulator(maxBytes int) *bashOutputAccumulator {
+	prefixLimit, tailLimit := splitBashBudget(maxBytes)
+	return &bashOutputAccumulator{
+		maxBytes:    maxBytes,
+		prefixLimit: prefixLimit,
+		tailLimit:   tailLimit,
+		full:        make([]byte, 0, max(maxBytes, 0)),
+	}
+}
+
+func (a *bashOutputAccumulator) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+
+	a.mu.Lock()
+	if a.closed {
+		a.mu.Unlock()
+		return len(p), nil
+	}
+	a.captureLocked(p)
+	onWrite := a.onWrite
+	a.mu.Unlock()
+
+	if onWrite != nil {
+		onWrite()
+	}
+	return len(p), nil
+}
+
+func (a *bashOutputAccumulator) captureLocked(p []byte) {
+	previousOutput := a.full
+	a.totalBytes += int64(len(p))
+	a.newlineCount += bytes.Count(p, []byte{'\n'})
+	a.lastByte = p[len(p)-1]
+	a.hasOutput = true
+
+	if remaining := a.prefixLimit - len(a.prefix); remaining > 0 {
+		a.prefix = append(a.prefix, p[:min(remaining, len(p))]...)
+	}
+	a.appendTailLocked(p)
+
+	if a.totalBytes <= int64(a.maxBytes) {
+		a.full = append(a.full, p...)
+		return
+	}
+
+	a.full = nil
+	if !a.spillAttempted {
+		a.startSpillLocked(previousOutput, p)
+		return
+	}
+	if a.spillFile != nil {
+		if _, err := a.spillFile.Write(p); err != nil {
+			a.discardSpillLocked()
+		}
+	}
+}
+
+func (a *bashOutputAccumulator) appendTailLocked(p []byte) {
+	if a.tailLimit <= 0 {
+		return
+	}
+	if len(p) >= a.tailLimit {
+		a.tail = append(a.tail[:0], p[len(p)-a.tailLimit:]...)
+		return
+	}
+	if overflow := len(a.tail) + len(p) - a.tailLimit; overflow > 0 {
+		copy(a.tail, a.tail[overflow:])
+		a.tail = a.tail[:len(a.tail)-overflow]
+	}
+	a.tail = append(a.tail, p...)
+}
+
+func (a *bashOutputAccumulator) startSpillLocked(previousOutput, p []byte) {
+	a.spillAttempted = true
+	spillFile, err := os.CreateTemp("", "kodelet-bash-output-*.log")
+	if err != nil {
+		return
+	}
+	if _, err := spillFile.Write(previousOutput); err != nil {
+		_ = spillFile.Close()
+		_ = os.Remove(spillFile.Name())
+		return
+	}
+	if _, err := spillFile.Write(p); err != nil {
+		_ = spillFile.Close()
+		_ = os.Remove(spillFile.Name())
+		return
+	}
+	a.spillFile = spillFile
+	a.fullOutputPath = spillFile.Name()
+}
+
+func (a *bashOutputAccumulator) discardSpillLocked() {
+	if a.spillFile != nil {
+		_ = a.spillFile.Close()
+		_ = os.Remove(a.spillFile.Name())
+	}
+	a.spillFile = nil
+	a.fullOutputPath = ""
+}
+
+func (a *bashOutputAccumulator) snapshot() bashOutputSnapshot {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.snapshotLocked()
+}
+
+func (a *bashOutputAccumulator) finish() bashOutputSnapshot {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.spillFile != nil {
+		if err := a.spillFile.Close(); err != nil {
+			a.discardSpillLocked()
+		} else {
+			a.spillFile = nil
+		}
+	}
+	a.closed = true
+	return a.snapshotLocked()
+}
+
+func (a *bashOutputAccumulator) snapshotLocked() bashOutputSnapshot {
+	totalLines := a.newlineCount
+	if a.hasOutput && a.lastByte != '\n' {
+		totalLines++
+	}
+
+	snapshot := bashOutputSnapshot{
+		totalLines:     totalLines,
+		totalBytes:     a.totalBytes,
+		fullOutputPath: a.fullOutputPath,
+	}
+	if a.totalBytes <= int64(a.maxBytes) {
+		content := a.full
+		if !a.closed {
+			content = trimIncompleteUTF8Suffix(content)
+		}
+		snapshot.output = string(content)
+		return snapshot
+	}
+
+	snapshot.truncated = true
+	prefixBytes := trimIncompleteUTF8Suffix(a.prefix)
+	tailBytes := a.tail
+	if !a.closed {
+		tailBytes = trimIncompleteUTF8Suffix(tailBytes)
+	}
+	tailBytes = trimUTF8ContinuationPrefix(tailBytes)
+	removedBytes := max(a.totalBytes-int64(len(prefixBytes))-int64(len(tailBytes)), 0)
+	marker := formatBashTruncationMarker(true, approxTokensFromByteCount(int(removedBytes)))
+	prefix := strings.ToValidUTF8(string(prefixBytes), "\uFFFD")
+	tail := strings.ToValidUTF8(string(tailBytes), "\uFFFD")
+	snapshot.output = fmt.Sprintf("Total output lines: %d\n\n%s%s%s", totalLines, prefix, marker, tail)
+	return snapshot
+}
+
+func trimIncompleteUTF8Suffix(content []byte) []byte {
+	if len(content) == 0 {
+		return content
+	}
+	start := max(len(content)-utf8.UTFMax, 0)
+	for i := len(content) - 1; i >= start; i-- {
+		if !utf8.RuneStart(content[i]) {
+			continue
+		}
+		if !utf8.FullRune(content[i:]) {
+			return content[:i]
+		}
+		break
+	}
+	return content
+}
+
+func trimUTF8ContinuationPrefix(content []byte) []byte {
+	for len(content) > 0 && !utf8.RuneStart(content[0]) {
+		content = content[1:]
+	}
+	return content
+}
+
+func newBashToolResult(command, workingDir string, executionTime time.Duration, snapshot bashOutputSnapshot, fullOutputComplete bool) *BashToolResult {
+	return &BashToolResult{
+		command:            command,
+		combinedOutput:     snapshot.output,
+		executionTime:      executionTime,
+		workingDir:         workingDir,
+		outputTruncated:    snapshot.truncated,
+		outputTotalLines:   snapshot.totalLines,
+		outputTotalBytes:   snapshot.totalBytes,
+		fullOutputPath:     snapshot.fullOutputPath,
+		fullOutputComplete: fullOutputComplete,
+	}
+}
+
+type bashUpdateEmitter struct {
+	onUpdate tooltypes.ToolUpdateCallback
+	snapshot func() tooltypes.ToolResult
+	dirty    chan struct{}
+	stop     chan struct{}
+	done     chan struct{}
+}
+
+func newBashUpdateEmitter(onUpdate tooltypes.ToolUpdateCallback, snapshot func() tooltypes.ToolResult, initial tooltypes.ToolResult) *bashUpdateEmitter {
+	emitter := &bashUpdateEmitter{
+		onUpdate: onUpdate,
+		snapshot: snapshot,
+		dirty:    make(chan struct{}, 1),
+		stop:     make(chan struct{}),
+		done:     make(chan struct{}),
+	}
+	go emitter.run(initial)
+	return emitter
+}
+
+func (e *bashUpdateEmitter) run(initial tooltypes.ToolResult) {
+	defer close(e.done)
+	if initial != nil {
+		e.onUpdate(initial)
+	}
+
+	var ticker *time.Ticker
+	var tickerC <-chan time.Time
+	dirty := false
+	emit := func() {
+		if !dirty {
+			return
+		}
+		dirty = false
+		e.onUpdate(e.snapshot())
+	}
+	drainDirty := func() {
+		select {
+		case <-e.dirty:
+			dirty = true
+		default:
 		}
 	}
 
-	return &BashToolResult{
-		command:        input.Command,
-		combinedOutput: string(output),
-		exitCode:       0, // Success
-		executionTime:  executionTime,
-		workingDir:     workingDir,
+	for {
+		select {
+		case <-e.dirty:
+			dirty = true
+			if ticker == nil {
+				emit()
+				ticker = time.NewTicker(bashToolUpdateInterval)
+				tickerC = ticker.C
+			}
+		case <-tickerC:
+			drainDirty()
+			emit()
+		case <-e.stop:
+			if ticker != nil {
+				ticker.Stop()
+			}
+			drainDirty()
+			emit()
+			return
+		}
 	}
+}
+
+func (e *bashUpdateEmitter) markDirty() {
+	select {
+	case e.dirty <- struct{}{}:
+	default:
+	}
+}
+
+func (e *bashUpdateEmitter) stopAndFlush() {
+	close(e.stop)
+	<-e.done
 }
 
 func bashEnvWithPreferredBinDirs() ([]string, error) {

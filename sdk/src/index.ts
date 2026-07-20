@@ -20,6 +20,7 @@ export type {
   SpawnFunction,
   SpawnedProcess,
   ToolCallData,
+  ToolUpdateData,
   ToolResultData,
 } from "./agent.js";
 export { runWithHostRPCClient, setActiveHostRPCClient } from "./context.js";
@@ -73,6 +74,7 @@ export type {
   SystemPromptPatch,
   ToolCallDetails,
   ToolCallEvent,
+  ToolUpdateEvent,
   ToolContext,
   ToolExecutionResult,
   ToolInputSchema,

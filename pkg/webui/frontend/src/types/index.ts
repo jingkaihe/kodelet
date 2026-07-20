@@ -283,6 +283,7 @@ export interface ChatStreamEvent {
 		| "text"
 		| "user-message"
 		| "tool-use"
+		| "tool-update"
 		| "tool-result"
 		| "done"
 		| "error";
@@ -367,12 +368,14 @@ export interface ChatRenderToolCall {
 	name: string;
 	input: string;
 	result?: ToolResult;
+	inProgress?: boolean;
 }
 
 // Tool renderer types
 export interface ToolRenderProps {
 	toolResult: ToolResult;
 	toolInput?: string;
+	isPartial?: boolean;
 }
 
 export interface FileMetadata {
@@ -406,6 +409,13 @@ export interface BashMetadata {
 	exitCode?: number;
 	executionTime?: number;
 	workingDir?: string;
+	truncation?: {
+		truncated: boolean;
+		totalLines: number;
+		totalBytes: number;
+		maxBytes: number;
+	};
+	fullOutputPath?: string;
 }
 
 export interface GrepMetadata {

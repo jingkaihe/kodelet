@@ -298,6 +298,23 @@ func TestChatMessageHandler_HandleToolResultBackfillsToolName(t *testing.T) {
 	}
 }
 
+func TestChatMessageHandler_HandleToolUpdateEmitsTransientSnapshot(t *testing.T) {
+	sink := &recordingChatSink{}
+	handler := &chatMessageHandler{
+		conversationID: "conv-123",
+		sink:           sink,
+	}
+
+	handler.HandleToolUpdate("tool-1", "bash", tooltypes.BaseToolResult{Result: "partial"})
+
+	require.Len(t, sink.events, 1)
+	assert.Equal(t, "tool-update", sink.events[0].Kind)
+	assert.Equal(t, "tool-1", sink.events[0].ToolCallID)
+	if assert.NotNil(t, sink.events[0].ToolResult) {
+		assert.Equal(t, "bash", sink.events[0].ToolResult.ToolName)
+	}
+}
+
 func TestChatMessageHandler_HandleUserMessageEmitsRenderableContent(t *testing.T) {
 	sink := &recordingChatSink{}
 	handler := &chatMessageHandler{

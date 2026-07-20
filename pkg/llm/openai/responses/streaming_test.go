@@ -813,6 +813,130 @@ func TestProcessStreamReturnsRetryableErrorOnIncompleteResponse(t *testing.T) {
 	assert.True(t, retry.IsRecoverable(err))
 }
 
+func TestProcessStreamEndsCommittedMessageBeforeRetryableFailure(t *testing.T) {
+	stream := responseStreamFromMaps(t, []map[string]any{
+		{"type": "response.output_text.delta", "delta": "Committed"},
+		{
+			"type": "response.output_item.done",
+			"item": map[string]any{
+				"id":     "msg_1",
+				"type":   "message",
+				"role":   "assistant",
+				"status": "completed",
+				"phase":  "commentary",
+				"content": []map[string]any{{
+					"type": "output_text",
+					"text": "Committed",
+				}},
+			},
+		},
+		{
+			"type": "response.failed",
+			"response": map[string]any{
+				"id":     "resp_failed",
+				"status": "failed",
+				"error": map[string]any{
+					"code":    "server_error",
+					"message": "retry me",
+				},
+			},
+		},
+	})
+	thread := &Thread{
+		Thread:      base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test"),
+		storedItems: make([]StoredInputItem, 0),
+		inputItems:  make([]responses.ResponseInputItemUnionParam, 0),
+	}
+	handler := &captureStreamHandler{}
+
+	_, err := thread.processStream(context.Background(), stream, handler, "gpt-5.5", llmtypes.MessageOpt{})
+	require.Error(t, err)
+	assert.True(t, retry.IsRecoverable(err))
+	assert.Equal(t, []string{"text_delta:Committed", "content_block_end"}, handler.events)
+	require.Len(t, thread.storedItems, 1)
+	assert.Equal(t, "message", thread.storedItems[0].Type)
+	assert.Equal(t, "Committed", thread.storedItems[0].Content)
+	assert.Contains(t, string(thread.storedItems[0].RawItem), `"id":"msg_1"`)
+	require.Len(t, thread.inputItems, 1)
+	require.NotNil(t, thread.inputItems[0].OfOutputMessage)
+	assert.Equal(t, "msg_1", thread.inputItems[0].OfOutputMessage.ID)
+	assert.Equal(t, responses.ResponseOutputMessageStatusCompleted, thread.inputItems[0].OfOutputMessage.Status)
+	assert.Equal(t, responses.ResponseOutputMessagePhaseCommentary, thread.inputItems[0].OfOutputMessage.Phase)
+}
+
+func TestProcessStreamEndsEachAssistantMessageItem(t *testing.T) {
+	stream := responseStreamFromMaps(t, []map[string]any{
+		{"type": "response.output_text.delta", "delta": "Commentary"},
+		{
+			"type": "response.output_item.done",
+			"item": map[string]any{
+				"id":     "msg_commentary",
+				"type":   "message",
+				"role":   "assistant",
+				"status": "completed",
+				"phase":  "commentary",
+				"content": []map[string]any{{
+					"type": "output_text",
+					"text": "Commentary",
+				}},
+			},
+		},
+		{"type": "response.output_text.delta", "delta": "Final"},
+		{
+			"type": "response.output_item.done",
+			"item": map[string]any{
+				"id":     "msg_final",
+				"type":   "message",
+				"role":   "assistant",
+				"status": "completed",
+				"phase":  "final_answer",
+				"content": []map[string]any{{
+					"type": "output_text",
+					"text": "Final",
+				}},
+			},
+		},
+		{
+			"type": "response.completed",
+			"response": map[string]any{
+				"id":     "resp_1",
+				"status": "completed",
+				"usage": map[string]any{
+					"input_tokens":  1,
+					"output_tokens": 1,
+					"input_tokens_details": map[string]any{
+						"cached_tokens": 0,
+					},
+				},
+			},
+		},
+	})
+	thread := &Thread{
+		Thread:      base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test"),
+		storedItems: make([]StoredInputItem, 0),
+		inputItems:  make([]responses.ResponseInputItemUnionParam, 0),
+	}
+	handler := &captureStreamHandler{}
+
+	streamResult, err := thread.processStream(context.Background(), stream, handler, "gpt-5.5", llmtypes.MessageOpt{})
+	require.NoError(t, err)
+	assert.True(t, streamResult.responseCompleted)
+	assert.Equal(t, []string{
+		"text_delta:Commentary",
+		"content_block_end",
+		"text_delta:Final",
+		"content_block_end",
+	}, handler.events)
+	require.Len(t, thread.storedItems, 2)
+	require.Len(t, thread.inputItems, 2)
+	require.NotNil(t, thread.inputItems[0].OfOutputMessage)
+	require.NotNil(t, thread.inputItems[1].OfOutputMessage)
+	assert.Equal(t, "msg_commentary", thread.inputItems[0].OfOutputMessage.ID)
+	assert.Equal(t, responses.ResponseOutputMessagePhaseCommentary, thread.inputItems[0].OfOutputMessage.Phase)
+	assert.Equal(t, "msg_final", thread.inputItems[1].OfOutputMessage.ID)
+	assert.Equal(t, responses.ResponseOutputMessagePhaseFinalAnswer, thread.inputItems[1].OfOutputMessage.Phase)
+}
+
 func TestProcessStreamResponseFailedErrorRetryabilityMatchesCodex(t *testing.T) {
 	tests := []struct {
 		name        string

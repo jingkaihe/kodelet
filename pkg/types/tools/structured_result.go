@@ -249,11 +249,21 @@ func (m GlobMetadata) ToolType() string { return "glob_tool" }
 
 // BashMetadata contains metadata about a bash command execution
 type BashMetadata struct {
-	Command       string        `json:"command"`
-	ExitCode      int           `json:"exitCode"`
-	Output        string        `json:"output"`
-	ExecutionTime time.Duration `json:"executionTime"`
-	WorkingDir    string        `json:"workingDir,omitempty"`
+	Command        string                `json:"command"`
+	ExitCode       int                   `json:"exitCode"`
+	Output         string                `json:"output"`
+	ExecutionTime  time.Duration         `json:"executionTime"`
+	WorkingDir     string                `json:"workingDir,omitempty"`
+	Truncation     *BashOutputTruncation `json:"truncation,omitempty"`
+	FullOutputPath string                `json:"fullOutputPath,omitempty"`
+}
+
+// BashOutputTruncation describes output omitted from the model-facing snapshot.
+type BashOutputTruncation struct {
+	Truncated  bool  `json:"truncated"`
+	TotalLines int   `json:"totalLines"`
+	TotalBytes int64 `json:"totalBytes"`
+	MaxBytes   int   `json:"maxBytes"`
 }
 
 // ToolType returns the tool type identifier for bash command execution

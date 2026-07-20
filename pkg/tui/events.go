@@ -67,15 +67,16 @@ func (m *model) applyChatEvent(event chat.ChatEvent) {
 			name:  event.ToolName,
 			input: event.Input,
 		})
-	case "tool-result":
+	case "tool-update", "tool-result":
+		complete := event.Kind == "tool-result"
 		idx := m.ensureAssistantEntry()
 		resultText := structuredToolResultText(event.ToolResult)
 		if blockIdx, toolIdx := findToolLocation(m.entries[idx], event.ToolCallID); blockIdx >= 0 && toolIdx >= 0 {
 			tool := &m.entries[idx].blocks[blockIdx].tools[toolIdx]
 			tool.result = resultText
-			tool.done = true
+			tool.done = complete
 			if event.ToolResult != nil {
-				tool.failed = !event.ToolResult.Success
+				tool.failed = complete && !event.ToolResult.Success
 				tool.structured = event.ToolResult
 				if tool.name == "" {
 					tool.name = event.ToolResult.ToolName
@@ -91,9 +92,9 @@ func (m *model) applyChatEvent(event chat.ChatEvent) {
 				if m.entries[idx].blocks[blockIdx].tools[toolIdx].id == event.ToolCallID {
 					tool := &m.entries[idx].blocks[blockIdx].tools[toolIdx]
 					tool.result = resultText
-					tool.done = true
+					tool.done = complete
 					if event.ToolResult != nil {
-						tool.failed = !event.ToolResult.Success
+						tool.failed = complete && !event.ToolResult.Success
 						tool.structured = event.ToolResult
 						if tool.name == "" {
 							tool.name = event.ToolResult.ToolName
@@ -104,7 +105,7 @@ func (m *model) applyChatEvent(event chat.ChatEvent) {
 			}
 		}
 		failed := false
-		if event.ToolResult != nil {
+		if complete && event.ToolResult != nil {
 			failed = !event.ToolResult.Success
 		}
 		toolName := event.ToolName
@@ -116,7 +117,7 @@ func (m *model) applyChatEvent(event chat.ChatEvent) {
 			id:         event.ToolCallID,
 			name:       toolName,
 			result:     resultText,
-			done:       true,
+			done:       complete,
 			failed:     failed,
 			structured: event.ToolResult,
 		})

@@ -11,11 +11,17 @@ import (
 )
 
 type mockSender struct {
-	updates []any
+	updates          []any
+	transientUpdates []any
 }
 
 func (m *mockSender) SendUpdate(_ acptypes.SessionID, update any) error {
 	m.updates = append(m.updates, update)
+	return nil
+}
+
+func (m *mockSender) SendTransientUpdate(_ acptypes.SessionID, update any) error {
+	m.transientUpdates = append(m.transientUpdates, update)
 	return nil
 }
 
@@ -94,6 +100,29 @@ func TestACPMessageHandler_HandleToolResult(t *testing.T) {
 	assert.Equal(t, acptypes.UpdateToolCallUpdate, result["sessionUpdate"])
 	assert.Equal(t, acptypes.ToolStatusCompleted, result["status"])
 	assert.NotNil(t, result["content"])
+}
+
+func TestACPMessageHandler_HandleToolUpdate(t *testing.T) {
+	sender := &mockSender{}
+	handler := NewACPMessageHandler(sender, "test-session")
+	result := &mockToolResult{
+		result: "partial output",
+		structuredData: tooltypes.StructuredToolResult{
+			ToolName: "bash",
+			Success:  true,
+			Metadata: &tooltypes.BashMetadata{Command: "echo hi", Output: "partial output"},
+		},
+	}
+
+	handler.HandleToolUpdate("call_1", "bash", result)
+
+	require.Len(t, sender.transientUpdates, 1)
+	assert.Empty(t, sender.updates)
+	update := sender.transientUpdates[0].(map[string]any)
+	assert.Equal(t, acptypes.UpdateToolCallUpdate, update["sessionUpdate"])
+	assert.Equal(t, acptypes.ToolStatusInProgress, update["status"])
+	assert.Equal(t, "call_1", update["toolCallId"])
+	assert.NotEmpty(t, update["content"])
 }
 
 func TestACPMessageHandler_HandleToolResult_Error(t *testing.T) {

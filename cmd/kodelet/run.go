@@ -33,7 +33,7 @@ type RunConfig struct {
 	Follow              bool
 	NoSave              bool
 	Headless            bool              // Use structured JSON output instead of console formatting
-	StreamDeltas        bool              // Stream partial text deltas in headless mode
+	StreamDeltas        bool              // Stream partial text and tool output in headless mode
 	Images              []string          // Image paths or URLs to include with the message
 	MaxTurns            int               // Maximum number of turns within a single SendMessage call
 	FragmentName        string            // Name of fragment to use
@@ -629,12 +629,50 @@ var runCmd = &cobra.Command{
 			defer closeFunc()
 
 			conversationID := thread.GetConversationID()
-			done := make(chan error, 1)
+			streamCtx, cancel := context.WithCancel(ctx)
+			defer cancel()
 
+			liveUpdateInterval := 200 * time.Millisecond
+			streamReady := make(chan struct{})
+			streamOpts := conversations.StreamOpts{
+				Interval:       liveUpdateInterval,
+				IncludeHistory: config.IncludeHistory,
+				New:            config.ResumeConvID == "",
+				Ready:          streamReady,
+			}
+			if config.StreamDeltas {
+				streamOpts.LiveExcludedKinds = map[string]bool{
+					"text":        true,
+					"thinking":    true,
+					"tool-use":    true,
+					"tool-result": true,
+				}
+			}
+			streamDone := make(chan error, 1)
+			go func() {
+				streamDone <- streamer.StreamLiveUpdates(streamCtx, conversationID, streamOpts)
+			}()
+			select {
+			case <-streamReady:
+			case err := <-streamDone:
+				if err != nil && err != context.Canceled {
+					logger.G(ctx).WithError(err).Error("Error initializing conversation stream")
+				}
+				return
+			}
+
+			done := make(chan error, 1)
 			go func() {
 				var handler llmtypes.MessageHandler
 				if config.StreamDeltas {
-					handler = llmtypes.NewHeadlessStreamHandler(conversationID)
+					headlessHandler := llmtypes.NewHeadlessStreamHandler(conversationID, llmConfig.Provider)
+					displayedMessages := conversations.ApplyDisplayToStreamableMessages([]conversations.StreamableMessage{{Kind: "text", Role: "user", Content: query}}, thread.GetMetadata())
+					displayContent := ""
+					if len(displayedMessages) > 0 {
+						displayContent = displayedMessages[0].Content
+					}
+					headlessHandler.HandleUserMessage(displayContent, config.Images)
+					handler = headlessHandler
 				} else {
 					handler = &llmtypes.ConsoleMessageHandler{Silent: true}
 				}
@@ -646,20 +684,6 @@ var runCmd = &cobra.Command{
 					UseWeakModel: config.UseWeakModel,
 				})
 				done <- err
-			}()
-
-			streamCtx, cancel := context.WithCancel(ctx)
-			defer cancel()
-
-			liveUpdateInterval := 200 * time.Millisecond
-			streamOpts := conversations.StreamOpts{
-				Interval:       liveUpdateInterval,
-				IncludeHistory: config.IncludeHistory,
-				New:            config.ResumeConvID == "",
-			}
-			streamDone := make(chan error, 1)
-			go func() {
-				streamDone <- streamer.StreamLiveUpdates(streamCtx, conversationID, streamOpts)
 			}()
 
 			select {
@@ -741,7 +765,7 @@ func init() {
 	runCmd.Flags().BoolP("follow", "f", defaults.Follow, "Follow the most recent conversation")
 	runCmd.Flags().Bool("no-save", defaults.NoSave, "Disable conversation persistence")
 	runCmd.Flags().Bool("headless", defaults.Headless, "Output structured JSON instead of console formatting")
-	runCmd.Flags().Bool("stream-deltas", defaults.StreamDeltas, "Stream partial text deltas in headless mode (requires --headless)")
+	runCmd.Flags().Bool("stream-deltas", defaults.StreamDeltas, "Stream partial text and tool output in headless mode (requires --headless)")
 	runCmd.Flags().StringSliceP("image", "I", defaults.Images, "Add image input (can be used multiple times)")
 	runCmd.Flags().Int("max-turns", defaults.MaxTurns, "Maximum number of agentic turns (0 for no limit)")
 	runCmd.Flags().StringP("recipe", "r", defaults.FragmentName, "Use a fragment/recipe template")

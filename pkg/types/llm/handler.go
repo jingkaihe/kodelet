@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -45,6 +46,14 @@ type MessageHandler interface {
 	HandleDone()
 }
 
+// ToolUpdateMessageHandler can be implemented by message handlers that want
+// transient, accumulated tool result snapshots while a tool is still running.
+// Providers may execute multiple tool calls concurrently, so implementations
+// must be safe for concurrent calls involving different toolCallID values.
+type ToolUpdateMessageHandler interface {
+	HandleToolUpdate(toolCallID string, toolName string, result tooltypes.ToolResult)
+}
+
 // UserMessageHandler can render user-authored messages that are injected during
 // an active turn, such as queued steering messages.
 type UserMessageHandler interface {
@@ -60,6 +69,12 @@ type StreamingMessageHandler interface {
 	HandleThinkingDelta(delta string) // Called for each thinking chunk as it streams
 	HandleThinkingBlockEnd()          // Called when a thinking block ends (for visual separation)
 	HandleContentBlockEnd()           // Called when any content block ends
+}
+
+// StreamingAttemptMessageHandler can reset attempt-local state before a
+// provider starts or retries a streaming request.
+type StreamingAttemptMessageHandler interface {
+	HandleStreamingAttemptStart()
 }
 
 // UsageMessageHandler receives cumulative usage snapshots while a message is being
@@ -80,6 +95,7 @@ const (
 	EventTypeThinking   = "thinking"
 	EventTypeText       = "text"
 	EventTypeToolUse    = "tool_use"
+	EventTypeToolUpdate = "tool_update"
 	EventTypeToolResult = "tool_result"
 
 	// Streaming event types
@@ -302,22 +318,37 @@ func (h *StringCollectorHandler) HandleContentBlockEnd() {
 // for headless mode with --stream-deltas enabled.
 type HeadlessStreamHandler struct {
 	conversationID string
+	toolResultRole string
+	bufferMu       sync.Mutex
+	textBuffer     strings.Builder
+	thinkingBuffer strings.Builder
 	mu             sync.Mutex
 }
 
 // DeltaEntry represents a streaming delta event for headless mode output
 type DeltaEntry struct {
-	Kind           string `json:"kind"`
-	Delta          string `json:"delta,omitempty"`
-	Content        string `json:"content,omitempty"`
-	ConversationID string `json:"conversation_id"`
-	Role           string `json:"role"`
+	Kind           string                          `json:"kind"`
+	Delta          string                          `json:"delta,omitempty"`
+	Content        string                          `json:"content,omitempty"`
+	ToolName       string                          `json:"tool_name,omitempty"`
+	ToolCallID     string                          `json:"tool_call_id,omitempty"`
+	Input          string                          `json:"input,omitempty"`
+	Result         string                          `json:"result,omitempty"`
+	ToolResult     *tooltypes.StructuredToolResult `json:"tool_result,omitempty"`
+	ConversationID string                          `json:"conversation_id"`
+	Role           string                          `json:"role"`
 }
 
-// NewHeadlessStreamHandler creates a new HeadlessStreamHandler with the given conversation ID
-func NewHeadlessStreamHandler(conversationID string) *HeadlessStreamHandler {
+// NewHeadlessStreamHandler creates a new HeadlessStreamHandler with the given
+// conversation ID and optional provider name.
+func NewHeadlessStreamHandler(conversationID string, provider ...string) *HeadlessStreamHandler {
+	toolResultRole := "assistant"
+	if len(provider) > 0 && strings.EqualFold(strings.TrimSpace(provider[0]), "anthropic") {
+		toolResultRole = "user"
+	}
 	return &HeadlessStreamHandler{
 		conversationID: conversationID,
+		toolResultRole: toolResultRole,
 	}
 }
 
@@ -329,8 +360,20 @@ func (h *HeadlessStreamHandler) output(entry DeltaEntry) {
 	fmt.Fprintf(os.Stdout, "%s\n", data)
 }
 
+// HandleStreamingAttemptStart discards incomplete content from an abandoned
+// provider attempt before a retry starts.
+func (h *HeadlessStreamHandler) HandleStreamingAttemptStart() {
+	h.bufferMu.Lock()
+	h.textBuffer.Reset()
+	h.thinkingBuffer.Reset()
+	h.bufferMu.Unlock()
+}
+
 // HandleTextDelta outputs text delta events
 func (h *HeadlessStreamHandler) HandleTextDelta(delta string) {
+	h.bufferMu.Lock()
+	h.textBuffer.WriteString(delta)
+	h.bufferMu.Unlock()
 	h.output(DeltaEntry{
 		Kind:           "text-delta",
 		Delta:          delta,
@@ -341,6 +384,9 @@ func (h *HeadlessStreamHandler) HandleTextDelta(delta string) {
 
 // HandleThinkingStart outputs thinking block start event
 func (h *HeadlessStreamHandler) HandleThinkingStart() {
+	h.bufferMu.Lock()
+	h.thinkingBuffer.Reset()
+	h.bufferMu.Unlock()
 	h.output(DeltaEntry{
 		Kind:           "thinking-start",
 		ConversationID: h.conversationID,
@@ -350,6 +396,9 @@ func (h *HeadlessStreamHandler) HandleThinkingStart() {
 
 // HandleThinkingDelta outputs thinking delta events
 func (h *HeadlessStreamHandler) HandleThinkingDelta(delta string) {
+	h.bufferMu.Lock()
+	h.thinkingBuffer.WriteString(delta)
+	h.bufferMu.Unlock()
 	h.output(DeltaEntry{
 		Kind:           "thinking-delta",
 		Delta:          delta,
@@ -365,6 +414,13 @@ func (h *HeadlessStreamHandler) HandleThinkingBlockEnd() {
 		ConversationID: h.conversationID,
 		Role:           "assistant",
 	})
+	h.bufferMu.Lock()
+	thinking := h.thinkingBuffer.String()
+	h.thinkingBuffer.Reset()
+	h.bufferMu.Unlock()
+	if thinking != "" {
+		h.HandleThinking(thinking)
+	}
 }
 
 // HandleContentBlockEnd outputs content block end event
@@ -374,19 +430,159 @@ func (h *HeadlessStreamHandler) HandleContentBlockEnd() {
 		ConversationID: h.conversationID,
 		Role:           "assistant",
 	})
+	h.bufferMu.Lock()
+	text := h.textBuffer.String()
+	h.textBuffer.Reset()
+	h.bufferMu.Unlock()
+	if text != "" {
+		h.HandleText(text)
+	}
 }
 
-// HandleText is a no-op as complete text is handled by ConversationStreamer
-func (h *HeadlessStreamHandler) HandleText(_ string) {}
+// HandleText outputs a complete text block in provider order.
+func (h *HeadlessStreamHandler) HandleText(text string) {
+	h.output(DeltaEntry{
+		Kind:           "text",
+		Content:        text,
+		ConversationID: h.conversationID,
+		Role:           "assistant",
+	})
+}
 
-// HandleToolUse is a no-op as tool calls are handled by ConversationStreamer
-func (h *HeadlessStreamHandler) HandleToolUse(_, _, _ string) {}
+// HandleUserMessage outputs user-authored messages before subsequent assistant
+// and tool events.
+func (h *HeadlessStreamHandler) HandleUserMessage(content string, images []string) {
+	for _, image := range images {
+		if display := headlessImageDisplay(image); display != "" {
+			h.output(DeltaEntry{
+				Kind:           "text",
+				Content:        display,
+				ConversationID: h.conversationID,
+				Role:           "user",
+			})
+		}
+	}
+	if strings.TrimSpace(content) != "" {
+		h.output(DeltaEntry{
+			Kind:           "text",
+			Content:        content,
+			ConversationID: h.conversationID,
+			Role:           "user",
+		})
+	}
+}
 
-// HandleToolResult is a no-op as tool results are handled by ConversationStreamer
-func (h *HeadlessStreamHandler) HandleToolResult(_, _ string, _ tooltypes.ToolResult) {}
+func headlessImageDisplay(image string) string {
+	image = strings.TrimSpace(image)
+	if image == "" {
+		return ""
+	}
+	if strings.HasPrefix(image, "data:") {
+		metadata, _, _ := strings.Cut(strings.TrimPrefix(image, "data:"), ",")
+		mediaType, _, _ := strings.Cut(metadata, ";")
+		if mediaType = strings.TrimSpace(mediaType); mediaType != "" {
+			return fmt.Sprintf("Inline image input (%s).", mediaType)
+		}
+		return "Inline image input."
+	}
+	if strings.HasPrefix(image, "http://") || strings.HasPrefix(image, "https://") {
+		return "Image input: " + image
+	}
+	mediaType := headlessImageMediaType(filepath.Ext(image))
+	if mediaType != "" {
+		return fmt.Sprintf("Inline image input (%s).", mediaType)
+	}
+	return "Inline image input."
+}
 
-// HandleThinking is a no-op as complete thinking is handled by ConversationStreamer
-func (h *HeadlessStreamHandler) HandleThinking(_ string) {}
+func headlessImageMediaType(extension string) string {
+	switch strings.ToLower(extension) {
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	default:
+		return ""
+	}
+}
+
+// HandleToolUse outputs tool invocations immediately so subsequent transient
+// updates always have a known call ID.
+func (h *HeadlessStreamHandler) HandleToolUse(toolCallID, toolName, input string) {
+	h.output(DeltaEntry{
+		Kind:           "tool-use",
+		ToolName:       toolName,
+		ToolCallID:     toolCallID,
+		Input:          input,
+		ConversationID: h.conversationID,
+		Role:           "assistant",
+	})
+}
+
+// HandleToolUpdate outputs transient accumulated tool result snapshots.
+func (h *HeadlessStreamHandler) HandleToolUpdate(toolCallID, toolName string, result tooltypes.ToolResult) {
+	structuredResult := result.StructuredData()
+	if structuredResult.ToolName == "" || structuredResult.ToolName == "unknown" {
+		structuredResult.ToolName = toolName
+	}
+	h.output(DeltaEntry{
+		Kind:           "tool-update",
+		ToolName:       structuredResult.ToolName,
+		ToolCallID:     toolCallID,
+		Result:         headlessToolResultText(result, structuredResult),
+		ToolResult:     &structuredResult,
+		ConversationID: h.conversationID,
+		Role:           "assistant",
+	})
+}
+
+// HandleToolResult outputs the final tool result after all transient snapshots.
+func (h *HeadlessStreamHandler) HandleToolResult(toolCallID, toolName string, result tooltypes.ToolResult) {
+	structuredResult := result.StructuredData()
+	if structuredResult.ToolName == "" || structuredResult.ToolName == "unknown" {
+		structuredResult.ToolName = toolName
+	}
+	h.output(DeltaEntry{
+		Kind:           "tool-result",
+		ToolName:       structuredResult.ToolName,
+		ToolCallID:     toolCallID,
+		Result:         headlessFinalToolResultText(result, structuredResult),
+		ToolResult:     &structuredResult,
+		ConversationID: h.conversationID,
+		Role:           h.toolResultRole,
+	})
+}
+
+func headlessFinalToolResultText(result tooltypes.ToolResult, structuredResult tooltypes.StructuredToolResult) string {
+	if data, err := structuredResult.MarshalJSON(); err == nil {
+		return string(data)
+	}
+	return headlessToolResultText(result, structuredResult)
+}
+
+func headlessToolResultText(result tooltypes.ToolResult, structuredResult tooltypes.StructuredToolResult) string {
+	if structuredResult.ToolName == "bash" {
+		var metadata tooltypes.BashMetadata
+		if tooltypes.ExtractMetadata(structuredResult.Metadata, &metadata) {
+			return metadata.Output
+		}
+	}
+	return result.GetResult()
+}
+
+// HandleThinking outputs a complete thinking block in provider order.
+func (h *HeadlessStreamHandler) HandleThinking(thinking string) {
+	h.output(DeltaEntry{
+		Kind:           "thinking",
+		Content:        thinking,
+		ConversationID: h.conversationID,
+		Role:           "assistant",
+	})
+}
 
 // HandleDone is called when message processing is complete
 func (h *HeadlessStreamHandler) HandleDone() {}

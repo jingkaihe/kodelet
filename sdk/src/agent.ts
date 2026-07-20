@@ -80,6 +80,7 @@ export interface RunOptions {
 export interface AgentResponse {
   content: string;
   conversationId?: string;
+  /** Run event log; transient tool.update snapshots are coalesced by toolCallId. */
   events: AgentStreamEvent[];
   exitCode: number;
   stopReason?: string;
@@ -118,6 +119,8 @@ export interface ToolResultData {
   status?: string;
 }
 
+export type ToolUpdateData = ToolResultData;
+
 export interface SessionEventMap {
   "agent.start": AgentStreamEvent<{ message: string }>;
   "agent.end": AgentStreamEvent<AgentResponse>;
@@ -129,6 +132,7 @@ export interface SessionEventMap {
   "assistant.content_end": AgentStreamEvent<Record<string, never>>;
   "user.message": AgentStreamEvent<{ content: string }>;
   "tool.call": AgentStreamEvent<ToolCallData>;
+  "tool.update": AgentStreamEvent<ToolUpdateData>;
   "tool.result": AgentStreamEvent<ToolResultData>;
   "agent.output": AgentStreamEvent<{ line: string }>;
   "agent.error": AgentStreamEvent<{ message: string }>;
@@ -535,18 +539,27 @@ export class Session extends EventEmitter {
       }
       case "tool_call_update": {
         const tool = update as ACPToolCallUpdate;
-        if (tool.status !== "completed" && tool.status !== "failed") {
-          return;
-        }
         const toolCallId = tool.toolCallId;
+        const data = {
+          toolName: (toolCallId && toolNames.get(toolCallId)) || toolNameFromUpdate(tool),
+          result: toolContentToText(tool.content),
+          toolCallId,
+          status: tool.status,
+        };
+        if (tool.status === "in_progress" && tool.content !== undefined) {
+          this.emitToolUpdateEvent(data, events, update);
+          break;
+        }
+        if (tool.status === "in_progress") {
+          break;
+        }
+        if (tool.status !== "completed" && tool.status !== "failed") {
+          this.emitSDKEvent("event", update, events, update);
+          break;
+        }
         this.emitSDKEvent(
           "tool.result",
-          {
-            toolName: (toolCallId && toolNames.get(toolCallId)) || toolNameFromUpdate(tool),
-            result: toolContentToText(tool.content),
-            toolCallId,
-            status: tool.status,
-          },
+          data,
           events,
           update,
         );
@@ -564,6 +577,23 @@ export class Session extends EventEmitter {
     if (type !== "event") {
       this.emit("event", event);
     }
+    return event;
+  }
+
+  private emitToolUpdateEvent(data: ToolUpdateData, events: AgentStreamEvent[], raw?: unknown): AgentStreamEvent<ToolUpdateData> {
+    const event: AgentStreamEvent<ToolUpdateData> = { type: "tool.update", data, conversationId: this.conversationId, raw };
+    const existingIndex = data.toolCallId === undefined ? -1 : events.findIndex((candidate) => {
+      if (candidate.type !== "tool.update" || !isRecord(candidate.data)) {
+        return false;
+      }
+      return candidate.data.toolCallId === data.toolCallId;
+    });
+    if (existingIndex >= 0) {
+      events.splice(existingIndex, 1);
+    }
+    events.push(event);
+    this.emit("tool.update", event);
+    this.emit("event", event);
     return event;
   }
 }

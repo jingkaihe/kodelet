@@ -1,14 +1,12 @@
 import React from 'react';
 import { ToolResult, BashMetadata } from '../../types';
-import {
-  ReferenceTerminal,
-  ReferenceToolNote,
-} from './reference';
+import { ReferenceTerminal, ReferenceToolNote } from './reference';
 import { CopyButton } from './shared';
 
 interface BashRendererProps {
   toolResult: ToolResult;
   toolInput?: string;
+  isPartial?: boolean;
 }
 
 const getDescriptionFromInput = (toolInput?: string): string | undefined => {
@@ -27,19 +25,29 @@ const getDescriptionFromInput = (toolInput?: string): string | undefined => {
   }
 };
 
-const BashRenderer: React.FC<BashRendererProps> = ({ toolResult, toolInput }) => {
+const BashRenderer: React.FC<BashRendererProps> = ({
+  toolResult,
+  toolInput,
+  isPartial = false,
+}) => {
   const meta = toolResult.metadata as BashMetadata;
   if (!meta) return null;
 
   const description = getDescriptionFromInput(toolInput);
   const hasOutput = !!meta.output?.trim();
   const exitCode = meta.exitCode ?? 0;
-  const isFailure = !toolResult.success || exitCode !== 0;
+  const isFailure = !isPartial && (!toolResult.success || exitCode !== 0);
   const hasMeaningfulExitCode = toolResult.success || exitCode !== 0;
-  const statusBadgeText = hasMeaningfulExitCode ? `exit ${exitCode}` : 'failed';
-  const emptyOutputText = isFailure
-    ? 'Command failed without output.'
-    : 'Command completed without output.';
+  const statusBadgeText = isPartial
+    ? 'running'
+    : hasMeaningfulExitCode
+      ? `exit ${exitCode}`
+      : 'failed';
+  const emptyOutputText = isPartial
+    ? 'Waiting for command output…'
+    : isFailure
+      ? 'Command failed without output.'
+      : 'Command completed without output.';
 
   return (
     <div className="space-y-2">
@@ -53,13 +61,21 @@ const BashRenderer: React.FC<BashRendererProps> = ({ toolResult, toolInput }) =>
         </div>
         <div className="bash-tool-actions">
           <CopyButton className="bash-copy-command" content={meta.command} />
-          <span className={isFailure ? 'bash-tool-badge is-error' : 'bash-tool-badge is-success'}>
+          <span
+            className={
+              isPartial
+                ? 'bash-tool-badge'
+                : isFailure
+                  ? 'bash-tool-badge is-error'
+                  : 'bash-tool-badge is-success'
+            }
+          >
             {statusBadgeText}
           </span>
         </div>
       </div>
 
-      {!toolResult.success && toolResult.error ? (
+      {!isPartial && !toolResult.success && toolResult.error ? (
         <ReferenceToolNote text={toolResult.error} />
       ) : null}
 

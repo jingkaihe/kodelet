@@ -7,14 +7,18 @@ import { normalizeToolName } from './tool-renderers/reference';
 interface ToolRendererProps {
   toolResult: ToolResult;
   toolInput?: string;
+  isPartial?: boolean;
 }
 
-const ToolRenderer: React.FC<ToolRendererProps> = ({ toolResult, toolInput }) => {
+const ToolRenderer: React.FC<ToolRendererProps> = ({ toolResult, toolInput, isPartial }) => {
   const renderTool = () => {
     const normalizedToolName = normalizeToolName(toolResult.toolName);
     const rendererRegistration = getToolRendererRegistration(toolResult);
 
-    if (!toolResult.success && !(rendererRegistration?.supportsFailureRendering && toolResult.metadata)) {
+    if (
+      !toolResult.success &&
+      !(rendererRegistration?.supportsFailureRendering && toolResult.metadata)
+    ) {
       return (
         <div className="surface-panel rounded-2xl border-kodelet-orange/20 p-4" role="alert">
           <div className="flex items-center gap-2 mb-2">
@@ -33,16 +37,20 @@ const ToolRenderer: React.FC<ToolRendererProps> = ({ toolResult, toolInput }) =>
                 d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
               />
             </svg>
-            <strong className="font-heading text-sm font-semibold text-kodelet-orange">Error ({normalizedToolName}):</strong>
+            <strong className="font-heading text-sm font-semibold text-kodelet-orange">
+              Error ({normalizedToolName}):
+            </strong>
           </div>
-          <div className="text-sm font-body text-kodelet-dark">{toolResult.error || 'Unknown error'}</div>
+          <div className="text-sm font-body text-kodelet-dark">
+            {toolResult.error || 'Unknown error'}
+          </div>
         </div>
       );
     }
 
     if (rendererRegistration) {
       const Renderer = rendererRegistration.component;
-      return <Renderer toolInput={toolInput} toolResult={toolResult} />;
+      return <Renderer isPartial={isPartial} toolInput={toolInput} toolResult={toolResult} />;
     }
 
     return <FallbackRenderer toolResult={toolResult} />;
@@ -54,7 +62,9 @@ const ToolRenderer: React.FC<ToolRendererProps> = ({ toolResult, toolInput }) =>
     console.error('Error rendering tool result:', error, toolResult);
     return (
       <div className="surface-panel rounded-2xl border-kodelet-orange/20 p-4">
-        <strong className="font-heading font-semibold text-sm text-kodelet-orange">Renderer Error ({normalizeToolName(toolResult.toolName)}):</strong>
+        <strong className="font-heading font-semibold text-sm text-kodelet-orange">
+          Renderer Error ({normalizeToolName(toolResult.toolName)}):
+        </strong>
         <div className="text-sm font-body text-kodelet-dark mt-1">Failed to render tool result</div>
       </div>
     );

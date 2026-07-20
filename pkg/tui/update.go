@@ -802,7 +802,7 @@ func (m *model) applyEditorResult(msg editorFinishedMsg) tea.Cmd {
 
 func shouldDebounceChatEvent(event chat.ChatEvent) bool {
 	switch event.Kind {
-	case "text-delta", "thinking-delta":
+	case "text-delta", "thinking-delta", "tool-update":
 		return true
 	default:
 		return false

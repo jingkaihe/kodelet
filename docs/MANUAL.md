@@ -19,7 +19,7 @@ Kodelet is a lightweight agentic SWE Agent that runs as an interactive CLI tool 
   - [Conversation Management](#conversation-management)
 - [Streaming and Programmatic Access](#streaming-and-programmatic-access)
   - [Headless Mode](#headless-mode)
-  - [Partial Message Streaming](#partial-message-streaming)
+  - [Partial Message and Tool Streaming](#partial-message-and-tool-streaming)
   - [Conversation Stream Command](#conversation-stream-command)
   - [StreamEntry JSON Schema](#streamentry-json-schema)
   - [Example Stream Output](#example-stream-output)
@@ -366,9 +366,9 @@ kodelet run --headless --resume CONVERSATION_ID "more questions"
 - Custom web interfaces
 - Monitoring and logging systems
 
-### Partial Message Streaming
+### Partial Message and Tool Streaming
 
-The `--stream-deltas` flag enables real-time token streaming in headless mode, outputting text as it's generated rather than waiting for complete messages. This creates a more responsive user experience similar to ChatGPT or Claude.io:
+The `--stream-deltas` flag enables real-time token and tool-output streaming in headless mode, outputting text and accumulated tool snapshots as they are generated rather than waiting for complete messages:
 
 ```bash
 # Stream partial text deltas with headless output
@@ -392,6 +392,7 @@ kodelet run --headless --stream-deltas "solve this puzzle" | \
 | `thinking-start` | Thinking block begins | `conversation_id`, `role` |
 | `thinking-end` | Thinking block ends | `conversation_id`, `role` |
 | `content-end` | Content block ends | `conversation_id`, `role` |
+| `tool-update` | Latest accumulated tool result snapshot | `tool_name`, `tool_call_id`, `result`, `tool_result`, `conversation_id`, `role` |
 
 **Example Output:**
 
@@ -400,6 +401,10 @@ kodelet run --headless --stream-deltas "solve this puzzle" | \
 {"kind":"thinking-delta","delta":"Let me","conversation_id":"abc123","role":"assistant"}
 {"kind":"thinking-delta","delta":" analyze this","conversation_id":"abc123","role":"assistant"}
 {"kind":"thinking-end","conversation_id":"abc123","role":"assistant"}
+{"kind":"tool-use","tool_name":"bash","tool_call_id":"call_456","input":"{\"command\":\"printf \\\"first\\\\n\\\"; sleep 1; printf \\\"second\\\\n\\\"\"}","conversation_id":"abc123","role":"assistant"}
+{"kind":"tool-update","tool_name":"bash","tool_call_id":"call_456","result":"first\n","tool_result":{"toolName":"bash","success":true,"metadataType":"bash","metadata":{"command":"printf \\\"first\\\\n\\\"; sleep 1; printf \\\"second\\\\n\\\"","exitCode":0,"output":"first\n","executionTime":100000000},"timestamp":"2026-07-19T00:00:00Z"},"conversation_id":"abc123","role":"assistant"}
+{"kind":"tool-update","tool_name":"bash","tool_call_id":"call_456","result":"first\nsecond\n","tool_result":{"toolName":"bash","success":true,"metadataType":"bash","metadata":{"command":"printf \\\"first\\\\n\\\"; sleep 1; printf \\\"second\\\\n\\\"","exitCode":0,"output":"first\nsecond\n","executionTime":1000000000},"timestamp":"2026-07-19T00:00:01Z"},"conversation_id":"abc123","role":"assistant"}
+{"kind":"tool-result","tool_name":"bash","tool_call_id":"call_456","result":"{\"toolName\":\"bash\",\"success\":true,\"metadataType\":\"bash\",\"metadata\":{\"command\":\"printf \\\"first\\\\n\\\"; sleep 1; printf \\\"second\\\\n\\\"\",\"exitCode\":0,\"output\":\"first\\nsecond\\n\",\"executionTime\":1000000000},\"timestamp\":\"2026-07-19T00:00:01Z\"}","tool_result":{"toolName":"bash","success":true,"metadataType":"bash","metadata":{"command":"printf \"first\\n\"; sleep 1; printf \"second\\n\"","exitCode":0,"output":"first\nsecond\n","executionTime":1000000000},"timestamp":"2026-07-19T00:00:01Z"},"conversation_id":"abc123","role":"assistant"}
 {"kind":"text-delta","delta":"The","conversation_id":"abc123","role":"assistant"}
 {"kind":"text-delta","delta":" answer","conversation_id":"abc123","role":"assistant"}
 {"kind":"text-delta","delta":" is 42.","conversation_id":"abc123","role":"assistant"}
@@ -407,7 +412,7 @@ kodelet run --headless --stream-deltas "solve this puzzle" | \
 {"kind":"text","content":"The answer is 42.","conversation_id":"abc123","role":"assistant"}
 ```
 
-Note: Complete messages (`text`, `thinking`, `tool-use`, `tool-result`) are still emitted after their delta streams, ensuring clients that ignore deltas still receive full content.
+Each `tool-update` contains a full accumulated snapshot, not a new output chunk. Replace the previous snapshot for the same `tool_call_id`; the subsequent `tool-result` is authoritative and completes the tool call. Complete messages (`text`, `thinking`, `tool-use`, `tool-result`) are emitted by the same live handler in provider order, so clients that ignore partial updates still receive ordered final content. For compatibility with the existing conversation stream, final `tool-result.result` is the serialized structured result; consumers should prefer the decoded `tool_result` object, while `tool-update.result` remains the current rendered output.
 
 **Third-Party UI Integration (Python):**
 
@@ -436,6 +441,10 @@ for line in process.stdout:
         hide_thinking_indicator()
     elif event["kind"] == "tool-use":
         show_tool_execution(event["tool_name"], event["input"])
+    elif event["kind"] == "tool-update":
+        replace_tool_output(event["tool_call_id"], event["result"])
+    elif event["kind"] == "tool-result":
+        complete_tool_execution(event["tool_call_id"], event.get("tool_result", event["result"]))
 ```
 
 ### Conversation Stream Command
@@ -458,15 +467,16 @@ This command is useful for:
 
 ### StreamEntry JSON Schema
 
-Both headless mode and conversation streaming output data using the `StreamEntry` format. Each line is a complete JSON object representing one conversation event:
+Both headless mode and conversation streaming output data using the `StreamEntry` format. Each line is a complete JSON object representing one conversation event. The transient `tool-update` kind is emitted by `kodelet run --headless --stream-deltas`; `kodelet conversation stream` emits persisted complete events only.
 
 ```typescript
 interface StreamEntry {
-  kind: "text" | "tool-use" | "tool-result" | "thinking";  // Type of entry
+  kind: "text" | "tool-use" | "tool-update" | "tool-result" | "thinking";  // Type of entry
   content?: string;         // Text content (for text and thinking entries)
-  tool_name?: string;       // Name of the tool (for tool-use and tool-result)
+  tool_name?: string;       // Name of the tool
   input?: string;          // JSON input for tool-use
-  result?: string;         // Tool execution result
+  result?: string;         // Rendered tool-update output or serialized final structured result
+  tool_result?: object;    // Structured result snapshot for tool-update/tool-result
   role: "user" | "assistant" | "system";  // Message role
   tool_call_id?: string;   // Unique ID to match tool calls with results
   conversation_id?: string; // ID of the conversation
@@ -1000,6 +1010,12 @@ Environment variable:
 export KODELET_BASH_TIMEOUT=5m
 ```
 
+### Bash Output Streaming and Truncation
+
+The built-in `bash` tool merges stdout and stderr, emits accumulated snapshots at most every 100 milliseconds, and flushes the latest snapshot before the final tool result. Output sent to the model and live renderers is bounded to the same approximate 10,000-token budget used for normal bash results, preserving the beginning and end with a truncation marker.
+
+When output exceeds that budget, Kodelet writes the complete byte stream to a local temporary file and includes `truncation` plus `fullOutputPath` in the final structured bash metadata. The path is a local best-effort artifact retained for the current host; clients should use the bounded `output` field for portable conversation rendering and should not assume that a persisted path remains available on another machine or after temporary-file cleanup.
+
 ## LLM Providers
 
 ### Anthropic Claude
@@ -1258,11 +1274,15 @@ const session = await client.createSession({
 
 session.on("assistant.message_delta", (event) => process.stdout.write(event.data.deltaContent));
 session.on("tool.call", (event) => console.error(event.data.toolName, event.data.input));
+session.on("tool.update", (event) => console.error("partial:", event.data.result));
+session.on("tool.result", (event) => console.error("final:", event.data.result));
 
 const response = await session.runAndWait({ message: "help me choose an approach" });
 console.log("\nfinal:", response.content);
 await client.close();
 ```
+
+SDK listeners receive every `tool.update`. The returned `response.events` array coalesces transient snapshots by `toolCallId`, retaining the latest update and the authoritative final `tool.result` without growing with every accumulated snapshot.
 
 ### Creating TypeScript Extensions
 
@@ -1480,6 +1500,7 @@ Extensions subscribe to dot-separated lifecycle events with `ext.on(...)`. Mutat
 | `agent.start` | Agent loop starts | No | No |
 | `turn.start` | Before a model turn | No | No |
 | `tool.call` | Before a tool runs | Yes | Tool input |
+| `tool.update` | While a streaming tool runs | No | Accumulated tool result snapshot |
 | `tool.result` | After a tool runs | No | Tool result |
 | `turn.end` | After one assistant turn completes | No | No |
 | `agent.end` | Agent loop completes | No | Follow-up messages |

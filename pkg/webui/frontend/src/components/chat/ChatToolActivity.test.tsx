@@ -16,7 +16,10 @@ describe('ChatToolActivity', () => {
           {
             callId: 'web-fetch-1',
             name: 'web_fetch',
-            input: JSON.stringify({ url: 'https://example.com/news', prompt: longPrompt }),
+            input: JSON.stringify({
+              url: 'https://example.com/news',
+              prompt: longPrompt,
+            }),
           },
         ]}
       />
@@ -60,6 +63,35 @@ describe('ChatToolActivity', () => {
     expect(screen.getByText('Print working directory')).toBeInTheDocument();
     expect(screen.getByText('/workspace/kodelet')).toBeInTheDocument();
     expect(container.querySelector('.activity-card-live')).not.toBeInTheDocument();
+  });
+
+  it('renders accumulated bash output while the tool is still running', () => {
+    const { container } = render(
+      <ChatToolActivity
+        tools={[
+          {
+            callId: 'bash-1',
+            name: 'bash',
+            input: '{"command":"long-task","description":"Run long task"}',
+            inProgress: true,
+            result: {
+              toolName: 'bash',
+              success: true,
+              metadata: {
+                command: 'long-task',
+                output: 'partial output',
+                exitCode: 0,
+              },
+            },
+          },
+        ]}
+      />
+    );
+
+    expect(screen.getByLabelText('Tool running')).toHaveTextContent('running');
+    expect(screen.getByText('partial output')).toBeInTheDocument();
+    expect(screen.queryByText('Awaiting tool result…')).not.toBeInTheDocument();
+    expect(container.querySelector('.activity-card-live')).toBeInTheDocument();
   });
 
   it('renders failed tool results with error styling and failed status', () => {

@@ -26,6 +26,7 @@ The chatbot shells out to `kodelet run --headless --stream-deltas --provider ope
 | `text-delta` | Streams assistant text in real-time |
 | `thinking-delta` | Shows model thinking (if enabled) |
 | `tool-use` | Displays tool invocations |
+| `tool-update` | Replaces the displayed result with the latest accumulated tool output |
 | `tool-result` | Shows tool execution results |
 
 For follow-up messages, it uses `--resume CONVERSATION_ID` to maintain context.

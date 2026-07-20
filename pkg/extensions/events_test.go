@@ -77,4 +77,23 @@ func TestNilRuntimeDispatchersReturnDefaults(t *testing.T) {
 	modifiedResult, changed := runtime.DispatchToolResult(context.Background(), ExtensionCallContext{}, "tool", `{"x":1}`, "call", toolResult)
 	assert.False(t, changed)
 	assert.Equal(t, toolResult, modifiedResult)
+	modifiedUpdate, changed, accepted := runtime.DispatchToolUpdate(context.Background(), ExtensionCallContext{}, "tool", `{"x":1}`, "call", toolResult)
+	assert.False(t, changed)
+	assert.True(t, accepted)
+	assert.Equal(t, toolResult, modifiedUpdate)
+}
+
+func TestCanStreamToolUpdatesRequiresMatchingResultExtensionSubscription(t *testing.T) {
+	resultProcess := &Process{}
+	otherProcess := &Process{}
+
+	runtime := EmptyRuntime()
+	runtime.eventHandlersByName[EventToolResult] = []eventHandler{{process: resultProcess}}
+	assert.False(t, runtime.CanStreamToolUpdates())
+
+	runtime.eventHandlersByName[EventToolUpdate] = []eventHandler{{process: otherProcess}}
+	assert.False(t, runtime.CanStreamToolUpdates())
+
+	runtime.eventHandlersByName[EventToolUpdate] = append(runtime.eventHandlersByName[EventToolUpdate], eventHandler{process: resultProcess})
+	assert.True(t, runtime.CanStreamToolUpdates())
 }

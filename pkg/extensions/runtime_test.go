@@ -204,6 +204,17 @@ func TestRuntimeDispatchesToolCallAndToolResultEvents(t *testing.T) {
 	var metadata tooltypes.ExtensionToolMetadata
 	require.True(t, tooltypes.ExtractMetadata(modified.Metadata, &metadata))
 	assert.Equal(t, "event modified output", metadata.Output)
+
+	updated, changed, accepted := runtime.DispatchToolUpdate(context.Background(), callContext, "get_weather", decision.Input, "call-1", original)
+	require.True(t, accepted)
+	require.True(t, changed)
+	require.True(t, tooltypes.ExtractMetadata(updated.Metadata, &metadata))
+	assert.Equal(t, "event updated output", metadata.Output)
+
+	rejected, changed, accepted := runtime.DispatchToolUpdate(context.Background(), callContext, "get_weather", `{"location":"InvalidUpdate"}`, "call-1", original)
+	assert.False(t, accepted)
+	assert.False(t, changed)
+	assert.Equal(t, original, rejected)
 }
 
 func TestRuntimeDispatchToolCallCanBlock(t *testing.T) {
@@ -622,6 +633,7 @@ func runExtensionHelperProcess() {
 					{Event: EventSessionStart, Priority: 10},
 					{Event: EventResourcesDiscover, Priority: 10},
 					{Event: EventToolCall, Priority: 10},
+					{Event: EventToolUpdate, Priority: 10},
 					{Event: EventToolResult, Priority: 10},
 					{Event: EventUserMessage, Priority: 10},
 					{Event: EventAgentInit, Priority: 10},
@@ -719,11 +731,22 @@ func handleHelperEvent(params eventParams) EventResult {
 			return EventResult{Block: &EventBlock{Reason: "dangerous command denied"}}
 		}
 		return EventResult{Input: json.RawMessage(`{"location":"Paris"}`)}
-	case EventToolResult:
+	case EventToolUpdate, EventToolResult:
 		payload, _ := json.Marshal(params.Payload)
 		var event toolResultPayload
 		_ = json.Unmarshal(payload, &event)
-		metadata := tooltypes.ExtensionToolMetadata{ExtensionID: "events", ToolName: event.Tool.Name, Output: "event modified output"}
+		var input struct {
+			Location string `json:"location"`
+		}
+		_ = json.Unmarshal(event.Tool.Input, &input)
+		if params.Event == EventToolUpdate && input.Location == "InvalidUpdate" {
+			return EventResult{Output: json.RawMessage(`"invalid"`)}
+		}
+		outputText := "event modified output"
+		if params.Event == EventToolUpdate {
+			outputText = "event updated output"
+		}
+		metadata := tooltypes.ExtensionToolMetadata{ExtensionID: "events", ToolName: event.Tool.Name, Output: outputText}
 		modified := tooltypes.StructuredToolResult{
 			ToolName:  event.Tool.Name,
 			Success:   true,

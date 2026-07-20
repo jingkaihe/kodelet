@@ -240,6 +240,18 @@ var tracer = telemetry.Tracer("kodelet.tools")
 
 // RunTool executes a tool by name with the given parameters
 func RunTool(ctx context.Context, state tooltypes.State, toolName string, parameters string) tooltypes.ToolResult {
+	return RunToolWithUpdates(ctx, state, toolName, parameters, nil)
+}
+
+// RunToolWithUpdates executes a tool and forwards transient result snapshots
+// when the selected tool implements tooltypes.StreamingTool.
+func RunToolWithUpdates(
+	ctx context.Context,
+	state tooltypes.State,
+	toolName string,
+	parameters string,
+	onUpdate tooltypes.ToolUpdateCallback,
+) tooltypes.ToolResult {
 	tool, err := findTool(toolName, state)
 	if err != nil {
 		return tooltypes.BaseToolResult{
@@ -265,7 +277,13 @@ func RunTool(ctx context.Context, state tooltypes.State, toolName string, parame
 			Error: err.Error(),
 		}
 	}
-	result := tool.Execute(ctx, state, parameters)
+
+	var result tooltypes.ToolResult
+	if streamingTool, ok := tool.(tooltypes.StreamingTool); ok && onUpdate != nil {
+		result = streamingTool.ExecuteStreaming(ctx, state, parameters, onUpdate)
+	} else {
+		result = tool.Execute(ctx, state, parameters)
+	}
 
 	if result.IsError() {
 		span.SetStatus(codes.Error, result.GetError())

@@ -26,6 +26,11 @@ func TestApplyChatEventUpdatesConversationAndBlocks(t *testing.T) {
 		{Kind: "thinking-delta", Delta: "think"},
 		{Kind: "thinking-end"},
 		{Kind: "tool-use", ToolCallID: "tool-1", ToolName: "bash", Input: "{\n  \"cmd\": \"pwd\"\n}"},
+		{Kind: "tool-update", ToolCallID: "tool-1", ToolResult: &tooltypes.StructuredToolResult{
+			ToolName: "bash",
+			Success:  true,
+			Metadata: &tooltypes.BashMetadata{Output: "partial"},
+		}},
 		{Kind: "tool-result", ToolCallID: "tool-1", ToolResult: &tooltypes.StructuredToolResult{
 			ToolName: "bash",
 			Success:  false,
@@ -48,6 +53,33 @@ func TestApplyChatEventUpdatesConversationAndBlocks(t *testing.T) {
 	assert.True(t, m.entries[0].blocks[2].tools[0].failed)
 	assert.Contains(t, m.entries[0].blocks[2].tools[0].result, "boom")
 	assert.Contains(t, m.entries[0].blocks[3].text, "model error")
+}
+
+func TestApplyChatEventReplacesToolUpdateWithFinalResult(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+
+	m.applyChatEvent(chat.ChatEvent{Kind: "tool-use", ToolCallID: "tool-1", ToolName: "bash", Input: `{}`})
+	m.applyChatEvent(chat.ChatEvent{Kind: "tool-update", ToolCallID: "tool-1", ToolResult: &tooltypes.StructuredToolResult{
+		ToolName: "bash",
+		Success:  true,
+		Metadata: &tooltypes.BashMetadata{Output: "partial"},
+	}})
+
+	tool := m.entries[0].blocks[0].tools[0]
+	assert.False(t, tool.done)
+	assert.Contains(t, tool.result, "partial")
+
+	m.applyChatEvent(chat.ChatEvent{Kind: "tool-result", ToolCallID: "tool-1", ToolResult: &tooltypes.StructuredToolResult{
+		ToolName: "bash",
+		Success:  true,
+		Metadata: &tooltypes.BashMetadata{Output: "complete"},
+	}})
+
+	tool = m.entries[0].blocks[0].tools[0]
+	assert.True(t, tool.done)
+	assert.Contains(t, tool.result, "complete")
+	assert.NotContains(t, tool.result, "partial")
 }
 
 func TestApplyChatEventPreservesWhitespaceOnlyTextDeltas(t *testing.T) {

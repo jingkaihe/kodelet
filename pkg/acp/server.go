@@ -663,6 +663,16 @@ func (s *Server) SendUpdate(sessionID acptypes.SessionID, update any) error {
 	return s.sendNotification("session/update", params)
 }
 
+// SendTransientUpdate sends a session/update notification without persisting
+// it for replay. Streaming tool snapshots are superseded by the final result.
+func (s *Server) SendTransientUpdate(sessionID acptypes.SessionID, update any) error {
+	params := map[string]any{
+		"sessionId": sessionID,
+		"update":    update,
+	}
+	return s.sendNotification("session/update", params)
+}
+
 // storeUpdate persists an update for replay without sending it to the client.
 // Used for user messages which the client already displays.
 func (s *Server) storeUpdate(sessionID acptypes.SessionID, update any) {

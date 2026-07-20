@@ -509,7 +509,7 @@ func (t *Thread) executeToolsParallel(
 				attribute.Int("tool_index", i),
 			)
 
-			toolExecution := base.ExecuteTool(
+			toolExecution := base.ExecuteToolWithHandler(
 				gctx,
 				t,
 				t.State,
@@ -517,6 +517,7 @@ func (t *Thread) executeToolsParallel(
 				toolName,
 				tb.variant.JSON.Input.Raw(),
 				tb.block.ID,
+				handler,
 			)
 			toolInput := toolExecution.Input
 			output := toolExecution.Result

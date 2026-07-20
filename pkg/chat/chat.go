@@ -961,12 +961,15 @@ type chatMessageHandler struct {
 	conversationID string
 	sink           ChatEventSink
 	broadcast      func(string, ChatEvent)
+	eventMu        sync.Mutex
 	usageMu        sync.Mutex
 	hasLastUsage   bool
 	lastUsage      llmtypes.Usage
 }
 
 func (h *chatMessageHandler) sendEvent(event ChatEvent) {
+	h.eventMu.Lock()
+	defer h.eventMu.Unlock()
 	_ = h.sink.Send(event)
 	if h.broadcast != nil {
 		h.broadcast(h.conversationID, event)
@@ -1058,6 +1061,23 @@ func (h *chatMessageHandler) HandleToolUse(toolCallID string, toolName string, i
 		ToolCallID:     toolCallID,
 		ToolName:       toolName,
 		Input:          input,
+	}
+	h.sendEvent(event)
+}
+
+func (h *chatMessageHandler) HandleToolUpdate(toolCallID string, toolName string, result tooltypes.ToolResult) {
+	structuredResult := result.StructuredData()
+	if structuredResult.ToolName == "" || structuredResult.ToolName == "unknown" {
+		structuredResult.ToolName = toolName
+	}
+
+	event := ChatEvent{
+		Kind:           "tool-update",
+		ConversationID: h.conversationID,
+		Role:           "assistant",
+		ToolCallID:     toolCallID,
+		ToolName:       structuredResult.ToolName,
+		ToolResult:     &structuredResult,
 	}
 	h.sendEvent(event)
 }

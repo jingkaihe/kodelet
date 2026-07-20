@@ -151,6 +151,21 @@ describe('BashRenderer', () => {
     expect(screen.getByText('Command completed without output.')).toBeInTheDocument();
   });
 
+  it('renders a running state for partial snapshots', () => {
+    const toolResult = createToolResult({
+      command: 'long-task',
+      exitCode: 0,
+      output: '',
+    });
+
+    const { container } = render(<BashRenderer isPartial toolResult={toolResult} />);
+
+    expect(screen.getByText('running')).toBeInTheDocument();
+    expect(screen.getByText('Waiting for command output…')).toBeInTheDocument();
+    expect(screen.queryByText('exit 0')).not.toBeInTheDocument();
+    expect(container.querySelector('.bash-tool-badge.is-success')).not.toBeInTheDocument();
+  });
+
   it('escapes HTML in terminal output', () => {
     const toolResult = createToolResult({
       command: 'echo',

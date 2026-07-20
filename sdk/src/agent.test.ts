@@ -8,7 +8,7 @@ import { Readable, Writable } from "node:stream";
 import test from "node:test";
 
 import { Client, Profile, defineExtension, z } from "./index.js";
-import type { SpawnFunction, SpawnedProcess } from "./agent.js";
+import type { SpawnFunction, SpawnedProcess, ToolUpdateData } from "./agent.js";
 
 interface JsonRPCRequest {
   jsonrpc?: "2.0";
@@ -276,6 +276,42 @@ test("Session runs kodelet ACP JSON-RPC and emits typed stream events", async ()
           update: {
             sessionUpdate: "tool_call_update",
             toolCallId: "call-1",
+            status: "in_progress",
+          },
+        });
+        child.notify("session/update", {
+          sessionId: "conv-1",
+          update: {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "call-1",
+            status: "in_progress",
+            content: [
+              {
+                type: "content",
+                content: { type: "text", text: "partial file contents" },
+              },
+            ],
+          },
+        });
+        child.notify("session/update", {
+          sessionId: "conv-1",
+          update: {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "call-1",
+            status: "in_progress",
+            content: [
+              {
+                type: "content",
+                content: { type: "text", text: "complete partial file contents" },
+              },
+            ],
+          },
+        });
+        child.notify("session/update", {
+          sessionId: "conv-1",
+          update: {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "call-1",
             status: "completed",
             content: [
               {
@@ -305,12 +341,16 @@ test("Session runs kodelet ACP JSON-RPC and emits typed stream events", async ()
   session.on("assistant.message_delta", (event) => deltas.push(event.data.deltaContent));
   session.on("assistant.thinking_delta", (event) => thoughts.push(event.data.deltaContent));
   let toolName = "";
+  const toolUpdates: string[] = [];
   let toolResult = "";
   session.on("tool.call", (event) => {
     toolName = event.data.toolName;
   });
   session.on("tool.result", (event) => {
     toolResult = event.data.result;
+  });
+  session.on("tool.update", (event) => {
+    toolUpdates.push(event.data.result);
   });
 
   const response = await session.runAndWait({ message: "meaning?", images: ["diagram.png"] });
@@ -320,7 +360,11 @@ test("Session runs kodelet ACP JSON-RPC and emits typed stream events", async ()
   assert.deepEqual(deltas, ["forty", " two"]);
   assert.deepEqual(thoughts, ["checking"]);
   assert.equal(toolName, "file_read");
+  assert.deepEqual(toolUpdates, ["partial file contents", "complete partial file contents"]);
   assert.equal(toolResult, "1 | hello");
+  const recordedToolUpdates = response.events.filter((event) => event.type === "tool.update");
+  assert.equal(recordedToolUpdates.length, 1);
+  assert.equal((recordedToolUpdates[0]?.data as ToolUpdateData).result, "complete partial file contents");
   assert.equal(response.stopReason, "end_turn");
   assert.equal(session.id, "conv-1");
   assert.equal(calls[0]?.command, "kodelet-test");

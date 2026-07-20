@@ -6,13 +6,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
-var _ llmtypes.StreamingMessageHandler = (*ACPMessageHandler)(nil)
+var (
+	_ llmtypes.StreamingMessageHandler  = (*ACPMessageHandler)(nil)
+	_ llmtypes.ToolUpdateMessageHandler = (*ACPMessageHandler)(nil)
+)
 
 // ToolCallLocation represents a file location for the "follow the agent" feature
 type ToolCallLocation struct {
@@ -30,12 +34,34 @@ type UpdateSender interface {
 	SendUpdate(sessionID acptypes.SessionID, update any) error
 }
 
+// TransientUpdateSender sends updates that should not be persisted for replay.
+type TransientUpdateSender interface {
+	SendTransientUpdate(sessionID acptypes.SessionID, update any) error
+}
+
 // ACPMessageHandler bridges kodelet's MessageHandler to ACP session updates
 type ACPMessageHandler struct {
 	sender           UpdateSender
 	sessionID        acptypes.SessionID
 	titleGenerator   TitleGenerator
 	contentGenerator *ToolContentGenerator
+	sendMu           sync.Mutex
+}
+
+func (h *ACPMessageHandler) sendUpdate(update any) {
+	h.sendMu.Lock()
+	defer h.sendMu.Unlock()
+	_ = h.sender.SendUpdate(h.sessionID, update)
+}
+
+func (h *ACPMessageHandler) sendTransientUpdate(update any) {
+	h.sendMu.Lock()
+	defer h.sendMu.Unlock()
+	if sender, ok := h.sender.(TransientUpdateSender); ok {
+		_ = sender.SendTransientUpdate(h.sessionID, update)
+		return
+	}
+	_ = h.sender.SendUpdate(h.sessionID, update)
 }
 
 // HandlerOption is a functional option for configuring ACPMessageHandler
@@ -64,7 +90,7 @@ func NewACPMessageHandler(sender UpdateSender, sessionID acptypes.SessionID, opt
 
 // HandleText sends complete text as agent_message_chunk
 func (h *ACPMessageHandler) HandleText(text string) {
-	h.sender.SendUpdate(h.sessionID, map[string]any{
+	h.sendUpdate(map[string]any{
 		"sessionUpdate": acptypes.UpdateAgentMessageChunk,
 		"content": map[string]any{
 			"type": acptypes.ContentTypeText,
@@ -75,7 +101,7 @@ func (h *ACPMessageHandler) HandleText(text string) {
 
 // HandleTextDelta sends streaming text deltas
 func (h *ACPMessageHandler) HandleTextDelta(delta string) {
-	h.sender.SendUpdate(h.sessionID, map[string]any{
+	h.sendUpdate(map[string]any{
 		"sessionUpdate": acptypes.UpdateAgentMessageChunk,
 		"content": map[string]any{
 			"type": acptypes.ContentTypeText,
@@ -109,7 +135,7 @@ func (h *ACPMessageHandler) HandleToolUse(toolCallID string, toolName string, in
 		toolCallUpdate["locations"] = locations
 	}
 
-	h.sender.SendUpdate(h.sessionID, toolCallUpdate)
+	h.sendUpdate(toolCallUpdate)
 
 	inProgressUpdate := map[string]any{
 		"sessionUpdate": acptypes.UpdateToolCallUpdate,
@@ -122,7 +148,18 @@ func (h *ACPMessageHandler) HandleToolUse(toolCallID string, toolName string, in
 		inProgressUpdate["locations"] = locations
 	}
 
-	h.sender.SendUpdate(h.sessionID, inProgressUpdate)
+	h.sendUpdate(inProgressUpdate)
+}
+
+// HandleToolUpdate sends a transient in-progress tool_call_update containing
+// the latest accumulated tool output snapshot.
+func (h *ACPMessageHandler) HandleToolUpdate(toolCallID string, _ string, result tooltypes.ToolResult) {
+	h.sendTransientUpdate(map[string]any{
+		"sessionUpdate": acptypes.UpdateToolCallUpdate,
+		"toolCallId":    toolCallID,
+		"status":        acptypes.ToolStatusInProgress,
+		"content":       h.contentGenerator.GenerateToolContent(result),
+	})
 }
 
 // HandleToolResult sends tool_call_update with rich, tool-specific content
@@ -151,7 +188,7 @@ func (h *ACPMessageHandler) HandleToolResult(toolCallID string, _ string, result
 		update["locations"] = locations
 	}
 
-	h.sender.SendUpdate(h.sessionID, update)
+	h.sendUpdate(update)
 }
 
 // extractLocations extracts file locations for "follow-along" feature from tool result
@@ -255,7 +292,7 @@ func (h *ACPMessageHandler) extractLocationsFromInput(toolName string, input str
 
 // HandleThinking sends agent_thought_chunk
 func (h *ACPMessageHandler) HandleThinking(thinking string) {
-	h.sender.SendUpdate(h.sessionID, map[string]any{
+	h.sendUpdate(map[string]any{
 		"sessionUpdate": acptypes.UpdateThoughtChunk,
 		"content": map[string]any{
 			"type": acptypes.ContentTypeText,
@@ -270,7 +307,7 @@ func (h *ACPMessageHandler) HandleThinkingStart() {
 
 // HandleThinkingDelta sends streaming thinking chunks
 func (h *ACPMessageHandler) HandleThinkingDelta(delta string) {
-	h.sender.SendUpdate(h.sessionID, map[string]any{
+	h.sendUpdate(map[string]any{
 		"sessionUpdate": acptypes.UpdateThoughtChunk,
 		"content": map[string]any{
 			"type": acptypes.ContentTypeText,

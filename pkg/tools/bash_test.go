@@ -5,14 +5,17 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jingkaihe/kodelet/pkg/binaries"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBashTool_GenerateSchema(t *testing.T) {
@@ -222,6 +225,239 @@ func TestBashTool_Execute_ContextCancellation(t *testing.T) {
 	result := tool.Execute(ctx, NewBasicState(context.TODO()), string(params))
 	assert.Contains(t, result.GetError(), "Command timed out")
 	assert.Empty(t, result.GetResult())
+}
+
+func TestBashTool_ExecuteStreamingEmitsAccumulatedSnapshots(t *testing.T) {
+	tool := NewBashTool(nil, false)
+	input := BashInput{
+		Description: "Stream command output",
+		Command:     "printf 'first\\n'; sleep 0.25; printf 'second\\n'",
+		Timeout:     10,
+	}
+	params, err := json.Marshal(input)
+	require.NoError(t, err)
+
+	updates := []string{}
+	result := tool.ExecuteStreaming(context.Background(), NewBasicState(context.TODO()), string(params), func(update tooltypes.ToolResult) {
+		metadata := update.StructuredData().Metadata.(*tooltypes.BashMetadata)
+		updates = append(updates, metadata.Output)
+	})
+
+	require.False(t, result.IsError())
+	assert.Equal(t, "first\nsecond\n", result.GetResult())
+	require.GreaterOrEqual(t, len(updates), 3)
+	assert.Empty(t, updates[0])
+	assert.Contains(t, updates[len(updates)-1], "first\nsecond\n")
+	assert.True(t, slices.ContainsFunc(updates, func(update string) bool {
+		return strings.Contains(update, "first\n") && !strings.Contains(update, "second\n")
+	}))
+}
+
+func TestBashTool_ExecuteStreamingSlowUpdateDoesNotConsumeCommandTimeout(t *testing.T) {
+	tool := NewBashTool(nil, false)
+	input := BashInput{
+		Description: "Run despite slow callback",
+		Command:     "printf 'ran\\n'",
+		Timeout:     10,
+	}
+	params, err := json.Marshal(input)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	callbackStarted := make(chan struct{}, 1)
+	releaseCallback := make(chan struct{})
+	resultCh := make(chan tooltypes.ToolResult, 1)
+	go func() {
+		resultCh <- tool.ExecuteStreaming(ctx, NewBasicState(context.TODO()), string(params), func(tooltypes.ToolResult) {
+			select {
+			case callbackStarted <- struct{}{}:
+			default:
+			}
+			<-releaseCallback
+		})
+	}()
+
+	select {
+	case <-callbackStarted:
+	case <-time.After(time.Second):
+		t.Fatal("streaming callback did not start")
+	}
+	time.Sleep(75 * time.Millisecond)
+	close(releaseCallback)
+
+	select {
+	case result := <-resultCh:
+		require.False(t, result.IsError())
+		assert.Equal(t, "ran\n", result.GetResult())
+	case <-time.After(time.Second):
+		t.Fatal("bash execution did not finish")
+	}
+}
+
+func TestBashTool_ExecuteStreamingSlowUpdateDoesNotRelabelFailureAsTimeout(t *testing.T) {
+	tool := NewBashTool(nil, false)
+	input := BashInput{
+		Description: "Preserve command failure status",
+		Command:     "printf 'failed\\n'; exit 7",
+		Timeout:     10,
+	}
+	params, err := json.Marshal(input)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	callbackStarted := make(chan struct{}, 1)
+	releaseCallback := make(chan struct{})
+	resultCh := make(chan tooltypes.ToolResult, 1)
+	go func() {
+		resultCh <- tool.ExecuteStreaming(ctx, NewBasicState(context.TODO()), string(params), func(tooltypes.ToolResult) {
+			select {
+			case callbackStarted <- struct{}{}:
+			default:
+			}
+			<-releaseCallback
+		})
+	}()
+
+	select {
+	case <-callbackStarted:
+	case <-time.After(time.Second):
+		t.Fatal("streaming callback did not start")
+	}
+	time.Sleep(75 * time.Millisecond)
+	close(releaseCallback)
+
+	select {
+	case result := <-resultCh:
+		require.True(t, result.IsError())
+		assert.Equal(t, "Command exited with status 7", result.GetError())
+		assert.Equal(t, "failed\n", result.GetResult())
+	case <-time.After(time.Second):
+		t.Fatal("bash execution did not finish")
+	}
+}
+
+func TestBashTool_ExecuteStreamingPreservesOutputOnTimeout(t *testing.T) {
+	tool := NewBashTool(nil, false)
+	input := BashInput{
+		Description: "Capture output before timeout",
+		Command:     "printf 'ready\\n'; sleep 5",
+		Timeout:     20,
+	}
+	params, err := json.Marshal(input)
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+
+	result := tool.ExecuteStreaming(ctx, NewBasicState(context.TODO()), string(params), func(tooltypes.ToolResult) {})
+
+	require.True(t, result.IsError())
+	assert.Contains(t, result.GetError(), "Command timed out")
+	assert.Contains(t, result.GetResult(), "ready")
+}
+
+func TestBashTool_ExecuteStreamingPreservesMergedOutputOnFailure(t *testing.T) {
+	tool := NewBashTool(nil, false)
+	input := BashInput{
+		Description: "Stream mixed failing output",
+		Command:     "printf 'stdout-1\\n'; sleep 0.05; printf 'stderr-1\\n' >&2; sleep 0.05; printf 'stdout-2\\n'; exit 7",
+		Timeout:     10,
+	}
+	params, err := json.Marshal(input)
+	require.NoError(t, err)
+	updates := []string{}
+
+	result := tool.ExecuteStreaming(context.Background(), NewBasicState(context.TODO()), string(params), func(update tooltypes.ToolResult) {
+		metadata := update.StructuredData().Metadata.(*tooltypes.BashMetadata)
+		updates = append(updates, metadata.Output)
+	})
+
+	require.True(t, result.IsError())
+	assert.Equal(t, "Command exited with status 7", result.GetError())
+	assert.Equal(t, "stdout-1\nstderr-1\nstdout-2\n", result.GetResult())
+	require.NotEmpty(t, updates)
+	assert.Equal(t, "stdout-1\nstderr-1\nstdout-2\n", updates[len(updates)-1])
+}
+
+func TestBashOutputAccumulatorSpillsFullOutputWhenSnapshotIsTruncated(t *testing.T) {
+	accumulator := newBashOutputAccumulator(8)
+	_, err := accumulator.Write([]byte("abcdef"))
+	require.NoError(t, err)
+	_, err = accumulator.Write([]byte("ghijkl\n"))
+	require.NoError(t, err)
+
+	snapshot := accumulator.finish()
+	require.True(t, snapshot.truncated)
+	assert.Equal(t, int64(13), snapshot.totalBytes)
+	assert.Equal(t, 1, snapshot.totalLines)
+	assert.Contains(t, snapshot.output, "tokens truncated")
+	require.NotEmpty(t, snapshot.fullOutputPath)
+	t.Cleanup(func() { _ = os.Remove(snapshot.fullOutputPath) })
+
+	fullOutput, err := os.ReadFile(snapshot.fullOutputPath)
+	require.NoError(t, err)
+	assert.Equal(t, "abcdefghijkl\n", string(fullOutput))
+
+	result := newBashToolResult("printf output", t.TempDir(), time.Second, snapshot, true)
+	assert.Equal(t, "abcdefghijkl\n", result.GetResult())
+	metadata := result.StructuredData().Metadata.(*tooltypes.BashMetadata)
+	assert.Contains(t, metadata.Output, "tokens truncated")
+	assert.Equal(t, snapshot.fullOutputPath, metadata.FullOutputPath)
+}
+
+func TestBashOutputAccumulatorKeepsUTF8BoundariesValid(t *testing.T) {
+	accumulator := newBashOutputAccumulator(8)
+	_, err := accumulator.Write([]byte("ab🙂cd🙂ef\n"))
+	require.NoError(t, err)
+
+	snapshot := accumulator.finish()
+	require.True(t, snapshot.truncated)
+	assert.True(t, utf8.ValidString(snapshot.output))
+	assert.NotContains(t, snapshot.output, "�")
+	if snapshot.fullOutputPath != "" {
+		t.Cleanup(func() { _ = os.Remove(snapshot.fullOutputPath) })
+	}
+}
+
+func TestBashOutputAccumulatorOmitsIncompleteUTF8FromPartialSnapshot(t *testing.T) {
+	accumulator := newBashOutputAccumulator(64)
+	content := []byte("prefix🙂")
+	_, err := accumulator.Write(content[:len(content)-1])
+	require.NoError(t, err)
+
+	partial := accumulator.snapshot()
+	assert.True(t, utf8.ValidString(partial.output))
+	assert.Equal(t, "prefix", partial.output)
+
+	_, err = accumulator.Write(content[len(content)-1:])
+	require.NoError(t, err)
+	final := accumulator.finish()
+	assert.True(t, utf8.ValidString(final.output))
+	assert.Equal(t, "prefix🙂", final.output)
+}
+
+func TestBashOutputAccumulatorOmitsIncompleteUTF8FromTruncatedTail(t *testing.T) {
+	accumulator := newBashOutputAccumulator(8)
+	_, err := accumulator.Write([]byte("abcdefghij"))
+	require.NoError(t, err)
+	emoji := []byte("🙂")
+	_, err = accumulator.Write(emoji[:len(emoji)-1])
+	require.NoError(t, err)
+
+	partial := accumulator.snapshot()
+	require.True(t, partial.truncated)
+	assert.True(t, utf8.ValidString(partial.output))
+	assert.NotContains(t, partial.output, "�")
+
+	_, err = accumulator.Write(emoji[len(emoji)-1:])
+	require.NoError(t, err)
+	final := accumulator.finish()
+	assert.True(t, utf8.ValidString(final.output))
+	assert.Contains(t, final.output, "🙂")
+	if final.fullOutputPath != "" {
+		t.Cleanup(func() { _ = os.Remove(final.fullOutputPath) })
+	}
 }
 
 func TestBashToolResult_AssistantFacing_TruncatesLargeOutput(t *testing.T) {

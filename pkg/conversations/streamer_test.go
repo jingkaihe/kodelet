@@ -288,25 +288,25 @@ func TestStreamNewMessagesSince(t *testing.T) {
 	ctx := context.Background()
 
 	// Test streaming from message 0 (should get all 5)
-	count, total, err := streamer.streamNewMessagesSince(ctx, service.conversation, 0, "test-conv")
+	count, total, err := streamer.streamNewMessagesSince(ctx, service.conversation, 0, "test-conv", nil)
 	assert.NoError(t, err)
 	assert.Equal(t, 5, count)
 	assert.Equal(t, 5, total)
 
 	// Test streaming from message 3 (should get 2 new messages)
-	count, total, err = streamer.streamNewMessagesSince(ctx, service.conversation, 3, "test-conv")
+	count, total, err = streamer.streamNewMessagesSince(ctx, service.conversation, 3, "test-conv", nil)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, count)
 	assert.Equal(t, 5, total)
 
 	// Test streaming from message 5 (should get 0 new messages)
-	count, total, err = streamer.streamNewMessagesSince(ctx, service.conversation, 5, "test-conv")
+	count, total, err = streamer.streamNewMessagesSince(ctx, service.conversation, 5, "test-conv", nil)
 	assert.NoError(t, err)
 	assert.Equal(t, 0, count)
 	assert.Equal(t, 5, total)
 
 	// Test streaming from message 10 (beyond available, should recover by rebasing and streaming all)
-	count, total, err = streamer.streamNewMessagesSince(ctx, service.conversation, 10, "test-conv")
+	count, total, err = streamer.streamNewMessagesSince(ctx, service.conversation, 10, "test-conv", nil)
 	assert.NoError(t, err)
 	assert.Equal(t, 5, count)
 	assert.Equal(t, 5, total)
@@ -369,6 +369,30 @@ func TestProcessLiveUpdate_AdvancesTimestampWithoutNewEntries(t *testing.T) {
 
 	assert.Equal(t, 2, state.streamedEntries)
 	assert.Equal(t, service.conversation.UpdatedAt, state.lastUpdateTime)
+}
+
+func TestStreamNewMessagesSinceExcludesSelectedLiveKinds(t *testing.T) {
+	service := &mockConversationService{conversation: &GetConversationResponse{Provider: "test-provider"}}
+	streamer := NewConversationStreamer(service)
+	streamer.RegisterMessageParser("test-provider", func(_ json.RawMessage, _ map[string]any, _ map[string]tools.StructuredToolResult) ([]StreamableMessage, error) {
+		return []StreamableMessage{
+			{Kind: "text", Role: "assistant", Content: "before"},
+			{Kind: "text", Role: "user", Content: "keep me"},
+			{Kind: "thinking", Role: "assistant", Content: "reasoning"},
+			{Kind: "tool-use", Role: "assistant", ToolCallID: "call-1", ToolName: "bash"},
+			{Kind: "tool-result", Role: "user", ToolCallID: "call-1", ToolName: "bash", Content: "done"},
+		}, nil
+	})
+
+	count, total, err := streamer.streamNewMessagesSince(context.Background(), service.conversation, 0, "conv-1", map[string]bool{
+		"assistant:text":     true,
+		"assistant:thinking": true,
+		"tool-use":           true,
+		"tool-result":        true,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 1, count)
+	assert.Equal(t, 5, total)
 }
 
 func TestStreamEntry_JSONOutput(t *testing.T) {
@@ -485,13 +509,20 @@ func TestStreamLiveUpdates_HistoryOnly(t *testing.T) {
 	})
 
 	ctx := context.Background()
+	ready := make(chan struct{})
 
 	streamOpts := StreamOpts{
 		Interval:    50 * time.Millisecond,
 		HistoryOnly: true,
+		Ready:       ready,
 	}
 
 	err := streamer.StreamLiveUpdates(ctx, "test-conv-history", streamOpts)
 
 	assert.NoError(t, err)
+	select {
+	case <-ready:
+	default:
+		t.Fatal("streamer did not signal readiness")
+	}
 }

@@ -661,6 +661,9 @@ func (t *Thread) processMessageExchangeWithStreamRetries(
 
 	err := retry.Do(
 		func() error {
+			if attemptHandler, ok := handler.(llmtypes.StreamingAttemptMessageHandler); ok {
+				attemptHandler.HandleStreamingAttemptStart()
+			}
 			resetPendingReasoning(&t.pendingReasoning, pendingReasoningBeforeAttempt)
 			attemptParams := params
 			attemptParams.Input = responses.ResponseNewParamsInputUnion{
@@ -731,6 +734,17 @@ func (t *Thread) processMessageExchangeWithStreamRetries(
 func (t *Thread) lastAssistantMessageText() string {
 	for i := len(t.inputItems) - 1; i >= 0; i-- {
 		item := t.inputItems[i]
+		if item.OfOutputMessage != nil {
+			var text strings.Builder
+			for _, content := range item.OfOutputMessage.Content {
+				if content.OfOutputText != nil {
+					text.WriteString(content.OfOutputText.Text)
+				}
+			}
+			if text.Len() > 0 {
+				return text.String()
+			}
+		}
 		if item.OfMessage != nil && item.OfMessage.Role == responses.EasyInputMessageRoleAssistant {
 			if item.OfMessage.Content.OfString.Valid() {
 				return item.OfMessage.Content.OfString.Value

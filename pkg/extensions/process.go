@@ -211,6 +211,7 @@ func (p *Process) initialize(ctx context.Context, cwd string) (*InitializeResult
 				"agent.start",
 				"turn.start",
 				"tool.call",
+				"tool.update",
 				"tool.result",
 				"turn.end",
 				"agent.end",

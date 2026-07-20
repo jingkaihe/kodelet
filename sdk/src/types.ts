@@ -202,6 +202,7 @@ export type EventName =
   | "agent.start"
   | "turn.start"
   | "tool.call"
+  | "tool.update"
   | "tool.result"
   | "turn.end"
   | "agent.end"
@@ -253,6 +254,7 @@ export interface EventPayloadMap {
   "session.start": EmptyEventPayload;
   "resources.discover": EmptyEventPayload;
   "tool.call": ToolCallEventPayload;
+  "tool.update": ToolResultEventPayload;
   "tool.result": ToolResultEventPayload;
   "user.message": UserMessageEventPayload;
   "agent.init": AgentInitEventPayload;
@@ -280,6 +282,7 @@ export type AgentInitEvent = ExtensionEvent<"agent.init">;
 export type AgentStartEvent = ExtensionEvent<"agent.start">;
 export type TurnStartEvent = ExtensionEvent<"turn.start">;
 export type ToolCallEvent = ExtensionEvent<"tool.call">;
+export type ToolUpdateEvent = ExtensionEvent<"tool.update">;
 export type ToolResultEvent = ExtensionEvent<"tool.result">;
 export type TurnEndEvent = ExtensionEvent<"turn.end">;
 export type AgentEndEvent = ExtensionEvent<"agent.end">;

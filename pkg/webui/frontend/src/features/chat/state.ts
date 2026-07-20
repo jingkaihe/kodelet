@@ -48,10 +48,7 @@ const ensureCurrentAssistantMessage = (
   return lastMessage;
 };
 
-const appendAssistantBlocks = (
-  target: ChatRenderMessage,
-  blocks: ChatAssistantBlock[]
-) => {
+const appendAssistantBlocks = (target: ChatRenderMessage, blocks: ChatAssistantBlock[]) => {
   const targetBlocks = ensureAssistantBlocks(target);
 
   blocks.forEach((block) => {
@@ -126,6 +123,64 @@ const setMostRecentBlockProgress = (
       return;
     }
   }
+};
+
+const applyToolResultEvent = (
+  messages: ChatRenderMessage[],
+  event: ChatStreamEvent,
+  inProgress: boolean
+): ChatRenderMessage[] => {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message.role !== 'assistant' || !message.blocks) {
+      continue;
+    }
+
+    for (let j = message.blocks.length - 1; j >= 0; j -= 1) {
+      const block = message.blocks[j];
+      if (block.type !== 'tools') {
+        continue;
+      }
+
+      for (let k = block.tools.length - 1; k >= 0; k -= 1) {
+        const tool = block.tools[k];
+        if (tool.callId !== event.tool_call_id) {
+          continue;
+        }
+
+        tool.result = event.tool_result;
+        tool.name = event.tool_name || event.tool_result?.toolName || tool.name;
+        if (inProgress) {
+          tool.inProgress = true;
+        } else {
+          delete tool.inProgress;
+        }
+        return messages;
+      }
+    }
+  }
+
+  const assistantMessage = ensureCurrentAssistantMessage(messages);
+  const tools = ensureToolsBlock(assistantMessage);
+  const metadata = event.tool_result?.metadata;
+  const metadataRecord =
+    metadata && typeof metadata === 'object' ? (metadata as Record<string, unknown>) : undefined;
+  const command =
+    metadataRecord && typeof metadataRecord.command === 'string'
+      ? metadataRecord.command
+      : undefined;
+  const tool: ChatRenderToolCall = {
+    callId: event.tool_call_id || '',
+    name: event.tool_name || event.tool_result?.toolName || 'unknown',
+    input: event.input || (command ? JSON.stringify({ command }) : '{}'),
+    result: event.tool_result,
+  };
+  if (inProgress) {
+    tool.inProgress = true;
+  }
+  tools.push(tool);
+
+  return messages;
 };
 
 const getThinkingTexts = (message: Message): string[] => {
@@ -293,30 +348,11 @@ export const applyChatStreamEvent = (
       return nextMessages;
     }
 
-    case 'tool-result': {
-      for (let i = nextMessages.length - 1; i >= 0; i -= 1) {
-        const message = nextMessages[i];
-        if (message.role !== 'assistant' || !message.blocks) {
-          continue;
-        }
+    case 'tool-update':
+      return applyToolResultEvent(nextMessages, event, true);
 
-        for (let j = message.blocks.length - 1; j >= 0; j -= 1) {
-          const block = message.blocks[j];
-          if (block.type !== 'tools') {
-            continue;
-          }
-
-          for (let k = block.tools.length - 1; k >= 0; k -= 1) {
-            const tool = block.tools[k];
-            if (tool.callId === event.tool_call_id && !tool.result) {
-              tool.result = event.tool_result;
-              return nextMessages;
-            }
-          }
-        }
-      }
-      return nextMessages;
-    }
+    case 'tool-result':
+      return applyToolResultEvent(nextMessages, event, false);
 
     case 'thinking': {
       const content = typeof event.content === 'string' ? event.content : '';

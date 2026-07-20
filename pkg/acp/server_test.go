@@ -609,6 +609,27 @@ func TestServer_SendUpdate(t *testing.T) {
 	assert.NotNil(t, params["update"])
 }
 
+func TestServer_SendTransientUpdateDoesNotPersist(t *testing.T) {
+	output := bytes.NewBuffer(nil)
+	storage := &fakeSessionStorage{}
+	server := NewServer(
+		WithInput(bytes.NewBuffer(nil)),
+		WithOutput(output),
+		WithContext(context.Background()),
+	)
+	server.sessionStorage = storage
+
+	err := server.SendTransientUpdate(acptypes.SessionID("test-session"), map[string]any{
+		"sessionUpdate": acptypes.UpdateToolCallUpdate,
+		"toolCallId":    "call-1",
+	})
+	require.NoError(t, err)
+	assert.Empty(t, storage.appended)
+
+	notif := readJSONRPCMessage(t, output)
+	assert.Equal(t, "session/update", notif["method"])
+}
+
 func TestServer_SendUpdate_WithUnavailableStorage(t *testing.T) {
 	tmpDir := t.TempDir()
 	unlock := lockServerTestDatabase(t, filepath.Join(tmpDir, "storage.db"))

@@ -180,7 +180,7 @@ func TestHeadlessStreamHandler_ThinkingFlow(t *testing.T) {
 	})
 
 	lines := strings.Split(strings.TrimSpace(output), "\n")
-	require.Len(t, lines, 4)
+	require.Len(t, lines, 5)
 
 	var entries []DeltaEntry
 	for _, line := range lines {
@@ -199,6 +199,8 @@ func TestHeadlessStreamHandler_ThinkingFlow(t *testing.T) {
 	assert.Equal(t, " think...", entries[2].Delta)
 
 	assert.Equal(t, "thinking-end", entries[3].Kind)
+	assert.Equal(t, "thinking", entries[4].Kind)
+	assert.Equal(t, "Let me think...", entries[4].Content)
 }
 
 func TestHeadlessStreamHandler_ContentEnd(t *testing.T) {
@@ -216,15 +218,127 @@ func TestHeadlessStreamHandler_ContentEnd(t *testing.T) {
 	assert.Equal(t, "assistant", entry.Role)
 }
 
-func TestHeadlessStreamHandler_NoOps(t *testing.T) {
+func TestHeadlessStreamHandler_UserMessage(t *testing.T) {
+	handler := NewHeadlessStreamHandler("conv-user")
+
+	output := captureStdout(func() {
+		handler.HandleUserMessage("run the tool", nil)
+	})
+
+	var entry DeltaEntry
+	require.NoError(t, json.Unmarshal([]byte(strings.TrimSpace(output)), &entry))
+	assert.Equal(t, "text", entry.Kind)
+	assert.Equal(t, "run the tool", entry.Content)
+	assert.Equal(t, "user", entry.Role)
+}
+
+func TestHeadlessStreamHandler_UserMessageIncludesImagePlaceholders(t *testing.T) {
+	handler := NewHeadlessStreamHandler("conv-user")
+
+	output := captureStdout(func() {
+		handler.HandleUserMessage("describe these", []string{
+			"data:image/png;base64,aGVsbG8=",
+			"https://example.com/mockup.jpg",
+			"/tmp/local.webp",
+		})
+	})
+
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	require.Len(t, lines, 4)
+	contents := make([]string, 0, len(lines))
+	for _, line := range lines {
+		var entry DeltaEntry
+		require.NoError(t, json.Unmarshal([]byte(line), &entry))
+		assert.Equal(t, "user", entry.Role)
+		contents = append(contents, entry.Content)
+	}
+	assert.Equal(t, []string{
+		"Inline image input (image/png).",
+		"Image input: https://example.com/mockup.jpg",
+		"Inline image input (image/webp).",
+		"describe these",
+	}, contents)
+}
+
+func TestHeadlessStreamHandler_StreamingRetryResetsCompleteContent(t *testing.T) {
+	handler := NewHeadlessStreamHandler("conv-retry")
+
+	output := captureStdout(func() {
+		handler.HandleTextDelta("abandoned")
+		handler.HandleStreamingAttemptStart()
+		handler.HandleTextDelta("kept")
+		handler.HandleContentBlockEnd()
+	})
+
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	require.Len(t, lines, 4)
+	var finalEntry DeltaEntry
+	require.NoError(t, json.Unmarshal([]byte(lines[3]), &finalEntry))
+	assert.Equal(t, "text", finalEntry.Kind)
+	assert.Equal(t, "kept", finalEntry.Content)
+}
+
+func TestHeadlessStreamHandler_ToolUpdate(t *testing.T) {
+	handler := NewHeadlessStreamHandler("conv-tool")
+
+	output := captureStdout(func() {
+		handler.HandleToolUpdate("call-1", "bash", tooltypes.BaseToolResult{Result: "partial output"})
+	})
+
+	var entry DeltaEntry
+	require.NoError(t, json.Unmarshal([]byte(strings.TrimSpace(output)), &entry))
+	assert.Equal(t, "tool-update", entry.Kind)
+	assert.Equal(t, "call-1", entry.ToolCallID)
+	assert.Equal(t, "bash", entry.ToolName)
+	require.NotNil(t, entry.ToolResult)
+	assert.Equal(t, "bash", entry.ToolResult.ToolName)
+}
+
+func TestHeadlessStreamHandler_ToolLifecycleIsOrdered(t *testing.T) {
+	handler := NewHeadlessStreamHandler("conv-tool")
+
+	output := captureStdout(func() {
+		handler.HandleTextDelta("before")
+		handler.HandleContentBlockEnd()
+		handler.HandleToolUse("call-1", "bash", `{"command":"echo hi"}`)
+		handler.HandleToolUpdate("call-1", "bash", tooltypes.BaseToolResult{Result: "partial"})
+		handler.HandleToolResult("call-1", "bash", tooltypes.BaseToolResult{Result: "complete"})
+	})
+
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	require.Len(t, lines, 6)
+	entries := make([]DeltaEntry, 0, len(lines))
+	for _, line := range lines {
+		var entry DeltaEntry
+		require.NoError(t, json.Unmarshal([]byte(line), &entry))
+		entries = append(entries, entry)
+	}
+	assert.Equal(t, []string{"text-delta", "content-end", "text", "tool-use", "tool-update", "tool-result"}, []string{entries[0].Kind, entries[1].Kind, entries[2].Kind, entries[3].Kind, entries[4].Kind, entries[5].Kind})
+	assert.Equal(t, "before", entries[2].Content)
+	assert.Equal(t, "partial", entries[4].Result)
+	var finalResult tooltypes.StructuredToolResult
+	require.NoError(t, json.Unmarshal([]byte(entries[5].Result), &finalResult))
+	assert.Equal(t, "bash", finalResult.ToolName)
+	assert.True(t, finalResult.Success)
+	assert.Equal(t, "assistant", entries[5].Role)
+}
+
+func TestHeadlessStreamHandler_AnthropicToolResultUsesUserRole(t *testing.T) {
+	handler := NewHeadlessStreamHandler("conv-tool", "anthropic")
+
+	output := captureStdout(func() {
+		handler.HandleToolResult("call-1", "bash", tooltypes.BaseToolResult{Result: "complete"})
+	})
+
+	var entry DeltaEntry
+	require.NoError(t, json.Unmarshal([]byte(strings.TrimSpace(output)), &entry))
+	assert.Equal(t, "user", entry.Role)
+}
+
+func TestHeadlessStreamHandler_DoneIsNoOp(t *testing.T) {
 	handler := NewHeadlessStreamHandler("conv-noop")
 
-	// These should not produce any output (handled by ConversationStreamer)
 	output := captureStdout(func() {
-		handler.HandleText("complete text")
-		handler.HandleToolUse("tc1", "Bash", `{"command":"ls"}`)
-		handler.HandleToolResult("tc1", "Bash", nil)
-		handler.HandleThinking("complete thinking")
 		handler.HandleDone()
 	})
 

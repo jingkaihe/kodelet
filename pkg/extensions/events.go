@@ -30,6 +30,8 @@ const (
 	EventTurnStart = "turn.start"
 	// EventToolCall is dispatched before a tool executes.
 	EventToolCall = "tool.call"
+	// EventToolUpdate is dispatched for transient tool result snapshots while a tool runs.
+	EventToolUpdate = "tool.update"
 	// EventToolResult is dispatched after a tool executes and before it is rendered/stored.
 	EventToolResult = "tool.result"
 	// EventTurnEnd is dispatched after one assistant turn completes.
@@ -236,20 +238,35 @@ func (r *Runtime) DispatchToolCall(ctx context.Context, callContext ExtensionCal
 	return decision
 }
 
+// DispatchToolUpdate runs tool.update subscriptions sequentially. The accepted
+// result is false when a subscribed sanitizer fails, so callers can drop the
+// transient snapshot instead of exposing unsanitized output.
+func (r *Runtime) DispatchToolUpdate(ctx context.Context, callContext ExtensionCallContext, toolName, toolInput, toolCallID string, output tooltypes.StructuredToolResult) (tooltypes.StructuredToolResult, bool, bool) {
+	return r.dispatchToolOutput(ctx, EventToolUpdate, callContext, toolName, toolInput, toolCallID, output, true)
+}
+
 // DispatchToolResult runs tool.result subscriptions sequentially.
 func (r *Runtime) DispatchToolResult(ctx context.Context, callContext ExtensionCallContext, toolName, toolInput, toolCallID string, output tooltypes.StructuredToolResult) (tooltypes.StructuredToolResult, bool) {
+	result, modified, _ := r.dispatchToolOutput(ctx, EventToolResult, callContext, toolName, toolInput, toolCallID, output, false)
+	return result, modified
+}
+
+func (r *Runtime) dispatchToolOutput(ctx context.Context, eventName string, callContext ExtensionCallContext, toolName, toolInput, toolCallID string, output tooltypes.StructuredToolResult, failClosed bool) (tooltypes.StructuredToolResult, bool, bool) {
 	if r == nil {
-		return output, false
+		return output, false, true
 	}
 
 	currentOutput := output
 	modifiedOutput := false
 	input := json.RawMessage(toolInput)
-	for _, handler := range r.eventHandlers(EventToolResult) {
+	for _, handler := range r.eventHandlers(eventName) {
 		payload := toolResultPayload{Tool: toolResultPayloadTool{Name: toolName, CallID: toolCallID, Input: input, Output: currentOutput}}
-		result, err := r.dispatchEventToHandler(ctx, handler, EventToolResult, payload, callContext)
+		result, err := r.dispatchEventToHandler(ctx, handler, eventName, payload, callContext)
 		if err != nil {
-			logger.G(ctx).WithError(err).WithField("extension", handler.process.Extension.ID).Warn("extension tool.result handler failed")
+			logger.G(ctx).WithError(err).WithField("extension", handler.process.Extension.ID).WithField("event", eventName).Warn("extension tool output handler failed")
+			if failClosed {
+				return currentOutput, modifiedOutput, false
+			}
 			continue
 		}
 		if result == nil || len(result.Output) == 0 {
@@ -257,14 +274,42 @@ func (r *Runtime) DispatchToolResult(ctx context.Context, callContext ExtensionC
 		}
 		var modified tooltypes.StructuredToolResult
 		if err := json.Unmarshal(result.Output, &modified); err != nil {
-			logger.G(ctx).WithError(err).WithField("extension", handler.process.Extension.ID).Warn("extension tool.result handler returned invalid output")
+			logger.G(ctx).WithError(err).WithField("extension", handler.process.Extension.ID).WithField("event", eventName).Warn("extension tool output handler returned invalid output")
+			if failClosed {
+				return currentOutput, modifiedOutput, false
+			}
 			continue
 		}
 		currentOutput = modified
 		modifiedOutput = true
 	}
 
-	return currentOutput, modifiedOutput
+	return currentOutput, modifiedOutput, true
+}
+
+// CanStreamToolUpdates reports whether every extension that mutates final tool
+// results also subscribes to tool.update. This prevents partial output from
+// bypassing an existing result sanitization policy.
+func (r *Runtime) CanStreamToolUpdates() bool {
+	if r == nil {
+		return true
+	}
+
+	updateProcesses := make(map[*Process]struct{})
+	for _, handler := range r.eventHandlers(EventToolUpdate) {
+		if handler.process != nil {
+			updateProcesses[handler.process] = struct{}{}
+		}
+	}
+	for _, handler := range r.eventHandlers(EventToolResult) {
+		if handler.process == nil {
+			continue
+		}
+		if _, ok := updateProcesses[handler.process]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // DispatchTurnEnd runs turn.end subscriptions.

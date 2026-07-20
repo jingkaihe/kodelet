@@ -3,6 +3,7 @@ import type {
     AgentStreamEvent,
     Session,
     ToolCallData,
+    ToolUpdateData,
     ToolResultData,
 } from "kodelet";
 
@@ -60,7 +61,7 @@ function installStreamHandlers(session: Session): () => void {
     };
 
     const writeJSONEvent = (
-        event: AgentStreamEvent<ToolCallData | ToolResultData>,
+        event: AgentStreamEvent<ToolCallData | ToolUpdateData | ToolResultData>,
     ): void => {
         finishThinking();
         console.error(
@@ -73,6 +74,7 @@ function installStreamHandlers(session: Session): () => void {
     session.on("assistant.thinking_end", finishThinking);
     session.on("assistant.message_delta", writeAnswer);
     session.on("tool.call", writeJSONEvent);
+    session.on("tool.update", writeJSONEvent);
     session.on("tool.result", writeJSONEvent);
     return finishThinking;
 }

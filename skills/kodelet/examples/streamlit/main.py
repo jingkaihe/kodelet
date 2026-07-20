@@ -125,6 +125,27 @@ def find_kodelet_binary() -> str:
     st.stop()
 
 
+def tool_result_text(event: dict) -> str:
+    """Extract portable display text from a partial or final tool event."""
+    structured = event.get("tool_result")
+    if not isinstance(structured, dict):
+        raw_result = event.get("result", "")
+        if isinstance(raw_result, str):
+            try:
+                structured = json.loads(raw_result)
+            except json.JSONDecodeError:
+                return raw_result
+        else:
+            return str(raw_result)
+
+    metadata = structured.get("metadata")
+    if isinstance(metadata, dict) and isinstance(metadata.get("output"), str):
+        return metadata["output"]
+    if isinstance(structured.get("error"), str):
+        return structured["error"]
+    return json.dumps(structured, indent=2)
+
+
 def load_conversation_history(conversation_id: str) -> list:
     """Load conversation history from kodelet using streaming format."""
     messages = []
@@ -159,7 +180,7 @@ def load_conversation_history(conversation_id: str) -> list:
                         tool_call_id = entry.get("tool_call_id", "")
                         for tc in current_msg["tools"]:
                             if tc.get("call_id") == tool_call_id:
-                                tc["result"] = entry.get("result", "")
+                                tc["result"] = tool_result_text(entry)
                                 break
                     continue
                 
@@ -288,11 +309,11 @@ def stream_kodelet_response(query: str, placeholder, conversation_id: str = None
                 _render_response(
                     placeholder, full_text, thinking_text, in_thinking, tool_calls
                 )
-            elif kind == "tool-result":
+            elif kind in ("tool-update", "tool-result"):
                 tool_call_id = event.get("tool_call_id", "")
-                result = event.get("result", "")
+                result = tool_result_text(event)
                 for tc in reversed(tool_calls):
-                    if tc.get("call_id") == tool_call_id and "result" not in tc:
+                    if tc.get("call_id") == tool_call_id:
                         tc["result"] = result
                         break
                 _render_response(

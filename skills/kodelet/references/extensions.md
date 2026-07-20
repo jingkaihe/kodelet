@@ -95,10 +95,12 @@ During local development, a wrapper can run `tsx` against `src/index.ts`, as sho
 - Tools use `ext.registerTool(...)`, a Zod `inputSchema`, and return either a string or `{ content, data?, error? }`.
 - Prompt commands use `ext.registerCommand(...)` and return `pass`, `respond`, or `runAgent` actions.
 - Recipe-like commands use `kind: "recipe"`, appear in `kodelet recipe list`, and can be invoked through `kodelet run -r` or directly as `/name`.
-- Lifecycle handlers use `ext.on(...)` for events like `session.start`, `user.message`, `agent.init`, `turn.start`, `tool.call`, `tool.result`, and `agent.end`.
+- Lifecycle handlers use `ext.on(...)` for events like `session.start`, `user.message`, `agent.init`, `turn.start`, `tool.call`, `tool.update`, `tool.result`, and `agent.end`.
 - Tool and event contexts can call host UI helpers such as `ctx.ui.input`, `ctx.ui.confirm`, `ctx.ui.select`, and `ctx.ui.notify`.
 
 Mutating/blocking event handlers run sequentially by priority, discovery order, then registration order. The first blocking handler stops the operation. Events use SDK `timeoutInSec` or the built-in 30 second default.
+
+Extensions that sanitize `tool.result` should apply the same policy in `tool.update`; Kodelet suppresses streaming snapshots when a result-subscribing extension does not also subscribe to updates. If an update sanitizer errors or returns invalid output, Kodelet drops that transient snapshot rather than exposing unsanitized output.
 
 Legacy hook mapping:
 

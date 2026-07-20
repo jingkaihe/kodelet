@@ -151,6 +151,8 @@ During prompt processing, kodelet sends `session/update` notifications:
 | `tool_call` | Tool invocation started |
 | `tool_call_update` | Tool status/result update |
 
+While a streaming tool is running, Kodelet may send repeated `tool_call_update` notifications with status `in_progress` and the latest accumulated `content`. ACP clients should replace the previous content for that `toolCallId`; a later `completed` or `failed` update is authoritative. In-progress snapshots are transient and are not stored for session replay, while the final update is persisted normally.
+
 ## Tools
 
 Kodelet uses its own built-in tools for all file and command operations, rather than delegating to client-side capabilities (`fs/*`, `terminal/*`). This ensures consistent behavior across all environments.

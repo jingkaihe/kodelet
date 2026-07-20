@@ -33,6 +33,9 @@ type StreamOpts struct {
 	IncludeHistory bool
 	HistoryOnly    bool
 	New            bool
+	Ready          chan<- struct{}
+	// LiveExcludedKinds accepts either a kind (all roles) or "role:kind".
+	LiveExcludedKinds map[string]bool
 }
 
 // StreamableMessage contains parsed message data for streaming
@@ -67,8 +70,9 @@ func (cs *ConversationStreamer) RegisterMessageParser(provider string, parser Me
 
 // streamState holds the current streaming state
 type streamState struct {
-	lastUpdateTime  time.Time
-	streamedEntries int
+	lastUpdateTime    time.Time
+	streamedEntries   int
+	liveExcludedKinds map[string]bool
 }
 
 // StreamLiveUpdates watches for conversation updates and streams entries based on options
@@ -84,6 +88,10 @@ func (cs *ConversationStreamer) StreamLiveUpdates(
 	state, err := cs.initializeStream(ctx, conversationID, includeHistory, streamOpts.New)
 	if err != nil {
 		return err
+	}
+	state.liveExcludedKinds = streamOpts.LiveExcludedKinds
+	if streamOpts.Ready != nil {
+		close(streamOpts.Ready)
 	}
 
 	if streamOpts.HistoryOnly {
@@ -163,7 +171,7 @@ func (cs *ConversationStreamer) processLiveUpdate(ctx context.Context, conversat
 		return
 	}
 
-	newlyStreamed, totalEntries, err := cs.streamNewMessagesSince(ctx, response, state.streamedEntries, conversationID)
+	newlyStreamed, totalEntries, err := cs.streamNewMessagesSince(ctx, response, state.streamedEntries, conversationID, state.liveExcludedKinds)
 	if err != nil {
 		logger.G(ctx).WithError(err).Error("Failed to stream new messages")
 		return
@@ -179,7 +187,7 @@ func (cs *ConversationStreamer) processLiveUpdate(ctx context.Context, conversat
 }
 
 // streamNewMessagesSince streams only the new messages since the last streamed count
-func (cs *ConversationStreamer) streamNewMessagesSince(ctx context.Context, response *GetConversationResponse, alreadyStreamed int, conversationID string) (int, int, error) {
+func (cs *ConversationStreamer) streamNewMessagesSince(ctx context.Context, response *GetConversationResponse, alreadyStreamed int, conversationID string, excludedKinds map[string]bool) (int, int, error) {
 	parser, exists := cs.messageParsers[response.Provider]
 	if !exists {
 		return 0, 0, errors.Errorf("no message parser registered for provider: %s", response.Provider)
@@ -205,6 +213,9 @@ func (cs *ConversationStreamer) streamNewMessagesSince(ctx context.Context, resp
 		newMessages := streamableMessages[startIndex:]
 		logger.G(ctx).WithField("newMessageCount", len(newMessages)).Debug("Streaming new messages")
 		for _, msg := range newMessages {
+			if excludedKinds[msg.Kind] || excludedKinds[msg.Role+":"+msg.Kind] {
+				continue
+			}
 			entry := cs.convertToStreamEntry(msg, conversationID)
 			if err := cs.outputStreamEntry(entry); err != nil {
 				return newlyStreamed, totalEntries, errors.Wrap(err, "failed to output stream entry")

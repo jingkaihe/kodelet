@@ -82,11 +82,20 @@ session.on("assistant.message_delta", (event) => {
 session.on("tool.call", (event) => {
   console.error(`tool: ${event.data.toolName}`, event.data.input);
 });
+session.on("tool.update", (event) => {
+  // Accumulated snapshots replace earlier updates with the same toolCallId.
+  console.error(`partial ${event.data.toolCallId}:`, event.data.result);
+});
+session.on("tool.result", (event) => {
+  console.error(`final ${event.data.toolCallId}:`, event.data.result);
+});
 
 const response = await session.runAndWait({ message: "help me choose an approach" });
 console.log("\nfinal:", response.content);
 await client.close();
 ```
+
+Listeners receive every `tool.update`. To keep completed responses bounded, `response.events` retains only the latest transient snapshot for each `toolCallId`, followed by the authoritative `tool.result`.
 
 Inline extensions passed to `createSession({ extensions: [...] })` are exposed to Kodelet through a temporary JSON-RPC bridge for that session. The bridge uses a Unix domain socket (or Windows named pipe) by default; set `extensionTransport: "tcp"` to use an ephemeral loopback TCP port instead. Sessions without inline extensions use the normal `.kodelet/extensions` and plugin discovery flow.
 
@@ -223,7 +232,7 @@ Common events:
 - `user.message`.
 - `agent.init`, `agent.start`, `agent.end`.
 - `turn.start`, `turn.end`.
-- `tool.call`, `tool.result`.
+- `tool.call`, `tool.update`, `tool.result`.
 
 Mutating/blocking events run sequentially by priority, discovery order, then registration order. The first blocking handler stops the operation. Events use SDK `timeoutInSec` or the built-in 30 second default.
 

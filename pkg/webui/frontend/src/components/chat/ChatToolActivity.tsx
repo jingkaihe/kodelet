@@ -146,14 +146,17 @@ const summarizeApplyPatchInput = (patchInput: string): string | undefined => {
 
     if (trimmedLine.startsWith('*** Move to: ') && operations.length > 0) {
       const previousOperation = operations[operations.length - 1];
-      operations[operations.length - 1] = `${previousOperation} → ${trimmedLine.slice('*** Move to: '.length).trim()}`;
+      operations[operations.length - 1] =
+        `${previousOperation} → ${trimmedLine.slice('*** Move to: '.length).trim()}`;
     }
   });
 
   return summarizeList(operations);
 };
 
-const summarizeApplyPatchResult = (metadata: Record<string, unknown> | null): string | undefined => {
+const summarizeApplyPatchResult = (
+  metadata: Record<string, unknown> | null
+): string | undefined => {
   const changes = metadata?.changes;
   if (!Array.isArray(changes) || changes.length === 0) {
     return summarizeList([
@@ -202,7 +205,10 @@ const getOpenAIWebSearchSummary = (
     ...getStringArrayField(input, 'queries'),
     ...getStringArrayField(metadata, 'queries'),
   ];
-  const query = queries[0] || getStringField(input, 'query', 'content') || getStringField(metadata, 'query', 'content');
+  const query =
+    queries[0] ||
+    getStringField(input, 'query', 'content') ||
+    getStringField(metadata, 'query', 'content');
   const url = getStringField(input, 'url', 'URL') || getStringField(metadata, 'url', 'URL');
   const pattern = getStringField(input, 'pattern') || getStringField(metadata, 'pattern');
 
@@ -211,7 +217,10 @@ const getOpenAIWebSearchSummary = (
   }
 
   if (actionType === 'find_in_page') {
-    return formatToolSummary('Find in page', pattern && url ? `${pattern} in ${url}` : pattern || url || query || 'target unavailable');
+    return formatToolSummary(
+      'Find in page',
+      pattern && url ? `${pattern} in ${url}` : pattern || url || query || 'target unavailable'
+    );
   }
 
   return formatToolSummary('Web search', query || url || pattern);
@@ -262,7 +271,10 @@ export const getToolSummary = (toolCall: ChatRenderToolCall): string => {
     case 'grep_tool': {
       const pattern = getStringField(input, 'pattern') || getStringField(metadata, 'pattern');
       const path = getStringField(input, 'path') || getStringField(metadata, 'path');
-      return formatToolSummary('Search', pattern && path ? `${pattern} in ${path}` : pattern || path);
+      return formatToolSummary(
+        'Search',
+        pattern && path ? `${pattern} in ${path}` : pattern || path
+      );
     }
 
     case 'glob_tool': {
@@ -323,7 +335,7 @@ export const getToolActivityStatus = (toolCall: ChatRenderToolCall): string => {
   const normalizedToolName = normalizeToolName(toolCall.name);
   const metadata = getMetadataRecord(toolCall.result);
 
-  if (!toolCall.result) {
+  if (toolCall.inProgress || !toolCall.result) {
     return 'running';
   }
 
@@ -374,7 +386,10 @@ const toolSummaryIcons: Partial<Record<string, LucideIcon>> = {
   'Write file': FilePlus,
 };
 
-const ActivitySummaryText: React.FC<{ summaryText: string; status?: string }> = ({ summaryText, status }) => {
+const ActivitySummaryText: React.FC<{
+  summaryText: string;
+  status?: string;
+}> = ({ summaryText, status }) => {
   const { label, detail } = splitActivitySummary(summaryText);
   const SummaryIcon = toolSummaryIcons[label];
 
@@ -397,12 +412,11 @@ const ActivitySummaryText: React.FC<{ summaryText: string; status?: string }> = 
           {detail ? `${label}:` : label}
         </span>
       )}
-      {SummaryIcon && !detail ? (
-        <span className="tool-summary-label">{label}</span>
-      ) : null}
+      {SummaryIcon && !detail ? <span className="tool-summary-label">{label}</span> : null}
       {detail ? (
         <span className="tool-summary-detail" aria-hidden="true">
-          {' '}{detail}
+          {' '}
+          {detail}
         </span>
       ) : null}
     </span>
@@ -442,6 +456,7 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
             <div className="activity-detail-content space-y-2">
               {toolCall.result ? (
                 <ToolRenderer
+                  isPartial={toolCall.inProgress}
                   toolInput={toolCall.input}
                   toolResult={toolCall.result}
                 />

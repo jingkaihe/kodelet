@@ -38,6 +38,22 @@ func (t *testTool) Execute(_ context.Context, _ tooltypes.State, _ string) toolt
 }
 func (t *testTool) TracingKVs(_ string) ([]attribute.KeyValue, error) { return nil, t.traceErr }
 
+type streamingTestTool struct {
+	*testTool
+	streamingExecuted bool
+}
+
+func (t *streamingTestTool) ExecuteStreaming(
+	_ context.Context,
+	_ tooltypes.State,
+	_ string,
+	onUpdate tooltypes.ToolUpdateCallback,
+) tooltypes.ToolResult {
+	t.streamingExecuted = true
+	onUpdate(tooltypes.BaseToolResult{Result: "partial"})
+	return tooltypes.BaseToolResult{Result: "complete"}
+}
+
 func TestGetAvailableToolNames(t *testing.T) {
 	tools := getAvailableToolNames()
 
@@ -209,6 +225,32 @@ func TestRunToolFindsValidatesAndExecutesTool(t *testing.T) {
 	require.False(t, result.IsError())
 	assert.Equal(t, "ran", result.GetResult())
 	assert.True(t, tool.executed)
+}
+
+func TestRunToolWithUpdatesUsesStreamingTool(t *testing.T) {
+	tool := &streamingTestTool{testTool: &testTool{name: "streaming_tool", description: "test"}}
+	state := NewBasicState(context.Background(), WithExtensionTools([]tooltypes.Tool{tool}))
+	updates := []string{}
+
+	result := RunToolWithUpdates(context.Background(), state, "streaming_tool", `{}`, func(update tooltypes.ToolResult) {
+		updates = append(updates, update.GetResult())
+	})
+
+	assert.True(t, tool.streamingExecuted)
+	assert.False(t, tool.executed)
+	assert.Equal(t, []string{"partial"}, updates)
+	assert.Equal(t, "complete", result.GetResult())
+}
+
+func TestRunToolWithoutUpdateCallbackUsesRegularExecution(t *testing.T) {
+	tool := &streamingTestTool{testTool: &testTool{name: "streaming_tool", description: "test"}}
+	state := NewBasicState(context.Background(), WithExtensionTools([]tooltypes.Tool{tool}))
+
+	result := RunTool(context.Background(), state, "streaming_tool", `{}`)
+
+	assert.False(t, tool.streamingExecuted)
+	assert.True(t, tool.executed)
+	assert.Equal(t, "ok", result.GetResult())
 }
 
 func TestRunToolReturnsFindAndValidationErrors(t *testing.T) {
