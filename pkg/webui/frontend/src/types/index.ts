@@ -535,6 +535,40 @@ export interface ExtensionToolMetadata {
 	data?: Record<string, unknown>;
 }
 
+export interface TaskRunCounts {
+	succeeded: number;
+	failed: number;
+	running: number;
+}
+
+export interface TaskRunActivity {
+	id: string;
+	sequence: number;
+	kind: string;
+	label: string;
+	detail?: string;
+	status: "running" | "succeeded" | "failed";
+	preview?: string;
+}
+
+export interface TaskRunSnapshot {
+	version: 1;
+	revision: number;
+	kind: string;
+	status: "running" | "completed" | "failed";
+	phase: string;
+	title: string;
+	detail?: string;
+	task?: string;
+	cwd?: string;
+	elapsedMs: number;
+	counts: TaskRunCounts;
+	activities: TaskRunActivity[];
+	omittedSucceeded?: number;
+	omittedFailed?: number;
+	omittedRunning?: number;
+}
+
 // Component props
 export interface ConversationListProps {
 	conversations: Conversation[];

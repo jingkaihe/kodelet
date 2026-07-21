@@ -113,6 +113,39 @@ func TestRuntimeExtensionToolCanRequestUIInput(t *testing.T) {
 	assert.Equal(t, "User answered 2", result.GetResult())
 }
 
+func TestRuntimeExtensionToolStreamsAccumulatedUpdates(t *testing.T) {
+	rootDir := t.TempDir()
+	extDir := filepath.Join(rootDir, "stream")
+	writeExecutable(t, filepath.Join(extDir, "kodelet-extension-stream"), helperExtensionScript(t))
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+
+	runtime, err := NewRuntime(
+		context.Background(),
+		WithConfig(DefaultConfig()),
+		WithWorkingDir(rootDir),
+		WithRoots(Root{Dir: rootDir, Kind: SourceKindLocalStandalone}),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, runtime.Close()) })
+
+	registered := runtime.Tools()
+	require.Len(t, registered, 1)
+	streamingTool, ok := registered[0].(tooltypes.StreamingTool)
+	require.True(t, ok)
+
+	var updates []tooltypes.ToolResult
+	result := streamingTool.ExecuteStreaming(context.Background(), nil, `{"location":"Stream"}`, func(update tooltypes.ToolResult) {
+		updates = append(updates, update)
+	})
+
+	require.Len(t, updates, 1)
+	assert.Equal(t, "Searching code", updates[0].GetResult())
+	var updateMetadata tooltypes.ExtensionToolMetadata
+	require.True(t, tooltypes.ExtractMetadata(updates[0].StructuredData().Metadata, &updateMetadata))
+	assert.Equal(t, float64(1), mustJSONNumber(t, updateMetadata.Data["revision"]))
+	assert.Equal(t, "Weather for Stream from ", result.GetResult())
+}
+
 type staticUIInputBroker struct {
 	value string
 }
@@ -207,12 +240,11 @@ func TestRuntimeDispatchesToolCallAndToolResultEvents(t *testing.T) {
 
 	updated, changed, accepted := runtime.DispatchToolUpdate(context.Background(), callContext, "get_weather", decision.Input, "call-1", original)
 	require.True(t, accepted)
-	require.True(t, changed)
-	require.True(t, tooltypes.ExtractMetadata(updated.Metadata, &metadata))
-	assert.Equal(t, "event updated output", metadata.Output)
+	assert.False(t, changed)
+	assert.Equal(t, original, updated)
 
 	rejected, changed, accepted := runtime.DispatchToolUpdate(context.Background(), callContext, "get_weather", `{"location":"InvalidUpdate"}`, "call-1", original)
-	assert.False(t, accepted)
+	assert.True(t, accepted)
 	assert.False(t, changed)
 	assert.Equal(t, original, rejected)
 }
@@ -671,6 +703,23 @@ func runExtensionHelperProcess() {
 				_ = json.Unmarshal(uiResponse.Result, &uiResult)
 				writeHelperResponse(request.ID, ToolExecutionResult{Content: "User answered " + uiResult.Value}, nil)
 				continue
+			}
+			if input.Location == "Stream" {
+				updateRequest := rpcRequest{
+					JSONRPC:  "2.0",
+					ID:       98,
+					ParentID: request.ID,
+					Method:   "kodelet.tool.update",
+					Params: ToolExecutionResult{
+						Content: "Searching code",
+						Data:    map[string]any{"revision": 1},
+					},
+				}
+				updatePayload, _ := json.Marshal(updateRequest)
+				_ = writeFrame(os.Stdout, updatePayload)
+				if _, err := readFrame(reader); err != nil {
+					return
+				}
 			}
 			result := ToolExecutionResult{
 				Content: fmt.Sprintf("Weather for %s from %s", input.Location, params.Context.ConversationID),

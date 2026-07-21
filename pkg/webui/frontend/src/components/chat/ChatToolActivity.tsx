@@ -17,6 +17,10 @@ import {
 import type { ChatRenderToolCall, ToolResult } from '../../types';
 import { cn, formatDuration } from '../../utils';
 import ToolRenderer from '../ToolRenderer';
+import {
+  formatTaskRunElapsed,
+  getTaskRunSnapshot,
+} from '../tool-renderers/TaskRunRenderer';
 import { normalizeToolName, ReferenceCodeBlock } from '../tool-renderers/reference';
 
 interface ChatToolActivityProps {
@@ -277,6 +281,12 @@ export const getToolSummary = (toolCall: ChatRenderToolCall): string => {
       );
     }
 
+    case 'code_search':
+      return formatToolSummary('Code search', getStringField(input, 'query'));
+
+    case 'subagent':
+      return formatToolSummary('Delegated task', getStringField(input, 'task'));
+
     case 'glob_tool': {
       const pattern = getStringField(input, 'pattern') || getStringField(metadata, 'pattern');
       const path = getStringField(input, 'path') || getStringField(metadata, 'path');
@@ -343,6 +353,11 @@ export const getToolActivityStatus = (toolCall: ChatRenderToolCall): string => {
     return 'failed';
   }
 
+  const taskRun = getTaskRunSnapshot(toolCall.result);
+  if (taskRun) {
+    return formatTaskRunElapsed(taskRun.elapsedMs) || 'done';
+  }
+
   if (normalizedToolName === 'bash') {
     const duration = getNumberField(metadata, 'executionTime');
     const durationText = duration !== undefined ? formatDuration(duration) : '';
@@ -371,6 +386,8 @@ const toolSummaryIcons: Partial<Record<string, LucideIcon>> = {
   'Apply patch': Pencil,
   Bash: SquareTerminal,
   'Code execution': FileCog,
+  'Code search': Search,
+  'Delegated task': FileCog,
   'Edit file': FilePen,
   'Extension tool': Wrench,
   'Fetch URL': Globe,
@@ -436,12 +453,13 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
 
         return (
           <details
-            key={toolCall.callId || `${toolCall.name}-${toolIndex}`}
+            key={`${toolCall.callId || `${toolCall.name}-${toolIndex}`}-${activityStatus === 'running' ? 'running' : 'settled'}`}
             className={cn(
               'activity-card',
               activityStatus === 'running' && 'activity-card-live',
               activityStatus === 'failed' && 'activity-card-error'
             )}
+            open={activityStatus === 'running' ? true : undefined}
           >
             <summary className="tool-summary activity-summary" title={summaryText}>
               <span className="tool-summary-chevron" aria-hidden="true">

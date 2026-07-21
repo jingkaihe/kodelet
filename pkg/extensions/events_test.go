@@ -60,6 +60,43 @@ func TestEventHandlersSortByPriorityThenRegistrationOrder(t *testing.T) {
 	assert.Equal(t, 2, handlers[2].order)
 }
 
+func TestToolUpdateHandlersExcludeTheProvidingProcess(t *testing.T) {
+	provider := &Process{Extension: Extension{ID: "provider"}}
+	observer := &Process{Extension: Extension{ID: "observer"}}
+	runtime := EmptyRuntime()
+	runtime.eventHandlersByName[EventToolUpdate] = []eventHandler{
+		{process: provider},
+		{process: observer},
+	}
+	extensionOutput := tooltypes.StructuredToolResult{
+		Metadata: &tooltypes.ExtensionToolMetadata{ExtensionID: "provider"},
+	}
+
+	handlers := runtime.toolOutputEventHandlers(EventToolUpdate, extensionOutput)
+
+	require.Len(t, handlers, 1)
+	assert.Same(t, observer, handlers[0].process)
+	require.Len(t, runtime.toolOutputEventHandlers(EventToolResult, extensionOutput), 0)
+}
+
+func TestToolUpdateHandlersDoNotInferProviderFromCollidingToolName(t *testing.T) {
+	shadowed := &Process{Extension: Extension{ID: "shadowed-bash"}}
+	observer := &Process{Extension: Extension{ID: "observer"}}
+	runtime := EmptyRuntime()
+	runtime.tools["bash"] = &Tool{process: shadowed}
+	runtime.eventHandlersByName[EventToolUpdate] = []eventHandler{
+		{process: shadowed},
+		{process: observer},
+	}
+	builtinOutput := tooltypes.StructuredToolResult{Metadata: &tooltypes.BashMetadata{}}
+
+	handlers := runtime.toolOutputEventHandlers(EventToolUpdate, builtinOutput)
+
+	require.Len(t, handlers, 2)
+	assert.Same(t, shadowed, handlers[0].process)
+	assert.Same(t, observer, handlers[1].process)
+}
+
 func TestEventTimeoutUsesSpecificAndDefaultTimeouts(t *testing.T) {
 	sdkTimeoutInSec := 3.0
 

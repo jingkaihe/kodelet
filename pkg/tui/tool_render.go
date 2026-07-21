@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/diffview"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -19,8 +20,10 @@ type toolRenderGroup struct {
 	body         string
 	bodyLines    []diffview.RenderedLine
 	wrapBody     bool
+	markdownBody bool
 	expanded     bool
 	active       bool
+	failed       bool
 }
 
 type toolRenderLabelPart struct {
@@ -47,6 +50,10 @@ func (m model) toolRenderGroups(block assistantBlock) []toolRenderGroup {
 			groups = append(groups, applyGroups...)
 			idx++
 
+		case isTaskRunTool(tool):
+			groups = append(groups, m.buildTaskRunToolGroup(block, idx))
+			idx++
+
 		case isDedicatedBuiltinTool(tool):
 			groups = append(groups, buildDedicatedBuiltinToolGroup(block, idx))
 			idx++
@@ -62,6 +69,144 @@ func (m model) toolRenderGroups(block assistantBlock) []toolRenderGroup {
 	}
 
 	return groups
+}
+
+func (m model) buildTaskRunToolGroup(block assistantBlock, idx int) toolRenderGroup {
+	tool := block.tools[idx]
+	snapshot, metadata, _ := tooltypes.ExtractTaskRunSnapshot(tool.structured)
+	runningLabel := strings.TrimSpace(snapshot.Title)
+	if runningLabel == "" {
+		runningLabel = "Running task"
+	}
+	if detail := strings.TrimSpace(snapshot.Detail); detail != "" {
+		runningLabel += " — " + detail
+	}
+
+	label := strings.TrimSpace(snapshot.Title)
+	if label == "" {
+		label = "Task"
+	}
+	if tool.done {
+		label = taskRunCompletionLabel(snapshot, label)
+	}
+
+	body := renderTaskRunProgressBody(m, snapshot)
+	markdownBody := false
+	if tool.done {
+		body = strings.TrimSpace(metadata.Output)
+		if tool.structured != nil {
+			errorText := strings.TrimSpace(tool.structured.Error)
+			if errorText != "" && errorText != body {
+				if body == "" {
+					body = errorText
+				} else {
+					body = "**Error:** " + errorText + "\n\n" + body
+				}
+			}
+		}
+		markdownBody = body != ""
+	}
+
+	return toolRenderGroup{
+		toolStart:    idx,
+		toolEnd:      idx,
+		changeIndex:  -1,
+		label:        label,
+		runningLabel: runningLabel,
+		body:         body,
+		wrapBody:     !markdownBody,
+		markdownBody: markdownBody,
+		expanded:     block.expanded || tool.expanded || tool.failed || snapshot.Status == "failed",
+		active:       !tool.done,
+		failed:       tool.failed || snapshot.Status == "failed",
+	}
+}
+
+func taskRunCompletionLabel(snapshot tooltypes.TaskRunSnapshot, fallback string) string {
+	parts := []string{fallback}
+	if total := snapshot.Counts.Total(); total > 0 {
+		parts = append(parts, fmt.Sprintf("%d %s", total, pluralize(total, "action", "actions")))
+	}
+	if snapshot.Counts.Failed > 0 {
+		parts = append(parts, fmt.Sprintf("%d failed", snapshot.Counts.Failed))
+	}
+	if elapsed := formatTaskRunElapsed(snapshot.ElapsedMS); elapsed != "" {
+		parts = append(parts, elapsed)
+	}
+	return strings.Join(parts, " · ")
+}
+
+func renderTaskRunProgressBody(m model, snapshot tooltypes.TaskRunSnapshot) string {
+	parts := []string{}
+	counts := []string{}
+	if snapshot.Counts.Succeeded > 0 {
+		counts = append(counts, fmt.Sprintf("%d done", snapshot.Counts.Succeeded))
+	}
+	if snapshot.Counts.Failed > 0 {
+		counts = append(counts, fmt.Sprintf("%d failed", snapshot.Counts.Failed))
+	}
+	if snapshot.Counts.Running > 0 {
+		counts = append(counts, fmt.Sprintf("%d running", snapshot.Counts.Running))
+	}
+	if elapsed := formatTaskRunElapsed(snapshot.ElapsedMS); elapsed != "" {
+		counts = append(counts, elapsed)
+	}
+	if len(counts) > 0 {
+		parts = append(parts, strings.Join(counts, " · "))
+	}
+
+	activityLines := make([]string, 0, len(snapshot.Activities)+3)
+	for _, activity := range snapshot.Activities {
+		marker := "✓"
+		switch activity.Status {
+		case "running":
+			marker = m.spinner.View()
+		case "failed":
+			marker = "✗"
+		}
+		activityLines = append(activityLines, marker+" "+strings.TrimSpace(activity.Label))
+		if activity.Status == "failed" && strings.TrimSpace(activity.Preview) != "" {
+			activityLines = append(activityLines, "  "+strings.TrimSpace(activity.Preview))
+		}
+	}
+	if snapshot.OmittedSucceeded > 0 {
+		activityLines = append(activityLines, fmt.Sprintf("+%d earlier completed", snapshot.OmittedSucceeded))
+	}
+	if snapshot.OmittedFailed > 0 {
+		activityLines = append(activityLines, fmt.Sprintf("+%d earlier failed", snapshot.OmittedFailed))
+	}
+	if snapshot.OmittedRunning > 0 {
+		activityLines = append(activityLines, fmt.Sprintf("+%d more running", snapshot.OmittedRunning))
+	}
+	if len(activityLines) > 0 {
+		if len(parts) > 0 {
+			parts = append(parts, "")
+		}
+		parts = append(parts, activityLines...)
+	}
+	return strings.Join(parts, "\n")
+}
+
+func formatTaskRunElapsed(elapsedMS int64) string {
+	if elapsedMS <= 0 {
+		return ""
+	}
+	duration := time.Duration(elapsedMS) * time.Millisecond
+	if duration < time.Minute {
+		return fmt.Sprintf("%ds", int(duration.Round(time.Second)/time.Second))
+	}
+	if duration < time.Hour {
+		minutes := int(duration / time.Minute)
+		seconds := int((duration % time.Minute).Round(time.Second) / time.Second)
+		if seconds == 60 {
+			minutes++
+			seconds = 0
+		}
+		return fmt.Sprintf("%dm %02ds", minutes, seconds)
+	}
+	hours := int(duration / time.Hour)
+	minutes := int((duration % time.Hour) / time.Minute)
+	return fmt.Sprintf("%dh %02dm", hours, minutes)
 }
 
 func buildBashToolGroup(block assistantBlock, start, end int) toolRenderGroup {
@@ -308,7 +453,7 @@ func skillToolLabel(tool toolCall) string {
 }
 
 func isFallbackAggregateTool(tool toolCall) bool {
-	return !isBashTool(tool) && !isApplyPatchTool(tool) && !isDedicatedBuiltinTool(tool)
+	return !isBashTool(tool) && !isApplyPatchTool(tool) && !isTaskRunTool(tool) && !isDedicatedBuiltinTool(tool)
 }
 
 func isBashTool(tool toolCall) bool {
@@ -317,6 +462,11 @@ func isBashTool(tool toolCall) bool {
 
 func isApplyPatchTool(tool toolCall) bool {
 	return normalizedToolName(tool) == "apply_patch"
+}
+
+func isTaskRunTool(tool toolCall) bool {
+	_, _, ok := tooltypes.ExtractTaskRunSnapshot(tool.structured)
+	return ok
 }
 
 func isDedicatedBuiltinTool(tool toolCall) bool {

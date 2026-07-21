@@ -13,7 +13,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
-var _ tooltypes.Tool = &Tool{}
+var _ tooltypes.StreamingTool = &Tool{}
 
 // Tool is a tool registered by an extension.
 type Tool struct {
@@ -84,6 +84,15 @@ func (t *Tool) ValidateInput(_ tooltypes.State, parameters string) error {
 
 // Execute invokes the extension tool over JSON-RPC.
 func (t *Tool) Execute(ctx context.Context, _ tooltypes.State, parameters string) tooltypes.ToolResult {
+	return t.execute(ctx, parameters, nil)
+}
+
+// ExecuteStreaming invokes the extension tool and forwards accumulated snapshots.
+func (t *Tool) ExecuteStreaming(ctx context.Context, _ tooltypes.State, parameters string, onUpdate tooltypes.ToolUpdateCallback) tooltypes.ToolResult {
+	return t.execute(ctx, parameters, onUpdate)
+}
+
+func (t *Tool) execute(ctx context.Context, parameters string, onUpdate tooltypes.ToolUpdateCallback) tooltypes.ToolResult {
 	start := time.Now()
 	toolCtx := tools.ToolContextFromContext(ctx)
 	callCtx := ExtensionCallContext{
@@ -98,19 +107,31 @@ func (t *Tool) Execute(ctx context.Context, _ tooltypes.State, parameters string
 
 	execCtx, cancel := contextWithOptionalDuration(ctx, t.timeout)
 	defer cancel()
-	result, err := t.process.ExecuteTool(execCtx, t.name, json.RawMessage(parameters), callCtx)
+	result, err := t.process.ExecuteToolStreaming(execCtx, t.name, json.RawMessage(parameters), callCtx, func(update ToolExecutionResult) {
+		if onUpdate != nil {
+			onUpdate(t.resultFromExecution(update, time.Since(start)))
+		}
+	})
 	executionTime := time.Since(start)
 	if err != nil {
 		return &ToolResult{toolName: t.name, extensionID: t.extensionID, executionTime: executionTime, err: err.Error()}
 	}
-	if result.Error != "" {
-		return &ToolResult{toolName: t.name, extensionID: t.extensionID, executionTime: executionTime, err: result.Error, data: result.Data}
-	}
+	return t.resultFromExecution(*result, executionTime)
+}
+
+func (t *Tool) resultFromExecution(result ToolExecutionResult, executionTime time.Duration) *ToolResult {
 	content := result.Content
 	if t.maxOutput > 0 && len(content) > t.maxOutput {
 		content = content[:t.maxOutput] + "\n\n[TRUNCATED - Output exceeded extension max output limit]"
 	}
-	return &ToolResult{toolName: t.name, extensionID: t.extensionID, executionTime: executionTime, result: content, data: result.Data}
+	return &ToolResult{
+		toolName:      t.name,
+		extensionID:   t.extensionID,
+		executionTime: executionTime,
+		result:        content,
+		err:           result.Error,
+		data:          result.Data,
+	}
 }
 
 // TracingKVs returns tracing attributes for the tool.
@@ -152,17 +173,16 @@ func (r *ToolResult) StructuredData() tooltypes.StructuredToolResult {
 		ToolName:  r.toolName,
 		Success:   !r.IsError(),
 		Timestamp: time.Now(),
-	}
-	if r.IsError() {
-		result.Error = r.err
-	} else {
-		result.Metadata = &tooltypes.ExtensionToolMetadata{
+		Metadata: &tooltypes.ExtensionToolMetadata{
 			ExtensionID:   r.extensionID,
 			ToolName:      r.toolName,
 			Output:        r.result,
 			Data:          r.data,
 			ExecutionTime: r.executionTime,
-		}
+		},
+	}
+	if r.IsError() {
+		result.Error = r.err
 	}
 	return result
 }

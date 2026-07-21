@@ -35,7 +35,7 @@ const toolRendererRegistry: Record<string, ToolRendererRegistration> = {
   skill: { component: SkillRenderer },
   openai_web_search: { component: OpenAIWebSearchRenderer, supportsFailureRendering: true },
   read_conversation: { component: ReadConversationRenderer },
-  extension_tool: { component: ExtensionToolRenderer },
+  extension_tool: { component: ExtensionToolRenderer, supportsFailureRendering: true },
 };
 
 export const getToolRendererRegistration = (toolResult: ToolResult): ToolRendererRegistration | undefined => {

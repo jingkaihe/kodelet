@@ -192,4 +192,47 @@ describe('ChatToolActivity', () => {
 
     expect(formatToolInputPreview('{"command":"pwd"}')).toBe('{\n  "command": "pwd"\n}');
   });
+
+  it('summarizes and opens a live code-search agent run', () => {
+    const { container } = render(
+      <ChatToolActivity
+        tools={[
+          {
+            callId: 'search-1',
+            name: 'code_search',
+            input: '{"query":"Trace tool updates"}',
+            inProgress: true,
+            result: {
+              toolName: 'code_search',
+              success: true,
+              metadataType: 'extension_tool',
+              metadata: {
+                extensionId: 'code-search',
+                toolName: 'code_search',
+                output: 'Searching code',
+                data: {
+                  taskRun: {
+                    version: 1,
+                    revision: 1,
+                    kind: 'code_search',
+                    status: 'running',
+                    phase: 'starting',
+                    title: 'Searching code',
+                    detail: 'starting task',
+                    elapsedMs: 1000,
+                    counts: { succeeded: 0, failed: 0, running: 0 },
+                    activities: [],
+                  },
+                },
+              },
+            },
+          },
+        ]}
+      />
+    );
+
+    expect(screen.getByText('Code search: Trace tool updates')).toBeInTheDocument();
+    expect(screen.getByText('Searching code')).toBeInTheDocument();
+    expect(container.querySelector('.activity-card[open]')).toBeInTheDocument();
+  });
 });

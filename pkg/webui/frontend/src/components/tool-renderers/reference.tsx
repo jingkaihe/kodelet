@@ -1,6 +1,6 @@
 import React from 'react';
 import { marked } from 'marked';
-import { cn, detectLanguageFromPath, formatFileSize, formatDuration } from '../../utils';
+import { cn, detectLanguageFromPath, escapeHtml, formatFileSize, formatDuration } from '../../utils';
 
 export const normalizeToolName = (toolName: string): string => {
   if (toolName === 'grep') {
@@ -266,6 +266,61 @@ export const ReferenceFileList: React.FC<ReferenceFileListProps> = ({ items }) =
 
 export const renderMarkdown = (content?: string | null): string =>
   content ? ((marked.parse(content) as string) || '') : '';
+
+const safeMarkdownRenderer = new marked.Renderer();
+const defaultMarkdownRenderer = new marked.Renderer();
+
+const decodeUrlCodePoint = (code: string, radix: number): string => {
+  const value = Number.parseInt(code, radix);
+  if (!Number.isInteger(value) || value < 0 || value > 0x10ffff || (value >= 0xd800 && value <= 0xdfff)) {
+    return '';
+  }
+  return String.fromCodePoint(value);
+};
+
+const decodeUrlCharacterReferences = (value: string): string => {
+  let decoded = value;
+  for (let iteration = 0; iteration < 4; iteration += 1) {
+    const next = decoded
+      .replace(/&#x([\da-f]+);?/gi, (_match, code: string) => decodeUrlCodePoint(code, 16))
+      .replace(/&#(\d+);?/g, (_match, code: string) => decodeUrlCodePoint(code, 10))
+      .replace(/&(amp|colon|newline|tab);/gi, (_match, name: string) => {
+        const values: Record<string, string> = {
+          amp: '&',
+          colon: ':',
+          newline: '\n',
+          tab: '\t',
+        };
+        return values[name.toLowerCase()] || '';
+      });
+    if (next === decoded) {
+      return decoded;
+    }
+    decoded = next;
+  }
+  return decoded;
+};
+
+const isSafeMarkdownUrl = (href: string): boolean => {
+  const normalized = [...decodeUrlCharacterReferences(href.trim())]
+    .filter((character) => {
+      const code = character.charCodeAt(0);
+      return code > 32 && code !== 127;
+    })
+    .join('')
+    .toLowerCase();
+  const scheme = /^([a-z][a-z\d+.-]*):/.exec(normalized)?.[1];
+  return !scheme || ['file', 'http', 'https', 'mailto'].includes(scheme);
+};
+
+safeMarkdownRenderer.html = (html) => escapeHtml(html);
+safeMarkdownRenderer.link = (href, title, text) =>
+  isSafeMarkdownUrl(href) ? defaultMarkdownRenderer.link(href, title, text) : text;
+safeMarkdownRenderer.image = (href, title, text) =>
+  isSafeMarkdownUrl(href) ? defaultMarkdownRenderer.image(href, title, text) : escapeHtml(text);
+
+export const renderSafeMarkdown = (content?: string | null): string =>
+  content ? ((marked.parse(content, { renderer: safeMarkdownRenderer }) as string) || '') : '';
 
 export const formatReferenceSize = (value?: number | null): string => {
   if (value === null || value === undefined) {

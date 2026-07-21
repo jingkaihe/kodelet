@@ -17,6 +17,11 @@ export interface ToolExecutionResult {
   error?: string;
 }
 
+export interface ToolUpdateRequest {
+  content: string;
+  data?: Record<string, unknown>;
+}
+
 export type CommandAction = "pass" | "respond" | "runAgent";
 
 export type CommandPassResult = { action: "pass" };
@@ -159,6 +164,7 @@ export interface UIContext {
 }
 
 export interface SharedContext extends Required<Pick<BaseCallContext, "cwd">>, Omit<BaseCallContext, "cwd"> {
+  signal: AbortSignal;
   storage: StorageContext;
   path: PathContext;
   fs: FileSystemContext;
@@ -168,7 +174,9 @@ export interface SharedContext extends Required<Pick<BaseCallContext, "cwd">>, O
   ui: UIContext;
 }
 
-export interface ToolContext extends SharedContext {}
+export interface ToolContext extends SharedContext {
+  update(content: string, data?: Record<string, unknown>): Promise<void>;
+}
 
 export interface CommandContext extends SharedContext {
   input: CommandInvocation;

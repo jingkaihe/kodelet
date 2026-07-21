@@ -324,7 +324,7 @@ Rules:
   log entries as UI notifications; unstructured stderr and lower-severity logs
   remain diagnostics only.
 - Requests use the effective timeout from config, SDK `timeoutInSec`, and runtime defaults. Extension commands may run without a timeout by default.
-- Extensions can call back into the host for UI interactions using separate reverse-RPC methods: `kodelet.ui.input`, `kodelet.ui.confirm`, `kodelet.ui.select`, and `kodelet.ui.notify`.
+- Extensions can call back into the host for transient tool progress with `kodelet.tool.update` and for UI interactions with `kodelet.ui.input`, `kodelet.ui.confirm`, `kodelet.ui.select`, and `kodelet.ui.notify`.
 - Reverse-RPC requests can include the originating host request ID as `parentId` so callbacks retain the correct context when extension requests execute concurrently.
 - Cancellation uses `$/cancelRequest`.
 - If an extension hangs after cancellation, Kodelet kills and restarts it.
@@ -352,6 +352,7 @@ Kodelet starts the extension executable, then sends:
     },
     "capabilities": {
       "tools": true,
+      "toolUpdates": true,
       "commands": true,
       "ui": {
         "input": true,
@@ -465,6 +466,42 @@ ExtensionToolMetadata{
 }
 ```
 
+### Live extension-tool updates
+
+When initialization advertises `capabilities.toolUpdates: true`, a running tool handler may send a reverse-RPC request containing its latest accumulated result snapshot:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 7,
+  "parentId": 42,
+  "method": "kodelet.tool.update",
+  "params": {
+    "content": "Searching code — 2 actions running",
+    "data": {
+      "taskRun": {
+        "version": 1,
+        "revision": 8,
+        "kind": "code_search",
+        "status": "running",
+        "phase": "working",
+        "title": "Searching code",
+        "detail": "2 actions running",
+        "elapsedMs": 68000,
+        "counts": { "succeeded": 10, "failed": 0, "running": 2 },
+        "activities": []
+      }
+    }
+  }
+}
+```
+
+`parentId` identifies the active `extension.tool.execute` request, which is required when one extension process handles concurrent tool calls. Each update replaces the previous snapshot for that outer tool call; it is transient and is not sent to the model or persisted as the final result. The eventual `extension.tool.execute` response remains authoritative and should include the terminal `data.taskRun` snapshot when clients should retain the activity history.
+
+`taskRun` is an optional generic rendering contract rather than an agent-specific protocol. SDK helpers named `TaskProgress` produce the bounded schema, can track activities directly, and can attach to a child Kodelet session as a convenience adapter.
+
+Renderers accept at most 14 visible activities: up to 8 running, 3 recently completed, and 3 recently failed. SDK helpers retain full observed counters and report hidden entries through the `omittedSucceeded`, `omittedFailed`, and `omittedRunning` fields; labels and previews are length-bounded before publication.
+
 ## Event model
 
 Use dot-separated event names.
@@ -483,6 +520,8 @@ Use dot-separated event names.
 | `turn.end` | After one assistant turn completes | No | No initially |
 | `agent.end` | Agent has completed | No | Yes, follow-up messages |
 | `session.end` | Kodelet shuts down extension runtime | No | No |
+
+The process providing an extension tool is not called back for that tool's own `tool.update` event. Providers should sanitize or shape snapshots before calling `ctx.update`; excluding the producer avoids re-entering a serial extension process while its reverse-RPC update is awaiting acknowledgement. Other subscribed extensions still receive the update in priority order.
 
 Breaking-change replacement mapping from the removed hook system:
 

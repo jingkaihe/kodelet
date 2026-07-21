@@ -134,7 +134,10 @@ func TestToolResultAssistantFacingStringAndStructuredData(t *testing.T) {
 	assert.Contains(t, failure.AssistantFacing(), "<error>")
 	assert.Equal(t, "boom", failure.GetError())
 	assert.Contains(t, failure.String(), "extension tool get_weather failed")
-	assert.False(t, failure.StructuredData().Success)
+	failureStructured := failure.StructuredData()
+	assert.False(t, failureStructured.Success)
+	require.True(t, tooltypes.ExtractMetadata(failureStructured.Metadata, &metadata))
+	assert.Equal(t, "weather", metadata.ExtensionID)
 }
 
 func TestShouldRestartAfterCallError(t *testing.T) {

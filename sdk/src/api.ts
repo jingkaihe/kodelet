@@ -130,20 +130,20 @@ export class ExtensionHost implements ExtensionAPI {
     };
   }
 
-  async executeTool(params: ExecuteToolParams): Promise<ToolExecutionResult> {
+  async executeTool(params: ExecuteToolParams, signal?: AbortSignal): Promise<ToolExecutionResult> {
     const tool = this.tools.get(params.name);
     if (!tool) {
       throw new Error(`Unknown extension tool: ${params.name}`);
     }
     const input = await tool.parseInput(params.input);
-    const result = await tool.registration.execute(input as never, createToolContext(this.initParams, params.context));
+    const result = await tool.registration.execute(input as never, createToolContext(this.initParams, params.context, signal));
     if (typeof result === "string") {
       return { content: result };
     }
     return result;
   }
 
-  async executeCommand(params: ExecuteCommandParams): Promise<CommandResult> {
+  async executeCommand(params: ExecuteCommandParams, signal?: AbortSignal): Promise<CommandResult> {
     const command = this.commands.get(normalizeCommandName(params.name));
     if (!command) {
       throw new Error(`Unknown extension command: ${params.name}`);
@@ -160,12 +160,12 @@ export class ExtensionHost implements ExtensionAPI {
 
     const result = await command.registration.execute(
       input as never,
-      createCommandContext(this.initParams, params.context, params.invocation),
+      createCommandContext(this.initParams, params.context, params.invocation, signal),
     );
     return result ?? { action: "pass" };
   }
 
-  async handleEvent<Name extends EventName>(params: HandleEventParams<Name>): Promise<EventResult> {
+  async handleEvent<Name extends EventName>(params: HandleEventParams<Name>, signal?: AbortSignal): Promise<EventResult> {
     const handlers = this.handlers
       .filter((handler) => handler.event === params.event)
       .sort((a, b) => b.priority - a.priority || a.order - b.order);
@@ -175,7 +175,7 @@ export class ExtensionHost implements ExtensionAPI {
       id: params.id,
       event: params.event,
     }) as ExtensionEvent<Name>;
-    const ctx = createEventContext(this.initParams, params.context as BaseCallContext | undefined);
+    const ctx = createEventContext(this.initParams, params.context as BaseCallContext | undefined, signal);
     const aggregate: EventResult = {};
 
     for (const entry of handlers) {

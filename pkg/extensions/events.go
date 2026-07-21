@@ -259,7 +259,7 @@ func (r *Runtime) dispatchToolOutput(ctx context.Context, eventName string, call
 	currentOutput := output
 	modifiedOutput := false
 	input := json.RawMessage(toolInput)
-	for _, handler := range r.eventHandlers(eventName) {
+	for _, handler := range r.toolOutputEventHandlers(eventName, output) {
 		payload := toolResultPayload{Tool: toolResultPayloadTool{Name: toolName, CallID: toolCallID, Input: input, Output: currentOutput}}
 		result, err := r.dispatchEventToHandler(ctx, handler, eventName, payload, callContext)
 		if err != nil {
@@ -285,6 +285,25 @@ func (r *Runtime) dispatchToolOutput(ctx context.Context, eventName string, call
 	}
 
 	return currentOutput, modifiedOutput, true
+}
+
+func (r *Runtime) toolOutputEventHandlers(eventName string, output tooltypes.StructuredToolResult) []eventHandler {
+	handlers := r.eventHandlers(eventName)
+	if eventName != EventToolUpdate {
+		return handlers
+	}
+
+	var metadata tooltypes.ExtensionToolMetadata
+	if !tooltypes.ExtractMetadata(output.Metadata, &metadata) || metadata.ExtensionID == "" {
+		return handlers
+	}
+	filtered := handlers[:0]
+	for _, handler := range handlers {
+		if handler.process == nil || handler.process.Extension.ID != metadata.ExtensionID {
+			filtered = append(filtered, handler)
+		}
+	}
+	return filtered
 }
 
 // CanStreamToolUpdates reports whether every extension that mutates final tool

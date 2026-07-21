@@ -17,6 +17,7 @@ import type {
   LogContext,
   SharedContext,
   ToolContext,
+  ToolUpdateRequest,
   UIConfirmRequest,
   UIInputRequest,
   UINotifyRequest,
@@ -44,26 +45,57 @@ function currentHostRPCClient(): HostRPCClient | undefined {
   return hostRPCClientStorage.getStore() ?? activeHostRPCClient;
 }
 
-export function createToolContext(init: InitializeParams | undefined, context: BaseCallContext = {}): ToolContext {
-  return createSharedContext(init, context);
+export function createToolContext(
+  init: InitializeParams | undefined,
+  context: BaseCallContext = {},
+  signal: AbortSignal = new AbortController().signal,
+): ToolContext {
+  const client = currentHostRPCClient();
+  return {
+    ...createSharedContext(init, context, signal, client),
+    async update(content: string, data?: Record<string, unknown>) {
+      if (!toolUpdatesSupported(init)) {
+        return;
+      }
+      if (!client) {
+        return;
+      }
+      const payload: ToolUpdateRequest = { content };
+      if (data !== undefined) {
+        payload.data = data;
+      }
+      await client.request("kodelet.tool.update", payload);
+    },
+  };
 }
 
 export function createCommandContext(
   init: InitializeParams | undefined,
   context: BaseCallContext = {},
   invocation: CommandInvocation,
+  signal: AbortSignal = new AbortController().signal,
 ): CommandContext {
+  const client = currentHostRPCClient();
   return {
-    ...createSharedContext(init, context),
+    ...createSharedContext(init, context, signal, client),
     input: invocation,
   };
 }
 
-export function createEventContext(init: InitializeParams | undefined, context: BaseCallContext = {}): EventContext {
-  return createSharedContext(init, context);
+export function createEventContext(
+  init: InitializeParams | undefined,
+  context: BaseCallContext = {},
+  signal: AbortSignal = new AbortController().signal,
+): EventContext {
+  return createSharedContext(init, context, signal, currentHostRPCClient());
 }
 
-function createSharedContext(init: InitializeParams | undefined, context: BaseCallContext): SharedContext {
+function createSharedContext(
+  init: InitializeParams | undefined,
+  context: BaseCallContext,
+  signal: AbortSignal,
+  client: HostRPCClient | undefined,
+): SharedContext {
   const cwd = path.resolve(context.cwd ?? init?.extension.cwd ?? nodeProcess.cwd());
   const dataDir = path.resolve(
     init?.extension.dataDir || path.join(os.homedir(), ".kodelet", "extensions", "data", init?.extension.id ?? "extension"),
@@ -89,6 +121,7 @@ function createSharedContext(init: InitializeParams | undefined, context: BaseCa
   const resolveFsPath = (target: string): string => (path.isAbsolute(target) ? target : resolveWorkspacePath(target));
 
   return {
+    signal,
     sessionId: context.sessionId,
     conversationId: context.conversationId,
     cwd,
@@ -209,7 +242,6 @@ function createSharedContext(init: InitializeParams | undefined, context: BaseCa
     log,
     ui: {
       async input(request: UIInputRequest) {
-        const client = currentHostRPCClient();
         if (!client) {
           return undefined;
         }
@@ -220,7 +252,6 @@ function createSharedContext(init: InitializeParams | undefined, context: BaseCa
         return undefined;
       },
       async confirm(request: UIConfirmRequest) {
-        const client = currentHostRPCClient();
         if (!client) {
           return false;
         }
@@ -228,7 +259,6 @@ function createSharedContext(init: InitializeParams | undefined, context: BaseCa
         return isRecord(result) && result.status === "submitted" && result.confirmed === true;
       },
       async select(request: UISelectRequest) {
-        const client = currentHostRPCClient();
         if (!client) {
           return undefined;
         }
@@ -239,7 +269,6 @@ function createSharedContext(init: InitializeParams | undefined, context: BaseCa
         return undefined;
       },
       async notify(request: string | UINotifyRequest) {
-        const client = currentHostRPCClient();
         if (!client) {
           return;
         }
@@ -279,4 +308,15 @@ function isNotFound(error: unknown): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function toolUpdatesSupported(init: InitializeParams | undefined): boolean {
+  const capabilities = init?.capabilities;
+  if (!capabilities) {
+    return false;
+  }
+  if (capabilities.toolUpdates === true) {
+    return true;
+  }
+  return isRecord(capabilities.tools) && capabilities.tools.updates === true;
 }

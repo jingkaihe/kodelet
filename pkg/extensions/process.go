@@ -200,9 +200,10 @@ func (p *Process) initialize(ctx context.Context, cwd string) (*InitializeResult
 			DataDir: dataDir,
 		},
 		Capabilities: map[string]any{
-			"tools":    true,
-			"commands": true,
-			"ui":       uiInputCapability{Input: true, Confirm: true, Select: true, Notify: true},
+			"tools":       true,
+			"toolUpdates": true,
+			"commands":    true,
+			"ui":          uiInputCapability{Input: true, Confirm: true, Select: true, Notify: true},
 			"events": []string{
 				"session.start",
 				"resources.discover",
@@ -272,6 +273,15 @@ func safeDataDirName(extensionID string) string {
 
 // ExecuteTool invokes an extension-provided tool.
 func (p *Process) ExecuteTool(ctx context.Context, name string, input json.RawMessage, callContext ExtensionCallContext) (*ToolExecutionResult, error) {
+	return p.executeTool(ctx, name, input, callContext, nil)
+}
+
+// ExecuteToolStreaming invokes an extension-provided tool and forwards transient updates.
+func (p *Process) ExecuteToolStreaming(ctx context.Context, name string, input json.RawMessage, callContext ExtensionCallContext, onUpdate func(ToolExecutionResult)) (*ToolExecutionResult, error) {
+	return p.executeTool(ctx, name, input, callContext, onUpdate)
+}
+
+func (p *Process) executeTool(ctx context.Context, name string, input json.RawMessage, callContext ExtensionCallContext, onUpdate func(ToolExecutionResult)) (*ToolExecutionResult, error) {
 	if err := p.ensureRunning(ctx); err != nil {
 		return nil, err
 	}
@@ -282,13 +292,34 @@ func (p *Process) ExecuteTool(ctx context.Context, name string, input json.RawMe
 
 	params := executeToolParams{Name: name, Input: input, Context: callContext}
 	var result ToolExecutionResult
-	if err := client.callWithHostHandler(ctx, "extension.tool.execute", params, &result, p); err != nil {
+	handler := toolExecutionHostHandler{process: p, onUpdate: onUpdate}
+	if err := client.callWithHostHandler(ctx, "extension.tool.execute", params, &result, handler); err != nil {
 		if shouldRestartAfterCallError(err) {
 			p.closeForRestart()
 		}
 		return nil, err
 	}
 	return &result, nil
+}
+
+type toolExecutionHostHandler struct {
+	process  *Process
+	onUpdate func(ToolExecutionResult)
+}
+
+func (h toolExecutionHostHandler) HandleRPCRequest(ctx context.Context, method string, params json.RawMessage) (any, *rpcError) {
+	if method != "kodelet.tool.update" {
+		return h.process.HandleRPCRequest(ctx, method, params)
+	}
+
+	var update ToolExecutionResult
+	if err := json.Unmarshal(params, &update); err != nil {
+		return nil, &rpcError{Code: -32602, Message: err.Error()}
+	}
+	if h.onUpdate != nil {
+		h.onUpdate(update)
+	}
+	return map[string]any{"accepted": true}, nil
 }
 
 // ExecuteCommand invokes an extension-provided command over JSON-RPC.

@@ -54,6 +54,7 @@ Kodelet is a lightweight agentic SWE Agent that runs as an interactive CLI tool 
 - [Extensions](#extensions)
   - [TypeScript Agent SDK](#typescript-agent-sdk)
   - [Creating TypeScript Extensions](#creating-typescript-extensions)
+  - [Streaming Extension Tool Progress](#streaming-extension-tool-progress)
   - [Requesting User Input from Extensions](#requesting-user-input-from-extensions)
   - [Extension Discovery](#extension-discovery)
   - [Extension Commands and Dynamic Recipes](#extension-commands-and-dynamic-recipes)
@@ -1338,6 +1339,41 @@ Example wrapper:
 #!/usr/bin/env bash
 exec kodelet-extension-node ./dist/index.js
 ```
+
+### Streaming Extension Tool Progress
+
+Long-running extension tools can publish an accumulated snapshot with `ctx.update(content, data)`. Kodelet replaces the previous snapshot for that tool call in the TUI, Web UI, ACP, and headless streaming handlers; the tool handler's eventual return value remains the authoritative result sent to the model and stored in the conversation.
+
+The TypeScript and Python SDKs provide `TaskProgress` for bounded multi-activity progress. It uses the generic `data.taskRun` shape, supports direct activities for any kind of task, and can attach to a child Kodelet session to translate its tool lifecycle events automatically.
+
+```typescript
+import { TaskProgress } from "kodelet";
+
+const progress = new TaskProgress(ctx, {
+  kind: "download",
+  task: "Fetch release artifacts",
+  cwd: ctx.cwd,
+  runningTitle: "Downloading",
+  completedTitle: "Downloaded",
+  failedTitle: "Download failed",
+  respondingDetail: "writing manifest",
+});
+
+await progress.start();
+progress.startActivity("artifact-1", {
+  kind: "download",
+  label: "Download artifact.tar.zst",
+  detail: "downloading artifact.tar.zst",
+});
+progress.finishActivity("artifact-1", { success: true });
+
+const taskRun = await progress.finish({ success: true });
+return { content: "Downloaded release artifacts.", data: { taskRun } };
+```
+
+For a nested Kodelet session, call `progress.attach(session)` before `session.runAndWait(...)`; `finish(...)` detaches those listeners automatically. Updates are capability-gated and become a no-op on older hosts that do not advertise live extension-tool updates.
+
+Cancellation is scoped to the active extension request. Python async handlers receive `asyncio.CancelledError`; TypeScript handlers can observe `ctx.signal`. After cancellation or a bridge disconnect, late reverse-RPC calls such as `ctx.update(...)` are rejected and cannot be attributed to a later tool call.
 
 ### Requesting User Input from Extensions
 

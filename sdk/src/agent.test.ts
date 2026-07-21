@@ -13,8 +13,11 @@ import type { SpawnFunction, SpawnedProcess, ToolUpdateData } from "./agent.js";
 interface JsonRPCRequest {
   jsonrpc?: "2.0";
   id?: number | string | null;
+  parentId?: number | string;
   method?: string;
   params?: unknown;
+  result?: unknown;
+  error?: { message?: string };
 }
 
 interface FakeACPProcessOptions {
@@ -494,6 +497,7 @@ test("Session can expose in-process extensions over a TCP bridge", async (t) => 
       description: "Ask a question",
       inputSchema: z.object({ question: z.string(), options: z.array(z.string()) }),
       async execute(input, ctx) {
+        await ctx.update("Waiting for selection", { step: 1 });
         const selected = await ctx.ui.select({ title: input.question, options: input.options });
         selectedValues.push(selected ?? "");
         return selected ?? "dismissed";
@@ -537,7 +541,7 @@ test("Session can expose in-process extensions over a TCP bridge", async (t) => 
     protocolVersion: "2026-05-30",
     kodelet: { version: "test" },
     extension: { id: "workspace", cwd: workspace, dataDir: "" },
-    capabilities: {},
+    capabilities: { toolUpdates: true },
   });
   assert.equal((init as { name?: string }).name, "workspace");
 
@@ -548,6 +552,197 @@ test("Session can expose in-process extensions over a TCP bridge", async (t) => 
   });
   assert.deepEqual(result, { content: "B" });
   assert.deepEqual(selectedValues, ["B"]);
+  assert.deepEqual(bridge.hostRequests, [
+    {
+      jsonrpc: "2.0",
+      id: 1,
+      parentId: 2,
+      method: "kodelet.tool.update",
+      params: { content: "Waiting for selection", data: { step: 1 } },
+    },
+  ]);
+
+  await client.close();
+});
+
+test("In-process extension bridge cancellation is connection-scoped", async (t) => {
+  const workspace = await mkdtemp(path.join(os.tmpdir(), "kodelet-agent-sdk-cancel-test-"));
+  const calls: Array<{ env?: NodeJS.ProcessEnv }> = [];
+  const spawn: SpawnFunction = (_command, _args, options) => {
+    calls.push({ env: options.env });
+    return new FakeACPProcess({ sessionId: "conv-cancel" });
+  };
+
+  let cancelStartedResolve!: () => void;
+  let cancelAbortedResolve!: () => void;
+  let disconnectStartedResolve!: () => void;
+  let disconnectAbortedResolve!: () => void;
+  let uiStartedResolve!: () => void;
+  let uiAbortedResolve!: () => void;
+  const notifications: string[] = [];
+  const cancelStarted = new Promise<void>((resolve) => { cancelStartedResolve = resolve; });
+  const cancelAborted = new Promise<void>((resolve) => { cancelAbortedResolve = resolve; });
+  const disconnectStarted = new Promise<void>((resolve) => { disconnectStartedResolve = resolve; });
+  const disconnectAborted = new Promise<void>((resolve) => { disconnectAbortedResolve = resolve; });
+  const uiStarted = new Promise<void>((resolve) => { uiStartedResolve = resolve; });
+  const uiAborted = new Promise<void>((resolve) => { uiAbortedResolve = resolve; });
+
+  const extension = defineExtension((ext) => {
+    ext.setMetadata({ name: "cancellable" });
+    ext.registerTool({
+      name: "wait_for_cancel",
+      description: "Wait for cancellation",
+      inputSchema: z.object({ mode: z.enum(["cancel", "disconnect", "detached", "finish_abort", "quick", "ui"]) }),
+      async execute(input, ctx) {
+        if (input.mode === "quick") {
+          return "quick result";
+        }
+        if (input.mode === "detached") {
+          setTimeout(() => {
+            void ctx.ui.notify({ message: "late notification" }).catch(() => undefined);
+          }, 20);
+          return "detached result";
+        }
+        if (input.mode === "ui") {
+          await ctx.ui.notify({ message: "blocking notification" });
+          return "ui result";
+        }
+        if (input.mode === "finish_abort") {
+          ctx.signal.addEventListener("abort", () => {
+            void ctx.ui.notify({ message: "completion notification" }).catch(() => undefined);
+          }, { once: true });
+          return "finish result";
+        }
+        if (input.mode === "cancel") {
+          cancelStartedResolve();
+        } else {
+          disconnectStartedResolve();
+        }
+        await new Promise<void>((resolve) => {
+          if (ctx.signal.aborted) {
+            resolve();
+            return;
+          }
+          ctx.signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+        if (input.mode === "cancel") {
+          cancelAbortedResolve();
+        } else {
+          disconnectAbortedResolve();
+        }
+        await ctx.update(`stale ${input.mode}`);
+        return `late ${input.mode}`;
+      },
+    });
+  });
+
+  const client = new Client({ cwd: workspace, spawn });
+  await client.createSession({
+    extensions: [extension],
+    extensionTransport: "tcp",
+    ui: {
+      async notify(request, signal) {
+        if (request.message !== "blocking notification") {
+          notifications.push(request.message);
+          return;
+        }
+        uiStartedResolve();
+        await new Promise<void>((resolve) => {
+          if (signal?.aborted) {
+            resolve();
+            return;
+          }
+          signal?.addEventListener("abort", () => resolve(), { once: true });
+        });
+        uiAbortedResolve();
+      },
+    },
+  });
+  const config = JSON.parse(await readFile(calls[0]?.env?.KODELET_CONFIG_FILE as string, "utf8")) as {
+    extensions?: { local_dir?: string };
+  };
+  const extensionRoot = config.extensions?.local_dir;
+  assert.ok(extensionRoot);
+  const executable = path.join(
+    extensionRoot,
+    (await readdir(extensionRoot)).find((entry) => entry.startsWith("kodelet-extension-")) ?? "",
+  );
+
+  const child = spawnProcess(executable, { stdio: ["pipe", "pipe", "pipe"] });
+  assert.ok(child.stdin);
+  assert.ok(child.stdout);
+  const bridge = new BridgeTestClient(child.stdout, child.stdin);
+  await bridge.call("extension.initialize", {
+    extension: { id: "cancellable", cwd: workspace },
+    capabilities: { toolUpdates: true },
+  });
+
+  const detached = await bridge.call("extension.tool.execute", {
+    name: "wait_for_cancel",
+    input: { mode: "detached" },
+  });
+  assert.deepEqual(detached, { content: "detached result" });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.deepEqual(notifications, []);
+
+  const finishAbort = await bridge.call("extension.tool.execute", {
+    name: "wait_for_cancel",
+    input: { mode: "finish_abort" },
+  });
+  assert.deepEqual(finishAbort, { content: "finish result" });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual(notifications, []);
+
+  const uiCall = bridge.beginCall("extension.tool.execute", {
+    name: "wait_for_cancel",
+    input: { mode: "ui" },
+  });
+  void uiCall.response.catch(() => undefined);
+  await uiStarted;
+  bridge.notify("$/cancelRequest", { id: uiCall.id });
+  await uiAborted;
+
+  const cancelled = bridge.beginCall("extension.tool.execute", {
+    name: "wait_for_cancel",
+    input: { mode: "cancel" },
+  });
+  void cancelled.response.catch(() => undefined);
+  await cancelStarted;
+  bridge.notify("$/cancelRequest", { id: cancelled.id });
+  await cancelAborted;
+
+  const reused = await bridge.callWithId(cancelled.id, "extension.tool.execute", {
+    name: "wait_for_cancel",
+    input: { mode: "quick" },
+  });
+  assert.deepEqual(reused, { content: "quick result" });
+
+  const disconnected = bridge.beginCall("extension.tool.execute", {
+    name: "wait_for_cancel",
+    input: { mode: "disconnect" },
+  });
+  void disconnected.response.catch(() => undefined);
+  await disconnectStarted;
+  child.kill();
+  await new Promise<void>((resolve) => child.once("close", () => resolve()));
+  await disconnectAborted;
+  assert.deepEqual(bridge.hostRequests, []);
+
+  const replacement = spawnProcess(executable, { stdio: ["pipe", "pipe", "pipe"] });
+  t.after(() => replacement.kill());
+  assert.ok(replacement.stdin);
+  assert.ok(replacement.stdout);
+  const replacementBridge = new BridgeTestClient(replacement.stdout, replacement.stdin);
+  await replacementBridge.call("extension.initialize", {
+    extension: { id: "cancellable", cwd: workspace },
+    capabilities: { toolUpdates: true },
+  });
+  const result = await replacementBridge.call("extension.tool.execute", {
+    name: "wait_for_cancel",
+    input: { mode: "quick" },
+  });
+  assert.deepEqual(result, { content: "quick result" });
+  assert.deepEqual(replacementBridge.hostRequests, []);
 
   await client.close();
 });
@@ -556,6 +751,7 @@ class BridgeTestClient {
   private buffer = Buffer.alloc(0);
   private nextId = 0;
   private waiters = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>();
+  hostRequests: JsonRPCRequest[] = [];
 
   constructor(stdout: NodeJS.ReadableStream, private stdin: NodeJS.WritableStream) {
     stdout.on("data", (chunk: Buffer) => {
@@ -565,12 +761,31 @@ class BridgeTestClient {
   }
 
   call(method: string, params: unknown): Promise<unknown> {
+    return this.beginCall(method, params).response;
+  }
+
+  beginCall(method: string, params: unknown): { id: number; response: Promise<unknown> } {
     const id = ++this.nextId;
+    return this.beginCallWithId(id, method, params);
+  }
+
+  callWithId(id: number, method: string, params: unknown): Promise<unknown> {
+    return this.beginCallWithId(id, method, params).response;
+  }
+
+  private beginCallWithId(id: number, method: string, params: unknown): { id: number; response: Promise<unknown> } {
+    this.nextId = Math.max(this.nextId, id);
     const payload = JSON.stringify({ jsonrpc: "2.0", id, method, params });
     this.stdin.write(`Content-Length: ${Buffer.byteLength(payload)}\r\n\r\n${payload}`);
-    return new Promise((resolve, reject) => {
+    const response = new Promise<unknown>((resolve, reject) => {
       this.waiters.set(id, { resolve, reject });
     });
+    return { id, response };
+  }
+
+  notify(method: string, params: unknown): void {
+    const payload = JSON.stringify({ jsonrpc: "2.0", method, params });
+    this.stdin.write(`Content-Length: ${Buffer.byteLength(payload)}\r\n\r\n${payload}`);
   }
 
   private drain(): void {
@@ -590,12 +805,14 @@ class BridgeTestClient {
       if (this.buffer.length < end) {
         return;
       }
-      const response = JSON.parse(this.buffer.subarray(start, end).toString("utf8")) as {
-        id?: number;
-        result?: unknown;
-        error?: { message?: string };
-      };
+      const response = JSON.parse(this.buffer.subarray(start, end).toString("utf8")) as JsonRPCRequest;
       this.buffer = this.buffer.subarray(end);
+      if (response.method && response.id !== undefined && response.id !== null) {
+        this.hostRequests.push(response);
+        const payload = JSON.stringify({ jsonrpc: "2.0", id: response.id, result: { accepted: true } });
+        this.stdin.write(`Content-Length: ${Buffer.byteLength(payload)}\r\n\r\n${payload}`);
+        continue;
+      }
       if (typeof response.id !== "number") {
         continue;
       }

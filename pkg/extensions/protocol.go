@@ -16,10 +16,11 @@ import (
 const protocolVersion = "2026-05-30"
 
 type rpcRequest struct {
-	JSONRPC string `json:"jsonrpc"`
-	ID      int64  `json:"id"`
-	Method  string `json:"method"`
-	Params  any    `json:"params,omitempty"`
+	JSONRPC  string `json:"jsonrpc"`
+	ID       int64  `json:"id"`
+	ParentID int64  `json:"parentId,omitempty"`
+	Method   string `json:"method"`
+	Params   any    `json:"params,omitempty"`
 }
 
 type rpcNotification struct {
@@ -342,25 +343,28 @@ func (c *rpcClient) dispatchResponse(msg rpcIncomingMessage) error {
 }
 
 func (c *rpcClient) dispatchIncomingRequest(msg rpcIncomingMessage) {
-	ctx, handler := c.hostRequestTarget(msg.ParentID)
+	ctx, handler, parentMatched := c.hostRequestTarget(msg.ParentID)
+	if msg.Method == "kodelet.tool.update" && !parentMatched {
+		handler = invalidToolUpdateParentHandler{}
+	}
 	if err := c.handleIncomingRequest(ctx, msg, handler); err != nil {
 		c.fail(err)
 	}
 }
 
-func (c *rpcClient) hostRequestTarget(parentID json.RawMessage) (context.Context, rpcHostRequestHandler) {
+func (c *rpcClient) hostRequestTarget(parentID json.RawMessage) (context.Context, rpcHostRequestHandler, bool) {
 	c.stateMu.Lock()
 	defer c.stateMu.Unlock()
 
 	if len(parentID) > 0 && string(parentID) != "null" {
 		var id int64
 		if err := json.Unmarshal(parentID, &id); err != nil {
-			return context.Background(), nil
+			return context.Background(), nil, false
 		}
 		if pending := c.pending[id]; pending != nil {
-			return pending.ctx, pending.handler
+			return pending.ctx, pending.handler, pending.handler != nil
 		}
-		return context.Background(), nil
+		return context.Background(), nil, false
 	}
 
 	var selectedID int64
@@ -372,9 +376,15 @@ func (c *rpcClient) hostRequestTarget(parentID json.RawMessage) (context.Context
 		}
 	}
 	if selected == nil {
-		return context.Background(), nil
+		return context.Background(), nil, false
 	}
-	return selected.ctx, selected.handler
+	return selected.ctx, selected.handler, false
+}
+
+type invalidToolUpdateParentHandler struct{}
+
+func (invalidToolUpdateParentHandler) HandleRPCRequest(_ context.Context, _ string, _ json.RawMessage) (any, *rpcError) {
+	return nil, &rpcError{Code: -32602, Message: "kodelet.tool.update requires a valid parentId"}
 }
 
 func (c *rpcClient) fail(err error) {

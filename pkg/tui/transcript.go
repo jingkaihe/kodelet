@@ -74,6 +74,9 @@ func (m *model) renderTranscript() (string, []detailRegion) {
 						line++
 						if group.expanded || group.active {
 							body := group.body
+							if group.markdownBody {
+								body = m.renderMarkdown(body, m.transcriptTextWidth()-2, markdownAssistant)
+							}
 							if group.wrapBody {
 								body = wrapPreservingWhitespace(body, m.transcriptTextWidth()-2)
 							}
@@ -91,7 +94,7 @@ func (m *model) renderTranscript() (string, []detailRegion) {
 							}
 							body = indentText(body, "  ")
 							if strings.TrimSpace(body) != "" {
-								rendered := toolBodyStyle.Render(body)
+								rendered := renderPersistentStyle(toolBodyStyle, body)
 								b.WriteString(rendered)
 								b.WriteString("\n")
 								line += lineCount(rendered)
@@ -211,6 +214,9 @@ func (m model) renderToolGroupHeader(group toolRenderGroup) string {
 	chevron := "▸"
 	if group.expanded {
 		chevron = "▾"
+	}
+	if group.failed {
+		return toolHeaderStyle.Render(fmt.Sprintf("✗ %s %s", group.label, chevron))
 	}
 	if len(group.labelParts) > 0 {
 		return renderToolGroupHeaderParts(group.labelParts, chevron)

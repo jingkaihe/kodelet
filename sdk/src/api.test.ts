@@ -267,6 +267,7 @@ test("tool context can request host UI interactions", async () => {
       description: "Ask for UI interactions",
       inputSchema: z.object({}),
       async execute(_, ctx) {
+        await ctx.update("Working", { step: 1 });
         const answer = await ctx.ui.input({
           title: "Pick one",
           helpText: "1. A\n2. B",
@@ -297,19 +298,46 @@ test("tool context can request host UI interactions", async () => {
   const result = await harness.executeTool({ name: "ask", input: {} });
   assert.deepEqual(result, { content: "answer=2;confirmed=true;selection=Pizza" });
   assert.deepEqual(requests.map((request) => request.method), [
+    "kodelet.tool.update",
     "kodelet.ui.input",
     "kodelet.ui.confirm",
     "kodelet.ui.select",
     "kodelet.ui.notify",
   ]);
-  assert.deepEqual(requests[0]?.params, {
+  assert.deepEqual(requests[0]?.params, { content: "Working", data: { step: 1 } });
+  assert.deepEqual(requests[1]?.params, {
     title: "Pick one",
     helpText: "1. A\n2. B",
     submitButtonText: "Select",
   });
-  assert.deepEqual(requests[1]?.params, { title: "Allow?", message: "A tool call incoming" });
-  assert.deepEqual(requests[2]?.params, { title: "Food", options: ["Pasta", "Pizza"] });
-  assert.deepEqual(requests[3]?.params, { message: "Done" });
+  assert.deepEqual(requests[2]?.params, { title: "Allow?", message: "A tool call incoming" });
+  assert.deepEqual(requests[3]?.params, { title: "Food", options: ["Pasta", "Pizza"] });
+  assert.deepEqual(requests[4]?.params, { message: "Done" });
+});
+
+test("tool updates are ignored when the host does not advertise support", async () => {
+  const extension = defineExtension((ext) => {
+    ext.registerTool({
+      name: "stream",
+      description: "Stream progress",
+      inputSchema: z.object({}),
+      async execute(_input, ctx) {
+        await ctx.update("Working", { step: 1 });
+        return "done";
+      },
+    });
+  });
+  const requests: string[] = [];
+  const harness = await createTestHarness(extension, {
+    async request(method) {
+      requests.push(method);
+      return { accepted: true };
+    },
+  });
+
+  harness.initialize({ capabilities: {} });
+  assert.deepEqual(await harness.executeTool({ name: "stream", input: {} }), { content: "done" });
+  assert.deepEqual(requests, []);
 });
 
 test("runtime serves JSON-RPC over stdio", async (t) => {
@@ -370,6 +398,7 @@ test("runtime supports extension-initiated host RPC", async (t) => {
           description: "Ask user",
           inputSchema: z.object({}),
           async execute(_, ctx) {
+            await ctx.update("Working", { step: 1 });
             const answer = await ctx.ui.input({ title: "Choose" });
             const confirmed = await ctx.ui.confirm({ title: "Allow?" });
             const selection = await ctx.ui.select({ title: "Food", options: ["Pasta", "Pizza"] });
@@ -393,7 +422,7 @@ test("runtime supports extension-initiated host RPC", async (t) => {
     protocolVersion: "2026-05-30",
     kodelet: { version: "test" },
     extension: { id: "rpc-ui", cwd: process.cwd(), dataDir: "" },
-    capabilities: { ui: { input: true } },
+    capabilities: { toolUpdates: true, ui: { input: true } },
   });
   assert.equal(init.tools[0].name, "ask");
 
@@ -403,13 +432,87 @@ test("runtime supports extension-initiated host RPC", async (t) => {
     context: { conversationId: "conv-rpc", cwd: process.cwd() },
   });
   assert.deepEqual(client.hostRequests.map((request) => request.method), [
+    "kodelet.tool.update",
     "kodelet.ui.input",
     "kodelet.ui.confirm",
     "kodelet.ui.select",
     "kodelet.ui.notify",
   ]);
-  assert.deepEqual(client.hostRequests.map((request) => request.parentId), [2, 2, 2, 2]);
+  assert.deepEqual(client.hostRequests.map((request) => request.parentId), [2, 2, 2, 2, 2]);
+  assert.deepEqual(client.hostRequests[0]?.params, { content: "Working", data: { step: 1 } });
   assert.deepEqual(result, { content: "from-host:true:Pizza" });
+});
+
+test("runtime cancellation aborts handlers and blocks late host RPC", async (t) => {
+  const extensionFile = path.join(await mkdtemp(path.join(os.tmpdir(), "kodelet-sdk-cancel-rpc-")), "extension.ts");
+  await writeFile(
+    extensionFile,
+    `
+      import { defineExtension, runExtension, z } from ${JSON.stringify(path.resolve("src/index.ts"))};
+
+      runExtension(defineExtension((ext) => {
+        ext.registerTool({
+          name: "wait",
+          description: "Wait for cancellation",
+          inputSchema: z.object({ finishAbort: z.boolean().optional(), quick: z.boolean().optional() }),
+          async execute(input, ctx) {
+            if (input.quick) return "quick result";
+            if (input.finishAbort) {
+              ctx.signal.addEventListener("abort", () => {
+                void ctx.update("completion update").catch(() => undefined);
+              }, { once: true });
+              return "finish result";
+            }
+            await ctx.update("started");
+            await new Promise((resolve) => {
+              if (ctx.signal.aborted) resolve(undefined);
+              else ctx.signal.addEventListener("abort", () => resolve(undefined), { once: true });
+            });
+            try { await ctx.update("stale update"); } catch {}
+            process.stderr.write("CANCELLED\\n");
+            return "late result";
+          },
+        });
+      }));
+    `,
+    "utf8",
+  );
+
+  const child = spawn(process.execPath, ["--import", "tsx", extensionFile], {
+    cwd: process.cwd(),
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  t.after(() => child.kill());
+  const cancelled = new Promise<void>((resolve) => {
+    child.stderr.on("data", (chunk) => {
+      if (String(chunk).includes("CANCELLED")) resolve();
+    });
+  });
+  const client = new RpcTestClient(child.stdout, child.stdin);
+  await client.call("extension.initialize", {
+    protocolVersion: "2026-05-30",
+    extension: { id: "cancellable", cwd: process.cwd(), dataDir: "" },
+    capabilities: { toolUpdates: true },
+  });
+
+  const pending = client.beginCall("extension.tool.execute", { name: "wait", input: {} });
+  void pending.response.catch(() => undefined);
+  await client.waitForHostRequests(1);
+  client.notify("$/cancelRequest", { id: pending.id });
+  await cancelled;
+
+  const result = await client.callWithId(pending.id, "extension.tool.execute", {
+    name: "wait",
+    input: { quick: true },
+  });
+  assert.deepEqual(result, { content: "quick result" });
+  const finishResult = await client.call("extension.tool.execute", {
+    name: "wait",
+    input: { finishAbort: true },
+  });
+  assert.deepEqual(finishResult, { content: "finish result" });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual(client.hostRequests.map((request) => request.params), [{ content: "started" }]);
 });
 
 class RpcTestClient {
@@ -426,12 +529,37 @@ class RpcTestClient {
   }
 
   call(method: string, params: unknown): Promise<any> {
+    return this.beginCall(method, params).response;
+  }
+
+  beginCall(method: string, params: unknown): { id: number; response: Promise<any> } {
     const id = ++this.nextId;
+    return this.beginCallWithId(id, method, params);
+  }
+
+  callWithId(id: number, method: string, params: unknown): Promise<any> {
+    return this.beginCallWithId(id, method, params).response;
+  }
+
+  private beginCallWithId(id: number, method: string, params: unknown): { id: number; response: Promise<any> } {
+    this.nextId = Math.max(this.nextId, id);
     const payload = JSON.stringify({ jsonrpc: "2.0", id, method, params });
     this.stdin.write(`Content-Length: ${Buffer.byteLength(payload)}\r\n\r\n${payload}`);
-    return new Promise((resolve, reject) => {
+    const response = new Promise<any>((resolve, reject) => {
       this.waiters.set(id, { resolve, reject });
     });
+    return { id, response };
+  }
+
+  notify(method: string, params: unknown): void {
+    const payload = JSON.stringify({ jsonrpc: "2.0", method, params });
+    this.stdin.write(`Content-Length: ${Buffer.byteLength(payload)}\r\n\r\n${payload}`);
+  }
+
+  async waitForHostRequests(count: number): Promise<void> {
+    while (this.hostRequests.length < count) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
   }
 
   private drain(): void {

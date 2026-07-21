@@ -202,6 +202,144 @@ func TestDedicatedBuiltinToolLabels(t *testing.T) {
 	}
 }
 
+func TestRenderTranscriptShowsTaskRunProgressAndFinalMarkdown(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 100
+	m.height = 40
+	m.resize()
+
+	progress := toolCall{
+		name: "code_search",
+		structured: &tooltypes.StructuredToolResult{
+			ToolName: "code_search",
+			Success:  true,
+			Metadata: &tooltypes.ExtensionToolMetadata{
+				ToolName: "code_search",
+				Data: map[string]any{"taskRun": map[string]any{
+					"version":   1,
+					"revision":  7,
+					"kind":      "code_search",
+					"status":    "running",
+					"phase":     "working",
+					"title":     "Searching code",
+					"detail":    "2 actions running",
+					"elapsedMs": 68000,
+					"counts": map[string]any{
+						"succeeded": 10,
+						"failed":    0,
+						"running":   2,
+					},
+					"activities": []any{
+						map[string]any{"id": "1", "sequence": 1, "kind": "grep_tool", "label": "Search \"HandleToolUpdate\" in pkg/", "status": "succeeded"},
+						map[string]any{"id": "2", "sequence": 2, "kind": "file_read", "label": "Read pkg/llm/base/tool_execution.go", "status": "running"},
+					},
+					"omittedSucceeded": 9,
+				}},
+			},
+		},
+	}
+	m.entries = []chatEntry{{kind: entryAssistant, blocks: []assistantBlock{{kind: blockTools, tools: []toolCall{progress}}}}}
+
+	content, _ := m.renderTranscript()
+	plain := xansi.Strip(content)
+	assert.Contains(t, plain, "Searching code — 2 actions running")
+	assert.Contains(t, plain, "10 done · 2 running · 1m 08s")
+	assert.Contains(t, plain, "Search \"HandleToolUpdate\" in pkg/")
+	assert.Contains(t, plain, "+9 earlier completed")
+
+	progress.done = true
+	progress.expanded = true
+	metadata := progress.structured.Metadata.(*tooltypes.ExtensionToolMetadata)
+	metadata.Output = "## Findings\n\nThe update path starts in `tool_execution.go`."
+	metadata.Data["taskRun"].(map[string]any)["status"] = "completed"
+	metadata.Data["taskRun"].(map[string]any)["phase"] = "completed"
+	metadata.Data["taskRun"].(map[string]any)["title"] = "Searched code"
+	metadata.Data["taskRun"].(map[string]any)["detail"] = ""
+	metadata.Data["taskRun"].(map[string]any)["counts"].(map[string]any)["running"] = 0
+	m.entries[0].blocks[0].tools[0] = progress
+
+	content, _ = m.renderTranscript()
+	plain = xansi.Strip(content)
+	assert.Contains(t, plain, "Searched code · 10 actions · 1m 08s")
+	assert.Contains(t, plain, "Findings")
+	assert.Contains(t, plain, "The update path starts in tool_execution.go")
+}
+
+func TestRenderTranscriptShowsFailedTaskRun(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 100
+	m.height = 40
+	m.resize()
+
+	failed := toolCall{
+		name:   "code_search",
+		done:   true,
+		failed: true,
+		result: "code_search timed out while waiting for kodelet to finish",
+		structured: &tooltypes.StructuredToolResult{
+			ToolName: "code_search",
+			Success:  false,
+			Error:    "code_search timed out while waiting for kodelet to finish",
+			Metadata: &tooltypes.ExtensionToolMetadata{
+				ToolName: "code_search",
+				Output:   "code_search timed out while waiting for kodelet to finish",
+				Data: map[string]any{"taskRun": map[string]any{
+					"version":   1,
+					"revision":  2,
+					"kind":      "code_search",
+					"status":    "failed",
+					"phase":     "failed",
+					"title":     "Code search failed",
+					"detail":    "failed",
+					"elapsedMs": 1200,
+					"counts": map[string]any{
+						"succeeded": 0,
+						"failed":    0,
+						"running":   0,
+					},
+					"activities": []any{},
+				}},
+			},
+		},
+	}
+	m.entries = []chatEntry{{kind: entryAssistant, blocks: []assistantBlock{{kind: blockTools, tools: []toolCall{failed}}}}}
+
+	content, _ := m.renderTranscript()
+	plain := xansi.Strip(content)
+	assert.Contains(t, plain, "✗ Code search failed · 1s")
+	assert.Contains(t, plain, "code_search timed out while waiting for kodelet to finish")
+}
+
+func TestRenderTranscriptShowsDistinctFailedTaskRunErrorAndOutput(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 100
+	m.height = 40
+	m.resize()
+
+	failed := toolCall{
+		name: "subagent", done: true, failed: true,
+		structured: &tooltypes.StructuredToolResult{
+			ToolName: "subagent", Success: false, Error: "subagent exited unexpectedly",
+			Metadata: &tooltypes.ExtensionToolMetadata{
+				ToolName: "subagent", Output: "Partial findings were preserved.",
+				Data: map[string]any{"taskRun": map[string]any{
+					"version": 1, "revision": 2, "kind": "subagent", "status": "failed", "phase": "failed", "title": "Delegated task failed", "detail": "failed", "elapsedMs": 1200,
+					"counts": map[string]any{"succeeded": 1, "failed": 1, "running": 0}, "activities": []any{},
+				}},
+			},
+		},
+	}
+	m.entries = []chatEntry{{kind: entryAssistant, blocks: []assistantBlock{{kind: blockTools, tools: []toolCall{failed}}}}}
+
+	content, _ := m.renderTranscript()
+	plain := xansi.Strip(content)
+	assert.Contains(t, plain, "subagent exited unexpectedly")
+	assert.Contains(t, plain, "Partial findings were preserved.")
+}
+
 func TestApplyPatchGroupsRenderMoveLabelsCountsAndLineGutter(t *testing.T) {
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)

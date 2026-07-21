@@ -1,8 +1,7 @@
-import { AsyncLocalStorage } from "node:async_hooks";
 import nodeProcess from "node:process";
 
 import { createExtensionHost, type ExtensionHost } from "./api.js";
-import { setActiveHostRPCClient, type HostRPCClient } from "./context.js";
+import { runWithHostRPCClient, setActiveHostRPCClient, type HostRPCClient } from "./context.js";
 import type { ExtensionEntrypoint } from "./types.js";
 
 interface JsonRpcRequest {
@@ -24,25 +23,72 @@ interface JsonRpcResponse {
 }
 
 interface PendingRequest {
+  request?: ActiveRequest;
   resolve(value: unknown): void;
   reject(error: Error): void;
+}
+
+class ActiveRequest {
+  readonly controller = new AbortController();
+  readonly cancelled: Promise<never>;
+  active = true;
+  private rejectCancellation!: (error: Error) => void;
+
+  constructor(readonly id: number | string) {
+    this.cancelled = new Promise<never>((_, reject) => {
+      this.rejectCancellation = reject;
+    });
+  }
+
+  cancel(error: Error): void {
+    if (!this.active) {
+      return;
+    }
+    this.active = false;
+    this.controller.abort(error);
+    this.rejectCancellation(error);
+  }
+
+  finish(): void {
+    const wasActive = this.active;
+    this.active = false;
+    if (wasActive) {
+      this.controller.abort(new Error("Extension request completed"));
+    }
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 class StdioHostRPCClient implements HostRPCClient {
   private nextId = 0;
   private pending = new Map<number, PendingRequest>();
-  private parentRequestStorage = new AsyncLocalStorage<number | string>();
-
-  async runForRequest<Result>(requestId: number | string, fn: () => Promise<Result>): Promise<Result> {
-    return await this.parentRequestStorage.run(requestId, fn);
-  }
 
   request(method: string, params?: unknown): Promise<unknown> {
+    return this.requestFor(undefined, method, params);
+  }
+
+  requestFor(request: ActiveRequest | undefined, method: string, params?: unknown): Promise<unknown> {
+    if (request && !request.active) {
+      throw new Error("Extension request is no longer active");
+    }
     const id = ++this.nextId;
-    writeMessage({ jsonrpc: "2.0", id, parentId: this.parentRequestStorage.getStore(), method, params });
+    writeMessage({ jsonrpc: "2.0", id, parentId: request?.id, method, params });
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      this.pending.set(id, { resolve, reject, request });
     });
+  }
+
+  finishRequest(request: ActiveRequest, error = new Error("Extension request completed")): void {
+    request.finish();
+    for (const [reverseId, pending] of this.pending) {
+      if (pending.request === request) {
+        this.pending.delete(reverseId);
+        pending.reject(error);
+      }
+    }
   }
 
   handleResponse(response: JsonRpcResponse): boolean {
@@ -72,6 +118,7 @@ export async function runExtension(entrypoint: ExtensionEntrypoint | { default: 
 function runStdioServer(host: ExtensionHost): void {
   let buffer: Buffer<ArrayBufferLike> = Buffer.alloc(0);
   const hostClient = new StdioHostRPCClient();
+  const activeRequests = new Map<number | string, ActiveRequest>();
   setActiveHostRPCClient(hostClient);
 
   nodeProcess.stdin.on("data", (chunk: Buffer) => {
@@ -82,13 +129,26 @@ function runStdioServer(host: ExtensionHost): void {
         break;
       }
       buffer = frame.remaining;
-      void handleMessage(host, hostClient, frame.payload);
+      handleMessage(host, hostClient, activeRequests, frame.payload);
     }
+  });
+  nodeProcess.stdin.on("end", () => {
+    for (const request of activeRequests.values()) {
+      const error = new Error("Extension host disconnected");
+      request.cancel(error);
+      hostClient.finishRequest(request, error);
+    }
+    activeRequests.clear();
   });
   nodeProcess.stdin.resume();
 }
 
-async function handleMessage(host: ExtensionHost, hostClient: StdioHostRPCClient, payload: Buffer): Promise<void> {
+function handleMessage(
+  host: ExtensionHost,
+  hostClient: StdioHostRPCClient,
+  activeRequests: Map<number | string, ActiveRequest>,
+  payload: Buffer,
+): void {
   let request: JsonRpcRequest;
   try {
     request = JSON.parse(payload.toString("utf8")) as JsonRpcRequest;
@@ -101,30 +161,79 @@ async function handleMessage(host: ExtensionHost, hostClient: StdioHostRPCClient
     return;
   }
 
+  if (request.method === "$/cancelRequest" && (request.id === undefined || request.id === null)) {
+    const params = request.params;
+    if (isRecord(params) && (typeof params.id === "number" || typeof params.id === "string")) {
+      const error = new Error("Extension request cancelled");
+      const request = activeRequests.get(params.id);
+      if (request) {
+        request.cancel(error);
+        hostClient.finishRequest(request, error);
+      }
+    }
+    return;
+  }
+
   if (request.id === undefined || request.id === null) {
     return;
   }
 
-  try {
-    const result = await hostClient.runForRequest(request.id, () => dispatch(host, request));
-    writeResponse({ jsonrpc: "2.0", id: request.id, result });
-  } catch (error) {
-    writeResponse({ jsonrpc: "2.0", id: request.id, error: { code: -32000, message: errorMessage(error) } });
-  }
+  startRequest(host, hostClient, activeRequests, request);
 }
 
-async function dispatch(host: ExtensionHost, request: JsonRpcRequest): Promise<unknown> {
+function startRequest(
+  host: ExtensionHost,
+  hostClient: StdioHostRPCClient,
+  activeRequests: Map<number | string, ActiveRequest>,
+  request: JsonRpcRequest,
+): void {
+  const requestId = request.id as number | string;
+  const previous = activeRequests.get(requestId);
+  if (previous) {
+    const reusedError = new Error("Extension request id was reused");
+    previous.cancel(reusedError);
+    hostClient.finishRequest(previous, reusedError);
+  }
+  const active = new ActiveRequest(requestId);
+  activeRequests.set(requestId, active);
+  const requestClient: HostRPCClient = {
+    request: (method, params) => hostClient.requestFor(active, method, params),
+  };
+
+  const execution = runWithHostRPCClient(requestClient, () => dispatch(host, request, active.controller.signal));
+  void Promise.race([execution, active.cancelled])
+    .then((result) => {
+      const shouldRespond = active.active;
+      hostClient.finishRequest(active);
+      if (shouldRespond) {
+        writeResponse({ jsonrpc: "2.0", id: requestId, result });
+      }
+    })
+    .catch((error) => {
+      const shouldRespond = active.active;
+      hostClient.finishRequest(active);
+      if (shouldRespond) {
+        writeResponse({ jsonrpc: "2.0", id: requestId, error: { code: -32000, message: errorMessage(error) } });
+      }
+    })
+    .finally(() => {
+      hostClient.finishRequest(active);
+      if (activeRequests.get(requestId) === active) {
+        activeRequests.delete(requestId);
+      }
+    });
+}
+
+async function dispatch(host: ExtensionHost, request: JsonRpcRequest, signal: AbortSignal): Promise<unknown> {
   switch (request.method) {
     case "extension.initialize":
       return host.initialize(request.params as never);
     case "extension.tool.execute":
-      return await host.executeTool(request.params as never);
+      return await host.executeTool(request.params as never, signal);
     case "extension.command.execute":
-      return await host.executeCommand(request.params as never);
+      return await host.executeCommand(request.params as never, signal);
     case "extension.event.handle":
-      return await host.handleEvent(request.params as never);
-    case "$/cancelRequest":
-      return undefined;
+      return await host.handleEvent(request.params as never, signal);
     default:
       throw new Error(`Unknown JSON-RPC method: ${request.method}`);
   }

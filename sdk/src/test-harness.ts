@@ -36,7 +36,7 @@ export async function createTestHarness(
       dataDir: "",
       config: {},
     },
-    capabilities: {},
+    capabilities: { toolUpdates: true },
   };
 
   const ensureInitialized = () => {

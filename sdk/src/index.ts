@@ -3,6 +3,7 @@ export { AgentRunError, Client, Profile, Session } from "./agent.js";
 export { defineExtension, ExtensionHost } from "./api.js";
 export { runExtension } from "./runtime.js";
 export { createTestHarness } from "./test-harness.js";
+export { formatTaskToolActivity, TaskProgress } from "./task-progress.js";
 export { renderTemplate } from "./template.js";
 export type {
   AgentResponse,
@@ -26,6 +27,22 @@ export type {
 export { runWithHostRPCClient, setActiveHostRPCClient } from "./context.js";
 export type { HostRPCClient } from "./context.js";
 export type { RenderTemplateOptions, TemplateView } from "./template.js";
+export type {
+  FinishTaskOptions,
+  FinishTaskActivityOptions,
+  StartTaskActivityOptions,
+  TaskActivity,
+  TaskActivityLabeler,
+  TaskActivityStatus,
+  TaskProgressContext,
+  TaskProgressLogger,
+  TaskProgressOptions,
+  TaskProgressSession,
+  TaskRunCounts,
+  TaskRunPhase,
+  TaskRunSnapshot,
+  TaskRunStatus,
+} from "./task-progress.js";
 export type {
   AgentEndEvent,
   AgentInitEvent,
@@ -80,6 +97,7 @@ export type {
   ToolInputSchema,
   ToolListPatch,
   ToolRegistration,
+  ToolUpdateRequest,
   ToolResultDetails,
   ToolResultEvent,
   TurnEndEvent,

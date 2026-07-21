@@ -33,10 +33,10 @@ export interface ProfileInput extends ProfileObject {
 }
 
 export interface AgentUIHandlers {
-  input?(request: UIInputRequest): Promise<string | undefined> | string | undefined;
-  confirm?(request: UIConfirmRequest): Promise<boolean> | boolean;
-  select?(request: UISelectRequest): Promise<string | undefined> | string | undefined;
-  notify?(request: UINotifyRequest): Promise<void> | void;
+  input?(request: UIInputRequest, signal?: AbortSignal): Promise<string | undefined> | string | undefined;
+  confirm?(request: UIConfirmRequest, signal?: AbortSignal): Promise<boolean> | boolean;
+  select?(request: UISelectRequest, signal?: AbortSignal): Promise<string | undefined> | string | undefined;
+  notify?(request: UINotifyRequest, signal?: AbortSignal): Promise<void> | void;
 }
 
 export interface ClientOptions {
@@ -165,6 +165,7 @@ type ConfigFileMode = "merge" | "isolated";
 interface JsonRPCMessage {
   jsonrpc?: "2.0";
   id?: number | string | null;
+  parentId?: number | string;
   method?: string;
   params?: unknown;
   result?: unknown;
@@ -771,7 +772,8 @@ class InMemoryExtensionBridge {
     entrypoints: ExtensionEntrypoint[],
     options: { ui?: AgentUIHandlers; transport?: BridgeTransport } = {},
   ): Promise<InMemoryExtensionBridge> {
-    const rootDir = await mkdtemp(path.join(os.tmpdir(), "kodelet-sdk-extensions-"));
+    const tempRoot = process.platform === "win32" ? os.tmpdir() : "/tmp";
+    const rootDir = await mkdtemp(path.join(tempRoot, "kodelet-sdk-extensions-"));
     const bridgeId = randomUUID().replace(/-/g, "").slice(0, 16);
     const transport = options.transport ?? "unix";
     const servers: ExtensionSocketServer[] = [];
@@ -827,11 +829,113 @@ class TempConfig {
   }
 }
 
-class ExtensionSocketServer implements HostRPCClient {
+interface BridgePendingRPCRequest extends PendingRPCRequest {
+  parentId: number | string;
+  request: BridgeActiveRequest;
+}
+
+class BridgeActiveRequest {
+  readonly controller = new AbortController();
+  readonly cancelled: Promise<never>;
+  active = true;
+  private rejectCancellation!: (error: Error) => void;
+
+  constructor() {
+    this.cancelled = new Promise<never>((_, reject) => {
+      this.rejectCancellation = reject;
+    });
+  }
+
+  cancel(error: Error): void {
+    if (!this.active) {
+      return;
+    }
+    this.active = false;
+    this.controller.abort(error);
+    this.rejectCancellation(error);
+  }
+
+  finish(): void {
+    const wasActive = this.active;
+    this.active = false;
+    if (wasActive) {
+      this.controller.abort(new Error("Extension request completed"));
+    }
+  }
+}
+
+class ExtensionBridgeConnection {
+  nextId = 0;
+  readonly pending = new Map<number, BridgePendingRPCRequest>();
+  readonly requests = new Map<number | string, BridgeActiveRequest>();
+  closed = false;
+
+  constructor(readonly socket: Socket) {}
+
+  send(message: JsonRPCMessage): void {
+    if (this.closed || this.socket.destroyed || !this.socket.writable) {
+      throw new Error("Extension bridge connection is closed");
+    }
+    writeFrame(this.socket, JSON.stringify(message));
+  }
+
+  cancelRequest(requestId: number | string, error = new Error("Extension request cancelled")): void {
+    const request = this.requests.get(requestId);
+    request?.cancel(error);
+    for (const [reverseId, pending] of this.pending) {
+      if (pending.request === request) {
+        this.pending.delete(reverseId);
+        pending.reject(error);
+      }
+    }
+  }
+
+  finishRequest(requestId: number | string, request: BridgeActiveRequest): void {
+    request.finish();
+    for (const [reverseId, pending] of this.pending) {
+      if (pending.request === request) {
+        this.pending.delete(reverseId);
+        pending.reject(new Error("Extension request completed"));
+      }
+    }
+    if (this.requests.get(requestId) === request) {
+      this.requests.delete(requestId);
+    }
+  }
+
+  close(error = new Error("Extension bridge connection closed")): void {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
+    for (const pending of this.pending.values()) {
+      pending.reject(error);
+    }
+    this.pending.clear();
+    for (const request of this.requests.values()) {
+      request.cancel(error);
+    }
+    this.requests.clear();
+    this.socket.destroy();
+  }
+}
+
+class ConnectionHostRPCClient implements HostRPCClient {
+  constructor(
+    private readonly server: ExtensionSocketServer,
+    private readonly connection: ExtensionBridgeConnection,
+    private readonly parentId: number | string,
+    private readonly activeRequest: BridgeActiveRequest,
+  ) {}
+
+  async request(method: string, params?: unknown): Promise<unknown> {
+    return await this.server.requestOnConnection(this.connection, this.parentId, this.activeRequest, method, params);
+  }
+}
+
+class ExtensionSocketServer {
   private server?: Server;
-  private socket?: Socket;
-  private nextId = 0;
-  private pending = new Map<number, PendingRPCRequest>();
+  private readonly connections = new Set<ExtensionBridgeConnection>();
 
   constructor(
     private readonly host: ExtensionHost,
@@ -847,18 +951,19 @@ class ExtensionSocketServer implements HostRPCClient {
       await rm(this.endpoint.path, { force: true });
     }
     this.server = createServer((socket) => {
-      this.socket = socket;
+      const connection = new ExtensionBridgeConnection(socket);
+      this.connections.add(connection);
       const reader = new FrameReader();
       socket.on("data", (chunk) => {
         for (const payload of reader.push(chunk)) {
-          void this.handlePayload(payload, socket);
+          this.handlePayload(payload, connection);
         }
       });
       socket.on("close", () => {
-        if (this.socket === socket) {
-          this.socket = undefined;
-        }
+        connection.close();
+        this.connections.delete(connection);
       });
+      socket.on("error", (error) => connection.close(error));
     });
 
     await new Promise<void>((resolve, reject) => {
@@ -885,51 +990,84 @@ class ExtensionSocketServer implements HostRPCClient {
   }
 
   async close(): Promise<void> {
-    for (const pending of this.pending.values()) {
-      pending.reject(new Error("Extension bridge closed"));
-    }
-    this.pending.clear();
-    this.socket?.destroy();
-    await new Promise<void>((resolve) => {
-      if (!this.server) {
+    const server = this.server;
+    const closed = new Promise<void>((resolve) => {
+      if (!server) {
         resolve();
         return;
       }
-      this.server.close(() => resolve());
+      server.close(() => resolve());
     });
+    for (const connection of this.connections) {
+      connection.close(new Error("Extension bridge closed"));
+    }
+    this.connections.clear();
+    await closed;
+    this.server = undefined;
     if (this.endpoint.transport === "unix" && this.endpoint.path) {
       await rm(this.endpoint.path, { force: true });
     }
   }
 
-  async request(method: string, params?: unknown): Promise<unknown> {
-    const localUIResponse = await this.tryHandleLocalUIRequest(method, params);
+  async requestOnConnection(
+    connection: ExtensionBridgeConnection,
+    parentId: number | string,
+    request: BridgeActiveRequest,
+    method: string,
+    params?: unknown,
+  ): Promise<unknown> {
+    this.assertActiveRequest(connection, parentId, request);
+    const localUIResponse = await raceWithAbort(
+      this.tryHandleLocalUIRequest(method, params, request.controller.signal),
+      request.controller.signal,
+    );
     if (localUIResponse.handled) {
+      this.assertActiveRequest(connection, parentId, request);
       return localUIResponse.result;
     }
 
-    if (!this.socket) {
-      throw new Error("Extension bridge is not connected");
-    }
+    this.assertActiveRequest(connection, parentId, request);
 
-    const id = ++this.nextId;
-    writeFrame(this.socket, JSON.stringify({ jsonrpc: "2.0", id, method, params }));
-    return await new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-    });
+    const id = ++connection.nextId;
+    try {
+      return await new Promise((resolve, reject) => {
+        connection.pending.set(id, { resolve, reject, parentId, request });
+        connection.send({ jsonrpc: "2.0", id, parentId, method, params });
+      });
+    } finally {
+      connection.pending.delete(id);
+    }
   }
 
-  private async handlePayload(payload: Buffer, socket: Socket): Promise<void> {
+  private assertActiveRequest(
+    connection: ExtensionBridgeConnection,
+    parentId: number | string,
+    request: BridgeActiveRequest,
+  ): void {
+    throwIfAlreadyAborted(request.controller.signal);
+    if (connection.closed || !request.active || connection.requests.get(parentId) !== request) {
+      throw new Error("Extension request is no longer active");
+    }
+  }
+
+  private handlePayload(payload: Buffer, connection: ExtensionBridgeConnection): void {
     let message: JsonRPCMessage;
     try {
       message = JSON.parse(payload.toString("utf8")) as JsonRPCMessage;
     } catch (error) {
-      writeFrame(socket, JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32700, message: errorMessage(error) } }));
+      connection.send({ jsonrpc: "2.0", id: null, error: { code: -32700, message: errorMessage(error) } });
       return;
     }
 
     if (!message.method && message.id !== undefined) {
-      this.handleResponse(message);
+      this.handleResponse(message, connection);
+      return;
+    }
+
+    if (message.method === "$/cancelRequest" && (message.id === undefined || message.id === null)) {
+      if (isRecord(message.params) && (typeof message.params.id === "number" || typeof message.params.id === "string")) {
+        connection.cancelRequest(message.params.id);
+      }
       return;
     }
 
@@ -937,23 +1075,54 @@ class ExtensionSocketServer implements HostRPCClient {
       return;
     }
 
-    try {
-      const result = await runWithHostRPCClient(this, () => this.dispatch(message));
-      writeFrame(socket, JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
-    } catch (error) {
-      writeFrame(socket, JSON.stringify({ jsonrpc: "2.0", id: message.id, error: { code: -32000, message: errorMessage(error) } }));
-    }
+    this.startRequest(message, connection);
   }
 
-  private handleResponse(response: JsonRPCMessage): void {
+  private startRequest(message: JsonRPCMessage, connection: ExtensionBridgeConnection): void {
+    const requestId = message.id as number | string;
+    connection.cancelRequest(requestId, new Error("Extension request id was reused"));
+    const active = new BridgeActiveRequest();
+    connection.requests.set(requestId, active);
+    const client = new ConnectionHostRPCClient(this, connection, requestId, active);
+
+    const execution = runWithHostRPCClient(client, () => this.dispatch(message, active.controller.signal));
+    void Promise.race([execution, active.cancelled])
+      .then((result) => {
+        const shouldRespond = !connection.closed && active.active;
+        connection.finishRequest(requestId, active);
+        if (shouldRespond) {
+          try {
+            connection.send({ jsonrpc: "2.0", id: requestId, result });
+          } catch {
+            // The proxy disconnected after the completion check.
+          }
+        }
+      })
+      .catch((error) => {
+        const shouldRespond = !connection.closed && active.active;
+        connection.finishRequest(requestId, active);
+        if (shouldRespond) {
+          try {
+            connection.send({ jsonrpc: "2.0", id: requestId, error: { code: -32000, message: errorMessage(error) } });
+          } catch {
+            // The proxy disconnected after the completion check.
+          }
+        }
+      })
+      .finally(() => {
+        connection.finishRequest(requestId, active);
+      });
+  }
+
+  private handleResponse(response: JsonRPCMessage, connection: ExtensionBridgeConnection): void {
     if (typeof response.id !== "number") {
       return;
     }
-    const pending = this.pending.get(response.id);
+    const pending = connection.pending.get(response.id);
     if (!pending) {
       return;
     }
-    this.pending.delete(response.id);
+    connection.pending.delete(response.id);
     if (response.error) {
       pending.reject(new Error(response.error.message));
       return;
@@ -961,51 +1130,53 @@ class ExtensionSocketServer implements HostRPCClient {
     pending.resolve(response.result);
   }
 
-  private async dispatch(message: JsonRPCMessage): Promise<unknown> {
+  private async dispatch(message: JsonRPCMessage, signal: AbortSignal): Promise<unknown> {
     switch (message.method) {
       case "extension.initialize":
         return this.host.initialize(message.params as never);
       case "extension.tool.execute":
-        return await this.host.executeTool(message.params as never);
+        return await this.host.executeTool(message.params as never, signal);
       case "extension.command.execute":
-        return await this.host.executeCommand(message.params as never);
+        return await this.host.executeCommand(message.params as never, signal);
       case "extension.event.handle":
-        return await this.host.handleEvent(message.params as never);
-      case "$/cancelRequest":
-        return undefined;
+        return await this.host.handleEvent(message.params as never, signal);
       default:
         throw new Error(`Unknown JSON-RPC method: ${message.method}`);
     }
   }
 
-  private async tryHandleLocalUIRequest(method: string, params: unknown): Promise<{ handled: boolean; result?: unknown }> {
+  private async tryHandleLocalUIRequest(
+    method: string,
+    params: unknown,
+    signal?: AbortSignal,
+  ): Promise<{ handled: boolean; result?: unknown }> {
     switch (method) {
       case "kodelet.ui.input": {
         if (!this.ui?.input) {
           return { handled: true, result: unavailableUI("ui input is not available") };
         }
-        const value = await this.ui.input(params as UIInputRequest);
+        const value = await this.ui.input(params as UIInputRequest, signal);
         return { handled: true, result: value === undefined ? dismissedUI() : { status: "submitted", value } };
       }
       case "kodelet.ui.confirm": {
         if (!this.ui?.confirm) {
           return { handled: true, result: unavailableUI("ui confirm is not available") };
         }
-        const confirmed = await this.ui.confirm(params as UIConfirmRequest);
+        const confirmed = await this.ui.confirm(params as UIConfirmRequest, signal);
         return { handled: true, result: { status: "submitted", confirmed } };
       }
       case "kodelet.ui.select": {
         if (!this.ui?.select) {
           return { handled: true, result: unavailableUI("ui select is not available") };
         }
-        const value = await this.ui.select(params as UISelectRequest);
+        const value = await this.ui.select(params as UISelectRequest, signal);
         return { handled: true, result: value === undefined ? dismissedUI() : { status: "submitted", value } };
       }
       case "kodelet.ui.notify": {
         if (!this.ui?.notify) {
           return { handled: true, result: unavailableUI("ui notify is not available") };
         }
-        await this.ui.notify(params as UINotifyRequest);
+        await this.ui.notify(params as UINotifyRequest, signal);
         return { handled: true, result: { status: "submitted" } };
       }
       default:
@@ -1131,6 +1302,24 @@ function throwIfAlreadyAborted(signal?: AbortSignal): void {
   const error = new Error("The operation was aborted");
   error.name = "AbortError";
   throw error;
+}
+
+async function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  throwIfAlreadyAborted(signal);
+  return await new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason instanceof Error ? signal.reason : new Error("Extension request cancelled"));
+    signal.addEventListener("abort", abort, { once: true });
+    void promise.then(
+      (value) => {
+        signal.removeEventListener("abort", abort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", abort);
+        reject(error);
+      },
+    );
+  });
 }
 
 function imageToContentBlock(image: string): ACPContentBlock {
