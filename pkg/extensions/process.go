@@ -295,7 +295,7 @@ func (p *Process) executeTool(ctx context.Context, name string, input json.RawMe
 	handler := toolExecutionHostHandler{process: p, onUpdate: onUpdate}
 	if err := client.callWithHostHandler(ctx, "extension.tool.execute", params, &result, handler); err != nil {
 		if shouldRestartAfterCallError(err) {
-			p.closeForRestart()
+			p.closeForRestart(client)
 		}
 		return nil, err
 	}
@@ -336,7 +336,7 @@ func (p *Process) ExecuteCommand(ctx context.Context, name string, input map[str
 	var result CommandResult
 	if err := client.callWithHostHandler(ctx, "extension.command.execute", params, &result, p); err != nil {
 		if shouldRestartAfterCallError(err) {
-			p.closeForRestart()
+			p.closeForRestart(client)
 		}
 		return nil, err
 	}
@@ -357,7 +357,7 @@ func (p *Process) HandleEvent(ctx context.Context, eventID string, eventName str
 	var result EventResult
 	if err := client.callWithHostHandler(ctx, "extension.event.handle", params, &result, p); err != nil {
 		if shouldRestartAfterCallError(err) {
-			p.closeForRestart()
+			p.closeForRestart(client)
 		}
 		return nil, err
 	}
@@ -467,10 +467,16 @@ func shouldRestartAfterCallError(err error) bool {
 	return !strings.Contains(err.Error(), "extension rpc error")
 }
 
-func (p *Process) closeForRestart() {
+func (p *Process) closeForRestart(failedClient *rpcClient) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.closed || p.shutdown || p.disabled || p.client != failedClient {
+		return
+	}
 	_ = p.closeProcessLocked()
+	// A failed call means this process generation is no longer usable even if
+	// it disappeared before cmd/process state was fully populated.
+	p.closed = true
 	p.recordFailureLocked()
 }
 

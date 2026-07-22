@@ -22,8 +22,8 @@ import (
 	"github.com/pkg/errors"
 )
 
-var newDefaultChatRunner = func(defaultCWD string) chat.ChatRunner {
-	return chat.NewDefaultChatRunner(defaultCWD)
+var newDefaultChatRunner = func(defaultCWD string, extensionRuntimes chat.ExtensionRuntimeProvider) chat.ChatRunner {
+	return chat.NewDefaultChatRunner(defaultCWD, extensionRuntimes)
 }
 
 func Run(ctx context.Context, config Config) error {
@@ -39,6 +39,11 @@ func Run(ctx context.Context, config Config) error {
 	applyTheme(theme)
 
 	initialModel := newModel(ctx, config)
+	if initialModel.extensionRuntimes != nil {
+		defer func() {
+			_ = initialModel.extensionRuntimes.Close()
+		}()
+	}
 	if closer, ok := initialModel.runner.(interface{ Close() error }); ok {
 		defer func() {
 			_ = closer.Close()
@@ -47,6 +52,7 @@ func Run(ctx context.Context, config Config) error {
 
 	program := tea.NewProgram(initialModel, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	finalModel, err := program.Run()
+	initialModel.cancel()
 	final, isModel := finalModel.(model)
 	// Cleared here so signal-driven exits also reset the title.
 	if isModel && final.terminalTitleWritten {
@@ -67,6 +73,7 @@ func newModel(ctx context.Context, config Config) model {
 	mctx, cancel := context.WithCancel(ctx)
 	runCh := make(chan tea.Msg, 256)
 	mctx = extensions.ContextWithDiagnosticSink(mctx, newTUIDiagnosticSink(runCh))
+	extensionRuntimes := extensions.NewRuntimeManager()
 	themeSelection := normalizedThemeSelection(config.Theme)
 	theme, err := resolveTheme(themeSelection)
 	if err != nil {
@@ -93,7 +100,7 @@ func newModel(ctx context.Context, config Config) model {
 	if runner == nil {
 		// The TUI sends --cwd as a per-request override below; leave the runner
 		// default empty so relative overrides resolve against the process cwd.
-		runner = newDefaultChatRunner("")
+		runner = newDefaultChatRunner("", extensionRuntimes)
 	}
 	requestedCWD := strings.TrimSpace(config.CWD)
 	cwd := requestedCWD
@@ -139,6 +146,7 @@ func newModel(ctx context.Context, config Config) model {
 		ctx:                     mctx,
 		cancel:                  cancel,
 		runner:                  runner,
+		extensionRuntimes:       extensionRuntimes,
 		conversationID:          conversationID,
 		conversationWasResumed:  conversationWasResumed,
 		profile:                 profile,
@@ -168,14 +176,17 @@ func newModel(ctx context.Context, config Config) model {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		textarea.Blink,
 		m.spinner.Tick,
 		waitForMsg(m.runCh),
 		loadInitialHistory(m.ctx, m.conversationID),
 		loadMessageHistory(m.ctx, m.messageHistoryStore, m.messageHistoryScopeCWD),
-		loadSlashCommands(m.ctx, m.slashCommandCWD()),
-	)
+	}
+	if !m.initialHistoryPending {
+		cmds = append(cmds, loadSlashCommands(m.ctx, m.slashCommandCWD()))
+	}
+	return tea.Batch(cmds...)
 }
 
 func loadSlashCommands(ctx context.Context, cwd string) tea.Cmd {
@@ -186,8 +197,12 @@ func loadSlashCommands(ctx context.Context, cwd string) tea.Cmd {
 }
 
 func loadExtensionSlashCommands(ctx context.Context, cwd string) tea.Cmd {
+	return loadExtensionSlashCommandsWithRuntime(ctx, cwd, nil)
+}
+
+func loadExtensionSlashCommandsWithRuntime(ctx context.Context, cwd string, runtimeProvider chat.ExtensionRuntimeProvider) tea.Cmd {
 	return func() tea.Msg {
-		commands, err := listExtensionSlashCommands(ctx, cwd)
+		commands, err := listExtensionSlashCommandsWithRuntime(ctx, cwd, runtimeProvider)
 		return slashCommandsMsg{cwd: strings.TrimSpace(cwd), commands: commands, extensionsOnly: true, err: err}
 	}
 }
@@ -219,19 +234,30 @@ func listBaseSlashCommands(ctx context.Context, cwd string) ([]slashcommands.Com
 }
 
 func listExtensionSlashCommands(ctx context.Context, cwd string) ([]slashcommands.Command, error) {
+	return listExtensionSlashCommandsWithRuntime(ctx, cwd, nil)
+}
+
+func listExtensionSlashCommandsWithRuntime(ctx context.Context, cwd string, runtimeProvider chat.ExtensionRuntimeProvider) ([]slashcommands.Command, error) {
 	resolvedCWD, err := resolveSlashCommandCWD(cwd)
 	if err != nil {
 		return nil, err
 	}
 
-	extensionRuntime, err := extensions.NewRuntimeFromViper(ctx, resolvedCWD)
+	var extensionRuntime *extensions.Runtime
+	if runtimeProvider != nil {
+		extensionRuntime, err = runtimeProvider.Runtime(ctx, resolvedCWD)
+	} else {
+		extensionRuntime, err = extensions.NewRuntimeFromViper(ctx, resolvedCWD)
+	}
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to initialize extensions for slash commands")
 	}
 	if extensionRuntime == nil {
 		return nil, nil
 	}
-	defer func() { _ = extensionRuntime.Close() }()
+	if runtimeProvider == nil {
+		defer func() { _ = extensionRuntime.Close() }()
+	}
 
 	return extensionRuntime.SlashCommands(), nil
 }

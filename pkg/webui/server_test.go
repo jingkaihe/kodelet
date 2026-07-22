@@ -1116,7 +1116,7 @@ func TestServer_handleGetSlashCommandsIncludesExtensionCommands(t *testing.T) {
 	viper.Set("extensions.global_dir", filepath.Join(t.TempDir(), "global-extensions"))
 	viper.Set("extensions.max_output_size", 102400)
 
-	extensionRuntimes := newWebExtensionRuntimeManager()
+	extensionRuntimes := extensions.NewRuntimeManager()
 	t.Cleanup(func() { assert.NoError(t, extensionRuntimes.Close()) })
 	server := &Server{config: &ServerConfig{CWD: t.TempDir()}, extensionRuntimes: extensionRuntimes}
 	req := httptest.NewRequest("GET", "/api/chat/slash-commands?cwd="+url.QueryEscape(workspace), nil)
@@ -1157,7 +1157,7 @@ func TestServer_handleGetSlashCommandsReusesExtensionRuntime(t *testing.T) {
 	viper.Set("extensions.global_dir", filepath.Join(t.TempDir(), "global-extensions"))
 	viper.Set("extensions.max_output_size", 102400)
 
-	extensionRuntimes := newWebExtensionRuntimeManager()
+	extensionRuntimes := extensions.NewRuntimeManager()
 	t.Cleanup(func() { assert.NoError(t, extensionRuntimes.Close()) })
 	server := &Server{config: &ServerConfig{CWD: t.TempDir()}, extensionRuntimes: extensionRuntimes}
 
@@ -1169,9 +1169,11 @@ func TestServer_handleGetSlashCommandsReusesExtensionRuntime(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 	}
 
-	extensionRuntimes.mu.Lock()
-	defer extensionRuntimes.mu.Unlock()
-	assert.Len(t, extensionRuntimes.runtimes, 1)
+	first, err := extensionRuntimes.Runtime(context.Background(), workspace)
+	require.NoError(t, err)
+	second, err := extensionRuntimes.Runtime(context.Background(), filepath.Join(workspace, "."))
+	require.NoError(t, err)
+	assert.Same(t, first, second)
 }
 
 func TestServer_handleGetConversationPreservesImageContent(t *testing.T) {

@@ -165,6 +165,23 @@ func TestWaitForMsgAndInitCommands(t *testing.T) {
 	assert.Len(t, batch, 6)
 }
 
+func TestInitDefersSlashCommandsUntilResumedHistoryLoads(t *testing.T) {
+	workspace := t.TempDir()
+	m := newModel(context.Background(), Config{ConversationID: "conversation-123", CWD: workspace})
+	t.Cleanup(m.cancel)
+	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+
+	initMsg := m.Init()()
+	batch, ok := initMsg.(tea.BatchMsg)
+	require.True(t, ok)
+	assert.Len(t, batch, 5)
+
+	updated, cmd := m.Update(initialHistoryMsg{loaded: true, cwd: workspace})
+	m = updated.(model)
+	require.NotNil(t, cmd)
+	assert.False(t, m.initialHistoryPending)
+}
+
 func TestUpdateIgnoresStaleRunEvents(t *testing.T) {
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)
@@ -1208,7 +1225,7 @@ func TestSubmitWithDefaultRunnerKeepsRelativeCWDAsRequestOnly(t *testing.T) {
 	runner := &recordingRunner{conversationID: "conversation-done"}
 	capturedDefaultCWD := "unset"
 	previous := newDefaultChatRunner
-	newDefaultChatRunner = func(defaultCWD string) chat.ChatRunner {
+	newDefaultChatRunner = func(defaultCWD string, _ chat.ExtensionRuntimeProvider) chat.ChatRunner {
 		capturedDefaultCWD = defaultCWD
 		return runner
 	}

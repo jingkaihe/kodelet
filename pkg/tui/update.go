@@ -159,6 +159,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case initialHistoryMsg:
+		wasInitialHistoryPending := m.initialHistoryPending
 		m.initialHistoryPending = false
 		if msg.err != nil {
 			m.err = msg.err
@@ -172,8 +173,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					text: fmt.Sprintf("Failed to resume conversation: %v", msg.err),
 				}},
 			})
+			if wasInitialHistoryPending {
+				cmds = append(cmds, loadSlashCommands(m.ctx, m.slashCommandCWD()))
+			}
 		} else if msg.loaded {
-			reloadSlashCommands := false
+			reloadSlashCommands := wasInitialHistoryPending
 			var reloadMessageHistory tea.Cmd
 			if strings.TrimSpace(m.conversationID) != "" {
 				m.setProfile(msg.profile)
@@ -185,7 +189,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.reasoningPickerOpen = false
 			}
 			if strings.TrimSpace(msg.cwd) != "" {
-				reloadSlashCommands = strings.TrimSpace(m.requestedCWD) == "" && strings.TrimSpace(m.cwd) != strings.TrimSpace(msg.cwd)
+				reloadSlashCommands = reloadSlashCommands || (strings.TrimSpace(m.requestedCWD) == "" && strings.TrimSpace(m.cwd) != strings.TrimSpace(msg.cwd))
 				m.cwd = strings.TrimSpace(msg.cwd)
 				reloadMessageHistory = m.updateMessageHistoryScope(m.cwd)
 			}
@@ -211,6 +215,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if reloadMessageHistory != nil {
 				cmds = append(cmds, reloadMessageHistory)
 			}
+		} else if wasInitialHistoryPending {
+			cmds = append(cmds, loadSlashCommands(m.ctx, m.slashCommandCWD()))
 		}
 		m.refreshViewport(true)
 
@@ -222,7 +228,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.slashCommands = mergeSlashCommands(m.slashCommands, msg.commands)
 		} else {
 			m.slashCommands = msg.commands
-			cmds = append(cmds, loadExtensionSlashCommands(m.ctx, m.slashCommandCWD()))
+			cmds = append(cmds, loadExtensionSlashCommandsWithRuntime(m.ctx, m.slashCommandCWD(), m.extensionRuntimes))
 		}
 		m.slashCommandErr = msg.err
 		m.resetSlashCommandIndex()
@@ -863,6 +869,7 @@ func (m *model) submit() tea.Cmd {
 	runID := m.activeRunID
 	runCh := m.runCh
 	runner := m.runner
+	uiDone := m.ctx.Done()
 	uiBroker := newTUIUIBroker(runCh, runID)
 	runCtx = extensions.ContextWithUIInputBroker(runCtx, uiBroker)
 	req := chat.ChatRequest{
@@ -881,8 +888,11 @@ func (m *model) submit() tea.Cmd {
 		}
 		go func() {
 			defer uiBroker.close()
-			conversationID, err := runner.Run(runCtx, req, tuiSink{ch: runCh, runID: runID})
-			runCh <- chatDoneMsg{runID: runID, conversationID: strings.TrimSpace(conversationID), err: err}
+			conversationID, err := runner.Run(runCtx, req, tuiSink{ch: runCh, runID: runID, done: uiDone})
+			select {
+			case runCh <- chatDoneMsg{runID: runID, conversationID: strings.TrimSpace(conversationID), err: err}:
+			case <-uiDone:
+			}
 		}()
 		return nil
 	}

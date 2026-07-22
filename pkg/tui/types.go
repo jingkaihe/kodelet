@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/messagehistory"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -107,9 +108,10 @@ type detailRegion struct {
 }
 
 type model struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	runner chat.ChatRunner
+	ctx               context.Context
+	cancel            context.CancelFunc
+	runner            chat.ChatRunner
+	extensionRuntimes *extensions.RuntimeManager
 
 	conversationID          string
 	conversationWasResumed  bool
@@ -228,9 +230,18 @@ type editorFinishedMsg struct {
 type tuiSink struct {
 	ch    chan<- tea.Msg
 	runID int
+	done  <-chan struct{}
 }
 
 func (s tuiSink) Send(event chat.ChatEvent) error {
-	s.ch <- chatEventMsg{runID: s.runID, event: event}
-	return nil
+	if s.done == nil {
+		s.ch <- chatEventMsg{runID: s.runID, event: event}
+		return nil
+	}
+	select {
+	case s.ch <- chatEventMsg{runID: s.runID, event: event}:
+		return nil
+	case <-s.done:
+		return context.Canceled
+	}
 }

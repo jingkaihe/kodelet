@@ -59,7 +59,7 @@ type Server struct {
 	runCancel           context.CancelFunc
 	terminalSessions    *terminalSessionManager
 	terminalSessionsMu  sync.Mutex
-	extensionRuntimes   *webExtensionRuntimeManager
+	extensionRuntimes   *extensions.RuntimeManager
 	activeChats         map[string]*activeChatRun
 	activeChatsMu       sync.Mutex
 	chatSubscribers     map[string]map[*subscriberEventSink]struct{}
@@ -172,7 +172,7 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 	}
 
 	runCtx, runCancel := context.WithCancel(ctx)
-	extensionRuntimes := newWebExtensionRuntimeManager()
+	extensionRuntimes := extensions.NewRuntimeManager()
 
 	s := &Server{
 		router:              mux.NewRouter(),

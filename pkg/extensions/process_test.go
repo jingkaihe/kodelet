@@ -64,7 +64,7 @@ func TestProcessRPCClientNilWhenClosedDisabledOrShutdown(t *testing.T) {
 	assert.Nil(t, (&Process{closed: true}).rpcClient())
 	assert.Nil(t, (&Process{disabled: true}).rpcClient())
 	assert.Nil(t, (&Process{shutdown: true}).rpcClient())
-	client := newRPCClient(stringsNewReader(""), ioDiscard{})
+	client := newRPCClient(strings.NewReader(""), ioDiscard{})
 	assert.Same(t, client, (&Process{client: client}).rpcClient())
 }
 
@@ -75,6 +75,31 @@ func TestProcessContextIgnoresCallerCancellation(t *testing.T) {
 	processCtx := processContext(ctx)
 
 	assert.NoError(t, processCtx.Err())
+}
+
+func TestProcessCloseForRestartCountsProcessGenerationOnce(t *testing.T) {
+	client := newRPCClient(strings.NewReader(""), ioDiscard{})
+	process := &Process{Extension: Extension{ID: "weather"}, client: client}
+
+	process.closeForRestart(client)
+	process.closeForRestart(client)
+	process.closeForRestart(client)
+
+	assert.True(t, process.closed)
+	assert.Equal(t, 1, process.failures)
+	assert.False(t, process.disabled)
+}
+
+func TestProcessCloseForRestartIgnoresStaleClientGeneration(t *testing.T) {
+	staleClient := newRPCClient(strings.NewReader(""), ioDiscard{})
+	currentClient := newRPCClient(strings.NewReader(""), ioDiscard{})
+	process := &Process{Extension: Extension{ID: "weather"}, client: currentClient}
+
+	process.closeForRestart(staleClient)
+
+	assert.False(t, process.closed)
+	assert.Zero(t, process.failures)
+	assert.Same(t, currentClient, process.client)
 }
 
 func TestProcessHandleRPCRequestSupportsUIConfirmSelectAndNotify(t *testing.T) {
@@ -109,5 +134,3 @@ func TestProcessHandleRPCRequestSupportsUIConfirmSelectAndNotify(t *testing.T) {
 type ioDiscard struct{}
 
 func (ioDiscard) Write(payload []byte) (int, error) { return len(payload), nil }
-
-func stringsNewReader(value string) *strings.Reader { return strings.NewReader(value) }
