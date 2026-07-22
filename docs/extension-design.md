@@ -477,7 +477,7 @@ When initialization advertises `capabilities.toolUpdates: true`, a running tool 
   "parentId": 42,
   "method": "kodelet.tool.update",
   "params": {
-    "content": "Searching code — 2 actions running",
+    "content": "Searching code - 2 actions running",
     "data": {
       "taskRun": {
         "version": 1,

@@ -79,18 +79,19 @@ func (m model) buildTaskRunToolGroup(block assistantBlock, idx int) toolRenderGr
 		runningLabel = "Running task"
 	}
 	if detail := strings.TrimSpace(snapshot.Detail); detail != "" {
-		runningLabel += " — " + detail
+		runningLabel += " - " + detail
 	}
 
 	label := strings.TrimSpace(snapshot.Title)
 	if label == "" {
 		label = "Task"
 	}
+	elapsedMS := taskRunElapsedMS(snapshot, tool, time.Now())
 	if tool.done {
 		label = taskRunCompletionLabel(snapshot, label)
 	}
 
-	body := renderTaskRunProgressBody(m, snapshot)
+	body := renderTaskRunProgressBody(m, snapshot, elapsedMS)
 	markdownBody := false
 	if tool.done {
 		body = strings.TrimSpace(metadata.Output)
@@ -136,7 +137,7 @@ func taskRunCompletionLabel(snapshot tooltypes.TaskRunSnapshot, fallback string)
 	return strings.Join(parts, " · ")
 }
 
-func renderTaskRunProgressBody(m model, snapshot tooltypes.TaskRunSnapshot) string {
+func renderTaskRunProgressBody(m model, snapshot tooltypes.TaskRunSnapshot, elapsedMS int64) string {
 	parts := []string{}
 	counts := []string{}
 	if snapshot.Counts.Succeeded > 0 {
@@ -148,7 +149,7 @@ func renderTaskRunProgressBody(m model, snapshot tooltypes.TaskRunSnapshot) stri
 	if snapshot.Counts.Running > 0 {
 		counts = append(counts, fmt.Sprintf("%d running", snapshot.Counts.Running))
 	}
-	if elapsed := formatTaskRunElapsed(snapshot.ElapsedMS); elapsed != "" {
+	if elapsed := formatTaskRunElapsed(elapsedMS); elapsed != "" {
 		counts = append(counts, elapsed)
 	}
 	if len(counts) > 0 {
@@ -160,13 +161,13 @@ func renderTaskRunProgressBody(m model, snapshot tooltypes.TaskRunSnapshot) stri
 		marker := "✓"
 		switch activity.Status {
 		case "running":
-			marker = m.spinner.View()
+			marker = m.spinnerGlyph()
 		case "failed":
 			marker = "✗"
 		}
 		activityLines = append(activityLines, marker+" "+strings.TrimSpace(activity.Label))
-		if activity.Status == "failed" && strings.TrimSpace(activity.Preview) != "" {
-			activityLines = append(activityLines, "  "+strings.TrimSpace(activity.Preview))
+		if preview := taskRunActivityPreview(activity.Preview); activity.Status == "failed" && preview != "" {
+			activityLines = append(activityLines, "  "+preview)
 		}
 	}
 	if snapshot.OmittedSucceeded > 0 {
@@ -185,6 +186,38 @@ func renderTaskRunProgressBody(m model, snapshot tooltypes.TaskRunSnapshot) stri
 		parts = append(parts, activityLines...)
 	}
 	return strings.Join(parts, "\n")
+}
+
+func taskRunElapsedMS(snapshot tooltypes.TaskRunSnapshot, tool toolCall, now time.Time) int64 {
+	elapsedMS := snapshot.ElapsedMS
+	if tool.structured == nil {
+		return elapsedMS
+	}
+	observedAt := tool.structured.Timestamp
+	if tool.done || snapshot.Status != "running" || observedAt.IsZero() {
+		return elapsedMS
+	}
+	delta := now.Sub(observedAt).Milliseconds()
+	if delta <= 0 {
+		return elapsedMS
+	}
+	return elapsedMS + delta
+}
+
+func taskRunActivityPreview(value string) string {
+	preview := ""
+	for _, line := range strings.Split(value, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "```") || strings.HasPrefix(line, "~~~") {
+			continue
+		}
+		preview = line
+	}
+	return preview
+}
+
+func (m model) spinnerGlyph() string {
+	return strings.TrimSpace(m.spinner.View())
 }
 
 func formatTaskRunElapsed(elapsedMS int64) string {

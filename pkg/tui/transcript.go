@@ -197,7 +197,7 @@ func (m model) renderThoughtHeader(block assistantBlock) string {
 		word = "Thought"
 	}
 	if active {
-		return thoughtHeaderStyle.Render(fmt.Sprintf("%s Thinking… ▾", m.spinner.View()))
+		return thoughtHeaderStyle.Render(fmt.Sprintf("%s Thinking… ▾", m.spinnerGlyph()))
 	}
 	chevron := "▸"
 	if block.expanded {
@@ -208,7 +208,16 @@ func (m model) renderThoughtHeader(block assistantBlock) string {
 
 func (m model) renderToolGroupHeader(group toolRenderGroup) string {
 	if group.active {
-		return toolHeaderStyle.Render(fmt.Sprintf("%s %s… ▾", m.spinner.View(), group.runningLabel))
+		prefix := m.spinnerGlyph() + " "
+		suffix := "… ▾"
+		maxWidth := max(1, m.transcriptTextWidth()*2/3)
+		labelWidth := max(1, maxWidth-lipgloss.Width(prefix)-lipgloss.Width(suffix))
+		label := strings.TrimSpace(group.runningLabel)
+		if lipgloss.Width(label) > labelWidth {
+			label, _ = splitVisible(label, labelWidth)
+			label = strings.TrimRight(label, " ")
+		}
+		return toolHeaderStyle.Render(prefix + label + suffix)
 	}
 
 	chevron := "▸"

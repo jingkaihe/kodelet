@@ -66,7 +66,7 @@ test("TaskProgress tracks bounded child-session activity", async () => {
   assert.equal(snapshot.omittedSucceeded, 2);
   assert.equal(snapshot.detail, "searching pkg");
   assert.equal(snapshot.activities.length, 4);
-  assert.match(context.updates.at(-1)?.content ?? "", /Searching code/);
+  assert.equal(context.updates.at(-1)?.content, "Searching code - searching pkg");
   assert.ok(context.updates.at(-1)?.data?.taskRun);
 
   const final = await progress.finish({ success: true });
@@ -99,6 +99,66 @@ test("TaskProgress supports direct non-agent task activity", async () => {
   await progress.flush();
 
   assert.equal(progress.snapshot().counts.succeeded, 1);
+});
+
+test("TaskProgress uses bounded task detail between activities", async () => {
+  const context = testContext();
+  const instruction = `Investigate the task progress renderer ${"carefully ".repeat(30)}`;
+  const progress = new TaskProgress(context, {
+    kind: "subagent",
+    task: instruction,
+    cwd: "/workspace",
+    runningTitle: "Delegated task",
+    completedTitle: "Delegated task",
+    failedTitle: "Delegated task failed",
+    respondingDetail: "writing response",
+  });
+  await progress.start();
+
+  const detail = progress.snapshot().detail;
+  assert.ok(Array.from(detail).length <= 160);
+  assert.ok(detail.endsWith("…"));
+  assert.equal(context.updates.at(-1)?.content, `Delegated task - ${detail}`);
+
+  progress.startActivity("read-1", { kind: "file_read", label: "Read renderer" });
+  progress.finishActivity("read-1", { success: true });
+  await progress.flush();
+  assert.equal(progress.snapshot().detail, detail);
+
+  await progress.finish({ success: true });
+});
+
+test("TaskProgress skips Markdown fences in failed activity previews", async () => {
+  const context = testContext();
+  const progress = new TaskProgress(context, {
+    kind: "build",
+    task: "Run tests",
+    cwd: "/workspace",
+    runningTitle: "Running tests",
+    completedTitle: "Ran tests",
+    failedTitle: "Tests failed",
+    respondingDetail: "writing summary",
+  });
+  await progress.start();
+  progress.startActivity("test-1", { kind: "bash", label: "Run tests" });
+  progress.finishActivity("test-1", {
+    success: false,
+    result: "```text\nTypeScript tests failed\n```",
+  });
+  progress.startActivity("test-2", { kind: "bash", label: "Run more tests" });
+  progress.finishActivity("test-2", { success: false, result: "```" });
+  await progress.flush();
+
+  const failed = progress.snapshot().activities.filter((activity) => activity.status === "failed");
+  assert.equal(failed[0]?.preview, "TypeScript tests failed");
+  assert.equal(failed[1]?.preview, undefined);
+
+  progress.startActivity("test-3", { kind: "bash", label: "Run final tests" });
+  const final = await progress.finish({ success: false, error: "Final tests failed\n```" });
+  assert.equal(
+    final.activities.find((activity) => activity.id === "test-3")?.preview,
+    "Final tests failed",
+  );
 });
 
 test("formatTaskToolActivity uses workspace-relative paths", () => {

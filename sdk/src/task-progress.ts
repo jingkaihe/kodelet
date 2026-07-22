@@ -137,7 +137,10 @@ function lastLine(value: unknown): string | undefined {
   if (typeof value !== "string") {
     return undefined;
   }
-  const lines = value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const lines = value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("```") && !line.startsWith("~~~"));
   return lines.length > 0 ? singleLine(lines.at(-1) ?? "", MAX_PREVIEW_LENGTH) : undefined;
 }
 
@@ -354,7 +357,10 @@ export class TaskProgress {
     for (const activity of terminalActivities) {
       activity.status = options.success ? "succeeded" : "failed";
       if (!options.success && options.error) {
-        activity.preview = singleLine(options.error, MAX_PREVIEW_LENGTH);
+        const preview = lastLine(options.error);
+        if (preview) {
+          activity.preview = preview;
+        }
       }
     }
     if (options.success) {
@@ -481,7 +487,7 @@ export class TaskProgress {
       return "";
     }
     if (this.phase === "starting") {
-      return "starting task";
+      return this.options.task || "starting task";
     }
     if (this.phase === "responding") {
       return this.options.respondingDetail;
@@ -492,7 +498,7 @@ export class TaskProgress {
     if (running.length > 1) {
       return `${running.length} actions running`;
     }
-    return "planning next step";
+    return this.options.task || "planning next step";
   }
 
   private changed(immediate: boolean): void {
@@ -528,7 +534,7 @@ export class TaskProgress {
     while (this.dirty) {
       this.dirty = false;
       const snapshot = this.snapshot();
-      const content = snapshot.detail ? `${snapshot.title} — ${snapshot.detail}` : snapshot.title;
+      const content = snapshot.detail ? `${snapshot.title} - ${snapshot.detail}` : snapshot.title;
       try {
         await this.context.update(content, { taskRun: snapshot });
       } catch (error) {

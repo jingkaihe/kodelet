@@ -24,6 +24,7 @@ const MAX_TASK_RUN_TASK_LENGTH = 1000;
 const MAX_TASK_RUN_CWD_LENGTH = 4096;
 const MAX_TASK_RUN_ACTIVITY_ID_LENGTH = 256;
 const MAX_TASK_RUN_PREVIEW_LENGTH = 180;
+const TASK_RUN_TICK_INTERVAL_MS = 1000;
 
 const isBoundedString = (value: unknown, maxLength: number, required = false): value is string =>
   typeof value === 'string' &&
@@ -89,6 +90,44 @@ export const formatTaskRunElapsed = (elapsedMs?: number): string => {
   return `${hours}h ${String(minutes).padStart(2, '0')}m`;
 };
 
+const useLiveTaskRunElapsed = (
+  snapshot: TaskRunSnapshot | undefined,
+  isPartial: boolean
+): number => {
+  const sourceKey = snapshot
+    ? JSON.stringify([snapshot.kind, snapshot.revision, snapshot.status, snapshot.elapsedMs])
+    : '';
+  const shouldTick = Boolean(isPartial && snapshot?.status === 'running');
+  const observedAt = React.useMemo(() => Date.now(), [sourceKey]);
+  const [now, setNow] = React.useState(observedAt);
+
+  React.useEffect(() => {
+    setNow(observedAt);
+
+    if (!shouldTick) {
+      return undefined;
+    }
+    const interval = window.setInterval(() => setNow(Date.now()), TASK_RUN_TICK_INTERVAL_MS);
+    return () => window.clearInterval(interval);
+  }, [observedAt, shouldTick]);
+
+  if (!snapshot) {
+    return 0;
+  }
+  if (!shouldTick) {
+    return snapshot.elapsedMs;
+  }
+  return snapshot.elapsedMs + Math.max(0, now - observedAt);
+};
+
+const taskRunActivityPreview = (value?: string): string => {
+  const lines = (value || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('```') && !line.startsWith('~~~'));
+  return lines[lines.length - 1] || '';
+};
+
 const ActivityMarker: React.FC<{ status: TaskRunActivity['status'] }> = ({ status }) => {
   if (status === 'failed') {
     return <X aria-hidden="true" className="task-run-activity-marker is-failed" size={14} />;
@@ -128,8 +167,10 @@ const TaskRunActivityList: React.FC<{ snapshot: TaskRunSnapshot }> = ({ snapshot
           <ActivityMarker status={activity.status} />
           <div className="task-run-activity-copy">
             <div className="task-run-activity-label">{activity.label}</div>
-            {activity.status === 'failed' && activity.preview ? (
-              <div className="task-run-activity-preview">{activity.preview}</div>
+            {activity.status === 'failed' && taskRunActivityPreview(activity.preview) ? (
+              <div className="task-run-activity-preview">
+                {taskRunActivityPreview(activity.preview)}
+              </div>
             ) : null}
           </div>
         </div>
@@ -143,12 +184,15 @@ const TaskRunActivityList: React.FC<{ snapshot: TaskRunSnapshot }> = ({ snapshot
   );
 };
 
-const TaskRunStats: React.FC<{ snapshot: TaskRunSnapshot }> = ({ snapshot }) => {
+const TaskRunStats: React.FC<{ snapshot: TaskRunSnapshot; elapsedMs?: number }> = ({
+  snapshot,
+  elapsedMs = snapshot.elapsedMs,
+}) => {
   const values = [
     snapshot.counts.succeeded ? `${snapshot.counts.succeeded} done` : undefined,
     snapshot.counts.failed ? `${snapshot.counts.failed} failed` : undefined,
     snapshot.counts.running ? `${snapshot.counts.running} running` : undefined,
-    formatTaskRunElapsed(snapshot.elapsedMs) || undefined,
+    formatTaskRunElapsed(elapsedMs) || undefined,
   ].filter((value): value is string => Boolean(value));
 
   return values.length > 0 ? <div className="task-run-stats">{values.join(' · ')}</div> : null;
@@ -156,6 +200,7 @@ const TaskRunStats: React.FC<{ snapshot: TaskRunSnapshot }> = ({ snapshot }) => 
 
 const TaskRunRenderer: React.FC<ToolRenderProps> = ({ toolResult, isPartial = false }) => {
   const snapshot = getTaskRunSnapshot(toolResult);
+  const liveElapsedMs = useLiveTaskRunElapsed(snapshot, isPartial);
   const metadata = toolResult.metadata as ExtensionToolMetadata | undefined;
   if (!snapshot || !metadata) {
     return null;
@@ -166,9 +211,14 @@ const TaskRunRenderer: React.FC<ToolRenderProps> = ({ toolResult, isPartial = fa
       <div className="task-run-progress">
         <div className="task-run-headline">
           <span className="task-run-title">{snapshot.title}</span>
-          {snapshot.detail ? <span className="task-run-detail">{snapshot.detail}</span> : null}
+          {snapshot.detail ? (
+            <>
+              <span className="task-run-separator">-</span>
+              <span className="task-run-detail">{snapshot.detail}</span>
+            </>
+          ) : null}
         </div>
-        <TaskRunStats snapshot={snapshot} />
+        <TaskRunStats elapsedMs={liveElapsedMs} snapshot={snapshot} />
         <TaskRunActivityList snapshot={snapshot} />
       </div>
     );
@@ -180,14 +230,13 @@ const TaskRunRenderer: React.FC<ToolRenderProps> = ({ toolResult, isPartial = fa
   const hasActivity =
     snapshot.activities.length > 0 ||
     Boolean(snapshot.omittedSucceeded || snapshot.omittedFailed || snapshot.omittedRunning);
+  const elapsed = formatTaskRunElapsed(liveElapsedMs);
 
   return (
     <div className="quiet-tool-detail task-run-result">
       <div className="quiet-tool-line">
         <span className="quiet-tool-emphasis">{snapshot.title}</span>
-        {formatTaskRunElapsed(snapshot.elapsedMs) ? (
-          <span className="quiet-tool-muted">{formatTaskRunElapsed(snapshot.elapsedMs)}</span>
-        ) : null}
+        {elapsed ? <span className="quiet-tool-muted">{elapsed}</span> : null}
       </div>
 
       {!toolResult.success && toolResult.error ? <ReferenceToolNote text={toolResult.error} /> : null}
@@ -204,7 +253,7 @@ const TaskRunRenderer: React.FC<ToolRenderProps> = ({ toolResult, isPartial = fa
       {hasActivity ? (
         <details className="task-run-history">
           <summary>Show activity</summary>
-          <TaskRunStats snapshot={snapshot} />
+          <TaskRunStats elapsedMs={liveElapsedMs} snapshot={snapshot} />
           <TaskRunActivityList snapshot={snapshot} />
         </details>
       ) : null}

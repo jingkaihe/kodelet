@@ -2,7 +2,9 @@ package tui
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
@@ -243,9 +245,13 @@ func TestRenderTranscriptShowsTaskRunProgressAndFinalMarkdown(t *testing.T) {
 
 	content, _ := m.renderTranscript()
 	plain := xansi.Strip(content)
-	assert.Contains(t, plain, "Searching code — 2 actions running")
+	assert.Contains(t, plain, "⣾ Searching code - 2 actions running… ▾")
+	assert.NotContains(t, plain, "⣾  Searching code - 2 actions running… ▾")
+	assert.Contains(t, plain, "Searching code - 2 actions running")
 	assert.Contains(t, plain, "10 done · 2 running · 1m 08s")
 	assert.Contains(t, plain, "Search \"HandleToolUpdate\" in pkg/")
+	assert.Contains(t, plain, "⣾ Read pkg/llm/base/tool_execution.go")
+	assert.NotContains(t, plain, "⣾  Read pkg/llm/base/tool_execution.go")
 	assert.Contains(t, plain, "+9 earlier completed")
 
 	progress.done = true
@@ -264,6 +270,47 @@ func TestRenderTranscriptShowsTaskRunProgressAndFinalMarkdown(t *testing.T) {
 	assert.Contains(t, plain, "Searched code · 10 actions · 1m 08s")
 	assert.Contains(t, plain, "Findings")
 	assert.Contains(t, plain, "The update path starts in tool_execution.go")
+}
+
+func TestTaskRunElapsedAdvancesBetweenRunningSnapshots(t *testing.T) {
+	observedAt := time.Date(2026, time.July, 22, 12, 0, 0, 0, time.UTC)
+	snapshot := tooltypes.TaskRunSnapshot{Status: "running", ElapsedMS: 68000}
+	tool := toolCall{structured: &tooltypes.StructuredToolResult{Timestamp: observedAt}}
+
+	assert.Equal(t, int64(70000), taskRunElapsedMS(snapshot, tool, observedAt.Add(2*time.Second)))
+
+	tool.done = true
+	assert.Equal(t, int64(68000), taskRunElapsedMS(snapshot, tool, observedAt.Add(2*time.Second)))
+
+	tool.done = false
+	snapshot.Status = "completed"
+	assert.Equal(t, int64(68000), taskRunElapsedMS(snapshot, tool, observedAt.Add(3*time.Second)))
+}
+
+func TestTaskRunActivityPreviewHidesMarkdownFences(t *testing.T) {
+	assert.Empty(t, taskRunActivityPreview("```"))
+	assert.Empty(t, taskRunActivityPreview("```text"))
+	assert.Empty(t, taskRunActivityPreview("~~~"))
+	assert.Equal(t, "TypeScript tests failed", taskRunActivityPreview("```text\nTypeScript tests failed\n```"))
+	assert.Equal(t, "TypeScript tests failed", taskRunActivityPreview("TypeScript tests failed"))
+}
+
+func TestActiveToolHeaderLeavesOneThirdOfTranscriptWidthEmpty(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 120
+	m.height = 24
+	m.resize()
+
+	header := m.renderToolGroupHeader(toolRenderGroup{
+		active:       true,
+		runningLabel: "Searching code - " + strings.Repeat("find the exact implementation ", 10),
+	})
+	plain := xansi.Strip(header)
+
+	assert.LessOrEqual(t, lipgloss.Width(plain), m.transcriptTextWidth()*2/3)
+	assert.Contains(t, plain, "Searching code - find the exact implementation")
+	assert.True(t, strings.HasSuffix(plain, "… ▾"))
 }
 
 func TestRenderTranscriptShowsFailedTaskRun(t *testing.T) {

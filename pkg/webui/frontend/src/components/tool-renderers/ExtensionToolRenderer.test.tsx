@@ -1,9 +1,13 @@
-import { describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, render, screen } from '@testing-library/react';
 import ExtensionToolRenderer from './ExtensionToolRenderer';
 import { ToolResult } from '../../types';
 
 describe('ExtensionToolRenderer', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('pretty-prints JSON output from extension tools', () => {
     const toolResult: ToolResult = {
       toolName: 'git_info',
@@ -26,13 +30,14 @@ describe('ExtensionToolRenderer', () => {
   });
 
   it('renders accumulated task activity while the tool is running', () => {
+    vi.useFakeTimers();
     const toolResult: ToolResult = {
       toolName: 'code_search',
       success: true,
       metadata: {
         extensionId: 'code-search',
         toolName: 'code_search',
-        output: 'Searching code — 2 actions running',
+        output: 'Searching code - 2 actions running',
         data: {
           taskRun: {
             version: 1,
@@ -66,14 +71,77 @@ describe('ExtensionToolRenderer', () => {
       },
     };
 
-    const { container } = render(<ExtensionToolRenderer isPartial toolResult={toolResult} />);
+    const { container, rerender } = render(
+      <ExtensionToolRenderer isPartial toolResult={toolResult} />
+    );
 
     expect(screen.getByText('Searching code')).toBeInTheDocument();
+    expect(container.querySelector('.task-run-headline')).toHaveTextContent(
+      'Searching code-2 actions running'
+    );
     expect(screen.getByText('2 actions running')).toBeInTheDocument();
     expect(screen.getByText('10 done · 2 running · 1m 08s')).toBeInTheDocument();
     expect(screen.getByText('Search "HandleToolUpdate" in pkg/')).toBeInTheDocument();
     expect(screen.getByText('+9 earlier completed')).toBeInTheDocument();
     expect(container.querySelector('.task-run-activity.is-running')).toBeInTheDocument();
+
+    act(() => vi.advanceTimersByTime(1000));
+    expect(screen.getByText('10 done · 2 running · 1m 09s')).toBeInTheDocument();
+
+    act(() => vi.advanceTimersByTime(1000));
+    expect(screen.getByText('10 done · 2 running · 1m 10s')).toBeInTheDocument();
+
+    rerender(<ExtensionToolRenderer toolResult={toolResult} />);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('hides Markdown fence-only failed activity previews', () => {
+    const toolResult: ToolResult = {
+      toolName: 'subagent',
+      success: false,
+      error: 'tests failed',
+      metadata: {
+        extensionId: 'subagent',
+        toolName: 'subagent',
+        output: 'tests failed',
+        data: {
+          taskRun: {
+            version: 1,
+            revision: 2,
+            kind: 'subagent',
+            status: 'failed',
+            phase: 'failed',
+            title: 'Delegated task failed',
+            elapsedMs: 1000,
+            counts: { succeeded: 0, failed: 2, running: 0 },
+            activities: [
+              {
+                id: 'test-1',
+                sequence: 1,
+                kind: 'bash',
+                label: 'Bash: Run TypeScript SDK unit tests',
+                status: 'failed',
+                preview: '```',
+              },
+              {
+                id: 'test-2',
+                sequence: 2,
+                kind: 'bash',
+                label: 'Bash: Run Go tests',
+                status: 'failed',
+                preview: '```text\nGo tests failed\n```',
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    render(<ExtensionToolRenderer toolResult={toolResult} />);
+
+    expect(screen.getByText('Bash: Run TypeScript SDK unit tests')).toBeInTheDocument();
+    expect(screen.getByText('Go tests failed')).toBeInTheDocument();
+    expect(screen.queryByText('```')).not.toBeInTheDocument();
   });
 
   it('renders the completed task response as markdown', () => {

@@ -4295,6 +4295,12 @@ code[class*="language-"] {
   color: rgba(20, 20, 19, 0.74);
 }
 
+.task-run-separator {
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+  color: rgba(20, 20, 19, 0.5);
+}
+
 .task-run-detail {
   min-width: 0;
   overflow: hidden;
