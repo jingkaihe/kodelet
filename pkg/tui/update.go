@@ -112,7 +112,8 @@ func hasShiftModifier(value string) bool {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if stringer, ok := msg.(fmt.Stringer); ok && m.activeUIPrompt == nil && isTextareaNewlineKey(stringer.String()) {
+	_, extensionSurfaceFocused := m.focusedExtensionSurfaceKey()
+	if stringer, ok := msg.(fmt.Stringer); ok && m.activeUIPrompt == nil && !extensionSurfaceFocused && isTextareaNewlineKey(stringer.String()) {
 		m.insertTextareaNewline()
 		return m, nil
 	}
@@ -124,7 +125,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.resize()
+		cmds = append(cmds, m.updateExtensionSurfaceLayouts()...)
 		m.refreshViewport(true)
+
+	case extensionUIFlushMsg:
+		if msg.host == nil || msg.host != m.extensionUI {
+			break
+		}
+		cmd := m.applyExtensionUIBatch(msg.host.drain())
+		return m, tea.Batch(waitForMsg(m.runCh), cmd)
+
+	case extensionUITransportErrorMsg:
+		if m.extensionUI != nil {
+			m.extensionUI.CleanupExtensionUI(msg.owner)
+		}
+		return m, waitForMsg(m.runCh)
 
 	case uiPromptRequestMsg:
 		if msg.runID != m.activeRunID {
@@ -261,6 +276,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.activeUIPrompt != nil {
 			cmd := m.updateUIPromptKey(msg)
 			return m, cmd
+		}
+		if key != "ctrl+c" && key != "ctrl+d" {
+			if cmd, handled := m.routeExtensionSurfaceKey(msg); handled {
+				return m, cmd
+			}
 		}
 		if m.historySearch != nil {
 			m.updateHistorySearchKey(msg)
@@ -426,6 +446,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.activeUIPrompt != nil {
 			return m, nil
+		}
+		if cmd, handled := m.routeExtensionSurfaceMouse(msg); handled {
+			return m, cmd
 		}
 		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
 			if optionIndex, ok := m.profilePickerOptionAt(msg.X, msg.Y); ok {
@@ -823,8 +846,9 @@ func (m *model) resize() {
 	historySearchHeight := m.historySearchHeight()
 	slashCommandHeight := m.slashCommandSuggestionsHeight()
 	settingsPickerHeight := m.profilePickerHeight() + m.reasoningPickerHeight()
+	extensionWidgetHeight := m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer) + m.extensionWidgetsHeight(extensions.UIWidgetPlacementBelowComposer)
 	footerHeight := 0
-	viewportHeight := m.height - inputOuterHeight - historySearchHeight - slashCommandHeight - settingsPickerHeight - footerHeight
+	viewportHeight := m.height - inputOuterHeight - historySearchHeight - slashCommandHeight - settingsPickerHeight - extensionWidgetHeight - footerHeight
 	if viewportHeight < 1 {
 		viewportHeight = 1
 	}

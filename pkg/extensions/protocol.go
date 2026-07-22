@@ -59,6 +59,10 @@ type rpcHostRequestHandler interface {
 	HandleRPCRequest(ctx context.Context, method string, params json.RawMessage) (any, *rpcError)
 }
 
+type rpcNotificationHandler interface {
+	HandleRPCNotification(method string, params json.RawMessage)
+}
+
 // ToolRegistration is returned by an extension during initialization.
 type ToolRegistration struct {
 	Name         string         `json:"name"`
@@ -89,13 +93,6 @@ type initializeParams struct {
 	Kodelet         map[string]any          `json:"kodelet"`
 	Extension       initializeExtensionInfo `json:"extension"`
 	Capabilities    map[string]any          `json:"capabilities"`
-}
-
-type uiInputCapability struct {
-	Input   bool `json:"input"`
-	Confirm bool `json:"confirm"`
-	Select  bool `json:"select"`
-	Notify  bool `json:"notify"`
 }
 
 type initializeExtensionInfo struct {
@@ -207,6 +204,8 @@ type rpcClient struct {
 	nextID   int64
 	pending  map[int64]*rpcPendingCall
 	terminal error
+	host     rpcHostRequestHandler
+	onFail   func(error)
 }
 
 type rpcPendingCall struct {
@@ -228,8 +227,20 @@ func newRPCClient(reader io.Reader, writer io.Writer) *rpcClient {
 	}
 }
 
-func (c *rpcClient) call(ctx context.Context, method string, params any, result any) error {
-	return c.callWithHostHandler(ctx, method, params, result, nil)
+func (c *rpcClient) setHostRequestHandler(handler rpcHostRequestHandler) {
+	c.stateMu.Lock()
+	c.host = handler
+	c.stateMu.Unlock()
+}
+
+func (c *rpcClient) setTerminalHandler(handler func(error)) {
+	c.stateMu.Lock()
+	c.onFail = handler
+	c.stateMu.Unlock()
+}
+
+func (c *rpcClient) call(ctx context.Context, method string, params any) error {
+	return c.callWithHostHandler(ctx, method, params, nil, nil)
 }
 
 func (c *rpcClient) callWithHostHandler(ctx context.Context, method string, params any, result any, handler rpcHostRequestHandler) error {
@@ -308,6 +319,10 @@ func (c *rpcClient) readLoop() {
 			return
 		}
 		if msg.Method != "" {
+			if len(msg.ID) == 0 || string(msg.ID) == "null" {
+				c.dispatchIncomingNotification(msg)
+				continue
+			}
 			go c.dispatchIncomingRequest(msg)
 			continue
 		}
@@ -352,6 +367,25 @@ func (c *rpcClient) dispatchIncomingRequest(msg rpcIncomingMessage) {
 	}
 }
 
+func (c *rpcClient) dispatchIncomingNotification(msg rpcIncomingMessage) {
+	var handler rpcHostRequestHandler
+	if len(msg.ParentID) > 0 && string(msg.ParentID) != "null" {
+		_, handler, _ = c.hostRequestTarget(msg.ParentID)
+	} else {
+		c.stateMu.Lock()
+		handler = c.host
+		c.stateMu.Unlock()
+	}
+	if handler == nil {
+		return
+	}
+	notificationHandler, ok := handler.(rpcNotificationHandler)
+	if !ok {
+		return
+	}
+	notificationHandler.HandleRPCNotification(msg.Method, msg.Params)
+}
+
 func (c *rpcClient) hostRequestTarget(parentID json.RawMessage) (context.Context, rpcHostRequestHandler, bool) {
 	c.stateMu.Lock()
 	defer c.stateMu.Unlock()
@@ -376,7 +410,7 @@ func (c *rpcClient) hostRequestTarget(parentID json.RawMessage) (context.Context
 		}
 	}
 	if selected == nil {
-		return context.Background(), nil, false
+		return context.Background(), c.host, false
 	}
 	return selected.ctx, selected.handler, false
 }
@@ -396,10 +430,14 @@ func (c *rpcClient) fail(err error) {
 	c.terminal = err
 	pending := c.pending
 	c.pending = make(map[int64]*rpcPendingCall)
+	onFail := c.onFail
 	c.stateMu.Unlock()
 
 	for _, call := range pending {
 		call.response <- rpcCallResult{err: err}
+	}
+	if onFail != nil {
+		go onFail(err)
 	}
 }
 
@@ -446,11 +484,20 @@ func (c *rpcClient) writeResponse(response rpcResponse) error {
 
 func (c *rpcClient) cancel(id int64) error {
 	notif := rpcNotification{JSONRPC: "2.0", Method: "$/cancelRequest", Params: cancelRequestParams{ID: id}}
+	return c.notify(notif.Method, notif.Params)
+}
+
+func (c *rpcClient) notify(method string, params any) error {
+	notif := rpcNotification{JSONRPC: "2.0", Method: method, Params: params}
 	payload, err := json.Marshal(notif)
 	if err != nil {
-		return errors.Wrap(err, "failed to marshal rpc cancel request")
+		return errors.Wrap(err, "failed to marshal rpc notification")
 	}
-	return c.writePayload(payload)
+	if err := c.writePayload(payload); err != nil {
+		c.fail(err)
+		return err
+	}
+	return nil
 }
 
 func (c *rpcClient) writePayload(payload []byte) error {

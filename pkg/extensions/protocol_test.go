@@ -9,7 +9,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -21,7 +23,7 @@ func TestRPCClientCallWritesCancelNotificationOnContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := client.call(ctx, "extension.test", map[string]any{"ok": true}, nil)
+	err := client.call(ctx, "extension.test", map[string]any{"ok": true})
 	_ = writer.Close()
 
 	require.ErrorIs(t, err, context.Canceled)
@@ -45,7 +47,7 @@ func TestRPCClientCallHandlesErrorResponseAndUnexpectedID(t *testing.T) {
 		require.NoError(t, writeFrame(&inbound, payload))
 
 		client := newRPCClient(&inbound, &outbound)
-		err = client.call(context.Background(), "extension.test", nil, nil)
+		err = client.call(context.Background(), "extension.test", nil)
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "extension rpc error -32000: boom")
@@ -60,7 +62,7 @@ func TestRPCClientCallHandlesErrorResponseAndUnexpectedID(t *testing.T) {
 		require.NoError(t, writeFrame(&inbound, payload))
 
 		client := newRPCClient(&inbound, &outbound)
-		err = client.call(context.Background(), "extension.test", nil, nil)
+		err = client.call(context.Background(), "extension.test", nil)
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unexpected rpc response id")
@@ -103,6 +105,58 @@ func TestRPCClientCallHandlesHostRequestBeforeResponse(t *testing.T) {
 
 	require.NoError(t, <-callDone)
 	assert.Equal(t, "done", result.Content)
+}
+
+func TestRPCClientRoutesParentlessNotificationsToPersistentHostHandler(t *testing.T) {
+	clientReader, serverWriter := io.Pipe()
+	serverReader, clientWriter := io.Pipe()
+	t.Cleanup(func() {
+		_ = clientReader.Close()
+		_ = serverWriter.Close()
+		_ = serverReader.Close()
+		_ = clientWriter.Close()
+	})
+
+	notifications := make(chan rpcIncomingNotification, 1)
+	client := newRPCClient(clientReader, clientWriter)
+	client.setHostRequestHandler(recordingRPCNotificationHandler{notifications: notifications})
+	callDone := make(chan error, 1)
+	go func() {
+		callDone <- client.call(context.Background(), "extension.initialize", nil)
+	}()
+
+	outbound := bufio.NewReader(serverReader)
+	requestPayload, err := readFrame(outbound)
+	require.NoError(t, err)
+	var request rpcRequest
+	require.NoError(t, json.Unmarshal(requestPayload, &request))
+
+	require.NoError(t, writeFrame(serverWriter, []byte(`{"jsonrpc":"2.0","method":"kodelet.ui.surface.frame","params":{"id":"doom","frame":{"sequence":2,"lines":["latest"]}}}`)))
+	notification := <-notifications
+	assert.Equal(t, UISurfaceFrameMethod, notification.method)
+	assert.JSONEq(t, `{"id":"doom","frame":{"sequence":2,"lines":["latest"]}}`, string(notification.params))
+
+	responsePayload, err := json.Marshal(rpcResponse{JSONRPC: "2.0", ID: request.ID, Result: json.RawMessage(`{}`)})
+	require.NoError(t, err)
+	require.NoError(t, writeFrame(serverWriter, responsePayload))
+	require.NoError(t, <-callDone)
+}
+
+func TestRPCClientNotificationWriteFailureTerminatesClient(t *testing.T) {
+	wantErr := errors.New("writer disconnected")
+	failed := make(chan error, 1)
+	client := newRPCClient(strings.NewReader(""), failingRPCWriter{err: wantErr})
+	client.setTerminalHandler(func(err error) { failed <- err })
+
+	err := client.notify(UISurfaceInputMethod, map[string]any{"id": "game"})
+
+	require.ErrorIs(t, err, wantErr)
+	select {
+	case terminalErr := <-failed:
+		require.ErrorIs(t, terminalErr, wantErr)
+	case <-time.After(time.Second):
+		t.Fatal("terminal handler was not called")
+	}
 }
 
 func TestRPCClientCallsRunConcurrentlyAndRouteHostRequests(t *testing.T) {
@@ -218,6 +272,31 @@ func (contextHostRequestHandler) HandleRPCRequest(ctx context.Context, method st
 	}
 	value, _ := ctx.Value(rpcCallContextKey{}).(string)
 	return UIInputResponse{Status: UIInputStatusSubmitted, Value: value}, nil
+}
+
+type rpcIncomingNotification struct {
+	method string
+	params json.RawMessage
+}
+
+type recordingRPCNotificationHandler struct {
+	notifications chan<- rpcIncomingNotification
+}
+
+type failingRPCWriter struct {
+	err error
+}
+
+func (w failingRPCWriter) Write([]byte) (int, error) {
+	return 0, w.err
+}
+
+func (h recordingRPCNotificationHandler) HandleRPCRequest(context.Context, string, json.RawMessage) (any, *rpcError) {
+	return nil, &rpcError{Code: -32601, Message: "not found"}
+}
+
+func (h recordingRPCNotificationHandler) HandleRPCNotification(method string, params json.RawMessage) {
+	h.notifications <- rpcIncomingNotification{method: method, params: params}
 }
 
 func TestReadFrameValidationErrors(t *testing.T) {

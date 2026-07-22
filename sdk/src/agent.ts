@@ -830,8 +830,8 @@ class TempConfig {
 }
 
 interface BridgePendingRPCRequest extends PendingRPCRequest {
-  parentId: number | string;
-  request: BridgeActiveRequest;
+  parentId?: number | string;
+  request?: BridgeActiveRequest;
 }
 
 class BridgeActiveRequest {
@@ -868,6 +868,8 @@ class ExtensionBridgeConnection {
   nextId = 0;
   readonly pending = new Map<number, BridgePendingRPCRequest>();
   readonly requests = new Map<number | string, BridgeActiveRequest>();
+  readonly notificationHandlers = new Set<(method: string, params: unknown) => void>();
+  persistentClient?: PersistentConnectionHostRPCClient;
   closed = false;
 
   constructor(readonly socket: Socket) {}
@@ -879,13 +881,22 @@ class ExtensionBridgeConnection {
     writeFrame(this.socket, JSON.stringify(message));
   }
 
+  sendAsync(message: JsonRPCMessage): Promise<void> {
+    if (this.closed || this.socket.destroyed || !this.socket.writable) {
+      throw new Error("Extension bridge connection is closed");
+    }
+    return writeFrameAsync(this.socket, JSON.stringify(message));
+  }
+
   cancelRequest(requestId: number | string, error = new Error("Extension request cancelled")): void {
     const request = this.requests.get(requestId);
     request?.cancel(error);
-    for (const [reverseId, pending] of this.pending) {
-      if (pending.request === request) {
-        this.pending.delete(reverseId);
-        pending.reject(error);
+    if (request) {
+      for (const [reverseId, pending] of this.pending) {
+        if (pending.request === request) {
+          this.pending.delete(reverseId);
+          pending.reject(error);
+        }
       }
     }
   }
@@ -916,20 +927,52 @@ class ExtensionBridgeConnection {
       request.cancel(error);
     }
     this.requests.clear();
+    this.notificationHandlers.clear();
     this.socket.destroy();
+  }
+
+  handleNotification(method: string, params: unknown): void {
+    for (const handler of this.notificationHandlers) {
+      handler(method, params);
+    }
   }
 }
 
 class ConnectionHostRPCClient implements HostRPCClient {
+  readonly persistent: HostRPCClient;
+
   constructor(
     private readonly server: ExtensionSocketServer,
     private readonly connection: ExtensionBridgeConnection,
     private readonly parentId: number | string,
     private readonly activeRequest: BridgeActiveRequest,
-  ) {}
+  ) {
+    connection.persistentClient ??= new PersistentConnectionHostRPCClient(server, connection);
+    this.persistent = connection.persistentClient;
+  }
 
   async request(method: string, params?: unknown): Promise<unknown> {
     return await this.server.requestOnConnection(this.connection, this.parentId, this.activeRequest, method, params);
+  }
+}
+
+class PersistentConnectionHostRPCClient implements HostRPCClient {
+  constructor(
+    private readonly server: ExtensionSocketServer,
+    private readonly connection: ExtensionBridgeConnection,
+  ) {}
+
+  async request(method: string, params?: unknown): Promise<unknown> {
+    return await this.server.requestPersistentOnConnection(this.connection, method, params);
+  }
+
+  notify(method: string, params?: unknown): Promise<void> {
+    return this.connection.sendAsync({ jsonrpc: "2.0", method, params });
+  }
+
+  onNotification(handler: (method: string, params: unknown) => void): () => void {
+    this.connection.notificationHandlers.add(handler);
+    return () => this.connection.notificationHandlers.delete(handler);
   }
 }
 
@@ -1039,6 +1082,25 @@ class ExtensionSocketServer {
     }
   }
 
+  async requestPersistentOnConnection(
+    connection: ExtensionBridgeConnection,
+    method: string,
+    params?: unknown,
+  ): Promise<unknown> {
+    if (connection.closed) {
+      throw new Error("Extension bridge connection is closed");
+    }
+    const id = ++connection.nextId;
+    try {
+      return await new Promise((resolve, reject) => {
+        connection.pending.set(id, { resolve, reject });
+        connection.send({ jsonrpc: "2.0", id, method, params });
+      });
+    } finally {
+      connection.pending.delete(id);
+    }
+  }
+
   private assertActiveRequest(
     connection: ExtensionBridgeConnection,
     parentId: number | string,
@@ -1071,7 +1133,12 @@ class ExtensionSocketServer {
       return;
     }
 
-    if (!message.method || message.id === undefined || message.id === null) {
+    if (message.method && (message.id === undefined || message.id === null)) {
+      connection.handleNotification(message.method, message.params);
+      return;
+    }
+
+    if (!message.method) {
       return;
     }
 
@@ -1434,6 +1501,19 @@ function parseContentLength(header: string): number {
 
 function writeFrame(socket: Socket, payload: string): void {
   socket.write(`Content-Length: ${Buffer.byteLength(payload, "utf8")}\r\n\r\n${payload}`);
+}
+
+function writeFrameAsync(socket: Socket, payload: string): Promise<void> {
+  const frame = `Content-Length: ${Buffer.byteLength(payload, "utf8")}\r\n\r\n${payload}`;
+  return new Promise((resolve, reject) => {
+    socket.write(frame, (error) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    });
+  });
 }
 
 function extensionSocketPath(rootDir: string, id: string): string {

@@ -16,8 +16,8 @@ For details, choose the reference that matches the task:
 - `references/configuration.md` — config files, profiles, model/provider setup, security restrictions, MCP, bash timeout.
 - `references/recipes.md` — `AGENTS.md`, fragments, and recipes.
 - `references/skills.md` — agentic skills, skill layout, configuration, and skill plugins.
-- `references/extensions.md` — extension runtime, discovery, configuration, plugins, and operational behavior.
-- `references/sdk.md` — TypeScript SDK agent sessions, extension authoring API, tools, commands/dynamic recipes, lifecycle events, UI helpers, and examples.
+- `references/extensions.md` — extension runtime, discovery, configuration, plugins, persistent TUI widgets/surfaces, and operational behavior.
+- `references/sdk.md` — TypeScript SDK agent sessions, extension authoring API, tools, commands/dynamic recipes, lifecycle events, UI helpers, persistent surfaces, and examples.
 
 Examples now live with the skill under `examples/`:
 

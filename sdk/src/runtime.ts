@@ -65,9 +65,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 class StdioHostRPCClient implements HostRPCClient {
   private nextId = 0;
   private pending = new Map<number, PendingRequest>();
+  private notificationHandlers = new Set<(method: string, params: unknown) => void>();
 
   request(method: string, params?: unknown): Promise<unknown> {
     return this.requestFor(undefined, method, params);
+  }
+
+  notify(method: string, params?: unknown): Promise<void> {
+    return writeMessageAsync({ jsonrpc: "2.0", method, params });
+  }
+
+  onNotification(handler: (method: string, params: unknown) => void): () => void {
+    this.notificationHandlers.add(handler);
+    return () => this.notificationHandlers.delete(handler);
+  }
+
+  handleNotification(method: string, params: unknown): void {
+    for (const handler of this.notificationHandlers) {
+      handler(method, params);
+    }
   }
 
   requestFor(request: ActiveRequest | undefined, method: string, params?: unknown): Promise<unknown> {
@@ -175,6 +191,7 @@ function handleMessage(
   }
 
   if (request.id === undefined || request.id === null) {
+    hostClient.handleNotification(request.method, request.params);
     return;
   }
 
@@ -198,6 +215,7 @@ function startRequest(
   activeRequests.set(requestId, active);
   const requestClient: HostRPCClient = {
     request: (method, params) => hostClient.requestFor(active, method, params),
+    persistent: hostClient,
   };
 
   const execution = runWithHostRPCClient(requestClient, () => dispatch(host, request, active.controller.signal));
@@ -281,6 +299,20 @@ function writeResponse(response: JsonRpcResponse): void {
 function writeMessage(message: JsonRpcRequest | JsonRpcResponse): void {
   const payload = JSON.stringify(message);
   nodeProcess.stdout.write(`Content-Length: ${Buffer.byteLength(payload, "utf8")}\r\n\r\n${payload}`);
+}
+
+function writeMessageAsync(message: JsonRpcRequest | JsonRpcResponse): Promise<void> {
+  const payload = JSON.stringify(message);
+  const frame = `Content-Length: ${Buffer.byteLength(payload, "utf8")}\r\n\r\n${payload}`;
+  return new Promise((resolve, reject) => {
+    nodeProcess.stdout.write(frame, (error) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    });
+  });
 }
 
 function errorMessage(error: unknown): string {

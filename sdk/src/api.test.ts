@@ -340,6 +340,261 @@ test("tool updates are ignored when the host does not advertise support", async 
   assert.deepEqual(requests, []);
 });
 
+test("widgets use sequences and surfaces coalesce frames and route host events", async () => {
+  let openedSurface: any;
+  const inputEvents: unknown[] = [];
+  const resizeEvents: unknown[] = [];
+  const requests: Array<{ method: string; params?: unknown }> = [];
+  const notifications: Array<{ method: string; params?: unknown }> = [];
+  const notificationHandlers = new Set<(method: string, params: unknown) => void>();
+  const host = {
+    async request(method: string, params?: unknown) {
+      requests.push({ method, params });
+      return { accepted: true, latestSequence: 1 };
+    },
+    notify(method: string, params?: unknown) {
+      notifications.push({ method, params });
+    },
+    onNotification(handler: (method: string, params: unknown) => void) {
+      notificationHandlers.add(handler);
+      return () => notificationHandlers.delete(handler);
+    },
+  };
+
+  const extension = defineExtension((ext) => {
+    ext.registerCommand({
+      name: "ui",
+      description: "Open extension UI",
+      async execute(_input, ctx) {
+        await ctx.ui.setWidget("status", [
+          "ready",
+          { spans: [{ text: "green", style: { foreground: "#00ff00", bold: true } }] },
+        ]);
+        await ctx.ui.setWidget("status", ["updated"], { placement: "belowComposer" });
+        await ctx.ui.setWidget("status", undefined);
+        openedSurface = await ctx.ui.openSurface({
+          id: "game",
+          initialLines: ["loading"],
+          width: "75%",
+          maxHeight: "95%",
+          anchor: "center",
+        });
+        openedSurface.onInput((event: unknown) => inputEvents.push(event));
+        openedSurface.onResize((event: unknown) => resizeEvents.push(event));
+        return { action: "respond", response: "opened" };
+      },
+    });
+  });
+
+  const harness = await createTestHarness(extension, host);
+  harness.initialize({ capabilities: { ui: { widgets: true, surfaces: true } } });
+  await harness.executeCommand({
+    name: "ui",
+    invocation: { raw: "/ui", commandName: "ui", args: [], flags: {} },
+  });
+
+  assert.deepEqual(requests.slice(0, 4), [
+    {
+      method: "kodelet.ui.widget.set",
+      params: {
+        id: "status",
+        placement: "aboveComposer",
+        frame: {
+          sequence: 1,
+          lines: ["ready", { spans: [{ text: "green", style: { foreground: "#00ff00", bold: true } }] }],
+        },
+      },
+    },
+    {
+      method: "kodelet.ui.widget.set",
+      params: { id: "status", placement: "belowComposer", frame: { sequence: 2, lines: ["updated"] } },
+    },
+    { method: "kodelet.ui.widget.remove", params: { id: "status", sequence: 3 } },
+    {
+      method: "kodelet.ui.surface.open",
+      params: {
+        id: "game",
+        options: { width: "75%", maxHeight: "95%", anchor: "center" },
+        frame: { sequence: 1, lines: ["loading"] },
+      },
+    },
+  ]);
+
+  openedSurface.update(["first"]);
+  openedSurface.update(["latest"]);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(notifications, [
+    { method: "kodelet.ui.surface.frame", params: { id: "game", frame: { sequence: 2, lines: ["latest"] } } },
+  ]);
+
+  for (const handler of notificationHandlers) {
+    handler("extension.ui.surface.resize", { id: "game", sequence: 1, width: 80, height: 20 });
+    handler("extension.ui.surface.input", { id: "game", sequence: 2, kind: "key", key: "q", text: "q" });
+    handler("extension.ui.surface.resize", { id: "game", sequence: 1, width: 1, height: 1 });
+  }
+  assert.deepEqual(openedSurface.size, { width: 80, height: 20 });
+  assert.deepEqual(resizeEvents, [{ sequence: 1, width: 80, height: 20 }]);
+  assert.deepEqual(inputEvents, [{ id: "game", sequence: 2, kind: "key", key: "q", text: "q" }]);
+
+  await openedSurface.close();
+  assert.deepEqual(requests.at(-1), {
+    method: "kodelet.ui.surface.close",
+    params: { id: "game", sequence: 3 },
+  });
+
+  await harness.executeCommand({
+    name: "ui",
+    invocation: { raw: "/ui", commandName: "ui", args: [], flags: {} },
+  });
+  assert.deepEqual(
+    requests.filter((request) => request.method === "kodelet.ui.surface.open").at(-1),
+    {
+      method: "kodelet.ui.surface.open",
+      params: {
+        id: "game",
+        options: { width: "75%", maxHeight: "95%", anchor: "center" },
+        frame: { sequence: 4, lines: ["loading"] },
+      },
+    },
+  );
+  await openedSurface.close();
+  assert.deepEqual(requests.at(-1), {
+    method: "kodelet.ui.surface.close",
+    params: { id: "game", sequence: 5 },
+  });
+});
+
+test("surface presentation keeps at most one frame in flight and one latest pending frame", async () => {
+  let openedSurface: any;
+  const notifications: Array<{ method: string; params?: unknown }> = [];
+  const releaseNotifications: Array<() => void> = [];
+  const notificationHandlers = new Set<(method: string, params: unknown) => void>();
+  const host = {
+    async request() {
+      return { accepted: true };
+    },
+    notify(method: string, params?: unknown) {
+      notifications.push({ method, params });
+      return new Promise<void>((resolve) => releaseNotifications.push(resolve));
+    },
+    onNotification(handler: (method: string, params: unknown) => void) {
+      notificationHandlers.add(handler);
+      return () => notificationHandlers.delete(handler);
+    },
+  };
+  const extension = defineExtension((ext) => {
+    ext.registerCommand({
+      name: "bounded-ui",
+      description: "Open a bounded presentation surface",
+      async execute(_input, ctx) {
+        openedSurface = await ctx.ui.openSurface({ id: "bounded" });
+        return { action: "respond", response: "opened" };
+      },
+    });
+  });
+
+  const harness = await createTestHarness(extension, host);
+  harness.initialize({ capabilities: { ui: { surfaces: true } } });
+  await harness.executeCommand({
+    name: "bounded-ui",
+    invocation: { raw: "/bounded-ui", commandName: "bounded-ui", args: [], flags: {} },
+  });
+
+  openedSurface.update(["frame 1"]);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(notifications.length, 1);
+
+  openedSurface.update(["frame 2"]);
+  openedSurface.update(["frame 3"]);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(notifications.length, 1, "a blocked transport must not accumulate writes");
+
+  releaseNotifications.shift()?.();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(notifications, [
+    {
+      method: "kodelet.ui.surface.frame",
+      params: { id: "bounded", frame: { sequence: 2, lines: ["frame 1"] } },
+    },
+    {
+      method: "kodelet.ui.surface.frame",
+      params: { id: "bounded", frame: { sequence: 3, lines: ["frame 3"] } },
+    },
+  ]);
+
+  releaseNotifications.shift()?.();
+  await new Promise((resolve) => setImmediate(resolve));
+  await openedSurface.close();
+});
+
+test("surface routing accepts the initial resize before open acknowledgement", async () => {
+  let openedSurface: any;
+  const notificationHandlers = new Set<(method: string, params: unknown) => void>();
+  const host = {
+    async request(method: string) {
+      if (method === "kodelet.ui.surface.open") {
+        for (const handler of notificationHandlers) {
+          handler("extension.ui.surface.resize", { id: "early", sequence: 1, width: 72, height: 18 });
+        }
+      }
+      return { accepted: true };
+    },
+    onNotification(handler: (method: string, params: unknown) => void) {
+      notificationHandlers.add(handler);
+      return () => notificationHandlers.delete(handler);
+    },
+  };
+  const extension = defineExtension((ext) => {
+    ext.registerCommand({
+      name: "early-resize",
+      description: "Open a surface that receives an immediate resize",
+      async execute(_input, ctx) {
+        openedSurface = await ctx.ui.openSurface({ id: "early" });
+        return { action: "respond", response: "opened" };
+      },
+    });
+  });
+
+  const harness = await createTestHarness(extension, host);
+  harness.initialize({ capabilities: { ui: { surfaces: true } } });
+  await harness.executeCommand({
+    name: "early-resize",
+    invocation: { raw: "/early-resize", commandName: "early-resize", args: [], flags: {} },
+  });
+
+  assert.deepEqual(openedSurface.size, { width: 72, height: 18 });
+  await openedSurface.close();
+});
+
+test("widget and surface APIs are capability gated", async () => {
+  const requests: string[] = [];
+  const extension = defineExtension((ext) => {
+    ext.registerCommand({
+      name: "ui",
+      description: "Try extension UI",
+      async execute(_input, ctx) {
+        await ctx.ui.setWidget("status", ["ignored"]);
+        await assert.rejects(ctx.ui.openSurface({ id: "missing" }), /not available/);
+        return { action: "respond", response: "done" };
+      },
+    });
+  });
+  const harness = await createTestHarness(extension, {
+    async request(method) {
+      requests.push(method);
+      return {};
+    },
+  });
+  harness.initialize({ capabilities: {} });
+
+  await harness.executeCommand({
+    name: "ui",
+    invocation: { raw: "/ui", commandName: "ui", args: [], flags: {} },
+  });
+
+  assert.deepEqual(requests, []);
+});
+
 test("runtime serves JSON-RPC over stdio", async (t) => {
   const extensionFile = path.join(await mkdtemp(path.join(os.tmpdir(), "kodelet-sdk-rpc-")), "extension.ts");
   await writeFile(
@@ -443,6 +698,74 @@ test("runtime supports extension-initiated host RPC", async (t) => {
   assert.deepEqual(result, { content: "from-host:true:Pizza" });
 });
 
+test("runtime keeps interactive surfaces alive after the opening command returns", async (t) => {
+  const extensionFile = path.join(await mkdtemp(path.join(os.tmpdir(), "kodelet-sdk-surface-rpc-")), "extension.ts");
+  await writeFile(
+    extensionFile,
+    `
+      import { defineExtension, runExtension } from ${JSON.stringify(path.resolve("src/index.ts"))};
+
+      runExtension(defineExtension((ext) => {
+        ext.registerCommand({
+          name: "game",
+          description: "Open a persistent surface",
+          async execute(_, ctx) {
+            const surface = await ctx.ui.openSurface({ id: "game", initialLines: ["loading"], width: "50%" });
+            surface.onResize((event) => surface.update(["size=" + event.width + "x" + event.height]));
+            surface.onInput((event) => {
+              surface.update(["key=" + event.key + ";size=" + surface.size?.width + "x" + surface.size?.height]);
+              if (event.key === "q") setTimeout(() => void surface.close(), 0);
+            });
+            return { action: "respond", response: "opened" };
+          },
+        });
+      }));
+    `,
+    "utf8",
+  );
+
+  const child = spawn(process.execPath, ["--import", "tsx", extensionFile], {
+    cwd: process.cwd(),
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  t.after(() => child.kill());
+
+  const client = new RpcTestClient(child.stdout, child.stdin);
+  await client.call("extension.initialize", {
+    protocolVersion: "2026-05-30",
+    extension: { id: "surface", cwd: process.cwd(), dataDir: "" },
+    capabilities: { ui: { surfaces: true } },
+  });
+  const result = await client.call("extension.command.execute", {
+    name: "game",
+    input: {},
+    invocation: { raw: "/game", commandName: "game", args: [], flags: {} },
+  });
+  assert.deepEqual(result, { action: "respond", response: "opened" });
+  const openRequest = client.hostRequests.find((request) => request.method === "kodelet.ui.surface.open");
+  assert.equal(openRequest?.parentId, undefined);
+
+  client.notify("extension.ui.surface.resize", { id: "game", sequence: 1, width: 60, height: 18 });
+  await client.waitForHostNotifications(1);
+  assert.deepEqual(client.hostNotifications[0], {
+    method: "kodelet.ui.surface.frame",
+    params: { id: "game", frame: { sequence: 2, lines: ["size=60x18"] } },
+  });
+
+  client.notify("extension.ui.surface.resize", { id: "game", sequence: 1, width: 1, height: 1 });
+  const requestCountBeforeInput = client.hostRequests.length;
+  client.notify("extension.ui.surface.input", { id: "game", sequence: 2, kind: "key", key: "q", text: "q" });
+  await client.waitForHostNotifications(2);
+  assert.deepEqual(client.hostNotifications[1], {
+    method: "kodelet.ui.surface.frame",
+    params: { id: "game", frame: { sequence: 3, lines: ["key=q;size=60x18"] } },
+  });
+  await client.waitForHostRequests(requestCountBeforeInput + 1);
+  const closeRequest = client.hostRequests.find((request) => request.method === "kodelet.ui.surface.close");
+  assert.equal(closeRequest?.parentId, undefined);
+  assert.deepEqual(closeRequest?.params, { id: "game", sequence: 4 });
+});
+
 test("runtime cancellation aborts handlers and blocks late host RPC", async (t) => {
   const extensionFile = path.join(await mkdtemp(path.join(os.tmpdir(), "kodelet-sdk-cancel-rpc-")), "extension.ts");
   await writeFile(
@@ -520,6 +843,7 @@ class RpcTestClient {
   private nextId = 0;
   private waiters = new Map<number, { resolve(value: any): void; reject(error: Error): void }>();
   hostRequests: Array<{ id: number | string; parentId?: number | string; method: string; params?: unknown }> = [];
+  hostNotifications: Array<{ method: string; params?: unknown }> = [];
 
   constructor(stdout: NodeJS.ReadableStream, private stdin: NodeJS.WritableStream) {
     stdout.on("data", (chunk: Buffer) => {
@@ -562,6 +886,12 @@ class RpcTestClient {
     }
   }
 
+  async waitForHostNotifications(count: number): Promise<void> {
+    while (this.hostNotifications.length < count) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  }
+
   private drain(): void {
     while (true) {
       const headerEnd = this.buffer.indexOf("\r\n\r\n");
@@ -582,6 +912,10 @@ class RpcTestClient {
       const response = JSON.parse(this.buffer.subarray(start, end).toString("utf8"));
       this.buffer = this.buffer.subarray(end);
       if (response.method) {
+        if (response.id === undefined || response.id === null) {
+          this.hostNotifications.push({ method: response.method, params: response.params });
+          continue;
+        }
         this.hostRequests.push(response);
         let result: unknown;
         switch (response.method) {
@@ -596,6 +930,12 @@ class RpcTestClient {
             break;
           case "kodelet.ui.notify":
             result = { status: "submitted" };
+            break;
+          case "kodelet.ui.widget.set":
+          case "kodelet.ui.widget.remove":
+          case "kodelet.ui.surface.open":
+          case "kodelet.ui.surface.close":
+            result = { accepted: true, latestSequence: response.params?.sequence ?? response.params?.frame?.sequence ?? 0 };
             break;
         }
         const payload = JSON.stringify({ jsonrpc: "2.0", id: response.id, result });

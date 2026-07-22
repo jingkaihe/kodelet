@@ -1441,6 +1441,53 @@ await ctx.ui.notify({
 });
 ```
 
+### Persistent TUI Widgets and Interactive Surfaces
+
+The native `kodelet chat` TUI lets extensions keep passive widgets and interactive overlay surfaces alive after the command, tool, or event handler that created them returns. These APIs are capability-gated: `ctx.ui.setWidget(...)` does nothing when widgets are unavailable, while `ctx.ui.openSurface(...)` rejects when the host has no interactive surface support. The Web UI, ACP, and headless modes do not currently advertise these capabilities.
+
+Passive widgets accept plain strings or styled lines and can be placed above or below the composer. Calling `setWidget` again with the same ID updates it; passing `undefined` removes it.
+
+```typescript
+await ctx.ui.setWidget(
+  "build-status",
+  [
+    "Build",
+    { spans: [{ text: " ready", style: { foreground: "#00ff00", bold: true } }] },
+  ],
+  { placement: "aboveComposer" },
+);
+
+await ctx.ui.setWidget("build-status", ["Build complete"], { placement: "belowComposer" });
+await ctx.ui.setWidget("build-status", undefined);
+```
+
+Interactive surfaces are terminal-cell overlays with fixed or percentage sizing, nine anchors, offsets, margins, keyboard focus, and relative mouse coordinates. The returned handle receives host input/resize notifications and sends replace-in-place frame snapshots. Surface handles remain valid after the opening handler returns.
+
+```typescript
+const surface = await ctx.ui.openSurface({
+  id: "demo",
+  initialLines: ["Loading…"],
+  width: "75%",
+  height: "80%",
+  maxWidth: "95%",
+  maxHeight: "95%",
+  anchor: "center",
+  margin: { top: 1, right: 1, bottom: 1, left: 1 },
+});
+
+surface.onResize(({ width, height }) => {
+  surface.update([`Allocated ${width}×${height}`]);
+});
+
+surface.onInput((event) => {
+  if (event.kind === "key" && event.key === "q") {
+    void surface.close();
+  }
+});
+```
+
+Frames use positive monotonically increasing sequence numbers internally. The SDK keeps at most one surface frame in flight and one replaceable latest pending frame, waits for transport writes, and the host independently keeps only the latest frame pending for each object before the next Bubble Tea update. Host input and resize notifications carry their own ordered sequence. ANSI/control sequences in extension text are stripped; terminal styles use explicit fields such as `foreground`, `background`, `bold`, and `underline`, with colors expressed as `#RRGGBB`. When an extension process exits or its transport fails, Kodelet automatically removes all widgets and surfaces owned by that process generation and restores the previous surface focus.
+
 ### Extension Discovery
 
 Kodelet discovers executable files named `kodelet-extension-*` in these locations, in precedence order:

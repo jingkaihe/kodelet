@@ -5,6 +5,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 )
 
@@ -52,7 +53,9 @@ func (m model) View() string {
 	slashSuggestions := m.renderSlashCommandSuggestions()
 	profilePicker := m.renderProfilePicker()
 	reasoningPicker := m.renderReasoningPicker()
+	widgetsAbove := m.renderExtensionWidgets(extensions.UIWidgetPlacementAboveComposer)
 	input := m.renderInputBox()
+	widgetsBelow := m.renderExtensionWidgets(extensions.UIWidgetPlacementBelowComposer)
 	parts := []string{transcript}
 	if strings.TrimSpace(historySearch) != "" {
 		parts = append(parts, historySearch)
@@ -66,7 +69,13 @@ func (m model) View() string {
 	if strings.TrimSpace(reasoningPicker) != "" {
 		parts = append(parts, reasoningPicker)
 	}
+	if widgetsAbove != "" {
+		parts = append(parts, widgetsAbove)
+	}
 	parts = append(parts, input)
+	if widgetsBelow != "" {
+		parts = append(parts, widgetsBelow)
+	}
 	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	content = m.renderUIOverlays(content)
 	return leftMarginBlock(content, tuiLeftMargin)
@@ -79,6 +88,9 @@ func (m model) renderUIOverlays(content string) string {
 	}
 	for i := range lines {
 		lines[i] = padVisible(lines[i], m.contentWidth())
+	}
+	if len(m.extensionSurfaces) > 0 {
+		lines = m.overlayExtensionSurfaces(lines)
 	}
 
 	if len(m.uiNotifications) > 0 {

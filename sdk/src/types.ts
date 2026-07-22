@@ -147,6 +147,101 @@ export interface UINotifyRequest {
   message: string;
 }
 
+export type UIWidgetPlacement = "aboveComposer" | "belowComposer";
+
+export interface UIStyle {
+  foreground?: string;
+  background?: string;
+  bold?: boolean;
+  dim?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strikethrough?: boolean;
+  reverse?: boolean;
+}
+
+export interface UIStyledSpan {
+  text: string;
+  style?: UIStyle;
+}
+
+export interface UIStyledLine {
+  spans: UIStyledSpan[];
+}
+
+export type UIFrameLine = string | UIStyledLine;
+export type UISizeValue = number | `${number}%`;
+export type UISurfaceAnchor =
+  | "topLeft"
+  | "top"
+  | "topRight"
+  | "left"
+  | "center"
+  | "right"
+  | "bottomLeft"
+  | "bottom"
+  | "bottomRight";
+
+export interface UIMargin {
+  top?: number;
+  right?: number;
+  bottom?: number;
+  left?: number;
+}
+
+export interface UISurfaceOpenOptions {
+  id: string;
+  initialLines?: UIFrameLine[];
+  width?: UISizeValue;
+  height?: UISizeValue;
+  maxWidth?: UISizeValue;
+  maxHeight?: UISizeValue;
+  anchor?: UISurfaceAnchor;
+  offsetX?: number;
+  offsetY?: number;
+  margin?: UIMargin;
+  nonCapturing?: boolean;
+}
+
+export interface UISurfaceSize {
+  width: number;
+  height: number;
+}
+
+export interface UISurfaceMouseEvent {
+  x: number;
+  y: number;
+  button: string;
+  action: string;
+  shift?: boolean;
+  alt?: boolean;
+  ctrl?: boolean;
+}
+
+export interface UISurfaceInputEvent {
+  sequence: number;
+  kind: "key" | "mouse" | "focus" | "blur";
+  key?: string;
+  text?: string;
+  alt?: boolean;
+  shift?: boolean;
+  ctrl?: boolean;
+  mouse?: UISurfaceMouseEvent;
+}
+
+export interface UISurfaceResizeEvent extends UISurfaceSize {
+  sequence: number;
+}
+
+export interface UISurface {
+  readonly id: string;
+  readonly size: UISurfaceSize | undefined;
+  update(lines: UIFrameLine[]): void;
+  close(): Promise<void>;
+  onInput(handler: (event: UISurfaceInputEvent) => void): () => void;
+  onResize(handler: (event: UISurfaceResizeEvent) => void): () => void;
+}
+
 export type UIInputStatus = "submitted" | "dismissed" | "timeout" | "unavailable";
 
 export interface UIInputResponse {
@@ -161,6 +256,8 @@ export interface UIContext {
   confirm(request: UIConfirmRequest): Promise<boolean>;
   select(request: UISelectRequest): Promise<string | undefined>;
   notify(request: string | UINotifyRequest): Promise<void>;
+  setWidget(id: string, lines: UIFrameLine[] | undefined, options?: { placement?: UIWidgetPlacement }): Promise<void>;
+  openSurface(options: UISurfaceOpenOptions): Promise<UISurface>;
 }
 
 export interface SharedContext extends Required<Pick<BaseCallContext, "cwd">>, Omit<BaseCallContext, "cwd"> {

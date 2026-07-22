@@ -325,6 +325,7 @@ Rules:
   remain diagnostics only.
 - Requests use the effective timeout from config, SDK `timeoutInSec`, and runtime defaults. Extension commands may run without a timeout by default.
 - Extensions can call back into the host for transient tool progress with `kodelet.tool.update` and for UI interactions with `kodelet.ui.input`, `kodelet.ui.confirm`, `kodelet.ui.select`, and `kodelet.ui.notify`.
+- Persistent interactive hosts can also advertise passive widgets and interactive surfaces. These calls are not scoped to the lifetime of the tool, command, or event request that created them.
 - Reverse-RPC requests can include the originating host request ID as `parentId` so callbacks retain the correct context when extension requests execute concurrently.
 - Cancellation uses `$/cancelRequest`.
 - If an extension hangs after cancellation, Kodelet kills and restarts it.
@@ -358,7 +359,9 @@ Kodelet starts the extension executable, then sends:
         "input": true,
         "confirm": true,
         "select": true,
-        "notify": true
+        "notify": true,
+        "widgets": true,
+        "surfaces": true
       },
       "events": [
         "session.start",
@@ -501,6 +504,36 @@ When initialization advertises `capabilities.toolUpdates: true`, a running tool 
 `taskRun` is an optional generic rendering contract rather than an agent-specific protocol. SDK helpers named `TaskProgress` produce the bounded schema, can track activities directly, and can attach to a child Kodelet session as a convenience adapter.
 
 Renderers accept at most 14 visible activities: up to 8 running, 3 recently completed, and 3 recently failed. SDK helpers retain full observed counters and report hidden entries through the `omittedSucceeded`, `omittedFailed`, and `omittedRunning` fields; labels and previews are length-bounded before publication.
+
+### Persistent widgets and interactive surfaces
+
+The native Bubble Tea TUI advertises `capabilities.ui.widgets` and `capabilities.ui.surfaces`. Headless, ACP, and Web UI runtimes currently advertise these capabilities as false, so extension authors must treat them as optional. The TypeScript SDK makes `ctx.ui.setWidget(...)` a no-op when widgets are unavailable and rejects `ctx.ui.openSurface(...)` when surfaces are unavailable.
+
+Every UI object is scoped to one extension process generation and an extension-chosen ID. Process generation is part of host ownership rather than the wire payload: when a process fails or restarts, the host removes every widget and surface owned by the failed generation, restores focus to the next capturing surface, and rejects queued events from the old generation.
+
+Extension-to-host methods:
+
+| Method | Transport | Purpose |
+|---|---|---|
+| `kodelet.ui.widget.set` | Request | Create or replace a passive widget and its placement. |
+| `kodelet.ui.widget.frame` | Request or notification | Replace an existing widget frame. Notifications are intended for coalescible presentation updates. |
+| `kodelet.ui.widget.remove` | Request | Remove a widget. |
+| `kodelet.ui.surface.open` | Request | Create or replace an interactive overlay and its layout options. |
+| `kodelet.ui.surface.frame` | Request or notification | Replace an existing surface frame. High-frequency renderers should use notifications. |
+| `kodelet.ui.surface.close` | Request | Close a surface and release its place in the focus stack. |
+
+Host-to-extension methods are parentless notifications:
+
+| Method | Purpose |
+|---|---|
+| `extension.ui.surface.input` | Deliver `key`, `mouse`, `focus`, or `blur` input. Mouse coordinates are relative to the surface origin. |
+| `extension.ui.surface.resize` | Report the surface's allocated terminal-cell width and height. |
+
+A presentation frame is `{ "sequence": 1, "lines": [...] }`. Each line is either a plain string or `{ "spans": [{ "text": "...", "style": { ... } }] }`; supported style fields are `foreground`, `background`, `bold`, `dim`, `italic`, `underline`, `strikethrough`, and `reverse`. The TUI strips embedded ANSI/control sequences from extension text and accepts `#RRGGBB` colors. Passive widgets are placed above or below the composer, and each placement renders at most ten rows.
+
+Widget and surface presentation sequences are positive and monotonically increasing for the lifetime of an object ID in one process generation. For each surface, the SDK permits at most one transport write in flight and one replaceable latest pending frame. The host reads presentation notifications synchronously, rejects stale frames, and keeps only the newest pending frame per object before the next Bubble Tea update, so a high-frequency renderer cannot build an unbounded presentation queue in either runtime. Input, focus, and resize notifications share a separate monotonically increasing per-surface event sequence; SDK handles discard stale host notifications.
+
+Surface width, height, maximum width, and maximum height accept either positive cell counts or percentage strings such as `"75%"`. Supported anchors are `topLeft`, `top`, `topRight`, `left`, `center`, `right`, `bottomLeft`, `bottom`, and `bottomRight`; offsets and per-edge margins are clamped to the terminal. Capturing surfaces form a last-opened focus stack. A `nonCapturing` surface remains visible and can receive hit-tested mouse events without taking keyboard focus.
 
 ## Event model
 

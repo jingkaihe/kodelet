@@ -10,6 +10,7 @@ Extensions communicate over stdio JSON-RPC using `Content-Length` framing. `stdo
 - **Prompt commands**: slash-style or named commands checked before the LLM sees the prompt.
 - **Dynamic recipes**: command registrations with `kind: "recipe"` that appear in recipe listings and can be run with `kodelet run -r`.
 - **Lifecycle event handlers**: observers/mutators/blockers for session, user, agent, turn, and tool events.
+- **Persistent TUI UI**: passive styled widgets above/below the composer and interactive overlay surfaces with focus, keyboard, mouse, and resize notifications.
 
 Use the TypeScript SDK to author extension subprocesses, or implement the JSON-RPC protocol directly. See `references/sdk.md` for SDK agent sessions and the full SDK API surface.
 
@@ -97,6 +98,7 @@ During local development, a wrapper can run `tsx` against `src/index.ts`, as sho
 - Recipe-like commands use `kind: "recipe"`, appear in `kodelet recipe list`, and can be invoked through `kodelet run -r` or directly as `/name`.
 - Lifecycle handlers use `ext.on(...)` for events like `session.start`, `user.message`, `agent.init`, `turn.start`, `tool.call`, `tool.update`, `tool.result`, and `agent.end`.
 - Tool and event contexts can call host UI helpers such as `ctx.ui.input`, `ctx.ui.confirm`, `ctx.ui.select`, and `ctx.ui.notify`.
+- Native TUI contexts can call `ctx.ui.setWidget(...)` and `ctx.ui.openSurface(...)` when the host advertises `ui.widgets` and `ui.surfaces`.
 
 Mutating/blocking event handlers run sequentially by priority, discovery order, then registration order. The first blocking handler stops the operation. Events use SDK `timeoutInSec` or the built-in 30 second default.
 
@@ -113,7 +115,7 @@ Legacy hook mapping:
 
 Extension subprocesses communicate with Kodelet over stdio JSON-RPC using `Content-Length` framing. Kodelet sends initialization, tool execution, command execution, and lifecycle event requests to the extension process. Extension code should reserve `stdout` for protocol messages and write logs to `stderr`.
 
-The TypeScript SDK's `runExtension(...)` helper implements this protocol for extensions. Non-SDK extensions can implement the same JSON-RPC methods directly.
+The TypeScript SDK's `runExtension(...)` helper implements this protocol for extensions. Non-SDK extensions can implement the same JSON-RPC methods directly. Persistent frame updates use parentless `kodelet.ui.widget.frame` and `kodelet.ui.surface.frame` notifications; host input and resize arrive as `extension.ui.surface.input` and `extension.ui.surface.resize` notifications. Positive sequence numbers reject stale frames/events, and the TUI coalesces pending presentation frames to the latest snapshot.
 
 ## Discovery
 

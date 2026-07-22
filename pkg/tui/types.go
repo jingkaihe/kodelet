@@ -112,6 +112,11 @@ type model struct {
 	cancel            context.CancelFunc
 	runner            chat.ChatRunner
 	extensionRuntimes *extensions.RuntimeManager
+	extensionUI       *tuiExtensionUIHost
+	extensionWidgets  map[extensionUIKey]tuiExtensionWidget
+	extensionSurfaces map[extensionUIKey]tuiExtensionSurface
+	// extensionSurfaceOrder is both the overlay z-order and the focus stack.
+	extensionSurfaceOrder []extensionUIKey
 
 	conversationID          string
 	conversationWasResumed  bool

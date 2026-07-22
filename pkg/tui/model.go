@@ -73,6 +73,8 @@ func newModel(ctx context.Context, config Config) model {
 	mctx, cancel := context.WithCancel(ctx)
 	runCh := make(chan tea.Msg, 256)
 	mctx = extensions.ContextWithDiagnosticSink(mctx, newTUIDiagnosticSink(runCh))
+	extensionUI := newTUIExtensionUIHost(runCh, mctx.Done())
+	mctx = extensions.ContextWithExtensionUIHost(mctx, extensionUI)
 	extensionRuntimes := extensions.NewRuntimeManager()
 	themeSelection := normalizedThemeSelection(config.Theme)
 	theme, err := resolveTheme(themeSelection)
@@ -147,6 +149,9 @@ func newModel(ctx context.Context, config Config) model {
 		cancel:                  cancel,
 		runner:                  runner,
 		extensionRuntimes:       extensionRuntimes,
+		extensionUI:             extensionUI,
+		extensionWidgets:        map[extensionUIKey]tuiExtensionWidget{},
+		extensionSurfaces:       map[extensionUIKey]tuiExtensionSurface{},
 		conversationID:          conversationID,
 		conversationWasResumed:  conversationWasResumed,
 		profile:                 profile,

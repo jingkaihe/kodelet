@@ -192,6 +192,45 @@ const confirmed = await ctx.ui.confirm({
 
 The workspace example uses this to ask users whether to allow or deny bash commands, and can remember exact command decisions in extension storage.
 
+## Persistent TUI widgets and surfaces
+
+The native `kodelet chat` host advertises `capabilities.ui.widgets` and `capabilities.ui.surfaces`. Other hosts currently do not: `ctx.ui.setWidget(...)` becomes a no-op without widget support, and `ctx.ui.openSurface(...)` rejects without surface support.
+
+Use `setWidget` for passive text or styled-line content above or below the composer. Reusing an ID updates the widget, and passing `undefined` removes it.
+
+```typescript
+await ctx.ui.setWidget("status", [
+  "Extension state",
+  { spans: [{ text: " ready", style: { foreground: "#00ff00", bold: true } }] },
+]);
+await ctx.ui.setWidget("status", ["Moved"], { placement: "belowComposer" });
+await ctx.ui.setWidget("status", undefined);
+```
+
+Use `openSurface` for an overlay that persists after its opening handler returns. Sizes are cell counts or percentage strings; anchors include all corners, edges, and center. A `nonCapturing` surface does not take keyboard focus.
+
+```typescript
+const surface = await ctx.ui.openSurface({
+  id: "game",
+  initialLines: ["Loading…"],
+  width: "75%",
+  height: "80%",
+  anchor: "center",
+  margin: { top: 1, right: 1, bottom: 1, left: 1 },
+});
+
+surface.onResize(({ width, height }) => {
+  surface.update([`Surface size: ${width}×${height}`]);
+});
+
+surface.onInput((event) => {
+  if (event.kind === "mouse") console.error(event.mouse?.x, event.mouse?.y);
+  if (event.kind === "key" && event.key === "q") void surface.close();
+});
+```
+
+`surface.update(...)` is intentionally synchronous and replace-in-place. The SDK keeps one frame in flight and one replaceable latest pending frame per surface, waiting for transport writes before sending the next snapshot; the Bubble Tea host independently keeps only the newest pending sequence per surface. Input, focus, blur, and resize events use a separate ordered sequence, and stale events are discarded. If the extension process fails, Kodelet removes its widgets/surfaces and restores focus automatically.
+
 ## Commands and dynamic recipes
 
 Prompt commands are checked before the LLM receives user input.
