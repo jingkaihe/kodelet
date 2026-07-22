@@ -51,6 +51,9 @@
     "tsx": "^4.22.4",
     "typescript": "^5.9.2"
   },
+  "overrides": {
+    "@hono/node-server": "2.0.11"
+  },
   "engines": {
     "node": ">=20"
   },
