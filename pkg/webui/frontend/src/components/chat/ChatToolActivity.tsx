@@ -403,12 +403,113 @@ const toolSummaryIcons: Partial<Record<string, LucideIcon>> = {
   'Write file': FilePlus,
 };
 
+const semanticToolIcons: Array<{ keywords: string[]; icon: LucideIcon }> = [
+  {
+    keywords: [
+      'agent',
+      'agents',
+      'agentic',
+      'subagent',
+      'subagents',
+      'delegate',
+      'delegated',
+      'delegation',
+      'worker',
+      'workers',
+      'task',
+      'tasks',
+    ],
+    icon: FileCog,
+  },
+  {
+    keywords: ['fetch', 'fetcher', 'fetching', 'http', 'https'],
+    icon: Globe,
+  },
+  {
+    keywords: ['search', 'searcher', 'searching', 'find', 'finder', 'finding', 'grep', 'glob', 'lookup'],
+    icon: Search,
+  },
+  {
+    keywords: ['bash', 'shell', 'command', 'commands', 'exec', 'execute', 'execution', 'terminal'],
+    icon: SquareTerminal,
+  },
+  {
+    keywords: ['web'],
+    icon: Globe,
+  },
+  {
+    keywords: ['write', 'writer', 'writing', 'edit', 'editor', 'editing', 'patch', 'patcher', 'patching'],
+    icon: FilePen,
+  },
+  {
+    keywords: ['read', 'reader', 'reading', 'view', 'viewer', 'viewing', 'open', 'opener', 'opening'],
+    icon: FileText,
+  },
+];
+
+const builtinToolNames = new Set([
+  'apply_patch',
+  'bash',
+  'file_edit',
+  'file_read',
+  'file_write',
+  'get_goal',
+  'glob_tool',
+  'grep_tool',
+  'openai_web_search',
+  'read_conversation',
+  'skill',
+  'update_goal',
+  'view_image',
+  'web_fetch',
+]);
+
+const tokenizeToolName = (toolName: string): Set<string> => {
+  const normalizedToolName = normalizeToolName(toolName);
+  const tokens = new Set(
+    normalizedToolName
+      .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+      .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter(Boolean)
+  );
+
+  if (/(?:^|[^a-zA-Z0-9])(?:Open|open)[A-Z]{2}/.test(normalizedToolName)) {
+    tokens.delete('open');
+  }
+
+  return tokens;
+};
+
+const getToolSummaryIcon = (
+  toolName: string,
+  summaryLabel: string,
+  isExtensionTool: boolean
+): LucideIcon | undefined => {
+  const existingIcon = toolSummaryIcons[summaryLabel];
+  if (existingIcon) {
+    return existingIcon;
+  }
+
+  const tokens = tokenizeToolName(toolName);
+  for (const { keywords, icon } of semanticToolIcons) {
+    if (keywords.some((keyword) => tokens.has(keyword))) {
+      return icon;
+    }
+  }
+
+  return isExtensionTool ? Wrench : undefined;
+};
+
 const ActivitySummaryText: React.FC<{
+  toolName: string;
   summaryText: string;
   status?: string;
-}> = ({ summaryText, status }) => {
+  isExtensionTool: boolean;
+}> = ({ toolName, summaryText, status, isExtensionTool }) => {
   const { label, detail } = splitActivitySummary(summaryText);
-  const SummaryIcon = toolSummaryIcons[label];
+  const SummaryIcon = getToolSummaryIcon(toolName, label, isExtensionTool);
 
   return (
     <span className="tool-summary-text" title={summaryText}>
@@ -450,6 +551,10 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
       {tools.map((toolCall, toolIndex) => {
         const summaryText = getToolSummary(toolCall);
         const activityStatus = getToolActivityStatus(toolCall);
+        const normalizedToolName = normalizeToolName(toolCall.name);
+        const isExtensionTool =
+          toolCall.result?.metadataType === 'extension_tool' ||
+          !builtinToolNames.has(normalizedToolName);
 
         return (
           <details
@@ -465,7 +570,12 @@ const ChatToolActivity: React.FC<ChatToolActivityProps> = ({ tools }) => {
               <span className="tool-summary-chevron" aria-hidden="true">
                 ›
               </span>
-              <ActivitySummaryText summaryText={summaryText} status={activityStatus} />
+              <ActivitySummaryText
+                toolName={toolCall.name}
+                summaryText={summaryText}
+                status={activityStatus}
+                isExtensionTool={isExtensionTool}
+              />
               <span className="tool-summary-status" aria-label={`Tool ${activityStatus}`}>
                 {activityStatus}
               </span>

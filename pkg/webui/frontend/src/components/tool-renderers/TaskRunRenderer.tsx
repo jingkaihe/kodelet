@@ -201,6 +201,7 @@ const TaskRunStats: React.FC<{ snapshot: TaskRunSnapshot; elapsedMs?: number }> 
 const TaskRunRenderer: React.FC<ToolRenderProps> = ({ toolResult, isPartial = false }) => {
   const snapshot = getTaskRunSnapshot(toolResult);
   const liveElapsedMs = useLiveTaskRunElapsed(snapshot, isPartial);
+  const [isActivityOpen, setIsActivityOpen] = React.useState(false);
   const metadata = toolResult.metadata as ExtensionToolMetadata | undefined;
   if (!snapshot || !metadata) {
     return null;
@@ -236,8 +237,11 @@ const TaskRunRenderer: React.FC<ToolRenderProps> = ({ toolResult, isPartial = fa
       ) : null}
 
       {hasActivity ? (
-        <details className="task-run-history">
-          <summary>Show activity</summary>
+        <details
+          className="task-run-history"
+          onToggle={(event) => setIsActivityOpen(event.currentTarget.open)}
+        >
+          <summary>{isActivityOpen ? 'Hide activity' : 'Show activity'}</summary>
           <TaskRunStats elapsedMs={liveElapsedMs} snapshot={snapshot} />
           <TaskRunActivityList snapshot={snapshot} />
         </details>

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ExtensionToolRenderer from './ExtensionToolRenderer';
 import { ToolResult } from '../../types';
 
@@ -141,7 +141,7 @@ describe('ExtensionToolRenderer', () => {
     expect(screen.queryByText('```')).not.toBeInTheDocument();
   });
 
-  it('renders the completed task response as markdown', () => {
+  it('renders the completed task response as markdown', async () => {
     const toolResult: ToolResult = {
       toolName: 'subagent',
       success: true,
@@ -172,7 +172,14 @@ describe('ExtensionToolRenderer', () => {
     expect(screen.queryByText('Delegated task')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Findings' })).toBeInTheDocument();
     expect(screen.getByText('pass')).toBeInTheDocument();
-    expect(screen.getByText('Show activity')).toBeInTheDocument();
+    const activityToggle = screen.getByText('Show activity');
+    expect(activityToggle).toBeInTheDocument();
+
+    fireEvent.click(activityToggle);
+    await waitFor(() => expect(screen.getByText('Hide activity')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByText('Hide activity'));
+    await waitFor(() => expect(screen.getByText('Show activity')).toBeInTheDocument());
     expect(container.querySelector('.task-run-response strong')).toHaveTextContent('pass');
   });
 

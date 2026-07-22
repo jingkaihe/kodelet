@@ -282,4 +282,139 @@ describe('ChatToolActivity', () => {
     );
     expect(container.querySelector('.task-run-headline')).not.toBeInTheDocument();
   });
+
+  it.each([
+    ['repository_search', '.lucide-search'],
+    ['reviewAgent', '.lucide-file-cog'],
+    ['review-task', '.lucide-file-cog'],
+    ['remote_command', '.lucide-square-terminal'],
+    ['URLFetch', '.lucide-globe'],
+    ['config-edit', '.lucide-file-pen'],
+    ['XMLReader', '.lucide-file-text'],
+  ])('infers the semantic icon for external tool %s', (name, expectedIcon) => {
+    const { container } = render(
+      <ChatToolActivity
+        tools={[
+          {
+            callId: 'external-1',
+            name,
+            input: '{}',
+            result: {
+              toolName: name,
+              success: true,
+              metadataType: 'extension_tool',
+            },
+          },
+        ]}
+      />
+    );
+
+    expect(container.querySelector(expectedIcon)).toBeInTheDocument();
+  });
+
+  it.each([
+    ['http_search', '.lucide-globe'],
+    ['https_search', '.lucide-globe'],
+    ['fetch_search_results', '.lucide-globe'],
+    ['web_code_search', '.lucide-search'],
+    ['web_preview', '.lucide-globe'],
+  ])('applies semantic category priority for external tool %s', (name, expectedIcon) => {
+    const { container } = render(
+      <ChatToolActivity
+        tools={[
+          {
+            callId: 'external-1',
+            name,
+            input: '{}',
+            result: {
+              toolName: name,
+              success: true,
+              metadataType: 'extension_tool',
+            },
+          },
+        ]}
+      />
+    );
+
+    expect(container.querySelector(expectedIcon)).toBeInTheDocument();
+  });
+
+  it.each([
+    ['openai_image_generation', '.lucide-file-text'],
+    ['OpenAIImageGeneration', '.lucide-file-text'],
+    ['openAIImageGeneration', '.lucide-file-text'],
+    ['OpenAPIValidator', '.lucide-file-text'],
+    ['OpenSSLScan', '.lucide-file-text'],
+    ['executive_summary', '.lucide-square-terminal'],
+    ['editorial_calendar', '.lucide-file-pen'],
+    ['readiness_probe', '.lucide-file-text'],
+  ])('avoids prefix false positives for external tool %s', (name, incorrectIcon) => {
+    const { container } = render(
+      <ChatToolActivity
+        tools={[
+          {
+            callId: 'external-1',
+            name,
+            input: '{}',
+            result: {
+              toolName: name,
+              success: true,
+              metadataType: 'extension_tool',
+            },
+          },
+        ]}
+      />
+    );
+
+    expect(container.querySelector('.lucide-wrench')).toBeInTheDocument();
+    expect(container.querySelector(incorrectIcon)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['file_write', '{"file_path":"README.md"}', '.lucide-file-plus', '.lucide-file-pen'],
+    [
+      'apply_patch',
+      '{"input":"*** Begin Patch\\n*** Update File: README.md\\n*** End Patch"}',
+      '.lucide-pencil',
+      '.lucide-file-pen',
+    ],
+    ['view_image', '{"path":"screenshot.png"}', '.lucide-file-image', '.lucide-file-text'],
+    ['openai_web_search', '{}', '.lucide-globe', '.lucide-search'],
+  ])(
+    'preserves the explicit built-in icon for %s',
+    (name, input, expectedIcon, inferredIcon) => {
+      const { container } = render(
+        <ChatToolActivity
+          tools={[
+            {
+              callId: 'builtin-1',
+              name,
+              input,
+            },
+          ]}
+        />
+      );
+
+      expect(container.querySelector(expectedIcon)).toBeInTheDocument();
+      expect(container.querySelector(inferredIcon)).not.toBeInTheDocument();
+    }
+  );
+
+  it('uses a generic icon for a running unmatched external tool without inspecting its input', () => {
+    const { container } = render(
+      <ChatToolActivity
+        tools={[
+          {
+            callId: 'runner-1',
+            name: 'runner',
+            input: '{"task":"search the repository"}',
+          },
+        ]}
+      />
+    );
+
+    expect(container.querySelector('.lucide-wrench')).toBeInTheDocument();
+    expect(container.querySelector('.lucide-search')).not.toBeInTheDocument();
+    expect(container.querySelector('.lucide-file-cog')).not.toBeInTheDocument();
+  });
 });
