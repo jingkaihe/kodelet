@@ -1,5 +1,15 @@
 # Kodelet
 
+## 0.5.3-beta
+
+Streamed live tool output through headless mode, ACP, the TypeScript SDK, TUI, and Web UI, including bounded Bash snapshots and preserved full-output artifacts for truncated commands.
+
+Added live extension tool progress with the `TaskProgress` helper for bounded activity tracking and nested Kodelet sessions.
+
+Improved task activity rendering with clearer labels, previews, elapsed time, status icons, and cleaner Web UI expansion behavior.
+
+Updated Go and SDK dependencies, including `brace-expansion` 5.0.7.
+
 ## 0.5.2-beta
 
 Persisted steering messages in a SQLite-backed queue so guidance is durable and consistently available across the CLI, TUI, and Web UI.
