@@ -75,11 +75,8 @@ describe('ExtensionToolRenderer', () => {
       <ExtensionToolRenderer isPartial toolResult={toolResult} />
     );
 
-    expect(screen.getByText('Searching code')).toBeInTheDocument();
-    expect(container.querySelector('.task-run-headline')).toHaveTextContent(
-      'Searching code-2 actions running'
-    );
-    expect(screen.getByText('2 actions running')).toBeInTheDocument();
+    expect(screen.queryByText('Searching code')).not.toBeInTheDocument();
+    expect(container.querySelector('.task-run-headline')).not.toBeInTheDocument();
     expect(screen.getByText('10 done · 2 running · 1m 08s')).toBeInTheDocument();
     expect(screen.getByText('Search "HandleToolUpdate" in pkg/')).toBeInTheDocument();
     expect(screen.getByText('+9 earlier completed')).toBeInTheDocument();
@@ -172,6 +169,7 @@ describe('ExtensionToolRenderer', () => {
 
     const { container } = render(<ExtensionToolRenderer toolResult={toolResult} />);
 
+    expect(screen.queryByText('Delegated task')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Findings' })).toBeInTheDocument();
     expect(screen.getByText('pass')).toBeInTheDocument();
     expect(screen.getByText('Show activity')).toBeInTheDocument();

@@ -209,15 +209,6 @@ const TaskRunRenderer: React.FC<ToolRenderProps> = ({ toolResult, isPartial = fa
   if (isPartial) {
     return (
       <div className="task-run-progress">
-        <div className="task-run-headline">
-          <span className="task-run-title">{snapshot.title}</span>
-          {snapshot.detail ? (
-            <>
-              <span className="task-run-separator">-</span>
-              <span className="task-run-detail">{snapshot.detail}</span>
-            </>
-          ) : null}
-        </div>
         <TaskRunStats elapsedMs={liveElapsedMs} snapshot={snapshot} />
         <TaskRunActivityList snapshot={snapshot} />
       </div>
@@ -230,15 +221,9 @@ const TaskRunRenderer: React.FC<ToolRenderProps> = ({ toolResult, isPartial = fa
   const hasActivity =
     snapshot.activities.length > 0 ||
     Boolean(snapshot.omittedSucceeded || snapshot.omittedFailed || snapshot.omittedRunning);
-  const elapsed = formatTaskRunElapsed(liveElapsedMs);
 
   return (
     <div className="quiet-tool-detail task-run-result">
-      <div className="quiet-tool-line">
-        <span className="quiet-tool-emphasis">{snapshot.title}</span>
-        {elapsed ? <span className="quiet-tool-muted">{elapsed}</span> : null}
-      </div>
-
       {!toolResult.success && toolResult.error ? <ReferenceToolNote text={toolResult.error} /> : null}
 
       {renderedOutput ? (

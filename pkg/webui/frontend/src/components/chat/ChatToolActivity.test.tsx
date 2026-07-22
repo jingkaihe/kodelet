@@ -232,7 +232,54 @@ describe('ChatToolActivity', () => {
     );
 
     expect(screen.getByText('Code search: Trace tool updates')).toBeInTheDocument();
-    expect(screen.getByText('Searching code')).toBeInTheDocument();
+    expect(screen.queryByText('Searching code')).not.toBeInTheDocument();
     expect(container.querySelector('.activity-card[open]')).toBeInTheDocument();
+  });
+
+  it('shows a live subagent instruction only in the outer activity header', () => {
+    const { container } = render(
+      <ChatToolActivity
+        tools={[
+          {
+            callId: 'subagent-1',
+            name: 'subagent',
+            input: '{"task":"Review the task progress renderer"}',
+            inProgress: true,
+            result: {
+              toolName: 'subagent',
+              success: true,
+              metadataType: 'extension_tool',
+              metadata: {
+                extensionId: 'subagent',
+                toolName: 'subagent',
+                output: 'Delegated task - Review the task progress renderer',
+                data: {
+                  taskRun: {
+                    version: 1,
+                    revision: 1,
+                    kind: 'subagent',
+                    status: 'running',
+                    phase: 'starting',
+                    title: 'Delegated task',
+                    detail: 'Review the task progress renderer',
+                    elapsedMs: 1000,
+                    counts: { succeeded: 0, failed: 0, running: 0 },
+                    activities: [],
+                  },
+                },
+              },
+            },
+          },
+        ]}
+      />
+    );
+
+    expect(
+      screen.getByText('Delegated task: Review the task progress renderer')
+    ).toBeInTheDocument();
+    expect(container.querySelector('.activity-detail-content')).not.toHaveTextContent(
+      'Review the task progress renderer'
+    );
+    expect(container.querySelector('.task-run-headline')).not.toBeInTheDocument();
   });
 });

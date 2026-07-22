@@ -4280,37 +4280,6 @@ code[class*="language-"] {
   gap: 0.62rem;
 }
 
-.task-run-headline {
-  display: flex;
-  min-width: 0;
-  align-items: baseline;
-  gap: 0.42rem;
-  font-family: var(--font-heading);
-}
-
-.task-run-title {
-  flex: 0 0 auto;
-  font-size: 0.8rem;
-  font-weight: 650;
-  color: rgba(20, 20, 19, 0.74);
-}
-
-.task-run-separator {
-  flex: 0 0 auto;
-  font-size: 0.8rem;
-  color: rgba(20, 20, 19, 0.5);
-}
-
-.task-run-detail {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  color: rgba(20, 20, 19, 0.5);
-}
-
 .task-run-stats {
   font-family: var(--font-mono);
   font-size: 0.68rem;
