@@ -527,14 +527,16 @@ test("surface presentation keeps at most one frame in flight and one latest pend
   await openedSurface.close();
 });
 
-test("surface routing accepts the initial resize before open acknowledgement", async () => {
+test("surface routing retains initial events until open listeners attach", async () => {
   let openedSurface: any;
+  const inputEvents: unknown[] = [];
   const notificationHandlers = new Set<(method: string, params: unknown) => void>();
   const host = {
     async request(method: string) {
       if (method === "kodelet.ui.surface.open") {
         for (const handler of notificationHandlers) {
           handler("extension.ui.surface.resize", { id: "early", sequence: 1, width: 72, height: 18 });
+          handler("extension.ui.surface.input", { id: "early", sequence: 2, kind: "focus" });
         }
       }
       return { accepted: true };
@@ -550,6 +552,7 @@ test("surface routing accepts the initial resize before open acknowledgement", a
       description: "Open a surface that receives an immediate resize",
       async execute(_input, ctx) {
         openedSurface = await ctx.ui.openSurface({ id: "early" });
+        openedSurface.onInput((event: unknown) => inputEvents.push(event));
         return { action: "respond", response: "opened" };
       },
     });
@@ -563,6 +566,7 @@ test("surface routing accepts the initial resize before open acknowledgement", a
   });
 
   assert.deepEqual(openedSurface.size, { width: 72, height: 18 });
+  assert.deepEqual(inputEvents, [{ id: "early", sequence: 2, kind: "focus" }]);
   await openedSurface.close();
 });
 

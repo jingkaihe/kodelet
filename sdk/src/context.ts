@@ -346,6 +346,7 @@ class UISurfaceHandle implements UISurface {
   private frameInFlight = false;
   private latestEventSequence = 0;
   private inputHandlers = new Set<(event: UISurfaceInputEvent) => void>();
+  private pendingInputEvents: UISurfaceInputEvent[] = [];
   private resizeHandlers = new Set<(event: UISurfaceResizeEvent) => void>();
   private currentSize: { width: number; height: number } | undefined;
 
@@ -389,6 +390,7 @@ class UISurfaceHandle implements UISurface {
     this.closed = true;
     this.pendingLines = undefined;
     this.inputHandlers.clear();
+    this.pendingInputEvents = [];
     this.resizeHandlers.clear();
     surfacesForClient(this.client).delete(this.id);
     if (this.active) {
@@ -398,6 +400,11 @@ class UISurfaceHandle implements UISurface {
 
   onInput(handler: (event: UISurfaceInputEvent) => void): () => void {
     this.inputHandlers.add(handler);
+    const pendingEvents = this.pendingInputEvents;
+    this.pendingInputEvents = [];
+    for (const event of pendingEvents) {
+      handler(event);
+    }
     return () => this.inputHandlers.delete(handler);
   }
 
@@ -415,6 +422,10 @@ class UISurfaceHandle implements UISurface {
     }
     this.latestEventSequence = params.sequence;
     if (method === "extension.ui.surface.input" && isSurfaceInputEvent(params)) {
+      if (this.inputHandlers.size === 0) {
+        this.pendingInputEvents.push(params);
+        return;
+      }
       for (const handler of this.inputHandlers) {
         handler(params);
       }

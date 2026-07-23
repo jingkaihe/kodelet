@@ -27,6 +27,7 @@ type Process struct {
 	stdout       io.ReadCloser
 	config       Config
 	workspaceCWD string
+	lifecycleMu  sync.Mutex
 	mu           sync.Mutex
 	uiMu         sync.RWMutex
 	closed       bool
@@ -129,16 +130,21 @@ func extensionProcessEnv(workspaceCWD string) []string {
 }
 
 func (p *Process) ensureRunning(ctx context.Context) error {
+	p.lifecycleMu.Lock()
+	defer p.lifecycleMu.Unlock()
+
 	p.mu.Lock()
-	defer p.mu.Unlock()
 
 	if p.disabled {
+		p.mu.Unlock()
 		return errors.Errorf("extension %s disabled after repeated failures", p.Extension.ID)
 	}
 	if p.shutdown {
+		p.mu.Unlock()
 		return errors.Errorf("extension %s is shut down", p.Extension.ID)
 	}
 	if !p.closed {
+		p.mu.Unlock()
 		return nil
 	}
 
@@ -163,6 +169,7 @@ func (p *Process) ensureRunning(ctx context.Context) error {
 				default:
 				}
 			}
+			p.mu.Unlock()
 			return ctx.Err()
 		case <-timer.C:
 		}
@@ -170,18 +177,30 @@ func (p *Process) ensureRunning(ctx context.Context) error {
 
 	if err := p.start(ctx); err != nil {
 		p.recordFailureLocked()
+		p.mu.Unlock()
 		return err
 	}
+	client := p.client
+	source := p.uiSource
+	cwd := p.workspaceCWD
+	p.mu.Unlock()
 
 	initCtx, cancel := context.WithTimeout(ctx, extensionInitializeTimeout)
-	_, err := p.initializeLocked(initCtx, p.workspaceCWD)
+	_, err := p.initialize(initCtx, cwd, client, source)
 	cancel()
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if err != nil {
-		p.closeProcessLocked()
-		p.recordFailureLocked()
+		if p.client == client && !p.closed {
+			_ = p.closeProcessLocked()
+			p.recordFailureLocked()
+		}
 		return err
 	}
-	p.failures = 0
+	if p.client == client && !p.closed {
+		p.failures = 0
+	}
 	return nil
 }
 
@@ -197,21 +216,24 @@ func (p *Process) recordFailureLocked() {
 
 // Initialize initializes the extension process and returns its registrations.
 func (p *Process) Initialize(ctx context.Context, cwd string) (*InitializeResult, error) {
+	p.lifecycleMu.Lock()
+	defer p.lifecycleMu.Unlock()
+
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	p.workspaceCWD = cwd
-	return p.initializeLocked(ctx, cwd)
+	client := p.client
+	source := p.uiSource
+	p.mu.Unlock()
+	return p.initialize(ctx, cwd, client, source)
 }
 
-func (p *Process) initializeLocked(ctx context.Context, cwd string) (*InitializeResult, error) {
+func (p *Process) initialize(ctx context.Context, cwd string, client *rpcClient, source *processExtensionUISource) (*InitializeResult, error) {
 	uiHost, hasExtensionUI := ExtensionUIHostFromContext(ctx)
 	if hasExtensionUI {
 		p.uiMu.Lock()
 		p.uiHost = uiHost
 		p.uiMu.Unlock()
 	}
-	client := p.client
-	source := p.uiSource
 	p.uiMu.RLock()
 	hasExtensionUI = p.uiHost != nil
 	p.uiMu.RUnlock()
@@ -449,9 +471,12 @@ func (p *Process) handleRPCRequest(ctx context.Context, source UIExtensionSource
 		if err := json.Unmarshal(params, &request); err != nil {
 			return nil, &rpcError{Code: -32602, Message: err.Error()}
 		}
-		resetExtensionUIEventSequence(source, request.ID)
 		return p.handleExtensionUIRequest(func(host ExtensionUIHost) (UIFrameResponse, error) {
-			return host.OpenSurface(ctx, source, request)
+			response, err := host.OpenSurface(ctx, source, request)
+			if err == nil && response.Accepted {
+				resetExtensionUIEventSequence(source, request.ID)
+			}
+			return response, err
 		})
 	case UISurfaceFrameMethod:
 		var request UISurfaceFrameRequest
@@ -466,9 +491,12 @@ func (p *Process) handleRPCRequest(ctx context.Context, source UIExtensionSource
 		if err := json.Unmarshal(params, &request); err != nil {
 			return nil, &rpcError{Code: -32602, Message: err.Error()}
 		}
-		resetExtensionUIEventSequence(source, request.ID)
 		return p.handleExtensionUIRequest(func(host ExtensionUIHost) (UIFrameResponse, error) {
-			return host.CloseSurface(ctx, source, request)
+			response, err := host.CloseSurface(ctx, source, request)
+			if err == nil && response.Accepted {
+				resetExtensionUIEventSequence(source, request.ID)
+			}
+			return response, err
 		})
 	case "kodelet.ui.input":
 		var request UIInputRequest

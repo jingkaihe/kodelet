@@ -36,10 +36,12 @@ func TestUIFrameLineSupportsPlainAndStyledJSON(t *testing.T) {
 }
 
 type recordingExtensionUIHost struct {
-	mu       sync.Mutex
-	set      []UIWidgetSetRequest
-	owners   []UIExtensionOwner
-	cleanups []UIExtensionOwner
+	mu            sync.Mutex
+	set           []UIWidgetSetRequest
+	owners        []UIExtensionOwner
+	cleanups      []UIExtensionOwner
+	openResponse  UIFrameResponse
+	closeResponse UIFrameResponse
 }
 
 func (h *recordingExtensionUIHost) SetWidget(_ context.Context, source UIExtensionSource, request UIWidgetSetRequest) (UIFrameResponse, error) {
@@ -58,16 +60,16 @@ func (*recordingExtensionUIHost) RemoveWidget(context.Context, UIExtensionSource
 	return UIFrameResponse{}, nil
 }
 
-func (*recordingExtensionUIHost) OpenSurface(context.Context, UIExtensionSource, UISurfaceOpenRequest) (UIFrameResponse, error) {
-	return UIFrameResponse{}, nil
+func (h *recordingExtensionUIHost) OpenSurface(context.Context, UIExtensionSource, UISurfaceOpenRequest) (UIFrameResponse, error) {
+	return h.openResponse, nil
 }
 
 func (*recordingExtensionUIHost) UpdateSurface(context.Context, UIExtensionSource, UISurfaceFrameRequest) (UIFrameResponse, error) {
 	return UIFrameResponse{}, nil
 }
 
-func (*recordingExtensionUIHost) CloseSurface(context.Context, UIExtensionSource, UISurfaceCloseRequest) (UIFrameResponse, error) {
-	return UIFrameResponse{}, nil
+func (h *recordingExtensionUIHost) CloseSurface(context.Context, UIExtensionSource, UISurfaceCloseRequest) (UIFrameResponse, error) {
+	return h.closeResponse, nil
 }
 
 func (h *recordingExtensionUIHost) CleanupExtensionUI(owner UIExtensionOwner) {
@@ -107,6 +109,107 @@ func TestProcessRoutesPersistentExtensionUIRequestsAndCleansFailedGeneration(t *
 	assert.Len(t, host.cleanups, 1)
 	require.NoError(t, process.Close())
 	assert.Len(t, host.cleanups, 1)
+}
+
+func TestProcessInitializeAllowsReverseUIRequest(t *testing.T) {
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	clientReader, serverWriter := io.Pipe()
+	serverReader, clientWriter := io.Pipe()
+	t.Cleanup(func() {
+		_ = clientReader.Close()
+		_ = serverWriter.Close()
+		_ = serverReader.Close()
+		_ = clientWriter.Close()
+	})
+
+	client := newRPCClient(clientReader, clientWriter)
+	host := &recordingExtensionUIHost{}
+	process := &Process{
+		Extension:  Extension{ID: "reverse-ui"},
+		client:     client,
+		generation: 1,
+	}
+	source := &processExtensionUISource{
+		process: process,
+		client:  client,
+		owner:   UIExtensionOwner{ExtensionID: "reverse-ui", Generation: 1},
+	}
+	process.uiSource = source
+	client.setHostRequestHandler(source)
+
+	type initializeResult struct {
+		result *InitializeResult
+		err    error
+	}
+	ctx, cancel := context.WithTimeout(ContextWithExtensionUIHost(context.Background(), host), 2*time.Second)
+	t.Cleanup(cancel)
+	initializeDone := make(chan initializeResult, 1)
+	go func() {
+		result, err := process.Initialize(ctx, "/workspace")
+		initializeDone <- initializeResult{result: result, err: err}
+	}()
+
+	outbound := bufio.NewReader(serverReader)
+	initializePayload, err := readFrame(outbound)
+	require.NoError(t, err)
+	var initializeRequest rpcRequest
+	require.NoError(t, json.Unmarshal(initializePayload, &initializeRequest))
+	assert.Equal(t, "extension.initialize", initializeRequest.Method)
+
+	reverseRequestPayload, err := json.Marshal(rpcRequest{
+		JSONRPC:  "2.0",
+		ID:       99,
+		ParentID: initializeRequest.ID,
+		Method:   UIWidgetSetMethod,
+		Params: UIWidgetSetRequest{
+			ID:        "status",
+			Placement: UIWidgetPlacementAboveComposer,
+			Frame:     UIFrame{Sequence: 1, Lines: []UIFrameLine{{Spans: []UIStyledSpan{{Text: "ready"}}}}},
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, writeFrame(serverWriter, reverseRequestPayload))
+
+	type frameResult struct {
+		payload []byte
+		err     error
+	}
+	hostResponseDone := make(chan frameResult, 1)
+	go func() {
+		payload, err := readFrame(outbound)
+		hostResponseDone <- frameResult{payload: payload, err: err}
+	}()
+
+	var hostResponsePayload []byte
+	select {
+	case response := <-hostResponseDone:
+		require.NoError(t, response.err)
+		hostResponsePayload = response.payload
+	case <-time.After(time.Second):
+		cancel()
+		t.Fatal("initialization reverse UI request deadlocked")
+	}
+	var hostResponse rpcResponse
+	require.NoError(t, json.Unmarshal(hostResponsePayload, &hostResponse))
+	assert.Equal(t, int64(99), hostResponse.ID)
+	assert.JSONEq(t, `{"accepted":true,"latestSequence":1}`, string(hostResponse.Result))
+
+	resultPayload, err := json.Marshal(InitializeResult{Name: "reverse-ui"})
+	require.NoError(t, err)
+	initializeResponsePayload, err := json.Marshal(rpcResponse{JSONRPC: "2.0", ID: initializeRequest.ID, Result: resultPayload})
+	require.NoError(t, err)
+	require.NoError(t, writeFrame(serverWriter, initializeResponsePayload))
+
+	select {
+	case call := <-initializeDone:
+		require.NoError(t, call.err)
+		require.NotNil(t, call.result)
+		assert.Equal(t, "reverse-ui", call.result.Name)
+	case <-time.After(time.Second):
+		t.Fatal("initialization response was not delivered")
+	}
+	require.Len(t, host.set, 1)
+	assert.Equal(t, "status", host.set[0].ID)
 }
 
 func TestProcessExtensionUISourceRejectsStaleGeneration(t *testing.T) {
@@ -209,6 +312,53 @@ func TestProcessExtensionUISourceOrdersHostEventsBySequence(t *testing.T) {
 	}
 	assert.Equal(t, []string{UISurfaceResizeMethod, UISurfaceInputMethod}, methods)
 	assert.Equal(t, []uint64{1, 2}, sequences)
+}
+
+func TestProcessResetsSurfaceEventSequenceOnlyAfterAcceptedLifecycleRequest(t *testing.T) {
+	tests := []struct {
+		name   string
+		method string
+		params json.RawMessage
+	}{
+		{
+			name:   "open",
+			method: UISurfaceOpenMethod,
+			params: json.RawMessage(`{"id":"surface","frame":{"sequence":3,"lines":[]}}`),
+		},
+		{
+			name:   "close",
+			method: UISurfaceCloseMethod,
+			params: json.RawMessage(`{"id":"surface","sequence":3}`),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for _, accepted := range []bool{false, true} {
+				t.Run(map[bool]string{false: "rejected", true: "accepted"}[accepted], func(t *testing.T) {
+					host := &recordingExtensionUIHost{
+						openResponse:  UIFrameResponse{Accepted: accepted, LatestSequence: 2},
+						closeResponse: UIFrameResponse{Accepted: accepted, LatestSequence: 2},
+					}
+					process := &Process{uiHost: host}
+					source := &processExtensionUISource{
+						notify: map[string]*orderedExtensionUINotifications{
+							"surface": {next: 3, pending: map[uint64]extensionUINotification{}},
+						},
+					}
+
+					result, rpcErr := process.handleRPCRequest(context.Background(), source, test.method, test.params)
+
+					require.Nil(t, rpcErr)
+					response, ok := result.(UIFrameResponse)
+					require.True(t, ok)
+					assert.Equal(t, accepted, response.Accepted)
+					_, sequenceStateExists := source.notify["surface"]
+					assert.Equal(t, !accepted, sequenceStateExists)
+				})
+			}
+		})
+	}
 }
 
 func TestUISizeValueSupportsCellsAndPercentages(t *testing.T) {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -130,6 +130,7 @@ test("MCP extension entrypoint loads config from workspace cwd env", async () =>
   const oldUserProfile = process.env.USERPROFILE;
   const oldWorkspaceCWD = process.env.KODELET_EXTENSION_WORKSPACE_CWD;
   const oldEnvValue = process.env.MCP_TEST_ENV_VALUE;
+  let host: Awaited<ReturnType<typeof createExtensionHost>> | undefined;
   try {
     const home = path.join(root, "home");
     const workspace = path.join(root, "workspace");
@@ -201,7 +202,7 @@ process.stdin.on('data', (chunk) => {
     const oldCwd = process.cwd();
     process.chdir(extensionDir);
     try {
-      const host = await createExtensionHost(mcpExtension);
+      host = await createExtensionHost(mcpExtension);
       const init = host.initialize({
         protocolVersion: "2024-11-05",
         extension: { id: "mcp", cwd: workspace, dataDir: path.join(root, "data") },
@@ -218,9 +219,9 @@ process.stdin.on('data', (chunk) => {
         "x-mcp-extension": { enabled: true },
       });
       const result = await host.executeTool({ name: "mcp__workspace_ping", input: {}, context: { cwd: workspace } });
-      assert.equal(result.content, JSON.stringify({ cwd: workspace, inherited: "expanded-value", bare: "expanded-value", braced: "expanded-value", mixed: "prefix-expanded-value-suffix" }));
-      await host.handleEvent({ id: "session-end", event: "session.end", context: { cwd: workspace } });
+      assert.equal(result.content, JSON.stringify({ cwd: await realpath(workspace), inherited: "expanded-value", bare: "expanded-value", braced: "expanded-value", mixed: "prefix-expanded-value-suffix" }));
     } finally {
+      await host?.handleEvent({ id: "session-end", event: "session.end", context: { cwd: workspace } }).catch(() => undefined);
       process.chdir(oldCwd);
     }
   } finally {

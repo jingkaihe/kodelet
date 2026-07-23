@@ -138,6 +138,37 @@ func TestTUIExtensionWidgetsRenderAboveAndBelowComposer(t *testing.T) {
 	assert.Greater(t, belowIndex, composerIndex)
 }
 
+func TestTUIExtensionWidgetsAboveComposerOffsetSettingsHitTargets(t *testing.T) {
+	m := newModel(context.Background(), Config{
+		Profile:                "work",
+		ProfileOptions:         []string{"default", "work"},
+		ReasoningEffort:        "medium",
+		ReasoningEffortOptions: []string{"low", "medium", "high"},
+	})
+	t.Cleanup(m.cancel)
+	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+	m.width = 100
+	m.height = 30
+	key := extensionUIKey{owner: extensions.UIExtensionOwner{ExtensionID: "widgets", Generation: 1}, id: "above"}
+	m.extensionWidgets[key] = tuiExtensionWidget{
+		key:       key,
+		placement: extensions.UIWidgetPlacementAboveComposer,
+		frame:     extensionTestFrame(1, "status"),
+	}
+	m.resize()
+
+	composerTop := m.viewport.Height + m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer)
+	profileStart, _, ok := m.profileLabelBoundsInBlock()
+	require.True(t, ok)
+	reasoningStart, _, ok := m.reasoningEffortLabelBoundsInBlock()
+	require.True(t, ok)
+
+	assert.False(t, m.profileComposerRegionContains(tuiLeftMargin+profileStart, m.viewport.Height))
+	assert.True(t, m.profileComposerRegionContains(tuiLeftMargin+profileStart, composerTop))
+	assert.False(t, m.reasoningComposerRegionContains(tuiLeftMargin+reasoningStart, m.viewport.Height))
+	assert.True(t, m.reasoningComposerRegionContains(tuiLeftMargin+reasoningStart, composerTop))
+}
+
 func TestTUIExtensionWidgetsBoundEachPlacementToTenLines(t *testing.T) {
 	m := model{width: 80}
 	owner := extensions.UIExtensionOwner{ExtensionID: "widgets", Generation: 1}
@@ -218,6 +249,63 @@ func TestTUIExtensionSurfaceLayoutFocusAndInputRouting(t *testing.T) {
 	assert.Equal(t, 3, inputNotifications[1].Mouse.X)
 	assert.Equal(t, 2, inputNotifications[1].Mouse.Y)
 	assert.Greater(t, inputNotifications[1].Sequence, inputNotifications[0].Sequence)
+}
+
+func TestTUIExtensionSurfaceKeyRoutingPreservesCombinedModifiers(t *testing.T) {
+	tests := []struct {
+		name  string
+		key   tea.KeyMsg
+		alt   bool
+		shift bool
+		ctrl  bool
+	}{
+		{
+			name:  "ctrl shift",
+			key:   tea.KeyMsg{Type: tea.KeyCtrlShiftUp},
+			shift: true,
+			ctrl:  true,
+		},
+		{
+			name: "alt ctrl",
+			key:  tea.KeyMsg{Type: tea.KeyCtrlUp, Alt: true},
+			alt:  true,
+			ctrl: true,
+		},
+		{
+			name:  "alt ctrl shift",
+			key:   tea.KeyMsg{Type: tea.KeyCtrlShiftUp, Alt: true},
+			alt:   true,
+			shift: true,
+			ctrl:  true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			owner := extensions.UIExtensionOwner{ExtensionID: "game", Generation: 1}
+			key := extensionUIKey{owner: owner, id: "surface"}
+			source := &fakeExtensionUISource{owner: owner}
+			surface := tuiExtensionSurface{key: key, source: source}
+			m := model{
+				extensionSurfaces:     map[extensionUIKey]tuiExtensionSurface{key: surface},
+				extensionSurfaceOrder: []extensionUIKey{key},
+			}
+
+			cmd, handled := m.routeExtensionSurfaceKey(test.key)
+
+			require.True(t, handled)
+			require.NotNil(t, cmd)
+			assert.Nil(t, cmd())
+			notifications := source.recordedNotifications()
+			require.Len(t, notifications, 1)
+			input, ok := notifications[0].params.(extensions.UISurfaceInputNotification)
+			require.True(t, ok)
+			assert.Equal(t, test.key.String(), input.Key)
+			assert.Equal(t, test.alt, input.Alt)
+			assert.Equal(t, test.shift, input.Shift)
+			assert.Equal(t, test.ctrl, input.Ctrl)
+		})
+	}
 }
 
 func TestTUIExtensionSurfaceFocusStackAndFailureCleanup(t *testing.T) {

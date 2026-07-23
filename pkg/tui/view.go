@@ -848,7 +848,7 @@ func (m model) reasoningComposerRegionContains(screenX, screenY int) bool {
 		return false
 	}
 	blockX := screenX - tuiLeftMargin
-	inputTopY := m.viewport.Height + m.profilePickerHeight() + m.reasoningPickerHeight()
+	inputTopY := m.viewport.Height + m.profilePickerHeight() + m.reasoningPickerHeight() + m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer)
 	if screenY != inputTopY {
 		return false
 	}
@@ -896,7 +896,7 @@ func (m model) profileComposerRegionContains(screenX, screenY int) bool {
 		return false
 	}
 	blockX := screenX - tuiLeftMargin
-	inputTopY := m.viewport.Height + m.profilePickerHeight() + m.reasoningPickerHeight()
+	inputTopY := m.viewport.Height + m.profilePickerHeight() + m.reasoningPickerHeight() + m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer)
 	if screenY != inputTopY {
 		return false
 	}

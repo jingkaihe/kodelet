@@ -549,8 +549,8 @@ func (m *model) routeExtensionSurfaceKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 		text = string(msg.Runes)
 	}
 	keyName := msg.String()
-	shift := strings.HasPrefix(keyName, "shift+")
-	ctrl := strings.HasPrefix(keyName, "ctrl+")
+	shift := strings.Contains(keyName, "shift+")
+	ctrl := strings.Contains(keyName, "ctrl+")
 	return m.nextExtensionSurfaceInputCmd(key, surface, extensions.UISurfaceInputKey, keyName, text, msg.Alt, shift, ctrl, nil), true
 }
 
