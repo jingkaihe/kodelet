@@ -306,6 +306,9 @@ func ValidateUIObjectID(id string) error {
 	if strings.TrimSpace(id) == "" {
 		return errors.New("extension UI id is required")
 	}
+	if id != strings.TrimSpace(id) {
+		return errors.New("extension UI id must not have leading or trailing whitespace")
+	}
 	if len(id) > 128 {
 		return errors.New("extension UI id is too long")
 	}

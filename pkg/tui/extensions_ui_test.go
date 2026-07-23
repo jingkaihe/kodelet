@@ -100,6 +100,102 @@ func TestTUIExtensionUIHostCoalescesLatestWidgetAndSurfaceFrames(t *testing.T) {
 	assert.Equal(t, "frame 4", batch.surfaces[0].surface.frame.Lines[0].Spans[0].Text)
 }
 
+func TestTUIExtensionUIHostSynchronizesClosedOwnerSequenceReads(t *testing.T) {
+	const attempts = 2000
+	tests := []struct {
+		name    string
+		request func(*tuiExtensionUIHost, *fakeExtensionUISource, uint64) (extensions.UIFrameResponse, error)
+	}{
+		{
+			name: "widget",
+			request: func(host *tuiExtensionUIHost, source *fakeExtensionUISource, sequence uint64) (extensions.UIFrameResponse, error) {
+				return host.SetWidget(context.Background(), source, extensions.UIWidgetSetRequest{
+					ID:        "object",
+					Placement: extensions.UIWidgetPlacementAboveComposer,
+					Frame:     extensionTestFrame(sequence, "frame"),
+				})
+			},
+		},
+		{
+			name: "surface",
+			request: func(host *tuiExtensionUIHost, source *fakeExtensionUISource, sequence uint64) (extensions.UIFrameResponse, error) {
+				return host.OpenSurface(context.Background(), source, extensions.UISurfaceOpenRequest{
+					ID:    "object",
+					Frame: extensionTestFrame(sequence, "frame"),
+				})
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			host := newTUIExtensionUIHost(make(chan tea.Msg, 1), nil)
+			closedSource := &fakeExtensionUISource{owner: extensions.UIExtensionOwner{ExtensionID: "closed", Generation: 1}}
+			liveSource := &fakeExtensionUISource{owner: extensions.UIExtensionOwner{ExtensionID: "live", Generation: 1}}
+			response, err := test.request(host, closedSource, 1)
+			require.NoError(t, err)
+			require.True(t, response.Accepted)
+			host.CleanupExtensionUI(closedSource.owner)
+
+			start := make(chan struct{})
+			errs := make(chan error, 2)
+			var wg sync.WaitGroup
+			wg.Add(2)
+			go func() {
+				defer wg.Done()
+				<-start
+				for range attempts {
+					response, err := test.request(host, closedSource, 2)
+					if err != nil {
+						errs <- err
+						return
+					}
+					if response.LatestSequence != 1 {
+						errs <- errors.Errorf("closed response latest sequence = %d, want 1", response.LatestSequence)
+						return
+					}
+				}
+			}()
+			go func() {
+				defer wg.Done()
+				<-start
+				for sequence := uint64(1); sequence <= attempts; sequence++ {
+					if _, err := test.request(host, liveSource, sequence); err != nil {
+						errs <- err
+						return
+					}
+				}
+			}()
+			close(start)
+			wg.Wait()
+			close(errs)
+			for err := range errs {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestTUIExtensionUIHostRejectsNoncanonicalIDs(t *testing.T) {
+	host := newTUIExtensionUIHost(make(chan tea.Msg, 1), nil)
+	source := &fakeExtensionUISource{owner: extensions.UIExtensionOwner{ExtensionID: "widgets", Generation: 1}}
+
+	_, err := host.SetWidget(context.Background(), source, extensions.UIWidgetSetRequest{
+		ID:        " status ",
+		Placement: extensions.UIWidgetPlacementAboveComposer,
+		Frame:     extensionTestFrame(1, "frame"),
+	})
+	require.ErrorContains(t, err, "leading or trailing whitespace")
+	_, err = host.OpenSurface(context.Background(), source, extensions.UISurfaceOpenRequest{
+		ID:    " surface ",
+		Frame: extensionTestFrame(1, "frame"),
+	})
+	require.ErrorContains(t, err, "leading or trailing whitespace")
+
+	assert.Empty(t, host.widgetSeq)
+	assert.Empty(t, host.surfaceSeq)
+}
+
 func TestTUIExtensionWidgetsRenderAboveAndBelowComposer(t *testing.T) {
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)
@@ -344,7 +440,7 @@ func TestTUIExtensionSurfaceFocusStackAndFailureCleanup(t *testing.T) {
 	assert.Equal(t, first.owner, transportError.owner)
 	updated, next := m.Update(transportError)
 	m = updated.(model)
-	require.NotNil(t, next)
+	require.Nil(t, next, "the waiter scheduled by the originating flush must remain the sole run-channel consumer")
 	flush := <-m.runCh
 	updated, _ = m.Update(flush)
 	m = updated.(model)

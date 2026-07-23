@@ -117,11 +117,11 @@ func (h *tuiExtensionUIHost) SetWidget(_ context.Context, source extensions.UIEx
 	}
 
 	h.mu.Lock()
+	latest := h.widgetSeq[key]
 	if _, closed := h.closed[key.owner]; closed {
 		h.mu.Unlock()
-		return extensions.UIFrameResponse{LatestSequence: h.widgetSeq[key], Reason: "extension process is closed"}, nil
+		return extensions.UIFrameResponse{LatestSequence: latest, Reason: "extension process is closed"}, nil
 	}
-	latest := h.widgetSeq[key]
 	if request.Frame.Sequence <= latest {
 		h.mu.Unlock()
 		return staleUIFrameResponse(latest), nil
@@ -221,11 +221,11 @@ func (h *tuiExtensionUIHost) OpenSurface(_ context.Context, source extensions.UI
 	request.Options.Anchor = anchor
 
 	h.mu.Lock()
+	latest := h.surfaceSeq[key]
 	if _, closed := h.closed[key.owner]; closed {
 		h.mu.Unlock()
-		return extensions.UIFrameResponse{LatestSequence: h.surfaceSeq[key], Reason: "extension process is closed"}, nil
+		return extensions.UIFrameResponse{LatestSequence: latest, Reason: "extension process is closed"}, nil
 	}
-	latest := h.surfaceSeq[key]
 	if request.Frame.Sequence <= latest {
 		h.mu.Unlock()
 		return staleUIFrameResponse(latest), nil
@@ -413,7 +413,6 @@ func extensionUIRequestKey(source extensions.UIExtensionSource, id string) (exte
 	if source == nil {
 		return extensionUIKey{}, errors.New("extension UI source is required")
 	}
-	id = strings.TrimSpace(id)
 	if err := extensions.ValidateUIObjectID(id); err != nil {
 		return extensionUIKey{}, err
 	}

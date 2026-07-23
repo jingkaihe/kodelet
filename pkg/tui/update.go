@@ -139,7 +139,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.extensionUI != nil {
 			m.extensionUI.CleanupExtensionUI(msg.owner)
 		}
-		return m, waitForMsg(m.runCh)
+		return m, nil
 
 	case uiPromptRequestMsg:
 		if msg.runID != m.activeRunID {

@@ -292,13 +292,14 @@ function createSharedContext(
         if (!extensionUISupported(init, "widgets") || !persistentClient) {
           return;
         }
-        const sequence = nextClientSequence(widgetSequencesByClient, persistentClient, id);
+        const objectID = validateUIObjectID(id);
+        const sequence = nextClientSequence(widgetSequencesByClient, persistentClient, objectID);
         if (lines === undefined) {
-          await persistentClient.request("kodelet.ui.widget.remove", { id, sequence });
+          await persistentClient.request("kodelet.ui.widget.remove", { id: objectID, sequence });
           return;
         }
         await persistentClient.request("kodelet.ui.widget.set", {
-          id,
+          id: objectID,
           placement: options?.placement ?? "aboveComposer",
           frame: { sequence, lines },
         });
@@ -307,15 +308,16 @@ function createSharedContext(
         if (!extensionUISupported(init, "surfaces") || !persistentClient) {
           throw new Error("Interactive extension surfaces are not available in this host");
         }
+        const { id: requestedID, initialLines = [], ...surfaceOptions } = options;
+        const id = validateUIObjectID(requestedID);
         const activeSurfaces = surfacesForClient(persistentClient);
-        const existing = activeSurfaces.get(options.id);
+        const existing = activeSurfaces.get(id);
         if (existing) {
           await existing.close();
         }
-        const surface = new UISurfaceHandle(options.id, persistentClient);
-        activeSurfaces.set(options.id, surface);
+        const surface = new UISurfaceHandle(id, persistentClient);
+        activeSurfaces.set(id, surface);
         ensurePersistentNotificationRouting(persistentClient);
-        const { id, initialLines = [], ...surfaceOptions } = options;
         try {
           const response = await persistentClient.request("kodelet.ui.surface.open", {
             id,
@@ -346,7 +348,7 @@ class UISurfaceHandle implements UISurface {
   private frameInFlight = false;
   private latestEventSequence = 0;
   private inputHandlers = new Set<(event: UISurfaceInputEvent) => void>();
-  private pendingInputEvents: UISurfaceInputEvent[] = [];
+  private pendingFocusEvent: UISurfaceInputEvent | undefined;
   private resizeHandlers = new Set<(event: UISurfaceResizeEvent) => void>();
   private currentSize: { width: number; height: number } | undefined;
 
@@ -390,7 +392,7 @@ class UISurfaceHandle implements UISurface {
     this.closed = true;
     this.pendingLines = undefined;
     this.inputHandlers.clear();
-    this.pendingInputEvents = [];
+    this.pendingFocusEvent = undefined;
     this.resizeHandlers.clear();
     surfacesForClient(this.client).delete(this.id);
     if (this.active) {
@@ -400,10 +402,10 @@ class UISurfaceHandle implements UISurface {
 
   onInput(handler: (event: UISurfaceInputEvent) => void): () => void {
     this.inputHandlers.add(handler);
-    const pendingEvents = this.pendingInputEvents;
-    this.pendingInputEvents = [];
-    for (const event of pendingEvents) {
-      handler(event);
+    const pendingFocusEvent = this.pendingFocusEvent;
+    this.pendingFocusEvent = undefined;
+    if (pendingFocusEvent) {
+      handler(pendingFocusEvent);
     }
     return () => this.inputHandlers.delete(handler);
   }
@@ -423,7 +425,9 @@ class UISurfaceHandle implements UISurface {
     this.latestEventSequence = params.sequence;
     if (method === "extension.ui.surface.input" && isSurfaceInputEvent(params)) {
       if (this.inputHandlers.size === 0) {
-        this.pendingInputEvents.push(params);
+        if (!this.active && (params.kind === "focus" || params.kind === "blur")) {
+          this.pendingFocusEvent = params;
+        }
         return;
       }
       for (const handler of this.inputHandlers) {
@@ -501,6 +505,19 @@ function nextClientSequence(
   const sequence = (sequences.get(id) ?? 0) + 1;
   sequences.set(id, sequence);
   return sequence;
+}
+
+function validateUIObjectID(id: string): string {
+  if (id.trim() === "") {
+    throw new Error("Extension UI id is required");
+  }
+  if (id !== id.trim()) {
+    throw new Error("Extension UI id must not have leading or trailing whitespace");
+  }
+  if (new TextEncoder().encode(id).length > 128) {
+    throw new Error("Extension UI id is too long");
+  }
+  return id;
 }
 
 function extensionUISupported(init: InitializeParams | undefined, feature: "widgets" | "surfaces"): boolean {

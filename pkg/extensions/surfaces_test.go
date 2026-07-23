@@ -390,6 +390,7 @@ func TestExtensionUINormalizationAndValidation(t *testing.T) {
 	require.Error(t, err)
 
 	require.Error(t, ValidateUIObjectID(""))
+	require.ErrorContains(t, ValidateUIObjectID(" doom "), "leading or trailing whitespace")
 	require.Error(t, ValidateUISequence(0))
 	require.NoError(t, ValidateUIObjectID("doom"))
 	require.NoError(t, ValidateUISequence(1))

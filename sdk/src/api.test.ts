@@ -529,6 +529,7 @@ test("surface presentation keeps at most one frame in flight and one latest pend
 
 test("surface routing retains initial events until open listeners attach", async () => {
   let openedSurface: any;
+  let unsubscribeInput: (() => void) | undefined;
   const inputEvents: unknown[] = [];
   const notificationHandlers = new Set<(method: string, params: unknown) => void>();
   const host = {
@@ -536,7 +537,14 @@ test("surface routing retains initial events until open listeners attach", async
       if (method === "kodelet.ui.surface.open") {
         for (const handler of notificationHandlers) {
           handler("extension.ui.surface.resize", { id: "early", sequence: 1, width: 72, height: 18 });
-          handler("extension.ui.surface.input", { id: "early", sequence: 2, kind: "focus" });
+          handler("extension.ui.surface.input", { id: "early", sequence: 2, kind: "key", key: "x", text: "x" });
+          handler("extension.ui.surface.input", { id: "early", sequence: 3, kind: "focus" });
+          handler("extension.ui.surface.input", {
+            id: "early",
+            sequence: 4,
+            kind: "mouse",
+            mouse: { x: 1, y: 1, button: "none", action: "motion" },
+          });
         }
       }
       return { accepted: true };
@@ -552,7 +560,7 @@ test("surface routing retains initial events until open listeners attach", async
       description: "Open a surface that receives an immediate resize",
       async execute(_input, ctx) {
         openedSurface = await ctx.ui.openSurface({ id: "early" });
-        openedSurface.onInput((event: unknown) => inputEvents.push(event));
+        unsubscribeInput = openedSurface.onInput((event: unknown) => inputEvents.push(event));
         return { action: "respond", response: "opened" };
       },
     });
@@ -566,8 +574,63 @@ test("surface routing retains initial events until open listeners attach", async
   });
 
   assert.deepEqual(openedSurface.size, { width: 72, height: 18 });
-  assert.deepEqual(inputEvents, [{ id: "early", sequence: 2, kind: "focus" }]);
+  assert.deepEqual(inputEvents, [{ id: "early", sequence: 3, kind: "focus" }]);
+  unsubscribeInput?.();
+  for (const handler of notificationHandlers) {
+    for (let sequence = 5; sequence < 25; sequence++) {
+      handler("extension.ui.surface.input", { id: "early", sequence, kind: "key", key: "x", text: "x" });
+    }
+    handler("extension.ui.surface.input", { id: "early", sequence: 25, kind: "blur" });
+  }
+  const replayedEvents: unknown[] = [];
+  openedSurface.onInput((event: unknown) => replayedEvents.push(event));
+  assert.deepEqual(replayedEvents, []);
   await openedSurface.close();
+});
+
+test("UI object IDs reject surrounding whitespace before routing or sequencing", async () => {
+  const requests: Array<{ method: string; params?: unknown }> = [];
+  const extension = defineExtension((ext) => {
+    ext.registerCommand({
+      name: "validated-ui",
+      description: "Validate UI object identifiers",
+      async execute(_input, ctx) {
+        await assert.rejects(ctx.ui.setWidget(" status ", ["invalid"]), /leading or trailing whitespace/);
+        await ctx.ui.setWidget("status", ["valid"]);
+        await assert.rejects(ctx.ui.openSurface({ id: " game " }), /leading or trailing whitespace/);
+        const surface = await ctx.ui.openSurface({ id: "game" });
+        await surface.close();
+        return { action: "respond", response: "validated" };
+      },
+    });
+  });
+  const harness = await createTestHarness(extension, {
+    async request(method, params) {
+      requests.push({ method, params });
+      return { accepted: true };
+    },
+  });
+  harness.initialize({ capabilities: { ui: { widgets: true, surfaces: true } } });
+
+  await harness.executeCommand({
+    name: "validated-ui",
+    invocation: { raw: "/validated-ui", commandName: "validated-ui", args: [], flags: {} },
+  });
+
+  assert.deepEqual(requests, [
+    {
+      method: "kodelet.ui.widget.set",
+      params: { id: "status", placement: "aboveComposer", frame: { sequence: 1, lines: ["valid"] } },
+    },
+    {
+      method: "kodelet.ui.surface.open",
+      params: { id: "game", options: {}, frame: { sequence: 1, lines: [] } },
+    },
+    {
+      method: "kodelet.ui.surface.close",
+      params: { id: "game", sequence: 2 },
+    },
+  ]);
 });
 
 test("widget and surface APIs are capability gated", async () => {
