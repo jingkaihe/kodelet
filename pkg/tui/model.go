@@ -201,27 +201,11 @@ func loadSlashCommands(ctx context.Context, cwd string) tea.Cmd {
 	}
 }
 
-func loadExtensionSlashCommands(ctx context.Context, cwd string) tea.Cmd {
-	return loadExtensionSlashCommandsWithRuntime(ctx, cwd, nil)
-}
-
-func loadExtensionSlashCommandsWithRuntime(ctx context.Context, cwd string, runtimeManager *extensions.RuntimeManager) tea.Cmd {
+func loadExtensionSlashCommands(ctx context.Context, cwd string, runtimeManager *extensions.RuntimeManager) tea.Cmd {
 	return func() tea.Msg {
-		commands, err := listExtensionSlashCommandsWithRuntime(ctx, cwd, runtimeManager)
+		commands, err := listExtensionSlashCommands(ctx, cwd, runtimeManager)
 		return slashCommandsMsg{cwd: strings.TrimSpace(cwd), commands: commands, extensionsOnly: true, err: err}
 	}
-}
-
-func listSlashCommands(ctx context.Context, cwd string) ([]slashcommands.Command, error) {
-	commands, err := listBaseSlashCommands(ctx, cwd)
-	if err != nil {
-		return commands, err
-	}
-	extensionCommands, err := listExtensionSlashCommands(ctx, cwd)
-	if err != nil {
-		return commands, err
-	}
-	return mergeSlashCommands(commands, extensionCommands), nil
 }
 
 func listBaseSlashCommands(ctx context.Context, cwd string) ([]slashcommands.Command, error) {
@@ -238,30 +222,18 @@ func listBaseSlashCommands(ctx context.Context, cwd string) ([]slashcommands.Com
 	return withTUIBuiltInSlashCommands(slashcommands.List(ctx, processor)), nil
 }
 
-func listExtensionSlashCommands(ctx context.Context, cwd string) ([]slashcommands.Command, error) {
-	return listExtensionSlashCommandsWithRuntime(ctx, cwd, nil)
-}
-
-func listExtensionSlashCommandsWithRuntime(ctx context.Context, cwd string, runtimeManager *extensions.RuntimeManager) ([]slashcommands.Command, error) {
+func listExtensionSlashCommands(ctx context.Context, cwd string, runtimeManager *extensions.RuntimeManager) ([]slashcommands.Command, error) {
 	resolvedCWD, err := resolveSlashCommandCWD(cwd)
 	if err != nil {
 		return nil, err
 	}
 
-	var extensionRuntime *extensions.Runtime
-	if runtimeManager != nil {
-		extensionRuntime, err = runtimeManager.RuntimeForCommandDiscovery(ctx, resolvedCWD)
-	} else {
-		extensionRuntime, err = extensions.NewRuntimeFromViper(ctx, resolvedCWD)
-	}
+	extensionRuntime, err := runtimeManager.RuntimeForCommandDiscovery(ctx, resolvedCWD)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to initialize extensions for slash commands")
 	}
 	if extensionRuntime == nil {
 		return nil, nil
-	}
-	if runtimeManager == nil {
-		defer func() { _ = extensionRuntime.Close() }()
 	}
 
 	return extensionRuntime.SlashCommands(), nil

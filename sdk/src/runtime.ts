@@ -1,7 +1,7 @@
 import nodeProcess from "node:process";
 
 import { createExtensionHost, type ExtensionHost } from "./api.js";
-import { runWithHostRPCClient, setActiveHostRPCClient, type HostRPCClient } from "./context.js";
+import { runWithHostRPCClient, type HostRPCClient } from "./context.js";
 import type { ExtensionEntrypoint } from "./types.js";
 
 interface JsonRpcRequest {
@@ -135,7 +135,6 @@ function runStdioServer(host: ExtensionHost): void {
   let buffer: Buffer<ArrayBufferLike> = Buffer.alloc(0);
   const hostClient = new StdioHostRPCClient();
   const activeRequests = new Map<number | string, ActiveRequest>();
-  setActiveHostRPCClient(hostClient);
 
   nodeProcess.stdin.on("data", (chunk: Buffer) => {
     buffer = Buffer.concat([buffer, chunk]);

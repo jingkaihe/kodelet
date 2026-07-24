@@ -830,7 +830,6 @@ class TempConfig {
 }
 
 interface BridgePendingRPCRequest extends PendingRPCRequest {
-  parentId?: number | string;
   request?: BridgeActiveRequest;
 }
 
@@ -1074,7 +1073,7 @@ class ExtensionSocketServer {
     const id = ++connection.nextId;
     try {
       return await new Promise((resolve, reject) => {
-        connection.pending.set(id, { resolve, reject, parentId, request });
+        connection.pending.set(id, { resolve, reject, request });
         connection.send({ jsonrpc: "2.0", id, parentId, method, params });
       });
     } finally {

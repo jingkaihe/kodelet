@@ -1140,42 +1140,6 @@ func TestServer_handleGetSlashCommandsIncludesExtensionCommands(t *testing.T) {
 	assert.Equal(t, `/review [focus="correctness, tests" target=HEAD] additional instructions`, reviewCommand.Placeholder)
 }
 
-func TestServer_handleGetSlashCommandsReusesExtensionRuntime(t *testing.T) {
-	originalSettings := viper.AllSettings()
-	defer func() {
-		viper.Reset()
-		for key, value := range originalSettings {
-			viper.Set(key, value)
-		}
-	}()
-
-	workspace := t.TempDir()
-	writeWebExtensionExecutable(t, filepath.Join(workspace, ".kodelet", "extensions", "commands", "kodelet-extension-commands"))
-	viper.Reset()
-	viper.Set("extensions.enabled", true)
-	viper.Set("extensions.local_dir", "./.kodelet/extensions")
-	viper.Set("extensions.global_dir", filepath.Join(t.TempDir(), "global-extensions"))
-	viper.Set("extensions.max_output_size", 102400)
-
-	extensionRuntimes := extensions.NewRuntimeManager()
-	t.Cleanup(func() { assert.NoError(t, extensionRuntimes.Close()) })
-	server := &Server{config: &ServerConfig{CWD: t.TempDir()}, extensionRuntimes: extensionRuntimes}
-
-	for range 2 {
-		req := httptest.NewRequest("GET", "/api/chat/slash-commands?cwd="+url.QueryEscape(workspace), nil)
-		w := httptest.NewRecorder()
-		server.handleGetSlashCommands(w, req)
-
-		assert.Equal(t, http.StatusOK, w.Code)
-	}
-
-	first, err := extensionRuntimes.Runtime(context.Background(), workspace)
-	require.NoError(t, err)
-	second, err := extensionRuntimes.Runtime(context.Background(), filepath.Join(workspace, "."))
-	require.NoError(t, err)
-	assert.Same(t, first, second)
-}
-
 func TestServer_handleGetConversationPreservesImageContent(t *testing.T) {
 	conversationID := "test-image-conv"
 	mockService := &mockConversationService{

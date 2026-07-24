@@ -34,7 +34,6 @@ type Process struct {
 	shutdown     bool
 	disabled     bool
 	failures     int
-	generation   uint64
 	uiHost       ExtensionUIHost
 	uiSource     *processExtensionUISource
 }
@@ -94,16 +93,13 @@ func (p *Process) start(ctx context.Context) error {
 		owner:   UIExtensionOwner{ExtensionID: p.Extension.ID, Generation: generation},
 	}
 	client.setHostRequestHandler(source)
-	client.setTerminalHandler(func(error) { p.handleRPCFailure(client) })
+	client.setTerminalHandler(func(error) { p.failClientGeneration(client) })
 	p.cmd = cmd
 	p.client = client
 	p.uiSource = source
 	p.stdin = stdin
 	p.stdout = stdout
 	p.closed = false
-	p.uiMu.Lock()
-	p.generation = generation
-	p.uiMu.Unlock()
 	return nil
 }
 
@@ -359,7 +355,7 @@ func (p *Process) executeTool(ctx context.Context, name string, input json.RawMe
 	handler := toolExecutionHostHandler{source: source, onUpdate: onUpdate}
 	if err := client.callWithHostHandler(ctx, "extension.tool.execute", params, &result, handler); err != nil {
 		if shouldRestartAfterCallError(err) {
-			p.closeForRestart(client)
+			p.failClientGeneration(client)
 		}
 		return nil, err
 	}
@@ -400,7 +396,7 @@ func (p *Process) ExecuteCommand(ctx context.Context, name string, input map[str
 	var result CommandResult
 	if err := client.callWithHostHandler(ctx, "extension.command.execute", params, &result, source); err != nil {
 		if shouldRestartAfterCallError(err) {
-			p.closeForRestart(client)
+			p.failClientGeneration(client)
 		}
 		return nil, err
 	}
@@ -421,7 +417,7 @@ func (p *Process) HandleEvent(ctx context.Context, eventID string, eventName str
 	var result EventResult
 	if err := client.callWithHostHandler(ctx, "extension.event.handle", params, &result, source); err != nil {
 		if shouldRestartAfterCallError(err) {
-			p.closeForRestart(client)
+			p.failClientGeneration(client)
 		}
 		return nil, err
 	}
@@ -429,14 +425,7 @@ func (p *Process) HandleEvent(ctx context.Context, eventID string, eventName str
 }
 
 func (p *Process) HandleRPCRequest(ctx context.Context, method string, params json.RawMessage) (any, *rpcError) {
-	p.mu.Lock()
-	var source UIExtensionSource
-	if p.uiSource != nil {
-		source = p.uiSource
-	} else if !p.closed && !p.disabled && !p.shutdown && p.client != nil {
-		source = &processExtensionUISource{process: p, client: p.client, owner: p.ExtensionUIOwner()}
-	}
-	p.mu.Unlock()
+	_, source := p.rpcSession()
 	return p.handleRPCRequest(ctx, source, method, params)
 }
 
@@ -572,32 +561,10 @@ func (p *Process) handleRPCRequest(ctx context.Context, source UIExtensionSource
 	}
 }
 
-// HandleRPCNotification accepts coalescible extension UI presentation frames.
-func (p *Process) HandleRPCNotification(method string, params json.RawMessage) {
-	_, source := p.rpcSession()
-	if source == nil {
-		return
-	}
-	p.handleRPCNotification(source, method, params)
-}
-
 func (p *Process) handleRPCNotification(source UIExtensionSource, method string, params json.RawMessage) {
-	ctx := context.Background()
 	switch method {
-	case UIWidgetFrameMethod:
-		var request UIWidgetFrameRequest
-		if json.Unmarshal(params, &request) == nil {
-			_, _ = p.handleExtensionUIRequest(func(host ExtensionUIHost) (UIFrameResponse, error) {
-				return host.UpdateWidget(ctx, source, request)
-			})
-		}
-	case UISurfaceFrameMethod:
-		var request UISurfaceFrameRequest
-		if json.Unmarshal(params, &request) == nil {
-			_, _ = p.handleExtensionUIRequest(func(host ExtensionUIHost) (UIFrameResponse, error) {
-				return host.UpdateSurface(ctx, source, request)
-			})
-		}
+	case UIWidgetFrameMethod, UISurfaceFrameMethod:
+		_, _ = p.handleRPCRequest(context.Background(), source, method, params)
 	}
 }
 
@@ -613,27 +580,6 @@ func (p *Process) handleExtensionUIRequest(handle func(ExtensionUIHost) (UIFrame
 		return nil, &rpcError{Code: -32000, Message: err.Error()}
 	}
 	return response, nil
-}
-
-// ExtensionUIOwner identifies the current process generation to the UI host.
-func (p *Process) ExtensionUIOwner() UIExtensionOwner {
-	p.uiMu.RLock()
-	defer p.uiMu.RUnlock()
-	return UIExtensionOwner{ExtensionID: p.Extension.ID, Generation: p.generation}
-}
-
-// NotifyExtensionUI sends input or resize notifications to a running extension.
-func (p *Process) NotifyExtensionUI(_ context.Context, method string, params any) error {
-	_, source := p.rpcSession()
-	if source == nil {
-		return errors.Errorf("extension %s is not running", p.Extension.ID)
-	}
-	return source.NotifyExtensionUI(context.Background(), method, params)
-}
-
-func (p *Process) rpcClient() *rpcClient {
-	client, _ := p.rpcSession()
-	return client
 }
 
 func (p *Process) rpcSession() (*rpcClient, *processExtensionUISource) {
@@ -825,7 +771,7 @@ func shouldRestartAfterCallError(err error) bool {
 	return !strings.Contains(err.Error(), "extension rpc error")
 }
 
-func (p *Process) closeForRestart(failedClient *rpcClient) {
+func (p *Process) failClientGeneration(failedClient *rpcClient) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.closed || p.shutdown || p.disabled || p.client != failedClient {
@@ -834,16 +780,6 @@ func (p *Process) closeForRestart(failedClient *rpcClient) {
 	_ = p.closeProcessLocked()
 	// A failed call means this process generation is no longer usable even if
 	// it disappeared before cmd/process state was fully populated.
-	p.recordFailureLocked()
-}
-
-func (p *Process) handleRPCFailure(failedClient *rpcClient) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.closed || p.shutdown || p.disabled || p.client != failedClient {
-		return
-	}
-	_ = p.closeProcessLocked()
 	p.recordFailureLocked()
 }
 
@@ -863,8 +799,11 @@ func (p *Process) closeProcessLocked() error {
 		return nil
 	}
 	p.closed = true
+	owner := UIExtensionOwner{}
+	if p.uiSource != nil {
+		owner = p.uiSource.owner
+	}
 	p.uiMu.RLock()
-	owner := UIExtensionOwner{ExtensionID: p.Extension.ID, Generation: p.generation}
 	uiHost := p.uiHost
 	p.uiMu.RUnlock()
 	if uiHost != nil && owner.Generation != 0 {

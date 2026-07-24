@@ -239,10 +239,6 @@ type tuiSink struct {
 }
 
 func (s tuiSink) Send(event chat.ChatEvent) error {
-	if s.done == nil {
-		s.ch <- chatEventMsg{runID: s.runID, event: event}
-		return nil
-	}
 	select {
 	case s.ch <- chatEventMsg{runID: s.runID, event: event}:
 		return nil

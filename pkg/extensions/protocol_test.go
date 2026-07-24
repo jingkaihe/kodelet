@@ -23,7 +23,7 @@ func TestRPCClientCallWritesCancelNotificationOnContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := client.call(ctx, "extension.test", map[string]any{"ok": true})
+	err := client.callWithHostHandler(ctx, "extension.test", map[string]any{"ok": true}, nil, nil)
 	_ = writer.Close()
 
 	require.ErrorIs(t, err, context.Canceled)
@@ -47,7 +47,7 @@ func TestRPCClientCallHandlesErrorResponseAndUnexpectedID(t *testing.T) {
 		require.NoError(t, writeFrame(&inbound, payload))
 
 		client := newRPCClient(&inbound, &outbound)
-		err = client.call(context.Background(), "extension.test", nil)
+		err = client.callWithHostHandler(context.Background(), "extension.test", nil, nil, nil)
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "extension rpc error -32000: boom")
@@ -62,7 +62,7 @@ func TestRPCClientCallHandlesErrorResponseAndUnexpectedID(t *testing.T) {
 		require.NoError(t, writeFrame(&inbound, payload))
 
 		client := newRPCClient(&inbound, &outbound)
-		err = client.call(context.Background(), "extension.test", nil)
+		err = client.callWithHostHandler(context.Background(), "extension.test", nil, nil, nil)
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unexpected rpc response id")
@@ -122,7 +122,7 @@ func TestRPCClientRoutesParentlessNotificationsToPersistentHostHandler(t *testin
 	client.setHostRequestHandler(recordingRPCNotificationHandler{notifications: notifications})
 	callDone := make(chan error, 1)
 	go func() {
-		callDone <- client.call(context.Background(), "extension.initialize", nil)
+		callDone <- client.callWithHostHandler(context.Background(), "extension.initialize", nil, nil, nil)
 	}()
 
 	outbound := bufio.NewReader(serverReader)

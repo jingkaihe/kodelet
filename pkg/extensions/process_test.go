@@ -60,14 +60,6 @@ func TestProcessEnsureRunningDisabledAndShutdownBranches(t *testing.T) {
 	})
 }
 
-func TestProcessRPCClientNilWhenClosedDisabledOrShutdown(t *testing.T) {
-	assert.Nil(t, (&Process{closed: true}).rpcClient())
-	assert.Nil(t, (&Process{disabled: true}).rpcClient())
-	assert.Nil(t, (&Process{shutdown: true}).rpcClient())
-	client := newRPCClient(strings.NewReader(""), ioDiscard{})
-	assert.Same(t, client, (&Process{client: client}).rpcClient())
-}
-
 func TestProcessContextIgnoresCallerCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -77,25 +69,25 @@ func TestProcessContextIgnoresCallerCancellation(t *testing.T) {
 	assert.NoError(t, processCtx.Err())
 }
 
-func TestProcessCloseForRestartCountsProcessGenerationOnce(t *testing.T) {
+func TestProcessFailClientGenerationCountsOnce(t *testing.T) {
 	client := newRPCClient(strings.NewReader(""), ioDiscard{})
 	process := &Process{Extension: Extension{ID: "weather"}, client: client}
 
-	process.closeForRestart(client)
-	process.closeForRestart(client)
-	process.closeForRestart(client)
+	process.failClientGeneration(client)
+	process.failClientGeneration(client)
+	process.failClientGeneration(client)
 
 	assert.True(t, process.closed)
 	assert.Equal(t, 1, process.failures)
 	assert.False(t, process.disabled)
 }
 
-func TestProcessCloseForRestartIgnoresStaleClientGeneration(t *testing.T) {
+func TestProcessFailClientGenerationIgnoresStaleClient(t *testing.T) {
 	staleClient := newRPCClient(strings.NewReader(""), ioDiscard{})
 	currentClient := newRPCClient(strings.NewReader(""), ioDiscard{})
 	process := &Process{Extension: Extension{ID: "weather"}, client: currentClient}
 
-	process.closeForRestart(staleClient)
+	process.failClientGeneration(staleClient)
 
 	assert.False(t, process.closed)
 	assert.Zero(t, process.failures)

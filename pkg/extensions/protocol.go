@@ -239,10 +239,6 @@ func (c *rpcClient) setTerminalHandler(handler func(error)) {
 	c.stateMu.Unlock()
 }
 
-func (c *rpcClient) call(ctx context.Context, method string, params any) error {
-	return c.callWithHostHandler(ctx, method, params, nil, nil)
-}
-
 func (c *rpcClient) callWithHostHandler(ctx context.Context, method string, params any, result any, handler rpcHostRequestHandler) error {
 	req, pending, err := c.registerCall(ctx, method, params, handler)
 	if err != nil {
@@ -483,8 +479,7 @@ func (c *rpcClient) writeResponse(response rpcResponse) error {
 }
 
 func (c *rpcClient) cancel(id int64) error {
-	notif := rpcNotification{JSONRPC: "2.0", Method: "$/cancelRequest", Params: cancelRequestParams{ID: id}}
-	return c.notify(notif.Method, notif.Params)
+	return c.notify("$/cancelRequest", cancelRequestParams{ID: id})
 }
 
 func (c *rpcClient) notify(method string, params any) error {

@@ -23,7 +23,6 @@ type extensionUIKey struct {
 
 type tuiExtensionWidget struct {
 	key       extensionUIKey
-	source    extensions.UIExtensionSource
 	placement string
 	frame     extensions.UIFrame
 }
@@ -38,7 +37,6 @@ type extensionSurfaceLayout struct {
 type tuiExtensionSurface struct {
 	key           extensionUIKey
 	source        extensions.UIExtensionSource
-	host          *tuiExtensionUIHost
 	options       extensions.UISurfaceOptions
 	frame         extensions.UIFrame
 	layout        extensionSurfaceLayout
@@ -63,9 +61,7 @@ type extensionUIBatch struct {
 	surfaces []pendingExtensionSurface
 }
 
-type extensionUIFlushMsg struct {
-	host *tuiExtensionUIHost
-}
+type extensionUIFlushMsg struct{}
 
 type extensionUITransportErrorMsg struct {
 	owner extensions.UIExtensionOwner
@@ -128,7 +124,7 @@ func (h *tuiExtensionUIHost) SetWidget(_ context.Context, source extensions.UIEx
 		h.mu.Unlock()
 		return staleUIFrameResponse(latest), nil
 	}
-	widget := tuiExtensionWidget{key: key, source: source, placement: placement, frame: request.Frame}
+	widget := tuiExtensionWidget{key: key, placement: placement, frame: request.Frame}
 	h.widgetSeq[key] = request.Frame.Sequence
 	h.widgets[key] = widget
 	h.pendingW[key] = pendingExtensionWidget{widget: widget}
@@ -236,7 +232,7 @@ func (h *tuiExtensionUIHost) OpenSurface(_ context.Context, source extensions.UI
 		return staleUIFrameResponse(latest), nil
 	}
 	h.openOrdinal++
-	surface := tuiExtensionSurface{key: key, source: source, host: h, options: request.Options, frame: request.Frame, openOrdinal: h.openOrdinal}
+	surface := tuiExtensionSurface{key: key, source: source, options: request.Options, frame: request.Frame, openOrdinal: h.openOrdinal}
 	h.surfaces[key] = surface
 	h.mu.Unlock()
 
@@ -393,11 +389,7 @@ func (h *tuiExtensionUIHost) enqueueFlush() error {
 	if h == nil || h.ch == nil {
 		return errors.New("TUI extension UI is not available")
 	}
-	msg := extensionUIFlushMsg{host: h}
-	if h.done == nil {
-		h.ch <- msg
-		return nil
-	}
+	msg := extensionUIFlushMsg{}
 	select {
 	case h.ch <- msg:
 		return nil
@@ -617,10 +609,6 @@ func (m *model) routeExtensionSurfaceMouse(msg tea.MouseMsg) (tea.Cmd, bool) {
 func (m *model) nextExtensionSurfaceInputCmd(key extensionUIKey, surface tuiExtensionSurface, kind, keyName, text string, alt, shift, ctrl bool, mouse *extensions.UISurfaceMouseEvent) tea.Cmd {
 	surface.eventSequence++
 	m.extensionSurfaces[key] = surface
-	return extensionSurfaceInputCmd(surface, kind, keyName, text, alt, shift, ctrl, mouse)
-}
-
-func extensionSurfaceInputCmd(surface tuiExtensionSurface, kind, keyName, text string, alt, shift, ctrl bool, mouse *extensions.UISurfaceMouseEvent) tea.Cmd {
 	request := extensions.UISurfaceInputNotification{
 		ID:       surface.key.id,
 		Sequence: surface.eventSequence,
@@ -632,7 +620,7 @@ func extensionSurfaceInputCmd(surface tuiExtensionSurface, kind, keyName, text s
 		Ctrl:     ctrl,
 		Mouse:    mouse,
 	}
-	return notifyExtensionSurfaceCmd(surface, extensions.UISurfaceInputMethod, request)
+	return notifyExtensionSurfaceCmd(m.extensionUI, surface, extensions.UISurfaceInputMethod, request)
 }
 
 func (m *model) updateExtensionSurfaceLayouts() []tea.Cmd {
@@ -655,17 +643,17 @@ func (m *model) updateExtensionSurfaceLayouts() []tea.Cmd {
 			Width:    layout.width,
 			Height:   layout.height,
 		}
-		cmds = append(cmds, notifyExtensionSurfaceCmd(surface, extensions.UISurfaceResizeMethod, request))
+		cmds = append(cmds, notifyExtensionSurfaceCmd(m.extensionUI, surface, extensions.UISurfaceResizeMethod, request))
 	}
 	return cmds
 }
 
-func notifyExtensionSurfaceCmd(surface tuiExtensionSurface, method string, request any) tea.Cmd {
+func notifyExtensionSurfaceCmd(host *tuiExtensionUIHost, surface tuiExtensionSurface, method string, request any) tea.Cmd {
 	return func() tea.Msg {
 		if surface.source == nil {
 			return extensionUITransportErrorMsg{owner: surface.key.owner}
 		}
-		if surface.host != nil && !surface.host.isCurrentSurfaceLifecycle(surface.key, surface.openOrdinal) {
+		if host != nil && !host.isCurrentSurfaceLifecycle(surface.key, surface.openOrdinal) {
 			return nil
 		}
 		if surface.source.ExtensionUIOwner() != surface.key.owner {

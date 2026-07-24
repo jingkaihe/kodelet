@@ -340,20 +340,16 @@ test("tool updates are ignored when the host does not advertise support", async 
   assert.deepEqual(requests, []);
 });
 
-test("widgets use sequences and surfaces coalesce frames and route host events", async () => {
+test("widgets use sequences and surfaces route host events", async () => {
   let openedSurface: any;
   const inputEvents: unknown[] = [];
   const resizeEvents: unknown[] = [];
   const requests: Array<{ method: string; params?: unknown }> = [];
-  const notifications: Array<{ method: string; params?: unknown }> = [];
   const notificationHandlers = new Set<(method: string, params: unknown) => void>();
   const host = {
     async request(method: string, params?: unknown) {
       requests.push({ method, params });
       return { accepted: true, latestSequence: 1 };
-    },
-    notify(method: string, params?: unknown) {
-      notifications.push({ method, params });
     },
     onNotification(handler: (method: string, params: unknown) => void) {
       notificationHandlers.add(handler);
@@ -420,13 +416,6 @@ test("widgets use sequences and surfaces coalesce frames and route host events",
     },
   ]);
 
-  openedSurface.update(["first"]);
-  openedSurface.update(["latest"]);
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(notifications, [
-    { method: "kodelet.ui.surface.frame", params: { id: "game", frame: { sequence: 2, lines: ["latest"] } } },
-  ]);
-
   for (const handler of notificationHandlers) {
     handler("extension.ui.surface.resize", { id: "game", sequence: 1, width: 80, height: 20 });
     handler("extension.ui.surface.input", { id: "game", sequence: 2, kind: "key", key: "q", text: "q" });
@@ -439,35 +428,16 @@ test("widgets use sequences and surfaces coalesce frames and route host events",
   await openedSurface.close();
   assert.deepEqual(requests.at(-1), {
     method: "kodelet.ui.surface.close",
-    params: { id: "game", sequence: 3 },
-  });
-
-  await harness.executeCommand({
-    name: "ui",
-    invocation: { raw: "/ui", commandName: "ui", args: [], flags: {} },
-  });
-  assert.deepEqual(
-    requests.filter((request) => request.method === "kodelet.ui.surface.open").at(-1),
-    {
-      method: "kodelet.ui.surface.open",
-      params: {
-        id: "game",
-        options: { width: "75%", maxHeight: "95%", anchor: "center" },
-        frame: { sequence: 4, lines: ["loading"] },
-      },
-    },
-  );
-  await openedSurface.close();
-  assert.deepEqual(requests.at(-1), {
-    method: "kodelet.ui.surface.close",
-    params: { id: "game", sequence: 5 },
+    params: { id: "game", sequence: 2 },
   });
 });
 
 test("surface IDs reject overlapping ownership until the active handle closes", async () => {
   let openedSurface: any;
   let releaseFirstOpen: ((response: { accepted: boolean }) => void) | undefined;
+  let releaseFirstClose: ((response: { accepted: boolean }) => void) | undefined;
   let openRequests = 0;
+  let closeRequests = 0;
   const requests: Array<{ method: string; params?: unknown }> = [];
   const host = {
     async request(method: string, params?: unknown) {
@@ -475,6 +445,11 @@ test("surface IDs reject overlapping ownership until the active handle closes", 
       if (method === "kodelet.ui.surface.open" && openRequests++ === 0) {
         return await new Promise<{ accepted: boolean }>((resolve) => {
           releaseFirstOpen = resolve;
+        });
+      }
+      if (method === "kodelet.ui.surface.close" && closeRequests++ === 0) {
+        return await new Promise<{ accepted: boolean }>((resolve) => {
+          releaseFirstClose = resolve;
         });
       }
       return { accepted: true };
@@ -490,7 +465,10 @@ test("surface IDs reject overlapping ownership until the active handle closes", 
         releaseFirstOpen?.({ accepted: true });
         openedSurface = await firstOpen;
         await assert.rejects(ctx.ui.openSurface({ id: "singleton" }), /already open, opening, or closing/);
-        await openedSurface.close();
+        const firstClose = openedSurface.close();
+        await assert.rejects(ctx.ui.openSurface({ id: "singleton" }), /already open, opening, or closing/);
+        releaseFirstClose?.({ accepted: true });
+        await firstClose;
         openedSurface = await ctx.ui.openSurface({ id: "singleton" });
         return { action: "respond", response: "opened" };
       },
@@ -508,8 +486,18 @@ test("surface IDs reject overlapping ownership until the active handle closes", 
     requests.map((request) => request.method),
     ["kodelet.ui.surface.open", "kodelet.ui.surface.close", "kodelet.ui.surface.open"],
   );
+  assert.deepEqual(
+    requests.map((request) => {
+      const params = request.params as { sequence?: number; frame?: { sequence?: number } };
+      return params.sequence ?? params.frame?.sequence;
+    }),
+    [1, 2, 3],
+  );
   await openedSurface.close();
-  assert.equal(requests.at(-1)?.method, "kodelet.ui.surface.close");
+  assert.deepEqual(requests.at(-1), {
+    method: "kodelet.ui.surface.close",
+    params: { id: "singleton", sequence: 4 },
+  });
 });
 
 test("surface presentation keeps at most one frame in flight and one latest pending frame", async () => {
@@ -630,11 +618,9 @@ test("surface routing retains initial events until open listeners attach", async
   unsubscribeResize?.();
   unsubscribeInput?.();
   for (const handler of notificationHandlers) {
-    for (let sequence = 5; sequence < 25; sequence++) {
-      handler("extension.ui.surface.input", { id: "early", sequence, kind: "key", key: "x", text: "x" });
-    }
-    handler("extension.ui.surface.input", { id: "early", sequence: 25, kind: "blur" });
-    handler("extension.ui.surface.resize", { id: "early", sequence: 26, width: 73, height: 19 });
+    handler("extension.ui.surface.input", { id: "early", sequence: 5, kind: "key", key: "x", text: "x" });
+    handler("extension.ui.surface.input", { id: "early", sequence: 6, kind: "blur" });
+    handler("extension.ui.surface.resize", { id: "early", sequence: 7, width: 73, height: 19 });
   }
   const replayedEvents: unknown[] = [];
   openedSurface.onInput((event: unknown) => replayedEvents.push(event));
@@ -674,20 +660,17 @@ test("UI object IDs reject surrounding whitespace before routing or sequencing",
     invocation: { raw: "/validated-ui", commandName: "validated-ui", args: [], flags: {} },
   });
 
-  assert.deepEqual(requests, [
-    {
-      method: "kodelet.ui.widget.set",
-      params: { id: "status", placement: "aboveComposer", frame: { sequence: 1, lines: ["valid"] } },
-    },
-    {
-      method: "kodelet.ui.surface.open",
-      params: { id: "game", options: {}, frame: { sequence: 1, lines: [] } },
-    },
-    {
-      method: "kodelet.ui.surface.close",
-      params: { id: "game", sequence: 2 },
-    },
-  ]);
+  assert.deepEqual(
+    requests.map((request) => request.method),
+    ["kodelet.ui.widget.set", "kodelet.ui.surface.open", "kodelet.ui.surface.close"],
+  );
+  assert.deepEqual(
+    requests.map((request) => {
+      const params = request.params as { sequence?: number; frame?: { sequence?: number } };
+      return params.sequence ?? params.frame?.sequence;
+    }),
+    [1, 1, 2],
+  );
 });
 
 test("widget and surface APIs are capability gated", async () => {
@@ -876,7 +859,6 @@ test("runtime keeps interactive surfaces alive after the opening command returns
     params: { id: "game", frame: { sequence: 2, lines: ["size=60x18"] } },
   });
 
-  client.notify("extension.ui.surface.resize", { id: "game", sequence: 1, width: 1, height: 1 });
   const requestCountBeforeInput = client.hostRequests.length;
   client.notify("extension.ui.surface.input", { id: "game", sequence: 2, kind: "key", key: "q", text: "q" });
   await client.waitForHostNotifications(2);

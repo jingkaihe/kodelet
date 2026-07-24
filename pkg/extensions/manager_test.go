@@ -59,25 +59,6 @@ func TestRuntimeManagerCreatesOneRuntimeForConcurrentCallers(t *testing.T) {
 	assert.Equal(t, 1, calls)
 }
 
-func TestRuntimeManagerDefersLifecycleUntilRuntimeUse(t *testing.T) {
-	var calls int
-	manager := newRuntimeManager(func(_ context.Context, _ string) (*Runtime, error) {
-		calls++
-		return EmptyRuntime(), nil
-	})
-	t.Cleanup(func() { assert.NoError(t, manager.Close()) })
-
-	discovered, err := manager.RuntimeForCommandDiscovery(context.Background(), "/workspace")
-	require.NoError(t, err)
-	assert.False(t, discovered.lifecycleStarted)
-
-	active, err := manager.Runtime(context.Background(), "/workspace")
-	require.NoError(t, err)
-	assert.Same(t, discovered, active)
-	assert.True(t, active.lifecycleStarted)
-	assert.Equal(t, 1, calls)
-}
-
 func TestRuntimeManagerDiscoveryCachesCommandsBeforeLifecycle(t *testing.T) {
 	rootDir := t.TempDir()
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())

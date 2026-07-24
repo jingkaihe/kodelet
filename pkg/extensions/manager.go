@@ -46,7 +46,7 @@ func (m *RuntimeManager) RuntimeForCommandDiscovery(ctx context.Context, cwd str
 
 func (m *RuntimeManager) runtime(ctx context.Context, cwd string, startLifecycle bool) (*Runtime, error) {
 	if m == nil {
-		return NewRuntimeFromViper(ctx, cwd)
+		return nil, errors.New("extension runtime manager is required")
 	}
 
 	key := runtimeManagerKey(cwd)

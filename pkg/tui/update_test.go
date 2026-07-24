@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	xansi "github.com/charmbracelet/x/ansi"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/messagehistory"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/spf13/viper"
@@ -717,14 +718,8 @@ description: Workspace recipe
 ---
 Body
 `)
-	withTUIViper(t, map[string]any{
-		"extensions.enabled":         false,
-		"extensions.local_dir":       filepath.Join(workspace, ".kodelet", "extensions"),
-		"extensions.global_dir":      filepath.Join(t.TempDir(), "global-extensions"),
-		"extensions.max_output_size": 102400,
-	})
 
-	commands, err := listSlashCommands(context.Background(), workspace)
+	commands, err := listBaseSlashCommands(context.Background(), workspace)
 
 	require.NoError(t, err)
 	assert.Contains(t, slashCommandNames(commands), "goal")
@@ -748,7 +743,9 @@ func TestSlashCommandLoadCommandsAndCWDHelpers(t *testing.T) {
 	assert.Contains(t, slashCommandNames(baseMsg.commands), "goal")
 	assert.False(t, baseMsg.extensionsOnly)
 
-	extensionMsg, ok := loadExtensionSlashCommands(context.Background(), workspace)().(slashCommandsMsg)
+	runtimeManager := extensions.NewRuntimeManager()
+	t.Cleanup(func() { assert.NoError(t, runtimeManager.Close()) })
+	extensionMsg, ok := loadExtensionSlashCommands(context.Background(), workspace, runtimeManager)().(slashCommandsMsg)
 	require.True(t, ok)
 	assert.Equal(t, workspace, extensionMsg.cwd)
 	assert.True(t, extensionMsg.extensionsOnly)
@@ -769,17 +766,6 @@ func TestSlashCommandLoaderErrorsForInvalidCWD(t *testing.T) {
 	assert.ErrorContains(t, err, "cwd directory does not exist")
 	assert.Contains(t, slashCommandNames(baseCommands), "goal")
 	assert.Contains(t, slashCommandNames(baseCommands), "theme")
-
-	extensionCommands, err := listExtensionSlashCommands(context.Background(), missing)
-	assert.ErrorContains(t, err, "cwd directory does not exist")
-	assert.Nil(t, extensionCommands)
-
-	combined, err := listSlashCommands(context.Background(), missing)
-	assert.ErrorContains(t, err, "cwd directory does not exist")
-	assert.Contains(t, slashCommandNames(combined), "goal")
-
-	_, err = resolveSlashCommandCWD(missing)
-	assert.ErrorContains(t, err, "cwd directory does not exist")
 }
 
 func slashCommandNames(commands []slashcommands.Command) []string {

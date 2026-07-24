@@ -129,10 +129,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewport(true)
 
 	case extensionUIFlushMsg:
-		if msg.host == nil || msg.host != m.extensionUI {
+		if m.extensionUI == nil {
 			break
 		}
-		cmd := m.applyExtensionUIBatch(msg.host.drain())
+		cmd := m.applyExtensionUIBatch(m.extensionUI.drain())
 		return m, tea.Batch(waitForMsg(m.runCh), cmd)
 
 	case extensionUITransportErrorMsg:
@@ -176,6 +176,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case initialHistoryMsg:
 		wasInitialHistoryPending := m.initialHistoryPending
 		m.initialHistoryPending = false
+		reloadSlashCommands := wasInitialHistoryPending
+		var reloadMessageHistory tea.Cmd
 		if msg.err != nil {
 			m.err = msg.err
 			m.status = "history load failed"
@@ -188,12 +190,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					text: fmt.Sprintf("Failed to resume conversation: %v", msg.err),
 				}},
 			})
-			if wasInitialHistoryPending {
-				cmds = append(cmds, loadSlashCommands(m.ctx, m.slashCommandCWD()))
-			}
 		} else if msg.loaded {
-			reloadSlashCommands := wasInitialHistoryPending
-			var reloadMessageHistory tea.Cmd
 			if strings.TrimSpace(m.conversationID) != "" {
 				m.setProfile(msg.profile)
 				m.profilePickerOpen = false
@@ -208,30 +205,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cwd = strings.TrimSpace(msg.cwd)
 				reloadMessageHistory = m.updateMessageHistoryScope(m.cwd)
 			}
-			if len(m.entries) != 0 {
-				m.refreshViewport(true)
-				if reloadSlashCommands {
-					cmds = append(cmds, loadSlashCommands(m.ctx, m.slashCommandCWD()))
-				}
-				if reloadMessageHistory != nil {
-					cmds = append(cmds, reloadMessageHistory)
-				}
-				break
-			}
-			if len(msg.entries) > 0 {
+			if len(m.entries) == 0 && len(msg.entries) > 0 {
 				m.entries = msg.entries
 				m.usage = msg.usage
 				m.status = fmt.Sprintf("resumed %s", shortID(m.conversationID))
 				m.prependMessageHistoryTexts(userMessagesFromEntries(msg.entries))
 			}
-			if reloadSlashCommands {
-				cmds = append(cmds, loadSlashCommands(m.ctx, m.slashCommandCWD()))
-			}
-			if reloadMessageHistory != nil {
-				cmds = append(cmds, reloadMessageHistory)
-			}
-		} else if wasInitialHistoryPending {
+		}
+		if reloadSlashCommands {
 			cmds = append(cmds, loadSlashCommands(m.ctx, m.slashCommandCWD()))
+		}
+		if reloadMessageHistory != nil {
+			cmds = append(cmds, reloadMessageHistory)
 		}
 		m.refreshViewport(true)
 
@@ -243,7 +228,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.slashCommands = mergeSlashCommands(m.slashCommands, msg.commands)
 		} else {
 			m.slashCommands = msg.commands
-			cmds = append(cmds, loadExtensionSlashCommandsWithRuntime(m.ctx, m.slashCommandCWD(), m.extensionRuntimes))
+			cmds = append(cmds, loadExtensionSlashCommands(m.ctx, m.slashCommandCWD(), m.extensionRuntimes))
 		}
 		m.slashCommandErr = msg.err
 		m.resetSlashCommandIndex()

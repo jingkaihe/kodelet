@@ -36,12 +36,10 @@ func TestUIFrameLineSupportsPlainAndStyledJSON(t *testing.T) {
 }
 
 type recordingExtensionUIHost struct {
-	mu            sync.Mutex
-	set           []UIWidgetSetRequest
-	owners        []UIExtensionOwner
-	cleanups      []UIExtensionOwner
-	openResponse  UIFrameResponse
-	closeResponse UIFrameResponse
+	mu       sync.Mutex
+	set      []UIWidgetSetRequest
+	owners   []UIExtensionOwner
+	cleanups []UIExtensionOwner
 }
 
 func (h *recordingExtensionUIHost) SetWidget(_ context.Context, source UIExtensionSource, request UIWidgetSetRequest) (UIFrameResponse, error) {
@@ -60,22 +58,16 @@ func (*recordingExtensionUIHost) RemoveWidget(context.Context, UIExtensionSource
 	return UIFrameResponse{}, nil
 }
 
-func (h *recordingExtensionUIHost) OpenSurface(_ context.Context, source UIExtensionSource, request UISurfaceOpenRequest) (UIFrameResponse, error) {
-	if h.openResponse.Accepted {
-		PrepareUISurfaceEventLifecycle(source, request.ID, request.Frame.Sequence)
-	}
-	return h.openResponse, nil
+func (*recordingExtensionUIHost) OpenSurface(context.Context, UIExtensionSource, UISurfaceOpenRequest) (UIFrameResponse, error) {
+	return UIFrameResponse{}, nil
 }
 
 func (*recordingExtensionUIHost) UpdateSurface(context.Context, UIExtensionSource, UISurfaceFrameRequest) (UIFrameResponse, error) {
 	return UIFrameResponse{}, nil
 }
 
-func (h *recordingExtensionUIHost) CloseSurface(_ context.Context, source UIExtensionSource, request UISurfaceCloseRequest) (UIFrameResponse, error) {
-	if h.closeResponse.Accepted {
-		PrepareUISurfaceEventLifecycle(source, request.ID, request.Sequence)
-	}
-	return h.closeResponse, nil
+func (*recordingExtensionUIHost) CloseSurface(context.Context, UIExtensionSource, UISurfaceCloseRequest) (UIFrameResponse, error) {
+	return UIFrameResponse{}, nil
 }
 
 func (h *recordingExtensionUIHost) CleanupExtensionUI(owner UIExtensionOwner) {
@@ -84,17 +76,22 @@ func (h *recordingExtensionUIHost) CleanupExtensionUI(owner UIExtensionOwner) {
 	h.mu.Unlock()
 }
 
-func TestProcessRoutesPersistentExtensionUIRequestsAndCleansFailedGeneration(t *testing.T) {
+func TestProcessExtensionUISourceRoutesRequestsAndCleansFailedGeneration(t *testing.T) {
 	host := &recordingExtensionUIHost{}
 	client := newRPCClient(strings.NewReader(""), ioDiscard{})
 	process := &Process{
-		Extension:  Extension{ID: "game"},
-		client:     client,
-		generation: 4,
-		uiHost:     host,
+		Extension: Extension{ID: "game"},
+		client:    client,
+		uiHost:    host,
 	}
+	source := &processExtensionUISource{
+		process: process,
+		client:  client,
+		owner:   UIExtensionOwner{ExtensionID: "game", Generation: 4},
+	}
+	process.uiSource = source
 
-	result, rpcErr := process.HandleRPCRequest(context.Background(), UIWidgetSetMethod, json.RawMessage(`{
+	result, rpcErr := source.HandleRPCRequest(context.Background(), UIWidgetSetMethod, json.RawMessage(`{
 		"id":"status",
 		"placement":"aboveComposer",
 		"frame":{"sequence":1,"lines":["ready"]}
@@ -106,12 +103,12 @@ func TestProcessRoutesPersistentExtensionUIRequestsAndCleansFailedGeneration(t *
 	require.Len(t, host.set, 1)
 	assert.Equal(t, "ready", host.set[0].Frame.Lines[0].Spans[0].Text)
 
-	process.handleRPCFailure(client)
+	process.failClientGeneration(client)
 	assert.True(t, process.closed)
 	assert.Equal(t, 1, process.failures)
 	assert.Equal(t, []UIExtensionOwner{{ExtensionID: "game", Generation: 4}}, host.cleanups)
 
-	process.handleRPCFailure(client)
+	process.failClientGeneration(client)
 	assert.Len(t, host.cleanups, 1)
 	require.NoError(t, process.Close())
 	assert.Len(t, host.cleanups, 1)
@@ -131,9 +128,8 @@ func TestProcessInitializeAllowsReverseUIRequest(t *testing.T) {
 	client := newRPCClient(clientReader, clientWriter)
 	host := &recordingExtensionUIHost{}
 	process := &Process{
-		Extension:  Extension{ID: "reverse-ui"},
-		client:     client,
-		generation: 1,
+		Extension: Extension{ID: "reverse-ui"},
+		client:    client,
 	}
 	source := &processExtensionUISource{
 		process: process,
@@ -223,10 +219,9 @@ func TestProcessExtensionUISourceRejectsStaleGeneration(t *testing.T) {
 	oldClient := newRPCClient(strings.NewReader(""), ioDiscard{})
 	currentClient := newRPCClient(strings.NewReader(""), ioDiscard{})
 	process := &Process{
-		Extension:  Extension{ID: "game"},
-		client:     currentClient,
-		generation: 12,
-		uiHost:     host,
+		Extension: Extension{ID: "game"},
+		client:    currentClient,
+		uiHost:    host,
 	}
 	oldSource := &processExtensionUISource{
 		process: process,
@@ -267,7 +262,7 @@ func TestProcessExtensionUISourceOrdersHostEventsBySequence(t *testing.T) {
 		_ = writer.Close()
 	})
 	client := newRPCClient(strings.NewReader(""), writer)
-	process := &Process{Extension: Extension{ID: "game"}, client: client, generation: 1}
+	process := &Process{Extension: Extension{ID: "game"}, client: client}
 	source := &processExtensionUISource{
 		process: process,
 		client:  client,
@@ -322,7 +317,7 @@ func TestProcessExtensionUISourceOrdersHostEventsBySequence(t *testing.T) {
 
 func TestProcessExtensionUISourceDropsEventsFromPriorSurfaceLifecycle(t *testing.T) {
 	client := newRPCClient(strings.NewReader(""), ioDiscard{})
-	process := &Process{Extension: Extension{ID: "game"}, client: client, generation: 1}
+	process := &Process{Extension: Extension{ID: "game"}, client: client}
 	source := &processExtensionUISource{
 		process: process,
 		client:  client,
@@ -339,53 +334,6 @@ func TestProcessExtensionUISourceDropsEventsFromPriorSurfaceLifecycle(t *testing
 	_, exists := source.notify["surface"]
 	source.notifyMu.Unlock()
 	assert.False(t, exists)
-}
-
-func TestProcessSurfaceLifecycleOnlyResetsEventSequenceAfterHostAcceptance(t *testing.T) {
-	tests := []struct {
-		name   string
-		method string
-		params json.RawMessage
-	}{
-		{
-			name:   "open",
-			method: UISurfaceOpenMethod,
-			params: json.RawMessage(`{"id":"surface","frame":{"sequence":3,"lines":[]}}`),
-		},
-		{
-			name:   "close",
-			method: UISurfaceCloseMethod,
-			params: json.RawMessage(`{"id":"surface","sequence":3}`),
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			for _, accepted := range []bool{false, true} {
-				t.Run(map[bool]string{false: "rejected", true: "accepted"}[accepted], func(t *testing.T) {
-					host := &recordingExtensionUIHost{
-						openResponse:  UIFrameResponse{Accepted: accepted, LatestSequence: 2},
-						closeResponse: UIFrameResponse{Accepted: accepted, LatestSequence: 2},
-					}
-					process := &Process{uiHost: host}
-					source := &processExtensionUISource{
-						notify: map[string]*orderedExtensionUINotifications{
-							"surface": {next: 3, pending: map[uint64]extensionUINotification{}},
-						},
-					}
-
-					result, rpcErr := process.handleRPCRequest(context.Background(), source, test.method, test.params)
-
-					require.Nil(t, rpcErr)
-					response, ok := result.(UIFrameResponse)
-					require.True(t, ok)
-					assert.Equal(t, accepted, response.Accepted)
-					_, sequenceStateExists := source.notify["surface"]
-					assert.Equal(t, !accepted, sequenceStateExists)
-				})
-			}
-		})
-	}
 }
 
 func TestUISizeValueSupportsCellsAndPercentages(t *testing.T) {

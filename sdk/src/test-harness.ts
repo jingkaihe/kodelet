@@ -1,5 +1,5 @@
 import { createExtensionHost } from "./api.js";
-import { setActiveHostRPCClient, type HostRPCClient } from "./context.js";
+import { runWithHostRPCClient, type HostRPCClient } from "./context.js";
 import type {
   CommandResult,
   EventName,
@@ -25,7 +25,6 @@ export async function createTestHarness(
   hostRPCClient?: HostRPCClient,
 ): Promise<ExtensionTestHarness> {
   const host = await createExtensionHost(entrypoint);
-  setActiveHostRPCClient(hostRPCClient);
   let initialized = false;
   const defaultInit: InitializeParams = {
     protocolVersion: "2026-05-30",
@@ -60,15 +59,15 @@ export async function createTestHarness(
     },
     async executeTool(params) {
       ensureInitialized();
-      return await host.executeTool(params);
+      return await runWithHostRPCClient(hostRPCClient, () => host.executeTool(params));
     },
     async executeCommand(params) {
       ensureInitialized();
-      return await host.executeCommand(params);
+      return await runWithHostRPCClient(hostRPCClient, () => host.executeCommand(params));
     },
     async handleEvent(params) {
       ensureInitialized();
-      return await host.handleEvent(params);
+      return await runWithHostRPCClient(hostRPCClient, () => host.handleEvent(params));
     },
   };
 }

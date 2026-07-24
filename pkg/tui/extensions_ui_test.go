@@ -27,7 +27,6 @@ type fakeExtensionUISource struct {
 
 	mu            sync.Mutex
 	notifications []extensionUINotification
-	lifecycles    []uint64
 	lifecycleCh   chan string
 }
 
@@ -42,9 +41,8 @@ func (s *fakeExtensionUISource) NotifyExtensionUI(_ context.Context, method stri
 	return s.err
 }
 
-func (s *fakeExtensionUISource) PrepareUISurfaceEventLifecycle(id string, lifecycle uint64) {
+func (s *fakeExtensionUISource) PrepareUISurfaceEventLifecycle(id string, _ uint64) {
 	s.mu.Lock()
-	s.lifecycles = append(s.lifecycles, lifecycle)
 	lifecycleCh := s.lifecycleCh
 	s.mu.Unlock()
 	if lifecycleCh != nil {
@@ -87,7 +85,8 @@ func TestTUIExtensionUIHostPreparesSurfaceEventsBeforePublishingOpen(t *testing.
 	}
 	select {
 	case message := <-ch:
-		assert.Same(t, host, message.(extensionUIFlushMsg).host)
+		_, ok := message.(extensionUIFlushMsg)
+		assert.True(t, ok)
 	case <-time.After(time.Second):
 		t.Fatal("surface open was not published")
 	}
@@ -144,7 +143,8 @@ func TestTUIExtensionUIHostCoalescesLatestWidgetAndSurfaceFrames(t *testing.T) {
 
 	assert.Len(t, ch, 1, "one queued Bubble Tea flush should cover every pending frame")
 	msg := <-ch
-	assert.Same(t, host, msg.(extensionUIFlushMsg).host)
+	_, ok := msg.(extensionUIFlushMsg)
+	assert.True(t, ok)
 	batch := host.drain()
 	require.Len(t, batch.widgets, 1)
 	assert.Equal(t, uint64(3), batch.widgets[0].widget.frame.Sequence)
@@ -647,8 +647,7 @@ func indexLineContaining(content, target string) int {
 func applyPendingExtensionUI(t *testing.T, m *model) {
 	t.Helper()
 	msg := <-m.runCh
-	flush, ok := msg.(extensionUIFlushMsg)
+	_, ok := msg.(extensionUIFlushMsg)
 	require.True(t, ok)
-	require.Same(t, m.extensionUI, flush.host)
-	_ = m.applyExtensionUIBatch(flush.host.drain())
+	_ = m.applyExtensionUIBatch(m.extensionUI.drain())
 }

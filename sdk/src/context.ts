@@ -113,7 +113,7 @@ function createSharedContext(
     init?.extension.dataDir || path.join(os.homedir(), ".kodelet", "extensions", "data", init?.extension.id ?? "extension"),
   );
   const log = createLogger(init?.extension.id);
-  const persistentClient = client?.persistent ?? activeHostRPCClient ?? client;
+  const persistentClient = client?.persistent ?? client;
 
   const resolveWorkspacePath = (target: string): string => {
     const resolved = path.resolve(cwd, target || ".");
