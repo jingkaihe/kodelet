@@ -406,6 +406,131 @@ describe('applyChatStreamEvent', () => {
     });
   });
 
+  it('tracks interleaved parallel subagent updates independently', () => {
+    let messages: ChatRenderMessage[] = [];
+
+    messages = applyChatStreamEvent(messages, {
+      kind: 'tool-use',
+      tool_call_id: 'subagent-1',
+      tool_name: 'subagent',
+      input: '{"task":"first"}',
+      role: 'assistant',
+    });
+    messages = applyChatStreamEvent(messages, {
+      kind: 'tool-use',
+      tool_call_id: 'subagent-2',
+      tool_name: 'subagent',
+      input: '{"task":"second"}',
+      role: 'assistant',
+    });
+    messages = applyChatStreamEvent(messages, {
+      kind: 'tool-update',
+      tool_call_id: 'subagent-2',
+      tool_name: 'subagent',
+      role: 'assistant',
+      tool_result: {
+        toolName: 'subagent',
+        success: true,
+        metadata: {
+          extensionId: 'subagent',
+          toolName: 'subagent',
+          output: '',
+          data: {
+            taskRun: {
+              title: 'Second task',
+              detail: 'reviewing',
+              status: 'running',
+            },
+          },
+        },
+      },
+    });
+    messages = applyChatStreamEvent(messages, {
+      kind: 'tool-update',
+      tool_call_id: 'subagent-1',
+      tool_name: 'subagent',
+      role: 'assistant',
+      tool_result: {
+        toolName: 'subagent',
+        success: true,
+        metadata: {
+          extensionId: 'subagent',
+          toolName: 'subagent',
+          output: '',
+          data: {
+            taskRun: {
+              title: 'First task',
+              detail: 'testing',
+              status: 'running',
+            },
+          },
+        },
+      },
+    });
+    messages = applyChatStreamEvent(messages, {
+      kind: 'tool-result',
+      tool_call_id: 'subagent-2',
+      tool_name: 'subagent',
+      role: 'assistant',
+      tool_result: {
+        toolName: 'subagent',
+        success: true,
+        metadata: {
+          extensionId: 'subagent',
+          toolName: 'subagent',
+          output: 'second result',
+          data: {
+            taskRun: {
+              title: 'Second task complete',
+              detail: '',
+              status: 'completed',
+            },
+          },
+        },
+      },
+    });
+
+    const toolsBlock = messages[0].blocks?.find((block) => block.type === 'tools');
+    expect(toolsBlock?.type).toBe('tools');
+    if (!toolsBlock || toolsBlock.type !== 'tools') {
+      throw new Error('expected tools block');
+    }
+
+    expect(toolsBlock.tools).toHaveLength(2);
+    expect(toolsBlock.tools[0]).toMatchObject({
+      callId: 'subagent-1',
+      name: 'subagent',
+      inProgress: true,
+      result: {
+        metadata: {
+          data: {
+            taskRun: {
+              title: 'First task',
+              detail: 'testing',
+              status: 'running',
+            },
+          },
+        },
+      },
+    });
+    expect(toolsBlock.tools[1]).toMatchObject({
+      callId: 'subagent-2',
+      name: 'subagent',
+      result: {
+        metadata: {
+          output: 'second result',
+          data: {
+            taskRun: {
+              title: 'Second task complete',
+              status: 'completed',
+            },
+          },
+        },
+      },
+    });
+    expect(toolsBlock.tools[1]).not.toHaveProperty('inProgress');
+  });
+
   it('upserts tool updates when a reconnect missed the tool-use event', () => {
     let messages: ChatRenderMessage[] = [];
 

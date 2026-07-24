@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/avast/retry-go/v4"
 	"github.com/invopop/jsonschema"
@@ -74,6 +76,81 @@ func (t responsesTestTool) Execute(context.Context, tooltypes.State, string) too
 
 func (t responsesTestTool) TracingKVs(string) ([]attribute.KeyValue, error) { return nil, nil }
 
+type streamingResponsesTestTool struct {
+	name     string
+	started  chan<- string
+	finished chan<- string
+	release  <-chan struct{}
+}
+
+func (t streamingResponsesTestTool) GenerateSchema() *jsonschema.Schema {
+	return jsonschema.Reflect(map[string]any{})
+}
+
+func (t streamingResponsesTestTool) Name() string { return t.name }
+
+func (t streamingResponsesTestTool) Description() string { return "streaming responses test tool" }
+
+func (t streamingResponsesTestTool) ValidateInput(tooltypes.State, string) error { return nil }
+
+func (t streamingResponsesTestTool) Execute(ctx context.Context, state tooltypes.State, parameters string) tooltypes.ToolResult {
+	return t.ExecuteStreaming(ctx, state, parameters, nil)
+}
+
+func (t streamingResponsesTestTool) ExecuteStreaming(
+	ctx context.Context,
+	_ tooltypes.State,
+	_ string,
+	onUpdate tooltypes.ToolUpdateCallback,
+) tooltypes.ToolResult {
+	select {
+	case t.started <- t.name:
+	case <-ctx.Done():
+		return tooltypes.BaseToolResult{Error: ctx.Err().Error()}
+	}
+
+	if onUpdate != nil {
+		onUpdate(tooltypes.BaseToolResult{Result: "streaming " + t.name})
+	}
+
+	select {
+	case <-t.release:
+	case <-ctx.Done():
+		return tooltypes.BaseToolResult{Error: ctx.Err().Error()}
+	}
+
+	t.finished <- t.name
+	return tooltypes.BaseToolResult{Result: "done " + t.name}
+}
+
+func (t streamingResponsesTestTool) TracingKVs(string) ([]attribute.KeyValue, error) {
+	return nil, nil
+}
+
+type recordingResponsesTestTool struct {
+	name     string
+	executed chan<- struct{}
+}
+
+func (t recordingResponsesTestTool) GenerateSchema() *jsonschema.Schema {
+	return jsonschema.Reflect(map[string]any{})
+}
+
+func (t recordingResponsesTestTool) Name() string { return t.name }
+
+func (t recordingResponsesTestTool) Description() string { return "recording responses test tool" }
+
+func (t recordingResponsesTestTool) ValidateInput(tooltypes.State, string) error { return nil }
+
+func (t recordingResponsesTestTool) Execute(context.Context, tooltypes.State, string) tooltypes.ToolResult {
+	t.executed <- struct{}{}
+	return tooltypes.BaseToolResult{Result: "executed"}
+}
+
+func (t recordingResponsesTestTool) TracingKVs(string) ([]attribute.KeyValue, error) {
+	return nil, nil
+}
+
 func responseStreamFromMaps(t *testing.T, events []map[string]any) *ssestream.Stream[responses.ResponseStreamEventUnion] {
 	t.Helper()
 
@@ -119,6 +196,70 @@ func (h *captureStreamHandler) HandleThinkingBlockEnd() {
 
 func (h *captureStreamHandler) HandleContentBlockEnd() {
 	h.events = append(h.events, "content_block_end")
+}
+
+type parallelToolCaptureHandler struct {
+	mu          sync.Mutex
+	toolUses    []string
+	toolResults []string
+	updates     chan string
+	results     chan string
+}
+
+func (h *parallelToolCaptureHandler) HandleText(string) {}
+
+func (h *parallelToolCaptureHandler) HandleToolUse(toolCallID string, _ string, _ string) {
+	h.mu.Lock()
+	h.toolUses = append(h.toolUses, toolCallID)
+	h.mu.Unlock()
+}
+
+func (h *parallelToolCaptureHandler) HandleToolUpdate(toolCallID string, _ string, result tooltypes.ToolResult) {
+	h.updates <- toolCallID + ":" + result.GetResult()
+}
+
+func (h *parallelToolCaptureHandler) HandleToolResult(toolCallID string, _ string, _ tooltypes.ToolResult) {
+	h.mu.Lock()
+	h.toolResults = append(h.toolResults, toolCallID)
+	h.mu.Unlock()
+	h.results <- toolCallID
+}
+
+func (h *parallelToolCaptureHandler) HandleThinking(string) {}
+
+func (h *parallelToolCaptureHandler) HandleDone() {}
+
+func (h *parallelToolCaptureHandler) snapshot() ([]string, []string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]string(nil), h.toolUses...), append([]string(nil), h.toolResults...)
+}
+
+type cancelOnToolUseHandler struct {
+	cancel context.CancelFunc
+}
+
+func (h *cancelOnToolUseHandler) HandleText(string) {}
+
+func (h *cancelOnToolUseHandler) HandleToolUse(string, string, string) {
+	h.cancel()
+}
+
+func (h *cancelOnToolUseHandler) HandleToolResult(string, string, tooltypes.ToolResult) {}
+
+func (h *cancelOnToolUseHandler) HandleThinking(string) {}
+
+func (h *cancelOnToolUseHandler) HandleDone() {}
+
+func receiveTestEvent(t *testing.T, events <-chan string) string {
+	t.Helper()
+	select {
+	case event := <-events:
+		return event
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for test event")
+		return ""
+	}
 }
 
 type fakeMultiModalToolResult struct {
@@ -182,21 +323,6 @@ func TestResponseFunctionCallOutputItemsFiltersAndPreservesDetail(t *testing.T) 
 	assert.Equal(t, responses.ResponseInputImageContentDetailOriginal, items[1].OfInputImage.Detail)
 }
 
-func TestExecuteToolCallStoresStructuredResult(t *testing.T) {
-	thread := &Thread{
-		Thread: base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "conv-test"),
-	}
-	thread.SetState(tools.NewBasicState(context.Background(), tools.WithExtensionTools([]tooltypes.Tool{responsesTestTool{name: "ok_tool"}})))
-
-	result := thread.executeToolCall(context.Background(), "call-ok", "ok_tool", `{}`, &captureStreamHandler{})
-
-	require.False(t, result.IsError())
-	assert.Contains(t, result.AssistantFacing(), "ok")
-	structured := thread.GetStructuredToolResults()["call-ok"]
-	assert.Equal(t, "unknown", structured.ToolName)
-	assert.True(t, structured.Success)
-}
-
 func TestProcessStreamCompletesFunctionCallAndStoresToolOutput(t *testing.T) {
 	usage := map[string]any{
 		"input_tokens":  1,
@@ -255,6 +381,252 @@ func TestProcessStreamCompletesFunctionCallAndStoresToolOutput(t *testing.T) {
 	require.Len(t, thread.inputItems, 2)
 	require.NotNil(t, thread.inputItems[0].OfFunctionCall)
 	require.NotNil(t, thread.inputItems[1].OfFunctionCallOutput)
+	assert.Contains(t, thread.GetStructuredToolResults(), "call_1")
+}
+
+func TestProcessStreamExecutesFunctionCallsInParallelAndStreamsUpdates(t *testing.T) {
+	releaseFirst := make(chan struct{})
+	releaseSecond := make(chan struct{})
+	var releaseFirstOnce sync.Once
+	var releaseSecondOnce sync.Once
+	releaseFirstTool := func() { releaseFirstOnce.Do(func() { close(releaseFirst) }) }
+	releaseSecondTool := func() { releaseSecondOnce.Do(func() { close(releaseSecond) }) }
+	defer releaseFirstTool()
+	defer releaseSecondTool()
+
+	started := make(chan string, 2)
+	finished := make(chan string, 2)
+	handler := &parallelToolCaptureHandler{
+		updates: make(chan string, 2),
+		results: make(chan string, 2),
+	}
+	stream := responseStreamFromMaps(t, []map[string]any{
+		{
+			"type":         "response.output_item.done",
+			"output_index": 1,
+			"item": map[string]any{
+				"type":      "function_call",
+				"call_id":   "call_2",
+				"name":      "tool_2",
+				"arguments": `{}`,
+			},
+		},
+		{
+			"type":         "response.output_item.done",
+			"output_index": 0,
+			"item": map[string]any{
+				"type":      "function_call",
+				"call_id":   "call_1",
+				"name":      "tool_1",
+				"arguments": `{}`,
+			},
+		},
+		{
+			"type": "response.completed",
+			"response": map[string]any{
+				"id":     "resp_parallel",
+				"status": "completed",
+				"usage": map[string]any{
+					"input_tokens":  1,
+					"output_tokens": 1,
+					"input_tokens_details": map[string]any{
+						"cached_tokens": 0,
+					},
+				},
+			},
+		},
+	})
+
+	thread := &Thread{
+		Thread:      base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test"),
+		storedItems: make([]StoredInputItem, 0),
+		inputItems:  make([]responses.ResponseInputItemUnionParam, 0),
+	}
+	thread.SetState(tools.NewBasicState(context.Background(), tools.WithExtensionTools([]tooltypes.Tool{
+		streamingResponsesTestTool{name: "tool_1", started: started, finished: finished, release: releaseFirst},
+		streamingResponsesTestTool{name: "tool_2", started: started, finished: finished, release: releaseSecond},
+	})))
+
+	type processResult struct {
+		result processStreamResult
+		err    error
+	}
+	processDone := make(chan processResult, 1)
+	go func() {
+		result, err := thread.processStream(context.Background(), stream, handler, "gpt-5.5", llmtypes.MessageOpt{})
+		processDone <- processResult{result: result, err: err}
+	}()
+
+	startedTools := []string{receiveTestEvent(t, started), receiveTestEvent(t, started)}
+	assert.ElementsMatch(t, []string{"tool_1", "tool_2"}, startedTools)
+
+	updates := []string{receiveTestEvent(t, handler.updates), receiveTestEvent(t, handler.updates)}
+	assert.ElementsMatch(t, []string{"call_1:streaming tool_1", "call_2:streaming tool_2"}, updates)
+
+	releaseSecondTool()
+	assert.Equal(t, "tool_2", receiveTestEvent(t, finished))
+	assert.Equal(t, "call_2", receiveTestEvent(t, handler.results))
+	releaseFirstTool()
+	assert.Equal(t, "tool_1", receiveTestEvent(t, finished))
+	assert.Equal(t, "call_1", receiveTestEvent(t, handler.results))
+
+	var processed processResult
+	select {
+	case processed = <-processDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for stream processing")
+	}
+	require.NoError(t, processed.err)
+	assert.True(t, processed.result.toolsUsed)
+	assert.True(t, processed.result.responseCompleted)
+	require.Len(t, processed.result.serverKnownItems, 2)
+	assert.Equal(t, "call_1", processed.result.serverKnownItems[0].OfFunctionCall.CallID)
+	assert.Equal(t, "call_2", processed.result.serverKnownItems[1].OfFunctionCall.CallID)
+
+	toolUses, toolResults := handler.snapshot()
+	assert.Equal(t, []string{"call_1", "call_2"}, toolUses)
+	assert.Equal(t, []string{"call_2", "call_1"}, toolResults)
+
+	require.Len(t, thread.storedItems, 4)
+	assert.Equal(t, "function_call", thread.storedItems[0].Type)
+	assert.Equal(t, "call_1", thread.storedItems[0].CallID)
+	assert.Equal(t, "function_call", thread.storedItems[1].Type)
+	assert.Equal(t, "call_2", thread.storedItems[1].CallID)
+	assert.Equal(t, "function_call_output", thread.storedItems[2].Type)
+	assert.Equal(t, "call_1", thread.storedItems[2].CallID)
+	assert.Contains(t, thread.storedItems[2].Output, "done tool_1")
+	assert.Equal(t, "function_call_output", thread.storedItems[3].Type)
+	assert.Equal(t, "call_2", thread.storedItems[3].CallID)
+	assert.Contains(t, thread.storedItems[3].Output, "done tool_2")
+
+	require.Len(t, thread.inputItems, 4)
+	require.NotNil(t, thread.inputItems[0].OfFunctionCall)
+	require.NotNil(t, thread.inputItems[1].OfFunctionCall)
+	require.NotNil(t, thread.inputItems[2].OfFunctionCallOutput)
+	require.NotNil(t, thread.inputItems[3].OfFunctionCallOutput)
+	assert.Equal(t, "call_1", thread.inputItems[2].OfFunctionCallOutput.CallID)
+	assert.Equal(t, "call_2", thread.inputItems[3].OfFunctionCallOutput.CallID)
+
+	structuredResults := thread.GetStructuredToolResults()
+	assert.Contains(t, structuredResults, "call_1")
+	assert.Contains(t, structuredResults, "call_2")
+}
+
+func TestProcessStreamDoesNotExecuteQueuedFunctionCallsAfterCancellation(t *testing.T) {
+	executed := make(chan struct{}, 1)
+	stream := responseStreamFromMaps(t, []map[string]any{
+		{
+			"type":         "response.output_item.done",
+			"output_index": 0,
+			"item": map[string]any{
+				"type":      "function_call",
+				"call_id":   "call_cancelled",
+				"name":      "recording_tool",
+				"arguments": `{}`,
+			},
+		},
+		{
+			"type": "response.completed",
+			"response": map[string]any{
+				"id":     "resp_cancelled",
+				"status": "completed",
+				"usage": map[string]any{
+					"input_tokens":  1,
+					"output_tokens": 1,
+					"input_tokens_details": map[string]any{
+						"cached_tokens": 0,
+					},
+				},
+			},
+		},
+	})
+
+	thread := &Thread{
+		Thread:      base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test"),
+		storedItems: make([]StoredInputItem, 0),
+		inputItems:  make([]responses.ResponseInputItemUnionParam, 0),
+	}
+	thread.SetState(tools.NewBasicState(context.Background(), tools.WithExtensionTools([]tooltypes.Tool{
+		recordingResponsesTestTool{name: "recording_tool", executed: executed},
+	})))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	streamResult, err := thread.processStream(ctx, stream, &captureStreamHandler{}, "gpt-5.5", llmtypes.MessageOpt{})
+	require.ErrorIs(t, err, context.Canceled)
+	assert.True(t, streamResult.toolsUsed)
+	assert.True(t, streamResult.responseCompleted)
+	assert.Empty(t, streamResult.serverKnownItems)
+	assert.Empty(t, thread.inputItems)
+	assert.Empty(t, thread.storedItems)
+	assert.Empty(t, thread.GetStructuredToolResults())
+	select {
+	case <-executed:
+		t.Fatal("queued function call executed after cancellation")
+	default:
+	}
+}
+
+func TestProcessStreamRechecksCancellationBeforeEachFunctionCall(t *testing.T) {
+	executed := make(chan struct{}, 1)
+	stream := responseStreamFromMaps(t, []map[string]any{
+		{
+			"type":         "response.output_item.done",
+			"output_index": 0,
+			"item": map[string]any{
+				"type":      "function_call",
+				"call_id":   "call_cancelled_during_launch",
+				"name":      "recording_tool",
+				"arguments": `{}`,
+			},
+		},
+		{
+			"type": "response.completed",
+			"response": map[string]any{
+				"id":     "resp_cancelled_during_launch",
+				"status": "completed",
+				"usage": map[string]any{
+					"input_tokens":  1,
+					"output_tokens": 1,
+					"input_tokens_details": map[string]any{
+						"cached_tokens": 0,
+					},
+				},
+			},
+		},
+	})
+
+	thread := &Thread{
+		Thread:      base.NewThread(llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}, "test"),
+		storedItems: make([]StoredInputItem, 0),
+		inputItems:  make([]responses.ResponseInputItemUnionParam, 0),
+	}
+	thread.SetState(tools.NewBasicState(context.Background(), tools.WithExtensionTools([]tooltypes.Tool{
+		recordingResponsesTestTool{name: "recording_tool", executed: executed},
+	})))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	streamResult, err := thread.processStream(ctx, stream, &cancelOnToolUseHandler{cancel: cancel}, "gpt-5.5", llmtypes.MessageOpt{})
+	require.ErrorIs(t, err, context.Canceled)
+	assert.True(t, streamResult.toolsUsed)
+	assert.True(t, streamResult.responseCompleted)
+	require.Len(t, streamResult.serverKnownItems, 1)
+	require.Len(t, thread.inputItems, 2)
+	require.NotNil(t, thread.inputItems[0].OfFunctionCall)
+	require.NotNil(t, thread.inputItems[1].OfFunctionCallOutput)
+	require.Len(t, thread.storedItems, 2)
+	assert.Equal(t, "function_call", thread.storedItems[0].Type)
+	assert.Equal(t, "function_call_output", thread.storedItems[1].Type)
+	assert.Contains(t, thread.storedItems[1].Output, context.Canceled.Error())
+	structuredResult, ok := thread.GetStructuredToolResults()["call_cancelled_during_launch"]
+	require.True(t, ok)
+	assert.False(t, structuredResult.Success)
+	assert.Equal(t, "recording_tool", structuredResult.ToolName)
+	select {
+	case <-executed:
+		t.Fatal("function call executed after cancellation during launch")
+	default:
+	}
 }
 
 func TestProcessStreamThinkingEndsBeforeText(t *testing.T) {

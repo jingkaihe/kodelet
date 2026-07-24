@@ -33,8 +33,8 @@ func TestResponsesWebSocketContinuationUsesIncrementalClientItems(t *testing.T) 
 	currentParams := responseContinuationTestParams([]openairesponses.ResponseInputItemUnionParam{
 		user,
 		firstCall,
-		firstOutput,
 		secondCall,
+		firstOutput,
 		secondOutput,
 	})
 	prepared := continuation.prepare(currentParams, 7)

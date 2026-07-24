@@ -82,6 +82,84 @@ func TestApplyChatEventReplacesToolUpdateWithFinalResult(t *testing.T) {
 	assert.NotContains(t, tool.result, "partial")
 }
 
+func TestApplyChatEventTracksParallelSubagentUpdatesIndependently(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+
+	m.applyChatEvent(chat.ChatEvent{Kind: "tool-use", ToolCallID: "subagent-1", ToolName: "subagent", Input: `{"task":"first"}`})
+	m.applyChatEvent(chat.ChatEvent{Kind: "tool-use", ToolCallID: "subagent-2", ToolName: "subagent", Input: `{"task":"second"}`})
+	m.applyChatEvent(chat.ChatEvent{
+		Kind:       "tool-update",
+		ToolCallID: "subagent-2",
+		ToolName:   "subagent",
+		ToolResult: subagentTaskRunResult("Second task", "reviewing", 2, "running"),
+	})
+	m.applyChatEvent(chat.ChatEvent{
+		Kind:       "tool-update",
+		ToolCallID: "subagent-1",
+		ToolName:   "subagent",
+		ToolResult: subagentTaskRunResult("First task", "testing", 3, "running"),
+	})
+	m.applyChatEvent(chat.ChatEvent{
+		Kind:       "tool-result",
+		ToolCallID: "subagent-2",
+		ToolName:   "subagent",
+		ToolResult: subagentTaskRunResult("Second task complete", "", 4, "completed"),
+	})
+
+	require.Len(t, m.entries, 1)
+	require.Len(t, m.entries[0].blocks, 1)
+	require.Len(t, m.entries[0].blocks[0].tools, 2)
+
+	toolsByID := make(map[string]toolCall)
+	for _, tool := range m.entries[0].blocks[0].tools {
+		toolsByID[tool.id] = tool
+	}
+
+	first, ok := toolsByID["subagent-1"]
+	require.True(t, ok)
+	assert.False(t, first.done)
+	firstSnapshot, _, ok := tooltypes.ExtractTaskRunSnapshot(first.structured)
+	require.True(t, ok)
+	assert.Equal(t, "First task", firstSnapshot.Title)
+	assert.Equal(t, "testing", firstSnapshot.Detail)
+
+	second, ok := toolsByID["subagent-2"]
+	require.True(t, ok)
+	assert.True(t, second.done)
+	secondSnapshot, _, ok := tooltypes.ExtractTaskRunSnapshot(second.structured)
+	require.True(t, ok)
+	assert.Equal(t, "Second task complete", secondSnapshot.Title)
+	assert.Equal(t, "completed", secondSnapshot.Status)
+}
+
+func subagentTaskRunResult(title, detail string, revision int, status string) *tooltypes.StructuredToolResult {
+	phase := "working"
+	if status == "completed" {
+		phase = "completed"
+	}
+	return &tooltypes.StructuredToolResult{
+		ToolName: "subagent",
+		Success:  true,
+		Metadata: &tooltypes.ExtensionToolMetadata{
+			ExtensionID: "subagent",
+			ToolName:    "subagent",
+			Data: map[string]any{"taskRun": map[string]any{
+				"version":    1,
+				"revision":   revision,
+				"kind":       "subagent",
+				"status":     status,
+				"phase":      phase,
+				"title":      title,
+				"detail":     detail,
+				"elapsedMs":  1000,
+				"counts":     map[string]any{"succeeded": 1, "failed": 0, "running": 0},
+				"activities": []any{},
+			}},
+		},
+	}
+}
+
 func TestApplyChatEventPreservesWhitespaceOnlyTextDeltas(t *testing.T) {
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
@@ -312,6 +313,32 @@ func TestChatMessageHandler_HandleToolUpdateEmitsTransientSnapshot(t *testing.T)
 	assert.Equal(t, "tool-1", sink.events[0].ToolCallID)
 	if assert.NotNil(t, sink.events[0].ToolResult) {
 		assert.Equal(t, "bash", sink.events[0].ToolResult.ToolName)
+	}
+}
+
+func TestChatMessageHandlerSerializesParallelToolUpdates(t *testing.T) {
+	sink := &recordingChatSink{}
+	handler := &chatMessageHandler{
+		conversationID: "conv-123",
+		sink:           sink,
+	}
+
+	var wg sync.WaitGroup
+	for _, toolCallID := range []string{"subagent-1", "subagent-2"} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			handler.HandleToolUpdate(toolCallID, "subagent", tooltypes.BaseToolResult{Result: "running " + toolCallID})
+		}()
+	}
+	wg.Wait()
+
+	require.Len(t, sink.events, 2)
+	toolCallIDs := []string{sink.events[0].ToolCallID, sink.events[1].ToolCallID}
+	assert.ElementsMatch(t, []string{"subagent-1", "subagent-2"}, toolCallIDs)
+	for _, event := range sink.events {
+		assert.Equal(t, "tool-update", event.Kind)
+		assert.Equal(t, "subagent", event.ToolName)
 	}
 }
 

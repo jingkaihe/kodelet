@@ -3,7 +3,9 @@ package responses
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/avast/retry-go/v4"
@@ -50,6 +52,8 @@ func (t *Thread) processStream(
 
 	// Track pending tool calls
 	pendingToolCalls := make(map[string]*toolCallState)
+	var functionCalls []functionCallInvocation
+	var streamProcessingErr error
 
 	// Track completed response
 	var finalResponse *responses.Response
@@ -108,6 +112,7 @@ func (t *Thread) processStream(
 
 	// Process stream events
 	log.Debug("waiting for stream events")
+streamLoop:
 	for stream.Next() {
 		event := stream.Current()
 
@@ -264,54 +269,17 @@ func (t *Thread) processStream(
 				}
 
 				funcCall := item.AsFunctionCall()
-				handler.HandleToolUse(funcCall.CallID, funcCall.Name, funcCall.Arguments)
 
-				// Flush pending reasoning to storedItems before adding function call
+				// Flush pending reasoning before collecting the function call so replay
+				// preserves the reasoning-before-tools boundary.
 				flushPendingReasoning()
 
-				// Add to inputItems (for API) and storedItems (for persistence).
-				// The function call itself is already present in the server's response
-				// state; only its locally produced output is incremental input.
-				functionCallItem := responses.ResponseInputItemUnionParam{
-					OfFunctionCall: &responses.ResponseFunctionToolCallParam{
-						CallID:    funcCall.CallID,
-						Name:      funcCall.Name,
-						Arguments: funcCall.Arguments,
-					},
-				}
-				t.inputItems = append(t.inputItems, functionCallItem)
-				serverKnownItems = append(serverKnownItems, functionCallItem)
-				t.storedItems = append(t.storedItems, StoredInputItem{
-					Type:      "function_call",
-					CallID:    funcCall.CallID,
-					Name:      funcCall.Name,
-					Arguments: funcCall.Arguments,
+				functionCalls = append(functionCalls, functionCallInvocation{
+					outputIndex: event.OutputIndex,
+					callID:      funcCall.CallID,
+					name:        funcCall.Name,
+					arguments:   funcCall.Arguments,
 				})
-
-				// Execute the tool
-				result := t.executeToolCall(ctx, funcCall.CallID, funcCall.Name, funcCall.Arguments, handler)
-
-				// Get the representation for API response
-				outputUnion, storedOutput, rawOutput := buildStoredFunctionCallOutput(result)
-
-				// Create tool result item
-				toolResultItem := responses.ResponseInputItemUnionParam{
-					OfFunctionCallOutput: &responses.ResponseInputItemFunctionCallOutputParam{
-						CallID: funcCall.CallID,
-						Output: outputUnion,
-					},
-				}
-
-				// Add the tool result to inputItems and storedItems
-				t.inputItems = append(t.inputItems, toolResultItem)
-				t.storedItems = append(t.storedItems, StoredInputItem{
-					Type:      "function_call_output",
-					CallID:    funcCall.CallID,
-					Output:    storedOutput,
-					RawOutput: rawOutput,
-				})
-
-				handler.HandleToolResult(funcCall.CallID, funcCall.Name, result)
 
 			case "message":
 				// Complete message - add to input items if assistant
@@ -388,9 +356,11 @@ func (t *Thread) processStream(
 			// Handle errors
 			errMsg := responseStreamEventErrorMessage(event)
 			if !isRetryableResponseStreamEventError(event) {
-				return result(), retry.Unrecoverable(errors.New(errMsg))
+				streamProcessingErr = retry.Unrecoverable(errors.New(errMsg))
+			} else {
+				streamProcessingErr = errors.New(errMsg)
 			}
-			return result(), errors.New(errMsg)
+			break streamLoop
 
 		case "response.in_progress", "response.queued":
 			// Status updates - no action needed
@@ -399,7 +369,7 @@ func (t *Thread) processStream(
 	}
 
 	// Check for stream errors
-	if err := stream.Err(); err != nil {
+	if err := stream.Err(); streamProcessingErr == nil && err != nil {
 		// Log detailed error information for debugging API failures
 		var apiErr *openai.Error
 		if errors.As(err, &apiErr) {
@@ -411,7 +381,66 @@ func (t *Thread) processStream(
 				WithField("raw_json", apiErr.RawJSON()).
 				Debug("API error details")
 		}
-		return result(), errors.Wrap(err, "stream error")
+		streamProcessingErr = errors.Wrap(err, "stream error")
+	}
+	if err := ctx.Err(); err != nil {
+		streamProcessingErr = err
+	}
+	if errors.Is(streamProcessingErr, context.Canceled) || errors.Is(streamProcessingErr, context.DeadlineExceeded) {
+		return result(), streamProcessingErr
+	}
+
+	sort.SliceStable(functionCalls, func(i, j int) bool {
+		return functionCalls[i].outputIndex < functionCalls[j].outputIndex
+	})
+	for _, functionCall := range functionCalls {
+		handler.HandleToolUse(functionCall.callID, functionCall.name, functionCall.arguments)
+
+		// The function call itself is already present in the server's response
+		// state; only its locally produced output is incremental input.
+		functionCallItem := responses.ResponseInputItemUnionParam{
+			OfFunctionCall: &responses.ResponseFunctionToolCallParam{
+				CallID:    functionCall.callID,
+				Name:      functionCall.name,
+				Arguments: functionCall.arguments,
+			},
+		}
+		t.inputItems = append(t.inputItems, functionCallItem)
+		serverKnownItems = append(serverKnownItems, functionCallItem)
+		t.storedItems = append(t.storedItems, StoredInputItem{
+			Type:      "function_call",
+			CallID:    functionCall.callID,
+			Name:      functionCall.name,
+			Arguments: functionCall.arguments,
+		})
+	}
+
+	toolExecutions := t.executeFunctionCallsParallel(ctx, functionCalls, handler)
+	for i, toolExecution := range toolExecutions {
+		functionCall := functionCalls[i]
+		toolResult := toolExecution.Result
+		t.SetStructuredToolResult(functionCall.callID, toolExecution.StructuredResult)
+
+		outputUnion, storedOutput, rawOutput := buildStoredFunctionCallOutput(toolResult)
+		t.inputItems = append(t.inputItems, responses.ResponseInputItemUnionParam{
+			OfFunctionCallOutput: &responses.ResponseInputItemFunctionCallOutputParam{
+				CallID: functionCall.callID,
+				Output: outputUnion,
+			},
+		})
+		t.storedItems = append(t.storedItems, StoredInputItem{
+			Type:      "function_call_output",
+			CallID:    functionCall.callID,
+			Output:    storedOutput,
+			RawOutput: rawOutput,
+		})
+	}
+	if err := ctx.Err(); err != nil {
+		return result(), err
+	}
+
+	if streamProcessingErr != nil {
+		return result(), streamProcessingErr
 	}
 
 	// Update usage from final response
@@ -442,6 +471,13 @@ type processStreamResult struct {
 	responseCompleted bool
 	responseID        string
 	serverKnownItems  []responses.ResponseInputItemUnionParam
+}
+
+type functionCallInvocation struct {
+	outputIndex int64
+	callID      string
+	name        string
+	arguments   string
 }
 
 func responseStreamEventErrorMessage(event responses.ResponseStreamEventUnion) string {
@@ -579,27 +615,71 @@ func responseFunctionCallOutputItems(parts []tooltypes.ToolResultContentPart) re
 	return result
 }
 
-// executeToolCall executes a tool call and returns the result.
-func (t *Thread) executeToolCall(
+// executeFunctionCallsParallel executes a response's function calls concurrently,
+// streams results as they complete, and returns them in response order.
+func (t *Thread) executeFunctionCallsParallel(
 	ctx context.Context,
-	callID string,
-	name string,
-	arguments string,
+	functionCalls []functionCallInvocation,
 	handler llmtypes.MessageHandler,
-) tooltypes.ToolResult {
-	toolExecution := base.ExecuteToolWithHandler(
-		ctx,
-		t,
-		t.State,
-		t.RendererRegistry,
-		name,
-		arguments,
-		callID,
-		handler,
-	)
+) []base.ToolExecution {
+	toolExecutions := make([]base.ToolExecution, len(functionCalls))
+	type completedToolExecution struct {
+		index     int
+		execution base.ToolExecution
+	}
+	completed := make(chan completedToolExecution, len(functionCalls))
 
-	t.SetStructuredToolResult(callID, toolExecution.StructuredResult)
-	return toolExecution.Result
+	var wg sync.WaitGroup
+	wg.Add(len(functionCalls))
+
+	for i, functionCall := range functionCalls {
+		go func() {
+			defer wg.Done()
+
+			if err := ctx.Err(); err != nil {
+				toolResult := tooltypes.BaseToolResult{Error: err.Error()}
+				structuredResult := toolResult.StructuredData()
+				structuredResult.ToolName = functionCall.name
+				completed <- completedToolExecution{
+					index: i,
+					execution: base.ToolExecution{
+						Input:            functionCall.arguments,
+						Result:           toolResult,
+						StructuredResult: structuredResult,
+						RenderedOutput:   t.RendererRegistry.Render(structuredResult),
+					},
+				}
+				return
+			}
+
+			completed <- completedToolExecution{
+				index: i,
+				execution: base.ExecuteToolWithHandler(
+					ctx,
+					t,
+					t.State,
+					t.RendererRegistry,
+					functionCall.name,
+					functionCall.arguments,
+					functionCall.callID,
+					handler,
+				),
+			}
+		}()
+	}
+
+	go func() {
+		wg.Wait()
+		close(completed)
+	}()
+
+	for result := range completed {
+		toolExecutions[result.index] = result.execution
+		functionCall := functionCalls[result.index]
+		handler.HandleToolResult(functionCall.callID, functionCall.name, result.execution.Result)
+	}
+
+	return toolExecutions
 }
 
 // updateUsage updates the thread's usage statistics from a response.
