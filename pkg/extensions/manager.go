@@ -22,7 +22,9 @@ type RuntimeManager struct {
 
 // NewRuntimeManager creates a persistent extension runtime manager.
 func NewRuntimeManager() *RuntimeManager {
-	return newRuntimeManager(NewRuntimeFromViper)
+	return newRuntimeManager(func(ctx context.Context, cwd string) (*Runtime, error) {
+		return newRuntimeFromViper(ctx, cwd, false)
+	})
 }
 
 func newRuntimeManager(factory runtimeFactory) *RuntimeManager {
@@ -34,6 +36,15 @@ func newRuntimeManager(factory runtimeFactory) *RuntimeManager {
 
 // Runtime returns the runtime associated with cwd, creating it on first use.
 func (m *RuntimeManager) Runtime(ctx context.Context, cwd string) (*Runtime, error) {
+	return m.runtime(ctx, cwd, true)
+}
+
+// RuntimeForCommandDiscovery returns a cached runtime without starting session lifecycle events.
+func (m *RuntimeManager) RuntimeForCommandDiscovery(ctx context.Context, cwd string) (*Runtime, error) {
+	return m.runtime(ctx, cwd, false)
+}
+
+func (m *RuntimeManager) runtime(ctx context.Context, cwd string, startLifecycle bool) (*Runtime, error) {
 	if m == nil {
 		return NewRuntimeFromViper(ctx, cwd)
 	}
@@ -44,19 +55,22 @@ func (m *RuntimeManager) Runtime(ctx context.Context, cwd string) (*Runtime, err
 	if m.closed {
 		return nil, errors.New("extension runtime manager is closed")
 	}
-	if runtime, ok := m.runtimes[key]; ok {
-		return runtime, nil
+	runtime := m.runtimes[key]
+	if runtime == nil {
+		var err error
+		runtime, err = m.newRuntime(ctx, cwd)
+		if err != nil {
+			return nil, err
+		}
+		if err := ctx.Err(); err != nil {
+			_ = runtime.Close()
+			return nil, err
+		}
+		m.runtimes[key] = runtime
 	}
-
-	runtime, err := m.newRuntime(ctx, cwd)
-	if err != nil {
-		return nil, err
+	if startLifecycle {
+		runtime.startLifecycle(ctx)
 	}
-	if err := ctx.Err(); err != nil {
-		_ = runtime.Close()
-		return nil, err
-	}
-	m.runtimes[key] = runtime
 	return runtime, nil
 }
 

@@ -22,6 +22,7 @@ type Runtime struct {
 	commands            []Command
 	subs                []Subscription
 	eventHandlersByName map[string][]eventHandler
+	lifecycleStarted    bool
 }
 
 // Command is an extension command registration bound to its process.
@@ -44,6 +45,10 @@ func EmptyRuntime() *Runtime {
 
 // NewRuntime creates and initializes an extension runtime.
 func NewRuntime(ctx context.Context, opts ...DiscoveryOption) (*Runtime, error) {
+	return newRuntime(ctx, true, opts...)
+}
+
+func newRuntime(ctx context.Context, startLifecycle bool, opts ...DiscoveryOption) (*Runtime, error) {
 	discovery, err := NewDiscovery(opts...)
 	if err != nil {
 		return nil, err
@@ -55,13 +60,20 @@ func NewRuntime(ctx context.Context, opts ...DiscoveryOption) (*Runtime, error) 
 		_ = r.Close()
 		return nil, err
 	}
+	if startLifecycle {
+		r.startLifecycle(ctx)
+	}
 	return r, nil
 }
 
 // NewRuntimeFromViper creates a runtime from viper config.
 func NewRuntimeFromViper(ctx context.Context, workingDir string) (*Runtime, error) {
+	return newRuntimeFromViper(ctx, workingDir, true)
+}
+
+func newRuntimeFromViper(ctx context.Context, workingDir string, startLifecycle bool) (*Runtime, error) {
 	config := LoadConfigFromViper()
-	return NewRuntime(ctx, WithConfig(config), WithWorkingDir(workingDir))
+	return newRuntime(ctx, startLifecycle, WithConfig(config), WithWorkingDir(workingDir))
 }
 
 func (r *Runtime) initialize(ctx context.Context, discovery *Discovery) error {
@@ -91,10 +103,21 @@ func (r *Runtime) initialize(ctx context.Context, discovery *Discovery) error {
 			return err
 		}
 	}
+	return nil
+}
+
+func (r *Runtime) startLifecycle(ctx context.Context) {
+	r.mu.Lock()
+	if r.lifecycleStarted {
+		r.mu.Unlock()
+		return
+	}
+	r.lifecycleStarted = true
+	r.mu.Unlock()
+
 	callContext := ExtensionCallContext{CWD: r.workingDir, InvokedBy: "main"}
 	r.DispatchSessionStart(ctx, callContext)
 	r.DispatchResourcesDiscover(ctx, callContext)
-	return nil
 }
 
 func (r *Runtime) register(_ context.Context, proc *Process, result *InitializeResult) error {
@@ -239,7 +262,13 @@ func (r *Runtime) Close() error {
 	if r == nil {
 		return nil
 	}
-	r.DispatchSessionEnd(context.Background(), ExtensionCallContext{CWD: r.workingDir, InvokedBy: "main"})
+	r.mu.Lock()
+	lifecycleStarted := r.lifecycleStarted
+	r.lifecycleStarted = false
+	r.mu.Unlock()
+	if lifecycleStarted {
+		r.DispatchSessionEnd(context.Background(), ExtensionCallContext{CWD: r.workingDir, InvokedBy: "main"})
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var firstErr error

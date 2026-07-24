@@ -1461,7 +1461,7 @@ await ctx.ui.setWidget("build-status", ["Build complete"], { placement: "belowCo
 await ctx.ui.setWidget("build-status", undefined);
 ```
 
-Interactive surfaces are terminal-cell overlays with fixed or percentage sizing, nine anchors, offsets, margins, keyboard focus, and relative mouse coordinates. The returned handle receives host input/resize notifications and sends replace-in-place frame snapshots. Surface handles remain valid after the opening handler returns.
+Interactive surfaces are terminal-cell overlays with fixed or percentage sizing, nine anchors, offsets, margins, keyboard focus, and relative mouse coordinates. The returned handle receives host input/resize notifications and sends replace-in-place frame snapshots. Surface handles remain valid after the opening handler returns. The SDK allows only one opening, active, or closing surface handle per ID; await `surface.close()` before reusing that ID.
 
 ```typescript
 const surface = await ctx.ui.openSurface({

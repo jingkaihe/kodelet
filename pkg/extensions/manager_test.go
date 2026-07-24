@@ -2,7 +2,9 @@ package extensions
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -55,6 +57,61 @@ func TestRuntimeManagerCreatesOneRuntimeForConcurrentCallers(t *testing.T) {
 		assert.Same(t, runtimes[0], runtimes[i])
 	}
 	assert.Equal(t, 1, calls)
+}
+
+func TestRuntimeManagerDefersLifecycleUntilRuntimeUse(t *testing.T) {
+	var calls int
+	manager := newRuntimeManager(func(_ context.Context, _ string) (*Runtime, error) {
+		calls++
+		return EmptyRuntime(), nil
+	})
+	t.Cleanup(func() { assert.NoError(t, manager.Close()) })
+
+	discovered, err := manager.RuntimeForCommandDiscovery(context.Background(), "/workspace")
+	require.NoError(t, err)
+	assert.False(t, discovered.lifecycleStarted)
+
+	active, err := manager.Runtime(context.Background(), "/workspace")
+	require.NoError(t, err)
+	assert.Same(t, discovered, active)
+	assert.True(t, active.lifecycleStarted)
+	assert.Equal(t, 1, calls)
+}
+
+func TestRuntimeManagerDiscoveryCachesCommandsBeforeLifecycle(t *testing.T) {
+	rootDir := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	statePath := filepath.Join(rootDir, "events.log")
+	extDir := filepath.Join(rootDir, "events")
+	writeExecutable(t, filepath.Join(extDir, "kodelet-extension-events"), helperExtensionScript(t))
+	manager := newRuntimeManager(func(ctx context.Context, _ string) (*Runtime, error) {
+		return newRuntime(
+			ctx,
+			false,
+			WithConfig(DefaultConfig()),
+			WithWorkingDir(rootDir),
+			WithRoots(Root{Dir: rootDir, Kind: SourceKindLocalStandalone}),
+		)
+	})
+	t.Cleanup(func() { assert.NoError(t, manager.Close()) })
+
+	discovered, err := manager.RuntimeForCommandDiscovery(context.Background(), rootDir)
+	require.NoError(t, err)
+	assert.NotEmpty(t, discovered.SlashCommands())
+	_, err = os.ReadFile(statePath)
+	assert.ErrorIs(t, err, os.ErrNotExist)
+
+	runCtx := ContextWithUIInputBroker(context.Background(), staticUIInputBroker{value: "ready"})
+	active, err := manager.Runtime(runCtx, rootDir)
+	require.NoError(t, err)
+	assert.Same(t, discovered, active)
+	_, err = manager.Runtime(runCtx, rootDir)
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(statePath)
+	require.NoError(t, err)
+	assert.Equal(t, 1, strings.Count(string(data), EventSessionStart+"\n"))
+	assert.Equal(t, 1, strings.Count(string(data), EventResourcesDiscover+"\n"))
 }
 
 func TestRuntimeManagerDoesNotCacheCreationFailures(t *testing.T) {

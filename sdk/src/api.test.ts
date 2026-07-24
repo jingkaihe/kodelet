@@ -464,6 +464,54 @@ test("widgets use sequences and surfaces coalesce frames and route host events",
   });
 });
 
+test("surface IDs reject overlapping ownership until the active handle closes", async () => {
+  let openedSurface: any;
+  let releaseFirstOpen: ((response: { accepted: boolean }) => void) | undefined;
+  let openRequests = 0;
+  const requests: Array<{ method: string; params?: unknown }> = [];
+  const host = {
+    async request(method: string, params?: unknown) {
+      requests.push({ method, params });
+      if (method === "kodelet.ui.surface.open" && openRequests++ === 0) {
+        return await new Promise<{ accepted: boolean }>((resolve) => {
+          releaseFirstOpen = resolve;
+        });
+      }
+      return { accepted: true };
+    },
+  };
+  const extension = defineExtension((ext) => {
+    ext.registerCommand({
+      name: "exclusive-surface",
+      description: "Enforce exclusive surface IDs",
+      async execute(_input, ctx) {
+        const firstOpen = ctx.ui.openSurface({ id: "singleton" });
+        await assert.rejects(ctx.ui.openSurface({ id: "singleton" }), /already open, opening, or closing/);
+        releaseFirstOpen?.({ accepted: true });
+        openedSurface = await firstOpen;
+        await assert.rejects(ctx.ui.openSurface({ id: "singleton" }), /already open, opening, or closing/);
+        await openedSurface.close();
+        openedSurface = await ctx.ui.openSurface({ id: "singleton" });
+        return { action: "respond", response: "opened" };
+      },
+    });
+  });
+
+  const harness = await createTestHarness(extension, host);
+  harness.initialize({ capabilities: { ui: { surfaces: true } } });
+  await harness.executeCommand({
+    name: "exclusive-surface",
+    invocation: { raw: "/exclusive-surface", commandName: "exclusive-surface", args: [], flags: {} },
+  });
+
+  assert.deepEqual(
+    requests.map((request) => request.method),
+    ["kodelet.ui.surface.open", "kodelet.ui.surface.close", "kodelet.ui.surface.open"],
+  );
+  await openedSurface.close();
+  assert.equal(requests.at(-1)?.method, "kodelet.ui.surface.close");
+});
+
 test("surface presentation keeps at most one frame in flight and one latest pending frame", async () => {
   let openedSurface: any;
   const notifications: Array<{ method: string; params?: unknown }> = [];

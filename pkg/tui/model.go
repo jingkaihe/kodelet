@@ -205,9 +205,9 @@ func loadExtensionSlashCommands(ctx context.Context, cwd string) tea.Cmd {
 	return loadExtensionSlashCommandsWithRuntime(ctx, cwd, nil)
 }
 
-func loadExtensionSlashCommandsWithRuntime(ctx context.Context, cwd string, runtimeProvider chat.ExtensionRuntimeProvider) tea.Cmd {
+func loadExtensionSlashCommandsWithRuntime(ctx context.Context, cwd string, runtimeManager *extensions.RuntimeManager) tea.Cmd {
 	return func() tea.Msg {
-		commands, err := listExtensionSlashCommandsWithRuntime(ctx, cwd, runtimeProvider)
+		commands, err := listExtensionSlashCommandsWithRuntime(ctx, cwd, runtimeManager)
 		return slashCommandsMsg{cwd: strings.TrimSpace(cwd), commands: commands, extensionsOnly: true, err: err}
 	}
 }
@@ -242,15 +242,15 @@ func listExtensionSlashCommands(ctx context.Context, cwd string) ([]slashcommand
 	return listExtensionSlashCommandsWithRuntime(ctx, cwd, nil)
 }
 
-func listExtensionSlashCommandsWithRuntime(ctx context.Context, cwd string, runtimeProvider chat.ExtensionRuntimeProvider) ([]slashcommands.Command, error) {
+func listExtensionSlashCommandsWithRuntime(ctx context.Context, cwd string, runtimeManager *extensions.RuntimeManager) ([]slashcommands.Command, error) {
 	resolvedCWD, err := resolveSlashCommandCWD(cwd)
 	if err != nil {
 		return nil, err
 	}
 
 	var extensionRuntime *extensions.Runtime
-	if runtimeProvider != nil {
-		extensionRuntime, err = runtimeProvider.Runtime(ctx, resolvedCWD)
+	if runtimeManager != nil {
+		extensionRuntime, err = runtimeManager.RuntimeForCommandDiscovery(ctx, resolvedCWD)
 	} else {
 		extensionRuntime, err = extensions.NewRuntimeFromViper(ctx, resolvedCWD)
 	}
@@ -260,7 +260,7 @@ func listExtensionSlashCommandsWithRuntime(ctx context.Context, cwd string, runt
 	if extensionRuntime == nil {
 		return nil, nil
 	}
-	if runtimeProvider == nil {
+	if runtimeManager == nil {
 		defer func() { _ = extensionRuntime.Close() }()
 	}
 

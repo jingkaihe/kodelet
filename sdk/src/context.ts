@@ -313,7 +313,9 @@ function createSharedContext(
         const activeSurfaces = surfacesForClient(persistentClient);
         const existing = activeSurfaces.get(id);
         if (existing) {
-          await existing.close();
+          throw new Error(
+            `Interactive surface "${id}" is already open, opening, or closing; close it before reusing the ID`,
+          );
         }
         const surface = new UISurfaceHandle(id, persistentClient);
         activeSurfaces.set(id, surface);
@@ -396,9 +398,15 @@ class UISurfaceHandle implements UISurface {
     this.pendingFocusEvent = undefined;
     this.resizeHandlers.clear();
     this.pendingResizeEvent = undefined;
-    surfacesForClient(this.client).delete(this.id);
-    if (this.active) {
-      await this.client.request("kodelet.ui.surface.close", { id: this.id, sequence: this.nextSequence() });
+    const activeSurfaces = surfacesForClient(this.client);
+    try {
+      if (this.active) {
+        await this.client.request("kodelet.ui.surface.close", { id: this.id, sequence: this.nextSequence() });
+      }
+    } finally {
+      if (activeSurfaces.get(this.id) === this) {
+        activeSurfaces.delete(this.id);
+      }
     }
   }
 
