@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"math"
 	"strconv"
 	"strings"
 
@@ -136,7 +137,7 @@ func (v *UISizeValue) UnmarshalJSON(data []byte) error {
 			return errors.Errorf("invalid surface size %q", value)
 		}
 		parsed, err := strconv.ParseFloat(strings.TrimSpace(percent), 64)
-		if err != nil || parsed <= 0 || parsed > 100 {
+		if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) || parsed <= 0 || parsed > 100 {
 			return errors.Errorf("invalid surface percentage %q", value)
 		}
 		*v = UISizeValue{Percent: parsed, Set: true}
@@ -264,6 +265,33 @@ type UISurfaceResizeNotification struct {
 type UIExtensionSource interface {
 	ExtensionUIOwner() UIExtensionOwner
 	NotifyExtensionUI(ctx context.Context, method string, params any) error
+}
+
+// PrepareUISurfaceEventLifecycle resets ordered event delivery after a surface
+// lifecycle request has been accepted and before the host publishes its UI changes.
+func PrepareUISurfaceEventLifecycle(source UIExtensionSource, id string, lifecycle uint64) {
+	if source == nil || lifecycle == 0 {
+		return
+	}
+	if lifecycleSource, ok := source.(interface {
+		PrepareUISurfaceEventLifecycle(string, uint64)
+	}); ok {
+		lifecycleSource.PrepareUISurfaceEventLifecycle(id, lifecycle)
+	}
+}
+
+// NotifyUISurfaceEvent delivers an event within a specific surface lifecycle.
+// Sources without lifecycle-aware routing retain the base UIExtensionSource behavior.
+func NotifyUISurfaceEvent(ctx context.Context, source UIExtensionSource, lifecycle uint64, method string, params any) error {
+	if source == nil {
+		return errors.New("extension UI source is required")
+	}
+	if lifecycleSource, ok := source.(interface {
+		NotifyExtensionUISurfaceEvent(context.Context, uint64, string, any) error
+	}); ok {
+		return lifecycleSource.NotifyExtensionUISurfaceEvent(ctx, lifecycle, method, params)
+	}
+	return source.NotifyExtensionUI(ctx, method, params)
 }
 
 // ExtensionUIHost owns extension widgets and interactive surfaces for an

@@ -350,6 +350,7 @@ class UISurfaceHandle implements UISurface {
   private inputHandlers = new Set<(event: UISurfaceInputEvent) => void>();
   private pendingFocusEvent: UISurfaceInputEvent | undefined;
   private resizeHandlers = new Set<(event: UISurfaceResizeEvent) => void>();
+  private pendingResizeEvent: UISurfaceResizeEvent | undefined;
   private currentSize: { width: number; height: number } | undefined;
 
   constructor(readonly id: string, private readonly client: HostRPCClient) {}
@@ -394,6 +395,7 @@ class UISurfaceHandle implements UISurface {
     this.inputHandlers.clear();
     this.pendingFocusEvent = undefined;
     this.resizeHandlers.clear();
+    this.pendingResizeEvent = undefined;
     surfacesForClient(this.client).delete(this.id);
     if (this.active) {
       await this.client.request("kodelet.ui.surface.close", { id: this.id, sequence: this.nextSequence() });
@@ -412,6 +414,11 @@ class UISurfaceHandle implements UISurface {
 
   onResize(handler: (event: UISurfaceResizeEvent) => void): () => void {
     this.resizeHandlers.add(handler);
+    const pendingResizeEvent = this.pendingResizeEvent;
+    this.pendingResizeEvent = undefined;
+    if (pendingResizeEvent) {
+      handler(pendingResizeEvent);
+    }
     return () => this.resizeHandlers.delete(handler);
   }
 
@@ -438,6 +445,10 @@ class UISurfaceHandle implements UISurface {
     if (method === "extension.ui.surface.resize" && typeof params.width === "number" && typeof params.height === "number") {
       const event: UISurfaceResizeEvent = { sequence: params.sequence, width: params.width, height: params.height };
       this.currentSize = { width: event.width, height: event.height };
+      if (this.resizeHandlers.size === 0) {
+        this.pendingResizeEvent = this.active ? undefined : event;
+        return;
+      }
       for (const handler of this.resizeHandlers) {
         handler(event);
       }

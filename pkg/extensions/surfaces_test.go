@@ -60,7 +60,10 @@ func (*recordingExtensionUIHost) RemoveWidget(context.Context, UIExtensionSource
 	return UIFrameResponse{}, nil
 }
 
-func (h *recordingExtensionUIHost) OpenSurface(context.Context, UIExtensionSource, UISurfaceOpenRequest) (UIFrameResponse, error) {
+func (h *recordingExtensionUIHost) OpenSurface(_ context.Context, source UIExtensionSource, request UISurfaceOpenRequest) (UIFrameResponse, error) {
+	if h.openResponse.Accepted {
+		PrepareUISurfaceEventLifecycle(source, request.ID, request.Frame.Sequence)
+	}
 	return h.openResponse, nil
 }
 
@@ -68,7 +71,10 @@ func (*recordingExtensionUIHost) UpdateSurface(context.Context, UIExtensionSourc
 	return UIFrameResponse{}, nil
 }
 
-func (h *recordingExtensionUIHost) CloseSurface(context.Context, UIExtensionSource, UISurfaceCloseRequest) (UIFrameResponse, error) {
+func (h *recordingExtensionUIHost) CloseSurface(_ context.Context, source UIExtensionSource, request UISurfaceCloseRequest) (UIFrameResponse, error) {
+	if h.closeResponse.Accepted {
+		PrepareUISurfaceEventLifecycle(source, request.ID, request.Sequence)
+	}
 	return h.closeResponse, nil
 }
 
@@ -314,7 +320,28 @@ func TestProcessExtensionUISourceOrdersHostEventsBySequence(t *testing.T) {
 	assert.Equal(t, []uint64{1, 2}, sequences)
 }
 
-func TestProcessResetsSurfaceEventSequenceOnlyAfterAcceptedLifecycleRequest(t *testing.T) {
+func TestProcessExtensionUISourceDropsEventsFromPriorSurfaceLifecycle(t *testing.T) {
+	client := newRPCClient(strings.NewReader(""), ioDiscard{})
+	process := &Process{Extension: Extension{ID: "game"}, client: client, generation: 1}
+	source := &processExtensionUISource{
+		process: process,
+		client:  client,
+		owner:   UIExtensionOwner{ExtensionID: "game", Generation: 1},
+	}
+	process.uiSource = source
+	source.PrepareUISurfaceEventLifecycle("surface", 2)
+
+	require.NoError(t, source.NotifyExtensionUISurfaceEvent(context.Background(), 1, UISurfaceInputMethod, UISurfaceInputNotification{
+		ID: "surface", Sequence: 1, Kind: UISurfaceInputKey, Key: "stale",
+	}))
+
+	source.notifyMu.Lock()
+	_, exists := source.notify["surface"]
+	source.notifyMu.Unlock()
+	assert.False(t, exists)
+}
+
+func TestProcessSurfaceLifecycleOnlyResetsEventSequenceAfterHostAcceptance(t *testing.T) {
 	tests := []struct {
 		name   string
 		method string
@@ -370,7 +397,7 @@ func TestUISizeValueSupportsCellsAndPercentages(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(`"75%"`), &percentage))
 	assert.Equal(t, UISizeValue{Percent: 75, Set: true}, percentage)
 
-	for _, input := range []string{`0`, `"0%"`, `"101%"`, `"wide"`} {
+	for _, input := range []string{`0`, `"0%"`, `"101%"`, `"NaN%"`, `"Inf%"`, `"-Inf%"`, `"wide"`} {
 		var value UISizeValue
 		require.Error(t, json.Unmarshal([]byte(input), &value), input)
 	}

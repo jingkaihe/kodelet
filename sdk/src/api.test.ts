@@ -530,7 +530,9 @@ test("surface presentation keeps at most one frame in flight and one latest pend
 test("surface routing retains initial events until open listeners attach", async () => {
   let openedSurface: any;
   let unsubscribeInput: (() => void) | undefined;
+  let unsubscribeResize: (() => void) | undefined;
   const inputEvents: unknown[] = [];
+  const resizeEvents: unknown[] = [];
   const notificationHandlers = new Set<(method: string, params: unknown) => void>();
   const host = {
     async request(method: string) {
@@ -560,6 +562,7 @@ test("surface routing retains initial events until open listeners attach", async
       description: "Open a surface that receives an immediate resize",
       async execute(_input, ctx) {
         openedSurface = await ctx.ui.openSurface({ id: "early" });
+        unsubscribeResize = openedSurface.onResize((event: unknown) => resizeEvents.push(event));
         unsubscribeInput = openedSurface.onInput((event: unknown) => inputEvents.push(event));
         return { action: "respond", response: "opened" };
       },
@@ -574,17 +577,23 @@ test("surface routing retains initial events until open listeners attach", async
   });
 
   assert.deepEqual(openedSurface.size, { width: 72, height: 18 });
+  assert.deepEqual(resizeEvents, [{ sequence: 1, width: 72, height: 18 }]);
   assert.deepEqual(inputEvents, [{ id: "early", sequence: 3, kind: "focus" }]);
+  unsubscribeResize?.();
   unsubscribeInput?.();
   for (const handler of notificationHandlers) {
     for (let sequence = 5; sequence < 25; sequence++) {
       handler("extension.ui.surface.input", { id: "early", sequence, kind: "key", key: "x", text: "x" });
     }
     handler("extension.ui.surface.input", { id: "early", sequence: 25, kind: "blur" });
+    handler("extension.ui.surface.resize", { id: "early", sequence: 26, width: 73, height: 19 });
   }
   const replayedEvents: unknown[] = [];
   openedSurface.onInput((event: unknown) => replayedEvents.push(event));
   assert.deepEqual(replayedEvents, []);
+  const replayedResizeEvents: unknown[] = [];
+  openedSurface.onResize((event: unknown) => replayedResizeEvents.push(event));
+  assert.deepEqual(replayedResizeEvents, []);
   await openedSurface.close();
 });
 

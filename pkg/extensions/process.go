@@ -472,11 +472,7 @@ func (p *Process) handleRPCRequest(ctx context.Context, source UIExtensionSource
 			return nil, &rpcError{Code: -32602, Message: err.Error()}
 		}
 		return p.handleExtensionUIRequest(func(host ExtensionUIHost) (UIFrameResponse, error) {
-			response, err := host.OpenSurface(ctx, source, request)
-			if err == nil && response.Accepted {
-				resetExtensionUIEventSequence(source, request.ID)
-			}
-			return response, err
+			return host.OpenSurface(ctx, source, request)
 		})
 	case UISurfaceFrameMethod:
 		var request UISurfaceFrameRequest
@@ -492,11 +488,7 @@ func (p *Process) handleRPCRequest(ctx context.Context, source UIExtensionSource
 			return nil, &rpcError{Code: -32602, Message: err.Error()}
 		}
 		return p.handleExtensionUIRequest(func(host ExtensionUIHost) (UIFrameResponse, error) {
-			response, err := host.CloseSurface(ctx, source, request)
-			if err == nil && response.Accepted {
-				resetExtensionUIEventSequence(source, request.ID)
-			}
-			return response, err
+			return host.CloseSurface(ctx, source, request)
 		})
 	case "kodelet.ui.input":
 		var request UIInputRequest
@@ -654,11 +646,12 @@ func (p *Process) rpcSession() (*rpcClient, *processExtensionUISource) {
 }
 
 type processExtensionUISource struct {
-	process  *Process
-	client   *rpcClient
-	owner    UIExtensionOwner
-	notifyMu sync.Mutex
-	notify   map[string]*orderedExtensionUINotifications
+	process          *Process
+	client           *rpcClient
+	owner            UIExtensionOwner
+	notifyMu         sync.Mutex
+	notify           map[string]*orderedExtensionUINotifications
+	notifyLifecycles map[string]uint64
 }
 
 type orderedExtensionUINotifications struct {
@@ -693,6 +686,15 @@ func (s *processExtensionUISource) ExtensionUIOwner() UIExtensionOwner {
 }
 
 func (s *processExtensionUISource) NotifyExtensionUI(_ context.Context, method string, params any) error {
+	return s.notifyExtensionUI(method, params, 0, false)
+}
+
+// NotifyExtensionUISurfaceEvent sends an event only if its surface lifecycle is current.
+func (s *processExtensionUISource) NotifyExtensionUISurfaceEvent(_ context.Context, lifecycle uint64, method string, params any) error {
+	return s.notifyExtensionUI(method, params, lifecycle, true)
+}
+
+func (s *processExtensionUISource) notifyExtensionUI(method string, params any, lifecycle uint64, lifecycleScoped bool) error {
 	if !s.current() {
 		return errors.New("extension process generation is no longer active")
 	}
@@ -702,6 +704,10 @@ func (s *processExtensionUISource) NotifyExtensionUI(_ context.Context, method s
 	}
 
 	s.notifyMu.Lock()
+	if lifecycleScoped && (s.notifyLifecycles == nil || s.notifyLifecycles[id] != lifecycle) {
+		s.notifyMu.Unlock()
+		return nil
+	}
 	if s.notify == nil {
 		s.notify = map[string]*orderedExtensionUINotifications{}
 	}
@@ -759,8 +765,9 @@ func (s *processExtensionUISource) sendOrderedExtensionUINotifications(id string
 	}
 }
 
-func (s *processExtensionUISource) resetEventSequence(id string) {
-	if s == nil || strings.TrimSpace(id) == "" {
+// PrepareUISurfaceEventLifecycle resets event ordering for an accepted lifecycle.
+func (s *processExtensionUISource) PrepareUISurfaceEventLifecycle(id string, lifecycle uint64) {
+	if s == nil || strings.TrimSpace(id) == "" || lifecycle == 0 {
 		return
 	}
 	s.notifyMu.Lock()
@@ -768,12 +775,10 @@ func (s *processExtensionUISource) resetEventSequence(id string) {
 	if s.notify != nil {
 		delete(s.notify, id)
 	}
-}
-
-func resetExtensionUIEventSequence(source UIExtensionSource, id string) {
-	if resetter, ok := source.(interface{ resetEventSequence(string) }); ok {
-		resetter.resetEventSequence(id)
+	if s.notifyLifecycles == nil {
+		s.notifyLifecycles = map[string]uint64{}
 	}
+	s.notifyLifecycles[id] = lifecycle
 }
 
 func extensionUIEventSequence(method string, params any) (string, uint64, bool) {

@@ -38,6 +38,7 @@ type extensionSurfaceLayout struct {
 type tuiExtensionSurface struct {
 	key           extensionUIKey
 	source        extensions.UIExtensionSource
+	host          *tuiExtensionUIHost
 	options       extensions.UISurfaceOptions
 	frame         extensions.UIFrame
 	layout        extensionSurfaceLayout
@@ -71,7 +72,8 @@ type extensionUITransportErrorMsg struct {
 }
 
 type tuiExtensionUIHost struct {
-	mu sync.Mutex
+	mu                 sync.Mutex
+	surfaceLifecycleMu sync.Mutex
 
 	ch   chan<- tea.Msg
 	done <-chan struct{}
@@ -220,23 +222,38 @@ func (h *tuiExtensionUIHost) OpenSurface(_ context.Context, source extensions.UI
 	}
 	request.Options.Anchor = anchor
 
+	h.surfaceLifecycleMu.Lock()
 	h.mu.Lock()
 	latest := h.surfaceSeq[key]
 	if _, closed := h.closed[key.owner]; closed {
 		h.mu.Unlock()
+		h.surfaceLifecycleMu.Unlock()
 		return extensions.UIFrameResponse{LatestSequence: latest, Reason: "extension process is closed"}, nil
 	}
 	if request.Frame.Sequence <= latest {
 		h.mu.Unlock()
+		h.surfaceLifecycleMu.Unlock()
 		return staleUIFrameResponse(latest), nil
 	}
 	h.openOrdinal++
-	surface := tuiExtensionSurface{key: key, source: source, options: request.Options, frame: request.Frame, openOrdinal: h.openOrdinal}
-	h.surfaceSeq[key] = request.Frame.Sequence
+	surface := tuiExtensionSurface{key: key, source: source, host: h, options: request.Options, frame: request.Frame, openOrdinal: h.openOrdinal}
 	h.surfaces[key] = surface
+	h.mu.Unlock()
+
+	extensions.PrepareUISurfaceEventLifecycle(source, request.ID, surface.openOrdinal)
+
+	h.mu.Lock()
+	if _, closed := h.closed[key.owner]; closed {
+		latest = h.surfaceSeq[key]
+		h.mu.Unlock()
+		h.surfaceLifecycleMu.Unlock()
+		return extensions.UIFrameResponse{LatestSequence: latest, Reason: "extension process is closed"}, nil
+	}
+	h.surfaceSeq[key] = request.Frame.Sequence
 	h.pendingS[key] = pendingExtensionSurface{surface: surface, opened: true}
 	queue := h.queueFlushLocked()
 	h.mu.Unlock()
+	h.surfaceLifecycleMu.Unlock()
 	if queue {
 		if err := h.enqueueFlush(); err != nil {
 			return extensions.UIFrameResponse{}, err
@@ -254,19 +271,23 @@ func (h *tuiExtensionUIHost) UpdateSurface(_ context.Context, source extensions.
 		return extensions.UIFrameResponse{}, err
 	}
 
+	h.surfaceLifecycleMu.Lock()
 	h.mu.Lock()
 	latest := h.surfaceSeq[key]
 	if _, closed := h.closed[key.owner]; closed {
 		h.mu.Unlock()
+		h.surfaceLifecycleMu.Unlock()
 		return extensions.UIFrameResponse{LatestSequence: latest, Reason: "extension process is closed"}, nil
 	}
 	surface, exists := h.surfaces[key]
 	if !exists {
 		h.mu.Unlock()
+		h.surfaceLifecycleMu.Unlock()
 		return extensions.UIFrameResponse{LatestSequence: latest, Reason: "surface is not open"}, nil
 	}
 	if request.Frame.Sequence <= latest {
 		h.mu.Unlock()
+		h.surfaceLifecycleMu.Unlock()
 		return staleUIFrameResponse(latest), nil
 	}
 	surface.frame = request.Frame
@@ -277,6 +298,7 @@ func (h *tuiExtensionUIHost) UpdateSurface(_ context.Context, source extensions.
 	h.pendingS[key] = pending
 	queue := h.queueFlushLocked()
 	h.mu.Unlock()
+	h.surfaceLifecycleMu.Unlock()
 	if queue {
 		if err := h.enqueueFlush(); err != nil {
 			return extensions.UIFrameResponse{}, err
@@ -294,17 +316,33 @@ func (h *tuiExtensionUIHost) CloseSurface(_ context.Context, source extensions.U
 		return extensions.UIFrameResponse{}, err
 	}
 
+	h.surfaceLifecycleMu.Lock()
 	h.mu.Lock()
 	latest := h.surfaceSeq[key]
 	if request.Sequence <= latest {
 		h.mu.Unlock()
+		h.surfaceLifecycleMu.Unlock()
 		return staleUIFrameResponse(latest), nil
 	}
-	h.surfaceSeq[key] = request.Sequence
+	h.openOrdinal++
 	delete(h.surfaces, key)
+	lifecycle := h.openOrdinal
+	h.mu.Unlock()
+
+	extensions.PrepareUISurfaceEventLifecycle(source, request.ID, lifecycle)
+
+	h.mu.Lock()
+	if _, closed := h.closed[key.owner]; closed {
+		latest = h.surfaceSeq[key]
+		h.mu.Unlock()
+		h.surfaceLifecycleMu.Unlock()
+		return extensions.UIFrameResponse{LatestSequence: latest, Reason: "extension process is closed"}, nil
+	}
+	h.surfaceSeq[key] = request.Sequence
 	h.pendingS[key] = pendingExtensionSurface{surface: tuiExtensionSurface{key: key}, remove: true}
 	queue := h.queueFlushLocked()
 	h.mu.Unlock()
+	h.surfaceLifecycleMu.Unlock()
 	if queue {
 		if err := h.enqueueFlush(); err != nil {
 			return extensions.UIFrameResponse{}, err
@@ -627,14 +665,24 @@ func notifyExtensionSurfaceCmd(surface tuiExtensionSurface, method string, reque
 		if surface.source == nil {
 			return extensionUITransportErrorMsg{owner: surface.key.owner}
 		}
+		if surface.host != nil && !surface.host.isCurrentSurfaceLifecycle(surface.key, surface.openOrdinal) {
+			return nil
+		}
 		if surface.source.ExtensionUIOwner() != surface.key.owner {
 			return extensionUITransportErrorMsg{owner: surface.key.owner}
 		}
-		if err := surface.source.NotifyExtensionUI(context.Background(), method, request); err != nil {
+		if err := extensions.NotifyUISurfaceEvent(context.Background(), surface.source, surface.openOrdinal, method, request); err != nil {
 			return extensionUITransportErrorMsg{owner: surface.key.owner}
 		}
 		return nil
 	}
+}
+
+func (h *tuiExtensionUIHost) isCurrentSurfaceLifecycle(key extensionUIKey, openOrdinal uint64) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	surface, ok := h.surfaces[key]
+	return ok && surface.openOrdinal == openOrdinal
 }
 
 func (m model) resolveExtensionSurfaceLayout(surface tuiExtensionSurface) extensionSurfaceLayout {

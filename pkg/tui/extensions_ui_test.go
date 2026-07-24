@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	xansi "github.com/charmbracelet/x/ansi"
@@ -26,6 +27,8 @@ type fakeExtensionUISource struct {
 
 	mu            sync.Mutex
 	notifications []extensionUINotification
+	lifecycles    []uint64
+	lifecycleCh   chan string
 }
 
 func (s *fakeExtensionUISource) ExtensionUIOwner() extensions.UIExtensionOwner {
@@ -39,10 +42,62 @@ func (s *fakeExtensionUISource) NotifyExtensionUI(_ context.Context, method stri
 	return s.err
 }
 
+func (s *fakeExtensionUISource) PrepareUISurfaceEventLifecycle(id string, lifecycle uint64) {
+	s.mu.Lock()
+	s.lifecycles = append(s.lifecycles, lifecycle)
+	lifecycleCh := s.lifecycleCh
+	s.mu.Unlock()
+	if lifecycleCh != nil {
+		lifecycleCh <- id
+	}
+}
+
 func (s *fakeExtensionUISource) recordedNotifications() []extensionUINotification {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]extensionUINotification(nil), s.notifications...)
+}
+
+func TestTUIExtensionUIHostPreparesSurfaceEventsBeforePublishingOpen(t *testing.T) {
+	ch := make(chan tea.Msg)
+	lifecycleCh := make(chan string)
+	host := newTUIExtensionUIHost(ch, nil)
+	source := &fakeExtensionUISource{
+		owner:       extensions.UIExtensionOwner{ExtensionID: "game", Generation: 1},
+		lifecycleCh: lifecycleCh,
+	}
+	type openResult struct {
+		response extensions.UIFrameResponse
+		err      error
+	}
+	resultCh := make(chan openResult, 1)
+	go func() {
+		response, err := host.OpenSurface(context.Background(), source, extensions.UISurfaceOpenRequest{
+			ID:    "surface",
+			Frame: extensionTestFrame(1, "frame"),
+		})
+		resultCh <- openResult{response: response, err: err}
+	}()
+
+	select {
+	case id := <-lifecycleCh:
+		assert.Equal(t, "surface", id)
+	case <-time.After(time.Second):
+		t.Fatal("surface event lifecycle was not prepared before publication")
+	}
+	select {
+	case message := <-ch:
+		assert.Same(t, host, message.(extensionUIFlushMsg).host)
+	case <-time.After(time.Second):
+		t.Fatal("surface open was not published")
+	}
+	select {
+	case result := <-resultCh:
+		require.NoError(t, result.err)
+		assert.True(t, result.response.Accepted)
+	case <-time.After(time.Second):
+		t.Fatal("surface open did not complete")
+	}
 }
 
 func TestTUIExtensionUIHostCoalescesLatestWidgetAndSurfaceFrames(t *testing.T) {
@@ -496,11 +551,14 @@ func TestTUIExtensionSurfaceReopenReallocatesAndRefocusesSameID(t *testing.T) {
 	key := extensionUIKey{owner: source.owner, id: "surface"}
 	first := m.extensionSurfaces[key]
 	assert.Equal(t, 10, first.layout.width)
+	staleCmd := m.nextExtensionSurfaceInputCmd(key, first, extensions.UISurfaceInputKey, "x", "x", false, false, false, nil)
 
 	request.Options.Width = extensions.UISizeValue{Cells: 20, Set: true}
 	request.Frame = extensionTestFrame(2, "second")
 	_, err = m.extensionUI.OpenSurface(context.Background(), source, request)
 	require.NoError(t, err)
+	assert.Nil(t, staleCmd())
+	assert.Empty(t, source.recordedNotifications(), "a queued command from the previous open must be dropped")
 	applyPendingExtensionUI(t, &m)
 	second := m.extensionSurfaces[key]
 
