@@ -60,6 +60,9 @@ func TestProcessDoesNotExposeTerminalStderrToExtension(t *testing.T) {
 	}()
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, process.Close()) })
+	require.NotNil(t, process.cmd.SysProcAttr)
+	assert.True(t, process.cmd.SysProcAttr.Setpgid)
+	assert.Equal(t, extensionProcessWaitDelay, process.cmd.WaitDelay)
 
 	result, err := process.Initialize(context.Background(), rootDir)
 	require.NoError(t, err)
@@ -71,6 +74,10 @@ func TestProcessDoesNotExposeTerminalStderrToExtension(t *testing.T) {
 	assert.Equal(t, DiagnosticLevelWarning, diagnostic.Level)
 	assert.Equal(t, "mcp", diagnostic.Extension)
 	assert.Equal(t, "playwright", diagnostic.Fields["server"])
+
+	startTime := time.Now()
+	require.NoError(t, process.Close())
+	assert.Less(t, time.Since(startTime), time.Second, "started extension processes should close promptly")
 }
 
 type lockedBuffer struct {
@@ -90,7 +97,7 @@ func (b *lockedBuffer) String() string {
 	return b.Buffer.String()
 }
 
-func TestProcessCloseUsesCommandCancelForProcessGroup(t *testing.T) {
+func TestProcessCloseKillsProcessGroup(t *testing.T) {
 	tempDir := t.TempDir()
 	childPIDPath := filepath.Join(tempDir, "child.pid")
 	cmd := exec.Command("bash", "-c", fmt.Sprintf("sleep 60 & echo $! > %q; wait", childPIDPath))
@@ -110,12 +117,6 @@ func TestProcessCloseUsesCommandCancelForProcessGroup(t *testing.T) {
 		_ = syscall.Kill(childPID, syscall.SIGKILL)
 	})
 
-	cancelCalled := false
-	cmd.Cancel = func() error {
-		cancelCalled = true
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	}
-
 	process := &Process{
 		Extension: Extension{ID: "process-group"},
 		cmd:       cmd,
@@ -123,9 +124,11 @@ func TestProcessCloseUsesCommandCancelForProcessGroup(t *testing.T) {
 		stdout:    stdout,
 	}
 
-	_ = process.Close()
+	startTime := time.Now()
+	require.NoError(t, process.Close())
+	elapsed := time.Since(startTime)
 
-	assert.True(t, cancelCalled)
+	assert.Less(t, elapsed, osutil.GracefulShutdownDelay/2, "process groups should close promptly")
 	assert.Eventually(t, func() bool {
 		return syscall.Kill(childPID, 0) == syscall.ESRCH
 	}, time.Second, 10*time.Millisecond)

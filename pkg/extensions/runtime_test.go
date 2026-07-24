@@ -476,20 +476,15 @@ func TestRuntimeRejectsDuplicateToolRegistrations(t *testing.T) {
 }
 
 func TestRuntimeRejectsDuplicateCommandRegistrations(t *testing.T) {
-	rootDir := t.TempDir()
-	t.Setenv("KODELET_BASE_PATH", t.TempDir())
-	writeExecutable(t, filepath.Join(rootDir, "first", "kodelet-extension-first"), helperCommandOnlyExtensionScript(t))
-	writeExecutable(t, filepath.Join(rootDir, "second", "kodelet-extension-second"), helperCommandOnlyExtensionScript(t))
+	runtime := EmptyRuntime()
+	registration := CommandRegistration{Name: "doctor", Aliases: []string{"/doctor"}, Description: "Inspect extension runtime health"}
+	require.NoError(t, runtime.register(context.Background(), &Process{Extension: Extension{ID: "first"}}, &InitializeResult{
+		Commands: []CommandRegistration{registration},
+	}))
 
-	runtime, err := NewRuntime(
-		context.Background(),
-		WithConfig(DefaultConfig()),
-		WithWorkingDir(rootDir),
-		WithRoots(Root{Dir: rootDir, Kind: SourceKindLocalStandalone}),
-	)
-	if runtime != nil {
-		_ = runtime.Close()
-	}
+	err := runtime.register(context.Background(), &Process{Extension: Extension{ID: "second"}}, &InitializeResult{
+		Commands: []CommandRegistration{registration},
+	})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "duplicate extension command registration: doctor")
@@ -500,14 +495,6 @@ func TestExtensionHelperProcess(t *testing.T) {
 		return
 	}
 	runExtensionHelperProcess()
-	os.Exit(0)
-}
-
-func TestCommandOnlyExtensionHelperProcess(t *testing.T) {
-	if os.Getenv("KODELET_TEST_COMMAND_EXTENSION_HELPER") != "1" {
-		return
-	}
-	runCommandOnlyExtensionHelperProcess()
 	os.Exit(0)
 }
 
@@ -524,13 +511,6 @@ func helperExtensionScript(t *testing.T) string {
 	executable, err := os.Executable()
 	require.NoError(t, err)
 	return fmt.Sprintf("#!/bin/sh\nKODELET_TEST_EXTENSION_HELPER=1 exec %q -test.run TestExtensionHelperProcess --\n", executable)
-}
-
-func helperCommandOnlyExtensionScript(t *testing.T) string {
-	t.Helper()
-	executable, err := os.Executable()
-	require.NoError(t, err)
-	return fmt.Sprintf("#!/bin/sh\nKODELET_TEST_COMMAND_EXTENSION_HELPER=1 exec %q -test.run TestCommandOnlyExtensionHelperProcess --\n", executable)
 }
 
 func helperEnvExtensionScript(t *testing.T) string {
@@ -573,41 +553,6 @@ func runEnvExtensionHelperProcess() {
 			}, nil)
 		case "extension.tool.execute":
 			writeHelperResponse(request.ID, ToolExecutionResult{Content: workspaceCWD}, nil)
-		case "extension.event.handle":
-			writeHelperResponse(request.ID, EventResult{}, nil)
-		default:
-			writeHelperResponse(request.ID, nil, &rpcError{Code: -32601, Message: "method not found"})
-		}
-	}
-}
-
-func runCommandOnlyExtensionHelperProcess() {
-	reader := bufio.NewReader(os.Stdin)
-	for {
-		payload, err := readFrame(reader)
-		if err != nil {
-			return
-		}
-
-		var request struct {
-			ID     int64  `json:"id"`
-			Method string `json:"method"`
-		}
-		if err := json.Unmarshal(payload, &request); err != nil {
-			writeHelperResponse(request.ID, nil, &rpcError{Code: -32700, Message: err.Error()})
-			continue
-		}
-
-		switch request.Method {
-		case "extension.initialize":
-			writeHelperResponse(request.ID, InitializeResult{
-				Name: "commands",
-				Commands: []CommandRegistration{{
-					Name:        "doctor",
-					Aliases:     []string{"/doctor"},
-					Description: "Inspect extension runtime health",
-				}},
-			}, nil)
 		case "extension.event.handle":
 			writeHelperResponse(request.ID, EventResult{}, nil)
 		default:

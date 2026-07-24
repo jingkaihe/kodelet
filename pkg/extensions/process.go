@@ -43,6 +43,7 @@ var extensionProcessGeneration atomic.Uint64
 const (
 	workspaceCWDEnvKey         = "KODELET_EXTENSION_WORKSPACE_CWD"
 	extensionInitializeTimeout = 3 * time.Minute
+	extensionProcessWaitDelay  = time.Second
 	maxProcessFailures         = 3
 	restartBackoffBase         = 100 * time.Millisecond
 	restartBackoffMax          = 2 * time.Second
@@ -71,7 +72,7 @@ func (p *Process) start(ctx context.Context) error {
 	// full-screen UI can redirect them without replacing the process stderr.
 	cmd.Stderr = newExtensionStderrWriter(processCtx, p.Extension.ID, logger.G(processCtx).Logger.Out)
 	osutil.SetProcessGroup(cmd)
-	osutil.SetProcessGroupKill(cmd)
+	cmd.WaitDelay = extensionProcessWaitDelay
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -812,14 +813,18 @@ func (p *Process) closeProcessLocked() error {
 	if p.cmd == nil || p.cmd.Process == nil {
 		return nil
 	}
+	forceKillErr := osutil.ForceKillProcessGroup(p.cmd)
+	if forceKillErr != nil {
+		if err := p.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			return errors.Wrapf(forceKillErr, "failed to force kill extension process group; direct process kill also failed: %v", err)
+		}
+	}
 	_ = p.stdin.Close()
 	_ = p.stdout.Close()
-	if p.cmd.Cancel != nil {
-		_ = p.cmd.Cancel()
-	} else {
-		_ = p.cmd.Process.Kill()
-	}
 	err := p.cmd.Wait()
+	if forceKillErr != nil {
+		return errors.Wrap(forceKillErr, "failed to force kill extension process group")
+	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		return nil

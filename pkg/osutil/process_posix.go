@@ -29,6 +29,10 @@ func SetProcessGroup(cmd *exec.Cmd) {
 // the entire process group. It first sends SIGTERM to allow cleanup, waits
 // briefly, then sends SIGKILL if processes are still running.
 func SetProcessGroupKill(cmd *exec.Cmd) {
+	setProcessGroupKill(cmd, GracefulShutdownDelay)
+}
+
+func setProcessGroupKill(cmd *exec.Cmd, gracefulShutdownDelay time.Duration) {
 	cmd.Cancel = func() error {
 		pgid := -cmd.Process.Pid
 
@@ -38,16 +42,27 @@ func SetProcessGroupKill(cmd *exec.Cmd) {
 			return nil
 		}
 
-		// Give processes time to cleanup
-		time.Sleep(GracefulShutdownDelay)
+		// Give processes time to cleanup.
+		time.Sleep(gracefulShutdownDelay)
 
-		// Check if any process in the group is still running (signal 0 = check only)
+		// Check if any process in the group is still running (signal 0 = check only).
 		if err := syscall.Kill(pgid, 0); err != nil {
-			// All processes terminated gracefully
 			return nil
 		}
 
-		// Processes still running, force kill with SIGKILL
+		// Processes still running, force kill with SIGKILL.
 		return syscall.Kill(pgid, syscall.SIGKILL)
 	}
+}
+
+// ForceKillProcessGroup immediately kills the entire process group. Call it
+// before waiting on the process so its process-group ID cannot be reused.
+func ForceKillProcessGroup(cmd *exec.Cmd) error {
+	if cmd == nil || cmd.Process == nil {
+		return nil
+	}
+	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil && err != syscall.ESRCH {
+		return err
+	}
+	return nil
 }

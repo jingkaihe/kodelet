@@ -25,6 +25,7 @@ func TestSetProcessGroup(t *testing.T) {
 func TestSetProcessGroupKill_GracefulShutdown(t *testing.T) {
 	// This test verifies that a process responding to SIGTERM exits gracefully
 	// without needing SIGKILL
+	gracefulDelay := 50 * time.Millisecond
 
 	// Script that handles SIGTERM and exits cleanly
 	script := `trap 'exit 0' TERM; while true; do sleep 0.1; done`
@@ -34,7 +35,7 @@ func TestSetProcessGroupKill_GracefulShutdown(t *testing.T) {
 
 	cmd := exec.CommandContext(ctx, "bash", "-c", script)
 	SetProcessGroup(cmd)
-	SetProcessGroupKill(cmd)
+	setProcessGroupKill(cmd, gracefulDelay)
 
 	err := cmd.Start()
 	require.NoError(t, err)
@@ -43,23 +44,23 @@ func TestSetProcessGroupKill_GracefulShutdown(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Cancel the context to trigger the Cancel function
+	startTime := time.Now()
 	cancel()
 
 	// Wait for the process to exit
 	err = cmd.Wait()
+	elapsed := time.Since(startTime)
 
 	// The process should have exited (either from SIGTERM or context cancellation)
 	// We don't check the exact error because it varies by how the process exits
 	assert.Error(t, err, "Process should have been terminated")
+	assert.GreaterOrEqual(t, elapsed, gracefulDelay-10*time.Millisecond, "Graceful shutdown should honor the configured delay")
+	assert.Less(t, elapsed, time.Second, "Graceful shutdown should use the shortened test delay")
 }
 
 func TestSetProcessGroupKill_ForceKillAfterTimeout(t *testing.T) {
 	// This test verifies that a process ignoring SIGTERM gets SIGKILL
-	// Note: This test takes ~2 seconds due to GracefulShutdownDelay
-
-	if testing.Short() {
-		t.Skip("Skipping test in short mode (takes ~2 seconds)")
-	}
+	gracefulDelay := GracefulShutdownDelay
 
 	// Script that ignores SIGTERM (but not SIGKILL)
 	script := `trap '' TERM; while true; do sleep 0.1; done`
@@ -97,14 +98,16 @@ func TestSetProcessGroupKill_ForceKillAfterTimeout(t *testing.T) {
 	err = syscall.Kill(pid, 0)
 	assert.Error(t, err, "Process should be terminated")
 
-	// Verify it took approximately GracefulShutdownDelay
+	// Verify it took approximately the configured graceful shutdown delay
 	// (with some tolerance for test execution overhead)
-	assert.GreaterOrEqual(t, elapsed, GracefulShutdownDelay-100*time.Millisecond,
+	assert.GreaterOrEqual(t, elapsed, gracefulDelay-10*time.Millisecond,
 		"Should have waited for graceful shutdown delay")
+	assert.Less(t, elapsed, gracefulDelay+time.Second, "Should force kill promptly after the graceful shutdown delay")
 }
 
 func TestSetProcessGroupKill_KillsEntireProcessGroup(t *testing.T) {
 	// This test verifies that child processes are also killed
+	gracefulDelay := 50 * time.Millisecond
 
 	// Script that spawns a child process
 	script := `
@@ -121,7 +124,7 @@ func TestSetProcessGroupKill_KillsEntireProcessGroup(t *testing.T) {
 
 	cmd := exec.CommandContext(ctx, "bash", "-c", script)
 	SetProcessGroup(cmd)
-	SetProcessGroupKill(cmd)
+	setProcessGroupKill(cmd, gracefulDelay)
 
 	stdout, err := cmd.StdoutPipe()
 	require.NoError(t, err)

@@ -5,6 +5,7 @@ package osutil
 import (
 	"os"
 	"os/exec"
+	"strconv"
 	"syscall"
 	"time"
 )
@@ -32,4 +33,14 @@ func SetProcessGroupKill(cmd *exec.Cmd) {
 	cmd.Cancel = func() error {
 		return cmd.Process.Signal(os.Kill)
 	}
+}
+
+// ForceKillProcessGroup immediately terminates the process and its descendants.
+func ForceKillProcessGroup(cmd *exec.Cmd) error {
+	if cmd == nil || cmd.Process == nil {
+		return nil
+	}
+	taskkill := exec.Command("taskkill.exe", "/PID", strconv.Itoa(cmd.Process.Pid), "/T", "/F")
+	taskkill.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	return taskkill.Run()
 }
