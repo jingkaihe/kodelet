@@ -1,5 +1,23 @@
 # Kodelet
 
+## Unreleased
+
+Added persistent extension UI to the native TUI: informational transcript entries, passive widgets above or below the composer, and interactive overlay surfaces with anchors, percentage sizing, keyboard focus, and relative mouse input, exposed through the TypeScript SDK as `ctx.ui.appendTranscript`, `ctx.ui.setWidget`, and `ctx.ui.openSurface`, plus a drawing-board example extension.
+
+Scoped every extension UI object to a process generation with exclusive surface IDs and bounded frame queues, so widgets and surfaces are removed and focus is restored automatically when an extension restarts or fails.
+
+Reused persistent extension runtimes across TUI and Web UI sessions instead of creating one per request, and force-killed extension process groups before waiting on shutdown.
+
+Added Claude Opus 5 support, including the `opus-5` alias, adaptive and `xhigh` thinking, and pricing.
+
+Rendered bash tool calls in the TUI as shell transcripts with commands, output, elapsed time, and failure status instead of raw tool input JSON.
+
+Executed OpenAI function calls in parallel while preserving tool ordering across the CLI, TUI, and Web UI.
+
+Stripped empty Anthropic content blocks instead of dropping whole messages when resuming conversations, keeping the thinking signatures needed to replay a turn.
+
+Upgraded the Web UI to React 19 and React Router v8, and patched Go and frontend dependency vulnerabilities.
+
 ## 0.5.3-beta
 
 Streamed live tool output through headless mode, ACP, the TypeScript SDK, TUI, and Web UI, including bounded Bash snapshots and preserved full-output artifacts for truncated commands.
