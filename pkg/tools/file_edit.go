@@ -230,6 +230,9 @@ func (t *FileEditTool) ValidateInput(_ tooltypes.State, parameters string) error
 	if err := json.Unmarshal([]byte(parameters), &input); err != nil {
 		return errors.Wrap(err, "invalid input")
 	}
+	if input.OldText == "" {
+		return errors.New("old text must not be empty")
+	}
 
 	// check if the file exists
 	_, err := os.Stat(input.FilePath)
@@ -265,58 +268,31 @@ func (t *FileEditTool) ValidateInput(_ tooltypes.State, parameters string) error
 
 // findAllOccurrences finds all occurrences of oldText in content and returns their positions and line numbers
 func findAllOccurrences(content, oldText string) []EditInfo {
-	var edits []EditInfo
-	lines := strings.Split(content, "\n")
-	oldTextLines := strings.Split(oldText, "\n")
-
-	// Find all occurrences line by line
-	for i := 0; i <= len(lines)-len(oldTextLines); i++ {
-		match := true
-		for j, oldLine := range oldTextLines {
-			if i+j >= len(lines) || lines[i+j] != oldLine {
-				match = false
-				break
-			}
-		}
-		if match {
-			startLine := i + 1 // 1-indexed
-			endLine := i + len(oldTextLines)
-			edits = append(edits, EditInfo{
-				StartLine:  startLine,
-				EndLine:    endLine,
-				OldContent: oldText,
-				NewContent: "",
-			})
-			// Skip to avoid overlapping matches
-			i += len(oldTextLines) - 1
-		}
+	if oldText == "" {
+		return nil
 	}
 
-	// If no exact line matches found, fall back to simple string search
-	if len(edits) == 0 {
-		searchText := content
-		startPos := 0
-		for {
-			pos := strings.Index(searchText, oldText)
-			if pos == -1 {
-				break
-			}
-
-			// Find line number for this position
-			beforeText := content[:startPos+pos]
-			lineNum := strings.Count(beforeText, "\n") + 1
-
-			edits = append(edits, EditInfo{
-				StartLine:  lineNum,
-				EndLine:    lineNum + strings.Count(oldText, "\n"),
-				OldContent: oldText,
-				NewContent: "",
-			})
-
-			// Move past this match
-			startPos += pos + len(oldText)
-			searchText = content[startPos:]
+	var edits []EditInfo
+	searchStart := 0
+	currentLine := 1
+	oldTextNewlines := strings.Count(oldText, "\n")
+	for searchStart <= len(content)-len(oldText) {
+		relativePos := strings.Index(content[searchStart:], oldText)
+		if relativePos == -1 {
+			break
 		}
+
+		position := searchStart + relativePos
+		currentLine += strings.Count(content[searchStart:position], "\n")
+		edits = append(edits, EditInfo{
+			StartLine:  currentLine,
+			EndLine:    currentLine + oldTextNewlines,
+			OldContent: oldText,
+			NewContent: "",
+		})
+
+		searchStart = position + len(oldText)
+		currentLine += oldTextNewlines
 	}
 
 	return edits
@@ -412,6 +388,12 @@ func (t *FileEditTool) Execute(_ context.Context, state tooltypes.State, paramet
 		return &FileEditToolResult{
 			filename: input.FilePath,
 			err:      fmt.Sprintf("invalid input: %s", err),
+		}
+	}
+	if input.OldText == "" {
+		return &FileEditToolResult{
+			filename: input.FilePath,
+			err:      "old text must not be empty",
 		}
 	}
 

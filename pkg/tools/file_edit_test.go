@@ -85,6 +85,17 @@ func TestFileEditTool_ValidateInput(t *testing.T) {
 			errorMsg:    "old text not found in the file",
 		},
 		{
+			name: "old text is empty",
+			input: FileEditInput{
+				FilePath:   tmpfile.Name(),
+				OldText:    "",
+				NewText:    "inserted everywhere",
+				ReplaceAll: true,
+			},
+			expectError: true,
+			errorMsg:    "old text must not be empty",
+		},
+		{
 			name: "text appears multiple times",
 			input: FileEditInput{
 				FilePath: tmpfile.Name(),
@@ -167,6 +178,33 @@ func TestFileEditTool_Execute(t *testing.T) {
 		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), "invalid json")
 		assert.True(t, result.IsError())
 		assert.Empty(t, result.GetResult())
+	})
+
+	t.Run("empty old text does not modify the file", func(t *testing.T) {
+		tmpfile, err := os.CreateTemp("", "FileEditEmptyOldTextTest")
+		require.NoError(t, err)
+		defer os.Remove(tmpfile.Name())
+
+		const original = "unchanged\n"
+		_, err = tmpfile.WriteString(original)
+		require.NoError(t, err)
+		require.NoError(t, tmpfile.Close())
+
+		params, err := json.Marshal(FileEditInput{
+			FilePath:   tmpfile.Name(),
+			OldText:    "",
+			NewText:    "inserted everywhere",
+			ReplaceAll: true,
+		})
+		require.NoError(t, err)
+
+		result := tool.Execute(context.Background(), NewBasicState(context.TODO()), string(params))
+		assert.True(t, result.IsError())
+		assert.Contains(t, result.GetError(), "old text must not be empty")
+
+		content, err := os.ReadFile(tmpfile.Name())
+		require.NoError(t, err)
+		assert.Equal(t, original, string(content))
 	})
 }
 
@@ -705,6 +743,12 @@ func TestFindAllOccurrences(t *testing.T) {
 			content:     "Hello world\nHello everyone\nGoodbye Hello\n",
 			oldText:     "Hello",
 			expectedLen: 3,
+		},
+		{
+			name:        "whole line and inline occurrences",
+			content:     "old\nprefix old suffix\n",
+			oldText:     "old",
+			expectedLen: 2,
 		},
 		{
 			name:        "multiline text",
