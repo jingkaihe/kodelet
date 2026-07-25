@@ -24,7 +24,7 @@ func TestRenderTranscriptDetailsAndMouseToggle(t *testing.T) {
 		kind: entryAssistant,
 		blocks: []assistantBlock{
 			{kind: blockThoughts, thoughts: []thoughtBlock{{text: "hidden thought", done: true}}},
-			{kind: blockTools, tools: []toolCall{{name: "bash", input: "{\n  \"cmd\": \"pwd\"\n}", result: "ok", done: true}}},
+			{kind: blockTools, tools: []toolCall{{name: "bash", input: "{\n  \"command\": \"pwd\"\n}", result: "ok", done: true}}},
 		},
 	}}
 
@@ -41,8 +41,8 @@ func TestRenderTranscriptDetailsAndMouseToggle(t *testing.T) {
 
 	m.toggleAllDetails()
 	content, _ = m.renderTranscript()
-	assert.Contains(t, content, "input: {\"cmd\":\"pwd\"}")
-	assert.Contains(t, content, "result: ok")
+	assert.Contains(t, content, "$ pwd")
+	assert.Contains(t, content, "ok")
 }
 
 func TestRenderTranscriptAddsSpacingBetweenAssistantBlocks(t *testing.T) {
@@ -170,9 +170,101 @@ func TestRenderTranscriptPreservesIndentedToolOutput(t *testing.T) {
 	content, _ := m.renderTranscript()
 	plain := xansi.Strip(content)
 
-	assert.Contains(t, plain, "  result: pkg/tui/model.go:")
+	assert.Contains(t, plain, "  pkg/tui/model.go:")
 	assert.Contains(t, plain, "      func indented()")
 	assert.Contains(t, plain, "      return nil")
+}
+
+func TestRenderTranscriptRendersBashGroupAsShellTranscript(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 120
+	m.height = 40
+	m.resize()
+	m.entries = []chatEntry{{
+		kind: entryAssistant,
+		blocks: []assistantBlock{{
+			kind:     blockTools,
+			expanded: true,
+			tools: []toolCall{
+				{
+					name:   "bash",
+					input:  `{"command":"cd /repo && mise run build","description":"build"}`,
+					done:   true,
+					failed: true,
+					structured: &tooltypes.StructuredToolResult{
+						ToolName: "bash",
+						Success:  false,
+						Error:    "command is banned: cd",
+					},
+				},
+				{
+					name:  "bash",
+					input: `{"command":"mise run build","description":"build"}`,
+					done:  true,
+					structured: &tooltypes.StructuredToolResult{
+						ToolName: "bash",
+						Success:  true,
+						Metadata: &tooltypes.BashMetadata{
+							Command:       "mise run build",
+							Output:        "build ok\n",
+							WorkingDir:    "/repo",
+							ExecutionTime: 13903481875,
+						},
+					},
+				},
+			},
+		}},
+	}}
+
+	content, _ := m.renderTranscript()
+	plain := xansi.Strip(content)
+
+	assert.Contains(t, plain, "✗ Ran 2 commands")
+	assert.Contains(t, plain, "$ cd /repo && mise run build")
+	assert.Contains(t, plain, "command is banned: cd")
+	assert.Contains(t, plain, "$ mise run build (14s)")
+	assert.Contains(t, plain, "build ok")
+	assert.NotContains(t, plain, "input: {")
+	assert.NotContains(t, plain, "Exit Code:")
+	assert.NotContains(t, plain, "Working Directory:")
+	assert.NotContains(t, plain, "Execution Time:")
+}
+
+func TestRenderTranscriptOmitsExecutionTimeForRunningBash(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 120
+	m.height = 40
+	m.resize()
+	m.entries = []chatEntry{{
+		kind: entryAssistant,
+		blocks: []assistantBlock{{
+			kind: blockTools,
+			tools: []toolCall{{
+				name:  "bash",
+				input: `{"command":"mise run build"}`,
+				structured: &tooltypes.StructuredToolResult{
+					ToolName: "bash",
+					Success:  true,
+					Metadata: &tooltypes.BashMetadata{
+						Command:       "mise run build",
+						Output:        "compiling…\n",
+						ExecutionTime: 7 * time.Second,
+					},
+				},
+			}},
+		}},
+	}}
+
+	content, _ := m.renderTranscript()
+	plain := xansi.Strip(content)
+
+	assert.Contains(t, plain, "Running 1 command")
+	assert.Contains(t, plain, "$ mise run build")
+	assert.Contains(t, plain, "compiling…")
+	assert.NotContains(t, plain, "(7s)")
+	assert.NotContains(t, plain, "Execution Time:")
 }
 
 func TestDedicatedBuiltinToolLabels(t *testing.T) {

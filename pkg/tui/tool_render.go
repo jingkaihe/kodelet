@@ -243,18 +243,84 @@ func formatTaskRunElapsed(elapsedMS int64) string {
 }
 
 func buildBashToolGroup(block assistantBlock, start, end int) toolRenderGroup {
-	count := end - start
+	bashTools := block.tools[start:end]
+	count := len(bashTools)
 	return toolRenderGroup{
 		toolStart:    start,
 		toolEnd:      end - 1,
 		changeIndex:  -1,
 		label:        fmt.Sprintf("Ran %d %s", count, pluralize(count, "command", "commands")),
 		runningLabel: fmt.Sprintf("Running %d %s", count, pluralize(count, "command", "commands")),
-		body:         joinTools(block.tools[start:end]),
+		body:         bashToolsBody(bashTools),
 		wrapBody:     true,
-		expanded:     block.expanded || anyExpandedTool(block.tools[start:end]),
-		active:       hasActiveToolRange(block.tools[start:end]),
+		expanded:     block.expanded || anyExpandedTool(bashTools),
+		active:       hasActiveToolRange(bashTools),
+		failed:       anyFailedTool(bashTools),
 	}
+}
+
+// bashToolsBody renders bash calls as the shell transcript they are, instead of
+// dumping the raw tool input JSON alongside the CLI-oriented result rendering.
+func bashToolsBody(tools []toolCall) string {
+	parts := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		if part := bashToolBody(tool); part != "" {
+			parts = append(parts, part)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func bashToolBody(tool toolCall) string {
+	var meta tooltypes.BashMetadata
+	hasMeta := tool.structured != nil && tooltypes.ExtractMetadata(tool.structured.Metadata, &meta)
+
+	lines := make([]string, 0, 3)
+	command := strings.TrimSpace(meta.Command)
+	if command == "" {
+		command = stringField(toolInputFields(tool.input), "command")
+	}
+	if command != "" {
+		lines = append(lines, "$ "+command+bashElapsedSuffix(tool, meta))
+	}
+
+	errorText := bashErrorText(tool)
+	output := strings.TrimRight(meta.Output, "\n")
+	if !hasMeta && errorText == "" {
+		// Results without metadata (older conversations) only carry rendered text.
+		output = strings.TrimSpace(tool.result)
+	}
+	if strings.TrimSpace(output) != "" {
+		lines = append(lines, output)
+	}
+	if errorText != "" {
+		lines = append(lines, errorText)
+	}
+
+	if len(lines) == 0 {
+		return strings.TrimSpace(tool.result)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// bashElapsedSuffix reports how long a command took, but only once it finished:
+// the elapsed time of a still-running command is not a meaningful result.
+func bashElapsedSuffix(tool toolCall, meta tooltypes.BashMetadata) string {
+	if !tool.done || meta.ExecutionTime < time.Second {
+		return ""
+	}
+	elapsed := formatTaskRunElapsed(meta.ExecutionTime.Milliseconds())
+	if elapsed == "" {
+		return ""
+	}
+	return " (" + elapsed + ")"
+}
+
+func bashErrorText(tool toolCall) string {
+	if !tool.done || tool.structured == nil {
+		return ""
+	}
+	return strings.TrimSpace(tool.structured.Error)
 }
 
 func buildFallbackToolGroup(block assistantBlock, start, end int) toolRenderGroup {
@@ -269,6 +335,7 @@ func buildFallbackToolGroup(block assistantBlock, start, end int) toolRenderGrou
 		wrapBody:     true,
 		expanded:     block.expanded || anyExpandedTool(block.tools[start:end]),
 		active:       hasActiveToolRange(block.tools[start:end]),
+		failed:       anyFailedTool(block.tools[start:end]),
 	}
 }
 
@@ -285,6 +352,7 @@ func buildDedicatedBuiltinToolGroup(block assistantBlock, idx int) toolRenderGro
 		wrapBody:     true,
 		expanded:     block.expanded || tool.expanded,
 		active:       !tool.done,
+		failed:       tool.failed,
 	}
 }
 
@@ -306,6 +374,7 @@ func (m model) buildApplyPatchToolGroups(block assistantBlock, idx int) []toolRe
 			wrapBody:     true,
 			expanded:     block.expanded || tool.expanded,
 			active:       !tool.done,
+			failed:       tool.failed,
 		}}
 	}
 
@@ -528,6 +597,15 @@ func normalizedToolName(tool toolCall) string {
 func anyExpandedTool(tools []toolCall) bool {
 	for _, tool := range tools {
 		if tool.expanded {
+			return true
+		}
+	}
+	return false
+}
+
+func anyFailedTool(tools []toolCall) bool {
+	for _, tool := range tools {
+		if tool.failed {
 			return true
 		}
 	}

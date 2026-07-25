@@ -24,6 +24,12 @@ func (r *BashRenderer) RenderCLI(result tools.StructuredToolResult) string {
 		return r.renderBashMetadata(bashMeta, &output)
 	}
 
+	// Failures raised before execution (e.g. input validation) carry no metadata,
+	// so surface the actual error instead of a misleading metadata complaint.
+	if !result.Success && strings.TrimSpace(result.Error) != "" {
+		return strings.TrimRight(output.String(), "\n")
+	}
+
 	return "Error: Invalid metadata type for bash"
 }
 
