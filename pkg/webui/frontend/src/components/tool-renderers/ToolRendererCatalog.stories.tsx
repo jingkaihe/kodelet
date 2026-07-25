@@ -1,10 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import ToolRenderer from '../ToolRenderer';
 import type { ToolResult } from '../../types';
-import {
-  sampleBashToolResult,
-  sampleFileReadToolResult,
-} from '../../stories/fixtures';
+import { sampleBashToolResult, sampleFileReadToolResult } from '../../stories/fixtures';
 
 interface ToolExample {
   title: string;
@@ -50,6 +47,8 @@ const examples: ToolExample[] = [
       success: true,
       metadata: {
         filePath: 'pkg/webui/frontend/src/pages/ChatPage.tsx',
+        unifiedDiff:
+          '@@ -20 +20,2 @@\n+import ChatComposer from "../components/chat/ChatComposer";\n import ChatSidebar from "../components/chat/ChatSidebar";',
         edits: [
           {
             startLine: 20,

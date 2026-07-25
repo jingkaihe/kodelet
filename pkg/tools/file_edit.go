@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/invopop/jsonschema"
+	"github.com/jingkaihe/kodelet/pkg/diffview"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
@@ -139,13 +140,15 @@ func (r *FileEditToolResult) StructuredData() tooltypes.StructuredToolResult {
 	}
 
 	// Always populate metadata, even for errors
-	result.Metadata = &tooltypes.FileEditMetadata{
+	metadata := tooltypes.FileEditMetadata{
 		FilePath:      r.filename,
 		Language:      language,
 		Edits:         edits,
 		ReplaceAll:    r.replaceAll,
 		ReplacedCount: r.replacedCount,
+		UnifiedDiff:   diffview.UnifiedDiff(r.filename, r.filename, r.oldContent, r.newContent),
 	}
+	result.Metadata = &metadata
 
 	if r.IsError() {
 		result.Error = r.GetError()

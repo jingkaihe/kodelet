@@ -44,6 +44,27 @@ describe('ToolRenderer', () => {
     expect(screen.getByText('permission denied')).toBeInTheDocument();
   });
 
+  it('uses the patch-style renderer for failed file edits', () => {
+    const toolResult: ToolResult = {
+      toolName: 'file_edit',
+      success: false,
+      error: 'failed to write file',
+      timestamp: '2026-07-25T00:00:00Z',
+      metadata: {
+        filePath: '/tmp/edit.go',
+        unifiedDiff: '@@ -7 +7 @@\n-old\n+new\n',
+        edits: [{ startLine: 7, endLine: 7, oldContent: 'old', newContent: 'new' }],
+      },
+    };
+
+    const { container } = render(<ToolRenderer toolResult={toolResult} />);
+
+    expect(container.firstChild).toHaveClass('apply-patch-result-failed');
+    expect(screen.getByText('failed to write file')).toBeInTheDocument();
+    expect(screen.getByText('/tmp/edit.go')).toBeInTheDocument();
+    expect(screen.queryByText('Error (file_edit):')).not.toBeInTheDocument();
+  });
+
   it('uses the native search renderer for failed OpenAI web search results', () => {
     const toolResult: ToolResult = {
       toolName: 'openai_web_search',

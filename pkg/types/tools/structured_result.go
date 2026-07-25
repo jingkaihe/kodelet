@@ -147,6 +147,7 @@ type FileEditMetadata struct {
 	Language      string `json:"language,omitempty"`
 	ReplaceAll    bool   `json:"replaceAll,omitempty"`
 	ReplacedCount int    `json:"replacedCount,omitempty"`
+	UnifiedDiff   string `json:"unifiedDiff,omitempty"`
 }
 
 // Edit represents a single text replacement in a file

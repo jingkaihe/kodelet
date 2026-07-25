@@ -2,6 +2,7 @@ package tools
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,10 +33,15 @@ func TestFileReadToolResult_StructuredData(t *testing.T) {
 }
 
 func TestFileEditToolResult_StructuredData(t *testing.T) {
+	prefix := strings.Repeat("line\n", 11)
 	result := &FileEditToolResult{
-		filename: "main.py",
-		oldText:  "print('old')",
-		newText:  "print('new')",
+		filename:   "main.py",
+		oldText:    "print('old')",
+		newText:    "print('new')",
+		oldContent: prefix + "print('old')\n",
+		newContent: prefix + "print('new')\n",
+		startLine:  12,
+		endLine:    12,
 	}
 
 	structured := result.StructuredData()
@@ -52,6 +58,9 @@ func TestFileEditToolResult_StructuredData(t *testing.T) {
 	edit := meta.Edits[0]
 	assert.Equal(t, "print('old')", edit.OldContent)
 	assert.Equal(t, "print('new')", edit.NewContent)
+	assert.Contains(t, meta.UnifiedDiff, "@@ -9,4 +9,4 @@")
+	assert.Contains(t, meta.UnifiedDiff, "-print('old')")
+	assert.Contains(t, meta.UnifiedDiff, "+print('new')")
 }
 
 func TestFileWriteToolResult_StructuredData(t *testing.T) {

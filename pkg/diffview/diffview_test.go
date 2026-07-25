@@ -40,6 +40,36 @@ func TestFromApplyPatchChangeParsesHunksCountsAndMoveHeader(t *testing.T) {
 	assert.Equal(t, Line{Kind: LineAdded, NewLine: 31, Content: "new2"}, file.Lines[8])
 }
 
+func TestFromFileEditMetadataUsesAbsoluteLineNumbersAcrossEdits(t *testing.T) {
+	oldContent := "one\ntwo\nthree\nfour\nold\nsix\nseven\neight\nnine\nold2\n"
+	newContent := "one\ntwo\nthree\nfour\nnew\nextra\nsix\nseven\neight\nnine\nnew2\n"
+	summary := FromFileEditMetadata(tooltypes.FileEditMetadata{
+		FilePath:    "edit.go",
+		UnifiedDiff: UnifiedDiff("edit.go", "edit.go", oldContent, newContent),
+	})
+
+	require.Len(t, summary.Files, 1)
+	file := summary.Files[0]
+	assert.Equal(t, "Edit edit.go (+3 -2)", file.Header())
+	assert.Equal(t, 3, summary.Added)
+	assert.Equal(t, 2, summary.Removed)
+	assert.Contains(t, file.Lines, Line{Kind: LineRemoved, OldLine: 5, Content: "old"})
+	assert.Contains(t, file.Lines, Line{Kind: LineAdded, NewLine: 5, Content: "new"})
+	assert.Contains(t, file.Lines, Line{Kind: LineAdded, NewLine: 6, Content: "extra"})
+	assert.Contains(t, file.Lines, Line{Kind: LineRemoved, OldLine: 10, Content: "old2"})
+	assert.Contains(t, file.Lines, Line{Kind: LineAdded, NewLine: 11, Content: "new2"})
+}
+
+func TestUnifiedDiffPreservesFinalNewlineChanges(t *testing.T) {
+	diff := UnifiedDiff("edit.go", "edit.go", "value", "value\n")
+
+	assert.NotEmpty(t, diff)
+	assert.Contains(t, diff, `\ No newline at end of file`)
+	file := FromFileEditMetadata(tooltypes.FileEditMetadata{FilePath: "edit.go", UnifiedDiff: diff}).Files[0]
+	assert.Equal(t, 1, file.Added)
+	assert.Equal(t, 1, file.Removed)
+}
+
 func TestRenderFileBodyWidthWrapsLongLinesWithGutterContinuation(t *testing.T) {
 	file := FileDiff{Lines: []Line{{Kind: LineAdded, NewLine: 1, Content: "abcdefghijklmnop"}}}
 

@@ -658,6 +658,105 @@ func TestRenderTranscriptApplyPatchDiffToggle(t *testing.T) {
 	assert.Contains(t, content, "+new")
 }
 
+func TestRenderTranscriptFileEditUsesDiffHeaderAndAbsoluteLineGutter(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 100
+	m.height = 30
+	m.resize()
+	m.entries = []chatEntry{{
+		kind: entryAssistant,
+		blocks: []assistantBlock{{
+			kind: blockTools,
+			tools: []toolCall{{
+				name: "file_edit",
+				done: true,
+				structured: &tooltypes.StructuredToolResult{
+					ToolName: "file_edit",
+					Success:  true,
+					Metadata: &tooltypes.FileEditMetadata{
+						FilePath:    "edit.go",
+						UnifiedDiff: "@@ -42,3 +42,3 @@\n before\n-old\n+new\n after\n",
+						Edits: []tooltypes.Edit{{
+							StartLine:  42,
+							EndLine:    44,
+							OldContent: "before\nold\nafter",
+							NewContent: "before\nnew\nafter",
+						}},
+					},
+				},
+			}},
+		}},
+	}}
+
+	m.refreshViewport(true)
+	content, regions := m.renderTranscript()
+	plain := xansi.Strip(content)
+	require.Len(t, regions, 1)
+	assert.Contains(t, plain, "Edit edit.go (+1 -1)")
+	assert.NotContains(t, plain, "Ran 1 tool")
+	assert.NotContains(t, plain, "@@ -42,3 +42,3 @@")
+
+	assert.True(t, m.toggleDetailAt(regions[0].line))
+	content, _ = m.renderTranscript()
+	plain = xansi.Strip(content)
+	assert.Contains(t, plain, "@@ -42,3 +42,3 @@")
+	assert.Contains(t, plain, "42 42 │  before")
+	assert.Contains(t, plain, "43    │ -old")
+	assert.Contains(t, plain, "   43 │ +new")
+	assert.Contains(t, plain, "44 44 │  after")
+}
+
+func TestRenderTranscriptFailedFileEditCanBeCollapsed(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 100
+	m.height = 30
+	m.resize()
+	m.entries = []chatEntry{{
+		kind: entryAssistant,
+		blocks: []assistantBlock{{
+			kind: blockTools,
+			tools: []toolCall{{
+				name:   "file_edit",
+				done:   true,
+				failed: true,
+				structured: &tooltypes.StructuredToolResult{
+					ToolName: "file_edit",
+					Success:  false,
+					Error:    "failed to write file",
+					Metadata: &tooltypes.FileEditMetadata{
+						FilePath:    "edit.go",
+						UnifiedDiff: "@@ -7 +7 @@\n-old\n+new\n",
+						Edits: []tooltypes.Edit{{
+							StartLine:  7,
+							EndLine:    7,
+							OldContent: "old",
+							NewContent: "new",
+						}},
+					},
+				},
+			}},
+		}},
+	}}
+
+	m.refreshViewport(true)
+	content, regions := m.renderTranscript()
+	require.Len(t, regions, 1)
+	assert.NotContains(t, xansi.Strip(content), "failed to write file")
+
+	assert.True(t, m.toggleDetailAt(regions[0].line))
+	content, _ = m.renderTranscript()
+	assert.Contains(t, xansi.Strip(content), "failed to write file")
+
+	m.refreshViewport(true)
+	_, regions = m.renderTranscript()
+	require.Len(t, regions, 1)
+	assert.True(t, m.toggleDetailAt(regions[0].line))
+	content, _ = m.renderTranscript()
+	assert.NotContains(t, xansi.Strip(content), "failed to write file")
+}
+
 func TestRenderTranscriptRendersAssistantMarkdown(t *testing.T) {
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)

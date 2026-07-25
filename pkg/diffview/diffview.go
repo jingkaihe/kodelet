@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/aymanbagabas/go-udiff"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/mattn/go-runewidth"
 )
@@ -50,6 +51,24 @@ type RenderedLine struct {
 }
 
 var hunkHeaderRE = regexp.MustCompile(`^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@`)
+
+func FromFileEditMetadata(meta tooltypes.FileEditMetadata) Summary {
+	file := FromApplyPatchChange(tooltypes.ApplyPatchChange{
+		Path:        meta.FilePath,
+		Operation:   tooltypes.ApplyPatchOperationUpdate,
+		UnifiedDiff: meta.UnifiedDiff,
+	})
+
+	return Summary{
+		Files:   []FileDiff{file},
+		Added:   file.Added,
+		Removed: file.Removed,
+	}
+}
+
+func UnifiedDiff(oldLabel, newLabel, oldContent, newContent string) string {
+	return udiff.Unified(oldLabel, newLabel, oldContent, newContent)
+}
 
 func FromApplyPatchMetadata(meta tooltypes.ApplyPatchMetadata) Summary {
 	changes := meta.Changes

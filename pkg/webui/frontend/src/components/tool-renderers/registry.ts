@@ -24,7 +24,7 @@ export interface ToolRendererRegistration {
 const toolRendererRegistry: Record<string, ToolRendererRegistration> = {
   file_read: { component: FileReadRenderer },
   file_write: { component: FileWriteRenderer },
-  file_edit: { component: FileEditRenderer },
+  file_edit: { component: FileEditRenderer, supportsFailureRendering: true },
   apply_patch: { component: ApplyPatchRenderer, supportsFailureRendering: true },
   bash: { component: BashRenderer, supportsFailureRendering: true },
   grep_tool: { component: GrepRenderer },
@@ -38,7 +38,9 @@ const toolRendererRegistry: Record<string, ToolRendererRegistration> = {
   extension_tool: { component: ExtensionToolRenderer, supportsFailureRendering: true },
 };
 
-export const getToolRendererRegistration = (toolResult: ToolResult): ToolRendererRegistration | undefined => {
+export const getToolRendererRegistration = (
+  toolResult: ToolResult
+): ToolRendererRegistration | undefined => {
   if (toolResult.metadataType) {
     const metadataRegistration = toolRendererRegistry[normalizeToolName(toolResult.metadataType)];
     if (metadataRegistration) {

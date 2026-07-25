@@ -50,6 +50,10 @@ func (m model) toolRenderGroups(block assistantBlock) []toolRenderGroup {
 			groups = append(groups, applyGroups...)
 			idx++
 
+		case isFileEditTool(tool):
+			groups = append(groups, m.buildFileEditToolGroup(block, idx))
+			idx++
+
 		case isTaskRunTool(tool):
 			groups = append(groups, m.buildTaskRunToolGroup(block, idx))
 			idx++
@@ -356,6 +360,54 @@ func buildDedicatedBuiltinToolGroup(block assistantBlock, idx int) toolRenderGro
 	}
 }
 
+func (m model) buildFileEditToolGroup(block assistantBlock, idx int) toolRenderGroup {
+	tool := block.tools[idx]
+	summary := fileEditSummary(tool)
+	if len(summary.Files) == 0 {
+		label := "Edited file"
+		if tool.failed {
+			label = "File edit failed"
+		}
+		return toolRenderGroup{
+			toolStart:    idx,
+			toolEnd:      idx,
+			changeIndex:  -1,
+			label:        label,
+			runningLabel: "Editing file",
+			body:         joinTools([]toolCall{tool}),
+			wrapBody:     true,
+			expanded:     block.expanded || tool.expanded,
+			active:       !tool.done,
+			failed:       tool.failed,
+		}
+	}
+
+	file := summary.Files[0]
+	bodyLines := diffview.RenderFileBodyWidth(file, m.transcriptTextWidth()-2)
+	if tool.failed {
+		if errorText := fileEditErrorText(tool); errorText != "" {
+			if len(bodyLines) > 0 {
+				bodyLines = append(bodyLines, diffview.RenderedLine{Kind: diffview.LinePlain, Text: ""})
+			}
+			bodyLines = append(bodyLines, diffview.RenderedLine{Kind: diffview.LineMeta, Text: errorText})
+		}
+	}
+
+	return toolRenderGroup{
+		toolStart:    idx,
+		toolEnd:      idx,
+		changeIndex:  -1,
+		label:        file.Header(),
+		labelParts:   diffLabelParts(file),
+		runningLabel: "Editing file",
+		body:         diffview.RenderedText(bodyLines),
+		bodyLines:    bodyLines,
+		expanded:     block.expanded || tool.expanded,
+		active:       !tool.done,
+		failed:       tool.failed,
+	}
+}
+
 func (m model) buildApplyPatchToolGroups(block assistantBlock, idx int) []toolRenderGroup {
 	tool := block.tools[idx]
 	summary := applyPatchSummary(tool)
@@ -398,7 +450,7 @@ func (m model) buildApplyPatchToolGroups(block assistantBlock, idx int) []toolRe
 			toolEnd:      idx,
 			changeIndex:  changeIdx,
 			label:        file.Header(),
-			labelParts:   applyPatchLabelParts(file),
+			labelParts:   diffLabelParts(file),
 			runningLabel: "Applying patch",
 			body:         body,
 			bodyLines:    bodyLines,
@@ -411,7 +463,7 @@ func (m model) buildApplyPatchToolGroups(block assistantBlock, idx int) []toolRe
 	return groups
 }
 
-func applyPatchLabelParts(file diffview.FileDiff) []toolRenderLabelPart {
+func diffLabelParts(file diffview.FileDiff) []toolRenderLabelPart {
 	return []toolRenderLabelPart{
 		{kind: diffview.LinePlain, text: fmt.Sprintf("%s %s (", file.OperationLabel(), file.DisplayPath())},
 		{kind: diffview.LineAdded, text: fmt.Sprintf("+%d", file.Added)},
@@ -419,6 +471,26 @@ func applyPatchLabelParts(file diffview.FileDiff) []toolRenderLabelPart {
 		{kind: diffview.LineRemoved, text: fmt.Sprintf("-%d", file.Removed)},
 		{kind: diffview.LinePlain, text: ")"},
 	}
+}
+
+func fileEditSummary(tool toolCall) diffview.Summary {
+	if tool.structured == nil {
+		return diffview.Summary{}
+	}
+
+	var meta tooltypes.FileEditMetadata
+	if !tooltypes.ExtractMetadata(tool.structured.Metadata, &meta) {
+		return diffview.Summary{}
+	}
+
+	return diffview.FromFileEditMetadata(meta)
+}
+
+func fileEditErrorText(tool toolCall) string {
+	if tool.structured != nil && strings.TrimSpace(tool.structured.Error) != "" {
+		return strings.TrimSpace(tool.structured.Error)
+	}
+	return strings.TrimSpace(tool.result)
 }
 
 func applyPatchSummary(tool toolCall) diffview.Summary {
@@ -555,7 +627,7 @@ func skillToolLabel(tool toolCall) string {
 }
 
 func isFallbackAggregateTool(tool toolCall) bool {
-	return !isBashTool(tool) && !isApplyPatchTool(tool) && !isTaskRunTool(tool) && !isDedicatedBuiltinTool(tool)
+	return !isBashTool(tool) && !isApplyPatchTool(tool) && !isFileEditTool(tool) && !isTaskRunTool(tool) && !isDedicatedBuiltinTool(tool)
 }
 
 func isBashTool(tool toolCall) bool {
@@ -564,6 +636,10 @@ func isBashTool(tool toolCall) bool {
 
 func isApplyPatchTool(tool toolCall) bool {
 	return normalizedToolName(tool) == "apply_patch"
+}
+
+func isFileEditTool(tool toolCall) bool {
+	return normalizedToolName(tool) == "file_edit"
 }
 
 func isTaskRunTool(tool toolCall) bool {
