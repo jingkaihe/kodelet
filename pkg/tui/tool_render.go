@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/jingkaihe/kodelet/pkg/diffview"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
@@ -42,7 +43,7 @@ func (m model) toolRenderGroups(block assistantBlock) []toolRenderGroup {
 			for end < len(block.tools) && isBashTool(block.tools[end]) {
 				end++
 			}
-			groups = append(groups, buildBashToolGroup(block, idx, end))
+			groups = append(groups, m.buildBashToolGroup(block, idx, end))
 			idx = end
 
 		case isApplyPatchTool(tool):
@@ -246,7 +247,7 @@ func formatTaskRunElapsed(elapsedMS int64) string {
 	return fmt.Sprintf("%dh %02dm", hours, minutes)
 }
 
-func buildBashToolGroup(block assistantBlock, start, end int) toolRenderGroup {
+func (m model) buildBashToolGroup(block assistantBlock, start, end int) toolRenderGroup {
 	bashTools := block.tools[start:end]
 	count := len(bashTools)
 	return toolRenderGroup{
@@ -255,7 +256,7 @@ func buildBashToolGroup(block assistantBlock, start, end int) toolRenderGroup {
 		changeIndex:  -1,
 		label:        fmt.Sprintf("Ran %d %s", count, pluralize(count, "command", "commands")),
 		runningLabel: fmt.Sprintf("Running %d %s", count, pluralize(count, "command", "commands")),
-		body:         bashToolsBody(bashTools, time.Now()),
+		body:         bashToolsBody(bashTools, time.Now(), m.transcriptTextWidth()-2),
 		wrapBody:     true,
 		expanded:     block.expanded || anyExpandedTool(bashTools),
 		active:       hasActiveToolRange(bashTools),
@@ -265,17 +266,17 @@ func buildBashToolGroup(block assistantBlock, start, end int) toolRenderGroup {
 
 // bashToolsBody renders bash calls as the shell transcript they are, instead of
 // dumping the raw tool input JSON alongside the CLI-oriented result rendering.
-func bashToolsBody(tools []toolCall, now time.Time) string {
+func bashToolsBody(tools []toolCall, now time.Time, width int) string {
 	parts := make([]string, 0, len(tools))
 	for _, tool := range tools {
-		if part := bashToolBody(tool, now); part != "" {
+		if part := bashToolBody(tool, now, width); part != "" {
 			parts = append(parts, part)
 		}
 	}
 	return strings.Join(parts, "\n\n")
 }
 
-func bashToolBody(tool toolCall, now time.Time) string {
+func bashToolBody(tool toolCall, now time.Time, width int) string {
 	var meta tooltypes.BashMetadata
 	hasMeta := tool.structured != nil && tooltypes.ExtractMetadata(tool.structured.Metadata, &meta)
 
@@ -285,7 +286,7 @@ func bashToolBody(tool toolCall, now time.Time) string {
 		command = stringField(toolInputFields(tool.input), "command")
 	}
 	if command != "" {
-		lines = append(lines, bashCommandLine(command, bashElapsed(tool, meta, now)))
+		lines = append(lines, bashCommandLine(command, bashElapsed(tool, meta, now), width))
 	}
 
 	errorText := bashErrorText(tool)
@@ -307,12 +308,27 @@ func bashToolBody(tool toolCall, now time.Time) string {
 	return strings.Join(lines, "\n")
 }
 
-func bashCommandLine(command, elapsed string) string {
-	line := renderPersistentStyle(bashCommandStyle, "$ "+command)
-	if elapsed == "" {
-		return line
+func bashCommandLine(command, elapsed string, width int) string {
+	width = max(10, width)
+	commandLines := strings.Split(wrapPreservingWhitespace("$ "+command, width), "\n")
+	rendered := make([]string, 0, len(commandLines)+1)
+	for _, line := range commandLines {
+		rendered = append(rendered, renderPersistentStyle(bashCommandStyle, line))
 	}
-	return line + renderPersistentStyle(mutedStyle, "  ·  "+elapsed)
+	if elapsed == "" {
+		return strings.Join(rendered, "\n")
+	}
+
+	suffix := "  ·  " + elapsed
+	last := len(rendered) - 1
+	if lipgloss.Width(commandLines[last])+lipgloss.Width(suffix) <= width {
+		rendered[last] += renderPersistentStyle(mutedStyle, suffix)
+		return strings.Join(rendered, "\n")
+	}
+	for _, line := range strings.Split(wrapPreservingWhitespace(suffix, width), "\n") {
+		rendered = append(rendered, renderPersistentStyle(mutedStyle, line))
+	}
+	return strings.Join(rendered, "\n")
 }
 
 func bashElapsed(tool toolCall, meta tooltypes.BashMetadata, now time.Time) string {

@@ -248,7 +248,7 @@ func TestBashToolBodyAdvancesElapsedTimeWhileRunning(t *testing.T) {
 		},
 	}
 
-	plain := xansi.Strip(bashToolBody(tool, observedAt.Add(2*time.Second)))
+	plain := xansi.Strip(bashToolBody(tool, observedAt.Add(2*time.Second), 120))
 
 	assert.Contains(t, plain, "$ mise run build  ·  9s")
 	assert.Contains(t, plain, "compiling…")
@@ -259,7 +259,7 @@ func TestBashToolBodyUsesStartTimeBeforeFirstUpdate(t *testing.T) {
 	startedAt := time.Date(2026, time.July, 25, 12, 0, 0, 0, time.UTC)
 	tool := toolCall{name: "bash", input: `{"command":"mise run lint"}`, startedAt: startedAt}
 
-	plain := xansi.Strip(bashToolBody(tool, startedAt.Add(2*time.Second)))
+	plain := xansi.Strip(bashToolBody(tool, startedAt.Add(2*time.Second), 120))
 
 	assert.Contains(t, plain, "$ mise run lint  ·  2s")
 }
@@ -272,7 +272,7 @@ func TestBashCommandLineUsesThemeAccentAndMutedElapsed(t *testing.T) {
 			m := newModel(context.Background(), Config{Theme: themeName})
 			t.Cleanup(m.cancel)
 
-			line := bashCommandLine("mise run lint", "6s")
+			line := bashCommandLine("mise run lint", "6s", 120)
 			commandStart, _ := styleSequences(bashCommandStyle)
 			elapsedStart, _ := styleSequences(mutedStyle)
 			expectedCommandStart, _ := styleSequences(lipgloss.NewStyle().Foreground(themeColor(m.theme.Markdown.Code)))
@@ -284,6 +284,30 @@ func TestBashCommandLineUsesThemeAccentAndMutedElapsed(t *testing.T) {
 			assert.Contains(t, line, elapsedStart+"  ·  6s")
 		})
 	}
+}
+
+func TestBashCommandAccentContinuesAcrossWrappedLines(t *testing.T) {
+	withANSI256ColorProfile(t)
+	m := newModel(context.Background(), Config{Theme: LightThemeName})
+	t.Cleanup(m.cancel)
+
+	command := "TMP=$(mktemp -d); gh release download 0.16.0 --repo astral-sh/ruff"
+	line := bashCommandLine(command, "38s", 24)
+	rendered := renderPersistentStyle(toolBodyStyle, indentText(line))
+	commandStart, _ := styleSequences(bashCommandStyle)
+	elapsedStart, _ := styleSequences(mutedStyle)
+	commandLineCount := 0
+
+	for _, wrappedLine := range strings.Split(rendered, "\n") {
+		plain := strings.TrimSpace(xansi.Strip(wrappedLine))
+		if strings.HasPrefix(plain, "·") {
+			assert.Contains(t, wrappedLine, elapsedStart)
+			continue
+		}
+		commandLineCount++
+		assert.Contains(t, wrappedLine, commandStart)
+	}
+	require.Greater(t, commandLineCount, 1)
 }
 
 func TestDedicatedBuiltinToolLabels(t *testing.T) {
