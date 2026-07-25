@@ -1,5 +1,15 @@
 # Kodelet
 
+## 0.5.12-beta
+
+Rendered `file_edit` results as unified diffs in the TUI and Web UI, reusing the same diff view as `apply_patch` instead of the bespoke line-pair renderer, and surfaced failed edits with their error text.
+
+Persisted a unified diff in file edit metadata so diffs are computed once server-side and stay consistent across renderers.
+
+Rejected empty `old_text` in file edits at validation and execution time, and simplified occurrence detection to a single string scan with accurate line numbers.
+
+Added a Biome configuration for the Web UI frontend.
+
 ## 0.5.11-beta
 
 Added persistent extension UI to the native TUI: informational transcript entries, passive widgets above or below the composer, and interactive overlay surfaces with anchors, percentage sizing, keyboard focus, and relative mouse input, exposed through the TypeScript SDK as `ctx.ui.appendTranscript`, `ctx.ui.setWidget`, and `ctx.ui.openSurface`, plus a drawing-board example extension.
