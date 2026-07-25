@@ -20,6 +20,7 @@ func (m *model) applyChatEvent(event chat.ChatEvent) {
 		if content == "" {
 			return
 		}
+		m.clearActiveAssistantEntry()
 		m.removeQueuedSteering(content)
 		if m.hasLastUserEntry(content) {
 			return
@@ -132,10 +133,21 @@ func (m *model) applyChatEvent(event chat.ChatEvent) {
 }
 
 func (m *model) ensureAssistantEntry() int {
-	if len(m.entries) == 0 || m.entries[len(m.entries)-1].kind != entryAssistant {
-		m.entries = append(m.entries, chatEntry{kind: entryAssistant})
+	if m.hasActiveAssistantEntry &&
+		m.activeAssistantEntry >= 0 &&
+		m.activeAssistantEntry < len(m.entries) &&
+		m.entries[m.activeAssistantEntry].kind == entryAssistant {
+		return m.activeAssistantEntry
 	}
-	return len(m.entries) - 1
+
+	m.entries = append(m.entries, chatEntry{kind: entryAssistant})
+	m.activeAssistantEntry = len(m.entries) - 1
+	m.hasActiveAssistantEntry = true
+	return m.activeAssistantEntry
+}
+
+func (m *model) clearActiveAssistantEntry() {
+	m.hasActiveAssistantEntry = false
 }
 
 func userMessageContentText(content any) string {
@@ -206,8 +218,13 @@ func (m model) hasLastUserEntry(content string) bool {
 	if content == "" || len(m.entries) == 0 {
 		return false
 	}
-	last := m.entries[len(m.entries)-1]
-	return last.kind == entryUser && strings.TrimSpace(last.content) == content
+	for i := len(m.entries) - 1; i >= 0; i-- {
+		if m.entries[i].kind == entryInfo {
+			continue
+		}
+		return m.entries[i].kind == entryUser && strings.TrimSpace(m.entries[i].content) == content
+	}
+	return false
 }
 
 func (m *model) removeQueuedSteering(content string) {

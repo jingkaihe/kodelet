@@ -211,6 +211,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				reloadMessageHistory = m.updateMessageHistoryScope(m.cwd)
 			}
 			if len(m.entries) == 0 && len(msg.entries) > 0 {
+				m.clearActiveAssistantEntry()
 				m.entries = msg.entries
 				m.usage = msg.usage
 				m.status = fmt.Sprintf("resumed %s", shortID(m.conversationID))
@@ -529,6 +530,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.status = "ready"
 		}
+		m.clearActiveAssistantEntry()
 		m.refreshViewport(m.autoFollow)
 		if m.quitAfterRun {
 			m.quitAfterRun = false
@@ -869,6 +871,7 @@ func (m *model) submit() tea.Cmd {
 	m.textarea.Reset()
 	m.appendSubmittedMessageToHistory(message)
 	persistMessageHistory := m.persistSubmittedMessageCommand(message)
+	m.clearActiveAssistantEntry()
 	m.entries = append(m.entries, chatEntry{kind: entryUser, content: userDisplayMessage(message)})
 	m.running = true
 	m.workingFrame = 0

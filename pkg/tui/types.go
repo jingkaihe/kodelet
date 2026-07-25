@@ -160,8 +160,10 @@ type model struct {
 	pendingRefresh       bool
 	pendingRefreshBottom bool
 
-	entries []chatEntry
-	usage   llmtypes.Usage
+	entries                 []chatEntry
+	activeAssistantEntry    int
+	hasActiveAssistantEntry bool
+	usage                   llmtypes.Usage
 
 	assistantMarkdownRenderer      *glamour.TermRenderer
 	assistantMarkdownRendererWidth int

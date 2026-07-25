@@ -22,6 +22,7 @@ import type {
   UIFrameLine,
   UIInputRequest,
   UINotifyRequest,
+  UITranscriptAppendRequest,
   UISelectRequest,
   UISurface,
   UISurfaceInputEvent,
@@ -288,6 +289,13 @@ function createSharedContext(
         const payload = typeof request === "string" ? { message: request } : request;
         await client.request("kodelet.ui.notify", payload);
       },
+      async appendTranscript(request: string | UITranscriptAppendRequest) {
+        if (!extensionUISupported(init, "transcript") || !persistentClient) {
+          return;
+        }
+        const payload = typeof request === "string" ? { message: request } : request;
+        await persistentClient.request("kodelet.ui.transcript.append", payload);
+      },
       async setWidget(id, lines, options) {
         if (!extensionUISupported(init, "widgets") || !persistentClient) {
           return;
@@ -539,7 +547,7 @@ function validateUIObjectID(id: string): string {
   return id;
 }
 
-function extensionUISupported(init: InitializeParams | undefined, feature: "widgets" | "surfaces"): boolean {
+function extensionUISupported(init: InitializeParams | undefined, feature: "widgets" | "surfaces" | "transcript"): boolean {
   const ui = init?.capabilities?.ui;
   return isRecord(ui) && ui[feature] === true;
 }

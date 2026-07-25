@@ -368,6 +368,7 @@ test("widgets use sequences and surfaces route host events", async () => {
         ]);
         await ctx.ui.setWidget("status", ["updated"], { placement: "belowComposer" });
         await ctx.ui.setWidget("status", undefined);
+        await ctx.ui.appendTranscript({ title: "Saved", message: "./drawing.png" });
         openedSurface = await ctx.ui.openSurface({
           id: "game",
           initialLines: ["loading"],
@@ -383,13 +384,13 @@ test("widgets use sequences and surfaces route host events", async () => {
   });
 
   const harness = await createTestHarness(extension, host);
-  harness.initialize({ capabilities: { ui: { widgets: true, surfaces: true } } });
+  harness.initialize({ capabilities: { ui: { widgets: true, surfaces: true, transcript: true } } });
   await harness.executeCommand({
     name: "ui",
     invocation: { raw: "/ui", commandName: "ui", args: [], flags: {} },
   });
 
-  assert.deepEqual(requests.slice(0, 4), [
+  assert.deepEqual(requests.slice(0, 5), [
     {
       method: "kodelet.ui.widget.set",
       params: {
@@ -406,6 +407,7 @@ test("widgets use sequences and surfaces route host events", async () => {
       params: { id: "status", placement: "belowComposer", frame: { sequence: 2, lines: ["updated"] } },
     },
     { method: "kodelet.ui.widget.remove", params: { id: "status", sequence: 3 } },
+    { method: "kodelet.ui.transcript.append", params: { title: "Saved", message: "./drawing.png" } },
     {
       method: "kodelet.ui.surface.open",
       params: {
@@ -673,7 +675,7 @@ test("UI object IDs reject surrounding whitespace before routing or sequencing",
   );
 });
 
-test("widget and surface APIs are capability gated", async () => {
+test("persistent UI APIs are capability gated", async () => {
   const requests: string[] = [];
   const extension = defineExtension((ext) => {
     ext.registerCommand({
@@ -681,6 +683,7 @@ test("widget and surface APIs are capability gated", async () => {
       description: "Try extension UI",
       async execute(_input, ctx) {
         await ctx.ui.setWidget("status", ["ignored"]);
+        await ctx.ui.appendTranscript("ignored");
         await assert.rejects(ctx.ui.openSurface({ id: "missing" }), /not available/);
         return { action: "respond", response: "done" };
       },
@@ -818,7 +821,10 @@ test("runtime keeps interactive surfaces alive after the opening command returns
           description: "Open a persistent surface",
           async execute(_, ctx) {
             const surface = await ctx.ui.openSurface({ id: "game", initialLines: ["loading"], width: "50%" });
-            surface.onResize((event) => surface.update(["size=" + event.width + "x" + event.height]));
+            surface.onResize((event) => {
+              surface.update(["size=" + event.width + "x" + event.height]);
+              void ctx.ui.appendTranscript({ title: "Resized", message: event.width + "x" + event.height });
+            });
             surface.onInput((event) => {
               surface.update(["key=" + event.key + ";size=" + surface.size?.width + "x" + surface.size?.height]);
               if (event.key === "q") setTimeout(() => void surface.close(), 0);
@@ -841,7 +847,7 @@ test("runtime keeps interactive surfaces alive after the opening command returns
   await client.call("extension.initialize", {
     protocolVersion: "2026-05-30",
     extension: { id: "surface", cwd: process.cwd(), dataDir: "" },
-    capabilities: { ui: { surfaces: true } },
+    capabilities: { ui: { surfaces: true, transcript: true } },
   });
   const result = await client.call("extension.command.execute", {
     name: "game",
@@ -858,6 +864,10 @@ test("runtime keeps interactive surfaces alive after the opening command returns
     method: "kodelet.ui.surface.frame",
     params: { id: "game", frame: { sequence: 2, lines: ["size=60x18"] } },
   });
+  await client.waitForHostRequests(2);
+  const transcriptRequest = client.hostRequests.find((request) => request.method === "kodelet.ui.transcript.append");
+  assert.equal(transcriptRequest?.parentId, undefined);
+  assert.deepEqual(transcriptRequest?.params, { title: "Resized", message: "60x18" });
 
   const requestCountBeforeInput = client.hostRequests.length;
   client.notify("extension.ui.surface.input", { id: "game", sequence: 2, kind: "key", key: "q", text: "q" });

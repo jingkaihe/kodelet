@@ -43,6 +43,9 @@ jobs:
       - name: Test TypeScript SDK
         run: mise run sdk-test
 
+      - name: Test repository extensions
+        run: mise run extensions-test
+
       - name: Lint frontend (Biome)
         run: mise run frontend-lint
 

@@ -147,6 +147,11 @@ export interface UINotifyRequest {
   message: string;
 }
 
+export interface UITranscriptAppendRequest {
+  title?: string;
+  message: string;
+}
+
 export type UIWidgetPlacement = "aboveComposer" | "belowComposer";
 
 export interface UIStyle {
@@ -256,6 +261,7 @@ export interface UIContext {
   confirm(request: UIConfirmRequest): Promise<boolean>;
   select(request: UISelectRequest): Promise<string | undefined>;
   notify(request: string | UINotifyRequest): Promise<void>;
+  appendTranscript(request: string | UITranscriptAppendRequest): Promise<void>;
   setWidget(id: string, lines: UIFrameLine[] | undefined, options?: { placement?: UIWidgetPlacement }): Promise<void>;
   openSurface(options: UISurfaceOpenOptions): Promise<UISurface>;
 }

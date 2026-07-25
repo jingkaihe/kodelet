@@ -110,6 +110,7 @@ export type {
   UIInputStatus,
   UIMargin,
   UINotifyRequest,
+  UITranscriptAppendRequest,
   UISelectRequest,
   UISizeValue,
   UIStyle,

@@ -82,6 +82,82 @@ func TestApplyChatEventReplacesToolUpdateWithFinalResult(t *testing.T) {
 	assert.NotContains(t, tool.result, "partial")
 }
 
+func TestExtensionTranscriptInsertPreservesActiveAssistantStreamsAndToolResults(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+
+	m.applyChatEvent(chat.ChatEvent{Kind: "text-delta", Delta: "before"})
+	m.applyChatEvent(chat.ChatEvent{Kind: "thinking-start"})
+	m.applyChatEvent(chat.ChatEvent{Kind: "thinking-delta", Delta: "think"})
+
+	updated, _ := m.Update(extensionUITranscriptMsg{title: "Progress", message: "still working"})
+	m = updated.(model)
+
+	m.applyChatEvent(chat.ChatEvent{Kind: "thinking-delta", Delta: "ing"})
+	m.applyChatEvent(chat.ChatEvent{Kind: "thinking-end"})
+	m.applyChatEvent(chat.ChatEvent{Kind: "tool-use", ToolCallID: "tool-1", ToolName: "bash", Input: `{}`})
+
+	updated, _ = m.Update(extensionUITranscriptMsg{title: "Saved", message: "./result.txt"})
+	m = updated.(model)
+
+	m.applyChatEvent(chat.ChatEvent{Kind: "tool-result", ToolCallID: "tool-1", ToolResult: &tooltypes.StructuredToolResult{
+		ToolName: "bash",
+		Success:  true,
+		Metadata: &tooltypes.BashMetadata{Output: "complete"},
+	}})
+	m.applyChatEvent(chat.ChatEvent{Kind: "text-delta", Delta: " after"})
+
+	require.Len(t, m.entries, 3)
+	assert.Equal(t, entryAssistant, m.entries[0].kind)
+	assert.Equal(t, entryInfo, m.entries[1].kind)
+	assert.Equal(t, entryInfo, m.entries[2].kind)
+
+	require.Len(t, m.entries[0].blocks, 4)
+	assert.Equal(t, "before", m.entries[0].blocks[0].text)
+	assert.Equal(t, "thinking", joinThoughts(m.entries[0].blocks[1].thoughts))
+	assert.False(t, hasActiveThought(m.entries[0].blocks[1]))
+	require.Len(t, m.entries[0].blocks[2].tools, 1)
+	tool := m.entries[0].blocks[2].tools[0]
+	assert.Equal(t, "tool-1", tool.id)
+	assert.True(t, tool.done)
+	assert.Contains(t, tool.result, "complete")
+	assert.Equal(t, " after", m.entries[0].blocks[3].text)
+}
+
+func TestUserMessageStartsNewAssistantEntryAfterTranscriptInsert(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+
+	m.applyChatEvent(chat.ChatEvent{Kind: "text-delta", Delta: "first response"})
+	updated, _ := m.Update(extensionUITranscriptMsg{title: "Note", message: "between turns"})
+	m = updated.(model)
+	m.applyChatEvent(chat.ChatEvent{Kind: "user-message", Content: "continue"})
+	m.applyChatEvent(chat.ChatEvent{Kind: "text-delta", Delta: "second response"})
+
+	require.Len(t, m.entries, 4)
+	assert.Equal(t, entryAssistant, m.entries[0].kind)
+	assert.Equal(t, entryInfo, m.entries[1].kind)
+	assert.Equal(t, entryUser, m.entries[2].kind)
+	assert.Equal(t, entryAssistant, m.entries[3].kind)
+	assert.Equal(t, "first response", m.entries[0].content)
+	assert.Equal(t, "second response", m.entries[3].content)
+}
+
+func TestApplyChatEventDoesNotDuplicateUserMessageAcrossTranscriptInsert(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.entries = []chatEntry{
+		{kind: entryUser, content: "hello"},
+		{kind: entryInfo, title: "Note", content: "after the prompt"},
+	}
+
+	m.applyChatEvent(chat.ChatEvent{Kind: "user-message", Content: "hello"})
+
+	require.Len(t, m.entries, 2)
+	assert.Equal(t, entryUser, m.entries[0].kind)
+	assert.Equal(t, entryInfo, m.entries[1].kind)
+}
+
 func TestApplyChatEventTracksParallelSubagentUpdatesIndependently(t *testing.T) {
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)
