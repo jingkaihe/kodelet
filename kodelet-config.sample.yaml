@@ -1,7 +1,0 @@
-mcp:
-    servers:
-        playwright:
-            command: "npx"
-            args:
-                - "@playwright/mcp@latest"
-                - "--caps=core"
