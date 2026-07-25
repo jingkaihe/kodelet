@@ -149,7 +149,7 @@ gofmt -d .
 
 The web UI is a React/TypeScript SPA built with Vite and embedded directly into the Go binary:
 
-**Frontend Stack**: React 18, TypeScript, Tailwind CSS, DaisyUI, React Router, Vite
+**Frontend Stack**: React 19, TypeScript, Tailwind CSS, DaisyUI, React Router, Vite
 
 **Build Process**:
 - `go generate ./pkg/webui` triggers `npm install && npm run build` in frontend directory

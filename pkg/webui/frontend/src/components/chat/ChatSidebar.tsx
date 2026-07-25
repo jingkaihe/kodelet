@@ -95,6 +95,18 @@ const groupConversationsByCwd = (conversations: Conversation[]) => {
 	});
 };
 
+type ConversationGroup = ReturnType<typeof groupConversationsByCwd>[number];
+
+const isGroupExpandedByDefault = (
+	group: ConversationGroup,
+	index: number,
+	activeConversationId: string | null,
+): boolean =>
+	index === 0 ||
+	group.conversations.some(
+		(conversation) => conversation.id === activeConversationId,
+	);
+
 const ChatSidebar: React.FC<ChatSidebarProps> = ({
 	conversations,
 	activeConversationId,
@@ -153,11 +165,9 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 			const nextState: Record<string, boolean> = {};
 
 			groupedConversations.forEach((group, index) => {
-				const hasActiveConversation = group.conversations.some(
-					(conversation) => conversation.id === activeConversationId,
-				);
 				nextState[group.key] =
-					currentState[group.key] ?? (hasActiveConversation || index === 0);
+					currentState[group.key] ??
+					isGroupExpandedByDefault(group, index, activeConversationId);
 			});
 
 			return nextState;
@@ -239,9 +249,16 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 						</div>
 					) : null}
 
-					{groupedConversations.map((group) => (
+					{groupedConversations.map((group, groupIndex) => (
 						<section className="conversation-group" key={group.key}>
 							{(() => {
+								const isExpanded =
+									expandedGroups[group.key] ??
+									isGroupExpandedByDefault(
+										group,
+										groupIndex,
+										activeConversationId,
+									);
 								const activeIndex = group.conversations.findIndex(
 									(conversation) => conversation.id === activeConversationId,
 								);
@@ -264,12 +281,12 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 								return (
 									<>
 							<button
-								aria-expanded={expandedGroups[group.key] !== false}
+								aria-expanded={isExpanded}
 								className="conversation-group-header"
 								onClick={() =>
 									setExpandedGroups((currentState) => ({
 										...currentState,
-										[group.key]: currentState[group.key] === false,
+										[group.key]: !isExpanded,
 									}))
 								}
 								type="button"
@@ -278,7 +295,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 									<ChevronRight
 										className={cn(
 											"h-3.5 w-3.5",
-											expandedGroups[group.key] !== false && "rotate-90",
+											isExpanded && "rotate-90",
 										)}
 										strokeWidth={1.9}
 									/>
@@ -301,7 +318,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 								</span>
 							</button>
 
-							{expandedGroups[group.key] !== false ? (
+							{isExpanded ? (
 								<div className="conversation-group-list">
 									{visibleConversations.map((conversation) => {
 										const isActive = conversation.id === activeConversationId;

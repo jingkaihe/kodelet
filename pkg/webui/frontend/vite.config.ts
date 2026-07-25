@@ -49,7 +49,7 @@ export default defineConfig({
             },
             {
               name: 'router-vendor',
-              test: /node_modules[\\/](react-router|react-router-dom)[\\/]/,
+              test: /node_modules[\\/]react-router[\\/]/,
               priority: 30
             },
             {

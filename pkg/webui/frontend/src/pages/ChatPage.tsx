@@ -15,7 +15,7 @@ import {
 	PanelRightOpen,
 	SquareTerminal,
 } from "lucide-react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router";
 import ChatComposer from "../components/chat/ChatComposer";
 import ChatSidebar from "../components/chat/ChatSidebar";
 import ChatTranscript from "../components/chat/ChatTranscript";

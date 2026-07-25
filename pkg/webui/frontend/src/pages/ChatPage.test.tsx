@@ -52,10 +52,10 @@ const flushCwdBlurTimer = async () => {
 	});
 };
 
-vi.mock("react-router-dom", async () => {
+vi.mock("react-router", async () => {
 	const actual =
-		await vi.importActual<typeof import("react-router-dom")>(
-			"react-router-dom",
+		await vi.importActual<typeof import("react-router")>(
+			"react-router",
 		);
 
 	return {
