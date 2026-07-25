@@ -1,6 +1,6 @@
 # Kodelet
 
-## Unreleased
+## 0.5.11-beta
 
 Added persistent extension UI to the native TUI: informational transcript entries, passive widgets above or below the composer, and interactive overlay surfaces with anchors, percentage sizing, keyboard focus, and relative mouse input, exposed through the TypeScript SDK as `ctx.ui.appendTranscript`, `ctx.ui.setWidget`, and `ctx.ui.openSurface`, plus a drawing-board example extension.
 
