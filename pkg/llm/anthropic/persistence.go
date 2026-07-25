@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -18,50 +19,62 @@ import (
 	"github.com/pkg/errors"
 )
 
-func hasAnyEmptyBlock(message *anthropic.MessageParam) bool {
-	for _, contentBlock := range message.Content {
-		if textBlock := contentBlock.OfText; textBlock != nil && strings.TrimSpace(textBlock.Text) == "" {
-			return true
-		}
-		if thinkingBlock := contentBlock.OfThinking; thinkingBlock != nil && strings.TrimSpace(thinkingBlock.Thinking) == "" {
-			return true
-		}
+// isEmptyContentBlock reports whether a block carries no usable content. A thinking
+// block with a signature counts as content: the signature is needed to replay the turn.
+func isEmptyContentBlock(contentBlock anthropic.ContentBlockParamUnion) bool {
+	if textBlock := contentBlock.OfText; textBlock != nil {
+		return strings.TrimSpace(textBlock.Text) == ""
+	}
+	if thinkingBlock := contentBlock.OfThinking; thinkingBlock != nil {
+		return strings.TrimSpace(thinkingBlock.Thinking) == "" &&
+			strings.TrimSpace(thinkingBlock.Signature) == ""
 	}
 	return false
 }
 
-// cleanupOrphanedMessages removes orphaned messages from the end of the message list.
-// This includes:
-// - Empty messages (messages with no content)
-// - Messages containing tool use blocks that are not followed by tool result messages
-func (t *Thread) cleanupOrphanedMessages() {
-	for len(t.messages) > 0 {
-		lastMessage := t.messages[len(t.messages)-1]
-		// remove the last message if it is empty
-		if len(lastMessage.Content) == 0 {
-			t.messages = t.messages[:len(t.messages)-1]
+func withoutEmptyContentBlocks(content []anthropic.ContentBlockParamUnion) []anthropic.ContentBlockParamUnion {
+	kept := make([]anthropic.ContentBlockParamUnion, 0, len(content))
+	for _, contentBlock := range content {
+		if isEmptyContentBlock(contentBlock) {
 			continue
 		}
-		// remove the last message if it is an empty message
-		if hasAnyEmptyBlock(&lastMessage) {
-			t.messages = t.messages[:len(t.messages)-1]
+		kept = append(kept, contentBlock)
+	}
+	return kept
+}
+
+// cleanedAnthropicMessages drops orphaned tool use and empty blocks from the tail.
+// Blocks are stripped individually so a message survives unless nothing is left.
+func cleanedAnthropicMessages(messages []anthropic.MessageParam) []anthropic.MessageParam {
+	cleaned := slices.Clone(messages)
+
+	for len(cleaned) > 0 {
+		lastMessage := cleaned[len(cleaned)-1]
+
+		if isMessageToolUse(lastMessage) {
+			cleaned = cleaned[:len(cleaned)-1]
 			continue
-		}
-		// remove the last message if it has any tool use message, as it must be followed by a tool result message
-		hasToolUse := false
-		for _, contentBlock := range lastMessage.Content {
-			if contentBlock.OfToolUse != nil {
-				hasToolUse = true
-				break
-			}
 		}
 
-		if hasToolUse {
-			t.messages = t.messages[:len(t.messages)-1]
+		content := withoutEmptyContentBlocks(lastMessage.Content)
+		if len(content) == 0 {
+			cleaned = cleaned[:len(cleaned)-1]
 			continue
 		}
+
+		if len(content) != len(lastMessage.Content) {
+			lastMessage.Content = content
+			cleaned[len(cleaned)-1] = lastMessage
+		}
+
 		break
 	}
+
+	return cleaned
+}
+
+func (t *Thread) cleanupOrphanedMessages() {
+	t.messages = cleanedAnthropicMessages(t.messages)
 }
 
 // SaveConversation saves the current thread to the conversation store

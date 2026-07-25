@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -349,7 +350,7 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 			description: "should preserve valid tool use when followed by tool result",
 		},
 		{
-			name: "remove empty textblock with thinking content",
+			name: "strip empty textblock but keep thinking content",
 			initialMessages: func() []anthropic.MessageParam {
 				rawMessages := `[
 					{
@@ -379,10 +380,32 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 				require.NoError(t, err)
 				return messages
 			}(),
-			expectedMessages: []anthropic.MessageParam{
-				anthropic.NewUserMessage(anthropic.NewTextBlock("Hello")),
-			},
-			description: "should remove empty textblock even with thinking content",
+			expectedMessages: func() []anthropic.MessageParam {
+				rawMessages := `[
+					{
+						"content": [
+							{
+								"text": "Hello",
+								"type": "text"
+							}
+						],
+						"role": "user"
+					},
+					{
+						"content": [
+							{
+								"thinking": "The user is asking for a simple arithmetic calculation. 2+2 equals 4.",
+								"type": "thinking"
+							}
+						],
+						"role": "assistant"
+					}
+				]`
+				messages, err := DeserializeMessages([]byte(rawMessages))
+				require.NoError(t, err)
+				return messages
+			}(),
+			description: "should drop only the empty textblock and keep the thinking content",
 		},
 		{
 			name: "remove empty thinking block only",
@@ -449,7 +472,7 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 			description: "should remove message with only whitespace thinking block",
 		},
 		{
-			name: "remove message with valid text but empty thinking block",
+			name: "strip empty thinking block but keep valid text",
 			initialMessages: func() []anthropic.MessageParam {
 				rawMessages := `[
 					{
@@ -479,10 +502,32 @@ func TestSaveConversationMessageCleanup(t *testing.T) {
 				require.NoError(t, err)
 				return messages
 			}(),
-			expectedMessages: []anthropic.MessageParam{
-				anthropic.NewUserMessage(anthropic.NewTextBlock("Hello")),
-			},
-			description: "should remove message with valid text but empty thinking block",
+			expectedMessages: func() []anthropic.MessageParam {
+				rawMessages := `[
+					{
+						"content": [
+							{
+								"text": "Hello",
+								"type": "text"
+							}
+						],
+						"role": "user"
+					},
+					{
+						"content": [
+							{
+								"text": "Hi there!",
+								"type": "text"
+							}
+						],
+						"role": "assistant"
+					}
+				]`
+				messages, err := DeserializeMessages([]byte(rawMessages))
+				require.NoError(t, err)
+				return messages
+			}(),
+			description: "should drop only the empty thinking block and keep the assistant text",
 		},
 		{
 			name: "preserve message with valid thinking block",
@@ -1051,7 +1096,7 @@ func TestExtractMessagesWithThinkingLeadingNewlines(t *testing.T) {
 	assert.Equal(t, "2+2 equals 4.", messages[2].Content)
 }
 
-func TestHasAnyEmptyBlock(t *testing.T) {
+func TestIsEmptyContentBlock(t *testing.T) {
 	tests := []struct {
 		name        string
 		message     anthropic.MessageParam
@@ -1201,14 +1246,67 @@ func TestHasAnyEmptyBlock(t *testing.T) {
 			expected:    false,
 			description: "should not detect tool use block as empty",
 		},
+		{
+			name: "message with signature-only thinking block",
+			message: anthropic.MessageParam{
+				Role: anthropic.MessageParamRoleAssistant,
+				Content: []anthropic.ContentBlockParamUnion{
+					{OfThinking: &anthropic.ThinkingBlockParam{Thinking: "", Signature: "CAIS4gMKhwEIEBgCKkD2CjQ"}},
+				},
+			},
+			expected:    false,
+			description: "should treat signature-only thinking block as meaningful content",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := hasAnyEmptyBlock(&tt.message)
+			result := slices.ContainsFunc(tt.message.Content, isEmptyContentBlock)
 			assert.Equal(t, tt.expected, result, tt.description)
 		})
 	}
+}
+
+// Adaptive thinking models emit signature-only thinking blocks.
+func TestCleanupPreservesAdaptiveThinkingFinalAnswer(t *testing.T) {
+	thread, err := NewAnthropicThread(llmtypes.Config{Model: anthropic.ModelClaudeOpus5})
+	require.NoError(t, err)
+
+	thread.messages = []anthropic.MessageParam{
+		anthropic.NewUserMessage(anthropic.NewTextBlock("do the thing")),
+		{
+			Role: anthropic.MessageParamRoleAssistant,
+			Content: []anthropic.ContentBlockParamUnion{
+				{OfThinking: &anthropic.ThinkingBlockParam{Thinking: "", Signature: "CAIS4gMKhwEIEBgCKkD2CjQ"}},
+				anthropic.NewTextBlock("Here is my final answer."),
+			},
+		},
+	}
+
+	thread.cleanupOrphanedMessages()
+
+	require.Len(t, thread.messages, 2, "final assistant answer must survive cleanup")
+	require.Len(t, thread.messages[1].Content, 2, "signature-only thinking block must be retained")
+	assert.Equal(t, "Here is my final answer.", thread.messages[1].Content[1].OfText.Text)
+}
+
+func TestCleanupDoesNotMutateInputSlice(t *testing.T) {
+	messages := []anthropic.MessageParam{
+		anthropic.NewUserMessage(anthropic.NewTextBlock("hello")),
+		{
+			Role: anthropic.MessageParamRoleAssistant,
+			Content: []anthropic.ContentBlockParamUnion{
+				anthropic.NewTextBlock("Hi there!"),
+				anthropic.NewTextBlock(""),
+			},
+		},
+	}
+
+	cleaned := cleanedAnthropicMessages(messages)
+
+	require.Len(t, cleaned, 2)
+	assert.Len(t, cleaned[1].Content, 1, "empty text block should be stripped from the copy")
+	assert.Len(t, messages[1].Content, 2, "input messages must not be mutated")
 }
 
 func TestStreamMessages_SimpleTextMessage(t *testing.T) {
