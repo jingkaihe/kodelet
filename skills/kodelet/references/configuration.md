@@ -22,7 +22,7 @@ export ANTHROPIC_API_KEY="sk-ant-api..."
 kodelet run --provider anthropic "query"
 ```
 
-Common model aliases in examples include `sonnet-46`, `haiku-45`, and `opus-48`. Check current config/source for the latest alias mapping.
+Common model aliases in examples include `sonnet-46`, `haiku-45`, `opus-48`, and `opus-5`. Check current config/source for the latest alias mapping.
 
 ### OpenAI
 
@@ -46,6 +46,7 @@ openai:
 aliases:
   haiku-45: claude-haiku-4-5-20251001
   opus-48: claude-opus-4-8
+  opus-5: claude-opus-5
   sonnet-46: claude-sonnet-4-6
 
 profile: default

@@ -819,7 +819,7 @@ profile: "anthropic"  # Optional: specify the active profile
 # Profile definitions
 profiles:
   anthropic:
-    model: "opus-48" # alias to "claude-opus-4-8"
+    model: "opus-5" # alias to "claude-opus-5"
     weak_model: "sonnet-46" # alias to "claude-sonnet-4-6"
     max_tokens: 64000
     weak_model_max_tokens: 8192
@@ -844,6 +844,7 @@ aliases:
     fable-5: claude-fable-5
     haiku-45: claude-haiku-4-5-20251001
     opus-48: claude-opus-4-8
+    opus-5: claude-opus-5
     sonnet-46: claude-sonnet-4-6
 ```
 
@@ -1022,6 +1023,7 @@ When output exceeds that budget, Kodelet writes the complete byte stream to a lo
 ### Anthropic Claude
 
 Kodelet supports various Anthropic Claude models:
+- `claude-opus-5` (latest Opus model, recommended default for coding and agentic work)
 - `claude-fable-5` (most capable widely released model for demanding reasoning and long-horizon agentic work)
 - `claude-sonnet-4-6` (recommended for standard tasks)
 - `claude-haiku-4-5-20251001` (recommended for lightweight tasks)

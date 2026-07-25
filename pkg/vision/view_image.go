@@ -35,6 +35,7 @@ var modelsSupportingOriginalImageDetail = map[string]struct{}{
 	// Anthropic models with automatic high-resolution image input.
 	"claude-fable-5":  {},
 	"claude-mythos-5": {},
+	"claude-opus-5":   {},
 	"claude-opus-4-8": {},
 	"claude-opus-4-7": {},
 	"claude-sonnet-5": {},

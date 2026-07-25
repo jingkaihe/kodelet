@@ -347,6 +347,8 @@ func TestGetModelPricingMatchesFamiliesAndDefault(t *testing.T) {
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeFable5], getModelPricing("claude-fable-5-latest"))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeSonnet4_6], getModelPricing(anthropic.ModelClaudeSonnet4_6))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeSonnet4_5], getModelPricing("claude-sonnet-4-5-latest"))
+	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeOpus5], getModelPricing(anthropic.ModelClaudeOpus5))
+	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeOpus5], getModelPricing("claude-opus-5-latest"))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeOpus4_8], getModelPricing("claude-opus-4-8-latest"))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeOpus4_7], getModelPricing("claude-opus-4-7-latest"))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeOpus4_6], getModelPricing("claude-opus-4-6-custom"))
@@ -354,6 +356,17 @@ func TestGetModelPricingMatchesFamiliesAndDefault(t *testing.T) {
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeHaiku4_5], getModelPricing("claude-haiku-4-5-custom"))
 	assert.Equal(t, ModelPricingMap[modelClaude35Haiku], getModelPricing("claude-3-5-haiku-20241022"))
 	assert.Equal(t, ModelPricingMap[anthropic.ModelClaudeSonnet4_6], getModelPricing("unknown-model"))
+}
+
+func TestOpus5Pricing(t *testing.T) {
+	pricing := ModelPricingMap[anthropic.ModelClaudeOpus5]
+
+	assert.Equal(t, 0.000005, pricing.Input)
+	assert.Equal(t, 0.00000625, pricing.PromptCachingWrite5m)
+	assert.Equal(t, 0.00001, pricing.PromptCachingWrite1h)
+	assert.Equal(t, 0.0000005, pricing.PromptCachingRead)
+	assert.Equal(t, 0.000025, pricing.Output)
+	assert.Equal(t, 1_000_000, pricing.ContextWindow)
 }
 
 func TestFable5Pricing(t *testing.T) {
@@ -983,6 +996,11 @@ func TestIsThinkingModel(t *testing.T) {
 			expected: true,
 		},
 		{
+			name:     "opus 5 supports thinking",
+			model:    anthropic.ModelClaudeOpus5,
+			expected: true,
+		},
+		{
 			name:     "opus 4.8 supports thinking",
 			model:    anthropic.ModelClaudeOpus4_8,
 			expected: true,
@@ -1166,6 +1184,13 @@ func TestAnthropicReasoningEffortForModel(t *testing.T) {
 		{
 			name:       "xhigh is preserved on opus 4.8",
 			model:      anthropic.ModelClaudeOpus4_8,
+			configured: "xhigh",
+			expected:   anthropic.OutputConfigEffortXhigh,
+			ok:         true,
+		},
+		{
+			name:       "xhigh is preserved on opus 5",
+			model:      anthropic.ModelClaudeOpus5,
 			configured: "xhigh",
 			expected:   anthropic.OutputConfigEffortXhigh,
 			ok:         true,

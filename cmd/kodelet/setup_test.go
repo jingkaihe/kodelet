@@ -25,6 +25,7 @@ func TestRecommendedSetupConfigYAML_OpenAIProfilesUsePatchMode(t *testing.T) {
 	assert.Equal(t, "claude-fable-5", config.Aliases["fable-5"])
 	assert.Equal(t, "gpt-5.6-sol", config.Aliases["gpt-5.6"])
 	assert.Equal(t, "claude-opus-4-8", config.Aliases["opus-48"])
+	assert.Equal(t, "claude-opus-5", config.Aliases["opus-5"])
 	assert.Equal(t, []string{"low", "medium", "high", "xhigh"}, config.AllowedReasoningEfforts)
 
 	openAIProfile, ok := config.Profiles["openai"]
@@ -41,7 +42,7 @@ func TestRecommendedSetupConfigYAML_OpenAIProfilesUsePatchMode(t *testing.T) {
 	assert.Equal(t, "full", anthropicProfile["tool_mode"])
 	assert.Equal(t, true, anthropicProfile["enable_fs_search_tools"])
 	assert.Equal(t, 64000, anthropicProfile["max_tokens"])
-	assert.Equal(t, "opus-48", anthropicProfile["model"])
+	assert.Equal(t, "opus-5", anthropicProfile["model"])
 	assert.Equal(t, "max", anthropicProfile["reasoning_effort"])
 	assert.Equal(t, []any{"low", "medium", "high", "xhigh", "max"}, anthropicProfile["allowed_reasoning_efforts"])
 }
