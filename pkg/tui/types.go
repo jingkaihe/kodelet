@@ -55,6 +55,7 @@ type toolCall struct {
 	name            string
 	input           string
 	result          string
+	startedAt       time.Time
 	done            bool
 	failed          bool
 	structured      *tooltypes.StructuredToolResult

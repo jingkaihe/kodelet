@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
 )
@@ -64,9 +65,10 @@ func (m *model) applyChatEvent(event chat.ChatEvent) {
 		idx := m.ensureAssistantEntry()
 		blockIdx := appendToolBlock(&m.entries[idx])
 		m.entries[idx].blocks[blockIdx].tools = append(m.entries[idx].blocks[blockIdx].tools, toolCall{
-			id:    event.ToolCallID,
-			name:  event.ToolName,
-			input: event.Input,
+			id:        event.ToolCallID,
+			name:      event.ToolName,
+			input:     event.Input,
+			startedAt: time.Now(),
 		})
 	case "tool-update", "tool-result":
 		complete := event.Kind == "tool-result"
@@ -118,6 +120,7 @@ func (m *model) applyChatEvent(event chat.ChatEvent) {
 			id:         event.ToolCallID,
 			name:       toolName,
 			result:     resultText,
+			startedAt:  time.Now(),
 			done:       complete,
 			failed:     failed,
 			structured: event.ToolResult,

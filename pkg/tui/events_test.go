@@ -50,6 +50,7 @@ func TestApplyChatEventUpdatesConversationAndBlocks(t *testing.T) {
 	assert.Equal(t, "hello", m.entries[0].blocks[0].text)
 	assert.False(t, hasActiveThought(m.entries[0].blocks[1]))
 	assert.Contains(t, joinThoughts(m.entries[0].blocks[1].thoughts), "think")
+	assert.False(t, m.entries[0].blocks[2].tools[0].startedAt.IsZero())
 	assert.True(t, m.entries[0].blocks[2].tools[0].failed)
 	assert.Contains(t, m.entries[0].blocks[2].tools[0].result, "boom")
 	assert.Contains(t, m.entries[0].blocks[3].text, "model error")

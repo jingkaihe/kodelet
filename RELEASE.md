@@ -10,6 +10,8 @@ Rejected empty `old_text` in file edits at validation and execution time, and si
 
 Added a Biome configuration for the Web UI frontend.
 
+Highlighted TUI bash commands with theme-aware non-purple accents and displayed live elapsed time using a muted `· 6s` suffix.
+
 ## 0.5.11-beta
 
 Added persistent extension UI to the native TUI: informational transcript entries, passive widgets above or below the composer, and interactive overlay surfaces with anchors, percentage sizing, keyboard focus, and relative mouse input, exposed through the TypeScript SDK as `ctx.ui.appendTranscript`, `ctx.ui.setWidget`, and `ctx.ui.openSurface`, plus a drawing-board example extension.

@@ -255,7 +255,7 @@ func buildBashToolGroup(block assistantBlock, start, end int) toolRenderGroup {
 		changeIndex:  -1,
 		label:        fmt.Sprintf("Ran %d %s", count, pluralize(count, "command", "commands")),
 		runningLabel: fmt.Sprintf("Running %d %s", count, pluralize(count, "command", "commands")),
-		body:         bashToolsBody(bashTools),
+		body:         bashToolsBody(bashTools, time.Now()),
 		wrapBody:     true,
 		expanded:     block.expanded || anyExpandedTool(bashTools),
 		active:       hasActiveToolRange(bashTools),
@@ -265,17 +265,17 @@ func buildBashToolGroup(block assistantBlock, start, end int) toolRenderGroup {
 
 // bashToolsBody renders bash calls as the shell transcript they are, instead of
 // dumping the raw tool input JSON alongside the CLI-oriented result rendering.
-func bashToolsBody(tools []toolCall) string {
+func bashToolsBody(tools []toolCall, now time.Time) string {
 	parts := make([]string, 0, len(tools))
 	for _, tool := range tools {
-		if part := bashToolBody(tool); part != "" {
+		if part := bashToolBody(tool, now); part != "" {
 			parts = append(parts, part)
 		}
 	}
 	return strings.Join(parts, "\n\n")
 }
 
-func bashToolBody(tool toolCall) string {
+func bashToolBody(tool toolCall, now time.Time) string {
 	var meta tooltypes.BashMetadata
 	hasMeta := tool.structured != nil && tooltypes.ExtractMetadata(tool.structured.Metadata, &meta)
 
@@ -285,7 +285,7 @@ func bashToolBody(tool toolCall) string {
 		command = stringField(toolInputFields(tool.input), "command")
 	}
 	if command != "" {
-		lines = append(lines, "$ "+command+bashElapsedSuffix(tool, meta))
+		lines = append(lines, bashCommandLine(command, bashElapsed(tool, meta, now)))
 	}
 
 	errorText := bashErrorText(tool)
@@ -307,17 +307,29 @@ func bashToolBody(tool toolCall) string {
 	return strings.Join(lines, "\n")
 }
 
-// bashElapsedSuffix reports how long a command took, but only once it finished:
-// the elapsed time of a still-running command is not a meaningful result.
-func bashElapsedSuffix(tool toolCall, meta tooltypes.BashMetadata) string {
-	if !tool.done || meta.ExecutionTime < time.Second {
-		return ""
-	}
-	elapsed := formatTaskRunElapsed(meta.ExecutionTime.Milliseconds())
+func bashCommandLine(command, elapsed string) string {
+	line := renderPersistentStyle(bashCommandStyle, "$ "+command)
 	if elapsed == "" {
+		return line
+	}
+	return line + renderPersistentStyle(mutedStyle, "  ·  "+elapsed)
+}
+
+func bashElapsed(tool toolCall, meta tooltypes.BashMetadata, now time.Time) string {
+	elapsed := meta.ExecutionTime
+	if !tool.done {
+		if tool.structured != nil && !tool.structured.Timestamp.IsZero() {
+			if delta := now.Sub(tool.structured.Timestamp); delta > 0 {
+				elapsed += delta
+			}
+		} else if elapsed <= 0 && !tool.startedAt.IsZero() {
+			elapsed = now.Sub(tool.startedAt)
+		}
+	}
+	if elapsed <= 0 || (tool.done && elapsed < time.Second) {
 		return ""
 	}
-	return " (" + elapsed + ")"
+	return formatTaskRunElapsed(elapsed.Milliseconds())
 }
 
 func bashErrorText(tool toolCall) string {

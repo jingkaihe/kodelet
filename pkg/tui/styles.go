@@ -410,6 +410,7 @@ var (
 	thoughtBodyStyle         lipgloss.Style
 	toolHeaderStyle          lipgloss.Style
 	toolBodyStyle            lipgloss.Style
+	bashCommandStyle         lipgloss.Style
 	diffAddedStyle           lipgloss.Style
 	diffRemovedStyle         lipgloss.Style
 	steeringStyle            lipgloss.Style
@@ -463,6 +464,7 @@ func applyTheme(theme tuiTheme) {
 	thoughtBodyStyle = lipgloss.NewStyle().Foreground(themeColor(theme.ThoughtBody)).Italic(true)
 	toolHeaderStyle = lipgloss.NewStyle().Foreground(themeColor(theme.ToolHeader))
 	toolBodyStyle = lipgloss.NewStyle().Foreground(themeColor(theme.ToolBody))
+	bashCommandStyle = lipgloss.NewStyle().Foreground(themeColor(theme.Markdown.Code))
 	diffAddedStyle = lipgloss.NewStyle().Foreground(themeColor(theme.DiffAdded))
 	diffRemovedStyle = lipgloss.NewStyle().Foreground(themeColor(theme.DiffRemoved))
 	steeringStyle = lipgloss.NewStyle().Foreground(themeColor(theme.Steering)).Italic(true)

@@ -223,7 +223,7 @@ func TestRenderTranscriptRendersBashGroupAsShellTranscript(t *testing.T) {
 	assert.Contains(t, plain, "✗ Ran 2 commands")
 	assert.Contains(t, plain, "$ cd /repo && mise run build")
 	assert.Contains(t, plain, "command is banned: cd")
-	assert.Contains(t, plain, "$ mise run build (14s)")
+	assert.Contains(t, plain, "$ mise run build  ·  14s")
 	assert.Contains(t, plain, "build ok")
 	assert.NotContains(t, plain, "input: {")
 	assert.NotContains(t, plain, "Exit Code:")
@@ -231,40 +231,59 @@ func TestRenderTranscriptRendersBashGroupAsShellTranscript(t *testing.T) {
 	assert.NotContains(t, plain, "Execution Time:")
 }
 
-func TestRenderTranscriptOmitsExecutionTimeForRunningBash(t *testing.T) {
-	m := newModel(context.Background(), Config{})
-	t.Cleanup(m.cancel)
-	m.width = 120
-	m.height = 40
-	m.resize()
-	m.entries = []chatEntry{{
-		kind: entryAssistant,
-		blocks: []assistantBlock{{
-			kind: blockTools,
-			tools: []toolCall{{
-				name:  "bash",
-				input: `{"command":"mise run build"}`,
-				structured: &tooltypes.StructuredToolResult{
-					ToolName: "bash",
-					Success:  true,
-					Metadata: &tooltypes.BashMetadata{
-						Command:       "mise run build",
-						Output:        "compiling…\n",
-						ExecutionTime: 7 * time.Second,
-					},
-				},
-			}},
-		}},
-	}}
+func TestBashToolBodyAdvancesElapsedTimeWhileRunning(t *testing.T) {
+	observedAt := time.Date(2026, time.July, 25, 12, 0, 0, 0, time.UTC)
+	tool := toolCall{
+		name:  "bash",
+		input: `{"command":"mise run build"}`,
+		structured: &tooltypes.StructuredToolResult{
+			ToolName:  "bash",
+			Success:   true,
+			Timestamp: observedAt,
+			Metadata: &tooltypes.BashMetadata{
+				Command:       "mise run build",
+				Output:        "compiling…\n",
+				ExecutionTime: 7 * time.Second,
+			},
+		},
+	}
 
-	content, _ := m.renderTranscript()
-	plain := xansi.Strip(content)
+	plain := xansi.Strip(bashToolBody(tool, observedAt.Add(2*time.Second)))
 
-	assert.Contains(t, plain, "Running 1 command")
-	assert.Contains(t, plain, "$ mise run build")
+	assert.Contains(t, plain, "$ mise run build  ·  9s")
 	assert.Contains(t, plain, "compiling…")
-	assert.NotContains(t, plain, "(7s)")
-	assert.NotContains(t, plain, "Execution Time:")
+	assert.NotContains(t, plain, "(")
+}
+
+func TestBashToolBodyUsesStartTimeBeforeFirstUpdate(t *testing.T) {
+	startedAt := time.Date(2026, time.July, 25, 12, 0, 0, 0, time.UTC)
+	tool := toolCall{name: "bash", input: `{"command":"mise run lint"}`, startedAt: startedAt}
+
+	plain := xansi.Strip(bashToolBody(tool, startedAt.Add(2*time.Second)))
+
+	assert.Contains(t, plain, "$ mise run lint  ·  2s")
+}
+
+func TestBashCommandLineUsesThemeAccentAndMutedElapsed(t *testing.T) {
+	withANSI256ColorProfile(t)
+
+	for _, themeName := range []string{DefaultThemeName, LightThemeName, "tokyo-night"} {
+		t.Run(themeName, func(t *testing.T) {
+			m := newModel(context.Background(), Config{Theme: themeName})
+			t.Cleanup(m.cancel)
+
+			line := bashCommandLine("mise run lint", "6s")
+			commandStart, _ := styleSequences(bashCommandStyle)
+			elapsedStart, _ := styleSequences(mutedStyle)
+			expectedCommandStart, _ := styleSequences(lipgloss.NewStyle().Foreground(themeColor(m.theme.Markdown.Code)))
+			purpleStart, _ := styleSequences(lipgloss.NewStyle().Foreground(themeColor(m.theme.Markdown.HeadingPrimary)))
+
+			assert.Equal(t, expectedCommandStart, commandStart)
+			assert.NotEqual(t, purpleStart, commandStart)
+			assert.Contains(t, line, commandStart+"$ mise run lint")
+			assert.Contains(t, line, elapsedStart+"  ·  6s")
+		})
+	}
 }
 
 func TestDedicatedBuiltinToolLabels(t *testing.T) {
