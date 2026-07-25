@@ -67,6 +67,12 @@ type extensionUITransportErrorMsg struct {
 	owner extensions.UIExtensionOwner
 }
 
+type extensionUITranscriptMsg struct {
+	owner   extensions.UIExtensionOwner
+	title   string
+	message string
+}
+
 type tuiExtensionUIHost struct {
 	mu                 sync.Mutex
 	surfaceLifecycleMu sync.Mutex
@@ -98,6 +104,37 @@ func newTUIExtensionUIHost(ch chan<- tea.Msg, done <-chan struct{}) *tuiExtensio
 		pendingS:   map[extensionUIKey]pendingExtensionSurface{},
 		widgetSeq:  map[extensionUIKey]uint64{},
 		surfaceSeq: map[extensionUIKey]uint64{},
+	}
+}
+
+func (h *tuiExtensionUIHost) AppendTranscript(ctx context.Context, source extensions.UIExtensionSource, request extensions.UITranscriptAppendRequest) (extensions.UITranscriptAppendResponse, error) {
+	if source == nil {
+		return extensions.UITranscriptAppendResponse{}, errors.New("extension UI source is required")
+	}
+	owner := source.ExtensionUIOwner()
+	if strings.TrimSpace(owner.ExtensionID) == "" || owner.Generation == 0 {
+		return extensions.UITranscriptAppendResponse{}, errors.New("extension UI owner is invalid")
+	}
+	title := sanitizeExtensionTranscriptText(request.Title)
+	message := sanitizeExtensionTranscriptText(request.Message)
+	if strings.TrimSpace(title) == "" && strings.TrimSpace(message) == "" {
+		return extensions.UITranscriptAppendResponse{}, errors.New("extension transcript entry is empty")
+	}
+
+	h.mu.Lock()
+	if _, closed := h.closed[owner]; closed {
+		h.mu.Unlock()
+		return extensions.UITranscriptAppendResponse{Reason: "extension process generation is closed"}, nil
+	}
+	h.mu.Unlock()
+
+	select {
+	case <-ctx.Done():
+		return extensions.UITranscriptAppendResponse{}, ctx.Err()
+	case <-h.done:
+		return extensions.UITranscriptAppendResponse{Reason: "extension UI host is closed"}, nil
+	case h.ch <- extensionUITranscriptMsg{owner: owner, title: title, message: message}:
+		return extensions.UITranscriptAppendResponse{Accepted: true}, nil
 	}
 }
 
@@ -831,6 +868,16 @@ func sanitizeExtensionUIText(text string) string {
 		}
 		return r
 	}, text)
+}
+
+func sanitizeExtensionTranscriptText(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	lines := strings.Split(text, "\n")
+	for index := range lines {
+		lines[index] = sanitizeExtensionUIText(lines[index])
+	}
+	return strings.Join(lines, "\n")
 }
 
 func normalizeExtensionUIColor(color string) string {

@@ -150,7 +150,7 @@ func compactJSON(input string) string {
 	return string(data)
 }
 
-func indentText(text, prefix string) string {
+func indentText(text string) string {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return ""
@@ -158,9 +158,9 @@ func indentText(text, prefix string) string {
 	lines := strings.Split(text, "\n")
 	for i, line := range lines {
 		if strings.TrimSpace(line) == "" {
-			lines[i] = prefix
+			lines[i] = "  "
 		} else {
-			lines[i] = prefix + line
+			lines[i] = "  " + line
 		}
 	}
 	return strings.Join(lines, "\n")

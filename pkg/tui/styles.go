@@ -406,14 +406,16 @@ var (
 	assistantMarkdownStyle ansi.StyleConfig
 	thoughtMarkdownStyle   ansi.StyleConfig
 
-	thoughtHeaderStyle lipgloss.Style
-	thoughtBodyStyle   lipgloss.Style
-	toolHeaderStyle    lipgloss.Style
-	toolBodyStyle      lipgloss.Style
-	diffAddedStyle     lipgloss.Style
-	diffRemovedStyle   lipgloss.Style
-	steeringStyle      lipgloss.Style
-	steeringErrorStyle lipgloss.Style
+	thoughtHeaderStyle       lipgloss.Style
+	thoughtBodyStyle         lipgloss.Style
+	toolHeaderStyle          lipgloss.Style
+	toolBodyStyle            lipgloss.Style
+	diffAddedStyle           lipgloss.Style
+	diffRemovedStyle         lipgloss.Style
+	steeringStyle            lipgloss.Style
+	steeringErrorStyle       lipgloss.Style
+	transcriptInfoTitleStyle lipgloss.Style
+	transcriptInfoBodyStyle  lipgloss.Style
 
 	inputBorderStyle                 lipgloss.Style
 	inputLabelStyle                  lipgloss.Style
@@ -465,6 +467,8 @@ func applyTheme(theme tuiTheme) {
 	diffRemovedStyle = lipgloss.NewStyle().Foreground(themeColor(theme.DiffRemoved))
 	steeringStyle = lipgloss.NewStyle().Foreground(themeColor(theme.Steering)).Italic(true)
 	steeringErrorStyle = lipgloss.NewStyle().Foreground(themeColor(theme.SteeringError))
+	transcriptInfoTitleStyle = lipgloss.NewStyle().Foreground(themeColor(theme.UI.NotificationTitle)).Bold(true)
+	transcriptInfoBodyStyle = lipgloss.NewStyle().Foreground(themeColor(theme.UI.NotificationBody))
 
 	inputBorderStyle = lipgloss.NewStyle().Foreground(themeColor(theme.InputBorder))
 	inputLabelStyle = lipgloss.NewStyle().Foreground(themeColor(theme.InputLabel))

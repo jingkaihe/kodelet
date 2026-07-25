@@ -1443,7 +1443,16 @@ await ctx.ui.notify({
 
 ### Persistent TUI Widgets and Interactive Surfaces
 
-The native `kodelet chat` TUI lets extensions keep passive widgets and interactive overlay surfaces alive after the command, tool, or event handler that created them returns. These APIs are capability-gated: `ctx.ui.setWidget(...)` does nothing when widgets are unavailable, while `ctx.ui.openSurface(...)` rejects when the host has no interactive surface support. The Web UI, ACP, and headless modes do not currently advertise these capabilities.
+The native `kodelet chat` TUI lets extensions append informational transcript entries and keep passive widgets and interactive overlay surfaces alive after the command, tool, or event handler that created them returns. These APIs are capability-gated: `ctx.ui.appendTranscript(...)` and `ctx.ui.setWidget(...)` do nothing when unavailable, while `ctx.ui.openSurface(...)` rejects when the host has no interactive surface support. The Web UI, ACP, and headless modes do not currently advertise these capabilities.
+
+Informational transcript entries are persistent within the active TUI session and render as distinct non-user, non-assistant entries. They are useful for durable extension status and copyable file paths.
+
+```typescript
+await ctx.ui.appendTranscript({
+  title: "Drawing saved",
+  message: "./drawing.png",
+});
+```
 
 Passive widgets accept plain strings or styled lines and can be placed above or below the composer. Calling `setWidget` again with the same ID updates it; passing `undefined` removes it.
 

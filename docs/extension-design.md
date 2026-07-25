@@ -361,7 +361,8 @@ Kodelet starts the extension executable, then sends:
         "select": true,
         "notify": true,
         "widgets": true,
-        "surfaces": true
+        "surfaces": true,
+        "transcript": true
       },
       "events": [
         "session.start",
@@ -507,7 +508,7 @@ Renderers accept at most 14 visible activities: up to 8 running, 3 recently comp
 
 ### Persistent widgets and interactive surfaces
 
-The native Bubble Tea TUI advertises `capabilities.ui.widgets` and `capabilities.ui.surfaces`. Headless, ACP, and Web UI runtimes currently advertise these capabilities as false, so extension authors must treat them as optional. The TypeScript SDK makes `ctx.ui.setWidget(...)` a no-op when widgets are unavailable and rejects `ctx.ui.openSurface(...)` when surfaces are unavailable.
+The native Bubble Tea TUI advertises `capabilities.ui.transcript`, `capabilities.ui.widgets`, and `capabilities.ui.surfaces`. Headless, ACP, and Web UI runtimes currently advertise these capabilities as false, so extension authors must treat them as optional. The TypeScript SDK makes `ctx.ui.appendTranscript(...)` and `ctx.ui.setWidget(...)` no-ops when unavailable and rejects `ctx.ui.openSurface(...)` when surfaces are unavailable.
 
 Every UI object is scoped to one extension process generation and an extension-chosen ID. Process generation is part of host ownership rather than the wire payload: when a process fails or restarts, the host removes every widget and surface owned by the failed generation, restores focus to the next capturing surface, and rejects queued events from the old generation.
 
@@ -515,6 +516,7 @@ Extension-to-host methods:
 
 | Method | Transport | Purpose |
 |---|---|---|
+| `kodelet.ui.transcript.append` | Request | Append a persistent informational entry that is neither a user nor assistant message. |
 | `kodelet.ui.widget.set` | Request | Create or replace a passive widget and its placement. |
 | `kodelet.ui.widget.frame` | Request or notification | Replace an existing widget frame. Notifications are intended for coalescible presentation updates. |
 | `kodelet.ui.widget.remove` | Request | Remove a widget. |

@@ -194,7 +194,13 @@ The workspace example uses this to ask users whether to allow or deny bash comma
 
 ## Persistent TUI widgets and surfaces
 
-The native `kodelet chat` host advertises `capabilities.ui.widgets` and `capabilities.ui.surfaces`. Other hosts currently do not: `ctx.ui.setWidget(...)` becomes a no-op without widget support, and `ctx.ui.openSurface(...)` rejects without surface support.
+The native `kodelet chat` host advertises `capabilities.ui.transcript`, `capabilities.ui.widgets`, and `capabilities.ui.surfaces`. Other hosts currently do not: `ctx.ui.appendTranscript(...)` and `ctx.ui.setWidget(...)` become no-ops without support, and `ctx.ui.openSurface(...)` rejects without surface support.
+
+Use `appendTranscript` for durable informational text that should appear in the transcript without being represented as a user or assistant message.
+
+```typescript
+await ctx.ui.appendTranscript({ title: "Drawing saved", message: "./drawing.png" });
+```
 
 Use `setWidget` for passive text or styled-line content above or below the composer. Reusing an ID updates the widget, and passing `undefined` removes it.
 

@@ -141,6 +141,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case extensionUITranscriptMsg:
+		m.entries = append(m.entries, chatEntry{kind: entryInfo, title: msg.title, content: msg.message})
+		m.refreshViewport(m.autoFollow)
+		return m, waitForMsg(m.runCh)
+
 	case uiPromptRequestMsg:
 		if msg.runID != m.activeRunID {
 			return m, waitForMsg(m.runCh)

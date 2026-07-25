@@ -30,14 +30,15 @@ const (
 	UISurfaceInputFocus = "focus"
 	UISurfaceInputBlur  = "blur"
 
-	UIWidgetSetMethod     = "kodelet.ui.widget.set"
-	UIWidgetFrameMethod   = "kodelet.ui.widget.frame"
-	UIWidgetRemoveMethod  = "kodelet.ui.widget.remove"
-	UISurfaceOpenMethod   = "kodelet.ui.surface.open"
-	UISurfaceFrameMethod  = "kodelet.ui.surface.frame"
-	UISurfaceCloseMethod  = "kodelet.ui.surface.close"
-	UISurfaceInputMethod  = "extension.ui.surface.input"
-	UISurfaceResizeMethod = "extension.ui.surface.resize"
+	UIWidgetSetMethod        = "kodelet.ui.widget.set"
+	UIWidgetFrameMethod      = "kodelet.ui.widget.frame"
+	UIWidgetRemoveMethod     = "kodelet.ui.widget.remove"
+	UITranscriptAppendMethod = "kodelet.ui.transcript.append"
+	UISurfaceOpenMethod      = "kodelet.ui.surface.open"
+	UISurfaceFrameMethod     = "kodelet.ui.surface.frame"
+	UISurfaceCloseMethod     = "kodelet.ui.surface.close"
+	UISurfaceInputMethod     = "extension.ui.surface.input"
+	UISurfaceResizeMethod    = "extension.ui.surface.resize"
 )
 
 // UIExtensionOwner identifies one running generation of an extension process.
@@ -203,6 +204,18 @@ type UIWidgetRemoveRequest struct {
 	Sequence uint64 `json:"sequence"`
 }
 
+// UITranscriptAppendRequest appends a persistent informational TUI transcript entry.
+type UITranscriptAppendRequest struct {
+	Title   string `json:"title,omitempty"`
+	Message string `json:"message"`
+}
+
+// UITranscriptAppendResponse reports whether an informational entry was accepted.
+type UITranscriptAppendResponse struct {
+	Accepted bool   `json:"accepted"`
+	Reason   string `json:"reason,omitempty"`
+}
+
 // UISurfaceOpenRequest creates or replaces an interactive overlay surface.
 type UISurfaceOpenRequest struct {
 	ID      string           `json:"id"`
@@ -304,6 +317,11 @@ type ExtensionUIHost interface {
 	UpdateSurface(ctx context.Context, source UIExtensionSource, request UISurfaceFrameRequest) (UIFrameResponse, error)
 	CloseSurface(ctx context.Context, source UIExtensionSource, request UISurfaceCloseRequest) (UIFrameResponse, error)
 	CleanupExtensionUI(owner UIExtensionOwner)
+}
+
+// ExtensionUITranscriptHost optionally accepts persistent informational transcript entries.
+type ExtensionUITranscriptHost interface {
+	AppendTranscript(ctx context.Context, source UIExtensionSource, request UITranscriptAppendRequest) (UITranscriptAppendResponse, error)
 }
 
 type extensionUIHostContextKey struct{}

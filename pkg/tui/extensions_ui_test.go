@@ -99,6 +99,25 @@ func TestTUIExtensionUIHostPreparesSurfaceEventsBeforePublishingOpen(t *testing.
 	}
 }
 
+func TestTUIExtensionUIHostAppendsSanitizedTranscriptEntry(t *testing.T) {
+	ch := make(chan tea.Msg, 1)
+	host := newTUIExtensionUIHost(ch, nil)
+	source := &fakeExtensionUISource{owner: extensions.UIExtensionOwner{ExtensionID: "drawing", Generation: 1}}
+
+	response, err := host.AppendTranscript(context.Background(), source, extensions.UITranscriptAppendRequest{
+		Title:   "Saved\x1b[31m",
+		Message: "./drawing.png\ncopy\tthis",
+	})
+
+	require.NoError(t, err)
+	assert.True(t, response.Accepted)
+	msg, ok := (<-ch).(extensionUITranscriptMsg)
+	require.True(t, ok)
+	assert.Equal(t, source.owner, msg.owner)
+	assert.Equal(t, "Saved", msg.title)
+	assert.Equal(t, "./drawing.png\ncopy this", msg.message)
+}
+
 func TestTUIExtensionUIHostCoalescesLatestWidgetAndSurfaceFrames(t *testing.T) {
 	ch := make(chan tea.Msg, 8)
 	host := newTUIExtensionUIHost(ch, nil)

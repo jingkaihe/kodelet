@@ -36,10 +36,19 @@ func TestUIFrameLineSupportsPlainAndStyledJSON(t *testing.T) {
 }
 
 type recordingExtensionUIHost struct {
-	mu       sync.Mutex
-	set      []UIWidgetSetRequest
-	owners   []UIExtensionOwner
-	cleanups []UIExtensionOwner
+	mu         sync.Mutex
+	set        []UIWidgetSetRequest
+	transcript []UITranscriptAppendRequest
+	owners     []UIExtensionOwner
+	cleanups   []UIExtensionOwner
+}
+
+func (h *recordingExtensionUIHost) AppendTranscript(_ context.Context, source UIExtensionSource, request UITranscriptAppendRequest) (UITranscriptAppendResponse, error) {
+	h.mu.Lock()
+	h.transcript = append(h.transcript, request)
+	h.owners = append(h.owners, source.ExtensionUIOwner())
+	h.mu.Unlock()
+	return UITranscriptAppendResponse{Accepted: true}, nil
 }
 
 func (h *recordingExtensionUIHost) SetWidget(_ context.Context, source UIExtensionSource, request UIWidgetSetRequest) (UIFrameResponse, error) {
@@ -102,6 +111,17 @@ func TestProcessExtensionUISourceRoutesRequestsAndCleansFailedGeneration(t *test
 	assert.True(t, response.Accepted)
 	require.Len(t, host.set, 1)
 	assert.Equal(t, "ready", host.set[0].Frame.Lines[0].Spans[0].Text)
+
+	result, rpcErr = source.HandleRPCRequest(context.Background(), UITranscriptAppendMethod, json.RawMessage(`{
+		"title":"Saved",
+		"message":"./drawing.png"
+	}`))
+	require.Nil(t, rpcErr)
+	transcriptResponse, ok := result.(UITranscriptAppendResponse)
+	require.True(t, ok)
+	assert.True(t, transcriptResponse.Accepted)
+	require.Len(t, host.transcript, 1)
+	assert.Equal(t, "./drawing.png", host.transcript[0].Message)
 
 	process.failClientGeneration(client)
 	assert.True(t, process.closed)

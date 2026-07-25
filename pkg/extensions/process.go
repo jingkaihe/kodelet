@@ -232,7 +232,9 @@ func (p *Process) initialize(ctx context.Context, cwd string, client *rpcClient,
 		p.uiMu.Unlock()
 	}
 	p.uiMu.RLock()
-	hasExtensionUI = p.uiHost != nil
+	activeUIHost := p.uiHost
+	hasExtensionUI = activeUIHost != nil
+	_, hasExtensionTranscript := activeUIHost.(ExtensionUITranscriptHost)
 	p.uiMu.RUnlock()
 
 	dataDir, err := extensionDataDir(p.Extension.ID)
@@ -255,12 +257,13 @@ func (p *Process) initialize(ctx context.Context, cwd string, client *rpcClient,
 			"toolUpdates": true,
 			"commands":    true,
 			"ui": map[string]any{
-				"input":    true,
-				"confirm":  true,
-				"select":   true,
-				"notify":   true,
-				"widgets":  hasExtensionUI,
-				"surfaces": hasExtensionUI,
+				"input":      true,
+				"confirm":    true,
+				"select":     true,
+				"notify":     true,
+				"widgets":    hasExtensionUI,
+				"surfaces":   hasExtensionUI,
+				"transcript": hasExtensionTranscript,
 			},
 			"events": []string{
 				"session.start",
@@ -456,6 +459,22 @@ func (p *Process) handleRPCRequest(ctx context.Context, source UIExtensionSource
 		return p.handleExtensionUIRequest(func(host ExtensionUIHost) (UIFrameResponse, error) {
 			return host.RemoveWidget(ctx, source, request)
 		})
+	case UITranscriptAppendMethod:
+		var request UITranscriptAppendRequest
+		if err := json.Unmarshal(params, &request); err != nil {
+			return nil, &rpcError{Code: -32602, Message: err.Error()}
+		}
+		p.uiMu.RLock()
+		host, ok := p.uiHost.(ExtensionUITranscriptHost)
+		p.uiMu.RUnlock()
+		if !ok {
+			return UITranscriptAppendResponse{Reason: "extension transcript is not available"}, nil
+		}
+		response, err := host.AppendTranscript(ctx, source, request)
+		if err != nil {
+			return nil, &rpcError{Code: -32000, Message: err.Error()}
+		}
+		return response, nil
 	case UISurfaceOpenMethod:
 		var request UISurfaceOpenRequest
 		if err := json.Unmarshal(params, &request); err != nil {

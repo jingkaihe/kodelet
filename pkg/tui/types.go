@@ -35,6 +35,7 @@ type entryKind int
 const (
 	entryUser entryKind = iota
 	entryAssistant
+	entryInfo
 )
 
 type detailKind int
@@ -86,6 +87,7 @@ type assistantBlock struct {
 
 type chatEntry struct {
 	kind    entryKind
+	title   string
 	content string
 	blocks  []assistantBlock
 }

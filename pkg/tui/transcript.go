@@ -51,7 +51,7 @@ func (m *model) renderTranscript() (string, []detailRegion) {
 					regions = append(regions, detailRegion{entryIndex: i, blockIndex: blockIdx, kind: detailThoughts, line: line})
 					line++
 					if block.expanded || hasActiveThought(block) {
-						body := indentText(m.renderMarkdown(joinThoughts(block.thoughts), m.transcriptTextWidth()-2, markdownThought), "  ")
+						body := indentText(m.renderMarkdown(joinThoughts(block.thoughts), m.transcriptTextWidth()-2, markdownThought))
 						if strings.TrimSpace(body) != "" {
 							b.WriteString("\n")
 							line++
@@ -92,7 +92,7 @@ func (m *model) renderTranscript() (string, []detailRegion) {
 								line += lineCount(rendered)
 								continue
 							}
-							body = indentText(body, "  ")
+							body = indentText(body)
 							if strings.TrimSpace(body) != "" {
 								rendered := renderPersistentStyle(toolBodyStyle, body)
 								b.WriteString(rendered)
@@ -112,6 +112,19 @@ func (m *model) renderTranscript() (string, []detailRegion) {
 						line += lineCount(rendered)
 					}
 				}
+			}
+		case entryInfo:
+			if title := strings.TrimSpace(entry.title); title != "" {
+				rendered := renderPersistentStyle(transcriptInfoTitleStyle, "◆ "+wrapText(title, max(1, m.transcriptTextWidth()-2)))
+				b.WriteString(rendered)
+				b.WriteString("\n")
+				line += lineCount(rendered)
+			}
+			if content := strings.TrimSpace(entry.content); content != "" {
+				rendered := renderPersistentStyle(transcriptInfoBodyStyle, indentText(wrapPreservingWhitespace(content, max(1, m.transcriptTextWidth()-2))))
+				b.WriteString(rendered)
+				b.WriteString("\n")
+				line += lineCount(rendered)
 			}
 		}
 	}

@@ -57,7 +57,7 @@ func TestViewAndFormattingHelpers(t *testing.T) {
 	assert.Equal(t, "def", rest)
 	assert.Equal(t, "plain", compactJSON(" plain "))
 	assert.Equal(t, `{"a":1}`, compactJSON("{\n  \"a\": 1\n}"))
-	assert.Equal(t, "  one\n  \n  two", indentText("one\n\ntwo", "  "))
+	assert.Equal(t, "  one\n  \n  two", indentText("one\n\ntwo"))
 	assert.Equal(t, 2, lineCount("one\ntwo"))
 	assert.True(t, strings.HasPrefix(rightLabeledBorder("╭", "╮", 12, "label"), "╭"))
 }

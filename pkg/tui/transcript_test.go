@@ -83,6 +83,23 @@ func TestRenderTranscriptUsesHeavyUserMessageBar(t *testing.T) {
 	assert.NotContains(t, plain, "│ please")
 }
 
+func TestRenderTranscriptInformationEntryIsNotAChatRole(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.resize()
+	m.entries = []chatEntry{{kind: entryInfo, title: "Drawing board saved", content: "./drawing.png\nCopy this path."}}
+
+	content, regions := m.renderTranscript()
+	plain := xansi.Strip(content)
+
+	assert.Empty(t, regions)
+	assert.Contains(t, plain, "◆ Drawing board saved")
+	assert.Contains(t, plain, "  ./drawing.png")
+	assert.NotContains(t, plain, "┃")
+}
+
 func TestRenderTranscriptGroupsToolBlocksByType(t *testing.T) {
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)
