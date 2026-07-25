@@ -8,10 +8,7 @@ export const renderWithRouter = (
   options?: RenderOptions
 ) => {
   const AllTheProviders = ({ children }: { children: React.ReactNode }) => {
-    return <BrowserRouter future={{
-      v7_startTransition: true,
-      v7_relativeSplatPath: true
-    }}>{children}</BrowserRouter>;
+    return <BrowserRouter>{children}</BrowserRouter>;
   };
 
   return render(ui, { wrapper: AllTheProviders, ...options });

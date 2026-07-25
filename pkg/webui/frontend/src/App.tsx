@@ -8,10 +8,7 @@ const TerminalPage = lazy(() => import('./pages/TerminalPage'));
 
 function App() {
   return (
-    <Router future={{
-      v7_startTransition: true,
-      v7_relativeSplatPath: true
-    }}>
+    <Router>
       <div className="min-h-screen">
         <ArcadeGames />
         <Suspense fallback={<div className="app-loading" role="status">Loading Kodelet…</div>}>

@@ -1171,7 +1171,9 @@ const ChatPage: React.FC = () => {
 		setCwdSuggestions([]);
 		setCwdSuggestionsOpen(false);
 		setCwdSuggestionIndex(-1);
-		startTransition(() => navigate("/"));
+		startTransition(() => {
+			navigate("/");
+		});
 		setNewChatDialogOpen(true);
 	};
 
@@ -1257,7 +1259,9 @@ const ChatPage: React.FC = () => {
 		}
 
 		setStreamError(null);
-		startTransition(() => navigate(`/c/${nextConversationId}`));
+		startTransition(() => {
+			navigate(`/c/${nextConversationId}`);
+		});
 	};
 
 	const handleForkConversation = async (sourceConversationId: string) => {
@@ -1265,7 +1269,9 @@ const ChatPage: React.FC = () => {
 			const response = await apiService.forkConversation(sourceConversationId);
 			await refreshConversations();
 			showToast("Conversation copied", "success");
-			startTransition(() => navigate(`/c/${response.conversation_id}`));
+			startTransition(() => {
+				navigate(`/c/${response.conversation_id}`);
+			});
 		} catch (error) {
 			const message =
 				error instanceof Error ? error.message : "Failed to copy conversation";
@@ -1304,7 +1310,9 @@ const ChatPage: React.FC = () => {
 				setConversationError(null);
 				setStreamError(null);
 				clearRunningConversation(targetConversationId);
-				startTransition(() => navigate("/"));
+				startTransition(() => {
+			navigate("/");
+		});
 			}
 
 			await refreshConversations();
@@ -1338,7 +1346,9 @@ const ChatPage: React.FC = () => {
 		conversationPathOverrideRef.current = nextPath;
 		viewedConversationIdRef.current = streamedId;
 		routerConversationIdRef.current = streamedId;
-		startTransition(() => navigate(nextPath, { replace: true }));
+		startTransition(() => {
+			navigate(nextPath, { replace: true });
+		});
 	};
 
 	const handleUIInputRequest = (event: ChatStreamEvent) => {
@@ -1700,9 +1710,9 @@ const ChatPage: React.FC = () => {
 				setMessages(conversationToChatMessages(latestConversation));
 				if (streamedConversationId !== routerConversationIdRef.current) {
 					conversationPathOverrideRef.current = null;
-					startTransition(() =>
-						navigate(`/c/${streamedConversationId}`, { replace: true }),
-					);
+					startTransition(() => {
+						navigate(`/c/${streamedConversationId}`, { replace: true });
+					});
 				}
 			}
 
