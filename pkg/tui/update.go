@@ -556,7 +556,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spinner, cmd = m.spinner.Update(msg)
 		if m.running {
 			m.workingFrame++
-			m.refreshViewport(m.autoFollow)
 		}
 		// The 100ms spinner tick doubles as the terminal-title refresh heartbeat.
 		cmds = append(cmds, cmd, m.refreshTerminalTitle(time.Now()))

@@ -14,6 +14,7 @@ const (
 	tuiRightMargin                   = 1
 	slashCommandBareQueryMaxRows     = 5
 	slashCommandFilteredQueryMaxRows = 8
+	transcriptSpinnerPlaceholder     = "\ue000"
 )
 
 var tuiWorkingMessages = []string{
@@ -32,7 +33,14 @@ var tuiFlowFrames = []string{
 }
 
 func (m *model) refreshViewport(scrollBottom bool) {
+	spinnerFrames := m.spinner.Spinner.Frames
+	placeholderFrames := make([]string, len(spinnerFrames))
+	for i := range placeholderFrames {
+		placeholderFrames[i] = transcriptSpinnerPlaceholder
+	}
+	m.spinner.Spinner.Frames = placeholderFrames
 	content, regions := m.renderTranscript()
+	m.spinner.Spinner.Frames = spinnerFrames
 	m.detailRegions = regions
 	m.viewport.SetContent(content)
 	m.pendingRefresh = false
@@ -48,7 +56,7 @@ func (m model) View() string {
 		return ""
 	}
 
-	transcript := m.viewport.View()
+	transcript := strings.ReplaceAll(m.viewport.View(), transcriptSpinnerPlaceholder, m.spinnerGlyph())
 	historySearch := m.renderHistorySearch()
 	slashSuggestions := m.renderSlashCommandSuggestions()
 	profilePicker := m.renderProfilePicker()

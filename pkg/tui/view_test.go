@@ -7,6 +7,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
@@ -394,6 +395,40 @@ func TestRunningIndicatorRendersInComposerBottomBorder(t *testing.T) {
 	assert.NotContains(t, bottomBorder, "Gathering the next clue…")
 	assert.NotContains(t, bottomBorder, "working…")
 	assert.Contains(t, bottomBorder, displayCWD(m.cwd))
+}
+
+func TestTranscriptSpinnerAnimatesWithoutViewportRefresh(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 12
+	m.resize()
+	m.running = true
+	m.entries = []chatEntry{{
+		kind: entryAssistant,
+		blocks: []assistantBlock{{
+			kind:     blockThoughts,
+			thoughts: []thoughtBlock{{text: "working"}},
+		}},
+	}}
+	m.refreshViewport(true)
+
+	viewportContent := m.viewport.View()
+	firstGlyph := m.spinnerGlyph()
+	firstView := xansi.Strip(m.View())
+	require.Equal(t, 1, lipgloss.Width(transcriptSpinnerPlaceholder))
+	assert.Contains(t, viewportContent, transcriptSpinnerPlaceholder)
+	assert.Contains(t, firstView, firstGlyph+" Thinking…")
+
+	updated, _ := m.Update(spinner.TickMsg{})
+	m = updated.(model)
+	secondGlyph := m.spinnerGlyph()
+	secondView := xansi.Strip(m.View())
+
+	assert.NotEqual(t, firstGlyph, secondGlyph)
+	assert.Equal(t, viewportContent, m.viewport.View())
+	assert.Contains(t, secondView, secondGlyph+" Thinking…")
+	assert.NotContains(t, secondView, transcriptSpinnerPlaceholder)
 }
 
 func TestComposerLabelThemeColors(t *testing.T) {
