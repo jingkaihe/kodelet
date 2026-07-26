@@ -293,6 +293,17 @@ func TestCtrlOTogglesDetails(t *testing.T) {
 			thoughts: []thoughtBlock{{text: "toggle me", done: true}},
 		}},
 	}}
+	widgetKey := extensionUIKey{owner: extensions.UIExtensionOwner{ExtensionID: "widgets", Generation: 1}, id: "status"}
+	m.extensionWidgets[widgetKey] = tuiExtensionWidget{
+		key:       widgetKey,
+		placement: extensions.UIWidgetPlacementAboveComposer,
+		frame: extensions.UIFrame{Sequence: 1, Lines: []extensions.UIFrameLine{
+			{Spans: []extensions.UIStyledSpan{{Text: "Status"}}},
+			{Spans: []extensions.UIStyledSpan{{Text: "widget detail"}}},
+		}},
+	}
+	m.rebuildExtensionWidgetOrder()
+	m.resize()
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
 	m = updated.(model)
@@ -300,7 +311,19 @@ func TestCtrlOTogglesDetails(t *testing.T) {
 
 	assert.Nil(t, cmd)
 	assert.True(t, m.entries[0].blocks[0].expanded)
+	assert.False(t, m.collapsedWidgets[widgetKey])
 	assert.Contains(t, content, "toggle me")
+	assert.Contains(t, xansi.Strip(m.renderExtensionWidgets(extensions.UIWidgetPlacementAboveComposer)), "widget detail")
+
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+	m = updated.(model)
+	content, _ = m.renderTranscript()
+
+	assert.Nil(t, cmd)
+	assert.False(t, m.entries[0].blocks[0].expanded)
+	assert.True(t, m.collapsedWidgets[widgetKey])
+	assert.NotContains(t, content, "toggle me")
+	assert.NotContains(t, xansi.Strip(m.renderExtensionWidgets(extensions.UIWidgetPlacementAboveComposer)), "widget detail")
 }
 
 func TestQuestionMarkOpensShortcutsDialogWhenComposerEmpty(t *testing.T) {

@@ -325,6 +325,7 @@ func TestTUIExtensionWidgetsAboveComposerOffsetSettingsHitTargets(t *testing.T) 
 		placement: extensions.UIWidgetPlacementAboveComposer,
 		frame:     extensionTestFrame(1, "status"),
 	}
+	m.rebuildExtensionWidgetOrder()
 	m.resize()
 
 	composerTop := m.viewport.Height + m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer)
@@ -339,24 +340,187 @@ func TestTUIExtensionWidgetsAboveComposerOffsetSettingsHitTargets(t *testing.T) 
 	assert.True(t, m.reasoningComposerRegionContains(tuiLeftMargin+reasoningStart, composerTop))
 }
 
-func TestTUIExtensionWidgetsBoundEachPlacementToTenLines(t *testing.T) {
-	m := model{width: 80}
-	owner := extensions.UIExtensionOwner{ExtensionID: "widgets", Generation: 1}
-	m.extensionWidgets = map[extensionUIKey]tuiExtensionWidget{}
-	for widgetIndex, id := range []string{"a", "b"} {
-		lines := make([]extensions.UIFrameLine, 8)
-		for lineIndex := range lines {
-			lines[lineIndex] = extensions.UIFrameLine{Spans: []extensions.UIStyledSpan{{Text: fmt.Sprintf("%d-%d", widgetIndex, lineIndex)}}}
-		}
-		key := extensionUIKey{owner: owner, id: id}
-		m.extensionWidgets[key] = tuiExtensionWidget{key: key, placement: extensions.UIWidgetPlacementAboveComposer, frame: extensions.UIFrame{Sequence: 1, Lines: lines}}
+func TestTUIExtensionWidgetsFoldFromFirstLine(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+	m.width = 80
+	m.height = 24
+	key := extensionUIKey{owner: extensions.UIExtensionOwner{ExtensionID: "widgets", Generation: 1}, id: "status"}
+	m.extensionWidgets[key] = tuiExtensionWidget{
+		key:       key,
+		placement: extensions.UIWidgetPlacementAboveComposer,
+		frame: extensions.UIFrame{Sequence: 1, Lines: []extensions.UIFrameLine{
+			{Spans: []extensions.UIStyledSpan{{Text: "Build status"}}},
+			{Spans: []extensions.UIStyledSpan{{Text: "tests passing"}}},
+			{Spans: []extensions.UIStyledSpan{{Text: "lint clean"}}},
+		}},
 	}
+	m.rebuildExtensionWidgetOrder()
+	m.resize()
+
+	expandedViewportHeight := m.viewport.Height
+	rendered := xansi.Strip(m.renderExtensionWidgets(extensions.UIWidgetPlacementAboveComposer))
+	assert.Contains(t, rendered, "Build status ▾")
+	assert.Contains(t, rendered, "tests passing")
+	assert.Contains(t, rendered, "lint clean")
+
+	headerY := m.viewport.Height
+	handled := m.routeExtensionWidgetMouse(tea.MouseMsg{
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+		X:      tuiLeftMargin,
+		Y:      headerY,
+	})
+	require.True(t, handled)
+	assert.True(t, m.collapsedWidgets[key])
+	assert.Equal(t, expandedViewportHeight+2, m.viewport.Height)
+	rendered = xansi.Strip(m.renderExtensionWidgets(extensions.UIWidgetPlacementAboveComposer))
+	assert.Contains(t, rendered, "Build status ▸")
+	assert.NotContains(t, rendered, "tests passing")
+	assert.NotContains(t, rendered, "lint clean")
+
+	headerY = m.viewport.Height
+	handled = m.routeExtensionWidgetMouse(tea.MouseMsg{
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+		X:      tuiLeftMargin,
+		Y:      headerY,
+	})
+	require.True(t, handled)
+	assert.NotContains(t, m.collapsedWidgets, key)
+	assert.Equal(t, expandedViewportHeight, m.viewport.Height)
+	rendered = xansi.Strip(m.renderExtensionWidgets(extensions.UIWidgetPlacementAboveComposer))
+	assert.Contains(t, rendered, "Build status ▾")
+	assert.Contains(t, rendered, "tests passing")
+}
+
+func TestTUIExtensionWidgetFoldStateSurvivesUpdatesAndClearsOnRemoval(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+	m.width = 80
+	m.height = 24
+	m.resize()
+	key := extensionUIKey{owner: extensions.UIExtensionOwner{ExtensionID: "widgets", Generation: 1}, id: "status"}
+	widget := tuiExtensionWidget{
+		key:       key,
+		placement: extensions.UIWidgetPlacementAboveComposer,
+		frame: extensions.UIFrame{Sequence: 1, Lines: []extensions.UIFrameLine{
+			{Spans: []extensions.UIStyledSpan{{Text: "Status"}}},
+			{Spans: []extensions.UIStyledSpan{{Text: "first"}}},
+		}},
+	}
+
+	m.applyExtensionUIBatch(extensionUIBatch{widgets: []pendingExtensionWidget{{widget: widget}}})
+	m.collapsedWidgets[key] = true
+	widget.frame = extensions.UIFrame{Sequence: 2, Lines: []extensions.UIFrameLine{
+		{Spans: []extensions.UIStyledSpan{{Text: "Status updated"}}},
+		{Spans: []extensions.UIStyledSpan{{Text: "second"}}},
+	}}
+	m.applyExtensionUIBatch(extensionUIBatch{widgets: []pendingExtensionWidget{{widget: widget}}})
+
+	assert.True(t, m.collapsedWidgets[key])
+	rendered := xansi.Strip(m.renderExtensionWidgets(extensions.UIWidgetPlacementAboveComposer))
+	assert.Contains(t, rendered, "Status updated ▸")
+	assert.NotContains(t, rendered, "second")
+
+	m.applyExtensionUIBatch(extensionUIBatch{widgets: []pendingExtensionWidget{{widget: tuiExtensionWidget{key: key}, remove: true}}})
+	assert.NotContains(t, m.collapsedWidgets, key)
+}
+
+func TestTUIExtensionWidgetsContainScrollingWithinTenLines(t *testing.T) {
+	m := newModel(context.Background(), Config{Profile: "default", ProfileOptions: []string{"default", "work"}})
+	t.Cleanup(m.cancel)
+	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+	m.width = 80
+	m.height = 40
+	m.profilePickerOpen = true
+	owner := extensions.UIExtensionOwner{ExtensionID: "widgets", Generation: 1}
+	for placementIndex, placement := range []string{extensions.UIWidgetPlacementAboveComposer, extensions.UIWidgetPlacementBelowComposer} {
+		for widgetIndex, id := range []string{"a", "b"} {
+			lines := make([]extensions.UIFrameLine, 8)
+			for lineIndex := range lines {
+				lines[lineIndex] = extensions.UIFrameLine{Spans: []extensions.UIStyledSpan{{Text: fmt.Sprintf("%d-%d-%d", placementIndex, widgetIndex, lineIndex)}}}
+			}
+			key := extensionUIKey{owner: owner, id: placement + id}
+			m.extensionWidgets[key] = tuiExtensionWidget{key: key, placement: placement, frame: extensions.UIFrame{Sequence: 1, Lines: lines}}
+		}
+	}
+	m.rebuildExtensionWidgetOrder()
+	m.resize()
+	m.viewport.SetContent(strings.Repeat("transcript\n", 100))
+	m.viewport.GotoTop()
 
 	assert.Equal(t, maxExtensionWidgetLines, m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer))
 	rendered := strings.Split(m.renderExtensionWidgets(extensions.UIWidgetPlacementAboveComposer), "\n")
 	require.Len(t, rendered, maxExtensionWidgetLines)
-	assert.Contains(t, rendered[0], "0-0")
-	assert.Contains(t, rendered[9], "1-1")
+	assert.Contains(t, rendered[0], "0-0-0")
+	assert.Contains(t, rendered[9], "0-1-1")
+
+	require.Positive(t, m.profilePickerHeight())
+	aboveY := m.viewport.Height + m.profilePickerHeight()
+	m.viewport.SetYOffset(6)
+	updated, _ := m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp, X: tuiLeftMargin, Y: aboveY})
+	m = updated.(model)
+	assert.Zero(t, m.widgetOffsets[extensions.UIWidgetPlacementAboveComposer])
+	assert.Equal(t, 6, m.viewport.YOffset)
+	m.viewport.GotoTop()
+
+	updated, _ = m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown, X: tuiLeftMargin, Y: aboveY})
+	m = updated.(model)
+	assert.Equal(t, extensionWidgetScrollStep, m.widgetOffsets[extensions.UIWidgetPlacementAboveComposer])
+	assert.Zero(t, m.viewport.YOffset)
+	rendered = strings.Split(m.renderExtensionWidgets(extensions.UIWidgetPlacementAboveComposer), "\n")
+	require.Len(t, rendered, maxExtensionWidgetLines)
+	assert.Contains(t, rendered[0], "0-0-3")
+	assert.Contains(t, rendered[9], "0-1-4")
+
+	belowY := aboveY + maxExtensionWidgetLines + inputHeight + 2
+	updated, _ = m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown, X: tuiLeftMargin, Y: belowY})
+	m = updated.(model)
+	assert.Equal(t, extensionWidgetScrollStep, m.widgetOffsets[extensions.UIWidgetPlacementBelowComposer])
+	rendered = strings.Split(m.renderExtensionWidgets(extensions.UIWidgetPlacementBelowComposer), "\n")
+	assert.Contains(t, rendered[0], "1-0-3")
+	assert.Contains(t, rendered[9], "1-1-4")
+
+	updated, _ = m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown, X: tuiLeftMargin, Y: aboveY})
+	m = updated.(model)
+	assert.Equal(t, 6, m.widgetOffsets[extensions.UIWidgetPlacementAboveComposer])
+	assert.Zero(t, m.viewport.YOffset)
+
+	updated, _ = m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown, X: tuiLeftMargin, Y: aboveY})
+	m = updated.(model)
+	assert.Equal(t, 6, m.widgetOffsets[extensions.UIWidgetPlacementAboveComposer])
+	assert.Zero(t, m.viewport.YOffset)
+
+	rendered = strings.Split(m.renderExtensionWidgets(extensions.UIWidgetPlacementAboveComposer), "\n")
+	assert.Contains(t, rendered[0], "0-0-6")
+	assert.Contains(t, rendered[9], "0-1-7")
+}
+
+func TestTUIExtensionWidgetScrollOffsetsClampAfterUpdatesAndRemoval(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+	m.width = 80
+	m.height = 24
+	m.resize()
+	key := extensionUIKey{owner: extensions.UIExtensionOwner{ExtensionID: "widgets", Generation: 1}, id: "status"}
+	widget := tuiExtensionWidget{
+		key:       key,
+		placement: extensions.UIWidgetPlacementAboveComposer,
+		frame:     extensions.UIFrame{Sequence: 1, Lines: make([]extensions.UIFrameLine, 16)},
+	}
+	m.applyExtensionUIBatch(extensionUIBatch{widgets: []pendingExtensionWidget{{widget: widget}}})
+	m.widgetOffsets[extensions.UIWidgetPlacementAboveComposer] = 6
+
+	widget.frame = extensions.UIFrame{Sequence: 2, Lines: make([]extensions.UIFrameLine, 12)}
+	m.applyExtensionUIBatch(extensionUIBatch{widgets: []pendingExtensionWidget{{widget: widget}}})
+	assert.Equal(t, 2, m.widgetOffsets[extensions.UIWidgetPlacementAboveComposer])
+
+	m.applyExtensionUIBatch(extensionUIBatch{widgets: []pendingExtensionWidget{{widget: tuiExtensionWidget{key: key}, remove: true}}})
+	assert.Zero(t, m.widgetOffsets[extensions.UIWidgetPlacementAboveComposer])
 }
 
 func TestTUIExtensionSurfaceLayoutFocusAndInputRouting(t *testing.T) {

@@ -14,7 +14,10 @@ import (
 	"github.com/pkg/errors"
 )
 
-const maxExtensionWidgetLines = 10
+const (
+	maxExtensionWidgetLines   = 10
+	extensionWidgetScrollStep = 3
+)
 
 type extensionUIKey struct {
 	owner extensions.UIExtensionOwner
@@ -25,6 +28,13 @@ type tuiExtensionWidget struct {
 	key       extensionUIKey
 	placement string
 	frame     extensions.UIFrame
+}
+
+type extensionWidgetLine struct {
+	key      extensionUIKey
+	line     extensions.UIFrameLine
+	header   bool
+	expanded bool
 }
 
 type extensionSurfaceLayout struct {
@@ -512,6 +522,9 @@ func (m *model) applyExtensionUIBatch(batch extensionUIBatch) tea.Cmd {
 	if m.extensionWidgets == nil {
 		m.extensionWidgets = map[extensionUIKey]tuiExtensionWidget{}
 	}
+	if m.collapsedWidgets == nil {
+		m.collapsedWidgets = map[extensionUIKey]bool{}
+	}
 	if m.extensionSurfaces == nil {
 		m.extensionSurfaces = map[extensionUIKey]tuiExtensionSurface{}
 	}
@@ -520,11 +533,14 @@ func (m *model) applyExtensionUIBatch(batch extensionUIBatch) tea.Cmd {
 	if oldFocused {
 		oldFocus = m.extensionSurfaces[oldFocusKey]
 	}
+	widgetOrderChanged := false
 
 	for _, owner := range batch.cleanups {
 		for key := range m.extensionWidgets {
 			if key.owner == owner {
 				delete(m.extensionWidgets, key)
+				delete(m.collapsedWidgets, key)
+				widgetOrderChanged = true
 			}
 		}
 		for key := range m.extensionSurfaces {
@@ -535,12 +551,18 @@ func (m *model) applyExtensionUIBatch(batch extensionUIBatch) tea.Cmd {
 		}
 	}
 	for _, mutation := range batch.widgets {
+		widgetOrderChanged = true
 		if mutation.remove {
 			delete(m.extensionWidgets, mutation.widget.key)
+			delete(m.collapsedWidgets, mutation.widget.key)
 			continue
 		}
 		m.extensionWidgets[mutation.widget.key] = mutation.widget
 	}
+	if widgetOrderChanged {
+		m.rebuildExtensionWidgetOrder()
+	}
+	m.clampExtensionWidgetScrollOffsets()
 	for _, mutation := range batch.surfaces {
 		key := mutation.surface.key
 		if mutation.remove {
@@ -772,40 +794,172 @@ func resolveExtensionSize(value extensions.UISizeValue, available, fallback int)
 }
 
 func (m model) extensionWidgetsHeight(placement string) int {
-	height := 0
-	for _, widget := range m.sortedExtensionWidgets(placement) {
-		height += min(len(widget.frame.Lines), maxExtensionWidgetLines-height)
-		if height == maxExtensionWidgetLines {
-			break
-		}
-	}
-	return height
+	return min(m.extensionWidgetLineCount(placement), maxExtensionWidgetLines)
 }
 
 func (m model) renderExtensionWidgets(placement string) string {
 	width := m.contentWidth()
-	lines := []string{}
-	for _, widget := range m.sortedExtensionWidgets(placement) {
-		limit := min(len(widget.frame.Lines), maxExtensionWidgetLines-len(lines))
-		for _, line := range widget.frame.Lines[:limit] {
-			lines = append(lines, renderExtensionFrameLine(line, width))
+	offset := min(m.extensionWidgetScrollOffset(placement), max(0, m.extensionWidgetLineCount(placement)-maxExtensionWidgetLines))
+	lines := make([]string, 0, maxExtensionWidgetLines)
+	index := 0
+	m.walkExtensionWidgetLines(placement, func(line extensionWidgetLine) bool {
+		if index < offset {
+			index++
+			return true
 		}
-		if len(lines) == maxExtensionWidgetLines {
-			break
-		}
-	}
+		lines = append(lines, renderExtensionWidgetLine(line, width))
+		return len(lines) < maxExtensionWidgetLines
+	})
 	return strings.Join(lines, "\n")
 }
 
-func (m model) sortedExtensionWidgets(placement string) []tuiExtensionWidget {
-	widgets := []tuiExtensionWidget{}
-	for _, widget := range m.extensionWidgets {
-		if widget.placement == placement {
-			widgets = append(widgets, widget)
+func (m model) extensionWidgetLineCount(placement string) int {
+	count := 0
+	for key, widget := range m.extensionWidgets {
+		if widget.placement != placement || len(widget.frame.Lines) == 0 {
+			continue
+		}
+		count++
+		if !m.collapsedWidgets[key] {
+			count += len(widget.frame.Lines) - 1
 		}
 	}
-	sort.Slice(widgets, func(i, j int) bool { return extensionUIKeyLess(widgets[i].key, widgets[j].key) })
-	return widgets
+	return count
+}
+
+func (m model) extensionWidgetLineAt(placement string, target int) (extensionWidgetLine, bool) {
+	index := 0
+	var targetLine extensionWidgetLine
+	found := false
+	m.walkExtensionWidgetLines(placement, func(line extensionWidgetLine) bool {
+		if index == target {
+			targetLine = line
+			found = true
+			return false
+		}
+		index++
+		return true
+	})
+	return targetLine, found
+}
+
+func (m model) walkExtensionWidgetLines(placement string, visit func(extensionWidgetLine) bool) {
+	for _, key := range m.widgetOrder {
+		widget, ok := m.extensionWidgets[key]
+		if !ok || widget.placement != placement {
+			continue
+		}
+		if len(widget.frame.Lines) == 0 {
+			continue
+		}
+		foldable := len(widget.frame.Lines) > 1
+		collapsed := foldable && m.collapsedWidgets[widget.key]
+		if !visit(extensionWidgetLine{
+			key:      widget.key,
+			line:     widget.frame.Lines[0],
+			header:   foldable,
+			expanded: !collapsed,
+		}) {
+			return
+		}
+		if !collapsed {
+			for _, line := range widget.frame.Lines[1:] {
+				if !visit(extensionWidgetLine{key: widget.key, line: line}) {
+					return
+				}
+			}
+		}
+	}
+}
+
+func (m model) extensionWidgetScrollOffset(placement string) int {
+	return max(0, m.widgetOffsets[placement])
+}
+
+func (m *model) clampExtensionWidgetScrollOffsets() {
+	if m.widgetOffsets == nil {
+		m.widgetOffsets = map[string]int{}
+	}
+	for _, placement := range []string{extensions.UIWidgetPlacementAboveComposer, extensions.UIWidgetPlacementBelowComposer} {
+		maximum := max(0, m.extensionWidgetLineCount(placement)-maxExtensionWidgetLines)
+		m.widgetOffsets[placement] = min(m.extensionWidgetScrollOffset(placement), maximum)
+	}
+}
+
+func (m *model) routeExtensionWidgetMouse(msg tea.MouseMsg) bool {
+	if msg.Action != tea.MouseActionPress {
+		return false
+	}
+	if msg.Button != tea.MouseButtonLeft && msg.Button != tea.MouseButtonWheelUp && msg.Button != tea.MouseButtonWheelDown {
+		return false
+	}
+	if msg.Shift && msg.Button != tea.MouseButtonLeft {
+		return false
+	}
+	if msg.X < tuiLeftMargin || msg.X >= tuiLeftMargin+m.contentWidth() {
+		return false
+	}
+
+	aboveTop := m.viewport.Height + m.historySearchHeight() + m.slashCommandSuggestionsHeight() + m.profilePickerHeight() + m.reasoningPickerHeight()
+	aboveHeight := m.extensionWidgetsHeight(extensions.UIWidgetPlacementAboveComposer)
+	belowTop := aboveTop + aboveHeight + inputHeight + 2
+	belowHeight := m.extensionWidgetsHeight(extensions.UIWidgetPlacementBelowComposer)
+	placement := ""
+	row := 0
+	switch {
+	case msg.Y >= aboveTop && msg.Y < aboveTop+aboveHeight:
+		placement = extensions.UIWidgetPlacementAboveComposer
+		row = msg.Y - aboveTop
+	case msg.Y >= belowTop && msg.Y < belowTop+belowHeight:
+		placement = extensions.UIWidgetPlacementBelowComposer
+		row = msg.Y - belowTop
+	default:
+		return false
+	}
+
+	maximum := max(0, m.extensionWidgetLineCount(placement)-maxExtensionWidgetLines)
+	offset := min(m.extensionWidgetScrollOffset(placement), maximum)
+	if msg.Button == tea.MouseButtonLeft {
+		line, ok := m.extensionWidgetLineAt(placement, offset+row)
+		if !ok || !line.header {
+			return false
+		}
+		if m.collapsedWidgets == nil {
+			m.collapsedWidgets = map[extensionUIKey]bool{}
+		}
+		if line.expanded {
+			m.collapsedWidgets[line.key] = true
+		} else {
+			delete(m.collapsedWidgets, line.key)
+		}
+		m.clampExtensionWidgetScrollOffsets()
+		m.resize()
+		m.refreshViewport(false)
+		return true
+	}
+
+	if maximum == 0 {
+		return false
+	}
+	if m.widgetOffsets == nil {
+		m.widgetOffsets = map[string]int{}
+	}
+	if msg.Button == tea.MouseButtonWheelUp {
+		offset -= extensionWidgetScrollStep
+	} else {
+		offset += extensionWidgetScrollStep
+	}
+	nextOffset := max(0, min(offset, maximum))
+	m.widgetOffsets[placement] = nextOffset
+	return true
+}
+
+func (m *model) rebuildExtensionWidgetOrder() {
+	m.widgetOrder = make([]extensionUIKey, 0, len(m.extensionWidgets))
+	for key := range m.extensionWidgets {
+		m.widgetOrder = append(m.widgetOrder, key)
+	}
+	sort.Slice(m.widgetOrder, func(i, j int) bool { return extensionUIKeyLess(m.widgetOrder[i], m.widgetOrder[j]) })
 }
 
 func (m model) overlayExtensionSurfaces(lines []string) []string {
@@ -833,6 +987,24 @@ func (m model) overlayExtensionSurfaces(lines []string) []string {
 }
 
 func renderExtensionFrameLine(line extensions.UIFrameLine, width int) string {
+	return padVisible(xansi.Cut(renderExtensionFrameLineContent(line), 0, width), width)
+}
+
+func renderExtensionWidgetLine(line extensionWidgetLine, width int) string {
+	if !line.header {
+		return renderExtensionFrameLine(line.line, width)
+	}
+	chevron := "▸"
+	if line.expanded {
+		chevron = "▾"
+	}
+	suffix := renderPersistentStyle(mutedStyle, " "+chevron)
+	contentWidth := max(0, width-lipgloss.Width(" "+chevron))
+	content := xansi.Cut(renderExtensionFrameLineContent(line.line), 0, contentWidth)
+	return padVisible(xansi.Cut(content+suffix, 0, width), width)
+}
+
+func renderExtensionFrameLineContent(line extensions.UIFrameLine) string {
 	var rendered strings.Builder
 	for _, span := range line.Spans {
 		text := sanitizeExtensionUIText(span.Text)
@@ -851,7 +1023,7 @@ func renderExtensionFrameLine(line extensions.UIFrameLine, width int) string {
 		}
 		rendered.WriteString(style.Render(text))
 	}
-	return padVisible(xansi.Cut(rendered.String(), 0, width), width)
+	return rendered.String()
 }
 
 func sanitizeExtensionUIText(text string) string {

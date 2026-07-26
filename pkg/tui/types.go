@@ -117,6 +117,9 @@ type model struct {
 	extensionRuntimes *extensions.RuntimeManager
 	extensionUI       *tuiExtensionUIHost
 	extensionWidgets  map[extensionUIKey]tuiExtensionWidget
+	widgetOrder       []extensionUIKey
+	collapsedWidgets  map[extensionUIKey]bool
+	widgetOffsets     map[string]int
 	extensionSurfaces map[extensionUIKey]tuiExtensionSurface
 	// extensionSurfaceOrder is both the overlay z-order and the focus stack.
 	extensionSurfaceOrder []extensionUIKey

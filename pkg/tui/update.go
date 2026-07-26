@@ -340,6 +340,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "ctrl+o":
 			m.toggleAllDetails()
+			m.resize()
 			m.refreshViewport(false)
 			return m, nil
 		case "ctrl+g":
@@ -440,6 +441,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if cmd, handled := m.routeExtensionSurfaceMouse(msg); handled {
 			return m, cmd
+		}
+		if m.routeExtensionWidgetMouse(msg) {
+			return m, nil
 		}
 		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
 			if optionIndex, ok := m.profilePickerOptionAt(msg.X, msg.Y); ok {

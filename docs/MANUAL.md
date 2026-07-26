@@ -1456,7 +1456,7 @@ await ctx.ui.appendTranscript({
 });
 ```
 
-Passive widgets accept plain strings or styled lines and can be placed above or below the composer. Calling `setWidget` again with the same ID updates it; passing `undefined` removes it.
+Passive widgets accept plain strings or styled lines and can be placed above or below the composer. Multi-line widgets use their first line as an always-visible summary and start expanded; click that row to fold or unfold the remaining lines, or press `Ctrl+O` to toggle widgets with transcript details. Each placement shows up to ten visible rows and can be scrolled with the mouse wheel when its content is taller. Calling `setWidget` again with the same ID updates it without resetting its fold state; passing `undefined` removes it.
 
 ```typescript
 await ctx.ui.setWidget(

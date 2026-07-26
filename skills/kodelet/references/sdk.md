@@ -202,7 +202,7 @@ Use `appendTranscript` for durable informational text that should appear in the 
 await ctx.ui.appendTranscript({ title: "Drawing saved", message: "./drawing.png" });
 ```
 
-Use `setWidget` for passive text or styled-line content above or below the composer. Reusing an ID updates the widget, and passing `undefined` removes it.
+Use `setWidget` for passive text or styled-line content above or below the composer. For multi-line widgets, make the first line a useful summary: the native TUI keeps it visible while the user folds or unfolds the remaining lines by clicking it or pressing `Ctrl+O`. Widgets start expanded, and reusing an ID updates the widget without resetting its fold state; passing `undefined` removes it.
 
 ```typescript
 await ctx.ui.setWidget("status", [

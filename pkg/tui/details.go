@@ -24,6 +24,14 @@ func (m *model) toggleAllDetails() {
 			break
 		}
 	}
+	if !shouldExpand {
+		for key, widget := range m.extensionWidgets {
+			if len(widget.frame.Lines) > 1 && m.collapsedWidgets[key] {
+				shouldExpand = true
+				break
+			}
+		}
+	}
 	for i := len(m.entries) - 1; i >= 0; i-- {
 		if m.entries[i].kind != entryAssistant {
 			continue
@@ -34,6 +42,20 @@ func (m *model) toggleAllDetails() {
 			}
 		}
 	}
+	if m.collapsedWidgets == nil {
+		m.collapsedWidgets = map[extensionUIKey]bool{}
+	}
+	for key, widget := range m.extensionWidgets {
+		if len(widget.frame.Lines) <= 1 {
+			continue
+		}
+		if shouldExpand {
+			delete(m.collapsedWidgets, key)
+		} else {
+			m.collapsedWidgets[key] = true
+		}
+	}
+	m.clampExtensionWidgetScrollOffsets()
 }
 
 func isDetailBlock(block assistantBlock) bool {

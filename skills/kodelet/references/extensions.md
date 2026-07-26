@@ -98,7 +98,7 @@ During local development, a wrapper can run `tsx` against `src/index.ts`, as sho
 - Recipe-like commands use `kind: "recipe"`, appear in `kodelet recipe list`, and can be invoked through `kodelet run -r` or directly as `/name`.
 - Lifecycle handlers use `ext.on(...)` for events like `session.start`, `user.message`, `agent.init`, `turn.start`, `tool.call`, `tool.update`, `tool.result`, and `agent.end`.
 - Tool and event contexts can call host UI helpers such as `ctx.ui.input`, `ctx.ui.confirm`, `ctx.ui.select`, and `ctx.ui.notify`.
-- Native TUI contexts can call `ctx.ui.setWidget(...)` and `ctx.ui.openSurface(...)` when the host advertises `ui.widgets` and `ui.surfaces`.
+- Native TUI contexts can call `ctx.ui.setWidget(...)` and `ctx.ui.openSurface(...)` when the host advertises `ui.widgets` and `ui.surfaces`; multi-line widgets use their first line as a foldable summary in the TUI.
 
 Mutating/blocking event handlers run sequentially by priority, discovery order, then registration order. The first blocking handler stops the operation. Events use SDK `timeoutInSec` or the built-in 30 second default.
 
