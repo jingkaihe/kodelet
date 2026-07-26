@@ -129,6 +129,10 @@ type ExtensionRuntimeProvider interface {
 	Runtime(ctx context.Context, cwd string) (*extensions.Runtime, error)
 }
 
+type contextualExtensionRuntimeProvider interface {
+	RuntimeWithCallContext(ctx context.Context, cwd string, callContext extensions.ExtensionCallContext) (*extensions.Runtime, error)
+}
+
 // DefaultChatRunner executes chat turns using the same LLM/tool stack as the CLI.
 type DefaultChatRunner struct {
 	defaultCWD        string
@@ -267,7 +271,19 @@ func runDefaultChat(
 
 	var extensionRuntime *extensions.Runtime
 	if extensionRuntimes != nil {
-		extensionRuntime, err = extensionRuntimes.Runtime(ctx, resolvedCWD)
+		if contextualProvider, ok := extensionRuntimes.(contextualExtensionRuntimeProvider); ok {
+			extensionRuntime, err = contextualProvider.RuntimeWithCallContext(ctx, resolvedCWD, extensions.ExtensionCallContext{
+				ConversationID: sessionID,
+				CWD:            resolvedCWD,
+				Provider:       llmConfig.Provider,
+				Model:          llmConfig.Model,
+				Profile:        llmConfig.Profile,
+				RecipeName:     llmConfig.RecipeName,
+				InvokedBy:      "main",
+			})
+		} else {
+			extensionRuntime, err = extensionRuntimes.Runtime(ctx, resolvedCWD)
+		}
 	} else {
 		extensionRuntime, err = extensions.NewRuntimeFromViper(ctx, resolvedCWD)
 		if extensionRuntime != nil {

@@ -2,6 +2,7 @@ package extensions
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -83,7 +84,12 @@ func TestRuntimeManagerDiscoveryCachesCommandsBeforeLifecycle(t *testing.T) {
 	assert.ErrorIs(t, err, os.ErrNotExist)
 
 	runCtx := ContextWithUIInputBroker(context.Background(), staticUIInputBroker{value: "ready"})
-	active, err := manager.Runtime(runCtx, rootDir)
+	active, err := manager.RuntimeWithCallContext(runCtx, rootDir, ExtensionCallContext{
+		ConversationID: "conversation-123",
+		Provider:       "anthropic",
+		Model:          "claude-test",
+		Profile:        "work",
+	})
 	require.NoError(t, err)
 	assert.Same(t, discovered, active)
 	_, err = manager.Runtime(runCtx, rootDir)
@@ -93,6 +99,15 @@ func TestRuntimeManagerDiscoveryCachesCommandsBeforeLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, strings.Count(string(data), EventSessionStart+"\n"))
 	assert.Equal(t, 1, strings.Count(string(data), EventResourcesDiscover+"\n"))
+
+	contextData, err := os.ReadFile(filepath.Join(rootDir, "session-start-context.json"))
+	require.NoError(t, err)
+	var callContext ExtensionCallContext
+	require.NoError(t, json.Unmarshal(contextData, &callContext))
+	assert.Equal(t, "conversation-123", callContext.ConversationID)
+	assert.Equal(t, "anthropic", callContext.Provider)
+	assert.Equal(t, "claude-test", callContext.Model)
+	assert.Equal(t, "work", callContext.Profile)
 }
 
 func TestRuntimeManagerDoesNotCacheCreationFailures(t *testing.T) {

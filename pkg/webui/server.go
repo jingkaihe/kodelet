@@ -1297,12 +1297,11 @@ func (s *Server) handleGetSlashCommands(w http.ResponseWriter, r *http.Request) 
 	commands := slashcommands.List(r.Context(), processor)
 	var extensionRuntime *extensions.Runtime
 	if s.extensionRuntimes != nil {
-		extensionRuntime, err = s.extensionRuntimes.Runtime(r.Context(), resolvedCWD)
+		extensionRuntime, err = s.extensionRuntimes.RuntimeForCommandDiscovery(r.Context(), resolvedCWD)
 	} else {
-		extensionRuntime, err = extensions.NewRuntimeFromViper(r.Context(), resolvedCWD)
-		if extensionRuntime != nil {
-			defer func() { _ = extensionRuntime.Close() }()
-		}
+		runtimeManager := extensions.NewRuntimeManager()
+		defer func() { _ = runtimeManager.Close() }()
+		extensionRuntime, err = runtimeManager.RuntimeForCommandDiscovery(r.Context(), resolvedCWD)
 	}
 	if err != nil {
 		logger.G(r.Context()).WithError(err).Warn("Failed to initialize extensions for slash command discovery")

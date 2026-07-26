@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -32,6 +33,22 @@ func TestNewModelSharesPersistentExtensionRuntimeManagerWithDefaultRunner(t *tes
 	require.True(t, ok)
 	require.NotNil(t, m.extensionRuntimes)
 	assert.Same(t, m.extensionRuntimes, runner.ExtensionRuntimeProvider())
+}
+
+func TestNewModelProvidesIdleExtensionUIBroker(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+
+	_, hasInput := extensions.UIInputBrokerFromContext(m.ctx)
+	_, hasConfirm := extensions.UIConfirmBrokerFromContext(m.ctx)
+	_, hasSelect := extensions.UISelectBrokerFromContext(m.ctx)
+	_, hasNotify := extensions.UINotifyBrokerFromContext(m.ctx)
+
+	assert.True(t, hasInput)
+	assert.True(t, hasConfirm)
+	assert.True(t, hasSelect)
+	assert.True(t, hasNotify)
 }
 
 func TestTUISinkStopsBlockingWhenUICloses(t *testing.T) {

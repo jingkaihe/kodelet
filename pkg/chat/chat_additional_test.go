@@ -66,6 +66,21 @@ func (p *fakeExtensionRuntimeProvider) Runtime(context.Context, string) (*extens
 	return p.runtime, nil
 }
 
+type fakeContextualExtensionRuntimeProvider struct {
+	fakeExtensionRuntimeProvider
+	contextualCalls int
+	cwd             string
+	callContext     extensions.ExtensionCallContext
+	err             error
+}
+
+func (p *fakeContextualExtensionRuntimeProvider) RuntimeWithCallContext(_ context.Context, cwd string, callContext extensions.ExtensionCallContext) (*extensions.Runtime, error) {
+	p.contextualCalls++
+	p.cwd = cwd
+	p.callContext = callContext
+	return p.runtime, p.err
+}
+
 type fakeMetadataThread struct {
 	metadata   map[string]any
 	closed     bool
@@ -135,6 +150,43 @@ func TestNewDefaultChatRunnerStoresExtensionRuntimeProvider(t *testing.T) {
 
 	require.NotNil(t, runner)
 	assert.Same(t, provider, runner.extensionRuntimes)
+}
+
+func TestRunDefaultChatPassesConversationContextToRuntimeProvider(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	}()
+
+	viper.Reset()
+	viper.Set("provider", "anthropic")
+	viper.Set("model", "claude-test")
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	workspace := t.TempDir()
+	sentinel := errors.New("stop after runtime acquisition")
+	provider := &fakeContextualExtensionRuntimeProvider{err: sentinel}
+
+	conversationID, err := RunDefaultChat(
+		context.Background(),
+		ChatRequest{Message: "hello", CWD: workspace},
+		&recordingChatSink{},
+		"",
+		provider,
+	)
+
+	require.ErrorIs(t, err, sentinel)
+	assert.NotEmpty(t, conversationID)
+	assert.Equal(t, 1, provider.contextualCalls)
+	assert.Zero(t, provider.calls)
+	assert.Equal(t, workspace, provider.cwd)
+	assert.Equal(t, conversationID, provider.callContext.ConversationID)
+	assert.Equal(t, workspace, provider.callContext.CWD)
+	assert.Equal(t, "anthropic", provider.callContext.Provider)
+	assert.Equal(t, "claude-test", provider.callContext.Model)
+	assert.Equal(t, "main", provider.callContext.InvokedBy)
 }
 
 func TestDefaultChatRunnerReusesAndClosesConversationThread(t *testing.T) {

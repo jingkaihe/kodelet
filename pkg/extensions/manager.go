@@ -36,15 +36,21 @@ func newRuntimeManager(factory runtimeFactory) *RuntimeManager {
 
 // Runtime returns the runtime associated with cwd, creating it on first use.
 func (m *RuntimeManager) Runtime(ctx context.Context, cwd string) (*Runtime, error) {
-	return m.runtime(ctx, cwd, true)
+	return m.runtime(ctx, cwd, true, ExtensionCallContext{})
+}
+
+// RuntimeWithCallContext returns the runtime associated with cwd and starts its
+// lifecycle with the supplied call context when it has not already started.
+func (m *RuntimeManager) RuntimeWithCallContext(ctx context.Context, cwd string, callContext ExtensionCallContext) (*Runtime, error) {
+	return m.runtime(ctx, cwd, true, callContext)
 }
 
 // RuntimeForCommandDiscovery returns a cached runtime without starting session lifecycle events.
 func (m *RuntimeManager) RuntimeForCommandDiscovery(ctx context.Context, cwd string) (*Runtime, error) {
-	return m.runtime(ctx, cwd, false)
+	return m.runtime(ctx, cwd, false, ExtensionCallContext{})
 }
 
-func (m *RuntimeManager) runtime(ctx context.Context, cwd string, startLifecycle bool) (*Runtime, error) {
+func (m *RuntimeManager) runtime(ctx context.Context, cwd string, startLifecycle bool, callContext ExtensionCallContext) (*Runtime, error) {
 	if m == nil {
 		return nil, errors.New("extension runtime manager is required")
 	}
@@ -69,7 +75,7 @@ func (m *RuntimeManager) runtime(ctx context.Context, cwd string, startLifecycle
 		m.runtimes[key] = runtime
 	}
 	if startLifecycle {
-		runtime.startLifecycle(ctx)
+		runtime.startLifecycle(ctx, callContext)
 	}
 	return runtime, nil
 }

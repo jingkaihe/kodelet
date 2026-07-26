@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	xansi "github.com/charmbracelet/x/ansi"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/messagehistory"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
@@ -181,6 +182,63 @@ func TestInitDefersSlashCommandsUntilResumedHistoryLoads(t *testing.T) {
 	m = updated.(model)
 	require.NotNil(t, cmd)
 	assert.False(t, m.initialHistoryPending)
+	assert.True(t, m.extensionLifecyclePending)
+}
+
+func TestSubmitWaitsForPendingStartupLifecycle(t *testing.T) {
+	runner := &recordingRunner{conversationID: "conversation-123"}
+	m := newModel(context.Background(), Config{ConversationID: "conversation-123", Runner: runner})
+	t.Cleanup(m.cancel)
+	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+	m.extensionLifecyclePending = true
+	m.textarea.SetValue("continue")
+
+	assert.Nil(t, m.submit())
+	assert.Equal(t, "continue", m.submitAfterExtensionLifecycle)
+	assert.False(t, m.running)
+	assert.Equal(t, "continue", m.textarea.Value())
+
+	updated, cmd := m.Update(extensionLifecycleMsg{conversationID: m.conversationID})
+	m = updated.(model)
+
+	require.NotNil(t, cmd)
+	assert.False(t, m.extensionLifecyclePending)
+	assert.Empty(t, m.submitAfterExtensionLifecycle)
+	assert.True(t, m.running)
+	assert.Empty(t, m.textarea.Value())
+}
+
+func TestQueuedStartupSubmitPreservesLaterDraft(t *testing.T) {
+	runner := &recordingRunner{conversationID: "conversation-123"}
+	m := newModel(context.Background(), Config{ConversationID: "conversation-123", Runner: runner})
+	t.Cleanup(m.cancel)
+	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+	m.extensionLifecyclePending = true
+	m.textarea.SetValue("first message")
+
+	assert.Nil(t, m.submit())
+	m.textarea.SetValue("next draft")
+	updated, cmd := m.Update(extensionLifecycleMsg{conversationID: m.conversationID})
+	m = updated.(model)
+
+	require.NotNil(t, cmd)
+	assert.True(t, m.running)
+	assert.Equal(t, "next draft", m.textarea.Value())
+}
+
+func TestHistoryFailureBlocksExtensionDiscovery(t *testing.T) {
+	m := newModel(context.Background(), Config{ConversationID: "conversation-123", CWD: t.TempDir()})
+	t.Cleanup(m.cancel)
+	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+
+	updated, cmd := m.Update(initialHistoryMsg{err: conversations.ErrCWDConflict})
+	m = updated.(model)
+	require.NotNil(t, cmd)
+	assert.True(t, m.extensionDiscoveryBlocked)
+
+	updated, cmd = m.Update(slashCommandsMsg{cwd: m.slashCommandCWD()})
+	m = updated.(model)
+	assert.Nil(t, cmd)
 }
 
 func TestUpdateIgnoresStaleRunEvents(t *testing.T) {

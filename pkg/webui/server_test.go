@@ -1138,6 +1138,8 @@ func TestServer_handleGetSlashCommandsIncludesExtensionCommands(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, `[focus="correctness, tests" target=HEAD] additional instructions`, reviewCommand.Hint)
 	assert.Equal(t, `/review [focus="correctness, tests" target=HEAD] additional instructions`, reviewCommand.Placeholder)
+	_, err = os.ReadFile(filepath.Join(workspace, "web-session-start.log"))
+	assert.ErrorIs(t, err, os.ErrNotExist)
 }
 
 func TestServer_handleGetConversationPreservesImageContent(t *testing.T) {
@@ -2480,7 +2482,8 @@ func runWebExtensionHelperProcess() {
 		switch request.Method {
 		case "extension.initialize":
 			writeWebRPCResponse(request.ID, extensions.InitializeResult{
-				Name: "commands",
+				Name:          "commands",
+				Subscriptions: []extensions.Subscription{{Event: extensions.EventSessionStart}},
 				Commands: []extensions.CommandRegistration{{
 					Name:        "doctor",
 					Aliases:     []string{"/doctor"},
@@ -2512,6 +2515,19 @@ func runWebExtensionHelperProcess() {
 				Action:   extensions.CommandActionRespond,
 				Response: fmt.Sprintf("All extensions are healthy for %s.", params.Context.ConversationID),
 			}, nil)
+		case "extension.event.handle":
+			var params struct {
+				Event   string                          `json:"event"`
+				Context extensions.ExtensionCallContext `json:"context"`
+			}
+			if err := json.Unmarshal(request.Params, &params); err != nil {
+				writeWebRPCResponse(request.ID, nil, map[string]any{"code": -32602, "message": err.Error()})
+				continue
+			}
+			if params.Event == extensions.EventSessionStart && params.Context.CWD != "" {
+				_ = os.WriteFile(filepath.Join(params.Context.CWD, "web-session-start.log"), []byte(params.Context.ConversationID), 0o644)
+			}
+			writeWebRPCResponse(request.ID, extensions.EventResult{}, nil)
 		default:
 			writeWebRPCResponse(request.ID, nil, map[string]any{"code": -32601, "message": "method not found"})
 		}

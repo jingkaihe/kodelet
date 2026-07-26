@@ -18,7 +18,7 @@ import (
 )
 
 func TestLoadInitialHistorySkipsBlankConversationID(t *testing.T) {
-	msg, ok := loadInitialHistory(context.Background(), " \t\n ")().(initialHistoryMsg)
+	msg, ok := loadInitialHistory(context.Background(), " \t\n ", "")().(initialHistoryMsg)
 
 	require.True(t, ok)
 	assert.False(t, msg.loaded)
@@ -51,13 +51,15 @@ func TestLoadInitialHistoryLoadsStoredConversation(t *testing.T) {
 	require.NoError(t, store.Save(ctx, record))
 	require.NoError(t, store.Close())
 
-	msg, ok := loadInitialHistory(ctx, record.ID)().(initialHistoryMsg)
+	msg, ok := loadInitialHistory(ctx, record.ID, "")().(initialHistoryMsg)
 
 	require.True(t, ok)
 	require.NoError(t, msg.err)
 	assert.True(t, msg.loaded)
 	assert.Equal(t, record.CWD, msg.cwd)
 	assert.Equal(t, "stored", msg.profile)
+	assert.Equal(t, "anthropic", msg.provider)
+	assert.Equal(t, "claude-test", msg.model)
 	assert.Equal(t, "high", msg.reasoningEffort)
 	assert.Equal(t, 42, msg.usage.CurrentContextWindow)
 	require.Len(t, msg.entries, 2)
@@ -66,11 +68,33 @@ func TestLoadInitialHistoryLoadsStoredConversation(t *testing.T) {
 	assert.FileExists(t, filepath.Join(basePath, "storage.db"))
 }
 
+func TestLoadInitialHistoryRejectsConflictingRequestedCWD(t *testing.T) {
+	ctx := context.Background()
+	setupTUIConversationStore(ctx, t)
+	storedCWD := t.TempDir()
+	requestedCWD := t.TempDir()
+
+	store, err := conversations.GetConversationStore(ctx)
+	require.NoError(t, err)
+	record := convtypes.NewConversationRecord("conversation-cwd-conflict")
+	record.Provider = "anthropic"
+	record.CWD = storedCWD
+	record.RawMessages = []byte(`[]`)
+	require.NoError(t, store.Save(ctx, record))
+	require.NoError(t, store.Close())
+
+	msg, ok := loadInitialHistory(ctx, record.ID, requestedCWD)().(initialHistoryMsg)
+
+	require.True(t, ok)
+	assert.ErrorIs(t, msg.err, conversations.ErrCWDConflict)
+	assert.False(t, msg.loaded)
+}
+
 func TestLoadInitialHistoryReportsLoadAndParseErrors(t *testing.T) {
 	ctx := context.Background()
 	setupTUIConversationStore(ctx, t)
 
-	missing, ok := loadInitialHistory(ctx, "missing-conversation")().(initialHistoryMsg)
+	missing, ok := loadInitialHistory(ctx, "missing-conversation", "")().(initialHistoryMsg)
 	require.True(t, ok)
 	assert.ErrorContains(t, missing.err, "failed to load conversation")
 
@@ -82,7 +106,7 @@ func TestLoadInitialHistoryReportsLoadAndParseErrors(t *testing.T) {
 	require.NoError(t, store.Save(ctx, record))
 	require.NoError(t, store.Close())
 
-	parsed, ok := loadInitialHistory(ctx, record.ID)().(initialHistoryMsg)
+	parsed, ok := loadInitialHistory(ctx, record.ID, "")().(initialHistoryMsg)
 	require.True(t, ok)
 	assert.ErrorContains(t, parsed.err, "failed to parse conversation")
 }

@@ -61,7 +61,7 @@ func newRuntime(ctx context.Context, startLifecycle bool, opts ...DiscoveryOptio
 		return nil, err
 	}
 	if startLifecycle {
-		r.startLifecycle(ctx)
+		r.startLifecycle(ctx, ExtensionCallContext{})
 	}
 	return r, nil
 }
@@ -106,7 +106,7 @@ func (r *Runtime) initialize(ctx context.Context, discovery *Discovery) error {
 	return nil
 }
 
-func (r *Runtime) startLifecycle(ctx context.Context) {
+func (r *Runtime) startLifecycle(ctx context.Context, callContext ExtensionCallContext) {
 	r.mu.Lock()
 	if r.lifecycleStarted {
 		r.mu.Unlock()
@@ -115,7 +115,12 @@ func (r *Runtime) startLifecycle(ctx context.Context) {
 	r.lifecycleStarted = true
 	r.mu.Unlock()
 
-	callContext := ExtensionCallContext{CWD: r.workingDir, InvokedBy: "main"}
+	if strings.TrimSpace(callContext.CWD) == "" {
+		callContext.CWD = r.workingDir
+	}
+	if strings.TrimSpace(callContext.InvokedBy) == "" {
+		callContext.InvokedBy = "main"
+	}
 	r.DispatchSessionStart(ctx, callContext)
 	r.DispatchResourcesDiscover(ctx, callContext)
 }

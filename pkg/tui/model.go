@@ -75,6 +75,7 @@ func newModel(ctx context.Context, config Config) model {
 	mctx = extensions.ContextWithDiagnosticSink(mctx, newTUIDiagnosticSink(runCh))
 	extensionUI := newTUIExtensionUIHost(runCh, mctx.Done())
 	mctx = extensions.ContextWithExtensionUIHost(mctx, extensionUI)
+	mctx = extensions.ContextWithUIInputBroker(mctx, newTUIUIBroker(runCh, 0))
 	extensionRuntimes := extensions.NewRuntimeManager()
 	themeSelection := normalizedThemeSelection(config.Theme)
 	theme, err := resolveTheme(themeSelection)
@@ -188,7 +189,7 @@ func (m model) Init() tea.Cmd {
 		textarea.Blink,
 		m.spinner.Tick,
 		waitForMsg(m.runCh),
-		loadInitialHistory(m.ctx, m.conversationID),
+		loadInitialHistory(m.ctx, m.conversationID, m.requestedCWD),
 		loadMessageHistory(m.ctx, m.messageHistoryStore, m.messageHistoryScopeCWD),
 	}
 	if !m.initialHistoryPending {
@@ -208,6 +209,23 @@ func loadExtensionSlashCommands(ctx context.Context, cwd string, runtimeManager 
 	return func() tea.Msg {
 		commands, err := listExtensionSlashCommands(ctx, cwd, runtimeManager)
 		return slashCommandsMsg{cwd: strings.TrimSpace(cwd), commands: commands, extensionsOnly: true, err: err}
+	}
+}
+
+func startExtensionLifecycle(ctx context.Context, cwd, conversationID, provider, model, profile string, runtimeManager *extensions.RuntimeManager) tea.Cmd {
+	return func() tea.Msg {
+		resolvedCWD, err := resolveSlashCommandCWD(cwd)
+		if err == nil {
+			_, err = runtimeManager.RuntimeWithCallContext(ctx, resolvedCWD, extensions.ExtensionCallContext{
+				ConversationID: strings.TrimSpace(conversationID),
+				CWD:            resolvedCWD,
+				Provider:       strings.TrimSpace(provider),
+				Model:          strings.TrimSpace(model),
+				Profile:        strings.TrimSpace(profile),
+				InvokedBy:      "main",
+			})
+		}
+		return extensionLifecycleMsg{conversationID: strings.TrimSpace(conversationID), cwd: resolvedCWD, err: err}
 	}
 }
 

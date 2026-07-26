@@ -11,7 +11,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-func loadInitialHistory(ctx context.Context, conversationID string) tea.Cmd {
+func loadInitialHistory(ctx context.Context, conversationID, requestedCWD string) tea.Cmd {
 	return func() tea.Msg {
 		if strings.TrimSpace(conversationID) == "" {
 			return initialHistoryMsg{}
@@ -27,22 +27,58 @@ func loadInitialHistory(ctx context.Context, conversationID string) tea.Cmd {
 		if err != nil {
 			return initialHistoryMsg{err: errors.Wrap(err, "failed to load conversation")}
 		}
+		if strings.TrimSpace(requestedCWD) != "" && strings.TrimSpace(response.CWD) != "" {
+			defaultCWD, err := chat.ResolveConfiguredDefaultCWD("")
+			if err != nil {
+				return initialHistoryMsg{err: errors.Wrap(err, "failed to resolve requested cwd")}
+			}
+			expandedCWD, err := chat.ExpandCWDInput(requestedCWD, defaultCWD)
+			if err != nil {
+				return initialHistoryMsg{err: errors.Wrap(err, "failed to resolve requested cwd")}
+			}
+			resolvedRequested, err := conversations.NormalizeCWD(expandedCWD)
+			if err != nil {
+				return initialHistoryMsg{err: errors.Wrap(err, "failed to resolve requested cwd")}
+			}
+			resolvedStored, err := conversations.NormalizeCWD(response.CWD)
+			if err != nil {
+				return initialHistoryMsg{err: errors.Wrap(err, "failed to resolve conversation cwd")}
+			}
+			if resolvedRequested != resolvedStored {
+				return initialHistoryMsg{err: errors.Wrapf(
+					conversations.ErrCWDConflict,
+					"conversation %s is bound to %s, not %s",
+					conversationID,
+					resolvedStored,
+					resolvedRequested,
+				)}
+			}
+		}
 
 		messages, err := llm.ExtractConversationEntries(response.Provider, response.RawMessages, response.Metadata, response.ToolResults)
 		if err != nil {
 			return initialHistoryMsg{err: errors.Wrap(err, "failed to parse conversation")}
 		}
 
+		provider := strings.TrimSpace(response.Provider)
+		model := ""
+		profile := profileFromMetadata(response.Metadata)
 		reasoningEffort := ""
 		if snapshot, ok, snapshotErr := conversations.ConfigSnapshotFromMetadata(response.Metadata); snapshotErr != nil {
 			return initialHistoryMsg{err: errors.Wrap(snapshotErr, "failed to load conversation config snapshot")}
 		} else if ok {
+			provider = strings.TrimSpace(snapshot.Provider)
+			model = strings.TrimSpace(snapshot.Model)
+			profile = displayProfile(snapshot.Profile)
 			reasoningEffort = snapshot.ReasoningEffort
 		} else if config, configErr := chat.ResolveConfigForExistingConversation(response, ""); configErr == nil {
+			provider = strings.TrimSpace(config.Provider)
+			model = strings.TrimSpace(config.Model)
+			profile = displayProfile(config.Profile)
 			reasoningEffort = config.ReasoningEffort
 		}
 
-		return initialHistoryMsg{loaded: true, entries: entriesFromHistory(messages), usage: response.Usage, cwd: strings.TrimSpace(response.CWD), profile: profileFromMetadata(response.Metadata), reasoningEffort: reasoningEffort}
+		return initialHistoryMsg{loaded: true, entries: entriesFromHistory(messages), usage: response.Usage, cwd: strings.TrimSpace(response.CWD), profile: profile, provider: provider, model: model, reasoningEffort: reasoningEffort}
 	}
 }
 

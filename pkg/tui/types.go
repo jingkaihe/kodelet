@@ -147,11 +147,14 @@ type model struct {
 	slashCommandErr      error
 	slashDismissedDraft  string
 
-	messageHistoryStore    *messagehistory.Store
-	messageHistoryScopeCWD string
-	initialHistoryPending  bool
-	messageHistory         []string
-	historySearch          *historySearchState
+	messageHistoryStore           *messagehistory.Store
+	messageHistoryScopeCWD        string
+	initialHistoryPending         bool
+	extensionDiscoveryBlocked     bool
+	extensionLifecyclePending     bool
+	submitAfterExtensionLifecycle string
+	messageHistory                []string
+	historySearch                 *historySearchState
 
 	viewport viewport.Model
 	textarea textarea.Model
@@ -216,8 +219,16 @@ type initialHistoryMsg struct {
 	usage           llmtypes.Usage
 	cwd             string
 	profile         string
+	provider        string
+	model           string
 	reasoningEffort string
 	err             error
+}
+
+type extensionLifecycleMsg struct {
+	conversationID string
+	cwd            string
+	err            error
 }
 
 type transcriptRefreshMsg struct{}

@@ -716,6 +716,11 @@ func handleHelperEvent(params eventParams) EventResult {
 				_ = file.Close()
 			}
 		}
+		if params.Event == EventSessionStart && params.Context.ConversationID != "" {
+			path := filepath.Join(params.Context.CWD, "session-start-context.json")
+			encoded, _ := json.Marshal(params.Context)
+			_ = os.WriteFile(path, encoded, 0o644)
+		}
 		return EventResult{}
 	case EventToolCall:
 		payload, _ := json.Marshal(params.Payload)

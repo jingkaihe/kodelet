@@ -153,13 +153,18 @@ func TestTUIUIBrokerConfirmSelectAndNotify(t *testing.T) {
 	assert.Equal(t, extensions.UIInputStatusSubmitted, selection.response.Status)
 	assert.Equal(t, "Pizza", selection.response.Value)
 
-	notify, err := broker.Notify(context.Background(), extensions.UINotifyRequest{Title: "Ready", Message: "Done"})
-	require.NoError(t, err)
-	assert.Equal(t, extensions.UIInputStatusSubmitted, notify.Status)
+	notifyCh := make(chan uiBrokerResult, 1)
+	go func() {
+		response, err := broker.Notify(context.Background(), extensions.UINotifyRequest{Title: "Ready", Message: "Done"})
+		notifyCh <- uiBrokerResult{response: response, err: err}
+	}()
 	notifyMsg, ok := receiveRunMsg(t, m.runCh).(uiNotificationMsg)
 	require.True(t, ok)
 	updated, _ = m.Update(notifyMsg)
 	m = updated.(model)
+	notify := receiveUIBrokerResult(t, notifyCh)
+	require.NoError(t, notify.err)
+	assert.Equal(t, extensions.UIInputStatusSubmitted, notify.response.Status)
 	require.Len(t, m.uiNotifications, 1)
 	view = xansi.Strip(m.View())
 	assert.Contains(t, view, "Ready")
@@ -394,6 +399,90 @@ func TestSubmitAttachesTUIUIBrokerToRunContext(t *testing.T) {
 	assert.True(t, runner.hasConfirm)
 	assert.True(t, runner.hasSelect)
 	assert.True(t, runner.hasNotify)
+}
+
+func TestIdleUIBrokerMessagesAreAcceptedOnlyBeforeRun(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+
+	assert.False(t, m.acceptUIBrokerRunID(0))
+	m.extensionLifecyclePending = true
+	assert.True(t, m.acceptUIBrokerRunID(0))
+	m.running = true
+	m.activeRunID = 1
+	assert.False(t, m.acceptUIBrokerRunID(0))
+	assert.True(t, m.acceptUIBrokerRunID(1))
+	assert.False(t, m.acceptUIBrokerRunID(2))
+}
+
+func TestIdleUIBrokerOpensStartupPrompt(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+	broker, ok := extensions.UIInputBrokerFromContext(m.ctx)
+	require.True(t, ok)
+	m.extensionLifecyclePending = true
+	resultCh := make(chan uiBrokerResult, 1)
+
+	go func() {
+		response, err := broker.Input(m.ctx, extensions.UIInputRequest{Title: "Startup question"})
+		resultCh <- uiBrokerResult{response: response, err: err}
+	}()
+
+	msg, ok := receiveRunMsg(t, m.runCh).(uiPromptRequestMsg)
+	require.True(t, ok)
+	assert.Zero(t, msg.runID)
+	updated, _ := m.Update(msg)
+	m = updated.(model)
+	require.NotNil(t, m.activeUIPrompt)
+	assert.Equal(t, "Startup question", m.activeUIPrompt.title)
+
+	m.dismissUIPrompt()
+	result := receiveUIBrokerResult(t, resultCh)
+	require.NoError(t, result.err)
+	assert.Equal(t, extensions.UIInputStatusDismissed, result.response.Status)
+}
+
+func TestIdleUIBrokerNotificationIsAcknowledgedOrRejected(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+	broker, ok := extensions.UINotifyBrokerFromContext(m.ctx)
+	require.True(t, ok)
+	m.extensionLifecyclePending = true
+	resultCh := make(chan uiBrokerResult, 1)
+
+	go func() {
+		response, err := broker.Notify(m.ctx, extensions.UINotifyRequest{Title: "Startup", Message: "Ready"})
+		resultCh <- uiBrokerResult{response: response, err: err}
+	}()
+
+	msg, ok := receiveRunMsg(t, m.runCh).(uiNotificationMsg)
+	require.True(t, ok)
+	select {
+	case <-resultCh:
+		t.Fatal("notification returned before the TUI accepted it")
+	default:
+	}
+	updated, _ := m.Update(msg)
+	m = updated.(model)
+	accepted := receiveUIBrokerResult(t, resultCh)
+	require.NoError(t, accepted.err)
+	assert.Equal(t, extensions.UIInputStatusSubmitted, accepted.response.Status)
+
+	m.extensionLifecyclePending = false
+	go func() {
+		response, err := broker.Notify(m.ctx, extensions.UINotifyRequest{Title: "Stale", Message: "Ignore"})
+		resultCh <- uiBrokerResult{response: response, err: err}
+	}()
+	msg, ok = receiveRunMsg(t, m.runCh).(uiNotificationMsg)
+	require.True(t, ok)
+	updated, _ = m.Update(msg)
+	m = updated.(model)
+	rejected := receiveUIBrokerResult(t, resultCh)
+	require.NoError(t, rejected.err)
+	assert.Equal(t, extensions.UIInputStatusUnavailable, rejected.response.Status)
 }
 
 func TestUIChatEventsOpenDialogsAndNotifications(t *testing.T) {

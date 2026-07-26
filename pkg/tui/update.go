@@ -147,23 +147,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, waitForMsg(m.runCh)
 
 	case uiPromptRequestMsg:
-		if msg.runID != m.activeRunID {
+		if !m.acceptUIBrokerRunID(msg.runID) {
+			respondUIPrompt(msg.prompt, extensions.UIInputResponse{Status: extensions.UIInputStatusUnavailable, Reason: "tui input request is no longer active"})
 			return m, waitForMsg(m.runCh)
 		}
 		if m.runCancelling {
+			respondUIPrompt(msg.prompt, extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
 			return m, waitForMsg(m.runCh)
 		}
 		cmd := m.openUIPrompt(msg.prompt)
 		return m, tea.Batch(waitForMsg(m.runCh), cmd)
 
 	case uiNotificationMsg:
-		if msg.runID != m.activeRunID {
+		if !m.acceptUIBrokerRunID(msg.runID) {
+			respondUINotification(msg, extensions.UIInputResponse{Status: extensions.UIInputStatusUnavailable, Reason: "tui notification is no longer active"})
 			return m, waitForMsg(m.runCh)
 		}
 		if m.runCancelling {
+			respondUINotification(msg, extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
 			return m, waitForMsg(m.runCh)
 		}
 		cmd := m.addUINotification(msg.notification)
+		respondUINotification(msg, extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted})
 		return m, tea.Batch(waitForMsg(m.runCh), cmd)
 
 	case uiDiagnosticMsg:
@@ -182,6 +187,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		wasInitialHistoryPending := m.initialHistoryPending
 		m.initialHistoryPending = false
 		reloadSlashCommands := wasInitialHistoryPending
+		m.extensionDiscoveryBlocked = wasInitialHistoryPending && msg.err != nil
 		var reloadMessageHistory tea.Cmd
 		if msg.err != nil {
 			m.err = msg.err
@@ -224,7 +230,32 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if reloadMessageHistory != nil {
 			cmds = append(cmds, reloadMessageHistory)
 		}
+		if msg.loaded && wasInitialHistoryPending && !m.running {
+			m.extensionLifecyclePending = true
+			cmds = append(cmds, startExtensionLifecycle(m.ctx, m.cwd, m.conversationID, msg.provider, msg.model, msg.profile, m.extensionRuntimes))
+		}
 		m.refreshViewport(true)
+
+	case extensionLifecycleMsg:
+		if strings.TrimSpace(msg.conversationID) != strings.TrimSpace(m.conversationID) {
+			break
+		}
+		m.extensionLifecyclePending = false
+		if msg.err != nil {
+			m.slashCommandErr = msg.err
+		}
+		queuedMessage := m.submitAfterExtensionLifecycle
+		m.submitAfterExtensionLifecycle = ""
+		if strings.TrimSpace(queuedMessage) != "" {
+			currentDraft := m.textarea.Value()
+			m.textarea.SetValue(queuedMessage)
+			cmds = append(cmds, m.submit())
+			if strings.TrimSpace(currentDraft) != "" && currentDraft != queuedMessage {
+				m.textarea.SetValue(currentDraft)
+			}
+		} else if m.status == "restoring extensions" {
+			m.status = "ready"
+		}
 
 	case slashCommandsMsg:
 		if strings.TrimSpace(msg.cwd) != strings.TrimSpace(m.slashCommandCWD()) {
@@ -234,7 +265,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.slashCommands = mergeSlashCommands(m.slashCommands, msg.commands)
 		} else {
 			m.slashCommands = msg.commands
-			cmds = append(cmds, loadExtensionSlashCommands(m.ctx, m.slashCommandCWD(), m.extensionRuntimes))
+			if !m.extensionDiscoveryBlocked {
+				cmds = append(cmds, loadExtensionSlashCommands(m.ctx, m.slashCommandCWD(), m.extensionRuntimes))
+			}
 		}
 		m.slashCommandErr = msg.err
 		m.resetSlashCommandIndex()
@@ -859,6 +892,13 @@ func (m *model) resize() {
 func (m *model) submit() tea.Cmd {
 	message := strings.TrimSpace(m.textarea.Value())
 	if message == "" || m.running {
+		return nil
+	}
+	if m.extensionLifecyclePending {
+		if strings.TrimSpace(m.submitAfterExtensionLifecycle) == "" {
+			m.submitAfterExtensionLifecycle = message
+		}
+		m.status = "restoring extensions"
 		return nil
 	}
 	if cmd, handled := m.handleLocalSlashCommand(message); handled {

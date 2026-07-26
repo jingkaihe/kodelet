@@ -81,6 +81,7 @@ type uiPromptRequestMsg struct {
 type uiNotificationMsg struct {
 	runID        int
 	notification uiNotification
+	response     chan extensions.UIInputResponse
 }
 
 type uiNotificationExpiredMsg struct {
@@ -293,11 +294,17 @@ func (b *tuiUIBroker) Notify(ctx context.Context, request extensions.UINotifyReq
 	if err := ctx.Err(); err != nil {
 		return extensions.UIInputResponse{}, err
 	}
+	response := make(chan extensions.UIInputResponse, 1)
 	select {
 	case <-ctx.Done():
 		return extensions.UIInputResponse{}, ctx.Err()
-	case b.ch <- uiNotificationMsg{runID: b.runID, notification: uiNotification{title: request.Title, message: request.Message}}:
-		return extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted}, nil
+	case b.ch <- uiNotificationMsg{runID: b.runID, notification: uiNotification{title: request.Title, message: request.Message}, response: response}:
+	}
+	select {
+	case <-ctx.Done():
+		return extensions.UIInputResponse{}, ctx.Err()
+	case result := <-response:
+		return result, nil
 	}
 }
 
@@ -338,7 +345,14 @@ func (b *tuiUIBroker) isClosed() bool {
 	return b.closed
 }
 
-func (b *tuiUIBroker) respond(prompt uiPromptState, response extensions.UIInputResponse) bool {
+func (m model) acceptUIBrokerRunID(runID int) bool {
+	if runID == 0 {
+		return m.extensionLifecyclePending && !m.running && m.activeRunID == 0
+	}
+	return runID == m.activeRunID
+}
+
+func respondUIPrompt(prompt uiPromptState, response extensions.UIInputResponse) bool {
 	if prompt.response == nil {
 		return false
 	}
@@ -348,6 +362,20 @@ func (b *tuiUIBroker) respond(prompt uiPromptState, response extensions.UIInputR
 	default:
 		return false
 	}
+}
+
+func respondUINotification(msg uiNotificationMsg, response extensions.UIInputResponse) {
+	if msg.response == nil {
+		return
+	}
+	select {
+	case msg.response <- response:
+	default:
+	}
+}
+
+func (b *tuiUIBroker) respond(prompt uiPromptState, response extensions.UIInputResponse) bool {
+	return respondUIPrompt(prompt, response)
 }
 
 func newInputPromptModel(prompt uiPromptState, width int) uiPromptState {
