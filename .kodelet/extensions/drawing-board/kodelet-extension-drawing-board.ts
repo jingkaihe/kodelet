@@ -6,8 +6,8 @@ import {
   type UISurface,
   type UISurfaceInputEvent,
   type UISurfaceMouseEvent,
-} from "kodelet";
-import { runExtension } from "kodelet/runtime";
+} from "../../../sdk/src/index.js";
+import { runExtension } from "../../../sdk/src/runtime.js";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { deflateSync } from "node:zlib";
