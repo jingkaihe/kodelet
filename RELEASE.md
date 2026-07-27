@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.5.14-beta
+
+Made native TUI extension widgets foldable and mouse-wheel scrollable, with first-line summaries, click or `Ctrl+O` toggling, preserved fold state, and bounded ten-row viewports.
+
+Reduced TUI rendering work by updating transcript spinner glyphs without rebuilding the transcript on every spinner tick.
+
+Restored session-start extension widgets by delaying lifecycle startup until conversation context is available, while keeping slash-command discovery side-effect free.
+
 ## 0.5.12-beta
 
 Rendered `file_edit` results as unified diffs in the TUI and Web UI, reusing the same diff view as `apply_patch` instead of the bespoke line-pair renderer, and surfaced failed edits with their error text.
