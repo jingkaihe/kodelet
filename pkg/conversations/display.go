@@ -22,6 +22,8 @@ const (
 	MessageDisplayKindGoal          = "goal"
 )
 
+type conversationNameOverrideContextKey struct{}
+
 // NormalizeConversationName converts a conversation name into a single-line label.
 func NormalizeConversationName(name string) string {
 	return strings.Join(strings.Fields(name), " ")
@@ -86,6 +88,28 @@ func EnsureConversationName(metadata map[string]any, fallback string) (map[strin
 	return metadata, ResolveConversationName(metadata, fallback)
 }
 
+// PreserveStoredConversationName keeps a persisted explicit name from being overwritten by stale thread metadata.
+func PreserveStoredConversationName(ctx context.Context, store ConversationStore, conversationID string, metadata map[string]any) map[string]any {
+	if store == nil || strings.TrimSpace(conversationID) == "" {
+		return metadata
+	}
+
+	record, err := store.Load(ctx, conversationID)
+	if err != nil {
+		return metadata
+	}
+	storedName := ExplicitConversationName(record.Metadata)
+	if storedName == "" || preferCurrentConversationName(ctx) {
+		return metadata
+	}
+	return SetConversationName(metadata, storedName)
+}
+
+func preferCurrentConversationName(ctx context.Context) bool {
+	preferCurrent, _ := ctx.Value(conversationNameOverrideContextKey{}).(bool)
+	return preferCurrent
+}
+
 // RenameThread persists an explicit name on an active conversation thread.
 func RenameThread(ctx context.Context, thread llmtypes.Thread, name string) (string, error) {
 	if thread == nil {
@@ -100,6 +124,7 @@ func RenameThread(ctx context.Context, thread llmtypes.Thread, name string) (str
 	}
 
 	thread.SetMetadataValue(ConversationNameMetadataKey, name)
+	ctx = context.WithValue(ctx, conversationNameOverrideContextKey{}, true)
 	if err := thread.SaveConversation(ctx); err != nil {
 		return "", errors.Wrap(err, "failed to save renamed conversation")
 	}

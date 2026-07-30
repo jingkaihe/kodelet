@@ -772,7 +772,7 @@ func TestSaveConversationPreservesProviderNeutralMetadata(t *testing.T) {
 	assert.Equal(t, "/init focus", store.SavedRecords[len(store.SavedRecords)-1].Summary)
 }
 
-func TestSaveConversationKeepsInitialNameAndHonorsExplicitRename(t *testing.T) {
+func TestSaveConversationKeepsInitialNameAndPreservesExplicitRenames(t *testing.T) {
 	thread, err := NewAnthropicThread(llmtypes.Config{Model: anthropic.ModelClaudeSonnet4_6})
 	require.NoError(t, err)
 	store := &MockConversationStore{}
@@ -790,10 +790,29 @@ func TestSaveConversationKeepsInitialNameAndHonorsExplicitRename(t *testing.T) {
 	require.Len(t, store.SavedRecords, 2)
 	assert.Equal(t, "first user request", store.SavedRecords[1].Summary)
 
-	thread.SetMetadataValue(conversations.ConversationNameMetadataKey, "renamed conversation")
+	externallyRenamed := store.SavedRecords[1]
+	externallyRenamed.Metadata = conversations.SetConversationName(externallyRenamed.Metadata, "external rename")
+	externallyRenamed.Summary = "external rename"
+	store.LoadedRecord = &externallyRenamed
+
 	require.NoError(t, thread.SaveConversation(context.Background()))
 	require.Len(t, store.SavedRecords, 3)
-	assert.Equal(t, "renamed conversation", store.SavedRecords[2].Summary)
+	assert.Equal(t, "external rename", store.SavedRecords[2].Summary)
+	assert.Equal(t, "external rename", conversations.ExplicitConversationName(thread.GetMetadata()))
+
+	name, err := conversations.RenameThread(context.Background(), thread, "active rename")
+	require.NoError(t, err)
+	assert.Equal(t, "active rename", name)
+	require.Len(t, store.SavedRecords, 4)
+	assert.Equal(t, "active rename", store.SavedRecords[3].Summary)
+
+	externallyRenamedAgain := store.SavedRecords[3]
+	externallyRenamedAgain.Metadata = conversations.SetConversationName(externallyRenamedAgain.Metadata, "newer external rename")
+	externallyRenamedAgain.Summary = "newer external rename"
+	store.LoadedRecord = &externallyRenamedAgain
+	require.NoError(t, thread.SaveConversation(context.Background()))
+	require.Len(t, store.SavedRecords, 5)
+	assert.Equal(t, "newer external rename", store.SavedRecords[4].Summary)
 }
 
 func TestExtractMessages(t *testing.T) {

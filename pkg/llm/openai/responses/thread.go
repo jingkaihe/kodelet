@@ -1353,6 +1353,10 @@ func (t *Thread) SaveConversation(ctx context.Context) error {
 		return errors.Wrap(err, "failed to parse conversation for naming")
 	}
 	metadata := t.GetMetadata()
+	metadata = conversations.PreserveStoredConversationName(ctx, t.Store, t.ConversationID, metadata)
+	if explicitName := conversations.ExplicitConversationName(metadata); explicitName != "" {
+		t.SetMetadataValue(conversations.ConversationNameMetadataKey, explicitName)
+	}
 	fallbackName := base.FirstUserMessageName(conversations.ApplyDisplayToStreamableMessages(conversationsFromResponses(messages), metadata))
 	metadata, name := conversations.EnsureConversationName(metadata, fallbackName)
 	if automaticName := conversations.AutomaticConversationName(metadata); automaticName != "" {

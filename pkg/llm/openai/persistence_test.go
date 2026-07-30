@@ -630,7 +630,7 @@ func TestSaveConversationPreservesProviderNeutralMetadata(t *testing.T) {
 	assert.Equal(t, "/init focus", store.SavedRecords[len(store.SavedRecords)-1].Summary)
 }
 
-func TestSaveConversationKeepsInitialNameAndHonorsExplicitRename(t *testing.T) {
+func TestSaveConversationKeepsInitialNameAndPreservesExplicitRenames(t *testing.T) {
 	thread := &Thread{
 		Thread: base.NewThread(llmtypes.Config{Model: "gpt-4.1", OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}, "conv-name"),
 	}
@@ -649,10 +649,29 @@ func TestSaveConversationKeepsInitialNameAndHonorsExplicitRename(t *testing.T) {
 	require.Len(t, store.SavedRecords, 2)
 	assert.Equal(t, "first user request", store.SavedRecords[1].Summary)
 
-	thread.SetMetadataValue(conversationmeta.ConversationNameMetadataKey, "renamed conversation")
+	externallyRenamed := store.SavedRecords[1]
+	externallyRenamed.Metadata = conversationmeta.SetConversationName(externallyRenamed.Metadata, "external rename")
+	externallyRenamed.Summary = "external rename"
+	store.LoadedRecord = &externallyRenamed
+
 	require.NoError(t, thread.SaveConversation(context.Background()))
 	require.Len(t, store.SavedRecords, 3)
-	assert.Equal(t, "renamed conversation", store.SavedRecords[2].Summary)
+	assert.Equal(t, "external rename", store.SavedRecords[2].Summary)
+	assert.Equal(t, "external rename", conversationmeta.ExplicitConversationName(thread.GetMetadata()))
+
+	name, err := conversationmeta.RenameThread(context.Background(), thread, "active rename")
+	require.NoError(t, err)
+	assert.Equal(t, "active rename", name)
+	require.Len(t, store.SavedRecords, 4)
+	assert.Equal(t, "active rename", store.SavedRecords[3].Summary)
+
+	externallyRenamedAgain := store.SavedRecords[3]
+	externallyRenamedAgain.Metadata = conversationmeta.SetConversationName(externallyRenamedAgain.Metadata, "newer external rename")
+	externallyRenamedAgain.Summary = "newer external rename"
+	store.LoadedRecord = &externallyRenamedAgain
+	require.NoError(t, thread.SaveConversation(context.Background()))
+	require.Len(t, store.SavedRecords, 5)
+	assert.Equal(t, "newer external rename", store.SavedRecords[4].Summary)
 }
 
 func TestLoadConversation_CleansOrphanedTrailingToolCall(t *testing.T) {

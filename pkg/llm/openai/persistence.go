@@ -121,6 +121,10 @@ func (t *Thread) SaveConversation(ctx context.Context) error {
 	// Clean up orphaned messages before saving
 	messagesToSave := cleanedOpenAIMessages(t.messages)
 	metadata := t.GetMetadata()
+	metadata = conversations.PreserveStoredConversationName(ctx, t.Store, t.ConversationID, metadata)
+	if explicitName := conversations.ExplicitConversationName(metadata); explicitName != "" {
+		t.SetMetadataValue(conversations.ConversationNameMetadataKey, explicitName)
+	}
 	fallbackName := base.FirstUserMessageName(conversations.ApplyDisplayToStreamableMessages(conversationsFromOpenAI(streamMessagesForName(messagesToSave, t.GetStructuredToolResults())), metadata))
 	metadata, name := conversations.EnsureConversationName(metadata, fallbackName)
 	if automaticName := conversations.AutomaticConversationName(metadata); automaticName != "" {

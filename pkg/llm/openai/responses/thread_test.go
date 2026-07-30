@@ -1927,6 +1927,7 @@ func TestIntegration_SendMessageAndCompact(t *testing.T) {
 
 type mockResponsesConversationStore struct {
 	savedRecords []convtypes.ConversationRecord
+	loadedRecord *convtypes.ConversationRecord
 }
 
 func (m *mockResponsesConversationStore) Save(_ context.Context, record convtypes.ConversationRecord) error {
@@ -1934,7 +1935,10 @@ func (m *mockResponsesConversationStore) Save(_ context.Context, record convtype
 	return nil
 }
 
-func (*mockResponsesConversationStore) Load(_ context.Context, _ string) (convtypes.ConversationRecord, error) {
+func (m *mockResponsesConversationStore) Load(_ context.Context, _ string) (convtypes.ConversationRecord, error) {
+	if m.loadedRecord != nil {
+		return *m.loadedRecord, nil
+	}
 	return convtypes.ConversationRecord{}, nil
 }
 
@@ -2022,7 +2026,7 @@ func TestResponsesSaveConversationPreservesProviderNeutralMetadata(t *testing.T)
 	assert.Equal(t, "/init focus", store.savedRecords[0].Summary)
 }
 
-func TestResponsesSaveConversationKeepsInitialNameAndHonorsExplicitRename(t *testing.T) {
+func TestResponsesSaveConversationKeepsInitialNameAndPreservesExplicitRenames(t *testing.T) {
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
 	thread := &Thread{Thread: base.NewThread(config, "conv-name")}
 	store := &mockResponsesConversationStore{}
@@ -2040,10 +2044,29 @@ func TestResponsesSaveConversationKeepsInitialNameAndHonorsExplicitRename(t *tes
 	require.Len(t, store.savedRecords, 2)
 	assert.Equal(t, "first user request", store.savedRecords[1].Summary)
 
-	thread.SetMetadataValue(conversations.ConversationNameMetadataKey, "renamed conversation")
+	externallyRenamed := store.savedRecords[1]
+	externallyRenamed.Metadata = conversations.SetConversationName(externallyRenamed.Metadata, "external rename")
+	externallyRenamed.Summary = "external rename"
+	store.loadedRecord = &externallyRenamed
+
 	require.NoError(t, thread.SaveConversation(context.Background()))
 	require.Len(t, store.savedRecords, 3)
-	assert.Equal(t, "renamed conversation", store.savedRecords[2].Summary)
+	assert.Equal(t, "external rename", store.savedRecords[2].Summary)
+	assert.Equal(t, "external rename", conversations.ExplicitConversationName(thread.GetMetadata()))
+
+	name, err := conversations.RenameThread(context.Background(), thread, "active rename")
+	require.NoError(t, err)
+	assert.Equal(t, "active rename", name)
+	require.Len(t, store.savedRecords, 4)
+	assert.Equal(t, "active rename", store.savedRecords[3].Summary)
+
+	externallyRenamedAgain := store.savedRecords[3]
+	externallyRenamedAgain.Metadata = conversations.SetConversationName(externallyRenamedAgain.Metadata, "newer external rename")
+	externallyRenamedAgain.Summary = "newer external rename"
+	store.loadedRecord = &externallyRenamedAgain
+	require.NoError(t, thread.SaveConversation(context.Background()))
+	require.Len(t, store.savedRecords, 5)
+	assert.Equal(t, "newer external rename", store.savedRecords[4].Summary)
 }
 
 func TestProcessMessageExchangeInjectsPendingSteer(t *testing.T) {
