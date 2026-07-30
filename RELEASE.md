@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.5.15-beta
+
+Named persisted conversations deterministically from the first user message, replacing weak-model title generation with normalized, bounded names.
+
+Added `/rename <name>` across terminal chat, ACP, and resumed or followed one-shot runs, persisting explicit names without invoking a model.
+
+Preserved explicit conversation renames across subsequent saves and resumes so generated names cannot overwrite them.
+
 ## 0.5.14-beta
 
 Made native TUI extension widgets foldable and mouse-wheel scrollable, with first-line summaries, click or `Ctrl+O` toggling, preserved fold state, and bounded ten-row viewports.
