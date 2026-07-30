@@ -45,7 +45,6 @@ func init() {
 	viper.SetDefault("sysprompt_args", map[string]string{})
 	viper.SetDefault("tool_mode", "patch")
 	viper.SetDefault("enable_fs_search_tools", false)
-	viper.SetDefault("conversation_summary_mode", "llm")
 	viper.SetDefault("anthropic_api_access", "auto")
 	viper.SetDefault("compact_ratio", llmtypes.DefaultCompactRatio)
 
@@ -181,7 +180,6 @@ func main() {
 	rootCmd.PersistentFlags().String("profile", "", "Configuration profile to use (overrides config file)")
 	rootCmd.PersistentFlags().Bool("no-skills", false, "Disable agentic skills")
 	rootCmd.PersistentFlags().Bool("enable-fs-search-tools", false, "Enable filesystem search tools (glob_tool and grep_tool)")
-	rootCmd.PersistentFlags().String("conversation-summary-mode", "llm", "Conversation summary mode (llm, first_message)")
 	rootCmd.PersistentFlags().StringSlice("context-patterns", []string{"AGENTS.md"}, "Context file patterns to load (e.g. 'AGENTS.md,README.md')")
 	rootCmd.PersistentFlags().Float64("compact-ratio", llmtypes.DefaultCompactRatio, "Context window utilization ratio to trigger auto-compact (>0.0-1.0)")
 
@@ -206,7 +204,6 @@ func main() {
 	viper.BindPFlag("profile", rootCmd.PersistentFlags().Lookup("profile"))
 	viper.BindPFlag("no_skills", rootCmd.PersistentFlags().Lookup("no-skills"))
 	viper.BindPFlag("enable_fs_search_tools", rootCmd.PersistentFlags().Lookup("enable-fs-search-tools"))
-	viper.BindPFlag("conversation_summary_mode", rootCmd.PersistentFlags().Lookup("conversation-summary-mode"))
 	viper.BindPFlag("context.patterns", rootCmd.PersistentFlags().Lookup("context-patterns"))
 	viper.BindPFlag("compact_ratio", rootCmd.PersistentFlags().Lookup("compact-ratio"))
 

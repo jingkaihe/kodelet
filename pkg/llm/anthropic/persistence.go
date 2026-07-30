@@ -11,7 +11,6 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
-	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -78,7 +77,7 @@ func (t *Thread) cleanupOrphanedMessages() {
 }
 
 // SaveConversation saves the current thread to the conversation store
-func (t *Thread) SaveConversation(ctx context.Context, summarise bool) error {
+func (t *Thread) SaveConversation(ctx context.Context) error {
 	t.ConversationMu.Lock()
 	defer t.ConversationMu.Unlock()
 
@@ -98,22 +97,14 @@ func (t *Thread) SaveConversation(ctx context.Context, summarise bool) error {
 	toolResults := t.GetStructuredToolResults()
 	messages, err := StreamMessages(rawMessages, toolResults)
 	if err != nil {
-		return errors.Wrap(err, "failed to parse conversation messages for summary")
+		return errors.Wrap(err, "failed to parse conversation messages for naming")
 	}
 	metadata := t.GetMetadata()
-	summary := base.FirstUserMessageFallback(conversations.ApplyDisplayToStreamableMessages(conversationsFromAnthropic(messages), metadata))
-
-	if summarise {
-		if t.Config.ConversationSummaryMode.UsesLLM() {
-			generatedSummary, err := t.ShortSummary(ctx)
-			if err != nil {
-				logger.G(ctx).WithError(err).Error("failed to generate summary")
-			} else if generatedSummary != "" {
-				summary = generatedSummary
-			}
-		}
+	fallbackName := base.FirstUserMessageName(conversations.ApplyDisplayToStreamableMessages(conversationsFromAnthropic(messages), metadata))
+	metadata, name := conversations.EnsureConversationName(metadata, fallbackName)
+	if automaticName := conversations.AutomaticConversationName(metadata); automaticName != "" {
+		t.SetMetadataValue(conversations.ConversationAutoNameMetadataKey, automaticName)
 	}
-	t.summary = summary
 
 	// Create a new conversation record
 	if profile := strings.TrimSpace(t.Config.Profile); profile != "" {
@@ -136,7 +127,7 @@ func (t *Thread) SaveConversation(ctx context.Context, summarise bool) error {
 		Provider:    "anthropic",
 		Usage:       *t.Usage,
 		Metadata:    metadata,
-		Summary:     t.summary,
+		Summary:     name,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 		ToolResults: toolResults,
@@ -176,7 +167,6 @@ func (t *Thread) loadConversation(ctx context.Context) {
 	t.cleanupOrphanedMessages()
 	// Restore usage statistics
 	t.Usage = &record.Usage
-	t.summary = record.Summary
 	t.SetMetadata(record.Metadata)
 	// Restore structured tool results
 	t.SetStructuredToolResults(record.ToolResults)

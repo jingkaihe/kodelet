@@ -82,9 +82,13 @@ func (p *fakeContextualExtensionRuntimeProvider) RuntimeWithCallContext(_ contex
 }
 
 type fakeMetadataThread struct {
-	metadata   map[string]any
-	closed     bool
-	extensions any
+	metadata       map[string]any
+	conversationID string
+	persisted      bool
+	saveCalls      int
+	sendCalls      int
+	closed         bool
+	extensions     any
 }
 
 func (f *fakeMetadataThread) SetState(tooltypes.State) {}
@@ -94,20 +98,26 @@ func (f *fakeMetadataThread) GetState() tooltypes.State { return nil }
 func (f *fakeMetadataThread) AddUserMessage(context.Context, string, ...string) {}
 
 func (f *fakeMetadataThread) SendMessage(context.Context, string, llmtypes.MessageHandler, llmtypes.MessageOpt) (string, error) {
+	f.sendCalls++
 	return "", nil
 }
 
 func (f *fakeMetadataThread) GetUsage() llmtypes.Usage { return llmtypes.Usage{} }
 
-func (f *fakeMetadataThread) GetConversationID() string { return "" }
+func (f *fakeMetadataThread) GetConversationID() string { return f.conversationID }
 
-func (f *fakeMetadataThread) SetConversationID(string) {}
+func (f *fakeMetadataThread) SetConversationID(id string) { f.conversationID = id }
 
-func (f *fakeMetadataThread) SaveConversation(context.Context, bool) error { return nil }
+func (f *fakeMetadataThread) SaveConversation(context.Context) error {
+	f.saveCalls++
+	return nil
+}
 
-func (f *fakeMetadataThread) IsPersisted() bool { return false }
+func (f *fakeMetadataThread) IsPersisted() bool { return f.persisted }
 
-func (f *fakeMetadataThread) EnablePersistence(context.Context, bool) {}
+func (f *fakeMetadataThread) EnablePersistence(_ context.Context, enabled bool) {
+	f.persisted = enabled
+}
 
 func (f *fakeMetadataThread) Provider() string { return "" }
 
@@ -212,6 +222,53 @@ func TestDefaultChatRunnerReusesAndClosesConversationThread(t *testing.T) {
 	assert.True(t, thread.closed)
 	assert.Empty(t, runner.sessions)
 	require.NoError(t, runner.Close())
+}
+
+func TestDefaultChatRunnerRenameCommandPersistsWithoutCallingModel(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	}()
+
+	viper.Reset()
+	viper.Set("provider", "openai")
+	viper.Set("model", "gpt-4.1")
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	workspace := t.TempDir()
+	conversationID := "conv-rename"
+	config, _, err := ResolveConfigWithReasoning(context.Background(), conversationID, "", "", workspace, workspace)
+	require.NoError(t, err)
+	fingerprint, err := chatThreadConfigFingerprint(config)
+	require.NoError(t, err)
+
+	thread := &fakeMetadataThread{conversationID: conversationID, persisted: true}
+	runner := NewDefaultChatRunner(workspace, &fakeExtensionRuntimeProvider{})
+	runner.sessions[conversationID] = &defaultChatSession{
+		thread:            thread,
+		configFingerprint: fingerprint,
+		lastUsed:          time.Now(),
+	}
+	sink := &recordingChatSink{}
+
+	gotID, err := runner.Run(context.Background(), ChatRequest{
+		ConversationID: conversationID,
+		CWD:            workspace,
+		Message:        "/rename  Authentication\n cleanup ",
+	}, sink)
+	require.NoError(t, err)
+	assert.Equal(t, conversationID, gotID)
+	assert.Equal(t, "Authentication cleanup", conversations.ExplicitConversationName(thread.metadata))
+	assert.Equal(t, 1, thread.saveCalls)
+	assert.Zero(t, thread.sendCalls)
+	require.Len(t, sink.events, 2)
+	assert.Equal(t, "conversation", sink.events[0].Kind)
+	assert.Equal(t, "ui-notification", sink.events[1].Kind)
+	require.NotNil(t, sink.events[1].UINotify)
+	assert.Equal(t, "Conversation renamed", sink.events[1].UINotify.Title)
+	assert.Equal(t, `Renamed to "Authentication cleanup"`, sink.events[1].UINotify.Message)
 }
 
 func TestAcquireChatThreadRejectsSessionDetachedDuringClose(t *testing.T) {

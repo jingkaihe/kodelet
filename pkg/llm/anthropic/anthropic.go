@@ -42,9 +42,8 @@ type Thread struct {
 	*base.Thread                     // Embedded base thread for shared functionality
 	client          anthropic.Client // Anthropic API client
 	messages        []anthropic.MessageParam
-	summary         string // Conversation summary
-	useSubscription bool   // Whether using Anthropic subscription vs API key
-	useCopilot      bool   // Whether using GitHub Copilot Anthropic-compatible API
+	useSubscription bool // Whether using Anthropic subscription vs API key
+	useCopilot      bool // Whether using GitHub Copilot Anthropic-compatible API
 }
 
 // Provider returns the provider name for this thread
@@ -431,7 +430,7 @@ OUTER:
 	// Save conversation state after completing the interaction
 	if t.Persisted && t.Store != nil && !opt.NoSaveConversation {
 		saveCtx := context.Background() // use new context to avoid cancellation
-		t.SaveConversation(saveCtx, true)
+		t.SaveConversation(saveCtx)
 	}
 
 	handler.HandleDone()
@@ -636,7 +635,7 @@ func (t *Thread) processMessageExchange(
 	response, err := t.NewMessage(ctx, messageParams, handler, opt)
 	if err != nil {
 		if t.Persisted && t.Store != nil && !opt.NoSaveConversation {
-			t.SaveConversation(ctx, false)
+			t.SaveConversation(ctx)
 		}
 		return "", false, err
 	}
@@ -713,7 +712,7 @@ func (t *Thread) processMessageExchange(
 	}
 
 	if t.Persisted && t.Store != nil && !opt.NoSaveConversation {
-		t.SaveConversation(ctx, false)
+		t.SaveConversation(ctx)
 	}
 
 	// Return whether tools were used in this exchange
@@ -1240,31 +1239,6 @@ func (t *Thread) runUtilityPrompt(ctx context.Context, prompt string, useWeakMod
 		},
 		prompt,
 		useWeakModel,
-	)
-}
-
-// ShortSummary generates a short summary of the conversation using rendered markdown.
-func (t *Thread) ShortSummary(ctx context.Context) (string, error) {
-	rawMessages, err := json.Marshal(t.messages)
-	if err != nil {
-		return "", err
-	}
-
-	toolResults := t.GetStructuredToolResults()
-	messages, err := StreamMessages(rawMessages, toolResults)
-	if err != nil {
-		return "", err
-	}
-	if len(messages) == 0 {
-		return "", nil
-	}
-
-	markdown := base.RenderMarkdownForSummary(conversationsFromAnthropic(messages), toolResults)
-
-	return base.GenerateShortSummary(
-		ctx,
-		markdown,
-		t.runUtilityPrompt,
 	)
 }
 

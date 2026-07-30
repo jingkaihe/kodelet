@@ -65,7 +65,7 @@ func (t *threadStub) SendMessage(context.Context, string, llmtypes.MessageHandle
 func (t *threadStub) GetUsage() llmtypes.Usage                          { return t.usage }
 func (t *threadStub) GetConversationID() string                         { return t.conversationID }
 func (t *threadStub) SetConversationID(id string)                       { t.conversationID = id }
-func (t *threadStub) SaveConversation(context.Context, bool) error      { return nil }
+func (t *threadStub) SaveConversation(context.Context) error            { return nil }
 func (t *threadStub) IsPersisted() bool                                 { return t.persisted }
 func (t *threadStub) EnablePersistence(_ context.Context, enabled bool) { t.persisted = enabled }
 func (t *threadStub) Provider() string                                  { return "test" }

@@ -23,7 +23,13 @@ kodelet conversation stream <id> --history-only
 # Delete or fork
 kodelet conversation delete <id>
 kodelet conversation fork <id>
+
+# Rename without invoking the model
+kodelet run --resume <id> "/rename New conversation name"
+kodelet run --follow "/rename New name for the latest conversation"
 ```
+
+Persisted conversations are named deterministically from the first user message, with whitespace folded and generated names limited to 100 characters. The generated name remains stable across later saves and context compaction. Use `/rename <name>` in terminal chat, ACP, or the Web UI, or use the `kodelet run --resume/--follow` forms above; an explicit rename takes precedence and does not invoke an LLM.
 
 `conversation fork` is an experimental branching workflow. Typical use:
 

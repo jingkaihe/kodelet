@@ -88,8 +88,8 @@ type Thread interface {
 	GetConversationID() string
 	// SetConversationID sets the conversation ID
 	SetConversationID(id string)
-	// SaveConversation saves the current thread to the conversation store
-	SaveConversation(ctx context.Context, summarise bool) error
+	// SaveConversation saves the current thread to the conversation store.
+	SaveConversation(ctx context.Context) error
 	// IsPersisted returns whether this thread is being persisted
 	IsPersisted() bool
 	// EnablePersistence enables conversation persistence for this thread

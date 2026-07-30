@@ -4,15 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
-	"github.com/jingkaihe/kodelet/pkg/llm/prompts"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
-	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
-	"github.com/pkg/errors"
 )
 
-const shortSummaryFallbackMaxLength = 100
+const conversationNameMaxLength = 100
 
 // UtilityThread is a thread that supports utility-mode preparation.
 type UtilityThread interface {
@@ -64,7 +62,7 @@ func RunPreparedPromptTyped[T llmtypes.Thread](
 	return handler.CollectedText(), nil
 }
 
-// UtilityPromptOptions returns standard options for internal utility prompts (summary/compaction).
+// UtilityPromptOptions returns standard options for internal utility prompts such as compaction.
 func UtilityPromptOptions(useWeakModel bool) llmtypes.MessageOpt {
 	return llmtypes.MessageOpt{
 		Initiator:          llmtypes.InitiatorAgent,
@@ -76,38 +74,8 @@ func UtilityPromptOptions(useWeakModel bool) llmtypes.MessageOpt {
 	}
 }
 
-// GenerateShortSummary runs a summary prompt using the utility prompt runner.
-// It returns a normalized summary on success, or an error when generation fails
-// or produces an empty result.
-func GenerateShortSummary(
-	ctx context.Context,
-	markdown string,
-	runUtilityPrompt func(ctx context.Context, prompt string, useWeakModel bool) (string, error),
-) (string, error) {
-	prompt := BuildShortSummaryPrompt(markdown)
-	summary, err := runUtilityPrompt(ctx, prompt, true)
-	if err != nil {
-		return "", err
-	}
-
-	normalized := normalizeShortSummary(summary)
-	if normalized == "" {
-		return "", errors.New("generated empty summary")
-	}
-
-	return normalized, nil
-}
-
-func normalizeShortSummary(summary string) string {
-	trimmed := strings.TrimSpace(summary)
-	if strings.HasSuffix(trimmed, ".") && !strings.HasSuffix(trimmed, "...") {
-		trimmed = strings.TrimSuffix(trimmed, ".")
-	}
-	return trimmed
-}
-
-// FirstUserMessageFallback builds a user-facing conversation title from the first user text message.
-func FirstUserMessageFallback(messages []conversations.StreamableMessage) string {
+// FirstUserMessageName builds a deterministic conversation name from the first user text message.
+func FirstUserMessageName(messages []conversations.StreamableMessage) string {
 	for _, msg := range messages {
 		if msg.Role != "user" {
 			continue
@@ -118,7 +86,7 @@ func FirstUserMessageFallback(messages []conversations.StreamableMessage) string
 			continue
 		}
 
-		return truncateSummaryFallback(text)
+		return truncateConversationName(text)
 	}
 
 	return ""
@@ -170,30 +138,14 @@ func extractTextFromRawItem(raw json.RawMessage) string {
 	return strings.TrimSpace(strings.Join(textParts, "\n\n"))
 }
 
-func truncateSummaryFallback(text string) string {
-	trimmed := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(text, "\r", " "), "\n", " "))
-	if len(trimmed) <= shortSummaryFallbackMaxLength {
+func truncateConversationName(text string) string {
+	trimmed := strings.Join(strings.Fields(text), " ")
+	if utf8.RuneCountInString(trimmed) <= conversationNameMaxLength {
 		return trimmed
 	}
 
-	return trimmed[:shortSummaryFallbackMaxLength-3] + "..."
-}
-
-// BuildShortSummaryPrompt wraps rendered conversation markdown in the short-summary instruction.
-func BuildShortSummaryPrompt(markdown string) string {
-	trimmed := strings.TrimSpace(markdown)
-	return strings.TrimSpace(prompts.ShortSummaryPrompt) + "\n\nConversation to summarize:\n\n" + trimmed
-}
-
-// RenderMarkdownForSummary converts streamable messages into markdown optimized for summary generation.
-func RenderMarkdownForSummary(
-	messages []conversations.StreamableMessage,
-	toolResults map[string]tooltypes.StructuredToolResult,
-) string {
-	return conversations.RenderMarkdown(messages, toolResults, conversations.MarkdownOptions{
-		TruncateToolResults: true,
-		ExcludeThinking:     true,
-	})
+	runes := []rune(trimmed)
+	return string(runes[:conversationNameMaxLength-3]) + "..."
 }
 
 // RunUtilityPrompt creates a helper thread, seeds provider-specific history,

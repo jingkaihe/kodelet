@@ -81,9 +81,6 @@ type Thread struct {
 	// customPricing contains provider-specific pricing information
 	customPricing map[string]llmtypes.ModelPricing
 
-	// summary stores a short summary of the conversation for persistence
-	summary string
-
 	// isCodex indicates if this thread is using Codex authentication
 	// Some API parameters may not be supported by the Codex API
 	isCodex bool
@@ -383,7 +380,7 @@ OUTER:
 					break OUTER
 				}
 				if t.Persisted && t.Store != nil && !opt.NoSaveConversation {
-					t.SaveConversation(ctx, false)
+					t.SaveConversation(ctx)
 				}
 				return "", err
 			}
@@ -421,7 +418,7 @@ OUTER:
 	// Save conversation state
 	if t.Persisted && t.Store != nil && !opt.NoSaveConversation {
 		saveCtx := context.Background()
-		t.SaveConversation(saveCtx, true)
+		t.SaveConversation(saveCtx)
 	}
 
 	handler.HandleDone()
@@ -485,7 +482,7 @@ func (t *Thread) processMessageExchange(
 
 	saveConversation := func() {
 		if t.Persisted && t.Store != nil && !opt.NoSaveConversation {
-			t.SaveConversation(ctx, false)
+			t.SaveConversation(ctx)
 		}
 	}
 
@@ -1315,31 +1312,6 @@ func (t *Thread) runUtilityPrompt(ctx context.Context, prompt string, useWeakMod
 	)
 }
 
-// ShortSummary generates a short summary of the conversation using an LLM.
-func (t *Thread) ShortSummary(ctx context.Context) (string, error) {
-	rawMessages, err := json.Marshal(t.storedItems)
-	if err != nil {
-		return "", err
-	}
-
-	toolResults := t.GetStructuredToolResults()
-	messages, err := StreamMessages(rawMessages, toolResults)
-	if err != nil {
-		return "", err
-	}
-	if len(messages) == 0 {
-		return "", nil
-	}
-
-	markdown := base.RenderMarkdownForSummary(conversationsFromResponses(messages), toolResults)
-
-	return base.GenerateShortSummary(
-		ctx,
-		markdown,
-		t.runUtilityPrompt,
-	)
-}
-
 func conversationsFromResponses(msgs []StreamableMessage) []conversations.StreamableMessage {
 	result := make([]conversations.StreamableMessage, len(msgs))
 	for i, msg := range msgs {
@@ -1356,7 +1328,7 @@ func conversationsFromResponses(msgs []StreamableMessage) []conversations.Stream
 	return result
 }
 
-func rawMessagesForSummary(items []StoredInputItem) json.RawMessage {
+func rawMessagesForName(items []StoredInputItem) json.RawMessage {
 	raw, err := json.Marshal(items)
 	if err != nil {
 		return nil
@@ -1365,7 +1337,7 @@ func rawMessagesForSummary(items []StoredInputItem) json.RawMessage {
 }
 
 // SaveConversation saves the current thread to the conversation store.
-func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
+func (t *Thread) SaveConversation(ctx context.Context) error {
 	t.ConversationMu.Lock()
 	defer t.ConversationMu.Unlock()
 
@@ -1376,25 +1348,16 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 	// Clean up orphaned messages before saving
 	t.cleanupOrphanedItems()
 	toolResults := t.GetStructuredToolResults()
-	messages, err := StreamMessages(rawMessagesForSummary(t.storedItems), toolResults)
+	messages, err := StreamMessages(rawMessagesForName(t.storedItems), toolResults)
 	if err != nil {
-		return errors.Wrap(err, "failed to parse conversation for summary")
+		return errors.Wrap(err, "failed to parse conversation for naming")
 	}
 	metadata := t.GetMetadata()
-	summary := base.FirstUserMessageFallback(conversations.ApplyDisplayToStreamableMessages(conversationsFromResponses(messages), metadata))
-
-	// Generate a new summary if requested and enabled; otherwise keep the first user message.
-	if summarize {
-		if t.Config.ConversationSummaryMode.UsesLLM() {
-			generatedSummary, err := t.ShortSummary(ctx)
-			if err != nil {
-				logger.G(ctx).WithError(err).Error("failed to generate summary")
-			} else if generatedSummary != "" {
-				summary = generatedSummary
-			}
-		}
+	fallbackName := base.FirstUserMessageName(conversations.ApplyDisplayToStreamableMessages(conversationsFromResponses(messages), metadata))
+	metadata, name := conversations.EnsureConversationName(metadata, fallbackName)
+	if automaticName := conversations.AutomaticConversationName(metadata); automaticName != "" {
+		t.SetMetadataValue(conversations.ConversationAutoNameMetadataKey, automaticName)
 	}
-	t.summary = summary
 
 	// Serialize stored items directly (already built inline during streaming)
 	inputItemsJSON, err := json.Marshal(t.storedItems)
@@ -1432,7 +1395,7 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 		Provider:    "openai",
 		Usage:       *t.Usage,
 		Metadata:    metadata,
-		Summary:     t.summary,
+		Summary:     name,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 		ToolResults: toolResults,
@@ -1475,7 +1438,6 @@ func (t *Thread) loadConversation(ctx context.Context) {
 	t.inputItems = fromStoredItems(storedItems)
 	t.cleanupOrphanedItems()
 	t.Usage = &record.Usage
-	t.summary = record.Summary
 	t.SetMetadata(record.Metadata)
 	t.SetStructuredToolResults(record.ToolResults)
 }

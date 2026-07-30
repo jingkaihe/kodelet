@@ -87,7 +87,7 @@ func (f *fakeThread) SetConversationID(id string) {
 	f.conversationID = id
 }
 
-func (f *fakeThread) SaveConversation(context.Context, bool) error { return nil }
+func (f *fakeThread) SaveConversation(context.Context) error { return nil }
 
 func (f *fakeThread) IsPersisted() bool {
 	f.mu.Lock()

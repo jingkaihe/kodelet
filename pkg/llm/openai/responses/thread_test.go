@@ -1816,42 +1816,6 @@ func skipIfNoAPIKey(t *testing.T) {
 	}
 }
 
-func TestIntegration_ShortSummary(t *testing.T) {
-	skipIfNoAPIKey(t)
-
-	ctx := context.Background()
-
-	// Use a cheap model for testing
-	config := llmtypes.Config{
-		Provider:  "openai",
-		Model:     "gpt-4.1-mini",
-		WeakModel: "gpt-4.1-mini",
-		MaxTokens: 1024,
-	}
-
-	thread, err := NewThread(config)
-	require.NoError(t, err)
-
-	// Add some conversation history
-	thread.AddUserMessage(ctx, "I want to refactor the authentication module in my Go application.")
-	thread.AddUserMessage(ctx, "The current implementation uses JWT tokens but I want to switch to OAuth2.")
-	thread.AddUserMessage(ctx, "Can you help me plan this migration?")
-
-	// Generate a short summary
-	summary, err := thread.ShortSummary(ctx)
-	require.NoError(t, err)
-
-	t.Logf("Generated summary: %s", summary)
-
-	// Verify the summary is not empty and is reasonably short
-	assert.NotEmpty(t, summary)
-	assert.NotEqual(t, "I want to refactor the authentication module in my Go application", summary)
-
-	// Summary should be concise (the prompt asks for <= 12 words)
-	words := len(splitWords(summary))
-	assert.LessOrEqual(t, words, 20, "Summary should be concise, got %d words: %s", words, summary)
-}
-
 func TestIntegration_CompactContext(t *testing.T) {
 	skipIfNoAPIKey(t)
 
@@ -1961,26 +1925,6 @@ func TestIntegration_SendMessageAndCompact(t *testing.T) {
 	assert.NotEmpty(t, response2)
 }
 
-// splitWords is a simple helper to count words in a string
-func splitWords(s string) []string {
-	var words []string
-	var current []rune
-	for _, r := range s {
-		if r == ' ' || r == '\t' || r == '\n' {
-			if len(current) > 0 {
-				words = append(words, string(current))
-				current = nil
-			}
-		} else {
-			current = append(current, r)
-		}
-	}
-	if len(current) > 0 {
-		words = append(words, string(current))
-	}
-	return words
-}
-
 type mockResponsesConversationStore struct {
 	savedRecords []convtypes.ConversationRecord
 }
@@ -2070,12 +2014,36 @@ func TestResponsesSaveConversationPreservesProviderNeutralMetadata(t *testing.T)
 	thread.Store = store
 	thread.Persisted = true
 
-	err := thread.SaveConversation(context.Background(), false)
+	err := thread.SaveConversation(context.Background())
 	require.NoError(t, err)
 	require.Len(t, store.savedRecords, 1)
 	assert.Contains(t, store.savedRecords[0].Metadata, conversations.MessageDisplayMetadataKey)
 	assert.Equal(t, "responses", store.savedRecords[0].Metadata["api_mode"])
 	assert.Equal(t, "/init focus", store.savedRecords[0].Summary)
+}
+
+func TestResponsesSaveConversationKeepsInitialNameAndHonorsExplicitRename(t *testing.T) {
+	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1", OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}
+	thread := &Thread{Thread: base.NewThread(config, "conv-name")}
+	store := &mockResponsesConversationStore{}
+	thread.Store = store
+	thread.Persisted = true
+	thread.storedItems = []StoredInputItem{{Type: "message", Role: "user", Content: "first user request"}}
+
+	require.NoError(t, thread.SaveConversation(context.Background()))
+	require.Len(t, store.savedRecords, 1)
+	assert.Equal(t, "first user request", store.savedRecords[0].Summary)
+	assert.Equal(t, "first user request", conversations.AutomaticConversationName(store.savedRecords[0].Metadata))
+
+	thread.storedItems = []StoredInputItem{{Type: "message", Role: "user", Content: "compacted history"}}
+	require.NoError(t, thread.SaveConversation(context.Background()))
+	require.Len(t, store.savedRecords, 2)
+	assert.Equal(t, "first user request", store.savedRecords[1].Summary)
+
+	thread.SetMetadataValue(conversations.ConversationNameMetadataKey, "renamed conversation")
+	require.NoError(t, thread.SaveConversation(context.Background()))
+	require.Len(t, store.savedRecords, 3)
+	assert.Equal(t, "renamed conversation", store.savedRecords[2].Summary)
 }
 
 func TestProcessMessageExchangeInjectsPendingSteer(t *testing.T) {

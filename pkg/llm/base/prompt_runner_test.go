@@ -2,13 +2,13 @@ package base
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
-	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -43,19 +43,19 @@ func (t *promptRunnerThread) SendMessage(_ context.Context, prompt string, handl
 	handler.HandleText("collected output")
 	return "ignored final output", nil
 }
-func (t *promptRunnerThread) GetUsage() llmtypes.Usage                     { return t.usage }
-func (t *promptRunnerThread) GetConversationID() string                    { return t.conversationID }
-func (t *promptRunnerThread) SetConversationID(id string)                  { t.conversationID = id }
-func (t *promptRunnerThread) SaveConversation(context.Context, bool) error { return nil }
-func (t *promptRunnerThread) IsPersisted() bool                            { return t.persisted }
-func (t *promptRunnerThread) EnablePersistence(context.Context, bool)      {}
-func (t *promptRunnerThread) Provider() string                             { return "test" }
-func (t *promptRunnerThread) GetMessages() ([]llmtypes.Message, error)     { return nil, nil }
-func (t *promptRunnerThread) GetConfig() llmtypes.Config                   { return t.config }
-func (t *promptRunnerThread) AggregateSubagentUsage(llmtypes.Usage)        {}
-func (t *promptRunnerThread) SetMetadataValue(key string, value any)       { t.metadata[key] = value }
-func (t *promptRunnerThread) GetMetadata() map[string]any                  { return t.metadata }
-func (t *promptRunnerThread) PrepareUtilityMode(context.Context)           { t.prepareCalled = true }
+func (t *promptRunnerThread) GetUsage() llmtypes.Usage                 { return t.usage }
+func (t *promptRunnerThread) GetConversationID() string                { return t.conversationID }
+func (t *promptRunnerThread) SetConversationID(id string)              { t.conversationID = id }
+func (t *promptRunnerThread) SaveConversation(context.Context) error   { return nil }
+func (t *promptRunnerThread) IsPersisted() bool                        { return t.persisted }
+func (t *promptRunnerThread) EnablePersistence(context.Context, bool)  {}
+func (t *promptRunnerThread) Provider() string                         { return "test" }
+func (t *promptRunnerThread) GetMessages() ([]llmtypes.Message, error) { return nil, nil }
+func (t *promptRunnerThread) GetConfig() llmtypes.Config               { return t.config }
+func (t *promptRunnerThread) AggregateSubagentUsage(llmtypes.Usage)    {}
+func (t *promptRunnerThread) SetMetadataValue(key string, value any)   { t.metadata[key] = value }
+func (t *promptRunnerThread) GetMetadata() map[string]any              { return t.metadata }
+func (t *promptRunnerThread) PrepareUtilityMode(context.Context)       { t.prepareCalled = true }
 
 var (
 	_ llmtypes.Thread = (*promptRunnerThread)(nil)
@@ -164,70 +164,7 @@ func TestRunUtilityPromptSeedsAndPreparesThread(t *testing.T) {
 	assert.False(t, thread.sentOpt.UseWeakModel)
 }
 
-func TestGenerateShortSummary(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("success", func(t *testing.T) {
-		summary, err := GenerateShortSummary(
-			ctx,
-			"summary prompt",
-			func(_ context.Context, prompt string, useWeakModel bool) (string, error) {
-				assert.Contains(t, prompt, "Conversation to summarize:")
-				assert.Contains(t, prompt, "summary prompt")
-				assert.True(t, useWeakModel)
-				return "generated summary.", nil
-			},
-		)
-
-		require.NoError(t, err)
-		assert.Equal(t, "generated summary", summary)
-	})
-
-	t.Run("preserves ellipsis", func(t *testing.T) {
-		summary, err := GenerateShortSummary(
-			ctx,
-			"summary prompt",
-			func(_ context.Context, prompt string, useWeakModel bool) (string, error) {
-				assert.Contains(t, prompt, "Conversation to summarize:")
-				assert.True(t, useWeakModel)
-				return "generated summary...", nil
-			},
-		)
-
-		require.NoError(t, err)
-		assert.Equal(t, "generated summary...", summary)
-	})
-
-	t.Run("error returns explicit failure", func(t *testing.T) {
-		summary, err := GenerateShortSummary(
-			ctx,
-			"summary prompt",
-			func(context.Context, string, bool) (string, error) {
-				return "", errors.New("generation failed")
-			},
-		)
-
-		assert.Empty(t, summary)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "generation failed")
-	})
-
-	t.Run("empty model summary returns explicit failure", func(t *testing.T) {
-		summary, err := GenerateShortSummary(
-			ctx,
-			"summary prompt",
-			func(context.Context, string, bool) (string, error) {
-				return "   ", nil
-			},
-		)
-
-		assert.Empty(t, summary)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "generated empty summary")
-	})
-}
-
-func TestFirstUserMessageFallback(t *testing.T) {
+func TestFirstUserMessageName(t *testing.T) {
 	t.Run("prefers first user text message", func(t *testing.T) {
 		messages := []conversations.StreamableMessage{
 			{Kind: "text", Role: "assistant", Content: "Ignore"},
@@ -235,7 +172,7 @@ func TestFirstUserMessageFallback(t *testing.T) {
 			{Kind: "text", Role: "user", Content: "Second user message"},
 		}
 
-		assert.Equal(t, "First user message", FirstUserMessageFallback(messages))
+		assert.Equal(t, "First user message", FirstUserMessageName(messages))
 	})
 
 	t.Run("uses raw item text when content is empty", func(t *testing.T) {
@@ -247,30 +184,21 @@ func TestFirstUserMessageFallback(t *testing.T) {
 			},
 		}
 
-		assert.Equal(t, "Message from raw item", FirstUserMessageFallback(messages))
+		assert.Equal(t, "Message from raw item", FirstUserMessageName(messages))
 	})
 
 	t.Run("truncates long fallback to 100 chars", func(t *testing.T) {
 		long := "This is a very long user message that should be truncated when used as the fallback conversation summary text."
 		messages := []conversations.StreamableMessage{{Kind: "text", Role: "user", Content: long}}
 
-		fallback := FirstUserMessageFallback(messages)
+		fallback := FirstUserMessageName(messages)
 		assert.Len(t, fallback, 100)
 		assert.True(t, strings.HasSuffix(fallback, "..."))
 	})
-}
 
-func TestRenderMarkdownForSummaryExcludesThinking(t *testing.T) {
-	messages := []conversations.StreamableMessage{
-		{Kind: "text", Role: "user", Content: "Summarize this"},
-		{Kind: "thinking", Role: "assistant", Content: "Internal reasoning"},
-		{Kind: "text", Role: "assistant", Content: "Here is the summary."},
-	}
+	t.Run("truncates unicode names without splitting runes", func(t *testing.T) {
+		name := FirstUserMessageName([]conversations.StreamableMessage{{Kind: "text", Role: "user", Content: strings.Repeat("界", 101)}})
 
-	markdown := RenderMarkdownForSummary(messages, nil)
-
-	assert.Contains(t, markdown, "Summarize this")
-	assert.Contains(t, markdown, "Here is the summary.")
-	assert.NotContains(t, markdown, "### Assistant · Thinking")
-	assert.NotContains(t, markdown, "Internal reasoning")
+		assert.Equal(t, strings.Repeat("界", 97)+"...", name)
+	})
 }

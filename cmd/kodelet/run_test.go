@@ -75,6 +75,46 @@ func TestGetQueryFromStdinOrArgs(t *testing.T) {
 	})
 }
 
+func TestRenameStoredConversation(t *testing.T) {
+	t.Setenv("KODELET_CONVERSATION_STORE_TYPE", "sqlite")
+	basePath := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", basePath)
+	ctx := context.Background()
+	dbPath := filepath.Join(basePath, "storage.db")
+	sqlDB, err := db.Open(ctx, dbPath)
+	require.NoError(t, err)
+	require.NoError(t, db.NewMigrationRunner(sqlDB).Run(ctx, migrations.All()))
+	require.NoError(t, sqlDB.Close())
+
+	store, err := conversations.NewConversationStore(ctx, &conversations.Config{StoreType: "sqlite", BasePath: basePath})
+	require.NoError(t, err)
+	conversationID := convtypes.GenerateID()
+	require.NoError(t, store.Save(ctx, convtypes.ConversationRecord{
+		ID:          conversationID,
+		Summary:     "old name",
+		RawMessages: json.RawMessage(`[]`),
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}))
+	require.NoError(t, store.Close())
+
+	require.NoError(t, renameStoredConversation(ctx, conversationID, "  Authentication\n cleanup  "))
+
+	store, err = conversations.NewConversationStore(ctx, &conversations.Config{StoreType: "sqlite", BasePath: basePath})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	record, err := store.Load(ctx, conversationID)
+	require.NoError(t, err)
+	assert.Equal(t, "Authentication cleanup", record.Summary)
+	assert.Equal(t, "Authentication cleanup", conversations.ExplicitConversationName(record.Metadata))
+}
+
+func TestRenameStoredConversationRequiresExistingConversation(t *testing.T) {
+	err := renameStoredConversation(context.Background(), "", "new name")
+
+	require.ErrorContains(t, err, "requires --resume")
+}
+
 func TestLoadResumeConversationConfig_UsesStoredProfileAndMetadata(t *testing.T) {
 	originalSettings := viper.AllSettings()
 	t.Setenv("KODELET_CONVERSATION_STORE_TYPE", "sqlite")
@@ -766,18 +806,18 @@ func (f *fakeRunThread) AddUserMessage(context.Context, string, ...string) {}
 func (f *fakeRunThread) SendMessage(context.Context, string, llmtypes.MessageHandler, llmtypes.MessageOpt) (string, error) {
 	return "", nil
 }
-func (f *fakeRunThread) GetUsage() llmtypes.Usage                     { return llmtypes.Usage{} }
-func (f *fakeRunThread) GetConversationID() string                    { return "conv" }
-func (f *fakeRunThread) SetConversationID(string)                     {}
-func (f *fakeRunThread) SaveConversation(context.Context, bool) error { return nil }
-func (f *fakeRunThread) IsPersisted() bool                            { return false }
-func (f *fakeRunThread) EnablePersistence(context.Context, bool)      {}
-func (f *fakeRunThread) Provider() string                             { return "fake" }
-func (f *fakeRunThread) GetMessages() ([]llmtypes.Message, error)     { return nil, nil }
-func (f *fakeRunThread) GetConfig() llmtypes.Config                   { return llmtypes.Config{} }
-func (f *fakeRunThread) AggregateSubagentUsage(llmtypes.Usage)        {}
-func (f *fakeRunThread) SetMetadataValue(key string, value any)       { f.metadata[key] = value }
-func (f *fakeRunThread) GetMetadata() map[string]any                  { return f.metadata }
+func (f *fakeRunThread) GetUsage() llmtypes.Usage                 { return llmtypes.Usage{} }
+func (f *fakeRunThread) GetConversationID() string                { return "conv" }
+func (f *fakeRunThread) SetConversationID(string)                 {}
+func (f *fakeRunThread) SaveConversation(context.Context) error   { return nil }
+func (f *fakeRunThread) IsPersisted() bool                        { return false }
+func (f *fakeRunThread) EnablePersistence(context.Context, bool)  {}
+func (f *fakeRunThread) Provider() string                         { return "fake" }
+func (f *fakeRunThread) GetMessages() ([]llmtypes.Message, error) { return nil, nil }
+func (f *fakeRunThread) GetConfig() llmtypes.Config               { return llmtypes.Config{} }
+func (f *fakeRunThread) AggregateSubagentUsage(llmtypes.Usage)    {}
+func (f *fakeRunThread) SetMetadataValue(key string, value any)   { f.metadata[key] = value }
+func (f *fakeRunThread) GetMetadata() map[string]any              { return f.metadata }
 
 func writeRunExtensionExecutable(t *testing.T, path string) {
 	t.Helper()

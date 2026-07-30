@@ -10,7 +10,6 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm/base"
-	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	"github.com/pkg/errors"
 	"github.com/sashabaranov/go-openai"
@@ -111,7 +110,7 @@ func isImageOnlyOpenAIMultiContent(parts []openai.ChatMessagePart) bool {
 }
 
 // SaveConversation saves the current thread to the conversation store
-func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
+func (t *Thread) SaveConversation(ctx context.Context) error {
 	t.ConversationMu.Lock()
 	defer t.ConversationMu.Unlock()
 
@@ -122,20 +121,11 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 	// Clean up orphaned messages before saving
 	messagesToSave := cleanedOpenAIMessages(t.messages)
 	metadata := t.GetMetadata()
-	summary := base.FirstUserMessageFallback(conversations.ApplyDisplayToStreamableMessages(conversationsFromOpenAI(streamMessagesForSummary(messagesToSave, t.GetStructuredToolResults())), metadata))
-
-	// Generate a new summary if requested and enabled; otherwise keep the first user message.
-	if summarize {
-		if t.Config.ConversationSummaryMode.UsesLLM() {
-			generatedSummary, err := t.ShortSummary(ctx)
-			if err != nil {
-				logger.G(ctx).WithError(err).Error("failed to generate summary")
-			} else if generatedSummary != "" {
-				summary = generatedSummary
-			}
-		}
+	fallbackName := base.FirstUserMessageName(conversations.ApplyDisplayToStreamableMessages(conversationsFromOpenAI(streamMessagesForName(messagesToSave, t.GetStructuredToolResults())), metadata))
+	metadata, name := conversations.EnsureConversationName(metadata, fallbackName)
+	if automaticName := conversations.AutomaticConversationName(metadata); automaticName != "" {
+		t.SetMetadataValue(conversations.ConversationAutoNameMetadataKey, automaticName)
 	}
-	t.summary = summary
 
 	// Serialize the thread state
 	messagesJSON, err := json.Marshal(messagesToSave)
@@ -173,7 +163,7 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 		Provider:    "openai",
 		Usage:       *t.Usage,
 		Metadata:    metadata,
-		Summary:     t.summary,
+		Summary:     name,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 		ToolResults: t.GetStructuredToolResults(),
@@ -183,7 +173,7 @@ func (t *Thread) SaveConversation(ctx context.Context, summarize bool) error {
 	return t.Store.Save(ctx, record)
 }
 
-func streamMessagesForSummary(messages []openai.ChatCompletionMessage, toolResults map[string]tooltypes.StructuredToolResult) []StreamableMessage {
+func streamMessagesForName(messages []openai.ChatCompletionMessage, toolResults map[string]tooltypes.StructuredToolResult) []StreamableMessage {
 	rawMessages, err := json.Marshal(messages)
 	if err != nil {
 		return nil
@@ -224,7 +214,6 @@ func (t *Thread) loadConversation(ctx context.Context) {
 
 	t.messages = cleanedOpenAIMessages(messages)
 	t.Usage = &record.Usage
-	t.summary = record.Summary
 	t.SetMetadata(record.Metadata)
 	// Restore structured tool results
 	t.SetStructuredToolResults(record.ToolResults)

@@ -286,6 +286,27 @@ func (s *ConversationService) DeleteConversation(ctx context.Context, id string)
 	return nil
 }
 
+// RenameConversation sets an explicit user-facing name for a persisted conversation.
+func (s *ConversationService) RenameConversation(ctx context.Context, id, name string) error {
+	name = NormalizeConversationName(name)
+	if name == "" {
+		return errors.New("conversation name must not be empty")
+	}
+
+	record, err := s.store.Load(ctx, id)
+	if err != nil {
+		return errors.Wrap(err, "failed to load conversation")
+	}
+	record.Metadata = SetConversationName(record.Metadata, name)
+	record.Summary = name
+	if err := s.store.Save(ctx, record); err != nil {
+		return errors.Wrap(err, "failed to save renamed conversation")
+	}
+
+	logger.G(ctx).WithField("id", id).WithField("name", name).Info("Renamed conversation")
+	return nil
+}
+
 // ConversationStatistics represents conversation statistics
 type ConversationStatistics struct {
 	TotalConversations int     `json:"totalConversations"`

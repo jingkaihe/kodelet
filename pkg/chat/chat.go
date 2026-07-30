@@ -327,9 +327,27 @@ func runDefaultChat(
 		}
 	}
 
-	message, slashExpansion, goalUpdate, err := TransformSlashCommandIfNeeded(ctx, message, resolvedCWD, expandSlashCommand)
-	if err != nil {
-		return sessionID, err
+	var renameName string
+	if expandSlashCommand {
+		if command, args, found := slashcommands.Parse(message); found {
+			var handled bool
+			renameName, handled, err = slashcommands.ParseRenameCommand(command, args)
+			if err != nil {
+				return sessionID, err
+			}
+			if handled {
+				expandSlashCommand = false
+			}
+		}
+	}
+
+	var slashExpansion *slashcommands.Expansion
+	var goalUpdate *goals.CommandUpdate
+	if renameName == "" {
+		message, slashExpansion, goalUpdate, err = TransformSlashCommandIfNeeded(ctx, message, resolvedCWD, expandSlashCommand)
+		if err != nil {
+			return sessionID, err
+		}
 	}
 	if slashExpansion != nil {
 		ApplyFragmentRestrictions(ctx, &llmConfig, &slashExpansion.Metadata)
@@ -354,6 +372,26 @@ func runDefaultChat(
 	thread.SetConversationID(sessionID)
 	if newThread {
 		thread.EnablePersistence(ctx, true)
+	}
+	if renameName != "" {
+		name, err := conversationservice.RenameThread(ctx, thread, renameName)
+		if err != nil {
+			return sessionID, err
+		}
+		if err := sink.Send(ChatEvent{Kind: "conversation", ConversationID: sessionID, Role: "assistant"}); err != nil {
+			return sessionID, err
+		}
+		if err := sink.Send(ChatEvent{
+			Kind:           "ui-notification",
+			ConversationID: sessionID,
+			UINotify: &UINotifyEvent{
+				Title:   "Conversation renamed",
+				Message: fmt.Sprintf("Renamed to %q", name),
+			},
+		}); err != nil {
+			return sessionID, err
+		}
+		return sessionID, nil
 	}
 	if slashExpansion != nil {
 		AddSlashCommandDisplay(thread, slashExpansion)

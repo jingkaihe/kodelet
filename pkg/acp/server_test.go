@@ -18,6 +18,9 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
 	"github.com/jingkaihe/kodelet/pkg/acp/bridge"
 	"github.com/jingkaihe/kodelet/pkg/acp/session"
+	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/goals"
@@ -1025,6 +1028,60 @@ func TestServer_ExtensionRespondCommandBypassesAgent(t *testing.T) {
 	result := response["result"].(map[string]any)
 	assert.Equal(t, string(acptypes.StopReasonEndTurn), result["stopReason"])
 	assert.Contains(t, storage.flushed, sess.ID)
+}
+
+func TestServer_RenameCommandPersistsWithoutCallingAgent(t *testing.T) {
+	basePath := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", basePath)
+	sqlDB, err := db.Open(context.Background(), filepath.Join(basePath, "storage.db"))
+	require.NoError(t, err)
+	require.NoError(t, db.NewMigrationRunner(sqlDB).Run(context.Background(), migrations.All()))
+	require.NoError(t, sqlDB.Close())
+
+	output := bytes.NewBuffer(nil)
+	server := NewServer(
+		WithInput(bytes.NewBuffer(nil)),
+		WithOutput(output),
+		WithContext(context.Background()),
+		WithConfig(&ServerConfig{Provider: "anthropic", Model: "claude-test", NoSkills: true}),
+	)
+	t.Cleanup(func() { server.Shutdown() })
+	server.initialized.Store(true)
+	storage := &fakeSessionStorage{}
+	server.sessionStorage = storage
+
+	sess, err := server.sessionManager.NewSession(context.Background(), acptypes.NewSessionRequest{CWD: t.TempDir()})
+	require.NoError(t, err)
+	req := &acptypes.Request{
+		ID: json.RawMessage(`8`),
+		Params: mustJSONRawMessage(t, acptypes.PromptRequest{
+			SessionID: sess.ID,
+			Prompt: []acptypes.ContentBlock{{
+				Type: acptypes.ContentTypeText,
+				Text: "/rename  Authentication\n cleanup ",
+			}},
+		}),
+	}
+
+	require.NoError(t, server.handleSessionPrompt(req))
+	assert.Equal(t, "Authentication cleanup", conversations.ExplicitConversationName(sess.Thread.GetMetadata()))
+
+	messages := readJSONRPCMessages(t, output)
+	require.Len(t, messages, 2)
+	update := messages[0]["params"].(map[string]any)["update"].(map[string]any)
+	assert.Equal(t, acptypes.UpdateAgentMessageChunk, update["sessionUpdate"])
+	content := update["content"].(map[string]any)
+	assert.Equal(t, `Renamed conversation to "Authentication cleanup".`, content["text"])
+	result := messages[1]["result"].(map[string]any)
+	assert.Equal(t, string(acptypes.StopReasonEndTurn), result["stopReason"])
+	assert.Contains(t, storage.flushed, sess.ID)
+
+	service, err := conversations.GetDefaultConversationService(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = service.Close() })
+	record, err := service.GetConversation(context.Background(), string(sess.ID))
+	require.NoError(t, err)
+	assert.Equal(t, "Authentication cleanup", record.Summary)
 }
 
 func TestServer_ExtensionRunAgentCommandTransformsPrompt(t *testing.T) {

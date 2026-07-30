@@ -59,7 +59,6 @@ allowed_reasoning_efforts: [low, medium, high]
 anthropic:
   # Optional: force adaptive-thinking request plumbing for custom Anthropic model IDs.
   # adaptive_thinking: true
-conversation_summary_mode: llm
 
 profiles:
   openai:
@@ -148,22 +147,4 @@ Restrict model tools for a run:
 
 ```bash
 kodelet run --allowed-tools "file_read,grep_tool,bash" "analyze code"
-```
-
-## Conversation summaries
-
-By default, Kodelet can use the weak model for persisted conversation titles. To use the first user message instead:
-
-```bash
-kodelet run --conversation-summary-mode first_message "query"
-```
-
-Config/env equivalents:
-
-```yaml
-conversation_summary_mode: first_message
-```
-
-```bash
-export KODELET_CONVERSATION_SUMMARY_MODE=first_message
 ```

@@ -336,6 +336,35 @@ func TestConversationService_DeleteConversation(t *testing.T) {
 	}
 }
 
+func TestConversationService_RenameConversation(t *testing.T) {
+	ctx := context.Background()
+	mockStore := newMockConversationStore()
+	mockStore.conversations["conversation-1"] = &conversations.ConversationRecord{
+		ID:       "conversation-1",
+		Summary:  "old name",
+		Metadata: map[string]any{ConversationAutoNameMetadataKey: "automatic name", "preserve": true},
+	}
+	service := NewConversationService(mockStore)
+
+	err := service.RenameConversation(ctx, "conversation-1", "  Authentication\n cleanup  ")
+	require.NoError(t, err)
+
+	record, err := mockStore.Load(ctx, "conversation-1")
+	require.NoError(t, err)
+	assert.Equal(t, "Authentication cleanup", record.Summary)
+	assert.Equal(t, "Authentication cleanup", ExplicitConversationName(record.Metadata))
+	assert.Equal(t, "automatic name", AutomaticConversationName(record.Metadata))
+	assert.Equal(t, true, record.Metadata["preserve"])
+}
+
+func TestConversationService_RenameConversationRejectsBlankName(t *testing.T) {
+	service := NewConversationService(newMockConversationStore())
+
+	err := service.RenameConversation(context.Background(), "conversation-1", " \n ")
+
+	require.ErrorContains(t, err, "must not be empty")
+}
+
 func TestConversationService_ForkConversation(t *testing.T) {
 	now := time.Now().UTC()
 	metadata, err := AddConfigSnapshot(map[string]any{"profile": "work"}, llm.Config{

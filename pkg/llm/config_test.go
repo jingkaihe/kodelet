@@ -121,43 +121,6 @@ func TestGetConfigFromViper_BashTimeoutRejectsTooShortDuration(t *testing.T) {
 	assert.Contains(t, err.Error(), "bash.timeout must be at least 10s")
 }
 
-func TestGetConfigFromViper_ConversationSummaryMode(t *testing.T) {
-	viper.Reset()
-	viper.Set("conversation_summary_mode", "first_message")
-
-	config, err := GetConfigFromViper()
-	require.NoError(t, err)
-
-	assert.Equal(t, llmtypes.ConversationSummaryModeFirstMessage, config.ConversationSummaryMode)
-}
-
-func TestGetConfigFromViperWithCmd_ExplicitConversationSummaryModeOverridesProfile(t *testing.T) {
-	originalConfig := viper.AllSettings()
-	defer func() {
-		viper.Reset()
-		for key, value := range originalConfig {
-			viper.Set(key, value)
-		}
-	}()
-
-	viper.Reset()
-	viper.Set("profile", "work")
-	viper.Set("profiles", map[string]any{
-		"work": map[string]any{
-			"conversation_summary_mode": "first_message",
-		},
-	})
-
-	cmd := &cobra.Command{Use: "test"}
-	cmd.Flags().String("conversation-summary-mode", "llm", "Conversation summary mode")
-	err := cmd.Flags().Set("conversation-summary-mode", "llm")
-	require.NoError(t, err)
-
-	config, err := GetConfigFromViperWithCmd(cmd)
-	require.NoError(t, err)
-	assert.Equal(t, llmtypes.ConversationSummaryModeLLM, config.ConversationSummaryMode)
-}
-
 func TestGetConfigFromViperWithCmd_ExplicitCompactRatioOverridesProfile(t *testing.T) {
 	originalConfig := viper.AllSettings()
 	defer func() {

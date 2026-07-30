@@ -14,9 +14,6 @@ type AnthropicAPIAccess string
 // ToolMode defines how the agent can interact with project files.
 type ToolMode string
 
-// ConversationSummaryMode defines how persisted conversation summaries are produced.
-type ConversationSummaryMode string
-
 const (
 	// MinBashTimeout is the minimum timeout a bash tool call can request.
 	MinBashTimeout = 10 * time.Second
@@ -36,11 +33,6 @@ const (
 	// ToolModePatch restricts file operations to apply_patch plus search/navigation tools.
 	ToolModePatch ToolMode = "patch"
 
-	// ConversationSummaryModeLLM generates a short summary via an LLM.
-	ConversationSummaryModeLLM ConversationSummaryMode = "llm"
-	// ConversationSummaryModeFirstMessage uses the first user message as the summary.
-	ConversationSummaryModeFirstMessage ConversationSummaryMode = "first_message"
-
 	// DefaultCompactRatio is the default context window utilization threshold for automatic compaction.
 	DefaultCompactRatio = 0.8
 )
@@ -48,11 +40,6 @@ const (
 // IsPatchMode reports whether the tool mode should use apply_patch-only workflows.
 func (m ToolMode) IsPatchMode() bool {
 	return m == ToolModePatch
-}
-
-// UsesLLM reports whether conversation summaries should be generated via an LLM.
-func (m ConversationSummaryMode) UsesLLM() bool {
-	return m == "" || m == ConversationSummaryModeLLM
 }
 
 // Config holds the configuration for the LLM client
@@ -94,11 +81,10 @@ type Config struct {
 	Context *ContextConfig `mapstructure:"context" json:"context,omitempty" yaml:"context,omitempty"` // Context configuration for context file discovery
 
 	// Runtime feature toggle configuration
-	Extensions              any                     `mapstructure:"-" json:"-" yaml:"-"`                                                                         // Extensions is the active extension runtime for lifecycle events
-	EnableFSSearchTools     bool                    `mapstructure:"enable_fs_search_tools" json:"enable_fs_search_tools" yaml:"enable_fs_search_tools"`          // EnableFSSearchTools enables glob_tool and grep_tool and updates prompt/tool guidance accordingly
-	ConversationSummaryMode ConversationSummaryMode `mapstructure:"conversation_summary_mode" json:"conversation_summary_mode" yaml:"conversation_summary_mode"` // ConversationSummaryMode controls whether persisted conversation summaries come from the LLM or first user message
-	RecipeName              string                  `mapstructure:"recipe_name" json:"recipe_name" yaml:"recipe_name"`                                           // RecipeName is the active recipe/fragment name for extension context metadata
-	CompactRatio            float64                 `mapstructure:"compact_ratio" json:"compact_ratio" yaml:"compact_ratio"`                                     // CompactRatio is the context utilization threshold for automatic compaction (>0.0-1.0)
+	Extensions          any     `mapstructure:"-" json:"-" yaml:"-"`                                                                // Extensions is the active extension runtime for lifecycle events
+	EnableFSSearchTools bool    `mapstructure:"enable_fs_search_tools" json:"enable_fs_search_tools" yaml:"enable_fs_search_tools"` // EnableFSSearchTools enables glob_tool and grep_tool and updates prompt/tool guidance accordingly
+	RecipeName          string  `mapstructure:"recipe_name" json:"recipe_name" yaml:"recipe_name"`                                  // RecipeName is the active recipe/fragment name for extension context metadata
+	CompactRatio        float64 `mapstructure:"compact_ratio" json:"compact_ratio" yaml:"compact_ratio"`                            // CompactRatio is the context utilization threshold for automatic compaction (>0.0-1.0)
 }
 
 // BashConfig holds configuration for the bash tool.

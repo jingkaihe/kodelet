@@ -756,7 +756,7 @@ func TestSaveConversationPreservesProviderNeutralMetadata(t *testing.T) {
 	}
 	thread.messages = []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("expanded recipe prompt"))}
 
-	err = thread.SaveConversation(context.Background(), false)
+	err = thread.SaveConversation(context.Background())
 	require.NoError(t, err)
 	require.NotEmpty(t, store.SavedRecords)
 
@@ -770,6 +770,30 @@ func TestSaveConversationPreservesProviderNeutralMetadata(t *testing.T) {
 	assert.Equal(t, anthropic.ModelClaudeSonnet4_6, snapshot.Model)
 	assert.Equal(t, "medium", snapshot.ReasoningEffort)
 	assert.Equal(t, "/init focus", store.SavedRecords[len(store.SavedRecords)-1].Summary)
+}
+
+func TestSaveConversationKeepsInitialNameAndHonorsExplicitRename(t *testing.T) {
+	thread, err := NewAnthropicThread(llmtypes.Config{Model: anthropic.ModelClaudeSonnet4_6})
+	require.NoError(t, err)
+	store := &MockConversationStore{}
+	thread.Store = store
+	thread.Persisted = true
+	thread.messages = []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("first user request"))}
+
+	require.NoError(t, thread.SaveConversation(context.Background()))
+	require.Len(t, store.SavedRecords, 1)
+	assert.Equal(t, "first user request", store.SavedRecords[0].Summary)
+	assert.Equal(t, "first user request", conversations.AutomaticConversationName(store.SavedRecords[0].Metadata))
+
+	thread.messages = []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("compacted history"))}
+	require.NoError(t, thread.SaveConversation(context.Background()))
+	require.Len(t, store.SavedRecords, 2)
+	assert.Equal(t, "first user request", store.SavedRecords[1].Summary)
+
+	thread.SetMetadataValue(conversations.ConversationNameMetadataKey, "renamed conversation")
+	require.NoError(t, thread.SaveConversation(context.Background()))
+	require.Len(t, store.SavedRecords, 3)
+	assert.Equal(t, "renamed conversation", store.SavedRecords[2].Summary)
 }
 
 func TestExtractMessages(t *testing.T) {

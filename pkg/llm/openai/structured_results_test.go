@@ -279,7 +279,7 @@ func TestOpenAIThread_PersistenceWithStructuredResults(t *testing.T) {
 
 	// Test saving
 	ctx := context.Background()
-	err = thread.SaveConversation(ctx, false)
+	err = thread.SaveConversation(ctx)
 	require.NoError(t, err)
 
 	// Verify the saved record contains structured results

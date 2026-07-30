@@ -121,6 +121,10 @@ kodelet run --enable-fs-search-tools "find references to SessionManager"
 # Set a persistent thread goal for goal-directed work
 kodelet run "/goal finish the migration and verify tests pass"
 
+# Rename a persisted conversation without invoking the model
+kodelet run --follow "/rename Migration cleanup"
+kodelet run --resume CONVERSATION_ID "/rename Migration cleanup"
+
 # Headless mode for programmatic use
 kodelet run --headless "your query"          # outputs structured JSON stream
 kodelet run --headless --include-history "query"  # include historical data in stream
@@ -129,6 +133,10 @@ kodelet run --headless --include-history "query"  # include historical data in s
 ### Thread Goals
 
 Use `/goal <objective>` in CLI, ACP, or the Web UI to set an active goal for the current thread. While the goal is active, Kodelet keeps future turns focused on that objective, including after conversation resume or compaction. The agent marks the goal complete when it is done, or blocked if it cannot make meaningful progress without user input.
+
+### Conversation Names
+
+Kodelet names persisted conversations deterministically from the first user message, folding whitespace and limiting the generated name to 100 characters. The generated name is stored with the conversation so later context compaction cannot change it. Use `/rename <name>` in the terminal chat, ACP, or Web UI to set an explicit name; for one-shot CLI usage, combine it with `--resume` or `--follow` as shown above. Renaming does not invoke an LLM.
 
 ### Terminal Chat TUI
 
@@ -326,6 +334,9 @@ kodelet conversation stream <conversation-id> --include-history
 # Delete conversations
 kodelet conversation delete <conversation-id>
 kodelet conversation delete --no-confirm <conversation-id>
+
+# Rename a conversation without invoking the model
+kodelet run --resume <conversation-id> "/rename New conversation name"
 ```
 
 ### Database Management
@@ -746,10 +757,6 @@ bash:
 # - patch: use apply_patch plus search/navigation tools instead of direct file reads/writes
 tool_mode: full
 
-# Conversation summary behavior
-# - llm: generate a short summary with the weak model
-# - first_message: use the first user message directly
-conversation_summary_mode: llm
 ```
 
 MCP servers are configured outside Kodelet's core `config.yaml`. MCP is provided by the SDK MCP extension, which reads `./mcp.json` and `~/.kodelet/mcp.json`. See the [SDK MCP extension README](../sdk/src/extensions/mcp/README.md) for local installation, `mcp.json` examples, remote HTTP/SSE, OAuth, and tool filtering.
@@ -773,9 +780,6 @@ kodelet run --allowed-commands "ls *,pwd,echo *" "query"
 
 # Enable filesystem search tools (`glob_tool` and `grep_tool`)
 kodelet run --enable-fs-search-tools "query"
-
-# Use the first user message for persisted conversation summaries
-kodelet run --conversation-summary-mode first_message "query"
 
 # Use a custom system prompt template
 kodelet run --sysprompt ./sysprompt.tmpl "query"
@@ -1753,16 +1757,6 @@ kodelet run --enable-fs-search-tools "your query"
 ```
 
 This can also be set via configuration file (`enable_fs_search_tools: true`) or environment variable (`KODELET_ENABLE_FS_SEARCH_TOOLS=true`).
-
-### Conversation Summary Mode
-
-To use the first user message instead of weak-model summary generation for persisted conversation titles:
-
-```bash
-kodelet run --conversation-summary-mode first_message "your query"
-```
-
-This can also be set via configuration file (`conversation_summary_mode: first_message`) or environment variable (`KODELET_CONVERSATION_SUMMARY_MODE=first_message`). The default is `llm`. This only affects short persisted conversation summaries/titles, not context compaction.
 
 ### Context Compaction Ratio
 

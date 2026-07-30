@@ -8,6 +8,39 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestConversationNameMetadata(t *testing.T) {
+	metadata := SetConversationName(nil, "  Authentication\n cleanup  ")
+
+	assert.Equal(t, "Authentication cleanup", ExplicitConversationName(metadata))
+	assert.Equal(t, "Authentication cleanup", ResolveConversationName(metadata, "fallback"))
+	assert.Equal(t, "fallback", ResolveConversationName(nil, "fallback"))
+}
+
+func TestEnsureConversationNamePersistsAutomaticFallback(t *testing.T) {
+	metadata, name := EnsureConversationName(nil, "  Authentication\n cleanup  ")
+
+	assert.Equal(t, "Authentication cleanup", name)
+	assert.Equal(t, "Authentication cleanup", AutomaticConversationName(metadata))
+
+	metadata, name = EnsureConversationName(metadata, "different fallback")
+	assert.Equal(t, "Authentication cleanup", name)
+	assert.Equal(t, "Authentication cleanup", AutomaticConversationName(metadata))
+}
+
+func TestExplicitConversationNameOverridesAutomaticName(t *testing.T) {
+	metadata := SetAutomaticConversationName(nil, "automatic name")
+	metadata = SetConversationName(metadata, "explicit name")
+
+	assert.Equal(t, "explicit name", ResolveConversationName(metadata, "fallback"))
+}
+
+func TestSetConversationNameIgnoresBlankName(t *testing.T) {
+	metadata := map[string]any{"preserve": true}
+
+	assert.Equal(t, metadata, SetConversationName(metadata, " \n "))
+	assert.NotContains(t, metadata, ConversationNameMetadataKey)
+}
+
 func TestAddSlashCommandDisplayAndLookup(t *testing.T) {
 	metadata := AddSlashCommandDisplay(nil, "full recipe prompt", "/init focus", "init")
 

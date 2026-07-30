@@ -430,6 +430,23 @@ func loadResumeConversationConfig(ctx context.Context, cmd *cobra.Command, conve
 	return config, resolution.CWD, nil
 }
 
+func renameStoredConversation(ctx context.Context, conversationID, name string) error {
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
+		return errors.New("/rename requires --resume <conversation-id> or --follow")
+	}
+
+	service, err := conversations.GetDefaultConversationService(ctx)
+	if err != nil {
+		return errors.Wrap(err, "failed to open conversation store")
+	}
+	defer func() {
+		_ = service.Close()
+	}()
+
+	return service.RenameConversation(ctx, conversationID, name)
+}
+
 var runCmd = &cobra.Command{
 	Use:   "run [query]",
 	Short: "Execute a one-shot query with Kodelet",
@@ -452,6 +469,8 @@ var runCmd = &cobra.Command{
 		var query string
 		var fragmentMetadata *fragments.Metadata
 		var goalUpdate *goals.CommandUpdate
+		var renameName string
+		var renameRequested bool
 		var llmConfig llmtypes.Config
 		var resolvedCWD string
 		var err error
@@ -464,16 +483,33 @@ var runCmd = &cobra.Command{
 			}
 
 			if command, commandArgs, found := slashcommands.Parse(query); found {
-				update, handled, err := goals.ParseSlashCommand(command, commandArgs, time.Now())
-				if handled {
+				renameName, renameRequested, err = slashcommands.ParseRenameCommand(command, commandArgs)
+				if renameRequested {
 					if err != nil {
-						presenter.Error(err, "Failed to process goal")
+						presenter.Error(err, "Failed to rename conversation")
 						return
 					}
-					query = update.ModelPrompt
-					goalUpdate = &update
+				} else {
+					update, handled, err := goals.ParseSlashCommand(command, commandArgs, time.Now())
+					if handled {
+						if err != nil {
+							presenter.Error(err, "Failed to process goal")
+							return
+						}
+						query = update.ModelPrompt
+						goalUpdate = &update
+					}
 				}
 			}
+		}
+
+		if renameRequested {
+			if err := renameStoredConversation(ctx, config.ResumeConvID, renameName); err != nil {
+				presenter.Error(err, "Failed to rename conversation")
+				return
+			}
+			presenter.Success(fmt.Sprintf("Conversation renamed to %q", conversations.NormalizeConversationName(renameName)))
+			return
 		}
 
 		llmConfig, resolvedCWD, err = loadResumeConversationConfig(ctx, cmd, config.ResumeConvID, config.CWD)

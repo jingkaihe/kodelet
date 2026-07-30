@@ -14,6 +14,8 @@ import (
 
 const additionalInstructionsHeader = "\n\n---\n\nAdditional instructions:\n"
 
+const RenameCommandName = "rename"
+
 // Command describes an available slash command backed by a recipe.
 type Command struct {
 	Name        string `json:"name"`
@@ -160,7 +162,25 @@ func BuiltIns() []Command {
 			Hint:        "objective",
 			Placeholder: "/goal <objective>",
 		},
+		{
+			Name:        RenameCommandName,
+			Description: "Rename the current conversation",
+			Hint:        "name",
+			Placeholder: "/rename <name>",
+		},
 	}
+}
+
+// ParseRenameCommand parses the built-in rename command without invoking the model.
+func ParseRenameCommand(command, args string) (name string, handled bool, err error) {
+	if strings.TrimSpace(command) != RenameCommandName {
+		return "", false, nil
+	}
+	name = strings.Join(strings.Fields(args), " ")
+	if name == "" {
+		return "", true, errors.New("usage: /rename <name>")
+	}
+	return name, true, nil
 }
 
 func recipeCommands(ctx context.Context, processor *fragments.Processor) []Command {

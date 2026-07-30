@@ -555,7 +555,7 @@ func TestSaveConversation_CleansCopyWithoutMutatingLiveMessages(t *testing.T) {
 		},
 	}
 
-	err = thread.SaveConversation(context.Background(), false)
+	err = thread.SaveConversation(context.Background())
 	require.NoError(t, err)
 	require.Len(t, store.SavedRecords, 1)
 
@@ -587,7 +587,7 @@ func TestSaveConversationMetadataIncludesPlatformAndAPIMode(t *testing.T) {
 	thread.SetState(tools.NewBasicState(context.Background()))
 	thread.messages = []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: "hello"}}
 
-	err = thread.SaveConversation(context.Background(), false)
+	err = thread.SaveConversation(context.Background())
 	require.NoError(t, err)
 	require.NotEmpty(t, store.SavedRecords)
 
@@ -620,7 +620,7 @@ func TestSaveConversationPreservesProviderNeutralMetadata(t *testing.T) {
 	}
 	thread.messages = []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: "expanded recipe prompt"}}
 
-	err := thread.SaveConversation(context.Background(), false)
+	err := thread.SaveConversation(context.Background())
 	require.NoError(t, err)
 	require.NotEmpty(t, store.SavedRecords)
 
@@ -628,6 +628,31 @@ func TestSaveConversationPreservesProviderNeutralMetadata(t *testing.T) {
 	assert.Contains(t, savedMetadata, conversationmeta.MessageDisplayMetadataKey)
 	assert.Equal(t, "chat_completions", savedMetadata["api_mode"])
 	assert.Equal(t, "/init focus", store.SavedRecords[len(store.SavedRecords)-1].Summary)
+}
+
+func TestSaveConversationKeepsInitialNameAndHonorsExplicitRename(t *testing.T) {
+	thread := &Thread{
+		Thread: base.NewThread(llmtypes.Config{Model: "gpt-4.1", OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"}}, "conv-name"),
+	}
+	store := &MockConversationStore{}
+	thread.Store = store
+	thread.Persisted = true
+	thread.messages = []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: "first user request"}}
+
+	require.NoError(t, thread.SaveConversation(context.Background()))
+	require.Len(t, store.SavedRecords, 1)
+	assert.Equal(t, "first user request", store.SavedRecords[0].Summary)
+	assert.Equal(t, "first user request", conversationmeta.AutomaticConversationName(store.SavedRecords[0].Metadata))
+
+	thread.messages = []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: "compacted history"}}
+	require.NoError(t, thread.SaveConversation(context.Background()))
+	require.Len(t, store.SavedRecords, 2)
+	assert.Equal(t, "first user request", store.SavedRecords[1].Summary)
+
+	thread.SetMetadataValue(conversationmeta.ConversationNameMetadataKey, "renamed conversation")
+	require.NoError(t, thread.SaveConversation(context.Background()))
+	require.Len(t, store.SavedRecords, 3)
+	assert.Equal(t, "renamed conversation", store.SavedRecords[2].Summary)
 }
 
 func TestLoadConversation_CleansOrphanedTrailingToolCall(t *testing.T) {

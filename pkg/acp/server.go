@@ -470,6 +470,29 @@ func (s *Server) handleSessionPrompt(req *acptypes.Request) error {
 				return err
 			}
 			prompt = handledPrompt
+		} else if name, handled, err := slashcommands.ParseRenameCommand(command, args); handled {
+			if err != nil {
+				return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, err.Error(), nil)
+			}
+			name, err = conversations.RenameThread(promptCtx, sess.Thread, name)
+			if err != nil {
+				return s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
+			}
+			if err := s.SendUpdate(params.SessionID, map[string]any{
+				"sessionUpdate": acptypes.UpdateAgentMessageChunk,
+				"content": acptypes.ContentBlock{
+					Type: acptypes.ContentTypeText,
+					Text: fmt.Sprintf("Renamed conversation to %q.", name),
+				},
+			}); err != nil {
+				return err
+			}
+			if s.sessionStorage != nil {
+				if err := s.sessionStorage.Flush(params.SessionID); err != nil {
+					logger.G(s.ctx).WithError(err).Warn("Failed to flush session storage")
+				}
+			}
+			return s.sendResult(req.ID, acptypes.PromptResponse{StopReason: acptypes.StopReasonEndTurn})
 		} else if goalUpdate, handled, err := goals.ParseSlashCommand(command, args, time.Now()); handled {
 			if err != nil {
 				return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, err.Error(), nil)

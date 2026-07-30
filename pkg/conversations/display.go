@@ -1,6 +1,7 @@
 package conversations
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -8,15 +9,102 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/goals"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/pkg/errors"
 )
 
 const (
+	ConversationNameMetadataKey     = "conversation_name"
+	ConversationAutoNameMetadataKey = "conversation_auto_name"
 	MessageDisplayMetadataKey       = "message_display"
 	legacyMessageDisplayMetadataKey = "message_display_overrides"
 	MessageDisplayVersion           = "v1"
 	MessageDisplayKindSlashCommand  = "slash-command"
 	MessageDisplayKindGoal          = "goal"
 )
+
+// NormalizeConversationName converts a conversation name into a single-line label.
+func NormalizeConversationName(name string) string {
+	return strings.Join(strings.Fields(name), " ")
+}
+
+// SetConversationName records an explicit user-facing conversation name in metadata.
+func SetConversationName(metadata map[string]any, name string) map[string]any {
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	if name = NormalizeConversationName(name); name != "" {
+		metadata[ConversationNameMetadataKey] = name
+	}
+	return metadata
+}
+
+// ExplicitConversationName returns the user-provided conversation name, if present.
+func ExplicitConversationName(metadata map[string]any) string {
+	if len(metadata) == 0 {
+		return ""
+	}
+	name, _ := metadata[ConversationNameMetadataKey].(string)
+	return NormalizeConversationName(name)
+}
+
+// SetAutomaticConversationName records the deterministic first-message name.
+func SetAutomaticConversationName(metadata map[string]any, name string) map[string]any {
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	if name = NormalizeConversationName(name); name != "" {
+		metadata[ConversationAutoNameMetadataKey] = name
+	}
+	return metadata
+}
+
+// AutomaticConversationName returns the persisted first-message name, if present.
+func AutomaticConversationName(metadata map[string]any) string {
+	if len(metadata) == 0 {
+		return ""
+	}
+	name, _ := metadata[ConversationAutoNameMetadataKey].(string)
+	return NormalizeConversationName(name)
+}
+
+// ResolveConversationName prefers an explicit name, then the persisted automatic name, over the deterministic fallback.
+func ResolveConversationName(metadata map[string]any, fallback string) string {
+	if name := ExplicitConversationName(metadata); name != "" {
+		return name
+	}
+	if name := AutomaticConversationName(metadata); name != "" {
+		return name
+	}
+	return NormalizeConversationName(fallback)
+}
+
+// EnsureConversationName persists the deterministic fallback the first time it is available.
+func EnsureConversationName(metadata map[string]any, fallback string) (map[string]any, string) {
+	if ExplicitConversationName(metadata) == "" && AutomaticConversationName(metadata) == "" {
+		metadata = SetAutomaticConversationName(metadata, fallback)
+	}
+	return metadata, ResolveConversationName(metadata, fallback)
+}
+
+// RenameThread persists an explicit name on an active conversation thread.
+func RenameThread(ctx context.Context, thread llmtypes.Thread, name string) (string, error) {
+	if thread == nil {
+		return "", errors.New("conversation thread is unavailable")
+	}
+	if !thread.IsPersisted() {
+		return "", errors.New("conversation persistence is disabled")
+	}
+	name = NormalizeConversationName(name)
+	if name == "" {
+		return "", errors.New("conversation name must not be empty")
+	}
+
+	thread.SetMetadataValue(ConversationNameMetadataKey, name)
+	if err := thread.SaveConversation(ctx); err != nil {
+		return "", errors.Wrap(err, "failed to save renamed conversation")
+	}
+	return name, nil
+}
 
 // MessageDisplay describes user-facing text for a model-facing message.
 type MessageDisplay struct {

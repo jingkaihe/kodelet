@@ -13,19 +13,18 @@ const ConversationConfigSnapshotVersion = 1
 // prompt/context inputs, tool permissions, extensions, and other live policy
 // remain sourced from current configuration.
 type ConversationConfigSnapshot struct {
-	Version                 int                            `json:"version" yaml:"version"`
-	Profile                 string                         `json:"profile,omitempty" yaml:"profile,omitempty"`
-	Provider                string                         `json:"provider" yaml:"provider"`
-	Model                   string                         `json:"model" yaml:"model"`
-	WeakModel               string                         `json:"weak_model,omitempty" yaml:"weak_model,omitempty"`
-	MaxTokens               int                            `json:"max_tokens,omitempty" yaml:"max_tokens,omitempty"`
-	WeakModelMaxTokens      int                            `json:"weak_model_max_tokens,omitempty" yaml:"weak_model_max_tokens,omitempty"`
-	ThinkingBudgetTokens    int                            `json:"thinking_budget_tokens,omitempty" yaml:"thinking_budget_tokens,omitempty"`
-	ReasoningEffort         string                         `json:"reasoning_effort" yaml:"reasoning_effort"`
-	ConversationSummaryMode ConversationSummaryMode        `json:"conversation_summary_mode,omitempty" yaml:"conversation_summary_mode,omitempty"`
-	CompactRatio            float64                        `json:"compact_ratio,omitempty" yaml:"compact_ratio,omitempty"`
-	OpenAI                  *ConversationOpenAISnapshot    `json:"openai,omitempty" yaml:"openai,omitempty"`
-	Anthropic               *ConversationAnthropicSnapshot `json:"anthropic,omitempty" yaml:"anthropic,omitempty"`
+	Version              int                            `json:"version" yaml:"version"`
+	Profile              string                         `json:"profile,omitempty" yaml:"profile,omitempty"`
+	Provider             string                         `json:"provider" yaml:"provider"`
+	Model                string                         `json:"model" yaml:"model"`
+	WeakModel            string                         `json:"weak_model,omitempty" yaml:"weak_model,omitempty"`
+	MaxTokens            int                            `json:"max_tokens,omitempty" yaml:"max_tokens,omitempty"`
+	WeakModelMaxTokens   int                            `json:"weak_model_max_tokens,omitempty" yaml:"weak_model_max_tokens,omitempty"`
+	ThinkingBudgetTokens int                            `json:"thinking_budget_tokens,omitempty" yaml:"thinking_budget_tokens,omitempty"`
+	ReasoningEffort      string                         `json:"reasoning_effort" yaml:"reasoning_effort"`
+	CompactRatio         float64                        `json:"compact_ratio,omitempty" yaml:"compact_ratio,omitempty"`
+	OpenAI               *ConversationOpenAISnapshot    `json:"openai,omitempty" yaml:"openai,omitempty"`
+	Anthropic            *ConversationAnthropicSnapshot `json:"anthropic,omitempty" yaml:"anthropic,omitempty"`
 }
 
 // ConversationOpenAISnapshot captures OpenAI request semantics that must remain
@@ -53,25 +52,21 @@ func NewConversationConfigSnapshot(config Config) (*ConversationConfigSnapshot, 
 	if err := NormalizeReasoningConfig(&config); err != nil {
 		return nil, errors.Wrap(err, "failed to snapshot reasoning configuration")
 	}
-	if config.ConversationSummaryMode == "" {
-		config.ConversationSummaryMode = ConversationSummaryModeLLM
-	}
 	if config.CompactRatio <= 0 {
 		config.CompactRatio = DefaultCompactRatio
 	}
 
 	snapshot := &ConversationConfigSnapshot{
-		Version:                 ConversationConfigSnapshotVersion,
-		Profile:                 strings.TrimSpace(config.Profile),
-		Provider:                strings.ToLower(strings.TrimSpace(config.Provider)),
-		Model:                   strings.TrimSpace(config.Model),
-		WeakModel:               strings.TrimSpace(config.WeakModel),
-		MaxTokens:               config.MaxTokens,
-		WeakModelMaxTokens:      config.WeakModelMaxTokens,
-		ThinkingBudgetTokens:    config.ThinkingBudgetTokens,
-		ReasoningEffort:         config.ReasoningEffort,
-		ConversationSummaryMode: config.ConversationSummaryMode,
-		CompactRatio:            config.CompactRatio,
+		Version:              ConversationConfigSnapshotVersion,
+		Profile:              strings.TrimSpace(config.Profile),
+		Provider:             strings.ToLower(strings.TrimSpace(config.Provider)),
+		Model:                strings.TrimSpace(config.Model),
+		WeakModel:            strings.TrimSpace(config.WeakModel),
+		MaxTokens:            config.MaxTokens,
+		WeakModelMaxTokens:   config.WeakModelMaxTokens,
+		ThinkingBudgetTokens: config.ThinkingBudgetTokens,
+		ReasoningEffort:      config.ReasoningEffort,
+		CompactRatio:         config.CompactRatio,
 	}
 	switch snapshot.Provider {
 	case "openai":
@@ -127,9 +122,6 @@ func (s *ConversationConfigSnapshot) Validate() error {
 	if effort == "" {
 		return errors.New("conversation config snapshot reasoning_effort is required")
 	}
-	if s.ConversationSummaryMode != "" && s.ConversationSummaryMode != ConversationSummaryModeLLM && s.ConversationSummaryMode != ConversationSummaryModeFirstMessage {
-		return errors.Errorf("invalid conversation config snapshot conversation_summary_mode %q", s.ConversationSummaryMode)
-	}
 	if s.CompactRatio < 0 || s.CompactRatio > 1 {
 		return errors.Errorf("invalid conversation config snapshot compact_ratio %v", s.CompactRatio)
 	}
@@ -177,7 +169,6 @@ func (s *ConversationConfigSnapshot) Apply(config Config) (Config, error) {
 	config.ThinkingBudgetTokens = s.ThinkingBudgetTokens
 	config.ReasoningEffort = effort
 	config.AllowedReasoningEfforts = nil
-	config.ConversationSummaryMode = s.ConversationSummaryMode
 	config.CompactRatio = s.CompactRatio
 
 	switch strings.ToLower(strings.TrimSpace(s.Provider)) {

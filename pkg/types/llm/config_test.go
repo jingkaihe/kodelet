@@ -30,12 +30,6 @@ func TestToolModeIsPatchMode(t *testing.T) {
 	assert.False(t, ToolMode("").IsPatchMode())
 }
 
-func TestConversationSummaryModeUsesLLM(t *testing.T) {
-	assert.True(t, ConversationSummaryMode("").UsesLLM())
-	assert.True(t, ConversationSummaryModeLLM.UsesLLM())
-	assert.False(t, ConversationSummaryModeFirstMessage.UsesLLM())
-}
-
 func TestConfigBashTimeout(t *testing.T) {
 	assert.Equal(t, DefaultBashTimeout, Config{}.BashTimeout())
 	assert.Equal(t, DefaultBashTimeout, Config{Bash: &BashConfig{}}.BashTimeout())

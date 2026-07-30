@@ -97,7 +97,6 @@ type Thread struct {
 	*base.Thread                                   // Embedded base thread for shared functionality
 	client          *openai.Client                 // OpenAI API client
 	messages        []openai.ChatCompletionMessage // OpenAI-specific message format
-	summary         string                         // Conversation summary
 	reasoningEffort string                         // Reasoning effort for o1/o3 models
 	customModels    *llmtypes.CustomModels         // Custom model configuration
 	customPricing   llmtypes.CustomPricing         // Custom pricing configuration
@@ -411,7 +410,7 @@ OUTER:
 	// Save conversation state after completing the interaction
 	if t.Persisted && t.Store != nil && !opt.NoSaveConversation {
 		saveCtx := context.Background() // use new context to avoid cancellation
-		t.SaveConversation(saveCtx, true)
+		t.SaveConversation(saveCtx)
 	}
 
 	handler.HandleDone()
@@ -590,7 +589,7 @@ func (t *Thread) processMessageExchange(
 	}
 
 	if t.Persisted && t.Store != nil && !opt.NoSaveConversation {
-		t.SaveConversation(ctx, false)
+		t.SaveConversation(ctx)
 	}
 	return finalOutput, true, nil
 }
@@ -1008,31 +1007,6 @@ func (t *Thread) SwapContext(_ context.Context, summary string) error {
 // CompactContext performs comprehensive context compacting by creating a detailed summary
 func (t *Thread) CompactContext(ctx context.Context) error {
 	return base.CompactContextWithSummary(ctx, t.runUtilityPrompt, t.SwapContext)
-}
-
-// ShortSummary generates a concise summary of the conversation using a faster model.
-func (t *Thread) ShortSummary(ctx context.Context) (string, error) {
-	toolResults := t.GetStructuredToolResults()
-	rawMessages, err := json.Marshal(t.messages)
-	if err != nil {
-		return "", err
-	}
-
-	messages, err := StreamMessages(rawMessages, toolResults)
-	if err != nil {
-		return "", err
-	}
-	if len(messages) == 0 {
-		return "", nil
-	}
-
-	markdown := base.RenderMarkdownForSummary(conversationsFromOpenAI(messages), toolResults)
-
-	return base.GenerateShortSummary(
-		ctx,
-		markdown,
-		t.runUtilityPrompt,
-	)
 }
 
 func conversationsFromOpenAI(msgs []StreamableMessage) []conversations.StreamableMessage {
