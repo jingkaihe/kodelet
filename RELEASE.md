@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.5.16-alpha
+
+Added `/sessions` and `/new` to the native TUI, with searchable switching across saved and open conversations, status indicators for running, unread, and input-required sessions, and preserved drafts and scroll positions.
+
+Enabled independent conversations to run concurrently in one TUI, with per-conversation steering, cancellation, queued slash-command follow-ups, and background completion or input notifications.
+
+Scoped persistent extension transcript entries, widgets, surfaces, and notifications to their originating conversation, and routed SDK persistent UI requests through active parent IDs for safe concurrent extension calls.
+
 ## 0.5.15-beta
 
 Named persisted conversations deterministically from the first user message, replacing weak-model title generation with normalized, bounded names.
