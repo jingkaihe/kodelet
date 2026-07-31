@@ -226,6 +226,16 @@ func TestRPCClientCallsRunConcurrentlyAndRouteHostRequests(t *testing.T) {
 	assert.Equal(t, -32602, ambiguousUIResponse.Error.Code)
 	assert.Contains(t, ambiguousUIResponse.Error.Message, "require parentId")
 
+	parentedWidgetRequest := []byte(`{"jsonrpc":"2.0","id":79,"parentId":` + strconv.FormatInt(requestIDs["first"], 10) + `,"method":"kodelet.ui.widget.set","params":{"id":"status","placement":"aboveComposer","frame":{"sequence":1,"lines":["working"]}}}`)
+	require.NoError(t, writeFrame(serverWriter, parentedWidgetRequest))
+	parentedWidgetPayload, err := readFrame(outbound)
+	require.NoError(t, err)
+	var parentedWidgetResponse rpcResponse
+	require.NoError(t, json.Unmarshal(parentedWidgetPayload, &parentedWidgetResponse))
+	assert.Equal(t, int64(79), parentedWidgetResponse.ID)
+	assert.Nil(t, parentedWidgetResponse.Error)
+	assert.JSONEq(t, `{"accepted":true,"conversation":"first"}`, string(parentedWidgetResponse.Result))
+
 	hostRequest := []byte(`{"jsonrpc":"2.0","id":77,"parentId":` + strconv.FormatInt(requestIDs["second"], 10) + `,"method":"kodelet.ui.input","params":{"title":"Choose"}}`)
 	require.NoError(t, writeFrame(serverWriter, hostRequest))
 	hostResponsePayload, err := readFrame(outbound)
@@ -277,11 +287,15 @@ type rpcCallContextKey struct{}
 type contextHostRequestHandler struct{}
 
 func (contextHostRequestHandler) HandleRPCRequest(ctx context.Context, method string, _ json.RawMessage) (any, *rpcError) {
-	if method != "kodelet.ui.input" {
+	value, _ := ctx.Value(rpcCallContextKey{}).(string)
+	switch method {
+	case "kodelet.ui.input":
+		return UIInputResponse{Status: UIInputStatusSubmitted, Value: value}, nil
+	case "kodelet.ui.widget.set":
+		return map[string]any{"accepted": true, "conversation": value}, nil
+	default:
 		return nil, &rpcError{Code: -32601, Message: "not found"}
 	}
-	value, _ := ctx.Value(rpcCallContextKey{}).(string)
-	return UIInputResponse{Status: UIInputStatusSubmitted, Value: value}, nil
 }
 
 type rpcIncomingNotification struct {

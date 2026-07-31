@@ -481,7 +481,7 @@ test("Session exposes in-process extensions through a temporary JSON-RPC bridge"
   await assert.rejects(() => stat(extensionRoot));
 });
 
-test("Session can expose in-process extensions over a TCP bridge", async (t) => {
+test("Session can expose in-process extensions over a TCP bridge", { timeout: 5000 }, async (t) => {
   const workspace = await mkdtemp(path.join(os.tmpdir(), "kodelet-agent-sdk-tcp-test-"));
   const calls: Array<{ env?: NodeJS.ProcessEnv }> = [];
   const spawn: SpawnFunction = (_command, _args, options) => {
@@ -490,6 +490,15 @@ test("Session can expose in-process extensions over a TCP bridge", async (t) => 
   };
 
   const selectedValues: string[] = [];
+  let resizeHandledResolve!: () => void;
+  const resizeHandled = new Promise<void>((resolve) => {
+    resizeHandledResolve = resolve;
+  });
+  let started = 0;
+  let releaseBoth!: () => void;
+  const bothStarted = new Promise<void>((resolve) => {
+    releaseBoth = resolve;
+  });
   const extension = defineExtension((ext) => {
     ext.setMetadata({ name: "workspace" });
     ext.registerTool({
@@ -497,10 +506,25 @@ test("Session can expose in-process extensions over a TCP bridge", async (t) => 
       description: "Ask a question",
       inputSchema: z.object({ question: z.string(), options: z.array(z.string()) }),
       async execute(input, ctx) {
-        await ctx.update("Waiting for selection", { step: 1 });
+        started += 1;
+        if (started === 2) releaseBoth();
+        await bothStarted;
+        await ctx.update(`Waiting for ${input.question}`, { step: 1 });
+        await ctx.ui.setWidget("selection", [input.question]);
         const selected = await ctx.ui.select({ title: input.question, options: input.options });
         selectedValues.push(selected ?? "");
         return selected ?? "dismissed";
+      },
+    });
+    ext.registerCommand({
+      name: "surface",
+      description: "Open a persistent surface",
+      async execute(_input, ctx) {
+        const surface = await ctx.ui.openSurface({ id: "game", initialLines: ["loading"] });
+        surface.onResize((event) => {
+          void ctx.ui.appendTranscript({ title: "Resized", message: String(event.width) }).then(resizeHandledResolve);
+        });
+        return { action: "respond", response: "opened" };
       },
     });
   });
@@ -541,26 +565,61 @@ test("Session can expose in-process extensions over a TCP bridge", async (t) => 
     protocolVersion: "2026-05-30",
     kodelet: { version: "test" },
     extension: { id: "workspace", cwd: workspace, dataDir: "" },
-    capabilities: { toolUpdates: true },
+    capabilities: { toolUpdates: true, ui: { widgets: true, surfaces: true, transcript: true } },
   });
   assert.equal((init as { name?: string }).name, "workspace");
 
-  const result = await bridge.call("extension.tool.execute", {
+  const first = bridge.beginCall("extension.tool.execute", {
     name: "ask_user_question",
-    input: { question: "Pick", options: ["A", "B"] },
+    input: { question: "First", options: ["A", "B"] },
     context: { cwd: workspace },
   });
-  assert.deepEqual(result, { content: "B" });
-  assert.deepEqual(selectedValues, ["B"]);
-  assert.deepEqual(bridge.hostRequests, [
-    {
-      jsonrpc: "2.0",
-      id: 1,
-      parentId: 2,
-      method: "kodelet.tool.update",
-      params: { content: "Waiting for selection", data: { step: 1 } },
-    },
+  const second = bridge.beginCall("extension.tool.execute", {
+    name: "ask_user_question",
+    input: { question: "Second", options: ["A", "B"] },
+    context: { cwd: workspace },
+  });
+  assert.deepEqual(await Promise.all([first.response, second.response]), [{ content: "B" }, { content: "B" }]);
+  assert.deepEqual(selectedValues.sort(), ["B", "B"]);
+
+  assert.equal(bridge.hostRequests.length, 4);
+  const expectedParents = new Map([
+    ["First", first.id],
+    ["Second", second.id],
   ]);
+  for (const request of bridge.hostRequests) {
+    let label: string;
+    if (request.method === "kodelet.tool.update") {
+      label = (request.params as { content: string }).content.replace("Waiting for ", "");
+    } else {
+      assert.equal(request.method, "kodelet.ui.widget.set");
+      label = (request.params as { frame: { lines: string[] } }).frame.lines[0];
+    }
+    assert.equal(request.parentId, expectedParents.get(label));
+  }
+  assert.deepEqual(
+    bridge.hostRequests
+      .filter((request) => request.method === "kodelet.ui.widget.set")
+      .map((request) => (request.params as { frame: { sequence: number } }).frame.sequence)
+      .sort((left, right) => left - right),
+    [1, 2],
+  );
+
+  const surfaceCall = bridge.beginCall("extension.command.execute", {
+    name: "surface",
+    input: {},
+    invocation: { raw: "/surface", commandName: "surface", args: [], flags: {} },
+    context: { cwd: workspace },
+  });
+  assert.deepEqual(await surfaceCall.response, { action: "respond", response: "opened" });
+  const openRequest = bridge.hostRequests.find((request) => request.method === "kodelet.ui.surface.open");
+  assert.equal(openRequest?.parentId, surfaceCall.id);
+
+  bridge.notify("extension.ui.surface.resize", { id: "game", sequence: 1, width: 60, height: 18 });
+  await resizeHandled;
+  const transcriptRequest = bridge.hostRequests.find((request) => request.method === "kodelet.ui.transcript.append");
+  assert.equal(transcriptRequest?.parentId, undefined);
+  assert.deepEqual(transcriptRequest?.params, { title: "Resized", message: "60" });
 
   await client.close();
 });

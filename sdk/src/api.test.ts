@@ -808,6 +808,78 @@ test("runtime supports extension-initiated host RPC", async (t) => {
   assert.deepEqual(result, { content: "from-host:true:Pizza" });
 });
 
+test("runtime correlates concurrent persistent widget requests", { timeout: 5000 }, async (t) => {
+  const extensionFile = path.join(await mkdtemp(path.join(os.tmpdir(), "kodelet-sdk-concurrent-widgets-")), "extension.ts");
+  await writeFile(
+    extensionFile,
+    `
+      import { defineExtension, runExtension, z } from ${JSON.stringify(path.resolve("src/index.ts"))};
+
+      let started = 0;
+      let releaseBoth;
+      const bothStarted = new Promise((resolve) => { releaseBoth = resolve; });
+      runExtension(defineExtension((ext) => {
+        ext.registerTool({
+          name: "widget",
+          description: "Update a persistent widget",
+          inputSchema: z.object({ label: z.string() }),
+          async execute(input, ctx) {
+            started += 1;
+            if (started === 2) releaseBoth();
+            await bothStarted;
+            await ctx.ui.setWidget("todo-progress", [input.label]);
+            return input.label;
+          },
+        });
+      }));
+    `,
+    "utf8",
+  );
+
+  const child = spawn(process.execPath, ["--import", "tsx", extensionFile], {
+    cwd: process.cwd(),
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  t.after(() => child.kill());
+
+  const client = new RpcTestClient(child.stdout, child.stdin);
+  await client.call("extension.initialize", {
+    protocolVersion: "2026-05-30",
+    extension: { id: "concurrent-widgets", cwd: process.cwd(), dataDir: "" },
+    capabilities: { ui: { widgets: true } },
+  });
+
+  const first = client.beginCall("extension.tool.execute", {
+    name: "widget",
+    input: { label: "first" },
+    context: { conversationId: "conversation-first", cwd: process.cwd() },
+  });
+  const second = client.beginCall("extension.tool.execute", {
+    name: "widget",
+    input: { label: "second" },
+    context: { conversationId: "conversation-second", cwd: process.cwd() },
+  });
+  const results = await Promise.all([first.response, second.response]);
+
+  const widgetRequests = client.hostRequests.filter((request) => request.method === "kodelet.ui.widget.set");
+  assert.equal(widgetRequests.length, 2);
+  const requestsByLabel = new Map(
+    widgetRequests.map((request) => {
+      const params = request.params as { frame: { sequence: number; lines: string[] } };
+      return [params.frame.lines[0], { request, params }] as const;
+    }),
+  );
+  assert.equal(requestsByLabel.get("first")?.request.parentId, first.id);
+  assert.equal(requestsByLabel.get("second")?.request.parentId, second.id);
+  assert.deepEqual(
+    widgetRequests
+      .map((request) => (request.params as { frame: { sequence: number } }).frame.sequence)
+      .sort((left, right) => left - right),
+    [1, 2],
+  );
+  assert.deepEqual(results, [{ content: "first" }, { content: "second" }]);
+});
+
 test("runtime keeps interactive surfaces alive after the opening command returns", async (t) => {
   const extensionFile = path.join(await mkdtemp(path.join(os.tmpdir(), "kodelet-sdk-surface-rpc-")), "extension.ts");
   await writeFile(

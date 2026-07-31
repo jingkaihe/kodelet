@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -157,6 +158,62 @@ func TestConversationPickerUsesWideDialogAndKeepsTitlePrefix(t *testing.T) {
 	assert.Equal(t, visibleTextColumn(line, "kodelet"), visibleTextColumn(other, "workspace"))
 }
 
+func TestConversationPickerKeyboardNavigationEditingAndNewConversation(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.conversationPicker = &conversationPickerState{
+		summaries: []convtypes.ConversationSummary{
+			{ID: "conversation-one", FirstMessage: "First conversation"},
+			{ID: "conversation-two", FirstMessage: "Second conversation"},
+		},
+	}
+
+	itemCount := len(m.filteredConversationPickerItems())
+	require.Greater(t, itemCount, 1)
+	m.updateConversationPickerKey(tea.KeyMsg{Type: tea.KeyUp})
+	assert.Equal(t, itemCount-1, m.conversationPicker.selected)
+	m.updateConversationPickerKey(tea.KeyMsg{Type: tea.KeyDown})
+	assert.Zero(t, m.conversationPicker.selected)
+
+	m.updateConversationPickerKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("café")})
+	assert.Equal(t, "café", m.conversationPicker.query)
+	m.conversationPicker.selected = 1
+	m.updateConversationPickerKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	assert.Equal(t, "caf", m.conversationPicker.query)
+	assert.Zero(t, m.conversationPicker.selected)
+	m.updateConversationPickerKey(tea.KeyMsg{Type: tea.KeyCtrlU})
+	assert.Empty(t, m.conversationPicker.query)
+
+	previousKey := m.activeConversationKey
+	m.conversationPicker.selected = itemCount + 10
+	cmd := m.updateConversationPickerKey(tea.KeyMsg{Type: tea.KeyEnter})
+
+	require.NotNil(t, cmd)
+	assert.Nil(t, m.conversationPicker)
+	assert.NotEqual(t, previousKey, m.activeConversationKey)
+	assert.True(t, strings.HasPrefix(m.activeConversationKey, "new:"))
+}
+
+func TestConversationPickerRendersLoadingErrorAndEmptyState(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 20
+	m.resize()
+	m.conversationPicker = &conversationPickerState{
+		query:   "does-not-match-any-conversation",
+		loading: true,
+		err:     errors.New("conversation store unavailable"),
+	}
+
+	rendered := xansi.Strip(m.renderConversationPicker())
+
+	assert.Contains(t, rendered, "Conversations")
+	assert.Contains(t, rendered, "Loading saved conversations")
+	assert.Contains(t, rendered, "conversation store unavailable")
+	assert.Contains(t, rendered, "No matching conversations")
+}
+
 func TestParallelConversationRunsRouteEventsAndCompletion(t *testing.T) {
 	m := newModel(context.Background(), Config{Runner: &recordingRunner{}})
 	t.Cleanup(m.cancel)
@@ -207,6 +264,54 @@ func TestParallelConversationRunsRouteEventsAndCompletion(t *testing.T) {
 	assert.NotContains(t, m.runs, firstRunID)
 	assert.Contains(t, m.runs, secondRunID)
 	assert.Equal(t, secondKey, m.activeConversationKey)
+}
+
+func TestBackgroundRunErrorDismissesPromptWithoutChangingActiveConversation(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	active := m.conversationState
+	m.textarea.SetValue("active draft")
+
+	responses := make(chan extensions.UIInputResponse, 1)
+	background := newConversationState("conversation-background", "conversation-background", true, m.conversationDefaults)
+	background.running = true
+	background.activeRunID = 7
+	background.entries = []chatEntry{{kind: entryUser, content: "background request"}}
+	background.activeUIPrompt = &uiPromptState{
+		mode:     uiPromptConfirm,
+		title:    "Approve background action",
+		response: responses,
+	}
+	m.conversations[background.key] = background
+	m.runs[background.activeRunID] = &conversationRun{conversationKey: background.key}
+	m.runByState[background.key] = background.activeRunID
+
+	updated, _ := m.Update(chatDoneMsg{
+		runID:           background.activeRunID,
+		conversationKey: background.key,
+		conversationID:  background.conversationID,
+		err:             errors.New("background failed"),
+	})
+	m = updated.(model)
+
+	assert.Same(t, active, m.conversationState)
+	assert.Equal(t, "active draft", m.textarea.Value())
+	assert.False(t, background.running)
+	assert.Equal(t, "error", background.status)
+	assert.ErrorContains(t, background.err, "background failed")
+	assert.True(t, background.unread)
+	assert.Nil(t, background.activeUIPrompt)
+	assert.NotContains(t, m.runs, 7)
+	require.NotEmpty(t, background.entries)
+	lastEntry := background.entries[len(background.entries)-1]
+	require.NotEmpty(t, lastEntry.blocks)
+	assert.Contains(t, lastEntry.blocks[0].text, "Error: background failed")
+	select {
+	case response := <-responses:
+		assert.Equal(t, extensions.UIInputStatusDismissed, response.Status)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for background prompt dismissal")
+	}
 }
 
 func TestGeneratedConversationIDKeepsStableStateKey(t *testing.T) {

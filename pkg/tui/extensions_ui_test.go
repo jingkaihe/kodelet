@@ -220,6 +220,81 @@ func TestTUIExtensionUIHostScopesSameIDWidgetsByConversation(t *testing.T) {
 	require.ErrorContains(t, err, "scope is ambiguous")
 }
 
+func TestTUIExtensionUIHostPersistentOperationsResolveEstablishedConversationScope(t *testing.T) {
+	ch := make(chan tea.Msg, 1)
+	host := newTUIExtensionUIHost(ch, nil)
+	source := &fakeExtensionUISource{owner: extensions.UIExtensionOwner{ExtensionID: "persistent", Generation: 1}}
+	conversationCtx := contextWithTUIConversation(context.Background(), "conversation-first")
+
+	widgetResponse, err := host.SetWidget(conversationCtx, source, extensions.UIWidgetSetRequest{
+		ID:        "status",
+		Placement: extensions.UIWidgetPlacementAboveComposer,
+		Frame:     extensionTestFrame(1, "starting"),
+	})
+	require.NoError(t, err)
+	assert.True(t, widgetResponse.Accepted)
+	surfaceResponse, err := host.OpenSurface(conversationCtx, source, extensions.UISurfaceOpenRequest{
+		ID:    "game",
+		Frame: extensionTestFrame(1, "opening"),
+	})
+	require.NoError(t, err)
+	assert.True(t, surfaceResponse.Accepted)
+
+	widgetResponse, err = host.UpdateWidget(context.Background(), source, extensions.UIWidgetFrameRequest{
+		ID:    "status",
+		Frame: extensionTestFrame(2, "running"),
+	})
+	require.NoError(t, err)
+	assert.True(t, widgetResponse.Accepted)
+	surfaceResponse, err = host.UpdateSurface(context.Background(), source, extensions.UISurfaceFrameRequest{
+		ID:    "game",
+		Frame: extensionTestFrame(2, "ready"),
+	})
+	require.NoError(t, err)
+	assert.True(t, surfaceResponse.Accepted)
+
+	widgetResponse, err = host.RemoveWidget(context.Background(), source, extensions.UIWidgetRemoveRequest{ID: "status", Sequence: 3})
+	require.NoError(t, err)
+	assert.True(t, widgetResponse.Accepted)
+	surfaceResponse, err = host.CloseSurface(context.Background(), source, extensions.UISurfaceCloseRequest{ID: "game", Sequence: 3})
+	require.NoError(t, err)
+	assert.True(t, surfaceResponse.Accepted)
+
+	<-ch
+	batch := host.drain()
+	require.Len(t, batch.widgets, 1)
+	assert.True(t, batch.widgets[0].remove)
+	assert.Equal(t, "conversation-first", batch.widgets[0].widget.key.conversationKey)
+	require.Len(t, batch.surfaces, 1)
+	assert.True(t, batch.surfaces[0].remove)
+	assert.Equal(t, "conversation-first", batch.surfaces[0].surface.key.conversationKey)
+	assert.Empty(t, host.widgets)
+	assert.Empty(t, host.surfaces)
+}
+
+func TestTUIExtensionUIHostRejectsAmbiguousContextFreeSurfaceOperations(t *testing.T) {
+	host := newTUIExtensionUIHost(make(chan tea.Msg, 1), nil)
+	source := &fakeExtensionUISource{owner: extensions.UIExtensionOwner{ExtensionID: "surfaces", Generation: 1}}
+
+	for _, conversationKey := range []string{"conversation-first", "conversation-second"} {
+		response, err := host.OpenSurface(
+			contextWithTUIConversation(context.Background(), conversationKey),
+			source,
+			extensions.UISurfaceOpenRequest{ID: "game", Frame: extensionTestFrame(1, conversationKey)},
+		)
+		require.NoError(t, err)
+		assert.True(t, response.Accepted)
+	}
+
+	_, err := host.UpdateSurface(context.Background(), source, extensions.UISurfaceFrameRequest{
+		ID:    "game",
+		Frame: extensionTestFrame(2, "ambiguous update"),
+	})
+	require.ErrorContains(t, err, "scope is ambiguous")
+	_, err = host.CloseSurface(context.Background(), source, extensions.UISurfaceCloseRequest{ID: "game", Sequence: 2})
+	require.ErrorContains(t, err, "scope is ambiguous")
+}
+
 func TestTUIExtensionUIHostSynchronizesClosedOwnerSequenceReads(t *testing.T) {
 	const attempts = 2000
 	tests := []struct {
