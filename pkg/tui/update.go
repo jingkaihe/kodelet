@@ -364,6 +364,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		key := msg.String()
 		if m.shortcutsOpen {
 			switch key {
+			case "ctrl+l":
+				return m, m.openConversationPicker("")
 			case "esc", "enter", "?", "q", "Q", "ctrl+c", "ctrl+d":
 				m.shortcutsOpen = false
 				m.refreshViewport(false)
@@ -379,6 +381,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.conversationPicker != nil {
 			cmd := m.updateConversationPickerKey(msg)
 			return m, cmd
+		}
+		if key == "ctrl+l" {
+			return m, m.openConversationPicker("")
 		}
 		if key != "ctrl+c" && key != "ctrl+d" {
 			if cmd, handled := m.routeExtensionSurfaceKey(msg); handled {

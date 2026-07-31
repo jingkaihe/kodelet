@@ -64,6 +64,47 @@ func TestSessionsSlashCommandOpensPickerWhileRunIsActive(t *testing.T) {
 	assert.Empty(t, m.textarea.Value())
 }
 
+func TestSessionsShortcutTogglesPickerWhileRunIsActive(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.running = true
+	m.activeRunID = 1
+	m.textarea.SetValue("draft while running")
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlL})
+	m = updated.(model)
+
+	require.NotNil(t, cmd)
+	require.NotNil(t, m.conversationPicker)
+	assert.True(t, m.running)
+	assert.Equal(t, "draft while running", m.textarea.Value())
+
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlL})
+	m = updated.(model)
+
+	assert.Nil(t, cmd)
+	assert.Nil(t, m.conversationPicker)
+	assert.True(t, m.running)
+	assert.Equal(t, "draft while running", m.textarea.Value())
+}
+
+func TestSessionsShortcutReplacesShortcutsAndHistorySearch(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.textarea.SetValue("original draft")
+	m.openHistorySearch()
+	m.shortcutsOpen = true
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlL})
+	m = updated.(model)
+
+	require.NotNil(t, cmd)
+	require.NotNil(t, m.conversationPicker)
+	assert.False(t, m.shortcutsOpen)
+	assert.Nil(t, m.historySearch)
+	assert.Equal(t, "original draft", m.textarea.Value())
+}
+
 func TestConversationPickerFiltersAndLoadsPersistedConversation(t *testing.T) {
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)

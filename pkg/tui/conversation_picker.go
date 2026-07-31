@@ -77,6 +77,7 @@ func (m *model) openConversationPicker(query string) tea.Cmd {
 	m.profilePickerOpen = false
 	m.reasoningPickerOpen = false
 	m.dismissSlashCommandSuggestions()
+	m.cancelHistorySearch()
 	m.shortcutsOpen = false
 	m.nextConversationListRequestID++
 	requestID := m.nextConversationListRequestID
@@ -227,7 +228,7 @@ func (m *model) updateConversationPickerKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 	switch msg.String() {
-	case "esc", "ctrl+c", "ctrl+d":
+	case "esc", "ctrl+c", "ctrl+d", "ctrl+l":
 		m.conversationPicker = nil
 		return nil
 	case "up", "shift+tab":

@@ -177,6 +177,7 @@ func (m model) renderShortcutsDialog() string {
 		{shortcut: "Shift+Enter", description: "Insert newline"},
 		{shortcut: "Ctrl+G", description: "Edit draft in $EDITOR"},
 		{shortcut: "Ctrl+R", description: "Search previous sent messages"},
+		{shortcut: "Ctrl+L", description: "Browse and switch conversations"},
 		{shortcut: "Ctrl+T", description: "Change profile before starting"},
 		{shortcut: "Ctrl+Y", description: "Change reasoning effort before starting"},
 		{shortcut: "Ctrl+O", description: "Toggle thought/tool details"},

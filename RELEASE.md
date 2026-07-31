@@ -2,7 +2,7 @@
 
 ## 0.5.16-alpha
 
-Added `/sessions` and `/new` to the native TUI, with searchable switching across saved and open conversations, status indicators for running, unread, and input-required sessions, and preserved drafts and scroll positions.
+Added `/sessions`, its `Ctrl+L` shortcut, and `/new` to the native TUI, with searchable switching across saved and open conversations, status indicators for running, unread, and input-required sessions, and preserved drafts and scroll positions.
 
 Enabled independent conversations to run concurrently in one TUI, with per-conversation steering, cancellation, queued slash-command follow-ups, and background completion or input notifications.
 

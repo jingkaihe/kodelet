@@ -121,6 +121,8 @@ func TestShortcutsDialogRendersWithThemeColors(t *testing.T) {
 			assert.Contains(t, view, "Shortcuts")
 			assert.Contains(t, view, "Ctrl+G")
 			assert.Contains(t, view, "Edit draft in $EDITOR")
+			assert.Contains(t, view, "Ctrl+L")
+			assert.Contains(t, view, "Browse and switch conversations")
 			assert.Contains(t, view, "Press Esc, Enter, ?, or q to close.")
 			dialogLines := strings.Split(xansi.Strip(m.renderShortcutsDialog()), "\n")
 			require.GreaterOrEqual(t, len(dialogLines), 3)
