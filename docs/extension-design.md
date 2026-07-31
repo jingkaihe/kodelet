@@ -510,7 +510,9 @@ Renderers accept at most 14 visible activities: up to 8 running, 3 recently comp
 
 The native Bubble Tea TUI advertises `capabilities.ui.transcript`, `capabilities.ui.widgets`, and `capabilities.ui.surfaces`. Headless, ACP, and Web UI runtimes currently advertise these capabilities as false, so extension authors must treat them as optional. The TypeScript SDK makes `ctx.ui.appendTranscript(...)` and `ctx.ui.setWidget(...)` no-ops when unavailable and rejects `ctx.ui.openSurface(...)` when surfaces are unavailable.
 
-Every UI object is scoped to one extension process generation and an extension-chosen ID. Process generation is part of host ownership rather than the wire payload: when a process fails or restarts, the host removes every widget and surface owned by the failed generation, restores focus to the next capturing surface, and rejects queued events from the old generation.
+Every UI object is scoped to one extension process generation, the originating conversation when one is present, and an extension-chosen ID. Context-free UI objects are deliberately global to the interactive host. Process generation and conversation scope are host ownership rather than wire payload fields: when a process fails or restarts, the host removes every widget and surface owned by the failed generation, restores focus to the next visible capturing surface, and rejects queued events from the old generation. Switching conversations hides scoped widgets, notifications, and surfaces from other conversations and prevents hidden surfaces from receiving keyboard or mouse input.
+
+Persistent UI requests should include the active host request as `parentId` while they are made from a tool, command, or event handler so concurrent calls retain the correct conversation context. SDKs may fall back to a parentless persistent connection after the originating handler returns; frame updates and close requests then reuse the scope established when the object was created. Hosts reject ambiguous parentless persistent UI requests rather than assigning them to an arbitrary concurrent call.
 
 Extension-to-host methods:
 

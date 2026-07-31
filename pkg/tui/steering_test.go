@@ -7,10 +7,101 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
+	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestRunningComposerOffersSlashCommands(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.running = true
+	m.activeRunID = 1
+	m.slashCommands = []slashcommands.Command{{Name: "review", Description: "Review changes"}}
+	m.textarea.SetValue("/rev")
+
+	assert.True(t, m.slashCommandSuggestionsOpen())
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(model)
+
+	assert.Nil(t, cmd)
+	assert.Equal(t, "/review ", m.textarea.Value())
+}
+
+func TestRunningComposerQueuesSlashCommandAsFollowUp(t *testing.T) {
+	m := newModel(context.Background(), Config{ConversationID: "conversation-123456789"})
+	t.Cleanup(m.cancel)
+	m.width = 100
+	m.height = 30
+	m.resize()
+	m.running = true
+	m.activeRunID = 1
+	m.textarea.SetValue("/goal finish the review")
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+
+	assert.Nil(t, cmd)
+	assert.True(t, m.running)
+	assert.Equal(t, "command queued", m.status)
+	assert.Empty(t, m.textarea.Value())
+	assert.Empty(t, m.queuedSteering)
+	assert.Equal(t, []string{"/goal finish the review"}, m.queuedFollowUps)
+	content, _ := m.renderTranscript()
+	assert.Contains(t, content, "queued command")
+	assert.Contains(t, content, "/goal finish the review")
+}
+
+func TestQueuedSlashCommandStartsAfterRunAndPreservesDraft(t *testing.T) {
+	m := newModel(context.Background(), Config{Runner: &recordingRunner{}})
+	t.Cleanup(m.cancel)
+	m.width = 100
+	m.height = 30
+	m.resize()
+	require.NotNil(t, m.startConversationRun(m.conversationState, "first request"))
+	firstRunID := m.activeRunID
+	m.queuedFollowUps = []string{"/goal finish the review"}
+	m.textarea.SetValue("draft typed while waiting")
+
+	updated, cmd := m.Update(chatDoneMsg{runID: firstRunID, conversationKey: m.key, conversationID: m.conversationID})
+	m = updated.(model)
+
+	require.NotNil(t, cmd)
+	assert.True(t, m.running)
+	assert.Greater(t, m.activeRunID, firstRunID)
+	assert.Empty(t, m.queuedFollowUps)
+	assert.Equal(t, "draft typed while waiting", m.textarea.Value())
+	require.Len(t, m.entries, 2)
+	assert.Equal(t, "Objective: finish the review", m.entries[1].content)
+}
+
+func TestBackgroundQueuedSlashCommandPreservesBothDrafts(t *testing.T) {
+	m := newModel(context.Background(), Config{Runner: &recordingRunner{}})
+	t.Cleanup(m.cancel)
+	background := m.conversationState
+	require.NotNil(t, m.startConversationRun(background, "first request"))
+	backgroundRunID := background.activeRunID
+	background.queuedFollowUps = []string{"/goal finish the review"}
+	background.slashDismissedDraft = "background slash state"
+	m.textarea.SetValue("background draft")
+
+	active := newConversationState("conversation-active", "conversation-active", true, m.conversationDefaults)
+	m.conversations[active.key] = active
+	requireConversationActivation(t, &m, active.key)
+	m.textarea.SetValue("active draft")
+
+	updated, cmd := m.Update(chatDoneMsg{runID: backgroundRunID, conversationKey: background.key, conversationID: background.conversationID})
+	m = updated.(model)
+
+	require.NotNil(t, cmd)
+	assert.Same(t, active, m.conversationState)
+	assert.Equal(t, "active draft", m.textarea.Value())
+	assert.Equal(t, "background draft", background.draft)
+	assert.Equal(t, "background slash state", background.slashDismissedDraft)
+	assert.True(t, background.running)
+}
 
 func TestRunningComposerQueuesSteering(t *testing.T) {
 	homeDir := setupTUIConversationStore(context.Background(), t)

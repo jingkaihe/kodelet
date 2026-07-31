@@ -216,6 +216,16 @@ func TestRPCClientCallsRunConcurrentlyAndRouteHostRequests(t *testing.T) {
 	require.NotNil(t, invalidUpdateResponse.Error)
 	assert.Equal(t, -32602, invalidUpdateResponse.Error.Code)
 
+	require.NoError(t, writeFrame(serverWriter, []byte(`{"jsonrpc":"2.0","id":78,"method":"kodelet.ui.widget.set","params":{"id":"status","placement":"aboveComposer","frame":{"sequence":1,"lines":["working"]}}}`)))
+	ambiguousUIPayload, err := readFrame(outbound)
+	require.NoError(t, err)
+	var ambiguousUIResponse rpcResponse
+	require.NoError(t, json.Unmarshal(ambiguousUIPayload, &ambiguousUIResponse))
+	assert.Equal(t, int64(78), ambiguousUIResponse.ID)
+	require.NotNil(t, ambiguousUIResponse.Error)
+	assert.Equal(t, -32602, ambiguousUIResponse.Error.Code)
+	assert.Contains(t, ambiguousUIResponse.Error.Message, "require parentId")
+
 	hostRequest := []byte(`{"jsonrpc":"2.0","id":77,"parentId":` + strconv.FormatInt(requestIDs["second"], 10) + `,"method":"kodelet.ui.input","params":{"title":"Choose"}}`)
 	require.NoError(t, writeFrame(serverWriter, hostRequest))
 	hostResponsePayload, err := readFrame(outbound)

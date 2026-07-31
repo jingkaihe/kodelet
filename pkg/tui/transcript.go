@@ -182,7 +182,7 @@ func (m model) renderAssistantBlockSeparator(b *strings.Builder, line *int, rend
 }
 
 func (m model) renderQueuedSteering(b *strings.Builder, line *int) {
-	if len(m.queuedSteering) == 0 && strings.TrimSpace(m.steerError) == "" {
+	if len(m.queuedSteering) == 0 && len(m.queuedFollowUps) == 0 && strings.TrimSpace(m.steerError) == "" {
 		return
 	}
 
@@ -190,6 +190,12 @@ func (m model) renderQueuedSteering(b *strings.Builder, line *int) {
 	(*line)++
 	for _, message := range m.queuedSteering {
 		rendered := steeringStyle.Render("↳ queued steering: " + wrapText(strings.TrimSpace(message), m.transcriptTextWidth()-20))
+		b.WriteString(rendered)
+		b.WriteString("\n")
+		*line += lineCount(rendered)
+	}
+	for _, message := range m.queuedFollowUps {
+		rendered := steeringStyle.Render("↳ queued command: " + wrapText(strings.TrimSpace(message), m.transcriptTextWidth()-19))
 		b.WriteString(rendered)
 		b.WriteString("\n")
 		*line += lineCount(rendered)

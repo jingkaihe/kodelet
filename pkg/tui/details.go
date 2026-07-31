@@ -26,7 +26,7 @@ func (m *model) toggleAllDetails() {
 	}
 	if !shouldExpand {
 		for key, widget := range m.extensionWidgets {
-			if len(widget.frame.Lines) > 1 && m.collapsedWidgets[key] {
+			if m.extensionUIKeyVisible(key) && len(widget.frame.Lines) > 1 && m.collapsedWidgets[key] {
 				shouldExpand = true
 				break
 			}
@@ -46,7 +46,7 @@ func (m *model) toggleAllDetails() {
 		m.collapsedWidgets = map[extensionUIKey]bool{}
 	}
 	for key, widget := range m.extensionWidgets {
-		if len(widget.frame.Lines) <= 1 {
+		if !m.extensionUIKeyVisible(key) || len(widget.frame.Lines) <= 1 {
 			continue
 		}
 		if shouldExpand {

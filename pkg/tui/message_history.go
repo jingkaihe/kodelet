@@ -11,16 +11,17 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/messagehistory"
 )
 
-func loadMessageHistory(ctx context.Context, store *messagehistory.Store, scopeCWD string) tea.Cmd {
+func loadMessageHistoryForConversation(ctx context.Context, conversationKey string, store *messagehistory.Store, scopeCWD string) tea.Cmd {
 	return func() tea.Msg {
+		conversationKey = strings.TrimSpace(conversationKey)
 		scopeCWD = strings.TrimSpace(scopeCWD)
 		if store == nil || scopeCWD == "" {
-			return messageHistoryMsg{scopeCWD: scopeCWD}
+			return messageHistoryMsg{conversationKey: conversationKey, scopeCWD: scopeCWD}
 		}
 
 		entries, err := store.List(ctx, scopeCWD, messagehistory.MaxEntriesPerScope)
 		if err != nil {
-			return messageHistoryMsg{scopeCWD: scopeCWD, err: err}
+			return messageHistoryMsg{conversationKey: conversationKey, scopeCWD: scopeCWD, err: err}
 		}
 
 		messages := make([]string, 0, len(entries))
@@ -29,7 +30,7 @@ func loadMessageHistory(ctx context.Context, store *messagehistory.Store, scopeC
 				messages = append(messages, text)
 			}
 		}
-		return messageHistoryMsg{scopeCWD: scopeCWD, messages: messages}
+		return messageHistoryMsg{conversationKey: conversationKey, scopeCWD: scopeCWD, messages: messages}
 	}
 }
 
@@ -41,7 +42,7 @@ func (m *model) updateMessageHistoryScope(cwd string) tea.Cmd {
 	m.messageHistoryScopeCWD = scopeCWD
 	m.messageHistory = nil
 	m.historySearch = nil
-	return loadMessageHistory(m.ctx, m.messageHistoryStore, m.messageHistoryScopeCWD)
+	return loadMessageHistoryForConversation(m.ctx, m.key, m.messageHistoryStore, m.messageHistoryScopeCWD)
 }
 
 func (m *model) appendSubmittedMessageToHistory(message string) {
@@ -57,15 +58,18 @@ func (m *model) appendSubmittedMessageToHistory(message string) {
 	m.appendMessageHistoryTexts([]string{message})
 }
 
-func (m *model) persistSubmittedMessageCommand(message string) tea.Cmd {
+func (m *model) persistSubmittedMessageCommandForState(state *conversationState, message string) tea.Cmd {
 	message = strings.TrimSpace(message)
 	store := m.messageHistoryStore
-	scopeCWD := strings.TrimSpace(m.messageHistoryScopeCWD)
+	if state == nil {
+		return nil
+	}
+	scopeCWD := strings.TrimSpace(state.messageHistoryScopeCWD)
 	if store == nil || message == "" {
 		return nil
 	}
-	conversationID := strings.TrimSpace(m.conversationID)
-	profile := strings.TrimSpace(m.profile)
+	conversationID := strings.TrimSpace(state.conversationID)
+	profile := strings.TrimSpace(state.profile)
 
 	return func() tea.Msg {
 		if scopeCWD == "" {

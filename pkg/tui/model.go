@@ -126,10 +126,6 @@ func newModel(ctx context.Context, config Config) model {
 		profileOptionsInput = loadProfileOptions()
 	}
 	profileOptions := normalizeProfileOptions(profileOptionsInput, profile)
-	profileIndex := profileOptionIndex(profileOptions, profile)
-	if profileIndex < 0 {
-		profileIndex = 0
-	}
 	reasoningEffort := strings.TrimSpace(config.ReasoningEffort)
 	reasoningEffortOptions := append([]string(nil), config.ReasoningEffortOptions...)
 	if resolvedEffort, resolvedOptions, err := resolveReasoningSettings(profile, reasoningEffort); err == nil {
@@ -140,47 +136,49 @@ func newModel(ctx context.Context, config Config) model {
 	}
 	reasoningEffort = normalizeReasoningEffort(reasoningEffort)
 	reasoningEffortOptions = normalizeReasoningEffortOptions(reasoningEffortOptions, reasoningEffort)
-	reasoningEffortIndex := reasoningEffortOptionIndex(reasoningEffortOptions, reasoningEffort)
-	if reasoningEffortIndex < 0 {
-		reasoningEffortIndex = 0
-	}
-
-	return model{
-		ctx:                     mctx,
-		cancel:                  cancel,
-		runner:                  runner,
-		extensionRuntimes:       extensionRuntimes,
-		extensionUI:             extensionUI,
-		extensionWidgets:        map[extensionUIKey]tuiExtensionWidget{},
-		widgetOrder:             []extensionUIKey{},
-		collapsedWidgets:        map[extensionUIKey]bool{},
-		widgetOffsets:           map[string]int{},
-		extensionSurfaces:       map[extensionUIKey]tuiExtensionSurface{},
-		conversationID:          conversationID,
-		conversationWasResumed:  conversationWasResumed,
+	defaults := conversationDefaults{
 		profile:                 profile,
-		profileOptions:          profileOptions,
-		profileIndex:            profileIndex,
+		profileOptions:          append([]string(nil), profileOptions...),
 		reasoningEffort:         reasoningEffort,
-		reasoningEffortOptions:  reasoningEffortOptions,
-		reasoningEffortIndex:    reasoningEffortIndex,
+		reasoningEffortOptions:  append([]string(nil), reasoningEffortOptions...),
 		reasoningEffortExplicit: config.ReasoningEffortExplicit,
-		reasoningPickerIndex:    reasoningEffortIndex,
 		cwd:                     cwd,
 		requestedCWD:            requestedCWD,
-		messageHistoryStore:     messageHistoryStore,
-		messageHistoryScopeCWD:  messageHistoryScopeCWD,
-		initialHistoryPending:   initialHistoryPending,
-		theme:                   theme,
-		themeSelection:          themeSelection,
-		slashCommandIndex:       -1,
-		viewport:                vp,
-		textarea:                ta,
-		spinner:                 sp,
-		autoFollow:              true,
-		runCh:                   runCh,
-		status:                  "ready",
-		terminalTitleEpoch:      time.Now(),
+	}
+	conversationKey := conversationID
+	if conversationKey == "" {
+		conversationKey = "new:1"
+	}
+	conversation := newConversationState(conversationKey, conversationID, conversationWasResumed, defaults)
+	conversation.initialHistoryPending = initialHistoryPending
+	conversation.messageHistoryScopeCWD = messageHistoryScopeCWD
+
+	return model{
+		conversationState:     conversation,
+		ctx:                   mctx,
+		cancel:                cancel,
+		runner:                runner,
+		extensionRuntimes:     extensionRuntimes,
+		extensionUI:           extensionUI,
+		extensionWidgets:      map[extensionUIKey]tuiExtensionWidget{},
+		widgetOrder:           []extensionUIKey{},
+		collapsedWidgets:      map[extensionUIKey]bool{},
+		widgetOffsets:         map[extensionWidgetOffsetKey]int{},
+		extensionSurfaces:     map[extensionUIKey]tuiExtensionSurface{},
+		conversations:         map[string]*conversationState{conversationKey: conversation},
+		activeConversationKey: conversationKey,
+		nextConversationKey:   1,
+		conversationDefaults:  defaults,
+		messageHistoryStore:   messageHistoryStore,
+		theme:                 theme,
+		themeSelection:        themeSelection,
+		viewport:              vp,
+		textarea:              ta,
+		spinner:               sp,
+		runs:                  map[int]*conversationRun{},
+		runByState:            map[string]int{},
+		runCh:                 runCh,
+		terminalTitleEpoch:    time.Now(),
 	}
 }
 
@@ -189,30 +187,38 @@ func (m model) Init() tea.Cmd {
 		textarea.Blink,
 		m.spinner.Tick,
 		waitForMsg(m.runCh),
-		loadInitialHistory(m.ctx, m.conversationID, m.requestedCWD),
-		loadMessageHistory(m.ctx, m.messageHistoryStore, m.messageHistoryScopeCWD),
+		loadConversationHistory(m.ctx, m.activeConversationKey, m.conversationID, m.requestedCWD),
+		loadMessageHistoryForConversation(m.ctx, m.activeConversationKey, m.messageHistoryStore, m.messageHistoryScopeCWD),
 	}
 	if !m.initialHistoryPending {
-		cmds = append(cmds, loadSlashCommands(m.ctx, m.slashCommandCWD()))
+		cmds = append(cmds, loadSlashCommandsForConversation(m.ctx, m.activeConversationKey, m.slashCommandCWD()))
 	}
 	return tea.Batch(cmds...)
 }
 
 func loadSlashCommands(ctx context.Context, cwd string) tea.Cmd {
+	return loadSlashCommandsForConversation(ctx, "", cwd)
+}
+
+func loadSlashCommandsForConversation(ctx context.Context, conversationKey, cwd string) tea.Cmd {
 	return func() tea.Msg {
 		commands, err := listBaseSlashCommands(ctx, cwd)
-		return slashCommandsMsg{cwd: strings.TrimSpace(cwd), commands: commands, err: err}
+		return slashCommandsMsg{conversationKey: conversationKey, cwd: strings.TrimSpace(cwd), commands: commands, err: err}
 	}
 }
 
 func loadExtensionSlashCommands(ctx context.Context, cwd string, runtimeManager *extensions.RuntimeManager) tea.Cmd {
+	return loadExtensionSlashCommandsForConversation(ctx, "", cwd, runtimeManager)
+}
+
+func loadExtensionSlashCommandsForConversation(ctx context.Context, conversationKey, cwd string, runtimeManager *extensions.RuntimeManager) tea.Cmd {
 	return func() tea.Msg {
 		commands, err := listExtensionSlashCommands(ctx, cwd, runtimeManager)
-		return slashCommandsMsg{cwd: strings.TrimSpace(cwd), commands: commands, extensionsOnly: true, err: err}
+		return slashCommandsMsg{conversationKey: conversationKey, cwd: strings.TrimSpace(cwd), commands: commands, extensionsOnly: true, err: err}
 	}
 }
 
-func startExtensionLifecycle(ctx context.Context, cwd, conversationID, provider, model, profile string, runtimeManager *extensions.RuntimeManager) tea.Cmd {
+func startExtensionLifecycleForConversation(ctx context.Context, conversationKey, cwd, conversationID, provider, model, profile string, runtimeManager *extensions.RuntimeManager) tea.Cmd {
 	return func() tea.Msg {
 		resolvedCWD, err := resolveSlashCommandCWD(cwd)
 		if err == nil {
@@ -225,7 +231,19 @@ func startExtensionLifecycle(ctx context.Context, cwd, conversationID, provider,
 				InvokedBy:      "main",
 			})
 		}
-		return extensionLifecycleMsg{conversationID: strings.TrimSpace(conversationID), cwd: resolvedCWD, err: err}
+		return extensionLifecycleMsg{conversationKey: conversationKey, conversationID: strings.TrimSpace(conversationID), cwd: resolvedCWD, err: err}
+	}
+}
+
+func closeTUIBrokerAfter(cmd tea.Cmd, broker *tuiUIBroker) tea.Cmd {
+	if cmd == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		if broker != nil {
+			defer broker.close()
+		}
+		return cmd()
 	}
 }
 

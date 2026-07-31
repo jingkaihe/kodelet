@@ -104,12 +104,21 @@ func normalizedThemeSelection(name string) string {
 }
 
 func tuiBuiltInSlashCommands() []slashcommands.Command {
-	return []slashcommands.Command{{
-		Name:        "theme",
-		Description: "Select the TUI theme",
-		Hint:        "name (optional)",
-		Placeholder: "/theme [name]",
-	}}
+	return []slashcommands.Command{
+		{
+			Name:        "theme",
+			Description: "Select the TUI theme",
+			Hint:        "name (optional)",
+			Placeholder: "/theme [name]",
+		},
+		{
+			Name:        "sessions",
+			Description: "Browse and switch conversations",
+			Hint:        "search (optional)",
+			Placeholder: "/sessions [search]",
+		},
+		{Name: "new", Description: "Start a new conversation"},
+	}
 }
 
 func withTUIBuiltInSlashCommands(commands []slashcommands.Command) []slashcommands.Command {
@@ -119,25 +128,37 @@ func withTUIBuiltInSlashCommands(commands []slashcommands.Command) []slashcomman
 
 func (m *model) handleLocalSlashCommand(message string) (tea.Cmd, bool) {
 	command, args, found := slashcommands.Parse(message)
-	if !found || command != "theme" {
+	if !found {
 		return nil, false
 	}
 
-	m.textarea.Reset()
-	m.dismissSlashCommandSuggestions()
-	if name := strings.TrimSpace(args); name != "" {
-		cmd, err := m.setThemeSelection(name)
-		if err != nil {
-			return m.addUINotification(uiNotification{
-				level:   uiNotificationError,
-				title:   "Theme unavailable",
-				message: err.Error(),
-			}), true
+	switch command {
+	case "theme":
+		m.textarea.Reset()
+		m.dismissSlashCommandSuggestions()
+		if name := strings.TrimSpace(args); name != "" {
+			cmd, err := m.setThemeSelection(name)
+			if err != nil {
+				return m.addUINotification(uiNotification{
+					level:   uiNotificationError,
+					title:   "Theme unavailable",
+					message: err.Error(),
+				}), true
+			}
+			return cmd, true
 		}
-		return cmd, true
+		return m.openThemePicker(), true
+	case "sessions":
+		m.textarea.Reset()
+		m.dismissSlashCommandSuggestions()
+		return m.openConversationPicker(args), true
+	case "new":
+		m.textarea.Reset()
+		m.dismissSlashCommandSuggestions()
+		return m.createNewConversation(), true
+	default:
+		return nil, false
 	}
-
-	return m.openThemePicker(), true
 }
 
 func (m *model) openThemePicker() tea.Cmd {

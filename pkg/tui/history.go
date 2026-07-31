@@ -12,52 +12,68 @@ import (
 )
 
 func loadInitialHistory(ctx context.Context, conversationID, requestedCWD string) tea.Cmd {
+	return loadConversationHistory(ctx, "", conversationID, requestedCWD)
+}
+
+func loadConversationHistory(ctx context.Context, conversationKey, conversationID, requestedCWD string) tea.Cmd {
 	return func() tea.Msg {
+		result := initialHistoryMsg{
+			conversationKey: strings.TrimSpace(conversationKey),
+			conversationID:  strings.TrimSpace(conversationID),
+		}
 		if strings.TrimSpace(conversationID) == "" {
-			return initialHistoryMsg{}
+			return result
 		}
 
 		service, err := conversations.GetDefaultConversationService(ctx)
 		if err != nil {
-			return initialHistoryMsg{err: errors.Wrap(err, "failed to open conversation store")}
+			result.err = errors.Wrap(err, "failed to open conversation store")
+			return result
 		}
 		defer service.Close()
 
 		response, err := service.GetConversation(ctx, conversationID)
 		if err != nil {
-			return initialHistoryMsg{err: errors.Wrap(err, "failed to load conversation")}
+			result.err = errors.Wrap(err, "failed to load conversation")
+			return result
 		}
 		if strings.TrimSpace(requestedCWD) != "" && strings.TrimSpace(response.CWD) != "" {
 			defaultCWD, err := chat.ResolveConfiguredDefaultCWD("")
 			if err != nil {
-				return initialHistoryMsg{err: errors.Wrap(err, "failed to resolve requested cwd")}
+				result.err = errors.Wrap(err, "failed to resolve requested cwd")
+				return result
 			}
 			expandedCWD, err := chat.ExpandCWDInput(requestedCWD, defaultCWD)
 			if err != nil {
-				return initialHistoryMsg{err: errors.Wrap(err, "failed to resolve requested cwd")}
+				result.err = errors.Wrap(err, "failed to resolve requested cwd")
+				return result
 			}
 			resolvedRequested, err := conversations.NormalizeCWD(expandedCWD)
 			if err != nil {
-				return initialHistoryMsg{err: errors.Wrap(err, "failed to resolve requested cwd")}
+				result.err = errors.Wrap(err, "failed to resolve requested cwd")
+				return result
 			}
 			resolvedStored, err := conversations.NormalizeCWD(response.CWD)
 			if err != nil {
-				return initialHistoryMsg{err: errors.Wrap(err, "failed to resolve conversation cwd")}
+				result.err = errors.Wrap(err, "failed to resolve conversation cwd")
+				return result
 			}
 			if resolvedRequested != resolvedStored {
-				return initialHistoryMsg{err: errors.Wrapf(
+				result.err = errors.Wrapf(
 					conversations.ErrCWDConflict,
 					"conversation %s is bound to %s, not %s",
 					conversationID,
 					resolvedStored,
 					resolvedRequested,
-				)}
+				)
+				return result
 			}
 		}
 
 		messages, err := llm.ExtractConversationEntries(response.Provider, response.RawMessages, response.Metadata, response.ToolResults)
 		if err != nil {
-			return initialHistoryMsg{err: errors.Wrap(err, "failed to parse conversation")}
+			result.err = errors.Wrap(err, "failed to parse conversation")
+			return result
 		}
 
 		provider := strings.TrimSpace(response.Provider)
@@ -65,7 +81,8 @@ func loadInitialHistory(ctx context.Context, conversationID, requestedCWD string
 		profile := profileFromMetadata(response.Metadata)
 		reasoningEffort := ""
 		if snapshot, ok, snapshotErr := conversations.ConfigSnapshotFromMetadata(response.Metadata); snapshotErr != nil {
-			return initialHistoryMsg{err: errors.Wrap(snapshotErr, "failed to load conversation config snapshot")}
+			result.err = errors.Wrap(snapshotErr, "failed to load conversation config snapshot")
+			return result
 		} else if ok {
 			provider = strings.TrimSpace(snapshot.Provider)
 			model = strings.TrimSpace(snapshot.Model)
@@ -78,7 +95,21 @@ func loadInitialHistory(ctx context.Context, conversationID, requestedCWD string
 			reasoningEffort = config.ReasoningEffort
 		}
 
-		return initialHistoryMsg{loaded: true, entries: entriesFromHistory(messages), usage: response.Usage, cwd: strings.TrimSpace(response.CWD), profile: profile, provider: provider, model: model, reasoningEffort: reasoningEffort}
+		fallbackTitle := strings.TrimSpace(response.Summary)
+		if fallbackTitle == "" {
+			fallbackTitle = shortID(response.ID)
+		}
+		result.loaded = true
+		result.entries = entriesFromHistory(messages)
+		result.usage = response.Usage
+		result.cwd = strings.TrimSpace(response.CWD)
+		result.title = conversations.ResolveConversationName(response.Metadata, fallbackTitle)
+		result.updatedAt = response.UpdatedAt
+		result.profile = profile
+		result.provider = provider
+		result.model = model
+		result.reasoningEffort = reasoningEffort
+		return result
 	}
 }
 

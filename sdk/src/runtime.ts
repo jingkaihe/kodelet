@@ -214,6 +214,18 @@ function startRequest(
   activeRequests.set(requestId, active);
   const requestClient: HostRPCClient = {
     request: (method, params) => hostClient.requestFor(active, method, params),
+    requestPersistent: async (method, params) => {
+      if (active.active) {
+        try {
+          return await hostClient.requestFor(active, method, params);
+        } catch (error) {
+          if (active.active) {
+            throw error;
+          }
+        }
+      }
+      return await hostClient.request(method, params);
+    },
     persistent: hostClient,
   };
 

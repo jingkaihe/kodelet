@@ -59,10 +59,11 @@ type uiPromptState struct {
 }
 
 type uiNotification struct {
-	id      int
-	level   uiNotificationLevel
-	title   string
-	message string
+	id              int
+	conversationKey string
+	level           uiNotificationLevel
+	title           string
+	message         string
 }
 
 type uiNotificationLevel int
@@ -74,14 +75,16 @@ const (
 )
 
 type uiPromptRequestMsg struct {
-	runID  int
-	prompt uiPromptState
+	runID           int
+	conversationKey string
+	prompt          uiPromptState
 }
 
 type uiNotificationMsg struct {
-	runID        int
-	notification uiNotification
-	response     chan extensions.UIInputResponse
+	runID           int
+	conversationKey string
+	notification    uiNotification
+	response        chan extensions.UIInputResponse
 }
 
 type uiNotificationExpiredMsg struct {
@@ -210,15 +213,20 @@ func truncateDiagnosticNotification(message string) string {
 }
 
 type tuiUIBroker struct {
-	ch    chan<- tea.Msg
-	runID int
+	ch              chan<- tea.Msg
+	runID           int
+	conversationKey string
 
 	mu     sync.Mutex
 	closed bool
 }
 
 func newTUIUIBroker(ch chan<- tea.Msg, runID int) *tuiUIBroker {
-	return &tuiUIBroker{ch: ch, runID: runID}
+	return newTUIUIBrokerForConversation(ch, runID, "")
+}
+
+func newTUIUIBrokerForConversation(ch chan<- tea.Msg, runID int, conversationKey string) *tuiUIBroker {
+	return &tuiUIBroker{ch: ch, runID: runID, conversationKey: strings.TrimSpace(conversationKey)}
 }
 
 func (b *tuiUIBroker) Input(ctx context.Context, request extensions.UIInputRequest) (extensions.UIInputResponse, error) {
@@ -298,7 +306,7 @@ func (b *tuiUIBroker) Notify(ctx context.Context, request extensions.UINotifyReq
 	select {
 	case <-ctx.Done():
 		return extensions.UIInputResponse{}, ctx.Err()
-	case b.ch <- uiNotificationMsg{runID: b.runID, notification: uiNotification{title: request.Title, message: request.Message}, response: response}:
+	case b.ch <- uiNotificationMsg{runID: b.runID, conversationKey: b.conversationKey, notification: uiNotification{title: request.Title, message: request.Message}, response: response}:
 	}
 	select {
 	case <-ctx.Done():
@@ -312,7 +320,7 @@ func (b *tuiUIBroker) prompt(ctx context.Context, prompt uiPromptState) (extensi
 	select {
 	case <-ctx.Done():
 		return extensions.UIInputResponse{}, ctx.Err()
-	case b.ch <- uiPromptRequestMsg{runID: b.runID, prompt: prompt}:
+	case b.ch <- uiPromptRequestMsg{runID: b.runID, conversationKey: b.conversationKey, prompt: prompt}:
 	}
 
 	select {
@@ -349,7 +357,29 @@ func (m model) acceptUIBrokerRunID(runID int) bool {
 	if runID == 0 {
 		return m.extensionLifecyclePending && !m.running && m.activeRunID == 0
 	}
+	if m.runs[runID] != nil {
+		return true
+	}
 	return runID == m.activeRunID
+}
+
+func (m *model) uiBrokerState(runID int, conversationKey string) *conversationState {
+	if m == nil {
+		return nil
+	}
+	if runID == 0 {
+		if state := m.stateForKey(conversationKey); strings.TrimSpace(conversationKey) != "" && state != nil {
+			if state.extensionLifecyclePending && !state.running && state.activeRunID == 0 {
+				return state
+			}
+			return nil
+		}
+		if m.acceptUIBrokerRunID(runID) {
+			return m.conversationState
+		}
+		return nil
+	}
+	return m.stateForRun(runID)
 }
 
 func respondUIPrompt(prompt uiPromptState, response extensions.UIInputResponse) bool {
@@ -397,35 +427,68 @@ func newInputPromptModel(prompt uiPromptState, width int) uiPromptState {
 }
 
 func (m *model) openUIPrompt(prompt uiPromptState) tea.Cmd {
-	if m.activeUIPrompt != nil {
-		m.resolveUIPrompt(extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
+	return m.openUIPromptForState(m.conversationState, prompt)
+}
+
+func (m *model) openUIPromptForState(state *conversationState, prompt uiPromptState) tea.Cmd {
+	if state == nil {
+		respondUIPrompt(prompt, extensions.UIInputResponse{Status: extensions.UIInputStatusUnavailable, Reason: "conversation is no longer available"})
+		return nil
 	}
-	m.profilePickerOpen = false
-	m.reasoningPickerOpen = false
-	m.dismissSlashCommandSuggestions()
+	if state.activeUIPrompt != nil {
+		previous := *state.activeUIPrompt
+		respondUIPrompt(previous, extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
+	}
+	state.profilePickerOpen = false
+	state.reasoningPickerOpen = false
+	state.slashCommandIndex = -1
 	if prompt.mode == uiPromptInput {
 		prompt = newInputPromptModel(prompt, m.uiDialogInputWidth())
 	}
-	m.activeUIPrompt = &prompt
-	m.status = "waiting for input"
-	m.resize()
-	m.refreshViewport(false)
-	if prompt.mode == uiPromptInput {
-		return textinput.Blink
+	state.activeUIPrompt = &prompt
+	state.status = "waiting for input"
+	active := state == m.conversationState
+	if active {
+		m.resize()
+		m.refreshViewport(false)
+	} else {
+		state.unread = true
 	}
-	return nil
+	var notificationCmd tea.Cmd
+	if !active {
+		title := strings.TrimSpace(state.title)
+		if title == "" {
+			title = shortID(state.conversationID)
+		}
+		if title == "" {
+			title = "Background conversation"
+		}
+		notificationCmd = m.addUINotification(uiNotification{
+			level:   uiNotificationWarning,
+			title:   "Conversation needs input",
+			message: title,
+		})
+	}
+	if prompt.mode == uiPromptInput {
+		return tea.Batch(notificationCmd, textinput.Blink)
+	}
+	return notificationCmd
 }
 
 func (m *model) resolveUIPrompt(response extensions.UIInputResponse) {
-	if m.activeUIPrompt == nil {
+	m.resolveUIPromptForState(m.conversationState, response)
+}
+
+func (m *model) resolveUIPromptForState(state *conversationState, response extensions.UIInputResponse) {
+	if state == nil || state.activeUIPrompt == nil {
 		return
 	}
-	prompt := *m.activeUIPrompt
-	m.activeUIPrompt = nil
-	if m.running {
-		m.status = "working"
+	prompt := *state.activeUIPrompt
+	state.activeUIPrompt = nil
+	if state.running {
+		state.status = "working"
 	} else {
-		m.status = "ready"
+		state.status = "ready"
 	}
 	if response.Status == "" {
 		response.Status = extensions.UIInputStatusDismissed
@@ -434,8 +497,10 @@ func (m *model) resolveUIPrompt(response extensions.UIInputResponse) {
 	case prompt.response <- response:
 	default:
 	}
-	m.resize()
-	m.refreshViewport(false)
+	if state == m.conversationState {
+		m.resize()
+		m.refreshViewport(false)
+	}
 }
 
 func (m *model) submitUIPrompt() tea.Cmd {
@@ -517,8 +582,16 @@ func (m *model) addUINotification(notification uiNotification) tea.Cmd {
 	notification.title = title
 	notification.message = message
 	m.uiNotifications = append(m.uiNotifications, notification)
-	if len(m.uiNotifications) > 3 {
-		m.uiNotifications = append([]uiNotification{}, m.uiNotifications[len(m.uiNotifications)-3:]...)
+	matching := 0
+	for index := len(m.uiNotifications) - 1; index >= 0; index-- {
+		if m.uiNotifications[index].conversationKey != notification.conversationKey {
+			continue
+		}
+		matching++
+		if matching > 3 {
+			m.uiNotifications = append(m.uiNotifications[:index], m.uiNotifications[index+1:]...)
+			break
+		}
 	}
 	m.refreshViewport(false)
 	return tea.Tick(uiNotificationTTL, func(time.Time) tea.Msg {

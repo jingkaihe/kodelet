@@ -354,9 +354,11 @@ func (c *rpcClient) dispatchResponse(msg rpcIncomingMessage) error {
 }
 
 func (c *rpcClient) dispatchIncomingRequest(msg rpcIncomingMessage) {
-	ctx, handler, parentMatched := c.hostRequestTarget(msg.ParentID)
+	ctx, handler, parentMatched, ambiguous := c.hostRequestTarget(msg.ParentID)
 	if msg.Method == "kodelet.tool.update" && !parentMatched {
 		handler = invalidToolUpdateParentHandler{}
+	} else if ambiguous && isPersistentExtensionUIRequest(msg.Method) {
+		handler = ambiguousExtensionUIParentHandler{}
 	}
 	if err := c.handleIncomingRequest(ctx, msg, handler); err != nil {
 		c.fail(err)
@@ -366,7 +368,7 @@ func (c *rpcClient) dispatchIncomingRequest(msg rpcIncomingMessage) {
 func (c *rpcClient) dispatchIncomingNotification(msg rpcIncomingMessage) {
 	var handler rpcHostRequestHandler
 	if len(msg.ParentID) > 0 && string(msg.ParentID) != "null" {
-		_, handler, _ = c.hostRequestTarget(msg.ParentID)
+		_, handler, _, _ = c.hostRequestTarget(msg.ParentID)
 	} else {
 		c.stateMu.Lock()
 		handler = c.host
@@ -382,39 +384,59 @@ func (c *rpcClient) dispatchIncomingNotification(msg rpcIncomingMessage) {
 	notificationHandler.HandleRPCNotification(msg.Method, msg.Params)
 }
 
-func (c *rpcClient) hostRequestTarget(parentID json.RawMessage) (context.Context, rpcHostRequestHandler, bool) {
+func (c *rpcClient) hostRequestTarget(parentID json.RawMessage) (context.Context, rpcHostRequestHandler, bool, bool) {
 	c.stateMu.Lock()
 	defer c.stateMu.Unlock()
 
 	if len(parentID) > 0 && string(parentID) != "null" {
 		var id int64
 		if err := json.Unmarshal(parentID, &id); err != nil {
-			return context.Background(), nil, false
+			return context.Background(), nil, false, false
 		}
 		if pending := c.pending[id]; pending != nil {
-			return pending.ctx, pending.handler, pending.handler != nil
+			return pending.ctx, pending.handler, pending.handler != nil, false
 		}
-		return context.Background(), nil, false
+		return context.Background(), nil, false, false
 	}
 
 	var selectedID int64
 	var selected *rpcPendingCall
+	candidates := 0
 	for id, pending := range c.pending {
-		if pending.handler != nil && (selected == nil || id < selectedID) {
+		if pending.handler == nil {
+			continue
+		}
+		candidates++
+		if selected == nil || id < selectedID {
 			selectedID = id
 			selected = pending
 		}
 	}
 	if selected == nil {
-		return context.Background(), c.host, false
+		return context.Background(), c.host, false, false
 	}
-	return selected.ctx, selected.handler, false
+	return selected.ctx, selected.handler, false, candidates > 1
 }
 
 type invalidToolUpdateParentHandler struct{}
 
 func (invalidToolUpdateParentHandler) HandleRPCRequest(_ context.Context, _ string, _ json.RawMessage) (any, *rpcError) {
 	return nil, &rpcError{Code: -32602, Message: "kodelet.tool.update requires a valid parentId"}
+}
+
+type ambiguousExtensionUIParentHandler struct{}
+
+func (ambiguousExtensionUIParentHandler) HandleRPCRequest(_ context.Context, _ string, _ json.RawMessage) (any, *rpcError) {
+	return nil, &rpcError{Code: -32602, Message: "persistent extension UI requests require parentId while calls execute concurrently"}
+}
+
+func isPersistentExtensionUIRequest(method string) bool {
+	switch method {
+	case UITranscriptAppendMethod, UIWidgetSetMethod, UIWidgetFrameMethod, UIWidgetRemoveMethod, UISurfaceOpenMethod, UISurfaceFrameMethod, UISurfaceCloseMethod:
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *rpcClient) fail(err error) {

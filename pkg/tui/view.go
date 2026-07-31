@@ -104,6 +104,9 @@ func (m model) renderUIOverlays(content string) string {
 	if len(m.uiNotifications) > 0 {
 		lines = m.overlayUINotifications(lines)
 	}
+	if m.conversationPicker != nil {
+		lines = m.overlayConversationPicker(lines)
+	}
 	if m.activeUIPrompt != nil {
 		lines = m.overlayUIDialog(lines)
 	}
@@ -413,6 +416,9 @@ func (m model) renderUINotifications() string {
 	}
 	boxes := make([]string, 0, len(m.uiNotifications))
 	for _, notification := range m.uiNotifications {
+		if notification.conversationKey != "" && notification.conversationKey != m.activeConversationKey {
+			continue
+		}
 		box := m.renderUINotification(notification)
 		if strings.TrimSpace(box) != "" {
 			boxes = append(boxes, box)

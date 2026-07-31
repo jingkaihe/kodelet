@@ -856,7 +856,7 @@ test("runtime keeps interactive surfaces alive after the opening command returns
   });
   assert.deepEqual(result, { action: "respond", response: "opened" });
   const openRequest = client.hostRequests.find((request) => request.method === "kodelet.ui.surface.open");
-  assert.equal(openRequest?.parentId, undefined);
+  assert.equal(openRequest?.parentId, 2);
 
   client.notify("extension.ui.surface.resize", { id: "game", sequence: 1, width: 60, height: 18 });
   await client.waitForHostNotifications(1);

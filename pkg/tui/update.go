@@ -15,6 +15,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/shlex"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
@@ -113,7 +114,7 @@ func hasShiftModifier(value string) bool {
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	_, extensionSurfaceFocused := m.focusedExtensionSurfaceKey()
-	if stringer, ok := msg.(fmt.Stringer); ok && m.activeUIPrompt == nil && !extensionSurfaceFocused && isTextareaNewlineKey(stringer.String()) {
+	if stringer, ok := msg.(fmt.Stringer); ok && m.activeUIPrompt == nil && m.conversationPicker == nil && !m.shortcutsOpen && m.historySearch == nil && !extensionSurfaceFocused && isTextareaNewlineKey(stringer.String()) {
 		m.insertTextareaNewline()
 		return m, nil
 	}
@@ -142,32 +143,48 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case extensionUITranscriptMsg:
-		m.entries = append(m.entries, chatEntry{kind: entryInfo, title: msg.title, content: msg.message})
-		m.refreshViewport(m.autoFollow)
+		state := m.stateForKey(msg.conversationKey)
+		if state == nil {
+			return m, waitForMsg(m.runCh)
+		}
+		active := state == m.conversationState
+		state.entries = append(state.entries, chatEntry{kind: entryInfo, title: msg.title, content: msg.message})
+		if active {
+			m.refreshViewport(m.autoFollow)
+		} else {
+			state.unread = true
+		}
 		return m, waitForMsg(m.runCh)
 
 	case uiPromptRequestMsg:
-		if !m.acceptUIBrokerRunID(msg.runID) {
+		state := m.uiBrokerState(msg.runID, msg.conversationKey)
+		if state == nil {
 			respondUIPrompt(msg.prompt, extensions.UIInputResponse{Status: extensions.UIInputStatusUnavailable, Reason: "tui input request is no longer active"})
 			return m, waitForMsg(m.runCh)
 		}
-		if m.runCancelling {
+		if state.runCancelling {
 			respondUIPrompt(msg.prompt, extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
 			return m, waitForMsg(m.runCh)
 		}
-		cmd := m.openUIPrompt(msg.prompt)
+		cmd := m.openUIPromptForState(state, msg.prompt)
 		return m, tea.Batch(waitForMsg(m.runCh), cmd)
 
 	case uiNotificationMsg:
-		if !m.acceptUIBrokerRunID(msg.runID) {
+		state := m.uiBrokerState(msg.runID, msg.conversationKey)
+		if state == nil {
 			respondUINotification(msg, extensions.UIInputResponse{Status: extensions.UIInputStatusUnavailable, Reason: "tui notification is no longer active"})
 			return m, waitForMsg(m.runCh)
 		}
-		if m.runCancelling {
+		if state.runCancelling {
 			respondUINotification(msg, extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
 			return m, waitForMsg(m.runCh)
 		}
-		cmd := m.addUINotification(msg.notification)
+		if state != m.conversationState {
+			state.unread = true
+		}
+		notification := msg.notification
+		notification.conversationKey = state.key
+		cmd := m.addUINotification(notification)
 		respondUINotification(msg, extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted})
 		return m, tea.Batch(waitForMsg(m.runCh), cmd)
 
@@ -184,6 +201,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case initialHistoryMsg:
+		state := m.stateForKey(msg.conversationKey)
+		if state == nil {
+			break
+		}
+		active := state == m.conversationState
+		currentState := m.conversationState
+		m.conversationState = state
 		wasInitialHistoryPending := m.initialHistoryPending
 		m.initialHistoryPending = false
 		reloadSlashCommands := wasInitialHistoryPending
@@ -202,6 +226,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}},
 			})
 		} else if msg.loaded {
+			m.loaded = true
+			if strings.TrimSpace(msg.title) != "" {
+				m.title = strings.TrimSpace(msg.title)
+			}
+			if !msg.updatedAt.IsZero() {
+				m.updatedAt = msg.updatedAt
+			}
 			if strings.TrimSpace(m.conversationID) != "" {
 				m.setProfile(msg.profile)
 				m.profilePickerOpen = false
@@ -225,21 +256,34 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if reloadSlashCommands {
-			cmds = append(cmds, loadSlashCommands(m.ctx, m.slashCommandCWD()))
+			cmds = append(cmds, loadSlashCommandsForConversation(m.ctx, state.key, m.slashCommandCWD()))
 		}
 		if reloadMessageHistory != nil {
 			cmds = append(cmds, reloadMessageHistory)
 		}
 		if msg.loaded && wasInitialHistoryPending && !m.running {
 			m.extensionLifecyclePending = true
-			cmds = append(cmds, startExtensionLifecycle(m.ctx, m.cwd, m.conversationID, msg.provider, msg.model, msg.profile, m.extensionRuntimes))
+			lifecycleBroker := newTUIUIBrokerForConversation(m.runCh, 0, state.key)
+			lifecycleCtx := contextWithTUIConversation(m.ctx, state.key)
+			lifecycleCtx = extensions.ContextWithUIInputBroker(lifecycleCtx, lifecycleBroker)
+			cmds = append(cmds, closeTUIBrokerAfter(
+				startExtensionLifecycleForConversation(lifecycleCtx, state.key, m.cwd, m.conversationID, msg.provider, msg.model, msg.profile, m.extensionRuntimes),
+				lifecycleBroker,
+			))
 		}
-		m.refreshViewport(true)
+		m.conversationState = currentState
+		if active {
+			m.refreshViewport(true)
+		}
 
 	case extensionLifecycleMsg:
-		if strings.TrimSpace(msg.conversationID) != strings.TrimSpace(m.conversationID) {
+		state := m.stateForKey(msg.conversationKey)
+		if state == nil || strings.TrimSpace(msg.conversationID) != strings.TrimSpace(state.conversationID) {
 			break
 		}
+		active := state == m.conversationState
+		currentState := m.conversationState
+		m.conversationState = state
 		m.extensionLifecyclePending = false
 		if msg.err != nil {
 			m.slashCommandErr = msg.err
@@ -247,18 +291,33 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		queuedMessage := m.submitAfterExtensionLifecycle
 		m.submitAfterExtensionLifecycle = ""
 		if strings.TrimSpace(queuedMessage) != "" {
-			currentDraft := m.textarea.Value()
-			m.textarea.SetValue(queuedMessage)
-			cmds = append(cmds, m.submit())
-			if strings.TrimSpace(currentDraft) != "" && currentDraft != queuedMessage {
-				m.textarea.SetValue(currentDraft)
+			if active {
+				currentDraft := m.textarea.Value()
+				m.textarea.SetValue(queuedMessage)
+				cmds = append(cmds, m.submit())
+				if strings.TrimSpace(currentDraft) != "" && currentDraft != queuedMessage {
+					m.textarea.SetValue(currentDraft)
+				}
+			} else {
+				m.conversationState = currentState
+				cmds = append(cmds, m.startConversationRun(state, queuedMessage))
+				m.conversationState = state
 			}
 		} else if m.status == "restoring extensions" {
 			m.status = "ready"
 		}
+		m.conversationState = currentState
 
 	case slashCommandsMsg:
+		state := m.stateForKey(msg.conversationKey)
+		if state == nil {
+			break
+		}
+		active := state == m.conversationState
+		currentState := m.conversationState
+		m.conversationState = state
 		if strings.TrimSpace(msg.cwd) != strings.TrimSpace(m.slashCommandCWD()) {
+			m.conversationState = currentState
 			break
 		}
 		if msg.extensionsOnly {
@@ -266,24 +325,40 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.slashCommands = msg.commands
 			if !m.extensionDiscoveryBlocked {
-				cmds = append(cmds, loadExtensionSlashCommands(m.ctx, m.slashCommandCWD(), m.extensionRuntimes))
+				cmds = append(cmds, loadExtensionSlashCommandsForConversation(m.ctx, state.key, m.slashCommandCWD(), m.extensionRuntimes))
 			}
 		}
 		m.slashCommandErr = msg.err
 		m.resetSlashCommandIndex()
-		m.resize()
-		m.refreshViewport(false)
+		m.conversationState = currentState
+		if active {
+			m.resize()
+			m.refreshViewport(false)
+		}
 
 	case messageHistoryMsg:
+		state := m.stateForKey(msg.conversationKey)
+		if state == nil {
+			break
+		}
+		currentState := m.conversationState
+		m.conversationState = state
 		if strings.TrimSpace(msg.scopeCWD) != strings.TrimSpace(m.messageHistoryScopeCWD) {
+			m.conversationState = currentState
 			break
 		}
 		if msg.err != nil {
 			m.err = msg.err
 			m.status = "history unavailable"
+			m.conversationState = currentState
 			break
 		}
 		m.appendMessageHistoryTexts(msg.messages)
+		m.conversationState = currentState
+
+	case conversationListMsg:
+		m.applyConversationList(msg)
+		return m, nil
 
 	case tea.KeyMsg:
 		key := msg.String()
@@ -299,6 +374,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.activeUIPrompt != nil {
 			cmd := m.updateUIPromptKey(msg)
+			return m, cmd
+		}
+		if m.conversationPicker != nil {
+			cmd := m.updateConversationPickerKey(msg)
 			return m, cmd
 		}
 		if key != "ctrl+c" && key != "ctrl+d" {
@@ -318,6 +397,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				if m.runCancelling {
+					m.cancelAllRuns()
 					m.quitAfterRun = true
 					m.status = "exiting"
 					m.refreshViewport(true)
@@ -430,6 +510,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		case "enter":
+			if cmd, handled := m.handleLocalSlashCommand(strings.TrimSpace(m.textarea.Value())); handled {
+				return m, cmd
+			}
 			if m.slashCommandSuggestionsOpen() {
 				m.selectSlashCommand()
 				m.resize()
@@ -470,6 +553,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.activeUIPrompt != nil {
+			return m, nil
+		}
+		if m.conversationPicker != nil {
 			return m, nil
 		}
 		if cmd, handled := m.routeExtensionSurfaceMouse(msg); handled {
@@ -525,16 +611,42 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case chatEventMsg:
-		if msg.runID != m.activeRunID {
+		state := m.stateForRun(msg.runID)
+		if state == nil {
 			return m, waitForMsg(m.runCh)
 		}
-		if m.runCancelling {
+		if state.runCancelling {
 			return m, waitForMsg(m.runCh)
 		}
-		if cmd, handled := m.handleUIChatEvent(msg.event); handled {
+		active := state == m.conversationState
+		if prompt, ok := promptFromChatEvent(msg.event); ok {
+			cmd := m.openUIPromptForState(state, prompt)
 			return m, tea.Batch(waitForMsg(m.runCh), cmd)
 		}
+		if msg.event.Kind == "ui-notify" || msg.event.Kind == "ui-notification" {
+			if msg.event.UINotify == nil {
+				return m, waitForMsg(m.runCh)
+			}
+			if !active {
+				state.unread = true
+			}
+			cmd := m.addUINotification(uiNotification{conversationKey: state.key, title: msg.event.UINotify.Title, message: msg.event.UINotify.Message})
+			return m, tea.Batch(waitForMsg(m.runCh), cmd)
+		}
+		if strings.TrimSpace(msg.event.ConversationID) != "" {
+			m.setConversationID(state, msg.event.ConversationID)
+		}
+		currentState := m.conversationState
+		m.conversationState = state
 		m.applyChatEvent(msg.event)
+		m.updatedAt = time.Now()
+		if !active && chatEventMarksConversationUnread(msg.event) {
+			m.unread = true
+		}
+		m.conversationState = currentState
+		if !active {
+			return m, waitForMsg(m.runCh)
+		}
 		if shouldDebounceChatEvent(msg.event) {
 			return m, tea.Batch(waitForMsg(m.runCh), m.queueTranscriptRefresh(m.autoFollow))
 		}
@@ -542,16 +654,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, waitForMsg(m.runCh)
 
 	case chatDoneMsg:
-		if msg.runID != m.activeRunID {
+		state := m.stateForRun(msg.runID)
+		if state == nil {
 			return m, waitForMsg(m.runCh)
 		}
-		wasCancelling := m.runCancelling
+		active := state == m.conversationState
+		wasCancelling := state.runCancelling
 		if msg.conversationID != "" {
-			m.conversationID = msg.conversationID
+			m.setConversationID(state, msg.conversationID)
 		}
-		if m.activeUIPrompt != nil {
-			m.resolveUIPrompt(extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
+		if state.activeUIPrompt != nil {
+			m.resolveUIPromptForState(state, extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
 		}
+		currentState := m.conversationState
+		m.conversationState = state
 		m.finishActiveBlocks()
 		m.running = false
 		m.runCancelling = false
@@ -568,11 +684,32 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "ready"
 		}
 		m.clearActiveAssistantEntry()
-		m.refreshViewport(m.autoFollow)
+		m.updatedAt = time.Now()
+		if !active {
+			m.unread = true
+		}
+		queuedFollowUp := ""
+		if !m.quitAfterRun && len(m.queuedFollowUps) > 0 {
+			queuedFollowUp = m.queuedFollowUps[0]
+			m.queuedFollowUps = m.queuedFollowUps[1:]
+		}
+		m.conversationState = currentState
+		if run := m.runs[msg.runID]; run != nil {
+			delete(m.runByState, run.conversationKey)
+		}
+		delete(m.runs, msg.runID)
+		delete(m.runByState, state.key)
+		if active && queuedFollowUp == "" {
+			m.refreshViewport(state.autoFollow)
+		}
 		if m.quitAfterRun {
 			m.quitAfterRun = false
 			m.cancel()
 			return m, tea.Quit
+		}
+		if queuedFollowUp != "" {
+			followUpCmd := m.startConversationRunPreservingComposer(state, queuedFollowUp)
+			return m, tea.Batch(waitForMsg(m.runCh), followUpCmd)
 		}
 		return m, waitForMsg(m.runCh)
 
@@ -587,8 +724,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
-		if m.running {
-			m.workingFrame++
+		for _, state := range m.conversations {
+			if state != nil && state.running {
+				state.workingFrame++
+			}
 		}
 		// The 100ms spinner tick doubles as the terminal-title refresh heartbeat.
 		cmds = append(cmds, cmd, m.refreshTerminalTitle(time.Now()))
@@ -665,21 +804,6 @@ func (m *model) updateUIPromptKey(msg tea.KeyMsg) tea.Cmd {
 	m.activeUIPrompt.input, cmd = m.activeUIPrompt.input.Update(msg)
 	m.refreshViewport(false)
 	return cmd
-}
-
-func (m *model) handleUIChatEvent(event chat.ChatEvent) (tea.Cmd, bool) {
-	if prompt, ok := promptFromChatEvent(event); ok {
-		return m.openUIPrompt(prompt), true
-	}
-	switch event.Kind {
-	case "ui-notify", "ui-notification":
-		if event.UINotify == nil {
-			return nil, false
-		}
-		return m.addUINotification(uiNotification{title: event.UINotify.Title, message: event.UINotify.Message}), true
-	default:
-		return nil, false
-	}
 }
 
 func shouldUpdateViewport(msg tea.Msg) bool {
@@ -866,6 +990,15 @@ func shouldDebounceChatEvent(event chat.ChatEvent) bool {
 	}
 }
 
+func chatEventMarksConversationUnread(event chat.ChatEvent) bool {
+	switch event.Kind {
+	case "conversation", "usage":
+		return false
+	default:
+		return true
+	}
+}
+
 func (m *model) resize() {
 	if m.width <= 0 || m.height <= 0 {
 		return
@@ -891,7 +1024,13 @@ func (m *model) resize() {
 
 func (m *model) submit() tea.Cmd {
 	message := strings.TrimSpace(m.textarea.Value())
-	if message == "" || m.running {
+	if message == "" {
+		return nil
+	}
+	if cmd, handled := m.handleLocalSlashCommand(message); handled {
+		return cmd
+	}
+	if m.running {
 		return nil
 	}
 	if m.extensionLifecyclePending {
@@ -901,19 +1040,49 @@ func (m *model) submit() tea.Cmd {
 		m.status = "restoring extensions"
 		return nil
 	}
-	if cmd, handled := m.handleLocalSlashCommand(message); handled {
-		return cmd
+	return m.startConversationRun(m.conversationState, message)
+}
+
+func (m *model) startConversationRun(state *conversationState, message string) tea.Cmd {
+	return m.startConversationRunWithComposer(state, message, true)
+}
+
+func (m *model) startConversationRunPreservingComposer(state *conversationState, message string) tea.Cmd {
+	return m.startConversationRunWithComposer(state, message, false)
+}
+
+func (m *model) startConversationRunWithComposer(state *conversationState, message string, clearComposer bool) tea.Cmd {
+	message = strings.TrimSpace(message)
+	if state == nil || message == "" || state.running {
+		return nil
 	}
+	active := state == m.conversationState
+	conversationID := m.ensureConversationID(state)
+	if conversationID == "" {
+		return nil
+	}
+	conversationKey := state.key
+	if strings.TrimSpace(state.title) == "" {
+		state.title = conversations.NormalizeConversationName(userDisplayMessage(message))
+	}
+	state.updatedAt = time.Now()
+
+	currentState := m.conversationState
+	m.conversationState = state
 	m.profilePickerOpen = false
 	m.reasoningPickerOpen = false
-	m.dismissSlashCommandSuggestions()
-	if strings.TrimSpace(m.conversationID) == "" {
-		m.conversationID = convtypes.GenerateID()
+	if clearComposer {
+		if active {
+			m.dismissSlashCommandSuggestions()
+			m.textarea.Reset()
+		} else {
+			m.slashCommandIndex = -1
+			m.slashDismissedDraft = ""
+		}
+		m.draft = ""
 	}
-
-	m.textarea.Reset()
 	m.appendSubmittedMessageToHistory(message)
-	persistMessageHistory := m.persistSubmittedMessageCommand(message)
+	persistMessageHistory := m.persistSubmittedMessageCommandForState(state, message)
 	m.clearActiveAssistantEntry()
 	m.entries = append(m.entries, chatEntry{kind: entryUser, content: userDisplayMessage(message)})
 	m.running = true
@@ -922,24 +1091,36 @@ func (m *model) submit() tea.Cmd {
 	m.activeRunID = m.nextRunID
 	m.status = "working"
 	m.err = nil
-	m.refreshViewport(true)
 
-	runCtx, cancel := context.WithCancel(m.ctx)
+	runCtx, cancel := context.WithCancel(contextWithTUIConversation(m.ctx, conversationKey))
 	m.cancelRun = cancel
 	runID := m.activeRunID
+	if m.runs == nil {
+		m.runs = map[int]*conversationRun{}
+	}
+	if m.runByState == nil {
+		m.runByState = map[string]int{}
+	}
+	m.runs[runID] = &conversationRun{conversationKey: conversationKey, cancel: cancel}
+	m.runByState[conversationKey] = runID
+	m.conversationState = currentState
+	if active {
+		m.refreshViewport(true)
+	}
+
 	runCh := m.runCh
 	runner := m.runner
 	uiDone := m.ctx.Done()
-	uiBroker := newTUIUIBroker(runCh, runID)
+	uiBroker := newTUIUIBrokerForConversation(runCh, runID, conversationKey)
 	runCtx = extensions.ContextWithUIInputBroker(runCtx, uiBroker)
 	req := chat.ChatRequest{
 		Message:        message,
-		ConversationID: m.conversationID,
-		Profile:        profileForRequest(m.profile),
-		CWD:            m.requestedCWD,
+		ConversationID: conversationID,
+		Profile:        profileForRequest(state.profile),
+		CWD:            state.requestedCWD,
 	}
-	if !m.conversationWasResumed {
-		req.ReasoningEffort = m.reasoningEffort
+	if !state.conversationWasResumed {
+		req.ReasoningEffort = state.reasoningEffort
 	}
 
 	return func() tea.Msg {
@@ -948,9 +1129,9 @@ func (m *model) submit() tea.Cmd {
 		}
 		go func() {
 			defer uiBroker.close()
-			conversationID, err := runner.Run(runCtx, req, tuiSink{ch: runCh, runID: runID, done: uiDone})
+			conversationID, err := runner.Run(runCtx, req, tuiSink{ch: runCh, runID: runID, conversationKey: conversationKey, done: uiDone})
 			select {
-			case runCh <- chatDoneMsg{runID: runID, conversationID: strings.TrimSpace(conversationID), err: err}:
+			case runCh <- chatDoneMsg{runID: runID, conversationKey: conversationKey, conversationID: strings.TrimSpace(conversationID), err: err}:
 			case <-uiDone:
 			}
 		}()
@@ -971,7 +1152,7 @@ func (m model) slashCommandQuery() (string, bool) {
 }
 
 func (m model) slashCommandSuggestionsOpen() bool {
-	if m.running || m.profilePickerOpen || m.reasoningPickerOpen || m.historySearch != nil {
+	if m.profilePickerOpen || m.reasoningPickerOpen || m.historySearch != nil {
 		return false
 	}
 	if m.textarea.Value() == m.slashDismissedDraft {
@@ -1104,6 +1285,10 @@ func (m *model) submitSteering() {
 	if message == "" {
 		return
 	}
+	if _, _, found := slashcommands.Parse(message); found {
+		m.queueFollowUpCommand(message)
+		return
+	}
 
 	if len(message) > steer.MaxMessageLength {
 		m.err = errors.New("steering message too long")
@@ -1139,6 +1324,18 @@ func (m *model) submitSteering() {
 	m.queuedSteering = append(m.queuedSteering, message)
 	m.steerError = ""
 	m.status = "steering queued"
+	m.refreshViewport(true)
+}
+
+func (m *model) queueFollowUpCommand(message string) {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return
+	}
+	m.textarea.Reset()
+	m.queuedFollowUps = append(m.queuedFollowUps, message)
+	m.steerError = ""
+	m.status = "command queued"
 	m.refreshViewport(true)
 }
 

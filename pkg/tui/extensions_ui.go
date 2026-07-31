@@ -20,8 +20,14 @@ const (
 )
 
 type extensionUIKey struct {
-	owner extensions.UIExtensionOwner
-	id    string
+	owner           extensions.UIExtensionOwner
+	conversationKey string
+	id              string
+}
+
+type extensionWidgetOffsetKey struct {
+	conversationKey string
+	placement       string
 }
 
 type tuiExtensionWidget struct {
@@ -78,9 +84,10 @@ type extensionUITransportErrorMsg struct {
 }
 
 type extensionUITranscriptMsg struct {
-	owner   extensions.UIExtensionOwner
-	title   string
-	message string
+	owner           extensions.UIExtensionOwner
+	conversationKey string
+	title           string
+	message         string
 }
 
 type tuiExtensionUIHost struct {
@@ -143,13 +150,13 @@ func (h *tuiExtensionUIHost) AppendTranscript(ctx context.Context, source extens
 		return extensions.UITranscriptAppendResponse{}, ctx.Err()
 	case <-h.done:
 		return extensions.UITranscriptAppendResponse{Reason: "extension UI host is closed"}, nil
-	case h.ch <- extensionUITranscriptMsg{owner: owner, title: title, message: message}:
+	case h.ch <- extensionUITranscriptMsg{owner: owner, conversationKey: tuiConversationKeyFromContext(ctx), title: title, message: message}:
 		return extensions.UITranscriptAppendResponse{Accepted: true}, nil
 	}
 }
 
-func (h *tuiExtensionUIHost) SetWidget(_ context.Context, source extensions.UIExtensionSource, request extensions.UIWidgetSetRequest) (extensions.UIFrameResponse, error) {
-	key, err := extensionUIRequestKey(source, request.ID)
+func (h *tuiExtensionUIHost) SetWidget(ctx context.Context, source extensions.UIExtensionSource, request extensions.UIWidgetSetRequest) (extensions.UIFrameResponse, error) {
+	key, err := extensionUIRequestKey(ctx, source, request.ID)
 	if err != nil {
 		return extensions.UIFrameResponse{}, err
 	}
@@ -162,6 +169,10 @@ func (h *tuiExtensionUIHost) SetWidget(_ context.Context, source extensions.UIEx
 	}
 
 	h.mu.Lock()
+	if key, err = resolveExtensionUIRequestKey(key, h.widgetSeq); err != nil {
+		h.mu.Unlock()
+		return extensions.UIFrameResponse{}, err
+	}
 	latest := h.widgetSeq[key]
 	if _, closed := h.closed[key.owner]; closed {
 		h.mu.Unlock()
@@ -185,8 +196,8 @@ func (h *tuiExtensionUIHost) SetWidget(_ context.Context, source extensions.UIEx
 	return extensions.UIFrameResponse{Accepted: true, LatestSequence: request.Frame.Sequence}, nil
 }
 
-func (h *tuiExtensionUIHost) UpdateWidget(_ context.Context, source extensions.UIExtensionSource, request extensions.UIWidgetFrameRequest) (extensions.UIFrameResponse, error) {
-	key, err := extensionUIRequestKey(source, request.ID)
+func (h *tuiExtensionUIHost) UpdateWidget(ctx context.Context, source extensions.UIExtensionSource, request extensions.UIWidgetFrameRequest) (extensions.UIFrameResponse, error) {
+	key, err := extensionUIRequestKey(ctx, source, request.ID)
 	if err != nil {
 		return extensions.UIFrameResponse{}, err
 	}
@@ -195,6 +206,10 @@ func (h *tuiExtensionUIHost) UpdateWidget(_ context.Context, source extensions.U
 	}
 
 	h.mu.Lock()
+	if key, err = resolveExtensionUIRequestKey(key, h.widgetSeq); err != nil {
+		h.mu.Unlock()
+		return extensions.UIFrameResponse{}, err
+	}
 	latest := h.widgetSeq[key]
 	if _, closed := h.closed[key.owner]; closed {
 		h.mu.Unlock()
@@ -223,8 +238,8 @@ func (h *tuiExtensionUIHost) UpdateWidget(_ context.Context, source extensions.U
 	return extensions.UIFrameResponse{Accepted: true, LatestSequence: request.Frame.Sequence}, nil
 }
 
-func (h *tuiExtensionUIHost) RemoveWidget(_ context.Context, source extensions.UIExtensionSource, request extensions.UIWidgetRemoveRequest) (extensions.UIFrameResponse, error) {
-	key, err := extensionUIRequestKey(source, request.ID)
+func (h *tuiExtensionUIHost) RemoveWidget(ctx context.Context, source extensions.UIExtensionSource, request extensions.UIWidgetRemoveRequest) (extensions.UIFrameResponse, error) {
+	key, err := extensionUIRequestKey(ctx, source, request.ID)
 	if err != nil {
 		return extensions.UIFrameResponse{}, err
 	}
@@ -233,6 +248,10 @@ func (h *tuiExtensionUIHost) RemoveWidget(_ context.Context, source extensions.U
 	}
 
 	h.mu.Lock()
+	if key, err = resolveExtensionUIRequestKey(key, h.widgetSeq); err != nil {
+		h.mu.Unlock()
+		return extensions.UIFrameResponse{}, err
+	}
 	latest := h.widgetSeq[key]
 	if request.Sequence <= latest {
 		h.mu.Unlock()
@@ -251,8 +270,8 @@ func (h *tuiExtensionUIHost) RemoveWidget(_ context.Context, source extensions.U
 	return extensions.UIFrameResponse{Accepted: true, LatestSequence: request.Sequence}, nil
 }
 
-func (h *tuiExtensionUIHost) OpenSurface(_ context.Context, source extensions.UIExtensionSource, request extensions.UISurfaceOpenRequest) (extensions.UIFrameResponse, error) {
-	key, err := extensionUIRequestKey(source, request.ID)
+func (h *tuiExtensionUIHost) OpenSurface(ctx context.Context, source extensions.UIExtensionSource, request extensions.UISurfaceOpenRequest) (extensions.UIFrameResponse, error) {
+	key, err := extensionUIRequestKey(ctx, source, request.ID)
 	if err != nil {
 		return extensions.UIFrameResponse{}, err
 	}
@@ -267,6 +286,11 @@ func (h *tuiExtensionUIHost) OpenSurface(_ context.Context, source extensions.UI
 
 	h.surfaceLifecycleMu.Lock()
 	h.mu.Lock()
+	if key, err = resolveExtensionUIRequestKey(key, h.surfaceSeq); err != nil {
+		h.mu.Unlock()
+		h.surfaceLifecycleMu.Unlock()
+		return extensions.UIFrameResponse{}, err
+	}
 	latest := h.surfaceSeq[key]
 	if _, closed := h.closed[key.owner]; closed {
 		h.mu.Unlock()
@@ -305,8 +329,8 @@ func (h *tuiExtensionUIHost) OpenSurface(_ context.Context, source extensions.UI
 	return extensions.UIFrameResponse{Accepted: true, LatestSequence: request.Frame.Sequence}, nil
 }
 
-func (h *tuiExtensionUIHost) UpdateSurface(_ context.Context, source extensions.UIExtensionSource, request extensions.UISurfaceFrameRequest) (extensions.UIFrameResponse, error) {
-	key, err := extensionUIRequestKey(source, request.ID)
+func (h *tuiExtensionUIHost) UpdateSurface(ctx context.Context, source extensions.UIExtensionSource, request extensions.UISurfaceFrameRequest) (extensions.UIFrameResponse, error) {
+	key, err := extensionUIRequestKey(ctx, source, request.ID)
 	if err != nil {
 		return extensions.UIFrameResponse{}, err
 	}
@@ -316,6 +340,11 @@ func (h *tuiExtensionUIHost) UpdateSurface(_ context.Context, source extensions.
 
 	h.surfaceLifecycleMu.Lock()
 	h.mu.Lock()
+	if key, err = resolveExtensionUIRequestKey(key, h.surfaceSeq); err != nil {
+		h.mu.Unlock()
+		h.surfaceLifecycleMu.Unlock()
+		return extensions.UIFrameResponse{}, err
+	}
 	latest := h.surfaceSeq[key]
 	if _, closed := h.closed[key.owner]; closed {
 		h.mu.Unlock()
@@ -350,8 +379,8 @@ func (h *tuiExtensionUIHost) UpdateSurface(_ context.Context, source extensions.
 	return extensions.UIFrameResponse{Accepted: true, LatestSequence: request.Frame.Sequence}, nil
 }
 
-func (h *tuiExtensionUIHost) CloseSurface(_ context.Context, source extensions.UIExtensionSource, request extensions.UISurfaceCloseRequest) (extensions.UIFrameResponse, error) {
-	key, err := extensionUIRequestKey(source, request.ID)
+func (h *tuiExtensionUIHost) CloseSurface(ctx context.Context, source extensions.UIExtensionSource, request extensions.UISurfaceCloseRequest) (extensions.UIFrameResponse, error) {
+	key, err := extensionUIRequestKey(ctx, source, request.ID)
 	if err != nil {
 		return extensions.UIFrameResponse{}, err
 	}
@@ -361,6 +390,11 @@ func (h *tuiExtensionUIHost) CloseSurface(_ context.Context, source extensions.U
 
 	h.surfaceLifecycleMu.Lock()
 	h.mu.Lock()
+	if key, err = resolveExtensionUIRequestKey(key, h.surfaceSeq); err != nil {
+		h.mu.Unlock()
+		h.surfaceLifecycleMu.Unlock()
+		return extensions.UIFrameResponse{}, err
+	}
 	latest := h.surfaceSeq[key]
 	if request.Sequence <= latest {
 		h.mu.Unlock()
@@ -486,7 +520,7 @@ func (h *tuiExtensionUIHost) drain() extensionUIBatch {
 	return batch
 }
 
-func extensionUIRequestKey(source extensions.UIExtensionSource, id string) (extensionUIKey, error) {
+func extensionUIRequestKey(ctx context.Context, source extensions.UIExtensionSource, id string) (extensionUIKey, error) {
 	if source == nil {
 		return extensionUIKey{}, errors.New("extension UI source is required")
 	}
@@ -497,7 +531,38 @@ func extensionUIRequestKey(source extensions.UIExtensionSource, id string) (exte
 	if strings.TrimSpace(owner.ExtensionID) == "" || owner.Generation == 0 {
 		return extensionUIKey{}, errors.New("extension UI source is not running")
 	}
-	return extensionUIKey{owner: owner, id: id}, nil
+	return extensionUIKey{owner: owner, conversationKey: tuiConversationKeyFromContext(ctx), id: id}, nil
+}
+
+// Persistent surface updates can outlive the request that opened the surface,
+// so a context-free update may need to recover the established conversation
+// scope. The SDK permits one active surface per owner and ID; widgets normally
+// remain request-scoped, but use the same fallback for compatibility with older
+// SDKs that sent persistent UI calls without a parent request ID.
+func resolveExtensionUIRequestKey(key extensionUIKey, sequences map[extensionUIKey]uint64) (extensionUIKey, error) {
+	if key.conversationKey != "" {
+		return key, nil
+	}
+	if _, exists := sequences[key]; exists {
+		return key, nil
+	}
+
+	var match extensionUIKey
+	found := false
+	for candidate := range sequences {
+		if candidate.owner != key.owner || candidate.id != key.id {
+			continue
+		}
+		if found {
+			return extensionUIKey{}, errors.Errorf("extension UI scope is ambiguous for %q", key.id)
+		}
+		match = candidate
+		found = true
+	}
+	if found {
+		return match, nil
+	}
+	return key, nil
 }
 
 func staleUIFrameResponse(latest uint64) extensions.UIFrameResponse {
@@ -514,6 +579,9 @@ func extensionUIOwnerLess(left, right extensions.UIExtensionOwner) bool {
 func extensionUIKeyLess(left, right extensionUIKey) bool {
 	if left.owner != right.owner {
 		return extensionUIOwnerLess(left.owner, right.owner)
+	}
+	if left.conversationKey != right.conversationKey {
+		return left.conversationKey < right.conversationKey
 	}
 	return left.id < right.id
 }
@@ -584,25 +652,33 @@ func (m *model) applyExtensionUIBatch(batch extensionUIBatch) tea.Cmd {
 
 	m.resize()
 	cmds := m.updateExtensionSurfaceLayouts()
+	cmds = append(cmds, m.extensionSurfaceFocusTransitionCommands(oldFocusKey, oldFocused, oldFocus)...)
+	m.refreshViewport(false)
+	return tea.Sequence(cmds...)
+}
+
+func (m *model) extensionSurfaceFocusTransitionCommands(oldFocusKey extensionUIKey, oldFocused bool, oldFocus tuiExtensionSurface) []tea.Cmd {
 	newFocusKey, newFocused := m.focusedExtensionSurfaceKey()
 	newFocus := tuiExtensionSurface{}
 	if newFocused {
 		newFocus = m.extensionSurfaces[newFocusKey]
 	}
 	focusChanged := oldFocused != newFocused || oldFocusKey != newFocusKey || (oldFocused && newFocused && oldFocus.openOrdinal != newFocus.openOrdinal)
-	if focusChanged {
-		if oldFocused {
-			if current, stillOpen := m.extensionSurfaces[oldFocusKey]; stillOpen && current.openOrdinal == oldFocus.openOrdinal {
-				cmds = append(cmds, m.nextExtensionSurfaceInputCmd(oldFocusKey, current, extensions.UISurfaceInputBlur, "", "", false, false, false, nil))
-			}
-		}
-		if newFocused {
-			surface := m.extensionSurfaces[newFocusKey]
-			cmds = append(cmds, m.nextExtensionSurfaceInputCmd(newFocusKey, surface, extensions.UISurfaceInputFocus, "", "", false, false, false, nil))
+	if !focusChanged {
+		return nil
+	}
+
+	cmds := []tea.Cmd{}
+	if oldFocused {
+		if current, stillOpen := m.extensionSurfaces[oldFocusKey]; stillOpen && current.openOrdinal == oldFocus.openOrdinal {
+			cmds = append(cmds, m.nextExtensionSurfaceInputCmd(oldFocusKey, current, extensions.UISurfaceInputBlur, "", "", false, false, false, nil))
 		}
 	}
-	m.refreshViewport(false)
-	return tea.Sequence(cmds...)
+	if newFocused {
+		surface := m.extensionSurfaces[newFocusKey]
+		cmds = append(cmds, m.nextExtensionSurfaceInputCmd(newFocusKey, surface, extensions.UISurfaceInputFocus, "", "", false, false, false, nil))
+	}
+	return cmds
 }
 
 func (m *model) removeExtensionSurfaceOrder(key extensionUIKey) {
@@ -619,11 +695,15 @@ func (m model) focusedExtensionSurfaceKey() (extensionUIKey, bool) {
 	for index := len(m.extensionSurfaceOrder) - 1; index >= 0; index-- {
 		key := m.extensionSurfaceOrder[index]
 		surface, ok := m.extensionSurfaces[key]
-		if ok && !surface.options.NonCapturing {
+		if ok && m.extensionUIKeyVisible(key) && !surface.options.NonCapturing {
 			return key, true
 		}
 	}
 	return extensionUIKey{}, false
+}
+
+func (m model) extensionUIKeyVisible(key extensionUIKey) bool {
+	return key.conversationKey == "" || key.conversationKey == m.activeConversationKey
 }
 
 func (m *model) routeExtensionSurfaceKey(msg tea.KeyMsg) (tea.Cmd, bool) {
@@ -648,7 +728,7 @@ func (m *model) routeExtensionSurfaceMouse(msg tea.MouseMsg) (tea.Cmd, bool) {
 	for index := len(m.extensionSurfaceOrder) - 1; index >= 0; index-- {
 		key := m.extensionSurfaceOrder[index]
 		surface, ok := m.extensionSurfaces[key]
-		if !ok || x < surface.layout.x || x >= surface.layout.x+surface.layout.width || y < surface.layout.y || y >= surface.layout.y+surface.layout.height {
+		if !ok || !m.extensionUIKeyVisible(key) || x < surface.layout.x || x >= surface.layout.x+surface.layout.width || y < surface.layout.y || y >= surface.layout.y+surface.layout.height {
 			continue
 		}
 		mouse := &extensions.UISurfaceMouseEvent{
@@ -686,7 +766,7 @@ func (m *model) updateExtensionSurfaceLayouts() []tea.Cmd {
 	cmds := []tea.Cmd{}
 	for _, key := range m.extensionSurfaceOrder {
 		surface, ok := m.extensionSurfaces[key]
-		if !ok {
+		if !ok || !m.extensionUIKeyVisible(key) {
 			continue
 		}
 		layout := m.resolveExtensionSurfaceLayout(surface)
@@ -816,7 +896,7 @@ func (m model) renderExtensionWidgets(placement string) string {
 func (m model) extensionWidgetLineCount(placement string) int {
 	count := 0
 	for key, widget := range m.extensionWidgets {
-		if widget.placement != placement || len(widget.frame.Lines) == 0 {
+		if !m.extensionUIKeyVisible(key) || widget.placement != placement || len(widget.frame.Lines) == 0 {
 			continue
 		}
 		count++
@@ -846,7 +926,7 @@ func (m model) extensionWidgetLineAt(placement string, target int) (extensionWid
 func (m model) walkExtensionWidgetLines(placement string, visit func(extensionWidgetLine) bool) {
 	for _, key := range m.widgetOrder {
 		widget, ok := m.extensionWidgets[key]
-		if !ok || widget.placement != placement {
+		if !ok || !m.extensionUIKeyVisible(key) || widget.placement != placement {
 			continue
 		}
 		if len(widget.frame.Lines) == 0 {
@@ -873,16 +953,20 @@ func (m model) walkExtensionWidgetLines(placement string, visit func(extensionWi
 }
 
 func (m model) extensionWidgetScrollOffset(placement string) int {
-	return max(0, m.widgetOffsets[placement])
+	return max(0, m.widgetOffsets[m.extensionWidgetOffsetKey(placement)])
+}
+
+func (m model) extensionWidgetOffsetKey(placement string) extensionWidgetOffsetKey {
+	return extensionWidgetOffsetKey{conversationKey: m.activeConversationKey, placement: placement}
 }
 
 func (m *model) clampExtensionWidgetScrollOffsets() {
 	if m.widgetOffsets == nil {
-		m.widgetOffsets = map[string]int{}
+		m.widgetOffsets = map[extensionWidgetOffsetKey]int{}
 	}
 	for _, placement := range []string{extensions.UIWidgetPlacementAboveComposer, extensions.UIWidgetPlacementBelowComposer} {
 		maximum := max(0, m.extensionWidgetLineCount(placement)-maxExtensionWidgetLines)
-		m.widgetOffsets[placement] = min(m.extensionWidgetScrollOffset(placement), maximum)
+		m.widgetOffsets[m.extensionWidgetOffsetKey(placement)] = min(m.extensionWidgetScrollOffset(placement), maximum)
 	}
 }
 
@@ -942,7 +1026,7 @@ func (m *model) routeExtensionWidgetMouse(msg tea.MouseMsg) bool {
 		return false
 	}
 	if m.widgetOffsets == nil {
-		m.widgetOffsets = map[string]int{}
+		m.widgetOffsets = map[extensionWidgetOffsetKey]int{}
 	}
 	if msg.Button == tea.MouseButtonWheelUp {
 		offset -= extensionWidgetScrollStep
@@ -950,7 +1034,7 @@ func (m *model) routeExtensionWidgetMouse(msg tea.MouseMsg) bool {
 		offset += extensionWidgetScrollStep
 	}
 	nextOffset := max(0, min(offset, maximum))
-	m.widgetOffsets[placement] = nextOffset
+	m.widgetOffsets[m.extensionWidgetOffsetKey(placement)] = nextOffset
 	return true
 }
 
@@ -966,7 +1050,7 @@ func (m model) overlayExtensionSurfaces(lines []string) []string {
 	width := m.contentWidth()
 	for _, key := range m.extensionSurfaceOrder {
 		surface, ok := m.extensionSurfaces[key]
-		if !ok || surface.layout.width <= 0 || surface.layout.height <= 0 {
+		if !ok || !m.extensionUIKeyVisible(key) || surface.layout.width <= 0 || surface.layout.height <= 0 {
 			continue
 		}
 		for row := 0; row < surface.layout.height; row++ {

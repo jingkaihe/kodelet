@@ -33,6 +33,7 @@ const execFileAsync = promisify(execFile);
 
 export interface HostRPCClient {
   request(method: string, params?: unknown): Promise<unknown>;
+  requestPersistent?(method: string, params?: unknown): Promise<unknown>;
   notify?(method: string, params?: unknown): void | Promise<void>;
   onNotification?(handler: (method: string, params: unknown) => void): () => void;
   persistent?: HostRPCClient;
@@ -115,6 +116,16 @@ function createSharedContext(
   );
   const log = createLogger(init?.extension.id);
   const persistentClient = client?.persistent ?? client;
+
+  const requestPersistentUI = async (method: string, params?: unknown): Promise<unknown> => {
+    if (client?.requestPersistent) {
+      return await client.requestPersistent(method, params);
+    }
+    if (!persistentClient) {
+      throw new Error("Persistent extension UI is not available in this host");
+    }
+    return await persistentClient.request(method, params);
+  };
 
   const resolveWorkspacePath = (target: string): string => {
     const resolved = path.resolve(cwd, target || ".");
@@ -294,7 +305,7 @@ function createSharedContext(
           return;
         }
         const payload = typeof request === "string" ? { message: request } : request;
-        await persistentClient.request("kodelet.ui.transcript.append", payload);
+        await requestPersistentUI("kodelet.ui.transcript.append", payload);
       },
       async setWidget(id, lines, options) {
         if (!extensionUISupported(init, "widgets") || !persistentClient) {
@@ -303,10 +314,10 @@ function createSharedContext(
         const objectID = validateUIObjectID(id);
         const sequence = nextClientSequence(widgetSequencesByClient, persistentClient, objectID);
         if (lines === undefined) {
-          await persistentClient.request("kodelet.ui.widget.remove", { id: objectID, sequence });
+          await requestPersistentUI("kodelet.ui.widget.remove", { id: objectID, sequence });
           return;
         }
-        await persistentClient.request("kodelet.ui.widget.set", {
+        await requestPersistentUI("kodelet.ui.widget.set", {
           id: objectID,
           placement: options?.placement ?? "aboveComposer",
           frame: { sequence, lines },
@@ -329,7 +340,7 @@ function createSharedContext(
         activeSurfaces.set(id, surface);
         ensurePersistentNotificationRouting(persistentClient);
         try {
-          const response = await persistentClient.request("kodelet.ui.surface.open", {
+          const response = await requestPersistentUI("kodelet.ui.surface.open", {
             id,
             options: surfaceOptions,
             frame: { sequence: surface.nextSequence(), lines: initialLines },

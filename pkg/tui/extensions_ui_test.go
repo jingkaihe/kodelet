@@ -174,6 +174,52 @@ func TestTUIExtensionUIHostCoalescesLatestWidgetAndSurfaceFrames(t *testing.T) {
 	assert.Equal(t, "frame 4", batch.surfaces[0].surface.frame.Lines[0].Spans[0].Text)
 }
 
+func TestTUIExtensionUIHostScopesSameIDWidgetsByConversation(t *testing.T) {
+	ch := make(chan tea.Msg, 4)
+	host := newTUIExtensionUIHost(ch, nil)
+	source := &fakeExtensionUISource{owner: extensions.UIExtensionOwner{ExtensionID: "todo", Generation: 1}}
+	firstCtx := contextWithTUIConversation(context.Background(), "conversation-first")
+	secondCtx := contextWithTUIConversation(context.Background(), "conversation-second")
+
+	for _, request := range []struct {
+		ctx  context.Context
+		text string
+	}{
+		{ctx: firstCtx, text: "first todos"},
+		{ctx: secondCtx, text: "second todos"},
+	} {
+		response, err := host.SetWidget(request.ctx, source, extensions.UIWidgetSetRequest{
+			ID:        "todo-progress",
+			Placement: extensions.UIWidgetPlacementAboveComposer,
+			Frame:     extensionTestFrame(1, request.text),
+		})
+		require.NoError(t, err)
+		assert.True(t, response.Accepted)
+	}
+
+	<-ch
+	batch := host.drain()
+	require.Len(t, batch.widgets, 2)
+	assert.Equal(t, "conversation-first", batch.widgets[0].widget.key.conversationKey)
+	assert.Equal(t, "conversation-second", batch.widgets[1].widget.key.conversationKey)
+	assert.Equal(t, uint64(1), host.widgetSeq[extensionUIKey{owner: source.owner, conversationKey: "conversation-first", id: "todo-progress"}])
+	assert.Equal(t, uint64(1), host.widgetSeq[extensionUIKey{owner: source.owner, conversationKey: "conversation-second", id: "todo-progress"}])
+
+	response, err := host.UpdateWidget(firstCtx, source, extensions.UIWidgetFrameRequest{
+		ID:    "todo-progress",
+		Frame: extensionTestFrame(2, "updated first todos"),
+	})
+	require.NoError(t, err)
+	assert.True(t, response.Accepted)
+	assert.Equal(t, "second todos", host.widgets[extensionUIKey{owner: source.owner, conversationKey: "conversation-second", id: "todo-progress"}].frame.Lines[0].Spans[0].Text)
+
+	_, err = host.UpdateWidget(context.Background(), source, extensions.UIWidgetFrameRequest{
+		ID:    "todo-progress",
+		Frame: extensionTestFrame(3, "ambiguous"),
+	})
+	require.ErrorContains(t, err, "scope is ambiguous")
+}
+
 func TestTUIExtensionUIHostSynchronizesClosedOwnerSequenceReads(t *testing.T) {
 	const attempts = 2000
 	tests := []struct {
@@ -308,6 +354,52 @@ func TestTUIExtensionWidgetsRenderAboveAndBelowComposer(t *testing.T) {
 	assert.Greater(t, belowIndex, composerIndex)
 }
 
+func TestTUIExtensionWidgetsRenderOnlyForActiveConversation(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+	m.width = 80
+	m.height = 30
+	first := m.conversationState
+	second := newConversationState("conversation-second", "conversation-second", true, m.conversationDefaults)
+	m.conversations[second.key] = second
+	source := &fakeExtensionUISource{owner: extensions.UIExtensionOwner{ExtensionID: "todo", Generation: 1}}
+
+	for _, request := range []struct {
+		ctx  context.Context
+		id   string
+		text string
+	}{
+		{ctx: contextWithTUIConversation(context.Background(), first.key), id: "todo-progress", text: "first conversation widget"},
+		{ctx: contextWithTUIConversation(context.Background(), second.key), id: "todo-progress", text: "second conversation widget"},
+		{ctx: context.Background(), id: "global-status", text: "global widget"},
+	} {
+		_, err := m.extensionUI.SetWidget(request.ctx, source, extensions.UIWidgetSetRequest{
+			ID:        request.id,
+			Placement: extensions.UIWidgetPlacementAboveComposer,
+			Frame:     extensionTestFrame(1, request.text),
+		})
+		require.NoError(t, err)
+	}
+	applyPendingExtensionUI(t, &m)
+
+	firstView := xansi.Strip(m.View())
+	assert.Contains(t, firstView, "first conversation widget")
+	assert.Contains(t, firstView, "global widget")
+	assert.NotContains(t, firstView, "second conversation widget")
+	m.widgetOffsets[m.extensionWidgetOffsetKey(extensions.UIWidgetPlacementAboveComposer)] = 3
+
+	requireConversationActivation(t, &m, second.key)
+	secondView := xansi.Strip(m.View())
+	assert.Contains(t, secondView, "second conversation widget")
+	assert.Contains(t, secondView, "global widget")
+	assert.NotContains(t, secondView, "first conversation widget")
+	assert.Zero(t, m.extensionWidgetScrollOffset(extensions.UIWidgetPlacementAboveComposer))
+
+	requireConversationActivation(t, &m, first.key)
+	assert.Equal(t, 3, m.extensionWidgetScrollOffset(extensions.UIWidgetPlacementAboveComposer))
+}
+
 func TestTUIExtensionWidgetsAboveComposerOffsetSettingsHitTargets(t *testing.T) {
 	m := newModel(context.Background(), Config{
 		Profile:                "work",
@@ -429,6 +521,37 @@ func TestTUIExtensionWidgetFoldStateSurvivesUpdatesAndClearsOnRemoval(t *testing
 	assert.NotContains(t, m.collapsedWidgets, key)
 }
 
+func TestToggleAllDetailsOnlyChangesVisibleConversationWidgets(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+	first := m.conversationState
+	second := newConversationState("conversation-second", "conversation-second", true, m.conversationDefaults)
+	m.conversations[second.key] = second
+	owner := extensions.UIExtensionOwner{ExtensionID: "widgets", Generation: 1}
+	firstKey := extensionUIKey{owner: owner, conversationKey: first.key, id: "status"}
+	secondKey := extensionUIKey{owner: owner, conversationKey: second.key, id: "status"}
+	for _, key := range []extensionUIKey{firstKey, secondKey} {
+		m.extensionWidgets[key] = tuiExtensionWidget{
+			key:       key,
+			placement: extensions.UIWidgetPlacementAboveComposer,
+			frame: extensions.UIFrame{Sequence: 1, Lines: []extensions.UIFrameLine{
+				{Spans: []extensions.UIStyledSpan{{Text: "Status"}}},
+				{Spans: []extensions.UIStyledSpan{{Text: "Details"}}},
+			}},
+		}
+		m.collapsedWidgets[key] = true
+	}
+
+	m.toggleAllDetails()
+	assert.False(t, m.collapsedWidgets[firstKey])
+	assert.True(t, m.collapsedWidgets[secondKey])
+
+	requireConversationActivation(t, &m, second.key)
+	m.toggleAllDetails()
+	assert.False(t, m.collapsedWidgets[secondKey])
+}
+
 func TestTUIExtensionWidgetsContainScrollingWithinTenLines(t *testing.T) {
 	m := newModel(context.Background(), Config{Profile: "default", ProfileOptions: []string{"default", "work"}})
 	t.Cleanup(m.cancel)
@@ -463,13 +586,13 @@ func TestTUIExtensionWidgetsContainScrollingWithinTenLines(t *testing.T) {
 	m.viewport.SetYOffset(6)
 	updated, _ := m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp, X: tuiLeftMargin, Y: aboveY})
 	m = updated.(model)
-	assert.Zero(t, m.widgetOffsets[extensions.UIWidgetPlacementAboveComposer])
+	assert.Zero(t, m.widgetOffsets[m.extensionWidgetOffsetKey(extensions.UIWidgetPlacementAboveComposer)])
 	assert.Equal(t, 6, m.viewport.YOffset)
 	m.viewport.GotoTop()
 
 	updated, _ = m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown, X: tuiLeftMargin, Y: aboveY})
 	m = updated.(model)
-	assert.Equal(t, extensionWidgetScrollStep, m.widgetOffsets[extensions.UIWidgetPlacementAboveComposer])
+	assert.Equal(t, extensionWidgetScrollStep, m.widgetOffsets[m.extensionWidgetOffsetKey(extensions.UIWidgetPlacementAboveComposer)])
 	assert.Zero(t, m.viewport.YOffset)
 	rendered = strings.Split(m.renderExtensionWidgets(extensions.UIWidgetPlacementAboveComposer), "\n")
 	require.Len(t, rendered, maxExtensionWidgetLines)
@@ -479,19 +602,19 @@ func TestTUIExtensionWidgetsContainScrollingWithinTenLines(t *testing.T) {
 	belowY := aboveY + maxExtensionWidgetLines + inputHeight + 2
 	updated, _ = m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown, X: tuiLeftMargin, Y: belowY})
 	m = updated.(model)
-	assert.Equal(t, extensionWidgetScrollStep, m.widgetOffsets[extensions.UIWidgetPlacementBelowComposer])
+	assert.Equal(t, extensionWidgetScrollStep, m.widgetOffsets[m.extensionWidgetOffsetKey(extensions.UIWidgetPlacementBelowComposer)])
 	rendered = strings.Split(m.renderExtensionWidgets(extensions.UIWidgetPlacementBelowComposer), "\n")
 	assert.Contains(t, rendered[0], "1-0-3")
 	assert.Contains(t, rendered[9], "1-1-4")
 
 	updated, _ = m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown, X: tuiLeftMargin, Y: aboveY})
 	m = updated.(model)
-	assert.Equal(t, 6, m.widgetOffsets[extensions.UIWidgetPlacementAboveComposer])
+	assert.Equal(t, 6, m.widgetOffsets[m.extensionWidgetOffsetKey(extensions.UIWidgetPlacementAboveComposer)])
 	assert.Zero(t, m.viewport.YOffset)
 
 	updated, _ = m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown, X: tuiLeftMargin, Y: aboveY})
 	m = updated.(model)
-	assert.Equal(t, 6, m.widgetOffsets[extensions.UIWidgetPlacementAboveComposer])
+	assert.Equal(t, 6, m.widgetOffsets[m.extensionWidgetOffsetKey(extensions.UIWidgetPlacementAboveComposer)])
 	assert.Zero(t, m.viewport.YOffset)
 
 	rendered = strings.Split(m.renderExtensionWidgets(extensions.UIWidgetPlacementAboveComposer), "\n")
@@ -513,14 +636,14 @@ func TestTUIExtensionWidgetScrollOffsetsClampAfterUpdatesAndRemoval(t *testing.T
 		frame:     extensions.UIFrame{Sequence: 1, Lines: make([]extensions.UIFrameLine, 16)},
 	}
 	m.applyExtensionUIBatch(extensionUIBatch{widgets: []pendingExtensionWidget{{widget: widget}}})
-	m.widgetOffsets[extensions.UIWidgetPlacementAboveComposer] = 6
+	m.widgetOffsets[m.extensionWidgetOffsetKey(extensions.UIWidgetPlacementAboveComposer)] = 6
 
 	widget.frame = extensions.UIFrame{Sequence: 2, Lines: make([]extensions.UIFrameLine, 12)}
 	m.applyExtensionUIBatch(extensionUIBatch{widgets: []pendingExtensionWidget{{widget: widget}}})
-	assert.Equal(t, 2, m.widgetOffsets[extensions.UIWidgetPlacementAboveComposer])
+	assert.Equal(t, 2, m.widgetOffsets[m.extensionWidgetOffsetKey(extensions.UIWidgetPlacementAboveComposer)])
 
 	m.applyExtensionUIBatch(extensionUIBatch{widgets: []pendingExtensionWidget{{widget: tuiExtensionWidget{key: key}, remove: true}}})
-	assert.Zero(t, m.widgetOffsets[extensions.UIWidgetPlacementAboveComposer])
+	assert.Zero(t, m.widgetOffsets[m.extensionWidgetOffsetKey(extensions.UIWidgetPlacementAboveComposer)])
 }
 
 func TestTUIExtensionSurfaceLayoutFocusAndInputRouting(t *testing.T) {
@@ -583,6 +706,76 @@ func TestTUIExtensionSurfaceLayoutFocusAndInputRouting(t *testing.T) {
 	assert.Equal(t, 3, inputNotifications[1].Mouse.X)
 	assert.Equal(t, 2, inputNotifications[1].Mouse.Y)
 	assert.Greater(t, inputNotifications[1].Sequence, inputNotifications[0].Sequence)
+}
+
+func TestTUIExtensionSurfacesRenderAndCaptureInputOnlyForActiveConversation(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+	m.width = 100
+	m.height = 40
+	m.resize()
+	first := m.conversationState
+	second := newConversationState("conversation-second", "conversation-second", true, m.conversationDefaults)
+	m.conversations[second.key] = second
+	source := &fakeExtensionUISource{owner: extensions.UIExtensionOwner{ExtensionID: "surfaces", Generation: 1}}
+	options := extensions.UISurfaceOptions{
+		Width:  extensions.UISizeValue{Cells: 30, Set: true},
+		Height: extensions.UISizeValue{Cells: 5, Set: true},
+		Anchor: extensions.UISurfaceAnchorCenter,
+	}
+
+	_, err := m.extensionUI.OpenSurface(contextWithTUIConversation(context.Background(), first.key), source, extensions.UISurfaceOpenRequest{
+		ID: "first", Options: options, Frame: extensionTestFrame(1, "FIRST SURFACE"),
+	})
+	require.NoError(t, err)
+	_, err = m.extensionUI.OpenSurface(contextWithTUIConversation(context.Background(), second.key), source, extensions.UISurfaceOpenRequest{
+		ID: "second", Options: options, Frame: extensionTestFrame(1, "SECOND SURFACE"),
+	})
+	require.NoError(t, err)
+	_, err = m.extensionUI.OpenSurface(context.Background(), source, extensions.UISurfaceOpenRequest{
+		ID: "global", Options: extensions.UISurfaceOptions{Width: options.Width, Height: options.Height, Anchor: extensions.UISurfaceAnchorTop, NonCapturing: true}, Frame: extensionTestFrame(1, "GLOBAL SURFACE"),
+	})
+	require.NoError(t, err)
+	applyPendingExtensionUI(t, &m)
+
+	firstKey := extensionUIKey{owner: source.owner, conversationKey: first.key, id: "first"}
+	secondKey := extensionUIKey{owner: source.owner, conversationKey: second.key, id: "second"}
+	focused, ok := m.focusedExtensionSurfaceKey()
+	require.True(t, ok)
+	assert.Equal(t, firstKey, focused)
+	assert.Positive(t, m.extensionSurfaces[firstKey].layout.width)
+	assert.Zero(t, m.extensionSurfaces[secondKey].layout.width)
+	firstView := xansi.Strip(m.View())
+	assert.Contains(t, firstView, "FIRST SURFACE")
+	assert.Contains(t, firstView, "GLOBAL SURFACE")
+	assert.NotContains(t, firstView, "SECOND SURFACE")
+	cmd, handled := m.routeExtensionSurfaceKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	require.True(t, handled)
+	assert.Nil(t, cmd())
+
+	requireConversationActivation(t, &m, second.key)
+	focused, ok = m.focusedExtensionSurfaceKey()
+	require.True(t, ok)
+	assert.Equal(t, secondKey, focused)
+	assert.Positive(t, m.extensionSurfaces[secondKey].layout.width)
+	secondView := xansi.Strip(m.View())
+	assert.Contains(t, secondView, "SECOND SURFACE")
+	assert.Contains(t, secondView, "GLOBAL SURFACE")
+	assert.NotContains(t, secondView, "FIRST SURFACE")
+	cmd, handled = m.routeExtensionSurfaceKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	require.True(t, handled)
+	assert.Nil(t, cmd())
+
+	inputs := []extensions.UISurfaceInputNotification{}
+	for _, notification := range source.recordedNotifications() {
+		if notification.method == extensions.UISurfaceInputMethod {
+			inputs = append(inputs, notification.params.(extensions.UISurfaceInputNotification))
+		}
+	}
+	require.Len(t, inputs, 2)
+	assert.Equal(t, "first", inputs[0].ID)
+	assert.Equal(t, "second", inputs[1].ID)
 }
 
 func TestTUIExtensionSurfaceKeyRoutingPreservesCombinedModifiers(t *testing.T) {
