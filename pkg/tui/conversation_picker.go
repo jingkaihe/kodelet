@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -17,11 +18,12 @@ import (
 
 const (
 	conversationPickerLimit             = 200
-	conversationPickerMaxWidth          = 112
+	conversationPickerPreferredMinWidth = 112
+	conversationPickerWidthPercent      = 80
 	conversationPickerStatusWidth       = 4
-	conversationPickerTimestampWidth    = 12
-	conversationPickerDirectoryMaxWidth = 18
-	conversationPickerDirectoryMinWidth = 8
+	conversationPickerAgeWidth          = 8
+	conversationPickerWorkspaceMaxWidth = 40
+	conversationPickerWorkspaceMinWidth = 8
 	conversationPickerTitleMinimumWidth = 20
 	conversationPickerColumnGap         = "  "
 )
@@ -327,11 +329,12 @@ func (m model) renderConversationPicker() string {
 	} else {
 		maxRows := max(1, m.height-9)
 		start, end := conversationPickerWindow(len(items), m.conversationPicker.selected, maxRows)
+		now := time.Now()
 		if start > 0 {
 			lines = append(lines, renderPersistentStyle(uiDialogMutedStyle, fitVisible("↑ more", contentWidth)))
 		}
 		for index := start; index < end; index++ {
-			line := m.renderConversationPickerItem(items[index], contentWidth)
+			line := m.renderConversationPickerItemAt(items[index], contentWidth, now)
 			if index == m.conversationPicker.selected {
 				line = renderPersistentStyle(uiDialogSelectedStyle, padVisible(line, contentWidth))
 			} else {
@@ -356,7 +359,12 @@ func (m model) renderConversationPicker() string {
 }
 
 func (m model) conversationPickerDialogWidth() int {
-	return max(4, min(m.contentWidth(), conversationPickerMaxWidth))
+	available := m.contentWidth()
+	if available <= 4 {
+		return available
+	}
+	target := available * conversationPickerWidthPercent / 100
+	return min(available, max(conversationPickerPreferredMinWidth, target))
 }
 
 func conversationPickerWindow(count, selected, maxRows int) (int, int) {
@@ -373,7 +381,7 @@ func conversationPickerWindow(count, selected, maxRows int) (int, int) {
 	return start, start + maxRows
 }
 
-func (m model) renderConversationPickerItem(item conversationPickerItem, width int) string {
+func (m model) renderConversationPickerItemAt(item conversationPickerItem, width int, now time.Time) string {
 	if item.isNew {
 		return fitVisible("+   New conversation", width)
 	}
@@ -385,24 +393,57 @@ func (m model) renderConversationPickerItem(item conversationPickerItem, width i
 	if width <= conversationPickerStatusWidth {
 		return fitVisible(status, width)
 	}
-	titleWidth, timestampWidth, directoryWidth := conversationPickerColumnWidths(width)
-	if timestampWidth == 0 {
+	titleWidth, workspaceWidth, ageWidth := conversationPickerColumnWidths(width)
+	if workspaceWidth == 0 {
 		return status + padVisible(fitVisiblePrefix(title, titleWidth), titleWidth)
 	}
 
-	timestamp := ""
-	if !item.updatedAt.IsZero() {
-		timestamp = item.updatedAt.Local().Format("Jan 02 15:04")
-	}
-	line := status + padVisible(fitVisiblePrefix(title, titleWidth), titleWidth) + conversationPickerColumnGap + padVisible(timestamp, timestampWidth)
-	if directoryWidth == 0 {
+	workspace := conversationPickerDisplayCWD(item.cwd)
+	line := status + padVisible(fitVisiblePrefix(title, titleWidth), titleWidth) + conversationPickerColumnGap + padVisible(fitVisiblePrefix(workspace, workspaceWidth), workspaceWidth)
+	if ageWidth == 0 {
 		return line
 	}
-	directory := ""
-	if item.cwd != "" {
-		directory = filepath.Base(item.cwd)
+	age := fitVisiblePrefix(conversationPickerRelativeAge(item.updatedAt, now), ageWidth)
+	return line + conversationPickerColumnGap + strings.Repeat(" ", max(0, ageWidth-lipgloss.Width(age))) + age
+}
+
+func conversationPickerDisplayCWD(cwd string) string {
+	cwd = strings.TrimSpace(cwd)
+	if cwd == "" {
+		return ""
 	}
-	return line + conversationPickerColumnGap + padVisible(fitVisiblePrefix(directory, directoryWidth), directoryWidth)
+	if cwd == "~" || strings.HasPrefix(cwd, "~/") || strings.HasPrefix(cwd, `~\`) {
+		return filepath.ToSlash(cwd)
+	}
+	return filepath.ToSlash(displayCWD(cwd))
+}
+
+func conversationPickerRelativeAge(updatedAt, now time.Time) string {
+	if updatedAt.IsZero() {
+		return ""
+	}
+	elapsed := now.Sub(updatedAt)
+	if elapsed < time.Minute {
+		return "now"
+	}
+	if elapsed < time.Hour {
+		return fmt.Sprintf("%dm ago", elapsed/time.Minute)
+	}
+	if elapsed < 24*time.Hour {
+		return fmt.Sprintf("%dh ago", elapsed/time.Hour)
+	}
+	if elapsed < 7*24*time.Hour {
+		return fmt.Sprintf("%dd ago", elapsed/(24*time.Hour))
+	}
+	if elapsed < 30*24*time.Hour {
+		return fmt.Sprintf("%dw ago", elapsed/(7*24*time.Hour))
+	}
+	if elapsed < 365*24*time.Hour {
+		months := min(11, max(1, int(elapsed/(30*24*time.Hour))))
+		return fmt.Sprintf("%dmo ago", months)
+	}
+	years := max(1, int(elapsed/(365*24*time.Hour)))
+	return fmt.Sprintf("%dy ago", years)
 }
 
 func (m model) conversationPickerItemStatus(item conversationPickerItem) string {
@@ -424,20 +465,25 @@ func (m model) conversationPickerItemStatus(item conversationPickerItem) string 
 	return padVisible(fitVisible(current+" "+activity, conversationPickerStatusWidth), conversationPickerStatusWidth)
 }
 
-func conversationPickerColumnWidths(width int) (titleWidth, timestampWidth, directoryWidth int) {
+func conversationPickerColumnWidths(width int) (titleWidth, workspaceWidth, ageWidth int) {
 	remaining := max(0, width-conversationPickerStatusWidth)
-	if remaining < conversationPickerTitleMinimumWidth+lipgloss.Width(conversationPickerColumnGap)+conversationPickerTimestampWidth {
+	gapWidth := lipgloss.Width(conversationPickerColumnGap)
+	if remaining < conversationPickerTitleMinimumWidth+gapWidth+conversationPickerWorkspaceMinWidth {
 		return remaining, 0, 0
 	}
 
-	timestampWidth = conversationPickerTimestampWidth
-	remaining -= lipgloss.Width(conversationPickerColumnGap) + timestampWidth
-	directoryCandidate := min(conversationPickerDirectoryMaxWidth, max(0, remaining-lipgloss.Width(conversationPickerColumnGap)-conversationPickerTitleMinimumWidth))
-	if directoryCandidate >= conversationPickerDirectoryMinWidth {
-		directoryWidth = directoryCandidate
-		remaining -= lipgloss.Width(conversationPickerColumnGap) + directoryWidth
+	workspaceCandidate := min(
+		conversationPickerWorkspaceMaxWidth,
+		max(0, remaining-conversationPickerTitleMinimumWidth-(2*gapWidth)-conversationPickerAgeWidth),
+	)
+	if workspaceCandidate >= conversationPickerWorkspaceMinWidth {
+		workspaceWidth = workspaceCandidate
+		ageWidth = conversationPickerAgeWidth
+		return remaining - workspaceWidth - ageWidth - (2 * gapWidth), workspaceWidth, ageWidth
 	}
-	return remaining, timestampWidth, directoryWidth
+
+	workspaceWidth = min(conversationPickerWorkspaceMaxWidth, remaining-conversationPickerTitleMinimumWidth-gapWidth)
+	return remaining - workspaceWidth - gapWidth, workspaceWidth, 0
 }
 
 func fitVisiblePrefix(text string, width int) string {

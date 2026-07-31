@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -166,37 +167,98 @@ func TestConversationPickerConsumesShiftEnter(t *testing.T) {
 }
 
 func TestConversationPickerUsesWideDialogAndKeepsTitlePrefix(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	now := time.Date(2026, time.July, 31, 6, 49, 0, 0, time.UTC)
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)
-	m.width = 160
+	m.width = 200
 	m.height = 30
 	m.resize()
 
-	assert.Equal(t, conversationPickerMaxWidth, m.conversationPickerDialogWidth())
+	assert.Equal(t, m.contentWidth()*conversationPickerWidthPercent/100, m.conversationPickerDialogWidth())
+	assert.Greater(t, m.conversationPickerDialogWidth(), conversationPickerPreferredMinWidth)
 	assert.Equal(t, "First few…", fitVisiblePrefix("First few characters remain visible", 10))
 
-	line := m.renderConversationPickerItem(conversationPickerItem{
+	line := m.renderConversationPickerItemAt(conversationPickerItem{
 		key:       m.activeConversationKey,
 		id:        "20260731abcdef",
 		title:     "First few characters should remain visible instead of the suffix",
-		cwd:       "/tmp/kodelet",
-		updatedAt: time.Date(2026, time.July, 31, 4, 49, 0, 0, time.Local),
+		cwd:       filepath.Join(homeDir, "workspace", "kodelet"),
+		updatedAt: now.Add(-2 * time.Hour),
 		running:   true,
-	}, 64)
+	}, 96, now)
 	assert.Contains(t, line, "First few characters")
+	assert.Contains(t, line, "~/workspace/kodelet")
+	assert.Contains(t, line, "2h ago")
+	assert.NotContains(t, line, homeDir)
 	assert.NotRegexp(t, `^…`, line)
 	assert.NotContains(t, line, "20260731")
 	assert.NotContains(t, line, "current")
 	assert.NotContains(t, line, "running")
 	assert.True(t, strings.HasPrefix(line, "› "+m.spinnerGlyph()))
 
-	other := m.renderConversationPickerItem(conversationPickerItem{
+	other := m.renderConversationPickerItemAt(conversationPickerItem{
 		title:     "Short title",
-		cwd:       "/tmp/workspace",
-		updatedAt: time.Date(2026, time.July, 30, 20, 9, 0, 0, time.Local),
-	}, 64)
-	assert.Equal(t, visibleTextColumn(line, "Jul 31 04:49"), visibleTextColumn(other, "Jul 30 20:09"))
-	assert.Equal(t, visibleTextColumn(line, "kodelet"), visibleTextColumn(other, "workspace"))
+		cwd:       "/srv/workspaces/project",
+		updatedAt: now.Add(-17 * time.Hour),
+	}, 96, now)
+	assert.Contains(t, other, "/srv/workspaces/project")
+	assert.Less(t, visibleTextColumn(line, "First few characters"), visibleTextColumn(line, "~/workspace/kodelet"))
+	assert.Equal(t, visibleTextColumn(line, "~/workspace/kodelet"), visibleTextColumn(other, "/srv/workspaces/project"))
+	assert.Less(t, visibleTextColumn(line, "~/workspace/kodelet"), visibleTextColumn(line, "2h ago"))
+	assert.Equal(t, visibleTextEndColumn(line, "2h ago"), visibleTextEndColumn(other, "17h ago"))
+	assert.True(t, strings.HasSuffix(line, "  2h ago"))
+
+	m.width = 90
+	m.resize()
+	assert.Equal(t, m.contentWidth(), m.conversationPickerDialogWidth())
+	assert.Equal(t, "~/already-compact", conversationPickerDisplayCWD("~/already-compact"))
+}
+
+func TestConversationPickerRelativeAge(t *testing.T) {
+	now := time.Date(2026, time.July, 31, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name      string
+		updatedAt time.Time
+		want      string
+	}{
+		{name: "missing", want: ""},
+		{name: "future", updatedAt: now.Add(time.Minute), want: "now"},
+		{name: "seconds", updatedAt: now.Add(-59 * time.Second), want: "now"},
+		{name: "minute boundary", updatedAt: now.Add(-time.Minute), want: "1m ago"},
+		{name: "minutes", updatedAt: now.Add(-12 * time.Minute), want: "12m ago"},
+		{name: "hour boundary", updatedAt: now.Add(-time.Hour), want: "1h ago"},
+		{name: "hours", updatedAt: now.Add(-17 * time.Hour), want: "17h ago"},
+		{name: "day boundary", updatedAt: now.Add(-24 * time.Hour), want: "1d ago"},
+		{name: "days", updatedAt: now.Add(-3 * 24 * time.Hour), want: "3d ago"},
+		{name: "week boundary", updatedAt: now.Add(-7 * 24 * time.Hour), want: "1w ago"},
+		{name: "weeks", updatedAt: now.Add(-14 * 24 * time.Hour), want: "2w ago"},
+		{name: "month boundary", updatedAt: now.Add(-30 * 24 * time.Hour), want: "1mo ago"},
+		{name: "months", updatedAt: now.Add(-180 * 24 * time.Hour), want: "6mo ago"},
+		{name: "before year boundary", updatedAt: now.Add(-364 * 24 * time.Hour), want: "11mo ago"},
+		{name: "year boundary", updatedAt: now.Add(-365 * 24 * time.Hour), want: "1y ago"},
+		{name: "years", updatedAt: now.Add(-730 * 24 * time.Hour), want: "2y ago"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, conversationPickerRelativeAge(tt.updatedAt, now))
+		})
+	}
+}
+
+func TestConversationPickerColumnWidthsPrioritizeWorkspaceOverAge(t *testing.T) {
+	titleWidth, workspaceWidth, ageWidth := conversationPickerColumnWidths(35)
+
+	assert.Equal(t, conversationPickerTitleMinimumWidth, titleWidth)
+	assert.Equal(t, 9, workspaceWidth)
+	assert.Zero(t, ageWidth)
+
+	titleWidth, workspaceWidth, ageWidth = conversationPickerColumnWidths(29)
+	assert.Equal(t, 25, titleWidth)
+	assert.Zero(t, workspaceWidth)
+	assert.Zero(t, ageWidth)
 }
 
 func TestConversationPickerKeyboardNavigationEditingAndNewConversation(t *testing.T) {
@@ -578,4 +640,12 @@ func visibleTextColumn(line, target string) int {
 		return -1
 	}
 	return lipgloss.Width(line[:index])
+}
+
+func visibleTextEndColumn(line, target string) int {
+	start := visibleTextColumn(line, target)
+	if start < 0 {
+		return -1
+	}
+	return start + lipgloss.Width(target)
 }
