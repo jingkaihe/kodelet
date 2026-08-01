@@ -1,5 +1,5 @@
 import React from "react";
-import { ChevronRight, PanelLeftClose, SquarePen } from "lucide-react";
+import { ChevronRight, PanelLeft, SquarePen } from "lucide-react";
 import type { Conversation } from "../../types";
 import { cn, truncateText } from "../../utils";
 
@@ -216,7 +216,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 						onClick={onHide}
 						type="button"
 					>
-						<PanelLeftClose aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
+						<PanelLeft aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
 					</button>
 				) : null}
 			</div>

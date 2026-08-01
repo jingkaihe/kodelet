@@ -10,9 +10,8 @@ import React, {
 } from "react";
 import {
 	GitCompareArrows,
-	PanelLeftOpen,
-	PanelRightClose,
-	PanelRightOpen,
+	PanelLeft,
+	PanelRight,
 	SquareTerminal,
 } from "lucide-react";
 import { useNavigate, useParams } from "react-router";
@@ -499,7 +498,6 @@ const ChatPage: React.FC = () => {
 		useState<string[]>([]);
 	const [attachments, setAttachments] = useState<PendingImageAttachment[]>([]);
 	const [dragActive, setDragActive] = useState(false);
-	const [composerExpanded, setComposerExpanded] = useState(false);
 	const [gitDiffLoading, setGitDiffLoading] = useState(false);
 	const [gitDiffError, setGitDiffError] = useState<string | null>(null);
 	const [gitDiff, setGitDiff] = useState<GitDiffResponse | null>(null);
@@ -2788,7 +2786,7 @@ const ChatPage: React.FC = () => {
 									onClick={handleSidebarToggle}
 									type="button"
 								>
-									<PanelLeftOpen
+									<PanelLeft
 										aria-hidden="true"
 										className="h-4 w-4"
 										strokeWidth={1.9}
@@ -2805,7 +2803,7 @@ const ChatPage: React.FC = () => {
 							onClick={handleSidebarToggle}
 							type="button"
 						>
-							<PanelLeftOpen
+							<PanelLeft
 								aria-hidden="true"
 								className="h-4 w-4"
 								strokeWidth={1.9}
@@ -2877,7 +2875,6 @@ const ChatPage: React.FC = () => {
 						contextText={composerContextText}
 						dragActive={dragActive}
 						draft={draft}
-						expanded={composerExpanded}
 						placeholder={composerPlaceholder}
 						showStop={currentConversationIsStreaming}
 						slashCommandIndex={slashCommandIndex}
@@ -2922,9 +2919,6 @@ const ChatPage: React.FC = () => {
 						onSelectSlashCommand={handleSelectSlashCommand}
 						onStop={handleStop}
 						onSubmit={handleSubmit}
-						onToggleExpanded={() =>
-							setComposerExpanded((currentValue) => !currentValue)
-						}
 					/>
 				</main>
 
@@ -3017,11 +3011,7 @@ const ChatPage: React.FC = () => {
 							onClick={handleToggleWorkspacePanel}
 							type="button"
 						>
-							{workspacePanelOpen ? (
-								<PanelRightClose aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
-							) : (
-								<PanelRightOpen aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
-							)}
+							<PanelRight aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
 						</button>
 					</div>
 				</aside>

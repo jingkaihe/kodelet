@@ -11,7 +11,6 @@ type ChatComposerStoryProps = React.ComponentProps<typeof ChatComposer>;
 
 const InteractiveComposer = (args: ChatComposerStoryProps) => {
 	const [draft, setDraft] = React.useState(args.draft);
-	const [expanded, setExpanded] = React.useState(args.expanded);
 	const [attachments, setAttachments] = React.useState(args.attachments);
 
 	return (
@@ -19,7 +18,6 @@ const InteractiveComposer = (args: ChatComposerStoryProps) => {
 			{...args}
 			attachments={attachments}
 			draft={draft}
-			expanded={expanded}
 			onAttachImages={(files) => {
 				void args.onAttachImages(files);
 			}}
@@ -29,10 +27,6 @@ const InteractiveComposer = (args: ChatComposerStoryProps) => {
 					currentAttachments.filter((attachment) => attachment.id !== attachmentId),
 				);
 				args.onRemoveAttachment(attachmentId);
-			}}
-			onToggleExpanded={() => {
-				setExpanded((currentValue) => !currentValue);
-				args.onToggleExpanded();
 			}}
 		/>
 	);
@@ -54,7 +48,6 @@ const meta = {
 		contextText: "default · kodelet",
 		dragActive: false,
 		draft: "Extract the reusable component and add a story.",
-		expanded: false,
 		placeholder: "Ask kodelet anything...",
 		showStop: false,
 		slashCommandIndex: -1,
@@ -78,7 +71,6 @@ const meta = {
 		onSelectSlashCommand: fn(),
 		onStop: fn(),
 		onSubmit: fn(),
-		onToggleExpanded: fn(),
 	},
 } satisfies Meta<typeof ChatComposer>;
 
@@ -87,6 +79,12 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const ReadyToSend: Story = {};
+
+export const Multiline: Story = {
+	args: {
+		draft: "Review these points:\n- mobile layout\n- terminal behavior",
+	},
+};
 
 export const WithSlashSuggestions: Story = {
 	args: {

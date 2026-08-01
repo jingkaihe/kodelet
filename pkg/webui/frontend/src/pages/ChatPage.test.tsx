@@ -223,13 +223,20 @@ describe("ChatPage", () => {
 		await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
 		expect(screen.getAllByText(getGreeting())).toHaveLength(1);
 		expect(screen.getByTestId("chat-sidebar-shell")).toBeInTheDocument();
-		expect(screen.getByTestId("sidebar-hide-button")).toHaveClass(
+		const sidebarHideButton = screen.getByTestId("sidebar-hide-button");
+		expect(sidebarHideButton).toHaveClass(
 			"sidebar-toggle-button",
 		);
+		expect(sidebarHideButton.querySelector("svg")).toHaveClass(
+			"lucide-panel-left",
+		);
 
-		fireEvent.click(screen.getByTestId("sidebar-hide-button"));
+		fireEvent.click(sidebarHideButton);
 		expect(screen.queryByTestId("chat-sidebar-shell")).not.toBeInTheDocument();
 		expect(screen.getByTestId("sidebar-collapsed-rail")).toBeInTheDocument();
+		expect(
+			screen.getByTestId("sidebar-attached-toggle").querySelector("svg"),
+		).toHaveClass("lucide-panel-left");
 
 		fireEvent.click(screen.getByTestId("sidebar-attached-toggle"));
 		expect(screen.getByTestId("chat-sidebar-shell")).toBeInTheDocument();
@@ -255,7 +262,13 @@ describe("ChatPage", () => {
 
 		await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
 		expect(screen.queryByTestId("chat-sidebar-shell")).not.toBeInTheDocument();
-		expect(screen.getByTestId("sidebar-attached-toggle-mobile")).toBeInTheDocument();
+		const mobileSidebarToggle = screen.getByTestId(
+			"sidebar-attached-toggle-mobile",
+		);
+		expect(mobileSidebarToggle).toBeInTheDocument();
+		expect(mobileSidebarToggle.querySelector("svg")).toHaveClass(
+			"lucide-panel-left",
+		);
 		expect(window.localStorage.getItem("kodelet.chat.sidebar.visible")).toBe(
 			"true",
 		);
@@ -308,6 +321,9 @@ describe("ChatPage", () => {
 
 		const workspaceShell = screen.getByTestId("workspace-tools-shell");
 		const workspaceToggle = screen.getByTestId("workspace-tools-toggle");
+		expect(workspaceToggle.querySelector("svg")).toHaveClass(
+			"lucide-panel-right",
+		);
 		const terminalTab = screen.getByTestId("workspace-tools-terminal-tab");
 		const diffTab = screen.getByTestId("workspace-tools-diff-tab");
 		const terminalHost = screen.getByTestId("terminal-host");
@@ -688,29 +704,20 @@ describe("ChatPage", () => {
 		);
 	});
 
-	it("toggles the composer between expanded and restored states", async () => {
+	it("switches the composer layout automatically for multiline drafts", async () => {
 		render(<ChatPage />);
 
 		await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
 
-		const toggle = screen.getByTestId("composer-expand-toggle");
 		const textarea = screen.getByTestId("composer-textarea");
+		expect(screen.queryByTestId("composer-expand-toggle")).not.toBeInTheDocument();
+		expect(textarea.parentElement).not.toHaveClass("is-multiline");
 
-		expect(toggle).toHaveAttribute("aria-label", "Expand composer");
-		expect(toggle).toHaveAttribute("aria-pressed", "false");
-		expect(textarea).not.toHaveClass("composer-editor-expanded");
+		fireEvent.change(textarea, { target: { value: "a\nb\nc" } });
 
-		fireEvent.click(toggle);
-
-		expect(toggle).toHaveAttribute("aria-label", "Restore composer");
-		expect(toggle).toHaveAttribute("aria-pressed", "true");
-		expect(textarea).toHaveClass("composer-editor-expanded");
-
-		fireEvent.click(toggle);
-
-		expect(toggle).toHaveAttribute("aria-label", "Expand composer");
-		expect(toggle).toHaveAttribute("aria-pressed", "false");
-		expect(textarea).not.toHaveClass("composer-editor-expanded");
+		await waitFor(() =>
+			expect(textarea.parentElement).toHaveClass("is-multiline"),
+		);
 	});
 
 	it("opens terminal in the workspace side panel from the right rail by default", async () => {

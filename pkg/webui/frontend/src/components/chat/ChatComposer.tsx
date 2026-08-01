@@ -1,9 +1,7 @@
 import React from "react";
 import {
 	ArrowUp,
-	ImageUp,
-	Maximize2,
-	Minimize2,
+	Paperclip,
 	Square,
 	X,
 } from "lucide-react";
@@ -19,7 +17,6 @@ interface ChatComposerProps {
 	contextText: string;
 	dragActive: boolean;
 	draft: string;
-	expanded: boolean;
 	placeholder: string;
 	showStop: boolean;
 	slashCommandIndex: number;
@@ -43,7 +40,6 @@ interface ChatComposerProps {
 	onSelectSlashCommand: (commandName: string) => void;
 	onStop: () => void;
 	onSubmit: () => void | Promise<void>;
-	onToggleExpanded: () => void;
 }
 
 const ChatComposer: React.FC<ChatComposerProps> = ({
@@ -55,7 +51,6 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
 	contextText,
 	dragActive,
 	draft,
-	expanded,
 	placeholder,
 	showStop,
 	slashCommandIndex,
@@ -79,9 +74,97 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
 	onSelectSlashCommand,
 	onStop,
 	onSubmit,
-	onToggleExpanded,
 }) => {
 	const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+	const controlGridRef = React.useRef<HTMLDivElement | null>(null);
+	const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
+	const [multiline, setMultiline] = React.useState(() => draft.includes("\n"));
+
+	const syncEditorLayout = React.useCallback(() => {
+		const controlGrid = controlGridRef.current;
+		const editor = textareaRef.current;
+		if (!controlGrid || !editor) {
+			return;
+		}
+
+		controlGrid.classList.remove("is-multiline");
+
+		editor.style.height = "0px";
+		const singleLineStyles = window.getComputedStyle(editor);
+		const singleLineMinHeight = Number.parseFloat(singleLineStyles.minHeight);
+		const measuredSingleLineHeight = editor.scrollHeight;
+		const hasLayoutMetrics =
+			Number.isFinite(singleLineMinHeight) &&
+			singleLineMinHeight > 0 &&
+			measuredSingleLineHeight > 0;
+		const nextMultiline =
+			draft.includes("\n") ||
+			(hasLayoutMetrics && measuredSingleLineHeight > singleLineMinHeight + 1);
+
+		controlGrid.classList.toggle("is-multiline", nextMultiline);
+		editor.style.height = "0px";
+		const finalStyles = window.getComputedStyle(editor);
+		const minHeight = Number.parseFloat(finalStyles.minHeight);
+		const maxHeight = Number.parseFloat(finalStyles.maxHeight);
+		const naturalHeight = editor.scrollHeight;
+
+		if (
+			Number.isFinite(minHeight) &&
+			minHeight > 0 &&
+			naturalHeight > 0
+		) {
+			const constrainedMaxHeight =
+				Number.isFinite(maxHeight) && maxHeight > 0
+					? maxHeight
+					: Number.POSITIVE_INFINITY;
+			const nextHeight = Math.min(
+				Math.max(naturalHeight, minHeight),
+				constrainedMaxHeight,
+			);
+			editor.style.height = `${nextHeight}px`;
+			editor.style.overflowY =
+				naturalHeight > constrainedMaxHeight ? "auto" : "hidden";
+		} else {
+			editor.style.height = "";
+			editor.style.overflowY = "";
+		}
+
+		setMultiline((currentValue) =>
+			currentValue === nextMultiline ? currentValue : nextMultiline,
+		);
+	}, [contextText, draft, showStop]);
+
+	React.useLayoutEffect(() => {
+		syncEditorLayout();
+	}, [syncEditorLayout]);
+
+	React.useEffect(() => {
+		const controlGrid = controlGridRef.current;
+		let observedWidth = controlGrid?.getBoundingClientRect().width ?? 0;
+		const resizeObserver =
+			typeof ResizeObserver !== "undefined" && controlGrid
+				? new ResizeObserver(([entry]) => {
+						const nextWidth = entry?.contentRect.width ?? 0;
+						if (Math.abs(nextWidth - observedWidth) < 0.5) {
+							return;
+						}
+						observedWidth = nextWidth;
+						syncEditorLayout();
+					})
+				: null;
+
+		if (controlGrid && resizeObserver) {
+			resizeObserver.observe(controlGrid);
+		}
+		window.addEventListener("resize", syncEditorLayout);
+		window.visualViewport?.addEventListener("resize", syncEditorLayout);
+
+		return () => {
+			resizeObserver?.disconnect();
+			window.removeEventListener("resize", syncEditorLayout);
+			window.visualViewport?.removeEventListener("resize", syncEditorLayout);
+		};
+	}, [syncEditorLayout]);
 
 	const handleFileInputChange = async (
 		event: React.ChangeEvent<HTMLInputElement>,
@@ -192,130 +275,109 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
 						</div>
 					) : null}
 
-					<textarea
-						className={cn(
-							"composer-editor",
-							expanded && "composer-editor-expanded",
-						)}
-						data-testid="composer-textarea"
-						disabled={textareaDisabled}
-						onChange={(event) => onDraftChange(event.target.value)}
-						onKeyDown={onDraftKeyDown}
-						onPaste={onPaste}
-						placeholder={placeholder}
-						value={draft}
-					/>
+					<div
+						className={cn("composer-control-grid", multiline && "is-multiline")}
+						ref={controlGridRef}
+					>
+						<textarea
+							className="composer-editor"
+							data-testid="composer-textarea"
+							disabled={textareaDisabled}
+							onChange={(event) => onDraftChange(event.target.value)}
+							onKeyDown={onDraftKeyDown}
+							onPaste={onPaste}
+							placeholder={placeholder}
+							ref={textareaRef}
+							value={draft}
+						/>
 
-					<div className="border-t border-black/8 px-2.5 pt-2">
-						<div className="composer-footer-row">
-							<div className="composer-leading-actions">
+						<div className="composer-leading-actions">
+							<button
+								aria-label="Add image"
+								className="composer-icon-button"
+								disabled={addImageDisabled}
+								onClick={() => fileInputRef.current?.click()}
+								title="Add image"
+								type="button"
+							>
+								<Paperclip
+									aria-hidden="true"
+									className="composer-attachment-icon"
+									strokeWidth={1.9}
+								/>
+							</button>
+						</div>
+
+						<div className="composer-footer-divider" />
+
+						<div className="composer-context-cluster">
+							{contextIsStatic ? (
+								<div
+									className="composer-inline-context is-static"
+									data-testid="composer-inline-context"
+								>
+									<span
+										className="composer-inline-context-value"
+										title={contextText}
+									>
+										{contextText}
+									</span>
+								</div>
+							) : (
 								<button
-									aria-label="Add image"
-									className="composer-icon-button"
-									disabled={addImageDisabled}
-									onClick={() => fileInputRef.current?.click()}
+									className="composer-inline-context"
+									disabled={contextDisabled}
+									onClick={onContextOpen}
 									type="button"
 								>
-									<ImageUp
+									<span
+										className="composer-inline-context-value"
+										title={contextText}
+									>
+										{contextText}
+									</span>
+								</button>
+							)}
+						</div>
+
+						<div className="composer-status-actions">
+							{showStop ? (
+								<button
+									aria-label={stopActionLabel}
+									className="composer-action-icon-button composer-action-icon-button-stop"
+									disabled={!canStop}
+									onClick={onStop}
+									title={stopActionLabel}
+									type="button"
+								>
+									<Square
 										aria-hidden="true"
-										className="h-4 w-4"
-										strokeWidth={1.8}
+										className="composer-action-stop-icon"
+										fill="currentColor"
+										strokeWidth={0}
 									/>
 								</button>
+							) : null}
 
-								<button
-									aria-label={expanded ? "Restore composer" : "Expand composer"}
-									aria-pressed={expanded}
-									className="composer-icon-button"
-									data-testid="composer-expand-toggle"
-									onClick={onToggleExpanded}
-									type="button"
-								>
-									{expanded ? (
-										<Minimize2
-											aria-hidden="true"
-											className="h-4 w-4"
-											strokeWidth={1.8}
-										/>
-									) : (
-										<Maximize2
-											aria-hidden="true"
-											className="h-4 w-4"
-											strokeWidth={1.8}
-										/>
-									)}
-								</button>
-							</div>
-
-							<div className="composer-context-cluster">
-								{contextIsStatic ? (
-									<div
-										className="composer-inline-context is-static"
-										data-testid="composer-inline-context"
-									>
-										<span
-											className="composer-inline-context-value"
-											title={contextText}
-										>
-											{contextText}
-										</span>
-									</div>
-								) : (
-									<button
-										className="composer-inline-context"
-										disabled={contextDisabled}
-										onClick={onContextOpen}
-										type="button"
-									>
-										<span
-											className="composer-inline-context-value"
-											title={contextText}
-										>
-											{contextText}
-										</span>
-									</button>
+							<button
+								className={cn(
+									"composer-action-icon-button composer-action-icon-button-submit",
+									submitDisabled
+										? "composer-action-icon-button-disabled"
+										: "composer-action-icon-button-ready",
 								)}
-							</div>
-
-							<div className="composer-status-actions">
-								{showStop ? (
-									<button
-										aria-label={stopActionLabel}
-										className="composer-action-icon-button composer-action-icon-button-stop"
-										disabled={!canStop}
-										onClick={onStop}
-										title={stopActionLabel}
-										type="button"
-									>
-										<Square
-											aria-hidden="true"
-											className="composer-action-stop-icon"
-											fill="currentColor"
-											strokeWidth={0}
-										/>
-									</button>
-								) : null}
-
-								<button
-									className={cn(
-										"composer-action-icon-button composer-action-icon-button-submit",
-										submitDisabled
-											? "composer-action-icon-button-disabled"
-											: "composer-action-icon-button-ready",
-									)}
-									aria-label={submitActionLabel}
-									disabled={submitDisabled}
-									onClick={() => void onSubmit()}
-									title={`${submitActionLabel} (Shift+Enter)`}
-									type="button"
-								>
-									<ArrowUp
-										aria-hidden="true"
-										className="composer-action-submit-icon"
-										strokeWidth={3}
-									/>
-								</button>
-							</div>
+								aria-label={submitActionLabel}
+								disabled={submitDisabled}
+								onClick={() => void onSubmit()}
+								title={`${submitActionLabel} (Shift+Enter)`}
+								type="button"
+							>
+								<ArrowUp
+									aria-hidden="true"
+									className="composer-action-submit-icon"
+									strokeWidth={3}
+								/>
+							</button>
 						</div>
 					</div>
 				</div>

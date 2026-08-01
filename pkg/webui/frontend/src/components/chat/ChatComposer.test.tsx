@@ -16,7 +16,6 @@ const renderComposer = (
 		contextText: "default · kodelet",
 		dragActive: false,
 		draft: "hello",
-		expanded: false,
 		placeholder: "Ask kodelet anything...",
 		showStop: false,
 		slashCommandIndex: -1,
@@ -40,7 +39,6 @@ const renderComposer = (
 		onSelectSlashCommand: vi.fn(),
 		onStop: vi.fn(),
 		onSubmit: vi.fn(),
-		onToggleExpanded: vi.fn(),
 		...overrides,
 	};
 
@@ -52,22 +50,37 @@ const renderComposer = (
 describe("ChatComposer", () => {
 	it("emits composer actions through props", () => {
 		const props = renderComposer();
+		const addImageButton = screen.getByLabelText("Add image");
 
 		fireEvent.change(screen.getByTestId("composer-textarea"), {
 			target: { value: "next draft" },
 		});
 		fireEvent.click(screen.getByLabelText("Send"));
-		fireEvent.click(screen.getByTestId("composer-expand-toggle"));
 		fireEvent.click(screen.getByText("default · kodelet"));
 
 		expect(screen.getByLabelText("Send")).toHaveAttribute(
 			"title",
 			"Send (Shift+Enter)",
 		);
+		expect(addImageButton.querySelector("svg")).toHaveClass(
+			"lucide-paperclip",
+		);
+		expect(screen.getByTestId("composer-textarea").parentElement).toHaveClass(
+			"composer-control-grid",
+		);
+		expect(screen.queryByTestId("composer-expand-toggle")).not.toBeInTheDocument();
 		expect(props.onDraftChange).toHaveBeenCalledWith("next draft");
 		expect(props.onSubmit).toHaveBeenCalledTimes(1);
-		expect(props.onToggleExpanded).toHaveBeenCalledTimes(1);
 		expect(props.onContextOpen).toHaveBeenCalledTimes(1);
+	});
+
+	it("uses the automatic multiline layout for drafts with line breaks", () => {
+		renderComposer({ draft: "a\nb\nc" });
+
+		expect(screen.getByTestId("composer-textarea").parentElement).toHaveClass(
+			"is-multiline",
+		);
+		expect(screen.queryByTestId("composer-expand-toggle")).not.toBeInTheDocument();
 	});
 
 	it("renders attachment previews and slash command suggestions", () => {
