@@ -527,6 +527,14 @@ test("Session can expose in-process extensions over a TCP bridge", { timeout: 50
         return { action: "respond", response: "opened" };
       },
     });
+    ext.registerCommand({
+      name: "once",
+      description: "Send one detached persistent request",
+      execute(_input, ctx) {
+        void ctx.ui.appendTranscript("once").catch(() => undefined);
+        return { action: "respond", response: "done" };
+      },
+    });
   });
 
   const client = new Client({ cwd: workspace, spawn });
@@ -572,12 +580,12 @@ test("Session can expose in-process extensions over a TCP bridge", { timeout: 50
   const first = bridge.beginCall("extension.tool.execute", {
     name: "ask_user_question",
     input: { question: "First", options: ["A", "B"] },
-    context: { cwd: workspace },
+    context: { cwd: workspace, uiScopeId: "conversation-first" },
   });
   const second = bridge.beginCall("extension.tool.execute", {
     name: "ask_user_question",
     input: { question: "Second", options: ["A", "B"] },
-    context: { cwd: workspace },
+    context: { cwd: workspace, uiScopeId: "conversation-second" },
   });
   assert.deepEqual(await Promise.all([first.response, second.response]), [{ content: "B" }, { content: "B" }]);
   assert.deepEqual(selectedValues.sort(), ["B", "B"]);
@@ -602,24 +610,46 @@ test("Session can expose in-process extensions over a TCP bridge", { timeout: 50
       .filter((request) => request.method === "kodelet.ui.widget.set")
       .map((request) => (request.params as { frame: { sequence: number } }).frame.sequence)
       .sort((left, right) => left - right),
-    [1, 2],
+    [1, 1],
+  );
+  assert.deepEqual(
+    bridge.hostRequests
+      .filter((request) => request.method === "kodelet.ui.widget.set")
+      .map((request) => (request.params as { scopeId: string }).scopeId)
+      .sort(),
+    ["conversation-first", "conversation-second"],
   );
 
   const surfaceCall = bridge.beginCall("extension.command.execute", {
     name: "surface",
     input: {},
     invocation: { raw: "/surface", commandName: "surface", args: [], flags: {} },
-    context: { cwd: workspace },
+    context: { cwd: workspace, uiScopeId: "conversation-surface" },
   });
   assert.deepEqual(await surfaceCall.response, { action: "respond", response: "opened" });
   const openRequest = bridge.hostRequests.find((request) => request.method === "kodelet.ui.surface.open");
   assert.equal(openRequest?.parentId, surfaceCall.id);
 
-  bridge.notify("extension.ui.surface.resize", { id: "game", sequence: 1, width: 60, height: 18 });
+  bridge.notify("extension.ui.surface.resize", { scopeId: "conversation-surface", id: "game", sequence: 1, width: 60, height: 18 });
   await resizeHandled;
   const transcriptRequest = bridge.hostRequests.find((request) => request.method === "kodelet.ui.transcript.append");
   assert.equal(transcriptRequest?.parentId, undefined);
-  assert.deepEqual(transcriptRequest?.params, { title: "Resized", message: "60" });
+  assert.deepEqual(transcriptRequest?.params, { scopeId: "conversation-surface", title: "Resized", message: "60" });
+
+  const requestCountBeforeDetached = bridge.hostRequests.length;
+  bridge.setRespondToHostRequests(false);
+  const detached = bridge.beginCall("extension.command.execute", {
+    name: "once",
+    input: {},
+    invocation: { raw: "/once", commandName: "once", args: [], flags: {} },
+    context: { cwd: workspace, uiScopeId: "conversation-once" },
+  });
+  assert.deepEqual(await detached.response, { action: "respond", response: "done" });
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  const detachedRequests = bridge.hostRequests.slice(requestCountBeforeDetached);
+  assert.equal(detachedRequests.length, 1);
+  assert.equal(detachedRequests[0]?.parentId, detached.id);
+  assert.deepEqual(detachedRequests[0]?.params, { scopeId: "conversation-once", message: "once" });
 
   await client.close();
 });
@@ -811,6 +841,7 @@ class BridgeTestClient {
   private nextId = 0;
   private waiters = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>();
   hostRequests: JsonRPCRequest[] = [];
+  private respondToHostRequests = true;
 
   constructor(stdout: NodeJS.ReadableStream, private stdin: NodeJS.WritableStream) {
     stdout.on("data", (chunk: Buffer) => {
@@ -847,6 +878,10 @@ class BridgeTestClient {
     this.stdin.write(`Content-Length: ${Buffer.byteLength(payload)}\r\n\r\n${payload}`);
   }
 
+  setRespondToHostRequests(enabled: boolean): void {
+    this.respondToHostRequests = enabled;
+  }
+
   private drain(): void {
     while (true) {
       const headerEnd = this.buffer.indexOf("\r\n\r\n");
@@ -868,6 +903,9 @@ class BridgeTestClient {
       this.buffer = this.buffer.subarray(end);
       if (response.method && response.id !== undefined && response.id !== null) {
         this.hostRequests.push(response);
+        if (!this.respondToHostRequests) {
+          continue;
+        }
         const payload = JSON.stringify({ jsonrpc: "2.0", id: response.id, result: { accepted: true } });
         this.stdin.write(`Content-Length: ${Buffer.byteLength(payload)}\r\n\r\n${payload}`);
         continue;

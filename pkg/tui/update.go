@@ -210,6 +210,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.conversationState = state
 		wasInitialHistoryPending := m.initialHistoryPending
 		m.initialHistoryPending = false
+		m.deferSubmitUntilHistory = false
+		queuedHistoryMessage := m.submitAfterHistoryLoad
+		m.submitAfterHistoryLoad = ""
 		reloadSlashCommands := wasInitialHistoryPending
 		m.extensionDiscoveryBlocked = wasInitialHistoryPending && msg.err != nil
 		var reloadMessageHistory tea.Cmd
@@ -263,6 +266,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.loaded && wasInitialHistoryPending && !m.running {
 			m.extensionLifecyclePending = true
+			if strings.TrimSpace(queuedHistoryMessage) != "" {
+				m.submitAfterExtensionLifecycle = queuedHistoryMessage
+			}
 			lifecycleBroker := newTUIUIBrokerForConversation(m.runCh, 0, state.key)
 			lifecycleCtx := contextWithTUIConversation(m.ctx, state.key)
 			lifecycleCtx = extensions.ContextWithUIInputBroker(lifecycleCtx, lifecycleBroker)
@@ -367,9 +373,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "ctrl+l":
 				return m, m.openConversationPicker("")
 			case "esc", "enter", "?", "q", "Q", "ctrl+c", "ctrl+d":
+				oldFocusKey, oldFocused := m.focusedExtensionSurfaceKey()
+				var oldFocus tuiExtensionSurface
+				if oldFocused {
+					oldFocus = m.extensionSurfaces[oldFocusKey]
+				}
 				m.shortcutsOpen = false
 				m.refreshViewport(false)
-				return m, nil
+				return m, tea.Sequence(m.extensionSurfaceFocusTransitionCommands(oldFocusKey, oldFocused, oldFocus)...)
 			default:
 				return m, nil
 			}
@@ -408,8 +419,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.refreshViewport(true)
 					return m, nil
 				}
-				m.cancelActiveRun()
-				return m, nil
+				return m, m.cancelActiveRun()
 			}
 			m.cancel()
 			return m, tea.Quit
@@ -439,7 +449,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if m.running && !m.runCancelling {
-				m.cancelActiveRun()
+				return m, m.cancelActiveRun()
 			}
 			return m, nil
 		case "ctrl+t":
@@ -473,8 +483,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "?":
 			if strings.TrimSpace(m.textarea.Value()) == "" {
-				m.openShortcutsDialog()
-				return m, nil
+				return m, m.openShortcutsDialog()
 			}
 		case "up", "shift+tab":
 			if m.slashCommandSuggestionsOpen() {
@@ -552,8 +561,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		if m.shortcutsOpen {
 			if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+				oldFocusKey, oldFocused := m.focusedExtensionSurfaceKey()
+				var oldFocus tuiExtensionSurface
+				if oldFocused {
+					oldFocus = m.extensionSurfaces[oldFocusKey]
+				}
 				m.shortcutsOpen = false
 				m.refreshViewport(false)
+				return m, tea.Sequence(m.extensionSurfaceFocusTransitionCommands(oldFocusKey, oldFocused, oldFocus)...)
 			}
 			return m, nil
 		}
@@ -668,8 +683,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.conversationID != "" {
 			m.setConversationID(state, msg.conversationID)
 		}
+		var promptFocusCmd tea.Cmd
 		if state.activeUIPrompt != nil {
-			m.resolveUIPromptForState(state, extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
+			promptFocusCmd = m.resolveUIPromptForState(state, extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
 		}
 		currentState := m.conversationState
 		m.conversationState = state
@@ -693,10 +709,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !active {
 			m.unread = true
 		}
+		runSucceeded := msg.err == nil && !wasCancelling
 		queuedFollowUp := ""
-		if !m.quitAfterRun && len(m.queuedFollowUps) > 0 {
+		if runSucceeded && !m.quitAfterRun && len(m.queuedFollowUps) > 0 {
 			queuedFollowUp = m.queuedFollowUps[0]
 			m.queuedFollowUps = m.queuedFollowUps[1:]
+		} else if !runSucceeded {
+			m.queuedFollowUps = nil
 		}
 		m.conversationState = currentState
 		if run := m.runs[msg.runID]; run != nil {
@@ -714,9 +733,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if queuedFollowUp != "" {
 			followUpCmd := m.startConversationRunPreservingComposer(state, queuedFollowUp)
-			return m, tea.Batch(waitForMsg(m.runCh), followUpCmd)
+			return m, tea.Batch(waitForMsg(m.runCh), promptFocusCmd, followUpCmd)
 		}
-		return m, waitForMsg(m.runCh)
+		return m, tea.Batch(waitForMsg(m.runCh), promptFocusCmd)
 
 	case transcriptRefreshMsg:
 		if m.pendingRefresh {
@@ -776,8 +795,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *model) updateUIPromptKey(msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc", "ctrl+c", "ctrl+d":
-		m.dismissUIPrompt()
-		return nil
+		return m.dismissUIPrompt()
 	case "enter":
 		return m.submitUIPrompt()
 	case "up", "shift+tab", "left":
@@ -792,13 +810,11 @@ func (m *model) updateUIPromptKey(msg tea.KeyMsg) tea.Cmd {
 		}
 	case "y", "Y":
 		if m.activeUIPrompt.mode == uiPromptConfirm {
-			m.submitUIPrompt()
-			return nil
+			return m.submitUIPrompt()
 		}
 	case "n", "N":
 		if m.activeUIPrompt.mode == uiPromptConfirm {
-			m.dismissUIPrompt()
-			return nil
+			return m.dismissUIPrompt()
 		}
 	}
 
@@ -874,13 +890,19 @@ func (m *model) queueTranscriptRefresh(scrollBottom bool) tea.Cmd {
 	return waitForTranscriptRefresh()
 }
 
-func (m *model) openShortcutsDialog() {
+func (m *model) openShortcutsDialog() tea.Cmd {
+	oldFocusKey, oldFocused := m.focusedExtensionSurfaceKey()
+	var oldFocus tuiExtensionSurface
+	if oldFocused {
+		oldFocus = m.extensionSurfaces[oldFocusKey]
+	}
 	m.profilePickerOpen = false
 	m.reasoningPickerOpen = false
 	m.dismissSlashCommandSuggestions()
 	m.shortcutsOpen = true
 	m.resize()
 	m.refreshViewport(false)
+	return tea.Sequence(m.extensionSurfaceFocusTransitionCommands(oldFocusKey, oldFocused, oldFocus)...)
 }
 
 func (m *model) openComposerInEditor() tea.Cmd {
@@ -1036,6 +1058,13 @@ func (m *model) submit() tea.Cmd {
 		return cmd
 	}
 	if m.running {
+		return nil
+	}
+	if m.initialHistoryPending && m.deferSubmitUntilHistory {
+		if strings.TrimSpace(m.submitAfterHistoryLoad) == "" {
+			m.submitAfterHistoryLoad = message
+		}
+		m.status = "loading conversation"
 		return nil
 	}
 	if m.extensionLifecyclePending {
@@ -1351,19 +1380,21 @@ func (m *model) stopRun() {
 	}
 }
 
-func (m *model) cancelActiveRun() {
+func (m *model) cancelActiveRun() tea.Cmd {
 	if m.runCancelling {
-		return
+		return nil
 	}
 	m.stopRun()
+	var focusCmd tea.Cmd
 	if m.activeUIPrompt != nil {
-		m.resolveUIPrompt(extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
+		focusCmd = m.resolveUIPrompt(extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
 	}
 	m.finishActiveBlocks()
 	m.status = "cancelling"
 	m.runCancelling = true
 	m.running = true
 	m.refreshViewport(true)
+	return focusCmd
 }
 
 func (m *model) finishActiveBlocks() {

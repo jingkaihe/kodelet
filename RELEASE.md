@@ -6,7 +6,7 @@ Added `/sessions`, its `Ctrl+L` shortcut, and `/new` to the native TUI, with sea
 
 Enabled independent conversations to run concurrently in one TUI, with per-conversation steering, cancellation, queued slash-command follow-ups, and background completion or input notifications.
 
-Scoped persistent extension transcript entries, widgets, surfaces, and notifications to their originating conversation, and routed SDK persistent UI requests through active parent IDs for safe concurrent extension calls.
+Scoped persistent extension transcript entries, widgets, surfaces, and notifications to their originating conversation with explicit durable UI scope IDs, isolated same-name objects across concurrent conversations, preserved other extension calls when one conversation is cancelled or times out, retained compatibility for unambiguous older SDK requests, prevented replay after request completion or cancellation, and kept failed surface closes retryable.
 
 ## 0.5.15-beta
 

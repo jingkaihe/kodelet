@@ -7,26 +7,17 @@ import (
 
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/messagehistory"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 )
 
-type tuiConversationContextKey struct{}
-
 func contextWithTUIConversation(ctx context.Context, conversationKey string) context.Context {
-	conversationKey = strings.TrimSpace(conversationKey)
-	if conversationKey == "" {
-		return ctx
-	}
-	return context.WithValue(ctx, tuiConversationContextKey{}, conversationKey)
+	return extensions.ContextWithExtensionUIScope(ctx, conversationKey)
 }
 
 func tuiConversationKeyFromContext(ctx context.Context) string {
-	if ctx == nil {
-		return ""
-	}
-	conversationKey, _ := ctx.Value(tuiConversationContextKey{}).(string)
-	return strings.TrimSpace(conversationKey)
+	return extensions.ExtensionUIScopeFromContext(ctx)
 }
 
 func newConversationState(key, conversationID string, resumed bool, defaults conversationDefaults) *conversationState {
@@ -145,9 +136,9 @@ func (m *model) createNewConversation() tea.Cmd {
 	state.messageHistoryScopeCWD, _ = messagehistory.ResolveScopeCWD(state.cwd)
 	m.conversations[key] = state
 	_, activateCmd := m.activateConversation(key)
-	m.conversationPicker = nil
 	return tea.Batch(
 		activateCmd,
+		m.closeConversationPicker(),
 		loadSlashCommandsForConversation(m.ctx, key, m.slashCommandCWD()),
 		loadMessageHistoryForConversation(m.ctx, key, m.messageHistoryStore, state.messageHistoryScopeCWD),
 		textarea.Blink,

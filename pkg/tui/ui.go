@@ -435,6 +435,12 @@ func (m *model) openUIPromptForState(state *conversationState, prompt uiPromptSt
 		respondUIPrompt(prompt, extensions.UIInputResponse{Status: extensions.UIInputStatusUnavailable, Reason: "conversation is no longer available"})
 		return nil
 	}
+	active := state == m.conversationState
+	oldFocusKey, oldFocused := m.focusedExtensionSurfaceKey()
+	var oldFocus tuiExtensionSurface
+	if oldFocused {
+		oldFocus = m.extensionSurfaces[oldFocusKey]
+	}
 	if state.activeUIPrompt != nil {
 		previous := *state.activeUIPrompt
 		respondUIPrompt(previous, extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
@@ -447,7 +453,6 @@ func (m *model) openUIPromptForState(state *conversationState, prompt uiPromptSt
 	}
 	state.activeUIPrompt = &prompt
 	state.status = "waiting for input"
-	active := state == m.conversationState
 	if active {
 		m.resize()
 		m.refreshViewport(false)
@@ -469,19 +474,25 @@ func (m *model) openUIPromptForState(state *conversationState, prompt uiPromptSt
 			message: title,
 		})
 	}
+	focusCmd := tea.Sequence(m.extensionSurfaceFocusTransitionCommands(oldFocusKey, oldFocused, oldFocus)...)
 	if prompt.mode == uiPromptInput {
-		return tea.Batch(notificationCmd, textinput.Blink)
+		return tea.Batch(notificationCmd, focusCmd, textinput.Blink)
 	}
-	return notificationCmd
+	return tea.Batch(notificationCmd, focusCmd)
 }
 
-func (m *model) resolveUIPrompt(response extensions.UIInputResponse) {
-	m.resolveUIPromptForState(m.conversationState, response)
+func (m *model) resolveUIPrompt(response extensions.UIInputResponse) tea.Cmd {
+	return m.resolveUIPromptForState(m.conversationState, response)
 }
 
-func (m *model) resolveUIPromptForState(state *conversationState, response extensions.UIInputResponse) {
+func (m *model) resolveUIPromptForState(state *conversationState, response extensions.UIInputResponse) tea.Cmd {
 	if state == nil || state.activeUIPrompt == nil {
-		return
+		return nil
+	}
+	oldFocusKey, oldFocused := m.focusedExtensionSurfaceKey()
+	var oldFocus tuiExtensionSurface
+	if oldFocused {
+		oldFocus = m.extensionSurfaces[oldFocusKey]
 	}
 	prompt := *state.activeUIPrompt
 	state.activeUIPrompt = nil
@@ -500,7 +511,9 @@ func (m *model) resolveUIPromptForState(state *conversationState, response exten
 	if state == m.conversationState {
 		m.resize()
 		m.refreshViewport(false)
+		return tea.Sequence(m.extensionSurfaceFocusTransitionCommands(oldFocusKey, oldFocused, oldFocus)...)
 	}
+	return nil
 }
 
 func (m *model) submitUIPrompt() tea.Cmd {
@@ -514,9 +527,9 @@ func (m *model) submitUIPrompt() tea.Cmd {
 		if prompt.required && strings.TrimSpace(value) == "" {
 			return nil
 		}
-		m.resolveUIPrompt(extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted, Value: value})
+		return m.resolveUIPrompt(extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted, Value: value})
 	case uiPromptConfirm:
-		m.resolveUIPrompt(extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted, Confirmed: true, Value: "true"})
+		return m.resolveUIPrompt(extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted, Confirmed: true, Value: "true"})
 	case uiPromptSelect:
 		if len(prompt.options) == 0 {
 			return nil
@@ -529,7 +542,7 @@ func (m *model) submitUIPrompt() tea.Cmd {
 		if len(prompt.optionValues) == len(prompt.options) {
 			value = prompt.optionValues[index]
 		}
-		m.resolveUIPrompt(extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted, Value: value})
+		focusCmd := m.resolveUIPrompt(extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted, Value: value})
 		if prompt.origin == uiPromptTheme {
 			cmd, err := m.setThemeSelection(value)
 			if err != nil {
@@ -539,22 +552,23 @@ func (m *model) submitUIPrompt() tea.Cmd {
 					message: err.Error(),
 				})
 			}
-			return cmd
+			return tea.Batch(focusCmd, cmd)
 		}
+		return focusCmd
 	}
 	return nil
 }
 
-func (m *model) dismissUIPrompt() {
+func (m *model) dismissUIPrompt() tea.Cmd {
 	if m.activeUIPrompt == nil {
-		return
+		return nil
 	}
 	response := extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed}
 	if m.activeUIPrompt.mode == uiPromptConfirm {
 		response.Confirmed = false
 		response.Value = "false"
 	}
-	m.resolveUIPrompt(response)
+	return m.resolveUIPrompt(response)
 }
 
 func (m *model) moveUISelect(delta int) bool {

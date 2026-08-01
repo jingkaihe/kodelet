@@ -354,6 +354,7 @@ func (p *Process) executeTool(ctx context.Context, name string, input json.RawMe
 		return nil, errors.Errorf("extension %s is not running", p.Extension.ID)
 	}
 
+	callContext = extensionCallContextWithUIScope(ctx, callContext)
 	params := executeToolParams{Name: name, Input: input, Context: callContext}
 	var result ToolExecutionResult
 	handler := toolExecutionHostHandler{source: source, onUpdate: onUpdate}
@@ -396,6 +397,7 @@ func (p *Process) ExecuteCommand(ctx context.Context, name string, input map[str
 		return nil, errors.Errorf("extension %s is not running", p.Extension.ID)
 	}
 
+	callContext = extensionCallContextWithUIScope(ctx, callContext)
 	params := executeCommandParams{Name: name, Input: input, Invocation: invocation, Context: callContext}
 	var result CommandResult
 	if err := client.callWithHostHandler(ctx, "extension.command.execute", params, &result, source); err != nil {
@@ -417,6 +419,7 @@ func (p *Process) HandleEvent(ctx context.Context, eventID string, eventName str
 		return nil, errors.Errorf("extension %s is not running", p.Extension.ID)
 	}
 
+	callContext = extensionCallContextWithUIScope(ctx, callContext)
 	params := eventParams{ID: eventID, Event: eventName, Context: callContext, Payload: payload}
 	var result EventResult
 	if err := client.callWithHostHandler(ctx, "extension.event.handle", params, &result, source); err != nil {
@@ -428,12 +431,22 @@ func (p *Process) HandleEvent(ctx context.Context, eventID string, eventName str
 	return &result, nil
 }
 
+func extensionCallContextWithUIScope(ctx context.Context, callContext ExtensionCallContext) ExtensionCallContext {
+	if strings.TrimSpace(callContext.UIScopeID) == "" {
+		callContext.UIScopeID = ExtensionUIScopeFromContext(ctx)
+	}
+	return callContext
+}
+
 func (p *Process) HandleRPCRequest(ctx context.Context, method string, params json.RawMessage) (any, *rpcError) {
 	_, source := p.rpcSession()
 	return p.handleRPCRequest(ctx, source, method, params)
 }
 
 func (p *Process) handleRPCRequest(ctx context.Context, source UIExtensionSource, method string, params json.RawMessage) (any, *rpcError) {
+	if isPersistentExtensionUIRequest(method) && !hasExplicitExtensionUIScope(params) {
+		ctx = ContextWithExtensionUIImplicitScope(ctx)
+	}
 	switch method {
 	case UIWidgetSetMethod:
 		var request UIWidgetSetRequest
@@ -664,23 +677,23 @@ func (s *processExtensionUISource) notifyExtensionUI(method string, params any, 
 	if !s.current() {
 		return errors.New("extension process generation is no longer active")
 	}
-	id, sequence, ordered := extensionUIEventSequence(method, params)
+	key, sequence, ordered := extensionUIEventSequence(method, params)
 	if !ordered {
 		return s.client.notify(method, params)
 	}
 
 	s.notifyMu.Lock()
-	if lifecycleScoped && (s.notifyLifecycles == nil || s.notifyLifecycles[id] != lifecycle) {
+	if lifecycleScoped && (s.notifyLifecycles == nil || s.notifyLifecycles[key] != lifecycle) {
 		s.notifyMu.Unlock()
 		return nil
 	}
 	if s.notify == nil {
 		s.notify = map[string]*orderedExtensionUINotifications{}
 	}
-	state := s.notify[id]
+	state := s.notify[key]
 	if state == nil {
 		state = &orderedExtensionUINotifications{next: 1, pending: map[uint64]extensionUINotification{}}
-		s.notify[id] = state
+		s.notify[key] = state
 	}
 	if sequence < state.next {
 		s.notifyMu.Unlock()
@@ -696,15 +709,15 @@ func (s *processExtensionUISource) notifyExtensionUI(method string, params any, 
 	}
 	s.notifyMu.Unlock()
 	if start {
-		go s.sendOrderedExtensionUINotifications(id)
+		go s.sendOrderedExtensionUINotifications(key)
 	}
 	return nil
 }
 
-func (s *processExtensionUISource) sendOrderedExtensionUINotifications(id string) {
+func (s *processExtensionUISource) sendOrderedExtensionUINotifications(key string) {
 	for {
 		s.notifyMu.Lock()
-		state := s.notify[id]
+		state := s.notify[key]
 		if state == nil {
 			s.notifyMu.Unlock()
 			return
@@ -732,19 +745,20 @@ func (s *processExtensionUISource) sendOrderedExtensionUINotifications(id string
 }
 
 // PrepareUISurfaceEventLifecycle resets event ordering for an accepted lifecycle.
-func (s *processExtensionUISource) PrepareUISurfaceEventLifecycle(id string, lifecycle uint64) {
+func (s *processExtensionUISource) PrepareUISurfaceEventLifecycle(scopeID, id string, lifecycle uint64) {
 	if s == nil || strings.TrimSpace(id) == "" || lifecycle == 0 {
 		return
 	}
+	key := extensionUISurfaceEventKey(scopeID, id)
 	s.notifyMu.Lock()
 	defer s.notifyMu.Unlock()
 	if s.notify != nil {
-		delete(s.notify, id)
+		delete(s.notify, key)
 	}
 	if s.notifyLifecycles == nil {
 		s.notifyLifecycles = map[string]uint64{}
 	}
-	s.notifyLifecycles[id] = lifecycle
+	s.notifyLifecycles[key] = lifecycle
 }
 
 func extensionUIEventSequence(method string, params any) (string, uint64, bool) {
@@ -752,23 +766,27 @@ func extensionUIEventSequence(method string, params any) (string, uint64, bool) 
 	case UISurfaceInputMethod:
 		switch value := params.(type) {
 		case UISurfaceInputNotification:
-			return value.ID, value.Sequence, value.ID != "" && value.Sequence > 0
+			return extensionUISurfaceEventKey(value.ScopeID, value.ID), value.Sequence, value.ID != "" && value.Sequence > 0
 		case *UISurfaceInputNotification:
 			if value != nil {
-				return value.ID, value.Sequence, value.ID != "" && value.Sequence > 0
+				return extensionUISurfaceEventKey(value.ScopeID, value.ID), value.Sequence, value.ID != "" && value.Sequence > 0
 			}
 		}
 	case UISurfaceResizeMethod:
 		switch value := params.(type) {
 		case UISurfaceResizeNotification:
-			return value.ID, value.Sequence, value.ID != "" && value.Sequence > 0
+			return extensionUISurfaceEventKey(value.ScopeID, value.ID), value.Sequence, value.ID != "" && value.Sequence > 0
 		case *UISurfaceResizeNotification:
 			if value != nil {
-				return value.ID, value.Sequence, value.ID != "" && value.Sequence > 0
+				return extensionUISurfaceEventKey(value.ScopeID, value.ID), value.Sequence, value.ID != "" && value.Sequence > 0
 			}
 		}
 	}
 	return "", 0, false
+}
+
+func extensionUISurfaceEventKey(scopeID, id string) string {
+	return strings.TrimSpace(scopeID) + "\x00" + id
 }
 
 func (s *processExtensionUISource) current() bool {
@@ -785,8 +803,11 @@ func shouldRestartAfterCallError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-		return true
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return false
 	}
 	return !strings.Contains(err.Error(), "extension rpc error")
 }

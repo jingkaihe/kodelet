@@ -235,7 +235,7 @@ surface.onInput((event) => {
 });
 ```
 
-`surface.update(...)` is intentionally synchronous and replace-in-place. The SDK keeps one frame in flight and one replaceable latest pending frame per surface, waiting for transport writes before sending the next snapshot; the Bubble Tea host independently keeps only the newest pending sequence per surface. Input, focus, blur, and resize events use a separate ordered sequence, and stale events are discarded. If the extension process fails, Kodelet removes its widgets/surfaces and restores focus automatically.
+`surface.update(...)` is intentionally synchronous and replace-in-place. Persistent UI is scoped to the originating conversation, so one extension can use the same widget or surface ID independently in multiple conversations. The SDK keeps one frame in flight and one replaceable latest pending frame per surface, waiting for transport writes before sending the next snapshot; the Bubble Tea host independently keeps only the newest pending sequence per scoped surface. Input, focus, blur, and resize events use a separate ordered sequence, and stale events are discarded. A failed `surface.close()` keeps the handle owned and retryable; successful close releases the ID. If the extension process fails, Kodelet removes its widgets/surfaces and restores focus automatically.
 
 ## Commands and dynamic recipes
 

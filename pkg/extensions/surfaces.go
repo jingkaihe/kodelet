@@ -187,6 +187,7 @@ type UISurfaceOptions struct {
 
 // UIWidgetSetRequest creates or replaces a passive widget frame.
 type UIWidgetSetRequest struct {
+	ScopeID   string  `json:"scopeId,omitempty"`
 	ID        string  `json:"id"`
 	Placement string  `json:"placement"`
 	Frame     UIFrame `json:"frame"`
@@ -194,18 +195,21 @@ type UIWidgetSetRequest struct {
 
 // UIWidgetFrameRequest updates an existing passive widget.
 type UIWidgetFrameRequest struct {
-	ID    string  `json:"id"`
-	Frame UIFrame `json:"frame"`
+	ScopeID string  `json:"scopeId,omitempty"`
+	ID      string  `json:"id"`
+	Frame   UIFrame `json:"frame"`
 }
 
 // UIWidgetRemoveRequest removes a passive widget.
 type UIWidgetRemoveRequest struct {
+	ScopeID  string `json:"scopeId,omitempty"`
 	ID       string `json:"id"`
 	Sequence uint64 `json:"sequence"`
 }
 
 // UITranscriptAppendRequest appends a persistent informational TUI transcript entry.
 type UITranscriptAppendRequest struct {
+	ScopeID string `json:"scopeId,omitempty"`
 	Title   string `json:"title,omitempty"`
 	Message string `json:"message"`
 }
@@ -218,6 +222,7 @@ type UITranscriptAppendResponse struct {
 
 // UISurfaceOpenRequest creates or replaces an interactive overlay surface.
 type UISurfaceOpenRequest struct {
+	ScopeID string           `json:"scopeId,omitempty"`
 	ID      string           `json:"id"`
 	Options UISurfaceOptions `json:"options,omitempty"`
 	Frame   UIFrame          `json:"frame"`
@@ -225,12 +230,14 @@ type UISurfaceOpenRequest struct {
 
 // UISurfaceFrameRequest replaces a surface's current presentation frame.
 type UISurfaceFrameRequest struct {
-	ID    string  `json:"id"`
-	Frame UIFrame `json:"frame"`
+	ScopeID string  `json:"scopeId,omitempty"`
+	ID      string  `json:"id"`
+	Frame   UIFrame `json:"frame"`
 }
 
 // UISurfaceCloseRequest closes an interactive surface.
 type UISurfaceCloseRequest struct {
+	ScopeID  string `json:"scopeId,omitempty"`
 	ID       string `json:"id"`
 	Sequence uint64 `json:"sequence"`
 }
@@ -255,6 +262,7 @@ type UISurfaceMouseEvent struct {
 
 // UISurfaceInputNotification routes terminal input and focus changes to an extension.
 type UISurfaceInputNotification struct {
+	ScopeID  string               `json:"scopeId,omitempty"`
 	ID       string               `json:"id"`
 	Sequence uint64               `json:"sequence"`
 	Kind     string               `json:"kind"`
@@ -268,6 +276,7 @@ type UISurfaceInputNotification struct {
 
 // UISurfaceResizeNotification reports the current allocated overlay size.
 type UISurfaceResizeNotification struct {
+	ScopeID  string `json:"scopeId,omitempty"`
 	ID       string `json:"id"`
 	Sequence uint64 `json:"sequence"`
 	Width    int    `json:"width"`
@@ -282,14 +291,14 @@ type UIExtensionSource interface {
 
 // PrepareUISurfaceEventLifecycle resets ordered event delivery after a surface
 // lifecycle request has been accepted and before the host publishes its UI changes.
-func PrepareUISurfaceEventLifecycle(source UIExtensionSource, id string, lifecycle uint64) {
+func PrepareUISurfaceEventLifecycle(source UIExtensionSource, scopeID, id string, lifecycle uint64) {
 	if source == nil || lifecycle == 0 {
 		return
 	}
 	if lifecycleSource, ok := source.(interface {
-		PrepareUISurfaceEventLifecycle(string, uint64)
+		PrepareUISurfaceEventLifecycle(string, string, uint64)
 	}); ok {
-		lifecycleSource.PrepareUISurfaceEventLifecycle(id, lifecycle)
+		lifecycleSource.PrepareUISurfaceEventLifecycle(scopeID, id, lifecycle)
 	}
 }
 
@@ -326,6 +335,10 @@ type ExtensionUITranscriptHost interface {
 
 type extensionUIHostContextKey struct{}
 
+type extensionUIScopeContextKey struct{}
+
+type extensionUIImplicitScopeContextKey struct{}
+
 // ContextWithExtensionUIHost attaches persistent widget/surface support to an
 // extension runtime initialization context.
 func ContextWithExtensionUIHost(ctx context.Context, host ExtensionUIHost) context.Context {
@@ -345,6 +358,58 @@ func ExtensionUIHostFromContext(ctx context.Context) (ExtensionUIHost, bool) {
 	}
 	host, ok := ctx.Value(extensionUIHostContextKey{}).(ExtensionUIHost)
 	return host, ok && host != nil
+}
+
+// ContextWithExtensionUIScope attaches an opaque host UI scope to extension
+// calls. Persistent UI requests carry this scope explicitly so they remain
+// associated with their originating conversation after a handler returns.
+func ContextWithExtensionUIScope(ctx context.Context, scopeID string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	scopeID = strings.TrimSpace(scopeID)
+	if scopeID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, extensionUIScopeContextKey{}, scopeID)
+}
+
+// ExtensionUIScopeFromContext returns the opaque persistent UI scope, if any.
+func ExtensionUIScopeFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	scopeID, _ := ctx.Value(extensionUIScopeContextKey{}).(string)
+	return strings.TrimSpace(scopeID)
+}
+
+// ContextWithExtensionUIImplicitScope marks a persistent UI request whose
+// scopeId field was omitted by an older SDK. Hosts may use the request context
+// or an existing uniquely matching object to recover its conversation scope.
+func ContextWithExtensionUIImplicitScope(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, extensionUIImplicitScopeContextKey{}, true)
+}
+
+// ExtensionUIHasImplicitScope reports whether a persistent UI request omitted
+// scopeId and therefore requires legacy scope recovery.
+func ExtensionUIHasImplicitScope(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	implicit, _ := ctx.Value(extensionUIImplicitScopeContextKey{}).(bool)
+	return implicit
+}
+
+func hasExplicitExtensionUIScope(params json.RawMessage) bool {
+	var request map[string]json.RawMessage
+	if err := json.Unmarshal(params, &request); err != nil {
+		return false
+	}
+	_, ok := request["scopeId"]
+	return ok
 }
 
 // ValidateUIObjectID validates an extension-scoped widget or surface ID.

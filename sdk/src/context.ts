@@ -116,15 +116,17 @@ function createSharedContext(
   );
   const log = createLogger(init?.extension.id);
   const persistentClient = client?.persistent ?? client;
+  const uiScopeId = context.uiScopeId?.trim() ?? "";
 
   const requestPersistentUI = async (method: string, params?: unknown): Promise<unknown> => {
+    const scopedParams = withUIScope(params, uiScopeId);
     if (client?.requestPersistent) {
-      return await client.requestPersistent(method, params);
+      return await client.requestPersistent(method, scopedParams);
     }
     if (!persistentClient) {
       throw new Error("Persistent extension UI is not available in this host");
     }
-    return await persistentClient.request(method, params);
+    return await persistentClient.request(method, scopedParams);
   };
 
   const resolveWorkspacePath = (target: string): string => {
@@ -149,6 +151,7 @@ function createSharedContext(
     signal,
     sessionId: context.sessionId,
     conversationId: context.conversationId,
+    uiScopeId: uiScopeId || undefined,
     cwd,
     provider: context.provider,
     model: context.model,
@@ -312,7 +315,7 @@ function createSharedContext(
           return;
         }
         const objectID = validateUIObjectID(id);
-        const sequence = nextClientSequence(widgetSequencesByClient, persistentClient, objectID);
+        const sequence = nextClientSequence(widgetSequencesByClient, persistentClient, uiObjectKey(uiScopeId, objectID));
         if (lines === undefined) {
           await requestPersistentUI("kodelet.ui.widget.remove", { id: objectID, sequence });
           return;
@@ -330,14 +333,15 @@ function createSharedContext(
         const { id: requestedID, initialLines = [], ...surfaceOptions } = options;
         const id = validateUIObjectID(requestedID);
         const activeSurfaces = surfacesForClient(persistentClient);
-        const existing = activeSurfaces.get(id);
+        const routingKey = uiObjectKey(uiScopeId, id);
+        const existing = activeSurfaces.get(routingKey);
         if (existing) {
           throw new Error(
             `Interactive surface "${id}" is already open, opening, or closing; close it before reusing the ID`,
           );
         }
-        const surface = new UISurfaceHandle(id, persistentClient);
-        activeSurfaces.set(id, surface);
+        const surface = new UISurfaceHandle(id, uiScopeId, persistentClient);
+        activeSurfaces.set(routingKey, surface);
         ensurePersistentNotificationRouting(persistentClient);
         try {
           const response = await requestPersistentUI("kodelet.ui.surface.open", {
@@ -349,8 +353,8 @@ function createSharedContext(
             throw new Error(typeof response.reason === "string" ? response.reason : "The host rejected the interactive surface");
           }
         } catch (error) {
-          if (activeSurfaces.get(id) === surface) {
-            activeSurfaces.delete(id);
+          if (activeSurfaces.get(routingKey) === surface) {
+            activeSurfaces.delete(routingKey);
           }
           throw error;
         }
@@ -363,6 +367,7 @@ function createSharedContext(
 
 class UISurfaceHandle implements UISurface {
   private closed = false;
+  private closing: Promise<void> | undefined;
   private active = false;
   private pendingLines: UIFrameLine[] | undefined;
   private frameScheduled = false;
@@ -374,14 +379,18 @@ class UISurfaceHandle implements UISurface {
   private pendingResizeEvent: UISurfaceResizeEvent | undefined;
   private currentSize: { width: number; height: number } | undefined;
 
-  constructor(readonly id: string, private readonly client: HostRPCClient) {}
+  constructor(
+    readonly id: string,
+    private readonly scopeId: string,
+    private readonly client: HostRPCClient,
+  ) {}
 
   get size(): { width: number; height: number } | undefined {
     return this.currentSize ? { ...this.currentSize } : undefined;
   }
 
   nextSequence(): number {
-    return nextClientSequence(surfaceSequencesByClient, this.client, this.id);
+    return nextClientSequence(surfaceSequencesByClient, this.client, this.routingKey());
   }
 
   activate(): void {
@@ -389,7 +398,7 @@ class UISurfaceHandle implements UISurface {
   }
 
   update(lines: UIFrameLine[]): void {
-    if (this.closed) {
+    if (this.closed || this.closing) {
       return;
     }
     this.pendingLines = lines;
@@ -397,7 +406,7 @@ class UISurfaceHandle implements UISurface {
   }
 
   private scheduleFrameFlush(): void {
-    if (this.closed || this.frameScheduled || this.frameInFlight || this.pendingLines === undefined) {
+    if (this.closed || this.closing || this.frameScheduled || this.frameInFlight || this.pendingLines === undefined) {
       return;
     }
     this.frameScheduled = true;
@@ -411,6 +420,31 @@ class UISurfaceHandle implements UISurface {
     if (this.closed) {
       return;
     }
+    if (this.closing) {
+      return await this.closing;
+    }
+    const operation = this.closeOnce();
+    this.closing = operation;
+    try {
+      await operation;
+    } finally {
+      if (this.closing === operation) {
+        this.closing = undefined;
+      }
+      this.scheduleFrameFlush();
+    }
+  }
+
+  private async closeOnce(): Promise<void> {
+    if (this.active) {
+      const response = await this.client.request("kodelet.ui.surface.close", withUIScope({
+        id: this.id,
+        sequence: this.nextSequence(),
+      }, this.scopeId));
+      if (isRecord(response) && response.accepted === false) {
+        throw new Error(typeof response.reason === "string" ? response.reason : "The host rejected the surface close");
+      }
+    }
     this.closed = true;
     this.pendingLines = undefined;
     this.inputHandlers.clear();
@@ -418,14 +452,8 @@ class UISurfaceHandle implements UISurface {
     this.resizeHandlers.clear();
     this.pendingResizeEvent = undefined;
     const activeSurfaces = surfacesForClient(this.client);
-    try {
-      if (this.active) {
-        await this.client.request("kodelet.ui.surface.close", { id: this.id, sequence: this.nextSequence() });
-      }
-    } finally {
-      if (activeSurfaces.get(this.id) === this) {
-        activeSurfaces.delete(this.id);
-      }
+    if (activeSurfaces.get(this.routingKey()) === this) {
+      activeSurfaces.delete(this.routingKey());
     }
   }
 
@@ -450,7 +478,13 @@ class UISurfaceHandle implements UISurface {
   }
 
   handleNotification(method: string, params: unknown): void {
-    if (this.closed || !isRecord(params) || params.id !== this.id || typeof params.sequence !== "number") {
+    if (
+      this.closed ||
+      !isRecord(params) ||
+      params.id !== this.id ||
+      normalizedUIScope(params.scopeId) !== this.scopeId ||
+      typeof params.sequence !== "number"
+    ) {
       return;
     }
     if (params.sequence <= this.latestEventSequence) {
@@ -483,7 +517,7 @@ class UISurfaceHandle implements UISurface {
   }
 
   private async flushFrame(): Promise<void> {
-    if (this.closed || this.frameInFlight) {
+    if (this.closed || this.closing || this.frameInFlight) {
       return;
     }
     const lines = this.pendingLines;
@@ -492,7 +526,7 @@ class UISurfaceHandle implements UISurface {
       return;
     }
     this.frameInFlight = true;
-    const params = { id: this.id, frame: { sequence: this.nextSequence(), lines } };
+    const params = withUIScope({ id: this.id, frame: { sequence: this.nextSequence(), lines } }, this.scopeId);
     try {
       if (this.client.notify) {
         await this.client.notify("kodelet.ui.surface.frame", params);
@@ -506,6 +540,10 @@ class UISurfaceHandle implements UISurface {
       this.scheduleFrameFlush();
     }
   }
+
+  private routingKey(): string {
+    return uiObjectKey(this.scopeId, this.id);
+  }
 }
 
 function ensurePersistentNotificationRouting(client: HostRPCClient | undefined): void {
@@ -517,7 +555,7 @@ function ensurePersistentNotificationRouting(client: HostRPCClient | undefined):
     if (!isRecord(params) || typeof params.id !== "string") {
       return;
     }
-    surfacesForClient(client).get(params.id)?.handleNotification(method, params);
+    surfacesForClient(client).get(uiObjectKey(normalizedUIScope(params.scopeId), params.id))?.handleNotification(method, params);
   });
 }
 
@@ -543,6 +581,21 @@ function nextClientSequence(
   const sequence = (sequences.get(id) ?? 0) + 1;
   sequences.set(id, sequence);
   return sequence;
+}
+
+function withUIScope(params: unknown, scopeId: string): unknown {
+  if (!isRecord(params)) {
+    return params;
+  }
+  return { ...params, scopeId };
+}
+
+function normalizedUIScope(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function uiObjectKey(scopeId: string, id: string): string {
+  return `${scopeId}\0${id}`;
 }
 
 function validateUIObjectID(id: string): string {

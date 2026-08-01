@@ -956,13 +956,7 @@ class ConnectionHostRPCClient implements HostRPCClient {
 
   async requestPersistent(method: string, params?: unknown): Promise<unknown> {
     if (this.activeRequest.active) {
-      try {
-        return await this.server.requestOnConnection(this.connection, this.parentId, this.activeRequest, method, params);
-      } catch (error) {
-        if (this.activeRequest.active) {
-          throw error;
-        }
-      }
+      return await this.server.requestOnConnection(this.connection, this.parentId, this.activeRequest, method, params);
     }
     return await this.server.requestPersistentOnConnection(this.connection, method, params);
   }

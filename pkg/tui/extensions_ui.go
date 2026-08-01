@@ -137,6 +137,10 @@ func (h *tuiExtensionUIHost) AppendTranscript(ctx context.Context, source extens
 	if strings.TrimSpace(title) == "" && strings.TrimSpace(message) == "" {
 		return extensions.UITranscriptAppendResponse{}, errors.New("extension transcript entry is empty")
 	}
+	conversationKey := extensionUIRequestScope(ctx, request.ScopeID)
+	if conversationKey == "" {
+		return extensions.UITranscriptAppendResponse{Reason: "extension transcript requires a conversation scope"}, nil
+	}
 
 	h.mu.Lock()
 	if _, closed := h.closed[owner]; closed {
@@ -150,13 +154,13 @@ func (h *tuiExtensionUIHost) AppendTranscript(ctx context.Context, source extens
 		return extensions.UITranscriptAppendResponse{}, ctx.Err()
 	case <-h.done:
 		return extensions.UITranscriptAppendResponse{Reason: "extension UI host is closed"}, nil
-	case h.ch <- extensionUITranscriptMsg{owner: owner, conversationKey: tuiConversationKeyFromContext(ctx), title: title, message: message}:
+	case h.ch <- extensionUITranscriptMsg{owner: owner, conversationKey: conversationKey, title: title, message: message}:
 		return extensions.UITranscriptAppendResponse{Accepted: true}, nil
 	}
 }
 
 func (h *tuiExtensionUIHost) SetWidget(ctx context.Context, source extensions.UIExtensionSource, request extensions.UIWidgetSetRequest) (extensions.UIFrameResponse, error) {
-	key, err := extensionUIRequestKey(ctx, source, request.ID)
+	key, err := extensionUIRequestKey(ctx, source, request.ScopeID, request.ID)
 	if err != nil {
 		return extensions.UIFrameResponse{}, err
 	}
@@ -169,7 +173,7 @@ func (h *tuiExtensionUIHost) SetWidget(ctx context.Context, source extensions.UI
 	}
 
 	h.mu.Lock()
-	if key, err = resolveExtensionUIRequestKey(key, h.widgetSeq); err != nil {
+	if key, err = resolveExtensionUIRequestKey(ctx, key, h.widgets); err != nil {
 		h.mu.Unlock()
 		return extensions.UIFrameResponse{}, err
 	}
@@ -197,7 +201,7 @@ func (h *tuiExtensionUIHost) SetWidget(ctx context.Context, source extensions.UI
 }
 
 func (h *tuiExtensionUIHost) UpdateWidget(ctx context.Context, source extensions.UIExtensionSource, request extensions.UIWidgetFrameRequest) (extensions.UIFrameResponse, error) {
-	key, err := extensionUIRequestKey(ctx, source, request.ID)
+	key, err := extensionUIRequestKey(ctx, source, request.ScopeID, request.ID)
 	if err != nil {
 		return extensions.UIFrameResponse{}, err
 	}
@@ -206,7 +210,7 @@ func (h *tuiExtensionUIHost) UpdateWidget(ctx context.Context, source extensions
 	}
 
 	h.mu.Lock()
-	if key, err = resolveExtensionUIRequestKey(key, h.widgetSeq); err != nil {
+	if key, err = resolveExtensionUIRequestKey(ctx, key, h.widgets); err != nil {
 		h.mu.Unlock()
 		return extensions.UIFrameResponse{}, err
 	}
@@ -239,7 +243,7 @@ func (h *tuiExtensionUIHost) UpdateWidget(ctx context.Context, source extensions
 }
 
 func (h *tuiExtensionUIHost) RemoveWidget(ctx context.Context, source extensions.UIExtensionSource, request extensions.UIWidgetRemoveRequest) (extensions.UIFrameResponse, error) {
-	key, err := extensionUIRequestKey(ctx, source, request.ID)
+	key, err := extensionUIRequestKey(ctx, source, request.ScopeID, request.ID)
 	if err != nil {
 		return extensions.UIFrameResponse{}, err
 	}
@@ -248,7 +252,7 @@ func (h *tuiExtensionUIHost) RemoveWidget(ctx context.Context, source extensions
 	}
 
 	h.mu.Lock()
-	if key, err = resolveExtensionUIRequestKey(key, h.widgetSeq); err != nil {
+	if key, err = resolveExtensionUIRequestKey(ctx, key, h.widgets); err != nil {
 		h.mu.Unlock()
 		return extensions.UIFrameResponse{}, err
 	}
@@ -271,7 +275,7 @@ func (h *tuiExtensionUIHost) RemoveWidget(ctx context.Context, source extensions
 }
 
 func (h *tuiExtensionUIHost) OpenSurface(ctx context.Context, source extensions.UIExtensionSource, request extensions.UISurfaceOpenRequest) (extensions.UIFrameResponse, error) {
-	key, err := extensionUIRequestKey(ctx, source, request.ID)
+	key, err := extensionUIRequestKey(ctx, source, request.ScopeID, request.ID)
 	if err != nil {
 		return extensions.UIFrameResponse{}, err
 	}
@@ -286,7 +290,7 @@ func (h *tuiExtensionUIHost) OpenSurface(ctx context.Context, source extensions.
 
 	h.surfaceLifecycleMu.Lock()
 	h.mu.Lock()
-	if key, err = resolveExtensionUIRequestKey(key, h.surfaceSeq); err != nil {
+	if key, err = resolveExtensionUIRequestKey(ctx, key, h.surfaces); err != nil {
 		h.mu.Unlock()
 		h.surfaceLifecycleMu.Unlock()
 		return extensions.UIFrameResponse{}, err
@@ -307,7 +311,7 @@ func (h *tuiExtensionUIHost) OpenSurface(ctx context.Context, source extensions.
 	h.surfaces[key] = surface
 	h.mu.Unlock()
 
-	extensions.PrepareUISurfaceEventLifecycle(source, request.ID, surface.openOrdinal)
+	extensions.PrepareUISurfaceEventLifecycle(source, key.conversationKey, request.ID, surface.openOrdinal)
 
 	h.mu.Lock()
 	if _, closed := h.closed[key.owner]; closed {
@@ -330,7 +334,7 @@ func (h *tuiExtensionUIHost) OpenSurface(ctx context.Context, source extensions.
 }
 
 func (h *tuiExtensionUIHost) UpdateSurface(ctx context.Context, source extensions.UIExtensionSource, request extensions.UISurfaceFrameRequest) (extensions.UIFrameResponse, error) {
-	key, err := extensionUIRequestKey(ctx, source, request.ID)
+	key, err := extensionUIRequestKey(ctx, source, request.ScopeID, request.ID)
 	if err != nil {
 		return extensions.UIFrameResponse{}, err
 	}
@@ -340,7 +344,7 @@ func (h *tuiExtensionUIHost) UpdateSurface(ctx context.Context, source extension
 
 	h.surfaceLifecycleMu.Lock()
 	h.mu.Lock()
-	if key, err = resolveExtensionUIRequestKey(key, h.surfaceSeq); err != nil {
+	if key, err = resolveExtensionUIRequestKey(ctx, key, h.surfaces); err != nil {
 		h.mu.Unlock()
 		h.surfaceLifecycleMu.Unlock()
 		return extensions.UIFrameResponse{}, err
@@ -380,7 +384,7 @@ func (h *tuiExtensionUIHost) UpdateSurface(ctx context.Context, source extension
 }
 
 func (h *tuiExtensionUIHost) CloseSurface(ctx context.Context, source extensions.UIExtensionSource, request extensions.UISurfaceCloseRequest) (extensions.UIFrameResponse, error) {
-	key, err := extensionUIRequestKey(ctx, source, request.ID)
+	key, err := extensionUIRequestKey(ctx, source, request.ScopeID, request.ID)
 	if err != nil {
 		return extensions.UIFrameResponse{}, err
 	}
@@ -390,7 +394,7 @@ func (h *tuiExtensionUIHost) CloseSurface(ctx context.Context, source extensions
 
 	h.surfaceLifecycleMu.Lock()
 	h.mu.Lock()
-	if key, err = resolveExtensionUIRequestKey(key, h.surfaceSeq); err != nil {
+	if key, err = resolveExtensionUIRequestKey(ctx, key, h.surfaces); err != nil {
 		h.mu.Unlock()
 		h.surfaceLifecycleMu.Unlock()
 		return extensions.UIFrameResponse{}, err
@@ -406,7 +410,7 @@ func (h *tuiExtensionUIHost) CloseSurface(ctx context.Context, source extensions
 	lifecycle := h.openOrdinal
 	h.mu.Unlock()
 
-	extensions.PrepareUISurfaceEventLifecycle(source, request.ID, lifecycle)
+	extensions.PrepareUISurfaceEventLifecycle(source, key.conversationKey, request.ID, lifecycle)
 
 	h.mu.Lock()
 	if _, closed := h.closed[key.owner]; closed {
@@ -520,7 +524,7 @@ func (h *tuiExtensionUIHost) drain() extensionUIBatch {
 	return batch
 }
 
-func extensionUIRequestKey(ctx context.Context, source extensions.UIExtensionSource, id string) (extensionUIKey, error) {
+func extensionUIRequestKey(ctx context.Context, source extensions.UIExtensionSource, scopeID, id string) (extensionUIKey, error) {
 	if source == nil {
 		return extensionUIKey{}, errors.New("extension UI source is required")
 	}
@@ -531,7 +535,15 @@ func extensionUIRequestKey(ctx context.Context, source extensions.UIExtensionSou
 	if strings.TrimSpace(owner.ExtensionID) == "" || owner.Generation == 0 {
 		return extensionUIKey{}, errors.New("extension UI source is not running")
 	}
-	return extensionUIKey{owner: owner, conversationKey: tuiConversationKeyFromContext(ctx), id: id}, nil
+	return extensionUIKey{owner: owner, conversationKey: extensionUIRequestScope(ctx, scopeID), id: id}, nil
+}
+
+func extensionUIRequestScope(ctx context.Context, scopeID string) string {
+	scopeID = strings.TrimSpace(scopeID)
+	if scopeID != "" || !extensions.ExtensionUIHasImplicitScope(ctx) {
+		return scopeID
+	}
+	return tuiConversationKeyFromContext(ctx)
 }
 
 // Persistent surface updates can outlive the request that opened the surface,
@@ -539,17 +551,14 @@ func extensionUIRequestKey(ctx context.Context, source extensions.UIExtensionSou
 // scope. The SDK permits one active surface per owner and ID; widgets normally
 // remain request-scoped, but use the same fallback for compatibility with older
 // SDKs that sent persistent UI calls without a parent request ID.
-func resolveExtensionUIRequestKey(key extensionUIKey, sequences map[extensionUIKey]uint64) (extensionUIKey, error) {
-	if key.conversationKey != "" {
-		return key, nil
-	}
-	if _, exists := sequences[key]; exists {
+func resolveExtensionUIRequestKey[T any](ctx context.Context, key extensionUIKey, objects map[extensionUIKey]T) (extensionUIKey, error) {
+	if key.conversationKey != "" || !extensions.ExtensionUIHasImplicitScope(ctx) {
 		return key, nil
 	}
 
 	var match extensionUIKey
 	found := false
-	for candidate := range sequences {
+	for candidate := range objects {
 		if candidate.owner != key.owner || candidate.id != key.id {
 			continue
 		}
@@ -692,6 +701,9 @@ func (m *model) removeExtensionSurfaceOrder(key extensionUIKey) {
 }
 
 func (m model) focusedExtensionSurfaceKey() (extensionUIKey, bool) {
+	if (m.conversationState != nil && m.activeUIPrompt != nil) || m.conversationPicker != nil || m.shortcutsOpen {
+		return extensionUIKey{}, false
+	}
 	for index := len(m.extensionSurfaceOrder) - 1; index >= 0; index-- {
 		key := m.extensionSurfaceOrder[index]
 		surface, ok := m.extensionSurfaces[key]
@@ -749,6 +761,7 @@ func (m *model) nextExtensionSurfaceInputCmd(key extensionUIKey, surface tuiExte
 	surface.eventSequence++
 	m.extensionSurfaces[key] = surface
 	request := extensions.UISurfaceInputNotification{
+		ScopeID:  surface.key.conversationKey,
 		ID:       surface.key.id,
 		Sequence: surface.eventSequence,
 		Kind:     kind,
@@ -777,6 +790,7 @@ func (m *model) updateExtensionSurfaceLayouts() []tea.Cmd {
 		surface.eventSequence++
 		m.extensionSurfaces[key] = surface
 		request := extensions.UISurfaceResizeNotification{
+			ScopeID:  key.conversationKey,
 			ID:       key.id,
 			Sequence: surface.eventSequence,
 			Width:    layout.width,

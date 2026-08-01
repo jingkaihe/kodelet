@@ -58,21 +58,22 @@ type ChatImageURLSource struct {
 
 // ChatEvent is a single streaming chat event.
 type ChatEvent struct {
-	Kind           string                          `json:"kind"`
-	ConversationID string                          `json:"conversation_id,omitempty"`
-	Role           string                          `json:"role,omitempty"`
-	Delta          string                          `json:"delta,omitempty"`
-	Content        any                             `json:"content,omitempty"`
-	Usage          *llmtypes.Usage                 `json:"usage,omitempty"`
-	ToolName       string                          `json:"tool_name,omitempty"`
-	ToolCallID     string                          `json:"tool_call_id,omitempty"`
-	Input          string                          `json:"input,omitempty"`
-	ToolResult     *tooltypes.StructuredToolResult `json:"tool_result,omitempty"`
-	UIInput        *UIInputEvent                   `json:"ui_input,omitempty"`
-	UIConfirm      *UIConfirmEvent                 `json:"ui_confirm,omitempty"`
-	UISelect       *UISelectEvent                  `json:"ui_select,omitempty"`
-	UINotify       *UINotifyEvent                  `json:"ui_notify,omitempty"`
-	Error          string                          `json:"error,omitempty"`
+	Kind             string                          `json:"kind"`
+	ConversationID   string                          `json:"conversation_id,omitempty"`
+	ConversationName string                          `json:"conversation_name,omitempty"`
+	Role             string                          `json:"role,omitempty"`
+	Delta            string                          `json:"delta,omitempty"`
+	Content          any                             `json:"content,omitempty"`
+	Usage            *llmtypes.Usage                 `json:"usage,omitempty"`
+	ToolName         string                          `json:"tool_name,omitempty"`
+	ToolCallID       string                          `json:"tool_call_id,omitempty"`
+	Input            string                          `json:"input,omitempty"`
+	ToolResult       *tooltypes.StructuredToolResult `json:"tool_result,omitempty"`
+	UIInput          *UIInputEvent                   `json:"ui_input,omitempty"`
+	UIConfirm        *UIConfirmEvent                 `json:"ui_confirm,omitempty"`
+	UISelect         *UISelectEvent                  `json:"ui_select,omitempty"`
+	UINotify         *UINotifyEvent                  `json:"ui_notify,omitempty"`
+	Error            string                          `json:"error,omitempty"`
 }
 
 // UIInputEvent describes an extension-requested input prompt.
@@ -378,7 +379,7 @@ func runDefaultChat(
 		if err != nil {
 			return sessionID, err
 		}
-		if err := sink.Send(ChatEvent{Kind: "conversation", ConversationID: sessionID, Role: "assistant"}); err != nil {
+		if err := sink.Send(ChatEvent{Kind: "conversation", ConversationID: sessionID, ConversationName: name, Role: "assistant"}); err != nil {
 			return sessionID, err
 		}
 		if err := sink.Send(ChatEvent{

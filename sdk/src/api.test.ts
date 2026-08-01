@@ -387,6 +387,7 @@ test("widgets use sequences and surfaces route host events", async () => {
   harness.initialize({ capabilities: { ui: { widgets: true, surfaces: true, transcript: true } } });
   await harness.executeCommand({
     name: "ui",
+    context: { uiScopeId: "conversation-a" },
     invocation: { raw: "/ui", commandName: "ui", args: [], flags: {} },
   });
 
@@ -394,6 +395,7 @@ test("widgets use sequences and surfaces route host events", async () => {
     {
       method: "kodelet.ui.widget.set",
       params: {
+        scopeId: "conversation-a",
         id: "status",
         placement: "aboveComposer",
         frame: {
@@ -404,13 +406,14 @@ test("widgets use sequences and surfaces route host events", async () => {
     },
     {
       method: "kodelet.ui.widget.set",
-      params: { id: "status", placement: "belowComposer", frame: { sequence: 2, lines: ["updated"] } },
+      params: { scopeId: "conversation-a", id: "status", placement: "belowComposer", frame: { sequence: 2, lines: ["updated"] } },
     },
-    { method: "kodelet.ui.widget.remove", params: { id: "status", sequence: 3 } },
-    { method: "kodelet.ui.transcript.append", params: { title: "Saved", message: "./drawing.png" } },
+    { method: "kodelet.ui.widget.remove", params: { scopeId: "conversation-a", id: "status", sequence: 3 } },
+    { method: "kodelet.ui.transcript.append", params: { scopeId: "conversation-a", title: "Saved", message: "./drawing.png" } },
     {
       method: "kodelet.ui.surface.open",
       params: {
+        scopeId: "conversation-a",
         id: "game",
         options: { width: "75%", maxHeight: "95%", anchor: "center" },
         frame: { sequence: 1, lines: ["loading"] },
@@ -419,19 +422,82 @@ test("widgets use sequences and surfaces route host events", async () => {
   ]);
 
   for (const handler of notificationHandlers) {
-    handler("extension.ui.surface.resize", { id: "game", sequence: 1, width: 80, height: 20 });
-    handler("extension.ui.surface.input", { id: "game", sequence: 2, kind: "key", key: "q", text: "q" });
-    handler("extension.ui.surface.resize", { id: "game", sequence: 1, width: 1, height: 1 });
+    handler("extension.ui.surface.resize", { scopeId: "conversation-a", id: "game", sequence: 1, width: 80, height: 20 });
+    handler("extension.ui.surface.input", { scopeId: "conversation-a", id: "game", sequence: 2, kind: "key", key: "q", text: "q" });
+    handler("extension.ui.surface.resize", { scopeId: "conversation-a", id: "game", sequence: 1, width: 1, height: 1 });
   }
   assert.deepEqual(openedSurface.size, { width: 80, height: 20 });
   assert.deepEqual(resizeEvents, [{ sequence: 1, width: 80, height: 20 }]);
-  assert.deepEqual(inputEvents, [{ id: "game", sequence: 2, kind: "key", key: "q", text: "q" }]);
+  assert.deepEqual(inputEvents, [{ scopeId: "conversation-a", id: "game", sequence: 2, kind: "key", key: "q", text: "q" }]);
 
   await openedSurface.close();
   assert.deepEqual(requests.at(-1), {
     method: "kodelet.ui.surface.close",
-    params: { id: "game", sequence: 2 },
+    params: { scopeId: "conversation-a", id: "game", sequence: 2 },
   });
+});
+
+test("same surface ID is isolated by UI scope and routes scoped events", async () => {
+  const surfaces = new Map<string, any>();
+  const inputs = new Map<string, unknown[]>([["conversation-a", []], ["conversation-b", []]]);
+  const requests: Array<{ method: string; params?: unknown }> = [];
+  const notificationHandlers = new Set<(method: string, params: unknown) => void>();
+  const host = {
+    async request(method: string, params?: unknown) {
+      requests.push({ method, params });
+      return { accepted: true };
+    },
+    onNotification(handler: (method: string, params: unknown) => void) {
+      notificationHandlers.add(handler);
+      return () => notificationHandlers.delete(handler);
+    },
+  };
+  const extension = defineExtension((ext) => {
+    ext.registerCommand({
+      name: "scoped-surface",
+      description: "Open one scoped surface",
+      async execute(_input, ctx) {
+        assert.ok(ctx.uiScopeId);
+        const surface = await ctx.ui.openSurface({ id: "shared" });
+        surfaces.set(ctx.uiScopeId, surface);
+        surface.onInput((event: unknown) => inputs.get(ctx.uiScopeId as string)?.push(event));
+        return { action: "respond", response: ctx.uiScopeId };
+      },
+    });
+  });
+  const harness = await createTestHarness(extension, host);
+  harness.initialize({ capabilities: { ui: { surfaces: true } } });
+
+  for (const scopeId of ["conversation-a", "conversation-b"]) {
+    await harness.executeCommand({
+      name: "scoped-surface",
+      context: { uiScopeId: scopeId },
+      invocation: { raw: "/scoped-surface", commandName: "scoped-surface", args: [], flags: {} },
+    });
+  }
+
+  assert.deepEqual(requests.map((request) => request.params), [
+    { scopeId: "conversation-a", id: "shared", options: {}, frame: { sequence: 1, lines: [] } },
+    { scopeId: "conversation-b", id: "shared", options: {}, frame: { sequence: 1, lines: [] } },
+  ]);
+  for (const handler of notificationHandlers) {
+    handler("extension.ui.surface.input", { scopeId: "conversation-a", id: "shared", sequence: 1, kind: "key", key: "a" });
+    handler("extension.ui.surface.input", { scopeId: "conversation-b", id: "shared", sequence: 1, kind: "key", key: "b" });
+    handler("extension.ui.surface.input", { scopeId: "conversation-c", id: "shared", sequence: 1, kind: "key", key: "ignored" });
+  }
+  assert.deepEqual(inputs.get("conversation-a"), [
+    { scopeId: "conversation-a", id: "shared", sequence: 1, kind: "key", key: "a" },
+  ]);
+  assert.deepEqual(inputs.get("conversation-b"), [
+    { scopeId: "conversation-b", id: "shared", sequence: 1, kind: "key", key: "b" },
+  ]);
+
+  await surfaces.get("conversation-a")?.close();
+  await surfaces.get("conversation-b")?.close();
+  assert.deepEqual(requests.slice(-2).map((request) => request.params), [
+    { scopeId: "conversation-a", id: "shared", sequence: 2 },
+    { scopeId: "conversation-b", id: "shared", sequence: 2 },
+  ]);
 });
 
 test("surface IDs reject overlapping ownership until the active handle closes", async () => {
@@ -498,8 +564,55 @@ test("surface IDs reject overlapping ownership until the active handle closes", 
   await openedSurface.close();
   assert.deepEqual(requests.at(-1), {
     method: "kodelet.ui.surface.close",
-    params: { id: "singleton", sequence: 4 },
+    params: { id: "singleton", sequence: 4, scopeId: "" },
   });
+});
+
+test("failed surface close keeps ownership and can be retried", async () => {
+  let closeAttempts = 0;
+  const requests: Array<{ method: string; params?: unknown }> = [];
+  const host = {
+    async request(method: string, params?: unknown) {
+      requests.push({ method, params });
+      if (method === "kodelet.ui.surface.close" && closeAttempts++ === 0) {
+        throw new Error("close failed");
+      }
+      return { accepted: true };
+    },
+  };
+  const extension = defineExtension((ext) => {
+    ext.registerCommand({
+      name: "retry-close",
+      description: "Retry a failed close",
+      async execute(_input, ctx) {
+        const surface = await ctx.ui.openSurface({ id: "retryable" });
+        await assert.rejects(surface.close(), /close failed/);
+        await assert.rejects(ctx.ui.openSurface({ id: "retryable" }), /already open, opening, or closing/);
+        await surface.close();
+        const replacement = await ctx.ui.openSurface({ id: "retryable" });
+        await replacement.close();
+        return { action: "respond", response: "closed" };
+      },
+    });
+  });
+  const harness = await createTestHarness(extension, host);
+  harness.initialize({ capabilities: { ui: { surfaces: true } } });
+  await harness.executeCommand({
+    name: "retry-close",
+    invocation: { raw: "/retry-close", commandName: "retry-close", args: [], flags: {} },
+  });
+
+  assert.deepEqual(requests.map((request) => request.method), [
+    "kodelet.ui.surface.open",
+    "kodelet.ui.surface.close",
+    "kodelet.ui.surface.close",
+    "kodelet.ui.surface.open",
+    "kodelet.ui.surface.close",
+  ]);
+  assert.deepEqual(requests.map((request) => {
+    const params = request.params as { sequence?: number; frame?: { sequence?: number } };
+    return params.sequence ?? params.frame?.sequence;
+  }), [1, 2, 3, 4, 5]);
 });
 
 test("surface presentation keeps at most one frame in flight and one latest pending frame", async () => {
@@ -552,11 +665,11 @@ test("surface presentation keeps at most one frame in flight and one latest pend
   assert.deepEqual(notifications, [
     {
       method: "kodelet.ui.surface.frame",
-      params: { id: "bounded", frame: { sequence: 2, lines: ["frame 1"] } },
+      params: { id: "bounded", frame: { sequence: 2, lines: ["frame 1"] }, scopeId: "" },
     },
     {
       method: "kodelet.ui.surface.frame",
-      params: { id: "bounded", frame: { sequence: 3, lines: ["frame 3"] } },
+      params: { id: "bounded", frame: { sequence: 3, lines: ["frame 3"] }, scopeId: "" },
     },
   ]);
 
@@ -924,34 +1037,81 @@ test("runtime keeps interactive surfaces alive after the opening command returns
   const result = await client.call("extension.command.execute", {
     name: "game",
     input: {},
+    context: { uiScopeId: "conversation-a" },
     invocation: { raw: "/game", commandName: "game", args: [], flags: {} },
   });
   assert.deepEqual(result, { action: "respond", response: "opened" });
   const openRequest = client.hostRequests.find((request) => request.method === "kodelet.ui.surface.open");
   assert.equal(openRequest?.parentId, 2);
 
-  client.notify("extension.ui.surface.resize", { id: "game", sequence: 1, width: 60, height: 18 });
+  client.notify("extension.ui.surface.resize", { scopeId: "conversation-a", id: "game", sequence: 1, width: 60, height: 18 });
   await client.waitForHostNotifications(1);
   assert.deepEqual(client.hostNotifications[0], {
     method: "kodelet.ui.surface.frame",
-    params: { id: "game", frame: { sequence: 2, lines: ["size=60x18"] } },
+    params: { scopeId: "conversation-a", id: "game", frame: { sequence: 2, lines: ["size=60x18"] } },
   });
   await client.waitForHostRequests(2);
   const transcriptRequest = client.hostRequests.find((request) => request.method === "kodelet.ui.transcript.append");
   assert.equal(transcriptRequest?.parentId, undefined);
-  assert.deepEqual(transcriptRequest?.params, { title: "Resized", message: "60x18" });
+  assert.deepEqual(transcriptRequest?.params, { scopeId: "conversation-a", title: "Resized", message: "60x18" });
 
   const requestCountBeforeInput = client.hostRequests.length;
-  client.notify("extension.ui.surface.input", { id: "game", sequence: 2, kind: "key", key: "q", text: "q" });
+  client.notify("extension.ui.surface.input", { scopeId: "conversation-a", id: "game", sequence: 2, kind: "key", key: "q", text: "q" });
   await client.waitForHostNotifications(2);
   assert.deepEqual(client.hostNotifications[1], {
     method: "kodelet.ui.surface.frame",
-    params: { id: "game", frame: { sequence: 3, lines: ["key=q;size=60x18"] } },
+    params: { scopeId: "conversation-a", id: "game", frame: { sequence: 3, lines: ["key=q;size=60x18"] } },
   });
   await client.waitForHostRequests(requestCountBeforeInput + 1);
   const closeRequest = client.hostRequests.find((request) => request.method === "kodelet.ui.surface.close");
   assert.equal(closeRequest?.parentId, undefined);
-  assert.deepEqual(closeRequest?.params, { id: "game", sequence: 4 });
+  assert.deepEqual(closeRequest?.params, { scopeId: "conversation-a", id: "game", sequence: 4 });
+});
+
+test("runtime does not replay a persistent UI request after its handler completes", async (t) => {
+  const extensionFile = path.join(await mkdtemp(path.join(os.tmpdir(), "kodelet-sdk-persistent-once-")), "extension.ts");
+  await writeFile(
+    extensionFile,
+    `
+      import { defineExtension, runExtension } from ${JSON.stringify(path.resolve("src/index.ts"))};
+
+      runExtension(defineExtension((ext) => {
+        ext.registerCommand({
+          name: "once",
+          description: "Send one detached persistent request",
+          execute(_, ctx) {
+            void ctx.ui.appendTranscript("once").catch(() => undefined);
+            return { action: "respond", response: "done" };
+          },
+        });
+      }));
+    `,
+    "utf8",
+  );
+  const child = spawn(process.execPath, ["--import", "tsx", extensionFile], {
+    cwd: process.cwd(),
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  t.after(() => child.kill());
+  const client = new RpcTestClient(child.stdout, child.stdin, false);
+  await client.call("extension.initialize", {
+    protocolVersion: "2026-05-30",
+    extension: { id: "once", cwd: process.cwd(), dataDir: "" },
+    capabilities: { ui: { transcript: true } },
+  });
+
+  const command = client.beginCall("extension.command.execute", {
+    name: "once",
+    input: {},
+    context: { uiScopeId: "conversation-once" },
+    invocation: { raw: "/once", commandName: "once", args: [], flags: {} },
+  });
+  assert.deepEqual(await command.response, { action: "respond", response: "done" });
+  await new Promise((resolve) => setTimeout(resolve, 25));
+
+  assert.equal(client.hostRequests.length, 1);
+  assert.equal(client.hostRequests[0]?.parentId, command.id);
+  assert.deepEqual(client.hostRequests[0]?.params, { scopeId: "conversation-once", message: "once" });
 });
 
 test("runtime cancellation aborts handlers and blocks late host RPC", async (t) => {
@@ -1033,7 +1193,11 @@ class RpcTestClient {
   hostRequests: Array<{ id: number | string; parentId?: number | string; method: string; params?: unknown }> = [];
   hostNotifications: Array<{ method: string; params?: unknown }> = [];
 
-  constructor(stdout: NodeJS.ReadableStream, private stdin: NodeJS.WritableStream) {
+  constructor(
+    stdout: NodeJS.ReadableStream,
+    private stdin: NodeJS.WritableStream,
+    private readonly respondToHostRequests = true,
+  ) {
     stdout.on("data", (chunk: Buffer) => {
       this.buffer = Buffer.concat([this.buffer, chunk]);
       this.drain();
@@ -1105,6 +1269,9 @@ class RpcTestClient {
           continue;
         }
         this.hostRequests.push(response);
+        if (!this.respondToHostRequests) {
+          continue;
+        }
         let result: unknown;
         switch (response.method) {
           case "kodelet.ui.input":

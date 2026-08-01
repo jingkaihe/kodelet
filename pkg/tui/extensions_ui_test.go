@@ -41,7 +41,7 @@ func (s *fakeExtensionUISource) NotifyExtensionUI(_ context.Context, method stri
 	return s.err
 }
 
-func (s *fakeExtensionUISource) PrepareUISurfaceEventLifecycle(id string, _ uint64) {
+func (s *fakeExtensionUISource) PrepareUISurfaceEventLifecycle(_ string, id string, _ uint64) {
 	s.mu.Lock()
 	lifecycleCh := s.lifecycleCh
 	s.mu.Unlock()
@@ -105,6 +105,7 @@ func TestTUIExtensionUIHostAppendsSanitizedTranscriptEntry(t *testing.T) {
 	source := &fakeExtensionUISource{owner: extensions.UIExtensionOwner{ExtensionID: "drawing", Generation: 1}}
 
 	response, err := host.AppendTranscript(context.Background(), source, extensions.UITranscriptAppendRequest{
+		ScopeID: "conversation-drawing",
 		Title:   "Saved\x1b[31m",
 		Message: "./drawing.png\ncopy\tthis",
 	})
@@ -114,6 +115,7 @@ func TestTUIExtensionUIHostAppendsSanitizedTranscriptEntry(t *testing.T) {
 	msg, ok := (<-ch).(extensionUITranscriptMsg)
 	require.True(t, ok)
 	assert.Equal(t, source.owner, msg.owner)
+	assert.Equal(t, "conversation-drawing", msg.conversationKey)
 	assert.Equal(t, "Saved", msg.title)
 	assert.Equal(t, "./drawing.png\ncopy this", msg.message)
 }
@@ -182,13 +184,15 @@ func TestTUIExtensionUIHostScopesSameIDWidgetsByConversation(t *testing.T) {
 	secondCtx := contextWithTUIConversation(context.Background(), "conversation-second")
 
 	for _, request := range []struct {
-		ctx  context.Context
-		text string
+		ctx     context.Context
+		scopeID string
+		text    string
 	}{
-		{ctx: firstCtx, text: "first todos"},
-		{ctx: secondCtx, text: "second todos"},
+		{ctx: firstCtx, scopeID: "conversation-first", text: "first todos"},
+		{ctx: secondCtx, scopeID: "conversation-second", text: "second todos"},
 	} {
 		response, err := host.SetWidget(request.ctx, source, extensions.UIWidgetSetRequest{
+			ScopeID:   request.scopeID,
 			ID:        "todo-progress",
 			Placement: extensions.UIWidgetPlacementAboveComposer,
 			Frame:     extensionTestFrame(1, request.text),
@@ -206,25 +210,102 @@ func TestTUIExtensionUIHostScopesSameIDWidgetsByConversation(t *testing.T) {
 	assert.Equal(t, uint64(1), host.widgetSeq[extensionUIKey{owner: source.owner, conversationKey: "conversation-second", id: "todo-progress"}])
 
 	response, err := host.UpdateWidget(firstCtx, source, extensions.UIWidgetFrameRequest{
-		ID:    "todo-progress",
-		Frame: extensionTestFrame(2, "updated first todos"),
+		ScopeID: "conversation-first",
+		ID:      "todo-progress",
+		Frame:   extensionTestFrame(2, "updated first todos"),
 	})
 	require.NoError(t, err)
 	assert.True(t, response.Accepted)
 	assert.Equal(t, "second todos", host.widgets[extensionUIKey{owner: source.owner, conversationKey: "conversation-second", id: "todo-progress"}].frame.Lines[0].Spans[0].Text)
 
-	_, err = host.UpdateWidget(context.Background(), source, extensions.UIWidgetFrameRequest{
+	_, err = host.UpdateWidget(extensions.ContextWithExtensionUIImplicitScope(context.Background()), source, extensions.UIWidgetFrameRequest{
 		ID:    "todo-progress",
 		Frame: extensionTestFrame(3, "ambiguous"),
 	})
 	require.ErrorContains(t, err, "scope is ambiguous")
 }
 
+func TestTUIExtensionUIExplicitScopeOverridesRequestContext(t *testing.T) {
+	ch := make(chan tea.Msg, 2)
+	host := newTUIExtensionUIHost(ch, nil)
+	source := &fakeExtensionUISource{owner: extensions.UIExtensionOwner{ExtensionID: "scoped", Generation: 1}}
+	wrongCtx := contextWithTUIConversation(context.Background(), "conversation-wrong")
+
+	response, err := host.SetWidget(wrongCtx, source, extensions.UIWidgetSetRequest{
+		ScopeID:   "conversation-right",
+		ID:        "status",
+		Placement: extensions.UIWidgetPlacementAboveComposer,
+		Frame:     extensionTestFrame(1, "right"),
+	})
+	require.NoError(t, err)
+	assert.True(t, response.Accepted)
+	transcript, err := host.AppendTranscript(wrongCtx, source, extensions.UITranscriptAppendRequest{
+		ScopeID: "conversation-right",
+		Message: "scoped transcript",
+	})
+	require.NoError(t, err)
+	assert.True(t, transcript.Accepted)
+
+	assert.Contains(t, host.widgets, extensionUIKey{owner: source.owner, conversationKey: "conversation-right", id: "status"})
+	assert.NotContains(t, host.widgets, extensionUIKey{owner: source.owner, conversationKey: "conversation-wrong", id: "status"})
+	var transcriptMsg extensionUITranscriptMsg
+	for range 2 {
+		switch msg := (<-ch).(type) {
+		case extensionUITranscriptMsg:
+			transcriptMsg = msg
+		}
+	}
+	assert.Equal(t, "conversation-right", transcriptMsg.conversationKey)
+}
+
+func TestTUIExtensionUIExplicitEmptyScopeOverridesRequestContext(t *testing.T) {
+	host := newTUIExtensionUIHost(make(chan tea.Msg, 2), nil)
+	source := &fakeExtensionUISource{owner: extensions.UIExtensionOwner{ExtensionID: "global", Generation: 1}}
+	conversationCtx := contextWithTUIConversation(context.Background(), "conversation-one")
+
+	response, err := host.SetWidget(conversationCtx, source, extensions.UIWidgetSetRequest{
+		ScopeID: "",
+		ID:      "status", Placement: extensions.UIWidgetPlacementAboveComposer, Frame: extensionTestFrame(1, "global"),
+	})
+	require.NoError(t, err)
+	assert.True(t, response.Accepted)
+
+	legacyCtx := extensions.ContextWithExtensionUIImplicitScope(conversationCtx)
+	response, err = host.SetWidget(legacyCtx, source, extensions.UIWidgetSetRequest{
+		ID: "legacy-status", Placement: extensions.UIWidgetPlacementAboveComposer, Frame: extensionTestFrame(1, "scoped"),
+	})
+	require.NoError(t, err)
+	assert.True(t, response.Accepted)
+
+	assert.Contains(t, host.widgets, extensionUIKey{owner: source.owner, id: "status"})
+	assert.Contains(t, host.widgets, extensionUIKey{owner: source.owner, conversationKey: "conversation-one", id: "legacy-status"})
+}
+
+func TestTUIExtensionUIFallbackIgnoresClosedSequenceTombstones(t *testing.T) {
+	host := newTUIExtensionUIHost(make(chan tea.Msg, 4), nil)
+	source := &fakeExtensionUISource{owner: extensions.UIExtensionOwner{ExtensionID: "legacy", Generation: 1}}
+	scopedCtx := contextWithTUIConversation(context.Background(), "conversation-old")
+
+	_, err := host.SetWidget(scopedCtx, source, extensions.UIWidgetSetRequest{
+		ScopeID: "conversation-old", ID: "status", Placement: extensions.UIWidgetPlacementAboveComposer, Frame: extensionTestFrame(1, "old"),
+	})
+	require.NoError(t, err)
+	_, err = host.RemoveWidget(scopedCtx, source, extensions.UIWidgetRemoveRequest{ScopeID: "conversation-old", ID: "status", Sequence: 2})
+	require.NoError(t, err)
+	response, err := host.SetWidget(context.Background(), source, extensions.UIWidgetSetRequest{
+		ID: "status", Placement: extensions.UIWidgetPlacementAboveComposer, Frame: extensionTestFrame(1, "global"),
+	})
+	require.NoError(t, err)
+	assert.True(t, response.Accepted)
+	assert.Contains(t, host.widgets, extensionUIKey{owner: source.owner, id: "status"})
+	assert.NotContains(t, host.widgets, extensionUIKey{owner: source.owner, conversationKey: "conversation-old", id: "status"})
+}
+
 func TestTUIExtensionUIHostPersistentOperationsResolveEstablishedConversationScope(t *testing.T) {
 	ch := make(chan tea.Msg, 1)
 	host := newTUIExtensionUIHost(ch, nil)
 	source := &fakeExtensionUISource{owner: extensions.UIExtensionOwner{ExtensionID: "persistent", Generation: 1}}
-	conversationCtx := contextWithTUIConversation(context.Background(), "conversation-first")
+	conversationCtx := extensions.ContextWithExtensionUIImplicitScope(contextWithTUIConversation(context.Background(), "conversation-first"))
 
 	widgetResponse, err := host.SetWidget(conversationCtx, source, extensions.UIWidgetSetRequest{
 		ID:        "status",
@@ -239,24 +320,25 @@ func TestTUIExtensionUIHostPersistentOperationsResolveEstablishedConversationSco
 	})
 	require.NoError(t, err)
 	assert.True(t, surfaceResponse.Accepted)
+	legacyCtx := extensions.ContextWithExtensionUIImplicitScope(context.Background())
 
-	widgetResponse, err = host.UpdateWidget(context.Background(), source, extensions.UIWidgetFrameRequest{
+	widgetResponse, err = host.UpdateWidget(legacyCtx, source, extensions.UIWidgetFrameRequest{
 		ID:    "status",
 		Frame: extensionTestFrame(2, "running"),
 	})
 	require.NoError(t, err)
 	assert.True(t, widgetResponse.Accepted)
-	surfaceResponse, err = host.UpdateSurface(context.Background(), source, extensions.UISurfaceFrameRequest{
+	surfaceResponse, err = host.UpdateSurface(legacyCtx, source, extensions.UISurfaceFrameRequest{
 		ID:    "game",
 		Frame: extensionTestFrame(2, "ready"),
 	})
 	require.NoError(t, err)
 	assert.True(t, surfaceResponse.Accepted)
 
-	widgetResponse, err = host.RemoveWidget(context.Background(), source, extensions.UIWidgetRemoveRequest{ID: "status", Sequence: 3})
+	widgetResponse, err = host.RemoveWidget(legacyCtx, source, extensions.UIWidgetRemoveRequest{ID: "status", Sequence: 3})
 	require.NoError(t, err)
 	assert.True(t, widgetResponse.Accepted)
-	surfaceResponse, err = host.CloseSurface(context.Background(), source, extensions.UISurfaceCloseRequest{ID: "game", Sequence: 3})
+	surfaceResponse, err = host.CloseSurface(legacyCtx, source, extensions.UISurfaceCloseRequest{ID: "game", Sequence: 3})
 	require.NoError(t, err)
 	assert.True(t, surfaceResponse.Accepted)
 
@@ -280,18 +362,60 @@ func TestTUIExtensionUIHostRejectsAmbiguousContextFreeSurfaceOperations(t *testi
 		response, err := host.OpenSurface(
 			contextWithTUIConversation(context.Background(), conversationKey),
 			source,
-			extensions.UISurfaceOpenRequest{ID: "game", Frame: extensionTestFrame(1, conversationKey)},
+			extensions.UISurfaceOpenRequest{ScopeID: conversationKey, ID: "game", Frame: extensionTestFrame(1, conversationKey)},
 		)
 		require.NoError(t, err)
 		assert.True(t, response.Accepted)
 	}
 
-	_, err := host.UpdateSurface(context.Background(), source, extensions.UISurfaceFrameRequest{
+	legacyCtx := extensions.ContextWithExtensionUIImplicitScope(context.Background())
+	_, err := host.UpdateSurface(legacyCtx, source, extensions.UISurfaceFrameRequest{
 		ID:    "game",
 		Frame: extensionTestFrame(2, "ambiguous update"),
 	})
 	require.ErrorContains(t, err, "scope is ambiguous")
-	_, err = host.CloseSurface(context.Background(), source, extensions.UISurfaceCloseRequest{ID: "game", Sequence: 2})
+	_, err = host.CloseSurface(legacyCtx, source, extensions.UISurfaceCloseRequest{ID: "game", Sequence: 2})
+	require.ErrorContains(t, err, "scope is ambiguous")
+}
+
+func TestTUIExtensionUIHostGlobalAndScopedObjectsWithSameIDCoexist(t *testing.T) {
+	host := newTUIExtensionUIHost(make(chan tea.Msg, 4), nil)
+	source := &fakeExtensionUISource{owner: extensions.UIExtensionOwner{ExtensionID: "coexist", Generation: 1}}
+	scopedCtx := contextWithTUIConversation(context.Background(), "conversation-one")
+
+	widgetResponse, err := host.SetWidget(scopedCtx, source, extensions.UIWidgetSetRequest{
+		ScopeID: "conversation-one", ID: "status", Placement: extensions.UIWidgetPlacementAboveComposer, Frame: extensionTestFrame(1, "scoped"),
+	})
+	require.NoError(t, err)
+	assert.True(t, widgetResponse.Accepted)
+	widgetResponse, err = host.SetWidget(context.Background(), source, extensions.UIWidgetSetRequest{
+		ID: "status", Placement: extensions.UIWidgetPlacementAboveComposer, Frame: extensionTestFrame(1, "global"),
+	})
+	require.NoError(t, err)
+	assert.True(t, widgetResponse.Accepted)
+
+	surfaceResponse, err := host.OpenSurface(scopedCtx, source, extensions.UISurfaceOpenRequest{
+		ScopeID: "conversation-one", ID: "panel", Frame: extensionTestFrame(1, "scoped"),
+	})
+	require.NoError(t, err)
+	assert.True(t, surfaceResponse.Accepted)
+	surfaceResponse, err = host.OpenSurface(context.Background(), source, extensions.UISurfaceOpenRequest{
+		ID: "panel", Frame: extensionTestFrame(1, "global"),
+	})
+	require.NoError(t, err)
+	assert.True(t, surfaceResponse.Accepted)
+
+	assert.Contains(t, host.widgets, extensionUIKey{owner: source.owner, conversationKey: "conversation-one", id: "status"})
+	assert.Contains(t, host.widgets, extensionUIKey{owner: source.owner, id: "status"})
+	assert.Contains(t, host.surfaces, extensionUIKey{owner: source.owner, conversationKey: "conversation-one", id: "panel"})
+	assert.Contains(t, host.surfaces, extensionUIKey{owner: source.owner, id: "panel"})
+
+	legacyCtx := extensions.ContextWithExtensionUIImplicitScope(context.Background())
+	_, err = host.UpdateWidget(legacyCtx, source, extensions.UIWidgetFrameRequest{
+		ID: "status", Frame: extensionTestFrame(2, "ambiguous"),
+	})
+	require.ErrorContains(t, err, "scope is ambiguous")
+	_, err = host.CloseSurface(legacyCtx, source, extensions.UISurfaceCloseRequest{ID: "panel", Sequence: 2})
 	require.ErrorContains(t, err, "scope is ambiguous")
 }
 
@@ -441,15 +565,17 @@ func TestTUIExtensionWidgetsRenderOnlyForActiveConversation(t *testing.T) {
 	source := &fakeExtensionUISource{owner: extensions.UIExtensionOwner{ExtensionID: "todo", Generation: 1}}
 
 	for _, request := range []struct {
-		ctx  context.Context
-		id   string
-		text string
+		ctx     context.Context
+		scopeID string
+		id      string
+		text    string
 	}{
-		{ctx: contextWithTUIConversation(context.Background(), first.key), id: "todo-progress", text: "first conversation widget"},
-		{ctx: contextWithTUIConversation(context.Background(), second.key), id: "todo-progress", text: "second conversation widget"},
+		{ctx: contextWithTUIConversation(context.Background(), first.key), scopeID: first.key, id: "todo-progress", text: "first conversation widget"},
+		{ctx: contextWithTUIConversation(context.Background(), second.key), scopeID: second.key, id: "todo-progress", text: "second conversation widget"},
 		{ctx: context.Background(), id: "global-status", text: "global widget"},
 	} {
 		_, err := m.extensionUI.SetWidget(request.ctx, source, extensions.UIWidgetSetRequest{
+			ScopeID:   request.scopeID,
 			ID:        request.id,
 			Placement: extensions.UIWidgetPlacementAboveComposer,
 			Frame:     extensionTestFrame(1, request.text),
@@ -801,11 +927,11 @@ func TestTUIExtensionSurfacesRenderAndCaptureInputOnlyForActiveConversation(t *t
 	}
 
 	_, err := m.extensionUI.OpenSurface(contextWithTUIConversation(context.Background(), first.key), source, extensions.UISurfaceOpenRequest{
-		ID: "first", Options: options, Frame: extensionTestFrame(1, "FIRST SURFACE"),
+		ScopeID: first.key, ID: "first", Options: options, Frame: extensionTestFrame(1, "FIRST SURFACE"),
 	})
 	require.NoError(t, err)
 	_, err = m.extensionUI.OpenSurface(contextWithTUIConversation(context.Background(), second.key), source, extensions.UISurfaceOpenRequest{
-		ID: "second", Options: options, Frame: extensionTestFrame(1, "SECOND SURFACE"),
+		ScopeID: second.key, ID: "second", Options: options, Frame: extensionTestFrame(1, "SECOND SURFACE"),
 	})
 	require.NoError(t, err)
 	_, err = m.extensionUI.OpenSurface(context.Background(), source, extensions.UISurfaceOpenRequest{
@@ -851,6 +977,97 @@ func TestTUIExtensionSurfacesRenderAndCaptureInputOnlyForActiveConversation(t *t
 	require.Len(t, inputs, 2)
 	assert.Equal(t, "first", inputs[0].ID)
 	assert.Equal(t, "second", inputs[1].ID)
+}
+
+func TestTUIExtensionSurfaceEventsIncludeConversationScopeForSameID(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 100
+	m.height = 40
+	m.resize()
+	first := m.conversationState
+	second := newConversationState("conversation-second", "conversation-second", true, m.conversationDefaults)
+	m.conversations[second.key] = second
+	source := &fakeExtensionUISource{owner: extensions.UIExtensionOwner{ExtensionID: "shared", Generation: 1}}
+	options := extensions.UISurfaceOptions{NonCapturing: false}
+
+	for _, scopeID := range []string{first.key, second.key} {
+		_, err := m.extensionUI.OpenSurface(context.Background(), source, extensions.UISurfaceOpenRequest{
+			ScopeID: scopeID,
+			ID:      "shared",
+			Options: options,
+			Frame:   extensionTestFrame(1, scopeID),
+		})
+		require.NoError(t, err)
+	}
+	applyPendingExtensionUI(t, &m)
+
+	cmd, handled := m.routeExtensionSurfaceKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	require.True(t, handled)
+	assert.Nil(t, cmd())
+	requireConversationActivation(t, &m, second.key)
+	cmd, handled = m.routeExtensionSurfaceKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	require.True(t, handled)
+	assert.Nil(t, cmd())
+
+	var inputs []extensions.UISurfaceInputNotification
+	for _, notification := range source.recordedNotifications() {
+		if notification.method == extensions.UISurfaceInputMethod {
+			input := notification.params.(extensions.UISurfaceInputNotification)
+			if input.Kind == extensions.UISurfaceInputKey {
+				inputs = append(inputs, input)
+			}
+		}
+	}
+	require.Len(t, inputs, 2)
+	assert.Equal(t, first.key, inputs[0].ScopeID)
+	assert.Equal(t, second.key, inputs[1].ScopeID)
+	assert.Equal(t, "shared", inputs[0].ID)
+	assert.Equal(t, "shared", inputs[1].ID)
+}
+
+func TestTUIExtensionSurfaceFocusIsSuspendedByModalUI(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	source := &fakeExtensionUISource{owner: extensions.UIExtensionOwner{ExtensionID: "focus", Generation: 1}}
+	key := extensionUIKey{
+		owner:           source.owner,
+		conversationKey: m.activeConversationKey,
+		id:              "surface",
+	}
+	surface := tuiExtensionSurface{key: key, source: source, openOrdinal: 1}
+	m.extensionSurfaces[key] = surface
+	m.extensionSurfaceOrder = []extensionUIKey{key}
+	m.extensionUI = nil
+
+	focused, ok := m.focusedExtensionSurfaceKey()
+	require.True(t, ok)
+	assert.Equal(t, key, focused)
+	m.conversationPicker = &conversationPickerState{}
+	_, ok = m.focusedExtensionSurfaceKey()
+	assert.False(t, ok)
+	for _, cmd := range m.extensionSurfaceFocusTransitionCommands(key, true, surface) {
+		assert.Nil(t, cmd())
+	}
+	m.conversationPicker = nil
+	for _, cmd := range m.extensionSurfaceFocusTransitionCommands(extensionUIKey{}, false, tuiExtensionSurface{}) {
+		assert.Nil(t, cmd())
+	}
+	m.shortcutsOpen = true
+	_, ok = m.focusedExtensionSurfaceKey()
+	assert.False(t, ok)
+	m.shortcutsOpen = false
+	m.activeUIPrompt = &uiPromptState{mode: uiPromptConfirm}
+	_, ok = m.focusedExtensionSurfaceKey()
+	assert.False(t, ok)
+
+	var focusKinds []string
+	for _, notification := range source.recordedNotifications() {
+		if notification.method == extensions.UISurfaceInputMethod {
+			focusKinds = append(focusKinds, notification.params.(extensions.UISurfaceInputNotification).Kind)
+		}
+	}
+	assert.Equal(t, []string{extensions.UISurfaceInputBlur, extensions.UISurfaceInputFocus}, focusKinds)
 }
 
 func TestTUIExtensionSurfaceKeyRoutingPreservesCombinedModifiers(t *testing.T) {

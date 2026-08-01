@@ -144,6 +144,8 @@ type conversationState struct {
 
 	messageHistoryScopeCWD        string
 	initialHistoryPending         bool
+	deferSubmitUntilHistory       bool
+	submitAfterHistoryLoad        string
 	extensionDiscoveryBlocked     bool
 	extensionLifecyclePending     bool
 	submitAfterExtensionLifecycle string

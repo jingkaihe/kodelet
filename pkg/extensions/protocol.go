@@ -135,6 +135,7 @@ type eventParams struct {
 type ExtensionCallContext struct {
 	SessionID      string `json:"sessionId,omitempty"`
 	ConversationID string `json:"conversationId,omitempty"`
+	UIScopeID      string `json:"uiScopeId,omitempty"`
 	CWD            string `json:"cwd,omitempty"`
 	Provider       string `json:"provider,omitempty"`
 	Model          string `json:"model,omitempty"`
@@ -354,11 +355,17 @@ func (c *rpcClient) dispatchResponse(msg rpcIncomingMessage) error {
 }
 
 func (c *rpcClient) dispatchIncomingRequest(msg rpcIncomingMessage) {
-	ctx, handler, parentMatched, ambiguous := c.hostRequestTarget(msg.ParentID)
+	ctx, handler, parentMatched, ambiguousParentless := c.hostRequestTarget(msg.ParentID)
+	if isPersistentExtensionUIRequest(msg.Method) && !hasRPCParentID(msg.ParentID) {
+		if hasExplicitExtensionUIScope(msg.Params) || ambiguousParentless {
+			c.stateMu.Lock()
+			handler = c.host
+			c.stateMu.Unlock()
+			ctx = context.Background()
+		}
+	}
 	if msg.Method == "kodelet.tool.update" && !parentMatched {
 		handler = invalidToolUpdateParentHandler{}
-	} else if ambiguous && isPersistentExtensionUIRequest(msg.Method) {
-		handler = ambiguousExtensionUIParentHandler{}
 	}
 	if err := c.handleIncomingRequest(ctx, msg, handler); err != nil {
 		c.fail(err)
@@ -424,12 +431,6 @@ func (invalidToolUpdateParentHandler) HandleRPCRequest(_ context.Context, _ stri
 	return nil, &rpcError{Code: -32602, Message: "kodelet.tool.update requires a valid parentId"}
 }
 
-type ambiguousExtensionUIParentHandler struct{}
-
-func (ambiguousExtensionUIParentHandler) HandleRPCRequest(_ context.Context, _ string, _ json.RawMessage) (any, *rpcError) {
-	return nil, &rpcError{Code: -32602, Message: "persistent extension UI requests require parentId while calls execute concurrently"}
-}
-
 func isPersistentExtensionUIRequest(method string) bool {
 	switch method {
 	case UITranscriptAppendMethod, UIWidgetSetMethod, UIWidgetFrameMethod, UIWidgetRemoveMethod, UISurfaceOpenMethod, UISurfaceFrameMethod, UISurfaceCloseMethod:
@@ -437,6 +438,10 @@ func isPersistentExtensionUIRequest(method string) bool {
 	default:
 		return false
 	}
+}
+
+func hasRPCParentID(parentID json.RawMessage) bool {
+	return len(parentID) > 0 && string(parentID) != "null"
 }
 
 func (c *rpcClient) fail(err error) {

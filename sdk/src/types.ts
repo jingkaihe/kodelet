@@ -46,6 +46,8 @@ export interface CommandInvocation {
 export interface BaseCallContext {
   sessionId?: string;
   conversationId?: string;
+  /** Opaque host scope used internally to route persistent UI. */
+  uiScopeId?: string;
   cwd?: string;
   provider?: string;
   model?: string;

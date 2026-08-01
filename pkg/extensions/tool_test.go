@@ -142,8 +142,8 @@ func TestToolResultAssistantFacingStringAndStructuredData(t *testing.T) {
 
 func TestShouldRestartAfterCallError(t *testing.T) {
 	assert.False(t, shouldRestartAfterCallError(nil))
-	assert.True(t, shouldRestartAfterCallError(context.DeadlineExceeded))
-	assert.True(t, shouldRestartAfterCallError(context.Canceled))
+	assert.False(t, shouldRestartAfterCallError(context.DeadlineExceeded))
+	assert.False(t, shouldRestartAfterCallError(context.Canceled))
 	assert.False(t, shouldRestartAfterCallError(errors.New("extension rpc error -32000: bad input")))
 	assert.True(t, shouldRestartAfterCallError(errors.New("failed to read rpc header")))
 }

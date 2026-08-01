@@ -12,6 +12,9 @@ func (m *model) applyChatEvent(event chat.ChatEvent) {
 	if event.ConversationID != "" {
 		m.conversationID = event.ConversationID
 	}
+	if strings.TrimSpace(event.ConversationName) != "" {
+		m.title = strings.TrimSpace(event.ConversationName)
+	}
 
 	switch event.Kind {
 	case "conversation":

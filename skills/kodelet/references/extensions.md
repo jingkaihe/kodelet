@@ -115,7 +115,7 @@ Legacy hook mapping:
 
 Extension subprocesses communicate with Kodelet over stdio JSON-RPC using `Content-Length` framing. Kodelet sends initialization, tool execution, command execution, and lifecycle event requests to the extension process. Extension code should reserve `stdout` for protocol messages and write logs to `stderr`.
 
-The TypeScript SDK's `runExtension(...)` helper implements this protocol for extensions. Non-SDK extensions can implement the same JSON-RPC methods directly. Persistent frame updates use parentless `kodelet.ui.widget.frame` and `kodelet.ui.surface.frame` notifications; host input and resize arrive as `extension.ui.surface.input` and `extension.ui.surface.resize` notifications. Positive sequence numbers reject stale frames/events, and the TUI coalesces pending presentation frames to the latest snapshot.
+The TypeScript SDK's `runExtension(...)` helper implements this protocol for extensions. Non-SDK extensions can implement the same JSON-RPC methods directly. Kodelet supplies an opaque `context.uiScopeId` for conversation-scoped calls, and persistent UI messages carry it as `scopeId`, including an explicit empty string for host-global objects, parentless frame updates, and later surface close requests. Host input and resize arrive as `extension.ui.surface.input` and `extension.ui.surface.resize` notifications with the same scope. Positive sequence numbers reject stale frames/events per scoped object, and the TUI coalesces pending presentation frames to the latest snapshot.
 
 ## Discovery
 

@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
+	"github.com/jingkaihe/kodelet/pkg/messagehistory"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -150,6 +152,108 @@ func TestConversationPickerIgnoresResultsFromEarlierOpening(t *testing.T) {
 
 	assert.True(t, m.conversationPicker.loading)
 	assert.Empty(t, m.conversationPicker.summaries)
+}
+
+func TestConversationPickerKeepsSelectedConversationAcrossAsyncReorder(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	now := time.Now()
+	m.conversationPicker = &conversationPickerState{
+		summaries: []convtypes.ConversationSummary{
+			{ID: "conversation-a", FirstMessage: "A", UpdatedAt: now},
+			{ID: "conversation-b", FirstMessage: "B", UpdatedAt: now.Add(-time.Hour)},
+		},
+		selected:  2,
+		requestID: 7,
+	}
+	m.clampConversationPickerSelection()
+	assert.Equal(t, "conversation:conversation-b", m.conversationPicker.selectedKey)
+
+	m.applyConversationList(conversationListMsg{
+		requestID: 7,
+		summaries: []convtypes.ConversationSummary{
+			{ID: "conversation-a", FirstMessage: "A", UpdatedAt: now.Add(-time.Hour)},
+			{ID: "conversation-b", FirstMessage: "B", UpdatedAt: now.Add(time.Hour)},
+		},
+	})
+
+	items := m.filteredConversationPickerItems()
+	selected := m.conversationPickerSelectedIndex(items)
+	assert.Equal(t, "conversation-b", items[selected].id)
+	assert.Equal(t, 1, selected)
+}
+
+func TestPickerSelectedConversationQueuesSubmitUntilHistoryLoads(t *testing.T) {
+	m := newModel(context.Background(), Config{Runner: &recordingRunner{}})
+	t.Cleanup(m.cancel)
+	m.conversationPicker = &conversationPickerState{
+		query: "persisted",
+		summaries: []convtypes.ConversationSummary{{
+			ID:           "conversation-persisted",
+			FirstMessage: "Persisted conversation",
+			CWD:          t.TempDir(),
+		}},
+	}
+	require.NotNil(t, m.selectConversationPickerItem())
+	state := m.conversationState
+	require.True(t, state.initialHistoryPending)
+	require.True(t, state.deferSubmitUntilHistory)
+
+	m.textarea.SetValue("continue after history")
+	assert.Nil(t, m.submit())
+	assert.False(t, state.running)
+	assert.Empty(t, state.entries)
+	assert.Equal(t, "continue after history", state.submitAfterHistoryLoad)
+
+	updated, _ := m.Update(initialHistoryMsg{
+		conversationKey: state.key,
+		conversationID:  state.conversationID,
+		loaded:          true,
+		cwd:             state.cwd,
+		entries:         []chatEntry{{kind: entryUser, content: "earlier prompt"}},
+	})
+	m = updated.(model)
+	assert.Equal(t, "continue after history", state.submitAfterExtensionLifecycle)
+	require.Len(t, state.entries, 1)
+	assert.Equal(t, "earlier prompt", state.entries[0].content)
+
+	updated, cmd := m.Update(extensionLifecycleMsg{conversationKey: state.key, conversationID: state.conversationID})
+	m = updated.(model)
+	require.NotNil(t, cmd)
+	assert.True(t, state.running)
+	require.Len(t, state.entries, 2)
+	assert.Equal(t, "continue after history", state.entries[1].content)
+}
+
+func TestPickerSelectedConversationUsesStoredWorkspaceAndReloadsMessageHistoryScope(t *testing.T) {
+	explicitCWD := t.TempDir()
+	storedCWD := t.TempDir()
+	m := newModel(context.Background(), Config{CWD: explicitCWD})
+	t.Cleanup(m.cancel)
+	m.conversationPicker = &conversationPickerState{
+		query: "persisted",
+		summaries: []convtypes.ConversationSummary{{
+			ID:           "conversation-persisted",
+			FirstMessage: "Persisted conversation",
+			CWD:          storedCWD,
+		}},
+	}
+	require.NotNil(t, m.selectConversationPickerItem())
+	state := m.conversationState
+	assert.Empty(t, state.requestedCWD)
+	assert.Equal(t, storedCWD, state.cwd)
+	assert.Empty(t, state.messageHistoryScopeCWD)
+
+	updated, _ := m.Update(initialHistoryMsg{
+		conversationKey: state.key,
+		conversationID:  state.conversationID,
+		loaded:          true,
+		cwd:             storedCWD,
+	})
+	m = updated.(model)
+	wantScope, err := messagehistory.ResolveScopeCWD(storedCWD)
+	require.NoError(t, err)
+	assert.Equal(t, wantScope, state.messageHistoryScopeCWD)
 }
 
 func TestConversationPickerConsumesShiftEnter(t *testing.T) {
@@ -317,6 +421,33 @@ func TestConversationPickerRendersLoadingErrorAndEmptyState(t *testing.T) {
 	assert.Contains(t, rendered, "No matching conversations")
 }
 
+func TestConversationPickerHeightBudgetIncludesStatusAndOverflowRows(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 100
+	m.height = 10
+	m.resize()
+	m.conversationPicker = &conversationPickerState{
+		loading: true,
+		err:     errors.New("conversation store unavailable"),
+	}
+	for index := range 12 {
+		m.conversationPicker.summaries = append(m.conversationPicker.summaries, convtypes.ConversationSummary{
+			ID:           fmt.Sprintf("conversation-%02d", index),
+			FirstMessage: fmt.Sprintf("Conversation %02d", index),
+			UpdatedAt:    time.Now().Add(-time.Duration(index) * time.Minute),
+		})
+	}
+	m.conversationPicker.selected = 8
+	m.clampConversationPickerSelection()
+
+	rendered := xansi.Strip(m.renderConversationPicker())
+	assert.LessOrEqual(t, len(strings.Split(rendered, "\n")), m.height)
+	items := m.filteredConversationPickerItems()
+	selected := m.conversationPickerSelectedIndex(items)
+	assert.Contains(t, rendered, items[selected].title)
+}
+
 func TestParallelConversationRunsRouteEventsAndCompletion(t *testing.T) {
 	m := newModel(context.Background(), Config{Runner: &recordingRunner{}})
 	t.Cleanup(m.cancel)
@@ -415,6 +546,56 @@ func TestBackgroundRunErrorDismissesPromptWithoutChangingActiveConversation(t *t
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for background prompt dismissal")
 	}
+}
+
+func TestFailedAndCancelledRunsDiscardQueuedSlashFollowUps(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		err        error
+		cancelling bool
+	}{
+		{name: "error", err: errors.New("run failed")},
+		{name: "cancelled", err: context.Canceled, cancelling: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			m := newModel(context.Background(), Config{})
+			t.Cleanup(m.cancel)
+			state := m.conversationState
+			state.running = true
+			state.runCancelling = test.cancelling
+			state.activeRunID = 9
+			state.queuedFollowUps = []string{"/goal should not run"}
+			m.runs[9] = &conversationRun{conversationKey: state.key}
+			m.runByState[state.key] = 9
+
+			updated, _ := m.Update(chatDoneMsg{runID: 9, conversationKey: state.key, conversationID: state.conversationID, err: test.err})
+			m = updated.(model)
+
+			assert.False(t, state.running)
+			assert.Empty(t, state.queuedFollowUps)
+			assert.Empty(t, m.runs)
+		})
+	}
+}
+
+func TestConversationRenameEventUpdatesOpenPickerTitle(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.title = "Old title"
+	m.conversationPicker = &conversationPickerState{}
+
+	m.applyChatEvent(chat.ChatEvent{Kind: "conversation", ConversationID: m.conversationID, ConversationName: "New title"})
+
+	assert.Equal(t, "New title", m.title)
+	items := m.filteredConversationPickerItems()
+	var current conversationPickerItem
+	for _, item := range items {
+		if item.key == m.activeConversationKey {
+			current = item
+			break
+		}
+	}
+	assert.Equal(t, "New title", current.title)
 }
 
 func TestGeneratedConversationIDKeepsStableStateKey(t *testing.T) {

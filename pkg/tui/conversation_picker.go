@@ -11,7 +11,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
-	"github.com/jingkaihe/kodelet/pkg/messagehistory"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/pkg/errors"
 )
@@ -29,12 +28,13 @@ const (
 )
 
 type conversationPickerState struct {
-	query     string
-	summaries []convtypes.ConversationSummary
-	selected  int
-	loading   bool
-	err       error
-	requestID int
+	query       string
+	summaries   []convtypes.ConversationSummary
+	selected    int
+	selectedKey string
+	loading     bool
+	err         error
+	requestID   int
 }
 
 type conversationPickerItem struct {
@@ -76,6 +76,11 @@ func loadConversationList(ctx context.Context, requestID int) tea.Cmd {
 }
 
 func (m *model) openConversationPicker(query string) tea.Cmd {
+	oldFocusKey, oldFocused := m.focusedExtensionSurfaceKey()
+	var oldFocus tuiExtensionSurface
+	if oldFocused {
+		oldFocus = m.extensionSurfaces[oldFocusKey]
+	}
 	m.profilePickerOpen = false
 	m.reasoningPickerOpen = false
 	m.dismissSlashCommandSuggestions()
@@ -89,13 +94,14 @@ func (m *model) openConversationPicker(query string) tea.Cmd {
 		requestID: requestID,
 	}
 	m.clampConversationPickerSelection()
-	return loadConversationList(m.ctx, requestID)
+	return tea.Batch(loadConversationList(m.ctx, requestID), tea.Sequence(m.extensionSurfaceFocusTransitionCommands(oldFocusKey, oldFocused, oldFocus)...))
 }
 
 func (m *model) applyConversationList(msg conversationListMsg) {
 	if m.conversationPicker == nil || msg.requestID != m.conversationPicker.requestID {
 		return
 	}
+	m.rememberConversationPickerSelection()
 	m.conversationPicker.loading = false
 	m.conversationPicker.err = msg.err
 	m.conversationPicker.summaries = append([]convtypes.ConversationSummary(nil), msg.summaries...)
@@ -213,16 +219,76 @@ func (m *model) clampConversationPickerSelection() {
 	if m.conversationPicker == nil {
 		return
 	}
-	count := len(m.filteredConversationPickerItems())
+	items := m.filteredConversationPickerItems()
+	count := len(items)
 	if count == 0 {
 		m.conversationPicker.selected = 0
+		m.conversationPicker.selectedKey = ""
 		return
+	}
+	if selectedKey := m.conversationPicker.selectedKey; selectedKey != "" {
+		for index, item := range items {
+			if conversationPickerSelectionKey(item) == selectedKey {
+				m.conversationPicker.selected = index
+				return
+			}
+		}
 	}
 	if m.conversationPicker.selected < 0 {
 		m.conversationPicker.selected = count - 1
 	} else if m.conversationPicker.selected >= count {
 		m.conversationPicker.selected = 0
 	}
+	m.conversationPicker.selectedKey = conversationPickerSelectionKey(items[m.conversationPicker.selected])
+}
+
+func (m *model) rememberConversationPickerSelection() {
+	if m.conversationPicker == nil {
+		return
+	}
+	items := m.filteredConversationPickerItems()
+	if len(items) == 0 {
+		return
+	}
+	index := min(max(0, m.conversationPicker.selected), len(items)-1)
+	m.conversationPicker.selectedKey = conversationPickerSelectionKey(items[index])
+}
+
+func conversationPickerSelectionKey(item conversationPickerItem) string {
+	if item.isNew {
+		return "new"
+	}
+	if item.key != "" {
+		return "conversation:" + item.key
+	}
+	return "conversation:" + item.id
+}
+
+func (m model) conversationPickerSelectedIndex(items []conversationPickerItem) int {
+	if m.conversationPicker == nil || len(items) == 0 {
+		return 0
+	}
+	if selectedKey := m.conversationPicker.selectedKey; selectedKey != "" {
+		for index, item := range items {
+			if conversationPickerSelectionKey(item) == selectedKey {
+				return index
+			}
+		}
+	}
+	return min(max(0, m.conversationPicker.selected), len(items)-1)
+}
+
+func (m *model) closeConversationPicker() tea.Cmd {
+	if m.conversationPicker == nil {
+		return nil
+	}
+	oldFocusKey, oldFocused := m.focusedExtensionSurfaceKey()
+	var oldFocus tuiExtensionSurface
+	if oldFocused {
+		oldFocus = m.extensionSurfaces[oldFocusKey]
+	}
+	m.conversationPicker = nil
+	return tea.Sequence(m.extensionSurfaceFocusTransitionCommands(oldFocusKey, oldFocused, oldFocus)...)
 }
 
 func (m *model) updateConversationPickerKey(msg tea.KeyMsg) tea.Cmd {
@@ -231,14 +297,17 @@ func (m *model) updateConversationPickerKey(msg tea.KeyMsg) tea.Cmd {
 	}
 	switch msg.String() {
 	case "esc", "ctrl+c", "ctrl+d", "ctrl+l":
-		m.conversationPicker = nil
-		return nil
+		return m.closeConversationPicker()
 	case "up", "shift+tab":
+		m.clampConversationPickerSelection()
 		m.conversationPicker.selected--
+		m.conversationPicker.selectedKey = ""
 		m.clampConversationPickerSelection()
 		return nil
 	case "down", "tab":
+		m.clampConversationPickerSelection()
 		m.conversationPicker.selected++
+		m.conversationPicker.selectedKey = ""
 		m.clampConversationPickerSelection()
 		return nil
 	case "enter":
@@ -246,15 +315,21 @@ func (m *model) updateConversationPickerKey(msg tea.KeyMsg) tea.Cmd {
 	case "backspace":
 		m.conversationPicker.query = trimLastRune(m.conversationPicker.query)
 		m.conversationPicker.selected = 0
+		m.conversationPicker.selectedKey = ""
+		m.clampConversationPickerSelection()
 		return nil
 	case "ctrl+u":
 		m.conversationPicker.query = ""
 		m.conversationPicker.selected = 0
+		m.conversationPicker.selectedKey = ""
+		m.clampConversationPickerSelection()
 		return nil
 	}
 	if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
 		m.conversationPicker.query += string(msg.Runes)
 		m.conversationPicker.selected = 0
+		m.conversationPicker.selectedKey = ""
+		m.clampConversationPickerSelection()
 	}
 	return nil
 }
@@ -272,31 +347,27 @@ func (m *model) selectConversationPickerItem() tea.Cmd {
 	if m.conversationPicker == nil || len(items) == 0 {
 		return nil
 	}
-	index := m.conversationPicker.selected
-	if index < 0 || index >= len(items) {
-		index = 0
-	}
+	index := m.conversationPickerSelectedIndex(items)
 	item := items[index]
 	if item.isNew {
 		return m.createNewConversation()
 	}
 	if activated, cmd := m.activateConversation(item.key); activated {
-		m.conversationPicker = nil
-		return cmd
+		return tea.Batch(cmd, m.closeConversationPicker())
 	}
 
 	state := newConversationState(item.key, item.id, true, m.conversationDefaults)
 	state.initialHistoryPending = true
+	state.deferSubmitUntilHistory = true
+	state.requestedCWD = ""
 	state.title = item.title
 	state.updatedAt = item.updatedAt
 	if item.cwd != "" {
 		state.cwd = item.cwd
-		state.messageHistoryScopeCWD, _ = messagehistory.ResolveScopeCWD(item.cwd)
 	}
 	m.conversations[item.key] = state
 	_, activateCmd := m.activateConversation(item.key)
-	m.conversationPicker = nil
-	return tea.Batch(activateCmd, loadConversationHistory(m.ctx, item.key, item.id, state.requestedCWD))
+	return tea.Batch(activateCmd, m.closeConversationPicker(), loadConversationHistory(m.ctx, item.key, item.id, state.requestedCWD))
 }
 
 func (m model) renderConversationPicker() string {
@@ -318,6 +389,7 @@ func (m model) renderConversationPicker() string {
 		"",
 	}
 	items := m.filteredConversationPickerItems()
+	selected := m.conversationPickerSelectedIndex(items)
 	if m.conversationPicker.loading {
 		lines = append(lines, renderPersistentStyle(uiDialogMutedStyle, fitVisible("Loading saved conversations…", contentWidth)))
 	}
@@ -327,26 +399,30 @@ func (m model) renderConversationPicker() string {
 	if len(items) == 0 {
 		lines = append(lines, renderPersistentStyle(uiDialogMutedStyle, fitVisible("No matching conversations.", contentWidth)))
 	} else {
-		maxRows := max(1, m.height-9)
-		start, end := conversationPickerWindow(len(items), m.conversationPicker.selected, maxRows)
+		fixedRows := len(lines) + 2
+		rowBudget := max(0, m.height-2-fixedRows)
+		start, end, showMoreAbove, showMoreBelow := conversationPickerVisibleWindow(len(items), selected, rowBudget)
 		now := time.Now()
-		if start > 0 {
+		if showMoreAbove {
 			lines = append(lines, renderPersistentStyle(uiDialogMutedStyle, fitVisible("↑ more", contentWidth)))
 		}
 		for index := start; index < end; index++ {
 			line := m.renderConversationPickerItemAt(items[index], contentWidth, now)
-			if index == m.conversationPicker.selected {
+			if index == selected {
 				line = renderPersistentStyle(uiDialogSelectedStyle, padVisible(line, contentWidth))
 			} else {
 				line = renderPersistentStyle(uiDialogBodyStyle, line)
 			}
 			lines = append(lines, line)
 		}
-		if end < len(items) {
+		if showMoreBelow {
 			lines = append(lines, renderPersistentStyle(uiDialogMutedStyle, fitVisible("↓ more", contentWidth)))
 		}
 	}
 	lines = append(lines, "", renderPersistentStyle(uiDialogMutedStyle, fitVisible("Enter open · Esc close · /new creates immediately", contentWidth)))
+	if maxContentRows := max(0, m.height-2); len(lines) > maxContentRows {
+		lines = lines[:maxContentRows]
+	}
 
 	top := uiDialogBorderStyle.Render("╭" + strings.Repeat("─", width-2) + "╮")
 	bottom := uiDialogBorderStyle.Render("╰" + strings.Repeat("─", width-2) + "╯")
@@ -379,6 +455,29 @@ func conversationPickerWindow(count, selected, maxRows int) (int, int) {
 		start = count - maxRows
 	}
 	return start, start + maxRows
+}
+
+func conversationPickerVisibleWindow(count, selected, rowBudget int) (start, end int, showMoreAbove, showMoreBelow bool) {
+	if count <= 0 || rowBudget <= 0 {
+		return 0, 0, false, false
+	}
+	for rows := min(count, rowBudget); rows > 0; rows-- {
+		start, end = conversationPickerWindow(count, selected, rows)
+		showMoreAbove = start > 0
+		showMoreBelow = end < count
+		indicators := 0
+		if showMoreAbove {
+			indicators++
+		}
+		if showMoreBelow {
+			indicators++
+		}
+		if rows+indicators <= rowBudget {
+			return start, end, showMoreAbove, showMoreBelow
+		}
+	}
+	start, end = conversationPickerWindow(count, selected, 1)
+	return start, end, false, false
 }
 
 func (m model) renderConversationPickerItemAt(item conversationPickerItem, width int, now time.Time) string {

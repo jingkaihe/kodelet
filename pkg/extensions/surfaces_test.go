@@ -38,6 +38,7 @@ func TestUIFrameLineSupportsPlainAndStyledJSON(t *testing.T) {
 type recordingExtensionUIHost struct {
 	mu         sync.Mutex
 	set        []UIWidgetSetRequest
+	implicit   []bool
 	transcript []UITranscriptAppendRequest
 	owners     []UIExtensionOwner
 	cleanups   []UIExtensionOwner
@@ -51,9 +52,10 @@ func (h *recordingExtensionUIHost) AppendTranscript(_ context.Context, source UI
 	return UITranscriptAppendResponse{Accepted: true}, nil
 }
 
-func (h *recordingExtensionUIHost) SetWidget(_ context.Context, source UIExtensionSource, request UIWidgetSetRequest) (UIFrameResponse, error) {
+func (h *recordingExtensionUIHost) SetWidget(ctx context.Context, source UIExtensionSource, request UIWidgetSetRequest) (UIFrameResponse, error) {
 	h.mu.Lock()
 	h.set = append(h.set, request)
+	h.implicit = append(h.implicit, ExtensionUIHasImplicitScope(ctx))
 	h.owners = append(h.owners, source.ExtensionUIOwner())
 	h.mu.Unlock()
 	return UIFrameResponse{Accepted: true, LatestSequence: request.Frame.Sequence}, nil
@@ -101,6 +103,7 @@ func TestProcessExtensionUISourceRoutesRequestsAndCleansFailedGeneration(t *test
 	process.uiSource = source
 
 	result, rpcErr := source.HandleRPCRequest(context.Background(), UIWidgetSetMethod, json.RawMessage(`{
+		"scopeId":"conversation-a",
 		"id":"status",
 		"placement":"aboveComposer",
 		"frame":{"sequence":1,"lines":["ready"]}
@@ -110,9 +113,38 @@ func TestProcessExtensionUISourceRoutesRequestsAndCleansFailedGeneration(t *test
 	require.True(t, ok)
 	assert.True(t, response.Accepted)
 	require.Len(t, host.set, 1)
+	assert.Equal(t, "conversation-a", host.set[0].ScopeID)
 	assert.Equal(t, "ready", host.set[0].Frame.Lines[0].Spans[0].Text)
+	assert.False(t, host.implicit[0])
+
+	result, rpcErr = source.HandleRPCRequest(context.Background(), UIWidgetSetMethod, json.RawMessage(`{
+		"id":"legacy-status",
+		"placement":"aboveComposer",
+		"frame":{"sequence":1,"lines":["legacy"]}
+	}`))
+	require.Nil(t, rpcErr)
+	response, ok = result.(UIFrameResponse)
+	require.True(t, ok)
+	assert.True(t, response.Accepted)
+	require.Len(t, host.set, 2)
+	assert.True(t, host.implicit[1])
+
+	result, rpcErr = source.HandleRPCRequest(ContextWithExtensionUIScope(context.Background(), "conversation-parent"), UIWidgetSetMethod, json.RawMessage(`{
+		"scopeId":"",
+		"id":"global-status",
+		"placement":"aboveComposer",
+		"frame":{"sequence":1,"lines":["global"]}
+	}`))
+	require.Nil(t, rpcErr)
+	response, ok = result.(UIFrameResponse)
+	require.True(t, ok)
+	assert.True(t, response.Accepted)
+	require.Len(t, host.set, 3)
+	assert.Empty(t, host.set[2].ScopeID)
+	assert.False(t, host.implicit[2])
 
 	result, rpcErr = source.HandleRPCRequest(context.Background(), UITranscriptAppendMethod, json.RawMessage(`{
+		"scopeId":"conversation-a",
 		"title":"Saved",
 		"message":"./drawing.png"
 	}`))
@@ -121,6 +153,7 @@ func TestProcessExtensionUISourceRoutesRequestsAndCleansFailedGeneration(t *test
 	require.True(t, ok)
 	assert.True(t, transcriptResponse.Accepted)
 	require.Len(t, host.transcript, 1)
+	assert.Equal(t, "conversation-a", host.transcript[0].ScopeID)
 	assert.Equal(t, "./drawing.png", host.transcript[0].Message)
 
 	process.failClientGeneration(client)
@@ -132,6 +165,34 @@ func TestProcessExtensionUISourceRoutesRequestsAndCleansFailedGeneration(t *test
 	assert.Len(t, host.cleanups, 1)
 	require.NoError(t, process.Close())
 	assert.Len(t, host.cleanups, 1)
+}
+
+func TestExtensionCallContextCarriesHostUIScope(t *testing.T) {
+	ctx := ContextWithExtensionUIScope(context.Background(), "conversation-a")
+	callContext := extensionCallContextWithUIScope(ctx, ExtensionCallContext{ConversationID: "persisted-id"})
+	assert.Equal(t, "conversation-a", callContext.UIScopeID)
+
+	explicit := extensionCallContextWithUIScope(ctx, ExtensionCallContext{UIScopeID: "conversation-explicit"})
+	assert.Equal(t, "conversation-explicit", explicit.UIScopeID)
+	assert.Equal(t, "conversation-a", ExtensionUIScopeFromContext(ctx))
+}
+
+func TestProcessExtensionUISourceTracksSameSurfaceIDPerScope(t *testing.T) {
+	client := newRPCClient(strings.NewReader(""), ioDiscard{})
+	process := &Process{Extension: Extension{ID: "game"}, client: client}
+	source := &processExtensionUISource{
+		process: process,
+		client:  client,
+		owner:   UIExtensionOwner{ExtensionID: "game", Generation: 1},
+	}
+	process.uiSource = source
+	source.PrepareUISurfaceEventLifecycle("conversation-a", "shared", 1)
+	source.PrepareUISurfaceEventLifecycle("conversation-b", "shared", 2)
+
+	source.notifyMu.Lock()
+	defer source.notifyMu.Unlock()
+	assert.Equal(t, uint64(1), source.notifyLifecycles[extensionUISurfaceEventKey("conversation-a", "shared")])
+	assert.Equal(t, uint64(2), source.notifyLifecycles[extensionUISurfaceEventKey("conversation-b", "shared")])
 }
 
 func TestProcessInitializeAllowsReverseUIRequest(t *testing.T) {
@@ -344,14 +405,14 @@ func TestProcessExtensionUISourceDropsEventsFromPriorSurfaceLifecycle(t *testing
 		owner:   UIExtensionOwner{ExtensionID: "game", Generation: 1},
 	}
 	process.uiSource = source
-	source.PrepareUISurfaceEventLifecycle("surface", 2)
+	source.PrepareUISurfaceEventLifecycle("conversation", "surface", 2)
 
 	require.NoError(t, source.NotifyExtensionUISurfaceEvent(context.Background(), 1, UISurfaceInputMethod, UISurfaceInputNotification{
-		ID: "surface", Sequence: 1, Kind: UISurfaceInputKey, Key: "stale",
+		ScopeID: "conversation", ID: "surface", Sequence: 1, Kind: UISurfaceInputKey, Key: "stale",
 	}))
 
 	source.notifyMu.Lock()
-	_, exists := source.notify["surface"]
+	_, exists := source.notify[extensionUISurfaceEventKey("conversation", "surface")]
 	source.notifyMu.Unlock()
 	assert.False(t, exists)
 }

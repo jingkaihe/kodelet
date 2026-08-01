@@ -107,6 +107,52 @@ func TestRPCClientCallHandlesHostRequestBeforeResponse(t *testing.T) {
 	assert.Equal(t, "done", result.Content)
 }
 
+func TestRPCClientRoutesLegacyPersistentUIToSinglePendingCall(t *testing.T) {
+	clientReader, serverWriter := io.Pipe()
+	serverReader, clientWriter := io.Pipe()
+	t.Cleanup(func() {
+		_ = clientReader.Close()
+		_ = serverWriter.Close()
+		_ = serverReader.Close()
+		_ = clientWriter.Close()
+	})
+
+	client := newRPCClient(clientReader, clientWriter)
+	client.setHostRequestHandler(contextHostRequestHandler{})
+	callDone := make(chan error, 1)
+	go func() {
+		ctx := context.WithValue(context.Background(), rpcCallContextKey{}, "conversation-one")
+		callDone <- client.callWithHostHandler(ctx, "extension.command.execute", nil, nil, contextHostRequestHandler{})
+	}()
+
+	outbound := bufio.NewReader(serverReader)
+	requestPayload, err := readFrame(outbound)
+	require.NoError(t, err)
+	var request rpcRequest
+	require.NoError(t, json.Unmarshal(requestPayload, &request))
+
+	require.NoError(t, writeFrame(serverWriter, []byte(`{"jsonrpc":"2.0","id":7,"method":"kodelet.ui.widget.set","params":{"id":"status","placement":"aboveComposer","frame":{"sequence":1,"lines":["working"]}}}`)))
+	legacyPayload, err := readFrame(outbound)
+	require.NoError(t, err)
+	var legacyResponse rpcResponse
+	require.NoError(t, json.Unmarshal(legacyPayload, &legacyResponse))
+	assert.Equal(t, int64(7), legacyResponse.ID)
+	assert.JSONEq(t, `{"accepted":true,"conversation":"conversation-one"}`, string(legacyResponse.Result))
+
+	require.NoError(t, writeFrame(serverWriter, []byte(`{"jsonrpc":"2.0","id":8,"method":"kodelet.ui.widget.set","params":{"scopeId":"","id":"global-status","placement":"aboveComposer","frame":{"sequence":1,"lines":["global"]}}}`)))
+	globalPayload, err := readFrame(outbound)
+	require.NoError(t, err)
+	var globalResponse rpcResponse
+	require.NoError(t, json.Unmarshal(globalPayload, &globalResponse))
+	assert.Equal(t, int64(8), globalResponse.ID)
+	assert.JSONEq(t, `{"accepted":true,"conversation":""}`, string(globalResponse.Result))
+
+	responsePayload, err := json.Marshal(rpcResponse{JSONRPC: "2.0", ID: request.ID, Result: json.RawMessage(`{}`)})
+	require.NoError(t, err)
+	require.NoError(t, writeFrame(serverWriter, responsePayload))
+	require.NoError(t, <-callDone)
+}
+
 func TestRPCClientRoutesParentlessNotificationsToPersistentHostHandler(t *testing.T) {
 	clientReader, serverWriter := io.Pipe()
 	serverReader, clientWriter := io.Pipe()
@@ -169,6 +215,7 @@ func TestRPCClientCallsRunConcurrentlyAndRouteHostRequests(t *testing.T) {
 		_ = clientWriter.Close()
 	})
 	client := newRPCClient(clientReader, clientWriter)
+	client.setHostRequestHandler(contextHostRequestHandler{})
 	type callResult struct {
 		label   string
 		content string
@@ -219,12 +266,11 @@ func TestRPCClientCallsRunConcurrentlyAndRouteHostRequests(t *testing.T) {
 	require.NoError(t, writeFrame(serverWriter, []byte(`{"jsonrpc":"2.0","id":78,"method":"kodelet.ui.widget.set","params":{"id":"status","placement":"aboveComposer","frame":{"sequence":1,"lines":["working"]}}}`)))
 	ambiguousUIPayload, err := readFrame(outbound)
 	require.NoError(t, err)
-	var ambiguousUIResponse rpcResponse
-	require.NoError(t, json.Unmarshal(ambiguousUIPayload, &ambiguousUIResponse))
-	assert.Equal(t, int64(78), ambiguousUIResponse.ID)
-	require.NotNil(t, ambiguousUIResponse.Error)
-	assert.Equal(t, -32602, ambiguousUIResponse.Error.Code)
-	assert.Contains(t, ambiguousUIResponse.Error.Message, "require parentId")
+	var parentlessUIResponse rpcResponse
+	require.NoError(t, json.Unmarshal(ambiguousUIPayload, &parentlessUIResponse))
+	assert.Equal(t, int64(78), parentlessUIResponse.ID)
+	assert.Nil(t, parentlessUIResponse.Error)
+	assert.JSONEq(t, `{"accepted":true,"conversation":""}`, string(parentlessUIResponse.Result))
 
 	parentedWidgetRequest := []byte(`{"jsonrpc":"2.0","id":79,"parentId":` + strconv.FormatInt(requestIDs["first"], 10) + `,"method":"kodelet.ui.widget.set","params":{"id":"status","placement":"aboveComposer","frame":{"sequence":1,"lines":["working"]}}}`)
 	require.NoError(t, writeFrame(serverWriter, parentedWidgetRequest))
