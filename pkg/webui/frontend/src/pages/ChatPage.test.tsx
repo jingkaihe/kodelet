@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	act,
 	fireEvent,
@@ -11,7 +11,17 @@ import type { ChatStreamEvent } from "../types";
 
 vi.mock("../components/workspace/TerminalModal", () => ({
 	default: ({ open }: { open: boolean }) =>
-		open ? <div data-testid="terminal-panel">Terminal</div> : null,
+		open ? (
+			<div data-testid="terminal-panel">
+				<div
+					className="workspace-terminal-host"
+					data-testid="terminal-host"
+					tabIndex={0}
+				>
+					Terminal
+				</div>
+			</div>
+		) : null,
 }));
 
 const mockNavigate = vi.fn();
@@ -84,6 +94,10 @@ vi.mock("../services/api", () => ({
 }));
 
 describe("ChatPage", () => {
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
 	beforeEach(() => {
 		vi.clearAllMocks();
 		routeParams = {};
@@ -219,6 +233,229 @@ describe("ChatPage", () => {
 
 		fireEvent.click(screen.getByTestId("sidebar-attached-toggle"));
 		expect(screen.getByTestId("chat-sidebar-shell")).toBeInTheDocument();
+	});
+
+	it("starts with the sidebar closed on mobile and closes it before opening a new chat", async () => {
+		window.localStorage.setItem("kodelet.chat.sidebar.visible", "true");
+		vi.stubGlobal(
+			"matchMedia",
+			vi.fn().mockImplementation((query: string) => ({
+				matches: query === "(max-width: 1023px)",
+				media: query,
+				onchange: null,
+				addEventListener: vi.fn(),
+				removeEventListener: vi.fn(),
+				addListener: vi.fn(),
+				removeListener: vi.fn(),
+				dispatchEvent: vi.fn(),
+			})),
+		);
+
+		render(<ChatPage />);
+
+		await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
+		expect(screen.queryByTestId("chat-sidebar-shell")).not.toBeInTheDocument();
+		expect(screen.getByTestId("sidebar-attached-toggle-mobile")).toBeInTheDocument();
+		expect(window.localStorage.getItem("kodelet.chat.sidebar.visible")).toBe(
+			"true",
+		);
+
+		await act(async () => {
+			fireEvent.click(screen.getByTestId("sidebar-attached-toggle-mobile"));
+		});
+		expect(screen.getByRole("dialog", { name: "Conversations" })).toBeInTheDocument();
+		expect(screen.getByTestId("chat-sidebar-shell")).toHaveAttribute(
+			"tabindex",
+			"-1",
+		);
+		expect(screen.getByTestId("sidebar-hide-button")).toBeEnabled();
+		fireEvent.click(screen.getByTestId("sidebar-hide-button"));
+		await waitFor(() =>
+			expect(screen.getByTestId("sidebar-attached-toggle-mobile")).toHaveFocus(),
+		);
+		fireEvent.click(screen.getByTestId("sidebar-attached-toggle-mobile"));
+
+		await act(async () => {
+			fireEvent.click(screen.getByTestId("sidebar-new-chat-button"));
+			await Promise.resolve();
+		});
+		expect(screen.queryByTestId("chat-sidebar-shell")).not.toBeInTheDocument();
+		expect(screen.getByTestId("new-chat-dialog")).toBeInTheDocument();
+	});
+
+	it("isolates the mobile workspace sheet without stealing terminal keys", async () => {
+		vi.stubGlobal(
+			"matchMedia",
+			vi.fn().mockImplementation((query: string) => ({
+				matches:
+					query === "(max-width: 1023px)" ||
+					query === "(max-width: 1180px)",
+				media: query,
+				onchange: null,
+				addEventListener: vi.fn(),
+				removeEventListener: vi.fn(),
+				addListener: vi.fn(),
+				removeListener: vi.fn(),
+				dispatchEvent: vi.fn(),
+			})),
+		);
+
+		render(<ChatPage />);
+		await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
+
+		fireEvent.click(screen.getByTestId("workspace-tools-toggle"));
+		await screen.findByTestId("terminal-panel");
+
+		const workspaceShell = screen.getByTestId("workspace-tools-shell");
+		const workspaceToggle = screen.getByTestId("workspace-tools-toggle");
+		const terminalTab = screen.getByTestId("workspace-tools-terminal-tab");
+		const diffTab = screen.getByTestId("workspace-tools-diff-tab");
+		const terminalHost = screen.getByTestId("terminal-host");
+		const chatMain = document.querySelector("main.chat-main-panel");
+		expect(workspaceShell).toHaveAttribute("role", "dialog");
+		expect(workspaceShell).toHaveAttribute("aria-modal", "true");
+		expect(chatMain).toHaveAttribute("inert");
+		expect(chatMain).toHaveAttribute("aria-hidden", "true");
+
+		workspaceToggle.focus();
+		fireEvent.keyDown(window, { key: "Tab" });
+		expect(terminalTab).toHaveFocus();
+
+		terminalTab.focus();
+		fireEvent.keyDown(window, { key: "Tab", shiftKey: true });
+		expect(workspaceToggle).toHaveFocus();
+
+		terminalHost.focus();
+		expect(fireEvent.keyDown(terminalHost, { key: "Tab" })).toBe(true);
+		expect(terminalHost).toHaveFocus();
+
+		fireEvent.keyDown(terminalHost, { key: "F6" });
+		expect(workspaceToggle).toHaveFocus();
+
+		terminalHost.focus();
+		expect(
+			fireEvent.keyDown(terminalHost, { key: "Tab", shiftKey: true }),
+		).toBe(true);
+		expect(terminalHost).toHaveFocus();
+
+		fireEvent.keyDown(terminalHost, { key: "F6", shiftKey: true });
+		expect(diffTab).toHaveFocus();
+	});
+
+	it("lets keyboard users leave the terminal on wide desktop", async () => {
+		vi.stubGlobal(
+			"matchMedia",
+			vi.fn().mockImplementation((query: string) => ({
+				matches: false,
+				media: query,
+				onchange: null,
+				addEventListener: vi.fn(),
+				removeEventListener: vi.fn(),
+				addListener: vi.fn(),
+				removeListener: vi.fn(),
+				dispatchEvent: vi.fn(),
+			})),
+		);
+
+		render(<ChatPage />);
+		await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
+		fireEvent.click(screen.getByTestId("workspace-tools-toggle"));
+		await screen.findByTestId("terminal-panel");
+
+		const terminalHost = screen.getByTestId("terminal-host");
+		const workspaceToggle = screen.getByTestId("workspace-tools-toggle");
+		const terminalTab = screen.getByTestId("workspace-tools-terminal-tab");
+		const diffTab = screen.getByTestId("workspace-tools-diff-tab");
+		expect(screen.getByTestId("workspace-tools-shell")).not.toHaveAttribute(
+			"role",
+			"dialog",
+		);
+
+		terminalHost.focus();
+		expect(fireEvent.keyDown(terminalHost, { key: "Tab" })).toBe(true);
+		expect(terminalHost).toHaveFocus();
+
+		fireEvent.keyDown(terminalHost, { key: "F6" });
+		expect(workspaceToggle).toHaveFocus();
+
+		terminalHost.focus();
+		fireEvent.keyDown(terminalHost, { key: "F6", shiftKey: true });
+		expect(diffTab).toHaveFocus();
+
+		fireEvent.click(diffTab);
+		await waitFor(() =>
+			expect(screen.queryByTestId("terminal-host")).not.toBeInTheDocument(),
+		);
+		fireEvent.click(terminalTab);
+		const reopenedTerminalHost = await screen.findByTestId("terminal-host");
+		reopenedTerminalHost.focus();
+		fireEvent.keyDown(reopenedTerminalHost, { key: "F6" });
+		expect(workspaceToggle).toHaveFocus();
+	});
+
+	it("removes a desktop sidebar from the accessibility tree when the workspace becomes modal", async () => {
+		let overlayMatches = false;
+		const overlayListeners = new Set<
+			(event: MediaQueryListEvent) => void
+		>();
+		const overlayMediaQuery = {
+			get matches() {
+				return overlayMatches;
+			},
+			media: "(max-width: 1180px)",
+			onchange: null,
+			addEventListener: vi.fn(
+				(_type: string, listener: (event: MediaQueryListEvent) => void) => {
+					overlayListeners.add(listener);
+				},
+			),
+			removeEventListener: vi.fn(
+				(_type: string, listener: (event: MediaQueryListEvent) => void) => {
+					overlayListeners.delete(listener);
+				},
+			),
+			addListener: vi.fn(),
+			removeListener: vi.fn(),
+			dispatchEvent: vi.fn(),
+		};
+		vi.stubGlobal(
+			"matchMedia",
+			vi.fn().mockImplementation((query: string) =>
+				query === "(max-width: 1180px)"
+					? overlayMediaQuery
+					: {
+							matches: false,
+							media: query,
+							onchange: null,
+							addEventListener: vi.fn(),
+							removeEventListener: vi.fn(),
+							addListener: vi.fn(),
+							removeListener: vi.fn(),
+							dispatchEvent: vi.fn(),
+						},
+			),
+		);
+
+		render(<ChatPage />);
+		await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
+		expect(screen.getByTestId("chat-sidebar-shell")).not.toHaveAttribute("inert");
+
+		fireEvent.click(screen.getByTestId("workspace-tools-toggle"));
+		await screen.findByTestId("terminal-panel");
+		expect(screen.getByTestId("chat-sidebar-shell")).not.toHaveAttribute("inert");
+
+		overlayMatches = true;
+		act(() => {
+			for (const listener of overlayListeners) {
+				listener({ matches: true } as MediaQueryListEvent);
+			}
+		});
+
+		expect(screen.getByTestId("chat-sidebar-shell")).toHaveAttribute("inert");
+		expect(screen.getByTestId("chat-sidebar-shell")).toHaveAttribute(
+			"aria-hidden",
+			"true",
+		);
 	});
 
 	it("resizes the sidebar width from the transparent edge handle", async () => {
@@ -939,6 +1176,15 @@ describe("ChatPage", () => {
 		await waitFor(() =>
 			expect(screen.getByLabelText("Working directory")).toHaveFocus(),
 		);
+		const closeButton = screen.getByRole("button", {
+			name: "Close new chat dialog",
+		});
+		const startButton = screen.getByRole("button", { name: "Start" });
+		startButton.focus();
+		fireEvent.keyDown(startButton, { key: "Tab" });
+		expect(closeButton).toHaveFocus();
+		fireEvent.keyDown(closeButton, { key: "Tab", shiftKey: true });
+		expect(startButton).toHaveFocus();
 		expect(screen.queryByTestId("cwd-suggestions")).not.toBeInTheDocument();
 		expect(
 			screen.queryByText("Type a full path or nearby project name."),
@@ -1101,9 +1347,10 @@ describe("ChatPage", () => {
 			expect(mockGetConversation).toHaveBeenCalledWith("conv-123"),
 		);
 
-		expect(screen.getByTestId("composer-inline-context")).toBeInTheDocument();
-		expect(screen.getByTestId("composer-inline-context")).toHaveTextContent(
-			"/workspace/project",
+		await waitFor(() =>
+			expect(screen.getByTestId("composer-inline-context")).toHaveTextContent(
+				"/workspace/project",
+			),
 		);
 		expect(
 			screen.queryByLabelText("Working directory"),
@@ -1716,6 +1963,21 @@ describe("ChatPage", () => {
 	});
 
 	it("shows blocking UI prompts from background running conversations", async () => {
+		vi.stubGlobal(
+			"matchMedia",
+			vi.fn().mockImplementation((query: string) => ({
+				matches:
+					query === "(max-width: 1023px)" ||
+					query === "(max-width: 1180px)",
+				media: query,
+				onchange: null,
+				addEventListener: vi.fn(),
+				removeEventListener: vi.fn(),
+				addListener: vi.fn(),
+				removeListener: vi.fn(),
+				dispatchEvent: vi.fn(),
+			})),
+		);
 		mockGetConversations.mockResolvedValue({
 			conversations: [
 				{
@@ -1772,6 +2034,8 @@ describe("ChatPage", () => {
 				expect.any(Object),
 			),
 		);
+		fireEvent.click(screen.getByTestId("workspace-tools-toggle"));
+		await screen.findByTestId("terminal-panel");
 
 		await act(async () => {
 			streamOptions?.onEvent({
@@ -1787,6 +2051,10 @@ describe("ChatPage", () => {
 
 		expect(screen.getByTestId("ui-input-dialog")).toBeInTheDocument();
 		expect(screen.getByText("Need background input")).toBeInTheDocument();
+		expect(screen.getByTestId("chat-layout")).toHaveAttribute("inert");
+		await waitFor(() => expect(screen.getByTestId("ui-input-response")).toHaveFocus());
+		fireEvent.keyDown(screen.getByTestId("ui-input-response"), { key: "Tab" });
+		expect(screen.getByTestId("ui-input-response")).toHaveFocus();
 
 		fireEvent.change(screen.getByTestId("ui-input-response"), {
 			target: { value: "yes" },

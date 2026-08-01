@@ -1,17 +1,34 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
 import App from './App';
+import TerminalPage from './pages/TerminalPage';
+import {
+  readTerminalPopOutRecord,
+  TERMINAL_POP_OUT_STORAGE_KEY,
+} from './components/workspace/terminalPopOut';
 
 vi.mock('./pages/ChatPage', () => ({
   default: () => <div data-testid="chat-page">Chat page</div>,
 }));
+
+vi.mock('./components/workspace/TerminalModal', () => ({
+  default: () => <div data-testid="terminal-modal">Terminal</div>,
+}));
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  window.localStorage.removeItem(TERMINAL_POP_OUT_STORAGE_KEY);
+  window.sessionStorage.clear();
+  document.documentElement.classList.remove('terminal-popout-active');
+  document.body.classList.remove('terminal-popout-active');
+});
 
 describe('App', () => {
   it('renders without crashing', async () => {
     const { container } = render(<App />);
 
     await waitFor(() => {
-      expect(container.querySelector('.min-h-screen')).toBeInTheDocument();
+      expect(container.querySelector('.h-full')).toBeInTheDocument();
     });
   });
 
@@ -20,7 +37,144 @@ describe('App', () => {
 
     await waitFor(() => {
       const wrapper = container.firstElementChild;
-      expect(wrapper).toHaveClass('min-h-screen');
+      expect(wrapper).toHaveClass('h-full', 'min-h-0', 'overflow-hidden');
     });
+  });
+
+  it('tracks the mobile visual viewport', async () => {
+    const viewportEvents = new EventTarget();
+    const visualViewport = {
+      width: 393,
+      height: 512,
+      offsetLeft: 0,
+      offsetTop: 18,
+      scale: 1,
+      addEventListener: viewportEvents.addEventListener.bind(viewportEvents),
+      removeEventListener: viewportEvents.removeEventListener.bind(viewportEvents),
+    };
+    vi.stubGlobal('visualViewport', visualViewport);
+
+    const { container } = render(<App />);
+    const app = container.firstElementChild;
+
+    await waitFor(() => {
+      expect(app).toHaveStyle({
+        '--app-viewport-top': '18px',
+        '--app-viewport-left': '0px',
+        '--app-viewport-width': '393px',
+        '--app-viewport-height': '512px',
+      });
+    });
+
+    visualViewport.height = 306;
+    visualViewport.offsetTop = 24;
+    viewportEvents.dispatchEvent(new Event('resize'));
+
+    await waitFor(() => {
+      expect(app).toHaveStyle({
+        '--app-viewport-top': '24px',
+        '--app-viewport-height': '306px',
+      });
+    });
+  });
+
+  it('leaves the layout viewport intact during pinch zoom', async () => {
+    const viewportEvents = new EventTarget();
+    const visualViewport = {
+      width: 240,
+      height: 360,
+      offsetLeft: 70,
+      offsetTop: 120,
+      scale: 1.6,
+      addEventListener: viewportEvents.addEventListener.bind(viewportEvents),
+      removeEventListener: viewportEvents.removeEventListener.bind(viewportEvents),
+    };
+    vi.stubGlobal('visualViewport', visualViewport);
+    vi.stubGlobal('innerWidth', 393);
+    vi.stubGlobal('innerHeight', 852);
+
+    const { container } = render(<App />);
+    const app = container.firstElementChild;
+
+    await waitFor(() => {
+      expect(app).toHaveStyle({
+        '--app-viewport-top': '0px',
+        '--app-viewport-left': '0px',
+        '--app-viewport-width': '393px',
+        '--app-viewport-height': '852px',
+      });
+    });
+  });
+});
+
+describe('TerminalPage', () => {
+  it('removes terminal document overflow styles on cleanup', () => {
+    const { unmount } = render(<TerminalPage />);
+    expect(document.documentElement).toHaveClass('terminal-popout-active');
+    expect(document.body).toHaveClass('terminal-popout-active');
+    expect(readTerminalPopOutRecord()).toEqual(
+      expect.objectContaining({ cwd: '' })
+    );
+
+    unmount();
+    expect(document.documentElement).not.toHaveClass('terminal-popout-active');
+    expect(document.body).not.toHaveClass('terminal-popout-active');
+    expect(readTerminalPopOutRecord()).toBeNull();
+  });
+
+  it('marks a reload handoff and reuses the pop-out identity', () => {
+    const { unmount } = render(<TerminalPage />);
+    const record = readTerminalPopOutRecord();
+    expect(record).not.toBeNull();
+    expect(record).toEqual(expect.objectContaining({ state: 'active' }));
+
+    window.dispatchEvent(new Event('beforeunload'));
+    unmount();
+
+    expect(readTerminalPopOutRecord()).toEqual(
+      expect.objectContaining({
+        id: record?.id,
+        state: 'closing',
+      })
+    );
+
+    const { unmount: unmountReloadedPage } = render(<TerminalPage />);
+    expect(readTerminalPopOutRecord()).toEqual(
+      expect.objectContaining({
+        id: record?.id,
+        state: 'active',
+      })
+    );
+    unmountReloadedPage();
+  });
+
+  it('releases ownership while cached and reclaims it when restored', () => {
+    const { unmount } = render(<TerminalPage />);
+    const record = readTerminalPopOutRecord();
+    expect(record).toEqual(expect.objectContaining({ state: 'active' }));
+
+    const pageHide = new Event('pagehide');
+    Object.defineProperty(pageHide, 'persisted', { value: true });
+    window.dispatchEvent(pageHide);
+
+    expect(readTerminalPopOutRecord()).toEqual(
+      expect.objectContaining({
+        id: record?.id,
+        state: 'closing',
+      })
+    );
+
+    const pageShow = new Event('pageshow');
+    Object.defineProperty(pageShow, 'persisted', { value: true });
+    window.dispatchEvent(pageShow);
+
+    expect(readTerminalPopOutRecord()).toEqual(
+      expect.objectContaining({
+        id: record?.id,
+        state: 'active',
+      })
+    );
+
+    unmount();
   });
 });

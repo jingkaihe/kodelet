@@ -30,8 +30,8 @@ const ChatMessageFrame: React.FC<ChatMessageFrameProps> = ({
     <article className="w-full">
       <div
         className={cn(
-          'chat-message-panel group w-full rounded-[1.5rem]',
-          isUser ? 'px-5 py-4' : 'px-5 py-5'
+          'chat-message-panel group w-full rounded-[1.5rem] px-4 sm:px-5',
+          isUser ? 'py-4' : 'py-5'
         )}
       >
         <div className="mb-4 flex items-center justify-between gap-3">

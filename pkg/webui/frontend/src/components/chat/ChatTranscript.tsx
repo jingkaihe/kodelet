@@ -321,7 +321,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
 
   if (messages.length === 0) {
     return (
-      <div className="flex min-h-full items-center justify-center px-6 py-12">
+      <div className="flex min-h-full items-center justify-center px-4 pb-12 pt-20 sm:px-6 lg:py-12">
         <div className="empty-state-copy-stack text-center">
           <h1 className="empty-state-title">
             {emptyStateTitle}
@@ -336,7 +336,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
   }
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-5 px-4 py-6 md:px-8">
+    <div className="mx-auto w-full max-w-5xl space-y-4 px-3 pb-6 pt-16 sm:space-y-5 sm:px-4 md:px-8 lg:py-6">
       {messages.map((message, index) => {
         const isUser = message.role === 'user';
         const isActiveStreamingAssistant =

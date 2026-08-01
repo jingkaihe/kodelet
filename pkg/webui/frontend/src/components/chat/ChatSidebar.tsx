@@ -202,7 +202,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 	const showLoadingState = loading && conversations.length === 0;
 
 	return (
-		<aside className="chat-sidebar-surface relative overflow-visible border-b border-black/8 px-6 py-6 lg:flex lg:h-screen lg:flex-col lg:border-b-0">
+		<aside className="chat-sidebar-surface relative flex h-full flex-col overflow-visible border-b border-black/8 px-6 py-6 lg:border-b-0">
 			<div className="sidebar-header">
 				<div className="sidebar-brand" aria-label="Kodelet conversations">
 					Kodelet
@@ -213,7 +213,6 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 						aria-label="Hide panel"
 						className="sidebar-toggle-button sidebar-toggle-button-open"
 						data-testid="sidebar-hide-button"
-						disabled={disabled}
 						onClick={onHide}
 						type="button"
 					>
@@ -222,7 +221,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 				) : null}
 			</div>
 
-			<div className="min-h-0 flex-1">
+			<div className="flex min-h-0 flex-1 flex-col">
 				<button
 					className="sidebar-action-link"
 					data-testid="sidebar-new-chat-button"
@@ -236,7 +235,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 
 				<div className="sidebar-section-title">Recents</div>
 
-				<div className="conversation-list max-h-[calc(100vh-13.5rem)] overflow-y-auto pr-1">
+				<div className="conversation-list min-h-0 flex-1 overflow-y-auto pr-1">
 					{conversations.length === 0 && !showLoadingState ? (
 						<div className="px-2 py-2 text-sm text-kodelet-dark/65">
 							No saved conversations yet.

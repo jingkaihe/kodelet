@@ -1,6 +1,14 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import TerminalModal from './TerminalModal';
+import {
+  clearTerminalPopOutRecord,
+  readTerminalPopOutRecord,
+  TERMINAL_POP_OUT_RELOAD_GRACE_PERIOD,
+  TERMINAL_POP_OUT_STORAGE_KEY,
+  type TerminalPopOutRecord,
+  writeTerminalPopOutRecord,
+} from './terminalPopOut';
 
 const { MockFitAddon, MockGhosttyLoad, MockTerminal, createTerminalWebSocketMock } = vi.hoisted(() => {
   class HoistedMockFitAddon {
@@ -146,6 +154,8 @@ describe('TerminalModal', () => {
   beforeEach(() => {
     MockTerminal.instances = [];
     createTerminalWebSocketMock.mockReset();
+    window.localStorage.removeItem(TERMINAL_POP_OUT_STORAGE_KEY);
+    window.sessionStorage.clear();
   });
 
   it('suppresses parser-generated input until replay completes', async () => {
@@ -222,6 +232,7 @@ describe('TerminalModal', () => {
     });
 
     expect(terminal.handleKey(new KeyboardEvent('keydown', { key: 'a' }))).toBe(false);
+    expect(terminal.handleKey(new KeyboardEvent('keydown', { key: 'Tab' }))).toBe(false);
   });
 
   it('does not close when Escape is pressed inside the terminal', async () => {
@@ -251,6 +262,23 @@ describe('TerminalModal', () => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
 
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not close behind a higher-priority inert overlay', async () => {
+    const socket = new MockWebSocket();
+    const onClose = vi.fn();
+    createTerminalWebSocketMock.mockReturnValue(socket);
+
+    render(
+      <div inert>
+        <TerminalModal cwdLabel="/tmp/project" onClose={onClose} open />
+      </div>
+    );
+
+    await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('reports wheel events to mouse-tracking terminal apps', async () => {
@@ -312,14 +340,280 @@ describe('TerminalModal', () => {
     render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open />);
 
     await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
-    screen.getByRole('button', { name: 'Open terminal in new window' }).click();
+    act(() => {
+      screen.getByRole('button', { name: 'Open terminal in new window' }).click();
+    });
 
     expect(openSpy).toHaveBeenCalledWith(
       'http://localhost:3000/terminal?cwd=%2Ftmp%2Fproject',
       'kodelet-terminal',
       'popup=yes,width=1120,height=760,resizable=yes,scrollbars=no'
     );
+    expect(socket.close).not.toHaveBeenCalled();
+    expect(screen.queryByText('Terminal is open in the pop-out')).not.toBeInTheDocument();
 
+    openSpy.mockRestore();
+  });
+
+  it('pauses the embedded terminal until the pop-out window closes', async () => {
+    const firstSocket = new MockWebSocket();
+    const restoredSocket = new MockWebSocket();
+    const popOutWindow = {
+      closed: false,
+      focus: vi.fn(),
+      location: {
+        href: 'http://localhost:3000/terminal?cwd=%2Ftmp%2Fproject',
+      },
+    };
+    const openSpy = vi
+      .spyOn(window, 'open')
+      .mockReturnValue(popOutWindow as unknown as Window);
+    createTerminalWebSocketMock
+      .mockReturnValueOnce(firstSocket)
+      .mockReturnValueOnce(restoredSocket);
+
+    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open />);
+
+    await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
+    act(() => {
+      screen.getByRole('button', { name: 'Open terminal in new window' }).click();
+    });
+
+    await waitFor(() => expect(firstSocket.close).toHaveBeenCalledTimes(1));
+    expect(popOutWindow.focus).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('terminal-host')).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByText('Terminal is open in the pop-out')).toBeInTheDocument();
+    expect(createTerminalWebSocketMock).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      screen.getByRole('button', { name: 'Focus pop-out' }).click();
+    });
+    expect(openSpy).toHaveBeenCalledTimes(1);
+    expect(popOutWindow.focus).toHaveBeenCalledTimes(2);
+
+    popOutWindow.closed = true;
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+    });
+
+    await waitFor(() => expect(createTerminalWebSocketMock).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId('terminal-host')).not.toHaveAttribute('aria-disabled');
+    expect(screen.queryByText('Terminal is open in the pop-out')).not.toBeInTheDocument();
+
+    const restoredTerminal = MockTerminal.instances[1];
+    act(() => {
+      firstSocket.emit('message', { data: JSON.stringify({ type: 'exit', code: 7 }) });
+      firstSocket.emit('close');
+      firstSocket.emit('error');
+    });
+
+    expect(restoredTerminal.writeln).not.toHaveBeenCalledWith(
+      '\r\n[process exited with code 7]'
+    );
+    expect(screen.queryByText('Disconnected')).not.toBeInTheDocument();
+    expect(screen.queryByText('Terminal connection failed')).not.toBeInTheDocument();
+
+    openSpy.mockRestore();
+  });
+
+  it('keeps the embedded terminal paused after the opener reloads', async () => {
+    const record: TerminalPopOutRecord = {
+      id: 'existing-pop-out',
+      cwd: '/tmp/project',
+      updatedAt: Date.now(),
+      version: 2,
+    };
+    window.localStorage.setItem(
+      TERMINAL_POP_OUT_STORAGE_KEY,
+      JSON.stringify(record)
+    );
+
+    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open />);
+
+    expect(screen.getByTestId('terminal-host')).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByText('Terminal is open in the pop-out')).toBeInTheDocument();
+    expect(createTerminalWebSocketMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps an old active record suspended when a mobile pop-out may be frozen', () => {
+    const record: TerminalPopOutRecord = {
+      id: 'background-pop-out',
+      cwd: '/tmp/project',
+      state: 'active',
+      updatedAt: Date.now() - 60_000,
+      version: 2,
+    };
+    window.localStorage.setItem(
+      TERMINAL_POP_OUT_STORAGE_KEY,
+      JSON.stringify(record)
+    );
+    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open />);
+
+    expect(createTerminalWebSocketMock).not.toHaveBeenCalled();
+    expect(screen.getByTestId('terminal-host')).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByText('Terminal is open in the pop-out')).toBeInTheDocument();
+    expect(readTerminalPopOutRecord('/tmp/project')).toEqual(record);
+  });
+
+  it('removes an abandoned closing record after the reload grace period', async () => {
+    const socket = new MockWebSocket();
+    const record: TerminalPopOutRecord = {
+      id: 'closed-pop-out',
+      cwd: '/tmp/project',
+      state: 'closing',
+      updatedAt: Date.now() - TERMINAL_POP_OUT_RELOAD_GRACE_PERIOD - 1,
+      version: 2,
+    };
+    window.localStorage.setItem(
+      TERMINAL_POP_OUT_STORAGE_KEY,
+      JSON.stringify(record)
+    );
+    createTerminalWebSocketMock.mockReturnValue(socket);
+
+    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open />);
+
+    await waitFor(() => expect(createTerminalWebSocketMock).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId('terminal-host')).not.toHaveAttribute('aria-disabled');
+    expect(readTerminalPopOutRecord('/tmp/project')).toBeNull();
+  });
+
+  it('preserves active pop-out leases for other working directories', () => {
+    const firstRecord: TerminalPopOutRecord = {
+      id: 'first-pop-out',
+      cwd: '/tmp/first',
+      updatedAt: Date.now(),
+      version: 2,
+    };
+    const secondRecord: TerminalPopOutRecord = {
+      id: 'second-pop-out',
+      cwd: '/tmp/second',
+      updatedAt: Date.now() + 1,
+      version: 2,
+    };
+
+    writeTerminalPopOutRecord(firstRecord);
+    writeTerminalPopOutRecord(secondRecord);
+
+    expect(readTerminalPopOutRecord('/tmp/first')).toEqual(firstRecord);
+    expect(readTerminalPopOutRecord('/tmp/second')).toEqual(secondRecord);
+
+    clearTerminalPopOutRecord(firstRecord.id);
+
+    expect(readTerminalPopOutRecord('/tmp/first')).toBeNull();
+    expect(readTerminalPopOutRecord('/tmp/second')).toEqual(secondRecord);
+  });
+
+  it('focuses a persisted pop-out opened from another tab', () => {
+    const popOutWindow = {
+      closed: false,
+      focus: vi.fn(),
+      location: {
+        href: 'http://localhost:3000/terminal?cwd=%2Ftmp%2Fproject',
+      },
+    };
+    const openSpy = vi
+      .spyOn(window, 'open')
+      .mockReturnValue(popOutWindow as unknown as Window);
+    const record: TerminalPopOutRecord = {
+      id: 'other-tab-pop-out',
+      cwd: '/tmp/project',
+      updatedAt: Date.now(),
+      version: 2,
+    };
+    writeTerminalPopOutRecord(record);
+
+    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open />);
+
+    expect(screen.getByText('Terminal is open in the pop-out')).toBeInTheDocument();
+    act(() => {
+      screen.getByRole('button', { name: 'Focus pop-out' }).click();
+    });
+
+    expect(openSpy).toHaveBeenCalledWith(
+      '',
+      'kodelet-terminal',
+      'popup=yes,width=1120,height=760,resizable=yes,scrollbars=no'
+    );
+    expect(popOutWindow.focus).toHaveBeenCalledTimes(1);
+    expect(createTerminalWebSocketMock).not.toHaveBeenCalled();
+
+    popOutWindow.closed = true;
+    openSpy.mockRestore();
+  });
+
+  it('reopens a missing persisted pop-out instead of adopting a blank window', () => {
+    const popOutWindow = {
+      closed: false,
+      focus: vi.fn(),
+      location: { href: 'about:blank' },
+    };
+    const openSpy = vi
+      .spyOn(window, 'open')
+      .mockReturnValue(popOutWindow as unknown as Window);
+    writeTerminalPopOutRecord({
+      id: 'missing-pop-out',
+      cwd: '/tmp/project',
+      state: 'active',
+      updatedAt: Date.now(),
+      version: 2,
+    });
+
+    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open />);
+    act(() => {
+      screen.getByRole('button', { name: 'Focus pop-out' }).click();
+    });
+
+    expect(popOutWindow.location.href).toBe(
+      'http://localhost:3000/terminal?cwd=%2Ftmp%2Fproject'
+    );
+    expect(popOutWindow.focus).toHaveBeenCalledTimes(1);
+    expect(createTerminalWebSocketMock).not.toHaveBeenCalled();
+
+    popOutWindow.closed = true;
+    openSpy.mockRestore();
+  });
+
+  it('restores the embedded terminal after the tracked pop-out navigates away', async () => {
+    const firstSocket = new MockWebSocket();
+    const restoredSocket = new MockWebSocket();
+    const popOutWindow = {
+      closed: false,
+      focus: vi.fn(),
+      location: {
+        href: 'http://localhost:3000/terminal?cwd=%2Ftmp%2Fproject',
+      },
+    };
+    const openSpy = vi
+      .spyOn(window, 'open')
+      .mockReturnValue(popOutWindow as unknown as Window);
+    createTerminalWebSocketMock
+      .mockReturnValueOnce(firstSocket)
+      .mockReturnValueOnce(restoredSocket);
+
+    render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open />);
+    await waitFor(() => expect(MockTerminal.instances[0]).toBeDefined());
+    act(() => {
+      screen.getByRole('button', { name: 'Open terminal in new window' }).click();
+      window.dispatchEvent(new Event('focus'));
+    });
+    await waitFor(() => expect(firstSocket.close).toHaveBeenCalledTimes(1));
+
+    popOutWindow.location.href = 'https://example.com/';
+    writeTerminalPopOutRecord({
+      id: 'navigated-pop-out',
+      cwd: '/tmp/project',
+      state: 'closing',
+      updatedAt: Date.now() - TERMINAL_POP_OUT_RELOAD_GRACE_PERIOD - 1,
+      version: 2,
+    });
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+    });
+
+    await waitFor(() => expect(createTerminalWebSocketMock).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId('terminal-host')).not.toHaveAttribute('aria-disabled');
+
+    popOutWindow.closed = true;
     openSpy.mockRestore();
   });
 

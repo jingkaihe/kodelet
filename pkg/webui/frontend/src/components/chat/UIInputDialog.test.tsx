@@ -64,7 +64,7 @@ describe('UIInputDialog', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('renders confirmation prompts without a free-form input', () => {
+  it('renders confirmation prompts without a free-form input', async () => {
     const onCancel = vi.fn();
     const onSubmit = vi.fn();
     render(
@@ -83,12 +83,64 @@ describe('UIInputDialog', () => {
 
     expect(screen.getByText('A tool call incoming')).toBeInTheDocument();
     expect(screen.queryByTestId('ui-input-response')).not.toBeInTheDocument();
+    expect(screen.getByTestId('ui-input-dialog')).toHaveAttribute('aria-modal', 'true');
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Allow' })).toHaveFocus();
+    });
+
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Allow' }), { key: 'Tab' });
+    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Cancel' }), {
+      key: 'Tab',
+      shiftKey: true,
+    });
+    expect(screen.getByRole('button', { name: 'Allow' })).toHaveFocus();
 
     fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
     expect(onSubmit).toHaveBeenCalledWith('');
     expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('dismisses the active dialog with Escape', async () => {
+    const onCancel = vi.fn();
+    render(
+      <UIInputDialog
+        request={baseRequest}
+        onCancel={onCancel}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByTestId('ui-input-response')).toHaveFocus());
+    fireEvent.keyDown(screen.getByTestId('ui-input-response'), { key: 'Escape' });
+
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not send a second dismissal while a response is submitting', async () => {
+    const onCancel = vi.fn();
+    const { rerender } = render(
+      <UIInputDialog
+        request={baseRequest}
+        onCancel={onCancel}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByTestId('ui-input-response')).toHaveFocus());
+    rerender(
+      <UIInputDialog
+        request={baseRequest}
+        submitting
+        onCancel={onCancel}
+        onSubmit={vi.fn()}
+      />
+    );
+    fireEvent.keyDown(screen.getByTestId('ui-input-response'), { key: 'Escape' });
+
+    expect(onCancel).not.toHaveBeenCalled();
   });
 
   it('renders select prompts and submits the selected option', async () => {

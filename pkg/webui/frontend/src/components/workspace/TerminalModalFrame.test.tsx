@@ -54,4 +54,23 @@ describe('TerminalModalFrame', () => {
 
     expect(onPopOut).toHaveBeenCalledTimes(1);
   });
+
+  it('disables and shields the embedded terminal while the pop-out is active', () => {
+    const onPopOut = vi.fn();
+
+    renderFrame({
+      currentStatus: 'Open in pop-out window',
+      onPopOut,
+      popOutActive: true,
+      statusVariant: 'idle',
+    });
+
+    expect(screen.getByTestId('terminal-host')).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByTestId('terminal-host')).toHaveAttribute('inert');
+    expect(screen.queryByText('Open in pop-out window')).not.toBeInTheDocument();
+    expect(screen.getByText('Terminal is open in the pop-out')).toBeInTheDocument();
+    expect(screen.queryByText('Close that window to resume here.')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Focus pop-out' }));
+    expect(onPopOut).toHaveBeenCalledTimes(1);
+  });
 });

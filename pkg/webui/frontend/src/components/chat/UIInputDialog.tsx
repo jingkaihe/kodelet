@@ -8,6 +8,14 @@ import type {
 type UIInputDialogMode = "input" | "confirm" | "select";
 
 const EMPTY_SELECT_OPTIONS: string[] = [];
+const DIALOG_FOCUSABLE_SELECTOR = [
+	"button:not([disabled])",
+	"input:not([disabled])",
+	"select:not([disabled])",
+	"textarea:not([disabled])",
+	"[href]",
+	"[tabindex]:not([tabindex='-1'])",
+].join(",");
 
 interface UIInputDialogProps {
 	mode?: UIInputDialogMode;
@@ -32,8 +40,18 @@ const UIInputDialog: React.FC<UIInputDialogProps> = ({
 	);
 	const inputRef = useRef<HTMLInputElement | null>(null);
 	const selectRef = useRef<HTMLSelectElement | null>(null);
+	const submitRef = useRef<HTMLButtonElement | null>(null);
+	const dialogRef = useRef<HTMLFormElement | null>(null);
+	const onCancelRef = useRef(onCancel);
+	const submittingRef = useRef(submitting);
+	onCancelRef.current = onCancel;
+	submittingRef.current = submitting;
 
 	useEffect(() => {
+		const previousFocus =
+			document.activeElement instanceof HTMLElement
+				? document.activeElement
+				: null;
 		setValue(
 			mode === "input"
 				? inputRequest.defaultValue || ""
@@ -41,15 +59,67 @@ const UIInputDialog: React.FC<UIInputDialogProps> = ({
 					? selectOptions[0] || ""
 					: "",
 		);
-		window.setTimeout(() => {
+		const focusControl = window.setTimeout(() => {
 			if (mode === "select") {
 				selectRef.current?.focus();
 				return;
 			}
 			if (mode === "input") {
 				inputRef.current?.focus();
+				return;
 			}
+			submitRef.current?.focus();
 		}, 0);
+		const handleKeyDown = (event: KeyboardEvent) => {
+			const dialog = dialogRef.current;
+			if (!dialog) {
+				return;
+			}
+			if (event.key === "Escape") {
+				event.preventDefault();
+				event.stopPropagation();
+				if (submittingRef.current) {
+					return;
+				}
+				onCancelRef.current();
+				return;
+			}
+			if (event.key !== "Tab") {
+				return;
+			}
+
+			const focusableElements = Array.from(
+				dialog.querySelectorAll<HTMLElement>(DIALOG_FOCUSABLE_SELECTOR),
+			).filter((element) => !element.hasAttribute("disabled"));
+			if (focusableElements.length === 0) {
+				event.preventDefault();
+				dialog.focus();
+				return;
+			}
+
+			const firstElement = focusableElements[0];
+			const lastElement = focusableElements[focusableElements.length - 1];
+			if (event.shiftKey && document.activeElement === firstElement) {
+				event.preventDefault();
+				lastElement.focus();
+				return;
+			}
+			if (!event.shiftKey && document.activeElement === lastElement) {
+				event.preventDefault();
+				firstElement.focus();
+			}
+		};
+
+		window.addEventListener("keydown", handleKeyDown, true);
+		return () => {
+			window.clearTimeout(focusControl);
+			window.removeEventListener("keydown", handleKeyDown, true);
+			window.setTimeout(() => {
+				if (previousFocus?.isConnected) {
+					previousFocus.focus();
+				}
+			}, 0);
+		};
 	}, [mode, request.id, inputRequest.defaultValue, selectOptions]);
 
 	const fallbackTitle =
@@ -75,6 +145,7 @@ const UIInputDialog: React.FC<UIInputDialogProps> = ({
 		<div className="new-chat-dialog-backdrop ui-input-dialog-backdrop">
 			<form
 				aria-label={trimmedTitle}
+				aria-modal="true"
 				className="new-chat-dialog ui-input-dialog surface-panel"
 				data-testid="ui-input-dialog"
 				onSubmit={(event) => {
@@ -83,7 +154,9 @@ const UIInputDialog: React.FC<UIInputDialogProps> = ({
 						onSubmit(value);
 					}
 				}}
+				ref={dialogRef}
 				role="dialog"
+				tabIndex={-1}
 			>
 				<div className="new-chat-dialog-header">
 					<h2 className="new-chat-dialog-title">{trimmedTitle}</h2>
@@ -148,6 +221,7 @@ const UIInputDialog: React.FC<UIInputDialogProps> = ({
 					<button
 						className="primary-pill-button"
 						disabled={submitting || !canSubmit}
+						ref={submitRef}
 						type="submit"
 					>
 						{submitting ? "Sending…" : submitLabel}

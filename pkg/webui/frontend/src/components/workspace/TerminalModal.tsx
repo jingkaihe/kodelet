@@ -8,6 +8,16 @@ import type {
 } from '../../types';
 import apiService from '../../services/api';
 import TerminalModalFrame, { type TerminalStatusVariant } from './TerminalModalFrame';
+import {
+  clearTerminalPopOutRecord,
+  createTerminalPopOutChannel,
+  isTerminalPopOutMessage,
+  readTerminalPopOutRecord,
+  readTerminalPopOutRecordById,
+  TERMINAL_POP_OUT_HEARTBEAT_INTERVAL,
+  TERMINAL_POP_OUT_RELOAD_GRACE_PERIOD,
+  TERMINAL_POP_OUT_STORAGE_KEY,
+} from './terminalPopOut';
 
 interface TerminalModalProps {
   cwdLabel: string;
@@ -25,8 +35,74 @@ const WHEEL_BUTTON_DOWN = 65;
 const WHEEL_BUTTON_LEFT = 66;
 const WHEEL_BUTTON_RIGHT = 67;
 const WHEEL_PIXEL_FALLBACK = 33;
+const POP_OUT_CLOSED_POLL_INTERVAL = 250;
+const POP_OUT_NAVIGATION_GRACE_PERIOD = 15000;
+const TERMINAL_POP_OUT_WINDOW_FEATURES = 'popup=yes,width=1120,height=760,resizable=yes,scrollbars=no';
 
 let ghosttyLoadPromise: Promise<Ghostty> | null = null;
+let activeTerminalPopOutWindow: Window | null = null;
+let activeTerminalPopOutCwd = '';
+let activeTerminalPopOutPendingUntil = 0;
+
+const getTerminalPopOutURL = (cwd: string): URL => {
+  const url = new URL('/terminal', window.location.origin);
+  if (cwd) {
+    url.searchParams.set('cwd', cwd);
+  }
+  return url;
+};
+
+const clearActiveTerminalPopOutWindow = () => {
+  activeTerminalPopOutWindow = null;
+  activeTerminalPopOutCwd = '';
+  activeTerminalPopOutPendingUntil = 0;
+};
+
+const isExpectedTerminalPopOutWindow = (candidate: Window, cwd: string): boolean => {
+  try {
+    const url = new URL(candidate.location.href, window.location.href);
+    return (
+      url.origin === window.location.origin &&
+      url.pathname === '/terminal' &&
+      (url.searchParams.get('cwd') ?? '') === cwd
+    );
+  } catch {
+    return false;
+  }
+};
+
+const rememberActiveTerminalPopOutWindow = (
+  candidate: Window,
+  cwd: string,
+  pendingNavigation: boolean
+) => {
+  activeTerminalPopOutWindow = candidate;
+  activeTerminalPopOutCwd = cwd;
+  activeTerminalPopOutPendingUntil = pendingNavigation
+    ? Date.now() + POP_OUT_NAVIGATION_GRACE_PERIOD
+    : 0;
+};
+
+const getActiveTerminalPopOutWindow = (cwd?: string) => {
+  if (activeTerminalPopOutWindow?.closed) {
+    clearActiveTerminalPopOutWindow();
+  } else if (activeTerminalPopOutWindow) {
+    if (
+      isExpectedTerminalPopOutWindow(
+        activeTerminalPopOutWindow,
+        activeTerminalPopOutCwd
+      )
+    ) {
+      activeTerminalPopOutPendingUntil = 0;
+    } else if (Date.now() >= activeTerminalPopOutPendingUntil) {
+      clearActiveTerminalPopOutWindow();
+    }
+  }
+
+  return cwd === undefined || activeTerminalPopOutCwd === cwd
+    ? activeTerminalPopOutWindow
+    : null;
+};
 
 const loadGhostty = () => {
   ghosttyLoadPromise ??= Ghostty.load(ghosttyWasmUrl);
@@ -125,6 +201,12 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose, 
   const [statusText, setStatusText] = useState('Connecting…');
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [exitCode, setExitCode] = useState<number | null>(null);
+  const [popOutActive, setPopOutActive] = useState(
+    () =>
+      showPopOut &&
+      (getActiveTerminalPopOutWindow(cwdLabel) !== null ||
+        readTerminalPopOutRecord(cwdLabel) !== null)
+  );
 
   const fitTerminalToPanel = useCallback(() => {
     const terminal = terminalRef.current;
@@ -161,7 +243,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose, 
   const statusVariant: TerminalStatusVariant = connectionError ? 'error' : exitCode !== null ? 'idle' : 'live';
 
   useEffect(() => {
-    if (!open || !terminalHostRef.current) {
+    if (!open || popOutActive || !terminalHostRef.current) {
       return undefined;
     }
 
@@ -184,8 +266,28 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose, 
     setConnectionError(null);
     setExitCode(null);
 
+    const getCurrentConnection = (): { terminal: Terminal; socket: WebSocket } | null => {
+      const currentTerminal = terminal;
+      const currentSocket = socket;
+      if (
+        cancelled ||
+        !currentTerminal ||
+        !currentSocket ||
+        terminalRef.current !== currentTerminal ||
+        socketRef.current !== currentSocket
+      ) {
+        return null;
+      }
+
+      return { terminal: currentTerminal, socket: currentSocket };
+    };
+
     const releaseReplaySuppressionIfReady = () => {
-      if (!replayCompleteReceivedRef.current || replayPendingWritesRef.current > 0) {
+      if (
+        !getCurrentConnection() ||
+        !replayCompleteReceivedRef.current ||
+        replayPendingWritesRef.current > 0
+      ) {
         return;
       }
 
@@ -194,10 +296,11 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose, 
     };
 
     const sendMessage = (message: TerminalClientMessage) => {
-      if (socketRef.current?.readyState !== WebSocket.OPEN) {
+      const connection = getCurrentConnection();
+      if (!connection || connection.socket.readyState !== WebSocket.OPEN) {
         return;
       }
-      socketRef.current.send(JSON.stringify(message));
+      connection.socket.send(JSON.stringify(message));
     };
 
     const sendTerminalInput = (data: string) => {
@@ -213,14 +316,15 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose, 
     };
 
     const sendResize = () => {
-      if (!terminalRef.current) {
+      const connection = getCurrentConnection();
+      if (!connection) {
         return;
       }
       fitTerminalToPanel();
       sendMessage({
         type: 'resize',
-        rows: terminalRef.current.rows,
-        cols: terminalRef.current.cols,
+        rows: connection.terminal.rows,
+        cols: connection.terminal.cols,
       });
     };
 
@@ -309,13 +413,18 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose, 
         socketRef.current = socket;
 
         socket.addEventListener('open', () => {
+          if (!getCurrentConnection()) {
+            return;
+          }
           scheduleSettledResize();
         });
 
         socket.addEventListener('message', (event) => {
-          if (!terminal) {
+          const connection = getCurrentConnection();
+          if (!connection) {
             return;
           }
+          const currentTerminal = connection.terminal;
 
           if (typeof event.data === 'string') {
             try {
@@ -340,15 +449,15 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose, 
                 const exitPayload = payload as TerminalExitEvent;
                 setExitCode(exitPayload.code);
                 setStatusText(`Exited with code ${exitPayload.code}`);
-                terminal.writeln(`\r\n[process exited with code ${exitPayload.code}]`);
+                currentTerminal.writeln(`\r\n[process exited with code ${exitPayload.code}]`);
                 return;
               }
 
               if (payload.type === 'info') {
-                terminal.writeln(`\r\n${payload.text}`);
+                currentTerminal.writeln(`\r\n${payload.text}`);
               }
             } catch {
-              terminal.writeln(`\r\n${event.data}`);
+              currentTerminal.writeln(`\r\n${event.data}`);
             }
             return;
           }
@@ -356,22 +465,31 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose, 
           if (event.data instanceof ArrayBuffer) {
             if (!replayCompleteReceivedRef.current) {
               replayPendingWritesRef.current += 1;
-              writeTerminalOutput(terminal, new Uint8Array(event.data), () => {
+              writeTerminalOutput(currentTerminal, new Uint8Array(event.data), () => {
+                if (!getCurrentConnection()) {
+                  return;
+                }
                 replayPendingWritesRef.current = Math.max(0, replayPendingWritesRef.current - 1);
                 releaseReplaySuppressionIfReady();
               });
               return;
             }
 
-            writeTerminalOutput(terminal, new Uint8Array(event.data));
+            writeTerminalOutput(currentTerminal, new Uint8Array(event.data));
           }
         });
 
         socket.addEventListener('close', () => {
+          if (!getCurrentConnection()) {
+            return;
+          }
           setStatusText((current) => (current.startsWith('Exited with code') ? current : 'Disconnected'));
         });
 
         socket.addEventListener('error', () => {
+          if (!getCurrentConnection()) {
+            return;
+          }
           setConnectionError('Terminal connection failed');
         });
 
@@ -483,7 +601,89 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose, 
       }
       fitAddonRef.current = null;
     };
-  }, [cwdLabel, fitTerminalToPanel, open]);
+  }, [cwdLabel, fitTerminalToPanel, open, popOutActive]);
+
+  useEffect(() => {
+    if (!showPopOut) {
+      return undefined;
+    }
+
+    const channel = createTerminalPopOutChannel();
+    const pendingCloseTimeouts = new Set<number>();
+    const syncPopOutState = () => {
+      setPopOutActive(
+        getActiveTerminalPopOutWindow(cwdLabel) !== null ||
+          readTerminalPopOutRecord(cwdLabel) !== null
+      );
+    };
+    const handleChannelMessage = (event: MessageEvent<unknown>) => {
+      if (!isTerminalPopOutMessage(event.data)) {
+        return;
+      }
+      if (event.data.type === 'active' && event.data.record.cwd === cwdLabel) {
+        setPopOutActive(true);
+        return;
+      }
+      if (event.data.type === 'closing' && event.data.cwd === cwdLabel) {
+        const closingId = event.data.id;
+        const closingRecord = readTerminalPopOutRecordById(closingId);
+        channel?.postMessage({ type: 'probe' });
+        const closeTimeout = window.setTimeout(() => {
+          pendingCloseTimeouts.delete(closeTimeout);
+          const currentRecord = readTerminalPopOutRecordById(closingId);
+          if (
+            getActiveTerminalPopOutWindow(cwdLabel) === null &&
+            closingRecord &&
+            currentRecord &&
+            currentRecord.id === closingId &&
+            currentRecord.cwd === cwdLabel &&
+            currentRecord.state === 'closing' &&
+            closingRecord.cwd === cwdLabel &&
+            currentRecord.updatedAt === closingRecord.updatedAt
+          ) {
+            clearTerminalPopOutRecord(currentRecord.id);
+          }
+          syncPopOutState();
+        }, TERMINAL_POP_OUT_RELOAD_GRACE_PERIOD);
+        pendingCloseTimeouts.add(closeTimeout);
+      }
+    };
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === TERMINAL_POP_OUT_STORAGE_KEY) {
+        syncPopOutState();
+      }
+    };
+
+    syncPopOutState();
+    channel?.addEventListener('message', handleChannelMessage);
+    channel?.postMessage({ type: 'probe' });
+    const probeWindow = channel
+      ? window.setInterval(
+          () => channel.postMessage({ type: 'probe' }),
+          TERMINAL_POP_OUT_HEARTBEAT_INTERVAL
+        )
+      : null;
+    const pollWindow = window.setInterval(
+      syncPopOutState,
+      POP_OUT_CLOSED_POLL_INTERVAL
+    );
+    window.addEventListener('focus', syncPopOutState);
+    window.addEventListener('storage', handleStorage);
+
+    return () => {
+      window.clearInterval(pollWindow);
+      if (probeWindow !== null) {
+        window.clearInterval(probeWindow);
+      }
+      pendingCloseTimeouts.forEach((timeout) => {
+        window.clearTimeout(timeout);
+      });
+      window.removeEventListener('focus', syncPopOutState);
+      window.removeEventListener('storage', handleStorage);
+      channel?.removeEventListener('message', handleChannelMessage);
+      channel?.close();
+    };
+  }, [cwdLabel, showPopOut]);
 
   useEffect(() => {
     if (!open) {
@@ -492,6 +692,10 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose, 
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented) {
+        return;
+      }
+
+      if (terminalHostRef.current?.parentElement?.closest('[inert]')) {
         return;
       }
 
@@ -509,16 +713,60 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose, 
   }, [open, onClose]);
 
   const handlePopOut = useCallback(() => {
-    const url = new URL('/terminal', window.location.origin);
-    if (cwdLabel) {
-      url.searchParams.set('cwd', cwdLabel);
+    const activePopOut = getActiveTerminalPopOutWindow(cwdLabel);
+    if (activePopOut) {
+      activePopOut.focus();
+      setPopOutActive(true);
+      return;
     }
 
-    window.open(
+    const persistedPopOut = readTerminalPopOutRecord(cwdLabel);
+    if (persistedPopOut) {
+      const existingPopOut = window.open(
+        '',
+        'kodelet-terminal',
+        TERMINAL_POP_OUT_WINDOW_FEATURES
+      );
+      if (existingPopOut) {
+        const alreadyShowingTerminal = isExpectedTerminalPopOutWindow(
+          existingPopOut,
+          cwdLabel
+        );
+        if (!alreadyShowingTerminal) {
+          try {
+            existingPopOut.location.href = getTerminalPopOutURL(cwdLabel).toString();
+          } catch {
+            clearTerminalPopOutRecord(persistedPopOut.id);
+            setPopOutActive(false);
+            return;
+          }
+        }
+        rememberActiveTerminalPopOutWindow(
+          existingPopOut,
+          cwdLabel,
+          !alreadyShowingTerminal
+        );
+        setPopOutActive(true);
+        existingPopOut.focus();
+      }
+      return;
+    }
+
+    const url = getTerminalPopOutURL(cwdLabel);
+
+    const popOutWindow = window.open(
       url.toString(),
       'kodelet-terminal',
-      'popup=yes,width=1120,height=760,resizable=yes,scrollbars=no'
+      TERMINAL_POP_OUT_WINDOW_FEATURES
     );
+
+    if (!popOutWindow) {
+      return;
+    }
+
+    rememberActiveTerminalPopOutWindow(popOutWindow, cwdLabel, true);
+    setPopOutActive(true);
+    popOutWindow.focus();
   }, [cwdLabel]);
 
   if (!open) {
@@ -527,9 +775,10 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose, 
 
   return (
     <TerminalModalFrame
-      currentStatus={currentStatus}
+      currentStatus={popOutActive ? '' : currentStatus}
       cwdLabel={cwdLabel}
-      statusVariant={statusVariant}
+      popOutActive={popOutActive}
+      statusVariant={popOutActive ? 'idle' : statusVariant}
       terminalHostRef={terminalHostRef}
       onClose={onClose}
       onPopOut={showPopOut ? handlePopOut : undefined}
