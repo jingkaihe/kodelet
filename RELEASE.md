@@ -1,6 +1,6 @@
 # Kodelet
 
-## 0.5.16-alpha
+## 0.5.17-beta
 
 Added `/sessions`, its `Ctrl+L` shortcut, and `/new` to the native TUI, with searchable switching across saved and open conversations, status indicators for running, unread, and input-required sessions, and preserved drafts and scroll positions.
 
