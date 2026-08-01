@@ -753,8 +753,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				state.workingFrame++
 			}
 		}
+		now := time.Now()
+		// Live elapsed values are replaced in View without rebuilding the transcript.
+		// Refresh only when a value outgrows the width reserved by its placeholder.
+		if m.running && m.transcriptElapsedPlaceholderOverflow(now) {
+			m.refreshViewport(m.autoFollow)
+		}
 		// The 100ms spinner tick doubles as the terminal-title refresh heartbeat.
-		cmds = append(cmds, cmd, m.refreshTerminalTitle(time.Now()))
+		cmds = append(cmds, cmd, m.refreshTerminalTitle(now))
 	}
 
 	if m.activeUIPrompt != nil {

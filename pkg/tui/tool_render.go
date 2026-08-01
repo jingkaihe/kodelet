@@ -32,7 +32,7 @@ type toolRenderLabelPart struct {
 	text string
 }
 
-func (m model) toolRenderGroups(block assistantBlock) []toolRenderGroup {
+func (m *model) toolRenderGroups(block assistantBlock) []toolRenderGroup {
 	groups := []toolRenderGroup{}
 
 	for idx := 0; idx < len(block.tools); {
@@ -76,7 +76,7 @@ func (m model) toolRenderGroups(block assistantBlock) []toolRenderGroup {
 	return groups
 }
 
-func (m model) buildTaskRunToolGroup(block assistantBlock, idx int) toolRenderGroup {
+func (m *model) buildTaskRunToolGroup(block assistantBlock, idx int) toolRenderGroup {
 	tool := block.tools[idx]
 	snapshot, metadata, _ := tooltypes.ExtractTaskRunSnapshot(tool.structured)
 	runningLabel := strings.TrimSpace(snapshot.Title)
@@ -91,12 +91,17 @@ func (m model) buildTaskRunToolGroup(block assistantBlock, idx int) toolRenderGr
 	if label == "" {
 		label = "Task"
 	}
-	elapsedMS := taskRunElapsedMS(snapshot, tool, time.Now())
+	elapsed := formatTaskRunElapsed(taskRunElapsedMS(snapshot, tool, time.Now()))
+	if !tool.done && snapshot.Status == "running" && tool.structured != nil && !tool.structured.Timestamp.IsZero() {
+		elapsed = m.transcriptElapsedPlaceholder(func(now time.Time) string {
+			return formatTaskRunElapsed(taskRunElapsedMS(snapshot, tool, now))
+		})
+	}
 	if tool.done {
 		label = taskRunCompletionLabel(snapshot, label)
 	}
 
-	body := renderTaskRunProgressBody(m, snapshot, elapsedMS)
+	body := renderTaskRunProgressBody(*m, snapshot, elapsed)
 	markdownBody := false
 	if tool.done {
 		body = strings.TrimSpace(metadata.Output)
@@ -142,7 +147,7 @@ func taskRunCompletionLabel(snapshot tooltypes.TaskRunSnapshot, fallback string)
 	return strings.Join(parts, " · ")
 }
 
-func renderTaskRunProgressBody(m model, snapshot tooltypes.TaskRunSnapshot, elapsedMS int64) string {
+func renderTaskRunProgressBody(m model, snapshot tooltypes.TaskRunSnapshot, elapsed string) string {
 	parts := []string{}
 	counts := []string{}
 	if snapshot.Counts.Succeeded > 0 {
@@ -154,7 +159,7 @@ func renderTaskRunProgressBody(m model, snapshot tooltypes.TaskRunSnapshot, elap
 	if snapshot.Counts.Running > 0 {
 		counts = append(counts, fmt.Sprintf("%d running", snapshot.Counts.Running))
 	}
-	if elapsed := formatTaskRunElapsed(elapsedMS); elapsed != "" {
+	if elapsed != "" {
 		counts = append(counts, elapsed)
 	}
 	if len(counts) > 0 {
@@ -247,7 +252,7 @@ func formatTaskRunElapsed(elapsedMS int64) string {
 	return fmt.Sprintf("%dh %02dm", hours, minutes)
 }
 
-func (m model) buildBashToolGroup(block assistantBlock, start, end int) toolRenderGroup {
+func (m *model) buildBashToolGroup(block assistantBlock, start, end int) toolRenderGroup {
 	bashTools := block.tools[start:end]
 	count := len(bashTools)
 	return toolRenderGroup{
@@ -256,7 +261,7 @@ func (m model) buildBashToolGroup(block assistantBlock, start, end int) toolRend
 		changeIndex:  -1,
 		label:        fmt.Sprintf("Ran %d %s", count, pluralize(count, "command", "commands")),
 		runningLabel: fmt.Sprintf("Running %d %s", count, pluralize(count, "command", "commands")),
-		body:         bashToolsBody(bashTools, time.Now(), m.transcriptTextWidth()-2),
+		body:         m.renderBashToolsBody(bashTools, time.Now(), m.transcriptTextWidth()-2),
 		wrapBody:     true,
 		expanded:     block.expanded || anyExpandedTool(bashTools),
 		active:       hasActiveToolRange(bashTools),
@@ -264,12 +269,12 @@ func (m model) buildBashToolGroup(block assistantBlock, start, end int) toolRend
 	}
 }
 
-// bashToolsBody renders bash calls as the shell transcript they are, instead of
-// dumping the raw tool input JSON alongside the CLI-oriented result rendering.
-func bashToolsBody(tools []toolCall, now time.Time, width int) string {
+// renderBashToolsBody renders bash calls as the shell transcript they are,
+// instead of dumping raw tool input JSON alongside CLI-oriented results.
+func (m *model) renderBashToolsBody(tools []toolCall, now time.Time, width int) string {
 	parts := make([]string, 0, len(tools))
 	for _, tool := range tools {
-		if part := bashToolBody(tool, now, width); part != "" {
+		if part := m.renderBashToolBody(tool, now, width); part != "" {
 			parts = append(parts, part)
 		}
 	}
@@ -279,14 +284,29 @@ func bashToolsBody(tools []toolCall, now time.Time, width int) string {
 func bashToolBody(tool toolCall, now time.Time, width int) string {
 	var meta tooltypes.BashMetadata
 	hasMeta := tool.structured != nil && tooltypes.ExtractMetadata(tool.structured.Metadata, &meta)
+	return bashToolBodyWithElapsed(tool, meta, hasMeta, bashElapsed(tool, meta, now), width)
+}
 
+func (m *model) renderBashToolBody(tool toolCall, now time.Time, width int) string {
+	var meta tooltypes.BashMetadata
+	hasMeta := tool.structured != nil && tooltypes.ExtractMetadata(tool.structured.Metadata, &meta)
+	elapsed := bashElapsed(tool, meta, now)
+	if bashElapsedIsLive(tool, meta) {
+		elapsed = m.transcriptElapsedPlaceholder(func(now time.Time) string {
+			return bashElapsed(tool, meta, now)
+		})
+	}
+	return bashToolBodyWithElapsed(tool, meta, hasMeta, elapsed, width)
+}
+
+func bashToolBodyWithElapsed(tool toolCall, meta tooltypes.BashMetadata, hasMeta bool, elapsed string, width int) string {
 	lines := make([]string, 0, 3)
 	command := strings.TrimSpace(meta.Command)
 	if command == "" {
 		command = stringField(toolInputFields(tool.input), "command")
 	}
 	if command != "" {
-		lines = append(lines, bashCommandLine(command, bashElapsed(tool, meta, now), width))
+		lines = append(lines, bashCommandLine(command, elapsed, width))
 	}
 
 	errorText := bashErrorText(tool)
@@ -346,6 +366,16 @@ func bashElapsed(tool toolCall, meta tooltypes.BashMetadata, now time.Time) stri
 		return ""
 	}
 	return formatTaskRunElapsed(elapsed.Milliseconds())
+}
+
+func bashElapsedIsLive(tool toolCall, meta tooltypes.BashMetadata) bool {
+	if tool.done {
+		return false
+	}
+	if tool.structured != nil && !tool.structured.Timestamp.IsZero() {
+		return true
+	}
+	return meta.ExecutionTime <= 0 && !tool.startedAt.IsZero()
 }
 
 func bashErrorText(tool toolCall) string {

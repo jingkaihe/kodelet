@@ -190,6 +190,12 @@ type conversationRun struct {
 	cancel          context.CancelFunc
 }
 
+type transcriptElapsedClock struct {
+	markers []rune
+	width   int
+	render  func(time.Time) string
+}
+
 type model struct {
 	*conversationState
 
@@ -225,8 +231,10 @@ type model struct {
 	width  int
 	height int
 
-	pendingRefresh       bool
-	pendingRefreshBottom bool
+	pendingRefresh           bool
+	pendingRefreshBottom     bool
+	captureTranscriptElapsed bool
+	transcriptElapsedClocks  []transcriptElapsedClock
 
 	assistantMarkdownRenderer      *glamour.TermRenderer
 	assistantMarkdownRendererWidth int

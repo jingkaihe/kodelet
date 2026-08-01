@@ -2,6 +2,8 @@ package tui
 
 import (
 	"strings"
+	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
@@ -10,11 +12,15 @@ import (
 )
 
 const (
-	tuiLeftMargin                    = 1
-	tuiRightMargin                   = 1
-	slashCommandBareQueryMaxRows     = 5
-	slashCommandFilteredQueryMaxRows = 8
-	transcriptSpinnerPlaceholder     = "\ue000"
+	tuiLeftMargin                        = 1
+	tuiRightMargin                       = 1
+	slashCommandBareQueryMaxRows         = 5
+	slashCommandFilteredQueryMaxRows     = 8
+	transcriptSpinnerPlaceholder         = "\ue000"
+	transcriptElapsedPlaceholderStart    = '\U000F0000'
+	transcriptElapsedPlaceholderEnd      = '\U000FFFFD'
+	transcriptElapsedPlaceholderSuffix   = "\u2063"
+	transcriptElapsedPlaceholderMinWidth = 7
 )
 
 var tuiWorkingMessages = []string{
@@ -39,7 +45,10 @@ func (m *model) refreshViewport(scrollBottom bool) {
 		placeholderFrames[i] = transcriptSpinnerPlaceholder
 	}
 	m.spinner.Spinner.Frames = placeholderFrames
+	m.transcriptElapsedClocks = nil
+	m.captureTranscriptElapsed = true
 	content, regions := m.renderTranscript()
+	m.captureTranscriptElapsed = false
 	m.spinner.Spinner.Frames = spinnerFrames
 	m.detailRegions = regions
 	m.viewport.SetContent(content)
@@ -51,12 +60,106 @@ func (m *model) refreshViewport(scrollBottom bool) {
 	}
 }
 
+func (m *model) transcriptElapsedPlaceholder(render func(time.Time) string) string {
+	if render == nil {
+		return ""
+	}
+	now := time.Now()
+	if !m.captureTranscriptElapsed {
+		return render(now)
+	}
+
+	clockRender := func(now time.Time) string {
+		value := render(now)
+		if value == "" {
+			return "0s"
+		}
+		return value
+	}
+	current := clockRender(now)
+	width := max(transcriptElapsedPlaceholderMinWidth, lipgloss.Width(current))
+	start := transcriptElapsedPlaceholderStart
+	if len(m.transcriptElapsedClocks) > 0 {
+		previousMarkers := m.transcriptElapsedClocks[len(m.transcriptElapsedClocks)-1].markers
+		start = previousMarkers[len(previousMarkers)-1] + 1
+	}
+	if start > transcriptElapsedPlaceholderEnd || rune(width-1) > transcriptElapsedPlaceholderEnd-start {
+		return current
+	}
+
+	markers := make([]rune, width)
+	var placeholder strings.Builder
+	for i := range markers {
+		markers[i] = start + rune(i)
+		placeholder.WriteString(transcriptElapsedMarker(markers[i]))
+	}
+	m.transcriptElapsedClocks = append(m.transcriptElapsedClocks, transcriptElapsedClock{
+		markers: markers,
+		width:   width,
+		render:  clockRender,
+	})
+	return placeholder.String()
+}
+
+func transcriptElapsedMarker(marker rune) string {
+	return string(marker) + transcriptElapsedPlaceholderSuffix
+}
+
+func (m model) renderTranscriptPlaceholders(transcript string, now time.Time) string {
+	if len(m.transcriptElapsedClocks) == 0 {
+		return strings.ReplaceAll(transcript, transcriptSpinnerPlaceholder, m.spinnerGlyph())
+	}
+
+	replacements := make(map[rune]string, len(m.transcriptElapsedClocks)*transcriptElapsedPlaceholderMinWidth)
+	for _, clock := range m.transcriptElapsedClocks {
+		value := padVisible(fitVisible(clock.render(now), clock.width), clock.width)
+		cells := []rune(value)
+		for i, marker := range clock.markers {
+			replacement := " "
+			if i < len(cells) {
+				replacement = string(cells[i])
+			}
+			replacements[marker] = replacement
+		}
+	}
+
+	spinnerGlyph := m.spinnerGlyph()
+	var rendered strings.Builder
+	rendered.Grow(len(transcript))
+	for offset := 0; offset < len(transcript); {
+		if strings.HasPrefix(transcript[offset:], transcriptSpinnerPlaceholder) {
+			rendered.WriteString(spinnerGlyph)
+			offset += len(transcriptSpinnerPlaceholder)
+			continue
+		}
+
+		marker, size := utf8.DecodeRuneInString(transcript[offset:])
+		if replacement, ok := replacements[marker]; ok && strings.HasPrefix(transcript[offset+size:], transcriptElapsedPlaceholderSuffix) {
+			rendered.WriteString(replacement)
+			offset += size + len(transcriptElapsedPlaceholderSuffix)
+			continue
+		}
+		rendered.WriteString(transcript[offset : offset+size])
+		offset += size
+	}
+	return rendered.String()
+}
+
+func (m model) transcriptElapsedPlaceholderOverflow(now time.Time) bool {
+	for _, clock := range m.transcriptElapsedClocks {
+		if lipgloss.Width(clock.render(now)) > clock.width {
+			return true
+		}
+	}
+	return false
+}
+
 func (m model) View() string {
 	if m.width == 0 || m.height == 0 {
 		return ""
 	}
 
-	transcript := strings.ReplaceAll(m.viewport.View(), transcriptSpinnerPlaceholder, m.spinnerGlyph())
+	transcript := m.renderTranscriptPlaceholders(m.viewport.View(), time.Now())
 	historySearch := m.renderHistorySearch()
 	slashSuggestions := m.renderSlashCommandSuggestions()
 	profilePicker := m.renderProfilePicker()

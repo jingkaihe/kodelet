@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -13,6 +14,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -431,6 +433,160 @@ func TestTranscriptSpinnerAnimatesWithoutViewportRefresh(t *testing.T) {
 	assert.Equal(t, viewportContent, m.viewport.View())
 	assert.Contains(t, secondView, secondGlyph+" Thinking…")
 	assert.NotContains(t, secondView, transcriptSpinnerPlaceholder)
+}
+
+func TestElapsedPlaceholdersUpdateMultipleToolsWithoutViewportRefresh(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.resize()
+	m.running = true
+	observedAt := time.Now().Add(time.Hour)
+	taskResult := &tooltypes.StructuredToolResult{
+		ToolName:  "code_search",
+		Success:   true,
+		Timestamp: observedAt,
+		Metadata: &tooltypes.ExtensionToolMetadata{
+			ToolName: "code_search",
+			Data: map[string]any{"taskRun": map[string]any{
+				"version": 1, "revision": 1, "kind": "code_search", "status": "running", "phase": "working", "title": "Searching code", "elapsedMs": 60000,
+				"counts": map[string]any{"succeeded": 0, "failed": 0, "running": 1}, "activities": []any{},
+			}},
+		},
+	}
+	bashResult := &tooltypes.StructuredToolResult{
+		ToolName:  "bash",
+		Success:   true,
+		Timestamp: observedAt,
+		Metadata: &tooltypes.BashMetadata{
+			Command:       "mise run test",
+			ExecutionTime: 7 * time.Second,
+		},
+	}
+	m.entries = []chatEntry{{
+		kind: entryAssistant,
+		blocks: []assistantBlock{{
+			kind: blockTools,
+			tools: []toolCall{
+				{name: "code_search", structured: taskResult},
+				{name: "bash", structured: bashResult},
+			},
+		}},
+	}}
+	m.refreshViewport(true)
+
+	require.Len(t, m.transcriptElapsedClocks, 2)
+	cachedTranscript := m.viewport.View()
+	initialView := xansi.Strip(m.View())
+	require.Contains(t, initialView, "1 running · 1m 00s")
+	require.Contains(t, initialView, "$ mise run test  ·  7s")
+
+	taskResult.Timestamp = time.Now().Add(-10 * time.Second)
+	bashResult.Timestamp = time.Now().Add(-2 * time.Second)
+	updated, _ := m.Update(spinner.TickMsg{})
+	m = updated.(model)
+	updatedView := xansi.Strip(m.View())
+
+	assert.Equal(t, cachedTranscript, m.viewport.View())
+	assert.Contains(t, updatedView, "1 running · 1m 10s")
+	assert.Contains(t, updatedView, "$ mise run test  ·  9s")
+}
+
+func TestElapsedPlaceholderSurvivesWrapping(t *testing.T) {
+	m := model{captureTranscriptElapsed: true}
+	placeholder := m.transcriptElapsedPlaceholder(func(time.Time) string { return "7s" })
+	require.Len(t, m.transcriptElapsedClocks, 1)
+	clock := m.transcriptElapsedClocks[0]
+
+	wrapped := wrapPreservingWhitespace(strings.Repeat("x", 9)+placeholder, 10)
+	for _, marker := range clock.markers {
+		token := transcriptElapsedMarker(marker)
+		assert.Equal(t, 1, lipgloss.Width(token))
+		assert.Equal(t, 1, strings.Count(wrapped, token))
+	}
+
+	rendered := m.renderTranscriptPlaceholders(wrapped, time.Time{})
+	assert.Contains(t, rendered, "xxxxxxxxx7\ns")
+	assert.NotContains(t, rendered, transcriptElapsedPlaceholderSuffix)
+}
+
+func TestElapsedPlaceholderOverflowRebuildsTranscriptAtWiderValue(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.resize()
+	m.running = true
+	taskResult := &tooltypes.StructuredToolResult{
+		ToolName:  "code_search",
+		Success:   true,
+		Timestamp: time.Now().Add(time.Hour),
+		Metadata: &tooltypes.ExtensionToolMetadata{
+			ToolName: "code_search",
+			Data: map[string]any{"taskRun": map[string]any{
+				"version": 1, "revision": 1, "kind": "code_search", "status": "running", "phase": "working", "title": "Searching code", "elapsedMs": int64((99*time.Hour + 59*time.Minute) / time.Millisecond),
+				"counts": map[string]any{"succeeded": 0, "failed": 0, "running": 1}, "activities": []any{},
+			}},
+		},
+	}
+	m.entries = []chatEntry{{
+		kind: entryAssistant,
+		blocks: []assistantBlock{{
+			kind:  blockTools,
+			tools: []toolCall{{name: "code_search", structured: taskResult}},
+		}},
+	}}
+	m.refreshViewport(true)
+
+	require.Len(t, m.transcriptElapsedClocks, 1)
+	require.Equal(t, 7, m.transcriptElapsedClocks[0].width)
+	cachedTranscript := m.viewport.View()
+
+	taskResult.Timestamp = time.Now().Add(-2 * time.Minute)
+	updated, _ := m.Update(spinner.TickMsg{})
+	m = updated.(model)
+
+	require.Len(t, m.transcriptElapsedClocks, 1)
+	assert.Equal(t, 8, m.transcriptElapsedClocks[0].width)
+	assert.NotEqual(t, cachedTranscript, m.viewport.View())
+	assert.Contains(t, xansi.Strip(m.View()), "1 running · 100h 01m")
+}
+
+func TestElapsedPlaceholdersResetWhenSwitchingConversations(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.resize()
+	first := m.conversationState
+	first.running = true
+	first.entries = []chatEntry{{
+		kind: entryAssistant,
+		blocks: []assistantBlock{{
+			kind: blockTools,
+			tools: []toolCall{{
+				name:      "bash",
+				input:     `{"command":"sleep 10"}`,
+				startedAt: time.Now().Add(-2 * time.Second),
+			}},
+		}},
+	}}
+	m.refreshViewport(true)
+	require.Len(t, m.transcriptElapsedClocks, 1)
+
+	second := newConversationState("second", "second", false, m.conversationDefaults)
+	second.entries = []chatEntry{{kind: entryUser, content: "second transcript"}}
+	m.conversations[second.key] = second
+	activated, _ := m.activateConversation(second.key)
+	require.True(t, activated)
+	assert.Empty(t, m.transcriptElapsedClocks)
+	assert.Contains(t, xansi.Strip(m.View()), "second transcript")
+
+	activated, _ = m.activateConversation(first.key)
+	require.True(t, activated)
+	require.Len(t, m.transcriptElapsedClocks, 1)
+	assert.Contains(t, xansi.Strip(m.View()), "$ sleep 10  ·  ")
 }
 
 func TestComposerLabelThemeColors(t *testing.T) {
