@@ -548,7 +548,11 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({
             title="Refresh diff"
             type="button"
           >
-            <RefreshCw aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
+            <RefreshCw
+              aria-hidden="true"
+              className="workspace-diff-refresh-icon"
+              strokeWidth={1.9}
+            />
           </button>
         </div>
 

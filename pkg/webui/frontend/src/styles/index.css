@@ -2465,7 +2465,8 @@ h6 {
   flex: 0 0 auto;
   justify-content: flex-end;
   gap: 0.3rem;
-  padding: 0 0.1rem 0.45rem;
+  overflow: visible;
+  padding: 0.3rem 0.35rem 0.45rem;
 }
 
 .workspace-diff-icon-button {
@@ -2490,6 +2491,11 @@ h6 {
   display: block;
   flex: 0 0 auto;
   overflow: visible;
+}
+
+.workspace-diff-icon-button .workspace-diff-refresh-icon {
+  width: 0.9rem;
+  height: 0.9rem;
 }
 
 .workspace-diff-icon-button:hover {
@@ -4579,22 +4585,6 @@ code[class*="language-"] {
   position: relative;
   display: grid;
   gap: 0.34rem;
-  padding-left: 1.4rem;
-}
-
-.activity-stack::before {
-  content: "";
-  position: absolute;
-  top: 0.72rem;
-  bottom: 0.72rem;
-  left: 0.34rem;
-  width: 1px;
-  background: linear-gradient(
-    180deg,
-    rgba(122, 117, 107, 0.06),
-    rgba(122, 117, 107, 0.2),
-    rgba(122, 117, 107, 0.06)
-  );
 }
 
 .activity-stack-thinking {
@@ -4611,17 +4601,6 @@ code[class*="language-"] {
   transition:
     background-color 160ms ease,
     border-color 160ms ease;
-}
-
-.activity-card::before {
-  content: "";
-  position: absolute;
-  left: 0.31rem;
-  top: 0.98rem;
-  width: 0.42rem;
-  height: 1px;
-  background: rgba(122, 117, 107, 0.18);
-  transform: translateX(-1.38rem);
 }
 
 .activity-card:hover,
