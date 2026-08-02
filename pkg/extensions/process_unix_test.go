@@ -134,6 +134,37 @@ func TestProcessCloseKillsProcessGroup(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 }
 
+func TestProcessLifetimeContextTerminatesProcess(t *testing.T) {
+	rootDir := t.TempDir()
+	extDir := filepath.Join(rootDir, "lifetime")
+	execPath := writeExecutable(t, filepath.Join(extDir, "kodelet-extension-lifetime"), helperEnvExtensionScript(t))
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+
+	runtimeCtx, cancelRuntime := context.WithCancel(context.Background())
+	process, err := StartProcess(runtimeCtx, Extension{
+		ID:       "lifetime",
+		Name:     "lifetime",
+		ExecPath: execPath,
+		Dir:      extDir,
+	}, DefaultConfig(), rootDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, process.Close()) })
+	_, err = process.Initialize(context.Background(), rootDir)
+	require.NoError(t, err)
+	pid := process.cmd.Process.Pid
+
+	cancelRuntime()
+
+	assert.Eventually(t, func() bool {
+		process.mu.Lock()
+		defer process.mu.Unlock()
+		return process.closed
+	}, time.Second, 10*time.Millisecond)
+	assert.Eventually(t, func() bool {
+		return syscall.Kill(pid, 0) == syscall.ESRCH
+	}, time.Second, 10*time.Millisecond)
+}
+
 func readPID(t *testing.T, path string) int {
 	t.Helper()
 	data, err := os.ReadFile(path)

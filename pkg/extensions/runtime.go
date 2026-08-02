@@ -16,6 +16,8 @@ import (
 type Runtime struct {
 	config              Config
 	workingDir          string
+	runtimeCtx          context.Context
+	cancelRuntime       context.CancelFunc
 	mu                  sync.RWMutex
 	processes           []*Process
 	tools               map[string]*Tool
@@ -36,8 +38,18 @@ type Command struct {
 // It is useful for callers that want to attach a non-nil runtime before discovery
 // has found any extensions.
 func EmptyRuntime() *Runtime {
+	return emptyRuntimeWithContext(context.Background())
+}
+
+func emptyRuntimeWithContext(ctx context.Context) *Runtime {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	runtimeCtx, cancelRuntime := context.WithCancel(context.WithoutCancel(ctx))
 	return &Runtime{
 		config:              DefaultConfig(),
+		runtimeCtx:          runtimeCtx,
+		cancelRuntime:       cancelRuntime,
 		tools:               map[string]*Tool{},
 		eventHandlersByName: map[string][]eventHandler{},
 	}
@@ -53,7 +65,7 @@ func newRuntime(ctx context.Context, startLifecycle bool, opts ...DiscoveryOptio
 	if err != nil {
 		return nil, err
 	}
-	r := EmptyRuntime()
+	r := emptyRuntimeWithContext(ctx)
 	r.config = discovery.config
 	r.workingDir = discovery.workingDir
 	if err := r.initialize(ctx, discovery); err != nil {
@@ -85,7 +97,7 @@ func (r *Runtime) initialize(ctx context.Context, discovery *Discovery) error {
 		return err
 	}
 	for _, ext := range extensions {
-		proc, err := StartProcess(ctx, ext, r.config, r.workingDir)
+		proc, err := StartProcess(r.runtimeCtx, ext, r.config, r.workingDir)
 		if err != nil {
 			logger.G(ctx).WithError(err).WithField("extension", ext.ID).Warn("failed to start extension; disabling for this process")
 			continue
@@ -273,6 +285,9 @@ func (r *Runtime) Close() error {
 	r.mu.Unlock()
 	if lifecycleStarted {
 		r.DispatchSessionEnd(context.Background(), ExtensionCallContext{CWD: r.workingDir, InvokedBy: "main"})
+	}
+	if r.cancelRuntime != nil {
+		r.cancelRuntime()
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()

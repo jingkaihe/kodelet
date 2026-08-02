@@ -424,6 +424,34 @@ func TestRuntimeProcessSurvivesInitializationContextCancellation(t *testing.T) {
 	assert.Equal(t, "All extensions are healthy for conv-after-cancel.", result.Response)
 }
 
+func TestRuntimeOwnsProcessContextLifetime(t *testing.T) {
+	type contextKey string
+	const key contextKey = "runtime-value"
+	rootDir := t.TempDir()
+	extDir := filepath.Join(rootDir, "runtime-context")
+	writeExecutable(t, filepath.Join(extDir, "kodelet-extension-runtime-context"), helperEnvExtensionScript(t))
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+
+	parentCtx, cancelParent := context.WithCancel(context.WithValue(context.Background(), key, "preserved"))
+	runtime, err := NewRuntime(
+		parentCtx,
+		WithConfig(DefaultConfig()),
+		WithWorkingDir(rootDir),
+		WithRoots(Root{Dir: rootDir, Kind: SourceKindLocalStandalone}),
+	)
+	require.NoError(t, err)
+	runtimeCtx := runtime.runtimeCtx
+	require.Len(t, runtime.processes, 1)
+
+	assert.Equal(t, "preserved", runtimeCtx.Value(key))
+	assert.Equal(t, "preserved", runtime.processes[0].runtimeCtx.Value(key))
+	cancelParent()
+	assert.NoError(t, runtimeCtx.Err())
+
+	require.NoError(t, runtime.Close())
+	assert.ErrorIs(t, runtimeCtx.Err(), context.Canceled)
+}
+
 func TestSafeDataDirNamePreservesPluginIdentity(t *testing.T) {
 	assert.Equal(t, "org@repo_weather", safeDataDirName("org@repo/weather"))
 	assert.Equal(t, "extension", safeDataDirName("///"))

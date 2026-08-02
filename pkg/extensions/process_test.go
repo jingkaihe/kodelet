@@ -62,15 +62,6 @@ func TestProcessEnsureRunningDisabledAndShutdownBranches(t *testing.T) {
 	})
 }
 
-func TestProcessContextIgnoresCallerCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	processCtx := processContext(ctx)
-
-	assert.NoError(t, processCtx.Err())
-}
-
 func TestProcessFailClientGenerationCountsOnce(t *testing.T) {
 	client := newRPCClient(strings.NewReader(""), ioDiscard{})
 	process := &Process{Extension: Extension{ID: "weather"}, client: client}

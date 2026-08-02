@@ -27,6 +27,7 @@ type Process struct {
 	stdout       io.ReadCloser
 	config       Config
 	workspaceCWD string
+	runtimeCtx   context.Context
 	lifecycleMu  sync.Mutex
 	mu           sync.Mutex
 	uiMu         sync.RWMutex
@@ -51,26 +52,33 @@ const (
 
 // StartProcess starts an extension subprocess and initializes its JSON-RPC client.
 func StartProcess(ctx context.Context, ext Extension, config Config, workspaceCWD string) (*Process, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	p := &Process{
 		Extension:    ext,
 		config:       config,
 		workspaceCWD: workspaceCWD,
+		runtimeCtx:   ctx,
 		closed:       true,
 	}
-	if err := p.start(ctx); err != nil {
+	if err := p.start(); err != nil {
 		return nil, err
 	}
 	return p, nil
 }
 
-func (p *Process) start(ctx context.Context) error {
-	processCtx := processContext(ctx)
-	cmd := exec.CommandContext(processCtx, p.Extension.ExecPath)
+func (p *Process) start() error {
+	runtimeCtx := p.runtimeCtx
+	if runtimeCtx == nil {
+		runtimeCtx = context.Background()
+	}
+	cmd := exec.CommandContext(runtimeCtx, p.Extension.ExecPath)
 	cmd.Dir = p.Extension.Dir
 	cmd.Env = extensionProcessEnv(p.workspaceCWD)
 	// Keep extension diagnostics on the host's configured log sink so a
 	// full-screen UI can redirect them without replacing the process stderr.
-	cmd.Stderr = newExtensionStderrWriter(processCtx, p.Extension.ID, logger.G(processCtx).Logger.Out)
+	cmd.Stderr = newExtensionStderrWriter(runtimeCtx, p.Extension.ID, logger.G(runtimeCtx).Logger.Out)
 	osutil.SetProcessGroup(cmd)
 	cmd.WaitDelay = extensionProcessWaitDelay
 
@@ -102,13 +110,6 @@ func (p *Process) start(ctx context.Context) error {
 	p.stdout = stdout
 	p.closed = false
 	return nil
-}
-
-func processContext(ctx context.Context) context.Context {
-	if ctx == nil {
-		return context.Background()
-	}
-	return context.WithoutCancel(ctx)
 }
 
 func extensionProcessEnv(workspaceCWD string) []string {
@@ -172,7 +173,7 @@ func (p *Process) ensureRunning(ctx context.Context) error {
 		}
 	}
 
-	if err := p.start(ctx); err != nil {
+	if err := p.start(); err != nil {
 		p.recordFailureLocked()
 		p.mu.Unlock()
 		return err
