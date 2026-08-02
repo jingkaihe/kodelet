@@ -83,6 +83,19 @@ describe("ChatComposer", () => {
 		expect(screen.queryByTestId("composer-expand-toggle")).not.toBeInTheDocument();
 	});
 
+	it("renders and emits the compact stop action", () => {
+		const props = renderComposer({ canStop: true, showStop: true });
+		const stopButton = screen.getByLabelText("Stop");
+
+		expect(stopButton).toHaveClass("composer-action-icon-button-stop");
+		expect(stopButton.querySelector("svg")).toHaveClass(
+			"composer-action-stop-icon",
+		);
+
+		fireEvent.click(stopButton);
+		expect(props.onStop).toHaveBeenCalledTimes(1);
+	});
+
 	it("renders attachment previews and slash command suggestions", () => {
 		const props = renderComposer({
 			attachments: [sampleAttachment],
