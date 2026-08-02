@@ -2475,10 +2475,10 @@ h6 {
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  border: 1px solid rgba(20, 20, 19, 0.08);
-  background: rgba(250, 249, 245, 0.86);
-  color: rgba(20, 20, 19, 0.58);
-  box-shadow: 0 8px 18px rgba(20, 20, 19, 0.08);
+  border: 1px solid rgba(93, 83, 64, 0.12);
+  background: rgba(230, 223, 210, 0.82);
+  color: #756e63;
+  box-shadow: 0 7px 16px rgba(93, 83, 64, 0.07);
   backdrop-filter: blur(10px);
   transition:
     color 140ms ease,
@@ -2487,8 +2487,8 @@ h6 {
 }
 
 .workspace-diff-icon-button:hover {
-  border-color: rgba(20, 20, 19, 0.12);
-  background: rgba(255, 255, 255, 0.94);
+  border-color: rgba(93, 83, 64, 0.17);
+  background: rgba(238, 231, 218, 0.96);
   color: var(--kodelet-dark);
 }
 
@@ -2508,15 +2508,16 @@ h6 {
 .workspace-diff-file-list {
   display: flex;
   flex-direction: column;
-  gap: 0.55rem;
+  gap: 0.45rem;
   padding: 0.05rem;
 }
 
 .workspace-diff-file {
   overflow: hidden;
-  border: 1px solid rgba(20, 20, 19, 0.08);
-  border-radius: 0.9rem;
-  background: rgba(250, 249, 245, 0.78);
+  border: 1px solid rgba(93, 83, 64, 0.09);
+  border-radius: 0.75rem;
+  background: rgba(238, 232, 221, 0.48);
+  box-shadow: inset 0 1px 0 rgba(255, 250, 241, 0.3);
 }
 
 .workspace-diff-file-toggle {
@@ -2537,7 +2538,11 @@ h6 {
 }
 
 .workspace-diff-file-toggle:hover {
-  background: rgba(255, 255, 255, 0.62);
+  background: rgba(244, 239, 229, 0.48);
+}
+
+.workspace-diff-file-toggle[aria-expanded="true"] {
+  background: rgba(236, 230, 218, 0.58);
 }
 
 .workspace-diff-file-toggle:focus-visible {
@@ -2592,13 +2597,13 @@ h6 {
 }
 
 .workspace-diff-file-body {
-  border-top: 1px solid rgba(20, 20, 19, 0.07);
+  border-top: 1px solid rgba(93, 83, 64, 0.08);
 }
 
 .workspace-diff-file-body .diff-block {
   border: 0;
   border-radius: 0;
-  background: rgba(255, 255, 255, 0.46);
+  background: rgba(247, 243, 235, 0.38);
 }
 
 .workspace-diff-panel .diff-line {
