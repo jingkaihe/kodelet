@@ -1,5 +1,11 @@
 import React, { useMemo, useState } from 'react';
-import { ChevronRight, Copy, RefreshCw } from 'lucide-react';
+import {
+  ChevronRight,
+  Copy,
+  FoldVertical,
+  RefreshCw,
+  UnfoldVertical,
+} from 'lucide-react';
 import { copyToClipboard } from '../../utils';
 import { parseUnifiedDiff, ReferenceDiffBlock } from '../tool-renderers/reference';
 import type { GitDiffResponse } from '../../types';
@@ -470,6 +476,9 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({
       ),
     [cwdLabel, diffText, gitDiff?.cwd, gitDiff?.git_root]
   );
+  const allFilesExpanded =
+    fileDiffs.length > 0 &&
+    fileDiffs.every((file) => expandedFileIds.has(file.id));
 
   if (!open) {
     return null;
@@ -487,6 +496,14 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({
     });
   };
 
+  const toggleAllFiles = () => {
+    setExpandedFileIds(
+      allFilesExpanded
+        ? new Set()
+        : new Set(fileDiffs.map((file) => file.id))
+    );
+  };
+
   return (
     <section
       aria-label="Changes"
@@ -497,15 +514,31 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({
       <div className="workspace-modal-body workspace-side-panel-body">
         <div className="workspace-diff-toolbar" aria-label="Diff actions">
           {gitDiff?.has_diff && !loading ? (
-            <button
-              aria-label="Copy diff"
-              className="workspace-diff-icon-button"
-              onClick={() => void copyToClipboard(diffText)}
-              title="Copy diff"
-              type="button"
-            >
-              <Copy aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
-            </button>
+            <>
+              <button
+                aria-label={allFilesExpanded ? 'Collapse all file diffs' : 'Expand all file diffs'}
+                aria-pressed={allFilesExpanded}
+                className="workspace-diff-icon-button"
+                onClick={toggleAllFiles}
+                title={allFilesExpanded ? 'Collapse all file diffs' : 'Expand all file diffs'}
+                type="button"
+              >
+                {allFilesExpanded ? (
+                  <FoldVertical aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
+                ) : (
+                  <UnfoldVertical aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
+                )}
+              </button>
+              <button
+                aria-label="Copy diff"
+                className="workspace-diff-icon-button"
+                onClick={() => void copyToClipboard(diffText)}
+                title="Copy diff"
+                type="button"
+              >
+                <Copy aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
+              </button>
+            </>
           ) : null}
           <button
             aria-label="Refresh diff"

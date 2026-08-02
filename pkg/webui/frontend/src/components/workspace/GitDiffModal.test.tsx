@@ -125,6 +125,60 @@ describe('GitDiffModal', () => {
     expect(screen.queryByText('one')).not.toBeInTheDocument();
   });
 
+  it('expands and collapses all file diffs from the toolbar toggle', () => {
+    const diff = [
+      'diff --git a/one.txt b/one.txt',
+      '--- a/one.txt',
+      '+++ b/one.txt',
+      '@@ -1 +1 @@',
+      '-old one',
+      '+new one',
+      'diff --git a/two.txt b/two.txt',
+      '--- a/two.txt',
+      '+++ b/two.txt',
+      '@@ -1 +1 @@',
+      '-old two',
+      '+new two',
+    ].join('\n');
+
+    render(
+      <GitDiffModal
+        error={null}
+        gitDiff={{
+          cwd: '/workspace/repo',
+          diff,
+          exit_code: 0,
+          git_root: '/workspace/repo',
+          has_diff: true,
+        }}
+        loading={false}
+        onRefresh={vi.fn()}
+        open
+      />
+    );
+
+    const expandAll = screen.getByRole('button', { name: 'Expand all file diffs' });
+    expect(expandAll).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByText('new one')).not.toBeInTheDocument();
+    expect(screen.queryByText('new two')).not.toBeInTheDocument();
+
+    fireEvent.click(expandAll);
+
+    const collapseAll = screen.getByRole('button', { name: 'Collapse all file diffs' });
+    expect(collapseAll).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('new one')).toBeInTheDocument();
+    expect(screen.getByText('new two')).toBeInTheDocument();
+
+    fireEvent.click(collapseAll);
+
+    expect(screen.getByRole('button', { name: 'Expand all file diffs' })).toHaveAttribute(
+      'aria-pressed',
+      'false'
+    );
+    expect(screen.queryByText('new one')).not.toBeInTheDocument();
+    expect(screen.queryByText('new two')).not.toBeInTheDocument();
+  });
+
   it('keeps nested submodule diffs together and includes combined conflict diffs', () => {
     const diff = [
       'Submodule nested contains modified content',
@@ -283,6 +337,7 @@ describe('GitDiffModal', () => {
     expect(screen.queryByRole('heading', { name: 'Changes' })).not.toBeInTheDocument();
     expect(screen.queryByText('/tmp/project')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy diff' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Expand all file diffs' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Refresh diff' })).toBeInTheDocument();
     expect(screen.getByTestId('git-diff-panel')).toHaveAttribute('role', 'complementary');
     expect(screen.queryByTestId('git-diff-modal-backdrop')).not.toBeInTheDocument();
@@ -392,5 +447,6 @@ describe('GitDiffModal', () => {
 
     expect(onRefresh).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('button', { name: 'Copy diff' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Expand all file diffs' })).not.toBeInTheDocument();
   });
 });

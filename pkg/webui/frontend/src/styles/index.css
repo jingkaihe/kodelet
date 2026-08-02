@@ -2486,6 +2486,12 @@ h6 {
     border-color 140ms ease;
 }
 
+.workspace-diff-icon-button svg {
+  display: block;
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
 .workspace-diff-icon-button:hover {
   border-color: rgba(93, 83, 64, 0.17);
   background: rgba(238, 231, 218, 0.96);
