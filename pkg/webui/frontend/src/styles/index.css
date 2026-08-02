@@ -821,8 +821,8 @@ h6 {
 @media (min-width: 1024px) {
   .composer-control-grid:not(.is-multiline) .composer-editor {
     min-height: 3.25rem;
-    padding-top: 0.45rem;
-    padding-bottom: 0.45rem;
+    padding-top: 0.7rem;
+    padding-bottom: 0.2rem;
   }
 }
 
