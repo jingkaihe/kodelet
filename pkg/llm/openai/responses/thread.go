@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"strings"
@@ -41,6 +42,14 @@ import (
 	"github.com/openai/openai-go/v3/packages/ssestream"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
+)
+
+// Keep structured overload retries aligned with openai/codex's retry_on_overload helper.
+const (
+	responsesServerOverloadInitialDelay = 250 * time.Millisecond
+	responsesServerOverloadMaxDelay     = 2 * time.Second
+	responsesServerOverloadJitterRatio  = 0.2
+	responsesServerOverloadHeader       = "X-Kodelet-Server-Overloaded"
 )
 
 // Thread represents a conversation thread using the OpenAI Responses API.
@@ -551,6 +560,7 @@ func (t *Thread) processMessageExchange(
 	useWebSocket := t.useWebSocket && t.webSocket != nil
 	var newStreaming func(context.Context, responses.ResponseNewParams, ...option.RequestOption) *ssestream.Stream[responses.ResponseStreamEventUnion]
 	if !useWebSocket {
+		requestOpts = append(requestOpts, disableSDKServerOverloadRetries())
 		newStreaming = t.newStreamingFunc
 		if newStreaming == nil {
 			newStreaming = t.client.Responses.NewStreaming
@@ -707,7 +717,6 @@ func (t *Thread) processMessageExchangeWithStreamRetries(
 		retry.Attempts(uint(retryConfig.Attempts)),
 		retry.Delay(time.Duration(retryConfig.InitialDelay)*time.Millisecond),
 		retry.DelayType(responsesStreamRetryDelayType(retryConfig)),
-		retry.MaxDelay(time.Duration(retryConfig.MaxDelay)*time.Millisecond),
 		retry.Context(ctx),
 		retry.OnRetry(func(n uint, err error) {
 			log.WithError(err).
@@ -775,10 +784,35 @@ func responsesStreamRetryConfig(config llmtypes.Config) llmtypes.RetryConfig {
 }
 
 func responsesStreamRetryDelayType(retryConfig llmtypes.RetryConfig) retry.DelayTypeFunc {
+	var regularDelayType retry.DelayTypeFunc
 	if retryConfig.BackoffType == "fixed" {
-		return retry.FixedDelay
+		regularDelayType = retry.FixedDelay
+	} else {
+		regularDelayType = retry.BackOffDelay
 	}
-	return retry.BackOffDelay
+
+	maxDelay := time.Duration(retryConfig.MaxDelay) * time.Millisecond
+	return func(n uint, err error, config *retry.Config) time.Duration {
+		if isResponsesServerOverloadedError(err) {
+			return responsesServerOverloadRetryDelay(n)
+		}
+
+		delay := regularDelayType(n, err, config)
+		if maxDelay > 0 && delay > maxDelay {
+			return maxDelay
+		}
+		return delay
+	}
+}
+
+func responsesServerOverloadRetryDelay(attempt uint) time.Duration {
+	delay := responsesServerOverloadInitialDelay
+	for retryNumber := uint(1); retryNumber < max(attempt, 1) && delay < responsesServerOverloadMaxDelay; retryNumber++ {
+		delay = min(delay*2, responsesServerOverloadMaxDelay)
+	}
+
+	jitterMultiplier := 1 + ((rand.Float64()*2)-1)*responsesServerOverloadJitterRatio
+	return time.Duration(float64(delay) * jitterMultiplier)
 }
 
 func resetPendingReasoning(builder *strings.Builder, value string) {
@@ -809,9 +843,9 @@ func isRetryableResponsesStreamError(err error) bool {
 	if errors.As(err, &eventErr) {
 		code := strings.ToLower(strings.TrimSpace(eventErr.code))
 		switch code {
-		case "websocket_connection_limit_reached", "previous_response_not_found":
+		case "websocket_connection_limit_reached", "previous_response_not_found", "server_is_overloaded", "slow_down":
 			return true
-		case "invalid_prompt", "context_length_exceeded", "insufficient_quota", "usage_not_included", "cyber_policy", "server_is_overloaded", "slow_down":
+		case "invalid_prompt", "context_length_exceeded", "insufficient_quota", "usage_not_included", "cyber_policy":
 			return false
 		}
 		if eventErr.statusCode != 0 {
@@ -822,6 +856,9 @@ func isRetryableResponsesStreamError(err error) bool {
 
 	var apiErr *openai.Error
 	if errors.As(err, &apiErr) {
+		if isResponsesServerOverloadedError(apiErr) {
+			return true
+		}
 		return isRetryableResponsesHTTPStatus(apiErr.StatusCode, apiErr.Code)
 	}
 
@@ -829,12 +866,13 @@ func isRetryableResponsesStreamError(err error) bool {
 }
 
 func isRetryableResponsesHTTPStatus(statusCode int, errorCode string) bool {
+	if isResponsesServerOverloadedCode(errorCode) {
+		return true
+	}
+
 	switch statusCode {
 	case http.StatusBadRequest, http.StatusTooManyRequests:
 		return false
-	case http.StatusServiceUnavailable:
-		code := strings.ToLower(strings.TrimSpace(errorCode))
-		return code != "server_is_overloaded" && code != "slow_down"
 	case 0:
 		return true
 	default:
@@ -843,14 +881,58 @@ func isRetryableResponsesHTTPStatus(statusCode int, errorCode string) bool {
 }
 
 func isRetryableResponsesWebSocketHandshakeStatus(statusCode int, body string) bool {
+	if isResponsesServerOverloadedCode(responsesAPIErrorCodeFromBody(body)) {
+		return true
+	}
+
 	switch statusCode {
 	case http.StatusBadRequest, http.StatusTooManyRequests:
 		return false
-	case http.StatusServiceUnavailable:
-		code := responsesAPIErrorCodeFromBody(body)
-		return code != "server_is_overloaded" && code != "slow_down"
 	default:
 		return true
+	}
+}
+
+func isResponsesServerOverloadedError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var streamEventErr *responseStreamEventError
+	if errors.As(err, &streamEventErr) && isResponsesServerOverloadedCode(streamEventErr.code) {
+		return true
+	}
+
+	var eventErr *responsesWebSocketEventError
+	if errors.As(err, &eventErr) && isResponsesServerOverloadedCode(eventErr.code) {
+		return true
+	}
+
+	var statusErr *websocketHandshakeStatusError
+	if errors.As(err, &statusErr) && isResponsesServerOverloadedCode(responsesAPIErrorCodeFromBody(statusErr.body)) {
+		return true
+	}
+
+	var apiErr *openai.Error
+	if errors.As(err, &apiErr) {
+		if apiErr.Response != nil && strings.EqualFold(apiErr.Response.Header.Get(responsesServerOverloadHeader), "true") {
+			return true
+		}
+		if isResponsesServerOverloadedCode(apiErr.Code) {
+			return true
+		}
+		return isResponsesServerOverloadedCode(responsesAPIErrorCodeFromBody(apiErr.RawJSON()))
+	}
+
+	return false
+}
+
+func isResponsesServerOverloadedCode(code string) bool {
+	switch strings.ToLower(strings.TrimSpace(code)) {
+	case "server_is_overloaded", "slow_down":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -860,6 +942,7 @@ func responsesAPIErrorCodeFromBody(body string) string {
 	}
 
 	var payload struct {
+		Code  string `json:"code"`
 		Error struct {
 			Code string `json:"code"`
 		} `json:"error"`
@@ -867,7 +950,7 @@ func responsesAPIErrorCodeFromBody(body string) string {
 	if err := json.Unmarshal([]byte(body), &payload); err != nil {
 		return ""
 	}
-	return strings.ToLower(strings.TrimSpace(payload.Error.Code))
+	return strings.ToLower(strings.TrimSpace(firstNonEmpty(payload.Code, payload.Error.Code)))
 }
 
 func logResponsesAPIRequestFailure(log *logrus.Entry, err error, model string, toolCount int, inputItemCount int) {
@@ -1760,6 +1843,32 @@ func errorLoggingMiddleware(log *logrus.Entry) option.RequestOption {
 			resp.Body = io.NopCloser(bytes.NewReader(body))
 		}
 
+		return resp, err
+	})
+}
+
+// disableSDKServerOverloadRetries leaves ordinary SDK retries unchanged while
+// reserving structured overload retries for the outer Responses retry loop.
+func disableSDKServerOverloadRetries() option.RequestOption {
+	return option.WithMiddleware(func(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
+		resp, err := next(req)
+		if err != nil || resp == nil || resp.Body == nil || resp.StatusCode < http.StatusBadRequest {
+			return resp, err
+		}
+
+		body, readErr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		resp.Body = io.NopCloser(bytes.NewReader(body))
+		if readErr != nil {
+			return resp, err
+		}
+		if isResponsesServerOverloadedCode(responsesAPIErrorCodeFromBody(string(body))) {
+			if resp.Header == nil {
+				resp.Header = make(http.Header)
+			}
+			resp.Header.Set(responsesServerOverloadHeader, "true")
+			resp.Header.Set("x-should-retry", "false")
+		}
 		return resp, err
 	})
 }

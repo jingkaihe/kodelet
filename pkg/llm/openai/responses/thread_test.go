@@ -3,7 +3,10 @@ package responses
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,6 +19,7 @@ import (
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	openai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/packages/ssestream"
@@ -25,6 +29,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type recordingRetryTimer struct {
+	delays []time.Duration
+}
+
+func (t *recordingRetryTimer) After(delay time.Duration) <-chan time.Time {
+	t.delays = append(t.delays, delay)
+	ready := make(chan time.Time, 1)
+	ready <- time.Now()
+	return ready
+}
 
 func extractInputItemText(item openairesponses.ResponseInputItemUnionParam) string {
 	var text string
@@ -2622,6 +2637,273 @@ func TestProcessMessageExchangeRetriesHTTPSStreamError(t *testing.T) {
 	assert.Equal(t, 3, attempts)
 }
 
+func TestProcessMessageExchangeRetriesServerOverload(t *testing.T) {
+	config := llmtypes.Config{
+		Provider: "openai",
+		Model:    "gpt-5.5",
+		Retry: llmtypes.RetryConfig{
+			Attempts:     2,
+			InitialDelay: 1,
+			MaxDelay:     1,
+			BackoffType:  "fixed",
+		},
+		OpenAI: &llmtypes.OpenAIConfig{Platform: "openai"},
+	}
+	thread := &Thread{
+		Thread: base.NewThread(config, "conv-test"),
+		inputItems: []openairesponses.ResponseInputItemUnionParam{
+			{
+				OfMessage: &openairesponses.EasyInputMessageParam{
+					Role:    openairesponses.EasyInputMessageRoleUser,
+					Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("hello")},
+				},
+			},
+		},
+		storedItems: []StoredInputItem{{Type: "message", Role: "user", Content: "hello"}},
+	}
+	thread.SetState(tools.NewBasicState(context.Background()))
+
+	attempts := 0
+	thread.newStreamingFunc = func(_ context.Context, _ openairesponses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
+		attempts++
+		return nil
+	}
+	thread.processStreamFunc = func(_ context.Context, _ *ssestream.Stream[openairesponses.ResponseStreamEventUnion], _ llmtypes.MessageHandler, _ string, _ llmtypes.MessageOpt) (processStreamResult, error) {
+		if attempts == 1 {
+			return processStreamResult{}, &responseStreamEventError{code: "server_is_overloaded", message: "server overloaded"}
+		}
+		thread.inputItems = append(thread.inputItems, openairesponses.ResponseInputItemUnionParam{
+			OfMessage: &openairesponses.EasyInputMessageParam{
+				Role:    openairesponses.EasyInputMessageRoleAssistant,
+				Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("done")},
+			},
+		})
+		return processStreamResult{responseCompleted: true}, nil
+	}
+
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
+	output, _, completed, err := thread.processMessageExchange(context.Background(), handler, "gpt-5.5", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
+	require.NoError(t, err)
+	assert.True(t, completed)
+	assert.Equal(t, "done", output)
+	assert.Equal(t, 2, attempts)
+}
+
+func TestProcessMessageExchangeHTTPRetryOwnership(t *testing.T) {
+	tests := []struct {
+		name             string
+		statusCode       int
+		body             string
+		expectedRequests int32
+	}{
+		{
+			name:             "structured overload uses outer three-attempt budget",
+			statusCode:       http.StatusServiceUnavailable,
+			body:             `{"error":{"code":"server_is_overloaded","message":"server overloaded","param":"","type":"server_error"}}`,
+			expectedRequests: 3,
+		},
+		{
+			name:             "ordinary rate limit keeps SDK retry budget",
+			statusCode:       http.StatusTooManyRequests,
+			body:             `{"error":{"code":"rate_limit_exceeded","message":"rate limited","param":"","type":"rate_limit_error"}}`,
+			expectedRequests: 3,
+		},
+		{
+			name:             "top-level slow down keeps outer overload classification",
+			statusCode:       http.StatusTooManyRequests,
+			body:             `{"code":"slow_down","message":"slow down","param":"","type":"server_error"}`,
+			expectedRequests: 3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var requests atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				requests.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tt.statusCode)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			t.Cleanup(server.Close)
+
+			client := openai.NewClient(
+				option.WithAPIKey("test-api-key"),
+				option.WithBaseURL(server.URL+"/v1"),
+			)
+			config := llmtypes.Config{
+				Provider: "openai",
+				Model:    "gpt-5.5",
+				Retry:    llmtypes.RetryConfig{Attempts: 3},
+				OpenAI: &llmtypes.OpenAIConfig{
+					Platform: "openai",
+					BaseURL:  server.URL + "/v1",
+				},
+			}
+			thread := &Thread{
+				Thread: base.NewThread(config, "conv-test"),
+				client: &client,
+				inputItems: []openairesponses.ResponseInputItemUnionParam{
+					{
+						OfMessage: &openairesponses.EasyInputMessageParam{
+							Role:    openairesponses.EasyInputMessageRoleUser,
+							Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("hello")},
+						},
+					},
+				},
+				storedItems: []StoredInputItem{{Type: "message", Role: "user", Content: "hello"}},
+			}
+			thread.SetState(tools.NewBasicState(context.Background()))
+			thread.newStreamingFunc = thread.client.Responses.NewStreaming
+			thread.processStreamFunc = thread.processStream
+
+			handler := &llmtypes.StringCollectorHandler{Silent: true}
+			_, _, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-5.5", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
+			require.Error(t, err)
+			assert.Equal(t, tt.expectedRequests, requests.Load())
+		})
+	}
+}
+
+func TestProcessMessageExchangeServerOverloadBackoffHonorsCancellation(t *testing.T) {
+	config := llmtypes.Config{
+		Provider: "openai",
+		Model:    "gpt-5.5",
+		Retry:    llmtypes.RetryConfig{Attempts: 3},
+		OpenAI:   &llmtypes.OpenAIConfig{Platform: "openai"},
+	}
+	thread := &Thread{
+		Thread: base.NewThread(config, "conv-test"),
+		inputItems: []openairesponses.ResponseInputItemUnionParam{
+			{
+				OfMessage: &openairesponses.EasyInputMessageParam{
+					Role:    openairesponses.EasyInputMessageRoleUser,
+					Content: openairesponses.EasyInputMessageContentUnionParam{OfString: param.NewOpt("hello")},
+				},
+			},
+		},
+		storedItems: []StoredInputItem{{Type: "message", Role: "user", Content: "hello"}},
+	}
+	thread.SetState(tools.NewBasicState(context.Background()))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	attempts := 0
+	thread.newStreamingFunc = func(_ context.Context, _ openairesponses.ResponseNewParams, _ ...option.RequestOption) *ssestream.Stream[openairesponses.ResponseStreamEventUnion] {
+		attempts++
+		return nil
+	}
+	thread.processStreamFunc = func(_ context.Context, _ *ssestream.Stream[openairesponses.ResponseStreamEventUnion], _ llmtypes.MessageHandler, _ string, _ llmtypes.MessageOpt) (processStreamResult, error) {
+		cancel()
+		return processStreamResult{}, &responseStreamEventError{code: "server_is_overloaded", message: "server overloaded"}
+	}
+
+	handler := &llmtypes.StringCollectorHandler{Silent: true}
+	_, _, _, err := thread.processMessageExchange(ctx, handler, "gpt-5.5", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, 1, attempts)
+}
+
+func TestResponsesServerOverloadRetryDelayMatchesCodex(t *testing.T) {
+	tests := []struct {
+		name      string
+		attempt   uint
+		baseDelay time.Duration
+	}{
+		{name: "first retry", attempt: 1, baseDelay: 250 * time.Millisecond},
+		{name: "second retry", attempt: 2, baseDelay: 500 * time.Millisecond},
+		{name: "delay caps before jitter", attempt: 8, baseDelay: 2 * time.Second},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lowerBound := time.Duration(float64(tt.baseDelay) * (1 - responsesServerOverloadJitterRatio))
+			upperBound := time.Duration(float64(tt.baseDelay) * (1 + responsesServerOverloadJitterRatio))
+			for range 20 {
+				delay := responsesServerOverloadRetryDelay(tt.attempt)
+				assert.Truef(t, delay >= lowerBound && delay <= upperBound, "delay %s outside [%s, %s]", delay, lowerBound, upperBound)
+			}
+		})
+	}
+}
+
+func TestResponsesStreamRetryDelayTypeUsesCodexOverloadSequence(t *testing.T) {
+	retryConfig := llmtypes.RetryConfig{
+		Attempts:     3,
+		InitialDelay: 1,
+		MaxDelay:     1,
+		BackoffType:  "fixed",
+	}
+	timer := &recordingRetryTimer{}
+	attempts := 0
+
+	err := retry.Do(
+		func() error {
+			attempts++
+			return &responseStreamEventError{code: "server_is_overloaded", message: "server overloaded"}
+		},
+		retry.Attempts(uint(retryConfig.Attempts)),
+		retry.Delay(time.Duration(retryConfig.InitialDelay)*time.Millisecond),
+		retry.DelayType(responsesStreamRetryDelayType(retryConfig)),
+		retry.WithTimer(timer),
+		retry.LastErrorOnly(true),
+	)
+	require.Error(t, err)
+	assert.Equal(t, 3, attempts)
+	require.Len(t, timer.delays, 2)
+	assert.InDelta(t, 250*time.Millisecond, timer.delays[0], float64(50*time.Millisecond))
+	assert.InDelta(t, 500*time.Millisecond, timer.delays[1], float64(100*time.Millisecond))
+}
+
+func TestIsResponsesServerOverloadedError(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		overloaded bool
+	}{
+		{
+			name:       "SSE response failed event",
+			err:        &responseStreamEventError{code: "server_is_overloaded", message: "overloaded"},
+			overloaded: true,
+		},
+		{
+			name:       "wrapped slow down event",
+			err:        errors.Wrap(&responseStreamEventError{code: "slow_down", message: "slow down"}, "stream error"),
+			overloaded: true,
+		},
+		{
+			name:       "websocket event",
+			err:        &responsesWebSocketEventError{code: "server_is_overloaded", message: "overloaded"},
+			overloaded: true,
+		},
+		{
+			name:       "HTTP API error",
+			err:        &openai.Error{StatusCode: http.StatusServiceUnavailable, Code: "server_is_overloaded"},
+			overloaded: true,
+		},
+		{
+			name:       "websocket handshake body",
+			err:        &websocketHandshakeStatusError{statusCode: http.StatusServiceUnavailable, body: `{"error":{"code":"slow_down"}}`},
+			overloaded: true,
+		},
+		{
+			name:       "generic service unavailable",
+			err:        &websocketHandshakeStatusError{statusCode: http.StatusServiceUnavailable, body: `{"error":{"code":"server_error"}}`},
+			overloaded: false,
+		},
+		{
+			name:       "generic stream failure",
+			err:        &responseStreamEventError{code: "server_error", message: "temporary"},
+			overloaded: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.overloaded, isResponsesServerOverloadedError(tt.err))
+		})
+	}
+}
+
 func TestProcessMessageExchangeKeepsDurableStateBeforeHTTPSStreamRetry(t *testing.T) {
 	config := llmtypes.Config{
 		Provider: "openai",
@@ -2827,7 +3109,7 @@ func TestProcessMessageExchangeDoesNotRetryHTTPSUnrecoverableStreamError(t *test
 	assert.Equal(t, 1, attempts)
 }
 
-func TestProcessMessageExchangeCodexUsesDefaultStreamingOptions(t *testing.T) {
+func TestProcessMessageExchangeCodexAddsOverloadRetryOwnershipMiddleware(t *testing.T) {
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-5.1-codex", OpenAI: &llmtypes.OpenAIConfig{Platform: "codex"}}
 	thread := &Thread{
 		Thread:  base.NewThread(config, "conv-test"),
@@ -2856,7 +3138,7 @@ func TestProcessMessageExchangeCodexUsesDefaultStreamingOptions(t *testing.T) {
 	handler := &llmtypes.StringCollectorHandler{Silent: true}
 	_, _, _, err := thread.processMessageExchange(context.Background(), handler, "gpt-5.1-codex", 256, "system", llmtypes.MessageOpt{NoToolUse: true})
 	require.NoError(t, err)
-	assert.Zero(t, streamingOptsCount, "codex streaming should use default request options")
+	assert.Equal(t, 1, streamingOptsCount, "codex streaming should add overload retry ownership middleware")
 }
 
 func TestSendMessageRequiresResponseCompletedEvent(t *testing.T) {

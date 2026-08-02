@@ -114,7 +114,7 @@ func TestWebSocketHandshakeErrorIsSafeToFormat(t *testing.T) {
 	assert.Contains(t, err.Error(), "HTTP 426 Upgrade Required")
 }
 
-func TestIsRetryableResponsesWebSocketHandshakeStatusMatchesCodex(t *testing.T) {
+func TestIsRetryableResponsesWebSocketHandshakeStatus(t *testing.T) {
 	tests := []struct {
 		name       string
 		statusCode int
@@ -129,8 +129,8 @@ func TestIsRetryableResponsesWebSocketHandshakeStatusMatchesCodex(t *testing.T) 
 		{name: "too many requests does not retry", statusCode: http.StatusTooManyRequests, retryable: false},
 		{name: "internal server error retries", statusCode: http.StatusInternalServerError, retryable: true},
 		{name: "generic service unavailable retries", statusCode: http.StatusServiceUnavailable, retryable: true},
-		{name: "overloaded service unavailable does not retry", statusCode: http.StatusServiceUnavailable, body: `{"error":{"code":"server_is_overloaded"}}`, retryable: false},
-		{name: "slow down service unavailable does not retry", statusCode: http.StatusServiceUnavailable, body: `{"error":{"code":"slow_down"}}`, retryable: false},
+		{name: "overloaded service unavailable retries", statusCode: http.StatusServiceUnavailable, body: `{"error":{"code":"server_is_overloaded"}}`, retryable: true},
+		{name: "slow down service unavailable retries", statusCode: http.StatusServiceUnavailable, body: `{"error":{"code":"slow_down"}}`, retryable: true},
 	}
 
 	for _, tt := range tests {

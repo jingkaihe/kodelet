@@ -355,10 +355,14 @@ streamLoop:
 		case "response.failed", "error":
 			// Handle errors
 			errMsg := responseStreamEventErrorMessage(event)
+			eventErr := &responseStreamEventError{
+				code:    responseStreamEventErrorCode(event),
+				message: errMsg,
+			}
 			if !isRetryableResponseStreamEventError(event) {
-				streamProcessingErr = retry.Unrecoverable(errors.New(errMsg))
+				streamProcessingErr = retry.Unrecoverable(eventErr)
 			} else {
-				streamProcessingErr = errors.New(errMsg)
+				streamProcessingErr = eventErr
 			}
 			break streamLoop
 
@@ -473,6 +477,18 @@ type processStreamResult struct {
 	serverKnownItems  []responses.ResponseInputItemUnionParam
 }
 
+type responseStreamEventError struct {
+	code    string
+	message string
+}
+
+func (e *responseStreamEventError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return e.message
+}
+
 type functionCallInvocation struct {
 	outputIndex int64
 	callID      string
@@ -493,11 +509,15 @@ func responseStreamEventErrorMessage(event responses.ResponseStreamEventUnion) s
 	return "Unknown error"
 }
 
-func isRetryableResponseStreamEventError(event responses.ResponseStreamEventUnion) bool {
-	code := strings.ToLower(strings.TrimSpace(firstNonEmpty(
+func responseStreamEventErrorCode(event responses.ResponseStreamEventUnion) string {
+	return strings.ToLower(strings.TrimSpace(firstNonEmpty(
 		event.Code,
 		string(event.Response.Error.Code),
 	)))
+}
+
+func isRetryableResponseStreamEventError(event responses.ResponseStreamEventUnion) bool {
+	code := responseStreamEventErrorCode(event)
 
 	if code == "invalid_prompt" {
 		return false
@@ -509,9 +529,6 @@ func isRetryableResponseStreamEventError(event responses.ResponseStreamEventUnio
 		return false
 	}
 	if code == "cyber_policy" {
-		return false
-	}
-	if code == "server_is_overloaded" || code == "slow_down" {
 		return false
 	}
 

@@ -1309,7 +1309,7 @@ func TestProcessStreamEndsEachAssistantMessageItem(t *testing.T) {
 	assert.Equal(t, responses.ResponseOutputMessagePhaseFinalAnswer, thread.inputItems[1].OfOutputMessage.Phase)
 }
 
-func TestProcessStreamResponseFailedErrorRetryabilityMatchesCodex(t *testing.T) {
+func TestProcessStreamResponseFailedErrorRetryability(t *testing.T) {
 	tests := []struct {
 		name        string
 		code        string
@@ -1322,8 +1322,8 @@ func TestProcessStreamResponseFailedErrorRetryabilityMatchesCodex(t *testing.T) 
 		{name: "quota does not retry", code: "insufficient_quota", retryable: false, errorString: "quota"},
 		{name: "usage not included does not retry", code: "usage_not_included", retryable: false, errorString: "usage"},
 		{name: "cyber policy does not retry", code: "cyber_policy", retryable: false, errorString: "policy"},
-		{name: "server overloaded does not retry", code: "server_is_overloaded", retryable: false, errorString: "overloaded"},
-		{name: "slow down does not retry", code: "slow_down", retryable: false, errorString: "slow down"},
+		{name: "server overloaded retries", code: "server_is_overloaded", retryable: true, errorString: "overloaded"},
+		{name: "slow down retries", code: "slow_down", retryable: true, errorString: "slow down"},
 	}
 
 	for _, tt := range tests {
@@ -1346,6 +1346,9 @@ func TestProcessStreamResponseFailedErrorRetryabilityMatchesCodex(t *testing.T) 
 
 			_, err := thread.processStream(context.Background(), stream, handler, "gpt-5.5", llmtypes.MessageOpt{})
 			require.Error(t, err)
+			var eventErr *responseStreamEventError
+			require.ErrorAs(t, err, &eventErr)
+			assert.Equal(t, tt.code, eventErr.code)
 			assert.Equal(t, tt.retryable, retry.IsRecoverable(err))
 		})
 	}
