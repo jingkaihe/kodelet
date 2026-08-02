@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -861,6 +861,57 @@ test("runtime serves JSON-RPC over stdio", async (t) => {
     context: { conversationId: "conv-rpc", cwd: process.cwd() },
   });
   assert.deepEqual(result, { content: "HELLO" });
+});
+
+test("runtime runs bounded session cleanup and exits when the host disconnects", async (t) => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "kodelet-sdk-disconnect-"));
+  const extensionFile = path.join(tempDir, "extension.ts");
+  const markerFile = path.join(tempDir, "session-ended");
+  await writeFile(
+    extensionFile,
+    `
+      import { writeFileSync } from "node:fs";
+      import { defineExtension, runExtension } from ${JSON.stringify(path.resolve("src/index.ts"))};
+
+      setInterval(() => undefined, 1000);
+      runExtension(defineExtension((ext) => {
+        ext.on("session.end", async () => {
+          writeFileSync(${JSON.stringify(markerFile)}, "ended");
+          await new Promise<void>(() => undefined);
+        });
+      }));
+    `,
+    "utf8",
+  );
+
+  const child = spawn(process.execPath, ["--import", "tsx", extensionFile], {
+    cwd: process.cwd(),
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  t.after(() => {
+    if (child.exitCode === null) {
+      child.kill();
+    }
+  });
+
+  const client = new RpcTestClient(child.stdout, child.stdin);
+  await client.call("extension.initialize", {
+    protocolVersion: "2026-05-30",
+    extension: { id: "disconnect", cwd: process.cwd(), dataDir: tempDir },
+    capabilities: {},
+  });
+
+  child.stdin.end();
+  const exitCode = await new Promise<number | null>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("extension did not exit after host disconnect")), 3000);
+    child.once("exit", (code) => {
+      clearTimeout(timeout);
+      resolve(code);
+    });
+  });
+
+  assert.equal(exitCode, 0);
+  assert.equal(await readFile(markerFile, "utf8"), "ended");
 });
 
 test("runtime supports extension-initiated host RPC", async (t) => {

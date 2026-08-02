@@ -2,7 +2,9 @@ import nodeProcess from "node:process";
 
 import { createExtensionHost, type ExtensionHost } from "./api.js";
 import { runWithHostRPCClient, type HostRPCClient } from "./context.js";
-import type { ExtensionEntrypoint } from "./types.js";
+import type { ExtensionEntrypoint, HandleEventParams } from "./types.js";
+
+const hostDisconnectShutdownTimeoutMs = 1000;
 
 interface JsonRpcRequest {
   jsonrpc: "2.0";
@@ -27,6 +29,8 @@ interface PendingRequest {
   resolve(value: unknown): void;
   reject(error: Error): void;
 }
+
+type SessionEndHandler = (params: HandleEventParams<"session.end">, signal?: AbortSignal) => Promise<unknown>;
 
 class ActiveRequest {
   readonly controller = new AbortController();
@@ -135,6 +139,38 @@ function runStdioServer(host: ExtensionHost): void {
   let buffer: Buffer<ArrayBufferLike> = Buffer.alloc(0);
   const hostClient = new StdioHostRPCClient();
   const activeRequests = new Map<number | string, ActiveRequest>();
+  const handleSessionEnd = createSessionEndHandler(host);
+  let shuttingDown = false;
+
+  const shutdownAfterHostDisconnect = (): void => {
+    if (shuttingDown) {
+      return;
+    }
+    shuttingDown = true;
+
+    const disconnectError = new Error("Extension host disconnected");
+    for (const request of activeRequests.values()) {
+      request.cancel(disconnectError);
+      hostClient.finishRequest(request, disconnectError);
+    }
+    activeRequests.clear();
+
+    const controller = new AbortController();
+    const forceExit = setTimeout(() => {
+      controller.abort(new Error("Extension shutdown timed out after host disconnect"));
+      nodeProcess.exit(0);
+    }, hostDisconnectShutdownTimeoutMs);
+
+    void handleSessionEnd(
+      { id: "host-disconnected", event: "session.end", context: {} },
+      controller.signal,
+    )
+      .catch(() => undefined)
+      .finally(() => {
+        clearTimeout(forceExit);
+        nodeProcess.exit(0);
+      });
+  };
 
   nodeProcess.stdin.on("data", (chunk: Buffer) => {
     buffer = Buffer.concat([buffer, chunk]);
@@ -144,24 +180,28 @@ function runStdioServer(host: ExtensionHost): void {
         break;
       }
       buffer = frame.remaining;
-      handleMessage(host, hostClient, activeRequests, frame.payload);
+      handleMessage(host, hostClient, activeRequests, handleSessionEnd, frame.payload);
     }
   });
-  nodeProcess.stdin.on("end", () => {
-    for (const request of activeRequests.values()) {
-      const error = new Error("Extension host disconnected");
-      request.cancel(error);
-      hostClient.finishRequest(request, error);
-    }
-    activeRequests.clear();
-  });
+  nodeProcess.stdin.once("end", shutdownAfterHostDisconnect);
+  nodeProcess.stdin.once("close", shutdownAfterHostDisconnect);
+  nodeProcess.stdin.once("error", shutdownAfterHostDisconnect);
   nodeProcess.stdin.resume();
+}
+
+function createSessionEndHandler(host: ExtensionHost): SessionEndHandler {
+  let execution: Promise<unknown> | undefined;
+  return (params, signal) => {
+    execution ??= host.handleEvent(params, signal);
+    return execution;
+  };
 }
 
 function handleMessage(
   host: ExtensionHost,
   hostClient: StdioHostRPCClient,
   activeRequests: Map<number | string, ActiveRequest>,
+  handleSessionEnd: SessionEndHandler,
   payload: Buffer,
 ): void {
   let request: JsonRpcRequest;
@@ -194,13 +234,14 @@ function handleMessage(
     return;
   }
 
-  startRequest(host, hostClient, activeRequests, request);
+  startRequest(host, hostClient, activeRequests, handleSessionEnd, request);
 }
 
 function startRequest(
   host: ExtensionHost,
   hostClient: StdioHostRPCClient,
   activeRequests: Map<number | string, ActiveRequest>,
+  handleSessionEnd: SessionEndHandler,
   request: JsonRpcRequest,
 ): void {
   const requestId = request.id as number | string;
@@ -223,7 +264,7 @@ function startRequest(
     persistent: hostClient,
   };
 
-  const execution = runWithHostRPCClient(requestClient, () => dispatch(host, request, active.controller.signal));
+  const execution = runWithHostRPCClient(requestClient, () => dispatch(host, request, active.controller.signal, handleSessionEnd));
   void Promise.race([execution, active.cancelled])
     .then((result) => {
       const shouldRespond = active.active;
@@ -247,7 +288,12 @@ function startRequest(
     });
 }
 
-async function dispatch(host: ExtensionHost, request: JsonRpcRequest, signal: AbortSignal): Promise<unknown> {
+async function dispatch(
+  host: ExtensionHost,
+  request: JsonRpcRequest,
+  signal: AbortSignal,
+  handleSessionEnd: SessionEndHandler,
+): Promise<unknown> {
   switch (request.method) {
     case "extension.initialize":
       return host.initialize(request.params as never);
@@ -255,8 +301,12 @@ async function dispatch(host: ExtensionHost, request: JsonRpcRequest, signal: Ab
       return await host.executeTool(request.params as never, signal);
     case "extension.command.execute":
       return await host.executeCommand(request.params as never, signal);
-    case "extension.event.handle":
+    case "extension.event.handle": {
+      if (isRecord(request.params) && request.params.event === "session.end") {
+        return await handleSessionEnd(request.params as unknown as HandleEventParams<"session.end">, signal);
+      }
       return await host.handleEvent(request.params as never, signal);
+    }
     default:
       throw new Error(`Unknown JSON-RPC method: ${request.method}`);
   }

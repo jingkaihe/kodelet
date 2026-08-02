@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/jingkaihe/kodelet/pkg/acp"
 	"github.com/jingkaihe/kodelet/pkg/llm"
@@ -9,6 +12,11 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
+
+type acpServerLifecycle interface {
+	Run() error
+	Shutdown()
+}
 
 var acpCmd = &cobra.Command{
 	Use:   "acp",
@@ -48,7 +56,8 @@ func init() {
 }
 
 func runACP(cmd *cobra.Command, _ []string) error {
-	ctx := cmd.Context()
+	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	config, err := buildACPServerConfig(cmd)
 	if err != nil {
@@ -63,7 +72,23 @@ func runACP(cmd *cobra.Command, _ []string) error {
 		acp.WithContext(ctx),
 	)
 
-	return server.Run()
+	return runACPServer(ctx, server)
+}
+
+func runACPServer(ctx context.Context, server acpServerLifecycle) error {
+	runErr := make(chan error, 1)
+	go func() {
+		runErr <- server.Run()
+	}()
+
+	select {
+	case err := <-runErr:
+		server.Shutdown()
+		return err
+	case <-ctx.Done():
+		server.Shutdown()
+		return nil
+	}
 }
 
 func buildACPServerConfig(cmd *cobra.Command) (*acp.ServerConfig, error) {
