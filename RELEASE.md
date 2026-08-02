@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.5.19-beta
+
+Updated live TUI tool elapsed times in place without rebuilding the transcript, preserving smooth progress rendering and scroll position.
+
+Improved the Web UI on mobile and constrained viewports with safe-area-aware layouts, more accessible controls and dialogs, and more resilient terminal pop-out handling.
+
+Added an automatic multiline chat composer layout that rearranges controls as input grows while keeping short prompts compact.
+
 ## 0.5.17-beta
 
 Added `/sessions`, its `Ctrl+L` shortcut, and `/new` to the native TUI, with searchable switching across saved and open conversations, status indicators for running, unread, and input-required sessions, and preserved drafts and scroll positions.
