@@ -116,7 +116,11 @@ export const parseUnifiedDiff = (unifiedDiff: string): ReferenceDiffLine[] => {
   let seenHunk = false;
 
   splitDiffLines(unifiedDiff).forEach((line) => {
-    if (line.startsWith('diff --git ')) {
+    if (
+      line.startsWith('diff --git ') ||
+      line.startsWith('diff --cc ') ||
+      line.startsWith('diff --combined ')
+    ) {
       seenHunk = false;
       parsedLines.push({ kind: 'meta', content: line });
       return;
