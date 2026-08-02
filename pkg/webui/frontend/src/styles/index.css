@@ -818,6 +818,14 @@ h6 {
   display: none;
 }
 
+@media (min-width: 1024px) {
+  .composer-control-grid:not(.is-multiline) .composer-editor {
+    min-height: 3.25rem;
+    padding-top: 0.45rem;
+    padding-bottom: 0.45rem;
+  }
+}
+
 .composer-slash-suggestions {
   margin: 0.25rem 0.25rem 0.35rem;
   max-height: min(42vh, 26rem);
