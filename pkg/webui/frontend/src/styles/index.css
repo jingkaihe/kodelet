@@ -36,6 +36,7 @@
   --tracking-eyebrow: 0.18em;
   --sidebar-surface: rgba(247, 243, 235, 0.84);
   --sidebar-surface-strong: rgba(244, 239, 229, 0.94);
+  --sidebar-surface-opaque: #f4efe5;
   --sidebar-surface-soft: rgba(239, 233, 222, 0.72);
   --sidebar-surface-ink: #4d473f;
   --sidebar-surface-muted: #8d8578;
@@ -4095,6 +4096,10 @@ code[class*="language-"] {
 
 @media (max-width: 1023px) {
   .chat-sidebar-surface {
+    border-right: 1px solid var(--sidebar-stroke-strong);
+    background: var(--sidebar-surface-opaque);
+    box-shadow: 12px 0 32px rgba(20, 20, 19, 0.1);
+    backdrop-filter: none;
     padding-top: calc(1rem + env(safe-area-inset-top));
     padding-right: calc(1rem + env(safe-area-inset-right));
     padding-bottom: calc(1rem + env(safe-area-inset-bottom));
