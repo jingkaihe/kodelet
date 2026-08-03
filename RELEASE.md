@@ -1,5 +1,15 @@
 # Kodelet
 
+## 0.5.24-beta
+
+Added a collapsible per-file Web UI git diff viewer with cwd-relative paths, line statistics, robust rename, submodule, and combined-diff handling, and expand/collapse-all controls.
+
+Improved OpenAI Responses API reliability by retrying structured server overload and slow-down failures with bounded jittered backoff across HTTP, SSE, and WebSocket transports.
+
+Tightened extension and ACP shutdown by binding subprocesses to runtime lifetimes, cleaning up when hosts disconnect, and handling interrupt and termination signals.
+
+Refined the Web UI chat sidebar, composer, stop action, and workspace diff panel styling across mobile and desktop layouts.
+
 ## 0.5.19-beta
 
 Updated live TUI tool elapsed times in place without rebuilding the transcript, preserving smooth progress rendering and scroll position.
