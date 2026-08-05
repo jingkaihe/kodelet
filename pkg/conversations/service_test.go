@@ -376,6 +376,7 @@ func TestConversationService_ForkConversation(t *testing.T) {
 	require.NoError(t, err)
 	sourceRecord := conversations.ConversationRecord{
 		ID:          "source-id",
+		CWD:         "/tmp/test-project",
 		CreatedAt:   now.Add(-time.Hour),
 		UpdatedAt:   now.Add(-time.Minute),
 		Provider:    "anthropic",
@@ -405,6 +406,7 @@ func TestConversationService_ForkConversation(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, response)
 		assert.NotEqual(t, sourceRecord.ID, response.ID)
+		assert.Equal(t, sourceRecord.CWD, response.CWD)
 		assert.Equal(t, sourceRecord.Provider, response.Provider)
 		assert.Equal(t, sourceRecord.Summary, response.Summary)
 		assert.Equal(t, 1, response.MessageCount)
@@ -412,6 +414,7 @@ func TestConversationService_ForkConversation(t *testing.T) {
 		forkedRecord, exists := mockStore.conversations[response.ID]
 		require.True(t, exists)
 		assert.Equal(t, sourceRecord.RawMessages, forkedRecord.RawMessages)
+		assert.Equal(t, sourceRecord.CWD, forkedRecord.CWD)
 		assert.Equal(t, sourceRecord.Provider, forkedRecord.Provider)
 		assert.Equal(t, sourceRecord.Summary, forkedRecord.Summary)
 		assert.Zero(t, forkedRecord.Usage.InputTokens)

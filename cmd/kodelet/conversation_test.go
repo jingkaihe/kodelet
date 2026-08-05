@@ -85,6 +85,7 @@ func TestConversationFork(t *testing.T) {
 
 	// Create a source conversation with non-zero usage
 	sourceRecord := convtypes.NewConversationRecord("source-id")
+	sourceRecord.CWD = "/tmp/test-project"
 	sourceRecord.Provider = "anthropic"
 	sourceRecord.Summary = "Test conversation"
 	sourceRecord.RawMessages = json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"Hello"}]}]`)
@@ -129,6 +130,7 @@ func TestConversationFork(t *testing.T) {
 	// Simulate fork operation
 	forkedRecord := convtypes.NewConversationRecord("")
 	forkedRecord.RawMessages = loadedSource.RawMessages
+	forkedRecord.CWD = loadedSource.CWD
 	forkedRecord.Provider = loadedSource.Provider
 	forkedRecord.Summary = loadedSource.Summary
 	forkedRecord.ToolResults = loadedSource.ToolResults
@@ -152,6 +154,7 @@ func TestConversationFork(t *testing.T) {
 
 	// Assert that messages and context are copied
 	assert.Equal(t, loadedSource.RawMessages, loadedForked.RawMessages)
+	assert.Equal(t, loadedSource.CWD, loadedForked.CWD)
 	assert.Equal(t, loadedSource.Provider, loadedForked.Provider)
 	assert.Equal(t, loadedSource.Summary, loadedForked.Summary)
 	assert.Equal(t, loadedSource.ToolResults, loadedForked.ToolResults)
@@ -767,7 +770,13 @@ func TestConversationCommandsWithSQLiteStore(t *testing.T) {
 			forkedSnapshot, ok, err := conversations.ConfigSnapshotFromMetadata(summary.Metadata)
 			require.NoError(t, err)
 			require.True(t, ok)
+			assert.Equal(t, record.CWD, summary.CWD)
+			assert.Equal(t, record.Provider, summary.Provider)
+			assert.Equal(t, "openai", forkedSnapshot.Provider)
+			assert.Equal(t, "gpt-test", forkedSnapshot.Model)
 			assert.Equal(t, "high", forkedSnapshot.ReasoningEffort)
+			require.NotNil(t, forkedSnapshot.OpenAI)
+			assert.Equal(t, "codex", forkedSnapshot.OpenAI.Platform)
 		}
 
 		deleteOutput := captureAllStdout(t, func() {

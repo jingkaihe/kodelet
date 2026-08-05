@@ -1141,6 +1141,7 @@ func forkConversationCmd(ctx context.Context, conversationID string) {
 
 	// Copy messages and context from source
 	forkedRecord.RawMessages = sourceRecord.RawMessages
+	forkedRecord.CWD = sourceRecord.CWD
 	forkedRecord.Provider = sourceRecord.Provider
 	forkedRecord.Summary = sourceRecord.Summary
 	forkedRecord.ToolResults = sourceRecord.ToolResults
