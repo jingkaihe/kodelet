@@ -76,7 +76,6 @@ const ReferencePrimitiveGallery = () => (
             'ChatComposer',
             'NewChatContextDialog',
             'TerminalModalFrame',
-            'ArcadeGamesModal',
           ]}
         />
       </section>

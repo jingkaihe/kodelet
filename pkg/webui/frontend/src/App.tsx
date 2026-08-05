@@ -1,7 +1,6 @@
 
 import { lazy, Suspense, useEffect, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router';
-import ArcadeGames from './components/games/ArcadeGames';
 
 const ChatPage = lazy(() => import('./pages/ChatPage'));
 const TerminalPage = lazy(() => import('./pages/TerminalPage'));
@@ -51,7 +50,6 @@ function App() {
   return (
     <Router>
       <div className="app-viewport h-full min-h-0 overflow-hidden" ref={appRef}>
-        <ArcadeGames />
         <Suspense fallback={<div className="app-loading" role="status">Loading Kodelet…</div>}>
           <Routes>
             <Route path="/" element={<ChatPage />} />
