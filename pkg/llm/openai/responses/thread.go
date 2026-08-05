@@ -668,9 +668,6 @@ func (t *Thread) processMessageExchangeWithStreamRetries(
 
 	err := retry.Do(
 		func() error {
-			if attemptHandler, ok := handler.(llmtypes.StreamingAttemptMessageHandler); ok {
-				attemptHandler.HandleStreamingAttemptStart()
-			}
 			resetPendingReasoning(&t.pendingReasoning, pendingReasoningBeforeAttempt)
 			attemptParams := params
 			attemptParams.Input = responses.ResponseNewParamsInputUnion{
@@ -1999,7 +1996,7 @@ func itemsForDisplay(items []StoredInputItem) ([]StoredInputItem, bool) {
 	return items[lastCompactionIdx+1:], true
 }
 
-// StreamMessages parses raw messages into streamable format for conversation streaming.
+// StreamMessages parses raw messages into normalized persisted conversation entries.
 func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltypes.StructuredToolResult) ([]StreamableMessage, error) {
 	var items []StoredInputItem
 	if err := json.Unmarshal(rawMessages, &items); err != nil {

@@ -737,9 +737,6 @@ func (t *Thread) createChatCompletionWithRetry(
 	err := retry.Do(
 		func() error {
 			var apiErr error
-			if attemptHandler, ok := streamHandler.(llmtypes.StreamingAttemptMessageHandler); ok {
-				attemptHandler.HandleStreamingAttemptStart()
-			}
 			client := t.client
 			if len(extraHeaders) > 0 {
 				client = t.chatClientWithHeaders(extraHeaders)

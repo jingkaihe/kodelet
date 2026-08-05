@@ -32,14 +32,11 @@ type RunConfig struct {
 	CWD                 string
 	Follow              bool
 	NoSave              bool
-	Headless            bool              // Use structured JSON output instead of console formatting
-	StreamDeltas        bool              // Stream partial text and tool output in headless mode
 	Images              []string          // Image paths or URLs to include with the message
 	MaxTurns            int               // Maximum number of turns within a single SendMessage call
 	FragmentName        string            // Name of fragment to use
 	FragmentArgs        map[string]string // Arguments to pass to fragment
 	FragmentDirs        []string          // Additional fragment directories
-	IncludeHistory      bool              // Include historical conversation data in headless streaming
 	NoSkills            bool              // Disable agentic skills
 	NoExtensions        bool              // Disable extension runtime
 	NoTools             bool              // Disable all tools (for simple query-response usage)
@@ -58,13 +55,11 @@ func NewRunConfig() *RunConfig {
 		CWD:                 "",
 		Follow:              false,
 		NoSave:              false,
-		Headless:            false,
 		Images:              []string{},
 		MaxTurns:            0,
 		FragmentName:        "",
 		FragmentArgs:        make(map[string]string),
 		FragmentDirs:        []string{},
-		IncludeHistory:      false,
 		NoSkills:            false,
 		NoExtensions:        false,
 		NoTools:             false,
@@ -519,7 +514,7 @@ var runCmd = &cobra.Command{
 		}
 		llmConfig.WorkingDirectory = resolvedCWD
 
-		if !config.Headless && !config.ResultOnly {
+		if !config.ResultOnly {
 			ctx = extensions.ContextWithUIInputBroker(ctx, extensions.NewTerminalUIInputBroker(os.Stdin, os.Stderr))
 		}
 
@@ -635,161 +630,58 @@ var runCmd = &cobra.Command{
 
 		appState := tools.NewBasicState(ctx, stateOpts...)
 
-		if config.Headless {
+		if config.ResultOnly {
 			presenter.SetQuiet(true)
-
-			// Configure logging for headless mode to avoid contaminating JSON output
-			logger.SetLogFormat("json")
 			logger.SetLogLevel("error")
+		}
 
-			thread, err := llm.NewThread(llmConfig)
-			if err != nil {
-				presenter.Error(err, "Failed to create LLM thread")
-				return
-			}
-			defer func() { _ = llm.CloseThread(thread) }()
-			thread.SetState(appState)
-			thread.SetConversationID(sessionID)
-			thread.EnablePersistence(ctx, !config.NoSave)
-			if goalUpdate != nil {
-				addRunGoalDisplay(thread, goalUpdate)
-			} else {
-				addRunMessageDisplay(thread, query, config)
-			}
+		handler := &llmtypes.ConsoleMessageHandler{Silent: config.ResultOnly}
+		thread, err := llm.NewThread(llmConfig)
+		if err != nil {
+			presenter.Error(err, "Failed to create LLM thread")
+			return
+		}
+		defer func() { _ = llm.CloseThread(thread) }()
+		thread.SetState(appState)
+		thread.SetConversationID(sessionID)
 
-			streamer, closeFunc, err := llm.NewConversationStreamer(ctx)
-			if err != nil {
-				presenter.Error(err, "Failed to create conversation streamer")
-				return
-			}
-			defer closeFunc()
+		if config.ResumeConvID != "" && !config.ResultOnly {
+			presenter.Info(fmt.Sprintf("Resuming conversation: %s", config.ResumeConvID))
+		}
 
-			conversationID := thread.GetConversationID()
-			streamCtx, cancel := context.WithCancel(ctx)
-			defer cancel()
-
-			liveUpdateInterval := 200 * time.Millisecond
-			streamReady := make(chan struct{})
-			streamOpts := conversations.StreamOpts{
-				Interval:       liveUpdateInterval,
-				IncludeHistory: config.IncludeHistory,
-				New:            config.ResumeConvID == "",
-				Ready:          streamReady,
-			}
-			if config.StreamDeltas {
-				streamOpts.LiveExcludedKinds = map[string]bool{
-					"text":        true,
-					"thinking":    true,
-					"tool-use":    true,
-					"tool-result": true,
-				}
-			}
-			streamDone := make(chan error, 1)
-			go func() {
-				streamDone <- streamer.StreamLiveUpdates(streamCtx, conversationID, streamOpts)
-			}()
-			select {
-			case <-streamReady:
-			case err := <-streamDone:
-				if err != nil && err != context.Canceled {
-					logger.G(ctx).WithError(err).Error("Error initializing conversation stream")
-				}
-				return
-			}
-
-			done := make(chan error, 1)
-			go func() {
-				var handler llmtypes.MessageHandler
-				if config.StreamDeltas {
-					headlessHandler := llmtypes.NewHeadlessStreamHandler(conversationID, llmConfig.Provider)
-					displayedMessages := conversations.ApplyDisplayToStreamableMessages([]conversations.StreamableMessage{{Kind: "text", Role: "user", Content: query}}, thread.GetMetadata())
-					displayContent := ""
-					if len(displayedMessages) > 0 {
-						displayContent = displayedMessages[0].Content
-					}
-					headlessHandler.HandleUserMessage(displayContent, config.Images)
-					handler = headlessHandler
-				} else {
-					handler = &llmtypes.ConsoleMessageHandler{Silent: true}
-				}
-				_, err := thread.SendMessage(ctx, query, handler, llmtypes.MessageOpt{
-					PromptCache:  true,
-					Images:       config.Images,
-					MaxTurns:     config.MaxTurns,
-					CompactRatio: llmConfig.CompactRatio,
-					UseWeakModel: config.UseWeakModel,
-				})
-				done <- err
-			}()
-
-			select {
-			case err := <-done:
-				if err != nil {
-					logger.G(ctx).WithError(err).Error("Error processing query")
-				}
-				// Give streaming time to catch final messages (2 polling cycles)
-				time.Sleep(2 * liveUpdateInterval)
-				cancel()
-				<-streamDone
-			case err := <-streamDone:
-				if err != nil && err != context.Canceled {
-					logger.G(ctx).WithError(err).Error("Error streaming updates")
-				}
-			}
+		thread.EnablePersistence(ctx, !config.NoSave)
+		if goalUpdate != nil {
+			addRunGoalDisplay(thread, goalUpdate)
 		} else {
-			if config.ResultOnly {
-				presenter.SetQuiet(true)
-				logger.SetLogLevel("error")
-			}
+			addRunMessageDisplay(thread, query, config)
+		}
 
-			handler := &llmtypes.ConsoleMessageHandler{Silent: config.ResultOnly}
-			thread, err := llm.NewThread(llmConfig)
-			if err != nil {
-				presenter.Error(err, "Failed to create LLM thread")
-				return
-			}
-			defer func() { _ = llm.CloseThread(thread) }()
-			thread.SetState(appState)
-			thread.SetConversationID(sessionID)
+		finalOutput, err := thread.SendMessage(ctx, query, handler, llmtypes.MessageOpt{
+			PromptCache:  true,
+			Images:       config.Images,
+			MaxTurns:     config.MaxTurns,
+			CompactRatio: llmConfig.CompactRatio,
+			UseWeakModel: config.UseWeakModel,
+		})
+		if err != nil {
+			presenter.Error(err, "Failed to process query")
+			return
+		}
 
-			if config.ResumeConvID != "" && !config.ResultOnly {
-				presenter.Info(fmt.Sprintf("Resuming conversation: %s", config.ResumeConvID))
-			}
+		if config.ResultOnly {
+			fmt.Println(finalOutput)
+			return
+		}
 
-			thread.EnablePersistence(ctx, !config.NoSave)
-			if goalUpdate != nil {
-				addRunGoalDisplay(thread, goalUpdate)
-			} else {
-				addRunMessageDisplay(thread, query, config)
-			}
+		usage := thread.GetUsage()
+		usageStats := presenter.ConvertUsageStats(&usage)
+		presenter.Stats(usageStats)
 
-			finalOutput, err := thread.SendMessage(ctx, query, handler, llmtypes.MessageOpt{
-				PromptCache:  true,
-				Images:       config.Images,
-				MaxTurns:     config.MaxTurns,
-				CompactRatio: llmConfig.CompactRatio,
-				UseWeakModel: config.UseWeakModel,
-			})
-			if err != nil {
-				presenter.Error(err, "Failed to process query")
-				return
-			}
-
-			if config.ResultOnly {
-				fmt.Println(finalOutput)
-				return
-			}
-
-			usage := thread.GetUsage()
-			usageStats := presenter.ConvertUsageStats(&usage)
-			presenter.Stats(usageStats)
-
-			if thread.IsPersisted() {
-				presenter.Section("Conversation Information")
-				presenter.Info(fmt.Sprintf("ID: %s", thread.GetConversationID()))
-				presenter.Info(fmt.Sprintf("To resume this conversation: kodelet run --resume %s", thread.GetConversationID()))
-				presenter.Info(fmt.Sprintf("To delete this conversation: kodelet conversation delete %s", thread.GetConversationID()))
-			}
+		if thread.IsPersisted() {
+			presenter.Section("Conversation Information")
+			presenter.Info(fmt.Sprintf("ID: %s", thread.GetConversationID()))
+			presenter.Info(fmt.Sprintf("To resume this conversation: kodelet run --resume %s", thread.GetConversationID()))
+			presenter.Info(fmt.Sprintf("To delete this conversation: kodelet conversation delete %s", thread.GetConversationID()))
 		}
 	},
 }
@@ -800,14 +692,11 @@ func init() {
 	runCmd.Flags().String("cwd", defaults.CWD, "Working directory to execute in (defaults to current shell directory for new runs)")
 	runCmd.Flags().BoolP("follow", "f", defaults.Follow, "Follow the most recent conversation")
 	runCmd.Flags().Bool("no-save", defaults.NoSave, "Disable conversation persistence")
-	runCmd.Flags().Bool("headless", defaults.Headless, "Output structured JSON instead of console formatting")
-	runCmd.Flags().Bool("stream-deltas", defaults.StreamDeltas, "Stream partial text and tool output in headless mode (requires --headless)")
 	runCmd.Flags().StringSliceP("image", "I", defaults.Images, "Add image input (can be used multiple times)")
 	runCmd.Flags().Int("max-turns", defaults.MaxTurns, "Maximum number of agentic turns (0 for no limit)")
 	runCmd.Flags().StringP("recipe", "r", defaults.FragmentName, "Use a fragment/recipe template")
 	runCmd.Flags().StringToString("arg", defaults.FragmentArgs, "Arguments to pass to fragment (e.g., --arg name=John --arg occupation=Engineer)")
 	runCmd.Flags().StringSlice("fragment-dirs", defaults.FragmentDirs, "Additional fragment directories (e.g., --fragment-dirs ./project-fragments --fragment-dirs ./team-fragments)")
-	runCmd.Flags().Bool("include-history", defaults.IncludeHistory, "Include historical conversation data in headless streaming")
 	runCmd.Flags().Bool("no-extensions", defaults.NoExtensions, "Disable extension runtime")
 	runCmd.Flags().Bool("no-tools", defaults.NoTools, "Disable all tools (for simple query-response usage)")
 	runCmd.Flags().Bool("enable-fs-search-tools", defaults.EnableFSSearchTools, "Enable filesystem search tools (glob_tool and grep_tool)")
@@ -843,21 +732,6 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 	if noSave, err := cmd.Flags().GetBool("no-save"); err == nil {
 		config.NoSave = noSave
 	}
-	if headless, err := cmd.Flags().GetBool("headless"); err == nil {
-		config.Headless = headless
-	}
-
-	if config.NoSave && config.Headless {
-		presenter.Error(errors.New("conflicting flags"), "--no-save and --headless cannot be used together (headless mode requires conversation storage)")
-		os.Exit(1)
-	}
-	if streamDeltas, err := cmd.Flags().GetBool("stream-deltas"); err == nil {
-		config.StreamDeltas = streamDeltas
-	}
-	if config.StreamDeltas && !config.Headless {
-		presenter.Error(errors.New("invalid flags"), "--stream-deltas requires --headless mode")
-		os.Exit(1)
-	}
 	if images, err := cmd.Flags().GetStringSlice("image"); err == nil {
 		config.Images = images
 	}
@@ -872,9 +746,6 @@ func getRunConfigFromFlags(ctx context.Context, cmd *cobra.Command) *RunConfig {
 	}
 	if fragmentDirs, err := cmd.Flags().GetStringSlice("fragment-dirs"); err == nil {
 		config.FragmentDirs = fragmentDirs
-	}
-	if includeHistory, err := cmd.Flags().GetBool("include-history"); err == nil {
-		config.IncludeHistory = includeHistory
 	}
 
 	if noExtensions, err := cmd.Flags().GetBool("no-extensions"); err == nil {

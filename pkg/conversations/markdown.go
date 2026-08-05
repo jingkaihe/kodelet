@@ -10,6 +10,17 @@ import (
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
+// StreamableMessage represents a normalized entry from a persisted conversation.
+type StreamableMessage struct {
+	Kind       string // "text", "tool-use", "tool-result", "thinking"
+	Role       string // "user", "assistant", "system"
+	Content    string // Text content
+	RawItem    json.RawMessage
+	ToolName   string // For tool use/result
+	ToolCallID string // For matching tool results
+	Input      string // For tool use (JSON string)
+}
+
 const (
 	DefaultMaxToolResultCharacters = 2000
 	DefaultMaxToolResultBytes      = 100 * 1024

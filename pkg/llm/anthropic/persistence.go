@@ -196,7 +196,7 @@ type StreamableMessage struct {
 	Input      string // For tool use (JSON string)
 }
 
-// StreamMessages parses raw messages into streamable format for conversation streaming
+// StreamMessages parses raw messages into normalized persisted conversation entries.
 func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltypes.StructuredToolResult) ([]StreamableMessage, error) {
 	messages, err := DeserializeMessages(rawMessages)
 	if err != nil {

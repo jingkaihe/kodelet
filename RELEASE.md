@@ -1,5 +1,9 @@
 # Kodelet
 
+## Unreleased
+
+Removed the legacy `kodelet run --headless` JSON stream, its `--stream-deltas` and `--include-history` flags, the `kodelet conversation stream` command, and the CLI-backed Streamlit example; ACP, TypeScript SDK, TUI, and Web UI streaming remain supported.
+
 ## 0.5.24-beta
 
 Added a collapsible per-file Web UI git diff viewer with cwd-relative paths, line statistics, robust rename, submodule, and combined-diff handling, and expand/collapse-all controls.

@@ -203,8 +203,6 @@ func TestConversationConfigDefaults(t *testing.T) {
 	assert.False(t, NewConversationExportConfig().UsePublicGist)
 	assert.Equal(t, "", NewConversationEditConfig().Editor)
 	assert.Equal(t, "", NewConversationEditConfig().EditArgs)
-	assert.False(t, NewConversationStreamConfig().IncludeHistory)
-	assert.False(t, NewConversationStreamConfig().HistoryOnly)
 }
 
 func TestConversationConfigFromFlags(t *testing.T) {
@@ -271,15 +269,6 @@ func TestConversationConfigFromFlags(t *testing.T) {
 	exportConfig := getConversationExportConfigFromFlags(exportCmd)
 	assert.True(t, exportConfig.UseGist)
 	assert.True(t, exportConfig.UsePublicGist)
-
-	streamCmd := &cobra.Command{}
-	streamCmd.Flags().Bool("include-history", false, "")
-	streamCmd.Flags().Bool("history-only", false, "")
-	require.NoError(t, streamCmd.Flags().Set("include-history", "true"))
-	require.NoError(t, streamCmd.Flags().Set("history-only", "true"))
-	streamConfig := getConversationStreamConfigFromFlags(streamCmd)
-	assert.True(t, streamConfig.IncludeHistory)
-	assert.True(t, streamConfig.HistoryOnly)
 
 	editCmd := &cobra.Command{}
 	editCmd.Flags().String("editor", "", "")

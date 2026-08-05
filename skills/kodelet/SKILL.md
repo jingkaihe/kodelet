@@ -12,7 +12,7 @@ Kodelet is a lightweight agentic software-engineering CLI. This skill gives a qu
 For details, choose the reference that matches the task:
 
 - `references/quick-start.md` — installation, core `kodelet run` usage, Web UI, ACP/IDE mode, image input, git commands, completions, common workflows.
-- `references/conversations-streaming.md` — conversation list/show/stream/fork commands, headless JSON output, `--stream-deltas`, Streamlit examples.
+- `references/conversations.md` — conversation list/show/delete/fork commands, renaming, steering, and the ACP Streamlit example.
 - `references/configuration.md` — config files, profiles, model/provider setup, security restrictions, MCP, bash timeout.
 - `references/recipes.md` — `AGENTS.md`, fragments, and recipes.
 - `references/skills.md` — agentic skills, skill layout, configuration, and skill plugins.
@@ -21,7 +21,6 @@ For details, choose the reference that matches the task:
 
 Examples now live with the skill under `examples/`:
 
-- `examples/streamlit/` — Streamlit chatbot around `kodelet run --headless --stream-deltas`.
 - `examples/streamlit-acp/` — Streamlit chatbot using Agent Client Protocol.
 - `examples/extensions/workspace/` — TypeScript extension with an `ask_user_question` tool and bash approval policy.
 - `examples/sdk/` — TypeScript SDK examples for basic, streaming, and inline-extension agent sessions.
@@ -59,7 +58,7 @@ kodelet serve
 - Skills: Model-invoked domain guidance in `.kodelet/skills/<name>/SKILL.md`, plugins, or global skill dirs; disable with `--no-skills`.
 - Extensions: Long-running subprocesses can register model tools, prompt commands/dynamic recipes, and lifecycle event handlers; inspect with `kodelet extension list` and disable with `--no-extensions`.
 - Plugins: Install bundled skills, recipes, and extensions with `kodelet plugin add org/repo`; inspect with `kodelet plugin list` and `kodelet plugin show org/repo`.
-- Conversations: Use `kodelet conversation list/show/stream/delete/fork` for persisted runs.
+- Conversations: Use `kodelet conversation list/show/delete/fork` for persisted runs.
 - Git helpers: `kodelet commit` generates commit messages; `kodelet pr` creates PRs.
 
 ## Quick decision guide
@@ -70,4 +69,4 @@ kodelet serve
 - User asks about agentic skills, skill layout, or skill plugins → use `references/skills.md`.
 - User asks about extension discovery/runtime/config, plugins → use `references/extensions.md`.
 - User asks about the TypeScript SDK, SDK agent sessions, SDK extension tools/commands/events, or SDK UI prompts → use `references/sdk.md`.
-- User asks about history, JSON streams, programmatic usage, Streamlit examples → use `references/conversations-streaming.md`.
+- User asks about conversation history, renaming, steering, or the Streamlit ACP example → use `references/conversations.md`.

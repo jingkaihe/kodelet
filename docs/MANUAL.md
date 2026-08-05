@@ -17,13 +17,6 @@ Kodelet is a lightweight agentic SWE Agent that runs as an interactive CLI tool 
   - [Conversation Continuation](#conversation-continuation)
   - [Context Compaction](#context-compaction)
   - [Conversation Management](#conversation-management)
-- [Streaming and Programmatic Access](#streaming-and-programmatic-access)
-  - [Headless Mode](#headless-mode)
-  - [Partial Message and Tool Streaming](#partial-message-and-tool-streaming)
-  - [Conversation Stream Command](#conversation-stream-command)
-  - [StreamEntry JSON Schema](#streamentry-json-schema)
-  - [Example Stream Output](#example-stream-output)
-  - [Processing Stream Output](#processing-stream-output)
 - [Agent Context Files](#agent-context-files)
   - [Creating Context Files](#creating-context-files)
   - [Context File Priority](#context-file-priority)
@@ -124,10 +117,6 @@ kodelet run "/goal finish the migration and verify tests pass"
 # Rename a persisted conversation without invoking the model
 kodelet run --follow "/rename Migration cleanup"
 kodelet run --resume CONVERSATION_ID "/rename Migration cleanup"
-
-# Headless mode for programmatic use
-kodelet run --headless "your query"          # outputs structured JSON stream
-kodelet run --headless --include-history "query"  # include historical data in stream
 ```
 
 ### Thread Goals
@@ -202,6 +191,8 @@ The ACP mode provides a rich interactive experience with features like:
 - Tool execution visualization
 - Conversation persistence
 - Multi-turn conversations
+
+Use ACP or the TypeScript Agent SDK for programmatic integrations that need structured assistant and tool events.
 
 ### Web UI Server
 
@@ -329,10 +320,6 @@ kodelet conversation list --search "term" --sort-by "updated" --sort-order "desc
 kodelet conversation show <conversation-id>
 kodelet conversation show <conversation-id> --format [text|markdown|json|raw]
 
-# Stream conversation updates in real-time
-kodelet conversation stream <conversation-id>
-kodelet conversation stream <conversation-id> --include-history
-
 # Delete conversations
 kodelet conversation delete <conversation-id>
 kodelet conversation delete --no-confirm <conversation-id>
@@ -354,172 +341,6 @@ kodelet db rollback
 
 # Rollback without confirmation (use with caution)
 kodelet db rollback --no-confirm
-```
-
-## Streaming and Programmatic Access
-
-Kodelet provides structured JSON streaming capabilities for programmatic integration, enabling you to build custom UIs, monitoring tools, and automation pipelines.
-
-### Headless Mode
-
-The `--headless` flag transforms `kodelet run` into a JSON streaming service, outputting structured data instead of formatted console text:
-
-```bash
-# Stream JSON output for a new query
-kodelet run --headless "analyze this codebase"
-
-# Include historical conversation data in the stream
-kodelet run --headless --include-history "continue the analysis"
-
-# Continue a specific conversation in headless mode
-kodelet run --headless --resume CONVERSATION_ID "more questions"
-```
-
-**Use Cases:**
-- CI/CD pipeline integration
-- Custom web interfaces
-- Monitoring and logging systems
-
-### Partial Message and Tool Streaming
-
-The `--stream-deltas` flag enables real-time token and tool-output streaming in headless mode, outputting text and accumulated tool snapshots as they are generated rather than waiting for complete messages:
-
-```bash
-# Stream partial text deltas with headless output
-kodelet run --headless --stream-deltas "explain how TCP works"
-
-# Show only text deltas (real-time text streaming)
-kodelet run --headless --stream-deltas "write a poem" | \
-    jq -r 'select(.kind == "text-delta") | .delta' | tr -d '\n'
-
-# Show thinking in real-time
-kodelet run --headless --stream-deltas "solve this puzzle" | \
-    jq -r 'select(.kind == "thinking-delta") | .delta' | tr -d '\n'
-```
-
-**Delta Event Types:**
-
-| Kind | Description | Fields |
-|------|-------------|--------|
-| `text-delta` | Partial text content | `delta`, `conversation_id`, `role` |
-| `thinking-delta` | Partial thinking content | `delta`, `conversation_id`, `role` |
-| `thinking-start` | Thinking block begins | `conversation_id`, `role` |
-| `thinking-end` | Thinking block ends | `conversation_id`, `role` |
-| `content-end` | Content block ends | `conversation_id`, `role` |
-| `tool-update` | Latest accumulated tool result snapshot | `tool_name`, `tool_call_id`, `result`, `tool_result`, `conversation_id`, `role` |
-
-**Example Output:**
-
-```jsonl
-{"kind":"thinking-start","conversation_id":"abc123","role":"assistant"}
-{"kind":"thinking-delta","delta":"Let me","conversation_id":"abc123","role":"assistant"}
-{"kind":"thinking-delta","delta":" analyze this","conversation_id":"abc123","role":"assistant"}
-{"kind":"thinking-end","conversation_id":"abc123","role":"assistant"}
-{"kind":"tool-use","tool_name":"bash","tool_call_id":"call_456","input":"{\"command\":\"printf \\\"first\\\\n\\\"; sleep 1; printf \\\"second\\\\n\\\"\"}","conversation_id":"abc123","role":"assistant"}
-{"kind":"tool-update","tool_name":"bash","tool_call_id":"call_456","result":"first\n","tool_result":{"toolName":"bash","success":true,"metadataType":"bash","metadata":{"command":"printf \\\"first\\\\n\\\"; sleep 1; printf \\\"second\\\\n\\\"","exitCode":0,"output":"first\n","executionTime":100000000},"timestamp":"2026-07-19T00:00:00Z"},"conversation_id":"abc123","role":"assistant"}
-{"kind":"tool-update","tool_name":"bash","tool_call_id":"call_456","result":"first\nsecond\n","tool_result":{"toolName":"bash","success":true,"metadataType":"bash","metadata":{"command":"printf \\\"first\\\\n\\\"; sleep 1; printf \\\"second\\\\n\\\"","exitCode":0,"output":"first\nsecond\n","executionTime":1000000000},"timestamp":"2026-07-19T00:00:01Z"},"conversation_id":"abc123","role":"assistant"}
-{"kind":"tool-result","tool_name":"bash","tool_call_id":"call_456","result":"{\"toolName\":\"bash\",\"success\":true,\"metadataType\":\"bash\",\"metadata\":{\"command\":\"printf \\\"first\\\\n\\\"; sleep 1; printf \\\"second\\\\n\\\"\",\"exitCode\":0,\"output\":\"first\\nsecond\\n\",\"executionTime\":1000000000},\"timestamp\":\"2026-07-19T00:00:01Z\"}","tool_result":{"toolName":"bash","success":true,"metadataType":"bash","metadata":{"command":"printf \"first\\n\"; sleep 1; printf \"second\\n\"","exitCode":0,"output":"first\nsecond\n","executionTime":1000000000},"timestamp":"2026-07-19T00:00:01Z"},"conversation_id":"abc123","role":"assistant"}
-{"kind":"text-delta","delta":"The","conversation_id":"abc123","role":"assistant"}
-{"kind":"text-delta","delta":" answer","conversation_id":"abc123","role":"assistant"}
-{"kind":"text-delta","delta":" is 42.","conversation_id":"abc123","role":"assistant"}
-{"kind":"content-end","conversation_id":"abc123","role":"assistant"}
-{"kind":"text","content":"The answer is 42.","conversation_id":"abc123","role":"assistant"}
-```
-
-Each `tool-update` contains a full accumulated snapshot, not a new output chunk. Replace the previous snapshot for the same `tool_call_id`; the subsequent `tool-result` is authoritative and completes the tool call. Complete messages (`text`, `thinking`, `tool-use`, `tool-result`) are emitted by the same live handler in provider order, so clients that ignore partial updates still receive ordered final content. For compatibility with the existing conversation stream, final `tool-result.result` is the serialized structured result; consumers should prefer the decoded `tool_result` object, while `tool-update.result` remains the current rendered output.
-
-**Third-Party UI Integration (Python):**
-
-```python
-import subprocess
-import json
-
-process = subprocess.Popen(
-    ["kodelet", "run", "--headless", "--stream-deltas", "explain recursion"],
-    stdout=subprocess.PIPE,
-    text=True
-)
-
-current_text = ""
-for line in process.stdout:
-    event = json.loads(line)
-    
-    if event["kind"] == "text-delta":
-        current_text += event["delta"]
-        update_ui(current_text)
-    elif event["kind"] == "thinking-start":
-        show_thinking_indicator()
-    elif event["kind"] == "thinking-delta":
-        update_thinking_panel(event["delta"])
-    elif event["kind"] == "thinking-end":
-        hide_thinking_indicator()
-    elif event["kind"] == "tool-use":
-        show_tool_execution(event["tool_name"], event["input"])
-    elif event["kind"] == "tool-update":
-        replace_tool_output(event["tool_call_id"], event["result"])
-    elif event["kind"] == "tool-result":
-        complete_tool_execution(event["tool_call_id"], event.get("tool_result", event["result"]))
-```
-
-### Conversation Stream Command
-
-Stream real-time updates from any conversation:
-
-```bash
-# Stream live updates from a conversation (like tail -f)
-kodelet conversation stream CONVERSATION_ID
-
-# Include historical data before streaming new entries
-kodelet conversation stream CONVERSATION_ID --include-history
-```
-
-This command is useful for:
-- Monitoring ongoing conversations
-- Building real-time dashboards
-- Debugging conversation flow
-- Creating custom conversation viewers
-
-### StreamEntry JSON Schema
-
-Both headless mode and conversation streaming output data using the `StreamEntry` format. Each line is a complete JSON object representing one conversation event. The transient `tool-update` kind is emitted by `kodelet run --headless --stream-deltas`; `kodelet conversation stream` emits persisted complete events only.
-
-```typescript
-interface StreamEntry {
-  kind: "text" | "tool-use" | "tool-update" | "tool-result" | "thinking";  // Type of entry
-  content?: string;         // Text content (for text and thinking entries)
-  tool_name?: string;       // Name of the tool
-  input?: string;          // JSON input for tool-use
-  result?: string;         // Rendered tool-update output or serialized final structured result
-  tool_result?: object;    // Structured result snapshot for tool-update/tool-result
-  role: "user" | "assistant" | "system";  // Message role
-  tool_call_id?: string;   // Unique ID to match tool calls with results
-  conversation_id?: string; // ID of the conversation
-}
-```
-
-### Example Stream Output
-
-```json
-{"kind":"text","role":"user","content":"What files are in this directory?","conversation_id":"conv_123"}
-{"kind":"thinking","role":"assistant","content":"The user wants to see the files...","conversation_id":"conv_123"}
-{"kind":"tool-use","tool_name":"bash","input":"{\"command\":\"ls -la\"}","tool_call_id":"call_456","role":"assistant","conversation_id":"conv_123"}
-{"kind":"tool-result","tool_name":"bash","result":"total 24\ndrwxr-xr-x  3 user user 4096 ...\n","tool_call_id":"call_456","role":"assistant","conversation_id":"conv_123"}
-{"kind":"text","role":"assistant","content":"Here are the files in the current directory...","conversation_id":"conv_123"}
-```
-
-### Processing Stream Output
-
-**Using jq for filtering:**
-
-```bash
-# Extract only text messages
-kodelet run --headless "query" | jq -r 'select(.kind == "text") | .content'
-
-# Monitor tool usage
-kodelet conversation stream ID | jq 'select(.kind == "tool-use") | {tool: .tool_name, input: .input}'
-
-# Get assistant responses only
-kodelet run --headless "query" | jq -r 'select(.role == "assistant" and .kind == "text") | .content'
 ```
 
 ## Agent Context Files
@@ -1350,7 +1171,7 @@ exec kodelet-extension-node ./dist/index.js
 
 ### Streaming Extension Tool Progress
 
-Long-running extension tools can publish an accumulated snapshot with `ctx.update(content, data)`. Kodelet replaces the previous snapshot for that tool call in the TUI, Web UI, ACP, and headless streaming handlers; the tool handler's eventual return value remains the authoritative result sent to the model and stored in the conversation.
+Long-running extension tools can publish an accumulated snapshot with `ctx.update(content, data)`. Kodelet replaces the previous snapshot for that tool call in the TUI, Web UI, ACP, and TypeScript SDK; the tool handler's eventual return value remains the authoritative result sent to the model and stored in the conversation.
 
 The TypeScript and Python SDKs provide `TaskProgress` for bounded multi-activity progress. It uses the generic `data.taskRun` shape, supports direct activities for any kind of task, and can attach to a child Kodelet session to translate its tool lifecycle events automatically.
 
@@ -1385,7 +1206,7 @@ Cancellation is scoped to the active extension request. Python async handlers re
 
 ### Requesting User Input from Extensions
 
-Tool, command, and event handlers can ask the active Kodelet UI for user-facing prompts with `ctx.ui.input(...)`, `ctx.ui.confirm(...)`, `ctx.ui.select(...)`, and `ctx.ui.notify(...)`. Kodelet routes prompts to the interactive CLI terminal or to the Web UI conversation stream. In headless/result-only runs, or when no interactive UI is attached, the SDK resolves inputs/selects as `undefined` and confirmations as `false`.
+Tool, command, and event handlers can ask the active Kodelet UI for user-facing prompts with `ctx.ui.input(...)`, `ctx.ui.confirm(...)`, `ctx.ui.select(...)`, and `ctx.ui.notify(...)`. Kodelet routes prompts to the interactive CLI terminal or the attached Web UI session. In result-only runs, or when no interactive UI is attached, the SDK resolves inputs/selects as `undefined` and confirmations as `false`.
 
 ```typescript
 ext.registerTool({
@@ -1451,7 +1272,7 @@ await ctx.ui.notify({
 
 ### Persistent TUI Widgets and Interactive Surfaces
 
-The native `kodelet chat` TUI lets extensions append informational transcript entries and keep passive widgets and interactive overlay surfaces alive after the command, tool, or event handler that created them returns. UI created from a conversation-scoped handler stays with that conversation: switching sessions hides its informational notifications, widgets, and surfaces, and hidden surfaces cannot capture keyboard or mouse input. Host-level diagnostics and other context-free UI remain global. These APIs are capability-gated: `ctx.ui.appendTranscript(...)` and `ctx.ui.setWidget(...)` do nothing when unavailable, while `ctx.ui.openSurface(...)` rejects when the host has no interactive surface support. The Web UI, ACP, and headless modes do not currently advertise these capabilities.
+The native `kodelet chat` TUI lets extensions append informational transcript entries and keep passive widgets and interactive overlay surfaces alive after the command, tool, or event handler that created them returns. UI created from a conversation-scoped handler stays with that conversation: switching sessions hides its informational notifications, widgets, and surfaces, and hidden surfaces cannot capture keyboard or mouse input. Host-level diagnostics and other context-free UI remain global. These APIs are capability-gated: `ctx.ui.appendTranscript(...)` and `ctx.ui.setWidget(...)` do nothing when unavailable, while `ctx.ui.openSurface(...)` rejects when the host has no interactive surface support. The Web UI, ACP, and one-shot CLI do not currently advertise these capabilities.
 
 Informational transcript entries are persistent within the active TUI session and render as distinct non-user, non-assistant entries. They are useful for durable extension status and copyable file paths.
 
