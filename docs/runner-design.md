@@ -27,6 +27,14 @@ The proposed design introduces an explicit boundary between the **agent** and it
 
 This boundary is richer than a remote tool API because Kodelet extensions participate in user-message processing, system-prompt construction, tool policy, tool-result shaping, agent lifecycle events, follow-up messages, and interactive UI requests. The runner therefore exposes a remote **agent environment**, not merely a command executor.
 
+## Feasibility Assessment
+
+The design is feasible, but it is a medium-to-large architectural change rather than primarily a transport feature. Kodelet already has useful seams in its provider `Thread` implementations, `BasicState`, extension runtime, and `ChatRunner`; however, provider loops currently reach directly into local context discovery, tool execution, and extension helpers. Extracting those dependencies behind one environment contract is the critical path.
+
+WebSocket and JSON-RPC are not the principal technical risk. The harder work is preserving provider-specific turn behavior and extension ordering while allowing some tools to execute centrally and others remotely. Implementing `LocalAgentEnvironment` first keeps that refactor testable without introducing a network boundary at the same time.
+
+The initial capacity-one runner provides parallelism across multiple workspace-bound runners. It does not provide concurrent runs against one workspace. Same-workspace parallelism arrives only after the runner can provision independent per-run environments.
+
 ## Decision
 
 Kodelet will use the following model:
@@ -39,8 +47,8 @@ Kodelet will use the following model:
 6. The runner keeps the existing extension subprocess protocol local: extensions continue using stdio JSON-RPC, while the runner proxies aggregate lifecycle and tool behavior to the control plane.
 7. The control plane and runner communicate over one runner-initiated WebSocket using JSON-RPC 2.0 messages.
 8. Each run begins with a full environment manifest that is pinned for the duration of that run.
-9. Model-invoked tools have an explicit placement: control-plane tools execute beside central conversation state, while runner tools execute in the workspace environment.
-10. Runner-owned extensions retain visibility over tool lifecycle events, including control-plane tools, so remote execution preserves current extension policy semantics.
+9. Host-executed model tools have an explicit placement: control-plane tools execute beside central conversation state, while runner tools execute in the workspace environment. Provider-native capabilities remain provider-owned.
+10. Runner-owned extensions retain visibility over lifecycle events for host-executed tools, including control-plane tools, so remote execution preserves current extension policy semantics. Provider-native tools are subject to the hooks exposed by their provider API and cannot be assumed to support host-side `tool.call` and `tool.result` interception.
 11. The initial runner executes directly in its workspace with capacity one.
 12. A future runner implementation creates one fresh ephemeral environment per top-level run without changing control-plane ownership of the agent loop.
 
@@ -227,7 +235,8 @@ The mechanism used to provision the environment is deliberately unspecified.
 | `AGENTS.md` and context discovery | Consumes pinned snapshot | Discovers and snapshots |
 | Runner-global and workspace skills | Consumes definitions/results | Discovers and executes |
 | Workspace tools | Routes model calls | Executes |
-| Control-plane tools | Executes | Applies extension lifecycle policy where required |
+| Host-executed control-plane tools | Executes | Applies extension lifecycle policy where required |
+| Provider-native tools | Configures and receives provider events | Applies catalog policy where supported; does not execute |
 | Extensions | Proxies lifecycle operations | Discovers, starts, and hosts processes |
 | Extension UI | Routes to clients | Proxies extension requests |
 | Future environment creation | Tracks run state | Creates and destroys environment |
@@ -271,7 +280,9 @@ control plane creates run and selects conversation's runner
     ↓
 control plane → runner: run.open
     ↓
-runner initializes or acquires its extension runtime and snapshots context, skills, tools, commands, extensions, and config
+runner initializes or acquires its workspace extension runtime; a new runtime dispatches session.start and resources.discover
+    ↓
+runner snapshots context, skills, tools, commands, extensions, and config
     ↓
 runner → control plane: pinned environment manifest
     ↓
@@ -299,6 +310,10 @@ control plane applies goal and steering continuation rules
     ↓
 control plane persists provider-native conversation and closes run environment
 ```
+
+A runner command can return a direct response or an agent prompt. A direct response is streamed and persisted without calling the provider; an agent prompt replaces the submitted command text and may select recipe metadata before `user.message` and the provider loop continues. Central conversation commands such as goal mutation remain control-plane operations.
+
+The initial runner reuses one extension runtime for its workspace, matching the current persistent interactive-host behavior. `session.start` and `resources.discover` run once for that runtime generation, while `session.end` runs when the runtime is shut down or replaced. Per-run extension runtimes can be introduced with future ephemeral environments without changing the control-plane lifecycle methods.
 
 The control plane streams provider text, reasoning, tool activity, usage, UI requests, and final status to attached clients through its existing client-facing event APIs.
 
@@ -367,9 +382,9 @@ The runner remains responsible for extension discovery, initialization, determin
 
 ### Lifecycle proxying
 
-The control plane sends lifecycle requests to the runner. The runner dispatches them through its local extension runtime and returns the aggregate result.
+The control plane sends run-scoped lifecycle requests to the runner, and the runner dispatches them through its local extension runtime and returns the aggregate result. Tool events for runner-executed tools are dispatched locally as part of `tool.execute` rather than making a second control-plane round trip.
 
-Lifecycle events include:
+The extension runtime still exposes the complete existing lifecycle:
 
 ```text
 session.start
@@ -385,6 +400,8 @@ turn.end
 agent.end
 session.end
 ```
+
+For the initial persistent runtime, `session.start`, `resources.discover`, and `session.end` are runner-local runtime events. The remaining events are either proxied from the central agent loop or dispatched around runner-side tool execution.
 
 The runner hides individual extension processes and intermediate mutations from the control plane. The control plane sees the same effective decision a local extension runtime would return: modified or blocked user messages, system-prompt patches, tool-list patches, modified tool input or results, and follow-up messages.
 
@@ -406,13 +423,19 @@ authoritative assistant-facing and structured result
 
 Only post-policy updates and results cross the runner boundary.
 
-### Control-plane tool lifecycle
+### Host-executed control-plane tool lifecycle
 
 Control-plane tools execute beside central conversation state, but runner-owned extensions must retain the opportunity to observe, block, or sanitize them when they subscribe to the relevant tool events.
 
 For a control-plane tool, the control plane therefore proxies `tool.call` to the runner before execution, proxies transient `tool.update` values through the runner before client display, and proxies `tool.result` before inserting the authoritative result into provider history.
 
-This adds network calls for central tools but preserves the current rule that workspace extension policy applies to every model-invoked tool. A later explicit policy may exempt trusted internal tools, but that is not the default behavior in this design.
+This adds network calls for central tools but preserves the current rule that workspace extension policy applies to every host-executed model tool. A later explicit policy may exempt trusted internal tools, but that is not the default behavior in this design.
+
+### Provider-native tool lifecycle
+
+Provider-native tools such as OpenAI web search execute inside the provider API rather than through Kodelet's host tool executor. Runner extensions can affect whether those tools are offered when the provider integration represents them in the `agent.init` tool list, but the control plane cannot promise pre-execution blocking or result mutation through `tool.call` and `tool.result`.
+
+Provider integrations may forward native-tool activity as observational events when the provider exposes enough structured information, but those events must not be presented as an enforceable extension policy boundary.
 
 ### Extension UI
 
@@ -423,13 +446,15 @@ extension → runner → control plane → browser or TUI
 extension ← runner ← control plane ← browser or TUI
 ```
 
-The runner sends a bidirectional JSON-RPC request such as `ui.input`, `ui.confirm`, or `ui.select`. The control plane routes it to the client attached to the run and returns the response. Cancellation must unblock the pending extension request.
+The runner proxies the full supported extension UI surface, including input, confirm, select, notifications, passive widgets, transcript entries, and interactive surfaces. Surface input and resize events travel in the opposite direction to the owning extension. Extension identity, process generation, scope ID, frame sequence, and run ID must survive the proxy so stale frames cannot overwrite a newer extension generation.
+
+The control plane routes interactive requests to the client attached to the run and returns the response. If no capable interactive client is attached, it returns the same structured unavailable or dismissed outcome expected by the local extension API. Cancellation must unblock pending extension requests and close run-scoped surfaces.
 
 ## Tool Placement
 
 The control plane builds one model-facing tool catalog by merging central tool definitions with the pinned runner manifest.
 
-### Initial control-plane tools
+### Initial host-executed control-plane tools
 
 Tools that operate on central conversation or provider state execute in the control plane:
 
@@ -438,7 +463,10 @@ Tools that operate on central conversation or provider state execute in the cont
 | `get_goal` | Reads central conversation metadata |
 | `update_goal` | Mutates central conversation metadata |
 | `read_conversation` | Reads the authoritative conversation store and invokes a utility model |
-| Provider-native search tools | Executed by the provider API |
+
+### Provider-native capabilities
+
+Provider-native capabilities such as OpenAI web search are configured by the control plane and execute inside the provider API. They are not runner tools or host-executed control-plane tools, even when represented by a name in Kodelet's allowed-tool configuration.
 
 ### Initial runner tools
 
@@ -490,6 +518,8 @@ One socket initially carries control traffic and the single active run. Every ru
 ### Why JSON-RPC 2.0
 
 JSON-RPC provides request IDs, correlated responses, structured errors, notifications, and symmetric requests in either direction without code generation. It also matches Kodelet's existing extension and ACP conventions.
+
+Kodelet already depends on `gorilla/websocket`, so this transport does not require adding a second RPC stack or generated Protobuf runtime. The protocol will add application code and schemas, but the incremental library and binary-size cost should be small relative to adopting gRPC or Connect-Go.
 
 Method payloads use typed Go structs with a small `json.RawMessage` envelope rather than unstructured `map[string]any` throughout the implementation.
 
@@ -545,12 +575,25 @@ The control plane opens a run with a request:
   "params": {
     "runId": "run_123",
     "conversationId": "conv_456",
+    "agent": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "profile": "default",
+      "recipeName": "",
+      "invokedBy": "webui"
+    },
+    "clientCapabilities": {
+      "interactiveUI": true,
+      "persistentSurfaces": true
+    },
     "reservedToolNames": ["get_goal", "update_goal", "read_conversation"]
   }
 }
 ```
 
 The runner returns the full pinned manifest in the response. Returning the manifest as the `run.open` result makes successful environment initialization a prerequisite for starting the central model loop.
+
+The runner receives provider and model identifiers because some environment tools and extension call contexts are model-sensitive, but it does not receive provider credentials. If command execution changes recipe metadata, subsequent lifecycle requests carry the effective call context for that run.
 
 ### Tool execution and updates
 
@@ -637,6 +680,15 @@ ui.input
 ui.confirm
 ui.select
 ui.notify
+ui.widget.set
+ui.widget.frame
+ui.widget.remove
+ui.transcript.append
+ui.surface.open
+ui.surface.frame
+ui.surface.close
+ui.surface.input
+ui.surface.resize
 
 operation.cancel
 ```
@@ -818,6 +870,8 @@ Run B: localhost:3000, localhost:5432
 
 No environment implementation, provisioning mechanism, state-transfer mechanism, port publication model, resource policy, or artifact model is selected by this document.
 
+Ephemeral must not imply that useful workspace changes disappear. Before same-workspace concurrent runs are enabled, the environment provider needs an explicit durability and conflict model for source edits, generated artifacts, and services. Possible mechanisms include a durable mounted workspace, promoted snapshots, patches, or commits, but this document deliberately does not select one. Without such a mechanism, a later run cannot reliably observe changes made by an earlier run.
+
 The runner-side implementation changes from direct workspace execution to environment-backed execution, but the control plane continues using the same manifest, lifecycle, tool, command, UI, and cancellation protocol.
 
 ## Integration with the Current Codebase
@@ -935,6 +989,7 @@ This is not selected because filesystem locks cannot coordinate Bash, Git, build
 - Should runner affinity be stored in a dedicated conversation column or provider-neutral metadata initially?
 - How should server model policy, conversation profiles, and workspace-requested model defaults be merged exactly?
 - Should extension runtimes be runner-lived, run-lived, or configurable once ephemeral environments exist?
+- How should edits and artifacts produced in an ephemeral environment become durable, and how should conflicting concurrent results be reconciled?
 - What heartbeat and lost-run timeouts should be used initially?
 - Which auxiliary Web UI features should receive runner-backed protocols first: Git diff, terminal, command discovery, or file browsing?
 - What subset of existing `kodelet run` flags should the first remote one-shot request support?
