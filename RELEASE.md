@@ -10,6 +10,8 @@ Removed the dormant hidden arcade games from the Web UI and updated Web UI and T
 
 Added a workspace-bound runner design covering lifecycle, isolation, and tool execution boundaries.
 
+Updated the bundled ripgrep binary to 15.2.0 while retaining fd 10.3.0.
+
 ## 0.5.24-beta
 
 Added a collapsible per-file Web UI git diff viewer with cwd-relative paths, line statistics, robust rename, submodule, and combined-diff handling, and expand/collapse-all controls.

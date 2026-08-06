@@ -186,18 +186,18 @@ func TestResolveBinaryPrefersLibexecOverManagedAndSystem(t *testing.T) {
 	setPathEnv(t, pathDir)
 
 	require.NoError(t, os.MkdirAll(libexecDir, 0o755))
-	writeVersionedTestBinary(t, GetLibexecBinaryPath("rg"), "ripgrep 15.1.0")
+	writeVersionedTestBinary(t, GetLibexecBinaryPath("rg"), "ripgrep "+RipgrepVersion)
 
 	managedPath, err := GetBinaryPath("rg")
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(managedPath), 0o755))
-	writeVersionedTestBinary(t, managedPath, "ripgrep 15.1.0")
+	writeVersionedTestBinary(t, managedPath, "ripgrep "+RipgrepVersion)
 
 	pathBinaryName := "rg"
 	if runtime.GOOS == "windows" {
 		pathBinaryName = "rg.exe"
 	}
-	writeVersionedTestBinary(t, filepath.Join(pathDir, pathBinaryName), "ripgrep 15.1.0")
+	writeVersionedTestBinary(t, filepath.Join(pathDir, pathBinaryName), "ripgrep "+RipgrepVersion)
 
 	resolved, err := ResolveBinary(ctx, RipgrepSpec())
 	require.NoError(t, err)
@@ -228,13 +228,13 @@ func TestResolveBinaryFallsBackToManagedBeforeSystem(t *testing.T) {
 	managedPath, err := GetBinaryPath("rg")
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(managedPath), 0o755))
-	writeVersionedTestBinary(t, managedPath, "ripgrep 15.1.0")
+	writeVersionedTestBinary(t, managedPath, "ripgrep "+RipgrepVersion)
 
 	pathBinaryName := "rg"
 	if runtime.GOOS == "windows" {
 		pathBinaryName = "rg.exe"
 	}
-	writeVersionedTestBinary(t, filepath.Join(pathDir, pathBinaryName), "ripgrep 15.1.0")
+	writeVersionedTestBinary(t, filepath.Join(pathDir, pathBinaryName), "ripgrep "+RipgrepVersion)
 
 	resolved, err := ResolveBinary(ctx, RipgrepSpec())
 	require.NoError(t, err)
@@ -714,8 +714,8 @@ func TestParseRipgrepVersion(t *testing.T) {
 	}{
 		{
 			name:     "standard output",
-			output:   "ripgrep 15.1.0\n-SIMD -AVX (compiled)\n+SIMD +AVX (runtime)\n",
-			expected: "15.1.0",
+			output:   "ripgrep 15.2.0\n-SIMD -AVX (compiled)\n+SIMD +AVX (runtime)\n",
+			expected: "15.2.0",
 		},
 		{
 			name:     "single line",

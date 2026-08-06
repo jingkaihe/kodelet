@@ -30,37 +30,37 @@ func TestGetRipgrepDownloadURL(t *testing.T) {
 			name:    "darwin amd64",
 			goos:    "darwin",
 			goarch:  "amd64",
-			wantURL: "https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-x86_64-apple-darwin.tar.gz",
+			wantURL: "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-apple-darwin.tar.gz",
 		},
 		{
 			name:    "darwin arm64",
 			goos:    "darwin",
 			goarch:  "arm64",
-			wantURL: "https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-aarch64-apple-darwin.tar.gz",
+			wantURL: "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-aarch64-apple-darwin.tar.gz",
 		},
 		{
 			name:    "linux amd64",
 			goos:    "linux",
 			goarch:  "amd64",
-			wantURL: "https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-x86_64-unknown-linux-musl.tar.gz",
+			wantURL: "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-unknown-linux-musl.tar.gz",
 		},
 		{
 			name:    "linux arm64",
 			goos:    "linux",
 			goarch:  "arm64",
-			wantURL: "https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-aarch64-unknown-linux-gnu.tar.gz",
+			wantURL: "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-aarch64-unknown-linux-gnu.tar.gz",
 		},
 		{
 			name:    "windows amd64",
 			goos:    "windows",
 			goarch:  "amd64",
-			wantURL: "https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-x86_64-pc-windows-msvc.zip",
+			wantURL: "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-pc-windows-msvc.zip",
 		},
 		{
 			name:    "windows arm64",
 			goos:    "windows",
 			goarch:  "arm64",
-			wantURL: "https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-aarch64-pc-windows-msvc.zip",
+			wantURL: "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-aarch64-pc-windows-msvc.zip",
 		},
 		{
 			name:      "unsupported platform",
@@ -104,7 +104,7 @@ func TestGetRipgrepDownloadURL(t *testing.T) {
 func TestGetRipgrepChecksumURL(t *testing.T) {
 	url, err := getRipgrepChecksumURL(RipgrepVersion, "linux", "amd64")
 	require.NoError(t, err)
-	assert.Equal(t, "https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-x86_64-unknown-linux-musl.tar.gz.sha256", url)
+	assert.Equal(t, "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-unknown-linux-musl.tar.gz.sha256", url)
 }
 
 func TestGetRipgrepArchiveEntry(t *testing.T) {

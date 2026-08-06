@@ -8,7 +8,7 @@ import (
 
 const (
 	// RipgrepVersion is the version of ripgrep to download and use
-	RipgrepVersion = "15.1.0"
+	RipgrepVersion = "15.2.0"
 	ripgrepBaseURL = "https://github.com/BurntSushi/ripgrep/releases/download"
 )
 

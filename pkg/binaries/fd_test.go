@@ -150,8 +150,8 @@ func TestEnsureFdAndRipgrepUseLibexecAndCachePaths(t *testing.T) {
 	})
 
 	require.NoError(t, os.MkdirAll(libexecDir, 0o755))
-	writeVersionedTestBinary(t, GetLibexecBinaryPath("fd"), "fd 10.3.0")
-	writeVersionedTestBinary(t, GetLibexecBinaryPath("rg"), "ripgrep 15.1.0")
+	writeVersionedTestBinary(t, GetLibexecBinaryPath("fd"), "fd "+FdSpec().Version)
+	writeVersionedTestBinary(t, GetLibexecBinaryPath("rg"), "ripgrep "+RipgrepVersion)
 
 	fdPath, err := EnsureFd(context.Background())
 	require.NoError(t, err)
