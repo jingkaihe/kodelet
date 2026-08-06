@@ -14,7 +14,9 @@ At the start of each top-level run, the runner returns a versioned environment m
 
 The initial implementation executes runner-side tools directly in the registered workspace and permits one active run per runner. It deliberately does not introduce worktrees, containers, micro-VMs, filesystem snapshots, or network namespaces.
 
-The long-term execution model is that every top-level run receives a fresh ephemeral environment created by its workspace-bound runner. Each environment will have dedicated filesystem, process, and network state, allowing independent runs to use the same conventional internal ports such as `3000`, `5432`, and `6379` without collisions. The control-plane protocol should not depend on how that environment is implemented.
+Each runner has a stable opaque control-plane ID, mutable display metadata, host metadata, and one live connection generation. Startup takes an OS-backed advisory file lock for the canonical workspace and records diagnostic PID metadata in that locked file, preventing two local runner processes from serving the same workspace while allowing crash-safe recovery.
+
+The long-term execution model is that every top-level run receives a fresh ephemeral execution instance created by its workspace-bound runner. Each instance will have dedicated filesystem, process, and network state, allowing independent runs to use the same conventional internal ports such as `3000`, `5432`, and `6379` without collisions. The control-plane protocol should not depend on how that instance is implemented.
 
 ## Context
 
@@ -23,7 +25,7 @@ Kodelet currently runs the provider loop, context discovery, tools, skills, exte
 The proposed design introduces an explicit boundary between the **agent** and its **environment**:
 
 - the control plane owns the agent, including model requests, provider-native history, continuation decisions, goals, steering, usage, and client APIs;
-- the runner owns the environment, including workspace context, runner-local configuration, tools, runner-global and workspace skills, plugins, extensions, and eventually an ephemeral run environment.
+- the runner owns the environment, including workspace context, runner-local configuration, tools, runner-global and workspace skills, plugins, extensions, and eventually creation of an ephemeral execution instance.
 
 This boundary is richer than a remote tool API because Kodelet extensions participate in user-message processing, system-prompt construction, tool policy, tool-result shaping, agent lifecycle events, follow-up messages, and interactive UI requests. The runner therefore exposes a remote **agent environment**, not merely a command executor.
 
@@ -31,7 +33,7 @@ This boundary is richer than a remote tool API because Kodelet extensions partic
 
 The design is feasible, but it is a medium-to-large architectural change rather than primarily a transport feature. Kodelet already has useful seams in its provider `Thread` implementations, `BasicState`, extension runtime, and `ChatRunner`; however, provider loops currently reach directly into local context discovery, tool execution, and extension helpers. Extracting those dependencies behind one environment contract is the critical path.
 
-WebSocket and JSON-RPC are not the principal technical risk. The harder work is preserving provider-specific turn behavior and extension ordering while allowing some tools to execute centrally and others remotely. Implementing `LocalAgentEnvironment` first keeps that refactor testable without introducing a network boundary at the same time.
+WebSocket and JSON-RPC are not the principal technical risk. The harder work is preserving provider-specific turn behavior and extension ordering while allowing some tools to execute centrally and others remotely. Implementing `agentenv.LocalEnvironment` first keeps that refactor testable without introducing a network boundary at the same time.
 
 The initial capacity-one runner provides parallelism across multiple workspace-bound runners. It does not provide concurrent runs against one workspace. Same-workspace parallelism arrives only after the runner can provision independent per-run environments.
 
@@ -43,14 +45,16 @@ Kodelet will use the following model:
 2. The control plane owns provider clients, provider-native conversation state, the complete model/tool continuation loop, goals, steering, usage accounting, and conversation persistence.
 3. `kodelet runner start` starts a long-running process bound to the command's canonical current working directory.
 4. A runner owns exactly one workspace and never accepts an arbitrary workspace path from the control plane.
-5. The runner discovers and hosts workspace context, runner-scoped skills, runner tools, workspace plugins, extension processes, extension commands, and extension lifecycle handlers.
-6. The runner keeps the existing extension subprocess protocol local: extensions continue using stdio JSON-RPC, while the runner proxies aggregate lifecycle and tool behavior to the control plane.
-7. The control plane and runner communicate over one runner-initiated WebSocket using JSON-RPC 2.0 messages.
-8. Each run begins with a full environment manifest that is pinned for the duration of that run.
-9. Host-executed model tools have an explicit placement: control-plane tools execute beside central conversation state, while runner tools execute in the workspace environment. Provider-native capabilities remain provider-owned.
-10. Runner-owned extensions retain visibility over lifecycle events for host-executed tools, including control-plane tools, so remote execution preserves current extension policy semantics. Provider-native tools are subject to the hooks exposed by their provider API and cannot be assumed to support host-side `tool.call` and `tool.result` interception.
-11. The initial runner executes directly in its workspace with capacity one.
-12. A future runner implementation creates one fresh ephemeral environment per top-level run without changing control-plane ownership of the agent loop.
+5. Runner startup takes an exclusive OS-backed advisory file lock for its canonical workspace. The locked file contains diagnostic metadata such as PID, but lock ownership rather than file existence or PID state determines whether a runner is active.
+6. The control plane assigns each runner a stable opaque ID. Hostname, workspace basename, and optional display name are metadata rather than identity, and registration is deduplicated by authenticated owner, stable host instance ID, and canonical workspace path.
+7. The runner discovers and hosts workspace context, runner-scoped skills, runner tools, workspace plugins, extension processes, extension commands, and extension lifecycle handlers.
+8. The runner keeps the existing extension subprocess protocol local: extensions continue using stdio JSON-RPC, while the runner proxies aggregate lifecycle and tool behavior to the control plane.
+9. The control plane and runner communicate over one runner-initiated WebSocket using JSON-RPC 2.0 messages.
+10. Each run begins with a full environment manifest that is pinned for the duration of that run.
+11. Host-executed model tools have an explicit placement: control-plane tools execute beside central conversation state, while runner tools execute in the workspace environment. Provider-native capabilities remain provider-owned.
+12. Runner-owned extensions retain visibility over lifecycle events for host-executed tools, including control-plane tools, so remote execution preserves current extension policy semantics. Provider-native tools are subject to the hooks exposed by their provider API and cannot be assumed to support host-side `tool.call` and `tool.result` interception.
+13. The initial runner executes directly in its workspace with capacity one.
+14. A future runner implementation creates one fresh ephemeral execution instance per top-level run without changing control-plane ownership of the agent loop.
 
 ## Goals
 
@@ -63,7 +67,7 @@ Kodelet will use the following model:
 - Keep existing extensions and extension SDKs unaware of the network boundary.
 - Use a simple, inspectable wire protocol with no code-generation requirement.
 - Preserve ordinary direct-local `kodelet run`, `kodelet chat`, ACP, and Web UI behavior through a local agent-environment implementation.
-- Leave a clean path to fresh per-run ephemeral environments with isolated internal ports.
+- Leave a clean path to fresh per-run execution instances with isolated internal ports.
 
 ## Non-goals
 
@@ -107,13 +111,15 @@ The durable provider-native message history, metadata, usage, goal state, and st
 
 The runner-hosted interface used by the central agent loop. It provides a pinned manifest, extension lifecycle dispatch, runner-side tool execution, workspace command handling, and interactive extension callbacks.
 
+In Go, this abstraction belongs in package `agentenv` and should be named `agentenv.Environment` rather than `agentenv.AgentEnvironment`. The package qualifier keeps call sites explicit without stuttering.
+
 ### Environment manifest
 
 A versioned snapshot of the resources and prompt inputs exposed by a runner for one run, including context files, tool definitions, skill definitions, commands, relevant configuration, capabilities, and content digests.
 
-### Ephemeral environment
+### Execution instance
 
-A future fresh run-scoped environment with dedicated filesystem, process, network, and internal port state. It is created by the workspace-bound runner and destroyed when the run ends.
+The concrete backing used by an agent environment to execute one run. Initially, the execution instance is the runner's workspace and host process environment. In the future, it can be a fresh ephemeral instance with dedicated filesystem, process, network, and internal port state. Distinguishing the logical agent environment from its physical execution instance prevents the term “environment” from carrying both meanings in implementation APIs.
 
 ## Core Invariants
 
@@ -126,9 +132,35 @@ The control plane assigns work to a runner ID. It never sends an absolute CWD th
 Starting runners from different canonical directories creates separate runners even when they execute on the same machine:
 
 ```bash
-(cd ~/src/kodelet && kodelet runner start --name kodelet)
-(cd ~/src/another-project && kodelet runner start --name another-project)
+(cd ~/src/kodelet && kodelet runner start)
+(cd ~/src/another-project && kodelet runner start)
 ```
+
+### One local runner process per workspace
+
+Before connecting to a control plane, `kodelet runner start` acquires an exclusive OS-backed advisory file lock keyed by the canonical workspace path. The lock coordinates Kodelet runner processes on the local host; the implementation must not treat lock-file existence as proof that a runner is active.
+
+The lock file lives outside the source repository, preferably under the platform runtime directory such as `$XDG_RUNTIME_DIR/kodelet/runners/<workspace-hash>.lock`, with a Kodelet user-state fallback when no runtime directory is available. The lock key is based on the canonical path alone rather than the target server, preventing two runner processes from serving the same mutable workspace to different control planes.
+
+After acquiring the lock, the runner writes diagnostic metadata into the locked file:
+
+```json
+{
+  "pid": 12345,
+  "startedAt": "2026-08-06T10:15:00Z",
+  "workspace": "/home/user/src/kodelet",
+  "runnerId": "runner_abc",
+  "server": "https://kodelet.example"
+}
+```
+
+On first startup, `runnerId` can be omitted until registration completes and then written into the same file. The runner retains the locked file handle for its complete process lifetime. Metadata refreshes truncate and rewrite that same locked file; they must not atomically rename another file over the path because the OS lock applies to the opened file or inode rather than to the pathname.
+
+The PID and other contents exist only to produce a useful error and support inspection. The held OS lock is authoritative: PIDs can be reused, metadata can be stale, and a process must never break or steal a lock merely because the recorded PID appears absent. A crash or clean process exit releases the kernel lock even though the file remains. The next runner acquires the existing file and overwrites its stale metadata.
+
+The lock file is intentionally persistent and is not unlinked during normal shutdown. Removing it around lock release creates a race in which another process can lock the old file while a third process creates and locks a new inode at the same path. The file and containing directory use user-only permissions, such as `0600` and `0700`, and never contain credentials.
+
+If acquisition fails, startup exits before registration and reports the canonical workspace, recorded PID, runner ID, server, and start time when those fields can be read. This local lock is a safety mechanism for cooperative Kodelet processes, not a sandbox or a general filesystem lock for other applications.
 
 ### The control plane owns the agent loop
 
@@ -146,7 +178,7 @@ The runner is authoritative for the workspace resources exposed to an agent:
 - extension-provided tools and commands;
 - extension lifecycle handling and policy;
 - workspace-local configuration relevant to the environment;
-- future ephemeral environment creation.
+- future ephemeral execution-instance creation.
 
 ### The manifest is pinned for one run
 
@@ -162,9 +194,9 @@ The initial runner executes directly in its registered workspace, so the control
 
 A conversation cannot have more than one active top-level run. The control plane already owns the provider thread and enforces this globally rather than relying on runner-local memory.
 
-### Every future run receives a fresh environment
+### Every future run receives a fresh execution instance
 
-When ephemeral environment support is introduced, every top-level run receives a newly created environment that is not reused by another run. Any state needed by a later run must be durable outside the previous ephemeral environment.
+When ephemeral execution support is introduced, every top-level run receives a newly created execution instance that is not reused by another run. Any state needed by a later run must be durable outside the previous instance.
 
 ## Architecture
 
@@ -205,10 +237,10 @@ The control-plane ownership and wire protocol remain the same. The runner change
 │ Workspace-bound runner       │
 │ `/home/user/src/kodelet`     │
 └──────────────┬───────────────┘
-               │ create fresh environment for run
+               │ create fresh execution instance for run
                ▼
 ┌──────────────────────────────┐
-│ Ephemeral run environment    │
+│ Ephemeral execution instance │
 │                              │
 │ dedicated filesystem         │
 │ dedicated processes          │
@@ -239,16 +271,18 @@ The mechanism used to provision the environment is deliberately unspecified.
 | Provider-native tools | Configures and receives provider events | Applies catalog policy where supported; does not execute |
 | Extensions | Proxies lifecycle operations | Discovers, starts, and hosts processes |
 | Extension UI | Routes to clients | Proxies extension requests |
-| Future environment creation | Tracks run state | Creates and destroys environment |
+| Future execution instances | Tracks run state | Creates and destroys instances |
 
 ## Agent Environment Contract
 
 Provider loops should depend on an agent-environment abstraction rather than directly depending on `tools.BasicState` and a concrete `*extensions.Runtime`.
 
-Conceptually:
+Conceptually, the package API is:
 
 ```go
-type AgentEnvironment interface {
+package agentenv
+
+type Environment interface {
     Open(ctx context.Context, spec RunSpec) (EnvironmentManifest, error)
     ExecuteCommand(ctx context.Context, request CommandRequest) (CommandResult, error)
     DispatchLifecycle(ctx context.Context, request LifecycleRequest) (LifecycleResult, error)
@@ -260,10 +294,10 @@ type AgentEnvironment interface {
 Kodelet will provide at least two implementations:
 
 ```text
-LocalAgentEnvironment
+agentenv.LocalEnvironment
   wraps BasicState, local context discovery, skills, and extensions
 
-RemoteAgentEnvironment
+agentenv.RemoteEnvironment
   proxies the same logical operations to a workspace-bound runner
 ```
 
@@ -313,7 +347,7 @@ control plane persists provider-native conversation and closes run environment
 
 A runner command can return a direct response or an agent prompt. A direct response is streamed and persisted without calling the provider; an agent prompt replaces the submitted command text and may select recipe metadata before `user.message` and the provider loop continues. Central conversation commands such as goal mutation remain control-plane operations.
 
-The initial runner reuses one extension runtime for its workspace, matching the current persistent interactive-host behavior. `session.start` and `resources.discover` run once for that runtime generation, while `session.end` runs when the runtime is shut down or replaced. Per-run extension runtimes can be introduced with future ephemeral environments without changing the control-plane lifecycle methods.
+The initial runner reuses one extension runtime for its workspace, matching the current persistent interactive-host behavior. `session.start` and `resources.discover` run once for that runtime generation, while `session.end` runs when the runtime is shut down or replaced. Per-run extension runtimes can be introduced with future ephemeral execution instances without changing the control-plane lifecycle methods.
 
 The control plane streams provider text, reasoning, tool activity, usage, UI requests, and final status to attached clients through its existing client-facing event APIs.
 
@@ -535,15 +569,30 @@ The runner's first request registers the stable runner and negotiates the applic
   "params": {
     "protocolVersions": [1],
     "runnerId": "runner_abc",
-    "name": "kodelet",
-    "workspace": "/home/user/src/kodelet",
+    "displayName": "kodelet-gpu",
+    "host": {
+      "instanceId": "host_xyz",
+      "hostname": "framework-desktop",
+      "os": "linux",
+      "arch": "amd64"
+    },
+    "workspace": {
+      "path": "/home/user/src/kodelet",
+      "name": "kodelet"
+    },
     "kodeletVersion": "1.2.3",
     "manifestDigest": "sha256:4d7e..."
   }
 }
 ```
 
-`runnerId` is optional on first registration. When omitted, the control plane creates a stable opaque runner ID and returns it. A reconnect sends the previously assigned ID.
+`runnerId` is optional on first registration. When omitted, the control plane finds or creates the record identified by the authenticated owner, `host.instanceId`, and canonical `workspace.path`, then returns its stable opaque runner ID. A reconnect sends the previously assigned ID when it is available locally; losing that cached ID does not create a duplicate because the server-side workspace identity key still resolves the existing record.
+
+The runner creates `host.instanceId` as a stable random identifier in the Kodelet user-state directory. It is not a credential or a hardware identity. `host.hostname`, operating system, architecture, workspace name, and optional `displayName` are mutable display and diagnostic metadata and never determine authorization. The runner supplies the workspace name because the control plane may run on an operating system with different path semantics.
+
+The control-plane store enforces a uniqueness constraint equivalent to `(owner_id, host_instance_id, canonical_workspace_path)`. Registration is an upsert against that key. Supplying an existing `runnerId` with a different host instance or workspace path is rejected rather than rebinding the runner. Starting from a moved or renamed workspace path creates a new runner under the one-runner-one-workspace model.
+
+`displayName` is optional and defaults in the UI to the workspace basename, qualified by hostname when needed. It is mutable and need not be unique. The project directory basename must never be used as `runnerId`, and ordinary startup does not expose a user-selected `--id` flag.
 
 The control plane responds with the selected version, stable runner identity, and a live connection generation:
 
@@ -561,7 +610,7 @@ The control plane responds with the selected version, stable runner identity, an
 }
 ```
 
-Only one live connection can serve a stable runner registration. The generation fences requests and notifications from a stale process after reconnect or replacement.
+Only one live connection can serve a stable runner registration. A reconnect atomically advances the generation and invalidates the previous connection. The local workspace lock prevents a second cooperating runner process from presenting itself as the same workspace, while the server-side uniqueness constraint prevents duplicate persistent records and the generation fences requests and notifications from a stale socket.
 
 ### Run open
 
@@ -741,9 +790,30 @@ The WebSocket protocol is intended for manifests, lifecycle payloads, schemas, t
 
 Arbitrarily large files, images, logs, database dumps, and future build artifacts should use a separate upload or artifact protocol rather than unbounded JSON or base64 on the control socket. That protocol is outside the initial scope.
 
-## Runner Identity and Conversation Affinity
+## Runner Identity, Registration Uniqueness, and Conversation Affinity
 
-A runner has a stable registration identity and an ephemeral live connection generation. Restarting `kodelet runner start` from the same workspace and control-plane identity should normally reconnect as the same runner without writing identity files into the source repository.
+A runner has a stable, opaque, control-plane-assigned `runnerId`; a stable local `hostInstanceId`; mutable hostname and display metadata; and an ephemeral live connection ID and generation. These values serve different purposes and must not be conflated:
+
+| Value | Purpose | Lifetime |
+|---|---|---|
+| `runnerId` | Authoritative control-plane identity and conversation affinity | Stable across restarts in the same host workspace |
+| `hostInstanceId` | Distinguishes local Kodelet installations for workspace deduplication | Stable local user-state value |
+| `displayName` | Optional human-friendly alias | Mutable and non-unique |
+| `hostname` | User display and diagnostics | Mutable and non-unique |
+| `connectionId` | Identifies one WebSocket connection | One connection |
+| `generation` | Rejects stale connection traffic | Increases on reconnect |
+
+Restarting `kodelet runner start` from the same canonical workspace, host instance, authenticated owner, and control plane reconnects as the same runner. Starting from another canonical path creates another runner, even if the basename or repository contents are identical. The same path string on a different host instance also creates another runner because paths are host-local.
+
+The runner stores its host instance ID and optional cached runner registrations in the Kodelet user-state directory, keyed by normalized control-plane identity and canonical workspace. It never writes identity or lock files into the source repository. The server-side uniqueness key remains authoritative, so deleting the local runner-ID cache does not create a duplicate record.
+
+Duplicate prevention has three independent layers:
+
+1. The local OS file lock prevents two cooperating runner processes from serving the same canonical workspace.
+2. The server-side uniqueness constraint prevents two persistent runner records for the same owner, host instance, and workspace path.
+3. The live connection generation prevents two sockets from concurrently acting as the same runner after reconnect or replacement.
+
+Hostname, display name, PID, workspace basename, and manifest digest are metadata rather than identity. Changing them updates the runner record but does not create or authorize a different runner. `runnerId` and `hostInstanceId` are identifiers rather than secrets; the runner credential remains the authentication mechanism.
 
 A new remote conversation selects a runner. The binding is durable because the runner defines the workspace, context, available skills, extensions, and future environment source.
 
@@ -800,7 +870,7 @@ Connections across hosts require WSS and runner authentication during the WebSoc
 
 Provider credentials remain in the control plane. Runner registration credentials must not be included in tool contexts, subprocess environments, extension initialization payloads, or logs. The runner must scrub its control-plane credential before spawning extensions or workspace processes.
 
-Binding a runner to one workspace prevents accidental path routing but is not a sandbox. Runner-side Bash, extensions, build systems, and package managers execute with the runner process's host permissions until ephemeral environment support is introduced.
+Binding a runner to one workspace prevents accidental path routing but is not a sandbox. Runner-side Bash, extensions, build systems, and package managers execute with the runner process's host permissions until ephemeral execution instances are introduced.
 
 ## User Experience
 
@@ -816,19 +886,25 @@ kodelet serve
 
 ```bash
 cd ~/src/kodelet
-kodelet runner start --server https://kodelet.example --name kodelet
+kodelet runner start --server https://kodelet.example
 ```
 
-The runner binds to the canonical current directory. The initial command does not need a `--cwd` flag; starting from another directory creates another runner.
+The runner binds to the canonical current directory. The initial command does not need a `--cwd` or `--id` flag; starting from another directory creates another runner. The default display label is the workspace basename, qualified by hostname when necessary. Users can optionally set a mutable alias without changing runner identity:
+
+```bash
+kodelet runner start --server https://kodelet.example --name kodelet-gpu
+```
 
 ### Selecting a runner
 
 The Web UI and TUI present connected runners when creating a remote conversation and display the selected runner on existing conversations.
 
 ```bash
-kodelet chat --runner kodelet
-kodelet run --runner kodelet "implement the requested change"
+kodelet chat --runner kodelet-gpu
+kodelet run --runner runner_abc "implement the requested change"
 ```
+
+A runner selector accepts an exact runner ID, an unambiguous ID prefix, or an unambiguous display name. Ambiguous names fail with the matching runner IDs, hostnames, and workspace paths rather than selecting one silently.
 
 `kodelet run --runner` remains a target UX, but the existing one-shot command has options not represented by `ChatRequest`. Remote Web UI or TUI chat may land first; remote one-shot execution requires a request contract covering the supported CLI options and output modes.
 
@@ -841,7 +917,7 @@ kodelet runner list
 kodelet runner inspect kodelet
 ```
 
-Status includes connected or offline state, workspace, Kodelet version, manifest digest, current run, and last heartbeat.
+Status includes runner ID, optional display name, hostname, connected or offline state, canonical workspace, Kodelet version, manifest digest, current run, connection generation, and last heartbeat. Detailed local inspection can also show the lock-file path, recorded PID, and start time.
 
 ### Initial remote Web UI limitations
 
@@ -849,9 +925,9 @@ Several existing Web UI features execute directly on the `kodelet serve` host. F
 
 Commands submitted in the conversation still resolve through the selected runner's command manifest and `command.execute` operation.
 
-## Future Ephemeral Run Environments
+## Future Ephemeral Execution Instances
 
-The long-term goal is one fresh ephemeral environment per top-level run. The runner remains bound to one source workspace but creates a dedicated environment before returning the run manifest.
+The long-term goal is one fresh ephemeral execution instance per top-level run. The runner remains bound to one source workspace but creates a dedicated instance before returning the run manifest.
 
 The required invariant is limited to:
 
@@ -878,13 +954,13 @@ The runner-side implementation changes from direct workspace execution to enviro
 
 ### `pkg/llm` and `pkg/llm/base`
 
-Provider loops currently read `State.DiscoverContexts()` and call local extension and tool helpers directly. Refactor shared turn flow and tool execution to depend on `AgentEnvironment` and a placement-aware tool router.
+Provider loops currently read `State.DiscoverContexts()` and call local extension and tool helpers directly. Refactor shared turn flow and tool execution to depend on `agentenv.Environment` and a placement-aware tool router.
 
 The provider thread remains in the control plane and continues owning provider-native messages, compaction, usage, and persistence.
 
 ### `pkg/tools`
 
-Keep existing tool implementations for `LocalAgentEnvironment`. Add serializable tool definitions and proxy tool implementations for runner manifests. Split central conversation tools from workspace tools without exposing placement to the model.
+Keep existing tool implementations for `agentenv.LocalEnvironment`. Add serializable tool definitions and proxy tool implementations for runner manifests. Split central conversation tools from workspace tools without exposing placement to the model.
 
 ### `pkg/extensions`
 
@@ -892,7 +968,7 @@ Keep extension discovery, subprocess management, stdio JSON-RPC, event ordering,
 
 ### `pkg/chat`
 
-`ChatRunner` remains the client-facing persisted-run interface, but `DefaultChatRunner` must be refactored so central run setup can open either a local or remote `AgentEnvironment` before constructing the provider turn flow.
+`ChatRunner` remains the client-facing persisted-run interface, but `DefaultChatRunner` must be refactored so central run setup can open either a local or remote `agentenv.Environment` before constructing the provider turn flow.
 
 ### `pkg/webui`
 
@@ -922,8 +998,8 @@ These paths are illustrative and should be adjusted to existing package ownershi
 
 ### Phase 1: local agent-environment abstraction
 
-- Extract an `AgentEnvironment` abstraction from provider turn flow and tool execution.
-- Implement `LocalAgentEnvironment` with existing context, skills, tools, commands, and extensions.
+- Extract the `agentenv.Environment` abstraction from provider turn flow and tool execution.
+- Implement `agentenv.LocalEnvironment` with existing context, skills, tools, commands, and extensions.
 - Split control-plane tools from environment tools.
 - Snapshot context and tool definitions once per run.
 - Preserve current direct-local behavior with focused provider and extension tests.
@@ -931,7 +1007,7 @@ These paths are illustrative and should be adjusted to existing package ownershi
 ### Phase 2: WebSocket JSON-RPC protocol
 
 - Add typed JSON-RPC envelopes and method payloads.
-- Add the runner-initiated WebSocket endpoint, authentication, registration, generation fencing, heartbeat, and bounded connection queues.
+- Add the runner-initiated WebSocket endpoint, authentication, stable host and runner identity, registration upsert, generation fencing, heartbeat, and bounded connection queues.
 - Add `run.open`, manifest snapshotting, lifecycle dispatch, runner tool execution, tool updates, cancellation, and run close.
 - Add bidirectional extension UI requests.
 - Enforce one active run per runner and one active run per conversation.
@@ -939,19 +1015,20 @@ These paths are illustrative and should be adjusted to existing package ownershi
 ### Phase 3: external runner and client integration
 
 - Add `kodelet runner start`, list, and inspect.
+- Add the canonical-workspace advisory lock, diagnostic PID metadata, and local identity cache outside source repositories.
 - Add remote runner selection to the Web UI and TUI.
 - Persist runner affinity and run records centrally.
 - Expose offline, idle, busy, incompatible, and manifest-changed states.
 - Disable or hide control-plane-local workspace features for remote conversations.
 - Define remote one-shot CLI behavior before enabling `kodelet run --runner` broadly.
 
-### Future phase: ephemeral environments
+### Future phase: ephemeral execution instances
 
-- Add an environment-provider interface inside the runner.
-- Create one fresh environment per top-level run.
-- Discover the manifest and execute tools and extensions inside that environment.
-- Destroy the environment when the run ends.
-- Increase runner capacity only when independent environments make concurrent runs safe.
+- Add an execution-instance provider interface inside the runner.
+- Create one fresh execution instance per top-level run.
+- Discover the manifest and execute tools and extensions inside that instance.
+- Destroy the instance when the run ends.
+- Increase runner capacity only when independent execution instances make concurrent runs safe.
 
 ## Alternatives Considered
 
@@ -973,7 +1050,7 @@ This would more closely match current behavior but introduces repeated runner ro
 
 This is not selected because Kodelet resources and configuration are strongly associated with one CWD. A workspace-bound runner gives users a clear execution identity and prevents arbitrary remote path selection.
 
-### Per-run ephemeral environments in the first release
+### Per-run ephemeral execution instances in the first release
 
 This remains the long-term target but is deliberately deferred. The environment protocol and central agent-loop split should be validated before selecting and implementing an isolation backend.
 
@@ -983,13 +1060,12 @@ This is not selected because filesystem locks cannot coordinate Bash, Git, build
 
 ## Open Questions
 
-- Should `kodelet serve` expose its startup CWD through an embedded `LocalAgentEnvironment` by default?
+- Should `kodelet serve` expose its startup CWD through an embedded `agentenv.LocalEnvironment` by default?
 - Should a run targeting an offline or busy runner queue or fail immediately in the first release?
-- What local registration format should retain stable runner IDs across process restarts?
 - Should runner affinity be stored in a dedicated conversation column or provider-neutral metadata initially?
 - How should server model policy, conversation profiles, and workspace-requested model defaults be merged exactly?
-- Should extension runtimes be runner-lived, run-lived, or configurable once ephemeral environments exist?
-- How should edits and artifacts produced in an ephemeral environment become durable, and how should conflicting concurrent results be reconciled?
+- Should extension runtimes be runner-lived, run-lived, or configurable once ephemeral execution instances exist?
+- How should edits and artifacts produced in an ephemeral execution instance become durable, and how should conflicting concurrent results be reconciled?
 - What heartbeat and lost-run timeouts should be used initially?
 - Which auxiliary Web UI features should receive runner-backed protocols first: Git diff, terminal, command discovery, or file browsing?
 - What subset of existing `kodelet run` flags should the first remote one-shot request support?
