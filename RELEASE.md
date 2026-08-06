@@ -1,8 +1,14 @@
 # Kodelet
 
-## Unreleased
+## 0.5.27-beta
 
 Removed the legacy `kodelet run --headless` JSON stream, its `--stream-deltas` and `--include-history` flags, the `kodelet conversation stream` command, and the CLI-backed Streamlit example; ACP, TypeScript SDK, TUI, and Web UI streaming remain supported.
+
+Preserved the source working directory when forking conversations so forks continue in the correct workspace.
+
+Removed the dormant hidden arcade games from the Web UI and updated Web UI and TypeScript SDK dependencies to resolve security alerts.
+
+Added a workspace-bound runner design covering lifecycle, isolation, and tool execution boundaries.
 
 ## 0.5.24-beta
 
