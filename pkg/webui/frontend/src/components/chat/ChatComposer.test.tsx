@@ -42,9 +42,14 @@ const renderComposer = (
 		...overrides,
 	};
 
-	render(<ChatComposer {...props} />);
+	const view = render(<ChatComposer {...props} />);
 
-	return props;
+	return {
+		...props,
+		rerenderComposer: (
+			nextOverrides: Partial<React.ComponentProps<typeof ChatComposer>>,
+		) => view.rerender(<ChatComposer {...props} {...nextOverrides} />),
+	};
 };
 
 describe("ChatComposer", () => {
@@ -68,6 +73,7 @@ describe("ChatComposer", () => {
 		expect(screen.getByTestId("composer-textarea").parentElement).toHaveClass(
 			"composer-control-grid",
 		);
+		expect(screen.getByTestId("composer-textarea")).toHaveAttribute("rows", "1");
 		expect(screen.queryByTestId("composer-expand-toggle")).not.toBeInTheDocument();
 		expect(props.onDraftChange).toHaveBeenCalledWith("next draft");
 		expect(props.onSubmit).toHaveBeenCalledTimes(1);
@@ -81,6 +87,44 @@ describe("ChatComposer", () => {
 			"is-multiline",
 		);
 		expect(screen.queryByTestId("composer-expand-toggle")).not.toBeInTheDocument();
+	});
+
+	it("keeps a fitting single-line editor stable during layout syncs", () => {
+		renderComposer({ draft: "hello" });
+
+		const textarea = screen.getByTestId("composer-textarea");
+		Object.defineProperties(textarea, {
+			clientHeight: { configurable: true, value: 52 },
+			scrollHeight: { configurable: true, value: 52 },
+		});
+		const styleObserver = new MutationObserver(() => undefined);
+		styleObserver.observe(textarea, {
+			attributes: true,
+			attributeFilter: ["style"],
+		});
+
+		window.dispatchEvent(new Event("resize"));
+
+		expect(styleObserver.takeRecords()).toHaveLength(0);
+		styleObserver.disconnect();
+	});
+
+	it("resets a stale multiline height when the draft is cleared", () => {
+		const composer = renderComposer({ draft: "a\nb\nc" });
+		const textarea = screen.getByTestId("composer-textarea");
+
+		textarea.style.height = "91px";
+		textarea.style.overflowY = "auto";
+		Object.defineProperty(textarea, "scrollHeight", {
+			configurable: true,
+			value: 91,
+		});
+
+		composer.rerenderComposer({ draft: "" });
+
+		expect(textarea.parentElement).not.toHaveClass("is-multiline");
+		expect(textarea.style.height).toBe("");
+		expect(textarea.style.overflowY).toBe("");
 	});
 
 	it("renders and emits the compact stop action", () => {

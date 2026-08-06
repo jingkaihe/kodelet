@@ -821,9 +821,17 @@ h6 {
 
 @media (min-width: 1024px) {
   .composer-control-grid:not(.is-multiline) .composer-editor {
+    height: 3.25rem;
     min-height: 3.25rem;
     padding-top: 0.7rem;
     padding-bottom: 0.2rem;
+  }
+
+  .composer-control-grid:not(.is-multiline) .composer-leading-actions,
+  .composer-control-grid:not(.is-multiline) .composer-context-cluster,
+  .composer-control-grid:not(.is-multiline) .composer-status-actions {
+    align-self: center;
+    margin-top: 0;
   }
 }
 

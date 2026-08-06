@@ -87,6 +87,24 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
 			return;
 		}
 
+		if (draft.length === 0) {
+			controlGrid.classList.remove("is-multiline");
+			editor.style.height = "";
+			editor.style.overflowY = "";
+			setMultiline(false);
+			return;
+		}
+
+		const hasExplicitLineBreak = draft.includes("\n");
+		const singleLineDraftStillFits =
+			!hasExplicitLineBreak &&
+			!controlGrid.classList.contains("is-multiline") &&
+			editor.clientHeight > 0 &&
+			editor.scrollHeight <= editor.clientHeight + 1;
+		if (singleLineDraftStillFits) {
+			return;
+		}
+
 		controlGrid.classList.remove("is-multiline");
 
 		editor.style.height = "0px";
@@ -98,7 +116,7 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
 			singleLineMinHeight > 0 &&
 			measuredSingleLineHeight > 0;
 		const nextMultiline =
-			draft.includes("\n") ||
+			hasExplicitLineBreak ||
 			(hasLayoutMetrics && measuredSingleLineHeight > singleLineMinHeight + 1);
 
 		controlGrid.classList.toggle("is-multiline", nextMultiline);
@@ -288,6 +306,7 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
 							onPaste={onPaste}
 							placeholder={placeholder}
 							ref={textareaRef}
+							rows={1}
 							value={draft}
 						/>
 
