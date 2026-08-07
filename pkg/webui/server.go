@@ -28,12 +28,15 @@ import (
 	"github.com/gorilla/mux"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/goals"
 	openairesponses "github.com/jingkaihe/kodelet/pkg/llm/openai/responses"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
+	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/jingkaihe/kodelet/pkg/steer"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -60,6 +63,7 @@ type Server struct {
 	terminalSessions    *terminalSessionManager
 	terminalSessionsMu  sync.Mutex
 	extensionRuntimes   *extensions.RuntimeManager
+	runnerRegistry      *runnerregistry.Registry
 	activeChats         map[string]*activeChatRun
 	activeChatsMu       sync.Mutex
 	chatSubscribers     map[string]map[*subscriberEventSink]struct{}
@@ -97,12 +101,13 @@ func (r *activeChatRun) markDone() {
 
 // ServerConfig holds the configuration for the web server
 type ServerConfig struct {
-	Host         string
-	Port         int
-	CWD          string
-	CompactRatio float64
-	AuthToken    string
-	CORSOrigins  []string
+	Host            string
+	Port            int
+	CWD             string
+	CompactRatio    float64
+	AuthToken       string
+	RunnerAuthToken string
+	CORSOrigins     []string
 }
 
 // Validate validates the server configuration
@@ -123,6 +128,12 @@ func (c *ServerConfig) Validate() error {
 
 	if err := ValidateAuthToken(c.AuthToken); err != nil {
 		return err
+	}
+	if err := ValidateAuthToken(c.RunnerAuthToken); err != nil {
+		return errors.Wrap(err, "invalid runner auth token")
+	}
+	if c.AuthToken != "" && c.RunnerAuthToken != "" && c.AuthToken == c.RunnerAuthToken {
+		return errors.New("runner auth token must differ from the web UI auth token")
 	}
 
 	if _, err := normalizeConfiguredCORSOrigins(c.CORSOrigins); err != nil {
@@ -173,6 +184,24 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 
 	runCtx, runCancel := context.WithCancel(ctx)
 	extensionRuntimes := extensions.NewRuntimeManager()
+	dbPath, err := db.DefaultDBPath()
+	if err != nil {
+		runCancel()
+		_ = conversationService.Close()
+		return nil, errors.Wrap(err, "failed to resolve runner persistence path")
+	}
+	runnerPersistence, err := runnerregistry.NewSQLitePersistence(runCtx, dbPath, "")
+	if err != nil {
+		runCancel()
+		_ = conversationService.Close()
+		return nil, errors.Wrap(err, "failed to open runner persistence")
+	}
+	runnerRegistry, err := runnerregistry.New(runCtx, runnerregistry.Options{Persistence: runnerPersistence})
+	if err != nil {
+		runCancel()
+		_ = conversationService.Close()
+		return nil, errors.Wrap(err, "failed to create runner registry")
+	}
 
 	s := &Server{
 		router:              mux.NewRouter(),
@@ -186,11 +215,13 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 		runCancel:         runCancel,
 		terminalSessions:  newTerminalSessionManager(runCtx),
 		extensionRuntimes: extensionRuntimes,
+		runnerRegistry:    runnerRegistry,
 		activeChats:       make(map[string]*activeChatRun),
 		chatSubscribers:   make(map[string]map[*subscriberEventSink]struct{}),
 	}
 	if runner, ok := s.chatRunner.(*webUIChatRunner); ok {
 		runner.server = s
+		runner.runner.SetEnvironmentResolver(runner)
 	}
 
 	// Setup routes
@@ -208,6 +239,9 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/chat/cwd-suggestions", s.handleGetCWDHints).Methods("GET")
 	api.HandleFunc("/git/diff", s.handleGetGitDiff).Methods("GET")
 	api.HandleFunc("/terminal/ws", s.handleTerminalWebsocket).Methods("GET")
+	api.HandleFunc("/runner/v1/connect", s.handleRunnerWebsocket).Methods("GET")
+	api.HandleFunc("/runners", s.handleListRunners).Methods("GET")
+	api.HandleFunc("/runners/{id}", s.handleGetRunner).Methods("GET")
 	api.HandleFunc("/conversations", s.handleListConversations).Methods("GET")
 	api.HandleFunc("/conversations/{id}", s.handleGetConversation).Methods("GET")
 	api.HandleFunc("/conversations/{id}/stream", s.handleStreamConversation).Methods("GET")
@@ -476,12 +510,25 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	}
 
 	authToken := strings.TrimSpace(s.config.AuthToken)
-	if authToken == "" {
+	runnerAuthToken := strings.TrimSpace(s.config.RunnerAuthToken)
+	if authToken == "" && runnerAuthToken == "" {
 		return next
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodOptions {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if r.URL.Path == protocol.Endpoint {
+			if runnerAuthToken == "" || requestHasAuthToken(r, runnerAuthToken) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			s.writeAuthError(w, r, http.StatusUnauthorized, "runner authentication required")
+			return
+		}
+		if authToken == "" {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -910,6 +957,14 @@ func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request)
 		if apiMode != "" {
 			summary.Metadata["api_mode"] = apiMode
 		}
+		if s.runnerRegistry != nil {
+			if runnerID, ok := s.runnerRegistry.RunnerForConversation(summary.ID); ok {
+				summary.Metadata["runner_id"] = runnerID
+				if runner, found := s.runnerRegistry.Runner(runnerID); found {
+					summary.Metadata["runner_status"] = runner.Status
+				}
+			}
+		}
 	}
 
 	s.writeJSONResponse(w, response)
@@ -917,23 +972,25 @@ func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request)
 
 // WebConversationResponse represents a conversation response for the web UI.
 type WebConversationResponse struct {
-	ID                    string       `json:"id"`
-	CreatedAt             time.Time    `json:"createdAt"`
-	UpdatedAt             time.Time    `json:"updatedAt"`
-	Provider              string       `json:"provider"`
-	CWD                   string       `json:"cwd,omitempty"`
-	CWDLocked             bool         `json:"cwdLocked,omitempty"`
-	Profile               string       `json:"profile,omitempty"`
-	ProfileLocked         bool         `json:"profileLocked,omitempty"`
-	ReasoningEffort       string       `json:"reasoningEffort,omitempty"`
-	ReasoningEffortLocked bool         `json:"reasoningEffortLocked,omitempty"`
-	Summary               string       `json:"summary,omitempty"`
-	IsRunning             bool         `json:"isRunning,omitempty"`
-	Usage                 any          `json:"usage"`
-	Messages              []WebMessage `json:"messages"`
-	PendingSteer          []WebMessage `json:"pendingSteer,omitempty"`
-	ToolResults           any          `json:"toolResults,omitempty"`
-	MessageCount          int          `json:"messageCount"`
+	ID                    string                 `json:"id"`
+	CreatedAt             time.Time              `json:"createdAt"`
+	UpdatedAt             time.Time              `json:"updatedAt"`
+	Provider              string                 `json:"provider"`
+	CWD                   string                 `json:"cwd,omitempty"`
+	CWDLocked             bool                   `json:"cwdLocked,omitempty"`
+	Profile               string                 `json:"profile,omitempty"`
+	ProfileLocked         bool                   `json:"profileLocked,omitempty"`
+	ReasoningEffort       string                 `json:"reasoningEffort,omitempty"`
+	ReasoningEffortLocked bool                   `json:"reasoningEffortLocked,omitempty"`
+	RunnerID              string                 `json:"runnerId,omitempty"`
+	Runner                *runnerregistry.Runner `json:"runner,omitempty"`
+	Summary               string                 `json:"summary,omitempty"`
+	IsRunning             bool                   `json:"isRunning,omitempty"`
+	Usage                 any                    `json:"usage"`
+	Messages              []WebMessage           `json:"messages"`
+	PendingSteer          []WebMessage           `json:"pendingSteer,omitempty"`
+	ToolResults           any                    `json:"toolResults,omitempty"`
+	MessageCount          int                    `json:"messageCount"`
 }
 
 // ChatProfileOption represents a selectable profile in the web UI.
@@ -1547,6 +1604,14 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 		ToolResults:           response.ToolResults,
 		MessageCount:          len(webMessages),
 	}
+	if s.runnerRegistry != nil {
+		if runnerID, ok := s.runnerRegistry.RunnerForConversation(response.ID); ok {
+			webResponse.RunnerID = runnerID
+			if runner, found := s.runnerRegistry.Runner(runnerID); found {
+				webResponse.Runner = &runner
+			}
+		}
+	}
 
 	s.writeJSONResponse(w, webResponse)
 }
@@ -2089,8 +2154,10 @@ func (s *Server) handleStopConversation(w http.ResponseWriter, r *http.Request) 
 }
 
 type uiInputResponseRequest struct {
-	Status string `json:"status"`
-	Value  string `json:"value,omitempty"`
+	Status    string `json:"status"`
+	Value     string `json:"value,omitempty"`
+	Confirmed bool   `json:"confirmed,omitempty"`
+	Reason    string `json:"reason,omitempty"`
 }
 
 func (s *Server) handleRespondUIInput(w http.ResponseWriter, r *http.Request) {
@@ -2114,14 +2181,17 @@ func (s *Server) handleRespondUIInput(w http.ResponseWriter, r *http.Request) {
 		status = extensions.UIInputStatusSubmitted
 	}
 	switch status {
-	case extensions.UIInputStatusSubmitted, extensions.UIInputStatusDismissed:
+	case extensions.UIInputStatusSubmitted,
+		extensions.UIInputStatusDismissed,
+		extensions.UIInputStatusTimeout,
+		extensions.UIInputStatusUnavailable:
 	default:
 		s.writeErrorResponse(w, http.StatusBadRequest, "invalid ui input status", nil)
 		return
 	}
 
-	response := extensions.UIInputResponse{Status: status, Value: req.Value}
-	if strings.EqualFold(strings.TrimSpace(req.Value), "true") {
+	response := extensions.UIInputResponse{Status: status, Value: req.Value, Confirmed: req.Confirmed, Reason: req.Reason}
+	if !response.Confirmed && strings.EqualFold(strings.TrimSpace(req.Value), "true") {
 		response.Confirmed = true
 	}
 
@@ -2259,6 +2329,11 @@ func (s *Server) Stop() error {
 	}
 	if s.extensionRuntimes != nil {
 		if err := s.extensionRuntimes.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	if s.runnerRegistry != nil {
+		if err := s.runnerRegistry.Close(); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}

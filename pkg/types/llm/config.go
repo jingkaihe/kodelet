@@ -63,6 +63,8 @@ type Config struct {
 	ModelAliasesResolved    bool               `mapstructure:"-" json:"-" yaml:"-"`                                                            // ModelAliasesResolved prevents effective model names from being resolved as aliases again
 	Retry                   RetryConfig        `mapstructure:"retry" json:"retry" yaml:"retry"`                                                // Retry configuration for API calls
 	Sysprompt               string             `mapstructure:"sysprompt" json:"sysprompt,omitempty" yaml:"sysprompt,omitempty"`                // Sysprompt is the path to a custom system prompt template file
+	SyspromptContent        string             `mapstructure:"-" json:"-" yaml:"-"`                                                            // SyspromptContent is an in-memory custom system prompt supplied by an agent environment
+	SyspromptInline         bool               `mapstructure:"-" json:"-" yaml:"-"`                                                            // SyspromptInline distinguishes an intentionally empty in-memory custom template
 	SyspromptArgs           map[string]string  `mapstructure:"sysprompt_args" json:"sysprompt_args,omitempty" yaml:"sysprompt_args,omitempty"` // SyspromptArgs are custom template arguments for system prompt rendering
 	Bash                    *BashConfig        `mapstructure:"bash" json:"bash,omitempty" yaml:"bash,omitempty"`                               // Bash contains bash tool configuration
 

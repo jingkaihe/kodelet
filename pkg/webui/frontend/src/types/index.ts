@@ -84,6 +84,8 @@ export interface Conversation {
 	profileLocked?: boolean;
 	reasoningEffort?: string;
 	reasoningEffortLocked?: boolean;
+	runnerId?: string;
+	runner?: Runner;
 	platform?: string;
 	api_mode?: string;
 	metadata?: Record<string, unknown>;
@@ -135,9 +137,54 @@ export interface ChatRequest {
 	message: string;
 	content?: ContentBlock[];
 	conversationId?: string;
+	runnerId?: string;
 	profile?: string;
 	reasoningEffort?: string;
 	cwd?: string;
+	clientCapabilities?: {
+		interactiveUI: boolean;
+		persistentSurfaces: boolean;
+	};
+}
+
+export interface RunnerHost {
+	instanceId: string;
+	hostname: string;
+	os: string;
+	arch: string;
+	pid?: number;
+}
+
+export interface RunnerWorkspace {
+	path: string;
+	name: string;
+}
+
+export interface Runner {
+	id: string;
+	displayName?: string;
+	host: RunnerHost;
+	workspace: RunnerWorkspace;
+	kodeletVersion?: string;
+	manifestDigest?: string;
+	manifestChanged: boolean;
+	compatibilityError?: string;
+	status:
+		| "offline"
+		| "connecting"
+		| "idle"
+		| "busy"
+		| "error"
+		| "incompatible";
+	connected: boolean;
+	activeRunId?: string;
+	generation: number;
+	connectedAt?: string;
+	lastHeartbeatAt?: string;
+}
+
+export interface RunnerListResponse {
+	runners: Runner[];
 }
 
 export interface SteerConversationRequest {

@@ -16,7 +16,7 @@ import (
 
 func TestAll(t *testing.T) {
 	migrations := All()
-	require.Len(t, migrations, 8)
+	require.Len(t, migrations, 9)
 
 	versions := make([]int64, 0, len(migrations))
 	for _, migration := range migrations {
@@ -34,6 +34,7 @@ func TestAll(t *testing.T) {
 		20260226120000,
 		20260331120000,
 		20260719170000,
+		20260806120000,
 	}, versions)
 }
 
@@ -49,16 +50,23 @@ func TestMigrationsCreateExpectedSchema(t *testing.T) {
 	assertTableExists(t, database.DB, "conversation_summaries")
 	assertTableExists(t, database.DB, "acp_session_updates")
 	assertTableExists(t, database.DB, "steering_messages")
+	assertTableExists(t, database.DB, "runner_registrations")
+	assertTableExists(t, database.DB, "runner_runs")
+	assertTableExists(t, database.DB, "conversation_runner_affinity")
 	assertColumnExists(t, database.DB, "conversations", "background_processes")
 	assertColumnExists(t, database.DB, "conversations", "cwd")
 	assertColumnExists(t, database.DB, "conversation_summaries", "provider")
 	assertColumnExists(t, database.DB, "conversation_summaries", "metadata")
 	assertColumnExists(t, database.DB, "conversation_summaries", "cwd")
+	assertColumnExists(t, database.DB, "runner_runs", "manifest_json")
 	assertIndexExists(t, database.DB, "idx_conversations_created_at")
 	assertIndexExists(t, database.DB, "idx_summaries_provider")
 	assertIndexExists(t, database.DB, "idx_acp_session_updates_session_id")
 	assertIndexExists(t, database.DB, "idx_conversations_cwd_updated_at")
 	assertIndexExists(t, database.DB, "idx_steering_messages_conversation_id")
+	assertIndexExists(t, database.DB, "idx_runner_registrations_status")
+	assertIndexExists(t, database.DB, "idx_runner_runs_conversation_created")
+	assertIndexExists(t, database.DB, "idx_conversation_runner_affinity_runner")
 
 	versions, err := runner.GetAppliedVersions(ctx)
 	require.NoError(t, err)
@@ -71,6 +79,7 @@ func TestMigrationsCreateExpectedSchema(t *testing.T) {
 		20260226120000,
 		20260331120000,
 		20260719170000,
+		20260806120000,
 	}, versions)
 }
 
@@ -202,6 +211,8 @@ func TestMigrationFunctionsReturnTransactionErrors(t *testing.T) {
 		{"cwd down", Migration20260331120000AddCWDToConversations().Down},
 		{"steering messages up", Migration20260719170000CreateSteeringMessages().Up},
 		{"steering messages down", Migration20260719170000CreateSteeringMessages().Down},
+		{"runner state up", Migration20260806120000CreateRunnerState().Up},
+		{"runner state down", Migration20260806120000CreateRunnerState().Down},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.run(closedTx(t))
@@ -216,6 +227,12 @@ func TestMigrationsDownFunctions(t *testing.T) {
 	database := openMigrationsTestDB(t)
 	runner := db.NewMigrationRunner(database)
 	require.NoError(t, runner.Run(ctx, All()))
+
+	// Runner-state rollback drops durable runner tables.
+	require.NoError(t, runner.Rollback(ctx, All()))
+	assertTableMissing(t, database.DB, "runner_registrations")
+	assertTableMissing(t, database.DB, "runner_runs")
+	assertTableMissing(t, database.DB, "conversation_runner_affinity")
 
 	// Steering rollback drops its queue table.
 	require.NoError(t, runner.Rollback(ctx, All()))

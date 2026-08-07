@@ -112,12 +112,15 @@ func newModel(ctx context.Context, config Config) model {
 			cwd = wd
 		}
 	}
+	if config.Remote {
+		requestedCWD = ""
+	}
 	messageHistoryStore, _ := messagehistory.NewStore()
 	conversationID := strings.TrimSpace(config.ConversationID)
 	conversationWasResumed := conversationID != ""
 	initialHistoryPending := conversationID != ""
 	var messageHistoryScopeCWD string
-	if !initialHistoryPending {
+	if !initialHistoryPending && !config.Remote {
 		messageHistoryScopeCWD, _ = messagehistory.ResolveScopeCWD(cwd)
 	}
 	profile := displayProfile(config.Profile)
@@ -152,12 +155,14 @@ func newModel(ctx context.Context, config Config) model {
 	conversation := newConversationState(conversationKey, conversationID, conversationWasResumed, defaults)
 	conversation.initialHistoryPending = initialHistoryPending
 	conversation.messageHistoryScopeCWD = messageHistoryScopeCWD
+	conversation.extensionDiscoveryBlocked = config.Remote
 
 	return model{
 		conversationState:     conversation,
 		ctx:                   mctx,
 		cancel:                cancel,
 		runner:                runner,
+		remote:                config.Remote,
 		extensionRuntimes:     extensionRuntimes,
 		extensionUI:           extensionUI,
 		extensionWidgets:      map[extensionUIKey]tuiExtensionWidget{},
@@ -188,9 +193,11 @@ func (m model) Init() tea.Cmd {
 		m.spinner.Tick,
 		waitForMsg(m.runCh),
 		loadConversationHistory(m.ctx, m.activeConversationKey, m.conversationID, m.requestedCWD),
-		loadMessageHistoryForConversation(m.ctx, m.activeConversationKey, m.messageHistoryStore, m.messageHistoryScopeCWD),
 	}
-	if !m.initialHistoryPending {
+	if !m.remote {
+		cmds = append(cmds, loadMessageHistoryForConversation(m.ctx, m.activeConversationKey, m.messageHistoryStore, m.messageHistoryScopeCWD))
+	}
+	if !m.initialHistoryPending && !m.remote {
 		cmds = append(cmds, loadSlashCommandsForConversation(m.ctx, m.activeConversationKey, m.slashCommandCWD()))
 	}
 	return tea.Batch(cmds...)

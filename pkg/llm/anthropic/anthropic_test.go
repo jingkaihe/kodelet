@@ -737,6 +737,17 @@ func TestAddUserMessage(t *testing.T) {
 	}
 }
 
+func TestAddAssistantMessage(t *testing.T) {
+	thread := &Thread{}
+	thread.AddAssistantMessage(t.Context(), "Direct response")
+
+	require.Len(t, thread.messages, 1)
+	assert.Equal(t, anthropic.MessageParamRoleAssistant, thread.messages[0].Role)
+	require.Len(t, thread.messages[0].Content, 1)
+	require.NotNil(t, thread.messages[0].Content[0].OfText)
+	assert.Equal(t, "Direct response", thread.messages[0].Content[0].OfText.Text)
+}
+
 func TestAddUserMessageGoalContextWithImagesSeparatesAttachments(t *testing.T) {
 	thread := &Thread{}
 	goalContext := "<goal_context>\nContinue working.\n</goal_context>"

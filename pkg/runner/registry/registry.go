@@ -1,0 +1,1120 @@
+// Package registry owns live runner registrations and run-capacity coordination
+// in the control plane.
+package registry
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	"github.com/pkg/errors"
+)
+
+const (
+	defaultHeartbeatInterval = 15 * time.Second
+	defaultHeartbeatTimeout  = 45 * time.Second
+)
+
+// Link is the live symmetric RPC connection retained for one runner generation.
+type Link interface {
+	Call(ctx context.Context, method string, params any, result any) error
+	Notify(ctx context.Context, method string, params any) error
+	Close() error
+	Done() <-chan struct{}
+	Err() error
+}
+
+// RunnerStatus is the scheduler-facing state of a runner registration.
+type RunnerStatus string
+
+const (
+	RunnerStatusOffline      RunnerStatus = "offline"
+	RunnerStatusConnecting   RunnerStatus = "connecting"
+	RunnerStatusIdle         RunnerStatus = "idle"
+	RunnerStatusBusy         RunnerStatus = "busy"
+	RunnerStatusError        RunnerStatus = "error"
+	RunnerStatusIncompatible RunnerStatus = "incompatible"
+)
+
+// RunStatus is the durable-shape state machine used by active runner operations.
+type RunStatus string
+
+const (
+	RunStatusOpening   RunStatus = "opening"
+	RunStatusRunning   RunStatus = "running"
+	RunStatusSucceeded RunStatus = "succeeded"
+	RunStatusFailed    RunStatus = "failed"
+	RunStatusCanceled  RunStatus = "canceled"
+	RunStatusLost      RunStatus = "lost"
+)
+
+// Runner is a safe snapshot of one stable runner registration.
+type Runner struct {
+	ID                 string             `json:"id"`
+	DisplayName        string             `json:"displayName,omitempty"`
+	Host               protocol.Host      `json:"host"`
+	Workspace          protocol.Workspace `json:"workspace"`
+	KodeletVersion     string             `json:"kodeletVersion"`
+	ManifestDigest     string             `json:"manifestDigest,omitempty"`
+	ManifestChanged    bool               `json:"manifestChanged"`
+	CompatibilityError string             `json:"compatibilityError,omitempty"`
+	Status             RunnerStatus       `json:"status"`
+	Connected          bool               `json:"connected"`
+	ActiveRunID        string             `json:"activeRunId,omitempty"`
+	ConnectionID       string             `json:"connectionId,omitempty"`
+	Generation         int64              `json:"generation"`
+	ConnectedAt        time.Time          `json:"connectedAt,omitempty"`
+	LastHeartbeatAt    time.Time          `json:"lastHeartbeatAt,omitempty"`
+	CreatedAt          time.Time          `json:"createdAt"`
+	UpdatedAt          time.Time          `json:"updatedAt"`
+}
+
+// Run is a snapshot of one top-level runner environment lease.
+type Run struct {
+	ID             string    `db:"id" json:"id"`
+	ConversationID string    `db:"conversation_id" json:"conversationId"`
+	RunnerID       string    `db:"runner_id" json:"runnerId"`
+	Status         RunStatus `db:"status" json:"status"`
+	ManifestDigest string    `db:"manifest_digest" json:"manifestDigest,omitempty"`
+	ManifestJSON   string    `db:"manifest_json" json:"-"`
+	Error          string    `db:"error" json:"error,omitempty"`
+	CreatedAt      time.Time `db:"created_at" json:"createdAt"`
+	UpdatedAt      time.Time `db:"updated_at" json:"updatedAt"`
+}
+
+type runnerEntry struct {
+	Runner
+	identity string
+	link     Link
+	ready    bool
+}
+
+type runEntry struct {
+	Run
+	connectionID string
+	generation   int64
+}
+
+type updateSink func(protocol.ToolUpdateParams)
+
+// Options configures registry liveness and test seams.
+type Options struct {
+	HeartbeatInterval time.Duration
+	HeartbeatTimeout  time.Duration
+	Now               func() time.Time
+	NewID             func(prefix string) (string, error)
+	Persistence       Persistence
+}
+
+// Registry coordinates stable runner identity, live connection generations, and capacity-one runs.
+type Registry struct {
+	mu                   sync.RWMutex
+	runners              map[string]*runnerEntry
+	byIdentity           map[string]string
+	runs                 map[string]*runEntry
+	activeConversation   map[string]string
+	conversationAffinity map[string]string
+	toolUpdates          map[string]updateSink
+	toolSequences        map[string]uint64
+	heartbeatInterval    time.Duration
+	heartbeatTimeout     time.Duration
+	now                  func() time.Time
+	newID                func(string) (string, error)
+	persistence          Persistence
+	ctx                  context.Context
+	cancel               context.CancelFunc
+	closed               bool
+}
+
+// New creates a live registry and restores any configured durable state.
+func New(parent context.Context, options Options) (*Registry, error) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithCancel(parent)
+	if options.HeartbeatInterval <= 0 {
+		options.HeartbeatInterval = defaultHeartbeatInterval
+	}
+	if options.HeartbeatTimeout <= 0 {
+		options.HeartbeatTimeout = defaultHeartbeatTimeout
+	}
+	if options.Now == nil {
+		options.Now = time.Now
+	}
+	if options.NewID == nil {
+		options.NewID = randomID
+	}
+	r := &Registry{
+		runners:              make(map[string]*runnerEntry),
+		byIdentity:           make(map[string]string),
+		runs:                 make(map[string]*runEntry),
+		activeConversation:   make(map[string]string),
+		conversationAffinity: make(map[string]string),
+		toolUpdates:          make(map[string]updateSink),
+		toolSequences:        make(map[string]uint64),
+		heartbeatInterval:    options.HeartbeatInterval,
+		heartbeatTimeout:     options.HeartbeatTimeout,
+		now:                  options.Now,
+		newID:                options.NewID,
+		persistence:          options.Persistence,
+		ctx:                  ctx,
+		cancel:               cancel,
+	}
+	if r.persistence != nil {
+		state, err := r.persistence.Load(ctx)
+		if err != nil {
+			cancel()
+			_ = r.persistence.Close()
+			return nil, errors.Wrap(err, "failed to restore runner registry")
+		}
+		if err := r.restore(state); err != nil {
+			cancel()
+			_ = r.persistence.Close()
+			return nil, err
+		}
+	}
+	go r.monitorLiveness()
+	return r, nil
+}
+
+func (r *Registry) restore(state PersistedState) error {
+	now := r.now().UTC()
+	for _, runner := range state.Runners {
+		if strings.TrimSpace(runner.ID) == "" || strings.TrimSpace(runner.Host.InstanceID) == "" || strings.TrimSpace(runner.Workspace.Path) == "" {
+			return errors.New("persisted runner registration has incomplete identity")
+		}
+		identity := runnerIdentity(runner.Host.InstanceID, runner.Workspace.Path)
+		if _, exists := r.runners[runner.ID]; exists {
+			return errors.Errorf("duplicate persisted runner id %s", runner.ID)
+		}
+		if _, exists := r.byIdentity[identity]; exists {
+			return errors.New("duplicate persisted runner workspace identity")
+		}
+		runner.Connected = false
+		runner.ConnectionID = ""
+		runner.ActiveRunID = ""
+		if runner.Status != RunnerStatusIncompatible {
+			runner.Status = RunnerStatusOffline
+		}
+		if runner.CreatedAt.IsZero() {
+			runner.CreatedAt = now
+		}
+		runner.UpdatedAt = now
+		entry := &runnerEntry{Runner: runner, identity: identity}
+		r.runners[runner.ID] = entry
+		r.byIdentity[identity] = runner.ID
+	}
+
+	for _, run := range state.Runs {
+		if strings.TrimSpace(run.ID) == "" || r.runners[run.RunnerID] == nil {
+			return errors.New("persisted runner run has incomplete identity")
+		}
+		if run.Status == RunStatusOpening || run.Status == RunStatusRunning {
+			run.Status = RunStatusLost
+			run.Error = "control plane restarted while run was active"
+			run.UpdatedAt = now
+			if err := r.persistence.SaveRun(r.ctx, run); err != nil {
+				return errors.Wrap(err, "failed to mark restored runner run lost")
+			}
+		}
+		r.runs[run.ID] = &runEntry{Run: run}
+	}
+
+	for conversationID, runnerID := range state.Affinities {
+		if strings.TrimSpace(conversationID) == "" || r.runners[runnerID] == nil {
+			return errors.New("persisted conversation runner affinity is invalid")
+		}
+		r.conversationAffinity[conversationID] = runnerID
+	}
+	for _, entry := range r.runners {
+		if err := r.persistence.SaveRunner(r.ctx, entry.Runner); err != nil {
+			return errors.Wrap(err, "failed to mark restored runner offline")
+		}
+	}
+	return nil
+}
+
+// Register upserts one stable workspace identity and atomically replaces its live generation.
+func (r *Registry) Register(params protocol.RegisterParams, link Link) (protocol.RegisterResult, error) {
+	if r == nil {
+		return protocol.RegisterResult{}, errors.New("runner registry is required")
+	}
+	if link == nil {
+		return protocol.RegisterResult{}, errors.New("runner link is required")
+	}
+	if strings.TrimSpace(params.Host.InstanceID) == "" || strings.TrimSpace(params.Workspace.Path) == "" || strings.TrimSpace(params.Workspace.Name) == "" {
+		return protocol.RegisterResult{}, params.Validate()
+	}
+	if !protocol.SupportsVersion(params.ProtocolVersions, protocol.Version) {
+		return protocol.RegisterResult{}, r.recordIncompatible(params)
+	}
+
+	identity := runnerIdentity(params.Host.InstanceID, params.Workspace.Path)
+	connectionID, err := r.newID("conn")
+	if err != nil {
+		return protocol.RegisterResult{}, errors.Wrap(err, "failed to generate runner connection id")
+	}
+	now := r.now().UTC()
+
+	var oldLink Link
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return protocol.RegisterResult{}, errors.New("runner registry is closed")
+	}
+	entry, err := r.registrationEntryLocked(params, identity, now)
+	if err != nil {
+		r.mu.Unlock()
+		return protocol.RegisterResult{}, err
+	}
+	oldLink = entry.link
+	var lostRun *runEntry
+	if entry.ActiveRunID != "" {
+		lostRun = r.runs[entry.ActiveRunID]
+		r.finishRunLocked(entry.ActiveRunID, RunStatusLost, "runner connection was replaced", now)
+	}
+	entry.Generation++
+	entry.ConnectionID = connectionID
+	entry.link = link
+	entry.Host = params.Host
+	entry.Workspace = params.Workspace
+	entry.DisplayName = strings.TrimSpace(params.DisplayName)
+	entry.KodeletVersion = strings.TrimSpace(params.KodeletVersion)
+	entry.ManifestDigest = strings.TrimSpace(params.ManifestDigest)
+	entry.ManifestChanged = false
+	entry.CompatibilityError = ""
+	entry.Connected = true
+	entry.Status = RunnerStatusConnecting
+	entry.ready = false
+	entry.ActiveRunID = ""
+	entry.ConnectedAt = now
+	entry.LastHeartbeatAt = now
+	entry.UpdatedAt = now
+	if err := r.persistRunnerLocked(entry); err != nil {
+		r.mu.Unlock()
+		return protocol.RegisterResult{}, err
+	}
+	if lostRun != nil {
+		if err := r.persistRunLocked(lostRun); err != nil {
+			r.mu.Unlock()
+			return protocol.RegisterResult{}, err
+		}
+	}
+	result := protocol.RegisterResult{
+		RunnerID:            entry.ID,
+		ProtocolVersion:     protocol.Version,
+		ConnectionID:        entry.ConnectionID,
+		Generation:          entry.Generation,
+		HeartbeatIntervalMS: r.heartbeatInterval.Milliseconds(),
+	}
+	r.mu.Unlock()
+
+	if oldLink != nil && oldLink != link {
+		_ = oldLink.Close()
+	}
+	return result, nil
+}
+
+func (r *Registry) registrationEntryLocked(params protocol.RegisterParams, identity string, now time.Time) (*runnerEntry, error) {
+	existingID := r.byIdentity[identity]
+	if requestedID := strings.TrimSpace(params.RunnerID); requestedID != "" {
+		if entry := r.runners[requestedID]; entry != nil && entry.identity != identity {
+			return nil, errors.New("runner id belongs to another host workspace")
+		}
+		if existingID != "" && existingID != requestedID {
+			return nil, errors.New("host workspace is registered under another runner id")
+		}
+		if existingID == "" && r.runners[requestedID] == nil {
+			return nil, errors.New("runner id is not known to this control plane")
+		}
+	}
+
+	entry := r.runners[existingID]
+	if entry != nil {
+		return entry, nil
+	}
+	runnerID, err := r.newID("runner")
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to generate runner id")
+	}
+	entry = &runnerEntry{
+		Runner: Runner{
+			ID:        runnerID,
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+		identity: identity,
+	}
+	r.runners[runnerID] = entry
+	r.byIdentity[identity] = runnerID
+	return entry, nil
+}
+
+func (r *Registry) recordIncompatible(params protocol.RegisterParams) error {
+	message := errors.Errorf("runner does not support protocol version %d", protocol.Version)
+	identity := runnerIdentity(params.Host.InstanceID, params.Workspace.Path)
+	now := r.now().UTC()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return errors.New("runner registry is closed")
+	}
+	entry, err := r.registrationEntryLocked(params, identity, now)
+	if err != nil {
+		return err
+	}
+	entry.Host = params.Host
+	entry.Workspace = params.Workspace
+	entry.DisplayName = strings.TrimSpace(params.DisplayName)
+	entry.KodeletVersion = strings.TrimSpace(params.KodeletVersion)
+	entry.ManifestDigest = strings.TrimSpace(params.ManifestDigest)
+	entry.CompatibilityError = message.Error()
+	entry.UpdatedAt = now
+	if !entry.Connected {
+		entry.Status = RunnerStatusIncompatible
+	}
+	if err := r.persistRunnerLocked(entry); err != nil {
+		return err
+	}
+	return message
+}
+
+// Detach marks a connection offline only when it is still the current fenced generation.
+func (r *Registry) Detach(runnerID, connectionID string, generation int64, cause error) {
+	if r == nil {
+		return
+	}
+	now := r.now().UTC()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry := r.runners[strings.TrimSpace(runnerID)]
+	if entry == nil || entry.ConnectionID != connectionID || entry.Generation != generation {
+		return
+	}
+	entry.link = nil
+	entry.Connected = false
+	entry.Status = RunnerStatusOffline
+	entry.ConnectionID = ""
+	entry.UpdatedAt = now
+	var lostRun *runEntry
+	if entry.ActiveRunID != "" {
+		lostRun = r.runs[entry.ActiveRunID]
+		r.finishRunLocked(entry.ActiveRunID, RunStatusLost, errorString(cause), now)
+	}
+	r.logPersistenceError("failed to persist detached runner", r.persistRunnerLocked(entry))
+	if lostRun != nil {
+		r.logPersistenceError("failed to persist lost runner run", r.persistRunLocked(lostRun))
+	}
+}
+
+// Heartbeat applies application health from the current connection generation.
+func (r *Registry) Heartbeat(runnerID, connectionID string, generation int64, params protocol.HeartbeatParams) error {
+	if strings.TrimSpace(params.RunnerID) != strings.TrimSpace(runnerID) || params.Generation != generation {
+		return errors.New("heartbeat identity does not match registered connection")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry, err := r.currentRunnerLocked(runnerID, connectionID, generation)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(params.ActiveRunID) != entry.ActiveRunID {
+		return errors.New("heartbeat active run does not match control-plane lease")
+	}
+	now := r.now().UTC()
+	entry.LastHeartbeatAt = now
+	entry.ManifestDigest = strings.TrimSpace(params.ManifestDigest)
+	entry.ready = true
+	if entry.ActiveRunID != "" {
+		entry.Status = RunnerStatusBusy
+	} else if params.State == protocol.RunnerStateError {
+		entry.Status = RunnerStatusError
+	} else {
+		entry.Status = RunnerStatusIdle
+	}
+	entry.UpdatedAt = now
+	return r.persistRunnerLocked(entry)
+}
+
+// ManifestChanged updates the idle manifest digest for the current generation.
+func (r *Registry) ManifestChanged(runnerID, connectionID string, generation int64, params protocol.ManifestChangedParams) error {
+	if params.RunnerID != runnerID || params.Generation != generation {
+		return errors.New("manifest notification identity does not match registered connection")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry, err := r.currentRunnerLocked(runnerID, connectionID, generation)
+	if err != nil {
+		return err
+	}
+	digest := strings.TrimSpace(params.ManifestDigest)
+	if digest != entry.ManifestDigest {
+		entry.ManifestChanged = true
+	}
+	entry.ManifestDigest = digest
+	entry.UpdatedAt = r.now().UTC()
+	return r.persistRunnerLocked(entry)
+}
+
+// OpenRun reserves capacity, opens the remote environment, validates its manifest, and marks the run active.
+func (r *Registry) OpenRun(ctx context.Context, runnerID string, params protocol.RunOpenParams) (protocol.Manifest, error) {
+	if err := params.Validate(); err != nil {
+		return protocol.Manifest{}, err
+	}
+	runnerID = strings.TrimSpace(runnerID)
+	now := r.now().UTC()
+
+	r.mu.Lock()
+	entry := r.runners[runnerID]
+	if entry == nil {
+		r.mu.Unlock()
+		return protocol.Manifest{}, errors.New("runner not found")
+	}
+	if !entry.Connected || entry.link == nil {
+		r.mu.Unlock()
+		return protocol.Manifest{}, errors.New("runner is offline")
+	}
+	if !entry.ready {
+		r.mu.Unlock()
+		return protocol.Manifest{}, errors.New("runner has not completed its initial heartbeat")
+	}
+	if entry.ActiveRunID != "" {
+		r.mu.Unlock()
+		return protocol.Manifest{}, errors.Errorf("runner is busy with run %s", entry.ActiveRunID)
+	}
+	if activeRunID := r.activeConversation[params.ConversationID]; activeRunID != "" {
+		r.mu.Unlock()
+		return protocol.Manifest{}, errors.Errorf("conversation already has active run %s", activeRunID)
+	}
+	if affinity := r.conversationAffinity[params.ConversationID]; affinity != "" && affinity != runnerID {
+		r.mu.Unlock()
+		return protocol.Manifest{}, errors.Errorf("conversation is bound to runner %s", affinity)
+	}
+	if _, exists := r.runs[params.RunID]; exists {
+		r.mu.Unlock()
+		return protocol.Manifest{}, errors.New("run id already exists")
+	}
+
+	link := entry.link
+	connectionID := entry.ConnectionID
+	generation := entry.Generation
+	if r.conversationAffinity[params.ConversationID] == "" {
+		if err := r.bindConversationLocked(params.ConversationID, runnerID, now); err != nil {
+			r.mu.Unlock()
+			return protocol.Manifest{}, err
+		}
+	}
+	entry.ActiveRunID = params.RunID
+	entry.Status = RunnerStatusBusy
+	entry.UpdatedAt = now
+	r.activeConversation[params.ConversationID] = params.RunID
+	run := &runEntry{
+		Run: Run{
+			ID:             params.RunID,
+			ConversationID: params.ConversationID,
+			RunnerID:       runnerID,
+			Status:         RunStatusOpening,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+		connectionID: connectionID,
+		generation:   generation,
+	}
+	r.runs[params.RunID] = run
+	if err := r.persistRunLocked(run); err != nil {
+		delete(r.runs, params.RunID)
+		delete(r.activeConversation, params.ConversationID)
+		entry.ActiveRunID = ""
+		entry.Status = RunnerStatusIdle
+		entry.UpdatedAt = now
+		r.mu.Unlock()
+		return protocol.Manifest{}, err
+	}
+	if err := r.persistRunnerLocked(entry); err != nil {
+		r.finishRunLocked(params.RunID, RunStatusFailed, err.Error(), now)
+		r.logPersistenceError("failed to persist runner run after reservation failure", r.persistRunLocked(run))
+		r.mu.Unlock()
+		return protocol.Manifest{}, err
+	}
+	r.mu.Unlock()
+
+	var manifest protocol.Manifest
+	if err := link.Call(ctx, protocol.MethodRunOpen, params, &manifest); err != nil {
+		r.failOpeningRun(params.RunID, errorString(err))
+		return protocol.Manifest{}, err
+	}
+	if err := validateManifest(manifest, runnerID, params, generation); err != nil {
+		closeCtx, cancel := context.WithTimeout(context.Background(), r.heartbeatInterval)
+		_ = link.Call(closeCtx, protocol.MethodRunClose, protocol.RunCloseParams{RunID: params.RunID}, nil)
+		cancel()
+		r.failOpeningRun(params.RunID, errorString(err))
+		return protocol.Manifest{}, err
+	}
+	manifestPayload, err := json.Marshal(manifest)
+	if err != nil {
+		closeCtx, cancel := context.WithTimeout(context.Background(), r.heartbeatInterval)
+		_ = link.Call(closeCtx, protocol.MethodRunClose, protocol.RunCloseParams{RunID: params.RunID}, nil)
+		cancel()
+		r.failOpeningRun(params.RunID, errorString(err))
+		return protocol.Manifest{}, errors.Wrap(err, "failed to encode runner manifest snapshot")
+	}
+
+	r.mu.Lock()
+	current, err := r.currentRunnerLocked(runnerID, connectionID, generation)
+	if err != nil || current.link != link {
+		now = r.now().UTC()
+		r.finishRunLocked(params.RunID, RunStatusLost, "runner connection changed while opening run", now)
+		r.logPersistenceError("failed to persist lost opening run", r.persistRunLocked(r.runs[params.RunID]))
+		r.mu.Unlock()
+		return protocol.Manifest{}, errors.New("runner connection changed while opening run")
+	}
+	run = r.runs[params.RunID]
+	if run == nil || run.Status != RunStatusOpening {
+		r.mu.Unlock()
+		return protocol.Manifest{}, errors.New("run is no longer opening")
+	}
+	run.Status = RunStatusRunning
+	run.ManifestDigest = manifest.Digest
+	run.ManifestJSON = string(manifestPayload)
+	now = r.now().UTC()
+	run.UpdatedAt = now
+	current.ManifestDigest = manifest.Digest
+	current.ManifestChanged = false
+	current.UpdatedAt = now
+	if err := r.persistRunLocked(run); err != nil {
+		r.finishRunLocked(params.RunID, RunStatusFailed, err.Error(), now)
+		r.logPersistenceError("failed to persist runner after run-open persistence failure", r.persistRunnerLocked(current))
+		r.logPersistenceError("failed to persist failed runner run", r.persistRunLocked(run))
+		r.mu.Unlock()
+		closeCtx, cancel := context.WithTimeout(context.Background(), r.heartbeatInterval)
+		_ = link.Call(closeCtx, protocol.MethodRunClose, protocol.RunCloseParams{RunID: params.RunID}, nil)
+		cancel()
+		return protocol.Manifest{}, err
+	}
+	if err := r.persistRunnerLocked(current); err != nil {
+		r.finishRunLocked(params.RunID, RunStatusFailed, err.Error(), now)
+		r.logPersistenceError("failed to persist failed runner run", r.persistRunLocked(run))
+		r.mu.Unlock()
+		closeCtx, cancel := context.WithTimeout(context.Background(), r.heartbeatInterval)
+		_ = link.Call(closeCtx, protocol.MethodRunClose, protocol.RunCloseParams{RunID: params.RunID}, nil)
+		cancel()
+		return protocol.Manifest{}, err
+	}
+	r.mu.Unlock()
+	return manifest, nil
+}
+
+// CallRun invokes a run-scoped runner method after generation and active-run validation.
+func (r *Registry) CallRun(ctx context.Context, runID, method string, params any, result any) error {
+	link, err := r.activeRunLink(runID)
+	if err != nil {
+		return err
+	}
+	return link.Call(ctx, method, params, result)
+}
+
+// ExecuteTool invokes tool.execute and routes replaceable transient updates to the supplied sink.
+func (r *Registry) ExecuteTool(ctx context.Context, params protocol.ToolExecuteParams, updates func(protocol.ToolUpdateParams)) (protocol.ToolExecuteResult, error) {
+	key := toolUpdateKey(params.RunID, params.ToolCallID)
+	params.WantUpdates = updates != nil
+	if updates != nil {
+		r.mu.Lock()
+		if _, exists := r.toolUpdates[key]; exists {
+			r.mu.Unlock()
+			return protocol.ToolExecuteResult{}, errors.New("tool call id is already active for this run")
+		}
+		r.toolUpdates[key] = updates
+		r.toolSequences[key] = 0
+		r.mu.Unlock()
+		defer func() {
+			r.mu.Lock()
+			delete(r.toolUpdates, key)
+			delete(r.toolSequences, key)
+			r.mu.Unlock()
+		}()
+	}
+
+	link, err := r.activeRunLink(params.RunID)
+	if err != nil {
+		return protocol.ToolExecuteResult{}, err
+	}
+	var result protocol.ToolExecuteResult
+	if err := link.Call(ctx, protocol.MethodToolExecute, params, &result); err != nil {
+		var rpcErr *protocol.RPCError
+		if errors.As(err, &rpcErr) {
+			return protocol.ToolExecuteResult{}, err
+		}
+		return protocol.ToolExecuteResult{}, errors.Wrap(err, "runner tool response was not received; execution may have started and side effects are uncertain")
+	}
+	return result, nil
+}
+
+// DeliverToolUpdate forwards a generation-fenced transient tool update.
+func (r *Registry) DeliverToolUpdate(runnerID, connectionID string, generation int64, params protocol.ToolUpdateParams) error {
+	r.mu.Lock()
+	entry := r.runners[runnerID]
+	run := r.runs[params.RunID]
+	key := toolUpdateKey(params.RunID, params.ToolCallID)
+	sink := r.toolUpdates[key]
+	lastSequence := r.toolSequences[key]
+	valid := entry != nil && entry.ConnectionID == connectionID && entry.Generation == generation && entry.ActiveRunID == params.RunID && run != nil && run.Status == RunStatusRunning
+	if !valid {
+		r.mu.Unlock()
+		return errors.New("tool update belongs to a stale or inactive run")
+	}
+	if sink == nil {
+		r.mu.Unlock()
+		return errors.New("tool update has no active subscriber")
+	}
+	if params.Sequence == 0 || params.Sequence <= lastSequence {
+		r.mu.Unlock()
+		return errors.New("tool update sequence is stale")
+	}
+	r.toolSequences[key] = params.Sequence
+	r.mu.Unlock()
+	sink(params)
+	return nil
+}
+
+// CancelRun cancels active runner operations but leaves run.close responsible for releasing the lease.
+func (r *Registry) CancelRun(ctx context.Context, runID, reason string) error {
+	link, err := r.activeRunLink(runID)
+	if err != nil {
+		return err
+	}
+	if err := link.Call(ctx, protocol.MethodRunCancel, protocol.RunCancelParams{RunID: runID, Reason: reason}, nil); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	if run := r.runs[runID]; run != nil && (run.Status == RunStatusOpening || run.Status == RunStatusRunning) {
+		run.Status = RunStatusCanceled
+		run.UpdatedAt = r.now().UTC()
+		if err := r.persistRunLocked(run); err != nil {
+			r.mu.Unlock()
+			return err
+		}
+	}
+	r.mu.Unlock()
+	return nil
+}
+
+// CloseRun releases one runner lease and records its terminal status.
+func (r *Registry) CloseRun(ctx context.Context, runID string, status RunStatus, runErr error) error {
+	if status != RunStatusSucceeded && status != RunStatusFailed && status != RunStatusCanceled {
+		return errors.Errorf("invalid terminal run status %q", status)
+	}
+	link, err := r.activeRunLinkAllowCanceled(runID)
+	if err != nil {
+		return err
+	}
+	callErr := link.Call(ctx, protocol.MethodRunClose, protocol.RunCloseParams{RunID: runID}, nil)
+	r.mu.Lock()
+	message := errorString(runErr)
+	if message == "" {
+		if run := r.runs[runID]; run != nil {
+			message = run.Error
+		}
+	}
+	if callErr != nil {
+		status = RunStatusLost
+		if message == "" {
+			message = callErr.Error()
+		}
+	}
+	r.finishRunLocked(runID, status, message, r.now().UTC())
+	run := r.runs[runID]
+	var persistenceErr error
+	if run != nil {
+		persistenceErr = r.persistRunLocked(run)
+		if runner := r.runners[run.RunnerID]; persistenceErr == nil && runner != nil {
+			persistenceErr = r.persistRunnerLocked(runner)
+		}
+	}
+	r.mu.Unlock()
+	if persistenceErr != nil {
+		return persistenceErr
+	}
+	return callErr
+}
+
+// EnvironmentError marks an active run failed after an asynchronous runner notification.
+func (r *Registry) EnvironmentError(runnerID, connectionID string, generation int64, params protocol.EnvironmentErrorParams) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry, err := r.currentRunnerLocked(runnerID, connectionID, generation)
+	if err != nil {
+		return err
+	}
+	if entry.ActiveRunID != params.RunID {
+		return errors.New("environment error belongs to another run")
+	}
+	run := r.runs[params.RunID]
+	if run == nil {
+		return errors.New("run not found")
+	}
+	run.Status = RunStatusFailed
+	run.Error = params.Message
+	now := r.now().UTC()
+	run.UpdatedAt = now
+	entry.Status = RunnerStatusBusy
+	entry.UpdatedAt = now
+	if err := r.persistRunLocked(run); err != nil {
+		return err
+	}
+	return r.persistRunnerLocked(entry)
+}
+
+// Runner returns one stable runner snapshot.
+func (r *Registry) Runner(id string) (Runner, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	entry := r.runners[strings.TrimSpace(id)]
+	if entry == nil {
+		return Runner{}, false
+	}
+	return entry.Runner, true
+}
+
+// Runners returns deterministic runner snapshots ordered by stable ID.
+func (r *Registry) Runners() []Runner {
+	r.mu.RLock()
+	result := make([]Runner, 0, len(r.runners))
+	for _, entry := range r.runners {
+		result = append(result, entry.Runner)
+	}
+	r.mu.RUnlock()
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	return result
+}
+
+// Run returns one run snapshot.
+func (r *Registry) Run(id string) (Run, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	entry := r.runs[strings.TrimSpace(id)]
+	if entry == nil {
+		return Run{}, false
+	}
+	return entry.Run, true
+}
+
+// BindConversation establishes authoritative affinity between a conversation and runner.
+func (r *Registry) BindConversation(ctx context.Context, conversationID, runnerID string) error {
+	conversationID = strings.TrimSpace(conversationID)
+	runnerID = strings.TrimSpace(runnerID)
+	if conversationID == "" {
+		return errors.New("conversation id is required")
+	}
+	if runnerID == "" {
+		return errors.New("runner id is required")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.runners[runnerID] == nil {
+		return errors.New("runner not found")
+	}
+	return r.bindConversationLockedContext(ctx, conversationID, runnerID, r.now().UTC())
+}
+
+// RunnerForConversation returns the durable runner affinity for a conversation.
+func (r *Registry) RunnerForConversation(conversationID string) (string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	runnerID := r.conversationAffinity[strings.TrimSpace(conversationID)]
+	return runnerID, runnerID != ""
+}
+
+// Close disconnects all live runner generations and stops liveness monitoring.
+func (r *Registry) Close() error {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return nil
+	}
+	r.closed = true
+	now := r.now().UTC()
+	links := make([]Link, 0, len(r.runners))
+	for _, entry := range r.runners {
+		if entry.link != nil {
+			links = append(links, entry.link)
+			entry.link = nil
+		}
+		if entry.ActiveRunID != "" {
+			r.finishRunLocked(entry.ActiveRunID, RunStatusLost, "control plane stopped while run was active", now)
+		}
+		entry.Connected = false
+		if entry.Status != RunnerStatusIncompatible {
+			entry.Status = RunnerStatusOffline
+		}
+		entry.ConnectionID = ""
+		entry.UpdatedAt = now
+		r.logPersistenceError("failed to persist runner shutdown", r.persistRunnerLocked(entry))
+	}
+	for _, run := range r.runs {
+		if run.UpdatedAt.Equal(now) && run.Status == RunStatusLost {
+			r.logPersistenceError("failed to persist lost shutdown run", r.persistRunLocked(run))
+		}
+	}
+	r.mu.Unlock()
+	r.cancel()
+
+	var firstErr error
+	for _, link := range links {
+		if err := link.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	if r.persistence != nil {
+		if err := r.persistence.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+func (r *Registry) failOpeningRun(runID, message string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.finishRunLocked(runID, RunStatusFailed, message, r.now().UTC())
+	if run := r.runs[runID]; run != nil {
+		r.logPersistenceError("failed to persist failed opening run", r.persistRunLocked(run))
+		if runner := r.runners[run.RunnerID]; runner != nil {
+			r.logPersistenceError("failed to persist runner after opening failure", r.persistRunnerLocked(runner))
+		}
+	}
+}
+
+func (r *Registry) finishRunLocked(runID string, status RunStatus, message string, now time.Time) {
+	run := r.runs[runID]
+	if run == nil {
+		return
+	}
+	run.Status = status
+	run.Error = message
+	run.UpdatedAt = now
+	delete(r.activeConversation, run.ConversationID)
+	toolPrefix := strings.TrimSpace(run.ID) + "\x00"
+	for key := range r.toolUpdates {
+		if strings.HasPrefix(key, toolPrefix) {
+			delete(r.toolUpdates, key)
+			delete(r.toolSequences, key)
+		}
+	}
+	if runner := r.runners[run.RunnerID]; runner != nil && runner.ActiveRunID == runID {
+		runner.ActiveRunID = ""
+		if runner.Connected {
+			runner.Status = RunnerStatusIdle
+		} else {
+			runner.Status = RunnerStatusOffline
+		}
+		runner.UpdatedAt = now
+	}
+}
+
+func (r *Registry) bindConversationLocked(conversationID, runnerID string, now time.Time) error {
+	return r.bindConversationLockedContext(r.ctx, conversationID, runnerID, now)
+}
+
+func (r *Registry) bindConversationLockedContext(ctx context.Context, conversationID, runnerID string, now time.Time) error {
+	if current := r.conversationAffinity[conversationID]; current != "" {
+		if current != runnerID {
+			return errors.Errorf("conversation is bound to runner %s", current)
+		}
+		return nil
+	}
+	if r.persistence != nil {
+		if err := r.persistence.BindConversation(ctx, conversationID, runnerID, now); err != nil {
+			return err
+		}
+	}
+	r.conversationAffinity[conversationID] = runnerID
+	return nil
+}
+
+func (r *Registry) persistRunnerLocked(entry *runnerEntry) error {
+	if r.persistence == nil || entry == nil {
+		return nil
+	}
+	return r.persistence.SaveRunner(r.ctx, entry.Runner)
+}
+
+func (r *Registry) persistRunLocked(entry *runEntry) error {
+	if r.persistence == nil || entry == nil {
+		return nil
+	}
+	return r.persistence.SaveRun(r.ctx, entry.Run)
+}
+
+func (r *Registry) logPersistenceError(message string, err error) {
+	if err != nil {
+		logger.G(r.ctx).WithError(err).Error(message)
+	}
+}
+
+func (r *Registry) activeRunLink(runID string) (Link, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.activeRunLinkLocked(runID, false)
+}
+
+func (r *Registry) activeRunLinkAllowCanceled(runID string) (Link, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.activeRunLinkLocked(runID, true)
+}
+
+func (r *Registry) activeRunLinkLocked(runID string, allowCanceled bool) (Link, error) {
+	run := r.runs[strings.TrimSpace(runID)]
+	if run == nil {
+		return nil, errors.New("run not found")
+	}
+	if run.Status != RunStatusRunning && run.Status != RunStatusOpening && (!allowCanceled || (run.Status != RunStatusCanceled && run.Status != RunStatusFailed)) {
+		return nil, errors.Errorf("run is not active: %s", run.Status)
+	}
+	runner := r.runners[run.RunnerID]
+	if runner == nil || !runner.Connected || runner.link == nil || runner.ActiveRunID != run.ID {
+		return nil, errors.New("runner connection for run is unavailable")
+	}
+	if runner.ConnectionID != run.connectionID || runner.Generation != run.generation {
+		return nil, errors.New("runner connection generation for run is stale")
+	}
+	return runner.link, nil
+}
+
+func (r *Registry) currentRunnerLocked(runnerID, connectionID string, generation int64) (*runnerEntry, error) {
+	entry := r.runners[strings.TrimSpace(runnerID)]
+	if entry == nil {
+		return nil, errors.New("runner not found")
+	}
+	if !entry.Connected || entry.link == nil || entry.ConnectionID != connectionID || entry.Generation != generation {
+		return nil, errors.New("runner connection generation is stale")
+	}
+	return entry, nil
+}
+
+func (r *Registry) monitorLiveness() {
+	interval := r.heartbeatInterval
+	if interval > r.heartbeatTimeout/2 {
+		interval = r.heartbeatTimeout / 2
+	}
+	if interval <= 0 {
+		interval = time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			r.expireStaleConnections()
+		case <-r.ctx.Done():
+			return
+		}
+	}
+}
+
+func (r *Registry) expireStaleConnections() {
+	now := r.now().UTC()
+	type staleConnection struct {
+		runnerID     string
+		connectionID string
+		generation   int64
+		link         Link
+	}
+	var stale []staleConnection
+	r.mu.RLock()
+	for _, entry := range r.runners {
+		if entry.Connected && entry.link != nil && now.Sub(entry.LastHeartbeatAt) > r.heartbeatTimeout {
+			stale = append(stale, staleConnection{entry.ID, entry.ConnectionID, entry.Generation, entry.link})
+		}
+	}
+	r.mu.RUnlock()
+	for _, connection := range stale {
+		r.Detach(connection.runnerID, connection.connectionID, connection.generation, errors.New("runner heartbeat timed out"))
+		_ = connection.link.Close()
+	}
+}
+
+func validateManifest(manifest protocol.Manifest, runnerID string, params protocol.RunOpenParams, generation int64) error {
+	if manifest.ProtocolVersion != protocol.Version {
+		return errors.Errorf("runner manifest uses protocol version %d", manifest.ProtocolVersion)
+	}
+	if manifest.RunnerID != runnerID || manifest.RunID != params.RunID || manifest.Generation != generation {
+		return errors.New("runner manifest identity does not match opened run")
+	}
+	reserved := make(map[string]struct{}, len(params.ReservedToolNames))
+	for _, name := range params.ReservedToolNames {
+		reserved[strings.TrimSpace(name)] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(manifest.Tools))
+	for _, definition := range manifest.Tools {
+		name := strings.TrimSpace(definition.Name)
+		if name == "" {
+			return errors.New("runner manifest contains a tool without a name")
+		}
+		if _, exists := reserved[name]; exists {
+			return errors.Errorf("runner tool %s collides with a reserved control-plane tool", name)
+		}
+		if definition.Placement != "environment" {
+			return errors.Errorf("runner tool %s has invalid placement %q", name, definition.Placement)
+		}
+		if _, exists := seen[name]; exists {
+			return errors.Errorf("runner manifest contains duplicate tool %s", name)
+		}
+		seen[name] = struct{}{}
+	}
+	digest, err := protocol.ComputeManifestDigest(manifest)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(manifest.Digest) == "" {
+		return errors.New("runner manifest digest is required")
+	}
+	if manifest.Digest != digest {
+		return errors.New("runner manifest digest does not match its contents")
+	}
+	return nil
+}
+
+func runnerIdentity(hostInstanceID, workspacePath string) string {
+	return strings.TrimSpace(hostInstanceID) + "\x00" + strings.TrimSpace(workspacePath)
+}
+
+func toolUpdateKey(runID, toolCallID string) string {
+	return strings.TrimSpace(runID) + "\x00" + strings.TrimSpace(toolCallID)
+}
+
+func randomID(prefix string) (string, error) {
+	data := make([]byte, 12)
+	if _, err := rand.Read(data); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(prefix) + "_" + base64.RawURLEncoding.EncodeToString(data), nil
+}
+
+func errorString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+func decodeParams[T any](params json.RawMessage) (T, error) {
+	var value T
+	if len(params) == 0 {
+		return value, errors.New("rpc params are required")
+	}
+	if err := json.Unmarshal(params, &value); err != nil {
+		return value, err
+	}
+	return value, nil
+}

@@ -133,16 +133,24 @@ func (m *model) createNewConversation() tea.Cmd {
 	m.nextConversationKey++
 	key := fmt.Sprintf("new:%d", m.nextConversationKey)
 	state := newConversationState(key, "", false, m.conversationDefaults)
-	state.messageHistoryScopeCWD, _ = messagehistory.ResolveScopeCWD(state.cwd)
+	if !m.remote {
+		state.messageHistoryScopeCWD, _ = messagehistory.ResolveScopeCWD(state.cwd)
+	}
+	state.extensionDiscoveryBlocked = m.remote
 	m.conversations[key] = state
 	_, activateCmd := m.activateConversation(key)
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		activateCmd,
 		m.closeConversationPicker(),
-		loadSlashCommandsForConversation(m.ctx, key, m.slashCommandCWD()),
-		loadMessageHistoryForConversation(m.ctx, key, m.messageHistoryStore, state.messageHistoryScopeCWD),
 		textarea.Blink,
-	)
+	}
+	if !m.remote {
+		cmds = append(cmds,
+			loadSlashCommandsForConversation(m.ctx, key, m.slashCommandCWD()),
+			loadMessageHistoryForConversation(m.ctx, key, m.messageHistoryStore, state.messageHistoryScopeCWD),
+		)
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m *model) ensureConversationID(state *conversationState) string {

@@ -210,6 +210,11 @@ func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths 
 	t.messages = append(t.messages, anthropic.NewUserMessage(contentBlocks...))
 }
 
+// AddAssistantMessage appends a provider-native assistant message without calling the model.
+func (t *Thread) AddAssistantMessage(_ context.Context, message string) {
+	t.messages = append(t.messages, anthropic.NewAssistantMessage(anthropic.NewTextBlock(message)))
+}
+
 func (t *Thread) userImageContentBlocks(ctx context.Context, imagePaths []string) []anthropic.ContentBlockParamUnion {
 	contentBlocks := []anthropic.ContentBlockParamUnion{}
 
@@ -309,6 +314,19 @@ func (t *Thread) SendMessage(
 	handler llmtypes.MessageHandler,
 	opt llmtypes.MessageOpt,
 ) (finalOutput string, err error) {
+	if _, err = base.OpenEnvironment(ctx, t); err != nil {
+		return "", errors.Wrap(err, "failed to open agent environment")
+	}
+	defer func() {
+		runErr := err
+		if runErr == nil {
+			runErr = ctx.Err()
+		}
+		if closeErr := base.CloseEnvironmentWithError(context.WithoutCancel(ctx), t, runErr); err == nil && closeErr != nil {
+			err = errors.Wrap(closeErr, "failed to close agent environment")
+		}
+	}()
+
 	// Check if tracing is enabled and wrap the handler
 	tracer := telemetry.Tracer("kodelet.llm")
 
@@ -345,7 +363,9 @@ func (t *Thread) SendMessage(
 
 	turnCount := 0
 	maxTurns := max(opt.MaxTurns, 0)
-	base.DispatchAgentStart(ctx, t)
+	if err := base.DispatchAgentStart(ctx, t); err != nil {
+		return "", errors.Wrap(err, "failed to dispatch agent start")
+	}
 
 OUTER:
 	for {
@@ -365,17 +385,19 @@ OUTER:
 				break OUTER
 			}
 
-			base.DispatchTurnStart(ctx, t, turnCount+1)
+			if err := base.DispatchTurnStart(ctx, t, turnCount+1); err != nil {
+				return "", errors.Wrap(err, "failed to dispatch turn start")
+			}
 
 			// Check if auto-compact should be triggered before each exchange
 			t.TryAutoCompact(ctx, t.CompactRatioOrDefault(opt.CompactRatio), t.CompactContext)
 
-			// Get relevant contexts from state and regenerate system prompt
-			var contexts map[string]string
-			if t.State != nil {
-				contexts = t.State.DiscoverContexts()
+			// Regenerate the system prompt from the context snapshot pinned when this run opened.
+			contexts := base.EnvironmentContexts(t)
+			systemPrompt, err := base.ProcessSystemPrompt(ctx, t, sysprompt.SystemPrompt(model, t.Config, contexts))
+			if err != nil {
+				return "", errors.Wrap(err, "failed to process agent initialization")
 			}
-			systemPrompt := base.ProcessSystemPrompt(ctx, t, sysprompt.SystemPrompt(model, t.Config, contexts))
 
 			exchangeOpt := opt.WithTurnInitiator(turnCount)
 
@@ -404,11 +426,17 @@ OUTER:
 			// Update finalOutput with the most recent output
 			finalOutput = exchangeOutput
 
-			base.TriggerTurnEnd(ctx, t, finalOutput, turnCount)
+			if err := base.TriggerTurnEnd(ctx, t, finalOutput, turnCount); err != nil {
+				return "", errors.Wrap(err, "failed to dispatch turn end")
+			}
 
 			// If no tools were used, check for queued continuations before stopping
 			if !toolsUsed {
-				if base.HandleAgentStopFollowUps(ctx, t, handler) {
+				continued, err := base.HandleAgentStopFollowUps(ctx, t, handler)
+				if err != nil {
+					return "", errors.Wrap(err, "failed to dispatch agent end")
+				}
+				if continued {
 					continue OUTER
 				}
 				if (maxTurns == 0 || turnCount < maxTurns) && base.HandleGoalAutoContinuation(ctx, t, t.tools(opt)) {
@@ -508,16 +536,18 @@ func (t *Thread) executeToolsParallel(
 				attribute.Int("tool_index", i),
 			)
 
-			toolExecution := base.ExecuteToolWithHandler(
+			toolExecution := base.ExecuteEnvironmentToolWithHandler(
 				gctx,
 				t,
-				t.State,
 				t.RendererRegistry,
 				toolName,
 				tb.variant.JSON.Input.Raw(),
 				tb.block.ID,
 				handler,
 			)
+			if toolExecution.Err != nil {
+				return errors.Wrapf(toolExecution.Err, "failed to execute tool %s", toolName)
+			}
 			toolInput := toolExecution.Input
 			output := toolExecution.Result
 
@@ -1193,7 +1223,7 @@ func (t *Thread) getLastMessagesAttributes(messages []anthropic.MessageParam, la
 }
 
 func (t *Thread) tools(opt llmtypes.MessageOpt) []tooltypes.Tool {
-	return base.AvailableToolsForThread(t, t.State, opt.NoToolUse)
+	return base.AvailableEnvironmentToolsForThread(t, opt.NoToolUse)
 }
 
 func (t *Thread) updateUsage(response *anthropic.Message, model anthropic.Model) {

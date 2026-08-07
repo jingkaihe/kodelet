@@ -34,6 +34,7 @@ import type {
 	Conversation,
 	GitDiffResponse,
 	PendingImageAttachment,
+	Runner,
 	SlashCommandOption,
 	UIConfirmRequestEvent,
 	UIInputRequestEvent,
@@ -477,6 +478,9 @@ const ChatPage: React.FC = () => {
 	const [reasoningSettingsLoading, setReasoningSettingsLoading] =
 		useState(false);
 	const [selectedCWD, setSelectedCWD] = useState("");
+	const [runners, setRunners] = useState<Runner[]>([]);
+	const [selectedRunnerID, setSelectedRunnerID] = useState("");
+	const [newChatRunnerDraft, setNewChatRunnerDraft] = useState("");
 	const [cwdQuery, setCwdQuery] = useState("");
 	const [cwdSuggestions, setCwdSuggestions] = useState<CWDHint[]>([]);
 	const [cwdSuggestionsOpen, setCwdSuggestionsOpen] = useState(false);
@@ -653,8 +657,18 @@ const ChatPage: React.FC = () => {
 		}
 	}, []);
 
+	const refreshRunners = useCallback(async () => {
+		try {
+			const response = await apiService.getRunners();
+			setRunners(response.runners || []);
+		} catch (error) {
+			console.error("Failed to load runners", error);
+		}
+	}, []);
+
 	useEffect(() => {
 		void refreshConversations();
+		void refreshRunners();
 
 		void apiService
 			.getChatSettings()
@@ -680,7 +694,12 @@ const ChatPage: React.FC = () => {
 				setChatSettingsLoaded(false);
 			});
 
-	}, [refreshConversations]);
+		const runnerRefresh = window.setInterval(() => {
+			void refreshRunners();
+		}, 5000);
+
+		return () => window.clearInterval(runnerRefresh);
+	}, [refreshConversations, refreshRunners]);
 
 	useEffect(() => {
 		return () => {
@@ -1438,6 +1457,8 @@ const ChatPage: React.FC = () => {
 		setNewChatReasoningEffortDraft(reasoningSettings.effort);
 		setNewChatReasoningEffortOptions(reasoningSettings.options);
 		setNewChatReasoningEffortExplicit(false);
+		setSelectedRunnerID("");
+		setNewChatRunnerDraft("");
 		reasoningSettingsRequestRef.current += 1;
 		setReasoningSettingsLoading(false);
 		setSelectedCWD(chatSettings.defaultCWD || "");
@@ -1841,6 +1862,8 @@ const ChatPage: React.FC = () => {
 				summary: userPreview,
 				preview: userPreview,
 				cwd: currentCWDLabel,
+				runnerId: selectedRunnerID || undefined,
+				runner: selectedRunnerID ? currentRunner : undefined,
 				profile: selectedProfile,
 				reasoningEffort: chatSettingsLoaded
 					? selectedReasoningEffort
@@ -1865,11 +1888,19 @@ const ChatPage: React.FC = () => {
 					message: prompt,
 					content: initialUserContent,
 					conversationId: targetConversationId,
+					runnerId: conversationId ? undefined : selectedRunnerID || undefined,
 					profile: conversationId ? undefined : selectedProfile,
 					reasoningEffort: conversationId || !chatSettingsLoaded
 						? undefined
 						: selectedReasoningEffort,
-					cwd: conversationId ? undefined : currentCWDLabel || undefined,
+					clientCapabilities: {
+						interactiveUI: true,
+						persistentSurfaces: false,
+					},
+					cwd:
+						conversationId || selectedRunnerID
+							? undefined
+							: currentCWDLabel || undefined,
 				},
 				{
 					signal: controller.signal,
@@ -1922,6 +1953,8 @@ const ChatPage: React.FC = () => {
 											summary: userPreview,
 											preview: userPreview,
 											cwd: currentCWDLabel,
+											runnerId: selectedRunnerID || undefined,
+											runner: selectedRunnerID ? currentRunner : undefined,
 											profile: selectedProfile,
 											isRunning: true,
 										},
@@ -2252,7 +2285,21 @@ const ChatPage: React.FC = () => {
 		return selectedReasoningEffort;
 	}, [conversation?.reasoningEffort, conversationId, selectedReasoningEffort]);
 
+	const currentRunnerID = conversationId
+		? conversation?.runnerId || ""
+		: selectedRunnerID;
+	const currentRunner = useMemo(
+		() =>
+			conversation?.runner ||
+			runners.find((runner) => runner.id === currentRunnerID),
+		[conversation?.runner, currentRunnerID, runners],
+	);
+	const isRemoteConversation = Boolean(currentRunnerID);
+
 	const currentCWDLabel = useMemo(() => {
+		if (currentRunnerID) {
+			return currentRunner?.workspace.path || conversation?.cwd || "Remote runner";
+		}
 		const isStartedConversationAwaitingLoad =
 			Boolean(conversationId) &&
 			loadedConversationId !== conversationId &&
@@ -2270,11 +2317,17 @@ const ChatPage: React.FC = () => {
 		chatSettings.defaultCWD,
 		conversation?.cwd,
 		conversationId,
+		currentRunner?.workspace.path,
+		currentRunnerID,
 		loadedConversationId,
 		selectedCWD,
 	]);
 
 	useEffect(() => {
+		if (isRemoteConversation) {
+			setSlashCommands([]);
+			return undefined;
+		}
 		let cancelled = false;
 
 		void apiService
@@ -2293,7 +2346,13 @@ const ChatPage: React.FC = () => {
 		return () => {
 			cancelled = true;
 		};
-	}, [currentCWDLabel]);
+	}, [currentCWDLabel, isRemoteConversation]);
+
+	useEffect(() => {
+		if (isRemoteConversation) {
+			setWorkspacePanelView(null);
+		}
+	}, [isRemoteConversation]);
 
 	const applyCwdSuggestion = (path: string) => {
 		cwdSuggestionSkipQueryRef.current = path;
@@ -2464,10 +2523,25 @@ const ChatPage: React.FC = () => {
 		if (currentReasoningEffortLabel) {
 			contextParts.push(`effort:${currentReasoningEffortLabel}`);
 		}
+		if (currentRunnerID) {
+			const runnerName =
+				currentRunner?.displayName ||
+				currentRunner?.workspace.name ||
+				currentRunnerID;
+			contextParts.push(
+				`runner:${runnerName} (${currentRunner?.status || "offline"})`,
+			);
+		}
 		contextParts.push(directoryLabel);
 
 		return contextParts.join(" · ");
-	}, [currentCWDLabel, currentProfileLabel, currentReasoningEffortLabel]);
+	}, [
+		currentCWDLabel,
+		currentProfileLabel,
+		currentReasoningEffortLabel,
+		currentRunner,
+		currentRunnerID,
+	]);
 
 	const recentWorkspaces = useMemo(
 		() => getRecentWorkspaces(conversations),
@@ -2580,6 +2654,7 @@ const ChatPage: React.FC = () => {
 		setNewChatReasoningEffortDraft(selectedReasoningEffort);
 		setNewChatReasoningEffortOptions(selectedReasoningEffortOptions);
 		setNewChatReasoningEffortExplicit(selectedReasoningEffortExplicit);
+		setNewChatRunnerDraft(selectedRunnerID);
 		cwdSuggestionSkipQueryRef.current = null;
 		requestCwdSuggestions.cancel();
 		cwdSuggestionRequestRef.current += 1;
@@ -2643,7 +2718,8 @@ const ChatPage: React.FC = () => {
 		setSelectedReasoningEffort(newChatReasoningEffortDraft);
 		setSelectedReasoningEffortOptions(newChatReasoningEffortOptions);
 		setSelectedReasoningEffortExplicit(newChatReasoningEffortExplicit);
-		setSelectedCWD(cwdQuery.trim());
+		setSelectedRunnerID(newChatRunnerDraft);
+		setSelectedCWD(newChatRunnerDraft ? "" : cwdQuery.trim());
 		cwdSuggestionSkipQueryRef.current = null;
 		requestCwdSuggestions.cancel();
 		cwdSuggestionRequestRef.current += 1;
@@ -2690,6 +2766,8 @@ const ChatPage: React.FC = () => {
 					}
 					reasoningEffortOptions={newChatReasoningEffortOptions}
 					recentWorkspaces={recentWorkspaces}
+					runners={runners}
+					runnerIdDraft={newChatRunnerDraft}
 					ref={newChatDialogRef}
 					onCancel={handleCloseNewChatDialog}
 					onCommit={handleCommitNewChatContext}
@@ -2714,6 +2792,15 @@ const ChatPage: React.FC = () => {
 						setNewChatReasoningEffortExplicit(true);
 					}}
 					onRecentWorkspaceSelect={handleRecentWorkspaceSelect}
+					onRunnerDraftChange={(runnerId) => {
+						setNewChatRunnerDraft(runnerId);
+						if (runnerId) {
+							requestCwdSuggestions.cancel();
+							setCwdSuggestions([]);
+							setCwdSuggestionsOpen(false);
+							setCwdSuggestionIndex(-1);
+						}
+					}}
 					onSelectCwdSuggestion={applyCwdSuggestion}
 				/>
 			) : null}
@@ -2906,6 +2993,7 @@ const ChatPage: React.FC = () => {
 							);
 							reasoningSettingsRequestRef.current += 1;
 							setReasoningSettingsLoading(false);
+							setNewChatRunnerDraft(selectedRunnerID);
 							setCwdQuery(selectedCWD || chatSettings.defaultCWD || "");
 							setNewChatDialogOpen(true);
 						}}
@@ -2922,6 +3010,7 @@ const ChatPage: React.FC = () => {
 					/>
 				</main>
 
+				{!isRemoteConversation ? (
 				<aside
 					aria-label="Workspace tools"
 					aria-modal={workspaceOverlayOpen || undefined}
@@ -3015,6 +3104,7 @@ const ChatPage: React.FC = () => {
 						</button>
 					</div>
 				</aside>
+				) : null}
 			</div>
 		</div>
 	);

@@ -1,0 +1,726 @@
+package registry
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/migrations"
+	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+type fakeLink struct {
+	mu       sync.Mutex
+	call     func(context.Context, string, any, any) error
+	closed   bool
+	done     chan struct{}
+	doneOnce sync.Once
+	err      error
+}
+
+type fakeUIRequestRouter struct {
+	runnerID string
+	method   string
+	params   json.RawMessage
+}
+
+func (r *fakeUIRequestRouter) HandleRunnerUIRequest(_ context.Context, runnerID string, method string, params json.RawMessage) (any, *protocol.RPCError) {
+	r.runnerID = runnerID
+	r.method = method
+	r.params = append(json.RawMessage(nil), params...)
+	return map[string]bool{"ok": true}, nil
+}
+
+func newFakeLink() *fakeLink {
+	return &fakeLink{done: make(chan struct{})}
+}
+
+func (l *fakeLink) Call(ctx context.Context, method string, params any, result any) error {
+	l.mu.Lock()
+	call := l.call
+	closed := l.closed
+	l.mu.Unlock()
+	if closed {
+		return protocol.ErrPeerClosed
+	}
+	if call != nil {
+		return call(ctx, method, params, result)
+	}
+	return nil
+}
+
+func (l *fakeLink) Notify(context.Context, string, any) error { return nil }
+
+func (l *fakeLink) Close() error {
+	l.mu.Lock()
+	l.closed = true
+	l.mu.Unlock()
+	l.doneOnce.Do(func() { close(l.done) })
+	return nil
+}
+
+func (l *fakeLink) Done() <-chan struct{} { return l.done }
+func (l *fakeLink) Err() error            { return l.err }
+
+func (l *fakeLink) isClosed() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.closed
+}
+
+func TestRegisterUpsertsWorkspaceIdentityAndFencesStaleConnections(t *testing.T) {
+	registry := newTestRegistry(t)
+	firstLink := newFakeLink()
+	params := testRegisterParams("host-one", "/work/project")
+
+	first, err := registry.Register(params, firstLink)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), first.Generation)
+
+	secondLink := newFakeLink()
+	params.RunnerID = first.RunnerID
+	params.DisplayName = "renamed"
+	second, err := registry.Register(params, secondLink)
+	require.NoError(t, err)
+	assert.Equal(t, first.RunnerID, second.RunnerID)
+	assert.Equal(t, int64(2), second.Generation)
+	assert.True(t, firstLink.isClosed())
+
+	registry.Detach(first.RunnerID, first.ConnectionID, first.Generation, context.Canceled)
+	runner, ok := registry.Runner(first.RunnerID)
+	require.True(t, ok)
+	assert.True(t, runner.Connected)
+	assert.Equal(t, second.ConnectionID, runner.ConnectionID)
+	assert.Equal(t, "renamed", runner.DisplayName)
+
+	params.Workspace.Path = "/work/other"
+	_, err = registry.Register(params, newFakeLink())
+	assert.ErrorContains(t, err, "another host workspace")
+}
+
+func TestOpenRunEnforcesRunnerAndConversationCapacity(t *testing.T) {
+	registry := newTestRegistry(t)
+	firstLink := newFakeLink()
+	firstRegistration, err := registry.Register(testRegisterParams("host-one", "/work/one"), firstLink)
+	require.NoError(t, err)
+	configureManifestLink(t, firstLink, firstRegistration)
+	markRunnerReady(t, registry, firstRegistration)
+
+	params := testRunOpenParams("run-one", "conversation-one")
+	manifest, err := registry.OpenRun(t.Context(), firstRegistration.RunnerID, params)
+	require.NoError(t, err)
+	assert.Equal(t, "run-one", manifest.RunID)
+
+	_, err = registry.OpenRun(t.Context(), firstRegistration.RunnerID, testRunOpenParams("run-two", "conversation-two"))
+	assert.ErrorContains(t, err, "runner is busy")
+
+	secondLink := newFakeLink()
+	secondRegistration, err := registry.Register(testRegisterParams("host-two", "/work/two"), secondLink)
+	require.NoError(t, err)
+	configureManifestLink(t, secondLink, secondRegistration)
+	markRunnerReady(t, registry, secondRegistration)
+	_, err = registry.OpenRun(t.Context(), secondRegistration.RunnerID, testRunOpenParams("run-three", "conversation-one"))
+	assert.ErrorContains(t, err, "conversation already has active run")
+
+	require.NoError(t, registry.CloseRun(t.Context(), "run-one", RunStatusSucceeded, nil))
+	run, ok := registry.Run("run-one")
+	require.True(t, ok)
+	assert.Equal(t, RunStatusSucceeded, run.Status)
+	var persistedManifest protocol.Manifest
+	require.NoError(t, json.Unmarshal([]byte(run.ManifestJSON), &persistedManifest))
+	assert.Equal(t, manifest, persistedManifest)
+	runner, ok := registry.Runner(firstRegistration.RunnerID)
+	require.True(t, ok)
+	assert.Equal(t, RunnerStatusIdle, runner.Status)
+	assert.Empty(t, runner.ActiveRunID)
+}
+
+func TestReconnectMarksActiveRunLost(t *testing.T) {
+	registry := newTestRegistry(t)
+	firstLink := newFakeLink()
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), firstLink)
+	require.NoError(t, err)
+	configureManifestLink(t, firstLink, registration)
+	markRunnerReady(t, registry, registration)
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-one", "conversation-one"))
+	require.NoError(t, err)
+
+	params := testRegisterParams("host-one", "/work/project")
+	params.RunnerID = registration.RunnerID
+	second, err := registry.Register(params, newFakeLink())
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), second.Generation)
+
+	run, ok := registry.Run("run-one")
+	require.True(t, ok)
+	assert.Equal(t, RunStatusLost, run.Status)
+	assert.Contains(t, run.Error, "replaced")
+}
+
+func TestExecuteToolRoutesMonotonicUpdates(t *testing.T) {
+	registry := newTestRegistry(t)
+	link := newFakeLink()
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), link)
+	require.NoError(t, err)
+	configureManifestLink(t, link, registration)
+	markRunnerReady(t, registry, registration)
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-one", "conversation-one"))
+	require.NoError(t, err)
+
+	link.mu.Lock()
+	link.call = func(_ context.Context, method string, params any, result any) error {
+		require.Equal(t, protocol.MethodToolExecute, method)
+		request := params.(protocol.ToolExecuteParams)
+		assert.True(t, request.WantUpdates)
+		update := protocol.ToolUpdateParams{RunID: request.RunID, ToolCallID: request.ToolCallID, Sequence: 1}
+		require.NoError(t, registry.DeliverToolUpdate(registration.RunnerID, registration.ConnectionID, registration.Generation, update))
+		assert.ErrorContains(t, registry.DeliverToolUpdate(registration.RunnerID, registration.ConnectionID, registration.Generation, update), "sequence is stale")
+		*result.(*protocol.ToolExecuteResult) = protocol.ToolExecuteResult{Input: request.Input}
+		return nil
+	}
+	link.mu.Unlock()
+
+	var updates []uint64
+	_, err = registry.ExecuteTool(t.Context(), protocol.ToolExecuteParams{
+		RunID:      "run-one",
+		ToolCallID: "call-one",
+		Name:       "bash",
+		Input:      json.RawMessage(`{"command":"true"}`),
+	}, func(update protocol.ToolUpdateParams) {
+		updates = append(updates, update.Sequence)
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []uint64{1}, updates)
+
+	link.mu.Lock()
+	link.call = func(context.Context, string, any, any) error {
+		return protocol.ErrPeerClosed
+	}
+	link.mu.Unlock()
+	_, err = registry.ExecuteTool(t.Context(), protocol.ToolExecuteParams{
+		RunID:      "run-one",
+		ToolCallID: "call-two",
+		Name:       "bash",
+		Input:      json.RawMessage(`{"command":"touch result"}`),
+	}, nil)
+	require.ErrorContains(t, err, "side effects are uncertain")
+
+	link.mu.Lock()
+	link.call = func(context.Context, string, any, any) error {
+		return &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: "tool rejected"}
+	}
+	link.mu.Unlock()
+	_, err = registry.ExecuteTool(t.Context(), protocol.ToolExecuteParams{
+		RunID:      "run-one",
+		ToolCallID: "call-three",
+		Name:       "bash",
+		Input:      json.RawMessage(`{"command":"false"}`),
+	}, nil)
+	require.ErrorContains(t, err, "tool rejected")
+	assert.NotContains(t, err.Error(), "side effects are uncertain")
+}
+
+func TestHeartbeatTimeoutMarksRunnerOffline(t *testing.T) {
+	registry, err := New(t.Context(), Options{
+		HeartbeatInterval: 5 * time.Millisecond,
+		HeartbeatTimeout:  15 * time.Millisecond,
+		NewID:             sequentialIDs(),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = registry.Close() })
+	link := newFakeLink()
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), link)
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		runner, ok := registry.Runner(registration.RunnerID)
+		return ok && !runner.Connected && runner.Status == RunnerStatusOffline
+	}, time.Second, 5*time.Millisecond)
+	assert.True(t, link.isClosed())
+}
+
+func TestManifestChangedIsExposedUntilTheNextRunPinsIt(t *testing.T) {
+	registry := newTestRegistry(t)
+	link := newFakeLink()
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), link)
+	require.NoError(t, err)
+	configureManifestLink(t, link, registration)
+	markRunnerReady(t, registry, registration)
+
+	require.NoError(t, registry.ManifestChanged(registration.RunnerID, registration.ConnectionID, registration.Generation, protocol.ManifestChangedParams{
+		RunnerID:       registration.RunnerID,
+		Generation:     registration.Generation,
+		ManifestDigest: "sha256:changed",
+	}))
+	runner, ok := registry.Runner(registration.RunnerID)
+	require.True(t, ok)
+	assert.True(t, runner.ManifestChanged)
+	assert.Equal(t, "sha256:changed", runner.ManifestDigest)
+
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-one", "conversation-one"))
+	require.NoError(t, err)
+	runner, ok = registry.Runner(registration.RunnerID)
+	require.True(t, ok)
+	assert.False(t, runner.ManifestChanged)
+}
+
+func TestSessionRequiresRegistrationBeforeOtherRequests(t *testing.T) {
+	registry := newTestRegistry(t)
+	session := NewSession(registry, nil)
+	link := newFakeLink()
+	session.Attach(link)
+
+	_, rpcErr := session.HandleRequest(t.Context(), protocol.MethodUIInput, json.RawMessage(`{}`))
+	require.NotNil(t, rpcErr)
+	assert.Equal(t, protocol.ErrorCodeInvalidRequest, rpcErr.Code)
+
+	params := testRegisterParams("host-one", "/work/project")
+	payload, err := json.Marshal(params)
+	require.NoError(t, err)
+	result, rpcErr := session.HandleRequest(t.Context(), protocol.MethodRunnerRegister, payload)
+	require.Nil(t, rpcErr)
+	registration := result.(protocol.RegisterResult)
+	assert.NotEmpty(t, registration.RunnerID)
+
+	heartbeatPayload, err := json.Marshal(protocol.HeartbeatParams{
+		RunnerID:   registration.RunnerID,
+		Generation: registration.Generation,
+		State:      protocol.RunnerStateIdle,
+	})
+	require.NoError(t, err)
+	session.HandleNotification(t.Context(), protocol.MethodRunnerHeartbeat, heartbeatPayload)
+	runner, ok := registry.Runner(registration.RunnerID)
+	require.True(t, ok)
+	assert.Equal(t, RunnerStatusIdle, runner.Status)
+}
+
+func TestRegistryRestoresStableIdentityAffinityAndLostRuns(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "storage.db")
+	database, err := db.Open(t.Context(), dbPath)
+	require.NoError(t, err)
+	require.NoError(t, db.NewMigrationRunner(database).Run(t.Context(), migrations.All()))
+	require.NoError(t, database.Close())
+
+	firstPersistence, err := NewSQLitePersistence(t.Context(), dbPath, "owner-one")
+	require.NoError(t, err)
+	firstRegistry, err := New(t.Context(), Options{
+		HeartbeatInterval: time.Hour,
+		HeartbeatTimeout:  2 * time.Hour,
+		NewID:             sequentialIDs(),
+		Persistence:       firstPersistence,
+	})
+	require.NoError(t, err)
+
+	firstLink := newFakeLink()
+	registration, err := firstRegistry.Register(testRegisterParams("host-one", "/work/project"), firstLink)
+	require.NoError(t, err)
+	configureManifestLink(t, firstLink, registration)
+	markRunnerReady(t, firstRegistry, registration)
+	_, err = firstRegistry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-one", "conversation-one"))
+	require.NoError(t, err)
+
+	secondPersistence, err := NewSQLitePersistence(t.Context(), dbPath, "owner-one")
+	require.NoError(t, err)
+	secondRegistry, err := New(t.Context(), Options{
+		HeartbeatInterval: time.Hour,
+		HeartbeatTimeout:  2 * time.Hour,
+		NewID:             sequentialIDs(),
+		Persistence:       secondPersistence,
+	})
+	require.NoError(t, err)
+
+	restoredRunner, ok := secondRegistry.Runner(registration.RunnerID)
+	require.True(t, ok)
+	assert.False(t, restoredRunner.Connected)
+	assert.Equal(t, RunnerStatusOffline, restoredRunner.Status)
+	assert.Equal(t, int64(1), restoredRunner.Generation)
+
+	restoredRun, ok := secondRegistry.Run("run-one")
+	require.True(t, ok)
+	assert.Equal(t, RunStatusLost, restoredRun.Status)
+	assert.Contains(t, restoredRun.Error, "control plane restarted")
+	var restoredManifest protocol.Manifest
+	require.NoError(t, json.Unmarshal([]byte(restoredRun.ManifestJSON), &restoredManifest))
+	assert.Equal(t, "run-one", restoredManifest.RunID)
+	assert.Equal(t, restoredRun.ManifestDigest, restoredManifest.Digest)
+
+	affinity, ok := secondRegistry.RunnerForConversation("conversation-one")
+	require.True(t, ok)
+	assert.Equal(t, registration.RunnerID, affinity)
+
+	reconnectedLink := newFakeLink()
+	reconnected, err := secondRegistry.Register(testRegisterParams("host-one", "/work/project"), reconnectedLink)
+	require.NoError(t, err)
+	assert.Equal(t, registration.RunnerID, reconnected.RunnerID)
+	assert.Equal(t, int64(2), reconnected.Generation)
+
+	require.NoError(t, secondRegistry.Close())
+	require.NoError(t, firstRegistry.Close())
+}
+
+func TestRegisterExposesIncompatibleRunner(t *testing.T) {
+	registry := newTestRegistry(t)
+	params := testRegisterParams("host-one", "/work/project")
+	params.ProtocolVersions = []int{protocol.Version + 1}
+
+	_, err := registry.Register(params, newFakeLink())
+	require.ErrorContains(t, err, "does not support protocol version")
+
+	runners := registry.Runners()
+	require.Len(t, runners, 1)
+	assert.Equal(t, RunnerStatusIncompatible, runners[0].Status)
+	assert.False(t, runners[0].Connected)
+	assert.Contains(t, runners[0].CompatibilityError, "does not support protocol version")
+}
+
+func TestCancelEnvironmentErrorAndConversationAffinity(t *testing.T) {
+	registry := newTestRegistry(t)
+	firstLink := newFakeLink()
+	first, err := registry.Register(testRegisterParams("host-one", "/work/one"), firstLink)
+	require.NoError(t, err)
+	configureManifestLink(t, firstLink, first)
+	markRunnerReady(t, registry, first)
+	second, err := registry.Register(testRegisterParams("host-two", "/work/two"), newFakeLink())
+	require.NoError(t, err)
+
+	require.ErrorContains(t, registry.BindConversation(t.Context(), "", first.RunnerID), "conversation id")
+	require.ErrorContains(t, registry.BindConversation(t.Context(), "conversation-one", ""), "runner id")
+	require.ErrorContains(t, registry.BindConversation(t.Context(), "conversation-one", "missing"), "runner not found")
+	require.NoError(t, registry.BindConversation(t.Context(), "conversation-one", first.RunnerID))
+	require.NoError(t, registry.BindConversation(t.Context(), "conversation-one", first.RunnerID))
+	require.ErrorContains(t, registry.BindConversation(t.Context(), "conversation-one", second.RunnerID), "bound to runner")
+	affinity, ok := registry.RunnerForConversation(" conversation-one ")
+	require.True(t, ok)
+	assert.Equal(t, first.RunnerID, affinity)
+
+	_, err = registry.OpenRun(t.Context(), first.RunnerID, testRunOpenParams("run-one", "conversation-one"))
+	require.NoError(t, err)
+	require.NoError(t, registry.EnvironmentError(first.RunnerID, first.ConnectionID, first.Generation, protocol.EnvironmentErrorParams{
+		RunID: "run-one", Message: "extension failed",
+	}))
+	run, ok := registry.Run("run-one")
+	require.True(t, ok)
+	assert.Equal(t, RunStatusFailed, run.Status)
+	assert.Equal(t, "extension failed", run.Error)
+	require.ErrorContains(t, registry.EnvironmentError(first.RunnerID, first.ConnectionID, first.Generation, protocol.EnvironmentErrorParams{
+		RunID: "another-run", Message: "stale",
+	}), "another run")
+	require.NoError(t, registry.CloseRun(t.Context(), "run-one", RunStatusFailed, errors.New("extension failed")))
+
+	_, err = registry.OpenRun(t.Context(), first.RunnerID, testRunOpenParams("run-two", "conversation-one"))
+	require.NoError(t, err)
+	require.NoError(t, registry.CancelRun(t.Context(), "run-two", "user stopped"))
+	run, ok = registry.Run("run-two")
+	require.True(t, ok)
+	assert.Equal(t, RunStatusCanceled, run.Status)
+	require.NoError(t, registry.CloseRun(t.Context(), "run-two", RunStatusCanceled, context.Canceled))
+	require.ErrorContains(t, registry.CancelRun(t.Context(), "missing", "no run"), "not found")
+	require.ErrorContains(t, registry.CloseRun(t.Context(), "missing", RunStatus("invalid"), nil), "invalid terminal")
+}
+
+func TestOpenRunFailureReleasesRunnerCapacity(t *testing.T) {
+	registry := newTestRegistry(t)
+	link := newFakeLink()
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), link)
+	require.NoError(t, err)
+	markRunnerReady(t, registry, registration)
+	link.mu.Lock()
+	link.call = func(_ context.Context, method string, _ any, _ any) error {
+		if method == protocol.MethodRunOpen {
+			return errors.New("runner open failed")
+		}
+		return nil
+	}
+	link.mu.Unlock()
+
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-one", "conversation-one"))
+	require.ErrorContains(t, err, "runner open failed")
+	run, ok := registry.Run("run-one")
+	require.True(t, ok)
+	assert.Equal(t, RunStatusFailed, run.Status)
+	runner, ok := registry.Runner(registration.RunnerID)
+	require.True(t, ok)
+	assert.Equal(t, RunnerStatusIdle, runner.Status)
+	assert.Empty(t, runner.ActiveRunID)
+
+	_, err = registry.OpenRun(t.Context(), "missing", testRunOpenParams("run-two", "conversation-two"))
+	require.ErrorContains(t, err, "runner not found")
+
+	offlineLink := newFakeLink()
+	offline, err := registry.Register(testRegisterParams("host-two", "/work/offline"), offlineLink)
+	require.NoError(t, err)
+	registry.Detach(offline.RunnerID, offline.ConnectionID, offline.Generation, nil)
+	_, err = registry.OpenRun(t.Context(), offline.RunnerID, testRunOpenParams("run-three", "conversation-three"))
+	require.ErrorContains(t, err, "offline")
+
+	notReady, err := registry.Register(testRegisterParams("host-three", "/work/not-ready"), newFakeLink())
+	require.NoError(t, err)
+	_, err = registry.OpenRun(t.Context(), notReady.RunnerID, testRunOpenParams("run-four", "conversation-four"))
+	require.ErrorContains(t, err, "initial heartbeat")
+}
+
+func TestValidateManifestRejectsInvalidRunnerContracts(t *testing.T) {
+	params := testRunOpenParams("run-one", "conversation-one")
+	base := protocol.Manifest{
+		ProtocolVersion:  protocol.Version,
+		RunnerID:         "runner-one",
+		RunID:            params.RunID,
+		Generation:       2,
+		WorkingDirectory: "/work/project",
+		Tools: []protocol.ToolDefinition{{
+			Name: "bash", Placement: "environment", InputSchema: map[string]any{"type": "object"},
+		}},
+	}
+	withDigest := func(manifest protocol.Manifest) protocol.Manifest {
+		digest, err := protocol.ComputeManifestDigest(manifest)
+		require.NoError(t, err)
+		manifest.Digest = digest
+		return manifest
+	}
+	require.NoError(t, validateManifest(withDigest(base), "runner-one", params, 2))
+
+	tests := []struct {
+		name      string
+		manifest  protocol.Manifest
+		wantError string
+	}{
+		{name: "protocol", manifest: func() protocol.Manifest { value := base; value.ProtocolVersion++; return withDigest(value) }(), wantError: "protocol version"},
+		{name: "identity", manifest: func() protocol.Manifest { value := base; value.RunnerID = "other"; return withDigest(value) }(), wantError: "identity"},
+		{name: "unnamed tool", manifest: func() protocol.Manifest {
+			value := base
+			value.Tools = []protocol.ToolDefinition{{Placement: "environment"}}
+			return withDigest(value)
+		}(), wantError: "without a name"},
+		{name: "reserved collision", manifest: func() protocol.Manifest {
+			value := base
+			value.Tools = []protocol.ToolDefinition{{Name: "get_goal", Placement: "environment"}}
+			return withDigest(value)
+		}(), wantError: "reserved"},
+		{name: "placement", manifest: func() protocol.Manifest {
+			value := base
+			value.Tools = []protocol.ToolDefinition{{Name: "bash", Placement: "control_plane"}}
+			return withDigest(value)
+		}(), wantError: "invalid placement"},
+		{name: "duplicate", manifest: func() protocol.Manifest {
+			value := base
+			value.Tools = append(value.Tools, value.Tools[0])
+			return withDigest(value)
+		}(), wantError: "duplicate tool"},
+		{name: "missing digest", manifest: base, wantError: "digest is required"},
+		{name: "wrong digest", manifest: func() protocol.Manifest { value := base; value.Digest = "sha256:wrong"; return value }(), wantError: "does not match"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.ErrorContains(t, validateManifest(test.manifest, "runner-one", params, 2), test.wantError)
+		})
+	}
+
+	id, err := randomID("runner")
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(id, "runner_"))
+	assert.Empty(t, errorString(nil))
+	assert.Equal(t, "failure", errorString(errors.New("failure")))
+}
+
+func TestSessionRoutesUIAndRunnerNotifications(t *testing.T) {
+	registry := newTestRegistry(t)
+	link := newFakeLink()
+	router := &fakeUIRequestRouter{}
+	session := NewSession(registry, router)
+	session.Attach(link)
+	params := testRegisterParams("host-one", "/work/project")
+	registrationValue, rpcErr := session.HandleRequest(t.Context(), protocol.MethodRunnerRegister, mustRegistryJSON(t, params))
+	require.Nil(t, rpcErr)
+	registration := registrationValue.(protocol.RegisterResult)
+
+	_, rpcErr = session.HandleRequest(t.Context(), protocol.MethodRunnerRegister, mustRegistryJSON(t, params))
+	require.NotNil(t, rpcErr)
+	assert.Equal(t, protocol.ErrorCodeInvalidRequest, rpcErr.Code)
+	for _, method := range []string{
+		protocol.MethodUIInput,
+		protocol.MethodUIConfirm,
+		protocol.MethodUISelect,
+		protocol.MethodUINotify,
+		protocol.MethodUIWidgetSet,
+		protocol.MethodUIWidgetFrame,
+		protocol.MethodUIWidgetRemove,
+		protocol.MethodUITranscriptAppend,
+		protocol.MethodUISurfaceOpen,
+		protocol.MethodUISurfaceFrame,
+		protocol.MethodUISurfaceClose,
+	} {
+		result, rpcErr := session.HandleRequest(t.Context(), method, json.RawMessage(`{"runId":"run-one"}`))
+		require.Nil(t, rpcErr)
+		assert.Equal(t, map[string]bool{"ok": true}, result)
+		assert.Equal(t, registration.RunnerID, router.runnerID)
+		assert.Equal(t, method, router.method)
+	}
+	_, rpcErr = session.HandleRequest(t.Context(), "runner.unknown", json.RawMessage(`{}`))
+	require.NotNil(t, rpcErr)
+	assert.Equal(t, protocol.ErrorCodeMethodNotFound, rpcErr.Code)
+
+	session.HandleNotification(t.Context(), protocol.MethodRunnerHeartbeat, mustRegistryJSON(t, protocol.HeartbeatParams{
+		RunnerID: registration.RunnerID, Generation: registration.Generation, State: protocol.RunnerStateIdle, ManifestDigest: "sha256:one",
+	}))
+	runner, ok := registry.Runner(registration.RunnerID)
+	require.True(t, ok)
+	assert.Equal(t, RunnerStatusIdle, runner.Status)
+	session.HandleNotification(t.Context(), protocol.MethodRunnerManifestChanged, mustRegistryJSON(t, protocol.ManifestChangedParams{
+		RunnerID: registration.RunnerID, Generation: registration.Generation, ManifestDigest: "sha256:two",
+	}))
+	runner, ok = registry.Runner(registration.RunnerID)
+	require.True(t, ok)
+	assert.True(t, runner.ManifestChanged)
+
+	configureManifestLink(t, link, registration)
+	_, err := registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-one", "conversation-one"))
+	require.NoError(t, err)
+	session.HandleNotification(t.Context(), protocol.MethodRunEnvironmentError, mustRegistryJSON(t, protocol.EnvironmentErrorParams{
+		RunID: "run-one", Message: "runner extension failed",
+	}))
+	run, ok := registry.Run("run-one")
+	require.True(t, ok)
+	assert.Equal(t, RunStatusFailed, run.Status)
+	session.HandleNotification(t.Context(), protocol.MethodToolUpdate, mustRegistryJSON(t, protocol.ToolUpdateParams{
+		RunID: "run-one", ToolCallID: "tool-one", Sequence: 1,
+	}))
+	session.HandleNotification(t.Context(), protocol.MethodToolUpdate, json.RawMessage(`not-json`))
+	session.HandleNotification(t.Context(), protocol.MethodRunnerGoodbye, json.RawMessage(`{}`))
+	runner, ok = registry.Runner(registration.RunnerID)
+	require.True(t, ok)
+	assert.False(t, runner.Connected)
+	session.Detach(errors.New("already detached"))
+}
+
+func TestSessionValidationAndRPCErrorMapping(t *testing.T) {
+	session := NewSession(nil, nil)
+	_, rpcErr := session.HandleRequest(t.Context(), protocol.MethodRunnerRegister, json.RawMessage(`{}`))
+	require.NotNil(t, rpcErr)
+	assert.Equal(t, protocol.ErrorCodeInternal, rpcErr.Code)
+
+	registry := newTestRegistry(t)
+	invalidSession := NewSession(registry, nil)
+	invalidSession.Attach(newFakeLink())
+	_, rpcErr = invalidSession.HandleRequest(t.Context(), protocol.MethodRunnerRegister, json.RawMessage(`not-json`))
+	require.NotNil(t, rpcErr)
+	assert.Equal(t, protocol.ErrorCodeInvalidParams, rpcErr.Code)
+
+	withoutUI := NewSession(registry, nil)
+	withoutUI.Attach(newFakeLink())
+	value, rpcErr := withoutUI.HandleRequest(t.Context(), protocol.MethodRunnerRegister, mustRegistryJSON(t, testRegisterParams("host-two", "/work/two")))
+	require.Nil(t, rpcErr)
+	assert.NotNil(t, value)
+	_, rpcErr = withoutUI.HandleRequest(t.Context(), protocol.MethodUIInput, json.RawMessage(`{}`))
+	require.NotNil(t, rpcErr)
+	assert.Equal(t, protocol.ErrorCodeUnavailable, rpcErr.Code)
+
+	assert.Nil(t, rpcErrorFor(nil))
+	assert.Equal(t, protocol.ErrorCodeBusy, rpcErrorFor(errors.New("runner is busy")).Code)
+	assert.Equal(t, protocol.ErrorCodeStale, rpcErrorFor(errors.New("stale generation")).Code)
+	assert.Equal(t, protocol.ErrorCodeConflict, rpcErrorFor(errors.New("already registered")).Code)
+	assert.Equal(t, protocol.ErrorCodeInvalidParams, rpcErrorFor(errors.New("invalid input")).Code)
+	assert.False(t, isUIRequest("runner.unknown"))
+}
+
+func newTestRegistry(t *testing.T) *Registry {
+	t.Helper()
+	registry, err := New(t.Context(), Options{
+		HeartbeatInterval: time.Hour,
+		HeartbeatTimeout:  2 * time.Hour,
+		NewID:             sequentialIDs(),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = registry.Close() })
+	return registry
+}
+
+func sequentialIDs() func(string) (string, error) {
+	var mu sync.Mutex
+	count := 0
+	return func(prefix string) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		count++
+		return fmt.Sprintf("%s-%d", prefix, count), nil
+	}
+}
+
+func testRegisterParams(hostInstanceID, workspace string) protocol.RegisterParams {
+	return protocol.RegisterParams{
+		ProtocolVersions: []int{protocol.Version},
+		Host: protocol.Host{
+			InstanceID: hostInstanceID,
+			Hostname:   "host",
+			OS:         "linux",
+			Arch:       "amd64",
+		},
+		Workspace: protocol.Workspace{Path: workspace, Name: "project"},
+	}
+}
+
+func testRunOpenParams(runID, conversationID string) protocol.RunOpenParams {
+	return protocol.RunOpenParams{
+		RunID:             runID,
+		ConversationID:    conversationID,
+		ReservedToolNames: []string{"get_goal", "update_goal", "read_conversation"},
+	}
+}
+
+func configureManifestLink(t *testing.T, link *fakeLink, registration protocol.RegisterResult) {
+	t.Helper()
+	link.mu.Lock()
+	defer link.mu.Unlock()
+	link.call = func(_ context.Context, method string, params any, result any) error {
+		switch method {
+		case protocol.MethodRunOpen:
+			request := params.(protocol.RunOpenParams)
+			manifest := protocol.Manifest{
+				ProtocolVersion:  protocol.Version,
+				RunnerID:         registration.RunnerID,
+				RunID:            request.RunID,
+				Generation:       registration.Generation,
+				WorkingDirectory: "/work/project",
+				Tools: []protocol.ToolDefinition{{
+					Name:        "bash",
+					Description: "execute commands",
+					InputSchema: map[string]any{"type": "object"},
+					Placement:   "environment",
+				}},
+			}
+			digest, err := protocol.ComputeManifestDigest(manifest)
+			require.NoError(t, err)
+			manifest.Digest = digest
+			*result.(*protocol.Manifest) = manifest
+		case protocol.MethodRunClose, protocol.MethodRunCancel:
+			return nil
+		default:
+			return fmt.Errorf("unexpected method %s", method)
+		}
+		return nil
+	}
+}
+
+func markRunnerReady(t *testing.T, registry *Registry, registration protocol.RegisterResult) {
+	t.Helper()
+	require.NoError(t, registry.Heartbeat(registration.RunnerID, registration.ConnectionID, registration.Generation, protocol.HeartbeatParams{
+		RunnerID:   registration.RunnerID,
+		Generation: registration.Generation,
+		State:      protocol.RunnerStateIdle,
+	}))
+}
+
+func mustRegistryJSON(t *testing.T, value any) json.RawMessage {
+	t.Helper()
+	payload, err := json.Marshal(value)
+	require.NoError(t, err)
+	return payload
+}

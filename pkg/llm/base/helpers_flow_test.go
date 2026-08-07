@@ -129,7 +129,8 @@ func TestProcessAgentInitClearsStaleAllowedToolsWhenNoPatchApplies(t *testing.T)
 	t.Run("no extension runtime", func(t *testing.T) {
 		thread := &threadStub{metadata: map[string]any{extensionAllowedToolsMetadataKey: []string{"bash"}}}
 
-		decision := ProcessAgentInit(context.Background(), thread, "base prompt")
+		decision, err := ProcessAgentInit(context.Background(), thread, "base prompt")
+		require.NoError(t, err)
 
 		assert.Equal(t, "base prompt", decision.SystemPrompt)
 		assert.False(t, decision.ToolsModified)
@@ -145,7 +146,8 @@ func TestProcessAgentInitClearsStaleAllowedToolsWhenNoPatchApplies(t *testing.T)
 			},
 		}
 
-		decision := ProcessAgentInit(context.Background(), thread, "base prompt")
+		decision, err := ProcessAgentInit(context.Background(), thread, "base prompt")
+		require.NoError(t, err)
 
 		assert.Equal(t, "base prompt", decision.SystemPrompt)
 		assert.False(t, decision.ToolsModified)
@@ -231,7 +233,7 @@ func TestHasTool(t *testing.T) {
 
 func TestTriggerTurnEnd(t *testing.T) {
 	thread := &threadStub{}
-	TriggerTurnEnd(context.Background(), thread, "final response", 7)
+	require.NoError(t, TriggerTurnEnd(context.Background(), thread, "final response", 7))
 }
 
 func TestHasPendingSteer(t *testing.T) {
@@ -261,7 +263,8 @@ func TestHandleAgentStopFollowUps(t *testing.T) {
 	}
 	handler := &recordingHandler{}
 
-	continued := HandleAgentStopFollowUps(context.Background(), thread, handler)
+	continued, err := HandleAgentStopFollowUps(context.Background(), thread, handler)
+	require.NoError(t, err)
 
 	assert.False(t, continued)
 	assert.Empty(t, thread.userMessages)
@@ -272,7 +275,8 @@ func TestHandleAgentStopFollowUpsReturnsFalse(t *testing.T) {
 	t.Run("message retrieval error", func(t *testing.T) {
 		thread := &threadStub{getMessagesErr: errors.New("boom")}
 
-		continued := HandleAgentStopFollowUps(context.Background(), thread, &recordingHandler{})
+		continued, err := HandleAgentStopFollowUps(context.Background(), thread, &recordingHandler{})
+		require.NoError(t, err)
 
 		assert.False(t, continued)
 	})
@@ -280,7 +284,8 @@ func TestHandleAgentStopFollowUpsReturnsFalse(t *testing.T) {
 	t.Run("no follow ups", func(t *testing.T) {
 		thread := &threadStub{messages: []llmtypes.Message{{Role: "assistant", Content: "done"}}}
 
-		continued := HandleAgentStopFollowUps(context.Background(), thread, &recordingHandler{})
+		continued, err := HandleAgentStopFollowUps(context.Background(), thread, &recordingHandler{})
+		require.NoError(t, err)
 
 		assert.False(t, continued)
 		assert.Empty(t, thread.userMessages)

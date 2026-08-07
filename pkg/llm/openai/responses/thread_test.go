@@ -1806,6 +1806,18 @@ func TestAddUserMessageAppendsInputItems(t *testing.T) {
 	assert.Len(t, thread.inputItems, 2)
 }
 
+func TestAddAssistantMessageAppendsInputAndStoredItems(t *testing.T) {
+	thread := &Thread{}
+	thread.AddAssistantMessage(t.Context(), "Direct response")
+
+	require.Len(t, thread.inputItems, 1)
+	require.NotNil(t, thread.inputItems[0].OfMessage)
+	assert.Equal(t, openairesponses.EasyInputMessageRoleAssistant, thread.inputItems[0].OfMessage.Role)
+	require.Len(t, thread.storedItems, 1)
+	assert.Equal(t, "assistant", thread.storedItems[0].Role)
+	assert.Equal(t, "Direct response", thread.storedItems[0].Content)
+}
+
 func TestThreadInitialization(t *testing.T) {
 	os.Setenv("OPENAI_API_KEY", "test-key")
 	defer os.Unsetenv("OPENAI_API_KEY")

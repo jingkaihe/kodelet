@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/jingkaihe/kodelet/pkg/llm/base"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 
@@ -13,6 +14,17 @@ import (
 
 // buildToolsForThread creates tool definitions and honors per-turn extension tool-list patches.
 func buildToolsForThread(thread llmtypes.Thread, state tooltypes.State, noToolUse bool) []responses.ToolUnionParam {
+	if thread != nil && base.EnvironmentIsOpen(thread) {
+		return buildToolsFromConfig(
+			thread.GetConfig(),
+			base.AvailableEnvironmentToolsForThread(thread, noToolUse),
+			noToolUse,
+			currentAllowedTools(thread),
+		)
+	}
+	if state == nil && thread != nil {
+		state = thread.GetState()
+	}
 	return buildToolsWithAllowed(state, noToolUse, currentAllowedTools(thread))
 }
 
@@ -22,34 +34,39 @@ func buildTools(state tooltypes.State) []responses.ToolUnionParam {
 }
 
 func buildToolsWithAllowed(state tooltypes.State, noToolUse bool, extensionAllowedTools []string) []responses.ToolUnionParam {
-	if noToolUse {
-		return nil
-	}
-
-	var llmConfig llmtypesConfig
+	var config llmtypes.Config
 	if state != nil {
 		if cfg, ok := state.GetLLMConfig().(llmtypes.Config); ok {
-			platform := resolvePlatformName(cfg)
-			llmConfig = llmtypesConfig{
-				platform:    platform,
-				baseURL:     getBaseURL(cfg),
-				useCopilot:  platform == "copilot",
-				allowedFile: cfg.AllowedDomainsFile,
-			}
-			if cfg.OpenAI != nil {
-				llmConfig.enableSearch = cfg.OpenAI.EnableSearch
-			}
-			if len(cfg.AllowedTools) > 0 {
-				llmConfig.allowedTools = append([]string(nil), cfg.AllowedTools...)
-			}
+			config = cfg
 		}
 	}
 
-	// Get available tools from the state
 	var availableTools []tooltypes.Tool
 	if state != nil {
 		availableTools = state.Tools()
 	}
+	return buildToolsFromConfig(config, availableTools, noToolUse, extensionAllowedTools)
+}
+
+func buildToolsFromConfig(config llmtypes.Config, availableTools []tooltypes.Tool, noToolUse bool, extensionAllowedTools []string) []responses.ToolUnionParam {
+	if noToolUse {
+		return nil
+	}
+
+	platform := resolvePlatformName(config)
+	llmConfig := llmtypesConfig{
+		platform:    platform,
+		baseURL:     getBaseURL(config),
+		useCopilot:  platform == "copilot",
+		allowedFile: config.AllowedDomainsFile,
+	}
+	if config.OpenAI != nil {
+		llmConfig.enableSearch = config.OpenAI.EnableSearch
+	}
+	if len(config.AllowedTools) > 0 {
+		llmConfig.allowedTools = append([]string(nil), config.AllowedTools...)
+	}
+
 	if extensionAllowedTools != nil {
 		availableTools = filterAvailableTools(availableTools, extensionAllowedTools)
 		llmConfig.allowedTools = extensionAllowedTools

@@ -274,6 +274,33 @@ func (r *Runtime) Subscriptions() []Subscription {
 	return append([]Subscription(nil), r.subs...)
 }
 
+// NotifySurfaceInput routes control-plane surface input to the owning extension generation.
+func (r *Runtime) NotifySurfaceInput(ctx context.Context, owner UIExtensionOwner, lifecycle uint64, request UISurfaceInputNotification) error {
+	return r.notifySurfaceEvent(ctx, owner, lifecycle, UISurfaceInputMethod, request)
+}
+
+// NotifySurfaceResize routes control-plane resize events to the owning extension generation.
+func (r *Runtime) NotifySurfaceResize(ctx context.Context, owner UIExtensionOwner, lifecycle uint64, request UISurfaceResizeNotification) error {
+	return r.notifySurfaceEvent(ctx, owner, lifecycle, UISurfaceResizeMethod, request)
+}
+
+func (r *Runtime) notifySurfaceEvent(ctx context.Context, owner UIExtensionOwner, lifecycle uint64, method string, request any) error {
+	if r == nil {
+		return errors.New("extension runtime is required")
+	}
+	r.mu.RLock()
+	processes := append([]*Process(nil), r.processes...)
+	r.mu.RUnlock()
+	for _, process := range processes {
+		_, source := process.rpcSession()
+		if source == nil || source.ExtensionUIOwner() != owner {
+			continue
+		}
+		return NotifyUISurfaceEvent(ctx, source, lifecycle, method, request)
+	}
+	return errors.New("extension UI owner is no longer active")
+}
+
 // Close terminates all extension processes.
 func (r *Runtime) Close() error {
 	if r == nil {

@@ -10,8 +10,10 @@ Kodelet is a lightweight agentic SWE Agent that runs as an interactive CLI tool 
 - [Updating](#updating)
 - [Usage Modes](#usage-modes)
   - [One-shot Mode](#one-shot-mode)
+  - [Terminal Chat TUI](#terminal-chat-tui)
   - [Interactive Chat Mode (ACP)](#interactive-chat-mode-acp)
   - [Web UI Server](#web-ui-server)
+  - [Workspace-bound Runners](#workspace-bound-runners)
   - [Git Integration](#git-integration)
   - [Image Input Support](#image-input-support)
   - [Conversation Continuation](#conversation-continuation)
@@ -143,6 +145,7 @@ kodelet chat --theme tokyo-night        # select another bundled theme
 kodelet chat --profile openai --reasoning-effort high
 kodelet chat --no-tools              # chat without tools
 kodelet chat --no-extensions         # disable extensions
+kodelet chat --runner RUNNER         # start a new conversation on a remote runner
 ```
 
 The TUI uses `auto` theme selection by default. It detects whether the terminal profile has a light or dark background and selects `catppuccin-latte` for light profiles or `catppuccin-mocha` for dark profiles; unavailable detection falls back to Mocha. Use `--theme` at startup or `/theme` in the TUI; the picker marks the active selection with ` (current)`. Use `/theme THEME_NAME` to switch directly. The TUI streams assistant responses, collapses thinking and tool details by default, and lets you toggle details with `ctrl+o` or by clicking the detail header. It uses the same chat runner as the Web UI, so conversations are persisted and can be resumed by ID. While the assistant is working, the composer stays editable; press `Enter` to queue ordinary text as steering for the active conversation. TUI-local slash commands such as `/sessions` and `/new` execute immediately, while other slash commands remain available in completion and are queued as follow-up turns that start when the current turn finishes. Kodelet applies queued steering on the next model API call. Before the first message, use `Ctrl+T` to select a profile and `Ctrl+Y` (or click the `effort:` label beside the profile) to select one of the profile's `allowed_reasoning_efforts`. Both controls are locked after the conversation starts, and the selected effort is restored when it is resumed.
@@ -227,6 +230,62 @@ For trusted local-only use, disable the web UI token gate with:
 ```bash
 kodelet serve --skip-auth
 ```
+
+### Workspace-bound Runners
+
+A workspace-bound runner lets one `kodelet serve` control plane run the central provider loop against tools, context, skills, commands, and extensions hosted by another Kodelet process. The runner owns exactly one canonical workspace: `kodelet runner start` binds to its current directory, does not accept `--cwd` or a caller-selected `--id`, and cannot be redirected to another path by the server.
+
+Start the control plane with separate credentials for browser/API clients and runners:
+
+```bash
+kodelet serve \
+  --auth-token web-secret \
+  --runner-auth-token runner-secret
+```
+
+When authentication is enabled and either token is omitted, `kodelet serve` generates and prints a distinct token for that role. `--skip-auth` disables both client and runner authentication. Do not reuse the browser token as the runner token.
+
+Start one runner from each workspace you want to expose:
+
+```bash
+cd ~/src/kodelet
+kodelet runner start \
+  --server http://localhost:8080 \
+  --auth-token runner-secret \
+  --name kodelet-gpu
+```
+
+`--name` is optional mutable display metadata. The control plane assigns the stable opaque runner ID. Reconnecting from the same authenticated owner, stable local host instance, and canonical workspace path reuses that ID even if the local ID cache was removed. Hostname, process ID, workspace basename, and display name are diagnostic metadata rather than identity.
+
+Runner startup takes an exclusive OS advisory file lock keyed only by the canonical workspace path, so two cooperating Kodelet runner processes cannot expose the same mutable directory, including to different control planes. The lock and local registration cache live outside the repository under the Kodelet state directory, normally `~/.kodelet/runners`. The `.lock` file records the PID, hostname, server, runner ID, display name, workspace, and start/stop timestamps for diagnostics, but the held kernel lock—not file existence or PID inspection—is authoritative. A stale file after a crash is expected and is overwritten after the next process successfully acquires the lock.
+
+Inspect runners with the normal web/API credential:
+
+```bash
+kodelet runner list --server http://localhost:8080 --auth-token web-secret
+kodelet runner list --server http://localhost:8080 --auth-token web-secret --json
+kodelet runner inspect kodelet-gpu --server http://localhost:8080 --auth-token web-secret
+kodelet runner inspect runner_abc --server http://localhost:8080 --auth-token web-secret --json
+```
+
+A selector can be an exact runner ID, an unambiguous ID prefix, or an unambiguous display name. Ambiguous selectors fail and show the matching IDs, hostnames, and workspace paths. Inspection exposes the canonical workspace, hostname and stable host instance, PID, platform, Kodelet version, connection generation, manifest digest/change flag, active run, last heartbeat, compatibility error, and local lock diagnostics when the inspected runner is local.
+
+Runner states are `connecting`, `idle`, `busy`, `error`, `offline`, and `incompatible`. Only an idle compatible runner accepts a new run. A manifest-change flag means the runner detected changed context, skills, tools, commands, extensions, or relevant configuration while idle; the changed manifest is pinned by the next run and never mutates an already active run.
+
+In the Web UI, choose the runner from the **Environment** field when creating a conversation. The conversation is durably bound to that runner, and later turns default to the same runner rather than silently moving to a similarly named workspace. Remote conversations hide or disable control-plane-local CWD suggestions, terminal access, Git diff, and server-side slash-command discovery; commands entered in chat still execute through the runner's pinned command manifest.
+
+The terminal UI can start a new remote conversation with:
+
+```bash
+kodelet chat \
+  --runner kodelet-gpu \
+  --server http://localhost:8080 \
+  --auth-token web-secret
+```
+
+Remote TUI extension input, confirmation, selection, and notification requests are relayed through the control plane. The initial remote TUI mode intentionally rejects `--resume`, `--follow`, `--cwd`, `--no-tools`, and `--no-extensions`; remote conversation browsing/resume and per-request runner policy overrides need a broader client contract. `kodelet run --runner` is likewise not enabled yet because the one-shot command's flags and output modes are not fully represented by the remote chat request contract.
+
+Across hosts, runner and remote TUI connections require HTTPS/WSS; plain HTTP is accepted only for loopback servers. The initial runner executes directly in its workspace with the runner process's host permissions, permits one active top-level run, and is not a sandbox. It does not create worktrees, containers, micro-VMs, filesystem snapshots, process namespaces, network namespaces, or isolated port spaces. Each run is created and cleaned up through an execution-instance provider, but the built-in provider currently returns a fresh lifecycle handle to the same workspace; an isolated provider and its durability/conflict model remain future work behind the unchanged agent-environment protocol.
 
 ### Git Integration
 

@@ -6,7 +6,9 @@ import (
 	"time"
 
 	"github.com/invopop/jsonschema"
+	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
+	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/attribute"
@@ -63,6 +65,52 @@ func (t *lateUpdateTool) TracingKVs(string) ([]attribute.KeyValue, error) { retu
 
 type toolUpdateHandler struct {
 	updates []string
+}
+
+type environmentThreadStub struct {
+	*threadStub
+	environment agentenv.Environment
+}
+
+func (t *environmentThreadStub) GetEnvironment() agentenv.Environment {
+	return t.environment
+}
+
+func (t *environmentThreadStub) SetEnvironment(environment agentenv.Environment) {
+	t.environment = environment
+}
+
+func (t *environmentThreadStub) SetEnvironmentState(state tooltypes.State) {
+	t.state = state
+}
+
+func (t *environmentThreadStub) ApplyEnvironmentConfig(config agentenv.EnvironmentConfig) {
+	t.config.WorkingDirectory = t.environment.Manifest().WorkingDirectory
+	t.config.AllowedCommands = append([]string(nil), config.AllowedCommands...)
+	t.config.ToolMode = config.ToolMode
+	t.config.EnableFSSearchTools = config.EnableFSSearchTools
+	t.config.Sysprompt = config.SystemPromptPath
+	t.config.SyspromptContent = config.SystemPromptContent
+	t.config.SyspromptInline = config.SystemPromptPath != "" || config.SystemPromptContent != ""
+	t.config.SyspromptArgs = config.SystemPromptArgs
+}
+
+type projectedEnvironment struct {
+	agentenv.Environment
+	manifest agentenv.Manifest
+	opened   bool
+}
+
+func (e *projectedEnvironment) Open(context.Context, agentenv.RunSpec) (agentenv.Manifest, error) {
+	e.opened = true
+	return e.manifest.Clone(), nil
+}
+
+func (e *projectedEnvironment) IsOpen() bool                { return e.opened }
+func (e *projectedEnvironment) Manifest() agentenv.Manifest { return e.manifest.Clone() }
+func (e *projectedEnvironment) Close(context.Context) error {
+	e.opened = false
+	return nil
 }
 
 func (h *toolUpdateHandler) HandleText(string)                                     {}
@@ -173,4 +221,65 @@ func TestExecuteToolWithHandlerForwardsUpdatesAndRejectsLateCallbacks(t *testing
 
 	tool.callback(tooltypes.BaseToolResult{Result: "too late"})
 	assert.Equal(t, []string{"running"}, handler.updates)
+}
+
+func TestExecuteEnvironmentToolRoutesControlPlaneToolsOutsideWorkspaceEnvironment(t *testing.T) {
+	thread := &environmentThreadStub{
+		threadStub: &threadStub{
+			config:         llmtypes.Config{WorkingDirectory: t.TempDir()},
+			conversationID: "conv-control-plane-tool",
+			metadata: map[string]any{
+				goals.MetadataKey: goals.Goal{Objective: "ship phase one", Status: goals.StatusActive, Version: 1},
+			},
+			state: &toolState{tools: []tooltypes.Tool{namedTool("file_read")}},
+		},
+	}
+
+	_, err := OpenEnvironment(context.Background(), thread)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = CloseEnvironment(context.Background(), thread) })
+
+	execution := ExecuteEnvironmentTool(
+		context.Background(),
+		thread,
+		renderers.NewRendererRegistry(),
+		"get_goal",
+		`{}`,
+		"call-goal",
+	)
+
+	require.NotNil(t, execution.Result)
+	assert.False(t, execution.Result.IsError())
+	assert.Contains(t, execution.Result.GetResult(), "ship phase one")
+}
+
+func TestOpenEnvironmentAppliesPinnedRunnerConfiguration(t *testing.T) {
+	environment := &projectedEnvironment{manifest: agentenv.Manifest{
+		WorkingDirectory: "/runner/workspace",
+		Config: &agentenv.EnvironmentConfig{
+			AllowedCommands:     []string{"go test *"},
+			ToolMode:            llmtypes.ToolModePatch,
+			EnableFSSearchTools: true,
+			SystemPromptPath:    "/runner/custom.tmpl",
+			SystemPromptContent: "runner prompt",
+			SystemPromptArgs:    map[string]string{"project": "kodelet"},
+		},
+	}}
+	thread := &environmentThreadStub{
+		threadStub:  &threadStub{config: llmtypes.Config{Provider: "openai"}},
+		environment: environment,
+	}
+
+	_, err := OpenEnvironment(t.Context(), thread)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, CloseEnvironment(t.Context(), thread)) })
+	config := thread.GetConfig()
+	assert.Equal(t, "/runner/workspace", config.WorkingDirectory)
+	assert.Equal(t, []string{"go test *"}, config.AllowedCommands)
+	assert.Equal(t, llmtypes.ToolModePatch, config.ToolMode)
+	assert.True(t, config.EnableFSSearchTools)
+	assert.Equal(t, "/runner/custom.tmpl", config.Sysprompt)
+	assert.Equal(t, "runner prompt", config.SyspromptContent)
+	assert.True(t, config.SyspromptInline)
+	assert.Equal(t, map[string]string{"project": "kodelet"}, config.SyspromptArgs)
 }

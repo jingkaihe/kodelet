@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"time"
@@ -10,6 +13,8 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
+	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	"github.com/jingkaihe/kodelet/pkg/tui"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -91,6 +96,43 @@ func TestChatNoToolsDisablesExtensionStartup(t *testing.T) {
 	assert.False(t, viper.GetBool("extensions.enabled"))
 	assert.Equal(t, []string{"none"}, viper.GetStringSlice("allowed_tools"))
 	assert.False(t, extensions.LoadConfigFromViper().Enabled)
+}
+
+func TestPrepareRemoteChatRunnerSelectsIdleRunner(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		assert.Equal(t, "/api/runners", request.URL.Path)
+		assert.Equal(t, "Bearer secret", request.Header.Get("Authorization"))
+		require.NoError(t, json.NewEncoder(w).Encode(runnerListAPIResponse{Runners: []runnerregistry.Runner{{
+			ID:          "runner-1",
+			DisplayName: "kodelet-gpu",
+			Host:        protocol.Host{Hostname: "worker"},
+			Workspace:   protocol.Workspace{Path: "/runner/kodelet", Name: "kodelet"},
+			Status:      runnerregistry.RunnerStatusIdle,
+			Connected:   true,
+		}}}))
+	}))
+	defer server.Close()
+
+	runner, workspace, err := prepareRemoteChatRunner(t.Context(), &ChatConfig{
+		Runner:    "kodelet-gpu",
+		Server:    server.URL,
+		AuthToken: "secret",
+	})
+
+	require.NoError(t, err)
+	assert.NotNil(t, runner)
+	assert.Equal(t, "/runner/kodelet", workspace)
+}
+
+func TestPrepareRemoteChatRunnerRejectsLocalOnlyOptions(t *testing.T) {
+	_, _, err := prepareRemoteChatRunner(t.Context(), &ChatConfig{Runner: "runner-1", CWD: "/tmp/project"})
+	require.ErrorContains(t, err, "--cwd cannot be used")
+
+	_, _, err = prepareRemoteChatRunner(t.Context(), &ChatConfig{Runner: "runner-1", ResumeConvID: "conversation-1"})
+	require.ErrorContains(t, err, "resume is not enabled")
+
+	_, _, err = prepareRemoteChatRunner(t.Context(), &ChatConfig{Runner: "runner-1", NoTools: true})
+	require.ErrorContains(t, err, "local-only options")
 }
 
 func TestValidateChatResumeConversationRejectsMissingConversation(t *testing.T) {

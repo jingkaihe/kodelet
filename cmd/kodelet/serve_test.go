@@ -118,6 +118,38 @@ func TestValidateServeConfig(t *testing.T) {
 			expectedError: "--auth-token cannot be used with --skip-auth",
 		},
 		{
+			name: "runner auth token conflicts with skip auth",
+			config: &ServeConfig{
+				Host:            "localhost",
+				Port:            8080,
+				CompactRatio:    0.8,
+				RunnerAuthToken: "runner-secret",
+				SkipAuth:        true,
+			},
+			expectedError: "--runner-auth-token cannot be used with --skip-auth",
+		},
+		{
+			name: "runner and web auth tokens must differ",
+			config: &ServeConfig{
+				Host:            "localhost",
+				Port:            8080,
+				CompactRatio:    0.8,
+				AuthToken:       "same-secret",
+				RunnerAuthToken: "same-secret",
+			},
+			expectedError: "--runner-auth-token must differ from --auth-token",
+		},
+		{
+			name: "invalid runner auth token",
+			config: &ServeConfig{
+				Host:            "localhost",
+				Port:            8080,
+				CompactRatio:    0.8,
+				RunnerAuthToken: "runner token",
+			},
+			expectedError: "invalid runner auth token",
+		},
+		{
 			name: "whitespace auth token",
 			config: &ServeConfig{
 				Host:         "localhost",
@@ -198,6 +230,7 @@ func TestGetServeConfigFromFlags_UsesConfiguredCompactRatio(t *testing.T) {
 	cmd.Flags().Int("port", defaults.Port, "")
 	cmd.Flags().String("cwd", defaults.CWD, "")
 	cmd.Flags().String("auth-token", defaults.AuthToken, "")
+	cmd.Flags().String("runner-auth-token", defaults.RunnerAuthToken, "")
 	cmd.Flags().Bool("skip-auth", defaults.SkipAuth, "")
 	cmd.Flags().StringSlice("cors-origins", defaults.CORSOrigins, "")
 
@@ -212,6 +245,7 @@ func TestGetServeConfigFromFlags_UsesCommaSeparatedCORSOrigins(t *testing.T) {
 	cmd.Flags().Int("port", defaults.Port, "")
 	cmd.Flags().String("cwd", defaults.CWD, "")
 	cmd.Flags().String("auth-token", defaults.AuthToken, "")
+	cmd.Flags().String("runner-auth-token", defaults.RunnerAuthToken, "")
 	cmd.Flags().Bool("skip-auth", defaults.SkipAuth, "")
 	cmd.Flags().StringSlice("cors-origins", defaults.CORSOrigins, "")
 	require.NoError(t, cmd.Flags().Set("cors-origins", "https://app.example.com,http://localhost:3000"))

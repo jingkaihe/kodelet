@@ -283,6 +283,7 @@ func TestNewServerInitializesRoutesAndNormalizesConfig(t *testing.T) {
 	basePath := t.TempDir()
 	t.Setenv("KODELET_BASE_PATH", basePath)
 	t.Setenv("KODELET_CONVERSATION_STORE_TYPE", "sqlite")
+	require.NoError(t, db.RunMigrations(context.Background(), migrations.All()))
 	defaultCWD := t.TempDir()
 	config := &ServerConfig{
 		Host:         "127.0.0.1",

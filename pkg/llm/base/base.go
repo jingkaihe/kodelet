@@ -8,7 +8,9 @@ import (
 	"maps"
 	"sync"
 
+	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -37,6 +39,7 @@ type LoadConversationFunc func(ctx context.Context)
 type Thread struct {
 	Config           llmtypes.Config                           // LLM configuration
 	State            tooltypes.State                           // Tool execution state
+	Environment      agentenv.Environment                      // Run-scoped agent environment
 	Usage            *llmtypes.Usage                           // Token usage tracking
 	ConversationID   string                                    // Unique conversation identifier
 	Persisted        bool                                      // Whether conversation is being persisted
@@ -104,6 +107,8 @@ func (t *Thread) SetMetadata(metadata map[string]any) {
 // SetState sets the state for the thread
 func (t *Thread) SetState(s tooltypes.State) {
 	t.State = s
+	runtime, _ := t.Config.Extensions.(*extensions.Runtime)
+	t.Environment = agentenv.NewLocalEnvironmentFromState(s, runtime)
 }
 
 // GetState returns the current state of the thread
@@ -111,9 +116,37 @@ func (t *Thread) GetState() tooltypes.State {
 	return t.State
 }
 
+// SetEnvironment replaces the run-scoped agent environment used by provider loops.
+func (t *Thread) SetEnvironment(environment agentenv.Environment) {
+	t.Environment = environment
+	t.State = nil
+}
+
+// GetEnvironment returns the run-scoped agent environment used by provider loops.
+func (t *Thread) GetEnvironment() agentenv.Environment {
+	return t.Environment
+}
+
+// SetEnvironmentState updates the compatibility state without replacing the environment.
+func (t *Thread) SetEnvironmentState(state tooltypes.State) {
+	t.State = state
+}
+
 // GetConfig returns the configuration of the thread
 func (t *Thread) GetConfig() llmtypes.Config {
 	return t.Config
+}
+
+// ApplyEnvironmentConfig applies runner-owned, non-secret configuration pinned at run.open.
+func (t *Thread) ApplyEnvironmentConfig(config agentenv.EnvironmentConfig) {
+	t.Config.WorkingDirectory = t.Environment.Manifest().WorkingDirectory
+	t.Config.AllowedCommands = append([]string(nil), config.AllowedCommands...)
+	t.Config.ToolMode = config.ToolMode
+	t.Config.EnableFSSearchTools = config.EnableFSSearchTools
+	t.Config.Sysprompt = config.SystemPromptPath
+	t.Config.SyspromptContent = config.SystemPromptContent
+	t.Config.SyspromptInline = config.SystemPromptPath != "" || config.SystemPromptContent != ""
+	t.Config.SyspromptArgs = maps.Clone(config.SystemPromptArgs)
 }
 
 // GetConversationID returns the current conversation ID
@@ -170,6 +203,9 @@ func (t *Thread) EnablePersistence(ctx context.Context, enabled bool) {
 func (t *Thread) PrepareUtilityMode(ctx context.Context) {
 	t.EnablePersistence(ctx, false)
 	t.Config.Extensions = nil
+	if setter, ok := t.Environment.(agentenv.ExtensionSetter); ok {
+		setter.SetExtensions(nil)
+	}
 }
 
 // SetExtensions updates the turn-scoped extension runtime used by tool execution.
@@ -177,6 +213,9 @@ func (t *Thread) SetExtensions(runtime any) {
 	t.ConversationMu.Lock()
 	defer t.ConversationMu.Unlock()
 	t.Config.Extensions = runtime
+	if setter, ok := t.Environment.(agentenv.ExtensionSetter); ok {
+		setter.SetExtensions(runtime)
+	}
 }
 
 // ResetContextStateLocked clears shared state after context replacement/compaction.

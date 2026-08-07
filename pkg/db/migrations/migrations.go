@@ -18,5 +18,6 @@ func All() []db.Migration {
 		Migration20260226120000AddMetadataToSummaries(),
 		Migration20260331120000AddCWDToConversations(),
 		Migration20260719170000CreateSteeringMessages(),
+		Migration20260806120000CreateRunnerState(),
 	}
 }

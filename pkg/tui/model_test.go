@@ -35,6 +35,23 @@ func TestNewModelSharesPersistentExtensionRuntimeManagerWithDefaultRunner(t *tes
 	assert.Same(t, m.extensionRuntimes, runner.ExtensionRuntimeProvider())
 }
 
+func TestNewModelRemoteModeKeepsDisplayWorkspaceWithoutLocalDiscovery(t *testing.T) {
+	runner := &recordingRunner{}
+	m := newModel(context.Background(), Config{
+		CWD:    "/runner/kodelet",
+		Runner: runner,
+		Remote: true,
+	})
+	t.Cleanup(m.cancel)
+	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+
+	assert.True(t, m.remote)
+	assert.Equal(t, "/runner/kodelet", m.cwd)
+	assert.Empty(t, m.requestedCWD)
+	assert.Empty(t, m.messageHistoryScopeCWD)
+	assert.True(t, m.extensionDiscoveryBlocked)
+}
+
 func TestNewModelProvidesIdleExtensionUIBroker(t *testing.T) {
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)

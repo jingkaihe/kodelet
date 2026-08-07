@@ -28,6 +28,7 @@ const mockNavigate = vi.fn();
 const mockGetConversations = vi.fn();
 const mockGetConversation = vi.fn();
 const mockGetChatSettings = vi.fn();
+const mockGetRunners = vi.fn();
 const mockGetSlashCommands = vi.fn();
 const mockStreamChat = vi.fn();
 const mockStreamConversation = vi.fn();
@@ -80,6 +81,7 @@ vi.mock("../services/api", () => ({
 		getConversations: (...args: unknown[]) => mockGetConversations(...args),
 		getConversation: (...args: unknown[]) => mockGetConversation(...args),
 		getChatSettings: (...args: unknown[]) => mockGetChatSettings(...args),
+		getRunners: (...args: unknown[]) => mockGetRunners(...args),
 		getSlashCommands: (...args: unknown[]) => mockGetSlashCommands(...args),
 		getCWDHints: (...args: unknown[]) => mockGetCWDHints(...args),
 		getGitDiff: (...args: unknown[]) => mockGetGitDiff(...args),
@@ -103,6 +105,7 @@ describe("ChatPage", () => {
 		routeParams = {};
 		window.localStorage.clear();
 		window.HTMLElement.prototype.scrollIntoView = vi.fn();
+		mockGetRunners.mockResolvedValue({ runners: [] });
 		mockGetChatSettings.mockImplementation((profile?: string) => {
 			const selectedProfile = profile || "work";
 			const reasoningSettings =
@@ -1202,6 +1205,61 @@ describe("ChatPage", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 		expect(screen.queryByTestId("new-chat-dialog")).not.toBeInTheDocument();
+	});
+
+	it("selects a remote runner and omits control-plane cwd features", async () => {
+		mockGetRunners.mockResolvedValue({
+			runners: [
+				{
+					id: "runner-1",
+					displayName: "kodelet-gpu",
+					host: {
+						instanceId: "host-1",
+						hostname: "worker",
+						os: "linux",
+						arch: "amd64",
+					},
+					workspace: { path: "/runner/kodelet", name: "kodelet" },
+					manifestChanged: false,
+					status: "idle",
+					connected: true,
+					generation: 1,
+				},
+			],
+		});
+		mockStreamChat.mockResolvedValue(undefined);
+
+		render(<ChatPage />);
+		await waitFor(() => expect(mockGetRunners).toHaveBeenCalled());
+		fireEvent.click(screen.getByTestId("sidebar-new-chat-button"));
+		fireEvent.change(screen.getByLabelText("Environment"), {
+			target: { value: "runner-1" },
+		});
+		expect(screen.getByText("/runner/kodelet")).toBeVisible();
+		expect(screen.queryByLabelText("Working directory")).not.toBeInTheDocument();
+		fireEvent.click(screen.getByRole("button", { name: "Start" }));
+		expect(screen.queryByTestId("workspace-tools-shell")).not.toBeInTheDocument();
+
+		fireEvent.change(screen.getByPlaceholderText("Ask kodelet anything..."), {
+			target: { value: "hello remotely" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+		await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
+		expect(mockStreamChat).toHaveBeenCalledWith(
+			expect.objectContaining({
+				runnerId: "runner-1",
+				clientCapabilities: {
+					interactiveUI: true,
+					persistentSurfaces: false,
+				},
+			}),
+			expect.any(Object),
+		);
+		expect(mockStreamChat).toHaveBeenCalledWith(
+			expect.not.objectContaining({ cwd: expect.anything() }),
+			expect.any(Object),
+		);
 	});
 
 	it("shows recent workspaces and applies a selected workspace", async () => {

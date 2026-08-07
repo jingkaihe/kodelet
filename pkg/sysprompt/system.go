@@ -37,7 +37,7 @@ func buildPrompt(model string, llmConfig llmtypes.Config, contexts map[string]st
 }
 
 func promptTemplatePath(model string, llmConfig llmtypes.Config) string {
-	if strings.TrimSpace(llmConfig.Sysprompt) != "" {
+	if strings.TrimSpace(llmConfig.Sysprompt) != "" || llmConfig.SyspromptInline || llmConfig.SyspromptContent != "" {
 		return SystemTemplate
 	}
 

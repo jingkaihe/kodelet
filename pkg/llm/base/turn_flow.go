@@ -17,6 +17,9 @@ func ProcessUserMessage(
 	thread llmtypes.Thread,
 	message string,
 ) (string, error) {
+	if environment := EnvironmentForThread(thread); environment != nil && environment.IsOpen() {
+		return environment.ProcessUserMessage(ctx, message)
+	}
 	if runtime := extensionRuntime(thread); runtime != nil {
 		decision := runtime.DispatchUserMessage(ctx, buildExtensionCallContext(thread, threadState(thread)), message)
 		if decision.Blocked {
@@ -29,22 +32,31 @@ func ProcessUserMessage(
 }
 
 // DispatchAgentStart notifies extension handlers when an agent loop starts.
-func DispatchAgentStart(ctx context.Context, thread llmtypes.Thread) {
+func DispatchAgentStart(ctx context.Context, thread llmtypes.Thread) error {
+	if environment := EnvironmentForThread(thread); environment != nil && environment.IsOpen() {
+		return environment.DispatchAgentStart(ctx)
+	}
 	if runtime := extensionRuntime(thread); runtime != nil {
 		runtime.DispatchAgentStart(ctx, buildExtensionCallContext(thread, threadState(thread)))
 	}
+	return nil
 }
 
 // DispatchTurnStart notifies extension handlers before a model turn starts.
-func DispatchTurnStart(ctx context.Context, thread llmtypes.Thread, turnNumber int) {
+func DispatchTurnStart(ctx context.Context, thread llmtypes.Thread, turnNumber int) error {
+	if environment := EnvironmentForThread(thread); environment != nil && environment.IsOpen() {
+		return environment.DispatchTurnStart(ctx, turnNumber)
+	}
 	if runtime := extensionRuntime(thread); runtime != nil {
 		runtime.DispatchTurnStart(ctx, buildExtensionCallContext(thread, threadState(thread)), turnNumber)
 	}
+	return nil
 }
 
 // ProcessSystemPrompt dispatches agent.init and returns the effective prompt.
-func ProcessSystemPrompt(ctx context.Context, thread llmtypes.Thread, systemPrompt string) string {
-	return ProcessAgentInit(ctx, thread, systemPrompt).SystemPrompt
+func ProcessSystemPrompt(ctx context.Context, thread llmtypes.Thread, systemPrompt string) (string, error) {
+	decision, err := ProcessAgentInit(ctx, thread, systemPrompt)
+	return decision.SystemPrompt, err
 }
 
 // AgentInitDecision is the host-side result of processing agent.init handlers.
@@ -55,9 +67,23 @@ type AgentInitDecision struct {
 }
 
 // ProcessAgentInit dispatches agent.init and applies supported prompt/tool-list mutations.
-func ProcessAgentInit(ctx context.Context, thread llmtypes.Thread, systemPrompt string) AgentInitDecision {
+func ProcessAgentInit(ctx context.Context, thread llmtypes.Thread, systemPrompt string) (AgentInitDecision, error) {
 	decision := AgentInitDecision{SystemPrompt: systemPrompt}
 	clearAllowedToolsMetadata(thread)
+	if environment := EnvironmentForThread(thread); environment != nil && environment.IsOpen() {
+		config := thread.GetConfig()
+		environmentDecision, err := environment.ProcessAgentInit(ctx, systemPrompt, agentInitAllowedToolNames(config, environment.Manifest().AvailableTools()))
+		if err != nil {
+			return decision, err
+		}
+		decision.SystemPrompt = environmentDecision.SystemPrompt
+		decision.AllowedTools = environmentDecision.AllowedTools
+		decision.ToolsModified = environmentDecision.ToolsModified
+		if environmentDecision.ToolsModified {
+			thread.SetMetadataValue(extensionAllowedToolsMetadataKey, environmentDecision.AllowedTools)
+		}
+		return decision, nil
+	}
 	if runtime := extensionRuntime(thread); runtime != nil {
 		config := thread.GetConfig()
 		state := threadState(thread)
@@ -69,7 +95,7 @@ func ProcessAgentInit(ctx context.Context, thread llmtypes.Thread, systemPrompt 
 			thread.SetMetadataValue(extensionAllowedToolsMetadataKey, extensionDecision.AllowedTools)
 		}
 	}
-	return decision
+	return decision, nil
 }
 
 type metadataReplacer interface {
@@ -90,13 +116,19 @@ func clearAllowedToolsMetadata(thread llmtypes.Thread) {
 }
 
 func agentInitAllowedTools(config llmtypes.Config, state tooltypes.State) []string {
+	if state == nil {
+		return agentInitAllowedToolNames(config, nil)
+	}
+	return agentInitAllowedToolNames(config, state.Tools())
+}
+
+func agentInitAllowedToolNames(config llmtypes.Config, stateTools []tooltypes.Tool) []string {
 	if len(config.AllowedTools) > 0 {
 		return append([]string(nil), config.AllowedTools...)
 	}
-	if state == nil {
+	if stateTools == nil {
 		return nil
 	}
-	stateTools := state.Tools()
 	virtualTools := tools.VirtualToolNames()
 	allowedTools := make([]string, 0, len(stateTools)+len(virtualTools))
 	for _, tool := range stateTools {
@@ -115,13 +147,17 @@ func TriggerTurnEnd(
 	thread llmtypes.Thread,
 	finalOutput string,
 	turnCount int,
-) {
+) error {
 	if finalOutput == "" {
-		return
+		return nil
+	}
+	if environment := EnvironmentForThread(thread); environment != nil && environment.IsOpen() {
+		return environment.DispatchTurnEnd(ctx, finalOutput, turnCount)
 	}
 	if runtime := extensionRuntime(thread); runtime != nil {
 		runtime.DispatchTurnEnd(ctx, buildExtensionCallContext(thread, threadState(thread)), finalOutput, turnCount)
 	}
+	return nil
 }
 
 // HasPendingSteer reports whether steering arrived while the current model turn was in flight.
@@ -155,18 +191,34 @@ func HandleAgentStopFollowUps(
 	ctx context.Context,
 	thread llmtypes.Thread,
 	handler llmtypes.MessageHandler,
-) bool {
+) (bool, error) {
 	logger.G(ctx).Debug("no tools used, checking agent end follow-ups")
 
 	messages, err := thread.GetMessages()
 	if err != nil {
-		return false
+		return false, nil
+	}
+	if environment := EnvironmentForThread(thread); environment != nil && environment.IsOpen() {
+		followUps, err := environment.DispatchAgentEnd(ctx, messages)
+		if err != nil {
+			return false, err
+		}
+		if len(followUps) == 0 {
+			return false, nil
+		}
+
+		logger.G(ctx).WithField("count", len(followUps)).Info("agent end follow-up messages returned, continuing conversation")
+		for _, msg := range followUps {
+			thread.AddUserMessage(ctx, msg)
+			handler.HandleText(fmt.Sprintf("\n📨 Extension follow-up: %s\n", msg))
+		}
+		return true, nil
 	}
 
 	if runtime := extensionRuntime(thread); runtime != nil {
 		followUps := runtime.DispatchAgentEnd(ctx, buildExtensionCallContext(thread, threadState(thread)), messages)
 		if len(followUps) == 0 {
-			return false
+			return false, nil
 		}
 
 		logger.G(ctx).WithField("count", len(followUps)).Info("agent end follow-up messages returned, continuing conversation")
@@ -175,9 +227,9 @@ func HandleAgentStopFollowUps(
 			handler.HandleText(fmt.Sprintf("\n📨 Extension follow-up: %s\n", msg))
 		}
 
-		return true
+		return true, nil
 	}
-	return false
+	return false, nil
 }
 
 func threadState(thread llmtypes.Thread) tooltypes.State {

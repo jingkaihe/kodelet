@@ -28,6 +28,7 @@ type Config struct {
 	CWD                     string
 	Theme                   string
 	Runner                  chat.ChatRunner
+	Remote                  bool
 }
 
 type entryKind int
@@ -202,6 +203,7 @@ type model struct {
 	ctx               context.Context
 	cancel            context.CancelFunc
 	runner            chat.ChatRunner
+	remote            bool
 	extensionRuntimes *extensions.RuntimeManager
 	extensionUI       *tuiExtensionUIHost
 	extensionWidgets  map[extensionUIKey]tuiExtensionWidget

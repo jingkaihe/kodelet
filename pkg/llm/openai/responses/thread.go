@@ -249,6 +249,27 @@ func (t *Thread) AddUserMessage(ctx context.Context, message string, imagePaths 
 	t.addInputItem(inputItem, message)
 }
 
+// AddAssistantMessage appends a provider-native assistant message without calling the model.
+func (t *Thread) AddAssistantMessage(_ context.Context, message string) {
+	inputItem := responses.ResponseInputItemUnionParam{
+		OfMessage: &responses.EasyInputMessageParam{
+			Role:    responses.EasyInputMessageRoleAssistant,
+			Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(message)},
+		},
+	}
+	t.inputItems = append(t.inputItems, inputItem)
+	rawItem, err := json.Marshal(inputItem)
+	if err != nil {
+		logger.G(context.Background()).WithError(err).Warn("failed to marshal OpenAI Responses assistant input item for persistence")
+	}
+	t.storedItems = append(t.storedItems, StoredInputItem{
+		Type:    "message",
+		Role:    "assistant",
+		Content: message,
+		RawItem: rawItem,
+	})
+}
+
 func userImageInputItem(ctx context.Context, imagePaths []string) (responses.ResponseInputItemUnionParam, bool) {
 	contentParts := userImageContentParts(ctx, imagePaths)
 	if len(contentParts) == 0 {
@@ -304,6 +325,19 @@ func (t *Thread) SendMessage(
 	handler llmtypes.MessageHandler,
 	opt llmtypes.MessageOpt,
 ) (finalOutput string, err error) {
+	if _, err = base.OpenEnvironment(ctx, t); err != nil {
+		return "", errors.Wrap(err, "failed to open agent environment")
+	}
+	defer func() {
+		runErr := err
+		if runErr == nil {
+			runErr = ctx.Err()
+		}
+		if closeErr := base.CloseEnvironmentWithError(context.WithoutCancel(ctx), t, runErr); err == nil && closeErr != nil {
+			err = errors.Wrap(closeErr, "failed to close agent environment")
+		}
+	}()
+
 	logger.G(ctx).Debug("SendMessage called")
 	tracer := telemetry.Tracer("kodelet.llm")
 
@@ -345,7 +379,9 @@ func (t *Thread) SendMessage(
 
 	turnCount := 0
 	maxTurns := max(opt.MaxTurns, 0)
-	base.DispatchAgentStart(ctx, t)
+	if err := base.DispatchAgentStart(ctx, t); err != nil {
+		return "", errors.Wrap(err, "failed to dispatch agent start")
+	}
 
 OUTER:
 	for {
@@ -362,15 +398,17 @@ OUTER:
 				break OUTER
 			}
 
-			base.DispatchTurnStart(ctx, t, turnCount+1)
-
-			// Get relevant contexts from state and regenerate system prompt
-			var contexts map[string]string
-			if t.State != nil {
-				contexts = t.State.DiscoverContexts()
+			if err := base.DispatchTurnStart(ctx, t, turnCount+1); err != nil {
+				return "", errors.Wrap(err, "failed to dispatch turn start")
 			}
 
-			systemPrompt := base.ProcessSystemPrompt(ctx, t, sysprompt.SystemPrompt(model, t.Config, contexts))
+			// Regenerate the system prompt from the context snapshot pinned when this run opened.
+			contexts := base.EnvironmentContexts(t)
+
+			systemPrompt, err := base.ProcessSystemPrompt(ctx, t, sysprompt.SystemPrompt(model, t.Config, contexts))
+			if err != nil {
+				return "", errors.Wrap(err, "failed to process agent initialization")
+			}
 
 			// Check if auto-compact should be triggered
 			t.TryAutoCompact(ctx, t.CompactRatioOrDefault(opt.CompactRatio), t.CompactContext)
@@ -401,14 +439,20 @@ OUTER:
 			turnCount++
 			finalOutput = exchangeOutput
 
-			base.TriggerTurnEnd(ctx, t, finalOutput, turnCount)
+			if err := base.TriggerTurnEnd(ctx, t, finalOutput, turnCount); err != nil {
+				return "", errors.Wrap(err, "failed to dispatch turn end")
+			}
 
 			// If no tools were used, check for queued continuations before stopping
 			if !toolsUsed {
-				if base.HandleAgentStopFollowUps(ctx, t, handler) {
+				continued, err := base.HandleAgentStopFollowUps(ctx, t, handler)
+				if err != nil {
+					return "", errors.Wrap(err, "failed to dispatch agent end")
+				}
+				if continued {
 					continue OUTER
 				}
-				if (maxTurns == 0 || turnCount < maxTurns) && base.HandleGoalAutoContinuation(ctx, t, base.AvailableToolsForThread(t, t.State, opt.NoToolUse)) {
+				if (maxTurns == 0 || turnCount < maxTurns) && base.HandleGoalAutoContinuation(ctx, t, base.AvailableEnvironmentToolsForThread(t, opt.NoToolUse)) {
 					continue OUTER
 				}
 				if (maxTurns == 0 || turnCount < maxTurns) && base.HasPendingSteer(ctx, t.ConversationID) {
@@ -449,8 +493,8 @@ func (t *Thread) applyCodexRestrictions(params *responses.ResponseNewParams) {
 	params.Store = param.NewOpt(false)
 	params.MaxOutputTokens = param.Opt[int64]{}
 
-	if t.State != nil {
-		contexts := t.State.DiscoverContexts()
+	if base.EnvironmentForThread(t) != nil {
+		contexts := base.EnvironmentContexts(t)
 		promptCtx := sysprompt.BuildRuntimeContext(t.Config, contexts)
 
 		renderer, err := sysprompt.ResolveRendererForConfig(t.Config)
@@ -500,7 +544,7 @@ func (t *Thread) processMessageExchange(
 	}
 
 	// Build tools
-	tools := buildToolsForThread(t, t.State, opt.NoToolUse)
+	tools := buildToolsForThread(t, nil, opt.NoToolUse)
 	log.WithField("tool_count", len(tools)).Debug("built tools for request")
 
 	// Keep a complete local input history for persistence, HTTP prompt caching, and
@@ -1130,11 +1174,7 @@ func (t *Thread) CompactContext(ctx context.Context) error {
 		return compactWithSummary(ctx)
 	}
 
-	var contexts map[string]string
-	if t.State != nil {
-		contexts = t.State.DiscoverContexts()
-	}
-
+	contexts := base.EnvironmentContexts(t)
 	systemPrompt := sysprompt.SystemPrompt(t.Config.Model, t.Config, contexts)
 
 	compactParams := responses.ResponseCompactParams{

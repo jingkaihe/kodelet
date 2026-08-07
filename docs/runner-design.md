@@ -2,7 +2,9 @@
 
 ## Status
 
-Draft.
+Implemented through the initial capacity-one Phase 3 release. The future ephemeral execution-instance phase remains deliberately deferred until an isolation and durability backend is selected.
+
+The current implementation preserves the design's direct-workspace constraints: no worktrees, containers, micro-VMs, filesystem snapshots, process namespaces, network namespaces, or same-workspace concurrent top-level runs. Remote Web UI conversations are supported, and the TUI can start new remote conversations with interactive extension prompts; remote TUI resume/follow and `kodelet run --runner` remain disabled pending broader client request and history contracts. The runner now provisions every run through an `ExecutionInstanceProvider`, but the only built-in provider returns a fresh lifecycle handle backed by the same registered workspace. This establishes creation and cleanup ordering without claiming filesystem, process, network, or port isolation.
 
 ## Summary
 
@@ -184,7 +186,7 @@ The runner is authoritative for the workspace resources exposed to an agent:
 
 The full environment manifest returned by `run.open` is immutable from the control plane's perspective for the lifetime of that run. In particular, `AGENTS.md` and the model-facing tool catalog do not silently change between provider turns.
 
-If the workspace, skills, extension registrations, or configuration change, the runner increments its manifest generation and advertises a new digest. The new manifest applies to the next run. If a required capability disappears during an active run, the runner reports an environment error instead of silently changing the pinned contract.
+If the workspace, skills, extension registrations, or configuration change, the runner advertises a new manifest digest. The live connection generation continues to fence stale sockets; the new manifest applies to the next run. If a required capability disappears during an active run, the runner reports an environment error instead of silently changing the pinned contract.
 
 ### One active top-level run per runner initially
 
@@ -386,7 +388,7 @@ An agent may edit `AGENTS.md` during a run, but those edits do not change the ac
 
 ### Manifest beats
 
-The runner computes a current manifest digest at registration, before accepting a run, and periodically while connected. Application heartbeats include the current generation and digest without repeatedly sending the full manifest.
+The runner computes a current manifest digest at registration, before accepting a run, and periodically while connected. Application heartbeats include the current connection generation and digest without repeatedly sending the full manifest. Discovery-only probes do not start extension session lifecycle; the first real run supplies the call context for `session.start` and `resources.discover`.
 
 When the digest changes, the runner sends a `runner.manifestChanged` notification. The control plane can request a refreshed idle manifest for display or compatibility checks, but an active run remains pinned to the manifest returned by its own `run.open` response.
 
@@ -866,7 +868,7 @@ Conversation state is durable, but active WebSocket connections and in-flight mo
 
 The initial design assumes the control plane and runners are mutually trusted and operated by the same user or trusted team.
 
-Connections across hosts require WSS and runner authentication during the WebSocket upgrade. The runner credential authorizes only that runner's registration and assigned environment operations.
+Connections across hosts require WSS and runner authentication during the WebSocket upgrade. The initial server uses a distinct runner-role token for this endpoint; after registration, the connection's stable runner ID and generation scope all assigned environment operations. Per-runner credentials and multi-owner authorization are outside the initial trusted deployment model.
 
 Provider credentials remain in the control plane. Runner registration credentials must not be included in tool contexts, subprocess environments, extension initialization payloads, or logs. The runner must scrub its control-plane credential before spawning extensions or workspace processes.
 
@@ -944,7 +946,7 @@ Run A: localhost:3000, localhost:5432
 Run B: localhost:3000, localhost:5432
 ```
 
-No environment implementation, provisioning mechanism, state-transfer mechanism, port publication model, resource policy, or artifact model is selected by this document.
+The implementation includes a provider interface and a non-isolating direct-workspace provider. No isolated environment implementation, provisioning mechanism, state-transfer mechanism, port publication model, resource policy, or artifact model is selected by this document.
 
 Ephemeral must not imply that useful workspace changes disappear. Before same-workspace concurrent runs are enabled, the environment provider needs an explicit durability and conflict model for source edits, generated artifacts, and services. Possible mechanisms include a durable mounted workspace, promoted snapshots, patches, or commits, but this document deliberately does not select one. Without such a mechanism, a later run cannot reliably observe changes made by an earlier run.
 
@@ -1024,7 +1026,7 @@ These paths are illustrative and should be adjusted to existing package ownershi
 
 ### Future phase: ephemeral execution instances
 
-- Add an execution-instance provider interface inside the runner.
+- Use the existing execution-instance provider interface to add an isolated backend; the initial direct-workspace provider only supplies lifecycle and cleanup symmetry.
 - Create one fresh execution instance per top-level run.
 - Discover the manifest and execute tools and extensions inside that instance.
 - Destroy the instance when the run ends.

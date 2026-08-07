@@ -1,6 +1,6 @@
 import React from "react";
 import { ArrowRight, Check, ChevronDown, FolderOpen, X } from "lucide-react";
-import type { ChatProfileOption, CWDHint } from "../../types";
+import type { ChatProfileOption, CWDHint, Runner } from "../../types";
 import { cn } from "../../utils";
 
 interface NewChatContextDialogProps {
@@ -16,6 +16,8 @@ interface NewChatContextDialogProps {
 	reasoningEffortLoading: boolean;
 	reasoningEffortOptions: string[];
 	recentWorkspaces: string[];
+	runners: Runner[];
+	runnerIdDraft: string;
 	onCancel: () => void;
 	onCommit: () => void;
 	onCwdInputBlur: () => void;
@@ -25,6 +27,7 @@ interface NewChatContextDialogProps {
 	onProfileDraftChange: (profileName: string) => void;
 	onReasoningEffortDraftChange: (reasoningEffort: string) => void;
 	onRecentWorkspaceSelect: (path: string) => void;
+	onRunnerDraftChange: (runnerId: string) => void;
 	onSelectCwdSuggestion: (path: string) => void;
 }
 
@@ -79,6 +82,8 @@ const NewChatContextDialog = React.forwardRef<
 			reasoningEffortLoading,
 			reasoningEffortOptions,
 			recentWorkspaces,
+			runners,
+			runnerIdDraft,
 			onCancel,
 			onCommit,
 			onCwdInputBlur,
@@ -88,10 +93,16 @@ const NewChatContextDialog = React.forwardRef<
 			onProfileDraftChange,
 			onReasoningEffortDraftChange,
 			onRecentWorkspaceSelect,
+			onRunnerDraftChange,
 			onSelectCwdSuggestion,
 		},
 		ref,
-	) => (
+	) => {
+		const selectedRunner = runners.find((runner) => runner.id === runnerIdDraft);
+		const selectedRunnerAvailable =
+			runnerIdDraft === "" ||
+			Boolean(selectedRunner?.connected && selectedRunner.status === "idle");
+		return (
 		<div className="new-chat-dialog-backdrop new-chat-context-backdrop">
 			<div
 				aria-labelledby="new-chat-dialog-title"
@@ -170,6 +181,52 @@ const NewChatContextDialog = React.forwardRef<
 							</div>
 						</label>
 
+						<label className="new-chat-field new-chat-field-wide new-chat-choice-card">
+							<span className="new-chat-field-label">Environment</span>
+							<div className="new-chat-select-shell">
+								<select
+									aria-label="Environment"
+									className="new-chat-field-control new-chat-field-control-select"
+									data-testid="new-chat-runner-select"
+									onChange={(event) => onRunnerDraftChange(event.target.value)}
+									value={runnerIdDraft}
+								>
+									<option value="">Local control-plane workspace</option>
+									{runners.map((runner) => {
+										const available = runner.connected && runner.status === "idle";
+										const name = runner.displayName || runner.workspace.name || runner.id;
+										return (
+											<option disabled={!available} key={runner.id} value={runner.id}>
+												{name} — {runner.host.hostname} — {runner.status}
+											</option>
+										);
+									})}
+								</select>
+								<span className="new-chat-select-chevron" aria-hidden="true">
+									<ChevronDown className="h-4 w-4" strokeWidth={1.8} />
+								</span>
+							</div>
+						</label>
+
+						{selectedRunner ? (
+							<div className="new-chat-field new-chat-field-wide new-chat-workspace-card">
+								<span className="new-chat-field-label">Runner workspace</span>
+								<div className="new-chat-directory-shell">
+									<FolderOpen
+										aria-hidden="true"
+										className="new-chat-directory-icon"
+										strokeWidth={1.6}
+									/>
+									<div className="new-chat-field-control new-chat-field-control-mono new-chat-directory-control">
+										{selectedRunner.workspace.path}
+									</div>
+								</div>
+								<span className="new-chat-recent-workspace-parent">
+									{selectedRunner.host.hostname} · {selectedRunner.status}
+									{selectedRunner.manifestChanged ? " · manifest changed" : ""}
+								</span>
+							</div>
+						) : (
 						<div className="new-chat-field new-chat-field-wide new-chat-workspace-card">
 							<label className="new-chat-field-label" htmlFor="new-chat-cwd">
 								Working directory
@@ -297,6 +354,7 @@ const NewChatContextDialog = React.forwardRef<
 								</div>
 							) : null}
 						</div>
+						)}
 					</div>
 				</div>
 
@@ -311,7 +369,7 @@ const NewChatContextDialog = React.forwardRef<
 						</button>
 						<button
 							className="new-chat-primary-button"
-							disabled={reasoningEffortLoading}
+							disabled={reasoningEffortLoading || !selectedRunnerAvailable}
 							onClick={onCommit}
 							type="button"
 						>
@@ -326,7 +384,8 @@ const NewChatContextDialog = React.forwardRef<
 				</div>
 			</div>
 		</div>
-	),
+		);
+	},
 );
 
 NewChatContextDialog.displayName = "NewChatContextDialog";

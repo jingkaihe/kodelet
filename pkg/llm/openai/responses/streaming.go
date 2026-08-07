@@ -419,7 +419,10 @@ streamLoop:
 		})
 	}
 
-	toolExecutions := t.executeFunctionCallsParallel(ctx, functionCalls, handler)
+	toolExecutions, err := t.executeFunctionCallsParallel(ctx, functionCalls, handler)
+	if err != nil {
+		return result(), err
+	}
 	for i, toolExecution := range toolExecutions {
 		functionCall := functionCalls[i]
 		toolResult := toolExecution.Result
@@ -638,7 +641,7 @@ func (t *Thread) executeFunctionCallsParallel(
 	ctx context.Context,
 	functionCalls []functionCallInvocation,
 	handler llmtypes.MessageHandler,
-) []base.ToolExecution {
+) ([]base.ToolExecution, error) {
 	toolExecutions := make([]base.ToolExecution, len(functionCalls))
 	type completedToolExecution struct {
 		index     int
@@ -671,10 +674,9 @@ func (t *Thread) executeFunctionCallsParallel(
 
 			completed <- completedToolExecution{
 				index: i,
-				execution: base.ExecuteToolWithHandler(
+				execution: base.ExecuteEnvironmentToolWithHandler(
 					ctx,
 					t,
-					t.State,
 					t.RendererRegistry,
 					functionCall.name,
 					functionCall.arguments,
@@ -692,11 +694,19 @@ func (t *Thread) executeFunctionCallsParallel(
 
 	for result := range completed {
 		toolExecutions[result.index] = result.execution
+		if result.execution.Err != nil {
+			continue
+		}
 		functionCall := functionCalls[result.index]
 		handler.HandleToolResult(functionCall.callID, functionCall.name, result.execution.Result)
 	}
 
-	return toolExecutions
+	for i, execution := range toolExecutions {
+		if execution.Err != nil {
+			return nil, errors.Wrapf(execution.Err, "failed to execute tool %s", functionCalls[i].name)
+		}
+	}
+	return toolExecutions, nil
 }
 
 // updateUsage updates the thread's usage statistics from a response.

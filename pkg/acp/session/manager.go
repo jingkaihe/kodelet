@@ -10,11 +10,11 @@ import (
 	"github.com/hashicorp/go-multierror"
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
 	"github.com/jingkaihe/kodelet/pkg/acp/bridge"
+	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
-	"github.com/jingkaihe/kodelet/pkg/tools"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	pkgerrors "github.com/pkg/errors"
@@ -24,7 +24,6 @@ import (
 type Session struct {
 	ID         acptypes.SessionID
 	Thread     llmtypes.Thread
-	State      *tools.BasicState
 	Extensions *extensions.Runtime
 	CWD        string
 
@@ -244,27 +243,18 @@ func (m *Manager) NewSession(ctx context.Context, req acptypes.NewSessionRequest
 		return nil, pkgerrors.Wrap(err, "failed to create LLM thread")
 	}
 
-	var stateOpts []tools.BasicStateOption
-	stateOpts = append(stateOpts, tools.WithWorkingDirectory(req.CWD))
-	stateOpts = append(stateOpts, tools.WithLLMConfig(llmConfig))
-	stateOpts = append(stateOpts, tools.WithMainTools())
-
-	if !m.config.NoSkills {
-		stateOpts = append(stateOpts, tools.WithSkillTool())
+	if err := llm.SetEnvironment(thread, agentenv.NewLocalEnvironment(req.CWD, extensionRuntime)); err != nil {
+		_ = llm.CloseThread(thread)
+		if extensionRuntime != nil {
+			_ = extensionRuntime.Close()
+		}
+		return nil, pkgerrors.Wrap(err, "failed to configure agent environment")
 	}
-
-	if extensionRuntime != nil {
-		stateOpts = append(stateOpts, tools.WithExtensionTools(extensionRuntime.Tools()))
-	}
-
-	state := tools.NewBasicState(ctx, stateOpts...)
-	thread.SetState(state)
 	thread.EnablePersistence(ctx, true)
 
 	session := &Session{
 		ID:           acptypes.SessionID(thread.GetConversationID()),
 		Thread:       thread,
-		State:        state,
 		Extensions:   extensionRuntime,
 		CWD:          req.CWD,
 		maxTurns:     m.config.MaxTurns,
@@ -304,27 +294,18 @@ func (m *Manager) LoadSession(ctx context.Context, req acptypes.LoadSessionReque
 
 	thread.SetConversationID(string(req.SessionID))
 
-	var stateOpts []tools.BasicStateOption
-	stateOpts = append(stateOpts, tools.WithWorkingDirectory(req.CWD))
-	stateOpts = append(stateOpts, tools.WithLLMConfig(llmConfig))
-	stateOpts = append(stateOpts, tools.WithMainTools())
-
-	if !m.config.NoSkills {
-		stateOpts = append(stateOpts, tools.WithSkillTool())
+	if err := llm.SetEnvironment(thread, agentenv.NewLocalEnvironment(req.CWD, extensionRuntime)); err != nil {
+		_ = llm.CloseThread(thread)
+		if extensionRuntime != nil {
+			_ = extensionRuntime.Close()
+		}
+		return nil, pkgerrors.Wrap(err, "failed to configure agent environment")
 	}
-
-	if extensionRuntime != nil {
-		stateOpts = append(stateOpts, tools.WithExtensionTools(extensionRuntime.Tools()))
-	}
-
-	state := tools.NewBasicState(ctx, stateOpts...)
-	thread.SetState(state)
 	thread.EnablePersistence(ctx, true)
 
 	session := &Session{
 		ID:           req.SessionID,
 		Thread:       thread,
-		State:        state,
 		Extensions:   extensionRuntime,
 		CWD:          req.CWD,
 		maxTurns:     m.config.MaxTurns,

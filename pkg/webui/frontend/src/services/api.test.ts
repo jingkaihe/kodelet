@@ -222,6 +222,39 @@ describe("ApiService", () => {
 		});
 	});
 
+	describe("getRunners", () => {
+		it("fetches registered runners", async () => {
+			const runners = [
+				{
+					id: "runner-1",
+					host: {
+						instanceId: "host-1",
+						hostname: "worker",
+						os: "linux",
+						arch: "amd64",
+					},
+					workspace: { path: "/workspace/project", name: "project" },
+					manifestChanged: false,
+					status: "idle",
+					connected: true,
+					generation: 1,
+				},
+			];
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({ runners }),
+			});
+
+			const result = await apiService.getRunners();
+
+			expect(mockFetch).toHaveBeenCalledWith(
+				"/api/runners",
+				expect.any(Object),
+			);
+			expect(result.runners).toEqual(runners);
+		});
+	});
+
 	describe("getChatSettings", () => {
 		it("fetches chat settings", async () => {
 			mockFetch.mockResolvedValueOnce({

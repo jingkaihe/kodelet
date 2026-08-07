@@ -11,6 +11,9 @@ import (
 )
 
 func rendererForConfig(llmConfig llm.Config) (*Renderer, error) {
+	if llmConfig.SyspromptInline || llmConfig.SyspromptContent != "" {
+		return newRendererFromCustomTemplateContent(llmConfig.SyspromptContent, llmConfig.Sysprompt)
+	}
 	if strings.TrimSpace(llmConfig.Sysprompt) == "" {
 		return defaultRenderer, nil
 	}
@@ -20,6 +23,20 @@ func rendererForConfig(llmConfig llm.Config) (*Renderer, error) {
 		return defaultRenderer, errors.Wrapf(err, "failed to load custom sysprompt %s", llmConfig.Sysprompt)
 	}
 
+	return renderer, nil
+}
+
+func newRendererFromCustomTemplateContent(content, source string) (*Renderer, error) {
+	overrides := map[string]string{
+		SystemTemplate: content,
+	}
+	renderer := NewRendererWithTemplateOverride(TemplateFS, overrides)
+	if renderer.parseErr != nil {
+		if strings.TrimSpace(source) == "" {
+			source = "agent environment"
+		}
+		return nil, errors.Wrapf(renderer.parseErr, "failed to parse custom sysprompt template from %s", source)
+	}
 	return renderer, nil
 }
 
@@ -34,16 +51,7 @@ func newRendererFromCustomTemplate(templatePath string) (*Renderer, error) {
 		return nil, err
 	}
 
-	overrides := map[string]string{
-		SystemTemplate: content,
-	}
-
-	renderer := NewRendererWithTemplateOverride(TemplateFS, overrides)
-	if renderer.parseErr != nil {
-		return nil, errors.Wrapf(renderer.parseErr, "failed to parse custom sysprompt template %s", resolvedPath)
-	}
-
-	return renderer, nil
+	return newRendererFromCustomTemplateContent(content, resolvedPath)
 }
 
 func resolveCustomTemplatePath(path string) (string, error) {

@@ -90,6 +90,8 @@ const meta = {
 		reasoningEffortLoading: false,
 		reasoningEffortOptions: ["low", "medium", "high"],
 		recentWorkspaces,
+		runners: [],
+		runnerIdDraft: "",
 		onCancel: fn(),
 		onCommit: fn(),
 		onCwdInputBlur: fn(),
@@ -99,6 +101,7 @@ const meta = {
 		onProfileDraftChange: fn(),
 		onReasoningEffortDraftChange: fn(),
 		onRecentWorkspaceSelect: fn(),
+		onRunnerDraftChange: fn(),
 		onSelectCwdSuggestion: fn(),
 	},
 } satisfies Meta<typeof NewChatContextDialog>;

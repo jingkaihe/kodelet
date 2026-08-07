@@ -19,6 +19,27 @@ func TestSystemPrompt(t *testing.T) {
 	assert.Contains(t, prompt, "System Information")
 }
 
+func TestSystemPromptUsesInlineAgentEnvironmentTemplate(t *testing.T) {
+	prompt := SystemPrompt("gpt-test", llm.Config{
+		Provider:         "openai",
+		WorkingDirectory: "/runner/workspace",
+		Sysprompt:        "/runner/custom.tmpl",
+		SyspromptContent: "runner={{.WorkingDirectory}} project={{index .Args \"project\"}}",
+		SyspromptInline:  true,
+		SyspromptArgs:    map[string]string{"project": "kodelet"},
+	}, nil)
+	assert.Equal(t, "runner=/runner/workspace project=kodelet", prompt)
+}
+
+func TestSystemPromptSupportsIntentionallyEmptyInlineTemplate(t *testing.T) {
+	prompt := SystemPrompt("gpt-test", llm.Config{
+		Provider:        "openai",
+		Sysprompt:       "/runner/empty.tmpl",
+		SyspromptInline: true,
+	}, nil)
+	assert.Empty(t, prompt)
+}
+
 func TestSystemPrompt_WithContexts(t *testing.T) {
 	contexts := map[string]string{
 		"/path/to/project/AGENTS.md":        "# Project Guidelines\nThis is the main project context.",

@@ -18,6 +18,7 @@ import {
 	ForkConversationResponse,
 	ToolResult,
 	UIInputResponseResult,
+	RunnerListResponse,
 } from "../types";
 
 class ApiService {
@@ -109,6 +110,10 @@ class ApiService {
 
 	async getConversation(id: string): Promise<Conversation> {
 		return this.request<Conversation>(`/api/conversations/${id}`);
+	}
+
+	async getRunners(): Promise<RunnerListResponse> {
+		return this.request<RunnerListResponse>("/api/runners");
 	}
 
 	async getChatSettings(profile?: string): Promise<ChatSettings> {

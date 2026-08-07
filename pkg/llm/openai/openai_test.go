@@ -736,6 +736,15 @@ func TestAddUserMessageGoalContextWithImagesSeparatesAttachments(t *testing.T) {
 	assert.Empty(t, goalMessage.MultiContent)
 }
 
+func TestAddAssistantMessage(t *testing.T) {
+	thread := &Thread{}
+	thread.AddAssistantMessage(t.Context(), "Direct response")
+
+	require.Len(t, thread.messages, 1)
+	assert.Equal(t, openai.ChatMessageRoleAssistant, thread.messages[0].Role)
+	assert.Equal(t, "Direct response", thread.messages[0].Content)
+}
+
 func TestAddUserMessageWithTooManyImages(t *testing.T) {
 	skipIfNoOpenAIAPIKey(t)
 

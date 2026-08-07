@@ -49,10 +49,52 @@ var virtualToolNames = []string{
 	"openai_web_search",
 }
 
+var controlPlaneToolNames = []string{
+	"get_goal",
+	"update_goal",
+	"read_conversation",
+}
+
 // VirtualToolNames returns tool names that are exposed directly by providers
 // rather than through the executable tool registry.
 func VirtualToolNames() []string {
 	return append([]string(nil), virtualToolNames...)
+}
+
+// ControlPlaneToolNames returns host tools that execute beside central conversation state.
+func ControlPlaneToolNames() []string {
+	return append([]string(nil), controlPlaneToolNames...)
+}
+
+// IsControlPlaneTool reports whether a registered host tool belongs to the control plane.
+func IsControlPlaneTool(name string) bool {
+	name = strings.TrimSpace(name)
+	for _, candidate := range controlPlaneToolNames {
+		if name == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+// ControlPlaneTool returns a registered control-plane tool by name.
+func ControlPlaneTool(name string) (tooltypes.Tool, bool) {
+	if !IsControlPlaneTool(name) {
+		return nil, false
+	}
+	tool, ok := toolRegistry[strings.TrimSpace(name)]
+	return tool, ok
+}
+
+// ControlPlaneTools returns all registered control-plane tool implementations.
+func ControlPlaneTools() []tooltypes.Tool {
+	result := make([]tooltypes.Tool, 0, len(controlPlaneToolNames))
+	for _, name := range controlPlaneToolNames {
+		if tool, ok := toolRegistry[name]; ok {
+			result = append(result, tool)
+		}
+	}
+	return result
 }
 
 // NoToolsMarker is a special value indicating no tools should be enabled
@@ -258,6 +300,20 @@ func RunToolWithUpdates(
 			Error: errors.Wrap(err, "failed to find tool").Error(),
 		}
 	}
+	return RunToolImplementationWithUpdates(ctx, state, tool, parameters, onUpdate)
+}
+
+// RunToolImplementationWithUpdates validates and executes a specific tool implementation.
+func RunToolImplementationWithUpdates(
+	ctx context.Context,
+	state tooltypes.State,
+	tool tooltypes.Tool,
+	parameters string,
+	onUpdate tooltypes.ToolUpdateCallback,
+) tooltypes.ToolResult {
+	if tool == nil {
+		return tooltypes.BaseToolResult{Error: "tool implementation is required"}
+	}
 
 	kvs, err := tool.TracingKVs(parameters)
 	if err != nil {
@@ -266,7 +322,7 @@ func RunToolWithUpdates(
 
 	ctx, span := tracer.Start(
 		ctx,
-		fmt.Sprintf("tools.run_tool.%s", toolName),
+		fmt.Sprintf("tools.run_tool.%s", tool.Name()),
 		trace.WithAttributes(kvs...),
 	)
 	defer span.End()

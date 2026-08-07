@@ -66,6 +66,19 @@ func TestGetAvailableToolNames(t *testing.T) {
 	assert.Equal(t, len(toolRegistry)+len(virtualToolNames), len(tools))
 }
 
+func TestControlPlaneToolClassification(t *testing.T) {
+	assert.Equal(t, []string{"get_goal", "update_goal", "read_conversation"}, ControlPlaneToolNames())
+	assert.True(t, IsControlPlaneTool("get_goal"))
+	assert.True(t, IsControlPlaneTool("read_conversation"))
+	assert.False(t, IsControlPlaneTool("bash"))
+
+	tool, ok := ControlPlaneTool("update_goal")
+	require.True(t, ok)
+	assert.Equal(t, "update_goal", tool.Name())
+	_, ok = ControlPlaneTool("bash")
+	assert.False(t, ok)
+}
+
 func TestValidateTools_ValidTools(t *testing.T) {
 	validTools := []string{"bash", "file_read", "file_write"}
 	err := ValidateTools(validTools)

@@ -87,6 +87,8 @@ type fakeMetadataThread struct {
 	persisted      bool
 	saveCalls      int
 	sendCalls      int
+	userMessages   []string
+	assistantMsgs  []string
 	closed         bool
 	extensions     any
 }
@@ -95,7 +97,13 @@ func (f *fakeMetadataThread) SetState(tooltypes.State) {}
 
 func (f *fakeMetadataThread) GetState() tooltypes.State { return nil }
 
-func (f *fakeMetadataThread) AddUserMessage(context.Context, string, ...string) {}
+func (f *fakeMetadataThread) AddUserMessage(_ context.Context, message string, _ ...string) {
+	f.userMessages = append(f.userMessages, message)
+}
+
+func (f *fakeMetadataThread) AddAssistantMessage(_ context.Context, message string) {
+	f.assistantMsgs = append(f.assistantMsgs, message)
+}
 
 func (f *fakeMetadataThread) SendMessage(context.Context, string, llmtypes.MessageHandler, llmtypes.MessageOpt) (string, error) {
 	f.sendCalls++
@@ -270,6 +278,34 @@ func TestDefaultChatRunnerRenameCommandPersistsWithoutCallingModel(t *testing.T)
 	require.NotNil(t, sink.events[1].UINotify)
 	assert.Equal(t, "Conversation renamed", sink.events[1].UINotify.Title)
 	assert.Equal(t, `Renamed to "Authentication cleanup"`, sink.events[1].UINotify.Message)
+}
+
+func TestPersistDirectCommandResponseWithoutCallingModel(t *testing.T) {
+	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}
+	fingerprint, err := chatThreadConfigFingerprint(config)
+	require.NoError(t, err)
+	thread := &fakeMetadataThread{conversationID: "conv-command"}
+	runner := NewDefaultChatRunner("/workspace")
+	runner.sessions[thread.conversationID] = &defaultChatSession{
+		thread:            thread,
+		configFingerprint: fingerprint,
+		lastUsed:          time.Now(),
+	}
+
+	require.NoError(t, persistDirectCommandResponse(
+		t.Context(),
+		runner,
+		thread.conversationID,
+		config,
+		"/doctor",
+		"Everything is healthy.",
+		nil,
+	))
+	assert.True(t, thread.persisted)
+	assert.Equal(t, []string{"/doctor"}, thread.userMessages)
+	assert.Equal(t, []string{"Everything is healthy."}, thread.assistantMsgs)
+	assert.Equal(t, 1, thread.saveCalls)
+	assert.Zero(t, thread.sendCalls)
 }
 
 func TestAcquireChatThreadRejectsSessionDetachedDuringClose(t *testing.T) {

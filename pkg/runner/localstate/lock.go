@@ -1,0 +1,227 @@
+package localstate
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/pkg/errors"
+)
+
+// LockMetadata is diagnostic process information stored in the advisory lock file.
+type LockMetadata struct {
+	Version     int        `json:"version"`
+	PID         int        `json:"pid"`
+	Hostname    string     `json:"hostname"`
+	Workspace   string     `json:"workspace"`
+	Server      string     `json:"server"`
+	RunnerID    string     `json:"runnerId,omitempty"`
+	DisplayName string     `json:"displayName,omitempty"`
+	StartedAt   time.Time  `json:"startedAt"`
+	StoppedAt   *time.Time `json:"stoppedAt,omitempty"`
+}
+
+// WorkspaceLock holds the OS-level advisory lock for one canonical workspace.
+type WorkspaceLock struct {
+	mu       sync.Mutex
+	file     *os.File
+	path     string
+	metadata LockMetadata
+	closed   bool
+}
+
+// LockHeldError reports diagnostics from an already-running workspace runner.
+type LockHeldError struct {
+	Path     string
+	Metadata LockMetadata
+}
+
+func (e *LockHeldError) Error() string {
+	if e == nil {
+		return "runner workspace lock is held"
+	}
+	details := make([]string, 0, 6)
+	if workspace := strings.TrimSpace(e.Metadata.Workspace); workspace != "" {
+		details = append(details, fmt.Sprintf("workspace %q", workspace))
+	}
+	if e.Metadata.PID > 0 {
+		details = append(details, fmt.Sprintf("pid %d", e.Metadata.PID))
+	}
+	if runnerID := strings.TrimSpace(e.Metadata.RunnerID); runnerID != "" {
+		details = append(details, fmt.Sprintf("runner %q", runnerID))
+	}
+	if server := strings.TrimSpace(e.Metadata.Server); server != "" {
+		details = append(details, fmt.Sprintf("server %q", server))
+	}
+	if !e.Metadata.StartedAt.IsZero() {
+		details = append(details, fmt.Sprintf("started %s", e.Metadata.StartedAt.UTC().Format(time.RFC3339)))
+	}
+	if path := strings.TrimSpace(e.Path); path != "" {
+		details = append(details, fmt.Sprintf("lock %q", path))
+	}
+	if len(details) == 0 {
+		return "workspace already has a runner process"
+	}
+	return fmt.Sprintf("workspace already has a runner process (%s)", strings.Join(details, ", "))
+}
+
+// AcquireWorkspaceLock acquires the non-blocking advisory lock for a canonical workspace.
+func (s *Store) AcquireWorkspaceLock(workspace string, metadata LockMetadata) (*WorkspaceLock, error) {
+	if s == nil {
+		return nil, errors.New("runner state store is required")
+	}
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return nil, errors.New("runner workspace is required")
+	}
+	path := filepath.Join(s.root, "locks", stateKey(workspace)+".lock")
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to open runner workspace lock")
+	}
+	if err := file.Chmod(0o600); err != nil {
+		_ = file.Close()
+		return nil, errors.Wrap(err, "failed to secure runner workspace lock")
+	}
+	if err := tryLockFile(file); err != nil {
+		_ = file.Close()
+		existing, _ := readLockMetadata(path)
+		existing.Workspace = workspace
+		return nil, &LockHeldError{Path: path, Metadata: existing}
+	}
+	lock := &WorkspaceLock{file: file, path: path}
+	metadata.Version = stateVersion
+	metadata.Workspace = workspace
+	metadata.StoppedAt = nil
+	if metadata.StartedAt.IsZero() {
+		metadata.StartedAt = time.Now().UTC()
+	}
+	if err := lock.WriteMetadata(metadata); err != nil {
+		_ = unlockFile(file)
+		_ = file.Close()
+		return nil, err
+	}
+	return lock, nil
+}
+
+// WorkspaceLockPath returns the diagnostic lock-file path for a canonical workspace.
+func (s *Store) WorkspaceLockPath(workspace string) string {
+	if s == nil || strings.TrimSpace(workspace) == "" {
+		return ""
+	}
+	return filepath.Join(s.root, "locks", stateKey(strings.TrimSpace(workspace))+".lock")
+}
+
+// ReadWorkspaceLockMetadata reads the latest diagnostic lock metadata without acquiring the lock.
+func (s *Store) ReadWorkspaceLockMetadata(workspace string) (LockMetadata, bool, error) {
+	path := s.WorkspaceLockPath(workspace)
+	if path == "" {
+		return LockMetadata{}, false, errors.New("runner workspace is required")
+	}
+	metadata, err := readLockMetadata(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return LockMetadata{}, false, nil
+	}
+	if err != nil {
+		return LockMetadata{}, false, err
+	}
+	return metadata, true, nil
+}
+
+// Path returns the diagnostic lock-file path.
+func (l *WorkspaceLock) Path() string {
+	if l == nil {
+		return ""
+	}
+	return l.path
+}
+
+// Metadata returns the latest metadata written by this process.
+func (l *WorkspaceLock) Metadata() LockMetadata {
+	if l == nil {
+		return LockMetadata{}
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.metadata
+}
+
+// WriteMetadata updates the diagnostic JSON while retaining the advisory lock.
+func (l *WorkspaceLock) WriteMetadata(metadata LockMetadata) error {
+	if l == nil || l.file == nil {
+		return errors.New("runner workspace lock is required")
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.closed {
+		return errors.New("runner workspace lock is closed")
+	}
+	metadata.Version = stateVersion
+	payload, err := json.MarshalIndent(metadata, "", "  ")
+	if err != nil {
+		return errors.Wrap(err, "failed to encode runner lock metadata")
+	}
+	payload = append(payload, '\n')
+	if err := l.file.Truncate(0); err != nil {
+		return errors.Wrap(err, "failed to truncate runner lock metadata")
+	}
+	if _, err := l.file.Seek(0, io.SeekStart); err != nil {
+		return errors.Wrap(err, "failed to seek runner lock metadata")
+	}
+	if _, err := l.file.Write(payload); err != nil {
+		return errors.Wrap(err, "failed to write runner lock metadata")
+	}
+	if err := l.file.Sync(); err != nil {
+		return errors.Wrap(err, "failed to sync runner lock metadata")
+	}
+	l.metadata = metadata
+	return nil
+}
+
+// Close records a stop time and releases the advisory lock.
+func (l *WorkspaceLock) Close() error {
+	if l == nil || l.file == nil {
+		return nil
+	}
+	l.mu.Lock()
+	if l.closed {
+		l.mu.Unlock()
+		return nil
+	}
+	stoppedAt := time.Now().UTC()
+	metadata := l.metadata
+	metadata.StoppedAt = &stoppedAt
+	l.mu.Unlock()
+	writeErr := l.WriteMetadata(metadata)
+
+	l.mu.Lock()
+	l.closed = true
+	file := l.file
+	l.mu.Unlock()
+	unlockErr := unlockFile(file)
+	closeErr := file.Close()
+	if writeErr != nil {
+		return writeErr
+	}
+	if unlockErr != nil {
+		return errors.Wrap(unlockErr, "failed to unlock runner workspace")
+	}
+	return closeErr
+}
+
+func readLockMetadata(path string) (LockMetadata, error) {
+	payload, err := os.ReadFile(path)
+	if err != nil {
+		return LockMetadata{}, err
+	}
+	var metadata LockMetadata
+	if err := json.Unmarshal(payload, &metadata); err != nil {
+		return LockMetadata{}, err
+	}
+	return metadata, nil
+}

@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/auth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
@@ -607,28 +608,11 @@ var runCmd = &cobra.Command{
 
 		applyRunToolRestrictions(&llmConfig, fragmentMetadata, config.NoTools)
 
-		var stateOpts []tools.BasicStateOption
-		stateOpts = append(stateOpts, tools.WithWorkingDirectory(llmConfig.WorkingDirectory))
-		stateOpts = append(stateOpts, tools.WithLLMConfig(llmConfig))
-		if !config.NoTools {
-			if extensionRuntime != nil {
-				stateOpts = append(stateOpts, tools.WithExtensionTools(extensionRuntime.Tools()))
-			}
-
-			stateOpts = append(stateOpts, tools.WithMainTools())
-
-			// Initialize skills (discovery happens inside WithSkillTool)
-			stateOpts = append(stateOpts, tools.WithSkillTool())
-
-		}
-
 		// Generate session ID (use resume ID if available, otherwise new ID)
 		sessionID := config.ResumeConvID
 		if sessionID == "" {
 			sessionID = convtypes.GenerateID()
 		}
-
-		appState := tools.NewBasicState(ctx, stateOpts...)
 
 		if config.ResultOnly {
 			presenter.SetQuiet(true)
@@ -642,7 +626,10 @@ var runCmd = &cobra.Command{
 			return
 		}
 		defer func() { _ = llm.CloseThread(thread) }()
-		thread.SetState(appState)
+		if err := llm.SetEnvironment(thread, agentenv.NewLocalEnvironment(llmConfig.WorkingDirectory, extensionRuntime)); err != nil {
+			presenter.Error(err, "Failed to configure agent environment")
+			return
+		}
 		thread.SetConversationID(sessionID)
 
 		if config.ResumeConvID != "" && !config.ResultOnly {

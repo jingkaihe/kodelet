@@ -100,7 +100,7 @@ func TestBroadcastingEventSinkBroadcastsOnSuccessAndFailure(t *testing.T) {
 	event := ChatEvent{Kind: "text", ConversationID: "conv-123", Role: "assistant", Content: "hi"}
 
 	require.NoError(t, sink.Send(event))
-	assert.Equal(t, []ChatEvent{event}, primary.events)
+	assert.Equal(t, []ChatEvent{event}, primary.Events())
 	assert.Equal(t, []ChatEvent{event}, broadcasted)
 
 	wantErr := errors.New("write failed")

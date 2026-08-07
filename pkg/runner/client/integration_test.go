@@ -1,0 +1,144 @@
+package client
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/gorilla/websocket"
+	"github.com/jingkaihe/kodelet/pkg/extensions"
+	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestRunnerServiceRoundTripsThroughSymmetricWebsocketProtocol(t *testing.T) {
+	workspace := t.TempDir()
+	filePath := filepath.Join(workspace, "wire.txt")
+	require.NoError(t, os.WriteFile(filePath, []byte("over the wire\n"), 0o600))
+
+	registry, err := runnerregistry.New(t.Context(), runnerregistry.Options{
+		HeartbeatInterval: time.Hour,
+		HeartbeatTimeout:  2 * time.Hour,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, registry.Close()) })
+
+	upgrader := websocket.Upgrader{
+		Subprotocols: []string{protocol.Subprotocol},
+		CheckOrigin:  func(*http.Request) bool { return true },
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		session := runnerregistry.NewSession(registry, nil)
+		peer, err := protocol.NewPeer(conn, protocol.PeerConfig{
+			RequestPrefix: "server",
+			Handler:       session,
+			Notifications: session,
+		})
+		if err != nil {
+			_ = conn.Close()
+			return
+		}
+		session.Attach(peer)
+		if err := peer.Start(r.Context()); err != nil {
+			_ = peer.Close()
+			return
+		}
+		<-peer.Done()
+		session.Detach(peer.Err())
+	}))
+	t.Cleanup(server.Close)
+
+	runtime := extensions.EmptyRuntime()
+	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
+	service, err := NewService(t.Context(), workspace, ServiceOptions{
+		RuntimeProvider: staticRuntimeProvider{runtime: runtime},
+		ConfigLoader: func(string) (llmtypes.Config, error) {
+			return llmtypes.Config{AllowedTools: []string{"file_read"}}, nil
+		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+
+	dialer := websocket.Dialer{Subprotocols: []string{protocol.Subprotocol}}
+	conn, response, err := dialer.Dial("ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if response != nil && response.Body != nil {
+		t.Cleanup(func() { _ = response.Body.Close() })
+	}
+	require.NoError(t, err)
+	peer, err := protocol.NewPeer(conn, protocol.PeerConfig{
+		RequestPrefix: "runner",
+		Handler:       service,
+		Notifications: service,
+	})
+	require.NoError(t, err)
+	service.Attach(peer)
+	require.NoError(t, peer.Start(t.Context()))
+	t.Cleanup(func() { require.NoError(t, peer.Close()) })
+
+	var registration protocol.RegisterResult
+	require.NoError(t, peer.Call(t.Context(), protocol.MethodRunnerRegister, protocol.RegisterParams{
+		ProtocolVersions: []int{protocol.Version},
+		Host: protocol.Host{
+			InstanceID: "host-1",
+			Hostname:   "runner-host",
+			OS:         "linux",
+			Arch:       "amd64",
+		},
+		Workspace: protocol.Workspace{Path: workspace, Name: filepath.Base(workspace)},
+	}, &registration))
+	require.NoError(t, service.SetRegistration(registration))
+	require.NoError(t, peer.Notify(t.Context(), protocol.MethodRunnerHeartbeat, protocol.HeartbeatParams{
+		RunnerID:   registration.RunnerID,
+		Generation: registration.Generation,
+		State:      protocol.RunnerStateIdle,
+	}))
+	require.Eventually(t, func() bool {
+		runner, ok := registry.Runner(registration.RunnerID)
+		return ok && runner.Status == runnerregistry.RunnerStatusIdle
+	}, time.Second, 10*time.Millisecond)
+
+	manifest, err := registry.OpenRun(t.Context(), registration.RunnerID, protocol.RunOpenParams{
+		RunID:             "run-wire",
+		ConversationID:    "conversation-wire",
+		ReservedToolNames: []string{"get_goal", "update_goal", "read_conversation"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "run-wire", manifest.RunID)
+	assert.Contains(t, manifestToolNames(manifest), "file_read")
+
+	var lifecycle protocol.LifecycleDispatchResult
+	require.NoError(t, registry.CallRun(t.Context(), "run-wire", protocol.MethodLifecycleDispatch, protocol.LifecycleDispatchParams{
+		RunID:        "run-wire",
+		Event:        protocol.LifecycleAgentInit,
+		SystemPrompt: "wire prompt",
+		AllowedTools: []string{"file_read"},
+	}, &lifecycle))
+	assert.Equal(t, "wire prompt", lifecycle.SystemPrompt)
+
+	result, err := registry.ExecuteTool(t.Context(), protocol.ToolExecuteParams{
+		RunID:      "run-wire",
+		ToolCallID: "tool-wire",
+		Name:       "file_read",
+		Input:      json.RawMessage(`{"file_path":"` + filePath + `","offset":1,"line_limit":10}`),
+	}, nil)
+	require.NoError(t, err)
+	assert.Contains(t, result.Result.AssistantFacing, "over the wire")
+	assert.True(t, result.Result.Structured.Success)
+
+	require.NoError(t, registry.CloseRun(t.Context(), "run-wire", runnerregistry.RunStatusSucceeded, nil))
+	run, ok := registry.Run("run-wire")
+	require.True(t, ok)
+	assert.Equal(t, runnerregistry.RunStatusSucceeded, run.Status)
+}

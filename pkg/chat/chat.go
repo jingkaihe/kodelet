@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	conversationservice "github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
@@ -28,12 +29,20 @@ import (
 
 // ChatRequest is the payload for a streamed chat turn.
 type ChatRequest struct {
-	Message         string             `json:"message"`
-	Content         []ChatContentBlock `json:"content,omitempty"`
-	ConversationID  string             `json:"conversationId,omitempty"`
-	Profile         string             `json:"profile,omitempty"`
-	ReasoningEffort string             `json:"reasoningEffort,omitempty"`
-	CWD             string             `json:"cwd,omitempty"`
+	Message            string                  `json:"message"`
+	Content            []ChatContentBlock      `json:"content,omitempty"`
+	ConversationID     string                  `json:"conversationId,omitempty"`
+	RunnerID           string                  `json:"runnerId,omitempty"`
+	Profile            string                  `json:"profile,omitempty"`
+	ReasoningEffort    string                  `json:"reasoningEffort,omitempty"`
+	CWD                string                  `json:"cwd,omitempty"`
+	ClientCapabilities *ChatClientCapabilities `json:"clientCapabilities,omitempty"`
+}
+
+// ChatClientCapabilities describes UI behavior supported by the client attached to a chat run.
+type ChatClientCapabilities struct {
+	InteractiveUI      bool `json:"interactiveUI"`
+	PersistentSurfaces bool `json:"persistentSurfaces"`
 }
 
 // ChatContentBlock represents a typed chat content block.
@@ -134,13 +143,19 @@ type contextualExtensionRuntimeProvider interface {
 	RuntimeWithCallContext(ctx context.Context, cwd string, callContext extensions.ExtensionCallContext) (*extensions.Runtime, error)
 }
 
+// EnvironmentResolver optionally selects a non-local environment for a chat request.
+type EnvironmentResolver interface {
+	ResolveEnvironment(ctx context.Context, req ChatRequest, conversationID string, config llmtypes.Config, resolvedCWD string) (agentenv.Environment, error)
+}
+
 // DefaultChatRunner executes chat turns using the same LLM/tool stack as the CLI.
 type DefaultChatRunner struct {
-	defaultCWD        string
-	extensionRuntimes ExtensionRuntimeProvider
-	sessionsMu        sync.Mutex
-	sessions          map[string]*defaultChatSession
-	closed            bool
+	defaultCWD          string
+	extensionRuntimes   ExtensionRuntimeProvider
+	environmentResolver EnvironmentResolver
+	sessionsMu          sync.Mutex
+	sessions            map[string]*defaultChatSession
+	closed              bool
 }
 
 type defaultChatSession struct {
@@ -172,9 +187,22 @@ func NewDefaultChatRunner(defaultCWD string, extensionRuntimes ...ExtensionRunti
 // Run executes a single persisted chat turn and streams events to the sink.
 func (r *DefaultChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatEventSink) (string, error) {
 	if r == nil {
-		return runDefaultChat(ctx, req, sink, "", nil, nil)
+		return runDefaultChat(ctx, req, sink, "", nil, nil, nil)
 	}
-	return runDefaultChat(ctx, req, sink, r.defaultCWD, r.extensionRuntimes, r)
+	r.sessionsMu.Lock()
+	resolver := r.environmentResolver
+	r.sessionsMu.Unlock()
+	return runDefaultChat(ctx, req, sink, r.defaultCWD, r.extensionRuntimes, r, resolver)
+}
+
+// SetEnvironmentResolver configures remote environment selection for subsequent requests.
+func (r *DefaultChatRunner) SetEnvironmentResolver(resolver EnvironmentResolver) {
+	if r == nil {
+		return
+	}
+	r.sessionsMu.Lock()
+	r.environmentResolver = resolver
+	r.sessionsMu.Unlock()
 }
 
 // Close releases cached conversation threads and their persistent transports.
@@ -239,7 +267,7 @@ func (r *DefaultChatRunner) ExtensionRuntimeProvider() ExtensionRuntimeProvider 
 
 // RunDefaultChat executes a single persisted chat turn and streams events to the sink.
 func RunDefaultChat(ctx context.Context, req ChatRequest, sink ChatEventSink, defaultCWD string, extensionRuntimes ExtensionRuntimeProvider) (string, error) {
-	return runDefaultChat(ctx, req, sink, defaultCWD, extensionRuntimes, nil)
+	return runDefaultChat(ctx, req, sink, defaultCWD, extensionRuntimes, nil, nil)
 }
 
 func runDefaultChat(
@@ -249,7 +277,8 @@ func runDefaultChat(
 	defaultCWD string,
 	extensionRuntimes ExtensionRuntimeProvider,
 	threadOwner *DefaultChatRunner,
-) (string, error) {
+	environmentResolver EnvironmentResolver,
+) (resultSessionID string, resultErr error) {
 	message, imageInputs, err := NormalizeRequest(req)
 	if err != nil {
 		return "", err
@@ -264,14 +293,33 @@ func runDefaultChat(
 		sessionID = convtypes.GenerateID()
 	}
 
-	llmConfig, resolvedCWD, err := ResolveConfigWithReasoning(ctx, sessionID, strings.TrimSpace(req.Profile), strings.TrimSpace(req.ReasoningEffort), strings.TrimSpace(req.CWD), defaultCWD)
+	var llmConfig llmtypes.Config
+	var resolvedCWD string
+	if strings.TrimSpace(req.RunnerID) != "" {
+		if strings.TrimSpace(req.CWD) != "" {
+			return sessionID, errors.New("cwd cannot be used with a remote runner")
+		}
+		llmConfig, err = ResolveRemoteConfigWithReasoning(ctx, sessionID, strings.TrimSpace(req.Profile), strings.TrimSpace(req.ReasoningEffort))
+	} else {
+		llmConfig, resolvedCWD, err = ResolveConfigWithReasoning(ctx, sessionID, strings.TrimSpace(req.Profile), strings.TrimSpace(req.ReasoningEffort), strings.TrimSpace(req.CWD), defaultCWD)
+	}
 	if err != nil {
 		return sessionID, errors.Wrap(err, "failed to load configuration")
 	}
 	llmConfig.WorkingDirectory = resolvedCWD
 
 	var extensionRuntime *extensions.Runtime
-	if extensionRuntimes != nil {
+	var environment agentenv.Environment
+	if strings.TrimSpace(req.RunnerID) != "" {
+		if environmentResolver == nil {
+			return sessionID, errors.New("remote runner environment resolver is unavailable")
+		}
+		environment, err = environmentResolver.ResolveEnvironment(ctx, req, sessionID, llmConfig, resolvedCWD)
+		if err != nil {
+			return sessionID, err
+		}
+	}
+	if environment == nil && extensionRuntimes != nil {
 		if contextualProvider, ok := extensionRuntimes.(contextualExtensionRuntimeProvider); ok {
 			extensionRuntime, err = contextualProvider.RuntimeWithCallContext(ctx, resolvedCWD, extensions.ExtensionCallContext{
 				ConversationID: sessionID,
@@ -285,7 +333,7 @@ func runDefaultChat(
 		} else {
 			extensionRuntime, err = extensionRuntimes.Runtime(ctx, resolvedCWD)
 		}
-	} else {
+	} else if environment == nil {
 		extensionRuntime, err = extensions.NewRuntimeFromViper(ctx, resolvedCWD)
 		if extensionRuntime != nil {
 			defer func() {
@@ -300,13 +348,36 @@ func runDefaultChat(
 		llmConfig.Extensions = extensionRuntime
 	}
 
-	expandSlashCommand := true
-	var extensionCommandResult *extensions.RoutedCommandResult
-	if commandResult, handled, err := TryExtensionCommand(ctx, message, extensionRuntime, llmConfig, sessionID, resolvedCWD); err != nil {
+	if environment == nil {
+		environment = agentenv.NewLocalEnvironment(resolvedCWD, extensionRuntime)
+	}
+	environmentHandedOff := false
+	defer func() {
+		if environmentHandedOff || environment == nil || !environment.IsOpen() {
+			return
+		}
+		closeCtx := context.WithoutCancel(ctx)
+		if closer, ok := environment.(agentenv.OutcomeCloser); ok {
+			_ = closer.CloseWithError(closeCtx, resultErr)
+			return
+		}
+		_ = environment.Close(closeCtx)
+	}()
+	runSpec := agentenv.RunSpec{
+		ConversationID: sessionID,
+		Config:         llmConfig,
+		InvokedBy:      "main",
+	}
+	commandResult, err := environment.ExecuteCommand(ctx, agentenv.CommandRequest{Message: message, RunSpec: runSpec})
+	if err != nil {
 		return sessionID, err
-	} else if handled {
+	}
+	if commandResult.Matched {
 		switch commandResult.Action {
-		case extensions.CommandActionRespond:
+		case agentenv.CommandActionRespond:
+			if err := persistDirectCommandResponse(ctx, threadOwner, sessionID, llmConfig, message, commandResult.Response, imageInputs); err != nil {
+				return sessionID, err
+			}
 			if err := sink.Send(ChatEvent{Kind: "conversation", ConversationID: sessionID, Role: "assistant"}); err != nil {
 				logger.G(ctx).WithError(err).Debug("failed to send extension command conversation event")
 			}
@@ -316,48 +387,39 @@ func runDefaultChat(
 				}
 			}
 			return sessionID, nil
-		case extensions.CommandActionRunAgent:
+		case agentenv.CommandActionRunAgent:
 			message = commandResult.Prompt
-			expandSlashCommand = false
-			extensionCommandResult = commandResult
 			if strings.TrimSpace(commandResult.RecipeName) != "" {
 				llmConfig.RecipeName = commandResult.RecipeName
 			}
+			ApplyCommandRestrictions(ctx, &llmConfig, commandResult)
 		default:
 			logger.G(ctx).WithField("command", commandResult.CommandName).WithField("action", commandResult.Action).Warn("extension command returned unknown action")
 		}
 	}
 
 	var renameName string
-	if expandSlashCommand {
+	if !commandResult.Matched {
 		if command, args, found := slashcommands.Parse(message); found {
-			var handled bool
-			renameName, handled, err = slashcommands.ParseRenameCommand(command, args)
+			renameName, _, err = slashcommands.ParseRenameCommand(command, args)
 			if err != nil {
 				return sessionID, err
 			}
+		}
+	}
+
+	var goalUpdate *goals.CommandUpdate
+	if renameName == "" && !commandResult.Matched {
+		if command, args, found := slashcommands.Parse(message); found {
+			update, handled, commandErr := goals.ParseSlashCommand(command, args, time.Now())
+			if commandErr != nil {
+				return sessionID, commandErr
+			}
 			if handled {
-				expandSlashCommand = false
+				message = update.ModelPrompt
+				goalUpdate = &update
 			}
 		}
-	}
-
-	var slashExpansion *slashcommands.Expansion
-	var goalUpdate *goals.CommandUpdate
-	if renameName == "" {
-		message, slashExpansion, goalUpdate, err = TransformSlashCommandIfNeeded(ctx, message, resolvedCWD, expandSlashCommand)
-		if err != nil {
-			return sessionID, err
-		}
-	}
-	if slashExpansion != nil {
-		ApplyFragmentRestrictions(ctx, &llmConfig, &slashExpansion.Metadata)
-		llmConfig.RecipeName = slashExpansion.Command
-	}
-
-	appState, err := BuildState(ctx, llmConfig, sessionID, resolvedCWD, extensionRuntime)
-	if err != nil {
-		return sessionID, err
 	}
 
 	thread, newThread, releaseThread, err := acquireChatThread(threadOwner, sessionID, llmConfig)
@@ -369,7 +431,6 @@ func runDefaultChat(
 		extensionSetter.SetExtensions(extensionRuntime)
 	}
 
-	thread.SetState(appState)
 	thread.SetConversationID(sessionID)
 	if newThread {
 		thread.EnablePersistence(ctx, true)
@@ -394,11 +455,11 @@ func runDefaultChat(
 		}
 		return sessionID, nil
 	}
-	if slashExpansion != nil {
-		AddSlashCommandDisplay(thread, slashExpansion)
+	if err := llm.SetEnvironment(thread, environment); err != nil {
+		return sessionID, err
 	}
-	if extensionCommandResult != nil {
-		AddExtensionCommandDisplay(thread, extensionCommandResult)
+	if commandResult.Matched && commandResult.Action == agentenv.CommandActionRunAgent {
+		AddEnvironmentCommandDisplay(thread, commandResult)
 	}
 	if goalUpdate != nil {
 		AddGoalDisplay(thread, goalUpdate)
@@ -416,6 +477,7 @@ func runDefaultChat(
 		conversationID: sessionID,
 		sink:           sink,
 	}
+	environmentHandedOff = true
 	_, err = thread.SendMessage(ctx, message, handler, llmtypes.MessageOpt{
 		PromptCache: true,
 		Images:      imageInputs,
@@ -425,6 +487,43 @@ func runDefaultChat(
 	}
 
 	return sessionID, nil
+}
+
+type assistantMessageAppender interface {
+	AddAssistantMessage(ctx context.Context, message string)
+}
+
+func persistDirectCommandResponse(
+	ctx context.Context,
+	owner *DefaultChatRunner,
+	conversationID string,
+	config llmtypes.Config,
+	message string,
+	response string,
+	images []string,
+) error {
+	thread, _, releaseThread, err := acquireChatThread(owner, conversationID, config)
+	if err != nil {
+		return errors.Wrap(err, "failed to create conversation thread for command response")
+	}
+	defer releaseThread()
+
+	thread.SetConversationID(conversationID)
+	if !thread.IsPersisted() {
+		thread.EnablePersistence(ctx, true)
+	}
+	appender, ok := thread.(assistantMessageAppender)
+	if !ok {
+		return errors.New("conversation provider cannot persist direct command responses")
+	}
+	thread.AddUserMessage(ctx, message, images...)
+	if strings.TrimSpace(response) != "" {
+		appender.AddAssistantMessage(ctx, response)
+	}
+	if err := thread.SaveConversation(ctx); err != nil {
+		return errors.Wrap(err, "failed to persist direct command response")
+	}
+	return nil
 }
 
 func acquireChatThread(
@@ -623,6 +722,34 @@ func ResolveConfigWithReasoning(ctx context.Context, conversationID, requestedPr
 	}
 	config.WorkingDirectory = resolution.CWD
 	return config, resolution.CWD, nil
+}
+
+// ResolveRemoteConfigWithReasoning resolves only control-plane provider settings.
+// The runner manifest supplies the authoritative workspace path and environment configuration.
+func ResolveRemoteConfigWithReasoning(ctx context.Context, conversationID, requestedProfile, requestedReasoningEffort string) (llmtypes.Config, error) {
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
+		return ResolveConfigForNewConversation(requestedProfile, requestedReasoningEffort)
+	}
+
+	service, err := conversationservice.GetDefaultConversationService(ctx)
+	if err != nil {
+		return llmtypes.Config{}, errors.Wrap(err, "failed to open conversation service")
+	}
+	defer func() {
+		_ = service.Close()
+	}()
+
+	record, err := service.GetConversation(ctx, conversationID)
+	if err != nil {
+		return ResolveConfigForNewConversation(requestedProfile, requestedReasoningEffort)
+	}
+	config, err := ResolveConfigForExistingConversation(record, requestedReasoningEffort)
+	if err != nil {
+		return llmtypes.Config{}, err
+	}
+	config.WorkingDirectory = ""
+	return config, nil
 }
 
 type ServiceStoreAdapter struct {
@@ -958,6 +1085,14 @@ func ApplyFragmentRestrictions(ctx context.Context, llmConfig *llmtypes.Config, 
 	}
 }
 
+// ApplyCommandRestrictions applies model/tool restrictions returned by an environment command.
+func ApplyCommandRestrictions(ctx context.Context, llmConfig *llmtypes.Config, result agentenv.CommandResult) {
+	ApplyFragmentRestrictions(ctx, llmConfig, &fragments.Metadata{
+		AllowedTools:    result.AllowedTools,
+		AllowedCommands: result.AllowedCommands,
+	})
+}
+
 func AddSlashCommandDisplay(thread llmtypes.Thread, expansion *slashcommands.Expansion) {
 	if thread == nil || expansion == nil {
 		return
@@ -971,6 +1106,18 @@ func AddSlashCommandDisplay(thread llmtypes.Thread, expansion *slashcommands.Exp
 
 func AddExtensionCommandDisplay(thread llmtypes.Thread, result *extensions.RoutedCommandResult) {
 	if thread == nil || result == nil {
+		return
+	}
+
+	metadata := conversationservice.AddSlashCommandDisplay(thread.GetMetadata(), result.Prompt, result.Display, result.CommandName)
+	for key, value := range metadata {
+		thread.SetMetadataValue(key, value)
+	}
+}
+
+// AddEnvironmentCommandDisplay stores the compact display for an environment-routed command.
+func AddEnvironmentCommandDisplay(thread llmtypes.Thread, result agentenv.CommandResult) {
+	if thread == nil || !result.Matched {
 		return
 	}
 

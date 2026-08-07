@@ -16,15 +16,32 @@ func AvailableTools(state tooltypes.State, noToolUse bool) []tooltypes.Tool {
 
 // AvailableToolsForThread returns tools filtered by any per-turn extension tool-list patch.
 func AvailableToolsForThread(thread llmtypes.Thread, state tooltypes.State, noToolUse bool) []tooltypes.Tool {
+	if environment := EnvironmentForThread(thread); environment != nil && environment.IsOpen() {
+		return filterAvailableTools(environment.Manifest().AvailableTools(), noToolUse, currentAllowedTools(thread))
+	}
 	return availableTools(state, noToolUse, currentAllowedTools(thread))
+}
+
+// AvailableEnvironmentToolsForThread returns tools from the run-pinned environment manifest.
+func AvailableEnvironmentToolsForThread(thread llmtypes.Thread, noToolUse bool) []tooltypes.Tool {
+	environment := EnvironmentForThread(thread)
+	if environment == nil || !environment.IsOpen() {
+		return availableTools(threadState(thread), noToolUse, currentAllowedTools(thread))
+	}
+	return filterAvailableTools(environment.Manifest().AvailableTools(), noToolUse, currentAllowedTools(thread))
 }
 
 func availableTools(state tooltypes.State, noToolUse bool, allowed []string) []tooltypes.Tool {
 	if noToolUse || state == nil {
 		return []tooltypes.Tool{}
 	}
+	return filterAvailableTools(state.Tools(), false, allowed)
+}
 
-	tools := state.Tools()
+func filterAvailableTools(tools []tooltypes.Tool, noToolUse bool, allowed []string) []tooltypes.Tool {
+	if noToolUse {
+		return []tooltypes.Tool{}
+	}
 	if allowed == nil {
 		return tools
 	}

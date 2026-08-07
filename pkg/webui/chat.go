@@ -9,10 +9,14 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 )
 
@@ -40,7 +44,12 @@ type webUIChatRunner struct {
 
 func (r *webUIChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatEventSink) (string, error) {
 	conversationID := strings.TrimSpace(req.ConversationID)
-	if r != nil && r.server != nil && conversationID != "" {
+	if r != nil && r.server != nil && r.server.runnerRegistry != nil && strings.TrimSpace(req.RunnerID) == "" && conversationID != "" {
+		if runnerID, ok := r.server.runnerRegistry.RunnerForConversation(conversationID); ok {
+			req.RunnerID = runnerID
+		}
+	}
+	if r != nil && r.server != nil && conversationID != "" && chatSupportsInteractiveUI(req) {
 		if broker := r.server.uiInputBrokerForRun(conversationID); broker != nil {
 			ctx = extensions.ContextWithUIInputBroker(ctx, broker)
 		}
@@ -52,6 +61,46 @@ func (r *webUIChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatEve
 		return chat.RunDefaultChat(ctx, req, sink, "", nil)
 	}
 	return r.runner.Run(ctx, req, sink)
+}
+
+func (r *webUIChatRunner) ResolveEnvironment(_ context.Context, req ChatRequest, conversationID string, _ llmtypes.Config, _ string) (agentenv.Environment, error) {
+	runnerID := strings.TrimSpace(req.RunnerID)
+	if runnerID == "" {
+		return nil, errors.New("runner id is required")
+	}
+	if r == nil || r.server == nil || r.server.runnerRegistry == nil {
+		return nil, errors.New("runner registry is unavailable")
+	}
+	if affinity, ok := r.server.runnerRegistry.RunnerForConversation(conversationID); ok && affinity != runnerID {
+		return nil, errors.Errorf("conversation is bound to runner %s", affinity)
+	}
+	runner, ok := r.server.runnerRegistry.Runner(runnerID)
+	if !ok {
+		return nil, errors.New("runner not found")
+	}
+	if runner.Status == runnerregistry.RunnerStatusIncompatible {
+		if runner.CompatibilityError != "" {
+			return nil, errors.New(runner.CompatibilityError)
+		}
+		return nil, errors.New("runner is incompatible with this control plane")
+	}
+	if !runner.Connected {
+		return nil, errors.New("runner is offline")
+	}
+	capabilities := protocol.ClientCapabilities{}
+	if req.ClientCapabilities != nil {
+		capabilities.InteractiveUI = req.ClientCapabilities.InteractiveUI
+		capabilities.PersistentSurfaces = req.ClientCapabilities.PersistentSurfaces
+	}
+	return agentenv.NewRemoteEnvironment(
+		r.server.runnerRegistry,
+		runnerID,
+		agentenv.WithRemoteClientCapabilities(capabilities),
+	), nil
+}
+
+func chatSupportsInteractiveUI(req ChatRequest) bool {
+	return req.ClientCapabilities != nil && req.ClientCapabilities.InteractiveUI
 }
 
 func (r *webUIChatRunner) Close() error {
