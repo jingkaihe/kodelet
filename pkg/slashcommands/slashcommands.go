@@ -22,6 +22,7 @@ type Command struct {
 	Description string `json:"description"`
 	Hint        string `json:"hint,omitempty"`
 	Placeholder string `json:"placeholder,omitempty"`
+	Digest      string `json:"digest,omitempty"`
 }
 
 // Expansion is the result of rendering a slash command.
@@ -207,6 +208,7 @@ func recipeCommands(ctx context.Context, processor *fragments.Processor) []Comma
 			Description: description,
 			Hint:        BuildCommandHint(frag.Metadata.Arguments),
 			Placeholder: BuildCommandPlaceholder(name, frag.Metadata.Arguments),
+			Digest:      frag.Digest,
 		})
 	}
 
@@ -216,16 +218,29 @@ func recipeCommands(ctx context.Context, processor *fragments.Processor) []Comma
 // Expand renders a slash command into the full prompt sent to the model and a
 // compact display string for user-facing conversation renderers.
 func Expand(ctx context.Context, processor *fragments.Processor, command, args string) (*Expansion, error) {
+	return expand(ctx, processor, command, args, "")
+}
+
+// ExpandPinned renders a recipe only when its current content matches the run manifest.
+func ExpandPinned(ctx context.Context, processor *fragments.Processor, command, args, expectedDigest string) (*Expansion, error) {
+	return expand(ctx, processor, command, args, strings.TrimSpace(expectedDigest))
+}
+
+func expand(ctx context.Context, processor *fragments.Processor, command, args, expectedDigest string) (*Expansion, error) {
 	if processor == nil {
 		return nil, errors.New("slash commands are unavailable")
 	}
 
 	kvArgs, additionalText := ParseArgs(args)
 	fragment, err := processor.LoadFragment(ctx, &fragments.Config{
-		FragmentName: command,
-		Arguments:    kvArgs,
+		FragmentName:   command,
+		Arguments:      kvArgs,
+		ExpectedDigest: expectedDigest,
 	})
 	if err != nil {
+		if expectedDigest != "" {
+			return nil, errors.Wrapf(err, "pinned recipe '/%s' is no longer available", command)
+		}
 		return nil, errors.Wrapf(err, "unknown recipe '/%s'. Available recipes: %s", command, AvailableRecipeNames(ctx, processor))
 	}
 

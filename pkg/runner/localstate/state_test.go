@@ -38,6 +38,58 @@ func TestStorePersistsHostIdentityAndRegistration(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, registrations, 1)
 	assert.Equal(t, registration.RunnerID, registrations[0].RunnerID)
+
+	removed, err := store.DeleteRegistration(registration.Server, registration.Workspace, registration.RunnerID)
+	require.NoError(t, err)
+	assert.True(t, removed)
+	_, ok, err = store.LoadRegistration(registration.Server, registration.Workspace)
+	require.NoError(t, err)
+	assert.False(t, ok)
+	removed, err = store.DeleteRegistration(registration.Server, registration.Workspace, registration.RunnerID)
+	require.NoError(t, err)
+	assert.False(t, removed)
+
+	newer := registration
+	newer.RunnerID = "runner-2"
+	require.NoError(t, store.SaveRegistration(newer))
+	removed, err = store.DeleteRegistration(registration.Server, registration.Workspace, registration.RunnerID)
+	require.NoError(t, err)
+	assert.False(t, removed)
+	loaded, ok, err = store.LoadRegistration(registration.Server, registration.Workspace)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, newer.RunnerID, loaded.RunnerID)
+}
+
+func TestRegistrationCacheUsesCanonicalServerIdentity(t *testing.T) {
+	store, err := NewStoreAt(t.TempDir())
+	require.NoError(t, err)
+	registration := Registration{
+		Server:    "HTTPS://EXAMPLE.COM:443/base/./",
+		Workspace: "/work/project",
+		RunnerID:  "runner-1",
+	}
+	require.NoError(t, store.SaveRegistration(registration))
+
+	loaded, ok, err := store.LoadRegistration("https://example.com/base", registration.Workspace)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, "https://example.com/base", loaded.Server)
+	assert.Equal(t, registration.RunnerID, loaded.RunnerID)
+
+	entries, err := os.ReadDir(filepath.Join(store.Root(), "registrations"))
+	require.NoError(t, err)
+	var jsonFiles int
+	for _, entry := range entries {
+		if filepath.Ext(entry.Name()) == ".json" {
+			jsonFiles++
+		}
+	}
+	assert.Equal(t, 1, jsonFiles)
+
+	removed, err := store.DeleteRegistration("https://EXAMPLE.com:443/base/", registration.Workspace, registration.RunnerID)
+	require.NoError(t, err)
+	assert.True(t, removed)
 }
 
 func TestWorkspaceLockPreventsDuplicateRunnerAndRecordsPID(t *testing.T) {

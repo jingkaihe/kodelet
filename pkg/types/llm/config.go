@@ -69,8 +69,9 @@ type Config struct {
 	Bash                    *BashConfig        `mapstructure:"bash" json:"bash,omitempty" yaml:"bash,omitempty"`                               // Bash contains bash tool configuration
 
 	// Profile system configuration
-	Profile  string                   `mapstructure:"profile" json:"profile,omitempty" yaml:"profile,omitempty"`    // Active profile name
-	Profiles map[string]ProfileConfig `mapstructure:"profiles" json:"profiles,omitempty" yaml:"profiles,omitempty"` // Named configuration profiles
+	Profile             string                   `mapstructure:"profile" json:"profile,omitempty" yaml:"profile,omitempty"`                                        // Active model profile name
+	Profiles            map[string]ProfileConfig `mapstructure:"profiles" json:"profiles,omitempty" yaml:"profiles,omitempty"`                                     // Named model configuration profiles
+	EnvironmentProfiles map[string]ProfileConfig `mapstructure:"environment_profiles" json:"environment_profiles,omitempty" yaml:"environment_profiles,omitempty"` // Named runner-local environment profiles
 
 	// Provider-specific configurations
 	OpenAI    *OpenAIConfig    `mapstructure:"openai" json:"openai,omitempty" yaml:"openai,omitempty"`          // OpenAI-specific configuration including compatible providers
@@ -83,10 +84,11 @@ type Config struct {
 	Context *ContextConfig `mapstructure:"context" json:"context,omitempty" yaml:"context,omitempty"` // Context configuration for context file discovery
 
 	// Runtime feature toggle configuration
-	Extensions          any     `mapstructure:"-" json:"-" yaml:"-"`                                                                // Extensions is the active extension runtime for lifecycle events
-	EnableFSSearchTools bool    `mapstructure:"enable_fs_search_tools" json:"enable_fs_search_tools" yaml:"enable_fs_search_tools"` // EnableFSSearchTools enables glob_tool and grep_tool and updates prompt/tool guidance accordingly
-	RecipeName          string  `mapstructure:"recipe_name" json:"recipe_name" yaml:"recipe_name"`                                  // RecipeName is the active recipe/fragment name for extension context metadata
-	CompactRatio        float64 `mapstructure:"compact_ratio" json:"compact_ratio" yaml:"compact_ratio"`                            // CompactRatio is the context utilization threshold for automatic compaction (>0.0-1.0)
+	ExtensionSettings   map[string]any `mapstructure:"extensions" json:"-" yaml:"-"`                                                       // ExtensionSettings is the configuration projection used before constructing a runtime
+	Extensions          any            `mapstructure:"-" json:"-" yaml:"-"`                                                                // Extensions is the active extension runtime for lifecycle events
+	EnableFSSearchTools bool           `mapstructure:"enable_fs_search_tools" json:"enable_fs_search_tools" yaml:"enable_fs_search_tools"` // EnableFSSearchTools enables glob_tool and grep_tool and updates prompt/tool guidance accordingly
+	RecipeName          string         `mapstructure:"recipe_name" json:"recipe_name" yaml:"recipe_name"`                                  // RecipeName is the active recipe/fragment name for extension context metadata
+	CompactRatio        float64        `mapstructure:"compact_ratio" json:"compact_ratio" yaml:"compact_ratio"`                            // CompactRatio is the context utilization threshold for automatic compaction (>0.0-1.0)
 }
 
 // BashConfig holds configuration for the bash tool.

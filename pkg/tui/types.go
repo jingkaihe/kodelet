@@ -22,6 +22,8 @@ type Config struct {
 	ConversationID          string
 	Profile                 string
 	ProfileOptions          []string
+	ProfileSettings         map[string]ProfileSettings
+	EnvironmentProfile      string
 	ReasoningEffort         string
 	ReasoningEffortOptions  []string
 	ReasoningEffortExplicit bool
@@ -29,6 +31,12 @@ type Config struct {
 	Theme                   string
 	Runner                  chat.ChatRunner
 	Remote                  bool
+}
+
+// ProfileSettings contains control-plane-owned reasoning policy for one model profile.
+type ProfileSettings struct {
+	ReasoningEffort        string
+	ReasoningEffortOptions []string
 }
 
 type entryKind int
@@ -200,17 +208,19 @@ type transcriptElapsedClock struct {
 type model struct {
 	*conversationState
 
-	ctx               context.Context
-	cancel            context.CancelFunc
-	runner            chat.ChatRunner
-	remote            bool
-	extensionRuntimes *extensions.RuntimeManager
-	extensionUI       *tuiExtensionUIHost
-	extensionWidgets  map[extensionUIKey]tuiExtensionWidget
-	widgetOrder       []extensionUIKey
-	collapsedWidgets  map[extensionUIKey]bool
-	widgetOffsets     map[extensionWidgetOffsetKey]int
-	extensionSurfaces map[extensionUIKey]tuiExtensionSurface
+	ctx                context.Context
+	cancel             context.CancelFunc
+	runner             chat.ChatRunner
+	remote             bool
+	environmentProfile string
+	profileSettings    map[string]ProfileSettings
+	extensionRuntimes  *extensions.RuntimeManager
+	extensionUI        *tuiExtensionUIHost
+	extensionWidgets   map[extensionUIKey]tuiExtensionWidget
+	widgetOrder        []extensionUIKey
+	collapsedWidgets   map[extensionUIKey]bool
+	widgetOffsets      map[extensionWidgetOffsetKey]int
+	extensionSurfaces  map[extensionUIKey]tuiExtensionSurface
 	// extensionSurfaceOrder is both the overlay z-order and the focus stack.
 	extensionSurfaceOrder []extensionUIKey
 
@@ -316,6 +326,18 @@ type messageHistoryMsg struct {
 type editorFinishedMsg struct {
 	path string
 	err  error
+}
+
+type remoteSteerMsg struct {
+	conversationKey string
+	message         string
+	queued          bool
+	err             error
+}
+
+type remoteStopMsg struct {
+	conversationKey string
+	err             error
 }
 
 type tuiSink struct {

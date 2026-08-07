@@ -68,11 +68,19 @@ func executeEnvironmentTool(
 	if rendererRegistry == nil {
 		panic("rendererRegistry must not be nil")
 	}
-	if definition, ok := environment.Manifest().ToolDefinition(toolName); ok && definition.Placement == agentenv.ToolPlacementControlPlane {
+	definition, defined := environment.Manifest().ToolDefinition(toolName)
+	if defined && definition.Placement == agentenv.ToolPlacementControlPlane {
 		return executeControlPlaneTool(ctx, thread, environment, rendererRegistry, toolName, toolInput, toolCallID, handler)
 	}
 	if tools.IsControlPlaneTool(toolName) {
-		return executeControlPlaneTool(ctx, thread, environment, rendererRegistry, toolName, toolInput, toolCallID, handler)
+		result := tooltypes.BaseToolResult{Error: "control-plane tool is not available in the active run: " + toolName}
+		structured := normalizeStructuredToolResult(toolName, result.StructuredData())
+		return ToolExecution{
+			Input:            toolInput,
+			Result:           result,
+			StructuredResult: structured,
+			RenderedOutput:   rendererRegistry.Render(structured),
+		}
 	}
 
 	if thread != nil {

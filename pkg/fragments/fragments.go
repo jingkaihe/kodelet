@@ -6,7 +6,9 @@ package fragments
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -48,12 +50,14 @@ type Fragment struct {
 	Metadata Metadata
 	Content  string
 	Path     string
+	Digest   string
 }
 
 // Config holds configuration for fragment processing
 type Config struct {
-	FragmentName string
-	Arguments    map[string]string
+	FragmentName   string
+	Arguments      map[string]string
+	ExpectedDigest string
 }
 
 // Processor handles fragment loading and rendering
@@ -374,6 +378,10 @@ func (fp *Processor) LoadFragment(ctx context.Context, config *Config) (*Fragmen
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to parse frontmatter in fragment '%s'", fragmentPath)
 	}
+	digest := fragmentDigest(metadata, bodyContent)
+	if expected := strings.TrimSpace(config.ExpectedDigest); expected != "" && expected != digest {
+		return nil, errors.Errorf("recipe '/%s' changed after the run opened; start a new run to use the updated recipe", config.FragmentName)
+	}
 
 	// Merge defaults from metadata with provided arguments
 	// User-provided arguments take precedence over defaults
@@ -401,6 +409,7 @@ func (fp *Processor) LoadFragment(ctx context.Context, config *Config) (*Fragmen
 		Metadata: metadata,
 		Content:  processed,
 		Path:     displayPath,
+		Digest:   digest,
 	}, nil
 }
 
@@ -432,6 +441,7 @@ func (fp *Processor) GetFragmentMetadata(fragmentName string) (*Fragment, error)
 		Metadata: metadata,
 		Content:  bodyContent,
 		Path:     displayPath,
+		Digest:   fragmentDigest(metadata, bodyContent),
 	}, nil
 }
 
@@ -521,6 +531,7 @@ func (fp *Processor) processFragmentEntry(name, path string, content []byte, see
 	if err != nil {
 		return nil
 	}
+	digest := fragmentDigest(metadata, bodyContent)
 
 	if metadata.Name == "" {
 		metadata.Name = filepath.Base(fragmentName)
@@ -532,7 +543,17 @@ func (fp *Processor) processFragmentEntry(name, path string, content []byte, see
 		Metadata: metadata,
 		Content:  bodyContent,
 		Path:     path,
+		Digest:   digest,
 	}
+}
+
+func fragmentDigest(metadata Metadata, content string) string {
+	payload, _ := json.Marshal(struct {
+		Metadata Metadata `json:"metadata"`
+		Content  string   `json:"content"`
+	}{Metadata: metadata, Content: content})
+	digest := sha256.Sum256(payload)
+	return fmt.Sprintf("sha256:%x", digest[:])
 }
 
 func (fp *Processor) processFragmentsFromFS(fragmentsFS fs.FS, pathConstructor func(string) string, fragments *[]*Fragment, seen map[string]bool) {

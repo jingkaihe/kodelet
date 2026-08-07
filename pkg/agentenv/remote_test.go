@@ -168,7 +168,8 @@ func TestRemoteEnvironmentProxiesPinnedRunnerContract(t *testing.T) {
 		return "run-1", nil
 	}))
 	manifest, err := environment.Open(t.Context(), RunSpec{
-		ConversationID: "conversation-1",
+		ConversationID:     "conversation-1",
+		EnvironmentProfile: "runner-workspace",
 		Config: llmtypes.Config{
 			Provider:   "openai",
 			Model:      "gpt-test",
@@ -181,6 +182,8 @@ func TestRemoteEnvironmentProxiesPinnedRunnerContract(t *testing.T) {
 	assert.True(t, environment.IsOpen())
 	assert.Equal(t, "runner-1", controller.openRunnerID)
 	assert.Equal(t, "conversation-1", controller.openParams.ConversationID)
+	assert.Equal(t, "workspace", controller.openParams.Agent.Profile)
+	assert.Equal(t, "runner-workspace", controller.openParams.Agent.EnvironmentProfile)
 	assert.ElementsMatch(t, []string{"get_goal", "update_goal", "read_conversation"}, controller.openParams.ReservedToolNames)
 	assert.Equal(t, contextContent, manifest.Contexts["/runner/workspace/AGENTS.md"])
 	require.NotNil(t, manifest.Config)
@@ -404,13 +407,13 @@ func TestRemoteToolResultAccessors(t *testing.T) {
 
 func TestConvertRemoteManifestRejectsInvalidContextPaths(t *testing.T) {
 	environment := NewRemoteEnvironment(&fakeRemoteController{}, "runner-1")
-	_, err := environment.convertManifest(protocol.Manifest{ContextFiles: []protocol.ContextFile{{Content: "missing path", Digest: remoteContentDigest("missing path")}}})
+	_, err := environment.convertManifest(protocol.Manifest{ContextFiles: []protocol.ContextFile{{Content: "missing path", Digest: remoteContentDigest("missing path")}}}, llmtypes.Config{})
 	require.ErrorContains(t, err, "without a path")
 
 	content := "same"
 	_, err = environment.convertManifest(protocol.Manifest{ContextFiles: []protocol.ContextFile{
 		{Path: "AGENTS.md", Content: content, Digest: remoteContentDigest(content)},
 		{Path: "AGENTS.md", Content: content, Digest: remoteContentDigest(content)},
-	}})
+	}}, llmtypes.Config{})
 	require.ErrorContains(t, err, "duplicate context path")
 }

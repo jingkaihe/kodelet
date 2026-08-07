@@ -16,7 +16,7 @@ import (
 
 func TestRuntimeManagerReusesRuntimeForCanonicalWorkingDirectory(t *testing.T) {
 	var calls int
-	manager := newRuntimeManager(func(_ context.Context, _ string) (*Runtime, error) {
+	manager := newRuntimeManager(func(_ context.Context, _ string, _ Config) (*Runtime, error) {
 		calls++
 		return EmptyRuntime(), nil
 	})
@@ -34,7 +34,7 @@ func TestRuntimeManagerReusesRuntimeForCanonicalWorkingDirectory(t *testing.T) {
 
 func TestRuntimeManagerCreatesOneRuntimeForConcurrentCallers(t *testing.T) {
 	var calls int
-	manager := newRuntimeManager(func(_ context.Context, _ string) (*Runtime, error) {
+	manager := newRuntimeManager(func(_ context.Context, _ string, _ Config) (*Runtime, error) {
 		calls++
 		return EmptyRuntime(), nil
 	})
@@ -66,7 +66,7 @@ func TestRuntimeManagerDiscoveryCachesCommandsBeforeLifecycle(t *testing.T) {
 	statePath := filepath.Join(rootDir, "events.log")
 	extDir := filepath.Join(rootDir, "events")
 	writeExecutable(t, filepath.Join(extDir, "kodelet-extension-events"), helperExtensionScript(t))
-	manager := newRuntimeManager(func(ctx context.Context, _ string) (*Runtime, error) {
+	manager := newRuntimeManager(func(ctx context.Context, _ string, _ Config) (*Runtime, error) {
 		return newRuntime(
 			ctx,
 			false,
@@ -112,7 +112,7 @@ func TestRuntimeManagerDiscoveryCachesCommandsBeforeLifecycle(t *testing.T) {
 
 func TestRuntimeManagerDoesNotCacheCreationFailures(t *testing.T) {
 	var calls int
-	manager := newRuntimeManager(func(_ context.Context, _ string) (*Runtime, error) {
+	manager := newRuntimeManager(func(_ context.Context, _ string, _ Config) (*Runtime, error) {
 		calls++
 		if calls == 1 {
 			return nil, errors.New("initialization failed")
@@ -129,10 +129,39 @@ func TestRuntimeManagerDoesNotCacheCreationFailures(t *testing.T) {
 	assert.Equal(t, 2, calls)
 }
 
+func TestRuntimeManagerScopesConfiguredRuntimesByVariantAndFingerprint(t *testing.T) {
+	rootDir := t.TempDir()
+	var configs []Config
+	manager := newRuntimeManager(func(_ context.Context, _ string, config Config) (*Runtime, error) {
+		configs = append(configs, config)
+		return EmptyRuntime(), nil
+	})
+	t.Cleanup(func() { assert.NoError(t, manager.Close()) })
+
+	baseConfig := Config{Enabled: false, MaxOutputSize: 1024}
+	first, err := manager.RuntimeWithConfigAndCallContext(context.Background(), rootDir, "runner-work", baseConfig, ExtensionCallContext{})
+	require.NoError(t, err)
+	reused, err := manager.RuntimeForCommandDiscoveryWithConfig(context.Background(), filepath.Join(rootDir, "."), "runner-work", baseConfig)
+	require.NoError(t, err)
+	assert.Same(t, first, reused)
+
+	otherVariant, err := manager.RuntimeWithConfigAndCallContext(context.Background(), rootDir, "runner-ci", baseConfig, ExtensionCallContext{})
+	require.NoError(t, err)
+	assert.NotSame(t, first, otherVariant)
+
+	changedConfig := baseConfig
+	changedConfig.MaxOutputSize = 2048
+	replacement, err := manager.RuntimeWithConfigAndCallContext(context.Background(), rootDir, "runner-work", changedConfig, ExtensionCallContext{})
+	require.NoError(t, err)
+	assert.NotSame(t, first, replacement)
+	require.Len(t, configs, 3)
+	assert.Equal(t, 2048, configs[2].MaxOutputSize)
+}
+
 func TestRuntimeManagerDoesNotCacheRuntimeCreatedByCanceledCaller(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var calls int
-	manager := newRuntimeManager(func(_ context.Context, _ string) (*Runtime, error) {
+	manager := newRuntimeManager(func(_ context.Context, _ string, _ Config) (*Runtime, error) {
 		calls++
 		if calls == 1 {
 			cancel()
@@ -150,7 +179,7 @@ func TestRuntimeManagerDoesNotCacheRuntimeCreatedByCanceledCaller(t *testing.T) 
 }
 
 func TestRuntimeManagerRejectsUseAfterClose(t *testing.T) {
-	manager := newRuntimeManager(func(_ context.Context, _ string) (*Runtime, error) {
+	manager := newRuntimeManager(func(_ context.Context, _ string, _ Config) (*Runtime, error) {
 		return EmptyRuntime(), nil
 	})
 

@@ -1,24 +1,26 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
-	"path"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"text/tabwriter"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	runnerclient "github.com/jingkaihe/kodelet/pkg/runner/client"
+	"github.com/jingkaihe/kodelet/pkg/runner/controlplaneurl"
 	"github.com/jingkaihe/kodelet/pkg/runner/localstate"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
@@ -40,6 +42,12 @@ type runnerQueryConfig struct {
 	JSONOutput bool
 }
 
+type runnerRemoveConfig struct {
+	runnerQueryConfig
+	Force     bool
+	NoConfirm bool
+}
+
 type runnerListAPIResponse struct {
 	Runners []runnerregistry.Runner `json:"runners"`
 }
@@ -57,7 +65,7 @@ type runnerLocalOutput struct {
 var runnerCmd = &cobra.Command{
 	Use:   "runner",
 	Short: "Manage workspace-bound runners",
-	Long:  "Start and inspect workspace-bound runner processes connected to a Kodelet control plane.",
+	Long:  "Start, inspect, and remove workspace-bound runner processes connected to a Kodelet control plane.",
 }
 
 var runnerStartCmd = &cobra.Command{
@@ -94,16 +102,31 @@ var runnerInspectCmd = &cobra.Command{
 	},
 }
 
+var runnerRemoveCmd = &cobra.Command{
+	Use:   "remove <runner>",
+	Short: "Remove an offline runner registration",
+	Long:  "Remove an offline runner registration and its durable runner-run history.",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		config := runnerRemoveConfig{runnerQueryConfig: runnerQueryConfigFromFlags(cmd)}
+		config.Force, _ = cmd.Flags().GetBool("force")
+		config.NoConfirm, _ = cmd.Flags().GetBool("no-confirm")
+		return runRunnerRemove(cmd.Context(), args[0], config, os.Stdin, os.Stdout)
+	},
+}
+
 func init() {
 	runnerStartCmd.Flags().String("server", defaultRunnerServer, "Control-plane URL")
 	runnerStartCmd.Flags().String("auth-token", os.Getenv("KODELET_RUNNER_AUTH_TOKEN"), "Runner-only authentication token (or KODELET_RUNNER_AUTH_TOKEN)")
 	runnerStartCmd.Flags().String("name", "", "Optional mutable display name")
-	for _, command := range []*cobra.Command{runnerListCmd, runnerInspectCmd} {
+	for _, command := range []*cobra.Command{runnerListCmd, runnerInspectCmd, runnerRemoveCmd} {
 		command.Flags().String("server", defaultRunnerServer, "Control-plane URL")
 		command.Flags().String("auth-token", os.Getenv("KODELET_AUTH_TOKEN"), "Control-plane API authentication token (or KODELET_AUTH_TOKEN)")
 		command.Flags().Bool("json", false, "Output in JSON format")
 	}
-	runnerCmd.AddCommand(runnerStartCmd, runnerListCmd, runnerInspectCmd)
+	runnerRemoveCmd.Flags().Bool("force", false, "Abandon conversation bindings while removing the runner and its run history")
+	runnerRemoveCmd.Flags().Bool("no-confirm", false, "Skip the removal confirmation prompt")
+	runnerCmd.AddCommand(runnerStartCmd, runnerListCmd, runnerInspectCmd, runnerRemoveCmd)
 	rootCmd.AddCommand(runnerCmd)
 }
 
@@ -224,14 +247,123 @@ func runRunnerInspect(ctx context.Context, query string, config runnerQueryConfi
 	return renderRunnerInspect(output, result)
 }
 
+func runRunnerRemove(ctx context.Context, query string, config runnerRemoveConfig, input io.Reader, output io.Writer) error {
+	if config.JSONOutput && !config.NoConfirm {
+		return errors.New("--json requires --no-confirm for runner removal")
+	}
+	runners, server, err := fetchRunners(ctx, config.Server, config.AuthToken)
+	if err != nil {
+		return err
+	}
+	runner, err := selectRunner(runners, query)
+	if err != nil {
+		return err
+	}
+	if runner.Connected {
+		return errors.Errorf("runner %s is connected; stop it before removal", runner.ID)
+	}
+	if !config.NoConfirm && !confirmRunnerRemoval(input, output, runner, config.Force) {
+		fmt.Fprintln(output, "Runner removal cancelled")
+		return nil
+	}
+
+	result, err := deleteRunner(ctx, server, config.AuthToken, runner.ID, config.Force)
+	if err != nil {
+		return err
+	}
+	if err := deleteLocalRunnerRegistration(server, runner); err != nil {
+		logger.G(ctx).WithError(err).WithField("runner_id", runner.ID).Warn("failed to remove local runner registration cache")
+	}
+	if config.JSONOutput {
+		return writeRunnerJSON(output, result)
+	}
+	fmt.Fprintf(output, "Removed runner %s (%d run record(s), %d conversation binding(s))\n", result.RunnerID, result.RemovedRuns, result.RemovedConversationAffinities)
+	return nil
+}
+
+func confirmRunnerRemoval(input io.Reader, output io.Writer, runner runnerregistry.Runner, force bool) bool {
+	fmt.Fprintf(output, "Remove runner %s (%s on %s)? ", runner.ID, runner.Workspace.Path, runner.Host.Hostname)
+	fmt.Fprint(output, "This deletes its registration and runner run history. ")
+	if force {
+		fmt.Fprint(output, "This will abandon its conversation bindings. ")
+	}
+	fmt.Fprint(output, "[y/N]: ")
+	response, _ := bufio.NewReader(input).ReadString('\n')
+	response = strings.ToLower(strings.TrimSpace(response))
+	return response == "y" || response == "yes"
+}
+
+func deleteRunner(ctx context.Context, server, authToken, runnerID string, force bool) (runnerregistry.RemovalResult, error) {
+	endpoint, err := controlplaneurl.Endpoint(server, "api", "runners", runnerID)
+	if err != nil {
+		return runnerregistry.RemovalResult{}, err
+	}
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return runnerregistry.RemovalResult{}, errors.Wrap(err, "failed to parse runner removal URL")
+	}
+	if force {
+		query := parsed.Query()
+		query.Set("force", strconv.FormatBool(true))
+		parsed.RawQuery = query.Encode()
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodDelete, parsed.String(), nil)
+	if err != nil {
+		return runnerregistry.RemovalResult{}, errors.Wrap(err, "failed to create runner removal request")
+	}
+	if token := strings.TrimSpace(authToken); token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	response, err := (&http.Client{Timeout: 15 * time.Second}).Do(request)
+	if err != nil {
+		return runnerregistry.RemovalResult{}, errors.Wrap(err, "failed to remove control-plane runner")
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		var payload struct {
+			Error string `json:"error"`
+		}
+		_ = json.NewDecoder(response.Body).Decode(&payload)
+		if strings.TrimSpace(payload.Error) != "" {
+			return runnerregistry.RemovalResult{}, errors.Errorf("control plane rejected runner removal: %s", payload.Error)
+		}
+		return runnerregistry.RemovalResult{}, errors.Errorf("control plane returned HTTP %d while removing runner", response.StatusCode)
+	}
+	var result runnerregistry.RemovalResult
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		return runnerregistry.RemovalResult{}, errors.Wrap(err, "failed to decode runner removal response")
+	}
+	return result, nil
+}
+
+func deleteLocalRunnerRegistration(server string, runner runnerregistry.Runner) error {
+	store, err := localstate.NewStore()
+	if err != nil {
+		return err
+	}
+	registrations, err := store.Registrations()
+	if err != nil {
+		return err
+	}
+	for _, registration := range registrations {
+		if registration.Server == server && registration.RunnerID == runner.ID {
+			_, err := store.DeleteRegistration(registration.Server, registration.Workspace, runner.ID)
+			return err
+		}
+	}
+	return nil
+}
+
 func fetchRunners(ctx context.Context, rawServer, authToken string) ([]runnerregistry.Runner, string, error) {
 	server, err := normalizeRunnerAPIBaseURL(rawServer)
 	if err != nil {
 		return nil, "", err
 	}
-	parsed, _ := url.Parse(server)
-	parsed.Path = path.Join(parsed.Path, "/api/runners")
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	endpoint, err := controlplaneurl.Endpoint(server, "api", "runners")
+	if err != nil {
+		return nil, "", err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, "", errors.Wrap(err, "failed to create runner list request")
 	}
@@ -256,34 +388,7 @@ func fetchRunners(ctx context.Context, rawServer, authToken string) ([]runnerreg
 }
 
 func normalizeRunnerAPIBaseURL(raw string) (string, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "", errors.New("control-plane URL is required")
-	}
-	parsed, err := url.Parse(raw)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to parse control-plane URL")
-	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return "", errors.New("control-plane URL must use http or https")
-	}
-	if parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return "", errors.New("control-plane URL must contain only scheme, host, and an optional base path")
-	}
-	if parsed.Scheme == "http" && !runnerLoopbackHostname(parsed.Hostname()) {
-		return "", errors.New("remote control-plane connections require https; http is allowed only for loopback servers")
-	}
-	parsed.Path = strings.TrimSuffix(parsed.Path, "/")
-	return parsed.String(), nil
-}
-
-func runnerLoopbackHostname(hostname string) bool {
-	hostname = strings.TrimSpace(strings.ToLower(hostname))
-	if hostname == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(hostname)
-	return ip != nil && ip.IsLoopback()
+	return controlplaneurl.NormalizeBase(raw)
 }
 
 func selectRunner(runners []runnerregistry.Runner, query string) (runnerregistry.Runner, error) {

@@ -134,6 +134,51 @@ Review this workspace carefully.`), 0o644))
 	assert.Equal(t, []string{"git status"}, result.AllowedCommands)
 }
 
+func TestLocalEnvironmentRejectsRecipeChangesAfterManifestIsPinned(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	workspace := t.TempDir()
+	recipeDir := filepath.Join(workspace, ".kodelet", "recipes")
+	require.NoError(t, os.MkdirAll(recipeDir, 0o755))
+	recipePath := filepath.Join(recipeDir, "review.md")
+	require.NoError(t, os.WriteFile(recipePath, []byte("Review version one."), 0o644))
+
+	environment := NewLocalEnvironment(workspace, nil)
+	manifest, err := environment.Open(t.Context(), RunSpec{Config: llmtypes.Config{WorkingDirectory: workspace}})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = environment.Close(t.Context()) })
+	var commandDigest string
+	for _, command := range manifest.Commands {
+		if command.Name == "review" {
+			commandDigest = command.Digest
+		}
+	}
+	assert.NotEmpty(t, commandDigest)
+
+	require.NoError(t, os.WriteFile(recipePath, []byte("Review version two."), 0o644))
+	_, err = environment.ExecuteCommand(t.Context(), CommandRequest{
+		Message: "/review",
+		RunSpec: RunSpec{Config: llmtypes.Config{WorkingDirectory: workspace}},
+	})
+	require.ErrorContains(t, err, "changed after the run opened")
+
+	require.NoError(t, environment.Close(t.Context()))
+	_, err = environment.Open(t.Context(), RunSpec{Config: llmtypes.Config{WorkingDirectory: workspace}})
+	require.NoError(t, err)
+	result, err := environment.ExecuteCommand(t.Context(), CommandRequest{
+		Message: "/review",
+		RunSpec: RunSpec{Config: llmtypes.Config{WorkingDirectory: workspace}},
+	})
+	require.NoError(t, err)
+	assert.Contains(t, result.Prompt, "version two")
+
+	require.NoError(t, os.Remove(recipePath))
+	_, err = environment.ExecuteCommand(t.Context(), CommandRequest{
+		Message: "/review",
+		RunSpec: RunSpec{Config: llmtypes.Config{WorkingDirectory: workspace}},
+	})
+	require.ErrorContains(t, err, "pinned recipe '/review' is no longer available")
+}
+
 func TestLocalEnvironmentLifecycleAndToolExecutionFromProvidedState(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	workspace := t.TempDir()

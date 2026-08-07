@@ -16,7 +16,7 @@ import (
 
 func TestAll(t *testing.T) {
 	migrations := All()
-	require.Len(t, migrations, 9)
+	require.Len(t, migrations, 10)
 
 	versions := make([]int64, 0, len(migrations))
 	for _, migration := range migrations {
@@ -35,6 +35,7 @@ func TestAll(t *testing.T) {
 		20260331120000,
 		20260719170000,
 		20260806120000,
+		20260807120000,
 	}, versions)
 }
 
@@ -59,6 +60,7 @@ func TestMigrationsCreateExpectedSchema(t *testing.T) {
 	assertColumnExists(t, database.DB, "conversation_summaries", "metadata")
 	assertColumnExists(t, database.DB, "conversation_summaries", "cwd")
 	assertColumnExists(t, database.DB, "runner_runs", "manifest_json")
+	assertColumnExists(t, database.DB, "conversation_runner_affinity", "environment_profile")
 	assertIndexExists(t, database.DB, "idx_conversations_created_at")
 	assertIndexExists(t, database.DB, "idx_summaries_provider")
 	assertIndexExists(t, database.DB, "idx_acp_session_updates_session_id")
@@ -80,6 +82,7 @@ func TestMigrationsCreateExpectedSchema(t *testing.T) {
 		20260331120000,
 		20260719170000,
 		20260806120000,
+		20260807120000,
 	}, versions)
 }
 
@@ -213,6 +216,8 @@ func TestMigrationFunctionsReturnTransactionErrors(t *testing.T) {
 		{"steering messages down", Migration20260719170000CreateSteeringMessages().Down},
 		{"runner state up", Migration20260806120000CreateRunnerState().Up},
 		{"runner state down", Migration20260806120000CreateRunnerState().Down},
+		{"runner environment profile up", Migration20260807120000AddRunnerEnvironmentProfile().Up},
+		{"runner environment profile down", Migration20260807120000AddRunnerEnvironmentProfile().Down},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.run(closedTx(t))
@@ -227,6 +232,10 @@ func TestMigrationsDownFunctions(t *testing.T) {
 	database := openMigrationsTestDB(t)
 	runner := db.NewMigrationRunner(database)
 	require.NoError(t, runner.Run(ctx, All()))
+
+	// Runner-environment-profile rollback removes the affinity column.
+	require.NoError(t, runner.Rollback(ctx, All()))
+	assertColumnMissing(t, database.DB, "conversation_runner_affinity", "environment_profile")
 
 	// Runner-state rollback drops durable runner tables.
 	require.NoError(t, runner.Rollback(ctx, All()))
@@ -300,6 +309,14 @@ func assertColumnExists(t *testing.T, database *sql.DB, table, column string) {
 	var exists bool
 	require.NoError(t, database.QueryRow(`SELECT COUNT(*) > 0 FROM pragma_table_info(?1) WHERE name = ?2`, table, column).Scan(&exists))
 	assert.True(t, exists, "column %s.%s should exist", table, column)
+}
+
+func assertColumnMissing(t *testing.T, database *sql.DB, table, column string) {
+	t.Helper()
+
+	var exists bool
+	require.NoError(t, database.QueryRow(`SELECT COUNT(*) > 0 FROM pragma_table_info(?1) WHERE name = ?2`, table, column).Scan(&exists))
+	assert.False(t, exists, "column %s.%s should not exist", table, column)
 }
 
 func assertIndexExists(t *testing.T, database *sql.DB, name string) {

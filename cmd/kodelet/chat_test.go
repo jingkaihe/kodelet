@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	chatpkg "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
@@ -33,12 +34,18 @@ func TestGetChatConfigFromFlags(t *testing.T) {
 	cmd.Flags().BoolP("follow", "f", defaults.Follow, "")
 	cmd.Flags().Bool("no-extensions", defaults.NoExtensions, "")
 	cmd.Flags().Bool("no-tools", defaults.NoTools, "")
+	cmd.Flags().String("runner", defaults.Runner, "")
+	cmd.Flags().String("runner-profile", defaults.RunnerProfile, "")
+	cmd.Flags().String("server", defaults.Server, "")
+	cmd.Flags().String("auth-token", defaults.AuthToken, "")
 
 	require.NoError(t, cmd.Flags().Set("resume", "conv-1"))
 	require.NoError(t, cmd.Flags().Set("cwd", " /tmp/project "))
 	require.NoError(t, cmd.Flags().Set("theme", " tokyo-night "))
 	require.NoError(t, cmd.Flags().Set("no-extensions", "true"))
 	require.NoError(t, cmd.Flags().Set("no-tools", "true"))
+	require.NoError(t, cmd.Flags().Set("runner", " runner-1 "))
+	require.NoError(t, cmd.Flags().Set("runner-profile", " workspace "))
 
 	config := getChatConfigFromFlags(context.Background(), cmd)
 
@@ -47,6 +54,8 @@ func TestGetChatConfigFromFlags(t *testing.T) {
 	assert.Equal(t, "tokyo-night", config.Theme)
 	assert.True(t, config.NoExtensions)
 	assert.True(t, config.NoTools)
+	assert.Equal(t, "runner-1", config.Runner)
+	assert.Equal(t, "workspace", config.RunnerProfile)
 }
 
 func TestChatResumeShortFlag(t *testing.T) {
@@ -133,6 +142,40 @@ func TestPrepareRemoteChatRunnerRejectsLocalOnlyOptions(t *testing.T) {
 
 	_, _, err = prepareRemoteChatRunner(t.Context(), &ChatConfig{Runner: "runner-1", NoTools: true})
 	require.ErrorContains(t, err, "local-only options")
+}
+
+func TestPrepareRemoteChatSettingsUsesControlPlaneProfiles(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		assert.Equal(t, "/api/chat/settings", request.URL.Path)
+		profile := request.URL.Query().Get("profile")
+		response := chatpkg.ControlPlaneChatSettings{
+			CurrentProfile: "work",
+			Profiles: []chatpkg.ControlPlaneProfileOption{
+				{Name: "default"},
+				{Name: "work"},
+			},
+			ReasoningEffort:        "high",
+			ReasoningEffortOptions: []string{"medium", "high"},
+		}
+		if profile == "default" {
+			response.CurrentProfile = "default"
+			response.ReasoningEffort = "medium"
+			response.ReasoningEffortOptions = []string{"low", "medium"}
+		}
+		require.NoError(t, json.NewEncoder(w).Encode(response))
+	}))
+	defer server.Close()
+	runner, err := chatpkg.NewControlPlaneChatRunner(server.URL, "", "runner-1")
+	require.NoError(t, err)
+
+	profile, options, settings, err := prepareRemoteChatSettings(t.Context(), runner, "work")
+	require.NoError(t, err)
+	assert.Equal(t, "work", profile)
+	assert.Equal(t, []string{"default", "work"}, options)
+	assert.Equal(t, "high", settings["work"].ReasoningEffort)
+	assert.Equal(t, []string{"low", "medium"}, settings["default"].ReasoningEffortOptions)
+	require.NoError(t, validateRemoteReasoningEffort("high", settings["work"].ReasoningEffortOptions))
+	require.ErrorContains(t, validateRemoteReasoningEffort("max", settings["work"].ReasoningEffortOptions), "not allowed")
 }
 
 func TestValidateChatResumeConversationRejectsMissingConversation(t *testing.T) {

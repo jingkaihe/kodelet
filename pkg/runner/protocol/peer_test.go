@@ -78,6 +78,116 @@ func TestPeerSupportsSymmetricCallsAndNotifications(t *testing.T) {
 	}
 }
 
+func TestPeerCallTrackedExposesInboundWireRequestID(t *testing.T) {
+	remoteID := make(chan string, 1)
+	_, clientPeer := newTestPeerPair(t,
+		PeerConfig{Handler: RequestHandlerFunc(func(ctx context.Context, _ string, _ json.RawMessage) (any, *RPCError) {
+			remoteID <- RequestIDFromContext(ctx)
+			return map[string]bool{"ok": true}, nil
+		})},
+		PeerConfig{RequestPrefix: "tracked"},
+	)
+
+	var trackedID string
+	require.NoError(t, clientPeer.CallTracked(t.Context(), "tracked.call", nil, nil, func(requestID string) {
+		trackedID = requestID
+	}))
+	assert.Equal(t, "tracked:1", trackedID)
+	assert.Equal(t, trackedID, <-remoteID)
+}
+
+func TestPeerBoundsRequestsWithoutStarvingControlCalls(t *testing.T) {
+	slowStarted := make(chan struct{})
+	releaseSlow := make(chan struct{})
+	serverPeer, clientPeer := newTestPeerPair(t,
+		PeerConfig{
+			MaxConcurrentRequests:        1,
+			MaxConcurrentControlRequests: 1,
+			Handler: RequestHandlerFunc(func(_ context.Context, method string, _ json.RawMessage) (any, *RPCError) {
+				switch method {
+				case "slow":
+					close(slowStarted)
+					<-releaseSlow
+					return map[string]bool{"ok": true}, nil
+				case MethodRunClose:
+					return map[string]bool{"closed": true}, nil
+				default:
+					return map[string]bool{"ok": true}, nil
+				}
+			}),
+		},
+		PeerConfig{},
+	)
+	_ = serverPeer
+
+	slowDone := make(chan error, 1)
+	go func() {
+		slowDone <- clientPeer.Call(t.Context(), "slow", nil, nil)
+	}()
+	select {
+	case <-slowStarted:
+	case <-time.After(time.Second):
+		t.Fatal("slow request did not start")
+	}
+
+	err := clientPeer.Call(t.Context(), "second", nil, nil)
+	var rpcErr *RPCError
+	require.ErrorAs(t, err, &rpcErr)
+	assert.Equal(t, ErrorCodeBusy, rpcErr.Code)
+
+	require.NoError(t, clientPeer.Call(t.Context(), MethodRunClose, RunCloseParams{RunID: "run-one"}, nil))
+	close(releaseSlow)
+	require.NoError(t, <-slowDone)
+}
+
+func TestPeerOperationCancelBypassesNotificationLimit(t *testing.T) {
+	notificationStarted := make(chan struct{})
+	releaseNotification := make(chan struct{})
+	requestStarted := make(chan struct{})
+	requestCanceled := make(chan struct{})
+	_, clientPeer := newTestPeerPair(t,
+		PeerConfig{
+			MaxConcurrentNotifications: 1,
+			Handler: RequestHandlerFunc(func(ctx context.Context, _ string, _ json.RawMessage) (any, *RPCError) {
+				close(requestStarted)
+				<-ctx.Done()
+				close(requestCanceled)
+				return nil, &RPCError{Code: ErrorCodeUnavailable, Message: ctx.Err().Error()}
+			}),
+			Notifications: NotificationHandlerFunc(func(context.Context, string, json.RawMessage) {
+				close(notificationStarted)
+				<-releaseNotification
+			}),
+		},
+		PeerConfig{},
+	)
+	require.NoError(t, clientPeer.Notify(t.Context(), "notification.block", nil))
+	select {
+	case <-notificationStarted:
+	case <-time.After(time.Second):
+		t.Fatal("notification did not start")
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	callDone := make(chan error, 1)
+	go func() {
+		callDone <- clientPeer.Call(ctx, "cancel-me", nil, nil)
+	}()
+	select {
+	case <-requestStarted:
+	case <-time.After(time.Second):
+		t.Fatal("request did not start")
+	}
+	cancel()
+	require.ErrorIs(t, <-callDone, context.Canceled)
+	select {
+	case <-requestCanceled:
+	case <-time.After(time.Second):
+		t.Fatal("operation.cancel was blocked by notification handling")
+	}
+	close(releaseNotification)
+}
+
 func TestPeerPropagatesRPCErrors(t *testing.T) {
 	_, clientPeer := newTestPeerPair(t,
 		PeerConfig{
@@ -229,6 +339,9 @@ func TestPeerDefaultsAndMarshalRPCValue(t *testing.T) {
 	assert.Positive(t, config.UpdateQueueSize)
 	assert.Equal(t, 2*time.Second, config.PingPeriod)
 	assert.Positive(t, config.ReadLimit)
+	assert.Positive(t, config.MaxConcurrentRequests)
+	assert.Positive(t, config.MaxConcurrentControlRequests)
+	assert.Positive(t, config.MaxConcurrentNotifications)
 
 	payload, err := marshalRPCValue(json.RawMessage(`{"value":1}`))
 	require.NoError(t, err)

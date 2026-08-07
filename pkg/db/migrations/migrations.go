@@ -19,5 +19,6 @@ func All() []db.Migration {
 		Migration20260331120000AddCWDToConversations(),
 		Migration20260719170000CreateSteeringMessages(),
 		Migration20260806120000CreateRunnerState(),
+		Migration20260807120000AddRunnerEnvironmentProfile(),
 	}
 }

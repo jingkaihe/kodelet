@@ -211,6 +211,22 @@ type HeartbeatParams struct {
 	ManifestDigest string      `json:"manifestDigest,omitempty"`
 }
 
+// Validate checks heartbeat identity and application state fields.
+func (p HeartbeatParams) Validate() error {
+	if strings.TrimSpace(p.RunnerID) == "" {
+		return errors.New("runnerId is required")
+	}
+	if p.Generation <= 0 {
+		return errors.New("generation must be positive")
+	}
+	switch p.State {
+	case RunnerStateIdle, RunnerStateRunning, RunnerStateStopping, RunnerStateError:
+		return nil
+	default:
+		return errors.Errorf("unsupported runner state %q", p.State)
+	}
+}
+
 // ManifestChangedParams reports an idle-manifest digest transition.
 type ManifestChangedParams struct {
 	RunnerID       string `json:"runnerId"`
@@ -299,11 +315,12 @@ func ComputeManifestDigest(manifest Manifest) (string, error) {
 
 // AgentDescriptor carries only provider-sensitive identifiers needed by runner resources.
 type AgentDescriptor struct {
-	Provider   string `json:"provider"`
-	Model      string `json:"model"`
-	Profile    string `json:"profile,omitempty"`
-	RecipeName string `json:"recipeName,omitempty"`
-	InvokedBy  string `json:"invokedBy,omitempty"`
+	Provider           string `json:"provider"`
+	Model              string `json:"model"`
+	Profile            string `json:"profile,omitempty"`
+	EnvironmentProfile string `json:"environmentProfile,omitempty"`
+	RecipeName         string `json:"recipeName,omitempty"`
+	InvokedBy          string `json:"invokedBy,omitempty"`
 }
 
 // ClientCapabilities describes the interactive client attached to a run.
@@ -461,21 +478,25 @@ type ExtensionOwner struct {
 
 type UIInputParams struct {
 	RunID   string                    `json:"runId"`
+	Owner   ExtensionOwner            `json:"owner"`
 	Request extensions.UIInputRequest `json:"request"`
 }
 
 type UIConfirmParams struct {
 	RunID   string                      `json:"runId"`
+	Owner   ExtensionOwner              `json:"owner"`
 	Request extensions.UIConfirmRequest `json:"request"`
 }
 
 type UISelectParams struct {
 	RunID   string                     `json:"runId"`
+	Owner   ExtensionOwner             `json:"owner"`
 	Request extensions.UISelectRequest `json:"request"`
 }
 
 type UINotifyParams struct {
 	RunID   string                     `json:"runId"`
+	Owner   ExtensionOwner             `json:"owner"`
 	Request extensions.UINotifyRequest `json:"request"`
 }
 

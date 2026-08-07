@@ -3,6 +3,7 @@ package base
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/steer"
@@ -72,7 +73,7 @@ func ProcessAgentInit(ctx context.Context, thread llmtypes.Thread, systemPrompt 
 	clearAllowedToolsMetadata(thread)
 	if environment := EnvironmentForThread(thread); environment != nil && environment.IsOpen() {
 		config := thread.GetConfig()
-		environmentDecision, err := environment.ProcessAgentInit(ctx, systemPrompt, agentInitAllowedToolNames(config, environment.Manifest().AvailableTools()))
+		environmentDecision, err := environment.ProcessAgentInit(ctx, systemPrompt, agentInitEnvironmentToolNames(config, environment.Manifest().AvailableTools()))
 		if err != nil {
 			return decision, err
 		}
@@ -138,6 +139,43 @@ func agentInitAllowedToolNames(config llmtypes.Config, stateTools []tooltypes.To
 		allowedTools = append(allowedTools, tool.Name())
 	}
 	allowedTools = append(allowedTools, virtualTools...)
+	return allowedTools
+}
+
+func agentInitEnvironmentToolNames(config llmtypes.Config, environmentTools []tooltypes.Tool) []string {
+	allowedTools := make([]string, 0, len(environmentTools)+len(tools.VirtualToolNames()))
+	seen := make(map[string]struct{}, len(environmentTools)+len(tools.VirtualToolNames()))
+	for _, tool := range environmentTools {
+		if tool == nil || strings.TrimSpace(tool.Name()) == "" {
+			continue
+		}
+		name := tool.Name()
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		allowedTools = append(allowedTools, name)
+	}
+
+	explicit := make(map[string]struct{}, len(config.AllowedTools))
+	for _, name := range config.AllowedTools {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			explicit[name] = struct{}{}
+		}
+	}
+	for _, name := range tools.VirtualToolNames() {
+		if len(config.AllowedTools) > 0 {
+			if _, allowed := explicit[name]; !allowed {
+				continue
+			}
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		allowedTools = append(allowedTools, name)
+	}
 	return allowedTools
 }
 

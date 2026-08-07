@@ -371,6 +371,53 @@ func TestGetConfigFromViperWithoutProfile_IgnoresActiveProfile(t *testing.T) {
 	assert.Empty(t, config.Profile)
 }
 
+func TestGetConfigFromViperWithEnvironmentProfileUsesSeparateNamespace(t *testing.T) {
+	originalConfig := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalConfig {
+			viper.Set(key, value)
+		}
+	}()
+
+	viper.Reset()
+	viper.Set("provider", "anthropic")
+	viper.Set("model", "base-model")
+	viper.Set("allowed_tools", []string{"file_read"})
+	viper.Set("extensions", map[string]any{"allow": []string{"base"}})
+	viper.Set("profile", "model-work")
+	viper.Set("profiles", map[string]any{
+		"model-work": map[string]any{
+			"model":         "profile-model",
+			"allowed_tools": []string{"bash"},
+		},
+	})
+	viper.Set("environment_profiles", map[string]any{
+		"runner-work": map[string]any{
+			"allowed_tools": []string{"grep_tool"},
+			"extensions": map[string]any{
+				"allow": []string{"runner-only"},
+			},
+		},
+	})
+
+	config, err := GetConfigFromViperWithEnvironmentProfile("runner-work")
+	require.NoError(t, err)
+	assert.Equal(t, "base-model", config.Model)
+	assert.Empty(t, config.Profile)
+	assert.Equal(t, []string{"grep_tool"}, config.AllowedTools)
+	assert.Equal(t, []string{"runner-only"}, config.ExtensionSettings["allow"])
+	assert.Equal(t, "model-work", viper.GetString("profile"))
+
+	base, err := GetConfigFromViperWithEnvironmentProfile("default")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"file_read"}, base.AllowedTools)
+	assert.Equal(t, []string{"base"}, base.ExtensionSettings["allow"])
+
+	_, err = GetConfigFromViperWithEnvironmentProfile("missing")
+	require.ErrorContains(t, err, "profile 'missing' not found")
+}
+
 func TestGetConfigFromViperWithProfileAndCmd_ExplicitFlagsOverrideExplicitProfile(t *testing.T) {
 	originalConfig := viper.AllSettings()
 	defer func() {

@@ -20,6 +20,19 @@ func TestTerminalUIInputBrokerUnavailableWhenNonInteractive(t *testing.T) {
 	assert.Contains(t, result.Reason, "terminal input is not available")
 }
 
+func TestUIExtensionOwnerContextRoundTrip(t *testing.T) {
+	owner := UIExtensionOwner{ExtensionID: "extension-one", Generation: 3}
+	ctx := ContextWithUIExtensionOwner(context.Background(), owner)
+	actual, ok := UIExtensionOwnerFromContext(ctx)
+	require.True(t, ok)
+	assert.Equal(t, owner, actual)
+
+	_, ok = UIExtensionOwnerFromContext(context.Background())
+	assert.False(t, ok)
+	_, ok = UIExtensionOwnerFromContext(ContextWithUIExtensionOwner(context.Background(), UIExtensionOwner{}))
+	assert.False(t, ok)
+}
+
 func TestTerminalUIInputBrokerPromptsForInput(t *testing.T) {
 	var out bytes.Buffer
 	broker := interactiveTerminalBroker("\n", &out)

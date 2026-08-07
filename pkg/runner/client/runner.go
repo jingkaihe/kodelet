@@ -3,11 +3,8 @@ package client
 import (
 	"context"
 	"errors"
-	"net"
 	"net/http"
-	"net/url"
 	"os"
-	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -15,6 +12,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/runner/controlplaneurl"
 	"github.com/jingkaihe/kodelet/pkg/runner/localstate"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	"github.com/jingkaihe/kodelet/pkg/version"
@@ -151,9 +149,13 @@ func (r *Runner) Run(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return nil
 		}
-		err = r.runConnection(ctx, initialDigest)
+		connected, connectionErr := r.runConnection(ctx, initialDigest)
+		err = connectionErr
 		if ctx.Err() != nil {
 			return nil
+		}
+		if connected {
+			backoff = r.config.ReconnectMin
 		}
 		if isPermanentConnectionError(err) {
 			return err
@@ -177,7 +179,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 }
 
-func (r *Runner) runConnection(ctx context.Context, initialDigest string) error {
+func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool, error) {
 	headers := http.Header{}
 	if token := strings.TrimSpace(r.config.AuthToken); token != "" {
 		headers.Set("Authorization", "Bearer "+token)
@@ -189,13 +191,13 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) error 
 	}
 	if err != nil {
 		if response != nil && (response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden) {
-			return &permanentConnectionError{err: pkgerrors.Errorf("runner authentication failed with HTTP %d", response.StatusCode)}
+			return false, &permanentConnectionError{err: pkgerrors.Errorf("runner authentication failed with HTTP %d", response.StatusCode)}
 		}
-		return pkgerrors.Wrap(err, "failed to connect runner websocket")
+		return false, pkgerrors.Wrap(err, "failed to connect runner websocket")
 	}
 	if conn.Subprotocol() != protocol.Subprotocol {
 		_ = conn.Close()
-		return &permanentConnectionError{err: pkgerrors.New("control plane did not negotiate the runner websocket subprotocol")}
+		return false, &permanentConnectionError{err: pkgerrors.New("control plane did not negotiate the runner websocket subprotocol")}
 	}
 
 	peer, err := protocol.NewPeer(conn, protocol.PeerConfig{
@@ -205,12 +207,12 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) error 
 	})
 	if err != nil {
 		_ = conn.Close()
-		return err
+		return false, err
 	}
 	r.service.Attach(peer)
 	if err := peer.Start(ctx); err != nil {
 		_ = peer.Close()
-		return err
+		return false, err
 	}
 	defer func() {
 		_ = peer.Close()
@@ -221,7 +223,7 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) error 
 
 	cached, found, err := r.store.LoadRegistration(r.server, r.workspace)
 	if err != nil {
-		return err
+		return false, err
 	}
 	params := protocol.RegisterParams{
 		ProtocolVersions: []int{protocol.Version},
@@ -239,23 +241,24 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) error 
 	}
 	registration, err := registerRunner(ctx, peer, params)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err := r.service.SetRegistration(registration); err != nil {
-		return err
+		return false, err
 	}
+	connected := true
 	if err := r.store.SaveRegistration(localstate.Registration{
 		Server:      r.server,
 		Workspace:   r.workspace,
 		RunnerID:    registration.RunnerID,
 		DisplayName: r.config.DisplayName,
 	}); err != nil {
-		return err
+		return connected, err
 	}
 	metadata := r.lock.Metadata()
 	metadata.RunnerID = registration.RunnerID
 	if err := r.lock.WriteMetadata(metadata); err != nil {
-		return err
+		return connected, err
 	}
 	if r.config.OnRegistered != nil {
 		r.config.OnRegistered(registration)
@@ -266,7 +269,7 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) error 
 		heartbeatInterval = 15 * time.Second
 	}
 	if err := r.sendHeartbeat(ctx, peer, registration); err != nil {
-		return err
+		return connected, err
 	}
 	heartbeatTicker := time.NewTicker(heartbeatInterval)
 	manifestTicker := time.NewTicker(r.config.ManifestInterval)
@@ -285,12 +288,12 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) error 
 			})
 			_ = peer.Shutdown(shutdownCtx, websocket.CloseNormalClosure, "runner process stopped")
 			cancel()
-			return nil
+			return connected, nil
 		case <-peer.Done():
-			return peer.Err()
+			return connected, peer.Err()
 		case <-heartbeatTicker.C:
 			if err := r.sendHeartbeat(ctx, peer, registration); err != nil {
-				return err
+				return connected, err
 			}
 		case <-manifestTicker.C:
 			state, _, _ := r.service.HeartbeatSnapshot()
@@ -308,7 +311,7 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) error 
 					Generation:     registration.Generation,
 					ManifestDigest: digest,
 				}); err != nil {
-					return err
+					return connected, err
 				}
 				lastAdvertisedDigest = digest
 			}
@@ -345,42 +348,19 @@ func registerRunner(ctx context.Context, peer *protocol.Peer, params protocol.Re
 }
 
 func normalizeServerURL(raw string) (string, string, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "", "", pkgerrors.New("runner server URL is required")
-	}
-	parsed, err := url.Parse(raw)
+	server, err := controlplaneurl.NormalizeBase(raw)
 	if err != nil {
-		return "", "", pkgerrors.Wrap(err, "failed to parse runner server URL")
+		return "", "", err
 	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return "", "", pkgerrors.New("runner server URL must use http or https")
+	websocketURL, err := controlplaneurl.WebSocketEndpoint(server, "api", "runner", "v1", "connect")
+	if err != nil {
+		return "", "", err
 	}
-	if parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return "", "", pkgerrors.New("runner server URL must contain only scheme, host, and an optional base path")
-	}
-	if parsed.Scheme == "http" && !isLoopbackHostname(parsed.Hostname()) {
-		return "", "", pkgerrors.New("remote runner connections require https; http is allowed only for loopback servers")
-	}
-	parsed.Path = strings.TrimSuffix(parsed.Path, "/")
-	parsed.RawPath = ""
-	server := parsed.String()
-	websocketScheme := "ws"
-	if parsed.Scheme == "https" {
-		websocketScheme = "wss"
-	}
-	parsed.Scheme = websocketScheme
-	parsed.Path = path.Join(parsed.Path, protocol.Endpoint)
-	return server, parsed.String(), nil
+	return server, websocketURL, nil
 }
 
 func isLoopbackHostname(hostname string) bool {
-	hostname = strings.TrimSpace(strings.ToLower(hostname))
-	if hostname == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(hostname)
-	return ip != nil && ip.IsLoopback()
+	return controlplaneurl.IsLoopbackHostname(hostname)
 }
 
 type permanentConnectionError struct {

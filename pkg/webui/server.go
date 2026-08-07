@@ -52,22 +52,23 @@ var embedFS embed.FS
 
 // Server represents the web UI server
 type Server struct {
-	router              *mux.Router
-	conversationService conversations.ConversationServiceInterface
-	chatRunner          ChatRunner
-	config              *ServerConfig
-	server              *http.Server
-	staticFS            fs.FS
-	runCtx              context.Context
-	runCancel           context.CancelFunc
-	terminalSessions    *terminalSessionManager
-	terminalSessionsMu  sync.Mutex
-	extensionRuntimes   *extensions.RuntimeManager
-	runnerRegistry      *runnerregistry.Registry
-	activeChats         map[string]*activeChatRun
-	activeChatsMu       sync.Mutex
-	chatSubscribers     map[string]map[*subscriberEventSink]struct{}
-	chatSubscribersMu   sync.Mutex
+	router                *mux.Router
+	conversationService   conversations.ConversationServiceInterface
+	chatRunner            ChatRunner
+	config                *ServerConfig
+	server                *http.Server
+	staticFS              fs.FS
+	runCtx                context.Context
+	runCancel             context.CancelFunc
+	terminalSessions      *terminalSessionManager
+	terminalSessionsMu    sync.Mutex
+	extensionRuntimes     *extensions.RuntimeManager
+	runnerRegistry        *runnerregistry.Registry
+	activeChats           map[string]*activeChatRun
+	deletingConversations map[string]struct{}
+	activeChatsMu         sync.Mutex
+	chatSubscribers       map[string]map[*subscriberEventSink]struct{}
+	chatSubscribersMu     sync.Mutex
 }
 
 type activeChatRun struct {
@@ -209,16 +210,20 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 		chatRunner: &webUIChatRunner{
 			runner: chat.NewDefaultChatRunner(config.CWD, extensionRuntimes),
 		},
-		config:            config,
-		staticFS:          staticFS,
-		runCtx:            runCtx,
-		runCancel:         runCancel,
-		terminalSessions:  newTerminalSessionManager(runCtx),
-		extensionRuntimes: extensionRuntimes,
-		runnerRegistry:    runnerRegistry,
-		activeChats:       make(map[string]*activeChatRun),
-		chatSubscribers:   make(map[string]map[*subscriberEventSink]struct{}),
+		config:                config,
+		staticFS:              staticFS,
+		runCtx:                runCtx,
+		runCancel:             runCancel,
+		terminalSessions:      newTerminalSessionManager(runCtx),
+		extensionRuntimes:     extensionRuntimes,
+		runnerRegistry:        runnerRegistry,
+		activeChats:           make(map[string]*activeChatRun),
+		deletingConversations: make(map[string]struct{}),
+		chatSubscribers:       make(map[string]map[*subscriberEventSink]struct{}),
 	}
+	runnerRegistry.SetEnvironmentErrorHandler(func(conversationID string) {
+		s.cancelActiveChat(conversationID)
+	})
 	if runner, ok := s.chatRunner.(*webUIChatRunner); ok {
 		runner.server = s
 		runner.runner.SetEnvironmentResolver(runner)
@@ -242,6 +247,7 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/runner/v1/connect", s.handleRunnerWebsocket).Methods("GET")
 	api.HandleFunc("/runners", s.handleListRunners).Methods("GET")
 	api.HandleFunc("/runners/{id}", s.handleGetRunner).Methods("GET")
+	api.HandleFunc("/runners/{id}", s.handleDeleteRunner).Methods("DELETE")
 	api.HandleFunc("/conversations", s.handleListConversations).Methods("GET")
 	api.HandleFunc("/conversations/{id}", s.handleGetConversation).Methods("GET")
 	api.HandleFunc("/conversations/{id}/stream", s.handleStreamConversation).Methods("GET")
@@ -734,6 +740,9 @@ func (s *Server) registerActiveChat(conversationID string, run *activeChatRun) b
 	if _, exists := s.activeChats[conversationID]; exists {
 		return false
 	}
+	if _, deleting := s.deletingConversations[conversationID]; deleting {
+		return false
+	}
 
 	s.activeChats[conversationID] = run
 	return true
@@ -754,9 +763,9 @@ func (s *Server) unregisterActiveChat(conversationID string, run *activeChatRun)
 	run.markDone()
 }
 
-func (s *Server) cancelActiveChat(conversationID string) (*activeChatRun, bool) {
+func (s *Server) cancelActiveChat(conversationID string) bool {
 	if strings.TrimSpace(conversationID) == "" {
-		return nil, false
+		return false
 	}
 
 	var cancel context.CancelFunc
@@ -772,7 +781,7 @@ func (s *Server) cancelActiveChat(conversationID string) (*activeChatRun, bool) 
 		cancel()
 	}
 
-	return run, ok
+	return ok
 }
 
 func (s *Server) isActiveChat(conversationID string) bool {
@@ -786,15 +795,31 @@ func (s *Server) isActiveChat(conversationID string) bool {
 	return ok && run != nil && !run.stopRequested
 }
 
-func (s *Server) hasActiveChatRun(conversationID string) bool {
-	if strings.TrimSpace(conversationID) == "" {
+func (s *Server) reserveConversationDeletion(conversationID string) bool {
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
 		return false
 	}
 
 	s.activeChatsMu.Lock()
 	defer s.activeChatsMu.Unlock()
-	run, ok := s.activeChats[conversationID]
-	return ok && run != nil
+	if run := s.activeChats[conversationID]; run != nil {
+		return false
+	}
+	if s.deletingConversations == nil {
+		s.deletingConversations = make(map[string]struct{})
+	}
+	if _, exists := s.deletingConversations[conversationID]; exists {
+		return false
+	}
+	s.deletingConversations[conversationID] = struct{}{}
+	return true
+}
+
+func (s *Server) releaseConversationDeletion(conversationID string) {
+	s.activeChatsMu.Lock()
+	delete(s.deletingConversations, strings.TrimSpace(conversationID))
+	s.activeChatsMu.Unlock()
 }
 
 func (s *Server) uiInputBrokerForRun(conversationID string) *webUIInputBroker {
@@ -958,9 +983,12 @@ func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request)
 			summary.Metadata["api_mode"] = apiMode
 		}
 		if s.runnerRegistry != nil {
-			if runnerID, ok := s.runnerRegistry.RunnerForConversation(summary.ID); ok {
-				summary.Metadata["runner_id"] = runnerID
-				if runner, found := s.runnerRegistry.Runner(runnerID); found {
+			affinity, ok, affinityErr := s.runnerRegistry.ResolveConversationAffinity(ctx, summary.ID)
+			if affinityErr != nil {
+				logger.G(ctx).WithError(affinityErr).WithField("conversation_id", summary.ID).Warn("failed to refresh runner affinity")
+			} else if ok {
+				summary.Metadata["runner_id"] = affinity.RunnerID
+				if runner, found := s.runnerRegistry.Runner(affinity.RunnerID); found {
 					summary.Metadata["runner_status"] = runner.Status
 				}
 			}
@@ -983,6 +1011,7 @@ type WebConversationResponse struct {
 	ReasoningEffort       string                 `json:"reasoningEffort,omitempty"`
 	ReasoningEffortLocked bool                   `json:"reasoningEffortLocked,omitempty"`
 	RunnerID              string                 `json:"runnerId,omitempty"`
+	EnvironmentProfile    string                 `json:"environmentProfile,omitempty"`
 	Runner                *runnerregistry.Runner `json:"runner,omitempty"`
 	Summary               string                 `json:"summary,omitempty"`
 	IsRunning             bool                   `json:"isRunning,omitempty"`
@@ -1605,9 +1634,13 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 		MessageCount:          len(webMessages),
 	}
 	if s.runnerRegistry != nil {
-		if runnerID, ok := s.runnerRegistry.RunnerForConversation(response.ID); ok {
-			webResponse.RunnerID = runnerID
-			if runner, found := s.runnerRegistry.Runner(runnerID); found {
+		affinity, ok, affinityErr := s.runnerRegistry.ResolveConversationAffinity(ctx, response.ID)
+		if affinityErr != nil {
+			logger.G(ctx).WithError(affinityErr).WithField("conversation_id", response.ID).Warn("failed to refresh runner affinity")
+		} else if ok {
+			webResponse.RunnerID = affinity.RunnerID
+			webResponse.EnvironmentProfile = affinity.EnvironmentProfile
+			if runner, found := s.runnerRegistry.Runner(affinity.RunnerID); found {
 				webResponse.Runner = &runner
 			}
 		}
@@ -2145,7 +2178,7 @@ func (s *Server) handleStopConversation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	_, stopped := s.cancelActiveChat(conversationID)
+	stopped := s.cancelActiveChat(conversationID)
 	s.writeJSONResponse(w, stopConversationResponse{
 		Success:        true,
 		ConversationID: conversationID,
@@ -2230,16 +2263,20 @@ func (s *Server) handleDeleteConversation(w http.ResponseWriter, r *http.Request
 	vars := mux.Vars(r)
 	id := vars["id"]
 
-	if s.hasActiveChatRun(id) {
+	if !s.reserveConversationDeletion(id) {
 		s.writeErrorResponse(w, http.StatusConflict, "conversation is actively running", nil)
 		return
 	}
+	defer s.releaseConversationDeletion(id)
 
 	// Delete conversation
 	err := s.conversationService.DeleteConversation(ctx, id)
 	if err != nil {
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to delete conversation", err)
 		return
+	}
+	if s.runnerRegistry != nil {
+		s.runnerRegistry.ForgetConversation(id)
 	}
 	if closer, ok := s.chatRunner.(interface{ CloseConversation(string) error }); ok {
 		if err := closer.CloseConversation(id); err != nil {

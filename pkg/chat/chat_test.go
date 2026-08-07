@@ -234,6 +234,31 @@ func TestResolveConfigForExistingLegacyConversationRejectsReasoningOverride(t *t
 	require.ErrorContains(t, err, "legacy conversation without config_snapshot")
 }
 
+func TestEnvironmentProfileIsIndependentAndLocked(t *testing.T) {
+	assert.Empty(t, NormalizeEnvironmentProfile(" default "))
+	assert.Equal(t, "workspace", NormalizeEnvironmentProfile(" workspace "))
+
+	metadata := map[string]any{EnvironmentProfileMetadataKey: "workspace"}
+	profile, err := resolveEnvironmentProfile(metadata, "")
+	require.NoError(t, err)
+	assert.Equal(t, "workspace", profile)
+	profile, err = resolveEnvironmentProfile(metadata, "workspace")
+	require.NoError(t, err)
+	assert.Equal(t, "workspace", profile)
+	_, err = resolveEnvironmentProfile(metadata, "other")
+	require.ErrorContains(t, err, "locked to \"workspace\"")
+	_, err = resolveEnvironmentProfile(nil, "workspace")
+	require.ErrorContains(t, err, "locked to \"default\"")
+}
+
+func TestLocalChatRejectsRunnerEnvironmentProfile(t *testing.T) {
+	_, err := RunDefaultChat(t.Context(), ChatRequest{
+		Message:            "hello",
+		EnvironmentProfile: "workspace",
+	}, &recordingChatSink{}, "", nil)
+	require.ErrorContains(t, err, "environmentProfile requires a remote runner")
+}
+
 func TestResolveWebChatConfig_ResolvesRelativeCWDFromDefaultWorkspace(t *testing.T) {
 	originalSettings := viper.AllSettings()
 	defer func() {

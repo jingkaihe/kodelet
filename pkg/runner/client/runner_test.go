@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -249,6 +250,112 @@ func TestRunnerTreatsAuthenticationFailureAsPermanent(t *testing.T) {
 	wrapped := &permanentConnectionError{err: errors.New("permanent")}
 	assert.Equal(t, "permanent", wrapped.Error())
 	assert.EqualError(t, wrapped.Unwrap(), "permanent")
+}
+
+func TestRunnerReconnectBackoffResetsAfterSuccessfulRegistration(t *testing.T) {
+	workspace := t.TempDir()
+	store, err := localstate.NewStoreAt(t.TempDir())
+	require.NoError(t, err)
+	registry, err := runnerregistry.New(t.Context(), runnerregistry.Options{
+		HeartbeatInterval: time.Hour,
+		HeartbeatTimeout:  2 * time.Hour,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, registry.Close()) })
+
+	var attempts atomic.Int32
+	upgrader := websocket.Upgrader{
+		Subprotocols: []string{protocol.Subprotocol},
+		CheckOrigin:  func(*http.Request) bool { return true },
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if attempts.Add(1) <= 2 {
+			http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		conn, upgradeErr := upgrader.Upgrade(w, request, nil)
+		if upgradeErr != nil {
+			return
+		}
+		session := runnerregistry.NewSession(registry, nil)
+		peer, peerErr := protocol.NewPeer(conn, protocol.PeerConfig{
+			RequestPrefix: "server",
+			Handler:       session,
+			Notifications: session,
+		})
+		if peerErr != nil {
+			_ = conn.Close()
+			return
+		}
+		session.Attach(peer)
+		if peerErr = peer.Start(request.Context()); peerErr != nil {
+			_ = peer.Close()
+			return
+		}
+		go func() {
+			deadline := time.NewTimer(2 * time.Second)
+			ticker := time.NewTicker(time.Millisecond)
+			defer deadline.Stop()
+			defer ticker.Stop()
+			for {
+				select {
+				case <-deadline.C:
+					_ = peer.Close()
+					return
+				case <-ticker.C:
+					for _, registered := range registry.Runners() {
+						if registered.Connected {
+							_ = peer.Close()
+							return
+						}
+					}
+				}
+			}
+		}()
+		<-peer.Done()
+		session.Detach(peer.Err())
+	}))
+	t.Cleanup(server.Close)
+
+	retryDelays := make(chan time.Duration, 4)
+	runner, err := NewRunner(t.Context(), RunnerConfig{
+		Server:           server.URL,
+		Workspace:        workspace,
+		Store:            store,
+		ReconnectMin:     10 * time.Millisecond,
+		ReconnectMax:     20 * time.Millisecond,
+		ManifestInterval: time.Hour,
+		OnRetry: func(_ error, delay time.Duration) {
+			retryDelays <- delay
+		},
+	})
+	require.NoError(t, err)
+	runtime := extensions.EmptyRuntime()
+	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
+	runner.service.runtimeProvider = staticRuntimeProvider{runtime: runtime}
+	runner.service.configLoader = func(string) (llmtypes.Config, error) { return llmtypes.Config{}, nil }
+
+	runCtx, cancel := context.WithCancel(t.Context())
+	runDone := make(chan error, 1)
+	go func() { runDone <- runner.Run(runCtx) }()
+
+	delays := make([]time.Duration, 0, 3)
+	for len(delays) < 3 {
+		select {
+		case delay := <-retryDelays:
+			delays = append(delays, delay)
+		case <-time.After(5 * time.Second):
+			t.Fatal("runner did not report expected reconnect attempts")
+		}
+	}
+	assert.Equal(t, []time.Duration{10 * time.Millisecond, 20 * time.Millisecond, 10 * time.Millisecond}, delays)
+	cancel()
+	select {
+	case err = <-runDone:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("runner did not stop after cancellation")
+	}
 }
 
 func TestRunnerRunRequiresInitialization(t *testing.T) {

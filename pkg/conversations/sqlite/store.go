@@ -125,7 +125,14 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 	}
 	defer tx.Rollback()
 
-	// Delete from both tables
+	// Runner affinity may exist before the first conversation record is saved, so it is
+	// explicitly released only when central conversation deletion commits.
+	_, err = tx.ExecContext(ctx, "DELETE FROM conversation_runner_affinity WHERE conversation_id = ?", id)
+	if err != nil {
+		return errors.Wrap(err, "failed to delete conversation runner affinity")
+	}
+
+	// Delete from both conversation tables.
 	_, err = tx.ExecContext(ctx, "DELETE FROM conversations WHERE id = ?", id)
 	if err != nil {
 		return errors.Wrap(err, "failed to delete conversation record")

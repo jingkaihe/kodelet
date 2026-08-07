@@ -114,6 +114,22 @@ profiles:
     openai:
       api_mode: "responses"
 
+# Runner-local profiles are a separate namespace from model/provider profiles.
+# They are resolved by `kodelet runner start` on the runner host before context,
+# tools, skills, recipes, and extensions are discovered for a remote run.
+environment_profiles:
+  workspace:
+    allowed_tools:
+      - "bash"
+      - "apply_patch"
+      - "file_read"
+    allowed_commands:
+      - "go test *"
+      - "mise run *"
+    extensions:
+      allow:
+        - "acp-subagent"
+
 # OpenAI specific settings
 # Reasoning effort for supported reasoning/adaptive models
 # OpenAI: none, minimal, low, medium, high, xhigh, max

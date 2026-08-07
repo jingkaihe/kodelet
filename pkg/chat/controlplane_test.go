@@ -28,6 +28,7 @@ func TestControlPlaneChatRunnerStreamsSelectedRunner(t *testing.T) {
 		var payload ChatRequest
 		require.NoError(t, json.NewDecoder(request.Body).Decode(&payload))
 		assert.Equal(t, "runner-1", payload.RunnerID)
+		assert.Equal(t, "runner-work", payload.EnvironmentProfile)
 		assert.Empty(t, payload.CWD)
 		require.NotNil(t, payload.ClientCapabilities)
 		assert.False(t, payload.ClientCapabilities.InteractiveUI)
@@ -40,12 +41,51 @@ func TestControlPlaneChatRunnerStreamsSelectedRunner(t *testing.T) {
 	runner, err := NewControlPlaneChatRunner(server.URL+"/base", "secret", "runner-1")
 	require.NoError(t, err)
 	sink := &collectingChatSink{}
-	conversationID, err := runner.Run(context.Background(), ChatRequest{Message: "hello", CWD: "/local/path"}, sink)
+	conversationID, err := runner.Run(context.Background(), ChatRequest{Message: "hello", CWD: "/local/path", EnvironmentProfile: "runner-work"}, sink)
 
 	require.NoError(t, err)
 	assert.Equal(t, "conversation-1", conversationID)
 	require.Len(t, sink.events, 2)
 	assert.Equal(t, "hello", sink.events[1].Delta)
+}
+
+func TestControlPlaneChatRunnerSettingsSteeringAndStop(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		assert.Equal(t, "Bearer secret", request.Header.Get("Authorization"))
+		switch request.URL.Path {
+		case "/base/api/chat/settings":
+			assert.Equal(t, "work", request.URL.Query().Get("profile"))
+			require.NoError(t, json.NewEncoder(w).Encode(ControlPlaneChatSettings{
+				CurrentProfile:         "work",
+				Profiles:               []ControlPlaneProfileOption{{Name: "default"}, {Name: "work"}},
+				ReasoningEffort:        "high",
+				ReasoningEffortOptions: []string{"low", "high"},
+			}))
+		case "/base/api/conversations/conversation-1/steer":
+			var payload struct {
+				Message string `json:"message"`
+			}
+			require.NoError(t, json.NewDecoder(request.Body).Decode(&payload))
+			assert.Equal(t, "focus", payload.Message)
+			_, _ = w.Write([]byte(`{"queued":true}`))
+		case "/base/api/conversations/conversation-1/stop":
+			_, _ = w.Write([]byte(`{"stopped":true}`))
+		default:
+			http.NotFound(w, request)
+		}
+	}))
+	defer server.Close()
+
+	runner, err := NewControlPlaneChatRunner(server.URL+"/base", "secret", "runner-1")
+	require.NoError(t, err)
+	settings, err := runner.ChatSettings(t.Context(), "work")
+	require.NoError(t, err)
+	assert.Equal(t, "work", settings.CurrentProfile)
+	assert.Equal(t, []string{"low", "high"}, settings.ReasoningEffortOptions)
+	queued, err := runner.SteerConversation(t.Context(), "conversation-1", "focus")
+	require.NoError(t, err)
+	assert.True(t, queued)
+	require.NoError(t, runner.StopConversation(t.Context(), "conversation-1"))
 }
 
 type staticControlPlaneUIBroker struct {

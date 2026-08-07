@@ -118,6 +118,45 @@ func TestStore_BasicOperations(t *testing.T) {
 	assert.Len(t, summaries, 0)
 }
 
+func TestStore_DeleteRemovesRunnerAffinity(t *testing.T) {
+	ctx := t.Context()
+	dbPath := filepath.Join(t.TempDir(), "test_conversations.db")
+	setupTestDB(t, dbPath)
+
+	store, err := NewStore(ctx, dbPath)
+	require.NoError(t, err)
+	defer store.Close()
+
+	now := time.Now().UTC()
+	record := conversations.ConversationRecord{
+		ID:          "conversation-one",
+		RawMessages: json.RawMessage(`[]`),
+		Provider:    "openai",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		Metadata:    map[string]any{},
+		ToolResults: map[string]tools.StructuredToolResult{},
+	}
+	require.NoError(t, store.Save(ctx, record))
+	_, err = store.db.ExecContext(ctx, `
+		INSERT INTO runner_registrations (
+			id, owner_id, host_instance_id, workspace_path, workspace_name, status, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, "runner-one", "local", "host-one", "/work/project", "project", "offline", now, now)
+	require.NoError(t, err)
+	_, err = store.db.ExecContext(ctx, `
+		INSERT INTO conversation_runner_affinity (conversation_id, runner_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?)
+	`, record.ID, "runner-one", now, now)
+	require.NoError(t, err)
+
+	require.NoError(t, store.Delete(ctx, record.ID))
+
+	var count int
+	require.NoError(t, store.db.GetContext(ctx, &count, "SELECT COUNT(*) FROM conversation_runner_affinity WHERE conversation_id = ?", record.ID))
+	assert.Zero(t, count)
+}
+
 func TestStore_Query(t *testing.T) {
 	ctx := context.Background()
 

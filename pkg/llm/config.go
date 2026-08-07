@@ -45,6 +45,43 @@ func GetConfigFromViperWithProfile(profileName string) (llmtypes.Config, error) 
 	return getConfigFromViperWithProfileAndCmd(profileName, nil, true)
 }
 
+// GetConfigFromViperWithEnvironmentProfile loads runner-owned configuration from
+// the separate environment_profiles namespace without applying a model profile.
+func GetConfigFromViperWithEnvironmentProfile(profileName string) (llmtypes.Config, error) {
+	settings := cloneSettings(viper.AllSettings())
+	delete(settings, "profile")
+
+	config, err := loadConfigFromSettings(settings)
+	if err != nil {
+		return config, err
+	}
+	profileName = strings.TrimSpace(profileName)
+	if strings.EqualFold(profileName, "default") {
+		profileName = ""
+	}
+	if profileName != "" {
+		profile, exists := config.EnvironmentProfiles[profileName]
+		if !exists {
+			return config, errors.Errorf("failed to apply environment profile: profile '%s' not found", profileName)
+		}
+		applyProfileToSettings(settings, profile)
+		delete(settings, "profile")
+	}
+
+	config, err = loadConfigFromSettings(settings)
+	if err != nil {
+		return config, err
+	}
+	if err := llmtypes.NormalizeReasoningConfig(&config); err != nil {
+		return config, err
+	}
+	config.Profile = ""
+	config.Aliases = withDefaultModelAliases(config.Aliases)
+	config.Model = resolveModelAlias(config.Model, config.Aliases)
+	config.WeakModel = resolveModelAlias(config.WeakModel, config.Aliases)
+	return config, nil
+}
+
 // GetConfigFromViperWithProfileAndCmd loads configuration from Viper while
 // applying the provided profile name and then re-applying any explicitly
 // changed Cobra flags on top.

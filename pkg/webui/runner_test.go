@@ -11,6 +11,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
@@ -32,6 +33,13 @@ func (l *runnerAPITestLink) Call(ctx context.Context, method string, params any,
 		return l.call(ctx, method, params, result)
 	}
 	return nil
+}
+
+func (l *runnerAPITestLink) CallTracked(ctx context.Context, method string, params any, result any, onRequestID func(string)) error {
+	if onRequestID != nil {
+		onRequestID("web-test:request")
+	}
+	return l.Call(ctx, method, params, result)
 }
 func (*runnerAPITestLink) Notify(context.Context, string, any) error { return nil }
 func (*runnerAPITestLink) Close() error                              { return nil }
@@ -169,6 +177,84 @@ func TestRunnerRESTEndpointsExposeRegisteredStatus(t *testing.T) {
 	missingRequest := mux.SetURLVars(httptest.NewRequest(http.MethodGet, "/api/runners/missing", nil), map[string]string{"id": "missing"})
 	server.handleGetRunner(missingRecorder, missingRequest)
 	assert.Equal(t, http.StatusNotFound, missingRecorder.Code)
+}
+
+func TestConversationResponseIncludesDurableRunnerEnvironmentProfile(t *testing.T) {
+	server := newRunnerTestServer(t, "")
+	link := newRunnerAPITestLink()
+	registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
+		ProtocolVersions: []int{protocol.Version},
+		Host: protocol.Host{
+			InstanceID: "host-one",
+			Hostname:   "worker-one",
+			OS:         "linux",
+			Arch:       "amd64",
+		},
+		Workspace: protocol.Workspace{Path: "/work/project", Name: "project"},
+	}, link)
+	require.NoError(t, err)
+	require.NoError(t, server.runnerRegistry.BindConversationWithEnvironmentProfile(t.Context(), "conversation-profile", registration.RunnerID, "gpu"))
+	server.conversationService = &mockConversationService{
+		getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
+			return &conversations.GetConversationResponse{
+				ID:          "conversation-profile",
+				Provider:    "openai",
+				RawMessages: json.RawMessage(`[]`),
+			}, nil
+		},
+	}
+
+	request := mux.SetURLVars(httptest.NewRequest(http.MethodGet, "/api/conversations/conversation-profile", nil), map[string]string{"id": "conversation-profile"})
+	recorder := httptest.NewRecorder()
+	server.handleGetConversation(recorder, request)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response WebConversationResponse
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, registration.RunnerID, response.RunnerID)
+	assert.Equal(t, "gpu", response.EnvironmentProfile)
+}
+
+func TestDeleteRunnerRequiresOfflineAndForceForAffinity(t *testing.T) {
+	server := newRunnerTestServer(t, "")
+	link := newRunnerAPITestLink()
+	registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
+		ProtocolVersions: []int{protocol.Version},
+		Host:             protocol.Host{InstanceID: "host-delete", Hostname: "worker-delete", OS: "linux", Arch: "amd64"},
+		Workspace:        protocol.Workspace{Path: "/work/delete", Name: "delete"},
+	}, link)
+	require.NoError(t, err)
+	require.NoError(t, server.runnerRegistry.BindConversation(t.Context(), "conversation-delete", registration.RunnerID))
+
+	connectedRecorder := httptest.NewRecorder()
+	connectedRequest := mux.SetURLVars(httptest.NewRequest(http.MethodDelete, "/api/runners/"+registration.RunnerID, nil), map[string]string{"id": registration.RunnerID})
+	server.handleDeleteRunner(connectedRecorder, connectedRequest)
+	assert.Equal(t, http.StatusConflict, connectedRecorder.Code)
+
+	server.runnerRegistry.Detach(registration.RunnerID, registration.ConnectionID, registration.Generation, nil)
+	referencedRecorder := httptest.NewRecorder()
+	referencedRequest := mux.SetURLVars(httptest.NewRequest(http.MethodDelete, "/api/runners/"+registration.RunnerID, nil), map[string]string{"id": registration.RunnerID})
+	server.handleDeleteRunner(referencedRecorder, referencedRequest)
+	assert.Equal(t, http.StatusConflict, referencedRecorder.Code)
+	assert.Contains(t, referencedRecorder.Body.String(), "--force")
+
+	forceRecorder := httptest.NewRecorder()
+	forceRequest := mux.SetURLVars(httptest.NewRequest(http.MethodDelete, "/api/runners/"+registration.RunnerID+"?force=true", nil), map[string]string{"id": registration.RunnerID})
+	server.handleDeleteRunner(forceRecorder, forceRequest)
+	require.Equal(t, http.StatusOK, forceRecorder.Code)
+	var result runnerregistry.RemovalResult
+	require.NoError(t, json.Unmarshal(forceRecorder.Body.Bytes(), &result))
+	assert.Equal(t, registration.RunnerID, result.RunnerID)
+	assert.Equal(t, 1, result.RemovedConversationAffinities)
+
+	missingRecorder := httptest.NewRecorder()
+	missingRequest := mux.SetURLVars(httptest.NewRequest(http.MethodDelete, "/api/runners/"+registration.RunnerID, nil), map[string]string{"id": registration.RunnerID})
+	server.handleDeleteRunner(missingRecorder, missingRequest)
+	assert.Equal(t, http.StatusNotFound, missingRecorder.Code)
+
+	invalidForceRecorder := httptest.NewRecorder()
+	invalidForceRequest := mux.SetURLVars(httptest.NewRequest(http.MethodDelete, "/api/runners/missing?force=perhaps", nil), map[string]string{"id": "missing"})
+	server.handleDeleteRunner(invalidForceRecorder, invalidForceRequest)
+	assert.Equal(t, http.StatusBadRequest, invalidForceRecorder.Code)
 }
 
 type runnerUIEventSink struct {
@@ -328,6 +414,11 @@ func TestRunnerRESTEndpointsRequireRegistry(t *testing.T) {
 	getRequest := mux.SetURLVars(httptest.NewRequest(http.MethodGet, "/api/runners/runner-1", nil), map[string]string{"id": "runner-1"})
 	server.handleGetRunner(getRecorder, getRequest)
 	assert.Equal(t, http.StatusServiceUnavailable, getRecorder.Code)
+
+	deleteRecorder := httptest.NewRecorder()
+	deleteRequest := mux.SetURLVars(httptest.NewRequest(http.MethodDelete, "/api/runners/runner-1", nil), map[string]string{"id": "runner-1"})
+	server.handleDeleteRunner(deleteRecorder, deleteRequest)
+	assert.Equal(t, http.StatusServiceUnavailable, deleteRecorder.Code)
 }
 
 func openRunnerUIRun(t *testing.T, server *Server) (protocol.RegisterResult, *runnerUIEventSink, *webUIInputBroker) {
@@ -393,7 +484,7 @@ func newRunnerTestServer(t *testing.T, authToken string) *Server {
 		runCancel()
 		_ = registry.Close()
 	})
-	return &Server{
+	server := &Server{
 		config:          &ServerConfig{AuthToken: authToken, RunnerAuthToken: authToken + "-runner"},
 		runCtx:          runCtx,
 		runCancel:       runCancel,
@@ -401,6 +492,10 @@ func newRunnerTestServer(t *testing.T, authToken string) *Server {
 		activeChats:     make(map[string]*activeChatRun),
 		chatSubscribers: make(map[string]map[*subscriberEventSink]struct{}),
 	}
+	registry.SetEnvironmentErrorHandler(func(conversationID string) {
+		server.cancelActiveChat(conversationID)
+	})
+	return server
 }
 
 func dialRunnerPeer(t *testing.T, url string, headers http.Header) *protocol.Peer {

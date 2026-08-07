@@ -21,6 +21,9 @@ const (
 	defaultPongWait         = 45 * time.Second
 	defaultPingPeriod       = 30 * time.Second
 	defaultReadLimit        = 4 * 1024 * 1024
+	defaultMaxRequests      = 64
+	defaultMaxControlCalls  = 8
+	defaultMaxNotifications = 64
 )
 
 var (
@@ -56,15 +59,18 @@ func (f NotificationHandlerFunc) HandleNotification(ctx context.Context, method 
 
 // PeerConfig configures one symmetric JSON-RPC WebSocket peer.
 type PeerConfig struct {
-	RequestPrefix    string
-	Handler          RequestHandler
-	Notifications    NotificationHandler
-	ControlQueueSize int
-	UpdateQueueSize  int
-	WriteWait        time.Duration
-	PongWait         time.Duration
-	PingPeriod       time.Duration
-	ReadLimit        int64
+	RequestPrefix                string
+	Handler                      RequestHandler
+	Notifications                NotificationHandler
+	ControlQueueSize             int
+	UpdateQueueSize              int
+	WriteWait                    time.Duration
+	PongWait                     time.Duration
+	PingPeriod                   time.Duration
+	ReadLimit                    int64
+	MaxConcurrentRequests        int
+	MaxConcurrentControlRequests int
+	MaxConcurrentNotifications   int
 }
 
 type outboundFrame struct {
@@ -95,23 +101,26 @@ func RequestIDFromContext(ctx context.Context) string {
 
 // Peer owns one WebSocket reader, one writer, bounded outbound queues, and symmetric RPC correlation.
 type Peer struct {
-	conn        *websocket.Conn
-	config      PeerConfig
-	control     chan outboundFrame
-	updates     chan outboundFrame
-	requestSeq  atomic.Uint64
-	started     atomic.Bool
-	ctx         context.Context
-	cancel      context.CancelFunc
-	done        chan struct{}
-	failOnce    sync.Once
-	errMu       sync.RWMutex
-	terminalErr error
-	pendingMu   sync.Mutex
-	pending     map[string]chan callResult
-	inboundMu   sync.Mutex
-	inbound     map[string]*inboundCall
-	workerWG    sync.WaitGroup
+	conn                *websocket.Conn
+	config              PeerConfig
+	control             chan outboundFrame
+	updates             chan outboundFrame
+	requestSeq          atomic.Uint64
+	started             atomic.Bool
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	done                chan struct{}
+	failOnce            sync.Once
+	errMu               sync.RWMutex
+	terminalErr         error
+	pendingMu           sync.Mutex
+	pending             map[string]chan callResult
+	inboundMu           sync.Mutex
+	inbound             map[string]*inboundCall
+	requestSlots        chan struct{}
+	controlRequestSlots chan struct{}
+	notificationSlots   chan struct{}
+	workerWG            sync.WaitGroup
 }
 
 // NewPeer creates a dormant peer. Start must be called after handlers have been fully wired.
@@ -121,13 +130,16 @@ func NewPeer(conn *websocket.Conn, config PeerConfig) (*Peer, error) {
 	}
 	config = withPeerDefaults(config)
 	return &Peer{
-		conn:    conn,
-		config:  config,
-		control: make(chan outboundFrame, config.ControlQueueSize),
-		updates: make(chan outboundFrame, config.UpdateQueueSize),
-		done:    make(chan struct{}),
-		pending: make(map[string]chan callResult),
-		inbound: make(map[string]*inboundCall),
+		conn:                conn,
+		config:              config,
+		control:             make(chan outboundFrame, config.ControlQueueSize),
+		updates:             make(chan outboundFrame, config.UpdateQueueSize),
+		done:                make(chan struct{}),
+		pending:             make(map[string]chan callResult),
+		inbound:             make(map[string]*inboundCall),
+		requestSlots:        make(chan struct{}, config.MaxConcurrentRequests),
+		controlRequestSlots: make(chan struct{}, config.MaxConcurrentControlRequests),
+		notificationSlots:   make(chan struct{}, config.MaxConcurrentNotifications),
 	}, nil
 }
 
@@ -159,6 +171,15 @@ func withPeerDefaults(config PeerConfig) PeerConfig {
 	}
 	if config.ReadLimit <= 0 {
 		config.ReadLimit = defaultReadLimit
+	}
+	if config.MaxConcurrentRequests <= 0 {
+		config.MaxConcurrentRequests = defaultMaxRequests
+	}
+	if config.MaxConcurrentControlRequests <= 0 {
+		config.MaxConcurrentControlRequests = defaultMaxControlCalls
+	}
+	if config.MaxConcurrentNotifications <= 0 {
+		config.MaxConcurrentNotifications = defaultMaxNotifications
 	}
 	return config
 }
@@ -216,6 +237,15 @@ func (p *Peer) Err() error {
 
 // Call sends a request and waits for its correlated response.
 func (p *Peer) Call(ctx context.Context, method string, params any, result any) error {
+	return p.call(ctx, method, params, result, nil)
+}
+
+// CallTracked sends a request and synchronously exposes its wire ID before enqueueing it.
+func (p *Peer) CallTracked(ctx context.Context, method string, params any, result any, onRequestID func(string)) error {
+	return p.call(ctx, method, params, result, onRequestID)
+}
+
+func (p *Peer) call(ctx context.Context, method string, params any, result any, onRequestID func(string)) error {
 	if err := p.ready(); err != nil {
 		return err
 	}
@@ -241,6 +271,9 @@ func (p *Peer) Call(ctx context.Context, method string, params any, result any) 
 	p.pendingMu.Lock()
 	p.pending[id] = responseCh
 	p.pendingMu.Unlock()
+	if onRequestID != nil {
+		onRequestID(id)
+	}
 	if err := p.enqueueControl(ctx, websocket.TextMessage, payload, nil); err != nil {
 		p.removePending(id, responseCh)
 		return err
@@ -513,13 +546,19 @@ func (p *Peer) dispatchNotification(message Message) {
 		if json.Unmarshal(message.Params, &params) == nil {
 			p.cancelInbound(params.RequestID)
 		}
+		return
 	}
 	if p.config.Notifications == nil {
+		return
+	}
+	if !tryAcquire(p.notificationSlots) {
+		p.fail(errors.New("runner rpc notification concurrency limit exceeded"))
 		return
 	}
 	p.workerWG.Add(1)
 	go func() {
 		defer p.workerWG.Done()
+		defer releaseSlot(p.notificationSlots)
 		p.config.Notifications.HandleNotification(p.ctx, message.Method, message.Params)
 	}()
 }
@@ -529,11 +568,21 @@ func (p *Peer) dispatchRequest(message Message) {
 	requestCtx, cancel := context.WithCancel(p.ctx)
 	requestCtx = context.WithValue(requestCtx, requestIDContextKey{}, id)
 	call := &inboundCall{cancel: cancel}
+	slots := p.requestSlots
+	if isControlRequest(message.Method) {
+		slots = p.controlRequestSlots
+	}
 	p.inboundMu.Lock()
 	if _, exists := p.inbound[id]; exists {
 		p.inboundMu.Unlock()
 		cancel()
-		p.sendErrorResponse(id, &RPCError{Code: ErrorCodeInvalidRequest, Message: "duplicate rpc request id"})
+		p.trySendErrorResponse(id, &RPCError{Code: ErrorCodeInvalidRequest, Message: "duplicate rpc request id"})
+		return
+	}
+	if !tryAcquire(slots) {
+		p.inboundMu.Unlock()
+		cancel()
+		p.trySendErrorResponse(id, &RPCError{Code: ErrorCodeBusy, Message: "runner rpc request concurrency limit exceeded"})
 		return
 	}
 	p.inbound[id] = call
@@ -542,6 +591,7 @@ func (p *Peer) dispatchRequest(message Message) {
 	p.workerWG.Add(1)
 	go func() {
 		defer p.workerWG.Done()
+		defer releaseSlot(slots)
 		defer cancel()
 		defer p.removeInbound(id, call)
 
@@ -564,6 +614,28 @@ func (p *Peer) dispatchRequest(message Message) {
 		defer cancelWrite()
 		_ = p.enqueueControl(ctx, websocket.TextMessage, payload, nil)
 	}()
+}
+
+func isControlRequest(method string) bool {
+	switch strings.TrimSpace(method) {
+	case MethodRunCancel, MethodRunClose:
+		return true
+	default:
+		return false
+	}
+}
+
+func tryAcquire(slots chan struct{}) bool {
+	select {
+	case slots <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func releaseSlot(slots chan struct{}) {
+	<-slots
 }
 
 func (p *Peer) handleRequestSafely(ctx context.Context, method string, params json.RawMessage) (result any, rpcErr *RPCError) {
@@ -590,6 +662,21 @@ func (p *Peer) sendErrorResponse(id string, rpcErr *RPCError) {
 	ctx, cancel := context.WithTimeout(p.ctx, p.config.WriteWait)
 	defer cancel()
 	_ = p.enqueueControl(ctx, websocket.TextMessage, payload, nil)
+}
+
+func (p *Peer) trySendErrorResponse(id string, rpcErr *RPCError) {
+	payload, err := json.Marshal(Message{JSONRPC: JSONRPCVersion, ID: &id, Error: rpcErr})
+	if err != nil {
+		p.fail(err)
+		return
+	}
+	frame := outboundFrame{messageType: websocket.TextMessage, payload: payload}
+	select {
+	case p.control <- frame:
+	case <-p.done:
+	default:
+		p.fail(errors.New("runner rpc control queue is full while rejecting inbound request"))
+	}
 }
 
 func (p *Peer) removePending(id string, expected chan callResult) bool {

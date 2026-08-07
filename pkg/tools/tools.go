@@ -268,11 +268,14 @@ func GetMainToolsWithOptions(ctx context.Context, allowedTools []string, enableF
 	}
 
 	if err := ValidateTools(allowedTools); err != nil {
-		logger.G(ctx).WithError(err).Warn("Invalid main agent tool configuration, falling back to defaults")
-		allowedTools = append([]string{}, defaultMainTools...)
-		if !enableFSSearchTools {
-			allowedTools = filterOutFSSearchTools(allowedTools)
+		logger.G(ctx).WithError(err).Warn("Invalid or externally provided main agent tool names will be ignored by the built-in tool resolver")
+		filtered := make([]string, 0, len(allowedTools))
+		for _, name := range allowedTools {
+			if _, exists := toolRegistry[name]; exists || isVirtualToolName(name) {
+				filtered = append(filtered, name)
+			}
 		}
+		allowedTools = filtered
 	}
 
 	return getMainToolsFromNamesWithOptions(allowedTools, enableFSSearchTools)

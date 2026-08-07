@@ -1,636 +1,632 @@
 // Core types for the Kodelet Web UI
 
 export interface Message {
-	role: "user" | "assistant";
-	content: string | ContentBlock[];
-	toolCalls?: ToolCall[];
-	tool_calls?: ToolCall[]; // Alternative format
-	thinkingText?: string; // For Claude thinking blocks
-	thinkingTexts?: string[]; // Multiple persisted thinking blocks
+  role: 'user' | 'assistant';
+  content: string | ContentBlock[];
+  toolCalls?: ToolCall[];
+  tool_calls?: ToolCall[]; // Alternative format
+  thinkingText?: string; // For Claude thinking blocks
+  thinkingTexts?: string[]; // Multiple persisted thinking blocks
 }
 
 export interface ContentBlock {
-	type: "text" | "image" | "slash-command" | "goal";
-	text?: string;
-	command?: string;
-	source?: {
-		data: string;
-		media_type: string;
-	};
-	image_url?: {
-		url: string;
-	};
+  type: 'text' | 'image' | 'slash-command' | 'goal';
+  text?: string;
+  command?: string;
+  source?: {
+    data: string;
+    media_type: string;
+  };
+  image_url?: {
+    url: string;
+  };
 }
 
 export interface ToolCall {
-	id: string;
-	function: {
-		name: string;
-		arguments: string;
-	};
+  id: string;
+  function: {
+    name: string;
+    arguments: string;
+  };
 }
 
 export interface ToolResult {
-	toolName: string;
-	metadataType?: string;
-	success: boolean;
-	error?: string;
-	metadata?:
-		| FileMetadata
-		| ApplyPatchMetadata
-		| BashMetadata
-		| GrepMetadata
-		| GlobMetadata
-		| WebFetchMetadata
-		| ThinkingMetadata
-		| BatchMetadata
-		| ViewImageMetadata
-		| BrowserMetadata
-		| SkillMetadata
-		| OpenAIWebSearchMetadata
-		| ReadConversationMetadata
-		| ExtensionToolMetadata
-		| Record<string, unknown>;
-	timestamp?: string;
+  toolName: string;
+  metadataType?: string;
+  success: boolean;
+  error?: string;
+  metadata?:
+    | FileMetadata
+    | ApplyPatchMetadata
+    | BashMetadata
+    | GrepMetadata
+    | GlobMetadata
+    | WebFetchMetadata
+    | ThinkingMetadata
+    | BatchMetadata
+    | ViewImageMetadata
+    | BrowserMetadata
+    | SkillMetadata
+    | OpenAIWebSearchMetadata
+    | ReadConversationMetadata
+    | ExtensionToolMetadata
+    | Record<string, unknown>;
+  timestamp?: string;
 }
 
 export interface Usage {
-	inputTokens?: number;
-	outputTokens?: number;
-	cacheCreationInputTokens?: number;
-	cacheReadInputTokens?: number;
-	inputCost?: number;
-	outputCost?: number;
-	cacheCreationCost?: number;
-	cacheReadCost?: number;
-	currentContextWindow?: number;
-	maxContextWindow?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheCreationInputTokens?: number;
+  cacheReadInputTokens?: number;
+  inputCost?: number;
+  outputCost?: number;
+  cacheCreationCost?: number;
+  cacheReadCost?: number;
+  currentContextWindow?: number;
+  maxContextWindow?: number;
 }
 
 export interface Conversation {
-	id: string;
-	messages?: Message[]; // Optional for list view
-	pendingSteer?: Message[];
-	toolResults?: Record<string, ToolResult>; // Optional for list view
-	usage?: Usage; // Optional for list view
-	createdAt: string;
-	updatedAt: string;
-	messageCount: number;
-	summary?: string;
-	provider?: string;
-	cwd?: string;
-	cwdLocked?: boolean;
-	profile?: string;
-	profileLocked?: boolean;
-	reasoningEffort?: string;
-	reasoningEffortLocked?: boolean;
-	runnerId?: string;
-	runner?: Runner;
-	platform?: string;
-	api_mode?: string;
-	metadata?: Record<string, unknown>;
-	isRunning?: boolean;
-	preview?: string;
-	firstMessage?: string; // For list view - truncated first user message
-	created_at?: string; // Alternative format
-	updated_at?: string; // Alternative format
+  id: string;
+  messages?: Message[]; // Optional for list view
+  pendingSteer?: Message[];
+  toolResults?: Record<string, ToolResult>; // Optional for list view
+  usage?: Usage; // Optional for list view
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+  summary?: string;
+  provider?: string;
+  cwd?: string;
+  cwdLocked?: boolean;
+  profile?: string;
+  profileLocked?: boolean;
+  reasoningEffort?: string;
+  reasoningEffortLocked?: boolean;
+  runnerId?: string;
+  environmentProfile?: string;
+  runner?: Runner;
+  platform?: string;
+  api_mode?: string;
+  metadata?: Record<string, unknown>;
+  isRunning?: boolean;
+  preview?: string;
+  firstMessage?: string; // For list view - truncated first user message
+  created_at?: string; // Alternative format
+  updated_at?: string; // Alternative format
 }
 
 export interface ConversationListResponse {
-	conversations: Conversation[];
-	hasMore: boolean;
-	total: number;
-	limit: number;
-	offset: number;
-	stats?: ConversationStats;
+  conversations: Conversation[];
+  hasMore: boolean;
+  total: number;
+  limit: number;
+  offset: number;
+  stats?: ConversationStats;
 }
 
 export interface ConversationStats {
-	totalConversations: number;
-	totalMessages: number;
-	totalTokens: number;
-	totalCost: number;
-	inputTokens: number;
-	outputTokens: number;
-	cacheReadTokens: number;
-	cacheWriteTokens: number;
-	inputCost: number;
-	outputCost: number;
-	cacheReadCost: number;
-	cacheWriteCost: number;
+  totalConversations: number;
+  totalMessages: number;
+  totalTokens: number;
+  totalCost: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  inputCost: number;
+  outputCost: number;
+  cacheReadCost: number;
+  cacheWriteCost: number;
 }
 
 export interface SearchFilters {
-	searchTerm: string;
-	sortBy: "updated" | "created" | "messages";
-	sortOrder: "asc" | "desc";
-	limit: number;
-	offset: number;
+  searchTerm: string;
+  sortBy: 'updated' | 'created' | 'messages';
+  sortOrder: 'asc' | 'desc';
+  limit: number;
+  offset: number;
 }
 
 export interface ApiError {
-	error: string;
-	message?: string;
+  error: string;
+  message?: string;
 }
 
 export interface ChatRequest {
-	message: string;
-	content?: ContentBlock[];
-	conversationId?: string;
-	runnerId?: string;
-	profile?: string;
-	reasoningEffort?: string;
-	cwd?: string;
-	clientCapabilities?: {
-		interactiveUI: boolean;
-		persistentSurfaces: boolean;
-	};
+  message: string;
+  content?: ContentBlock[];
+  conversationId?: string;
+  runnerId?: string;
+  environmentProfile?: string;
+  profile?: string;
+  reasoningEffort?: string;
+  cwd?: string;
+  clientCapabilities?: {
+    interactiveUI: boolean;
+    persistentSurfaces: boolean;
+  };
 }
 
 export interface RunnerHost {
-	instanceId: string;
-	hostname: string;
-	os: string;
-	arch: string;
-	pid?: number;
+  instanceId: string;
+  hostname: string;
+  os: string;
+  arch: string;
+  pid?: number;
 }
 
 export interface RunnerWorkspace {
-	path: string;
-	name: string;
+  path: string;
+  name: string;
 }
 
 export interface Runner {
-	id: string;
-	displayName?: string;
-	host: RunnerHost;
-	workspace: RunnerWorkspace;
-	kodeletVersion?: string;
-	manifestDigest?: string;
-	manifestChanged: boolean;
-	compatibilityError?: string;
-	status:
-		| "offline"
-		| "connecting"
-		| "idle"
-		| "busy"
-		| "error"
-		| "incompatible";
-	connected: boolean;
-	activeRunId?: string;
-	generation: number;
-	connectedAt?: string;
-	lastHeartbeatAt?: string;
+  id: string;
+  displayName?: string;
+  host: RunnerHost;
+  workspace: RunnerWorkspace;
+  kodeletVersion?: string;
+  manifestDigest?: string;
+  manifestChanged: boolean;
+  compatibilityError?: string;
+  status: 'offline' | 'connecting' | 'idle' | 'busy' | 'error' | 'incompatible';
+  connected: boolean;
+  activeRunId?: string;
+  generation: number;
+  connectedAt?: string;
+  lastHeartbeatAt?: string;
 }
 
 export interface RunnerListResponse {
-	runners: Runner[];
+  runners: Runner[];
 }
 
 export interface SteerConversationRequest {
-	message: string;
-	content?: ContentBlock[];
+  message: string;
+  content?: ContentBlock[];
 }
 
 export interface SteerConversationResponse {
-	success: boolean;
-	conversation_id: string;
-	queued: boolean;
+  success: boolean;
+  conversation_id: string;
+  queued: boolean;
 }
 
 export interface StopConversationResponse {
-	success: boolean;
-	conversation_id: string;
-	stopped: boolean;
+  success: boolean;
+  conversation_id: string;
+  stopped: boolean;
 }
 
 export interface UIInputResponseResult {
-	success: boolean;
+  success: boolean;
 }
 
 export interface ForkConversationResponse {
-	success: boolean;
-	conversation_id: string;
+  success: boolean;
+  conversation_id: string;
 }
 
 export interface ChatProfileOption {
-	name: string;
-	scope: string;
-	active?: boolean;
+  name: string;
+  scope: string;
+  active?: boolean;
 }
 
 export interface SlashCommandOption {
-	name: string;
-	description: string;
-	hint?: string;
-	placeholder?: string;
+  name: string;
+  description: string;
+  hint?: string;
+  placeholder?: string;
 }
 
 export interface SlashCommandsResponse {
-	commands: SlashCommandOption[];
+  commands: SlashCommandOption[];
 }
 
 export interface ChatSettings {
-	currentProfile?: string;
-	profiles: ChatProfileOption[];
-	reasoningEffort: string;
-	reasoningEffortOptions: string[];
-	defaultCWD?: string;
+  currentProfile?: string;
+  profiles: ChatProfileOption[];
+  reasoningEffort: string;
+  reasoningEffortOptions: string[];
+  defaultCWD?: string;
 }
 
 export interface CWDHint {
-	path: string;
+  path: string;
 }
 
 export interface CWDHintsResponse {
-	baseDir?: string;
-	query?: string;
-	hints: CWDHint[];
+  baseDir?: string;
+  query?: string;
+  hints: CWDHint[];
 }
 
 export interface GitDiffResponse {
-	cwd: string;
-	diff: string;
-	has_diff: boolean;
-	git_root?: string;
-	exit_code: number;
+  cwd: string;
+  diff: string;
+  has_diff: boolean;
+  git_root?: string;
+  exit_code: number;
 }
 
 export interface TerminalReadyEvent {
-	type: "ready";
-	cwd: string;
-	name: string;
-	git: boolean;
-	pid: number;
+  type: 'ready';
+  cwd: string;
+  name: string;
+  git: boolean;
+  pid: number;
 }
 
 export interface TerminalExitEvent {
-	type: "exit";
-	code: number;
+  type: 'exit';
+  code: number;
 }
 
 export interface TerminalInfoEvent {
-	type: "info";
-	text: string;
+  type: 'info';
+  text: string;
 }
 
 export interface TerminalReplayCompleteEvent {
-	type: "replay-complete";
+  type: 'replay-complete';
 }
 
 export interface TerminalInputMessage {
-	type: "input";
-	data: string;
+  type: 'input';
+  data: string;
 }
 
 export interface TerminalResizeMessage {
-	type: "resize";
-	rows: number;
-	cols: number;
+  type: 'resize';
+  rows: number;
+  cols: number;
 }
 
 export interface TerminalSignalMessage {
-	type: "signal";
-	name: string;
+  type: 'signal';
+  name: string;
 }
 
 export type TerminalServerEvent =
-	| TerminalReadyEvent
-	| TerminalExitEvent
-	| TerminalInfoEvent
-	| TerminalReplayCompleteEvent;
+  | TerminalReadyEvent
+  | TerminalExitEvent
+  | TerminalInfoEvent
+  | TerminalReplayCompleteEvent;
 export type TerminalClientMessage =
-	| TerminalInputMessage
-	| TerminalResizeMessage
-	| TerminalSignalMessage;
+  | TerminalInputMessage
+  | TerminalResizeMessage
+  | TerminalSignalMessage;
 
 export interface PendingImageAttachment {
-	id: string;
-	name: string;
-	mediaType: string;
-	data: string;
-	previewUrl: string;
-	size: number;
+  id: string;
+  name: string;
+  mediaType: string;
+  data: string;
+  previewUrl: string;
+  size: number;
 }
 
 export interface ChatStreamEvent {
-	kind:
-		| "conversation"
-		| "usage"
-		| "ui-input-request"
-		| "ui-confirm-request"
-		| "ui-select-request"
-		| "ui-notification"
-		| "thinking-start"
-		| "thinking-delta"
-		| "thinking-end"
-		| "thinking"
-		| "text-delta"
-		| "content-end"
-		| "text"
-		| "user-message"
-		| "tool-use"
-		| "tool-update"
-		| "tool-result"
-		| "done"
-		| "error";
-	conversation_id?: string;
-	role?: "user" | "assistant";
-	delta?: string;
-	content?: string | ContentBlock[];
-	usage?: Usage;
-	tool_name?: string;
-	tool_call_id?: string;
-	input?: string;
-	tool_result?: ToolResult;
-	ui_input?: UIInputRequestEvent;
-	ui_confirm?: UIConfirmRequestEvent;
-	ui_select?: UISelectRequestEvent;
-	ui_notify?: UINotifyEvent;
-	error?: string;
+  kind:
+    | 'conversation'
+    | 'usage'
+    | 'ui-input-request'
+    | 'ui-confirm-request'
+    | 'ui-select-request'
+    | 'ui-notification'
+    | 'thinking-start'
+    | 'thinking-delta'
+    | 'thinking-end'
+    | 'thinking'
+    | 'text-delta'
+    | 'content-end'
+    | 'text'
+    | 'user-message'
+    | 'tool-use'
+    | 'tool-update'
+    | 'tool-result'
+    | 'done'
+    | 'error';
+  conversation_id?: string;
+  role?: 'user' | 'assistant';
+  delta?: string;
+  content?: string | ContentBlock[];
+  usage?: Usage;
+  tool_name?: string;
+  tool_call_id?: string;
+  input?: string;
+  tool_result?: ToolResult;
+  ui_input?: UIInputRequestEvent;
+  ui_confirm?: UIConfirmRequestEvent;
+  ui_select?: UISelectRequestEvent;
+  ui_notify?: UINotifyEvent;
+  error?: string;
 }
 
 export interface UIInputRequestEvent {
-	id: string;
-	conversationId?: string;
-	title: string;
-	helpText?: string;
-	message?: string;
-	placeholder?: string;
-	defaultValue?: string;
-	submitButtonText?: string;
-	cancelButtonText?: string;
-	required?: boolean;
-	secret?: boolean;
+  id: string;
+  conversationId?: string;
+  title: string;
+  helpText?: string;
+  message?: string;
+  placeholder?: string;
+  defaultValue?: string;
+  submitButtonText?: string;
+  cancelButtonText?: string;
+  required?: boolean;
+  secret?: boolean;
 }
 
 export interface UIConfirmRequestEvent {
-	id: string;
-	conversationId?: string;
-	title: string;
-	message?: string;
-	confirmButtonText?: string;
-	cancelButtonText?: string;
+  id: string;
+  conversationId?: string;
+  title: string;
+  message?: string;
+  confirmButtonText?: string;
+  cancelButtonText?: string;
 }
 
 export interface UISelectRequestEvent {
-	id: string;
-	conversationId?: string;
-	title: string;
-	message?: string;
-	options: string[];
-	submitButtonText?: string;
-	cancelButtonText?: string;
+  id: string;
+  conversationId?: string;
+  title: string;
+  message?: string;
+  options: string[];
+  submitButtonText?: string;
+  cancelButtonText?: string;
 }
 
 export interface UINotifyEvent {
-	title?: string;
-	message: string;
+  title?: string;
+  message: string;
 }
 
 export interface ChatRenderMessage {
-	role: "user" | "assistant";
-	content?: string | ContentBlock[];
-	blocks?: ChatAssistantBlock[];
+  role: 'user' | 'assistant';
+  content?: string | ContentBlock[];
+  blocks?: ChatAssistantBlock[];
 }
 
 export type ChatAssistantBlock =
-	| {
-			type: "thinking";
-			content: string;
-			inProgress?: boolean;
-	  }
-	| {
-			type: "message";
-			content: string | ContentBlock[];
-			inProgress?: boolean;
-	  }
-	| {
-			type: "tools";
-			tools: ChatRenderToolCall[];
-	  };
+  | {
+      type: 'thinking';
+      content: string;
+      inProgress?: boolean;
+    }
+  | {
+      type: 'message';
+      content: string | ContentBlock[];
+      inProgress?: boolean;
+    }
+  | {
+      type: 'tools';
+      tools: ChatRenderToolCall[];
+    };
 
 export interface ChatRenderToolCall {
-	callId: string;
-	name: string;
-	input: string;
-	result?: ToolResult;
-	inProgress?: boolean;
+  callId: string;
+  name: string;
+  input: string;
+  result?: ToolResult;
+  inProgress?: boolean;
 }
 
 // Tool renderer types
 export interface ToolRenderProps {
-	toolResult: ToolResult;
-	toolInput?: string;
-	isPartial?: boolean;
+  toolResult: ToolResult;
+  toolInput?: string;
+  isPartial?: boolean;
 }
 
 export interface FileMetadata {
-	filePath: string;
-	language?: string;
-	size?: number;
-	lines?: string[];
-	offset?: number;
-	lineLimit?: number;
-	totalLines?: number;
-	remainingLines?: number;
-	truncated?: boolean;
+  filePath: string;
+  language?: string;
+  size?: number;
+  lines?: string[];
+  offset?: number;
+  lineLimit?: number;
+  totalLines?: number;
+  remainingLines?: number;
+  truncated?: boolean;
 }
 
 export interface ApplyPatchMetadata {
-	changes: ApplyPatchChange[];
+  changes: ApplyPatchChange[];
 }
 
 export interface ApplyPatchChange {
-	path: string;
-	operation: "add" | "delete" | "update" | string;
-	oldContent?: string;
-	newContent?: string;
-	unifiedDiff?: string;
-	movePath?: string;
+  path: string;
+  operation: 'add' | 'delete' | 'update' | string;
+  oldContent?: string;
+  newContent?: string;
+  unifiedDiff?: string;
+  movePath?: string;
 }
 
 export interface BashMetadata {
-	command: string;
-	output?: string;
-	exitCode?: number;
-	executionTime?: number;
-	workingDir?: string;
-	truncation?: {
-		truncated: boolean;
-		totalLines: number;
-		totalBytes: number;
-		maxBytes: number;
-	};
-	fullOutputPath?: string;
+  command: string;
+  output?: string;
+  exitCode?: number;
+  executionTime?: number;
+  workingDir?: string;
+  truncation?: {
+    truncated: boolean;
+    totalLines: number;
+    totalBytes: number;
+    maxBytes: number;
+  };
+  fullOutputPath?: string;
 }
 
 export interface GrepMetadata {
-	pattern: string;
-	path?: string;
-	include?: string;
-	results: GrepResult[];
-	truncated?: boolean;
-	truncationReason?: "file_limit" | "output_size" | "";
-	maxResults?: number;
+  pattern: string;
+  path?: string;
+  include?: string;
+  results: GrepResult[];
+  truncated?: boolean;
+  truncationReason?: 'file_limit' | 'output_size' | '';
+  maxResults?: number;
 }
 
 export interface GrepResult {
-	filePath: string;
-	matches?: GrepMatch[];
-	lineNumber?: number;
-	content?: string;
+  filePath: string;
+  matches?: GrepMatch[];
+  lineNumber?: number;
+  content?: string;
 }
 
 export interface GrepMatch {
-	lineNumber: number;
-	content: string;
-	isContext?: boolean;
+  lineNumber: number;
+  content: string;
+  isContext?: boolean;
 }
 
 export interface GlobMetadata {
-	pattern: string;
-	path?: string;
-	files: FileInfo[];
-	truncated?: boolean;
+  pattern: string;
+  path?: string;
+  files: FileInfo[];
+  truncated?: boolean;
 }
 
 export interface FileInfo {
-	path: string;
-	name?: string;
-	size?: number;
-	modTime?: string;
-	modified?: string;
-	type?: string;
-	language?: string;
+  path: string;
+  name?: string;
+  size?: number;
+  modTime?: string;
+  modified?: string;
+  type?: string;
+  language?: string;
 }
 
 export interface WebFetchMetadata {
-	url: string;
-	contentType?: string;
-	size?: number;
-	savedPath?: string;
-	filePath?: string;
-	prompt?: string;
-	processedType?: string;
-	content?: string;
+  url: string;
+  contentType?: string;
+  size?: number;
+  savedPath?: string;
+  filePath?: string;
+  prompt?: string;
+  processedType?: string;
+  content?: string;
 }
 
 export interface ThinkingMetadata {
-	thought: string;
+  thought: string;
 }
 
 export interface BatchMetadata {
-	description: string;
-	subResults: ToolResult[];
-	results?: ToolResult[];
-	successCount?: number;
-	failureCount?: number;
+  description: string;
+  subResults: ToolResult[];
+  results?: ToolResult[];
+  successCount?: number;
+  failureCount?: number;
 }
 
 export interface ViewImageMetadata {
-	path?: string;
-	mimeType?: string;
-	mime_type?: string;
-	detail?: string;
-	imageSize?: {
-		width?: number;
-		height?: number;
-	};
+  path?: string;
+  mimeType?: string;
+  mime_type?: string;
+  detail?: string;
+  imageSize?: {
+    width?: number;
+    height?: number;
+  };
 }
 
 export interface BrowserMetadata {
-	url: string;
-	title?: string;
-	pageTitle?: string;
-	filePath?: string;
-	file_path?: string;
-	path?: string;
-	dimensions?: string;
-	size?: string;
+  url: string;
+  title?: string;
+  pageTitle?: string;
+  filePath?: string;
+  file_path?: string;
+  path?: string;
+  dimensions?: string;
+  size?: string;
 }
 
 export interface SkillMetadata {
-	skillName: string;
-	directory: string;
+  skillName: string;
+  directory: string;
 }
 
 export interface OpenAIWebSearchMetadata {
-	callId?: string;
-	status?: string;
-	action?: string;
-	queries?: string[];
-	sources?: string[];
-	results?: string[];
-	url?: string;
-	pattern?: string;
+  callId?: string;
+  status?: string;
+  action?: string;
+  queries?: string[];
+  sources?: string[];
+  results?: string[];
+  url?: string;
+  pattern?: string;
 }
 
 export interface ReadConversationMetadata {
-	conversationID?: string;
-	conversationId?: string;
-	goal?: string;
-	content?: string;
+  conversationID?: string;
+  conversationId?: string;
+  goal?: string;
+  content?: string;
 }
 
 export interface ExtensionToolMetadata {
-	extensionID?: string;
-	extensionId?: string;
-	toolName?: string;
-	executionTime?: number;
-	output?: string;
-	data?: Record<string, unknown>;
+  extensionID?: string;
+  extensionId?: string;
+  toolName?: string;
+  executionTime?: number;
+  output?: string;
+  data?: Record<string, unknown>;
 }
 
 export interface TaskRunCounts {
-	succeeded: number;
-	failed: number;
-	running: number;
+  succeeded: number;
+  failed: number;
+  running: number;
 }
 
 export interface TaskRunActivity {
-	id: string;
-	sequence: number;
-	kind: string;
-	label: string;
-	detail?: string;
-	status: "running" | "succeeded" | "failed";
-	preview?: string;
+  id: string;
+  sequence: number;
+  kind: string;
+  label: string;
+  detail?: string;
+  status: 'running' | 'succeeded' | 'failed';
+  preview?: string;
 }
 
 export interface TaskRunSnapshot {
-	version: 1;
-	revision: number;
-	kind: string;
-	status: "running" | "completed" | "failed";
-	phase: string;
-	title: string;
-	detail?: string;
-	task?: string;
-	cwd?: string;
-	elapsedMs: number;
-	counts: TaskRunCounts;
-	activities: TaskRunActivity[];
-	omittedSucceeded?: number;
-	omittedFailed?: number;
-	omittedRunning?: number;
+  version: 1;
+  revision: number;
+  kind: string;
+  status: 'running' | 'completed' | 'failed';
+  phase: string;
+  title: string;
+  detail?: string;
+  task?: string;
+  cwd?: string;
+  elapsedMs: number;
+  counts: TaskRunCounts;
+  activities: TaskRunActivity[];
+  omittedSucceeded?: number;
+  omittedFailed?: number;
+  omittedRunning?: number;
 }
 
 // Component props
 export interface ConversationListProps {
-	conversations: Conversation[];
-	loading: boolean;
-	error: string | null;
-	hasMore: boolean;
-	onLoadMore: () => void;
-	onSearch: (filters: SearchFilters) => void;
-	onDelete: (conversationId: string) => void;
+  conversations: Conversation[];
+  loading: boolean;
+  error: string | null;
+  hasMore: boolean;
+  onLoadMore: () => void;
+  onSearch: (filters: SearchFilters) => void;
+  onDelete: (conversationId: string) => void;
 }
 
 export interface ConversationViewProps {
-	conversation: Conversation;
-	loading: boolean;
-	error: string | null;
-	onExport: () => void;
-	onDelete: () => void;
+  conversation: Conversation;
+  loading: boolean;
+  error: string | null;
+  onExport: () => void;
+  onDelete: () => void;
 }

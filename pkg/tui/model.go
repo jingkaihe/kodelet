@@ -31,7 +31,7 @@ func Run(ctx context.Context, config Config) error {
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(config.ConversationID) == "" {
+	if strings.TrimSpace(config.ConversationID) == "" && !config.Remote {
 		if _, _, err := resolveReasoningSettings(displayProfile(config.Profile), config.ReasoningEffort); err != nil {
 			return errors.Wrap(err, "invalid reasoning effort configuration")
 		}
@@ -126,15 +126,30 @@ func newModel(ctx context.Context, config Config) model {
 	profile := displayProfile(config.Profile)
 	profileOptionsInput := config.ProfileOptions
 	if len(profileOptionsInput) == 0 {
-		profileOptionsInput = loadProfileOptions()
+		if config.Remote {
+			profileOptionsInput = []string{profile}
+		} else {
+			profileOptionsInput = loadProfileOptions()
+		}
 	}
 	profileOptions := normalizeProfileOptions(profileOptionsInput, profile)
 	reasoningEffort := strings.TrimSpace(config.ReasoningEffort)
 	reasoningEffortOptions := append([]string(nil), config.ReasoningEffortOptions...)
-	if resolvedEffort, resolvedOptions, err := resolveReasoningSettings(profile, reasoningEffort); err == nil {
-		reasoningEffort = resolvedEffort
-		if len(reasoningEffortOptions) == 0 {
-			reasoningEffortOptions = resolvedOptions
+	if config.Remote {
+		if settings, ok := profileSettingsFor(config.ProfileSettings, profile); ok {
+			if reasoningEffort == "" {
+				reasoningEffort = settings.ReasoningEffort
+			}
+			if len(reasoningEffortOptions) == 0 {
+				reasoningEffortOptions = append([]string(nil), settings.ReasoningEffortOptions...)
+			}
+		}
+	} else {
+		if resolvedEffort, resolvedOptions, err := resolveReasoningSettings(profile, reasoningEffort); err == nil {
+			reasoningEffort = resolvedEffort
+			if len(reasoningEffortOptions) == 0 {
+				reasoningEffortOptions = resolvedOptions
+			}
 		}
 	}
 	reasoningEffort = normalizeReasoningEffort(reasoningEffort)
@@ -163,6 +178,8 @@ func newModel(ctx context.Context, config Config) model {
 		cancel:                cancel,
 		runner:                runner,
 		remote:                config.Remote,
+		environmentProfile:    strings.TrimSpace(config.EnvironmentProfile),
+		profileSettings:       cloneProfileSettings(config.ProfileSettings),
 		extensionRuntimes:     extensionRuntimes,
 		extensionUI:           extensionUI,
 		extensionWidgets:      map[extensionUIKey]tuiExtensionWidget{},

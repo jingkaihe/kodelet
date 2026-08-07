@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
@@ -22,7 +23,7 @@ type staticRuntimeProvider struct {
 	runtime *extensions.Runtime
 }
 
-func (p staticRuntimeProvider) RuntimeWithCallContext(context.Context, string, extensions.ExtensionCallContext) (*extensions.Runtime, error) {
+func (p staticRuntimeProvider) RuntimeWithConfigAndCallContext(context.Context, string, string, extensions.Config, extensions.ExtensionCallContext) (*extensions.Runtime, error) {
 	return p.runtime, nil
 }
 
@@ -30,16 +31,20 @@ type recordingRuntimeProvider struct {
 	runtime           *extensions.Runtime
 	discoveryCalls    int
 	activeCalls       int
+	activeVariant     string
+	activeConfig      extensions.Config
 	activeCallContext extensions.ExtensionCallContext
 }
 
-func (p *recordingRuntimeProvider) RuntimeForCommandDiscovery(context.Context, string) (*extensions.Runtime, error) {
+func (p *recordingRuntimeProvider) RuntimeForCommandDiscoveryWithConfig(context.Context, string, string, extensions.Config) (*extensions.Runtime, error) {
 	p.discoveryCalls++
 	return p.runtime, nil
 }
 
-func (p *recordingRuntimeProvider) RuntimeWithCallContext(_ context.Context, _ string, callContext extensions.ExtensionCallContext) (*extensions.Runtime, error) {
+func (p *recordingRuntimeProvider) RuntimeWithConfigAndCallContext(_ context.Context, _ string, variant string, config extensions.Config, callContext extensions.ExtensionCallContext) (*extensions.Runtime, error) {
 	p.activeCalls++
+	p.activeVariant = variant
+	p.activeConfig = config
 	p.activeCallContext = callContext
 	return p.runtime, nil
 }
@@ -47,6 +52,7 @@ func (p *recordingRuntimeProvider) RuntimeWithCallContext(_ context.Context, _ s
 type recordingExecutionInstanceProvider struct {
 	workspace string
 	err       error
+	closeErr  error
 	returnNil bool
 	specs     []ExecutionInstanceSpec
 	instances []*recordingExecutionInstance
@@ -59,7 +65,7 @@ func (p *recordingExecutionInstanceProvider) Create(_ context.Context, spec Exec
 	if p.returnNil {
 		return nil, nil //nolint:nilnil // Deliberately violates the provider contract to test validation.
 	}
-	instance := &recordingExecutionInstance{workspace: p.workspace}
+	instance := &recordingExecutionInstance{workspace: p.workspace, closeErr: p.closeErr}
 	p.specs = append(p.specs, spec)
 	p.instances = append(p.instances, instance)
 	return instance, nil
@@ -68,25 +74,42 @@ func (p *recordingExecutionInstanceProvider) Create(_ context.Context, spec Exec
 type recordingExecutionInstance struct {
 	workspace string
 	closed    bool
+	closeErr  error
 }
 
 type failingRuntimeProvider struct {
 	err error
 }
 
-func (p failingRuntimeProvider) RuntimeWithCallContext(context.Context, string, extensions.ExtensionCallContext) (*extensions.Runtime, error) {
+func (p failingRuntimeProvider) RuntimeWithConfigAndCallContext(context.Context, string, string, extensions.Config, extensions.ExtensionCallContext) (*extensions.Runtime, error) {
 	return nil, p.err
 }
 
 func (i *recordingExecutionInstance) WorkingDirectory() string { return i.workspace }
 func (i *recordingExecutionInstance) Close(context.Context) error {
 	i.closed = true
-	return nil
+	return i.closeErr
 }
 
 type failingOpenEnvironment struct {
 	agentenv.Environment
 	closed bool
+}
+
+type blockingToolEnvironment struct {
+	agentenv.Environment
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (e *blockingToolEnvironment) ExecuteTool(_ context.Context, request agentenv.ToolRequest, _ agentenv.ToolUpdateSink) (agentenv.ToolExecution, error) {
+	e.once.Do(func() { close(e.started) })
+	<-e.release
+	return agentenv.ToolExecution{
+		Input:  request.Input,
+		Result: tooltypes.BaseToolResult{Result: "released"},
+	}, nil
 }
 
 func (*failingOpenEnvironment) Open(context.Context, agentenv.RunSpec) (agentenv.Manifest, error) {
@@ -174,9 +197,11 @@ Review the runner workspace.`), 0o600))
 
 	runtime := extensions.EmptyRuntime()
 	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
+	loadedEnvironmentProfile := ""
 	service, err := NewService(t.Context(), workspace, ServiceOptions{
 		RuntimeProvider: staticRuntimeProvider{runtime: runtime},
-		ConfigLoader: func(string) (llmtypes.Config, error) {
+		ConfigLoader: func(profile string) (llmtypes.Config, error) {
+			loadedEnvironmentProfile = profile
 			return llmtypes.Config{
 				Provider:        "runner-default",
 				Model:           "runner-model",
@@ -207,12 +232,15 @@ Review the runner workspace.`), 0o600))
 			InteractiveUI: true,
 		},
 		Agent: protocol.AgentDescriptor{
-			Provider: "openai",
-			Model:    "gpt-test",
+			Provider:           "openai",
+			Model:              "gpt-test",
+			Profile:            "control-work",
+			EnvironmentProfile: "runner-work",
 		},
 		ReservedToolNames: []string{"get_goal", "update_goal", "read_conversation"},
 	})
 	assert.Equal(t, "runner-1", manifest.RunnerID)
+	assert.Equal(t, "runner-work", loadedEnvironmentProfile)
 	assert.Equal(t, "run-1", manifest.RunID)
 	assert.Equal(t, int64(4), manifest.Generation)
 	assert.Equal(t, workspace, manifest.WorkingDirectory)
@@ -339,10 +367,16 @@ func TestServiceManifestProbeDoesNotStartRunLifecycle(t *testing.T) {
 	runtime := extensions.EmptyRuntime()
 	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
 	provider := &recordingRuntimeProvider{runtime: runtime}
+	var loadedProfiles []string
 	service, err := NewService(t.Context(), workspace, ServiceOptions{
 		RuntimeProvider: provider,
-		ConfigLoader: func(string) (llmtypes.Config, error) {
-			return llmtypes.Config{Provider: "openai", Model: "gpt-test"}, nil
+		ConfigLoader: func(profile string) (llmtypes.Config, error) {
+			loadedProfiles = append(loadedProfiles, profile)
+			return llmtypes.Config{
+				Provider:          "openai",
+				Model:             "gpt-test",
+				ExtensionSettings: map[string]any{"enabled": false},
+			}, nil
 		},
 	})
 	require.NoError(t, err)
@@ -354,16 +388,74 @@ func TestServiceManifestProbeDoesNotStartRunLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, provider.discoveryCalls)
 	assert.Zero(t, provider.activeCalls)
+	assert.Equal(t, []string{""}, loadedProfiles)
 
 	callService[protocol.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
 		RunID: "run-1", ConversationID: "conversation-1",
-		Agent: protocol.AgentDescriptor{Provider: "anthropic", Model: "claude-test"},
+		Agent: protocol.AgentDescriptor{Provider: "anthropic", Model: "claude-test", EnvironmentProfile: "runner-work"},
 	})
 	assert.Equal(t, 1, provider.activeCalls)
+	assert.Equal(t, []string{"", "runner-work"}, loadedProfiles)
+	assert.Equal(t, "runner-work", provider.activeVariant)
+	assert.False(t, provider.activeConfig.Enabled)
 	assert.Equal(t, "conversation-1", provider.activeCallContext.ConversationID)
 	assert.Equal(t, "anthropic", provider.activeCallContext.Provider)
 	assert.Equal(t, "claude-test", provider.activeCallContext.Model)
 	callService[any](t, service, protocol.MethodRunClose, protocol.RunCloseParams{RunID: "run-1"})
+}
+
+func TestServiceCloseRunDoesNotWaitForeverForCanceledOperation(t *testing.T) {
+	workspace := t.TempDir()
+	runtime := extensions.EmptyRuntime()
+	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
+	blocking := &blockingToolEnvironment{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	service, err := NewService(t.Context(), workspace, ServiceOptions{
+		RuntimeProvider: staticRuntimeProvider{runtime: runtime},
+		EnvironmentFactory: func(workingDirectory string, runtime *extensions.Runtime) agentenv.Environment {
+			blocking.Environment = agentenv.NewLocalEnvironment(workingDirectory, runtime)
+			return blocking
+		},
+		CleanupTimeout: 20 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	service.Attach(&recordingPeer{})
+	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
+	callService[protocol.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
+		RunID: "run-1", ConversationID: "conversation-1",
+	})
+
+	operationDone := make(chan error, 1)
+	go func() {
+		_, operationErr := service.executeTool(context.Background(), protocol.ToolExecuteParams{
+			RunID: "run-1", ToolCallID: "tool-1", Name: "file_read", Input: json.RawMessage(`{}`),
+		})
+		operationDone <- operationErr
+	}()
+	select {
+	case <-blocking.started:
+	case <-time.After(time.Second):
+		t.Fatal("tool operation did not start")
+	}
+
+	startedAt := time.Now()
+	err = service.closeRun(t.Context(), "run-1")
+	require.ErrorContains(t, err, "timed out waiting for runner operations to stop")
+	assert.Less(t, time.Since(startedAt), time.Second)
+	state, activeRunID, _ := service.HeartbeatSnapshot()
+	assert.Equal(t, protocol.RunnerStateError, state)
+	assert.Empty(t, activeRunID)
+	_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodRunOpen, mustJSON(t, protocol.RunOpenParams{
+		RunID: "run-2", ConversationID: "conversation-2",
+	}))
+	require.NotNil(t, rpcErr)
+	assert.Contains(t, rpcErr.Message, "requires restart")
+
+	close(blocking.release)
+	require.NoError(t, <-operationDone)
 }
 
 func TestServiceReturnsUnavailableWhenClientDoesNotSupportInteractiveUI(t *testing.T) {
@@ -429,7 +521,9 @@ func TestServiceProxiesInteractiveAndPersistentUI(t *testing.T) {
 		ClientCapabilities: protocol.ClientCapabilities{InteractiveUI: true, PersistentSurfaces: true},
 	})
 
-	input, err := service.Input(t.Context(), extensions.UIInputRequest{Title: "Input", DefaultValue: "draft"})
+	source := &recordingUIExtensionSource{owner: extensions.UIExtensionOwner{ExtensionID: "extension-1", Generation: 4}}
+	interactiveCtx := extensions.ContextWithUIExtensionOwner(t.Context(), source.owner)
+	input, err := service.Input(interactiveCtx, extensions.UIInputRequest{ID: "shared-id", Title: "Input", DefaultValue: "draft"})
 	require.NoError(t, err)
 	assert.Equal(t, "draft", input.Value)
 	confirmation, err := service.Confirm(t.Context(), extensions.UIConfirmRequest{Title: "Confirm"})
@@ -442,7 +536,6 @@ func TestServiceProxiesInteractiveAndPersistentUI(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, extensions.UIInputStatusSubmitted, notification.Status)
 
-	source := &recordingUIExtensionSource{owner: extensions.UIExtensionOwner{ExtensionID: "extension-1", Generation: 4}}
 	frame := extensions.UIFrame{Sequence: 7, Lines: []extensions.UIFrameLine{{Spans: []extensions.UIStyledSpan{{Text: "frame"}}}}}
 	frameResponses := []extensions.UIFrameResponse{}
 	response, err := service.SetWidget(t.Context(), source, extensions.UIWidgetSetRequest{ID: "widget", Placement: extensions.UIWidgetPlacementAboveComposer, Frame: frame})
@@ -486,8 +579,17 @@ func TestServiceProxiesInteractiveAndPersistentUI(t *testing.T) {
 		protocol.MethodUISurfaceFrame,
 		protocol.MethodUISurfaceClose,
 	}, peer.calls)
+	inputParams := peer.callParams[0].(protocol.UIInputParams)
+	confirmParams := peer.callParams[1].(protocol.UIConfirmParams)
+	selectParams := peer.callParams[2].(protocol.UISelectParams)
 	widgetParams := peer.callParams[4].(protocol.UIWidgetSetParams)
 	peer.mu.Unlock()
+	assert.Equal(t, protocol.ExtensionOwner{ExtensionID: "extension-1", Generation: 4}, inputParams.Owner)
+	assert.Equal(t, scopedInteractiveUIRequestID(inputParams.Owner, "shared-id"), inputParams.Request.ID)
+	assert.NotEqual(t, scopedInteractiveUIRequestID(protocol.ExtensionOwner{ExtensionID: "extension-2", Generation: 4}, "shared-id"), inputParams.Request.ID)
+	assert.NotEmpty(t, confirmParams.Request.ID)
+	assert.NotEmpty(t, selectParams.Request.ID)
+	assert.NotEqual(t, confirmParams.Request.ID, selectParams.Request.ID)
 	assert.Equal(t, "run-1", widgetParams.RunID)
 	assert.Equal(t, protocol.ExtensionOwner{ExtensionID: "extension-1", Generation: 4}, widgetParams.Owner)
 
@@ -599,6 +701,58 @@ func TestServiceCleansExecutionInstanceWhenEnvironmentOpenFails(t *testing.T) {
 	assert.True(t, environment.closed)
 	require.Len(t, provider.instances, 1)
 	assert.True(t, provider.instances[0].closed)
+}
+
+func TestServiceRequiresRestartWhenFailedOpenCleanupFails(t *testing.T) {
+	provider := &recordingExecutionInstanceProvider{workspace: t.TempDir(), closeErr: errors.New("instance close failed")}
+	runtime := extensions.EmptyRuntime()
+	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
+	service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{
+		RuntimeProvider:           staticRuntimeProvider{runtime: runtime},
+		ConfigLoader:              func(string) (llmtypes.Config, error) { return llmtypes.Config{}, nil },
+		EnvironmentFactory:        func(string, *extensions.Runtime) agentenv.Environment { return nil },
+		ExecutionInstanceProvider: provider,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	service.Attach(&recordingPeer{})
+	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
+
+	_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodRunOpen, mustJSON(t, protocol.RunOpenParams{
+		RunID: "run-1", ConversationID: "conversation-1",
+	}))
+	require.NotNil(t, rpcErr)
+	assert.Contains(t, rpcErr.Message, "factory returned nil")
+	state, activeRunID, _ := service.HeartbeatSnapshot()
+	assert.Equal(t, protocol.RunnerStateError, state)
+	assert.Empty(t, activeRunID)
+	_, rpcErr = service.HandleRequest(t.Context(), protocol.MethodRunOpen, mustJSON(t, protocol.RunOpenParams{
+		RunID: "run-2", ConversationID: "conversation-2",
+	}))
+	require.NotNil(t, rpcErr)
+	assert.Contains(t, rpcErr.Message, "requires restart")
+}
+
+func TestServiceRequiresRestartWhenManifestProbeCleanupFails(t *testing.T) {
+	provider := &recordingExecutionInstanceProvider{workspace: t.TempDir(), closeErr: errors.New("instance close failed")}
+	runtime := extensions.EmptyRuntime()
+	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
+	service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{
+		RuntimeProvider:           staticRuntimeProvider{runtime: runtime},
+		ConfigLoader:              func(string) (llmtypes.Config, error) { return llmtypes.Config{}, nil },
+		ExecutionInstanceProvider: provider,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	service.Attach(&recordingPeer{})
+	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
+
+	_, err = service.ProbeManifestDigest(t.Context())
+	require.ErrorContains(t, err, "failed to clean up runner manifest probe resources")
+	state, activeRunID, digest := service.HeartbeatSnapshot()
+	assert.Equal(t, protocol.RunnerStateError, state)
+	assert.Empty(t, activeRunID)
+	assert.Empty(t, digest)
 }
 
 func TestDirectWorkspaceInstanceProviderReturnsFreshHandles(t *testing.T) {

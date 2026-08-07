@@ -28,6 +28,26 @@ type recordingRunner struct {
 	err            error
 }
 
+type remoteControlRecordingRunner struct {
+	recordingRunner
+	actions      []string
+	steerMessage string
+	steerQueued  bool
+	steerErr     error
+	stopErr      error
+}
+
+func (r *remoteControlRecordingRunner) SteerConversation(_ context.Context, _ string, message string) (bool, error) {
+	r.actions = append(r.actions, "steer")
+	r.steerMessage = message
+	return r.steerQueued, r.steerErr
+}
+
+func (r *remoteControlRecordingRunner) StopConversation(context.Context, string) error {
+	r.actions = append(r.actions, "stop")
+	return r.stopErr
+}
+
 func (r *recordingRunner) Run(ctx context.Context, req chat.ChatRequest, sink chat.ChatEventSink) (string, error) {
 	r.req = req
 	if err := sink.Send(chat.ChatEvent{Kind: "text", Delta: "streamed"}); err != nil {
@@ -94,6 +114,79 @@ func TestCancelActiveRunFinishesActiveBlocks(t *testing.T) {
 	assert.Contains(t, content, "Had 1 Thought")
 	assert.Contains(t, content, "Ran 1 command")
 	assert.NotContains(t, content, "Thinking")
+}
+
+func TestRemoteCancelStopsControlPlaneBeforeClosingStream(t *testing.T) {
+	runner := &remoteControlRecordingRunner{}
+	m := newModel(context.Background(), Config{Runner: runner, Remote: true})
+	t.Cleanup(m.cancel)
+	m.running = true
+	m.conversationID = "conversation-1"
+	m.cancelRun = func() { runner.actions = append(runner.actions, "cancel-stream") }
+
+	cmd := m.cancelActiveRun()
+	require.NotNil(t, cmd)
+	var stopMessage remoteStopMsg
+	switch message := cmd().(type) {
+	case remoteStopMsg:
+		stopMessage = message
+	case tea.BatchMsg:
+		for _, child := range message {
+			if child == nil {
+				continue
+			}
+			if childMessage, ok := child().(remoteStopMsg); ok {
+				stopMessage = childMessage
+			}
+		}
+	default:
+		t.Fatalf("unexpected cancellation message %T", message)
+	}
+	assert.NoError(t, stopMessage.err)
+	assert.Equal(t, []string{"stop", "cancel-stream"}, runner.actions)
+}
+
+func TestRemoteSteeringUsesControlPlaneRunner(t *testing.T) {
+	runner := &remoteControlRecordingRunner{steerQueued: true}
+	m := newModel(context.Background(), Config{Runner: runner, Remote: true})
+	t.Cleanup(m.cancel)
+	m.running = true
+	m.conversationID = "conversation-1"
+	m.textarea.SetValue(" focus on tests ")
+
+	cmd := m.submitSteering()
+	require.NotNil(t, cmd)
+	message, ok := cmd().(remoteSteerMsg)
+	require.True(t, ok)
+	updated, _ := m.Update(message)
+	m = updated.(model)
+
+	assert.Equal(t, "focus on tests", runner.steerMessage)
+	assert.Equal(t, []string{"steer"}, runner.actions)
+	assert.Equal(t, []string{"focus on tests"}, m.queuedSteering)
+	assert.Equal(t, "steering queued", m.status)
+}
+
+func TestRemoteModelUsesControlPlaneProfileSettings(t *testing.T) {
+	m := newModel(context.Background(), Config{
+		Remote:         true,
+		Profile:        "work",
+		ProfileOptions: []string{"default", "work"},
+		ProfileSettings: map[string]ProfileSettings{
+			"default": {ReasoningEffort: "low", ReasoningEffortOptions: []string{"low", "medium"}},
+			"work":    {ReasoningEffort: "high", ReasoningEffortOptions: []string{"medium", "high"}},
+		},
+	})
+	t.Cleanup(m.cancel)
+	assert.Equal(t, "work", m.profile)
+	assert.Equal(t, "high", m.reasoningEffort)
+	assert.Equal(t, []string{"medium", "high"}, m.reasoningEffortOptions)
+
+	m.profilePickerOpen = true
+	m.selectProfilePickerOption(0)
+	assert.Equal(t, "default", m.profile)
+	assert.Equal(t, "low", m.reasoningEffort)
+	assert.Equal(t, []string{"low", "medium"}, m.reasoningEffortOptions)
 }
 
 func TestCancelledRunFinishesOnDone(t *testing.T) {

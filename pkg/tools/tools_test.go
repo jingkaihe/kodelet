@@ -158,21 +158,18 @@ func TestErrorMessageFormat(t *testing.T) {
 	})
 }
 
-func TestGetMainTools_FallsBackOnValidationErrors(t *testing.T) {
+func TestGetMainTools_IgnoresUnknownNamesWithoutBroadeningAllowlist(t *testing.T) {
 	// Test with invalid tools
 	invalidTools := []string{"unknown_tool", "bash"}
 	tools := GetMainTools(context.Background(), invalidTools)
 
-	// Should fallback to default tools
-	defaultTools := GetMainTools(context.Background(), []string{})
-	assert.Equal(t, len(defaultTools), len(tools), "Should fallback to default tools")
-
-	// Verify we got the default tools, not the invalid ones
 	toolNames := make([]string, len(tools))
 	for i, tool := range tools {
 		toolNames[i] = tool.Name()
 	}
-	assert.NotContains(t, toolNames, "unknown_tool", "Should not contain unknown tool")
+	assert.Contains(t, toolNames, "bash")
+	assert.NotContains(t, toolNames, "unknown_tool")
+	assert.NotContains(t, toolNames, "file_write", "an invalid external name must not enable default mutation tools")
 }
 
 func TestGetMainTools_UsesValidTools(t *testing.T) {
@@ -380,7 +377,7 @@ func TestGetMainToolsWithOptions_FSSearchToolsDisabled(t *testing.T) {
 		assert.Empty(t, tools)
 	})
 
-	t.Run("fallback after validation still keeps grep and glob disabled", func(t *testing.T) {
+	t.Run("unknown-only allowlists do not fall back to defaults", func(t *testing.T) {
 		tools := GetMainToolsWithOptions(context.Background(), []string{"unknown_tool"}, false)
 
 		toolNames := make([]string, len(tools))
@@ -389,7 +386,7 @@ func TestGetMainToolsWithOptions_FSSearchToolsDisabled(t *testing.T) {
 		}
 
 		assert.NotContains(t, toolNames, "file_read")
-		assert.Contains(t, toolNames, "bash")
+		assert.NotContains(t, toolNames, "bash")
 		assert.NotContains(t, toolNames, "grep_tool")
 		assert.NotContains(t, toolNames, "glob_tool")
 	})

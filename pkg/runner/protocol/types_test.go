@@ -113,3 +113,18 @@ func TestRegistrationAndRunOpenValidationBranches(t *testing.T) {
 	require.ErrorContains(t, (RunOpenParams{RunID: "run-one"}).Validate(), "conversationId")
 	require.NoError(t, (RunOpenParams{RunID: "run-one", ConversationID: "conversation-one"}).Validate())
 }
+
+func TestHeartbeatParamsValidate(t *testing.T) {
+	valid := HeartbeatParams{RunnerID: "runner-one", Generation: 1, State: RunnerStateIdle}
+	require.NoError(t, valid.Validate())
+
+	missingRunner := valid
+	missingRunner.RunnerID = ""
+	require.ErrorContains(t, missingRunner.Validate(), "runnerId")
+	missingGeneration := valid
+	missingGeneration.Generation = 0
+	require.ErrorContains(t, missingGeneration.Validate(), "generation")
+	unknown := valid
+	unknown.State = RunnerState("future")
+	require.ErrorContains(t, unknown.Validate(), "unsupported runner state")
+}

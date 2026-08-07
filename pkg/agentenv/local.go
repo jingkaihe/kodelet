@@ -168,6 +168,10 @@ func (e *LocalEnvironment) ExecuteCommand(ctx context.Context, request CommandRe
 	if !found {
 		return CommandResult{}, nil
 	}
+	pinned, opened := e.pinnedCommands(command)
+	if opened && command != goals.SlashCommandName && command != slashcommands.RenameCommandName && len(pinned) == 0 {
+		return CommandResult{}, errors.Errorf("slash command '/%s' is not available in the pinned run manifest", command)
+	}
 
 	runtime := e.extensionRuntime()
 	if runtime != nil {
@@ -204,12 +208,28 @@ func (e *LocalEnvironment) ExecuteCommand(ctx context.Context, request CommandRe
 		return CommandResult{}, nil
 	}
 
+	expectedDigest := ""
+	for _, pinnedCommand := range pinned {
+		if strings.TrimSpace(pinnedCommand.Digest) != "" {
+			expectedDigest = pinnedCommand.Digest
+			break
+		}
+	}
+	if opened && expectedDigest == "" {
+		return CommandResult{}, errors.Errorf("pinned extension command '/%s' is no longer available", command)
+	}
+
 	workingDirectory := firstNonEmpty(request.RunSpec.Config.WorkingDirectory, e.workingDirectory)
 	processor, err := fragments.NewFragmentProcessor(fragments.WithDefaultDirsForCWD(workingDirectory))
 	if err != nil {
 		return CommandResult{}, errors.Wrap(err, "failed to initialize slash commands")
 	}
-	expansion, err := slashcommands.Expand(ctx, processor, command, args)
+	var expansion *slashcommands.Expansion
+	if opened {
+		expansion, err = slashcommands.ExpandPinned(ctx, processor, command, args, expectedDigest)
+	} else {
+		expansion, err = slashcommands.Expand(ctx, processor, command, args)
+	}
 	if err != nil {
 		return CommandResult{}, err
 	}
@@ -343,20 +363,6 @@ func (e *LocalEnvironment) ExecuteTool(ctx context.Context, request ToolRequest,
 		structured.ToolName = request.Name
 		return ToolExecution{Input: effectiveInput, Result: result, StructuredResult: structured}, nil
 	}
-	if !environmentToolAllowed(spec.Config, request.Name) {
-		result := tooltypes.NewBlockedToolResult(request.Name, "tool is not allowed by the active workspace command")
-		outputDecision, err := e.DispatchToolResult(ctx, ToolOutputRequest{
-			Name:             request.Name,
-			Input:            effectiveInput,
-			ToolCallID:       request.ToolCallID,
-			StructuredResult: result.StructuredData(),
-		})
-		if err != nil {
-			return ToolExecution{}, err
-		}
-		return ToolExecution{Input: effectiveInput, Result: result, StructuredResult: outputDecision.StructuredResult, Modified: outputDecision.Modified}, nil
-	}
-
 	decision, err := e.DispatchToolCall(ctx, request)
 	if err != nil {
 		return ToolExecution{}, err
@@ -375,6 +381,19 @@ func (e *LocalEnvironment) ExecuteTool(ctx context.Context, request ToolRequest,
 		return ToolExecution{Input: decision.Input, Result: result, StructuredResult: outputDecision.StructuredResult, Modified: outputDecision.Modified}, nil
 	}
 	effectiveInput = decision.Input
+	if !environmentToolAllowed(spec.Config, request.Name) {
+		result := tooltypes.NewBlockedToolResult(request.Name, "tool is not allowed by the active workspace command")
+		outputDecision, err := e.DispatchToolResult(ctx, ToolOutputRequest{
+			Name:             request.Name,
+			Input:            effectiveInput,
+			ToolCallID:       request.ToolCallID,
+			StructuredResult: result.StructuredData(),
+		})
+		if err != nil {
+			return ToolExecution{}, err
+		}
+		return ToolExecution{Input: effectiveInput, Result: result, StructuredResult: outputDecision.StructuredResult, Modified: outputDecision.Modified}, nil
+	}
 	if request.Name == "bash" && len(spec.Config.AllowedCommands) > 0 {
 		validator := tools.NewBashToolWithTimeout(spec.Config.AllowedCommands, spec.Config.EnableFSSearchTools, spec.Config.BashTimeout())
 		if err := validator.ValidateInput(state, effectiveInput); err != nil {
@@ -484,6 +503,24 @@ func (e *LocalEnvironment) runSpec() RunSpec {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.spec.Clone()
+}
+
+func (e *LocalEnvironment) pinnedCommands(name string) ([]slashcommands.Command, bool) {
+	if e == nil {
+		return nil, false
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if !e.opened {
+		return nil, false
+	}
+	commands := make([]slashcommands.Command, 0, 1)
+	for _, command := range e.manifest.Commands {
+		if command.Name == name {
+			commands = append(commands, command)
+		}
+	}
+	return commands, true
 }
 
 func environmentToolAllowed(config llmtypes.Config, name string) bool {

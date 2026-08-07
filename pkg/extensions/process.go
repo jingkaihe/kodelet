@@ -649,6 +649,7 @@ func (s *processExtensionUISource) HandleRPCRequest(ctx context.Context, method 
 	if !s.current() {
 		return nil, &rpcError{Code: -32000, Message: "extension process generation is no longer active"}
 	}
+	ctx = ContextWithUIExtensionOwner(ctx, s.owner)
 	return s.process.handleRPCRequest(ctx, s, method, params)
 }
 

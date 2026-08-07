@@ -34,10 +34,14 @@ type ChatRequest struct {
 	ConversationID     string                  `json:"conversationId,omitempty"`
 	RunnerID           string                  `json:"runnerId,omitempty"`
 	Profile            string                  `json:"profile,omitempty"`
+	EnvironmentProfile string                  `json:"environmentProfile,omitempty"`
 	ReasoningEffort    string                  `json:"reasoningEffort,omitempty"`
 	CWD                string                  `json:"cwd,omitempty"`
 	ClientCapabilities *ChatClientCapabilities `json:"clientCapabilities,omitempty"`
 }
+
+// EnvironmentProfileMetadataKey stores the runner-owned profile independently from model policy.
+const EnvironmentProfileMetadataKey = "environment_profile"
 
 // ChatClientCapabilities describes UI behavior supported by the client attached to a chat run.
 type ChatClientCapabilities struct {
@@ -295,12 +299,22 @@ func runDefaultChat(
 
 	var llmConfig llmtypes.Config
 	var resolvedCWD string
+	var environmentProfile string
 	if strings.TrimSpace(req.RunnerID) != "" {
 		if strings.TrimSpace(req.CWD) != "" {
 			return sessionID, errors.New("cwd cannot be used with a remote runner")
 		}
-		llmConfig, err = ResolveRemoteConfigWithReasoning(ctx, sessionID, strings.TrimSpace(req.Profile), strings.TrimSpace(req.ReasoningEffort))
+		llmConfig, environmentProfile, err = ResolveRemoteConfigWithReasoningAndEnvironmentProfile(
+			ctx,
+			sessionID,
+			strings.TrimSpace(req.Profile),
+			strings.TrimSpace(req.ReasoningEffort),
+			strings.TrimSpace(req.EnvironmentProfile),
+		)
 	} else {
+		if strings.TrimSpace(req.EnvironmentProfile) != "" {
+			return sessionID, errors.New("environmentProfile requires a remote runner")
+		}
 		llmConfig, resolvedCWD, err = ResolveConfigWithReasoning(ctx, sessionID, strings.TrimSpace(req.Profile), strings.TrimSpace(req.ReasoningEffort), strings.TrimSpace(req.CWD), defaultCWD)
 	}
 	if err != nil {
@@ -364,9 +378,10 @@ func runDefaultChat(
 		_ = environment.Close(closeCtx)
 	}()
 	runSpec := agentenv.RunSpec{
-		ConversationID: sessionID,
-		Config:         llmConfig,
-		InvokedBy:      "main",
+		ConversationID:     sessionID,
+		EnvironmentProfile: environmentProfile,
+		Config:             llmConfig,
+		InvokedBy:          "main",
 	}
 	commandResult, err := environment.ExecuteCommand(ctx, agentenv.CommandRequest{Message: message, RunSpec: runSpec})
 	if err != nil {
@@ -375,7 +390,7 @@ func runDefaultChat(
 	if commandResult.Matched {
 		switch commandResult.Action {
 		case agentenv.CommandActionRespond:
-			if err := persistDirectCommandResponse(ctx, threadOwner, sessionID, llmConfig, message, commandResult.Response, imageInputs); err != nil {
+			if err := persistDirectCommandResponse(ctx, threadOwner, sessionID, llmConfig, environmentProfile, message, commandResult.Response, imageInputs); err != nil {
 				return sessionID, err
 			}
 			if err := sink.Send(ChatEvent{Kind: "conversation", ConversationID: sessionID, Role: "assistant"}); err != nil {
@@ -432,6 +447,9 @@ func runDefaultChat(
 	}
 
 	thread.SetConversationID(sessionID)
+	if strings.TrimSpace(req.RunnerID) != "" {
+		thread.SetMetadataValue(EnvironmentProfileMetadataKey, environmentProfile)
+	}
 	if newThread {
 		thread.EnablePersistence(ctx, true)
 	}
@@ -498,6 +516,7 @@ func persistDirectCommandResponse(
 	owner *DefaultChatRunner,
 	conversationID string,
 	config llmtypes.Config,
+	environmentProfile string,
 	message string,
 	response string,
 	images []string,
@@ -509,6 +528,7 @@ func persistDirectCommandResponse(
 	defer releaseThread()
 
 	thread.SetConversationID(conversationID)
+	thread.SetMetadataValue(EnvironmentProfileMetadataKey, environmentProfile)
 	if !thread.IsPersisted() {
 		thread.EnablePersistence(ctx, true)
 	}
@@ -727,14 +747,21 @@ func ResolveConfigWithReasoning(ctx context.Context, conversationID, requestedPr
 // ResolveRemoteConfigWithReasoning resolves only control-plane provider settings.
 // The runner manifest supplies the authoritative workspace path and environment configuration.
 func ResolveRemoteConfigWithReasoning(ctx context.Context, conversationID, requestedProfile, requestedReasoningEffort string) (llmtypes.Config, error) {
+	config, _, err := ResolveRemoteConfigWithReasoningAndEnvironmentProfile(ctx, conversationID, requestedProfile, requestedReasoningEffort, "")
+	return config, err
+}
+
+// ResolveRemoteConfigWithReasoningAndEnvironmentProfile resolves central model policy and the independently locked runner profile.
+func ResolveRemoteConfigWithReasoningAndEnvironmentProfile(ctx context.Context, conversationID, requestedProfile, requestedReasoningEffort, requestedEnvironmentProfile string) (llmtypes.Config, string, error) {
 	conversationID = strings.TrimSpace(conversationID)
 	if conversationID == "" {
-		return ResolveConfigForNewConversation(requestedProfile, requestedReasoningEffort)
+		config, err := ResolveConfigForNewConversation(requestedProfile, requestedReasoningEffort)
+		return config, NormalizeEnvironmentProfile(requestedEnvironmentProfile), err
 	}
 
 	service, err := conversationservice.GetDefaultConversationService(ctx)
 	if err != nil {
-		return llmtypes.Config{}, errors.Wrap(err, "failed to open conversation service")
+		return llmtypes.Config{}, "", errors.Wrap(err, "failed to open conversation service")
 	}
 	defer func() {
 		_ = service.Close()
@@ -742,14 +769,53 @@ func ResolveRemoteConfigWithReasoning(ctx context.Context, conversationID, reque
 
 	record, err := service.GetConversation(ctx, conversationID)
 	if err != nil {
-		return ResolveConfigForNewConversation(requestedProfile, requestedReasoningEffort)
+		config, configErr := ResolveConfigForNewConversation(requestedProfile, requestedReasoningEffort)
+		return config, NormalizeEnvironmentProfile(requestedEnvironmentProfile), configErr
 	}
 	config, err := ResolveConfigForExistingConversation(record, requestedReasoningEffort)
 	if err != nil {
-		return llmtypes.Config{}, err
+		return llmtypes.Config{}, "", err
+	}
+	environmentProfile, err := resolveEnvironmentProfile(record.Metadata, requestedEnvironmentProfile)
+	if err != nil {
+		return llmtypes.Config{}, "", err
 	}
 	config.WorkingDirectory = ""
-	return config, nil
+	return config, environmentProfile, nil
+}
+
+// NormalizeEnvironmentProfile maps blank and the reserved default name to runner base configuration.
+func NormalizeEnvironmentProfile(profile string) string {
+	profile = strings.TrimSpace(profile)
+	if strings.EqualFold(profile, "default") {
+		return ""
+	}
+	return profile
+}
+
+func resolveEnvironmentProfile(metadata map[string]any, requested string) (string, error) {
+	requested = NormalizeEnvironmentProfile(requested)
+	stored := ""
+	if metadata != nil {
+		if value, exists := metadata[EnvironmentProfileMetadataKey]; exists {
+			profile, ok := value.(string)
+			if !ok {
+				return "", errors.New("conversation environment profile metadata is invalid")
+			}
+			stored = NormalizeEnvironmentProfile(profile)
+		}
+	}
+	if requested != "" && requested != stored {
+		locked := stored
+		if locked == "" {
+			locked = "default"
+		}
+		return "", errors.Errorf("conversation environment profile is locked to %q; cannot resume with %q", locked, requested)
+	}
+	if requested != "" {
+		return requested, nil
+	}
+	return stored, nil
 }
 
 type ServiceStoreAdapter struct {

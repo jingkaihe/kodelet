@@ -2,6 +2,9 @@ package client
 
 import (
 	"context"
+	"encoding/base64"
+	"strconv"
+	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
@@ -16,8 +19,10 @@ func (s *Service) Input(ctx context.Context, request extensions.UIInputRequest) 
 	if !capabilities.InteractiveUI {
 		return extensions.UIInputResponse{Status: extensions.UIInputStatusUnavailable, Reason: "client ui input is not available"}, nil
 	}
+	owner := interactiveUIOwner(ctx)
+	request.ID = scopedInteractiveUIRequestID(owner, request.ID)
 	var response extensions.UIInputResponse
-	err = peer.Call(ctx, protocol.MethodUIInput, protocol.UIInputParams{RunID: runID, Request: request}, &response)
+	err = peer.Call(ctx, protocol.MethodUIInput, protocol.UIInputParams{RunID: runID, Owner: owner, Request: request}, &response)
 	return response, err
 }
 
@@ -29,8 +34,10 @@ func (s *Service) Confirm(ctx context.Context, request extensions.UIConfirmReque
 	if !capabilities.InteractiveUI {
 		return extensions.UIInputResponse{Status: extensions.UIInputStatusUnavailable, Reason: "client ui confirmation is not available"}, nil
 	}
+	owner := interactiveUIOwner(ctx)
+	request.ID = scopedInteractiveUIRequestID(owner, request.ID)
 	var response extensions.UIInputResponse
-	err = peer.Call(ctx, protocol.MethodUIConfirm, protocol.UIConfirmParams{RunID: runID, Request: request}, &response)
+	err = peer.Call(ctx, protocol.MethodUIConfirm, protocol.UIConfirmParams{RunID: runID, Owner: owner, Request: request}, &response)
 	return response, err
 }
 
@@ -42,8 +49,10 @@ func (s *Service) Select(ctx context.Context, request extensions.UISelectRequest
 	if !capabilities.InteractiveUI {
 		return extensions.UIInputResponse{Status: extensions.UIInputStatusUnavailable, Reason: "client ui selection is not available"}, nil
 	}
+	owner := interactiveUIOwner(ctx)
+	request.ID = scopedInteractiveUIRequestID(owner, request.ID)
 	var response extensions.UIInputResponse
-	err = peer.Call(ctx, protocol.MethodUISelect, protocol.UISelectParams{RunID: runID, Request: request}, &response)
+	err = peer.Call(ctx, protocol.MethodUISelect, protocol.UISelectParams{RunID: runID, Owner: owner, Request: request}, &response)
 	return response, err
 }
 
@@ -55,8 +64,9 @@ func (s *Service) Notify(ctx context.Context, request extensions.UINotifyRequest
 	if !capabilities.InteractiveUI {
 		return extensions.UIInputResponse{Status: extensions.UIInputStatusUnavailable, Reason: "client ui notification is not available"}, nil
 	}
+	owner := interactiveUIOwner(ctx)
 	var response extensions.UIInputResponse
-	err = peer.Call(ctx, protocol.MethodUINotify, protocol.UINotifyParams{RunID: runID, Request: request}, &response)
+	err = peer.Call(ctx, protocol.MethodUINotify, protocol.UINotifyParams{RunID: runID, Owner: owner, Request: request}, &response)
 	return response, err
 }
 
@@ -176,6 +186,26 @@ func (s *Service) persistentUITarget(source extensions.UIExtensionSource) (Peer,
 	}
 	owner := source.ExtensionUIOwner()
 	return peer, runID, protocol.ExtensionOwner{ExtensionID: owner.ExtensionID, Generation: owner.Generation}, capabilities.PersistentSurfaces, nil
+}
+
+func interactiveUIOwner(ctx context.Context) protocol.ExtensionOwner {
+	owner, ok := extensions.UIExtensionOwnerFromContext(ctx)
+	if !ok {
+		return protocol.ExtensionOwner{}
+	}
+	return protocol.ExtensionOwner{ExtensionID: owner.ExtensionID, Generation: owner.Generation}
+}
+
+func scopedInteractiveUIRequestID(owner protocol.ExtensionOwner, requestID string) string {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		requestID = extensions.NewUIInputRequestID()
+	}
+	if strings.TrimSpace(owner.ExtensionID) == "" || owner.Generation == 0 {
+		return requestID
+	}
+	payload := owner.ExtensionID + "\x00" + strconv.FormatUint(owner.Generation, 10) + "\x00" + requestID
+	return "runner-ui-" + base64.RawURLEncoding.EncodeToString([]byte(payload))
 }
 
 func (s *Service) notifySurfaceInput(ctx context.Context, params protocol.UISurfaceInputParams) error {

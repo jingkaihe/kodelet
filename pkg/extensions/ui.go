@@ -86,7 +86,10 @@ type UINotifyBroker interface {
 	Notify(ctx context.Context, request UINotifyRequest) (UIInputResponse, error)
 }
 
-type uiInputBrokerKey struct{}
+type (
+	uiInputBrokerKey    struct{}
+	uiExtensionOwnerKey struct{}
+)
 
 // ContextWithUIInputBroker attaches a UI input broker to the active run context.
 func ContextWithUIInputBroker(ctx context.Context, broker UIInputBroker) context.Context {
@@ -106,6 +109,26 @@ func UIInputBrokerFromContext(ctx context.Context) (UIInputBroker, bool) {
 	}
 	broker, ok := ctx.Value(uiInputBrokerKey{}).(UIInputBroker)
 	return broker, ok && broker != nil
+}
+
+// ContextWithUIExtensionOwner attaches the originating extension process generation to interactive UI requests.
+func ContextWithUIExtensionOwner(ctx context.Context, owner UIExtensionOwner) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if strings.TrimSpace(owner.ExtensionID) == "" || owner.Generation == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, uiExtensionOwnerKey{}, owner)
+}
+
+// UIExtensionOwnerFromContext returns the extension process generation that originated an interactive UI request.
+func UIExtensionOwnerFromContext(ctx context.Context) (UIExtensionOwner, bool) {
+	if ctx == nil {
+		return UIExtensionOwner{}, false
+	}
+	owner, ok := ctx.Value(uiExtensionOwnerKey{}).(UIExtensionOwner)
+	return owner, ok && strings.TrimSpace(owner.ExtensionID) != "" && owner.Generation > 0
 }
 
 // UIConfirmBrokerFromContext returns the run-scoped confirmation broker, if one exists.

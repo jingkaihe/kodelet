@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -26,6 +27,10 @@ func TestNormalizeRunnerAPIBaseURL(t *testing.T) {
 	server, err = normalizeRunnerAPIBaseURL("https://kodelet.example/control")
 	require.NoError(t, err)
 	assert.Equal(t, "https://kodelet.example/control", server)
+
+	server, err = normalizeRunnerAPIBaseURL("http://localhost:8080/%62ase")
+	require.NoError(t, err)
+	assert.Equal(t, "http://localhost:8080/base", server)
 
 	_, err = normalizeRunnerAPIBaseURL("http://kodelet.example")
 	require.ErrorContains(t, err, "require https")
@@ -168,4 +173,111 @@ func TestRunRunnerInspectIncludesLocalLockDiagnostics(t *testing.T) {
 	require.NotNil(t, result.Local.Metadata)
 	assert.Equal(t, 4242, result.Local.Metadata.PID)
 	assert.Equal(t, runner.ID, result.Local.Metadata.RunnerID)
+}
+
+func TestRunRunnerRemoveUsesResolvedIDAndDeletesLocalCache(t *testing.T) {
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	runner := runnerregistry.Runner{
+		ID:          "runner_remove",
+		DisplayName: "project",
+		Host:        protocol.Host{Hostname: "worker"},
+		Workspace:   protocol.Workspace{Path: "/work/project", Name: "project"},
+		Status:      runnerregistry.RunnerStatusOffline,
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		assert.Equal(t, "Bearer web-secret", request.Header.Get("Authorization"))
+		switch request.Method {
+		case http.MethodGet:
+			assert.Equal(t, "/base/api/runners", request.URL.Path)
+			require.NoError(t, json.NewEncoder(w).Encode(runnerListAPIResponse{Runners: []runnerregistry.Runner{runner}}))
+		case http.MethodDelete:
+			assert.Equal(t, "/base/api/runners/runner_remove", request.URL.Path)
+			assert.Equal(t, "true", request.URL.Query().Get("force"))
+			require.NoError(t, json.NewEncoder(w).Encode(runnerregistry.RemovalResult{
+				RunnerID:                      runner.ID,
+				RemovedRuns:                   2,
+				RemovedConversationAffinities: 1,
+			}))
+		default:
+			t.Fatalf("unexpected method %s", request.Method)
+		}
+	}))
+	defer server.Close()
+
+	store, err := localstate.NewStore()
+	require.NoError(t, err)
+	require.NoError(t, store.SaveRegistration(localstate.Registration{
+		Server:    server.URL + "/base",
+		Workspace: runner.Workspace.Path,
+		RunnerID:  runner.ID,
+	}))
+
+	var output bytes.Buffer
+	require.NoError(t, runRunnerRemove(t.Context(), "project", runnerRemoveConfig{
+		runnerQueryConfig: runnerQueryConfig{Server: server.URL + "/base", AuthToken: "web-secret", JSONOutput: true},
+		Force:             true,
+		NoConfirm:         true,
+	}, strings.NewReader(""), &output))
+
+	var result runnerregistry.RemovalResult
+	require.NoError(t, json.Unmarshal(output.Bytes(), &result))
+	assert.Equal(t, 2, result.RemovedRuns)
+	_, found, err := store.LoadRegistration(server.URL+"/base", runner.Workspace.Path)
+	require.NoError(t, err)
+	assert.False(t, found)
+}
+
+func TestRunRunnerRemoveRejectsConnectedAndSurfacesControlPlaneError(t *testing.T) {
+	connected := runnerregistry.Runner{
+		ID:        "runner_connected",
+		Connected: true,
+		Host:      protocol.Host{Hostname: "worker"},
+		Workspace: protocol.Workspace{Path: "/work/connected", Name: "connected"},
+	}
+	connectedServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		require.NoError(t, json.NewEncoder(w).Encode(runnerListAPIResponse{Runners: []runnerregistry.Runner{connected}}))
+	}))
+	defer connectedServer.Close()
+
+	err := runRunnerRemove(t.Context(), connected.ID, runnerRemoveConfig{
+		runnerQueryConfig: runnerQueryConfig{Server: connectedServer.URL},
+		NoConfirm:         true,
+	}, strings.NewReader(""), &bytes.Buffer{})
+	require.ErrorContains(t, err, "stop it before removal")
+
+	offline := connected
+	offline.Connected = false
+	offline.ID = "runner_offline"
+	conflictServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.Method == http.MethodGet {
+			require.NoError(t, json.NewEncoder(w).Encode(runnerListAPIResponse{Runners: []runnerregistry.Runner{offline}}))
+			return
+		}
+		w.WriteHeader(http.StatusConflict)
+		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"error": "runner is bound to a conversation"}))
+	}))
+	defer conflictServer.Close()
+	err = runRunnerRemove(t.Context(), offline.ID, runnerRemoveConfig{
+		runnerQueryConfig: runnerQueryConfig{Server: conflictServer.URL},
+		NoConfirm:         true,
+	}, strings.NewReader(""), &bytes.Buffer{})
+	require.ErrorContains(t, err, "runner is bound to a conversation")
+}
+
+func TestConfirmRunnerRemovalDefaultsToNoAndWarnsForForce(t *testing.T) {
+	runner := runnerregistry.Runner{
+		ID:        "runner_confirm",
+		Host:      protocol.Host{Hostname: "worker"},
+		Workspace: protocol.Workspace{Path: "/work/project"},
+	}
+	var output bytes.Buffer
+	assert.False(t, confirmRunnerRemoval(strings.NewReader("\n"), &output, runner, true))
+	assert.Contains(t, output.String(), "runner run history")
+	assert.Contains(t, output.String(), "abandon its conversation bindings")
+	assert.True(t, confirmRunnerRemoval(strings.NewReader("yes\n"), io.Discard, runner, false))
+
+	err := runRunnerRemove(t.Context(), runner.ID, runnerRemoveConfig{
+		runnerQueryConfig: runnerQueryConfig{JSONOutput: true},
+	}, strings.NewReader("yes\n"), io.Discard)
+	require.ErrorContains(t, err, "--json requires --no-confirm")
 }

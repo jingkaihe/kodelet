@@ -2,11 +2,7 @@ import type React from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import NewChatContextDialog from './NewChatContextDialog';
-import {
-  sampleCwdHints,
-  sampleProfiles,
-  sampleConversations,
-} from '../../stories/fixtures';
+import { sampleCwdHints, sampleProfiles, sampleConversations } from '../../stories/fixtures';
 
 const recentWorkspaces = Array.from(
   new Set(
@@ -33,6 +29,7 @@ const renderDialog = (
     recentWorkspaces,
     runners: [],
     runnerIdDraft: '',
+    environmentProfileDraft: '',
     onCancel: vi.fn(),
     onCommit: vi.fn(),
     onCwdInputBlur: vi.fn(),
@@ -43,6 +40,7 @@ const renderDialog = (
     onReasoningEffortDraftChange: vi.fn(),
     onRecentWorkspaceSelect: vi.fn(),
     onRunnerDraftChange: vi.fn(),
+    onEnvironmentProfileDraftChange: vi.fn(),
     onSelectCwdSuggestion: vi.fn(),
     ...overrides,
   };
@@ -59,23 +57,19 @@ describe('NewChatContextDialog', () => {
       recentWorkspaces: ['~/workspace/kodelet', '~/workspace/comet'],
     });
 
-    expect(screen.getByRole('dialog', { name: 'New chat' })).toHaveAttribute(
-      'aria-modal',
-      'true'
-    );
+    expect(screen.getByRole('dialog', { name: 'New chat' })).toHaveAttribute('aria-modal', 'true');
 
     const selectedWorkspace = screen.getByRole('button', {
       name: '~/workspace/kodelet',
     });
     expect(selectedWorkspace).toHaveAttribute('aria-pressed', 'true');
     expect(within(selectedWorkspace).getByText('~/workspace')).toBeVisible();
-    expect(
-      screen.getByRole('button', { name: '~/workspace/comet' })
-    ).toHaveAttribute('aria-pressed', 'false');
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Close new chat dialog' })
+    expect(screen.getByRole('button', { name: '~/workspace/comet' })).toHaveAttribute(
+      'aria-pressed',
+      'false'
     );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close new chat dialog' }));
     expect(props.onCancel).toHaveBeenCalledTimes(1);
   });
 
@@ -100,9 +94,7 @@ describe('NewChatContextDialog', () => {
     expect(props.onSelectCwdSuggestion).toHaveBeenCalledWith(
       '/home/jingkaihe/workspace/kodelet/pkg/webui/frontend'
     );
-    expect(props.onRecentWorkspaceSelect).toHaveBeenCalledWith(
-      '/home/jingkaihe/workspace/plugins'
-    );
+    expect(props.onRecentWorkspaceSelect).toHaveBeenCalledWith('/home/jingkaihe/workspace/plugins');
   });
 
   it('keeps dialog actions external', () => {
@@ -145,7 +137,12 @@ describe('NewChatContextDialog', () => {
     });
 
     expect(screen.getByText('/workspace/kodelet')).toBeVisible();
+    expect(screen.getByLabelText('Runner profile')).toBeVisible();
     expect(screen.queryByTestId('cwd-input')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Runner profile'), {
+      target: { value: 'gpu' },
+    });
+    expect(props.onEnvironmentProfileDraftChange).toHaveBeenCalledWith('gpu');
     fireEvent.change(screen.getByTestId('new-chat-runner-select'), {
       target: { value: '' },
     });
@@ -187,12 +184,8 @@ describe('NewChatContextDialog', () => {
       runnerIdDraft: 'runner-busy',
     });
 
-    expect(
-      screen.getByRole('option', { name: /busy — worker — busy/ })
-    ).toBeDisabled();
-    expect(
-      screen.getByRole('option', { name: /offline — worker — offline/ })
-    ).toBeDisabled();
+    expect(screen.getByRole('option', { name: /busy — worker — busy/ })).toBeDisabled();
+    expect(screen.getByRole('option', { name: /offline — worker — offline/ })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
   });
 });

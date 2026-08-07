@@ -45,8 +45,15 @@ type webUIChatRunner struct {
 func (r *webUIChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatEventSink) (string, error) {
 	conversationID := strings.TrimSpace(req.ConversationID)
 	if r != nil && r.server != nil && r.server.runnerRegistry != nil && strings.TrimSpace(req.RunnerID) == "" && conversationID != "" {
-		if runnerID, ok := r.server.runnerRegistry.RunnerForConversation(conversationID); ok {
-			req.RunnerID = runnerID
+		affinity, ok, err := r.server.runnerRegistry.ResolveConversationAffinity(ctx, conversationID)
+		if err != nil {
+			return conversationID, err
+		}
+		if ok {
+			req.RunnerID = affinity.RunnerID
+			if strings.TrimSpace(req.EnvironmentProfile) == "" {
+				req.EnvironmentProfile = affinity.EnvironmentProfile
+			}
 		}
 	}
 	if r != nil && r.server != nil && conversationID != "" && chatSupportsInteractiveUI(req) {
@@ -63,7 +70,7 @@ func (r *webUIChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatEve
 	return r.runner.Run(ctx, req, sink)
 }
 
-func (r *webUIChatRunner) ResolveEnvironment(_ context.Context, req ChatRequest, conversationID string, _ llmtypes.Config, _ string) (agentenv.Environment, error) {
+func (r *webUIChatRunner) ResolveEnvironment(ctx context.Context, req ChatRequest, conversationID string, _ llmtypes.Config, _ string) (agentenv.Environment, error) {
 	runnerID := strings.TrimSpace(req.RunnerID)
 	if runnerID == "" {
 		return nil, errors.New("runner id is required")
@@ -71,8 +78,8 @@ func (r *webUIChatRunner) ResolveEnvironment(_ context.Context, req ChatRequest,
 	if r == nil || r.server == nil || r.server.runnerRegistry == nil {
 		return nil, errors.New("runner registry is unavailable")
 	}
-	if affinity, ok := r.server.runnerRegistry.RunnerForConversation(conversationID); ok && affinity != runnerID {
-		return nil, errors.Errorf("conversation is bound to runner %s", affinity)
+	if err := r.server.runnerRegistry.BindConversationWithEnvironmentProfile(ctx, conversationID, runnerID, req.EnvironmentProfile); err != nil {
+		return nil, err
 	}
 	runner, ok := r.server.runnerRegistry.Runner(runnerID)
 	if !ok {

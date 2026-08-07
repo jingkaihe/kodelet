@@ -3,7 +3,9 @@ package webui
 import (
 	"context"
 	"encoding/json"
+	stdErrors "errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,6 +40,42 @@ func (s *Server) handleGetRunner(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.writeJSONResponse(w, runner)
+}
+
+func (s *Server) handleDeleteRunner(w http.ResponseWriter, r *http.Request) {
+	if s.runnerRegistry == nil {
+		s.writeErrorResponse(w, http.StatusServiceUnavailable, "runner registry is unavailable", nil)
+		return
+	}
+	runnerID := strings.TrimSpace(mux.Vars(r)["id"])
+	if runnerID == "" {
+		s.writeErrorResponse(w, http.StatusBadRequest, "runner ID is required", nil)
+		return
+	}
+	force := false
+	if raw := strings.TrimSpace(r.URL.Query().Get("force")); raw != "" {
+		var err error
+		force, err = strconv.ParseBool(raw)
+		if err != nil {
+			s.writeErrorResponse(w, http.StatusBadRequest, "force must be a boolean", nil)
+			return
+		}
+	}
+
+	result, err := s.runnerRegistry.RemoveRunner(r.Context(), runnerID, force)
+	if err != nil {
+		var referenced *runnerregistry.RunnerReferencedError
+		switch {
+		case stdErrors.Is(err, runnerregistry.ErrRunnerNotFound):
+			s.writeErrorResponse(w, http.StatusNotFound, err.Error(), nil)
+		case stdErrors.Is(err, runnerregistry.ErrRunnerConnected), stdErrors.Is(err, runnerregistry.ErrRunnerActiveRun), stdErrors.As(err, &referenced):
+			s.writeErrorResponse(w, http.StatusConflict, err.Error(), nil)
+		default:
+			s.writeErrorResponse(w, http.StatusInternalServerError, "failed to remove runner", err)
+		}
+		return
+	}
+	s.writeJSONResponse(w, result)
 }
 
 var runnerUpgrader = websocket.Upgrader{

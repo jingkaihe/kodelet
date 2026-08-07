@@ -20,6 +20,8 @@ import (
 	"github.com/pkg/errors"
 )
 
+const defaultCleanupTimeout = 10 * time.Second
+
 // Peer is the symmetric runner connection used for updates and reverse UI calls.
 type Peer interface {
 	Call(ctx context.Context, method string, params any, result any) error
@@ -29,11 +31,11 @@ type Peer interface {
 
 // RuntimeProvider supplies the persistent extension runtime for the bound workspace.
 type RuntimeProvider interface {
-	RuntimeWithCallContext(ctx context.Context, cwd string, callContext extensions.ExtensionCallContext) (*extensions.Runtime, error)
+	RuntimeWithConfigAndCallContext(ctx context.Context, cwd, variant string, config extensions.Config, callContext extensions.ExtensionCallContext) (*extensions.Runtime, error)
 }
 
 type runtimeDiscoveryProvider interface {
-	RuntimeForCommandDiscovery(ctx context.Context, cwd string) (*extensions.Runtime, error)
+	RuntimeForCommandDiscoveryWithConfig(ctx context.Context, cwd, variant string, config extensions.Config) (*extensions.Runtime, error)
 }
 
 // ConfigLoader loads runner-owned configuration for an optional conversation profile.
@@ -48,6 +50,7 @@ type ServiceOptions struct {
 	ConfigLoader              ConfigLoader
 	EnvironmentFactory        EnvironmentFactory
 	ExecutionInstanceProvider ExecutionInstanceProvider
+	CleanupTimeout            time.Duration
 }
 
 // Service handles control-plane requests for one workspace-bound runner process.
@@ -61,11 +64,13 @@ type Service struct {
 	configLoader       ConfigLoader
 	environmentFactory EnvironmentFactory
 	instanceProvider   ExecutionInstanceProvider
+	cleanupTimeout     time.Duration
 	peer               Peer
 	runnerID           string
 	generation         int64
 	active             *activeRun
 	lastManifestDigest string
+	unhealthy          error
 	closed             bool
 }
 
@@ -104,6 +109,10 @@ func NewService(parent context.Context, workspace string, options ServiceOptions
 		configLoader:       options.ConfigLoader,
 		environmentFactory: options.EnvironmentFactory,
 		instanceProvider:   options.ExecutionInstanceProvider,
+		cleanupTimeout:     options.CleanupTimeout,
+	}
+	if service.cleanupTimeout <= 0 {
+		service.cleanupTimeout = defaultCleanupTimeout
 	}
 	if service.runtimeProvider == nil {
 		service.ownedRuntime = extensions.NewRuntimeManager()
@@ -128,10 +137,7 @@ func NewService(parent context.Context, workspace string, options ServiceOptions
 }
 
 func loadRunnerConfig(profile string) (llmtypes.Config, error) {
-	if strings.TrimSpace(profile) != "" {
-		return llm.GetConfigFromViperWithProfile(profile)
-	}
-	return llm.GetConfigFromViperWithoutProfile()
+	return llm.GetConfigFromViperWithEnvironmentProfile(profile)
 }
 
 // Attach installs the current symmetric connection used by runner-originated calls.
@@ -249,6 +255,11 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (p
 		s.mu.Unlock()
 		return protocol.Manifest{}, errors.New("runner has not completed registration")
 	}
+	if s.unhealthy != nil {
+		message := s.unhealthy.Error()
+		s.mu.Unlock()
+		return protocol.Manifest{}, errors.Wrap(errors.New(message), "runner requires restart after cleanup failure")
+	}
 	if s.active != nil {
 		activeID := s.active.id
 		s.mu.Unlock()
@@ -292,7 +303,7 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (p
 		return protocol.Manifest{}, errors.New("runner execution instance returned an empty working directory")
 	}
 
-	config, err := s.configLoader(params.Agent.Profile)
+	config, err := s.configLoader(params.Agent.EnvironmentProfile)
 	if err != nil {
 		s.closeOpeningResources(operationCtx, nil, instance)
 		s.failOpen(run)
@@ -303,6 +314,12 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (p
 	config.Model = params.Agent.Model
 	config.Profile = params.Agent.Profile
 	config.RecipeName = params.Agent.RecipeName
+	extensionConfig, err := extensions.LoadConfigFromSettings(config.ExtensionSettings)
+	if err != nil {
+		s.closeOpeningResources(operationCtx, nil, instance)
+		s.failOpen(run)
+		return protocol.Manifest{}, errors.Wrap(err, "failed to load runner extension configuration")
+	}
 
 	callContext := extensions.ExtensionCallContext{
 		ConversationID: params.ConversationID,
@@ -314,7 +331,13 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (p
 		RecipeName:     config.RecipeName,
 		InvokedBy:      firstNonEmpty(params.Agent.InvokedBy, "main"),
 	}
-	runtime, err := s.runtimeProvider.RuntimeWithCallContext(operationCtx, workingDirectory, callContext)
+	runtime, err := s.runtimeProvider.RuntimeWithConfigAndCallContext(
+		operationCtx,
+		workingDirectory,
+		normalizeEnvironmentProfile(params.Agent.EnvironmentProfile),
+		extensionConfig,
+		callContext,
+	)
 	if err != nil {
 		s.closeOpeningResources(operationCtx, nil, instance)
 		s.failOpen(run)
@@ -367,9 +390,38 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (p
 }
 
 func (s *Service) closeOpeningResources(ctx context.Context, environment agentenv.Environment, instance ExecutionInstance) {
-	if err := closeExecutionResources(context.WithoutCancel(ctx), environment, instance); err != nil {
+	if err := closeExecutionResources(ctx, s.cleanupTimeout, environment, instance); err != nil {
+		s.markUnhealthy(err)
 		logger.G(ctx).WithError(err).Warn("failed to clean up runner execution instance after open failure")
 	}
+}
+
+func (s *Service) closeProbeResources(ctx context.Context, environment agentenv.Environment, instance ExecutionInstance, cause error) error {
+	cleanupErr := closeExecutionResources(ctx, s.cleanupTimeout, environment, instance)
+	if cleanupErr != nil {
+		s.markUnhealthy(cleanupErr)
+	}
+	switch {
+	case cause == nil && cleanupErr == nil:
+		return nil
+	case cause == nil:
+		return errors.Wrap(cleanupErr, "failed to clean up runner manifest probe resources")
+	case cleanupErr == nil:
+		return cause
+	default:
+		return errors.Wrapf(cause, "runner manifest probe cleanup also failed: %v", cleanupErr)
+	}
+}
+
+func (s *Service) markUnhealthy(err error) {
+	if s == nil || err == nil {
+		return
+	}
+	s.mu.Lock()
+	if s.unhealthy == nil {
+		s.unhealthy = err
+	}
+	s.mu.Unlock()
 }
 
 func (s *Service) failOpen(run *activeRun) {
@@ -411,14 +463,18 @@ func (s *Service) closeRun(ctx context.Context, runID string) error {
 	run.cancel()
 	s.mu.Unlock()
 
-	run.ops.Wait()
-	closeErr := closeExecutionResources(context.WithoutCancel(ctx), run.environment, run.instance)
+	waitErr := waitForRunOperations(ctx, s.cleanupTimeout, run)
+	closeErr := closeExecutionResources(ctx, s.cleanupTimeout, run.environment, run.instance)
+	cleanupErr := combineCleanupErrors(waitErr, closeErr)
 	s.mu.Lock()
+	if cleanupErr != nil {
+		s.unhealthy = cleanupErr
+	}
 	if s.active == run {
 		s.active = nil
 	}
 	s.mu.Unlock()
-	return closeErr
+	return cleanupErr
 }
 
 // ProbeManifestDigest snapshots idle runner resources without reserving a control-plane run.
@@ -432,6 +488,11 @@ func (s *Service) ProbeManifestDigest(ctx context.Context) (string, error) {
 	if s.closed {
 		s.mu.Unlock()
 		return "", errors.New("runner service is closed")
+	}
+	if s.unhealthy != nil {
+		message := s.unhealthy.Error()
+		s.mu.Unlock()
+		return "", errors.Wrap(errors.New(message), "runner requires restart after cleanup failure")
 	}
 	if s.active != nil {
 		digest := s.active.manifest.Digest
@@ -454,22 +515,24 @@ func (s *Service) ProbeManifestDigest(ctx context.Context) (string, error) {
 	}
 	workingDirectory := strings.TrimSpace(instance.WorkingDirectory())
 	if workingDirectory == "" {
-		_ = instance.Close(context.WithoutCancel(ctx))
-		return "", errors.New("runner manifest probe instance returned an empty working directory")
+		return "", s.closeProbeResources(ctx, nil, instance, errors.New("runner manifest probe instance returned an empty working directory"))
 	}
 
 	config, err := s.configLoader("")
 	if err != nil {
-		_ = instance.Close(context.WithoutCancel(ctx))
-		return "", errors.Wrap(err, "failed to load runner configuration")
+		return "", s.closeProbeResources(ctx, nil, instance, errors.Wrap(err, "failed to load runner configuration"))
 	}
 	config.WorkingDirectory = workingDirectory
+	extensionConfig, err := extensions.LoadConfigFromSettings(config.ExtensionSettings)
+	if err != nil {
+		return "", s.closeProbeResources(ctx, nil, instance, errors.Wrap(err, "failed to load runner extension configuration"))
+	}
 	probeCtx := s.decorateRunContext(ctx, "runner-manifest-probe")
 	var runtime *extensions.Runtime
 	if provider, ok := s.runtimeProvider.(runtimeDiscoveryProvider); ok {
-		runtime, err = provider.RuntimeForCommandDiscovery(probeCtx, workingDirectory)
+		runtime, err = provider.RuntimeForCommandDiscoveryWithConfig(probeCtx, workingDirectory, "", extensionConfig)
 	} else {
-		runtime, err = s.runtimeProvider.RuntimeWithCallContext(probeCtx, workingDirectory, extensions.ExtensionCallContext{
+		runtime, err = s.runtimeProvider.RuntimeWithConfigAndCallContext(probeCtx, workingDirectory, "", extensionConfig, extensions.ExtensionCallContext{
 			ConversationID: "runner-manifest-probe",
 			UIScopeID:      "runner-manifest-probe",
 			CWD:            workingDirectory,
@@ -481,14 +544,12 @@ func (s *Service) ProbeManifestDigest(ctx context.Context) (string, error) {
 		})
 	}
 	if err != nil {
-		_ = instance.Close(context.WithoutCancel(probeCtx))
-		return "", errors.Wrap(err, "failed to initialize runner extensions")
+		return "", s.closeProbeResources(probeCtx, nil, instance, errors.Wrap(err, "failed to initialize runner extensions"))
 	}
 	config.Extensions = runtime
 	environment := s.environmentFactory(workingDirectory, runtime)
 	if environment == nil {
-		_ = instance.Close(context.WithoutCancel(probeCtx))
-		return "", errors.New("runner environment factory returned nil")
+		return "", s.closeProbeResources(probeCtx, nil, instance, errors.New("runner environment factory returned nil"))
 	}
 	manifest, err := environment.Open(probeCtx, agentenv.RunSpec{
 		ConversationID: "runner-manifest-probe",
@@ -496,12 +557,13 @@ func (s *Service) ProbeManifestDigest(ctx context.Context) (string, error) {
 		InvokedBy:      "runner.manifest",
 	})
 	if err != nil {
-		_ = closeExecutionResources(context.WithoutCancel(probeCtx), environment, instance)
-		return "", errors.Wrap(err, "failed to probe runner environment")
+		return "", s.closeProbeResources(probeCtx, environment, instance, errors.Wrap(err, "failed to probe runner environment"))
 	}
-	defer func() { _ = closeExecutionResources(context.WithoutCancel(probeCtx), environment, instance) }()
 	wire, err := buildWireManifest(manifest, config, runtime, runnerID, "runner-manifest-probe", generation, tools.ControlPlaneToolNames())
 	if err != nil {
+		return "", s.closeProbeResources(probeCtx, environment, instance, err)
+	}
+	if err := s.closeProbeResources(probeCtx, environment, instance, nil); err != nil {
 		return "", err
 	}
 	s.mu.Lock()
@@ -517,6 +579,9 @@ func (s *Service) HeartbeatSnapshot() (protocol.RunnerState, string, string) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.unhealthy != nil {
+		return protocol.RunnerStateError, "", s.lastManifestDigest
+	}
 	if s.active == nil {
 		return protocol.RunnerStateIdle, "", s.lastManifestDigest
 	}
@@ -662,7 +727,7 @@ func (s *Service) executeTool(ctx context.Context, params protocol.ToolExecutePa
 	if params.WantUpdates {
 		requestID := protocol.RequestIDFromContext(operationCtx)
 		if requestID == "" {
-			requestID = params.ToolCallID
+			return protocol.ToolExecuteResult{}, errors.New("tool.execute request id is unavailable")
 		}
 		updateSink = func(update agentenv.ToolUpdate) {
 			if peer == nil || update.Result == nil {
@@ -811,14 +876,18 @@ func (s *Service) AbortActiveRun(ctx context.Context) error {
 	run.cancel()
 	s.peer = nil
 	s.mu.Unlock()
-	run.ops.Wait()
-	err := closeExecutionResources(context.WithoutCancel(ctx), run.environment, run.instance)
+	waitErr := waitForRunOperations(ctx, s.cleanupTimeout, run)
+	closeErr := closeExecutionResources(ctx, s.cleanupTimeout, run.environment, run.instance)
+	cleanupErr := combineCleanupErrors(waitErr, closeErr)
 	s.mu.Lock()
+	if cleanupErr != nil {
+		s.unhealthy = cleanupErr
+	}
 	if s.active == run {
 		s.active = nil
 	}
 	s.mu.Unlock()
-	return err
+	return cleanupErr
 }
 
 // Close releases an active environment and any runtime manager owned by the service.
@@ -842,17 +911,72 @@ func (s *Service) Close() error {
 	return activeErr
 }
 
-func closeExecutionResources(ctx context.Context, environment agentenv.Environment, instance ExecutionInstance) error {
+func waitForRunOperations(ctx context.Context, timeout time.Duration, run *activeRun) error {
+	if run == nil {
+		return nil
+	}
+	done := make(chan struct{})
+	go func() {
+		run.ops.Wait()
+		close(done)
+	}()
+	waitCtx, cancel := cleanupContext(ctx, timeout)
+	defer cancel()
+	select {
+	case <-done:
+		return nil
+	case <-waitCtx.Done():
+		return errors.Wrap(waitCtx.Err(), "timed out waiting for runner operations to stop")
+	}
+}
+
+func closeExecutionResources(ctx context.Context, timeout time.Duration, environment agentenv.Environment, instance ExecutionInstance) error {
 	var firstErr error
 	if environment != nil {
-		firstErr = environment.Close(ctx)
+		firstErr = runBoundedCleanup(ctx, timeout, "runner environment", environment.Close)
 	}
 	if instance != nil {
-		if err := instance.Close(ctx); firstErr == nil {
+		if err := runBoundedCleanup(ctx, timeout, "runner execution instance", instance.Close); firstErr == nil {
 			firstErr = err
 		}
 	}
 	return firstErr
+}
+
+func runBoundedCleanup(ctx context.Context, timeout time.Duration, resource string, closeFunc func(context.Context) error) error {
+	cleanupCtx, cancel := cleanupContext(ctx, timeout)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- closeFunc(cleanupCtx)
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-cleanupCtx.Done():
+		return errors.Wrapf(cleanupCtx.Err(), "timed out closing %s", resource)
+	}
+}
+
+func cleanupContext(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if timeout <= 0 {
+		timeout = defaultCleanupTimeout
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), timeout)
+}
+
+func combineCleanupErrors(waitErr, closeErr error) error {
+	switch {
+	case waitErr == nil:
+		return closeErr
+	case closeErr == nil:
+		return waitErr
+	default:
+		return errors.Wrapf(waitErr, "resource cleanup also failed: %v", closeErr)
+	}
 }
 
 func rawJSON(value string) (json.RawMessage, error) {
@@ -873,6 +997,14 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func normalizeEnvironmentProfile(profile string) string {
+	profile = strings.TrimSpace(profile)
+	if strings.EqualFold(profile, "default") {
+		return ""
+	}
+	return profile
 }
 
 func decodeParams[T any](params json.RawMessage) (T, *protocol.RPCError) {

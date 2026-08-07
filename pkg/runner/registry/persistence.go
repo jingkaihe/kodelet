@@ -18,7 +18,13 @@ const defaultOwnerID = "local"
 type PersistedState struct {
 	Runners    []Runner
 	Runs       []Run
-	Affinities map[string]string
+	Affinities map[string]ConversationAffinity
+}
+
+// ConversationAffinity is the durable environment selection for one conversation.
+type ConversationAffinity struct {
+	RunnerID           string
+	EnvironmentProfile string
 }
 
 // Persistence stores durable runner identity, run state, and conversation affinity.
@@ -26,7 +32,10 @@ type Persistence interface {
 	Load(ctx context.Context) (PersistedState, error)
 	SaveRunner(ctx context.Context, runner Runner) error
 	SaveRun(ctx context.Context, run Run) error
-	BindConversation(ctx context.Context, conversationID, runnerID string, now time.Time) error
+	SaveRunnerAndRun(ctx context.Context, runner Runner, run Run) error
+	BindConversation(ctx context.Context, conversationID, runnerID, environmentProfile string, now time.Time) error
+	ConversationAffinity(ctx context.Context, conversationID string) (ConversationAffinity, bool, error)
+	RemoveRunner(ctx context.Context, runnerID string, force bool) (RemovalResult, error)
 	Close() error
 }
 
@@ -71,7 +80,7 @@ func (s *SQLitePersistence) Load(ctx context.Context) (PersistedState, error) {
 
 	state := PersistedState{
 		Runners:    make([]Runner, 0, len(runnerRows)),
-		Affinities: make(map[string]string),
+		Affinities: make(map[string]ConversationAffinity),
 	}
 	for _, row := range runnerRows {
 		state.Runners = append(state.Runners, row.runner())
@@ -93,7 +102,7 @@ func (s *SQLitePersistence) Load(ctx context.Context) (PersistedState, error) {
 
 	var affinities []conversationAffinityRow
 	if err := s.db.SelectContext(ctx, &affinities, `
-		SELECT a.conversation_id, a.runner_id
+		SELECT a.conversation_id, a.runner_id, a.environment_profile
 		FROM conversation_runner_affinity a
 		JOIN runner_registrations r ON r.id = a.runner_id
 		WHERE r.owner_id = ?
@@ -101,7 +110,10 @@ func (s *SQLitePersistence) Load(ctx context.Context) (PersistedState, error) {
 		return PersistedState{}, errors.Wrap(err, "failed to load runner conversation affinity")
 	}
 	for _, affinity := range affinities {
-		state.Affinities[affinity.ConversationID] = affinity.RunnerID
+		state.Affinities[affinity.ConversationID] = ConversationAffinity{
+			RunnerID:           affinity.RunnerID,
+			EnvironmentProfile: affinity.EnvironmentProfile,
+		}
 	}
 	return state, nil
 }
@@ -111,7 +123,11 @@ func (s *SQLitePersistence) SaveRunner(ctx context.Context, runner Runner) error
 	if s == nil || s.db == nil {
 		return errors.New("runner persistence is closed")
 	}
-	_, err := s.db.ExecContext(ctx, `
+	return s.saveRunner(ctx, s.db, runner)
+}
+
+func (s *SQLitePersistence) saveRunner(ctx context.Context, executor sqlExecutor, runner Runner) error {
+	_, err := executor.ExecContext(ctx, `
 		INSERT INTO runner_registrations (
 			id, owner_id, display_name, host_instance_id, hostname, host_os, host_arch,
 			host_pid, workspace_path, workspace_name, kodelet_version, manifest_digest,
@@ -169,7 +185,11 @@ func (s *SQLitePersistence) SaveRun(ctx context.Context, run Run) error {
 	if s == nil || s.db == nil {
 		return errors.New("runner persistence is closed")
 	}
-	_, err := s.db.ExecContext(ctx, `
+	return s.saveRun(ctx, s.db, run)
+}
+
+func (s *SQLitePersistence) saveRun(ctx context.Context, executor sqlExecutor, run Run) error {
+	_, err := executor.ExecContext(ctx, `
 		INSERT INTO runner_runs (
 			id, conversation_id, runner_id, status, manifest_digest, manifest_json, error, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -185,18 +205,42 @@ func (s *SQLitePersistence) SaveRun(ctx context.Context, run Run) error {
 	return errors.Wrap(err, "failed to save runner run")
 }
 
+// SaveRunnerAndRun atomically stores a runner registration and one of its runs.
+func (s *SQLitePersistence) SaveRunnerAndRun(ctx context.Context, runner Runner, run Run) error {
+	if s == nil || s.db == nil {
+		return errors.New("runner persistence is closed")
+	}
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return errors.Wrap(err, "failed to begin runner state transaction")
+	}
+	defer tx.Rollback()
+
+	if err := s.saveRunner(ctx, tx, runner); err != nil {
+		return err
+	}
+	if err := s.saveRun(ctx, tx, run); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return errors.Wrap(err, "failed to commit runner state transaction")
+	}
+	return nil
+}
+
 // BindConversation durably establishes affinity without silently moving an existing conversation.
-func (s *SQLitePersistence) BindConversation(ctx context.Context, conversationID, runnerID string, now time.Time) error {
+func (s *SQLitePersistence) BindConversation(ctx context.Context, conversationID, runnerID, environmentProfile string, now time.Time) error {
 	if s == nil || s.db == nil {
 		return errors.New("runner persistence is closed")
 	}
 	result, err := s.db.ExecContext(ctx, `
-		INSERT INTO conversation_runner_affinity (conversation_id, runner_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?)
+		INSERT INTO conversation_runner_affinity (conversation_id, runner_id, environment_profile, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(conversation_id) DO UPDATE SET
 			updated_at = excluded.updated_at
 		WHERE conversation_runner_affinity.runner_id = excluded.runner_id
-	`, conversationID, runnerID, now, now)
+			AND conversation_runner_affinity.environment_profile = excluded.environment_profile
+	`, conversationID, runnerID, environmentProfile, now, now)
 	if err != nil {
 		return errors.Wrap(err, "failed to bind conversation to runner")
 	}
@@ -208,6 +252,112 @@ func (s *SQLitePersistence) BindConversation(ctx context.Context, conversationID
 		return errors.New("conversation is already bound to another runner")
 	}
 	return nil
+}
+
+// ConversationAffinity reads the current durable affinity so a long-running control plane can observe external deletion.
+func (s *SQLitePersistence) ConversationAffinity(ctx context.Context, conversationID string) (ConversationAffinity, bool, error) {
+	if s == nil || s.db == nil {
+		return ConversationAffinity{}, false, errors.New("runner persistence is closed")
+	}
+	var row conversationAffinityRow
+	err := s.db.GetContext(ctx, &row, `
+		SELECT a.conversation_id, a.runner_id, a.environment_profile
+		FROM conversation_runner_affinity a
+		JOIN runner_registrations r ON r.id = a.runner_id
+		WHERE a.conversation_id = ? AND r.owner_id = ?
+	`, strings.TrimSpace(conversationID), s.ownerID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ConversationAffinity{}, false, nil
+	}
+	if err != nil {
+		return ConversationAffinity{}, false, errors.Wrap(err, "failed to load conversation runner affinity")
+	}
+	return ConversationAffinity{RunnerID: row.RunnerID, EnvironmentProfile: row.EnvironmentProfile}, true, nil
+}
+
+// RemoveRunner deletes one offline registration and its durable run history.
+// Every durable conversation affinity blocks ordinary removal.
+func (s *SQLitePersistence) RemoveRunner(ctx context.Context, runnerID string, force bool) (RemovalResult, error) {
+	if s == nil || s.db == nil {
+		return RemovalResult{}, errors.New("runner persistence is closed")
+	}
+	runnerID = strings.TrimSpace(runnerID)
+	if runnerID == "" {
+		return RemovalResult{}, errors.New("runner id is required")
+	}
+
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return RemovalResult{}, errors.Wrap(err, "failed to begin runner removal")
+	}
+	defer tx.Rollback()
+
+	locked, err := tx.ExecContext(ctx, `
+		UPDATE runner_registrations
+		SET updated_at = updated_at
+		WHERE id = ? AND owner_id = ?
+	`, runnerID, s.ownerID)
+	if err != nil {
+		return RemovalResult{}, errors.Wrap(err, "failed to lock runner registration for removal")
+	}
+	lockedCount, err := locked.RowsAffected()
+	if err != nil {
+		return RemovalResult{}, errors.Wrap(err, "failed to inspect locked runner registration")
+	}
+	if lockedCount != 1 {
+		return RemovalResult{}, errors.Wrapf(ErrRunnerNotFound, "runner %s", runnerID)
+	}
+
+	var conversationIDs []string
+	if err := tx.SelectContext(ctx, &conversationIDs, `
+		SELECT conversation_id
+		FROM conversation_runner_affinity
+		WHERE runner_id = ?
+		ORDER BY conversation_id
+	`, runnerID); err != nil {
+		return RemovalResult{}, errors.Wrap(err, "failed to inspect runner conversation affinities")
+	}
+	if len(conversationIDs) > 0 && !force {
+		return RemovalResult{}, &RunnerReferencedError{RunnerID: runnerID, ConversationIDs: conversationIDs}
+	}
+
+	result := RemovalResult{RunnerID: runnerID}
+	removed, err := tx.ExecContext(ctx, "DELETE FROM conversation_runner_affinity WHERE runner_id = ?", runnerID)
+	if err != nil {
+		return RemovalResult{}, errors.Wrap(err, "failed to delete runner conversation affinities")
+	}
+	count, err := removed.RowsAffected()
+	if err != nil {
+		return RemovalResult{}, errors.Wrap(err, "failed to count removed runner conversation affinities")
+	}
+	result.RemovedConversationAffinities = int(count)
+
+	removedRuns, err := tx.ExecContext(ctx, "DELETE FROM runner_runs WHERE runner_id = ?", runnerID)
+	if err != nil {
+		return RemovalResult{}, errors.Wrap(err, "failed to delete runner run history")
+	}
+	runCount, err := removedRuns.RowsAffected()
+	if err != nil {
+		return RemovalResult{}, errors.Wrap(err, "failed to count removed runner runs")
+	}
+	result.RemovedRuns = int(runCount)
+
+	removedRunner, err := tx.ExecContext(ctx, "DELETE FROM runner_registrations WHERE id = ? AND owner_id = ?", runnerID, s.ownerID)
+	if err != nil {
+		return RemovalResult{}, errors.Wrap(err, "failed to delete runner registration")
+	}
+	runnerCount, err := removedRunner.RowsAffected()
+	if err != nil {
+		return RemovalResult{}, errors.Wrap(err, "failed to count removed runner registrations")
+	}
+	if runnerCount != 1 {
+		return RemovalResult{}, errors.Wrapf(ErrRunnerNotFound, "runner %s", runnerID)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return RemovalResult{}, errors.Wrap(err, "failed to commit runner removal")
+	}
+	return result, nil
 }
 
 // Close releases the SQLite connection.
@@ -264,8 +414,13 @@ func (row runnerPersistenceRow) runner() Runner {
 }
 
 type conversationAffinityRow struct {
-	ConversationID string `db:"conversation_id"`
-	RunnerID       string `db:"runner_id"`
+	ConversationID     string `db:"conversation_id"`
+	RunnerID           string `db:"runner_id"`
+	EnvironmentProfile string `db:"environment_profile"`
+}
+
+type sqlExecutor interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
 func nullString(value string) any {

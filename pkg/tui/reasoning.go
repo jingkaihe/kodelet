@@ -72,9 +72,21 @@ func (m *model) setReasoningEffort(effort string, explicit bool) {
 }
 
 func (m *model) refreshReasoningSettingsForProfile() {
-	profileDefault, options, err := resolveReasoningSettings(m.profile, "")
-	if err != nil {
-		return
+	var profileDefault string
+	var options []string
+	if m.remote {
+		settings, ok := profileSettingsFor(m.profileSettings, m.profile)
+		if !ok {
+			return
+		}
+		profileDefault = settings.ReasoningEffort
+		options = append([]string(nil), settings.ReasoningEffortOptions...)
+	} else {
+		var err error
+		profileDefault, options, err = resolveReasoningSettings(m.profile, "")
+		if err != nil {
+			return
+		}
 	}
 	if m.reasoningEffortExplicit && slices.Contains(options, m.reasoningEffort) {
 		m.reasoningEffortOptions = normalizeReasoningEffortOptions(options, m.reasoningEffort)
@@ -83,6 +95,28 @@ func (m *model) refreshReasoningSettingsForProfile() {
 	}
 	m.reasoningEffortOptions = normalizeReasoningEffortOptions(options, profileDefault)
 	m.setReasoningEffort(profileDefault, false)
+}
+
+func profileSettingsFor(settings map[string]ProfileSettings, profile string) (ProfileSettings, bool) {
+	key := strings.ToLower(displayProfile(profile))
+	for name, value := range settings {
+		if strings.ToLower(displayProfile(name)) == key {
+			return value, true
+		}
+	}
+	return ProfileSettings{}, false
+}
+
+func cloneProfileSettings(settings map[string]ProfileSettings) map[string]ProfileSettings {
+	if settings == nil {
+		return nil
+	}
+	cloned := make(map[string]ProfileSettings, len(settings))
+	for profile, value := range settings {
+		value.ReasoningEffortOptions = append([]string(nil), value.ReasoningEffortOptions...)
+		cloned[profile] = value
+	}
+	return cloned
 }
 
 func (m *model) openReasoningPicker() {

@@ -297,6 +297,7 @@ func TestPersistDirectCommandResponseWithoutCallingModel(t *testing.T) {
 		runner,
 		thread.conversationID,
 		config,
+		"",
 		"/doctor",
 		"Everything is healthy.",
 		nil,

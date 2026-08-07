@@ -200,6 +200,43 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := m.applyEditorResult(msg)
 		return m, cmd
 
+	case remoteSteerMsg:
+		state := m.stateForKey(msg.conversationKey)
+		if state == nil {
+			return m, nil
+		}
+		if msg.err != nil {
+			state.err = errors.Wrap(msg.err, "failed to queue steering message")
+			state.steerError = fmt.Sprintf("Failed to queue steering: %v", msg.err)
+			state.status = "steering failed"
+		} else if msg.queued {
+			state.queuedSteering = append(state.queuedSteering, msg.message)
+			state.steerError = ""
+			state.status = "steering queued"
+		} else {
+			state.steerError = "Steering message was not queued."
+			state.status = "steering ignored"
+		}
+		if state == m.conversationState {
+			m.refreshViewport(true)
+		} else {
+			state.unread = true
+		}
+		return m, nil
+
+	case remoteStopMsg:
+		state := m.stateForKey(msg.conversationKey)
+		if state != nil && msg.err != nil {
+			state.err = errors.Wrap(msg.err, "failed to stop remote conversation")
+			state.status = "cancellation failed"
+			if state == m.conversationState {
+				m.refreshViewport(true)
+			} else {
+				state.unread = true
+			}
+		}
+		return m, nil
+
 	case initialHistoryMsg:
 		state := m.stateForKey(msg.conversationKey)
 		if state == nil {
@@ -549,8 +586,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.runCancelling {
 					return m, nil
 				}
-				m.submitSteering()
-				return m, nil
+				return m, m.submitSteering()
 			}
 			if cmd := m.submit(); cmd != nil {
 				return m, cmd
@@ -1161,6 +1197,9 @@ func (m *model) startConversationRunWithComposer(state *conversationState, messa
 	}
 	if !state.conversationWasResumed {
 		req.ReasoningEffort = state.reasoningEffort
+		if m.remote {
+			req.EnvironmentProfile = m.environmentProfile
+		}
 	}
 
 	return func() tea.Msg {
@@ -1320,14 +1359,14 @@ func mergeSlashCommands(base, additions []slashcommands.Command) []slashcommands
 	return merged
 }
 
-func (m *model) submitSteering() {
+func (m *model) submitSteering() tea.Cmd {
 	message := strings.TrimSpace(m.textarea.Value())
 	if message == "" {
-		return
+		return nil
 	}
 	if _, _, found := slashcommands.Parse(message); found {
 		m.queueFollowUpCommand(message)
-		return
+		return nil
 	}
 
 	if len(message) > steer.MaxMessageLength {
@@ -1335,11 +1374,35 @@ func (m *model) submitSteering() {
 		m.steerError = "Steering message must be less than 10,000 characters."
 		m.status = "steering failed"
 		m.refreshViewport(true)
-		return
+		return nil
 	}
 
 	if strings.TrimSpace(m.conversationID) == "" {
 		m.conversationID = convtypes.GenerateID()
+	}
+	if m.remote {
+		controller, ok := m.runner.(interface {
+			SteerConversation(context.Context, string, string) (bool, error)
+		})
+		if !ok {
+			m.err = errors.New("remote chat runner does not support steering")
+			m.steerError = "Remote steering is unavailable."
+			m.status = "steering failed"
+			m.refreshViewport(true)
+			return nil
+		}
+		conversationID := m.conversationID
+		conversationKey := m.activeConversationKey
+		m.textarea.Reset()
+		m.steerError = ""
+		m.status = "queuing steering"
+		m.refreshViewport(true)
+		return func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.WithoutCancel(m.ctx), 5*time.Second)
+			defer cancel()
+			queued, err := controller.SteerConversation(ctx, conversationID, message)
+			return remoteSteerMsg{conversationKey: conversationKey, message: message, queued: queued, err: err}
+		}
 	}
 
 	steerStore, err := steer.NewSteerStore(m.ctx)
@@ -1348,7 +1411,7 @@ func (m *model) submitSteering() {
 		m.steerError = fmt.Sprintf("Failed to queue steering: %v", err)
 		m.status = "steering failed"
 		m.refreshViewport(true)
-		return
+		return nil
 	}
 	defer steerStore.Close()
 
@@ -1357,7 +1420,7 @@ func (m *model) submitSteering() {
 		m.steerError = fmt.Sprintf("Failed to queue steering: %v", err)
 		m.status = "steering failed"
 		m.refreshViewport(true)
-		return
+		return nil
 	}
 
 	m.textarea.Reset()
@@ -1365,6 +1428,7 @@ func (m *model) submitSteering() {
 	m.steerError = ""
 	m.status = "steering queued"
 	m.refreshViewport(true)
+	return nil
 }
 
 func (m *model) queueFollowUpCommand(message string) {
@@ -1390,7 +1454,30 @@ func (m *model) cancelActiveRun() tea.Cmd {
 	if m.runCancelling {
 		return nil
 	}
-	m.stopRun()
+	var stopCmd tea.Cmd
+	if m.remote && strings.TrimSpace(m.conversationID) != "" {
+		if controller, ok := m.runner.(interface {
+			StopConversation(context.Context, string) error
+		}); ok {
+			conversationID := m.conversationID
+			conversationKey := m.activeConversationKey
+			cancelRun := m.cancelRun
+			m.cancelRun = nil
+			stopCmd = func() tea.Msg {
+				ctx, cancel := context.WithTimeout(context.WithoutCancel(m.ctx), 5*time.Second)
+				err := controller.StopConversation(ctx, conversationID)
+				cancel()
+				if cancelRun != nil {
+					cancelRun()
+				}
+				return remoteStopMsg{conversationKey: conversationKey, err: err}
+			}
+		} else {
+			m.stopRun()
+		}
+	} else {
+		m.stopRun()
+	}
 	var focusCmd tea.Cmd
 	if m.activeUIPrompt != nil {
 		focusCmd = m.resolveUIPrompt(extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
@@ -1400,7 +1487,7 @@ func (m *model) cancelActiveRun() tea.Cmd {
 	m.runCancelling = true
 	m.running = true
 	m.refreshViewport(true)
-	return focusCmd
+	return tea.Batch(focusCmd, stopCmd)
 }
 
 func (m *model) finishActiveBlocks() {

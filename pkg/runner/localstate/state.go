@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/osutil"
+	"github.com/jingkaihe/kodelet/pkg/runner/controlplaneurl"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/pkg/errors"
 )
@@ -122,6 +123,12 @@ func (s *Store) LoadRegistration(server, workspace string) (Registration, bool, 
 	if s == nil {
 		return Registration{}, false, errors.New("runner state store is required")
 	}
+	normalizedServer, err := controlplaneurl.NormalizeBase(server)
+	if err != nil {
+		return Registration{}, false, err
+	}
+	server = normalizedServer
+	workspace = strings.TrimSpace(workspace)
 	path := s.registrationPath(server, workspace)
 	registration, err := readJSONFile[Registration](path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -147,9 +154,54 @@ func (s *Store) SaveRegistration(registration Registration) error {
 	if registration.Server == "" || registration.Workspace == "" || registration.RunnerID == "" {
 		return errors.New("server, workspace, and runner id are required")
 	}
+	server, err := controlplaneurl.NormalizeBase(registration.Server)
+	if err != nil {
+		return err
+	}
+	registration.Server = server
 	registration.Version = stateVersion
 	registration.UpdatedAt = time.Now().UTC()
-	return writeJSONAtomic(s.registrationPath(registration.Server, registration.Workspace), registration)
+	return s.withRegistrationLock(registration.Server, registration.Workspace, func() error {
+		return writeJSONAtomic(s.registrationPath(registration.Server, registration.Workspace), registration)
+	})
+}
+
+// DeleteRegistration removes a cached registration only when it still contains the expected runner ID.
+func (s *Store) DeleteRegistration(server, workspace, expectedRunnerID string) (bool, error) {
+	if s == nil {
+		return false, errors.New("runner state store is required")
+	}
+	server = strings.TrimSpace(server)
+	workspace = strings.TrimSpace(workspace)
+	expectedRunnerID = strings.TrimSpace(expectedRunnerID)
+	if server == "" || workspace == "" || expectedRunnerID == "" {
+		return false, errors.New("server, workspace, and expected runner id are required")
+	}
+	normalizedServer, err := controlplaneurl.NormalizeBase(server)
+	if err != nil {
+		return false, err
+	}
+	server = normalizedServer
+	removed := false
+	err = s.withRegistrationLock(server, workspace, func() error {
+		path := s.registrationPath(server, workspace)
+		registration, err := readJSONFile[Registration](path)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return errors.Wrap(err, "failed to read cached runner registration before deletion")
+		}
+		if strings.TrimSpace(registration.RunnerID) != expectedRunnerID {
+			return nil
+		}
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return errors.Wrap(err, "failed to delete cached runner registration")
+		}
+		removed = true
+		return nil
+	})
+	return removed, err
 }
 
 // Registrations lists every locally cached control-plane registration.
@@ -171,6 +223,10 @@ func (s *Store) Registrations() ([]Registration, error) {
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to read cached runner registration %s", entry.Name())
 		}
+		registration.Server, err = controlplaneurl.NormalizeBase(registration.Server)
+		if err != nil {
+			return nil, errors.Wrapf(err, "cached runner registration %s has an invalid server", entry.Name())
+		}
 		registrations = append(registrations, registration)
 	}
 	sort.Slice(registrations, func(i, j int) bool {
@@ -184,6 +240,36 @@ func (s *Store) Registrations() ([]Registration, error) {
 
 func (s *Store) registrationPath(server, workspace string) string {
 	return filepath.Join(s.root, "registrations", stateKey(server, workspace)+".json")
+}
+
+func (s *Store) withRegistrationLock(server, workspace string, operation func() error) error {
+	lockPath := filepath.Join(s.root, "registrations", stateKey(server, workspace)+".lock")
+	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return errors.Wrap(err, "failed to open cached runner registration lock")
+	}
+	if err := file.Chmod(0o600); err != nil {
+		_ = file.Close()
+		return errors.Wrap(err, "failed to secure cached runner registration lock")
+	}
+
+	var lockErr error
+	for range 100 {
+		lockErr = tryLockFile(file)
+		if lockErr == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if lockErr != nil {
+		_ = file.Close()
+		return errors.Wrap(lockErr, "failed to lock cached runner registration")
+	}
+	defer func() {
+		_ = unlockFile(file)
+		_ = file.Close()
+	}()
+	return operation()
 }
 
 func stateKey(values ...string) string {

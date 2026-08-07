@@ -100,3 +100,27 @@ func TestWebUIInputBrokerSendsSeparateConfirmSelectAndNotifyEvents(t *testing.T)
 	require.NotNil(t, events[2].UINotify)
 	assert.Equal(t, "Done", events[2].UINotify.Message)
 }
+
+func TestWebUIInputBrokerDuplicateIDKeepsNewestPromptRegistered(t *testing.T) {
+	sink := &recordingChatSink{}
+	broker := newWebUIInputBroker("conv-123", sink)
+
+	firstResult := make(chan extensions.UIInputResponse, 1)
+	go func() {
+		result, _ := broker.Input(context.Background(), extensions.UIInputRequest{ID: "shared", Title: "First"})
+		firstResult <- result
+	}()
+	require.Eventually(t, func() bool { return len(sink.Events()) == 1 }, time.Second, 10*time.Millisecond)
+
+	secondResult := make(chan extensions.UIInputResponse, 1)
+	go func() {
+		result, _ := broker.Input(context.Background(), extensions.UIInputRequest{ID: "shared", Title: "Second"})
+		secondResult <- result
+	}()
+	require.Eventually(t, func() bool { return len(sink.Events()) == 2 }, time.Second, 10*time.Millisecond)
+	assert.Equal(t, extensions.UIInputStatusDismissed, (<-firstResult).Status)
+
+	response := extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted, Value: "newest"}
+	require.True(t, broker.Respond("shared", response))
+	assert.Equal(t, response, <-secondResult)
+}

@@ -231,7 +231,7 @@ func TestExecuteEnvironmentToolRoutesControlPlaneToolsOutsideWorkspaceEnvironmen
 			metadata: map[string]any{
 				goals.MetadataKey: goals.Goal{Objective: "ship phase one", Status: goals.StatusActive, Version: 1},
 			},
-			state: &toolState{tools: []tooltypes.Tool{namedTool("file_read")}},
+			state: &toolState{tools: []tooltypes.Tool{namedTool("file_read"), namedTool("get_goal")}},
 		},
 	}
 

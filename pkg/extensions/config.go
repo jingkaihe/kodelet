@@ -39,13 +39,26 @@ func DefaultConfig() Config {
 
 // LoadConfigFromViper loads extension configuration from viper.
 func LoadConfigFromViper() Config {
-	config := DefaultConfig()
-	if viper.IsSet("extensions") {
-		if err := viper.UnmarshalKey("extensions", &config, viper.DecodeHook(extensionConfigDecodeHook())); err != nil {
-			logger.G(context.Background()).WithError(err).Warn("failed to load extensions config, using defaults")
-		}
+	config, err := LoadConfigFromSettings(viper.GetStringMap("extensions"))
+	if err != nil {
+		logger.G(context.Background()).WithError(err).Warn("failed to load extensions config, using defaults")
+		return DefaultConfig()
 	}
 	return config
+}
+
+// LoadConfigFromSettings decodes a request-scoped extension settings map.
+func LoadConfigFromSettings(settings map[string]any) (Config, error) {
+	config := DefaultConfig()
+	if len(settings) == 0 {
+		return config, nil
+	}
+	local := viper.New()
+	local.Set("extensions", settings)
+	if err := local.UnmarshalKey("extensions", &config, viper.DecodeHook(extensionConfigDecodeHook())); err != nil {
+		return DefaultConfig(), err
+	}
+	return config, nil
 }
 
 func extensionConfigDecodeHook() mapstructure.DecodeHookFunc {

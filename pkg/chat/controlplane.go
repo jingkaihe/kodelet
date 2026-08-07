@@ -6,14 +6,13 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
-	"path"
 	"strings"
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/extensions"
+	"github.com/jingkaihe/kodelet/pkg/runner/controlplaneurl"
 	"github.com/pkg/errors"
 )
 
@@ -26,6 +25,22 @@ type ControlPlaneChatRunner struct {
 	authToken string
 	runnerID  string
 	client    *http.Client
+}
+
+// ControlPlaneProfileOption describes one model-policy profile advertised by the server.
+type ControlPlaneProfileOption struct {
+	Name   string `json:"name"`
+	Scope  string `json:"scope"`
+	Active bool   `json:"active,omitempty"`
+}
+
+// ControlPlaneChatSettings contains server-owned settings for a new conversation.
+type ControlPlaneChatSettings struct {
+	CurrentProfile         string                      `json:"currentProfile,omitempty"`
+	Profiles               []ControlPlaneProfileOption `json:"profiles"`
+	ReasoningEffort        string                      `json:"reasoningEffort"`
+	ReasoningEffortOptions []string                    `json:"reasoningEffortOptions"`
+	DefaultCWD             string                      `json:"defaultCWD,omitempty"`
 }
 
 // NewControlPlaneChatRunner creates a TUI-compatible remote chat transport.
@@ -122,38 +137,126 @@ func (r *ControlPlaneChatRunner) Run(ctx context.Context, request ChatRequest, s
 	return conversationID, streamErr
 }
 
-func controlPlaneBaseURL(rawServer string) (string, error) {
-	rawServer = strings.TrimSpace(rawServer)
-	if rawServer == "" {
-		return "", errors.New("control-plane URL is required")
+// ChatSettings fetches control-plane model profiles and reasoning policy.
+func (r *ControlPlaneChatRunner) ChatSettings(ctx context.Context, profile string) (ControlPlaneChatSettings, error) {
+	if r == nil || r.client == nil {
+		return ControlPlaneChatSettings{}, errors.New("control-plane chat runner is not initialized")
 	}
-	parsed, err := url.Parse(rawServer)
+	settingsURL, err := controlPlaneEndpointURL(r.baseURL, "api", "chat", "settings")
 	if err != nil {
-		return "", errors.Wrap(err, "failed to parse control-plane URL")
+		return ControlPlaneChatSettings{}, err
 	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return "", errors.New("control-plane URL must use http or https")
+	parsed, err := url.Parse(settingsURL)
+	if err != nil {
+		return ControlPlaneChatSettings{}, errors.Wrap(err, "failed to parse control-plane chat settings URL")
 	}
-	if parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return "", errors.New("control-plane URL must contain only scheme, host, and an optional base path")
+	if profile = strings.TrimSpace(profile); profile != "" {
+		query := parsed.Query()
+		query.Set("profile", profile)
+		parsed.RawQuery = query.Encode()
 	}
-	if parsed.Scheme == "http" && !controlPlaneLoopbackHostname(parsed.Hostname()) {
-		return "", errors.New("remote control-plane connections require https; http is allowed only for loopback servers")
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	if err != nil {
+		return ControlPlaneChatSettings{}, errors.Wrap(err, "failed to create control-plane chat settings request")
 	}
-	parsed.Path = strings.TrimSuffix(parsed.Path, "/")
-	parsed.RawPath = ""
-	return parsed.String(), nil
+	r.authorize(request)
+	response, err := r.client.Do(request)
+	if err != nil {
+		return ControlPlaneChatSettings{}, errors.Wrap(err, "failed to load control-plane chat settings")
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return ControlPlaneChatSettings{}, controlPlaneResponseError(response)
+	}
+	var settings ControlPlaneChatSettings
+	decoder := json.NewDecoder(io.LimitReader(response.Body, 1<<20))
+	if err := decoder.Decode(&settings); err != nil {
+		return ControlPlaneChatSettings{}, errors.Wrap(err, "failed to decode control-plane chat settings")
+	}
+	return settings, nil
+}
+
+// StopConversation requests cancellation of central and runner work before the client stream closes.
+func (r *ControlPlaneChatRunner) StopConversation(ctx context.Context, conversationID string) error {
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
+		return errors.New("conversation id is required")
+	}
+	endpoint, err := controlPlaneEndpointURL(r.baseURL, "api", "conversations", conversationID, "stop")
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
+	if err != nil {
+		return errors.Wrap(err, "failed to create control-plane stop request")
+	}
+	r.authorize(request)
+	response, err := r.client.Do(request)
+	if err != nil {
+		return errors.Wrap(err, "failed to stop control-plane conversation")
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return controlPlaneResponseError(response)
+	}
+	return nil
+}
+
+// SteerConversation queues a steering message in the control plane that owns the active provider loop.
+func (r *ControlPlaneChatRunner) SteerConversation(ctx context.Context, conversationID, message string) (bool, error) {
+	conversationID = strings.TrimSpace(conversationID)
+	message = strings.TrimSpace(message)
+	if conversationID == "" {
+		return false, errors.New("conversation id is required")
+	}
+	if message == "" {
+		return false, errors.New("steering message is required")
+	}
+	endpoint, err := controlPlaneEndpointURL(r.baseURL, "api", "conversations", conversationID, "steer")
+	if err != nil {
+		return false, err
+	}
+	payload, err := json.Marshal(struct {
+		Message string `json:"message"`
+	}{Message: message})
+	if err != nil {
+		return false, errors.Wrap(err, "failed to encode control-plane steering request")
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return false, errors.Wrap(err, "failed to create control-plane steering request")
+	}
+	request.Header.Set("Content-Type", "application/json")
+	r.authorize(request)
+	response, err := r.client.Do(request)
+	if err != nil {
+		return false, errors.Wrap(err, "failed to queue control-plane steering message")
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return false, controlPlaneResponseError(response)
+	}
+	var result struct {
+		Queued bool `json:"queued"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&result); err != nil {
+		return false, errors.Wrap(err, "failed to decode control-plane steering response")
+	}
+	return result.Queued, nil
+}
+
+func (r *ControlPlaneChatRunner) authorize(request *http.Request) {
+	if r != nil && request != nil && r.authToken != "" {
+		request.Header.Set("Authorization", "Bearer "+r.authToken)
+	}
+}
+
+func controlPlaneBaseURL(rawServer string) (string, error) {
+	return controlplaneurl.NormalizeBase(rawServer)
 }
 
 func controlPlaneEndpointURL(baseURL string, parts ...string) (string, error) {
-	parsed, err := url.Parse(baseURL)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to parse control-plane URL")
-	}
-	segments := append([]string{parsed.Path}, parts...)
-	parsed.Path = path.Join(segments...)
-	parsed.RawPath = ""
-	return parsed.String(), nil
+	return controlplaneurl.Endpoint(baseURL, parts...)
 }
 
 func controlPlaneSupportsInteractiveUI(ctx context.Context) bool {
@@ -283,15 +386,6 @@ func (r *ControlPlaneChatRunner) respondToUIInput(ctx context.Context, conversat
 		return controlPlaneResponseError(httpResponse)
 	}
 	return nil
-}
-
-func controlPlaneLoopbackHostname(hostname string) bool {
-	hostname = strings.TrimSpace(strings.ToLower(hostname))
-	if hostname == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(hostname)
-	return ip != nil && ip.IsLoopback()
 }
 
 func controlPlaneResponseError(response *http.Response) error {

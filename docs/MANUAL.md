@@ -146,6 +146,7 @@ kodelet chat --profile openai --reasoning-effort high
 kodelet chat --no-tools              # chat without tools
 kodelet chat --no-extensions         # disable extensions
 kodelet chat --runner RUNNER         # start a new conversation on a remote runner
+kodelet chat --runner RUNNER --runner-profile workspace  # select runner-local environment configuration
 ```
 
 The TUI uses `auto` theme selection by default. It detects whether the terminal profile has a light or dark background and selects `catppuccin-latte` for light profiles or `catppuccin-mocha` for dark profiles; unavailable detection falls back to Mocha. Use `--theme` at startup or `/theme` in the TUI; the picker marks the active selection with ` (current)`. Use `/theme THEME_NAME` to switch directly. The TUI streams assistant responses, collapses thinking and tool details by default, and lets you toggle details with `ctrl+o` or by clicking the detail header. It uses the same chat runner as the Web UI, so conversations are persisted and can be resumed by ID. While the assistant is working, the composer stays editable; press `Enter` to queue ordinary text as steering for the active conversation. TUI-local slash commands such as `/sessions` and `/new` execute immediately, while other slash commands remain available in completion and are queued as follow-up turns that start when the current turn finishes. Kodelet applies queued steering on the next model API call. Before the first message, use `Ctrl+T` to select a profile and `Ctrl+Y` (or click the `effort:` label beside the profile) to select one of the profile's `allowed_reasoning_efforts`. Both controls are locked after the conversation starts, and the selected effort is restored when it is resumed.
@@ -270,22 +271,33 @@ kodelet runner inspect runner_abc --server http://localhost:8080 --auth-token we
 
 A selector can be an exact runner ID, an unambiguous ID prefix, or an unambiguous display name. Ambiguous selectors fail and show the matching IDs, hostnames, and workspace paths. Inspection exposes the canonical workspace, hostname and stable host instance, PID, platform, Kodelet version, connection generation, manifest digest/change flag, active run, last heartbeat, compatibility error, and local lock diagnostics when the inspected runner is local.
 
+Offline registrations remain durable until explicitly removed. Stop the runner process before removing it:
+
+```bash
+kodelet runner remove kodelet-gpu --server http://localhost:8080 --auth-token web-secret
+```
+
+Removal deletes the stable registration and its runner-run history. It refuses connected runners and, by default, refuses every durable conversation affinity. Delete the bound conversations first, which removes their affinities transactionally, or use `--force` to explicitly abandon all bindings, after which those conversations are no longer pinned to that runner. `--no-confirm` skips the destructive-operation prompt and is required with `--json`. When invoked on the runner host, successful removal also clears the matching local registration cache if it still refers to the removed runner, while retaining the diagnostic lock file.
+
 Runner states are `connecting`, `idle`, `busy`, `error`, `offline`, and `incompatible`. Only an idle compatible runner accepts a new run. A manifest-change flag means the runner detected changed context, skills, tools, commands, extensions, or relevant configuration while idle; the changed manifest is pinned by the next run and never mutates an already active run.
 
-In the Web UI, choose the runner from the **Environment** field when creating a conversation. The conversation is durably bound to that runner, and later turns default to the same runner rather than silently moving to a similarly named workspace. Remote conversations hide or disable control-plane-local CWD suggestions, terminal access, Git diff, and server-side slash-command discovery; commands entered in chat still execute through the runner's pinned command manifest.
+In the Web UI, choose the runner from the **Environment** field when creating a conversation. An optional **Runner profile** field selects a name from that runner's `environment_profiles` namespace; blank means the runner's base configuration. The conversation is durably bound to both that runner and runner profile before the first environment open is attempted, and later turns reuse the same selection rather than silently moving to a similarly named workspace or profile. Remote conversations hide or disable control-plane-local CWD suggestions, terminal access, Git diff, and server-side slash-command discovery; commands entered in chat still execute through the runner's pinned command manifest. If a recipe changes or disappears after a run opens, Kodelet rejects the command until a new run pins the updated manifest.
 
 The terminal UI can start a new remote conversation with:
 
 ```bash
 kodelet chat \
   --runner kodelet-gpu \
+  --runner-profile workspace \
   --server http://localhost:8080 \
   --auth-token web-secret
 ```
 
-Remote TUI extension input, confirmation, selection, and notification requests are relayed through the control plane. The initial remote TUI mode intentionally rejects `--resume`, `--follow`, `--cwd`, `--no-tools`, and `--no-extensions`; remote conversation browsing/resume and per-request runner policy overrides need a broader client contract. `kodelet run --runner` is likewise not enabled yet because the one-shot command's flags and output modes are not fully represented by the remote chat request contract.
+`--profile` selects model/provider policy from the control plane, while `--runner-profile` independently selects a profile from the runner's own global and workspace `environment_profiles` configuration; blank or `default` uses the runner base configuration. A model profile never implicitly selects a same-named runner profile, and the selected runner profile is locked after the conversation starts. Remote TUI profile and reasoning-effort choices are loaded from the control plane rather than the client machine. Extension input, confirmation, selection, and notification requests are relayed through the control plane with extension-generation identity preserved; steering is queued centrally, and `Esc` or `Ctrl+C` requests server-side cancellation before closing the local response stream. The initial remote TUI mode intentionally rejects `--resume`, `--follow`, `--cwd`, `--no-tools`, and `--no-extensions`; remote conversation browsing/resume and per-request runner policy overrides need a broader client contract. `kodelet run --runner` is likewise not enabled yet because the one-shot command's flags and output modes are not fully represented by the remote chat request contract.
 
-Across hosts, runner and remote TUI connections require HTTPS/WSS; plain HTTP is accepted only for loopback servers. The initial runner executes directly in its workspace with the runner process's host permissions, permits one active top-level run, and is not a sandbox. It does not create worktrees, containers, micro-VMs, filesystem snapshots, process namespaces, network namespaces, or isolated port spaces. Each run is created and cleaned up through an execution-instance provider, but the built-in provider currently returns a fresh lifecycle handle to the same workspace; an isolated provider and its durability/conflict model remain future work behind the unchanged agent-environment protocol.
+Across hosts, runner and remote TUI connections require HTTPS/WSS; plain HTTP is accepted only for loopback servers. Control-plane URLs are canonicalized for endpoint construction and local registration-cache identity, so equivalent host casing, trailing dots, default ports, and base-path spellings do not create duplicate local registrations. The initial runner executes directly in its workspace with the runner process's host permissions, permits one active top-level run, and is not a sandbox. It does not create worktrees, containers, micro-VMs, filesystem snapshots, process namespaces, network namespaces, or isolated port spaces. Each run is created and cleaned up through an execution-instance provider, but the built-in provider currently returns a fresh lifecycle handle to the same workspace; an isolated provider and its durability/conflict model remain future work behind the unchanged agent-environment protocol.
+
+Runner cancellation and resource cleanup are bounded. If an operation or resource does not stop within the cleanup deadline, the runner reports an error and refuses further runs until the runner process is restarted rather than advertising the workspace as safely idle. A control-plane `run.open` transport failure is reconciled with `run.close`; if cleanup cannot be confirmed, the run is recorded as lost and the uncertain connection is fenced.
 
 ### Git Integration
 
@@ -735,6 +747,19 @@ aliases:
 ```
 
 `allowed_reasoning_efforts` defines the ordered reasoning-effort choices available for new conversations in the TUI and Web UI. When omitted or empty, all efforts supported by the configured provider are available.
+
+Runner-local environment profiles use a separate `environment_profiles` namespace. They are resolved only by `kodelet runner start` on the runner host and do not select or override the control plane's model profile:
+
+```yaml
+environment_profiles:
+  workspace:
+    allowed_tools: [bash, apply_patch, file_read]
+    allowed_commands: ["go test *", "mise run *"]
+    extensions:
+      allow: [acp-subagent]
+```
+
+Select one with `kodelet chat --runner RUNNER --runner-profile workspace` or the Web UI's **Runner profile** field. Blank or `default` uses the runner base configuration.
 
 ### Profile Management Commands
 

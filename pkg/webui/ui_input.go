@@ -133,7 +133,9 @@ func (b *webUIInputBroker) prompt(ctx context.Context, requestID string, event C
 	b.mu.Unlock()
 	defer func() {
 		b.mu.Lock()
-		delete(b.pending, requestID)
+		if b.pending[requestID] == responseCh {
+			delete(b.pending, requestID)
+		}
 		b.mu.Unlock()
 	}()
 

@@ -27,6 +27,87 @@ type fakeLink struct {
 	err      error
 }
 
+type testPersistence struct {
+	state               PersistedState
+	saveRunnerErr       error
+	saveRunnerAndRunErr error
+}
+
+func (p *testPersistence) Load(context.Context) (PersistedState, error) {
+	state := p.state
+	state.Runners = append([]Runner(nil), state.Runners...)
+	state.Runs = append([]Run(nil), state.Runs...)
+	state.Affinities = make(map[string]ConversationAffinity, len(p.state.Affinities))
+	for conversationID, affinity := range p.state.Affinities {
+		state.Affinities[conversationID] = affinity
+	}
+	return state, nil
+}
+
+func (p *testPersistence) SaveRunner(_ context.Context, runner Runner) error {
+	if p.saveRunnerErr != nil {
+		return p.saveRunnerErr
+	}
+	p.upsertRunner(runner)
+	return nil
+}
+
+func (p *testPersistence) SaveRun(_ context.Context, run Run) error {
+	p.upsertRun(run)
+	return nil
+}
+
+func (p *testPersistence) SaveRunnerAndRun(_ context.Context, runner Runner, run Run) error {
+	if p.saveRunnerAndRunErr != nil {
+		return p.saveRunnerAndRunErr
+	}
+	p.upsertRunner(runner)
+	p.upsertRun(run)
+	return nil
+}
+
+func (p *testPersistence) BindConversation(_ context.Context, conversationID, runnerID, environmentProfile string, _ time.Time) error {
+	if p.state.Affinities == nil {
+		p.state.Affinities = make(map[string]ConversationAffinity)
+	}
+	if existing, ok := p.state.Affinities[conversationID]; ok && (existing.RunnerID != runnerID || existing.EnvironmentProfile != environmentProfile) {
+		return errors.New("conversation is already bound to another runner")
+	}
+	p.state.Affinities[conversationID] = ConversationAffinity{RunnerID: runnerID, EnvironmentProfile: environmentProfile}
+	return nil
+}
+
+func (p *testPersistence) ConversationAffinity(_ context.Context, conversationID string) (ConversationAffinity, bool, error) {
+	affinity, ok := p.state.Affinities[conversationID]
+	return affinity, ok, nil
+}
+
+func (*testPersistence) RemoveRunner(context.Context, string, bool) (RemovalResult, error) {
+	return RemovalResult{}, errors.New("not implemented")
+}
+
+func (*testPersistence) Close() error { return nil }
+
+func (p *testPersistence) upsertRunner(runner Runner) {
+	for i := range p.state.Runners {
+		if p.state.Runners[i].ID == runner.ID {
+			p.state.Runners[i] = runner
+			return
+		}
+	}
+	p.state.Runners = append(p.state.Runners, runner)
+}
+
+func (p *testPersistence) upsertRun(run Run) {
+	for i := range p.state.Runs {
+		if p.state.Runs[i].ID == run.ID {
+			p.state.Runs[i] = run
+			return
+		}
+	}
+	p.state.Runs = append(p.state.Runs, run)
+}
+
 type fakeUIRequestRouter struct {
 	runnerID string
 	method   string
@@ -56,6 +137,13 @@ func (l *fakeLink) Call(ctx context.Context, method string, params any, result a
 		return call(ctx, method, params, result)
 	}
 	return nil
+}
+
+func (l *fakeLink) CallTracked(ctx context.Context, method string, params any, result any, onRequestID func(string)) error {
+	if onRequestID != nil {
+		onRequestID("fake:request")
+	}
+	return l.Call(ctx, method, params, result)
 }
 
 func (l *fakeLink) Notify(context.Context, string, any) error { return nil }
@@ -107,6 +195,128 @@ func TestRegisterUpsertsWorkspaceIdentityAndFencesStaleConnections(t *testing.T)
 	assert.ErrorContains(t, err, "another host workspace")
 }
 
+func TestRegisterPersistenceFailureDoesNotPublishRunner(t *testing.T) {
+	persistence := &testPersistence{saveRunnerErr: errors.New("save failed")}
+	registry, err := New(t.Context(), Options{
+		HeartbeatInterval: time.Hour,
+		HeartbeatTimeout:  2 * time.Hour,
+		NewID:             sequentialIDs(),
+		Persistence:       persistence,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = registry.Close() })
+
+	params := testRegisterParams("host-one", "/work/project")
+	_, err = registry.Register(params, newFakeLink())
+	require.ErrorContains(t, err, "save failed")
+	assert.Empty(t, registry.Runners())
+
+	persistence.saveRunnerErr = nil
+	registration, err := registry.Register(params, newFakeLink())
+	require.NoError(t, err)
+	assert.NotEmpty(t, registration.RunnerID)
+	assert.Len(t, registry.Runners(), 1)
+}
+
+func TestReconnectPersistenceFailureKeepsPriorGenerationAndRun(t *testing.T) {
+	persistence := &testPersistence{}
+	registry, err := New(t.Context(), Options{
+		HeartbeatInterval: time.Hour,
+		HeartbeatTimeout:  2 * time.Hour,
+		NewID:             sequentialIDs(),
+		Persistence:       persistence,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		persistence.saveRunnerAndRunErr = nil
+		_ = registry.Close()
+	})
+
+	firstLink := newFakeLink()
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), firstLink)
+	require.NoError(t, err)
+	configureManifestLink(t, firstLink, registration)
+	markRunnerReady(t, registry, registration)
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-one", "conversation-one"))
+	require.NoError(t, err)
+
+	persistence.saveRunnerAndRunErr = errors.New("transaction failed")
+	_, err = registry.Register(testRegisterParams("host-one", "/work/project"), newFakeLink())
+	require.ErrorContains(t, err, "transaction failed")
+
+	runner, ok := registry.Runner(registration.RunnerID)
+	require.True(t, ok)
+	assert.Equal(t, registration.Generation, runner.Generation)
+	assert.Equal(t, registration.ConnectionID, runner.ConnectionID)
+	assert.Equal(t, "run-one", runner.ActiveRunID)
+	assert.False(t, firstLink.isClosed())
+	run, ok := registry.Run("run-one")
+	require.True(t, ok)
+	assert.Equal(t, RunStatusRunning, run.Status)
+}
+
+func TestHeartbeatStateGatesScheduling(t *testing.T) {
+	registry := newTestRegistry(t)
+	link := newFakeLink()
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), link)
+	require.NoError(t, err)
+
+	err = registry.Heartbeat(registration.RunnerID, registration.ConnectionID, registration.Generation, protocol.HeartbeatParams{
+		RunnerID:   registration.RunnerID,
+		Generation: registration.Generation,
+		State:      protocol.RunnerState("future"),
+	})
+	require.ErrorContains(t, err, "unsupported runner state")
+	runner, ok := registry.Runner(registration.RunnerID)
+	require.True(t, ok)
+	assert.Equal(t, RunnerStatusConnecting, runner.Status)
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-one", "conversation-one"))
+	require.ErrorContains(t, err, "initial heartbeat")
+
+	require.NoError(t, registry.Heartbeat(registration.RunnerID, registration.ConnectionID, registration.Generation, protocol.HeartbeatParams{
+		RunnerID:   registration.RunnerID,
+		Generation: registration.Generation,
+		State:      protocol.RunnerStateError,
+	}))
+	runner, ok = registry.Runner(registration.RunnerID)
+	require.True(t, ok)
+	assert.Equal(t, RunnerStatusError, runner.Status)
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-two", "conversation-two"))
+	require.ErrorContains(t, err, "runner is not idle")
+}
+
+func TestOpenRunReservationFailureRetainsAffinityWithoutPublishingCapacity(t *testing.T) {
+	persistence := &testPersistence{}
+	registry, err := New(t.Context(), Options{
+		HeartbeatInterval: time.Hour,
+		HeartbeatTimeout:  2 * time.Hour,
+		NewID:             sequentialIDs(),
+		Persistence:       persistence,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		persistence.saveRunnerAndRunErr = nil
+		_ = registry.Close()
+	})
+	link := newFakeLink()
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), link)
+	require.NoError(t, err)
+	markRunnerReady(t, registry, registration)
+
+	persistence.saveRunnerAndRunErr = errors.New("reservation failed")
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-one", "conversation-one"))
+	require.ErrorContains(t, err, "reservation failed")
+	runnerID, ok := registry.RunnerForConversation("conversation-one")
+	require.True(t, ok)
+	assert.Equal(t, registration.RunnerID, runnerID)
+	_, ok = registry.Run("run-one")
+	assert.False(t, ok)
+	runner, ok := registry.Runner(registration.RunnerID)
+	require.True(t, ok)
+	assert.Equal(t, RunnerStatusIdle, runner.Status)
+	assert.Empty(t, runner.ActiveRunID)
+}
+
 func TestOpenRunEnforcesRunnerAndConversationCapacity(t *testing.T) {
 	registry := newTestRegistry(t)
 	firstLink := newFakeLink()
@@ -129,7 +339,7 @@ func TestOpenRunEnforcesRunnerAndConversationCapacity(t *testing.T) {
 	configureManifestLink(t, secondLink, secondRegistration)
 	markRunnerReady(t, registry, secondRegistration)
 	_, err = registry.OpenRun(t.Context(), secondRegistration.RunnerID, testRunOpenParams("run-three", "conversation-one"))
-	assert.ErrorContains(t, err, "conversation already has active run")
+	assert.ErrorContains(t, err, "conversation is bound to runner")
 
 	require.NoError(t, registry.CloseRun(t.Context(), "run-one", RunStatusSucceeded, nil))
 	run, ok := registry.Run("run-one")
@@ -181,7 +391,9 @@ func TestExecuteToolRoutesMonotonicUpdates(t *testing.T) {
 		require.Equal(t, protocol.MethodToolExecute, method)
 		request := params.(protocol.ToolExecuteParams)
 		assert.True(t, request.WantUpdates)
-		update := protocol.ToolUpdateParams{RunID: request.RunID, ToolCallID: request.ToolCallID, Sequence: 1}
+		wrongRequest := protocol.ToolUpdateParams{RunID: request.RunID, RequestID: "fake:old-request", ToolCallID: request.ToolCallID, Sequence: 10}
+		assert.ErrorContains(t, registry.DeliverToolUpdate(registration.RunnerID, registration.ConnectionID, registration.Generation, wrongRequest), "request id is stale")
+		update := protocol.ToolUpdateParams{RunID: request.RunID, RequestID: "fake:request", ToolCallID: request.ToolCallID, Sequence: 1}
 		require.NoError(t, registry.DeliverToolUpdate(registration.RunnerID, registration.ConnectionID, registration.Generation, update))
 		assert.ErrorContains(t, registry.DeliverToolUpdate(registration.RunnerID, registration.ConnectionID, registration.Generation, update), "sequence is stale")
 		*result.(*protocol.ToolExecuteResult) = protocol.ToolExecuteResult{Input: request.Input}
@@ -367,6 +579,132 @@ func TestRegistryRestoresStableIdentityAffinityAndLostRuns(t *testing.T) {
 	require.NoError(t, firstRegistry.Close())
 }
 
+func TestRemoveRunnerRequiresOfflineAndProtectsConversationAffinity(t *testing.T) {
+	registry := newTestRegistry(t)
+	link := newFakeLink()
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), link)
+	require.NoError(t, err)
+	configureManifestLink(t, link, registration)
+	markRunnerReady(t, registry, registration)
+
+	_, err = registry.RemoveRunner(t.Context(), registration.RunnerID, false)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrRunnerConnected))
+
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-one", "conversation-one"))
+	require.NoError(t, err)
+	require.NoError(t, registry.CloseRun(t.Context(), "run-one", RunStatusSucceeded, nil))
+	registry.Detach(registration.RunnerID, registration.ConnectionID, registration.Generation, nil)
+
+	_, err = registry.RemoveRunner(t.Context(), registration.RunnerID, false)
+	var referenced *RunnerReferencedError
+	require.ErrorAs(t, err, &referenced)
+	assert.Equal(t, []string{"conversation-one"}, referenced.ConversationIDs)
+
+	result, err := registry.RemoveRunner(t.Context(), registration.RunnerID, true)
+	require.NoError(t, err)
+	assert.Equal(t, RemovalResult{
+		RunnerID:                      registration.RunnerID,
+		RemovedRuns:                   1,
+		RemovedConversationAffinities: 1,
+	}, result)
+	_, ok := registry.Runner(registration.RunnerID)
+	assert.False(t, ok)
+	_, ok = registry.Run("run-one")
+	assert.False(t, ok)
+	_, ok = registry.RunnerForConversation("conversation-one")
+	assert.False(t, ok)
+
+	_, err = registry.RemoveRunner(t.Context(), registration.RunnerID, true)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrRunnerNotFound))
+}
+
+func TestRemoveRunnerDeletesDurableState(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "storage.db")
+	database, err := db.Open(t.Context(), dbPath)
+	require.NoError(t, err)
+	require.NoError(t, db.NewMigrationRunner(database).Run(t.Context(), migrations.All()))
+	require.NoError(t, database.Close())
+
+	firstPersistence, err := NewSQLitePersistence(t.Context(), dbPath, "owner-one")
+	require.NoError(t, err)
+	firstRegistry, err := New(t.Context(), Options{
+		HeartbeatInterval: time.Hour,
+		HeartbeatTimeout:  2 * time.Hour,
+		NewID:             sequentialIDs(),
+		Persistence:       firstPersistence,
+	})
+	require.NoError(t, err)
+
+	link := newFakeLink()
+	registration, err := firstRegistry.Register(testRegisterParams("host-one", "/work/project"), link)
+	require.NoError(t, err)
+	configureManifestLink(t, link, registration)
+	markRunnerReady(t, firstRegistry, registration)
+	_, err = firstRegistry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-one", "conversation-one"))
+	require.NoError(t, err)
+	require.NoError(t, firstRegistry.CloseRun(t.Context(), "run-one", RunStatusSucceeded, nil))
+	firstRegistry.Detach(registration.RunnerID, registration.ConnectionID, registration.Generation, nil)
+
+	result, err := firstRegistry.RemoveRunner(t.Context(), registration.RunnerID, true)
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.RemovedRuns)
+	assert.Equal(t, 1, result.RemovedConversationAffinities)
+	require.NoError(t, firstRegistry.Close())
+
+	secondPersistence, err := NewSQLitePersistence(t.Context(), dbPath, "owner-one")
+	require.NoError(t, err)
+	secondRegistry, err := New(t.Context(), Options{
+		HeartbeatInterval: time.Hour,
+		HeartbeatTimeout:  2 * time.Hour,
+		NewID:             sequentialIDs(),
+		Persistence:       secondPersistence,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = secondRegistry.Close() })
+	assert.Empty(t, secondRegistry.Runners())
+	_, ok := secondRegistry.Run("run-one")
+	assert.False(t, ok)
+	_, ok = secondRegistry.RunnerForConversation("conversation-one")
+	assert.False(t, ok)
+}
+
+func TestRemoveRunnerProtectsAffinityWithoutConversationRecord(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "storage.db")
+	database, err := db.Open(t.Context(), dbPath)
+	require.NoError(t, err)
+	require.NoError(t, db.NewMigrationRunner(database).Run(t.Context(), migrations.All()))
+	require.NoError(t, database.Close())
+
+	persistence, err := NewSQLitePersistence(t.Context(), dbPath, "owner-one")
+	require.NoError(t, err)
+	registry, err := New(t.Context(), Options{
+		HeartbeatInterval: time.Hour,
+		HeartbeatTimeout:  2 * time.Hour,
+		NewID:             sequentialIDs(),
+		Persistence:       persistence,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = registry.Close() })
+
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), newFakeLink())
+	require.NoError(t, err)
+	require.NoError(t, registry.BindConversation(t.Context(), "conversation-one", registration.RunnerID))
+	registry.Detach(registration.RunnerID, registration.ConnectionID, registration.Generation, nil)
+
+	_, err = registry.RemoveRunner(t.Context(), registration.RunnerID, false)
+	var referenced *RunnerReferencedError
+	require.ErrorAs(t, err, &referenced)
+	assert.Equal(t, []string{"conversation-one"}, referenced.ConversationIDs)
+
+	result, err := registry.RemoveRunner(t.Context(), registration.RunnerID, true)
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.RemovedConversationAffinities)
+	_, ok := registry.RunnerForConversation("conversation-one")
+	assert.False(t, ok)
+}
+
 func TestRegisterExposesIncompatibleRunner(t *testing.T) {
 	registry := newTestRegistry(t)
 	params := testRegisterParams("host-one", "/work/project")
@@ -384,6 +722,10 @@ func TestRegisterExposesIncompatibleRunner(t *testing.T) {
 
 func TestCancelEnvironmentErrorAndConversationAffinity(t *testing.T) {
 	registry := newTestRegistry(t)
+	var failedConversation string
+	registry.SetEnvironmentErrorHandler(func(conversationID string) {
+		failedConversation = conversationID
+	})
 	firstLink := newFakeLink()
 	first, err := registry.Register(testRegisterParams("host-one", "/work/one"), firstLink)
 	require.NoError(t, err)
@@ -411,10 +753,15 @@ func TestCancelEnvironmentErrorAndConversationAffinity(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, RunStatusFailed, run.Status)
 	assert.Equal(t, "extension failed", run.Error)
+	assert.Equal(t, "conversation-one", failedConversation)
 	require.ErrorContains(t, registry.EnvironmentError(first.RunnerID, first.ConnectionID, first.Generation, protocol.EnvironmentErrorParams{
 		RunID: "another-run", Message: "stale",
 	}), "another run")
 	require.NoError(t, registry.CloseRun(t.Context(), "run-one", RunStatusFailed, errors.New("extension failed")))
+	run, ok = registry.Run("run-one")
+	require.True(t, ok)
+	assert.Equal(t, RunStatusFailed, run.Status)
+	assert.Equal(t, "extension failed", run.Error)
 
 	_, err = registry.OpenRun(t.Context(), first.RunnerID, testRunOpenParams("run-two", "conversation-one"))
 	require.NoError(t, err)
@@ -425,6 +772,84 @@ func TestCancelEnvironmentErrorAndConversationAffinity(t *testing.T) {
 	require.NoError(t, registry.CloseRun(t.Context(), "run-two", RunStatusCanceled, context.Canceled))
 	require.ErrorContains(t, registry.CancelRun(t.Context(), "missing", "no run"), "not found")
 	require.ErrorContains(t, registry.CloseRun(t.Context(), "missing", RunStatus("invalid"), nil), "invalid terminal")
+}
+
+func TestOpenRunClosesLeaseWhenEnvironmentFailsBeforeRunningCommit(t *testing.T) {
+	registry := newTestRegistry(t)
+	link := newFakeLink()
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), link)
+	require.NoError(t, err)
+	markRunnerReady(t, registry, registration)
+	var methods []string
+	link.mu.Lock()
+	link.call = func(_ context.Context, method string, params any, result any) error {
+		methods = append(methods, method)
+		switch method {
+		case protocol.MethodRunOpen:
+			request := params.(protocol.RunOpenParams)
+			manifest := protocol.Manifest{
+				ProtocolVersion:  protocol.Version,
+				RunnerID:         registration.RunnerID,
+				RunID:            request.RunID,
+				Generation:       registration.Generation,
+				WorkingDirectory: "/work/project",
+			}
+			digest, digestErr := protocol.ComputeManifestDigest(manifest)
+			require.NoError(t, digestErr)
+			manifest.Digest = digest
+			*result.(*protocol.Manifest) = manifest
+			require.NoError(t, registry.EnvironmentError(registration.RunnerID, registration.ConnectionID, registration.Generation, protocol.EnvironmentErrorParams{
+				RunID: request.RunID, Message: "extension failed during open",
+			}))
+		case protocol.MethodRunClose:
+			return nil
+		default:
+			return fmt.Errorf("unexpected method %s", method)
+		}
+		return nil
+	}
+	link.mu.Unlock()
+
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-one", "conversation-one"))
+	require.ErrorContains(t, err, "run failed while opening")
+	require.ErrorContains(t, err, "extension failed during open")
+	assert.Equal(t, []string{protocol.MethodRunOpen, protocol.MethodRunClose}, methods)
+	run, ok := registry.Run("run-one")
+	require.True(t, ok)
+	assert.Equal(t, RunStatusFailed, run.Status)
+	assert.Equal(t, "extension failed during open", run.Error)
+	runner, ok := registry.Runner(registration.RunnerID)
+	require.True(t, ok)
+	assert.Equal(t, RunnerStatusIdle, runner.Status)
+	assert.Empty(t, runner.ActiveRunID)
+}
+
+func TestCloseRunTreatsMissingRemoteLeaseAsAlreadyClosed(t *testing.T) {
+	registry := newTestRegistry(t)
+	link := newFakeLink()
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), link)
+	require.NoError(t, err)
+	configureManifestLink(t, link, registration)
+	markRunnerReady(t, registry, registration)
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-one", "conversation-one"))
+	require.NoError(t, err)
+	link.mu.Lock()
+	link.call = func(_ context.Context, method string, _ any, _ any) error {
+		if method == protocol.MethodRunClose {
+			return &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: "runner has no active run"}
+		}
+		return fmt.Errorf("unexpected method %s", method)
+	}
+	link.mu.Unlock()
+
+	require.NoError(t, registry.CloseRun(t.Context(), "run-one", RunStatusSucceeded, nil))
+	run, ok := registry.Run("run-one")
+	require.True(t, ok)
+	assert.Equal(t, RunStatusSucceeded, run.Status)
+	runner, ok := registry.Runner(registration.RunnerID)
+	require.True(t, ok)
+	assert.Equal(t, RunnerStatusIdle, runner.Status)
+	assert.Empty(t, runner.ActiveRunID)
 }
 
 func TestOpenRunFailureReleasesRunnerCapacity(t *testing.T) {
@@ -466,6 +891,132 @@ func TestOpenRunFailureReleasesRunnerCapacity(t *testing.T) {
 	require.NoError(t, err)
 	_, err = registry.OpenRun(t.Context(), notReady.RunnerID, testRunOpenParams("run-four", "conversation-four"))
 	require.ErrorContains(t, err, "initial heartbeat")
+}
+
+func TestOpenRunReconcilesAmbiguousTransportFailure(t *testing.T) {
+	registry := newTestRegistry(t)
+	link := newFakeLink()
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), link)
+	require.NoError(t, err)
+	markRunnerReady(t, registry, registration)
+	var methods []string
+	link.mu.Lock()
+	link.call = func(_ context.Context, method string, _ any, _ any) error {
+		methods = append(methods, method)
+		if method == protocol.MethodRunOpen {
+			return protocol.ErrPeerClosed
+		}
+		return nil
+	}
+	link.mu.Unlock()
+
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-one", "conversation-one"))
+	require.ErrorIs(t, err, protocol.ErrPeerClosed)
+	assert.Equal(t, []string{protocol.MethodRunOpen, protocol.MethodRunClose}, methods)
+	run, ok := registry.Run("run-one")
+	require.True(t, ok)
+	assert.Equal(t, RunStatusFailed, run.Status)
+	runner, ok := registry.Runner(registration.RunnerID)
+	require.True(t, ok)
+	assert.Equal(t, RunnerStatusIdle, runner.Status)
+	assert.False(t, link.isClosed())
+}
+
+func TestOpenRunClosesUncertainConnectionWhenCleanupCannotBeConfirmed(t *testing.T) {
+	registry := newTestRegistry(t)
+	link := newFakeLink()
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), link)
+	require.NoError(t, err)
+	markRunnerReady(t, registry, registration)
+	link.mu.Lock()
+	link.call = func(_ context.Context, _ string, _ any, _ any) error {
+		return protocol.ErrPeerClosed
+	}
+	link.mu.Unlock()
+
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-one", "conversation-one"))
+	require.ErrorContains(t, err, "open state is uncertain")
+	run, ok := registry.Run("run-one")
+	require.True(t, ok)
+	assert.Equal(t, RunStatusLost, run.Status)
+	assert.Contains(t, run.Error, "cleanup was not confirmed")
+	runner, ok := registry.Runner(registration.RunnerID)
+	require.True(t, ok)
+	assert.Equal(t, RunnerStatusError, runner.Status)
+	assert.Empty(t, runner.ActiveRunID)
+	assert.True(t, link.isClosed())
+}
+
+func TestOpenRunRPCRejectionDoesNotAttemptCleanup(t *testing.T) {
+	registry := newTestRegistry(t)
+	link := newFakeLink()
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), link)
+	require.NoError(t, err)
+	markRunnerReady(t, registry, registration)
+	var methods []string
+	link.mu.Lock()
+	link.call = func(_ context.Context, method string, _ any, _ any) error {
+		methods = append(methods, method)
+		return &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: "open rejected"}
+	}
+	link.mu.Unlock()
+
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-one", "conversation-one"))
+	require.ErrorContains(t, err, "open rejected")
+	assert.Equal(t, []string{protocol.MethodRunOpen}, methods)
+	run, ok := registry.Run("run-one")
+	require.True(t, ok)
+	assert.Equal(t, RunStatusFailed, run.Status)
+	assert.False(t, link.isClosed())
+}
+
+func TestOpenRunLocksEnvironmentProfileBeforeRunnerAvailability(t *testing.T) {
+	registry := newTestRegistry(t)
+	link := newFakeLink()
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), link)
+	require.NoError(t, err)
+	registry.Detach(registration.RunnerID, registration.ConnectionID, registration.Generation, nil)
+
+	params := testRunOpenParams("run-one", "conversation-one")
+	params.Agent.EnvironmentProfile = "runner-work"
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, params)
+	require.ErrorContains(t, err, "offline")
+
+	params.RunID = "run-two"
+	params.Agent.EnvironmentProfile = "runner-ci"
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, params)
+	require.ErrorContains(t, err, `locked to "runner-work"`)
+
+	params.Agent.EnvironmentProfile = "runner-work"
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, params)
+	require.ErrorContains(t, err, "offline")
+}
+
+func TestResolveConversationAffinityObservesExternalDeletion(t *testing.T) {
+	persistence := &testPersistence{}
+	registry, err := New(t.Context(), Options{
+		HeartbeatInterval: time.Hour,
+		HeartbeatTimeout:  2 * time.Hour,
+		NewID:             sequentialIDs(),
+		Persistence:       persistence,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = registry.Close() })
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), newFakeLink())
+	require.NoError(t, err)
+	require.NoError(t, registry.BindConversationWithEnvironmentProfile(t.Context(), "conversation-one", registration.RunnerID, "runner-work"))
+
+	affinity, ok, err := registry.ResolveConversationAffinity(t.Context(), "conversation-one")
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, ConversationAffinity{RunnerID: registration.RunnerID, EnvironmentProfile: "runner-work"}, affinity)
+
+	delete(persistence.state.Affinities, "conversation-one")
+	_, ok, err = registry.ResolveConversationAffinity(t.Context(), "conversation-one")
+	require.NoError(t, err)
+	assert.False(t, ok)
+	_, ok = registry.RunnerForConversation("conversation-one")
+	assert.False(t, ok)
 }
 
 func TestValidateManifestRejectsInvalidRunnerContracts(t *testing.T) {

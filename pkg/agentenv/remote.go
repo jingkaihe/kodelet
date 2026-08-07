@@ -109,11 +109,12 @@ func (e *RemoteEnvironment) Open(ctx context.Context, spec RunSpec) (Manifest, e
 		RunID:          runID,
 		ConversationID: spec.ConversationID,
 		Agent: protocol.AgentDescriptor{
-			Provider:   spec.Config.Provider,
-			Model:      spec.Config.Model,
-			Profile:    spec.Config.Profile,
-			RecipeName: spec.Config.RecipeName,
-			InvokedBy:  firstNonEmpty(spec.InvokedBy, "main"),
+			Provider:           spec.Config.Provider,
+			Model:              spec.Config.Model,
+			Profile:            spec.Config.Profile,
+			EnvironmentProfile: spec.EnvironmentProfile,
+			RecipeName:         spec.Config.RecipeName,
+			InvokedBy:          firstNonEmpty(spec.InvokedBy, "main"),
 		},
 		ClientCapabilities: e.clientCapabilities,
 		ReservedToolNames:  tools.ControlPlaneToolNames(),
@@ -123,7 +124,7 @@ func (e *RemoteEnvironment) Open(ctx context.Context, spec RunSpec) (Manifest, e
 		e.finishOpenFailure()
 		return Manifest{}, err
 	}
-	manifest, err := e.convertManifest(wireManifest)
+	manifest, err := e.convertManifest(wireManifest, spec.Config)
 	if err != nil {
 		closeCtx := context.WithoutCancel(ctx)
 		_ = e.controller.CloseRun(closeCtx, runID, runnerregistry.RunStatusFailed, err)
@@ -449,7 +450,7 @@ func (e *RemoteEnvironment) dispatchLifecycle(ctx context.Context, params protoc
 	return result, nil
 }
 
-func (e *RemoteEnvironment) convertManifest(wire protocol.Manifest) (Manifest, error) {
+func (e *RemoteEnvironment) convertManifest(wire protocol.Manifest, config llmtypes.Config) (Manifest, error) {
 	contexts := make(map[string]string, len(wire.ContextFiles))
 	for _, contextFile := range wire.ContextFiles {
 		path := strings.TrimSpace(contextFile.Path)
@@ -465,8 +466,9 @@ func (e *RemoteEnvironment) convertManifest(wire protocol.Manifest) (Manifest, e
 		contexts[path] = contextFile.Content
 	}
 
-	definitions := make([]ToolDefinition, 0, len(wire.Tools)+len(tools.ControlPlaneTools()))
-	for _, tool := range tools.ControlPlaneTools() {
+	controlPlaneTools := allowedControlPlaneTools(config)
+	definitions := make([]ToolDefinition, 0, len(wire.Tools)+len(controlPlaneTools))
+	for _, tool := range controlPlaneTools {
 		definitions = append(definitions, ToolDefinition{
 			Name:        tool.Name(),
 			Description: tool.Description(),
@@ -500,6 +502,31 @@ func (e *RemoteEnvironment) convertManifest(wire protocol.Manifest) (Manifest, e
 			SystemPromptArgs:    maps.Clone(wire.Config.SystemPromptArgs),
 		}).Clone(),
 	}, nil
+}
+
+func allowedControlPlaneTools(config llmtypes.Config) []tooltypes.Tool {
+	available := tools.ControlPlaneTools()
+	if len(config.AllowedTools) == 0 {
+		return available
+	}
+
+	allowed := make(map[string]struct{}, len(config.AllowedTools))
+	for _, name := range config.AllowedTools {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			allowed[name] = struct{}{}
+		}
+	}
+	filtered := make([]tooltypes.Tool, 0, len(available))
+	for _, tool := range available {
+		if tool == nil {
+			continue
+		}
+		if _, ok := allowed[tool.Name()]; ok {
+			filtered = append(filtered, tool)
+		}
+	}
+	return filtered
 }
 
 func rawToolInput(input string) (json.RawMessage, error) {
