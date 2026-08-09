@@ -142,6 +142,25 @@ type ChatRunner interface {
 	Run(ctx context.Context, req ChatRequest, sink ChatEventSink) (string, error)
 }
 
+// ConversationSource supplies persisted conversation summaries and normalized history to a chat client.
+type ConversationSource interface {
+	ListConversations(ctx context.Context, limit int) ([]convtypes.ConversationSummary, error)
+	LoadConversation(ctx context.Context, conversationID string) (ConversationHistory, error)
+}
+
+// ConversationHistory is the client-facing persisted state needed to resume a conversation.
+type ConversationHistory struct {
+	ID              string
+	CWD             string
+	Title           string
+	Provider        string
+	Profile         string
+	ReasoningEffort string
+	UpdatedAt       time.Time
+	Usage           llmtypes.Usage
+	Messages        []conversationservice.StreamableMessage
+}
+
 // ExtensionRuntimeProvider supplies extension runtimes for chat turns.
 type ExtensionRuntimeProvider interface {
 	Runtime(ctx context.Context, cwd string) (*extensions.Runtime, error)

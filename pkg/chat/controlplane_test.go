@@ -8,8 +8,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -55,6 +59,97 @@ func TestControlPlaneChatRunnerStreamsSelectedRunner(t *testing.T) {
 	assert.Equal(t, "conversation-1", conversationID)
 	require.Len(t, sink.events, 2)
 	assert.Equal(t, "hello", sink.events[1].Delta)
+}
+
+func TestControlPlaneChatRunnerStreamsWithoutSelectingRunner(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		var payload ChatRequest
+		require.NoError(t, json.NewDecoder(request.Body).Decode(&payload))
+		assert.Empty(t, payload.RunnerID)
+		assert.Equal(t, "conversation-bound", payload.ConversationID)
+		_, _ = w.Write([]byte("{\"kind\":\"conversation\",\"conversation_id\":\"conversation-bound\"}\n"))
+	}))
+	defer server.Close()
+
+	runner, err := NewControlPlaneChatRunner(server.URL, "", "")
+	require.NoError(t, err)
+	conversationID, err := runner.Run(t.Context(), ChatRequest{Message: "continue", ConversationID: "conversation-bound"}, &collectingChatSink{})
+
+	require.NoError(t, err)
+	assert.Equal(t, "conversation-bound", conversationID)
+}
+
+func TestControlPlaneChatRunnerListsAndLoadsRunnerConversations(t *testing.T) {
+	updatedAt := time.Date(2026, time.August, 9, 12, 35, 0, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		assert.Equal(t, "Bearer secret", request.Header.Get("Authorization"))
+		switch request.URL.Path {
+		case "/api/conversations":
+			assert.Equal(t, "200", request.URL.Query().Get("limit"))
+			assert.Equal(t, "updated", request.URL.Query().Get("sortBy"))
+			assert.Equal(t, "desc", request.URL.Query().Get("sortOrder"))
+			require.NoError(t, json.NewEncoder(w).Encode(conversations.ListConversationsResponse{
+				Conversations: []convtypes.ConversationSummary{
+					{ID: "conversation-bound", Summary: "Bound conversation", UpdatedAt: updatedAt, Metadata: map[string]any{RunnerIDMetadataKey: "runner-1"}},
+					{ID: "conversation-other", Summary: "Other runner", UpdatedAt: updatedAt.Add(-time.Minute), Metadata: map[string]any{RunnerIDMetadataKey: "runner-2"}},
+					{ID: "conversation-local", Summary: "Local", UpdatedAt: updatedAt.Add(-2 * time.Minute)},
+				},
+			}))
+		case "/api/conversations/conversation-bound":
+			result := tooltypes.StructuredToolResult{ToolName: "bash", Success: true, Timestamp: updatedAt}
+			require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+				"id":              "conversation-bound",
+				"updatedAt":       updatedAt,
+				"provider":        "OpenAI",
+				"cwd":             "/Users/jingkaihe/Workspace/kodelet",
+				"profile":         "deep",
+				"reasoningEffort": "max",
+				"summary":         "Bound conversation",
+				"usage":           map[string]any{"currentContextWindow": 42, "maxContextWindow": 100},
+				"messages": []map[string]any{
+					{"role": "user", "content": "how many cores?"},
+					{
+						"role":          "assistant",
+						"content":       "Eight cores.",
+						"thinkingTexts": []string{"Inspecting the host"},
+						"toolCalls": []map[string]any{{
+							"id":       "call-1",
+							"function": map[string]any{"name": "bash", "arguments": `{"command":"sysctl -n hw.ncpu"}`},
+						}},
+					},
+				},
+				"toolResults": map[string]tooltypes.StructuredToolResult{"call-1": result},
+			}))
+		default:
+			http.NotFound(w, request)
+		}
+	}))
+	defer server.Close()
+
+	runner, err := NewControlPlaneChatRunner(server.URL, "secret", "runner-1")
+	require.NoError(t, err)
+	summaries, err := runner.ListConversations(t.Context(), 200)
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+	assert.Equal(t, "conversation-bound", summaries[0].ID)
+	serverOnlyRunner, err := NewControlPlaneChatRunner(server.URL, "secret", "")
+	require.NoError(t, err)
+	allSummaries, err := serverOnlyRunner.ListConversations(t.Context(), 200)
+	require.NoError(t, err)
+	assert.Len(t, allSummaries, 3)
+
+	history, err := runner.LoadConversation(t.Context(), "conversation-bound")
+	require.NoError(t, err)
+	assert.Equal(t, "/Users/jingkaihe/Workspace/kodelet", history.CWD)
+	assert.Equal(t, "deep", history.Profile)
+	assert.Equal(t, "max", history.ReasoningEffort)
+	assert.Equal(t, 42, history.Usage.CurrentContextWindow)
+	require.Len(t, history.Messages, 5)
+	assert.Equal(t, "text", history.Messages[0].Kind)
+	assert.Equal(t, "thinking", history.Messages[1].Kind)
+	assert.Equal(t, "tool-use", history.Messages[2].Kind)
+	assert.Equal(t, "tool-result", history.Messages[3].Kind)
+	assert.Equal(t, "text", history.Messages[4].Kind)
 }
 
 func TestControlPlaneChatRunnerSettingsSteeringAndStop(t *testing.T) {
@@ -310,10 +405,15 @@ func TestControlPlaneChatRunnerUIFallbacksAndValidation(t *testing.T) {
 }
 
 func TestControlPlaneChatRunnerValidationAndMalformedResponses(t *testing.T) {
-	_, err := NewControlPlaneChatRunner("https://example.com", "", " ")
-	require.ErrorContains(t, err, "runner id is required")
+	serverOnly, err := NewControlPlaneChatRunner("https://example.com", "", " ")
+	require.NoError(t, err)
+	assert.Empty(t, serverOnly.runnerID)
 	var nilRunner *ControlPlaneChatRunner
 	_, err = nilRunner.Run(t.Context(), ChatRequest{}, &collectingChatSink{})
+	require.ErrorContains(t, err, "not initialized")
+	_, err = nilRunner.ListConversations(t.Context(), 10)
+	require.ErrorContains(t, err, "not initialized")
+	_, err = nilRunner.LoadConversation(t.Context(), "conversation")
 	require.ErrorContains(t, err, "not initialized")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {

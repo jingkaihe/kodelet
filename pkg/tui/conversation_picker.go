@@ -10,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/pkg/errors"
@@ -55,8 +56,15 @@ type conversationListMsg struct {
 	err       error
 }
 
-func loadConversationList(ctx context.Context, requestID int) tea.Cmd {
+func loadConversationListFromSource(ctx context.Context, requestID int, source chat.ConversationSource) tea.Cmd {
 	return func() tea.Msg {
+		if source != nil {
+			summaries, err := source.ListConversations(ctx, conversationPickerLimit)
+			if err != nil {
+				return conversationListMsg{requestID: requestID, err: errors.Wrap(err, "failed to list control-plane conversations")}
+			}
+			return conversationListMsg{requestID: requestID, summaries: summaries}
+		}
 		service, err := conversations.GetDefaultConversationService(ctx)
 		if err != nil {
 			return conversationListMsg{requestID: requestID, err: errors.Wrap(err, "failed to open conversation store")}
@@ -90,15 +98,15 @@ func (m *model) openConversationPicker(query string) tea.Cmd {
 	requestID := m.nextConversationListRequestID
 	m.conversationPicker = &conversationPickerState{
 		query:     strings.TrimSpace(query),
-		loading:   !m.remote,
+		loading:   !m.remote || m.conversationSource != nil,
 		requestID: requestID,
 	}
 	m.clampConversationPickerSelection()
 	focusTransition := tea.Sequence(m.extensionSurfaceFocusTransitionCommands(oldFocusKey, oldFocused, oldFocus)...)
-	if m.remote {
+	if m.remote && m.conversationSource == nil {
 		return focusTransition
 	}
-	return tea.Batch(loadConversationList(m.ctx, requestID), focusTransition)
+	return tea.Batch(loadConversationListFromSource(m.ctx, requestID, m.conversationSource), focusTransition)
 }
 
 func (m *model) applyConversationList(msg conversationListMsg) {
@@ -371,7 +379,7 @@ func (m *model) selectConversationPickerItem() tea.Cmd {
 	}
 	m.conversations[item.key] = state
 	_, activateCmd := m.activateConversation(item.key)
-	return tea.Batch(activateCmd, m.closeConversationPicker(), loadConversationHistory(m.ctx, item.key, item.id, state.requestedCWD))
+	return tea.Batch(activateCmd, m.closeConversationPicker(), loadConversationHistoryFromSource(m.ctx, item.key, item.id, state.requestedCWD, m.conversationSource))
 }
 
 func (m model) renderConversationPicker() string {

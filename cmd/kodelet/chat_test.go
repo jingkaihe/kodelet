@@ -47,7 +47,7 @@ func TestGetChatConfigFromFlags(t *testing.T) {
 	require.NoError(t, cmd.Flags().Set("runner", " runner-1 "))
 	require.NoError(t, cmd.Flags().Set("runner-profile", " workspace "))
 
-	config := getChatConfigFromFlags(context.Background(), cmd)
+	config := getChatConfigFromFlags(cmd)
 
 	assert.Equal(t, "conv-1", config.ResumeConvID)
 	assert.Equal(t, "/tmp/project", config.CWD)
@@ -63,7 +63,7 @@ func TestGetChatConfigFromFlagsLoadsAuthTokenFromEnvironment(t *testing.T) {
 	cmd := &cobra.Command{Use: "chat"}
 	cmd.Flags().String("auth-token", "", "")
 
-	config := getChatConfigFromFlags(context.Background(), cmd)
+	config := getChatConfigFromFlags(cmd)
 
 	assert.Equal(t, "control-plane-secret", config.AuthToken)
 }
@@ -80,7 +80,7 @@ func TestChatResumeShortFlag(t *testing.T) {
 
 	require.NoError(t, cmd.ParseFlags([]string{"-r", "conv-short"}))
 
-	config := getChatConfigFromFlags(context.Background(), cmd)
+	config := getChatConfigFromFlags(cmd)
 	assert.Equal(t, "conv-short", config.ResumeConvID)
 }
 
@@ -96,7 +96,7 @@ func TestChatNoToolsFlag(t *testing.T) {
 
 	require.NoError(t, cmd.Flags().Set("no-tools", "true"))
 
-	config := getChatConfigFromFlags(context.Background(), cmd)
+	config := getChatConfigFromFlags(cmd)
 	assert.True(t, config.NoTools)
 }
 
@@ -133,9 +133,10 @@ func TestPrepareRemoteChatRunnerSelectsIdleRunner(t *testing.T) {
 	defer server.Close()
 
 	runner, workspace, err := prepareRemoteChatRunner(t.Context(), &ChatConfig{
-		Runner:    "kodelet-gpu",
-		Server:    server.URL,
-		AuthToken: "secret",
+		Runner:       "kodelet-gpu",
+		Server:       server.URL,
+		AuthToken:    "secret",
+		ResumeConvID: "conversation-1",
 	})
 
 	require.NoError(t, err)
@@ -147,11 +148,25 @@ func TestPrepareRemoteChatRunnerRejectsLocalOnlyOptions(t *testing.T) {
 	_, _, err := prepareRemoteChatRunner(t.Context(), &ChatConfig{Runner: "runner-1", CWD: "/tmp/project"})
 	require.ErrorContains(t, err, "--cwd cannot be used")
 
-	_, _, err = prepareRemoteChatRunner(t.Context(), &ChatConfig{Runner: "runner-1", ResumeConvID: "conversation-1"})
-	require.ErrorContains(t, err, "resume is not enabled")
-
 	_, _, err = prepareRemoteChatRunner(t.Context(), &ChatConfig{Runner: "runner-1", NoTools: true})
 	require.ErrorContains(t, err, "local-only options")
+}
+
+func TestPrepareServerChatRunnerAndModeSelection(t *testing.T) {
+	cmd := &cobra.Command{Use: "chat"}
+	cmd.Flags().String("server", defaultRunnerServer, "")
+	config := &ChatConfig{Server: defaultRunnerServer}
+	assert.False(t, usesControlPlaneChat(cmd, config))
+	require.NoError(t, cmd.Flags().Set("server", "http://localhost:8080"))
+	assert.True(t, usesControlPlaneChat(cmd, config))
+
+	runner, err := prepareServerChatRunner(config)
+	require.NoError(t, err)
+	assert.NotNil(t, runner)
+	_, err = prepareServerChatRunner(&ChatConfig{Server: defaultRunnerServer, CWD: "/tmp/project"})
+	require.ErrorContains(t, err, "control plane owns")
+	_, err = prepareServerChatRunner(&ChatConfig{Server: defaultRunnerServer, NoTools: true})
+	require.ErrorContains(t, err, "local-only")
 }
 
 func TestPrepareRemoteChatSettingsUsesControlPlaneProfiles(t *testing.T) {
@@ -166,6 +181,7 @@ func TestPrepareRemoteChatSettingsUsesControlPlaneProfiles(t *testing.T) {
 			},
 			ReasoningEffort:        "high",
 			ReasoningEffortOptions: []string{"medium", "high"},
+			DefaultCWD:             "/control-plane/workspace",
 		}
 		if profile == "default" {
 			response.CurrentProfile = "default"
@@ -178,14 +194,37 @@ func TestPrepareRemoteChatSettingsUsesControlPlaneProfiles(t *testing.T) {
 	runner, err := chatpkg.NewControlPlaneChatRunner(server.URL, "", "runner-1")
 	require.NoError(t, err)
 
-	profile, options, settings, err := prepareRemoteChatSettings(t.Context(), runner, "work")
+	profile, options, settings, defaultCWD, err := prepareRemoteChatSettings(t.Context(), runner, "work")
 	require.NoError(t, err)
 	assert.Equal(t, "work", profile)
 	assert.Equal(t, []string{"default", "work"}, options)
 	assert.Equal(t, "high", settings["work"].ReasoningEffort)
 	assert.Equal(t, []string{"low", "medium"}, settings["default"].ReasoningEffortOptions)
+	assert.Equal(t, "/control-plane/workspace", defaultCWD)
 	require.NoError(t, validateRemoteReasoningEffort("high", settings["work"].ReasoningEffortOptions))
 	require.ErrorContains(t, validateRemoteReasoningEffort("max", settings["work"].ReasoningEffortOptions), "not allowed")
+}
+
+type staticChatConversationSource struct {
+	summaries []convtypes.ConversationSummary
+	err       error
+}
+
+func (s staticChatConversationSource) ListConversations(context.Context, int) ([]convtypes.ConversationSummary, error) {
+	return s.summaries, s.err
+}
+
+func (staticChatConversationSource) LoadConversation(context.Context, string) (chatpkg.ConversationHistory, error) {
+	return chatpkg.ConversationHistory{}, nil
+}
+
+func TestResolveFollowConversationUsesSelectedSource(t *testing.T) {
+	id, err := resolveFollowConversation(t.Context(), staticChatConversationSource{summaries: []convtypes.ConversationSummary{{ID: "conversation-latest"}}})
+	require.NoError(t, err)
+	assert.Equal(t, "conversation-latest", id)
+
+	_, err = resolveFollowConversation(t.Context(), staticChatConversationSource{})
+	require.ErrorContains(t, err, "no conversations")
 }
 
 func TestValidateChatResumeConversationRejectsMissingConversation(t *testing.T) {

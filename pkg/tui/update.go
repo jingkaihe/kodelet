@@ -250,9 +250,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.deferSubmitUntilHistory = false
 		queuedHistoryMessage := m.submitAfterHistoryLoad
 		m.submitAfterHistoryLoad = ""
-		reloadSlashCommands := wasInitialHistoryPending
-		m.extensionDiscoveryBlocked = wasInitialHistoryPending && msg.err != nil
+		reloadSlashCommands := wasInitialHistoryPending && !m.remote
+		m.extensionDiscoveryBlocked = m.remote || (wasInitialHistoryPending && msg.err != nil)
 		var reloadMessageHistory tea.Cmd
+		var remoteQueuedSubmit string
 		if msg.err != nil {
 			m.err = msg.err
 			m.status = "history load failed"
@@ -283,9 +284,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.reasoningPickerOpen = false
 			}
 			if strings.TrimSpace(msg.cwd) != "" {
-				reloadSlashCommands = reloadSlashCommands || (strings.TrimSpace(m.requestedCWD) == "" && strings.TrimSpace(m.cwd) != strings.TrimSpace(msg.cwd))
+				reloadSlashCommands = reloadSlashCommands || (!m.remote && strings.TrimSpace(m.requestedCWD) == "" && strings.TrimSpace(m.cwd) != strings.TrimSpace(msg.cwd))
 				m.cwd = strings.TrimSpace(msg.cwd)
-				reloadMessageHistory = m.updateMessageHistoryScope(m.cwd)
+				if !m.remote {
+					reloadMessageHistory = m.updateMessageHistoryScope(m.cwd)
+				}
 			}
 			if len(m.entries) == 0 && len(msg.entries) > 0 {
 				m.clearActiveAssistantEntry()
@@ -301,7 +304,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if reloadMessageHistory != nil {
 			cmds = append(cmds, reloadMessageHistory)
 		}
-		if msg.loaded && wasInitialHistoryPending && !m.running {
+		if msg.loaded && wasInitialHistoryPending && !m.running && m.remote {
+			remoteQueuedSubmit = strings.TrimSpace(queuedHistoryMessage)
+		} else if msg.loaded && wasInitialHistoryPending && !m.running {
 			m.extensionLifecyclePending = true
 			if strings.TrimSpace(queuedHistoryMessage) != "" {
 				m.submitAfterExtensionLifecycle = queuedHistoryMessage
@@ -315,6 +320,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			))
 		}
 		m.conversationState = currentState
+		if remoteQueuedSubmit != "" {
+			cmds = append(cmds, m.startConversationRun(state, remoteQueuedSubmit))
+		}
 		if active {
 			m.refreshViewport(true)
 		}

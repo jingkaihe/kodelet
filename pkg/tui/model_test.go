@@ -38,7 +38,7 @@ func TestNewModelSharesPersistentExtensionRuntimeManagerWithDefaultRunner(t *tes
 func TestNewModelRemoteModeKeepsDisplayWorkspaceWithoutLocalDiscovery(t *testing.T) {
 	runner := &recordingRunner{}
 	m := newModel(context.Background(), Config{
-		CWD:    "/runner/kodelet",
+		CWD:    "~/runner/kodelet",
 		Runner: runner,
 		Remote: true,
 	})
@@ -46,10 +46,36 @@ func TestNewModelRemoteModeKeepsDisplayWorkspaceWithoutLocalDiscovery(t *testing
 	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
 
 	assert.True(t, m.remote)
-	assert.Equal(t, "/runner/kodelet", m.cwd)
+	assert.Equal(t, "~/runner/kodelet", m.cwd)
 	assert.Empty(t, m.requestedCWD)
 	assert.Empty(t, m.messageHistoryScopeCWD)
 	assert.True(t, m.extensionDiscoveryBlocked)
+	assert.Equal(t, "~/runner/kodelet", displayCWD(m.cwd))
+	assert.ElementsMatch(t, []string{"goal", "new", "rename", "sessions", "theme"}, slashCommandNames(m.slashCommands))
+
+	m.createNewConversation()
+	assert.ElementsMatch(t, []string{"goal", "new", "rename", "sessions", "theme"}, slashCommandNames(m.slashCommands))
+}
+
+func TestDisplayCWDPreservesServerCompactedWorkspace(t *testing.T) {
+	assert.Equal(t, "~/workspace/kodelet", displayCWD("~/workspace/kodelet"))
+	assert.Equal(t, `~\workspace\kodelet`, displayCWD(`~\workspace\kodelet`))
+}
+
+func TestRemoteModelCanSelectTUISlashCommand(t *testing.T) {
+	m := newModel(context.Background(), Config{Runner: &recordingRunner{}, Remote: true})
+	t.Cleanup(m.cancel)
+	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+	m.textarea.SetValue("/sess")
+
+	assert.True(t, m.slashCommandSuggestionsOpen())
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	assert.Equal(t, "/sessions ", m.textarea.Value())
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	assert.NotNil(t, m.conversationPicker)
 }
 
 func TestNewModelProvidesIdleExtensionUIBroker(t *testing.T) {

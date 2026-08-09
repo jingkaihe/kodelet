@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/messagehistory"
+	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 )
 
@@ -55,6 +56,7 @@ func newConversationState(key, conversationID string, resumed bool, defaults con
 		reasoningEffortExplicit: defaults.reasoningEffortExplicit,
 		cwd:                     defaults.cwd,
 		requestedCWD:            defaults.requestedCWD,
+		slashCommands:           append([]slashcommands.Command(nil), defaults.slashCommands...),
 		slashCommandIndex:       -1,
 		autoFollow:              true,
 		status:                  status,

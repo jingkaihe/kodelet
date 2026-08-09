@@ -105,6 +105,7 @@ func newModel(ctx context.Context, config Config) model {
 		// default empty so relative overrides resolve against the process cwd.
 		runner = newDefaultChatRunner("", extensionRuntimes)
 	}
+	conversationSource, _ := runner.(chat.ConversationSource)
 	requestedCWD := strings.TrimSpace(config.CWD)
 	cwd := requestedCWD
 	if cwd == "" {
@@ -154,6 +155,10 @@ func newModel(ctx context.Context, config Config) model {
 	}
 	reasoningEffort = normalizeReasoningEffort(reasoningEffort)
 	reasoningEffortOptions = normalizeReasoningEffortOptions(reasoningEffortOptions, reasoningEffort)
+	var defaultSlashCommands []slashcommands.Command
+	if config.Remote {
+		defaultSlashCommands = withTUIBuiltInSlashCommands(nil)
+	}
 	defaults := conversationDefaults{
 		profile:                 profile,
 		profileOptions:          append([]string(nil), profileOptions...),
@@ -162,6 +167,7 @@ func newModel(ctx context.Context, config Config) model {
 		reasoningEffortExplicit: config.ReasoningEffortExplicit,
 		cwd:                     cwd,
 		requestedCWD:            requestedCWD,
+		slashCommands:           defaultSlashCommands,
 	}
 	conversationKey := conversationID
 	if conversationKey == "" {
@@ -177,6 +183,7 @@ func newModel(ctx context.Context, config Config) model {
 		ctx:                   mctx,
 		cancel:                cancel,
 		runner:                runner,
+		conversationSource:    conversationSource,
 		remote:                config.Remote,
 		environmentProfile:    strings.TrimSpace(config.EnvironmentProfile),
 		profileSettings:       cloneProfileSettings(config.ProfileSettings),
@@ -209,7 +216,7 @@ func (m model) Init() tea.Cmd {
 		textarea.Blink,
 		m.spinner.Tick,
 		waitForMsg(m.runCh),
-		loadConversationHistory(m.ctx, m.activeConversationKey, m.conversationID, m.requestedCWD),
+		loadConversationHistoryFromSource(m.ctx, m.activeConversationKey, m.conversationID, m.requestedCWD, m.conversationSource),
 	}
 	if !m.remote {
 		cmds = append(cmds, loadMessageHistoryForConversation(m.ctx, m.activeConversationKey, m.messageHistoryStore, m.messageHistoryScopeCWD))

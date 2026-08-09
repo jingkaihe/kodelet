@@ -42,11 +42,11 @@ var chatCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := cmd.Context()
-		config := getChatConfigFromFlags(ctx, cmd)
+		config := getChatConfigFromFlags(cmd)
 		var chatRunner chatpkg.ChatRunner
 		var remoteRunner *chatpkg.ControlPlaneChatRunner
-		remote := strings.TrimSpace(config.Runner) != ""
-		if remote {
+		remote := usesControlPlaneChat(cmd, config)
+		if strings.TrimSpace(config.Runner) != "" {
 			selectedRunner, workspace, remoteErr := prepareRemoteChatRunner(ctx, config)
 			if remoteErr != nil {
 				presenter.Error(remoteErr, "Failed to select remote runner")
@@ -55,9 +55,25 @@ var chatCmd = &cobra.Command{
 			remoteRunner = selectedRunner
 			chatRunner = remoteRunner
 			config.CWD = workspace
+		} else if remote {
+			selectedRunner, remoteErr := prepareServerChatRunner(config)
+			if remoteErr != nil {
+				presenter.Error(remoteErr, "Failed to connect to control plane")
+				os.Exit(1)
+			}
+			remoteRunner = selectedRunner
+			chatRunner = remoteRunner
 		} else if strings.TrimSpace(config.RunnerProfile) != "" {
 			presenter.Error(errors.New("--runner-profile requires --runner"), "Invalid remote runner configuration")
 			os.Exit(1)
+		}
+		if config.Follow {
+			conversationID, followErr := resolveFollowConversation(ctx, remoteRunner)
+			if followErr != nil {
+				presenter.Warning("No conversations found, starting a new conversation")
+			} else {
+				config.ResumeConvID = conversationID
+			}
 		}
 
 		if !remote {
@@ -72,9 +88,11 @@ var chatCmd = &cobra.Command{
 		if reasoningEffortExplicit {
 			reasoningEffort, _ = cmd.Flags().GetString("reasoning-effort")
 		}
-		if err := validateChatResumeConversation(ctx, config.ResumeConvID, reasoningEffort); err != nil {
-			presenter.Error(err, "Failed to resume conversation")
-			os.Exit(1)
+		if !remote {
+			if err := validateChatResumeConversation(ctx, config.ResumeConvID, reasoningEffort); err != nil {
+				presenter.Error(err, "Failed to resume conversation")
+				os.Exit(1)
+			}
 		}
 		logger.SetLogOutput(io.Discard)
 		stdlog.SetOutput(io.Discard)
@@ -88,7 +106,7 @@ var chatCmd = &cobra.Command{
 			if cmd.Flags().Changed("profile") {
 				requestedProfile = profile
 			}
-			remoteProfile, options, settings, settingsErr := prepareRemoteChatSettings(ctx, remoteRunner, requestedProfile)
+			remoteProfile, options, settings, defaultCWD, settingsErr := prepareRemoteChatSettings(ctx, remoteRunner, requestedProfile)
 			if settingsErr != nil {
 				presenter.Error(settingsErr, "Failed to load control-plane chat settings")
 				os.Exit(1)
@@ -96,6 +114,9 @@ var chatCmd = &cobra.Command{
 			profile = remoteProfile
 			profileOptions = options
 			profileSettings = settings
+			if strings.TrimSpace(config.CWD) == "" {
+				config.CWD = defaultCWD
+			}
 			if selected, ok := remoteProfileSettings(settings, profile); ok {
 				reasoningEffortOptions = selected.ReasoningEffortOptions
 				if !reasoningEffortExplicit {
@@ -151,11 +172,11 @@ func init() {
 	chatCmd.Flags().Bool("no-tools", defaults.NoTools, "Disable all tools (for simple query-response usage)")
 	chatCmd.Flags().String("runner", defaults.Runner, "Use a remote runner by ID, ID prefix, or display name")
 	chatCmd.Flags().String("runner-profile", defaults.RunnerProfile, "Runner-local environment profile used with --runner (blank uses the runner base configuration)")
-	chatCmd.Flags().String("server", defaultRunnerServer, "Control-plane URL used with --runner")
-	chatCmd.Flags().String("auth-token", "", "Control-plane API authentication token used with --runner (or KODELET_AUTH_TOKEN)")
+	chatCmd.Flags().String("server", defaultRunnerServer, "Run the TUI against a control plane; use with --runner to select a runner for new conversations")
+	chatCmd.Flags().String("auth-token", "", "Control-plane API authentication token (or KODELET_AUTH_TOKEN)")
 }
 
-func getChatConfigFromFlags(ctx context.Context, cmd *cobra.Command) *ChatConfig {
+func getChatConfigFromFlags(cmd *cobra.Command) *ChatConfig {
 	config := NewChatConfig()
 
 	if resumeConvID, err := cmd.Flags().GetString("resume"); err == nil {
@@ -174,11 +195,6 @@ func getChatConfigFromFlags(ctx context.Context, cmd *cobra.Command) *ChatConfig
 		if config.ResumeConvID != "" {
 			presenter.Error(errors.New("conflicting flags"), "--follow and --resume cannot be used together")
 			os.Exit(1)
-		}
-		var err error
-		config.ResumeConvID, err = conversations.GetMostRecentConversationID(ctx)
-		if err != nil {
-			presenter.Warning("No conversations found, starting a new conversation")
 		}
 	}
 	if noExtensions, err := cmd.Flags().GetBool("no-extensions"); err == nil {
@@ -204,9 +220,6 @@ func getChatConfigFromFlags(ctx context.Context, cmd *cobra.Command) *ChatConfig
 func prepareRemoteChatRunner(ctx context.Context, config *ChatConfig) (*chatpkg.ControlPlaneChatRunner, string, error) {
 	if config == nil || strings.TrimSpace(config.Runner) == "" {
 		return nil, "", errors.New("runner selector is required")
-	}
-	if config.ResumeConvID != "" || config.Follow {
-		return nil, "", errors.New("remote TUI resume is not enabled yet; start a new conversation with --runner")
 	}
 	if strings.TrimSpace(config.CWD) != "" {
 		return nil, "", errors.New("--cwd cannot be used with --runner because the runner owns its workspace")
@@ -241,13 +254,47 @@ func prepareRemoteChatRunner(ctx context.Context, config *ChatConfig) (*chatpkg.
 	return runner, selected.Workspace.Path, nil
 }
 
-func prepareRemoteChatSettings(ctx context.Context, runner *chatpkg.ControlPlaneChatRunner, requestedProfile string) (string, []string, map[string]tui.ProfileSettings, error) {
+func prepareServerChatRunner(config *ChatConfig) (*chatpkg.ControlPlaneChatRunner, error) {
+	if config == nil {
+		return nil, errors.New("chat configuration is required")
+	}
+	if strings.TrimSpace(config.CWD) != "" {
+		return nil, errors.New("--cwd cannot be used with --server because the control plane owns the working directory")
+	}
+	if config.NoExtensions || config.NoTools {
+		return nil, errors.New("--no-extensions and --no-tools are local-only options and cannot be used with --server")
+	}
+	if strings.TrimSpace(config.RunnerProfile) != "" {
+		return nil, errors.New("--runner-profile requires --runner")
+	}
+	return chatpkg.NewControlPlaneChatRunner(config.Server, config.AuthToken, "")
+}
+
+func usesControlPlaneChat(cmd *cobra.Command, config *ChatConfig) bool {
+	return config != nil && (strings.TrimSpace(config.Runner) != "" || (cmd != nil && cmd.Flags().Changed("server")))
+}
+
+func resolveFollowConversation(ctx context.Context, source chatpkg.ConversationSource) (string, error) {
+	if source == nil {
+		return conversations.GetMostRecentConversationID(ctx)
+	}
+	summaries, err := source.ListConversations(ctx, 1)
+	if err != nil {
+		return "", err
+	}
+	if len(summaries) == 0 || strings.TrimSpace(summaries[0].ID) == "" {
+		return "", errors.New("no conversations found")
+	}
+	return strings.TrimSpace(summaries[0].ID), nil
+}
+
+func prepareRemoteChatSettings(ctx context.Context, runner *chatpkg.ControlPlaneChatRunner, requestedProfile string) (string, []string, map[string]tui.ProfileSettings, string, error) {
 	if runner == nil {
-		return "", nil, nil, errors.New("control-plane chat runner is required")
+		return "", nil, nil, "", errors.New("control-plane chat runner is required")
 	}
 	selected, err := runner.ChatSettings(ctx, requestedProfile)
 	if err != nil {
-		return "", nil, nil, err
+		return "", nil, nil, "", err
 	}
 	profile := strings.TrimSpace(selected.CurrentProfile)
 	if profile == "" {
@@ -265,7 +312,7 @@ func prepareRemoteChatSettings(ctx context.Context, runner *chatpkg.ControlPlane
 		if !strings.EqualFold(name, profile) {
 			profileSettings, err = runner.ChatSettings(ctx, name)
 			if err != nil {
-				return "", nil, nil, errors.Wrapf(err, "failed to load profile %s", name)
+				return "", nil, nil, "", errors.Wrapf(err, "failed to load profile %s", name)
 			}
 		}
 		settings[name] = tui.ProfileSettings{
@@ -280,7 +327,7 @@ func prepareRemoteChatSettings(ctx context.Context, runner *chatpkg.ControlPlane
 			ReasoningEffortOptions: append([]string(nil), selected.ReasoningEffortOptions...),
 		}
 	}
-	return profile, options, settings, nil
+	return profile, options, settings, strings.TrimSpace(selected.DefaultCWD), nil
 }
 
 func remoteProfileSettings(settings map[string]tui.ProfileSettings, profile string) (tui.ProfileSettings, bool) {

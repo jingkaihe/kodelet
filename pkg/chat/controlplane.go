@@ -8,17 +8,22 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/runner/controlplaneurl"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
 )
 
 const maxControlPlaneChatEventSize = 16 << 20
 
-// ControlPlaneChatRunner streams chat turns through kodelet serve for one selected runner.
+// ControlPlaneChatRunner streams chat turns and conversation history through kodelet serve.
 type ControlPlaneChatRunner struct {
 	baseURL   string
 	chatURL   string
@@ -43,7 +48,7 @@ type ControlPlaneChatSettings struct {
 	DefaultCWD             string                      `json:"defaultCWD,omitempty"`
 }
 
-// NewControlPlaneChatRunner creates a TUI-compatible remote chat transport.
+// NewControlPlaneChatRunner creates a TUI-compatible control-plane transport with an optional runner selection.
 func NewControlPlaneChatRunner(server, authToken, runnerID string) (*ControlPlaneChatRunner, error) {
 	baseURL, err := controlPlaneBaseURL(server)
 	if err != nil {
@@ -54,9 +59,6 @@ func NewControlPlaneChatRunner(server, authToken, runnerID string) (*ControlPlan
 		return nil, err
 	}
 	runnerID = strings.TrimSpace(runnerID)
-	if runnerID == "" {
-		return nil, errors.New("runner id is required")
-	}
 	return &ControlPlaneChatRunner{
 		baseURL:   baseURL,
 		chatURL:   chatURL,
@@ -74,7 +76,9 @@ func (r *ControlPlaneChatRunner) Run(ctx context.Context, request ChatRequest, s
 	if sink == nil {
 		return "", errors.New("chat event sink is required")
 	}
-	request.RunnerID = r.runnerID
+	if r.runnerID != "" {
+		request.RunnerID = r.runnerID
+	}
 	request.CWD = ""
 	request.ClientCapabilities = &ChatClientCapabilities{
 		InteractiveUI: controlPlaneSupportsInteractiveUI(ctx),
@@ -135,6 +139,219 @@ func (r *ControlPlaneChatRunner) Run(ctx context.Context, request ChatRequest, s
 		return conversationID, errors.Wrap(err, "failed to read control-plane chat stream")
 	}
 	return conversationID, streamErr
+}
+
+// ListConversations returns control-plane conversations visible to this client.
+func (r *ControlPlaneChatRunner) ListConversations(ctx context.Context, limit int) ([]convtypes.ConversationSummary, error) {
+	if r == nil || r.client == nil {
+		return nil, errors.New("control-plane chat runner is not initialized")
+	}
+	endpoint, err := controlPlaneEndpointURL(r.baseURL, "api", "conversations")
+	if err != nil {
+		return nil, err
+	}
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to parse control-plane conversations URL")
+	}
+	query := parsed.Query()
+	if limit > 0 {
+		query.Set("limit", strconv.Itoa(limit))
+	}
+	query.Set("sortBy", "updated")
+	query.Set("sortOrder", "desc")
+	parsed.RawQuery = query.Encode()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create control-plane conversations request")
+	}
+	r.authorize(request)
+	response, err := r.client.Do(request)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to list control-plane conversations")
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, controlPlaneResponseError(response)
+	}
+	var result conversations.ListConversationsResponse
+	if err := json.NewDecoder(io.LimitReader(response.Body, 8<<20)).Decode(&result); err != nil {
+		return nil, errors.Wrap(err, "failed to decode control-plane conversations")
+	}
+	if r.runnerID == "" {
+		return result.Conversations, nil
+	}
+	filtered := make([]convtypes.ConversationSummary, 0, len(result.Conversations))
+	for _, summary := range result.Conversations {
+		runnerID, _ := summary.Metadata[RunnerIDMetadataKey].(string)
+		if strings.TrimSpace(runnerID) == r.runnerID {
+			filtered = append(filtered, summary)
+		}
+	}
+	return filtered, nil
+}
+
+// LoadConversation returns normalized history from the control plane.
+func (r *ControlPlaneChatRunner) LoadConversation(ctx context.Context, conversationID string) (ConversationHistory, error) {
+	if r == nil || r.client == nil {
+		return ConversationHistory{}, errors.New("control-plane chat runner is not initialized")
+	}
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
+		return ConversationHistory{}, errors.New("conversation id is required")
+	}
+	endpoint, err := controlPlaneEndpointURL(r.baseURL, "api", "conversations", conversationID)
+	if err != nil {
+		return ConversationHistory{}, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return ConversationHistory{}, errors.Wrap(err, "failed to create control-plane conversation request")
+	}
+	r.authorize(request)
+	response, err := r.client.Do(request)
+	if err != nil {
+		return ConversationHistory{}, errors.Wrap(err, "failed to load control-plane conversation")
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return ConversationHistory{}, controlPlaneResponseError(response)
+	}
+	var result controlPlaneConversationResponse
+	if err := json.NewDecoder(io.LimitReader(response.Body, 16<<20)).Decode(&result); err != nil {
+		return ConversationHistory{}, errors.Wrap(err, "failed to decode control-plane conversation")
+	}
+	messages, err := normalizeControlPlaneConversationMessages(result.Messages, result.ToolResults)
+	if err != nil {
+		return ConversationHistory{}, err
+	}
+	title := strings.TrimSpace(result.Summary)
+	if title == "" {
+		title = conversationID
+	}
+	return ConversationHistory{
+		ID:              firstNonEmptyString(result.ID, conversationID),
+		CWD:             strings.TrimSpace(result.CWD),
+		Title:           title,
+		Provider:        strings.TrimSpace(result.Provider),
+		Profile:         strings.TrimSpace(result.Profile),
+		ReasoningEffort: strings.TrimSpace(result.ReasoningEffort),
+		UpdatedAt:       result.UpdatedAt,
+		Usage:           result.Usage,
+		Messages:        messages,
+	}, nil
+}
+
+type controlPlaneConversationResponse struct {
+	ID              string                                    `json:"id"`
+	UpdatedAt       time.Time                                 `json:"updatedAt"`
+	Provider        string                                    `json:"provider"`
+	CWD             string                                    `json:"cwd"`
+	Profile         string                                    `json:"profile"`
+	ReasoningEffort string                                    `json:"reasoningEffort"`
+	Summary         string                                    `json:"summary"`
+	Usage           llmtypes.Usage                            `json:"usage"`
+	Messages        []controlPlaneConversationMessage         `json:"messages"`
+	ToolResults     map[string]tooltypes.StructuredToolResult `json:"toolResults"`
+}
+
+type controlPlaneConversationMessage struct {
+	Role          string                 `json:"role"`
+	Content       json.RawMessage        `json:"content"`
+	ToolCalls     []controlPlaneToolCall `json:"toolCalls"`
+	ThinkingText  string                 `json:"thinkingText"`
+	ThinkingTexts []string               `json:"thinkingTexts"`
+}
+
+type controlPlaneToolCall struct {
+	ID       string                       `json:"id"`
+	Function controlPlaneToolCallFunction `json:"function"`
+}
+
+type controlPlaneToolCallFunction struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+func normalizeControlPlaneConversationMessages(messages []controlPlaneConversationMessage, toolResults map[string]tooltypes.StructuredToolResult) ([]conversations.StreamableMessage, error) {
+	result := make([]conversations.StreamableMessage, 0, len(messages))
+	for _, message := range messages {
+		role := strings.TrimSpace(message.Role)
+		content, err := controlPlaneMessageText(message.Content)
+		if err != nil {
+			return nil, err
+		}
+		if role == "user" {
+			if strings.TrimSpace(content) != "" {
+				result = append(result, conversations.StreamableMessage{Kind: "text", Role: role, Content: content})
+			}
+			continue
+		}
+
+		thinkingTexts := message.ThinkingTexts
+		if len(thinkingTexts) == 0 && strings.TrimSpace(message.ThinkingText) != "" {
+			thinkingTexts = []string{message.ThinkingText}
+		}
+		for _, thinking := range thinkingTexts {
+			if thinking = strings.TrimSpace(thinking); thinking != "" {
+				result = append(result, conversations.StreamableMessage{Kind: "thinking", Role: "assistant", Content: thinking})
+			}
+		}
+		for _, toolCall := range message.ToolCalls {
+			toolCallID := strings.TrimSpace(toolCall.ID)
+			toolName := strings.TrimSpace(toolCall.Function.Name)
+			result = append(result, conversations.StreamableMessage{
+				Kind:       "tool-use",
+				Role:       "assistant",
+				ToolCallID: toolCallID,
+				ToolName:   toolName,
+				Input:      firstNonEmptyString(toolCall.Function.Arguments, "{}"),
+			})
+			if toolResult, ok := toolResults[toolCallID]; ok {
+				payload, err := json.Marshal(toolResult)
+				if err != nil {
+					return nil, errors.Wrap(err, "failed to encode control-plane tool result")
+				}
+				result = append(result, conversations.StreamableMessage{
+					Kind:       "tool-result",
+					Role:       "user",
+					Content:    string(payload),
+					ToolCallID: toolCallID,
+					ToolName:   firstNonEmptyString(toolResult.ToolName, toolName),
+				})
+			}
+		}
+		if strings.TrimSpace(content) != "" {
+			result = append(result, conversations.StreamableMessage{Kind: "text", Role: "assistant", Content: content})
+		}
+	}
+	return result, nil
+}
+
+func controlPlaneMessageText(content json.RawMessage) (string, error) {
+	if len(bytes.TrimSpace(content)) == 0 || bytes.Equal(bytes.TrimSpace(content), []byte("null")) {
+		return "", nil
+	}
+	var text string
+	if err := json.Unmarshal(content, &text); err == nil {
+		return text, nil
+	}
+	var blocks []ChatContentBlock
+	if err := json.Unmarshal(content, &blocks); err != nil {
+		return "", errors.Wrap(err, "failed to decode control-plane conversation message content")
+	}
+	parts := make([]string, 0, len(blocks))
+	for _, block := range blocks {
+		switch strings.TrimSpace(block.Type) {
+		case "text", "input_text":
+			if strings.TrimSpace(block.Text) != "" {
+				parts = append(parts, block.Text)
+			}
+		case "image", "input_image", "image_url":
+			parts = append(parts, "[Image attachment]")
+		}
+	}
+	return strings.Join(parts, "\n"), nil
 }
 
 // ChatSettings fetches control-plane model profiles and reasoning policy.

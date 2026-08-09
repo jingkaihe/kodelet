@@ -119,6 +119,12 @@ func displayCWD(cwd string) string {
 	if cwd == "" {
 		return "~"
 	}
+	// A control plane may return a home-compacted path for display. Treat that
+	// path as opaque because expanding it on the client would use the client's
+	// home directory rather than the host that owns the workspace.
+	if cwd == "~" || strings.HasPrefix(cwd, "~/") || strings.HasPrefix(cwd, `~\`) {
+		return cwd
+	}
 	if abs, err := filepath.Abs(cwd); err == nil {
 		cwd = abs
 	}

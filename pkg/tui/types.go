@@ -192,6 +192,7 @@ type conversationDefaults struct {
 	reasoningEffortExplicit bool
 	cwd                     string
 	requestedCWD            string
+	slashCommands           []slashcommands.Command
 }
 
 type conversationRun struct {
@@ -211,6 +212,7 @@ type model struct {
 	ctx                context.Context
 	cancel             context.CancelFunc
 	runner             chat.ChatRunner
+	conversationSource chat.ConversationSource
 	remote             bool
 	environmentProfile string
 	profileSettings    map[string]ProfileSettings

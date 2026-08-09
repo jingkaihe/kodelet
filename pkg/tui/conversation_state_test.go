@@ -13,12 +13,29 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/jingkaihe/kodelet/pkg/chat"
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/messagehistory"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type conversationSourceRunner struct {
+	recordingRunner
+	summaries []convtypes.ConversationSummary
+	history   chat.ConversationHistory
+	listErr   error
+	loadErr   error
+}
+
+func (r *conversationSourceRunner) ListConversations(context.Context, int) ([]convtypes.ConversationSummary, error) {
+	return r.summaries, r.listErr
+}
+
+func (r *conversationSourceRunner) LoadConversation(context.Context, string) (chat.ConversationHistory, error) {
+	return r.history, r.loadErr
+}
 
 func TestConversationSwitchPreservesDraftAndTranscript(t *testing.T) {
 	m := newModel(context.Background(), Config{})
@@ -123,6 +140,100 @@ func TestRemoteConversationPickerDoesNotLoadClientLocalSessions(t *testing.T) {
 		_, exists := m.conversations[item.key]
 		assert.True(t, exists)
 	}
+}
+
+func TestRemoteConversationPickerLoadsControlPlaneSessions(t *testing.T) {
+	runner := &conversationSourceRunner{summaries: []convtypes.ConversationSummary{{
+		ID:           "conversation-remote",
+		FirstMessage: "Remote conversation",
+		CWD:          "/Users/jingkaihe/Workspace/kodelet",
+		UpdatedAt:    time.Now(),
+	}}}
+	m := newModel(context.Background(), Config{Remote: true, Runner: runner})
+	t.Cleanup(m.cancel)
+	m.openConversationPicker("")
+
+	require.NotNil(t, m.conversationPicker)
+	assert.True(t, m.conversationPicker.loading)
+	msg, ok := loadConversationListFromSource(m.ctx, m.conversationPicker.requestID, m.conversationSource)().(conversationListMsg)
+	require.True(t, ok)
+	m.applyConversationList(msg)
+
+	assert.False(t, m.conversationPicker.loading)
+	items := m.filteredConversationPickerItems()
+	assert.True(t, items[0].isNew)
+	assert.Contains(t, itemConversationIDs(items), "conversation-remote")
+}
+
+func TestRemoteConversationHistoryLoadsFromControlPlaneSource(t *testing.T) {
+	updatedAt := time.Now()
+	runner := &conversationSourceRunner{history: chat.ConversationHistory{
+		ID:              "conversation-remote",
+		CWD:             "/Users/jingkaihe/Workspace/kodelet",
+		Title:           "Remote conversation",
+		Provider:        "OpenAI",
+		Profile:         "deep",
+		ReasoningEffort: "max",
+		UpdatedAt:       updatedAt,
+		Messages: []conversations.StreamableMessage{
+			{Kind: "text", Role: "user", Content: "old prompt"},
+			{Kind: "text", Role: "assistant", Content: "old answer"},
+		},
+	}}
+
+	msg, ok := loadConversationHistoryFromSource(t.Context(), "conversation-remote", "conversation-remote", "", runner)().(initialHistoryMsg)
+	require.True(t, ok)
+	require.NoError(t, msg.err)
+	assert.True(t, msg.loaded)
+	assert.Equal(t, runner.history.CWD, msg.cwd)
+	assert.Equal(t, "deep", msg.profile)
+	assert.Equal(t, "max", msg.reasoningEffort)
+	assert.Equal(t, updatedAt, msg.updatedAt)
+	require.Len(t, msg.entries, 2)
+	assert.Equal(t, "old prompt", msg.entries[0].content)
+	assert.Equal(t, "old answer", msg.entries[1].blocks[0].text)
+}
+
+func TestRemoteHistoryQueuesSubmitWithoutLocalExtensionLifecycle(t *testing.T) {
+	runner := &conversationSourceRunner{}
+	runner.conversationID = "conversation-remote"
+	m := newModel(context.Background(), Config{ConversationID: "conversation-remote", Remote: true, Runner: runner})
+	t.Cleanup(m.cancel)
+	m.submitAfterHistoryLoad = "continue remotely"
+
+	updated, cmd := m.Update(initialHistoryMsg{
+		conversationKey: m.activeConversationKey,
+		conversationID:  "conversation-remote",
+		loaded:          true,
+		cwd:             "/Users/jingkaihe/Workspace/kodelet",
+		entries:         []chatEntry{{kind: entryUser, content: "old prompt"}},
+	})
+	m = updated.(model)
+	require.NotNil(t, cmd)
+	assert.False(t, m.extensionLifecyclePending)
+	assert.True(t, m.running)
+
+	if batch, ok := cmd().(tea.BatchMsg); ok {
+		for _, child := range batch {
+			if child != nil {
+				_ = child()
+			}
+		}
+	}
+	_, ok := receiveRunMsg(t, m.runCh).(chatEventMsg)
+	require.True(t, ok)
+	assert.Equal(t, "continue remotely", runner.req.Message)
+	assert.Equal(t, "conversation-remote", runner.req.ConversationID)
+}
+
+func itemConversationIDs(items []conversationPickerItem) []string {
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		if item.id != "" {
+			ids = append(ids, item.id)
+		}
+	}
+	return ids
 }
 
 func TestConversationPickerFiltersAndLoadsPersistedConversation(t *testing.T) {

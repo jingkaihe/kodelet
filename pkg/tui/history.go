@@ -16,12 +16,33 @@ func loadInitialHistory(ctx context.Context, conversationID, requestedCWD string
 }
 
 func loadConversationHistory(ctx context.Context, conversationKey, conversationID, requestedCWD string) tea.Cmd {
+	return loadConversationHistoryFromSource(ctx, conversationKey, conversationID, requestedCWD, nil)
+}
+
+func loadConversationHistoryFromSource(ctx context.Context, conversationKey, conversationID, requestedCWD string, source chat.ConversationSource) tea.Cmd {
 	return func() tea.Msg {
 		result := initialHistoryMsg{
 			conversationKey: strings.TrimSpace(conversationKey),
 			conversationID:  strings.TrimSpace(conversationID),
 		}
 		if strings.TrimSpace(conversationID) == "" {
+			return result
+		}
+		if source != nil {
+			history, err := source.LoadConversation(ctx, conversationID)
+			if err != nil {
+				result.err = errors.Wrap(err, "failed to load control-plane conversation")
+				return result
+			}
+			result.loaded = true
+			result.entries = entriesFromHistory(history.Messages)
+			result.usage = history.Usage
+			result.cwd = strings.TrimSpace(history.CWD)
+			result.title = strings.TrimSpace(history.Title)
+			result.updatedAt = history.UpdatedAt
+			result.profile = strings.TrimSpace(history.Profile)
+			result.provider = strings.TrimSpace(history.Provider)
+			result.reasoningEffort = strings.TrimSpace(history.ReasoningEffort)
 			return result
 		}
 
