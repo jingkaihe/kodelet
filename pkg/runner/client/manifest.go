@@ -16,6 +16,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
+	"github.com/jingkaihe/kodelet/pkg/sysprompt"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -107,6 +108,7 @@ func buildWireManifest(
 	if err != nil {
 		return runnerpayload.Manifest{}, err
 	}
+	systemInformation := sysprompt.CollectSystemInformation(local.WorkingDirectory)
 	manifest := runnerpayload.Manifest{
 		ProtocolVersion:  protocol.Version,
 		RunnerID:         runnerID,
@@ -124,6 +126,7 @@ func buildWireManifest(
 			SystemPromptPath:    systemPromptPath,
 			SystemPromptContent: systemPromptContent,
 			SystemPromptArgs:    maps.Clone(config.SyspromptArgs),
+			SystemInformation:   systemInformation.Clone(),
 		},
 		ExtensionGeneration: 1,
 		Capabilities: runnerpayload.EnvironmentCapabilities{

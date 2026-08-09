@@ -14,6 +14,23 @@ type AnthropicAPIAccess string
 // ToolMode defines how the agent can interact with project files.
 type ToolMode string
 
+// SystemInformation is the model-facing execution environment metadata pinned for a run.
+type SystemInformation struct {
+	IsGitRepo bool   `json:"isGitRepo"`
+	Platform  string `json:"platform"`
+	OSVersion string `json:"osVersion"`
+	Date      string `json:"date"`
+}
+
+// Clone returns a copy safe for retention by another run-scoped component.
+func (i *SystemInformation) Clone() *SystemInformation {
+	if i == nil {
+		return nil
+	}
+	cloned := *i
+	return &cloned
+}
+
 const (
 	// MinBashTimeout is the minimum timeout a bash tool call can request.
 	MinBashTimeout = 10 * time.Second
@@ -66,6 +83,7 @@ type Config struct {
 	SyspromptContent        string             `mapstructure:"-" json:"-" yaml:"-"`                                                            // SyspromptContent is an in-memory custom system prompt supplied by an agent environment
 	SyspromptInline         bool               `mapstructure:"-" json:"-" yaml:"-"`                                                            // SyspromptInline distinguishes an intentionally empty in-memory custom template
 	SyspromptArgs           map[string]string  `mapstructure:"sysprompt_args" json:"sysprompt_args,omitempty" yaml:"sysprompt_args,omitempty"` // SyspromptArgs are custom template arguments for system prompt rendering
+	SystemInformation       *SystemInformation `mapstructure:"-" json:"-" yaml:"-"`                                                            // SystemInformation is transient model-facing metadata supplied by the active agent environment
 	Bash                    *BashConfig        `mapstructure:"bash" json:"bash,omitempty" yaml:"bash,omitempty"`                               // Bash contains bash tool configuration
 
 	// Profile system configuration

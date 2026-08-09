@@ -271,6 +271,7 @@ The mechanism used to provision the environment is deliberately unspecified.
 | Goals, steering, and metadata | Owns | Participates only through lifecycle context |
 | Runner registration and status | Stores | Connects and heartbeats |
 | `AGENTS.md` and context discovery | Consumes pinned snapshot | Discovers and snapshots |
+| Model-facing system information (git status, OS/version, date) | Consumes pinned snapshot | Discovers and snapshots |
 | Runner-global and workspace skills | Consumes definitions/results | Discovers and executes |
 | Workspace tools | Routes model calls | Executes |
 | Host-executed control-plane tools | Executes | Applies extension lifecycle policy where required |
@@ -370,6 +371,7 @@ type EnvironmentManifest struct {
     RunID               string
     Generation          int64
     Digest              string
+    WorkingDirectory    string
     ContextFiles        []ContextFile
     Tools               []ToolDefinition
     Skills              []SkillDefinition
@@ -381,6 +383,8 @@ type EnvironmentManifest struct {
 ```
 
 Open-ended schemas and extension payloads remain JSON-native rather than being translated into a second schema language.
+
+For remote runs, model-facing workspace and system context comes from the pinned runner manifest rather than the control-plane host.
 
 ### Context snapshot
 
@@ -553,6 +557,8 @@ environment_profiles:
 The runner applies the selected environment profile before context, tools, skills, recipes, and extensions are discovered. Extension runtimes are cached by canonical workspace plus environment-profile identity. Fingerprint changes publish a new generation for later callers without closing a generation still leased by an active run.
 
 At `run.open`, the runner materializes a sanitized environment configuration projection into the manifest. It never sends secrets, environment variables, runner authentication credentials, or arbitrary runner-global provider credentials.
+
+Runner-local system information is excluded from the protocol-v1 resource digest for compatibility and to avoid date-only manifest churn.
 
 Workspace-derived prompt inputs that the central model requires, such as a custom system-prompt file, must be loaded by the runner and included as content in the manifest. The control plane must not interpret runner-local paths as server-local paths.
 

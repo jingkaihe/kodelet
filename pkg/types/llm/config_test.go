@@ -36,6 +36,26 @@ func TestConfigBashTimeout(t *testing.T) {
 	assert.Equal(t, 30*time.Second, Config{Bash: &BashConfig{Timeout: 30 * time.Second}}.BashTimeout())
 }
 
+func TestSystemInformationCloneAndTransientConfigSerialization(t *testing.T) {
+	information := &SystemInformation{
+		IsGitRepo: true,
+		Platform:  "darwin",
+		OSVersion: "macOS 26.0",
+		Date:      "2026-08-09",
+	}
+	clone := information.Clone()
+	require.NotNil(t, clone)
+	assert.Equal(t, information, clone)
+	clone.Platform = "linux"
+	assert.Equal(t, "darwin", information.Platform)
+	assert.Nil(t, (*SystemInformation)(nil).Clone())
+
+	payload, err := json.Marshal(Config{SystemInformation: information})
+	require.NoError(t, err)
+	assert.NotContains(t, string(payload), "systemInformation")
+	assert.NotContains(t, string(payload), "macOS 26.0")
+}
+
 func TestOpenAIServiceTierParsingAndWireValue(t *testing.T) {
 	tier, ok := ParseOpenAIServiceTier(" FAST ")
 	require.True(t, ok)

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -428,6 +429,7 @@ func TestManifestHelpersLoadSystemPromptAndDefensivelyCloneSchemas(t *testing.T)
 
 func TestBuildWireManifestSortsContentAndRejectsReservedToolCollisions(t *testing.T) {
 	workspace := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(workspace, ".git"), 0o700))
 	manifest, err := buildWireManifest(agentenv.Manifest{
 		WorkingDirectory: workspace,
 		Contexts: map[string]string{
@@ -455,6 +457,11 @@ func TestBuildWireManifestSortsContentAndRejectsReservedToolCollisions(t *testin
 	assert.NotEmpty(t, manifest.Digest)
 	assert.True(t, manifest.Config.EnableFSSearchTools)
 	assert.Equal(t, map[string]string{"audience": "developer"}, manifest.Config.SystemPromptArgs)
+	require.NotNil(t, manifest.Config.SystemInformation)
+	assert.True(t, manifest.Config.SystemInformation.IsGitRepo)
+	assert.Equal(t, runtime.GOOS, manifest.Config.SystemInformation.Platform)
+	assert.NotEmpty(t, manifest.Config.SystemInformation.OSVersion)
+	assert.Regexp(t, `^\d{4}-\d{2}-\d{2}$`, manifest.Config.SystemInformation.Date)
 
 	manifest.Tools[0].InputSchema["type"] = "changed"
 	assert.Equal(t, "object", manifest.Tools[1].InputSchema["type"])

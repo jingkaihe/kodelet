@@ -3,21 +3,30 @@ package payload
 import (
 	"testing"
 
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestComputeManifestDigestIgnoresRunIdentityAndDetectsContentChanges(t *testing.T) {
 	manifest := Manifest{
-		ProtocolVersion:     1,
-		RunnerID:            "runner-one",
-		RunID:               "run-one",
-		Generation:          3,
-		Digest:              "sha256:previous",
-		WorkingDirectory:    "/work/project",
-		ContextFiles:        []ContextFile{{Path: "AGENTS.md", Content: "rules", Digest: "sha256:rules"}},
-		Tools:               []ToolDefinition{{Name: "file_read", Description: "Read files", InputSchema: map[string]any{"type": "object"}, Placement: "environment"}},
-		Config:              EnvironmentConfig{AllowedCommands: []string{"go test ./..."}},
+		ProtocolVersion:  1,
+		RunnerID:         "runner-one",
+		RunID:            "run-one",
+		Generation:       3,
+		Digest:           "sha256:previous",
+		WorkingDirectory: "/work/project",
+		ContextFiles:     []ContextFile{{Path: "AGENTS.md", Content: "rules", Digest: "sha256:rules"}},
+		Tools:            []ToolDefinition{{Name: "file_read", Description: "Read files", InputSchema: map[string]any{"type": "object"}, Placement: "environment"}},
+		Config: EnvironmentConfig{
+			AllowedCommands: []string{"go test ./..."},
+			SystemInformation: &llmtypes.SystemInformation{
+				IsGitRepo: true,
+				Platform:  "darwin",
+				OSVersion: "macOS 26.0",
+				Date:      "2026-08-09",
+			},
+		},
 		ExtensionGeneration: 9,
 		Capabilities:        EnvironmentCapabilities{ToolUpdates: true, Commands: true},
 	}
@@ -41,6 +50,13 @@ func TestComputeManifestDigestIgnoresRunIdentityAndDetectsContentChanges(t *test
 	contentDigest, err := ComputeManifestDigest(contentChange)
 	require.NoError(t, err)
 	assert.NotEqual(t, digest, contentDigest)
+
+	systemChange := manifest
+	systemChange.Config.SystemInformation = manifest.Config.SystemInformation.Clone()
+	systemChange.Config.SystemInformation.Platform = "linux"
+	systemDigest, err := ComputeManifestDigest(systemChange)
+	require.NoError(t, err)
+	assert.Equal(t, digest, systemDigest)
 }
 
 func TestComputeManifestDigestReportsUnserializableManifest(t *testing.T) {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
 
 // PromptContext holds all variables for template rendering
@@ -36,9 +37,12 @@ type contextEntry struct {
 	Content  string
 }
 
-// newPromptContext creates a new PromptContext with default values.
-// The optional workingDirectory override preserves compatibility with existing callers.
-func newPromptContext(contexts map[string]string, workingDirectory ...string) *PromptContext {
+// newPromptContext creates a new PromptContext with local default values.
+func newPromptContext() *PromptContext {
+	return newPromptContextWithSystemInformation(nil, nil)
+}
+
+func newPromptContextWithSystemInformation(contexts map[string]string, pinned *llmtypes.SystemInformation, workingDirectory ...string) *PromptContext {
 	pwd := ""
 	if len(workingDirectory) > 0 {
 		pwd = strings.TrimSpace(workingDirectory[0])
@@ -46,10 +50,11 @@ func newPromptContext(contexts map[string]string, workingDirectory ...string) *P
 	if pwd == "" {
 		pwd, _ = os.Getwd()
 	}
-	isGitRepo := checkIsGitRepo(pwd)
-	platform := runtime.GOOS
-	osVersion := getOSVersion()
-	date := time.Now().Format("2006-01-02")
+	systemInformation := pinned
+	if systemInformation == nil {
+		local := CollectSystemInformation(pwd)
+		systemInformation = &local
+	}
 
 	// Use provided contexts or initialize empty map
 	contextFiles := contexts
@@ -59,14 +64,28 @@ func newPromptContext(contexts map[string]string, workingDirectory ...string) *P
 
 	return &PromptContext{
 		WorkingDirectory:    pwd,
-		IsGitRepo:           isGitRepo,
-		Platform:            platform,
-		OSVersion:           osVersion,
-		Date:                date,
+		IsGitRepo:           systemInformation.IsGitRepo,
+		Platform:            systemInformation.Platform,
+		OSVersion:           systemInformation.OSVersion,
+		Date:                systemInformation.Date,
 		ContextFiles:        contextFiles,
 		ActiveContextFile:   AgentsMd,
 		Args:                map[string]string{},
 		EnableFSSearchTools: true,
+	}
+}
+
+// CollectSystemInformation reads model-facing metadata from the host that owns the execution environment.
+func CollectSystemInformation(workingDirectory string) llmtypes.SystemInformation {
+	workingDirectory = strings.TrimSpace(workingDirectory)
+	if workingDirectory == "" {
+		workingDirectory, _ = os.Getwd()
+	}
+	return llmtypes.SystemInformation{
+		IsGitRepo: checkIsGitRepo(workingDirectory),
+		Platform:  runtime.GOOS,
+		OSVersion: getOSVersion(),
+		Date:      time.Now().Format("2006-01-02"),
 	}
 }
 

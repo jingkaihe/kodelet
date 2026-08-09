@@ -47,6 +47,7 @@ type EnvironmentConfig struct {
 	SystemPromptPath    string
 	SystemPromptContent string
 	SystemPromptArgs    map[string]string
+	SystemInformation   *llmtypes.SystemInformation
 }
 
 // Clone returns a defensive copy of the configuration projection.
@@ -57,6 +58,7 @@ func (c *EnvironmentConfig) Clone() *EnvironmentConfig {
 	cloned := *c
 	cloned.AllowedCommands = slices.Clone(c.AllowedCommands)
 	cloned.SystemPromptArgs = maps.Clone(c.SystemPromptArgs)
+	cloned.SystemInformation = c.SystemInformation.Clone()
 	return &cloned
 }
 

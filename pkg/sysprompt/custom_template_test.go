@@ -50,7 +50,7 @@ func TestRendererForConfig_CustomTemplate(t *testing.T) {
 		renderer, err := rendererForConfig(llmtypes.Config{Sysprompt: tmplPath})
 		require.NoError(t, err)
 
-		ctx := newPromptContext(nil)
+		ctx := newPromptContext()
 		prompt, err := renderer.RenderSystemPrompt(ctx)
 		require.NoError(t, err)
 		assert.Contains(t, prompt, "CUSTOM")
@@ -62,7 +62,7 @@ func TestRendererForConfig_CustomTemplate(t *testing.T) {
 		require.Error(t, err)
 		require.NotNil(t, renderer)
 
-		ctx := newPromptContext(nil)
+		ctx := newPromptContext()
 		prompt, renderErr := renderer.RenderSystemPrompt(ctx)
 		require.NoError(t, renderErr)
 		assert.Contains(t, prompt, "You are an interactive CLI tool")
@@ -76,7 +76,7 @@ func TestRendererForConfig_CustomTemplate(t *testing.T) {
 		renderer, err := rendererForConfig(llmtypes.Config{Sysprompt: tmplPath})
 		require.NoError(t, err)
 
-		ctx := newPromptContext(nil)
+		ctx := newPromptContext()
 		ctx.Args = map[string]string{"project": "kodelet"}
 		prompt, err := renderer.RenderSystemPrompt(ctx)
 		require.NoError(t, err)
@@ -92,7 +92,7 @@ func TestRendererForConfig_CustomTemplate(t *testing.T) {
 		renderer, err := rendererForConfig(llmtypes.Config{Sysprompt: tmplPath})
 		require.NoError(t, err)
 
-		ctx := newPromptContext(nil)
+		ctx := newPromptContext()
 		prompt, err := renderer.RenderSystemPrompt(ctx)
 		require.NoError(t, err)
 		assert.Contains(t, prompt, "Echo=hello")

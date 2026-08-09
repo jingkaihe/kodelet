@@ -160,6 +160,12 @@ func TestRemoteEnvironmentProxiesPinnedRunnerContract(t *testing.T) {
 			SystemPromptPath:    "/runner/custom.tmpl",
 			SystemPromptContent: "runner prompt {{.WorkingDirectory}}",
 			SystemPromptArgs:    map[string]string{"scope": "runner"},
+			SystemInformation: &llmtypes.SystemInformation{
+				IsGitRepo: true,
+				Platform:  "darwin",
+				OSVersion: "macOS 26.0",
+				Date:      "2026-08-09",
+			},
 		},
 		Capabilities: runnerpayload.EnvironmentCapabilities{ToolUpdates: true, Commands: true},
 	}
@@ -189,6 +195,11 @@ func TestRemoteEnvironmentProxiesPinnedRunnerContract(t *testing.T) {
 	require.NotNil(t, manifest.Config)
 	assert.Equal(t, "/runner/custom.tmpl", manifest.Config.SystemPromptPath)
 	assert.Equal(t, "runner prompt {{.WorkingDirectory}}", manifest.Config.SystemPromptContent)
+	require.NotNil(t, manifest.Config.SystemInformation)
+	assert.True(t, manifest.Config.SystemInformation.IsGitRepo)
+	assert.Equal(t, "darwin", manifest.Config.SystemInformation.Platform)
+	assert.Equal(t, "macOS 26.0", manifest.Config.SystemInformation.OSVersion)
+	assert.Equal(t, "2026-08-09", manifest.Config.SystemInformation.Date)
 
 	fileDefinition, ok := manifest.ToolDefinition("file_read")
 	require.True(t, ok)

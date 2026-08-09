@@ -1396,6 +1396,17 @@ func validateManifest(manifest runnerpayload.Manifest, runnerID string, params p
 		}
 		seen[name] = struct{}{}
 	}
+	if information := manifest.Config.SystemInformation; information != nil {
+		if strings.TrimSpace(information.Platform) == "" {
+			return errors.New("runner manifest system information is missing its platform")
+		}
+		if strings.TrimSpace(information.OSVersion) == "" {
+			return errors.New("runner manifest system information is missing its OS version")
+		}
+		if _, err := time.Parse("2006-01-02", strings.TrimSpace(information.Date)); err != nil {
+			return errors.New("runner manifest system information has an invalid date")
+		}
+	}
 	digest, err := runnerpayload.ComputeManifestDigest(manifest)
 	if err != nil {
 		return err

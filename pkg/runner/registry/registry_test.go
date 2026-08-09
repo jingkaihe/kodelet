@@ -15,6 +15,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1399,6 +1400,21 @@ func TestValidateManifestRejectsInvalidRunnerContracts(t *testing.T) {
 			value.Tools = append(value.Tools, value.Tools[0])
 			return withDigest(value)
 		}(), wantError: "duplicate tool"},
+		{name: "system platform", manifest: func() runnerpayload.Manifest {
+			value := base
+			value.Config.SystemInformation = &llmtypes.SystemInformation{OSVersion: "macOS 26.0", Date: "2026-08-09"}
+			return withDigest(value)
+		}(), wantError: "missing its platform"},
+		{name: "system OS version", manifest: func() runnerpayload.Manifest {
+			value := base
+			value.Config.SystemInformation = &llmtypes.SystemInformation{Platform: "darwin", Date: "2026-08-09"}
+			return withDigest(value)
+		}(), wantError: "missing its OS version"},
+		{name: "system date", manifest: func() runnerpayload.Manifest {
+			value := base
+			value.Config.SystemInformation = &llmtypes.SystemInformation{Platform: "darwin", OSVersion: "macOS 26.0", Date: "not-a-date"}
+			return withDigest(value)
+		}(), wantError: "invalid date"},
 		{name: "missing digest", manifest: base, wantError: "digest is required"},
 		{name: "wrong digest", manifest: func() runnerpayload.Manifest { value := base; value.Digest = "sha256:wrong"; return value }(), wantError: "does not match"},
 	}

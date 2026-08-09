@@ -13,7 +13,7 @@ func TestConditionalRendering(t *testing.T) {
 	renderer := NewRenderer(TemplateFS)
 
 	t.Run("With all features enabled", func(t *testing.T) {
-		ctx := newPromptContext(nil)
+		ctx := newPromptContext()
 
 		prompt, err := renderer.RenderSystemPrompt(ctx)
 		require.NoError(t, err, "Failed to render system prompt")
@@ -22,7 +22,7 @@ func TestConditionalRendering(t *testing.T) {
 	})
 
 	t.Run("With some features disabled", func(t *testing.T) {
-		ctx := newPromptContext(nil)
+		ctx := newPromptContext()
 
 		_, err := renderer.RenderSystemPrompt(ctx)
 		require.NoError(t, err, "Failed to render system prompt")
@@ -32,7 +32,7 @@ func TestConditionalRendering(t *testing.T) {
 // TestRenderer tests the core functionality of the template renderer
 func TestRenderer(t *testing.T) {
 	renderer := NewRenderer(TemplateFS)
-	ctx := newPromptContext(nil)
+	ctx := newPromptContext()
 
 	t.Run("Component template rendering", func(t *testing.T) {
 		components := []string{

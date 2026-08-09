@@ -147,6 +147,7 @@ func (t *Thread) ApplyEnvironmentConfig(config agentenv.EnvironmentConfig) {
 	t.Config.SyspromptContent = config.SystemPromptContent
 	t.Config.SyspromptInline = config.SystemPromptPath != "" || config.SystemPromptContent != ""
 	t.Config.SyspromptArgs = maps.Clone(config.SystemPromptArgs)
+	t.Config.SystemInformation = config.SystemInformation.Clone()
 }
 
 // GetConversationID returns the current conversation ID

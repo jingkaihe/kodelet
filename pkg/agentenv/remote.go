@@ -511,6 +511,7 @@ func (e *RemoteEnvironment) convertManifest(wire runnerpayload.Manifest, config 
 			SystemPromptPath:    wire.Config.SystemPromptPath,
 			SystemPromptContent: wire.Config.SystemPromptContent,
 			SystemPromptArgs:    maps.Clone(wire.Config.SystemPromptArgs),
+			SystemInformation:   wire.Config.SystemInformation.Clone(),
 		}).Clone(),
 	}, nil
 }

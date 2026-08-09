@@ -94,6 +94,7 @@ func (t *environmentThreadStub) ApplyEnvironmentConfig(config agentenv.Environme
 	t.config.SyspromptContent = config.SystemPromptContent
 	t.config.SyspromptInline = config.SystemPromptPath != "" || config.SystemPromptContent != ""
 	t.config.SyspromptArgs = config.SystemPromptArgs
+	t.config.SystemInformation = config.SystemInformation.Clone()
 }
 
 type projectedEnvironment struct {
@@ -264,6 +265,12 @@ func TestOpenEnvironmentAppliesPinnedRunnerConfiguration(t *testing.T) {
 			SystemPromptPath:    "/runner/custom.tmpl",
 			SystemPromptContent: "runner prompt",
 			SystemPromptArgs:    map[string]string{"project": "kodelet"},
+			SystemInformation: &llmtypes.SystemInformation{
+				IsGitRepo: true,
+				Platform:  "darwin",
+				OSVersion: "macOS 26.0",
+				Date:      "2026-08-09",
+			},
 		},
 	}}
 	thread := &environmentThreadStub{
@@ -283,6 +290,11 @@ func TestOpenEnvironmentAppliesPinnedRunnerConfiguration(t *testing.T) {
 	assert.Equal(t, "runner prompt", config.SyspromptContent)
 	assert.True(t, config.SyspromptInline)
 	assert.Equal(t, map[string]string{"project": "kodelet"}, config.SyspromptArgs)
+	require.NotNil(t, config.SystemInformation)
+	assert.True(t, config.SystemInformation.IsGitRepo)
+	assert.Equal(t, "darwin", config.SystemInformation.Platform)
+	assert.Equal(t, "macOS 26.0", config.SystemInformation.OSVersion)
+	assert.Equal(t, "2026-08-09", config.SystemInformation.Date)
 }
 
 func TestExecuteEnvironmentToolForwardsUpdatesAndNormalizesResults(t *testing.T) {

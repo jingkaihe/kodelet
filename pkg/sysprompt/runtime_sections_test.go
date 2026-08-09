@@ -77,6 +77,32 @@ func TestBuildRuntimeContext(t *testing.T) {
 	assert.True(t, ctx.EnableFSSearchTools)
 }
 
+func TestBuildRuntimeContextUsesPinnedEnvironmentSystemInformation(t *testing.T) {
+	controlPlaneDirectory := t.TempDir()
+	config := llmtypes.Config{
+		WorkingDirectory: controlPlaneDirectory,
+		SystemInformation: &llmtypes.SystemInformation{
+			IsGitRepo: true,
+			Platform:  "darwin",
+			OSVersion: "macOS 26.0",
+			Date:      "2026-08-09",
+		},
+	}
+
+	ctx := BuildRuntimeContext(config, nil)
+	assert.Equal(t, controlPlaneDirectory, ctx.WorkingDirectory)
+	assert.True(t, ctx.IsGitRepo)
+	assert.Equal(t, "darwin", ctx.Platform)
+	assert.Equal(t, "macOS 26.0", ctx.OSVersion)
+	assert.Equal(t, "2026-08-09", ctx.Date)
+
+	sections := RenderRuntimeSections(ctx, nil)
+	require.Len(t, sections, 2)
+	assert.Contains(t, sections[0], "Is this a git repository? true")
+	assert.Contains(t, sections[0], "Operating system: darwin macOS 26.0")
+	assert.NotContains(t, sections[0], "linux")
+}
+
 func TestResolveRendererForConfig(t *testing.T) {
 	t.Run("default renderer", func(t *testing.T) {
 		renderer, err := ResolveRendererForConfig(llmtypes.Config{})

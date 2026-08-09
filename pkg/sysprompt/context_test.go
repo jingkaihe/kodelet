@@ -73,14 +73,14 @@ func TestPromptContextActiveContextFile(t *testing.T) {
 		require.NoError(t, err)
 		defer os.Remove(AgentsMd)
 
-		ctx := newPromptContext(nil)
+		ctx := newPromptContext()
 		assert.Equal(t, AgentsMd, ctx.ActiveContextFile, "Expected ActiveContextFile to be AGENTS.md")
 	})
 
 	t.Run("ActiveContextFile defaults to AGENTS.md when no file exists", func(t *testing.T) {
 		os.Remove(AgentsMd)
 
-		ctx := newPromptContext(nil)
+		ctx := newPromptContext()
 		assert.Equal(t, AgentsMd, ctx.ActiveContextFile, "Expected ActiveContextFile to default to AGENTS.md")
 	})
 }

@@ -40,12 +40,13 @@ type SkillDefinition struct {
 
 // EnvironmentConfig is the sanitized runner-owned configuration projection.
 type EnvironmentConfig struct {
-	AllowedCommands     []string          `json:"allowedCommands,omitempty"`
-	ToolMode            llmtypes.ToolMode `json:"toolMode,omitempty"`
-	EnableFSSearchTools bool              `json:"enableFSSearchTools,omitempty"`
-	SystemPromptPath    string            `json:"systemPromptPath,omitempty"`
-	SystemPromptContent string            `json:"systemPromptContent,omitempty"`
-	SystemPromptArgs    map[string]string `json:"systemPromptArgs,omitempty"`
+	AllowedCommands     []string                    `json:"allowedCommands,omitempty"`
+	ToolMode            llmtypes.ToolMode           `json:"toolMode,omitempty"`
+	EnableFSSearchTools bool                        `json:"enableFSSearchTools,omitempty"`
+	SystemPromptPath    string                      `json:"systemPromptPath,omitempty"`
+	SystemPromptContent string                      `json:"systemPromptContent,omitempty"`
+	SystemPromptArgs    map[string]string           `json:"systemPromptArgs,omitempty"`
+	SystemInformation   *llmtypes.SystemInformation `json:"systemInformation,omitempty"`
 }
 
 // EnvironmentCapabilities advertises optional runner behavior.
@@ -80,6 +81,10 @@ func ComputeManifestDigest(manifest Manifest) (string, error) {
 	manifest.Generation = 0
 	manifest.Digest = ""
 	manifest.ExtensionGeneration = 0
+	// System information is pinned in each run.open response but excluded from
+	// the protocol-v1 resource digest for additive wire compatibility and to
+	// avoid date-only manifest churn.
+	manifest.Config.SystemInformation = nil
 	payload, err := json.Marshal(manifest)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to encode runner manifest")

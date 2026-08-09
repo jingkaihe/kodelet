@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"testing"
 	"time"
@@ -118,6 +119,10 @@ func TestRunnerServiceRoundTripsThroughSymmetricWebsocketProtocol(t *testing.T) 
 	require.NoError(t, err)
 	assert.Equal(t, "run-wire", manifest.RunID)
 	assert.Contains(t, manifestToolNames(manifest), "file_read")
+	require.NotNil(t, manifest.Config.SystemInformation)
+	assert.Equal(t, goruntime.GOOS, manifest.Config.SystemInformation.Platform)
+	assert.NotEmpty(t, manifest.Config.SystemInformation.OSVersion)
+	assert.Regexp(t, `^\d{4}-\d{2}-\d{2}$`, manifest.Config.SystemInformation.Date)
 
 	var lifecycle runnerpayload.LifecycleDispatchResult
 	require.NoError(t, registry.CallRun(t.Context(), "run-wire", protocol.MethodLifecycleDispatch, runnerpayload.LifecycleDispatchParams{

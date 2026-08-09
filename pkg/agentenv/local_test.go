@@ -80,17 +80,24 @@ func TestLocalEnvironmentManifestIncludesSerializableToolDefinitionsAndPlacement
 }
 
 func TestManifestCloneDeepCopiesToolSchemas(t *testing.T) {
-	manifest := Manifest{Tools: []ToolDefinition{{
-		Name: "nested",
-		InputSchema: map[string]any{
-			"properties": map[string]any{
-				"path": map[string]any{
-					"type": "string",
-					"enum": []any{"one", "two"},
+	manifest := Manifest{
+		Tools: []ToolDefinition{{
+			Name: "nested",
+			InputSchema: map[string]any{
+				"properties": map[string]any{
+					"path": map[string]any{
+						"type": "string",
+						"enum": []any{"one", "two"},
+					},
 				},
 			},
-		},
-	}}}
+		}},
+		Config: &EnvironmentConfig{SystemInformation: &llmtypes.SystemInformation{
+			Platform:  "darwin",
+			OSVersion: "macOS 26.0",
+			Date:      "2026-08-09",
+		}},
+	}
 
 	clone := manifest.Clone()
 	properties := clone.Tools[0].InputSchema["properties"].(map[string]any)
@@ -102,6 +109,9 @@ func TestManifestCloneDeepCopiesToolSchemas(t *testing.T) {
 	originalPath := originalProperties["path"].(map[string]any)
 	assert.Equal(t, "string", originalPath["type"])
 	assert.Equal(t, []any{"one", "two"}, originalPath["enum"])
+
+	clone.Config.SystemInformation.Platform = "linux"
+	assert.Equal(t, "darwin", manifest.Config.SystemInformation.Platform)
 }
 
 func TestManifestToolNamesSkipsEmptyDefinitions(t *testing.T) {
