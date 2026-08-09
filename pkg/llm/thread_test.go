@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -68,6 +69,20 @@ func TestNewThread(t *testing.T) {
 			assert.NotNil(t, thread)
 		})
 	}
+}
+
+func TestSetEnvironmentAttachesEnvironmentToProviderThread(t *testing.T) {
+	require.ErrorContains(t, SetEnvironment(nil, nil), "thread is required")
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	thread, err := NewThread(llmtypes.Config{Provider: "anthropic", Model: "claude-sonnet-4-6"})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, CloseThread(thread)) })
+	environment := agentenv.NewLocalEnvironment(t.TempDir(), nil)
+
+	require.NoError(t, SetEnvironment(thread, environment))
+	getter, ok := thread.(interface{ GetEnvironment() agentenv.Environment })
+	require.True(t, ok)
+	assert.Same(t, environment, getter.GetEnvironment())
 }
 
 func TestConsoleMessageHandler(_ *testing.T) {

@@ -381,6 +381,94 @@ Review the runner workspace.`), 0o600))
 	assert.Equal(t, manifest.Digest, heartbeatDigest)
 }
 
+func TestManifestHelpersLoadSystemPromptAndDefensivelyCloneSchemas(t *testing.T) {
+	workspace := t.TempDir()
+	promptPath := filepath.Join(workspace, "prompt.md")
+	require.NoError(t, os.WriteFile(promptPath, []byte("runner prompt"), 0o600))
+
+	path, content, err := loadSystemPrompt(llmtypes.Config{Sysprompt: "prompt.md"}, workspace)
+	require.NoError(t, err)
+	assert.Equal(t, promptPath, path)
+	assert.Equal(t, "runner prompt", content)
+
+	path, content, err = loadSystemPrompt(llmtypes.Config{}, workspace)
+	require.NoError(t, err)
+	assert.Empty(t, path)
+	assert.Empty(t, content)
+
+	_, _, err = loadSystemPrompt(llmtypes.Config{Sysprompt: "bad\x00path"}, workspace)
+	require.ErrorContains(t, err, "null byte")
+	_, _, err = loadSystemPrompt(llmtypes.Config{Sysprompt: "~another-user/prompt"}, workspace)
+	require.ErrorContains(t, err, "unsupported custom system prompt path")
+	_, _, err = loadSystemPrompt(llmtypes.Config{Sysprompt: "missing.md"}, workspace)
+	require.ErrorContains(t, err, "failed to stat custom system prompt")
+	_, _, err = loadSystemPrompt(llmtypes.Config{Sysprompt: "."}, workspace)
+	require.ErrorContains(t, err, "must be a regular file")
+
+	invalidUTF8Path := filepath.Join(workspace, "invalid.md")
+	require.NoError(t, os.WriteFile(invalidUTF8Path, []byte{0xff, 0xfe}, 0o600))
+	_, _, err = loadSystemPrompt(llmtypes.Config{Sysprompt: invalidUTF8Path}, workspace)
+	require.ErrorContains(t, err, "not valid UTF-8")
+
+	schema := map[string]any{
+		"properties": map[string]any{
+			"paths": []any{map[string]any{"type": "string"}, "literal"},
+		},
+	}
+	cloned := cloneJSONMap(schema)
+	clonedProperties := cloned["properties"].(map[string]any)
+	clonedPaths := clonedProperties["paths"].([]any)
+	clonedPaths[0].(map[string]any)["type"] = "integer"
+	originalPaths := schema["properties"].(map[string]any)["paths"].([]any)
+	assert.Equal(t, "string", originalPaths[0].(map[string]any)["type"])
+	assert.Nil(t, cloneJSONMap(nil))
+	assert.Nil(t, runtimeToolByName(nil, "missing"))
+	assert.Nil(t, runtimeToolByName(extensions.EmptyRuntime(), "missing"))
+}
+
+func TestBuildWireManifestSortsContentAndRejectsReservedToolCollisions(t *testing.T) {
+	workspace := t.TempDir()
+	manifest, err := buildWireManifest(agentenv.Manifest{
+		WorkingDirectory: workspace,
+		Contexts: map[string]string{
+			"z/AGENTS.md": "z rules",
+			"a/AGENTS.md": "a rules",
+		},
+		Tools: []agentenv.ToolDefinition{
+			{Name: "z_tool", Description: "z", InputSchema: map[string]any{"type": "object"}, Placement: agentenv.ToolPlacementEnvironment},
+			{Name: "control", Placement: agentenv.ToolPlacementControlPlane},
+			{Name: "a_tool", Description: "a", InputSchema: map[string]any{"type": "object"}, Placement: agentenv.ToolPlacementEnvironment},
+		},
+	}, llmtypes.Config{
+		AllowedCommands:     []string{"go test ./..."},
+		EnableFSSearchTools: true,
+		SyspromptArgs:       map[string]string{"audience": "developer"},
+	}, nil, "runner-1", "run-1", 4, []string{"get_goal", " "})
+	require.NoError(t, err)
+	require.Len(t, manifest.ContextFiles, 2)
+	assert.Equal(t, "a/AGENTS.md", manifest.ContextFiles[0].Path)
+	assert.Equal(t, "z/AGENTS.md", manifest.ContextFiles[1].Path)
+	require.Len(t, manifest.Tools, 2)
+	assert.Equal(t, "a_tool", manifest.Tools[0].Name)
+	assert.Equal(t, "z_tool", manifest.Tools[1].Name)
+	assert.NotEmpty(t, manifest.ContextFiles[0].Digest)
+	assert.NotEmpty(t, manifest.Digest)
+	assert.True(t, manifest.Config.EnableFSSearchTools)
+	assert.Equal(t, map[string]string{"audience": "developer"}, manifest.Config.SystemPromptArgs)
+
+	manifest.Tools[0].InputSchema["type"] = "changed"
+	assert.Equal(t, "object", manifest.Tools[1].InputSchema["type"])
+
+	_, err = buildWireManifest(agentenv.Manifest{
+		WorkingDirectory: workspace,
+		Tools: []agentenv.ToolDefinition{{
+			Name:      "get_goal",
+			Placement: agentenv.ToolPlacementEnvironment,
+		}},
+	}, llmtypes.Config{}, nil, "runner-1", "run-1", 1, []string{"get_goal"})
+	require.ErrorContains(t, err, "collides with a reserved control-plane tool")
+}
+
 func TestServiceOpenRunWaitsForManifestSnapshotRefresh(t *testing.T) {
 	workspace := t.TempDir()
 	runtime := extensions.EmptyRuntime()

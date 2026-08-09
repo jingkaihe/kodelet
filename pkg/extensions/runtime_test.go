@@ -13,6 +13,7 @@ import (
 	kodelettools "github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -197,6 +198,29 @@ func TestRuntimeTimeoutPrecedence(t *testing.T) {
 	assert.Equal(t, 2*time.Second, eventTimeout(eventHandler{sub: Subscription{Event: EventToolCall, TimeoutInSec: &sdkEventTimeout}}))
 	assert.Zero(t, eventTimeout(eventHandler{sub: Subscription{Event: EventToolCall, TimeoutInSec: &sdkEventNoTimeout}}))
 	assert.Equal(t, 30*time.Second, eventTimeout(eventHandler{sub: Subscription{Event: EventToolCall}}))
+}
+
+func TestNewRuntimeFromViperHonorsDisabledExtensions(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	}()
+	viper.Reset()
+	viper.Set("extensions.enabled", false)
+
+	runtime, err := NewRuntimeFromViper(t.Context(), t.TempDir())
+	require.NoError(t, err)
+	require.NotNil(t, runtime)
+	assert.Empty(t, runtime.Tools())
+	require.NoError(t, runtime.Close())
+
+	runtime, err = newRuntimeFromViper(t.Context(), t.TempDir(), false)
+	require.NoError(t, err)
+	require.NotNil(t, runtime)
+	require.NoError(t, runtime.Close())
 }
 
 func TestRuntimeDispatchesToolCallAndToolResultEvents(t *testing.T) {

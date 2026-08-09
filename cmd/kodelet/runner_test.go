@@ -298,3 +298,113 @@ func TestConfirmRunnerRemovalDefaultsToNoAndWarnsForForce(t *testing.T) {
 	}, strings.NewReader("yes\n"), io.Discard)
 	require.ErrorContains(t, err, "--json requires --no-confirm")
 }
+
+func TestRunRunnerStartRejectsInvalidServerBeforeConnecting(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	err := runRunnerStart(t.Context(), runnerStartConfig{Server: "://invalid"})
+	require.Error(t, err)
+}
+
+func TestRenderRunnerInspectIncludesCompatibilityAndLocalLifecycle(t *testing.T) {
+	connectedAt := time.Date(2026, time.August, 8, 10, 0, 0, 0, time.FixedZone("test", 2*60*60))
+	stoppedAt := connectedAt.Add(time.Hour)
+	result := runnerInspectOutput{
+		Runner: runnerregistry.Runner{
+			ID:                 "runner-inspect",
+			DisplayName:        "project",
+			Status:             runnerregistry.RunnerStatusIncompatible,
+			Connected:          true,
+			Workspace:          protocol.Workspace{Path: "/work/project"},
+			Host:               protocol.Host{InstanceID: "host-1", Hostname: "worker", PID: 1234, OS: "linux", Arch: "amd64"},
+			KodeletVersion:     "v1.2.3",
+			ManifestDigest:     "sha256:manifest",
+			ManifestChanged:    true,
+			CompatibilityError: "protocol mismatch",
+			ActiveRunID:        "run-1",
+			ConnectionID:       "connection-1",
+			Generation:         7,
+			ConnectedAt:        connectedAt,
+			LastHeartbeatAt:    connectedAt.Add(30 * time.Second),
+		},
+		Local: &runnerLocalOutput{
+			LockPath: "/state/runner.lock",
+			Metadata: &localstate.LockMetadata{
+				StartedAt: connectedAt,
+				StoppedAt: &stoppedAt,
+			},
+		},
+	}
+
+	var output bytes.Buffer
+	require.NoError(t, renderRunnerInspect(&output, result))
+	rendered := output.String()
+	for _, expected := range []string{
+		"runner-inspect", "project", "incompatible", "protocol mismatch", "/work/project",
+		"worker", "host-1", "1234", "linux/amd64", "v1.2.3", "sha256:manifest",
+		"run-1", "connection-1", "7", "/state/runner.lock", "2026-08-08T08:00:00Z", "2026-08-08T09:00:00Z",
+	} {
+		assert.Contains(t, rendered, expected)
+	}
+	assert.Equal(t, "", formatRunnerTime(time.Time{}))
+}
+
+func TestRunnerListAndRemovalHTTPFailurePaths(t *testing.T) {
+	t.Run("empty list", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			require.NoError(t, json.NewEncoder(w).Encode(runnerListAPIResponse{}))
+		}))
+		defer server.Close()
+
+		require.NoError(t, runRunnerList(t.Context(), runnerQueryConfig{Server: server.URL}, io.Discard))
+	})
+
+	t.Run("list HTTP status", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusBadGateway)
+		}))
+		defer server.Close()
+
+		_, _, err := fetchRunners(t.Context(), server.URL, "")
+		require.ErrorContains(t, err, "HTTP 502")
+	})
+
+	t.Run("list malformed JSON", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = io.WriteString(w, "not-json")
+		}))
+		defer server.Close()
+
+		_, _, err := fetchRunners(t.Context(), server.URL, "")
+		require.ErrorContains(t, err, "failed to decode runner list response")
+	})
+
+	t.Run("remove HTTP status without JSON error", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		defer server.Close()
+
+		_, err := deleteRunner(t.Context(), server.URL, "", "runner-1", false)
+		require.ErrorContains(t, err, "HTTP 500")
+	})
+
+	t.Run("remove malformed success response", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = io.WriteString(w, "not-json")
+		}))
+		defer server.Close()
+
+		_, err := deleteRunner(t.Context(), server.URL, "", "runner-1", false)
+		require.ErrorContains(t, err, "failed to decode runner removal response")
+	})
+}
+
+func TestSelectRunnerRejectsEmptyAndUnknownSelectors(t *testing.T) {
+	_, err := selectRunner(nil, " ")
+	require.ErrorContains(t, err, "runner selector is required")
+	_, err = selectRunner(nil, "missing")
+	require.ErrorContains(t, err, "runner not found: missing")
+
+	assert.Equal(t, "workspace", runnerDisplayName(runnerregistry.Runner{Workspace: protocol.Workspace{Name: "workspace"}}))
+}

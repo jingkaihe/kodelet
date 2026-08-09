@@ -104,6 +104,12 @@ func TestManifestCloneDeepCopiesToolSchemas(t *testing.T) {
 	assert.Equal(t, []any{"one", "two"}, originalPath["enum"])
 }
 
+func TestManifestToolNamesSkipsEmptyDefinitions(t *testing.T) {
+	manifest := Manifest{Tools: []ToolDefinition{{Name: "file_read"}, {}, {Name: "bash"}}}
+
+	assert.Equal(t, []string{"file_read", "bash"}, manifest.ToolNames())
+}
+
 func TestLocalEnvironmentExecutesWorkspaceRecipeCommand(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	workspace := t.TempDir()

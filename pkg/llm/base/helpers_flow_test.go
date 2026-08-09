@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/invopop/jsonschema"
+	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
@@ -98,6 +99,106 @@ func (h *recordingHandler) HandleToolResult(string, string, tooltypes.ToolResult
 func (h *recordingHandler) HandleThinking(string)                                 {}
 func (h *recordingHandler) HandleDone()                                           {}
 
+type recordingAgentEnvironment struct {
+	open                  bool
+	manifest              agentenv.Manifest
+	state                 tooltypes.State
+	processedMessage      string
+	processMessageErr     error
+	agentStartErr         error
+	turnStartErr          error
+	agentInitDecision     agentenv.AgentInitDecision
+	agentInitErr          error
+	agentInitAllowedTools []string
+	turnEndErr            error
+	followUps             []string
+	agentEndErr           error
+	toolCallDecision      agentenv.ToolCallDecision
+	toolCallErr           error
+	toolUpdateDecision    agentenv.ToolOutputDecision
+	toolUpdateErr         error
+	toolResultDecision    agentenv.ToolOutputDecision
+	toolResultErr         error
+	canStreamUpdates      bool
+	executeTool           func(context.Context, agentenv.ToolRequest, agentenv.ToolUpdateSink) (agentenv.ToolExecution, error)
+	agentStartCalls       int
+	turnStartCalls        []int
+	turnEndCalls          []string
+}
+
+func (e *recordingAgentEnvironment) Open(context.Context, agentenv.RunSpec) (agentenv.Manifest, error) {
+	e.open = true
+	return e.manifest.Clone(), nil
+}
+
+func (e *recordingAgentEnvironment) IsOpen() bool { return e != nil && e.open }
+func (e *recordingAgentEnvironment) Manifest() agentenv.Manifest {
+	if e == nil {
+		return agentenv.Manifest{}
+	}
+	return e.manifest.Clone()
+}
+
+func (*recordingAgentEnvironment) ExecuteCommand(context.Context, agentenv.CommandRequest) (agentenv.CommandResult, error) {
+	return agentenv.CommandResult{}, nil
+}
+
+func (e *recordingAgentEnvironment) ProcessUserMessage(_ context.Context, message string) (string, error) {
+	if e.processedMessage == "" {
+		e.processedMessage = message
+	}
+	return e.processedMessage, e.processMessageErr
+}
+
+func (e *recordingAgentEnvironment) DispatchAgentStart(context.Context) error {
+	e.agentStartCalls++
+	return e.agentStartErr
+}
+
+func (e *recordingAgentEnvironment) DispatchTurnStart(_ context.Context, turnNumber int) error {
+	e.turnStartCalls = append(e.turnStartCalls, turnNumber)
+	return e.turnStartErr
+}
+
+func (e *recordingAgentEnvironment) ProcessAgentInit(_ context.Context, _ string, allowedTools []string) (agentenv.AgentInitDecision, error) {
+	e.agentInitAllowedTools = append([]string(nil), allowedTools...)
+	return e.agentInitDecision, e.agentInitErr
+}
+
+func (e *recordingAgentEnvironment) DispatchTurnEnd(_ context.Context, finalOutput string, _ int) error {
+	e.turnEndCalls = append(e.turnEndCalls, finalOutput)
+	return e.turnEndErr
+}
+
+func (e *recordingAgentEnvironment) DispatchAgentEnd(context.Context, []llmtypes.Message) ([]string, error) {
+	return append([]string(nil), e.followUps...), e.agentEndErr
+}
+
+func (e *recordingAgentEnvironment) DispatchToolCall(context.Context, agentenv.ToolRequest) (agentenv.ToolCallDecision, error) {
+	return e.toolCallDecision, e.toolCallErr
+}
+
+func (e *recordingAgentEnvironment) DispatchToolUpdate(context.Context, agentenv.ToolOutputRequest) (agentenv.ToolOutputDecision, error) {
+	return e.toolUpdateDecision, e.toolUpdateErr
+}
+
+func (e *recordingAgentEnvironment) DispatchToolResult(context.Context, agentenv.ToolOutputRequest) (agentenv.ToolOutputDecision, error) {
+	return e.toolResultDecision, e.toolResultErr
+}
+func (e *recordingAgentEnvironment) CanStreamToolUpdates() bool { return e.canStreamUpdates }
+func (e *recordingAgentEnvironment) ExecuteTool(ctx context.Context, request agentenv.ToolRequest, updates agentenv.ToolUpdateSink) (agentenv.ToolExecution, error) {
+	if e.executeTool != nil {
+		return e.executeTool(ctx, request, updates)
+	}
+	return agentenv.ToolExecution{Input: request.Input, Result: tooltypes.BaseToolResult{Result: "ok"}}, nil
+}
+
+func (e *recordingAgentEnvironment) Close(context.Context) error {
+	e.open = false
+	return nil
+}
+func (e *recordingAgentEnvironment) State() tooltypes.State { return e.state }
+
 func TestAvailableTools(t *testing.T) {
 	tools := []tooltypes.Tool{namedTool("read_file"), namedTool("update_goal")}
 	state := &toolState{tools: tools}
@@ -154,6 +255,87 @@ func TestProcessAgentInitClearsStaleAllowedToolsWhenNoPatchApplies(t *testing.T)
 		assert.Nil(t, currentAllowedTools(thread))
 		assert.NotContains(t, thread.metadata, extensionAllowedToolsMetadataKey)
 	})
+}
+
+func TestTurnFlowUsesPinnedAgentEnvironment(t *testing.T) {
+	environment := &recordingAgentEnvironment{
+		open:             true,
+		processedMessage: "rewritten message",
+		manifest: agentenv.Manifest{Tools: []agentenv.ToolDefinition{
+			{Name: "remote_tool", Tool: namedTool("remote_tool")},
+			{Name: "duplicate", Tool: namedTool("remote_tool")},
+			{Name: "empty", Tool: nil},
+		}},
+		agentInitDecision: agentenv.AgentInitDecision{
+			SystemPrompt:  "runner prompt",
+			AllowedTools:  []string{"remote_tool"},
+			ToolsModified: true,
+		},
+		followUps: []string{"inspect the logs", "retry the check"},
+	}
+	thread := &environmentThreadStub{
+		threadStub: &threadStub{
+			config:   llmtypes.Config{AllowedTools: []string{"openai_web_search"}},
+			metadata: map[string]any{extensionAllowedToolsMetadataKey: []string{"stale"}},
+			messages: []llmtypes.Message{{Role: "assistant", Content: "done"}},
+		},
+		environment: environment,
+	}
+
+	message, err := ProcessUserMessage(t.Context(), thread, "original")
+	require.NoError(t, err)
+	assert.Equal(t, "rewritten message", message)
+	require.NoError(t, DispatchAgentStart(t.Context(), thread))
+	require.NoError(t, DispatchTurnStart(t.Context(), thread, 3))
+	decision, err := ProcessAgentInit(t.Context(), thread, "base prompt")
+	require.NoError(t, err)
+	assert.Equal(t, AgentInitDecision{SystemPrompt: "runner prompt", AllowedTools: []string{"remote_tool"}, ToolsModified: true}, decision)
+	assert.Equal(t, []string{"remote_tool", "openai_web_search"}, environment.agentInitAllowedTools)
+	assert.Equal(t, []string{"remote_tool"}, thread.metadata[extensionAllowedToolsMetadataKey])
+	prompt, err := ProcessSystemPrompt(t.Context(), thread, "base prompt")
+	require.NoError(t, err)
+	assert.Equal(t, "runner prompt", prompt)
+	require.NoError(t, TriggerTurnEnd(t.Context(), thread, "final response", 3))
+	require.NoError(t, TriggerTurnEnd(t.Context(), thread, "", 4))
+
+	handler := &recordingHandler{}
+	continued, err := HandleAgentStopFollowUps(t.Context(), thread, handler)
+	require.NoError(t, err)
+	assert.True(t, continued)
+	assert.Equal(t, []string{"inspect the logs", "retry the check"}, thread.userMessages)
+	require.Len(t, handler.texts, 2)
+	assert.Contains(t, handler.texts[0], "inspect the logs")
+	assert.Equal(t, 1, environment.agentStartCalls)
+	assert.Equal(t, []int{3}, environment.turnStartCalls)
+	assert.Equal(t, []string{"final response"}, environment.turnEndCalls)
+}
+
+func TestTurnFlowPropagatesEnvironmentFailures(t *testing.T) {
+	sentinel := errors.New("runner unavailable")
+	environment := &recordingAgentEnvironment{
+		open:              true,
+		processMessageErr: sentinel,
+		agentStartErr:     sentinel,
+		turnStartErr:      sentinel,
+		agentInitErr:      sentinel,
+		turnEndErr:        sentinel,
+		agentEndErr:       sentinel,
+	}
+	thread := &environmentThreadStub{threadStub: &threadStub{}, environment: environment}
+
+	_, err := ProcessUserMessage(t.Context(), thread, "message")
+	require.ErrorIs(t, err, sentinel)
+	require.ErrorIs(t, DispatchAgentStart(t.Context(), thread), sentinel)
+	require.ErrorIs(t, DispatchTurnStart(t.Context(), thread, 1), sentinel)
+	_, err = ProcessAgentInit(t.Context(), thread, "prompt")
+	require.ErrorIs(t, err, sentinel)
+	require.ErrorIs(t, TriggerTurnEnd(t.Context(), thread, "output", 1), sentinel)
+	_, err = HandleAgentStopFollowUps(t.Context(), thread, &recordingHandler{})
+	require.ErrorIs(t, err, sentinel)
+
+	message, err := ProcessUserMessage(t.Context(), nil, "unchanged")
+	require.NoError(t, err)
+	assert.Equal(t, "unchanged", message)
 }
 
 func TestBase64ImageSourceMediaType(t *testing.T) {

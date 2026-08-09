@@ -2,6 +2,7 @@ package base
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -282,4 +283,148 @@ func TestOpenEnvironmentAppliesPinnedRunnerConfiguration(t *testing.T) {
 	assert.Equal(t, "runner prompt", config.SyspromptContent)
 	assert.True(t, config.SyspromptInline)
 	assert.Equal(t, map[string]string{"project": "kodelet"}, config.SyspromptArgs)
+}
+
+func TestExecuteEnvironmentToolForwardsUpdatesAndNormalizesResults(t *testing.T) {
+	var lateUpdate agentenv.ToolUpdateSink
+	environment := &recordingAgentEnvironment{
+		open: true,
+		manifest: agentenv.Manifest{
+			WorkingDirectory: "/runner/workspace",
+			Tools: []agentenv.ToolDefinition{{
+				Name:      "remote_tool",
+				Placement: agentenv.ToolPlacementEnvironment,
+			}},
+		},
+		executeTool: func(_ context.Context, request agentenv.ToolRequest, updates agentenv.ToolUpdateSink) (agentenv.ToolExecution, error) {
+			assert.Equal(t, "remote_tool", request.Name)
+			assert.Equal(t, "call-remote", request.ToolCallID)
+			lateUpdate = updates
+			updates(agentenv.ToolUpdate{})
+			updates(agentenv.ToolUpdate{Result: tooltypes.BaseToolResult{Result: "running"}})
+			updates(agentenv.ToolUpdate{
+				Result:           tooltypes.BaseToolResult{Result: "replaced"},
+				StructuredResult: tooltypes.StructuredToolResult{ToolName: "remote_tool", Success: true},
+				Modified:         true,
+			})
+			return agentenv.ToolExecution{
+				Input:            `{"path":"normalized"}`,
+				Result:           tooltypes.BaseToolResult{Result: "complete"},
+				StructuredResult: tooltypes.StructuredToolResult{ToolName: "remote_tool", Success: true},
+			}, nil
+		},
+	}
+	thread := &environmentThreadStub{
+		threadStub: &threadStub{
+			config:         llmtypes.Config{RecipeName: "recipe"},
+			conversationID: "conversation-remote",
+			metadata:       map[string]any{"recipe_name": "metadata-recipe"},
+		},
+		environment: environment,
+	}
+	handler := &toolUpdateHandler{}
+
+	execution := ExecuteEnvironmentToolWithHandler(
+		t.Context(),
+		thread,
+		renderers.NewRendererRegistry(),
+		"remote_tool",
+		`{"path":"original"}`,
+		"call-remote",
+		handler,
+	)
+
+	require.NoError(t, execution.Err)
+	assert.Equal(t, `{"path":"normalized"}`, execution.Input)
+	assert.Equal(t, "complete", execution.Result.GetResult())
+	assert.Equal(t, "remote_tool", execution.StructuredResult.ToolName)
+	assert.NotEmpty(t, execution.RenderedOutput)
+	require.Len(t, handler.updates, 2)
+	assert.Equal(t, "running", handler.updates[0])
+	require.NotNil(t, lateUpdate)
+	lateUpdate(agentenv.ToolUpdate{Result: tooltypes.BaseToolResult{Result: "too late"}})
+	assert.Len(t, handler.updates, 2)
+}
+
+func TestExecuteEnvironmentToolHandlesUnavailableAndFailedRunnerTools(t *testing.T) {
+	environment := &recordingAgentEnvironment{
+		open:     true,
+		manifest: agentenv.Manifest{WorkingDirectory: "/runner/workspace"},
+	}
+	thread := &environmentThreadStub{threadStub: &threadStub{}, environment: environment}
+	registry := renderers.NewRendererRegistry()
+
+	unavailable := ExecuteEnvironmentTool(t.Context(), thread, registry, "get_goal", `{}`, "call-goal")
+	require.NotNil(t, unavailable.Result)
+	assert.True(t, unavailable.Result.IsError())
+	assert.Contains(t, unavailable.Result.GetError(), "not available in the active run")
+
+	sentinel := errors.New("runner link closed")
+	environment.manifest.Tools = []agentenv.ToolDefinition{{Name: "remote", Placement: agentenv.ToolPlacementEnvironment}}
+	environment.executeTool = func(context.Context, agentenv.ToolRequest, agentenv.ToolUpdateSink) (agentenv.ToolExecution, error) {
+		return agentenv.ToolExecution{}, sentinel
+	}
+	failed := ExecuteEnvironmentTool(t.Context(), thread, registry, "remote", `{}`, "call-remote")
+	require.ErrorIs(t, failed.Err, sentinel)
+	assert.Equal(t, `{}`, failed.Input)
+
+	environment.executeTool = func(_ context.Context, request agentenv.ToolRequest, _ agentenv.ToolUpdateSink) (agentenv.ToolExecution, error) {
+		return agentenv.ToolExecution{Input: request.Input}, nil
+	}
+	missing := ExecuteEnvironmentTool(t.Context(), thread, registry, "remote", `{}`, "call-missing")
+	require.NotNil(t, missing.Result)
+	assert.True(t, missing.Result.IsError())
+	assert.Contains(t, missing.Result.GetError(), "returned no tool result")
+}
+
+func TestExecuteControlPlaneToolHonorsEnvironmentPolicyAndResultMutation(t *testing.T) {
+	mutated := tooltypes.StructuredToolResult{ToolName: "get_goal", Success: false, Error: "redacted by runner policy"}
+	environment := &recordingAgentEnvironment{
+		open: true,
+		manifest: agentenv.Manifest{
+			WorkingDirectory: "/runner/workspace",
+			Tools: []agentenv.ToolDefinition{{
+				Name:      "get_goal",
+				Placement: agentenv.ToolPlacementControlPlane,
+			}},
+		},
+		toolCallDecision:   agentenv.ToolCallDecision{Blocked: true, Reason: "policy denied", Input: `{"changed":true}`},
+		toolResultDecision: agentenv.ToolOutputDecision{StructuredResult: mutated, Modified: true, Accepted: true},
+	}
+	thread := &environmentThreadStub{threadStub: &threadStub{conversationID: "conversation"}, environment: environment}
+
+	execution := ExecuteEnvironmentTool(t.Context(), thread, renderers.NewRendererRegistry(), "get_goal", `{}`, "call-goal")
+
+	require.NoError(t, execution.Err)
+	assert.Equal(t, `{"changed":true}`, execution.Input)
+	assert.True(t, execution.Result.IsError())
+	assert.Equal(t, "redacted by runner policy", execution.Result.GetError())
+	assert.Equal(t, mutated, execution.StructuredResult)
+}
+
+func TestControlPlaneStateAndStructuredResultAdapter(t *testing.T) {
+	environment := &recordingAgentEnvironment{
+		open:     true,
+		manifest: agentenv.Manifest{WorkingDirectory: "/runner/workspace"},
+	}
+	state := controlPlaneToolState(&threadStub{config: llmtypes.Config{Model: "test-model"}}, environment)
+	assert.NotEmpty(t, state.BasicTools())
+	assert.NotEmpty(t, state.Tools())
+	assert.Nil(t, state.DiscoverContexts())
+	assert.Equal(t, "test-model", state.GetLLMConfig().(llmtypes.Config).Model)
+	assert.Equal(t, "/runner/workspace", state.WorkingDirectory())
+	state.LockFile("file")
+	state.UnlockFile("file")
+
+	result := StructuredResultToolResult{
+		Result: tooltypes.StructuredToolResult{ToolName: "remote", Success: false, Error: "failed"},
+	}
+	assert.True(t, result.IsError())
+	assert.Equal(t, "failed", result.GetError())
+	assert.NotEmpty(t, result.GetResult())
+	assert.Contains(t, result.AssistantFacing(), "failed")
+	assert.Equal(t, result.Result, result.StructuredData())
+	require.Len(t, result.ContentParts(), 1)
+	assert.Equal(t, result.GetResult(), result.ContentParts()[0].Text)
+	assert.Equal(t, result.GetResult(), result.String())
 }

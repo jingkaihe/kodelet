@@ -11,12 +11,14 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
+	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -451,6 +453,102 @@ func TestCommitRunnerAffinityOnlyReleasesPendingBindingWhenConversationIsMissing
 	require.ErrorIs(t, err, convtypes.ErrConversationNotFound)
 	_, found = server.runnerRegistry.RunnerForConversation("conversation-missing")
 	assert.False(t, found)
+}
+
+func TestWebUIChatRunnerResolvesAffinityBeforeChatValidation(t *testing.T) {
+	server := newRunnerTestServer(t, "")
+	registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
+		ProtocolVersions: []int{protocol.Version},
+		Host:             protocol.Host{InstanceID: "host-chat", Hostname: "host", OS: "linux", Arch: "amd64"},
+		Workspace:        protocol.Workspace{Path: "/work/chat", Name: "chat"},
+	}, newRunnerAPITestLink())
+	require.NoError(t, err)
+	require.NoError(t, server.runnerRegistry.BindConversationWithEnvironmentProfile(t.Context(), "conversation-chat", registration.RunnerID, "gpu"))
+
+	defaultRunner := NewDefaultChatRunner("")
+	runner := &webUIChatRunner{runner: defaultRunner, server: server}
+	defaultRunner.SetEnvironmentResolver(runner)
+	active := newActiveChatRun(func() {})
+	active.uiInput = newWebUIInputBroker("conversation-chat", &recordingChatSink{})
+	server.activeChats["conversation-chat"] = active
+
+	conversationID, err := runner.Run(t.Context(), ChatRequest{
+		ConversationID: "conversation-chat",
+		Message:        " ",
+		ClientCapabilities: &chat.ChatClientCapabilities{
+			InteractiveUI: true,
+		},
+	}, &recordingChatSink{})
+	require.ErrorContains(t, err, "message cannot be empty")
+	assert.Equal(t, "conversation-chat", conversationID)
+	affinity, found, err := server.runnerRegistry.ResolveConversationAffinity(t.Context(), conversationID)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, registration.RunnerID, affinity.RunnerID)
+	assert.Equal(t, "gpu", affinity.EnvironmentProfile)
+
+	var nilRunner *webUIChatRunner
+	conversationID, err = nilRunner.Run(t.Context(), ChatRequest{ConversationID: "local-conversation", Message: " "}, &recordingChatSink{})
+	require.ErrorContains(t, err, "message cannot be empty")
+	assert.Equal(t, "local-conversation", conversationID)
+
+	assert.True(t, chatSupportsInteractiveUI(ChatRequest{ClientCapabilities: &chat.ChatClientCapabilities{InteractiveUI: true}}))
+	assert.False(t, chatSupportsInteractiveUI(ChatRequest{}))
+	require.NoError(t, runner.CloseConversation("conversation-chat"))
+	require.NoError(t, runner.Close())
+	require.NoError(t, runner.Close())
+	require.NoError(t, (*webUIChatRunner)(nil).CloseConversation("conversation-chat"))
+}
+
+func TestWebUIChatRunnerResolveEnvironmentValidatesRunnerState(t *testing.T) {
+	runner := &webUIChatRunner{}
+	_, err := runner.ResolveEnvironment(t.Context(), ChatRequest{}, "conversation", llmtypes.Config{}, "")
+	require.ErrorContains(t, err, "runner id is required")
+	_, err = runner.ResolveEnvironment(t.Context(), ChatRequest{RunnerID: "runner"}, "conversation", llmtypes.Config{}, "")
+	require.ErrorContains(t, err, "runner registry is unavailable")
+
+	server := newRunnerTestServer(t, "")
+	runner.server = server
+	_, err = runner.ResolveEnvironment(t.Context(), ChatRequest{RunnerID: "missing"}, "conversation", llmtypes.Config{}, "")
+	require.ErrorContains(t, err, "runner not found")
+
+	link := newRunnerAPITestLink()
+	registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
+		ProtocolVersions: []int{protocol.Version},
+		Host:             protocol.Host{InstanceID: "host-environment", Hostname: "host", OS: "linux", Arch: "amd64"},
+		Workspace:        protocol.Workspace{Path: "/work/environment", Name: "environment"},
+	}, link)
+	require.NoError(t, err)
+	environment, err := runner.ResolveEnvironment(t.Context(), ChatRequest{
+		RunnerID: registration.RunnerID,
+		ClientCapabilities: &chat.ChatClientCapabilities{
+			InteractiveUI:      true,
+			PersistentSurfaces: true,
+		},
+	}, "conversation", llmtypes.Config{}, "")
+	require.NoError(t, err)
+	require.NotNil(t, environment)
+
+	server.runnerRegistry.Detach(registration.RunnerID, registration.ConnectionID, registration.Generation, nil)
+	_, err = runner.ResolveEnvironment(t.Context(), ChatRequest{RunnerID: registration.RunnerID}, "conversation", llmtypes.Config{}, "")
+	require.ErrorContains(t, err, "runner is offline")
+
+	_, err = server.runnerRegistry.Register(protocol.RegisterParams{
+		ProtocolVersions: []int{protocol.Version + 1},
+		Host:             protocol.Host{InstanceID: "host-incompatible", Hostname: "host", OS: "linux", Arch: "amd64"},
+		Workspace:        protocol.Workspace{Path: "/work/incompatible", Name: "incompatible"},
+	}, newRunnerAPITestLink())
+	require.ErrorContains(t, err, "does not support protocol version")
+	var incompatibleID string
+	for _, registered := range server.runnerRegistry.Runners() {
+		if registered.Status == runnerregistry.RunnerStatusIncompatible {
+			incompatibleID = registered.ID
+			break
+		}
+	}
+	require.NotEmpty(t, incompatibleID)
+	_, err = runner.ResolveEnvironment(t.Context(), ChatRequest{RunnerID: incompatibleID}, "conversation", llmtypes.Config{}, "")
+	require.ErrorContains(t, err, "does not support protocol version")
 }
 
 func openRunnerUIRun(t *testing.T, server *Server) (protocol.RegisterResult, *runnerUIEventSink, *webUIInputBroker) {

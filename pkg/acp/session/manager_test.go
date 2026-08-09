@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
+	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -153,4 +154,81 @@ func TestManagerBuildLLMConfigForRecordAppliesSnapshot(t *testing.T) {
 	assert.Equal(t, "/tmp/project", config.WorkingDirectory)
 	require.NotNil(t, config.Skills)
 	assert.False(t, config.Skills.Enabled)
+}
+
+func TestManagerCreatesAndLoadsSessionsWithLocalEnvironment(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	}()
+	viper.Reset()
+	viper.Set("provider", "anthropic")
+	viper.Set("model", "claude-sonnet-4-6")
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+
+	store := &fakeConversationStore{loads: map[string]convtypes.ConversationRecord{
+		"loaded-session": {
+			ID:       "loaded-session",
+			Provider: "anthropic",
+			Metadata: map[string]any{"model": "claude-sonnet-4-6"},
+		},
+	}}
+	manager := &Manager{
+		config: ManagerConfig{
+			Provider:     "anthropic",
+			Model:        "claude-sonnet-4-6",
+			NoExtensions: true,
+			MaxTurns:     9,
+			CompactRatio: 0.65,
+		},
+		sessions: make(map[acptypes.SessionID]*Session),
+		store:    store,
+	}
+	workspace := t.TempDir()
+
+	created, err := manager.NewSession(t.Context(), acptypes.NewSessionRequest{CWD: workspace})
+	require.NoError(t, err)
+	assert.NotEmpty(t, created.ID)
+	assert.Equal(t, workspace, created.CWD)
+	assert.Equal(t, 9, created.maxTurns)
+	assert.Equal(t, 0.65, created.compactRatio)
+	assert.Nil(t, created.Extensions)
+	assert.True(t, created.Thread.IsPersisted())
+	environmentThread, ok := created.Thread.(interface{ GetEnvironment() agentenv.Environment })
+	require.True(t, ok)
+	require.NotNil(t, environmentThread.GetEnvironment())
+	stored, err := manager.GetSession(created.ID)
+	require.NoError(t, err)
+	assert.Same(t, created, stored)
+
+	loaded, err := manager.LoadSession(t.Context(), acptypes.LoadSessionRequest{SessionID: "loaded-session", CWD: workspace})
+	require.NoError(t, err)
+	assert.Equal(t, acptypes.SessionID("loaded-session"), loaded.ID)
+	assert.Equal(t, workspace, loaded.CWD)
+	assert.True(t, loaded.Thread.IsPersisted())
+	assert.Equal(t, "loaded-session", loaded.Thread.GetConversationID())
+
+	require.NoError(t, manager.Close(t.Context()))
+	assert.True(t, store.isClosed())
+}
+
+func TestManagerBuildExtensionRuntimeHonorsConfiguration(t *testing.T) {
+	assert.Nil(t, (&Manager{config: ManagerConfig{NoExtensions: true}}).buildExtensionRuntime(t.Context(), t.TempDir()))
+
+	originalSettings := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	}()
+	viper.Reset()
+	viper.Set("extensions.enabled", false)
+	runtime := (&Manager{}).buildExtensionRuntime(t.Context(), t.TempDir())
+	require.NotNil(t, runtime)
+	require.NoError(t, runtime.Close())
 }

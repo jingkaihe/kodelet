@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	conversationsqlite "github.com/jingkaihe/kodelet/pkg/conversations/sqlite"
 	"github.com/jingkaihe/kodelet/pkg/db"
@@ -163,6 +164,8 @@ func TestNewDefaultChatRunnerStoresDefaultCWD(t *testing.T) {
 
 	require.NotNil(t, runner)
 	assert.Equal(t, "/workspace", runner.defaultCWD)
+	assert.Equal(t, "/workspace", runner.DefaultCWD())
+	assert.Empty(t, (*DefaultChatRunner)(nil).DefaultCWD())
 }
 
 func TestNewDefaultChatRunnerStoresExtensionRuntimeProvider(t *testing.T) {
@@ -171,6 +174,49 @@ func TestNewDefaultChatRunnerStoresExtensionRuntimeProvider(t *testing.T) {
 
 	require.NotNil(t, runner)
 	assert.Same(t, provider, runner.extensionRuntimes)
+	assert.Same(t, provider, runner.ExtensionRuntimeProvider())
+	assert.Nil(t, (*DefaultChatRunner)(nil).ExtensionRuntimeProvider())
+}
+
+type staticEnvironmentResolver struct{}
+
+func (staticEnvironmentResolver) ResolveEnvironment(context.Context, ChatRequest, string, llmtypes.Config, string) (agentenv.Environment, error) {
+	return nil, errors.New("environment resolution is not implemented")
+}
+
+type recordingEnvironmentResolver struct {
+	environment    agentenv.Environment
+	request        ChatRequest
+	conversationID string
+	config         llmtypes.Config
+}
+
+func (r *recordingEnvironmentResolver) ResolveEnvironment(_ context.Context, request ChatRequest, conversationID string, config llmtypes.Config, _ string) (agentenv.Environment, error) {
+	r.request = request
+	r.conversationID = conversationID
+	r.config = config
+	return r.environment, nil
+}
+
+type directCommandEnvironment struct {
+	agentenv.Environment
+	request agentenv.CommandRequest
+	result  agentenv.CommandResult
+}
+
+func (e *directCommandEnvironment) IsOpen() bool { return false }
+func (e *directCommandEnvironment) ExecuteCommand(_ context.Context, request agentenv.CommandRequest) (agentenv.CommandResult, error) {
+	e.request = request
+	return e.result, nil
+}
+
+func TestDefaultChatRunnerStoresEnvironmentResolver(t *testing.T) {
+	runner := NewDefaultChatRunner("")
+	resolver := staticEnvironmentResolver{}
+
+	runner.SetEnvironmentResolver(resolver)
+	assert.Equal(t, resolver, runner.environmentResolver)
+	(*DefaultChatRunner)(nil).SetEnvironmentResolver(resolver)
 }
 
 func TestRunDefaultChatPassesConversationContextToRuntimeProvider(t *testing.T) {
@@ -208,6 +254,64 @@ func TestRunDefaultChatPassesConversationContextToRuntimeProvider(t *testing.T) 
 	assert.Equal(t, "anthropic", provider.callContext.Provider)
 	assert.Equal(t, "claude-test", provider.callContext.Model)
 	assert.Equal(t, "main", provider.callContext.InvokedBy)
+}
+
+func TestDefaultChatRunnerExecutesRemoteDirectCommandAndPersistsAffinityMetadata(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	}()
+	viper.Reset()
+	viper.Set("provider", "anthropic")
+	viper.Set("model", "claude-sonnet-4-6")
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
+
+	environment := &directCommandEnvironment{result: agentenv.CommandResult{
+		Matched:     true,
+		Action:      agentenv.CommandActionRespond,
+		CommandName: "runner-status",
+		Response:    "runner ready",
+		Display:     "/runner-status",
+	}}
+	resolver := &recordingEnvironmentResolver{environment: environment}
+	runner := NewDefaultChatRunner("")
+	runner.SetEnvironmentResolver(resolver)
+	t.Cleanup(func() { require.NoError(t, runner.Close()) })
+	sink := &recordingChatSink{}
+
+	conversationID, err := runner.Run(t.Context(), ChatRequest{
+		ConversationID:     "conversation-remote-command",
+		RunnerID:           "runner-one",
+		EnvironmentProfile: "gpu",
+		Message:            "/runner-status",
+	}, sink)
+	require.NoError(t, err)
+	assert.Equal(t, "conversation-remote-command", conversationID)
+	assert.Equal(t, "runner-one", resolver.request.RunnerID)
+	assert.Equal(t, conversationID, resolver.conversationID)
+	assert.Empty(t, resolver.config.WorkingDirectory)
+	assert.Equal(t, "/runner-status", environment.request.Message)
+	assert.Equal(t, "gpu", environment.request.RunSpec.EnvironmentProfile)
+	require.Len(t, sink.events, 2)
+	assert.Equal(t, "conversation", sink.events[0].Kind)
+	assert.Equal(t, "runner ready", sink.events[1].Content)
+
+	service, err := conversations.GetDefaultConversationService(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	record, err := service.GetConversation(t.Context(), conversationID)
+	require.NoError(t, err)
+	assert.Equal(t, "runner-one", record.Metadata[RunnerIDMetadataKey])
+	assert.Equal(t, "gpu", record.Metadata[EnvironmentProfileMetadataKey])
+
+	config, err := ResolveRemoteConfigWithReasoning(t.Context(), "", "", "high")
+	require.NoError(t, err)
+	assert.Equal(t, "high", config.ReasoningEffort)
 }
 
 func TestDefaultChatRunnerReusesAndClosesConversationThread(t *testing.T) {
@@ -739,6 +843,27 @@ func TestAddWebChatDisplayMetadata(t *testing.T) {
 	assert.Equal(t, conversations.MessageDisplayKindGoal, display.Kind)
 	assert.Equal(t, goalUpdate.Display, display.Text)
 	assert.Equal(t, goals.SlashCommandName, display.Command)
+
+	environmentResult := agentenv.CommandResult{
+		Matched:         true,
+		CommandName:     "runner-review",
+		Prompt:          "Review on the runner",
+		Display:         "/runner-review staged",
+		AllowedTools:    []string{"file_read"},
+		AllowedCommands: []string{"git diff --cached"},
+	}
+	AddEnvironmentCommandDisplay(thread, environmentResult)
+	display, ok = conversations.LookupMessageDisplay(thread.metadata, environmentResult.Prompt)
+	require.True(t, ok)
+	assert.Equal(t, environmentResult.Display, display.Text)
+	assert.Equal(t, environmentResult.CommandName, display.Command)
+
+	config := llmtypes.Config{}
+	ApplyCommandRestrictions(t.Context(), &config, environmentResult)
+	assert.Equal(t, []string{"file_read"}, config.AllowedTools)
+	assert.Equal(t, []string{"git diff --cached"}, config.AllowedCommands)
+	AddEnvironmentCommandDisplay(nil, environmentResult)
+	AddEnvironmentCommandDisplay(thread, agentenv.CommandResult{})
 }
 
 func TestChatMessageHandlerEmitsStreamingEventsAndBroadcasts(t *testing.T) {

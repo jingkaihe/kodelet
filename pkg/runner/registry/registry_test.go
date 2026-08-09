@@ -1261,6 +1261,97 @@ func TestResolveConversationAffinityObservesExternalDeletion(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestRegistryCallRunRoutesOnlyToActiveRunAndForgetsAffinity(t *testing.T) {
+	registry := newTestRegistry(t)
+	link := newFakeLink()
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), link)
+	require.NoError(t, err)
+	configureManifestLink(t, link, registration)
+	markRunnerReady(t, registry, registration)
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-one", "conversation-one"))
+	require.NoError(t, err)
+
+	link.mu.Lock()
+	previousCall := link.call
+	link.call = func(ctx context.Context, method string, params any, result any) error {
+		if method == "runner.custom" {
+			assert.Equal(t, map[string]string{"key": "value"}, params)
+			(*result.(*map[string]bool))["ok"] = true
+			return nil
+		}
+		return previousCall(ctx, method, params, result)
+	}
+	link.mu.Unlock()
+	result := map[string]bool{}
+	require.NoError(t, registry.CallRun(t.Context(), "run-one", "runner.custom", map[string]string{"key": "value"}, &result))
+	assert.True(t, result["ok"])
+
+	require.NoError(t, registry.CloseRun(t.Context(), "run-one", RunStatusSucceeded, nil))
+	require.ErrorContains(t, registry.CallRun(t.Context(), "run-one", "runner.custom", nil, nil), "not active")
+
+	require.NoError(t, registry.BindConversation(t.Context(), "conversation-forget", registration.RunnerID))
+	_, found := registry.RunnerForConversation("conversation-forget")
+	require.True(t, found)
+	registry.ForgetConversation("conversation-forget")
+	_, found = registry.RunnerForConversation("conversation-forget")
+	assert.False(t, found)
+	registry.ForgetConversation(" ")
+	(*Registry)(nil).ForgetConversation("conversation")
+}
+
+func TestConversationAffinityProfileLockAndReferencedErrorDiagnostics(t *testing.T) {
+	registry := newTestRegistry(t)
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), newFakeLink())
+	require.NoError(t, err)
+	require.NoError(t, registry.BindConversationWithEnvironmentProfile(t.Context(), "conversation-one", registration.RunnerID, "default"))
+	err = registry.BindConversationWithEnvironmentProfile(t.Context(), "conversation-one", registration.RunnerID, "gpu")
+	require.ErrorContains(t, err, `locked to "default"`)
+	require.ErrorContains(t, err, `resume with "gpu"`)
+
+	assert.Equal(t, "runner is referenced by conversations", (*RunnerReferencedError)(nil).Error())
+	referenced := (&RunnerReferencedError{
+		RunnerID:        "runner-one",
+		ConversationIDs: []string{"conversation-7", "conversation-2", "conversation-6", "conversation-1", "conversation-5", "conversation-4", "conversation-3"},
+	}).Error()
+	assert.Contains(t, referenced, "runner runner-one is bound to 7 conversation(s)")
+	assert.Contains(t, referenced, "conversation-1, conversation-2, conversation-3, conversation-4, conversation-5, and 2 more")
+}
+
+func TestSQLitePersistenceReadsConversationAffinity(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "storage.db")
+	database, err := db.Open(t.Context(), dbPath)
+	require.NoError(t, err)
+	require.NoError(t, db.NewMigrationRunner(database).Run(t.Context(), migrations.All()))
+	require.NoError(t, database.Close())
+
+	persistence, err := NewSQLitePersistence(t.Context(), dbPath, "owner-one")
+	require.NoError(t, err)
+	now := time.Date(2026, time.August, 8, 12, 0, 0, 0, time.UTC)
+	require.NoError(t, persistence.SaveRunner(t.Context(), Runner{
+		ID:        "runner-one",
+		Host:      protocol.Host{InstanceID: "host-one"},
+		Workspace: protocol.Workspace{Path: "/work/project", Name: "project"},
+		Status:    RunnerStatusOffline,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}))
+	require.NoError(t, persistence.BindConversation(t.Context(), "conversation-one", "runner-one", "gpu", now))
+
+	affinity, found, err := persistence.ConversationAffinity(t.Context(), " conversation-one ")
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, ConversationAffinity{RunnerID: "runner-one", EnvironmentProfile: "gpu"}, affinity)
+	_, found, err = persistence.ConversationAffinity(t.Context(), "missing")
+	require.NoError(t, err)
+	assert.False(t, found)
+
+	require.NoError(t, persistence.Close())
+	_, _, err = persistence.ConversationAffinity(t.Context(), "conversation-one")
+	require.ErrorContains(t, err, "runner persistence is closed")
+	_, _, err = (*SQLitePersistence)(nil).ConversationAffinity(t.Context(), "conversation-one")
+	require.ErrorContains(t, err, "runner persistence is closed")
+}
+
 func TestValidateManifestRejectsInvalidRunnerContracts(t *testing.T) {
 	params := testRunOpenParams("run-one", "conversation-one")
 	base := runnerpayload.Manifest{
