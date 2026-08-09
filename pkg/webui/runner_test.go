@@ -14,6 +14,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -281,7 +282,7 @@ func TestHandleRunnerUIRequestRoutesInteractivePrompts(t *testing.T) {
 		{
 			name:      "input",
 			method:    protocol.MethodUIInput,
-			params:    protocol.UIInputParams{RunID: "run-ui", Request: extensions.UIInputRequest{ID: "input-1", Title: "Input"}},
+			params:    runnerpayload.UIInputParams{RunID: "run-ui", Request: extensions.UIInputRequest{ID: "input-1", Title: "Input"}},
 			eventKind: "ui-input-request",
 			requestID: "input-1",
 			response:  extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted, Value: "answer"},
@@ -289,7 +290,7 @@ func TestHandleRunnerUIRequestRoutesInteractivePrompts(t *testing.T) {
 		{
 			name:      "confirm",
 			method:    protocol.MethodUIConfirm,
-			params:    protocol.UIConfirmParams{RunID: "run-ui", Request: extensions.UIConfirmRequest{ID: "confirm-1", Title: "Confirm"}},
+			params:    runnerpayload.UIConfirmParams{RunID: "run-ui", Request: extensions.UIConfirmRequest{ID: "confirm-1", Title: "Confirm"}},
 			eventKind: "ui-confirm-request",
 			requestID: "confirm-1",
 			response:  extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted, Confirmed: true},
@@ -297,7 +298,7 @@ func TestHandleRunnerUIRequestRoutesInteractivePrompts(t *testing.T) {
 		{
 			name:      "select",
 			method:    protocol.MethodUISelect,
-			params:    protocol.UISelectParams{RunID: "run-ui", Request: extensions.UISelectRequest{ID: "select-1", Title: "Select", Options: []string{"one"}}},
+			params:    runnerpayload.UISelectParams{RunID: "run-ui", Request: extensions.UISelectRequest{ID: "select-1", Title: "Select", Options: []string{"one"}}},
 			eventKind: "ui-select-request",
 			requestID: "select-1",
 			response:  extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted, Value: "one"},
@@ -335,7 +336,7 @@ func TestHandleRunnerUIRequestRoutesInteractivePrompts(t *testing.T) {
 		})
 	}
 
-	notify, rpcErr := server.HandleRunnerUIRequest(t.Context(), registration.RunnerID, protocol.MethodUINotify, mustRunnerJSON(t, protocol.UINotifyParams{
+	notify, rpcErr := server.HandleRunnerUIRequest(t.Context(), registration.RunnerID, protocol.MethodUINotify, mustRunnerJSON(t, runnerpayload.UINotifyParams{
 		RunID: "run-ui", Request: extensions.UINotifyRequest{Title: "Notice", Message: "done"},
 	}))
 	require.Nil(t, rpcErr)
@@ -356,14 +357,14 @@ func TestHandleRunnerUIRequestValidatesRunAndPersistentCapabilities(t *testing.T
 	server.activeChatsMu.Lock()
 	delete(server.activeChats, "conversation-ui")
 	server.activeChatsMu.Unlock()
-	value, rpcErr := server.HandleRunnerUIRequest(t.Context(), registration.RunnerID, protocol.MethodUIInput, mustRunnerJSON(t, protocol.UIInputParams{
+	value, rpcErr := server.HandleRunnerUIRequest(t.Context(), registration.RunnerID, protocol.MethodUIInput, mustRunnerJSON(t, runnerpayload.UIInputParams{
 		RunID: "run-ui", Request: extensions.UIInputRequest{ID: "input-1", Title: "Input"},
 	}))
 	require.Nil(t, rpcErr)
 	response := value.(extensions.UIInputResponse)
 	assert.Equal(t, extensions.UIInputStatusUnavailable, response.Status)
 
-	value, rpcErr = server.HandleRunnerUIRequest(t.Context(), registration.RunnerID, protocol.MethodUITranscriptAppend, mustRunnerJSON(t, protocol.UITranscriptAppendParams{RunID: "run-ui"}))
+	value, rpcErr = server.HandleRunnerUIRequest(t.Context(), registration.RunnerID, protocol.MethodUITranscriptAppend, mustRunnerJSON(t, runnerpayload.UITranscriptAppendParams{RunID: "run-ui"}))
 	require.Nil(t, rpcErr)
 	assert.Contains(t, value.(extensions.UITranscriptAppendResponse).Reason, "not available")
 	for _, method := range []string{
@@ -382,10 +383,10 @@ func TestHandleRunnerUIRequestValidatesRunAndPersistentCapabilities(t *testing.T
 	_, rpcErr = server.HandleRunnerUIRequest(t.Context(), registration.RunnerID, protocol.MethodUIInput, json.RawMessage(`not-json`))
 	require.NotNil(t, rpcErr)
 	assert.Equal(t, protocol.ErrorCodeInvalidParams, rpcErr.Code)
-	_, rpcErr = server.HandleRunnerUIRequest(t.Context(), registration.RunnerID, protocol.MethodUIInput, mustRunnerJSON(t, protocol.UIInputParams{}))
+	_, rpcErr = server.HandleRunnerUIRequest(t.Context(), registration.RunnerID, protocol.MethodUIInput, mustRunnerJSON(t, runnerpayload.UIInputParams{}))
 	require.NotNil(t, rpcErr)
 	assert.Equal(t, protocol.ErrorCodeInvalidParams, rpcErr.Code)
-	_, rpcErr = server.HandleRunnerUIRequest(t.Context(), "another-runner", protocol.MethodUIInput, mustRunnerJSON(t, protocol.UIInputParams{RunID: "run-ui"}))
+	_, rpcErr = server.HandleRunnerUIRequest(t.Context(), "another-runner", protocol.MethodUIInput, mustRunnerJSON(t, runnerpayload.UIInputParams{RunID: "run-ui"}))
 	require.NotNil(t, rpcErr)
 	assert.Equal(t, protocol.ErrorCodeStale, rpcErr.Code)
 	_, rpcErr = server.HandleRunnerUIRequest(t.Context(), registration.RunnerID, "ui.unknown", json.RawMessage(`{}`))
@@ -393,12 +394,12 @@ func TestHandleRunnerUIRequestValidatesRunAndPersistentCapabilities(t *testing.T
 	assert.Equal(t, protocol.ErrorCodeMethodNotFound, rpcErr.Code)
 
 	require.NoError(t, server.runnerRegistry.CloseRun(t.Context(), "run-ui", runnerregistry.RunStatusSucceeded, nil))
-	_, rpcErr = server.HandleRunnerUIRequest(t.Context(), registration.RunnerID, protocol.MethodUIInput, mustRunnerJSON(t, protocol.UIInputParams{RunID: "run-ui"}))
+	_, rpcErr = server.HandleRunnerUIRequest(t.Context(), registration.RunnerID, protocol.MethodUIInput, mustRunnerJSON(t, runnerpayload.UIInputParams{RunID: "run-ui"}))
 	require.NotNil(t, rpcErr)
 	assert.Equal(t, protocol.ErrorCodeStale, rpcErr.Code)
 
 	nilServer := &Server{}
-	_, rpcErr = nilServer.HandleRunnerUIRequest(t.Context(), registration.RunnerID, protocol.MethodUIInput, mustRunnerJSON(t, protocol.UIInputParams{RunID: "run-ui"}))
+	_, rpcErr = nilServer.HandleRunnerUIRequest(t.Context(), registration.RunnerID, protocol.MethodUIInput, mustRunnerJSON(t, runnerpayload.UIInputParams{RunID: "run-ui"}))
 	require.NotNil(t, rpcErr)
 	assert.Equal(t, protocol.ErrorCodeUnavailable, rpcErr.Code)
 	assert.Nil(t, nilServer.runnerUIBroker("run-ui"))
@@ -434,19 +435,19 @@ func openRunnerUIRun(t *testing.T, server *Server) (protocol.RegisterResult, *ru
 		switch method {
 		case protocol.MethodRunOpen:
 			request := params.(protocol.RunOpenParams)
-			manifest := protocol.Manifest{
+			manifest := runnerpayload.Manifest{
 				ProtocolVersion:  protocol.Version,
 				RunnerID:         registration.RunnerID,
 				RunID:            request.RunID,
 				Generation:       registration.Generation,
 				WorkingDirectory: "/work/ui",
 			}
-			digest, digestErr := protocol.ComputeManifestDigest(manifest)
+			digest, digestErr := runnerpayload.ComputeManifestDigest(manifest)
 			if digestErr != nil {
 				return digestErr
 			}
 			manifest.Digest = digest
-			*result.(*protocol.Manifest) = manifest
+			*result.(*runnerpayload.Manifest) = manifest
 		}
 		return nil
 	}

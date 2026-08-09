@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
-	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
+	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
@@ -16,7 +16,7 @@ import (
 )
 
 type fakeRemoteController struct {
-	manifest       protocol.Manifest
+	manifest       runnerpayload.Manifest
 	openErr        error
 	callErr        error
 	executeErr     error
@@ -26,14 +26,14 @@ type fakeRemoteController struct {
 	openRunnerID   string
 	openParams     protocol.RunOpenParams
 	calls          []string
-	toolParams     protocol.ToolExecuteParams
+	toolParams     runnerpayload.ToolExecuteParams
 	canceledRunID  string
 	closedRunID    string
-	closedStatus   runnerregistry.RunStatus
+	closedStatus   protocol.RunStatus
 	closedError    error
 }
 
-func (c *fakeRemoteController) OpenRun(_ context.Context, runnerID string, params protocol.RunOpenParams) (protocol.Manifest, error) {
+func (c *fakeRemoteController) OpenRun(_ context.Context, runnerID string, params protocol.RunOpenParams) (runnerpayload.Manifest, error) {
 	c.openRunnerID = runnerID
 	c.openParams = params
 	return c.manifest, c.openErr
@@ -46,7 +46,7 @@ func (c *fakeRemoteController) CallRun(_ context.Context, _ string, method strin
 	}
 	switch method {
 	case protocol.MethodCommandExecute:
-		return assignRemoteResult(result, protocol.CommandExecuteResult{
+		return assignRemoteResult(result, runnerpayload.CommandExecuteResult{
 			Matched:         true,
 			Action:          string(CommandActionRunAgent),
 			CommandName:     "review",
@@ -56,20 +56,20 @@ func (c *fakeRemoteController) CallRun(_ context.Context, _ string, method strin
 			AllowedCommands: []string{"go test *"},
 		})
 	case protocol.MethodLifecycleDispatch:
-		value := params.(protocol.LifecycleDispatchParams)
-		response := protocol.LifecycleDispatchResult{}
+		value := params.(runnerpayload.LifecycleDispatchParams)
+		response := runnerpayload.LifecycleDispatchResult{}
 		switch value.Event {
-		case protocol.LifecycleUserMessage:
+		case runnerpayload.LifecycleUserMessage:
 			response.Message = "modified: " + value.Message
-		case protocol.LifecycleAgentInit:
+		case runnerpayload.LifecycleAgentInit:
 			response.SystemPrompt = value.SystemPrompt + "\npatched"
 			response.AllowedTools = []string{"file_read"}
 			response.ToolsModified = true
-		case protocol.LifecycleAgentEnd:
+		case runnerpayload.LifecycleAgentEnd:
 			response.FollowUpMessages = []string{"follow up"}
-		case protocol.LifecycleToolCall:
+		case runnerpayload.LifecycleToolCall:
 			response.ToolInput = json.RawMessage(`{"path":"changed"}`)
-		case protocol.LifecycleToolUpdate, protocol.LifecycleToolResult:
+		case runnerpayload.LifecycleToolUpdate, runnerpayload.LifecycleToolResult:
 			if !c.omitStructured {
 				response.StructuredResult = value.StructuredResult
 			}
@@ -81,27 +81,27 @@ func (c *fakeRemoteController) CallRun(_ context.Context, _ string, method strin
 	}
 }
 
-func (c *fakeRemoteController) ExecuteTool(_ context.Context, params protocol.ToolExecuteParams, updates func(protocol.ToolUpdateParams)) (protocol.ToolExecuteResult, error) {
+func (c *fakeRemoteController) ExecuteTool(_ context.Context, params runnerpayload.ToolExecuteParams, updates func(runnerpayload.ToolUpdateParams)) (runnerpayload.ToolExecuteResult, error) {
 	c.toolParams = params
 	if c.executeErr != nil {
-		return protocol.ToolExecuteResult{}, c.executeErr
+		return runnerpayload.ToolExecuteResult{}, c.executeErr
 	}
 	structured := tooltypes.StructuredToolResult{ToolName: params.Name, Success: true, Timestamp: time.Unix(1, 0).UTC()}
 	if updates != nil {
-		updates(protocol.ToolUpdateParams{
+		updates(runnerpayload.ToolUpdateParams{
 			RunID:      params.RunID,
 			ToolCallID: params.ToolCallID,
 			Sequence:   1,
-			Result: protocol.ToolResult{
+			Result: runnerpayload.ToolResult{
 				AssistantFacing: "partial",
 				Structured:      structured,
 			},
 			Modified: true,
 		})
 	}
-	return protocol.ToolExecuteResult{
+	return runnerpayload.ToolExecuteResult{
 		Input: json.RawMessage(`{"path":"effective"}`),
-		Result: protocol.ToolResult{
+		Result: runnerpayload.ToolResult{
 			AssistantFacing: "complete",
 			Structured:      structured,
 			ContentParts: []tooltypes.ToolResultContentPart{{
@@ -118,7 +118,7 @@ func (c *fakeRemoteController) CancelRun(_ context.Context, runID, _ string) err
 	return c.cancelErr
 }
 
-func (c *fakeRemoteController) CloseRun(_ context.Context, runID string, status runnerregistry.RunStatus, runErr error) error {
+func (c *fakeRemoteController) CloseRun(_ context.Context, runID string, status protocol.RunStatus, runErr error) error {
 	c.closedRunID = runID
 	c.closedStatus = status
 	c.closedError = runErr
@@ -136,24 +136,24 @@ func assignRemoteResult(target any, value any) error {
 func TestRemoteEnvironmentProxiesPinnedRunnerContract(t *testing.T) {
 	contextContent := "# Runner instructions"
 	controller := &fakeRemoteController{}
-	controller.manifest = protocol.Manifest{
+	controller.manifest = runnerpayload.Manifest{
 		ProtocolVersion:  protocol.Version,
 		RunnerID:         "runner-1",
 		RunID:            "run-1",
 		Generation:       3,
 		WorkingDirectory: "/runner/workspace",
-		ContextFiles: []protocol.ContextFile{{
+		ContextFiles: []runnerpayload.ContextFile{{
 			Path:    "/runner/workspace/AGENTS.md",
 			Content: contextContent,
 			Digest:  remoteContentDigest(contextContent),
 		}},
-		Tools: []protocol.ToolDefinition{{
+		Tools: []runnerpayload.ToolDefinition{{
 			Name:        "file_read",
 			Description: "Read a runner file",
 			InputSchema: map[string]any{"type": "object"},
 			Placement:   string(ToolPlacementEnvironment),
 		}},
-		Config: protocol.EnvironmentConfig{
+		Config: runnerpayload.EnvironmentConfig{
 			AllowedCommands:     []string{"go test *"},
 			ToolMode:            llmtypes.ToolModePatch,
 			EnableFSSearchTools: true,
@@ -161,7 +161,7 @@ func TestRemoteEnvironmentProxiesPinnedRunnerContract(t *testing.T) {
 			SystemPromptContent: "runner prompt {{.WorkingDirectory}}",
 			SystemPromptArgs:    map[string]string{"scope": "runner"},
 		},
-		Capabilities: protocol.EnvironmentCapabilities{ToolUpdates: true, Commands: true},
+		Capabilities: runnerpayload.EnvironmentCapabilities{ToolUpdates: true, Commands: true},
 	}
 
 	environment := NewRemoteEnvironment(controller, "runner-1", WithRemoteRunIDGenerator(func() (string, error) {
@@ -238,17 +238,17 @@ func TestRemoteEnvironmentProxiesPinnedRunnerContract(t *testing.T) {
 	assert.False(t, environment.IsOpen())
 	assert.Equal(t, "run-1", controller.canceledRunID)
 	assert.Equal(t, "run-1", controller.closedRunID)
-	assert.Equal(t, runnerregistry.RunStatusCanceled, controller.closedStatus)
+	assert.Equal(t, protocol.RunStatusCanceled, controller.closedStatus)
 	assert.ErrorIs(t, controller.closedError, context.Canceled)
 }
 
 func TestRemoteEnvironmentRejectsMismatchedContextDigest(t *testing.T) {
-	controller := &fakeRemoteController{manifest: protocol.Manifest{
+	controller := &fakeRemoteController{manifest: runnerpayload.Manifest{
 		ProtocolVersion: protocol.Version,
 		RunnerID:        "runner-1",
 		RunID:           "run-1",
 		Generation:      1,
-		ContextFiles: []protocol.ContextFile{{
+		ContextFiles: []runnerpayload.ContextFile{{
 			Path:    "AGENTS.md",
 			Content: "changed",
 			Digest:  "sha256:not-the-content",
@@ -259,28 +259,28 @@ func TestRemoteEnvironmentRejectsMismatchedContextDigest(t *testing.T) {
 	}))
 	_, err := environment.Open(t.Context(), RunSpec{ConversationID: "conversation-1"})
 	require.ErrorContains(t, err, "context digest")
-	assert.Equal(t, runnerregistry.RunStatusFailed, controller.closedStatus)
+	assert.Equal(t, protocol.RunStatusFailed, controller.closedStatus)
 }
 
 func TestRemoteEnvironmentLifecycleHelpersAndToolProxy(t *testing.T) {
 	content := "# Runner context"
-	controller := &fakeRemoteController{manifest: protocol.Manifest{
+	controller := &fakeRemoteController{manifest: runnerpayload.Manifest{
 		ProtocolVersion:  protocol.Version,
 		RunnerID:         "runner-1",
 		RunID:            "run-1",
 		Generation:       1,
 		WorkingDirectory: "/runner/workspace",
-		ContextFiles: []protocol.ContextFile{{
+		ContextFiles: []runnerpayload.ContextFile{{
 			Path:    "/runner/workspace/AGENTS.md",
 			Content: content,
 			Digest:  remoteContentDigest(content),
 		}},
-		Tools: []protocol.ToolDefinition{{
+		Tools: []runnerpayload.ToolDefinition{{
 			Name:        "file_read",
 			Description: "Read a file",
 			InputSchema: map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}}},
 		}},
-		Capabilities: protocol.EnvironmentCapabilities{ToolUpdates: true},
+		Capabilities: runnerpayload.EnvironmentCapabilities{ToolUpdates: true},
 	}}
 	environment := NewRemoteEnvironment(controller, "runner-1",
 		WithRemoteClientCapabilities(protocol.ClientCapabilities{InteractiveUI: true, PersistentSurfaces: true}),
@@ -326,7 +326,7 @@ func TestRemoteEnvironmentLifecycleHelpersAndToolProxy(t *testing.T) {
 	assert.Nil(t, tracing)
 
 	require.NoError(t, environment.Close(t.Context()))
-	assert.Equal(t, runnerregistry.RunStatusSucceeded, controller.closedStatus)
+	assert.Equal(t, protocol.RunStatusSucceeded, controller.closedStatus)
 	assert.Empty(t, environment.RunID())
 	assert.False(t, environment.IsOpen())
 }
@@ -361,7 +361,7 @@ func TestRemoteEnvironmentValidationAndFailurePaths(t *testing.T) {
 	_, err = environment.Open(t.Context(), RunSpec{ConversationID: "conversation-1"})
 	require.ErrorContains(t, err, "offline")
 
-	validController := &fakeRemoteController{manifest: protocol.Manifest{
+	validController := &fakeRemoteController{manifest: runnerpayload.Manifest{
 		ProtocolVersion: protocol.Version,
 		RunnerID:        "runner-1",
 		RunID:           "run-1",
@@ -382,13 +382,13 @@ func TestRemoteEnvironmentValidationAndFailurePaths(t *testing.T) {
 	validController.closeErr = errors.New("close failed")
 	err = environment.CloseWithError(t.Context(), errors.New("run failed"))
 	require.ErrorContains(t, err, "close failed")
-	assert.Equal(t, runnerregistry.RunStatusFailed, validController.closedStatus)
+	assert.Equal(t, protocol.RunStatusFailed, validController.closedStatus)
 	assert.False(t, environment.IsOpen())
 }
 
 func TestRemoteToolResultAccessors(t *testing.T) {
 	structured := tooltypes.StructuredToolResult{ToolName: "tool", Success: false, Error: "structured error"}
-	result := newRemoteToolResult(protocol.ToolResult{
+	result := newRemoteToolResult(runnerpayload.ToolResult{
 		AssistantFacing: "assistant",
 		Error:           "wire error",
 		Structured:      structured,
@@ -407,11 +407,11 @@ func TestRemoteToolResultAccessors(t *testing.T) {
 
 func TestConvertRemoteManifestRejectsInvalidContextPaths(t *testing.T) {
 	environment := NewRemoteEnvironment(&fakeRemoteController{}, "runner-1")
-	_, err := environment.convertManifest(protocol.Manifest{ContextFiles: []protocol.ContextFile{{Content: "missing path", Digest: remoteContentDigest("missing path")}}}, llmtypes.Config{})
+	_, err := environment.convertManifest(runnerpayload.Manifest{ContextFiles: []runnerpayload.ContextFile{{Content: "missing path", Digest: remoteContentDigest("missing path")}}}, llmtypes.Config{})
 	require.ErrorContains(t, err, "without a path")
 
 	content := "same"
-	_, err = environment.convertManifest(protocol.Manifest{ContextFiles: []protocol.ContextFile{
+	_, err = environment.convertManifest(runnerpayload.Manifest{ContextFiles: []runnerpayload.ContextFile{
 		{Path: "AGENTS.md", Content: content, Digest: remoteContentDigest(content)},
 		{Path: "AGENTS.md", Content: content, Digest: remoteContentDigest(content)},
 	}}, llmtypes.Config{})

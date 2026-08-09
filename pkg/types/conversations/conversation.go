@@ -14,6 +14,13 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
 )
 
+const (
+	// RunnerIDMetadataKey identifies a conversation whose environment belongs to a remote runner.
+	RunnerIDMetadataKey = "runner_id"
+	// RunnerEnvironmentProfileMetadataKey stores the runner-local profile independently from model policy.
+	RunnerEnvironmentProfileMetadataKey = "environment_profile"
+)
+
 // QueryOptions provides filtering and sorting options for conversation queries
 type QueryOptions struct {
 	StartDate  *time.Time // Filter by start date

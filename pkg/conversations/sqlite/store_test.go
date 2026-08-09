@@ -149,11 +149,18 @@ func TestStore_DeleteRemovesRunnerAffinity(t *testing.T) {
 		VALUES (?, ?, ?, ?)
 	`, record.ID, "runner-one", now, now)
 	require.NoError(t, err)
+	_, err = store.db.ExecContext(ctx, `
+		INSERT INTO runner_runs (id, conversation_id, runner_id, status, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, "run-one", record.ID, "runner-one", "succeeded", now, now)
+	require.NoError(t, err)
 
 	require.NoError(t, store.Delete(ctx, record.ID))
 
 	var count int
 	require.NoError(t, store.db.GetContext(ctx, &count, "SELECT COUNT(*) FROM conversation_runner_affinity WHERE conversation_id = ?", record.ID))
+	assert.Zero(t, count)
+	require.NoError(t, store.db.GetContext(ctx, &count, "SELECT COUNT(*) FROM runner_runs WHERE conversation_id = ?", record.ID))
 	assert.Zero(t, count)
 }
 

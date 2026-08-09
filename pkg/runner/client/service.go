@@ -14,6 +14,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -21,6 +22,8 @@ import (
 )
 
 const defaultCleanupTimeout = 10 * time.Second
+
+var errNoActiveRun = errors.New("runner has no active run")
 
 // Peer is the symmetric runner connection used for updates and reverse UI calls.
 type Peer interface {
@@ -82,7 +85,7 @@ type activeRun struct {
 	runtime        *extensions.Runtime
 	instance       ExecutionInstance
 	environment    agentenv.Environment
-	manifest       protocol.Manifest
+	manifest       runnerpayload.Manifest
 	ctx            context.Context
 	cancel         context.CancelFunc
 	updates        atomic.Uint64
@@ -194,21 +197,21 @@ func (s *Service) HandleRequest(ctx context.Context, method string, params json.
 		}
 		return rpcResult(nil, s.cancelRun(value.RunID))
 	case protocol.MethodCommandExecute:
-		value, rpcErr := decodeParams[protocol.CommandExecuteParams](params)
+		value, rpcErr := decodeParams[runnerpayload.CommandExecuteParams](params)
 		if rpcErr != nil {
 			return nil, rpcErr
 		}
 		result, err := s.executeCommand(ctx, value)
 		return rpcResult(result, err)
 	case protocol.MethodLifecycleDispatch:
-		value, rpcErr := decodeParams[protocol.LifecycleDispatchParams](params)
+		value, rpcErr := decodeParams[runnerpayload.LifecycleDispatchParams](params)
 		if rpcErr != nil {
 			return nil, rpcErr
 		}
 		result, err := s.dispatchLifecycle(ctx, value)
 		return rpcResult(result, err)
 	case protocol.MethodToolExecute:
-		value, rpcErr := decodeParams[protocol.ToolExecuteParams](params)
+		value, rpcErr := decodeParams[runnerpayload.ToolExecuteParams](params)
 		if rpcErr != nil {
 			return nil, rpcErr
 		}
@@ -224,12 +227,12 @@ func (s *Service) HandleNotification(ctx context.Context, method string, params 
 	var err error
 	switch method {
 	case protocol.MethodUISurfaceInput:
-		var value protocol.UISurfaceInputParams
+		var value runnerpayload.UISurfaceInputParams
 		if json.Unmarshal(params, &value) == nil {
 			err = s.notifySurfaceInput(ctx, value)
 		}
 	case protocol.MethodUISurfaceResize:
-		var value protocol.UISurfaceResizeParams
+		var value runnerpayload.UISurfaceResizeParams
 		if json.Unmarshal(params, &value) == nil {
 			err = s.notifySurfaceResize(ctx, value)
 		}
@@ -239,31 +242,33 @@ func (s *Service) HandleNotification(ctx context.Context, method string, params 
 	}
 }
 
-func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (protocol.Manifest, error) {
+func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (runnerpayload.Manifest, error) {
 	if err := params.Validate(); err != nil {
-		return protocol.Manifest{}, err
+		return runnerpayload.Manifest{}, err
 	}
-	s.snapshotMu.Lock()
+	if !s.snapshotMu.TryLock() {
+		return runnerpayload.Manifest{}, errors.New("runner is busy refreshing its environment snapshot")
+	}
 	defer s.snapshotMu.Unlock()
 
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
-		return protocol.Manifest{}, errors.New("runner service is closed")
+		return runnerpayload.Manifest{}, errors.New("runner service is closed")
 	}
 	if s.runnerID == "" || s.generation <= 0 {
 		s.mu.Unlock()
-		return protocol.Manifest{}, errors.New("runner has not completed registration")
+		return runnerpayload.Manifest{}, errors.New("runner has not completed registration")
 	}
 	if s.unhealthy != nil {
 		message := s.unhealthy.Error()
 		s.mu.Unlock()
-		return protocol.Manifest{}, errors.Wrap(errors.New(message), "runner requires restart after cleanup failure")
+		return runnerpayload.Manifest{}, errors.Wrap(errors.New(message), "runner requires restart after cleanup failure")
 	}
 	if s.active != nil {
 		activeID := s.active.id
 		s.mu.Unlock()
-		return protocol.Manifest{}, errors.Errorf("runner is busy with run %s", activeID)
+		return runnerpayload.Manifest{}, errors.Errorf("runner is busy with run %s", activeID)
 	}
 	runCtx, cancel := context.WithCancel(s.ctx)
 	run := &activeRun{
@@ -290,24 +295,24 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (p
 	})
 	if err != nil {
 		s.failOpen(run)
-		return protocol.Manifest{}, errors.Wrap(err, "failed to create runner execution instance")
+		return runnerpayload.Manifest{}, errors.Wrap(err, "failed to create runner execution instance")
 	}
 	if instance == nil {
 		s.failOpen(run)
-		return protocol.Manifest{}, errors.New("runner execution instance provider returned nil")
+		return runnerpayload.Manifest{}, errors.New("runner execution instance provider returned nil")
 	}
 	workingDirectory := strings.TrimSpace(instance.WorkingDirectory())
 	if workingDirectory == "" {
 		s.closeOpeningResources(operationCtx, nil, instance)
 		s.failOpen(run)
-		return protocol.Manifest{}, errors.New("runner execution instance returned an empty working directory")
+		return runnerpayload.Manifest{}, errors.New("runner execution instance returned an empty working directory")
 	}
 
 	config, err := s.configLoader(params.Agent.EnvironmentProfile)
 	if err != nil {
 		s.closeOpeningResources(operationCtx, nil, instance)
 		s.failOpen(run)
-		return protocol.Manifest{}, errors.Wrap(err, "failed to load runner configuration")
+		return runnerpayload.Manifest{}, errors.Wrap(err, "failed to load runner configuration")
 	}
 	config.WorkingDirectory = workingDirectory
 	config.Provider = params.Agent.Provider
@@ -318,7 +323,7 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (p
 	if err != nil {
 		s.closeOpeningResources(operationCtx, nil, instance)
 		s.failOpen(run)
-		return protocol.Manifest{}, errors.Wrap(err, "failed to load runner extension configuration")
+		return runnerpayload.Manifest{}, errors.Wrap(err, "failed to load runner extension configuration")
 	}
 
 	callContext := extensions.ExtensionCallContext{
@@ -341,14 +346,14 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (p
 	if err != nil {
 		s.closeOpeningResources(operationCtx, nil, instance)
 		s.failOpen(run)
-		return protocol.Manifest{}, errors.Wrap(err, "failed to initialize runner extensions")
+		return runnerpayload.Manifest{}, errors.Wrap(err, "failed to initialize runner extensions")
 	}
 	config.Extensions = runtime
 	environment := s.environmentFactory(workingDirectory, runtime)
 	if environment == nil {
 		s.closeOpeningResources(operationCtx, nil, instance)
 		s.failOpen(run)
-		return protocol.Manifest{}, errors.New("runner environment factory returned nil")
+		return runnerpayload.Manifest{}, errors.New("runner environment factory returned nil")
 	}
 	spec := agentenv.RunSpec{
 		ConversationID: params.ConversationID,
@@ -359,7 +364,7 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (p
 	if err != nil {
 		s.closeOpeningResources(operationCtx, environment, instance)
 		s.failOpen(run)
-		return protocol.Manifest{}, errors.Wrap(err, "failed to open runner environment")
+		return runnerpayload.Manifest{}, errors.Wrap(err, "failed to open runner environment")
 	}
 	wireManifest, err := buildWireManifest(localManifest, config, runtime, runnerID, params.RunID, generation, params.ReservedToolNames)
 	if err == nil {
@@ -368,7 +373,7 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (p
 	if err != nil {
 		s.closeOpeningResources(operationCtx, environment, instance)
 		s.failOpen(run)
-		return protocol.Manifest{}, err
+		return runnerpayload.Manifest{}, err
 	}
 
 	s.mu.Lock()
@@ -376,7 +381,7 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (p
 		s.mu.Unlock()
 		s.closeOpeningResources(operationCtx, environment, instance)
 		s.failOpen(run)
-		return protocol.Manifest{}, errors.New("runner run was canceled while opening")
+		return runnerpayload.Manifest{}, errors.New("runner run was canceled while opening")
 	}
 	run.config = config
 	run.runtime = runtime
@@ -596,10 +601,10 @@ func (s *Service) HeartbeatSnapshot() (protocol.RunnerState, string, string) {
 	return state, s.active.id, digest
 }
 
-func (s *Service) executeCommand(ctx context.Context, params protocol.CommandExecuteParams) (protocol.CommandExecuteResult, error) {
+func (s *Service) executeCommand(ctx context.Context, params runnerpayload.CommandExecuteParams) (runnerpayload.CommandExecuteResult, error) {
 	run, operationCtx, finish, err := s.beginRunOperation(ctx, params.RunID)
 	if err != nil {
-		return protocol.CommandExecuteResult{}, err
+		return runnerpayload.CommandExecuteResult{}, err
 	}
 	defer finish()
 	s.mu.Lock()
@@ -614,7 +619,7 @@ func (s *Service) executeCommand(ctx context.Context, params protocol.CommandExe
 		},
 	})
 	if err != nil {
-		return protocol.CommandExecuteResult{}, err
+		return runnerpayload.CommandExecuteResult{}, err
 	}
 	if applier, ok := run.environment.(interface{ ApplyCommandResult(agentenv.CommandResult) }); ok {
 		applier.ApplyCommandResult(result)
@@ -630,7 +635,7 @@ func (s *Service) executeCommand(ctx context.Context, params protocol.CommandExe
 		run.config.AllowedCommands = append([]string(nil), result.AllowedCommands...)
 	}
 	s.mu.Unlock()
-	return protocol.CommandExecuteResult{
+	return runnerpayload.CommandExecuteResult{
 		Matched:         result.Matched,
 		Action:          string(result.Action),
 		CommandName:     result.CommandName,
@@ -643,34 +648,34 @@ func (s *Service) executeCommand(ctx context.Context, params protocol.CommandExe
 	}, nil
 }
 
-func (s *Service) dispatchLifecycle(ctx context.Context, params protocol.LifecycleDispatchParams) (protocol.LifecycleDispatchResult, error) {
+func (s *Service) dispatchLifecycle(ctx context.Context, params runnerpayload.LifecycleDispatchParams) (runnerpayload.LifecycleDispatchResult, error) {
 	run, operationCtx, finish, err := s.beginRunOperation(ctx, params.RunID)
 	if err != nil {
-		return protocol.LifecycleDispatchResult{}, err
+		return runnerpayload.LifecycleDispatchResult{}, err
 	}
 	defer finish()
 
 	switch params.Event {
-	case protocol.LifecycleUserMessage:
+	case runnerpayload.LifecycleUserMessage:
 		message, err := run.environment.ProcessUserMessage(operationCtx, params.Message)
-		return protocol.LifecycleDispatchResult{Message: message}, err
-	case protocol.LifecycleAgentStart:
-		return protocol.LifecycleDispatchResult{}, run.environment.DispatchAgentStart(operationCtx)
-	case protocol.LifecycleTurnStart:
-		return protocol.LifecycleDispatchResult{}, run.environment.DispatchTurnStart(operationCtx, params.TurnNumber)
-	case protocol.LifecycleAgentInit:
+		return runnerpayload.LifecycleDispatchResult{Message: message}, err
+	case runnerpayload.LifecycleAgentStart:
+		return runnerpayload.LifecycleDispatchResult{}, run.environment.DispatchAgentStart(operationCtx)
+	case runnerpayload.LifecycleTurnStart:
+		return runnerpayload.LifecycleDispatchResult{}, run.environment.DispatchTurnStart(operationCtx, params.TurnNumber)
+	case runnerpayload.LifecycleAgentInit:
 		decision, err := run.environment.ProcessAgentInit(operationCtx, params.SystemPrompt, params.AllowedTools)
-		return protocol.LifecycleDispatchResult{
+		return runnerpayload.LifecycleDispatchResult{
 			SystemPrompt:  decision.SystemPrompt,
 			AllowedTools:  append([]string(nil), decision.AllowedTools...),
 			ToolsModified: decision.ToolsModified,
 		}, err
-	case protocol.LifecycleTurnEnd:
-		return protocol.LifecycleDispatchResult{}, run.environment.DispatchTurnEnd(operationCtx, params.FinalOutput, params.TurnCount)
-	case protocol.LifecycleAgentEnd:
+	case runnerpayload.LifecycleTurnEnd:
+		return runnerpayload.LifecycleDispatchResult{}, run.environment.DispatchTurnEnd(operationCtx, params.FinalOutput, params.TurnCount)
+	case runnerpayload.LifecycleAgentEnd:
 		messages, err := run.environment.DispatchAgentEnd(operationCtx, params.Messages)
-		return protocol.LifecycleDispatchResult{FollowUpMessages: messages}, err
-	case protocol.LifecycleToolCall:
+		return runnerpayload.LifecycleDispatchResult{FollowUpMessages: messages}, err
+	case runnerpayload.LifecycleToolCall:
 		decision, err := run.environment.DispatchToolCall(operationCtx, agentenv.ToolRequest{
 			Name:       params.ToolName,
 			Input:      string(params.ToolInput),
@@ -680,14 +685,14 @@ func (s *Service) dispatchLifecycle(ctx context.Context, params protocol.Lifecyc
 		if err == nil {
 			err = encodeErr
 		}
-		return protocol.LifecycleDispatchResult{
+		return runnerpayload.LifecycleDispatchResult{
 			Blocked:   decision.Blocked,
 			Reason:    decision.Reason,
 			ToolInput: input,
 		}, err
-	case protocol.LifecycleToolUpdate, protocol.LifecycleToolResult:
+	case runnerpayload.LifecycleToolUpdate, runnerpayload.LifecycleToolResult:
 		if params.StructuredResult == nil {
-			return protocol.LifecycleDispatchResult{}, errors.New("structuredResult is required for tool output lifecycle")
+			return runnerpayload.LifecycleDispatchResult{}, errors.New("structuredResult is required for tool output lifecycle")
 		}
 		request := agentenv.ToolOutputRequest{
 			Name:             params.ToolName,
@@ -696,29 +701,29 @@ func (s *Service) dispatchLifecycle(ctx context.Context, params protocol.Lifecyc
 			StructuredResult: *params.StructuredResult,
 		}
 		var decision agentenv.ToolOutputDecision
-		if params.Event == protocol.LifecycleToolUpdate {
+		if params.Event == runnerpayload.LifecycleToolUpdate {
 			decision, err = run.environment.DispatchToolUpdate(operationCtx, request)
 		} else {
 			decision, err = run.environment.DispatchToolResult(operationCtx, request)
 		}
 		structured := decision.StructuredResult
-		return protocol.LifecycleDispatchResult{
+		return runnerpayload.LifecycleDispatchResult{
 			StructuredResult: &structured,
 			Modified:         decision.Modified,
 			Accepted:         decision.Accepted,
 		}, err
 	default:
-		return protocol.LifecycleDispatchResult{}, errors.Errorf("unsupported lifecycle event %q", params.Event)
+		return runnerpayload.LifecycleDispatchResult{}, errors.Errorf("unsupported lifecycle event %q", params.Event)
 	}
 }
 
-func (s *Service) executeTool(ctx context.Context, params protocol.ToolExecuteParams) (protocol.ToolExecuteResult, error) {
+func (s *Service) executeTool(ctx context.Context, params runnerpayload.ToolExecuteParams) (runnerpayload.ToolExecuteResult, error) {
 	if strings.TrimSpace(params.ToolCallID) == "" || strings.TrimSpace(params.Name) == "" {
-		return protocol.ToolExecuteResult{}, errors.New("toolCallId and name are required")
+		return runnerpayload.ToolExecuteResult{}, errors.New("toolCallId and name are required")
 	}
 	run, operationCtx, finish, err := s.beginRunOperation(ctx, params.RunID)
 	if err != nil {
-		return protocol.ToolExecuteResult{}, err
+		return runnerpayload.ToolExecuteResult{}, err
 	}
 	defer finish()
 
@@ -727,13 +732,13 @@ func (s *Service) executeTool(ctx context.Context, params protocol.ToolExecutePa
 	if params.WantUpdates {
 		requestID := protocol.RequestIDFromContext(operationCtx)
 		if requestID == "" {
-			return protocol.ToolExecuteResult{}, errors.New("tool.execute request id is unavailable")
+			return runnerpayload.ToolExecuteResult{}, errors.New("tool.execute request id is unavailable")
 		}
 		updateSink = func(update agentenv.ToolUpdate) {
 			if peer == nil || update.Result == nil {
 				return
 			}
-			_ = peer.NotifyUpdate(protocol.MethodToolUpdate, protocol.ToolUpdateParams{
+			_ = peer.NotifyUpdate(protocol.MethodToolUpdate, runnerpayload.ToolUpdateParams{
 				RunID:      run.id,
 				RequestID:  requestID,
 				ToolCallID: params.ToolCallID,
@@ -749,20 +754,20 @@ func (s *Service) executeTool(ctx context.Context, params protocol.ToolExecutePa
 		ToolCallID: params.ToolCallID,
 	}, updateSink)
 	if err != nil {
-		return protocol.ToolExecuteResult{}, err
+		return runnerpayload.ToolExecuteResult{}, err
 	}
 	input, err := rawJSON(execution.Input)
 	if err != nil {
-		return protocol.ToolExecuteResult{}, err
+		return runnerpayload.ToolExecuteResult{}, err
 	}
-	return protocol.ToolExecuteResult{
+	return runnerpayload.ToolExecuteResult{
 		Input:    input,
 		Result:   serializeToolResult(execution.Result, execution.StructuredResult),
 		Modified: execution.Modified,
 	}, nil
 }
 
-func serializeToolResult(result tooltypes.ToolResult, structured tooltypes.StructuredToolResult) protocol.ToolResult {
+func serializeToolResult(result tooltypes.ToolResult, structured tooltypes.StructuredToolResult) runnerpayload.ToolResult {
 	if result == nil {
 		result = tooltypes.BaseToolResult{Error: "runner environment returned no tool result"}
 	}
@@ -773,7 +778,7 @@ func serializeToolResult(result tooltypes.ToolResult, structured tooltypes.Struc
 	if errorMessage == "" {
 		errorMessage = structured.Error
 	}
-	wire := protocol.ToolResult{
+	wire := runnerpayload.ToolResult{
 		AssistantFacing: result.AssistantFacing(),
 		Error:           errorMessage,
 		Structured:      structured,
@@ -827,7 +832,7 @@ func (s *Service) decorateRunContext(ctx context.Context, conversationID string)
 
 func (s *Service) activeRunLocked(runID string) (*activeRun, error) {
 	if s.active == nil {
-		return nil, errors.New("runner has no active run")
+		return nil, errNoActiveRun
 	}
 	if strings.TrimSpace(runID) == "" || s.active.id != strings.TrimSpace(runID) {
 		return nil, errors.New("request belongs to another runner run")
@@ -1022,6 +1027,8 @@ func rpcResult(result any, err error) (any, *protocol.RPCError) {
 	message := err.Error()
 	code := protocol.ErrorCodeInternal
 	switch {
+	case errors.Is(err, errNoActiveRun):
+		return nil, &protocol.RPCError{Code: protocol.ErrorCodeStale, Message: message, Data: protocol.RPCErrorData{Reason: protocol.ErrorReasonRunNotActive}}
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		code = protocol.ErrorCodeUnavailable
 	case strings.Contains(message, "busy"), strings.Contains(message, "active run"):

@@ -90,11 +90,15 @@ func (m *model) openConversationPicker(query string) tea.Cmd {
 	requestID := m.nextConversationListRequestID
 	m.conversationPicker = &conversationPickerState{
 		query:     strings.TrimSpace(query),
-		loading:   true,
+		loading:   !m.remote,
 		requestID: requestID,
 	}
 	m.clampConversationPickerSelection()
-	return tea.Batch(loadConversationList(m.ctx, requestID), tea.Sequence(m.extensionSurfaceFocusTransitionCommands(oldFocusKey, oldFocused, oldFocus)...))
+	focusTransition := tea.Sequence(m.extensionSurfaceFocusTransitionCommands(oldFocusKey, oldFocused, oldFocus)...)
+	if m.remote {
+		return focusTransition
+	}
+	return tea.Batch(loadConversationList(m.ctx, requestID), focusTransition)
 }
 
 func (m *model) applyConversationList(msg conversationListMsg) {

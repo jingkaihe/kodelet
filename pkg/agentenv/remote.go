@@ -14,7 +14,7 @@ import (
 
 	"github.com/invopop/jsonschema"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
-	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
+	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -24,11 +24,11 @@ import (
 
 // RemoteController is the control-plane runner API used by RemoteEnvironment.
 type RemoteController interface {
-	OpenRun(ctx context.Context, runnerID string, params protocol.RunOpenParams) (protocol.Manifest, error)
+	OpenRun(ctx context.Context, runnerID string, params protocol.RunOpenParams) (runnerpayload.Manifest, error)
 	CallRun(ctx context.Context, runID, method string, params any, result any) error
-	ExecuteTool(ctx context.Context, params protocol.ToolExecuteParams, updates func(protocol.ToolUpdateParams)) (protocol.ToolExecuteResult, error)
+	ExecuteTool(ctx context.Context, params runnerpayload.ToolExecuteParams, updates func(runnerpayload.ToolUpdateParams)) (runnerpayload.ToolExecuteResult, error)
 	CancelRun(ctx context.Context, runID, reason string) error
-	CloseRun(ctx context.Context, runID string, status runnerregistry.RunStatus, runErr error) error
+	CloseRun(ctx context.Context, runID string, status protocol.RunStatus, runErr error) error
 }
 
 // RemoteEnvironmentOption configures a remote runner environment.
@@ -59,7 +59,7 @@ type RemoteEnvironment struct {
 	newRunID           func() (string, error)
 	runID              string
 	manifest           Manifest
-	wireManifest       protocol.Manifest
+	wireManifest       runnerpayload.Manifest
 	opened             bool
 	opening            bool
 	closing            bool
@@ -127,7 +127,7 @@ func (e *RemoteEnvironment) Open(ctx context.Context, spec RunSpec) (Manifest, e
 	manifest, err := e.convertManifest(wireManifest, spec.Config)
 	if err != nil {
 		closeCtx := context.WithoutCancel(ctx)
-		_ = e.controller.CloseRun(closeCtx, runID, runnerregistry.RunStatusFailed, err)
+		_ = e.controller.CloseRun(closeCtx, runID, protocol.RunStatusFailed, err)
 		e.finishOpenFailure()
 		return Manifest{}, err
 	}
@@ -189,8 +189,8 @@ func (e *RemoteEnvironment) ExecuteCommand(ctx context.Context, request CommandR
 	if err != nil {
 		return CommandResult{}, err
 	}
-	var result protocol.CommandExecuteResult
-	if err := e.controller.CallRun(ctx, runID, protocol.MethodCommandExecute, protocol.CommandExecuteParams{
+	var result runnerpayload.CommandExecuteResult
+	if err := e.controller.CallRun(ctx, runID, protocol.MethodCommandExecute, runnerpayload.CommandExecuteParams{
 		RunID:   runID,
 		Message: request.Message,
 	}, &result); err != nil {
@@ -211,7 +211,7 @@ func (e *RemoteEnvironment) ExecuteCommand(ctx context.Context, request CommandR
 
 // ProcessUserMessage applies runner-owned user.message handlers.
 func (e *RemoteEnvironment) ProcessUserMessage(ctx context.Context, message string) (string, error) {
-	result, err := e.dispatchLifecycle(ctx, protocol.LifecycleDispatchParams{Event: protocol.LifecycleUserMessage, Message: message})
+	result, err := e.dispatchLifecycle(ctx, runnerpayload.LifecycleDispatchParams{Event: runnerpayload.LifecycleUserMessage, Message: message})
 	if err != nil {
 		return "", err
 	}
@@ -223,20 +223,20 @@ func (e *RemoteEnvironment) ProcessUserMessage(ctx context.Context, message stri
 
 // DispatchAgentStart applies runner-owned agent.start handlers.
 func (e *RemoteEnvironment) DispatchAgentStart(ctx context.Context) error {
-	_, err := e.dispatchLifecycle(ctx, protocol.LifecycleDispatchParams{Event: protocol.LifecycleAgentStart})
+	_, err := e.dispatchLifecycle(ctx, runnerpayload.LifecycleDispatchParams{Event: runnerpayload.LifecycleAgentStart})
 	return err
 }
 
 // DispatchTurnStart applies runner-owned turn.start handlers.
 func (e *RemoteEnvironment) DispatchTurnStart(ctx context.Context, turnNumber int) error {
-	_, err := e.dispatchLifecycle(ctx, protocol.LifecycleDispatchParams{Event: protocol.LifecycleTurnStart, TurnNumber: turnNumber})
+	_, err := e.dispatchLifecycle(ctx, runnerpayload.LifecycleDispatchParams{Event: runnerpayload.LifecycleTurnStart, TurnNumber: turnNumber})
 	return err
 }
 
 // ProcessAgentInit applies runner-owned system prompt and tool-list patches.
 func (e *RemoteEnvironment) ProcessAgentInit(ctx context.Context, systemPrompt string, allowedTools []string) (AgentInitDecision, error) {
-	result, err := e.dispatchLifecycle(ctx, protocol.LifecycleDispatchParams{
-		Event:        protocol.LifecycleAgentInit,
+	result, err := e.dispatchLifecycle(ctx, runnerpayload.LifecycleDispatchParams{
+		Event:        runnerpayload.LifecycleAgentInit,
 		SystemPrompt: systemPrompt,
 		AllowedTools: slices.Clone(allowedTools),
 	})
@@ -252,8 +252,8 @@ func (e *RemoteEnvironment) ProcessAgentInit(ctx context.Context, systemPrompt s
 
 // DispatchTurnEnd applies runner-owned turn.end handlers.
 func (e *RemoteEnvironment) DispatchTurnEnd(ctx context.Context, finalOutput string, turnCount int) error {
-	_, err := e.dispatchLifecycle(ctx, protocol.LifecycleDispatchParams{
-		Event:       protocol.LifecycleTurnEnd,
+	_, err := e.dispatchLifecycle(ctx, runnerpayload.LifecycleDispatchParams{
+		Event:       runnerpayload.LifecycleTurnEnd,
 		FinalOutput: finalOutput,
 		TurnCount:   turnCount,
 	})
@@ -262,8 +262,8 @@ func (e *RemoteEnvironment) DispatchTurnEnd(ctx context.Context, finalOutput str
 
 // DispatchAgentEnd applies runner-owned agent.end handlers.
 func (e *RemoteEnvironment) DispatchAgentEnd(ctx context.Context, messages []llmtypes.Message) ([]string, error) {
-	result, err := e.dispatchLifecycle(ctx, protocol.LifecycleDispatchParams{
-		Event:    protocol.LifecycleAgentEnd,
+	result, err := e.dispatchLifecycle(ctx, runnerpayload.LifecycleDispatchParams{
+		Event:    runnerpayload.LifecycleAgentEnd,
 		Messages: slices.Clone(messages),
 	})
 	if err != nil {
@@ -278,8 +278,8 @@ func (e *RemoteEnvironment) DispatchToolCall(ctx context.Context, request ToolRe
 	if err != nil {
 		return ToolCallDecision{}, err
 	}
-	result, err := e.dispatchLifecycle(ctx, protocol.LifecycleDispatchParams{
-		Event:      protocol.LifecycleToolCall,
+	result, err := e.dispatchLifecycle(ctx, runnerpayload.LifecycleDispatchParams{
+		Event:      runnerpayload.LifecycleToolCall,
 		ToolName:   request.Name,
 		ToolInput:  input,
 		ToolCallID: request.ToolCallID,
@@ -296,21 +296,21 @@ func (e *RemoteEnvironment) DispatchToolCall(ctx context.Context, request ToolRe
 
 // DispatchToolUpdate proxies extension policy for a transient control-plane tool result.
 func (e *RemoteEnvironment) DispatchToolUpdate(ctx context.Context, request ToolOutputRequest) (ToolOutputDecision, error) {
-	return e.dispatchToolOutput(ctx, protocol.LifecycleToolUpdate, request)
+	return e.dispatchToolOutput(ctx, runnerpayload.LifecycleToolUpdate, request)
 }
 
 // DispatchToolResult proxies extension policy for an authoritative control-plane tool result.
 func (e *RemoteEnvironment) DispatchToolResult(ctx context.Context, request ToolOutputRequest) (ToolOutputDecision, error) {
-	return e.dispatchToolOutput(ctx, protocol.LifecycleToolResult, request)
+	return e.dispatchToolOutput(ctx, runnerpayload.LifecycleToolResult, request)
 }
 
-func (e *RemoteEnvironment) dispatchToolOutput(ctx context.Context, event protocol.LifecycleEvent, request ToolOutputRequest) (ToolOutputDecision, error) {
+func (e *RemoteEnvironment) dispatchToolOutput(ctx context.Context, event runnerpayload.LifecycleEvent, request ToolOutputRequest) (ToolOutputDecision, error) {
 	input, err := rawToolInput(request.Input)
 	if err != nil {
 		return ToolOutputDecision{}, err
 	}
 	structured := request.StructuredResult
-	result, err := e.dispatchLifecycle(ctx, protocol.LifecycleDispatchParams{
+	result, err := e.dispatchLifecycle(ctx, runnerpayload.LifecycleDispatchParams{
 		Event:            event,
 		ToolName:         request.Name,
 		ToolInput:        input,
@@ -350,15 +350,15 @@ func (e *RemoteEnvironment) ExecuteTool(ctx context.Context, request ToolRequest
 	if err != nil {
 		return ToolExecution{}, err
 	}
-	params := protocol.ToolExecuteParams{
+	params := runnerpayload.ToolExecuteParams{
 		RunID:      runID,
 		ToolCallID: request.ToolCallID,
 		Name:       request.Name,
 		Input:      input,
 	}
-	var updateCallback func(protocol.ToolUpdateParams)
+	var updateCallback func(runnerpayload.ToolUpdateParams)
 	if updates != nil && e.CanStreamToolUpdates() {
-		updateCallback = func(update protocol.ToolUpdateParams) {
+		updateCallback = func(update runnerpayload.ToolUpdateParams) {
 			updates(ToolUpdate{
 				Result:           newRemoteToolResult(update.Result),
 				StructuredResult: update.Result.Structured,
@@ -401,13 +401,13 @@ func (e *RemoteEnvironment) CloseWithError(ctx context.Context, runErr error) er
 	runID := e.runID
 	e.mu.Unlock()
 
-	status := runnerregistry.RunStatusSucceeded
+	status := protocol.RunStatusSucceeded
 	if runErr != nil {
-		status = runnerregistry.RunStatusFailed
+		status = protocol.RunStatusFailed
 	}
 	var cancelErr error
 	if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) {
-		status = runnerregistry.RunStatusCanceled
+		status = protocol.RunStatusCanceled
 		cancelErr = e.controller.CancelRun(ctx, runID, runErr.Error())
 	}
 	closeErr := e.controller.CloseRun(ctx, runID, status, runErr)
@@ -415,7 +415,7 @@ func (e *RemoteEnvironment) CloseWithError(ctx context.Context, runErr error) er
 	e.mu.Lock()
 	e.runID = ""
 	e.manifest = Manifest{}
-	e.wireManifest = protocol.Manifest{}
+	e.wireManifest = runnerpayload.Manifest{}
 	e.opened = false
 	e.closing = false
 	e.mu.Unlock()
@@ -437,20 +437,20 @@ func (e *RemoteEnvironment) activeRunID() (string, error) {
 	return e.runID, nil
 }
 
-func (e *RemoteEnvironment) dispatchLifecycle(ctx context.Context, params protocol.LifecycleDispatchParams) (protocol.LifecycleDispatchResult, error) {
+func (e *RemoteEnvironment) dispatchLifecycle(ctx context.Context, params runnerpayload.LifecycleDispatchParams) (runnerpayload.LifecycleDispatchResult, error) {
 	runID, err := e.activeRunID()
 	if err != nil {
-		return protocol.LifecycleDispatchResult{}, err
+		return runnerpayload.LifecycleDispatchResult{}, err
 	}
 	params.RunID = runID
-	var result protocol.LifecycleDispatchResult
+	var result runnerpayload.LifecycleDispatchResult
 	if err := e.controller.CallRun(ctx, runID, protocol.MethodLifecycleDispatch, params, &result); err != nil {
-		return protocol.LifecycleDispatchResult{}, err
+		return runnerpayload.LifecycleDispatchResult{}, err
 	}
 	return result, nil
 }
 
-func (e *RemoteEnvironment) convertManifest(wire protocol.Manifest, config llmtypes.Config) (Manifest, error) {
+func (e *RemoteEnvironment) convertManifest(wire runnerpayload.Manifest, config llmtypes.Config) (Manifest, error) {
 	contexts := make(map[string]string, len(wire.ContextFiles))
 	for _, contextFile := range wire.ContextFiles {
 		path := strings.TrimSpace(contextFile.Path)
@@ -559,7 +559,7 @@ type remoteToolProxy struct {
 	schema      map[string]any
 }
 
-func newRemoteToolProxy(definition protocol.ToolDefinition) *remoteToolProxy {
+func newRemoteToolProxy(definition runnerpayload.ToolDefinition) *remoteToolProxy {
 	return &remoteToolProxy{
 		name:        definition.Name,
 		description: definition.Description,
@@ -593,10 +593,10 @@ func (t *remoteToolProxy) Execute(context.Context, tooltypes.State, string) tool
 func (t *remoteToolProxy) TracingKVs(string) ([]attribute.KeyValue, error) { return nil, nil }
 
 type remoteToolResult struct {
-	result protocol.ToolResult
+	result runnerpayload.ToolResult
 }
 
-func newRemoteToolResult(result protocol.ToolResult) remoteToolResult {
+func newRemoteToolResult(result runnerpayload.ToolResult) remoteToolResult {
 	result.ContentParts = slices.Clone(result.ContentParts)
 	return remoteToolResult{result: result}
 }
@@ -605,9 +605,11 @@ func (r remoteToolResult) AssistantFacing() string { return r.result.AssistantFa
 func (r remoteToolResult) IsError() bool {
 	return r.result.Error != "" || !r.result.Structured.Success
 }
-func (r remoteToolResult) GetError() string                               { return r.result.Error }
-func (r remoteToolResult) GetResult() string                              { return r.result.AssistantFacing }
+func (r remoteToolResult) GetError() string  { return r.result.Error }
+func (r remoteToolResult) GetResult() string { return r.result.AssistantFacing }
+
 func (r remoteToolResult) StructuredData() tooltypes.StructuredToolResult { return r.result.Structured }
+
 func (r remoteToolResult) ContentParts() []tooltypes.ToolResultContentPart {
 	return slices.Clone(r.result.ContentParts)
 }

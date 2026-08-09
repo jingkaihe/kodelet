@@ -14,6 +14,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -31,6 +32,7 @@ type testPersistence struct {
 	state               PersistedState
 	saveRunnerErr       error
 	saveRunnerAndRunErr error
+	saveRunnerCalls     int
 }
 
 func (p *testPersistence) Load(context.Context) (PersistedState, error) {
@@ -45,6 +47,7 @@ func (p *testPersistence) Load(context.Context) (PersistedState, error) {
 }
 
 func (p *testPersistence) SaveRunner(_ context.Context, runner Runner) error {
+	p.saveRunnerCalls++
 	if p.saveRunnerErr != nil {
 		return p.saveRunnerErr
 	}
@@ -285,7 +288,33 @@ func TestHeartbeatStateGatesScheduling(t *testing.T) {
 	require.ErrorContains(t, err, "runner is not idle")
 }
 
-func TestOpenRunReservationFailureRetainsAffinityWithoutPublishingCapacity(t *testing.T) {
+func TestHeartbeatUpdatesLiveStateWithoutWritingSQLiteState(t *testing.T) {
+	now := time.Date(2026, time.August, 8, 12, 0, 0, 0, time.UTC)
+	persistence := &testPersistence{}
+	registry, err := New(t.Context(), Options{
+		HeartbeatInterval: time.Hour,
+		HeartbeatTimeout:  2 * time.Hour,
+		Now:               func() time.Time { return now },
+		NewID:             sequentialIDs(),
+		Persistence:       persistence,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = registry.Close() })
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), newFakeLink())
+	require.NoError(t, err)
+	writesAfterRegistration := persistence.saveRunnerCalls
+	persistedHeartbeat := persistence.state.Runners[0].LastHeartbeatAt
+
+	now = now.Add(time.Minute)
+	markRunnerReady(t, registry, registration)
+	runner, ok := registry.Runner(registration.RunnerID)
+	require.True(t, ok)
+	assert.Equal(t, now, runner.LastHeartbeatAt)
+	assert.Equal(t, writesAfterRegistration, persistence.saveRunnerCalls)
+	assert.Equal(t, persistedHeartbeat, persistence.state.Runners[0].LastHeartbeatAt)
+}
+
+func TestOpenRunReservationFailureRollsBackPendingAffinityAndCapacity(t *testing.T) {
 	persistence := &testPersistence{}
 	registry, err := New(t.Context(), Options{
 		HeartbeatInterval: time.Hour,
@@ -306,9 +335,8 @@ func TestOpenRunReservationFailureRetainsAffinityWithoutPublishingCapacity(t *te
 	persistence.saveRunnerAndRunErr = errors.New("reservation failed")
 	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-one", "conversation-one"))
 	require.ErrorContains(t, err, "reservation failed")
-	runnerID, ok := registry.RunnerForConversation("conversation-one")
-	require.True(t, ok)
-	assert.Equal(t, registration.RunnerID, runnerID)
+	_, ok := registry.RunnerForConversation("conversation-one")
+	assert.False(t, ok)
 	_, ok = registry.Run("run-one")
 	assert.False(t, ok)
 	runner, ok := registry.Runner(registration.RunnerID)
@@ -345,7 +373,7 @@ func TestOpenRunEnforcesRunnerAndConversationCapacity(t *testing.T) {
 	run, ok := registry.Run("run-one")
 	require.True(t, ok)
 	assert.Equal(t, RunStatusSucceeded, run.Status)
-	var persistedManifest protocol.Manifest
+	var persistedManifest runnerpayload.Manifest
 	require.NoError(t, json.Unmarshal([]byte(run.ManifestJSON), &persistedManifest))
 	assert.Equal(t, manifest, persistedManifest)
 	runner, ok := registry.Runner(firstRegistration.RunnerID)
@@ -376,6 +404,113 @@ func TestReconnectMarksActiveRunLost(t *testing.T) {
 	assert.Contains(t, run.Error, "replaced")
 }
 
+func TestConnectionLossCancelsTheActiveConversation(t *testing.T) {
+	registry := newTestRegistry(t)
+	canceled := make(chan string, 1)
+	registry.SetEnvironmentErrorHandler(func(conversationID string) {
+		canceled <- conversationID
+	})
+	link := newFakeLink()
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), link)
+	require.NoError(t, err)
+	configureManifestLink(t, link, registration)
+	markRunnerReady(t, registry, registration)
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-one", "conversation-one"))
+	require.NoError(t, err)
+
+	link.mu.Lock()
+	link.err = errors.New("connection reset")
+	link.mu.Unlock()
+	require.NoError(t, link.Close())
+
+	select {
+	case conversationID := <-canceled:
+		assert.Equal(t, "conversation-one", conversationID)
+	case <-time.After(time.Second):
+		t.Fatal("connection loss did not cancel the active conversation")
+	}
+	require.Eventually(t, func() bool {
+		run, ok := registry.Run("run-one")
+		return ok && run.Status == RunStatusLost
+	}, time.Second, time.Millisecond)
+}
+
+func TestRunLeaseWatchdogReleasesCapacityAfterOwnerContextEnds(t *testing.T) {
+	registry, err := New(t.Context(), Options{
+		HeartbeatInterval: time.Hour,
+		HeartbeatTimeout:  2 * time.Hour,
+		RunLeaseGrace:     5 * time.Millisecond,
+		NewID:             sequentialIDs(),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = registry.Close() })
+	link := newFakeLink()
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), link)
+	require.NoError(t, err)
+	configureManifestLink(t, link, registration)
+	markRunnerReady(t, registry, registration)
+
+	runCtx, cancel := context.WithCancel(t.Context())
+	_, err = registry.OpenRun(runCtx, registration.RunnerID, testRunOpenParams("run-one", "conversation-one"))
+	require.NoError(t, err)
+	cancel()
+
+	require.Eventually(t, func() bool {
+		run, runOK := registry.Run("run-one")
+		runner, runnerOK := registry.Runner(registration.RunnerID)
+		return runOK && runnerOK && run.Status == RunStatusCanceled && runner.Status == RunnerStatusIdle && runner.ActiveRunID == ""
+	}, time.Second, time.Millisecond)
+}
+
+func TestStaleOpenFailureCannotPoisonReplacementGeneration(t *testing.T) {
+	registry := newTestRegistry(t)
+	firstLink := newFakeLink()
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), firstLink)
+	require.NoError(t, err)
+	markRunnerReady(t, registry, registration)
+	openStarted := make(chan struct{})
+	releaseOpen := make(chan struct{})
+	firstLink.mu.Lock()
+	firstLink.call = func(_ context.Context, method string, _ any, _ any) error {
+		if method == protocol.MethodRunOpen {
+			close(openStarted)
+			<-releaseOpen
+		}
+		return protocol.ErrPeerClosed
+	}
+	firstLink.mu.Unlock()
+
+	openDone := make(chan error, 1)
+	go func() {
+		_, openErr := registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-one", "conversation-one"))
+		openDone <- openErr
+	}()
+	select {
+	case <-openStarted:
+	case <-time.After(time.Second):
+		t.Fatal("run.open did not start")
+	}
+
+	params := testRegisterParams("host-one", "/work/project")
+	params.RunnerID = registration.RunnerID
+	secondLink := newFakeLink()
+	second, err := registry.Register(params, secondLink)
+	require.NoError(t, err)
+	markRunnerReady(t, registry, second)
+	close(releaseOpen)
+	require.ErrorContains(t, <-openDone, "open state is uncertain")
+
+	runner, ok := registry.Runner(registration.RunnerID)
+	require.True(t, ok)
+	assert.True(t, runner.Connected)
+	assert.Equal(t, second.Generation, runner.Generation)
+	assert.Equal(t, RunnerStatusIdle, runner.Status)
+	run, ok := registry.Run("run-one")
+	require.True(t, ok)
+	assert.Equal(t, RunStatusLost, run.Status)
+	assert.Contains(t, run.Error, "replaced")
+}
+
 func TestExecuteToolRoutesMonotonicUpdates(t *testing.T) {
 	registry := newTestRegistry(t)
 	link := newFakeLink()
@@ -389,25 +524,25 @@ func TestExecuteToolRoutesMonotonicUpdates(t *testing.T) {
 	link.mu.Lock()
 	link.call = func(_ context.Context, method string, params any, result any) error {
 		require.Equal(t, protocol.MethodToolExecute, method)
-		request := params.(protocol.ToolExecuteParams)
+		request := params.(runnerpayload.ToolExecuteParams)
 		assert.True(t, request.WantUpdates)
-		wrongRequest := protocol.ToolUpdateParams{RunID: request.RunID, RequestID: "fake:old-request", ToolCallID: request.ToolCallID, Sequence: 10}
+		wrongRequest := runnerpayload.ToolUpdateParams{RunID: request.RunID, RequestID: "fake:old-request", ToolCallID: request.ToolCallID, Sequence: 10}
 		assert.ErrorContains(t, registry.DeliverToolUpdate(registration.RunnerID, registration.ConnectionID, registration.Generation, wrongRequest), "request id is stale")
-		update := protocol.ToolUpdateParams{RunID: request.RunID, RequestID: "fake:request", ToolCallID: request.ToolCallID, Sequence: 1}
+		update := runnerpayload.ToolUpdateParams{RunID: request.RunID, RequestID: "fake:request", ToolCallID: request.ToolCallID, Sequence: 1}
 		require.NoError(t, registry.DeliverToolUpdate(registration.RunnerID, registration.ConnectionID, registration.Generation, update))
 		assert.ErrorContains(t, registry.DeliverToolUpdate(registration.RunnerID, registration.ConnectionID, registration.Generation, update), "sequence is stale")
-		*result.(*protocol.ToolExecuteResult) = protocol.ToolExecuteResult{Input: request.Input}
+		*result.(*runnerpayload.ToolExecuteResult) = runnerpayload.ToolExecuteResult{Input: request.Input}
 		return nil
 	}
 	link.mu.Unlock()
 
 	var updates []uint64
-	_, err = registry.ExecuteTool(t.Context(), protocol.ToolExecuteParams{
+	_, err = registry.ExecuteTool(t.Context(), runnerpayload.ToolExecuteParams{
 		RunID:      "run-one",
 		ToolCallID: "call-one",
 		Name:       "bash",
 		Input:      json.RawMessage(`{"command":"true"}`),
-	}, func(update protocol.ToolUpdateParams) {
+	}, func(update runnerpayload.ToolUpdateParams) {
 		updates = append(updates, update.Sequence)
 	})
 	require.NoError(t, err)
@@ -418,7 +553,7 @@ func TestExecuteToolRoutesMonotonicUpdates(t *testing.T) {
 		return protocol.ErrPeerClosed
 	}
 	link.mu.Unlock()
-	_, err = registry.ExecuteTool(t.Context(), protocol.ToolExecuteParams{
+	_, err = registry.ExecuteTool(t.Context(), runnerpayload.ToolExecuteParams{
 		RunID:      "run-one",
 		ToolCallID: "call-two",
 		Name:       "bash",
@@ -431,7 +566,7 @@ func TestExecuteToolRoutesMonotonicUpdates(t *testing.T) {
 		return &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: "tool rejected"}
 	}
 	link.mu.Unlock()
-	_, err = registry.ExecuteTool(t.Context(), protocol.ToolExecuteParams{
+	_, err = registry.ExecuteTool(t.Context(), runnerpayload.ToolExecuteParams{
 		RunID:      "run-one",
 		ToolCallID: "call-three",
 		Name:       "bash",
@@ -539,6 +674,7 @@ func TestRegistryRestoresStableIdentityAffinityAndLostRuns(t *testing.T) {
 	markRunnerReady(t, firstRegistry, registration)
 	_, err = firstRegistry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-one", "conversation-one"))
 	require.NoError(t, err)
+	require.NoError(t, firstRegistry.CommitConversationAffinity(t.Context(), "conversation-one"))
 
 	secondPersistence, err := NewSQLitePersistence(t.Context(), dbPath, "owner-one")
 	require.NoError(t, err)
@@ -560,7 +696,7 @@ func TestRegistryRestoresStableIdentityAffinityAndLostRuns(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, RunStatusLost, restoredRun.Status)
 	assert.Contains(t, restoredRun.Error, "control plane restarted")
-	var restoredManifest protocol.Manifest
+	var restoredManifest runnerpayload.Manifest
 	require.NoError(t, json.Unmarshal([]byte(restoredRun.ManifestJSON), &restoredManifest))
 	assert.Equal(t, "run-one", restoredManifest.RunID)
 	assert.Equal(t, restoredRun.ManifestDigest, restoredManifest.Digest)
@@ -577,6 +713,76 @@ func TestRegistryRestoresStableIdentityAffinityAndLostRuns(t *testing.T) {
 
 	require.NoError(t, secondRegistry.Close())
 	require.NoError(t, firstRegistry.Close())
+}
+
+func TestSQLitePersistenceBoundsRestoredHistoryAndPrunesTerminalOrphans(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "storage.db")
+	database, err := db.Open(t.Context(), dbPath)
+	require.NoError(t, err)
+	require.NoError(t, db.NewMigrationRunner(database).Run(t.Context(), migrations.All()))
+	require.NoError(t, database.Close())
+	persistence, err := NewSQLitePersistence(t.Context(), dbPath, "owner-one")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = persistence.Close() })
+	now := time.Date(2026, time.August, 8, 12, 0, 0, 0, time.UTC)
+	require.NoError(t, persistence.SaveRunner(t.Context(), Runner{
+		ID:        "runner-one",
+		Host:      protocol.Host{InstanceID: "host-one"},
+		Workspace: protocol.Workspace{Path: "/work/project", Name: "project"},
+		Status:    RunnerStatusOffline,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}))
+	_, err = persistence.db.ExecContext(t.Context(), `
+		INSERT INTO conversations (id, raw_messages, provider, usage, created_at, updated_at, metadata, tool_results)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, "conversation-one", `[]`, "openai", `{}`, now, now, `{}`, `{}`)
+	require.NoError(t, err)
+	tx, err := persistence.db.BeginTxx(t.Context(), nil)
+	require.NoError(t, err)
+	for i := range defaultLoadedRunHistory + 5 {
+		runID := fmt.Sprintf("run-%04d", i)
+		require.NoError(t, persistence.saveRun(t.Context(), tx, Run{
+			ID:             runID,
+			ConversationID: "conversation-one",
+			RunnerID:       "runner-one",
+			Status:         RunStatusSucceeded,
+			CreatedAt:      now.Add(time.Duration(i) * time.Second),
+			UpdatedAt:      now.Add(time.Duration(i) * time.Second),
+		}))
+	}
+	require.NoError(t, persistence.saveRun(t.Context(), tx, Run{
+		ID:             "orphan-terminal",
+		ConversationID: "deleted-conversation",
+		RunnerID:       "runner-one",
+		Status:         RunStatusFailed,
+		CreatedAt:      now.Add(time.Hour),
+		UpdatedAt:      now.Add(time.Hour),
+	}))
+	require.NoError(t, persistence.saveRun(t.Context(), tx, Run{
+		ID:             "orphan-active",
+		ConversationID: "not-yet-persisted-conversation",
+		RunnerID:       "runner-one",
+		Status:         RunStatusRunning,
+		CreatedAt:      now.Add(2 * time.Hour),
+		UpdatedAt:      now.Add(2 * time.Hour),
+	}))
+	require.NoError(t, tx.Commit())
+
+	state, err := persistence.Load(t.Context())
+	require.NoError(t, err)
+	require.Len(t, state.Runs, defaultLoadedRunHistory+1)
+	loaded := make(map[string]struct{}, len(state.Runs))
+	for _, run := range state.Runs {
+		loaded[run.ID] = struct{}{}
+	}
+	assert.NotContains(t, loaded, "run-0000")
+	assert.Contains(t, loaded, fmt.Sprintf("run-%04d", defaultLoadedRunHistory+4))
+	assert.NotContains(t, loaded, "orphan-terminal")
+	assert.Contains(t, loaded, "orphan-active")
+	var orphanCount int
+	require.NoError(t, persistence.db.GetContext(t.Context(), &orphanCount, "SELECT COUNT(*) FROM runner_runs WHERE id = ?", "orphan-terminal"))
+	assert.Zero(t, orphanCount)
 }
 
 func TestRemoveRunnerRequiresOfflineAndProtectsConversationAffinity(t *testing.T) {
@@ -644,6 +850,7 @@ func TestRemoveRunnerDeletesDurableState(t *testing.T) {
 	markRunnerReady(t, firstRegistry, registration)
 	_, err = firstRegistry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-one", "conversation-one"))
 	require.NoError(t, err)
+	require.NoError(t, firstRegistry.CommitConversationAffinity(t.Context(), "conversation-one"))
 	require.NoError(t, firstRegistry.CloseRun(t.Context(), "run-one", RunStatusSucceeded, nil))
 	firstRegistry.Detach(registration.RunnerID, registration.ConnectionID, registration.Generation, nil)
 
@@ -787,17 +994,17 @@ func TestOpenRunClosesLeaseWhenEnvironmentFailsBeforeRunningCommit(t *testing.T)
 		switch method {
 		case protocol.MethodRunOpen:
 			request := params.(protocol.RunOpenParams)
-			manifest := protocol.Manifest{
+			manifest := runnerpayload.Manifest{
 				ProtocolVersion:  protocol.Version,
 				RunnerID:         registration.RunnerID,
 				RunID:            request.RunID,
 				Generation:       registration.Generation,
 				WorkingDirectory: "/work/project",
 			}
-			digest, digestErr := protocol.ComputeManifestDigest(manifest)
+			digest, digestErr := runnerpayload.ComputeManifestDigest(manifest)
 			require.NoError(t, digestErr)
 			manifest.Digest = digest
-			*result.(*protocol.Manifest) = manifest
+			*result.(*runnerpayload.Manifest) = manifest
 			require.NoError(t, registry.EnvironmentError(registration.RunnerID, registration.ConnectionID, registration.Generation, protocol.EnvironmentErrorParams{
 				RunID: request.RunID, Message: "extension failed during open",
 			}))
@@ -836,7 +1043,11 @@ func TestCloseRunTreatsMissingRemoteLeaseAsAlreadyClosed(t *testing.T) {
 	link.mu.Lock()
 	link.call = func(_ context.Context, method string, _ any, _ any) error {
 		if method == protocol.MethodRunClose {
-			return &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: "runner has no active run"}
+			return &protocol.RPCError{
+				Code:    protocol.ErrorCodeStale,
+				Message: "runner has no active run",
+				Data:    protocol.RPCErrorData{Reason: protocol.ErrorReasonRunNotActive},
+			}
 		}
 		return fmt.Errorf("unexpected method %s", method)
 	}
@@ -970,7 +1181,29 @@ func TestOpenRunRPCRejectionDoesNotAttemptCleanup(t *testing.T) {
 	assert.False(t, link.isClosed())
 }
 
-func TestOpenRunLocksEnvironmentProfileBeforeRunnerAvailability(t *testing.T) {
+func TestPendingAffinityCanBeReleasedWhenFirstRunCreatesNoConversation(t *testing.T) {
+	registry := newTestRegistry(t)
+	link := newFakeLink()
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), link)
+	require.NoError(t, err)
+	markRunnerReady(t, registry, registration)
+	link.mu.Lock()
+	link.call = func(context.Context, string, any, any) error {
+		return &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: "open rejected"}
+	}
+	link.mu.Unlock()
+
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-one", "conversation-one"))
+	require.Error(t, err)
+	_, ok := registry.RunnerForConversation("conversation-one")
+	require.True(t, ok)
+	assert.True(t, registry.ReleasePendingConversationAffinity("conversation-one"))
+	_, ok = registry.RunnerForConversation("conversation-one")
+	assert.False(t, ok)
+	assert.False(t, registry.ReleasePendingConversationAffinity("conversation-one"))
+}
+
+func TestOpenRunDoesNotReserveAffinityBeforeRunnerAvailability(t *testing.T) {
 	registry := newTestRegistry(t)
 	link := newFakeLink()
 	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), link)
@@ -985,11 +1218,9 @@ func TestOpenRunLocksEnvironmentProfileBeforeRunnerAvailability(t *testing.T) {
 	params.RunID = "run-two"
 	params.Agent.EnvironmentProfile = "runner-ci"
 	_, err = registry.OpenRun(t.Context(), registration.RunnerID, params)
-	require.ErrorContains(t, err, `locked to "runner-work"`)
-
-	params.Agent.EnvironmentProfile = "runner-work"
-	_, err = registry.OpenRun(t.Context(), registration.RunnerID, params)
 	require.ErrorContains(t, err, "offline")
+	_, ok := registry.RunnerForConversation("conversation-one")
+	assert.False(t, ok)
 }
 
 func TestResolveConversationAffinityObservesExternalDeletion(t *testing.T) {
@@ -1021,18 +1252,18 @@ func TestResolveConversationAffinityObservesExternalDeletion(t *testing.T) {
 
 func TestValidateManifestRejectsInvalidRunnerContracts(t *testing.T) {
 	params := testRunOpenParams("run-one", "conversation-one")
-	base := protocol.Manifest{
+	base := runnerpayload.Manifest{
 		ProtocolVersion:  protocol.Version,
 		RunnerID:         "runner-one",
 		RunID:            params.RunID,
 		Generation:       2,
 		WorkingDirectory: "/work/project",
-		Tools: []protocol.ToolDefinition{{
+		Tools: []runnerpayload.ToolDefinition{{
 			Name: "bash", Placement: "environment", InputSchema: map[string]any{"type": "object"},
 		}},
 	}
-	withDigest := func(manifest protocol.Manifest) protocol.Manifest {
-		digest, err := protocol.ComputeManifestDigest(manifest)
+	withDigest := func(manifest runnerpayload.Manifest) runnerpayload.Manifest {
+		digest, err := runnerpayload.ComputeManifestDigest(manifest)
 		require.NoError(t, err)
 		manifest.Digest = digest
 		return manifest
@@ -1041,33 +1272,33 @@ func TestValidateManifestRejectsInvalidRunnerContracts(t *testing.T) {
 
 	tests := []struct {
 		name      string
-		manifest  protocol.Manifest
+		manifest  runnerpayload.Manifest
 		wantError string
 	}{
-		{name: "protocol", manifest: func() protocol.Manifest { value := base; value.ProtocolVersion++; return withDigest(value) }(), wantError: "protocol version"},
-		{name: "identity", manifest: func() protocol.Manifest { value := base; value.RunnerID = "other"; return withDigest(value) }(), wantError: "identity"},
-		{name: "unnamed tool", manifest: func() protocol.Manifest {
+		{name: "protocol", manifest: func() runnerpayload.Manifest { value := base; value.ProtocolVersion++; return withDigest(value) }(), wantError: "protocol version"},
+		{name: "identity", manifest: func() runnerpayload.Manifest { value := base; value.RunnerID = "other"; return withDigest(value) }(), wantError: "identity"},
+		{name: "unnamed tool", manifest: func() runnerpayload.Manifest {
 			value := base
-			value.Tools = []protocol.ToolDefinition{{Placement: "environment"}}
+			value.Tools = []runnerpayload.ToolDefinition{{Placement: "environment"}}
 			return withDigest(value)
 		}(), wantError: "without a name"},
-		{name: "reserved collision", manifest: func() protocol.Manifest {
+		{name: "reserved collision", manifest: func() runnerpayload.Manifest {
 			value := base
-			value.Tools = []protocol.ToolDefinition{{Name: "get_goal", Placement: "environment"}}
+			value.Tools = []runnerpayload.ToolDefinition{{Name: "get_goal", Placement: "environment"}}
 			return withDigest(value)
 		}(), wantError: "reserved"},
-		{name: "placement", manifest: func() protocol.Manifest {
+		{name: "placement", manifest: func() runnerpayload.Manifest {
 			value := base
-			value.Tools = []protocol.ToolDefinition{{Name: "bash", Placement: "control_plane"}}
+			value.Tools = []runnerpayload.ToolDefinition{{Name: "bash", Placement: "control_plane"}}
 			return withDigest(value)
 		}(), wantError: "invalid placement"},
-		{name: "duplicate", manifest: func() protocol.Manifest {
+		{name: "duplicate", manifest: func() runnerpayload.Manifest {
 			value := base
 			value.Tools = append(value.Tools, value.Tools[0])
 			return withDigest(value)
 		}(), wantError: "duplicate tool"},
 		{name: "missing digest", manifest: base, wantError: "digest is required"},
-		{name: "wrong digest", manifest: func() protocol.Manifest { value := base; value.Digest = "sha256:wrong"; return value }(), wantError: "does not match"},
+		{name: "wrong digest", manifest: func() runnerpayload.Manifest { value := base; value.Digest = "sha256:wrong"; return value }(), wantError: "does not match"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -1141,7 +1372,7 @@ func TestSessionRoutesUIAndRunnerNotifications(t *testing.T) {
 	run, ok := registry.Run("run-one")
 	require.True(t, ok)
 	assert.Equal(t, RunStatusFailed, run.Status)
-	session.HandleNotification(t.Context(), protocol.MethodToolUpdate, mustRegistryJSON(t, protocol.ToolUpdateParams{
+	session.HandleNotification(t.Context(), protocol.MethodToolUpdate, mustRegistryJSON(t, runnerpayload.ToolUpdateParams{
 		RunID: "run-one", ToolCallID: "tool-one", Sequence: 1,
 	}))
 	session.HandleNotification(t.Context(), protocol.MethodToolUpdate, json.RawMessage(`not-json`))
@@ -1234,23 +1465,23 @@ func configureManifestLink(t *testing.T, link *fakeLink, registration protocol.R
 		switch method {
 		case protocol.MethodRunOpen:
 			request := params.(protocol.RunOpenParams)
-			manifest := protocol.Manifest{
+			manifest := runnerpayload.Manifest{
 				ProtocolVersion:  protocol.Version,
 				RunnerID:         registration.RunnerID,
 				RunID:            request.RunID,
 				Generation:       registration.Generation,
 				WorkingDirectory: "/work/project",
-				Tools: []protocol.ToolDefinition{{
+				Tools: []runnerpayload.ToolDefinition{{
 					Name:        "bash",
 					Description: "execute commands",
 					InputSchema: map[string]any{"type": "object"},
 					Placement:   "environment",
 				}},
 			}
-			digest, err := protocol.ComputeManifestDigest(manifest)
+			digest, err := runnerpayload.ComputeManifestDigest(manifest)
 			require.NoError(t, err)
 			manifest.Digest = digest
-			*result.(*protocol.Manifest) = manifest
+			*result.(*runnerpayload.Manifest) = manifest
 		case protocol.MethodRunClose, protocol.MethodRunCancel:
 			return nil
 		default:

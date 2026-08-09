@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
@@ -118,16 +119,16 @@ func TestRunnerServiceRoundTripsThroughSymmetricWebsocketProtocol(t *testing.T) 
 	assert.Equal(t, "run-wire", manifest.RunID)
 	assert.Contains(t, manifestToolNames(manifest), "file_read")
 
-	var lifecycle protocol.LifecycleDispatchResult
-	require.NoError(t, registry.CallRun(t.Context(), "run-wire", protocol.MethodLifecycleDispatch, protocol.LifecycleDispatchParams{
+	var lifecycle runnerpayload.LifecycleDispatchResult
+	require.NoError(t, registry.CallRun(t.Context(), "run-wire", protocol.MethodLifecycleDispatch, runnerpayload.LifecycleDispatchParams{
 		RunID:        "run-wire",
-		Event:        protocol.LifecycleAgentInit,
+		Event:        runnerpayload.LifecycleAgentInit,
 		SystemPrompt: "wire prompt",
 		AllowedTools: []string{"file_read"},
 	}, &lifecycle))
 	assert.Equal(t, "wire prompt", lifecycle.SystemPrompt)
 
-	result, err := registry.ExecuteTool(t.Context(), protocol.ToolExecuteParams{
+	result, err := registry.ExecuteTool(t.Context(), runnerpayload.ToolExecuteParams{
 		RunID:      "run-wire",
 		ToolCallID: "tool-wire",
 		Name:       "file_read",

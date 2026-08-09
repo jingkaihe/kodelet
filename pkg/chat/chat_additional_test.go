@@ -10,6 +10,9 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
+	conversationsqlite "github.com/jingkaihe/kodelet/pkg/conversations/sqlite"
+	"github.com/jingkaihe/kodelet/pkg/db"
+	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
@@ -280,6 +283,49 @@ func TestDefaultChatRunnerRenameCommandPersistsWithoutCallingModel(t *testing.T)
 	assert.Equal(t, `Renamed to "Authentication cleanup"`, sink.events[1].UINotify.Message)
 }
 
+func TestResolveConfigRejectsRunnerBoundConversationBeforeResolvingRemoteCWD(t *testing.T) {
+	basePath := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", basePath)
+	dbPath := filepath.Join(basePath, "storage.db")
+	database, err := db.Open(t.Context(), dbPath)
+	require.NoError(t, err)
+	require.NoError(t, db.NewMigrationRunner(database).Run(t.Context(), migrations.All()))
+	require.NoError(t, database.Close())
+
+	store, err := conversationsqlite.NewStore(t.Context(), dbPath)
+	require.NoError(t, err)
+	now := time.Now().UTC()
+	require.NoError(t, store.Save(t.Context(), convtypes.ConversationRecord{
+		ID:          "remote-conversation",
+		CWD:         filepath.Join(basePath, "runner-only-workspace", "missing"),
+		Provider:    "openai",
+		RawMessages: json.RawMessage(`[]`),
+		Metadata:    map[string]any{},
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}))
+	require.NoError(t, store.Close())
+
+	database, err = db.Open(t.Context(), dbPath)
+	require.NoError(t, err)
+	_, err = database.ExecContext(t.Context(), `
+		INSERT INTO runner_registrations (
+			id, owner_id, host_instance_id, workspace_path, workspace_name, status, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, "runner-one", "local", "host-one", "/runner/workspace", "workspace", "offline", now, now)
+	require.NoError(t, err)
+	_, err = database.ExecContext(t.Context(), `
+		INSERT INTO conversation_runner_affinity (conversation_id, runner_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?)
+	`, "remote-conversation", "runner-one", now, now)
+	require.NoError(t, err)
+	require.NoError(t, database.Close())
+
+	_, _, err = ResolveConfigWithReasoning(t.Context(), "remote-conversation", "", "", "", t.TempDir())
+	require.ErrorContains(t, err, "bound to runner runner-one")
+	assert.NotContains(t, err.Error(), "cwd directory does not exist")
+}
+
 func TestPersistDirectCommandResponseWithoutCallingModel(t *testing.T) {
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-4.1"}
 	fingerprint, err := chatThreadConfigFingerprint(config)
@@ -297,6 +343,7 @@ func TestPersistDirectCommandResponseWithoutCallingModel(t *testing.T) {
 		runner,
 		thread.conversationID,
 		config,
+		"",
 		"",
 		"/doctor",
 		"Everything is healthy.",

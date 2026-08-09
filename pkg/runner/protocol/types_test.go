@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -48,11 +49,13 @@ func TestRegisterParamsValidate(t *testing.T) {
 }
 
 func TestComputeManifestDigestIgnoresExistingDigest(t *testing.T) {
-	manifest := Manifest{
-		ProtocolVersion: Version,
-		RunnerID:        "runner-one",
-		RunID:           "run-one",
-		Tools: []ToolDefinition{{
+	manifest := runnerpayload.Manifest{
+		ProtocolVersion:     Version,
+		RunnerID:            "runner-one",
+		RunID:               "run-one",
+		Generation:          1,
+		ExtensionGeneration: 1,
+		Tools: []runnerpayload.ToolDefinition{{
 			Name:        "bash",
 			Description: "execute a command",
 			InputSchema: map[string]any{"type": "object"},
@@ -60,10 +63,14 @@ func TestComputeManifestDigestIgnoresExistingDigest(t *testing.T) {
 		}},
 	}
 
-	first, err := ComputeManifestDigest(manifest)
+	first, err := runnerpayload.ComputeManifestDigest(manifest)
 	require.NoError(t, err)
 	manifest.Digest = "stale"
-	second, err := ComputeManifestDigest(manifest)
+	manifest.RunnerID = "runner-two"
+	manifest.RunID = "run-two"
+	manifest.Generation = 2
+	manifest.ExtensionGeneration = 99
+	second, err := runnerpayload.ComputeManifestDigest(manifest)
 	require.NoError(t, err)
 	assert.Equal(t, first, second)
 	assert.Regexp(t, `^sha256:[0-9a-f]{64}$`, first)
@@ -73,6 +80,8 @@ func TestMessageAndRPCErrorValidationBranches(t *testing.T) {
 	var nilRPCError *RPCError
 	assert.Empty(t, nilRPCError.Error())
 	assert.Equal(t, "runner rpc error -32600: invalid", (&RPCError{Code: ErrorCodeInvalidRequest, Message: "invalid"}).Error())
+	assert.Equal(t, ErrorReasonRunNotActive, (&RPCError{Data: RPCErrorData{Reason: ErrorReasonRunNotActive}}).Reason())
+	assert.Equal(t, ErrorReasonRunnerNotFound, (&RPCError{Data: map[string]any{"reason": ErrorReasonRunnerNotFound}}).Reason())
 	_, err := DecodeMessage([]byte(`not-json`))
 	require.ErrorContains(t, err, "decode runner rpc message")
 

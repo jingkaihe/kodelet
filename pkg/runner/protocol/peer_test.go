@@ -332,6 +332,77 @@ func TestPeerReturnsHandlerAndDecodeFailures(t *testing.T) {
 	})
 }
 
+func TestPeerRejectsOversizedMessagesWithoutClosingConnection(t *testing.T) {
+	t.Run("result", func(t *testing.T) {
+		_, clientPeer := newTestPeerPair(t, PeerConfig{
+			WriteLimit: 512,
+			Handler: RequestHandlerFunc(func(_ context.Context, method string, _ json.RawMessage) (any, *RPCError) {
+				if method == "large" {
+					return map[string]string{"value": strings.Repeat("x", 2048)}, nil
+				}
+				return map[string]string{"value": "ok"}, nil
+			}),
+		}, PeerConfig{})
+
+		err := clientPeer.Call(t.Context(), "large", nil, nil)
+		var rpcErr *RPCError
+		require.ErrorAs(t, err, &rpcErr)
+		assert.Equal(t, ErrorCodeUnavailable, rpcErr.Code)
+		assert.Contains(t, rpcErr.Message, "message-size limit")
+
+		var result map[string]string
+		require.NoError(t, clientPeer.Call(t.Context(), "small", nil, &result))
+		assert.Equal(t, "ok", result["value"])
+	})
+
+	t.Run("request", func(t *testing.T) {
+		_, clientPeer := newTestPeerPair(t, PeerConfig{
+			Handler: RequestHandlerFunc(func(context.Context, string, json.RawMessage) (any, *RPCError) {
+				return map[string]bool{"ok": true}, nil
+			}),
+		}, PeerConfig{WriteLimit: 256})
+
+		err := clientPeer.Call(t.Context(), "large", map[string]string{"value": strings.Repeat("x", 1024)}, nil)
+		require.ErrorContains(t, err, "outbound limit")
+		require.NoError(t, clientPeer.Call(t.Context(), "small", nil, nil))
+	})
+}
+
+func TestPeerDoneWaitsForInboundHandlers(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	serverPeer, clientPeer := newTestPeerPair(t, PeerConfig{
+		Notifications: NotificationHandlerFunc(func(context.Context, string, json.RawMessage) {
+			close(started)
+			<-release
+		}),
+	}, PeerConfig{})
+
+	require.NoError(t, clientPeer.Notify(t.Context(), "block", nil))
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("notification handler did not start")
+	}
+	require.NoError(t, serverPeer.Close())
+	select {
+	case <-serverPeer.TransportDone():
+	case <-time.After(time.Second):
+		t.Fatal("transport did not terminate")
+	}
+	select {
+	case <-serverPeer.Done():
+		t.Fatal("peer reported handler completion before the handler returned")
+	default:
+	}
+	close(release)
+	select {
+	case <-serverPeer.Done():
+	case <-time.After(time.Second):
+		t.Fatal("peer did not finish after its handler returned")
+	}
+}
+
 func TestPeerDefaultsAndMarshalRPCValue(t *testing.T) {
 	config := withPeerDefaults(PeerConfig{PongWait: 3 * time.Second, PingPeriod: 4 * time.Second})
 	assert.Equal(t, "rpc", config.RequestPrefix)
@@ -339,6 +410,7 @@ func TestPeerDefaultsAndMarshalRPCValue(t *testing.T) {
 	assert.Positive(t, config.UpdateQueueSize)
 	assert.Equal(t, 2*time.Second, config.PingPeriod)
 	assert.Positive(t, config.ReadLimit)
+	assert.Equal(t, config.ReadLimit, config.WriteLimit)
 	assert.Positive(t, config.MaxConcurrentRequests)
 	assert.Positive(t, config.MaxConcurrentControlRequests)
 	assert.Positive(t, config.MaxConcurrentNotifications)

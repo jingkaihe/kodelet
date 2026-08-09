@@ -13,6 +13,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
@@ -126,7 +127,7 @@ type recordingPeer struct {
 	calls         []string
 	callParams    []any
 	notifications []string
-	updates       []protocol.ToolUpdateParams
+	updates       []runnerpayload.ToolUpdateParams
 }
 
 func (p *recordingPeer) Call(_ context.Context, method string, params any, result any) error {
@@ -136,14 +137,14 @@ func (p *recordingPeer) Call(_ context.Context, method string, params any, resul
 	p.mu.Unlock()
 	switch method {
 	case protocol.MethodUIInput:
-		value := params.(protocol.UIInputParams)
+		value := params.(runnerpayload.UIInputParams)
 		response := result.(*extensions.UIInputResponse)
 		*response = extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted, Value: value.Request.DefaultValue}
 	case protocol.MethodUIConfirm:
 		response := result.(*extensions.UIInputResponse)
 		*response = extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted, Confirmed: true, Value: "true"}
 	case protocol.MethodUISelect:
-		value := params.(protocol.UISelectParams)
+		value := params.(runnerpayload.UISelectParams)
 		response := result.(*extensions.UIInputResponse)
 		*response = extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted, Value: value.Request.Options[0]}
 	case protocol.MethodUINotify:
@@ -173,7 +174,7 @@ func (p *recordingPeer) Notify(_ context.Context, method string, _ any) error {
 
 func (p *recordingPeer) NotifyUpdate(_ string, params any) error {
 	p.mu.Lock()
-	p.updates = append(p.updates, params.(protocol.ToolUpdateParams))
+	p.updates = append(p.updates, params.(runnerpayload.ToolUpdateParams))
 	p.mu.Unlock()
 	return nil
 }
@@ -225,7 +226,7 @@ Review the runner workspace.`), 0o600))
 	assert.Empty(t, activeRunID)
 	assert.Equal(t, probeDigest, heartbeatDigest)
 
-	manifest := callService[protocol.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
+	manifest := callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
 		RunID:          "run-1",
 		ConversationID: "conversation-1",
 		ClientCapabilities: protocol.ClientCapabilities{
@@ -263,16 +264,16 @@ Review the runner workspace.`), 0o600))
 	require.NotNil(t, rpcErr)
 	assert.Equal(t, protocol.ErrorCodeBusy, rpcErr.Code)
 
-	initResult := callService[protocol.LifecycleDispatchResult](t, service, protocol.MethodLifecycleDispatch, protocol.LifecycleDispatchParams{
+	initResult := callService[runnerpayload.LifecycleDispatchResult](t, service, protocol.MethodLifecycleDispatch, runnerpayload.LifecycleDispatchParams{
 		RunID:        "run-1",
-		Event:        protocol.LifecycleAgentInit,
+		Event:        runnerpayload.LifecycleAgentInit,
 		SystemPrompt: "base prompt",
 		AllowedTools: []string{"file_read"},
 	})
 	assert.Equal(t, "base prompt", initResult.SystemPrompt)
 	assert.Equal(t, []string{"file_read"}, initResult.AllowedTools)
 
-	commandResult := callService[protocol.CommandExecuteResult](t, service, protocol.MethodCommandExecute, protocol.CommandExecuteParams{
+	commandResult := callService[runnerpayload.CommandExecuteResult](t, service, protocol.MethodCommandExecute, runnerpayload.CommandExecuteParams{
 		RunID: "run-1", Message: "/review focus on tests",
 	})
 	assert.True(t, commandResult.Matched)
@@ -280,49 +281,49 @@ Review the runner workspace.`), 0o600))
 	assert.Contains(t, commandResult.Prompt, "Review the runner workspace")
 	assert.Equal(t, []string{"file_read"}, commandResult.AllowedTools)
 
-	userMessage := callService[protocol.LifecycleDispatchResult](t, service, protocol.MethodLifecycleDispatch, protocol.LifecycleDispatchParams{
-		RunID: "run-1", Event: protocol.LifecycleUserMessage, Message: "hello",
+	userMessage := callService[runnerpayload.LifecycleDispatchResult](t, service, protocol.MethodLifecycleDispatch, runnerpayload.LifecycleDispatchParams{
+		RunID: "run-1", Event: runnerpayload.LifecycleUserMessage, Message: "hello",
 	})
 	assert.Equal(t, "hello", userMessage.Message)
-	callService[protocol.LifecycleDispatchResult](t, service, protocol.MethodLifecycleDispatch, protocol.LifecycleDispatchParams{
-		RunID: "run-1", Event: protocol.LifecycleAgentStart,
+	callService[runnerpayload.LifecycleDispatchResult](t, service, protocol.MethodLifecycleDispatch, runnerpayload.LifecycleDispatchParams{
+		RunID: "run-1", Event: runnerpayload.LifecycleAgentStart,
 	})
-	callService[protocol.LifecycleDispatchResult](t, service, protocol.MethodLifecycleDispatch, protocol.LifecycleDispatchParams{
-		RunID: "run-1", Event: protocol.LifecycleTurnStart, TurnNumber: 2,
+	callService[runnerpayload.LifecycleDispatchResult](t, service, protocol.MethodLifecycleDispatch, runnerpayload.LifecycleDispatchParams{
+		RunID: "run-1", Event: runnerpayload.LifecycleTurnStart, TurnNumber: 2,
 	})
-	callService[protocol.LifecycleDispatchResult](t, service, protocol.MethodLifecycleDispatch, protocol.LifecycleDispatchParams{
-		RunID: "run-1", Event: protocol.LifecycleTurnEnd, FinalOutput: "done", TurnCount: 2,
+	callService[runnerpayload.LifecycleDispatchResult](t, service, protocol.MethodLifecycleDispatch, runnerpayload.LifecycleDispatchParams{
+		RunID: "run-1", Event: runnerpayload.LifecycleTurnEnd, FinalOutput: "done", TurnCount: 2,
 	})
-	agentEnd := callService[protocol.LifecycleDispatchResult](t, service, protocol.MethodLifecycleDispatch, protocol.LifecycleDispatchParams{
-		RunID: "run-1", Event: protocol.LifecycleAgentEnd,
+	agentEnd := callService[runnerpayload.LifecycleDispatchResult](t, service, protocol.MethodLifecycleDispatch, runnerpayload.LifecycleDispatchParams{
+		RunID: "run-1", Event: runnerpayload.LifecycleAgentEnd,
 	})
 	assert.Empty(t, agentEnd.FollowUpMessages)
-	toolCall := callService[protocol.LifecycleDispatchResult](t, service, protocol.MethodLifecycleDispatch, protocol.LifecycleDispatchParams{
-		RunID: "run-1", Event: protocol.LifecycleToolCall, ToolName: "file_read", ToolCallID: "policy-1", ToolInput: json.RawMessage(`{}`),
+	toolCall := callService[runnerpayload.LifecycleDispatchResult](t, service, protocol.MethodLifecycleDispatch, runnerpayload.LifecycleDispatchParams{
+		RunID: "run-1", Event: runnerpayload.LifecycleToolCall, ToolName: "file_read", ToolCallID: "policy-1", ToolInput: json.RawMessage(`{}`),
 	})
 	assert.JSONEq(t, `{}`, string(toolCall.ToolInput))
 	structured := tooltypes.StructuredToolResult{ToolName: "file_read", Success: true}
-	toolUpdate := callService[protocol.LifecycleDispatchResult](t, service, protocol.MethodLifecycleDispatch, protocol.LifecycleDispatchParams{
-		RunID: "run-1", Event: protocol.LifecycleToolUpdate, ToolName: "file_read", ToolCallID: "policy-1", ToolInput: json.RawMessage(`{}`), StructuredResult: &structured,
+	toolUpdate := callService[runnerpayload.LifecycleDispatchResult](t, service, protocol.MethodLifecycleDispatch, runnerpayload.LifecycleDispatchParams{
+		RunID: "run-1", Event: runnerpayload.LifecycleToolUpdate, ToolName: "file_read", ToolCallID: "policy-1", ToolInput: json.RawMessage(`{}`), StructuredResult: &structured,
 	})
 	assert.True(t, toolUpdate.Accepted)
-	toolLifecycleResult := callService[protocol.LifecycleDispatchResult](t, service, protocol.MethodLifecycleDispatch, protocol.LifecycleDispatchParams{
-		RunID: "run-1", Event: protocol.LifecycleToolResult, ToolName: "file_read", ToolCallID: "policy-1", ToolInput: json.RawMessage(`{}`), StructuredResult: &structured,
+	toolLifecycleResult := callService[runnerpayload.LifecycleDispatchResult](t, service, protocol.MethodLifecycleDispatch, runnerpayload.LifecycleDispatchParams{
+		RunID: "run-1", Event: runnerpayload.LifecycleToolResult, ToolName: "file_read", ToolCallID: "policy-1", ToolInput: json.RawMessage(`{}`), StructuredResult: &structured,
 	})
 	assert.True(t, toolLifecycleResult.Accepted)
 
-	_, rpcErr = service.HandleRequest(t.Context(), protocol.MethodLifecycleDispatch, mustJSON(t, protocol.LifecycleDispatchParams{
-		RunID: "run-1", Event: protocol.LifecycleToolResult,
+	_, rpcErr = service.HandleRequest(t.Context(), protocol.MethodLifecycleDispatch, mustJSON(t, runnerpayload.LifecycleDispatchParams{
+		RunID: "run-1", Event: runnerpayload.LifecycleToolResult,
 	}))
 	require.NotNil(t, rpcErr)
 	assert.Contains(t, rpcErr.Message, "structuredResult")
-	_, rpcErr = service.HandleRequest(t.Context(), protocol.MethodLifecycleDispatch, mustJSON(t, protocol.LifecycleDispatchParams{
-		RunID: "run-1", Event: protocol.LifecycleEvent("unknown"),
+	_, rpcErr = service.HandleRequest(t.Context(), protocol.MethodLifecycleDispatch, mustJSON(t, runnerpayload.LifecycleDispatchParams{
+		RunID: "run-1", Event: runnerpayload.LifecycleEvent("unknown"),
 	}))
 	require.NotNil(t, rpcErr)
 	assert.Contains(t, rpcErr.Message, "unsupported lifecycle")
 
-	toolResult := callService[protocol.ToolExecuteResult](t, service, protocol.MethodToolExecute, protocol.ToolExecuteParams{
+	toolResult := callService[runnerpayload.ToolExecuteResult](t, service, protocol.MethodToolExecute, runnerpayload.ToolExecuteParams{
 		RunID:      "run-1",
 		ToolCallID: "tool-1",
 		Name:       "file_read",
@@ -330,19 +331,19 @@ Review the runner workspace.`), 0o600))
 	})
 	assert.Contains(t, toolResult.Result.AssistantFacing, "hello runner")
 	assert.True(t, toolResult.Result.Structured.Success)
-	_, rpcErr = service.HandleRequest(t.Context(), protocol.MethodToolExecute, mustJSON(t, protocol.ToolExecuteParams{RunID: "run-1"}))
+	_, rpcErr = service.HandleRequest(t.Context(), protocol.MethodToolExecute, mustJSON(t, runnerpayload.ToolExecuteParams{RunID: "run-1"}))
 	require.NotNil(t, rpcErr)
 	assert.Contains(t, rpcErr.Message, "toolCallId and name")
 
 	uiResponse, err := service.Input(t.Context(), extensions.UIInputRequest{Title: "Input", DefaultValue: "answer"})
 	require.NoError(t, err)
 	assert.Equal(t, "answer", uiResponse.Value)
-	service.HandleNotification(t.Context(), protocol.MethodUISurfaceInput, mustJSON(t, protocol.UISurfaceInputParams{
-		RunID: "run-1", Owner: protocol.ExtensionOwner{ExtensionID: "missing", Generation: 1}, Lifecycle: 1,
+	service.HandleNotification(t.Context(), protocol.MethodUISurfaceInput, mustJSON(t, runnerpayload.UISurfaceInputParams{
+		RunID: "run-1", Owner: runnerpayload.ExtensionOwner{ExtensionID: "missing", Generation: 1}, Lifecycle: 1,
 		Request: extensions.UISurfaceInputNotification{ID: "surface", Sequence: 1, Kind: extensions.UISurfaceInputKey, Key: "enter"},
 	}))
-	service.HandleNotification(t.Context(), protocol.MethodUISurfaceResize, mustJSON(t, protocol.UISurfaceResizeParams{
-		RunID: "run-1", Owner: protocol.ExtensionOwner{ExtensionID: "missing", Generation: 1}, Lifecycle: 1,
+	service.HandleNotification(t.Context(), protocol.MethodUISurfaceResize, mustJSON(t, runnerpayload.UISurfaceResizeParams{
+		RunID: "run-1", Owner: runnerpayload.ExtensionOwner{ExtensionID: "missing", Generation: 1}, Lifecycle: 1,
 		Request: extensions.UISurfaceResizeNotification{ID: "surface", Sequence: 1, Width: 80, Height: 24},
 	}))
 	service.HandleNotification(t.Context(), protocol.MethodUISurfaceInput, json.RawMessage(`not-json`))
@@ -390,7 +391,7 @@ func TestServiceManifestProbeDoesNotStartRunLifecycle(t *testing.T) {
 	assert.Zero(t, provider.activeCalls)
 	assert.Equal(t, []string{""}, loadedProfiles)
 
-	callService[protocol.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
+	callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
 		RunID: "run-1", ConversationID: "conversation-1",
 		Agent: protocol.AgentDescriptor{Provider: "anthropic", Model: "claude-test", EnvironmentProfile: "runner-work"},
 	})
@@ -424,13 +425,13 @@ func TestServiceCloseRunDoesNotWaitForeverForCanceledOperation(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, service.Close()) })
 	service.Attach(&recordingPeer{})
 	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
-	callService[protocol.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
+	callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
 		RunID: "run-1", ConversationID: "conversation-1",
 	})
 
 	operationDone := make(chan error, 1)
 	go func() {
-		_, operationErr := service.executeTool(context.Background(), protocol.ToolExecuteParams{
+		_, operationErr := service.executeTool(context.Background(), runnerpayload.ToolExecuteParams{
 			RunID: "run-1", ToolCallID: "tool-1", Name: "file_read", Input: json.RawMessage(`{}`),
 		})
 		operationDone <- operationErr
@@ -473,7 +474,7 @@ func TestServiceReturnsUnavailableWhenClientDoesNotSupportInteractiveUI(t *testi
 	peer := &recordingPeer{}
 	service.Attach(peer)
 	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
-	callService[protocol.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
+	callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
 		RunID: "run-1", ConversationID: "conversation-1",
 	})
 
@@ -516,7 +517,7 @@ func TestServiceProxiesInteractiveAndPersistentUI(t *testing.T) {
 	peer := &recordingPeer{}
 	service.Attach(peer)
 	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
-	callService[protocol.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
+	callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
 		RunID: "run-1", ConversationID: "conversation-1",
 		ClientCapabilities: protocol.ClientCapabilities{InteractiveUI: true, PersistentSurfaces: true},
 	})
@@ -579,19 +580,19 @@ func TestServiceProxiesInteractiveAndPersistentUI(t *testing.T) {
 		protocol.MethodUISurfaceFrame,
 		protocol.MethodUISurfaceClose,
 	}, peer.calls)
-	inputParams := peer.callParams[0].(protocol.UIInputParams)
-	confirmParams := peer.callParams[1].(protocol.UIConfirmParams)
-	selectParams := peer.callParams[2].(protocol.UISelectParams)
-	widgetParams := peer.callParams[4].(protocol.UIWidgetSetParams)
+	inputParams := peer.callParams[0].(runnerpayload.UIInputParams)
+	confirmParams := peer.callParams[1].(runnerpayload.UIConfirmParams)
+	selectParams := peer.callParams[2].(runnerpayload.UISelectParams)
+	widgetParams := peer.callParams[4].(runnerpayload.UIWidgetSetParams)
 	peer.mu.Unlock()
-	assert.Equal(t, protocol.ExtensionOwner{ExtensionID: "extension-1", Generation: 4}, inputParams.Owner)
+	assert.Equal(t, runnerpayload.ExtensionOwner{ExtensionID: "extension-1", Generation: 4}, inputParams.Owner)
 	assert.Equal(t, scopedInteractiveUIRequestID(inputParams.Owner, "shared-id"), inputParams.Request.ID)
-	assert.NotEqual(t, scopedInteractiveUIRequestID(protocol.ExtensionOwner{ExtensionID: "extension-2", Generation: 4}, "shared-id"), inputParams.Request.ID)
+	assert.NotEqual(t, scopedInteractiveUIRequestID(runnerpayload.ExtensionOwner{ExtensionID: "extension-2", Generation: 4}, "shared-id"), inputParams.Request.ID)
 	assert.NotEmpty(t, confirmParams.Request.ID)
 	assert.NotEmpty(t, selectParams.Request.ID)
 	assert.NotEqual(t, confirmParams.Request.ID, selectParams.Request.ID)
 	assert.Equal(t, "run-1", widgetParams.RunID)
-	assert.Equal(t, protocol.ExtensionOwner{ExtensionID: "extension-1", Generation: 4}, widgetParams.Owner)
+	assert.Equal(t, runnerpayload.ExtensionOwner{ExtensionID: "extension-1", Generation: 4}, widgetParams.Owner)
 
 	callService[any](t, service, protocol.MethodRunClose, protocol.RunCloseParams{RunID: "run-1"})
 	_, err = service.Input(t.Context(), extensions.UIInputRequest{Title: "closed"})
@@ -610,7 +611,7 @@ func TestServicePersistentUIRequiresCapabilityAndSource(t *testing.T) {
 	peer := &recordingPeer{}
 	service.Attach(peer)
 	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
-	callService[protocol.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
+	callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
 		RunID: "run-1", ConversationID: "conversation-1",
 		ClientCapabilities: protocol.ClientCapabilities{InteractiveUI: true},
 	})
@@ -660,7 +661,7 @@ func TestServiceCreatesEnvironmentInsideExecutionInstanceAndCleansItUp(t *testin
 	service.Attach(&recordingPeer{})
 	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
 
-	manifest := callService[protocol.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
+	manifest := callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
 		RunID: "run-1", ConversationID: "conversation-1",
 	})
 
@@ -788,12 +789,12 @@ func TestServiceRunCancelPropagatesToActiveToolOperation(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, service.Close()) })
 	service.Attach(&recordingPeer{})
 	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
-	callService[protocol.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
+	callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
 		RunID: "run-1", ConversationID: "conversation-1",
 	})
 
 	done := make(chan *protocol.RPCError, 1)
-	toolParams := mustJSON(t, protocol.ToolExecuteParams{
+	toolParams := mustJSON(t, runnerpayload.ToolExecuteParams{
 		RunID: "run-1", ToolCallID: "tool-1", Name: "wait", Input: json.RawMessage(`{}`),
 	})
 	go func() {
@@ -922,7 +923,7 @@ func TestServiceAbortAndValidationHelpers(t *testing.T) {
 	service.Attach(&recordingPeer{})
 	require.ErrorContains(t, service.SetRegistration(protocol.RegisterResult{}), "incomplete")
 	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
-	callService[protocol.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{RunID: "run-1", ConversationID: "conversation-1"})
+	callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{RunID: "run-1", ConversationID: "conversation-1"})
 	require.NoError(t, service.AbortActiveRun(t.Context()))
 	state, runID, _ = service.HeartbeatSnapshot()
 	assert.Equal(t, protocol.RunnerStateIdle, state)
@@ -1002,7 +1003,7 @@ func mustProbeManifestDigest(t *testing.T, service *Service) string {
 	return digest
 }
 
-func manifestToolNames(manifest protocol.Manifest) []string {
+func manifestToolNames(manifest runnerpayload.Manifest) []string {
 	names := make([]string, 0, len(manifest.Tools))
 	for _, definition := range manifest.Tools {
 		names = append(names, definition.Name)

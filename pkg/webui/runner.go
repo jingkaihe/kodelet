@@ -14,6 +14,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 )
 
@@ -131,7 +132,7 @@ func (s *Server) handleRunnerWebsocket(w http.ResponseWriter, r *http.Request) {
 		logger.G(r.Context()).WithError(err).Warn("failed to start runner rpc peer")
 		return
 	}
-	<-peer.Done()
+	<-peer.TransportDone()
 	session.Detach(peer.Err())
 }
 
@@ -148,7 +149,7 @@ func supportsRunnerSubprotocol(r *http.Request) bool {
 func (s *Server) HandleRunnerUIRequest(ctx context.Context, runnerID, method string, params json.RawMessage) (any, *protocol.RPCError) {
 	switch method {
 	case protocol.MethodUIInput:
-		value, rpcErr := decodeRunnerUIParams[protocol.UIInputParams](s, runnerID, params)
+		value, rpcErr := decodeRunnerUIParams[runnerpayload.UIInputParams](s, runnerID, params)
 		if rpcErr != nil {
 			return nil, rpcErr
 		}
@@ -159,7 +160,7 @@ func (s *Server) HandleRunnerUIRequest(ctx context.Context, runnerID, method str
 		response, err := broker.Input(ctx, value.Request)
 		return runnerUIResponse(response, err)
 	case protocol.MethodUIConfirm:
-		value, rpcErr := decodeRunnerUIParams[protocol.UIConfirmParams](s, runnerID, params)
+		value, rpcErr := decodeRunnerUIParams[runnerpayload.UIConfirmParams](s, runnerID, params)
 		if rpcErr != nil {
 			return nil, rpcErr
 		}
@@ -170,7 +171,7 @@ func (s *Server) HandleRunnerUIRequest(ctx context.Context, runnerID, method str
 		response, err := broker.Confirm(ctx, value.Request)
 		return runnerUIResponse(response, err)
 	case protocol.MethodUISelect:
-		value, rpcErr := decodeRunnerUIParams[protocol.UISelectParams](s, runnerID, params)
+		value, rpcErr := decodeRunnerUIParams[runnerpayload.UISelectParams](s, runnerID, params)
 		if rpcErr != nil {
 			return nil, rpcErr
 		}
@@ -181,7 +182,7 @@ func (s *Server) HandleRunnerUIRequest(ctx context.Context, runnerID, method str
 		response, err := broker.Select(ctx, value.Request)
 		return runnerUIResponse(response, err)
 	case protocol.MethodUINotify:
-		value, rpcErr := decodeRunnerUIParams[protocol.UINotifyParams](s, runnerID, params)
+		value, rpcErr := decodeRunnerUIParams[runnerpayload.UINotifyParams](s, runnerID, params)
 		if rpcErr != nil {
 			return nil, rpcErr
 		}
@@ -192,7 +193,7 @@ func (s *Server) HandleRunnerUIRequest(ctx context.Context, runnerID, method str
 		response, err := broker.Notify(ctx, value.Request)
 		return runnerUIResponse(response, err)
 	case protocol.MethodUITranscriptAppend:
-		value, rpcErr := decodeRunnerUIParams[protocol.UITranscriptAppendParams](s, runnerID, params)
+		value, rpcErr := decodeRunnerUIParams[runnerpayload.UITranscriptAppendParams](s, runnerID, params)
 		if rpcErr != nil {
 			return nil, rpcErr
 		}

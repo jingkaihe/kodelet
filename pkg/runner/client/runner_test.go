@@ -20,6 +20,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type blockingRefreshInstanceProvider struct {
+	workspace string
+	probes    atomic.Int32
+	started   atomic.Bool
+	startedCh chan struct{}
+}
+
+func (p *blockingRefreshInstanceProvider) Create(ctx context.Context, spec ExecutionInstanceSpec) (ExecutionInstance, error) {
+	if spec.Probe && p.probes.Add(1) > 1 {
+		if p.started.CompareAndSwap(false, true) {
+			close(p.startedCh)
+		}
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	return &directWorkspaceInstance{workspace: p.workspace}, nil
+}
+
 func TestNormalizeServerURL(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -87,6 +105,7 @@ func TestNewRunnerValidatesConfigurationAndAppliesDefaults(t *testing.T) {
 	assert.Equal(t, defaultReconnectMin, runner.config.ReconnectMin)
 	assert.Equal(t, defaultReconnectMax, runner.config.ReconnectMax)
 	assert.Equal(t, defaultManifestInterval, runner.config.ManifestInterval)
+	assert.Equal(t, defaultManifestProbeTimeout, runner.config.ManifestProbeTimeout)
 	assert.Equal(t, filepath.Base(workspace), filepath.Base(runner.workspace))
 	assert.NotEmpty(t, runner.host.InstanceID)
 	assert.NotEmpty(t, runner.host.Hostname)
@@ -221,6 +240,85 @@ func TestRunnerRegistersHeartbeatsAndReleasesWorkspaceLock(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, found)
 	assert.NotNil(t, metadata.StoppedAt)
+}
+
+func TestManifestRefreshDoesNotBlockRunnerHeartbeats(t *testing.T) {
+	workspace := t.TempDir()
+	store, err := localstate.NewStoreAt(t.TempDir())
+	require.NoError(t, err)
+	registry, err := runnerregistry.New(t.Context(), runnerregistry.Options{
+		HeartbeatInterval: 5 * time.Millisecond,
+		HeartbeatTimeout:  30 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, registry.Close()) })
+
+	upgrader := websocket.Upgrader{Subprotocols: []string{protocol.Subprotocol}, CheckOrigin: func(*http.Request) bool { return true }}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		conn, upgradeErr := upgrader.Upgrade(w, request, nil)
+		if upgradeErr != nil {
+			return
+		}
+		session := runnerregistry.NewSession(registry, nil)
+		peer, peerErr := protocol.NewPeer(conn, protocol.PeerConfig{RequestPrefix: "server", Handler: session, Notifications: session})
+		if peerErr != nil {
+			_ = conn.Close()
+			return
+		}
+		session.Attach(peer)
+		if peerErr = peer.Start(request.Context()); peerErr != nil {
+			_ = peer.Close()
+			return
+		}
+		<-peer.TransportDone()
+		session.Detach(peer.Err())
+	}))
+	t.Cleanup(server.Close)
+
+	registered := make(chan protocol.RegisterResult, 2)
+	runner, err := NewRunner(t.Context(), RunnerConfig{
+		Server:               server.URL,
+		Workspace:            workspace,
+		Store:                store,
+		ReconnectMin:         5 * time.Millisecond,
+		ReconnectMax:         10 * time.Millisecond,
+		ManifestInterval:     5 * time.Millisecond,
+		ManifestProbeTimeout: 200 * time.Millisecond,
+		OnRegistered: func(result protocol.RegisterResult) {
+			registered <- result
+		},
+	})
+	require.NoError(t, err)
+	runtime := extensions.EmptyRuntime()
+	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
+	runner.service.runtimeProvider = staticRuntimeProvider{runtime: runtime}
+	runner.service.configLoader = func(string) (llmtypes.Config, error) { return llmtypes.Config{}, nil }
+	provider := &blockingRefreshInstanceProvider{workspace: workspace, startedCh: make(chan struct{})}
+	runner.service.instanceProvider = provider
+
+	runCtx, cancel := context.WithCancel(t.Context())
+	runDone := make(chan error, 1)
+	go func() { runDone <- runner.Run(runCtx) }()
+	registration := <-registered
+	select {
+	case <-provider.startedCh:
+	case <-time.After(time.Second):
+		cancel()
+		t.Fatal("periodic manifest refresh did not start")
+	}
+	time.Sleep(80 * time.Millisecond)
+	entry, ok := registry.Runner(registration.RunnerID)
+	require.True(t, ok)
+	assert.True(t, entry.Connected)
+	assert.Equal(t, registration.Generation, entry.Generation)
+
+	cancel()
+	select {
+	case err = <-runDone:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("runner did not stop")
+	}
 }
 
 func TestRunnerTreatsAuthenticationFailureAsPermanent(t *testing.T) {

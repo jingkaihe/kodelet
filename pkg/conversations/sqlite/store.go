@@ -5,6 +5,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"time"
 
@@ -114,7 +115,27 @@ func (s *Store) Load(ctx context.Context, id string) (conversations.Conversation
 		return conversations.ConversationRecord{}, errors.Wrap(err, "failed to load conversation record")
 	}
 
-	return dbRecord.ToConversationRecord(), nil
+	record := dbRecord.ToConversationRecord()
+	var affinity struct {
+		RunnerID           string `db:"runner_id"`
+		EnvironmentProfile string `db:"environment_profile"`
+	}
+	err = s.db.GetContext(ctx, &affinity, `
+		SELECT runner_id, environment_profile
+		FROM conversation_runner_affinity
+		WHERE conversation_id = ?
+	`, id)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return conversations.ConversationRecord{}, errors.Wrap(err, "failed to load conversation runner affinity")
+	}
+	if err == nil {
+		if record.Metadata == nil {
+			record.Metadata = make(map[string]any)
+		}
+		record.Metadata[conversations.RunnerIDMetadataKey] = affinity.RunnerID
+		record.Metadata[conversations.RunnerEnvironmentProfileMetadataKey] = affinity.EnvironmentProfile
+	}
+	return record, nil
 }
 
 // Delete removes a conversation and its associated data
@@ -124,6 +145,11 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 		return errors.Wrap(err, "failed to begin transaction")
 	}
 	defer tx.Rollback()
+
+	_, err = tx.ExecContext(ctx, "DELETE FROM runner_runs WHERE conversation_id = ?", id)
+	if err != nil {
+		return errors.Wrap(err, "failed to delete conversation runner run history")
+	}
 
 	// Runner affinity may exist before the first conversation record is saved, so it is
 	// explicitly released only when central conversation deletion commits.

@@ -68,7 +68,8 @@ func executeEnvironmentTool(
 	if rendererRegistry == nil {
 		panic("rendererRegistry must not be nil")
 	}
-	definition, defined := environment.Manifest().ToolDefinition(toolName)
+	manifest := environment.Manifest()
+	definition, defined := manifest.ToolDefinition(toolName)
 	if defined && definition.Placement == agentenv.ToolPlacementControlPlane {
 		return executeControlPlaneTool(ctx, thread, environment, rendererRegistry, toolName, toolInput, toolCallID, handler)
 	}
@@ -84,7 +85,7 @@ func executeEnvironmentTool(
 	}
 
 	if thread != nil {
-		workingDir := environment.Manifest().WorkingDirectory
+		workingDir := manifest.WorkingDirectory
 		toolContext := tools.ToolContextFromThreadState(thread.GetConfig(), thread.GetConversationID(), workingDir, thread)
 		if toolContext.RecipeName == "" {
 			if metadataRecipeName, ok := thread.GetMetadata()["recipe_name"].(string); ok {

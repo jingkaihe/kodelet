@@ -108,6 +108,23 @@ func TestSessionsShortcutReplacesShortcutsAndHistorySearch(t *testing.T) {
 	assert.Equal(t, "original draft", m.textarea.Value())
 }
 
+func TestRemoteConversationPickerDoesNotLoadClientLocalSessions(t *testing.T) {
+	m := newModel(context.Background(), Config{Remote: true})
+	t.Cleanup(m.cancel)
+	m.openConversationPicker("")
+
+	require.NotNil(t, m.conversationPicker)
+	assert.False(t, m.conversationPicker.loading)
+	assert.Empty(t, m.conversationPicker.summaries)
+	for _, item := range m.filteredConversationPickerItems() {
+		if item.isNew {
+			continue
+		}
+		_, exists := m.conversations[item.key]
+		assert.True(t, exists)
+	}
+}
+
 func TestConversationPickerFiltersAndLoadsPersistedConversation(t *testing.T) {
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)

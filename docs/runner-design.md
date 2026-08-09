@@ -6,6 +6,8 @@ Implemented through the initial capacity-one Phase 3 release. The future ephemer
 
 The current implementation preserves the design's direct-workspace constraints: no worktrees, containers, micro-VMs, filesystem snapshots, process namespaces, network namespaces, or same-workspace concurrent top-level runs. Remote Web UI conversations are supported, and the TUI can start new remote conversations with interactive extension prompts; remote TUI resume/follow and `kodelet run --runner` remain disabled pending broader client request and history contracts. The runner now provisions every run through an `ExecutionInstanceProvider`, but the only built-in provider returns a fresh lifecycle handle backed by the same registered workspace. This establishes creation and cleanup ordering without claiming filesystem, process, network, or port isolation.
 
+The implemented robustness model includes generation-fenced open reconciliation, immediate control-plane cancellation when an active runner connection is lost or replaced, a context-backed run-lease watchdog, asynchronous bounded manifest probing, symmetric message-size enforcement, handler-draining peer shutdown, pending-to-durable conversation affinity, and lease-aware extension runtime replacement.
+
 ## Summary
 
 This document defines Kodelet's workspace-bound runner architecture. A central `kodelet serve` process acts as the control plane: it owns the API layer, provider threads, provider credentials, conversation persistence, and the core agentic loop. A runner is a long-running Kodelet process bound to exactly one canonical workspace directory and exposes that workspace as a remote agent environment containing context, tools, skills, extension behavior, and workspace-local commands.
@@ -161,6 +163,8 @@ On first startup, `runnerId` can be omitted until registration completes and the
 The PID and other contents exist only to produce a useful error and support inspection. The held OS lock is authoritative: PIDs can be reused, metadata can be stale, and a process must never break or steal a lock merely because the recorded PID appears absent. A crash or clean process exit releases the kernel lock even though the file remains. The next runner acquires the existing file and overwrites its stale metadata.
 
 The lock file is intentionally persistent and is not unlinked during normal shutdown. Removing it around lock release creates a race in which another process can lock the old file while a third process creates and locks a new inode at the same path. The file and containing directory use user-only permissions, such as `0600` and `0700`, and never contain credentials.
+
+On Windows, the mandatory byte-range lock is placed beyond the diagnostic JSON region rather than over byte zero. This preserves the one-runner invariant while allowing `runner inspect` and duplicate-start diagnostics to read metadata from a lock file that is currently owned by another process.
 
 If acquisition fails, startup exits before registration and reports the canonical workspace, recorded PID, runner ID, server, and start time when those fields can be read. This local lock is a safety mechanism for cooperative Kodelet processes, not a sandbox or a general filesystem lock for other applications.
 
@@ -349,7 +353,7 @@ control plane persists provider-native conversation and closes run environment
 
 A runner command can return a direct response or an agent prompt. A direct response is streamed and persisted without calling the provider; an agent prompt replaces the submitted command text and may select recipe metadata before `user.message` and the provider loop continues. Central conversation commands such as goal mutation remain control-plane operations.
 
-The initial runner reuses one extension runtime for its workspace, matching the current persistent interactive-host behavior. `session.start` and `resources.discover` run once for that runtime generation, while `session.end` runs when the runtime is shut down or replaced. Per-run extension runtimes can be introduced with future ephemeral execution instances without changing the control-plane lifecycle methods.
+The initial runner reuses one extension runtime for its workspace and environment-profile variant, matching the current persistent interactive-host behavior. `session.start` and `resources.discover` run once for that runtime generation. When configuration or executable fingerprints change, later callers receive a replacement generation while callers that already pinned the prior runtime continue using it; the retired generation receives `session.end` and closes after those caller contexts end, or when the host shuts down. A transient fingerprint/discovery failure continues serving an existing cached generation rather than terminating active extension processes. Per-run extension runtimes can be introduced with future ephemeral execution instances without changing the control-plane lifecycle methods.
 
 The control plane streams provider text, reasoning, tool activity, usage, UI requests, and final status to attached clients through its existing client-facing event APIs.
 
@@ -388,9 +392,9 @@ An agent may edit `AGENTS.md` during a run, but those edits do not change the ac
 
 ### Manifest beats
 
-The runner computes a current manifest digest at registration, before accepting a run, and periodically while connected. Application heartbeats include the current connection generation and digest without repeatedly sending the full manifest. Discovery-only probes do not start extension session lifecycle; the first real run supplies the call context for `session.start` and `resources.discover`.
+The runner computes a current manifest digest at registration, before accepting a run, and periodically while connected. Application heartbeats include the current connection generation and digest without repeatedly sending the full manifest. Discovery-only probes do not start extension session lifecycle; the first real run supplies the call context for `session.start` and `resources.discover`. Periodic probes run asynchronously from the connection select loop with a bounded context, so slow discovery cannot suppress heartbeats. Only one refresh probe runs at a time; if it still owns the snapshot gate, a concurrent `run.open` fails quickly as busy rather than leaving an RPC handler blocked indefinitely.
 
-When the digest changes, the runner sends a `runner.manifestChanged` notification. The control plane can request a refreshed idle manifest for display or compatibility checks, but an active run remains pinned to the manifest returned by its own `run.open` response.
+When the digest changes, the runner sends a `runner.manifestChanged` notification. The control plane can request a refreshed idle manifest for display or compatibility checks, but an active run remains pinned to the manifest returned by its own `run.open` response. Connection identity, run identity, and extension runtime generation are excluded from the resource digest so reconnects and runtime-generation bookkeeping do not create false manifest-change notifications.
 
 ## Skills
 
@@ -484,7 +488,7 @@ extension ← runner ← control plane ← browser or TUI
 
 The runner proxies the full supported extension UI surface, including input, confirm, select, notifications, passive widgets, transcript entries, and interactive surfaces. Surface input and resize events travel in the opposite direction to the owning extension. Extension identity, process generation, scope ID, frame sequence, and run ID must survive the proxy so stale frames cannot overwrite a newer extension generation.
 
-The control plane routes interactive requests to the client attached to the run and returns the response. If no capable interactive client is attached, it returns the same structured unavailable or dismissed outcome expected by the local extension API. Cancellation must unblock pending extension requests and close run-scoped surfaces.
+The control plane routes interactive requests to the client attached to the run and returns the response. If no capable interactive client is attached, it returns the same structured unavailable or dismissed outcome expected by the local extension API. Client capabilities are opt-in: an omitted `clientCapabilities` field means interactive input and persistent surfaces are unavailable, which keeps unattended API clients from unexpectedly receiving blocking prompts. Cancellation must unblock pending extension requests and close run-scoped surfaces.
 
 ## Tool Placement
 
@@ -533,7 +537,7 @@ Model profiles and runner environment profiles are separate namespaces:
 - `profile` selects a control-plane model profile. The control plane resolves provider, model, reasoning policy, provider-native capabilities, and control-plane tool policy from its own configuration.
 - `environmentProfile` selects a runner-local configuration profile. The runner resolves that name from its own global and workspace configuration before discovering the run manifest. Blank or `default` selects the runner's base configuration.
 - Selecting a model profile never implicitly selects a same-named runner profile, and the runner never uses the model profile as a local configuration lookup key.
-- The selected environment profile is stored both in provider-neutral conversation metadata and in the durable conversation-runner affinity row. The affinity is established before runner availability or `run.open` is checked, so a failed first open does not permit a later request to switch the conversation to another runner or runner profile. A later request may omit the field and reuse the stored value, but it cannot select a different runner profile.
+- After runner identity, readiness, capacity, and profile compatibility are validated, the control plane creates an in-memory pending affinity before reserving `run.open`. The binding becomes durable only after the conversation record exists. Failed reservation or a first turn that produces no conversation releases the pending binding, avoiding phantom durable rows; once persisted, a later request may omit the environment profile and reuse it but cannot select a different runner or environment profile.
 
 Runner profiles are defined under the separate `environment_profiles` configuration namespace on the runner host:
 
@@ -546,13 +550,13 @@ environment_profiles:
       allow: [acp-subagent]
 ```
 
-The runner applies the selected environment profile before context, tools, skills, recipes, and extensions are discovered. Extension runtimes are cached by canonical workspace plus environment-profile identity and are replaced when their effective configuration or discovered executable fingerprint changes.
+The runner applies the selected environment profile before context, tools, skills, recipes, and extensions are discovered. Extension runtimes are cached by canonical workspace plus environment-profile identity. Fingerprint changes publish a new generation for later callers without closing a generation still leased by an active run.
 
 At `run.open`, the runner materializes a sanitized environment configuration projection into the manifest. It never sends secrets, environment variables, runner authentication credentials, or arbitrary runner-global provider credentials.
 
 Workspace-derived prompt inputs that the central model requires, such as a custom system-prompt file, must be loaded by the runner and included as content in the manifest. The control plane must not interpret runner-local paths as server-local paths.
 
-Runner `allowed_tools` policy filters runner-owned tools while the manifest is built. It does not suppress `get_goal`, `update_goal`, `read_conversation`, or other control-plane-owned tools, whose availability is resolved centrally. Runner extensions still receive the effective merged tool list during `agent.init` and retain the lifecycle visibility described above for host-executed control-plane tools.
+Runner `allowed_tools` policy filters runner-owned tools while the manifest is built. An explicit list is currently a strict allowlist: unknown names do not cause a fallback to the full default tool catalog. It does not suppress `get_goal`, `update_goal`, `read_conversation`, or other control-plane-owned tools, whose availability is resolved centrally. Runner extensions still receive the effective merged tool list during `agent.init` and retain the lifecycle visibility described above for host-executed control-plane tools.
 
 Recipe-backed commands carry a digest of their raw content and metadata in the pinned manifest. If a recipe changes or disappears during an active run, command execution fails and asks the user to start a new run rather than executing content that was not part of the pinned snapshot.
 
@@ -789,15 +793,19 @@ WebSocket ping and pong frames detect transport liveness. A separate `runner.hea
 
 A live socket is not sufficient evidence that the runner can accept work; the scheduler uses application heartbeat state.
 
+Heartbeat state is hot-path in-memory state. Registration, disconnect, run-state, and manifest transitions are persisted, while every individual heartbeat is not written to SQLite under the registry mutex. A clean disconnect persists the latest in-memory snapshot; after a control-plane crash, restored runners are offline regardless of the exact last heartbeat timestamp.
+
+The registry watches transport termination independently of handler draining. If a connection disappears or is replaced while a run is active, the generation-fenced run becomes lost and the control plane invokes the conversation cancellation hook immediately, stopping provider streaming rather than waiting for the next runner tool call. Every opened run also watches the owning control-plane context; if that context ends and normal `run.close` has not completed within the cleanup grace period, the watchdog sends best-effort cancel and close operations, then closes the connection if cleanup remains uncertain.
+
 ### Concurrency and backpressure
 
 Each connection has exactly one WebSocket reader goroutine and one writer goroutine. Request handlers run independently so a long tool call or UI request does not block receipt of cancellation or responses.
 
 Inbound normal requests, cancellation/close control requests, and notifications use separate bounded concurrency pools. Saturated normal or control request capacity returns a JSON-RPC busy error without starting the operation. `operation.cancel` is handled directly by the reader path so it can cancel an in-flight request even when handler pools are full. Notification overload closes the connection rather than allowing unbounded goroutine or memory growth.
 
-All outbound messages pass through bounded control and replaceable-update queues. Responses, cancellation, close, and heartbeat traffic use the control path ahead of transient tool updates. A slow or unreachable peer eventually fails the relevant operation rather than causing unbounded memory growth.
+All outbound messages pass through bounded control and replaceable-update queues. Responses, cancellation, close, and heartbeat traffic use the control path ahead of transient tool updates. A slow or unreachable peer eventually fails the relevant operation rather than causing unbounded memory growth. A transient failure to enqueue one WebSocket ping does not permanently disable the ping loop.
 
-The connection enforces read and write deadlines, maximum frame size, ping and pong handling, and context cancellation for pending requests. WebSocket compression remains disabled initially.
+The connection enforces read and write deadlines, symmetric inbound and outbound message-size limits, ping and pong handling, and context cancellation for pending requests. An oversized request or notification fails locally; an oversized handler result returns a small operation-level JSON-RPC error so the connection and run remain usable. Transport termination is observable immediately, while `Peer.Done()` closes only after in-flight request and notification handlers have returned. WebSocket compression remains disabled initially.
 
 Every `tool.update` carries the exact JSON-RPC request ID assigned to its active `tool.execute` request in addition to `runId`, `toolCallId`, and a monotonically increasing sequence number. The control plane rejects updates whose connection generation, run lease, tool call, request ID, or sequence does not match the active operation.
 
@@ -815,7 +823,7 @@ Compatibility rules are:
 
 ### Large and binary data
 
-The WebSocket protocol is intended for manifests, lifecycle payloads, schemas, tool input, text output, structured results, and UI messages. Initial implementations enforce conservative message-size limits.
+The WebSocket protocol is intended for manifests, lifecycle payloads, schemas, tool input, text output, structured results, and UI messages. Initial implementations enforce a conservative 4 MiB default in each direction. Results that exceed the limit fail that operation and should be reduced or moved to a future artifact channel; they do not intentionally tear down the runner connection.
 
 Arbitrarily large files, images, logs, database dumps, and future build artifacts should use a separate upload or artifact protocol rather than unbounded JSON or base64 on the control socket. That protocol is outside the initial scope.
 
@@ -850,7 +858,7 @@ A new remote conversation selects a runner. The binding is durable because the r
 
 Subsequent runs for that conversation default to the same runner. The control plane must not silently move a conversation to another runner because two paths or display names appear similar. Moving work to another runner initially requires an explicit conversation fork or migration operation.
 
-Runner affinity is stored in the dedicated `conversation_runner_affinity` table. Explicit runner selection establishes that binding before remote environment initialization, so an offline, busy, or failed-to-open runner does not cause a retry to silently become local or target another runner. Conversation deletion removes its affinity in the same database transaction and evicts the corresponding in-memory registry binding.
+Runner affinity is stored in the dedicated `conversation_runner_affinity` table. Explicit runner selection creates a pending in-memory binding only after the selected runner is usable, then persists it after the first conversation record is saved. A failed first turn cannot leave a phantom durable row, while an existing durable conversation still cannot silently become local or target another runner. Local CLI resume rejects runner-bound conversations before resolving their runner-local CWD, and the remote TUI conversation picker never imports client-local persisted sessions. Conversation deletion removes its affinity and runner-run history in the same database transaction and evicts the corresponding in-memory registry binding.
 
 ## Run Lifecycle
 
@@ -867,7 +875,7 @@ The runner is considered busy from successful `run.open` until `run.close` compl
 
 The control plane persists provider-native conversation state directly because the provider loop is central. Runner events and tool results are inputs to that loop rather than an independent conversation checkpoint.
 
-Client-stream disconnection does not automatically cancel a run. An explicit stop action cancels the central provider request and sends `run.cancel` or `operation.cancel` for active runner operations.
+Client-stream disconnection does not automatically cancel a run. An explicit stop action cancels the central provider request and sends `run.cancel` or `operation.cancel` for active runner operations. Runner transport disconnection is different: it invalidates the environment contract, marks the run lost, and cancels the central provider loop immediately.
 
 ## Failure and Reconnection Semantics
 
@@ -892,6 +900,12 @@ A restarted runner reconnects with its stable runner ID and a new generation. Me
 ### Control-plane restart
 
 Conversation state is durable, but active WebSocket connections and in-flight model or tool operations are lost. Active runs are marked lost or failed according to persisted run state. Transparent run resumption is deferred.
+
+The registry restores every nonterminal run plus a bounded recent terminal history instead of loading an unbounded run table into memory. Terminal run rows whose conversation was already deleted are pruned, and ordinary conversation deletion removes its associated run rows transactionally.
+
+### Cleanup timeout policy
+
+The initial direct-workspace runner treats an unconfirmed environment or execution-instance cleanup as a process-health failure. It releases the active lease, reports `error` heartbeats, and rejects later `run.open` requests until the runner process restarts. This conservative latch intentionally avoids reusing a workspace after cleanup state became uncertain; automatic recovery after late resource drain is a separate policy choice rather than an implicit timeout behavior.
 
 ## Security Model
 
@@ -1037,13 +1051,15 @@ Potential package boundaries are:
 
 ```text
 pkg/agentenv/          local and remote agent-environment contracts
-pkg/runs/              durable run model and coordination
-pkg/runner/protocol/   JSON-RPC methods and typed payloads
+pkg/runner/protocol/   leaf JSON-RPC envelope, registration, heartbeat, and run-lease types
+pkg/runner/protocol/payload/ application payloads that depend on tools, extensions, commands, and model types
 pkg/runner/client/     workspace-bound runner process
-pkg/runner/registry/   control-plane connections and scheduling
+pkg/runner/registry/   control-plane connections and run-state coordination
+  affinity.go          pending and durable conversation affinity
+  tool_updates.go      run-scoped transient tool-update routing
 ```
 
-These paths are illustrative and should be adjusted to existing package ownership during implementation.
+The transport package remains a dependency leaf: `agentenv` does not import the registry or database graph, and the core protocol envelope does not import the extension or tool stack.
 
 ## Delivery Plan
 

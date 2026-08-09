@@ -20,24 +20,26 @@ import (
 )
 
 const (
-	defaultReconnectMin      = time.Second
-	defaultReconnectMax      = 30 * time.Second
-	defaultManifestInterval  = 30 * time.Second
-	connectionShutdownPeriod = 5 * time.Second
+	defaultReconnectMin         = time.Second
+	defaultReconnectMax         = 30 * time.Second
+	defaultManifestInterval     = 30 * time.Second
+	defaultManifestProbeTimeout = 10 * time.Second
+	connectionShutdownPeriod    = 5 * time.Second
 )
 
 // RunnerConfig configures one long-running workspace-bound runner process.
 type RunnerConfig struct {
-	Server           string
-	AuthToken        string
-	Workspace        string
-	DisplayName      string
-	Store            *localstate.Store
-	ReconnectMin     time.Duration
-	ReconnectMax     time.Duration
-	ManifestInterval time.Duration
-	OnRegistered     func(protocol.RegisterResult)
-	OnRetry          func(error, time.Duration)
+	Server               string
+	AuthToken            string
+	Workspace            string
+	DisplayName          string
+	Store                *localstate.Store
+	ReconnectMin         time.Duration
+	ReconnectMax         time.Duration
+	ManifestInterval     time.Duration
+	ManifestProbeTimeout time.Duration
+	OnRegistered         func(protocol.RegisterResult)
+	OnRetry              func(error, time.Duration)
 }
 
 // Runner maintains one workspace lock, stable identity, and reconnecting control connection.
@@ -89,6 +91,9 @@ func NewRunner(ctx context.Context, config RunnerConfig) (*Runner, error) {
 	if config.ManifestInterval <= 0 {
 		config.ManifestInterval = defaultManifestInterval
 	}
+	if config.ManifestProbeTimeout <= 0 {
+		config.ManifestProbeTimeout = defaultManifestProbeTimeout
+	}
 	config.Server = server
 	config.Workspace = workspace
 	config.DisplayName = strings.TrimSpace(config.DisplayName)
@@ -139,7 +144,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 	}()
 
-	initialDigest, err := r.service.ProbeManifestDigest(ctx)
+	initialDigest, err := r.probeManifestDigest(ctx)
 	if err != nil {
 		return pkgerrors.Wrap(err, "failed to discover initial runner manifest")
 	}
@@ -173,7 +178,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		case <-timer.C:
 		}
 		backoff = min(backoff*2, r.config.ReconnectMax)
-		if digest, probeErr := r.service.ProbeManifestDigest(ctx); probeErr == nil {
+		if digest, probeErr := r.probeManifestDigest(ctx); probeErr == nil {
 			initialDigest = digest
 		}
 	}
@@ -276,6 +281,14 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool,
 	defer heartbeatTicker.Stop()
 	defer manifestTicker.Stop()
 	lastAdvertisedDigest := initialDigest
+	connectionCtx, cancelConnection := context.WithCancel(ctx)
+	defer cancelConnection()
+	type manifestProbeResult struct {
+		digest string
+		err    error
+	}
+	probeResults := make(chan manifestProbeResult, 1)
+	probeInFlight := false
 
 	for {
 		select {
@@ -289,7 +302,7 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool,
 			_ = peer.Shutdown(shutdownCtx, websocket.CloseNormalClosure, "runner process stopped")
 			cancel()
 			return connected, nil
-		case <-peer.Done():
+		case <-peer.TransportDone():
 			return connected, peer.Err()
 		case <-heartbeatTicker.C:
 			if err := r.sendHeartbeat(ctx, peer, registration); err != nil {
@@ -297,26 +310,41 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool,
 			}
 		case <-manifestTicker.C:
 			state, _, _ := r.service.HeartbeatSnapshot()
-			if state != protocol.RunnerStateIdle {
+			if state != protocol.RunnerStateIdle || probeInFlight {
 				continue
 			}
-			digest, probeErr := r.service.ProbeManifestDigest(ctx)
-			if probeErr != nil {
-				logger.G(ctx).WithError(probeErr).Warn("failed to refresh runner manifest digest")
+			probeInFlight = true
+			go func() {
+				digest, probeErr := r.probeManifestDigest(connectionCtx)
+				select {
+				case probeResults <- manifestProbeResult{digest: digest, err: probeErr}:
+				case <-connectionCtx.Done():
+				}
+			}()
+		case result := <-probeResults:
+			probeInFlight = false
+			if result.err != nil {
+				logger.G(ctx).WithError(result.err).Warn("failed to refresh runner manifest digest")
 				continue
 			}
-			if digest != lastAdvertisedDigest {
+			if result.digest != lastAdvertisedDigest {
 				if err := peer.Notify(ctx, protocol.MethodRunnerManifestChanged, protocol.ManifestChangedParams{
 					RunnerID:       registration.RunnerID,
 					Generation:     registration.Generation,
-					ManifestDigest: digest,
+					ManifestDigest: result.digest,
 				}); err != nil {
 					return connected, err
 				}
-				lastAdvertisedDigest = digest
+				lastAdvertisedDigest = result.digest
 			}
 		}
 	}
+}
+
+func (r *Runner) probeManifestDigest(ctx context.Context) (string, error) {
+	probeCtx, cancel := context.WithTimeout(ctx, r.config.ManifestProbeTimeout)
+	defer cancel()
+	return r.service.ProbeManifestDigest(probeCtx)
 }
 
 func (r *Runner) sendHeartbeat(ctx context.Context, peer *protocol.Peer, registration protocol.RegisterResult) error {
@@ -337,7 +365,7 @@ func registerRunner(ctx context.Context, peer *protocol.Peer, params protocol.Re
 		return result, nil
 	}
 	var rpcErr *protocol.RPCError
-	if params.RunnerID == "" || !errors.As(err, &rpcErr) || !strings.Contains(strings.ToLower(rpcErr.Message), "not known") {
+	if params.RunnerID == "" || !errors.As(err, &rpcErr) || rpcErr.Code != protocol.ErrorCodeStale || (rpcErr.Reason() != "" && rpcErr.Reason() != protocol.ErrorReasonRunnerNotFound) {
 		return protocol.RegisterResult{}, err
 	}
 	params.RunnerID = ""

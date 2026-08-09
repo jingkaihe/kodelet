@@ -61,13 +61,22 @@ func (r *webUIChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatEve
 			ctx = extensions.ContextWithUIInputBroker(ctx, broker)
 		}
 	}
-	if r == nil {
-		return chat.RunDefaultChat(ctx, req, sink, "", nil)
+	var resultConversationID string
+	var runErr error
+	if r == nil || r.runner == nil {
+		resultConversationID, runErr = chat.RunDefaultChat(ctx, req, sink, "", nil)
+	} else {
+		resultConversationID, runErr = r.runner.Run(ctx, req, sink)
 	}
-	if r.runner == nil {
-		return chat.RunDefaultChat(ctx, req, sink, "", nil)
+	if strings.TrimSpace(resultConversationID) == "" {
+		resultConversationID = conversationID
 	}
-	return r.runner.Run(ctx, req, sink)
+	if strings.TrimSpace(req.RunnerID) != "" && r != nil && r.server != nil {
+		if err := r.server.commitRunnerAffinity(context.WithoutCancel(ctx), resultConversationID); err != nil && runErr == nil {
+			runErr = err
+		}
+	}
+	return resultConversationID, runErr
 }
 
 func (r *webUIChatRunner) ResolveEnvironment(ctx context.Context, req ChatRequest, conversationID string, _ llmtypes.Config, _ string) (agentenv.Environment, error) {
@@ -77,9 +86,6 @@ func (r *webUIChatRunner) ResolveEnvironment(ctx context.Context, req ChatReques
 	}
 	if r == nil || r.server == nil || r.server.runnerRegistry == nil {
 		return nil, errors.New("runner registry is unavailable")
-	}
-	if err := r.server.runnerRegistry.BindConversationWithEnvironmentProfile(ctx, conversationID, runnerID, req.EnvironmentProfile); err != nil {
-		return nil, err
 	}
 	runner, ok := r.server.runnerRegistry.Runner(runnerID)
 	if !ok {
@@ -104,6 +110,17 @@ func (r *webUIChatRunner) ResolveEnvironment(ctx context.Context, req ChatReques
 		runnerID,
 		agentenv.WithRemoteClientCapabilities(capabilities),
 	), nil
+}
+
+func (s *Server) commitRunnerAffinity(ctx context.Context, conversationID string) error {
+	if s == nil || s.runnerRegistry == nil || s.conversationService == nil || strings.TrimSpace(conversationID) == "" {
+		return nil
+	}
+	if _, err := s.conversationService.GetConversation(ctx, conversationID); err != nil {
+		s.runnerRegistry.ReleasePendingConversationAffinity(conversationID)
+		return err
+	}
+	return s.runnerRegistry.CommitConversationAffinity(ctx, conversationID)
 }
 
 func chatSupportsInteractiveUI(req ChatRequest) bool {

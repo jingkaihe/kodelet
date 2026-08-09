@@ -12,7 +12,10 @@ import (
 	"github.com/pkg/errors"
 )
 
-const defaultOwnerID = "local"
+const (
+	defaultOwnerID          = "local"
+	defaultLoadedRunHistory = 1000
+)
 
 // PersistedState is the durable registry state restored when the control plane starts.
 type PersistedState struct {
@@ -85,6 +88,16 @@ func (s *SQLitePersistence) Load(ctx context.Context) (PersistedState, error) {
 	for _, row := range runnerRows {
 		state.Runners = append(state.Runners, row.runner())
 	}
+	if _, err := s.db.ExecContext(ctx, `
+		DELETE FROM runner_runs
+		WHERE runner_id IN (
+			SELECT id FROM runner_registrations WHERE owner_id = ?
+		) AND status NOT IN (?, ?) AND NOT EXISTS (
+			SELECT 1 FROM conversations c WHERE c.id = runner_runs.conversation_id
+		)
+	`, s.ownerID, RunStatusOpening, RunStatusRunning); err != nil {
+		return PersistedState{}, errors.Wrap(err, "failed to prune orphaned runner runs")
+	}
 
 	if err := s.db.SelectContext(ctx, &state.Runs, `
 		SELECT rr.id, rr.conversation_id, rr.runner_id, rr.status,
@@ -94,9 +107,19 @@ func (s *SQLitePersistence) Load(ctx context.Context) (PersistedState, error) {
 			rr.created_at, rr.updated_at
 		FROM runner_runs rr
 		JOIN runner_registrations r ON r.id = rr.runner_id
-		WHERE r.owner_id = ?
+		WHERE r.owner_id = ? AND (
+			rr.status IN (?, ?)
+			OR rr.id IN (
+				SELECT rr2.id
+				FROM runner_runs rr2
+				JOIN runner_registrations r2 ON r2.id = rr2.runner_id
+				WHERE r2.owner_id = ? AND rr2.status NOT IN (?, ?)
+				ORDER BY rr2.created_at DESC, rr2.id DESC
+				LIMIT ?
+			)
+		)
 		ORDER BY rr.created_at, rr.id
-	`, s.ownerID); err != nil {
+	`, s.ownerID, RunStatusOpening, RunStatusRunning, s.ownerID, RunStatusOpening, RunStatusRunning, defaultLoadedRunHistory); err != nil {
 		return PersistedState{}, errors.Wrap(err, "failed to load runner runs")
 	}
 

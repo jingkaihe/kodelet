@@ -8,6 +8,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	"github.com/pkg/errors"
 )
 
@@ -22,7 +23,7 @@ func (s *Service) Input(ctx context.Context, request extensions.UIInputRequest) 
 	owner := interactiveUIOwner(ctx)
 	request.ID = scopedInteractiveUIRequestID(owner, request.ID)
 	var response extensions.UIInputResponse
-	err = peer.Call(ctx, protocol.MethodUIInput, protocol.UIInputParams{RunID: runID, Owner: owner, Request: request}, &response)
+	err = peer.Call(ctx, protocol.MethodUIInput, runnerpayload.UIInputParams{RunID: runID, Owner: owner, Request: request}, &response)
 	return response, err
 }
 
@@ -37,7 +38,7 @@ func (s *Service) Confirm(ctx context.Context, request extensions.UIConfirmReque
 	owner := interactiveUIOwner(ctx)
 	request.ID = scopedInteractiveUIRequestID(owner, request.ID)
 	var response extensions.UIInputResponse
-	err = peer.Call(ctx, protocol.MethodUIConfirm, protocol.UIConfirmParams{RunID: runID, Owner: owner, Request: request}, &response)
+	err = peer.Call(ctx, protocol.MethodUIConfirm, runnerpayload.UIConfirmParams{RunID: runID, Owner: owner, Request: request}, &response)
 	return response, err
 }
 
@@ -52,7 +53,7 @@ func (s *Service) Select(ctx context.Context, request extensions.UISelectRequest
 	owner := interactiveUIOwner(ctx)
 	request.ID = scopedInteractiveUIRequestID(owner, request.ID)
 	var response extensions.UIInputResponse
-	err = peer.Call(ctx, protocol.MethodUISelect, protocol.UISelectParams{RunID: runID, Owner: owner, Request: request}, &response)
+	err = peer.Call(ctx, protocol.MethodUISelect, runnerpayload.UISelectParams{RunID: runID, Owner: owner, Request: request}, &response)
 	return response, err
 }
 
@@ -66,7 +67,7 @@ func (s *Service) Notify(ctx context.Context, request extensions.UINotifyRequest
 	}
 	owner := interactiveUIOwner(ctx)
 	var response extensions.UIInputResponse
-	err = peer.Call(ctx, protocol.MethodUINotify, protocol.UINotifyParams{RunID: runID, Owner: owner, Request: request}, &response)
+	err = peer.Call(ctx, protocol.MethodUINotify, runnerpayload.UINotifyParams{RunID: runID, Owner: owner, Request: request}, &response)
 	return response, err
 }
 
@@ -79,7 +80,7 @@ func (s *Service) SetWidget(ctx context.Context, source extensions.UIExtensionSo
 		return extensions.UIFrameResponse{Reason: "client persistent extension surfaces are not available"}, nil
 	}
 	var response extensions.UIFrameResponse
-	err = peer.Call(ctx, protocol.MethodUIWidgetSet, protocol.UIWidgetSetParams{RunID: runID, Owner: owner, Request: request}, &response)
+	err = peer.Call(ctx, protocol.MethodUIWidgetSet, runnerpayload.UIWidgetSetParams{RunID: runID, Owner: owner, Request: request}, &response)
 	return response, err
 }
 
@@ -92,7 +93,7 @@ func (s *Service) UpdateWidget(ctx context.Context, source extensions.UIExtensio
 		return extensions.UIFrameResponse{Reason: "client persistent extension surfaces are not available"}, nil
 	}
 	var response extensions.UIFrameResponse
-	err = peer.Call(ctx, protocol.MethodUIWidgetFrame, protocol.UIWidgetFrameParams{RunID: runID, Owner: owner, Request: request}, &response)
+	err = peer.Call(ctx, protocol.MethodUIWidgetFrame, runnerpayload.UIWidgetFrameParams{RunID: runID, Owner: owner, Request: request}, &response)
 	return response, err
 }
 
@@ -105,7 +106,7 @@ func (s *Service) RemoveWidget(ctx context.Context, source extensions.UIExtensio
 		return extensions.UIFrameResponse{Reason: "client persistent extension surfaces are not available"}, nil
 	}
 	var response extensions.UIFrameResponse
-	err = peer.Call(ctx, protocol.MethodUIWidgetRemove, protocol.UIWidgetRemoveParams{RunID: runID, Owner: owner, Request: request}, &response)
+	err = peer.Call(ctx, protocol.MethodUIWidgetRemove, runnerpayload.UIWidgetRemoveParams{RunID: runID, Owner: owner, Request: request}, &response)
 	return response, err
 }
 
@@ -118,7 +119,7 @@ func (s *Service) AppendTranscript(ctx context.Context, source extensions.UIExte
 		return extensions.UITranscriptAppendResponse{Reason: "client persistent extension surfaces are not available"}, nil
 	}
 	var response extensions.UITranscriptAppendResponse
-	err = peer.Call(ctx, protocol.MethodUITranscriptAppend, protocol.UITranscriptAppendParams{RunID: runID, Owner: owner, Request: request}, &response)
+	err = peer.Call(ctx, protocol.MethodUITranscriptAppend, runnerpayload.UITranscriptAppendParams{RunID: runID, Owner: owner, Request: request}, &response)
 	return response, err
 }
 
@@ -131,7 +132,7 @@ func (s *Service) OpenSurface(ctx context.Context, source extensions.UIExtension
 		return extensions.UIFrameResponse{Reason: "client persistent extension surfaces are not available"}, nil
 	}
 	var response extensions.UIFrameResponse
-	err = peer.Call(ctx, protocol.MethodUISurfaceOpen, protocol.UISurfaceOpenParams{RunID: runID, Owner: owner, Request: request}, &response)
+	err = peer.Call(ctx, protocol.MethodUISurfaceOpen, runnerpayload.UISurfaceOpenParams{RunID: runID, Owner: owner, Request: request}, &response)
 	return response, err
 }
 
@@ -144,7 +145,7 @@ func (s *Service) UpdateSurface(ctx context.Context, source extensions.UIExtensi
 		return extensions.UIFrameResponse{Reason: "client persistent extension surfaces are not available"}, nil
 	}
 	var response extensions.UIFrameResponse
-	err = peer.Call(ctx, protocol.MethodUISurfaceFrame, protocol.UISurfaceFrameParams{RunID: runID, Owner: owner, Request: request}, &response)
+	err = peer.Call(ctx, protocol.MethodUISurfaceFrame, runnerpayload.UISurfaceFrameParams{RunID: runID, Owner: owner, Request: request}, &response)
 	return response, err
 }
 
@@ -157,7 +158,7 @@ func (s *Service) CloseSurface(ctx context.Context, source extensions.UIExtensio
 		return extensions.UIFrameResponse{Reason: "client persistent extension surfaces are not available"}, nil
 	}
 	var response extensions.UIFrameResponse
-	err = peer.Call(ctx, protocol.MethodUISurfaceClose, protocol.UISurfaceCloseParams{RunID: runID, Owner: owner, Request: request}, &response)
+	err = peer.Call(ctx, protocol.MethodUISurfaceClose, runnerpayload.UISurfaceCloseParams{RunID: runID, Owner: owner, Request: request}, &response)
 	return response, err
 }
 
@@ -176,27 +177,27 @@ func (s *Service) uiTarget() (Peer, string, protocol.ClientCapabilities, error) 
 	return s.peer, s.active.id, s.active.clientCaps, nil
 }
 
-func (s *Service) persistentUITarget(source extensions.UIExtensionSource) (Peer, string, protocol.ExtensionOwner, bool, error) {
+func (s *Service) persistentUITarget(source extensions.UIExtensionSource) (Peer, string, runnerpayload.ExtensionOwner, bool, error) {
 	if source == nil {
-		return nil, "", protocol.ExtensionOwner{}, false, errors.New("extension UI source is required")
+		return nil, "", runnerpayload.ExtensionOwner{}, false, errors.New("extension UI source is required")
 	}
 	peer, runID, capabilities, err := s.uiTarget()
 	if err != nil {
-		return nil, "", protocol.ExtensionOwner{}, false, err
+		return nil, "", runnerpayload.ExtensionOwner{}, false, err
 	}
 	owner := source.ExtensionUIOwner()
-	return peer, runID, protocol.ExtensionOwner{ExtensionID: owner.ExtensionID, Generation: owner.Generation}, capabilities.PersistentSurfaces, nil
+	return peer, runID, runnerpayload.ExtensionOwner{ExtensionID: owner.ExtensionID, Generation: owner.Generation}, capabilities.PersistentSurfaces, nil
 }
 
-func interactiveUIOwner(ctx context.Context) protocol.ExtensionOwner {
+func interactiveUIOwner(ctx context.Context) runnerpayload.ExtensionOwner {
 	owner, ok := extensions.UIExtensionOwnerFromContext(ctx)
 	if !ok {
-		return protocol.ExtensionOwner{}
+		return runnerpayload.ExtensionOwner{}
 	}
-	return protocol.ExtensionOwner{ExtensionID: owner.ExtensionID, Generation: owner.Generation}
+	return runnerpayload.ExtensionOwner{ExtensionID: owner.ExtensionID, Generation: owner.Generation}
 }
 
-func scopedInteractiveUIRequestID(owner protocol.ExtensionOwner, requestID string) string {
+func scopedInteractiveUIRequestID(owner runnerpayload.ExtensionOwner, requestID string) string {
 	requestID = strings.TrimSpace(requestID)
 	if requestID == "" {
 		requestID = extensions.NewUIInputRequestID()
@@ -208,7 +209,7 @@ func scopedInteractiveUIRequestID(owner protocol.ExtensionOwner, requestID strin
 	return "runner-ui-" + base64.RawURLEncoding.EncodeToString([]byte(payload))
 }
 
-func (s *Service) notifySurfaceInput(ctx context.Context, params protocol.UISurfaceInputParams) error {
+func (s *Service) notifySurfaceInput(ctx context.Context, params runnerpayload.UISurfaceInputParams) error {
 	run, operationCtx, finish, err := s.beginRunOperation(ctx, params.RunID)
 	if err != nil {
 		return err
@@ -223,7 +224,7 @@ func (s *Service) notifySurfaceInput(ctx context.Context, params protocol.UISurf
 	}, params.Lifecycle, params.Request)
 }
 
-func (s *Service) notifySurfaceResize(ctx context.Context, params protocol.UISurfaceResizeParams) error {
+func (s *Service) notifySurfaceResize(ctx context.Context, params runnerpayload.UISurfaceResizeParams) error {
 	run, operationCtx, finish, err := s.beginRunOperation(ctx, params.RunID)
 	if err != nil {
 		return err

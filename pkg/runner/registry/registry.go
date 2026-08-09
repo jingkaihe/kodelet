@@ -15,12 +15,14 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	"github.com/pkg/errors"
 )
 
 const (
 	defaultHeartbeatInterval = 15 * time.Second
 	defaultHeartbeatTimeout  = 45 * time.Second
+	defaultRunLeaseGrace     = 10 * time.Second
 	openingCleanupTimeout    = 10 * time.Second
 )
 
@@ -55,16 +57,16 @@ const (
 	RunnerStatusIncompatible RunnerStatus = "incompatible"
 )
 
-// RunStatus is the durable-shape state machine used by active runner operations.
-type RunStatus string
+// RunStatus is retained as an API alias for the shared runner lease status.
+type RunStatus = protocol.RunStatus
 
 const (
-	RunStatusOpening   RunStatus = "opening"
-	RunStatusRunning   RunStatus = "running"
-	RunStatusSucceeded RunStatus = "succeeded"
-	RunStatusFailed    RunStatus = "failed"
-	RunStatusCanceled  RunStatus = "canceled"
-	RunStatusLost      RunStatus = "lost"
+	RunStatusOpening   = protocol.RunStatusOpening
+	RunStatusRunning   = protocol.RunStatusRunning
+	RunStatusSucceeded = protocol.RunStatusSucceeded
+	RunStatusFailed    = protocol.RunStatusFailed
+	RunStatusCanceled  = protocol.RunStatusCanceled
+	RunStatusLost      = protocol.RunStatusLost
 )
 
 // Runner is a safe snapshot of one stable runner registration.
@@ -138,14 +140,22 @@ type runEntry struct {
 	Run
 	connectionID string
 	generation   int64
+	leaseCancel  context.CancelFunc
 }
 
-type updateSink func(protocol.ToolUpdateParams)
+type runFence struct {
+	runnerID     string
+	runID        string
+	connectionID string
+	generation   int64
+	link         Link
+}
 
 // Options configures registry liveness and test seams.
 type Options struct {
 	HeartbeatInterval time.Duration
 	HeartbeatTimeout  time.Duration
+	RunLeaseGrace     time.Duration
 	Now               func() time.Time
 	NewID             func(prefix string) (string, error)
 	Persistence       Persistence
@@ -153,24 +163,22 @@ type Options struct {
 
 // Registry coordinates stable runner identity, live connection generations, and capacity-one runs.
 type Registry struct {
-	mu                   sync.RWMutex
-	runners              map[string]*runnerEntry
-	byIdentity           map[string]string
-	runs                 map[string]*runEntry
-	activeConversation   map[string]string
-	conversationAffinity map[string]ConversationAffinity
-	toolUpdates          map[string]updateSink
-	toolSequences        map[string]uint64
-	toolRequestIDs       map[string]string
-	onEnvironmentError   func(string)
-	heartbeatInterval    time.Duration
-	heartbeatTimeout     time.Duration
-	now                  func() time.Time
-	newID                func(string) (string, error)
-	persistence          Persistence
-	ctx                  context.Context
-	cancel               context.CancelFunc
-	closed               bool
+	mu                sync.RWMutex
+	runners           map[string]*runnerEntry
+	byIdentity        map[string]string
+	runs              map[string]*runEntry
+	affinities        *affinityIndex
+	toolUpdates       *toolUpdateRouter
+	onRunFailure      func(string)
+	heartbeatInterval time.Duration
+	heartbeatTimeout  time.Duration
+	runLeaseGrace     time.Duration
+	now               func() time.Time
+	newID             func(string) (string, error)
+	persistence       Persistence
+	ctx               context.Context
+	cancel            context.CancelFunc
+	closed            bool
 }
 
 // New creates a live registry and restores any configured durable state.
@@ -185,6 +193,9 @@ func New(parent context.Context, options Options) (*Registry, error) {
 	if options.HeartbeatTimeout <= 0 {
 		options.HeartbeatTimeout = defaultHeartbeatTimeout
 	}
+	if options.RunLeaseGrace <= 0 {
+		options.RunLeaseGrace = defaultRunLeaseGrace
+	}
 	if options.Now == nil {
 		options.Now = time.Now
 	}
@@ -192,21 +203,19 @@ func New(parent context.Context, options Options) (*Registry, error) {
 		options.NewID = randomID
 	}
 	r := &Registry{
-		runners:              make(map[string]*runnerEntry),
-		byIdentity:           make(map[string]string),
-		runs:                 make(map[string]*runEntry),
-		activeConversation:   make(map[string]string),
-		conversationAffinity: make(map[string]ConversationAffinity),
-		toolUpdates:          make(map[string]updateSink),
-		toolSequences:        make(map[string]uint64),
-		toolRequestIDs:       make(map[string]string),
-		heartbeatInterval:    options.HeartbeatInterval,
-		heartbeatTimeout:     options.HeartbeatTimeout,
-		now:                  options.Now,
-		newID:                options.NewID,
-		persistence:          options.Persistence,
-		ctx:                  ctx,
-		cancel:               cancel,
+		runners:           make(map[string]*runnerEntry),
+		byIdentity:        make(map[string]string),
+		runs:              make(map[string]*runEntry),
+		affinities:        newAffinityIndex(),
+		toolUpdates:       newToolUpdateRouter(),
+		heartbeatInterval: options.HeartbeatInterval,
+		heartbeatTimeout:  options.HeartbeatTimeout,
+		runLeaseGrace:     options.RunLeaseGrace,
+		now:               options.Now,
+		newID:             options.NewID,
+		persistence:       options.Persistence,
+		ctx:               ctx,
+		cancel:            cancel,
 	}
 	if r.persistence != nil {
 		state, err := r.persistence.Load(ctx)
@@ -273,7 +282,7 @@ func (r *Registry) restore(state PersistedState) error {
 			return errors.New("persisted conversation runner affinity is invalid")
 		}
 		affinity.EnvironmentProfile = normalizeEnvironmentProfile(affinity.EnvironmentProfile)
-		r.conversationAffinity[conversationID] = affinity
+		r.affinities.put(conversationID, affinity, true)
 	}
 	for _, entry := range r.runners {
 		if err := r.persistence.SaveRunner(r.ctx, entry.Runner); err != nil {
@@ -306,6 +315,7 @@ func (r *Registry) Register(params protocol.RegisterParams, link Link) (protocol
 	now := r.now().UTC()
 
 	var oldLink Link
+	var lostConversationID string
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
@@ -363,9 +373,14 @@ func (r *Registry) Register(params protocol.RegisterParams, link Link) (protocol
 	}
 	r.runners[entry.ID] = entry
 	if lostRun != nil {
+		if lostRun.leaseCancel != nil {
+			lostRun.leaseCancel()
+			lostRun.leaseCancel = nil
+		}
 		r.runs[lostRun.ID] = lostRun
-		delete(r.activeConversation, lostRun.ConversationID)
+		r.affinities.deactivate(lostRun.ConversationID)
 		r.clearRunTransientStateLocked(lostRun.ID)
+		lostConversationID = lostRun.ConversationID
 	}
 	result := protocol.RegisterResult{
 		RunnerID:            entry.ID,
@@ -376,10 +391,33 @@ func (r *Registry) Register(params protocol.RegisterParams, link Link) (protocol
 	}
 	r.mu.Unlock()
 
+	if lostConversationID != "" {
+		r.notifyRunFailure(lostConversationID)
+	}
 	if oldLink != nil && oldLink != link {
 		_ = oldLink.Close()
 	}
+	go r.watchConnection(result, link)
 	return result, nil
+}
+
+func (r *Registry) watchConnection(registration protocol.RegisterResult, link Link) {
+	select {
+	case <-linkTransportDone(link):
+		cause := link.Err()
+		if cause == nil {
+			cause = errors.New("runner connection closed")
+		}
+		r.Detach(registration.RunnerID, registration.ConnectionID, registration.Generation, cause)
+	case <-r.ctx.Done():
+	}
+}
+
+func linkTransportDone(link Link) <-chan struct{} {
+	if transport, ok := link.(interface{ TransportDone() <-chan struct{} }); ok {
+		return transport.TransportDone()
+	}
+	return link.Done()
 }
 
 func (r *Registry) registrationCandidateLocked(params protocol.RegisterParams, identity string, now time.Time) (*runnerEntry, bool, error) {
@@ -392,7 +430,7 @@ func (r *Registry) registrationCandidateLocked(params protocol.RegisterParams, i
 			return nil, false, errors.New("host workspace is registered under another runner id")
 		}
 		if existingID == "" && r.runners[requestedID] == nil {
-			return nil, false, errors.New("runner id is not known to this control plane")
+			return nil, false, errors.Wrap(ErrRunnerNotFound, "runner id is not known to this control plane")
 		}
 	}
 
@@ -455,9 +493,9 @@ func (r *Registry) Detach(runnerID, connectionID string, generation int64, cause
 	}
 	now := r.now().UTC()
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	entry := r.runners[strings.TrimSpace(runnerID)]
 	if entry == nil || entry.ConnectionID != connectionID || entry.Generation != generation {
+		r.mu.Unlock()
 		return
 	}
 	entry.link = nil
@@ -474,6 +512,14 @@ func (r *Registry) Detach(runnerID, connectionID string, generation int64, cause
 		r.logPersistenceError("failed to persist detached runner and lost run", r.persistRunnerAndRunLocked(entry, lostRun))
 	} else {
 		r.logPersistenceError("failed to persist detached runner", r.persistRunnerLocked(entry))
+	}
+	conversationID := ""
+	if lostRun != nil {
+		conversationID = lostRun.ConversationID
+	}
+	r.mu.Unlock()
+	if conversationID != "" {
+		r.notifyRunFailure(conversationID)
 	}
 }
 
@@ -517,7 +563,7 @@ func (r *Registry) Heartbeat(runnerID, connectionID string, generation int64, pa
 		entry.Status = RunnerStatusIdle
 	}
 	entry.UpdatedAt = now
-	return r.persistRunnerLocked(entry)
+	return nil
 }
 
 // ManifestChanged updates the idle manifest digest for the current generation.
@@ -541,9 +587,12 @@ func (r *Registry) ManifestChanged(runnerID, connectionID string, generation int
 }
 
 // OpenRun reserves capacity, opens the remote environment, validates its manifest, and marks the run active.
-func (r *Registry) OpenRun(ctx context.Context, runnerID string, params protocol.RunOpenParams) (protocol.Manifest, error) {
+func (r *Registry) OpenRun(ctx context.Context, runnerID string, params protocol.RunOpenParams) (runnerpayload.Manifest, error) {
 	if err := params.Validate(); err != nil {
-		return protocol.Manifest{}, err
+		return runnerpayload.Manifest{}, err
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	runnerID = strings.TrimSpace(runnerID)
 	now := r.now().UTC()
@@ -552,51 +601,61 @@ func (r *Registry) OpenRun(ctx context.Context, runnerID string, params protocol
 	entry := r.runners[runnerID]
 	if entry == nil {
 		r.mu.Unlock()
-		return protocol.Manifest{}, errors.New("runner not found")
+		return runnerpayload.Manifest{}, errors.New("runner not found")
 	}
 	environmentProfile := normalizeEnvironmentProfile(params.Agent.EnvironmentProfile)
-	if affinity, exists := r.conversationAffinity[params.ConversationID]; exists && affinity.RunnerID != runnerID {
+	reservedAffinity := false
+	if affinity, exists := r.affinities.get(params.ConversationID); exists && affinity.RunnerID != runnerID {
 		r.mu.Unlock()
-		return protocol.Manifest{}, errors.Errorf("conversation is bound to runner %s", affinity.RunnerID)
+		return runnerpayload.Manifest{}, errors.Errorf("conversation is bound to runner %s", affinity.RunnerID)
 	}
-	if affinity, exists := r.conversationAffinity[params.ConversationID]; exists && affinity.EnvironmentProfile != environmentProfile {
+	if affinity, exists := r.affinities.get(params.ConversationID); exists && affinity.EnvironmentProfile != environmentProfile {
 		r.mu.Unlock()
-		return protocol.Manifest{}, environmentProfileLockedError(affinity.EnvironmentProfile, environmentProfile)
-	}
-	if _, exists := r.conversationAffinity[params.ConversationID]; !exists {
-		if err := r.bindConversationLocked(params.ConversationID, runnerID, environmentProfile, now); err != nil {
-			r.mu.Unlock()
-			return protocol.Manifest{}, err
-		}
+		return runnerpayload.Manifest{}, environmentProfileLockedError(affinity.EnvironmentProfile, environmentProfile)
 	}
 	if !entry.Connected || entry.link == nil {
 		r.mu.Unlock()
-		return protocol.Manifest{}, errors.New("runner is offline")
+		return runnerpayload.Manifest{}, errors.New("runner is offline")
 	}
 	if !entry.ready {
 		r.mu.Unlock()
-		return protocol.Manifest{}, errors.New("runner has not completed its initial heartbeat")
+		return runnerpayload.Manifest{}, errors.New("runner has not completed its initial heartbeat")
 	}
 	if entry.ActiveRunID != "" {
 		r.mu.Unlock()
-		return protocol.Manifest{}, errors.Errorf("runner is busy with run %s", entry.ActiveRunID)
+		return runnerpayload.Manifest{}, errors.Errorf("runner is busy with run %s", entry.ActiveRunID)
 	}
 	if entry.Status != RunnerStatusIdle {
 		r.mu.Unlock()
-		return protocol.Manifest{}, errors.Errorf("runner is not idle: %s", entry.Status)
+		return runnerpayload.Manifest{}, errors.Errorf("runner is not idle: %s", entry.Status)
 	}
-	if activeRunID := r.activeConversation[params.ConversationID]; activeRunID != "" {
+	if activeRunID := r.affinities.activeRun(params.ConversationID); activeRunID != "" {
 		r.mu.Unlock()
-		return protocol.Manifest{}, errors.Errorf("conversation already has active run %s", activeRunID)
+		return runnerpayload.Manifest{}, errors.Errorf("conversation already has active run %s", activeRunID)
 	}
 	if _, exists := r.runs[params.RunID]; exists {
 		r.mu.Unlock()
-		return protocol.Manifest{}, errors.New("run id already exists")
+		return runnerpayload.Manifest{}, errors.New("run id already exists")
+	}
+	if _, exists := r.affinities.get(params.ConversationID); !exists {
+		if err := r.reserveConversationAffinityLocked(params.ConversationID, runnerID, environmentProfile); err != nil {
+			r.mu.Unlock()
+			return runnerpayload.Manifest{}, err
+		}
+		reservedAffinity = true
 	}
 
 	link := entry.link
 	connectionID := entry.ConnectionID
 	generation := entry.Generation
+	fence := runFence{
+		runnerID:     runnerID,
+		runID:        params.RunID,
+		connectionID: connectionID,
+		generation:   generation,
+		link:         link,
+	}
+	leaseCtx, leaseCancel := context.WithCancel(context.Background())
 	runnerCandidate := *entry
 	runnerCandidate.ActiveRunID = params.RunID
 	runnerCandidate.Status = RunnerStatusBusy
@@ -612,51 +671,52 @@ func (r *Registry) OpenRun(ctx context.Context, runnerID string, params protocol
 		},
 		connectionID: connectionID,
 		generation:   generation,
+		leaseCancel:  leaseCancel,
 	}
 	if err := r.persistRunnerAndRunLocked(&runnerCandidate, run); err != nil {
+		leaseCancel()
+		if reservedAffinity {
+			r.affinities.releasePending(params.ConversationID)
+		}
 		r.mu.Unlock()
-		return protocol.Manifest{}, err
+		return runnerpayload.Manifest{}, err
 	}
 	r.runners[runnerID] = &runnerCandidate
-	r.activeConversation[params.ConversationID] = params.RunID
+	r.affinities.activate(params.ConversationID, params.RunID)
 	r.runs[params.RunID] = run
 	r.mu.Unlock()
+	go r.watchRunLease(ctx, leaseCtx.Done(), fence)
 
-	var manifest protocol.Manifest
+	var manifest runnerpayload.Manifest
 	if err := link.Call(ctx, protocol.MethodRunOpen, params, &manifest); err != nil {
 		var rpcErr *protocol.RPCError
-		return protocol.Manifest{}, r.reconcileOpeningFailure(link, params.RunID, err, errors.As(err, &rpcErr))
+		return runnerpayload.Manifest{}, r.reconcileOpeningFailure(fence, err, errors.As(err, &rpcErr))
 	}
 	if err := validateManifest(manifest, runnerID, params, generation); err != nil {
-		return protocol.Manifest{}, r.reconcileOpeningFailure(link, params.RunID, err, false)
+		return runnerpayload.Manifest{}, r.reconcileOpeningFailure(fence, err, false)
 	}
 	manifestPayload, err := json.Marshal(manifest)
 	if err != nil {
 		wrapped := errors.Wrap(err, "failed to encode runner manifest snapshot")
-		return protocol.Manifest{}, r.reconcileOpeningFailure(link, params.RunID, wrapped, false)
+		return runnerpayload.Manifest{}, r.reconcileOpeningFailure(fence, wrapped, false)
 	}
 
 	r.mu.Lock()
 	current, err := r.currentRunnerLocked(runnerID, connectionID, generation)
 	if err != nil || current.link != link {
-		now = r.now().UTC()
-		r.finishRunLocked(params.RunID, RunStatusLost, "runner connection changed while opening run", now)
-		lostRun := r.runs[params.RunID]
-		lostRunner := r.runners[runnerID]
-		r.logPersistenceError("failed to persist lost opening run", r.persistRunnerAndRunLocked(lostRunner, lostRun))
 		r.mu.Unlock()
-		return protocol.Manifest{}, errors.New("runner connection changed while opening run")
+		return runnerpayload.Manifest{}, errors.New("runner connection changed while opening run")
 	}
 	run = r.runs[params.RunID]
 	if run == nil {
 		r.mu.Unlock()
-		return protocol.Manifest{}, errors.New("run is no longer opening")
+		return runnerpayload.Manifest{}, errors.New("run is no longer opening")
 	}
 	if run.Status != RunStatusOpening {
 		status := run.Status
 		message := run.Error
 		r.mu.Unlock()
-		return protocol.Manifest{}, r.closeRunInterruptedDuringOpen(params.RunID, status, message)
+		return runnerpayload.Manifest{}, r.closeRunInterruptedDuringOpen(params.RunID, status, message)
 	}
 	runCandidate := *run
 	runCandidate.Status = RunStatusRunning
@@ -670,7 +730,7 @@ func (r *Registry) OpenRun(ctx context.Context, runnerID string, params protocol
 	runnerCandidate.UpdatedAt = now
 	if err := r.persistRunnerAndRunLocked(&runnerCandidate, &runCandidate); err != nil {
 		r.mu.Unlock()
-		return protocol.Manifest{}, r.reconcileOpeningFailure(link, params.RunID, err, false)
+		return runnerpayload.Manifest{}, r.reconcileOpeningFailure(fence, err, false)
 	}
 	r.runners[runnerID] = &runnerCandidate
 	r.runs[params.RunID] = &runCandidate
@@ -688,79 +748,47 @@ func (r *Registry) CallRun(ctx context.Context, runID, method string, params any
 }
 
 // ExecuteTool invokes tool.execute and routes replaceable transient updates to the supplied sink.
-func (r *Registry) ExecuteTool(ctx context.Context, params protocol.ToolExecuteParams, updates func(protocol.ToolUpdateParams)) (protocol.ToolExecuteResult, error) {
-	key := toolUpdateKey(params.RunID, params.ToolCallID)
+func (r *Registry) ExecuteTool(ctx context.Context, params runnerpayload.ToolExecuteParams, updates func(runnerpayload.ToolUpdateParams)) (runnerpayload.ToolExecuteResult, error) {
 	params.WantUpdates = updates != nil
+	cleanup := func() {}
 	if updates != nil {
-		r.mu.Lock()
-		if _, exists := r.toolUpdates[key]; exists {
-			r.mu.Unlock()
-			return protocol.ToolExecuteResult{}, errors.New("tool call id is already active for this run")
+		var err error
+		cleanup, err = r.toolUpdates.subscribe(params.RunID, params.ToolCallID, updates)
+		if err != nil {
+			return runnerpayload.ToolExecuteResult{}, err
 		}
-		r.toolUpdates[key] = updates
-		r.toolSequences[key] = 0
-		r.toolRequestIDs[key] = ""
-		r.mu.Unlock()
-		defer func() {
-			r.mu.Lock()
-			delete(r.toolUpdates, key)
-			delete(r.toolSequences, key)
-			delete(r.toolRequestIDs, key)
-			r.mu.Unlock()
-		}()
 	}
+	defer cleanup()
 
 	link, err := r.activeRunLink(params.RunID)
 	if err != nil {
-		return protocol.ToolExecuteResult{}, err
+		return runnerpayload.ToolExecuteResult{}, err
 	}
-	var result protocol.ToolExecuteResult
+	var result runnerpayload.ToolExecuteResult
 	if err := link.CallTracked(ctx, protocol.MethodToolExecute, params, &result, func(requestID string) {
-		r.mu.Lock()
-		if r.toolUpdates[key] != nil {
-			r.toolRequestIDs[key] = requestID
-		}
-		r.mu.Unlock()
+		r.toolUpdates.setRequestID(params.RunID, params.ToolCallID, requestID)
 	}); err != nil {
 		var rpcErr *protocol.RPCError
 		if errors.As(err, &rpcErr) {
-			return protocol.ToolExecuteResult{}, err
+			return runnerpayload.ToolExecuteResult{}, err
 		}
-		return protocol.ToolExecuteResult{}, errors.Wrap(err, "runner tool response was not received; execution may have started and side effects are uncertain")
+		return runnerpayload.ToolExecuteResult{}, errors.Wrap(err, "runner tool response was not received; execution may have started and side effects are uncertain")
 	}
 	return result, nil
 }
 
 // DeliverToolUpdate forwards a generation-fenced transient tool update.
-func (r *Registry) DeliverToolUpdate(runnerID, connectionID string, generation int64, params protocol.ToolUpdateParams) error {
+func (r *Registry) DeliverToolUpdate(runnerID, connectionID string, generation int64, params runnerpayload.ToolUpdateParams) error {
 	r.mu.Lock()
 	entry := r.runners[runnerID]
 	run := r.runs[params.RunID]
-	key := toolUpdateKey(params.RunID, params.ToolCallID)
-	sink := r.toolUpdates[key]
-	lastSequence := r.toolSequences[key]
-	requestID := r.toolRequestIDs[key]
 	valid := entry != nil && entry.ConnectionID == connectionID && entry.Generation == generation && entry.ActiveRunID == params.RunID && run != nil && run.Status == RunStatusRunning
 	if !valid {
 		r.mu.Unlock()
 		return errors.New("tool update belongs to a stale or inactive run")
 	}
-	if sink == nil {
-		r.mu.Unlock()
-		return errors.New("tool update has no active subscriber")
-	}
-	if params.RequestID == "" || params.RequestID != requestID {
-		r.mu.Unlock()
-		return errors.New("tool update request id is stale")
-	}
-	if params.Sequence == 0 || params.Sequence <= lastSequence {
-		r.mu.Unlock()
-		return errors.New("tool update sequence is stale")
-	}
-	r.toolSequences[key] = params.Sequence
 	r.mu.Unlock()
-	sink(params)
-	return nil
+	return r.toolUpdates.deliver(params)
 }
 
 // CancelRun cancels active runner operations but leaves run.close responsible for releasing the lease.
@@ -883,7 +911,7 @@ func (r *Registry) EnvironmentError(runnerID, connectionID string, generation in
 	entry.UpdatedAt = now
 	persistErr := r.persistRunnerAndRunLocked(entry, run)
 	conversationID := run.ConversationID
-	handler := r.onEnvironmentError
+	handler := r.onRunFailure
 	r.mu.Unlock()
 	if handler != nil {
 		handler(conversationID)
@@ -897,8 +925,17 @@ func (r *Registry) SetEnvironmentErrorHandler(handler func(conversationID string
 		return
 	}
 	r.mu.Lock()
-	r.onEnvironmentError = handler
+	r.onRunFailure = handler
 	r.mu.Unlock()
+}
+
+func (r *Registry) notifyRunFailure(conversationID string) {
+	r.mu.RLock()
+	handler := r.onRunFailure
+	r.mu.RUnlock()
+	if handler != nil {
+		handler(conversationID)
+	}
 }
 
 // Runner returns one stable runner snapshot.
@@ -935,93 +972,6 @@ func (r *Registry) Run(id string) (Run, bool) {
 	return entry.Run, true
 }
 
-// BindConversation establishes authoritative affinity between a conversation and runner.
-func (r *Registry) BindConversation(ctx context.Context, conversationID, runnerID string) error {
-	return r.BindConversationWithEnvironmentProfile(ctx, conversationID, runnerID, "")
-}
-
-// BindConversationWithEnvironmentProfile establishes authoritative affinity between a conversation and runner-local profile.
-func (r *Registry) BindConversationWithEnvironmentProfile(ctx context.Context, conversationID, runnerID, environmentProfile string) error {
-	conversationID = strings.TrimSpace(conversationID)
-	runnerID = strings.TrimSpace(runnerID)
-	environmentProfile = normalizeEnvironmentProfile(environmentProfile)
-	if conversationID == "" {
-		return errors.New("conversation id is required")
-	}
-	if runnerID == "" {
-		return errors.New("runner id is required")
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.runners[runnerID] == nil {
-		return errors.New("runner not found")
-	}
-	return r.bindConversationLockedContext(ctx, conversationID, runnerID, environmentProfile, r.now().UTC())
-}
-
-// RunnerForConversation returns the durable runner affinity for a conversation.
-func (r *Registry) RunnerForConversation(conversationID string) (string, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	affinity, ok := r.conversationAffinity[strings.TrimSpace(conversationID)]
-	return affinity.RunnerID, ok
-}
-
-// ResolveConversationAffinity refreshes one affinity from durable storage before returning it.
-func (r *Registry) ResolveConversationAffinity(ctx context.Context, conversationID string) (ConversationAffinity, bool, error) {
-	if r == nil {
-		return ConversationAffinity{}, false, errors.New("runner registry is required")
-	}
-	conversationID = strings.TrimSpace(conversationID)
-	if conversationID == "" {
-		return ConversationAffinity{}, false, nil
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.persistence == nil {
-		affinity, ok := r.conversationAffinity[conversationID]
-		return affinity, ok, nil
-	}
-	affinity, found, err := r.persistence.ConversationAffinity(ctx, conversationID)
-	if err != nil {
-		return ConversationAffinity{}, false, err
-	}
-	if !found {
-		if current, ok := r.conversationAffinity[conversationID]; ok && r.activeConversation[conversationID] != "" {
-			if err := r.persistence.BindConversation(ctx, conversationID, current.RunnerID, current.EnvironmentProfile, r.now().UTC()); err != nil {
-				return ConversationAffinity{}, false, err
-			}
-			return current, true, nil
-		}
-		delete(r.conversationAffinity, conversationID)
-		return ConversationAffinity{}, false, nil
-	}
-	if r.runners[affinity.RunnerID] == nil {
-		return ConversationAffinity{}, false, errors.New("persisted conversation runner affinity is invalid")
-	}
-	affinity.EnvironmentProfile = normalizeEnvironmentProfile(affinity.EnvironmentProfile)
-	r.conversationAffinity[conversationID] = affinity
-	return affinity, true, nil
-}
-
-// ForgetConversation removes the in-memory affinity after central conversation deletion commits.
-func (r *Registry) ForgetConversation(conversationID string) {
-	if r == nil {
-		return
-	}
-	conversationID = strings.TrimSpace(conversationID)
-	if conversationID == "" {
-		return
-	}
-	r.mu.Lock()
-	delete(r.conversationAffinity, conversationID)
-	r.mu.Unlock()
-}
-
 // RemoveRunner deletes an offline stable registration and its run history.
 // Force explicitly abandons any conversations pinned to the runner.
 func (r *Registry) RemoveRunner(ctx context.Context, runnerID string, force bool) (RemovalResult, error) {
@@ -1053,11 +1003,7 @@ func (r *Registry) RemoveRunner(ctx context.Context, runnerID string, force bool
 	}
 
 	conversationIDs := make([]string, 0)
-	for conversationID, affinity := range r.conversationAffinity {
-		if affinity.RunnerID == runnerID {
-			conversationIDs = append(conversationIDs, conversationID)
-		}
-	}
+	conversationIDs = append(conversationIDs, r.affinities.conversationsForRunner(runnerID)...)
 	if len(conversationIDs) > 0 && !force && r.persistence == nil {
 		return RemovalResult{}, &RunnerReferencedError{RunnerID: runnerID, ConversationIDs: conversationIDs}
 	}
@@ -1078,18 +1024,14 @@ func (r *Registry) RemoveRunner(ctx context.Context, runnerID string, force bool
 		if r.persistence == nil {
 			result.RemovedRuns++
 		}
-		delete(r.activeConversation, run.ConversationID)
+		r.affinities.deactivate(run.ConversationID)
 		r.clearRunTransientStateLocked(runID)
 		delete(r.runs, runID)
 	}
-	for conversationID, affinity := range r.conversationAffinity {
-		if affinity.RunnerID != runnerID {
-			continue
-		}
-		if r.persistence == nil {
-			result.RemovedConversationAffinities++
-		}
-		delete(r.conversationAffinity, conversationID)
+	if r.persistence == nil {
+		result.RemovedConversationAffinities += r.affinities.removeRunner(runnerID)
+	} else {
+		r.affinities.removeRunner(runnerID)
 	}
 	delete(r.byIdentity, entry.identity)
 	delete(r.runners, runnerID)
@@ -1147,17 +1089,17 @@ func (r *Registry) Close() error {
 	return firstErr
 }
 
-func (r *Registry) failOpeningRun(runID, message string) {
-	r.finishOpeningFailure(runID, RunStatusFailed, message, false)
-}
-
-func (r *Registry) finishOpeningFailure(runID string, status RunStatus, message string, runnerError bool) {
+func (r *Registry) finishOpeningFailure(fence runFence, status RunStatus, message string, runnerError bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.finishRunLocked(runID, status, message, r.now().UTC())
-	if run := r.runs[runID]; run != nil {
+	run := r.runs[fence.runID]
+	if !runMatchesFence(run, fence) || run.Status != RunStatusOpening {
+		return
+	}
+	r.finishRunLocked(fence.runID, status, message, r.now().UTC())
+	if run = r.runs[fence.runID]; run != nil {
 		if runnerError {
-			if runner := r.runners[run.RunnerID]; runner != nil && runner.Connected {
+			if runner := r.runners[run.RunnerID]; runnerMatchesFence(runner, fence) {
 				runner.Status = RunnerStatusError
 				runner.UpdatedAt = r.now().UTC()
 			}
@@ -1166,22 +1108,101 @@ func (r *Registry) finishOpeningFailure(runID string, status RunStatus, message 
 	}
 }
 
-func (r *Registry) reconcileOpeningFailure(link Link, runID string, cause error, openRejected bool) error {
+func (r *Registry) reconcileOpeningFailure(fence runFence, cause error, openRejected bool) error {
 	if openRejected {
-		r.failOpeningRun(runID, errorString(cause))
+		r.finishOpeningFailure(fence, RunStatusFailed, errorString(cause), false)
 		return cause
 	}
 
-	cleanupConfirmed, cleanupErr := closeRemoteOpeningRun(link, runID)
+	cleanupConfirmed, cleanupErr := closeRemoteOpeningRun(fence.link, fence.runID)
 	if cleanupConfirmed {
-		r.failOpeningRun(runID, errorString(cause))
+		r.finishOpeningFailure(fence, RunStatusFailed, errorString(cause), false)
 		return cause
 	}
 
 	message := fmt.Sprintf("%v; runner cleanup was not confirmed: %v", cause, cleanupErr)
-	r.finishOpeningFailure(runID, RunStatusLost, message, true)
-	_ = link.Close()
+	r.finishOpeningFailure(fence, RunStatusLost, message, true)
+	_ = fence.link.Close()
 	return errors.Wrapf(cause, "runner open state is uncertain because cleanup failed: %v", cleanupErr)
+}
+
+func runMatchesFence(run *runEntry, fence runFence) bool {
+	return run != nil && run.ID == fence.runID && run.RunnerID == fence.runnerID && run.connectionID == fence.connectionID && run.generation == fence.generation
+}
+
+func runnerMatchesFence(runner *runnerEntry, fence runFence) bool {
+	return runner != nil && runner.ID == fence.runnerID && runner.ConnectionID == fence.connectionID && runner.Generation == fence.generation && runner.link == fence.link
+}
+
+func (r *Registry) watchRunLease(owner context.Context, leaseDone <-chan struct{}, fence runFence) {
+	select {
+	case <-owner.Done():
+	case <-leaseDone:
+		return
+	case <-r.ctx.Done():
+		return
+	}
+
+	timer := time.NewTimer(r.runLeaseGrace)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		r.expireRunLease(fence, owner.Err())
+	case <-leaseDone:
+	case <-r.ctx.Done():
+	}
+}
+
+func (r *Registry) expireRunLease(fence runFence, cause error) {
+	r.mu.RLock()
+	run := r.runs[fence.runID]
+	runner := r.runners[fence.runnerID]
+	active := runMatchesFence(run, fence) && runnerMatchesFence(runner, fence) && runner.ActiveRunID == fence.runID && (run.Status == RunStatusOpening || run.Status == RunStatusRunning || run.Status == RunStatusCanceled || run.Status == RunStatusFailed)
+	conversationID := ""
+	if active {
+		conversationID = run.ConversationID
+	}
+	r.mu.RUnlock()
+	if !active {
+		return
+	}
+
+	r.notifyRunFailure(conversationID)
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), openingCleanupTimeout)
+	_ = fence.link.Call(cleanupCtx, protocol.MethodRunCancel, protocol.RunCancelParams{RunID: fence.runID, Reason: "control-plane run lease expired"}, nil)
+	cleanupErr := fence.link.Call(cleanupCtx, protocol.MethodRunClose, protocol.RunCloseParams{RunID: fence.runID}, nil)
+	cancel()
+	if cleanupErr == nil || remoteRunAlreadyClosed(cleanupErr) {
+		message := "control-plane run context ended without run.close"
+		if cause != nil {
+			message += ": " + cause.Error()
+		}
+		r.finishRunForFence(fence, RunStatusCanceled, message, false)
+		return
+	}
+
+	_ = fence.link.Close()
+	r.Detach(fence.runnerID, fence.connectionID, fence.generation, errors.Wrap(cleanupErr, "control-plane run lease cleanup failed"))
+}
+
+func (r *Registry) finishRunForFence(fence runFence, status RunStatus, message string, runnerError bool) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	run := r.runs[fence.runID]
+	if !runMatchesFence(run, fence) {
+		return false
+	}
+	runner := r.runners[fence.runnerID]
+	if !runnerMatchesFence(runner, fence) || runner.ActiveRunID != fence.runID {
+		return false
+	}
+	r.finishRunLocked(fence.runID, status, message, r.now().UTC())
+	if runnerError && runner.Connected {
+		runner.Status = RunnerStatusError
+		runner.UpdatedAt = r.now().UTC()
+	}
+	r.logPersistenceError("failed to persist terminal fenced run", r.persistRunnerAndRunLocked(runner, run))
+	return true
 }
 
 func closeRemoteOpeningRun(link Link, runID string) (bool, error) {
@@ -1199,7 +1220,7 @@ func closeRemoteOpeningRun(link Link, runID string) (bool, error) {
 
 func remoteRunAlreadyClosed(err error) bool {
 	var rpcErr *protocol.RPCError
-	return errors.As(err, &rpcErr) && strings.Contains(strings.ToLower(rpcErr.Message), "no active run")
+	return errors.As(err, &rpcErr) && rpcErr.Code == protocol.ErrorCodeStale && (rpcErr.Reason() == "" || rpcErr.Reason() == protocol.ErrorReasonRunNotActive)
 }
 
 func (r *Registry) finishRunLocked(runID string, status RunStatus, message string, now time.Time) {
@@ -1207,10 +1228,14 @@ func (r *Registry) finishRunLocked(runID string, status RunStatus, message strin
 	if run == nil {
 		return
 	}
+	if run.leaseCancel != nil {
+		run.leaseCancel()
+		run.leaseCancel = nil
+	}
 	run.Status = status
 	run.Error = message
 	run.UpdatedAt = now
-	delete(r.activeConversation, run.ConversationID)
+	r.affinities.deactivate(run.ConversationID)
 	r.clearRunTransientStateLocked(run.ID)
 	if runner := r.runners[run.RunnerID]; runner != nil && runner.ActiveRunID == runID {
 		runner.ActiveRunID = ""
@@ -1224,58 +1249,7 @@ func (r *Registry) finishRunLocked(runID string, status RunStatus, message strin
 }
 
 func (r *Registry) clearRunTransientStateLocked(runID string) {
-	toolPrefix := strings.TrimSpace(runID) + "\x00"
-	for key := range r.toolUpdates {
-		if strings.HasPrefix(key, toolPrefix) {
-			delete(r.toolUpdates, key)
-			delete(r.toolSequences, key)
-			delete(r.toolRequestIDs, key)
-		}
-	}
-}
-
-func (r *Registry) bindConversationLocked(conversationID, runnerID, environmentProfile string, now time.Time) error {
-	return r.bindConversationLockedContext(r.ctx, conversationID, runnerID, environmentProfile, now)
-}
-
-func (r *Registry) bindConversationLockedContext(ctx context.Context, conversationID, runnerID, environmentProfile string, now time.Time) error {
-	if current, exists := r.conversationAffinity[conversationID]; exists {
-		if current.RunnerID != runnerID {
-			return errors.Errorf("conversation is bound to runner %s", current.RunnerID)
-		}
-		if current.EnvironmentProfile != environmentProfile {
-			return environmentProfileLockedError(current.EnvironmentProfile, environmentProfile)
-		}
-		if r.persistence != nil {
-			return r.persistence.BindConversation(ctx, conversationID, runnerID, environmentProfile, now)
-		}
-		return nil
-	}
-	if r.persistence != nil {
-		if err := r.persistence.BindConversation(ctx, conversationID, runnerID, environmentProfile, now); err != nil {
-			return err
-		}
-	}
-	r.conversationAffinity[conversationID] = ConversationAffinity{RunnerID: runnerID, EnvironmentProfile: environmentProfile}
-	return nil
-}
-
-func normalizeEnvironmentProfile(profile string) string {
-	profile = strings.TrimSpace(profile)
-	if strings.EqualFold(profile, "default") {
-		return ""
-	}
-	return profile
-}
-
-func environmentProfileLockedError(locked, requested string) error {
-	if locked == "" {
-		locked = "default"
-	}
-	if requested == "" {
-		requested = "default"
-	}
-	return errors.Errorf("conversation environment profile is locked to %q; cannot resume with %q", locked, requested)
+	r.toolUpdates.clearRun(runID)
 }
 
 func (r *Registry) persistRunnerLocked(entry *runnerEntry) error {
@@ -1388,7 +1362,7 @@ func (r *Registry) expireStaleConnections() {
 	}
 }
 
-func validateManifest(manifest protocol.Manifest, runnerID string, params protocol.RunOpenParams, generation int64) error {
+func validateManifest(manifest runnerpayload.Manifest, runnerID string, params protocol.RunOpenParams, generation int64) error {
 	if manifest.ProtocolVersion != protocol.Version {
 		return errors.Errorf("runner manifest uses protocol version %d", manifest.ProtocolVersion)
 	}
@@ -1416,7 +1390,7 @@ func validateManifest(manifest protocol.Manifest, runnerID string, params protoc
 		}
 		seen[name] = struct{}{}
 	}
-	digest, err := protocol.ComputeManifestDigest(manifest)
+	digest, err := runnerpayload.ComputeManifestDigest(manifest)
 	if err != nil {
 		return err
 	}
@@ -1431,10 +1405,6 @@ func validateManifest(manifest protocol.Manifest, runnerID string, params protoc
 
 func runnerIdentity(hostInstanceID, workspacePath string) string {
 	return strings.TrimSpace(hostInstanceID) + "\x00" + strings.TrimSpace(workspacePath)
-}
-
-func toolUpdateKey(runID, toolCallID string) string {
-	return strings.TrimSpace(runID) + "\x00" + strings.TrimSpace(toolCallID)
 }
 
 func randomID(prefix string) (string, error) {

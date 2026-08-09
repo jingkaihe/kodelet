@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
@@ -154,8 +155,65 @@ func TestRuntimeManagerScopesConfiguredRuntimesByVariantAndFingerprint(t *testin
 	replacement, err := manager.RuntimeWithConfigAndCallContext(context.Background(), rootDir, "runner-work", changedConfig, ExtensionCallContext{})
 	require.NoError(t, err)
 	assert.NotSame(t, first, replacement)
+	select {
+	case <-first.runtimeCtx.Done():
+		t.Fatal("replacing a cached runtime closed a generation that may still be in use")
+	default:
+	}
 	require.Len(t, configs, 3)
 	assert.Equal(t, 2048, configs[2].MaxOutputSize)
+}
+
+func TestRuntimeManagerKeepsCachedRuntimeWhenFingerprintRefreshFails(t *testing.T) {
+	manager := newRuntimeManager(func(_ context.Context, _ string, _ Config) (*Runtime, error) {
+		return EmptyRuntime(), nil
+	})
+	t.Cleanup(func() { assert.NoError(t, manager.Close()) })
+
+	first, err := manager.Runtime(context.Background(), "/workspace")
+	require.NoError(t, err)
+	manager.fingerprint = func(string, Config) (string, error) {
+		return "", errors.New("extension metadata is temporarily unreadable")
+	}
+
+	cached, err := manager.Runtime(context.Background(), "/workspace")
+	require.NoError(t, err)
+	assert.Same(t, first, cached)
+
+	_, err = manager.Runtime(context.Background(), "/other-workspace")
+	require.ErrorContains(t, err, "temporarily unreadable")
+}
+
+func TestRuntimeManagerClosesRetiredRuntimeAfterItsCallerLeaseEnds(t *testing.T) {
+	manager := newRuntimeManager(func(_ context.Context, _ string, _ Config) (*Runtime, error) {
+		return EmptyRuntime(), nil
+	})
+	t.Cleanup(func() { assert.NoError(t, manager.Close()) })
+	ctx, cancel := context.WithCancel(context.Background())
+	baseConfig := Config{Enabled: false, MaxOutputSize: 1024}
+	first, err := manager.RuntimeWithConfigAndCallContext(ctx, "/workspace", "runner-work", baseConfig, ExtensionCallContext{})
+	require.NoError(t, err)
+
+	changedConfig := baseConfig
+	changedConfig.MaxOutputSize = 2048
+	replacement, err := manager.RuntimeWithConfigAndCallContext(context.Background(), "/workspace", "runner-work", changedConfig, ExtensionCallContext{})
+	require.NoError(t, err)
+	assert.NotSame(t, first, replacement)
+	select {
+	case <-first.runtimeCtx.Done():
+		t.Fatal("retired runtime closed before its active caller lease ended")
+	default:
+	}
+
+	cancel()
+	require.Eventually(t, func() bool {
+		select {
+		case <-first.runtimeCtx.Done():
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
 }
 
 func TestRuntimeManagerDoesNotCacheRuntimeCreatedByCanceledCaller(t *testing.T) {

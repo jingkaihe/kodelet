@@ -40,8 +40,12 @@ type ChatRequest struct {
 	ClientCapabilities *ChatClientCapabilities `json:"clientCapabilities,omitempty"`
 }
 
-// EnvironmentProfileMetadataKey stores the runner-owned profile independently from model policy.
-const EnvironmentProfileMetadataKey = "environment_profile"
+const (
+	// RunnerIDMetadataKey identifies the remote runner that owns a conversation environment.
+	RunnerIDMetadataKey = convtypes.RunnerIDMetadataKey
+	// EnvironmentProfileMetadataKey stores the runner-owned profile independently from model policy.
+	EnvironmentProfileMetadataKey = convtypes.RunnerEnvironmentProfileMetadataKey
+)
 
 // ChatClientCapabilities describes UI behavior supported by the client attached to a chat run.
 type ChatClientCapabilities struct {
@@ -390,7 +394,7 @@ func runDefaultChat(
 	if commandResult.Matched {
 		switch commandResult.Action {
 		case agentenv.CommandActionRespond:
-			if err := persistDirectCommandResponse(ctx, threadOwner, sessionID, llmConfig, environmentProfile, message, commandResult.Response, imageInputs); err != nil {
+			if err := persistDirectCommandResponse(ctx, threadOwner, sessionID, llmConfig, strings.TrimSpace(req.RunnerID), environmentProfile, message, commandResult.Response, imageInputs); err != nil {
 				return sessionID, err
 			}
 			if err := sink.Send(ChatEvent{Kind: "conversation", ConversationID: sessionID, Role: "assistant"}); err != nil {
@@ -448,6 +452,7 @@ func runDefaultChat(
 
 	thread.SetConversationID(sessionID)
 	if strings.TrimSpace(req.RunnerID) != "" {
+		thread.SetMetadataValue(RunnerIDMetadataKey, strings.TrimSpace(req.RunnerID))
 		thread.SetMetadataValue(EnvironmentProfileMetadataKey, environmentProfile)
 	}
 	if newThread {
@@ -516,6 +521,7 @@ func persistDirectCommandResponse(
 	owner *DefaultChatRunner,
 	conversationID string,
 	config llmtypes.Config,
+	runnerID string,
 	environmentProfile string,
 	message string,
 	response string,
@@ -528,6 +534,9 @@ func persistDirectCommandResponse(
 	defer releaseThread()
 
 	thread.SetConversationID(conversationID)
+	if strings.TrimSpace(runnerID) != "" {
+		thread.SetMetadataValue(RunnerIDMetadataKey, strings.TrimSpace(runnerID))
+	}
 	thread.SetMetadataValue(EnvironmentProfileMetadataKey, environmentProfile)
 	if !thread.IsPersisted() {
 		thread.EnablePersistence(ctx, true)
@@ -721,13 +730,19 @@ func ResolveConfigWithReasoning(ctx context.Context, conversationID, requestedPr
 		_ = service.Close()
 	}()
 
+	record, recordErr := service.GetConversation(ctx, conversationID)
+	if recordErr == nil {
+		if runnerID, _ := record.Metadata[RunnerIDMetadataKey].(string); strings.TrimSpace(runnerID) != "" {
+			return llmtypes.Config{}, "", errors.Errorf("conversation is bound to runner %s and cannot be resumed as a local chat", strings.TrimSpace(runnerID))
+		}
+	}
+
 	resolution, err := conversationservice.ResolveCWD(ctx, ServiceStoreAdapter{Service: service}, conversationID, expandedRequestedCWD, defaultCWD, false)
 	if err != nil {
 		return llmtypes.Config{}, "", err
 	}
 
-	record, err := service.GetConversation(ctx, conversationID)
-	if err != nil {
+	if recordErr != nil {
 		config, newErr := ResolveConfigForNewConversation(requestedProfile, requestedReasoningEffort)
 		if newErr != nil {
 			return llmtypes.Config{}, "", newErr
@@ -735,7 +750,6 @@ func ResolveConfigWithReasoning(ctx context.Context, conversationID, requestedPr
 		config.WorkingDirectory = resolution.CWD
 		return config, resolution.CWD, nil
 	}
-
 	config, err := ResolveConfigForExistingConversation(record, requestedReasoningEffort)
 	if err != nil {
 		return llmtypes.Config{}, "", err

@@ -7,6 +7,8 @@ import (
 	"sync"
 
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
+	"github.com/pkg/errors"
 )
 
 // UIRequestRouter handles runner-originated extension UI requests in the control plane.
@@ -78,7 +80,7 @@ func (s *Session) HandleNotification(_ context.Context, method string, params js
 			_ = s.registry.EnvironmentError(runnerID, connectionID, generation, value)
 		}
 	case protocol.MethodToolUpdate:
-		if value, err := decodeParams[protocol.ToolUpdateParams](params); err == nil {
+		if value, err := decodeParams[runnerpayload.ToolUpdateParams](params); err == nil {
 			_ = s.registry.DeliverToolUpdate(runnerID, connectionID, generation, value)
 		}
 	}
@@ -154,6 +156,8 @@ func rpcErrorFor(err error) *protocol.RPCError {
 	message := err.Error()
 	code := protocol.ErrorCodeInvalidParams
 	switch {
+	case errors.Is(err, ErrRunnerNotFound):
+		code = protocol.ErrorCodeStale
 	case strings.Contains(message, "busy"), strings.Contains(message, "active run"):
 		code = protocol.ErrorCodeBusy
 	case strings.Contains(message, "stale"), strings.Contains(message, "generation"):
@@ -161,5 +165,9 @@ func rpcErrorFor(err error) *protocol.RPCError {
 	case strings.Contains(message, "another") || strings.Contains(message, "already"):
 		code = protocol.ErrorCodeConflict
 	}
-	return &protocol.RPCError{Code: code, Message: message}
+	rpcErr := &protocol.RPCError{Code: code, Message: message}
+	if errors.Is(err, ErrRunnerNotFound) {
+		rpcErr.Data = protocol.RPCErrorData{Reason: protocol.ErrorReasonRunnerNotFound}
+	}
+	return rpcErr
 }

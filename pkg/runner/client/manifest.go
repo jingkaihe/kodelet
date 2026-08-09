@@ -14,6 +14,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -29,7 +30,7 @@ func buildWireManifest(
 	runID string,
 	generation int64,
 	reservedToolNames []string,
-) (protocol.Manifest, error) {
+) (runnerpayload.Manifest, error) {
 	reserved := make(map[string]struct{}, len(reservedToolNames))
 	for _, name := range reservedToolNames {
 		name = strings.TrimSpace(name)
@@ -43,7 +44,7 @@ func buildWireManifest(
 				continue
 			}
 			if _, collision := reserved[tool.Name()]; collision {
-				return protocol.Manifest{}, errors.Errorf("extension tool %s collides with a reserved control-plane tool", tool.Name())
+				return runnerpayload.Manifest{}, errors.Errorf("extension tool %s collides with a reserved control-plane tool", tool.Name())
 			}
 		}
 	}
@@ -53,10 +54,10 @@ func buildWireManifest(
 		contextPaths = append(contextPaths, path)
 	}
 	sort.Strings(contextPaths)
-	contexts := make([]protocol.ContextFile, 0, len(contextPaths))
+	contexts := make([]runnerpayload.ContextFile, 0, len(contextPaths))
 	for _, path := range contextPaths {
 		content := local.Contexts[path]
-		contexts = append(contexts, protocol.ContextFile{
+		contexts = append(contexts, runnerpayload.ContextFile{
 			Path:    path,
 			Content: content,
 			Digest:  contentDigest(content),
@@ -65,19 +66,19 @@ func buildWireManifest(
 
 	definitions := append([]agentenv.ToolDefinition(nil), local.Tools...)
 	sort.Slice(definitions, func(i, j int) bool { return definitions[i].Name < definitions[j].Name })
-	wireTools := make([]protocol.ToolDefinition, 0, len(definitions))
-	var skillDefinitions []protocol.SkillDefinition
+	wireTools := make([]runnerpayload.ToolDefinition, 0, len(definitions))
+	var skillDefinitions []runnerpayload.SkillDefinition
 	for _, definition := range definitions {
 		if definition.Placement == agentenv.ToolPlacementControlPlane {
 			continue
 		}
 		if _, collision := reserved[definition.Name]; collision {
-			return protocol.Manifest{}, errors.Errorf("runner tool %s collides with a reserved control-plane tool", definition.Name)
+			return runnerpayload.Manifest{}, errors.Errorf("runner tool %s collides with a reserved control-plane tool", definition.Name)
 		}
 		if runtimeTool := runtimeToolByName(runtime, definition.Name); runtimeTool != nil && runtimeTool != definition.Tool {
-			return protocol.Manifest{}, errors.Errorf("extension tool %s collides with a runner tool", definition.Name)
+			return runnerpayload.Manifest{}, errors.Errorf("extension tool %s collides with a runner tool", definition.Name)
 		}
-		wireTools = append(wireTools, protocol.ToolDefinition{
+		wireTools = append(wireTools, runnerpayload.ToolDefinition{
 			Name:        definition.Name,
 			Description: definition.Description,
 			InputSchema: cloneJSONMap(definition.InputSchema),
@@ -88,7 +89,7 @@ func buildWireManifest(
 				if skill == nil {
 					continue
 				}
-				skillDefinitions = append(skillDefinitions, protocol.SkillDefinition{
+				skillDefinitions = append(skillDefinitions, runnerpayload.SkillDefinition{
 					Name:        skill.Name,
 					Description: skill.Description,
 					Source:      skill.Directory,
@@ -104,9 +105,9 @@ func buildWireManifest(
 
 	systemPromptPath, systemPromptContent, err := loadSystemPrompt(config, local.WorkingDirectory)
 	if err != nil {
-		return protocol.Manifest{}, err
+		return runnerpayload.Manifest{}, err
 	}
-	manifest := protocol.Manifest{
+	manifest := runnerpayload.Manifest{
 		ProtocolVersion:  protocol.Version,
 		RunnerID:         runnerID,
 		RunID:            runID,
@@ -116,7 +117,7 @@ func buildWireManifest(
 		Tools:            wireTools,
 		Skills:           skillDefinitions,
 		Commands:         commands,
-		Config: protocol.EnvironmentConfig{
+		Config: runnerpayload.EnvironmentConfig{
 			AllowedCommands:     append([]string(nil), config.AllowedCommands...),
 			ToolMode:            config.ToolMode,
 			EnableFSSearchTools: config.EnableFSSearchTools,
@@ -125,16 +126,16 @@ func buildWireManifest(
 			SystemPromptArgs:    maps.Clone(config.SyspromptArgs),
 		},
 		ExtensionGeneration: 1,
-		Capabilities: protocol.EnvironmentCapabilities{
+		Capabilities: runnerpayload.EnvironmentCapabilities{
 			ToolUpdates:        true,
 			InteractiveUI:      true,
 			PersistentSurfaces: true,
 			Commands:           true,
 		},
 	}
-	digest, err := protocol.ComputeManifestDigest(manifest)
+	digest, err := runnerpayload.ComputeManifestDigest(manifest)
 	if err != nil {
-		return protocol.Manifest{}, err
+		return runnerpayload.Manifest{}, err
 	}
 	manifest.Digest = digest
 	return manifest, nil

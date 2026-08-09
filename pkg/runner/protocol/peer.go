@@ -68,6 +68,7 @@ type PeerConfig struct {
 	PongWait                     time.Duration
 	PingPeriod                   time.Duration
 	ReadLimit                    int64
+	WriteLimit                   int64
 	MaxConcurrentRequests        int
 	MaxConcurrentControlRequests int
 	MaxConcurrentNotifications   int
@@ -109,6 +110,7 @@ type Peer struct {
 	started             atomic.Bool
 	ctx                 context.Context
 	cancel              context.CancelFunc
+	transportDone       chan struct{}
 	done                chan struct{}
 	failOnce            sync.Once
 	errMu               sync.RWMutex
@@ -120,6 +122,7 @@ type Peer struct {
 	requestSlots        chan struct{}
 	controlRequestSlots chan struct{}
 	notificationSlots   chan struct{}
+	workerMu            sync.Mutex
 	workerWG            sync.WaitGroup
 }
 
@@ -134,6 +137,7 @@ func NewPeer(conn *websocket.Conn, config PeerConfig) (*Peer, error) {
 		config:              config,
 		control:             make(chan outboundFrame, config.ControlQueueSize),
 		updates:             make(chan outboundFrame, config.UpdateQueueSize),
+		transportDone:       make(chan struct{}),
 		done:                make(chan struct{}),
 		pending:             make(map[string]chan callResult),
 		inbound:             make(map[string]*inboundCall),
@@ -171,6 +175,9 @@ func withPeerDefaults(config PeerConfig) PeerConfig {
 	}
 	if config.ReadLimit <= 0 {
 		config.ReadLimit = defaultReadLimit
+	}
+	if config.WriteLimit <= 0 {
+		config.WriteLimit = config.ReadLimit
 	}
 	if config.MaxConcurrentRequests <= 0 {
 		config.MaxConcurrentRequests = defaultMaxRequests
@@ -215,7 +222,17 @@ func (p *Peer) Start(parent context.Context) error {
 	return nil
 }
 
-// Done closes when the peer terminates.
+// TransportDone closes as soon as the WebSocket transport terminates.
+func (p *Peer) TransportDone() <-chan struct{} {
+	if p == nil {
+		closed := make(chan struct{})
+		close(closed)
+		return closed
+	}
+	return p.transportDone
+}
+
+// Done closes after the transport and all in-flight handlers terminate.
 func (p *Peer) Done() <-chan struct{} {
 	if p == nil {
 		closed := make(chan struct{})
@@ -266,6 +283,9 @@ func (p *Peer) call(ctx context.Context, method string, params any, result any, 
 	if err != nil {
 		return errors.Wrap(err, "failed to encode runner rpc request")
 	}
+	if err := p.validateOutboundFrame(websocket.TextMessage, payload); err != nil {
+		return err
+	}
 
 	responseCh := make(chan callResult, 1)
 	p.pendingMu.Lock()
@@ -301,7 +321,7 @@ func (p *Peer) call(ctx context.Context, method string, params any, result any, 
 			cancel()
 		}
 		return ctx.Err()
-	case <-p.done:
+	case <-p.transportDone:
 		return p.closedError()
 	}
 }
@@ -325,6 +345,9 @@ func (p *Peer) NotifyUpdate(method string, params any) error {
 	if err != nil {
 		return err
 	}
+	if err := p.validateOutboundFrame(websocket.TextMessage, payload); err != nil {
+		return err
+	}
 	frame := outboundFrame{messageType: websocket.TextMessage, payload: payload}
 	select {
 	case p.updates <- frame:
@@ -338,7 +361,7 @@ func (p *Peer) NotifyUpdate(method string, params any) error {
 	select {
 	case p.updates <- frame:
 		return nil
-	case <-p.done:
+	case <-p.transportDone:
 		return p.closedError()
 	default:
 		return nil
@@ -381,12 +404,25 @@ func (p *Peer) Shutdown(ctx context.Context, code int, reason string) error {
 	select {
 	case err := <-done:
 		p.fail(io.EOF)
-		return err
+		if err != nil {
+			return err
+		}
+		select {
+		case <-p.done:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	case <-ctx.Done():
 		p.fail(ctx.Err())
 		return ctx.Err()
-	case <-p.done:
-		return nil
+	case <-p.transportDone:
+		select {
+		case <-p.done:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 }
 
@@ -407,7 +443,7 @@ func (p *Peer) ready() error {
 		return ErrPeerNotStarted
 	}
 	select {
-	case <-p.done:
+	case <-p.transportDone:
 		return p.closedError()
 	default:
 		return nil
@@ -425,6 +461,9 @@ func (p *Peer) enqueueControl(ctx context.Context, messageType int, payload []by
 	if err := p.ready(); err != nil {
 		return err
 	}
+	if err := p.validateOutboundFrame(messageType, payload); err != nil {
+		return err
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -434,9 +473,16 @@ func (p *Peer) enqueueControl(ctx context.Context, messageType int, payload []by
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-p.done:
+	case <-p.transportDone:
 		return p.closedError()
 	}
+}
+
+func (p *Peer) validateOutboundFrame(messageType int, payload []byte) error {
+	if messageType == websocket.TextMessage && int64(len(payload)) > p.config.WriteLimit {
+		return errors.Errorf("runner rpc message is %d bytes, exceeding the %d-byte outbound limit", len(payload), p.config.WriteLimit)
+	}
+	return nil
 }
 
 func (p *Peer) writeLoop() {
@@ -476,6 +522,9 @@ func (p *Peer) nextOutbound() (outboundFrame, bool) {
 }
 
 func (p *Peer) writeFrame(frame outboundFrame) error {
+	if err := p.validateOutboundFrame(frame.messageType, frame.payload); err != nil {
+		return err
+	}
 	if err := p.conn.SetWriteDeadline(time.Now().Add(p.config.WriteWait)); err != nil {
 		return err
 	}
@@ -492,7 +541,10 @@ func (p *Peer) pingLoop() {
 			err := p.enqueueControl(ctx, websocket.PingMessage, nil, nil)
 			cancel()
 			if err != nil {
-				return
+				if p.ctx.Err() != nil {
+					return
+				}
+				continue
 			}
 		case <-p.ctx.Done():
 			return
@@ -555,12 +607,12 @@ func (p *Peer) dispatchNotification(message Message) {
 		p.fail(errors.New("runner rpc notification concurrency limit exceeded"))
 		return
 	}
-	p.workerWG.Add(1)
-	go func() {
-		defer p.workerWG.Done()
+	if !p.startWorker(func() {
 		defer releaseSlot(p.notificationSlots)
 		p.config.Notifications.HandleNotification(p.ctx, message.Method, message.Params)
-	}()
+	}) {
+		releaseSlot(p.notificationSlots)
+	}
 }
 
 func (p *Peer) dispatchRequest(message Message) {
@@ -588,9 +640,7 @@ func (p *Peer) dispatchRequest(message Message) {
 	p.inbound[id] = call
 	p.inboundMu.Unlock()
 
-	p.workerWG.Add(1)
-	go func() {
-		defer p.workerWG.Done()
+	if !p.startWorker(func() {
 		defer releaseSlot(slots)
 		defer cancel()
 		defer p.removeInbound(id, call)
@@ -610,10 +660,34 @@ func (p *Peer) dispatchRequest(message Message) {
 			p.sendErrorResponse(id, &RPCError{Code: ErrorCodeInternal, Message: err.Error()})
 			return
 		}
+		if err := p.validateOutboundFrame(websocket.TextMessage, payload); err != nil {
+			p.sendErrorResponse(id, &RPCError{Code: ErrorCodeUnavailable, Message: "runner rpc result exceeds the connection message-size limit; return a smaller result or use an artifact channel"})
+			return
+		}
 		ctx, cancelWrite := context.WithTimeout(p.ctx, p.config.WriteWait)
 		defer cancelWrite()
 		_ = p.enqueueControl(ctx, websocket.TextMessage, payload, nil)
+	}) {
+		p.removeInbound(id, call)
+		cancel()
+		releaseSlot(slots)
+	}
+}
+
+func (p *Peer) startWorker(worker func()) bool {
+	p.workerMu.Lock()
+	defer p.workerMu.Unlock()
+	select {
+	case <-p.transportDone:
+		return false
+	default:
+	}
+	p.workerWG.Add(1)
+	go func() {
+		defer p.workerWG.Done()
+		worker()
 	}()
+	return true
 }
 
 func isControlRequest(method string) bool {
@@ -655,7 +729,7 @@ func (p *Peer) handleRequestSafely(ctx context.Context, method string, params js
 }
 
 func (p *Peer) sendErrorResponse(id string, rpcErr *RPCError) {
-	payload, err := json.Marshal(Message{JSONRPC: JSONRPCVersion, ID: &id, Error: rpcErr})
+	payload, err := p.errorResponsePayload(id, rpcErr)
 	if err != nil {
 		return
 	}
@@ -665,7 +739,7 @@ func (p *Peer) sendErrorResponse(id string, rpcErr *RPCError) {
 }
 
 func (p *Peer) trySendErrorResponse(id string, rpcErr *RPCError) {
-	payload, err := json.Marshal(Message{JSONRPC: JSONRPCVersion, ID: &id, Error: rpcErr})
+	payload, err := p.errorResponsePayload(id, rpcErr)
 	if err != nil {
 		p.fail(err)
 		return
@@ -673,10 +747,29 @@ func (p *Peer) trySendErrorResponse(id string, rpcErr *RPCError) {
 	frame := outboundFrame{messageType: websocket.TextMessage, payload: payload}
 	select {
 	case p.control <- frame:
-	case <-p.done:
+	case <-p.transportDone:
 	default:
 		p.fail(errors.New("runner rpc control queue is full while rejecting inbound request"))
 	}
+}
+
+func (p *Peer) errorResponsePayload(id string, rpcErr *RPCError) ([]byte, error) {
+	payload, err := json.Marshal(Message{JSONRPC: JSONRPCVersion, ID: &id, Error: rpcErr})
+	if err != nil {
+		return nil, err
+	}
+	if p.validateOutboundFrame(websocket.TextMessage, payload) == nil {
+		return payload, nil
+	}
+	fallback := &RPCError{Code: ErrorCodeUnavailable, Message: "runner rpc error exceeds the connection message-size limit"}
+	payload, err = json.Marshal(Message{JSONRPC: JSONRPCVersion, ID: &id, Error: fallback})
+	if err != nil {
+		return nil, err
+	}
+	if err := p.validateOutboundFrame(websocket.TextMessage, payload); err != nil {
+		return nil, err
+	}
+	return payload, nil
 }
 
 func (p *Peer) removePending(id string, expected chan callResult) bool {
@@ -735,7 +828,14 @@ func (p *Peer) fail(err error) {
 		for _, call := range inbound {
 			call.cancel()
 		}
-		close(p.done)
+
+		p.workerMu.Lock()
+		close(p.transportDone)
+		p.workerMu.Unlock()
+		go func() {
+			p.workerWG.Wait()
+			close(p.done)
+		}()
 	})
 }
 
