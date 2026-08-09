@@ -15,6 +15,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/runner/localstate"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -39,14 +40,29 @@ func TestNormalizeRunnerAPIBaseURL(t *testing.T) {
 	require.ErrorContains(t, err, "only scheme, host")
 }
 
-func TestScrubRunnerCredentialEnvironment(t *testing.T) {
-	t.Setenv("KODELET_RUNNER_AUTH_TOKEN", "runner-secret")
-	t.Setenv("KODELET_AUTH_TOKEN", "client-secret")
+func TestRunnerConfigsLoadAuthTokensFromEnvironment(t *testing.T) {
+	t.Setenv(runnerAuthTokenEnv, "runner-secret")
+	t.Setenv(controlPlaneAuthTokenEnv, "control-plane-secret")
 
-	scrubRunnerCredentialEnvironment()
+	startCmd := &cobra.Command{Use: "start"}
+	startCmd.Flags().String("server", defaultRunnerServer, "")
+	startCmd.Flags().String("auth-token", "", "")
+	startCmd.Flags().String("name", "workspace", "")
+	assert.Equal(t, runnerStartConfig{
+		Server:      defaultRunnerServer,
+		AuthToken:   "runner-secret",
+		DisplayName: "workspace",
+	}, runnerStartConfigFromFlags(startCmd))
 
-	assert.Empty(t, os.Getenv("KODELET_RUNNER_AUTH_TOKEN"))
-	assert.Empty(t, os.Getenv("KODELET_AUTH_TOKEN"))
+	queryCmd := &cobra.Command{Use: "list"}
+	queryCmd.Flags().String("server", defaultRunnerServer, "")
+	queryCmd.Flags().String("auth-token", "", "")
+	queryCmd.Flags().Bool("json", true, "")
+	assert.Equal(t, runnerQueryConfig{
+		Server:     defaultRunnerServer,
+		AuthToken:  "control-plane-secret",
+		JSONOutput: true,
+	}, runnerQueryConfigFromFlags(queryCmd))
 }
 
 func TestSelectRunnerSupportsStableIDPrefixAndDisplayName(t *testing.T) {

@@ -152,7 +152,7 @@ func init() {
 	chatCmd.Flags().String("runner", defaults.Runner, "Use a remote runner by ID, ID prefix, or display name")
 	chatCmd.Flags().String("runner-profile", defaults.RunnerProfile, "Runner-local environment profile used with --runner (blank uses the runner base configuration)")
 	chatCmd.Flags().String("server", defaultRunnerServer, "Control-plane URL used with --runner")
-	chatCmd.Flags().String("auth-token", os.Getenv("KODELET_AUTH_TOKEN"), "Control-plane API authentication token used with --runner (or KODELET_AUTH_TOKEN)")
+	chatCmd.Flags().String("auth-token", "", "Control-plane API authentication token used with --runner (or KODELET_AUTH_TOKEN)")
 }
 
 func getChatConfigFromFlags(ctx context.Context, cmd *cobra.Command) *ChatConfig {
@@ -196,9 +196,7 @@ func getChatConfigFromFlags(ctx context.Context, cmd *cobra.Command) *ChatConfig
 	if server, err := cmd.Flags().GetString("server"); err == nil {
 		config.Server = strings.TrimSpace(server)
 	}
-	if authToken, err := cmd.Flags().GetString("auth-token"); err == nil {
-		config.AuthToken = strings.TrimSpace(authToken)
-	}
+	config.AuthToken = authTokenFlagOrEnvironment(cmd, controlPlaneAuthTokenEnv)
 
 	return config
 }

@@ -58,6 +58,16 @@ func TestGetChatConfigFromFlags(t *testing.T) {
 	assert.Equal(t, "workspace", config.RunnerProfile)
 }
 
+func TestGetChatConfigFromFlagsLoadsAuthTokenFromEnvironment(t *testing.T) {
+	t.Setenv(controlPlaneAuthTokenEnv, " control-plane-secret ")
+	cmd := &cobra.Command{Use: "chat"}
+	cmd.Flags().String("auth-token", "", "")
+
+	config := getChatConfigFromFlags(context.Background(), cmd)
+
+	assert.Equal(t, "control-plane-secret", config.AuthToken)
+}
+
 func TestChatResumeShortFlag(t *testing.T) {
 	cmd := &cobra.Command{Use: "chat"}
 	defaults := NewChatConfig()

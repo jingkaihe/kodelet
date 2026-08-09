@@ -133,6 +133,9 @@ func (c *ServerConfig) Validate() error {
 	if err := ValidateAuthToken(c.RunnerAuthToken); err != nil {
 		return errors.Wrap(err, "invalid runner auth token")
 	}
+	if c.AuthToken != "" && c.RunnerAuthToken == "" {
+		return errors.New("runner auth token is required when web UI authentication is enabled")
+	}
 	if c.AuthToken != "" && c.RunnerAuthToken != "" && c.AuthToken == c.RunnerAuthToken {
 		return errors.New("runner auth token must differ from the web UI auth token")
 	}

@@ -183,6 +183,16 @@ func TestServerConfig_Validate(t *testing.T) {
 			},
 			expectedError: "compact-ratio must be greater than 0.0 and less than or equal to 1.0",
 		},
+		{
+			name: "web UI auth requires runner auth",
+			config: &ServerConfig{
+				Host:         "localhost",
+				Port:         8080,
+				CompactRatio: 0.8,
+				AuthToken:    "web-secret",
+			},
+			expectedError: "runner auth token is required when web UI authentication is enabled",
+		},
 	}
 
 	for _, tt := range tests {
@@ -286,12 +296,13 @@ func TestNewServerInitializesRoutesAndNormalizesConfig(t *testing.T) {
 	require.NoError(t, db.RunMigrations(context.Background(), migrations.All()))
 	defaultCWD := t.TempDir()
 	config := &ServerConfig{
-		Host:         "127.0.0.1",
-		Port:         1,
-		CWD:          defaultCWD,
-		CompactRatio: 0.8,
-		AuthToken:    "token",
-		CORSOrigins:  []string{"https://Example.com"},
+		Host:            "127.0.0.1",
+		Port:            1,
+		CWD:             defaultCWD,
+		CompactRatio:    0.8,
+		AuthToken:       "token",
+		RunnerAuthToken: "runner-token",
+		CORSOrigins:     []string{"https://Example.com"},
 	}
 
 	server, err := NewServer(context.Background(), config)
@@ -303,6 +314,7 @@ func TestNewServerInitializesRoutesAndNormalizesConfig(t *testing.T) {
 	assert.NotNil(t, server.chatRunner)
 	assert.Equal(t, defaultCWD, config.CWD)
 	assert.Equal(t, "token", config.AuthToken)
+	assert.Equal(t, "runner-token", config.RunnerAuthToken)
 	assert.Equal(t, []string{"https://example.com"}, config.CORSOrigins)
 
 	req := httptest.NewRequest("GET", "/", nil)

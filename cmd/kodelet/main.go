@@ -17,11 +17,24 @@ import (
 )
 
 const (
-	configFileEnv         = "KODELET_CONFIG_FILE"
-	configFileModeEnv     = "KODELET_CONFIG_FILE_MODE"
-	configFileModeMerge   = "merge"
-	configFileModeIsolate = "isolated"
+	configFileEnv            = "KODELET_CONFIG_FILE"
+	configFileModeEnv        = "KODELET_CONFIG_FILE_MODE"
+	controlPlaneAuthTokenEnv = "KODELET_AUTH_TOKEN"
+	runnerAuthTokenEnv       = "KODELET_RUNNER_AUTH_TOKEN"
+	configFileModeMerge      = "merge"
+	configFileModeIsolate    = "isolated"
 )
+
+func authTokenFlagOrEnvironment(cmd *cobra.Command, environmentName string) string {
+	value, err := cmd.Flags().GetString("auth-token")
+	if err != nil {
+		return ""
+	}
+	if cmd.Flags().Changed("auth-token") {
+		return strings.TrimSpace(value)
+	}
+	return strings.TrimSpace(os.Getenv(environmentName))
+}
 
 func init() {
 	viper.SetDefault("max_tokens", 8192)

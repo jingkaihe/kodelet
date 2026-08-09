@@ -72,14 +72,7 @@ var runnerStartCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start a runner bound to the current workspace",
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		server, _ := cmd.Flags().GetString("server")
-		authToken, _ := cmd.Flags().GetString("auth-token")
-		displayName, _ := cmd.Flags().GetString("name")
-		return runRunnerStart(cmd.Context(), runnerStartConfig{
-			Server:      server,
-			AuthToken:   authToken,
-			DisplayName: displayName,
-		})
+		return runRunnerStart(cmd.Context(), runnerStartConfigFromFlags(cmd))
 	},
 }
 
@@ -117,11 +110,11 @@ var runnerRemoveCmd = &cobra.Command{
 
 func init() {
 	runnerStartCmd.Flags().String("server", defaultRunnerServer, "Control-plane URL")
-	runnerStartCmd.Flags().String("auth-token", os.Getenv("KODELET_RUNNER_AUTH_TOKEN"), "Runner-only authentication token (or KODELET_RUNNER_AUTH_TOKEN)")
+	runnerStartCmd.Flags().String("auth-token", "", "Runner-only authentication token (or KODELET_RUNNER_AUTH_TOKEN)")
 	runnerStartCmd.Flags().String("name", "", "Optional mutable display name")
 	for _, command := range []*cobra.Command{runnerListCmd, runnerInspectCmd, runnerRemoveCmd} {
 		command.Flags().String("server", defaultRunnerServer, "Control-plane URL")
-		command.Flags().String("auth-token", os.Getenv("KODELET_AUTH_TOKEN"), "Control-plane API authentication token (or KODELET_AUTH_TOKEN)")
+		command.Flags().String("auth-token", "", "Control-plane API authentication token (or KODELET_AUTH_TOKEN)")
 		command.Flags().Bool("json", false, "Output in JSON format")
 	}
 	runnerRemoveCmd.Flags().Bool("force", false, "Abandon conversation bindings while removing the runner and its run history")
@@ -130,11 +123,24 @@ func init() {
 	rootCmd.AddCommand(runnerCmd)
 }
 
+func runnerStartConfigFromFlags(cmd *cobra.Command) runnerStartConfig {
+	server, _ := cmd.Flags().GetString("server")
+	displayName, _ := cmd.Flags().GetString("name")
+	return runnerStartConfig{
+		Server:      server,
+		AuthToken:   authTokenFlagOrEnvironment(cmd, runnerAuthTokenEnv),
+		DisplayName: displayName,
+	}
+}
+
 func runnerQueryConfigFromFlags(cmd *cobra.Command) runnerQueryConfig {
 	server, _ := cmd.Flags().GetString("server")
-	authToken, _ := cmd.Flags().GetString("auth-token")
 	jsonOutput, _ := cmd.Flags().GetBool("json")
-	return runnerQueryConfig{Server: server, AuthToken: authToken, JSONOutput: jsonOutput}
+	return runnerQueryConfig{
+		Server:     server,
+		AuthToken:  authTokenFlagOrEnvironment(cmd, controlPlaneAuthTokenEnv),
+		JSONOutput: jsonOutput,
+	}
 }
 
 func runRunnerStart(ctx context.Context, config runnerStartConfig) error {
@@ -142,9 +148,6 @@ func runRunnerStart(ctx context.Context, config runnerStartConfig) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to determine current workspace")
 	}
-	// The runner credential is retained in memory for the control socket. Neither
-	// control-plane credential belongs in extension or workspace process environments.
-	scrubRunnerCredentialEnvironment()
 
 	var registered bool
 	runner, err := runnerclient.NewRunner(ctx, runnerclient.RunnerConfig{
@@ -178,11 +181,6 @@ func runRunnerStart(ctx context.Context, config runnerStartConfig) error {
 	}
 	presenter.Info("Runner stopped")
 	return nil
-}
-
-func scrubRunnerCredentialEnvironment() {
-	_ = os.Unsetenv("KODELET_RUNNER_AUTH_TOKEN")
-	_ = os.Unsetenv("KODELET_AUTH_TOKEN")
 }
 
 func runRunnerList(ctx context.Context, config runnerQueryConfig, output io.Writer) error {

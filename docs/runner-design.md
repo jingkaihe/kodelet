@@ -909,13 +909,15 @@ The initial direct-workspace runner treats an unconfirmed environment or executi
 
 ## Security Model
 
-The initial design assumes the control plane and runners are mutually trusted and operated by the same user or trusted team.
+The initial design assumes the control plane and runners are mutually trusted and operated by the same user or trusted team. The runner core, extensions, tools, shell commands, workspace processes, and other processes running as the runner operating-system user belong to one runner-host trust domain. The direct-workspace runner does not attempt to isolate these processes from each other.
 
 Connections across hosts require WSS and runner authentication during the WebSocket upgrade. The initial server uses a distinct runner-role token for this endpoint; after registration, the connection's stable runner ID and generation scope all assigned environment operations. Per-runner credentials and multi-owner authorization are outside the initial trusted deployment model.
 
-Provider credentials remain in the control plane. Runner registration credentials must not be included in tool contexts, subprocess environments, extension initialization payloads, or logs. The runner must scrub its control-plane credential before spawning extensions or workspace processes.
+Provider credentials remain in the control plane. The runner client uses its registration token for the control connection and does not deliberately add that in-memory value to tool contexts, manifests, extension initialization payloads, or logs. Runner-owned subprocesses otherwise inherit the ambient runner-host environment according to the existing local execution model; supplying a credential through an environment variable therefore makes it available within the same trusted host-user domain. The CLI must not capture credential environment variables as flag defaults because Cobra may render non-empty defaults in help and error output.
 
 Binding a runner to one workspace prevents accidental path routing but is not a sandbox. Runner-side Bash, extensions, build systems, and package managers execute with the runner process's host permissions until ephemeral execution instances are introduced.
+
+A future isolated execution instance introduces a new trust boundary. Its provider must construct an explicit per-instance environment and keep runner and control-plane credentials outside the container, virtual machine, or other sandbox rather than relying on process-global environment scrubbing.
 
 ## User Experience
 
@@ -1119,7 +1121,7 @@ This is not selected because Kodelet resources and configuration are strongly as
 
 ### Per-run ephemeral execution instances in the first release
 
-This remains the long-term target but is deliberately deferred. The environment protocol and central agent-loop split should be validated before selecting and implementing an isolation backend.
+This remains the long-term target but is deliberately deferred. The environment protocol and central agent-loop split should be validated before selecting and implementing an isolation backend. Once introduced, the execution-instance provider owns the explicit environment projection and excludes runner and control-plane credentials from the isolated instance.
 
 ### Sharing one workspace across concurrent initial runs
 
