@@ -289,7 +289,8 @@ func TestConfirmRunnerRemovalDefaultsToNoAndWarnsForForce(t *testing.T) {
 	var output bytes.Buffer
 	assert.False(t, confirmRunnerRemoval(strings.NewReader("\n"), &output, runner, true))
 	assert.Contains(t, output.String(), "runner run history")
-	assert.Contains(t, output.String(), "abandon its conversation bindings")
+	assert.Contains(t, output.String(), "abandons its conversation bindings")
+	assert.Contains(t, output.String(), "cannot be resumed")
 	assert.True(t, confirmRunnerRemoval(strings.NewReader("yes\n"), io.Discard, runner, false))
 
 	err := runRunnerRemove(t.Context(), runner.ID, runnerRemoveConfig{

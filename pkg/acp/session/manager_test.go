@@ -1,8 +1,10 @@
 package session
 
 import (
+	"context"
 	"testing"
 
+	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -10,6 +12,25 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestManagerLoadSessionRejectsRunnerBoundConversation(t *testing.T) {
+	manager := &Manager{
+		config:   ManagerConfig{NoExtensions: true},
+		sessions: make(map[acptypes.SessionID]*Session),
+		store: &fakeConversationStore{loads: map[string]convtypes.ConversationRecord{
+			"remote-session": {
+				ID:       "remote-session",
+				Metadata: map[string]any{convtypes.RunnerIDMetadataKey: "runner-1"},
+			},
+		}},
+	}
+
+	_, err := manager.LoadSession(context.Background(), acptypes.LoadSessionRequest{
+		SessionID: "remote-session",
+		CWD:       t.TempDir(),
+	})
+	require.ErrorContains(t, err, "conversation is bound to runner runner-1")
+}
 
 func TestNewManager_WithManagerConfig(t *testing.T) {
 	t.Run("creates manager with default config", func(t *testing.T) {

@@ -93,6 +93,7 @@ func TestStore_BasicOperations(t *testing.T) {
 	// Test Load non-existent
 	_, err = store.Load(ctx, "non-existent")
 	assert.Error(t, err)
+	assert.ErrorIs(t, err, conversations.ErrConversationNotFound)
 	assert.Contains(t, err.Error(), "conversation not found")
 
 	// Test Query (replaces List)

@@ -55,37 +55,46 @@ func newRuntimeManager(factory runtimeFactory) *RuntimeManager {
 
 // Runtime returns the runtime associated with cwd, creating it on first use.
 func (m *RuntimeManager) Runtime(ctx context.Context, cwd string) (*Runtime, error) {
-	return m.runtime(ctx, cwd, "", LoadConfigFromViper(), true, ExtensionCallContext{})
+	return m.runtime(ctx, ctx, cwd, "", LoadConfigFromViper(), true, ExtensionCallContext{})
 }
 
 // RuntimeWithCallContext returns the runtime associated with cwd and starts its
 // lifecycle with the supplied call context when it has not already started.
 func (m *RuntimeManager) RuntimeWithCallContext(ctx context.Context, cwd string, callContext ExtensionCallContext) (*Runtime, error) {
-	return m.runtime(ctx, cwd, "", LoadConfigFromViper(), true, callContext)
+	return m.runtime(ctx, ctx, cwd, "", LoadConfigFromViper(), true, callContext)
 }
 
 // RuntimeForCommandDiscovery returns a cached runtime without starting session lifecycle events.
 func (m *RuntimeManager) RuntimeForCommandDiscovery(ctx context.Context, cwd string) (*Runtime, error) {
-	return m.runtime(ctx, cwd, "", LoadConfigFromViper(), false, ExtensionCallContext{})
+	return m.runtime(ctx, ctx, cwd, "", LoadConfigFromViper(), false, ExtensionCallContext{})
 }
 
 // RuntimeWithConfigAndCallContext returns a runtime isolated by a caller-owned
 // variant such as a runner environment profile.
 func (m *RuntimeManager) RuntimeWithConfigAndCallContext(ctx context.Context, cwd, variant string, config Config, callContext ExtensionCallContext) (*Runtime, error) {
-	return m.runtime(ctx, cwd, variant, config, true, callContext)
+	return m.runtime(ctx, ctx, cwd, variant, config, true, callContext)
+}
+
+// RuntimeWithConfigAndCallContextForLease separates runtime construction
+// cancellation from the caller lifetime that pins the selected generation.
+func (m *RuntimeManager) RuntimeWithConfigAndCallContextForLease(ctx, leaseCtx context.Context, cwd, variant string, config Config, callContext ExtensionCallContext) (*Runtime, error) {
+	return m.runtime(ctx, leaseCtx, cwd, variant, config, true, callContext)
 }
 
 // RuntimeForCommandDiscoveryWithConfig returns a configured runtime without starting lifecycle events.
 func (m *RuntimeManager) RuntimeForCommandDiscoveryWithConfig(ctx context.Context, cwd, variant string, config Config) (*Runtime, error) {
-	return m.runtime(ctx, cwd, variant, config, false, ExtensionCallContext{})
+	return m.runtime(ctx, ctx, cwd, variant, config, false, ExtensionCallContext{})
 }
 
-func (m *RuntimeManager) runtime(ctx context.Context, cwd, variant string, config Config, startLifecycle bool, callContext ExtensionCallContext) (*Runtime, error) {
+func (m *RuntimeManager) runtime(ctx, leaseCtx context.Context, cwd, variant string, config Config, startLifecycle bool, callContext ExtensionCallContext) (*Runtime, error) {
 	if m == nil {
 		return nil, errors.New("extension runtime manager is required")
 	}
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if leaseCtx == nil {
+		leaseCtx = ctx
 	}
 
 	key := runtimeManagerKey(cwd, variant)
@@ -101,7 +110,7 @@ func (m *RuntimeManager) runtime(ctx context.Context, cwd, variant string, confi
 			m.mu.Unlock()
 			return nil, err
 		}
-		m.acquireLocked(ctx, cached)
+		m.acquireLocked(leaseCtx, cached)
 		m.mu.Unlock()
 		if startLifecycle {
 			cached.runtime.startLifecycle(ctx, callContext)
@@ -137,7 +146,7 @@ func (m *RuntimeManager) runtime(ctx context.Context, cwd, variant string, confi
 		managed = &managedRuntime{runtime: replacement, fingerprint: fingerprint}
 		m.runtimes[key] = managed
 	}
-	m.acquireLocked(ctx, managed)
+	m.acquireLocked(leaseCtx, managed)
 	runtime := managed.runtime
 	m.mu.Unlock()
 	if closeRetired != nil {

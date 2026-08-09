@@ -449,11 +449,22 @@ func TestRunLeaseWatchdogReleasesCapacityAfterOwnerContextEnds(t *testing.T) {
 	require.NoError(t, err)
 	configureManifestLink(t, link, registration)
 	markRunnerReady(t, registry, registration)
+	statusAtCancellation := make(chan RunStatus, 1)
+	registry.SetEnvironmentErrorHandler(func(string) {
+		run, _ := registry.Run("run-one")
+		statusAtCancellation <- run.Status
+	})
 
 	runCtx, cancel := context.WithCancel(t.Context())
 	_, err = registry.OpenRun(runCtx, registration.RunnerID, testRunOpenParams("run-one", "conversation-one"))
 	require.NoError(t, err)
 	cancel()
+	select {
+	case status := <-statusAtCancellation:
+		assert.Equal(t, RunStatusCanceled, status)
+	case <-time.After(time.Second):
+		t.Fatal("run lease expiry did not cancel the owning conversation")
+	}
 
 	require.Eventually(t, func() bool {
 		run, runOK := registry.Run("run-one")

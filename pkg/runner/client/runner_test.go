@@ -27,6 +27,24 @@ type blockingRefreshInstanceProvider struct {
 	startedCh chan struct{}
 }
 
+type delayedInitialProbeInstanceProvider struct {
+	workspace string
+	delay     time.Duration
+}
+
+func (p *delayedInitialProbeInstanceProvider) Create(ctx context.Context, spec ExecutionInstanceSpec) (ExecutionInstance, error) {
+	if spec.Probe {
+		timer := time.NewTimer(p.delay)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return &directWorkspaceInstance{workspace: p.workspace}, nil
+}
+
 func (p *blockingRefreshInstanceProvider) Create(ctx context.Context, spec ExecutionInstanceSpec) (ExecutionInstance, error) {
 	if spec.Probe && p.probes.Add(1) > 1 {
 		if p.started.CompareAndSwap(false, true) {
@@ -179,14 +197,15 @@ func TestRunnerRegistersHeartbeatsAndReleasesWorkspaceLock(t *testing.T) {
 
 	registered := make(chan protocol.RegisterResult, 1)
 	runner, err := NewRunner(t.Context(), RunnerConfig{
-		Server:           server.URL,
-		AuthToken:        "runner-secret",
-		Workspace:        workspace,
-		DisplayName:      "project runner",
-		Store:            store,
-		ReconnectMin:     5 * time.Millisecond,
-		ReconnectMax:     10 * time.Millisecond,
-		ManifestInterval: time.Hour,
+		Server:               server.URL,
+		AuthToken:            "runner-secret",
+		Workspace:            workspace,
+		DisplayName:          "project runner",
+		Store:                store,
+		ReconnectMin:         5 * time.Millisecond,
+		ReconnectMax:         10 * time.Millisecond,
+		ManifestInterval:     time.Hour,
+		ManifestProbeTimeout: 5 * time.Millisecond,
 		OnRegistered: func(result protocol.RegisterResult) {
 			registered <- result
 		},
@@ -198,6 +217,7 @@ func TestRunnerRegistersHeartbeatsAndReleasesWorkspaceLock(t *testing.T) {
 	runner.service.configLoader = func(string) (llmtypes.Config, error) {
 		return llmtypes.Config{AllowedTools: []string{"file_read"}}, nil
 	}
+	runner.service.instanceProvider = &delayedInitialProbeInstanceProvider{workspace: workspace, delay: 25 * time.Millisecond}
 
 	runCtx, cancel := context.WithCancel(t.Context())
 	runDone := make(chan error, 1)

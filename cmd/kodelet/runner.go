@@ -283,7 +283,7 @@ func confirmRunnerRemoval(input io.Reader, output io.Writer, runner runnerregist
 	fmt.Fprintf(output, "Remove runner %s (%s on %s)? ", runner.ID, runner.Workspace.Path, runner.Host.Hostname)
 	fmt.Fprint(output, "This deletes its registration and runner run history. ")
 	if force {
-		fmt.Fprint(output, "This will abandon its conversation bindings. ")
+		fmt.Fprint(output, "This abandons its conversation bindings; affected conversations retain runner metadata and cannot be resumed until explicitly migrated or unbound. ")
 	}
 	fmt.Fprint(output, "[y/N]: ")
 	response, _ := bufio.NewReader(input).ReadString('\n')

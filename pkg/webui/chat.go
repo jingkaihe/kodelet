@@ -117,7 +117,9 @@ func (s *Server) commitRunnerAffinity(ctx context.Context, conversationID string
 		return nil
 	}
 	if _, err := s.conversationService.GetConversation(ctx, conversationID); err != nil {
-		s.runnerRegistry.ReleasePendingConversationAffinity(conversationID)
+		if stdErrors.Is(err, convtypes.ErrConversationNotFound) {
+			s.runnerRegistry.ReleasePendingConversationAffinity(conversationID)
+		}
 		return err
 	}
 	return s.runnerRegistry.CommitConversationAffinity(ctx, conversationID)

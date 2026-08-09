@@ -18,6 +18,7 @@ const (
 	defaultControlQueueSize = 128
 	defaultUpdateQueueSize  = 64
 	defaultWriteWait        = 10 * time.Second
+	defaultShutdownWait     = 10 * time.Second
 	defaultPongWait         = 45 * time.Second
 	defaultPingPeriod       = 30 * time.Second
 	defaultReadLimit        = 4 * 1024 * 1024
@@ -65,6 +66,7 @@ type PeerConfig struct {
 	ControlQueueSize             int
 	UpdateQueueSize              int
 	WriteWait                    time.Duration
+	ShutdownWait                 time.Duration
 	PongWait                     time.Duration
 	PingPeriod                   time.Duration
 	ReadLimit                    int64
@@ -160,6 +162,9 @@ func withPeerDefaults(config PeerConfig) PeerConfig {
 	}
 	if config.WriteWait <= 0 {
 		config.WriteWait = defaultWriteWait
+	}
+	if config.ShutdownWait <= 0 {
+		config.ShutdownWait = defaultShutdownWait
 	}
 	if config.PongWait <= 0 {
 		config.PongWait = defaultPongWait
@@ -391,6 +396,11 @@ func (p *Peer) Shutdown(ctx context.Context, code int, reason string) error {
 	}
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if _, bounded := ctx.Deadline(); !bounded {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, p.config.ShutdownWait)
+		defer cancel()
 	}
 	if code == 0 {
 		code = websocket.CloseNormalClosure
@@ -661,7 +671,11 @@ func (p *Peer) dispatchRequest(message Message) {
 			return
 		}
 		if err := p.validateOutboundFrame(websocket.TextMessage, payload); err != nil {
-			p.sendErrorResponse(id, &RPCError{Code: ErrorCodeUnavailable, Message: "runner rpc result exceeds the connection message-size limit; return a smaller result or use an artifact channel"})
+			p.sendErrorResponse(id, &RPCError{
+				Code:    ErrorCodeUnavailable,
+				Message: "runner rpc result exceeds the connection message-size limit; return a smaller result or use an artifact channel",
+				Data:    RPCErrorData{Reason: ErrorReasonResultTooLarge},
+			})
 			return
 		}
 		ctx, cancelWrite := context.WithTimeout(p.ctx, p.config.WriteWait)

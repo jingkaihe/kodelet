@@ -405,6 +405,38 @@ func TestRemoteToolResultAccessors(t *testing.T) {
 	assert.Equal(t, "part", result.ContentParts()[0].Text)
 }
 
+func TestRemoteEnvironmentReturnsOversizedToolResultAsInBandError(t *testing.T) {
+	controller := &fakeRemoteController{
+		manifest: runnerpayload.Manifest{
+			ProtocolVersion: protocol.Version,
+			RunnerID:        "runner-1",
+			RunID:           "run-1",
+			Generation:      1,
+		},
+		executeErr: &protocol.RPCError{
+			Code:    protocol.ErrorCodeUnavailable,
+			Message: "runner rpc result exceeds the connection message-size limit; return a smaller result",
+			Data:    protocol.RPCErrorData{Reason: protocol.ErrorReasonResultTooLarge},
+		},
+	}
+	environment := NewRemoteEnvironment(controller, "runner-1", WithRemoteRunIDGenerator(func() (string, error) { return "run-1", nil }))
+	_, err := environment.Open(t.Context(), RunSpec{ConversationID: "conversation-1"})
+	require.NoError(t, err)
+
+	execution, err := environment.ExecuteTool(t.Context(), ToolRequest{
+		Name:       "file_read",
+		Input:      `{"path":"large.log"}`,
+		ToolCallID: "tool-1",
+	}, nil)
+	require.NoError(t, err)
+	require.NotNil(t, execution.Result)
+	assert.True(t, execution.Result.IsError())
+	assert.Contains(t, execution.Result.GetError(), "smaller result")
+	assert.False(t, execution.StructuredResult.Success)
+	assert.Equal(t, "file_read", execution.StructuredResult.ToolName)
+	assert.JSONEq(t, `{"path":"large.log"}`, execution.Input)
+}
+
 func TestConvertRemoteManifestRejectsInvalidContextPaths(t *testing.T) {
 	environment := NewRemoteEnvironment(&fakeRemoteController{}, "runner-1")
 	_, err := environment.convertManifest(runnerpayload.Manifest{ContextFiles: []runnerpayload.ContextFile{{Content: "missing path", Digest: remoteContentDigest("missing path")}}}, llmtypes.Config{})

@@ -109,8 +109,8 @@ func (s *Store) Load(ctx context.Context, id string) (conversations.Conversation
 		FROM conversations WHERE id = ?`
 	err := s.db.GetContext(ctx, &dbRecord, query, id)
 	if err != nil {
-		if err.Error() == "sql: no rows in result set" {
-			return conversations.ConversationRecord{}, errors.Errorf("conversation not found: %s", id)
+		if errors.Is(err, sql.ErrNoRows) {
+			return conversations.ConversationRecord{}, errors.Wrapf(conversations.ErrConversationNotFound, "%s", id)
 		}
 		return conversations.ConversationRecord{}, errors.Wrap(err, "failed to load conversation record")
 	}

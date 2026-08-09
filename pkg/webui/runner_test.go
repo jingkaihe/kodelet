@@ -16,6 +16,8 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -420,6 +422,35 @@ func TestRunnerRESTEndpointsRequireRegistry(t *testing.T) {
 	deleteRequest := mux.SetURLVars(httptest.NewRequest(http.MethodDelete, "/api/runners/runner-1", nil), map[string]string{"id": "runner-1"})
 	server.handleDeleteRunner(deleteRecorder, deleteRequest)
 	assert.Equal(t, http.StatusServiceUnavailable, deleteRecorder.Code)
+}
+
+func TestCommitRunnerAffinityOnlyReleasesPendingBindingWhenConversationIsMissing(t *testing.T) {
+	server := newRunnerTestServer(t, "")
+	registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
+		ProtocolVersions: []int{protocol.Version},
+		Host:             protocol.Host{InstanceID: "host-affinity", Hostname: "host", OS: "linux", Arch: "amd64"},
+		Workspace:        protocol.Workspace{Path: "/work/affinity", Name: "affinity"},
+	}, newRunnerAPITestLink())
+	require.NoError(t, err)
+
+	require.NoError(t, server.runnerRegistry.BindConversation(t.Context(), "conversation-transient", registration.RunnerID))
+	server.conversationService = &mockConversationService{getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
+		return nil, errors.New("database temporarily unavailable")
+	}}
+	err = server.commitRunnerAffinity(t.Context(), "conversation-transient")
+	require.ErrorContains(t, err, "temporarily unavailable")
+	runnerID, found := server.runnerRegistry.RunnerForConversation("conversation-transient")
+	assert.True(t, found)
+	assert.Equal(t, registration.RunnerID, runnerID)
+
+	require.NoError(t, server.runnerRegistry.BindConversation(t.Context(), "conversation-missing", registration.RunnerID))
+	server.conversationService = &mockConversationService{getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
+		return nil, convtypes.ErrConversationNotFound
+	}}
+	err = server.commitRunnerAffinity(t.Context(), "conversation-missing")
+	require.ErrorIs(t, err, convtypes.ErrConversationNotFound)
+	_, found = server.runnerRegistry.RunnerForConversation("conversation-missing")
+	assert.False(t, found)
 }
 
 func openRunnerUIRun(t *testing.T, server *Server) (protocol.RegisterResult, *runnerUIEventSink, *webUIInputBroker) {

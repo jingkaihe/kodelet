@@ -1154,18 +1154,28 @@ func (r *Registry) watchRunLease(owner context.Context, leaseDone <-chan struct{
 }
 
 func (r *Registry) expireRunLease(fence runFence, cause error) {
-	r.mu.RLock()
+	message := "control-plane run context ended without run.close"
+	if cause != nil {
+		message += ": " + cause.Error()
+	}
+	r.mu.Lock()
 	run := r.runs[fence.runID]
 	runner := r.runners[fence.runnerID]
 	active := runMatchesFence(run, fence) && runnerMatchesFence(runner, fence) && runner.ActiveRunID == fence.runID && (run.Status == RunStatusOpening || run.Status == RunStatusRunning || run.Status == RunStatusCanceled || run.Status == RunStatusFailed)
 	conversationID := ""
+	var persistenceErr error
 	if active {
 		conversationID = run.ConversationID
+		run.Status = RunStatusCanceled
+		run.Error = message
+		run.UpdatedAt = r.now().UTC()
+		persistenceErr = r.persistRunLocked(run)
 	}
-	r.mu.RUnlock()
+	r.mu.Unlock()
 	if !active {
 		return
 	}
+	r.logPersistenceError("failed to persist expired run lease", persistenceErr)
 
 	r.notifyRunFailure(conversationID)
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), openingCleanupTimeout)
@@ -1173,10 +1183,6 @@ func (r *Registry) expireRunLease(fence runFence, cause error) {
 	cleanupErr := fence.link.Call(cleanupCtx, protocol.MethodRunClose, protocol.RunCloseParams{RunID: fence.runID}, nil)
 	cancel()
 	if cleanupErr == nil || remoteRunAlreadyClosed(cleanupErr) {
-		message := "control-plane run context ended without run.close"
-		if cause != nil {
-			message += ": " + cause.Error()
-		}
 		r.finishRunForFence(fence, RunStatusCanceled, message, false)
 		return
 	}

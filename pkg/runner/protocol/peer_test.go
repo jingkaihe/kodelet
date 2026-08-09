@@ -348,6 +348,7 @@ func TestPeerRejectsOversizedMessagesWithoutClosingConnection(t *testing.T) {
 		var rpcErr *RPCError
 		require.ErrorAs(t, err, &rpcErr)
 		assert.Equal(t, ErrorCodeUnavailable, rpcErr.Code)
+		assert.Equal(t, ErrorReasonResultTooLarge, rpcErr.Reason())
 		assert.Contains(t, rpcErr.Message, "message-size limit")
 
 		var result map[string]string
@@ -400,6 +401,33 @@ func TestPeerDoneWaitsForInboundHandlers(t *testing.T) {
 	case <-serverPeer.Done():
 	case <-time.After(time.Second):
 		t.Fatal("peer did not finish after its handler returned")
+	}
+}
+
+func TestPeerShutdownBoundsHandlerDrainWithoutCallerDeadline(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	serverPeer, clientPeer := newTestPeerPair(t, PeerConfig{
+		ShutdownWait: 20 * time.Millisecond,
+		Notifications: NotificationHandlerFunc(func(context.Context, string, json.RawMessage) {
+			close(started)
+			<-release
+		}),
+	}, PeerConfig{})
+
+	require.NoError(t, clientPeer.Notify(t.Context(), "block", nil))
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("notification handler did not start")
+	}
+	err := serverPeer.Shutdown(context.Background(), websocket.CloseNormalClosure, "done")
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	close(release)
+	select {
+	case <-serverPeer.Done():
+	case <-time.After(time.Second):
+		t.Fatal("peer did not finish after blocked handler returned")
 	}
 }
 

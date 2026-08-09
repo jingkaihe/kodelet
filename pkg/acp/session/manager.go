@@ -276,6 +276,9 @@ func (m *Manager) LoadSession(ctx context.Context, req acptypes.LoadSessionReque
 	if err != nil {
 		return nil, pkgerrors.Wrap(err, "failed to load conversation")
 	}
+	if runnerID, _ := record.Metadata[convtypes.RunnerIDMetadataKey].(string); strings.TrimSpace(runnerID) != "" {
+		return nil, pkgerrors.Errorf("conversation is bound to runner %s and cannot be loaded as a local ACP session", strings.TrimSpace(runnerID))
+	}
 
 	llmConfig, err := m.buildLLMConfigForRecord(record, req.CWD)
 	if err != nil {

@@ -189,10 +189,12 @@ func TestRuntimeManagerClosesRetiredRuntimeAfterItsCallerLeaseEnds(t *testing.T)
 		return EmptyRuntime(), nil
 	})
 	t.Cleanup(func() { assert.NoError(t, manager.Close()) })
-	ctx, cancel := context.WithCancel(context.Background())
+	operationCtx, cancelOperation := context.WithCancel(context.Background())
+	leaseCtx, cancelLease := context.WithCancel(context.Background())
 	baseConfig := Config{Enabled: false, MaxOutputSize: 1024}
-	first, err := manager.RuntimeWithConfigAndCallContext(ctx, "/workspace", "runner-work", baseConfig, ExtensionCallContext{})
+	first, err := manager.RuntimeWithConfigAndCallContextForLease(operationCtx, leaseCtx, "/workspace", "runner-work", baseConfig, ExtensionCallContext{})
 	require.NoError(t, err)
+	cancelOperation()
 
 	changedConfig := baseConfig
 	changedConfig.MaxOutputSize = 2048
@@ -205,7 +207,7 @@ func TestRuntimeManagerClosesRetiredRuntimeAfterItsCallerLeaseEnds(t *testing.T)
 	default:
 	}
 
-	cancel()
+	cancelLease()
 	require.Eventually(t, func() bool {
 		select {
 		case <-first.runtimeCtx.Done():

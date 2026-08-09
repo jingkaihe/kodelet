@@ -21,7 +21,11 @@ import (
 	"github.com/pkg/errors"
 )
 
-const defaultCleanupTimeout = 10 * time.Second
+const (
+	defaultCleanupTimeout      = 10 * time.Second
+	defaultSnapshotWaitTimeout = 30 * time.Second
+	snapshotLockPollInterval   = 10 * time.Millisecond
+)
 
 var errNoActiveRun = errors.New("runner has no active run")
 
@@ -35,6 +39,10 @@ type Peer interface {
 // RuntimeProvider supplies the persistent extension runtime for the bound workspace.
 type RuntimeProvider interface {
 	RuntimeWithConfigAndCallContext(ctx context.Context, cwd, variant string, config extensions.Config, callContext extensions.ExtensionCallContext) (*extensions.Runtime, error)
+}
+
+type runtimeLeaseProvider interface {
+	RuntimeWithConfigAndCallContextForLease(ctx, leaseCtx context.Context, cwd, variant string, config extensions.Config, callContext extensions.ExtensionCallContext) (*extensions.Runtime, error)
 }
 
 type runtimeDiscoveryProvider interface {
@@ -54,45 +62,48 @@ type ServiceOptions struct {
 	EnvironmentFactory        EnvironmentFactory
 	ExecutionInstanceProvider ExecutionInstanceProvider
 	CleanupTimeout            time.Duration
+	SnapshotWaitTimeout       time.Duration
 }
 
 // Service handles control-plane requests for one workspace-bound runner process.
 type Service struct {
-	ctx                context.Context
-	mu                 sync.Mutex
-	snapshotMu         sync.Mutex
-	workspace          string
-	runtimeProvider    RuntimeProvider
-	ownedRuntime       *extensions.RuntimeManager
-	configLoader       ConfigLoader
-	environmentFactory EnvironmentFactory
-	instanceProvider   ExecutionInstanceProvider
-	cleanupTimeout     time.Duration
-	peer               Peer
-	runnerID           string
-	generation         int64
-	active             *activeRun
-	lastManifestDigest string
-	unhealthy          error
-	closed             bool
+	ctx                 context.Context
+	mu                  sync.Mutex
+	snapshotMu          sync.Mutex
+	workspace           string
+	runtimeProvider     RuntimeProvider
+	ownedRuntime        *extensions.RuntimeManager
+	configLoader        ConfigLoader
+	environmentFactory  EnvironmentFactory
+	instanceProvider    ExecutionInstanceProvider
+	cleanupTimeout      time.Duration
+	snapshotWaitTimeout time.Duration
+	peer                Peer
+	runnerID            string
+	generation          int64
+	active              *activeRun
+	lastManifestDigest  string
+	unhealthy           error
+	closed              bool
 }
 
 type activeRun struct {
-	id             string
-	conversationID string
-	clientCaps     protocol.ClientCapabilities
-	config         llmtypes.Config
-	runtime        *extensions.Runtime
-	instance       ExecutionInstance
-	environment    agentenv.Environment
-	manifest       runnerpayload.Manifest
-	ctx            context.Context
-	cancel         context.CancelFunc
-	updates        atomic.Uint64
-	ops            sync.WaitGroup
-	opening        bool
-	closing        bool
-	stopping       bool
+	id                 string
+	conversationID     string
+	clientCaps         protocol.ClientCapabilities
+	config             llmtypes.Config
+	runtime            *extensions.Runtime
+	instance           ExecutionInstance
+	environment        agentenv.Environment
+	manifest           runnerpayload.Manifest
+	ctx                context.Context
+	cancel             context.CancelFunc
+	runtimeLeaseCancel context.CancelFunc
+	updates            atomic.Uint64
+	ops                sync.WaitGroup
+	opening            bool
+	closing            bool
+	stopping           bool
 }
 
 // NewService creates a runner-side request handler bound to one canonical workspace.
@@ -106,16 +117,20 @@ func NewService(parent context.Context, workspace string, options ServiceOptions
 		parent = context.Background()
 	}
 	service := &Service{
-		ctx:                parent,
-		workspace:          workspace,
-		runtimeProvider:    options.RuntimeProvider,
-		configLoader:       options.ConfigLoader,
-		environmentFactory: options.EnvironmentFactory,
-		instanceProvider:   options.ExecutionInstanceProvider,
-		cleanupTimeout:     options.CleanupTimeout,
+		ctx:                 parent,
+		workspace:           workspace,
+		runtimeProvider:     options.RuntimeProvider,
+		configLoader:        options.ConfigLoader,
+		environmentFactory:  options.EnvironmentFactory,
+		instanceProvider:    options.ExecutionInstanceProvider,
+		cleanupTimeout:      options.CleanupTimeout,
+		snapshotWaitTimeout: options.SnapshotWaitTimeout,
 	}
 	if service.cleanupTimeout <= 0 {
 		service.cleanupTimeout = defaultCleanupTimeout
+	}
+	if service.snapshotWaitTimeout <= 0 {
+		service.snapshotWaitTimeout = defaultSnapshotWaitTimeout
 	}
 	if service.runtimeProvider == nil {
 		service.ownedRuntime = extensions.NewRuntimeManager()
@@ -246,8 +261,8 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 	if err := params.Validate(); err != nil {
 		return runnerpayload.Manifest{}, err
 	}
-	if !s.snapshotMu.TryLock() {
-		return runnerpayload.Manifest{}, errors.New("runner is busy refreshing its environment snapshot")
+	if err := s.lockSnapshot(ctx); err != nil {
+		return runnerpayload.Manifest{}, err
 	}
 	defer s.snapshotMu.Unlock()
 
@@ -271,13 +286,15 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 		return runnerpayload.Manifest{}, errors.Errorf("runner is busy with run %s", activeID)
 	}
 	runCtx, cancel := context.WithCancel(s.ctx)
+	runtimeLeaseCtx, runtimeLeaseCancel := context.WithCancel(s.ctx)
 	run := &activeRun{
-		id:             params.RunID,
-		conversationID: params.ConversationID,
-		clientCaps:     params.ClientCapabilities,
-		ctx:            runCtx,
-		cancel:         cancel,
-		opening:        true,
+		id:                 params.RunID,
+		conversationID:     params.ConversationID,
+		clientCaps:         params.ClientCapabilities,
+		ctx:                runCtx,
+		cancel:             cancel,
+		runtimeLeaseCancel: runtimeLeaseCancel,
+		opening:            true,
 	}
 	run.ops.Add(1)
 	defer run.ops.Done()
@@ -336,13 +353,13 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 		RecipeName:     config.RecipeName,
 		InvokedBy:      firstNonEmpty(params.Agent.InvokedBy, "main"),
 	}
-	runtime, err := s.runtimeProvider.RuntimeWithConfigAndCallContext(
-		operationCtx,
-		workingDirectory,
-		normalizeEnvironmentProfile(params.Agent.EnvironmentProfile),
-		extensionConfig,
-		callContext,
-	)
+	variant := normalizeEnvironmentProfile(params.Agent.EnvironmentProfile)
+	var runtime *extensions.Runtime
+	if provider, ok := s.runtimeProvider.(runtimeLeaseProvider); ok {
+		runtime, err = provider.RuntimeWithConfigAndCallContextForLease(operationCtx, runtimeLeaseCtx, workingDirectory, variant, extensionConfig, callContext)
+	} else {
+		runtime, err = s.runtimeProvider.RuntimeWithConfigAndCallContext(operationCtx, workingDirectory, variant, extensionConfig, callContext)
+	}
 	if err != nil {
 		s.closeOpeningResources(operationCtx, nil, instance)
 		s.failOpen(run)
@@ -434,6 +451,7 @@ func (s *Service) failOpen(run *activeRun) {
 		return
 	}
 	run.cancel()
+	run.runtimeLeaseCancel()
 	s.mu.Lock()
 	if s.active == run {
 		s.active = nil
@@ -470,6 +488,7 @@ func (s *Service) closeRun(ctx context.Context, runID string) error {
 
 	waitErr := waitForRunOperations(ctx, s.cleanupTimeout, run)
 	closeErr := closeExecutionResources(ctx, s.cleanupTimeout, run.environment, run.instance)
+	run.runtimeLeaseCancel()
 	cleanupErr := combineCleanupErrors(waitErr, closeErr)
 	s.mu.Lock()
 	if cleanupErr != nil {
@@ -487,7 +506,9 @@ func (s *Service) ProbeManifestDigest(ctx context.Context) (string, error) {
 	if s == nil {
 		return "", errors.New("runner service is required")
 	}
-	s.snapshotMu.Lock()
+	if err := s.lockSnapshot(ctx); err != nil {
+		return "", err
+	}
 	defer s.snapshotMu.Unlock()
 	s.mu.Lock()
 	if s.closed {
@@ -883,6 +904,7 @@ func (s *Service) AbortActiveRun(ctx context.Context) error {
 	s.mu.Unlock()
 	waitErr := waitForRunOperations(ctx, s.cleanupTimeout, run)
 	closeErr := closeExecutionResources(ctx, s.cleanupTimeout, run.environment, run.instance)
+	run.runtimeLeaseCancel()
 	cleanupErr := combineCleanupErrors(waitErr, closeErr)
 	s.mu.Lock()
 	if cleanupErr != nil {
@@ -893,6 +915,26 @@ func (s *Service) AbortActiveRun(ctx context.Context) error {
 	}
 	s.mu.Unlock()
 	return cleanupErr
+}
+
+func (s *Service) lockSnapshot(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, s.snapshotWaitTimeout)
+	defer cancel()
+	ticker := time.NewTicker(snapshotLockPollInterval)
+	defer ticker.Stop()
+	for {
+		if s.snapshotMu.TryLock() {
+			return nil
+		}
+		select {
+		case <-waitCtx.Done():
+			return errors.Wrap(waitCtx.Err(), "timed out waiting for runner environment snapshot")
+		case <-ticker.C:
+		}
+	}
 }
 
 // Close releases an active environment and any runtime manager owned by the service.

@@ -343,14 +343,17 @@ func loadResumeConversationConfig(ctx context.Context, cmd *cobra.Command, conve
 		_ = store.Close()
 	}()
 
-	resolution, err := conversations.ResolveCWD(ctx, store, conversationID, requestedCWD, defaultCWD, true)
-	if err != nil {
-		return llmtypes.Config{}, "", errors.Wrap(err, "failed to resolve conversation cwd")
-	}
-
 	record, err := store.Load(ctx, conversationID)
 	if err != nil {
 		return llmtypes.Config{}, "", errors.Wrap(err, "failed to load conversation")
+	}
+	if runnerID, _ := record.Metadata[convtypes.RunnerIDMetadataKey].(string); strings.TrimSpace(runnerID) != "" {
+		return llmtypes.Config{}, "", errors.Errorf("conversation is bound to runner %s and cannot be resumed as a local run", strings.TrimSpace(runnerID))
+	}
+
+	resolution, err := conversations.ResolveCWD(ctx, store, conversationID, requestedCWD, defaultCWD, true)
+	if err != nil {
+		return llmtypes.Config{}, "", errors.Wrap(err, "failed to resolve conversation cwd")
 	}
 
 	snapshot, hasSnapshot, err := conversations.ConfigSnapshotFromMetadata(record.Metadata)

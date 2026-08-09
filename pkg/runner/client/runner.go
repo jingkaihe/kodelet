@@ -144,7 +144,9 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 	}()
 
-	initialDigest, err := r.probeManifestDigest(ctx)
+	// The first snapshot may need to cold-start extensions. It is bounded by the
+	// runner lifetime rather than the short periodic-refresh timeout.
+	initialDigest, err := r.service.ProbeManifestDigest(ctx)
 	if err != nil {
 		return pkgerrors.Wrap(err, "failed to discover initial runner manifest")
 	}

@@ -368,6 +368,17 @@ func (e *RemoteEnvironment) ExecuteTool(ctx context.Context, request ToolRequest
 	}
 	result, err := e.controller.ExecuteTool(ctx, params, updateCallback)
 	if err != nil {
+		var rpcErr *protocol.RPCError
+		if errors.As(err, &rpcErr) && rpcErr.Code == protocol.ErrorCodeUnavailable && rpcErr.Reason() == protocol.ErrorReasonResultTooLarge {
+			toolResult := tooltypes.BaseToolResult{Error: rpcErr.Message}
+			structured := toolResult.StructuredData()
+			structured.ToolName = request.Name
+			return ToolExecution{
+				Input:            request.Input,
+				Result:           toolResult,
+				StructuredResult: structured,
+			}, nil
+		}
 		return ToolExecution{}, err
 	}
 	effectiveInput := request.Input

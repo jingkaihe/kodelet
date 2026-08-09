@@ -37,6 +37,24 @@ type recordingRuntimeProvider struct {
 	activeCallContext extensions.ExtensionCallContext
 }
 
+type leaseRecordingRuntimeProvider struct {
+	runtime      *extensions.Runtime
+	operationCtx context.Context
+	leaseCtx     context.Context
+}
+
+func (p *leaseRecordingRuntimeProvider) RuntimeWithConfigAndCallContext(ctx context.Context, _ string, _ string, _ extensions.Config, _ extensions.ExtensionCallContext) (*extensions.Runtime, error) {
+	p.operationCtx = ctx
+	p.leaseCtx = ctx
+	return p.runtime, nil
+}
+
+func (p *leaseRecordingRuntimeProvider) RuntimeWithConfigAndCallContextForLease(ctx, leaseCtx context.Context, _ string, _ string, _ extensions.Config, _ extensions.ExtensionCallContext) (*extensions.Runtime, error) {
+	p.operationCtx = ctx
+	p.leaseCtx = leaseCtx
+	return p.runtime, nil
+}
+
 func (p *recordingRuntimeProvider) RuntimeForCommandDiscoveryWithConfig(context.Context, string, string, extensions.Config) (*extensions.Runtime, error) {
 	p.discoveryCalls++
 	return p.runtime, nil
@@ -361,6 +379,74 @@ Review the runner workspace.`), 0o600))
 	assert.Equal(t, protocol.RunnerStateIdle, state)
 	assert.Empty(t, activeRunID)
 	assert.Equal(t, manifest.Digest, heartbeatDigest)
+}
+
+func TestServiceOpenRunWaitsForManifestSnapshotRefresh(t *testing.T) {
+	workspace := t.TempDir()
+	runtime := extensions.EmptyRuntime()
+	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
+	service, err := NewService(t.Context(), workspace, ServiceOptions{
+		RuntimeProvider:     staticRuntimeProvider{runtime: runtime},
+		SnapshotWaitTimeout: time.Second,
+		ConfigLoader:        func(string) (llmtypes.Config, error) { return llmtypes.Config{}, nil },
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	service.Attach(&recordingPeer{})
+	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
+
+	service.snapshotMu.Lock()
+	type response struct {
+		result any
+		err    *protocol.RPCError
+	}
+	done := make(chan response, 1)
+	go func() {
+		result, rpcErr := service.HandleRequest(t.Context(), protocol.MethodRunOpen, mustJSON(t, protocol.RunOpenParams{
+			RunID: "run-1", ConversationID: "conversation-1",
+		}))
+		done <- response{result: result, err: rpcErr}
+	}()
+	select {
+	case <-done:
+		service.snapshotMu.Unlock()
+		t.Fatal("run.open failed instead of waiting for the in-flight manifest refresh")
+	case <-time.After(30 * time.Millisecond):
+	}
+	service.snapshotMu.Unlock()
+
+	select {
+	case response := <-done:
+		require.Nil(t, response.err)
+		assert.Equal(t, "run-1", response.result.(runnerpayload.Manifest).RunID)
+	case <-time.After(time.Second):
+		t.Fatal("run.open did not continue after the manifest refresh completed")
+	}
+	callService[any](t, service, protocol.MethodRunClose, protocol.RunCloseParams{RunID: "run-1"})
+}
+
+func TestServicePinsExtensionRuntimeForRunLifetime(t *testing.T) {
+	workspace := t.TempDir()
+	runtime := extensions.EmptyRuntime()
+	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
+	provider := &leaseRecordingRuntimeProvider{runtime: runtime}
+	service, err := NewService(t.Context(), workspace, ServiceOptions{
+		RuntimeProvider: provider,
+		ConfigLoader:    func(string) (llmtypes.Config, error) { return llmtypes.Config{}, nil },
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	service.Attach(&recordingPeer{})
+	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
+
+	callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
+		RunID: "run-1", ConversationID: "conversation-1",
+	})
+	require.Eventually(t, func() bool { return provider.operationCtx.Err() != nil }, time.Second, time.Millisecond)
+	assert.NoError(t, provider.leaseCtx.Err())
+
+	callService[any](t, service, protocol.MethodRunClose, protocol.RunCloseParams{RunID: "run-1"})
+	require.Eventually(t, func() bool { return provider.leaseCtx.Err() != nil }, time.Second, time.Millisecond)
 }
 
 func TestServiceManifestProbeDoesNotStartRunLifecycle(t *testing.T) {

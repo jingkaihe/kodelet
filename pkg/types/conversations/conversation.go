@@ -6,6 +6,7 @@ package conversations
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -13,6 +14,9 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
 )
+
+// ErrConversationNotFound identifies a missing durable conversation record.
+var ErrConversationNotFound = errors.New("conversation not found")
 
 const (
 	// RunnerIDMetadataKey identifies a conversation whose environment belongs to a remote runner.

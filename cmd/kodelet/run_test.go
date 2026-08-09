@@ -210,6 +210,34 @@ func TestLoadResumeConversationConfig_DefaultsToCurrentConfigForNewConversation(
 	assert.NotEmpty(t, resolvedCWD)
 }
 
+func TestLoadResumeConversationConfigRejectsRunnerBoundConversationBeforeResolvingCWD(t *testing.T) {
+	t.Setenv("KODELET_CONVERSATION_STORE_TYPE", "sqlite")
+	basePath := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", basePath)
+	ctx := t.Context()
+	sqlDB, err := db.Open(ctx, filepath.Join(basePath, "storage.db"))
+	require.NoError(t, err)
+	require.NoError(t, db.NewMigrationRunner(sqlDB).Run(ctx, migrations.All()))
+	require.NoError(t, sqlDB.Close())
+
+	store, err := conversations.NewConversationStore(ctx, &conversations.Config{StoreType: "sqlite", BasePath: basePath})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	conversationID := convtypes.GenerateID()
+	require.NoError(t, store.Save(ctx, convtypes.ConversationRecord{
+		ID:          conversationID,
+		CWD:         filepath.Join(t.TempDir(), "missing-runner-workspace"),
+		RawMessages: []byte(`[]`),
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+		Metadata:    map[string]any{convtypes.RunnerIDMetadataKey: "runner-1"},
+	}))
+
+	_, _, err = loadResumeConversationConfig(ctx, &cobra.Command{Use: "run"}, conversationID, "")
+	require.ErrorContains(t, err, "conversation is bound to runner runner-1")
+	assert.NotContains(t, err.Error(), "cwd directory does not exist")
+}
+
 func TestLoadResumeConversationConfig_ProfiledConversationPreservesExplicitFlagOverrides(t *testing.T) {
 	originalSettings := viper.AllSettings()
 	t.Setenv("KODELET_CONVERSATION_STORE_TYPE", "sqlite")
