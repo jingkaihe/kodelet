@@ -1295,6 +1295,51 @@ describe('ChatPage', () => {
     expect(screen.queryByLabelText('Working directory')).not.toBeInTheDocument();
   });
 
+  it('uses the live runner status instead of the conversation runner snapshot', async () => {
+    routeParams = { id: 'conv-123' };
+    const idleRunner = {
+      id: 'runner-1',
+      displayName: 'kodelet',
+      host: {
+        instanceId: 'host-1',
+        hostname: 'worker',
+        os: 'darwin',
+        arch: 'arm64',
+      },
+      workspace: { path: '/runner/kodelet', name: 'kodelet' },
+      manifestChanged: false,
+      status: 'idle' as const,
+      connected: true,
+      generation: 1,
+    };
+    mockGetConversation.mockResolvedValue({
+      id: 'conv-123',
+      createdAt: '2026-08-09T00:00:00Z',
+      updatedAt: '2026-08-09T00:00:00Z',
+      messageCount: 1,
+      cwd: '/runner/kodelet',
+      runnerId: idleRunner.id,
+      runner: idleRunner,
+      messages: [{ role: 'user', content: 'hello' }],
+      toolResults: {},
+    });
+    mockGetRunners.mockResolvedValue({
+      runners: [{ ...idleRunner, status: 'busy', activeRunId: 'run-1' }],
+    });
+
+    render(<ChatPage />);
+
+    await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-123'));
+    await waitFor(() =>
+      expect(screen.getByTestId('composer-inline-context')).toHaveTextContent(
+        'runner:kodelet (busy)'
+      )
+    );
+    expect(screen.getByTestId('composer-inline-context')).not.toHaveTextContent(
+      'runner:kodelet (idle)'
+    );
+  });
+
   it('shows the profile inside the inline context for existing conversations', async () => {
     routeParams = { id: 'conv-123' };
     mockGetConversation.mockResolvedValue({

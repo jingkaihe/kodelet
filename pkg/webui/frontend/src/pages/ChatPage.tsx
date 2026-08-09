@@ -2111,7 +2111,7 @@ const ChatPage: React.FC = () => {
 
   const currentRunnerID = conversationId ? conversation?.runnerId || '' : selectedRunnerID;
   const currentRunner = useMemo(
-    () => conversation?.runner || runners.find((runner) => runner.id === currentRunnerID),
+    () => runners.find((runner) => runner.id === currentRunnerID) || conversation?.runner,
     [conversation?.runner, currentRunnerID, runners]
   );
   const isRemoteConversation = Boolean(currentRunnerID);
