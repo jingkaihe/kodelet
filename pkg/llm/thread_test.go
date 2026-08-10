@@ -296,6 +296,19 @@ func TestExtractConversationEntriesPreservesResponsesRawItem(t *testing.T) {
 	assert.Contains(t, string(messages[0].RawItem), `"input_image"`)
 }
 
+func TestExtractConversationEntriesSupportsLegacyResponsesProvider(t *testing.T) {
+	rawMessages := json.RawMessage(`[
+		{"type":"message","role":"user","content":"hello"},
+		{"type":"message","role":"assistant","content":"world"}
+	]`)
+
+	messages, err := ExtractConversationEntries("openai-responses", rawMessages, nil, nil)
+	require.NoError(t, err)
+	require.Len(t, messages, 2)
+	assert.Equal(t, "hello", messages[0].Content)
+	assert.Equal(t, "world", messages[1].Content)
+}
+
 func TestExtractConversationEntriesPreservesOpenAIRawItem(t *testing.T) {
 	rawMessages, err := json.Marshal([]openai.ChatCompletionMessage{
 		{

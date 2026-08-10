@@ -232,6 +232,7 @@ type StreamableMessage struct {
 	ToolName   string // For tool use/result
 	ToolCallID string // For matching tool results
 	Input      string // For tool use (JSON string)
+	ToolOutput string // Display output retained alongside structured results
 }
 
 // StreamMessages parses raw messages into normalized persisted conversation entries.
@@ -264,6 +265,7 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 				ToolName:   toolName,
 				ToolCallID: msg.ToolCallID,
 				Content:    result,
+				ToolOutput: msg.Content,
 				RawItem:    mustMarshalOpenAIMultiContent(msg.Role, msg.MultiContent),
 			})
 			continue
@@ -278,7 +280,7 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 		}
 
 		// Handle plain text content stored directly on the message.
-		if msg.Content != "" && len(msg.MultiContent) == 0 && len(msg.ToolCalls) == 0 {
+		if msg.Content != "" && len(msg.MultiContent) == 0 {
 			streamable = append(streamable, StreamableMessage{
 				Kind:    "text",
 				Role:    msg.Role,
@@ -297,13 +299,19 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 
 		if len(msg.ToolCalls) > 0 {
 			for _, toolCall := range msg.ToolCalls {
-				inputJSON, _ := json.Marshal(toolCall.Function.Arguments)
+				input := strings.TrimSpace(toolCall.Function.Arguments)
+				if input == "" {
+					input = "{}"
+				} else if !json.Valid([]byte(input)) {
+					inputJSON, _ := json.Marshal(toolCall.Function.Arguments)
+					input = string(inputJSON)
+				}
 				streamable = append(streamable, StreamableMessage{
 					Kind:       "tool-use",
 					Role:       msg.Role,
 					ToolName:   toolCall.Function.Name,
 					ToolCallID: toolCall.ID,
-					Input:      string(inputJSON),
+					Input:      input,
 				})
 			}
 		}

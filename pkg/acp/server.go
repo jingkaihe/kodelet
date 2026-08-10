@@ -17,13 +17,16 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/acp/acptypes"
+	"github.com/jingkaihe/kodelet/pkg/acp/bridge"
 	"github.com/jingkaihe/kodelet/pkg/acp/session"
+	"github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/jingkaihe/kodelet/pkg/version"
 	pkgerrors "github.com/pkg/errors"
 )
@@ -46,6 +49,7 @@ type Server struct {
 	clientCaps   *acptypes.ClientCapabilities
 
 	sessionManager    *session.Manager
+	remoteSessions    *remoteSessionManager
 	sessionStorage    session.SessionStorage
 	config            *ServerConfig
 	fragmentProcessor *fragments.Processor
@@ -54,7 +58,8 @@ type Server struct {
 	cancel context.CancelFunc
 
 	// wg tracks in-flight request handlers for graceful shutdown
-	wg sync.WaitGroup
+	wg           sync.WaitGroup
+	shutdownOnce sync.Once
 
 	pendingRequests map[string]chan json.RawMessage
 	pendingMu       sync.Mutex
@@ -62,8 +67,17 @@ type Server struct {
 
 	// activePrompts tracks in-flight prompt requests for async processing.
 	// Only one prompt can be active per session at a time.
-	activePrompts   map[acptypes.SessionID]context.CancelFunc
+	activePrompts   map[acptypes.SessionID]*activePrompt
 	activePromptsMu sync.Mutex
+}
+
+type activePrompt struct {
+	cancel        context.CancelFunc
+	turnID        string
+	remoteStarted bool
+	cancelling    bool
+	stopping      bool
+	stopDone      chan struct{}
 }
 
 // ServerConfig holds configuration for the ACP server
@@ -103,6 +117,14 @@ func WithContext(ctx context.Context) Option {
 	}
 }
 
+// WithRemoteSessions configures ACP to use a control-plane-owned agentic loop
+// backed by an embedded local workspace runner.
+func WithRemoteSessions(config RemoteSessionConfig) Option {
+	return func(s *Server) {
+		s.remoteSessions = newRemoteSessionManager(config)
+	}
+}
+
 // NewServer creates a new ACP server
 func NewServer(opts ...Option) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -113,7 +135,7 @@ func NewServer(opts ...Option) *Server {
 		ctx:             ctx,
 		cancel:          cancel,
 		pendingRequests: make(map[string]chan json.RawMessage),
-		activePrompts:   make(map[acptypes.SessionID]context.CancelFunc),
+		activePrompts:   make(map[acptypes.SessionID]*activePrompt),
 		config:          &ServerConfig{},
 	}
 
@@ -121,28 +143,30 @@ func NewServer(opts ...Option) *Server {
 		opt(s)
 	}
 
-	s.sessionManager = session.NewManager(session.ManagerConfig{
-		Provider:            s.config.Provider,
-		Model:               s.config.Model,
-		MaxTokens:           s.config.MaxTokens,
-		NoSkills:            s.config.NoSkills,
-		NoExtensions:        s.config.NoExtensions,
-		EnableFSSearchTools: s.config.EnableFSSearchTools,
-		MaxTurns:            s.config.MaxTurns,
-		CompactRatio:        s.config.CompactRatio,
-	})
+	if s.remoteSessions == nil {
+		s.sessionManager = session.NewManager(session.ManagerConfig{
+			Provider:            s.config.Provider,
+			Model:               s.config.Model,
+			MaxTokens:           s.config.MaxTokens,
+			NoSkills:            s.config.NoSkills,
+			NoExtensions:        s.config.NoExtensions,
+			EnableFSSearchTools: s.config.EnableFSSearchTools,
+			MaxTurns:            s.config.MaxTurns,
+			CompactRatio:        s.config.CompactRatio,
+		})
 
-	fp, err := fragments.NewFragmentProcessor()
-	if err != nil {
-		logger.G(ctx).WithError(err).Warn("Failed to create fragment processor for slash commands")
-	}
-	s.fragmentProcessor = fp
+		fp, err := fragments.NewFragmentProcessor()
+		if err != nil {
+			logger.G(ctx).WithError(err).Warn("Failed to create fragment processor for slash commands")
+		}
+		s.fragmentProcessor = fp
 
-	storage, err := session.GetDefaultStorage(ctx)
-	if err != nil {
-		logger.G(ctx).WithError(err).Warn("Failed to create session storage for replay")
-	} else {
-		s.sessionStorage = storage
+		storage, err := session.GetDefaultStorage(ctx)
+		if err != nil {
+			logger.G(ctx).WithError(err).Warn("Failed to create session storage for replay")
+		} else {
+			s.sessionStorage = storage
+		}
 	}
 
 	return s
@@ -158,7 +182,7 @@ func (s *Server) Run() error {
 	for scanner.Scan() {
 		select {
 		case <-s.ctx.Done():
-			// Wait for in-flight requests before returning
+			s.cancelActivePromptContexts()
 			s.wg.Wait()
 			return s.ctx.Err()
 		default:
@@ -171,19 +195,85 @@ func (s *Server) Run() error {
 
 		// Copy buffer before spawning goroutine - scanner reuses the buffer
 		data := append([]byte(nil), line...)
+		handler := func() error { return s.handleMessage(data) }
+		if prepared, ok := s.prepareOrderedRemoteMessage(data); ok {
+			handler = prepared
+		}
 
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
-			if err := s.handleMessage(data); err != nil {
+			if err := handler(); err != nil {
 				logger.G(s.ctx).WithError(err).Error("Failed to handle message")
 			}
 		}()
 	}
 
-	// Wait for in-flight requests before returning
+	s.cancelActivePromptContexts()
 	s.wg.Wait()
 	return scanner.Err()
+}
+
+func (s *Server) prepareOrderedRemoteMessage(data []byte) (func() error, bool) {
+	if s.remoteSessions == nil {
+		return nil, false
+	}
+	var probe struct {
+		ID     json.RawMessage `json:"id"`
+		Method string          `json:"method"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return nil, false
+	}
+	switch probe.Method {
+	case "session/prompt":
+		if probe.ID == nil || string(probe.ID) == "null" {
+			return nil, false
+		}
+		var req acptypes.Request
+		if err := json.Unmarshal(data, &req); err != nil {
+			return nil, false
+		}
+		if !s.initialized.Load() {
+			return func() error {
+				return s.sendError(req.ID, acptypes.ErrCodeInternalError, "Not initialized", nil)
+			}, true
+		}
+		var params acptypes.PromptRequest
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			return func() error {
+				return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, "Invalid params", err.Error())
+			}, true
+		}
+		promptCtx, active, err := s.registerActivePrompt(params.SessionID)
+		if err != nil {
+			return func() error {
+				return s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
+			}, true
+		}
+		return func() error {
+			return s.handlePreparedSessionPrompt(promptCtx, active, &req, params)
+		}, true
+	case "session/cancel":
+		if probe.ID != nil && string(probe.ID) != "null" {
+			return nil, false
+		}
+		var notif acptypes.Notification
+		if err := json.Unmarshal(data, &notif); err != nil {
+			return nil, false
+		}
+		var params acptypes.CancelRequest
+		if err := json.Unmarshal(notif.Params, &params); err != nil {
+			return nil, false
+		}
+		prompt, shouldStop := s.prepareRemotePromptCancellation(params.SessionID)
+		return func() error {
+			s.finishRemotePromptCancellation(params.SessionID, prompt, shouldStop)
+			return nil
+		}, true
+	default:
+		return nil, false
+	}
 }
 
 func (s *Server) handleMessage(data []byte) error {
@@ -243,18 +333,18 @@ func (s *Server) handleNotification(method string, data []byte) error {
 		if err := json.Unmarshal(notif.Params, &params); err != nil {
 			return err
 		}
+		if s.remoteSessions != nil {
+			s.cancelRemotePrompt(params.SessionID)
+			return nil
+		}
 
 		// Mark session as cancelled first (best-effort, ignore errors since
 		// cancellation is idempotent and the session may not exist yet)
 		_ = s.sessionManager.Cancel(params.SessionID)
 
-		// Then cancel the active prompt context (triggers immediate cancellation)
-		s.activePromptsMu.Lock()
-		if cancelFn, ok := s.activePrompts[params.SessionID]; ok {
-			cancelFn()
-			delete(s.activePrompts, params.SessionID)
+		if prompt := s.markPromptCancelling(params.SessionID); prompt != nil {
+			prompt.cancel()
 		}
-		s.activePromptsMu.Unlock()
 
 		return nil
 	default:
@@ -340,6 +430,16 @@ func (s *Server) handleSessionNew(req *acptypes.Request) error {
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, "Invalid params", err.Error())
 	}
+	if s.remoteSessions != nil {
+		sessionID, err := s.remoteSessions.newSession(s.ctx, params)
+		if err != nil {
+			return s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
+		}
+		if err := s.sendResult(req.ID, acptypes.NewSessionResponse{SessionID: sessionID}); err != nil {
+			return err
+		}
+		return s.sendRemoteAvailableCommands(sessionID)
+	}
 
 	sess, err := s.sessionManager.NewSession(s.ctx, params)
 	if err != nil {
@@ -365,6 +465,19 @@ func (s *Server) handleSessionLoad(req *acptypes.Request) error {
 	var params acptypes.LoadSessionRequest
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, "Invalid params", err.Error())
+	}
+	if s.remoteSessions != nil {
+		history, err := s.remoteSessions.loadSession(s.ctx, params)
+		if err != nil {
+			return s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
+		}
+		if err := bridge.ReplayConversationHistory(s, params.SessionID, history.Messages); err != nil {
+			return s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
+		}
+		if err := s.sendResult(req.ID, acptypes.LoadSessionResponse{}); err != nil {
+			return err
+		}
+		return s.sendRemoteAvailableCommands(params.SessionID)
 	}
 
 	_, err := s.sessionManager.LoadSession(s.ctx, params)
@@ -425,25 +538,43 @@ func (s *Server) handleSessionPrompt(req *acptypes.Request) error {
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, "Invalid params", err.Error())
 	}
+	promptCtx, active, err := s.registerActivePrompt(params.SessionID)
+	if err != nil {
+		return s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
+	}
+	return s.handlePreparedSessionPrompt(promptCtx, active, req, params)
+}
 
-	// Create cancellable context and register atomically
+func (s *Server) registerActivePrompt(sessionID acptypes.SessionID) (context.Context, *activePrompt, error) {
 	promptCtx, promptCancel := context.WithCancel(s.ctx)
+	active := &activePrompt{cancel: promptCancel}
+	if s.remoteSessions != nil {
+		active.turnID = convtypes.GenerateID()
+	}
 
 	s.activePromptsMu.Lock()
-	if _, exists := s.activePrompts[params.SessionID]; exists {
+	if _, exists := s.activePrompts[sessionID]; exists {
 		s.activePromptsMu.Unlock()
 		promptCancel()
-		return s.sendError(req.ID, acptypes.ErrCodeInternalError, "prompt already in progress for this session", nil)
+		return nil, nil, errors.New("prompt already in progress for this session")
 	}
-	s.activePrompts[params.SessionID] = promptCancel
+	s.activePrompts[sessionID] = active
 	s.activePromptsMu.Unlock()
+	return promptCtx, active, nil
+}
 
+func (s *Server) handlePreparedSessionPrompt(promptCtx context.Context, active *activePrompt, req *acptypes.Request, params acptypes.PromptRequest) error {
 	defer func() {
-		promptCancel()
+		active.cancel()
 		s.activePromptsMu.Lock()
-		delete(s.activePrompts, params.SessionID)
+		if s.activePrompts[params.SessionID] == active {
+			delete(s.activePrompts, params.SessionID)
+		}
 		s.activePromptsMu.Unlock()
 	}()
+	if s.remoteSessions != nil {
+		return s.handleRemoteSessionPrompt(promptCtx, req, params)
+	}
 
 	sess, err := s.sessionManager.GetSession(params.SessionID)
 	if err != nil {
@@ -536,6 +667,206 @@ func (s *Server) handleSessionPrompt(req *acptypes.Request) error {
 		StopReason: stopReason,
 	}
 	return s.sendResult(req.ID, result)
+}
+
+func (s *Server) handleRemoteSessionPrompt(promptCtx context.Context, req *acptypes.Request, params acptypes.PromptRequest) error {
+	firstPrompt, environmentProfile, err := s.remoteSessions.beginPrompt(params.SessionID)
+	if err != nil {
+		return s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
+	}
+	succeeded := false
+	defer func() {
+		s.remoteSessions.finishPrompt(params.SessionID, succeeded)
+	}()
+
+	client, runnerID, err := s.remoteSessions.client(promptCtx)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || promptCtx.Err() != nil || s.remotePromptCancellationConfirmed(params.SessionID) {
+			return s.sendResult(req.ID, acptypes.PromptResponse{StopReason: acptypes.StopReasonCancelled})
+		}
+		return s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
+	}
+	turnID, started := s.startRemotePrompt(params.SessionID)
+	if !started {
+		return s.sendResult(req.ID, acptypes.PromptResponse{StopReason: acptypes.StopReasonCancelled})
+	}
+	message, images := bridge.ContentBlocksToMessage(params.Prompt)
+	request := chat.ChatRequest{
+		Message:        message,
+		Content:        chat.ContentBlocksForUserInput(message, images),
+		ConversationID: string(params.SessionID),
+		TurnID:         turnID,
+		RunnerID:       runnerID,
+	}
+	if firstPrompt {
+		request.Profile = strings.TrimSpace(s.remoteSessions.config.Profile)
+		request.ReasoningEffort = strings.TrimSpace(s.remoteSessions.config.ReasoningEffort)
+		request.EnvironmentProfile = environmentProfile
+	}
+
+	_, err = client.Run(promptCtx, request, bridge.NewACPChatEventSink(s, params.SessionID))
+	if err != nil {
+		if errors.Is(err, context.Canceled) || promptCtx.Err() != nil || s.remotePromptCancellationConfirmed(params.SessionID) {
+			return s.sendResult(req.ID, acptypes.PromptResponse{StopReason: acptypes.StopReasonCancelled})
+		}
+		return s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
+	}
+	if promptCtx.Err() != nil || s.remotePromptCancellationConfirmed(params.SessionID) {
+		return s.sendResult(req.ID, acptypes.PromptResponse{StopReason: acptypes.StopReasonCancelled})
+	}
+	succeeded = true
+	return s.sendResult(req.ID, acptypes.PromptResponse{StopReason: acptypes.StopReasonEndTurn})
+}
+
+func (s *Server) cancelRemotePrompt(sessionID acptypes.SessionID) {
+	prompt, shouldStop := s.prepareRemotePromptCancellation(sessionID)
+	s.finishRemotePromptCancellation(sessionID, prompt, shouldStop)
+}
+
+func (s *Server) prepareRemotePromptCancellation(sessionID acptypes.SessionID) (*activePrompt, bool) {
+	prompt, shouldStop := s.beginRemotePromptStop(sessionID)
+	if prompt == nil {
+		return nil, false
+	}
+	prompt.cancel()
+	return prompt, shouldStop
+}
+
+func (s *Server) finishRemotePromptCancellation(sessionID acptypes.SessionID, prompt *activePrompt, shouldStop bool) {
+	if prompt == nil {
+		return
+	}
+	var err error
+	if shouldStop && s.remoteSessions != nil && s.remoteSessions.isActive(sessionID) {
+		err = s.stopRemoteConversation(sessionID, prompt.turnID)
+	}
+	if shouldStop {
+		s.completeRemotePromptStop(sessionID, prompt)
+	}
+	if err != nil {
+		logger.G(s.ctx).WithField("session_id", sessionID).WithError(err).Warn("Failed to stop remote ACP conversation")
+	}
+}
+
+func (s *Server) stopRemoteConversation(sessionID acptypes.SessionID, turnID string) error {
+	stopCtx, cancelStop := context.WithTimeout(context.WithoutCancel(s.ctx), 15*time.Second)
+	defer cancelStop()
+	client, _, err := s.remoteSessions.client(stopCtx)
+	if err == nil {
+		err = client.StopConversationTurn(stopCtx, string(sessionID), turnID)
+	}
+	return err
+}
+
+func (s *Server) startRemotePrompt(sessionID acptypes.SessionID) (string, bool) {
+	s.activePromptsMu.Lock()
+	defer s.activePromptsMu.Unlock()
+	prompt := s.activePrompts[sessionID]
+	if prompt == nil || prompt.cancelling {
+		return "", false
+	}
+	prompt.remoteStarted = true
+	return prompt.turnID, true
+}
+
+func (s *Server) markPromptCancelling(sessionID acptypes.SessionID) *activePrompt {
+	s.activePromptsMu.Lock()
+	defer s.activePromptsMu.Unlock()
+	prompt := s.activePrompts[sessionID]
+	if prompt == nil || prompt.cancelling {
+		return nil
+	}
+	prompt.cancelling = true
+	return prompt
+}
+
+func (s *Server) beginRemotePromptStop(sessionID acptypes.SessionID) (*activePrompt, bool) {
+	s.activePromptsMu.Lock()
+	defer s.activePromptsMu.Unlock()
+	prompt := s.activePrompts[sessionID]
+	if prompt == nil || prompt.cancelling || prompt.stopping {
+		return nil, false
+	}
+	prompt.cancelling = true
+	if prompt.remoteStarted {
+		prompt.stopping = true
+		prompt.stopDone = make(chan struct{})
+	}
+	return prompt, prompt.remoteStarted
+}
+
+func (s *Server) completeRemotePromptStop(sessionID acptypes.SessionID, prompt *activePrompt) {
+	s.activePromptsMu.Lock()
+	defer s.activePromptsMu.Unlock()
+	if prompt == nil || s.activePrompts[sessionID] != prompt || !prompt.stopping {
+		return
+	}
+	done := prompt.stopDone
+	prompt.stopping = false
+	if done != nil {
+		close(done)
+	}
+}
+
+func (s *Server) remotePromptCancellationConfirmed(sessionID acptypes.SessionID) bool {
+	s.activePromptsMu.Lock()
+	prompt := s.activePrompts[sessionID]
+	if prompt == nil {
+		s.activePromptsMu.Unlock()
+		return false
+	}
+	if !prompt.stopping || prompt.stopDone == nil {
+		cancelling := prompt.cancelling
+		s.activePromptsMu.Unlock()
+		return cancelling
+	}
+	done := prompt.stopDone
+	s.activePromptsMu.Unlock()
+
+	<-done
+	s.activePromptsMu.Lock()
+	defer s.activePromptsMu.Unlock()
+	return prompt.cancelling
+}
+
+func (s *Server) cancelActivePromptContexts() {
+	type promptCancellation struct {
+		sessionID acptypes.SessionID
+		prompt    *activePrompt
+		stop      bool
+	}
+
+	s.activePromptsMu.Lock()
+	prompts := make([]promptCancellation, 0, len(s.activePrompts))
+	for sessionID, prompt := range s.activePrompts {
+		if prompt == nil {
+			continue
+		}
+		if prompt.cancelling {
+			prompts = append(prompts, promptCancellation{sessionID: sessionID, prompt: prompt})
+			continue
+		}
+		prompt.cancelling = true
+		shouldStop := prompt.remoteStarted && !prompt.stopping
+		if shouldStop {
+			prompt.stopping = true
+			prompt.stopDone = make(chan struct{})
+		}
+		prompts = append(prompts, promptCancellation{sessionID: sessionID, prompt: prompt, stop: shouldStop})
+	}
+	s.activePromptsMu.Unlock()
+
+	for _, cancellation := range prompts {
+		cancellation.prompt.cancel()
+		if cancellation.stop {
+			if s.remoteSessions != nil && s.remoteSessions.isActive(cancellation.sessionID) {
+				if err := s.stopRemoteConversation(cancellation.sessionID, cancellation.prompt.turnID); err != nil {
+					logger.G(s.ctx).WithField("session_id", cancellation.sessionID).WithError(err).Warn("Failed to stop remote ACP conversation during shutdown")
+				}
+			}
+			s.completeRemotePromptStop(cancellation.sessionID, cancellation.prompt)
+		}
+	}
 }
 
 func (s *Server) tryExtensionCommand(ctx context.Context, sess *session.Session, originalPrompt []acptypes.ContentBlock, command, args string) (*extensions.RoutedCommandResult, bool, error) {
@@ -856,6 +1187,22 @@ func (s *Server) sendAvailableCommands(sessionID acptypes.SessionID) error {
 	return s.SendUpdate(sessionID, update)
 }
 
+func (s *Server) sendRemoteAvailableCommands(sessionID acptypes.SessionID) error {
+	commands, err := s.remoteSessions.commands(s.ctx, sessionID)
+	if err != nil {
+		logger.G(s.ctx).WithField("session_id", sessionID).WithError(err).Warn("Failed to discover remote ACP slash commands")
+		return nil
+	}
+	available := s.availableCommandsFromSlashCommands(commands)
+	if len(available) == 0 {
+		return nil
+	}
+	return s.SendUpdate(sessionID, acptypes.AvailableCommandsUpdate{
+		SessionUpdate:     acptypes.UpdateAvailableCommands,
+		AvailableCommands: available,
+	})
+}
+
 // parseSlashCommand parses a slash command from prompt content.
 // The command name is everything after the leading "/" up to the first space.
 // Recipe names may contain slashes (e.g., "github/pr" from "/github/pr").
@@ -915,16 +1262,19 @@ func buildCommandHint(arguments map[string]fragments.ArgumentMeta) string {
 // Shutdown gracefully shuts down the server.
 // It cancels the context and waits for in-flight requests to complete.
 func (s *Server) Shutdown() {
-	s.cancel()
-	s.wg.Wait()
+	s.shutdownOnce.Do(func() {
+		s.cancelActivePromptContexts()
+		s.cancel()
+		s.wg.Wait()
 
-	if s.sessionManager != nil {
-		if err := s.sessionManager.Close(context.Background()); err != nil {
-			logger.G(s.ctx).WithError(err).Warn("Failed to close ACP session manager")
+		if s.sessionManager != nil {
+			if err := s.sessionManager.Close(context.Background()); err != nil {
+				logger.G(s.ctx).WithError(err).Warn("Failed to close ACP session manager")
+			}
 		}
-	}
 
-	if s.sessionStorage != nil {
-		s.sessionStorage.Close()
-	}
+		if s.sessionStorage != nil {
+			s.sessionStorage.Close()
+		}
+	})
 }

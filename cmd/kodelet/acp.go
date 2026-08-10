@@ -4,11 +4,17 @@ import (
 	"context"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/acp"
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	runnerclient "github.com/jingkaihe/kodelet/pkg/runner/client"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -38,7 +44,10 @@ Example:
 	kodelet acp --no-skills
 
 	# Disable extensions
-	kodelet acp --no-extensions`,
+	kodelet acp --no-extensions
+
+	# Keep workspace tools, skills, and extensions local while the control plane owns the agent loop
+	kodelet acp --server https://kodelet.example`,
 	RunE: runACP,
 }
 
@@ -53,19 +62,26 @@ func init() {
 	acpCmd.Flags().Bool("no-extensions", defaults.NoExtensions, "Disable extension runtime")
 	acpCmd.Flags().Bool("enable-fs-search-tools", defaults.EnableFSSearchTools, "Enable filesystem search tools (glob_tool and grep_tool)")
 	acpCmd.Flags().Int("max-turns", defaults.MaxTurns, "Maximum number of agentic turns (0 for no limit)")
+	acpCmd.Flags().String("server", defaultRunnerServer, "Run the agentic loop on a control plane while keeping the workspace environment local")
+	acpCmd.Flags().String("auth-token", "", "Control-plane API authentication token (or KODELET_AUTH_TOKEN)")
+	acpCmd.Flags().String("runner-auth-token", "", "Runner-only authentication token (or KODELET_RUNNER_AUTH_TOKEN)")
+	acpCmd.Flags().String("runner-profile", "", "Local environment profile for the embedded workspace runner")
 }
 
 func runACP(cmd *cobra.Command, _ []string) error {
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	logger.SetLogOutput(os.Stderr)
+	logger.SetLogLevel(viper.GetString("log_level"))
+	if cmd.Flags().Changed("server") {
+		return runRemoteACP(ctx, cmd)
+	}
+
 	config, err := buildACPServerConfig(cmd)
 	if err != nil {
 		return err
 	}
-
-	logger.SetLogOutput(os.Stderr)
-	logger.SetLogLevel(viper.GetString("log_level"))
 
 	server := acp.NewServer(
 		acp.WithConfig(config),
@@ -73,6 +89,125 @@ func runACP(cmd *cobra.Command, _ []string) error {
 	)
 
 	return runACPServer(ctx, server)
+}
+
+func runRemoteACP(ctx context.Context, cmd *cobra.Command) error {
+	if err := validateRemoteACPFlags(cmd); err != nil {
+		return err
+	}
+	workspace, err := conversations.CurrentWorkingDirectory()
+	if err != nil {
+		return err
+	}
+	serverURL, _ := cmd.Flags().GetString("server")
+	apiAuthToken, runnerAuthToken, err := consumeRemoteACPAuthTokens(cmd)
+	if err != nil {
+		return err
+	}
+	runnerProfile, _ := cmd.Flags().GetString("runner-profile")
+
+	provider := newEmbeddedACPRemoteProvider(serverURL, apiAuthToken)
+	runner, err := runnerclient.NewRunner(ctx, runnerclient.RunnerConfig{
+		Server:         serverURL,
+		AuthToken:      runnerAuthToken,
+		Workspace:      workspace,
+		ServiceOptions: remoteACPServiceOptions(cmd),
+		OnRegistered:   provider.registeredRunner,
+		OnRetry: func(connectionErr error, delay time.Duration) {
+			provider.unavailable()
+			logger.G(ctx).WithError(connectionErr).WithField("retry_in", delay).Warn("Embedded ACP runner connection lost")
+		},
+	})
+	if err != nil {
+		return errors.Wrap(err, "failed to initialize embedded ACP runner")
+	}
+
+	profile := ""
+	if cmd.Flags().Changed("profile") {
+		profile, _ = cmd.Flags().GetString("profile")
+	}
+	reasoningEffort := ""
+	if cmd.Flags().Changed("reasoning-effort") {
+		reasoningEffort, _ = cmd.Flags().GetString("reasoning-effort")
+	}
+	server := acp.NewServer(
+		acp.WithContext(ctx),
+		acp.WithRemoteSessions(acp.RemoteSessionConfig{
+			Provider:                   provider,
+			CommandSource:              runner,
+			Workspace:                  workspace,
+			Profile:                    profile,
+			ReasoningEffort:            reasoningEffort,
+			EnvironmentProfile:         runnerProfile,
+			EnvironmentProfileExplicit: cmd.Flags().Changed("runner-profile"),
+		}),
+	)
+	return runACPServerWithEmbeddedRunner(ctx, server, runner, provider)
+}
+
+func consumeRemoteACPAuthTokens(cmd *cobra.Command) (string, string, error) {
+	// Clone values before scrubbing argv because pflag values may share the
+	// original command-line backing storage.
+	apiAuthToken := strings.Clone(authTokenFlagOrEnvironment(cmd, controlPlaneAuthTokenEnv))
+	runnerAuthToken := strings.Clone(stringFlagOrEnvironment(cmd, "runner-auth-token", runnerAuthTokenEnv))
+	// Local tools and extensions inherit the ACP process environment. Keep the
+	// captured credentials only in the HTTP and runner clients, not child envs.
+	_ = os.Unsetenv(controlPlaneAuthTokenEnv)
+	_ = os.Unsetenv(runnerAuthTokenEnv)
+	if apiAuthToken != "" || runnerAuthToken != "" {
+		if err := protectRemoteACPProcessSecrets("auth-token", "runner-auth-token"); err != nil {
+			return "", "", err
+		}
+	}
+	return apiAuthToken, runnerAuthToken, nil
+}
+
+func validateRemoteACPFlags(cmd *cobra.Command) error {
+	for _, name := range []string{
+		"provider",
+		"model",
+		"max-tokens",
+		"max-turns",
+		"thinking-budget-tokens",
+		"weak-model",
+		"weak-model-max-tokens",
+		"weak-reasoning-effort",
+		"compact-ratio",
+		"anthropic-api-access",
+		"enable-openai-search",
+	} {
+		if cmd.Flags().Changed(name) {
+			return errors.Errorf("--%s configures the local agentic loop and cannot be used with --server", name)
+		}
+	}
+	return nil
+}
+
+func remoteACPServiceOptions(cmd *cobra.Command) runnerclient.ServiceOptions {
+	noSkills, _ := cmd.Flags().GetBool("no-skills")
+	noExtensions, _ := cmd.Flags().GetBool("no-extensions")
+	enableFSSearchTools, _ := cmd.Flags().GetBool("enable-fs-search-tools")
+	return runnerclient.ServiceOptions{
+		ConfigLoader: func(environmentProfile string) (llmtypes.Config, error) {
+			config, err := llm.GetConfigFromViperWithEnvironmentProfile(environmentProfile)
+			if err != nil {
+				return config, err
+			}
+			if noSkills {
+				config.Skills = &llmtypes.SkillsConfig{Enabled: false}
+			}
+			if noExtensions {
+				if config.ExtensionSettings == nil {
+					config.ExtensionSettings = make(map[string]any)
+				}
+				config.ExtensionSettings["enabled"] = false
+			}
+			if enableFSSearchTools {
+				config.EnableFSSearchTools = true
+			}
+			return config, nil
+		},
+	}
 }
 
 func runACPServer(ctx context.Context, server acpServerLifecycle) error {

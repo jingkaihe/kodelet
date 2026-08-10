@@ -12,13 +12,14 @@ import (
 
 // StreamableMessage represents a normalized entry from a persisted conversation.
 type StreamableMessage struct {
-	Kind       string // "text", "tool-use", "tool-result", "thinking"
-	Role       string // "user", "assistant", "system"
-	Content    string // Text content
-	RawItem    json.RawMessage
-	ToolName   string // For tool use/result
-	ToolCallID string // For matching tool results
-	Input      string // For tool use (JSON string)
+	Kind       string          `json:"kind"`                 // "text", "tool-use", "tool-result", "thinking"
+	Role       string          `json:"role"`                 // "user", "assistant", "system"
+	Content    string          `json:"content,omitempty"`    // Text content
+	RawItem    json.RawMessage `json:"rawItem,omitempty"`    // Original provider item when needed for rich content
+	ToolName   string          `json:"toolName,omitempty"`   // For tool use/result
+	ToolCallID string          `json:"toolCallId,omitempty"` // For matching tool results
+	Input      string          `json:"input,omitempty"`      // For tool use (JSON string)
+	ToolOutput string          `json:"toolOutput,omitempty"` // Display output retained alongside structured results
 }
 
 const (

@@ -242,6 +242,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithCancel(s.chatExecutionContext(requestCtx))
 	run := newActiveChatRun(cancel)
+	run.turnID = strings.TrimSpace(req.TurnID)
 	if !s.registerActiveChat(conversationID, run) {
 		cancel()
 		s.writeErrorResponse(w, http.StatusConflict, "conversation already has an active run", nil)

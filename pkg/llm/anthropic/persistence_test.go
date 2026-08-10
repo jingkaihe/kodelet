@@ -1400,6 +1400,7 @@ func TestStreamMessages_ImageOnlyMessage(t *testing.T) {
 	assert.Equal(t, "text", streamableMessages[0].Kind)
 	assert.Equal(t, "user", streamableMessages[0].Role)
 	assert.Equal(t, "Inline image input (image/png).", streamableMessages[0].Content)
+	assert.JSONEq(t, `{"role":"user","content":[{"type":"input_image","image_url":"data:image/png;base64,aGVsbG8="}]}`, string(streamableMessages[0].RawItem))
 }
 
 func TestStreamMessages_ThinkingMessage(t *testing.T) {

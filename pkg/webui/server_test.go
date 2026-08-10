@@ -665,6 +665,60 @@ func TestServer_handleGetConversation(t *testing.T) {
 	assert.Equal(t, 1, response.MessageCount)
 }
 
+func TestServer_handleGetConversationStreamFormatReturnsAuthoritativeEntries(t *testing.T) {
+	conversationCWD := t.TempDir()
+	expandedPrompt := "Full rendered recipe prompt"
+	metadata := conversations.AddSlashCommandDisplay(map[string]any{
+		"platform": "openai",
+		"api_mode": "responses",
+	}, expandedPrompt, "/review target=main", "review")
+	server := &Server{
+		conversationService: &mockConversationService{getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
+			return &conversations.GetConversationResponse{
+				ID:          "conversation-1",
+				CWD:         conversationCWD,
+				Provider:    "openai",
+				Summary:     "Review",
+				Metadata:    metadata,
+				RawMessages: json.RawMessage(`[{"type":"message","role":"user","content":"Full rendered recipe prompt"}]`),
+			}, nil
+		}},
+	}
+	request := mux.SetURLVars(httptest.NewRequest(http.MethodGet, "/api/conversations/conversation-1?format=stream", nil), map[string]string{"id": "conversation-1"})
+	recorder := httptest.NewRecorder()
+
+	server.handleGetConversation(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response conversationHistoryResponse
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, conversationCWD, response.CWD)
+	require.Len(t, response.Entries, 1)
+	assert.Equal(t, "/review target=main", response.Entries[0].Content)
+}
+
+func TestServer_handleGetConversationStreamFormatSupportsLegacyResponsesProvider(t *testing.T) {
+	server := &Server{
+		conversationService: &mockConversationService{getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
+			return &conversations.GetConversationResponse{
+				ID:          "conversation-1",
+				Provider:    "openai-responses",
+				RawMessages: json.RawMessage(`[{"type":"message","role":"user","content":"hello"}]`),
+			}, nil
+		}},
+	}
+	request := mux.SetURLVars(httptest.NewRequest(http.MethodGet, "/api/conversations/conversation-1?format=stream", nil), map[string]string{"id": "conversation-1"})
+	recorder := httptest.NewRecorder()
+
+	server.handleGetConversation(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response conversationHistoryResponse
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Len(t, response.Entries, 1)
+	assert.Equal(t, "hello", response.Entries[0].Content)
+}
+
 func TestServer_handleGetChatSettings_IncludesDefaultCWD(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
@@ -1554,9 +1608,12 @@ func TestServer_handleStopConversation(t *testing.T) {
 		router:              mux.NewRouter(),
 		activeChats:         make(map[string]*activeChatRun),
 	}
-	server.activeChats["conv-123"] = newActiveChatRun(func() {
+	var run *activeChatRun
+	run = newActiveChatRun(func() {
 		cancelled.Store(true)
+		run.markDone()
 	})
+	server.activeChats["conv-123"] = run
 
 	req := httptest.NewRequest("POST", "/api/conversations/conv-123/stop", nil)
 	req = mux.SetURLVars(req, map[string]string{"id": "conv-123"})
@@ -1575,6 +1632,54 @@ func TestServer_handleStopConversation(t *testing.T) {
 	assert.True(t, response.Stopped)
 	assert.False(t, server.isActiveChat("conv-123"))
 	assert.True(t, server.activeChats["conv-123"].stopRequested)
+}
+
+func TestServer_handleStopConversationWaitsForActiveTurnCleanup(t *testing.T) {
+	cancelled := make(chan struct{})
+	server := &Server{activeChats: make(map[string]*activeChatRun)}
+	run := newActiveChatRun(func() { close(cancelled) })
+	run.turnID = "turn-1"
+	server.activeChats["conv-123"] = run
+	req := httptest.NewRequest("POST", "/api/conversations/conv-123/stop?turnId=turn-1", nil)
+	req = mux.SetURLVars(req, map[string]string{"id": "conv-123"})
+	w := httptest.NewRecorder()
+	returned := make(chan struct{})
+
+	go func() {
+		server.handleStopConversation(w, req)
+		close(returned)
+	}()
+	<-cancelled
+	select {
+	case <-returned:
+		t.Fatal("stop response returned before active turn cleanup completed")
+	default:
+	}
+	run.markDone()
+	<-returned
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var response stopConversationResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	assert.True(t, response.Stopped)
+}
+
+func TestServer_handleStopConversationBlocksMatchingTurnBeforeRegistration(t *testing.T) {
+	server := &Server{activeChats: make(map[string]*activeChatRun)}
+	req := httptest.NewRequest("POST", "/api/conversations/conv-123/stop?turnId=turn-1", nil)
+	req = mux.SetURLVars(req, map[string]string{"id": "conv-123"})
+	w := httptest.NewRecorder()
+
+	server.handleStopConversation(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var response stopConversationResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	assert.True(t, response.Stopped)
+	run := newActiveChatRun(func() {})
+	run.turnID = "turn-1"
+	assert.False(t, server.registerActiveChat("conv-123", run))
+	assert.False(t, server.registerActiveChat("conv-123", run), "a cancelled turn must remain blocked for the tombstone lifetime")
 }
 
 func TestServer_handleRespondUIInput(t *testing.T) {

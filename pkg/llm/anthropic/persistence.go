@@ -191,9 +191,11 @@ type StreamableMessage struct {
 	Kind       string // "text", "tool-use", "tool-result", "thinking"
 	Role       string // "user", "assistant", "system"
 	Content    string // Text content
+	RawItem    json.RawMessage
 	ToolName   string // For tool use/result
 	ToolCallID string // For matching tool results
 	Input      string // For tool use (JSON string)
+	ToolOutput string // Display output retained alongside structured results
 }
 
 // StreamMessages parses raw messages into normalized persisted conversation entries.
@@ -221,6 +223,7 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 						Kind:    "text",
 						Role:    string(msg.Role),
 						Content: imageText,
+						RawItem: anthropicImageRawItem(string(msg.Role), imageBlock),
 					})
 				}
 			}
@@ -237,20 +240,19 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 			}
 
 			if toolResultBlock := contentBlock.OfToolResult; toolResultBlock != nil {
-				result := ""
+				var output strings.Builder
+				for _, resultContent := range toolResultBlock.Content {
+					if textBlock := resultContent.OfText; textBlock != nil {
+						output.WriteString(textBlock.Text)
+					}
+				}
+				result := output.String()
 				toolName := ""
 
 				if structuredResult, ok := toolResults[toolResultBlock.ToolUseID]; ok {
 					toolName = structuredResult.ToolName
 					if jsonData, err := structuredResult.MarshalJSON(); err == nil {
 						result = string(jsonData)
-					}
-				} else {
-					// Fallback: extract raw text from tool result
-					for _, resultContent := range toolResultBlock.Content {
-						if textBlock := resultContent.OfText; textBlock != nil {
-							result += textBlock.Text
-						}
 					}
 				}
 
@@ -260,6 +262,7 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 					ToolName:   toolName,
 					ToolCallID: toolResultBlock.ToolUseID,
 					Content:    result,
+					ToolOutput: output.String(),
 				})
 			}
 
@@ -362,4 +365,36 @@ func anthropicImageDisplayString(imageBlock *anthropic.ImageBlockParam) string {
 	}
 
 	return ""
+}
+
+func anthropicImageRawItem(role string, imageBlock *anthropic.ImageBlockParam) json.RawMessage {
+	if imageBlock == nil {
+		return nil
+	}
+	imageURL := ""
+	if imageBlock.Source.OfBase64 != nil {
+		mediaType := strings.TrimSpace(string(imageBlock.Source.OfBase64.MediaType))
+		if mediaType == "" {
+			mediaType = "application/octet-stream"
+		}
+		if imageBlock.Source.OfBase64.Data != "" {
+			imageURL = "data:" + mediaType + ";base64," + imageBlock.Source.OfBase64.Data
+		}
+	} else if imageBlock.Source.OfURL != nil {
+		imageURL = strings.TrimSpace(imageBlock.Source.OfURL.URL)
+	}
+	if imageURL == "" {
+		return nil
+	}
+	payload, err := json.Marshal(map[string]any{
+		"role": role,
+		"content": []map[string]any{{
+			"type":      "input_image",
+			"image_url": imageURL,
+		}},
+	})
+	if err != nil {
+		return nil
+	}
+	return payload
 }

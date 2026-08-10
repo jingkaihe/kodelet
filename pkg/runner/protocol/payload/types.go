@@ -171,6 +171,7 @@ type ToolExecuteParams struct {
 // ToolResult is the serializable authoritative or transient result sent over the runner link.
 type ToolResult struct {
 	AssistantFacing string                            `json:"assistantFacing"`
+	DisplayOutput   string                            `json:"displayOutput,omitempty"`
 	Error           string                            `json:"error,omitempty"`
 	Structured      tooltypes.StructuredToolResult    `json:"structured"`
 	ContentParts    []tooltypes.ToolResultContentPart `json:"contentParts,omitempty"`

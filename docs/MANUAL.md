@@ -198,6 +198,14 @@ The ACP mode provides a rich interactive experience with features like:
 - Conversation persistence
 - Multi-turn conversations
 
+To run the model loop and conversation store on a `kodelet serve` control plane while keeping the current workspace's tools, context files, skills, recipes, and extensions local, use:
+
+```bash
+kodelet acp --server https://kodelet.example
+```
+
+Use `--auth-token` or `KODELET_AUTH_TOKEN` for control-plane APIs and `--runner-auth-token` or `KODELET_RUNNER_AUTH_TOKEN` for embedded runner registration. `--runner-profile` selects a runner-local environment profile, while explicit `--profile` and `--reasoning-effort` values select control-plane model policy for new conversations. Server-backed sessions are tied to the current workspace's stable runner identity and are persisted on the control plane.
+
 Use ACP or the TypeScript Agent SDK for programmatic integrations that need structured assistant and tool events.
 
 ### Web UI Server

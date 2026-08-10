@@ -1049,7 +1049,7 @@ The Web server owns runner registration, run state, client event fan-out, cancel
 
 ### `pkg/acp`
 
-ACP continues to be a client-facing protocol. ACP sessions can use the same local or remote agent-environment abstraction without making the runner protocol itself ACP-specific.
+ACP continues to be a client-facing protocol. Ordinary `kodelet acp` uses the local agent environment directly, while `kodelet acp --server` embeds a stable workspace runner and delegates the provider loop and conversation store to the control plane without making the runner protocol itself ACP-specific.
 
 ### `cmd/kodelet`
 

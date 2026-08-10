@@ -116,12 +116,13 @@ func SendMessageAndGetText(ctx context.Context, state tooltypes.State, query str
 func ExtractMessages(provider string, rawMessages []byte, metadata map[string]any, toolResults map[string]tooltypes.StructuredToolResult) ([]llmtypes.Message, error) {
 	var messages []llmtypes.Message
 	var err error
+	provider = strings.TrimSpace(strings.ToLower(provider))
 
 	switch provider {
 	case "anthropic":
 		messages, err = anthropic.ExtractMessages(rawMessages, toolResults)
-	case "openai":
-		if openai.RecordUsesResponsesMode(metadata, rawMessages) {
+	case "openai", "openai-responses":
+		if provider == "openai-responses" || openai.RecordUsesResponsesMode(metadata, rawMessages) {
 			messages, err = openai.ExtractResponsesMessages(rawMessages, toolResults)
 		} else {
 			messages, err = openai.ExtractMessages(rawMessages, toolResults)
@@ -139,6 +140,7 @@ func ExtractMessages(provider string, rawMessages []byte, metadata map[string]an
 func ExtractConversationEntries(provider string, rawMessages []byte, metadata map[string]any, toolResults map[string]tooltypes.StructuredToolResult) ([]conversations.StreamableMessage, error) {
 	var messages []conversations.StreamableMessage
 	var err error
+	provider = strings.TrimSpace(strings.ToLower(provider))
 
 	switch provider {
 	case "anthropic":
@@ -147,8 +149,8 @@ func ExtractConversationEntries(provider string, rawMessages []byte, metadata ma
 			return nil, err
 		}
 		messages = convertAnthropicStreamableMessages(msgs)
-	case "openai":
-		if openai.RecordUsesResponsesMode(metadata, rawMessages) {
+	case "openai", "openai-responses":
+		if provider == "openai-responses" || openai.RecordUsesResponsesMode(metadata, rawMessages) {
 			msgs, err := openai.StreamResponsesMessages(rawMessages, toolResults)
 			if err != nil {
 				return nil, err
@@ -177,9 +179,11 @@ func convertAnthropicStreamableMessages(msgs []anthropic.StreamableMessage) []co
 			Kind:       msg.Kind,
 			Role:       msg.Role,
 			Content:    msg.Content,
+			RawItem:    msg.RawItem,
 			ToolName:   msg.ToolName,
 			ToolCallID: msg.ToolCallID,
 			Input:      msg.Input,
+			ToolOutput: msg.ToolOutput,
 		}
 	}
 	return result
@@ -196,6 +200,7 @@ func convertOpenAIStreamableMessages(msgs []openai.StreamableMessage) []conversa
 			ToolName:   msg.ToolName,
 			ToolCallID: msg.ToolCallID,
 			Input:      msg.Input,
+			ToolOutput: msg.ToolOutput,
 		}
 	}
 	return result
@@ -212,6 +217,7 @@ func convertResponsesStreamableMessages(msgs []responses.StreamableMessage) []co
 			ToolName:   msg.ToolName,
 			ToolCallID: msg.ToolCallID,
 			Input:      msg.Input,
+			ToolOutput: msg.ToolOutput,
 		}
 	}
 	return result

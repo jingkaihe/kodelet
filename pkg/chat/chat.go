@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	conversationservice "github.com/jingkaihe/kodelet/pkg/conversations"
@@ -27,11 +28,17 @@ import (
 	"github.com/pkg/errors"
 )
 
+const (
+	maxChatToolDisplayOutputBytes  = 128 * 1024
+	chatToolOutputTruncationMarker = "\n\n[output truncated for remote display]"
+)
+
 // ChatRequest is the payload for a streamed chat turn.
 type ChatRequest struct {
 	Message            string                  `json:"message"`
 	Content            []ChatContentBlock      `json:"content,omitempty"`
 	ConversationID     string                  `json:"conversationId,omitempty"`
+	TurnID             string                  `json:"turnId,omitempty"`
 	RunnerID           string                  `json:"runnerId,omitempty"`
 	Profile            string                  `json:"profile,omitempty"`
 	EnvironmentProfile string                  `json:"environmentProfile,omitempty"`
@@ -85,6 +92,7 @@ type ChatEvent struct {
 	ToolName         string                          `json:"tool_name,omitempty"`
 	ToolCallID       string                          `json:"tool_call_id,omitempty"`
 	Input            string                          `json:"input,omitempty"`
+	ToolOutput       string                          `json:"tool_output,omitempty"`
 	ToolResult       *tooltypes.StructuredToolResult `json:"tool_result,omitempty"`
 	UIInput          *UIInputEvent                   `json:"ui_input,omitempty"`
 	UIConfirm        *UIConfirmEvent                 `json:"ui_confirm,omitempty"`
@@ -150,15 +158,17 @@ type ConversationSource interface {
 
 // ConversationHistory is the client-facing persisted state needed to resume a conversation.
 type ConversationHistory struct {
-	ID              string
-	CWD             string
-	Title           string
-	Provider        string
-	Profile         string
-	ReasoningEffort string
-	UpdatedAt       time.Time
-	Usage           llmtypes.Usage
-	Messages        []conversationservice.StreamableMessage
+	ID                 string
+	CWD                string
+	Title              string
+	Provider           string
+	Profile            string
+	ReasoningEffort    string
+	RunnerID           string
+	EnvironmentProfile string
+	UpdatedAt          time.Time
+	Usage              llmtypes.Usage
+	Messages           []conversationservice.StreamableMessage
 }
 
 // ExtensionRuntimeProvider supplies extension runtimes for chat turns.
@@ -1378,6 +1388,7 @@ func (h *chatMessageHandler) HandleToolUpdate(toolCallID string, toolName string
 		Role:           "assistant",
 		ToolCallID:     toolCallID,
 		ToolName:       structuredResult.ToolName,
+		ToolOutput:     chatToolDisplayOutput(result, structuredResult.ToolName),
 		ToolResult:     &structuredResult,
 	}
 	h.sendEvent(event)
@@ -1395,9 +1406,25 @@ func (h *chatMessageHandler) HandleToolResult(toolCallID string, toolName string
 		Role:           "assistant",
 		ToolCallID:     toolCallID,
 		ToolName:       structuredResult.ToolName,
+		ToolOutput:     chatToolDisplayOutput(result, structuredResult.ToolName),
 		ToolResult:     &structuredResult,
 	}
 	h.sendEvent(event)
+}
+
+func chatToolDisplayOutput(result tooltypes.ToolResult, toolName string) string {
+	if result == nil || toolName == "bash" {
+		return ""
+	}
+	output := result.GetResult()
+	if len(output) <= maxChatToolDisplayOutputBytes {
+		return output
+	}
+	limit := maxChatToolDisplayOutputBytes - len(chatToolOutputTruncationMarker)
+	for limit > 0 && !utf8.RuneStart(output[limit]) {
+		limit--
+	}
+	return output[:limit] + chatToolOutputTruncationMarker
 }
 
 func (h *chatMessageHandler) HandleThinking(thinking string) {

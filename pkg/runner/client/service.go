@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
@@ -25,7 +26,10 @@ const (
 	defaultCleanupTimeout      = 10 * time.Second
 	defaultSnapshotWaitTimeout = 30 * time.Second
 	snapshotLockPollInterval   = 10 * time.Millisecond
+	maxToolDisplayOutputBytes  = 128 * 1024
 )
+
+const toolDisplayOutputTruncationMarker = "\n\n[output truncated for remote display]"
 
 var errNoActiveRun = errors.New("runner has no active run")
 
@@ -90,6 +94,7 @@ type Service struct {
 type activeRun struct {
 	id                 string
 	conversationID     string
+	environmentProfile string
 	clientCaps         protocol.ClientCapabilities
 	config             llmtypes.Config
 	runtime            *extensions.Runtime
@@ -290,6 +295,7 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 	run := &activeRun{
 		id:                 params.RunID,
 		conversationID:     params.ConversationID,
+		environmentProfile: normalizeEnvironmentProfile(params.Agent.EnvironmentProfile),
 		clientCaps:         params.ClientCapabilities,
 		ctx:                runCtx,
 		cancel:             cancel,
@@ -503,27 +509,46 @@ func (s *Service) closeRun(ctx context.Context, runID string) error {
 
 // ProbeManifestDigest snapshots idle runner resources without reserving a control-plane run.
 func (s *Service) ProbeManifestDigest(ctx context.Context) (string, error) {
+	manifest, err := s.probeManifest(ctx, "", false)
+	if err != nil {
+		return "", err
+	}
+	return manifest.Digest, nil
+}
+
+// ProbeManifest snapshots runner resources for command and capability discovery without reserving a control-plane run.
+func (s *Service) ProbeManifest(ctx context.Context, environmentProfile string) (runnerpayload.Manifest, error) {
+	return s.probeManifest(ctx, environmentProfile, true)
+}
+
+func (s *Service) probeManifest(ctx context.Context, environmentProfile string, enforceActiveProfile bool) (runnerpayload.Manifest, error) {
 	if s == nil {
-		return "", errors.New("runner service is required")
+		return runnerpayload.Manifest{}, errors.New("runner service is required")
 	}
 	if err := s.lockSnapshot(ctx); err != nil {
-		return "", err
+		return runnerpayload.Manifest{}, err
 	}
 	defer s.snapshotMu.Unlock()
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
-		return "", errors.New("runner service is closed")
+		return runnerpayload.Manifest{}, errors.New("runner service is closed")
 	}
 	if s.unhealthy != nil {
 		message := s.unhealthy.Error()
 		s.mu.Unlock()
-		return "", errors.Wrap(errors.New(message), "runner requires restart after cleanup failure")
+		return runnerpayload.Manifest{}, errors.Wrap(errors.New(message), "runner requires restart after cleanup failure")
 	}
 	if s.active != nil {
-		digest := s.active.manifest.Digest
+		requestedProfile := normalizeEnvironmentProfile(environmentProfile)
+		if enforceActiveProfile && s.active.environmentProfile != requestedProfile {
+			activeProfile := s.active.environmentProfile
+			s.mu.Unlock()
+			return runnerpayload.Manifest{}, errors.Errorf("runner is busy with environment profile %q, not requested profile %q", activeProfile, requestedProfile)
+		}
+		manifest := s.active.manifest
 		s.mu.Unlock()
-		return digest, nil
+		return manifest, nil
 	}
 	runnerID := s.runnerID
 	generation := s.generation
@@ -534,31 +559,32 @@ func (s *Service) ProbeManifestDigest(ctx context.Context) (string, error) {
 		Probe:          true,
 	})
 	if err != nil {
-		return "", errors.Wrap(err, "failed to create runner manifest probe instance")
+		return runnerpayload.Manifest{}, errors.Wrap(err, "failed to create runner manifest probe instance")
 	}
 	if instance == nil {
-		return "", errors.New("runner manifest probe instance provider returned nil")
+		return runnerpayload.Manifest{}, errors.New("runner manifest probe instance provider returned nil")
 	}
 	workingDirectory := strings.TrimSpace(instance.WorkingDirectory())
 	if workingDirectory == "" {
-		return "", s.closeProbeResources(ctx, nil, instance, errors.New("runner manifest probe instance returned an empty working directory"))
+		return runnerpayload.Manifest{}, s.closeProbeResources(ctx, nil, instance, errors.New("runner manifest probe instance returned an empty working directory"))
 	}
 
-	config, err := s.configLoader("")
+	config, err := s.configLoader(environmentProfile)
 	if err != nil {
-		return "", s.closeProbeResources(ctx, nil, instance, errors.Wrap(err, "failed to load runner configuration"))
+		return runnerpayload.Manifest{}, s.closeProbeResources(ctx, nil, instance, errors.Wrap(err, "failed to load runner configuration"))
 	}
 	config.WorkingDirectory = workingDirectory
 	extensionConfig, err := extensions.LoadConfigFromSettings(config.ExtensionSettings)
 	if err != nil {
-		return "", s.closeProbeResources(ctx, nil, instance, errors.Wrap(err, "failed to load runner extension configuration"))
+		return runnerpayload.Manifest{}, s.closeProbeResources(ctx, nil, instance, errors.Wrap(err, "failed to load runner extension configuration"))
 	}
 	probeCtx := s.decorateRunContext(ctx, "runner-manifest-probe")
+	variant := normalizeEnvironmentProfile(environmentProfile)
 	var runtime *extensions.Runtime
 	if provider, ok := s.runtimeProvider.(runtimeDiscoveryProvider); ok {
-		runtime, err = provider.RuntimeForCommandDiscoveryWithConfig(probeCtx, workingDirectory, "", extensionConfig)
+		runtime, err = provider.RuntimeForCommandDiscoveryWithConfig(probeCtx, workingDirectory, variant, extensionConfig)
 	} else {
-		runtime, err = s.runtimeProvider.RuntimeWithConfigAndCallContext(probeCtx, workingDirectory, "", extensionConfig, extensions.ExtensionCallContext{
+		runtime, err = s.runtimeProvider.RuntimeWithConfigAndCallContext(probeCtx, workingDirectory, variant, extensionConfig, extensions.ExtensionCallContext{
 			ConversationID: "runner-manifest-probe",
 			UIScopeID:      "runner-manifest-probe",
 			CWD:            workingDirectory,
@@ -570,12 +596,12 @@ func (s *Service) ProbeManifestDigest(ctx context.Context) (string, error) {
 		})
 	}
 	if err != nil {
-		return "", s.closeProbeResources(probeCtx, nil, instance, errors.Wrap(err, "failed to initialize runner extensions"))
+		return runnerpayload.Manifest{}, s.closeProbeResources(probeCtx, nil, instance, errors.Wrap(err, "failed to initialize runner extensions"))
 	}
 	config.Extensions = runtime
 	environment := s.environmentFactory(workingDirectory, runtime)
 	if environment == nil {
-		return "", s.closeProbeResources(probeCtx, nil, instance, errors.New("runner environment factory returned nil"))
+		return runnerpayload.Manifest{}, s.closeProbeResources(probeCtx, nil, instance, errors.New("runner environment factory returned nil"))
 	}
 	manifest, err := environment.Open(probeCtx, agentenv.RunSpec{
 		ConversationID: "runner-manifest-probe",
@@ -583,19 +609,19 @@ func (s *Service) ProbeManifestDigest(ctx context.Context) (string, error) {
 		InvokedBy:      "runner.manifest",
 	})
 	if err != nil {
-		return "", s.closeProbeResources(probeCtx, environment, instance, errors.Wrap(err, "failed to probe runner environment"))
+		return runnerpayload.Manifest{}, s.closeProbeResources(probeCtx, environment, instance, errors.Wrap(err, "failed to probe runner environment"))
 	}
 	wire, err := buildWireManifest(manifest, config, runtime, runnerID, "runner-manifest-probe", generation, tools.ControlPlaneToolNames())
 	if err != nil {
-		return "", s.closeProbeResources(probeCtx, environment, instance, err)
+		return runnerpayload.Manifest{}, s.closeProbeResources(probeCtx, environment, instance, err)
 	}
 	if err := s.closeProbeResources(probeCtx, environment, instance, nil); err != nil {
-		return "", err
+		return runnerpayload.Manifest{}, err
 	}
 	s.mu.Lock()
 	s.lastManifestDigest = wire.Digest
 	s.mu.Unlock()
-	return wire.Digest, nil
+	return wire, nil
 }
 
 // HeartbeatSnapshot returns current application health for runner.heartbeat.
@@ -801,6 +827,7 @@ func serializeToolResult(result tooltypes.ToolResult, structured tooltypes.Struc
 	}
 	wire := runnerpayload.ToolResult{
 		AssistantFacing: result.AssistantFacing(),
+		DisplayOutput:   serializeToolDisplayOutput(result, structured.ToolName),
 		Error:           errorMessage,
 		Structured:      structured,
 	}
@@ -808,6 +835,23 @@ func serializeToolResult(result tooltypes.ToolResult, structured tooltypes.Struc
 		wire.ContentParts = append([]tooltypes.ToolResultContentPart(nil), multimodal.ContentParts()...)
 	}
 	return wire
+}
+
+func serializeToolDisplayOutput(result tooltypes.ToolResult, toolName string) string {
+	// Bash can spill arbitrarily large output to disk. Its structured metadata
+	// already carries the bounded display snapshot, so avoid reading the full file.
+	if toolName == "bash" {
+		return ""
+	}
+	output := result.GetResult()
+	if len(output) <= maxToolDisplayOutputBytes {
+		return output
+	}
+	limit := maxToolDisplayOutputBytes - len(toolDisplayOutputTruncationMarker)
+	for limit > 0 && !utf8.RuneStart(output[limit]) {
+		limit--
+	}
+	return output[:limit] + toolDisplayOutputTruncationMarker
 }
 
 func (s *Service) beginRunOperation(ctx context.Context, runID string) (*activeRun, context.Context, func(), error) {

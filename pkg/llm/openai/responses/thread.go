@@ -2013,6 +2013,7 @@ type StreamableMessage struct {
 	ToolName   string // For tool use/result
 	ToolCallID string // For matching tool results
 	Input      string // For tool use (JSON string)
+	ToolOutput string // Display output retained alongside structured results
 }
 
 const compactedHistoryNotice = "Context compacted"
@@ -2112,6 +2113,7 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 				ToolName:   toolName,
 				ToolCallID: item.CallID,
 				Content:    resultStr,
+				ToolOutput: item.Output,
 				RawItem:    item.RawOutput,
 			})
 
@@ -2136,6 +2138,7 @@ func StreamMessages(rawMessages json.RawMessage, toolResults map[string]tooltype
 				ToolName:   openAISearchToolName,
 				ToolCallID: item.CallID,
 				Content:    resultStr,
+				ToolOutput: item.Content,
 			})
 		}
 	}

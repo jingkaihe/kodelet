@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/runner/controlplaneurl"
 	"github.com/jingkaihe/kodelet/pkg/runner/localstate"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/jingkaihe/kodelet/pkg/version"
 	pkgerrors "github.com/pkg/errors"
 )
@@ -33,6 +35,7 @@ type RunnerConfig struct {
 	AuthToken            string
 	Workspace            string
 	DisplayName          string
+	ServiceOptions       ServiceOptions
 	Store                *localstate.Store
 	ReconnectMin         time.Duration
 	ReconnectMax         time.Duration
@@ -97,7 +100,7 @@ func NewRunner(ctx context.Context, config RunnerConfig) (*Runner, error) {
 	config.Server = server
 	config.Workspace = workspace
 	config.DisplayName = strings.TrimSpace(config.DisplayName)
-	service, err := NewService(ctx, workspace, ServiceOptions{})
+	service, err := NewService(ctx, workspace, config.ServiceOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -116,6 +119,18 @@ func NewRunner(ctx context.Context, config RunnerConfig) (*Runner, error) {
 		},
 		service: service,
 	}, nil
+}
+
+// Commands discovers workspace and extension slash commands for an optional environment profile.
+func (r *Runner) Commands(ctx context.Context, environmentProfile string) ([]slashcommands.Command, error) {
+	if r == nil || r.service == nil {
+		return nil, pkgerrors.New("runner is not initialized")
+	}
+	manifest, err := r.service.ProbeManifest(ctx, environmentProfile)
+	if err != nil {
+		return nil, err
+	}
+	return slices.Clone(manifest.Commands), nil
 }
 
 // Run acquires the workspace lock and keeps the runner connected until cancellation.

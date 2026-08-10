@@ -838,7 +838,7 @@ func TestStreamMessages_ToolUseMessage(t *testing.T) {
 		},
 		{
 			Role:      openai.ChatMessageRoleAssistant,
-			Content:   "",
+			Content:   "I'll inspect the directory.",
 			ToolCalls: []openai.ToolCall{toolCall},
 		},
 	}
@@ -851,17 +851,21 @@ func TestStreamMessages_ToolUseMessage(t *testing.T) {
 	streamableMessages, err := StreamMessages(rawMessages, toolResults)
 
 	require.NoError(t, err)
-	assert.Equal(t, 2, len(streamableMessages))
+	require.Len(t, streamableMessages, 3)
 
 	assert.Equal(t, "text", streamableMessages[0].Kind)
 	assert.Equal(t, "user", streamableMessages[0].Role)
 	assert.Equal(t, "List the files in the current directory", streamableMessages[0].Content)
 
-	assert.Equal(t, "tool-use", streamableMessages[1].Kind)
+	assert.Equal(t, "text", streamableMessages[1].Kind)
 	assert.Equal(t, "assistant", streamableMessages[1].Role)
-	assert.Equal(t, "bash", streamableMessages[1].ToolName)
-	assert.Equal(t, "call-123", streamableMessages[1].ToolCallID)
-	assert.Contains(t, streamableMessages[1].Input, "command")
+	assert.Equal(t, "I'll inspect the directory.", streamableMessages[1].Content)
+
+	assert.Equal(t, "tool-use", streamableMessages[2].Kind)
+	assert.Equal(t, "assistant", streamableMessages[2].Role)
+	assert.Equal(t, "bash", streamableMessages[2].ToolName)
+	assert.Equal(t, "call-123", streamableMessages[2].ToolCallID)
+	assert.JSONEq(t, `{"command":"ls -la","timeout":10}`, streamableMessages[2].Input)
 }
 
 func TestStreamMessages_ToolResultMessage(t *testing.T) {

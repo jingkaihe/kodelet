@@ -751,10 +751,10 @@ func TestServer_ConcurrentPromptLimit(t *testing.T) {
 		WithContext(context.Background()),
 	)
 
-	// Simulate an active prompt by adding a cancel func to activePrompts
+	// Simulate an active prompt by adding it to activePrompts.
 	sessionID := acptypes.SessionID("test-session")
 	server.activePromptsMu.Lock()
-	server.activePrompts[sessionID] = func() {}
+	server.activePrompts[sessionID] = &activePrompt{cancel: func() {}}
 	server.activePromptsMu.Unlock()
 
 	// Mark server as initialized

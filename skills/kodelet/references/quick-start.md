@@ -37,6 +37,14 @@ Kodelet implements the Agent Client Protocol (ACP):
 kodelet acp
 ```
 
+To use a remote control-plane agentic loop while retaining local workspace tools, context, skills, recipes, and extensions:
+
+```bash
+kodelet acp --server https://kodelet.example
+```
+
+Authenticate control-plane API calls with `--auth-token` or `KODELET_AUTH_TOKEN`, authenticate the embedded runner with `--runner-auth-token` or `KODELET_RUNNER_AUTH_TOKEN`, and optionally select local runner policy with `--runner-profile`.
+
 Example Zed-style configuration:
 
 ```json
@@ -48,7 +56,7 @@ Example Zed-style configuration:
 }
 ```
 
-ACP supports session persistence, image input, embedded file context, streaming responses, and tool-call visualization in compatible clients.
+ACP supports session persistence, image input, embedded file context, streaming responses, tool-call visualization, and local slash-command discovery in compatible clients. Server-backed ACP persists conversations on the control plane and resumes only conversations bound to the embedded workspace runner.
 
 ### Terminal chat TUI
 

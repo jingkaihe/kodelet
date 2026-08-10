@@ -401,12 +401,13 @@ func TestRemoteToolResultAccessors(t *testing.T) {
 	structured := tooltypes.StructuredToolResult{ToolName: "tool", Success: false, Error: "structured error"}
 	result := newRemoteToolResult(runnerpayload.ToolResult{
 		AssistantFacing: "assistant",
+		DisplayOutput:   "display",
 		Error:           "wire error",
 		Structured:      structured,
 		ContentParts:    []tooltypes.ToolResultContentPart{{Type: tooltypes.ToolResultContentPartTypeText, Text: "part"}},
 	})
 	assert.Equal(t, "assistant", result.AssistantFacing())
-	assert.Equal(t, "assistant", result.GetResult())
+	assert.Equal(t, "display", result.GetResult())
 	assert.True(t, result.IsError())
 	assert.Equal(t, "wire error", result.GetError())
 	assert.Equal(t, structured, result.StructuredData())

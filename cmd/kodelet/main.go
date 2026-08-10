@@ -26,11 +26,15 @@ const (
 )
 
 func authTokenFlagOrEnvironment(cmd *cobra.Command, environmentName string) string {
-	value, err := cmd.Flags().GetString("auth-token")
+	return stringFlagOrEnvironment(cmd, "auth-token", environmentName)
+}
+
+func stringFlagOrEnvironment(cmd *cobra.Command, flagName, environmentName string) string {
+	value, err := cmd.Flags().GetString(flagName)
 	if err != nil {
 		return ""
 	}
-	if cmd.Flags().Changed("auth-token") {
+	if cmd.Flags().Changed(flagName) {
 		return strings.TrimSpace(value)
 	}
 	return strings.TrimSpace(os.Getenv(environmentName))

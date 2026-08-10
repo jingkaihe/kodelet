@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
@@ -339,6 +340,39 @@ func TestChatMessageHandler_HandleToolUpdateEmitsTransientSnapshot(t *testing.T)
 	if assert.NotNil(t, sink.events[0].ToolResult) {
 		assert.Equal(t, "bash", sink.events[0].ToolResult.ToolName)
 	}
+}
+
+func TestChatMessageHandlerBoundsRemoteToolOutput(t *testing.T) {
+	sink := &recordingChatSink{}
+	handler := &chatMessageHandler{conversationID: "conv-123", sink: sink}
+
+	handler.HandleToolResult("tool-1", "custom", tooltypes.BaseToolResult{Result: strings.Repeat("界", maxChatToolDisplayOutputBytes)})
+
+	require.Len(t, sink.events, 1)
+	output := sink.events[0].ToolOutput
+	assert.LessOrEqual(t, len(output), maxChatToolDisplayOutputBytes)
+	assert.True(t, strings.HasSuffix(output, chatToolOutputTruncationMarker))
+	assert.True(t, utf8.ValidString(output))
+}
+
+func TestChatMessageHandlerDoesNotReadFullBashDisplayOutput(t *testing.T) {
+	sink := &recordingChatSink{}
+	handler := &chatMessageHandler{conversationID: "conv-123", sink: sink}
+
+	handler.HandleToolResult("tool-1", "bash", unreadableBashDisplayResult{})
+
+	require.Len(t, sink.events, 1)
+	assert.Empty(t, sink.events[0].ToolOutput)
+}
+
+type unreadableBashDisplayResult struct{}
+
+func (unreadableBashDisplayResult) AssistantFacing() string { return "bounded" }
+func (unreadableBashDisplayResult) IsError() bool           { return false }
+func (unreadableBashDisplayResult) GetError() string        { return "" }
+func (unreadableBashDisplayResult) GetResult() string       { panic("full bash output must not be read") }
+func (unreadableBashDisplayResult) StructuredData() tooltypes.StructuredToolResult {
+	return tooltypes.StructuredToolResult{ToolName: "bash", Success: true}
 }
 
 func TestChatMessageHandlerSerializesParallelToolUpdates(t *testing.T) {

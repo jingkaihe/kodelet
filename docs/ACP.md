@@ -14,6 +14,12 @@ kodelet acp
 
 This starts kodelet in agent mode, reading JSON-RPC 2.0 messages from stdin and writing responses to stdout.
 
+To keep workspace execution local while a `kodelet serve` control plane owns the model loop and conversation store, pass `--server`:
+
+```bash
+kodelet acp --server https://kodelet.example
+```
+
 ## IDE Integration
 
 ### Zed
@@ -49,6 +55,35 @@ kodelet acp [flags]
 | `--no-skills` | Disable agentic skills |
 | `--enable-fs-search-tools` | Enable `glob_tool` and `grep_tool` (by default the agent uses `fd`/`rg` via bash) |
 | `--no-extensions` | Disable extension runtime |
+| `--server` | Run the model agentic loop on a control plane while keeping the current workspace runtime local |
+| `--auth-token` | Control-plane API token; defaults to `KODELET_AUTH_TOKEN` |
+| `--runner-auth-token` | Runner registration token; defaults to `KODELET_RUNNER_AUTH_TOKEN` |
+| `--runner-profile` | Runner-local environment profile used for tools, skills, extensions, context, and workspace policy |
+
+## Server-Backed ACP
+
+`kodelet acp --server URL` embeds a stable runner for the process's current working directory. The ACP client still communicates with a local stdio subprocess, but the subprocess registers that workspace with the control plane and sends each prompt to the control plane's chat API.
+
+```text
+ACP client <-- stdio --> kodelet acp <-- HTTPS --> kodelet serve / model loop
+                              |
+                              +-- embedded local runner
+                                  tools, files, context, skills, recipes, extensions
+```
+
+The control plane owns provider credentials, model calls, turn orchestration, cancellation state, and persisted conversations. The embedded runner owns the canonical workspace, context files, filesystem and shell tools, skills, recipes, extension tools and commands, local command restrictions, tool mode, and runner environment profiles.
+
+The embedded runner executes with the ACP process's host permissions and is not a sandbox. API and runner tokens are captured before local extensions start and removed from the child-process environment; on Linux, Kodelet also scrubs token flag values from the process command line and disables same-user process inspection of its original environment. Supplying tokens through `KODELET_AUTH_TOKEN` and `KODELET_RUNNER_AUTH_TOKEN` avoids their initial appearance in process listings.
+
+For new conversations, explicit `--profile` and `--reasoning-effort` values select control-plane model policy. `--runner-profile` independently selects local runner policy. Flags that configure a local model loop, including `--provider`, `--model`, `--max-tokens`, `--max-turns`, weak-model settings, thinking budget, compact ratio, Anthropic API access, and OpenAI native search, are rejected with `--server`.
+
+`--no-skills`, `--no-extensions`, and `--enable-fs-search-tools` remain runner-local and override any selected runner profile. Local recipes and extension commands are advertised to compatible ACP clients and are executed through the embedded runner when invoked.
+
+The server-backed process is bound to the current working directory and accepts ACP session CWDs only for that same canonical workspace. A loaded conversation must already be bound to the exact embedded runner; when `--runner-profile` was explicitly supplied, the stored conversation must also use that profile. Only one prompt can execute through the embedded runner at a time.
+
+Runner readiness is checked during `session/new` and `session/load`; an unavailable runner produces an error after 15 seconds rather than leaving the ACP request pending indefinitely. `session/cancel` immediately cancels the local prompt stream, sends a turn-specific stop request to the control plane, and does not release the ACP workspace slot until the control plane confirms runner cleanup. The turn identifier also lets cancellation arrive safely before the control plane has registered the chat request.
+
+Extension tools and commands work in server-backed ACP, but ACP does not currently expose Kodelet's interactive extension UI broker, persistent widgets, or surfaces. Extensions must treat those UI capabilities as unavailable in this mode.
 
 ## Protocol Overview
 
@@ -174,7 +209,7 @@ Extensions may register additional tools; those are reported with kind `other` u
 
 ## Session Persistence
 
-ACP sessions are stored as kodelet conversations and can be resumed. The session ID corresponds to the conversation ID. Use `session/load` to resume a previous session:
+ACP sessions are stored as kodelet conversations and can be resumed. In ordinary local ACP they use the local conversation store; in server-backed ACP they use the control-plane conversation store. The session ID corresponds to the conversation ID. Use `session/load` to resume a previous session:
 
 ```json
 {
@@ -232,9 +267,11 @@ flowchart TB
 
 ## Security Considerations
 
-1. **Path Validation**: All file paths are validated relative to the session CWD
-2. **Command Restrictions**: Bash tool restrictions apply in ACP mode
-3. **No Authentication**: Kodelet doesn't require authentication (handled by the client)
+1. **Path Validation**: All file paths are validated relative to the session CWD; server-backed ACP additionally requires the session CWD to match the embedded runner workspace.
+2. **Command Restrictions**: Bash and tool restrictions apply in both local and server-backed ACP.
+3. **Local stdio authentication**: Ordinary `kodelet acp` relies on the parent ACP client to control subprocess access and does not add an authentication exchange.
+4. **Control-plane authentication**: Server-backed ACP uses `--auth-token` for API requests and `--runner-auth-token` for runner registration. Environment-provided values are captured before the runner starts and removed from the child-process environment inherited by local tools and extensions.
+5. **Transport security**: Non-loopback control-plane URLs must use HTTPS.
 
 ## References
 

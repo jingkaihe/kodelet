@@ -617,8 +617,13 @@ func (r remoteToolResult) AssistantFacing() string { return r.result.AssistantFa
 func (r remoteToolResult) IsError() bool {
 	return r.result.Error != "" || !r.result.Structured.Success
 }
-func (r remoteToolResult) GetError() string  { return r.result.Error }
-func (r remoteToolResult) GetResult() string { return r.result.AssistantFacing }
+func (r remoteToolResult) GetError() string { return r.result.Error }
+func (r remoteToolResult) GetResult() string {
+	if r.result.DisplayOutput != "" {
+		return r.result.DisplayOutput
+	}
+	return r.result.AssistantFacing
+}
 
 func (r remoteToolResult) StructuredData() tooltypes.StructuredToolResult { return r.result.Structured }
 

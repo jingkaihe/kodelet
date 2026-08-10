@@ -32,6 +32,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/goals"
+	"github.com/jingkaihe/kodelet/pkg/llm"
 	openairesponses "github.com/jingkaihe/kodelet/pkg/llm/openai/responses"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
@@ -65,6 +66,7 @@ type Server struct {
 	extensionRuntimes     *extensions.RuntimeManager
 	runnerRegistry        *runnerregistry.Registry
 	activeChats           map[string]*activeChatRun
+	pendingChatStops      map[string]time.Time
 	deletingConversations map[string]struct{}
 	activeChatsMu         sync.Mutex
 	chatSubscribers       map[string]map[*subscriberEventSink]struct{}
@@ -75,9 +77,15 @@ type activeChatRun struct {
 	cancel        context.CancelFunc
 	done          chan struct{}
 	doneOnce      sync.Once
+	turnID        string
 	stopRequested bool
 	uiInput       *webUIInputBroker
 }
+
+const (
+	pendingChatStopTTL  = 30 * time.Second
+	maxPendingChatStops = 1024
+)
 
 func newActiveChatRun(cancel context.CancelFunc) *activeChatRun {
 	if cancel == nil {
@@ -221,6 +229,7 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 		extensionRuntimes:     extensionRuntimes,
 		runnerRegistry:        runnerRegistry,
 		activeChats:           make(map[string]*activeChatRun),
+		pendingChatStops:      make(map[string]time.Time),
 		deletingConversations: make(map[string]struct{}),
 		chatSubscribers:       make(map[string]map[*subscriberEventSink]struct{}),
 	}
@@ -739,6 +748,13 @@ func (s *Server) registerActiveChat(conversationID string, run *activeChatRun) b
 	if s.activeChats == nil {
 		s.activeChats = make(map[string]*activeChatRun)
 	}
+	s.prunePendingChatStopsLocked(time.Now())
+	if run.turnID != "" {
+		key := pendingChatStopKey(conversationID, run.turnID)
+		if _, stopped := s.pendingChatStops[key]; stopped {
+			return false
+		}
+	}
 
 	if _, exists := s.activeChats[conversationID]; exists {
 		return false
@@ -767,16 +783,39 @@ func (s *Server) unregisterActiveChat(conversationID string, run *activeChatRun)
 }
 
 func (s *Server) cancelActiveChat(conversationID string) bool {
+	_, stopped := s.requestActiveChatStop(conversationID, "")
+	return stopped
+}
+
+func (s *Server) requestActiveChatStop(conversationID, turnID string) (*activeChatRun, bool) {
 	if strings.TrimSpace(conversationID) == "" {
-		return false
+		return nil, false
 	}
+	conversationID = strings.TrimSpace(conversationID)
+	turnID = strings.TrimSpace(turnID)
 
 	var cancel context.CancelFunc
 	s.activeChatsMu.Lock()
+	s.prunePendingChatStopsLocked(time.Now())
 	run, ok := s.activeChats[conversationID]
-	if ok && run != nil && !run.stopRequested {
-		run.stopRequested = true
-		cancel = run.cancel
+	if ok && run != nil {
+		if turnID != "" && run.turnID != turnID {
+			s.activeChatsMu.Unlock()
+			return nil, false
+		}
+		if !run.stopRequested {
+			run.stopRequested = true
+			cancel = run.cancel
+		}
+	} else if turnID != "" {
+		if s.pendingChatStops == nil {
+			s.pendingChatStops = make(map[string]time.Time)
+		}
+		if len(s.pendingChatStops) >= maxPendingChatStops {
+			s.removeOldestPendingChatStopLocked()
+		}
+		s.pendingChatStops[pendingChatStopKey(conversationID, turnID)] = time.Now().Add(pendingChatStopTTL)
+		ok = true
 	}
 	s.activeChatsMu.Unlock()
 
@@ -784,7 +823,33 @@ func (s *Server) cancelActiveChat(conversationID string) bool {
 		cancel()
 	}
 
-	return ok
+	return run, ok
+}
+
+func pendingChatStopKey(conversationID, turnID string) string {
+	return conversationID + "\x00" + turnID
+}
+
+func (s *Server) prunePendingChatStopsLocked(now time.Time) {
+	for key, expiresAt := range s.pendingChatStops {
+		if !expiresAt.After(now) {
+			delete(s.pendingChatStops, key)
+		}
+	}
+}
+
+func (s *Server) removeOldestPendingChatStopLocked() {
+	oldestKey := ""
+	var oldestExpiry time.Time
+	for key, expiresAt := range s.pendingChatStops {
+		if oldestKey == "" || expiresAt.Before(oldestExpiry) {
+			oldestKey = key
+			oldestExpiry = expiresAt
+		}
+	}
+	if oldestKey != "" {
+		delete(s.pendingChatStops, oldestKey)
+	}
 }
 
 func (s *Server) isActiveChat(conversationID string) bool {
@@ -1023,6 +1088,21 @@ type WebConversationResponse struct {
 	PendingSteer          []WebMessage           `json:"pendingSteer,omitempty"`
 	ToolResults           any                    `json:"toolResults,omitempty"`
 	MessageCount          int                    `json:"messageCount"`
+}
+
+type conversationHistoryResponse struct {
+	ID                 string                                    `json:"id"`
+	UpdatedAt          time.Time                                 `json:"updatedAt"`
+	Provider           string                                    `json:"provider"`
+	CWD                string                                    `json:"cwd,omitempty"`
+	Profile            string                                    `json:"profile,omitempty"`
+	ReasoningEffort    string                                    `json:"reasoningEffort,omitempty"`
+	RunnerID           string                                    `json:"runnerId,omitempty"`
+	EnvironmentProfile string                                    `json:"environmentProfile,omitempty"`
+	Summary            string                                    `json:"summary,omitempty"`
+	Usage              llmtypes.Usage                            `json:"usage"`
+	Entries            []conversations.StreamableMessage         `json:"entries"`
+	ToolResults        map[string]tooltypes.StructuredToolResult `json:"toolResults,omitempty"`
 }
 
 // ChatProfileOption represents a selectable profile in the web UI.
@@ -1594,6 +1674,10 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to get conversation", err)
 		return
 	}
+	if r.URL.Query().Get("format") == "stream" {
+		s.writeConversationHistoryResponse(w, r, response)
+		return
+	}
 
 	_, apiMode := extractProviderMetadata(response.Provider, response.Metadata)
 	providerLabel := displayProviderName(response.Provider)
@@ -1650,6 +1734,37 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSONResponse(w, webResponse)
+}
+
+func (s *Server) writeConversationHistoryResponse(w http.ResponseWriter, r *http.Request, response *conversations.GetConversationResponse) {
+	entries, err := llm.ExtractConversationEntries(response.Provider, response.RawMessages, response.Metadata, response.ToolResults)
+	if err != nil {
+		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to parse conversation history", err)
+		return
+	}
+	history := conversationHistoryResponse{
+		ID:              response.ID,
+		UpdatedAt:       response.UpdatedAt,
+		Provider:        response.Provider,
+		CWD:             response.CWD,
+		Profile:         resolveConversationProfile(response.Metadata),
+		ReasoningEffort: resolveConversationReasoningEffort(response),
+		Summary:         response.Summary,
+		Usage:           response.Usage,
+		Entries:         entries,
+	}
+	if s.runnerRegistry != nil {
+		affinity, ok, affinityErr := s.runnerRegistry.ResolveConversationAffinity(r.Context(), response.ID)
+		if affinityErr != nil {
+			s.writeErrorResponse(w, http.StatusInternalServerError, "failed to resolve conversation runner", affinityErr)
+			return
+		}
+		if ok {
+			history.RunnerID = affinity.RunnerID
+			history.EnvironmentProfile = affinity.EnvironmentProfile
+		}
+	}
+	s.writeJSONResponse(w, history)
 }
 
 func pendingSteerWebMessages(ctx context.Context, conversationID string) ([]WebMessage, error) {
@@ -2181,7 +2296,15 @@ func (s *Server) handleStopConversation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	stopped := s.cancelActiveChat(conversationID)
+	run, stopped := s.requestActiveChatStop(conversationID, r.URL.Query().Get("turnId"))
+	if run != nil && run.done != nil {
+		select {
+		case <-run.done:
+		case <-r.Context().Done():
+			s.writeErrorResponse(w, http.StatusRequestTimeout, "timed out waiting for conversation to stop", r.Context().Err())
+			return
+		}
+	}
 	s.writeJSONResponse(w, stopConversationResponse{
 		Success:        true,
 		ConversationID: conversationID,

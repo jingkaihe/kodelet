@@ -7,9 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
@@ -349,6 +351,7 @@ Review the runner workspace.`), 0o600))
 		Input:      json.RawMessage(`{"file_path":"` + filePath + `","offset":1,"line_limit":10}`),
 	})
 	assert.Contains(t, toolResult.Result.AssistantFacing, "hello runner")
+	assert.Contains(t, toolResult.Result.DisplayOutput, "hello runner")
 	assert.True(t, toolResult.Result.Structured.Success)
 	_, rpcErr = service.HandleRequest(t.Context(), protocol.MethodToolExecute, mustJSON(t, runnerpayload.ToolExecuteParams{RunID: "run-1"}))
 	require.NotNil(t, rpcErr)
@@ -380,6 +383,32 @@ Review the runner workspace.`), 0o600))
 	assert.Equal(t, protocol.RunnerStateIdle, state)
 	assert.Empty(t, activeRunID)
 	assert.Equal(t, manifest.Digest, heartbeatDigest)
+}
+
+func TestSerializeToolResultCapsRemoteDisplayOutput(t *testing.T) {
+	result := serializeToolResult(
+		tooltypes.BaseToolResult{Result: strings.Repeat("界", maxToolDisplayOutputBytes)},
+		tooltypes.StructuredToolResult{ToolName: "custom", Success: true},
+	)
+
+	assert.LessOrEqual(t, len(result.DisplayOutput), maxToolDisplayOutputBytes)
+	assert.True(t, strings.HasSuffix(result.DisplayOutput, toolDisplayOutputTruncationMarker))
+	assert.True(t, utf8.ValidString(result.DisplayOutput))
+}
+
+func TestProbeManifestRejectsDifferentActiveEnvironmentProfile(t *testing.T) {
+	expected := runnerpayload.Manifest{RunnerID: "runner-1", RunID: "run-1"}
+	service := &Service{active: &activeRun{
+		environmentProfile: "gpu",
+		manifest:           expected,
+	}}
+
+	manifest, err := service.ProbeManifest(t.Context(), "gpu")
+	require.NoError(t, err)
+	assert.Equal(t, expected, manifest)
+
+	_, err = service.ProbeManifest(t.Context(), "workspace")
+	require.ErrorContains(t, err, `runner is busy with environment profile "gpu", not requested profile "workspace"`)
 }
 
 func TestManifestHelpersLoadSystemPromptAndDefensivelyCloneSchemas(t *testing.T) {

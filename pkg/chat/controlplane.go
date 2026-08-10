@@ -15,13 +15,17 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/runner/controlplaneurl"
+	"github.com/jingkaihe/kodelet/pkg/tools/renderers"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
 )
 
-const maxControlPlaneChatEventSize = 16 << 20
+const (
+	maxControlPlaneChatEventSize           = 16 << 20
+	maxControlPlaneConversationHistorySize = 64 << 20
+)
 
 // ControlPlaneChatRunner streams chat turns and conversation history through kodelet serve.
 type ControlPlaneChatRunner struct {
@@ -107,6 +111,7 @@ func (r *ControlPlaneChatRunner) Run(ctx context.Context, request ChatRequest, s
 
 	conversationID := strings.TrimSpace(request.ConversationID)
 	var streamErr error
+	completed := false
 	scanner := bufio.NewScanner(response.Body)
 	scanner.Buffer(make([]byte, 64*1024), maxControlPlaneChatEventSize)
 	for scanner.Scan() {
@@ -131,6 +136,9 @@ func (r *ControlPlaneChatRunner) Run(ctx context.Context, request ChatRequest, s
 		if err := sink.Send(event); err != nil {
 			return conversationID, err
 		}
+		if event.Kind == "done" {
+			completed = true
+		}
 		if event.Kind == "error" && strings.TrimSpace(event.Error) != "" {
 			streamErr = errors.New(event.Error)
 		}
@@ -138,7 +146,16 @@ func (r *ControlPlaneChatRunner) Run(ctx context.Context, request ChatRequest, s
 	if err := scanner.Err(); err != nil {
 		return conversationID, errors.Wrap(err, "failed to read control-plane chat stream")
 	}
-	return conversationID, streamErr
+	if streamErr != nil {
+		return conversationID, streamErr
+	}
+	if !completed {
+		if err := ctx.Err(); err != nil {
+			return conversationID, err
+		}
+		return conversationID, errors.New("control-plane chat stream ended before completion")
+	}
+	return conversationID, nil
 }
 
 // ListConversations returns control-plane conversations visible to this client.
@@ -204,7 +221,14 @@ func (r *ControlPlaneChatRunner) LoadConversation(ctx context.Context, conversat
 	if err != nil {
 		return ConversationHistory{}, err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	parsedEndpoint, err := url.Parse(endpoint)
+	if err != nil {
+		return ConversationHistory{}, errors.Wrap(err, "failed to parse control-plane conversation URL")
+	}
+	query := parsedEndpoint.Query()
+	query.Set("format", "stream")
+	parsedEndpoint.RawQuery = query.Encode()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, parsedEndpoint.String(), nil)
 	if err != nil {
 		return ConversationHistory{}, errors.Wrap(err, "failed to create control-plane conversation request")
 	}
@@ -218,41 +242,49 @@ func (r *ControlPlaneChatRunner) LoadConversation(ctx context.Context, conversat
 		return ConversationHistory{}, controlPlaneResponseError(response)
 	}
 	var result controlPlaneConversationResponse
-	if err := json.NewDecoder(io.LimitReader(response.Body, 16<<20)).Decode(&result); err != nil {
+	if err := json.NewDecoder(io.LimitReader(response.Body, maxControlPlaneConversationHistorySize)).Decode(&result); err != nil {
 		return ConversationHistory{}, errors.Wrap(err, "failed to decode control-plane conversation")
 	}
-	messages, err := normalizeControlPlaneConversationMessages(result.Messages, result.ToolResults)
-	if err != nil {
-		return ConversationHistory{}, err
+	messages := normalizeControlPlaneConversationEntries(result.Entries, result.ToolResults)
+	if len(messages) == 0 && len(result.Messages) > 0 {
+		messages, err = normalizeControlPlaneConversationMessages(result.Messages, result.ToolResults)
+		if err != nil {
+			return ConversationHistory{}, err
+		}
 	}
 	title := strings.TrimSpace(result.Summary)
 	if title == "" {
 		title = conversationID
 	}
 	return ConversationHistory{
-		ID:              firstNonEmptyString(result.ID, conversationID),
-		CWD:             strings.TrimSpace(result.CWD),
-		Title:           title,
-		Provider:        strings.TrimSpace(result.Provider),
-		Profile:         strings.TrimSpace(result.Profile),
-		ReasoningEffort: strings.TrimSpace(result.ReasoningEffort),
-		UpdatedAt:       result.UpdatedAt,
-		Usage:           result.Usage,
-		Messages:        messages,
+		ID:                 firstNonEmptyString(result.ID, conversationID),
+		CWD:                strings.TrimSpace(result.CWD),
+		Title:              title,
+		Provider:           strings.TrimSpace(result.Provider),
+		Profile:            strings.TrimSpace(result.Profile),
+		ReasoningEffort:    strings.TrimSpace(result.ReasoningEffort),
+		RunnerID:           strings.TrimSpace(result.RunnerID),
+		EnvironmentProfile: strings.TrimSpace(result.EnvironmentProfile),
+		UpdatedAt:          result.UpdatedAt,
+		Usage:              result.Usage,
+		Messages:           messages,
 	}, nil
 }
 
 type controlPlaneConversationResponse struct {
-	ID              string                                    `json:"id"`
-	UpdatedAt       time.Time                                 `json:"updatedAt"`
-	Provider        string                                    `json:"provider"`
-	CWD             string                                    `json:"cwd"`
-	Profile         string                                    `json:"profile"`
-	ReasoningEffort string                                    `json:"reasoningEffort"`
-	Summary         string                                    `json:"summary"`
-	Usage           llmtypes.Usage                            `json:"usage"`
-	Messages        []controlPlaneConversationMessage         `json:"messages"`
-	ToolResults     map[string]tooltypes.StructuredToolResult `json:"toolResults"`
+	ID                 string                                    `json:"id"`
+	UpdatedAt          time.Time                                 `json:"updatedAt"`
+	Provider           string                                    `json:"provider"`
+	CWD                string                                    `json:"cwd"`
+	Profile            string                                    `json:"profile"`
+	ReasoningEffort    string                                    `json:"reasoningEffort"`
+	RunnerID           string                                    `json:"runnerId"`
+	EnvironmentProfile string                                    `json:"environmentProfile"`
+	Summary            string                                    `json:"summary"`
+	Usage              llmtypes.Usage                            `json:"usage"`
+	Messages           []controlPlaneConversationMessage         `json:"messages"`
+	Entries            []conversations.StreamableMessage         `json:"entries"`
+	ToolResults        map[string]tooltypes.StructuredToolResult `json:"toolResults"`
 }
 
 type controlPlaneConversationMessage struct {
@@ -271,6 +303,36 @@ type controlPlaneToolCall struct {
 type controlPlaneToolCallFunction struct {
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
+}
+
+func normalizeControlPlaneConversationEntries(entries []conversations.StreamableMessage, toolResults map[string]tooltypes.StructuredToolResult) []conversations.StreamableMessage {
+	result := make([]conversations.StreamableMessage, len(entries))
+	copy(result, entries)
+	for index := range result {
+		entry := &result[index]
+		if entry.Kind != "tool-result" {
+			continue
+		}
+		structured, ok := toolResults[entry.ToolCallID]
+		if !ok {
+			continue
+		}
+		if entry.ToolName == "" {
+			entry.ToolName = structured.ToolName
+		}
+		if entry.ToolOutput == "" {
+			var embedded tooltypes.StructuredToolResult
+			if json.Unmarshal([]byte(entry.Content), &embedded) != nil {
+				entry.ToolOutput = entry.Content
+			} else {
+				entry.ToolOutput = renderers.NewRendererRegistry().Render(structured)
+			}
+		}
+		if payload, err := json.Marshal(structured); err == nil {
+			entry.Content = string(payload)
+		}
+	}
+	return result
 }
 
 func normalizeControlPlaneConversationMessages(messages []controlPlaneConversationMessage, toolResults map[string]tooltypes.StructuredToolResult) ([]conversations.StreamableMessage, error) {
@@ -316,6 +378,7 @@ func normalizeControlPlaneConversationMessages(messages []controlPlaneConversati
 					Kind:       "tool-result",
 					Role:       "user",
 					Content:    string(payload),
+					ToolOutput: renderers.NewRendererRegistry().Render(toolResult),
 					ToolCallID: toolCallID,
 					ToolName:   firstNonEmptyString(toolResult.ToolName, toolName),
 				})
@@ -395,6 +458,11 @@ func (r *ControlPlaneChatRunner) ChatSettings(ctx context.Context, profile strin
 
 // StopConversation requests cancellation of central and runner work before the client stream closes.
 func (r *ControlPlaneChatRunner) StopConversation(ctx context.Context, conversationID string) error {
+	return r.StopConversationTurn(ctx, conversationID, "")
+}
+
+// StopConversationTurn requests cancellation of one specific control-plane turn.
+func (r *ControlPlaneChatRunner) StopConversationTurn(ctx context.Context, conversationID, turnID string) error {
 	conversationID = strings.TrimSpace(conversationID)
 	if conversationID == "" {
 		return errors.New("conversation id is required")
@@ -402,6 +470,16 @@ func (r *ControlPlaneChatRunner) StopConversation(ctx context.Context, conversat
 	endpoint, err := controlPlaneEndpointURL(r.baseURL, "api", "conversations", conversationID, "stop")
 	if err != nil {
 		return err
+	}
+	if turnID = strings.TrimSpace(turnID); turnID != "" {
+		parsed, err := url.Parse(endpoint)
+		if err != nil {
+			return errors.Wrap(err, "failed to parse control-plane stop URL")
+		}
+		query := parsed.Query()
+		query.Set("turnId", turnID)
+		parsed.RawQuery = query.Encode()
+		endpoint = parsed.String()
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
 	if err != nil {
@@ -415,6 +493,15 @@ func (r *ControlPlaneChatRunner) StopConversation(ctx context.Context, conversat
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		return controlPlaneResponseError(response)
+	}
+	var result struct {
+		Stopped bool `json:"stopped"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&result); err != nil {
+		return errors.Wrap(err, "failed to decode control-plane stop response")
+	}
+	if !result.Stopped {
+		return errors.New("control-plane conversation is not active")
 	}
 	return nil
 }
