@@ -197,16 +197,19 @@ type ToolListPatch struct {
 }
 
 type rpcClient struct {
-	reader   *bufio.Reader
-	writer   io.Writer
-	writeMu  sync.Mutex
-	stateMu  sync.Mutex
-	readOnce sync.Once
-	nextID   int64
-	pending  map[int64]*rpcPendingCall
-	terminal error
-	host     rpcHostRequestHandler
-	onFail   func(error)
+	reader         *bufio.Reader
+	writer         io.Writer
+	writeMu        sync.Mutex
+	stateMu        sync.Mutex
+	readOnce       sync.Once
+	nextID         int64
+	pending        map[int64]*rpcPendingCall
+	terminal       error
+	host           rpcHostRequestHandler
+	onFail         func(error)
+	incomingMu     sync.Mutex
+	incomingWG     sync.WaitGroup
+	incomingClosed bool
 }
 
 type rpcPendingCall struct {
@@ -320,7 +323,7 @@ func (c *rpcClient) readLoop() {
 				c.dispatchIncomingNotification(msg)
 				continue
 			}
-			go c.dispatchIncomingRequest(msg)
+			c.startIncomingRequest(msg)
 			continue
 		}
 		if err := c.dispatchResponse(msg); err != nil {
@@ -328,6 +331,37 @@ func (c *rpcClient) readLoop() {
 			return
 		}
 	}
+}
+
+func (c *rpcClient) startIncomingRequest(msg rpcIncomingMessage) {
+	c.incomingMu.Lock()
+	if c.incomingClosed {
+		c.incomingMu.Unlock()
+		return
+	}
+	c.incomingWG.Add(1)
+	c.incomingMu.Unlock()
+	go func() {
+		defer c.incomingWG.Done()
+		c.dispatchIncomingRequest(msg)
+	}()
+}
+
+func (c *rpcClient) stopIncomingRequests() {
+	if c == nil {
+		return
+	}
+	c.incomingMu.Lock()
+	c.incomingClosed = true
+	c.incomingMu.Unlock()
+}
+
+func (c *rpcClient) waitIncomingRequests() {
+	if c == nil {
+		return
+	}
+	c.stopIncomingRequests()
+	c.incomingWG.Wait()
 }
 
 func (c *rpcClient) dispatchResponse(msg rpcIncomingMessage) error {
@@ -361,7 +395,7 @@ func (c *rpcClient) dispatchIncomingRequest(msg rpcIncomingMessage) {
 			c.stateMu.Lock()
 			handler = c.host
 			c.stateMu.Unlock()
-			ctx = context.Background()
+			ctx = hostRequestContext(handler)
 		}
 	}
 	if msg.Method == "kodelet.tool.update" && !parentMatched {
@@ -420,9 +454,16 @@ func (c *rpcClient) hostRequestTarget(parentID json.RawMessage) (context.Context
 		}
 	}
 	if selected == nil {
-		return context.Background(), c.host, false, false
+		return hostRequestContext(c.host), c.host, false, false
 	}
 	return selected.ctx, selected.handler, false, candidates > 1
+}
+
+func hostRequestContext(handler rpcHostRequestHandler) context.Context {
+	if provider, ok := handler.(interface{ hostContext() context.Context }); ok {
+		return provider.hostContext()
+	}
+	return context.Background()
 }
 
 type invalidToolUpdateParentHandler struct{}
@@ -445,6 +486,7 @@ func hasRPCParentID(parentID json.RawMessage) bool {
 }
 
 func (c *rpcClient) fail(err error) {
+	c.stopIncomingRequests()
 	c.stateMu.Lock()
 	if c.terminal != nil {
 		c.stateMu.Unlock()

@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -53,6 +54,7 @@ type Runner struct {
 	server       string
 	websocketURL string
 	host         protocol.Host
+	lockMu       sync.Mutex
 	lock         *localstate.WorkspaceLock
 	service      *Service
 }
@@ -133,10 +135,15 @@ func (r *Runner) Commands(ctx context.Context, environmentProfile string) ([]sla
 	return slices.Clone(manifest.Commands), nil
 }
 
-// Run acquires the workspace lock and keeps the runner connected until cancellation.
-func (r *Runner) Run(ctx context.Context) error {
+// AcquireWorkspaceLock claims this host workspace before it is registered.
+func (r *Runner) AcquireWorkspaceLock() error {
 	if r == nil || r.service == nil {
 		return pkgerrors.New("runner is not initialized")
+	}
+	r.lockMu.Lock()
+	defer r.lockMu.Unlock()
+	if r.lock != nil {
+		return nil
 	}
 	lock, err := r.store.AcquireWorkspaceLock(r.workspace, localstate.LockMetadata{
 		PID:         r.host.PID,
@@ -150,12 +157,17 @@ func (r *Runner) Run(ctx context.Context) error {
 		return err
 	}
 	r.lock = lock
+	return nil
+}
+
+// Run acquires the workspace lock and keeps the runner connected until cancellation.
+func (r *Runner) Run(ctx context.Context) error {
+	if err := r.AcquireWorkspaceLock(); err != nil {
+		return err
+	}
 	defer func() {
-		if err := r.service.Close(); err != nil {
-			logger.G(ctx).WithError(err).Warn("failed to close runner service")
-		}
-		if err := lock.Close(); err != nil {
-			logger.G(ctx).WithError(err).Warn("failed to close runner workspace lock")
+		if err := r.Close(); err != nil {
+			logger.G(ctx).WithError(err).Warn("failed to close runner")
 		}
 	}()
 
@@ -199,6 +211,23 @@ func (r *Runner) Run(ctx context.Context) error {
 			initialDigest = digest
 		}
 	}
+}
+
+// Close releases runner-owned local resources. It must not race with Run.
+func (r *Runner) Close() error {
+	if r == nil {
+		return nil
+	}
+	r.lockMu.Lock()
+	lock := r.lock
+	r.lock = nil
+	r.lockMu.Unlock()
+	serviceErr := r.service.Close()
+	lockErr := lock.Close()
+	if serviceErr != nil {
+		return serviceErr
+	}
+	return lockErr
 }
 
 func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool, error) {
@@ -249,8 +278,11 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool,
 	}
 	params := protocol.RegisterParams{
 		ProtocolVersions: []int{protocol.Version},
-		DisplayName:      r.config.DisplayName,
-		Host:             r.host,
+		Capabilities: protocol.RunnerCapabilities{
+			ConcurrentRuns: true,
+		},
+		DisplayName: r.config.DisplayName,
+		Host:        r.host,
 		Workspace: protocol.Workspace{
 			Path: r.workspace,
 			Name: filepath.Base(r.workspace),
@@ -326,8 +358,7 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool,
 				return connected, err
 			}
 		case <-manifestTicker.C:
-			state, _, _ := r.service.HeartbeatSnapshot()
-			if state != protocol.RunnerStateIdle || probeInFlight {
+			if probeInFlight {
 				continue
 			}
 			probeInFlight = true
@@ -365,12 +396,17 @@ func (r *Runner) probeManifestDigest(ctx context.Context) (string, error) {
 }
 
 func (r *Runner) sendHeartbeat(ctx context.Context, peer *protocol.Peer, registration protocol.RegisterResult) error {
-	state, activeRunID, manifestDigest := r.service.HeartbeatSnapshot()
+	state, activeRunIDs, manifestDigest := r.service.HeartbeatSnapshotRuns()
+	activeRunID := ""
+	if len(activeRunIDs) == 1 {
+		activeRunID = activeRunIDs[0]
+	}
 	return peer.Notify(ctx, protocol.MethodRunnerHeartbeat, protocol.HeartbeatParams{
 		RunnerID:       registration.RunnerID,
 		Generation:     registration.Generation,
 		State:          state,
 		ActiveRunID:    activeRunID,
+		ActiveRunIDs:   activeRunIDs,
 		ManifestDigest: manifestDigest,
 	})
 }

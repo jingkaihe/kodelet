@@ -2,11 +2,11 @@
 
 ## Status
 
-Implemented through the initial capacity-one Phase 3 release. The future ephemeral execution-instance phase remains deliberately deferred until an isolation and durability backend is selected.
+Implemented through Phase 3, including multiple concurrent logical runs on one workspace-bound runner. The future ephemeral execution-instance phase remains deliberately deferred until an isolation and durability backend is selected.
 
-The current implementation preserves the design's direct-workspace constraints: no worktrees, containers, micro-VMs, filesystem snapshots, process namespaces, network namespaces, or same-workspace concurrent top-level runs. Remote Web UI and TUI conversations are supported, including control-plane conversation browsing and resume; `kodelet run --runner` remains disabled pending a broader one-shot client contract. The runner now provisions every run through an `ExecutionInstanceProvider`, but the only built-in provider returns a fresh lifecycle handle backed by the same registered workspace. This establishes creation and cleanup ordering without claiming filesystem, process, network, or port isolation.
+The current implementation preserves the design's direct-workspace constraints: no worktrees, containers, micro-VMs, filesystem snapshots, process namespaces, or network namespaces. Remote Web UI and TUI conversations are supported, including control-plane conversation browsing and resume; `kodelet run --runner` remains disabled pending a broader one-shot client contract. The runner provisions every run through an `ExecutionInstanceProvider`, but the only built-in provider returns a fresh lifecycle handle backed by the same registered workspace. Concurrent runs are therefore allowed and receive separate run state and extension runtimes, but they intentionally share the workspace filesystem, host processes, network, and ports.
 
-The implemented robustness model includes generation-fenced open reconciliation, immediate control-plane cancellation when an active runner connection is lost or replaced, a context-backed run-lease watchdog, asynchronous bounded manifest refresh, symmetric message-size enforcement, bounded handler-draining peer shutdown, pending-to-durable conversation affinity, and lease-aware extension runtime replacement.
+The implemented robustness model includes generation-fenced open reconciliation, immediate control-plane cancellation of every active run when a runner connection is lost or replaced, a context-backed run-lease watchdog, run-set heartbeats, asynchronous bounded manifest refresh, symmetric message-size enforcement, bounded handler-draining peer shutdown, pending-to-durable conversation affinity, and run-isolated extension runtime leases.
 
 ## Summary
 
@@ -16,7 +16,7 @@ The runner initiates one persistent WebSocket connection to the control plane. M
 
 At the start of each top-level run, the runner returns a versioned environment manifest. The manifest contains a snapshot of workspace context such as `AGENTS.md`, runner-scoped skill and tool definitions, extension-provided resources, and relevant workspace configuration. The control plane pins that manifest for the complete run. Changes discovered by later manifest beats apply to subsequent runs rather than mutating an active run's prompt or tool catalog.
 
-The initial implementation executes runner-side tools directly in the registered workspace and permits one active run per runner. It deliberately does not introduce worktrees, containers, micro-VMs, filesystem snapshots, or network namespaces.
+The implementation executes runner-side tools directly in the registered workspace and permits multiple active runs per runner while retaining one active top-level run per conversation. It deliberately does not introduce worktrees, containers, micro-VMs, filesystem snapshots, or network namespaces, so concurrent runs can observe and modify the same files and can contend for host-level resources.
 
 Each runner has a stable opaque control-plane ID, mutable display metadata, host metadata, and one live connection generation. Startup takes an OS-backed advisory file lock for the canonical workspace and records diagnostic PID metadata in that locked file, preventing two local runner processes from serving the same workspace while allowing crash-safe recovery.
 
@@ -39,7 +39,7 @@ The design is feasible, but it is a medium-to-large architectural change rather 
 
 WebSocket and JSON-RPC are not the principal technical risk. The harder work is preserving provider-specific turn behavior and extension ordering while allowing some tools to execute centrally and others remotely. Implementing `agentenv.LocalEnvironment` first keeps that refactor testable without introducing a network boundary at the same time.
 
-The initial capacity-one runner provides parallelism across multiple workspace-bound runners. It does not provide concurrent runs against one workspace. Same-workspace parallelism arrives only after the runner can provision independent per-run environments.
+The runner provides logical same-workspace parallelism without imposing a capacity flag or workspace-wide run mutex. This is appropriate for trusted cooperating agents such as a main agent plus code-search, review, or editing subagents, but it is not isolation: concurrent mutations, commands, services, and port use can interfere. A future execution-instance backend can add stronger isolation without changing the run protocol.
 
 ## Decision
 
@@ -57,7 +57,7 @@ Kodelet will use the following model:
 10. Each run begins with a full environment manifest that is pinned for the duration of that run.
 11. Host-executed model tools have an explicit placement: control-plane tools execute beside central conversation state and are governed by control-plane model policy, while runner tools execute in the workspace environment and are governed by runner environment policy. Provider-native capabilities remain provider-owned.
 12. Runner-owned extensions retain visibility over lifecycle events for host-executed tools, including control-plane tools, so remote execution preserves current extension policy semantics. Provider-native tools are subject to the hooks exposed by their provider API and cannot be assumed to support host-side `tool.call` and `tool.result` interception.
-13. The initial runner executes directly in its workspace with capacity one.
+13. The runner executes directly in its workspace and accepts multiple concurrent run leases; one active run per conversation is still enforced.
 14. A future runner implementation creates one fresh ephemeral execution instance per top-level run without changing control-plane ownership of the agent loop.
 
 ## Goals
@@ -79,7 +79,7 @@ The initial implementation will not:
 
 - create Git worktrees, clones, containers, micro-VMs, or filesystem snapshots per run;
 - provide process or network isolation;
-- allow more than one active top-level run on a runner;
+- serialize or otherwise coordinate concurrent workspace mutations between runs;
 - run several unrelated workspaces from one runner process;
 - dynamically select an arbitrary CWD for an assigned run;
 - provide port forwarding, public preview URLs, or artifact transfer protocols;
@@ -166,7 +166,7 @@ The lock file is intentionally persistent and is not unlinked during normal shut
 
 On Windows, the mandatory byte-range lock is placed beyond the diagnostic JSON region rather than over byte zero. This preserves the one-runner invariant while allowing `runner inspect` and duplicate-start diagnostics to read metadata from a lock file that is currently owned by another process.
 
-If acquisition fails, startup exits before registration and reports the canonical workspace, recorded PID, runner ID, server, and start time when those fields can be read. This local lock is a safety mechanism for cooperative Kodelet processes, not a sandbox or a general filesystem lock for other applications.
+If acquisition fails, ordinary runner startup exits before registration and reports the canonical workspace, recorded PID, runner ID, server, and start time when those fields can be read. `kodelet acp --server` instead treats a held same-server lock with an advertised runner ID as a discovery record and attaches its ACP sessions to that existing runner. The lock protects one runner registration owner per host workspace; it does not serialize `run.open`, tool execution, file edits, shell commands, or extension activity.
 
 ### The control plane owns the agent loop
 
@@ -192,9 +192,9 @@ The full environment manifest returned by `run.open` is immutable from the contr
 
 If the workspace, skills, extension registrations, or configuration change, the runner advertises a new manifest digest. The live connection generation continues to fence stale sockets; the new manifest applies to the next run. If a required capability disappears during an active run, the runner reports an environment error instead of silently changing the pinned contract.
 
-### One active top-level run per runner initially
+### Concurrent top-level runs per runner
 
-The initial runner executes directly in its registered workspace, so the control plane assigns at most one top-level run to it at a time. A run may still contain provider-requested parallel tool calls.
+Current runners advertise concurrent-run support, so the control plane may assign multiple top-level runs for different conversations to one registered workspace. Protocol-v1 runners that omit the additive capability remain capacity-one. Concurrent runs have independently fenced state, manifests, extension processes, cancellation, and cleanup, but the built-in execution provider exposes the same filesystem and host resources to all of them.
 
 ### One active run per conversation
 
@@ -541,7 +541,7 @@ Model profiles and runner environment profiles are separate namespaces:
 - `profile` selects a control-plane model profile. The control plane resolves provider, model, reasoning policy, provider-native capabilities, and control-plane tool policy from its own configuration.
 - `environmentProfile` selects a runner-local configuration profile. The runner resolves that name from its own global and workspace configuration before discovering the run manifest. Blank or `default` selects the runner's base configuration.
 - Selecting a model profile never implicitly selects a same-named runner profile, and the runner never uses the model profile as a local configuration lookup key.
-- After runner identity, readiness, capacity, and profile compatibility are validated, the control plane creates an in-memory pending affinity before reserving `run.open`. The binding becomes durable only after the conversation record exists. Failed reservation or a first turn that produces no conversation releases the pending binding, avoiding phantom durable rows; once persisted, a later request may omit the environment profile and reuse it but cannot select a different runner or environment profile.
+- After runner identity, readiness, availability, and profile compatibility are validated, the control plane creates an in-memory pending affinity before reserving `run.open`. The binding becomes durable only after the conversation record exists. Failed reservation or a first turn that produces no conversation releases the pending binding, avoiding phantom durable rows; once persisted, a later request may omit the environment profile and reuse it but cannot select a different runner or environment profile.
 
 Runner profiles are defined under the separate `environment_profiles` configuration namespace on the runner host:
 
@@ -554,7 +554,9 @@ environment_profiles:
       allow: [acp-subagent]
 ```
 
-The runner applies the selected environment profile before context, tools, skills, recipes, and extensions are discovered. Extension runtimes are cached by canonical workspace plus environment-profile identity. Fingerprint changes publish a new generation for later callers without closing a generation still leased by an active run.
+The runner applies the selected environment profile before context, tools, skills, recipes, and extensions are discovered. Active runs receive isolated extension runtime processes so concurrent parentless extension UI or lifecycle requests cannot inherit another run's context. Command discovery may use a cached non-run runtime; fingerprint changes replace that discovery generation without closing a generation still leased by a caller.
+
+Concurrent runs are negotiated as an additive runner registration capability within protocol v1. Current runners advertise unbounded concurrent-run support; a protocol-v1 runner that omits the capability remains usable but is scheduled for a new run only while idle.
 
 At `run.open`, the runner materializes a sanitized environment configuration projection into the manifest. It never sends secrets, environment variables, runner authentication credentials, or arbitrary runner-global provider credentials.
 
@@ -581,7 +583,7 @@ encoding:    one JSON-RPC 2.0 object per WebSocket text frame
 
 WebSocket frames provide message boundaries, so the protocol does not use extension-style `Content-Length` framing or ACP-style newline framing.
 
-One socket initially carries control traffic and the single active run. Every run-scoped request includes `runId`. If future runner capacity creates meaningful head-of-line or backpressure problems, run-specific sockets can be added without changing the method payloads.
+One socket carries control traffic and all active runs. Every run-scoped request includes `runId`, and the symmetric JSON-RPC peer can process multiple requests concurrently. If many-run workloads create meaningful head-of-line or backpressure problems, run-specific sockets can be added without changing the method payloads.
 
 ### Why JSON-RPC 2.0
 
@@ -781,7 +783,7 @@ Requests are used when the sender requires a result. Notifications are used for 
 
 ### Heartbeat and liveness
 
-WebSocket ping and pong frames detect transport liveness. A separate `runner.heartbeat` notification reports application health, runner state, active run, connection generation, and current manifest digest.
+WebSocket ping and pong frames detect transport liveness. A separate `runner.heartbeat` notification reports application health, runner state, active run IDs, connection generation, and current manifest digest.
 
 ```json
 {
@@ -791,7 +793,7 @@ WebSocket ping and pong frames detect transport liveness. A separate `runner.hea
     "runnerId": "runner_abc",
     "generation": 8,
     "state": "running",
-    "activeRunId": "run_123",
+    "activeRunIds": ["run_123", "run_456"],
     "manifestDigest": "sha256:9a21..."
   }
 }
@@ -801,13 +803,13 @@ A live socket is not sufficient evidence that the runner can accept work; the sc
 
 Heartbeat state is hot-path in-memory state. Registration, disconnect, run-state, and manifest transitions are persisted, while every individual heartbeat is not written to SQLite under the registry mutex. A clean disconnect persists the latest in-memory snapshot; after a control-plane crash, restored runners are offline regardless of the exact last heartbeat timestamp.
 
-The registry watches transport termination independently of handler draining. If a connection disappears or is replaced while a run is active, the generation-fenced run becomes lost and the control plane invokes the conversation cancellation hook immediately, stopping provider streaming rather than waiting for the next runner tool call. Every opened run also watches the owning control-plane context; if that context ends and normal `run.close` has not completed within the cleanup grace period, the watchdog sends best-effort cancel and close operations, then closes the connection if cleanup remains uncertain.
+The registry watches transport termination independently of handler draining. If a connection disappears or is replaced while runs are active, every generation-fenced run becomes lost and the control plane invokes each conversation cancellation hook immediately, stopping provider streaming rather than waiting for the next runner tool call. Every opened run also watches its owning control-plane context; if that context ends and normal `run.close` has not completed within the cleanup grace period, the watchdog sends best-effort cancel and close operations, then closes the connection if cleanup remains uncertain.
 
 ### Concurrency and backpressure
 
 Each connection has exactly one WebSocket reader goroutine and one writer goroutine. Request handlers run independently so a long tool call or UI request does not block receipt of cancellation or responses.
 
-Inbound normal requests, cancellation/close control requests, and notifications use separate bounded concurrency pools. Saturated normal or control request capacity returns a JSON-RPC busy error without starting the operation. `operation.cancel` is handled directly by the reader path so it can cancel an in-flight request even when handler pools are full. Notification overload closes the connection rather than allowing unbounded goroutine or memory growth.
+Inbound normal requests and cancellation/close control requests use separate bounded execution pools, with excess requests queued rather than rejected; the control lane therefore remains available while ordinary tool or open requests are busy. `operation.cancel` is handled directly by the reader path so it can cancel an in-flight or queued request even when handler pools are full. Notifications retain a separate bounded concurrency pool, and notification overload closes the connection rather than allowing unbounded goroutine or memory growth.
 
 All outbound messages pass through bounded control and replaceable-update queues. Responses, cancellation, close, and heartbeat traffic use the control path ahead of transient tool updates. A slow or unreachable peer eventually fails the relevant operation rather than causing unbounded memory growth. A transient failure to enqueue one WebSocket ping does not permanently disable the ping loop.
 
@@ -1049,7 +1051,7 @@ The Web server owns runner registration, run state, client event fan-out, cancel
 
 ### `pkg/acp`
 
-ACP continues to be a client-facing protocol. Ordinary `kodelet acp` uses the local agent environment directly, while `kodelet acp --server` embeds a stable workspace runner and delegates the provider loop and conversation store to the control plane without making the runner protocol itself ACP-specific.
+ACP continues to be a client-facing protocol. Ordinary `kodelet acp` uses the local agent environment directly, while `kodelet acp --server` either starts an embedded stable workspace runner or reuses the same-server runner ID advertised by an already-held workspace lock, then delegates the provider loop and conversation store to the control plane without making the runner protocol itself ACP-specific.
 
 ### `cmd/kodelet`
 
@@ -1085,7 +1087,7 @@ The transport package remains a dependency leaf: `agentenv` does not import the 
 - Add the runner-initiated WebSocket endpoint, authentication, stable host and runner identity, registration upsert, generation fencing, heartbeat, and bounded connection queues.
 - Add `run.open`, manifest snapshotting, lifecycle dispatch, runner tool execution, tool updates, cancellation, and run close.
 - Add bidirectional extension UI requests.
-- Enforce one active run per runner and one active run per conversation.
+- Track a set of active runs per runner while enforcing one active run per conversation.
 
 ### Phase 3: external runner and client integration
 
@@ -1103,7 +1105,7 @@ The transport package remains a dependency leaf: `agentenv` does not import the 
 - Create one fresh execution instance per top-level run.
 - Discover the manifest and execute tools and extensions inside that instance.
 - Destroy the instance when the run ends.
-- Increase runner capacity only when independent execution instances make concurrent runs safe.
+- Preserve concurrent logical runs while adding filesystem, process, network, and port isolation between them.
 
 ## Alternatives Considered
 
@@ -1113,7 +1115,7 @@ This is closer to the current in-process code and would require a smaller initia
 
 ### gRPC, Connect-Go, and Protobuf
 
-Typed generated RPC would provide standard streaming and flow-control machinery, but the initial system has one first-party Go runner, capacity one, low message volume, and no high-performance requirement. WebSocket plus JSON-RPC reuses existing Kodelet dependencies and conventions, avoids code generation, and remains easy to inspect while debugging.
+Typed generated RPC would provide standard streaming and flow-control machinery, but the current system has one first-party Go runner implementation, moderate message volume, and no demonstrated need for a generated transport stack. WebSocket plus JSON-RPC reuses existing Kodelet dependencies and conventions, avoids code generation, supports concurrent run-scoped requests, and remains easy to inspect while debugging.
 
 The application still requires run IDs, request correlation, generation fencing, heartbeats, cancellation, and uncertain-side-effect handling under either transport. Those requirements dominate logical reliability.
 
@@ -1129,9 +1131,9 @@ This is not selected because Kodelet resources and configuration are strongly as
 
 This remains the long-term target but is deliberately deferred. The environment protocol and central agent-loop split should be validated before selecting and implementing an isolation backend. Once introduced, the execution-instance provider owns the explicit environment projection and excludes runner and control-plane credentials from the isolated instance.
 
-### Sharing one workspace across concurrent initial runs
+### Serializing every run that shares a workspace
 
-This is not selected because filesystem locks cannot coordinate Bash, Git, build systems, extension processes, or services binding ports. Initial capacity is one.
+This is not selected. Trusted agents commonly need a main run plus parallel code-search, review, or editing subagents, and filesystem-level concurrency is already a normal property of development tools. Kodelet therefore does not use the runner lock as a workspace mutation lock and does not expose a capacity flag. Users and agents remain responsible for semantic conflicts until an isolated execution-instance backend is available.
 
 ## Open Questions
 

@@ -24,6 +24,18 @@ type managedRuntime struct {
 	fingerprint string
 	leases      int
 	retired     bool
+	closeOnce   sync.Once
+	closeErr    error
+}
+
+func (r *managedRuntime) close() error {
+	if r == nil || r.runtime == nil {
+		return nil
+	}
+	r.closeOnce.Do(func() {
+		r.closeErr = r.runtime.Close()
+	})
+	return r.closeErr
 }
 
 // RuntimeManager reuses extension runtimes for the lifetime of an interactive host.
@@ -81,6 +93,62 @@ func (m *RuntimeManager) RuntimeWithConfigAndCallContextForLease(ctx, leaseCtx c
 	return m.runtime(ctx, leaseCtx, cwd, variant, config, true, callContext)
 }
 
+// RuntimeWithConfigAndCallContextForIsolatedLease creates a runtime owned only
+// by one caller lease. It is closed when that lease ends and is never reused by
+// another concurrent session. The returned release function synchronously
+// closes the runtime and is safe to call more than once.
+func (m *RuntimeManager) RuntimeWithConfigAndCallContextForIsolatedLease(ctx, leaseCtx context.Context, cwd, _ string, config Config, callContext ExtensionCallContext) (*Runtime, func() error, error) {
+	if m == nil {
+		return nil, nil, errors.New("extension runtime manager is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if leaseCtx == nil {
+		leaseCtx = ctx
+	}
+	if err := leaseCtx.Err(); err != nil {
+		return nil, nil, err
+	}
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return nil, nil, errors.New("extension runtime manager is closed")
+	}
+	factory := m.newRuntime
+	m.mu.Unlock()
+
+	runtime, err := factory(ctx, cwd, config)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		_ = runtime.Close()
+		return nil, nil, err
+	}
+	if err := leaseCtx.Err(); err != nil {
+		_ = runtime.Close()
+		return nil, nil, err
+	}
+	managed := &managedRuntime{runtime: runtime, leases: 1, retired: true}
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		_ = runtime.Close()
+		return nil, nil, errors.New("extension runtime manager is closed")
+	}
+	m.retired[managed] = struct{}{}
+	m.mu.Unlock()
+	runtime.startLifecycle(ctx, callContext)
+	release := func() error {
+		return m.release(managed)
+	}
+	context.AfterFunc(leaseCtx, func() {
+		_ = release()
+	})
+	return runtime, release, nil
+}
+
 // RuntimeForCommandDiscoveryWithConfig returns a configured runtime without starting lifecycle events.
 func (m *RuntimeManager) RuntimeForCommandDiscoveryWithConfig(ctx context.Context, cwd, variant string, config Config) (*Runtime, error) {
 	return m.runtime(ctx, ctx, cwd, variant, config, false, ExtensionCallContext{})
@@ -123,7 +191,7 @@ func (m *RuntimeManager) runtime(ctx, leaseCtx context.Context, cwd, variant str
 		return nil, errors.New("extension runtime manager is closed")
 	}
 	managed := m.runtimes[key]
-	var closeRetired *Runtime
+	var closeRetired *managedRuntime
 	if managed == nil || managed.fingerprint != fingerprint {
 		replacement, err := m.newRuntime(ctx, cwd, config)
 		if err != nil {
@@ -138,7 +206,7 @@ func (m *RuntimeManager) runtime(ctx, leaseCtx context.Context, cwd, variant str
 		if managed != nil {
 			managed.retired = true
 			if managed.leases == 0 {
-				closeRetired = managed.runtime
+				closeRetired = managed
 			} else {
 				m.retired[managed] = struct{}{}
 			}
@@ -150,7 +218,7 @@ func (m *RuntimeManager) runtime(ctx, leaseCtx context.Context, cwd, variant str
 	runtime := managed.runtime
 	m.mu.Unlock()
 	if closeRetired != nil {
-		_ = closeRetired.Close()
+		_ = closeRetired.close()
 	}
 	if startLifecycle {
 		runtime.startLifecycle(ctx, callContext)
@@ -161,27 +229,30 @@ func (m *RuntimeManager) runtime(ctx, leaseCtx context.Context, cwd, variant str
 func (m *RuntimeManager) acquireLocked(ctx context.Context, managed *managedRuntime) {
 	managed.leases++
 	context.AfterFunc(ctx, func() {
-		m.release(managed)
+		_ = m.release(managed)
 	})
 }
 
-func (m *RuntimeManager) release(managed *managedRuntime) {
+func (m *RuntimeManager) release(managed *managedRuntime) error {
 	if m == nil || managed == nil {
-		return
+		return nil
 	}
-	var runtime *Runtime
+	closeRuntime := false
 	m.mu.Lock()
 	if managed.leases > 0 {
 		managed.leases--
 	}
-	if !m.closed && managed.retired && managed.leases == 0 {
-		delete(m.retired, managed)
-		runtime = managed.runtime
+	if managed.retired && managed.leases == 0 {
+		if !m.closed {
+			delete(m.retired, managed)
+		}
+		closeRuntime = true
 	}
 	m.mu.Unlock()
-	if runtime != nil {
-		_ = runtime.Close()
+	if closeRuntime {
+		return managed.close()
 	}
+	return nil
 }
 
 // Close terminates every managed extension runtime. It is safe to call more than once.
@@ -206,7 +277,7 @@ func (m *RuntimeManager) Close() error {
 	seen := make(map[*Runtime]struct{}, len(runtimes)+len(retired))
 	for key, managed := range runtimes {
 		seen[managed.runtime] = struct{}{}
-		if err := managed.runtime.Close(); err != nil && firstErr == nil {
+		if err := managed.close(); err != nil && firstErr == nil {
 			firstErr = errors.Wrapf(err, "failed to close extension runtime for %s", key)
 		}
 	}
@@ -214,7 +285,7 @@ func (m *RuntimeManager) Close() error {
 		if _, ok := seen[managed.runtime]; ok {
 			continue
 		}
-		if err := managed.runtime.Close(); err != nil && firstErr == nil {
+		if err := managed.close(); err != nil && firstErr == nil {
 			firstErr = errors.Wrap(err, "failed to close retired extension runtime")
 		}
 	}

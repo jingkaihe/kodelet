@@ -96,7 +96,11 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
     const selectedRunner = runners.find((runner) => runner.id === runnerIdDraft);
     const selectedRunnerAvailable =
       runnerIdDraft === '' ||
-      Boolean(selectedRunner?.connected && selectedRunner.status === 'idle');
+      Boolean(
+        selectedRunner?.connected &&
+          (selectedRunner.status === 'idle' ||
+            (selectedRunner.status === 'busy' && selectedRunner.concurrentRuns))
+      );
     return (
       <div className="new-chat-dialog-backdrop new-chat-context-backdrop">
         <div
@@ -181,7 +185,10 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
                   >
                     <option value="">Local control-plane workspace</option>
                     {runners.map((runner) => {
-                      const available = runner.connected && runner.status === 'idle';
+                      const available =
+                        runner.connected &&
+                        (runner.status === 'idle' ||
+                          (runner.status === 'busy' && runner.concurrentRuns));
                       const name = runner.displayName || runner.workspace.name || runner.id;
                       return (
                         <option disabled={!available} key={runner.id} value={runner.id}>

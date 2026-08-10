@@ -46,6 +46,25 @@ type leaseRecordingRuntimeProvider struct {
 	leaseCtx     context.Context
 }
 
+type isolatedRuntimeProvider struct {
+	runtime        *extensions.Runtime
+	releaseStarted chan struct{}
+	releaseGate    chan struct{}
+	startedOnce    sync.Once
+}
+
+func (p *isolatedRuntimeProvider) RuntimeWithConfigAndCallContext(context.Context, string, string, extensions.Config, extensions.ExtensionCallContext) (*extensions.Runtime, error) {
+	return p.runtime, nil
+}
+
+func (p *isolatedRuntimeProvider) RuntimeWithConfigAndCallContextForIsolatedLease(context.Context, context.Context, string, string, extensions.Config, extensions.ExtensionCallContext) (*extensions.Runtime, func() error, error) {
+	return p.runtime, func() error {
+		p.startedOnce.Do(func() { close(p.releaseStarted) })
+		<-p.releaseGate
+		return nil
+	}, nil
+}
+
 func (p *leaseRecordingRuntimeProvider) RuntimeWithConfigAndCallContext(ctx context.Context, _ string, _ string, _ extensions.Config, _ extensions.ExtensionCallContext) (*extensions.Runtime, error) {
 	p.operationCtx = ctx
 	p.leaseCtx = ctx
@@ -272,7 +291,7 @@ Review the runner workspace.`), 0o600))
 	assert.Contains(t, manifestToolNames(manifest), "file_read")
 	require.NotEmpty(t, manifest.ContextFiles)
 	assert.Contains(t, manifest.ContextFiles[0].Content, "Workspace rules")
-	assert.Equal(t, manifest.Digest, mustProbeManifestDigest(t, service))
+	assert.NotEmpty(t, mustProbeManifestDigest(t, service))
 	state, activeRunID, heartbeatDigest = service.HeartbeatSnapshot()
 	assert.Equal(t, protocol.RunnerStateRunning, state)
 	assert.Equal(t, "run-1", activeRunID)
@@ -280,7 +299,7 @@ Review the runner workspace.`), 0o600))
 	require.ErrorContains(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-2", Generation: 5}), "active run")
 
 	_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodRunOpen, mustJSON(t, protocol.RunOpenParams{
-		RunID: "run-2", ConversationID: "conversation-2",
+		RunID: "run-2", ConversationID: "conversation-1",
 	}))
 	require.NotNil(t, rpcErr)
 	assert.Equal(t, protocol.ErrorCodeBusy, rpcErr.Code)
@@ -396,19 +415,99 @@ func TestSerializeToolResultCapsRemoteDisplayOutput(t *testing.T) {
 	assert.True(t, utf8.ValidString(result.DisplayOutput))
 }
 
-func TestProbeManifestRejectsDifferentActiveEnvironmentProfile(t *testing.T) {
-	expected := runnerpayload.Manifest{RunnerID: "runner-1", RunID: "run-1"}
-	service := &Service{active: &activeRun{
-		environmentProfile: "gpu",
-		manifest:           expected,
-	}}
-
-	manifest, err := service.ProbeManifest(t.Context(), "gpu")
+func TestServiceSupportsConcurrentRunsAndProfileProbes(t *testing.T) {
+	workspace := t.TempDir()
+	runtime := extensions.EmptyRuntime()
+	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
+	service, err := NewService(t.Context(), workspace, ServiceOptions{
+		RuntimeProvider: staticRuntimeProvider{runtime: runtime},
+		ConfigLoader: func(string) (llmtypes.Config, error) {
+			return llmtypes.Config{AllowedTools: []string{"file_read"}}, nil
+		},
+	})
 	require.NoError(t, err)
-	assert.Equal(t, expected, manifest)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
 
-	_, err = service.ProbeManifest(t.Context(), "workspace")
-	require.ErrorContains(t, err, `runner is busy with environment profile "gpu", not requested profile "workspace"`)
+	for _, params := range []protocol.RunOpenParams{
+		{RunID: "run-1", ConversationID: "conversation-1", ClientCapabilities: protocol.ClientCapabilities{InteractiveUI: true}, Agent: protocol.AgentDescriptor{EnvironmentProfile: "gpu"}},
+		{RunID: "run-2", ConversationID: "conversation-2", ClientCapabilities: protocol.ClientCapabilities{PersistentSurfaces: true}, Agent: protocol.AgentDescriptor{EnvironmentProfile: "workspace"}},
+	} {
+		manifest := callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, params)
+		assert.Equal(t, params.RunID, manifest.RunID)
+	}
+
+	state, runIDs, _ := service.HeartbeatSnapshotRuns()
+	assert.Equal(t, protocol.RunnerStateRunning, state)
+	assert.Equal(t, []string{"run-1", "run-2"}, runIDs)
+	service.Attach(&recordingPeer{})
+	_, uiRunID, capabilities, err := service.uiTarget(context.WithValue(t.Context(), runnerRunIDContextKey{}, "run-2"))
+	require.NoError(t, err)
+	assert.Equal(t, "run-2", uiRunID)
+	assert.False(t, capabilities.InteractiveUI)
+	assert.True(t, capabilities.PersistentSurfaces)
+	manifest, err := service.ProbeManifest(t.Context(), "review")
+	require.NoError(t, err)
+	assert.NotEmpty(t, manifest.Digest)
+
+	callService[any](t, service, protocol.MethodRunClose, protocol.RunCloseParams{RunID: "run-1"})
+	state, runIDs, _ = service.HeartbeatSnapshotRuns()
+	assert.Equal(t, protocol.RunnerStateRunning, state)
+	assert.Equal(t, []string{"run-2"}, runIDs)
+	_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodRunClose, mustJSON(t, protocol.RunCloseParams{RunID: "run-1"}))
+	require.NotNil(t, rpcErr)
+	assert.Equal(t, protocol.ErrorCodeStale, rpcErr.Code)
+	assert.Equal(t, protocol.ErrorReasonRunNotActive, rpcErr.Reason())
+	state, runIDs, _ = service.HeartbeatSnapshotRuns()
+	assert.Equal(t, protocol.RunnerStateRunning, state)
+	assert.Equal(t, []string{"run-2"}, runIDs)
+	callService[any](t, service, protocol.MethodRunClose, protocol.RunCloseParams{RunID: "run-2"})
+}
+
+func TestServiceCloseWaitsForIsolatedExtensionRuntimeRelease(t *testing.T) {
+	runtime := extensions.EmptyRuntime()
+	provider := &isolatedRuntimeProvider{
+		runtime:        runtime,
+		releaseStarted: make(chan struct{}),
+		releaseGate:    make(chan struct{}),
+	}
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(provider.releaseGate) }) })
+	service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{
+		RuntimeProvider: provider,
+		CleanupTimeout:  time.Second,
+		ConfigLoader:    func(string) (llmtypes.Config, error) { return llmtypes.Config{}, nil },
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, service.Close())
+		require.NoError(t, runtime.Close())
+	})
+	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
+	callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{RunID: "run-1", ConversationID: "conversation-1"})
+
+	done := make(chan *protocol.RPCError, 1)
+	go func() {
+		_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodRunClose, mustJSON(t, protocol.RunCloseParams{RunID: "run-1"}))
+		done <- rpcErr
+	}()
+	select {
+	case <-provider.releaseStarted:
+	case <-time.After(time.Second):
+		t.Fatal("run.close did not start isolated extension runtime release")
+	}
+	select {
+	case <-done:
+		t.Fatal("run.close completed before isolated extension runtime release")
+	case <-time.After(30 * time.Millisecond):
+	}
+	releaseOnce.Do(func() { close(provider.releaseGate) })
+	select {
+	case rpcErr := <-done:
+		require.Nil(t, rpcErr)
+	case <-time.After(time.Second):
+		t.Fatal("run.close did not complete after isolated extension runtime release")
+	}
 }
 
 func TestManifestHelpersLoadSystemPromptAndDefensivelyCloneSchemas(t *testing.T) {
@@ -537,6 +636,9 @@ func TestServiceOpenRunWaitsForManifestSnapshotRefresh(t *testing.T) {
 		t.Fatal("run.open failed instead of waiting for the in-flight manifest refresh")
 	case <-time.After(30 * time.Millisecond):
 	}
+	state, runIDs, _ := service.HeartbeatSnapshotRuns()
+	assert.Equal(t, protocol.RunnerStateRunning, state)
+	assert.Equal(t, []string{"run-1"}, runIDs)
 	service.snapshotMu.Unlock()
 
 	select {

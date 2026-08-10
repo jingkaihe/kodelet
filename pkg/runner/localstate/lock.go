@@ -89,10 +89,15 @@ func (s *Store) AcquireWorkspaceLock(workspace string, metadata LockMetadata) (*
 		return nil, errors.Wrap(err, "failed to secure runner workspace lock")
 	}
 	if err := tryLockFile(file); err != nil {
-		_ = file.Close()
-		existing, _ := readLockMetadata(path)
-		existing.Workspace = workspace
-		return nil, &LockHeldError{Path: path, Metadata: existing}
+		existing, _ := readLockMetadataFile(file)
+		if retryErr := tryLockFile(file); retryErr != nil {
+			if latest, readErr := readLockMetadataFile(file); readErr == nil {
+				existing = latest
+			}
+			_ = file.Close()
+			existing.Workspace = workspace
+			return nil, &LockHeldError{Path: path, Metadata: existing}
+		}
 	}
 	lock := &WorkspaceLock{file: file, path: path}
 	metadata.Version = stateVersion
@@ -215,7 +220,19 @@ func (l *WorkspaceLock) Close() error {
 }
 
 func readLockMetadata(path string) (LockMetadata, error) {
-	payload, err := os.ReadFile(path)
+	file, err := os.Open(path)
+	if err != nil {
+		return LockMetadata{}, err
+	}
+	defer file.Close()
+	return readLockMetadataFile(file)
+}
+
+func readLockMetadataFile(file *os.File) (LockMetadata, error) {
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return LockMetadata{}, err
+	}
+	payload, err := io.ReadAll(file)
 	if err != nil {
 		return LockMetadata{}, err
 	}

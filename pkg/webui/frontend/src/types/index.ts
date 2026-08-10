@@ -173,7 +173,9 @@ export interface Runner {
   compatibilityError?: string;
   status: 'offline' | 'connecting' | 'idle' | 'busy' | 'error' | 'incompatible';
   connected: boolean;
+  concurrentRuns?: boolean;
   activeRunId?: string;
+  activeRunIds?: string[];
   generation: number;
   connectedAt?: string;
   lastHeartbeatAt?: string;

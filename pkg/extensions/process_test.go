@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -240,6 +241,58 @@ func TestProcessHandleRPCRequestSupportsUIConfirmSelectAndNotify(t *testing.T) {
 	notification, ok := result.(UIInputResponse)
 	require.True(t, ok)
 	assert.Equal(t, UIInputStatusSubmitted, notification.Status)
+}
+
+func TestProcessCloseCancelsAndWaitsForParentlessHostRequests(t *testing.T) {
+	clientReader, serverWriter := io.Pipe()
+	t.Cleanup(func() {
+		_ = clientReader.Close()
+		_ = serverWriter.Close()
+	})
+	broker := &cancelAwareUIInputBroker{started: make(chan struct{}), canceled: make(chan struct{})}
+	client := newRPCClient(clientReader, io.Discard)
+	process := &Process{closed: false, client: client}
+	source := &processExtensionUISource{
+		process: process,
+		client:  client,
+		owner:   UIExtensionOwner{ExtensionID: "test", Generation: 1},
+	}
+	source.setHostContext(ContextWithUIInputBroker(context.Background(), broker))
+	process.uiSource = source
+	client.setHostRequestHandler(source)
+	go client.readLoop()
+
+	require.NoError(t, writeFrame(serverWriter, []byte(`{"jsonrpc":"2.0","id":1,"method":"kodelet.ui.input","params":{"title":"Choose"}}`)))
+	select {
+	case <-broker.started:
+	case <-time.After(time.Second):
+		t.Fatal("parentless host request did not start")
+	}
+	done := make(chan error, 1)
+	go func() { done <- process.Close() }()
+	select {
+	case <-broker.canceled:
+	case <-time.After(time.Second):
+		t.Fatal("process close did not cancel the parentless host request")
+	}
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("process close did not wait for the parentless host request")
+	}
+}
+
+type cancelAwareUIInputBroker struct {
+	started  chan struct{}
+	canceled chan struct{}
+}
+
+func (b *cancelAwareUIInputBroker) Input(ctx context.Context, _ UIInputRequest) (UIInputResponse, error) {
+	close(b.started)
+	<-ctx.Done()
+	close(b.canceled)
+	return UIInputResponse{}, ctx.Err()
 }
 
 type ioDiscard struct{}

@@ -36,6 +36,7 @@ type Persistence interface {
 	SaveRunner(ctx context.Context, runner Runner) error
 	SaveRun(ctx context.Context, run Run) error
 	SaveRunnerAndRun(ctx context.Context, runner Runner, run Run) error
+	SaveRunnerAndRuns(ctx context.Context, runner Runner, runs []Run) error
 	BindConversation(ctx context.Context, conversationID, runnerID, environmentProfile string, now time.Time) error
 	ConversationAffinity(ctx context.Context, conversationID string) (ConversationAffinity, bool, error)
 	RemoveRunner(ctx context.Context, runnerID string, force bool) (RemovalResult, error)
@@ -230,6 +231,11 @@ func (s *SQLitePersistence) saveRun(ctx context.Context, executor sqlExecutor, r
 
 // SaveRunnerAndRun atomically stores a runner registration and one of its runs.
 func (s *SQLitePersistence) SaveRunnerAndRun(ctx context.Context, runner Runner, run Run) error {
+	return s.SaveRunnerAndRuns(ctx, runner, []Run{run})
+}
+
+// SaveRunnerAndRuns atomically stores a runner registration and its changed runs.
+func (s *SQLitePersistence) SaveRunnerAndRuns(ctx context.Context, runner Runner, runs []Run) error {
 	if s == nil || s.db == nil {
 		return errors.New("runner persistence is closed")
 	}
@@ -242,8 +248,10 @@ func (s *SQLitePersistence) SaveRunnerAndRun(ctx context.Context, runner Runner,
 	if err := s.saveRunner(ctx, tx, runner); err != nil {
 		return err
 	}
-	if err := s.saveRun(ctx, tx, run); err != nil {
-		return err
+	for _, run := range runs {
+		if err := s.saveRun(ctx, tx, run); err != nil {
+			return err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return errors.Wrap(err, "failed to commit runner state transaction")

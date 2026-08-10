@@ -5,6 +5,7 @@ package protocol
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -175,15 +176,21 @@ type Workspace struct {
 	Name string `json:"name"`
 }
 
+// RunnerCapabilities declares optional behavior supported by this runner process.
+type RunnerCapabilities struct {
+	ConcurrentRuns bool `json:"concurrentRuns,omitempty"`
+}
+
 // RegisterParams is the first request sent by a runner connection.
 type RegisterParams struct {
-	ProtocolVersions []int     `json:"protocolVersions"`
-	RunnerID         string    `json:"runnerId,omitempty"`
-	DisplayName      string    `json:"displayName,omitempty"`
-	Host             Host      `json:"host"`
-	Workspace        Workspace `json:"workspace"`
-	KodeletVersion   string    `json:"kodeletVersion"`
-	ManifestDigest   string    `json:"manifestDigest,omitempty"`
+	ProtocolVersions []int              `json:"protocolVersions"`
+	RunnerID         string             `json:"runnerId,omitempty"`
+	DisplayName      string             `json:"displayName,omitempty"`
+	Host             Host               `json:"host"`
+	Workspace        Workspace          `json:"workspace"`
+	Capabilities     RunnerCapabilities `json:"capabilities,omitempty"`
+	KodeletVersion   string             `json:"kodeletVersion"`
+	ManifestDigest   string             `json:"manifestDigest,omitempty"`
 }
 
 // Validate checks registration identity and version negotiation fields.
@@ -250,6 +257,7 @@ type HeartbeatParams struct {
 	Generation     int64       `json:"generation"`
 	State          RunnerState `json:"state"`
 	ActiveRunID    string      `json:"activeRunId,omitempty"`
+	ActiveRunIDs   []string    `json:"activeRunIds,omitempty"`
 	ManifestDigest string      `json:"manifestDigest,omitempty"`
 }
 
@@ -263,10 +271,39 @@ func (p HeartbeatParams) Validate() error {
 	}
 	switch p.State {
 	case RunnerStateIdle, RunnerStateRunning, RunnerStateStopping, RunnerStateError:
-		return nil
 	default:
 		return errors.Errorf("unsupported runner state %q", p.State)
 	}
+	_, err := p.NormalizedActiveRunIDs()
+	return err
+}
+
+// NormalizedActiveRunIDs returns the deterministic active-run set advertised by a heartbeat.
+// ActiveRunID remains accepted for compatibility with singular-run runner clients.
+func (p HeartbeatParams) NormalizedActiveRunIDs() ([]string, error) {
+	seen := make(map[string]struct{}, len(p.ActiveRunIDs)+1)
+	result := make([]string, 0, len(p.ActiveRunIDs)+1)
+	for _, raw := range p.ActiveRunIDs {
+		runID := strings.TrimSpace(raw)
+		if runID == "" {
+			return nil, errors.New("activeRunIds must not contain empty values")
+		}
+		if _, exists := seen[runID]; exists {
+			return nil, errors.Errorf("activeRunIds contains duplicate run %s", runID)
+		}
+		seen[runID] = struct{}{}
+		result = append(result, runID)
+	}
+	if runID := strings.TrimSpace(p.ActiveRunID); runID != "" {
+		if _, exists := seen[runID]; !exists {
+			if len(result) > 0 {
+				return nil, errors.New("activeRunId does not match activeRunIds")
+			}
+			result = append(result, runID)
+		}
+	}
+	sort.Strings(result)
+	return result, nil
 }
 
 // ManifestChangedParams reports an idle-manifest digest transition.

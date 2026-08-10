@@ -117,17 +117,19 @@ func TestChatNoToolsDisablesExtensionStartup(t *testing.T) {
 	assert.False(t, extensions.LoadConfigFromViper().Enabled)
 }
 
-func TestPrepareRemoteChatRunnerSelectsIdleRunner(t *testing.T) {
+func TestPrepareRemoteChatRunnerSelectsAvailableRunner(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		assert.Equal(t, "/api/runners", request.URL.Path)
 		assert.Equal(t, "Bearer secret", request.Header.Get("Authorization"))
 		require.NoError(t, json.NewEncoder(w).Encode(runnerListAPIResponse{Runners: []runnerregistry.Runner{{
-			ID:          "runner-1",
-			DisplayName: "kodelet-gpu",
-			Host:        protocol.Host{Hostname: "worker"},
-			Workspace:   protocol.Workspace{Path: "/runner/kodelet", Name: "kodelet"},
-			Status:      runnerregistry.RunnerStatusIdle,
-			Connected:   true,
+			ID:             "runner-1",
+			DisplayName:    "kodelet-gpu",
+			Host:           protocol.Host{Hostname: "worker"},
+			Workspace:      protocol.Workspace{Path: "/runner/kodelet", Name: "kodelet"},
+			Status:         runnerregistry.RunnerStatusBusy,
+			ConcurrentRuns: true,
+			ActiveRunID:    "run-1",
+			Connected:      true,
 		}}}))
 	}))
 	defer server.Close()
@@ -142,6 +144,21 @@ func TestPrepareRemoteChatRunnerSelectsIdleRunner(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, runner)
 	assert.Equal(t, "/runner/kodelet", workspace)
+}
+
+func TestPrepareRemoteChatRunnerRejectsBusyLegacyRunner(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		require.NoError(t, json.NewEncoder(w).Encode(runnerListAPIResponse{Runners: []runnerregistry.Runner{{
+			ID:        "runner-1",
+			Workspace: protocol.Workspace{Path: "/runner/kodelet", Name: "kodelet"},
+			Status:    runnerregistry.RunnerStatusBusy,
+			Connected: true,
+		}}}))
+	}))
+	defer server.Close()
+
+	_, _, err := prepareRemoteChatRunner(t.Context(), &ChatConfig{Runner: "runner-1", Server: server.URL})
+	require.ErrorContains(t, err, "does not support concurrent runs")
 }
 
 func TestPrepareRemoteChatRunnerRejectsLocalOnlyOptions(t *testing.T) {

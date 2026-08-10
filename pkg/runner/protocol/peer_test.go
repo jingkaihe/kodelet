@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -96,7 +97,7 @@ func TestPeerCallTrackedExposesInboundWireRequestID(t *testing.T) {
 	assert.Equal(t, trackedID, <-remoteID)
 }
 
-func TestPeerBoundsRequestsWithoutStarvingControlCalls(t *testing.T) {
+func TestPeerQueuesRequestsWithoutStarvingControlCalls(t *testing.T) {
 	slowStarted := make(chan struct{})
 	releaseSlow := make(chan struct{})
 	serverPeer, clientPeer := newTestPeerPair(t,
@@ -130,14 +131,63 @@ func TestPeerBoundsRequestsWithoutStarvingControlCalls(t *testing.T) {
 		t.Fatal("slow request did not start")
 	}
 
-	err := clientPeer.Call(t.Context(), "second", nil, nil)
-	var rpcErr *RPCError
-	require.ErrorAs(t, err, &rpcErr)
-	assert.Equal(t, ErrorCodeBusy, rpcErr.Code)
+	secondDone := make(chan error, 1)
+	go func() {
+		secondDone <- clientPeer.Call(t.Context(), "second", nil, nil)
+	}()
+	select {
+	case err := <-secondDone:
+		t.Fatalf("queued request completed before capacity was released: %v", err)
+	case <-time.After(30 * time.Millisecond):
+	}
 
 	require.NoError(t, clientPeer.Call(t.Context(), MethodRunClose, RunCloseParams{RunID: "run-one"}, nil))
 	close(releaseSlow)
 	require.NoError(t, <-slowDone)
+	require.NoError(t, <-secondDone)
+}
+
+func TestPeerQueuesControlCallsInsteadOfRejectingThem(t *testing.T) {
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var calls atomic.Int32
+	_, clientPeer := newTestPeerPair(t,
+		PeerConfig{
+			MaxConcurrentControlRequests: 1,
+			Handler: RequestHandlerFunc(func(_ context.Context, method string, _ json.RawMessage) (any, *RPCError) {
+				require.Equal(t, MethodRunClose, method)
+				if calls.Add(1) == 1 {
+					close(firstStarted)
+					<-releaseFirst
+				}
+				return map[string]bool{"closed": true}, nil
+			}),
+		},
+		PeerConfig{},
+	)
+
+	firstDone := make(chan error, 1)
+	secondDone := make(chan error, 1)
+	go func() {
+		firstDone <- clientPeer.Call(t.Context(), MethodRunClose, RunCloseParams{RunID: "run-one"}, nil)
+	}()
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first control request did not start")
+	}
+	go func() {
+		secondDone <- clientPeer.Call(t.Context(), MethodRunClose, RunCloseParams{RunID: "run-two"}, nil)
+	}()
+	select {
+	case err := <-secondDone:
+		t.Fatalf("queued control request completed before capacity was released: %v", err)
+	case <-time.After(30 * time.Millisecond):
+	}
+	close(releaseFirst)
+	require.NoError(t, <-firstDone)
+	require.NoError(t, <-secondDone)
+	assert.Equal(t, int32(2), calls.Load())
 }
 
 func TestPeerOperationCancelBypassesNotificationLimit(t *testing.T) {

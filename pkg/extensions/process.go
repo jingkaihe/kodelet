@@ -188,17 +188,20 @@ func (p *Process) ensureRunning(ctx context.Context) error {
 	cancel()
 
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	if err != nil {
+		var closedClient *rpcClient
 		if p.client == client && !p.closed {
-			_ = p.closeProcessLocked()
+			closedClient, _ = p.closeProcessLocked()
 			p.recordFailureLocked()
 		}
+		p.mu.Unlock()
+		closedClient.waitIncomingRequests()
 		return err
 	}
 	if p.client == client && !p.closed {
 		p.failures = 0
 	}
+	p.mu.Unlock()
 	return nil
 }
 
@@ -226,6 +229,9 @@ func (p *Process) Initialize(ctx context.Context, cwd string) (*InitializeResult
 }
 
 func (p *Process) initialize(ctx context.Context, cwd string, client *rpcClient, source *processExtensionUISource) (*InitializeResult, error) {
+	if source != nil {
+		source.setHostContext(ctx)
+	}
 	uiHost, hasExtensionUI := ExtensionUIHostFromContext(ctx)
 	if hasExtensionUI {
 		p.uiMu.Lock()
@@ -598,7 +604,11 @@ func (p *Process) handleRPCRequest(ctx context.Context, source UIExtensionSource
 func (p *Process) handleRPCNotification(source UIExtensionSource, method string, params json.RawMessage) {
 	switch method {
 	case UIWidgetFrameMethod, UISurfaceFrameMethod:
-		_, _ = p.handleRPCRequest(context.Background(), source, method, params)
+		ctx := context.Background()
+		if processSource, ok := source.(*processExtensionUISource); ok {
+			ctx = processSource.hostContext()
+		}
+		_, _ = p.handleRPCRequest(ctx, source, method, params)
 	}
 }
 
@@ -629,9 +639,57 @@ type processExtensionUISource struct {
 	process          *Process
 	client           *rpcClient
 	owner            UIExtensionOwner
+	hostCtxMu        sync.RWMutex
+	hostCtx          context.Context
+	hostCancel       context.CancelFunc
 	notifyMu         sync.Mutex
 	notify           map[string]*orderedExtensionUINotifications
 	notifyLifecycles map[string]uint64
+}
+
+func (s *processExtensionUISource) setHostContext(ctx context.Context) {
+	if s == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	hostCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	s.hostCtxMu.Lock()
+	previousCancel := s.hostCancel
+	s.hostCtx = hostCtx
+	s.hostCancel = cancel
+	s.hostCtxMu.Unlock()
+	if previousCancel != nil {
+		previousCancel()
+	}
+}
+
+func (s *processExtensionUISource) hostContext() context.Context {
+	if s == nil {
+		return context.Background()
+	}
+	s.hostCtxMu.RLock()
+	ctx := s.hostCtx
+	s.hostCtxMu.RUnlock()
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
+}
+
+func (s *processExtensionUISource) cancelHostContext() {
+	if s == nil {
+		return
+	}
+	s.hostCtxMu.Lock()
+	cancel := s.hostCancel
+	s.hostCancel = nil
+	s.hostCtx = nil
+	s.hostCtxMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 type orderedExtensionUINotifications struct {
@@ -816,14 +874,16 @@ func shouldRestartAfterCallError(err error) bool {
 
 func (p *Process) failClientGeneration(failedClient *rpcClient) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	if p.closed || p.shutdown || p.disabled || p.client != failedClient {
+		p.mu.Unlock()
 		return
 	}
-	_ = p.closeProcessLocked()
+	closedClient, _ := p.closeProcessLocked()
 	// A failed call means this process generation is no longer usable even if
 	// it disappeared before cmd/process state was fully populated.
 	p.recordFailureLocked()
+	p.mu.Unlock()
+	closedClient.waitIncomingRequests()
 }
 
 // Close terminates the extension process.
@@ -832,14 +892,21 @@ func (p *Process) Close() error {
 		return nil
 	}
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	p.shutdown = true
-	return p.closeProcessLocked()
+	closedClient, err := p.closeProcessLocked()
+	p.mu.Unlock()
+	closedClient.waitIncomingRequests()
+	return err
 }
 
-func (p *Process) closeProcessLocked() error {
+func (p *Process) closeProcessLocked() (*rpcClient, error) {
+	client := p.client
+	if p.uiSource != nil {
+		p.uiSource.cancelHostContext()
+	}
+	client.stopIncomingRequests()
 	if p.closed {
-		return nil
+		return client, nil
 	}
 	p.closed = true
 	owner := UIExtensionOwner{}
@@ -853,26 +920,26 @@ func (p *Process) closeProcessLocked() error {
 		uiHost.CleanupExtensionUI(owner)
 	}
 	if p.cmd == nil || p.cmd.Process == nil {
-		return nil
+		return client, nil
 	}
 	forceKillErr := osutil.ForceKillProcessGroup(p.cmd)
 	if forceKillErr != nil {
 		if err := p.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
-			return errors.Wrapf(forceKillErr, "failed to force kill extension process group; direct process kill also failed: %v", err)
+			return client, errors.Wrapf(forceKillErr, "failed to force kill extension process group; direct process kill also failed: %v", err)
 		}
 	}
 	_ = p.stdin.Close()
 	_ = p.stdout.Close()
 	err := p.cmd.Wait()
 	if forceKillErr != nil {
-		return errors.Wrap(forceKillErr, "failed to force kill extension process group")
+		return client, errors.Wrap(forceKillErr, "failed to force kill extension process group")
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
-		return nil
+		return client, nil
 	}
 	if err != nil && strings.Contains(err.Error(), "process already finished") {
-		return nil
+		return client, nil
 	}
-	return err
+	return client, err
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	runnerclient "github.com/jingkaihe/kodelet/pkg/runner/client"
+	"github.com/jingkaihe/kodelet/pkg/runner/localstate"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -65,7 +66,7 @@ func init() {
 	acpCmd.Flags().String("server", defaultRunnerServer, "Run the agentic loop on a control plane while keeping the workspace environment local")
 	acpCmd.Flags().String("auth-token", "", "Control-plane API authentication token (or KODELET_AUTH_TOKEN)")
 	acpCmd.Flags().String("runner-auth-token", "", "Runner-only authentication token (or KODELET_RUNNER_AUTH_TOKEN)")
-	acpCmd.Flags().String("runner-profile", "", "Local environment profile for the embedded workspace runner")
+	acpCmd.Flags().String("runner-profile", "", "Local environment profile for the selected workspace runner")
 }
 
 func runACP(cmd *cobra.Command, _ []string) error {
@@ -99,18 +100,27 @@ func runRemoteACP(ctx context.Context, cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	serverURL, _ := cmd.Flags().GetString("server")
+	rawServerURL, _ := cmd.Flags().GetString("server")
+	serverURL, err := normalizeRunnerAPIBaseURL(rawServerURL)
+	if err != nil {
+		return err
+	}
 	apiAuthToken, runnerAuthToken, err := consumeRemoteACPAuthTokens(cmd)
 	if err != nil {
 		return err
 	}
 	runnerProfile, _ := cmd.Flags().GetString("runner-profile")
 
-	provider := newEmbeddedACPRemoteProvider(serverURL, apiAuthToken)
+	store, err := localstate.NewStore()
+	if err != nil {
+		return errors.Wrap(err, "failed to initialize runner state")
+	}
+	provider := newEmbeddedACPRemoteProvider(serverURL, apiAuthToken, workspace, store)
 	runner, err := runnerclient.NewRunner(ctx, runnerclient.RunnerConfig{
 		Server:         serverURL,
 		AuthToken:      runnerAuthToken,
 		Workspace:      workspace,
+		Store:          store,
 		ServiceOptions: remoteACPServiceOptions(cmd),
 		OnRegistered:   provider.registeredRunner,
 		OnRetry: func(connectionErr error, delay time.Duration) {
@@ -120,6 +130,22 @@ func runRemoteACP(ctx context.Context, cmd *cobra.Command) error {
 	})
 	if err != nil {
 		return errors.Wrap(err, "failed to initialize embedded ACP runner")
+	}
+	defer func() {
+		if closeErr := runner.Close(); closeErr != nil {
+			logger.G(ctx).WithError(closeErr).Warn("Failed to close ACP workspace runner")
+		}
+	}()
+	ownsWorkspaceLock, existingRunnerID, err := acquireOrReuseACPRunner(ctx, runner, serverURL)
+	if err != nil {
+		return errors.Wrap(err, "failed to acquire or reuse ACP workspace runner")
+	}
+	if !ownsWorkspaceLock {
+		if err := validateReusedACPFlags(cmd); err != nil {
+			return err
+		}
+		provider.registeredRunnerID(existingRunnerID)
+		logger.G(ctx).WithField("runner_id", existingRunnerID).Info("Reusing existing workspace runner for server-backed ACP")
 	}
 
 	profile := ""
@@ -134,7 +160,7 @@ func runRemoteACP(ctx context.Context, cmd *cobra.Command) error {
 		acp.WithContext(ctx),
 		acp.WithRemoteSessions(acp.RemoteSessionConfig{
 			Provider:                   provider,
-			CommandSource:              runner,
+			CommandSource:              remoteACPCommandSource(runner, ownsWorkspaceLock),
 			Workspace:                  workspace,
 			Profile:                    profile,
 			ReasoningEffort:            reasoningEffort,
@@ -142,7 +168,17 @@ func runRemoteACP(ctx context.Context, cmd *cobra.Command) error {
 			EnvironmentProfileExplicit: cmd.Flags().Changed("runner-profile"),
 		}),
 	)
-	return runACPServerWithEmbeddedRunner(ctx, server, runner, provider)
+	if ownsWorkspaceLock {
+		return runACPServerWithEmbeddedRunner(ctx, server, runner, provider)
+	}
+	return runACPServer(ctx, server)
+}
+
+func remoteACPCommandSource(runner *runnerclient.Runner, ownsWorkspaceLock bool) acp.RemoteCommandSource {
+	if !ownsWorkspaceLock {
+		return nil
+	}
+	return runner
 }
 
 func consumeRemoteACPAuthTokens(cmd *cobra.Command) (string, string, error) {
@@ -178,6 +214,15 @@ func validateRemoteACPFlags(cmd *cobra.Command) error {
 	} {
 		if cmd.Flags().Changed(name) {
 			return errors.Errorf("--%s configures the local agentic loop and cannot be used with --server", name)
+		}
+	}
+	return nil
+}
+
+func validateReusedACPFlags(cmd *cobra.Command) error {
+	for _, name := range []string{"no-skills", "no-extensions", "enable-fs-search-tools"} {
+		if cmd.Flags().Changed(name) {
+			return errors.Errorf("--%s cannot override an already-running workspace runner; configure its runner profile or stop it so ACP can start the embedded runner", name)
 		}
 	}
 	return nil

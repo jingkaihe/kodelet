@@ -25,6 +25,8 @@ type Runtime struct {
 	subs                []Subscription
 	eventHandlersByName map[string][]eventHandler
 	lifecycleStarted    bool
+	lifecycleCtx        context.Context
+	lifecycleCallCtx    ExtensionCallContext
 }
 
 // Command is an extension command registration bound to its process.
@@ -119,20 +121,24 @@ func (r *Runtime) initialize(ctx context.Context, discovery *Discovery) error {
 }
 
 func (r *Runtime) startLifecycle(ctx context.Context, callContext ExtensionCallContext) {
-	r.mu.Lock()
-	if r.lifecycleStarted {
-		r.mu.Unlock()
-		return
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	r.lifecycleStarted = true
-	r.mu.Unlock()
-
 	if strings.TrimSpace(callContext.CWD) == "" {
 		callContext.CWD = r.workingDir
 	}
 	if strings.TrimSpace(callContext.InvokedBy) == "" {
 		callContext.InvokedBy = "main"
 	}
+	r.mu.Lock()
+	if r.lifecycleStarted {
+		r.mu.Unlock()
+		return
+	}
+	r.lifecycleStarted = true
+	r.lifecycleCtx = context.WithoutCancel(ctx)
+	r.lifecycleCallCtx = callContext
+	r.mu.Unlock()
 	r.DispatchSessionStart(ctx, callContext)
 	r.DispatchResourcesDiscover(ctx, callContext)
 }
@@ -308,10 +314,17 @@ func (r *Runtime) Close() error {
 	}
 	r.mu.Lock()
 	lifecycleStarted := r.lifecycleStarted
+	lifecycleCtx := r.lifecycleCtx
+	lifecycleCallCtx := r.lifecycleCallCtx
 	r.lifecycleStarted = false
+	r.lifecycleCtx = nil
+	r.lifecycleCallCtx = ExtensionCallContext{}
 	r.mu.Unlock()
 	if lifecycleStarted {
-		r.DispatchSessionEnd(context.Background(), ExtensionCallContext{CWD: r.workingDir, InvokedBy: "main"})
+		if lifecycleCtx == nil {
+			lifecycleCtx = context.Background()
+		}
+		r.DispatchSessionEnd(lifecycleCtx, lifecycleCallCtx)
 	}
 	if r.cancelRuntime != nil {
 		r.cancelRuntime()

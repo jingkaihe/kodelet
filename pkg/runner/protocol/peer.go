@@ -631,7 +631,8 @@ func (p *Peer) dispatchRequest(message Message) {
 	requestCtx = context.WithValue(requestCtx, requestIDContextKey{}, id)
 	call := &inboundCall{cancel: cancel}
 	slots := p.requestSlots
-	if isControlRequest(message.Method) {
+	controlRequest := isControlRequest(message.Method)
+	if controlRequest {
 		slots = p.controlRequestSlots
 	}
 	p.inboundMu.Lock()
@@ -641,19 +642,17 @@ func (p *Peer) dispatchRequest(message Message) {
 		p.trySendErrorResponse(id, &RPCError{Code: ErrorCodeInvalidRequest, Message: "duplicate rpc request id"})
 		return
 	}
-	if !tryAcquire(slots) {
-		p.inboundMu.Unlock()
-		cancel()
-		p.trySendErrorResponse(id, &RPCError{Code: ErrorCodeBusy, Message: "runner rpc request concurrency limit exceeded"})
-		return
-	}
 	p.inbound[id] = call
 	p.inboundMu.Unlock()
 
 	if !p.startWorker(func() {
-		defer releaseSlot(slots)
 		defer cancel()
 		defer p.removeInbound(id, call)
+		if !acquireSlot(requestCtx, slots) {
+			p.sendErrorResponse(id, &RPCError{Code: ErrorCodeUnavailable, Message: requestCtx.Err().Error()})
+			return
+		}
+		defer releaseSlot(slots)
 
 		result, rpcErr := p.handleRequestSafely(requestCtx, message.Method, message.Params)
 		if rpcErr != nil {
@@ -684,7 +683,6 @@ func (p *Peer) dispatchRequest(message Message) {
 	}) {
 		p.removeInbound(id, call)
 		cancel()
-		releaseSlot(slots)
 	}
 }
 
@@ -718,6 +716,15 @@ func tryAcquire(slots chan struct{}) bool {
 	case slots <- struct{}{}:
 		return true
 	default:
+		return false
+	}
+}
+
+func acquireSlot(ctx context.Context, slots chan struct{}) bool {
+	select {
+	case slots <- struct{}{}:
+		return true
+	case <-ctx.Done():
 		return false
 	}
 }

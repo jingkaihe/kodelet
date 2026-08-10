@@ -22,12 +22,12 @@ type RemoteChatClient interface {
 	StopConversationTurn(ctx context.Context, conversationID, turnID string) error
 }
 
-// RemoteChatProvider waits until the embedded workspace runner has a ready control-plane client.
+// RemoteChatProvider waits until the selected workspace runner has a ready control-plane client.
 type RemoteChatProvider interface {
 	WaitForRemoteChat(ctx context.Context) (RemoteChatClient, string, error)
 }
 
-// RemoteCommandSource discovers slash commands owned by the embedded workspace runner.
+// RemoteCommandSource discovers slash commands owned by the selected workspace runner.
 type RemoteCommandSource interface {
 	Commands(ctx context.Context, environmentProfile string) ([]slashcommands.Command, error)
 }
@@ -49,12 +49,12 @@ type remoteSessionManager struct {
 
 	mu       sync.Mutex
 	sessions map[acptypes.SessionID]*remoteSession
-	active   acptypes.SessionID
 }
 
 type remoteSession struct {
 	id                 acptypes.SessionID
 	started            bool
+	active             bool
 	environmentProfile string
 }
 
@@ -155,21 +155,19 @@ func (m *remoteSessionManager) beginPrompt(sessionID acptypes.SessionID) (bool, 
 	if session == nil {
 		return false, "", errors.Errorf("session not found: %s", sessionID)
 	}
-	if m.active != "" {
-		return false, "", errors.Errorf("workspace agent is already running session %s", m.active)
+	if session.active {
+		return false, "", errors.Errorf("session %s already has an active prompt", sessionID)
 	}
-	m.active = sessionID
+	session.active = true
 	return !session.started, session.environmentProfile, nil
 }
 
 func (m *remoteSessionManager) finishPrompt(sessionID acptypes.SessionID, succeeded bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.active == sessionID {
-		m.active = ""
-	}
-	if succeeded {
-		if session := m.sessions[sessionID]; session != nil {
+	if session := m.sessions[sessionID]; session != nil {
+		session.active = false
+		if succeeded {
 			session.started = true
 		}
 	}
@@ -178,7 +176,8 @@ func (m *remoteSessionManager) finishPrompt(sessionID acptypes.SessionID, succee
 func (m *remoteSessionManager) isActive(sessionID acptypes.SessionID) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.active == sessionID
+	session := m.sessions[sessionID]
+	return session != nil && session.active
 }
 
 func (m *remoteSessionManager) client(ctx context.Context) (RemoteChatClient, string, error) {
@@ -190,7 +189,7 @@ func (m *remoteSessionManager) client(ctx context.Context) (RemoteChatClient, st
 		return nil, "", err
 	}
 	if client == nil || strings.TrimSpace(runnerID) == "" {
-		return nil, "", errors.New("embedded workspace runner is not ready")
+		return nil, "", errors.New("workspace runner is not ready")
 	}
 	return client, strings.TrimSpace(runnerID), nil
 }
@@ -204,7 +203,7 @@ func (m *remoteSessionManager) waitForClient(ctx context.Context) (RemoteChatCli
 	defer cancel()
 	client, runnerID, err := m.client(waitCtx)
 	if err != nil && errors.Is(err, context.DeadlineExceeded) {
-		return nil, "", errors.Errorf("embedded workspace runner did not become ready within %s", timeout)
+		return nil, "", errors.Errorf("workspace runner did not become ready within %s", timeout)
 	}
 	return client, runnerID, err
 }
@@ -212,7 +211,7 @@ func (m *remoteSessionManager) waitForClient(ctx context.Context) (RemoteChatCli
 func (m *remoteSessionManager) validateCWD(requested string) error {
 	workspace, err := conversations.NormalizeCWD(m.config.Workspace)
 	if err != nil {
-		return errors.Wrap(err, "failed to resolve embedded runner workspace")
+		return errors.Wrap(err, "failed to resolve workspace runner directory")
 	}
 	requested = strings.TrimSpace(requested)
 	if requested == "" {

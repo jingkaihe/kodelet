@@ -188,6 +188,21 @@ func TestRPCClientRoutesParentlessNotificationsToPersistentHostHandler(t *testin
 	require.NoError(t, <-callDone)
 }
 
+func TestRPCClientUsesPersistentHostContextForParentlessRequests(t *testing.T) {
+	client := newRPCClient(strings.NewReader(""), io.Discard)
+	hostCtx := context.WithValue(context.Background(), rpcCallContextKey{}, "conversation-host")
+	handler := persistentContextHostRequestHandler{ctx: hostCtx}
+	client.setHostRequestHandler(handler)
+
+	ctx, selected, parentMatched, ambiguous := client.hostRequestTarget(nil)
+	assert.False(t, parentMatched)
+	assert.False(t, ambiguous)
+	assert.Equal(t, "conversation-host", ctx.Value(rpcCallContextKey{}))
+	result, rpcErr := selected.HandleRPCRequest(ctx, "kodelet.ui.widget.set", nil)
+	require.Nil(t, rpcErr)
+	assert.Equal(t, map[string]any{"accepted": true, "conversation": "conversation-host"}, result)
+}
+
 func TestRPCClientNotificationWriteFailureTerminatesClient(t *testing.T) {
 	wantErr := errors.New("writer disconnected")
 	failed := make(chan error, 1)
@@ -342,6 +357,15 @@ func (contextHostRequestHandler) HandleRPCRequest(ctx context.Context, method st
 	default:
 		return nil, &rpcError{Code: -32601, Message: "not found"}
 	}
+}
+
+type persistentContextHostRequestHandler struct {
+	contextHostRequestHandler
+	ctx context.Context
+}
+
+func (h persistentContextHostRequestHandler) hostContext() context.Context {
+	return h.ctx
 }
 
 type rpcIncomingNotification struct {

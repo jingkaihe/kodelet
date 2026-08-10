@@ -114,7 +114,7 @@ func TestRunRunnerListQueriesControlPlaneAndRendersStatus(t *testing.T) {
 				Workspace:       protocol.Workspace{Path: "/work/a", Name: "a"},
 				KodeletVersion:  "v1",
 				Status:          runnerregistry.RunnerStatusBusy,
-				ActiveRunID:     "run-1",
+				ActiveRunIDs:    []string{"run-1", "run-2"},
 				LastHeartbeatAt: time.Date(2026, time.August, 6, 12, 0, 0, 0, time.UTC),
 			},
 		}}))
@@ -132,7 +132,7 @@ func TestRunRunnerListQueriesControlPlaneAndRendersStatus(t *testing.T) {
 	assert.Contains(t, rendered, "runner_a")
 	assert.Contains(t, rendered, "primary")
 	assert.Contains(t, rendered, "busy")
-	assert.Contains(t, rendered, "run-1")
+	assert.Contains(t, rendered, "run-1, run-2")
 	assert.Less(t, strings.Index(rendered, "runner_a"), strings.Index(rendered, "runner_b"))
 }
 
@@ -321,7 +321,7 @@ func TestRenderRunnerInspectIncludesCompatibilityAndLocalLifecycle(t *testing.T)
 			ManifestDigest:     "sha256:manifest",
 			ManifestChanged:    true,
 			CompatibilityError: "protocol mismatch",
-			ActiveRunID:        "run-1",
+			ActiveRunIDs:       []string{"run-1", "run-2"},
 			ConnectionID:       "connection-1",
 			Generation:         7,
 			ConnectedAt:        connectedAt,

@@ -43,7 +43,7 @@ To use a remote control-plane agentic loop while retaining local workspace tools
 kodelet acp --server https://kodelet.example
 ```
 
-Authenticate control-plane API calls with `--auth-token` or `KODELET_AUTH_TOKEN`, authenticate the embedded runner with `--runner-auth-token` or `KODELET_RUNNER_AUTH_TOKEN`, and optionally select local runner policy with `--runner-profile`.
+Authenticate control-plane API calls with `--auth-token` or `KODELET_AUTH_TOKEN`, authenticate a newly embedded runner with `--runner-auth-token` or `KODELET_RUNNER_AUTH_TOKEN`, and optionally select local runner policy with `--runner-profile`. If a same-server `kodelet runner start` process already owns the current workspace, ACP reuses that runner; different ACP sessions can run concurrently through it.
 
 Example Zed-style configuration:
 
@@ -56,7 +56,7 @@ Example Zed-style configuration:
 }
 ```
 
-ACP supports session persistence, image input, embedded file context, streaming responses, tool-call visualization, and local slash-command discovery in compatible clients. Server-backed ACP persists conversations on the control plane and resumes only conversations bound to the embedded workspace runner.
+ACP supports session persistence, image input, embedded file context, streaming responses, tool-call visualization, and local slash-command discovery in compatible clients. Server-backed ACP persists conversations on the control plane and resumes only conversations bound to the selected workspace runner.
 
 ### Terminal chat TUI
 

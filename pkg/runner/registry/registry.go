@@ -1,4 +1,4 @@
-// Package registry owns live runner registrations and run-capacity coordination
+// Package registry owns live runner registrations and run-lease coordination
 // in the control plane.
 package registry
 
@@ -81,7 +81,9 @@ type Runner struct {
 	CompatibilityError string             `json:"compatibilityError,omitempty"`
 	Status             RunnerStatus       `json:"status"`
 	Connected          bool               `json:"connected"`
+	ConcurrentRuns     bool               `json:"concurrentRuns"`
 	ActiveRunID        string             `json:"activeRunId,omitempty"`
+	ActiveRunIDs       []string           `json:"activeRunIds,omitempty"`
 	ConnectionID       string             `json:"connectionId,omitempty"`
 	Generation         int64              `json:"generation"`
 	ConnectedAt        time.Time          `json:"connectedAt,omitempty"`
@@ -136,6 +138,80 @@ type runnerEntry struct {
 	ready    bool
 }
 
+func cloneRunnerEntry(entry *runnerEntry) *runnerEntry {
+	if entry == nil {
+		return nil
+	}
+	candidate := *entry
+	candidate.ActiveRunIDs = append([]string(nil), entry.ActiveRunIDs...)
+	return &candidate
+}
+
+func runnerActiveRunIDs(entry *runnerEntry) []string {
+	if entry == nil {
+		return nil
+	}
+	if len(entry.ActiveRunIDs) > 0 {
+		return append([]string(nil), entry.ActiveRunIDs...)
+	}
+	if runID := strings.TrimSpace(entry.ActiveRunID); runID != "" {
+		return []string{runID}
+	}
+	return nil
+}
+
+func setRunnerActiveRunIDs(entry *runnerEntry, runIDs []string) {
+	if entry == nil {
+		return
+	}
+	seen := make(map[string]struct{}, len(runIDs))
+	normalized := make([]string, 0, len(runIDs))
+	for _, raw := range runIDs {
+		runID := strings.TrimSpace(raw)
+		if runID == "" {
+			continue
+		}
+		if _, exists := seen[runID]; exists {
+			continue
+		}
+		seen[runID] = struct{}{}
+		normalized = append(normalized, runID)
+	}
+	sort.Strings(normalized)
+	entry.ActiveRunIDs = normalized
+	entry.ActiveRunID = ""
+	if len(normalized) == 1 {
+		entry.ActiveRunID = normalized[0]
+	}
+}
+
+func runnerHasActiveRun(entry *runnerEntry, runID string) bool {
+	runID = strings.TrimSpace(runID)
+	for _, activeRunID := range runnerActiveRunIDs(entry) {
+		if activeRunID == runID {
+			return true
+		}
+	}
+	return false
+}
+
+func addRunnerActiveRun(entry *runnerEntry, runID string) {
+	runIDs := runnerActiveRunIDs(entry)
+	runIDs = append(runIDs, runID)
+	setRunnerActiveRunIDs(entry, runIDs)
+}
+
+func removeRunnerActiveRun(entry *runnerEntry, runID string) {
+	activeRunIDs := runnerActiveRunIDs(entry)
+	filtered := activeRunIDs[:0]
+	for _, activeRunID := range activeRunIDs {
+		if activeRunID != strings.TrimSpace(runID) {
+			filtered = append(filtered, activeRunID)
+		}
+	}
+	setRunnerActiveRunIDs(entry, filtered)
+}
+
 type runEntry struct {
 	Run
 	connectionID string
@@ -161,7 +237,7 @@ type Options struct {
 	Persistence       Persistence
 }
 
-// Registry coordinates stable runner identity, live connection generations, and capacity-one runs.
+// Registry coordinates stable runner identity, live connection generations, and concurrent runs.
 type Registry struct {
 	mu                sync.RWMutex
 	runners           map[string]*runnerEntry
@@ -250,6 +326,7 @@ func (r *Registry) restore(state PersistedState) error {
 		runner.Connected = false
 		runner.ConnectionID = ""
 		runner.ActiveRunID = ""
+		runner.ActiveRunIDs = nil
 		if runner.Status != RunnerStatusIncompatible {
 			runner.Status = RunnerStatusOffline
 		}
@@ -315,7 +392,7 @@ func (r *Registry) Register(params protocol.RegisterParams, link Link) (protocol
 	now := r.now().UTC()
 
 	var oldLink Link
-	var lostConversationID string
+	var lostConversationIDs []string
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
@@ -327,18 +404,19 @@ func (r *Registry) Register(params protocol.RegisterParams, link Link) (protocol
 		return protocol.RegisterResult{}, err
 	}
 	oldLink = entry.link
-	var lostRun *runEntry
-	if entry.ActiveRunID != "" {
-		currentRun := r.runs[entry.ActiveRunID]
+	lostRuns := make([]*runEntry, 0, len(runnerActiveRunIDs(entry)))
+	for _, runID := range runnerActiveRunIDs(entry) {
+		currentRun := r.runs[runID]
 		if currentRun == nil {
 			r.mu.Unlock()
-			return protocol.RegisterResult{}, errors.New("runner active run is missing")
+			return protocol.RegisterResult{}, errors.Errorf("runner active run %s is missing", runID)
 		}
 		candidate := *currentRun
 		candidate.Status = RunStatusLost
 		candidate.Error = "runner connection was replaced"
 		candidate.UpdatedAt = now
-		lostRun = &candidate
+		candidate.leaseCancel = nil
+		lostRuns = append(lostRuns, &candidate)
 	}
 	entry.Generation++
 	entry.ConnectionID = connectionID
@@ -347,19 +425,24 @@ func (r *Registry) Register(params protocol.RegisterParams, link Link) (protocol
 	entry.Workspace = params.Workspace
 	entry.DisplayName = strings.TrimSpace(params.DisplayName)
 	entry.KodeletVersion = strings.TrimSpace(params.KodeletVersion)
+	entry.ConcurrentRuns = params.Capabilities.ConcurrentRuns
 	entry.ManifestDigest = strings.TrimSpace(params.ManifestDigest)
 	entry.ManifestChanged = false
 	entry.CompatibilityError = ""
 	entry.Connected = true
 	entry.Status = RunnerStatusConnecting
 	entry.ready = false
-	entry.ActiveRunID = ""
+	setRunnerActiveRunIDs(entry, nil)
 	entry.ConnectedAt = now
 	entry.LastHeartbeatAt = now
 	entry.UpdatedAt = now
 	if r.persistence != nil {
-		if lostRun != nil {
-			err = r.persistence.SaveRunnerAndRun(r.ctx, entry.Runner, lostRun.Run)
+		if len(lostRuns) > 0 {
+			runs := make([]Run, 0, len(lostRuns))
+			for _, lostRun := range lostRuns {
+				runs = append(runs, lostRun.Run)
+			}
+			err = r.persistence.SaveRunnerAndRuns(r.ctx, entry.Runner, runs)
 		} else {
 			err = r.persistence.SaveRunner(r.ctx, entry.Runner)
 		}
@@ -372,7 +455,11 @@ func (r *Registry) Register(params protocol.RegisterParams, link Link) (protocol
 		r.byIdentity[identity] = entry.ID
 	}
 	r.runners[entry.ID] = entry
-	if lostRun != nil {
+	for _, lostRun := range lostRuns {
+		currentRun := r.runs[lostRun.ID]
+		if currentRun != nil && currentRun.leaseCancel != nil {
+			currentRun.leaseCancel()
+		}
 		if lostRun.leaseCancel != nil {
 			lostRun.leaseCancel()
 			lostRun.leaseCancel = nil
@@ -380,7 +467,7 @@ func (r *Registry) Register(params protocol.RegisterParams, link Link) (protocol
 		r.runs[lostRun.ID] = lostRun
 		r.affinities.deactivate(lostRun.ConversationID)
 		r.clearRunTransientStateLocked(lostRun.ID)
-		lostConversationID = lostRun.ConversationID
+		lostConversationIDs = append(lostConversationIDs, lostRun.ConversationID)
 	}
 	result := protocol.RegisterResult{
 		RunnerID:            entry.ID,
@@ -391,8 +478,8 @@ func (r *Registry) Register(params protocol.RegisterParams, link Link) (protocol
 	}
 	r.mu.Unlock()
 
-	if lostConversationID != "" {
-		r.notifyRunFailure(lostConversationID)
+	for _, conversationID := range lostConversationIDs {
+		r.notifyRunFailure(conversationID)
 	}
 	if oldLink != nil && oldLink != link {
 		_ = oldLink.Close()
@@ -436,8 +523,7 @@ func (r *Registry) registrationCandidateLocked(params protocol.RegisterParams, i
 
 	entry := r.runners[existingID]
 	if entry != nil {
-		candidate := *entry
-		return &candidate, false, nil
+		return cloneRunnerEntry(entry), false, nil
 	}
 	runnerID, err := r.newID("runner")
 	if err != nil {
@@ -470,6 +556,7 @@ func (r *Registry) recordIncompatible(params protocol.RegisterParams) error {
 	entry.Workspace = params.Workspace
 	entry.DisplayName = strings.TrimSpace(params.DisplayName)
 	entry.KodeletVersion = strings.TrimSpace(params.KodeletVersion)
+	entry.ConcurrentRuns = params.Capabilities.ConcurrentRuns
 	entry.ManifestDigest = strings.TrimSpace(params.ManifestDigest)
 	entry.CompatibilityError = message.Error()
 	entry.UpdatedAt = now
@@ -501,24 +588,27 @@ func (r *Registry) Detach(runnerID, connectionID string, generation int64, cause
 	entry.link = nil
 	entry.Connected = false
 	entry.Status = RunnerStatusOffline
+	entry.ready = false
 	entry.ConnectionID = ""
 	entry.UpdatedAt = now
-	var lostRun *runEntry
-	if entry.ActiveRunID != "" {
-		lostRun = r.runs[entry.ActiveRunID]
-		r.finishRunLocked(entry.ActiveRunID, RunStatusLost, errorString(cause), now)
+	lostRuns := make([]*runEntry, 0, len(runnerActiveRunIDs(entry)))
+	conversationIDs := make([]string, 0, len(runnerActiveRunIDs(entry)))
+	for _, runID := range runnerActiveRunIDs(entry) {
+		lostRun := r.runs[runID]
+		if lostRun == nil {
+			continue
+		}
+		conversationIDs = append(conversationIDs, lostRun.ConversationID)
+		r.finishRunLocked(runID, RunStatusLost, errorString(cause), now)
+		lostRuns = append(lostRuns, lostRun)
 	}
-	if lostRun != nil {
-		r.logPersistenceError("failed to persist detached runner and lost run", r.persistRunnerAndRunLocked(entry, lostRun))
+	if len(lostRuns) > 0 {
+		r.logPersistenceError("failed to persist detached runner and lost runs", r.persistRunnerAndRunsLocked(entry, lostRuns))
 	} else {
 		r.logPersistenceError("failed to persist detached runner", r.persistRunnerLocked(entry))
 	}
-	conversationID := ""
-	if lostRun != nil {
-		conversationID = lostRun.ConversationID
-	}
 	r.mu.Unlock()
-	if conversationID != "" {
+	for _, conversationID := range conversationIDs {
 		r.notifyRunFailure(conversationID)
 	}
 }
@@ -526,6 +616,10 @@ func (r *Registry) Detach(runnerID, connectionID string, generation int64, cause
 // Heartbeat applies application health from the current connection generation.
 func (r *Registry) Heartbeat(runnerID, connectionID string, generation int64, params protocol.HeartbeatParams) error {
 	if err := params.Validate(); err != nil {
+		return err
+	}
+	activeRunIDs, err := params.NormalizedActiveRunIDs()
+	if err != nil {
 		return err
 	}
 	if strings.TrimSpace(params.RunnerID) != strings.TrimSpace(runnerID) || params.Generation != generation {
@@ -537,17 +631,18 @@ func (r *Registry) Heartbeat(runnerID, connectionID string, generation int64, pa
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(params.ActiveRunID) != entry.ActiveRunID {
-		return errors.New("heartbeat active run does not match control-plane lease")
+	expectedRunIDs := runnerActiveRunIDs(entry)
+	if !r.heartbeatRunIDsMatchLocked(expectedRunIDs, activeRunIDs) {
+		return errors.New("heartbeat active runs do not match control-plane leases")
 	}
 	switch params.State {
 	case protocol.RunnerStateIdle:
-		if entry.ActiveRunID != "" {
-			return errors.New("idle heartbeat cannot report an active run")
+		if len(activeRunIDs) > 0 {
+			return errors.New("idle heartbeat cannot report active runs")
 		}
 	case protocol.RunnerStateRunning, protocol.RunnerStateStopping:
-		if entry.ActiveRunID == "" {
-			return errors.New("active heartbeat state requires a control-plane run lease")
+		if len(activeRunIDs) == 0 {
+			return errors.New("active heartbeat state requires control-plane run leases")
 		}
 	case protocol.RunnerStateError:
 	}
@@ -557,13 +652,37 @@ func (r *Registry) Heartbeat(runnerID, connectionID string, generation int64, pa
 	entry.ready = true
 	if params.State == protocol.RunnerStateError {
 		entry.Status = RunnerStatusError
-	} else if entry.ActiveRunID != "" {
+	} else if len(expectedRunIDs) > 0 {
 		entry.Status = RunnerStatusBusy
 	} else {
 		entry.Status = RunnerStatusIdle
 	}
 	entry.UpdatedAt = now
 	return nil
+}
+
+func (r *Registry) heartbeatRunIDsMatchLocked(expected, reported []string) bool {
+	expectedSet := make(map[string]struct{}, len(expected))
+	for _, runID := range expected {
+		expectedSet[runID] = struct{}{}
+	}
+	reportedSet := make(map[string]struct{}, len(reported))
+	for _, runID := range reported {
+		if _, exists := expectedSet[runID]; !exists {
+			return false
+		}
+		reportedSet[runID] = struct{}{}
+	}
+	for _, runID := range expected {
+		if _, exists := reportedSet[runID]; exists {
+			continue
+		}
+		run := r.runs[runID]
+		if run == nil || run.Status != RunStatusOpening {
+			return false
+		}
+	}
+	return true
 }
 
 // ManifestChanged updates the idle manifest digest for the current generation.
@@ -586,7 +705,7 @@ func (r *Registry) ManifestChanged(runnerID, connectionID string, generation int
 	return r.persistRunnerLocked(entry)
 }
 
-// OpenRun reserves capacity, opens the remote environment, validates its manifest, and marks the run active.
+// OpenRun reserves a run lease, opens the remote environment, validates its manifest, and marks the run active.
 func (r *Registry) OpenRun(ctx context.Context, runnerID string, params protocol.RunOpenParams) (runnerpayload.Manifest, error) {
 	if err := params.Validate(); err != nil {
 		return runnerpayload.Manifest{}, err
@@ -621,13 +740,13 @@ func (r *Registry) OpenRun(ctx context.Context, runnerID string, params protocol
 		r.mu.Unlock()
 		return runnerpayload.Manifest{}, errors.New("runner has not completed its initial heartbeat")
 	}
-	if entry.ActiveRunID != "" {
+	if entry.Status != RunnerStatusIdle && entry.Status != RunnerStatusBusy {
 		r.mu.Unlock()
-		return runnerpayload.Manifest{}, errors.Errorf("runner is busy with run %s", entry.ActiveRunID)
+		return runnerpayload.Manifest{}, errors.Errorf("runner is not available: %s", entry.Status)
 	}
-	if entry.Status != RunnerStatusIdle {
+	if len(runnerActiveRunIDs(entry)) > 0 && !entry.ConcurrentRuns {
 		r.mu.Unlock()
-		return runnerpayload.Manifest{}, errors.Errorf("runner is not idle: %s", entry.Status)
+		return runnerpayload.Manifest{}, errors.New("runner does not support concurrent runs")
 	}
 	if activeRunID := r.affinities.activeRun(params.ConversationID); activeRunID != "" {
 		r.mu.Unlock()
@@ -656,8 +775,8 @@ func (r *Registry) OpenRun(ctx context.Context, runnerID string, params protocol
 		link:         link,
 	}
 	leaseCtx, leaseCancel := context.WithCancel(context.Background())
-	runnerCandidate := *entry
-	runnerCandidate.ActiveRunID = params.RunID
+	runnerCandidate := cloneRunnerEntry(entry)
+	addRunnerActiveRun(runnerCandidate, params.RunID)
 	runnerCandidate.Status = RunnerStatusBusy
 	runnerCandidate.UpdatedAt = now
 	run := &runEntry{
@@ -673,7 +792,7 @@ func (r *Registry) OpenRun(ctx context.Context, runnerID string, params protocol
 		generation:   generation,
 		leaseCancel:  leaseCancel,
 	}
-	if err := r.persistRunnerAndRunLocked(&runnerCandidate, run); err != nil {
+	if err := r.persistRunnerAndRunLocked(runnerCandidate, run); err != nil {
 		leaseCancel()
 		if reservedAffinity {
 			r.affinities.releasePending(params.ConversationID)
@@ -681,7 +800,7 @@ func (r *Registry) OpenRun(ctx context.Context, runnerID string, params protocol
 		r.mu.Unlock()
 		return runnerpayload.Manifest{}, err
 	}
-	r.runners[runnerID] = &runnerCandidate
+	r.runners[runnerID] = runnerCandidate
 	r.affinities.activate(params.ConversationID, params.RunID)
 	r.runs[params.RunID] = run
 	r.mu.Unlock()
@@ -703,7 +822,7 @@ func (r *Registry) OpenRun(ctx context.Context, runnerID string, params protocol
 
 	r.mu.Lock()
 	current, err := r.currentRunnerLocked(runnerID, connectionID, generation)
-	if err != nil || current.link != link {
+	if err != nil || current.link != link || !runnerHasActiveRun(current, params.RunID) {
 		r.mu.Unlock()
 		return runnerpayload.Manifest{}, errors.New("runner connection changed while opening run")
 	}
@@ -724,15 +843,15 @@ func (r *Registry) OpenRun(ctx context.Context, runnerID string, params protocol
 	runCandidate.ManifestJSON = string(manifestPayload)
 	now = r.now().UTC()
 	runCandidate.UpdatedAt = now
-	runnerCandidate = *current
+	runnerCandidate = cloneRunnerEntry(current)
 	runnerCandidate.ManifestDigest = manifest.Digest
 	runnerCandidate.ManifestChanged = false
 	runnerCandidate.UpdatedAt = now
-	if err := r.persistRunnerAndRunLocked(&runnerCandidate, &runCandidate); err != nil {
+	if err := r.persistRunnerAndRunLocked(runnerCandidate, &runCandidate); err != nil {
 		r.mu.Unlock()
 		return runnerpayload.Manifest{}, r.reconcileOpeningFailure(fence, err, false)
 	}
-	r.runners[runnerID] = &runnerCandidate
+	r.runners[runnerID] = runnerCandidate
 	r.runs[params.RunID] = &runCandidate
 	r.mu.Unlock()
 	return manifest, nil
@@ -782,7 +901,7 @@ func (r *Registry) DeliverToolUpdate(runnerID, connectionID string, generation i
 	r.mu.Lock()
 	entry := r.runners[runnerID]
 	run := r.runs[params.RunID]
-	valid := entry != nil && entry.ConnectionID == connectionID && entry.Generation == generation && entry.ActiveRunID == params.RunID && run != nil && run.Status == RunStatusRunning
+	valid := entry != nil && entry.ConnectionID == connectionID && entry.Generation == generation && runnerHasActiveRun(entry, params.RunID) && run != nil && run.Status == RunStatusRunning
 	if !valid {
 		r.mu.Unlock()
 		return errors.New("tool update belongs to a stale or inactive run")
@@ -834,7 +953,7 @@ func (r *Registry) CloseRun(ctx context.Context, runID string, status RunStatus,
 		return nil
 	}
 	runner := r.runners[run.RunnerID]
-	if runner == nil || runner.ActiveRunID != runID {
+	if runner == nil || !runnerHasActiveRun(runner, runID) {
 		r.mu.Unlock()
 		return nil
 	}
@@ -894,7 +1013,7 @@ func (r *Registry) EnvironmentError(runnerID, connectionID string, generation in
 		r.mu.Unlock()
 		return err
 	}
-	if entry.ActiveRunID != params.RunID {
+	if !runnerHasActiveRun(entry, params.RunID) {
 		r.mu.Unlock()
 		return errors.New("environment error belongs to another run")
 	}
@@ -946,7 +1065,9 @@ func (r *Registry) Runner(id string) (Runner, bool) {
 	if entry == nil {
 		return Runner{}, false
 	}
-	return entry.Runner, true
+	snapshot := entry.Runner
+	snapshot.ActiveRunIDs = append([]string(nil), entry.ActiveRunIDs...)
+	return snapshot, true
 }
 
 // Runners returns deterministic runner snapshots ordered by stable ID.
@@ -954,7 +1075,9 @@ func (r *Registry) Runners() []Runner {
 	r.mu.RLock()
 	result := make([]Runner, 0, len(r.runners))
 	for _, entry := range r.runners {
-		result = append(result, entry.Runner)
+		snapshot := entry.Runner
+		snapshot.ActiveRunIDs = append([]string(nil), entry.ActiveRunIDs...)
+		result = append(result, snapshot)
 	}
 	r.mu.RUnlock()
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
@@ -998,7 +1121,7 @@ func (r *Registry) RemoveRunner(ctx context.Context, runnerID string, force bool
 	if entry.Connected || entry.link != nil {
 		return RemovalResult{}, errors.Wrapf(ErrRunnerConnected, "runner %s must be stopped before removal", runnerID)
 	}
-	if entry.ActiveRunID != "" {
+	if len(runnerActiveRunIDs(entry)) > 0 {
 		return RemovalResult{}, errors.Wrapf(ErrRunnerActiveRun, "runner %s", runnerID)
 	}
 
@@ -1056,8 +1179,8 @@ func (r *Registry) Close() error {
 			links = append(links, entry.link)
 			entry.link = nil
 		}
-		if entry.ActiveRunID != "" {
-			r.finishRunLocked(entry.ActiveRunID, RunStatusLost, "control plane stopped while run was active", now)
+		for _, runID := range runnerActiveRunIDs(entry) {
+			r.finishRunLocked(runID, RunStatusLost, "control plane stopped while run was active", now)
 		}
 		entry.Connected = false
 		if entry.Status != RunnerStatusIncompatible {
@@ -1161,7 +1284,7 @@ func (r *Registry) expireRunLease(fence runFence, cause error) {
 	r.mu.Lock()
 	run := r.runs[fence.runID]
 	runner := r.runners[fence.runnerID]
-	active := runMatchesFence(run, fence) && runnerMatchesFence(runner, fence) && runner.ActiveRunID == fence.runID && (run.Status == RunStatusOpening || run.Status == RunStatusRunning || run.Status == RunStatusCanceled || run.Status == RunStatusFailed)
+	active := runMatchesFence(run, fence) && runnerMatchesFence(runner, fence) && runnerHasActiveRun(runner, fence.runID) && (run.Status == RunStatusOpening || run.Status == RunStatusRunning || run.Status == RunStatusCanceled || run.Status == RunStatusFailed)
 	conversationID := ""
 	var persistenceErr error
 	if active {
@@ -1199,7 +1322,7 @@ func (r *Registry) finishRunForFence(fence runFence, status RunStatus, message s
 		return false
 	}
 	runner := r.runners[fence.runnerID]
-	if !runnerMatchesFence(runner, fence) || runner.ActiveRunID != fence.runID {
+	if !runnerMatchesFence(runner, fence) || !runnerHasActiveRun(runner, fence.runID) {
 		return false
 	}
 	r.finishRunLocked(fence.runID, status, message, r.now().UTC())
@@ -1243,12 +1366,18 @@ func (r *Registry) finishRunLocked(runID string, status RunStatus, message strin
 	run.UpdatedAt = now
 	r.affinities.deactivate(run.ConversationID)
 	r.clearRunTransientStateLocked(run.ID)
-	if runner := r.runners[run.RunnerID]; runner != nil && runner.ActiveRunID == runID {
-		runner.ActiveRunID = ""
-		if runner.Connected {
-			runner.Status = RunnerStatusIdle
-		} else {
+	if runner := r.runners[run.RunnerID]; runner != nil && runnerHasActiveRun(runner, runID) {
+		removeRunnerActiveRun(runner, runID)
+		switch {
+		case !runner.Connected:
 			runner.Status = RunnerStatusOffline
+		case runner.Status == RunnerStatusError || runner.Status == RunnerStatusIncompatible:
+			// Preserve a runner-level failure until a later heartbeat or reconnect
+			// explicitly reports that the process is healthy again.
+		case len(runnerActiveRunIDs(runner)) > 0:
+			runner.Status = RunnerStatusBusy
+		default:
+			runner.Status = RunnerStatusIdle
 		}
 		runner.UpdatedAt = now
 	}
@@ -1279,6 +1408,19 @@ func (r *Registry) persistRunnerAndRunLocked(runner *runnerEntry, run *runEntry)
 	return r.persistence.SaveRunnerAndRun(r.ctx, runner.Runner, run.Run)
 }
 
+func (r *Registry) persistRunnerAndRunsLocked(runner *runnerEntry, runs []*runEntry) error {
+	if r.persistence == nil || runner == nil {
+		return nil
+	}
+	persistedRuns := make([]Run, 0, len(runs))
+	for _, run := range runs {
+		if run != nil {
+			persistedRuns = append(persistedRuns, run.Run)
+		}
+	}
+	return r.persistence.SaveRunnerAndRuns(r.ctx, runner.Runner, persistedRuns)
+}
+
 func (r *Registry) logPersistenceError(message string, err error) {
 	if err != nil {
 		logger.G(r.ctx).WithError(err).Error(message)
@@ -1306,7 +1448,7 @@ func (r *Registry) activeRunLinkLocked(runID string, allowCanceled bool) (Link, 
 		return nil, errors.Errorf("run is not active: %s", run.Status)
 	}
 	runner := r.runners[run.RunnerID]
-	if runner == nil || !runner.Connected || runner.link == nil || runner.ActiveRunID != run.ID {
+	if runner == nil || !runner.Connected || runner.link == nil || !runnerHasActiveRun(runner, run.ID) {
 		return nil, errors.New("runner connection for run is unavailable")
 	}
 	if runner.ConnectionID != run.connectionID || runner.Generation != run.generation {

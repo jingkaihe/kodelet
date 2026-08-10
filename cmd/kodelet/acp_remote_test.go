@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	runnerclient "github.com/jingkaihe/kodelet/pkg/runner/client"
+	"github.com/jingkaihe/kodelet/pkg/runner/localstate"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	"github.com/spf13/cobra"
@@ -37,7 +39,7 @@ func TestEmbeddedACPRemoteProviderWaitsForControlPlaneReadiness(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	provider := newEmbeddedACPRemoteProvider(server.URL, "api-secret")
+	provider := newEmbeddedACPRemoteProvider(server.URL, "api-secret", "", nil)
 	provider.registeredRunner(protocol.RegisterResult{RunnerID: "runner-1"})
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
@@ -59,10 +61,156 @@ func TestEmbeddedACPRemoteProviderRejectsIncompatibleRunner(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	provider := newEmbeddedACPRemoteProvider(server.URL, "")
+	provider := newEmbeddedACPRemoteProvider(server.URL, "", "", nil)
 	provider.registeredRunner(protocol.RegisterResult{RunnerID: "runner-1"})
 	_, _, err := provider.WaitForRemoteChat(t.Context())
 	require.ErrorContains(t, err, "protocol mismatch")
+}
+
+func TestAcquireOrReuseACPRunnerOwnsUnlockedWorkspace(t *testing.T) {
+	store, err := localstate.NewStoreAt(t.TempDir())
+	require.NoError(t, err)
+	runner, err := runnerclient.NewRunner(t.Context(), runnerclient.RunnerConfig{
+		Server:    "http://localhost:8080",
+		Workspace: t.TempDir(),
+		Store:     store,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, runner.Close()) })
+
+	owned, runnerID, err := acquireOrReuseACPRunner(t.Context(), runner, "http://localhost:8080")
+	require.NoError(t, err)
+	assert.True(t, owned)
+	assert.Empty(t, runnerID)
+}
+
+func TestAcquireOrReuseACPRunnerUsesLiveLockRunnerID(t *testing.T) {
+	store, err := localstate.NewStoreAt(t.TempDir())
+	require.NoError(t, err)
+	workspace := t.TempDir()
+	lock, err := store.AcquireWorkspaceLock(workspace, localstate.LockMetadata{
+		Server:   "http://localhost:8080",
+		RunnerID: "runner-existing",
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, lock.Close()) })
+	runner, err := runnerclient.NewRunner(t.Context(), runnerclient.RunnerConfig{
+		Server:    "http://localhost:8080",
+		Workspace: workspace,
+		Store:     store,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, runner.Close()) })
+
+	owned, runnerID, err := acquireOrReuseACPRunner(t.Context(), runner, "http://localhost:8080")
+	require.NoError(t, err)
+	assert.False(t, owned)
+	assert.Equal(t, "runner-existing", runnerID)
+}
+
+func TestAcquireOrReuseACPRunnerRejectsAnotherServer(t *testing.T) {
+	store, err := localstate.NewStoreAt(t.TempDir())
+	require.NoError(t, err)
+	workspace := t.TempDir()
+	lock, err := store.AcquireWorkspaceLock(workspace, localstate.LockMetadata{
+		Server:   "http://localhost:9090",
+		RunnerID: "runner-existing",
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, lock.Close()) })
+	runner, err := runnerclient.NewRunner(t.Context(), runnerclient.RunnerConfig{
+		Server:    "http://localhost:8080",
+		Workspace: workspace,
+		Store:     store,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, runner.Close()) })
+
+	_, _, err = acquireOrReuseACPRunner(t.Context(), runner, "http://localhost:8080")
+	require.ErrorContains(t, err, "already registered with http://localhost:9090")
+}
+
+func TestAcquireOrReuseACPRunnerIgnoresStoppingLockMetadata(t *testing.T) {
+	store, err := localstate.NewStoreAt(t.TempDir())
+	require.NoError(t, err)
+	workspace := t.TempDir()
+	lock, err := store.AcquireWorkspaceLock(workspace, localstate.LockMetadata{
+		Server:   "http://localhost:9090",
+		RunnerID: "runner-stopping",
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, lock.Close()) })
+	metadata := lock.Metadata()
+	stoppedAt := time.Now().UTC()
+	metadata.StoppedAt = &stoppedAt
+	require.NoError(t, lock.WriteMetadata(metadata))
+	runner, err := runnerclient.NewRunner(t.Context(), runnerclient.RunnerConfig{
+		Server:    "http://localhost:8080",
+		Workspace: workspace,
+		Store:     store,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, runner.Close()) })
+
+	type result struct {
+		owned    bool
+		runnerID string
+		err      error
+	}
+	done := make(chan result, 1)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	go func() {
+		owned, runnerID, acquireErr := acquireOrReuseACPRunner(ctx, runner, "http://localhost:8080")
+		done <- result{owned: owned, runnerID: runnerID, err: acquireErr}
+	}()
+	select {
+	case result := <-done:
+		t.Fatalf("stopping lock metadata was reused before release: %+v", result)
+	case <-time.After(30 * time.Millisecond):
+	}
+	require.NoError(t, lock.Close())
+	select {
+	case result := <-done:
+		require.NoError(t, result.err)
+		assert.True(t, result.owned)
+		assert.Empty(t, result.runnerID)
+	case <-time.After(time.Second):
+		t.Fatal("ACP did not acquire the workspace after the stopping owner released it")
+	}
+}
+
+func TestEmbeddedACPRemoteProviderRefreshesRunnerIDFromLiveLock(t *testing.T) {
+	workspace := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		require.NoError(t, json.NewEncoder(w).Encode(runnerListAPIResponse{Runners: []runnerregistry.Runner{{
+			ID:        "runner-new",
+			Connected: true,
+			Status:    runnerregistry.RunnerStatusIdle,
+			Workspace: protocol.Workspace{Path: workspace},
+		}}}))
+	}))
+	t.Cleanup(server.Close)
+	store, err := localstate.NewStoreAt(t.TempDir())
+	require.NoError(t, err)
+	lock, err := store.AcquireWorkspaceLock(workspace, localstate.LockMetadata{Server: server.URL, RunnerID: "runner-old"})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, lock.Close()) })
+	provider := newEmbeddedACPRemoteProvider(server.URL, "", workspace, store)
+	provider.registeredRunnerID("runner-old")
+	metadata := lock.Metadata()
+	metadata.RunnerID = "runner-new"
+	require.NoError(t, lock.WriteMetadata(metadata))
+
+	client, runnerID, err := provider.WaitForRemoteChat(t.Context())
+	require.NoError(t, err)
+	require.NotNil(t, client)
+	assert.Equal(t, "runner-new", runnerID)
+}
+
+func TestEmbeddedACPRemoteProviderCanonicalizesServerURL(t *testing.T) {
+	provider := newEmbeddedACPRemoteProvider(" HTTP://LOCALHOST:8080/ ", "", "", nil)
+	assert.Equal(t, "http://localhost:8080", provider.server)
 }
 
 func TestValidateRemoteACPFlagsRejectsLocalLoopOverrides(t *testing.T) {
@@ -90,6 +238,21 @@ func TestValidateRemoteACPFlagsRejectsLocalLoopOverrides(t *testing.T) {
 	cmd.Flags().String("profile", "", "")
 	require.NoError(t, cmd.Flags().Set("profile", "server-profile"))
 	require.NoError(t, validateRemoteACPFlags(cmd))
+}
+
+func TestValidateReusedACPFlagsRejectsEmbeddedRunnerOverrides(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("no-skills", false, "")
+	cmd.Flags().Bool("no-extensions", false, "")
+	cmd.Flags().Bool("enable-fs-search-tools", false, "")
+	require.NoError(t, cmd.Flags().Set("no-extensions", "true"))
+	require.ErrorContains(t, validateReusedACPFlags(cmd), "already-running workspace runner")
+}
+
+func TestRemoteACPCommandSourceUsesOnlyLockOwner(t *testing.T) {
+	runner := &runnerclient.Runner{}
+	assert.Same(t, runner, remoteACPCommandSource(runner, true))
+	assert.Nil(t, remoteACPCommandSource(runner, false))
 }
 
 func TestRemoteACPServiceOptionsKeepCLIRestrictionsAfterEnvironmentProfile(t *testing.T) {
@@ -163,7 +326,7 @@ func TestRunACPServerWithEmbeddedRunnerStopsRunnerWhenACPStops(t *testing.T) {
 	server := newFakeACPServerLifecycle()
 	server.runResult <- wantErr
 	runner := &fakeEmbeddedRunner{started: make(chan struct{}), stopped: make(chan struct{})}
-	provider := newEmbeddedACPRemoteProvider("http://localhost:8080", "")
+	provider := newEmbeddedACPRemoteProvider("http://localhost:8080", "", "", nil)
 
 	err := runACPServerWithEmbeddedRunner(t.Context(), server, runner, provider)
 	require.ErrorIs(t, err, wantErr)
@@ -175,7 +338,7 @@ func TestRunACPServerWithEmbeddedRunnerReturnsRunnerFailure(t *testing.T) {
 	wantErr := errors.New("runner authentication failed")
 	server := newFakeACPServerLifecycle()
 	runner := &fakeEmbeddedRunner{err: wantErr, started: make(chan struct{})}
-	provider := newEmbeddedACPRemoteProvider("http://localhost:8080", "")
+	provider := newEmbeddedACPRemoteProvider("http://localhost:8080", "", "", nil)
 
 	err := runACPServerWithEmbeddedRunner(t.Context(), server, runner, provider)
 	require.ErrorIs(t, err, wantErr)

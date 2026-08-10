@@ -34,10 +34,12 @@ func TestDecodeMessageValidatesEnvelope(t *testing.T) {
 func TestRegisterParamsValidate(t *testing.T) {
 	valid := RegisterParams{
 		ProtocolVersions: []int{Version},
+		Capabilities:     RunnerCapabilities{ConcurrentRuns: true},
 		Host:             Host{InstanceID: "host-one"},
 		Workspace:        Workspace{Path: "/workspace", Name: "workspace"},
 	}
 	require.NoError(t, valid.Validate())
+	assert.True(t, valid.Capabilities.ConcurrentRuns)
 
 	unsupported := valid
 	unsupported.ProtocolVersions = []int{Version + 1}
@@ -126,6 +128,11 @@ func TestRegistrationAndRunOpenValidationBranches(t *testing.T) {
 func TestHeartbeatParamsValidate(t *testing.T) {
 	valid := HeartbeatParams{RunnerID: "runner-one", Generation: 1, State: RunnerStateIdle}
 	require.NoError(t, valid.Validate())
+	multiple := HeartbeatParams{RunnerID: "runner-one", Generation: 1, State: RunnerStateRunning, ActiveRunIDs: []string{"run-two", "run-one"}}
+	require.NoError(t, multiple.Validate())
+	runIDs, err := multiple.NormalizedActiveRunIDs()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"run-one", "run-two"}, runIDs)
 
 	missingRunner := valid
 	missingRunner.RunnerID = ""
@@ -136,4 +143,10 @@ func TestHeartbeatParamsValidate(t *testing.T) {
 	unknown := valid
 	unknown.State = RunnerState("future")
 	require.ErrorContains(t, unknown.Validate(), "unsupported runner state")
+	duplicate := multiple
+	duplicate.ActiveRunIDs = []string{"run-one", "run-one"}
+	require.ErrorContains(t, duplicate.Validate(), "duplicate run")
+	mismatch := multiple
+	mismatch.ActiveRunID = "run-three"
+	require.ErrorContains(t, mismatch.Validate(), "does not match")
 }

@@ -130,6 +130,7 @@ describe('NewChatContextDialog', () => {
           manifestChanged: true,
           status: 'idle',
           connected: true,
+          concurrentRuns: true,
           generation: 2,
         },
       ],
@@ -149,7 +150,7 @@ describe('NewChatContextDialog', () => {
     expect(props.onRunnerDraftChange).toHaveBeenCalledWith('');
   });
 
-  it('disables busy and offline runners and prevents stale runner submission', () => {
+  it('allows concurrent busy runners but disables legacy busy and offline runners', () => {
     renderDialog({
       runners: [
         {
@@ -164,6 +165,22 @@ describe('NewChatContextDialog', () => {
           manifestChanged: false,
           status: 'busy',
           connected: true,
+          concurrentRuns: true,
+          generation: 1,
+        },
+        {
+          id: 'runner-legacy-busy',
+          host: {
+            instanceId: 'host-legacy',
+            hostname: 'worker',
+            os: 'linux',
+            arch: 'amd64',
+          },
+          workspace: { path: '/workspace/legacy', name: 'legacy' },
+          manifestChanged: false,
+          status: 'busy',
+          connected: true,
+          concurrentRuns: false,
           generation: 1,
         },
         {
@@ -178,14 +195,16 @@ describe('NewChatContextDialog', () => {
           manifestChanged: false,
           status: 'offline',
           connected: false,
+          concurrentRuns: false,
           generation: 1,
         },
       ],
       runnerIdDraft: 'runner-busy',
     });
 
-    expect(screen.getByRole('option', { name: /busy — worker — busy/ })).toBeDisabled();
+    expect(screen.getByRole('option', { name: /busy — worker — busy/ })).toBeEnabled();
+    expect(screen.getByRole('option', { name: /legacy — worker — busy/ })).toBeDisabled();
     expect(screen.getByRole('option', { name: /offline — worker — offline/ })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
   });
 });

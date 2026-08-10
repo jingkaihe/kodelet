@@ -12,8 +12,10 @@ import (
 	"github.com/pkg/errors"
 )
 
+type runnerRunIDContextKey struct{}
+
 func (s *Service) Input(ctx context.Context, request extensions.UIInputRequest) (extensions.UIInputResponse, error) {
-	peer, runID, capabilities, err := s.uiTarget()
+	peer, runID, capabilities, err := s.uiTarget(ctx)
 	if err != nil {
 		return extensions.UIInputResponse{}, err
 	}
@@ -28,7 +30,7 @@ func (s *Service) Input(ctx context.Context, request extensions.UIInputRequest) 
 }
 
 func (s *Service) Confirm(ctx context.Context, request extensions.UIConfirmRequest) (extensions.UIInputResponse, error) {
-	peer, runID, capabilities, err := s.uiTarget()
+	peer, runID, capabilities, err := s.uiTarget(ctx)
 	if err != nil {
 		return extensions.UIInputResponse{}, err
 	}
@@ -43,7 +45,7 @@ func (s *Service) Confirm(ctx context.Context, request extensions.UIConfirmReque
 }
 
 func (s *Service) Select(ctx context.Context, request extensions.UISelectRequest) (extensions.UIInputResponse, error) {
-	peer, runID, capabilities, err := s.uiTarget()
+	peer, runID, capabilities, err := s.uiTarget(ctx)
 	if err != nil {
 		return extensions.UIInputResponse{}, err
 	}
@@ -58,7 +60,7 @@ func (s *Service) Select(ctx context.Context, request extensions.UISelectRequest
 }
 
 func (s *Service) Notify(ctx context.Context, request extensions.UINotifyRequest) (extensions.UIInputResponse, error) {
-	peer, runID, capabilities, err := s.uiTarget()
+	peer, runID, capabilities, err := s.uiTarget(ctx)
 	if err != nil {
 		return extensions.UIInputResponse{}, err
 	}
@@ -72,7 +74,7 @@ func (s *Service) Notify(ctx context.Context, request extensions.UINotifyRequest
 }
 
 func (s *Service) SetWidget(ctx context.Context, source extensions.UIExtensionSource, request extensions.UIWidgetSetRequest) (extensions.UIFrameResponse, error) {
-	peer, runID, owner, available, err := s.persistentUITarget(source)
+	peer, runID, owner, available, err := s.persistentUITarget(ctx, source)
 	if err != nil {
 		return extensions.UIFrameResponse{}, err
 	}
@@ -85,7 +87,7 @@ func (s *Service) SetWidget(ctx context.Context, source extensions.UIExtensionSo
 }
 
 func (s *Service) UpdateWidget(ctx context.Context, source extensions.UIExtensionSource, request extensions.UIWidgetFrameRequest) (extensions.UIFrameResponse, error) {
-	peer, runID, owner, available, err := s.persistentUITarget(source)
+	peer, runID, owner, available, err := s.persistentUITarget(ctx, source)
 	if err != nil {
 		return extensions.UIFrameResponse{}, err
 	}
@@ -98,7 +100,7 @@ func (s *Service) UpdateWidget(ctx context.Context, source extensions.UIExtensio
 }
 
 func (s *Service) RemoveWidget(ctx context.Context, source extensions.UIExtensionSource, request extensions.UIWidgetRemoveRequest) (extensions.UIFrameResponse, error) {
-	peer, runID, owner, available, err := s.persistentUITarget(source)
+	peer, runID, owner, available, err := s.persistentUITarget(ctx, source)
 	if err != nil {
 		return extensions.UIFrameResponse{}, err
 	}
@@ -111,7 +113,7 @@ func (s *Service) RemoveWidget(ctx context.Context, source extensions.UIExtensio
 }
 
 func (s *Service) AppendTranscript(ctx context.Context, source extensions.UIExtensionSource, request extensions.UITranscriptAppendRequest) (extensions.UITranscriptAppendResponse, error) {
-	peer, runID, owner, available, err := s.persistentUITarget(source)
+	peer, runID, owner, available, err := s.persistentUITarget(ctx, source)
 	if err != nil {
 		return extensions.UITranscriptAppendResponse{}, err
 	}
@@ -124,7 +126,7 @@ func (s *Service) AppendTranscript(ctx context.Context, source extensions.UIExte
 }
 
 func (s *Service) OpenSurface(ctx context.Context, source extensions.UIExtensionSource, request extensions.UISurfaceOpenRequest) (extensions.UIFrameResponse, error) {
-	peer, runID, owner, available, err := s.persistentUITarget(source)
+	peer, runID, owner, available, err := s.persistentUITarget(ctx, source)
 	if err != nil {
 		return extensions.UIFrameResponse{}, err
 	}
@@ -137,7 +139,7 @@ func (s *Service) OpenSurface(ctx context.Context, source extensions.UIExtension
 }
 
 func (s *Service) UpdateSurface(ctx context.Context, source extensions.UIExtensionSource, request extensions.UISurfaceFrameRequest) (extensions.UIFrameResponse, error) {
-	peer, runID, owner, available, err := s.persistentUITarget(source)
+	peer, runID, owner, available, err := s.persistentUITarget(ctx, source)
 	if err != nil {
 		return extensions.UIFrameResponse{}, err
 	}
@@ -150,7 +152,7 @@ func (s *Service) UpdateSurface(ctx context.Context, source extensions.UIExtensi
 }
 
 func (s *Service) CloseSurface(ctx context.Context, source extensions.UIExtensionSource, request extensions.UISurfaceCloseRequest) (extensions.UIFrameResponse, error) {
-	peer, runID, owner, available, err := s.persistentUITarget(source)
+	peer, runID, owner, available, err := s.persistentUITarget(ctx, source)
 	if err != nil {
 		return extensions.UIFrameResponse{}, err
 	}
@@ -165,23 +167,31 @@ func (s *Service) CloseSurface(ctx context.Context, source extensions.UIExtensio
 // CleanupExtensionUI is best-effort; the control plane also closes run-scoped UI when the run ends.
 func (s *Service) CleanupExtensionUI(extensions.UIExtensionOwner) {}
 
-func (s *Service) uiTarget() (Peer, string, protocol.ClientCapabilities, error) {
+func (s *Service) uiTarget(ctx context.Context) (Peer, string, protocol.ClientCapabilities, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.peer == nil {
 		return nil, "", protocol.ClientCapabilities{}, errors.New("runner control connection is unavailable")
 	}
-	if s.active == nil || s.active.closing {
+	runID, _ := ctx.Value(runnerRunIDContextKey{}).(string)
+	runID = strings.TrimSpace(runID)
+	if runID == "" && len(s.runs) == 1 {
+		for candidate := range s.runs {
+			runID = candidate
+		}
+	}
+	run := s.runs[runID]
+	if run == nil || run.closing {
 		return nil, "", protocol.ClientCapabilities{}, errors.New("runner has no active UI run")
 	}
-	return s.peer, s.active.id, s.active.clientCaps, nil
+	return s.peer, run.id, run.clientCaps, nil
 }
 
-func (s *Service) persistentUITarget(source extensions.UIExtensionSource) (Peer, string, runnerpayload.ExtensionOwner, bool, error) {
+func (s *Service) persistentUITarget(ctx context.Context, source extensions.UIExtensionSource) (Peer, string, runnerpayload.ExtensionOwner, bool, error) {
 	if source == nil {
 		return nil, "", runnerpayload.ExtensionOwner{}, false, errors.New("extension UI source is required")
 	}
-	peer, runID, capabilities, err := s.uiTarget()
+	peer, runID, capabilities, err := s.uiTarget(ctx)
 	if err != nil {
 		return nil, "", runnerpayload.ExtensionOwner{}, false, err
 	}

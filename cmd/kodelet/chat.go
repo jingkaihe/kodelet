@@ -244,8 +244,11 @@ func prepareRemoteChatRunner(ctx context.Context, config *ChatConfig) (*chatpkg.
 	if !selected.Connected {
 		return nil, "", errors.New("runner is offline")
 	}
-	if selected.Status != runnerregistry.RunnerStatusIdle {
-		return nil, "", errors.Errorf("runner is not idle: %s", selected.Status)
+	if selected.Status != runnerregistry.RunnerStatusIdle && selected.Status != runnerregistry.RunnerStatusBusy {
+		return nil, "", errors.Errorf("runner is not available: %s", selected.Status)
+	}
+	if selected.Status == runnerregistry.RunnerStatusBusy && !selected.ConcurrentRuns {
+		return nil, "", errors.New("runner does not support concurrent runs")
 	}
 	runner, err := chatpkg.NewControlPlaneChatRunner(server, config.AuthToken, selected.ID)
 	if err != nil {

@@ -218,6 +218,39 @@ func TestRuntimeManagerClosesRetiredRuntimeAfterItsCallerLeaseEnds(t *testing.T)
 	}, time.Second, time.Millisecond)
 }
 
+func TestRuntimeManagerIsolatesConcurrentCallerLeases(t *testing.T) {
+	var calls int
+	manager := newRuntimeManager(func(_ context.Context, _ string, _ Config) (*Runtime, error) {
+		calls++
+		return EmptyRuntime(), nil
+	})
+	t.Cleanup(func() { assert.NoError(t, manager.Close()) })
+	firstLease, cancelFirst := context.WithCancel(context.Background())
+	secondLease, cancelSecond := context.WithCancel(context.Background())
+	t.Cleanup(cancelSecond)
+
+	first, releaseFirst, err := manager.RuntimeWithConfigAndCallContextForIsolatedLease(context.Background(), firstLease, "/workspace", "runner-work", Config{Enabled: false}, ExtensionCallContext{})
+	require.NoError(t, err)
+	second, releaseSecond, err := manager.RuntimeWithConfigAndCallContextForIsolatedLease(context.Background(), secondLease, "/workspace", "runner-work", Config{Enabled: false}, ExtensionCallContext{})
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, releaseSecond()) })
+	assert.NotSame(t, first, second)
+	assert.Equal(t, 2, calls)
+
+	require.NoError(t, releaseFirst())
+	cancelFirst()
+	select {
+	case <-first.runtimeCtx.Done():
+	default:
+		t.Fatal("explicit isolated lease release did not synchronously close its runtime")
+	}
+	select {
+	case <-second.runtimeCtx.Done():
+		t.Fatal("ending one isolated lease closed another run's runtime")
+	default:
+	}
+}
+
 func TestRuntimeManagerDoesNotCacheRuntimeCreatedByCanceledCaller(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var calls int

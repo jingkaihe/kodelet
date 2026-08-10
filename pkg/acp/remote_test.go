@@ -348,6 +348,27 @@ func TestRemoteACPCommandsIncludeBuiltInsAndWorkspaceCommands(t *testing.T) {
 	assert.Equal(t, []string{"goal", "rename", "review"}, names)
 }
 
+func TestRemoteACPSessionsCanRunConcurrently(t *testing.T) {
+	manager := newRemoteSessionManager(RemoteSessionConfig{})
+	manager.sessions["session-1"] = &remoteSession{id: "session-1"}
+	manager.sessions["session-2"] = &remoteSession{id: "session-2"}
+
+	firstPrompt, _, err := manager.beginPrompt("session-1")
+	require.NoError(t, err)
+	assert.True(t, firstPrompt)
+	secondPrompt, _, err := manager.beginPrompt("session-2")
+	require.NoError(t, err)
+	assert.True(t, secondPrompt)
+	_, _, err = manager.beginPrompt("session-1")
+	require.ErrorContains(t, err, "already has an active prompt")
+
+	assert.True(t, manager.isActive("session-1"))
+	assert.True(t, manager.isActive("session-2"))
+	manager.finishPrompt("session-1", true)
+	assert.False(t, manager.isActive("session-1"))
+	assert.True(t, manager.isActive("session-2"))
+}
+
 func TestRemoteACPRunEOFCancelsPromptAndStopsControlPlane(t *testing.T) {
 	workspace := t.TempDir()
 	stopCalled := make(chan struct{})
@@ -356,8 +377,7 @@ func TestRemoteACPRunEOFCancelsPromptAndStopsControlPlane(t *testing.T) {
 	server := newRemoteACPTestServer(t, workspace, client, bytes.NewBuffer(nil))
 	sessionID := acptypes.SessionID("conversation-1")
 	server.remoteSessions.mu.Lock()
-	server.remoteSessions.sessions[sessionID] = &remoteSession{id: sessionID, started: true}
-	server.remoteSessions.active = sessionID
+	server.remoteSessions.sessions[sessionID] = &remoteSession{id: sessionID, started: true, active: true}
 	server.remoteSessions.mu.Unlock()
 
 	server.activePromptsMu.Lock()
@@ -388,8 +408,7 @@ func TestRemoteACPCancelBeforeRemoteRunSkipsControlPlaneStop(t *testing.T) {
 	server := newRemoteACPTestServer(t, workspace, client, bytes.NewBuffer(nil))
 	sessionID := acptypes.SessionID("conversation-1")
 	server.remoteSessions.mu.Lock()
-	server.remoteSessions.sessions[sessionID] = &remoteSession{id: sessionID}
-	server.remoteSessions.active = sessionID
+	server.remoteSessions.sessions[sessionID] = &remoteSession{id: sessionID, active: true}
 	server.remoteSessions.mu.Unlock()
 	server.activePromptsMu.Lock()
 	server.activePrompts[sessionID] = &activePrompt{cancel: func() { close(cancelled) }, turnID: "turn-1"}

@@ -8,6 +8,8 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/acp"
 	"github.com/jingkaihe/kodelet/pkg/chat"
+	runnerclient "github.com/jingkaihe/kodelet/pkg/runner/client"
+	"github.com/jingkaihe/kodelet/pkg/runner/localstate"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	"github.com/pkg/errors"
@@ -16,6 +18,8 @@ import (
 type embeddedACPRemoteProvider struct {
 	server    string
 	authToken string
+	workspace string
+	store     *localstate.Store
 
 	mu          sync.Mutex
 	ready       bool
@@ -25,16 +29,25 @@ type embeddedACPRemoteProvider struct {
 	changed     chan struct{}
 }
 
-func newEmbeddedACPRemoteProvider(server, authToken string) *embeddedACPRemoteProvider {
+func newEmbeddedACPRemoteProvider(server, authToken, workspace string, store *localstate.Store) *embeddedACPRemoteProvider {
+	if normalized, err := normalizeRunnerAPIBaseURL(server); err == nil {
+		server = normalized
+	}
 	return &embeddedACPRemoteProvider{
 		server:    server,
 		authToken: authToken,
+		workspace: strings.TrimSpace(workspace),
+		store:     store,
 		changed:   make(chan struct{}),
 	}
 }
 
 func (p *embeddedACPRemoteProvider) registeredRunner(result protocol.RegisterResult) {
-	client, err := chat.NewControlPlaneChatRunner(p.server, p.authToken, result.RunnerID)
+	p.registeredRunnerID(result.RunnerID)
+}
+
+func (p *embeddedACPRemoteProvider) registeredRunnerID(runnerID string) {
+	client, err := chat.NewControlPlaneChatRunner(p.server, p.authToken, runnerID)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if err != nil {
@@ -44,7 +57,7 @@ func (p *embeddedACPRemoteProvider) registeredRunner(result protocol.RegisterRes
 		return
 	}
 	p.client = client
-	p.runnerID = result.RunnerID
+	p.runnerID = strings.TrimSpace(runnerID)
 	p.ready = true
 	p.terminalErr = nil
 	p.signalLocked()
@@ -70,6 +83,9 @@ func (p *embeddedACPRemoteProvider) fail(err error) {
 
 func (p *embeddedACPRemoteProvider) WaitForRemoteChat(ctx context.Context) (acp.RemoteChatClient, string, error) {
 	for {
+		if err := p.refreshAdvertisedRunner(); err != nil {
+			return nil, "", err
+		}
 		p.mu.Lock()
 		if p.ready && p.client != nil && p.runnerID != "" {
 			client := p.client
@@ -109,8 +125,54 @@ func (p *embeddedACPRemoteProvider) WaitForRemoteChat(ctx context.Context) (acp.
 		case <-ctx.Done():
 			return nil, "", ctx.Err()
 		case <-changed:
+		case <-time.After(50 * time.Millisecond):
 		}
 	}
+}
+
+func (p *embeddedACPRemoteProvider) refreshAdvertisedRunner() error {
+	if p == nil || p.store == nil || strings.TrimSpace(p.workspace) == "" {
+		return nil
+	}
+	metadata, found, err := p.store.ReadWorkspaceLockMetadata(p.workspace)
+	if err != nil || !found {
+		// The lock owner rewrites this file in place. A concurrent read can see
+		// incomplete JSON, so treat read failures as transient and retry later.
+		return nil
+	}
+	if metadata.StoppedAt != nil {
+		p.markUnavailable()
+		return nil
+	}
+	runnerID := strings.TrimSpace(metadata.RunnerID)
+	advertisedServer := strings.TrimSpace(metadata.Server)
+	if runnerID == "" || advertisedServer == "" {
+		p.markUnavailable()
+		return nil
+	}
+	normalizedServer, err := normalizeRunnerAPIBaseURL(advertisedServer)
+	if err != nil {
+		return errors.Wrap(err, "workspace lock advertises an invalid control-plane server")
+	}
+	if normalizedServer != p.server {
+		return errors.Errorf("workspace runner is now registered with %s, not %s", normalizedServer, p.server)
+	}
+	p.mu.Lock()
+	currentRunnerID := p.runnerID
+	p.mu.Unlock()
+	if currentRunnerID != runnerID {
+		p.registeredRunnerID(runnerID)
+	}
+	return nil
+}
+
+func (p *embeddedACPRemoteProvider) markUnavailable() {
+	p.mu.Lock()
+	if p.ready {
+		p.ready = false
+		p.signalLocked()
+	}
+	p.mu.Unlock()
 }
 
 func (p *embeddedACPRemoteProvider) controlPlaneRunnerReady(ctx context.Context, runnerID string) (bool, error) {
@@ -126,12 +188,15 @@ func (p *embeddedACPRemoteProvider) controlPlaneRunnerReady(ctx context.Context,
 			if strings.TrimSpace(runner.CompatibilityError) != "" {
 				return false, errors.New(runner.CompatibilityError)
 			}
-			return false, errors.New("embedded workspace runner is incompatible with the control plane")
+			return false, errors.New("workspace runner is incompatible with the control plane")
 		}
 		if runner.Status == runnerregistry.RunnerStatusError {
-			return false, errors.New("embedded workspace runner entered an error state")
+			return false, errors.New("workspace runner entered an error state")
 		}
-		return runner.Connected && (runner.Status == runnerregistry.RunnerStatusIdle || runner.Status == runnerregistry.RunnerStatusBusy), nil
+		if p.workspace != "" && strings.TrimSpace(runner.Workspace.Path) != p.workspace {
+			return false, errors.Errorf("runner %s is bound to workspace %s, not %s", runnerID, runner.Workspace.Path, p.workspace)
+		}
+		return runner.Connected && (runner.Status == runnerregistry.RunnerStatusIdle || (runner.Status == runnerregistry.RunnerStatusBusy && runner.ConcurrentRuns)), nil
 	}
 	return false, nil
 }
@@ -143,6 +208,59 @@ func (p *embeddedACPRemoteProvider) signalLocked() {
 
 type acpEmbeddedRunner interface {
 	Run(ctx context.Context) error
+}
+
+func acquireOrReuseACPRunner(ctx context.Context, runner *runnerclient.Runner, expectedServer string) (bool, string, error) {
+	if runner == nil {
+		return false, "", errors.New("workspace runner is required")
+	}
+	expectedServer, err := normalizeRunnerAPIBaseURL(expectedServer)
+	if err != nil {
+		return false, "", err
+	}
+	for {
+		err := runner.AcquireWorkspaceLock()
+		if err == nil {
+			return true, "", nil
+		}
+		var held *localstate.LockHeldError
+		if !errors.As(err, &held) {
+			return false, "", err
+		}
+		metadata := held.Metadata
+		if metadata.StoppedAt != nil {
+			timer := time.NewTimer(50 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return false, "", ctx.Err()
+			case <-timer.C:
+			}
+			continue
+		}
+		if advertisedServer := strings.TrimSpace(metadata.Server); advertisedServer != "" {
+			normalizedServer, normalizeErr := normalizeRunnerAPIBaseURL(advertisedServer)
+			if normalizeErr != nil {
+				return false, "", errors.Wrap(normalizeErr, "workspace lock advertises an invalid control-plane server")
+			}
+			if normalizedServer != expectedServer {
+				return false, "", errors.Errorf("workspace runner is already registered with %s, not %s", normalizedServer, expectedServer)
+			}
+		}
+		if runnerID := strings.TrimSpace(metadata.RunnerID); runnerID != "" {
+			if strings.TrimSpace(metadata.Server) == "" {
+				return false, "", errors.New("workspace lock advertises a runner id without a control-plane server")
+			}
+			return false, runnerID, nil
+		}
+		timer := time.NewTimer(50 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return false, "", ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
 func runACPServerWithEmbeddedRunner(

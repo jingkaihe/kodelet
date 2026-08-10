@@ -196,7 +196,7 @@ func runRunnerList(ctx context.Context, config runnerQueryConfig, output io.Writ
 		return nil
 	}
 	tw := tabwriter.NewWriter(output, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tName\tHost\tStatus\tWorkspace\tVersion\tActive run\tManifest changed\tLast heartbeat")
+	fmt.Fprintln(tw, "ID\tName\tHost\tStatus\tWorkspace\tVersion\tActive runs\tManifest changed\tLast heartbeat")
 	for _, runner := range runners {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%t\t%s\n",
 			runner.ID,
@@ -205,7 +205,7 @@ func runRunnerList(ctx context.Context, config runnerQueryConfig, output io.Writ
 			runner.Status,
 			runner.Workspace.Path,
 			runner.KodeletVersion,
-			runner.ActiveRunID,
+			strings.Join(activeRunnerRunIDs(runner), ", "),
 			runner.ManifestChanged,
 			formatRunnerTime(runner.LastHeartbeatAt),
 		)
@@ -425,6 +425,16 @@ func runnerDisplayName(runner runnerregistry.Runner) string {
 	return runner.Workspace.Name
 }
 
+func activeRunnerRunIDs(runner runnerregistry.Runner) []string {
+	if len(runner.ActiveRunIDs) > 0 {
+		return runner.ActiveRunIDs
+	}
+	if strings.TrimSpace(runner.ActiveRunID) != "" {
+		return []string{runner.ActiveRunID}
+	}
+	return nil
+}
+
 func renderRunnerInspect(output io.Writer, result runnerInspectOutput) error {
 	tw := tabwriter.NewWriter(output, 0, 0, 2, ' ', 0)
 	runner := result.Runner
@@ -443,7 +453,7 @@ func renderRunnerInspect(output io.Writer, result runnerInspectOutput) error {
 	if runner.CompatibilityError != "" {
 		fmt.Fprintf(tw, "Compatibility error:\t%s\n", runner.CompatibilityError)
 	}
-	fmt.Fprintf(tw, "Active run:\t%s\n", runner.ActiveRunID)
+	fmt.Fprintf(tw, "Active runs:\t%s\n", strings.Join(activeRunnerRunIDs(runner), ", "))
 	fmt.Fprintf(tw, "Connection ID:\t%s\n", runner.ConnectionID)
 	fmt.Fprintf(tw, "Generation:\t%d\n", runner.Generation)
 	fmt.Fprintf(tw, "Connected at:\t%s\n", formatRunnerTime(runner.ConnectedAt))

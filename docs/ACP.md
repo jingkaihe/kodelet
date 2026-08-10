@@ -62,26 +62,26 @@ kodelet acp [flags]
 
 ## Server-Backed ACP
 
-`kodelet acp --server URL` embeds a stable runner for the process's current working directory. The ACP client still communicates with a local stdio subprocess, but the subprocess registers that workspace with the control plane and sends each prompt to the control plane's chat API.
+`kodelet acp --server URL` uses the stable runner for the process's current working directory. It acquires the workspace runner lock and starts an embedded runner when no owner exists; if `kodelet runner start` already holds the lock for the same server and has advertised its runner ID, ACP reuses that runner instead of registering the workspace again. The ACP client still communicates with a local stdio subprocess, which sends each prompt to the control plane's chat API.
 
 ```text
 ACP client <-- stdio --> kodelet acp <-- HTTPS --> kodelet serve / model loop
                               |
-                              +-- embedded local runner
+                              +-- embedded or existing local runner
                                   tools, files, context, skills, recipes, extensions
 ```
 
-The control plane owns provider credentials, model calls, turn orchestration, cancellation state, and persisted conversations. The embedded runner owns the canonical workspace, context files, filesystem and shell tools, skills, recipes, extension tools and commands, local command restrictions, tool mode, and runner environment profiles.
+The control plane owns provider credentials, model calls, turn orchestration, cancellation state, and persisted conversations. The local workspace runner owns the canonical workspace, context files, filesystem and shell tools, skills, recipes, extension tools and commands, local command restrictions, tool mode, and runner environment profiles.
 
-The embedded runner executes with the ACP process's host permissions and is not a sandbox. API and runner tokens are captured before local extensions start and removed from the child-process environment; on Linux, Kodelet also scrubs token flag values from the process command line and disables same-user process inspection of its original environment. Supplying tokens through `KODELET_AUTH_TOKEN` and `KODELET_RUNNER_AUTH_TOKEN` avoids their initial appearance in process listings.
+An embedded runner executes with the ACP process's host permissions and is not a sandbox; a reused runner executes with the permissions of its existing process. API and runner tokens are captured before local extensions start and removed from the child-process environment; on Linux, Kodelet also scrubs token flag values from the process command line and disables same-user process inspection of its original environment. Supplying tokens through `KODELET_AUTH_TOKEN` and `KODELET_RUNNER_AUTH_TOKEN` avoids their initial appearance in process listings.
 
 For new conversations, explicit `--profile` and `--reasoning-effort` values select control-plane model policy. `--runner-profile` independently selects local runner policy. Flags that configure a local model loop, including `--provider`, `--model`, `--max-tokens`, `--max-turns`, weak-model settings, thinking budget, compact ratio, Anthropic API access, and OpenAI native search, are rejected with `--server`.
 
-`--no-skills`, `--no-extensions`, and `--enable-fs-search-tools` remain runner-local and override any selected runner profile. Local recipes and extension commands are advertised to compatible ACP clients and are executed through the embedded runner when invoked.
+`--no-skills`, `--no-extensions`, and `--enable-fs-search-tools` remain runner-local and override any selected runner profile when ACP owns the embedded runner. If ACP reuses an already-running runner, explicitly passing one of those process-level overrides is rejected; configure the external runner's environment profile instead. Local recipes and extension commands execute through the selected workspace runner when invoked. ACP advertises them for an embedded runner; when reusing an external runner, it currently advertises only built-in commands, although manually submitted workspace commands still execute remotely.
 
-The server-backed process is bound to the current working directory and accepts ACP session CWDs only for that same canonical workspace. A loaded conversation must already be bound to the exact embedded runner; when `--runner-profile` was explicitly supplied, the stored conversation must also use that profile. Only one prompt can execute through the embedded runner at a time.
+The server-backed process is bound to the current working directory and accepts ACP session CWDs only for that same canonical workspace. A loaded conversation must already be bound to the exact workspace runner; when `--runner-profile` was explicitly supplied, the stored conversation must also use that profile. Different ACP sessions may execute concurrently through the runner, while a single conversation still allows only one active prompt at a time. Concurrent runs share the workspace filesystem and host resources, although their run state and extension processes are isolated.
 
-Runner readiness is checked during `session/new` and `session/load`; an unavailable runner produces an error after 15 seconds rather than leaving the ACP request pending indefinitely. `session/cancel` immediately cancels the local prompt stream, sends a turn-specific stop request to the control plane, and does not release the ACP workspace slot until the control plane confirms runner cleanup. The turn identifier also lets cancellation arrive safely before the control plane has registered the chat request.
+When another process already owns the workspace lock, ACP waits for that live runner to publish its stable runner ID instead of racing it with a duplicate registration. Runner readiness is then checked during `session/new` and `session/load`; an unavailable runner produces an error after 15 seconds rather than leaving the ACP request pending indefinitely. `session/cancel` immediately cancels the local prompt stream and sends a turn-specific stop request to the control plane. The turn identifier also lets cancellation arrive safely before the control plane has registered the chat request.
 
 Extension tools and commands work in server-backed ACP, but ACP does not currently expose Kodelet's interactive extension UI broker, persistent widgets, or surfaces. Extensions must treat those UI capabilities as unavailable in this mode.
 
@@ -267,7 +267,7 @@ flowchart TB
 
 ## Security Considerations
 
-1. **Path Validation**: All file paths are validated relative to the session CWD; server-backed ACP additionally requires the session CWD to match the embedded runner workspace.
+1. **Path Validation**: All file paths are validated relative to the session CWD; server-backed ACP additionally requires the session CWD to match the selected workspace runner.
 2. **Command Restrictions**: Bash and tool restrictions apply in both local and server-backed ACP.
 3. **Local stdio authentication**: Ordinary `kodelet acp` relies on the parent ACP client to control subprocess access and does not add an authentication exchange.
 4. **Control-plane authentication**: Server-backed ACP uses `--auth-token` for API requests and `--runner-auth-token` for runner registration. Environment-provided values are captured before the runner starts and removed from the child-process environment inherited by local tools and extensions.
