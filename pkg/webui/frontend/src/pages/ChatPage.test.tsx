@@ -1319,25 +1319,36 @@ describe('ChatPage', () => {
       messageCount: 1,
       cwd: '/runner/kodelet',
       runnerId: idleRunner.id,
+      environmentProfile: 'gpu',
       runner: idleRunner,
       messages: [{ role: 'user', content: 'hello' }],
       toolResults: {},
     });
     mockGetRunners.mockResolvedValue({
-      runners: [{ ...idleRunner, status: 'busy', activeRunId: 'run-1' }],
+      runners: [
+        {
+          ...idleRunner,
+          status: 'busy',
+          activeRunId: 'run-1',
+          activeRunIds: ['run-1', 'run-2'],
+        },
+      ],
     });
 
     render(<ChatPage />);
 
     await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-123'));
     await waitFor(() =>
-      expect(screen.getByTestId('composer-inline-context')).toHaveTextContent(
-        'runner:kodelet (busy)'
+      expect(screen.getByTestId('transcript-meta-strip')).toHaveTextContent(
+        'runner:kodelet (2 active)'
       )
     );
-    expect(screen.getByTestId('composer-inline-context')).not.toHaveTextContent(
+    expect(screen.getByTestId('transcript-meta-strip')).toHaveTextContent('env:gpu');
+    expect(screen.getByTestId('transcript-meta-strip')).not.toHaveTextContent(
       'runner:kodelet (idle)'
     );
+    expect(screen.getByTestId('composer-inline-context')).not.toHaveTextContent('runner:kodelet');
+    expect(screen.getByTestId('composer-inline-context')).not.toHaveTextContent('env:gpu');
   });
 
   it('shows the profile inside the inline context for existing conversations', async () => {
@@ -1483,8 +1494,8 @@ describe('ChatPage', () => {
 
     await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-123'));
     await waitFor(() =>
-      expect(screen.getByTestId('composer-inline-context')).toHaveTextContent(
-        'runner:kodelet (busy)'
+      expect(screen.getByTestId('transcript-meta-strip')).toHaveTextContent(
+        'runner:kodelet (1 active)'
       )
     );
     await waitFor(() => expect(streamListener).not.toBeNull());

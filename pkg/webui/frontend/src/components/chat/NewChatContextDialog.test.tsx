@@ -166,6 +166,8 @@ describe('NewChatContextDialog', () => {
           status: 'busy',
           connected: true,
           concurrentRuns: true,
+          activeRunId: 'run-1',
+          activeRunIds: ['run-1', 'run-2'],
           generation: 1,
         },
         {
@@ -202,8 +204,8 @@ describe('NewChatContextDialog', () => {
       runnerIdDraft: 'runner-busy',
     });
 
-    expect(screen.getByRole('option', { name: /busy — worker — busy/ })).toBeEnabled();
-    expect(screen.getByRole('option', { name: /legacy — worker — busy/ })).toBeDisabled();
+    expect(screen.getByRole('option', { name: /busy — worker — 2 active/ })).toBeEnabled();
+    expect(screen.getByRole('option', { name: /legacy — worker — 1 active/ })).toBeDisabled();
     expect(screen.getByRole('option', { name: /offline — worker — offline/ })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
   });

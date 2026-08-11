@@ -1,7 +1,7 @@
 import React from 'react';
 import { ArrowRight, Check, ChevronDown, FolderOpen, X } from 'lucide-react';
 import type { ChatProfileOption, CWDHint, Runner } from '../../types';
-import { cn } from '../../utils';
+import { cn, formatRunnerStatus } from '../../utils';
 
 interface NewChatContextDialogProps {
   availableProfiles: ChatProfileOption[];
@@ -192,7 +192,7 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
                       const name = runner.displayName || runner.workspace.name || runner.id;
                       return (
                         <option disabled={!available} key={runner.id} value={runner.id}>
-                          {name} — {runner.host.hostname} — {runner.status}
+                          {name} — {runner.host.hostname} — {formatRunnerStatus(runner)}
                         </option>
                       );
                     })}

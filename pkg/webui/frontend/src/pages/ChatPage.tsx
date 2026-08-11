@@ -38,6 +38,7 @@ import {
   formatCompactRelativeTime,
   formatContextWindow,
   formatCost,
+  formatRunnerStatus,
   showToast,
   truncateMiddle,
 } from '../utils';
@@ -2346,25 +2347,10 @@ const ChatPage: React.FC = () => {
     if (currentReasoningEffortLabel) {
       contextParts.push(`effort:${currentReasoningEffortLabel}`);
     }
-    if (currentRunnerID) {
-      const runnerName =
-        currentRunner?.displayName || currentRunner?.workspace.name || currentRunnerID;
-      contextParts.push(`runner:${runnerName} (${currentRunner?.status || 'offline'})`);
-      if (currentEnvironmentProfile) {
-        contextParts.push(`env:${currentEnvironmentProfile}`);
-      }
-    }
     contextParts.push(directoryLabel);
 
     return contextParts.join(' · ');
-  }, [
-    currentCWDLabel,
-    currentProfileLabel,
-    currentReasoningEffortLabel,
-    currentRunner,
-    currentRunnerID,
-    currentEnvironmentProfile,
-  ]);
+  }, [currentCWDLabel, currentProfileLabel, currentReasoningEffortLabel]);
 
   const recentWorkspaces = useMemo(() => getRecentWorkspaces(conversations), [conversations]);
 
@@ -2397,11 +2383,19 @@ const ChatPage: React.FC = () => {
       : 'Send';
   const stopActionLabel = canStopActiveConversation ? 'Stop' : 'Starting…';
   const composerMetaText = useMemo(() => {
+    const parts: string[] = [];
+    if (currentRunnerID) {
+      const runnerName =
+        currentRunner?.displayName || currentRunner?.workspace.name || currentRunnerID;
+      parts.push(`runner:${runnerName} (${formatRunnerStatus(currentRunner)})`);
+      if (currentEnvironmentProfile) {
+        parts.push(`env:${currentEnvironmentProfile}`);
+      }
+    }
     if (!conversation) {
-      return '';
+      return parts.join(', ');
     }
 
-    const parts: string[] = [];
     const contextWindow = formatContextWindow(conversation.usage);
 
     if (contextWindow) {
@@ -2461,7 +2455,7 @@ const ChatPage: React.FC = () => {
     }
 
     return parts.join(', ');
-  }, [conversation, statusTick]);
+  }, [conversation, currentEnvironmentProfile, currentRunner, currentRunnerID, statusTick]);
   const pendingSteerMessages = conversation?.pendingSteer || [];
 
   const handleCloseNewChatDialog = () => {

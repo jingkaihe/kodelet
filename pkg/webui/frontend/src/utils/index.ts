@@ -1,7 +1,7 @@
 // Utility functions for Kodelet Web UI
 
 import { format, formatDistanceToNow } from 'date-fns';
-import { Usage } from '../types';
+import type { Runner, Usage } from '../types';
 
 const formatCompactNumber = (value: number): string => {
   return new Intl.NumberFormat('en-US', {
@@ -84,6 +84,20 @@ export const formatContextWindow = (usage: Usage | null | undefined): string | n
   const percentage = Math.max(0, Math.min(100, Math.round((current / max) * 100)));
 
   return `${formatCompactNumber(current)}/${formatCompactNumber(max)} (${percentage}%) context`;
+};
+
+export const formatRunnerStatus = (
+  runner: Pick<Runner, 'status' | 'activeRunId' | 'activeRunIds'> | null | undefined
+): string => {
+  if (!runner) {
+    return 'offline';
+  }
+  if (runner.status !== 'busy') {
+    return runner.status;
+  }
+
+  const activeRunCount = runner.activeRunIds?.length || (runner.activeRunId ? 1 : 0) || 1;
+  return `${activeRunCount} active`;
 };
 
 const fallbackCopyToClipboard = (text: string): boolean => {
