@@ -19,21 +19,6 @@ export const getMetadataAny = (toolResult: ToolResult, paths: string[]): unknown
   return null;
 };
 
-// File icon utility
-export const getFileIcon = (path: string): string => {
-  if (!path) return '📄';
-  const ext = path.split('.').pop()?.toLowerCase();
-  const iconMap: Record<string, string> = {
-    'js': '📜', 'ts': '📜', 'py': '🐍', 'go': '🐹', 'java': '☕',
-    'html': '🌐', 'css': '🎨', 'json': '📋', 'xml': '📄',
-    'md': '📝', 'txt': '📄', 'log': '📊',
-    'jpg': '🖼️', 'jpeg': '🖼️', 'png': '🖼️', 'gif': '🖼️',
-    'pdf': '📕', 'doc': '📘', 'docx': '📘',
-    'zip': '📦', 'tar': '📦', 'gz': '📦'
-  };
-  return iconMap[ext || ''] || '📄';
-};
-
 // Check if image file
 export const isImageFile = (path: string): boolean => {
   const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'];

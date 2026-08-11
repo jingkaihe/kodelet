@@ -283,21 +283,6 @@ export const detectLanguageFromPath = (filePath: string): string => {
   return langMap[ext || ''] || ext || '';
 };
 
-// File icon utility
-export const getFileIcon = (path: string): string => {
-  if (!path) return '📄';
-  const ext = path.split('.').pop()?.toLowerCase();
-  const iconMap: Record<string, string> = {
-    'js': '📜', 'ts': '📜', 'py': '🐍', 'go': '🐹', 'java': '☕',
-    'html': '🌐', 'css': '🎨', 'json': '📋', 'xml': '📄',
-    'md': '📝', 'txt': '📄', 'log': '📊',
-    'jpg': '🖼️', 'jpeg': '🖼️', 'png': '🖼️', 'gif': '🖼️',
-    'pdf': '📕', 'doc': '📘', 'docx': '📘',
-    'zip': '📦', 'tar': '📦', 'gz': '📦'
-  };
-  return iconMap[ext || ''] || '📄';
-};
-
 // Debounce utility
 export type DebouncedFunction<T extends unknown[]> = ((...args: T) => void) & {
   cancel: () => void;

@@ -10,7 +10,6 @@ import {
   formatFileSize,
   formatDuration,
   detectLanguageFromPath,
-  getFileIcon,
   debounce,
   throttle,
   deepClone,
@@ -342,23 +341,6 @@ describe('detectLanguageFromPath', () => {
 
   it('handles paths with multiple dots', () => {
     expect(detectLanguageFromPath('my.file.test.js')).toBe('javascript');
-  });
-});
-
-describe('getFileIcon', () => {
-  it('returns default icon for falsy values', () => {
-    expect(getFileIcon('')).toBe('📄');
-  });
-
-  it('returns correct icons for known extensions', () => {
-    expect(getFileIcon('file.js')).toBe('📜');
-    expect(getFileIcon('file.py')).toBe('🐍');
-    expect(getFileIcon('file.go')).toBe('🐹');
-    expect(getFileIcon('file.png')).toBe('🖼️');
-  });
-
-  it('returns default icon for unknown extensions', () => {
-    expect(getFileIcon('file.xyz')).toBe('📄');
   });
 });
 

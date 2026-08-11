@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getMetadata, getMetadataAny, getFileIcon, isImageFile } from './utils';
+import { getMetadata, getMetadataAny, isImageFile } from './utils';
 import { ToolResult } from '../../types';
 
 describe('getMetadata', () => {
@@ -103,60 +103,6 @@ describe('getMetadataAny', () => {
     };
     const result = getMetadataAny(toolResult, ['option1', 'option2', 'option3']);
     expect(result).toBe('found');
-  });
-});
-
-describe('getFileIcon', () => {
-  it('returns default icon for empty path', () => {
-    expect(getFileIcon('')).toBe('📄');
-  });
-
-  it('returns correct icons for programming languages', () => {
-    expect(getFileIcon('script.js')).toBe('📜');
-    expect(getFileIcon('script.ts')).toBe('📜');
-    expect(getFileIcon('script.py')).toBe('🐍');
-    expect(getFileIcon('main.go')).toBe('🐹');
-    expect(getFileIcon('App.java')).toBe('☕');
-  });
-
-  it('returns correct icons for web files', () => {
-    expect(getFileIcon('index.html')).toBe('🌐');
-    expect(getFileIcon('styles.css')).toBe('🎨');
-    expect(getFileIcon('data.json')).toBe('📋');
-  });
-
-  it('returns correct icons for images', () => {
-    expect(getFileIcon('photo.jpg')).toBe('🖼️');
-    expect(getFileIcon('photo.jpeg')).toBe('🖼️');
-    expect(getFileIcon('image.png')).toBe('🖼️');
-    expect(getFileIcon('animation.gif')).toBe('🖼️');
-  });
-
-  it('returns correct icons for documents', () => {
-    expect(getFileIcon('document.pdf')).toBe('📕');
-    expect(getFileIcon('report.doc')).toBe('📘');
-    expect(getFileIcon('report.docx')).toBe('📘');
-  });
-
-  it('returns correct icons for archives', () => {
-    expect(getFileIcon('archive.zip')).toBe('📦');
-    expect(getFileIcon('backup.tar')).toBe('📦');
-    expect(getFileIcon('compressed.gz')).toBe('📦');
-  });
-
-  it('returns default icon for unknown extensions', () => {
-    expect(getFileIcon('file.xyz')).toBe('📄');
-    expect(getFileIcon('file.unknown')).toBe('📄');
-  });
-
-  it('handles case insensitive extensions', () => {
-    expect(getFileIcon('Script.JS')).toBe('📜');
-    expect(getFileIcon('IMAGE.PNG')).toBe('🖼️');
-  });
-
-  it('handles files with multiple dots', () => {
-    expect(getFileIcon('my.component.test.js')).toBe('📜');
-    expect(getFileIcon('archive.tar.gz')).toBe('📦');
   });
 });
 
