@@ -1387,24 +1387,32 @@ describe('ChatPage', () => {
     );
   });
 
-  it('re-subscribes to an active conversation stream when reopening a conversation', async () => {
+  it('streams a future TUI turn into an already-open conversation', async () => {
     routeParams = { id: 'conv-123' };
-    mockGetConversation.mockResolvedValue({
-      id: 'conv-123',
-      createdAt: '2024-01-01T00:00:00Z',
-      updatedAt: '2024-01-01T00:00:00Z',
-      messageCount: 1,
-      messages: [],
-      toolResults: {},
-    });
-    mockStreamConversation.mockImplementation(async (_id, options) => {
-      options.onEvent({ kind: 'conversation', conversation_id: 'conv-123' });
-      options.onEvent({
-        kind: 'text-delta',
-        conversation_id: 'conv-123',
-        delta: 'hello',
+    mockGetConversation
+      .mockResolvedValueOnce({
+        id: 'conv-123',
+        createdAt: '2024-01-01T00:00:00Z',
+        updatedAt: '2024-01-01T00:00:00Z',
+        messageCount: 1,
+        messages: [],
+        toolResults: {},
+      })
+      .mockResolvedValue({
+        id: 'conv-123',
+        createdAt: '2024-01-01T00:00:00Z',
+        updatedAt: '2024-01-01T00:01:00Z',
+        messageCount: 2,
+        messages: [
+          { role: 'user', content: 'sent from the tui' },
+          { role: 'assistant', content: 'hello from the runner' },
+        ],
+        toolResults: {},
       });
-      options.onEvent({ kind: 'done', conversation_id: 'conv-123' });
+    let streamListener: ((event: ChatStreamEvent) => void) | null = null;
+    mockStreamConversation.mockImplementation(async (_id, options) => {
+      streamListener = (options as { onEvent: (event: ChatStreamEvent) => void }).onEvent;
+      return new Promise(() => undefined);
     });
 
     render(<ChatPage />);
@@ -1413,7 +1421,94 @@ describe('ChatPage', () => {
     await waitFor(() =>
       expect(mockStreamConversation).toHaveBeenCalledWith('conv-123', expect.any(Object))
     );
-    await waitFor(() => expect(screen.getByText('hello')).toBeInTheDocument());
+
+    await act(async () => {
+      streamListener?.({ kind: 'conversation', conversation_id: 'conv-123' });
+      streamListener?.({
+        kind: 'user-message',
+        conversation_id: 'conv-123',
+        content: 'sent from the tui',
+      });
+      streamListener?.({
+        kind: 'text-delta',
+        conversation_id: 'conv-123',
+        delta: 'hello from the runner',
+      });
+      streamListener?.({ kind: 'done', conversation_id: 'conv-123' });
+    });
+
+    await waitFor(() => expect(screen.getByText('sent from the tui')).toBeInTheDocument());
+    expect(screen.getByText('hello from the runner')).toBeInTheDocument();
+  });
+
+  it('allows steering a TUI-started conversation while its remote runner is busy', async () => {
+    routeParams = { id: 'conv-123' };
+    const busyRunner = {
+      id: 'runner-1',
+      displayName: 'kodelet',
+      host: {
+        instanceId: 'host-1',
+        hostname: 'worker',
+        os: 'linux',
+        arch: 'amd64',
+      },
+      workspace: { path: '/runner/kodelet', name: 'kodelet' },
+      manifestChanged: false,
+      status: 'busy' as const,
+      connected: true,
+      concurrentRuns: true,
+      activeRunId: 'run-1',
+      activeRunIds: ['run-1'],
+      generation: 1,
+    };
+    mockGetConversation.mockResolvedValue({
+      id: 'conv-123',
+      createdAt: '2026-08-11T00:00:00Z',
+      updatedAt: '2026-08-11T00:00:00Z',
+      messageCount: 1,
+      cwd: '/runner/kodelet',
+      runnerId: busyRunner.id,
+      runner: busyRunner,
+      messages: [{ role: 'user', content: 'existing turn' }],
+      toolResults: {},
+    });
+    mockGetRunners.mockResolvedValue({ runners: [busyRunner] });
+    let streamListener: ((event: ChatStreamEvent) => void) | null = null;
+    mockStreamConversation.mockImplementation(async (_id, options) => {
+      streamListener = (options as { onEvent: (event: ChatStreamEvent) => void }).onEvent;
+      return new Promise(() => undefined);
+    });
+
+    render(<ChatPage />);
+
+    await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-123'));
+    await waitFor(() =>
+      expect(screen.getByTestId('composer-inline-context')).toHaveTextContent(
+        'runner:kodelet (busy)'
+      )
+    );
+    await waitFor(() => expect(streamListener).not.toBeNull());
+
+    await act(async () => {
+      streamListener?.({ kind: 'conversation', conversation_id: 'conv-123' });
+    });
+
+    fireEvent.change(screen.getByPlaceholderText('Steer the active conversation…'), {
+      target: { value: 'Focus on the failing tests' },
+    });
+    const steerButton = screen.getByRole('button', { name: 'Steer' });
+    expect(steerButton).toBeEnabled();
+    fireEvent.click(steerButton);
+
+    await waitFor(() =>
+      expect(mockSteerConversation).toHaveBeenCalledWith(
+        'conv-123',
+        'Focus on the failing tests',
+        expect.arrayContaining([
+          expect.objectContaining({ type: 'text', text: 'Focus on the failing tests' }),
+        ])
+      )
+    );
   });
 
   it('queues steering while a conversation is streaming', async () => {

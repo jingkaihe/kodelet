@@ -50,6 +50,7 @@ func TestNDJSONEventSinkRequiresFlusherAndWritesLines(t *testing.T) {
 	sink, err := newNDJSONEventSink(recorder)
 	require.NoError(t, err)
 	require.NoError(t, sink.Send(ChatEvent{Kind: "text", Content: "hello", Role: "assistant"}))
+	require.NoError(t, sink.KeepAlive())
 
 	assert.True(t, recorder.Flushed)
 	lines := strings.Split(strings.TrimSpace(recorder.Body.String()), "\n")

@@ -1192,12 +1192,16 @@ const ChatPage: React.FC = () => {
     const controller = new AbortController();
     resumeControllerRef.current = controller;
     let sawEvent = false;
+    let watchedTurn = 0;
 
     void apiService
       .streamConversation(conversationId, {
         signal: controller.signal,
         onEvent: (event: ChatStreamEvent) => {
           if (event.conversation_id && event.conversation_id !== conversationId) {
+            return;
+          }
+          if (sendControllersRef.current[conversationId]) {
             return;
           }
 
@@ -1219,6 +1223,7 @@ const ChatPage: React.FC = () => {
 
           sawEvent = true;
           if (event.kind === 'conversation' && event.conversation_id) {
+            watchedTurn += 1;
             setActiveConversationId(event.conversation_id);
             markConversationRunning(event.conversation_id);
             return;
@@ -1231,7 +1236,29 @@ const ChatPage: React.FC = () => {
             return;
           }
 
-          if (event.kind === 'done' || event.kind === 'error') {
+          if (event.kind === 'done') {
+            clearRunningConversation(conversationId);
+            const completedTurn = watchedTurn;
+            void apiService
+              .getConversation(conversationId)
+              .then((data) => {
+                if (
+                  resumeStreamRef.current !== streamInstance ||
+                  viewedConversationIdRef.current !== conversationId ||
+                  sendControllersRef.current[conversationId] ||
+                  completedTurn !== watchedTurn
+                ) {
+                  return;
+                }
+                const normalizedConversation = normalizeConversation(data);
+                setConversation(normalizedConversation);
+                setMessages(conversationToChatMessages(normalizedConversation));
+                void refreshConversations();
+              })
+              .catch((error) => {
+                console.error('Failed to refresh completed conversation', error);
+              });
+          } else if (event.kind === 'error') {
             clearRunningConversation(conversationId);
           }
 
@@ -1306,6 +1333,7 @@ const ChatPage: React.FC = () => {
     conversationLoading,
     loadedConversationId,
     markConversationRunning,
+    refreshConversations,
   ]);
 
   const handleTranscriptScroll = (event: React.UIEvent<HTMLDivElement>) => {

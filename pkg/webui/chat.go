@@ -150,8 +150,9 @@ type ndjsonEventSink struct {
 }
 
 type subscriberEventSink struct {
-	ch   chan ChatEvent
-	once sync.Once
+	ch     chan ChatEvent
+	mu     sync.RWMutex
+	closed bool
 }
 
 func newNDJSONEventSink(w http.ResponseWriter) (*ndjsonEventSink, error) {
@@ -182,11 +183,26 @@ func (s *ndjsonEventSink) Send(event ChatEvent) error {
 	return nil
 }
 
+func (s *ndjsonEventSink) KeepAlive() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := s.w.Write([]byte("\n")); err != nil {
+		return errors.Wrap(err, "failed to write chat stream keepalive")
+	}
+	s.flusher.Flush()
+	return nil
+}
+
 func newSubscriberEventSink() *subscriberEventSink {
 	return &subscriberEventSink{ch: make(chan ChatEvent, 128)}
 }
 
 func (s *subscriberEventSink) Send(event ChatEvent) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return errors.New("subscriber is closed")
+	}
 	select {
 	case s.ch <- event:
 		return nil
@@ -196,9 +212,13 @@ func (s *subscriberEventSink) Send(event ChatEvent) error {
 }
 
 func (s *subscriberEventSink) Close() {
-	s.once.Do(func() {
-		close(s.ch)
-	})
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	s.closed = true
+	close(s.ch)
 }
 
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
@@ -239,6 +259,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		conversationID = convtypes.GenerateID()
 		req.ConversationID = conversationID
 	}
+	registeredConversationID := conversationID
 
 	ctx, cancel := context.WithCancel(s.chatExecutionContext(requestCtx))
 	run := newActiveChatRun(cancel)
@@ -248,8 +269,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorResponse(w, http.StatusConflict, "conversation already has an active run", nil)
 		return
 	}
-	defer s.unregisterActiveChat(conversationID, run)
-	defer s.closeChatSubscribers(conversationID)
+	defer s.unregisterActiveChat(registeredConversationID, run)
 	defer cancel()
 
 	broadcastingSink := &broadcastingEventSink{
@@ -259,14 +279,40 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 	run.uiInput = newWebUIInputBroker(conversationID, broadcastingSink)
 
+	s.broadcastChatEvent(conversationID, ChatEvent{
+		Kind:           "conversation",
+		ConversationID: conversationID,
+		Role:           "assistant",
+	})
+	var userContent any = message
+	if contentBlocks := chat.ContentBlocksForUserInput(message, imageInputs); len(contentBlocks) > 0 {
+		userContent = contentBlocks
+	}
+	s.broadcastChatEvent(conversationID, ChatEvent{
+		Kind:           "user-message",
+		ConversationID: conversationID,
+		Role:           "user",
+		Content:        userContent,
+	})
+
 	conversationID, runErr := s.chatRunner.Run(ctx, req, broadcastingSink)
+	if strings.TrimSpace(conversationID) == "" {
+		conversationID = registeredConversationID
+	}
 	if runErr != nil {
 		if stdErrors.Is(runErr, io.ErrClosedPipe) || stdErrors.Is(runErr, context.Canceled) {
+			s.unregisterActiveChat(registeredConversationID, run)
+			s.broadcastChatEvent(conversationID, ChatEvent{
+				Kind:           "done",
+				ConversationID: conversationID,
+				Role:           "assistant",
+			})
 			logger.G(requestCtx).WithError(runErr).Debug("chat stream disconnected")
 			return
 		}
 
 		logger.G(ctx).WithError(runErr).Error("chat request failed")
+		s.unregisterActiveChat(registeredConversationID, run)
 		s.broadcastChatEvent(conversationID, ChatEvent{
 			Kind:           "error",
 			ConversationID: conversationID,
@@ -282,6 +328,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.unregisterActiveChat(registeredConversationID, run)
 	s.broadcastChatEvent(conversationID, ChatEvent{
 		Kind:           "done",
 		ConversationID: conversationID,

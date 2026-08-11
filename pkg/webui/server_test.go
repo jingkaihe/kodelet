@@ -1824,6 +1824,74 @@ func TestServer_handleStreamConversationForwardsUsageEvents(t *testing.T) {
 	}
 }
 
+func TestServer_handleStreamConversationFollowsFutureChatRun(t *testing.T) {
+	const conversationID = "conv-123"
+	server := &Server{
+		conversationService: &mockConversationService{getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
+			return &conversations.GetConversationResponse{ID: conversationID}, nil
+		}},
+		chatRunner: &mockChatRunner{runFunc: func(_ context.Context, _ ChatRequest, sink ChatEventSink) (string, error) {
+			require.NoError(t, sink.Send(ChatEvent{
+				Kind:           "text-delta",
+				ConversationID: conversationID,
+				Role:           "assistant",
+				Delta:          "hello from the runner",
+			}))
+			return conversationID, nil
+		}},
+		activeChats:           make(map[string]*activeChatRun),
+		pendingChatStops:      make(map[string]time.Time),
+		deletingConversations: make(map[string]struct{}),
+		chatSubscribers:       make(map[string]map[*subscriberEventSink]struct{}),
+	}
+
+	streamRequest := httptest.NewRequest(http.MethodGet, "/api/conversations/"+conversationID+"/stream", nil)
+	streamRequest = mux.SetURLVars(streamRequest, map[string]string{"id": conversationID})
+	streamRecorder := httptest.NewRecorder()
+	streamDone := make(chan struct{})
+	go func() {
+		server.handleStreamConversation(streamRecorder, streamRequest)
+		close(streamDone)
+	}()
+
+	require.Eventually(t, func() bool {
+		server.chatSubscribersMu.Lock()
+		defer server.chatSubscribersMu.Unlock()
+		return len(server.chatSubscribers[conversationID]) == 1
+	}, time.Second, 10*time.Millisecond)
+
+	chatRequest := httptest.NewRequest(http.MethodPost, "/api/chat", strings.NewReader(`{"message":"sent from the tui","conversationId":"conv-123","runnerId":"runner-1"}`))
+	chatRecorder := httptest.NewRecorder()
+	server.handleChat(chatRecorder, chatRequest)
+	assert.Equal(t, http.StatusOK, chatRecorder.Code)
+	assert.False(t, server.isActiveChat(conversationID))
+
+	server.chatSubscribersMu.Lock()
+	assert.Len(t, server.chatSubscribers[conversationID], 1, "the idle watcher should survive turn completion")
+	server.chatSubscribersMu.Unlock()
+
+	server.closeChatSubscribers(conversationID)
+	<-streamDone
+
+	lines := strings.Split(strings.TrimSpace(streamRecorder.Body.String()), "\n")
+	require.Len(t, lines, 4)
+	events := make([]ChatEvent, 0, len(lines))
+	for _, line := range lines {
+		var event ChatEvent
+		require.NoError(t, json.Unmarshal([]byte(line), &event))
+		events = append(events, event)
+	}
+
+	assert.Equal(t, []string{"conversation", "user-message", "text-delta", "done"}, []string{
+		events[0].Kind,
+		events[1].Kind,
+		events[2].Kind,
+		events[3].Kind,
+	})
+	assert.Equal(t, "sent from the tui", events[1].Content)
+	assert.Equal(t, "hello from the runner", events[2].Delta)
+}
+
 func TestServer_handleDeleteConversationRejectsActiveRun(t *testing.T) {
 	deleteCalled := false
 

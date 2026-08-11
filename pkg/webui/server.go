@@ -83,8 +83,9 @@ type activeChatRun struct {
 }
 
 const (
-	pendingChatStopTTL  = 30 * time.Second
-	maxPendingChatStops = 1024
+	pendingChatStopTTL                  = 30 * time.Second
+	maxPendingChatStops                 = 1024
+	conversationStreamKeepAliveInterval = 15 * time.Second
 )
 
 func newActiveChatRun(cancel context.CancelFunc) *activeChatRun {
@@ -915,8 +916,7 @@ func (s *Server) registerChatSubscriber(conversationID string, sink *subscriberE
 	}
 
 	s.activeChatsMu.Lock()
-	run, ok := s.activeChats[conversationID]
-	if !ok || run == nil || run.stopRequested {
+	if _, deleting := s.deletingConversations[conversationID]; deleting {
 		s.activeChatsMu.Unlock()
 		return false
 	}
@@ -2157,6 +2157,14 @@ func (s *Server) handleStreamConversation(w http.ResponseWriter, r *http.Request
 		s.writeErrorResponse(w, http.StatusBadRequest, "conversation ID is required", nil)
 		return
 	}
+	if s.conversationService == nil {
+		s.writeErrorResponse(w, http.StatusInternalServerError, "conversation service is unavailable", nil)
+		return
+	}
+	if _, err := s.conversationService.GetConversation(r.Context(), conversationID); err != nil {
+		s.writeErrorResponse(w, http.StatusNotFound, "conversation not found", err)
+		return
+	}
 
 	sink, err := newNDJSONEventSink(w)
 	if err != nil {
@@ -2172,7 +2180,7 @@ func (s *Server) handleStreamConversation(w http.ResponseWriter, r *http.Request
 	subscriber := newSubscriberEventSink()
 	if !s.registerChatSubscriber(conversationID, subscriber) {
 		subscriber.Close()
-		s.writeErrorResponse(w, http.StatusConflict, "conversation is not actively streaming", nil)
+		s.writeErrorResponse(w, http.StatusConflict, "conversation is unavailable", nil)
 		return
 	}
 	defer func() {
@@ -2180,16 +2188,26 @@ func (s *Server) handleStreamConversation(w http.ResponseWriter, r *http.Request
 		subscriber.Close()
 	}()
 
-	_ = sink.Send(ChatEvent{
-		Kind:           "conversation",
-		ConversationID: conversationID,
-		Role:           "assistant",
-	})
+	if s.isActiveChat(conversationID) {
+		_ = sink.Send(ChatEvent{
+			Kind:           "conversation",
+			ConversationID: conversationID,
+			Role:           "assistant",
+		})
+	} else {
+		_ = sink.KeepAlive()
+	}
+	keepAlive := time.NewTicker(conversationStreamKeepAliveInterval)
+	defer keepAlive.Stop()
 
 	for {
 		select {
 		case <-r.Context().Done():
 			return
+		case <-keepAlive.C:
+			if err := sink.KeepAlive(); err != nil {
+				return
+			}
 		case event, ok := <-subscriber.ch:
 			if !ok {
 				return
@@ -2410,6 +2428,7 @@ func (s *Server) handleDeleteConversation(w http.ResponseWriter, r *http.Request
 			logger.G(ctx).WithError(err).WithField("conversation_id", id).Warn("failed to close cached conversation thread")
 		}
 	}
+	s.closeChatSubscribers(id)
 
 	w.WriteHeader(http.StatusNoContent)
 }
