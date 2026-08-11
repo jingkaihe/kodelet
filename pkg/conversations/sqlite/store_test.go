@@ -285,6 +285,74 @@ func TestStore_Query(t *testing.T) {
 	assert.Equal(t, "conv-2", result.ConversationSummaries[0].ID)
 }
 
+func TestStore_QueryFiltersRunnerBeforePagination(t *testing.T) {
+	ctx := t.Context()
+	dbPath := filepath.Join(t.TempDir(), "test_runner_filter.db")
+	setupTestDB(t, dbPath)
+	store, err := NewStore(ctx, dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+
+	now := time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC)
+	for _, record := range []conversations.ConversationRecord{
+		{ID: "runner-one-newest", RawMessages: json.RawMessage(`[]`), Provider: "openai", CreatedAt: now, UpdatedAt: now},
+		{ID: "runner-one-older", RawMessages: json.RawMessage(`[]`), Provider: "openai", CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour)},
+		{ID: "other-runner-newest", RawMessages: json.RawMessage(`[]`), Provider: "openai", CreatedAt: now.Add(time.Hour), UpdatedAt: now.Add(time.Hour)},
+	} {
+		require.NoError(t, store.Save(ctx, record))
+	}
+	for _, runnerID := range []string{"runner-one", "runner-two"} {
+		_, err = store.db.ExecContext(ctx, `
+			INSERT INTO runner_registrations (
+				id, owner_id, host_instance_id, workspace_path, workspace_name, status, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		`, runnerID, "local", "host-"+runnerID, "/work/"+runnerID, runnerID, "offline", now, now)
+		require.NoError(t, err)
+	}
+	for conversationID, runnerID := range map[string]string{
+		"runner-one-newest":   "runner-one",
+		"runner-one-older":    "runner-one",
+		"other-runner-newest": "runner-two",
+	} {
+		_, err = store.db.ExecContext(ctx, `
+			INSERT INTO conversation_runner_affinity (conversation_id, runner_id, created_at, updated_at)
+			VALUES (?, ?, ?, ?)
+		`, conversationID, runnerID, now, now)
+		require.NoError(t, err)
+	}
+	for conversationID, updatedAt := range map[string]time.Time{
+		"runner-one-newest":   now,
+		"runner-one-older":    now.Add(-time.Hour),
+		"other-runner-newest": now.Add(time.Hour),
+	} {
+		_, err = store.db.ExecContext(ctx, "UPDATE conversation_summaries SET updated_at = ? WHERE id = ?", updatedAt, conversationID)
+		require.NoError(t, err)
+	}
+
+	result, err := store.Query(ctx, conversations.QueryOptions{
+		RunnerID:  "runner-one",
+		Limit:     1,
+		SortBy:    "updatedAt",
+		SortOrder: "desc",
+	})
+	require.NoError(t, err)
+	require.Len(t, result.ConversationSummaries, 1)
+	assert.Equal(t, "runner-one-newest", result.ConversationSummaries[0].ID)
+	assert.Equal(t, 2, result.Total)
+
+	result, err = store.Query(ctx, conversations.QueryOptions{
+		RunnerID:  "runner-one",
+		Limit:     1,
+		Offset:    1,
+		SortBy:    "updatedAt",
+		SortOrder: "desc",
+	})
+	require.NoError(t, err)
+	require.Len(t, result.ConversationSummaries, 1)
+	assert.Equal(t, "runner-one-older", result.ConversationSummaries[0].ID)
+	assert.Equal(t, 2, result.Total)
+}
+
 func TestStore_DefaultSorting(t *testing.T) {
 	ctx := context.Background()
 

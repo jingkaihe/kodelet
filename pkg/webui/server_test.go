@@ -556,7 +556,8 @@ func TestServer_handleListConversations(t *testing.T) {
 	conversationCWD := filepath.Join(homeDir, "workspace", "kodelet")
 
 	mockService := &mockConversationService{
-		listFunc: func(_ context.Context, _ *conversations.ListConversationsRequest) (*conversations.ListConversationsResponse, error) {
+		listFunc: func(_ context.Context, request *conversations.ListConversationsRequest) (*conversations.ListConversationsResponse, error) {
+			assert.Equal(t, "runner-1", request.RunnerID)
 			return &conversations.ListConversationsResponse{
 				Conversations: []convtypes.ConversationSummary{
 					{
@@ -579,7 +580,7 @@ func TestServer_handleListConversations(t *testing.T) {
 		activeChats:         map[string]*activeChatRun{"1": newActiveChatRun(func() {})},
 	}
 
-	req := httptest.NewRequest("GET", "/api/conversations?limit=10", nil)
+	req := httptest.NewRequest("GET", "/api/conversations?limit=10&runnerId=runner-1", nil)
 	w := httptest.NewRecorder()
 
 	server.handleListConversations(w, req)

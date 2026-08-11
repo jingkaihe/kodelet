@@ -24,6 +24,7 @@ const (
 	defaultHeartbeatTimeout  = 45 * time.Second
 	defaultRunLeaseGrace     = 10 * time.Second
 	openingCleanupTimeout    = 10 * time.Second
+	missingRunHeartbeatLimit = 3
 )
 
 var (
@@ -214,9 +215,10 @@ func removeRunnerActiveRun(entry *runnerEntry, runID string) {
 
 type runEntry struct {
 	Run
-	connectionID string
-	generation   int64
-	leaseCancel  context.CancelFunc
+	connectionID      string
+	generation        int64
+	leaseCancel       context.CancelFunc
+	missingHeartbeats int
 }
 
 type runFence struct {
@@ -615,50 +617,114 @@ func (r *Registry) Detach(runnerID, connectionID string, generation int64, cause
 
 // Heartbeat applies application health from the current connection generation.
 func (r *Registry) Heartbeat(runnerID, connectionID string, generation int64, params protocol.HeartbeatParams) error {
-	if err := params.Validate(); err != nil {
-		return err
+	if strings.TrimSpace(params.RunnerID) == "" {
+		return errors.New("runnerId is required")
 	}
-	activeRunIDs, err := params.NormalizedActiveRunIDs()
-	if err != nil {
-		return err
+	if params.Generation <= 0 {
+		return errors.New("generation must be positive")
 	}
 	if strings.TrimSpace(params.RunnerID) != strings.TrimSpace(runnerID) || params.Generation != generation {
 		return errors.New("heartbeat identity does not match registered connection")
 	}
+	activeRunIDs, runSetErr := params.NormalizedActiveRunIDs()
+	var stateErr error
+	switch params.State {
+	case protocol.RunnerStateIdle, protocol.RunnerStateRunning, protocol.RunnerStateStopping, protocol.RunnerStateError:
+	default:
+		stateErr = errors.Errorf("unsupported runner state %q", params.State)
+	}
+	if runSetErr == nil && stateErr == nil {
+		switch params.State {
+		case protocol.RunnerStateIdle:
+			if len(activeRunIDs) > 0 {
+				stateErr = errors.New("idle heartbeat cannot report active runs")
+			}
+		case protocol.RunnerStateRunning, protocol.RunnerStateStopping:
+			if len(activeRunIDs) == 0 {
+				stateErr = errors.New("active heartbeat state requires active runs")
+			}
+		}
+	}
+
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	entry, err := r.currentRunnerLocked(runnerID, connectionID, generation)
 	if err != nil {
+		r.mu.Unlock()
 		return err
-	}
-	expectedRunIDs := runnerActiveRunIDs(entry)
-	if !r.heartbeatRunIDsMatchLocked(expectedRunIDs, activeRunIDs) {
-		return errors.New("heartbeat active runs do not match control-plane leases")
-	}
-	switch params.State {
-	case protocol.RunnerStateIdle:
-		if len(activeRunIDs) > 0 {
-			return errors.New("idle heartbeat cannot report active runs")
-		}
-	case protocol.RunnerStateRunning, protocol.RunnerStateStopping:
-		if len(activeRunIDs) == 0 {
-			return errors.New("active heartbeat state requires control-plane run leases")
-		}
-	case protocol.RunnerStateError:
 	}
 	now := r.now().UTC()
 	entry.LastHeartbeatAt = now
 	entry.ManifestDigest = strings.TrimSpace(params.ManifestDigest)
-	entry.ready = true
-	if params.State == protocol.RunnerStateError {
-		entry.Status = RunnerStatusError
-	} else if len(expectedRunIDs) > 0 {
-		entry.Status = RunnerStatusBusy
-	} else {
-		entry.Status = RunnerStatusIdle
-	}
 	entry.UpdatedAt = now
-	return nil
+	mismatchExpectedRunIDs := runnerActiveRunIDs(entry)
+	runsMatch := runSetErr != nil || r.heartbeatRunIDsMatchLocked(mismatchExpectedRunIDs, activeRunIDs)
+	expectedRunIDs := mismatchExpectedRunIDs
+	var reconciledRuns []*runEntry
+	var lostConversationIDs []string
+	if runSetErr == nil && stateErr == nil {
+		reconciledRuns, lostConversationIDs = r.reconcileMissingRunsLocked(entry, activeRunIDs, now)
+		expectedRunIDs = runnerActiveRunIDs(entry)
+	}
+	if runSetErr == nil && stateErr == nil {
+		entry.ready = true
+		if params.State == protocol.RunnerStateError {
+			entry.Status = RunnerStatusError
+		} else if len(expectedRunIDs) > 0 {
+			entry.Status = RunnerStatusBusy
+		} else {
+			entry.Status = RunnerStatusIdle
+		}
+	}
+	var persistenceErr error
+	if len(reconciledRuns) > 0 {
+		persistenceErr = r.persistRunnerAndRunsLocked(entry, reconciledRuns)
+	}
+	r.mu.Unlock()
+	r.logPersistenceError("failed to persist heartbeat run reconciliation", persistenceErr)
+	for _, conversationID := range lostConversationIDs {
+		r.notifyRunFailure(conversationID)
+	}
+
+	if runSetErr == nil && !runsMatch {
+		logger.G(r.ctx).
+			WithField("runner_id", strings.TrimSpace(runnerID)).
+			WithField("generation", generation).
+			WithField("expected_run_ids", mismatchExpectedRunIDs).
+			WithField("reported_run_ids", activeRunIDs).
+			Warn("runner heartbeat active runs differ from control-plane leases")
+	}
+	if runSetErr != nil {
+		return runSetErr
+	}
+	return stateErr
+}
+
+func (r *Registry) reconcileMissingRunsLocked(entry *runnerEntry, reportedRunIDs []string, now time.Time) ([]*runEntry, []string) {
+	reported := make(map[string]struct{}, len(reportedRunIDs))
+	for _, runID := range reportedRunIDs {
+		reported[runID] = struct{}{}
+	}
+	reconciled := make([]*runEntry, 0)
+	conversationIDs := make([]string, 0)
+	for _, runID := range runnerActiveRunIDs(entry) {
+		run := r.runs[runID]
+		if run == nil {
+			continue
+		}
+		if _, exists := reported[runID]; exists || run.Status == RunStatusOpening {
+			run.missingHeartbeats = 0
+			continue
+		}
+		run.missingHeartbeats++
+		if run.missingHeartbeats < missingRunHeartbeatLimit {
+			continue
+		}
+		message := fmt.Sprintf("runner stopped reporting active run for %d consecutive heartbeats", run.missingHeartbeats)
+		conversationIDs = append(conversationIDs, run.ConversationID)
+		r.finishRunLocked(runID, RunStatusLost, message, now)
+		reconciled = append(reconciled, run)
+	}
+	return reconciled, conversationIDs
 }
 
 func (r *Registry) heartbeatRunIDsMatchLocked(expected, reported []string) bool {
@@ -964,21 +1030,20 @@ func (r *Registry) CloseRun(ctx context.Context, runID string, status RunStatus,
 		message = run.Error
 	}
 	if callErr != nil {
-		status = RunStatusLost
+		cleanupMessage := fmt.Sprintf("runner cleanup was not confirmed: %v", callErr)
 		if message == "" {
-			message = callErr.Error()
+			message = cleanupMessage
+		} else {
+			message += "; " + cleanupMessage
 		}
+		status = RunStatusLost
+		r.finishRunLocked(runID, status, message, r.now().UTC())
+	} else {
+		r.finishRunLocked(runID, status, message, r.now().UTC())
 	}
-	r.finishRunLocked(runID, status, message, r.now().UTC())
 	run = r.runs[runID]
 	var persistenceErr error
 	if run != nil {
-		if callErr != nil {
-			if runner := r.runners[run.RunnerID]; runner != nil && runner.Connected {
-				runner.Status = RunnerStatusError
-				runner.UpdatedAt = r.now().UTC()
-			}
-		}
 		persistenceErr = r.persistRunnerAndRunLocked(r.runners[run.RunnerID], run)
 	}
 	r.mu.Unlock()
@@ -1212,7 +1277,7 @@ func (r *Registry) Close() error {
 	return firstErr
 }
 
-func (r *Registry) finishOpeningFailure(fence runFence, status RunStatus, message string, runnerError bool) {
+func (r *Registry) finishOpeningFailure(fence runFence, status RunStatus, message string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	run := r.runs[fence.runID]
@@ -1221,31 +1286,30 @@ func (r *Registry) finishOpeningFailure(fence runFence, status RunStatus, messag
 	}
 	r.finishRunLocked(fence.runID, status, message, r.now().UTC())
 	if run = r.runs[fence.runID]; run != nil {
-		if runnerError {
-			if runner := r.runners[run.RunnerID]; runnerMatchesFence(runner, fence) {
-				runner.Status = RunnerStatusError
-				runner.UpdatedAt = r.now().UTC()
-			}
-		}
 		r.logPersistenceError("failed to persist failed opening run", r.persistRunnerAndRunLocked(r.runners[run.RunnerID], run))
 	}
 }
 
 func (r *Registry) reconcileOpeningFailure(fence runFence, cause error, openRejected bool) error {
 	if openRejected {
-		r.finishOpeningFailure(fence, RunStatusFailed, errorString(cause), false)
+		r.finishOpeningFailure(fence, RunStatusFailed, errorString(cause))
 		return cause
 	}
 
 	cleanupConfirmed, cleanupErr := closeRemoteOpeningRun(fence.link, fence.runID)
 	if cleanupConfirmed {
-		r.finishOpeningFailure(fence, RunStatusFailed, errorString(cause), false)
+		r.finishOpeningFailure(fence, RunStatusFailed, errorString(cause))
 		return cause
 	}
 
 	message := fmt.Sprintf("%v; runner cleanup was not confirmed: %v", cause, cleanupErr)
-	r.finishOpeningFailure(fence, RunStatusLost, message, true)
-	_ = fence.link.Close()
+	r.finishOpeningFailure(fence, RunStatusLost, message)
+	logger.G(r.ctx).
+		WithField("runner_id", fence.runnerID).
+		WithField("run_id", fence.runID).
+		WithField("generation", fence.generation).
+		WithError(cleanupErr).
+		Warn("runner opening-run cleanup was not confirmed; preserving shared connection")
 	return errors.Wrapf(cause, "runner open state is uncertain because cleanup failed: %v", cleanupErr)
 }
 
@@ -1306,32 +1370,33 @@ func (r *Registry) expireRunLease(fence runFence, cause error) {
 	cleanupErr := fence.link.Call(cleanupCtx, protocol.MethodRunClose, protocol.RunCloseParams{RunID: fence.runID}, nil)
 	cancel()
 	if cleanupErr == nil || remoteRunAlreadyClosed(cleanupErr) {
-		r.finishRunForFence(fence, RunStatusCanceled, message, false)
+		r.finishRunForFence(fence, RunStatusCanceled, message)
 		return
 	}
 
-	_ = fence.link.Close()
-	r.Detach(fence.runnerID, fence.connectionID, fence.generation, errors.Wrap(cleanupErr, "control-plane run lease cleanup failed"))
+	message = fmt.Sprintf("%s; runner cleanup was not confirmed: %v", message, cleanupErr)
+	r.finishRunForFence(fence, RunStatusLost, message)
+	logger.G(r.ctx).
+		WithField("runner_id", fence.runnerID).
+		WithField("run_id", fence.runID).
+		WithField("generation", fence.generation).
+		WithError(cleanupErr).
+		Warn("runner lease cleanup was not confirmed; preserving shared connection")
 }
 
-func (r *Registry) finishRunForFence(fence runFence, status RunStatus, message string, runnerError bool) bool {
+func (r *Registry) finishRunForFence(fence runFence, status RunStatus, message string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	run := r.runs[fence.runID]
 	if !runMatchesFence(run, fence) {
-		return false
+		return
 	}
 	runner := r.runners[fence.runnerID]
 	if !runnerMatchesFence(runner, fence) || !runnerHasActiveRun(runner, fence.runID) {
-		return false
+		return
 	}
 	r.finishRunLocked(fence.runID, status, message, r.now().UTC())
-	if runnerError && runner.Connected {
-		runner.Status = RunnerStatusError
-		runner.UpdatedAt = r.now().UTC()
-	}
 	r.logPersistenceError("failed to persist terminal fenced run", r.persistRunnerAndRunLocked(runner, run))
-	return true
 }
 
 func closeRemoteOpeningRun(link Link, runID string) (bool, error) {
@@ -1364,6 +1429,7 @@ func (r *Registry) finishRunLocked(runID string, status RunStatus, message strin
 	run.Status = status
 	run.Error = message
 	run.UpdatedAt = now
+	run.missingHeartbeats = 0
 	r.affinities.deactivate(run.ConversationID)
 	r.clearRunTransientStateLocked(run.ID)
 	if runner := r.runners[run.RunnerID]; runner != nil && runnerHasActiveRun(runner, runID) {

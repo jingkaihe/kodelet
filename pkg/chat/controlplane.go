@@ -177,6 +177,9 @@ func (r *ControlPlaneChatRunner) ListConversations(ctx context.Context, limit in
 	}
 	query.Set("sortBy", "updated")
 	query.Set("sortOrder", "desc")
+	if r.runnerID != "" {
+		query.Set("runnerId", r.runnerID)
+	}
 	parsed.RawQuery = query.Encode()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
 	if err != nil {
@@ -501,6 +504,11 @@ func (r *ControlPlaneChatRunner) StopConversationTurn(ctx context.Context, conve
 		return errors.Wrap(err, "failed to decode control-plane stop response")
 	}
 	if !result.Stopped {
+		if turnID != "" {
+			// A scoped stop that no longer matches is a successful no-op: the
+			// requested turn has already ended or a newer turn now owns the stream.
+			return nil
+		}
 		return errors.New("control-plane conversation is not active")
 	}
 	return nil

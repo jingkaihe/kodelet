@@ -396,7 +396,7 @@ An agent may edit `AGENTS.md` during a run, but those edits do not change the ac
 
 ### Manifest beats
 
-The runner computes a current manifest digest at registration, before accepting a run, and periodically while connected. Application heartbeats include the current connection generation and digest without repeatedly sending the full manifest. Discovery-only probes do not start extension session lifecycle; the first real run supplies the call context for `session.start` and `resources.discover`. The initial cold probe is bounded by the runner process context so first-time extension startup is not constrained by the short refresh deadline. Periodic probes run asynchronously from the connection select loop with a bounded context, so slow discovery cannot suppress heartbeats. Only one probe or `run.open` owns the snapshot gate at a time; a concurrent `run.open` waits for that gate with its own bounded timeout instead of surfacing ordinary refresh contention as an immediate busy failure.
+The runner computes a current manifest digest at registration, before accepting a run, and periodically while connected. Application heartbeats include the current connection generation and digest without repeatedly sending the full manifest. Discovery-only probes do not start extension session lifecycle; the first real run supplies the call context for `session.start` and `resources.discover`. The initial cold probe is bounded by the runner process context so first-time extension startup is not constrained by the short refresh deadline. Periodic probes run asynchronously from the connection select loop with a bounded context, so slow discovery cannot suppress heartbeats. Only one probe or `run.open` owns the fair snapshot gate at a time because current provider interfaces do not promise concurrent snapshot safety. A concurrent `run.open` waits according to its caller context rather than an internal fixed timeout, while periodic digest probes reuse the last successful digest when the gate is occupied instead of joining the queue ahead of agent work.
 
 When the digest changes, the runner sends a `runner.manifestChanged` notification. The control plane can request a refreshed idle manifest for display or compatibility checks, but an active run remains pinned to the manifest returned by its own `run.open` response. Connection identity, run identity, and extension runtime generation are excluded from the resource digest so reconnects and runtime-generation bookkeeping do not create false manifest-change notifications.
 
@@ -801,9 +801,11 @@ WebSocket ping and pong frames detect transport liveness. A separate `runner.hea
 
 A live socket is not sufficient evidence that the runner can accept work; the scheduler uses application heartbeat state.
 
+Runner identity and generation validation fence stale connections, but application-state and active-run-set validation are reconciled separately from connection liveness. A heartbeat from the current generation refreshes `lastHeartbeatAt` even when its state or run-set payload is invalid; the validation error is logged without making an otherwise live shared connection time out. Unknown run IDs reported by the runner are diagnostic-only, while a non-opening control-plane run omitted by three consecutive valid heartbeats is marked lost and has its conversation lease released.
+
 Heartbeat state is hot-path in-memory state. Registration, disconnect, run-state, and manifest transitions are persisted, while every individual heartbeat is not written to SQLite under the registry mutex. A clean disconnect persists the latest in-memory snapshot; after a control-plane crash, restored runners are offline regardless of the exact last heartbeat timestamp.
 
-The registry watches transport termination independently of handler draining. If a connection disappears or is replaced while runs are active, every generation-fenced run becomes lost and the control plane invokes each conversation cancellation hook immediately, stopping provider streaming rather than waiting for the next runner tool call. Every opened run also watches its owning control-plane context; if that context ends and normal `run.close` has not completed within the cleanup grace period, the watchdog sends best-effort cancel and close operations, then closes the connection if cleanup remains uncertain.
+The registry watches transport termination independently of handler draining. If a connection disappears or is replaced while runs are active, every generation-fenced run becomes lost and the control plane invokes each conversation cancellation hook immediately, stopping provider streaming rather than waiting for the next runner tool call. Every opened run also watches its owning control-plane context; if that context ends and normal `run.close` has not completed within the cleanup grace period, the watchdog sends best-effort cancel and close operations. Unconfirmed cleanup marks only that fenced run lost and releases its active-run and conversation lease, leaving the shared connection available for unrelated runs and allowing a later run of the same conversation. Connection closure is reserved for actual transport loss, replacement, or heartbeat timeout.
 
 ### Concurrency and backpressure
 
@@ -879,7 +881,7 @@ created → opening → running → succeeded
                           └→ lost
 ```
 
-The runner is considered busy from successful `run.open` until `run.close` completes or the connection is lost.
+The runner is considered busy from successful `run.open` until the corresponding `run.close` attempt completes or the connection is lost.
 
 The control plane persists provider-native conversation state directly because the provider loop is central. Runner events and tool results are inputs to that loop rather than an independent conversation checkpoint.
 
@@ -913,7 +915,7 @@ The registry restores every nonterminal run plus a bounded recent terminal histo
 
 ### Cleanup timeout policy
 
-The initial direct-workspace runner treats an unconfirmed environment or execution-instance cleanup as a process-health failure. It releases the active lease, reports `error` heartbeats, and rejects later `run.open` requests until the runner process restarts. This conservative latch intentionally avoids reusing a workspace after cleanup state became uncertain; automatic recovery after late resource drain is a separate policy choice rather than an implicit timeout behavior.
+The direct-workspace runner scopes unconfirmed environment or execution-instance cleanup to the affected run. It cancels that run, waits and cleans up within bounded deadlines, reports any timeout or close failure, and then removes the run from its active set without placing the whole service in an error latch. The control plane records the run as lost and permits later work, including another run for the same conversation. An operation that ignores cancellation or a resource that fails to close can therefore overlap later work in the shared workspace; this is an explicit consequence of the trusted cooperating-agent model, and resulting filesystem, process, or port conflicts surface through the later client operation.
 
 ## Security Model
 

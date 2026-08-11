@@ -197,6 +197,7 @@ type conversationDefaults struct {
 
 type conversationRun struct {
 	conversationKey string
+	turnID          string
 	cancel          context.CancelFunc
 }
 

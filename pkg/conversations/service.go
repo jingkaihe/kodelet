@@ -63,6 +63,7 @@ type ListConversationsRequest struct {
 	StartDate  *time.Time `json:"startDate,omitempty"`
 	EndDate    *time.Time `json:"endDate,omitempty"`
 	SearchTerm string     `json:"searchTerm,omitempty"`
+	RunnerID   string     `json:"runnerId,omitempty"`
 	Limit      int        `json:"limit,omitempty"`
 	Offset     int        `json:"offset,omitempty"`
 	SortBy     string     `json:"sortBy,omitempty"`
@@ -117,6 +118,7 @@ func (s *ConversationService) ListConversations(ctx context.Context, req *ListCo
 		StartDate:  req.StartDate,
 		EndDate:    req.EndDate,
 		SearchTerm: req.SearchTerm,
+		RunnerID:   req.RunnerID,
 		Limit:      req.Limit,
 		Offset:     req.Offset,
 		SortBy:     req.SortBy,

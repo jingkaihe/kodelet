@@ -26,6 +26,7 @@ type embeddedACPRemoteProvider struct {
 	runnerID    string
 	client      acp.RemoteChatClient
 	terminalErr error
+	reused      bool
 	changed     chan struct{}
 }
 
@@ -61,6 +62,16 @@ func (p *embeddedACPRemoteProvider) registeredRunnerID(runnerID string) {
 	p.ready = true
 	p.terminalErr = nil
 	p.signalLocked()
+}
+
+func (p *embeddedACPRemoteProvider) reuseRunner(runnerID string) {
+	p.mu.Lock()
+	p.reused = true
+	p.signalLocked()
+	p.mu.Unlock()
+	if strings.TrimSpace(runnerID) != "" {
+		p.registeredRunnerID(runnerID)
+	}
 }
 
 func (p *embeddedACPRemoteProvider) unavailable() {
@@ -135,12 +146,34 @@ func (p *embeddedACPRemoteProvider) refreshAdvertisedRunner() error {
 		return nil
 	}
 	metadata, found, err := p.store.ReadWorkspaceLockMetadata(p.workspace)
-	if err != nil || !found {
+	if err != nil {
 		// The lock owner rewrites this file in place. A concurrent read can see
 		// incomplete JSON, so treat read failures as transient and retry later.
 		return nil
 	}
+	p.mu.Lock()
+	reused := p.reused
+	p.mu.Unlock()
+	if !found {
+		if reused {
+			p.fail(errors.New("reused workspace runner lock disappeared; restart kodelet acp to start an embedded runner"))
+		}
+		return nil
+	}
+	if reused {
+		held, heldErr := p.store.WorkspaceLockHeld(p.workspace)
+		if heldErr != nil {
+			return errors.Wrap(heldErr, "failed to inspect reused workspace runner lock")
+		}
+		if !held {
+			p.fail(errors.New("reused workspace runner stopped; restart kodelet acp to start an embedded runner"))
+			return nil
+		}
+	}
 	if metadata.StoppedAt != nil {
+		// WorkspaceLock.Close writes stoppedAt before releasing the kernel lock.
+		// Treat that short handoff window as unavailable; the next refresh either
+		// observes a replacement owner or the unlocked-file check above fails it.
 		p.markUnavailable()
 		return nil
 	}
@@ -159,8 +192,9 @@ func (p *embeddedACPRemoteProvider) refreshAdvertisedRunner() error {
 	}
 	p.mu.Lock()
 	currentRunnerID := p.runnerID
+	ready := p.ready
 	p.mu.Unlock()
-	if currentRunnerID != runnerID {
+	if currentRunnerID != runnerID || !ready {
 		p.registeredRunnerID(runnerID)
 	}
 	return nil
@@ -253,13 +287,7 @@ func acquireOrReuseACPRunner(ctx context.Context, runner *runnerclient.Runner, e
 			}
 			return false, runnerID, nil
 		}
-		timer := time.NewTimer(50 * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return false, "", ctx.Err()
-		case <-timer.C:
-		}
+		return false, "", nil
 	}
 }
 

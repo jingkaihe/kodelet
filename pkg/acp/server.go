@@ -74,6 +74,7 @@ type Server struct {
 type activePrompt struct {
 	cancel        context.CancelFunc
 	turnID        string
+	remoteClient  RemoteChatClient
 	remoteStarted bool
 	cancelling    bool
 	stopping      bool
@@ -679,14 +680,14 @@ func (s *Server) handleRemoteSessionPrompt(promptCtx context.Context, req *acpty
 		s.remoteSessions.finishPrompt(params.SessionID, succeeded)
 	}()
 
-	client, runnerID, err := s.remoteSessions.client(promptCtx)
+	client, runnerID, err := s.remoteSessions.waitForClient(promptCtx)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || promptCtx.Err() != nil || s.remotePromptCancellationConfirmed(params.SessionID) {
 			return s.sendResult(req.ID, acptypes.PromptResponse{StopReason: acptypes.StopReasonCancelled})
 		}
 		return s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
 	}
-	turnID, started := s.startRemotePrompt(params.SessionID)
+	turnID, started := s.startRemotePrompt(params.SessionID, client)
 	if !started {
 		return s.sendResult(req.ID, acptypes.PromptResponse{StopReason: acptypes.StopReasonCancelled})
 	}
@@ -738,7 +739,7 @@ func (s *Server) finishRemotePromptCancellation(sessionID acptypes.SessionID, pr
 	}
 	var err error
 	if shouldStop && s.remoteSessions != nil && s.remoteSessions.isActive(sessionID) {
-		err = s.stopRemoteConversation(sessionID, prompt.turnID)
+		err = s.stopRemoteConversation(sessionID, prompt)
 	}
 	if shouldStop {
 		s.completeRemotePromptStop(sessionID, prompt)
@@ -748,23 +749,23 @@ func (s *Server) finishRemotePromptCancellation(sessionID acptypes.SessionID, pr
 	}
 }
 
-func (s *Server) stopRemoteConversation(sessionID acptypes.SessionID, turnID string) error {
+func (s *Server) stopRemoteConversation(sessionID acptypes.SessionID, prompt *activePrompt) error {
+	if prompt == nil || prompt.remoteClient == nil {
+		return errors.New("remote ACP prompt has no control-plane client")
+	}
 	stopCtx, cancelStop := context.WithTimeout(context.WithoutCancel(s.ctx), 15*time.Second)
 	defer cancelStop()
-	client, _, err := s.remoteSessions.client(stopCtx)
-	if err == nil {
-		err = client.StopConversationTurn(stopCtx, string(sessionID), turnID)
-	}
-	return err
+	return prompt.remoteClient.StopConversationTurn(stopCtx, string(sessionID), prompt.turnID)
 }
 
-func (s *Server) startRemotePrompt(sessionID acptypes.SessionID) (string, bool) {
+func (s *Server) startRemotePrompt(sessionID acptypes.SessionID, client RemoteChatClient) (string, bool) {
 	s.activePromptsMu.Lock()
 	defer s.activePromptsMu.Unlock()
 	prompt := s.activePrompts[sessionID]
-	if prompt == nil || prompt.cancelling {
+	if prompt == nil || prompt.cancelling || client == nil {
 		return "", false
 	}
+	prompt.remoteClient = client
 	prompt.remoteStarted = true
 	return prompt.turnID, true
 }
@@ -860,7 +861,7 @@ func (s *Server) cancelActivePromptContexts() {
 		cancellation.prompt.cancel()
 		if cancellation.stop {
 			if s.remoteSessions != nil && s.remoteSessions.isActive(cancellation.sessionID) {
-				if err := s.stopRemoteConversation(cancellation.sessionID, cancellation.prompt.turnID); err != nil {
+				if err := s.stopRemoteConversation(cancellation.sessionID, cancellation.prompt); err != nil {
 					logger.G(s.ctx).WithField("session_id", cancellation.sessionID).WithError(err).Warn("Failed to stop remote ACP conversation during shutdown")
 				}
 			}

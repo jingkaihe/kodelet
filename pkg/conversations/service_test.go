@@ -162,6 +162,21 @@ func TestConversationService_ListConversations(t *testing.T) {
 	}
 }
 
+func TestConversationService_ListConversationsPassesRunnerFilter(t *testing.T) {
+	mockStore := newMockConversationStore()
+	var received conversations.QueryOptions
+	mockStore.queryFunc = func(_ context.Context, options conversations.QueryOptions) (conversations.QueryResult, error) {
+		received = options
+		return conversations.QueryResult{QueryOptions: options}, nil
+	}
+	service := NewConversationService(mockStore)
+
+	_, err := service.ListConversations(t.Context(), &ListConversationsRequest{RunnerID: "runner-1", Limit: 1})
+	require.NoError(t, err)
+	assert.Equal(t, "runner-1", received.RunnerID)
+	assert.Equal(t, 1, received.Limit)
+}
+
 func TestConversationService_GetConversation(t *testing.T) {
 	now := time.Now()
 	testRecord := &conversations.ConversationRecord{

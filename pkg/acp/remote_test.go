@@ -34,6 +34,32 @@ func (blockingRemoteChatProvider) WaitForRemoteChat(ctx context.Context) (Remote
 	return nil, "", ctx.Err()
 }
 
+type switchableRemoteChatProvider struct {
+	mu       sync.Mutex
+	client   RemoteChatClient
+	runnerID string
+	blocked  bool
+}
+
+func (p *switchableRemoteChatProvider) WaitForRemoteChat(ctx context.Context) (RemoteChatClient, string, error) {
+	p.mu.Lock()
+	blocked := p.blocked
+	client := p.client
+	runnerID := p.runnerID
+	p.mu.Unlock()
+	if blocked {
+		<-ctx.Done()
+		return nil, "", ctx.Err()
+	}
+	return client, runnerID, nil
+}
+
+func (p *switchableRemoteChatProvider) setBlocked(blocked bool) {
+	p.mu.Lock()
+	p.blocked = blocked
+	p.mu.Unlock()
+}
+
 type recordingRemoteCommandSource struct {
 	commands []slashcommands.Command
 	profile  string
@@ -54,6 +80,7 @@ type fakeRemoteChatClient struct {
 	history  chat.ConversationHistory
 	run      func(context.Context, chat.ChatRequest, chat.ChatEventSink) (string, error)
 	stop     func(string)
+	stopTurn func(string, string)
 	stopErr  error
 	requests []chat.ChatRequest
 	stopped  []string
@@ -81,9 +108,13 @@ func (c *fakeRemoteChatClient) StopConversation(_ context.Context, conversationI
 	return c.StopConversationTurn(context.Background(), conversationID, "")
 }
 
-func (c *fakeRemoteChatClient) StopConversationTurn(_ context.Context, conversationID, _ string) error {
+func (c *fakeRemoteChatClient) StopConversationTurn(_ context.Context, conversationID, turnID string) error {
 	if c.stopErr != nil {
 		return c.stopErr
+	}
+	if c.stopTurn != nil {
+		c.stopTurn(conversationID, turnID)
+		return nil
 	}
 	if c.stop != nil {
 		c.stop(conversationID)
@@ -383,7 +414,11 @@ func TestRemoteACPRunEOFCancelsPromptAndStopsControlPlane(t *testing.T) {
 	server.activePromptsMu.Lock()
 	cancelCalled := make(chan struct{})
 	cancelOnce := sync.Once{}
-	server.activePrompts[sessionID] = &activePrompt{remoteStarted: true, cancel: func() { cancelOnce.Do(func() { close(cancelCalled) }) }}
+	server.activePrompts[sessionID] = &activePrompt{
+		remoteClient:  client,
+		remoteStarted: true,
+		cancel:        func() { cancelOnce.Do(func() { close(cancelCalled) }) },
+	}
 	server.activePromptsMu.Unlock()
 
 	require.NoError(t, server.Run())
@@ -472,6 +507,74 @@ func TestRemoteACPCancelStopsControlPlaneAndCancelsStream(t *testing.T) {
 	messages := readJSONRPCMessages(t, output)
 	require.Len(t, messages, 1)
 	assert.Equal(t, string(acptypes.StopReasonCancelled), messages[0]["result"].(map[string]any)["stopReason"])
+}
+
+func TestRemoteACPCancelUsesPromptClientWithoutWaitingForRunnerReadiness(t *testing.T) {
+	workspace := t.TempDir()
+	output := bytes.NewBuffer(nil)
+	started := make(chan struct{})
+	stopped := make(chan string, 1)
+	client := &fakeRemoteChatClient{}
+	provider := &switchableRemoteChatProvider{client: client, runnerID: "runner-1"}
+	server := NewServer(
+		WithInput(bytes.NewBuffer(nil)),
+		WithOutput(output),
+		WithContext(t.Context()),
+		WithRemoteSessions(RemoteSessionConfig{Provider: provider, Workspace: workspace}),
+	)
+	server.initialized.Store(true)
+	t.Cleanup(server.Shutdown)
+	sessionID := createRemoteACPSession(t, server, output, workspace)
+	client.run = func(ctx context.Context, request chat.ChatRequest, _ chat.ChatEventSink) (string, error) {
+		close(started)
+		<-ctx.Done()
+		return request.ConversationID, ctx.Err()
+	}
+	client.stopTurn = func(conversationID, turnID string) {
+		assert.Equal(t, string(sessionID), conversationID)
+		stopped <- turnID
+	}
+
+	promptDone := make(chan error, 1)
+	go func() {
+		promptDone <- server.handleSessionPrompt(&acptypes.Request{
+			ID: json.RawMessage(`2`),
+			Params: mustJSONRawMessage(t, acptypes.PromptRequest{
+				SessionID: sessionID,
+				Prompt:    []acptypes.ContentBlock{{Type: acptypes.ContentTypeText, Text: "work"}},
+			}),
+		})
+	}()
+	<-started
+	provider.setBlocked(true)
+
+	cancelDone := make(chan error, 1)
+	go func() {
+		notification, err := json.Marshal(acptypes.Notification{
+			JSONRPC: "2.0",
+			Method:  "session/cancel",
+			Params:  mustJSONRawMessage(t, acptypes.CancelRequest{SessionID: sessionID}),
+		})
+		if err != nil {
+			cancelDone <- err
+			return
+		}
+		cancelDone <- server.handleNotification("session/cancel", notification)
+	}()
+
+	select {
+	case err := <-cancelDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("remote ACP cancellation waited for runner readiness")
+	}
+	select {
+	case turnID := <-stopped:
+		assert.NotEmpty(t, turnID)
+	case <-time.After(time.Second):
+		t.Fatal("cached control-plane client did not receive the scoped stop")
+	}
+	require.NoError(t, <-promptDone)
 }
 
 func TestRemoteACPCancelFailureStillCancelsLocalPrompt(t *testing.T) {

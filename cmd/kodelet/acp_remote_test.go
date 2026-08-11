@@ -108,6 +108,29 @@ func TestAcquireOrReuseACPRunnerUsesLiveLockRunnerID(t *testing.T) {
 	assert.Equal(t, "runner-existing", runnerID)
 }
 
+func TestAcquireOrReuseACPRunnerServesWhileExistingRunnerRegisters(t *testing.T) {
+	store, err := localstate.NewStoreAt(t.TempDir())
+	require.NoError(t, err)
+	workspace := t.TempDir()
+	lock, err := store.AcquireWorkspaceLock(workspace, localstate.LockMetadata{Server: "http://localhost:8080"})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, lock.Close()) })
+	runner, err := runnerclient.NewRunner(t.Context(), runnerclient.RunnerConfig{
+		Server:    "http://localhost:8080",
+		Workspace: workspace,
+		Store:     store,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, runner.Close()) })
+
+	startedAt := time.Now()
+	owned, runnerID, err := acquireOrReuseACPRunner(t.Context(), runner, "http://localhost:8080")
+	require.NoError(t, err)
+	assert.False(t, owned)
+	assert.Empty(t, runnerID)
+	assert.Less(t, time.Since(startedAt), time.Second)
+}
+
 func TestAcquireOrReuseACPRunnerRejectsAnotherServer(t *testing.T) {
 	store, err := localstate.NewStoreAt(t.TempDir())
 	require.NoError(t, err)
@@ -206,6 +229,72 @@ func TestEmbeddedACPRemoteProviderRefreshesRunnerIDFromLiveLock(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, client)
 	assert.Equal(t, "runner-new", runnerID)
+}
+
+func TestEmbeddedACPRemoteProviderReportsReusedRunnerExit(t *testing.T) {
+	workspace := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		require.NoError(t, json.NewEncoder(w).Encode(runnerListAPIResponse{Runners: []runnerregistry.Runner{{
+			ID:        "runner-1",
+			Connected: true,
+			Status:    runnerregistry.RunnerStatusIdle,
+			Workspace: protocol.Workspace{Path: workspace},
+		}}}))
+	}))
+	t.Cleanup(server.Close)
+	store, err := localstate.NewStoreAt(t.TempDir())
+	require.NoError(t, err)
+	lock, err := store.AcquireWorkspaceLock(workspace, localstate.LockMetadata{Server: server.URL, RunnerID: "runner-1"})
+	require.NoError(t, err)
+	provider := newEmbeddedACPRemoteProvider(server.URL, "", workspace, store)
+	provider.reuseRunner("runner-1")
+
+	client, runnerID, err := provider.WaitForRemoteChat(t.Context())
+	require.NoError(t, err)
+	require.NotNil(t, client)
+	assert.Equal(t, "runner-1", runnerID)
+	require.NoError(t, lock.Close())
+
+	_, _, err = provider.WaitForRemoteChat(t.Context())
+	require.ErrorContains(t, err, "reused workspace runner stopped")
+}
+
+func TestEmbeddedACPRemoteProviderRecoversSameRunnerIDAfterHandoff(t *testing.T) {
+	workspace := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		require.NoError(t, json.NewEncoder(w).Encode(runnerListAPIResponse{Runners: []runnerregistry.Runner{{
+			ID:        "runner-1",
+			Connected: true,
+			Status:    runnerregistry.RunnerStatusIdle,
+			Workspace: protocol.Workspace{Path: workspace},
+		}}}))
+	}))
+	t.Cleanup(server.Close)
+	store, err := localstate.NewStoreAt(t.TempDir())
+	require.NoError(t, err)
+	lock, err := store.AcquireWorkspaceLock(workspace, localstate.LockMetadata{Server: server.URL, RunnerID: "runner-1"})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, lock.Close()) })
+	provider := newEmbeddedACPRemoteProvider(server.URL, "", workspace, store)
+	provider.reuseRunner("runner-1")
+
+	_, _, err = provider.WaitForRemoteChat(t.Context())
+	require.NoError(t, err)
+	metadata := lock.Metadata()
+	stoppedAt := time.Now().UTC()
+	metadata.StoppedAt = &stoppedAt
+	require.NoError(t, lock.WriteMetadata(metadata))
+	require.NoError(t, provider.refreshAdvertisedRunner())
+	provider.mu.Lock()
+	assert.False(t, provider.ready)
+	provider.mu.Unlock()
+
+	metadata.StoppedAt = nil
+	require.NoError(t, lock.WriteMetadata(metadata))
+	client, runnerID, err := provider.WaitForRemoteChat(t.Context())
+	require.NoError(t, err)
+	require.NotNil(t, client)
+	assert.Equal(t, "runner-1", runnerID)
 }
 
 func TestEmbeddedACPRemoteProviderCanonicalizesServerURL(t *testing.T) {

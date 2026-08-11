@@ -21,13 +21,12 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
+	"golang.org/x/sync/semaphore"
 )
 
 const (
-	defaultCleanupTimeout      = 10 * time.Second
-	defaultSnapshotWaitTimeout = 30 * time.Second
-	snapshotLockPollInterval   = 10 * time.Millisecond
-	maxToolDisplayOutputBytes  = 128 * 1024
+	defaultCleanupTimeout     = 10 * time.Second
+	maxToolDisplayOutputBytes = 128 * 1024
 )
 
 const toolDisplayOutputTruncationMarker = "\n\n[output truncated for remote display]"
@@ -71,14 +70,16 @@ type ServiceOptions struct {
 	EnvironmentFactory        EnvironmentFactory
 	ExecutionInstanceProvider ExecutionInstanceProvider
 	CleanupTimeout            time.Duration
-	SnapshotWaitTimeout       time.Duration
+	// SnapshotWaitTimeout optionally bounds admission to the serialized snapshot
+	// pipeline. Zero lets the caller's context own the deadline.
+	SnapshotWaitTimeout time.Duration
 }
 
 // Service handles control-plane requests for one workspace-bound runner process.
 type Service struct {
 	ctx                 context.Context
 	mu                  sync.Mutex
-	snapshotMu          sync.Mutex
+	snapshotGate        *semaphore.Weighted
 	workspace           string
 	runtimeProvider     RuntimeProvider
 	ownedRuntime        *extensions.RuntimeManager
@@ -92,7 +93,6 @@ type Service struct {
 	generation          int64
 	runs                map[string]*activeRun
 	lastManifestDigest  string
-	unhealthy           error
 	closed              bool
 }
 
@@ -132,6 +132,7 @@ func NewService(parent context.Context, workspace string, options ServiceOptions
 	}
 	service := &Service{
 		ctx:                 parent,
+		snapshotGate:        semaphore.NewWeighted(1),
 		workspace:           workspace,
 		runtimeProvider:     options.RuntimeProvider,
 		configLoader:        options.ConfigLoader,
@@ -143,9 +144,6 @@ func NewService(parent context.Context, workspace string, options ServiceOptions
 	}
 	if service.cleanupTimeout <= 0 {
 		service.cleanupTimeout = defaultCleanupTimeout
-	}
-	if service.snapshotWaitTimeout <= 0 {
-		service.snapshotWaitTimeout = defaultSnapshotWaitTimeout
 	}
 	if service.runtimeProvider == nil {
 		service.ownedRuntime = extensions.NewRuntimeManager()
@@ -288,11 +286,6 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 		s.mu.Unlock()
 		return runnerpayload.Manifest{}, errors.New("runner has not completed registration")
 	}
-	if s.unhealthy != nil {
-		message := s.unhealthy.Error()
-		s.mu.Unlock()
-		return runnerpayload.Manifest{}, errors.Wrap(errors.New(message), "runner requires restart after cleanup failure")
-	}
 	if _, exists := s.runs[params.RunID]; exists {
 		s.mu.Unlock()
 		return runnerpayload.Manifest{}, errors.Errorf("runner already has run %s", params.RunID)
@@ -328,7 +321,7 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 		s.failOpen(run)
 		return runnerpayload.Manifest{}, err
 	}
-	defer s.snapshotMu.Unlock()
+	defer s.unlockSnapshot()
 	instance, err := s.instanceProvider.Create(operationCtx, ExecutionInstanceSpec{
 		RunID:          params.RunID,
 		ConversationID: params.ConversationID,
@@ -440,16 +433,12 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 
 func (s *Service) closeOpeningResources(ctx context.Context, environment agentenv.Environment, instance ExecutionInstance) {
 	if err := closeExecutionResources(ctx, s.cleanupTimeout, environment, instance); err != nil {
-		s.markUnhealthy(err)
 		logger.G(ctx).WithError(err).Warn("failed to clean up runner execution instance after open failure")
 	}
 }
 
 func (s *Service) closeProbeResources(ctx context.Context, environment agentenv.Environment, instance ExecutionInstance, cause error) error {
 	cleanupErr := closeExecutionResources(ctx, s.cleanupTimeout, environment, instance)
-	if cleanupErr != nil {
-		s.markUnhealthy(cleanupErr)
-	}
 	switch {
 	case cause == nil && cleanupErr == nil:
 		return nil
@@ -462,24 +451,12 @@ func (s *Service) closeProbeResources(ctx context.Context, environment agentenv.
 	}
 }
 
-func (s *Service) markUnhealthy(err error) {
-	if s == nil || err == nil {
-		return
-	}
-	s.mu.Lock()
-	if s.unhealthy == nil {
-		s.unhealthy = err
-	}
-	s.mu.Unlock()
-}
-
 func (s *Service) failOpen(run *activeRun) {
 	if run == nil {
 		return
 	}
 	run.cancel()
 	if err := s.releaseRunRuntime(context.Background(), run); err != nil {
-		s.markUnhealthy(err)
 		logger.G(s.ctx).WithError(err).Warn("failed to close runner extension runtime after open failure")
 	}
 	s.mu.Lock()
@@ -527,9 +504,6 @@ func (s *Service) closeActiveRun(ctx context.Context, run *activeRun) error {
 		run.cleanupErr = combineCleanupErrors(waitErr, closeErr)
 		run.cleanupErr = combineCleanupErrors(run.cleanupErr, s.releaseRunRuntime(ctx, run))
 		s.mu.Lock()
-		if run.cleanupErr != nil {
-			s.unhealthy = run.cleanupErr
-		}
 		if s.runs[run.id] == run {
 			delete(s.runs, run.id)
 		}
@@ -557,7 +531,28 @@ func (s *Service) releaseRunRuntime(ctx context.Context, run *activeRun) error {
 
 // ProbeManifestDigest snapshots idle runner resources without reserving a control-plane run.
 func (s *Service) ProbeManifestDigest(ctx context.Context) (string, error) {
-	manifest, err := s.probeManifest(ctx, "")
+	if s == nil {
+		return "", errors.New("runner service is required")
+	}
+	if s.snapshotGate.TryAcquire(1) {
+		defer s.unlockSnapshot()
+		manifest, err := s.probeManifestLocked(ctx, "")
+		if err != nil {
+			return "", err
+		}
+		return manifest.Digest, nil
+	}
+	s.mu.Lock()
+	cachedDigest := s.lastManifestDigest
+	s.mu.Unlock()
+	if cachedDigest != "" {
+		return cachedDigest, nil
+	}
+	if err := s.lockSnapshot(ctx); err != nil {
+		return "", err
+	}
+	defer s.unlockSnapshot()
+	manifest, err := s.probeManifestLocked(ctx, "")
 	if err != nil {
 		return "", err
 	}
@@ -566,26 +561,21 @@ func (s *Service) ProbeManifestDigest(ctx context.Context) (string, error) {
 
 // ProbeManifest snapshots runner resources for command and capability discovery without reserving a control-plane run.
 func (s *Service) ProbeManifest(ctx context.Context, environmentProfile string) (runnerpayload.Manifest, error) {
-	return s.probeManifest(ctx, environmentProfile)
-}
-
-func (s *Service) probeManifest(ctx context.Context, environmentProfile string) (runnerpayload.Manifest, error) {
 	if s == nil {
 		return runnerpayload.Manifest{}, errors.New("runner service is required")
 	}
 	if err := s.lockSnapshot(ctx); err != nil {
 		return runnerpayload.Manifest{}, err
 	}
-	defer s.snapshotMu.Unlock()
+	defer s.unlockSnapshot()
+	return s.probeManifestLocked(ctx, environmentProfile)
+}
+
+func (s *Service) probeManifestLocked(ctx context.Context, environmentProfile string) (runnerpayload.Manifest, error) {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
 		return runnerpayload.Manifest{}, errors.New("runner service is closed")
-	}
-	if s.unhealthy != nil {
-		message := s.unhealthy.Error()
-		s.mu.Unlock()
-		return runnerpayload.Manifest{}, errors.Wrap(errors.New(message), "runner requires restart after cleanup failure")
 	}
 	runnerID := s.runnerID
 	generation := s.generation
@@ -677,9 +667,6 @@ func (s *Service) HeartbeatSnapshotRuns() (protocol.RunnerState, []string, strin
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.unhealthy != nil {
-		return protocol.RunnerStateError, activeRunIDs(s.runs), s.lastManifestDigest
-	}
 	if len(s.runs) == 0 {
 		return protocol.RunnerStateIdle, nil, s.lastManifestDigest
 	}
@@ -1024,22 +1011,27 @@ func (s *Service) AbortActiveRun(ctx context.Context) error {
 }
 
 func (s *Service) lockSnapshot(ctx context.Context) error {
+	if s == nil || s.snapshotGate == nil {
+		return errors.New("runner snapshot gate is unavailable")
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	waitCtx, cancel := context.WithTimeout(ctx, s.snapshotWaitTimeout)
+	waitCtx := ctx
+	cancel := func() {}
+	if s.snapshotWaitTimeout > 0 {
+		waitCtx, cancel = context.WithTimeout(ctx, s.snapshotWaitTimeout)
+	}
 	defer cancel()
-	ticker := time.NewTicker(snapshotLockPollInterval)
-	defer ticker.Stop()
-	for {
-		if s.snapshotMu.TryLock() {
-			return nil
-		}
-		select {
-		case <-waitCtx.Done():
-			return errors.Wrap(waitCtx.Err(), "timed out waiting for runner environment snapshot")
-		case <-ticker.C:
-		}
+	if err := s.snapshotGate.Acquire(waitCtx, 1); err != nil {
+		return errors.Wrap(err, "failed to wait for runner environment snapshot")
+	}
+	return nil
+}
+
+func (s *Service) unlockSnapshot() {
+	if s != nil && s.snapshotGate != nil {
+		s.snapshotGate.Release(1)
 	}
 }
 

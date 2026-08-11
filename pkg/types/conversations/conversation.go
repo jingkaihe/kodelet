@@ -32,6 +32,7 @@ type QueryOptions struct {
 	SearchTerm string     // Text to search for in messages
 	Provider   string     // Filter by LLM provider (e.g., "anthropic", "openai")
 	CWD        string     // Filter by canonical working directory
+	RunnerID   string     // Filter by durable runner affinity
 	Limit      int        // Maximum number of results
 	Offset     int        // Offset for pagination
 	SortBy     string     // Field to sort by

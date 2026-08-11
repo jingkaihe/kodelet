@@ -1179,13 +1179,17 @@ func (m *model) startConversationRunWithComposer(state *conversationState, messa
 	runCtx, cancel := context.WithCancel(contextWithTUIConversation(m.ctx, conversationKey))
 	m.cancelRun = cancel
 	runID := m.activeRunID
+	turnID := ""
+	if m.remote {
+		turnID = convtypes.GenerateID()
+	}
 	if m.runs == nil {
 		m.runs = map[int]*conversationRun{}
 	}
 	if m.runByState == nil {
 		m.runByState = map[string]int{}
 	}
-	m.runs[runID] = &conversationRun{conversationKey: conversationKey, cancel: cancel}
+	m.runs[runID] = &conversationRun{conversationKey: conversationKey, turnID: turnID, cancel: cancel}
 	m.runByState[conversationKey] = runID
 	m.conversationState = currentState
 	if active {
@@ -1200,6 +1204,7 @@ func (m *model) startConversationRunWithComposer(state *conversationState, messa
 	req := chat.ChatRequest{
 		Message:        message,
 		ConversationID: conversationID,
+		TurnID:         turnID,
 		Profile:        profileForRequest(state.profile),
 		CWD:            state.requestedCWD,
 	}
@@ -1464,16 +1469,37 @@ func (m *model) cancelActiveRun() tea.Cmd {
 	}
 	var stopCmd tea.Cmd
 	if m.remote && strings.TrimSpace(m.conversationID) != "" {
-		if controller, ok := m.runner.(interface {
-			StopConversation(context.Context, string) error
-		}); ok {
-			conversationID := m.conversationID
-			conversationKey := m.activeConversationKey
+		conversationID := m.conversationID
+		conversationKey := m.activeConversationKey
+		turnID := ""
+		if run := m.runs[m.activeRunID]; run != nil {
+			turnID = strings.TrimSpace(run.turnID)
+		}
+		var stop func(context.Context) error
+		if turnID != "" {
+			if controller, ok := m.runner.(interface {
+				StopConversationTurn(context.Context, string, string) error
+			}); ok {
+				stop = func(ctx context.Context) error {
+					return controller.StopConversationTurn(ctx, conversationID, turnID)
+				}
+			}
+		}
+		if stop == nil {
+			if controller, ok := m.runner.(interface {
+				StopConversation(context.Context, string) error
+			}); ok {
+				stop = func(ctx context.Context) error {
+					return controller.StopConversation(ctx, conversationID)
+				}
+			}
+		}
+		if stop != nil {
 			cancelRun := m.cancelRun
 			m.cancelRun = nil
 			stopCmd = func() tea.Msg {
 				ctx, cancel := context.WithTimeout(context.WithoutCancel(m.ctx), 5*time.Second)
-				err := controller.StopConversation(ctx, conversationID)
+				err := stop(ctx)
 				cancel()
 				if cancelRun != nil {
 					cancelRun()

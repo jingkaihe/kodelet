@@ -997,6 +997,7 @@ func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request)
 	query := r.URL.Query()
 	req := &conversations.ListConversationsRequest{
 		SearchTerm: query.Get("search"),
+		RunnerID:   strings.TrimSpace(query.Get("runnerId")),
 		SortBy:     query.Get("sortBy"),
 		SortOrder:  query.Get("sortOrder"),
 	}

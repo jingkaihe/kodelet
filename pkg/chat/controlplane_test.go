@@ -84,6 +84,7 @@ func TestControlPlaneChatRunnerStreamsWithoutSelectingRunner(t *testing.T) {
 func TestControlPlaneChatRunnerListsAndLoadsRunnerConversations(t *testing.T) {
 	updatedAt := time.Date(2026, time.August, 9, 12, 35, 0, 0, time.UTC)
 	structuredResult := tooltypes.StructuredToolResult{ToolName: "bash", Success: true, Timestamp: updatedAt}
+	listedRunnerIDs := make(chan string, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		assert.Equal(t, "Bearer secret", request.Header.Get("Authorization"))
 		switch request.URL.Path {
@@ -91,6 +92,7 @@ func TestControlPlaneChatRunnerListsAndLoadsRunnerConversations(t *testing.T) {
 			assert.Equal(t, "200", request.URL.Query().Get("limit"))
 			assert.Equal(t, "updated", request.URL.Query().Get("sortBy"))
 			assert.Equal(t, "desc", request.URL.Query().Get("sortOrder"))
+			listedRunnerIDs <- request.URL.Query().Get("runnerId")
 			require.NoError(t, json.NewEncoder(w).Encode(conversations.ListConversationsResponse{
 				Conversations: []convtypes.ConversationSummary{
 					{ID: "conversation-bound", Summary: "Bound conversation", UpdatedAt: updatedAt, Metadata: map[string]any{RunnerIDMetadataKey: "runner-1"}},
@@ -142,12 +144,14 @@ func TestControlPlaneChatRunnerListsAndLoadsRunnerConversations(t *testing.T) {
 	require.NoError(t, err)
 	summaries, err := runner.ListConversations(t.Context(), 200)
 	require.NoError(t, err)
+	assert.Equal(t, "runner-1", <-listedRunnerIDs)
 	require.Len(t, summaries, 1)
 	assert.Equal(t, "conversation-bound", summaries[0].ID)
 	serverOnlyRunner, err := NewControlPlaneChatRunner(server.URL, "secret", "")
 	require.NoError(t, err)
 	allSummaries, err := serverOnlyRunner.ListConversations(t.Context(), 200)
 	require.NoError(t, err)
+	assert.Empty(t, <-listedRunnerIDs)
 	assert.Len(t, allSummaries, 3)
 
 	history, err := runner.LoadConversation(t.Context(), "conversation-bound")
@@ -213,6 +217,20 @@ func TestControlPlaneChatRunnerSettingsSteeringAndStop(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, queued)
 	require.NoError(t, runner.StopConversationTurn(t.Context(), "conversation-1", "turn-1"))
+}
+
+func TestControlPlaneChatRunnerTreatsStaleScopedStopAsSuccess(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		turnID := request.URL.Query().Get("turnId")
+		assert.True(t, turnID == "" || turnID == "turn-old")
+		require.NoError(t, json.NewEncoder(w).Encode(map[string]bool{"stopped": false}))
+	}))
+	defer server.Close()
+	runner, err := NewControlPlaneChatRunner(server.URL, "", "runner-1")
+	require.NoError(t, err)
+
+	require.NoError(t, runner.StopConversationTurn(t.Context(), "conversation-1", "turn-old"))
+	require.ErrorContains(t, runner.StopConversation(t.Context(), "conversation-1"), "not active")
 }
 
 type staticControlPlaneUIBroker struct {

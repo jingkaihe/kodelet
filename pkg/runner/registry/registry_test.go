@@ -384,6 +384,139 @@ func TestHeartbeatAllowsOpeningRunNotYetReportedByRunner(t *testing.T) {
 	require.NoError(t, registry.CloseRun(t.Context(), "run-one", RunStatusSucceeded, nil))
 }
 
+func TestHeartbeatRunMismatchDoesNotSuppressConnectionLiveness(t *testing.T) {
+	now := time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC)
+	registry, err := New(t.Context(), Options{
+		HeartbeatInterval: time.Hour,
+		HeartbeatTimeout:  2 * time.Hour,
+		Now:               func() time.Time { return now },
+		NewID:             sequentialIDs(),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = registry.Close() })
+	link := newFakeLink()
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), link)
+	require.NoError(t, err)
+	configureManifestLink(t, link, registration)
+	markRunnerReady(t, registry, registration)
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-one", "conversation-one"))
+	require.NoError(t, err)
+
+	now = now.Add(time.Minute)
+	require.NoError(t, registry.Heartbeat(registration.RunnerID, registration.ConnectionID, registration.Generation, protocol.HeartbeatParams{
+		RunnerID:   registration.RunnerID,
+		Generation: registration.Generation,
+		State:      protocol.RunnerStateIdle,
+	}))
+	runner, ok := registry.Runner(registration.RunnerID)
+	require.True(t, ok)
+	assert.Equal(t, now, runner.LastHeartbeatAt)
+	assert.Equal(t, RunnerStatusBusy, runner.Status)
+	assert.Equal(t, []string{"run-one"}, runner.ActiveRunIDs)
+	run, ok := registry.Run("run-one")
+	require.True(t, ok)
+	assert.Equal(t, RunStatusRunning, run.Status)
+	assert.False(t, link.isClosed())
+
+	require.NoError(t, registry.CloseRun(t.Context(), "run-one", RunStatusSucceeded, nil))
+	now = now.Add(time.Minute)
+	require.NoError(t, registry.Heartbeat(registration.RunnerID, registration.ConnectionID, registration.Generation, protocol.HeartbeatParams{
+		RunnerID:     registration.RunnerID,
+		Generation:   registration.Generation,
+		State:        protocol.RunnerStateRunning,
+		ActiveRunIDs: []string{"stale-run"},
+	}))
+	runner, ok = registry.Runner(registration.RunnerID)
+	require.True(t, ok)
+	assert.Equal(t, now, runner.LastHeartbeatAt)
+	assert.Equal(t, RunnerStatusIdle, runner.Status)
+	assert.Empty(t, runner.ActiveRunIDs)
+}
+
+func TestMalformedHeartbeatRunSetStillRefreshesConnectionLiveness(t *testing.T) {
+	now := time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC)
+	registry, err := New(t.Context(), Options{
+		HeartbeatInterval: time.Hour,
+		HeartbeatTimeout:  2 * time.Hour,
+		Now:               func() time.Time { return now },
+		NewID:             sequentialIDs(),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = registry.Close() })
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), newFakeLink())
+	require.NoError(t, err)
+	markRunnerReady(t, registry, registration)
+
+	now = now.Add(time.Minute)
+	err = registry.Heartbeat(registration.RunnerID, registration.ConnectionID, registration.Generation, protocol.HeartbeatParams{
+		RunnerID:       registration.RunnerID,
+		Generation:     registration.Generation,
+		State:          protocol.RunnerStateRunning,
+		ActiveRunIDs:   []string{"duplicate-run", "duplicate-run"},
+		ManifestDigest: "digest-after-malformed-heartbeat",
+	})
+	require.ErrorContains(t, err, "duplicate run")
+	runner, ok := registry.Runner(registration.RunnerID)
+	require.True(t, ok)
+	assert.Equal(t, now, runner.LastHeartbeatAt)
+	assert.Equal(t, "digest-after-malformed-heartbeat", runner.ManifestDigest)
+	assert.Equal(t, RunnerStatusIdle, runner.Status)
+}
+
+func TestHeartbeatReleasesRunAfterConsecutiveOmissions(t *testing.T) {
+	registry := newTestRegistry(t)
+	lostConversations := make(chan string, 1)
+	registry.SetEnvironmentErrorHandler(func(conversationID string) {
+		lostConversations <- conversationID
+	})
+	link := newFakeLink()
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), link)
+	require.NoError(t, err)
+	configureManifestLink(t, link, registration)
+	markRunnerReady(t, registry, registration)
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-one", "conversation-one"))
+	require.NoError(t, err)
+
+	missingHeartbeat := protocol.HeartbeatParams{
+		RunnerID:   registration.RunnerID,
+		Generation: registration.Generation,
+		State:      protocol.RunnerStateIdle,
+	}
+	require.NoError(t, registry.Heartbeat(registration.RunnerID, registration.ConnectionID, registration.Generation, missingHeartbeat))
+	run, ok := registry.Run("run-one")
+	require.True(t, ok)
+	assert.Equal(t, RunStatusRunning, run.Status)
+	runner, ok := registry.Runner(registration.RunnerID)
+	require.True(t, ok)
+	assert.Equal(t, RunnerStatusBusy, runner.Status)
+	assert.Equal(t, []string{"run-one"}, runner.ActiveRunIDs)
+
+	require.NoError(t, registry.Heartbeat(registration.RunnerID, registration.ConnectionID, registration.Generation, missingHeartbeat))
+	run, ok = registry.Run("run-one")
+	require.True(t, ok)
+	assert.Equal(t, RunStatusRunning, run.Status)
+
+	require.NoError(t, registry.Heartbeat(registration.RunnerID, registration.ConnectionID, registration.Generation, missingHeartbeat))
+	run, ok = registry.Run("run-one")
+	require.True(t, ok)
+	assert.Equal(t, RunStatusLost, run.Status)
+	assert.Contains(t, run.Error, "3 consecutive heartbeats")
+	runner, ok = registry.Runner(registration.RunnerID)
+	require.True(t, ok)
+	assert.Equal(t, RunnerStatusIdle, runner.Status)
+	assert.Empty(t, runner.ActiveRunIDs)
+	select {
+	case conversationID := <-lostConversations:
+		assert.Equal(t, "conversation-one", conversationID)
+	case <-time.After(time.Second):
+		t.Fatal("missing run reconciliation did not cancel the owning conversation")
+	}
+
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-replacement", "conversation-one"))
+	require.NoError(t, err)
+	require.NoError(t, registry.CloseRun(t.Context(), "run-replacement", RunStatusSucceeded, nil))
+}
+
 func TestOpenRunReservationFailureRollsBackPendingAffinityAndCapacity(t *testing.T) {
 	persistence := &testPersistence{}
 	registry, err := New(t.Context(), Options{
@@ -614,6 +747,98 @@ func TestRunLeaseWatchdogReleasesCapacityAfterOwnerContextEnds(t *testing.T) {
 		runner, runnerOK := registry.Runner(registration.RunnerID)
 		return runOK && runnerOK && run.Status == RunStatusCanceled && runner.Status == RunnerStatusIdle && runner.ActiveRunID == ""
 	}, time.Second, time.Millisecond)
+}
+
+func TestRunLeaseCleanupFailureDoesNotDetachOtherRuns(t *testing.T) {
+	registry, err := New(t.Context(), Options{
+		HeartbeatInterval: time.Hour,
+		HeartbeatTimeout:  2 * time.Hour,
+		RunLeaseGrace:     5 * time.Millisecond,
+		NewID:             sequentialIDs(),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = registry.Close() })
+	link := newFakeLink()
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), link)
+	require.NoError(t, err)
+	configureManifestLink(t, link, registration)
+	markRunnerReady(t, registry, registration)
+
+	expiringCtx, cancelExpiring := context.WithCancel(t.Context())
+	_, err = registry.OpenRun(expiringCtx, registration.RunnerID, testRunOpenParams("run-expiring", "conversation-expiring"))
+	require.NoError(t, err)
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-healthy", "conversation-healthy"))
+	require.NoError(t, err)
+
+	link.mu.Lock()
+	previousCall := link.call
+	link.call = func(ctx context.Context, method string, params any, result any) error {
+		if method == protocol.MethodRunClose && params.(protocol.RunCloseParams).RunID == "run-expiring" {
+			return errors.New("run cleanup timed out")
+		}
+		return previousCall(ctx, method, params, result)
+	}
+	link.mu.Unlock()
+	cancelExpiring()
+
+	require.Eventually(t, func() bool {
+		expiring, expiringOK := registry.Run("run-expiring")
+		healthy, healthyOK := registry.Run("run-healthy")
+		runner, runnerOK := registry.Runner(registration.RunnerID)
+		return expiringOK && healthyOK && runnerOK &&
+			expiring.Status == RunStatusLost &&
+			healthy.Status == RunStatusRunning &&
+			runner.Connected && runner.Status == RunnerStatusBusy &&
+			len(runner.ActiveRunIDs) == 1 && runner.ActiveRunIDs[0] == "run-healthy"
+	}, time.Second, time.Millisecond)
+	assert.False(t, link.isClosed())
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-replacement", "conversation-expiring"))
+	require.NoError(t, err)
+	require.NoError(t, registry.CloseRun(t.Context(), "run-replacement", RunStatusSucceeded, nil))
+	require.NoError(t, registry.CloseRun(t.Context(), "run-healthy", RunStatusSucceeded, nil))
+}
+
+func TestCloseRunCleanupFailureDoesNotPoisonOtherRuns(t *testing.T) {
+	registry := newTestRegistry(t)
+	link := newFakeLink()
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), link)
+	require.NoError(t, err)
+	configureManifestLink(t, link, registration)
+	markRunnerReady(t, registry, registration)
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-failing", "conversation-failing"))
+	require.NoError(t, err)
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-healthy", "conversation-healthy"))
+	require.NoError(t, err)
+
+	link.mu.Lock()
+	previousCall := link.call
+	link.call = func(ctx context.Context, method string, params any, result any) error {
+		if method == protocol.MethodRunClose && params.(protocol.RunCloseParams).RunID == "run-failing" {
+			return errors.New("run cleanup failed")
+		}
+		return previousCall(ctx, method, params, result)
+	}
+	link.mu.Unlock()
+
+	require.ErrorContains(t, registry.CloseRun(t.Context(), "run-failing", RunStatusFailed, errors.New("agent failed")), "run cleanup failed")
+	failing, ok := registry.Run("run-failing")
+	require.True(t, ok)
+	assert.Equal(t, RunStatusLost, failing.Status)
+	assert.Contains(t, failing.Error, "agent failed")
+	assert.Contains(t, failing.Error, "runner cleanup was not confirmed: run cleanup failed")
+	healthy, ok := registry.Run("run-healthy")
+	require.True(t, ok)
+	assert.Equal(t, RunStatusRunning, healthy.Status)
+	runner, ok := registry.Runner(registration.RunnerID)
+	require.True(t, ok)
+	assert.True(t, runner.Connected)
+	assert.Equal(t, RunnerStatusBusy, runner.Status)
+	assert.Equal(t, []string{"run-healthy"}, runner.ActiveRunIDs)
+	assert.False(t, link.isClosed())
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-replacement", "conversation-failing"))
+	require.NoError(t, err)
+	require.NoError(t, registry.CloseRun(t.Context(), "run-replacement", RunStatusSucceeded, nil))
+	require.NoError(t, registry.CloseRun(t.Context(), "run-healthy", RunStatusSucceeded, nil))
 }
 
 func TestStaleOpenFailureCannotPoisonReplacementGeneration(t *testing.T) {
@@ -1287,32 +1512,51 @@ func TestOpenRunReconcilesAmbiguousTransportFailure(t *testing.T) {
 	assert.False(t, link.isClosed())
 }
 
-func TestOpenRunClosesUncertainConnectionWhenCleanupCannotBeConfirmed(t *testing.T) {
+func TestOpenRunCleanupFailureDoesNotCloseSharedConnection(t *testing.T) {
 	registry := newTestRegistry(t)
 	link := newFakeLink()
 	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), link)
 	require.NoError(t, err)
+	configureManifestLink(t, link, registration)
 	markRunnerReady(t, registry, registration)
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-healthy", "conversation-healthy"))
+	require.NoError(t, err)
 	link.mu.Lock()
-	link.call = func(_ context.Context, _ string, _ any, _ any) error {
-		return protocol.ErrPeerClosed
+	previousCall := link.call
+	link.call = func(ctx context.Context, method string, params any, result any) error {
+		switch method {
+		case protocol.MethodRunOpen:
+			if params.(protocol.RunOpenParams).RunID == "run-failing" {
+				return protocol.ErrPeerClosed
+			}
+		case protocol.MethodRunClose:
+			if params.(protocol.RunCloseParams).RunID == "run-failing" {
+				return protocol.ErrPeerClosed
+			}
+		}
+		return previousCall(ctx, method, params, result)
 	}
 	link.mu.Unlock()
 
-	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-one", "conversation-one"))
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-failing", "conversation-failing"))
 	require.ErrorContains(t, err, "open state is uncertain")
-	run, ok := registry.Run("run-one")
+	run, ok := registry.Run("run-failing")
 	require.True(t, ok)
 	assert.Equal(t, RunStatusLost, run.Status)
 	assert.Contains(t, run.Error, "cleanup was not confirmed")
-	require.Eventually(t, func() bool {
-		runner, ok := registry.Runner(registration.RunnerID)
-		return ok && runner.Status == RunnerStatusOffline
-	}, time.Second, time.Millisecond)
 	runner, ok := registry.Runner(registration.RunnerID)
 	require.True(t, ok)
-	assert.Empty(t, runner.ActiveRunID)
-	assert.True(t, link.isClosed())
+	assert.True(t, runner.Connected)
+	assert.Equal(t, RunnerStatusBusy, runner.Status)
+	assert.Equal(t, []string{"run-healthy"}, runner.ActiveRunIDs)
+	healthy, ok := registry.Run("run-healthy")
+	require.True(t, ok)
+	assert.Equal(t, RunStatusRunning, healthy.Status)
+	assert.False(t, link.isClosed())
+	_, err = registry.OpenRun(t.Context(), registration.RunnerID, testRunOpenParams("run-replacement", "conversation-failing"))
+	require.NoError(t, err)
+	require.NoError(t, registry.CloseRun(t.Context(), "run-replacement", RunStatusSucceeded, nil))
+	require.NoError(t, registry.CloseRun(t.Context(), "run-healthy", RunStatusSucceeded, nil))
 }
 
 func TestOpenRunRPCRejectionDoesNotAttemptCleanup(t *testing.T) {

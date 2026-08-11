@@ -30,11 +30,13 @@ type recordingRunner struct {
 
 type remoteControlRecordingRunner struct {
 	recordingRunner
-	actions      []string
-	steerMessage string
-	steerQueued  bool
-	steerErr     error
-	stopErr      error
+	actions             []string
+	steerMessage        string
+	steerQueued         bool
+	steerErr            error
+	stopErr             error
+	stoppedConversation string
+	stoppedTurnID       string
 }
 
 func (r *remoteControlRecordingRunner) SteerConversation(_ context.Context, _ string, message string) (bool, error) {
@@ -43,8 +45,16 @@ func (r *remoteControlRecordingRunner) SteerConversation(_ context.Context, _ st
 	return r.steerQueued, r.steerErr
 }
 
-func (r *remoteControlRecordingRunner) StopConversation(context.Context, string) error {
+func (r *remoteControlRecordingRunner) StopConversation(_ context.Context, conversationID string) error {
 	r.actions = append(r.actions, "stop")
+	r.stoppedConversation = conversationID
+	return r.stopErr
+}
+
+func (r *remoteControlRecordingRunner) StopConversationTurn(_ context.Context, conversationID, turnID string) error {
+	r.actions = append(r.actions, "stop-turn")
+	r.stoppedConversation = conversationID
+	r.stoppedTurnID = turnID
 	return r.stopErr
 }
 
@@ -122,6 +132,8 @@ func TestRemoteCancelStopsControlPlaneBeforeClosingStream(t *testing.T) {
 	t.Cleanup(m.cancel)
 	m.running = true
 	m.conversationID = "conversation-1"
+	m.activeRunID = 1
+	m.runs[1] = &conversationRun{conversationKey: m.activeConversationKey, turnID: "turn-1"}
 	m.cancelRun = func() { runner.actions = append(runner.actions, "cancel-stream") }
 
 	cmd := m.cancelActiveRun()
@@ -143,7 +155,26 @@ func TestRemoteCancelStopsControlPlaneBeforeClosingStream(t *testing.T) {
 		t.Fatalf("unexpected cancellation message %T", message)
 	}
 	assert.NoError(t, stopMessage.err)
-	assert.Equal(t, []string{"stop", "cancel-stream"}, runner.actions)
+	assert.Equal(t, []string{"stop-turn", "cancel-stream"}, runner.actions)
+	assert.Equal(t, "conversation-1", runner.stoppedConversation)
+	assert.Equal(t, "turn-1", runner.stoppedTurnID)
+}
+
+func TestRemoteSubmitPinsTurnIDForScopedCancellation(t *testing.T) {
+	runner := &remoteControlRecordingRunner{}
+	m := newModel(context.Background(), Config{ConversationID: "conversation-1", Runner: runner, Remote: true})
+	t.Cleanup(m.cancel)
+	m.textarea.SetValue("work")
+
+	cmd := m.submit()
+	require.NotNil(t, cmd)
+	run := m.runs[m.activeRunID]
+	require.NotNil(t, run)
+	assert.NotEmpty(t, run.turnID)
+	assert.Nil(t, cmd())
+	receiveRunMsg(t, m.runCh)
+	receiveRunMsg(t, m.runCh)
+	assert.Equal(t, run.turnID, runner.req.TurnID)
 }
 
 func TestRemoteSteeringUsesControlPlaneRunner(t *testing.T) {

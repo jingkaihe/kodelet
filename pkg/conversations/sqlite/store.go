@@ -204,6 +204,15 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 		args["cwd"] = options.CWD
 	}
 
+	if options.RunnerID != "" {
+		conditions = append(conditions, `EXISTS (
+			SELECT 1 FROM conversation_runner_affinity affinity
+			WHERE affinity.conversation_id = conversation_summaries.id
+				AND affinity.runner_id = :runner_id
+		)`)
+		args["runner_id"] = options.RunnerID
+	}
+
 	// Build ORDER BY clause
 	sortBy := "updated_at"
 	switch options.SortBy {

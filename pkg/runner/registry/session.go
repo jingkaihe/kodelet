@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	"github.com/pkg/errors"
@@ -59,15 +60,23 @@ func (s *Session) HandleRequest(ctx context.Context, method string, params json.
 }
 
 // HandleNotification implements protocol.NotificationHandler.
-func (s *Session) HandleNotification(_ context.Context, method string, params json.RawMessage) {
+func (s *Session) HandleNotification(ctx context.Context, method string, params json.RawMessage) {
 	runnerID, connectionID, generation, registered := s.connectionIdentity()
 	if !registered || s.registry == nil {
 		return
 	}
 	switch method {
 	case protocol.MethodRunnerHeartbeat:
-		if value, err := decodeParams[protocol.HeartbeatParams](params); err == nil {
-			_ = s.registry.Heartbeat(runnerID, connectionID, generation, value)
+		value, err := decodeParams[protocol.HeartbeatParams](params)
+		if err == nil {
+			err = s.registry.Heartbeat(runnerID, connectionID, generation, value)
+		}
+		if err != nil {
+			logger.G(ctx).
+				WithField("runner_id", runnerID).
+				WithField("generation", generation).
+				WithError(err).
+				Warn("failed to apply runner heartbeat")
 		}
 	case protocol.MethodRunnerManifestChanged:
 		if value, err := decodeParams[protocol.ManifestChangedParams](params); err == nil {

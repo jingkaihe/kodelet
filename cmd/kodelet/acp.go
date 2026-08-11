@@ -144,8 +144,12 @@ func runRemoteACP(ctx context.Context, cmd *cobra.Command) error {
 		if err := validateReusedACPFlags(cmd); err != nil {
 			return err
 		}
-		provider.registeredRunnerID(existingRunnerID)
-		logger.G(ctx).WithField("runner_id", existingRunnerID).Info("Reusing existing workspace runner for server-backed ACP")
+		provider.reuseRunner(existingRunnerID)
+		if existingRunnerID == "" {
+			logger.G(ctx).Info("Waiting for the existing workspace runner to advertise its control-plane registration")
+		} else {
+			logger.G(ctx).WithField("runner_id", existingRunnerID).Info("Reusing existing workspace runner for server-backed ACP")
+		}
 	}
 
 	profile := ""

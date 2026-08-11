@@ -138,6 +138,31 @@ func (s *Store) ReadWorkspaceLockMetadata(workspace string) (LockMetadata, bool,
 	return metadata, true, nil
 }
 
+// WorkspaceLockHeld reports whether another open file description currently owns
+// the advisory lock for a workspace. A stale diagnostic file without a live lock
+// returns false.
+func (s *Store) WorkspaceLockHeld(workspace string) (bool, error) {
+	path := s.WorkspaceLockPath(workspace)
+	if path == "" {
+		return false, errors.New("runner workspace is required")
+	}
+	file, err := os.OpenFile(path, os.O_RDWR, 0o600)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, errors.Wrap(err, "failed to open runner workspace lock")
+	}
+	defer file.Close()
+	if err := tryLockFile(file); err != nil {
+		return true, nil
+	}
+	if err := unlockFile(file); err != nil {
+		return false, errors.Wrap(err, "failed to unlock runner workspace probe")
+	}
+	return false, nil
+}
+
 // Path returns the diagnostic lock-file path.
 func (l *WorkspaceLock) Path() string {
 	if l == nil {

@@ -618,7 +618,7 @@ func TestServiceOpenRunWaitsForManifestSnapshotRefresh(t *testing.T) {
 	service.Attach(&recordingPeer{})
 	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
 
-	service.snapshotMu.Lock()
+	require.NoError(t, service.snapshotGate.Acquire(t.Context(), 1))
 	type response struct {
 		result any
 		err    *protocol.RPCError
@@ -632,14 +632,14 @@ func TestServiceOpenRunWaitsForManifestSnapshotRefresh(t *testing.T) {
 	}()
 	select {
 	case <-done:
-		service.snapshotMu.Unlock()
+		service.snapshotGate.Release(1)
 		t.Fatal("run.open failed instead of waiting for the in-flight manifest refresh")
 	case <-time.After(30 * time.Millisecond):
 	}
 	state, runIDs, _ := service.HeartbeatSnapshotRuns()
 	assert.Equal(t, protocol.RunnerStateRunning, state)
 	assert.Equal(t, []string{"run-1"}, runIDs)
-	service.snapshotMu.Unlock()
+	service.snapshotGate.Release(1)
 
 	select {
 	case response := <-done:
@@ -649,6 +649,32 @@ func TestServiceOpenRunWaitsForManifestSnapshotRefresh(t *testing.T) {
 		t.Fatal("run.open did not continue after the manifest refresh completed")
 	}
 	callService[any](t, service, protocol.MethodRunClose, protocol.RunCloseParams{RunID: "run-1"})
+}
+
+func TestServiceManifestDigestProbeUsesCachedDigestWhileSnapshotBusy(t *testing.T) {
+	workspace := t.TempDir()
+	runtime := extensions.EmptyRuntime()
+	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
+	service, err := NewService(t.Context(), workspace, ServiceOptions{
+		RuntimeProvider: staticRuntimeProvider{runtime: runtime},
+		ConfigLoader:    func(string) (llmtypes.Config, error) { return llmtypes.Config{}, nil },
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	service.Attach(&recordingPeer{})
+	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
+	manifest := callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
+		RunID: "run-1", ConversationID: "conversation-1",
+	})
+	require.NoError(t, service.snapshotGate.Acquire(t.Context(), 1))
+	defer service.snapshotGate.Release(1)
+
+	probeCtx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	digest, err := service.ProbeManifestDigest(probeCtx)
+	require.NoError(t, err)
+	assert.Equal(t, manifest.Digest, digest)
+	require.NoError(t, service.closeRun(t.Context(), "run-1"))
 }
 
 func TestServicePinsExtensionRuntimeForRunLifetime(t *testing.T) {
@@ -717,7 +743,7 @@ func TestServiceManifestProbeDoesNotStartRunLifecycle(t *testing.T) {
 	callService[any](t, service, protocol.MethodRunClose, protocol.RunCloseParams{RunID: "run-1"})
 }
 
-func TestServiceCloseRunDoesNotWaitForeverForCanceledOperation(t *testing.T) {
+func TestServiceCloseRunDoesNotPoisonRunnerAfterCanceledOperationTimeout(t *testing.T) {
 	workspace := t.TempDir()
 	runtime := extensions.EmptyRuntime()
 	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
@@ -725,11 +751,16 @@ func TestServiceCloseRunDoesNotWaitForeverForCanceledOperation(t *testing.T) {
 		started: make(chan struct{}),
 		release: make(chan struct{}),
 	}
+	environmentCalls := 0
 	service, err := NewService(t.Context(), workspace, ServiceOptions{
 		RuntimeProvider: staticRuntimeProvider{runtime: runtime},
 		EnvironmentFactory: func(workingDirectory string, runtime *extensions.Runtime) agentenv.Environment {
-			blocking.Environment = agentenv.NewLocalEnvironment(workingDirectory, runtime)
-			return blocking
+			environmentCalls++
+			if environmentCalls == 1 {
+				blocking.Environment = agentenv.NewLocalEnvironment(workingDirectory, runtime)
+				return blocking
+			}
+			return agentenv.NewLocalEnvironment(workingDirectory, runtime)
 		},
 		CleanupTimeout: 20 * time.Millisecond,
 	})
@@ -758,17 +789,53 @@ func TestServiceCloseRunDoesNotWaitForeverForCanceledOperation(t *testing.T) {
 	err = service.closeRun(t.Context(), "run-1")
 	require.ErrorContains(t, err, "timed out waiting for runner operations to stop")
 	assert.Less(t, time.Since(startedAt), time.Second)
-	state, activeRunID, _ := service.HeartbeatSnapshot()
-	assert.Equal(t, protocol.RunnerStateError, state)
-	assert.Empty(t, activeRunID)
+	state, activeRunIDs, _ := service.HeartbeatSnapshotRuns()
+	assert.Equal(t, protocol.RunnerStateIdle, state)
+	assert.Empty(t, activeRunIDs)
+
 	_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodRunOpen, mustJSON(t, protocol.RunOpenParams{
-		RunID: "run-2", ConversationID: "conversation-2",
+		RunID: "run-same-conversation", ConversationID: "conversation-1",
 	}))
-	require.NotNil(t, rpcErr)
-	assert.Contains(t, rpcErr.Message, "requires restart")
+	require.Nil(t, rpcErr)
+	state, activeRunIDs, _ = service.HeartbeatSnapshotRuns()
+	assert.Equal(t, protocol.RunnerStateRunning, state)
+	assert.Equal(t, []string{"run-same-conversation"}, activeRunIDs)
 
 	close(blocking.release)
 	require.NoError(t, <-operationDone)
+	require.NoError(t, service.closeRun(t.Context(), "run-same-conversation"))
+}
+
+func TestServiceRunCleanupFailureReleasesAffectedRun(t *testing.T) {
+	provider := &recordingExecutionInstanceProvider{workspace: t.TempDir(), closeErr: errors.New("instance close failed")}
+	runtime := extensions.EmptyRuntime()
+	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
+	service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{
+		RuntimeProvider:           staticRuntimeProvider{runtime: runtime},
+		ConfigLoader:              func(string) (llmtypes.Config, error) { return llmtypes.Config{}, nil },
+		ExecutionInstanceProvider: provider,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = service.Close() })
+	service.Attach(&recordingPeer{})
+	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
+	callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
+		RunID: "run-1", ConversationID: "conversation-1",
+	})
+
+	require.ErrorContains(t, service.closeRun(t.Context(), "run-1"), "instance close failed")
+	state, activeRunIDs, _ := service.HeartbeatSnapshotRuns()
+	assert.Equal(t, protocol.RunnerStateIdle, state)
+	assert.Empty(t, activeRunIDs)
+	provider.closeErr = nil
+	_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodRunOpen, mustJSON(t, protocol.RunOpenParams{
+		RunID: "run-same-conversation", ConversationID: "conversation-1",
+	}))
+	require.Nil(t, rpcErr)
+	state, activeRunIDs, _ = service.HeartbeatSnapshotRuns()
+	assert.Equal(t, protocol.RunnerStateRunning, state)
+	assert.Equal(t, []string{"run-same-conversation"}, activeRunIDs)
+	require.NoError(t, service.closeRun(t.Context(), "run-same-conversation"))
 }
 
 func TestServiceReturnsUnavailableWhenClientDoesNotSupportInteractiveUI(t *testing.T) {
@@ -1016,7 +1083,7 @@ func TestServiceCleansExecutionInstanceWhenEnvironmentOpenFails(t *testing.T) {
 	assert.True(t, provider.instances[0].closed)
 }
 
-func TestServiceRequiresRestartWhenFailedOpenCleanupFails(t *testing.T) {
+func TestServiceFailedOpenCleanupDoesNotPoisonRunner(t *testing.T) {
 	provider := &recordingExecutionInstanceProvider{workspace: t.TempDir(), closeErr: errors.New("instance close failed")}
 	runtime := extensions.EmptyRuntime()
 	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
@@ -1037,16 +1104,17 @@ func TestServiceRequiresRestartWhenFailedOpenCleanupFails(t *testing.T) {
 	require.NotNil(t, rpcErr)
 	assert.Contains(t, rpcErr.Message, "factory returned nil")
 	state, activeRunID, _ := service.HeartbeatSnapshot()
-	assert.Equal(t, protocol.RunnerStateError, state)
+	assert.Equal(t, protocol.RunnerStateIdle, state)
 	assert.Empty(t, activeRunID)
 	_, rpcErr = service.HandleRequest(t.Context(), protocol.MethodRunOpen, mustJSON(t, protocol.RunOpenParams{
 		RunID: "run-2", ConversationID: "conversation-2",
 	}))
 	require.NotNil(t, rpcErr)
-	assert.Contains(t, rpcErr.Message, "requires restart")
+	assert.Contains(t, rpcErr.Message, "factory returned nil")
+	assert.NotContains(t, rpcErr.Message, "requires restart")
 }
 
-func TestServiceRequiresRestartWhenManifestProbeCleanupFails(t *testing.T) {
+func TestServiceManifestProbeCleanupFailureDoesNotPoisonRunner(t *testing.T) {
 	provider := &recordingExecutionInstanceProvider{workspace: t.TempDir(), closeErr: errors.New("instance close failed")}
 	runtime := extensions.EmptyRuntime()
 	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
@@ -1063,9 +1131,15 @@ func TestServiceRequiresRestartWhenManifestProbeCleanupFails(t *testing.T) {
 	_, err = service.ProbeManifestDigest(t.Context())
 	require.ErrorContains(t, err, "failed to clean up runner manifest probe resources")
 	state, activeRunID, digest := service.HeartbeatSnapshot()
-	assert.Equal(t, protocol.RunnerStateError, state)
+	assert.Equal(t, protocol.RunnerStateIdle, state)
 	assert.Empty(t, activeRunID)
 	assert.Empty(t, digest)
+	provider.closeErr = nil
+	_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodRunOpen, mustJSON(t, protocol.RunOpenParams{
+		RunID: "run-1", ConversationID: "conversation-1",
+	}))
+	require.Nil(t, rpcErr)
+	require.NoError(t, service.closeRun(t.Context(), "run-1"))
 }
 
 func TestDirectWorkspaceInstanceProviderReturnsFreshHandles(t *testing.T) {
