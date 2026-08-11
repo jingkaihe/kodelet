@@ -1,5 +1,19 @@
 # Kodelet
 
+## 0.5.30-beta
+
+Added workspace-bound runners so a `kodelet serve` control plane can run the model loop against tools, context, skills, commands, and extensions hosted by a `kodelet runner start` process in another workspace, with stable runner identity, an exclusive per-workspace advisory lock, and durable conversation affinity.
+
+Added `kodelet runner start`, `list`, `inspect`, and `remove`, a separate `--runner-auth-token` credential for runner registration, and runner selection from the Web UI **Environment** field.
+
+Added remote execution to the terminal UI and ACP via `kodelet chat --server`, `--runner`, `--runner-profile`, and `kodelet acp --server`, including control-plane conversation browsing, resume, steering, cancellation, and relayed extension input requests.
+
+Added runner-local `environment_profiles` configuration, a separate namespace from model profiles, for restricting tools, commands, and extensions on the runner host.
+
+Supported concurrent runs per runner with per-run lifecycle, bounded cleanup, lost-run reconciliation, and manifest pinning so an in-flight run never sees a changed tool, skill, or command manifest.
+
+Streamed future control-plane conversation turns to already-open Web UI sessions and surfaced live runner status and active run counts in chat context metadata.
+
 ## 0.5.27-beta
 
 Removed the legacy `kodelet run --headless` JSON stream, its `--stream-deltas` and `--include-history` flags, the `kodelet conversation stream` command, and the CLI-backed Streamlit example; ACP, TypeScript SDK, TUI, and Web UI streaming remain supported.
