@@ -20,6 +20,15 @@ To keep workspace execution local while a `kodelet serve` control plane owns the
 kodelet acp --server https://kodelet.example
 ```
 
+Alternatively, configure the control plane once and launch ACP without repeating the flag:
+
+```yaml
+# ~/.kodelet/config.yaml or ./kodelet-config.yaml
+server: https://kodelet.example
+```
+
+`KODELET_SERVER=https://kodelet.example` provides the environment-variable equivalent. An explicit `--server` value has the highest precedence.
+
 ## IDE Integration
 
 ### Zed
@@ -55,14 +64,14 @@ kodelet acp [flags]
 | `--no-skills` | Disable agentic skills |
 | `--enable-fs-search-tools` | Enable `glob_tool` and `grep_tool` (by default the agent uses `fd`/`rg` via bash) |
 | `--no-extensions` | Disable extension runtime |
-| `--server` | Run the model agentic loop on a control plane while keeping the current workspace runtime local |
+| `--server` | Run the model agentic loop on a control plane while keeping the current workspace runtime local; overrides `KODELET_SERVER` and `server` config |
 | `--auth-token` | Control-plane API token; defaults to `KODELET_AUTH_TOKEN` |
 | `--runner-auth-token` | Runner registration token; defaults to `KODELET_RUNNER_AUTH_TOKEN` |
 | `--runner-profile` | Runner-local environment profile used for tools, skills, extensions, context, and workspace policy |
 
 ## Server-Backed ACP
 
-`kodelet acp --server URL` uses the stable runner for the process's current working directory. It acquires the workspace runner lock and starts an embedded runner when no owner exists; if `kodelet runner start` already holds the lock for the same server and has advertised its runner ID, ACP reuses that runner instead of registering the workspace again. The ACP client still communicates with a local stdio subprocess, which sends each prompt to the control plane's chat API.
+When selected by `--server`, `KODELET_SERVER`, or the top-level `server` configuration, server-backed ACP uses the stable runner for the process's current working directory. It acquires the workspace runner lock and starts an embedded runner when no owner exists; if `kodelet runner start` already holds the lock for the same server and has advertised its runner ID, ACP reuses that runner instead of registering the workspace again. The ACP client still communicates with a local stdio subprocess, which sends each prompt to the control plane's chat API.
 
 ```text
 ACP client <-- stdio --> kodelet acp <-- HTTPS --> kodelet serve / model loop
@@ -75,7 +84,7 @@ The control plane owns provider credentials, model calls, turn orchestration, ca
 
 An embedded runner executes with the ACP process's host permissions and is not a sandbox; a reused runner executes with the permissions of its existing process. API and runner tokens are captured before local extensions start and removed from the child-process environment; on Linux, Kodelet also scrubs token flag values from the process command line and disables same-user process inspection of its original environment. Supplying tokens through `KODELET_AUTH_TOKEN` and `KODELET_RUNNER_AUTH_TOKEN` avoids their initial appearance in process listings.
 
-For new conversations, explicit `--profile` and `--reasoning-effort` values select control-plane model policy. `--runner-profile` independently selects local runner policy. Flags that configure a local model loop, including `--provider`, `--model`, `--max-tokens`, `--max-turns`, weak-model settings, thinking budget, compact ratio, Anthropic API access, and OpenAI native search, are rejected with `--server`.
+For new conversations, explicit `--profile` and `--reasoning-effort` values select control-plane model policy. `--runner-profile` independently selects local runner policy. Flags that configure a local model loop, including `--provider`, `--model`, `--max-tokens`, `--max-turns`, weak-model settings, thinking budget, compact ratio, Anthropic API access, and OpenAI native search, are rejected in server-backed mode.
 
 `--no-skills`, `--no-extensions`, and `--enable-fs-search-tools` remain runner-local and override any selected runner profile when ACP owns the embedded runner. If ACP reuses an already-running runner, explicitly passing one of those process-level overrides is rejected; configure the external runner's environment profile instead. Local recipes and extension commands execute through the selected workspace runner when invoked. ACP advertises them for an embedded runner; when reusing an external runner, it currently advertises only built-in commands, although manually submitted workspace commands still execute remotely.
 

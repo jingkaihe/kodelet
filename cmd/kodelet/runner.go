@@ -124,7 +124,7 @@ func init() {
 }
 
 func runnerStartConfigFromFlags(cmd *cobra.Command) runnerStartConfig {
-	server, _ := cmd.Flags().GetString("server")
+	server, _ := serverFlagOrConfig(cmd)
 	displayName, _ := cmd.Flags().GetString("name")
 	return runnerStartConfig{
 		Server:      server,
@@ -134,7 +134,7 @@ func runnerStartConfigFromFlags(cmd *cobra.Command) runnerStartConfig {
 }
 
 func runnerQueryConfigFromFlags(cmd *cobra.Command) runnerQueryConfig {
-	server, _ := cmd.Flags().GetString("server")
+	server, _ := serverFlagOrConfig(cmd)
 	jsonOutput, _ := cmd.Flags().GetBool("json")
 	return runnerQueryConfig{
 		Server:     server,

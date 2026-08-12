@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -89,4 +90,16 @@ func TestACPRespectsProfileEnableFSSearchTools(t *testing.T) {
 	config, err := buildACPServerConfig(acpCmd)
 	require.NoError(t, err)
 	assert.True(t, config.EnableFSSearchTools)
+}
+
+func TestACPResolvesConfiguredServerWithoutFlag(t *testing.T) {
+	setServerConfigForTest(t, " https://kodelet.example/control ")
+	t.Setenv(controlPlaneServerEnv, "")
+	cmd := &cobra.Command{Use: "acp"}
+	cmd.Flags().String("server", defaultRunnerServer, "")
+
+	server, configured := serverFlagOrConfig(cmd)
+
+	assert.Equal(t, "https://kodelet.example/control", server)
+	assert.True(t, configured)
 }

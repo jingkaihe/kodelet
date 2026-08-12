@@ -68,6 +68,20 @@ func TestGetChatConfigFromFlagsLoadsAuthTokenFromEnvironment(t *testing.T) {
 	assert.Equal(t, "control-plane-secret", config.AuthToken)
 }
 
+func TestGetChatConfigFromFlagsLoadsServerFromConfig(t *testing.T) {
+	setServerConfigForTest(t, " https://kodelet.example/control ")
+	t.Setenv(controlPlaneServerEnv, "")
+	cmd := &cobra.Command{Use: "chat"}
+	cmd.Flags().String("server", defaultRunnerServer, "")
+	cmd.Flags().String("auth-token", "", "")
+
+	config := getChatConfigFromFlags(cmd)
+
+	assert.Equal(t, "https://kodelet.example/control", config.Server)
+	assert.True(t, config.ServerConfigured)
+	assert.True(t, usesControlPlaneChat(config))
+}
+
 func TestChatResumeShortFlag(t *testing.T) {
 	cmd := &cobra.Command{Use: "chat"}
 	defaults := NewChatConfig()
@@ -170,12 +184,16 @@ func TestPrepareRemoteChatRunnerRejectsLocalOnlyOptions(t *testing.T) {
 }
 
 func TestPrepareServerChatRunnerAndModeSelection(t *testing.T) {
+	setServerConfigForTest(t, "")
+	t.Setenv(controlPlaneServerEnv, "")
 	cmd := &cobra.Command{Use: "chat"}
 	cmd.Flags().String("server", defaultRunnerServer, "")
-	config := &ChatConfig{Server: defaultRunnerServer}
-	assert.False(t, usesControlPlaneChat(cmd, config))
+	cmd.Flags().String("auth-token", "", "")
+	config := getChatConfigFromFlags(cmd)
+	assert.False(t, usesControlPlaneChat(config))
 	require.NoError(t, cmd.Flags().Set("server", "http://localhost:8080"))
-	assert.True(t, usesControlPlaneChat(cmd, config))
+	config = getChatConfigFromFlags(cmd)
+	assert.True(t, usesControlPlaneChat(config))
 
 	runner, err := prepareServerChatRunner(config)
 	require.NoError(t, err)

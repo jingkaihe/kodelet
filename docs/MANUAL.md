@@ -151,6 +151,8 @@ kodelet chat --runner RUNNER         # start a new conversation on a remote runn
 kodelet chat --runner RUNNER --runner-profile workspace  # select runner-local environment configuration
 ```
 
+To use the same control plane by default, set `server: https://kodelet.example` in `~/.kodelet/config.yaml` or `kodelet-config.yaml`, or export `KODELET_SERVER`. A configured server puts `kodelet chat` into control-plane mode without an explicit `--server` flag; an explicit flag takes precedence.
+
 The TUI uses `auto` theme selection by default. It detects whether the terminal profile has a light or dark background and selects `catppuccin-latte` for light profiles or `catppuccin-mocha` for dark profiles; unavailable detection falls back to Mocha. Use `--theme` at startup or `/theme` in the TUI; the picker marks the active selection with ` (current)`. Use `/theme THEME_NAME` to switch directly. The TUI streams assistant responses, collapses thinking and tool details by default, and lets you toggle details with `ctrl+o` or by clicking the detail header. It uses the same chat runner as the Web UI, so conversations are persisted and can be resumed by ID. While the assistant is working, the composer stays editable; press `Enter` to queue ordinary text as steering for the active conversation. TUI-local slash commands such as `/sessions` and `/new` execute immediately, while other slash commands remain available in completion and are queued as follow-up turns that start when the current turn finishes. Kodelet applies queued steering on the next model API call. Before the first message, use `Ctrl+T` to select a profile and `Ctrl+Y` (or click the `effort:` label beside the profile) to select one of the profile's `allowed_reasoning_efforts`. Both controls are locked after the conversation starts, and the selected effort is restored when it is resumed.
 
 Use `/sessions` or `Ctrl+L` to open a searchable conversation picker. The picker includes saved conversations and conversations already open in the current TUI. It preserves each conversation's draft and scroll position when switching. Use `/new` to start another conversation. One run may be active per conversation, while different conversations can run in parallel; `Enter` queues steering and `Esc` or `Ctrl+C` cancels only the currently selected conversation. If a background run requires extension input, the TUI marks it in the picker and shows a notification so you can switch to it and respond.
@@ -203,6 +205,8 @@ To run the model loop and conversation store on a `kodelet serve` control plane 
 ```bash
 kodelet acp --server https://kodelet.example
 ```
+
+The control-plane URL can also be configured once with `server: https://kodelet.example` or `KODELET_SERVER=https://kodelet.example`; `kodelet acp` then enters server-backed mode automatically. An explicit `--server` value takes precedence.
 
 Use `--auth-token` or `KODELET_AUTH_TOKEN` for control-plane APIs and `--runner-auth-token` or `KODELET_RUNNER_AUTH_TOKEN` when ACP needs to register an embedded runner. If `kodelet runner start` already owns the same canonical workspace for the same server, `kodelet acp --server` reuses the runner ID advertised by that live workspace lock instead. `--runner-profile` selects a runner-local environment profile, while explicit `--profile` and `--reasoning-effort` values select control-plane model policy for new conversations. Server-backed sessions are tied to the current workspace's stable runner identity, may run concurrently across different conversations, and are persisted on the control plane.
 
@@ -266,6 +270,8 @@ kodelet runner start \
   --name kodelet-gpu
 ```
 
+All `kodelet runner` subcommands use the top-level `server` configuration or `KODELET_SERVER` when `--server` is omitted. If none is configured, they default to `http://localhost:8080`.
+
 `--name` is optional mutable display metadata. The control plane assigns the stable opaque runner ID. Reconnecting from the same authenticated owner, stable local host instance, and canonical workspace path reuses that ID even if the local ID cache was removed. Hostname, process ID, workspace basename, and display name are diagnostic metadata rather than identity.
 
 Runner startup takes an exclusive OS advisory file lock keyed only by the canonical workspace path, so two cooperating Kodelet runner processes cannot register the same mutable directory, including to different control planes. The lock is a registration-ownership and discovery mechanism, not a workspace mutation mutex: one connected runner can host any number of concurrent logical runs. The lock and local registration cache live outside the repository under the Kodelet state directory, normally `~/.kodelet/runners`. The `.lock` file records the PID, hostname, server, runner ID, display name, workspace, and start/stop timestamps for diagnostics and lets same-server `kodelet acp --server` reuse an existing runner, but the held kernel lock—not file existence or PID inspection—is authoritative. A stale file after a crash is expected and is overwritten after the next process successfully acquires the lock.
@@ -303,7 +309,7 @@ kodelet chat \
   --auth-token web-secret
 ```
 
-`--server` makes the TUI use the control plane for conversation listing, history, settings, and execution. `/sessions`, `--resume`, and `--follow` therefore operate on control-plane conversations; an existing runner-bound conversation resumes through its stored runner affinity. Adding `--runner` selects the runner for new conversations and limits the picker to conversations bound to that runner. `--profile` selects model/provider policy from the control plane, while `--runner-profile` independently selects a profile from the runner's own global and workspace `environment_profiles` configuration; blank or `default` uses the runner base configuration. A model profile never implicitly selects a same-named runner profile, and the selected runner profile is locked after the conversation starts. Extension input, confirmation, selection, and notification requests are relayed through the control plane with extension-generation identity preserved; steering is queued centrally, and `Esc` or `Ctrl+C` requests server-side cancellation before closing the local response stream. `--cwd`, `--no-tools`, and `--no-extensions` remain local-only. `kodelet run --runner` is likewise not enabled yet because the one-shot command's flags and output modes are not fully represented by the remote chat request contract.
+`--server`, the top-level `server` configuration, or `KODELET_SERVER` makes the TUI use the control plane for conversation listing, history, settings, and execution. `/sessions`, `--resume`, and `--follow` therefore operate on control-plane conversations; an existing runner-bound conversation resumes through its stored runner affinity. Adding `--runner` selects the runner for new conversations and limits the picker to conversations bound to that runner. `--profile` selects model/provider policy from the control plane, while `--runner-profile` independently selects a profile from the runner's own global and workspace `environment_profiles` configuration; blank or `default` uses the runner base configuration. A model profile never implicitly selects a same-named runner profile, and the selected runner profile is locked after the conversation starts. Extension input, confirmation, selection, and notification requests are relayed through the control plane with extension-generation identity preserved; steering is queued centrally, and `Esc` or `Ctrl+C` requests server-side cancellation before closing the local response stream. `--cwd`, `--no-tools`, and `--no-extensions` remain local-only. `kodelet run --runner` is likewise not enabled yet because the one-shot command's flags and output modes are not fully represented by the remote chat request contract.
 
 When the Web UI already has a persisted conversation open, it keeps an idle control-plane stream attached to that conversation. A turn started from `kodelet chat --server ... --resume CONVERSATION_ID` therefore appears live in the Web UI, including turns that execute through `--runner`; the same behavior applies to server-local execution without `--runner`. A standalone local TUI does not participate because it bypasses the control plane.
 
@@ -575,6 +581,9 @@ export KODELET_OPENAI_TEXT_VERBOSITY="low"  # Responses API only: low|medium|hig
 # Profile configuration
 export KODELET_PROFILE="anthropic"  # Use a specific profile
 
+# Default Kodelet control plane for chat, ACP, and runner commands
+export KODELET_SERVER="https://kodelet.example"
+
 # Command restriction configuration
 export KODELET_ALLOWED_COMMANDS="ls *,pwd,echo *,git status"  # Comma-separated allowed command patterns
 ```
@@ -593,11 +602,14 @@ Use `kodelet-config.yaml` in your project root for project-specific settings. Th
 
 ```yaml
 # Global config (~/.kodelet/config.yaml)
+server: "https://kodelet.example"
 provider: "anthropic"
 model: "claude-sonnet-4-6"
 max_tokens: 8192
 log_level: "info"
 ```
+
+When `server` is non-empty, `kodelet chat` and `kodelet acp` select server-backed mode automatically, while `kodelet runner` commands use it instead of their `http://localhost:8080` default. `kodelet run` remains local. The precedence is explicit `--server`, then `KODELET_SERVER`, then the repository/global configuration value, then the command default.
 
 ```yaml
 # Repository config (kodelet-config.yaml) - only override what's different

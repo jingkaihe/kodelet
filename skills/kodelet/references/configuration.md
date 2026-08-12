@@ -8,6 +8,16 @@ Kodelet uses layered configuration:
 
 Repository config overrides global config. See `config.sample.yaml` in the repo for the complete schema.
 
+## Control-plane server
+
+Configure a default `kodelet serve` control plane once for terminal chat, ACP, and runner commands:
+
+```yaml
+server: https://kodelet.example
+```
+
+With this setting, `kodelet chat` and `kodelet acp` enter server-backed mode without an explicit flag, and `kodelet runner` subcommands use the configured URL instead of `http://localhost:8080`. `kodelet run` remains local. The precedence is `--server`, then `KODELET_SERVER`, then repository/global config, then the command default.
+
 ## Provider setup
 
 ### Anthropic Claude

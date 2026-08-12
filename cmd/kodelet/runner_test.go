@@ -65,6 +65,24 @@ func TestRunnerConfigsLoadAuthTokensFromEnvironment(t *testing.T) {
 	}, runnerQueryConfigFromFlags(queryCmd))
 }
 
+func TestRunnerConfigsLoadServerFromConfigAndAllowFlagOverride(t *testing.T) {
+	setServerConfigForTest(t, " https://config.example/control ")
+	t.Setenv(controlPlaneServerEnv, "")
+
+	startCmd := &cobra.Command{Use: "start"}
+	startCmd.Flags().String("server", defaultRunnerServer, "")
+	startCmd.Flags().String("auth-token", "", "")
+	startCmd.Flags().String("name", "", "")
+	assert.Equal(t, "https://config.example/control", runnerStartConfigFromFlags(startCmd).Server)
+
+	queryCmd := &cobra.Command{Use: "list"}
+	queryCmd.Flags().String("server", defaultRunnerServer, "")
+	queryCmd.Flags().String("auth-token", "", "")
+	queryCmd.Flags().Bool("json", false, "")
+	require.NoError(t, queryCmd.Flags().Set("server", " https://flag.example "))
+	assert.Equal(t, "https://flag.example", runnerQueryConfigFromFlags(queryCmd).Server)
+}
+
 func TestSelectRunnerSupportsStableIDPrefixAndDisplayName(t *testing.T) {
 	runners := []runnerregistry.Runner{
 		{

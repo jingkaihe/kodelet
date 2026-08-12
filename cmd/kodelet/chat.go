@@ -19,16 +19,17 @@ import (
 )
 
 type ChatConfig struct {
-	ResumeConvID  string
-	CWD           string
-	Theme         string
-	Follow        bool
-	NoExtensions  bool
-	NoTools       bool
-	Runner        string
-	RunnerProfile string
-	Server        string
-	AuthToken     string
+	ResumeConvID     string
+	CWD              string
+	Theme            string
+	Follow           bool
+	NoExtensions     bool
+	NoTools          bool
+	Runner           string
+	RunnerProfile    string
+	Server           string
+	ServerConfigured bool
+	AuthToken        string
 }
 
 func NewChatConfig() *ChatConfig {
@@ -45,7 +46,7 @@ var chatCmd = &cobra.Command{
 		config := getChatConfigFromFlags(cmd)
 		var chatRunner chatpkg.ChatRunner
 		var remoteRunner *chatpkg.ControlPlaneChatRunner
-		remote := usesControlPlaneChat(cmd, config)
+		remote := usesControlPlaneChat(config)
 		if strings.TrimSpace(config.Runner) != "" {
 			selectedRunner, workspace, remoteErr := prepareRemoteChatRunner(ctx, config)
 			if remoteErr != nil {
@@ -209,9 +210,7 @@ func getChatConfigFromFlags(cmd *cobra.Command) *ChatConfig {
 	if runnerProfile, err := cmd.Flags().GetString("runner-profile"); err == nil {
 		config.RunnerProfile = strings.TrimSpace(runnerProfile)
 	}
-	if server, err := cmd.Flags().GetString("server"); err == nil {
-		config.Server = strings.TrimSpace(server)
-	}
+	config.Server, config.ServerConfigured = serverFlagOrConfig(cmd)
 	config.AuthToken = authTokenFlagOrEnvironment(cmd, controlPlaneAuthTokenEnv)
 
 	return config
@@ -273,8 +272,8 @@ func prepareServerChatRunner(config *ChatConfig) (*chatpkg.ControlPlaneChatRunne
 	return chatpkg.NewControlPlaneChatRunner(config.Server, config.AuthToken, "")
 }
 
-func usesControlPlaneChat(cmd *cobra.Command, config *ChatConfig) bool {
-	return config != nil && (strings.TrimSpace(config.Runner) != "" || (cmd != nil && cmd.Flags().Changed("server")))
+func usesControlPlaneChat(config *ChatConfig) bool {
+	return config != nil && (strings.TrimSpace(config.Runner) != "" || config.ServerConfigured)
 }
 
 func resolveFollowConversation(ctx context.Context, source chatpkg.ConversationSource) (string, error) {

@@ -19,6 +19,7 @@ import (
 const (
 	configFileEnv            = "KODELET_CONFIG_FILE"
 	configFileModeEnv        = "KODELET_CONFIG_FILE_MODE"
+	controlPlaneServerEnv    = "KODELET_SERVER"
 	controlPlaneAuthTokenEnv = "KODELET_AUTH_TOKEN"
 	runnerAuthTokenEnv       = "KODELET_RUNNER_AUTH_TOKEN"
 	configFileModeMerge      = "merge"
@@ -38,6 +39,23 @@ func stringFlagOrEnvironment(cmd *cobra.Command, flagName, environmentName strin
 		return strings.TrimSpace(value)
 	}
 	return strings.TrimSpace(os.Getenv(environmentName))
+}
+
+func serverFlagOrConfig(cmd *cobra.Command) (string, bool) {
+	value, err := cmd.Flags().GetString("server")
+	if err != nil {
+		return "", false
+	}
+	if cmd.Flags().Changed("server") {
+		return strings.TrimSpace(value), true
+	}
+	if environment := strings.TrimSpace(os.Getenv(controlPlaneServerEnv)); environment != "" {
+		return environment, true
+	}
+	if configured := strings.TrimSpace(viper.GetString("server")); configured != "" {
+		return configured, true
+	}
+	return strings.TrimSpace(value), false
 }
 
 func init() {

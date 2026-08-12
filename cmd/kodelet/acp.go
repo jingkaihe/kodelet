@@ -75,8 +75,8 @@ func runACP(cmd *cobra.Command, _ []string) error {
 
 	logger.SetLogOutput(os.Stderr)
 	logger.SetLogLevel(viper.GetString("log_level"))
-	if cmd.Flags().Changed("server") {
-		return runRemoteACP(ctx, cmd)
+	if serverURL, configured := serverFlagOrConfig(cmd); configured {
+		return runRemoteACP(ctx, cmd, serverURL)
 	}
 
 	config, err := buildACPServerConfig(cmd)
@@ -92,7 +92,7 @@ func runACP(cmd *cobra.Command, _ []string) error {
 	return runACPServer(ctx, server)
 }
 
-func runRemoteACP(ctx context.Context, cmd *cobra.Command) error {
+func runRemoteACP(ctx context.Context, cmd *cobra.Command, rawServerURL string) error {
 	if err := validateRemoteACPFlags(cmd); err != nil {
 		return err
 	}
@@ -100,7 +100,6 @@ func runRemoteACP(ctx context.Context, cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	rawServerURL, _ := cmd.Flags().GetString("server")
 	serverURL, err := normalizeRunnerAPIBaseURL(rawServerURL)
 	if err != nil {
 		return err
