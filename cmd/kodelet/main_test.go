@@ -78,17 +78,90 @@ func TestServerFlagOrConfig(t *testing.T) {
 	})
 }
 
+func TestServerResolutionUsesActualCommandPaths(t *testing.T) {
+	t.Run("chat stays local without a configured server", func(t *testing.T) {
+		setServerConfigForTest(t, "")
+		t.Setenv(controlPlaneServerEnv, "")
+		cmd := parseActualCommandForTest(t, chatCmd)
+
+		config := getChatConfigFromFlags(cmd)
+
+		assert.Equal(t, defaultRunnerServer, config.Server)
+		assert.False(t, usesControlPlaneChat(config))
+	})
+
+	t.Run("chat flag overrides environment and user config", func(t *testing.T) {
+		setServerConfigForTest(t, "https://config.example")
+		t.Setenv(controlPlaneServerEnv, "https://environment.example")
+		cmd := parseActualCommandForTest(t, chatCmd, "--server", "https://flag.example")
+
+		config := getChatConfigFromFlags(cmd)
+
+		assert.Equal(t, "https://flag.example", config.Server)
+		assert.True(t, usesControlPlaneChat(config))
+	})
+
+	t.Run("ACP uses the user-configured server", func(t *testing.T) {
+		setServerConfigForTest(t, "https://config.example")
+		t.Setenv(controlPlaneServerEnv, "")
+		cmd := parseActualCommandForTest(t, acpCmd)
+
+		server, configured := serverFlagOrConfig(cmd)
+
+		assert.Equal(t, "https://config.example", server)
+		assert.True(t, configured)
+	})
+
+	t.Run("ACP environment overrides user config", func(t *testing.T) {
+		setServerConfigForTest(t, "https://config.example")
+		t.Setenv(controlPlaneServerEnv, "https://environment.example")
+		cmd := parseActualCommandForTest(t, acpCmd)
+
+		server, configured := serverFlagOrConfig(cmd)
+
+		assert.Equal(t, "https://environment.example", server)
+		assert.True(t, configured)
+	})
+
+	t.Run("runner start uses the user-configured server", func(t *testing.T) {
+		setServerConfigForTest(t, "https://config.example")
+		t.Setenv(controlPlaneServerEnv, "")
+		cmd := parseActualCommandForTest(t, runnerStartCmd)
+
+		assert.Equal(t, "https://config.example", runnerStartConfigFromFlags(cmd).Server)
+	})
+
+	t.Run("runner query flag overrides environment and user config", func(t *testing.T) {
+		setServerConfigForTest(t, "https://config.example")
+		t.Setenv(controlPlaneServerEnv, "https://environment.example")
+		cmd := parseActualCommandForTest(t, runnerListCmd, "--server", "https://flag.example")
+
+		assert.Equal(t, "https://flag.example", runnerQueryConfigFromFlags(cmd).Server)
+	})
+}
+
+func parseActualCommandForTest(t *testing.T, cmd *cobra.Command, args ...string) *cobra.Command {
+	t.Helper()
+	flag := cmd.Flags().Lookup("server")
+	require.NotNil(t, flag)
+	previousValue := flag.Value.String()
+	previousChanged := flag.Changed
+	require.NoError(t, flag.Value.Set(flag.DefValue))
+	flag.Changed = false
+	t.Cleanup(func() {
+		require.NoError(t, flag.Value.Set(previousValue))
+		flag.Changed = previousChanged
+	})
+	require.NoError(t, cmd.ParseFlags(args))
+	return cmd
+}
+
 func setServerConfigForTest(t *testing.T, value string) {
 	t.Helper()
-	previous := viper.Get("server")
-	wasSet := viper.IsSet("server")
-	viper.Set("server", value)
+	previous := userConfiguredServer
+	userConfiguredServer = value
 	t.Cleanup(func() {
-		if wasSet {
-			viper.Set("server", previous)
-			return
-		}
-		viper.Set("server", nil)
+		userConfiguredServer = previous
 	})
 }
 
@@ -104,18 +177,23 @@ func TestAuthTokenFlagsDoNotCaptureEnvironmentDefaults(t *testing.T) {
 }
 
 func TestLoadConfigFilesMergesOverrideConfigFile(t *testing.T) {
+	setServerConfigForTest(t, "")
 	t.Cleanup(viper.Reset)
 	viper.Reset()
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
 	t.Chdir(t.TempDir())
 	viper.SetDefault("provider", "openai")
 	viper.SetDefault("model", "default-model")
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".kodelet"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".kodelet", "config.yaml"), []byte("server: https://global.example/control\n"), 0o644))
 
 	require.NoError(t, os.WriteFile("kodelet-config.yaml", []byte("model: repo-model\nserver: https://repo.example/control\n"), 0o644))
 
 	configPath := filepath.Join(t.TempDir(), "kodelet-config.json")
 	require.NoError(t, os.WriteFile(configPath, []byte(`{"provider":"anthropic","extensions":{"local_dir":"/tmp/sdk-extensions"}}`), 0o644))
 	t.Setenv(configFileEnv, configPath)
+	t.Setenv(configFileModeEnv, configFileModeMerge)
 
 	loadConfigFiles()
 
@@ -123,9 +201,11 @@ func TestLoadConfigFilesMergesOverrideConfigFile(t *testing.T) {
 	assert.Equal(t, "repo-model", viper.GetString("model"))
 	assert.Equal(t, "https://repo.example/control", viper.GetString("server"))
 	assert.Equal(t, "/tmp/sdk-extensions", viper.GetString("extensions.local_dir"))
+	assert.Equal(t, "https://global.example/control", userConfiguredServer)
 }
 
 func TestLoadConfigFilesCanUseIsolatedOverrideConfigFile(t *testing.T) {
+	setServerConfigForTest(t, "")
 	t.Cleanup(viper.Reset)
 	viper.Reset()
 	t.Setenv("HOME", t.TempDir())
@@ -136,7 +216,7 @@ func TestLoadConfigFilesCanUseIsolatedOverrideConfigFile(t *testing.T) {
 	require.NoError(t, os.WriteFile("kodelet-config.yaml", []byte("model: repo-model\n"), 0o644))
 
 	configPath := filepath.Join(t.TempDir(), "kodelet-config.json")
-	require.NoError(t, os.WriteFile(configPath, []byte(`{"provider":"anthropic"}`), 0o644))
+	require.NoError(t, os.WriteFile(configPath, []byte(`{"provider":"anthropic","server":"https://override.example/control"}`), 0o644))
 	t.Setenv(configFileEnv, configPath)
 	t.Setenv(configFileModeEnv, configFileModeIsolate)
 
@@ -144,4 +224,26 @@ func TestLoadConfigFilesCanUseIsolatedOverrideConfigFile(t *testing.T) {
 
 	assert.Equal(t, "anthropic", viper.GetString("provider"))
 	assert.Equal(t, "default-model", viper.GetString("model"))
+	assert.Equal(t, "https://override.example/control", userConfiguredServer)
+}
+
+func TestLoadConfigFilesDoesNotTrustRepositoryServer(t *testing.T) {
+	setServerConfigForTest(t, "")
+	t.Cleanup(viper.Reset)
+	viper.Reset()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv(controlPlaneServerEnv, "")
+	t.Setenv(configFileEnv, "")
+	t.Setenv(configFileModeEnv, configFileModeMerge)
+	t.Chdir(t.TempDir())
+	require.NoError(t, os.WriteFile("kodelet-config.yaml", []byte("server: https://repo.example/control\n"), 0o644))
+
+	loadConfigFiles()
+
+	cmd := &cobra.Command{Use: "test"}
+	cmd.Flags().String("server", defaultRunnerServer, "")
+	server, configured := serverFlagOrConfig(cmd)
+	assert.Equal(t, defaultRunnerServer, server)
+	assert.False(t, configured)
+	assert.Equal(t, "https://repo.example/control", viper.GetString("server"))
 }

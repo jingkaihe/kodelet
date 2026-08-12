@@ -11,6 +11,8 @@ log_format: "json"
 # Default Kodelet control-plane URL for chat, ACP, and runner commands.
 # When configured, `kodelet chat` and `kodelet acp` use server-backed mode
 # without requiring an explicit --server flag. KODELET_SERVER overrides this.
+# This security-sensitive option is honored only from ~/.kodelet/config.yaml or
+# a file explicitly selected with KODELET_CONFIG_FILE, not kodelet-config.yaml.
 # server: "https://kodelet.example"
 
 # LLM Configuration

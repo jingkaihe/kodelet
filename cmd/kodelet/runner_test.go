@@ -41,6 +41,8 @@ func TestNormalizeRunnerAPIBaseURL(t *testing.T) {
 }
 
 func TestRunnerConfigsLoadAuthTokensFromEnvironment(t *testing.T) {
+	setServerConfigForTest(t, "")
+	t.Setenv(controlPlaneServerEnv, "")
 	t.Setenv(runnerAuthTokenEnv, "runner-secret")
 	t.Setenv(controlPlaneAuthTokenEnv, "control-plane-secret")
 

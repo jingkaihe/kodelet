@@ -26,6 +26,8 @@ const (
 	configFileModeIsolate    = "isolated"
 )
 
+var userConfiguredServer string
+
 func authTokenFlagOrEnvironment(cmd *cobra.Command, environmentName string) string {
 	return stringFlagOrEnvironment(cmd, "auth-token", environmentName)
 }
@@ -52,7 +54,7 @@ func serverFlagOrConfig(cmd *cobra.Command) (string, bool) {
 	if environment := strings.TrimSpace(os.Getenv(controlPlaneServerEnv)); environment != "" {
 		return environment, true
 	}
-	if configured := strings.TrimSpace(viper.GetString("server")); configured != "" {
+	if configured := strings.TrimSpace(userConfiguredServer); configured != "" {
 		return configured, true
 	}
 	return strings.TrimSpace(value), false
@@ -106,9 +108,12 @@ func init() {
 }
 
 func loadConfigFiles() {
+	userConfiguredServer = ""
 	overrideConfigFile := strings.TrimSpace(os.Getenv(configFileEnv))
 	if overrideConfigFile != "" && configFileMode() == configFileModeIsolate {
-		readConfigFile(overrideConfigFile, "isolated override")
+		if readConfigFile(overrideConfigFile, "isolated override") {
+			loadUserConfiguredServer(overrideConfigFile, "isolated override")
+		}
 		return
 	}
 
@@ -118,7 +123,9 @@ func loadConfigFiles() {
 	viper.AddConfigPath("$HOME/.kodelet")
 
 	if err := viper.ReadInConfig(); err == nil {
-		logger.G(context.TODO()).WithField("config_file", viper.ConfigFileUsed()).Debug("Using global config file")
+		configFile := viper.ConfigFileUsed()
+		logger.G(context.TODO()).WithField("config_file", configFile).Debug("Using global config file")
+		loadUserConfiguredServer(configFile, "global")
 	}
 
 	// Then, try to merge repo-level config which will override global settings
@@ -130,7 +137,9 @@ func loadConfigFiles() {
 	}
 
 	if overrideConfigFile != "" {
-		mergeConfigFile(overrideConfigFile, "override")
+		if mergeConfigFile(overrideConfigFile, "override") {
+			loadUserConfiguredServer(overrideConfigFile, "override")
+		}
 	}
 }
 
@@ -147,21 +156,37 @@ func configFileMode() string {
 	}
 }
 
-func readConfigFile(configFile, label string) {
+func readConfigFile(configFile, label string) bool {
 	viper.SetConfigFile(configFile)
 	if err := viper.ReadInConfig(); err == nil {
 		logger.G(context.TODO()).WithField("config_file", configFile).Debugf("Read %s config file", label)
+		return true
 	} else {
 		logger.G(context.TODO()).WithField("config_file", configFile).WithError(err).Warnf("Failed to read %s config file", label)
+		return false
 	}
 }
 
-func mergeConfigFile(configFile, label string) {
+func mergeConfigFile(configFile, label string) bool {
 	viper.SetConfigFile(configFile)
 	if err := viper.MergeInConfig(); err == nil {
 		logger.G(context.TODO()).WithField("config_file", configFile).Debugf("Merged %s config file", label)
+		return true
 	} else {
 		logger.G(context.TODO()).WithField("config_file", configFile).WithError(err).Warnf("Failed to merge %s config file", label)
+		return false
+	}
+}
+
+func loadUserConfiguredServer(configFile, label string) {
+	config := viper.New()
+	config.SetConfigFile(configFile)
+	if err := config.ReadInConfig(); err != nil {
+		logger.G(context.TODO()).WithField("config_file", configFile).WithError(err).Warnf("Failed to read server from %s config file", label)
+		return
+	}
+	if config.IsSet("server") {
+		userConfiguredServer = strings.TrimSpace(config.GetString("server"))
 	}
 }
 

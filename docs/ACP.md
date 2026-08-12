@@ -23,11 +23,11 @@ kodelet acp --server https://kodelet.example
 Alternatively, configure the control plane once and launch ACP without repeating the flag:
 
 ```yaml
-# ~/.kodelet/config.yaml or ./kodelet-config.yaml
+# ~/.kodelet/config.yaml
 server: https://kodelet.example
 ```
 
-`KODELET_SERVER=https://kodelet.example` provides the environment-variable equivalent. An explicit `--server` value has the highest precedence.
+An explicitly selected `KODELET_CONFIG_FILE` may also provide `server`, and `KODELET_SERVER=https://kodelet.example` provides the environment-variable equivalent. An explicit `--server` value has the highest precedence. Repository-level `kodelet-config.yaml` is deliberately ignored for this security-sensitive setting.
 
 ## IDE Integration
 
@@ -64,14 +64,14 @@ kodelet acp [flags]
 | `--no-skills` | Disable agentic skills |
 | `--enable-fs-search-tools` | Enable `glob_tool` and `grep_tool` (by default the agent uses `fd`/`rg` via bash) |
 | `--no-extensions` | Disable extension runtime |
-| `--server` | Run the model agentic loop on a control plane while keeping the current workspace runtime local; overrides `KODELET_SERVER` and `server` config |
+| `--server` | Run the model agentic loop on a control plane while keeping the current workspace runtime local; overrides `KODELET_SERVER` and user-level `server` config |
 | `--auth-token` | Control-plane API token; defaults to `KODELET_AUTH_TOKEN` |
 | `--runner-auth-token` | Runner registration token; defaults to `KODELET_RUNNER_AUTH_TOKEN` |
 | `--runner-profile` | Runner-local environment profile used for tools, skills, extensions, context, and workspace policy |
 
 ## Server-Backed ACP
 
-When selected by `--server`, `KODELET_SERVER`, or the top-level `server` configuration, server-backed ACP uses the stable runner for the process's current working directory. It acquires the workspace runner lock and starts an embedded runner when no owner exists; if `kodelet runner start` already holds the lock for the same server and has advertised its runner ID, ACP reuses that runner instead of registering the workspace again. The ACP client still communicates with a local stdio subprocess, which sends each prompt to the control plane's chat API.
+When selected by `--server`, `KODELET_SERVER`, or the user-level `server` configuration, server-backed ACP uses the stable runner for the process's current working directory. It acquires the workspace runner lock and starts an embedded runner when no owner exists; if `kodelet runner start` already holds the lock for the same server and has advertised its runner ID, ACP reuses that runner instead of registering the workspace again. The ACP client still communicates with a local stdio subprocess, which sends each prompt to the control plane's chat API.
 
 ```text
 ACP client <-- stdio --> kodelet acp <-- HTTPS --> kodelet serve / model loop

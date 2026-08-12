@@ -1053,7 +1053,7 @@ The Web server owns runner registration, run state, client event fan-out, cancel
 
 ### `pkg/acp`
 
-ACP continues to be a client-facing protocol. Ordinary `kodelet acp` uses the local agent environment directly, while `kodelet acp --server` either starts an embedded stable workspace runner or reuses the same-server runner ID advertised by an already-held workspace lock, then delegates the provider loop and conversation store to the control plane without making the runner protocol itself ACP-specific.
+ACP continues to be a client-facing protocol. `kodelet acp` uses the local agent environment when no control plane is selected; `--server`, `KODELET_SERVER`, or the user-level `server` configuration instead starts an embedded stable workspace runner or reuses the same-server runner ID advertised by an already-held workspace lock, then delegates the provider loop and conversation store to the control plane without making the runner protocol itself ACP-specific. Repository-level configuration cannot select the control plane.
 
 ### `cmd/kodelet`
 
