@@ -14,6 +14,7 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -25,8 +26,6 @@ const (
 	configFileModeMerge      = "merge"
 	configFileModeIsolate    = "isolated"
 )
-
-var userConfiguredServer string
 
 func authTokenFlagOrEnvironment(cmd *cobra.Command, environmentName string) string {
 	return stringFlagOrEnvironment(cmd, "auth-token", environmentName)
@@ -54,7 +53,7 @@ func serverFlagOrConfig(cmd *cobra.Command) (string, bool) {
 	if environment := strings.TrimSpace(os.Getenv(controlPlaneServerEnv)); environment != "" {
 		return environment, true
 	}
-	if configured := strings.TrimSpace(userConfiguredServer); configured != "" {
+	if configured := strings.TrimSpace(viper.GetString("server")); configured != "" {
 		return configured, true
 	}
 	return strings.TrimSpace(value), false
@@ -108,12 +107,9 @@ func init() {
 }
 
 func loadConfigFiles() {
-	userConfiguredServer = ""
 	overrideConfigFile := strings.TrimSpace(os.Getenv(configFileEnv))
 	if overrideConfigFile != "" && configFileMode() == configFileModeIsolate {
-		if readConfigFile(overrideConfigFile, "isolated override") {
-			loadUserConfiguredServer(overrideConfigFile, "isolated override")
-		}
+		readConfigFile(overrideConfigFile, "isolated override")
 		return
 	}
 
@@ -123,23 +119,16 @@ func loadConfigFiles() {
 	viper.AddConfigPath("$HOME/.kodelet")
 
 	if err := viper.ReadInConfig(); err == nil {
-		configFile := viper.ConfigFileUsed()
-		logger.G(context.TODO()).WithField("config_file", configFile).Debug("Using global config file")
-		loadUserConfiguredServer(configFile, "global")
+		logger.G(context.TODO()).WithField("config_file", viper.ConfigFileUsed()).Debug("Using global config file")
 	}
 
 	// Then, try to merge repo-level config which will override global settings
 	if _, err := os.Stat("kodelet-config.yaml"); err == nil {
-		viper.SetConfigFile("kodelet-config.yaml")
-		if err := viper.MergeInConfig(); err == nil {
-			logger.G(context.TODO()).WithField("config_file", "kodelet-config.yaml").Debug("Merged repo-level config file")
-		}
+		mergeRepositoryConfigFile("kodelet-config.yaml")
 	}
 
 	if overrideConfigFile != "" {
-		if mergeConfigFile(overrideConfigFile, "override") {
-			loadUserConfiguredServer(overrideConfigFile, "override")
-		}
+		mergeConfigFile(overrideConfigFile, "override")
 	}
 }
 
@@ -156,38 +145,46 @@ func configFileMode() string {
 	}
 }
 
-func readConfigFile(configFile, label string) bool {
+func readConfigFile(configFile, label string) {
 	viper.SetConfigFile(configFile)
 	if err := viper.ReadInConfig(); err == nil {
 		logger.G(context.TODO()).WithField("config_file", configFile).Debugf("Read %s config file", label)
-		return true
 	} else {
 		logger.G(context.TODO()).WithField("config_file", configFile).WithError(err).Warnf("Failed to read %s config file", label)
-		return false
 	}
 }
 
-func mergeConfigFile(configFile, label string) bool {
+func mergeConfigFile(configFile, label string) {
 	viper.SetConfigFile(configFile)
 	if err := viper.MergeInConfig(); err == nil {
 		logger.G(context.TODO()).WithField("config_file", configFile).Debugf("Merged %s config file", label)
-		return true
 	} else {
 		logger.G(context.TODO()).WithField("config_file", configFile).WithError(err).Warnf("Failed to merge %s config file", label)
-		return false
 	}
 }
 
-func loadUserConfiguredServer(configFile, label string) {
-	config := viper.New()
-	config.SetConfigFile(configFile)
-	if err := config.ReadInConfig(); err != nil {
-		logger.G(context.TODO()).WithField("config_file", configFile).WithError(err).Warnf("Failed to read server from %s config file", label)
+func mergeRepositoryConfigFile(configFile string) {
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		logger.G(context.TODO()).WithField("config_file", configFile).WithError(err).Warn("Failed to read repo-level config file")
 		return
 	}
-	if config.IsSet("server") {
-		userConfiguredServer = strings.TrimSpace(config.GetString("server"))
+
+	var settings map[string]any
+	if err := yaml.Unmarshal(data, &settings); err != nil {
+		logger.G(context.TODO()).WithField("config_file", configFile).WithError(err).Warn("Failed to parse repo-level config file")
+		return
 	}
+	for key := range settings {
+		if strings.EqualFold(key, "server") {
+			delete(settings, key)
+		}
+	}
+	if err := viper.MergeConfigMap(settings); err != nil {
+		logger.G(context.TODO()).WithField("config_file", configFile).WithError(err).Warn("Failed to merge repo-level config file")
+		return
+	}
+	logger.G(context.TODO()).WithField("config_file", configFile).Debug("Merged repo-level config file")
 }
 
 var rootCmd = &cobra.Command{

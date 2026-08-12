@@ -158,10 +158,15 @@ func parseActualCommandForTest(t *testing.T, cmd *cobra.Command, args ...string)
 
 func setServerConfigForTest(t *testing.T, value string) {
 	t.Helper()
-	previous := userConfiguredServer
-	userConfiguredServer = value
+	previous := viper.Get("server")
+	wasSet := viper.IsSet("server")
+	viper.Set("server", value)
 	t.Cleanup(func() {
-		userConfiguredServer = previous
+		if wasSet {
+			viper.Set("server", previous)
+			return
+		}
+		viper.Set("server", nil)
 	})
 }
 
@@ -177,7 +182,6 @@ func TestAuthTokenFlagsDoNotCaptureEnvironmentDefaults(t *testing.T) {
 }
 
 func TestLoadConfigFilesMergesOverrideConfigFile(t *testing.T) {
-	setServerConfigForTest(t, "")
 	t.Cleanup(viper.Reset)
 	viper.Reset()
 	home := t.TempDir()
@@ -186,9 +190,18 @@ func TestLoadConfigFilesMergesOverrideConfigFile(t *testing.T) {
 	viper.SetDefault("provider", "openai")
 	viper.SetDefault("model", "default-model")
 	require.NoError(t, os.MkdirAll(filepath.Join(home, ".kodelet"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(home, ".kodelet", "config.yaml"), []byte("server: https://global.example/control\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".kodelet", "config.yaml"), []byte("server: https://global.example/control\nprofile: global-profile\n"), 0o644))
 
-	require.NoError(t, os.WriteFile("kodelet-config.yaml", []byte("model: repo-model\nserver: https://repo.example/control\n"), 0o644))
+	repositoryConfig := `
+model: repo-model
+server: https://repo.example/control
+profile: null
+extensions:
+  tools:
+    dangerous.tool:
+      enabled: false
+`
+	require.NoError(t, os.WriteFile("kodelet-config.yaml", []byte(repositoryConfig), 0o644))
 
 	configPath := filepath.Join(t.TempDir(), "kodelet-config.json")
 	require.NoError(t, os.WriteFile(configPath, []byte(`{"provider":"anthropic","extensions":{"local_dir":"/tmp/sdk-extensions"}}`), 0o644))
@@ -199,13 +212,17 @@ func TestLoadConfigFilesMergesOverrideConfigFile(t *testing.T) {
 
 	assert.Equal(t, "anthropic", viper.GetString("provider"))
 	assert.Equal(t, "repo-model", viper.GetString("model"))
-	assert.Equal(t, "https://repo.example/control", viper.GetString("server"))
+	assert.Equal(t, "https://global.example/control", viper.GetString("server"))
+	assert.Nil(t, viper.Get("profile"))
 	assert.Equal(t, "/tmp/sdk-extensions", viper.GetString("extensions.local_dir"))
-	assert.Equal(t, "https://global.example/control", userConfiguredServer)
+	tools := viper.GetStringMap("extensions.tools")
+	require.Contains(t, tools, "dangerous.tool")
+	toolConfig, ok := tools["dangerous.tool"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, false, toolConfig["enabled"])
 }
 
 func TestLoadConfigFilesCanUseIsolatedOverrideConfigFile(t *testing.T) {
-	setServerConfigForTest(t, "")
 	t.Cleanup(viper.Reset)
 	viper.Reset()
 	t.Setenv("HOME", t.TempDir())
@@ -224,11 +241,29 @@ func TestLoadConfigFilesCanUseIsolatedOverrideConfigFile(t *testing.T) {
 
 	assert.Equal(t, "anthropic", viper.GetString("provider"))
 	assert.Equal(t, "default-model", viper.GetString("model"))
-	assert.Equal(t, "https://override.example/control", userConfiguredServer)
+	assert.Equal(t, "https://override.example/control", viper.GetString("server"))
+}
+
+func TestLoadConfigFilesMergeOverrideCanSelectServer(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	viper.Reset()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Chdir(t.TempDir())
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".kodelet"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".kodelet", "config.yaml"), []byte("server: https://global.example/control\n"), 0o644))
+
+	configPath := filepath.Join(t.TempDir(), "kodelet-config.json")
+	require.NoError(t, os.WriteFile(configPath, []byte(`{"server":"https://override.example/control"}`), 0o644))
+	t.Setenv(configFileEnv, configPath)
+	t.Setenv(configFileModeEnv, configFileModeMerge)
+
+	loadConfigFiles()
+
+	assert.Equal(t, "https://override.example/control", viper.GetString("server"))
 }
 
 func TestLoadConfigFilesDoesNotTrustRepositoryServer(t *testing.T) {
-	setServerConfigForTest(t, "")
 	t.Cleanup(viper.Reset)
 	viper.Reset()
 	t.Setenv("HOME", t.TempDir())
@@ -245,5 +280,5 @@ func TestLoadConfigFilesDoesNotTrustRepositoryServer(t *testing.T) {
 	server, configured := serverFlagOrConfig(cmd)
 	assert.Equal(t, defaultRunnerServer, server)
 	assert.False(t, configured)
-	assert.Equal(t, "https://repo.example/control", viper.GetString("server"))
+	assert.Empty(t, viper.GetString("server"))
 }
