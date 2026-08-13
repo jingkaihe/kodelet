@@ -5,7 +5,9 @@ package auth
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -18,6 +20,7 @@ import (
 
 	"github.com/openai/openai-go/v3/option"
 	"github.com/pkg/errors"
+	"github.com/rogpeppe/go-internal/lockedfile"
 )
 
 // CodexTokens represents the OAuth tokens stored by the Codex CLI.
@@ -53,6 +56,17 @@ const (
 	// Using the official Codex CLI originator for compatibility.
 	CodexOriginator = "kodelet"
 
+	// CodexBetaFeaturesHeader advertises Codex Responses features enabled by the client.
+	CodexBetaFeaturesHeader = "x-codex-beta-features"
+	// CodexBetaFeatures enables the current remote compaction protocol used by Codex.
+	CodexBetaFeatures = "remote_compaction_v2"
+	// CodexInstallationIDHeader identifies one durable Kodelet installation.
+	CodexInstallationIDHeader = "x-codex-installation-id"
+	// CodexWindowIDHeader identifies the installed context-window generation.
+	CodexWindowIDHeader = "x-codex-window-id"
+	// CodexTurnMetadataHeader carries the canonical Codex request metadata payload.
+	CodexTurnMetadataHeader = "x-codex-turn-metadata"
+
 	// OAuth configuration for OpenAI Codex
 	codexAuthIssuer   = "https://auth.openai.com"
 	codexClientID     = "app_EMoamEEZ73f0CkXaXp7hrann"
@@ -67,7 +81,11 @@ const (
 
 	// codexDeviceCodeTimeout matches the official Codex CLI device auth window.
 	codexDeviceCodeTimeout = 15 * time.Minute
+
+	codexInstallationIDFilename = "installation_id"
 )
+
+var codexInstallationIDMu sync.Mutex
 
 // CodexDeviceCode contains the device authorization details shown to the user.
 type CodexDeviceCode struct {
@@ -97,6 +115,112 @@ func codexAuthFilePath() (string, error) {
 		return "", errors.Wrap(err, "failed to get user home directory")
 	}
 	return filepath.Join(home, ".kodelet", "codex-credentials.json"), nil
+}
+
+func codexInstallationIDPath() (string, error) {
+	if basePath := strings.TrimSpace(os.Getenv("KODELET_BASE_PATH")); basePath != "" {
+		return filepath.Join(basePath, codexInstallationIDFilename), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", errors.Wrap(err, "failed to get user home directory")
+	}
+	return filepath.Join(home, ".kodelet", codexInstallationIDFilename), nil
+}
+
+// GetCodexInstallationID returns a stable UUID for this Kodelet installation,
+// creating it on first use with owner-only permissions.
+func GetCodexInstallationID() (string, error) {
+	codexInstallationIDMu.Lock()
+	defer codexInstallationIDMu.Unlock()
+
+	path, err := codexInstallationIDPath()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return "", errors.Wrap(err, "failed to create codex installation directory")
+	}
+	f, err := lockedfile.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to open codex installation ID")
+	}
+	defer f.Close()
+	if err := f.Chmod(0o600); err != nil {
+		return "", errors.Wrap(err, "failed to secure codex installation ID")
+	}
+
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return "", errors.Wrap(err, "failed to seek codex installation ID")
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to read codex installation ID")
+	}
+	if installationID, ok := canonicalCodexInstallationID(string(data)); ok {
+		return installationID, nil
+	}
+
+	installationID, err := newCodexInstallationID()
+	if err != nil {
+		return "", err
+	}
+	if err := f.Truncate(0); err != nil {
+		return "", errors.Wrap(err, "failed to truncate codex installation ID")
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return "", errors.Wrap(err, "failed to seek codex installation ID")
+	}
+	if _, err := io.WriteString(f, installationID); err != nil {
+		return "", errors.Wrap(err, "failed to write codex installation ID")
+	}
+	if err := f.Sync(); err != nil {
+		return "", errors.Wrap(err, "failed to sync codex installation ID")
+	}
+	return installationID, nil
+}
+
+func newCodexInstallationID() (string, error) {
+	raw := make([]byte, 16)
+	if _, err := rand.Read(raw); err != nil {
+		return "", errors.Wrap(err, "failed to generate codex installation ID")
+	}
+	raw[6] = (raw[6] & 0x0f) | 0x40
+	raw[8] = (raw[8] & 0x3f) | 0x80
+	encoded := hex.EncodeToString(raw)
+	return encoded[:8] + "-" + encoded[8:12] + "-" + encoded[12:16] + "-" + encoded[16:20] + "-" + encoded[20:], nil
+}
+
+func validCodexInstallationID(value string) bool {
+	_, ok := canonicalCodexInstallationID(value)
+	return ok
+}
+
+func canonicalCodexInstallationID(value string) (string, bool) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.TrimPrefix(value, "urn:uuid:")
+	if len(value) == 38 && value[0] == '{' && value[len(value)-1] == '}' {
+		value = value[1 : len(value)-1]
+	}
+
+	var raw string
+	switch len(value) {
+	case 32:
+		raw = value
+	case 36:
+		if value[8] != '-' || value[13] != '-' || value[18] != '-' || value[23] != '-' {
+			return "", false
+		}
+		raw = strings.ReplaceAll(value, "-", "")
+	default:
+		return "", false
+	}
+	decoded, err := hex.DecodeString(raw)
+	if err != nil || len(decoded) != 16 {
+		return "", false
+	}
+	encoded := hex.EncodeToString(decoded)
+	return encoded[:8] + "-" + encoded[8:12] + "-" + encoded[12:16] + "-" + encoded[16:20] + "-" + encoded[20:], true
 }
 
 // GetCodexCredentialsExists checks if the Codex auth file exists.
@@ -207,7 +331,7 @@ func CodexHeaderWithCredentials(creds *CodexCredentials) []option.RequestOption 
 			option.WithBaseURL(CodexAPIBaseURL),
 			option.WithHeader("Authorization", "Bearer "+creds.AccessToken),
 			option.WithHeader("ChatGPT-Account-ID", creds.AccountID),
-			option.WithHeader("OpenAI-Beta", "responses=experimental"),
+			option.WithHeader(CodexBetaFeaturesHeader, CodexBetaFeatures),
 			option.WithHeader("originator", CodexOriginator),
 		}
 	}

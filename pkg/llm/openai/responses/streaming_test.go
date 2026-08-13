@@ -382,6 +382,7 @@ func TestProcessStreamCompletesFunctionCallAndStoresToolOutput(t *testing.T) {
 	require.NotNil(t, thread.inputItems[0].OfFunctionCall)
 	require.NotNil(t, thread.inputItems[1].OfFunctionCallOutput)
 	assert.Contains(t, thread.GetStructuredToolResults(), "call_1")
+	assert.Equal(t, 2+approximateResponseInputItemTokens(thread.inputItems[1]), thread.GetUsage().CurrentContextWindow)
 }
 
 func TestProcessStreamExecutesFunctionCallsInParallelAndStreamsUpdates(t *testing.T) {
@@ -816,14 +817,14 @@ func TestUpdateUsageAccumulatesCachedTokensLikeCodexTotals(t *testing.T) {
 		InputTokensDetails: responses.ResponseUsageInputTokensDetails{
 			CachedTokens: 2400,
 		},
-	}, "gpt-4.1", "")
+	}, "gpt-4.1")
 	thread.updateUsage(responses.ResponseUsage{
 		InputTokens:  120,
 		OutputTokens: 20,
 		InputTokensDetails: responses.ResponseUsageInputTokensDetails{
 			CachedTokens: 143900,
 		},
-	}, "gpt-4.1", "")
+	}, "gpt-4.1")
 
 	assert.Equal(t, 220, thread.Usage.InputTokens)
 	assert.Equal(t, 30, thread.Usage.OutputTokens)
@@ -861,7 +862,7 @@ func TestUpdateUsageUsesLongContextPricing(t *testing.T) {
 	var usage responses.ResponseUsage
 	require.NoError(t, json.Unmarshal([]byte(usageJSON), &usage))
 
-	thread.updateUsage(usage, "test-model", "")
+	thread.updateUsage(usage, "test-model")
 
 	assert.Equal(t, 271999, thread.Usage.InputTokens)
 	assert.Equal(t, 1, thread.Usage.CacheReadInputTokens)
@@ -906,7 +907,7 @@ func TestUpdateUsageAccountsCacheWriteTokensOnlyWithConfiguredRate(t *testing.T)
 		InputTokensDetails: responses.ResponseUsageInputTokensDetails{
 			CachedTokens: usage.InputTokensDetails.CachedTokens,
 		},
-	}, "test-model", "")
+	}, "test-model")
 
 	assert.Equal(t, 100, thread.Usage.InputTokens)
 	assert.Equal(t, 20, thread.Usage.CacheReadInputTokens)
@@ -928,7 +929,7 @@ func TestUpdateUsageAccountsCacheWriteTokensOnlyWithConfiguredRate(t *testing.T)
 		},
 	}
 
-	thread.updateUsage(usage, "test-model", "")
+	thread.updateUsage(usage, "test-model")
 
 	assert.Equal(t, 70, thread.Usage.InputTokens)
 	assert.Equal(t, 20, thread.Usage.CacheReadInputTokens)

@@ -192,7 +192,7 @@ func CodexAuthorizer() HTTPAuthorizer {
 		if creds.AccessToken != "" && creds.AccountID != "" {
 			req.Header.Set("Authorization", "Bearer "+creds.AccessToken)
 			req.Header.Set("ChatGPT-Account-ID", creds.AccountID)
-			req.Header.Set("OpenAI-Beta", "responses=experimental")
+			req.Header.Set(CodexBetaFeaturesHeader, CodexBetaFeatures)
 			req.Header.Set("originator", CodexOriginator)
 			return nil
 		}

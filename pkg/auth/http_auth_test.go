@@ -216,7 +216,8 @@ func TestCodexAuthorizer(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "Bearer codex-access-token", req.Header.Get("Authorization"))
 		assert.Equal(t, "acct_123", req.Header.Get("ChatGPT-Account-ID"))
-		assert.Equal(t, "responses=experimental", req.Header.Get("OpenAI-Beta"))
+		assert.Empty(t, req.Header.Get("OpenAI-Beta"))
+		assert.Equal(t, CodexBetaFeatures, req.Header.Get(CodexBetaFeaturesHeader))
 		assert.Equal(t, CodexOriginator, req.Header.Get("originator"))
 	})
 

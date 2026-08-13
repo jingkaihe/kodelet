@@ -49,6 +49,7 @@ func (t *Thread) processStream(
 	var responseIncompleteReason string
 	var responseID string
 	var serverKnownItems []responses.ResponseInputItemUnionParam
+	var localInputTokens int
 
 	// Track pending tool calls
 	pendingToolCalls := make(map[string]*toolCallState)
@@ -68,11 +69,11 @@ func (t *Thread) processStream(
 			return
 		}
 
-		t.storedItems = append(t.storedItems, StoredInputItem{
+		t.appendHistoryItems(nil, []StoredInputItem{{
 			Type:    "reasoning",
 			Role:    "assistant",
 			Content: t.pendingReasoning.String(),
-		})
+		}})
 		t.pendingReasoning.Reset()
 	}
 
@@ -238,11 +239,9 @@ streamLoop:
 				default:
 					storedItem.Content = strings.Join(details.queries, ", ")
 				}
-				t.storedItems = append(t.storedItems, storedItem)
-				if inputItems := fromStoredItems([]StoredInputItem{storedItem}); len(inputItems) > 0 {
-					t.inputItems = append(t.inputItems, inputItems[0])
-					serverKnownItems = append(serverKnownItems, inputItems[0])
-				}
+				inputItems := fromStoredItems([]StoredInputItem{storedItem})
+				t.appendHistoryItems(inputItems, []StoredInputItem{storedItem})
+				serverKnownItems = append(serverKnownItems, inputItems...)
 
 				result := webSearchStructuredResult(callID, webSearch)
 				if meta, ok := result.Metadata.(tooltypes.OpenAIWebSearchMetadata); ok {
@@ -316,11 +315,9 @@ streamLoop:
 							Content: textContent,
 							RawItem: rawItem,
 						}
-						t.storedItems = append(t.storedItems, storedItem)
-						if inputItems := fromStoredItems([]StoredInputItem{storedItem}); len(inputItems) > 0 {
-							t.inputItems = append(t.inputItems, inputItems[0])
-							serverKnownItems = append(serverKnownItems, inputItems[0])
-						}
+						inputItems := fromStoredItems([]StoredInputItem{storedItem})
+						t.appendHistoryItems(inputItems, []StoredInputItem{storedItem})
+						serverKnownItems = append(serverKnownItems, inputItems...)
 
 						currentText.Reset()
 						contentBlockEnded = false
@@ -409,14 +406,13 @@ streamLoop:
 				Arguments: functionCall.arguments,
 			},
 		}
-		t.inputItems = append(t.inputItems, functionCallItem)
 		serverKnownItems = append(serverKnownItems, functionCallItem)
-		t.storedItems = append(t.storedItems, StoredInputItem{
+		t.appendHistoryItems([]responses.ResponseInputItemUnionParam{functionCallItem}, []StoredInputItem{{
 			Type:      "function_call",
 			CallID:    functionCall.callID,
 			Name:      functionCall.name,
 			Arguments: functionCall.arguments,
-		})
+		}})
 	}
 
 	toolExecutions, err := t.executeFunctionCallsParallel(ctx, functionCalls, handler)
@@ -429,18 +425,19 @@ streamLoop:
 		t.SetStructuredToolResult(functionCall.callID, toolExecution.StructuredResult)
 
 		outputUnion, storedOutput, rawOutput := buildStoredFunctionCallOutput(toolResult)
-		t.inputItems = append(t.inputItems, responses.ResponseInputItemUnionParam{
+		inputItem := responses.ResponseInputItemUnionParam{
 			OfFunctionCallOutput: &responses.ResponseInputItemFunctionCallOutputParam{
 				CallID: functionCall.callID,
 				Output: outputUnion,
 			},
-		})
-		t.storedItems = append(t.storedItems, StoredInputItem{
+		}
+		t.appendHistoryItems([]responses.ResponseInputItemUnionParam{inputItem}, []StoredInputItem{{
 			Type:      "function_call_output",
 			CallID:    functionCall.callID,
 			Output:    storedOutput,
 			RawOutput: rawOutput,
-		})
+		}})
+		localInputTokens += approximateResponseInputItemTokens(inputItem)
 	}
 	if err := ctx.Err(); err != nil {
 		return result(), err
@@ -452,7 +449,12 @@ streamLoop:
 
 	// Update usage from final response
 	if finalResponse != nil {
-		t.updateUsage(finalResponse.Usage, model, llmtypes.OpenAIServiceTier(finalResponse.ServiceTier))
+		t.updateUsageWithLocalInput(
+			finalResponse.Usage,
+			model,
+			llmtypes.OpenAIServiceTier(finalResponse.ServiceTier),
+			localInputTokens,
+		)
 		if usageHandler, ok := handler.(llmtypes.UsageMessageHandler); ok {
 			usageHandler.HandleUsage(t.GetUsage())
 		}
@@ -710,9 +712,40 @@ func (t *Thread) executeFunctionCallsParallel(
 }
 
 // updateUsage updates the thread's usage statistics from a response.
-func (t *Thread) updateUsage(usage responses.ResponseUsage, model string, serviceTier llmtypes.OpenAIServiceTier) {
+func (t *Thread) updateUsage(usage responses.ResponseUsage, model string) {
+	t.updateUsageAccounting(usage, model, "", true, 0)
+}
+
+// updateUsageWithLocalInput includes client-produced input items, such as
+// function outputs, that were appended after the server calculated response usage.
+func (t *Thread) updateUsageWithLocalInput(
+	usage responses.ResponseUsage,
+	model string,
+	serviceTier llmtypes.OpenAIServiceTier,
+	localInputTokens int,
+) {
+	t.updateUsageAccounting(usage, model, serviceTier, true, localInputTokens)
+}
+
+// updateUsageTotals records billable usage without replacing the live history's
+// current-context estimate. Remote compaction installs that estimate atomically
+// with its revision-checked replacement history.
+func (t *Thread) updateUsageTotals(usage responses.ResponseUsage, model string, serviceTier llmtypes.OpenAIServiceTier) {
+	t.updateUsageAccounting(usage, model, serviceTier, false, 0)
+}
+
+func (t *Thread) updateUsageAccounting(
+	usage responses.ResponseUsage,
+	model string,
+	serviceTier llmtypes.OpenAIServiceTier,
+	updateCurrentContext bool,
+	localInputTokens int,
+) {
 	t.Mu.Lock()
 	defer t.Mu.Unlock()
+	if t.Usage == nil {
+		t.Usage = &llmtypes.Usage{}
+	}
 
 	inputTokens := int(usage.InputTokens)
 	outputTokens := int(usage.OutputTokens)
@@ -758,7 +791,8 @@ func (t *Thread) updateUsage(usage responses.ResponseUsage, model string, servic
 	// Output tokens
 	t.Usage.OutputCost += float64(outputTokens) * pricing.Output
 
-	// Update context window
-	t.Usage.CurrentContextWindow = inputTokens + outputTokens
-	t.Usage.MaxContextWindow = pricing.ContextWindow
+	if updateCurrentContext {
+		t.Usage.CurrentContextWindow = inputTokens + outputTokens + max(localInputTokens, 0)
+		t.Usage.MaxContextWindow = pricing.ContextWindow
+	}
 }

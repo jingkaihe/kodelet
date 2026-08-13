@@ -23,6 +23,9 @@ const (
 	RunnerIDMetadataKey = "runner_id"
 	// RunnerEnvironmentProfileMetadataKey stores the runner-local profile independently from model policy.
 	RunnerEnvironmentProfileMetadataKey = "environment_profile"
+	// CodexResponsesWindowGenerationMetadataKey stores the logical Codex Responses
+	// context-window generation. Forks intentionally start a new generation lineage.
+	CodexResponsesWindowGenerationMetadataKey = "codex_responses_window_generation"
 )
 
 // QueryOptions provides filtering and sorting options for conversation queries

@@ -48,6 +48,86 @@ func TestCodexAuthFilePath(t *testing.T) {
 	assert.True(t, exists)
 }
 
+func TestGetCodexInstallationIDPersists(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("KODELET_BASE_PATH", "")
+
+	first, err := GetCodexInstallationID()
+	require.NoError(t, err)
+	second, err := GetCodexInstallationID()
+	require.NoError(t, err)
+
+	assert.Equal(t, first, second)
+	assert.True(t, validCodexInstallationID(first))
+	data, err := os.ReadFile(filepath.Join(home, ".kodelet", codexInstallationIDFilename))
+	require.NoError(t, err)
+	assert.Equal(t, first, strings.TrimSpace(string(data)))
+	info, err := os.Stat(filepath.Join(home, ".kodelet", codexInstallationIDFilename))
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+}
+
+func TestGetCodexInstallationIDRegeneratesMalformedValue(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("KODELET_BASE_PATH", "")
+
+	path := filepath.Join(home, ".kodelet", codexInstallationIDFilename)
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(t, os.WriteFile(path, []byte("not-a-uuid"), 0o644))
+
+	installationID, err := GetCodexInstallationID()
+	require.NoError(t, err)
+	assert.True(t, validCodexInstallationID(installationID))
+	assert.NotEqual(t, "not-a-uuid", installationID)
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, installationID, string(data))
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+}
+
+func TestGetCodexInstallationIDCanonicalizesAcceptedUUIDForms(t *testing.T) {
+	for _, persisted := range []string{
+		"550E8400E29B41D4A716446655440000",
+		"{550E8400-E29B-41D4-A716-446655440000}",
+		"urn:uuid:550E8400-E29B-41D4-A716-446655440000",
+	} {
+		t.Run(persisted, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("KODELET_BASE_PATH", "")
+
+			path := filepath.Join(home, ".kodelet", codexInstallationIDFilename)
+			require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+			require.NoError(t, os.WriteFile(path, []byte(persisted), 0o600))
+
+			installationID, err := GetCodexInstallationID()
+			require.NoError(t, err)
+			assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", installationID)
+			data, err := os.ReadFile(path)
+			require.NoError(t, err)
+			assert.Equal(t, persisted, string(data), "valid noncanonical UUIDs should not rotate the persisted identity")
+		})
+	}
+}
+
+func TestGetCodexInstallationIDUsesKodeletBasePath(t *testing.T) {
+	home := t.TempDir()
+	basePath := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("KODELET_BASE_PATH", basePath)
+
+	installationID, err := GetCodexInstallationID()
+	require.NoError(t, err)
+	data, err := os.ReadFile(filepath.Join(basePath, codexInstallationIDFilename))
+	require.NoError(t, err)
+	assert.Equal(t, installationID, string(data))
+	assert.NoFileExists(t, filepath.Join(home, ".kodelet", codexInstallationIDFilename))
+}
+
 func TestGetCodexCredentialsExists(t *testing.T) {
 	// Create a temporary directory for testing
 	tempDir := t.TempDir()
@@ -654,6 +734,11 @@ func TestCodexConstants(t *testing.T) {
 	t.Run("originator is set", func(t *testing.T) {
 		assert.NotEmpty(t, CodexOriginator)
 		assert.Equal(t, "kodelet", CodexOriginator)
+	})
+
+	t.Run("remote compaction v2 is advertised", func(t *testing.T) {
+		assert.Equal(t, "x-codex-beta-features", CodexBetaFeaturesHeader)
+		assert.Equal(t, "remote_compaction_v2", CodexBetaFeatures)
 	})
 }
 

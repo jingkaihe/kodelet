@@ -46,6 +46,32 @@ func TestResponsesWebSocketContinuationUsesIncrementalClientItems(t *testing.T) 
 	assert.True(t, responsesInputItemEqual(secondOutput, prepared.Input.OfInputItemList[1]))
 }
 
+func TestResponsesWebSocketContinuationIgnoresClientMetadataChanges(t *testing.T) {
+	user := responseMessageItem(openairesponses.EasyInputMessageRoleUser, "hello")
+	nextUser := responseMessageItem(openairesponses.EasyInputMessageRoleUser, "again")
+	initialParams := responseContinuationTestParams([]openairesponses.ResponseInputItemUnionParam{user})
+	initialParams.SetExtraFields(map[string]any{
+		"client_metadata": map[string]string{"turn_id": "turn-1"},
+	})
+
+	continuation := responsesWebSocketContinuation{}
+	continuation.commit(7, initialParams, processStreamResult{
+		responseCompleted: true,
+		responseID:        "resp_1",
+	})
+
+	currentParams := responseContinuationTestParams([]openairesponses.ResponseInputItemUnionParam{user, nextUser})
+	currentParams.SetExtraFields(map[string]any{
+		"client_metadata": map[string]string{"turn_id": "turn-2"},
+	})
+	prepared := continuation.prepare(currentParams, 7)
+
+	require.True(t, prepared.PreviousResponseID.Valid())
+	assert.Equal(t, "resp_1", prepared.PreviousResponseID.Value)
+	require.Len(t, prepared.Input.OfInputItemList, 1)
+	assert.True(t, responsesInputItemEqual(nextUser, prepared.Input.OfInputItemList[0]))
+}
+
 func TestResponsesWebSocketContinuationFallsBackToFullInput(t *testing.T) {
 	user := responseMessageItem(openairesponses.EasyInputMessageRoleUser, "hello")
 	assistant := responseMessageItem(openairesponses.EasyInputMessageRoleAssistant, "hi")

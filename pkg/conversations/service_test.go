@@ -382,7 +382,10 @@ func TestConversationService_RenameConversationRejectsBlankName(t *testing.T) {
 
 func TestConversationService_ForkConversation(t *testing.T) {
 	now := time.Now().UTC()
-	metadata, err := AddConfigSnapshot(map[string]any{"profile": "work"}, llm.Config{
+	metadata, err := AddConfigSnapshot(map[string]any{
+		"profile": "work",
+		conversations.CodexResponsesWindowGenerationMetadataKey: float64(3),
+	}, llm.Config{
 		Profile:         "work",
 		Provider:        "anthropic",
 		Model:           "claude-test",
@@ -438,7 +441,8 @@ func TestConversationService_ForkConversation(t *testing.T) {
 		assert.Zero(t, forkedRecord.Usage.OutputCost)
 		assert.Equal(t, sourceRecord.Usage.CurrentContextWindow, forkedRecord.Usage.CurrentContextWindow)
 		assert.Equal(t, sourceRecord.Usage.MaxContextWindow, forkedRecord.Usage.MaxContextWindow)
-		assert.Equal(t, sourceRecord.Metadata, forkedRecord.Metadata)
+		assert.NotContains(t, forkedRecord.Metadata, conversations.CodexResponsesWindowGenerationMetadataKey)
+		assert.Equal(t, sourceRecord.Metadata["profile"], forkedRecord.Metadata["profile"])
 		snapshot, ok, err := ConfigSnapshotFromMetadata(forkedRecord.Metadata)
 		require.NoError(t, err)
 		require.True(t, ok)

@@ -215,10 +215,71 @@ func TestResponsesWebSocketTransportSetsBetaHeader(t *testing.T) {
 	}
 }
 
+func TestResponsesWebSocketTransportReusesConnectionWithStableCodexHeaders(t *testing.T) {
+	var handshakes atomic.Int32
+	handshakeHeaders := make(chan http.Header, 1)
+	releaseServer := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upgrader := websocket.Upgrader{}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		require.NoError(t, err)
+		defer conn.Close()
+		handshakes.Add(1)
+		handshakeHeaders <- r.Header.Clone()
+
+		for requestIndex := range 2 {
+			_, _, err := conn.ReadMessage()
+			require.NoError(t, err)
+			if requestIndex == 0 {
+				require.NoError(t, conn.WriteMessage(websocket.TextMessage, completedWebSocketEvent("resp_normal")))
+				continue
+			}
+			require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"encrypted"}}`)))
+			require.NoError(t, conn.WriteMessage(websocket.TextMessage, completedWebSocketEvent("resp_compact")))
+		}
+		<-releaseServer
+	}))
+	defer server.Close()
+
+	transport := newResponsesWebSocketTransport("http" + strings.TrimPrefix(server.URL, "http") + "/v1")
+	defer func() { require.NoError(t, transport.Close()) }()
+	headers := []string{
+		auth.CodexBetaFeaturesHeader + ": " + auth.CodexBetaFeatures,
+		"session-id: conv-test",
+		"thread-id: conv-test",
+	}
+	paramsFactory := func(uint64) openairesponses.ResponseNewParams {
+		return openairesponses.ResponseNewParams{Model: "gpt-5.5"}
+	}
+
+	first, _, err := transport.Stream(context.Background(), paramsFactory, headers, nil)
+	require.NoError(t, err)
+	require.True(t, first.Next())
+	assert.False(t, first.Next())
+	require.NoError(t, first.Err())
+	require.NoError(t, first.Close())
+
+	second, _, err := transport.Stream(context.Background(), paramsFactory, headers, nil)
+	require.NoError(t, err)
+	require.True(t, second.Next())
+	require.True(t, second.Next())
+	assert.False(t, second.Next())
+	require.NoError(t, second.Err())
+	require.NoError(t, second.Close())
+
+	seen := <-handshakeHeaders
+	assert.Equal(t, auth.CodexBetaFeatures, seen.Get(auth.CodexBetaFeaturesHeader))
+	assert.Equal(t, "conv-test", seen.Get("session-id"))
+	assert.Equal(t, "conv-test", seen.Get("thread-id"))
+	assert.Equal(t, int32(1), handshakes.Load())
+	close(releaseServer)
+}
+
 type fakeResponsesWebSocketStreamer struct {
 	streamFunc func(context.Context, openairesponses.ResponseNewParams, []string, auth.HTTPAuthorizer) (*ssestream.Stream[openairesponses.ResponseStreamEventUnion], error)
 	generation uint64
 	closed     bool
+	resets     int
 }
 
 func (f *fakeResponsesWebSocketStreamer) Stream(
@@ -237,6 +298,11 @@ func (f *fakeResponsesWebSocketStreamer) Stream(
 
 func (f *fakeResponsesWebSocketStreamer) Close() error {
 	f.closed = true
+	return nil
+}
+
+func (f *fakeResponsesWebSocketStreamer) Reset() error {
+	f.resets++
 	return nil
 }
 

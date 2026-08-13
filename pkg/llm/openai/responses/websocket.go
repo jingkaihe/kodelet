@@ -27,6 +27,7 @@ const (
 
 type responsesWebSocketStreamer interface {
 	Stream(context.Context, responsesWebSocketParamsFactory, []string, auth.HTTPAuthorizer) (*ssestream.Stream[responses.ResponseStreamEventUnion], uint64, error)
+	Reset() error
 	Close() error
 }
 
@@ -167,6 +168,23 @@ func (t *responsesWebSocketTransport) Close() error {
 
 	t.mu.Lock()
 	t.closed = true
+	conn := t.conn
+	t.conn = nil
+	t.mu.Unlock()
+	if conn == nil {
+		return nil
+	}
+	return conn.close()
+}
+
+// Reset closes only the current connection so a later request can establish a
+// fresh handshake with updated Codex window metadata.
+func (t *responsesWebSocketTransport) Reset() error {
+	if t == nil {
+		return nil
+	}
+
+	t.mu.Lock()
 	conn := t.conn
 	t.conn = nil
 	t.mu.Unlock()

@@ -93,6 +93,7 @@ func responsesWebSocketRequestProperties(params openairesponses.ResponseNewParam
 	delete(properties, "background")
 	delete(properties, "stream")
 	delete(properties, "stream_options")
+	delete(properties, "client_metadata")
 	return json.Marshal(properties)
 }
 

@@ -261,6 +261,7 @@ func (s *ConversationService) ForkConversation(ctx context.Context, id string) (
 
 	if sourceRecord.Metadata != nil {
 		forkedRecord.Metadata = maps.Clone(sourceRecord.Metadata)
+		delete(forkedRecord.Metadata, conversations.CodexResponsesWindowGenerationMetadataKey)
 	}
 
 	if err := s.store.Save(ctx, forkedRecord); err != nil {
