@@ -48,13 +48,34 @@ func TestUserLoginHTTPApprovalLifecycleAndTrustedVerificationURL(t *testing.T) {
 	addUserAuthSessionCookies(pageRequest, sessionToken, csrfToken)
 	pageResponse := serveUserAuthRequest(server, pageRequest)
 	require.Equal(t, http.StatusOK, pageResponse.Code)
-	assert.Equal(t, "no-store", pageResponse.Header().Get("Cache-Control"))
-	assert.Contains(t, pageResponse.Body.String(), "Enter the code displayed by the Kodelet client")
-	assert.Contains(t, pageResponse.Body.String(), `name="decision" value="lookup"`)
+	assert.Contains(t, pageResponse.Header().Get("Cache-Control"), "no-store")
+	assert.Equal(t, "frame-ancestors 'none'", pageResponse.Header().Get("Content-Security-Policy"))
+	assert.Equal(t, "DENY", pageResponse.Header().Get("X-Frame-Options"))
+	assert.Contains(t, pageResponse.Body.String(), `<div id="root"></div>`)
 	assert.NotContains(t, pageResponse.Body.String(), started.UserCode)
-	assert.NotContains(t, pageResponse.Body.String(), ">Approve<")
 	assert.NotContains(t, pageResponse.Body.String(), started.DeviceCode)
 	assert.NotContains(t, pageResponse.Body.String(), started.BearerToken)
+
+	headRequest := httptest.NewRequest(http.MethodHead, "https://trusted.example:8443"+userauth.DeviceVerificationPath, nil)
+	addUserAuthSessionCookies(headRequest, sessionToken, csrfToken)
+	headResponse := serveUserAuthRequest(server, headRequest)
+	assert.Equal(t, http.StatusOK, headResponse.Code)
+	assert.Equal(t, "frame-ancestors 'none'", headResponse.Header().Get("Content-Security-Policy"))
+
+	contextRequest := httptest.NewRequest(http.MethodGet, "https://trusted.example:8443/api/auth/v1/device/context", nil)
+	addUserAuthSessionCookies(contextRequest, sessionToken, csrfToken)
+	contextResponse := serveUserAuthRequest(server, contextRequest)
+	require.Equal(t, http.StatusOK, contextResponse.Code)
+	assert.Equal(t, "no-store", contextResponse.Header().Get("Cache-Control"))
+	var contextPrincipal Principal
+	require.NoError(t, json.Unmarshal(contextResponse.Body.Bytes(), &contextPrincipal))
+	assert.Equal(t, "user@example.com", contextPrincipal.Email)
+
+	nonSessionContextRequest := httptest.NewRequest(http.MethodGet, "https://trusted.example:8443/api/auth/v1/device/context", nil)
+	nonSessionContextRequest = nonSessionContextRequest.WithContext(contextWithPrincipal(nonSessionContextRequest.Context(), administrativePrincipal("token")))
+	nonSessionContextResponse := httptest.NewRecorder()
+	server.handleUserLoginContext(nonSessionContextResponse, nonSessionContextRequest)
+	assert.Equal(t, http.StatusForbidden, nonSessionContextResponse.Code)
 
 	wrongOriginResponse := performUserLoginDecision(t, server, started.UserCode, "lookup", sessionToken, csrfToken, csrfToken, "https://attacker.example", "")
 	assert.Equal(t, http.StatusForbidden, wrongOriginResponse.Code)
@@ -70,18 +91,25 @@ func TestUserLoginHTTPApprovalLifecycleAndTrustedVerificationURL(t *testing.T) {
 
 	lookupResponse := performUserLoginDecision(t, server, started.UserCode, "lookup", sessionToken, csrfToken, csrfToken, "https://trusted.example:8443", "")
 	require.Equal(t, http.StatusOK, lookupResponse.Code)
-	assert.Contains(t, lookupResponse.Body.String(), started.UserCode)
-	assert.Contains(t, lookupResponse.Body.String(), "kodelet")
-	assert.Contains(t, lookupResponse.Body.String(), "linux/amd64")
-	assert.Contains(t, lookupResponse.Body.String(), "v-test")
-	assert.Contains(t, lookupResponse.Body.String(), ">Approve<")
-	assert.Contains(t, lookupResponse.Body.String(), ">Deny<")
+	assert.Equal(t, "no-store", lookupResponse.Header().Get("Cache-Control"))
+	var lookup userLoginDecisionResponse
+	require.NoError(t, json.Unmarshal(lookupResponse.Body.Bytes(), &lookup))
+	require.NotNil(t, lookup.Authorization)
+	assert.Equal(t, userauth.DeviceStatusPending, lookup.Status)
+	assert.Equal(t, started.UserCode, lookup.Authorization.UserCode)
+	assert.Equal(t, "kodelet", lookup.Authorization.ClientName)
+	assert.Equal(t, "linux", lookup.Authorization.ClientOS)
+	assert.Equal(t, "amd64", lookup.Authorization.ClientArch)
+	assert.Equal(t, "v-test", lookup.Authorization.KodeletVersion)
 	assert.NotContains(t, lookupResponse.Body.String(), started.DeviceCode)
 	assert.NotContains(t, lookupResponse.Body.String(), started.BearerToken)
 
 	approvedResponse := performUserLoginDecision(t, server, started.UserCode, "approve", sessionToken, csrfToken, csrfToken, "https://trusted.example:8443", "")
 	require.Equal(t, http.StatusOK, approvedResponse.Code)
-	assert.Contains(t, approvedResponse.Body.String(), "User login approved")
+	var approved userLoginDecisionResponse
+	require.NoError(t, json.Unmarshal(approvedResponse.Body.Bytes(), &approved))
+	assert.Equal(t, userauth.DeviceStatusApproved, approved.Status)
+	assert.Contains(t, approved.Message, "Sign-in approved")
 	assert.Equal(t, "no-store", approvedResponse.Header().Get("Cache-Control"))
 
 	polled := pollUserLoginHTTP(t, server, started)
@@ -112,7 +140,10 @@ func TestUserLoginHTTPDenialLifecycle(t *testing.T) {
 
 	deniedResponse := performUserLoginDecision(t, server, started.UserCode, "deny", sessionToken, csrfToken, csrfToken, "https://kodelet.example", "")
 	require.Equal(t, http.StatusOK, deniedResponse.Code)
-	assert.Contains(t, deniedResponse.Body.String(), "User login denied")
+	var denied userLoginDecisionResponse
+	require.NoError(t, json.Unmarshal(deniedResponse.Body.Bytes(), &denied))
+	assert.Equal(t, userauth.DeviceStatusDenied, denied.Status)
+	assert.Contains(t, denied.Message, "Sign-in denied")
 
 	polled := pollUserLoginHTTP(t, server, started)
 	assert.Equal(t, userauth.DeviceStatusDenied, polled.Status)
@@ -121,6 +152,40 @@ func TestUserLoginHTTPDenialLifecycle(t *testing.T) {
 
 	conflictResponse := performUserLoginDecision(t, server, started.UserCode, "deny", sessionToken, csrfToken, csrfToken, "https://kodelet.example", "")
 	assert.Equal(t, http.StatusConflict, conflictResponse.Code)
+}
+
+func TestUserLoginDecisionRejectsUnknownJSONAndLegacyFormPosts(t *testing.T) {
+	store, _ := newAuthStoreTest(t)
+	server := newUserAuthRouteServer(testUserAuthServerConfig(), store)
+	started := startUserLoginHTTP(t, server, "https://kodelet.example", testUserLoginStartRequest())
+	sessionToken, csrfToken, err := store.CreateWebSession(t.Context(), "https://issuer.example.com", "subject-json", "JSON User", "json@example.com", []string{string(RoleUser)}, time.Hour)
+	require.NoError(t, err)
+
+	payload, err := json.Marshal(map[string]any{
+		"userCode":   started.UserCode,
+		"decision":   "lookup",
+		"csrfToken":  csrfToken,
+		"unexpected": true,
+	})
+	require.NoError(t, err)
+	request := httptest.NewRequest(http.MethodPost, "https://kodelet.example/api/auth/v1/device/decision", bytes.NewReader(payload))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Origin", "https://kodelet.example")
+	addUserAuthSessionCookies(request, sessionToken, csrfToken)
+	response := serveUserAuthRequest(server, request)
+	assert.Equal(t, http.StatusBadRequest, response.Code)
+	assert.Equal(t, "no-store", response.Header().Get("Cache-Control"))
+
+	legacyRequest := httptest.NewRequest(http.MethodPost, "https://kodelet.example"+userauth.DeviceVerificationPath, strings.NewReader("decision=lookup"))
+	legacyRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	addUserAuthSessionCookies(legacyRequest, sessionToken, csrfToken)
+	legacyResponse := serveUserAuthRequest(server, legacyRequest)
+	assert.Equal(t, http.StatusMethodNotAllowed, legacyResponse.Code)
+	assert.Equal(t, "GET, HEAD", legacyResponse.Header().Get("Allow"))
+
+	pending, err := store.UserLoginByUserCode(t.Context(), started.UserCode)
+	require.NoError(t, err)
+	assert.Equal(t, userauth.DeviceStatusPending, pending.Status)
 }
 
 func TestUserLoginHTTPStrictJSONPollingAndPublicErrors(t *testing.T) {
@@ -385,13 +450,10 @@ func pollUserLoginHTTPResponse(t *testing.T, server *Server, started userauth.De
 
 func performUserLoginDecision(t *testing.T, server *Server, userCode, decision, sessionToken, cookieCSRF, formCSRF, origin, authorization string) *httptest.ResponseRecorder {
 	t.Helper()
-	form := url.Values{
-		"user_code":  []string{userCode},
-		"decision":   []string{decision},
-		"csrf_token": []string{formCSRF},
-	}
-	request := httptest.NewRequest(http.MethodPost, origin+userauth.DeviceVerificationPath, strings.NewReader(form.Encode()))
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	payload, err := json.Marshal(userLoginDecisionRequest{UserCode: userCode, Decision: decision, CSRFToken: formCSRF})
+	require.NoError(t, err)
+	request := httptest.NewRequest(http.MethodPost, origin+"/api/auth/v1/device/decision", bytes.NewReader(payload))
+	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Origin", origin)
 	if authorization != "" {
 		request.Header.Set("Authorization", authorization)

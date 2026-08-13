@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
-import { render, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import App from './App';
 import TerminalPage from './pages/TerminalPage';
 import {
@@ -11,6 +11,14 @@ vi.mock('./pages/ChatPage', () => ({
   default: () => <div data-testid="chat-page">Chat page</div>,
 }));
 
+vi.mock('./pages/UserLoginPage', () => ({
+  default: () => <div data-testid="user-login-page">User login page</div>,
+}));
+
+vi.mock('./pages/RunnerEnrollmentPage', () => ({
+  default: () => <div data-testid="runner-enrollment-page">Runner enrollment page</div>,
+}));
+
 vi.mock('./components/workspace/TerminalModal', () => ({
   default: () => <div data-testid="terminal-modal">Terminal</div>,
 }));
@@ -19,6 +27,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   window.localStorage.removeItem(TERMINAL_POP_OUT_STORAGE_KEY);
   window.sessionStorage.clear();
+  window.history.replaceState({}, '', '/');
   document.documentElement.classList.remove('terminal-popout-active');
   document.body.classList.remove('terminal-popout-active');
 });
@@ -39,6 +48,20 @@ describe('App', () => {
       const wrapper = container.firstElementChild;
       expect(wrapper).toHaveClass('h-full', 'min-h-0', 'overflow-hidden');
     });
+  });
+
+  it('routes the device sign-in approval page', async () => {
+    window.history.replaceState({}, '', '/auth/device');
+    render(<App />);
+
+    expect(await screen.findByTestId('user-login-page')).toBeInTheDocument();
+  });
+
+  it('routes the runner enrollment approval page', async () => {
+    window.history.replaceState({}, '', '/runner/enroll');
+    render(<App />);
+
+    expect(await screen.findByTestId('runner-enrollment-page')).toBeInTheDocument();
   });
 
   it('tracks the mobile visual viewport', async () => {

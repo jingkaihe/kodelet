@@ -4,6 +4,8 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router';
 
 const ChatPage = lazy(() => import('./pages/ChatPage'));
 const TerminalPage = lazy(() => import('./pages/TerminalPage'));
+const UserLoginPage = lazy(() => import('./pages/UserLoginPage'));
+const RunnerEnrollmentPage = lazy(() => import('./pages/RunnerEnrollmentPage'));
 
 function App() {
   const appRef = useRef<HTMLDivElement | null>(null);
@@ -55,6 +57,8 @@ function App() {
             <Route path="/" element={<ChatPage />} />
             <Route path="/c/:id" element={<ChatPage />} />
             <Route path="/terminal" element={<TerminalPage />} />
+            <Route path="/auth/device" element={<UserLoginPage />} />
+            <Route path="/runner/enroll" element={<RunnerEnrollmentPage />} />
           </Routes>
         </Suspense>
       </div>

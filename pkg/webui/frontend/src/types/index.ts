@@ -134,6 +134,57 @@ export interface ApiError {
   message?: string;
 }
 
+export interface AuthPrincipal {
+  id: string;
+  issuer?: string;
+  subject?: string;
+  name?: string;
+  email?: string;
+  roles: string[];
+}
+
+export type ApprovalStatus = 'pending' | 'approved' | 'denied' | 'expired';
+
+export interface UserLoginAuthorization {
+  status: ApprovalStatus;
+  userCode: string;
+  clientName: string;
+  clientOS: string;
+  clientArch: string;
+  kodeletVersion: string;
+  expiresAt: string;
+}
+
+export interface UserLoginDecisionResponse {
+  status: ApprovalStatus;
+  authorization?: UserLoginAuthorization;
+  message?: string;
+}
+
+export interface RunnerEnrollmentAuthorization {
+  status: ApprovalStatus;
+  userCode: string;
+  displayName?: string;
+  host: {
+    hostname: string;
+    os: string;
+    arch: string;
+  };
+  workspace: {
+    path: string;
+  };
+  kodeletVersion?: string;
+  fingerprint: string;
+  expiresAt: string;
+  replaceNeeded: boolean;
+}
+
+export interface RunnerEnrollmentDecisionResponse {
+  status: ApprovalStatus;
+  enrollment?: RunnerEnrollmentAuthorization;
+  message?: string;
+}
+
 export interface ChatRequest {
   message: string;
   content?: ContentBlock[];

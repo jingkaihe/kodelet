@@ -132,15 +132,18 @@ func TestStartRunnerEnrollmentUsesForwardedExternalURL(t *testing.T) {
 
 func TestRunnerEnrollmentDecisionRequiresSameOrigin(t *testing.T) {
 	tests := []struct {
-		name    string
-		origin  string
-		referer string
-		forward string
-		want    bool
+		name        string
+		origin      string
+		referer     string
+		forward     string
+		forwardHost string
+		want        bool
 	}{
 		{name: "matching origin", origin: "https://kodelet.example", want: true},
 		{name: "matching referer", referer: "https://kodelet.example/runner/enroll?user_code=ABCD-EFGH", want: true},
 		{name: "forwarded https", origin: "https://kodelet.example", forward: "https", want: true},
+		{name: "forwarded https chain with default port", origin: "https://kodelet.example", forward: "https, http", forwardHost: "kodelet.example:443", want: true},
+		{name: "forwarded development host", origin: "http://localhost:3000", forward: "http", forwardHost: "localhost:3000", want: true},
 		{name: "missing source", want: false},
 		{name: "other port", origin: "https://kodelet.example:8443", want: false},
 		{name: "sibling domain", origin: "https://attacker.example", want: false},
@@ -155,6 +158,7 @@ func TestRunnerEnrollmentDecisionRequiresSameOrigin(t *testing.T) {
 			request := httptest.NewRequest(http.MethodPost, scheme+"://kodelet.example/runner/enroll", nil)
 			request.Header.Set("Origin", test.origin)
 			request.Header.Set("Referer", test.referer)
+			request.Header.Set("X-Forwarded-Host", test.forwardHost)
 			if test.forward != "" {
 				request.Header.Set("X-Forwarded-Proto", test.forward)
 			}
@@ -163,7 +167,7 @@ func TestRunnerEnrollmentDecisionRequiresSameOrigin(t *testing.T) {
 	}
 }
 
-func TestRunnerEnrollmentPageRequiresManualCodeEntry(t *testing.T) {
+func TestRunnerEnrollmentPageServesSPAAndDecisionAPIRequiresManualCodeEntry(t *testing.T) {
 	store, _ := newAuthStoreTest(t)
 	started, err := store.StartRunnerEnrollment(
 		t.Context(),
@@ -174,9 +178,15 @@ func TestRunnerEnrollmentPageRequiresManualCodeEntry(t *testing.T) {
 	assert.Empty(t, started.VerificationURLComplete)
 
 	server := &Server{
-		config:    &ServerConfig{RunnerAuthMode: RunnerAuthModeEnrollment},
+		router: mux.NewRouter(),
+		config: &ServerConfig{
+			WebAuthMode:    WebAuthModeToken,
+			AuthToken:      "web-token",
+			RunnerAuthMode: RunnerAuthModeEnrollment,
+		},
 		authStore: store,
 	}
+	server.setupRoutes()
 	principal := administrativePrincipal("manual-entry-test")
 
 	pageRequest := httptest.NewRequest(http.MethodGet, "https://kodelet.example/runner/enroll?user_code="+url.QueryEscape(started.UserCode), nil)
@@ -184,27 +194,110 @@ func TestRunnerEnrollmentPageRequiresManualCodeEntry(t *testing.T) {
 	pageResponse := httptest.NewRecorder()
 	server.handleRunnerEnrollmentPage(pageResponse, pageRequest)
 	require.Equal(t, http.StatusOK, pageResponse.Code)
-	assert.Contains(t, pageResponse.Body.String(), "Enter the code displayed by the runner")
-	assert.Contains(t, pageResponse.Body.String(), `name="decision" value="lookup"`)
+	assert.Contains(t, pageResponse.Header().Get("Cache-Control"), "no-store")
+	assert.Equal(t, "frame-ancestors 'none'", pageResponse.Header().Get("Content-Security-Policy"))
+	assert.Equal(t, "DENY", pageResponse.Header().Get("X-Frame-Options"))
+	assert.Contains(t, pageResponse.Body.String(), `<div id="root"></div>`)
 	assert.NotContains(t, pageResponse.Body.String(), started.UserCode)
-	assert.NotContains(t, pageResponse.Body.String(), ">Approve<")
 
-	form := url.Values{
-		"user_code": []string{started.UserCode},
-		"decision":  []string{"lookup"},
-	}
-	lookupRequest := httptest.NewRequest(http.MethodPost, "https://kodelet.example/runner/enroll", strings.NewReader(form.Encode()))
-	lookupRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	headRequest := httptest.NewRequest(http.MethodHead, "https://kodelet.example/runner/enroll", nil)
+	headRequest.AddCookie(&http.Cookie{Name: webUIAuthCookieName, Value: "web-token"})
+	headResponse := httptest.NewRecorder()
+	server.router.ServeHTTP(headResponse, headRequest)
+	assert.Equal(t, http.StatusOK, headResponse.Code)
+	assert.Equal(t, "frame-ancestors 'none'", headResponse.Header().Get("Content-Security-Policy"))
+
+	contextRequest := httptest.NewRequest(http.MethodGet, "https://kodelet.example/api/runner/v1/enrollment/context", nil)
+	contextRequest.AddCookie(&http.Cookie{Name: webUIAuthCookieName, Value: "web-token"})
+	contextResponse := httptest.NewRecorder()
+	server.router.ServeHTTP(contextResponse, contextRequest)
+	require.Equal(t, http.StatusOK, contextResponse.Code)
+	assert.Equal(t, "no-store", contextResponse.Header().Get("Cache-Control"))
+	var contextPrincipal Principal
+	require.NoError(t, json.Unmarshal(contextResponse.Body.Bytes(), &contextPrincipal))
+	assert.Equal(t, "token", contextPrincipal.ID)
+
+	payload, err := json.Marshal(runnerEnrollmentDecisionRequest{UserCode: started.UserCode, Decision: "lookup"})
+	require.NoError(t, err)
+	lookupRequest := httptest.NewRequest(http.MethodPost, "https://kodelet.example/api/runner/v1/enrollment/decision", strings.NewReader(string(payload)))
+	lookupRequest.Header.Set("Content-Type", "application/json")
 	lookupRequest.Header.Set("Origin", "https://kodelet.example")
 	lookupRequest = lookupRequest.WithContext(contextWithPrincipal(lookupRequest.Context(), principal))
 	lookupResponse := httptest.NewRecorder()
-	server.handleRunnerEnrollmentPage(lookupResponse, lookupRequest)
+	server.handleRunnerEnrollmentDecision(lookupResponse, lookupRequest)
 	require.Equal(t, http.StatusOK, lookupResponse.Code)
-	assert.Contains(t, lookupResponse.Body.String(), started.UserCode)
-	assert.Contains(t, lookupResponse.Body.String(), "host.example.test")
-	assert.Contains(t, lookupResponse.Body.String(), "/work/manual")
-	assert.Contains(t, lookupResponse.Body.String(), ">Approve<")
-	assert.Contains(t, lookupResponse.Body.String(), ">Deny<")
+	assert.Equal(t, "no-store", lookupResponse.Header().Get("Cache-Control"))
+	var response runnerEnrollmentDecisionResponse
+	require.NoError(t, json.Unmarshal(lookupResponse.Body.Bytes(), &response))
+	require.NotNil(t, response.Enrollment)
+	assert.Equal(t, protocol.EnrollmentStatusPending, response.Status)
+	assert.Equal(t, started.UserCode, response.Enrollment.UserCode)
+	assert.Equal(t, "host.example.test", response.Enrollment.Host.Hostname)
+	assert.Equal(t, "/work/manual", response.Enrollment.Workspace.Path)
+	assert.NotEmpty(t, response.Enrollment.Fingerprint)
+	assert.NotContains(t, lookupResponse.Body.String(), started.DeviceCode)
+	assert.NotContains(t, lookupResponse.Body.String(), "host-manual")
+}
+
+func TestRunnerEnrollmentDecisionRequiresWebSessionCSRFAndStrictJSON(t *testing.T) {
+	store, _ := newAuthStoreTest(t)
+	started, err := store.StartRunnerEnrollment(
+		t.Context(),
+		testEnrollmentRequest(t, "host-csrf", "/work/csrf", "csrf", 0x73),
+		"https://kodelet.example/runner/enroll",
+	)
+	require.NoError(t, err)
+	sessionToken, csrfToken, err := store.CreateWebSession(t.Context(), "https://issuer.example.com", "subject-runner-admin", "Runner Admin", "runner-admin@example.com", []string{string(RoleRunnerAdmin)}, time.Hour)
+	require.NoError(t, err)
+	session, found, err := store.LoadWebSession(t.Context(), sessionToken)
+	require.NoError(t, err)
+	require.True(t, found)
+	principal := principalFromWebSession(session)
+	server := &Server{
+		config:    &ServerConfig{RunnerAuthMode: RunnerAuthModeEnrollment},
+		authStore: store,
+	}
+
+	performDecision := func(payload any, cookieCSRF string) *httptest.ResponseRecorder {
+		body, marshalErr := json.Marshal(payload)
+		require.NoError(t, marshalErr)
+		request := httptest.NewRequest(http.MethodPost, "https://kodelet.example/api/runner/v1/enrollment/decision", strings.NewReader(string(body)))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Origin", "https://kodelet.example")
+		request.AddCookie(&http.Cookie{Name: webCSRFCookieName, Value: cookieCSRF})
+		request = request.WithContext(contextWithPrincipal(request.Context(), principal))
+		response := httptest.NewRecorder()
+		server.handleRunnerEnrollmentDecision(response, request)
+		return response
+	}
+
+	wrongCSRF := performDecision(runnerEnrollmentDecisionRequest{UserCode: started.UserCode, Decision: "lookup", CSRFToken: "wrong-token"}, csrfToken)
+	assert.Equal(t, http.StatusForbidden, wrongCSRF.Code)
+
+	unknownField := performDecision(map[string]any{
+		"userCode":   started.UserCode,
+		"decision":   "lookup",
+		"csrfToken":  csrfToken,
+		"unexpected": true,
+	}, csrfToken)
+	assert.Equal(t, http.StatusBadRequest, unknownField.Code)
+
+	valid := performDecision(runnerEnrollmentDecisionRequest{UserCode: started.UserCode, Decision: "lookup", CSRFToken: csrfToken}, csrfToken)
+	assert.Equal(t, http.StatusOK, valid.Code)
+	assert.Equal(t, "no-store", valid.Header().Get("Cache-Control"))
+}
+
+func TestRunnerEnrollmentConnectedConflictReturnsActionableConflict(t *testing.T) {
+	server := &Server{}
+	request := httptest.NewRequest(http.MethodPost, "https://kodelet.example/api/runner/v1/enrollment/decision", nil)
+	response := httptest.NewRecorder()
+
+	server.writeRunnerEnrollmentStoreError(response, request, runnerregistry.ErrRunnerConnected)
+
+	assert.Equal(t, http.StatusConflict, response.Code)
+	assert.Equal(t, "no-store", response.Header().Get("Cache-Control"))
+	assert.Contains(t, response.Body.String(), "currently connected")
+	assert.Contains(t, response.Body.String(), "Stop it before enrolling")
 }
 
 func TestRunnerDPoPTargetURLUsesForwardedExternalAddress(t *testing.T) {

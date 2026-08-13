@@ -1,10 +1,7 @@
 package webui
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
-	"html/template"
 	"io"
 	"net/http"
 	"net/url"
@@ -104,6 +101,7 @@ func (s *Server) handlePollUserLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUserLoginVerificationPage(w http.ResponseWriter, r *http.Request) {
+	setAuthApprovalPageHeaders(w)
 	if !s.userLoginEnabled() {
 		w.Header().Set("Cache-Control", "no-store")
 		http.NotFound(w, r)
@@ -118,84 +116,130 @@ func (s *Server) handleUserLoginVerificationPage(w http.ResponseWriter, r *http.
 		s.writeAuthError(w, r, http.StatusForbidden, "an active OIDC web session is required")
 		return
 	}
-	if r.Method == http.MethodPost {
-		s.handleUserLoginDecision(w, r, principal)
-		return
-	}
-	s.renderUserLoginVerificationPage(w, http.StatusOK, userLoginVerificationPageData{
-		Principal: principal,
-		CSRFToken: csrfCookieValue(r),
-		EnterCode: true,
-	})
+	s.handleReactSPA(w, r)
 }
 
-func (s *Server) handleUserLoginDecision(w http.ResponseWriter, r *http.Request, principal Principal) {
-	if !sameOriginUserLoginDecision(r, s.config) {
-		s.writeAuthError(w, r, http.StatusForbidden, "invalid user login request origin")
+func (s *Server) handleUserLoginContext(w http.ResponseWriter, r *http.Request) {
+	if !s.userLoginEnabled() {
+		s.writeUserAuthAPIError(w, r, http.StatusNotFound, "user login is not enabled", nil)
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxUserLoginDecisionBytes)
-	if err := r.ParseForm(); err != nil {
-		s.writeAuthError(w, r, http.StatusBadRequest, "invalid user login decision")
+	principal, ok := principalFromContext(r.Context())
+	if !ok {
+		s.writeUserAuthAPIError(w, r, http.StatusUnauthorized, "authentication required", nil)
+		return
+	}
+	if !isGenuineOIDCWebPrincipal(principal) {
+		s.writeUserAuthAPIError(w, r, http.StatusForbidden, "an active OIDC web session is required", nil)
+		return
+	}
+	encodeAuthJSON(w, http.StatusOK, principal)
+}
+
+type userLoginDecisionRequest struct {
+	UserCode  string `json:"userCode"`
+	Decision  string `json:"decision"`
+	CSRFToken string `json:"csrfToken"`
+}
+
+type userLoginAuthorizationResponse struct {
+	Status         userauth.DeviceStatus `json:"status"`
+	UserCode       string                `json:"userCode"`
+	ClientName     string                `json:"clientName"`
+	ClientOS       string                `json:"clientOS"`
+	ClientArch     string                `json:"clientArch"`
+	KodeletVersion string                `json:"kodeletVersion"`
+	ExpiresAt      time.Time             `json:"expiresAt"`
+}
+
+type userLoginDecisionResponse struct {
+	Status        userauth.DeviceStatus           `json:"status"`
+	Authorization *userLoginAuthorizationResponse `json:"authorization,omitempty"`
+	Message       string                          `json:"message,omitempty"`
+}
+
+func (s *Server) handleUserLoginDecision(w http.ResponseWriter, r *http.Request) {
+	if !s.userLoginEnabled() {
+		s.writeUserAuthAPIError(w, r, http.StatusNotFound, "user login is not enabled", nil)
+		return
+	}
+	principal, ok := principalFromContext(r.Context())
+	if !ok {
+		s.writeUserAuthAPIError(w, r, http.StatusUnauthorized, "authentication required", nil)
+		return
+	}
+	if !isGenuineOIDCWebPrincipal(principal) {
+		s.writeUserAuthAPIError(w, r, http.StatusForbidden, "an active OIDC web session is required", nil)
+		return
+	}
+	if !sameOriginUserLoginDecision(r, s.config) {
+		s.writeUserAuthAPIError(w, r, http.StatusForbidden, "invalid user login request origin", nil)
+		return
+	}
+	var request userLoginDecisionRequest
+	if err := decodeUserAuthJSON(w, r, maxUserLoginDecisionBytes, &request); err != nil {
+		s.writeUserAuthAPIError(w, r, http.StatusBadRequest, "invalid user login decision", nil)
 		return
 	}
 
-	formToken := strings.TrimSpace(r.PostForm.Get("csrf_token"))
+	formToken := strings.TrimSpace(request.CSRFToken)
 	cookieToken := csrfCookieValue(r)
 	valid, err := s.authStore.WebSessionCSRFValid(r.Context(), principal.SessionID, formToken)
 	if err != nil {
 		logger.G(r.Context()).WithError(err).Error("failed to validate user login CSRF token")
-		s.writeAuthError(w, r, http.StatusInternalServerError, "failed to validate user login decision")
+		s.writeUserAuthAPIError(w, r, http.StatusInternalServerError, "failed to validate user login decision", nil)
 		return
 	}
 	if formToken == "" || cookieToken == "" || !valid || !constantTimeStringEqual(formToken, cookieToken) {
-		s.writeAuthError(w, r, http.StatusForbidden, "invalid CSRF token")
+		s.writeUserAuthAPIError(w, r, http.StatusForbidden, "invalid CSRF token", nil)
 		return
 	}
 
-	userCode := strings.TrimSpace(r.PostForm.Get("user_code"))
+	userCode := strings.TrimSpace(request.UserCode)
 	if _, err := normalizeUserCode(userCode); err != nil {
-		s.renderUserLoginVerificationPage(w, http.StatusNotFound, userLoginVerificationPageData{
-			Principal: principal,
-			CSRFToken: cookieToken,
-			EnterCode: true,
-			Error:     "User login request not found.",
-		})
+		s.writeUserAuthAPIError(w, r, http.StatusNotFound, "User login request not found.", nil)
 		return
 	}
-	decision := strings.TrimSpace(r.PostForm.Get("decision"))
+	decision := strings.TrimSpace(request.Decision)
 	switch decision {
 	case "lookup":
 		authorization, err := s.authStore.UserLoginByUserCode(r.Context(), userCode)
 		if err != nil {
-			s.renderUserLoginStoreError(w, r, principal, err)
+			s.writeUserLoginDecisionError(w, r, err)
 			return
 		}
-		s.renderUserLoginVerificationPage(w, http.StatusOK, userLoginVerificationPageData{
-			Principal:     principal,
-			Authorization: &authorization,
-			CSRFToken:     cookieToken,
+		encodeAuthJSON(w, http.StatusOK, userLoginDecisionResponse{
+			Status: authorization.Status,
+			Authorization: &userLoginAuthorizationResponse{
+				Status:         authorization.Status,
+				UserCode:       authorization.UserCode,
+				ClientName:     authorization.ClientName,
+				ClientOS:       authorization.ClientOS,
+				ClientArch:     authorization.ClientArch,
+				KodeletVersion: authorization.KodeletVersion,
+				ExpiresAt:      authorization.ExpiresAt,
+			},
 		})
 	case "approve":
 		if _, err := s.authStore.ApproveUserLogin(r.Context(), userCode, principal, s.config.OIDC.SessionDuration); err != nil {
-			s.renderUserLoginStoreError(w, r, principal, err)
+			s.writeUserLoginDecisionError(w, r, err)
 			return
 		}
-		s.renderUserLoginVerificationPage(w, http.StatusOK, userLoginVerificationPageData{
-			Principal: principal,
-			Message:   "User login approved. You can return to the Kodelet client.",
+		encodeAuthJSON(w, http.StatusOK, userLoginDecisionResponse{
+			Status:  userauth.DeviceStatusApproved,
+			Message: "Sign-in approved. You can return to the Kodelet client.",
 		})
 	case "deny":
 		if err := s.authStore.DenyUserLogin(r.Context(), userCode, principal.ID); err != nil {
-			s.renderUserLoginStoreError(w, r, principal, err)
+			s.writeUserLoginDecisionError(w, r, err)
 			return
 		}
-		s.renderUserLoginVerificationPage(w, http.StatusOK, userLoginVerificationPageData{
-			Principal: principal,
-			Message:   "User login denied. You can close this page.",
+		encodeAuthJSON(w, http.StatusOK, userLoginDecisionResponse{
+			Status:  userauth.DeviceStatusDenied,
+			Message: "Sign-in denied. You can close this page.",
 		})
 	default:
-		s.writeAuthError(w, r, http.StatusBadRequest, "invalid user login decision")
+		s.writeUserAuthAPIError(w, r, http.StatusBadRequest, "invalid user login decision", nil)
 	}
 }
 
@@ -322,60 +366,21 @@ func (s *Server) writeUserAuthAPIError(w http.ResponseWriter, r *http.Request, s
 	})
 }
 
-func (s *Server) renderUserLoginStoreError(w http.ResponseWriter, r *http.Request, principal Principal, err error) {
-	data := userLoginVerificationPageData{
-		Principal: principal,
-		CSRFToken: csrfCookieValue(r),
-		EnterCode: true,
-	}
+func (s *Server) writeUserLoginDecisionError(w http.ResponseWriter, r *http.Request, err error) {
 	statusCode := http.StatusInternalServerError
+	message := "Failed to process the user login request."
 	switch {
 	case errors.Is(err, errUserAuthorizationNotFound):
 		statusCode = http.StatusNotFound
-		data.Error = "User login request not found."
+		message = "User login request not found."
 	case errors.Is(err, errUserAuthorizationExpired):
 		statusCode = http.StatusConflict
-		data.Error = "User login request has expired."
+		message = "User login request has expired."
 	case errors.Is(err, errUserAuthorizationNotPending):
 		statusCode = http.StatusConflict
-		data.Error = "User login request is no longer pending."
+		message = "User login request is no longer pending."
 	default:
-		data.Error = "Failed to process the user login request."
 		logger.G(r.Context()).WithError(err).Error("failed to process user login verification")
 	}
-	s.renderUserLoginVerificationPage(w, statusCode, data)
-}
-
-type userLoginVerificationPageData struct {
-	Principal     Principal
-	Authorization *userLoginAuthorization
-	CSRFToken     string
-	EnterCode     bool
-	Message       string
-	Error         string
-}
-
-var userLoginVerificationPage = template.Must(template.New("user-login-verification").Parse(`<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Kodelet user login</title><style>
-body{font-family:system-ui,sans-serif;max-width:760px;margin:4rem auto;padding:0 1rem;color:#202020}main{border:1px solid #ddd;border-radius:16px;padding:2rem}code{background:#f4f4f4;padding:.15rem .35rem;border-radius:4px;word-break:break-all}.error{color:#a40000}.success{color:#126b2e}label{display:block;margin:.8rem 0}.actions{display:flex;gap:.75rem;margin-top:1.5rem}button{padding:.65rem 1rem}input[type=text]{font-size:1.1rem;padding:.6rem;width:14rem}dt{font-weight:600;margin-top:.75rem}dd{margin-left:0}</style></head>
-	<body><main><h1>Kodelet user login</h1>
-	{{if .Principal.Email}}<p>Signed in as <strong>{{.Principal.Email}}</strong>.</p>{{end}}
-	{{if .Error}}<p class="error">{{.Error}}</p>{{end}}{{if .Message}}<p class="success">{{.Message}}</p>{{end}}
-	{{if .EnterCode}}<p>Enter the code displayed by the Kodelet client. Do not enter a code sent to you by someone else.</p><form method="post"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><label>Login code <input type="text" name="user_code" autocomplete="off" autocapitalize="characters" spellcheck="false" autofocus required></label><button type="submit" name="decision" value="lookup">Continue</button></form>{{end}}
-	{{with .Authorization}}<p>Confirm this code matches the code in the Kodelet client, and approve only if you initiated the login.</p><dl><dt>Code</dt><dd><code>{{.UserCode}}</code></dd><dt>Client</dt><dd>{{.ClientName}}</dd><dt>Platform</dt><dd>{{.ClientOS}}/{{.ClientArch}}</dd><dt>Kodelet version</dt><dd>{{.KodeletVersion}}</dd><dt>Expires</dt><dd>{{.ExpiresAt}}</dd></dl>
-{{if eq .Status "pending"}}<form method="post"><input type="hidden" name="user_code" value="{{.UserCode}}"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><div class="actions"><button type="submit" name="decision" value="approve">Approve</button><button type="submit" name="decision" value="deny">Deny</button></div></form>{{else}}<p>Status: <strong>{{.Status}}</strong></p>{{end}}{{end}}
-</main></body></html>`))
-
-func (s *Server) renderUserLoginVerificationPage(w http.ResponseWriter, statusCode int, data userLoginVerificationPageData) {
-	var body bytes.Buffer
-	if err := userLoginVerificationPage.Execute(&body, data); err != nil {
-		logger.G(context.Background()).WithError(err).Error("failed to render user login verification page")
-		http.Error(w, "failed to render user login verification", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(statusCode)
-	_, _ = w.Write(body.Bytes())
+	s.writeUserAuthAPIError(w, r, statusCode, message, nil)
 }

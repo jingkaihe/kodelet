@@ -19,6 +19,9 @@ import {
 	ToolResult,
 	UIInputResponseResult,
 	RunnerListResponse,
+	AuthPrincipal,
+	UserLoginDecisionResponse,
+	RunnerEnrollmentDecisionResponse,
 } from "../types";
 
 class ApiService {
@@ -47,9 +50,11 @@ class ApiService {
 			} catch {
 				error = { error: `HTTP ${response.status}` };
 			}
-			throw new Error(
+			const requestError = new Error(
 				error.error || error.message || `HTTP ${response.status}`,
 			);
+			Object.assign(requestError, { status: response.status });
+			throw requestError;
 		}
 
 		if (response.status === 204) {
@@ -106,6 +111,54 @@ class ApiService {
 		}
 		const token = this.getCSRFCookie();
 		return token ? { [this.csrfHeaderName]: token } : {};
+	}
+
+	async getAuthPrincipal(): Promise<AuthPrincipal> {
+		return this.request<AuthPrincipal>("/api/auth/me");
+	}
+
+	async getUserLoginPrincipal(): Promise<AuthPrincipal> {
+		return this.request<AuthPrincipal>("/api/auth/v1/device/context");
+	}
+
+	async getRunnerEnrollmentPrincipal(): Promise<AuthPrincipal> {
+		return this.request<AuthPrincipal>("/api/runner/v1/enrollment/context");
+	}
+
+	async submitUserLoginDecision(
+		userCode: string,
+		decision: "lookup" | "approve" | "deny",
+	): Promise<UserLoginDecisionResponse> {
+		return this.request<UserLoginDecisionResponse>(
+			"/api/auth/v1/device/decision",
+			{
+				method: "POST",
+				body: JSON.stringify({
+					userCode,
+					decision,
+					csrfToken: this.getCSRFCookie(),
+				}),
+			},
+		);
+	}
+
+	async submitRunnerEnrollmentDecision(
+		userCode: string,
+		decision: "lookup" | "approve" | "deny",
+		replace = false,
+	): Promise<RunnerEnrollmentDecisionResponse> {
+		return this.request<RunnerEnrollmentDecisionResponse>(
+			"/api/runner/v1/enrollment/decision",
+			{
+				method: "POST",
+				body: JSON.stringify({
+					userCode,
+					decision,
+					csrfToken: this.getCSRFCookie(),
+					replace,
+				}),
+			},
+		);
 	}
 
 	async getConversations(

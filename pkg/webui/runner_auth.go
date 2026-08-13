@@ -3,7 +3,7 @@ package webui
 import (
 	"context"
 	"encoding/json"
-	"html/template"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	"github.com/pkg/errors"
@@ -194,69 +195,133 @@ func (s *Server) handlePollRunnerEnrollment(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) handleRunnerEnrollmentPage(w http.ResponseWriter, r *http.Request) {
+	setAuthApprovalPageHeaders(w)
 	if !s.runnerEnrollmentEnabled() || s.authStore == nil {
+		w.Header().Set("Cache-Control", "no-store")
 		http.NotFound(w, r)
 		return
 	}
-	principal, ok := principalFromContext(r.Context())
+	_, ok := principalFromContext(r.Context())
 	if !ok {
 		s.writeAuthError(w, r, http.StatusUnauthorized, "authentication required")
 		return
 	}
-	if r.Method == http.MethodPost {
-		s.handleRunnerEnrollmentDecision(w, r, principal)
-		return
-	}
-	s.renderRunnerEnrollmentPage(w, runnerEnrollmentPageData{Principal: principal, EnterCode: true, CSRFToken: csrfCookieValue(r)})
+	s.handleReactSPA(w, r)
 }
 
-func (s *Server) handleRunnerEnrollmentDecision(w http.ResponseWriter, r *http.Request, principal Principal) {
-	r.Body = http.MaxBytesReader(w, r.Body, 32*1024)
-	if err := r.ParseForm(); err != nil {
-		s.writeAuthError(w, r, http.StatusBadRequest, "invalid enrollment decision")
+func (s *Server) handleRunnerEnrollmentContext(w http.ResponseWriter, r *http.Request) {
+	if !s.runnerEnrollmentEnabled() || s.authStore == nil {
+		s.writeRunnerEnrollmentDecisionError(w, r, http.StatusNotFound, "runner enrollment is not enabled", nil)
+		return
+	}
+	principal, ok := principalFromContext(r.Context())
+	if !ok {
+		s.writeRunnerEnrollmentDecisionError(w, r, http.StatusUnauthorized, "authentication required", nil)
+		return
+	}
+	encodeAuthJSON(w, http.StatusOK, principal)
+}
+
+type runnerEnrollmentDecisionRequest struct {
+	UserCode  string `json:"userCode"`
+	Decision  string `json:"decision"`
+	CSRFToken string `json:"csrfToken"`
+	Replace   bool   `json:"replace,omitempty"`
+}
+
+type runnerEnrollmentResponse struct {
+	Status         protocol.EnrollmentStatus         `json:"status"`
+	UserCode       string                            `json:"userCode"`
+	DisplayName    string                            `json:"displayName,omitempty"`
+	Host           runnerEnrollmentHostResponse      `json:"host"`
+	Workspace      runnerEnrollmentWorkspaceResponse `json:"workspace"`
+	KodeletVersion string                            `json:"kodeletVersion,omitempty"`
+	Fingerprint    string                            `json:"fingerprint"`
+	ExpiresAt      time.Time                         `json:"expiresAt"`
+	ReplaceNeeded  bool                              `json:"replaceNeeded"`
+}
+
+type runnerEnrollmentHostResponse struct {
+	Hostname string `json:"hostname"`
+	OS       string `json:"os"`
+	Arch     string `json:"arch"`
+}
+
+type runnerEnrollmentWorkspaceResponse struct {
+	Path string `json:"path"`
+}
+
+type runnerEnrollmentDecisionResponse struct {
+	Status     protocol.EnrollmentStatus `json:"status"`
+	Enrollment *runnerEnrollmentResponse `json:"enrollment,omitempty"`
+	Message    string                    `json:"message,omitempty"`
+}
+
+func (s *Server) handleRunnerEnrollmentDecision(w http.ResponseWriter, r *http.Request) {
+	if !s.runnerEnrollmentEnabled() || s.authStore == nil {
+		s.writeRunnerEnrollmentDecisionError(w, r, http.StatusNotFound, "runner enrollment is not enabled", nil)
+		return
+	}
+	principal, ok := principalFromContext(r.Context())
+	if !ok {
+		s.writeRunnerEnrollmentDecisionError(w, r, http.StatusUnauthorized, "authentication required", nil)
+		return
+	}
+	if !principal.HasRole(RoleRunnerAdmin) {
+		s.writeRunnerEnrollmentDecisionError(w, r, http.StatusForbidden, "insufficient permissions", nil)
 		return
 	}
 	if !sameOriginEnrollmentDecision(r) {
-		s.writeAuthError(w, r, http.StatusForbidden, "invalid enrollment request origin")
+		s.writeRunnerEnrollmentDecisionError(w, r, http.StatusForbidden, "invalid enrollment request origin", nil)
+		return
+	}
+	var request runnerEnrollmentDecisionRequest
+	if err := decodeRunnerEnrollmentDecisionJSON(w, r, &request); err != nil {
+		s.writeRunnerEnrollmentDecisionError(w, r, http.StatusBadRequest, "invalid enrollment decision", nil)
 		return
 	}
 	if principal.SessionID != "" {
-		formToken := strings.TrimSpace(r.FormValue("csrf_token"))
+		formToken := strings.TrimSpace(request.CSRFToken)
 		cookieToken := csrfCookieValue(r)
 		valid, err := s.authStore.WebSessionCSRFValid(r.Context(), principal.SessionID, formToken)
 		if err != nil || !valid || !constantTimeStringEqual(formToken, cookieToken) {
-			s.writeAuthError(w, r, http.StatusForbidden, "invalid CSRF token")
+			s.writeRunnerEnrollmentDecisionError(w, r, http.StatusForbidden, "invalid CSRF token", nil)
 			return
 		}
 	}
-	userCode := strings.TrimSpace(r.FormValue("user_code"))
-	decision := strings.TrimSpace(r.FormValue("decision"))
+	userCode := strings.TrimSpace(request.UserCode)
+	if _, err := normalizeRunnerUserCode(userCode); err != nil {
+		s.writeRunnerEnrollmentDecisionError(w, r, http.StatusNotFound, "Runner enrollment request not found.", nil)
+		return
+	}
+	decision := strings.TrimSpace(request.Decision)
 	switch decision {
 	case "lookup":
 		enrollment, err := s.authStore.RunnerEnrollmentByUserCode(r.Context(), userCode)
 		if err != nil {
-			s.renderRunnerEnrollmentPage(w, runnerEnrollmentPageData{Principal: principal, Error: err.Error(), EnterCode: true, CSRFToken: csrfCookieValue(r)})
+			s.writeRunnerEnrollmentStoreError(w, r, err)
 			return
 		}
-		s.renderRunnerEnrollmentPage(w, runnerEnrollmentPageData{Principal: principal, Enrollment: &enrollment, CSRFToken: csrfCookieValue(r)})
+		response := runnerEnrollmentResponseFromEnrollment(enrollment)
+		encodeAuthJSON(w, http.StatusOK, runnerEnrollmentDecisionResponse{Status: enrollment.Status, Enrollment: &response})
 	case "deny":
 		if err := s.authStore.DenyRunnerEnrollment(r.Context(), userCode, principal.ID); err != nil {
-			s.renderRunnerEnrollmentPage(w, runnerEnrollmentPageData{Principal: principal, Error: err.Error(), EnterCode: true, CSRFToken: csrfCookieValue(r)})
+			s.writeRunnerEnrollmentStoreError(w, r, err)
 			return
 		}
-		s.renderRunnerEnrollmentPage(w, runnerEnrollmentPageData{Principal: principal, Message: "Runner enrollment denied."})
+		encodeAuthJSON(w, http.StatusOK, runnerEnrollmentDecisionResponse{Status: protocol.EnrollmentStatusDenied, Message: "Runner enrollment denied. You can close this page."})
 	case "approve":
 		enrollment, err := s.authStore.RunnerEnrollmentByUserCode(r.Context(), userCode)
 		if err != nil {
-			s.renderRunnerEnrollmentPage(w, runnerEnrollmentPageData{Principal: principal, Error: err.Error(), EnterCode: true, CSRFToken: csrfCookieValue(r)})
+			s.writeRunnerEnrollmentStoreError(w, r, err)
 			return
 		}
 		publicKey, err := protocol.EncodePublicKey(enrollment.PublicKey)
 		if err != nil {
-			s.writeAuthError(w, r, http.StatusInternalServerError, "invalid enrollment public key")
+			s.writeRunnerEnrollmentDecisionError(w, r, http.StatusInternalServerError, "invalid enrollment public key", err)
 			return
 		}
-		replace := strings.EqualFold(strings.TrimSpace(r.FormValue("replace")), "true") || r.FormValue("replace") == "on"
+		replace := request.Replace
 		runner, err := s.runnerRegistry.EnsureEnrollmentRegistration(protocol.EnrollmentStartRequest{
 			ProtocolVersions: []int{protocol.Version},
 			PublicKey:        publicKey,
@@ -267,48 +332,90 @@ func (s *Server) handleRunnerEnrollmentDecision(w http.ResponseWriter, r *http.R
 			KodeletVersion:   enrollment.KodeletVersion,
 		}, replace)
 		if err != nil {
-			s.renderRunnerEnrollmentPage(w, runnerEnrollmentPageData{Principal: principal, Enrollment: &enrollment, Error: err.Error(), CSRFToken: csrfCookieValue(r)})
+			s.writeRunnerEnrollmentStoreError(w, r, err)
 			return
 		}
 		enrollment, err = s.authStore.ApproveRunnerEnrollment(r.Context(), userCode, principal.ID, runner.ID, replace)
 		if err != nil {
-			s.renderRunnerEnrollmentPage(w, runnerEnrollmentPageData{Principal: principal, Enrollment: &enrollment, Error: err.Error(), CSRFToken: csrfCookieValue(r)})
+			s.writeRunnerEnrollmentStoreError(w, r, err)
 			return
 		}
 		s.runnerRegistry.DisconnectRunnerExceptCredential(runner.ID, enrollment.CredentialID, errors.New("runner credential was replaced by an approved enrollment"))
-		s.renderRunnerEnrollmentPage(w, runnerEnrollmentPageData{Principal: principal, Message: "Runner enrollment approved. You can return to the runner terminal."})
+		encodeAuthJSON(w, http.StatusOK, runnerEnrollmentDecisionResponse{Status: protocol.EnrollmentStatusApproved, Message: "Runner enrollment approved. You can return to the runner terminal."})
 	default:
-		s.writeAuthError(w, r, http.StatusBadRequest, "invalid enrollment decision")
+		s.writeRunnerEnrollmentDecisionError(w, r, http.StatusBadRequest, "invalid enrollment decision", nil)
 	}
 }
 
-type runnerEnrollmentPageData struct {
-	Principal  Principal
-	Enrollment *runnerEnrollment
-	CSRFToken  string
-	EnterCode  bool
-	Message    string
-	Error      string
+func decodeRunnerEnrollmentDecisionJSON(w http.ResponseWriter, r *http.Request, destination any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, 32*1024)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return errors.New("request body must contain exactly one JSON value")
+		}
+		return err
+	}
+	return nil
 }
 
-var runnerEnrollmentPage = template.Must(template.New("runner-enrollment").Parse(`<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Kodelet runner enrollment</title><style>
-body{font-family:system-ui,sans-serif;max-width:760px;margin:4rem auto;padding:0 1rem;color:#202020}main{border:1px solid #ddd;border-radius:16px;padding:2rem}code{background:#f4f4f4;padding:.15rem .35rem;border-radius:4px;word-break:break-all}.error{color:#a40000}.success{color:#126b2e}label{display:block;margin:.8rem 0}.actions{display:flex;gap:.75rem;margin-top:1.5rem}button{padding:.65rem 1rem}input[type=text]{font-size:1.1rem;padding:.6rem;width:14rem}</style></head>
-	<body><main><h1>Kodelet runner enrollment</h1>
-	{{if .Principal.Email}}<p>Signed in as <strong>{{.Principal.Email}}</strong>.</p>{{end}}
-	{{if .Error}}<p class="error">{{.Error}}</p>{{end}}{{if .Message}}<p class="success">{{.Message}}</p>{{end}}
-	{{if .EnterCode}}<p>Enter the code displayed by the runner. Do not enter a code sent to you by someone else.</p><form method="post"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><label>Enrollment code <input type="text" name="user_code" autocomplete="off" autocapitalize="characters" spellcheck="false" autofocus required></label><button type="submit" name="decision" value="lookup">Continue</button></form>{{end}}
-	{{with .Enrollment}}<p>Confirm this code and runner information match the runner you are enrolling.</p><dl><dt>Code</dt><dd><code>{{.UserCode}}</code></dd><dt>Runner</dt><dd>{{.DisplayName}}</dd><dt>Host</dt><dd>{{.Host.Hostname}} ({{.Host.OS}}/{{.Host.Arch}})</dd><dt>Workspace</dt><dd><code>{{.Workspace.Path}}</code></dd><dt>Public-key fingerprint</dt><dd><code>{{.Fingerprint}}</code></dd><dt>Expires</dt><dd>{{.ExpiresAt}}</dd></dl>
-{{if eq .Status "pending"}}<form method="post"><input type="hidden" name="user_code" value="{{.UserCode}}"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">{{if .ReplaceNeeded}}<label><input type="checkbox" name="replace" value="true" required> Revoke and replace the existing runner credential</label>{{end}}<div class="actions"><button type="submit" name="decision" value="approve">Approve</button><button type="submit" name="decision" value="deny">Deny</button></div></form>{{else}}<p>Status: <strong>{{.Status}}</strong></p>{{end}}{{end}}
-</main></body></html>`))
-
-func (s *Server) renderRunnerEnrollmentPage(w http.ResponseWriter, data runnerEnrollmentPageData) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	if err := runnerEnrollmentPage.Execute(w, data); err != nil {
-		http.Error(w, "failed to render runner enrollment", http.StatusInternalServerError)
+func runnerEnrollmentResponseFromEnrollment(enrollment runnerEnrollment) runnerEnrollmentResponse {
+	return runnerEnrollmentResponse{
+		Status:      enrollment.Status,
+		UserCode:    enrollment.UserCode,
+		DisplayName: enrollment.DisplayName,
+		Host: runnerEnrollmentHostResponse{
+			Hostname: enrollment.Host.Hostname,
+			OS:       enrollment.Host.OS,
+			Arch:     enrollment.Host.Arch,
+		},
+		Workspace:      runnerEnrollmentWorkspaceResponse{Path: enrollment.Workspace.Path},
+		KodeletVersion: enrollment.KodeletVersion,
+		Fingerprint:    enrollment.Fingerprint,
+		ExpiresAt:      enrollment.ExpiresAt,
+		ReplaceNeeded:  enrollment.ReplaceNeeded,
 	}
+}
+
+func (s *Server) writeRunnerEnrollmentStoreError(w http.ResponseWriter, r *http.Request, err error) {
+	statusCode := http.StatusInternalServerError
+	message := "Failed to process the runner enrollment request."
+	switch {
+	case errors.Is(err, errEnrollmentNotFound):
+		statusCode = http.StatusNotFound
+		message = "Runner enrollment request not found."
+	case errors.Is(err, errEnrollmentExpired):
+		statusCode = http.StatusConflict
+		message = "Runner enrollment request has expired."
+	case errors.Is(err, errEnrollmentNotPending):
+		statusCode = http.StatusConflict
+		message = "Runner enrollment request is no longer pending."
+	case errors.Is(err, errRunnerCredentialExists):
+		statusCode = http.StatusConflict
+		message = "This runner already has an active credential. Confirm replacement to continue."
+	case errors.Is(err, runnerregistry.ErrRunnerConnected):
+		statusCode = http.StatusConflict
+		message = "This runner is currently connected. Stop it before enrolling a new credential, then try again."
+	default:
+		logger.G(r.Context()).WithError(err).Error("failed to process runner enrollment approval")
+	}
+	s.writeRunnerEnrollmentDecisionError(w, r, statusCode, message, nil)
+}
+
+func (s *Server) writeRunnerEnrollmentDecisionError(w http.ResponseWriter, r *http.Request, statusCode int, message string, err error) {
+	if err != nil {
+		logger.G(r.Context()).WithError(err).Error(message)
+	}
+	encodeAuthJSON(w, statusCode, map[string]any{
+		"error":   message,
+		"status":  statusCode,
+		"success": false,
+	})
 }
 
 func (s *Server) runnerEnrollmentEnabled() bool {

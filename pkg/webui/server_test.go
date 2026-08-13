@@ -322,9 +322,18 @@ func TestValidateCORSOriginsAndNormalization(t *testing.T) {
 	err := ValidateCORSOrigins([]string{"https://Example.COM:443", "https://example.com:443"})
 	require.NoError(t, err)
 
-	normalized, err := normalizeConfiguredCORSOrigins([]string{" https://Example.COM ", "https://example.com"})
+	normalized, err := normalizeConfiguredCORSOrigins([]string{
+		" https://Example.COM:443 ",
+		"https://example.com",
+		"http://Example.COM:80",
+		"http://example.com",
+	})
 	require.NoError(t, err)
-	assert.Equal(t, []string{"https://example.com"}, normalized)
+	assert.Equal(t, []string{"https://example.com", "http://example.com"}, normalized)
+
+	normalizedOrigin, err := normalizeCORSOrigin("https://[::1]:443")
+	require.NoError(t, err)
+	assert.Equal(t, "https://[::1]", normalizedOrigin)
 
 	_, err = normalizeConfiguredCORSOrigins([]string{"   "})
 	require.Error(t, err)
@@ -378,6 +387,27 @@ func TestNewServerInitializesRoutesAndNormalizesConfig(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "text/html; charset=utf-8", w.Header().Get("Content-Type"))
 	assert.Contains(t, w.Body.String(), "<html")
+}
+
+func TestReactSPACanonicalizesAuthApprovalPaths(t *testing.T) {
+	server := &Server{}
+	for _, test := range []struct {
+		path     string
+		location string
+	}{
+		{path: "/AUTH/DEVICE/?user_code=ABCD-EFGH", location: "/auth/device?user_code=ABCD-EFGH"},
+		{path: "/runner/enroll///", location: "/runner/enroll"},
+	} {
+		t.Run(test.path, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, test.path, nil)
+			response := httptest.NewRecorder()
+
+			server.handleReactSPA(response, request)
+
+			assert.Equal(t, http.StatusPermanentRedirect, response.Code)
+			assert.Equal(t, test.location, response.Header().Get("Location"))
+		})
+	}
 }
 
 func TestNewAuthTokenGeneratesUsableToken(t *testing.T) {

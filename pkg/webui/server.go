@@ -317,17 +317,21 @@ func (s *Server) setupRoutes() {
 	s.router.HandleFunc("/auth/login", s.handleOIDCLogin).Methods("GET")
 	s.router.HandleFunc("/auth/oidc/callback", s.handleOIDCCallback).Methods("GET")
 	s.router.HandleFunc("/auth/logout", s.handleLogout).Methods("GET")
-	s.router.HandleFunc(userauth.DeviceVerificationPath, s.handleUserLoginVerificationPage).Methods("GET", "POST")
+	s.router.HandleFunc(userauth.DeviceVerificationPath, s.handleUserLoginVerificationPage).Methods("GET", "HEAD")
 	s.router.HandleFunc(userauth.DeviceStartPath, s.handleStartUserLogin).Methods("POST")
 	s.router.HandleFunc(userauth.DevicePollPath, s.handlePollUserLogin).Methods("POST")
 	s.router.HandleFunc(userauth.CurrentCredentialPath, s.handleRevokeCurrentUserCredential).Methods("DELETE")
-	s.router.HandleFunc("/runner/enroll", s.requireRole(RoleRunnerAdmin, s.handleRunnerEnrollmentPage)).Methods("GET", "POST")
+	s.router.HandleFunc("/runner/enroll", s.requireRole(RoleRunnerAdmin, s.handleRunnerEnrollmentPage)).Methods("GET", "HEAD")
 	s.router.HandleFunc(protocol.EnrollmentStartPath, s.handleStartRunnerEnrollment).Methods("POST")
 	s.router.HandleFunc(protocol.EnrollmentPollPath, s.handlePollRunnerEnrollment).Methods("POST")
 
 	// API routes
 	api := s.router.PathPrefix("/api").Subrouter()
 	api.HandleFunc("/auth/me", s.handleAuthMe).Methods("GET")
+	api.HandleFunc("/auth/v1/device/context", s.handleUserLoginContext).Methods("GET")
+	api.HandleFunc("/auth/v1/device/decision", s.handleUserLoginDecision).Methods("POST")
+	api.HandleFunc("/runner/v1/enrollment/context", s.requireRole(RoleRunnerAdmin, s.handleRunnerEnrollmentContext)).Methods("GET")
+	api.HandleFunc("/runner/v1/enrollment/decision", s.requireRole(RoleRunnerAdmin, s.handleRunnerEnrollmentDecision)).Methods("POST")
 	api.HandleFunc("/chat/settings", s.handleGetChatSettings).Methods("GET")
 	api.HandleFunc("/chat/slash-commands", s.handleGetSlashCommands).Methods("GET")
 	api.HandleFunc("/chat/cwd-suggestions", s.handleGetCWDHints).Methods("GET")
@@ -368,6 +372,19 @@ func (s *Server) staticFileHandler() http.Handler {
 
 // handleReactSPA serves the React single-page application
 func (s *Server) handleReactSPA(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if canonicalPath, ok := canonicalAuthApprovalPath(r.URL.Path); ok && r.URL.Path != canonicalPath {
+		target := canonicalPath
+		if r.URL.RawQuery != "" {
+			target += "?" + r.URL.RawQuery
+		}
+		http.Redirect(w, r, target, http.StatusPermanentRedirect)
+		return
+	}
 	// Serve index.html for all non-API routes
 	indexContent, err := embedFS.ReadFile("dist/index.html")
 	if err != nil {
@@ -379,6 +396,18 @@ func (s *Server) handleReactSPA(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Write(indexContent)
+}
+
+func canonicalAuthApprovalPath(path string) (string, bool) {
+	trimmed := strings.TrimRight(path, "/")
+	switch {
+	case strings.EqualFold(trimmed, userauth.DeviceVerificationPath):
+		return userauth.DeviceVerificationPath, true
+	case strings.EqualFold(trimmed, "/runner/enroll"):
+		return "/runner/enroll", true
+	default:
+		return "", false
+	}
 }
 
 // loggingMiddleware logs HTTP requests
@@ -512,6 +541,9 @@ func normalizeCORSOrigin(origin string) (string, error) {
 
 	parsed.Scheme = strings.ToLower(parsed.Scheme)
 	parsed.Host = normalizedURLHost(parsed.Host)
+	if (parsed.Scheme == "http" && parsed.Port() == "80") || (parsed.Scheme == "https" && parsed.Port() == "443") {
+		parsed.Host = normalizedURLHost(parsed.Hostname())
+	}
 	parsed.Path = ""
 	return parsed.String(), nil
 }

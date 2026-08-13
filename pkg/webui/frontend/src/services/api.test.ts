@@ -97,6 +97,129 @@ describe("ApiService", () => {
 				"HTTP 500",
 			);
 		});
+
+		it("preserves the HTTP status on API errors", async () => {
+			mockFetch.mockResolvedValueOnce({
+				ok: false,
+				status: 409,
+				json: async () => ({ error: "Request is no longer pending" }),
+			});
+
+			await expect(apiService.getConversation("stale")).rejects.toMatchObject({
+				message: "Request is no longer pending",
+				status: 409,
+			});
+		});
+	});
+
+	describe("authentication approvals", () => {
+		it("loads the authenticated principal", async () => {
+			const principal = {
+				id: "issuer|subject",
+				email: "user@example.com",
+				roles: ["user"],
+			};
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				status: 200,
+				json: async () => principal,
+			});
+
+			await expect(apiService.getAuthPrincipal()).resolves.toEqual(principal);
+			expect(mockFetch).toHaveBeenCalledWith(
+				"/api/auth/me",
+				expect.objectContaining({
+					headers: expect.objectContaining({ "Content-Type": "application/json" }),
+				}),
+			);
+		});
+
+		it("loads the user sign-in approval context", async () => {
+			const principal = {
+				id: "issuer|subject",
+				email: "user@example.com",
+				roles: ["user"],
+			};
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				status: 200,
+				json: async () => principal,
+			});
+
+			await expect(apiService.getUserLoginPrincipal()).resolves.toEqual(principal);
+			expect(mockFetch).toHaveBeenCalledWith(
+				"/api/auth/v1/device/context",
+				expect.any(Object),
+			);
+		});
+
+		it("loads the runner enrollment approval context", async () => {
+			const principal = {
+				id: "issuer|subject",
+				email: "admin@example.com",
+				roles: ["runner-admin"],
+			};
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				status: 200,
+				json: async () => principal,
+			});
+
+			await expect(apiService.getRunnerEnrollmentPrincipal()).resolves.toEqual(principal);
+			expect(mockFetch).toHaveBeenCalledWith(
+				"/api/runner/v1/enrollment/context",
+				expect.any(Object),
+			);
+		});
+
+		it("posts user sign-in decisions with the CSRF cookie", async () => {
+			document.cookie = "kodelet_csrf=csrf-user; Path=/";
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				status: 200,
+				json: async () => ({ status: "pending" }),
+			});
+
+			await apiService.submitUserLoginDecision("ABCD-EFGH", "lookup");
+
+			expect(mockFetch).toHaveBeenCalledWith(
+				"/api/auth/v1/device/decision",
+				expect.objectContaining({
+					method: "POST",
+					headers: expect.objectContaining({ "X-CSRF-Token": "csrf-user" }),
+					body: JSON.stringify({
+						userCode: "ABCD-EFGH",
+						decision: "lookup",
+						csrfToken: "csrf-user",
+					}),
+				}),
+			);
+		});
+
+		it("posts runner approval replacement intent with the CSRF cookie", async () => {
+			document.cookie = "kodelet_csrf=csrf-runner; Path=/";
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				status: 200,
+				json: async () => ({ status: "approved" }),
+			});
+
+			await apiService.submitRunnerEnrollmentDecision("WXYZ-2345", "approve", true);
+
+			expect(mockFetch).toHaveBeenCalledWith(
+				"/api/runner/v1/enrollment/decision",
+				expect.objectContaining({
+					method: "POST",
+					headers: expect.objectContaining({ "X-CSRF-Token": "csrf-runner" }),
+					body: JSON.stringify({
+						userCode: "WXYZ-2345",
+						decision: "approve",
+						csrfToken: "csrf-runner",
+						replace: true,
+					}),
+				}),
+			);
+		});
 	});
 
 	describe("getConversations", () => {
