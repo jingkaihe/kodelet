@@ -173,8 +173,6 @@ func rpcErrorFor(err error) *protocol.RPCError {
 	switch {
 	case errors.Is(err, ErrRunnerNotFound):
 		code = protocol.ErrorCodeStale
-	case errors.Is(err, ErrLegacyAuthKeyEnrolled):
-		code = protocol.ErrorCodeConflict
 	case strings.Contains(message, "busy"), strings.Contains(message, "active run"):
 		code = protocol.ErrorCodeBusy
 	case strings.Contains(message, "stale"), strings.Contains(message, "generation"):
@@ -185,8 +183,6 @@ func rpcErrorFor(err error) *protocol.RPCError {
 	rpcErr := &protocol.RPCError{Code: code, Message: message}
 	if errors.Is(err, ErrRunnerNotFound) {
 		rpcErr.Data = protocol.RPCErrorData{Reason: protocol.ErrorReasonRunnerNotFound}
-	} else if errors.Is(err, ErrLegacyAuthKeyEnrolled) {
-		rpcErr.Data = protocol.RPCErrorData{Reason: protocol.ErrorReasonLegacyAuthKeyEnrolled}
 	}
 	return rpcErr
 }

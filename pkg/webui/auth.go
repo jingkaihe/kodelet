@@ -42,7 +42,6 @@ type RunnerAuthMode string
 const (
 	RunnerAuthModeToken      RunnerAuthMode = "token"
 	RunnerAuthModeEnrollment RunnerAuthMode = "enrollment"
-	RunnerAuthModeHybrid     RunnerAuthMode = "hybrid"
 	RunnerAuthModeNone       RunnerAuthMode = "none"
 )
 
@@ -192,17 +191,10 @@ func (c *ServerConfig) validateAuthModes() error {
 		if webMode == WebAuthModeNone {
 			return errors.New("runner enrollment requires web authentication")
 		}
-	case RunnerAuthModeHybrid:
-		if c.RunnerAuthToken == "" {
-			return errors.New("runner auth token is required when runner authentication mode is hybrid")
-		}
-		if webMode == WebAuthModeNone {
-			return errors.New("runner enrollment requires web authentication")
-		}
 	default:
 		return errors.Errorf("unsupported runner authentication mode %q", runnerMode)
 	}
-	if (runnerMode == RunnerAuthModeEnrollment || runnerMode == RunnerAuthModeHybrid) && webMode == WebAuthModeOIDC && c.AuthToken == "" && len(c.OIDC.AdminEmails) == 0 && len(c.OIDC.RunnerAdminEmails) == 0 {
+	if runnerMode == RunnerAuthModeEnrollment && webMode == WebAuthModeOIDC && c.AuthToken == "" && len(c.OIDC.AdminEmails) == 0 && len(c.OIDC.RunnerAdminEmails) == 0 {
 		return errors.New("OIDC runner enrollment requires a runner-admin/admin email or an administrative compatibility token")
 	}
 	return nil
@@ -213,7 +205,7 @@ func (c *ServerConfig) requiresAuthStore() bool {
 		return false
 	}
 	runnerMode := c.resolvedRunnerAuthMode()
-	return c.resolvedWebAuthMode() == WebAuthModeOIDC || runnerMode == RunnerAuthModeEnrollment || runnerMode == RunnerAuthModeHybrid
+	return c.resolvedWebAuthMode() == WebAuthModeOIDC || runnerMode == RunnerAuthModeEnrollment
 }
 
 func (c *OIDCConfig) normalize() {

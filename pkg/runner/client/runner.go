@@ -327,7 +327,7 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool,
 	}
 	registration, err := registerRunner(ctx, peer, params, !keyAuthenticated)
 	if err != nil {
-		return false, runnerRegistrationError(err, strings.TrimSpace(r.config.AuthToken) != "")
+		return false, err
 	}
 	if err := r.service.SetRegistration(registration); err != nil {
 		return false, err
@@ -499,17 +499,6 @@ func registerRunner(ctx context.Context, peer *protocol.Peer, params protocol.Re
 		return protocol.RegisterResult{}, err
 	}
 	return result, nil
-}
-
-func runnerRegistrationError(err error, explicitLegacyToken bool) error {
-	if err == nil || !explicitLegacyToken {
-		return err
-	}
-	var rpcErr *protocol.RPCError
-	if errors.As(err, &rpcErr) && rpcErr.Reason() == protocol.ErrorReasonLegacyAuthKeyEnrolled {
-		return &permanentConnectionError{err: pkgerrors.New("runner has an enrolled key credential but an explicit legacy runner token took precedence; remove --auth-token or KODELET_RUNNER_AUTH_TOKEN")}
-	}
-	return err
 }
 
 func normalizeServerURL(raw string) (string, string, error) {

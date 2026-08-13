@@ -396,16 +396,6 @@ func TestRunnerTreatsAuthenticationFailureAsPermanent(t *testing.T) {
 	wrapped := &permanentConnectionError{err: errors.New("permanent")}
 	assert.Equal(t, "permanent", wrapped.Error())
 	assert.EqualError(t, wrapped.Unwrap(), "permanent")
-
-	legacyConflict := &protocol.RPCError{
-		Code:    protocol.ErrorCodeConflict,
-		Message: "runner has a key-bound credential and cannot use legacy authentication",
-		Data:    protocol.RPCErrorData{Reason: protocol.ErrorReasonLegacyAuthKeyEnrolled},
-	}
-	classified := runnerRegistrationError(legacyConflict, true)
-	require.ErrorContains(t, classified, "explicit legacy runner token took precedence")
-	assert.True(t, isPermanentConnectionError(classified))
-	assert.Same(t, legacyConflict, runnerRegistrationError(legacyConflict, false))
 }
 
 func TestRunnerTreatsUnknownOrRevokedCredentialAsPermanent(t *testing.T) {

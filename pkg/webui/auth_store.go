@@ -792,23 +792,6 @@ func (s *authStore) VerifyRunnerDPoP(ctx context.Context, accessToken, proof, me
 	}, nil
 }
 
-func (s *authStore) HasActiveRunnerCredential(ctx context.Context, hostInstanceID, workspacePath string) (bool, error) {
-	if s == nil || s.db == nil {
-		return false, errors.New("authentication store is closed")
-	}
-	var count int
-	if err := s.db.GetContext(ctx, &count, `
-		SELECT COUNT(*)
-		FROM runner_credentials c
-		JOIN runner_registrations r ON r.id = c.runner_id
-		WHERE r.owner_id = ? AND r.host_instance_id = ? AND r.workspace_path = ?
-			AND c.revoked_at IS NULL
-	`, controlPlaneOwnerID, strings.TrimSpace(hostInstanceID), strings.TrimSpace(workspacePath)); err != nil {
-		return false, errors.Wrap(err, "failed to inspect runner credential binding")
-	}
-	return count > 0, nil
-}
-
 func (s *authStore) RunnerCredentialActive(ctx context.Context, credentialID, runnerID, hostInstanceID, workspacePath string) (bool, error) {
 	if s == nil || s.db == nil {
 		return false, errors.New("authentication store is closed")

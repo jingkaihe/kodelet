@@ -66,7 +66,7 @@ kodelet acp [flags]
 | `--no-extensions` | Disable extension runtime |
 | `--server` | Run the model agentic loop on a control plane while keeping the current workspace runtime local; overrides `KODELET_SERVER` and user-level `server` config |
 | `--auth-token` | Explicit control-plane API token override. Precedence is this flag, then `KODELET_AUTH_TOKEN`, then the Kodelet-issued credential stored by `kodelet auth login`. |
-| `--runner-auth-token` | Optional legacy shared runner token; defaults to `KODELET_RUNNER_AUTH_TOKEN` and takes precedence over a stored enrolled credential. |
+| `--runner-auth-token` | Optional shared runner token for servers using runner token mode; defaults to `KODELET_RUNNER_AUTH_TOKEN`. |
 | `--runner-profile` | Runner-local environment profile used for tools, skills, extensions, context, and workspace policy |
 
 ## Server-Backed ACP
@@ -82,7 +82,7 @@ ACP client <-- stdio --> kodelet acp <-- HTTPS --> kodelet serve / model loop
 
 The control plane owns provider credentials, model calls, turn orchestration, cancellation state, and persisted conversations. The local workspace runner owns the canonical workspace, context files, filesystem and shell tools, skills, recipes, extension tools and commands, local command restrictions, tool mode, and runner environment profiles.
 
-An embedded runner executes with the ACP process's host permissions and is not a sandbox; a reused runner executes with the permissions of its existing process. In runner `enrollment` or `hybrid` mode, ACP automatically loads the current workspace's enrolled DPoP credential when no explicit runner token is supplied. ACP does not initiate browser enrollment over stdio, so run `kodelet runner enroll --server https://kodelet.example` from the workspace first. An explicit `--runner-auth-token` or `KODELET_RUNNER_AUTH_TOKEN` takes precedence over local credential discovery for migration compatibility.
+An embedded runner executes with the ACP process's host permissions and is not a sandbox; a reused runner executes with the permissions of its existing process. In runner `enrollment` mode, ACP automatically loads the current workspace's enrolled DPoP credential when no explicit runner token is supplied. ACP does not initiate browser enrollment over stdio, so run `kodelet runner enroll --server https://kodelet.example` from the workspace first. Runner tokens apply only when the server uses runner token mode; remove an explicit `--runner-auth-token` or `KODELET_RUNNER_AUTH_TOKEN` when using enrollment mode.
 
 Kodelet-issued user credentials and enrolled runner private keys and access tokens are loaded directly from user-only local state. Explicit token overrides and ambient environment variables remain part of the same trusted local agent boundary and are not selectively scrubbed before tools or extensions run.
 
@@ -283,7 +283,7 @@ flowchart TB
 1. **Path Validation**: All file paths are validated relative to the session CWD; server-backed ACP additionally requires the session CWD to match the selected workspace runner.
 2. **Command Restrictions**: Bash and tool restrictions apply in both local and server-backed ACP.
 3. **Local stdio authentication**: Ordinary `kodelet acp` relies on the parent ACP client to control subprocess access and does not add an authentication exchange.
-4. **Control-plane authentication**: Server-backed ACP uses the Kodelet-issued credential created by `kodelet auth login` unless `KODELET_AUTH_TOKEN` or an explicit `--auth-token` overrides it. It separately uses an enrolled DPoP runner credential when available and no explicit runner token is supplied; `--runner-auth-token` remains the legacy-token override. Stored user and runner credentials are loaded directly from user-only state, while explicit token overrides and ambient environment variables remain within the trusted local agent boundary.
+4. **Control-plane authentication**: Server-backed ACP uses the Kodelet-issued credential created by `kodelet auth login` unless `KODELET_AUTH_TOKEN` or an explicit `--auth-token` overrides it. It separately uses an enrolled DPoP runner credential when available and no explicit runner token is supplied; `--runner-auth-token` is used only with runner token mode. Stored user and runner credentials are loaded directly from user-only state, while explicit token overrides and ambient environment variables remain within the trusted local agent boundary.
 5. **Transport security**: Non-loopback control-plane URLs must use HTTPS.
 
 ## References

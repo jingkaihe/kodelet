@@ -41,8 +41,6 @@ type testPersistence struct {
 }
 
 type fakeCredentialAuthorizer struct {
-	bound                  bool
-	err                    error
 	credentialActive       bool
 	credentialErr          error
 	host                   string
@@ -50,14 +48,6 @@ type fakeCredentialAuthorizer struct {
 	credentialID           string
 	runnerID               string
 	credentialRequestCount int
-	requestCount           int
-}
-
-func (a *fakeCredentialAuthorizer) HasActiveRunnerCredential(_ context.Context, hostInstanceID, workspacePath string) (bool, error) {
-	a.requestCount++
-	a.host = hostInstanceID
-	a.workspace = workspacePath
-	return a.bound, a.err
 }
 
 func (a *fakeCredentialAuthorizer) RunnerCredentialActive(_ context.Context, credentialID, runnerID, hostInstanceID, workspacePath string) (bool, error) {
@@ -333,33 +323,6 @@ func TestKeyRegistrationRevalidatesCredentialAndReplacementDisconnectsOldConnect
 		WorkspacePath:  "/work/enrolled",
 	})
 	require.ErrorContains(t, err, "invalid or revoked")
-}
-
-func TestLegacyRegistrationIsBlockedAfterKeyEnrollment(t *testing.T) {
-	authorizer := &fakeCredentialAuthorizer{bound: true}
-	registry, err := New(t.Context(), Options{
-		HeartbeatInterval: time.Hour,
-		HeartbeatTimeout:  2 * time.Hour,
-		NewID:             sequentialIDs(),
-		Credentials:       authorizer,
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = registry.Close() })
-
-	_, err = registry.Register(testRegisterParams("host-one", "/work/project"), newFakeLink())
-	require.ErrorContains(t, err, "cannot use legacy authentication")
-	assert.Equal(t, 1, authorizer.requestCount)
-	assert.Equal(t, "host-one", authorizer.host)
-	assert.Equal(t, "/work/project", authorizer.workspace)
-
-	authorizer.bound = false
-	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), newFakeLink())
-	require.NoError(t, err)
-	assert.NotEmpty(t, registration.RunnerID)
-
-	authorizer.err = errors.New("credential lookup failed")
-	_, err = registry.Register(testRegisterParams("host-two", "/work/other"), newFakeLink())
-	require.ErrorContains(t, err, "failed to inspect runner credential binding")
 }
 
 func TestEnsureOfflineRegistrationPreservesIdentityAndRequiresStoppedRunner(t *testing.T) {
@@ -2179,9 +2142,6 @@ func TestSessionValidationAndRPCErrorMapping(t *testing.T) {
 	assert.Equal(t, protocol.ErrorCodeStale, rpcErrorFor(errors.New("stale generation")).Code)
 	assert.Equal(t, protocol.ErrorCodeConflict, rpcErrorFor(errors.New("already registered")).Code)
 	assert.Equal(t, protocol.ErrorCodeInvalidParams, rpcErrorFor(errors.New("invalid input")).Code)
-	legacyAuthError := rpcErrorFor(ErrLegacyAuthKeyEnrolled)
-	assert.Equal(t, protocol.ErrorCodeConflict, legacyAuthError.Code)
-	assert.Equal(t, protocol.ErrorReasonLegacyAuthKeyEnrolled, legacyAuthError.Reason())
 	assert.False(t, isUIRequest("runner.unknown"))
 }
 

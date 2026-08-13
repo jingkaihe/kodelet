@@ -208,7 +208,9 @@ kodelet acp --server https://kodelet.example
 
 The control-plane URL can also be configured once in `~/.kodelet/config.yaml` or an explicitly selected `KODELET_CONFIG_FILE`, or with `KODELET_SERVER=https://kodelet.example`; `kodelet acp` then enters server-backed mode automatically. An explicit `--server` value takes precedence, while repository-level `kodelet-config.yaml` cannot select a control plane.
 
-For an OIDC control plane, authenticate once with `kodelet auth login --server https://kodelet.example`; ACP then discovers the Kodelet-issued user credential stored for that normalized server URL. An explicit `--auth-token` takes precedence over `KODELET_AUTH_TOKEN`, which takes precedence over the stored credential, preserving static administrative tokens as migration and automation overrides. In runner enrollment or hybrid mode, ACP separately loads the current workspace's stored DPoP runner credential when no explicit `--runner-auth-token` or `KODELET_RUNNER_AUTH_TOKEN` is supplied; run `kodelet runner enroll --server https://kodelet.example` from the workspace first. An explicit runner token takes precedence for migration compatibility. If `kodelet runner start` already owns the same canonical workspace for the same server, `kodelet acp --server` reuses the runner ID advertised by that live workspace lock instead. `--runner-profile` selects a runner-local environment profile, while explicit `--profile` and `--reasoning-effort` values select control-plane model policy for new conversations. Server-backed sessions are tied to the current workspace's stable runner identity, may run concurrently across different conversations, and are persisted on the control plane.
+For an OIDC control plane, authenticate once with `kodelet auth login --server https://kodelet.example`. An explicit `--auth-token` takes precedence over `KODELET_AUTH_TOKEN`, which takes precedence over the stored login.
+
+In runner enrollment mode, first run `kodelet runner enroll --server https://kodelet.example` from the workspace. ACP uses the stored runner credential automatically, or reuses a `kodelet runner start` process already serving that workspace. `--runner-profile` selects the runner environment; `--profile` and `--reasoning-effort` select model settings for new conversations.
 
 Use ACP or the TypeScript Agent SDK for programmatic integrations that need structured assistant and tool events.
 
@@ -228,7 +230,7 @@ kodelet serve --auth-token "your-secret-token"
 
 Explicit tokens may contain only letters, numbers, and URL-safe punctuation (`-._~`) so they can be stored safely in the browser auth cookie.
 
-Web authentication modes are `token`, `oidc`, and `none`. Runner authentication modes are `token`, `enrollment`, `hybrid`, and `none`. Use native generic OpenID Connect for browser users with an authorization-code flow, PKCE, state, nonce, provider discovery, verified ID tokens, and opaque server-side sessions:
+Web authentication modes are `token`, `oidc`, and `none`. Runner authentication modes are `token`, `enrollment`, and `none`. Use OIDC for browser sign-in:
 
 ```bash
 install -m 600 /dev/null "$HOME/.kodelet/google-oidc-client-secret"
@@ -272,7 +274,7 @@ serve:
     session_duration: "12h"
 ```
 
-Trusted `serve` configuration also supports `cwd`, `auth_token`, `runner_auth_token`, `skip_auth`, `cors_origins`, and the OIDC keys `allowed_emails` and `allow_any_user`. In token or hybrid mode, omitted tokens retain the normal generated-token behavior. A trusted configuration file containing either static token must be a regular file inaccessible to group and other users, such as mode `0600`; Kodelet's global configuration writers apply user-only permissions automatically. Configured static tokens are never echoed at server startup, while newly generated tokens are displayed once. The OIDC client secret itself is still read from `serve.oidc.client_secret_file` or `--oidc-client-secret-file`, rather than being embedded directly in YAML or a secret-valued flag; its referenced file must likewise be regular, non-empty, and user-only.
+Trusted `serve` configuration also supports `cwd`, `auth_token`, `runner_auth_token`, `skip_auth`, `cors_origins`, and the OIDC keys `allowed_emails` and `allow_any_user`. In token mode, omitted tokens retain the normal generated-token behavior. A trusted configuration file containing either static token must be a regular file inaccessible to group and other users, such as mode `0600`; Kodelet's global configuration writers apply user-only permissions automatically. Configured static tokens are never echoed at server startup, while newly generated tokens are displayed once. The OIDC client secret itself is still read from `serve.oidc.client_secret_file` or `--oidc-client-secret-file`, rather than being embedded directly in YAML or a secret-valued flag; its referenced file must likewise be regular, non-empty, and user-only.
 
 For Google, select or create a Cloud project, configure the Google Auth Platform branding and audience, then open **Google Auth Platform → Clients**, choose **Create client**, and select **Web application**. Add the exact redirect URI supplied to `--oidc-redirect-url`; no JavaScript origin is required for Kodelet's server-side flow. The callback path must be `/auth/oidc/callback`; use `https://kodelet.example/auth/oidc/callback` in production or `http://localhost:8080/auth/oidc/callback` for local testing. Copy the client ID and write only the client-secret value to the protected file. `gcloud iam oauth-clients create` manages IAM OAuth client resources and is not the Google Sign-In Web application client workflow used here.
 
@@ -312,9 +314,8 @@ A workspace-bound runner lets one `kodelet serve` control plane run the central 
 
 The runner modes are:
 
-- `token`: accept only the legacy shared runner token;
-- `enrollment`: accept only browser-approved, key-bound runner credentials;
-- `hybrid`: accept enrollment credentials and retain the shared token for identities that have not yet enrolled;
+- `token`: use a shared runner token;
+- `enrollment`: use a browser-approved credential for each workspace;
 - `none`: disable runner authentication for trusted local-only use.
 
 Start the control plane in legacy token mode with separate credentials for browser/API clients and runners:
@@ -327,7 +328,13 @@ kodelet serve \
 
 When omitted modes resolve to token authentication and either token is absent, `kodelet serve` generates and prints a distinct token for that role. A token supplied through a flag or trusted configuration is reported only as configured and its value is not displayed. `--skip-auth` is compatibility shorthand for `--web-auth-mode=none --runner-auth-mode=none`. Do not reuse the browser token as the runner token.
 
-For a workspace's first enrollment, stop any currently connected legacy runner and then enroll from that workspace:
+Enrollment mode uses a separate credential for each workspace. Start the control plane in enrollment mode:
+
+```bash
+kodelet serve --runner-auth-mode enrollment
+```
+
+Then stop any runner currently using the workspace and enroll it:
 
 ```bash
 cd ~/src/kodelet
@@ -336,11 +343,11 @@ kodelet runner enroll \
   --name kodelet-gpu
 ```
 
-The command prints a short code and opens the verification page when possible. Enter the code, check the runner details and fingerprint, then approve or deny the request. Pending enrollment can resume until it expires. Use `--no-browser` to suppress browser launch, or `--replace` to replace an existing workspace credential after confirmation.
+The command prints a short code and opens the approval page. Confirm the code and runner details before approving. Use `--no-browser` to suppress browser launch or `--replace` to replace an existing credential.
 
-After approval, `kodelet runner start` and server-backed ACP automatically use the stored credential when no explicit runner token is supplied. The runner keeps the Ed25519 private key and opaque access token in user-only local state; the control plane stores only the access-token hash and public key. Every WebSocket connection or reconnect sends `Authorization: DPoP <access-token>` plus a fresh EdDSA-signed RFC 9449 `DPoP` proof JWT whose `jti`, `htm`, `htu`, `iat`, and `ath` claims bind it to that request and token. The server verifies the embedded public JWK, signature, request and token bindings, issuance time, revocation state, and bounded replay record before accepting the upgrade. A copied token without the private key cannot authenticate, and a reused proof is rejected. When a trusted reverse proxy changes the public scheme, host, or path prefix, it must replace client-supplied forwarding headers and send consistent `X-Forwarded-Proto`, `X-Forwarded-Host`, and `X-Forwarded-Prefix` values so the server reconstructs the same public `htu` signed by the runner.
+After approval, `kodelet runner start` and server-backed ACP automatically use the stored credential. Credentials are kept outside the repository in user-only local state. Behind a trusted reverse proxy, set consistent replacement `X-Forwarded-Proto`, `X-Forwarded-Host`, and `X-Forwarded-Prefix` headers.
 
-In `hybrid` mode, an existing shared runner token remains available for legacy identities, but once a host/workspace identity has an active key credential the registry rejects shared-token registration for that identity. Supplying an explicit runner token to `runner start` or ACP takes precedence over local key discovery, so remove that token after migrating an enrolled identity.
+Token and enrollment modes are mutually exclusive. Remove `--runner-auth-token` and `KODELET_RUNNER_AUTH_TOKEN` when using enrollment mode.
 
 Start one runner from each workspace you want to expose:
 

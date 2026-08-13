@@ -227,10 +227,10 @@ func TestResolveServeAuthModes(t *testing.T) {
 			name: "explicit modes are normalized",
 			config: &ServeConfig{
 				WebAuthMode:    " OIDC ",
-				RunnerAuthMode: " Hybrid ",
+				RunnerAuthMode: " Enrollment ",
 			},
 			expectedWebMode:    webui.WebAuthModeOIDC,
-			expectedRunnerMode: webui.RunnerAuthModeHybrid,
+			expectedRunnerMode: webui.RunnerAuthModeEnrollment,
 		},
 		{
 			name: "skip auth resolves both modes to none",
@@ -261,7 +261,7 @@ func TestResolveServeAuthModes(t *testing.T) {
 		{
 			name: "skip auth conflicts with runner mode",
 			config: &ServeConfig{
-				RunnerAuthMode: webui.RunnerAuthModeHybrid,
+				RunnerAuthMode: webui.RunnerAuthModeEnrollment,
 				SkipAuth:       true,
 			},
 			expectedError: "disabled authentication conflicts with a non-none runner authentication mode",
@@ -272,6 +272,13 @@ func TestResolveServeAuthModes(t *testing.T) {
 				WebAuthMode: "password",
 			},
 			expectedError: "invalid web authentication mode",
+		},
+		{
+			name: "hybrid runner mode is unsupported",
+			config: &ServeConfig{
+				RunnerAuthMode: "hybrid",
+			},
+			expectedError: "invalid runner authentication mode",
 		},
 		{
 			name: "invalid runner mode",
@@ -333,7 +340,7 @@ func TestValidateServeAuthConfig(t *testing.T) {
 				config.RunnerAuthMode = webui.RunnerAuthModeEnrollment
 				config.RunnerAuthToken = "runner-token"
 			},
-			expectedError: "runner auth token requires runner authentication mode token or hybrid",
+			expectedError: "runner auth token requires runner authentication mode token",
 		},
 		{
 			name: "enrollment requires web authentication",
@@ -451,18 +458,6 @@ func TestBuildWebUIServerConfigAuthResolution(t *testing.T) {
 		assert.Empty(t, serverConfig.RunnerAuthToken)
 	})
 
-	t.Run("hybrid generates a runner token", func(t *testing.T) {
-		config := NewServeConfig()
-		config.RunnerAuthMode = webui.RunnerAuthModeHybrid
-
-		serverConfig, err := buildWebUIServerConfig(config)
-		require.NoError(t, err)
-
-		assert.Equal(t, webui.RunnerAuthModeHybrid, serverConfig.RunnerAuthMode)
-		assert.NotEmpty(t, serverConfig.RunnerAuthToken)
-		assert.NotEqual(t, serverConfig.AuthToken, serverConfig.RunnerAuthToken)
-	})
-
 	t.Run("skip auth disables both token types", func(t *testing.T) {
 		config := NewServeConfig()
 		config.SkipAuth = true
@@ -551,14 +546,13 @@ func TestGetServeConfigFromFlags_UsesCommaSeparatedCORSOrigins(t *testing.T) {
 
 func TestGetServeConfigFromFlags_UsesTrustedYAMLSettings(t *testing.T) {
 	setTrustedServeConfigForTest(t, map[string]any{
-		"host":              "127.0.0.1",
-		"port":              8443,
-		"cwd":               " /srv/kodelet ",
-		"web_auth_mode":     "oidc",
-		"runner_auth_mode":  "hybrid",
-		"auth_token":        "compat-token",
-		"runner_auth_token": "runner-token",
-		"cors_origins":      []string{"https://app.example.com"},
+		"host":             "127.0.0.1",
+		"port":             8443,
+		"cwd":              " /srv/kodelet ",
+		"web_auth_mode":    "oidc",
+		"runner_auth_mode": "enrollment",
+		"auth_token":       "compat-token",
+		"cors_origins":     []string{"https://app.example.com"},
 		"oidc": map[string]any{
 			"issuer":              "https://issuer.example.com",
 			"client_id":           "kodelet",
@@ -581,9 +575,9 @@ func TestGetServeConfigFromFlags_UsesTrustedYAMLSettings(t *testing.T) {
 	assert.Equal(t, 8443, config.Port)
 	assert.Equal(t, "/srv/kodelet", config.CWD)
 	assert.Equal(t, webui.WebAuthModeOIDC, config.WebAuthMode)
-	assert.Equal(t, webui.RunnerAuthModeHybrid, config.RunnerAuthMode)
+	assert.Equal(t, webui.RunnerAuthModeEnrollment, config.RunnerAuthMode)
 	assert.Equal(t, "compat-token", config.AuthToken)
-	assert.Equal(t, "runner-token", config.RunnerAuthToken)
+	assert.Empty(t, config.RunnerAuthToken)
 	assert.Equal(t, []string{"https://app.example.com"}, config.CORSOrigins)
 	assert.Equal(t, "https://issuer.example.com", config.OIDC.IssuerURL)
 	assert.Equal(t, "kodelet", config.OIDC.ClientID)
@@ -729,9 +723,8 @@ func TestGetServeConfigFromFlags_ParsesAuthenticationFlags(t *testing.T) {
 	cmd := newServeCommandForTest()
 	require.NoError(t, cmd.ParseFlags([]string{
 		"--web-auth-mode=oidc",
-		"--runner-auth-mode=hybrid",
+		"--runner-auth-mode=enrollment",
 		"--auth-token=compat-token",
-		"--runner-auth-token=runner-token",
 		"--oidc-issuer=https://issuer.example.com",
 		"--oidc-client-id=kodelet",
 		"--oidc-client-secret-file=/run/secrets/kodelet-oidc",
@@ -748,9 +741,9 @@ func TestGetServeConfigFromFlags_ParsesAuthenticationFlags(t *testing.T) {
 
 	config := getServeConfigFromFlags(cmd)
 	assert.Equal(t, webui.WebAuthModeOIDC, config.WebAuthMode)
-	assert.Equal(t, webui.RunnerAuthModeHybrid, config.RunnerAuthMode)
+	assert.Equal(t, webui.RunnerAuthModeEnrollment, config.RunnerAuthMode)
 	assert.Equal(t, "compat-token", config.AuthToken)
-	assert.Equal(t, "runner-token", config.RunnerAuthToken)
+	assert.Empty(t, config.RunnerAuthToken)
 	assert.Equal(t, "https://issuer.example.com", config.OIDC.IssuerURL)
 	assert.Equal(t, "kodelet", config.OIDC.ClientID)
 	assert.Equal(t, "/run/secrets/kodelet-oidc", config.OIDCClientSecretFile)

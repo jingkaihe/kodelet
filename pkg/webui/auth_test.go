@@ -77,10 +77,10 @@ func TestServerConfigResolvedAuthModes(t *testing.T) {
 			name: "explicit modes are normalized",
 			config: &ServerConfig{
 				WebAuthMode:    " OIDC ",
-				RunnerAuthMode: " Hybrid ",
+				RunnerAuthMode: " Enrollment ",
 			},
 			wantWeb:    WebAuthModeOIDC,
-			wantRunner: RunnerAuthModeHybrid,
+			wantRunner: RunnerAuthModeEnrollment,
 		},
 		{
 			name: "explicit none wins during resolution",
@@ -126,16 +126,6 @@ func TestServerConfigValidateAuthModes(t *testing.T) {
 				WebAuthMode:    WebAuthModeOIDC,
 				RunnerAuthMode: RunnerAuthModeEnrollment,
 				OIDC:           validOIDC,
-			},
-		},
-		{
-			name: "OIDC hybrid with compatibility admin token",
-			config: ServerConfig{
-				WebAuthMode:     WebAuthModeOIDC,
-				RunnerAuthMode:  RunnerAuthModeHybrid,
-				AuthToken:       "compat-admin-token",
-				RunnerAuthToken: "runner-token",
-				OIDC:            validOIDC,
 			},
 		},
 		{
@@ -219,21 +209,11 @@ func TestServerConfigValidateAuthModes(t *testing.T) {
 			wantErr: "runner enrollment requires web authentication",
 		},
 		{
-			name: "hybrid requires runner token",
+			name: "hybrid is unsupported",
 			config: ServerConfig{
-				WebAuthMode:    WebAuthModeOIDC,
-				RunnerAuthMode: RunnerAuthModeHybrid,
-				OIDC:           validOIDC,
+				RunnerAuthMode: "hybrid",
 			},
-			wantErr: "runner auth token is required when runner authentication mode is hybrid",
-		},
-		{
-			name: "hybrid requires web authentication",
-			config: ServerConfig{
-				RunnerAuthMode:  RunnerAuthModeHybrid,
-				RunnerAuthToken: "runner-token",
-			},
-			wantErr: "runner enrollment requires web authentication",
+			wantErr: "unsupported runner authentication mode",
 		},
 		{
 			name: "unsupported runner mode",
@@ -263,7 +243,6 @@ func TestServerConfigRequiresAuthStore(t *testing.T) {
 	assert.False(t, (&ServerConfig{WebAuthMode: WebAuthModeToken, RunnerAuthMode: RunnerAuthModeToken}).requiresAuthStore())
 	assert.True(t, (&ServerConfig{WebAuthMode: WebAuthModeOIDC}).requiresAuthStore())
 	assert.True(t, (&ServerConfig{RunnerAuthMode: RunnerAuthModeEnrollment}).requiresAuthStore())
-	assert.True(t, (&ServerConfig{RunnerAuthMode: RunnerAuthModeHybrid}).requiresAuthStore())
 }
 
 func TestOIDCConfigValidateIssuerURL(t *testing.T) {

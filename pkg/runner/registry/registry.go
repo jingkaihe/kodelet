@@ -34,8 +34,6 @@ var (
 	ErrRunnerConnected = errors.New("runner is connected")
 	// ErrRunnerActiveRun indicates inconsistent state that still references an active run.
 	ErrRunnerActiveRun = errors.New("runner has an active run")
-	// ErrLegacyAuthKeyEnrolled indicates that a key-enrolled identity cannot use the shared runner token.
-	ErrLegacyAuthKeyEnrolled = errors.New("runner has a key-bound credential and cannot use legacy authentication")
 )
 
 // Link is the live symmetric RPC connection retained for one runner generation.
@@ -67,9 +65,8 @@ type RegistrationPrincipal struct {
 	WorkspacePath  string
 }
 
-// CredentialAuthorizer exposes active key bindings to the runner registry.
+// CredentialAuthorizer validates active key bindings for the runner registry.
 type CredentialAuthorizer interface {
-	HasActiveRunnerCredential(ctx context.Context, hostInstanceID, workspacePath string) (bool, error)
 	RunnerCredentialActive(ctx context.Context, credentialID, runnerID, hostInstanceID, workspacePath string) (bool, error)
 }
 
@@ -507,8 +504,7 @@ func (r *Registry) register(params protocol.RegisterParams, link Link, principal
 		r.mu.Unlock()
 		return protocol.RegisterResult{}, errors.New("runner registry is closed")
 	}
-	switch principal.Mode {
-	case RegistrationAuthKey:
+	if principal.Mode == RegistrationAuthKey {
 		if r.credentials != nil {
 			active, authorizeErr := r.credentials.RunnerCredentialActive(r.ctx, principal.CredentialID, principal.RunnerID, params.Host.InstanceID, params.Workspace.Path)
 			if authorizeErr != nil {
@@ -518,18 +514,6 @@ func (r *Registry) register(params protocol.RegisterParams, link Link, principal
 			if !active {
 				r.mu.Unlock()
 				return protocol.RegisterResult{}, errors.New("runner credential is invalid or revoked")
-			}
-		}
-	case RegistrationAuthLegacy, "":
-		if r.credentials != nil {
-			bound, authorizeErr := r.credentials.HasActiveRunnerCredential(r.ctx, params.Host.InstanceID, params.Workspace.Path)
-			if authorizeErr != nil {
-				r.mu.Unlock()
-				return protocol.RegisterResult{}, errors.Wrap(authorizeErr, "failed to inspect runner credential binding")
-			}
-			if bound {
-				r.mu.Unlock()
-				return protocol.RegisterResult{}, ErrLegacyAuthKeyEnrolled
 			}
 		}
 	}

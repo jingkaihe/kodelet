@@ -10,7 +10,7 @@ Allowed serve listener and authentication settings through CLI flags or the trus
 
 Hardened control-plane secrets by requiring user-only trusted files for persisted static tokens and OIDC client secrets, applying restrictive local credential permissions, and suppressing configured token values at startup.
 
-Added browser-approved `kodelet runner enroll` pairing with manual short-code entry, independently revocable per-runner Ed25519 credentials, and RFC 9449 DPoP-bound opaque access tokens, including secure resumable local enrollment state, replay protection, live-generation key replacement and disconnection, reverse-proxy target reconstruction, and hybrid migration from the legacy shared runner token.
+Added browser-approved `kodelet runner enroll` pairing with manual short-code entry, independently revocable per-runner Ed25519 credentials, and RFC 9449 DPoP-bound opaque access tokens, including secure resumable local enrollment state, replay protection, live-generation key replacement and disconnection, and reverse-proxy target reconstruction.
 
 Changed runner removal to preserve control-plane conversations, summaries, and transcripts while clearing concrete runner affinity, credentials, registration state, and runner-run history so preserved conversations can later be explicitly rebound to a compatible runner.
 

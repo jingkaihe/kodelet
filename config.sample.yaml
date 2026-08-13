@@ -20,7 +20,7 @@ log_format: "json"
 # kodelet-config.yaml cannot set this namespace. Explicit CLI flags override the
 # corresponding trusted YAML values; serve and OIDC policy is not read from
 # KODELET_SERVE_* environment variables. Web modes: token, oidc, none. Runner
-# modes: token, enrollment, hybrid, none.
+# modes: token, enrollment, none.
 # serve:
 #   host: "0.0.0.0"
 #   port: 8080
@@ -29,7 +29,7 @@ log_format: "json"
 #   runner_auth_mode: "enrollment"
 #   # Optional static administrative migration or automation credential.
 #   # auth_token: "generate-a-long-random-token"
-#   # Legacy shared runner token for token or hybrid mode only.
+#   # Legacy shared runner token for token mode only.
 #   # runner_auth_token: "generate-a-different-long-random-token"
 #   # Compatibility shorthand for web_auth_mode: none and runner_auth_mode: none.
 #   skip_auth: false

@@ -193,10 +193,7 @@ func TestAuthStoreRunnerEnrollmentApprovalPollingAndReplacement(t *testing.T) {
 	assert.Equal(t, protocol.DPoPAuthorizationScheme, polled.TokenType)
 	assert.Equal(t, "runner-one", polled.RunnerID)
 	assert.Equal(t, pending.Fingerprint, polled.Fingerprint)
-	active, err := store.HasActiveRunnerCredential(t.Context(), "host-one", "/work/project")
-	require.NoError(t, err)
-	assert.True(t, active)
-	active, err = store.RunnerCredentialActive(t.Context(), firstCredentialID, "runner-one", "host-one", "/work/project")
+	active, err := store.RunnerCredentialActive(t.Context(), firstCredentialID, "runner-one", "host-one", "/work/project")
 	require.NoError(t, err)
 	assert.True(t, active)
 

@@ -29,12 +29,12 @@ func runnerPrincipalFromContext(ctx context.Context) (runnerregistry.Registratio
 
 func (s *Server) authenticateRunnerRequest(w http.ResponseWriter, r *http.Request) (runnerregistry.RegistrationPrincipal, bool) {
 	mode := s.config.resolvedRunnerAuthMode()
-	accessToken, proof, hasDPoP, validDPoPHeaders := runnerDPoPHeaders(r)
+	accessToken, proof, _, validDPoPHeaders := runnerDPoPHeaders(r)
 
 	if mode == RunnerAuthModeNone {
 		return runnerregistry.RegistrationPrincipal{Mode: runnerregistry.RegistrationAuthLegacy}, true
 	}
-	if mode == RunnerAuthModeEnrollment || (mode == RunnerAuthModeHybrid && hasDPoP) {
+	if mode == RunnerAuthModeEnrollment {
 		if !validDPoPHeaders || s.authStore == nil {
 			setRunnerDPoPAuthenticateHeader(w, "")
 			s.writeAuthError(w, r, http.StatusUnauthorized, "runner DPoP authentication required")
@@ -59,7 +59,7 @@ func (s *Server) authenticateRunnerRequest(w http.ResponseWriter, r *http.Reques
 			WorkspacePath:  identity.WorkspacePath,
 		}, true
 	}
-	if mode == RunnerAuthModeToken || (mode == RunnerAuthModeHybrid && !hasDPoP) {
+	if mode == RunnerAuthModeToken {
 		if s.config.RunnerAuthToken == "" || !constantTimeStringEqual(authHeaderToken(r.Header.Get("Authorization")), s.config.RunnerAuthToken) {
 			s.writeAuthError(w, r, http.StatusUnauthorized, "runner authentication required")
 			return runnerregistry.RegistrationPrincipal{}, false
@@ -312,8 +312,7 @@ func (s *Server) renderRunnerEnrollmentPage(w http.ResponseWriter, data runnerEn
 }
 
 func (s *Server) runnerEnrollmentEnabled() bool {
-	mode := s.config.resolvedRunnerAuthMode()
-	return mode == RunnerAuthModeEnrollment || mode == RunnerAuthModeHybrid
+	return s.config.resolvedRunnerAuthMode() == RunnerAuthModeEnrollment
 }
 
 func csrfCookieValue(r *http.Request) string {

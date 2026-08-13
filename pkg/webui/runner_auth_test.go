@@ -64,16 +64,16 @@ func TestRunnerWebsocketKeyProofAuthenticationAndReplayProtection(t *testing.T) 
 	assert.Equal(t, time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC), lastUsedAt.UTC())
 }
 
-func TestHybridRunnerTokenCannotRegisterAsKeyBoundIdentity(t *testing.T) {
-	server, _, _, _, _ := newRunnerAuthIntegrationServer(t, RunnerAuthModeHybrid)
+func TestTokenRunnerCanRegisterIdentityWithStoredEnrollmentCredential(t *testing.T) {
+	server, _, _, _, _ := newRunnerAuthIntegrationServer(t, RunnerAuthModeToken)
 	httpServer := httptest.NewServer(server.router)
 	t.Cleanup(httpServer.Close)
 	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + protocol.Endpoint
 
 	peer := dialRunnerPeer(t, wsURL, http.Header{"Authorization": []string{"Bearer legacy-runner-token"}})
 	var registration protocol.RegisterResult
-	err := peer.Call(t.Context(), protocol.MethodRunnerRegister, testRunnerAuthRegisterParams("runner-proof", "host-proof", "/work/proof"), &registration)
-	require.ErrorContains(t, err, "cannot use legacy authentication")
+	require.NoError(t, peer.Call(t.Context(), protocol.MethodRunnerRegister, testRunnerAuthRegisterParams("runner-proof", "host-proof", "/work/proof"), &registration))
+	assert.Equal(t, "runner-proof", registration.RunnerID)
 	require.NoError(t, peer.Close())
 
 	dialer := websocket.Dialer{Subprotocols: []string{protocol.Subprotocol}}
@@ -260,7 +260,7 @@ func newRunnerAuthIntegrationServer(t *testing.T, mode RunnerAuthMode) (*Server,
 		AuthToken:      "web-token",
 		RunnerAuthMode: mode,
 	}
-	if mode == RunnerAuthModeHybrid || mode == RunnerAuthModeToken {
+	if mode == RunnerAuthModeToken {
 		config.RunnerAuthToken = "legacy-runner-token"
 	}
 	server := &Server{

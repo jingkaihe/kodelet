@@ -43,7 +43,7 @@ To use a remote control-plane agentic loop while retaining local workspace tools
 kodelet acp --server https://kodelet.example
 ```
 
-For an OIDC control plane, run `kodelet auth login --server https://kodelet.example`; ACP automatically uses the resulting Kodelet-issued per-server credential. An explicit `--auth-token` takes precedence over `KODELET_AUTH_TOKEN`, which takes precedence over stored login state. In runner enrollment mode, ACP separately uses the current workspace's stored DPoP credential when no explicit `--runner-auth-token` or `KODELET_RUNNER_AUTH_TOKEN` is supplied; enroll first with `kodelet runner enroll --server https://kodelet.example`. An explicit runner token takes precedence for legacy migration. If a same-server `kodelet runner start` process already owns the current workspace, ACP reuses that runner; different ACP sessions can run concurrently through it.
+For an OIDC control plane, run `kodelet auth login --server https://kodelet.example`; ACP automatically uses the resulting Kodelet-issued per-server credential. An explicit `--auth-token` takes precedence over `KODELET_AUTH_TOKEN`, which takes precedence over stored login state. In runner enrollment mode, ACP separately uses the current workspace's stored DPoP credential when no explicit `--runner-auth-token` or `KODELET_RUNNER_AUTH_TOKEN` is supplied; enroll first with `kodelet runner enroll --server https://kodelet.example`. Runner tokens are used only with runner token mode. If a same-server `kodelet runner start` process already owns the current workspace, ACP reuses that runner; different ACP sessions can run concurrently through it.
 
 Example Zed-style configuration:
 
@@ -104,7 +104,7 @@ kodelet runner enroll --server https://kodelet.example --name project-runner
 kodelet runner start --server https://kodelet.example
 ```
 
-Enrollment opens a browser approval flow and stores a workspace-bound opaque access token and Ed25519 private key outside the repository. Each runner WebSocket connection sends a fresh RFC 9449 DPoP proof bound to the token, request method, and target URL; replayed proofs are rejected. A `--replace` enrollment can revoke and disconnect an existing enrolled generation after separate browser confirmation. Use runner `hybrid` mode during migration from the legacy shared token; after an identity is enrolled, shared-token registration for that host/workspace is rejected. Loopback CORS origins are allowed by default; use `--cors-origins` for additional browser origins.
+Enrollment opens a browser approval flow and stores a workspace-bound opaque access token and Ed25519 private key outside the repository. Each runner WebSocket connection sends a fresh RFC 9449 DPoP proof bound to the token, request method, and target URL; replayed proofs are rejected. A `--replace` enrollment can revoke and disconnect an existing enrolled generation after separate browser confirmation. Token and enrollment authentication are mutually exclusive runner modes; remove any explicit runner token when using enrollment mode. Loopback CORS origins are allowed by default; use `--cors-origins` for additional browser origins.
 
 ## Project context
 

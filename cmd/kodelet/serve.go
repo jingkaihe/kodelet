@@ -112,9 +112,9 @@ func addServeFlags(cmd *cobra.Command, defaults *ServeConfig) {
 	cmd.Flags().Int("port", defaults.Port, "Port to bind the web server to")
 	cmd.Flags().String("cwd", defaults.CWD, "Default working directory for new web conversations")
 	cmd.Flags().String("web-auth-mode", string(defaults.WebAuthMode), "Web authentication mode: token, oidc, or none (default: token)")
-	cmd.Flags().String("runner-auth-mode", string(defaults.RunnerAuthMode), "Runner authentication mode: token, enrollment, hybrid, or none (default: token)")
+	cmd.Flags().String("runner-auth-mode", string(defaults.RunnerAuthMode), "Runner authentication mode: token, enrollment, or none (default: token)")
 	cmd.Flags().String("auth-token", defaults.AuthToken, "Web UI token; generated in token mode, or used as an admin compatibility credential in OIDC mode")
-	cmd.Flags().String("runner-auth-token", defaults.RunnerAuthToken, "Runner registration token; generated in token and hybrid modes")
+	cmd.Flags().String("runner-auth-token", defaults.RunnerAuthToken, "Runner registration token; generated in token mode")
 	cmd.Flags().Bool("skip-auth", defaults.SkipAuth, "Compatibility shorthand for --web-auth-mode=none --runner-auth-mode=none")
 	cmd.Flags().String("oidc-issuer", defaults.OIDC.IssuerURL, "OIDC issuer URL")
 	cmd.Flags().String("oidc-client-id", defaults.OIDC.ClientID, "OIDC client ID")
@@ -349,9 +349,9 @@ func validateServeConfig(config *ServeConfig) error {
 		return errors.New("runner auth token cannot be used when runner authentication mode is none")
 	}
 	if runnerAuthMode == webui.RunnerAuthModeEnrollment && config.RunnerAuthToken != "" {
-		return errors.New("runner auth token requires runner authentication mode token or hybrid")
+		return errors.New("runner auth token requires runner authentication mode token")
 	}
-	if (runnerAuthMode == webui.RunnerAuthModeEnrollment || runnerAuthMode == webui.RunnerAuthModeHybrid) && webAuthMode == webui.WebAuthModeNone {
+	if runnerAuthMode == webui.RunnerAuthModeEnrollment && webAuthMode == webui.WebAuthModeNone {
 		return errors.New("runner enrollment requires web authentication")
 	}
 	if webAuthMode == webui.WebAuthModeOIDC {
@@ -374,7 +374,7 @@ func validateServeConfig(config *ServeConfig) error {
 		if redirectURL.Path != oidcCallbackPath {
 			return errors.Errorf("OIDC redirect URL path must be %s", oidcCallbackPath)
 		}
-		if (runnerAuthMode == webui.RunnerAuthModeEnrollment || runnerAuthMode == webui.RunnerAuthModeHybrid) && config.AuthToken == "" && len(oidcConfig.AdminEmails) == 0 && len(oidcConfig.RunnerAdminEmails) == 0 {
+		if runnerAuthMode == webui.RunnerAuthModeEnrollment && config.AuthToken == "" && len(oidcConfig.AdminEmails) == 0 && len(oidcConfig.RunnerAdminEmails) == 0 {
 			return errors.New("OIDC runner enrollment requires a runner-admin/admin email or an administrative compatibility token")
 		}
 	}
@@ -422,9 +422,9 @@ func resolveServeAuthModes(config *ServeConfig) (webui.WebAuthMode, webui.Runner
 		runnerAuthMode = webui.RunnerAuthModeToken
 	}
 	switch runnerAuthMode {
-	case webui.RunnerAuthModeToken, webui.RunnerAuthModeEnrollment, webui.RunnerAuthModeHybrid, webui.RunnerAuthModeNone:
+	case webui.RunnerAuthModeToken, webui.RunnerAuthModeEnrollment, webui.RunnerAuthModeNone:
 	default:
-		return "", "", errors.Errorf("invalid runner authentication mode %q: must be token, enrollment, hybrid, or none", config.RunnerAuthMode)
+		return "", "", errors.Errorf("invalid runner authentication mode %q: must be token, enrollment, or none", config.RunnerAuthMode)
 	}
 
 	return webAuthMode, runnerAuthMode, nil
@@ -481,7 +481,7 @@ func buildWebUIServerConfig(config *ServeConfig) (*webui.ServerConfig, error) {
 			return nil, errors.Wrap(err, "failed to generate web auth token")
 		}
 	}
-	if (runnerAuthMode == webui.RunnerAuthModeToken || runnerAuthMode == webui.RunnerAuthModeHybrid) && runnerAuthToken == "" {
+	if runnerAuthMode == webui.RunnerAuthModeToken && runnerAuthToken == "" {
 		for runnerAuthToken == "" || runnerAuthToken == authToken {
 			runnerAuthToken, err = webui.NewAuthToken()
 			if err != nil {
@@ -581,14 +581,6 @@ func runServeCommand(ctx context.Context, config *ServeConfig) {
 		}
 	case webui.RunnerAuthModeEnrollment:
 		presenter.Info("Runner authentication mode: enrollment")
-		presenter.Info(fmt.Sprintf("Approve runner enrollments at: %s/runner/enroll", baseURL))
-	case webui.RunnerAuthModeHybrid:
-		presenter.Info("Runner authentication mode: hybrid (token or enrollment)")
-		if runnerTokenConfigured {
-			presenter.Info("Runner authentication token: configured (value not displayed)")
-		} else {
-			presenter.Info(fmt.Sprintf("Runner authentication token: %s", serverConfig.RunnerAuthToken))
-		}
 		presenter.Info(fmt.Sprintf("Approve runner enrollments at: %s/runner/enroll", baseURL))
 	case webui.RunnerAuthModeNone:
 		if config.SkipAuth {

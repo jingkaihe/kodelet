@@ -64,10 +64,9 @@ const (
 )
 
 const (
-	ErrorReasonRunnerNotFound        = "runner_not_found"
-	ErrorReasonRunNotActive          = "run_not_active"
-	ErrorReasonResultTooLarge        = "result_too_large"
-	ErrorReasonLegacyAuthKeyEnrolled = "legacy_auth_key_enrolled"
+	ErrorReasonRunnerNotFound = "runner_not_found"
+	ErrorReasonRunNotActive   = "run_not_active"
+	ErrorReasonResultTooLarge = "result_too_large"
 )
 
 // RPCErrorData carries stable machine-readable error details.
