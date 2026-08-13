@@ -412,6 +412,7 @@ func TestServer_corsMiddleware(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, "http://localhost:3000", w.Header().Get("Access-Control-Allow-Origin"))
 		assert.Equal(t, "Origin", w.Header().Get("Vary"))
+		assert.Contains(t, w.Header().Get("Access-Control-Allow-Headers"), webCSRFHeaderName)
 	})
 
 	t.Run("allows ipv4 loopback origin by default", func(t *testing.T) {
@@ -554,7 +555,7 @@ func TestServer_authMiddleware(t *testing.T) {
 
 	t.Run("sets secure cookie for forwarded https token request", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/api/chat/settings?token=secret-token", nil)
-		req.Header.Set("X-Forwarded-Proto", "https")
+		req.Header.Set("X-Forwarded-Proto", "https, http")
 		w := httptest.NewRecorder()
 
 		handler.ServeHTTP(w, req)
@@ -562,6 +563,18 @@ func TestServer_authMiddleware(t *testing.T) {
 		assert.Equal(t, http.StatusNoContent, w.Code)
 		require.Len(t, w.Result().Cookies(), 1)
 		assert.True(t, w.Result().Cookies()[0].Secure)
+	})
+
+	t.Run("uses the first forwarded protocol value", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/chat/settings?token=secret-token", nil)
+		req.Header.Set("X-Forwarded-Proto", "http, https")
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNoContent, w.Code)
+		require.Len(t, w.Result().Cookies(), 1)
+		assert.False(t, w.Result().Cookies()[0].Secure)
 	})
 }
 

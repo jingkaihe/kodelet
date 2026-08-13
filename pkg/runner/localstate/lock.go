@@ -11,10 +11,8 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/rogpeppe/go-internal/lockedfile"
+	"golang.org/x/sys/unix"
 )
-
-const workspaceLockAttemptTimeout = 250 * time.Millisecond
 
 // LockMetadata is diagnostic process information stored in the advisory lock file.
 type LockMetadata struct {
@@ -32,7 +30,7 @@ type LockMetadata struct {
 // WorkspaceLock holds the OS-level advisory lock for one canonical workspace.
 type WorkspaceLock struct {
 	mu       sync.Mutex
-	file     *lockedfile.File
+	file     *os.File
 	path     string
 	metadata LockMetadata
 	closed   bool
@@ -235,34 +233,31 @@ func (l *WorkspaceLock) Close() error {
 	return closeErr
 }
 
-type workspaceLockResult struct {
-	file *lockedfile.File
-	err  error
-}
-
-func openWorkspaceLockFile(path string) (*lockedfile.File, bool, error) {
-	result := make(chan workspaceLockResult)
-	abandoned := make(chan struct{})
-	go func() {
-		file, err := lockedfile.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
-		select {
-		case result <- workspaceLockResult{file: file, err: err}:
-		case <-abandoned:
-			if file != nil {
-				_ = file.Close()
-			}
+func openWorkspaceLockFile(path string) (*os.File, bool, error) {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, false, err
+	}
+	for {
+		err = unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+		if !errors.Is(err, unix.EINTR) {
+			break
 		}
-	}()
-
-	timer := time.NewTimer(workspaceLockAttemptTimeout)
-	defer timer.Stop()
-	select {
-	case opened := <-result:
-		return opened.file, false, opened.err
-	case <-timer.C:
-		close(abandoned)
+	}
+	if err == nil {
+		return file, false, nil
+	}
+	closeErr := file.Close()
+	if errors.Is(err, unix.EWOULDBLOCK) || errors.Is(err, unix.EAGAIN) {
+		if closeErr != nil {
+			return nil, false, errors.Wrap(closeErr, "failed to close runner workspace lock probe")
+		}
 		return nil, true, nil
 	}
+	if closeErr != nil {
+		return nil, false, errors.Wrapf(err, "failed to lock runner workspace; closing lock file also failed: %v", closeErr)
+	}
+	return nil, false, &os.PathError{Op: "flock", Path: path, Err: err}
 }
 
 func readLockMetadata(path string) (LockMetadata, error) {

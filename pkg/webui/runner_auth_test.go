@@ -108,6 +108,28 @@ func TestPublicRunnerAuthEndpointsHideStoreErrors(t *testing.T) {
 	assert.Contains(t, recorder.Body.String(), "failed to poll runner enrollment")
 }
 
+func TestStartRunnerEnrollmentUsesForwardedExternalURL(t *testing.T) {
+	store, _ := newAuthStoreTest(t)
+	server := &Server{
+		config:    &ServerConfig{RunnerAuthMode: RunnerAuthModeEnrollment},
+		authStore: store,
+	}
+	payload, err := json.Marshal(testEnrollmentRequest(t, "host-forwarded", "/work/forwarded", "forwarded", 0x74))
+	require.NoError(t, err)
+	request := httptest.NewRequest(http.MethodPost, "http://runner-backend.internal"+protocol.EnrollmentStartPath, strings.NewReader(string(payload)))
+	request.Header.Set("X-Forwarded-Proto", "https, http")
+	request.Header.Set("X-Forwarded-Host", "kodelet.example:8443")
+	request.Header.Set("X-Forwarded-Prefix", "/control")
+	response := httptest.NewRecorder()
+
+	server.handleStartRunnerEnrollment(response, request)
+
+	require.Equal(t, http.StatusCreated, response.Code)
+	var started protocol.EnrollmentStartResponse
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &started))
+	assert.Equal(t, "https://kodelet.example:8443/control/runner/enroll", started.VerificationURL)
+}
+
 func TestRunnerEnrollmentDecisionRequiresSameOrigin(t *testing.T) {
 	tests := []struct {
 		name    string

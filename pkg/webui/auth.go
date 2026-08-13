@@ -23,6 +23,7 @@ const (
 	webUIAuthCookieName  = "kodelet_auth_token"
 	webSessionCookieName = "kodelet_session"
 	webCSRFCookieName    = "kodelet_csrf"
+	webCSRFHeaderName    = "X-CSRF-Token"
 	oidcStateCookieName  = "kodelet_oidc_state"
 	oidcCallbackPath     = "/auth/oidc/callback"
 )
@@ -588,6 +589,17 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 					return
 				}
 				if found {
+					if strings.HasPrefix(r.URL.Path, "/api/") && !isSafeHTTPMethod(r.Method) {
+						valid, csrfErr := s.webSessionCSRFValid(r, session.ID)
+						if csrfErr != nil {
+							s.writeAuthError(w, r, http.StatusInternalServerError, "failed to validate CSRF token")
+							return
+						}
+						if !valid {
+							s.writeAuthError(w, r, http.StatusForbidden, "invalid CSRF token")
+							return
+						}
+					}
 					principal := principalFromWebSession(session)
 					next.ServeHTTP(w, r.WithContext(contextWithPrincipal(r.Context(), principal)))
 					return
@@ -665,6 +677,43 @@ func isPublicAuthPath(path string) bool {
 	}
 }
 
+func isSafeHTTPMethod(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Server) webSessionCSRFValid(r *http.Request, sessionID string) (bool, error) {
+	if s == nil || s.authStore == nil || r == nil {
+		return false, errors.New("authentication store is unavailable")
+	}
+	headerValues := r.Header.Values(webCSRFHeaderName)
+	if len(headerValues) != 1 {
+		return false, nil
+	}
+	headerToken := strings.TrimSpace(headerValues[0])
+	if headerToken == "" || headerToken != headerValues[0] {
+		return false, nil
+	}
+	cookieTokens := make([]string, 0, 1)
+	for _, cookie := range r.Cookies() {
+		if cookie.Name == webCSRFCookieName {
+			cookieTokens = append(cookieTokens, cookie.Value)
+		}
+	}
+	if len(cookieTokens) != 1 {
+		return false, nil
+	}
+	cookieToken := strings.TrimSpace(cookieTokens[0])
+	if cookieToken == "" || cookieToken != cookieTokens[0] || !constantTimeStringEqual(headerToken, cookieToken) {
+		return false, nil
+	}
+	return s.authStore.WebSessionCSRFValid(r.Context(), sessionID, headerToken)
+}
+
 func explicitAuthorizationHeader(r *http.Request) (string, bool) {
 	if r == nil {
 		return "", false
@@ -717,7 +766,7 @@ func sanitizeReturnTo(value string) string {
 func setWebSessionCookies(w http.ResponseWriter, r *http.Request, sessionToken, csrfToken string, duration time.Duration) {
 	maxAge := int(duration.Seconds())
 	http.SetCookie(w, &http.Cookie{Name: webSessionCookieName, Value: sessionToken, Path: "/", MaxAge: maxAge, HttpOnly: true, Secure: isHTTPSRequest(r), SameSite: http.SameSiteLaxMode})
-	http.SetCookie(w, &http.Cookie{Name: webCSRFCookieName, Value: csrfToken, Path: "/", MaxAge: maxAge, HttpOnly: false, Secure: isHTTPSRequest(r), SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: webCSRFCookieName, Value: csrfToken, Path: "/", MaxAge: maxAge, HttpOnly: false, Secure: isHTTPSRequest(r), SameSite: http.SameSiteLaxMode})
 }
 
 func clearCookie(w http.ResponseWriter, r *http.Request, name, path string, httpOnly bool) {

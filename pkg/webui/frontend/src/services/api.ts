@@ -23,17 +23,21 @@ import {
 
 class ApiService {
 	private baseUrl = "";
+	private csrfCookieName = "kodelet_csrf";
+	private csrfHeaderName = "X-CSRF-Token";
 
 	private async request<T>(
 		endpoint: string,
 		options: RequestInit = {},
 	): Promise<T> {
+		const { headers, ...requestOptions } = options;
 		const response = await fetch(`${this.baseUrl}${endpoint}`, {
+			...requestOptions,
 			headers: {
 				"Content-Type": "application/json",
-				...options.headers,
+				...headers,
+				...this.getCSRFHeaders(requestOptions.method),
 			},
-			...options,
 		});
 
 		if (!response.ok) {
@@ -70,6 +74,38 @@ class ApiService {
 
 		const normalized = rawValue.trim().toLowerCase();
 		return normalized || undefined;
+	}
+
+	private getCSRFCookie(): string {
+		if (typeof document === "undefined") {
+			return "";
+		}
+		const prefix = `${this.csrfCookieName}=`;
+		const cookie = document.cookie
+			.split(";")
+			.map((value) => value.trim())
+			.find((value) => value.startsWith(prefix));
+		if (!cookie) {
+			return "";
+		}
+		const value = cookie.slice(prefix.length);
+		try {
+			return decodeURIComponent(value);
+		} catch {
+			return value;
+		}
+	}
+
+	private getCSRFHeaders(method = "GET"): Record<string, string> {
+		switch (method.toUpperCase()) {
+			case "GET":
+			case "HEAD":
+			case "OPTIONS":
+			case "TRACE":
+				return {};
+		}
+		const token = this.getCSRFCookie();
+		return token ? { [this.csrfHeaderName]: token } : {};
 	}
 
 	async getConversations(
@@ -264,6 +300,7 @@ class ApiService {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
+				...this.getCSRFHeaders("POST"),
 			},
 			body: JSON.stringify(request),
 			signal: options.signal,

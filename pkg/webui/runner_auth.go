@@ -324,11 +324,24 @@ func csrfCookieValue(r *http.Request) string {
 }
 
 func requestAbsoluteURL(r *http.Request, path string) string {
+	if r == nil {
+		return ""
+	}
 	scheme := "http"
 	if isHTTPSRequest(r) {
 		scheme = "https"
 	}
-	result := &url.URL{Scheme: scheme, Host: r.Host, Path: path}
+	host := r.Host
+	if forwardedHost := firstForwardedValue(r.Header.Get("X-Forwarded-Host")); validForwardedHost(forwardedHost) {
+		host = forwardedHost
+	}
+	requestPath := path
+	if requestPath != "" {
+		if prefix := firstForwardedValue(r.Header.Get("X-Forwarded-Prefix")); validForwardedPrefix(prefix) {
+			requestPath = strings.TrimRight(prefix, "/") + "/" + strings.TrimLeft(requestPath, "/")
+		}
+	}
+	result := &url.URL{Scheme: scheme, Host: host, Path: requestPath}
 	return result.String()
 }
 
@@ -336,19 +349,7 @@ func runnerDPoPTargetURL(r *http.Request) string {
 	if r == nil {
 		return ""
 	}
-	host := r.Host
-	if forwardedHost := firstForwardedValue(r.Header.Get("X-Forwarded-Host")); validForwardedHost(forwardedHost) {
-		host = forwardedHost
-	}
-	requestPath := r.URL.Path
-	if prefix := firstForwardedValue(r.Header.Get("X-Forwarded-Prefix")); validForwardedPrefix(prefix) {
-		requestPath = strings.TrimRight(prefix, "/") + "/" + strings.TrimLeft(requestPath, "/")
-	}
-	scheme := "http"
-	if isHTTPSRequest(r) {
-		scheme = "https"
-	}
-	return (&url.URL{Scheme: scheme, Host: host, Path: requestPath}).String()
+	return requestAbsoluteURL(r, r.URL.Path)
 }
 
 func firstForwardedValue(value string) string {

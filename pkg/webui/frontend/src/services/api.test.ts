@@ -19,6 +19,7 @@ describe("ApiService", () => {
 
 	afterEach(() => {
 		vi.clearAllMocks();
+		document.cookie = "kodelet_csrf=; Max-Age=0; Path=/";
 	});
 
 	describe("request method", () => {
@@ -36,6 +37,37 @@ describe("ApiService", () => {
 					headers: expect.objectContaining({
 						"Content-Type": "application/json",
 					}),
+				}),
+			);
+		});
+
+		it("adds CSRF headers only to unsafe requests", async () => {
+			document.cookie = "kodelet_csrf=csrf-api; Path=/";
+			mockFetch
+				.mockResolvedValueOnce({
+					ok: true,
+					json: async () => ({ conversations: [], total: 0 }),
+				})
+				.mockResolvedValueOnce({ ok: true, status: 204 });
+
+			await apiService.getConversations();
+			await apiService.deleteConversation("conv-123");
+
+			expect(mockFetch).toHaveBeenNthCalledWith(
+				1,
+				"/api/conversations",
+				expect.objectContaining({
+					headers: expect.not.objectContaining({
+						"X-CSRF-Token": expect.any(String),
+					}),
+				}),
+			);
+			expect(mockFetch).toHaveBeenNthCalledWith(
+				2,
+				"/api/conversations/conv-123",
+				expect.objectContaining({
+					method: "DELETE",
+					headers: expect.objectContaining({ "X-CSRF-Token": "csrf-api" }),
 				}),
 			);
 		});
@@ -603,6 +635,7 @@ describe("ApiService", () => {
 
 	describe("streamChat", () => {
 		it("streams newline-delimited chat events", async () => {
+			document.cookie = "kodelet_csrf=csrf-stream; Path=/";
 			const onEvent = vi.fn();
 			const encoder = new TextEncoder();
 
@@ -631,6 +664,7 @@ describe("ApiService", () => {
 				"/api/chat",
 				expect.objectContaining({
 					method: "POST",
+					headers: expect.objectContaining({ "X-CSRF-Token": "csrf-stream" }),
 					body: JSON.stringify({ message: "hello" }),
 				}),
 			);

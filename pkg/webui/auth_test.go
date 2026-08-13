@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -554,7 +555,7 @@ func TestOIDCLoginCallbackCreatesAuthenticatedSession(t *testing.T) {
 	csrfCookie := responseCookie(t, callbackResponse.Result().Cookies(), webCSRFCookieName)
 	assert.True(t, sessionCookie.HttpOnly)
 	assert.False(t, csrfCookie.HttpOnly)
-	assert.Equal(t, http.SameSiteStrictMode, csrfCookie.SameSite)
+	assert.Equal(t, http.SameSiteLaxMode, csrfCookie.SameSite)
 
 	session, found, err := store.LoadWebSession(t.Context(), sessionCookie.Value)
 	require.NoError(t, err)
@@ -630,6 +631,74 @@ func TestAuthMiddlewareAndRoleAuthorization(t *testing.T) {
 	request = httptest.NewRequest(http.MethodGet, "/api/runners", nil)
 	response = httptest.NewRecorder()
 	adminHandler.ServeHTTP(response, request)
+	assert.Equal(t, http.StatusNoContent, response.Code)
+}
+
+func TestAuthMiddlewareRequiresCSRFForWebSessionWrites(t *testing.T) {
+	store, _ := newAuthStoreTest(t)
+	sessionToken, csrfToken, err := store.CreateWebSession(t.Context(), "issuer", "subject", "User", "user@example.com", []string{string(RoleUser)}, time.Hour)
+	require.NoError(t, err)
+	server := &Server{
+		config:    &ServerConfig{WebAuthMode: WebAuthModeOIDC, AuthToken: "compat-admin-token"},
+		authStore: store,
+	}
+	handler := server.authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		principal, ok := principalFromContext(r.Context())
+		require.True(t, ok)
+		assert.Equal(t, "issuer|subject", principal.ID)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	request := httptest.NewRequest(http.MethodGet, "/api/chat/settings", nil)
+	request.AddCookie(&http.Cookie{Name: webSessionCookieName, Value: sessionToken})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	assert.Equal(t, http.StatusNoContent, response.Code)
+
+	request = httptest.NewRequest(http.MethodPost, "/runner/enroll", nil)
+	request.AddCookie(&http.Cookie{Name: webSessionCookieName, Value: sessionToken})
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	assert.Equal(t, http.StatusNoContent, response.Code)
+
+	for _, test := range []struct {
+		name         string
+		cookieTokens []string
+		headerTokens []string
+		expectedCode int
+	}{
+		{name: "missing token", expectedCode: http.StatusForbidden},
+		{name: "cookie only", cookieTokens: []string{csrfToken}, expectedCode: http.StatusForbidden},
+		{name: "header only", headerTokens: []string{csrfToken}, expectedCode: http.StatusForbidden},
+		{name: "mismatched token", cookieTokens: []string{csrfToken}, headerTokens: []string{"wrong-token"}, expectedCode: http.StatusForbidden},
+		{name: "duplicate cookie", cookieTokens: []string{csrfToken, csrfToken}, headerTokens: []string{csrfToken}, expectedCode: http.StatusForbidden},
+		{name: "duplicate header", cookieTokens: []string{csrfToken}, headerTokens: []string{csrfToken, csrfToken}, expectedCode: http.StatusForbidden},
+		{name: "valid token", cookieTokens: []string{csrfToken}, headerTokens: []string{csrfToken}, expectedCode: http.StatusNoContent},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/api/chat", strings.NewReader(`{"message":"run a tool"}`))
+			request.Header.Set("Content-Type", "text/plain")
+			request.AddCookie(&http.Cookie{Name: webSessionCookieName, Value: sessionToken})
+			for _, token := range test.cookieTokens {
+				request.AddCookie(&http.Cookie{Name: webCSRFCookieName, Value: token})
+			}
+			for _, token := range test.headerTokens {
+				request.Header.Add(webCSRFHeaderName, token)
+			}
+			response := httptest.NewRecorder()
+
+			handler.ServeHTTP(response, request)
+
+			assert.Equal(t, test.expectedCode, response.Code)
+		})
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/api/chat", strings.NewReader(`{"message":"run a tool"}`))
+	request.Header.Set("Authorization", "Bearer compat-admin-token")
+	response = httptest.NewRecorder()
+	server.authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})).ServeHTTP(response, request)
 	assert.Equal(t, http.StatusNoContent, response.Code)
 }
 

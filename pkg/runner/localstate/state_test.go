@@ -275,6 +275,23 @@ func TestWorkspaceLockMetadataCanBeReadAcrossLifecycle(t *testing.T) {
 	require.ErrorContains(t, (*WorkspaceLock)(nil).WriteMetadata(LockMetadata{}), "runner workspace lock is required")
 }
 
+func TestWorkspaceLockHeldProbesDoNotBlock(t *testing.T) {
+	store, err := NewStoreAt(t.TempDir())
+	require.NoError(t, err)
+	workspace := "/work/project"
+	lock, err := store.AcquireWorkspaceLock(workspace, LockMetadata{PID: os.Getpid()})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, lock.Close()) })
+
+	startedAt := time.Now()
+	for range 16 {
+		held, probeErr := store.WorkspaceLockHeld(workspace)
+		require.NoError(t, probeErr)
+		assert.True(t, held)
+	}
+	assert.Less(t, time.Since(startedAt), 2*time.Second)
+}
+
 func TestCanonicalWorkspaceRejectsInvalidPaths(t *testing.T) {
 	_, err := CanonicalWorkspace(" ")
 	require.ErrorContains(t, err, "workspace path is required")

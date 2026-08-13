@@ -405,6 +405,7 @@ func performUserLoginDecision(t *testing.T, server *Server, userCode, decision, 
 func addUserAuthSessionCookies(request *http.Request, sessionToken, csrfToken string) {
 	request.AddCookie(&http.Cookie{Name: webSessionCookieName, Value: sessionToken})
 	request.AddCookie(&http.Cookie{Name: webCSRFCookieName, Value: csrfToken})
+	request.Header.Set(webCSRFHeaderName, csrfToken)
 }
 
 func issueUserCredentialForHTTPTest(t *testing.T, store *authStore, principal Principal, duration time.Duration) (userauth.DeviceStartResponse, userLoginAuthorization) {
