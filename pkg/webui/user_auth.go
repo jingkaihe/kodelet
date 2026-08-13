@@ -122,35 +122,10 @@ func (s *Server) handleUserLoginVerificationPage(w http.ResponseWriter, r *http.
 		s.handleUserLoginDecision(w, r, principal)
 		return
 	}
-
-	code := strings.TrimSpace(r.URL.Query().Get("user_code"))
-	if code == "" {
-		s.renderUserLoginVerificationPage(w, http.StatusOK, userLoginVerificationPageData{
-			Principal: principal,
-			CSRFToken: csrfCookieValue(r),
-			EnterCode: true,
-		})
-		return
-	}
-	normalized, err := normalizeUserCode(code)
-	if err != nil {
-		s.renderUserLoginVerificationPage(w, http.StatusNotFound, userLoginVerificationPageData{
-			Principal: principal,
-			CSRFToken: csrfCookieValue(r),
-			EnterCode: true,
-			Error:     "User login request not found.",
-		})
-		return
-	}
-	authorization, err := s.authStore.UserLoginByUserCode(r.Context(), normalized)
-	if err != nil {
-		s.renderUserLoginStoreError(w, r, principal, err)
-		return
-	}
 	s.renderUserLoginVerificationPage(w, http.StatusOK, userLoginVerificationPageData{
-		Principal:     principal,
-		Authorization: &authorization,
-		CSRFToken:     csrfCookieValue(r),
+		Principal: principal,
+		CSRFToken: csrfCookieValue(r),
+		EnterCode: true,
 	})
 }
 
@@ -190,6 +165,17 @@ func (s *Server) handleUserLoginDecision(w http.ResponseWriter, r *http.Request,
 	}
 	decision := strings.TrimSpace(r.PostForm.Get("decision"))
 	switch decision {
+	case "lookup":
+		authorization, err := s.authStore.UserLoginByUserCode(r.Context(), userCode)
+		if err != nil {
+			s.renderUserLoginStoreError(w, r, principal, err)
+			return
+		}
+		s.renderUserLoginVerificationPage(w, http.StatusOK, userLoginVerificationPageData{
+			Principal:     principal,
+			Authorization: &authorization,
+			CSRFToken:     cookieToken,
+		})
 	case "approve":
 		if _, err := s.authStore.ApproveUserLogin(r.Context(), userCode, principal, s.config.OIDC.SessionDuration); err != nil {
 			s.renderUserLoginStoreError(w, r, principal, err)
@@ -373,11 +359,11 @@ var userLoginVerificationPage = template.Must(template.New("user-login-verificat
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kodelet user login</title><style>
 body{font-family:system-ui,sans-serif;max-width:760px;margin:4rem auto;padding:0 1rem;color:#202020}main{border:1px solid #ddd;border-radius:16px;padding:2rem}code{background:#f4f4f4;padding:.15rem .35rem;border-radius:4px;word-break:break-all}.error{color:#a40000}.success{color:#126b2e}label{display:block;margin:.8rem 0}.actions{display:flex;gap:.75rem;margin-top:1.5rem}button{padding:.65rem 1rem}input[type=text]{font-size:1.1rem;padding:.6rem;width:14rem}dt{font-weight:600;margin-top:.75rem}dd{margin-left:0}</style></head>
-<body><main><h1>Kodelet user login</h1>
-{{if .Principal.Email}}<p>Signed in as <strong>{{.Principal.Email}}</strong>.</p>{{end}}
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}{{if .Message}}<p class="success">{{.Message}}</p>{{end}}
-{{if .EnterCode}}<form method="get"><label>Login code <input type="text" name="user_code" autocomplete="one-time-code" required></label><button type="submit">Continue</button></form>{{end}}
-{{with .Authorization}}<p>Approve only if you initiated this login from a Kodelet client.</p><dl><dt>Code</dt><dd><code>{{.UserCode}}</code></dd><dt>Client</dt><dd>{{.ClientName}}</dd><dt>Platform</dt><dd>{{.ClientOS}}/{{.ClientArch}}</dd><dt>Kodelet version</dt><dd>{{.KodeletVersion}}</dd><dt>Expires</dt><dd>{{.ExpiresAt}}</dd></dl>
+	<body><main><h1>Kodelet user login</h1>
+	{{if .Principal.Email}}<p>Signed in as <strong>{{.Principal.Email}}</strong>.</p>{{end}}
+	{{if .Error}}<p class="error">{{.Error}}</p>{{end}}{{if .Message}}<p class="success">{{.Message}}</p>{{end}}
+	{{if .EnterCode}}<p>Enter the code displayed by the Kodelet client. Do not enter a code sent to you by someone else.</p><form method="post"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><label>Login code <input type="text" name="user_code" autocomplete="off" autocapitalize="characters" spellcheck="false" autofocus required></label><button type="submit" name="decision" value="lookup">Continue</button></form>{{end}}
+	{{with .Authorization}}<p>Confirm this code matches the code in the Kodelet client, and approve only if you initiated the login.</p><dl><dt>Code</dt><dd><code>{{.UserCode}}</code></dd><dt>Client</dt><dd>{{.ClientName}}</dd><dt>Platform</dt><dd>{{.ClientOS}}/{{.ClientArch}}</dd><dt>Kodelet version</dt><dd>{{.KodeletVersion}}</dd><dt>Expires</dt><dd>{{.ExpiresAt}}</dd></dl>
 {{if eq .Status "pending"}}<form method="post"><input type="hidden" name="user_code" value="{{.UserCode}}"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><div class="actions"><button type="submit" name="decision" value="approve">Approve</button><button type="submit" name="decision" value="deny">Deny</button></div></form>{{else}}<p>Status: <strong>{{.Status}}</strong></p>{{end}}{{end}}
 </main></body></html>`))
 

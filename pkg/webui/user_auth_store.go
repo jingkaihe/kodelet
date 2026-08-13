@@ -157,19 +157,14 @@ func (s *authStore) StartUserLogin(ctx context.Context, request userauth.DeviceS
 		if err := tx.Commit(); err != nil {
 			return userauth.DeviceStartResponse{}, errors.Wrap(err, "failed to commit user login authorization")
 		}
-		complete := *verification
-		query := complete.Query()
-		query.Set("user_code", userCode)
-		complete.RawQuery = query.Encode()
 		return userauth.DeviceStartResponse{
-			AuthorizationID:         authorizationID,
-			DeviceCode:              deviceCode,
-			UserCode:                userCode,
-			VerificationURL:         verification.String(),
-			VerificationURLComplete: complete.String(),
-			BearerToken:             bearerToken,
-			ExpiresAt:               expiresAt,
-			PollIntervalMS:          defaultUserPollInterval.Milliseconds(),
+			AuthorizationID: authorizationID,
+			DeviceCode:      deviceCode,
+			UserCode:        userCode,
+			VerificationURL: verification.String(),
+			BearerToken:     bearerToken,
+			ExpiresAt:       expiresAt,
+			PollIntervalMS:  defaultUserPollInterval.Milliseconds(),
 		}, nil
 	}
 	return userauth.DeviceStartResponse{}, errors.Wrap(insertErr, "failed to create user login authorization")

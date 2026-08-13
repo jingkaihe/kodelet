@@ -133,9 +133,11 @@ func TestRunRunnerEnrollStartsBrowserFlowAndSavesCredential(t *testing.T) {
 		},
 	}, &output))
 
-	assert.Equal(t, "https://kodelet.example/runner/enroll?user_code=ABCD-EFGH", openedURL)
+	assert.Equal(t, "https://kodelet.example/runner/enroll", openedURL)
 	rendered := output.String()
 	assert.Contains(t, rendered, "Enrollment code: ABCD-EFGH")
+	assert.Contains(t, rendered, "Enter this code at: https://kodelet.example/runner/enroll")
+	assert.NotContains(t, rendered, "?user_code=ABCD-EFGH")
 	assert.Contains(t, rendered, "Public-key fingerprint: "+fingerprint)
 	assert.Contains(t, rendered, "Runner ID: runner-cli")
 	credential, found, err := store.LoadCredential(server.URL, workspace)

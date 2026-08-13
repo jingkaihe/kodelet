@@ -4,7 +4,6 @@ import (
 	"bytes"
 	stdErrors "errors"
 	"fmt"
-	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -28,10 +27,7 @@ func TestAuthStoreUserLoginLifecycleAndSecretStorage(t *testing.T) {
 	assert.Equal(t, clock.current.Add(defaultUserLoginTTL), started.ExpiresAt)
 	assert.Equal(t, defaultUserPollInterval.Milliseconds(), started.PollIntervalMS)
 	assert.Equal(t, "https://kodelet.example/auth/device?source=test", started.VerificationURL)
-	complete, err := url.Parse(started.VerificationURLComplete)
-	require.NoError(t, err)
-	assert.Equal(t, "test", complete.Query().Get("source"))
-	assert.Equal(t, started.UserCode, complete.Query().Get("user_code"))
+	assert.Empty(t, started.VerificationURLComplete)
 
 	var storedDeviceHash, storedTokenHash []byte
 	require.NoError(t, store.db.QueryRowxContext(t.Context(), `

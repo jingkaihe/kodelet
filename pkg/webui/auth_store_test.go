@@ -155,8 +155,7 @@ func TestAuthStoreRunnerEnrollmentApprovalPollingAndReplacement(t *testing.T) {
 	started, err := store.StartRunnerEnrollment(t.Context(), request, "https://kodelet.example/runner/enroll?source=test")
 	require.NoError(t, err)
 	assert.Equal(t, "https://kodelet.example/runner/enroll?source=test", started.VerificationURL)
-	assert.Contains(t, started.VerificationURLComplete, "source=test")
-	assert.Contains(t, started.VerificationURLComplete, "user_code="+started.UserCode)
+	assert.Empty(t, started.VerificationURLComplete)
 
 	pending, err := store.RunnerEnrollmentByUserCode(t.Context(), started.UserCode)
 	require.NoError(t, err)

@@ -392,18 +392,13 @@ func (s *authStore) StartRunnerEnrollment(ctx context.Context, request protocol.
 			if err := tx.Commit(); err != nil {
 				return protocol.EnrollmentStartResponse{}, errors.Wrap(err, "failed to commit runner enrollment")
 			}
-			complete := *verification
-			query := complete.Query()
-			query.Set("user_code", userCode)
-			complete.RawQuery = query.Encode()
 			return protocol.EnrollmentStartResponse{
-				EnrollmentID:            enrollmentID,
-				DeviceCode:              deviceCode,
-				UserCode:                userCode,
-				VerificationURL:         verification.String(),
-				VerificationURLComplete: complete.String(),
-				ExpiresAt:               expiresAt,
-				PollIntervalMS:          defaultRunnerPollInterval.Milliseconds(),
+				EnrollmentID:    enrollmentID,
+				DeviceCode:      deviceCode,
+				UserCode:        userCode,
+				VerificationURL: verification.String(),
+				ExpiresAt:       expiresAt,
+				PollIntervalMS:  defaultRunnerPollInterval.Milliseconds(),
 			}, nil
 		}
 	}

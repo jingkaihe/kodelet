@@ -207,17 +207,7 @@ func (s *Server) handleRunnerEnrollmentPage(w http.ResponseWriter, r *http.Reque
 		s.handleRunnerEnrollmentDecision(w, r, principal)
 		return
 	}
-	code := strings.TrimSpace(r.URL.Query().Get("user_code"))
-	if code == "" {
-		s.renderRunnerEnrollmentPage(w, runnerEnrollmentPageData{Principal: principal, EnterCode: true, CSRFToken: csrfCookieValue(r)})
-		return
-	}
-	enrollment, err := s.authStore.RunnerEnrollmentByUserCode(r.Context(), code)
-	if err != nil {
-		s.renderRunnerEnrollmentPage(w, runnerEnrollmentPageData{Principal: principal, Error: err.Error(), EnterCode: true, CSRFToken: csrfCookieValue(r)})
-		return
-	}
-	s.renderRunnerEnrollmentPage(w, runnerEnrollmentPageData{Principal: principal, Enrollment: &enrollment, CSRFToken: csrfCookieValue(r)})
+	s.renderRunnerEnrollmentPage(w, runnerEnrollmentPageData{Principal: principal, EnterCode: true, CSRFToken: csrfCookieValue(r)})
 }
 
 func (s *Server) handleRunnerEnrollmentDecision(w http.ResponseWriter, r *http.Request, principal Principal) {
@@ -242,6 +232,13 @@ func (s *Server) handleRunnerEnrollmentDecision(w http.ResponseWriter, r *http.R
 	userCode := strings.TrimSpace(r.FormValue("user_code"))
 	decision := strings.TrimSpace(r.FormValue("decision"))
 	switch decision {
+	case "lookup":
+		enrollment, err := s.authStore.RunnerEnrollmentByUserCode(r.Context(), userCode)
+		if err != nil {
+			s.renderRunnerEnrollmentPage(w, runnerEnrollmentPageData{Principal: principal, Error: err.Error(), EnterCode: true, CSRFToken: csrfCookieValue(r)})
+			return
+		}
+		s.renderRunnerEnrollmentPage(w, runnerEnrollmentPageData{Principal: principal, Enrollment: &enrollment, CSRFToken: csrfCookieValue(r)})
 	case "deny":
 		if err := s.authStore.DenyRunnerEnrollment(r.Context(), userCode, principal.ID); err != nil {
 			s.renderRunnerEnrollmentPage(w, runnerEnrollmentPageData{Principal: principal, Error: err.Error(), EnterCode: true, CSRFToken: csrfCookieValue(r)})
@@ -298,11 +295,11 @@ var runnerEnrollmentPage = template.Must(template.New("runner-enrollment").Parse
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kodelet runner enrollment</title><style>
 body{font-family:system-ui,sans-serif;max-width:760px;margin:4rem auto;padding:0 1rem;color:#202020}main{border:1px solid #ddd;border-radius:16px;padding:2rem}code{background:#f4f4f4;padding:.15rem .35rem;border-radius:4px;word-break:break-all}.error{color:#a40000}.success{color:#126b2e}label{display:block;margin:.8rem 0}.actions{display:flex;gap:.75rem;margin-top:1.5rem}button{padding:.65rem 1rem}input[type=text]{font-size:1.1rem;padding:.6rem;width:14rem}</style></head>
-<body><main><h1>Kodelet runner enrollment</h1>
-{{if .Principal.Email}}<p>Signed in as <strong>{{.Principal.Email}}</strong>.</p>{{end}}
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}{{if .Message}}<p class="success">{{.Message}}</p>{{end}}
-{{if .EnterCode}}<form method="get"><label>Enrollment code <input type="text" name="user_code" autocomplete="one-time-code" required></label><button type="submit">Continue</button></form>{{end}}
-{{with .Enrollment}}<dl><dt>Code</dt><dd><code>{{.UserCode}}</code></dd><dt>Runner</dt><dd>{{.DisplayName}}</dd><dt>Host</dt><dd>{{.Host.Hostname}} ({{.Host.OS}}/{{.Host.Arch}})</dd><dt>Workspace</dt><dd><code>{{.Workspace.Path}}</code></dd><dt>Public-key fingerprint</dt><dd><code>{{.Fingerprint}}</code></dd><dt>Expires</dt><dd>{{.ExpiresAt}}</dd></dl>
+	<body><main><h1>Kodelet runner enrollment</h1>
+	{{if .Principal.Email}}<p>Signed in as <strong>{{.Principal.Email}}</strong>.</p>{{end}}
+	{{if .Error}}<p class="error">{{.Error}}</p>{{end}}{{if .Message}}<p class="success">{{.Message}}</p>{{end}}
+	{{if .EnterCode}}<p>Enter the code displayed by the runner. Do not enter a code sent to you by someone else.</p><form method="post"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><label>Enrollment code <input type="text" name="user_code" autocomplete="off" autocapitalize="characters" spellcheck="false" autofocus required></label><button type="submit" name="decision" value="lookup">Continue</button></form>{{end}}
+	{{with .Enrollment}}<p>Confirm this code and runner information match the runner you are enrolling.</p><dl><dt>Code</dt><dd><code>{{.UserCode}}</code></dd><dt>Runner</dt><dd>{{.DisplayName}}</dd><dt>Host</dt><dd>{{.Host.Hostname}} ({{.Host.OS}}/{{.Host.Arch}})</dd><dt>Workspace</dt><dd><code>{{.Workspace.Path}}</code></dd><dt>Public-key fingerprint</dt><dd><code>{{.Fingerprint}}</code></dd><dt>Expires</dt><dd>{{.ExpiresAt}}</dd></dl>
 {{if eq .Status "pending"}}<form method="post"><input type="hidden" name="user_code" value="{{.UserCode}}"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">{{if .ReplaceNeeded}}<label><input type="checkbox" name="replace" value="true" required> Revoke and replace the existing runner credential</label>{{end}}<div class="actions"><button type="submit" name="decision" value="approve">Approve</button><button type="submit" name="decision" value="deny">Deny</button></div></form>{{else}}<p>Status: <strong>{{.Status}}</strong></p>{{end}}{{end}}
 </main></body></html>`))
 

@@ -248,13 +248,9 @@ func runRunnerEnroll(ctx context.Context, config runnerEnrollConfig, output io.W
 			}
 			fmt.Fprintf(output, "Enrollment code: %s\n", info.UserCode)
 			fmt.Fprintf(output, "Public-key fingerprint: %s\n", info.Fingerprint)
-			verificationURL := info.VerificationURLComplete
-			if verificationURL == "" {
-				verificationURL = info.VerificationURL
-			}
-			fmt.Fprintf(output, "Approve this runner at: %s\n", verificationURL)
+			fmt.Fprintf(output, "Enter this code at: %s\n", info.VerificationURL)
 			if !config.NoBrowser {
-				if browserErr := openBrowser(verificationURL); browserErr != nil {
+				if browserErr := openBrowser(info.VerificationURL); browserErr != nil {
 					fmt.Fprintf(output, "Could not open the browser automatically: %v\n", browserErr)
 				}
 			}

@@ -156,16 +156,12 @@ func runControlPlaneAuthLogin(ctx context.Context, config controlPlaneAuthLoginC
 				fmt.Fprintln(output, "Control-plane login started")
 			}
 			fmt.Fprintf(output, "Login code: %s\n", info.UserCode)
-			approvalURL := info.VerificationURLComplete
-			if approvalURL == "" {
-				approvalURL = info.VerificationURL
-			}
-			fmt.Fprintf(output, "Approve this login at: %s\n", approvalURL)
+			fmt.Fprintf(output, "Enter this code at: %s\n", info.VerificationURL)
 			if config.NoBrowser {
-				fmt.Fprintf(output, "Open this URL manually to continue: %s\n", approvalURL)
-			} else if browserErr := openBrowser(approvalURL); browserErr != nil {
+				fmt.Fprintf(output, "Open this URL manually to continue: %s\n", info.VerificationURL)
+			} else if browserErr := openBrowser(info.VerificationURL); browserErr != nil {
 				fmt.Fprintf(output, "Could not open the browser automatically: %v\n", browserErr)
-				fmt.Fprintf(output, "Open this URL manually to continue: %s\n", approvalURL)
+				fmt.Fprintf(output, "Open this URL manually to continue: %s\n", info.VerificationURL)
 			}
 			fmt.Fprintln(output, "Waiting for browser approval...")
 		},
@@ -253,13 +249,9 @@ func runControlPlaneAuthStatus(ctx context.Context, config controlPlaneAuthStatu
 		if !pending.ExpiresAt.After(time.Now().UTC()) {
 			pendingStatus = "expired"
 		}
-		approvalURL := pending.VerificationURLComplete
-		if approvalURL == "" {
-			approvalURL = pending.VerificationURL
-		}
 		fmt.Fprintf(output, "Pending login status: %s\n", pendingStatus)
 		fmt.Fprintf(output, "Pending login code: %s\n", pending.UserCode)
-		fmt.Fprintf(output, "Pending approval URL: %s\n", approvalURL)
+		fmt.Fprintf(output, "Pending verification URL: %s\n", pending.VerificationURL)
 		fmt.Fprintf(output, "Pending login expires: %s\n", formatControlPlaneAuthTime(pending.ExpiresAt))
 	}
 	return nil

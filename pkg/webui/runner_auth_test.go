@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -138,6 +139,50 @@ func TestRunnerEnrollmentDecisionRequiresSameOrigin(t *testing.T) {
 			assert.Equal(t, test.want, sameOriginEnrollmentDecision(request))
 		})
 	}
+}
+
+func TestRunnerEnrollmentPageRequiresManualCodeEntry(t *testing.T) {
+	store, _ := newAuthStoreTest(t)
+	started, err := store.StartRunnerEnrollment(
+		t.Context(),
+		testEnrollmentRequest(t, "host-manual", "/work/manual", "manual", 0x72),
+		"https://kodelet.example/runner/enroll",
+	)
+	require.NoError(t, err)
+	assert.Empty(t, started.VerificationURLComplete)
+
+	server := &Server{
+		config:    &ServerConfig{RunnerAuthMode: RunnerAuthModeEnrollment},
+		authStore: store,
+	}
+	principal := administrativePrincipal("manual-entry-test")
+
+	pageRequest := httptest.NewRequest(http.MethodGet, "https://kodelet.example/runner/enroll?user_code="+url.QueryEscape(started.UserCode), nil)
+	pageRequest = pageRequest.WithContext(contextWithPrincipal(pageRequest.Context(), principal))
+	pageResponse := httptest.NewRecorder()
+	server.handleRunnerEnrollmentPage(pageResponse, pageRequest)
+	require.Equal(t, http.StatusOK, pageResponse.Code)
+	assert.Contains(t, pageResponse.Body.String(), "Enter the code displayed by the runner")
+	assert.Contains(t, pageResponse.Body.String(), `name="decision" value="lookup"`)
+	assert.NotContains(t, pageResponse.Body.String(), started.UserCode)
+	assert.NotContains(t, pageResponse.Body.String(), ">Approve<")
+
+	form := url.Values{
+		"user_code": []string{started.UserCode},
+		"decision":  []string{"lookup"},
+	}
+	lookupRequest := httptest.NewRequest(http.MethodPost, "https://kodelet.example/runner/enroll", strings.NewReader(form.Encode()))
+	lookupRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	lookupRequest.Header.Set("Origin", "https://kodelet.example")
+	lookupRequest = lookupRequest.WithContext(contextWithPrincipal(lookupRequest.Context(), principal))
+	lookupResponse := httptest.NewRecorder()
+	server.handleRunnerEnrollmentPage(lookupResponse, lookupRequest)
+	require.Equal(t, http.StatusOK, lookupResponse.Code)
+	assert.Contains(t, lookupResponse.Body.String(), started.UserCode)
+	assert.Contains(t, lookupResponse.Body.String(), "host.example.test")
+	assert.Contains(t, lookupResponse.Body.String(), "/work/manual")
+	assert.Contains(t, lookupResponse.Body.String(), ">Approve<")
+	assert.Contains(t, lookupResponse.Body.String(), ">Deny<")
 }
 
 func TestRunnerDPoPTargetURLUsesForwardedExternalAddress(t *testing.T) {

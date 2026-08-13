@@ -164,13 +164,14 @@ func TestRunControlPlaneAuthLoginStartsBrowserFlowPersistsAndHidesSecrets(t *tes
 	assert.Equal(t, int32(1), startCalls.Load())
 	assert.Equal(t, int32(1), pollCalls.Load())
 	assert.Equal(t, int32(1), browserCalls.Load())
-	assert.Equal(t, verificationURLComplete, openedURL)
+	assert.Equal(t, verificationURL, openedURL)
 	rendered := output.String()
 	assert.Contains(t, rendered, "Control-plane login started")
 	assert.Contains(t, rendered, "Login code: ABCD-EFGH")
-	assert.Contains(t, rendered, "Approve this login at: "+verificationURLComplete)
+	assert.Contains(t, rendered, "Enter this code at: "+verificationURL)
 	assert.Contains(t, rendered, "Could not open the browser automatically: browser unavailable")
-	assert.Contains(t, rendered, "Open this URL manually to continue: "+verificationURLComplete)
+	assert.Contains(t, rendered, "Open this URL manually to continue: "+verificationURL)
+	assert.NotContains(t, rendered, verificationURLComplete)
 	assert.Contains(t, rendered, "Control-plane login approved")
 	assert.Contains(t, rendered, "Credential ID: credential-new")
 	assert.Contains(t, rendered, "Principal: principal-new")
@@ -348,7 +349,8 @@ func TestRunControlPlaneAuthLoginNoBrowserResumesAndPrintsManualInstructions(t *
 	now := time.Now().UTC()
 	bearer := controlPlaneAuthTestBearer(0x51)
 	deviceCode := "private-device-code-resumed"
-	verificationURL := "https://kodelet.example/auth/device?user_code=RSUM-0001"
+	verificationURL := "https://kodelet.example/auth/device"
+	verificationURLComplete := verificationURL + "?user_code=RSUM-0001"
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		requests.Add(1)
@@ -367,7 +369,7 @@ func TestRunControlPlaneAuthLoginNoBrowserResumesAndPrintsManualInstructions(t *
 		DeviceCode:              deviceCode,
 		UserCode:                "RSUM-0001",
 		VerificationURL:         "https://kodelet.example/auth/device",
-		VerificationURLComplete: verificationURL,
+		VerificationURLComplete: verificationURLComplete,
 		BearerToken:             bearer,
 		ExpiresAt:               now.Add(10 * time.Minute),
 		PollIntervalMS:          0,
@@ -390,6 +392,7 @@ func TestRunControlPlaneAuthLoginNoBrowserResumesAndPrintsManualInstructions(t *
 	assert.Contains(t, rendered, "Resuming pending control-plane login")
 	assert.Contains(t, rendered, "Login code: RSUM-0001")
 	assert.Contains(t, rendered, "Open this URL manually to continue: "+verificationURL)
+	assert.NotContains(t, rendered, verificationURLComplete)
 	assertControlPlaneAuthSecretsHidden(t, rendered, bearer, deviceCode)
 }
 
@@ -580,15 +583,16 @@ func TestRunControlPlaneAuthStatus(t *testing.T) {
 		canonicalServer := "http://localhost:48484/base"
 		bearer := controlPlaneAuthTestBearer(0x73)
 		deviceCode := "private-device-code-status"
-		approvalURL := "https://kodelet.example/auth/device?user_code=PEND-0001"
+		verificationURL := "https://kodelet.example/auth/device"
+		verificationURLComplete := verificationURL + "?user_code=PEND-0001"
 		expiresAt := now.Add(10 * time.Minute)
 		require.NoError(t, store.SavePendingLogin(userauth.PendingLogin{
 			Server:                  server,
 			AuthorizationID:         "authorization-status-pending",
 			DeviceCode:              deviceCode,
 			UserCode:                "PEND-0001",
-			VerificationURL:         "https://kodelet.example/auth/device",
-			VerificationURLComplete: approvalURL,
+			VerificationURL:         verificationURL,
+			VerificationURLComplete: verificationURLComplete,
 			BearerToken:             bearer,
 			ExpiresAt:               expiresAt,
 			PollIntervalMS:          1000,
@@ -604,7 +608,8 @@ func TestRunControlPlaneAuthStatus(t *testing.T) {
 		assert.Contains(t, rendered, "Credential status: logged out")
 		assert.Contains(t, rendered, "Pending login status: pending")
 		assert.Contains(t, rendered, "Pending login code: PEND-0001")
-		assert.Contains(t, rendered, "Pending approval URL: "+approvalURL)
+		assert.Contains(t, rendered, "Pending verification URL: "+verificationURL)
+		assert.NotContains(t, rendered, verificationURLComplete)
 		assert.Contains(t, rendered, formatControlPlaneAuthTime(expiresAt))
 		assertControlPlaneAuthSecretsHidden(t, rendered, bearer, deviceCode, "authorization-status-pending")
 	})
