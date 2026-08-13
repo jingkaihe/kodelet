@@ -84,6 +84,7 @@ func TestMessageAndRPCErrorValidationBranches(t *testing.T) {
 	assert.Equal(t, "runner rpc error -32600: invalid", (&RPCError{Code: ErrorCodeInvalidRequest, Message: "invalid"}).Error())
 	assert.Equal(t, ErrorReasonRunNotActive, (&RPCError{Data: RPCErrorData{Reason: ErrorReasonRunNotActive}}).Reason())
 	assert.Equal(t, ErrorReasonRunnerNotFound, (&RPCError{Data: map[string]any{"reason": ErrorReasonRunnerNotFound}}).Reason())
+	assert.Equal(t, ErrorReasonLegacyAuthKeyEnrolled, (&RPCError{Data: RPCErrorData{Reason: ErrorReasonLegacyAuthKeyEnrolled}}).Reason())
 	_, err := DecodeMessage([]byte(`not-json`))
 	require.ErrorContains(t, err, "decode runner rpc message")
 

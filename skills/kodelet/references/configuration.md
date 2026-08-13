@@ -18,6 +18,28 @@ server: https://kodelet.example
 
 With this setting, `kodelet chat` and `kodelet acp` enter server-backed mode without an explicit flag, and `kodelet runner` subcommands use the configured URL instead of `http://localhost:8080`. Repository-level `kodelet-config.yaml` is deliberately ignored for `server` so a repository cannot redirect credentials or workspace execution. `kodelet run` remains local. The precedence is `--server`, then `KODELET_SERVER`, then user-level configuration. Without a selected server, chat and ACP remain local while runner commands use `http://localhost:8080`.
 
+The listener and authentication policy of the control plane can be configured either with explicit `kodelet serve` flags or with a top-level `serve` block in `~/.kodelet/config.yaml` or an explicitly selected `KODELET_CONFIG_FILE`. Repository-level `kodelet-config.yaml` cannot set `serve`, preventing a checked-out project from changing listener addresses, tokens, OIDC issuer/client settings, role allowlists, or runner enrollment policy. Explicit CLI flags override the corresponding trusted YAML values. Web modes are `token`, `oidc`, and `none`; runner modes are `token`, `enrollment`, `hybrid`, and `none`.
+
+```yaml
+serve:
+  web_auth_mode: oidc
+  runner_auth_mode: enrollment
+  oidc:
+    issuer: https://accounts.google.com
+    client_id: CLIENT_ID.apps.googleusercontent.com
+    client_secret_file: /run/secrets/kodelet-oidc
+    redirect_url: https://kodelet.example/auth/oidc/callback
+    allowed_domains: [example.com]
+    admin_emails: [admin@example.com]
+    runner_admin_emails: [runners@example.com]
+```
+
+The OIDC client secret is read from a regular, non-empty, user-only referenced file, not accepted directly as a YAML value or secret-valued CLI flag. On Unix, trusted configuration containing `serve.auth_token` or `serve.runner_auth_token` must likewise be inaccessible to group and other users, such as mode `0600`; configured token values are not echoed at startup. An unreadable or malformed explicitly selected configuration file and an invalid `KODELET_CONFIG_FILE_MODE` fail closed.
+
+In OIDC mode, browser users authenticate through server-side sessions. Non-browser clients run `kodelet auth login --server https://kodelet.example`, approve the request in an OIDC-authenticated browser, and store the resulting Kodelet-issued credential in user-only state keyed by canonical server URL. `kodelet chat --server`, `kodelet acp --server`, and runner-administration commands discover it automatically. Explicit `--auth-token` values override `KODELET_AUTH_TOKEN`, which overrides stored login state; static tokens remain administrative migration or automation credentials, and pure OIDC mode does not generate one automatically.
+
+Runner enrollment state is also outside project configuration. Run `kodelet runner enroll --server https://kodelet.example` from the workspace; Kodelet stores the pending enrollment, opaque access token, private key, credential identifier, and stable registration in user-only runner state. `kodelet runner start` and server-backed ACP load that DPoP credential automatically when no explicit legacy runner token is supplied. In `hybrid` mode, an explicit `--runner-auth-token` or `KODELET_RUNNER_AUTH_TOKEN` takes precedence, but the shared token cannot register a host/workspace identity after that identity has an active enrolled credential.
+
 ## Provider setup
 
 ### Anthropic Claude

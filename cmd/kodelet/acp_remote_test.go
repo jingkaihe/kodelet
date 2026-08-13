@@ -380,7 +380,7 @@ func TestConsumeRemoteACPAuthTokensRemovesCredentialsFromChildEnvironment(t *tes
 	cmd.Flags().String("auth-token", "", "")
 	cmd.Flags().String("runner-auth-token", "", "")
 
-	apiToken, runnerToken, err := consumeRemoteACPAuthTokens(cmd)
+	apiToken, runnerToken, err := consumeRemoteACPAuthTokens(cmd, defaultRunnerServer)
 
 	require.NoError(t, err)
 	assert.Equal(t, "api-secret", apiToken)

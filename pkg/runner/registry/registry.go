@@ -34,6 +34,8 @@ var (
 	ErrRunnerConnected = errors.New("runner is connected")
 	// ErrRunnerActiveRun indicates inconsistent state that still references an active run.
 	ErrRunnerActiveRun = errors.New("runner has an active run")
+	// ErrLegacyAuthKeyEnrolled indicates that a key-enrolled identity cannot use the shared runner token.
+	ErrLegacyAuthKeyEnrolled = errors.New("runner has a key-bound credential and cannot use legacy authentication")
 )
 
 // Link is the live symmetric RPC connection retained for one runner generation.
@@ -44,6 +46,31 @@ type Link interface {
 	Close() error
 	Done() <-chan struct{}
 	Err() error
+}
+
+// RegistrationAuthMode identifies how a runner connection authenticated before registration.
+type RegistrationAuthMode string
+
+const (
+	// RegistrationAuthLegacy covers the shared runner token and explicitly unauthenticated compatibility modes.
+	RegistrationAuthLegacy RegistrationAuthMode = "legacy"
+	// RegistrationAuthKey covers a device-enrolled runner that proved possession of its private key.
+	RegistrationAuthKey RegistrationAuthMode = "key"
+)
+
+// RegistrationPrincipal is the authenticated identity attached to one runner WebSocket connection.
+type RegistrationPrincipal struct {
+	Mode           RegistrationAuthMode
+	CredentialID   string
+	RunnerID       string
+	HostInstanceID string
+	WorkspacePath  string
+}
+
+// CredentialAuthorizer exposes active key bindings to the runner registry.
+type CredentialAuthorizer interface {
+	HasActiveRunnerCredential(ctx context.Context, hostInstanceID, workspacePath string) (bool, error)
+	RunnerCredentialActive(ctx context.Context, credentialID, runnerID, hostInstanceID, workspacePath string) (bool, error)
 }
 
 // RunnerStatus is the scheduler-facing state of a runner registration.
@@ -113,30 +140,12 @@ type RemovalResult struct {
 	RemovedConversationAffinities int    `json:"removedConversationAffinities"`
 }
 
-// RunnerReferencedError prevents an ordinary removal from abandoning conversation affinity.
-type RunnerReferencedError struct {
-	RunnerID        string
-	ConversationIDs []string
-}
-
-func (e *RunnerReferencedError) Error() string {
-	if e == nil {
-		return "runner is referenced by conversations"
-	}
-	ids := append([]string(nil), e.ConversationIDs...)
-	sort.Strings(ids)
-	detail := strings.Join(ids, ", ")
-	if len(ids) > 5 {
-		detail = strings.Join(ids[:5], ", ") + fmt.Sprintf(", and %d more", len(ids)-5)
-	}
-	return fmt.Sprintf("runner %s is bound to %d conversation(s): %s; remove those conversations or retry with --force", e.RunnerID, len(ids), detail)
-}
-
 type runnerEntry struct {
 	Runner
-	identity string
-	link     Link
-	ready    bool
+	identity     string
+	credentialID string
+	link         Link
+	ready        bool
 }
 
 func cloneRunnerEntry(entry *runnerEntry) *runnerEntry {
@@ -237,6 +246,7 @@ type Options struct {
 	Now               func() time.Time
 	NewID             func(prefix string) (string, error)
 	Persistence       Persistence
+	Credentials       CredentialAuthorizer
 }
 
 // Registry coordinates stable runner identity, live connection generations, and concurrent runs.
@@ -254,6 +264,7 @@ type Registry struct {
 	now               func() time.Time
 	newID             func(string) (string, error)
 	persistence       Persistence
+	credentials       CredentialAuthorizer
 	ctx               context.Context
 	cancel            context.CancelFunc
 	closed            bool
@@ -292,6 +303,7 @@ func New(parent context.Context, options Options) (*Registry, error) {
 		now:               options.Now,
 		newID:             options.NewID,
 		persistence:       options.Persistence,
+		credentials:       options.Credentials,
 		ctx:               ctx,
 		cancel:            cancel,
 	}
@@ -371,8 +383,90 @@ func (r *Registry) restore(state PersistedState) error {
 	return nil
 }
 
-// Register upserts one stable workspace identity and atomically replaces its live generation.
+// Register upserts one stable workspace identity using the legacy shared-token trust model.
 func (r *Registry) Register(params protocol.RegisterParams, link Link) (protocol.RegisterResult, error) {
+	return r.register(params, link, RegistrationPrincipal{Mode: RegistrationAuthLegacy})
+}
+
+// RegisterAuthenticated upserts the runner identity authorized for one authenticated connection.
+func (r *Registry) RegisterAuthenticated(params protocol.RegisterParams, link Link, principal RegistrationPrincipal) (protocol.RegisterResult, error) {
+	return r.register(params, link, principal)
+}
+
+// EnsureOfflineRegistration creates or refreshes the durable runner identity being approved for device enrollment.
+func (r *Registry) EnsureOfflineRegistration(request protocol.EnrollmentStartRequest) (Runner, error) {
+	return r.EnsureEnrollmentRegistration(request, false)
+}
+
+// EnsureEnrollmentRegistration creates or refreshes the durable runner identity being approved for enrollment.
+// A replacement approval may target a connected generation because the newly issued credential disconnects it.
+func (r *Registry) EnsureEnrollmentRegistration(request protocol.EnrollmentStartRequest, replace bool) (Runner, error) {
+	if r == nil {
+		return Runner{}, errors.New("runner registry is required")
+	}
+	if err := request.Validate(); err != nil {
+		return Runner{}, err
+	}
+	identity := runnerIdentity(request.Host.InstanceID, request.Workspace.Path)
+	now := r.now().UTC()
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return Runner{}, errors.New("runner registry is closed")
+	}
+	if existingID := r.byIdentity[identity]; existingID != "" {
+		entry := r.runners[existingID]
+		if entry == nil {
+			return Runner{}, errors.New("runner identity index is inconsistent")
+		}
+		if entry.Connected || entry.link != nil {
+			if !replace {
+				return Runner{}, errors.Wrapf(ErrRunnerConnected, "runner %s must be stopped before enrolling its credential", entry.ID)
+			}
+			return entry.Runner, nil
+		}
+		entry.DisplayName = strings.TrimSpace(request.DisplayName)
+		entry.Host = request.Host
+		entry.Workspace = request.Workspace
+		entry.KodeletVersion = strings.TrimSpace(request.KodeletVersion)
+		entry.UpdatedAt = now
+		if entry.Status != RunnerStatusIncompatible {
+			entry.Status = RunnerStatusOffline
+		}
+		if err := r.persistRunnerLocked(entry); err != nil {
+			return Runner{}, err
+		}
+		return entry.Runner, nil
+	}
+
+	runnerID, err := r.newID("runner")
+	if err != nil {
+		return Runner{}, errors.Wrap(err, "failed to generate runner id")
+	}
+	entry := &runnerEntry{
+		Runner: Runner{
+			ID:             runnerID,
+			DisplayName:    strings.TrimSpace(request.DisplayName),
+			Host:           request.Host,
+			Workspace:      request.Workspace,
+			KodeletVersion: strings.TrimSpace(request.KodeletVersion),
+			Status:         RunnerStatusOffline,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+		identity: identity,
+	}
+	if err := r.persistRunnerLocked(entry); err != nil {
+		return Runner{}, err
+	}
+	r.byIdentity[identity] = runnerID
+	r.runners[runnerID] = entry
+	return entry.Runner, nil
+}
+
+// register upserts one stable workspace identity and atomically replaces its live generation.
+func (r *Registry) register(params protocol.RegisterParams, link Link, principal RegistrationPrincipal) (protocol.RegisterResult, error) {
 	if r == nil {
 		return protocol.RegisterResult{}, errors.New("runner registry is required")
 	}
@@ -382,11 +476,24 @@ func (r *Registry) Register(params protocol.RegisterParams, link Link) (protocol
 	if strings.TrimSpace(params.Host.InstanceID) == "" || strings.TrimSpace(params.Workspace.Path) == "" || strings.TrimSpace(params.Workspace.Name) == "" {
 		return protocol.RegisterResult{}, params.Validate()
 	}
-	if !protocol.SupportsVersion(params.ProtocolVersions, protocol.Version) {
-		return protocol.RegisterResult{}, r.recordIncompatible(params)
+	identity := runnerIdentity(params.Host.InstanceID, params.Workspace.Path)
+	switch principal.Mode {
+	case RegistrationAuthKey:
+		if strings.TrimSpace(principal.CredentialID) == "" || strings.TrimSpace(principal.RunnerID) == "" {
+			return protocol.RegisterResult{}, errors.New("key-authenticated runner principal is incomplete")
+		}
+		if strings.TrimSpace(principal.HostInstanceID) != strings.TrimSpace(params.Host.InstanceID) || strings.TrimSpace(principal.WorkspacePath) != strings.TrimSpace(params.Workspace.Path) {
+			return protocol.RegisterResult{}, errors.New("runner registration identity does not match its enrolled credential")
+		}
+		if requestedID := strings.TrimSpace(params.RunnerID); requestedID != "" && requestedID != strings.TrimSpace(principal.RunnerID) {
+			return protocol.RegisterResult{}, errors.New("runner id does not match its enrolled credential")
+		}
+		params.RunnerID = strings.TrimSpace(principal.RunnerID)
+	case RegistrationAuthLegacy, "":
+	default:
+		return protocol.RegisterResult{}, errors.Errorf("unsupported runner authentication mode %q", principal.Mode)
 	}
 
-	identity := runnerIdentity(params.Host.InstanceID, params.Workspace.Path)
 	connectionID, err := r.newID("conn")
 	if err != nil {
 		return protocol.RegisterResult{}, errors.Wrap(err, "failed to generate runner connection id")
@@ -399,6 +506,37 @@ func (r *Registry) Register(params protocol.RegisterParams, link Link) (protocol
 	if r.closed {
 		r.mu.Unlock()
 		return protocol.RegisterResult{}, errors.New("runner registry is closed")
+	}
+	switch principal.Mode {
+	case RegistrationAuthKey:
+		if r.credentials != nil {
+			active, authorizeErr := r.credentials.RunnerCredentialActive(r.ctx, principal.CredentialID, principal.RunnerID, params.Host.InstanceID, params.Workspace.Path)
+			if authorizeErr != nil {
+				r.mu.Unlock()
+				return protocol.RegisterResult{}, errors.Wrap(authorizeErr, "failed to validate runner credential")
+			}
+			if !active {
+				r.mu.Unlock()
+				return protocol.RegisterResult{}, errors.New("runner credential is invalid or revoked")
+			}
+		}
+	case RegistrationAuthLegacy, "":
+		if r.credentials != nil {
+			bound, authorizeErr := r.credentials.HasActiveRunnerCredential(r.ctx, params.Host.InstanceID, params.Workspace.Path)
+			if authorizeErr != nil {
+				r.mu.Unlock()
+				return protocol.RegisterResult{}, errors.Wrap(authorizeErr, "failed to inspect runner credential binding")
+			}
+			if bound {
+				r.mu.Unlock()
+				return protocol.RegisterResult{}, ErrLegacyAuthKeyEnrolled
+			}
+		}
+	}
+	if !protocol.SupportsVersion(params.ProtocolVersions, protocol.Version) {
+		err := r.recordIncompatibleLocked(params, identity, now)
+		r.mu.Unlock()
+		return protocol.RegisterResult{}, err
 	}
 	entry, isNew, err := r.registrationCandidateLocked(params, identity, now)
 	if err != nil {
@@ -422,6 +560,7 @@ func (r *Registry) Register(params protocol.RegisterParams, link Link) (protocol
 	}
 	entry.Generation++
 	entry.ConnectionID = connectionID
+	entry.credentialID = strings.TrimSpace(principal.CredentialID)
 	entry.link = link
 	entry.Host = params.Host
 	entry.Workspace = params.Workspace
@@ -541,15 +680,8 @@ func (r *Registry) registrationCandidateLocked(params protocol.RegisterParams, i
 	}, true, nil
 }
 
-func (r *Registry) recordIncompatible(params protocol.RegisterParams) error {
+func (r *Registry) recordIncompatibleLocked(params protocol.RegisterParams, identity string, now time.Time) error {
 	message := errors.Errorf("runner does not support protocol version %d", protocol.Version)
-	identity := runnerIdentity(params.Host.InstanceID, params.Workspace.Path)
-	now := r.now().UTC()
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.closed {
-		return errors.New("runner registry is closed")
-	}
 	entry, isNew, err := r.registrationCandidateLocked(params, identity, now)
 	if err != nil {
 		return err
@@ -575,6 +707,51 @@ func (r *Registry) recordIncompatible(params protocol.RegisterParams) error {
 	return message
 }
 
+// DisconnectRunnerExceptCredential closes a live runner unless it already uses the newly approved credential.
+func (r *Registry) DisconnectRunnerExceptCredential(runnerID, allowedCredentialID string, cause error) {
+	if r == nil {
+		return
+	}
+	runnerID = strings.TrimSpace(runnerID)
+	allowedCredentialID = strings.TrimSpace(allowedCredentialID)
+	now := r.now().UTC()
+	r.mu.Lock()
+	entry := r.runners[runnerID]
+	if entry == nil || entry.link == nil || entry.credentialID == allowedCredentialID {
+		r.mu.Unlock()
+		return
+	}
+	link := entry.link
+	entry.link = nil
+	entry.credentialID = ""
+	entry.Connected = false
+	entry.Status = RunnerStatusOffline
+	entry.ready = false
+	entry.ConnectionID = ""
+	entry.UpdatedAt = now
+	lostRuns := make([]*runEntry, 0, len(runnerActiveRunIDs(entry)))
+	conversationIDs := make([]string, 0, len(runnerActiveRunIDs(entry)))
+	for _, runID := range runnerActiveRunIDs(entry) {
+		lostRun := r.runs[runID]
+		if lostRun == nil {
+			continue
+		}
+		conversationIDs = append(conversationIDs, lostRun.ConversationID)
+		r.finishRunLocked(runID, RunStatusLost, errorString(cause), now)
+		lostRuns = append(lostRuns, lostRun)
+	}
+	if len(lostRuns) > 0 {
+		r.logPersistenceError("failed to persist credential-replaced runner and lost runs", r.persistRunnerAndRunsLocked(entry, lostRuns))
+	} else {
+		r.logPersistenceError("failed to persist credential-replaced runner", r.persistRunnerLocked(entry))
+	}
+	r.mu.Unlock()
+	for _, conversationID := range conversationIDs {
+		r.notifyRunFailure(conversationID)
+	}
+	_ = link.Close()
+}
+
 // Detach marks a connection offline only when it is still the current fenced generation.
 func (r *Registry) Detach(runnerID, connectionID string, generation int64, cause error) {
 	if r == nil {
@@ -588,6 +765,7 @@ func (r *Registry) Detach(runnerID, connectionID string, generation int64, cause
 		return
 	}
 	entry.link = nil
+	entry.credentialID = ""
 	entry.Connected = false
 	entry.Status = RunnerStatusOffline
 	entry.ready = false
@@ -1161,7 +1339,8 @@ func (r *Registry) Run(id string) (Run, bool) {
 }
 
 // RemoveRunner deletes an offline stable registration and its run history.
-// Force explicitly abandons any conversations pinned to the runner.
+// Conversation records are preserved while concrete runner affinity is cleared.
+// The force argument is retained for CLI/API compatibility.
 func (r *Registry) RemoveRunner(ctx context.Context, runnerID string, force bool) (RemovalResult, error) {
 	if r == nil {
 		return RemovalResult{}, errors.New("runner registry is required")
@@ -1188,12 +1367,6 @@ func (r *Registry) RemoveRunner(ctx context.Context, runnerID string, force bool
 	}
 	if len(runnerActiveRunIDs(entry)) > 0 {
 		return RemovalResult{}, errors.Wrapf(ErrRunnerActiveRun, "runner %s", runnerID)
-	}
-
-	conversationIDs := make([]string, 0)
-	conversationIDs = append(conversationIDs, r.affinities.conversationsForRunner(runnerID)...)
-	if len(conversationIDs) > 0 && !force && r.persistence == nil {
-		return RemovalResult{}, &RunnerReferencedError{RunnerID: runnerID, ConversationIDs: conversationIDs}
 	}
 
 	result := RemovalResult{RunnerID: runnerID}
@@ -1244,6 +1417,7 @@ func (r *Registry) Close() error {
 			links = append(links, entry.link)
 			entry.link = nil
 		}
+		entry.credentialID = ""
 		for _, runID := range runnerActiveRunIDs(entry) {
 			r.finishRunLocked(runID, RunStatusLost, "control plane stopped while run was active", now)
 		}

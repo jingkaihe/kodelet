@@ -8,6 +8,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	conversationtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
 )
@@ -307,8 +308,12 @@ func (s *SQLitePersistence) ConversationAffinity(ctx context.Context, conversati
 }
 
 // RemoveRunner deletes one offline registration and its durable run history.
-// Every durable conversation affinity blocks ordinary removal.
+// Conversation records remain owned by the control plane; their concrete runner
+// affinities are cleared so they can later be rebound explicitly.
 func (s *SQLitePersistence) RemoveRunner(ctx context.Context, runnerID string, force bool) (RemovalResult, error) {
+	// force is retained in the persistence contract for CLI/API compatibility.
+	// Affinity is now cleared on every removal without deleting conversations.
+	_ = force
 	if s == nil || s.db == nil {
 		return RemovalResult{}, errors.New("runner persistence is closed")
 	}
@@ -339,20 +344,18 @@ func (s *SQLitePersistence) RemoveRunner(ctx context.Context, runnerID string, f
 		return RemovalResult{}, errors.Wrapf(ErrRunnerNotFound, "runner %s", runnerID)
 	}
 
-	var conversationIDs []string
-	if err := tx.SelectContext(ctx, &conversationIDs, `
-		SELECT conversation_id
-		FROM conversation_runner_affinity
-		WHERE runner_id = ?
-		ORDER BY conversation_id
-	`, runnerID); err != nil {
-		return RemovalResult{}, errors.Wrap(err, "failed to inspect runner conversation affinities")
-	}
-	if len(conversationIDs) > 0 && !force {
-		return RemovalResult{}, &RunnerReferencedError{RunnerID: runnerID, ConversationIDs: conversationIDs}
-	}
-
 	result := RemovalResult{RunnerID: runnerID}
+	for _, table := range []string{"conversations", "conversation_summaries"} {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE `+table+`
+			SET metadata = json_remove(metadata, ?, ?)
+			WHERE id IN (
+				SELECT conversation_id FROM conversation_runner_affinity WHERE runner_id = ?
+			)
+		`, "$."+conversationtypes.RunnerIDMetadataKey, "$."+conversationtypes.RunnerEnvironmentProfileMetadataKey, runnerID); err != nil {
+			return RemovalResult{}, errors.Wrapf(err, "failed to clear runner metadata from %s", table)
+		}
+	}
 	removed, err := tx.ExecContext(ctx, "DELETE FROM conversation_runner_affinity WHERE runner_id = ?", runnerID)
 	if err != nil {
 		return RemovalResult{}, errors.Wrap(err, "failed to delete runner conversation affinities")

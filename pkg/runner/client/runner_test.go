@@ -2,9 +2,14 @@ package client
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -30,6 +35,25 @@ type blockingRefreshInstanceProvider struct {
 type delayedInitialProbeInstanceProvider struct {
 	workspace string
 	delay     time.Duration
+}
+
+func saveTestRunnerCredential(t *testing.T, store *localstate.Store, server, workspace, credentialID string) localstate.Credential {
+	t.Helper()
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	fingerprint, err := protocol.CredentialFingerprint(publicKey)
+	require.NoError(t, err)
+	credential := localstate.Credential{
+		Server:       server,
+		Workspace:    workspace,
+		CredentialID: credentialID,
+		AccessToken:  mustRunnerAccessToken(t),
+		Fingerprint:  fingerprint,
+		PublicKey:    publicKey,
+		PrivateKey:   privateKey,
+	}
+	require.NoError(t, store.SaveCredential(credential))
+	return credential
 }
 
 func (p *delayedInitialProbeInstanceProvider) Create(ctx context.Context, spec ExecutionInstanceSpec) (ExecutionInstance, error) {
@@ -165,6 +189,8 @@ func TestRunnerRegistersHeartbeatsAndReleasesWorkspaceLock(t *testing.T) {
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		assert.Equal(t, protocol.Endpoint, request.URL.Path)
+		assert.Equal(t, "Bearer runner-secret", request.Header.Get("Authorization"))
+		assert.Empty(t, request.Header.Get(protocol.DPoPHeader))
 		conn, upgradeErr := upgrader.Upgrade(w, request, nil)
 		if upgradeErr != nil {
 			return
@@ -188,6 +214,7 @@ func TestRunnerRegistersHeartbeatsAndReleasesWorkspaceLock(t *testing.T) {
 		session.Detach(peer.Err())
 	}))
 	t.Cleanup(server.Close)
+	saveTestRunnerCredential(t, store, server.URL, workspace, "credential-ignored")
 
 	require.NoError(t, store.SaveRegistration(localstate.Registration{
 		Server:    server.URL,
@@ -211,6 +238,7 @@ func TestRunnerRegistersHeartbeatsAndReleasesWorkspaceLock(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
+	assert.Nil(t, runner.credential)
 	runtime := extensions.EmptyRuntime()
 	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
 	runner.service.runtimeProvider = staticRuntimeProvider{runtime: runtime}
@@ -368,6 +396,128 @@ func TestRunnerTreatsAuthenticationFailureAsPermanent(t *testing.T) {
 	wrapped := &permanentConnectionError{err: errors.New("permanent")}
 	assert.Equal(t, "permanent", wrapped.Error())
 	assert.EqualError(t, wrapped.Unwrap(), "permanent")
+
+	legacyConflict := &protocol.RPCError{
+		Code:    protocol.ErrorCodeConflict,
+		Message: "runner has a key-bound credential and cannot use legacy authentication",
+		Data:    protocol.RPCErrorData{Reason: protocol.ErrorReasonLegacyAuthKeyEnrolled},
+	}
+	classified := runnerRegistrationError(legacyConflict, true)
+	require.ErrorContains(t, classified, "explicit legacy runner token took precedence")
+	assert.True(t, isPermanentConnectionError(classified))
+	assert.Same(t, legacyConflict, runnerRegistrationError(legacyConflict, false))
+}
+
+func TestRunnerTreatsUnknownOrRevokedCredentialAsPermanent(t *testing.T) {
+	workspace := t.TempDir()
+	store, err := localstate.NewStoreAt(t.TempDir())
+	require.NoError(t, err)
+	var connectionRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != protocol.Endpoint {
+			t.Errorf("unexpected request path %q", request.URL.Path)
+			http.NotFound(w, request)
+			return
+		}
+		connectionRequests.Add(1)
+		assert.Contains(t, request.Header.Get("Authorization"), protocol.DPoPAuthorizationScheme+" ")
+		assert.NotEmpty(t, request.Header.Get(protocol.DPoPHeader))
+		http.Error(w, "runner credential is invalid or revoked", http.StatusUnauthorized)
+	}))
+	t.Cleanup(server.Close)
+	saveTestRunnerCredential(t, store, server.URL, workspace, "credential-revoked")
+
+	runner, err := NewRunner(t.Context(), RunnerConfig{
+		Server:       server.URL,
+		Workspace:    workspace,
+		Store:        store,
+		ReconnectMin: time.Millisecond,
+		ReconnectMax: time.Millisecond,
+	})
+	require.NoError(t, err)
+	runtime := extensions.EmptyRuntime()
+	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
+	runner.service.runtimeProvider = staticRuntimeProvider{runtime: runtime}
+	runner.service.configLoader = func(string) (llmtypes.Config, error) { return llmtypes.Config{}, nil }
+
+	err = runner.Run(t.Context())
+	require.ErrorContains(t, err, "unknown or revoked")
+	require.ErrorContains(t, err, "re-enroll")
+	assert.True(t, isPermanentConnectionError(err))
+	assert.Equal(t, int32(1), connectionRequests.Load())
+}
+
+func TestKeyAuthenticatedRunnerDoesNotDiscardStaleRunnerID(t *testing.T) {
+	workspace := t.TempDir()
+	store, err := localstate.NewStoreAt(t.TempDir())
+	require.NoError(t, err)
+	var credential localstate.Credential
+	var registerCalls atomic.Int32
+	requestedRunnerIDs := make([]string, 0, 1)
+	var requestedRunnerIDsMu sync.Mutex
+	upgrader := websocket.Upgrader{
+		Subprotocols: []string{protocol.Subprotocol},
+		CheckOrigin:  func(*http.Request) bool { return true },
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != protocol.Endpoint {
+			http.NotFound(w, request)
+			return
+		}
+		verifyRunnerDPoPRequest(t, request, credential)
+		conn, upgradeErr := upgrader.Upgrade(w, request, nil)
+		if upgradeErr != nil {
+			return
+		}
+		peer, peerErr := protocol.NewPeer(conn, protocol.PeerConfig{
+			RequestPrefix: "server",
+			Handler: protocol.RequestHandlerFunc(func(_ context.Context, method string, raw json.RawMessage) (any, *protocol.RPCError) {
+				if method != protocol.MethodRunnerRegister {
+					return nil, &protocol.RPCError{Code: protocol.ErrorCodeMethodNotFound, Message: "unknown method"}
+				}
+				var params protocol.RegisterParams
+				if err := json.Unmarshal(raw, &params); err != nil {
+					return nil, &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: err.Error()}
+				}
+				registerCalls.Add(1)
+				requestedRunnerIDsMu.Lock()
+				requestedRunnerIDs = append(requestedRunnerIDs, params.RunnerID)
+				requestedRunnerIDsMu.Unlock()
+				return nil, &protocol.RPCError{
+					Code:    protocol.ErrorCodeStale,
+					Message: "runner not found",
+					Data:    protocol.RPCErrorData{Reason: protocol.ErrorReasonRunnerNotFound},
+				}
+			}),
+		})
+		if peerErr != nil {
+			_ = conn.Close()
+			return
+		}
+		if peerErr = peer.Start(request.Context()); peerErr != nil {
+			_ = peer.Close()
+			return
+		}
+		<-peer.Done()
+	}))
+	t.Cleanup(server.Close)
+	credential = saveTestRunnerCredential(t, store, server.URL, workspace, "credential-stale")
+	require.NoError(t, store.SaveRegistration(localstate.Registration{
+		Server:    server.URL,
+		Workspace: workspace,
+		RunnerID:  "runner-stale",
+	}))
+
+	runner, err := NewRunner(t.Context(), RunnerConfig{Server: server.URL, Workspace: workspace, Store: store})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, runner.service.Close()) })
+	connected, err := runner.runConnection(t.Context(), "manifest-digest")
+	require.ErrorContains(t, err, "runner not found")
+	assert.False(t, connected)
+	assert.Equal(t, int32(1), registerCalls.Load())
+	requestedRunnerIDsMu.Lock()
+	assert.Equal(t, []string{"runner-stale"}, requestedRunnerIDs)
+	requestedRunnerIDsMu.Unlock()
 }
 
 func TestRunnerReconnectBackoffResetsAfterSuccessfulRegistration(t *testing.T) {
@@ -382,11 +532,27 @@ func TestRunnerReconnectBackoffResetsAfterSuccessfulRegistration(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, registry.Close()) })
 
 	var attempts atomic.Int32
+	var credential localstate.Credential
+	seenProofs := map[string]struct{}{}
+	var seenProofsMu sync.Mutex
 	upgrader := websocket.Upgrader{
 		Subprotocols: []string{protocol.Subprotocol},
 		CheckOrigin:  func(*http.Request) bool { return true },
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != protocol.Endpoint {
+			http.NotFound(w, request)
+			return
+		}
+		verified := verifyRunnerDPoPRequest(t, request, credential)
+		seenProofsMu.Lock()
+		_, replayed := seenProofs[verified.JTI]
+		seenProofs[verified.JTI] = struct{}{}
+		seenProofsMu.Unlock()
+		if replayed {
+			http.Error(w, "replayed DPoP proof", http.StatusUnauthorized)
+			return
+		}
 		if attempts.Add(1) <= 2 {
 			http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
 			return
@@ -434,11 +600,12 @@ func TestRunnerReconnectBackoffResetsAfterSuccessfulRegistration(t *testing.T) {
 		session.Detach(peer.Err())
 	}))
 	t.Cleanup(server.Close)
+	credential = saveTestRunnerCredential(t, store, server.URL, workspace, "credential-reconnect")
 
 	retryDelays := make(chan time.Duration, 4)
 	runner, err := NewRunner(t.Context(), RunnerConfig{
-		Server:           server.URL,
-		Workspace:        workspace,
+		Server:           server.URL + "/",
+		Workspace:        workspace + string(filepath.Separator) + ".",
 		Store:            store,
 		ReconnectMin:     10 * time.Millisecond,
 		ReconnectMax:     20 * time.Millisecond,
@@ -448,6 +615,8 @@ func TestRunnerReconnectBackoffResetsAfterSuccessfulRegistration(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
+	require.NotNil(t, runner.credential)
+	assert.Equal(t, credential.CredentialID, runner.credential.CredentialID)
 	runtime := extensions.EmptyRuntime()
 	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
 	runner.service.runtimeProvider = staticRuntimeProvider{runtime: runtime}
@@ -474,6 +643,40 @@ func TestRunnerReconnectBackoffResetsAfterSuccessfulRegistration(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("runner did not stop after cancellation")
 	}
+	assert.Equal(t, int32(3), attempts.Load())
+	seenProofsMu.Lock()
+	assert.Len(t, seenProofs, int(attempts.Load()))
+	seenProofsMu.Unlock()
+}
+
+func verifyRunnerDPoPRequest(t *testing.T, request *http.Request, credential localstate.Credential) protocol.VerifiedDPoPProof {
+	t.Helper()
+	scheme, accessToken, found := strings.Cut(request.Header.Get("Authorization"), " ")
+	require.True(t, found)
+	assert.Equal(t, protocol.DPoPAuthorizationScheme, scheme)
+	assert.Equal(t, credential.AccessToken, accessToken)
+	targetScheme := "http"
+	if request.TLS != nil {
+		targetScheme = "https"
+	}
+	verified, err := protocol.VerifyDPoPProof(request.Header.Get(protocol.DPoPHeader), protocol.DPoPVerificationOptions{
+		Method:      request.Method,
+		TargetURL:   targetScheme + "://" + request.Host + request.URL.EscapedPath(),
+		AccessToken: accessToken,
+		PublicKey:   credential.PublicKey,
+		Now:         time.Now(),
+		MaxAge:      5 * time.Minute,
+		FutureSkew:  time.Minute,
+	})
+	require.NoError(t, err)
+	return verified
+}
+
+func mustRunnerAccessToken(t *testing.T) string {
+	t.Helper()
+	token, err := protocol.NewRunnerAccessToken()
+	require.NoError(t, err)
+	return token
 }
 
 func TestRunnerRunRequiresInitialization(t *testing.T) {

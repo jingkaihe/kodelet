@@ -65,8 +65,8 @@ kodelet acp [flags]
 | `--enable-fs-search-tools` | Enable `glob_tool` and `grep_tool` (by default the agent uses `fd`/`rg` via bash) |
 | `--no-extensions` | Disable extension runtime |
 | `--server` | Run the model agentic loop on a control plane while keeping the current workspace runtime local; overrides `KODELET_SERVER` and user-level `server` config |
-| `--auth-token` | Control-plane API token; defaults to `KODELET_AUTH_TOKEN` |
-| `--runner-auth-token` | Runner registration token; defaults to `KODELET_RUNNER_AUTH_TOKEN` |
+| `--auth-token` | Explicit control-plane API token override. Precedence is this flag, then `KODELET_AUTH_TOKEN`, then the Kodelet-issued credential stored by `kodelet auth login`. |
+| `--runner-auth-token` | Optional legacy shared runner token; defaults to `KODELET_RUNNER_AUTH_TOKEN` and takes precedence over a stored enrolled credential. |
 | `--runner-profile` | Runner-local environment profile used for tools, skills, extensions, context, and workspace policy |
 
 ## Server-Backed ACP
@@ -82,7 +82,11 @@ ACP client <-- stdio --> kodelet acp <-- HTTPS --> kodelet serve / model loop
 
 The control plane owns provider credentials, model calls, turn orchestration, cancellation state, and persisted conversations. The local workspace runner owns the canonical workspace, context files, filesystem and shell tools, skills, recipes, extension tools and commands, local command restrictions, tool mode, and runner environment profiles.
 
-An embedded runner executes with the ACP process's host permissions and is not a sandbox; a reused runner executes with the permissions of its existing process. API and runner tokens are captured before local extensions start and removed from the child-process environment; on Linux, Kodelet also scrubs token flag values from the process command line and disables same-user process inspection of its original environment. Supplying tokens through `KODELET_AUTH_TOKEN` and `KODELET_RUNNER_AUTH_TOKEN` avoids their initial appearance in process listings.
+An embedded runner executes with the ACP process's host permissions and is not a sandbox; a reused runner executes with the permissions of its existing process. In runner `enrollment` or `hybrid` mode, ACP automatically loads the current workspace's enrolled DPoP credential when no explicit runner token is supplied. ACP does not initiate browser enrollment over stdio, so run `kodelet runner enroll --server https://kodelet.example` from the workspace first. An explicit `--runner-auth-token` or `KODELET_RUNNER_AUTH_TOKEN` takes precedence over local credential discovery for migration compatibility.
+
+Explicit API and runner tokens are captured before local extensions start and removed from the child-process environment; on Linux, Kodelet also scrubs token flag values from the process command line and disables same-user process inspection of its original environment. Supplying overrides through `KODELET_AUTH_TOKEN` and `KODELET_RUNNER_AUTH_TOKEN` avoids their initial appearance in process listings. Kodelet-issued user credentials and enrolled runner private keys and access tokens are loaded directly from user-only local state rather than injected through the child-process environment.
+
+Before launching server-backed ACP against an OIDC control plane, run `kodelet auth login --server https://kodelet.example`. The browser approval uses the server's verified OIDC session and activates a Kodelet-issued user credential stored for that canonical server URL; ACP discovers it automatically and retains the approved principal's role set rather than receiving administrative privileges implicitly. Use `kodelet auth status` to inspect it and `kodelet auth logout` to revoke it. Static `--auth-token`, `KODELET_AUTH_TOKEN`, or trusted `serve.auth_token` credentials remain available as explicit administrative migration and automation mechanisms.
 
 For new conversations, explicit `--profile` and `--reasoning-effort` values select control-plane model policy. `--runner-profile` independently selects local runner policy. Flags that configure a local model loop, including `--provider`, `--model`, `--max-tokens`, `--max-turns`, weak-model settings, thinking budget, compact ratio, Anthropic API access, and OpenAI native search, are rejected in server-backed mode.
 
@@ -279,7 +283,7 @@ flowchart TB
 1. **Path Validation**: All file paths are validated relative to the session CWD; server-backed ACP additionally requires the session CWD to match the selected workspace runner.
 2. **Command Restrictions**: Bash and tool restrictions apply in both local and server-backed ACP.
 3. **Local stdio authentication**: Ordinary `kodelet acp` relies on the parent ACP client to control subprocess access and does not add an authentication exchange.
-4. **Control-plane authentication**: Server-backed ACP uses `--auth-token` for API requests and `--runner-auth-token` for runner registration. Environment-provided values are captured before the runner starts and removed from the child-process environment inherited by local tools and extensions.
+4. **Control-plane authentication**: Server-backed ACP uses the Kodelet-issued credential created by `kodelet auth login` unless `KODELET_AUTH_TOKEN` or an explicit `--auth-token` overrides it. It separately uses an enrolled DPoP runner credential when available and no explicit runner token is supplied; `--runner-auth-token` remains the legacy-token override. Environment-provided client token values are captured before the runner starts and removed from the child-process environment inherited by local tools and extensions, while stored user and runner credentials are loaded directly from user-only state.
 5. **Transport security**: Non-loopback control-plane URLs must use HTTPS.
 
 ## References

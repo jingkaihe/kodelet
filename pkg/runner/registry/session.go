@@ -21,6 +21,7 @@ type UIRequestRouter interface {
 type Session struct {
 	registry     *Registry
 	ui           UIRequestRouter
+	principal    RegistrationPrincipal
 	mu           sync.RWMutex
 	peer         Link
 	runnerID     string
@@ -31,7 +32,12 @@ type Session struct {
 
 // NewSession creates a connection handler. Attach must be called before the peer starts.
 func NewSession(registry *Registry, ui UIRequestRouter) *Session {
-	return &Session{registry: registry, ui: ui}
+	return &Session{registry: registry, ui: ui, principal: RegistrationPrincipal{Mode: RegistrationAuthLegacy}}
+}
+
+// NewAuthenticatedSession creates a connection handler bound to an upgrade-authenticated runner principal.
+func NewAuthenticatedSession(registry *Registry, ui UIRequestRouter, principal RegistrationPrincipal) *Session {
+	return &Session{registry: registry, ui: ui, principal: principal}
 }
 
 // Attach binds the symmetric peer used for registration and reverse calls.
@@ -116,7 +122,7 @@ func (s *Session) handleRegister(params json.RawMessage) (any, *protocol.RPCErro
 	if err != nil {
 		return nil, &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: err.Error()}
 	}
-	result, err := s.registry.Register(value, s.peer)
+	result, err := s.registry.RegisterAuthenticated(value, s.peer, s.principal)
 	if err != nil {
 		return nil, rpcErrorFor(err)
 	}
@@ -167,6 +173,8 @@ func rpcErrorFor(err error) *protocol.RPCError {
 	switch {
 	case errors.Is(err, ErrRunnerNotFound):
 		code = protocol.ErrorCodeStale
+	case errors.Is(err, ErrLegacyAuthKeyEnrolled):
+		code = protocol.ErrorCodeConflict
 	case strings.Contains(message, "busy"), strings.Contains(message, "active run"):
 		code = protocol.ErrorCodeBusy
 	case strings.Contains(message, "stale"), strings.Contains(message, "generation"):
@@ -177,6 +185,8 @@ func rpcErrorFor(err error) *protocol.RPCError {
 	rpcErr := &protocol.RPCError{Code: code, Message: message}
 	if errors.Is(err, ErrRunnerNotFound) {
 		rpcErr.Data = protocol.RPCErrorData{Reason: protocol.ErrorReasonRunnerNotFound}
+	} else if errors.Is(err, ErrLegacyAuthKeyEnrolled) {
+		rpcErr.Data = protocol.RPCErrorData{Reason: protocol.ErrorReasonLegacyAuthKeyEnrolled}
 	}
 	return rpcErr
 }

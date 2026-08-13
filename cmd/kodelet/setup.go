@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	"github.com/spf13/cobra"
 )
@@ -105,7 +106,7 @@ var setupCmd = &cobra.Command{
 
 		// Create config directory
 		configDir := filepath.Join(os.Getenv("HOME"), ".kodelet")
-		err := os.MkdirAll(configDir, 0o755)
+		err := osutil.EnsurePrivateDir(configDir)
 		if err != nil {
 			presenter.Error(err, "Failed to create config directory")
 			logger.G(ctx).WithError(err).WithField("config_dir", configDir).Error("Config directory creation failed")
@@ -135,9 +136,13 @@ var setupCmd = &cobra.Command{
 				}
 
 				// Write backup
-				err = os.WriteFile(backupFile, existingConfig, 0o644)
+				err = os.WriteFile(backupFile, existingConfig, 0o600)
 				if err != nil {
 					presenter.Error(err, "Failed to create backup of existing configuration")
+					return
+				}
+				if err := osutil.EnsurePrivateFile(backupFile); err != nil {
+					presenter.Error(err, "Failed to secure configuration backup")
 					return
 				}
 
@@ -148,10 +153,14 @@ var setupCmd = &cobra.Command{
 		// Create config with the excellent defaults
 		configContent := recommendedSetupConfigYAML()
 
-		err = os.WriteFile(configFile, []byte(configContent), 0o644)
+		err = os.WriteFile(configFile, []byte(configContent), 0o600)
 		if err != nil {
 			presenter.Error(err, "Failed to write config file")
 			logger.G(ctx).WithError(err).WithField("config_file", configFile).Error("Config file write failed")
+			return
+		}
+		if err := osutil.EnsurePrivateFile(configFile); err != nil {
+			presenter.Error(err, "Failed to secure config file")
 			return
 		}
 

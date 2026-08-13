@@ -65,11 +65,10 @@ func (s *Server) handleDeleteRunner(w http.ResponseWriter, r *http.Request) {
 
 	result, err := s.runnerRegistry.RemoveRunner(r.Context(), runnerID, force)
 	if err != nil {
-		var referenced *runnerregistry.RunnerReferencedError
 		switch {
 		case stdErrors.Is(err, runnerregistry.ErrRunnerNotFound):
 			s.writeErrorResponse(w, http.StatusNotFound, err.Error(), nil)
-		case stdErrors.Is(err, runnerregistry.ErrRunnerConnected), stdErrors.Is(err, runnerregistry.ErrRunnerActiveRun), stdErrors.As(err, &referenced):
+		case stdErrors.Is(err, runnerregistry.ErrRunnerConnected), stdErrors.Is(err, runnerregistry.ErrRunnerActiveRun):
 			s.writeErrorResponse(w, http.StatusConflict, err.Error(), nil)
 		default:
 			s.writeErrorResponse(w, http.StatusInternalServerError, "failed to remove runner", err)
@@ -101,6 +100,14 @@ func (s *Server) handleRunnerWebsocket(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorResponse(w, http.StatusServiceUnavailable, "runner registry is unavailable", nil)
 		return
 	}
+	principal, ok := runnerPrincipalFromContext(r.Context())
+	if !ok {
+		if s.config != nil && s.config.resolvedRunnerAuthMode() != RunnerAuthModeNone {
+			s.writeAuthError(w, r, http.StatusUnauthorized, "runner authentication required")
+			return
+		}
+		principal = runnerregistry.RegistrationPrincipal{Mode: runnerregistry.RegistrationAuthLegacy}
+	}
 
 	upgrader := s.runnerUpgrader()
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -114,7 +121,7 @@ func (s *Server) handleRunnerWebsocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session := runnerregistry.NewSession(s.runnerRegistry, s)
+	session := runnerregistry.NewAuthenticatedSession(s.runnerRegistry, s, principal)
 	peer, err := protocol.NewPeer(conn, protocol.PeerConfig{
 		RequestPrefix: "server",
 		Handler:       session,

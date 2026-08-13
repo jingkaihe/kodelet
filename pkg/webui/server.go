@@ -7,7 +7,6 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"embed"
 	"encoding/base64"
 	"encoding/json"
@@ -27,6 +26,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/gorilla/mux"
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
+	"github.com/jingkaihe/kodelet/pkg/controlplane/userauth"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
@@ -65,12 +65,17 @@ type Server struct {
 	terminalSessionsMu    sync.Mutex
 	extensionRuntimes     *extensions.RuntimeManager
 	runnerRegistry        *runnerregistry.Registry
+	authStore             *authStore
+	oidcFlow              OIDCFlow
 	activeChats           map[string]*activeChatRun
 	pendingChatStops      map[string]time.Time
 	deletingConversations map[string]struct{}
 	activeChatsMu         sync.Mutex
 	chatSubscribers       map[string]map[*subscriberEventSink]struct{}
 	chatSubscribersMu     sync.Mutex
+	publicAuthRates       map[string]publicAuthRateEntry
+	publicAuthRatesMu     sync.Mutex
+	shutdownTimeout       time.Duration
 }
 
 type activeChatRun struct {
@@ -86,7 +91,32 @@ const (
 	pendingChatStopTTL                  = 30 * time.Second
 	maxPendingChatStops                 = 1024
 	conversationStreamKeepAliveInterval = 15 * time.Second
+	publicAuthRateWindow                = time.Minute
+	maxPublicAuthRateEntries            = 4096
+	maxOIDCLoginRequestsPerWindow       = 60
+	maxEnrollmentStartsPerWindow        = 30
+	maxEnrollmentPollsPerWindow         = 8192
+	maxUserLoginStartsPerWindow         = 30
+	maxUserLoginPollsPerWindow          = 8192
+	defaultHTTPShutdownTimeout          = 30 * time.Second
 )
+
+type publicAuthRateEntry struct {
+	windowStart time.Time
+	count       int
+}
+
+type httpShutdownError struct {
+	err error
+}
+
+func (e *httpShutdownError) Error() string {
+	return "HTTP server shutdown did not complete: " + e.err.Error()
+}
+
+func (e *httpShutdownError) Unwrap() error {
+	return e.err
+}
 
 func newActiveChatRun(cancel context.CancelFunc) *activeChatRun {
 	if cancel == nil {
@@ -117,11 +147,25 @@ type ServerConfig struct {
 	CompactRatio    float64
 	AuthToken       string
 	RunnerAuthToken string
+	WebAuthMode     WebAuthMode
+	RunnerAuthMode  RunnerAuthMode
+	OIDC            OIDCConfig
 	CORSOrigins     []string
 }
 
 // Validate validates the server configuration
 func (c *ServerConfig) Validate() error {
+	if c == nil {
+		return errors.New("server configuration is required")
+	}
+	if err := ValidateAuthToken(c.AuthToken); err != nil {
+		return err
+	}
+	if err := ValidateAuthToken(c.RunnerAuthToken); err != nil {
+		return errors.Wrap(err, "invalid runner auth token")
+	}
+	c.normalizeAuth()
+
 	// Validate host
 	if c.Host == "" {
 		return errors.New("host cannot be empty")
@@ -136,17 +180,11 @@ func (c *ServerConfig) Validate() error {
 		return errors.New("compact-ratio must be greater than 0.0 and less than or equal to 1.0")
 	}
 
-	if err := ValidateAuthToken(c.AuthToken); err != nil {
-		return err
-	}
-	if err := ValidateAuthToken(c.RunnerAuthToken); err != nil {
-		return errors.Wrap(err, "invalid runner auth token")
-	}
-	if c.AuthToken != "" && c.RunnerAuthToken == "" {
-		return errors.New("runner auth token is required when web UI authentication is enabled")
-	}
 	if c.AuthToken != "" && c.RunnerAuthToken != "" && c.AuthToken == c.RunnerAuthToken {
 		return errors.New("runner auth token must differ from the web UI auth token")
+	}
+	if err := c.validateAuthModes(); err != nil {
+		return err
 	}
 
 	if _, err := normalizeConfiguredCORSOrigins(c.CORSOrigins); err != nil {
@@ -176,7 +214,6 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 		}
 		config.CWD = normalizedCWD
 	}
-	config.AuthToken = strings.TrimSpace(config.AuthToken)
 	normalizedCORSOrigins, err := normalizeConfiguredCORSOrigins(config.CORSOrigins)
 	if err != nil {
 		return nil, errors.Wrap(err, "invalid server configuration")
@@ -203,15 +240,39 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 		_ = conversationService.Close()
 		return nil, errors.Wrap(err, "failed to resolve runner persistence path")
 	}
+	var authenticationStore *authStore
+	if config.requiresAuthStore() {
+		authenticationStore, err = newAuthStore(runCtx, dbPath)
+		if err != nil {
+			runCancel()
+			_ = conversationService.Close()
+			return nil, errors.Wrap(err, "failed to open control-plane authentication store")
+		}
+	}
+	var oidcFlow OIDCFlow
+	if config.resolvedWebAuthMode() == WebAuthModeOIDC {
+		oidcFlow = config.OIDC.Flow
+		if oidcFlow == nil {
+			oidcFlow, err = newProviderOIDCFlow(runCtx, config.OIDC)
+			if err != nil {
+				runCancel()
+				_ = authenticationStore.Close()
+				_ = conversationService.Close()
+				return nil, err
+			}
+		}
+	}
 	runnerPersistence, err := runnerregistry.NewSQLitePersistence(runCtx, dbPath, "")
 	if err != nil {
 		runCancel()
+		_ = authenticationStore.Close()
 		_ = conversationService.Close()
 		return nil, errors.Wrap(err, "failed to open runner persistence")
 	}
-	runnerRegistry, err := runnerregistry.New(runCtx, runnerregistry.Options{Persistence: runnerPersistence})
+	runnerRegistry, err := runnerregistry.New(runCtx, runnerregistry.Options{Persistence: runnerPersistence, Credentials: authenticationStore})
 	if err != nil {
 		runCancel()
+		_ = authenticationStore.Close()
 		_ = conversationService.Close()
 		return nil, errors.Wrap(err, "failed to create runner registry")
 	}
@@ -229,6 +290,8 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 		terminalSessions:      newTerminalSessionManager(runCtx),
 		extensionRuntimes:     extensionRuntimes,
 		runnerRegistry:        runnerRegistry,
+		authStore:             authenticationStore,
+		oidcFlow:              oidcFlow,
 		activeChats:           make(map[string]*activeChatRun),
 		pendingChatStops:      make(map[string]time.Time),
 		deletingConversations: make(map[string]struct{}),
@@ -250,17 +313,30 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 
 // setupRoutes configures all the HTTP routes
 func (s *Server) setupRoutes() {
+	// Authentication and browser approval routes.
+	s.router.HandleFunc("/auth/login", s.handleOIDCLogin).Methods("GET")
+	s.router.HandleFunc("/auth/oidc/callback", s.handleOIDCCallback).Methods("GET")
+	s.router.HandleFunc("/auth/logout", s.handleLogout).Methods("GET")
+	s.router.HandleFunc(userauth.DeviceVerificationPath, s.handleUserLoginVerificationPage).Methods("GET", "POST")
+	s.router.HandleFunc(userauth.DeviceStartPath, s.handleStartUserLogin).Methods("POST")
+	s.router.HandleFunc(userauth.DevicePollPath, s.handlePollUserLogin).Methods("POST")
+	s.router.HandleFunc(userauth.CurrentCredentialPath, s.handleRevokeCurrentUserCredential).Methods("DELETE")
+	s.router.HandleFunc("/runner/enroll", s.requireRole(RoleRunnerAdmin, s.handleRunnerEnrollmentPage)).Methods("GET", "POST")
+	s.router.HandleFunc(protocol.EnrollmentStartPath, s.handleStartRunnerEnrollment).Methods("POST")
+	s.router.HandleFunc(protocol.EnrollmentPollPath, s.handlePollRunnerEnrollment).Methods("POST")
+
 	// API routes
 	api := s.router.PathPrefix("/api").Subrouter()
+	api.HandleFunc("/auth/me", s.handleAuthMe).Methods("GET")
 	api.HandleFunc("/chat/settings", s.handleGetChatSettings).Methods("GET")
 	api.HandleFunc("/chat/slash-commands", s.handleGetSlashCommands).Methods("GET")
 	api.HandleFunc("/chat/cwd-suggestions", s.handleGetCWDHints).Methods("GET")
 	api.HandleFunc("/git/diff", s.handleGetGitDiff).Methods("GET")
-	api.HandleFunc("/terminal/ws", s.handleTerminalWebsocket).Methods("GET")
+	api.HandleFunc("/terminal/ws", s.requireRole(RoleTerminal, s.handleTerminalWebsocket)).Methods("GET")
 	api.HandleFunc("/runner/v1/connect", s.handleRunnerWebsocket).Methods("GET")
-	api.HandleFunc("/runners", s.handleListRunners).Methods("GET")
-	api.HandleFunc("/runners/{id}", s.handleGetRunner).Methods("GET")
-	api.HandleFunc("/runners/{id}", s.handleDeleteRunner).Methods("DELETE")
+	api.HandleFunc("/runners", s.requireRole(RoleRunnerAdmin, s.handleListRunners)).Methods("GET")
+	api.HandleFunc("/runners/{id}", s.requireRole(RoleRunnerAdmin, s.handleGetRunner)).Methods("GET")
+	api.HandleFunc("/runners/{id}", s.requireRole(RoleRunnerAdmin, s.handleDeleteRunner)).Methods("DELETE")
 	api.HandleFunc("/conversations", s.handleListConversations).Methods("GET")
 	api.HandleFunc("/conversations/{id}", s.handleGetConversation).Methods("GET")
 	api.HandleFunc("/conversations/{id}/stream", s.handleStreamConversation).Methods("GET")
@@ -482,8 +558,6 @@ func isLoopbackOrigin(origin string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-const webUIAuthCookieName = "kodelet_auth_token"
-
 // NewAuthToken generates a random token suitable for protecting the web UI.
 func NewAuthToken() (string, error) {
 	buf := make([]byte, 32)
@@ -521,61 +595,6 @@ func isAuthTokenRune(r rune) bool {
 		(r >= 'A' && r <= 'Z') ||
 		(r >= '0' && r <= '9') ||
 		r == '-' || r == '.' || r == '_' || r == '~'
-}
-
-func (s *Server) authMiddleware(next http.Handler) http.Handler {
-	if s.config == nil {
-		return next
-	}
-
-	authToken := strings.TrimSpace(s.config.AuthToken)
-	runnerAuthToken := strings.TrimSpace(s.config.RunnerAuthToken)
-	if authToken == "" && runnerAuthToken == "" {
-		return next
-	}
-
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodOptions {
-			next.ServeHTTP(w, r)
-			return
-		}
-		if r.URL.Path == protocol.Endpoint {
-			if runnerAuthToken == "" || requestHasAuthToken(r, runnerAuthToken) {
-				next.ServeHTTP(w, r)
-				return
-			}
-			s.writeAuthError(w, r, http.StatusUnauthorized, "runner authentication required")
-			return
-		}
-		if authToken == "" {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		queryToken, hasQueryToken := authQueryToken(r)
-		if hasQueryToken {
-			if !constantTimeStringEqual(queryToken, authToken) {
-				s.writeAuthError(w, r, http.StatusUnauthorized, "invalid authentication token")
-				return
-			}
-
-			setWebUIAuthCookie(w, r, authToken)
-			if shouldRedirectTokenRequest(r) {
-				http.Redirect(w, r, tokenlessURL(r), http.StatusFound)
-				return
-			}
-
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		if requestHasAuthToken(r, authToken) {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		s.writeAuthError(w, r, http.StatusUnauthorized, "authentication required")
-	})
 }
 
 func authQueryToken(r *http.Request) (string, bool) {
@@ -653,29 +672,6 @@ func setWebUIAuthCookie(w http.ResponseWriter, r *http.Request, authToken string
 
 func isHTTPSRequest(r *http.Request) bool {
 	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
-}
-
-func constantTimeStringEqual(a, b string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-
-	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
-}
-
-func (s *Server) writeAuthError(w http.ResponseWriter, r *http.Request, statusCode int, message string) {
-	if strings.HasPrefix(r.URL.Path, "/api/") {
-		s.writeErrorResponse(w, statusCode, message, nil)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(statusCode)
-	_, _ = fmt.Fprintf(
-		w,
-		"%s\n\nOpen the tokenized URL printed by `kodelet serve`, or restart with --skip-auth to disable web UI authentication.\n",
-		message,
-	)
 }
 
 // responseWriter wraps http.ResponseWriter to capture status code
@@ -2486,7 +2482,7 @@ func (s *Server) Start(ctx context.Context) error {
 	<-ctx.Done()
 
 	// Shutdown server gracefully
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), s.httpShutdownTimeout())
 	defer cancel()
 
 	return s.server.Shutdown(shutdownCtx)
@@ -2494,6 +2490,15 @@ func (s *Server) Start(ctx context.Context) error {
 
 // Stop stops the web server
 func (s *Server) Stop() error {
+	var firstErr error
+	if s.server != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), s.httpShutdownTimeout())
+		if err := s.server.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			cancel()
+			return &httpShutdownError{err: err}
+		}
+		cancel()
+	}
 	if s.runCancel != nil {
 		s.runCancel()
 	}
@@ -2501,7 +2506,6 @@ func (s *Server) Stop() error {
 	s.terminalSessionsMu.Lock()
 	terminalSessions := s.terminalSessions
 	s.terminalSessionsMu.Unlock()
-	var firstErr error
 	if terminalSessions != nil {
 		terminalSessions.Close()
 	}
@@ -2520,12 +2524,19 @@ func (s *Server) Stop() error {
 			firstErr = err
 		}
 	}
-	if s.server != nil {
-		if err := s.server.Close(); err != nil && firstErr == nil {
+	if s.authStore != nil {
+		if err := s.authStore.Close(); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
 	return firstErr
+}
+
+func (s *Server) httpShutdownTimeout() time.Duration {
+	if s != nil && s.shutdownTimeout > 0 {
+		return s.shutdownTimeout
+	}
+	return defaultHTTPShutdownTimeout
 }
 
 func normalizeWebContent(textParts []string, blocks []WebContentBlock) any {
@@ -2629,10 +2640,18 @@ func isEmptyWebContent(content any) bool {
 
 // Close closes the server and releases resources
 func (s *Server) Close() error {
-	if s.conversationService != nil {
-		if err := s.conversationService.Close(); err != nil {
-			return errors.Wrap(err, "failed to close conversation service")
+	var firstErr error
+	if err := s.Stop(); err != nil {
+		firstErr = err
+		var shutdownErr *httpShutdownError
+		if errors.As(err, &shutdownErr) {
+			return firstErr
 		}
 	}
-	return s.Stop()
+	if s.conversationService != nil {
+		if err := s.conversationService.Close(); err != nil && firstErr == nil {
+			firstErr = errors.Wrap(err, "failed to close conversation service")
+		}
+	}
+	return firstErr
 }

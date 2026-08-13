@@ -15,6 +15,47 @@ log_format: "json"
 # a file explicitly selected with KODELET_CONFIG_FILE, not kodelet-config.yaml.
 # server: "https://kodelet.example"
 
+# `kodelet serve` settings may be stored under `serve` in ~/.kodelet/config.yaml
+# or a file explicitly selected with KODELET_CONFIG_FILE. Repository-level
+# kodelet-config.yaml cannot set this namespace. Explicit CLI flags override the
+# corresponding trusted YAML values. Web modes: token, oidc, none. Runner modes:
+# token, enrollment, hybrid, none.
+# serve:
+#   host: "0.0.0.0"
+#   port: 8080
+#   cwd: "/srv/kodelet"
+#   web_auth_mode: "oidc"
+#   runner_auth_mode: "enrollment"
+#   # Optional static administrative migration or automation credential.
+#   # auth_token: "generate-a-long-random-token"
+#   # Legacy shared runner token for token or hybrid mode only.
+#   # runner_auth_token: "generate-a-different-long-random-token"
+#   # Compatibility shorthand for web_auth_mode: none and runner_auth_mode: none.
+#   skip_auth: false
+#   cors_origins:
+#     - "https://app.example.com"
+#   oidc:
+#     issuer: "https://accounts.google.com"
+#     client_id: "CLIENT_ID.apps.googleusercontent.com"
+#     client_secret_file: "/run/secrets/kodelet-oidc"
+#     redirect_url: "https://kodelet.example/auth/oidc/callback"
+#     scopes: ["openid", "profile", "email"]
+#     allowed_emails: ["user@example.com"]
+#     allowed_domains: ["example.com"]
+#     admin_emails: ["admin@example.com"]
+#     terminal_emails: ["terminal@example.com"]
+#     runner_admin_emails: ["runners@example.com"]
+#     allow_any_user: false
+#     session_duration: "12h"
+# Pure OIDC does not generate an administrative compatibility token. Use
+# `kodelet auth login --server https://kodelet.example` for interactive CLI,
+# TUI, and ACP access; explicit tokens remain migration or automation overrides.
+# On Unix, a trusted config containing either static token must use owner-only
+# permissions such as 0600. Configured token values are not printed at startup.
+# The OIDC client secret remains in its own regular, non-empty, owner-only file.
+# Enroll a runner separately from its workspace with:
+# kodelet runner enroll --server https://kodelet.example
+
 # LLM Configuration
 # Provider to use (anthropic or openai)
 provider: "anthropic"

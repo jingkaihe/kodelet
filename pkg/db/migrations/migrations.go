@@ -20,5 +20,8 @@ func All() []db.Migration {
 		Migration20260719170000CreateSteeringMessages(),
 		Migration20260806120000CreateRunnerState(),
 		Migration20260807120000AddRunnerEnvironmentProfile(),
+		Migration20260812120000CreateControlPlaneAuth(),
+		Migration20260813120000CreateUserAPICredentials(),
+		Migration20260813130000CreateRunnerDPoPReplays(),
 	}
 }

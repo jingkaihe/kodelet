@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	runnerclient "github.com/jingkaihe/kodelet/pkg/runner/client"
 	"github.com/jingkaihe/kodelet/pkg/runner/controlplaneurl"
@@ -36,10 +37,21 @@ type runnerStartConfig struct {
 	DisplayName string
 }
 
+type runnerEnrollConfig struct {
+	Server                 string
+	DisplayName            string
+	ReplaceLocalCredential bool
+	NoBrowser              bool
+	Store                  *localstate.Store
+	HTTPClient             *http.Client
+	OpenBrowser            func(string) error
+}
+
 type runnerQueryConfig struct {
-	Server     string
-	AuthToken  string
-	JSONOutput bool
+	Server      string
+	AuthToken   string
+	JSONOutput  bool
+	ConfigError error
 }
 
 type runnerRemoveConfig struct {
@@ -72,7 +84,19 @@ var runnerStartCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start a runner bound to the current workspace",
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		return runRunnerStart(cmd.Context(), runnerStartConfigFromFlags(cmd))
+		config, err := consumeRunnerStartConfig(cmd)
+		if err != nil {
+			return err
+		}
+		return runRunnerStart(cmd.Context(), config)
+	},
+}
+
+var runnerEnrollCmd = &cobra.Command{
+	Use:   "enroll",
+	Short: "Enroll the current workspace runner with a control plane",
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		return runRunnerEnroll(cmd.Context(), runnerEnrollConfigFromFlags(cmd), os.Stdout)
 	},
 }
 
@@ -112,14 +136,18 @@ func init() {
 	runnerStartCmd.Flags().String("server", defaultRunnerServer, "Control-plane URL")
 	runnerStartCmd.Flags().String("auth-token", "", "Runner-only authentication token (or KODELET_RUNNER_AUTH_TOKEN)")
 	runnerStartCmd.Flags().String("name", "", "Optional mutable display name")
+	runnerEnrollCmd.Flags().String("server", defaultRunnerServer, "Control-plane URL")
+	runnerEnrollCmd.Flags().String("name", "", "Optional mutable display name")
+	runnerEnrollCmd.Flags().Bool("replace", false, "Replace an existing local runner credential after browser approval")
+	runnerEnrollCmd.Flags().Bool("no-browser", false, "Do not open the browser automatically")
 	for _, command := range []*cobra.Command{runnerListCmd, runnerInspectCmd, runnerRemoveCmd} {
 		command.Flags().String("server", defaultRunnerServer, "Control-plane URL")
 		command.Flags().String("auth-token", "", "Control-plane API authentication token (or KODELET_AUTH_TOKEN)")
 		command.Flags().Bool("json", false, "Output in JSON format")
 	}
-	runnerRemoveCmd.Flags().Bool("force", false, "Abandon conversation bindings while removing the runner and its run history")
+	runnerRemoveCmd.Flags().Bool("force", false, "Accepted for compatibility; runner affinity is cleared on every removal")
 	runnerRemoveCmd.Flags().Bool("no-confirm", false, "Skip the removal confirmation prompt")
-	runnerCmd.AddCommand(runnerStartCmd, runnerListCmd, runnerInspectCmd, runnerRemoveCmd)
+	runnerCmd.AddCommand(runnerStartCmd, runnerEnrollCmd, runnerListCmd, runnerInspectCmd, runnerRemoveCmd)
 	rootCmd.AddCommand(runnerCmd)
 }
 
@@ -133,13 +161,40 @@ func runnerStartConfigFromFlags(cmd *cobra.Command) runnerStartConfig {
 	}
 }
 
+func consumeRunnerStartConfig(cmd *cobra.Command) (runnerStartConfig, error) {
+	config := runnerStartConfigFromFlags(cmd)
+	config.AuthToken = strings.Clone(config.AuthToken)
+	_ = os.Unsetenv(runnerAuthTokenEnv)
+	if config.AuthToken != "" {
+		if err := protectProcessSecrets("auth-token"); err != nil {
+			return runnerStartConfig{}, errors.Wrap(err, "failed to protect runner authentication token")
+		}
+	}
+	return config, nil
+}
+
+func runnerEnrollConfigFromFlags(cmd *cobra.Command) runnerEnrollConfig {
+	server, _ := serverFlagOrConfig(cmd)
+	displayName, _ := cmd.Flags().GetString("name")
+	replace, _ := cmd.Flags().GetBool("replace")
+	noBrowser, _ := cmd.Flags().GetBool("no-browser")
+	return runnerEnrollConfig{
+		Server:                 server,
+		DisplayName:            strings.TrimSpace(displayName),
+		ReplaceLocalCredential: replace,
+		NoBrowser:              noBrowser,
+	}
+}
+
 func runnerQueryConfigFromFlags(cmd *cobra.Command) runnerQueryConfig {
 	server, _ := serverFlagOrConfig(cmd)
 	jsonOutput, _ := cmd.Flags().GetBool("json")
+	authToken, _, authErr := resolveControlPlaneAuthToken(cmd, server)
 	return runnerQueryConfig{
-		Server:     server,
-		AuthToken:  authTokenFlagOrEnvironment(cmd, controlPlaneAuthTokenEnv),
-		JSONOutput: jsonOutput,
+		Server:      server,
+		AuthToken:   authToken,
+		JSONOutput:  jsonOutput,
+		ConfigError: authErr,
 	}
 }
 
@@ -183,7 +238,65 @@ func runRunnerStart(ctx context.Context, config runnerStartConfig) error {
 	return nil
 }
 
+func runRunnerEnroll(ctx context.Context, config runnerEnrollConfig, output io.Writer) error {
+	workspace, err := os.Getwd()
+	if err != nil {
+		return errors.Wrap(err, "failed to determine current workspace")
+	}
+	if output == nil {
+		output = io.Discard
+	}
+	openBrowser := config.OpenBrowser
+	if openBrowser == nil {
+		openBrowser = osutil.OpenBrowser
+	}
+
+	result, err := runnerclient.EnrollRunner(ctx, runnerclient.EnrollmentConfig{
+		Server:                 config.Server,
+		Workspace:              workspace,
+		DisplayName:            config.DisplayName,
+		Store:                  config.Store,
+		HTTPClient:             config.HTTPClient,
+		ReplaceLocalCredential: config.ReplaceLocalCredential,
+		OnPending: func(info runnerclient.EnrollmentInfo) {
+			if info.Resumed {
+				fmt.Fprintln(output, "Resuming pending runner enrollment")
+			} else {
+				fmt.Fprintln(output, "Runner enrollment started")
+			}
+			fmt.Fprintf(output, "Enrollment code: %s\n", info.UserCode)
+			fmt.Fprintf(output, "Public-key fingerprint: %s\n", info.Fingerprint)
+			verificationURL := info.VerificationURLComplete
+			if verificationURL == "" {
+				verificationURL = info.VerificationURL
+			}
+			fmt.Fprintf(output, "Approve this runner at: %s\n", verificationURL)
+			if !config.NoBrowser {
+				if browserErr := openBrowser(verificationURL); browserErr != nil {
+					fmt.Fprintf(output, "Could not open the browser automatically: %v\n", browserErr)
+				}
+			}
+			fmt.Fprintln(output, "Waiting for browser approval...")
+		},
+	})
+	if err != nil {
+		if errors.Is(err, runnerclient.ErrActiveLocalCredential) {
+			return errors.Wrap(err, "use --replace to enroll a replacement key")
+		}
+		return err
+	}
+
+	fmt.Fprintln(output, "Runner enrollment approved")
+	fmt.Fprintf(output, "Runner ID: %s\n", result.RunnerID)
+	fmt.Fprintf(output, "Credential fingerprint: %s\n", result.Fingerprint)
+	fmt.Fprintln(output, "Start the enrolled runner with `kodelet runner start`")
+	return nil
+}
+
 func runRunnerList(ctx context.Context, config runnerQueryConfig, output io.Writer) error {
+	if config.ConfigError != nil {
+		return config.ConfigError
+	}
 	runners, server, err := fetchRunners(ctx, config.Server, config.AuthToken)
 	if err != nil {
 		return err
@@ -214,6 +327,9 @@ func runRunnerList(ctx context.Context, config runnerQueryConfig, output io.Writ
 }
 
 func runRunnerInspect(ctx context.Context, query string, config runnerQueryConfig, output io.Writer) error {
+	if config.ConfigError != nil {
+		return config.ConfigError
+	}
 	runners, server, err := fetchRunners(ctx, config.Server, config.AuthToken)
 	if err != nil {
 		return err
@@ -246,6 +362,9 @@ func runRunnerInspect(ctx context.Context, query string, config runnerQueryConfi
 }
 
 func runRunnerRemove(ctx context.Context, query string, config runnerRemoveConfig, input io.Reader, output io.Writer) error {
+	if config.ConfigError != nil {
+		return config.ConfigError
+	}
 	if config.JSONOutput && !config.NoConfirm {
 		return errors.New("--json requires --no-confirm for runner removal")
 	}
@@ -270,7 +389,7 @@ func runRunnerRemove(ctx context.Context, query string, config runnerRemoveConfi
 		return err
 	}
 	if err := deleteLocalRunnerRegistration(server, runner); err != nil {
-		logger.G(ctx).WithError(err).WithField("runner_id", runner.ID).Warn("failed to remove local runner registration cache")
+		logger.G(ctx).WithError(err).WithField("runner_id", runner.ID).Warn("failed to remove local runner authentication state")
 	}
 	if config.JSONOutput {
 		return writeRunnerJSON(output, result)
@@ -280,11 +399,9 @@ func runRunnerRemove(ctx context.Context, query string, config runnerRemoveConfi
 }
 
 func confirmRunnerRemoval(input io.Reader, output io.Writer, runner runnerregistry.Runner, force bool) bool {
+	_ = force
 	fmt.Fprintf(output, "Remove runner %s (%s on %s)? ", runner.ID, runner.Workspace.Path, runner.Host.Hostname)
-	fmt.Fprint(output, "This deletes its registration and runner run history. ")
-	if force {
-		fmt.Fprint(output, "This abandons its conversation bindings; affected conversations retain runner metadata and cannot be resumed until explicitly migrated or unbound. ")
-	}
+	fmt.Fprint(output, "This deletes its registration, credentials, and runner run history. Conversation transcripts are preserved, while bindings to this runner are cleared; future remote execution requires selecting a compatible runner. ")
 	fmt.Fprint(output, "[y/N]: ")
 	response, _ := bufio.NewReader(input).ReadString('\n')
 	response = strings.ToLower(strings.TrimSpace(response))
@@ -345,8 +462,16 @@ func deleteLocalRunnerRegistration(server string, runner runnerregistry.Runner) 
 	}
 	for _, registration := range registrations {
 		if registration.Server == server && registration.RunnerID == runner.ID {
-			_, err := store.DeleteRegistration(registration.Server, registration.Workspace, runner.ID)
-			return err
+			if _, err := store.DeleteCredential(registration.Server, registration.Workspace); err != nil {
+				return errors.Wrap(err, "failed to delete local runner credential")
+			}
+			if _, err := store.DeletePendingEnrollment(registration.Server, registration.Workspace); err != nil {
+				return errors.Wrap(err, "failed to delete pending local runner enrollment")
+			}
+			if _, err := store.DeleteRegistration(registration.Server, registration.Workspace, runner.ID); err != nil {
+				return errors.Wrap(err, "failed to delete local runner registration")
+			}
+			return nil
 		}
 	}
 	return nil

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -60,6 +61,11 @@ func TestSetupCommandCreatesConfig(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "provider: openai")
 	assert.Contains(t, string(data), "profiles:")
+	if runtime.GOOS != "windows" {
+		info, statErr := os.Stat(configPath)
+		require.NoError(t, statErr)
+		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	}
 }
 
 func TestSetupCommandSkipsExistingConfigWithoutOverride(t *testing.T) {
@@ -95,6 +101,13 @@ func TestSetupCommandOverrideBacksUpExistingConfig(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, strings.Contains(string(updated), "profile: default"))
 	assert.True(t, strings.Contains(string(updated), "reasoning_effort: xhigh"))
+	if runtime.GOOS != "windows" {
+		for _, path := range []string{configPath, filepath.Join(home, ".kodelet", "config.yaml.bak")} {
+			info, statErr := os.Stat(path)
+			require.NoError(t, statErr)
+			assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+		}
+	}
 }
 
 func runSetupCommandForTest(t *testing.T, override bool) {

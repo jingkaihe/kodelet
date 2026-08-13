@@ -184,14 +184,13 @@ func TestServerConfig_Validate(t *testing.T) {
 			expectedError: "compact-ratio must be greater than 0.0 and less than or equal to 1.0",
 		},
 		{
-			name: "web UI auth requires runner auth",
+			name: "web UI token auth does not require runner token auth",
 			config: &ServerConfig{
 				Host:         "localhost",
 				Port:         8080,
 				CompactRatio: 0.8,
 				AuthToken:    "web-secret",
 			},
-			expectedError: "runner auth token is required when web UI authentication is enabled",
 		},
 	}
 
@@ -199,8 +198,9 @@ func TestServerConfig_Validate(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.config.Validate()
 			if tt.expectedError != "" {
-				assert.Error(t, err)
-				assert.Contains(t, err.Error(), tt.expectedError)
+				if assert.Error(t, err) {
+					assert.Contains(t, err.Error(), tt.expectedError)
+				}
 			} else {
 				assert.NoError(t, err)
 			}
@@ -222,6 +222,61 @@ func TestServerStopCancelsRunContextBeforeClosingChatRunner(t *testing.T) {
 	require.NoError(t, server.Stop())
 	assert.ErrorIs(t, runCtx.Err(), context.Canceled)
 	assert.True(t, runner.closeCalled.Load())
+}
+
+func TestServerCloseLeavesDependenciesOpenWhenHTTPShutdownTimesOut(t *testing.T) {
+	store, _ := newAuthStoreTest(t)
+	runCtx, runCancel := context.WithCancel(context.Background())
+	t.Cleanup(runCancel)
+	handlerStarted := make(chan struct{})
+	releaseHandler := make(chan struct{})
+	httpServer := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(handlerStarted)
+		<-releaseHandler
+		w.WriteHeader(http.StatusNoContent)
+	})}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	serveDone := make(chan error, 1)
+	go func() {
+		serveDone <- httpServer.Serve(listener)
+	}()
+
+	var conversationClosed atomic.Bool
+	server := &Server{
+		server:          httpServer,
+		authStore:       store,
+		runCtx:          runCtx,
+		runCancel:       runCancel,
+		shutdownTimeout: 20 * time.Millisecond,
+		conversationService: &mockConversationService{closeFunc: func() error {
+			conversationClosed.Store(true)
+			return nil
+		}},
+	}
+	requestDone := make(chan error, 1)
+	go func() {
+		response, requestErr := http.Get("http://" + listener.Addr().String())
+		if response != nil {
+			requestErr = errors.WithMessage(response.Body.Close(), "failed to close response body")
+		}
+		requestDone <- requestErr
+	}()
+	<-handlerStarted
+
+	err = server.Close()
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.False(t, conversationClosed.Load())
+	assert.NoError(t, runCtx.Err())
+	require.NoError(t, store.db.PingContext(t.Context()))
+
+	close(releaseHandler)
+	require.NoError(t, <-requestDone)
+	require.ErrorIs(t, <-serveDone, http.ErrServerClosed)
+	server.shutdownTimeout = time.Second
+	require.NoError(t, server.Close())
+	assert.True(t, conversationClosed.Load())
+	assert.ErrorIs(t, runCtx.Err(), context.Canceled)
 }
 
 func TestServerConfig_Validate_RejectsWhitespaceAuthToken(t *testing.T) {

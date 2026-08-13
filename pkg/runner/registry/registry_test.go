@@ -1,7 +1,9 @@
 package registry
 
 import (
+	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,10 +13,12 @@ import (
 	"testing"
 	"time"
 
+	conversationsqlite "github.com/jingkaihe/kodelet/pkg/conversations/sqlite"
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
+	conversationtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -34,6 +38,35 @@ type testPersistence struct {
 	saveRunnerErr       error
 	saveRunnerAndRunErr error
 	saveRunnerCalls     int
+}
+
+type fakeCredentialAuthorizer struct {
+	bound                  bool
+	err                    error
+	credentialActive       bool
+	credentialErr          error
+	host                   string
+	workspace              string
+	credentialID           string
+	runnerID               string
+	credentialRequestCount int
+	requestCount           int
+}
+
+func (a *fakeCredentialAuthorizer) HasActiveRunnerCredential(_ context.Context, hostInstanceID, workspacePath string) (bool, error) {
+	a.requestCount++
+	a.host = hostInstanceID
+	a.workspace = workspacePath
+	return a.bound, a.err
+}
+
+func (a *fakeCredentialAuthorizer) RunnerCredentialActive(_ context.Context, credentialID, runnerID, hostInstanceID, workspacePath string) (bool, error) {
+	a.credentialRequestCount++
+	a.credentialID = credentialID
+	a.runnerID = runnerID
+	a.host = hostInstanceID
+	a.workspace = workspacePath
+	return a.credentialActive, a.credentialErr
 }
 
 func (p *testPersistence) Load(context.Context) (PersistedState, error) {
@@ -203,6 +236,164 @@ func TestRegisterUpsertsWorkspaceIdentityAndFencesStaleConnections(t *testing.T)
 	params.Workspace.Path = "/work/other"
 	_, err = registry.Register(params, newFakeLink())
 	assert.ErrorContains(t, err, "another host workspace")
+}
+
+func TestRegisterAuthenticatedBindsConnectionToEnrolledRunnerIdentity(t *testing.T) {
+	registry := newTestRegistry(t)
+	enrollment := testEnrollmentStartRequest(t, "host-enrolled", "/work/enrolled")
+	offline, err := registry.EnsureOfflineRegistration(enrollment)
+	require.NoError(t, err)
+
+	params := testRegisterParams("host-enrolled", "/work/enrolled")
+	registration, err := registry.RegisterAuthenticated(params, newFakeLink(), RegistrationPrincipal{
+		Mode:           RegistrationAuthKey,
+		CredentialID:   "credential-one",
+		RunnerID:       offline.ID,
+		HostInstanceID: "host-enrolled",
+		WorkspacePath:  "/work/enrolled",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, offline.ID, registration.RunnerID)
+
+	params.RunnerID = "runner-other"
+	_, err = registry.RegisterAuthenticated(params, newFakeLink(), RegistrationPrincipal{
+		Mode:           RegistrationAuthKey,
+		CredentialID:   "credential-one",
+		RunnerID:       offline.ID,
+		HostInstanceID: "host-enrolled",
+		WorkspacePath:  "/work/enrolled",
+	})
+	require.ErrorContains(t, err, "runner id does not match")
+
+	params.RunnerID = ""
+	params.Workspace.Path = "/work/other"
+	_, err = registry.RegisterAuthenticated(params, newFakeLink(), RegistrationPrincipal{
+		Mode:           RegistrationAuthKey,
+		CredentialID:   "credential-one",
+		RunnerID:       offline.ID,
+		HostInstanceID: "host-enrolled",
+		WorkspacePath:  "/work/enrolled",
+	})
+	require.ErrorContains(t, err, "does not match its enrolled credential")
+
+	_, err = registry.RegisterAuthenticated(testRegisterParams("host-enrolled", "/work/enrolled"), newFakeLink(), RegistrationPrincipal{Mode: RegistrationAuthKey})
+	require.ErrorContains(t, err, "principal is incomplete")
+}
+
+func TestKeyRegistrationRevalidatesCredentialAndReplacementDisconnectsOldConnection(t *testing.T) {
+	authorizer := &fakeCredentialAuthorizer{credentialActive: true}
+	registry, err := New(t.Context(), Options{
+		HeartbeatInterval: time.Hour,
+		HeartbeatTimeout:  2 * time.Hour,
+		NewID:             sequentialIDs(),
+		Credentials:       authorizer,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = registry.Close() })
+
+	offline, err := registry.EnsureOfflineRegistration(testEnrollmentStartRequest(t, "host-enrolled", "/work/enrolled"))
+	require.NoError(t, err)
+	oldLink := newFakeLink()
+	oldRegistration, err := registry.RegisterAuthenticated(testRegisterParams("host-enrolled", "/work/enrolled"), oldLink, RegistrationPrincipal{
+		Mode:           RegistrationAuthKey,
+		CredentialID:   "credential-old",
+		RunnerID:       offline.ID,
+		HostInstanceID: "host-enrolled",
+		WorkspacePath:  "/work/enrolled",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 1, authorizer.credentialRequestCount)
+	assert.Equal(t, "credential-old", authorizer.credentialID)
+	assert.Equal(t, offline.ID, authorizer.runnerID)
+
+	registry.DisconnectRunnerExceptCredential(oldRegistration.RunnerID, "credential-new", errors.New("credential replaced"))
+	assert.True(t, oldLink.isClosed())
+	runner, ok := registry.Runner(oldRegistration.RunnerID)
+	require.True(t, ok)
+	assert.False(t, runner.Connected)
+
+	newLink := newFakeLink()
+	newRegistration, err := registry.RegisterAuthenticated(testRegisterParams("host-enrolled", "/work/enrolled"), newLink, RegistrationPrincipal{
+		Mode:           RegistrationAuthKey,
+		CredentialID:   "credential-new",
+		RunnerID:       offline.ID,
+		HostInstanceID: "host-enrolled",
+		WorkspacePath:  "/work/enrolled",
+	})
+	require.NoError(t, err)
+	registry.DisconnectRunnerExceptCredential(newRegistration.RunnerID, "credential-new", errors.New("credential replaced"))
+	assert.False(t, newLink.isClosed())
+
+	authorizer.credentialActive = false
+	_, err = registry.RegisterAuthenticated(testRegisterParams("host-enrolled", "/work/enrolled"), newFakeLink(), RegistrationPrincipal{
+		Mode:           RegistrationAuthKey,
+		CredentialID:   "credential-revoked",
+		RunnerID:       offline.ID,
+		HostInstanceID: "host-enrolled",
+		WorkspacePath:  "/work/enrolled",
+	})
+	require.ErrorContains(t, err, "invalid or revoked")
+}
+
+func TestLegacyRegistrationIsBlockedAfterKeyEnrollment(t *testing.T) {
+	authorizer := &fakeCredentialAuthorizer{bound: true}
+	registry, err := New(t.Context(), Options{
+		HeartbeatInterval: time.Hour,
+		HeartbeatTimeout:  2 * time.Hour,
+		NewID:             sequentialIDs(),
+		Credentials:       authorizer,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = registry.Close() })
+
+	_, err = registry.Register(testRegisterParams("host-one", "/work/project"), newFakeLink())
+	require.ErrorContains(t, err, "cannot use legacy authentication")
+	assert.Equal(t, 1, authorizer.requestCount)
+	assert.Equal(t, "host-one", authorizer.host)
+	assert.Equal(t, "/work/project", authorizer.workspace)
+
+	authorizer.bound = false
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), newFakeLink())
+	require.NoError(t, err)
+	assert.NotEmpty(t, registration.RunnerID)
+
+	authorizer.err = errors.New("credential lookup failed")
+	_, err = registry.Register(testRegisterParams("host-two", "/work/other"), newFakeLink())
+	require.ErrorContains(t, err, "failed to inspect runner credential binding")
+}
+
+func TestEnsureOfflineRegistrationPreservesIdentityAndRequiresStoppedRunner(t *testing.T) {
+	registry := newTestRegistry(t)
+	enrollment := testEnrollmentStartRequest(t, "host-one", "/work/project")
+	enrollment.DisplayName = "first"
+	offline, err := registry.EnsureOfflineRegistration(enrollment)
+	require.NoError(t, err)
+	assert.Equal(t, RunnerStatusOffline, offline.Status)
+
+	registration, err := registry.RegisterAuthenticated(testRegisterParams("host-one", "/work/project"), newFakeLink(), RegistrationPrincipal{
+		Mode:           RegistrationAuthKey,
+		CredentialID:   "credential-one",
+		RunnerID:       offline.ID,
+		HostInstanceID: "host-one",
+		WorkspacePath:  "/work/project",
+	})
+	require.NoError(t, err)
+	live, found := registry.Runner(registration.RunnerID)
+	require.True(t, found)
+	enrollment.DisplayName = "second"
+	_, err = registry.EnsureOfflineRegistration(enrollment)
+	require.ErrorIs(t, err, ErrRunnerConnected)
+	replacementTarget, err := registry.EnsureEnrollmentRegistration(enrollment, true)
+	require.NoError(t, err)
+	assert.Equal(t, offline.ID, replacementTarget.ID)
+	assert.True(t, replacementTarget.Connected)
+	assert.Equal(t, live.DisplayName, replacementTarget.DisplayName)
+
+	registry.Detach(registration.RunnerID, registration.ConnectionID, registration.Generation, context.Canceled)
+	updated, err := registry.EnsureOfflineRegistration(enrollment)
+	require.NoError(t, err)
+	assert.Equal(t, offline.ID, updated.ID)
+	assert.Equal(t, "second", updated.DisplayName)
 }
 
 func TestRegisterPersistenceFailureDoesNotPublishRunner(t *testing.T) {
@@ -1164,7 +1355,7 @@ func TestSQLitePersistenceBoundsRestoredHistoryAndPrunesTerminalOrphans(t *testi
 	assert.Zero(t, orphanCount)
 }
 
-func TestRemoveRunnerRequiresOfflineAndProtectsConversationAffinity(t *testing.T) {
+func TestRemoveRunnerRequiresOfflineAndClearsConversationAffinity(t *testing.T) {
 	registry := newTestRegistry(t)
 	link := newFakeLink()
 	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), link)
@@ -1181,12 +1372,7 @@ func TestRemoveRunnerRequiresOfflineAndProtectsConversationAffinity(t *testing.T
 	require.NoError(t, registry.CloseRun(t.Context(), "run-one", RunStatusSucceeded, nil))
 	registry.Detach(registration.RunnerID, registration.ConnectionID, registration.Generation, nil)
 
-	_, err = registry.RemoveRunner(t.Context(), registration.RunnerID, false)
-	var referenced *RunnerReferencedError
-	require.ErrorAs(t, err, &referenced)
-	assert.Equal(t, []string{"conversation-one"}, referenced.ConversationIDs)
-
-	result, err := registry.RemoveRunner(t.Context(), registration.RunnerID, true)
+	result, err := registry.RemoveRunner(t.Context(), registration.RunnerID, false)
 	require.NoError(t, err)
 	assert.Equal(t, RemovalResult{
 		RunnerID:                      registration.RunnerID,
@@ -1211,6 +1397,24 @@ func TestRemoveRunnerDeletesDurableState(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, db.NewMigrationRunner(database).Run(t.Context(), migrations.All()))
 	require.NoError(t, database.Close())
+	conversationStore, err := conversationsqlite.NewStore(t.Context(), dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, conversationStore.Close()) })
+	conversation := conversationtypes.ConversationRecord{
+		ID:          "conversation-one",
+		CWD:         "/work/project",
+		RawMessages: json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"preserve this transcript"}]}]`),
+		Provider:    "openai",
+		Summary:     "Preserved conversation",
+		Metadata: map[string]any{
+			conversationtypes.RunnerIDMetadataKey:                 "runner-stale",
+			conversationtypes.RunnerEnvironmentProfileMetadataKey: "gpu",
+			"preserve": "metadata",
+		},
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	require.NoError(t, conversationStore.Save(t.Context(), conversation))
 
 	firstPersistence, err := NewSQLitePersistence(t.Context(), dbPath, "owner-one")
 	require.NoError(t, err)
@@ -1233,7 +1437,7 @@ func TestRemoveRunnerDeletesDurableState(t *testing.T) {
 	require.NoError(t, firstRegistry.CloseRun(t.Context(), "run-one", RunStatusSucceeded, nil))
 	firstRegistry.Detach(registration.RunnerID, registration.ConnectionID, registration.Generation, nil)
 
-	result, err := firstRegistry.RemoveRunner(t.Context(), registration.RunnerID, true)
+	result, err := firstRegistry.RemoveRunner(t.Context(), registration.RunnerID, false)
 	require.NoError(t, err)
 	assert.Equal(t, 1, result.RemovedRuns)
 	assert.Equal(t, 1, result.RemovedConversationAffinities)
@@ -1254,9 +1458,24 @@ func TestRemoveRunnerDeletesDurableState(t *testing.T) {
 	assert.False(t, ok)
 	_, ok = secondRegistry.RunnerForConversation("conversation-one")
 	assert.False(t, ok)
+	loadedConversation, err := conversationStore.Load(t.Context(), "conversation-one")
+	require.NoError(t, err)
+	assert.Equal(t, string(conversation.RawMessages), string(loadedConversation.RawMessages))
+	assert.Equal(t, conversation.Summary, loadedConversation.Summary)
+	assert.NotContains(t, loadedConversation.Metadata, conversationtypes.RunnerIDMetadataKey)
+	assert.NotContains(t, loadedConversation.Metadata, conversationtypes.RunnerEnvironmentProfileMetadataKey)
+	assert.Equal(t, "metadata", loadedConversation.Metadata["preserve"])
+	queryResult, err := conversationStore.Query(t.Context(), conversationtypes.QueryOptions{})
+	require.NoError(t, err)
+	require.Len(t, queryResult.ConversationSummaries, 1)
+	assert.Equal(t, conversation.ID, queryResult.ConversationSummaries[0].ID)
+	assert.Equal(t, conversation.Summary, queryResult.ConversationSummaries[0].Summary)
+	assert.NotContains(t, queryResult.ConversationSummaries[0].Metadata, conversationtypes.RunnerIDMetadataKey)
+	assert.NotContains(t, queryResult.ConversationSummaries[0].Metadata, conversationtypes.RunnerEnvironmentProfileMetadataKey)
+	assert.Equal(t, "metadata", queryResult.ConversationSummaries[0].Metadata["preserve"])
 }
 
-func TestRemoveRunnerProtectsAffinityWithoutConversationRecord(t *testing.T) {
+func TestRemoveRunnerClearsAffinityWithoutConversationRecord(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "storage.db")
 	database, err := db.Open(t.Context(), dbPath)
 	require.NoError(t, err)
@@ -1279,12 +1498,7 @@ func TestRemoveRunnerProtectsAffinityWithoutConversationRecord(t *testing.T) {
 	require.NoError(t, registry.BindConversation(t.Context(), "conversation-one", registration.RunnerID))
 	registry.Detach(registration.RunnerID, registration.ConnectionID, registration.Generation, nil)
 
-	_, err = registry.RemoveRunner(t.Context(), registration.RunnerID, false)
-	var referenced *RunnerReferencedError
-	require.ErrorAs(t, err, &referenced)
-	assert.Equal(t, []string{"conversation-one"}, referenced.ConversationIDs)
-
-	result, err := registry.RemoveRunner(t.Context(), registration.RunnerID, true)
+	result, err := registry.RemoveRunner(t.Context(), registration.RunnerID, false)
 	require.NoError(t, err)
 	assert.Equal(t, 1, result.RemovedConversationAffinities)
 	_, ok := registry.RunnerForConversation("conversation-one")
@@ -1689,7 +1903,7 @@ func TestRegistryCallRunRoutesOnlyToActiveRunAndForgetsAffinity(t *testing.T) {
 	(*Registry)(nil).ForgetConversation("conversation")
 }
 
-func TestConversationAffinityProfileLockAndReferencedErrorDiagnostics(t *testing.T) {
+func TestConversationAffinityProfileLock(t *testing.T) {
 	registry := newTestRegistry(t)
 	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), newFakeLink())
 	require.NoError(t, err)
@@ -1697,14 +1911,6 @@ func TestConversationAffinityProfileLockAndReferencedErrorDiagnostics(t *testing
 	err = registry.BindConversationWithEnvironmentProfile(t.Context(), "conversation-one", registration.RunnerID, "gpu")
 	require.ErrorContains(t, err, `locked to "default"`)
 	require.ErrorContains(t, err, `resume with "gpu"`)
-
-	assert.Equal(t, "runner is referenced by conversations", (*RunnerReferencedError)(nil).Error())
-	referenced := (&RunnerReferencedError{
-		RunnerID:        "runner-one",
-		ConversationIDs: []string{"conversation-7", "conversation-2", "conversation-6", "conversation-1", "conversation-5", "conversation-4", "conversation-3"},
-	}).Error()
-	assert.Contains(t, referenced, "runner runner-one is bound to 7 conversation(s)")
-	assert.Contains(t, referenced, "conversation-1, conversation-2, conversation-3, conversation-4, conversation-5, and 2 more")
 }
 
 func TestSQLitePersistenceReadsConversationAffinity(t *testing.T) {
@@ -1917,6 +2123,9 @@ func TestSessionValidationAndRPCErrorMapping(t *testing.T) {
 	assert.Equal(t, protocol.ErrorCodeStale, rpcErrorFor(errors.New("stale generation")).Code)
 	assert.Equal(t, protocol.ErrorCodeConflict, rpcErrorFor(errors.New("already registered")).Code)
 	assert.Equal(t, protocol.ErrorCodeInvalidParams, rpcErrorFor(errors.New("invalid input")).Code)
+	legacyAuthError := rpcErrorFor(ErrLegacyAuthKeyEnrolled)
+	assert.Equal(t, protocol.ErrorCodeConflict, legacyAuthError.Code)
+	assert.Equal(t, protocol.ErrorReasonLegacyAuthKeyEnrolled, legacyAuthError.Reason())
 	assert.False(t, isUIRequest("runner.unknown"))
 }
 
@@ -1954,6 +2163,29 @@ func testRegisterParams(hostInstanceID, workspace string) protocol.RegisterParam
 			Arch:       "amd64",
 		},
 		Workspace: protocol.Workspace{Path: workspace, Name: "project"},
+	}
+}
+
+func testEnrollmentStartRequest(t *testing.T, hostInstanceID, workspace string) protocol.EnrollmentStartRequest {
+	t.Helper()
+	privateKey := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x42}, ed25519.SeedSize))
+	publicKey := privateKey.Public().(ed25519.PublicKey)
+	encodedPublicKey, err := protocol.EncodePublicKey(publicKey)
+	require.NoError(t, err)
+	fingerprint, err := protocol.CredentialFingerprint(publicKey)
+	require.NoError(t, err)
+	return protocol.EnrollmentStartRequest{
+		ProtocolVersions: []int{protocol.Version},
+		PublicKey:        encodedPublicKey,
+		Fingerprint:      fingerprint,
+		Host: protocol.Host{
+			InstanceID: hostInstanceID,
+			Hostname:   "host",
+			OS:         "linux",
+			Arch:       "amd64",
+		},
+		Workspace:      protocol.Workspace{Path: workspace, Name: "project"},
+		KodeletVersion: "v-test",
 	}
 }
 

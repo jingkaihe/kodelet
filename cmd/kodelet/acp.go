@@ -104,7 +104,7 @@ func runRemoteACP(ctx context.Context, cmd *cobra.Command, rawServerURL string) 
 	if err != nil {
 		return err
 	}
-	apiAuthToken, runnerAuthToken, err := consumeRemoteACPAuthTokens(cmd)
+	apiAuthToken, runnerAuthToken, err := consumeRemoteACPAuthTokens(cmd, serverURL)
 	if err != nil {
 		return err
 	}
@@ -184,16 +184,20 @@ func remoteACPCommandSource(runner *runnerclient.Runner, ownsWorkspaceLock bool)
 	return runner
 }
 
-func consumeRemoteACPAuthTokens(cmd *cobra.Command) (string, string, error) {
+func consumeRemoteACPAuthTokens(cmd *cobra.Command, server string) (string, string, error) {
 	// Clone values before scrubbing argv because pflag values may share the
 	// original command-line backing storage.
-	apiAuthToken := strings.Clone(authTokenFlagOrEnvironment(cmd, controlPlaneAuthTokenEnv))
+	apiAuthToken, apiAuthSource, err := resolveControlPlaneAuthToken(cmd, server)
+	if err != nil {
+		return "", "", err
+	}
+	apiAuthToken = strings.Clone(apiAuthToken)
 	runnerAuthToken := strings.Clone(stringFlagOrEnvironment(cmd, "runner-auth-token", runnerAuthTokenEnv))
 	// Local tools and extensions inherit the ACP process environment. Keep the
 	// captured credentials only in the HTTP and runner clients, not child envs.
 	_ = os.Unsetenv(controlPlaneAuthTokenEnv)
 	_ = os.Unsetenv(runnerAuthTokenEnv)
-	if apiAuthToken != "" || runnerAuthToken != "" {
+	if (apiAuthToken != "" && apiAuthSource != controlPlaneAuthTokenSourceStored) || runnerAuthToken != "" {
 		if err := protectRemoteACPProcessSecrets("auth-token", "runner-auth-token"); err != nil {
 			return "", "", err
 		}

@@ -53,6 +53,7 @@ type Runner struct {
 	workspace    string
 	server       string
 	websocketURL string
+	credential   *localstate.Credential
 	host         protocol.Host
 	lockMu       sync.Mutex
 	lock         *localstate.WorkspaceLock
@@ -74,6 +75,16 @@ func NewRunner(ctx context.Context, config RunnerConfig) (*Runner, error) {
 		store, err = localstate.NewStore()
 		if err != nil {
 			return nil, err
+		}
+	}
+	var credential *localstate.Credential
+	if strings.TrimSpace(config.AuthToken) == "" {
+		storedCredential, found, err := store.LoadCredential(server, workspace)
+		if err != nil {
+			return nil, pkgerrors.Wrap(err, "failed to load enrolled runner credential; re-enroll this runner with `kodelet runner enroll --replace`")
+		}
+		if found {
+			credential = &storedCredential
 		}
 	}
 	identity, err := store.LoadOrCreateHostIdentity()
@@ -112,6 +123,7 @@ func NewRunner(ctx context.Context, config RunnerConfig) (*Runner, error) {
 		workspace:    workspace,
 		server:       server,
 		websocketURL: websocketURL,
+		credential:   credential,
 		host: protocol.Host{
 			InstanceID: identity.InstanceID,
 			Hostname:   hostname,
@@ -231,9 +243,9 @@ func (r *Runner) Close() error {
 }
 
 func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool, error) {
-	headers := http.Header{}
-	if token := strings.TrimSpace(r.config.AuthToken); token != "" {
-		headers.Set("Authorization", "Bearer "+token)
+	headers, keyAuthenticated, err := r.connectionHeaders()
+	if err != nil {
+		return false, err
 	}
 	dialer := websocket.Dialer{Subprotocols: []string{protocol.Subprotocol}}
 	conn, response, err := dialer.DialContext(ctx, r.websocketURL, headers)
@@ -242,6 +254,9 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool,
 	}
 	if err != nil {
 		if response != nil && (response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden) {
+			if keyAuthenticated {
+				return false, &permanentConnectionError{err: pkgerrors.Errorf("runner credential authentication failed with HTTP %d; the credential may be unknown or revoked, so re-enroll this runner", response.StatusCode)}
+			}
 			return false, &permanentConnectionError{err: pkgerrors.Errorf("runner authentication failed with HTTP %d", response.StatusCode)}
 		}
 		return false, pkgerrors.Wrap(err, "failed to connect runner websocket")
@@ -293,9 +308,9 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool,
 	if found {
 		params.RunnerID = cached.RunnerID
 	}
-	registration, err := registerRunner(ctx, peer, params)
+	registration, err := registerRunner(ctx, peer, params, !keyAuthenticated)
 	if err != nil {
-		return false, err
+		return false, runnerRegistrationError(err, strings.TrimSpace(r.config.AuthToken) != "")
 	}
 	if err := r.service.SetRegistration(registration); err != nil {
 		return false, err
@@ -389,6 +404,29 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool,
 	}
 }
 
+func (r *Runner) connectionHeaders() (http.Header, bool, error) {
+	headers := http.Header{}
+	if token := strings.TrimSpace(r.config.AuthToken); token != "" {
+		headers.Set("Authorization", "Bearer "+token)
+		return headers, false, nil
+	}
+	if r.credential == nil {
+		return headers, false, nil
+	}
+
+	proof, err := protocol.SignDPoPProof(r.credential.PrivateKey, protocol.DPoPProofOptions{
+		Method:      http.MethodGet,
+		TargetURL:   r.websocketURL,
+		AccessToken: r.credential.AccessToken,
+	})
+	if err != nil {
+		return nil, true, &permanentConnectionError{err: pkgerrors.Wrap(err, "stored runner credential cannot sign a DPoP proof; re-enroll this runner")}
+	}
+	headers.Set("Authorization", protocol.DPoPAuthorizationScheme+" "+r.credential.AccessToken)
+	headers.Set(protocol.DPoPHeader, proof)
+	return headers, true, nil
+}
+
 func (r *Runner) probeManifestDigest(ctx context.Context) (string, error) {
 	probeCtx, cancel := context.WithTimeout(ctx, r.config.ManifestProbeTimeout)
 	defer cancel()
@@ -411,14 +449,14 @@ func (r *Runner) sendHeartbeat(ctx context.Context, peer *protocol.Peer, registr
 	})
 }
 
-func registerRunner(ctx context.Context, peer *protocol.Peer, params protocol.RegisterParams) (protocol.RegisterResult, error) {
+func registerRunner(ctx context.Context, peer *protocol.Peer, params protocol.RegisterParams, allowStaleRunnerIDFallback bool) (protocol.RegisterResult, error) {
 	var result protocol.RegisterResult
 	err := peer.Call(ctx, protocol.MethodRunnerRegister, params, &result)
 	if err == nil {
 		return result, nil
 	}
 	var rpcErr *protocol.RPCError
-	if params.RunnerID == "" || !errors.As(err, &rpcErr) || rpcErr.Code != protocol.ErrorCodeStale || (rpcErr.Reason() != "" && rpcErr.Reason() != protocol.ErrorReasonRunnerNotFound) {
+	if !allowStaleRunnerIDFallback || params.RunnerID == "" || !errors.As(err, &rpcErr) || rpcErr.Code != protocol.ErrorCodeStale || (rpcErr.Reason() != "" && rpcErr.Reason() != protocol.ErrorReasonRunnerNotFound) {
 		return protocol.RegisterResult{}, err
 	}
 	params.RunnerID = ""
@@ -426,6 +464,17 @@ func registerRunner(ctx context.Context, peer *protocol.Peer, params protocol.Re
 		return protocol.RegisterResult{}, err
 	}
 	return result, nil
+}
+
+func runnerRegistrationError(err error, explicitLegacyToken bool) error {
+	if err == nil || !explicitLegacyToken {
+		return err
+	}
+	var rpcErr *protocol.RPCError
+	if errors.As(err, &rpcErr) && rpcErr.Reason() == protocol.ErrorReasonLegacyAuthKeyEnrolled {
+		return &permanentConnectionError{err: pkgerrors.New("runner has an enrolled key credential but an explicit legacy runner token took precedence; remove --auth-token or KODELET_RUNNER_AUTH_TOKEN")}
+	}
+	return err
 }
 
 func normalizeServerURL(raw string) (string, string, error) {

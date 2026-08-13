@@ -16,7 +16,7 @@ import (
 
 func TestAll(t *testing.T) {
 	migrations := All()
-	require.Len(t, migrations, 10)
+	require.Len(t, migrations, 13)
 
 	versions := make([]int64, 0, len(migrations))
 	for _, migration := range migrations {
@@ -36,6 +36,9 @@ func TestAll(t *testing.T) {
 		20260719170000,
 		20260806120000,
 		20260807120000,
+		20260812120000,
+		20260813120000,
+		20260813130000,
 	}, versions)
 }
 
@@ -54,6 +57,14 @@ func TestMigrationsCreateExpectedSchema(t *testing.T) {
 	assertTableExists(t, database.DB, "runner_registrations")
 	assertTableExists(t, database.DB, "runner_runs")
 	assertTableExists(t, database.DB, "conversation_runner_affinity")
+	assertTableExists(t, database.DB, "web_auth_sessions")
+	assertTableExists(t, database.DB, "oidc_login_transactions")
+	assertTableExists(t, database.DB, "runner_credentials")
+	assertTableExists(t, database.DB, "runner_enrollments")
+	assertTableExists(t, database.DB, "runner_dpop_replays")
+	assertTableMissing(t, database.DB, "runner_auth_challenges")
+	assertTableExists(t, database.DB, "user_api_credentials")
+	assertTableExists(t, database.DB, "user_login_authorizations")
 	assertColumnExists(t, database.DB, "conversations", "background_processes")
 	assertColumnExists(t, database.DB, "conversations", "cwd")
 	assertColumnExists(t, database.DB, "conversation_summaries", "provider")
@@ -61,6 +72,19 @@ func TestMigrationsCreateExpectedSchema(t *testing.T) {
 	assertColumnExists(t, database.DB, "conversation_summaries", "cwd")
 	assertColumnExists(t, database.DB, "runner_runs", "manifest_json")
 	assertColumnExists(t, database.DB, "conversation_runner_affinity", "environment_profile")
+	assertColumnExists(t, database.DB, "web_auth_sessions", "token_sha256")
+	assertColumnExists(t, database.DB, "web_auth_sessions", "csrf_token_sha256")
+	assertColumnExists(t, database.DB, "oidc_login_transactions", "state_sha256")
+	assertColumnExists(t, database.DB, "runner_credentials", "public_key_sha256")
+	assertColumnExists(t, database.DB, "runner_credentials", "approved_by")
+	assertColumnExists(t, database.DB, "runner_enrollments", "device_code_sha256")
+	assertColumnExists(t, database.DB, "runner_enrollments", "approved_by")
+	assertColumnExists(t, database.DB, "runner_enrollments", "denied_by")
+	assertColumnExists(t, database.DB, "runner_dpop_replays", "jti_sha256")
+	assertColumnExists(t, database.DB, "user_api_credentials", "token_sha256")
+	assertColumnExists(t, database.DB, "user_api_credentials", "revoked_at")
+	assertColumnExists(t, database.DB, "user_login_authorizations", "device_code_sha256")
+	assertColumnExists(t, database.DB, "user_login_authorizations", "credential_id")
 	assertIndexExists(t, database.DB, "idx_conversations_created_at")
 	assertIndexExists(t, database.DB, "idx_summaries_provider")
 	assertIndexExists(t, database.DB, "idx_acp_session_updates_session_id")
@@ -69,6 +93,16 @@ func TestMigrationsCreateExpectedSchema(t *testing.T) {
 	assertIndexExists(t, database.DB, "idx_runner_registrations_status")
 	assertIndexExists(t, database.DB, "idx_runner_runs_conversation_created")
 	assertIndexExists(t, database.DB, "idx_conversation_runner_affinity_runner")
+	assertIndexExists(t, database.DB, "idx_web_auth_sessions_expiry")
+	assertIndexExists(t, database.DB, "idx_web_auth_sessions_principal")
+	assertIndexExists(t, database.DB, "idx_oidc_login_transactions_expiry")
+	assertIndexExists(t, database.DB, "idx_runner_credentials_active_runner")
+	assertIndexExists(t, database.DB, "idx_runner_enrollments_status_expiry")
+	assertIndexExists(t, database.DB, "idx_runner_enrollments_public_key")
+	assertIndexExists(t, database.DB, "idx_runner_dpop_replays_expiry")
+	assertIndexExists(t, database.DB, "idx_user_api_credentials_expiry")
+	assertIndexExists(t, database.DB, "idx_user_api_credentials_principal")
+	assertIndexExists(t, database.DB, "idx_user_login_authorizations_status_expiry")
 
 	versions, err := runner.GetAppliedVersions(ctx)
 	require.NoError(t, err)
@@ -83,6 +117,9 @@ func TestMigrationsCreateExpectedSchema(t *testing.T) {
 		20260719170000,
 		20260806120000,
 		20260807120000,
+		20260812120000,
+		20260813120000,
+		20260813130000,
 	}, versions)
 }
 
@@ -182,6 +219,145 @@ func TestCreateMigrationsAreSafeWhenSchemaAlreadyExists(t *testing.T) {
 	require.NoError(t, tx.Commit())
 	assertTableExists(t, database.DB, "steering_messages")
 	assertIndexExists(t, database.DB, "idx_steering_messages_conversation_id")
+
+	tx, err = database.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	runnerState := Migration20260806120000CreateRunnerState()
+	require.NoError(t, runnerState.Up(tx))
+	require.NoError(t, tx.Commit())
+
+	tx, err = database.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	controlPlaneAuth := Migration20260812120000CreateControlPlaneAuth()
+	require.NoError(t, controlPlaneAuth.Up(tx))
+	require.NoError(t, controlPlaneAuth.Up(tx))
+	require.NoError(t, tx.Commit())
+	assertTableExists(t, database.DB, "web_auth_sessions")
+	assertTableExists(t, database.DB, "runner_credentials")
+	assertTableExists(t, database.DB, "runner_enrollments")
+	assertTableExists(t, database.DB, "runner_auth_challenges")
+	assertIndexExists(t, database.DB, "idx_runner_credentials_active_runner")
+	assertIndexExists(t, database.DB, "idx_runner_enrollments_status_expiry")
+	assertIndexExists(t, database.DB, "idx_runner_auth_challenges_credential_expiry")
+
+	tx, err = database.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	userCredentials := Migration20260813120000CreateUserAPICredentials()
+	require.NoError(t, userCredentials.Up(tx))
+	require.NoError(t, userCredentials.Up(tx))
+	require.NoError(t, tx.Commit())
+	assertTableExists(t, database.DB, "user_api_credentials")
+	assertTableExists(t, database.DB, "user_login_authorizations")
+	assertIndexExists(t, database.DB, "idx_user_api_credentials_expiry")
+	assertIndexExists(t, database.DB, "idx_user_login_authorizations_status_expiry")
+
+	tx, err = database.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	runnerDPoP := Migration20260813130000CreateRunnerDPoPReplays()
+	require.NoError(t, runnerDPoP.Up(tx))
+	require.NoError(t, runnerDPoP.Up(tx))
+	require.NoError(t, tx.Commit())
+	assertTableExists(t, database.DB, "runner_dpop_replays")
+	assertTableMissing(t, database.DB, "runner_auth_challenges")
+	assertIndexExists(t, database.DB, "idx_runner_dpop_replays_expiry")
+}
+
+func TestControlPlaneAuthMigrationConstraints(t *testing.T) {
+	ctx := context.Background()
+	database := openMigrationsTestDB(t)
+	runner := db.NewMigrationRunner(database)
+	require.NoError(t, runner.Run(ctx, All()))
+
+	now := time.Now().UTC()
+	_, err := database.ExecContext(ctx, `
+		INSERT INTO runner_registrations (
+			id, owner_id, host_instance_id, workspace_path, workspace_name, status, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, "runner-1", "owner-1", "host-1", "/workspace", "workspace", "offline", now, now)
+	require.NoError(t, err)
+
+	publicKey := make([]byte, 32)
+	firstFingerprint := make([]byte, 32)
+	firstFingerprint[0] = 1
+	secondFingerprint := make([]byte, 32)
+	secondFingerprint[0] = 2
+	_, err = database.ExecContext(ctx, `
+		INSERT INTO runner_credentials (
+			id, runner_id, key_algorithm, public_key, public_key_sha256, approved_by, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, "credential-1", "runner-1", "ed25519", publicKey, firstFingerprint, "admin@example.com", now)
+	require.NoError(t, err)
+
+	_, err = database.ExecContext(ctx, `
+		INSERT INTO runner_credentials (
+			id, runner_id, key_algorithm, public_key, public_key_sha256, approved_by, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, "credential-2", "runner-1", "ed25519", publicKey, secondFingerprint, "admin@example.com", now)
+	require.Error(t, err)
+
+	_, err = database.ExecContext(ctx, `UPDATE runner_credentials SET revoked_at = ? WHERE id = ?`, now, "credential-1")
+	require.NoError(t, err)
+	_, err = database.ExecContext(ctx, `
+		INSERT INTO runner_credentials (
+			id, runner_id, key_algorithm, public_key, public_key_sha256, approved_by, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, "credential-2", "runner-1", "ed25519", publicKey, secondFingerprint, "admin@example.com", now)
+	require.NoError(t, err)
+
+	deviceCodeHash := make([]byte, 32)
+	deviceCodeHash[0] = 3
+	_, err = database.ExecContext(ctx, `
+		INSERT INTO runner_enrollments (
+			id, device_code_sha256, user_code, owner_id, status, protocol_version,
+			key_algorithm, public_key, public_key_sha256, host_instance_id,
+			workspace_path, workspace_name, poll_interval_seconds, created_at, expires_at,
+			runner_id, credential_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, "enrollment-1", deviceCodeHash, "ABCD-EFGH", "owner-1", "approved", 1,
+		"ed25519", publicKey, secondFingerprint, "host-1", "/workspace", "workspace", 5,
+		now, now.Add(time.Minute), "runner-1", "credential-2")
+	require.NoError(t, err)
+
+	otherDeviceCodeHash := make([]byte, 32)
+	otherDeviceCodeHash[0] = 4
+	_, err = database.ExecContext(ctx, `
+		INSERT INTO runner_enrollments (
+			id, device_code_sha256, user_code, status, protocol_version, key_algorithm,
+			public_key, public_key_sha256, host_instance_id, workspace_path,
+			workspace_name, poll_interval_seconds, created_at, expires_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, "enrollment-2", otherDeviceCodeHash, "ABCD-EFGH", "pending", 1, "ed25519",
+		publicKey, secondFingerprint, "host-2", "/other", "other", 5, now, now.Add(time.Minute))
+	require.Error(t, err)
+
+	jtiHash := make([]byte, 32)
+	jtiHash[0] = 5
+	_, err = database.ExecContext(ctx, `
+		INSERT INTO runner_dpop_replays (
+			credential_id, jti_sha256, created_at, expires_at
+		) VALUES (?, ?, ?, ?)
+	`, "credential-2", jtiHash, now, now.Add(time.Minute))
+	require.NoError(t, err)
+	_, err = database.ExecContext(ctx, `
+		INSERT INTO runner_dpop_replays (
+			credential_id, jti_sha256, created_at, expires_at
+		) VALUES (?, ?, ?, ?)
+	`, "credential-2", jtiHash, now, now.Add(time.Minute))
+	require.Error(t, err)
+
+	_, err = database.ExecContext(ctx, `DELETE FROM runner_registrations WHERE id = ?`, "runner-1")
+	require.NoError(t, err)
+
+	var count int
+	require.NoError(t, database.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_credentials WHERE runner_id = ?`, "runner-1").Scan(&count))
+	assert.Zero(t, count)
+	require.NoError(t, database.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_dpop_replays`).Scan(&count))
+	assert.Zero(t, count)
+
+	var enrollmentRunnerID, enrollmentCredentialID sql.NullString
+	require.NoError(t, database.QueryRowContext(ctx, `SELECT runner_id, credential_id FROM runner_enrollments WHERE id = ?`, "enrollment-1").Scan(&enrollmentRunnerID, &enrollmentCredentialID))
+	assert.False(t, enrollmentRunnerID.Valid)
+	assert.False(t, enrollmentCredentialID.Valid)
 }
 
 func TestMigrationFunctionsReturnTransactionErrors(t *testing.T) {
@@ -218,6 +394,12 @@ func TestMigrationFunctionsReturnTransactionErrors(t *testing.T) {
 		{"runner state down", Migration20260806120000CreateRunnerState().Down},
 		{"runner environment profile up", Migration20260807120000AddRunnerEnvironmentProfile().Up},
 		{"runner environment profile down", Migration20260807120000AddRunnerEnvironmentProfile().Down},
+		{"control plane auth up", Migration20260812120000CreateControlPlaneAuth().Up},
+		{"control plane auth down", Migration20260812120000CreateControlPlaneAuth().Down},
+		{"user API credentials up", Migration20260813120000CreateUserAPICredentials().Up},
+		{"user API credentials down", Migration20260813120000CreateUserAPICredentials().Down},
+		{"runner DPoP replays up", Migration20260813130000CreateRunnerDPoPReplays().Up},
+		{"runner DPoP replays down", Migration20260813130000CreateRunnerDPoPReplays().Down},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.run(closedTx(t))
@@ -232,6 +414,24 @@ func TestMigrationsDownFunctions(t *testing.T) {
 	database := openMigrationsTestDB(t)
 	runner := db.NewMigrationRunner(database)
 	require.NoError(t, runner.Run(ctx, All()))
+
+	// DPoP rollback restores the legacy challenge table for the preceding migration.
+	require.NoError(t, runner.Rollback(ctx, All()))
+	assertTableMissing(t, database.DB, "runner_dpop_replays")
+	assertTableExists(t, database.DB, "runner_auth_challenges")
+
+	// User-credential rollback drops non-browser login state.
+	require.NoError(t, runner.Rollback(ctx, All()))
+	assertTableMissing(t, database.DB, "user_api_credentials")
+	assertTableMissing(t, database.DB, "user_login_authorizations")
+
+	// Control-plane-auth rollback drops web and runner authentication state.
+	require.NoError(t, runner.Rollback(ctx, All()))
+	assertTableMissing(t, database.DB, "web_auth_sessions")
+	assertTableMissing(t, database.DB, "oidc_login_transactions")
+	assertTableMissing(t, database.DB, "runner_credentials")
+	assertTableMissing(t, database.DB, "runner_enrollments")
+	assertTableMissing(t, database.DB, "runner_auth_challenges")
 
 	// Runner-environment-profile rollback removes the affinity column.
 	require.NoError(t, runner.Rollback(ctx, All()))

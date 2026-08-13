@@ -1,5 +1,19 @@
 # Kodelet
 
+## UNRELEASED
+
+Added native generic OIDC authentication to `kodelet serve`, including provider discovery, authorization-code PKCE, server-side browser sessions, verified email/domain allowlists, and `user`, `terminal`, `runner-admin`, and `admin` authorization roles.
+
+Added `kodelet auth login`, `logout`, and `status` for browser-assisted non-browser authentication. Kodelet now issues revocable per-server user credentials for remote chat, TUI, ACP, and runner-administration commands, stores them in user-only local state, and retains explicit `--auth-token` and `KODELET_AUTH_TOKEN` values as higher-precedence migration and automation overrides.
+
+Allowed serve listener and authentication settings through CLI flags or the trusted `serve` namespace in user-level or explicitly selected configuration files, while preventing repository configuration from changing the control-plane trust boundary and rejecting malformed explicit configuration instead of silently falling back.
+
+Hardened control-plane secrets by requiring user-only trusted files for persisted static tokens and OIDC client secrets, applying protected local credential permissions across platforms, suppressing configured token values at startup, and removing inherited runner/server token values from child-process environments and Linux process arguments.
+
+Added browser-approved `kodelet runner enroll` pairing with independently revocable per-runner Ed25519 credentials and RFC 9449 DPoP-bound opaque access tokens, including secure resumable local enrollment state, replay protection, live-generation key replacement and disconnection, reverse-proxy target reconstruction, and hybrid migration from the legacy shared runner token.
+
+Changed runner removal to preserve control-plane conversations, summaries, and transcripts while clearing concrete runner affinity, credentials, registration state, and runner-run history so preserved conversations can later be explicitly rebound to a compatible runner.
+
 ## 0.5.30-beta
 
 Added workspace-bound runners so a `kodelet serve` control plane can run the model loop against tools, context, skills, commands, and extensions hosted by a `kodelet runner start` process in another workspace, with stable runner identity, an exclusive per-workspace advisory lock, and durable conversation affinity.

@@ -219,7 +219,7 @@ func TestConversationResponseIncludesDurableRunnerEnvironmentProfile(t *testing.
 	assert.Equal(t, "gpu", response.EnvironmentProfile)
 }
 
-func TestDeleteRunnerRequiresOfflineAndForceForAffinity(t *testing.T) {
+func TestDeleteRunnerRequiresOfflineAndClearsAffinity(t *testing.T) {
 	server := newRunnerTestServer(t, "")
 	link := newRunnerAPITestLink()
 	registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
@@ -236,18 +236,12 @@ func TestDeleteRunnerRequiresOfflineAndForceForAffinity(t *testing.T) {
 	assert.Equal(t, http.StatusConflict, connectedRecorder.Code)
 
 	server.runnerRegistry.Detach(registration.RunnerID, registration.ConnectionID, registration.Generation, nil)
-	referencedRecorder := httptest.NewRecorder()
-	referencedRequest := mux.SetURLVars(httptest.NewRequest(http.MethodDelete, "/api/runners/"+registration.RunnerID, nil), map[string]string{"id": registration.RunnerID})
-	server.handleDeleteRunner(referencedRecorder, referencedRequest)
-	assert.Equal(t, http.StatusConflict, referencedRecorder.Code)
-	assert.Contains(t, referencedRecorder.Body.String(), "--force")
-
-	forceRecorder := httptest.NewRecorder()
-	forceRequest := mux.SetURLVars(httptest.NewRequest(http.MethodDelete, "/api/runners/"+registration.RunnerID+"?force=true", nil), map[string]string{"id": registration.RunnerID})
-	server.handleDeleteRunner(forceRecorder, forceRequest)
-	require.Equal(t, http.StatusOK, forceRecorder.Code)
+	removeRecorder := httptest.NewRecorder()
+	removeRequest := mux.SetURLVars(httptest.NewRequest(http.MethodDelete, "/api/runners/"+registration.RunnerID, nil), map[string]string{"id": registration.RunnerID})
+	server.handleDeleteRunner(removeRecorder, removeRequest)
+	require.Equal(t, http.StatusOK, removeRecorder.Code)
 	var result runnerregistry.RemovalResult
-	require.NoError(t, json.Unmarshal(forceRecorder.Body.Bytes(), &result))
+	require.NoError(t, json.Unmarshal(removeRecorder.Body.Bytes(), &result))
 	assert.Equal(t, registration.RunnerID, result.RunnerID)
 	assert.Equal(t, 1, result.RemovedConversationAffinities)
 
@@ -614,8 +608,13 @@ func newRunnerTestServer(t *testing.T, authToken string) *Server {
 		runCancel()
 		_ = registry.Close()
 	})
+	config := &ServerConfig{}
+	if authToken != "" {
+		config.AuthToken = authToken
+		config.RunnerAuthToken = authToken + "-runner"
+	}
 	server := &Server{
-		config:          &ServerConfig{AuthToken: authToken, RunnerAuthToken: authToken + "-runner"},
+		config:          config,
 		runCtx:          runCtx,
 		runCancel:       runCancel,
 		runnerRegistry:  registry,

@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -56,6 +58,18 @@ func TestRunnerConfigsLoadAuthTokensFromEnvironment(t *testing.T) {
 		DisplayName: "workspace",
 	}, runnerStartConfigFromFlags(startCmd))
 
+	enrollCmd := &cobra.Command{Use: "enroll"}
+	enrollCmd.Flags().String("server", defaultRunnerServer, "")
+	enrollCmd.Flags().String("name", " workspace ", "")
+	enrollCmd.Flags().Bool("replace", true, "")
+	enrollCmd.Flags().Bool("no-browser", true, "")
+	assert.Equal(t, runnerEnrollConfig{
+		Server:                 defaultRunnerServer,
+		DisplayName:            "workspace",
+		ReplaceLocalCredential: true,
+		NoBrowser:              true,
+	}, runnerEnrollConfigFromFlags(enrollCmd))
+
 	queryCmd := &cobra.Command{Use: "list"}
 	queryCmd.Flags().String("server", defaultRunnerServer, "")
 	queryCmd.Flags().String("auth-token", "", "")
@@ -65,6 +79,89 @@ func TestRunnerConfigsLoadAuthTokensFromEnvironment(t *testing.T) {
 		AuthToken:  "control-plane-secret",
 		JSONOutput: true,
 	}, runnerQueryConfigFromFlags(queryCmd))
+}
+
+func TestConsumeRunnerStartConfigRemovesCredentialFromChildEnvironment(t *testing.T) {
+	setServerConfigForTest(t, "")
+	t.Setenv(controlPlaneServerEnv, "")
+	t.Setenv(runnerAuthTokenEnv, "runner-secret")
+	cmd := &cobra.Command{Use: "start"}
+	cmd.Flags().String("server", defaultRunnerServer, "")
+	cmd.Flags().String("auth-token", "", "")
+	cmd.Flags().String("name", "workspace", "")
+
+	config, err := consumeRunnerStartConfig(cmd)
+
+	require.NoError(t, err)
+	assert.Equal(t, "runner-secret", config.AuthToken)
+	assert.Empty(t, os.Getenv(runnerAuthTokenEnv))
+}
+
+func TestRunRunnerEnrollStartsBrowserFlowAndSavesCredential(t *testing.T) {
+	workspace := t.TempDir()
+	t.Chdir(workspace)
+	store, err := localstate.NewStoreAt(t.TempDir())
+	require.NoError(t, err)
+	var fingerprint string
+	var openedURL string
+	accessToken := mustRunnerAuthAccessToken(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case protocol.EnrollmentStartPath:
+			var start protocol.EnrollmentStartRequest
+			require.NoError(t, json.NewDecoder(request.Body).Decode(&start))
+			require.NoError(t, start.Validate())
+			assert.Equal(t, "project runner", start.DisplayName)
+			fingerprint = start.Fingerprint
+			require.NoError(t, json.NewEncoder(w).Encode(protocol.EnrollmentStartResponse{
+				EnrollmentID:            "enrollment-cli",
+				DeviceCode:              accessToken,
+				UserCode:                "ABCD-EFGH",
+				VerificationURL:         "https://kodelet.example/runner/enroll",
+				VerificationURLComplete: "https://kodelet.example/runner/enroll?user_code=ABCD-EFGH",
+				ExpiresAt:               time.Now().Add(10 * time.Minute),
+				PollIntervalMS:          0,
+			}))
+		case protocol.EnrollmentPollPath:
+			require.NoError(t, json.NewEncoder(w).Encode(protocol.EnrollmentPollResponse{
+				Status:       protocol.EnrollmentStatusApproved,
+				CredentialID: "credential-cli",
+				AccessToken:  accessToken,
+				TokenType:    protocol.DPoPAuthorizationScheme,
+				RunnerID:     "runner-cli",
+				Fingerprint:  fingerprint,
+			}))
+		default:
+			t.Fatalf("unexpected request path %q", request.URL.Path)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	var output bytes.Buffer
+	require.NoError(t, runRunnerEnroll(t.Context(), runnerEnrollConfig{
+		Server:      server.URL,
+		DisplayName: "project runner",
+		Store:       store,
+		HTTPClient:  server.Client(),
+		OpenBrowser: func(target string) error {
+			openedURL = target
+			return nil
+		},
+	}, &output))
+
+	assert.Equal(t, "https://kodelet.example/runner/enroll?user_code=ABCD-EFGH", openedURL)
+	rendered := output.String()
+	assert.Contains(t, rendered, "Enrollment code: ABCD-EFGH")
+	assert.Contains(t, rendered, "Public-key fingerprint: "+fingerprint)
+	assert.Contains(t, rendered, "Runner ID: runner-cli")
+	credential, found, err := store.LoadCredential(server.URL, workspace)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, "credential-cli", credential.CredentialID)
+	registration, found, err := store.LoadRegistration(server.URL, workspace)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, "runner-cli", registration.RunnerID)
 }
 
 func TestRunnerConfigsLoadServerFromConfigAndAllowFlagOverride(t *testing.T) {
@@ -213,11 +310,12 @@ func TestRunRunnerInspectIncludesLocalLockDiagnostics(t *testing.T) {
 
 func TestRunRunnerRemoveUsesResolvedIDAndDeletesLocalCache(t *testing.T) {
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	workspace := t.TempDir()
 	runner := runnerregistry.Runner{
 		ID:          "runner_remove",
 		DisplayName: "project",
 		Host:        protocol.Host{Hostname: "worker"},
-		Workspace:   protocol.Workspace{Path: "/work/project", Name: "project"},
+		Workspace:   protocol.Workspace{Path: workspace, Name: "project"},
 		Status:      runnerregistry.RunnerStatusOffline,
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
@@ -247,6 +345,29 @@ func TestRunRunnerRemoveUsesResolvedIDAndDeletesLocalCache(t *testing.T) {
 		Workspace: runner.Workspace.Path,
 		RunnerID:  runner.ID,
 	}))
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	fingerprint, err := protocol.CredentialFingerprint(publicKey)
+	require.NoError(t, err)
+	require.NoError(t, store.SaveCredential(localstate.Credential{
+		Server:       server.URL + "/base",
+		Workspace:    runner.Workspace.Path,
+		CredentialID: "credential-remove",
+		AccessToken:  mustRunnerAuthAccessToken(t),
+		Fingerprint:  fingerprint,
+		PublicKey:    publicKey,
+		PrivateKey:   privateKey,
+	}))
+	require.NoError(t, store.SavePendingEnrollment(localstate.PendingEnrollment{
+		Server:       server.URL + "/base",
+		Workspace:    runner.Workspace.Path,
+		EnrollmentID: "enrollment-remove",
+		DeviceCode:   mustRunnerAuthAccessToken(t),
+		Fingerprint:  fingerprint,
+		PublicKey:    publicKey,
+		PrivateKey:   privateKey,
+		ExpiresAt:    time.Now().Add(10 * time.Minute),
+	}))
 
 	var output bytes.Buffer
 	require.NoError(t, runRunnerRemove(t.Context(), "project", runnerRemoveConfig{
@@ -261,6 +382,19 @@ func TestRunRunnerRemoveUsesResolvedIDAndDeletesLocalCache(t *testing.T) {
 	_, found, err := store.LoadRegistration(server.URL+"/base", runner.Workspace.Path)
 	require.NoError(t, err)
 	assert.False(t, found)
+	_, found, err = store.LoadCredential(server.URL+"/base", runner.Workspace.Path)
+	require.NoError(t, err)
+	assert.False(t, found)
+	_, found, err = store.LoadPendingEnrollment(server.URL+"/base", runner.Workspace.Path)
+	require.NoError(t, err)
+	assert.False(t, found)
+}
+
+func mustRunnerAuthAccessToken(t *testing.T) string {
+	t.Helper()
+	token, err := protocol.NewRunnerAccessToken()
+	require.NoError(t, err)
+	return token
 }
 
 func TestRunRunnerRemoveRejectsConnectedAndSurfacesControlPlaneError(t *testing.T) {
@@ -300,7 +434,7 @@ func TestRunRunnerRemoveRejectsConnectedAndSurfacesControlPlaneError(t *testing.
 	require.ErrorContains(t, err, "runner is bound to a conversation")
 }
 
-func TestConfirmRunnerRemovalDefaultsToNoAndWarnsForForce(t *testing.T) {
+func TestConfirmRunnerRemovalDefaultsToNoAndExplainsTranscriptPreservation(t *testing.T) {
 	runner := runnerregistry.Runner{
 		ID:        "runner_confirm",
 		Host:      protocol.Host{Hostname: "worker"},
@@ -309,8 +443,8 @@ func TestConfirmRunnerRemovalDefaultsToNoAndWarnsForForce(t *testing.T) {
 	var output bytes.Buffer
 	assert.False(t, confirmRunnerRemoval(strings.NewReader("\n"), &output, runner, true))
 	assert.Contains(t, output.String(), "runner run history")
-	assert.Contains(t, output.String(), "abandons its conversation bindings")
-	assert.Contains(t, output.String(), "cannot be resumed")
+	assert.Contains(t, output.String(), "Conversation transcripts are preserved")
+	assert.Contains(t, output.String(), "selecting a compatible runner")
 	assert.True(t, confirmRunnerRemoval(strings.NewReader("yes\n"), io.Discard, runner, false))
 
 	err := runRunnerRemove(t.Context(), runner.ID, runnerRemoveConfig{

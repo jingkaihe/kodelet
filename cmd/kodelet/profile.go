@@ -15,6 +15,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 )
@@ -368,7 +369,7 @@ func updateProfileInConfig(global bool, profileName string) error {
 			newConfig := map[string]any{
 				"profile": profileName,
 			}
-			return writeYAMLConfig(configPath, newConfig)
+			return writeYAMLConfig(configPath, newConfig, global)
 		}
 		return errors.Wrap(err, "failed to read config file")
 	}
@@ -384,12 +385,16 @@ func updateProfileInConfig(global bool, profileName string) error {
 
 	config["profile"] = profileName
 
-	return writeYAMLConfig(configPath, config)
+	return writeYAMLConfig(configPath, config, global)
 }
 
-func writeYAMLConfig(configPath string, config map[string]any) error {
+func writeYAMLConfig(configPath string, config map[string]any, private bool) error {
 	dir := filepath.Dir(configPath)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if private {
+		if err := osutil.EnsurePrivateDir(dir); err != nil {
+			return errors.Wrap(err, "failed to create private config directory")
+		}
+	} else if err := os.MkdirAll(dir, 0o755); err != nil {
 		return errors.Wrap(err, "failed to create config directory")
 	}
 
@@ -398,8 +403,17 @@ func writeYAMLConfig(configPath string, config map[string]any) error {
 		return errors.Wrap(err, "failed to marshal config")
 	}
 
-	if err := os.WriteFile(configPath, data, 0o644); err != nil {
+	mode := os.FileMode(0o644)
+	if private {
+		mode = 0o600
+	}
+	if err := os.WriteFile(configPath, data, mode); err != nil {
 		return errors.Wrap(err, "failed to write config file")
+	}
+	if private {
+		if err := osutil.EnsurePrivateFile(configPath); err != nil {
+			return errors.Wrap(err, "failed to secure config file")
+		}
 	}
 
 	logger.G(context.TODO()).WithField("file", configPath).Debug("Profile configuration updated")

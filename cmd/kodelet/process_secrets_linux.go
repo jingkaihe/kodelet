@@ -11,12 +11,16 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func protectRemoteACPProcessSecrets(flagNames ...string) error {
+func protectProcessSecrets(flagNames ...string) error {
 	scrubProcessFlagValues(os.Args, flagNames...)
 	if err := unix.Prctl(unix.PR_SET_DUMPABLE, 0, 0, 0, 0); err != nil {
-		return errors.Wrap(err, "failed to protect remote ACP credentials from child processes")
+		return errors.Wrap(err, "failed to protect process credentials from child processes")
 	}
 	return nil
+}
+
+func protectRemoteACPProcessSecrets(flagNames ...string) error {
+	return protectProcessSecrets(flagNames...)
 }
 
 func scrubProcessFlagValues(args []string, flagNames ...string) {

@@ -85,20 +85,6 @@ func (a *affinityIndex) deactivate(conversationID string) {
 	}
 }
 
-func (a *affinityIndex) conversationsForRunner(runnerID string) []string {
-	if a == nil {
-		return nil
-	}
-	runnerID = strings.TrimSpace(runnerID)
-	conversationIDs := make([]string, 0)
-	for conversationID, record := range a.records {
-		if record.RunnerID == runnerID {
-			conversationIDs = append(conversationIDs, conversationID)
-		}
-	}
-	return conversationIDs
-}
-
 func (a *affinityIndex) removeRunner(runnerID string) int {
 	if a == nil {
 		return 0

@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -11,7 +12,9 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/logger"
+	"github.com/jingkaihe/kodelet/pkg/osutil"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
@@ -26,6 +29,8 @@ const (
 	configFileModeMerge      = "merge"
 	configFileModeIsolate    = "isolated"
 )
+
+var configFileLoadError error
 
 func authTokenFlagOrEnvironment(cmd *cobra.Command, environmentName string) string {
 	return stringFlagOrEnvironment(cmd, "auth-token", environmentName)
@@ -103,14 +108,17 @@ func init() {
 	// e.g. KODELET_TRACING_ENABLED -> tracing.enabled
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
-	loadConfigFiles()
+	configFileLoadError = loadConfigFiles()
 }
 
-func loadConfigFiles() {
+func loadConfigFiles() error {
 	overrideConfigFile := strings.TrimSpace(os.Getenv(configFileEnv))
-	if overrideConfigFile != "" && configFileMode() == configFileModeIsolate {
-		readConfigFile(overrideConfigFile, "isolated override")
-		return
+	mode, err := configFileMode()
+	if err != nil {
+		return err
+	}
+	if overrideConfigFile != "" && mode == configFileModeIsolate {
+		return readConfigFile(overrideConfigFile, "isolated override")
 	}
 
 	// Layered config: global first, then repo-level override
@@ -119,6 +127,9 @@ func loadConfigFiles() {
 	viper.AddConfigPath("$HOME/.kodelet")
 
 	if err := viper.ReadInConfig(); err == nil {
+		if err := validateTrustedConfigSecretPermissions(viper.ConfigFileUsed()); err != nil {
+			return err
+		}
 		logger.G(context.TODO()).WithField("config_file", viper.ConfigFileUsed()).Debug("Using global config file")
 	}
 
@@ -128,39 +139,105 @@ func loadConfigFiles() {
 	}
 
 	if overrideConfigFile != "" {
-		mergeConfigFile(overrideConfigFile, "override")
+		return mergeConfigFile(overrideConfigFile, "override")
 	}
+	return nil
 }
 
-func configFileMode() string {
+func configFileMode() (string, error) {
 	mode := strings.ToLower(strings.TrimSpace(os.Getenv(configFileModeEnv)))
 	switch mode {
 	case "", configFileModeMerge:
-		return configFileModeMerge
+		return configFileModeMerge, nil
 	case configFileModeIsolate:
-		return configFileModeIsolate
+		return configFileModeIsolate, nil
 	default:
-		logger.G(context.TODO()).WithField("mode", mode).Warn("Unknown config file mode, using merge mode")
-		return configFileModeMerge
+		return "", errors.Errorf("invalid %s value %q: must be %q or %q", configFileModeEnv, mode, configFileModeMerge, configFileModeIsolate)
 	}
 }
 
-func readConfigFile(configFile, label string) {
+func readConfigFile(configFile, label string) error {
 	viper.SetConfigFile(configFile)
 	if err := viper.ReadInConfig(); err == nil {
+		if err := validateTrustedConfigSecretPermissions(configFile); err != nil {
+			return err
+		}
 		logger.G(context.TODO()).WithField("config_file", configFile).Debugf("Read %s config file", label)
 	} else {
-		logger.G(context.TODO()).WithField("config_file", configFile).WithError(err).Warnf("Failed to read %s config file", label)
+		return errors.Wrapf(err, "failed to read %s config file %q", label, configFile)
 	}
+	return nil
 }
 
-func mergeConfigFile(configFile, label string) {
+func mergeConfigFile(configFile, label string) error {
 	viper.SetConfigFile(configFile)
 	if err := viper.MergeInConfig(); err == nil {
+		if err := validateTrustedConfigSecretPermissions(configFile); err != nil {
+			return err
+		}
 		logger.G(context.TODO()).WithField("config_file", configFile).Debugf("Merged %s config file", label)
 	} else {
-		logger.G(context.TODO()).WithField("config_file", configFile).WithError(err).Warnf("Failed to merge %s config file", label)
+		return errors.Wrapf(err, "failed to merge %s config file %q", label, configFile)
 	}
+	return nil
+}
+
+func validateTrustedConfigSecretPermissions(configFile string) error {
+	contents, err := os.ReadFile(configFile)
+	if err != nil {
+		return errors.Wrapf(err, "failed to inspect trusted config file %q", configFile)
+	}
+	var settings map[string]any
+	if err := yaml.Unmarshal(contents, &settings); err != nil {
+		return errors.Wrapf(err, "failed to inspect trusted config file %q", configFile)
+	}
+	if !trustedConfigContainsStaticTokens(settings) {
+		return nil
+	}
+	if runtime.GOOS == "windows" {
+		return errors.Wrapf(osutil.EnsurePrivateFile(configFile), "failed to secure trusted config file %q containing static authentication tokens", configFile)
+	}
+	info, err := os.Stat(configFile)
+	if err != nil {
+		return errors.Wrapf(err, "failed to inspect trusted config file %q", configFile)
+	}
+	if !info.Mode().IsRegular() {
+		return errors.Errorf("trusted config file %q containing static authentication tokens must be a regular file", configFile)
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		return errors.Errorf("trusted config file %q containing static authentication tokens must not be accessible by group or other users", configFile)
+	}
+	return nil
+}
+
+func trustedConfigContainsStaticTokens(settings map[string]any) bool {
+	for key, value := range settings {
+		switch strings.ToLower(strings.TrimSpace(key)) {
+		case "serve.auth_token", "serve.runner_auth_token":
+			if configSecretPresent(value) {
+				return true
+			}
+		case "serve":
+			nested, ok := value.(map[string]any)
+			if !ok {
+				continue
+			}
+			for nestedKey, nestedValue := range nested {
+				switch strings.ToLower(strings.TrimSpace(nestedKey)) {
+				case "auth_token", "runner_auth_token":
+					if configSecretPresent(nestedValue) {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
+func configSecretPresent(value any) bool {
+	secret, ok := value.(string)
+	return ok && strings.TrimSpace(secret) != ""
 }
 
 func mergeRepositoryConfigFile(configFile string) {
@@ -176,7 +253,8 @@ func mergeRepositoryConfigFile(configFile string) {
 		return
 	}
 	for key := range settings {
-		if strings.EqualFold(key, "server") {
+		normalizedKey := strings.ToLower(strings.TrimSpace(key))
+		if normalizedKey == "server" || normalizedKey == "serve" || strings.HasPrefix(normalizedKey, "serve.") {
 			delete(settings, key)
 		}
 	}
@@ -205,6 +283,9 @@ var rootCmd = &cobra.Command{
 
 func main() {
 	ctx := context.Background()
+	if configFileLoadError != nil {
+		logger.G(ctx).WithError(configFileLoadError).Fatal("Failed to load trusted configuration")
+	}
 
 	cobra.OnInitialize(func() {
 		if logLevel := viper.GetString("log_level"); logLevel != "" {

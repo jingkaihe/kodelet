@@ -30,6 +30,7 @@ type ChatConfig struct {
 	Server           string
 	ServerConfigured bool
 	AuthToken        string
+	ConfigError      error
 }
 
 func NewChatConfig() *ChatConfig {
@@ -44,6 +45,10 @@ var chatCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := cmd.Context()
 		config := getChatConfigFromFlags(cmd)
+		if config.ConfigError != nil {
+			presenter.Error(config.ConfigError, "Failed to resolve control-plane authentication")
+			os.Exit(1)
+		}
 		var chatRunner chatpkg.ChatRunner
 		var remoteRunner *chatpkg.ControlPlaneChatRunner
 		remote := usesControlPlaneChat(config)
@@ -211,7 +216,9 @@ func getChatConfigFromFlags(cmd *cobra.Command) *ChatConfig {
 		config.RunnerProfile = strings.TrimSpace(runnerProfile)
 	}
 	config.Server, config.ServerConfigured = serverFlagOrConfig(cmd)
-	config.AuthToken = authTokenFlagOrEnvironment(cmd, controlPlaneAuthTokenEnv)
+	if usesControlPlaneChat(config) || cmd.Flags().Changed("auth-token") || strings.TrimSpace(os.Getenv(controlPlaneAuthTokenEnv)) != "" {
+		config.AuthToken, _, config.ConfigError = resolveControlPlaneAuthToken(cmd, config.Server)
+	}
 
 	return config
 }

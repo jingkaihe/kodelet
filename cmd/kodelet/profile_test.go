@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -116,6 +117,11 @@ func TestUpdateProfileInConfig(t *testing.T) {
 		require.NoError(t, yaml.Unmarshal(data, &config))
 		assert.Equal(t, "new", config["profile"])
 		assert.Equal(t, "openai", config["provider"])
+		if runtime.GOOS != "windows" {
+			info, statErr := os.Stat(path)
+			require.NoError(t, statErr)
+			assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+		}
 	})
 
 	t.Run("invalid yaml returns parse error", func(t *testing.T) {
@@ -136,7 +142,7 @@ func TestWriteYAMLConfig(t *testing.T) {
 		"profiles": map[string]llmtypes.ProfileConfig{
 			"dev": {"provider": "openai"},
 		},
-	}))
+	}, false))
 
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
