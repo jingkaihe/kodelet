@@ -11,7 +11,10 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/rogpeppe/go-internal/lockedfile"
 )
+
+const workspaceLockAttemptTimeout = 250 * time.Millisecond
 
 // LockMetadata is diagnostic process information stored in the advisory lock file.
 type LockMetadata struct {
@@ -29,7 +32,7 @@ type LockMetadata struct {
 // WorkspaceLock holds the OS-level advisory lock for one canonical workspace.
 type WorkspaceLock struct {
 	mu       sync.Mutex
-	file     *os.File
+	file     *lockedfile.File
 	path     string
 	metadata LockMetadata
 	closed   bool
@@ -80,24 +83,18 @@ func (s *Store) AcquireWorkspaceLock(workspace string, metadata LockMetadata) (*
 		return nil, errors.New("runner workspace is required")
 	}
 	path := filepath.Join(s.root, "locks", stateKey(workspace)+".lock")
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	file, held, err := openWorkspaceLockFile(path)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to open runner workspace lock")
+		return nil, errors.Wrap(err, "failed to lock runner workspace")
+	}
+	if held {
+		existing, _ := readLockMetadata(path)
+		existing.Workspace = workspace
+		return nil, &LockHeldError{Path: path, Metadata: existing}
 	}
 	if err := file.Chmod(0o600); err != nil {
 		_ = file.Close()
 		return nil, errors.Wrap(err, "failed to secure runner workspace lock")
-	}
-	if err := tryLockFile(file); err != nil {
-		existing, _ := readLockMetadataFile(file)
-		if retryErr := tryLockFile(file); retryErr != nil {
-			if latest, readErr := readLockMetadataFile(file); readErr == nil {
-				existing = latest
-			}
-			_ = file.Close()
-			existing.Workspace = workspace
-			return nil, &LockHeldError{Path: path, Metadata: existing}
-		}
 	}
 	lock := &WorkspaceLock{file: file, path: path}
 	metadata.Version = stateVersion
@@ -107,7 +104,6 @@ func (s *Store) AcquireWorkspaceLock(workspace string, metadata LockMetadata) (*
 		metadata.StartedAt = time.Now().UTC()
 	}
 	if err := lock.WriteMetadata(metadata); err != nil {
-		_ = unlockFile(file)
 		_ = file.Close()
 		return nil, err
 	}
@@ -146,20 +142,19 @@ func (s *Store) WorkspaceLockHeld(workspace string) (bool, error) {
 	if path == "" {
 		return false, errors.New("runner workspace is required")
 	}
-	file, err := os.OpenFile(path, os.O_RDWR, 0o600)
-	if errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		return false, nil
-	}
-	if err != nil {
+	} else if err != nil {
 		return false, errors.Wrap(err, "failed to open runner workspace lock")
 	}
-	defer file.Close()
-	if err := tryLockFile(file); err != nil {
+	file, held, err := openWorkspaceLockFile(path)
+	if err != nil {
+		return false, errors.Wrap(err, "failed to inspect runner workspace lock")
+	}
+	if held {
 		return true, nil
 	}
-	if err := unlockFile(file); err != nil {
-		return false, errors.Wrap(err, "failed to unlock runner workspace probe")
-	}
+	_ = file.Close()
 	return false, nil
 }
 
@@ -233,15 +228,41 @@ func (l *WorkspaceLock) Close() error {
 	l.closed = true
 	file := l.file
 	l.mu.Unlock()
-	unlockErr := unlockFile(file)
 	closeErr := file.Close()
 	if writeErr != nil {
 		return writeErr
 	}
-	if unlockErr != nil {
-		return errors.Wrap(unlockErr, "failed to unlock runner workspace")
-	}
 	return closeErr
+}
+
+type workspaceLockResult struct {
+	file *lockedfile.File
+	err  error
+}
+
+func openWorkspaceLockFile(path string) (*lockedfile.File, bool, error) {
+	result := make(chan workspaceLockResult)
+	abandoned := make(chan struct{})
+	go func() {
+		file, err := lockedfile.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+		select {
+		case result <- workspaceLockResult{file: file, err: err}:
+		case <-abandoned:
+			if file != nil {
+				_ = file.Close()
+			}
+		}
+	}()
+
+	timer := time.NewTimer(workspaceLockAttemptTimeout)
+	defer timer.Stop()
+	select {
+	case opened := <-result:
+		return opened.file, false, opened.err
+	case <-timer.C:
+		close(abandoned)
+		return nil, true, nil
+	}
 }
 
 func readLockMetadata(path string) (LockMetadata, error) {
@@ -253,7 +274,7 @@ func readLockMetadata(path string) (LockMetadata, error) {
 	return readLockMetadataFile(file)
 }
 
-func readLockMetadataFile(file *os.File) (LockMetadata, error) {
+func readLockMetadataFile(file io.ReadSeeker) (LockMetadata, error) {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return LockMetadata{}, err
 	}

@@ -18,8 +18,9 @@ log_format: "json"
 # `kodelet serve` settings may be stored under `serve` in ~/.kodelet/config.yaml
 # or a file explicitly selected with KODELET_CONFIG_FILE. Repository-level
 # kodelet-config.yaml cannot set this namespace. Explicit CLI flags override the
-# corresponding trusted YAML values. Web modes: token, oidc, none. Runner modes:
-# token, enrollment, hybrid, none.
+# corresponding trusted YAML values; serve and OIDC policy is not read from
+# KODELET_SERVE_* environment variables. Web modes: token, oidc, none. Runner
+# modes: token, enrollment, hybrid, none.
 # serve:
 #   host: "0.0.0.0"
 #   port: 8080

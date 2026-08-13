@@ -164,8 +164,6 @@ The PID and other contents exist only to produce a useful error and support insp
 
 The lock file is intentionally persistent and is not unlinked during normal shutdown. Removing it around lock release creates a race in which another process can lock the old file while a third process creates and locks a new inode at the same path. The file and containing directory use user-only permissions, such as `0600` and `0700`, and never contain credentials.
 
-On Windows, the mandatory byte-range lock is placed beyond the diagnostic JSON region rather than over byte zero. This preserves the one-runner invariant while allowing `runner inspect` and duplicate-start diagnostics to read metadata from a lock file that is currently owned by another process.
-
 If acquisition fails, ordinary runner startup exits before registration and reports the canonical workspace, recorded PID, runner ID, server, and start time when those fields can be read. `kodelet acp --server` instead treats a held same-server lock with an advertised runner ID as a discovery record and attaches its ACP sessions to that existing runner. The lock protects one runner registration owner per host workspace; it does not serialize `run.open`, tool execution, file edits, shell commands, or extension activity.
 
 ### The control plane owns the agent loop
@@ -927,11 +925,11 @@ Enrollment is a device-code-style flow. The runner generates an Ed25519 key pair
 
 Before every WebSocket connection or reconnect, an enrolled runner creates a fresh RFC 9449 DPoP proof JWT and sends it with `Authorization: DPoP <opaque-access-token>` and a `DPoP` header. The protected header requires `typ: dpop+jwt`, EdDSA, and the public JWK; the proof claims include `jti`, `htm`, `htu`, `iat`, and `ath`. Verification checks the key and signature, method and target URL, freshness, access-token hash binding, credential revocation, and a bounded server-side replay set before accepting the upgrade. The server derives authoritative runner identity from the bound credential row, so `runner.register` cannot select another runner ID, host instance, or workspace. The current implementation does not require a DPoP server nonce.
 
-Provider credentials remain in the control plane. The runner client does not deliberately add either its local key credential or an explicit legacy token to tool contexts, manifests, extension initialization payloads, or logs. Explicit token values are captured before local extensions start and removed from the child-process environment; on Linux they are also scrubbed from process arguments and the original environment is protected from same-user inspection. Runner-owned subprocesses otherwise inherit the ambient runner-host environment according to the existing local execution model, so supplying unrelated secrets through environment variables keeps them inside the same trusted host-user domain. The CLI must not capture credential environment variables as flag defaults because Cobra may render non-empty defaults in help and error output.
+Provider credentials remain in the control plane. The runner client does not deliberately add either its local key credential or an explicit legacy token to tool contexts, manifests, extension initialization payloads, or logs. Runner-owned subprocesses inherit the ambient runner-host environment according to the existing trusted local execution model; environment variables are part of that same trust domain and are not selectively scrubbed. The CLI must not capture credential environment variables as flag defaults because Cobra may render non-empty defaults in help and error output.
 
 Binding a runner to one workspace prevents accidental path routing but is not a sandbox. Runner-side Bash, extensions, build systems, and package managers execute with the runner process's host permissions until ephemeral execution instances are introduced.
 
-A future isolated execution instance introduces a new trust boundary. Its provider must construct an explicit per-instance environment and keep runner and control-plane credentials outside the container, virtual machine, or other sandbox rather than relying on process-global environment scrubbing.
+A future isolated execution instance introduces a new trust boundary. Its provider must construct an explicit per-instance environment and keep runner and control-plane credentials outside the container, virtual machine, or other sandbox.
 
 ## User Experience
 

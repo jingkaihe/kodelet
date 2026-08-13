@@ -373,20 +373,20 @@ func TestRemoteACPServiceOptionsKeepCLIRestrictionsAfterEnvironmentProfile(t *te
 	assert.True(t, config.EnableFSSearchTools)
 }
 
-func TestConsumeRemoteACPAuthTokensRemovesCredentialsFromChildEnvironment(t *testing.T) {
+func TestResolveRemoteACPAuthTokensUsesEnvironmentOverrides(t *testing.T) {
 	t.Setenv(controlPlaneAuthTokenEnv, "api-secret")
 	t.Setenv(runnerAuthTokenEnv, "runner-secret")
 	cmd := &cobra.Command{}
 	cmd.Flags().String("auth-token", "", "")
 	cmd.Flags().String("runner-auth-token", "", "")
 
-	apiToken, runnerToken, err := consumeRemoteACPAuthTokens(cmd, defaultRunnerServer)
+	apiToken, runnerToken, err := resolveRemoteACPAuthTokens(cmd, defaultRunnerServer)
 
 	require.NoError(t, err)
 	assert.Equal(t, "api-secret", apiToken)
 	assert.Equal(t, "runner-secret", runnerToken)
-	assert.Empty(t, os.Getenv(controlPlaneAuthTokenEnv))
-	assert.Empty(t, os.Getenv(runnerAuthTokenEnv))
+	assert.Equal(t, "api-secret", os.Getenv(controlPlaneAuthTokenEnv))
+	assert.Equal(t, "runner-secret", os.Getenv(runnerAuthTokenEnv))
 }
 
 type fakeEmbeddedRunner struct {

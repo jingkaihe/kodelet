@@ -1475,6 +1475,62 @@ func TestRemoveRunnerDeletesDurableState(t *testing.T) {
 	assert.Equal(t, "metadata", queryResult.ConversationSummaries[0].Metadata["preserve"])
 }
 
+func TestRemoveRunnerClearsPersistedMetadataWithoutDurableAffinity(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "storage.db")
+	database, err := db.Open(t.Context(), dbPath)
+	require.NoError(t, err)
+	require.NoError(t, db.NewMigrationRunner(database).Run(t.Context(), migrations.All()))
+	require.NoError(t, database.Close())
+	conversationStore, err := conversationsqlite.NewStore(t.Context(), dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, conversationStore.Close()) })
+	persistence, err := NewSQLitePersistence(t.Context(), dbPath, "owner-one")
+	require.NoError(t, err)
+	registry, err := New(t.Context(), Options{
+		HeartbeatInterval: time.Hour,
+		HeartbeatTimeout:  2 * time.Hour,
+		NewID:             sequentialIDs(),
+		Persistence:       persistence,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = registry.Close() })
+
+	registration, err := registry.Register(testRegisterParams("host-one", "/work/project"), newFakeLink())
+	require.NoError(t, err)
+	registry.Detach(registration.RunnerID, registration.ConnectionID, registration.Generation, nil)
+	conversation := conversationtypes.ConversationRecord{
+		ID:          "conversation-before-affinity-commit",
+		CWD:         "/work/project",
+		RawMessages: json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"preserve this transcript"}]}]`),
+		Provider:    "openai",
+		Summary:     "Preserved before affinity commit",
+		Metadata: map[string]any{
+			conversationtypes.RunnerIDMetadataKey:                 registration.RunnerID,
+			conversationtypes.RunnerEnvironmentProfileMetadataKey: "gpu",
+			"preserve": "metadata",
+		},
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	require.NoError(t, conversationStore.Save(t.Context(), conversation))
+
+	result, err := registry.RemoveRunner(t.Context(), registration.RunnerID, false)
+
+	require.NoError(t, err)
+	assert.Zero(t, result.RemovedConversationAffinities)
+	loaded, err := conversationStore.Load(t.Context(), conversation.ID)
+	require.NoError(t, err)
+	assert.Equal(t, string(conversation.RawMessages), string(loaded.RawMessages))
+	assert.NotContains(t, loaded.Metadata, conversationtypes.RunnerIDMetadataKey)
+	assert.NotContains(t, loaded.Metadata, conversationtypes.RunnerEnvironmentProfileMetadataKey)
+	assert.Equal(t, "metadata", loaded.Metadata["preserve"])
+	queryResult, err := conversationStore.Query(t.Context(), conversationtypes.QueryOptions{})
+	require.NoError(t, err)
+	require.Len(t, queryResult.ConversationSummaries, 1)
+	assert.NotContains(t, queryResult.ConversationSummaries[0].Metadata, conversationtypes.RunnerIDMetadataKey)
+	assert.NotContains(t, queryResult.ConversationSummaries[0].Metadata, conversationtypes.RunnerEnvironmentProfileMetadataKey)
+}
+
 func TestRemoveRunnerClearsAffinityWithoutConversationRecord(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "storage.db")
 	database, err := db.Open(t.Context(), dbPath)

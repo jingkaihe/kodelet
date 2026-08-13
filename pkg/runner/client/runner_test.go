@@ -447,6 +447,50 @@ func TestRunnerTreatsUnknownOrRevokedCredentialAsPermanent(t *testing.T) {
 	assert.Equal(t, int32(1), connectionRequests.Load())
 }
 
+func TestRunnerReloadsCredentialReplacedDuringAuthenticationFailure(t *testing.T) {
+	workspace := t.TempDir()
+	store, err := localstate.NewStoreAt(t.TempDir())
+	require.NoError(t, err)
+	var current localstate.Credential
+	var replacement localstate.Credential
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		verifyRunnerDPoPRequest(t, request, current)
+		require.NoError(t, store.SaveCredential(replacement))
+		http.Error(w, "runner credential is invalid or revoked", http.StatusUnauthorized)
+	}))
+	t.Cleanup(server.Close)
+	current = saveTestRunnerCredential(t, store, server.URL, workspace, "credential-old")
+	replacementPublicKey, replacementPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	replacementFingerprint, err := protocol.CredentialFingerprint(replacementPublicKey)
+	require.NoError(t, err)
+	replacement = localstate.Credential{
+		Server:       server.URL,
+		Workspace:    workspace,
+		CredentialID: "credential-new",
+		AccessToken:  mustRunnerAccessToken(t),
+		Fingerprint:  replacementFingerprint,
+		PublicKey:    replacementPublicKey,
+		PrivateKey:   replacementPrivateKey,
+	}
+
+	runner, err := NewRunner(t.Context(), RunnerConfig{Server: server.URL, Workspace: workspace, Store: store})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, runner.service.Close()) })
+
+	connected, err := runner.runConnection(t.Context(), "manifest-digest")
+
+	assert.False(t, connected)
+	require.ErrorContains(t, err, "credential was replaced")
+	assert.False(t, isPermanentConnectionError(err))
+	require.NotNil(t, runner.credential)
+	assert.Equal(t, replacement.CredentialID, runner.credential.CredentialID)
+	headers, keyAuthenticated, err := runner.connectionHeaders()
+	require.NoError(t, err)
+	assert.True(t, keyAuthenticated)
+	assert.Equal(t, protocol.DPoPAuthorizationScheme+" "+replacement.AccessToken, headers.Get("Authorization"))
+}
+
 func TestKeyAuthenticatedRunnerDoesNotDiscardStaleRunnerID(t *testing.T) {
 	workspace := t.TempDir()
 	store, err := localstate.NewStoreAt(t.TempDir())

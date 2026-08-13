@@ -411,6 +411,49 @@ func TestStorePersistsPendingEnrollmentSecurely(t *testing.T) {
 	assert.False(t, found)
 }
 
+func TestStoreDeletesRunnerAuthenticationStateAfterWorkspaceRemoval(t *testing.T) {
+	store, err := NewStoreAt(t.TempDir())
+	require.NoError(t, err)
+	workspace := t.TempDir()
+	server := "https://kodelet.example"
+	publicKey, privateKey, fingerprint := testCredentialKeyPair(t, 9)
+	require.NoError(t, store.SaveRegistration(Registration{
+		Server:    server,
+		Workspace: workspace,
+		RunnerID:  "runner-removed-workspace",
+	}))
+	require.NoError(t, store.SaveCredential(Credential{
+		Server:       server,
+		Workspace:    workspace,
+		CredentialID: "credential-removed-workspace",
+		AccessToken:  testRunnerAccessToken(t),
+		Fingerprint:  fingerprint,
+		PublicKey:    publicKey,
+		PrivateKey:   privateKey,
+	}))
+	require.NoError(t, store.SavePendingEnrollment(PendingEnrollment{
+		Server:       server,
+		Workspace:    workspace,
+		EnrollmentID: "enrollment-removed-workspace",
+		DeviceCode:   testRunnerAccessToken(t),
+		Fingerprint:  fingerprint,
+		PublicKey:    publicKey,
+		PrivateKey:   privateKey,
+		ExpiresAt:    time.Now().Add(time.Minute),
+	}))
+	require.NoError(t, os.RemoveAll(workspace))
+
+	removed, err := store.DeleteCredential(server, workspace)
+	require.NoError(t, err)
+	assert.True(t, removed)
+	removed, err = store.DeletePendingEnrollment(server, workspace)
+	require.NoError(t, err)
+	assert.True(t, removed)
+	removed, err = store.DeleteRegistration(server, workspace, "runner-removed-workspace")
+	require.NoError(t, err)
+	assert.True(t, removed)
+}
+
 func TestCredentialStateRejectsMismatchedKeysAndFingerprints(t *testing.T) {
 	store, err := NewStoreAt(t.TempDir())
 	require.NoError(t, err)

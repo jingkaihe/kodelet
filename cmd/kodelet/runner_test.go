@@ -81,22 +81,6 @@ func TestRunnerConfigsLoadAuthTokensFromEnvironment(t *testing.T) {
 	}, runnerQueryConfigFromFlags(queryCmd))
 }
 
-func TestConsumeRunnerStartConfigRemovesCredentialFromChildEnvironment(t *testing.T) {
-	setServerConfigForTest(t, "")
-	t.Setenv(controlPlaneServerEnv, "")
-	t.Setenv(runnerAuthTokenEnv, "runner-secret")
-	cmd := &cobra.Command{Use: "start"}
-	cmd.Flags().String("server", defaultRunnerServer, "")
-	cmd.Flags().String("auth-token", "", "")
-	cmd.Flags().String("name", "workspace", "")
-
-	config, err := consumeRunnerStartConfig(cmd)
-
-	require.NoError(t, err)
-	assert.Equal(t, "runner-secret", config.AuthToken)
-	assert.Empty(t, os.Getenv(runnerAuthTokenEnv))
-}
-
 func TestRunRunnerEnrollStartsBrowserFlowAndSavesCredential(t *testing.T) {
 	workspace := t.TempDir()
 	t.Chdir(workspace)

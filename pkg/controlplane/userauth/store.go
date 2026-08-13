@@ -16,6 +16,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/runner/controlplaneurl"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/pkg/errors"
+	"github.com/rogpeppe/go-internal/lockedfile"
 )
 
 const (
@@ -408,30 +409,14 @@ func (s *Store) withStateLock(directory, server string, operation func() error) 
 	defer localLock.Unlock()
 
 	lockPath := filepath.Join(s.root, directory, stateKey(server)+".lock")
-	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	file, err := lockedfile.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		return errors.Wrap(err, "failed to open user authentication state lock")
+		return errors.Wrap(err, "failed to lock user authentication state")
 	}
+	defer file.Close()
 	if err := file.Chmod(0o600); err != nil {
-		_ = file.Close()
 		return errors.Wrap(err, "failed to secure user authentication state lock")
 	}
-	var lockErr error
-	for range 100 {
-		lockErr = tryLockFile(file)
-		if lockErr == nil {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if lockErr != nil {
-		_ = file.Close()
-		return errors.Wrap(lockErr, "failed to lock user authentication state")
-	}
-	defer func() {
-		_ = unlockFile(file)
-		_ = file.Close()
-	}()
 	return operation()
 }
 

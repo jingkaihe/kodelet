@@ -84,11 +84,7 @@ var runnerStartCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start a runner bound to the current workspace",
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		config, err := consumeRunnerStartConfig(cmd)
-		if err != nil {
-			return err
-		}
-		return runRunnerStart(cmd.Context(), config)
+		return runRunnerStart(cmd.Context(), runnerStartConfigFromFlags(cmd))
 	},
 }
 
@@ -104,8 +100,7 @@ var runnerListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List runners registered with a control plane",
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		config := runnerQueryConfigFromFlags(cmd)
-		return runRunnerList(cmd.Context(), config, os.Stdout)
+		return runRunnerList(cmd.Context(), runnerQueryConfigFromFlags(cmd), os.Stdout)
 	},
 }
 
@@ -114,8 +109,7 @@ var runnerInspectCmd = &cobra.Command{
 	Short: "Inspect a runner by ID, ID prefix, or display name",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		config := runnerQueryConfigFromFlags(cmd)
-		return runRunnerInspect(cmd.Context(), args[0], config, os.Stdout)
+		return runRunnerInspect(cmd.Context(), args[0], runnerQueryConfigFromFlags(cmd), os.Stdout)
 	},
 }
 
@@ -159,18 +153,6 @@ func runnerStartConfigFromFlags(cmd *cobra.Command) runnerStartConfig {
 		AuthToken:   authTokenFlagOrEnvironment(cmd, runnerAuthTokenEnv),
 		DisplayName: displayName,
 	}
-}
-
-func consumeRunnerStartConfig(cmd *cobra.Command) (runnerStartConfig, error) {
-	config := runnerStartConfigFromFlags(cmd)
-	config.AuthToken = strings.Clone(config.AuthToken)
-	_ = os.Unsetenv(runnerAuthTokenEnv)
-	if config.AuthToken != "" {
-		if err := protectProcessSecrets("auth-token"); err != nil {
-			return runnerStartConfig{}, errors.Wrap(err, "failed to protect runner authentication token")
-		}
-	}
-	return config, nil
 }
 
 func runnerEnrollConfigFromFlags(cmd *cobra.Command) runnerEnrollConfig {

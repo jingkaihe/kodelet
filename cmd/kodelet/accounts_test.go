@@ -6,12 +6,12 @@ import (
 	"io"
 	"os"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 
 	"github.com/jingkaihe/kodelet/pkg/auth"
 )
@@ -143,11 +143,11 @@ func captureAllStdout(t *testing.T, f func()) string {
 	require.NoError(t, err)
 
 	stdoutFD := int(os.Stdout.Fd())
-	savedStdoutFD, err := syscall.Dup(stdoutFD)
+	savedStdoutFD, err := unix.Dup(stdoutFD)
 	require.NoError(t, err)
-	defer syscall.Close(savedStdoutFD)
+	defer unix.Close(savedStdoutFD)
 
-	require.NoError(t, syscall.Dup2(int(w.Fd()), stdoutFD))
+	require.NoError(t, unix.Dup2(int(w.Fd()), stdoutFD))
 
 	output := make(chan string, 1)
 	go func() {
@@ -158,7 +158,7 @@ func captureAllStdout(t *testing.T, f func()) string {
 
 	f()
 
-	require.NoError(t, syscall.Dup2(savedStdoutFD, stdoutFD))
+	require.NoError(t, unix.Dup2(savedStdoutFD, stdoutFD))
 	require.NoError(t, w.Close())
 
 	return <-output

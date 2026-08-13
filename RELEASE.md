@@ -8,7 +8,7 @@ Added `kodelet auth login`, `logout`, and `status` for browser-assisted non-brow
 
 Allowed serve listener and authentication settings through CLI flags or the trusted `serve` namespace in user-level or explicitly selected configuration files, while preventing repository configuration from changing the control-plane trust boundary and rejecting malformed explicit configuration instead of silently falling back.
 
-Hardened control-plane secrets by requiring user-only trusted files for persisted static tokens and OIDC client secrets, applying protected local credential permissions across platforms, suppressing configured token values at startup, and removing inherited runner/server token values from child-process environments and Linux process arguments.
+Hardened control-plane secrets by requiring user-only trusted files for persisted static tokens and OIDC client secrets, applying restrictive local credential permissions, and suppressing configured token values at startup.
 
 Added browser-approved `kodelet runner enroll` pairing with independently revocable per-runner Ed25519 credentials and RFC 9449 DPoP-bound opaque access tokens, including secure resumable local enrollment state, replay protection, live-generation key replacement and disconnection, reverse-proxy target reconstruction, and hybrid migration from the legacy shared runner token.
 

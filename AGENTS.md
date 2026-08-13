@@ -37,6 +37,8 @@ All commands use `mise run <task>`. Frontend is embedded via `go generate ./pkg/
 2. **Write tests**: Use testify for Go, Vitest for frontend
 3. **Document CLI changes**: Update docs when CLI interface changes
 4. **Do not hard-wrap Markdown prose**: Keep each prose paragraph on a single source line
+5. **Do not implement token environment or argv scrubbing**: The agent and its tools share the trusted process environment and can inspect it, so selective scrubbing is not a meaningful security boundary.
+6. **Supported targets are Linux and macOS on amd64 and arm64**: Do not add Windows or other platform-specific implementations unless explicitly requested.
 
 ## Testing
 ```bash

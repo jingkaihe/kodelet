@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -16,7 +15,6 @@ import (
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
-	"github.com/jingkaihe/kodelet/pkg/osutil"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/webui"
@@ -100,12 +98,7 @@ The server will be available at http://localhost:8080 by default. A random
 web authentication token and a separate runner authentication token are generated
 unless explicit authentication modes are configured or --skip-auth is set.`,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		ctx := cmd.Context()
-		config, err := consumeServeConfig(cmd)
-		if err != nil {
-			return err
-		}
-		runServeCommand(ctx, config)
+		runServeCommand(cmd.Context(), getServeConfigFromFlags(cmd))
 		return nil
 	},
 }
@@ -217,18 +210,6 @@ func getServeConfigFromFlags(cmd *cobra.Command) *ServeConfig {
 	}
 
 	return config
-}
-
-func consumeServeConfig(cmd *cobra.Command) (*ServeConfig, error) {
-	config := getServeConfigFromFlags(cmd)
-	config.AuthToken = strings.Clone(config.AuthToken)
-	config.RunnerAuthToken = strings.Clone(config.RunnerAuthToken)
-	if config.AuthToken != "" || config.RunnerAuthToken != "" {
-		if err := protectProcessSecrets("auth-token", "runner-auth-token"); err != nil {
-			return nil, errors.Wrap(err, "failed to protect server authentication tokens")
-		}
-	}
-	return config, nil
 }
 
 func applyTrustedServeConfig(config *ServeConfig) error {
@@ -454,12 +435,6 @@ func loadOIDCClientSecret(path string) (string, error) {
 	if path == "" {
 		return "", errors.New("OIDC client secret file path cannot be empty")
 	}
-	if runtime.GOOS == "windows" {
-		if err := osutil.EnsurePrivateFile(path); err != nil {
-			return "", errors.Wrapf(err, "failed to secure OIDC client secret file %q", path)
-		}
-	}
-
 	file, err := os.Open(path)
 	if err != nil {
 		return "", errors.Wrapf(err, "failed to read OIDC client secret file %q", path)
@@ -472,7 +447,7 @@ func loadOIDCClientSecret(path string) (string, error) {
 	if !info.Mode().IsRegular() {
 		return "", errors.Errorf("OIDC client secret file %q must be a regular file", path)
 	}
-	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
+	if info.Mode().Perm()&0o077 != 0 {
 		return "", errors.Errorf("OIDC client secret file %q must not be accessible by group or other users", path)
 	}
 	contents, err := io.ReadAll(io.LimitReader(file, 64*1024+1))

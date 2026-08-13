@@ -20,6 +20,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/pkg/errors"
+	"github.com/rogpeppe/go-internal/lockedfile"
 )
 
 const stateVersion = 1
@@ -342,7 +343,7 @@ func (s *Store) DeleteCredential(server, workspace string) (bool, error) {
 	if s == nil {
 		return false, errors.New("runner state store is required")
 	}
-	server, workspace, err := normalizeCredentialLocation(server, workspace)
+	server, workspace, err := normalizeStoredCredentialLocation(server, workspace)
 	if err != nil {
 		return false, err
 	}
@@ -437,7 +438,7 @@ func (s *Store) DeletePendingEnrollment(server, workspace string) (bool, error) 
 	if s == nil {
 		return false, errors.New("runner state store is required")
 	}
-	server, workspace, err := normalizeCredentialLocation(server, workspace)
+	server, workspace, err := normalizeStoredCredentialLocation(server, workspace)
 	if err != nil {
 		return false, err
 	}
@@ -502,61 +503,23 @@ func (s *Store) enrollmentPath(server, workspace string) string {
 
 func (s *Store) withRegistrationLock(server, workspace string, operation func() error) error {
 	lockPath := filepath.Join(s.root, "registrations", stateKey(server, workspace)+".lock")
-	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return errors.Wrap(err, "failed to open cached runner registration lock")
-	}
-	if err := file.Chmod(0o600); err != nil {
-		_ = file.Close()
-		return errors.Wrap(err, "failed to secure cached runner registration lock")
-	}
-
-	var lockErr error
-	for range 100 {
-		lockErr = tryLockFile(file)
-		if lockErr == nil {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if lockErr != nil {
-		_ = file.Close()
-		return errors.Wrap(lockErr, "failed to lock cached runner registration")
-	}
-	defer func() {
-		_ = unlockFile(file)
-		_ = file.Close()
-	}()
-	return operation()
+	return withStateFileLock(lockPath, "cached runner registration", operation)
 }
 
 func (s *Store) withKeyedStateLock(directory, description, server, workspace string, operation func() error) error {
 	lockPath := filepath.Join(s.root, directory, stateKey(server, workspace)+".lock")
-	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	return withStateFileLock(lockPath, description, operation)
+}
+
+func withStateFileLock(lockPath, description string, operation func() error) error {
+	file, err := lockedfile.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		return errors.Wrapf(err, "failed to open %s lock", description)
+		return errors.Wrapf(err, "failed to lock %s", description)
 	}
+	defer file.Close()
 	if err := file.Chmod(0o600); err != nil {
-		_ = file.Close()
 		return errors.Wrapf(err, "failed to secure %s lock", description)
 	}
-
-	var lockErr error
-	for range 100 {
-		lockErr = tryLockFile(file)
-		if lockErr == nil {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if lockErr != nil {
-		_ = file.Close()
-		return errors.Wrapf(lockErr, "failed to lock %s", description)
-	}
-	defer func() {
-		_ = unlockFile(file)
-		_ = file.Close()
-	}()
 	return operation()
 }
 
@@ -570,6 +533,26 @@ func normalizeCredentialLocation(server, workspace string) (string, string, erro
 		return "", "", err
 	}
 	return normalizedServer, canonicalWorkspace, nil
+}
+
+func normalizeStoredCredentialLocation(server, workspace string) (string, string, error) {
+	normalizedServer, err := controlplaneurl.NormalizeBase(server)
+	if err != nil {
+		return "", "", err
+	}
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return "", "", errors.New("workspace path is required")
+	}
+	canonicalWorkspace, err := CanonicalWorkspace(workspace)
+	if err == nil {
+		return normalizedServer, canonicalWorkspace, nil
+	}
+	absoluteWorkspace, absoluteErr := filepath.Abs(workspace)
+	if absoluteErr != nil {
+		return "", "", errors.Wrap(absoluteErr, "failed to resolve stored workspace path")
+	}
+	return normalizedServer, filepath.Clean(absoluteWorkspace), nil
 }
 
 func encodeCredentialFile(credential Credential) (credentialFile, error) {

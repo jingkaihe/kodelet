@@ -19,9 +19,6 @@ func EnsurePrivateDir(path string) error {
 	if err := os.Chmod(path, 0o700); err != nil {
 		return errors.Wrap(err, "failed to set private directory mode")
 	}
-	if err := restrictPrivatePath(path, true); err != nil {
-		return errors.Wrap(err, "failed to restrict private directory access")
-	}
 	return nil
 }
 
@@ -40,9 +37,6 @@ func EnsurePrivateFile(path string) error {
 	}
 	if err := os.Chmod(path, 0o600); err != nil {
 		return errors.Wrap(err, "failed to set private file mode")
-	}
-	if err := restrictPrivatePath(path, false); err != nil {
-		return errors.Wrap(err, "failed to restrict private file access")
 	}
 	return nil
 }

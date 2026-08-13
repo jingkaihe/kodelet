@@ -4,7 +4,6 @@ package main
 import (
 	"context"
 	"os"
-	"runtime"
 	"strings"
 	"time"
 
@@ -12,7 +11,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/logger"
-	"github.com/jingkaihe/kodelet/pkg/osutil"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -127,7 +125,7 @@ func loadConfigFiles() error {
 	viper.AddConfigPath("$HOME/.kodelet")
 
 	if err := viper.ReadInConfig(); err == nil {
-		if err := validateTrustedConfigSecretPermissions(viper.ConfigFileUsed()); err != nil {
+		if err := validateTrustedConfigPermissions(viper.ConfigFileUsed()); err != nil {
 			return err
 		}
 		logger.G(context.TODO()).WithField("config_file", viper.ConfigFileUsed()).Debug("Using global config file")
@@ -159,7 +157,7 @@ func configFileMode() (string, error) {
 func readConfigFile(configFile, label string) error {
 	viper.SetConfigFile(configFile)
 	if err := viper.ReadInConfig(); err == nil {
-		if err := validateTrustedConfigSecretPermissions(configFile); err != nil {
+		if err := validateTrustedConfigPermissions(configFile); err != nil {
 			return err
 		}
 		logger.G(context.TODO()).WithField("config_file", configFile).Debugf("Read %s config file", label)
@@ -172,7 +170,7 @@ func readConfigFile(configFile, label string) error {
 func mergeConfigFile(configFile, label string) error {
 	viper.SetConfigFile(configFile)
 	if err := viper.MergeInConfig(); err == nil {
-		if err := validateTrustedConfigSecretPermissions(configFile); err != nil {
+		if err := validateTrustedConfigPermissions(configFile); err != nil {
 			return err
 		}
 		logger.G(context.TODO()).WithField("config_file", configFile).Debugf("Merged %s config file", label)
@@ -182,7 +180,7 @@ func mergeConfigFile(configFile, label string) error {
 	return nil
 }
 
-func validateTrustedConfigSecretPermissions(configFile string) error {
+func validateTrustedConfigPermissions(configFile string) error {
 	contents, err := os.ReadFile(configFile)
 	if err != nil {
 		return errors.Wrapf(err, "failed to inspect trusted config file %q", configFile)
@@ -191,23 +189,35 @@ func validateTrustedConfigSecretPermissions(configFile string) error {
 	if err := yaml.Unmarshal(contents, &settings); err != nil {
 		return errors.Wrapf(err, "failed to inspect trusted config file %q", configFile)
 	}
-	if !trustedConfigContainsStaticTokens(settings) {
+	containsControlPlaneSettings := trustedConfigContainsControlPlaneSettings(settings)
+	containsStaticTokens := trustedConfigContainsStaticTokens(settings)
+	if !containsControlPlaneSettings {
 		return nil
-	}
-	if runtime.GOOS == "windows" {
-		return errors.Wrapf(osutil.EnsurePrivateFile(configFile), "failed to secure trusted config file %q containing static authentication tokens", configFile)
 	}
 	info, err := os.Stat(configFile)
 	if err != nil {
 		return errors.Wrapf(err, "failed to inspect trusted config file %q", configFile)
 	}
 	if !info.Mode().IsRegular() {
-		return errors.Errorf("trusted config file %q containing static authentication tokens must be a regular file", configFile)
+		return errors.Errorf("trusted control-plane config file %q must be a regular file", configFile)
 	}
-	if info.Mode().Perm()&0o077 != 0 {
+	if containsStaticTokens && info.Mode().Perm()&0o077 != 0 {
 		return errors.Errorf("trusted config file %q containing static authentication tokens must not be accessible by group or other users", configFile)
 	}
+	if info.Mode().Perm()&0o022 != 0 {
+		return errors.Errorf("trusted control-plane config file %q must not be writable by group or other users", configFile)
+	}
 	return nil
+}
+
+func trustedConfigContainsControlPlaneSettings(settings map[string]any) bool {
+	for key := range settings {
+		normalized := strings.ToLower(strings.TrimSpace(key))
+		if normalized == "server" || normalized == "serve" || strings.HasPrefix(normalized, "serve.") {
+			return true
+		}
+	}
+	return false
 }
 
 func trustedConfigContainsStaticTokens(settings map[string]any) bool {

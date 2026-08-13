@@ -247,7 +247,7 @@ kodelet serve \
   --runner-auth-mode enrollment
 ```
 
-The same server settings can be kept in trusted user configuration instead of repeated on every invocation. Use `~/.kodelet/config.yaml` or a file explicitly selected with `KODELET_CONFIG_FILE`; an ordinary repository-level `kodelet-config.yaml` cannot set the `serve` namespace. Explicit command-line flags override the corresponding YAML values:
+The same server settings can be kept in trusted user configuration instead of repeated on every invocation. Use `~/.kodelet/config.yaml` or a file explicitly selected with `KODELET_CONFIG_FILE`; an ordinary repository-level `kodelet-config.yaml` cannot set the `serve` namespace. Explicit command-line flags override the corresponding YAML values. Serve and OIDC policy is not read from `KODELET_SERVE_*` environment variables:
 
 ```yaml
 serve:
@@ -272,7 +272,7 @@ serve:
     session_duration: "12h"
 ```
 
-Trusted `serve` configuration also supports `cwd`, `auth_token`, `runner_auth_token`, `skip_auth`, `cors_origins`, and the OIDC keys `allowed_emails` and `allow_any_user`. In token or hybrid mode, omitted tokens retain the normal generated-token behavior. On Unix, a trusted configuration file containing either static token must be a regular file inaccessible to group and other users, such as mode `0600`; Kodelet's global configuration writers apply user-only permissions automatically. On Windows, Kodelet applies a protected user-and-SYSTEM ACL. Configured static tokens are never echoed at server startup, while newly generated tokens are displayed once. The OIDC client secret itself is still read from `serve.oidc.client_secret_file` or `--oidc-client-secret-file`, rather than being embedded directly in YAML or a secret-valued flag; its referenced file must likewise be regular, non-empty, and user-only.
+Trusted `serve` configuration also supports `cwd`, `auth_token`, `runner_auth_token`, `skip_auth`, `cors_origins`, and the OIDC keys `allowed_emails` and `allow_any_user`. In token or hybrid mode, omitted tokens retain the normal generated-token behavior. A trusted configuration file containing either static token must be a regular file inaccessible to group and other users, such as mode `0600`; Kodelet's global configuration writers apply user-only permissions automatically. Configured static tokens are never echoed at server startup, while newly generated tokens are displayed once. The OIDC client secret itself is still read from `serve.oidc.client_secret_file` or `--oidc-client-secret-file`, rather than being embedded directly in YAML or a secret-valued flag; its referenced file must likewise be regular, non-empty, and user-only.
 
 For Google, select or create a Cloud project, configure the Google Auth Platform branding and audience, then open **Google Auth Platform → Clients**, choose **Create client**, and select **Web application**. Add the exact redirect URI supplied to `--oidc-redirect-url`; no JavaScript origin is required for Kodelet's server-side flow. The callback path must be `/auth/oidc/callback`; use `https://kodelet.example/auth/oidc/callback` in production or `http://localhost:8080/auth/oidc/callback` for local testing. Copy the client ID and write only the client-secret value to the protected file. `gcloud iam oauth-clients create` manages IAM OAuth client resources and is not the Google Sign-In Web application client workflow used here.
 

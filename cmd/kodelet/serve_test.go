@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
@@ -506,15 +505,13 @@ func TestLoadOIDCClientSecret(t *testing.T) {
 		assert.NotContains(t, err.Error(), "super-secret")
 	})
 
-	if runtime.GOOS != "windows" {
-		t.Run("rejects group-readable file", func(t *testing.T) {
-			path := writeOIDCSecretFile(t, "super-secret")
-			require.NoError(t, os.Chmod(path, 0o640))
+	t.Run("rejects group-readable file", func(t *testing.T) {
+		path := writeOIDCSecretFile(t, "super-secret")
+		require.NoError(t, os.Chmod(path, 0o640))
 
-			_, err := loadOIDCClientSecret(path)
-			require.ErrorContains(t, err, "must not be accessible by group or other users")
-		})
-	}
+		_, err := loadOIDCClientSecret(path)
+		require.ErrorContains(t, err, "must not be accessible by group or other users")
+	})
 }
 
 func TestIsSensitiveFlagName(t *testing.T) {
@@ -602,6 +599,29 @@ func TestGetServeConfigFromFlags_UsesTrustedYAMLSettings(t *testing.T) {
 	assert.Equal(t, 24*time.Hour, config.OIDC.SessionDuration)
 }
 
+func TestGetServeConfigFromFlags_DoesNotUseServeEnvironmentVariables(t *testing.T) {
+	setTrustedServeConfigForTest(t, map[string]any{
+		"web_auth_mode":    "token",
+		"runner_auth_mode": "token",
+		"skip_auth":        false,
+		"oidc": map[string]any{
+			"issuer": "https://issuer.example.com",
+		},
+	})
+	t.Setenv("KODELET_SERVE_WEB_AUTH_MODE", "none")
+	t.Setenv("KODELET_SERVE_RUNNER_AUTH_MODE", "none")
+	t.Setenv("KODELET_SERVE_SKIP_AUTH", "true")
+	t.Setenv("KODELET_SERVE_OIDC_ISSUER", "https://environment.example.com")
+
+	config := getServeConfigFromFlags(newServeCommandForTest())
+
+	require.NoError(t, config.ConfigError)
+	assert.Equal(t, webui.WebAuthModeToken, config.WebAuthMode)
+	assert.Equal(t, webui.RunnerAuthModeToken, config.RunnerAuthMode)
+	assert.False(t, config.SkipAuth)
+	assert.Equal(t, "https://issuer.example.com", config.OIDC.IssuerURL)
+}
+
 func TestGetServeConfigFromFlags_ExplicitFlagsOverrideTrustedYAML(t *testing.T) {
 	setTrustedServeConfigForTest(t, map[string]any{
 		"host":             "127.0.0.1",
@@ -631,21 +651,6 @@ func TestGetServeConfigFromFlags_ExplicitFlagsOverrideTrustedYAML(t *testing.T) 
 	assert.Equal(t, "flag-token", config.AuthToken)
 	assert.Equal(t, "https://flag-issuer.example.com", config.OIDC.IssuerURL)
 	assert.False(t, config.OIDC.AllowAnyUser)
-}
-
-func TestConsumeServeConfigCapturesConfiguredCredentials(t *testing.T) {
-	setTrustedServeConfigForTest(t, nil)
-	cmd := newServeCommandForTest()
-	require.NoError(t, cmd.ParseFlags([]string{
-		"--auth-token=flag-web-token",
-		"--runner-auth-token=flag-runner-token",
-	}))
-
-	config, err := consumeServeConfig(cmd)
-
-	require.NoError(t, err)
-	assert.Equal(t, "flag-web-token", config.AuthToken)
-	assert.Equal(t, "flag-runner-token", config.RunnerAuthToken)
 }
 
 func TestGetServeConfigFromFlags_ExplicitEmptyFlagsOverrideTrustedYAML(t *testing.T) {

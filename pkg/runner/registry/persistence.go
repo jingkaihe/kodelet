@@ -349,10 +349,16 @@ func (s *SQLitePersistence) RemoveRunner(ctx context.Context, runnerID string, f
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE `+table+`
 			SET metadata = json_remove(metadata, ?, ?)
-			WHERE id IN (
+			WHERE json_extract(metadata, ?) = ? OR id IN (
 				SELECT conversation_id FROM conversation_runner_affinity WHERE runner_id = ?
 			)
-		`, "$."+conversationtypes.RunnerIDMetadataKey, "$."+conversationtypes.RunnerEnvironmentProfileMetadataKey, runnerID); err != nil {
+		`,
+			"$."+conversationtypes.RunnerIDMetadataKey,
+			"$."+conversationtypes.RunnerEnvironmentProfileMetadataKey,
+			"$."+conversationtypes.RunnerIDMetadataKey,
+			runnerID,
+			runnerID,
+		); err != nil {
 			return RemovalResult{}, errors.Wrapf(err, "failed to clear runner metadata from %s", table)
 		}
 	}

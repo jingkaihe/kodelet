@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -378,9 +377,6 @@ func TestLoadConfigFilesRejectsUnknownExplicitConfigMode(t *testing.T) {
 }
 
 func TestLoadConfigFilesRequiresPrivateModeForTrustedStaticTokens(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows uses ACL validation rather than Unix mode bits")
-	}
 	for _, test := range []struct {
 		name   string
 		config string
@@ -408,6 +404,26 @@ func TestLoadConfigFilesRequiresPrivateModeForTrustedStaticTokens(t *testing.T) 
 			require.NoError(t, loadConfigFiles())
 		})
 	}
+}
+
+func TestLoadConfigFilesRejectsWritableTrustedControlPlanePolicy(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Chdir(t.TempDir())
+	configDir := filepath.Join(home, ".kodelet")
+	require.NoError(t, os.MkdirAll(configDir, 0o700))
+	configPath := filepath.Join(configDir, "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte("serve:\n  skip_auth: true\n"), 0o600))
+	require.NoError(t, os.Chmod(configPath, 0o664))
+
+	err := loadConfigFiles()
+	require.ErrorContains(t, err, "must not be writable by group or other users")
+
+	viper.Reset()
+	require.NoError(t, os.Chmod(configPath, 0o644))
+	require.NoError(t, loadConfigFiles())
 }
 
 func stringPointer(value string) *string {

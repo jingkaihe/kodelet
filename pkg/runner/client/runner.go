@@ -243,6 +243,9 @@ func (r *Runner) Close() error {
 }
 
 func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool, error) {
+	if _, err := r.refreshStoredCredential(); err != nil {
+		return false, &permanentConnectionError{err: pkgerrors.Wrap(err, "failed to reload enrolled runner credential")}
+	}
 	headers, keyAuthenticated, err := r.connectionHeaders()
 	if err != nil {
 		return false, err
@@ -255,6 +258,20 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool,
 	if err != nil {
 		if response != nil && (response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden) {
 			if keyAuthenticated {
+				changed, reloadErr := r.refreshStoredCredential()
+				if reloadErr != nil {
+					return false, &permanentConnectionError{err: pkgerrors.Wrap(reloadErr, "failed to reload rejected runner credential")}
+				}
+				if changed {
+					return false, pkgerrors.New("runner credential was replaced; reconnecting with the new credential")
+				}
+				pending, found, pendingErr := r.store.LoadPendingEnrollment(r.server, r.workspace)
+				if pendingErr != nil {
+					return false, &permanentConnectionError{err: pkgerrors.Wrap(pendingErr, "failed to inspect pending runner credential replacement")}
+				}
+				if found && pending.ExpiresAt.After(time.Now()) {
+					return false, pkgerrors.New("runner credential replacement is awaiting local delivery; retrying")
+				}
 				return false, &permanentConnectionError{err: pkgerrors.Errorf("runner credential authentication failed with HTTP %d; the credential may be unknown or revoked, so re-enroll this runner", response.StatusCode)}
 			}
 			return false, &permanentConnectionError{err: pkgerrors.Errorf("runner authentication failed with HTTP %d", response.StatusCode)}
@@ -425,6 +442,24 @@ func (r *Runner) connectionHeaders() (http.Header, bool, error) {
 	headers.Set("Authorization", protocol.DPoPAuthorizationScheme+" "+r.credential.AccessToken)
 	headers.Set(protocol.DPoPHeader, proof)
 	return headers, true, nil
+}
+
+func (r *Runner) refreshStoredCredential() (bool, error) {
+	if r == nil || strings.TrimSpace(r.config.AuthToken) != "" {
+		return false, nil
+	}
+	stored, found, err := r.store.LoadCredential(r.server, r.workspace)
+	if err != nil {
+		return false, err
+	}
+	if !found {
+		changed := r.credential != nil
+		r.credential = nil
+		return changed, nil
+	}
+	changed := r.credential == nil || r.credential.CredentialID != stored.CredentialID || r.credential.AccessToken != stored.AccessToken
+	r.credential = &stored
+	return changed, nil
 }
 
 func (r *Runner) probeManifestDigest(ctx context.Context) (string, error) {
