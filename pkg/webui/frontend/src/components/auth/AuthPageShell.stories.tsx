@@ -26,19 +26,16 @@ type Story = StoryObj<typeof meta>;
 
 export const SignInEntry: Story = {
   args: {
-    description: 'Authorize a Kodelet client to use your current identity and role set on this server.',
-    eyebrow: 'Client sign-in',
+    description: 'Enter the code shown in your Kodelet client.',
     principal,
-    title: 'Approve Kodelet sign-in',
+    title: 'Client sign-in',
     children: (
       <>
         <AuthNotice tone="warning">
-          Only continue if you started this sign-in from your own Kodelet client. Never use a code
-          someone else sent you.
+          Only use a code from your own Kodelet client.
         </AuthNotice>
         <ApprovalCodeForm
           busy={false}
-          helpText="Enter the eight-character code displayed in the Kodelet client."
           id="storybook-sign-in-code"
           label="Sign-in code"
           onChange={() => {}}
@@ -52,19 +49,16 @@ export const SignInEntry: Story = {
 
 export const RunnerEntry: Story = {
   args: {
-    description: 'Authorize a runner and bind its key credential to the displayed host and workspace.',
-    eyebrow: 'Runner enrollment',
+    description: 'Enter the code shown in the runner terminal.',
     principal,
-    title: 'Approve runner enrollment',
+    title: 'Runner enrollment',
     children: (
       <>
         <AuthNotice tone="warning">
-          Only continue if you started this enrollment from a runner you control. Never use a code
-          someone else sent you.
+          Only use a code from a runner you control.
         </AuthNotice>
         <ApprovalCodeForm
           busy={false}
-          helpText="Enter the eight-character code displayed in the runner terminal."
           id="storybook-runner-code"
           label="Enrollment code"
           onChange={() => {}}
@@ -76,24 +70,42 @@ export const RunnerEntry: Story = {
   },
 };
 
+export const SignInLookupError: Story = {
+  args: {
+    description: 'Enter the code shown in your Kodelet client.',
+    principal,
+    title: 'Client sign-in',
+    children: (
+      <>
+        <AuthNotice tone="error">Code not found.</AuthNotice>
+        <ApprovalCodeForm
+          busy={false}
+          id="storybook-invalid-sign-in-code"
+          label="Sign-in code"
+          onChange={() => {}}
+          onSubmit={() => {}}
+          value="ABCD-EFGH"
+        />
+      </>
+    ),
+  },
+};
+
 export const SignInReview: Story = {
   args: {
-    description: 'Authorize a Kodelet client to use your current identity and role set on this server.',
-    eyebrow: 'Client sign-in',
+    description: 'Confirm these details match your client.',
     principal,
-    title: 'Approve Kodelet sign-in',
+    title: 'Approve sign-in',
     children: (
       <div className="auth-request-review">
         <AuthNotice tone="warning">
-          Check that this code and client information match exactly. Approve only if you initiated
-          the sign-in.
+          Only approve a sign-in you started.
         </AuthNotice>
         <AuthDetailList
           items={[
             { label: 'Code', value: 'ABCD-EFGH', mono: true },
             { label: 'Client', value: 'kodelet' },
             { label: 'Platform', value: 'linux/amd64', mono: true },
-            { label: 'Kodelet version', value: 'v1.8.0', mono: true },
             { label: 'Expires', value: 'Aug 13, 2026, 9:45 PM' },
           ]}
         />
@@ -117,15 +129,13 @@ export const SignInReview: Story = {
 
 export const RunnerReplacementReview: Story = {
   args: {
-    description: 'Authorize a runner and bind its key credential to the displayed host and workspace.',
-    eyebrow: 'Runner enrollment',
+    description: 'Confirm the runner, host, and workspace.',
     principal,
-    title: 'Approve runner enrollment',
+    title: 'Approve runner',
     children: (
       <div className="auth-request-review">
         <AuthNotice tone="warning">
-          Check that the code, host, workspace, and key fingerprint match the runner you intend to
-          enroll.
+          Only approve a runner you control.
         </AuthNotice>
         <AuthDetailList
           items={[
@@ -133,7 +143,6 @@ export const RunnerReplacementReview: Story = {
             { label: 'Runner', value: 'Build runner' },
             { label: 'Host', value: 'runner.example.test (linux/arm64)' },
             { label: 'Workspace', value: '/home/kodelet/project', mono: true },
-            { label: 'Kodelet version', value: 'v1.8.0', mono: true },
             {
               label: 'Public-key fingerprint',
               value: 'SHA256:6dYP9PZL2UQ0tbCDppR9xq6jXwsk4gF4cJ4JX3aYeGc',
@@ -145,8 +154,8 @@ export const RunnerReplacementReview: Story = {
         <label className="auth-replacement-confirmation">
           <input defaultChecked type="checkbox" />
           <span>
-            <strong>Replace the existing credential.</strong> The currently active runner
-            credential will be revoked immediately.
+            <strong>Replace the existing credential.</strong> The current credential will be
+            revoked.
           </span>
         </label>
         <div className="auth-decision-actions">

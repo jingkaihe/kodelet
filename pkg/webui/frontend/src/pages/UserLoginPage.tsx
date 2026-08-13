@@ -74,12 +74,13 @@ export default function UserLoginPage() {
     };
   }, []);
 
-  const lookup = async () => {
+  const lookup = async (code: string) => {
+    setUserCode(code);
     setActiveAction('lookup');
     setError('');
     setMessage('');
     try {
-      const response = await apiService.submitUserLoginDecision(userCode, 'lookup');
+      const response = await apiService.submitUserLoginDecision(code, 'lookup');
       if (!response.authorization) {
         throw new Error('The sign-in request details were unavailable.');
       }
@@ -88,7 +89,13 @@ export default function UserLoginPage() {
       if (accessError(lookupError)) {
         setPrincipal(null);
       }
-      setError(lookupError instanceof Error ? lookupError.message : 'Unable to find that sign-in request.');
+      setError(
+        lookupError && typeof lookupError === 'object' && 'status' in lookupError && Number(lookupError.status) === 404
+          ? 'Code not found.'
+          : lookupError instanceof Error
+            ? lookupError.message
+            : 'Unable to find that sign-in request.',
+      );
     } finally {
       setActiveAction(null);
     }
@@ -135,14 +142,25 @@ export default function UserLoginPage() {
   };
 
   const requestStatusCopy = authorization ? statusCopy(authorization.status) : '';
+  const pageTitle = authorization
+    ? 'Approve sign-in'
+    : completionStatus === 'approved'
+      ? 'Sign-in approved'
+      : completionStatus === 'denied'
+        ? 'Sign-in denied'
+        : 'Client sign-in';
+  const pageDescription = authorization
+    ? 'Confirm these details match your client.'
+    : completionStatus
+      ? undefined
+      : 'Enter the code shown in your Kodelet client.';
 
   return (
     <AuthPageShell
-      description="Authorize a Kodelet client to use your current identity and role set on this server."
-      eyebrow="Client sign-in"
+      description={pageDescription}
       principal={principal}
       principalLoading={principalLoading}
-      title="Approve Kodelet sign-in"
+      title={pageTitle}
     >
       {error ? <AuthNotice tone="error">{error}</AuthNotice> : null}
       {message ? (
@@ -153,16 +171,19 @@ export default function UserLoginPage() {
 
       {principal && !authorization && !completionStatus ? (
         <>
-          <AuthNotice tone="warning">
-            Only continue if you started this sign-in from your own Kodelet client. Never use a
-            code someone else sent you.
-          </AuthNotice>
+          {!error ? (
+            <AuthNotice tone="warning">
+              Only use a code from your own Kodelet client.
+            </AuthNotice>
+          ) : null}
           <ApprovalCodeForm
             busy={busy}
-            helpText="Enter the eight-character code displayed in the Kodelet client."
             id="user-login-code"
             label="Sign-in code"
-            onChange={setUserCode}
+            onChange={(value) => {
+              setUserCode(value);
+              setError('');
+            }}
             onSubmit={lookup}
             value={userCode}
           />
@@ -172,8 +193,7 @@ export default function UserLoginPage() {
       {principal && authorization ? (
         <div className="auth-request-review">
           <AuthNotice tone="warning">
-            Check that this code and client information match exactly. Approve only if you
-            initiated the sign-in.
+            Only approve a sign-in you started.
           </AuthNotice>
           <AuthDetailList
             items={[
@@ -184,7 +204,6 @@ export default function UserLoginPage() {
                 value: `${authorization.clientOS}/${authorization.clientArch}`,
                 mono: true,
               },
-              { label: 'Kodelet version', value: authorization.kodeletVersion, mono: true },
               { label: 'Expires', value: formatAuthTimestamp(authorization.expiresAt) },
             ]}
           />

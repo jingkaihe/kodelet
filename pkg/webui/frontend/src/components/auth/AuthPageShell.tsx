@@ -1,13 +1,12 @@
-import type { FormEvent, ReactNode } from 'react';
-import { AlertTriangle, CheckCircle2, Info, ShieldCheck } from 'lucide-react';
+import { useRef, useState, type ClipboardEvent, type FormEvent, type ReactNode } from 'react';
+import { AlertTriangle, CheckCircle2, Info } from 'lucide-react';
 import type { AuthPrincipal } from '../../types';
 
 type AuthNoticeTone = 'info' | 'warning' | 'error' | 'success';
 
 interface AuthPageShellProps {
-  eyebrow: string;
   title: string;
-  description: string;
+  description?: string;
   principal?: AuthPrincipal | null;
   principalLoading?: boolean;
   children: ReactNode;
@@ -31,11 +30,10 @@ interface AuthDetailListProps {
 interface ApprovalCodeFormProps {
   id: string;
   label: string;
-  helpText: string;
   value: string;
   busy: boolean;
   onChange: (value: string) => void;
-  onSubmit: () => void;
+  onSubmit: (value: string) => void;
 }
 
 const approvalCodeAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -64,7 +62,6 @@ const principalLabel = (principal?: AuthPrincipal | null): string => {
 };
 
 export function AuthPageShell({
-  eyebrow,
   title,
   description,
   principal,
@@ -91,22 +88,14 @@ export function AuthPageShell({
 
         <section className="auth-card surface-panel" aria-labelledby="auth-page-title">
           <header className="auth-header">
-            <div className="auth-context-label">
-              <ShieldCheck aria-hidden="true" size={15} strokeWidth={1.8} />
-              <p className="auth-eyebrow">{eyebrow}</p>
-            </div>
             <h1 className="auth-title" id="auth-page-title">
               {title}
             </h1>
-            <p className="auth-description">{description}</p>
+            {description ? <p className="auth-description">{description}</p> : null}
           </header>
 
           <div className="auth-card-content">{children}</div>
         </section>
-
-        <p className="auth-page-footnote">
-          Approval changes access to this Kodelet server. Check every detail before continuing.
-        </p>
       </main>
     </div>
   );
@@ -147,51 +136,95 @@ export function AuthDetailList({ items }: AuthDetailListProps) {
 export function ApprovalCodeForm({
   id,
   label,
-  helpText,
   value,
   busy,
   onChange,
   onSubmit,
 }: ApprovalCodeFormProps) {
-  const complete = value.replace('-', '').length === 8;
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [focused, setFocused] = useState(false);
+  const compactValue = value.replace('-', '');
+  const complete = compactValue.length === 8;
+
+  const commitCode = (rawValue: string) => {
+    const formatted = formatApprovalCode(rawValue);
+    onChange(formatted);
+    if (!busy && formatted !== value && formatted.replace('-', '').length === 8) {
+      onSubmit(formatted);
+    }
+  };
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (complete && !busy) {
-      onSubmit();
+      onSubmit(value);
     }
+  };
+
+  const handlePaste = (event: ClipboardEvent<HTMLInputElement>) => {
+    event.preventDefault();
+    commitCode(event.clipboardData.getData('text'));
+  };
+
+  const moveCaretToEnd = () => {
+    const input = inputRef.current;
+    if (!input) {
+      return;
+    }
+    input.setSelectionRange(input.value.length, input.value.length);
   };
 
   return (
     <form className="auth-code-form" onSubmit={handleSubmit}>
-      <label className="auth-field" htmlFor={id}>
-        <span className="auth-field-label">{label}</span>
+      <div className="auth-code-control" aria-busy={busy}>
         <input
-          aria-describedby={`${id}-help`}
+          aria-label={label}
           autoCapitalize="characters"
-          autoComplete="off"
+          autoComplete="one-time-code"
           autoFocus
           className="auth-code-input"
+          data-1p-ignore="true"
           disabled={busy}
           id={id}
           inputMode="text"
-          maxLength={9}
-          onChange={(event) => onChange(formatApprovalCode(event.target.value))}
-          placeholder="ABCD-EFGH"
+          maxLength={32}
+          onBlur={() => setFocused(false)}
+          onChange={(event) => commitCode(event.target.value)}
+          onClick={moveCaretToEnd}
+          onFocus={() => {
+            setFocused(true);
+            moveCaretToEnd();
+          }}
+          onPaste={handlePaste}
+          ref={inputRef}
           required
           spellCheck={false}
           type="text"
           value={value}
         />
-      </label>
-      <p className="auth-field-help" id={`${id}-help`}>
-        {helpText}
-      </p>
-      <div className="auth-form-actions">
-        <button className="auth-primary-button" disabled={!complete || busy} type="submit">
-          {busy ? 'Checking…' : 'Continue'}
-        </button>
+        <div className="auth-code-cells" aria-hidden="true">
+          {Array.from({ length: 8 }, (_, index) => {
+            const character = compactValue[index] || '';
+            const active = focused && !busy && !complete && index === compactValue.length;
+            return (
+              <span
+                className={`auth-code-cell${character ? ' is-filled' : ''}${active ? ' is-active' : ''}`}
+                key={index}
+              >
+                {character}
+              </span>
+            );
+          })}
+        </div>
       </div>
+      {busy ? (
+        <p className="auth-code-status" role="status">
+          Checking…
+        </p>
+      ) : null}
+      <button className="sr-only" disabled={!complete || busy} type="submit">
+        Check code
+      </button>
     </form>
   );
 }

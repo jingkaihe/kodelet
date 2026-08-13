@@ -79,12 +79,13 @@ export default function RunnerEnrollmentPage() {
     };
   }, []);
 
-  const lookup = async () => {
+  const lookup = async (code: string) => {
+    setUserCode(code);
     setActiveAction('lookup');
     setError('');
     setMessage('');
     try {
-      const response = await apiService.submitRunnerEnrollmentDecision(userCode, 'lookup');
+      const response = await apiService.submitRunnerEnrollmentDecision(code, 'lookup');
       if (!response.enrollment) {
         throw new Error('The runner enrollment details were unavailable.');
       }
@@ -95,9 +96,11 @@ export default function RunnerEnrollmentPage() {
         setPrincipal(null);
       }
       setError(
-        lookupError instanceof Error
-          ? lookupError.message
-          : 'Unable to find that runner enrollment.',
+        lookupError && typeof lookupError === 'object' && 'status' in lookupError && Number(lookupError.status) === 404
+          ? 'Code not found.'
+          : lookupError instanceof Error
+            ? lookupError.message
+            : 'Unable to find that runner enrollment.',
       );
     } finally {
       setActiveAction(null);
@@ -149,14 +152,25 @@ export default function RunnerEnrollmentPage() {
 
   const requestStatusCopy = enrollment ? statusCopy(enrollment.status) : '';
   const runnerName = enrollment?.displayName || enrollment?.host.hostname || 'Unnamed runner';
+  const pageTitle = enrollment
+    ? 'Approve runner'
+    : completionStatus === 'approved'
+      ? 'Runner approved'
+      : completionStatus === 'denied'
+        ? 'Runner denied'
+        : 'Runner enrollment';
+  const pageDescription = enrollment
+    ? 'Confirm the runner, host, and workspace.'
+    : completionStatus
+      ? undefined
+      : 'Enter the code shown in the runner terminal.';
 
   return (
     <AuthPageShell
-      description="Authorize a runner and bind its key credential to the displayed host and workspace."
-      eyebrow="Runner enrollment"
+      description={pageDescription}
       principal={principal}
       principalLoading={principalLoading}
-      title="Approve runner enrollment"
+      title={pageTitle}
     >
       {error ? <AuthNotice tone="error">{error}</AuthNotice> : null}
       {message ? (
@@ -167,16 +181,19 @@ export default function RunnerEnrollmentPage() {
 
       {principal && !enrollment && !completionStatus ? (
         <>
-          <AuthNotice tone="warning">
-            Only continue if you started this enrollment from a runner you control. Never use a
-            code someone else sent you.
-          </AuthNotice>
+          {!error ? (
+            <AuthNotice tone="warning">
+              Only use a code from a runner you control.
+            </AuthNotice>
+          ) : null}
           <ApprovalCodeForm
             busy={busy}
-            helpText="Enter the eight-character code displayed in the runner terminal."
             id="runner-enrollment-code"
             label="Enrollment code"
-            onChange={setUserCode}
+            onChange={(value) => {
+              setUserCode(value);
+              setError('');
+            }}
             onSubmit={lookup}
             value={userCode}
           />
@@ -186,8 +203,7 @@ export default function RunnerEnrollmentPage() {
       {principal && enrollment ? (
         <div className="auth-request-review">
           <AuthNotice tone="warning">
-            Check that the code, host, workspace, and key fingerprint match the runner you intend
-            to enroll.
+            Only approve a runner you control.
           </AuthNotice>
           <AuthDetailList
             items={[
@@ -198,11 +214,6 @@ export default function RunnerEnrollmentPage() {
                 value: `${enrollment.host.hostname || 'Unknown host'} (${enrollment.host.os}/${enrollment.host.arch})`,
               },
               { label: 'Workspace', value: enrollment.workspace.path, mono: true },
-              {
-                label: 'Kodelet version',
-                value: enrollment.kodeletVersion || 'Not reported',
-                mono: true,
-              },
               { label: 'Public-key fingerprint', value: enrollment.fingerprint, mono: true },
               { label: 'Expires', value: formatAuthTimestamp(enrollment.expiresAt) },
             ]}
@@ -216,8 +227,8 @@ export default function RunnerEnrollmentPage() {
                 type="checkbox"
               />
               <span>
-                <strong>Replace the existing credential.</strong> The currently active runner
-                credential will be revoked immediately.
+                <strong>Replace the existing credential.</strong> The current credential will be
+                revoked.
               </span>
             </label>
           ) : null}

@@ -58,17 +58,18 @@ describe('authentication approval pages', () => {
     render(<UserLoginPage />);
 
     expect(await screen.findByText('Signed in as user@example.com')).toBeInTheDocument();
-    expect(screen.getByText('Client sign-in')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Client sign-in' })).toBeInTheDocument();
     expect(
-      screen.getByText(/Only continue if you started this sign-in from your own Kodelet client/),
+      screen.getByText('Only use a code from your own Kodelet client.'),
     ).toBeInTheDocument();
 
-    await user.type(screen.getByLabelText('Sign-in code'), 'abcd efgh');
-    expect(screen.getByLabelText('Sign-in code')).toHaveValue('ABCD-EFGH');
-    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    const signInCode = screen.getByLabelText('Sign-in code');
+    await user.click(signInCode);
+    await user.paste('abcd-efgh');
+    expect(signInCode).toHaveValue('ABCD-EFGH');
+    expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument();
 
     expect(await screen.findByText('linux/amd64')).toBeInTheDocument();
-    expect(screen.getByText('v-test')).toBeInTheDocument();
     expect(apiMocks.submitUserLoginDecision).toHaveBeenNthCalledWith(
       1,
       'ABCD-EFGH',
@@ -123,7 +124,6 @@ describe('authentication approval pages', () => {
 
     render(<UserLoginPage />);
     await user.type(await screen.findByLabelText('Sign-in code'), 'abcdefgh');
-    await user.click(screen.getByRole('button', { name: 'Continue' }));
     await user.click(await screen.findByRole('button', { name: 'Deny' }));
 
     expect(screen.getByRole('button', { name: 'Denying…' })).toBeDisabled();
@@ -166,9 +166,8 @@ describe('authentication approval pages', () => {
     render(<RunnerEnrollmentPage />);
 
     await screen.findByText('Signed in as user@example.com');
-    expect(screen.getByText('Runner enrollment')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Runner enrollment' })).toBeInTheDocument();
     await user.type(screen.getByLabelText('Enrollment code'), 'wxyz2345');
-    await user.click(screen.getByRole('button', { name: 'Continue' }));
 
     expect(await screen.findByText('SHA256:runner-fingerprint')).toBeInTheDocument();
     expect(screen.getByText('/work/project')).toBeInTheDocument();
@@ -205,6 +204,21 @@ describe('authentication approval pages', () => {
     expect(screen.queryByLabelText('Enrollment code')).not.toBeInTheDocument();
   });
 
+  it('shows only the lookup error after an invalid code', async () => {
+    const user = userEvent.setup();
+    apiMocks.submitUserLoginDecision.mockRejectedValueOnce(
+      Object.assign(new Error('User login request not found.'), { status: 404 }),
+    );
+
+    render(<UserLoginPage />);
+    await user.type(await screen.findByLabelText('Sign-in code'), 'abcdefgh');
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Code not found.');
+    expect(
+      screen.queryByText('Only use a code from your own Kodelet client.'),
+    ).not.toBeInTheDocument();
+  });
+
   it('clears stale sign-in approval controls after a conflict', async () => {
     const user = userEvent.setup();
     apiMocks.submitUserLoginDecision
@@ -226,7 +240,6 @@ describe('authentication approval pages', () => {
 
     render(<UserLoginPage />);
     await user.type(await screen.findByLabelText('Sign-in code'), 'abcdefgh');
-    await user.click(screen.getByRole('button', { name: 'Continue' }));
     await user.click(await screen.findByRole('button', { name: 'Approve sign-in' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('no longer pending');
@@ -255,7 +268,6 @@ describe('authentication approval pages', () => {
 
     render(<RunnerEnrollmentPage />);
     await user.type(await screen.findByLabelText('Enrollment code'), 'wxyz2345');
-    await user.click(screen.getByRole('button', { name: 'Continue' }));
     await user.click(await screen.findByRole('button', { name: 'Approve runner' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('has expired');
