@@ -27,7 +27,7 @@ type Story = StoryObj<typeof meta>;
 export const SignInEntry: Story = {
   args: {
     description: 'Authorize a Kodelet client to use your current identity and role set on this server.',
-    eyebrow: 'Secure client authorization',
+    eyebrow: 'Client sign-in',
     principal,
     title: 'Approve Kodelet sign-in',
     children: (
@@ -50,10 +50,36 @@ export const SignInEntry: Story = {
   },
 };
 
+export const RunnerEntry: Story = {
+  args: {
+    description: 'Authorize a runner and bind its key credential to the displayed host and workspace.',
+    eyebrow: 'Runner enrollment',
+    principal,
+    title: 'Approve runner enrollment',
+    children: (
+      <>
+        <AuthNotice tone="warning">
+          Only continue if you started this enrollment from a runner you control. Never use a code
+          someone else sent you.
+        </AuthNotice>
+        <ApprovalCodeForm
+          busy={false}
+          helpText="Enter the eight-character code displayed in the runner terminal."
+          id="storybook-runner-code"
+          label="Enrollment code"
+          onChange={() => {}}
+          onSubmit={() => {}}
+          value=""
+        />
+      </>
+    ),
+  },
+};
+
 export const SignInReview: Story = {
   args: {
     description: 'Authorize a Kodelet client to use your current identity and role set on this server.',
-    eyebrow: 'Secure client authorization',
+    eyebrow: 'Client sign-in',
     principal,
     title: 'Approve Kodelet sign-in',
     children: (
@@ -92,7 +118,7 @@ export const SignInReview: Story = {
 export const RunnerReplacementReview: Story = {
   args: {
     description: 'Authorize a runner and bind its key credential to the displayed host and workspace.',
-    eyebrow: 'Runner administration',
+    eyebrow: 'Runner enrollment',
     principal,
     title: 'Approve runner enrollment',
     children: (

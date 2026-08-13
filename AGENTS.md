@@ -39,6 +39,7 @@ All commands use `mise run <task>`. Frontend is embedded via `go generate ./pkg/
 4. **Do not hard-wrap Markdown prose**: Keep each prose paragraph on a single source line
 5. **Do not implement token environment or argv scrubbing**: The agent and its tools share the trusted process environment and can inspect it, so selective scrubbing is not a meaningful security boundary.
 6. **Supported targets are Linux and macOS on amd64 and arm64**: Do not add Windows or other platform-specific implementations unless explicitly requested.
+7. **Use sentence case in the Web UI**: Avoid all-caps interface copy and CSS `text-transform: uppercase`; reserve uppercase for codes and established acronyms.
 
 ## Testing
 ```bash

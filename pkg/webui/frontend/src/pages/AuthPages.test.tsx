@@ -58,6 +58,7 @@ describe('authentication approval pages', () => {
     render(<UserLoginPage />);
 
     expect(await screen.findByText('Signed in as user@example.com')).toBeInTheDocument();
+    expect(screen.getByText('Client sign-in')).toBeInTheDocument();
     expect(
       screen.getByText(/Only continue if you started this sign-in from your own Kodelet client/),
     ).toBeInTheDocument();
@@ -165,6 +166,7 @@ describe('authentication approval pages', () => {
     render(<RunnerEnrollmentPage />);
 
     await screen.findByText('Signed in as user@example.com');
+    expect(screen.getByText('Runner enrollment')).toBeInTheDocument();
     await user.type(screen.getByLabelText('Enrollment code'), 'wxyz2345');
     await user.click(screen.getByRole('button', { name: 'Continue' }));
 

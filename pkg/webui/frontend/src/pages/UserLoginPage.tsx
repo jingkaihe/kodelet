@@ -139,7 +139,7 @@ export default function UserLoginPage() {
   return (
     <AuthPageShell
       description="Authorize a Kodelet client to use your current identity and role set on this server."
-      eyebrow="Secure client authorization"
+      eyebrow="Client sign-in"
       principal={principal}
       principalLoading={principalLoading}
       title="Approve Kodelet sign-in"

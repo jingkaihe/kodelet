@@ -153,7 +153,7 @@ export default function RunnerEnrollmentPage() {
   return (
     <AuthPageShell
       description="Authorize a runner and bind its key credential to the displayed host and workspace."
-      eyebrow="Runner administration"
+      eyebrow="Runner enrollment"
       principal={principal}
       principalLoading={principalLoading}
       title="Approve runner enrollment"

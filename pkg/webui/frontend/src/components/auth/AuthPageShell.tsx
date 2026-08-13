@@ -76,34 +76,29 @@ export function AuthPageShell({
   return (
     <div className="auth-page">
       <main className="auth-page-shell">
-        <section className="auth-card surface-panel" aria-labelledby="auth-page-title">
-          <div className="auth-card-topline">
-            <div className="auth-brand" aria-label="Kodelet">
-              <span className="auth-brand-mark" aria-hidden="true">
-                K
-              </span>
-              <span>Kodelet</span>
-            </div>
-            {principalLoading ? (
-              <span className="auth-identity-chip">Checking session…</span>
-            ) : identity ? (
-              <span className="auth-identity-chip" title={identity}>
-                Signed in as {identity}
-              </span>
-            ) : null}
+        <div className="auth-app-bar">
+          <div className="auth-brand" aria-label="Kodelet">
+            Kodelet
           </div>
+          {principalLoading ? (
+            <span className="auth-identity-chip">Checking session…</span>
+          ) : identity ? (
+            <span className="auth-identity-chip" title={identity}>
+              Signed in as {identity}
+            </span>
+          ) : null}
+        </div>
 
+        <section className="auth-card surface-panel" aria-labelledby="auth-page-title">
           <header className="auth-header">
-            <div className="auth-header-icon" aria-hidden="true">
-              <ShieldCheck size={20} strokeWidth={1.8} />
-            </div>
-            <div>
+            <div className="auth-context-label">
+              <ShieldCheck aria-hidden="true" size={15} strokeWidth={1.8} />
               <p className="auth-eyebrow">{eyebrow}</p>
-              <h1 className="auth-title" id="auth-page-title">
-                {title}
-              </h1>
-              <p className="auth-description">{description}</p>
             </div>
+            <h1 className="auth-title" id="auth-page-title">
+              {title}
+            </h1>
+            <p className="auth-description">{description}</p>
           </header>
 
           <div className="auth-card-content">{children}</div>
