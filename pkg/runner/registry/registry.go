@@ -404,44 +404,80 @@ func (r *Registry) EnsureEnrollmentRegistration(request protocol.EnrollmentStart
 	if err := request.Validate(); err != nil {
 		return Runner{}, err
 	}
-	identity := runnerIdentity(request.Host.InstanceID, request.Workspace.Path)
-	now := r.now().UTC()
-
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
 		return Runner{}, errors.New("runner registry is closed")
 	}
+	candidate, existing, err := r.enrollmentRegistrationCandidateLocked(request, replace)
+	if err != nil {
+		return Runner{}, err
+	}
+	if err := r.persistRunnerLocked(candidate); err != nil {
+		return Runner{}, err
+	}
+	r.publishEnrollmentRegistrationLocked(candidate, existing)
+	return candidate.Runner, nil
+}
+
+// CommitEnrollmentRegistration validates a proposed enrollment registration, invokes commit while
+// registry state is fenced, and publishes it only after the durable approval succeeds.
+func (r *Registry) CommitEnrollmentRegistration(request protocol.EnrollmentStartRequest, replace bool, commit func(Runner) error) (Runner, error) {
+	if r == nil {
+		return Runner{}, errors.New("runner registry is required")
+	}
+	if commit == nil {
+		return Runner{}, errors.New("runner enrollment commit callback is required")
+	}
+	if err := request.Validate(); err != nil {
+		return Runner{}, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return Runner{}, errors.New("runner registry is closed")
+	}
+	candidate, existing, err := r.enrollmentRegistrationCandidateLocked(request, replace)
+	if err != nil {
+		return Runner{}, err
+	}
+	if err := commit(candidate.Runner); err != nil {
+		return Runner{}, err
+	}
+	r.publishEnrollmentRegistrationLocked(candidate, existing)
+	return candidate.Runner, nil
+}
+
+func (r *Registry) enrollmentRegistrationCandidateLocked(request protocol.EnrollmentStartRequest, replace bool) (*runnerEntry, *runnerEntry, error) {
+	identity := runnerIdentity(request.Host.InstanceID, request.Workspace.Path)
+	now := r.now().UTC()
 	if existingID := r.byIdentity[identity]; existingID != "" {
 		entry := r.runners[existingID]
 		if entry == nil {
-			return Runner{}, errors.New("runner identity index is inconsistent")
+			return nil, nil, errors.New("runner identity index is inconsistent")
 		}
+		candidate := cloneRunnerEntry(entry)
 		if entry.Connected || entry.link != nil {
 			if !replace {
-				return Runner{}, errors.Wrapf(ErrRunnerConnected, "runner %s must be stopped before enrolling its credential", entry.ID)
+				return nil, nil, errors.Wrapf(ErrRunnerConnected, "runner %s must be stopped before enrolling its credential", entry.ID)
 			}
-			return entry.Runner, nil
+			return candidate, entry, nil
 		}
-		entry.DisplayName = strings.TrimSpace(request.DisplayName)
-		entry.Host = request.Host
-		entry.Workspace = request.Workspace
-		entry.KodeletVersion = strings.TrimSpace(request.KodeletVersion)
-		entry.UpdatedAt = now
-		if entry.Status != RunnerStatusIncompatible {
-			entry.Status = RunnerStatusOffline
+		candidate.DisplayName = strings.TrimSpace(request.DisplayName)
+		candidate.Host = request.Host
+		candidate.Workspace = request.Workspace
+		candidate.KodeletVersion = strings.TrimSpace(request.KodeletVersion)
+		candidate.UpdatedAt = now
+		if candidate.Status != RunnerStatusIncompatible {
+			candidate.Status = RunnerStatusOffline
 		}
-		if err := r.persistRunnerLocked(entry); err != nil {
-			return Runner{}, err
-		}
-		return entry.Runner, nil
+		return candidate, entry, nil
 	}
-
 	runnerID, err := r.newID("runner")
 	if err != nil {
-		return Runner{}, errors.Wrap(err, "failed to generate runner id")
+		return nil, nil, errors.Wrap(err, "failed to generate runner id")
 	}
-	entry := &runnerEntry{
+	return &runnerEntry{
 		Runner: Runner{
 			ID:             runnerID,
 			DisplayName:    strings.TrimSpace(request.DisplayName),
@@ -453,13 +489,16 @@ func (r *Registry) EnsureEnrollmentRegistration(request protocol.EnrollmentStart
 			UpdatedAt:      now,
 		},
 		identity: identity,
+	}, nil, nil
+}
+
+func (r *Registry) publishEnrollmentRegistrationLocked(candidate, existing *runnerEntry) {
+	if existing != nil {
+		existing.Runner = candidate.Runner
+		return
 	}
-	if err := r.persistRunnerLocked(entry); err != nil {
-		return Runner{}, err
-	}
-	r.byIdentity[identity] = runnerID
-	r.runners[runnerID] = entry
-	return entry.Runner, nil
+	r.byIdentity[candidate.identity] = candidate.ID
+	r.runners[candidate.ID] = candidate
 }
 
 // register upserts one stable workspace identity and atomically replaces its live generation.

@@ -14,6 +14,7 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
 )
@@ -439,7 +440,7 @@ func (s *authStore) RunnerEnrollmentByUserCode(ctx context.Context, userCode str
 	return runnerEnrollmentFromRow(row, activeCount > 0)
 }
 
-func (s *authStore) ApproveRunnerEnrollment(ctx context.Context, userCode, approvedBy, runnerID string, replace bool) (runnerEnrollment, error) {
+func (s *authStore) ApproveRunnerEnrollment(ctx context.Context, userCode, approvedBy string, runner runnerregistry.Runner, replace bool) (runnerEnrollment, error) {
 	if s == nil || s.db == nil {
 		return runnerEnrollment{}, errors.New("authentication store is closed")
 	}
@@ -448,11 +449,11 @@ func (s *authStore) ApproveRunnerEnrollment(ctx context.Context, userCode, appro
 		return runnerEnrollment{}, err
 	}
 	approvedBy = strings.TrimSpace(approvedBy)
-	runnerID = strings.TrimSpace(runnerID)
+	runner.ID = strings.TrimSpace(runner.ID)
 	if approvedBy == "" {
 		return runnerEnrollment{}, errors.New("runner enrollment approver is required")
 	}
-	if runnerID == "" {
+	if runner.ID == "" {
 		return runnerEnrollment{}, errors.New("runner registration id is required")
 	}
 	tx, err := s.db.BeginTxx(ctx, nil)
@@ -487,18 +488,14 @@ func (s *authStore) ApproveRunnerEnrollment(ctx context.Context, userCode, appro
 	if err != nil {
 		return runnerEnrollment{}, err
 	}
-	var runnerMatches int
-	if err := tx.GetContext(ctx, &runnerMatches, `
-		SELECT COUNT(*) FROM runner_registrations
-		WHERE id = ? AND owner_id = ? AND host_instance_id = ? AND workspace_path = ?
-	`, runnerID, controlPlaneOwnerID, row.HostInstanceID, row.WorkspacePath); err != nil {
-		return runnerEnrollment{}, errors.Wrap(err, "failed to validate runner registration for enrollment")
-	}
-	if runnerMatches != 1 {
+	if runner.Host.InstanceID != row.HostInstanceID || runner.Workspace.Path != row.WorkspacePath {
 		return runnerEnrollment{}, errors.New("runner registration does not match the enrollment identity")
 	}
+	if err := persistApprovedRunnerRegistration(ctx, tx, runner); err != nil {
+		return runnerEnrollment{}, err
+	}
 	var activeCredentialID string
-	err = tx.GetContext(ctx, &activeCredentialID, `SELECT id FROM runner_credentials WHERE runner_id = ? AND revoked_at IS NULL`, runnerID)
+	err = tx.GetContext(ctx, &activeCredentialID, `SELECT id FROM runner_credentials WHERE runner_id = ? AND revoked_at IS NULL`, runner.ID)
 	switch {
 	case err == nil && !replace:
 		return runnerEnrollment{}, errRunnerCredentialExists
@@ -526,14 +523,14 @@ func (s *authStore) ApproveRunnerEnrollment(ctx context.Context, userCode, appro
 			id, runner_id, key_algorithm, public_key, public_key_sha256,
 			approved_by, created_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, credentialID, runnerID, runnerCredentialKeyAlgorithm, row.PublicKey, row.PublicKeySHA256, approvedBy, now); err != nil {
+	`, credentialID, runner.ID, runnerCredentialKeyAlgorithm, row.PublicKey, row.PublicKeySHA256, approvedBy, now); err != nil {
 		return runnerEnrollment{}, errors.Wrap(err, "failed to issue runner credential")
 	}
 	result, err := tx.ExecContext(ctx, `
 		UPDATE runner_enrollments
 		SET status = ?, approved_at = ?, approved_by = ?, runner_id = ?, credential_id = ?
 		WHERE id = ? AND status = ? AND expires_at > ?
-	`, protocol.EnrollmentStatusApproved, now, approvedBy, runnerID, credentialID, row.ID, protocol.EnrollmentStatusPending, now)
+	`, protocol.EnrollmentStatusApproved, now, approvedBy, runner.ID, credentialID, row.ID, protocol.EnrollmentStatusPending, now)
 	if err != nil {
 		return runnerEnrollment{}, errors.Wrap(err, "failed to approve runner enrollment")
 	}
@@ -545,12 +542,61 @@ func (s *authStore) ApproveRunnerEnrollment(ctx context.Context, userCode, appro
 		return runnerEnrollment{}, errEnrollmentNotPending
 	}
 	approvedEnrollment.Status = protocol.EnrollmentStatusApproved
-	approvedEnrollment.RunnerID = runnerID
+	approvedEnrollment.RunnerID = runner.ID
 	approvedEnrollment.CredentialID = credentialID
 	if err := tx.Commit(); err != nil {
 		return runnerEnrollment{}, errors.Wrap(err, "failed to commit runner enrollment approval")
 	}
 	return approvedEnrollment, nil
+}
+
+func persistApprovedRunnerRegistration(ctx context.Context, tx *sqlx.Tx, runner runnerregistry.Runner) error {
+	if runner.ID == "" || strings.TrimSpace(runner.Host.InstanceID) == "" || strings.TrimSpace(runner.Workspace.Path) == "" || strings.TrimSpace(runner.Workspace.Name) == "" {
+		return errors.New("runner registration is incomplete")
+	}
+	result, err := tx.ExecContext(ctx, `
+		INSERT INTO runner_registrations (
+			id, owner_id, display_name, host_instance_id, hostname, host_os, host_arch,
+			host_pid, workspace_path, workspace_name, kodelet_version, manifest_digest,
+			manifest_changed, compatibility_error, status, active_run_id, generation,
+			connected_at, last_heartbeat_at, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			display_name = excluded.display_name,
+			hostname = excluded.hostname,
+			host_os = excluded.host_os,
+			host_arch = excluded.host_arch,
+			host_pid = excluded.host_pid,
+			workspace_name = excluded.workspace_name,
+			kodelet_version = excluded.kodelet_version,
+			manifest_digest = excluded.manifest_digest,
+			manifest_changed = excluded.manifest_changed,
+			compatibility_error = excluded.compatibility_error,
+			status = excluded.status,
+			active_run_id = excluded.active_run_id,
+			generation = excluded.generation,
+			connected_at = excluded.connected_at,
+			last_heartbeat_at = excluded.last_heartbeat_at,
+			updated_at = excluded.updated_at
+		WHERE runner_registrations.owner_id = excluded.owner_id
+			AND runner_registrations.host_instance_id = excluded.host_instance_id
+			AND runner_registrations.workspace_path = excluded.workspace_path
+	`, runner.ID, controlPlaneOwnerID, nullAuthString(runner.DisplayName), runner.Host.InstanceID, nullAuthString(runner.Host.Hostname),
+		nullAuthString(runner.Host.OS), nullAuthString(runner.Host.Arch), nullAuthInt(runner.Host.PID), runner.Workspace.Path,
+		runner.Workspace.Name, nullAuthString(runner.KodeletVersion), nullAuthString(runner.ManifestDigest), runner.ManifestChanged,
+		nullAuthString(runner.CompatibilityError), runner.Status, nullAuthString(runner.ActiveRunID), runner.Generation,
+		nullAuthTime(runner.ConnectedAt), nullAuthTime(runner.LastHeartbeatAt), runner.CreatedAt, runner.UpdatedAt)
+	if err != nil {
+		return errors.Wrap(err, "failed to persist approved runner registration")
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return errors.Wrap(err, "failed to inspect approved runner registration")
+	}
+	if affected != 1 {
+		return errors.New("runner registration does not match the enrollment identity")
+	}
+	return nil
 }
 
 func (s *authStore) DenyRunnerEnrollment(ctx context.Context, userCode, deniedBy string) error {
@@ -908,6 +954,20 @@ func authHash(value string) []byte {
 func nullAuthString(value string) any {
 	value = strings.TrimSpace(value)
 	if value == "" {
+		return nil
+	}
+	return value
+}
+
+func nullAuthInt(value int) any {
+	if value == 0 {
+		return nil
+	}
+	return value
+}
+
+func nullAuthTime(value time.Time) any {
+	if value.IsZero() {
 		return nil
 	}
 	return value

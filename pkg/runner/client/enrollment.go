@@ -38,6 +38,8 @@ var (
 	ErrEnrollmentDenied = errors.New("runner enrollment was denied")
 	// ErrEnrollmentExpired indicates that the pending enrollment expired before approval.
 	ErrEnrollmentExpired = errors.New("runner enrollment expired")
+	// ErrEnrollmentSuperseded indicates that newer local enrollment state replaced this flow.
+	ErrEnrollmentSuperseded = errors.New("runner enrollment was superseded by a newer local enrollment")
 )
 
 // EnrollmentConfig configures one runner device-enrollment operation.
@@ -151,26 +153,17 @@ func enrollRunner(ctx context.Context, config EnrollmentConfig, deps enrollmentD
 		return EnrollmentResult{}, err
 	}
 
-	pending, found, err := client.store.LoadPendingEnrollment(client.server, client.workspace)
+	pending, resumed, err := client.store.LoadOrCreatePendingEnrollment(client.server, client.workspace, func(active bool) (localstate.PendingEnrollment, error) {
+		if active && !client.replaceLocal {
+			return localstate.PendingEnrollment{}, errors.Wrap(ErrActiveLocalCredential, "refusing to start runner enrollment without replacement opt-in")
+		}
+		return client.start(ctx)
+	})
 	if err != nil {
 		return EnrollmentResult{}, err
 	}
 
-	if !found {
-		_, active, err := client.store.LoadCredential(client.server, client.workspace)
-		if err != nil && !client.replaceLocal {
-			return EnrollmentResult{}, err
-		}
-		if active && !client.replaceLocal {
-			return EnrollmentResult{}, errors.Wrap(ErrActiveLocalCredential, "refusing to start runner enrollment without replacement opt-in")
-		}
-		pending, err = client.start(ctx)
-		if err != nil {
-			return EnrollmentResult{}, err
-		}
-	}
-
-	info, err := client.enrollmentInfo(pending, found)
+	info, err := client.enrollmentInfo(pending, resumed)
 	if err != nil {
 		return EnrollmentResult{}, err
 	}
@@ -329,9 +322,6 @@ func (c *enrollmentClient) start(ctx context.Context) (localstate.PendingEnrollm
 		CreatedAt:               now,
 		UpdatedAt:               now,
 	}
-	if err := c.store.SavePendingEnrollment(pending); err != nil {
-		return localstate.PendingEnrollment{}, errors.Wrap(err, "failed to save pending runner enrollment")
-	}
 	return pending, nil
 }
 
@@ -368,7 +358,7 @@ func (c *enrollmentClient) poll(ctx context.Context, pending localstate.PendingE
 		}
 		if !isHTTPSuccess(response.statusCode) {
 			if response.statusCode == http.StatusNotFound {
-				return protocol.EnrollmentPollResponse{}, c.finishTerminalEnrollment(ErrEnrollmentExpired)
+				return protocol.EnrollmentPollResponse{}, c.finishTerminalEnrollment(pending.EnrollmentID, ErrEnrollmentExpired)
 			}
 			return protocol.EnrollmentPollResponse{}, newEnrollmentAPIError("poll", response, pending.DeviceCode, privateKeySecret)
 		}
@@ -393,9 +383,9 @@ func (c *enrollmentClient) poll(ctx context.Context, pending localstate.PendingE
 			}
 			return polled, nil
 		case protocol.EnrollmentStatusDenied:
-			return protocol.EnrollmentPollResponse{}, c.finishTerminalEnrollment(ErrEnrollmentDenied)
+			return protocol.EnrollmentPollResponse{}, c.finishTerminalEnrollment(pending.EnrollmentID, ErrEnrollmentDenied)
 		case protocol.EnrollmentStatusExpired:
-			return protocol.EnrollmentPollResponse{}, c.finishTerminalEnrollment(ErrEnrollmentExpired)
+			return protocol.EnrollmentPollResponse{}, c.finishTerminalEnrollment(pending.EnrollmentID, ErrEnrollmentExpired)
 		default:
 			return protocol.EnrollmentPollResponse{}, errors.Errorf("control plane returned unknown runner enrollment status %q", polled.Status)
 		}
@@ -428,7 +418,7 @@ func (c *enrollmentClient) finishApprovedEnrollment(pending localstate.PendingEn
 		return errors.New("control plane returned an approved runner access token that does not match the enrollment secret")
 	}
 	now := c.now()
-	if err := c.store.SaveCredential(localstate.Credential{
+	committed, err := c.store.CommitApprovedEnrollment(pending.EnrollmentID, localstate.Credential{
 		Server:       c.server,
 		Workspace:    c.workspace,
 		CredentialID: credentialID,
@@ -438,34 +428,41 @@ func (c *enrollmentClient) finishApprovedEnrollment(pending localstate.PendingEn
 		PrivateKey:   pending.PrivateKey,
 		CreatedAt:    now,
 		UpdatedAt:    now,
-	}); err != nil {
-		return errors.Wrap(err, "failed to save approved runner credential")
-	}
-	if err := c.store.SaveRegistration(localstate.Registration{
+	}, localstate.Registration{
 		Server:      c.server,
 		Workspace:   c.workspace,
 		RunnerID:    runnerID,
 		DisplayName: c.displayName,
 		UpdatedAt:   now,
-	}); err != nil {
-		return errors.Wrap(err, "failed to save approved runner registration")
+	})
+	if err != nil {
+		return errors.Wrap(err, "failed to save approved runner enrollment")
 	}
-	if err := c.deletePendingEnrollment(); err != nil {
-		return errors.Wrap(err, "failed to delete approved pending runner enrollment")
+	if !committed {
+		currentCredential, credentialFound, loadErr := c.store.LoadCredential(c.server, c.workspace)
+		if loadErr != nil {
+			return errors.Wrap(loadErr, "failed to inspect concurrently approved runner credential")
+		}
+		currentRegistration, registrationFound, loadErr := c.store.LoadRegistration(c.server, c.workspace)
+		if loadErr != nil {
+			return errors.Wrap(loadErr, "failed to inspect concurrently approved runner registration")
+		}
+		if credentialFound && registrationFound &&
+			currentCredential.CredentialID == credentialID && currentCredential.AccessToken == response.AccessToken &&
+			currentCredential.Fingerprint == expectedFingerprint && bytes.Equal(currentCredential.PublicKey, pending.PublicKey) &&
+			currentRegistration.RunnerID == runnerID {
+			return nil
+		}
+		return ErrEnrollmentSuperseded
 	}
 	return nil
 }
 
-func (c *enrollmentClient) finishTerminalEnrollment(terminal error) error {
-	if err := c.deletePendingEnrollment(); err != nil {
+func (c *enrollmentClient) finishTerminalEnrollment(enrollmentID string, terminal error) error {
+	if _, err := c.store.DeletePendingEnrollmentIfID(c.server, c.workspace, enrollmentID); err != nil {
 		return errors.Wrap(err, "failed to delete terminal pending runner enrollment")
 	}
 	return terminal
-}
-
-func (c *enrollmentClient) deletePendingEnrollment() error {
-	_, err := c.store.DeletePendingEnrollment(c.server, c.workspace)
-	return err
 }
 
 func (c *enrollmentClient) enrollmentInfo(pending localstate.PendingEnrollment, resumed bool) (EnrollmentInfo, error) {

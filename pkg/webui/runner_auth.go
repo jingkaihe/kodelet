@@ -322,7 +322,7 @@ func (s *Server) handleRunnerEnrollmentDecision(w http.ResponseWriter, r *http.R
 			return
 		}
 		replace := request.Replace
-		runner, err := s.runnerRegistry.EnsureEnrollmentRegistration(protocol.EnrollmentStartRequest{
+		registrationRequest := protocol.EnrollmentStartRequest{
 			ProtocolVersions: []int{protocol.Version},
 			PublicKey:        publicKey,
 			Fingerprint:      enrollment.Fingerprint,
@@ -330,12 +330,12 @@ func (s *Server) handleRunnerEnrollmentDecision(w http.ResponseWriter, r *http.R
 			Workspace:        enrollment.Workspace,
 			DisplayName:      enrollment.DisplayName,
 			KodeletVersion:   enrollment.KodeletVersion,
-		}, replace)
-		if err != nil {
-			s.writeRunnerEnrollmentStoreError(w, r, err)
-			return
 		}
-		enrollment, err = s.authStore.ApproveRunnerEnrollment(r.Context(), userCode, principal.ID, runner.ID, replace)
+		runner, err := s.runnerRegistry.CommitEnrollmentRegistration(registrationRequest, replace, func(runner runnerregistry.Runner) error {
+			var approveErr error
+			enrollment, approveErr = s.authStore.ApproveRunnerEnrollment(r.Context(), userCode, principal.ID, runner, replace)
+			return approveErr
+		})
 		if err != nil {
 			s.writeRunnerEnrollmentStoreError(w, r, err)
 			return

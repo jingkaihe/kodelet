@@ -111,6 +111,30 @@ func TestStoreExpectedIDDeletesDoNotRemoveReplacementState(t *testing.T) {
 	assert.True(t, removed)
 }
 
+func TestApprovedCredentialSaveIsFencedByPendingAuthorizationID(t *testing.T) {
+	store, err := NewStoreAt(t.TempDir())
+	require.NoError(t, err)
+	now := time.Date(2030, time.March, 4, 5, 6, 7, 0, time.UTC)
+	server := "http://localhost:8080"
+	newCredential := testCredential(server, "credential-new", 0x65, now)
+	require.NoError(t, store.SaveCredential(newCredential))
+	newPending := testPendingLogin(server, "authorization-new", 0x66, now)
+	require.NoError(t, store.SavePendingLogin(newPending))
+	staleCredential := testCredential(server, "credential-old", 0x67, now)
+
+	_, saved, err := store.saveCredentialForPendingLogin(staleCredential, "authorization-old", now)
+	require.NoError(t, err)
+	assert.False(t, saved)
+	credential, found, err := store.LoadCredential(server)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, newCredential.CredentialID, credential.CredentialID)
+	pending, found, err := store.LoadPendingLogin(server)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, newPending.AuthorizationID, pending.AuthorizationID)
+}
+
 func TestStoreLoadsExpiredStateButRejectsTampering(t *testing.T) {
 	store, err := NewStoreAt(t.TempDir())
 	require.NoError(t, err)

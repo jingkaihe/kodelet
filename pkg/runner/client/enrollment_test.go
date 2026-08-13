@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -230,6 +232,106 @@ func TestEnrollRunnerResumesPendingEnrollmentAfterRestart(t *testing.T) {
 	require.True(t, found)
 	assert.Equal(t, "runner-resumed", registration.RunnerID)
 	assert.Equal(t, "resumed runner", registration.DisplayName)
+}
+
+func TestConcurrentEnrollmentsStartOneFlowPerWorkspace(t *testing.T) {
+	root := t.TempDir()
+	workspace := t.TempDir()
+	server := "http://localhost:8182"
+	firstStore, err := localstate.NewStoreAt(root)
+	require.NoError(t, err)
+	secondStore, err := localstate.NewStoreAt(root)
+	require.NoError(t, err)
+	clock := &enrollmentFakeClock{current: time.Date(2030, time.February, 3, 4, 5, 6, 0, time.UTC)}
+	accessToken := testEnrollmentAccessToken(t)
+	startEntered := make(chan struct{})
+	releaseStart := make(chan struct{})
+	resumedSeen := make(chan struct{})
+	var resumedOnce sync.Once
+	var startCalls atomic.Int32
+	var pollCalls atomic.Int32
+	var fingerprintMu sync.Mutex
+	var fingerprint string
+	httpClient := &http.Client{Transport: enrollmentRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		switch request.URL.Path {
+		case protocol.EnrollmentStartPath:
+			started := decodeEnrollmentJSON[protocol.EnrollmentStartRequest](t, request.Body)
+			fingerprintMu.Lock()
+			fingerprint = started.Fingerprint
+			fingerprintMu.Unlock()
+			if startCalls.Add(1) == 1 {
+				close(startEntered)
+			}
+			<-releaseStart
+			return enrollmentJSONResponse(t, http.StatusCreated, protocol.EnrollmentStartResponse{
+				EnrollmentID:    "enrollment-shared",
+				DeviceCode:      accessToken,
+				UserCode:        "SHAR-ED01",
+				VerificationURL: "https://kodelet.example/runner/enroll",
+				ExpiresAt:       clock.current.Add(time.Minute),
+			}, nil), nil
+		case protocol.EnrollmentPollPath:
+			pollCalls.Add(1)
+			select {
+			case <-resumedSeen:
+			case <-request.Context().Done():
+				return nil, request.Context().Err()
+			}
+			fingerprintMu.Lock()
+			approvedFingerprint := fingerprint
+			fingerprintMu.Unlock()
+			return enrollmentJSONResponse(t, http.StatusOK, protocol.EnrollmentPollResponse{
+				Status:       protocol.EnrollmentStatusApproved,
+				CredentialID: "credential-shared",
+				AccessToken:  accessToken,
+				TokenType:    protocol.DPoPAuthorizationScheme,
+				RunnerID:     "runner-shared",
+				Fingerprint:  approvedFingerprint,
+			}, nil), nil
+		default:
+			t.Fatalf("unexpected enrollment request path %q", request.URL.Path)
+			return nil, io.ErrUnexpectedEOF
+		}
+	})}
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	results := make(chan error, 2)
+	config := func(store *localstate.Store) EnrollmentConfig {
+		return EnrollmentConfig{
+			Server:     server,
+			Workspace:  workspace,
+			Store:      store,
+			HTTPClient: httpClient,
+			OnPending: func(info EnrollmentInfo) {
+				if info.Resumed {
+					resumedOnce.Do(func() { close(resumedSeen) })
+				}
+			},
+		}
+	}
+	go func() {
+		_, enrollErr := enrollRunner(ctx, config(firstStore), testEnrollmentDependencies(clock, 0x42))
+		results <- enrollErr
+	}()
+	select {
+	case <-startEntered:
+	case <-ctx.Done():
+		t.Fatal("first enrollment did not start")
+	}
+	go func() {
+		_, enrollErr := enrollRunner(ctx, config(secondStore), testEnrollmentDependencies(clock, 0x43))
+		results <- enrollErr
+	}()
+	close(releaseStart)
+	for range 2 {
+		require.NoError(t, <-results)
+	}
+	assert.Equal(t, int32(1), startCalls.Load())
+	assert.Equal(t, int32(2), pollCalls.Load())
+	credential, found, err := firstStore.LoadCredential(server, workspace)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, "credential-shared", credential.CredentialID)
 }
 
 func TestEnrollRunnerRequiresExplicitLocalCredentialReplacement(t *testing.T) {

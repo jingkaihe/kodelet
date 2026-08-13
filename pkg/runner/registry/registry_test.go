@@ -359,6 +359,31 @@ func TestEnsureOfflineRegistrationPreservesIdentityAndRequiresStoppedRunner(t *t
 	assert.Equal(t, "second", updated.DisplayName)
 }
 
+func TestCommitEnrollmentRegistrationPublishesOnlyAfterDurableCommit(t *testing.T) {
+	registry := newTestRegistry(t)
+	enrollment := testEnrollmentStartRequest(t, "host-commit", "/work/commit")
+	commitErr := errors.New("approval rejected")
+	var rejectedCandidate Runner
+
+	_, err := registry.CommitEnrollmentRegistration(enrollment, false, func(candidate Runner) error {
+		rejectedCandidate = candidate
+		return commitErr
+	})
+	require.ErrorIs(t, err, commitErr)
+	assert.NotEmpty(t, rejectedCandidate.ID)
+	assert.Empty(t, registry.Runners())
+
+	committed, err := registry.CommitEnrollmentRegistration(enrollment, false, func(candidate Runner) error {
+		assert.NotEqual(t, rejectedCandidate.ID, candidate.ID)
+		return nil
+	})
+	require.NoError(t, err)
+	stored, found := registry.Runner(committed.ID)
+	require.True(t, found)
+	assert.Equal(t, enrollment.Host.InstanceID, stored.Host.InstanceID)
+	assert.Equal(t, enrollment.Workspace.Path, stored.Workspace.Path)
+}
+
 func TestRegisterPersistenceFailureDoesNotPublishRunner(t *testing.T) {
 	persistence := &testPersistence{saveRunnerErr: errors.New("save failed")}
 	registry, err := New(t.Context(), Options{

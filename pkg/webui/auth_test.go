@@ -2,6 +2,9 @@ package webui
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -9,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-jose/go-jose/v4"
+	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -481,6 +486,95 @@ func TestOIDCConfigNormalizeSets(t *testing.T) {
 	assert.Equal(t, []string{"user@example.com"}, config.AllowedEmails)
 	assert.Equal(t, []string{"example.com"}, config.AllowedDomains)
 	assert.Equal(t, defaultWebSessionDuration, config.SessionDuration)
+}
+
+func TestOIDCConfigNormalizeAddsOpenIDToCustomScopes(t *testing.T) {
+	config := OIDCConfig{Scopes: []string{"profile", "email"}}
+
+	config.normalize()
+
+	assert.Equal(t, []string{"openid", "profile", "email"}, config.Scopes)
+}
+
+func TestProviderOIDCFlowFetchesAndSubjectChecksRequiredUserInfoClaims(t *testing.T) {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	signer, err := jose.NewSigner(
+		jose.SigningKey{Algorithm: jose.EdDSA, Key: privateKey},
+		(&jose.SignerOptions{}).WithType("JWT").WithHeader(jose.HeaderKey("kid"), "test-key"),
+	)
+	require.NoError(t, err)
+	now := time.Now().UTC()
+	userInfoSubject := "subject-1"
+	userInfoCalls := 0
+	var providerServer *httptest.Server
+	providerServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+				"issuer":                                providerServer.URL,
+				"authorization_endpoint":                providerServer.URL + "/authorize",
+				"token_endpoint":                        providerServer.URL + "/token",
+				"jwks_uri":                              providerServer.URL + "/keys",
+				"userinfo_endpoint":                     providerServer.URL + "/userinfo",
+				"id_token_signing_alg_values_supported": []string{string(jose.EdDSA)},
+			}))
+		case "/keys":
+			require.NoError(t, json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{
+				Key: publicKey, KeyID: "test-key", Algorithm: string(jose.EdDSA), Use: "sig",
+			}}}))
+		case "/token":
+			rawIDToken, signErr := jwt.Signed(signer).Claims(jwt.Claims{
+				Issuer:   providerServer.URL,
+				Subject:  "subject-1",
+				Audience: jwt.Audience{"kodelet-client"},
+				Expiry:   jwt.NewNumericDate(now.Add(time.Hour)),
+				IssuedAt: jwt.NewNumericDate(now),
+			}).Claims(struct {
+				Nonce string `json:"nonce"`
+			}{Nonce: "nonce-1"}).Serialize()
+			require.NoError(t, signErr)
+			require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+				"access_token": "access-token",
+				"token_type":   "Bearer",
+				"expires_in":   3600,
+				"id_token":     rawIDToken,
+			}))
+		case "/userinfo":
+			userInfoCalls++
+			assert.Equal(t, "Bearer access-token", r.Header.Get("Authorization"))
+			require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+				"sub":            userInfoSubject,
+				"name":           "User Info Name",
+				"email":          "USER@example.com",
+				"email_verified": true,
+			}))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(providerServer.Close)
+
+	flow, err := newProviderOIDCFlow(t.Context(), OIDCConfig{
+		IssuerURL:    providerServer.URL,
+		ClientID:     "kodelet-client",
+		ClientSecret: "client-secret",
+		RedirectURL:  "http://localhost:8080/auth/oidc/callback",
+		Scopes:       []string{"email", "profile"},
+	})
+	require.NoError(t, err)
+	identity, err := flow.Exchange(t.Context(), "authorization-code", "verifier", "nonce-1")
+	require.NoError(t, err)
+	assert.Equal(t, "subject-1", identity.Subject)
+	assert.Equal(t, "User Info Name", identity.Name)
+	assert.Equal(t, "user@example.com", identity.Email)
+	assert.True(t, identity.EmailVerified)
+	assert.Equal(t, 1, userInfoCalls)
+
+	userInfoSubject = "different-subject"
+	_, err = flow.Exchange(t.Context(), "authorization-code", "verifier", "nonce-1")
+	require.ErrorContains(t, err, "UserInfo subject does not match")
 }
 
 func TestSanitizeReturnTo(t *testing.T) {

@@ -287,6 +287,50 @@ func TestRunnerEnrollmentDecisionRequiresWebSessionCSRFAndStrictJSON(t *testing.
 	assert.Equal(t, "no-store", valid.Header().Get("Cache-Control"))
 }
 
+func TestExpiredEnrollmentApprovalDoesNotPublishOrPersistRunner(t *testing.T) {
+	store, clock := newAuthStoreTest(t)
+	started, err := store.StartRunnerEnrollment(
+		t.Context(),
+		testEnrollmentRequest(t, "host-expired-approval", "/work/expired-approval", "expired-approval", 0x75),
+		"https://kodelet.example/runner/enroll",
+	)
+	require.NoError(t, err)
+	var sequence int
+	var name, dbPath string
+	require.NoError(t, store.db.QueryRowxContext(t.Context(), `PRAGMA database_list`).Scan(&sequence, &name, &dbPath))
+	persistence, err := runnerregistry.NewSQLitePersistence(t.Context(), dbPath, controlPlaneOwnerID)
+	require.NoError(t, err)
+	registry, err := runnerregistry.New(t.Context(), runnerregistry.Options{
+		HeartbeatInterval: time.Hour,
+		HeartbeatTimeout:  2 * time.Hour,
+		Persistence:       persistence,
+		Credentials:       store,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, registry.Close()) })
+	server := &Server{
+		config:         &ServerConfig{WebAuthMode: WebAuthModeToken, AuthToken: "web-token", RunnerAuthMode: RunnerAuthModeEnrollment},
+		authStore:      store,
+		runnerRegistry: registry,
+	}
+	clock.current = started.ExpiresAt
+	payload, err := json.Marshal(runnerEnrollmentDecisionRequest{UserCode: started.UserCode, Decision: "approve"})
+	require.NoError(t, err)
+	request := httptest.NewRequest(http.MethodPost, "https://kodelet.example/api/runner/v1/enrollment/decision", strings.NewReader(string(payload)))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Origin", "https://kodelet.example")
+	request = request.WithContext(contextWithPrincipal(request.Context(), administrativePrincipal("token")))
+	response := httptest.NewRecorder()
+
+	server.handleRunnerEnrollmentDecision(response, request)
+
+	assert.Equal(t, http.StatusConflict, response.Code)
+	assert.Empty(t, registry.Runners())
+	var runnerCount int
+	require.NoError(t, store.db.GetContext(t.Context(), &runnerCount, `SELECT COUNT(*) FROM runner_registrations WHERE host_instance_id = ? AND workspace_path = ?`, "host-expired-approval", "/work/expired-approval"))
+	assert.Zero(t, runnerCount)
+}
+
 func TestRunnerEnrollmentConnectedConflictReturnsActionableConflict(t *testing.T) {
 	server := &Server{}
 	request := httptest.NewRequest(http.MethodPost, "https://kodelet.example/api/runner/v1/enrollment/decision", nil)

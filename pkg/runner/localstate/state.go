@@ -455,6 +455,155 @@ func (s *Store) DeletePendingEnrollment(server, workspace string) (bool, error) 
 	return removed, err
 }
 
+// LoadOrCreatePendingEnrollment serializes enrollment creation for one server and workspace.
+// The create callback runs while the cross-process state lock is held and receives whether an
+// active credential currently exists.
+func (s *Store) LoadOrCreatePendingEnrollment(server, workspace string, create func(bool) (PendingEnrollment, error)) (PendingEnrollment, bool, error) {
+	if s == nil {
+		return PendingEnrollment{}, false, errors.New("runner state store is required")
+	}
+	if create == nil {
+		return PendingEnrollment{}, false, errors.New("runner enrollment creator is required")
+	}
+	server, workspace, err := normalizeCredentialLocation(server, workspace)
+	if err != nil {
+		return PendingEnrollment{}, false, err
+	}
+	var pending PendingEnrollment
+	var resumed bool
+	err = s.withWorkspaceStateLock(server, workspace, func() error {
+		stored, found, err := s.LoadPendingEnrollment(server, workspace)
+		if err != nil {
+			return err
+		}
+		if found {
+			pending = stored
+			resumed = true
+			return nil
+		}
+		_, active, err := s.LoadCredential(server, workspace)
+		if err != nil {
+			return err
+		}
+		pending, err = create(active)
+		if err != nil {
+			return err
+		}
+		pending.Server = server
+		pending.Workspace = workspace
+		return s.SavePendingEnrollment(pending)
+	})
+	return pending, resumed, err
+}
+
+// CommitApprovedEnrollment saves approved state only if the pending enrollment still matches.
+func (s *Store) CommitApprovedEnrollment(expectedEnrollmentID string, credential Credential, registration Registration) (bool, error) {
+	if s == nil {
+		return false, errors.New("runner state store is required")
+	}
+	expectedEnrollmentID = strings.TrimSpace(expectedEnrollmentID)
+	if expectedEnrollmentID == "" {
+		return false, errors.New("expected enrollment id is required")
+	}
+	server, workspace, err := normalizeCredentialLocation(credential.Server, credential.Workspace)
+	if err != nil {
+		return false, err
+	}
+	credential.Server = server
+	credential.Workspace = workspace
+	registration.Server = server
+	registration.Workspace = workspace
+	committed := false
+	err = s.withWorkspaceStateLock(server, workspace, func() error {
+		pending, found, err := s.LoadPendingEnrollment(server, workspace)
+		if err != nil || !found {
+			return err
+		}
+		if pending.EnrollmentID != expectedEnrollmentID {
+			return nil
+		}
+		if err := s.SaveCredential(credential); err != nil {
+			return err
+		}
+		if err := s.SaveRegistration(registration); err != nil {
+			return err
+		}
+		removed, err := s.DeletePendingEnrollment(server, workspace)
+		if err != nil {
+			return err
+		}
+		if !removed {
+			return errors.New("pending runner enrollment disappeared during approval")
+		}
+		committed = true
+		return nil
+	})
+	return committed, err
+}
+
+// DeletePendingEnrollmentIfID removes pending state only if its enrollment ID still matches.
+func (s *Store) DeletePendingEnrollmentIfID(server, workspace, expectedEnrollmentID string) (bool, error) {
+	if s == nil {
+		return false, errors.New("runner state store is required")
+	}
+	expectedEnrollmentID = strings.TrimSpace(expectedEnrollmentID)
+	if expectedEnrollmentID == "" {
+		return false, errors.New("expected enrollment id is required")
+	}
+	server, workspace, err := normalizeStoredCredentialLocation(server, workspace)
+	if err != nil {
+		return false, err
+	}
+	removed := false
+	err = s.withWorkspaceStateLock(server, workspace, func() error {
+		pending, found, err := s.LoadPendingEnrollment(server, workspace)
+		if err != nil || !found {
+			return err
+		}
+		if pending.EnrollmentID != expectedEnrollmentID {
+			return nil
+		}
+		removed, err = s.DeletePendingEnrollment(server, workspace)
+		return err
+	})
+	return removed, err
+}
+
+// DeleteAuthenticationStateForRegistration removes local authentication state only while the
+// cached registration still names the expected runner.
+func (s *Store) DeleteAuthenticationStateForRegistration(server, workspace, expectedRunnerID string) (bool, error) {
+	if s == nil {
+		return false, errors.New("runner state store is required")
+	}
+	expectedRunnerID = strings.TrimSpace(expectedRunnerID)
+	if expectedRunnerID == "" {
+		return false, errors.New("expected runner id is required")
+	}
+	server, workspace, err := normalizeStoredCredentialLocation(server, workspace)
+	if err != nil {
+		return false, err
+	}
+	removed := false
+	err = s.withWorkspaceStateLock(server, workspace, func() error {
+		registration, found, err := s.LoadRegistration(server, workspace)
+		if err != nil || !found {
+			return err
+		}
+		if registration.RunnerID != expectedRunnerID {
+			return nil
+		}
+		if _, err := s.DeleteCredential(server, workspace); err != nil {
+			return err
+		}
+		if _, err := s.DeletePendingEnrollment(server, workspace); err != nil {
+			return err
+		}
+		removed, err = s.DeleteRegistration(server, workspace, expectedRunnerID)
+		return err
+	})
+	return removed, err
+}
+
 // Registrations lists every locally cached control-plane registration.
 func (s *Store) Registrations() ([]Registration, error) {
 	if s == nil {
@@ -509,6 +658,11 @@ func (s *Store) withRegistrationLock(server, workspace string, operation func() 
 func (s *Store) withKeyedStateLock(directory, description, server, workspace string, operation func() error) error {
 	lockPath := filepath.Join(s.root, directory, stateKey(server, workspace)+".lock")
 	return withStateFileLock(lockPath, description, operation)
+}
+
+func (s *Store) withWorkspaceStateLock(server, workspace string, operation func() error) error {
+	lockPath := filepath.Join(s.root, "locks", stateKey(server, workspace)+".state.lock")
+	return withStateFileLock(lockPath, "runner workspace authentication state", operation)
 }
 
 func withStateFileLock(lockPath, description string, operation func() error) error {

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -426,6 +427,129 @@ func TestStorePersistsPendingEnrollmentSecurely(t *testing.T) {
 	_, found, err = store.LoadPendingEnrollment("https://kodelet.example/base", workspace)
 	require.NoError(t, err)
 	assert.False(t, found)
+}
+
+func TestLoadOrCreatePendingEnrollmentSerializesAcrossStoreInstances(t *testing.T) {
+	root := t.TempDir()
+	workspace := t.TempDir()
+	server := "https://kodelet.example"
+	first, err := NewStoreAt(root)
+	require.NoError(t, err)
+	second, err := NewStoreAt(root)
+	require.NoError(t, err)
+	publicKey, privateKey, fingerprint := testCredentialKeyPair(t, 0x61)
+	pending := PendingEnrollment{
+		EnrollmentID: "enrollment-shared",
+		DeviceCode:   testRunnerAccessToken(t),
+		Fingerprint:  fingerprint,
+		PublicKey:    publicKey,
+		PrivateKey:   privateKey,
+		ExpiresAt:    time.Now().Add(time.Minute),
+	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var callsMu sync.Mutex
+	var calls int
+	type result struct {
+		pending PendingEnrollment
+		resumed bool
+		err     error
+	}
+	results := make(chan result, 2)
+	create := func(active bool) (PendingEnrollment, error) {
+		if active {
+			return PendingEnrollment{}, fmt.Errorf("unexpected active credential")
+		}
+		callsMu.Lock()
+		calls++
+		if calls == 1 {
+			close(entered)
+		}
+		callsMu.Unlock()
+		<-release
+		return pending, nil
+	}
+	go func() {
+		loaded, resumed, loadErr := first.LoadOrCreatePendingEnrollment(server, workspace, create)
+		results <- result{pending: loaded, resumed: resumed, err: loadErr}
+	}()
+	<-entered
+	go func() {
+		loaded, resumed, loadErr := second.LoadOrCreatePendingEnrollment(server, workspace, create)
+		results <- result{pending: loaded, resumed: resumed, err: loadErr}
+	}()
+	close(release)
+	firstResult := <-results
+	secondResult := <-results
+	require.NoError(t, firstResult.err)
+	require.NoError(t, secondResult.err)
+	assert.Equal(t, pending.EnrollmentID, firstResult.pending.EnrollmentID)
+	assert.Equal(t, pending.EnrollmentID, secondResult.pending.EnrollmentID)
+	assert.NotEqual(t, firstResult.resumed, secondResult.resumed)
+	callsMu.Lock()
+	assert.Equal(t, 1, calls)
+	callsMu.Unlock()
+}
+
+func TestRunnerAuthenticationStateMutationsAreFencedByExpectedIDs(t *testing.T) {
+	store, err := NewStoreAt(t.TempDir())
+	require.NoError(t, err)
+	server := "https://kodelet.example"
+	workspace := t.TempDir()
+	publicKey, privateKey, fingerprint := testCredentialKeyPair(t, 0x62)
+	pending := PendingEnrollment{
+		Server:       server,
+		Workspace:    workspace,
+		EnrollmentID: "enrollment-new",
+		DeviceCode:   testRunnerAccessToken(t),
+		Fingerprint:  fingerprint,
+		PublicKey:    publicKey,
+		PrivateKey:   privateKey,
+		ExpiresAt:    time.Now().Add(time.Minute),
+	}
+	require.NoError(t, store.SavePendingEnrollment(pending))
+	credential := Credential{
+		Server:       server,
+		Workspace:    workspace,
+		CredentialID: "credential-new",
+		AccessToken:  testRunnerAccessToken(t),
+		Fingerprint:  fingerprint,
+		PublicKey:    publicKey,
+		PrivateKey:   privateKey,
+	}
+	require.NoError(t, store.SaveCredential(credential))
+	require.NoError(t, store.SaveRegistration(Registration{Server: server, Workspace: workspace, RunnerID: "runner-new"}))
+
+	committed, err := store.CommitApprovedEnrollment("enrollment-old", Credential{
+		Server:       server,
+		Workspace:    workspace,
+		CredentialID: "credential-old",
+		AccessToken:  pending.DeviceCode,
+		Fingerprint:  fingerprint,
+		PublicKey:    publicKey,
+		PrivateKey:   privateKey,
+	}, Registration{Server: server, Workspace: workspace, RunnerID: "runner-old"})
+	require.NoError(t, err)
+	assert.False(t, committed)
+	removed, err := store.DeletePendingEnrollmentIfID(server, workspace, "enrollment-old")
+	require.NoError(t, err)
+	assert.False(t, removed)
+	removed, err = store.DeleteAuthenticationStateForRegistration(server, workspace, "runner-old")
+	require.NoError(t, err)
+	assert.False(t, removed)
+
+	loadedPending, found, err := store.LoadPendingEnrollment(server, workspace)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, "enrollment-new", loadedPending.EnrollmentID)
+	loadedCredential, found, err := store.LoadCredential(server, workspace)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, "credential-new", loadedCredential.CredentialID)
+	loadedRegistration, found, err := store.LoadRegistration(server, workspace)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, "runner-new", loadedRegistration.RunnerID)
 }
 
 func TestStoreDeletesRunnerAuthenticationStateAfterWorkspaceRemoval(t *testing.T) {

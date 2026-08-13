@@ -221,6 +221,9 @@ func (c *OIDCConfig) normalize() {
 		c.Scopes = []string{oidc.ScopeOpenID, "profile", "email"}
 	}
 	c.Scopes = normalizeStringSet(c.Scopes)
+	if !slices.Contains(c.Scopes, oidc.ScopeOpenID) {
+		c.Scopes = append([]string{oidc.ScopeOpenID}, c.Scopes...)
+	}
 	c.AllowedEmails = normalizeEmailSet(c.AllowedEmails)
 	c.AllowedDomains = normalizeDomainSet(c.AllowedDomains)
 	c.AdminEmails = normalizeEmailSet(c.AdminEmails)
@@ -276,9 +279,21 @@ func validateOIDCIssuerURL(raw string) error {
 }
 
 type providerOIDCFlow struct {
-	issuer   string
 	oauth2   oauth2.Config
+	provider *oidc.Provider
 	verifier *oidc.IDTokenVerifier
+}
+
+type oidcIdentityClaims struct {
+	Name          string `json:"name"`
+	Email         string `json:"email"`
+	EmailVerified bool   `json:"email_verified"`
+	HostedDomain  string `json:"hd"`
+}
+
+type oidcUserInfoProfileClaims struct {
+	Name         string `json:"name"`
+	HostedDomain string `json:"hd"`
 }
 
 func newProviderOIDCFlow(ctx context.Context, config OIDCConfig) (OIDCFlow, error) {
@@ -291,7 +306,6 @@ func newProviderOIDCFlow(ctx context.Context, config OIDCConfig) (OIDCFlow, erro
 		return nil, errors.Wrap(err, "failed to discover OIDC provider")
 	}
 	return &providerOIDCFlow{
-		issuer: config.IssuerURL,
 		oauth2: oauth2.Config{
 			ClientID:     config.ClientID,
 			ClientSecret: config.ClientSecret,
@@ -299,6 +313,7 @@ func newProviderOIDCFlow(ctx context.Context, config OIDCConfig) (OIDCFlow, erro
 			RedirectURL:  config.RedirectURL,
 			Scopes:       slices.Clone(config.Scopes),
 		},
+		provider: provider,
 		verifier: provider.Verifier(&oidc.Config{ClientID: config.ClientID}),
 	}, nil
 }
@@ -323,14 +338,36 @@ func (f *providerOIDCFlow) Exchange(ctx context.Context, code, verifier, expecte
 	if !constantTimeStringEqual(strings.TrimSpace(idToken.Nonce), strings.TrimSpace(expectedNonce)) {
 		return OIDCIdentity{}, errors.New("OIDC ID token nonce does not match the login transaction")
 	}
-	var claims struct {
-		Name          string `json:"name"`
-		Email         string `json:"email"`
-		EmailVerified bool   `json:"email_verified"`
-		HostedDomain  string `json:"hd"`
-	}
+	var claims oidcIdentityClaims
 	if err := idToken.Claims(&claims); err != nil {
 		return OIDCIdentity{}, errors.Wrap(err, "failed to decode OIDC ID token claims")
+	}
+	requiresUserInfo := strings.TrimSpace(claims.Email) == "" || !claims.EmailVerified
+	if requiresUserInfo || strings.TrimSpace(claims.Name) == "" {
+		userInfo, err := f.provider.UserInfo(ctx, oauth2.StaticTokenSource(token))
+		if err != nil {
+			if requiresUserInfo {
+				return OIDCIdentity{}, errors.Wrap(err, "failed to fetch required OIDC UserInfo claims")
+			}
+		} else {
+			if !constantTimeStringEqual(strings.TrimSpace(userInfo.Subject), strings.TrimSpace(idToken.Subject)) {
+				return OIDCIdentity{}, errors.New("OIDC UserInfo subject does not match the ID token")
+			}
+			var userInfoClaims oidcUserInfoProfileClaims
+			if err := userInfo.Claims(&userInfoClaims); err != nil {
+				return OIDCIdentity{}, errors.Wrap(err, "failed to decode OIDC UserInfo claims")
+			}
+			if strings.TrimSpace(claims.Name) == "" {
+				claims.Name = userInfoClaims.Name
+			}
+			if strings.TrimSpace(claims.Email) == "" || !claims.EmailVerified {
+				claims.Email = userInfo.Email
+				claims.EmailVerified = userInfo.EmailVerified
+			}
+			if strings.TrimSpace(claims.HostedDomain) == "" {
+				claims.HostedDomain = userInfoClaims.HostedDomain
+			}
+		}
 	}
 	return OIDCIdentity{
 		Issuer:        idToken.Issuer,

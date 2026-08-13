@@ -3,6 +3,7 @@ package userauth
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +18,10 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/version"
 	"github.com/pkg/errors"
 )
+
+func constantTimeEqual(left, right string) bool {
+	return len(left) == len(right) && subtle.ConstantTimeCompare([]byte(left), []byte(right)) == 1
+}
 
 const (
 	maxHTTPResponseBytes    = 1024 * 1024
@@ -285,19 +290,26 @@ func (c *loginClient) poll(ctx context.Context, pending PendingLogin) (Credentia
 				nextInterval = max(nextInterval, headerInterval)
 			}
 		case DeviceStatusApproved:
-			credential, err := c.store.saveCredentialAt(Credential{
+			credential, saved, err := c.store.saveCredentialForPendingLogin(Credential{
 				Server:       c.server,
 				CredentialID: polled.CredentialID,
 				BearerToken:  pending.BearerToken,
 				Principal:    polled.Principal,
 				CreatedAt:    c.now(),
 				ExpiresAt:    polled.ExpiresAt,
-			}, c.now())
+			}, pending.AuthorizationID, c.now())
 			if err != nil {
 				return Credential{}, errors.Wrap(err, "failed to save approved user credential")
 			}
-			if _, err := c.store.DeletePendingLogin(c.server, pending.AuthorizationID); err != nil {
-				return Credential{}, errors.Wrap(err, "failed to delete approved pending user login")
+			if !saved {
+				current, found, loadErr := c.store.LoadCredential(c.server)
+				if loadErr != nil {
+					return Credential{}, errors.Wrap(loadErr, "failed to inspect concurrently approved user credential")
+				}
+				if found && current.CredentialID == polled.CredentialID && constantTimeEqual(current.BearerToken, pending.BearerToken) {
+					return current, nil
+				}
+				return Credential{}, ErrLoginSuperseded
 			}
 			return credential, nil
 		case DeviceStatusDenied:

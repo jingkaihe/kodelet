@@ -27,6 +27,8 @@ var (
 	ErrLoginDenied = errors.New("user login was denied")
 	// ErrLoginExpired indicates that the pending device login expired before approval.
 	ErrLoginExpired = errors.New("user login expired")
+	// ErrLoginSuperseded indicates that a newer pending login replaced this flow locally.
+	ErrLoginSuperseded = errors.New("user login was superseded by a newer local login")
 )
 
 // DeviceStatus is the current state of a device authorization.

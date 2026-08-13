@@ -15,6 +15,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/db"
 	dbmigrations "github.com/jingkaihe/kodelet/pkg/db/migrations"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -177,8 +178,9 @@ func TestAuthStoreRunnerEnrollmentApprovalPollingAndReplacement(t *testing.T) {
 	require.ErrorAs(t, err, &slowDown)
 	assert.Equal(t, defaultRunnerPollInterval, slowDown.RetryAfter)
 
-	insertAuthStoreTestRunner(t, store, "runner-one", "host-one", "/work/project", "project")
-	approved, err := store.ApproveRunnerEnrollment(t.Context(), started.UserCode, " issuer|admin ", " runner-one ", false)
+	runner := insertAuthStoreTestRunner(t, store, "runner-one", "host-one", "/work/project", "project")
+	runner.ID = " runner-one "
+	approved, err := store.ApproveRunnerEnrollment(t.Context(), started.UserCode, " issuer|admin ", runner, false)
 	require.NoError(t, err)
 	assert.Equal(t, protocol.EnrollmentStatusApproved, approved.Status)
 	assert.Equal(t, "runner-one", approved.RunnerID)
@@ -207,9 +209,10 @@ func TestAuthStoreRunnerEnrollmentApprovalPollingAndReplacement(t *testing.T) {
 	replacementView, err := store.RunnerEnrollmentByUserCode(t.Context(), replacement.UserCode)
 	require.NoError(t, err)
 	assert.True(t, replacementView.ReplaceNeeded)
-	_, err = store.ApproveRunnerEnrollment(t.Context(), replacement.UserCode, "issuer|admin", "runner-one", false)
+	runner.ID = "runner-one"
+	_, err = store.ApproveRunnerEnrollment(t.Context(), replacement.UserCode, "issuer|admin", runner, false)
 	require.ErrorIs(t, err, errRunnerCredentialExists)
-	replacementApproved, err := store.ApproveRunnerEnrollment(t.Context(), replacement.UserCode, "issuer|admin", "runner-one", true)
+	replacementApproved, err := store.ApproveRunnerEnrollment(t.Context(), replacement.UserCode, "issuer|admin", runner, true)
 	require.NoError(t, err)
 	assert.NotEqual(t, firstCredentialID, replacementApproved.CredentialID)
 
@@ -229,12 +232,45 @@ func TestAuthStoreRunnerEnrollmentApprovalPollingAndReplacement(t *testing.T) {
 	assert.True(t, active)
 }
 
+func TestAuthStorePersistsRunnerOnlyWithSuccessfulEnrollmentApproval(t *testing.T) {
+	store, clock := newAuthStoreTest(t)
+	newCandidate := func(id, host, workspace, name string) runnerregistry.Runner {
+		return runnerregistry.Runner{
+			ID:             id,
+			DisplayName:    name,
+			Host:           protocol.Host{InstanceID: host, Hostname: "host.example.test", OS: "linux", Arch: "amd64"},
+			Workspace:      protocol.Workspace{Path: workspace, Name: name},
+			KodeletVersion: "v-test",
+			Status:         runnerregistry.RunnerStatusOffline,
+			CreatedAt:      clock.current,
+			UpdatedAt:      clock.current,
+		}
+	}
+
+	approvedStart, err := store.StartRunnerEnrollment(t.Context(), testEnrollmentRequest(t, "host-transactional", "/work/transactional", "transactional", 0x34), "https://kodelet.example/runner/enroll")
+	require.NoError(t, err)
+	approved, err := store.ApproveRunnerEnrollment(t.Context(), approvedStart.UserCode, "issuer|admin", newCandidate("runner-transactional", "host-transactional", "/work/transactional", "transactional"), false)
+	require.NoError(t, err)
+	assert.Equal(t, "runner-transactional", approved.RunnerID)
+	var count int
+	require.NoError(t, store.db.GetContext(t.Context(), &count, `SELECT COUNT(*) FROM runner_registrations WHERE id = ?`, "runner-transactional"))
+	assert.Equal(t, 1, count)
+
+	expiredStart, err := store.StartRunnerEnrollment(t.Context(), testEnrollmentRequest(t, "host-expired-transaction", "/work/expired-transaction", "expired-transaction", 0x35), "https://kodelet.example/runner/enroll")
+	require.NoError(t, err)
+	clock.current = expiredStart.ExpiresAt
+	_, err = store.ApproveRunnerEnrollment(t.Context(), expiredStart.UserCode, "issuer|admin", newCandidate("runner-expired-transaction", "host-expired-transaction", "/work/expired-transaction", "expired-transaction"), false)
+	require.ErrorIs(t, err, errEnrollmentExpired)
+	require.NoError(t, store.db.GetContext(t.Context(), &count, `SELECT COUNT(*) FROM runner_registrations WHERE id = ?`, "runner-expired-transaction"))
+	assert.Zero(t, count)
+}
+
 func TestAuthStoreApproveRunnerEnrollmentReturnsCommittedResultWithoutReread(t *testing.T) {
 	store, _ := newAuthStoreTest(t)
 	request := testEnrollmentRequest(t, "host-no-reread", "/work/no-reread", "no-reread", 0x33)
 	started, err := store.StartRunnerEnrollment(t.Context(), request, "https://kodelet.example/runner/enroll")
 	require.NoError(t, err)
-	insertAuthStoreTestRunner(t, store, "runner-no-reread", "host-no-reread", "/work/no-reread", "no-reread")
+	runner := insertAuthStoreTestRunner(t, store, "runner-no-reread", "host-no-reread", "/work/no-reread", "no-reread")
 	_, err = store.db.Exec(`
 		CREATE TRIGGER mutate_approved_enrollment_user_code
 		AFTER UPDATE OF status ON runner_enrollments
@@ -245,7 +281,7 @@ func TestAuthStoreApproveRunnerEnrollmentReturnsCommittedResultWithoutReread(t *
 	`)
 	require.NoError(t, err)
 
-	approved, err := store.ApproveRunnerEnrollment(t.Context(), started.UserCode, "issuer|admin", "runner-no-reread", false)
+	approved, err := store.ApproveRunnerEnrollment(t.Context(), started.UserCode, "issuer|admin", runner, false)
 	require.NoError(t, err)
 	assert.Equal(t, started.EnrollmentID, approved.ID)
 	assert.Equal(t, protocol.EnrollmentStatusApproved, approved.Status)
@@ -280,7 +316,7 @@ func TestAuthStoreRunnerEnrollmentDenialAndExpiry(t *testing.T) {
 	view, err = store.RunnerEnrollmentByUserCode(t.Context(), expired.UserCode)
 	require.NoError(t, err)
 	assert.Equal(t, protocol.EnrollmentStatusExpired, view.Status)
-	_, err = store.ApproveRunnerEnrollment(t.Context(), expired.UserCode, "issuer|admin", "runner-missing", false)
+	_, err = store.ApproveRunnerEnrollment(t.Context(), expired.UserCode, "issuer|admin", runnerregistry.Runner{ID: "runner-missing"}, false)
 	require.ErrorIs(t, err, errEnrollmentExpired)
 	require.ErrorIs(t, store.DenyRunnerEnrollment(t.Context(), expired.UserCode, "issuer|admin"), errEnrollmentExpired)
 	polled, err = store.PollRunnerEnrollment(t.Context(), protocol.EnrollmentPollRequest{EnrollmentID: expired.EnrollmentID, DeviceCode: expired.DeviceCode})
@@ -397,7 +433,7 @@ func testEd25519KeyPair(discriminator byte) (ed25519.PublicKey, ed25519.PrivateK
 	return privateKey.Public().(ed25519.PublicKey), privateKey
 }
 
-func insertAuthStoreTestRunner(t *testing.T, store *authStore, runnerID, hostInstanceID, workspacePath, workspaceName string) {
+func insertAuthStoreTestRunner(t *testing.T, store *authStore, runnerID, hostInstanceID, workspacePath, workspaceName string) runnerregistry.Runner {
 	t.Helper()
 	now := store.now().UTC()
 	_, err := store.db.ExecContext(t.Context(), `
@@ -407,6 +443,14 @@ func insertAuthStoreTestRunner(t *testing.T, store *authStore, runnerID, hostIns
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`, runnerID, controlPlaneOwnerID, hostInstanceID, workspacePath, workspaceName, "offline", now, now)
 	require.NoError(t, err)
+	return runnerregistry.Runner{
+		ID:        runnerID,
+		Host:      protocol.Host{InstanceID: hostInstanceID},
+		Workspace: protocol.Workspace{Path: workspacePath, Name: workspaceName},
+		Status:    runnerregistry.RunnerStatusOffline,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
 }
 
 func insertAuthStoreTestCredential(t *testing.T, store *authStore, credentialID, runnerID string, publicKey ed25519.PublicKey, createdAt time.Time) string {

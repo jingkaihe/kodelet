@@ -221,6 +221,41 @@ func (s *Store) saveCredentialAt(credential Credential, now time.Time) (Credenti
 	return prepared, nil
 }
 
+func (s *Store) saveCredentialForPendingLogin(credential Credential, expectedAuthorizationID string, now time.Time) (Credential, bool, error) {
+	prepared, err := prepareCredential(credential, now)
+	if err != nil {
+		return Credential{}, false, err
+	}
+	if err := validateText("expected authorization id", expectedAuthorizationID, true); err != nil {
+		return Credential{}, false, err
+	}
+	var saved bool
+	err = s.withStateLock("logins", prepared.Server, func() error {
+		pending, found, err := s.loadPendingLoginUnlocked(prepared.Server)
+		if err != nil || !found {
+			return err
+		}
+		if pending.AuthorizationID != expectedAuthorizationID {
+			return nil
+		}
+		if err := s.withStateLock("credentials", prepared.Server, func() error {
+			return writeJSONAtomic(s.credentialPath(prepared.Server), prepared)
+		}); err != nil {
+			return errors.Wrap(err, "failed to save user credential")
+		}
+		removed, err := s.deletePendingLoginUnlocked(prepared.Server, expectedAuthorizationID)
+		if err != nil {
+			return err
+		}
+		if !removed {
+			return errors.New("pending user login disappeared during approval")
+		}
+		saved = true
+		return nil
+	})
+	return prepared, saved, err
+}
+
 func (s *Store) loadCredentialUnlocked(server string) (Credential, bool, error) {
 	credential, err := readJSONFile[Credential](s.credentialPath(server))
 	if errors.Is(err, os.ErrNotExist) {

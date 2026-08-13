@@ -440,14 +440,8 @@ func deleteLocalRunnerRegistration(server string, runner runnerregistry.Runner) 
 	}
 	for _, registration := range registrations {
 		if registration.Server == server && registration.RunnerID == runner.ID {
-			if _, err := store.DeleteCredential(registration.Server, registration.Workspace); err != nil {
-				return errors.Wrap(err, "failed to delete local runner credential")
-			}
-			if _, err := store.DeletePendingEnrollment(registration.Server, registration.Workspace); err != nil {
-				return errors.Wrap(err, "failed to delete pending local runner enrollment")
-			}
-			if _, err := store.DeleteRegistration(registration.Server, registration.Workspace, runner.ID); err != nil {
-				return errors.Wrap(err, "failed to delete local runner registration")
+			if _, err := store.DeleteAuthenticationStateForRegistration(registration.Server, registration.Workspace, runner.ID); err != nil {
+				return errors.Wrap(err, "failed to delete local runner authentication state")
 			}
 			return nil
 		}
