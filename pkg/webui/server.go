@@ -2264,10 +2264,16 @@ func (s *Server) handleStreamConversation(w http.ResponseWriter, r *http.Request
 	}
 	keepAlive := time.NewTicker(conversationStreamKeepAliveInterval)
 	defer keepAlive.Stop()
+	var serverDone <-chan struct{}
+	if s.runCtx != nil {
+		serverDone = s.runCtx.Done()
+	}
 
 	for {
 		select {
 		case <-r.Context().Done():
+			return
+		case <-serverDone:
 			return
 		case <-keepAlive.C:
 			if err := sink.KeepAlive(); err != nil {
@@ -2550,26 +2556,27 @@ func (s *Server) Start(ctx context.Context) error {
 	// Wait for context cancellation
 	<-ctx.Done()
 
-	// Shutdown server gracefully
+	return s.shutdownHTTPServer()
+}
+
+func (s *Server) shutdownHTTPServer() error {
+	if s.runCancel != nil {
+		s.runCancel()
+	}
+	if s.server == nil {
+		return nil
+	}
+
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), s.httpShutdownTimeout())
 	defer cancel()
-
 	return s.server.Shutdown(shutdownCtx)
 }
 
 // Stop stops the web server
 func (s *Server) Stop() error {
 	var firstErr error
-	if s.server != nil {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), s.httpShutdownTimeout())
-		if err := s.server.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			cancel()
-			return &httpShutdownError{err: err}
-		}
-		cancel()
-	}
-	if s.runCancel != nil {
-		s.runCancel()
+	if err := s.shutdownHTTPServer(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return &httpShutdownError{err: err}
 	}
 
 	s.terminalSessionsMu.Lock()

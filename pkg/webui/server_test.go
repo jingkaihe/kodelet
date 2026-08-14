@@ -235,6 +235,56 @@ func TestServerStopCancelsRunContextBeforeClosingChatRunner(t *testing.T) {
 	assert.True(t, runner.closeCalled.Load())
 }
 
+func TestServerStopClosesOpenConversationStream(t *testing.T) {
+	runCtx, runCancel := context.WithCancel(context.Background())
+	t.Cleanup(runCancel)
+
+	server := &Server{
+		conversationService: &mockConversationService{},
+		runCtx:              runCtx,
+		runCancel:           runCancel,
+		chatSubscribers:     make(map[string]map[*subscriberEventSink]struct{}),
+		shutdownTimeout:     time.Second,
+	}
+	router := mux.NewRouter()
+	router.HandleFunc("/api/conversations/{id}/stream", server.handleStreamConversation).Methods(http.MethodGet)
+	httpServer := &http.Server{Handler: router}
+	server.server = httpServer
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	serveDone := make(chan error, 1)
+	go func() {
+		serveDone <- httpServer.Serve(listener)
+	}()
+	t.Cleanup(func() {
+		_ = httpServer.Close()
+	})
+
+	response, err := http.Get("http://" + listener.Addr().String() + "/api/conversations/conv-123/stream")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = response.Body.Close()
+	})
+	line, err := bufio.NewReader(response.Body).ReadString('\n')
+	require.NoError(t, err)
+	assert.Equal(t, "\n", line)
+	require.Eventually(t, func() bool {
+		server.chatSubscribersMu.Lock()
+		defer server.chatSubscribersMu.Unlock()
+		return len(server.chatSubscribers["conv-123"]) == 1
+	}, time.Second, 10*time.Millisecond)
+
+	require.NoError(t, server.Stop())
+	assert.ErrorIs(t, runCtx.Err(), context.Canceled)
+	require.Eventually(t, func() bool {
+		server.chatSubscribersMu.Lock()
+		defer server.chatSubscribersMu.Unlock()
+		return len(server.chatSubscribers["conv-123"]) == 0
+	}, time.Second, 10*time.Millisecond)
+	require.ErrorIs(t, <-serveDone, http.ErrServerClosed)
+}
+
 func TestServerCloseLeavesDependenciesOpenWhenHTTPShutdownTimesOut(t *testing.T) {
 	store, _ := newAuthStoreTest(t)
 	runCtx, runCancel := context.WithCancel(context.Background())
@@ -278,7 +328,7 @@ func TestServerCloseLeavesDependenciesOpenWhenHTTPShutdownTimesOut(t *testing.T)
 	err = server.Close()
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.False(t, conversationClosed.Load())
-	assert.NoError(t, runCtx.Err())
+	assert.ErrorIs(t, runCtx.Err(), context.Canceled)
 	require.NoError(t, store.db.PingContext(t.Context()))
 
 	close(releaseHandler)
