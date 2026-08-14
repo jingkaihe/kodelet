@@ -184,6 +184,38 @@ func TestRunnerRESTEndpointsExposeRegisteredStatus(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, missingRecorder.Code)
 }
 
+func TestRunnerRoutesAllowUserDiscoveryButRequireAdminForInspection(t *testing.T) {
+	store, _ := newAuthStoreTest(t)
+	userToken, _, err := store.CreateWebSession(t.Context(), "issuer", "user", "User", "user@example.com", []string{string(RoleUser)}, time.Hour)
+	require.NoError(t, err)
+	runnerAdminToken, _, err := store.CreateWebSession(t.Context(), "issuer", "runner-admin", "Runner admin", "runner-admin@example.com", []string{string(RoleUser), string(RoleRunnerAdmin)}, time.Hour)
+	require.NoError(t, err)
+
+	server := newRunnerTestServer(t, "")
+	server.router = mux.NewRouter()
+	server.config.WebAuthMode = WebAuthModeOIDC
+	server.authStore = store
+	server.setupRoutes()
+
+	listRequest := httptest.NewRequest(http.MethodGet, "/api/runners", nil)
+	listRequest.AddCookie(&http.Cookie{Name: webSessionCookieName, Value: userToken})
+	listResponse := httptest.NewRecorder()
+	server.router.ServeHTTP(listResponse, listRequest)
+	assert.Equal(t, http.StatusOK, listResponse.Code)
+
+	inspectRequest := httptest.NewRequest(http.MethodGet, "/api/runners/missing", nil)
+	inspectRequest.AddCookie(&http.Cookie{Name: webSessionCookieName, Value: userToken})
+	inspectResponse := httptest.NewRecorder()
+	server.router.ServeHTTP(inspectResponse, inspectRequest)
+	assert.Equal(t, http.StatusForbidden, inspectResponse.Code)
+
+	adminInspectRequest := httptest.NewRequest(http.MethodGet, "/api/runners/missing", nil)
+	adminInspectRequest.AddCookie(&http.Cookie{Name: webSessionCookieName, Value: runnerAdminToken})
+	adminInspectResponse := httptest.NewRecorder()
+	server.router.ServeHTTP(adminInspectResponse, adminInspectRequest)
+	assert.Equal(t, http.StatusNotFound, adminInspectResponse.Code)
+}
+
 func TestConversationResponseIncludesDurableRunnerEnvironmentProfile(t *testing.T) {
 	server := newRunnerTestServer(t, "")
 	link := newRunnerAPITestLink()
@@ -500,6 +532,56 @@ func TestWebUIChatRunnerResolvesAffinityBeforeChatValidation(t *testing.T) {
 	require.NoError(t, runner.Close())
 	require.NoError(t, runner.Close())
 	require.NoError(t, (*webUIChatRunner)(nil).CloseConversation("conversation-chat"))
+}
+
+func TestWebUIChatRunnerRejectsExistingLocalConversationRunnerMigration(t *testing.T) {
+	server := newRunnerTestServer(t, "")
+	server.config.DisableControlPlaneWorkspace = true
+	registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
+		ProtocolVersions: []int{protocol.Version},
+		Host:             protocol.Host{InstanceID: "host-chat-migration", Hostname: "host", OS: "linux", Arch: "amd64"},
+		Workspace:        protocol.Workspace{Path: "/work/chat-migration", Name: "chat-migration"},
+	}, newRunnerAPITestLink())
+	require.NoError(t, err)
+	require.NoError(t, server.runnerRegistry.BindConversation(t.Context(), "remote-conversation", registration.RunnerID))
+
+	server.conversationService = &mockConversationService{getFunc: func(_ context.Context, id string) (*conversations.GetConversationResponse, error) {
+		switch id {
+		case "local-conversation":
+			return &conversations.GetConversationResponse{ID: id}, nil
+		case "new-conversation":
+			return nil, convtypes.ErrConversationNotFound
+		default:
+			return nil, errors.Errorf("unexpected conversation lookup %q", id)
+		}
+	}}
+	runner := &webUIChatRunner{server: server}
+
+	conversationID, err := runner.Run(t.Context(), ChatRequest{
+		ConversationID: "local-conversation",
+		RunnerID:       registration.RunnerID,
+		Message:        " ",
+	}, &recordingChatSink{})
+	require.ErrorContains(t, err, "existing local conversations are read-only")
+	assert.Equal(t, "local-conversation", conversationID)
+	_, found := server.runnerRegistry.RunnerForConversation(conversationID)
+	assert.False(t, found)
+
+	conversationID, err = runner.Run(t.Context(), ChatRequest{
+		ConversationID: "new-conversation",
+		RunnerID:       registration.RunnerID,
+		Message:        " ",
+	}, &recordingChatSink{})
+	require.ErrorContains(t, err, "message cannot be empty")
+	assert.Equal(t, "new-conversation", conversationID)
+
+	conversationID, err = runner.Run(t.Context(), ChatRequest{
+		ConversationID: "remote-conversation",
+		RunnerID:       registration.RunnerID,
+		Message:        " ",
+	}, &recordingChatSink{})
+	require.ErrorContains(t, err, "message cannot be empty")
+	assert.Equal(t, "remote-conversation", conversationID)
 }
 
 func TestWebUIChatRunnerResolveEnvironmentValidatesRunnerState(t *testing.T) {

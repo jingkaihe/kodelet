@@ -348,7 +348,7 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/git/diff", s.handleGetGitDiff).Methods("GET")
 	api.HandleFunc("/terminal/ws", s.requireRole(RoleTerminal, s.handleTerminalWebsocket)).Methods("GET")
 	api.HandleFunc("/runner/v1/connect", s.handleRunnerWebsocket).Methods("GET")
-	api.HandleFunc("/runners", s.requireRole(RoleRunnerAdmin, s.handleListRunners)).Methods("GET")
+	api.HandleFunc("/runners", s.requireRole(RoleUser, s.handleListRunners)).Methods("GET")
 	api.HandleFunc("/runners/{id}", s.requireRole(RoleRunnerAdmin, s.handleGetRunner)).Methods("GET")
 	api.HandleFunc("/runners/{id}", s.requireRole(RoleRunnerAdmin, s.handleDeleteRunner)).Methods("DELETE")
 	api.HandleFunc("/conversations", s.handleListConversations).Methods("GET")

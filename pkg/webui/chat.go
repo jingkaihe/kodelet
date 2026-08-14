@@ -44,20 +44,40 @@ type webUIChatRunner struct {
 
 func (r *webUIChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatEventSink) (string, error) {
 	conversationID := strings.TrimSpace(req.ConversationID)
-	if r != nil && r.server != nil && r.server.runnerRegistry != nil && strings.TrimSpace(req.RunnerID) == "" && conversationID != "" {
+	hasRunnerAffinity := false
+	if r != nil && r.server != nil && r.server.runnerRegistry != nil && conversationID != "" {
 		affinity, ok, err := r.server.runnerRegistry.ResolveConversationAffinity(ctx, conversationID)
 		if err != nil {
 			return conversationID, err
 		}
+		hasRunnerAffinity = ok
 		if ok {
-			req.RunnerID = affinity.RunnerID
+			if strings.TrimSpace(req.RunnerID) == "" {
+				req.RunnerID = affinity.RunnerID
+			}
 			if strings.TrimSpace(req.EnvironmentProfile) == "" {
 				req.EnvironmentProfile = affinity.EnvironmentProfile
 			}
 		}
 	}
-	if r != nil && r.server != nil && !r.server.controlPlaneWorkspaceEnabled() && strings.TrimSpace(req.RunnerID) == "" {
-		return conversationID, errors.New(controlPlaneWorkspaceDisabledMessage + "; select a workspace runner")
+	if r != nil && r.server != nil && !r.server.controlPlaneWorkspaceEnabled() {
+		if strings.TrimSpace(req.RunnerID) == "" {
+			return conversationID, errors.New(controlPlaneWorkspaceDisabledMessage + "; select a workspace runner")
+		}
+		if conversationID != "" && !hasRunnerAffinity {
+			if r.server.conversationService == nil {
+				return conversationID, errors.New("conversation service is unavailable")
+			}
+			_, err := r.server.conversationService.GetConversation(ctx, conversationID)
+			switch {
+			case err == nil:
+				return conversationID, errors.New(controlPlaneWorkspaceDisabledMessage + "; existing local conversations are read-only")
+			case stdErrors.Is(err, convtypes.ErrConversationNotFound):
+				// A client may allocate the conversation ID before the first turn.
+			default:
+				return conversationID, errors.Wrap(err, "failed to inspect conversation before selecting a runner")
+			}
+		}
 	}
 	if r != nil && r.server != nil && conversationID != "" && chatSupportsInteractiveUI(req) {
 		if broker := r.server.uiInputBrokerForRun(conversationID); broker != nil {

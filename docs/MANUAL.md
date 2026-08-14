@@ -281,7 +281,7 @@ For Google, select or create a Cloud project, configure the Google Auth Platform
 
 The default scopes are `openid`, `profile`, and `email`. Access can be granted through `--oidc-allowed-emails`, `--oidc-allowed-domains`, any role-specific email list, or `--oidc-allow-any-user`. Kodelet always requires a verified email. For the Google issuer, domain allowlisting also requires the signed `hd` claim to match the email domain; an OAuth domain hint alone is not an authorization check. Identities are keyed by verified issuer and `sub`, not by email.
 
-Every accepted OIDC identity receives the `user` role. `terminal` permits the server-host terminal WebSocket, `runner-admin` permits runner inspection, deletion, and enrollment approval, and `admin` implies every role. When runner enrollment is enabled, an OIDC deployment must configure at least one runner-admin or admin identity through the corresponding CLI flags or trusted OIDC email lists, unless an administrative compatibility token will perform approvals. `--auth-token` and trusted `serve.auth_token` remain optional static administrative credentials for migration or automation; pure OIDC mode does not generate one automatically.
+Every accepted OIDC identity receives the `user` role and can list runners for chat selection. `terminal` permits the server-host terminal WebSocket, `runner-admin` permits detailed runner inspection, deletion, and enrollment approval, and `admin` implies every role. When runner enrollment is enabled, an OIDC deployment must configure at least one runner-admin or admin identity through the corresponding CLI flags or trusted OIDC email lists, unless an administrative compatibility token will perform approvals. `--auth-token` and trusted `serve.auth_token` remain optional static administrative credentials for migration or automation; pure OIDC mode does not generate one automatically.
 
 Non-browser clients authenticate to an OIDC control plane with a Kodelet-issued user credential rather than forwarding an identity-provider access token. Start the browser-assisted, device-style login from any client host:
 
@@ -374,7 +374,7 @@ All `kodelet runner` subcommands use the user-level `server` configuration or `K
 
 Runner startup takes an exclusive OS advisory file lock keyed only by the canonical workspace path, so two cooperating Kodelet runner processes cannot register the same mutable directory, including to different control planes. The lock is a registration-ownership and discovery mechanism, not a workspace mutation mutex: one connected runner can host any number of concurrent logical runs. The lock and local registration cache live outside the repository under the Kodelet state directory, normally `~/.kodelet/runners`. The `.lock` file records the PID, hostname, server, runner ID, display name, workspace, and start/stop timestamps for diagnostics and lets same-server `kodelet acp --server` reuse an existing runner, but the held kernel lock—not file existence or PID inspection—is authoritative. A stale file after a crash is expected and is overwritten after the next process successfully acquires the lock.
 
-After `kodelet auth login`, inspect runners with the stored user credential; the principal needs `runner-admin` or `admin`:
+All users can list runners. Inspecting or removing a runner requires `runner-admin` or `admin`:
 
 ```bash
 kodelet runner list --server https://kodelet.example
