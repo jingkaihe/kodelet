@@ -1,18 +1,22 @@
 # Kodelet
 
-## UNRELEASED
+## 0.5.33-beta
 
-Added native generic OIDC authentication to `kodelet serve`, including provider discovery, authorization-code PKCE, server-side browser sessions, verified email/domain allowlists, and `user`, `terminal`, `runner-admin`, and `admin` authorization roles.
+Added generic OIDC authentication to `kodelet serve`, with verified email and domain allowlists plus `user`, `terminal`, `runner-admin`, and `admin` roles.
 
-Added `kodelet auth login`, `logout`, and `status` for browser-assisted non-browser authentication. Login requires manually entering a short code at the generic verification page before approval. Kodelet now issues revocable per-server user credentials for remote chat, TUI, ACP, and runner-administration commands, stores them in user-only local state, and retains explicit `--auth-token` and `KODELET_AUTH_TOKEN` values as higher-precedence migration and automation overrides.
+Added `kodelet auth login`, `logout`, and `status` for browser-assisted CLI, TUI, ACP, and runner-administration authentication using revocable per-server credentials.
 
-Allowed serve listener and authentication settings through CLI flags or the trusted `serve` namespace in user-level or explicitly selected configuration files, while preventing repository configuration from changing the control-plane trust boundary and rejecting malformed explicit configuration instead of silently falling back.
+Allowed listener and authentication settings through CLI flags or the trusted user-level `serve` configuration, while preventing repository configuration from redirecting control-plane access and protecting persisted tokens and OIDC client secrets with user-only files.
 
-Hardened control-plane secrets by requiring user-only trusted files for persisted static tokens and OIDC client secrets, applying restrictive local credential permissions, and suppressing configured token values at startup.
+Added browser-approved `kodelet runner enroll` pairing with a separate revocable credential for each workspace.
 
-Added browser-approved `kodelet runner enroll` pairing with manual short-code entry, independently revocable per-runner Ed25519 credentials, and RFC 9449 DPoP-bound opaque access tokens, including secure resumable local enrollment state, replay protection, live-generation key replacement and disconnection, and reverse-proxy target reconstruction.
+Added `--disable-control-plane-workspace` so deployments can require workspace runners and hide unavailable local workspace controls.
 
-Changed runner removal to preserve control-plane conversations, summaries, and transcripts while clearing concrete runner affinity, credentials, registration state, and runner-run history so preserved conversations can later be explicitly rebound to a compatible runner.
+Allowed authenticated users to discover runners for chat selection while reserving inspection, removal, and enrollment approval for runner administrators. Runner removal now preserves conversations and transcripts while clearing runner affinity, credentials, registration state, and run history.
+
+Implemented OpenAI Responses API remote compaction across HTTP, streaming, and WebSocket continuations.
+
+Added optional user-facing display text for extension-provided `runAgent` commands across local and remote clients.
 
 ## 0.5.30-beta
 
