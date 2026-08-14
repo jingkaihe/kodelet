@@ -74,6 +74,7 @@ const meta = {
     cwdSuggestionIndex: 0,
     cwdSuggestions: sampleCwdHints,
     cwdSuggestionsOpen: true,
+    controlPlaneWorkspaceEnabled: true,
     defaultCWD: '/home/jingkaihe/workspace/kodelet',
     profileDraft: 'default',
     reasoningEffortDraft: 'medium',

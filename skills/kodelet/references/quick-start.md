@@ -75,7 +75,10 @@ The default `auto` theme selects Catppuccin Latte for light terminal profiles an
 kodelet serve
 kodelet serve --host 0.0.0.0 --port 3000
 kodelet serve --cors-origins https://app.example.com,https://admin.example.com
+kodelet serve --disable-control-plane-workspace
 ```
+
+`--disable-control-plane-workspace` keeps the provider and conversation control plane active while requiring workspace runners for execution. It removes the local workspace option and disables the server-host terminal, Git diff, CWD suggestions, and local command or extension discovery; do not combine it with `--cwd`.
 
 With no explicit authentication modes, `kodelet serve` prints separate generated web/API and runner tokens. Tokens supplied through flags or trusted configuration are not echoed. For native browser OIDC and browser-approved runners, create a Web application OAuth client with the exact callback URI, store its client secret in a regular owner-only file, and run:
 

@@ -25,6 +25,10 @@ log_format: "json"
 #   host: "0.0.0.0"
 #   port: 8080
 #   cwd: "/srv/kodelet"
+#   # Disable control-plane-local chat execution, terminal, Git diff, CWD
+#   # discovery, and local slash-command discovery. Requires workspace runners
+#   # for executable conversations and cannot be combined with cwd.
+#   disable_control_plane_workspace: false
 #   web_auth_mode: "oidc"
 #   runner_auth_mode: "enrollment"
 #   # Optional static administrative migration or automation credential.

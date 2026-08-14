@@ -183,6 +183,17 @@ func TestValidateServeConfig(t *testing.T) {
 			},
 			expectedError: "invalid cors-origin",
 		},
+		{
+			name: "control-plane workspace disabled with cwd",
+			config: &ServeConfig{
+				Host:                         "localhost",
+				Port:                         8080,
+				CompactRatio:                 0.8,
+				CWD:                          "/srv/kodelet",
+				DisableControlPlaneWorkspace: true,
+			},
+			expectedError: "cwd cannot be set when the control-plane workspace is disabled",
+		},
 	}
 
 	for _, tt := range tests {
@@ -470,6 +481,16 @@ func TestBuildWebUIServerConfigAuthResolution(t *testing.T) {
 		assert.Empty(t, serverConfig.AuthToken)
 		assert.Empty(t, serverConfig.RunnerAuthToken)
 	})
+
+	t.Run("control-plane workspace setting is preserved", func(t *testing.T) {
+		config := NewServeConfig()
+		config.DisableControlPlaneWorkspace = true
+
+		serverConfig, err := buildWebUIServerConfig(config)
+		require.NoError(t, err)
+
+		assert.True(t, serverConfig.DisableControlPlaneWorkspace)
+	})
 }
 
 func TestLoadOIDCClientSecret(t *testing.T) {
@@ -546,13 +567,14 @@ func TestGetServeConfigFromFlags_UsesCommaSeparatedCORSOrigins(t *testing.T) {
 
 func TestGetServeConfigFromFlags_UsesTrustedYAMLSettings(t *testing.T) {
 	setTrustedServeConfigForTest(t, map[string]any{
-		"host":             "127.0.0.1",
-		"port":             8443,
-		"cwd":              " /srv/kodelet ",
-		"web_auth_mode":    "oidc",
-		"runner_auth_mode": "enrollment",
-		"auth_token":       "compat-token",
-		"cors_origins":     []string{"https://app.example.com"},
+		"host":                            "127.0.0.1",
+		"port":                            8443,
+		"cwd":                             " /srv/kodelet ",
+		"web_auth_mode":                   "oidc",
+		"runner_auth_mode":                "enrollment",
+		"auth_token":                      "compat-token",
+		"disable_control_plane_workspace": false,
+		"cors_origins":                    []string{"https://app.example.com"},
 		"oidc": map[string]any{
 			"issuer":              "https://issuer.example.com",
 			"client_id":           "kodelet",
@@ -578,6 +600,7 @@ func TestGetServeConfigFromFlags_UsesTrustedYAMLSettings(t *testing.T) {
 	assert.Equal(t, webui.RunnerAuthModeEnrollment, config.RunnerAuthMode)
 	assert.Equal(t, "compat-token", config.AuthToken)
 	assert.Empty(t, config.RunnerAuthToken)
+	assert.False(t, config.DisableControlPlaneWorkspace)
 	assert.Equal(t, []string{"https://app.example.com"}, config.CORSOrigins)
 	assert.Equal(t, "https://issuer.example.com", config.OIDC.IssuerURL)
 	assert.Equal(t, "kodelet", config.OIDC.ClientID)
@@ -618,10 +641,11 @@ func TestGetServeConfigFromFlags_DoesNotUseServeEnvironmentVariables(t *testing.
 
 func TestGetServeConfigFromFlags_ExplicitFlagsOverrideTrustedYAML(t *testing.T) {
 	setTrustedServeConfigForTest(t, map[string]any{
-		"host":             "127.0.0.1",
-		"web_auth_mode":    "token",
-		"runner_auth_mode": "token",
-		"auth_token":       "yaml-token",
+		"host":                            "127.0.0.1",
+		"web_auth_mode":                   "token",
+		"runner_auth_mode":                "token",
+		"auth_token":                      "yaml-token",
+		"disable_control_plane_workspace": true,
 		"oidc": map[string]any{
 			"issuer":         "https://yaml-issuer.example.com",
 			"allow_any_user": true,
@@ -633,6 +657,7 @@ func TestGetServeConfigFromFlags_ExplicitFlagsOverrideTrustedYAML(t *testing.T) 
 		"--web-auth-mode=oidc",
 		"--runner-auth-mode=none",
 		"--auth-token=flag-token",
+		"--disable-control-plane-workspace=false",
 		"--oidc-issuer=https://flag-issuer.example.com",
 		"--oidc-allow-any-user=false",
 	}))
@@ -643,6 +668,7 @@ func TestGetServeConfigFromFlags_ExplicitFlagsOverrideTrustedYAML(t *testing.T) 
 	assert.Equal(t, webui.WebAuthModeOIDC, config.WebAuthMode)
 	assert.Equal(t, webui.RunnerAuthModeNone, config.RunnerAuthMode)
 	assert.Equal(t, "flag-token", config.AuthToken)
+	assert.False(t, config.DisableControlPlaneWorkspace)
 	assert.Equal(t, "https://flag-issuer.example.com", config.OIDC.IssuerURL)
 	assert.False(t, config.OIDC.AllowAnyUser)
 }
@@ -737,6 +763,7 @@ func TestGetServeConfigFromFlags_ParsesAuthenticationFlags(t *testing.T) {
 		"--oidc-runner-admin-emails=runners@example.com",
 		"--oidc-allow-any-user",
 		"--oidc-session-duration=24h",
+		"--disable-control-plane-workspace",
 	}))
 
 	config := getServeConfigFromFlags(cmd)
@@ -757,6 +784,7 @@ func TestGetServeConfigFromFlags_ParsesAuthenticationFlags(t *testing.T) {
 	assert.Equal(t, []string{"runners@example.com"}, config.OIDC.RunnerAdminEmails)
 	assert.True(t, config.OIDC.AllowAnyUser)
 	assert.Equal(t, 24*time.Hour, config.OIDC.SessionDuration)
+	assert.True(t, config.DisableControlPlaneWorkspace)
 	assert.Nil(t, cmd.Flags().Lookup("oidc-client-secret"))
 }
 

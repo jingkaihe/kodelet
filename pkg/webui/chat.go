@@ -56,6 +56,9 @@ func (r *webUIChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatEve
 			}
 		}
 	}
+	if r != nil && r.server != nil && !r.server.controlPlaneWorkspaceEnabled() && strings.TrimSpace(req.RunnerID) == "" {
+		return conversationID, errors.New(controlPlaneWorkspaceDisabledMessage + "; select a workspace runner")
+	}
 	if r != nil && r.server != nil && conversationID != "" && chatSupportsInteractiveUI(req) {
 		if broker := r.server.uiInputBrokerForRun(conversationID); broker != nil {
 			ctx = extensions.ContextWithUIInputBroker(ctx, broker)

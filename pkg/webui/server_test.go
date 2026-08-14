@@ -192,6 +192,17 @@ func TestServerConfig_Validate(t *testing.T) {
 				AuthToken:    "web-secret",
 			},
 		},
+		{
+			name: "control-plane workspace disabled with cwd",
+			config: &ServerConfig{
+				Host:                         "localhost",
+				Port:                         8080,
+				CompactRatio:                 0.8,
+				CWD:                          "/srv/kodelet",
+				DisableControlPlaneWorkspace: true,
+			},
+			expectedError: "cwd cannot be set when the control-plane workspace is disabled",
+		},
 	}
 
 	for _, tt := range tests {
@@ -839,6 +850,54 @@ func TestServer_handleGetChatSettings_IncludesDefaultCWD(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
 	assert.Equal(t, "~/workspace/kodelet", response.DefaultCWD)
+	assert.True(t, response.ControlPlaneWorkspaceEnabled)
+}
+
+func TestServer_handleGetChatSettings_DisablesControlPlaneWorkspace(t *testing.T) {
+	server := &Server{
+		config: &ServerConfig{DisableControlPlaneWorkspace: true},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/chat/settings", nil)
+	w := httptest.NewRecorder()
+
+	server.handleGetChatSettings(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var response ChatSettingsResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	assert.False(t, response.ControlPlaneWorkspaceEnabled)
+	assert.Empty(t, response.DefaultCWD)
+
+	defaultCWD, err := server.defaultCWD()
+	require.ErrorContains(t, err, controlPlaneWorkspaceDisabledMessage)
+	assert.Empty(t, defaultCWD)
+}
+
+func TestServer_ControlPlaneWorkspaceEndpointsDisabled(t *testing.T) {
+	server := &Server{config: &ServerConfig{DisableControlPlaneWorkspace: true}}
+	tests := []struct {
+		name    string
+		path    string
+		handler http.HandlerFunc
+	}{
+		{name: "slash commands", path: "/api/chat/slash-commands", handler: server.handleGetSlashCommands},
+		{name: "cwd suggestions", path: "/api/chat/cwd-suggestions", handler: server.handleGetCWDHints},
+		{name: "git diff", path: "/api/git/diff", handler: server.handleGetGitDiff},
+		{name: "terminal", path: "/api/terminal/ws", handler: server.handleTerminalWebsocket},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			w := httptest.NewRecorder()
+
+			tt.handler(w, req)
+
+			assert.Equal(t, http.StatusForbidden, w.Code)
+			assert.Contains(t, w.Body.String(), controlPlaneWorkspaceDisabledMessage)
+		})
+	}
 }
 
 func TestServer_defaultCWD_ReturnsErrorForInvalidConfiguredCWD(t *testing.T) {

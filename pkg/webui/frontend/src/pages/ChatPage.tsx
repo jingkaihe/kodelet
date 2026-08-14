@@ -480,6 +480,7 @@ const ChatPage: React.FC = () => {
   const [uiRequestDialog, setUIRequestDialog] = useState<UIRequestDialogState | null>(null);
   const [uiInputSubmitting, setUIInputSubmitting] = useState(false);
   const [statusTick, setStatusTick] = useState(0);
+  const controlPlaneWorkspaceEnabled = chatSettings.controlPlaneWorkspaceEnabled !== false;
   const loadedConversationId = conversation?.id ?? null;
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
@@ -635,6 +636,7 @@ const ChatPage: React.FC = () => {
       .getChatSettings()
       .then((settings) => {
         const reasoningSettings = reasoningSettingsFromChatSettings(settings);
+        const workspaceEnabled = settings.controlPlaneWorkspaceEnabled !== false;
         setChatSettings(settings);
         setChatSettingsLoaded(true);
         setSelectedProfile(settings.currentProfile || 'default');
@@ -646,7 +648,7 @@ const ChatPage: React.FC = () => {
         setNewChatReasoningEffortOptions(reasoningSettings.options);
         setNewChatReasoningEffortExplicit(false);
         setReasoningSettingsLoading(false);
-        setSelectedCWD(settings.defaultCWD || '');
+        setSelectedCWD(workspaceEnabled ? settings.defaultCWD || '' : '');
         setCwdQuery('');
       })
       .catch((error) => {
@@ -1380,8 +1382,8 @@ const ChatPage: React.FC = () => {
     setNewChatEnvironmentProfileDraft('');
     reasoningSettingsRequestRef.current += 1;
     setReasoningSettingsLoading(false);
-    setSelectedCWD(chatSettings.defaultCWD || '');
-    const defaultCWD = chatSettings.defaultCWD || '';
+    const defaultCWD = controlPlaneWorkspaceEnabled ? chatSettings.defaultCWD || '' : '';
+    setSelectedCWD(defaultCWD);
     cwdSuggestionSkipQueryRef.current = defaultCWD;
     requestCwdSuggestions.cancel();
     cwdSuggestionRequestRef.current += 1;
@@ -1433,9 +1435,10 @@ const ChatPage: React.FC = () => {
   }, [requestCwdSuggestions]);
 
   useEffect(() => {
-    if (conversationId) {
+    if (conversationId || !controlPlaneWorkspaceEnabled) {
       requestCwdSuggestions.cancel();
       cwdInputFocusedRef.current = false;
+      setCwdSuggestions([]);
       setCwdSuggestionsOpen(false);
       setCwdSuggestionIndex(-1);
       return;
@@ -1462,7 +1465,7 @@ const ChatPage: React.FC = () => {
     cwdSuggestionSkipQueryRef.current = null;
 
     requestCwdSuggestions(cwdQuery);
-  }, [conversationId, cwdQuery, requestCwdSuggestions]);
+  }, [controlPlaneWorkspaceEnabled, conversationId, cwdQuery, requestCwdSuggestions]);
 
   const handleSelectConversation = (nextConversationId: string) => {
     closeMobileSidebar();
@@ -2144,6 +2147,7 @@ const ChatPage: React.FC = () => {
     [conversation?.runner, currentRunnerID, runners]
   );
   const isRemoteConversation = Boolean(currentRunnerID);
+  const executionEnvironmentAvailable = controlPlaneWorkspaceEnabled || isRemoteConversation;
   const currentEnvironmentProfile = conversationId
     ? conversation?.environmentProfile || ''
     : selectedEnvironmentProfile;
@@ -2176,7 +2180,7 @@ const ChatPage: React.FC = () => {
   ]);
 
   useEffect(() => {
-    if (isRemoteConversation) {
+    if (isRemoteConversation || !controlPlaneWorkspaceEnabled) {
       setSlashCommands([]);
       return undefined;
     }
@@ -2198,13 +2202,13 @@ const ChatPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [currentCWDLabel, isRemoteConversation]);
+  }, [controlPlaneWorkspaceEnabled, currentCWDLabel, isRemoteConversation]);
 
   useEffect(() => {
-    if (isRemoteConversation) {
+    if (isRemoteConversation || !controlPlaneWorkspaceEnabled) {
       setWorkspacePanelView(null);
     }
-  }, [isRemoteConversation]);
+  }, [controlPlaneWorkspaceEnabled, isRemoteConversation]);
 
   const applyCwdSuggestion = (path: string) => {
     cwdSuggestionSkipQueryRef.current = path;
@@ -2340,9 +2344,11 @@ const ChatPage: React.FC = () => {
   }, [chatSettings.profiles, conversationId, currentProfileLabel]);
 
   const composerContextText = useMemo(() => {
-    const directoryLabel = currentCWDLabel
-      ? truncateMiddle(currentCWDLabel, 46)
-      : 'Default directory';
+    const directoryLabel = !executionEnvironmentAvailable
+      ? 'Workspace runner required'
+      : currentCWDLabel
+        ? truncateMiddle(currentCWDLabel, 46)
+        : 'Default directory';
     const contextParts = [currentProfileLabel];
     if (currentReasoningEffortLabel) {
       contextParts.push(`effort:${currentReasoningEffortLabel}`);
@@ -2350,28 +2356,42 @@ const ChatPage: React.FC = () => {
     contextParts.push(directoryLabel);
 
     return contextParts.join(' · ');
-  }, [currentCWDLabel, currentProfileLabel, currentReasoningEffortLabel]);
+  }, [
+    currentCWDLabel,
+    currentProfileLabel,
+    currentReasoningEffortLabel,
+    executionEnvironmentAvailable,
+  ]);
 
   const recentWorkspaces = useMemo(() => getRecentWorkspaces(conversations), [conversations]);
 
   const hasActiveConversationTarget = Boolean(activeRunningConversationId);
   const canSteerActiveConversation = hasActiveConversationTarget;
   const isSteeringMode = currentConversationIsStreaming && canSteerActiveConversation;
-  const canSubmit = isSteeringMode
-    ? draft.trim().length > 0
-    : draft.trim().length > 0 || attachments.length > 0;
+  const canSubmit =
+    executionEnvironmentAvailable &&
+    (isSteeringMode ? draft.trim().length > 0 : draft.trim().length > 0 || attachments.length > 0);
   const canStopActiveConversation =
     currentConversationIsStreaming && Boolean(activeRunningConversationId);
   const canStartNewChat = !currentConversationIsStarting;
-  const composerPlaceholder = currentConversationIsStreaming
-    ? !activeRunningConversationId
-      ? 'Waiting for conversation to start…'
-      : canSteerActiveConversation
-        ? 'Steer the active conversation…'
-        : 'Add your guidance here...'
-    : activeSlashCommand
-      ? getSlashCommandPlaceholder(activeSlashCommand)
-      : 'Ask kodelet anything...';
+  const composerPlaceholder = !executionEnvironmentAvailable
+    ? conversationId
+      ? 'This local conversation is read-only'
+      : 'Select a workspace runner to start'
+    : currentConversationIsStreaming
+      ? !activeRunningConversationId
+        ? 'Waiting for conversation to start…'
+        : canSteerActiveConversation
+          ? 'Steer the active conversation…'
+          : 'Add your guidance here...'
+      : activeSlashCommand
+        ? getSlashCommandPlaceholder(activeSlashCommand)
+        : 'Ask kodelet anything...';
+  const workspaceExecutionMessage = !executionEnvironmentAvailable
+    ? conversationId
+      ? 'This conversation uses the disabled control-plane workspace and is read-only.'
+      : 'The control-plane workspace is disabled. Select a workspace runner to start a chat.'
+    : null;
   const composerSlashUsageHint =
     !currentConversationIsStreaming && !steering && activeSlashCommand
       ? getSlashCommandPlaceholder(activeSlashCommand)
@@ -2519,7 +2539,11 @@ const ChatPage: React.FC = () => {
   };
 
   const handleCommitNewChatContext = () => {
-    if (reasoningSettingsLoading || !chatSettingsLoaded) {
+    if (
+      reasoningSettingsLoading ||
+      !chatSettingsLoaded ||
+      (!controlPlaneWorkspaceEnabled && !newChatRunnerDraft)
+    ) {
       return;
     }
 
@@ -2567,6 +2591,7 @@ const ChatPage: React.FC = () => {
           cwdSuggestionIndex={cwdSuggestionIndex}
           cwdSuggestions={cwdSuggestions}
           cwdSuggestionsOpen={cwdSuggestionsOpen}
+          controlPlaneWorkspaceEnabled={controlPlaneWorkspaceEnabled}
           defaultCWD={chatSettings.defaultCWD}
           profileDraft={newChatProfileDraft}
           reasoningEffortDraft={newChatReasoningEffortDraft}
@@ -2750,7 +2775,9 @@ const ChatPage: React.FC = () => {
 
           <ChatComposer
             addImageDisabled={
-              (currentConversationIsStreaming && !canSteerActiveConversation) || steering
+              !executionEnvironmentAvailable ||
+              (currentConversationIsStreaming && !canSteerActiveConversation) ||
+              steering
             }
             attachments={attachments}
             canStop={canStopActiveConversation}
@@ -2766,14 +2793,15 @@ const ChatPage: React.FC = () => {
             slashCommandSuggestionsOpen={slashCommandSuggestionsOpen}
             slashUsageHint={composerSlashUsageHint}
             stopActionLabel={stopActionLabel}
-            streamError={streamError}
+            streamError={streamError || workspaceExecutionMessage}
             submitActionLabel={submitActionLabel}
             submitDisabled={
               steering ||
+              !executionEnvironmentAvailable ||
               !canSubmit ||
               (currentConversationIsStreaming && !canSteerActiveConversation)
             }
-            textareaDisabled={steering}
+            textareaDisabled={steering || !executionEnvironmentAvailable}
             onAttachImages={appendAttachments}
             onContextOpen={() => {
               newChatReturnFocusRef.current =
@@ -2786,7 +2814,9 @@ const ChatPage: React.FC = () => {
               setReasoningSettingsLoading(false);
               setNewChatRunnerDraft(selectedRunnerID);
               setNewChatEnvironmentProfileDraft(selectedEnvironmentProfile);
-              setCwdQuery(selectedCWD || chatSettings.defaultCWD || '');
+              setCwdQuery(
+                controlPlaneWorkspaceEnabled ? selectedCWD || chatSettings.defaultCWD || '' : ''
+              );
               setNewChatDialogOpen(true);
             }}
             onDragLeave={handleDragLeave}
@@ -2802,7 +2832,7 @@ const ChatPage: React.FC = () => {
           />
         </main>
 
-        {!isRemoteConversation ? (
+        {controlPlaneWorkspaceEnabled && !isRemoteConversation ? (
           <aside
             aria-label="Workspace tools"
             aria-modal={workspaceOverlayOpen || undefined}

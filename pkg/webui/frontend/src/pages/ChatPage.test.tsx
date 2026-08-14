@@ -1151,6 +1151,68 @@ describe('ChatPage', () => {
     );
   });
 
+  it('requires a workspace runner when the control-plane workspace is disabled', async () => {
+    mockGetChatSettings.mockResolvedValue({
+      currentProfile: 'work',
+      controlPlaneWorkspaceEnabled: false,
+      profiles: [
+        { name: 'default', scope: 'built-in' },
+        { name: 'work', scope: 'repo' },
+      ],
+      reasoningEffort: 'medium',
+      reasoningEffortOptions: ['low', 'medium', 'high'],
+    });
+    mockGetRunners.mockResolvedValue({
+      runners: [
+        {
+          id: 'runner-required',
+          displayName: 'required-runner',
+          host: {
+            instanceId: 'host-required',
+            hostname: 'worker',
+            os: 'linux',
+            arch: 'amd64',
+          },
+          workspace: { path: '/runner/required', name: 'required' },
+          manifestChanged: false,
+          status: 'idle',
+          connected: true,
+          generation: 1,
+        },
+      ],
+    });
+
+    render(<ChatPage />);
+
+    await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
+    expect(
+      screen.getByText(
+        'The control-plane workspace is disabled. Select a workspace runner to start a chat.'
+      )
+    ).toBeVisible();
+    expect(screen.getByTestId('composer-textarea')).toBeDisabled();
+    expect(screen.queryByTestId('workspace-tools-shell')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
+    expect(screen.getByRole('option', { name: 'Select a workspace runner' })).toBeDisabled();
+    expect(screen.queryByLabelText('Working directory')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText('Environment'), {
+      target: { value: 'runner-required' },
+    });
+    expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+
+    expect(screen.getByTestId('composer-textarea')).toBeEnabled();
+    expect(
+      screen.queryByText(
+        'The control-plane workspace is disabled. Select a workspace runner to start a chat.'
+      )
+    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId('workspace-tools-shell')).not.toBeInTheDocument();
+  });
+
   it('shows recent workspaces and applies a selected workspace', async () => {
     mockGetConversations.mockResolvedValue({
       conversations: [

@@ -10,6 +10,7 @@ interface NewChatContextDialogProps {
   cwdSuggestionIndex: number;
   cwdSuggestions: CWDHint[];
   cwdSuggestionsOpen: boolean;
+  controlPlaneWorkspaceEnabled: boolean;
   defaultCWD?: string;
   profileDraft: string;
   reasoningEffortDraft: string;
@@ -69,6 +70,7 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
       cwdSuggestionIndex,
       cwdSuggestions,
       cwdSuggestionsOpen,
+      controlPlaneWorkspaceEnabled,
       defaultCWD,
       profileDraft,
       reasoningEffortDraft,
@@ -95,12 +97,13 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
   ) => {
     const selectedRunner = runners.find((runner) => runner.id === runnerIdDraft);
     const selectedRunnerAvailable =
-      runnerIdDraft === '' ||
-      Boolean(
-        selectedRunner?.connected &&
-          (selectedRunner.status === 'idle' ||
-            (selectedRunner.status === 'busy' && selectedRunner.concurrentRuns))
-      );
+      runnerIdDraft === ''
+        ? controlPlaneWorkspaceEnabled
+        : Boolean(
+            selectedRunner?.connected &&
+              (selectedRunner.status === 'idle' ||
+                (selectedRunner.status === 'busy' && selectedRunner.concurrentRuns))
+          );
     return (
       <div className="new-chat-dialog-backdrop new-chat-context-backdrop">
         <div
@@ -183,7 +186,11 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
                     onChange={(event) => onRunnerDraftChange(event.target.value)}
                     value={runnerIdDraft}
                   >
-                    <option value="">Local control-plane workspace</option>
+                    <option disabled={!controlPlaneWorkspaceEnabled} value="">
+                      {controlPlaneWorkspaceEnabled
+                        ? 'Local control-plane workspace'
+                        : 'Select a workspace runner'}
+                    </option>
                     {runners.map((runner) => {
                       const available =
                         runner.connected &&
@@ -242,7 +249,7 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
                     </span>
                   </div>
                 </>
-              ) : (
+              ) : controlPlaneWorkspaceEnabled ? (
                 <div className="new-chat-field new-chat-field-wide new-chat-workspace-card">
                   <label className="new-chat-field-label" htmlFor="new-chat-cwd">
                     Working directory
@@ -345,6 +352,17 @@ const NewChatContextDialog = React.forwardRef<HTMLDivElement, NewChatContextDial
                       </div>
                     </div>
                   ) : null}
+                </div>
+              ) : (
+                <div
+                  className="new-chat-field new-chat-field-wide new-chat-workspace-card"
+                  role="status"
+                >
+                  <span className="new-chat-field-label">Workspace runner required</span>
+                  <span className="new-chat-recent-workspace-parent">
+                    The control-plane workspace is disabled. Select an available workspace runner
+                    to start this chat.
+                  </span>
                 </div>
               )}
             </div>

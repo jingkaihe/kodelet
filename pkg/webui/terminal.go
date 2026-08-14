@@ -91,6 +91,9 @@ func (w *websocketWriter) writeJSON(message terminalMessage) error {
 }
 
 func (s *Server) handleTerminalWebsocket(w http.ResponseWriter, r *http.Request) {
+	if !s.requireControlPlaneWorkspace(w) {
+		return
+	}
 	resolvedCWD, err := s.resolveRequestedCWD(r.URL.Query().Get("cwd"))
 	if err != nil {
 		s.writeErrorResponse(w, http.StatusBadRequest, "invalid cwd", err)

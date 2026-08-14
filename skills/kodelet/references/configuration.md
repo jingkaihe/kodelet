@@ -22,6 +22,7 @@ The listener and authentication policy of the control plane can be configured ei
 
 ```yaml
 serve:
+  disable_control_plane_workspace: true
   web_auth_mode: oidc
   runner_auth_mode: enrollment
   oidc:
@@ -33,6 +34,8 @@ serve:
     admin_emails: [admin@example.com]
     runner_admin_emails: [runners@example.com]
 ```
+
+Set `serve.disable_control_plane_workspace: true`, or pass `kodelet serve --disable-control-plane-workspace`, when the control plane must not expose a local workspace environment. The mode requires workspace runners for executable conversations and disables local chat execution, the server-host terminal, Git diff, CWD suggestions, and control-plane workspace command and extension discovery. It cannot be combined with `serve.cwd` or `--cwd`; provider requests, conversation persistence, and runner coordination remain on the control plane.
 
 The OIDC client secret is read from a regular, non-empty, user-only referenced file, not accepted directly as a YAML value or secret-valued CLI flag. On Unix, trusted configuration containing `serve.auth_token` or `serve.runner_auth_token` must likewise be inaccessible to group and other users, such as mode `0600`; configured token values are not echoed at startup. An unreadable or malformed explicitly selected configuration file and an invalid `KODELET_CONFIG_FILE_MODE` fail closed.
 

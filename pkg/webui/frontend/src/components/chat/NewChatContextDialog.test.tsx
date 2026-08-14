@@ -21,6 +21,7 @@ const renderDialog = (
     cwdSuggestionIndex: 0,
     cwdSuggestions: sampleCwdHints,
     cwdSuggestionsOpen: true,
+    controlPlaneWorkspaceEnabled: true,
     defaultCWD: '/home/jingkaihe/workspace/kodelet',
     profileDraft: 'default',
     reasoningEffortDraft: 'medium',
@@ -111,6 +112,16 @@ describe('NewChatContextDialog', () => {
     renderDialog({ reasoningEffortLoading: true });
 
     expect(screen.getByLabelText('Reasoning effort')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
+  });
+
+  it('requires a workspace runner when the control-plane workspace is disabled', () => {
+    renderDialog({ controlPlaneWorkspaceEnabled: false });
+
+    expect(screen.getByRole('option', { name: 'Select a workspace runner' })).toBeDisabled();
+    expect(screen.queryByRole('option', { name: 'Local control-plane workspace' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('cwd-input')).not.toBeInTheDocument();
+    expect(screen.getByText('Workspace runner required')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
   });
 

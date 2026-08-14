@@ -285,6 +285,7 @@ export interface ChatSettings {
   reasoningEffort: string;
   reasoningEffortOptions: string[];
   defaultCWD?: string;
+  controlPlaneWorkspaceEnabled?: boolean;
 }
 
 export interface CWDHint {

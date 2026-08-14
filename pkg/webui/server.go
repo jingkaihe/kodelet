@@ -88,17 +88,18 @@ type activeChatRun struct {
 }
 
 const (
-	pendingChatStopTTL                  = 30 * time.Second
-	maxPendingChatStops                 = 1024
-	conversationStreamKeepAliveInterval = 15 * time.Second
-	publicAuthRateWindow                = time.Minute
-	maxPublicAuthRateEntries            = 4096
-	maxOIDCLoginRequestsPerWindow       = 60
-	maxEnrollmentStartsPerWindow        = 30
-	maxEnrollmentPollsPerWindow         = 8192
-	maxUserLoginStartsPerWindow         = 30
-	maxUserLoginPollsPerWindow          = 8192
-	defaultHTTPShutdownTimeout          = 30 * time.Second
+	pendingChatStopTTL                   = 30 * time.Second
+	maxPendingChatStops                  = 1024
+	conversationStreamKeepAliveInterval  = 15 * time.Second
+	publicAuthRateWindow                 = time.Minute
+	maxPublicAuthRateEntries             = 4096
+	maxOIDCLoginRequestsPerWindow        = 60
+	maxEnrollmentStartsPerWindow         = 30
+	maxEnrollmentPollsPerWindow          = 8192
+	maxUserLoginStartsPerWindow          = 30
+	maxUserLoginPollsPerWindow           = 8192
+	defaultHTTPShutdownTimeout           = 30 * time.Second
+	controlPlaneWorkspaceDisabledMessage = "control-plane workspace is disabled"
 )
 
 type publicAuthRateEntry struct {
@@ -141,16 +142,17 @@ func (r *activeChatRun) markDone() {
 
 // ServerConfig holds the configuration for the web server
 type ServerConfig struct {
-	Host            string
-	Port            int
-	CWD             string
-	CompactRatio    float64
-	AuthToken       string
-	RunnerAuthToken string
-	WebAuthMode     WebAuthMode
-	RunnerAuthMode  RunnerAuthMode
-	OIDC            OIDCConfig
-	CORSOrigins     []string
+	Host                         string
+	Port                         int
+	CWD                          string
+	CompactRatio                 float64
+	AuthToken                    string
+	RunnerAuthToken              string
+	WebAuthMode                  WebAuthMode
+	RunnerAuthMode               RunnerAuthMode
+	OIDC                         OIDCConfig
+	DisableControlPlaneWorkspace bool
+	CORSOrigins                  []string
 }
 
 // Validate validates the server configuration
@@ -178,6 +180,9 @@ func (c *ServerConfig) Validate() error {
 
 	if c.CompactRatio <= 0.0 || c.CompactRatio > 1.0 {
 		return errors.New("compact-ratio must be greater than 0.0 and less than or equal to 1.0")
+	}
+	if c.DisableControlPlaneWorkspace && strings.TrimSpace(c.CWD) != "" {
+		return errors.New("cwd cannot be set when the control-plane workspace is disabled")
 	}
 
 	if c.AuthToken != "" && c.RunnerAuthToken != "" && c.AuthToken == c.RunnerAuthToken {
@@ -233,7 +238,12 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 	}
 
 	runCtx, runCancel := context.WithCancel(ctx)
-	extensionRuntimes := extensions.NewRuntimeManager()
+	var extensionRuntimes *extensions.RuntimeManager
+	var terminalSessions *terminalSessionManager
+	if !config.DisableControlPlaneWorkspace {
+		extensionRuntimes = extensions.NewRuntimeManager()
+		terminalSessions = newTerminalSessionManager(runCtx)
+	}
 	dbPath, err := db.DefaultDBPath()
 	if err != nil {
 		runCancel()
@@ -287,7 +297,7 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 		staticFS:              staticFS,
 		runCtx:                runCtx,
 		runCancel:             runCancel,
-		terminalSessions:      newTerminalSessionManager(runCtx),
+		terminalSessions:      terminalSessions,
 		extensionRuntimes:     extensionRuntimes,
 		runnerRegistry:        runnerRegistry,
 		authStore:             authenticationStore,
@@ -1143,11 +1153,12 @@ type ChatProfileOption struct {
 
 // ChatSettingsResponse contains new-conversation settings for the web chat composer.
 type ChatSettingsResponse struct {
-	CurrentProfile         string              `json:"currentProfile,omitempty"`
-	Profiles               []ChatProfileOption `json:"profiles"`
-	ReasoningEffort        string              `json:"reasoningEffort"`
-	ReasoningEffortOptions []string            `json:"reasoningEffortOptions"`
-	DefaultCWD             string              `json:"defaultCWD,omitempty"`
+	CurrentProfile               string              `json:"currentProfile,omitempty"`
+	Profiles                     []ChatProfileOption `json:"profiles"`
+	ReasoningEffort              string              `json:"reasoningEffort"`
+	ReasoningEffortOptions       []string            `json:"reasoningEffortOptions"`
+	DefaultCWD                   string              `json:"defaultCWD,omitempty"`
+	ControlPlaneWorkspaceEnabled bool                `json:"controlPlaneWorkspaceEnabled"`
 }
 
 type SlashCommandsResponse struct {
@@ -1465,21 +1476,29 @@ func (s *Server) handleGetChatSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	defaultCWD, err := s.defaultCWD()
-	if err != nil {
-		defaultCWD = ""
+	controlPlaneWorkspaceEnabled := s.controlPlaneWorkspaceEnabled()
+	defaultCWD := ""
+	if controlPlaneWorkspaceEnabled {
+		defaultCWD, err = s.defaultCWD()
+		if err != nil {
+			defaultCWD = ""
+		}
 	}
 
 	s.writeJSONResponse(w, ChatSettingsResponse{
-		CurrentProfile:         profile,
-		Profiles:               getWebUIProfileOptions(),
-		ReasoningEffort:        config.ReasoningEffort,
-		ReasoningEffortOptions: llmtypes.ReasoningEffortOptions(config),
-		DefaultCWD:             compactHomePath(defaultCWD),
+		CurrentProfile:               profile,
+		Profiles:                     getWebUIProfileOptions(),
+		ReasoningEffort:              config.ReasoningEffort,
+		ReasoningEffortOptions:       llmtypes.ReasoningEffortOptions(config),
+		DefaultCWD:                   compactHomePath(defaultCWD),
+		ControlPlaneWorkspaceEnabled: controlPlaneWorkspaceEnabled,
 	})
 }
 
 func (s *Server) handleGetSlashCommands(w http.ResponseWriter, r *http.Request) {
+	if !s.requireControlPlaneWorkspace(w) {
+		return
+	}
 	resolvedCWD, err := s.resolveRequestedCWD(r.URL.Query().Get("cwd"))
 	if err != nil {
 		s.writeErrorResponse(w, http.StatusBadRequest, "invalid cwd", err)
@@ -1511,6 +1530,9 @@ func (s *Server) handleGetSlashCommands(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleGetCWDHints(w http.ResponseWriter, r *http.Request) {
+	if !s.requireControlPlaneWorkspace(w) {
+		return
+	}
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
 	defaultCWD, err := s.defaultCWD()
 	if err != nil {
@@ -1551,12 +1573,27 @@ func (s *Server) handleGetCWDHints(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) defaultCWD() (string, error) {
+	if !s.controlPlaneWorkspaceEnabled() {
+		return "", errors.New(controlPlaneWorkspaceDisabledMessage)
+	}
 	configuredCWD := ""
 	if s != nil && s.config != nil {
 		configuredCWD = s.config.CWD
 	}
 
 	return chat.ResolveConfiguredDefaultCWD(configuredCWD)
+}
+
+func (s *Server) controlPlaneWorkspaceEnabled() bool {
+	return s == nil || s.config == nil || !s.config.DisableControlPlaneWorkspace
+}
+
+func (s *Server) requireControlPlaneWorkspace(w http.ResponseWriter) bool {
+	if s.controlPlaneWorkspaceEnabled() {
+		return true
+	}
+	s.writeErrorResponse(w, http.StatusForbidden, controlPlaneWorkspaceDisabledMessage, nil)
+	return false
 }
 
 func (s *Server) resolveRequestedCWD(requestedCWD string) (string, error) {

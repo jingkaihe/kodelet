@@ -31,32 +31,34 @@ const (
 var defaultOIDCScopes = []string{"openid", "profile", "email"}
 
 type ServeConfig struct {
-	Host                 string
-	Port                 int
-	CWD                  string
-	CompactRatio         float64
-	AuthToken            string
-	RunnerAuthToken      string
-	WebAuthMode          webui.WebAuthMode
-	RunnerAuthMode       webui.RunnerAuthMode
-	OIDC                 webui.OIDCConfig
-	OIDCClientSecretFile string
-	SkipAuth             bool
-	CORSOrigins          []string
-	ConfigError          error
+	Host                         string
+	Port                         int
+	CWD                          string
+	CompactRatio                 float64
+	AuthToken                    string
+	RunnerAuthToken              string
+	WebAuthMode                  webui.WebAuthMode
+	RunnerAuthMode               webui.RunnerAuthMode
+	OIDC                         webui.OIDCConfig
+	OIDCClientSecretFile         string
+	SkipAuth                     bool
+	DisableControlPlaneWorkspace bool
+	CORSOrigins                  []string
+	ConfigError                  error
 }
 
 type trustedServeConfig struct {
-	Host            *string                 `mapstructure:"host"`
-	Port            *int                    `mapstructure:"port"`
-	CWD             *string                 `mapstructure:"cwd"`
-	AuthToken       *string                 `mapstructure:"auth_token"`
-	RunnerAuthToken *string                 `mapstructure:"runner_auth_token"`
-	WebAuthMode     *string                 `mapstructure:"web_auth_mode"`
-	RunnerAuthMode  *string                 `mapstructure:"runner_auth_mode"`
-	SkipAuth        *bool                   `mapstructure:"skip_auth"`
-	CORSOrigins     []string                `mapstructure:"cors_origins"`
-	OIDC            *trustedServeOIDCConfig `mapstructure:"oidc"`
+	Host                         *string                 `mapstructure:"host"`
+	Port                         *int                    `mapstructure:"port"`
+	CWD                          *string                 `mapstructure:"cwd"`
+	AuthToken                    *string                 `mapstructure:"auth_token"`
+	RunnerAuthToken              *string                 `mapstructure:"runner_auth_token"`
+	WebAuthMode                  *string                 `mapstructure:"web_auth_mode"`
+	RunnerAuthMode               *string                 `mapstructure:"runner_auth_mode"`
+	SkipAuth                     *bool                   `mapstructure:"skip_auth"`
+	DisableControlPlaneWorkspace *bool                   `mapstructure:"disable_control_plane_workspace"`
+	CORSOrigins                  []string                `mapstructure:"cors_origins"`
+	OIDC                         *trustedServeOIDCConfig `mapstructure:"oidc"`
 }
 
 type trustedServeOIDCConfig struct {
@@ -116,6 +118,7 @@ func addServeFlags(cmd *cobra.Command, defaults *ServeConfig) {
 	cmd.Flags().String("auth-token", defaults.AuthToken, "Web UI token; generated in token mode, or used as an admin compatibility credential in OIDC mode")
 	cmd.Flags().String("runner-auth-token", defaults.RunnerAuthToken, "Runner registration token; generated in token mode")
 	cmd.Flags().Bool("skip-auth", defaults.SkipAuth, "Compatibility shorthand for --web-auth-mode=none --runner-auth-mode=none")
+	cmd.Flags().Bool("disable-control-plane-workspace", defaults.DisableControlPlaneWorkspace, "Disable control-plane-local workspace execution and require workspace runners")
 	cmd.Flags().String("oidc-issuer", defaults.OIDC.IssuerURL, "OIDC issuer URL")
 	cmd.Flags().String("oidc-client-id", defaults.OIDC.ClientID, "OIDC client ID")
 	cmd.Flags().String("oidc-client-secret-file", defaults.OIDCClientSecretFile, "Path to a file containing the OIDC client secret")
@@ -160,6 +163,9 @@ func getServeConfigFromFlags(cmd *cobra.Command) *ServeConfig {
 	}
 	if skipAuth, err := cmd.Flags().GetBool("skip-auth"); err == nil && cmd.Flags().Changed("skip-auth") {
 		config.SkipAuth = skipAuth
+	}
+	if disableControlPlaneWorkspace, err := cmd.Flags().GetBool("disable-control-plane-workspace"); err == nil && cmd.Flags().Changed("disable-control-plane-workspace") {
+		config.DisableControlPlaneWorkspace = disableControlPlaneWorkspace
 	}
 	if oidcIssuer, err := cmd.Flags().GetString("oidc-issuer"); err == nil && cmd.Flags().Changed("oidc-issuer") {
 		config.OIDC.IssuerURL = oidcIssuer
@@ -251,6 +257,9 @@ func applyTrustedServeConfig(config *ServeConfig) error {
 	if trusted.SkipAuth != nil {
 		config.SkipAuth = *trusted.SkipAuth
 	}
+	if trusted.DisableControlPlaneWorkspace != nil {
+		config.DisableControlPlaneWorkspace = *trusted.DisableControlPlaneWorkspace
+	}
 	if trusted.CORSOrigins != nil {
 		config.CORSOrigins = trusted.CORSOrigins
 	}
@@ -326,6 +335,9 @@ func validateServeConfig(config *ServeConfig) error {
 
 	if config.CompactRatio <= 0.0 || config.CompactRatio > 1.0 {
 		return errors.New("compact-ratio must be greater than 0.0 and less than or equal to 1.0")
+	}
+	if config.DisableControlPlaneWorkspace && strings.TrimSpace(config.CWD) != "" {
+		return errors.New("cwd cannot be set when the control-plane workspace is disabled")
 	}
 
 	webAuthMode, runnerAuthMode, err := resolveServeAuthModes(config)
@@ -500,16 +512,17 @@ func buildWebUIServerConfig(config *ServeConfig) (*webui.ServerConfig, error) {
 	}
 
 	serverConfig := &webui.ServerConfig{
-		Host:            config.Host,
-		Port:            config.Port,
-		CWD:             config.CWD,
-		CompactRatio:    config.CompactRatio,
-		AuthToken:       authToken,
-		RunnerAuthToken: runnerAuthToken,
-		WebAuthMode:     webAuthMode,
-		RunnerAuthMode:  runnerAuthMode,
-		OIDC:            oidcConfig,
-		CORSOrigins:     config.CORSOrigins,
+		Host:                         config.Host,
+		Port:                         config.Port,
+		CWD:                          config.CWD,
+		CompactRatio:                 config.CompactRatio,
+		AuthToken:                    authToken,
+		RunnerAuthToken:              runnerAuthToken,
+		WebAuthMode:                  webAuthMode,
+		RunnerAuthMode:               runnerAuthMode,
+		OIDC:                         oidcConfig,
+		DisableControlPlaneWorkspace: config.DisableControlPlaneWorkspace,
+		CORSOrigins:                  config.CORSOrigins,
 	}
 	if err := serverConfig.Validate(); err != nil {
 		return nil, errors.Wrap(err, "invalid resolved server configuration")
@@ -525,10 +538,11 @@ func runServeCommand(ctx context.Context, config *ServeConfig) {
 	}
 
 	logger.G(ctx).WithFields(map[string]any{
-		"host":             serverConfig.Host,
-		"port":             serverConfig.Port,
-		"web_auth_mode":    serverConfig.WebAuthMode,
-		"runner_auth_mode": serverConfig.RunnerAuthMode,
+		"host":                             serverConfig.Host,
+		"port":                             serverConfig.Port,
+		"web_auth_mode":                    serverConfig.WebAuthMode,
+		"runner_auth_mode":                 serverConfig.RunnerAuthMode,
+		"control_plane_workspace_disabled": serverConfig.DisableControlPlaneWorkspace,
 	}).Info("Starting web UI server")
 
 	server, err := webui.NewServer(ctx, serverConfig)

@@ -20,6 +20,9 @@ type gitDiffResponse struct {
 }
 
 func (s *Server) handleGetGitDiff(w http.ResponseWriter, r *http.Request) {
+	if !s.requireControlPlaneWorkspace(w) {
+		return
+	}
 	resolvedCWD, err := s.resolveRequestedCWD(r.URL.Query().Get("cwd"))
 	if err != nil {
 		s.writeErrorResponse(w, http.StatusBadRequest, "invalid cwd", err)

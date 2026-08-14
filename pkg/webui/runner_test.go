@@ -462,6 +462,7 @@ func TestWebUIChatRunnerResolvesAffinityBeforeChatValidation(t *testing.T) {
 	defaultRunner := NewDefaultChatRunner("")
 	runner := &webUIChatRunner{runner: defaultRunner, server: server}
 	defaultRunner.SetEnvironmentResolver(runner)
+	server.config.DisableControlPlaneWorkspace = true
 	active := newActiveChatRun(func() {})
 	active.uiInput = newWebUIInputBroker("conversation-chat", &recordingChatSink{})
 	server.activeChats["conversation-chat"] = active
@@ -480,6 +481,13 @@ func TestWebUIChatRunnerResolvesAffinityBeforeChatValidation(t *testing.T) {
 	require.True(t, found)
 	assert.Equal(t, registration.RunnerID, affinity.RunnerID)
 	assert.Equal(t, "gpu", affinity.EnvironmentProfile)
+
+	conversationID, err = runner.Run(t.Context(), ChatRequest{
+		ConversationID: "local-conversation",
+		Message:        "hello",
+	}, &recordingChatSink{})
+	require.ErrorContains(t, err, "control-plane workspace is disabled; select a workspace runner")
+	assert.Equal(t, "local-conversation", conversationID)
 
 	var nilRunner *webUIChatRunner
 	conversationID, err = nilRunner.Run(t.Context(), ChatRequest{ConversationID: "local-conversation", Message: " "}, &recordingChatSink{})
