@@ -135,15 +135,15 @@ class MockWebSocket {
   send = vi.fn();
   close = vi.fn();
 
-  private listeners = new Map<string, Array<(event?: any) => void>>();
+  private listeners = new Map<string, Array<(event?: unknown) => void>>();
 
-  addEventListener(type: string, listener: (event?: any) => void) {
+  addEventListener(type: string, listener: (event?: unknown) => void) {
     const existing = this.listeners.get(type) ?? [];
     existing.push(listener);
     this.listeners.set(type, existing);
   }
 
-  emit(type: string, event?: any) {
+  emit(type: string, event?: unknown) {
     for (const listener of this.listeners.get(type) ?? []) {
       listener(event);
     }

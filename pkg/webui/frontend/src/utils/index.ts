@@ -325,13 +325,11 @@ export const throttle = <T extends unknown[]>(
 export const deepClone = <T>(obj: T): T => {
   if (obj === null || typeof obj !== 'object') return obj;
   if (obj instanceof Date) return new Date(obj.getTime()) as T;
-  if (obj instanceof Array) return obj.map(item => deepClone(item)) as T;
+  if (Array.isArray(obj)) return obj.map(item => deepClone(item)) as T;
   if (obj instanceof Object) {
     const cloned: Record<string, unknown> = {};
-    for (const key in obj) {
-      if (Object.prototype.hasOwnProperty.call(obj, key)) {
-        cloned[key] = deepClone((obj as Record<string, unknown>)[key]);
-      }
+    for (const key of Object.keys(obj)) {
+      cloned[key] = deepClone((obj as Record<string, unknown>)[key]);
     }
     return cloned as T;
   }
@@ -359,7 +357,7 @@ export const highlightSearchTerm = (text: string, searchTerm: string): string =>
 // Truncate text utility
 export const truncateText = (text: string, maxLength: number): string => {
   if (text.length <= maxLength) return text;
-  return text.substring(0, maxLength) + '...';
+  return `${text.substring(0, maxLength)}...`;
 };
 
 export const truncateMiddle = (text: string, maxLength: number): string => {

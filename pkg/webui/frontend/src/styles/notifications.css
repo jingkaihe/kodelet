@@ -1,0 +1,156 @@
+/* Toast notifications positioning */
+.toast {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 9999;
+  width: min(28rem, calc(100vw - 2rem));
+  max-width: calc(100vw - 2rem);
+  animation: slideIn 0.3s ease-out;
+}
+
+.kodelet-toast-card {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: 0.85rem 1rem;
+  border-radius: 16px;
+  border: 1px solid rgba(20, 20, 19, 0.08);
+  box-shadow:
+    0 16px 32px rgba(23, 21, 18, 0.12),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(12px);
+  font-family: var(--font-heading);
+  font-size: 0.88rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  white-space: normal;
+}
+
+.kodelet-toast-card .toast-title {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  margin-bottom: 0.15rem;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+  color: inherit;
+}
+
+.kodelet-toast-card .toast-message {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+  line-height: 1.35;
+}
+
+.kodelet-toast-card.alert-info {
+  background: rgba(244, 241, 234, 0.96);
+  color: #4a463f;
+}
+
+.kodelet-toast-card.alert-success {
+  background: rgba(238, 244, 234, 0.96);
+  color: #41503f;
+}
+
+.kodelet-toast-card.alert-error {
+  background: rgba(247, 236, 232, 0.97);
+  color: #8c3f34;
+}
+
+.kodelet-toast-card.alert-neutral {
+  background: rgba(243, 240, 234, 0.98);
+  color: #4d483f;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes kodeletSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes kodeletDustOrbit {
+  0% {
+    transform: rotate(0deg) scale(0.96);
+  }
+  45% {
+    transform: rotate(178deg) scale(1.05);
+  }
+  100% {
+    transform: rotate(360deg) scale(0.96);
+  }
+}
+
+@keyframes kodeletDustOrbitReverse {
+  0% {
+    transform: rotate(360deg) scale(1);
+  }
+  100% {
+    transform: rotate(0deg) scale(1);
+  }
+}
+
+@keyframes kodeletDustCore {
+  0%,
+  100% {
+    opacity: 0.62;
+    transform: scale(0.94);
+  }
+  50% {
+    opacity: 0.92;
+    transform: scale(1.08);
+  }
+}
+
+@keyframes kodeletDustTrail {
+  0%,
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0.2;
+  }
+  50% {
+    stroke-dashoffset: -6;
+    opacity: 0.58;
+  }
+}
+
+@keyframes kodeletTextDust {
+  from {
+    transform: translate3d(-0.08rem, 0.06rem, 0) scale(0.7);
+    opacity: 0.18;
+  }
+  to {
+    transform: translate3d(0.14rem, -0.12rem, 0) scale(1.2);
+    opacity: 0.72;
+  }
+}
+
+@keyframes kodeletActivityPulse {
+  0%,
+  100% {
+    opacity: 0.72;
+    transform: scale(0.92);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}

@@ -1,0 +1,366 @@
+.activity-stack {
+  position: relative;
+  display: grid;
+  gap: 0.34rem;
+}
+
+.activity-stack-thinking {
+  margin-top: 0.1rem;
+  margin-bottom: 0.1rem;
+}
+
+.activity-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0.65rem;
+  border: 1px solid transparent;
+  background: transparent;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease;
+}
+
+.activity-card:hover,
+.activity-card[open] {
+  border-color: rgba(20, 20, 19, 0.06);
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.activity-card-thinking {
+  border-color: transparent;
+  background: transparent;
+}
+
+.activity-card-thinking:hover,
+.activity-card-thinking[open] {
+  border-color: rgba(20, 20, 19, 0.045);
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.activity-card-live {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.activity-card-thinking.activity-card-live {
+  border-color: transparent;
+  background: transparent;
+}
+
+.activity-card-thinking.activity-card-live:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.activity-card-error {
+  background: rgba(191, 63, 63, 0.035);
+}
+
+.activity-summary {
+  min-height: 2.15rem;
+  padding: 0.36rem 0.58rem;
+}
+
+.activity-summary-static {
+  cursor: default;
+}
+
+.activity-summary-static:hover {
+  background: transparent;
+}
+
+.activity-detail-content {
+  margin: 0 0.58rem 0.58rem 2.05rem;
+  padding-top: 0.64rem;
+  border-top: 1px solid rgba(20, 20, 19, 0.055);
+}
+
+.activity-detail-content-live {
+  margin-top: -0.15rem;
+  padding-top: 0.48rem;
+}
+
+.tool-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  list-style: none;
+  padding: 0.52rem 0.7rem;
+  transition:
+    background-color 160ms ease,
+    color 160ms ease;
+}
+
+.tool-summary:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.tool-summary:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px rgba(106, 155, 204, 0.28);
+}
+
+.tool-summary-chevron {
+  flex: 0 0 auto;
+  font-family: var(--font-heading);
+  font-size: 0.72rem;
+  color: rgba(122, 117, 107, 0.56);
+  transform: rotate(0deg);
+  transform-origin: center;
+  transition:
+    transform 180ms ease,
+    color 180ms ease;
+}
+
+.activity-card[open] .tool-summary-chevron {
+  color: rgba(122, 117, 107, 0.84);
+  transform: rotate(90deg);
+}
+
+.tool-summary-text {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: baseline;
+  gap: 0.18rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-heading);
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: rgba(20, 20, 19, 0.66);
+}
+
+.tool-summary-label {
+  flex: 0 0 auto;
+  color: rgba(20, 20, 19, 0.72);
+}
+
+.tool-summary-icon {
+  flex: 0 0 auto;
+  align-self: center;
+  color: rgba(20, 20, 19, 0.58);
+  margin-right: 0.16rem;
+  stroke-width: 2.2;
+  transform: translateY(-0.02rem);
+}
+
+.tool-summary-icon-thinking {
+  color: #6f91b5;
+}
+
+.tool-summary-icon-running {
+  color: #c79643;
+  filter: drop-shadow(0 0 5px rgba(199, 150, 67, 0.16));
+  animation: kodeletActivityPulse 1.5s ease-in-out infinite;
+}
+
+.tool-summary-icon-error {
+  color: #b04a4a;
+  filter: drop-shadow(0 0 4px rgba(191, 63, 63, 0.14));
+}
+
+.tool-summary-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: rgba(20, 20, 19, 0.52);
+}
+
+.tool-summary-status {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: rgba(122, 117, 107, 0.52);
+}
+
+.tool-awaiting {
+  font-size: 0.82rem;
+  color: #6f6a5f;
+}
+
+.tool-code-block {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: 0.875rem;
+  overflow-x: auto;
+  border-radius: 6px;
+  border: 1px solid var(--kodelet-mid-gray);
+  background: linear-gradient(
+    135deg,
+    var(--kodelet-light-gray) 0%,
+    var(--kodelet-light) 100%
+  );
+  box-shadow: var(--shadow-sm);
+}
+
+.tool-code-block code {
+  display: block;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--kodelet-dark);
+}
+
+.web-fetch-code-preview .tool-code-block {
+  max-height: 24rem;
+  overflow: auto;
+  padding: 0.72rem;
+  background: rgba(247, 243, 235, 0.58);
+  box-shadow: none;
+}
+
+.web-fetch-code-preview .tool-code-block code {
+  font-size: 0.74rem;
+  line-height: 1.44;
+}
+
+.web-fetch-code-preview {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.web-fetch-code-preview .tool-code-block code {
+  white-space: pre;
+  word-break: normal;
+}
+
+.running-tool-input-preview .tool-code-block {
+  max-height: 8.5rem;
+  overflow: auto;
+  opacity: 0.82;
+}
+
+.running-tool-input-preview .tool-code-block code {
+  font-size: 0.72rem;
+  line-height: 1.42;
+}
+
+.task-run-progress,
+.task-run-result {
+  display: grid;
+  gap: 0.62rem;
+}
+
+.task-run-stats {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: rgba(122, 117, 107, 0.72);
+}
+
+.task-run-activities {
+  display: grid;
+  gap: 0.22rem;
+}
+
+.task-run-activity {
+  display: grid;
+  grid-template-columns: 1rem minmax(0, 1fr);
+  gap: 0.34rem;
+  align-items: start;
+  min-width: 0;
+  padding: 0.16rem 0;
+}
+
+.task-run-activity-marker {
+  margin-top: 0.08rem;
+  color: rgba(74, 122, 88, 0.82);
+  stroke-width: 2.3;
+}
+
+.task-run-activity-marker.is-running {
+  color: #c79643;
+  animation: taskRunSpin 1.15s linear infinite;
+}
+
+.task-run-activity-marker.is-failed {
+  color: #b04a4a;
+}
+
+.task-run-activity-copy {
+  min-width: 0;
+}
+
+.task-run-activity-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.71rem;
+  line-height: 1.42;
+  color: rgba(20, 20, 19, 0.65);
+}
+
+.task-run-activity.is-running .task-run-activity-label {
+  color: rgba(20, 20, 19, 0.78);
+}
+
+.task-run-activity.is-failed .task-run-activity-label {
+  color: #8d3e3e;
+}
+
+.task-run-activity-preview {
+  margin-top: 0.12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: rgba(141, 62, 62, 0.72);
+}
+
+.task-run-omitted,
+.task-run-empty {
+  padding-left: 1.34rem;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: rgba(122, 117, 107, 0.62);
+}
+
+.task-run-response {
+  max-height: 34rem;
+}
+
+.task-run-history {
+  border-top: 1px solid rgba(20, 20, 19, 0.055);
+  padding-top: 0.5rem;
+}
+
+.task-run-history > summary {
+  width: fit-content;
+  cursor: pointer;
+  list-style: none;
+  font-family: var(--font-heading);
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: rgba(84, 123, 166, 0.86);
+}
+
+.task-run-history > summary:hover {
+  color: var(--kodelet-orange);
+}
+
+.task-run-history[open] > summary {
+  margin-bottom: 0.48rem;
+}
+
+.task-run-history .task-run-stats {
+  margin-bottom: 0.34rem;
+}
+
+@keyframes taskRunSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+

@@ -1205,16 +1205,22 @@ describe('ChatPage', () => {
 
     render(<ChatPage />);
 
-    await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(mockGetConversations).toHaveBeenCalled();
+      expect(mockGetChatSettings).toHaveBeenCalled();
+    });
     fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
 
     expect(screen.getByTestId('recent-workspaces')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText('Working directory')).toHaveFocus());
     expect(screen.getByRole('button', { name: '/workspace/a' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '/workspace/e' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '/workspace/f' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '/workspace/b' }));
-    expect(screen.getByLabelText('Working directory')).toHaveValue('/workspace/b');
+    await waitFor(() => {
+      expect(screen.getByLabelText('Working directory')).toHaveValue('/workspace/b');
+    });
   });
 
   it('cancels pending cwd suggestions when applying a recent workspace', async () => {
@@ -2867,7 +2873,11 @@ describe('ChatPage', () => {
       'Send (Shift+Enter)'
     );
     fireEvent.click(screen.getByText(/work · effort:medium · ~\/workspace\/kodelet/));
-    expect(screen.getByLabelText('Working directory')).toHaveValue('~/workspace/kodelet');
+    const cwdInput = screen.getByLabelText('Working directory');
+    await waitFor(() => {
+      expect(cwdInput).toHaveValue('~/workspace/kodelet');
+      expect(cwdInput).toHaveFocus();
+    });
   });
 
   it('shows compact usage metadata below the transcript when available', async () => {

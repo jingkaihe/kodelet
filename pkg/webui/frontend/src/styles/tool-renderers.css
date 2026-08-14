@@ -1,0 +1,450 @@
+.bash-tool-brief {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.bash-tool-description {
+  font-family: var(--font-heading);
+  font-size: 0.82rem;
+  font-weight: 500;
+  line-height: 1.45;
+  color: rgba(20, 20, 19, 0.68);
+}
+
+.bash-tool-description.is-muted {
+  color: rgba(20, 20, 19, 0.44);
+}
+
+.bash-tool-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.bash-tool-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  font-family: var(--font-heading);
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1.2;
+  color: #6f6a5f;
+}
+
+.bash-tool-badge.is-success {
+  color: #5f7247;
+}
+
+.bash-tool-badge.is-error {
+  color: #a63f3f;
+}
+
+.bash-copy-command {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: rgba(20, 20, 19, 0.42);
+  box-shadow: none;
+}
+
+.bash-copy-command:hover,
+.bash-copy-command:focus-visible {
+  border: 0;
+  background: transparent;
+  color: rgba(20, 20, 19, 0.72);
+  box-shadow: none;
+  transform: none;
+}
+
+.bash-copy-command svg {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+.skill-tool-detail {
+  display: grid;
+  gap: 0.28rem;
+}
+
+.skill-tool-status {
+  display: inline-flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-family: var(--font-heading);
+  font-size: 0.75rem;
+  line-height: 1.3;
+}
+
+.skill-tool-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 650;
+  color: rgba(20, 20, 19, 0.64);
+}
+
+.skill-tool-loaded {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: rgba(122, 117, 107, 0.58);
+}
+
+.skill-tool-path {
+  width: fit-content;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.73rem;
+  color: rgba(20, 20, 19, 0.7);
+}
+
+.quiet-tool-detail {
+  display: grid;
+  min-width: 0;
+  max-width: 100%;
+  gap: 0.62rem;
+}
+
+.quiet-tool-line {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-family: var(--font-heading);
+  font-size: 0.76rem;
+  line-height: 1.35;
+  color: rgba(20, 20, 19, 0.66);
+}
+
+.quiet-tool-emphasis {
+  font-weight: 650;
+  color: rgba(20, 20, 19, 0.64);
+}
+
+.quiet-tool-muted {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(122, 117, 107, 0.68);
+}
+
+.quiet-tool-muted.mono,
+.quiet-tool-path {
+  font-family: var(--font-mono);
+}
+
+.quiet-tool-warning {
+  font-weight: 650;
+  color: #a63f3f;
+}
+
+.quiet-tool-path {
+  width: fit-content;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.73rem;
+  color: rgba(20, 20, 19, 0.68);
+}
+
+.quiet-tool-empty {
+  font-family: var(--font-heading);
+  font-size: 0.76rem;
+  color: rgba(20, 20, 19, 0.52);
+}
+
+.quiet-tool-section-title {
+  font-family: var(--font-heading);
+  font-size: 0.75rem;
+  font-weight: 650;
+  color: rgba(20, 20, 19, 0.62);
+}
+
+.read-conversation-detail {
+  gap: 0.52rem;
+}
+
+.read-conversation-goal {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.52rem;
+  align-items: baseline;
+  max-width: 100%;
+  font-size: 0.76rem;
+  line-height: 1.42;
+  color: rgba(20, 20, 19, 0.62);
+}
+
+.read-conversation-goal span:first-child {
+  font-family: var(--font-heading);
+  font-weight: 650;
+  color: rgba(122, 117, 107, 0.66);
+}
+
+.read-conversation-goal span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.tool-compact-markdown {
+  max-height: 26rem;
+  overflow: auto;
+  padding: 0.72rem 0.78rem;
+  border: 1px solid rgba(176, 174, 165, 0.16);
+  border-radius: 0.58rem;
+  background: rgba(247, 243, 235, 0.38);
+  color: rgba(20, 20, 19, 0.72);
+  font-family: var(--font-body);
+  font-size: 0.82rem;
+  line-height: 1.56;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.tool-compact-markdown > *:first-child {
+  margin-top: 0;
+}
+
+.tool-compact-markdown > *:last-child {
+  margin-bottom: 0;
+}
+
+.tool-compact-markdown p {
+  margin: 0 0 0.55rem;
+}
+
+.tool-compact-markdown h1,
+.tool-compact-markdown h2,
+.tool-compact-markdown h3,
+.tool-compact-markdown h4,
+.tool-compact-markdown h5,
+.tool-compact-markdown h6 {
+  margin: 0.72rem 0 0.34rem;
+  font-family: var(--font-heading);
+  font-weight: 650;
+  color: rgba(20, 20, 19, 0.72);
+}
+
+.tool-compact-markdown h1,
+.tool-compact-markdown h2 {
+  font-size: 0.9rem;
+}
+
+.tool-compact-markdown h3,
+.tool-compact-markdown h4,
+.tool-compact-markdown h5,
+.tool-compact-markdown h6 {
+  font-size: 0.84rem;
+}
+
+.tool-compact-markdown ul,
+.tool-compact-markdown ol {
+  margin: 0.42rem 0 0.62rem;
+  padding-left: 1.08rem;
+}
+
+.tool-compact-markdown ul {
+  list-style: disc outside;
+}
+
+.tool-compact-markdown ol {
+  list-style: decimal outside;
+}
+
+.tool-compact-markdown li {
+  margin-bottom: 0.28rem;
+}
+
+.tool-compact-markdown a {
+  color: #547ba6;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.16em;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.tool-compact-markdown a:hover {
+  color: var(--kodelet-orange);
+}
+
+.tool-compact-markdown code {
+  padding: 0.08rem 0.28rem;
+  border: 1px solid rgba(176, 174, 165, 0.2);
+  border-radius: 0.28rem;
+  background: rgba(232, 230, 220, 0.48);
+  font-family: var(--font-mono);
+  font-size: 0.75em;
+}
+
+.tool-compact-markdown pre {
+  max-height: 14rem;
+  overflow: auto;
+  margin: 0.6rem 0;
+  padding: 0.62rem;
+  border: 1px solid rgba(176, 174, 165, 0.18);
+  border-radius: 0.46rem;
+  background: rgba(232, 230, 220, 0.38);
+}
+
+.tool-compact-markdown pre code {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 0.74rem;
+  line-height: 1.44;
+  white-space: pre-wrap;
+}
+
+.apply-patch-result {
+  display: grid;
+  gap: 0.72rem;
+}
+
+.apply-patch-result-failed {
+  border-left: 2px solid rgba(166, 63, 63, 0.36);
+  padding-left: 0.72rem;
+}
+
+.apply-patch-error {
+  border-radius: 10px;
+  background: rgba(191, 63, 63, 0.08);
+  padding: 0.46rem 0.62rem;
+  font-family: var(--font-heading);
+  font-size: 0.76rem;
+  color: #8d3e3e;
+}
+
+.apply-patch-change {
+  display: grid;
+  gap: 0.38rem;
+}
+
+.apply-patch-change-line {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 0.52rem;
+  font-family: var(--font-heading);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.apply-patch-operation {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 600;
+  color: rgba(122, 117, 107, 0.7);
+}
+
+.apply-patch-operation-add {
+  color: #5f7247;
+}
+
+.apply-patch-operation-update {
+  color: #537aa5;
+}
+
+.apply-patch-operation-delete {
+  color: #a63f3f;
+}
+
+.apply-patch-operation-move {
+  color: #8b6a2b;
+}
+
+.apply-patch-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.73rem;
+  color: rgba(20, 20, 19, 0.68);
+}
+
+.apply-patch-counts {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 0.32rem;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  margin-left: auto;
+}
+
+.apply-patch-count-added {
+  color: #5f7247;
+}
+
+.apply-patch-count-removed {
+  color: #a63f3f;
+}
+
+.apply-patch-empty {
+  font-family: var(--font-heading);
+  font-size: 0.76rem;
+  color: rgba(20, 20, 19, 0.52);
+}
+
+.tool-kv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  min-width: 0;
+  max-width: 100%;
+  gap: 0.45rem 0.75rem;
+  margin: 0.55rem 0 0.35rem;
+}
+
+.tool-kv-item {
+  min-width: 0;
+  background: rgba(232, 230, 220, 0.42);
+  border: 1px solid rgba(176, 174, 165, 0.18);
+  border-radius: 8px;
+  padding: 0.45rem 0.6rem;
+}
+
+.tool-kv-label {
+  display: block;
+  font-family: var(--font-heading);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: #7a756b;
+  margin-bottom: 0.18rem;
+}
+
+.tool-kv-value {
+  display: block;
+  font-size: 0.84rem;
+  color: var(--kodelet-dark);
+  word-break: break-word;
+}
+
+.tool-kv-value.mono {
+  font-family: var(--font-mono);
+  font-size: 0.77rem;
+}
+
+.tool-note {
+  background: rgba(250, 249, 245, 0.95);
+  border-left: 3px solid var(--kodelet-orange);
+  border-radius: 6px;
+  padding: 0.55rem 0.7rem;
+  margin: 0.45rem 0;
+  font-size: 0.83rem;
+  color: #5f5a50;
+}
+

@@ -1,0 +1,113 @@
+/* Refined card styling with micro-interactions */
+.card {
+  background: var(--kodelet-light);
+  border: 1px solid var(--kodelet-light-gray);
+  box-shadow: var(--shadow-sm);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(
+    90deg,
+    var(--kodelet-orange) 0%,
+    var(--kodelet-blue) 50%,
+    var(--kodelet-green) 100%
+  );
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-lg);
+  border-color: var(--kodelet-mid-gray);
+}
+
+.card:hover::before {
+  transform: scaleX(1);
+}
+
+/* Force light color scheme - kodelet uses a fixed light theme */
+/* This prevents system dark mode from affecting the UI */
+:root {
+  color-scheme: light;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .container {
+    @apply px-4;
+  }
+
+  .card-body {
+    @apply p-4;
+  }
+
+  .prose {
+    @apply text-sm;
+  }
+}
+
+/* Collapsible content styling */
+.collapse-content {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+/* Refined button styling */
+button,
+.btn {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+button:hover,
+.btn:hover {
+  transform: translateY(-1px);
+}
+
+button:active,
+.btn:active {
+  transform: translateY(0);
+}
+
+/* Focus visible for keyboard navigation */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid var(--kodelet-orange);
+  outline-offset: 2px;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .badge {
+    @apply border border-current;
+  }
+
+  .card {
+    @apply border-2 border-current;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  /* Match component specificity so motion is disabled without !important. */
+  :root:root * {
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+    transition-duration: 0.01ms;
+  }
+}

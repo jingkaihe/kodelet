@@ -1,0 +1,368 @@
+.tool-action-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-family: var(--font-heading);
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+  color: var(--kodelet-blue);
+  transition: color 140ms ease;
+}
+
+.tool-action-link:hover {
+  color: #547ba6;
+}
+
+.tool-detail-panel {
+  border-radius: 1rem;
+  border: 1px solid rgba(20, 20, 19, 0.08);
+  background: var(--kodelet-panel);
+  padding: 0.9rem 1rem;
+}
+
+.tool-meta-label {
+  font-family: var(--font-heading);
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+  color: #7a756b;
+}
+
+.primary-pill-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.65rem;
+  border-radius: 1.2rem;
+  padding: 0.58rem 1rem;
+  font-family: var(--font-heading);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: white;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 10px 26px rgba(20, 20, 19, 0.12);
+  transition:
+    background-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.primary-pill-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 14px 32px rgba(20, 20, 19, 0.16);
+}
+
+h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+h2 {
+  font-size: 1.5rem;
+  line-height: 1.3;
+}
+
+h3 {
+  font-size: 1.25rem;
+  line-height: 1.4;
+}
+
+/* Line number styling for code blocks */
+.line-number {
+  @apply select-none mr-2;
+  color: var(--kodelet-mid-gray);
+}
+
+/* Syntax highlighting adjustments */
+pre code {
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+/* Refined prose styling for markdown content */
+.prose,
+.chat-prose {
+  max-width: none;
+  min-width: 0;
+  color: var(--kodelet-dark);
+  font-family: var(--font-body);
+  font-size: 0.98rem;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.prose > *:first-child,
+.chat-prose > *:first-child,
+.prose-enhanced > *:first-child {
+  margin-top: 0;
+}
+
+.prose > *:last-child,
+.chat-prose > *:last-child,
+.prose-enhanced > *:last-child {
+  margin-bottom: 0;
+}
+
+.prose p,
+.chat-prose p {
+  margin-bottom: 0.95rem;
+}
+
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4,
+.chat-prose h1,
+.chat-prose h2,
+.chat-prose h3,
+.chat-prose h4 {
+  margin: 1.35rem 0 0.65rem;
+  font-family: var(--font-heading);
+  color: var(--kodelet-dark);
+}
+
+.prose h1,
+.chat-prose h1 {
+  font-size: 1.55rem;
+}
+
+.prose h2,
+.chat-prose h2 {
+  font-size: 1.34rem;
+}
+
+.prose h3,
+.chat-prose h3 {
+  font-size: 1.15rem;
+}
+
+.prose ul,
+.prose ol,
+.chat-prose ul,
+.chat-prose ol {
+  margin: 0.9rem 0 1rem;
+  padding-left: 1.4rem;
+}
+
+.prose ul,
+.chat-prose ul {
+  list-style: disc outside;
+}
+
+.prose ol,
+.chat-prose ol {
+  list-style: decimal outside;
+}
+
+.prose li,
+.chat-prose li {
+  margin-bottom: 0.4rem;
+}
+
+.prose blockquote,
+.chat-prose blockquote {
+  margin: 1rem 0;
+  border-left: 3px solid rgba(217, 119, 87, 0.32);
+  padding-left: 1rem;
+  color: rgba(20, 20, 19, 0.72);
+  font-style: italic;
+}
+
+.prose a,
+.chat-prose a {
+  color: #547ba6;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.16em;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.prose a:hover,
+.chat-prose a:hover {
+  color: var(--kodelet-orange);
+}
+
+.prose strong,
+.prose b,
+.chat-prose strong,
+.chat-prose b {
+  font-weight: 600;
+  color: var(--kodelet-dark);
+}
+
+.prose pre,
+.chat-prose pre {
+  background: linear-gradient(
+    135deg,
+    var(--kodelet-light-gray) 0%,
+    var(--kodelet-light) 100%
+  );
+  color: var(--kodelet-dark);
+  border-radius: 6px;
+  padding: 0.875rem;
+  overflow-x: auto;
+  margin: 0.875rem 0;
+  border: 1px solid var(--kodelet-mid-gray);
+  box-shadow: var(--shadow-sm);
+}
+
+.prose code,
+.chat-prose code {
+  background: var(--kodelet-light-gray);
+  color: var(--kodelet-dark);
+  padding: 0.12rem 0.36rem;
+  border-radius: 0.34rem;
+  font-size: 0.78em;
+  font-family: var(--font-mono);
+  line-height: 1.32;
+  border: 1px solid var(--kodelet-mid-gray);
+}
+
+.prose :not(pre) > code,
+.chat-prose :not(pre) > code {
+  white-space: break-spaces;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.prose pre code,
+.chat-prose pre code {
+  background: transparent;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+/* Enhanced prose styling for subagent and other technical content */
+.prose-enhanced {
+  max-width: none;
+  min-width: 0;
+  color: var(--kodelet-dark);
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  line-height: 1.72;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.prose-enhanced p {
+  margin-bottom: 0.95rem;
+}
+
+.prose-enhanced h1,
+.prose-enhanced h2,
+.prose-enhanced h3,
+.prose-enhanced h4,
+.prose-enhanced h5,
+.prose-enhanced h6 {
+  margin-top: 1.4rem;
+  margin-bottom: 0.65rem;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  color: var(--kodelet-dark);
+}
+
+.prose-enhanced h1 {
+  font-size: 1.5rem;
+}
+.prose-enhanced h2 {
+  font-size: 1.375rem;
+}
+.prose-enhanced h3 {
+  font-size: 1.25rem;
+}
+.prose-enhanced h4 {
+  font-size: 1.125rem;
+}
+
+.prose-enhanced code {
+  background-color: rgba(232, 230, 220, 0.72);
+  color: var(--kodelet-dark);
+  padding: 0.1rem 0.34rem;
+  border-radius: 0.32rem;
+  font-size: 0.78em;
+  font-family: var(--font-mono);
+  line-height: 1.32;
+  border: 1px solid rgba(176, 174, 165, 0.22);
+}
+
+.prose-enhanced :not(pre) > code {
+  white-space: break-spaces;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.prose-enhanced pre {
+  background-color: rgba(232, 230, 220, 0.45);
+  color: var(--kodelet-dark);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  margin: 1rem 0;
+  overflow-x: auto;
+  border: 1px solid rgba(176, 174, 165, 0.2);
+}
+
+.prose-enhanced pre code {
+  background-color: transparent;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.prose-enhanced ul,
+.prose-enhanced ol {
+  margin: 1rem 0;
+  padding-left: 1.5rem;
+}
+
+.prose-enhanced ul {
+  list-style: disc outside;
+}
+
+.prose-enhanced ol {
+  list-style: decimal outside;
+}
+
+.prose-enhanced li {
+  margin-bottom: 0.5rem;
+}
+
+.prose-enhanced blockquote {
+  border-left: 3px solid rgba(217, 119, 87, 0.32);
+  margin: 1rem 0;
+  padding-left: 1rem;
+  font-style: italic;
+  color: rgba(20, 20, 19, 0.72);
+}
+
+.prose-enhanced table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+}

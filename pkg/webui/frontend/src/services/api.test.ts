@@ -12,6 +12,11 @@ import {
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
+const setTestCookie = (cookie: string) => {
+	// biome-ignore lint/suspicious/noDocumentCookie: jsdom exposes cookie mutation through document.cookie.
+	document.cookie = cookie;
+};
+
 describe("ApiService", () => {
 	beforeEach(() => {
 		mockFetch.mockClear();
@@ -19,7 +24,7 @@ describe("ApiService", () => {
 
 	afterEach(() => {
 		vi.clearAllMocks();
-		document.cookie = "kodelet_csrf=; Max-Age=0; Path=/";
+		setTestCookie("kodelet_csrf=; Max-Age=0; Path=/");
 	});
 
 	describe("request method", () => {
@@ -42,7 +47,7 @@ describe("ApiService", () => {
 		});
 
 		it("adds CSRF headers only to unsafe requests", async () => {
-			document.cookie = "kodelet_csrf=csrf-api; Path=/";
+			setTestCookie("kodelet_csrf=csrf-api; Path=/");
 			mockFetch
 				.mockResolvedValueOnce({
 					ok: true,
@@ -173,7 +178,7 @@ describe("ApiService", () => {
 		});
 
 		it("posts user sign-in decisions with the CSRF cookie", async () => {
-			document.cookie = "kodelet_csrf=csrf-user; Path=/";
+			setTestCookie("kodelet_csrf=csrf-user; Path=/");
 			mockFetch.mockResolvedValueOnce({
 				ok: true,
 				status: 200,
@@ -197,7 +202,7 @@ describe("ApiService", () => {
 		});
 
 		it("posts runner approval replacement intent with the CSRF cookie", async () => {
-			document.cookie = "kodelet_csrf=csrf-runner; Path=/";
+			setTestCookie("kodelet_csrf=csrf-runner; Path=/");
 			mockFetch.mockResolvedValueOnce({
 				ok: true,
 				status: 200,
@@ -758,7 +763,7 @@ describe("ApiService", () => {
 
 	describe("streamChat", () => {
 		it("streams newline-delimited chat events", async () => {
-			document.cookie = "kodelet_csrf=csrf-stream; Path=/";
+			setTestCookie("kodelet_csrf=csrf-stream; Path=/");
 			const onEvent = vi.fn();
 			const encoder = new TextEncoder();
 

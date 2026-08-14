@@ -1,0 +1,186 @@
+/* ============================================
+   Kodelet Web UI
+   ============================================ */
+
+/* Custom CSS Variables for Brand Colors */
+:root {
+  --kodelet-dark: #141413;
+  --kodelet-light: #faf9f5;
+  --kodelet-mid-gray: #b0aea5;
+  --kodelet-light-gray: #e8e6dc;
+  --kodelet-orange: #d97757;
+  --kodelet-blue: #6a9bcc;
+  --kodelet-green: #788c5d;
+  --kodelet-panel: rgba(245, 240, 231, 0.94);
+  --font-heading: "IBM Plex Sans", "Helvetica Neue", sans-serif;
+  --font-body: "Crimson Pro", Georgia, serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  --type-body-sm: 1rem;
+  --sidebar-surface-opaque: #f4efe5;
+  --sidebar-surface-ink: #4d473f;
+  --sidebar-surface-muted: #8d8578;
+  --sidebar-stroke-strong: rgba(93, 83, 64, 0.12);
+
+  /* Refined shadows */
+  --shadow-sm: 0 1px 2px 0 rgb(20 20 19 / 0.05);
+  --shadow-lg:
+    0 10px 15px -3px rgb(20 20 19 / 0.08), 0 4px 6px -4px rgb(20 20 19 / 0.05);
+
+  /* Noise texture for depth */
+  --noise-texture: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' /%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.05'/%3E%3C/svg%3E");
+}
+
+html,
+body,
+#root,
+#storybook-root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+html.terminal-popout-active,
+body.terminal-popout-active {
+  overscroll-behavior: none;
+  background: #18140f;
+}
+
+body.terminal-popout-active::before {
+  display: none;
+}
+
+/* Base Typography Styling */
+body {
+  font-family: var(--font-heading);
+  font-size: var(--type-body-sm);
+  line-height: 1.55;
+  color: var(--kodelet-dark);
+  background: #f2ede3;
+  position: relative;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Subtle background texture for depth */
+body::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image: var(--noise-texture);
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.18;
+}
+
+#root,
+#storybook-root {
+  min-height: 100%;
+  position: relative;
+  z-index: 1;
+}
+
+.app-viewport {
+  position: fixed;
+  top: var(--app-viewport-top, 0px);
+  left: var(--app-viewport-left, 0px);
+  width: var(--app-viewport-width, 100vw);
+  height: var(--app-viewport-height, 100dvh);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+textarea::placeholder {
+  color: rgba(20, 20, 19, 0.4);
+}
+
+summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Editorial heading styles */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--kodelet-dark);
+}
+
+.empty-state-copy-stack {
+  width: min(100%, 50rem);
+  padding-bottom: clamp(1.5rem, 6vh, 4rem);
+}
+
+.empty-state-title {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: clamp(3.2rem, 5.8vw, 5.25rem);
+  font-weight: 600;
+  letter-spacing: -0.046em;
+  line-height: 0.96;
+  color: var(--kodelet-dark);
+  text-wrap: balance;
+}
+
+.empty-state-copy {
+  max-width: 36rem;
+  margin: clamp(0.85rem, 1.4vw, 1.15rem) auto 0;
+  font-family: var(--font-body);
+  font-size: clamp(1.08rem, 1.35vw, 1.38rem);
+  font-style: normal;
+  font-weight: 400;
+  line-height: 1.32;
+  letter-spacing: -0.012em;
+  color: rgba(20, 20, 19, 0.6);
+  text-wrap: balance;
+}
+
+@media (min-width: 1024px) {
+  .empty-state-title {
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 600px) {
+  .empty-state-copy-stack {
+    padding-bottom: 1.25rem;
+  }
+
+  .empty-state-title {
+    font-size: clamp(2.65rem, 13vw, 3.2rem);
+    line-height: 0.98;
+  }
+
+  .empty-state-copy {
+    font-size: 1.05rem;
+  }
+}
+
+.eyebrow-label {
+  font-family: var(--font-heading);
+  font-size: 0.68rem;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: #7a756b;
+}
+
+.surface-panel {
+  border: 1px solid rgba(20, 20, 19, 0.08);
+  background: var(--kodelet-panel);
+  box-shadow: 0 14px 34px rgba(20, 20, 19, 0.05);
+}
