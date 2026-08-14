@@ -36,6 +36,141 @@ const accessError = (error: unknown): boolean => {
   return [401, 403].includes(Number(error.status));
 };
 
+type UserLoginAction = 'lookup' | 'approve' | 'deny';
+
+interface UserLoginPageViewProps {
+  principal: AuthPrincipal | null;
+  principalLoading: boolean;
+  userCode: string;
+  authorization: UserLoginAuthorization | null;
+  completionStatus: ApprovalStatus | null;
+  message: string;
+  error: string;
+  activeAction: UserLoginAction | null;
+  onUserCodeChange: (value: string) => void;
+  onLookup: (code: string) => void;
+  onDecision: (decision: 'approve' | 'deny') => void;
+  onReset: () => void;
+}
+
+export function UserLoginPageView({
+  principal,
+  principalLoading,
+  userCode,
+  authorization,
+  completionStatus,
+  message,
+  error,
+  activeAction,
+  onUserCodeChange,
+  onLookup,
+  onDecision,
+  onReset,
+}: UserLoginPageViewProps) {
+  const busy = activeAction !== null;
+  const requestStatusCopy = authorization ? statusCopy(authorization.status) : '';
+  const pageTitle = authorization
+    ? 'Approve sign-in'
+    : completionStatus === 'approved'
+      ? 'Sign-in approved'
+      : completionStatus === 'denied'
+        ? 'Sign-in denied'
+        : 'Client sign-in';
+  const pageDescription = authorization
+    ? 'Confirm these details match your client.'
+    : completionStatus
+      ? undefined
+      : 'Enter the code shown in your Kodelet client.';
+
+  return (
+    <AuthPageShell
+      description={pageDescription}
+      principal={principal}
+      principalLoading={principalLoading}
+      title={pageTitle}
+    >
+      {error ? <AuthNotice tone="error">{error}</AuthNotice> : null}
+      {message ? (
+        <AuthNotice tone={completionStatus === 'approved' ? 'success' : 'info'}>
+          {message}
+        </AuthNotice>
+      ) : null}
+
+      {principal && !authorization && !completionStatus ? (
+        <>
+          {!error ? (
+            <AuthNotice tone="warning">
+              Only use a code from your own Kodelet client.
+            </AuthNotice>
+          ) : null}
+          <ApprovalCodeForm
+            busy={busy}
+            id="user-login-code"
+            label="Sign-in code"
+            onChange={onUserCodeChange}
+            onSubmit={onLookup}
+            value={userCode}
+          />
+        </>
+      ) : null}
+
+      {principal && authorization ? (
+        <div className="auth-request-review">
+          <AuthNotice tone="warning">
+            Only approve a sign-in you started.
+          </AuthNotice>
+          <AuthDetailList
+            items={[
+              { label: 'Code', value: authorization.userCode, mono: true },
+              { label: 'Client', value: authorization.clientName },
+              {
+                label: 'Platform',
+                value: `${authorization.clientOS}/${authorization.clientArch}`,
+                mono: true,
+              },
+              { label: 'Expires', value: formatAuthTimestamp(authorization.expiresAt) },
+            ]}
+          />
+          {requestStatusCopy ? <AuthNotice tone="info">{requestStatusCopy}</AuthNotice> : null}
+          <div className="auth-decision-actions">
+            <button className="auth-secondary-button" disabled={busy} onClick={onReset} type="button">
+              Use a different code
+            </button>
+            {authorization.status === 'pending' ? (
+              <div className="auth-decision-primary-actions">
+                <button
+                  className="auth-danger-button"
+                  disabled={busy}
+                  onClick={() => onDecision('deny')}
+                  type="button"
+                >
+                  {activeAction === 'deny' ? 'Denying…' : 'Deny'}
+                </button>
+                <button
+                  className="auth-primary-button"
+                  disabled={busy}
+                  onClick={() => onDecision('approve')}
+                  type="button"
+                >
+                  {activeAction === 'approve' ? 'Approving…' : 'Approve sign-in'}
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {completionStatus ? (
+        <div className="auth-completion-actions">
+          <a className="auth-secondary-button" href="/">
+            Return to Kodelet
+          </a>
+        </div>
+      ) : null}
+    </AuthPageShell>
+  );
+}
+
 export default function UserLoginPage() {
   const [principal, setPrincipal] = useState<AuthPrincipal | null>(null);
   const [principalLoading, setPrincipalLoading] = useState(true);
@@ -44,8 +179,7 @@ export default function UserLoginPage() {
   const [completionStatus, setCompletionStatus] = useState<ApprovalStatus | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const [activeAction, setActiveAction] = useState<'lookup' | 'approve' | 'deny' | null>(null);
-  const busy = activeAction !== null;
+  const [activeAction, setActiveAction] = useState<UserLoginAction | null>(null);
 
   useEffect(() => {
     const previousTitle = document.title;
@@ -141,108 +275,23 @@ export default function UserLoginPage() {
     setUserCode('');
   };
 
-  const requestStatusCopy = authorization ? statusCopy(authorization.status) : '';
-  const pageTitle = authorization
-    ? 'Approve sign-in'
-    : completionStatus === 'approved'
-      ? 'Sign-in approved'
-      : completionStatus === 'denied'
-        ? 'Sign-in denied'
-        : 'Client sign-in';
-  const pageDescription = authorization
-    ? 'Confirm these details match your client.'
-    : completionStatus
-      ? undefined
-      : 'Enter the code shown in your Kodelet client.';
-
   return (
-    <AuthPageShell
-      description={pageDescription}
+    <UserLoginPageView
+      activeAction={activeAction}
+      authorization={authorization}
+      completionStatus={completionStatus}
+      error={error}
+      message={message}
       principal={principal}
       principalLoading={principalLoading}
-      title={pageTitle}
-    >
-      {error ? <AuthNotice tone="error">{error}</AuthNotice> : null}
-      {message ? (
-        <AuthNotice tone={completionStatus === 'approved' ? 'success' : 'info'}>
-          {message}
-        </AuthNotice>
-      ) : null}
-
-      {principal && !authorization && !completionStatus ? (
-        <>
-          {!error ? (
-            <AuthNotice tone="warning">
-              Only use a code from your own Kodelet client.
-            </AuthNotice>
-          ) : null}
-          <ApprovalCodeForm
-            busy={busy}
-            id="user-login-code"
-            label="Sign-in code"
-            onChange={(value) => {
-              setUserCode(value);
-              setError('');
-            }}
-            onSubmit={lookup}
-            value={userCode}
-          />
-        </>
-      ) : null}
-
-      {principal && authorization ? (
-        <div className="auth-request-review">
-          <AuthNotice tone="warning">
-            Only approve a sign-in you started.
-          </AuthNotice>
-          <AuthDetailList
-            items={[
-              { label: 'Code', value: authorization.userCode, mono: true },
-              { label: 'Client', value: authorization.clientName },
-              {
-                label: 'Platform',
-                value: `${authorization.clientOS}/${authorization.clientArch}`,
-                mono: true,
-              },
-              { label: 'Expires', value: formatAuthTimestamp(authorization.expiresAt) },
-            ]}
-          />
-          {requestStatusCopy ? <AuthNotice tone="info">{requestStatusCopy}</AuthNotice> : null}
-          <div className="auth-decision-actions">
-            <button className="auth-secondary-button" disabled={busy} onClick={reset} type="button">
-              Use a different code
-            </button>
-            {authorization.status === 'pending' ? (
-              <div className="auth-decision-primary-actions">
-                <button
-                  className="auth-danger-button"
-                  disabled={busy}
-                  onClick={() => decide('deny')}
-                  type="button"
-                >
-                  {activeAction === 'deny' ? 'Denying…' : 'Deny'}
-                </button>
-                <button
-                  className="auth-primary-button"
-                  disabled={busy}
-                  onClick={() => decide('approve')}
-                  type="button"
-                >
-                  {activeAction === 'approve' ? 'Approving…' : 'Approve sign-in'}
-                </button>
-              </div>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
-
-      {completionStatus ? (
-        <div className="auth-completion-actions">
-          <a className="auth-secondary-button" href="/">
-            Return to Kodelet
-          </a>
-        </div>
-      ) : null}
-    </AuthPageShell>
+      userCode={userCode}
+      onDecision={decide}
+      onLookup={lookup}
+      onReset={reset}
+      onUserCodeChange={(value) => {
+        setUserCode(value);
+        setError('');
+      }}
+    />
   );
 }

@@ -40,6 +40,161 @@ const accessError = (error: unknown): boolean => {
   return [401, 403].includes(Number(error.status));
 };
 
+type RunnerEnrollmentAction = 'lookup' | 'approve' | 'deny';
+
+interface RunnerEnrollmentPageViewProps {
+  principal: AuthPrincipal | null;
+  principalLoading: boolean;
+  userCode: string;
+  enrollment: RunnerEnrollmentAuthorization | null;
+  replaceConfirmed: boolean;
+  completionStatus: ApprovalStatus | null;
+  message: string;
+  error: string;
+  activeAction: RunnerEnrollmentAction | null;
+  onUserCodeChange: (value: string) => void;
+  onLookup: (code: string) => void;
+  onDecision: (decision: 'approve' | 'deny') => void;
+  onReplaceConfirmedChange: (confirmed: boolean) => void;
+  onReset: () => void;
+}
+
+export function RunnerEnrollmentPageView({
+  principal,
+  principalLoading,
+  userCode,
+  enrollment,
+  replaceConfirmed,
+  completionStatus,
+  message,
+  error,
+  activeAction,
+  onUserCodeChange,
+  onLookup,
+  onDecision,
+  onReplaceConfirmedChange,
+  onReset,
+}: RunnerEnrollmentPageViewProps) {
+  const busy = activeAction !== null;
+  const requestStatusCopy = enrollment ? statusCopy(enrollment.status) : '';
+  const runnerName = enrollment?.displayName || enrollment?.host.hostname || 'Unnamed runner';
+  const pageTitle = enrollment
+    ? 'Approve runner'
+    : completionStatus === 'approved'
+      ? 'Runner approved'
+      : completionStatus === 'denied'
+        ? 'Runner denied'
+        : 'Runner enrollment';
+  const pageDescription = enrollment
+    ? 'Confirm the runner, host, and workspace.'
+    : completionStatus
+      ? undefined
+      : 'Enter the code shown in the runner terminal.';
+
+  return (
+    <AuthPageShell
+      description={pageDescription}
+      principal={principal}
+      principalLoading={principalLoading}
+      title={pageTitle}
+    >
+      {error ? <AuthNotice tone="error">{error}</AuthNotice> : null}
+      {message ? (
+        <AuthNotice tone={completionStatus === 'approved' ? 'success' : 'info'}>
+          {message}
+        </AuthNotice>
+      ) : null}
+
+      {principal && !enrollment && !completionStatus ? (
+        <>
+          {!error ? (
+            <AuthNotice tone="warning">
+              Only use a code from a runner you control.
+            </AuthNotice>
+          ) : null}
+          <ApprovalCodeForm
+            busy={busy}
+            id="runner-enrollment-code"
+            label="Enrollment code"
+            onChange={onUserCodeChange}
+            onSubmit={onLookup}
+            value={userCode}
+          />
+        </>
+      ) : null}
+
+      {principal && enrollment ? (
+        <div className="auth-request-review">
+          <AuthNotice tone="warning">
+            Only approve a runner you control.
+          </AuthNotice>
+          <AuthDetailList
+            items={[
+              { label: 'Code', value: enrollment.userCode, mono: true },
+              { label: 'Runner', value: runnerName },
+              {
+                label: 'Host',
+                value: `${enrollment.host.hostname || 'Unknown host'} (${enrollment.host.os}/${enrollment.host.arch})`,
+              },
+              { label: 'Workspace', value: enrollment.workspace.path, mono: true },
+              { label: 'Public-key fingerprint', value: enrollment.fingerprint, mono: true },
+              { label: 'Expires', value: formatAuthTimestamp(enrollment.expiresAt) },
+            ]}
+          />
+          {enrollment.replaceNeeded ? (
+            <label className="auth-replacement-confirmation">
+              <input
+                checked={replaceConfirmed}
+                disabled={busy}
+                onChange={(event) => onReplaceConfirmedChange(event.target.checked)}
+                type="checkbox"
+              />
+              <span>
+                <strong>Replace the existing credential.</strong> The current credential will be
+                revoked.
+              </span>
+            </label>
+          ) : null}
+          {requestStatusCopy ? <AuthNotice tone="info">{requestStatusCopy}</AuthNotice> : null}
+          <div className="auth-decision-actions">
+            <button className="auth-secondary-button" disabled={busy} onClick={onReset} type="button">
+              Use a different code
+            </button>
+            {enrollment.status === 'pending' ? (
+              <div className="auth-decision-primary-actions">
+                <button
+                  className="auth-danger-button"
+                  disabled={busy}
+                  onClick={() => onDecision('deny')}
+                  type="button"
+                >
+                  {activeAction === 'deny' ? 'Denying…' : 'Deny'}
+                </button>
+                <button
+                  className="auth-primary-button"
+                  disabled={busy || (enrollment.replaceNeeded && !replaceConfirmed)}
+                  onClick={() => onDecision('approve')}
+                  type="button"
+                >
+                  {activeAction === 'approve' ? 'Approving…' : 'Approve runner'}
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {completionStatus ? (
+        <div className="auth-completion-actions">
+          <a className="auth-secondary-button" href="/">
+            Return to Kodelet
+          </a>
+        </div>
+      ) : null}
+    </AuthPageShell>
+  );
+}
+
 export default function RunnerEnrollmentPage() {
   const [principal, setPrincipal] = useState<AuthPrincipal | null>(null);
   const [principalLoading, setPrincipalLoading] = useState(true);
@@ -49,8 +204,7 @@ export default function RunnerEnrollmentPage() {
   const [completionStatus, setCompletionStatus] = useState<ApprovalStatus | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const [activeAction, setActiveAction] = useState<'lookup' | 'approve' | 'deny' | null>(null);
-  const busy = activeAction !== null;
+  const [activeAction, setActiveAction] = useState<RunnerEnrollmentAction | null>(null);
 
   useEffect(() => {
     const previousTitle = document.title;
@@ -150,124 +304,25 @@ export default function RunnerEnrollmentPage() {
     setUserCode('');
   };
 
-  const requestStatusCopy = enrollment ? statusCopy(enrollment.status) : '';
-  const runnerName = enrollment?.displayName || enrollment?.host.hostname || 'Unnamed runner';
-  const pageTitle = enrollment
-    ? 'Approve runner'
-    : completionStatus === 'approved'
-      ? 'Runner approved'
-      : completionStatus === 'denied'
-        ? 'Runner denied'
-        : 'Runner enrollment';
-  const pageDescription = enrollment
-    ? 'Confirm the runner, host, and workspace.'
-    : completionStatus
-      ? undefined
-      : 'Enter the code shown in the runner terminal.';
-
   return (
-    <AuthPageShell
-      description={pageDescription}
+    <RunnerEnrollmentPageView
+      activeAction={activeAction}
+      completionStatus={completionStatus}
+      enrollment={enrollment}
+      error={error}
+      message={message}
       principal={principal}
       principalLoading={principalLoading}
-      title={pageTitle}
-    >
-      {error ? <AuthNotice tone="error">{error}</AuthNotice> : null}
-      {message ? (
-        <AuthNotice tone={completionStatus === 'approved' ? 'success' : 'info'}>
-          {message}
-        </AuthNotice>
-      ) : null}
-
-      {principal && !enrollment && !completionStatus ? (
-        <>
-          {!error ? (
-            <AuthNotice tone="warning">
-              Only use a code from a runner you control.
-            </AuthNotice>
-          ) : null}
-          <ApprovalCodeForm
-            busy={busy}
-            id="runner-enrollment-code"
-            label="Enrollment code"
-            onChange={(value) => {
-              setUserCode(value);
-              setError('');
-            }}
-            onSubmit={lookup}
-            value={userCode}
-          />
-        </>
-      ) : null}
-
-      {principal && enrollment ? (
-        <div className="auth-request-review">
-          <AuthNotice tone="warning">
-            Only approve a runner you control.
-          </AuthNotice>
-          <AuthDetailList
-            items={[
-              { label: 'Code', value: enrollment.userCode, mono: true },
-              { label: 'Runner', value: runnerName },
-              {
-                label: 'Host',
-                value: `${enrollment.host.hostname || 'Unknown host'} (${enrollment.host.os}/${enrollment.host.arch})`,
-              },
-              { label: 'Workspace', value: enrollment.workspace.path, mono: true },
-              { label: 'Public-key fingerprint', value: enrollment.fingerprint, mono: true },
-              { label: 'Expires', value: formatAuthTimestamp(enrollment.expiresAt) },
-            ]}
-          />
-          {enrollment.replaceNeeded ? (
-            <label className="auth-replacement-confirmation">
-              <input
-                checked={replaceConfirmed}
-                disabled={busy}
-                onChange={(event) => setReplaceConfirmed(event.target.checked)}
-                type="checkbox"
-              />
-              <span>
-                <strong>Replace the existing credential.</strong> The current credential will be
-                revoked.
-              </span>
-            </label>
-          ) : null}
-          {requestStatusCopy ? <AuthNotice tone="info">{requestStatusCopy}</AuthNotice> : null}
-          <div className="auth-decision-actions">
-            <button className="auth-secondary-button" disabled={busy} onClick={reset} type="button">
-              Use a different code
-            </button>
-            {enrollment.status === 'pending' ? (
-              <div className="auth-decision-primary-actions">
-                <button
-                  className="auth-danger-button"
-                  disabled={busy}
-                  onClick={() => decide('deny')}
-                  type="button"
-                >
-                  {activeAction === 'deny' ? 'Denying…' : 'Deny'}
-                </button>
-                <button
-                  className="auth-primary-button"
-                  disabled={busy || (enrollment.replaceNeeded && !replaceConfirmed)}
-                  onClick={() => decide('approve')}
-                  type="button"
-                >
-                  {activeAction === 'approve' ? 'Approving…' : 'Approve runner'}
-                </button>
-              </div>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
-
-      {completionStatus ? (
-        <div className="auth-completion-actions">
-          <a className="auth-secondary-button" href="/">
-            Return to Kodelet
-          </a>
-        </div>
-      ) : null}
-    </AuthPageShell>
+      replaceConfirmed={replaceConfirmed}
+      userCode={userCode}
+      onDecision={decide}
+      onLookup={lookup}
+      onReplaceConfirmedChange={setReplaceConfirmed}
+      onReset={reset}
+      onUserCodeChange={(value) => {
+        setUserCode(value);
+        setError('');
+      }}
+    />
   );
 }
