@@ -151,7 +151,7 @@ kodelet chat --runner RUNNER         # start a new conversation on a remote runn
 kodelet chat --runner RUNNER --runner-profile workspace  # select runner-local environment configuration
 ```
 
-To use the same control plane by default, set `server: https://kodelet.example` in `~/.kodelet/config.yaml` or a file explicitly selected with `KODELET_CONFIG_FILE`, or export `KODELET_SERVER`. A configured server puts `kodelet chat` into control-plane mode without an explicit `--server` flag; an explicit flag takes precedence. For security, a `server` value in repository-level `kodelet-config.yaml` is ignored.
+Set a default control plane with `server` in user configuration or `KODELET_SERVER`; `--server` takes precedence. Repository configuration cannot set this value.
 
 The TUI uses `auto` theme selection by default. It detects whether the terminal profile has a light or dark background and selects `catppuccin-latte` for light profiles or `catppuccin-mocha` for dark profiles; unavailable detection falls back to Mocha. Use `--theme` at startup or `/theme` in the TUI; the picker marks the active selection with ` (current)`. Use `/theme THEME_NAME` to switch directly. The TUI streams assistant responses, collapses thinking and tool details by default, and lets you toggle details with `ctrl+o` or by clicking the detail header. It uses the same chat runner as the Web UI, so conversations are persisted and can be resumed by ID. While the assistant is working, the composer stays editable; press `Enter` to queue ordinary text as steering for the active conversation. TUI-local slash commands such as `/sessions` and `/new` execute immediately, while other slash commands remain available in completion and are queued as follow-up turns that start when the current turn finishes. Kodelet applies queued steering on the next model API call. Before the first message, use `Ctrl+T` to select a profile and `Ctrl+Y` (or click the `effort:` label beside the profile) to select one of the profile's `allowed_reasoning_efforts`. Both controls are locked after the conversation starts, and the selected effort is restored when it is resumed.
 
@@ -206,11 +206,7 @@ To run the model loop and conversation store on a `kodelet serve` control plane 
 kodelet acp --server https://kodelet.example
 ```
 
-The control-plane URL can also be configured once in `~/.kodelet/config.yaml` or an explicitly selected `KODELET_CONFIG_FILE`, or with `KODELET_SERVER=https://kodelet.example`; `kodelet acp` then enters server-backed mode automatically. An explicit `--server` value takes precedence, while repository-level `kodelet-config.yaml` cannot select a control plane.
-
-For an OIDC control plane, authenticate once with `kodelet auth login --server https://kodelet.example`. An explicit `--auth-token` takes precedence over `KODELET_AUTH_TOKEN`, which takes precedence over the stored login.
-
-In runner enrollment mode, first run `kodelet runner enroll --server https://kodelet.example` from the workspace. ACP uses the stored runner credential automatically, or reuses a `kodelet runner start` process already serving that workspace. `--runner-profile` selects the runner environment; `--profile` and `--reasoning-effort` select model settings for new conversations.
+The user-level `server` setting or `KODELET_SERVER` can select the control plane by default. For OIDC, run `kodelet auth login --server https://kodelet.example`; when runner enrollment is enabled, run `kodelet runner enroll --server https://kodelet.example` once per workspace. ACP uses the stored credentials automatically. `--runner-profile` selects the runner environment, while `--profile` and `--reasoning-effort` select model settings.
 
 Use ACP or the TypeScript Agent SDK for programmatic integrations that need structured assistant and tool events.
 
@@ -222,20 +218,17 @@ Start the browser-based chat UI with:
 kodelet serve
 ```
 
-When authentication modes are omitted, `kodelet serve` preserves the legacy behavior: it generates separate random web/API and runner tokens. The browser token is printed in a URL such as `http://localhost:8080?token=...`; opening that URL stores the token in an HTTP-only cookie for subsequent same-browser requests. You can also supply a stable token explicitly:
+By default, `kodelet serve` uses token authentication and generates separate browser/API and runner tokens when they are not supplied. Opening the printed `?token=...` URL stores the browser token in an HTTP-only cookie. To use a stable browser/API token:
 
 ```bash
 kodelet serve --auth-token "your-secret-token"
 ```
 
-Explicit tokens may contain only letters, numbers, and URL-safe punctuation (`-._~`) so they can be stored safely in the browser auth cookie.
+Explicit tokens may contain only letters, numbers, and URL-safe punctuation (`-._~`). Web authentication modes are `token`, `oidc`, and `none`; runner authentication modes are `token`, `enrollment`, and `none`.
 
-Web authentication modes are `token`, `oidc`, and `none`. Runner authentication modes are `token`, `enrollment`, and `none`. Use OIDC for browser sign-in:
+To use OIDC, create a Web application with your identity provider, register a redirect URL ending in `/auth/oidc/callback`, and keep the client secret in an owner-only file:
 
 ```bash
-install -m 600 /dev/null "$HOME/.kodelet/google-oidc-client-secret"
-# Write only the OAuth client secret value into that file using your editor or secret manager.
-
 kodelet serve \
   --web-auth-mode oidc \
   --oidc-issuer https://accounts.google.com \
@@ -244,12 +237,10 @@ kodelet serve \
   --oidc-redirect-url https://kodelet.example/auth/oidc/callback \
   --oidc-allowed-domains example.com \
   --oidc-admin-emails admin@example.com \
-  --oidc-terminal-emails operator@example.com \
-  --oidc-runner-admin-emails runners@example.com \
   --runner-auth-mode enrollment
 ```
 
-The same server settings can be kept in trusted user configuration instead of repeated on every invocation. Use `~/.kodelet/config.yaml` or a file explicitly selected with `KODELET_CONFIG_FILE`; an ordinary repository-level `kodelet-config.yaml` cannot set the `serve` namespace. Explicit command-line flags override the corresponding YAML values. Serve and OIDC policy is not read from `KODELET_SERVE_*` environment variables:
+The same setup can be kept in trusted user configuration instead of repeated on every invocation:
 
 ```yaml
 serve:
@@ -258,7 +249,7 @@ serve:
   disable_control_plane_workspace: true
   web_auth_mode: "oidc"
   runner_auth_mode: "enrollment"
-  # Optional static administrative migration or automation credential:
+  # Optional static administrative token for automation or migration:
   # auth_token: "generate-a-long-random-token"
   cors_origins:
     - "https://app.example.com"
@@ -275,15 +266,11 @@ serve:
     session_duration: "12h"
 ```
 
-Trusted `serve` configuration also supports `cwd`, `disable_control_plane_workspace`, `auth_token`, `runner_auth_token`, `skip_auth`, `cors_origins`, and the OIDC keys `allowed_emails` and `allow_any_user`. In token mode, omitted tokens retain the normal generated-token behavior. A trusted configuration file containing either static token must be a regular file inaccessible to group and other users, such as mode `0600`; Kodelet's global configuration writers apply user-only permissions automatically. Configured static tokens are never echoed at server startup, while newly generated tokens are displayed once. The OIDC client secret itself is still read from `serve.oidc.client_secret_file` or `--oidc-client-secret-file`, rather than being embedded directly in YAML or a secret-valued flag; its referenced file must likewise be regular, non-empty, and user-only.
+Store `serve` settings in `~/.kodelet/config.yaml` or a file explicitly selected with `KODELET_CONFIG_FILE`. Command-line flags take precedence, and repository-level `kodelet-config.yaml` cannot set this security-sensitive namespace. Files containing static tokens and the file referenced by `client_secret_file` must be owner-only. See [`config.sample.yaml`](../config.sample.yaml) for all settings.
 
-For Google, select or create a Cloud project, configure the Google Auth Platform branding and audience, then open **Google Auth Platform → Clients**, choose **Create client**, and select **Web application**. Add the exact redirect URI supplied to `--oidc-redirect-url`; no JavaScript origin is required for Kodelet's server-side flow. The callback path must be `/auth/oidc/callback`; use `https://kodelet.example/auth/oidc/callback` in production or `http://localhost:8080/auth/oidc/callback` for local testing. Copy the client ID and write only the client-secret value to the protected file. `gcloud iam oauth-clients create` manages IAM OAuth client resources and is not the Google Sign-In Web application client workflow used here.
+Restrict sign-in with allowed emails or domains, or use `--oidc-allow-any-user`. All accepted identities receive the `user` role and can use chat and list runners. `terminal` grants server-host terminal access, `runner-admin` grants runner inspection, removal, and enrollment approval, and `admin` grants all roles. Runner enrollment requires at least one `runner-admin` or `admin` identity, unless a static administrative token is used.
 
-The default scopes are `openid`, `profile`, and `email`. Access can be granted through `--oidc-allowed-emails`, `--oidc-allowed-domains`, any role-specific email list, or `--oidc-allow-any-user`. Kodelet always requires a verified email. For the Google issuer, domain allowlisting also requires the signed `hd` claim to match the email domain; an OAuth domain hint alone is not an authorization check. Identities are keyed by verified issuer and `sub`, not by email.
-
-Every accepted OIDC identity receives the `user` role and can list runners for chat selection. `terminal` permits the server-host terminal WebSocket, `runner-admin` permits detailed runner inspection, deletion, and enrollment approval, and `admin` implies every role. When runner enrollment is enabled, an OIDC deployment must configure at least one runner-admin or admin identity through the corresponding CLI flags or trusted OIDC email lists, unless an administrative compatibility token will perform approvals. `--auth-token` and trusted `serve.auth_token` remain optional static administrative credentials for migration or automation; pure OIDC mode does not generate one automatically.
-
-Non-browser clients authenticate to an OIDC control plane with a Kodelet-issued user credential rather than forwarding an identity-provider access token. Start the browser-assisted, device-style login from any client host:
+Authenticate non-browser clients with:
 
 ```bash
 kodelet auth login --server https://kodelet.example
@@ -291,9 +278,7 @@ kodelet auth status --server https://kodelet.example
 kodelet auth logout --server https://kodelet.example
 ```
 
-`login` prints a short code, opens the verification page when possible, and waits for approval. Enter the code shown in the terminal, sign in through OIDC if prompted, check the client details, and approve the request. Use `--no-browser` to suppress browser launch. `logout` revokes the stored credential, and `status` displays its principal, roles, and expiry.
-
-Credentials and resumable pending-login state are stored outside repositories in user-only Kodelet state, keyed by canonical control-plane URL. Remote chat, TUI, ACP, and runner-administration commands use the stored credential automatically. Authentication precedence is an explicitly supplied `--auth-token`, then `KODELET_AUTH_TOKEN`, then the stored Kodelet credential.
+`login` prints a short code, opens the verification page when possible, and waits for approval. Enter the code, sign in, review the client details, and approve the request. Use `--no-browser` to suppress browser launch. `status` shows the stored identity, roles, and expiry, while `logout` revokes the credential. Remote commands use the per-server credential automatically; an explicit `--auth-token` takes precedence over `KODELET_AUTH_TOKEN`, which takes precedence over the stored login.
 
 OIDC authentication does not make the current server multi-tenant. Conversations, active chats, terminal sessions, and runner execution remain shared among authenticated users; roles protect sensitive capabilities but do not add per-user conversation ownership or isolation.
 
@@ -319,7 +304,7 @@ To require workspace runners for all chats, disable the control-plane workspace:
 kodelet serve --disable-control-plane-workspace
 ```
 
-The equivalent setting is `serve.disable_control_plane_workspace: true`. This disables local workspace execution and controls, cannot be combined with `cwd`, and makes existing local conversations read-only.
+The equivalent setting is `serve.disable_control_plane_workspace: true`. It disables local workspace execution and makes existing local conversations read-only.
 
 The runner modes are:
 
@@ -327,7 +312,7 @@ The runner modes are:
 - `enrollment`: use a browser-approved credential for each workspace;
 - `none`: disable runner authentication for trusted local-only use.
 
-Start the control plane in legacy token mode with separate credentials for browser/API clients and runners:
+For token mode, use separate browser/API and runner credentials:
 
 ```bash
 kodelet serve \
@@ -335,15 +320,15 @@ kodelet serve \
   --runner-auth-token runner-secret
 ```
 
-When omitted modes resolve to token authentication and either token is absent, `kodelet serve` generates and prints a distinct token for that role. A token supplied through a flag or trusted configuration is reported only as configured and its value is not displayed. `--skip-auth` is compatibility shorthand for `--web-auth-mode=none --runner-auth-mode=none`. Do not reuse the browser token as the runner token.
+Missing token-mode credentials are generated automatically. Do not reuse the browser token as the runner token.
 
-Enrollment mode uses a separate credential for each workspace. Start the control plane in enrollment mode:
+Enrollment mode uses a separate credential for each workspace:
 
 ```bash
 kodelet serve --runner-auth-mode enrollment
 ```
 
-Then stop any runner currently using the workspace and enroll it:
+Stop any runner currently using the workspace, then enroll it:
 
 ```bash
 cd ~/src/kodelet
@@ -352,11 +337,7 @@ kodelet runner enroll \
   --name kodelet-gpu
 ```
 
-The command prints a short code and opens the approval page. Confirm the code and runner details before approving. Use `--no-browser` to suppress browser launch or `--replace` to replace an existing credential.
-
-After approval, `kodelet runner start` and server-backed ACP automatically use the stored credential. Credentials are kept outside the repository in user-only local state. Behind a trusted reverse proxy, set consistent replacement `X-Forwarded-Proto`, `X-Forwarded-Host`, and `X-Forwarded-Prefix` headers.
-
-Token and enrollment modes are mutually exclusive. Remove `--runner-auth-token` and `KODELET_RUNNER_AUTH_TOKEN` when using enrollment mode.
+Approve the displayed code and runner details. Use `--no-browser` to suppress browser launch or `--replace` to replace an existing credential. `kodelet runner start` and server-backed ACP then use the stored credential automatically; do not supply a shared runner token in enrollment mode.
 
 Start one runner from each workspace you want to expose:
 
@@ -368,7 +349,7 @@ kodelet runner start \
   --name kodelet-gpu
 ```
 
-All `kodelet runner` subcommands use the user-level `server` configuration or `KODELET_SERVER` when `--server` is omitted. If none is configured, they default to `http://localhost:8080`. Repository-level `kodelet-config.yaml` cannot redirect runner commands.
+Runner commands use the user-level `server` setting or `KODELET_SERVER` when `--server` is omitted, otherwise they default to `http://localhost:8080`.
 
 `--name` is optional mutable display metadata. The control plane assigns the stable opaque runner ID. Reconnecting from the same authenticated owner, stable local host instance, and canonical workspace path reuses that ID even if the local ID cache was removed. Hostname, process ID, workspace basename, and display name are diagnostic metadata rather than identity.
 
@@ -383,7 +364,7 @@ kodelet runner inspect kodelet-gpu --server https://kodelet.example
 kodelet runner inspect runner_abc --server https://kodelet.example --json
 ```
 
-Add `--auth-token web-secret` only when deliberately overriding the stored credential with a static administrative compatibility token.
+Use `--auth-token` only to override the stored login with a static token.
 
 A selector can be an exact runner ID, an unambiguous ID prefix, or an unambiguous display name. Ambiguous selectors fail and show the matching IDs, hostnames, and workspace paths. Inspection exposes the canonical workspace, hostname and stable host instance, PID, platform, Kodelet version, connection generation, manifest digest/change flag, active runs, last heartbeat, compatibility error, and local lock diagnostics when the inspected runner is local.
 
@@ -393,11 +374,13 @@ Offline registrations remain durable until explicitly removed. Stop the runner p
 kodelet runner remove kodelet-gpu --server https://kodelet.example
 ```
 
-Removal refuses connected runners and active runs, then deletes the stable registration, runner credentials, and runner-run history while transactionally clearing every concrete conversation affinity. Conversations, summaries, and full transcripts remain in the control-plane conversation store. A later remote resume must explicitly select a compatible runner, which establishes a new affinity rather than silently migrating execution. `--force` remains accepted for CLI/API compatibility but is no longer required to clear affinity. `--no-confirm` skips the destructive-operation prompt and is required with `--json`. When invoked on the runner host, successful removal also clears the matching local registration cache, DPoP credential, and pending enrollment if they still refer to the removed runner, while retaining the diagnostic lock file. Server-side deletion cascades to the runner's credential and DPoP replay rows.
+Removing a stopped runner deletes its registration, credentials, and run history, and clears its conversation affinities. Conversations and transcripts are preserved; resume them by explicitly selecting a compatible runner. `--no-confirm` skips the prompt and is required with `--json`.
 
 Runner states are `connecting`, `idle`, `busy`, `error`, `offline`, and `incompatible`. An idle compatible runner accepts a new run, and a busy runner also accepts one when it advertised concurrent-run support; legacy protocol-v1 runners that omit that capability remain capacity-one. A manifest-change flag means the connected runner detected changed context, skills, tools, commands, extensions, or relevant configuration; the changed manifest is pinned independently by the next run and never mutates an already active run.
 
-In the Web UI, choose the runner from the **Environment** field when creating a conversation. An optional **Runner profile** field selects a name from that runner's `environment_profiles` namespace; blank means the runner's base configuration. The conversation is durably bound to both that runner and runner profile before the first environment open is attempted, and later turns reuse the same selection rather than silently moving to a similarly named workspace or profile. Remote conversations hide or disable control-plane-local CWD suggestions, terminal access, Git diff, and server-side slash-command discovery; commands entered in chat still execute through the runner's pinned command manifest. When the control-plane workspace is disabled, only runner environments are available. If a recipe changes or disappears after a run opens, Kodelet rejects the command until a new run pins the updated manifest.
+In the Web UI, choose the runner from the **Environment** field when creating a conversation. An optional **Runner profile** field selects a name from that runner's `environment_profiles` namespace; blank means the runner's base configuration. The conversation is durably bound to both that runner and runner profile before the first environment open is attempted, and later turns reuse the same selection rather than silently moving to a similarly named workspace or profile. Remote conversations hide or disable control-plane-local CWD suggestions, terminal access, Git diff, and server-side slash-command discovery; commands entered in chat still execute through the runner's pinned command manifest. If a recipe changes or disappears after a run opens, Kodelet rejects the command until a new run pins the updated manifest.
+
+When the control-plane workspace is disabled, only runner environments are available.
 
 The terminal UI can start a new remote conversation with:
 
@@ -409,7 +392,7 @@ kodelet chat \
   --server https://kodelet.example
 ```
 
-`--server`, the user-level `server` configuration, or `KODELET_SERVER` makes the TUI use the control plane for conversation listing, history, settings, and execution. `/sessions`, `--resume`, and `--follow` therefore operate on control-plane conversations; an existing runner-bound conversation resumes through its stored runner affinity. Adding `--runner` selects the runner for new conversations and limits the picker to conversations bound to that runner. `--profile` selects model/provider policy from the control plane, while `--runner-profile` independently selects a profile from the runner's own global and workspace `environment_profiles` configuration; blank or `default` uses the runner base configuration. A model profile never implicitly selects a same-named runner profile, and the selected runner profile is locked after the conversation starts. Extension input, confirmation, selection, and notification requests are relayed through the control plane with extension-generation identity preserved; steering is queued centrally, and `Esc` or `Ctrl+C` requests server-side cancellation before closing the local response stream. `--cwd`, `--no-tools`, and `--no-extensions` remain local-only. `kodelet run --runner` is likewise not enabled yet because the one-shot command's flags and output modes are not fully represented by the remote chat request contract.
+`--server` makes the TUI use the control plane for conversation listing, history, settings, and execution. `/sessions`, `--resume`, and `--follow` therefore operate on control-plane conversations; an existing runner-bound conversation resumes through its stored runner affinity. Adding `--runner` selects the runner for new conversations and limits the picker to conversations bound to that runner. `--profile` selects model/provider policy from the control plane, while `--runner-profile` independently selects a profile from the runner's own global and workspace `environment_profiles` configuration; blank or `default` uses the runner base configuration. A model profile never implicitly selects a same-named runner profile, and the selected runner profile is locked after the conversation starts. Extension input, confirmation, selection, and notification requests are relayed through the control plane with extension-generation identity preserved; steering is queued centrally, and `Esc` or `Ctrl+C` requests server-side cancellation before closing the local response stream. `--cwd`, `--no-tools`, and `--no-extensions` remain local-only. `kodelet run --runner` is likewise not enabled yet because the one-shot command's flags and output modes are not fully represented by the remote chat request contract.
 
 When the Web UI already has a persisted conversation open, it keeps an idle control-plane stream attached to that conversation. A turn started from `kodelet chat --server ... --resume CONVERSATION_ID` therefore appears live in the Web UI, including turns that execute through `--runner`. Server-local turns also appear when the control-plane workspace is enabled. A standalone local TUI does not participate because it bypasses the control plane.
 
@@ -709,9 +692,9 @@ max_tokens: 8192
 log_level: "info"
 ```
 
-When the user-level `server` setting is non-empty, `kodelet chat` and `kodelet acp` select server-backed mode automatically, while `kodelet runner` commands use it instead of their `http://localhost:8080` default. The setting is honored from `~/.kodelet/config.yaml` or a file explicitly selected with `KODELET_CONFIG_FILE`; a repository-level `kodelet-config.yaml` value is ignored because it could otherwise redirect credentials and workspace execution to an untrusted control plane. `kodelet run` remains local. The precedence is explicit `--server`, then `KODELET_SERVER`, then user-level configuration. With no selected server, chat and ACP remain local while runner commands default to `http://localhost:8080`.
+The user-level `server` setting provides the default for `kodelet chat`, `kodelet acp`, and runner commands; `KODELET_SERVER` and `--server` override it. Repository configuration cannot set this value, and `kodelet run` remains local.
 
-The `kodelet serve` listener and authentication policy can be configured either with serve flags or through the top-level `serve` namespace in `~/.kodelet/config.yaml` or an explicitly selected `KODELET_CONFIG_FILE`. Repository-level `kodelet-config.yaml` cannot set `serve`, so checked-out projects cannot change listener addresses, OIDC issuer/client settings, role allowlists, tokens, or runner enrollment policy. Explicit serve flags have the highest precedence. An explicitly selected file or invalid `KODELET_CONFIG_FILE_MODE` fails closed instead of silently falling back. Trusted configuration containing a static web or runner token must be user-only, and configured token values are not printed at startup. The OIDC client secret remains in a separate user-only file referenced by `serve.oidc.client_secret_file` or `--oidc-client-secret-file`; it is not accepted directly as a YAML value or secret-valued CLI flag. See [Web UI Server](#web-ui-server) for the complete mode and migration examples.
+Configure `kodelet serve` with flags or the trusted user-level `serve` namespace. Repository configuration cannot set `serve`; command-line flags take precedence, and static token or OIDC secret files must be owner-only. See [Web UI Server](#web-ui-server) and [`config.sample.yaml`](../config.sample.yaml).
 
 ```yaml
 # Repository config (kodelet-config.yaml) - only override what's different
@@ -1619,7 +1602,7 @@ ext.registerCommand({
 
 Recipe-like commands appear in `kodelet recipe list` and can be invoked through recipe UX such as `kodelet run -r review --arg target=main`. They can also be invoked directly as slash commands, for example `/review target=main`.
 
-`runAgent` commands may return an optional `display` string. When present, Kodelet shows and persists that text as the user message instead of the original slash command while still sending `prompt` to the model. When omitted, the slash-command invocation remains the user-facing display.
+`runAgent` commands may set `display` to control the persisted user-facing text while `prompt` remains the model input.
 
 ### Extension Events
 
