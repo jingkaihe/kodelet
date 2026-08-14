@@ -1095,7 +1095,7 @@ func (m *model) resize() {
 	m.textarea.SetWidth(max(1, m.inputContentWidth()))
 	m.textarea.SetHeight(inputHeight)
 	if m.activeUIPrompt != nil && m.activeUIPrompt.mode == uiPromptInput {
-		m.activeUIPrompt.input.Width = m.uiDialogInputWidth()
+		m.activeUIPrompt.input.Width = uiPromptTextInputWidth(m.uiDialogInputWidth())
 	}
 }
 

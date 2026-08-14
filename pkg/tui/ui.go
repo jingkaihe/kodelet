@@ -416,7 +416,7 @@ func newInputPromptModel(prompt uiPromptState, width int) uiPromptState {
 	input.TextStyle = composerTextStyle
 	input.Cursor.Style = composerCursorStyle
 	input.Cursor.TextStyle = composerTextStyle
-	input.Width = max(1, width)
+	input.Width = uiPromptTextInputWidth(width)
 	if prompt.secret {
 		input.EchoMode = textinput.EchoPassword
 	}
@@ -424,6 +424,12 @@ func newInputPromptModel(prompt uiPromptState, width int) uiPromptState {
 	input.Focus()
 	prompt.input = input
 	return prompt
+}
+
+func uiPromptTextInputWidth(width int) int {
+	// bubbles/textinput renders the cursor in addition to Width. Reserve one
+	// cell so the rendered value fits the dialog without left-truncation.
+	return max(1, width-1)
 }
 
 func (m *model) openUIPrompt(prompt uiPromptState) tea.Cmd {

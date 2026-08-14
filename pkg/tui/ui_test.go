@@ -367,6 +367,24 @@ func TestUIPromptDefaultsRequiredDismissAndEmptySelect(t *testing.T) {
 	m.dismissUIPrompt()
 }
 
+func TestUIInputLineDoesNotPrefixShortValuesWithEllipsis(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.width = 80
+	m.height = 24
+	m.resize()
+
+	prompt := newInputPromptModel(uiPromptState{mode: uiPromptInput, placeholder: "en"}, m.uiDialogInputWidth())
+	placeholder := xansi.Strip(m.renderUIInputLine(prompt, m.uiDialogInputWidth()))
+	assert.Contains(t, placeholder, "en")
+	assert.NotContains(t, placeholder, "…")
+
+	prompt.input.SetValue("en")
+	value := xansi.Strip(m.renderUIInputLine(prompt, m.uiDialogInputWidth()))
+	assert.Contains(t, value, "en")
+	assert.NotContains(t, value, "…")
+}
+
 type brokerCheckingRunner struct {
 	hasInput   bool
 	hasConfirm bool
