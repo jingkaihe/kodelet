@@ -95,6 +95,7 @@ type fakeMetadataThread struct {
 	assistantMsgs  []string
 	closed         bool
 	extensions     any
+	environment    agentenv.Environment
 }
 
 func (f *fakeMetadataThread) SetState(tooltypes.State) {}
@@ -157,6 +158,10 @@ func (f *fakeMetadataThread) Close() error {
 
 func (f *fakeMetadataThread) SetExtensions(runtime any) {
 	f.extensions = runtime
+}
+
+func (f *fakeMetadataThread) SetEnvironment(environment agentenv.Environment) {
+	f.environment = environment
 }
 
 func TestNewDefaultChatRunnerStoresDefaultCWD(t *testing.T) {
@@ -312,6 +317,65 @@ func TestDefaultChatRunnerExecutesRemoteDirectCommandAndPersistsAffinityMetadata
 	config, err := ResolveRemoteConfigWithReasoning(t.Context(), "", "", "high")
 	require.NoError(t, err)
 	assert.Equal(t, "high", config.ReasoningEffort)
+}
+
+func TestDefaultChatRunnerStreamsAndPersistsExplicitCommandDisplay(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	}()
+
+	viper.Reset()
+	viper.Set("provider", "openai")
+	viper.Set("model", "gpt-4.1")
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	conversationID := "conversation-dictate-display"
+	config, _, err := ResolveRemoteConfigWithReasoningAndEnvironmentProfile(t.Context(), conversationID, "", "", "")
+	require.NoError(t, err)
+	fingerprint, err := chatThreadConfigFingerprint(config)
+	require.NoError(t, err)
+
+	thread := &fakeMetadataThread{conversationID: conversationID, persisted: true}
+	environment := &directCommandEnvironment{result: agentenv.CommandResult{
+		Matched:         true,
+		Action:          agentenv.CommandActionRunAgent,
+		CommandName:     "dictate",
+		Prompt:          "model-facing transcription",
+		Display:         "What should I make for breakfast?",
+		DisplayOverride: true,
+	}}
+	runner := NewDefaultChatRunner("")
+	runner.sessions[conversationID] = &defaultChatSession{
+		thread:            thread,
+		configFingerprint: fingerprint,
+		lastUsed:          time.Now(),
+	}
+	runner.SetEnvironmentResolver(&recordingEnvironmentResolver{environment: environment})
+	t.Cleanup(func() { require.NoError(t, runner.Close()) })
+	sink := &recordingChatSink{}
+
+	gotID, err := runner.Run(t.Context(), ChatRequest{
+		ConversationID: conversationID,
+		RunnerID:       "runner-one",
+		Message:        "/dictate",
+	}, sink)
+
+	require.NoError(t, err)
+	assert.Equal(t, conversationID, gotID)
+	require.Len(t, sink.events, 2)
+	assert.Equal(t, "user-message-display", sink.events[0].Kind)
+	assert.Equal(t, "What should I make for breakfast?", sink.events[0].Content)
+	assert.Equal(t, "conversation", sink.events[1].Kind)
+	assert.Equal(t, 1, thread.sendCalls)
+	assert.Same(t, environment, thread.environment)
+	display, ok := conversations.LookupMessageDisplay(thread.metadata, "model-facing transcription")
+	require.True(t, ok)
+	assert.Equal(t, "What should I make for breakfast?", display.Text)
+	assert.Empty(t, display.Kind)
+	assert.Empty(t, display.Command)
 }
 
 func TestDefaultChatRunnerReusesAndClosesConversationThread(t *testing.T) {
@@ -857,6 +921,20 @@ func TestAddWebChatDisplayMetadata(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, environmentResult.Display, display.Text)
 	assert.Equal(t, environmentResult.CommandName, display.Command)
+
+	explicitEnvironmentResult := agentenv.CommandResult{
+		Matched:         true,
+		CommandName:     "dictate",
+		Prompt:          "internal transcription",
+		Display:         "What should I make for breakfast?",
+		DisplayOverride: true,
+	}
+	AddEnvironmentCommandDisplay(thread, explicitEnvironmentResult)
+	display, ok = conversations.LookupMessageDisplay(thread.metadata, explicitEnvironmentResult.Prompt)
+	require.True(t, ok)
+	assert.Equal(t, explicitEnvironmentResult.Display, display.Text)
+	assert.Empty(t, display.Kind)
+	assert.Empty(t, display.Command)
 
 	config := llmtypes.Config{}
 	ApplyCommandRestrictions(t.Context(), &config, environmentResult)

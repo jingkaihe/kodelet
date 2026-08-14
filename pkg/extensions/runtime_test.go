@@ -395,6 +395,7 @@ func TestRuntimeTryCommandRoutesExtensionCommand(t *testing.T) {
 	assert.Equal(t, CommandActionRespond, result.Action)
 	assert.Equal(t, "All extensions are healthy for conv-command.", result.Response)
 	assert.Equal(t, "/doctor verbose=true", result.Display)
+	assert.False(t, result.DisplayOverride)
 }
 
 func TestRuntimeTryCommandReturnsRunAgent(t *testing.T) {
@@ -420,6 +421,8 @@ func TestRuntimeTryCommandReturnsRunAgent(t *testing.T) {
 	assert.Equal(t, CommandActionRunAgent, result.Action)
 	assert.Equal(t, "Review HEAD", result.Prompt)
 	assert.Equal(t, "review", result.RecipeName)
+	assert.Equal(t, "Please review HEAD", result.Display)
+	assert.True(t, result.DisplayOverride)
 }
 
 func TestRuntimeProcessSurvivesInitializationContextCancellation(t *testing.T) {
@@ -752,7 +755,7 @@ func handleHelperCommand(params executeCommandParams) CommandResult {
 		if target == "" {
 			target = "HEAD"
 		}
-		return CommandResult{Action: CommandActionRunAgent, Prompt: "Review " + target, RecipeName: "review"}
+		return CommandResult{Action: CommandActionRunAgent, Prompt: "Review " + target, RecipeName: "review", Display: "Please review " + target}
 	default:
 		return CommandResult{Action: CommandActionPass}
 	}

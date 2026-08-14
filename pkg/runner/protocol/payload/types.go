@@ -107,6 +107,7 @@ type CommandExecuteResult struct {
 	Response        string   `json:"response,omitempty"`
 	Prompt          string   `json:"prompt,omitempty"`
 	Display         string   `json:"display,omitempty"`
+	DisplayOverride bool     `json:"displayOverride,omitempty"`
 	RecipeName      string   `json:"recipeName,omitempty"`
 	AllowedTools    []string `json:"allowedTools,omitempty"`
 	AllowedCommands []string `json:"allowedCommands,omitempty"`

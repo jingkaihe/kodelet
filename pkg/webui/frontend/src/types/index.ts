@@ -379,6 +379,7 @@ export interface ChatStreamEvent {
     | 'content-end'
     | 'text'
     | 'user-message'
+    | 'user-message-display'
     | 'tool-use'
     | 'tool-update'
     | 'tool-result'

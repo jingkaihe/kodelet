@@ -203,6 +203,7 @@ func (e *RemoteEnvironment) ExecuteCommand(ctx context.Context, request CommandR
 		Response:        result.Response,
 		Prompt:          result.Prompt,
 		Display:         result.Display,
+		DisplayOverride: result.DisplayOverride,
 		RecipeName:      result.RecipeName,
 		AllowedTools:    slices.Clone(result.AllowedTools),
 		AllowedCommands: slices.Clone(result.AllowedCommands),

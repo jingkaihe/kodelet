@@ -29,25 +29,26 @@ import (
 )
 
 type RunConfig struct {
-	ResumeConvID        string
-	CWD                 string
-	Follow              bool
-	NoSave              bool
-	Images              []string          // Image paths or URLs to include with the message
-	MaxTurns            int               // Maximum number of turns within a single SendMessage call
-	FragmentName        string            // Name of fragment to use
-	FragmentArgs        map[string]string // Arguments to pass to fragment
-	FragmentDirs        []string          // Additional fragment directories
-	NoSkills            bool              // Disable agentic skills
-	NoExtensions        bool              // Disable extension runtime
-	NoTools             bool              // Disable all tools (for simple query-response usage)
-	EnableFSSearchTools bool              // Enable filesystem search tools (glob_tool and grep_tool)
-	MessageDisplay      string            // User-facing compact text for persisted display
-	Sysprompt           string            // Path to custom system prompt template file
-	SyspromptArgs       map[string]string // Arguments passed to custom system prompt template
-	ResultOnly          bool              // Only print the final agent message, no intermediate output or usage stats
-	UseWeakModel        bool              // Use weak model for SendMessage
-	Account             string            // Anthropic subscription account alias to use
+	ResumeConvID           string
+	CWD                    string
+	Follow                 bool
+	NoSave                 bool
+	Images                 []string          // Image paths or URLs to include with the message
+	MaxTurns               int               // Maximum number of turns within a single SendMessage call
+	FragmentName           string            // Name of fragment to use
+	FragmentArgs           map[string]string // Arguments to pass to fragment
+	FragmentDirs           []string          // Additional fragment directories
+	NoSkills               bool              // Disable agentic skills
+	NoExtensions           bool              // Disable extension runtime
+	NoTools                bool              // Disable all tools (for simple query-response usage)
+	EnableFSSearchTools    bool              // Enable filesystem search tools (glob_tool and grep_tool)
+	MessageDisplay         string            // User-facing compact text for persisted display
+	MessageDisplayOverride bool              // Display is explicit user text rather than a slash command
+	Sysprompt              string            // Path to custom system prompt template file
+	SyspromptArgs          map[string]string // Arguments passed to custom system prompt template
+	ResultOnly             bool              // Only print the final agent message, no intermediate output or usage stats
+	UseWeakModel           bool              // Use weak model for SendMessage
+	Account                string            // Anthropic subscription account alias to use
 }
 
 func NewRunConfig() *RunConfig {
@@ -74,11 +75,12 @@ func NewRunConfig() *RunConfig {
 }
 
 type processedFragment struct {
-	Query     string
-	Display   string
-	Metadata  *fragments.Metadata
-	Response  string
-	Responded bool
+	Query           string
+	Display         string
+	DisplayOverride bool
+	Metadata        *fragments.Metadata
+	Response        string
+	Responded       bool
 }
 
 func processFragment(ctx context.Context, config *RunConfig, args []string, extensionRuntime *extensions.Runtime, callContext extensions.ExtensionCallContext) (*processedFragment, error) {
@@ -140,7 +142,7 @@ func processFragment(ctx context.Context, config *RunConfig, args []string, exte
 					Name:        commandResult.Registration.Name,
 					Description: commandResult.Registration.Description,
 				}
-				return &processedFragment{Query: commandResult.Prompt, Display: display, Metadata: metadata}, nil
+				return &processedFragment{Query: commandResult.Prompt, Display: commandResult.Display, DisplayOverride: commandResult.DisplayOverride, Metadata: metadata}, nil
 			case extensions.CommandActionRespond:
 				metadata := &fragments.Metadata{
 					Name:        commandResult.Registration.Name,
@@ -198,6 +200,9 @@ func addRunMessageDisplay(thread llmtypes.Thread, query string, config *RunConfi
 	}
 
 	metadata := conversations.AddSlashCommandDisplay(thread.GetMetadata(), query, display, config.FragmentName)
+	if config.MessageDisplayOverride {
+		metadata = conversations.AddMessageDisplay(thread.GetMetadata(), query, display, "", "")
+	}
 	for key, value := range metadata {
 		thread.SetMetadataValue(key, value)
 	}
@@ -552,6 +557,7 @@ var runCmd = &cobra.Command{
 			}
 			query = processed.Query
 			config.MessageDisplay = processed.Display
+			config.MessageDisplayOverride = processed.DisplayOverride
 			fragmentMetadata = processed.Metadata
 		}
 
@@ -577,6 +583,7 @@ var runCmd = &cobra.Command{
 					case extensions.CommandActionRunAgent:
 						query = commandResult.Prompt
 						config.MessageDisplay = commandResult.Display
+						config.MessageDisplayOverride = commandResult.DisplayOverride
 						if commandResult.RecipeName != "" {
 							config.FragmentName = commandResult.RecipeName
 						}

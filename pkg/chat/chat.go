@@ -437,6 +437,16 @@ func runDefaultChat(
 			return sessionID, nil
 		case agentenv.CommandActionRunAgent:
 			message = commandResult.Prompt
+			if commandResult.DisplayOverride && strings.TrimSpace(commandResult.Display) != "" {
+				if err := sink.Send(ChatEvent{
+					Kind:           "user-message-display",
+					ConversationID: sessionID,
+					Role:           "user",
+					Content:        strings.TrimSpace(commandResult.Display),
+				}); err != nil {
+					return sessionID, err
+				}
+			}
 			if strings.TrimSpace(commandResult.RecipeName) != "" {
 				llmConfig.RecipeName = commandResult.RecipeName
 			}
@@ -1218,7 +1228,7 @@ func AddExtensionCommandDisplay(thread llmtypes.Thread, result *extensions.Route
 		return
 	}
 
-	metadata := conversationservice.AddSlashCommandDisplay(thread.GetMetadata(), result.Prompt, result.Display, result.CommandName)
+	metadata := commandDisplayMetadata(thread.GetMetadata(), result.Prompt, result.Display, result.CommandName, result.DisplayOverride)
 	for key, value := range metadata {
 		thread.SetMetadataValue(key, value)
 	}
@@ -1230,10 +1240,17 @@ func AddEnvironmentCommandDisplay(thread llmtypes.Thread, result agentenv.Comman
 		return
 	}
 
-	metadata := conversationservice.AddSlashCommandDisplay(thread.GetMetadata(), result.Prompt, result.Display, result.CommandName)
+	metadata := commandDisplayMetadata(thread.GetMetadata(), result.Prompt, result.Display, result.CommandName, result.DisplayOverride)
 	for key, value := range metadata {
 		thread.SetMetadataValue(key, value)
 	}
+}
+
+func commandDisplayMetadata(metadata map[string]any, prompt, display, command string, override bool) map[string]any {
+	if override {
+		return conversationservice.AddMessageDisplay(metadata, prompt, display, "", "")
+	}
+	return conversationservice.AddSlashCommandDisplay(metadata, prompt, display, command)
 }
 
 func AddGoalDisplay(thread llmtypes.Thread, update *goals.CommandUpdate) {

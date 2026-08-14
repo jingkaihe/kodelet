@@ -159,6 +159,18 @@ func TestApplyChatEventDoesNotDuplicateUserMessageAcrossTranscriptInsert(t *test
 	assert.Equal(t, entryInfo, m.entries[1].kind)
 }
 
+func TestApplyChatEventReplacesSubmittedCommandDisplay(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	m.entries = []chatEntry{{kind: entryUser, content: "/dictate"}}
+
+	m.applyChatEvent(chat.ChatEvent{Kind: "user-message-display", Content: "What should I make for breakfast?"})
+
+	require.Len(t, m.entries, 1)
+	assert.Equal(t, entryUser, m.entries[0].kind)
+	assert.Equal(t, "What should I make for breakfast?", m.entries[0].content)
+}
+
 func TestApplyChatEventTracksParallelSubagentUpdatesIndependently(t *testing.T) {
 	m := newModel(context.Background(), Config{})
 	t.Cleanup(m.cancel)

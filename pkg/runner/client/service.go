@@ -730,6 +730,7 @@ func (s *Service) executeCommand(ctx context.Context, params runnerpayload.Comma
 		Response:        result.Response,
 		Prompt:          result.Prompt,
 		Display:         result.Display,
+		DisplayOverride: result.DisplayOverride,
 		RecipeName:      result.RecipeName,
 		AllowedTools:    append([]string(nil), result.AllowedTools...),
 		AllowedCommands: append([]string(nil), result.AllowedCommands...),

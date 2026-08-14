@@ -95,6 +95,7 @@ During local development, a wrapper can run `tsx` against `src/index.ts`, as sho
 
 - Tools use `ext.registerTool(...)`, a Zod `inputSchema`, and return either a string or `{ content, data?, error? }`.
 - Prompt commands use `ext.registerCommand(...)` and return `pass`, `respond`, or `runAgent` actions.
+- `runAgent` results may set `display` when the visible and persisted user message should differ from the model-facing `prompt`.
 - Recipe-like commands use `kind: "recipe"`, appear in `kodelet recipe list`, and can be invoked through `kodelet run -r` or directly as `/name`.
 - Lifecycle handlers use `ext.on(...)` for events like `session.start`, `user.message`, `agent.init`, `turn.start`, `tool.call`, `tool.update`, `tool.result`, and `agent.end`.
 - Tool and event contexts can call host UI helpers such as `ctx.ui.input`, `ctx.ui.confirm`, `ctx.ui.select`, and `ctx.ui.notify`.

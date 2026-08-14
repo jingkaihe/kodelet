@@ -927,6 +927,9 @@ func (s *Server) applyExtensionCommandResult(reqID json.RawMessage, sessionID ac
 			return originalPrompt, false, pkgerrors.Errorf("extension command %s returned runAgent without a prompt", result.CommandName)
 		}
 		metadata := conversations.AddSlashCommandDisplay(sess.Thread.GetMetadata(), result.Prompt, result.Display, result.CommandName)
+		if result.DisplayOverride {
+			metadata = conversations.AddMessageDisplay(sess.Thread.GetMetadata(), result.Prompt, result.Display, "", "")
+		}
 		for key, value := range metadata {
 			sess.Thread.SetMetadataValue(key, value)
 		}

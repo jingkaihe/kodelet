@@ -773,6 +773,7 @@ type CommandResult =
       action: "runAgent";
       prompt: string;
       recipeName?: string;
+      display?: string;
     };
 ```
 
@@ -781,7 +782,7 @@ Result semantics:
 - `action` is a discriminant that tells Kodelet what to do next.
 - `{ action: "pass" }`: command did not match, failed validation, or intentionally declined to handle the prompt. Kodelet continues command routing and, if no command acts on it, continues normal prompt processing.
 - `{ action: "respond", response }`: command consumed the prompt and handled it directly. `response` is displayed to the user in the terminal/web UI and is **not** appended to the conversation or fed into the LLM.
-- `{ action: "runAgent", prompt }`: command consumed the original prompt by producing a replacement agent prompt. Kodelet starts the normal agent flow using `prompt`; this prompt enters the conversation as the effective user message.
+- `{ action: "runAgent", prompt, display? }`: command consumed the original prompt by producing a replacement agent prompt. Kodelet starts the normal agent flow using `prompt`; when `display` is provided, that text replaces the original slash command as the visible and persisted user message without changing the model input.
 
 This distinction is important: direct command responses are UI output, while recipe-like command prompts are LLM input.
 

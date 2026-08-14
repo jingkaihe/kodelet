@@ -165,6 +165,7 @@ type CommandResult struct {
 	Response   string `json:"response,omitempty"`
 	Prompt     string `json:"prompt,omitempty"`
 	RecipeName string `json:"recipeName,omitempty"`
+	Display    string `json:"display,omitempty"`
 }
 
 // EventResult is returned by extension.event.handle.

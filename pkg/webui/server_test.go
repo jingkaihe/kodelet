@@ -2794,6 +2794,23 @@ func TestServer_convertToWebMessagesAppliesMessageDisplay(t *testing.T) {
 	assert.Equal(t, "goal", blocks[0].Type)
 	assert.Equal(t, "Objective: find cores", blocks[0].Text)
 	assert.Equal(t, "goal", blocks[0].Command)
+
+	plainPrompt := "Internal transcription prompt"
+	metadata = conversations.AddMessageDisplay(nil, plainPrompt, "What should I make for breakfast?", "", "")
+	messages, err = server.convertToWebMessages(
+		json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"Internal transcription prompt"}]}]`),
+		"anthropic",
+		metadata,
+		nil,
+	)
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	blocks, ok = messages[0].Content.([]WebContentBlock)
+	require.True(t, ok)
+	require.Len(t, blocks, 1)
+	assert.Equal(t, "text", blocks[0].Type)
+	assert.Equal(t, "What should I make for breakfast?", blocks[0].Text)
+	assert.Empty(t, blocks[0].Command)
 }
 
 func TestServer_convertToWebMessagesHidesRepeatedGoalContext(t *testing.T) {

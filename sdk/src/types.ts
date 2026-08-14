@@ -26,7 +26,12 @@ export type CommandAction = "pass" | "respond" | "runAgent";
 
 export type CommandPassResult = { action: "pass" };
 export type CommandRespondResult = { action: "respond"; response: string };
-export type CommandRunAgentResult = { action: "runAgent"; prompt: string; recipeName?: string };
+export type CommandRunAgentResult = {
+  action: "runAgent";
+  prompt: string;
+  recipeName?: string;
+  display?: string;
+};
 
 export type CommandResult =
   | CommandPassResult

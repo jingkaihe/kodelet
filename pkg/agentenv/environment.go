@@ -234,6 +234,7 @@ type CommandResult struct {
 	Response        string
 	Prompt          string
 	Display         string
+	DisplayOverride bool
 	RecipeName      string
 	AllowedTools    []string
 	AllowedCommands []string

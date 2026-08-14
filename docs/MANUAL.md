@@ -1611,12 +1611,15 @@ ext.registerCommand({
       action: "runAgent",
       recipeName: "review",
       prompt: `Review ${input.target}. Focus on correctness, simplicity, and tests.`,
+      display: `Please review ${input.target}`,
     };
   },
 });
 ```
 
 Recipe-like commands appear in `kodelet recipe list` and can be invoked through recipe UX such as `kodelet run -r review --arg target=main`. They can also be invoked directly as slash commands, for example `/review target=main`.
+
+`runAgent` commands may return an optional `display` string. When present, Kodelet shows and persists that text as the user message instead of the original slash command while still sending `prompt` to the model. When omitted, the slash-command invocation remains the user-facing display.
 
 ### Extension Events
 

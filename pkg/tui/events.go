@@ -19,6 +19,13 @@ func (m *model) applyChatEvent(event chat.ChatEvent) {
 	switch event.Kind {
 	case "conversation":
 		return
+	case "user-message-display":
+		content := userMessageContentText(event.Content)
+		if content == "" {
+			return
+		}
+		m.replaceLastUserEntry(content)
+		return
 	case "user-message":
 		content := userMessageContentText(event.Content)
 		if content == "" {
@@ -136,6 +143,24 @@ func (m *model) applyChatEvent(event chat.ChatEvent) {
 		idx := m.ensureAssistantEntry()
 		appendTextBlock(&m.entries[idx], event.Error)
 	}
+}
+
+func (m *model) replaceLastUserEntry(content string) {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return
+	}
+	for index := len(m.entries) - 1; index >= 0; index-- {
+		if m.entries[index].kind == entryInfo {
+			continue
+		}
+		if m.entries[index].kind == entryUser {
+			m.entries[index].content = content
+			return
+		}
+		break
+	}
+	m.entries = append(m.entries, chatEntry{kind: entryUser, content: content})
 }
 
 func (m *model) ensureAssistantEntry() int {

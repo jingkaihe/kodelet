@@ -408,6 +408,29 @@ export const applyChatStreamEvent = (
       return nextMessages;
     }
 
+    case 'user-message-display': {
+      if (!hasRenderableContent(event.content)) {
+        return nextMessages;
+      }
+
+      for (let index = nextMessages.length - 1; index >= 0; index -= 1) {
+        if (nextMessages[index]?.role !== 'user') {
+          continue;
+        }
+        nextMessages[index] = {
+          role: 'user',
+          content: event.content,
+        };
+        return nextMessages;
+      }
+
+      nextMessages.push({
+        role: 'user',
+        content: event.content,
+      });
+      return nextMessages;
+    }
+
     default:
       return nextMessages;
   }

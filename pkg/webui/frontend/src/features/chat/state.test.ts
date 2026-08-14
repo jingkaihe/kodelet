@@ -633,6 +633,25 @@ describe('applyChatStreamEvent', () => {
     ]);
   });
 
+  it('replaces the latest user message display without duplicating it', () => {
+    const messages = applyChatStreamEvent(
+      [
+        { role: 'assistant', content: 'Earlier response' },
+        { role: 'user', content: '/dictate' },
+      ],
+      {
+        kind: 'user-message-display',
+        role: 'user',
+        content: 'What should I make for breakfast?',
+      }
+    );
+
+    expect(messages).toEqual([
+      { role: 'assistant', content: 'Earlier response' },
+      { role: 'user', content: 'What should I make for breakfast?' },
+    ]);
+  });
+
   it('keeps later streamed text in the same assistant container after tool events', () => {
     let messages: ChatRenderMessage[] = [
       {

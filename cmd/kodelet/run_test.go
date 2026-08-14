@@ -686,6 +686,21 @@ func TestAddRunMessageDisplay(t *testing.T) {
 	assert.Equal(t, "commit", display.Command)
 }
 
+func TestAddRunMessageDisplayStoresExplicitDisplayAsPlainText(t *testing.T) {
+	thread := newFakeRunThread()
+	config := NewRunConfig()
+	config.MessageDisplay = "What should I make for breakfast?"
+	config.MessageDisplayOverride = true
+
+	addRunMessageDisplay(thread, "internal transcription prompt", config)
+
+	display, ok := conversations.LookupMessageDisplay(thread.metadata, "internal transcription prompt")
+	require.True(t, ok)
+	assert.Equal(t, "What should I make for breakfast?", display.Text)
+	assert.Empty(t, display.Kind)
+	assert.Empty(t, display.Command)
+}
+
 func TestAddRunMessageDisplaySkipsBlankInputs(t *testing.T) {
 	thread := newFakeRunThread()
 	config := NewRunConfig()

@@ -1123,6 +1123,11 @@ func TestServer_ExtensionRunAgentCommandTransformsPrompt(t *testing.T) {
 	assert.Equal(t, "Review HEAD", transformed[0].Text)
 	assert.Equal(t, acptypes.ContentTypeImage, transformed[1].Type)
 	assert.Equal(t, "review", sess.Thread.GetMetadata()["recipe_name"])
+	display, ok := conversations.LookupMessageDisplay(sess.Thread.GetMetadata(), "Review HEAD")
+	require.True(t, ok)
+	assert.Equal(t, "Please review HEAD", display.Text)
+	assert.Empty(t, display.Kind)
+	assert.Empty(t, display.Command)
 }
 
 func TestParseSlashCommandArgs(t *testing.T) {
@@ -1488,7 +1493,7 @@ func handleACPServerExtensionCommand(name string, input map[string]any, callCont
 		if strings.TrimSpace(target) == "" {
 			target = "HEAD"
 		}
-		return extensions.CommandResult{Action: extensions.CommandActionRunAgent, Prompt: "Review " + target, RecipeName: "review"}
+		return extensions.CommandResult{Action: extensions.CommandActionRunAgent, Prompt: "Review " + target, RecipeName: "review", Display: "Please review " + target}
 	default:
 		return extensions.CommandResult{Action: extensions.CommandActionPass}
 	}

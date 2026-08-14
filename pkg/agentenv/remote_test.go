@@ -51,6 +51,8 @@ func (c *fakeRemoteController) CallRun(_ context.Context, _ string, method strin
 			Action:          string(CommandActionRunAgent),
 			CommandName:     "review",
 			Prompt:          "review this",
+			Display:         "Please review this",
+			DisplayOverride: true,
 			RecipeName:      "review",
 			AllowedTools:    []string{"file_read"},
 			AllowedCommands: []string{"go test *"},
@@ -212,6 +214,8 @@ func TestRemoteEnvironmentProxiesPinnedRunnerContract(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, CommandActionRunAgent, command.Action)
 	assert.Equal(t, "review this", command.Prompt)
+	assert.Equal(t, "Please review this", command.Display)
+	assert.True(t, command.DisplayOverride)
 
 	message, err := environment.ProcessUserMessage(t.Context(), "hello")
 	require.NoError(t, err)

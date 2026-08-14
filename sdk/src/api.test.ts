@@ -144,7 +144,11 @@ test("command validation can pass to the next route", async () => {
       description: "Review code",
       inputSchema: z.object({ target: z.string() }),
       async execute(input) {
-        return { action: "runAgent", prompt: `Review ${input.target}` };
+        return {
+          action: "runAgent",
+          prompt: `Review ${input.target}`,
+          display: `Please review ${input.target}`,
+        };
       },
     });
   });
@@ -156,6 +160,17 @@ test("command validation can pass to the next route", async () => {
     invocation: { raw: "/review", commandName: "review", args: [], flags: {} },
   });
   assert.deepEqual(result, { action: "pass" });
+
+  const valid = await harness.executeCommand({
+    name: "review",
+    input: { target: "HEAD" },
+    invocation: { raw: "/review target=HEAD", commandName: "review", args: ["target=HEAD"], flags: { target: "HEAD" } },
+  });
+  assert.deepEqual(valid, {
+    action: "runAgent",
+    prompt: "Review HEAD",
+    display: "Please review HEAD",
+  });
 });
 
 test("preserves explicit zero timeout and merges event timeout options", async () => {

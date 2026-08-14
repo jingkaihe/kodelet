@@ -22,15 +22,16 @@ const (
 
 // RoutedCommandResult is returned by TryCommand.
 type RoutedCommandResult struct {
-	Matched      bool
-	CommandName  string
-	ExtensionID  string
-	Action       string
-	Response     string
-	Prompt       string
-	RecipeName   string
-	Display      string
-	Registration CommandRegistration
+	Matched         bool
+	CommandName     string
+	ExtensionID     string
+	Action          string
+	Response        string
+	Prompt          string
+	RecipeName      string
+	Display         string
+	DisplayOverride bool
+	Registration    CommandRegistration
 }
 
 // SlashCommands returns extension command registrations in the shared slash
@@ -140,16 +141,22 @@ func (r *Runtime) TryCommand(ctx context.Context, rawPrompt, commandName, args s
 		if result == nil || result.Action == "" || result.Action == CommandActionPass {
 			continue
 		}
+		display := strings.TrimSpace(result.Display)
+		displayOverride := display != ""
+		if !displayOverride {
+			display = slashcommands.BuildDisplay(commandName, args)
+		}
 		routed := &RoutedCommandResult{
-			Matched:      true,
-			CommandName:  command.Registration.Name,
-			ExtensionID:  command.ExtensionID,
-			Action:       result.Action,
-			Response:     result.Response,
-			Prompt:       result.Prompt,
-			RecipeName:   result.RecipeName,
-			Display:      slashcommands.BuildDisplay(commandName, args),
-			Registration: command.Registration,
+			Matched:         true,
+			CommandName:     command.Registration.Name,
+			ExtensionID:     command.ExtensionID,
+			Action:          result.Action,
+			Response:        result.Response,
+			Prompt:          result.Prompt,
+			RecipeName:      result.RecipeName,
+			Display:         display,
+			DisplayOverride: displayOverride,
+			Registration:    command.Registration,
 		}
 		if routed.RecipeName == "" && command.Registration.Kind == "recipe" {
 			routed.RecipeName = command.Registration.Name

@@ -254,6 +254,7 @@ ext.registerCommand({
       action: "runAgent",
       recipeName: "review",
       prompt: `Review ${input.target}. Focus on correctness, simplicity, and tests.`,
+      display: `Please review ${input.target}`,
     };
   },
 });
@@ -263,7 +264,7 @@ Command result actions:
 
 - `pass`: decline handling and continue normal prompt routing.
 - `respond`: display a direct terminal/Web UI response; it is not fed into the LLM.
-- `runAgent`: replace the prompt and run the normal agent flow; this prompt becomes LLM input.
+- `runAgent`: replace the prompt and run the normal agent flow; this prompt becomes LLM input. Set optional `display` to replace the slash command with different visible and persisted user text.
 
 Recipe-like commands use `kind: "recipe"`, appear in `kodelet recipe list`, can be invoked with `kodelet run -r review --arg target=main`, and can be invoked directly as `/review target=main`.
 

@@ -183,20 +183,22 @@ func (e *LocalEnvironment) ExecuteCommand(ctx context.Context, request CommandRe
 			switch result.Action {
 			case extensions.CommandActionRespond:
 				return CommandResult{
-					Matched:     true,
-					Action:      CommandActionRespond,
-					CommandName: result.CommandName,
-					Response:    result.Response,
-					Display:     result.Display,
+					Matched:         true,
+					Action:          CommandActionRespond,
+					CommandName:     result.CommandName,
+					Response:        result.Response,
+					Display:         result.Display,
+					DisplayOverride: result.DisplayOverride,
 				}, nil
 			case extensions.CommandActionRunAgent:
 				return CommandResult{
-					Matched:     true,
-					Action:      CommandActionRunAgent,
-					CommandName: result.CommandName,
-					Prompt:      result.Prompt,
-					Display:     result.Display,
-					RecipeName:  result.RecipeName,
+					Matched:         true,
+					Action:          CommandActionRunAgent,
+					CommandName:     result.CommandName,
+					Prompt:          result.Prompt,
+					Display:         result.Display,
+					DisplayOverride: result.DisplayOverride,
+					RecipeName:      result.RecipeName,
 				}, nil
 			default:
 				return CommandResult{}, errors.Errorf("extension command %s returned unknown action %q", result.CommandName, result.Action)
