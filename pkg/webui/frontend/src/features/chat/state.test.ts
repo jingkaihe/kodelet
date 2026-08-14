@@ -652,6 +652,34 @@ describe('applyChatStreamEvent', () => {
     ]);
   });
 
+  it('appends a user message display when loaded history ends with an assistant', () => {
+    let messages: ChatRenderMessage[] = [
+      { role: 'user', content: 'Earlier question' },
+      { role: 'assistant', content: 'Earlier response' },
+    ];
+
+    messages = applyChatStreamEvent(messages, {
+      kind: 'user-message-display',
+      role: 'user',
+      content: 'What should I make for breakfast?',
+    });
+    messages = applyChatStreamEvent(messages, {
+      kind: 'text-delta',
+      role: 'assistant',
+      delta: 'Try pancakes.',
+    });
+
+    expect(messages).toEqual([
+      { role: 'user', content: 'Earlier question' },
+      { role: 'assistant', content: 'Earlier response' },
+      { role: 'user', content: 'What should I make for breakfast?' },
+      {
+        role: 'assistant',
+        blocks: [{ type: 'message', content: 'Try pancakes.', inProgress: true }],
+      },
+    ]);
+  });
+
   it('keeps later streamed text in the same assistant container after tool events', () => {
     let messages: ChatRenderMessage[] = [
       {

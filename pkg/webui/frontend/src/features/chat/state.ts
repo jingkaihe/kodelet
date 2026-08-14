@@ -413,11 +413,9 @@ export const applyChatStreamEvent = (
         return nextMessages;
       }
 
-      for (let index = nextMessages.length - 1; index >= 0; index -= 1) {
-        if (nextMessages[index]?.role !== 'user') {
-          continue;
-        }
-        nextMessages[index] = {
+      const lastMessageIndex = nextMessages.length - 1;
+      if (nextMessages[lastMessageIndex]?.role === 'user') {
+        nextMessages[lastMessageIndex] = {
           role: 'user',
           content: event.content,
         };

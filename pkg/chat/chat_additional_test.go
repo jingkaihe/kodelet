@@ -378,6 +378,78 @@ func TestDefaultChatRunnerStreamsAndPersistsExplicitCommandDisplay(t *testing.T)
 	assert.Empty(t, display.Command)
 }
 
+func TestDefaultChatRunnerIncludesImagesInExplicitCommandDisplay(t *testing.T) {
+	originalSettings := viper.AllSettings()
+	defer func() {
+		viper.Reset()
+		for key, value := range originalSettings {
+			viper.Set(key, value)
+		}
+	}()
+
+	viper.Reset()
+	viper.Set("provider", "openai")
+	viper.Set("model", "gpt-4.1")
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	conversationID := "conversation-dictate-display-image"
+	config, _, err := ResolveRemoteConfigWithReasoningAndEnvironmentProfile(t.Context(), conversationID, "", "", "")
+	require.NoError(t, err)
+	fingerprint, err := chatThreadConfigFingerprint(config)
+	require.NoError(t, err)
+
+	thread := &fakeMetadataThread{conversationID: conversationID, persisted: true}
+	environment := &directCommandEnvironment{result: agentenv.CommandResult{
+		Matched:         true,
+		Action:          agentenv.CommandActionRunAgent,
+		CommandName:     "dictate",
+		Prompt:          "model-facing transcription",
+		Display:         "What is in this image?",
+		DisplayOverride: true,
+	}}
+	runner := NewDefaultChatRunner("")
+	runner.sessions[conversationID] = &defaultChatSession{
+		thread:            thread,
+		configFingerprint: fingerprint,
+		lastUsed:          time.Now(),
+	}
+	runner.SetEnvironmentResolver(&recordingEnvironmentResolver{environment: environment})
+	t.Cleanup(func() { require.NoError(t, runner.Close()) })
+	sink := &recordingChatSink{}
+
+	gotID, err := runner.Run(t.Context(), ChatRequest{
+		ConversationID: conversationID,
+		RunnerID:       "runner-one",
+		Message:        "/dictate",
+		Content: []ChatContentBlock{
+			{Type: "text", Text: "/dictate"},
+			{
+				Type: "image",
+				Source: &ChatImageSource{
+					Data:      "aGVsbG8=",
+					MediaType: "image/png",
+				},
+			},
+		},
+	}, sink)
+
+	require.NoError(t, err)
+	assert.Equal(t, conversationID, gotID)
+	require.Len(t, sink.events, 2)
+	assert.Equal(t, "user-message-display", sink.events[0].Kind)
+	assert.Equal(t, []ChatContentBlock{
+		{Type: "text", Text: "What is in this image?"},
+		{
+			Type: "image",
+			Source: &ChatImageSource{
+				Data:      "aGVsbG8=",
+				MediaType: "image/png",
+			},
+		},
+	}, sink.events[0].Content)
+	assert.Equal(t, "conversation", sink.events[1].Kind)
+	assert.Equal(t, 1, thread.sendCalls)
+}
+
 func TestDefaultChatRunnerReusesAndClosesConversationThread(t *testing.T) {
 	config := llmtypes.Config{Provider: "openai", Model: "gpt-5.5"}
 	fingerprint, err := chatThreadConfigFingerprint(config)

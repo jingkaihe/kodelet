@@ -438,11 +438,15 @@ func runDefaultChat(
 		case agentenv.CommandActionRunAgent:
 			message = commandResult.Prompt
 			if commandResult.DisplayOverride && strings.TrimSpace(commandResult.Display) != "" {
+				displayContent := any(strings.TrimSpace(commandResult.Display))
+				if contentBlocks := ContentBlocksForUserInput(strings.TrimSpace(commandResult.Display), imageInputs); len(contentBlocks) > 0 {
+					displayContent = contentBlocks
+				}
 				if err := sink.Send(ChatEvent{
 					Kind:           "user-message-display",
 					ConversationID: sessionID,
 					Role:           "user",
-					Content:        strings.TrimSpace(commandResult.Display),
+					Content:        displayContent,
 				}); err != nil {
 					return sessionID, err
 				}
