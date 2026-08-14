@@ -15,6 +15,7 @@ vi.mock('../components/workspace/TerminalModal', () => ({
 }));
 
 const mockNavigate = vi.fn();
+const mockGetAuthPrincipal = vi.fn();
 const mockGetConversations = vi.fn();
 const mockGetConversation = vi.fn();
 const mockGetChatSettings = vi.fn();
@@ -65,6 +66,7 @@ vi.mock('react-router', async () => {
 
 vi.mock('../services/api', () => ({
   default: {
+    getAuthPrincipal: (...args: unknown[]) => mockGetAuthPrincipal(...args),
     getConversations: (...args: unknown[]) => mockGetConversations(...args),
     getConversation: (...args: unknown[]) => mockGetConversation(...args),
     getChatSettings: (...args: unknown[]) => mockGetChatSettings(...args),
@@ -92,6 +94,7 @@ describe('ChatPage', () => {
     routeParams = {};
     window.localStorage.clear();
     window.HTMLElement.prototype.scrollIntoView = vi.fn();
+    mockGetAuthPrincipal.mockResolvedValue({ id: 'anonymous', roles: ['admin'] });
     mockGetRunners.mockResolvedValue({ runners: [] });
     mockGetChatSettings.mockImplementation((profile?: string) => {
       const selectedProfile = profile || 'work';
@@ -222,6 +225,23 @@ describe('ChatPage', () => {
 
     fireEvent.click(screen.getByTestId('sidebar-attached-toggle'));
     expect(screen.getByTestId('chat-sidebar-shell')).toBeInTheDocument();
+  });
+
+  it('shows the account control for an authenticated OIDC session', async () => {
+    mockGetAuthPrincipal.mockResolvedValue({
+      id: 'https://issuer.example.com|jingkai-he',
+      issuer: 'https://issuer.example.com',
+      subject: 'jingkai-he',
+      name: 'Jingkai He',
+      email: 'jingkai@example.com',
+      roles: ['user'],
+    });
+
+    render(<ChatPage />);
+
+    expect(
+      await screen.findByRole('button', { name: 'Jingkai He account menu' })
+    ).toHaveTextContent('J He');
   });
 
   it('starts with the sidebar closed on mobile and closes it before opening a new chat', async () => {

@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import UserLoginPage from './UserLoginPage';
 import RunnerEnrollmentPage from './RunnerEnrollmentPage';
+import SignedOutPage from './SignedOutPage';
 import { formatApprovalCode } from '../components/auth/AuthPageShell';
 
 const apiMocks = vi.hoisted(() => ({
@@ -33,6 +34,18 @@ describe('authentication approval pages', () => {
   it('normalizes manually entered approval codes', () => {
     expect(formatApprovalCode('ab cd-efgh')).toBe('ABCD-EFGH');
     expect(formatApprovalCode('IO01-ABCD')).toBe('ABCD');
+  });
+
+  it('keeps signed-out users on a public confirmation page until they continue', () => {
+    render(<SignedOutPage />);
+
+    expect(screen.getByRole('heading', { name: 'Signed out' })).toBeInTheDocument();
+    expect(screen.getByText('Your Kodelet session has ended.')).toBeInTheDocument();
+    expect(screen.getByText('Your identity provider may still be signed in.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/');
+    expect(screen.getByRole('link', { name: 'Sign in' }).querySelector('svg')).toHaveClass(
+      'lucide-log-in',
+    );
   });
 
   it('reviews and approves a Kodelet client sign-in', async () => {

@@ -26,6 +26,7 @@ const (
 	webCSRFHeaderName    = "X-CSRF-Token"
 	oidcStateCookieName  = "kodelet_oidc_state"
 	oidcCallbackPath     = "/auth/oidc/callback"
+	signedOutPath        = "/auth/signed-out"
 )
 
 // WebAuthMode selects the authentication mechanism for browser and control-plane API requests.
@@ -530,7 +531,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	clearCookie(w, r, webSessionCookieName, "/", true)
 	clearCookie(w, r, webCSRFCookieName, "/", false)
 	clearCookie(w, r, webUIAuthCookieName, "/", true)
-	http.Redirect(w, r, "/", http.StatusFound)
+	http.Redirect(w, r, signedOutPath, http.StatusFound)
 }
 
 func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
@@ -707,7 +708,7 @@ func isPublicAuthPath(path string) bool {
 		return true
 	}
 	switch path {
-	case "/auth/login", oidcCallbackPath, "/auth/logout", protocol.EnrollmentStartPath, protocol.EnrollmentPollPath, userauth.DeviceStartPath, userauth.DevicePollPath:
+	case "/auth/login", oidcCallbackPath, "/auth/logout", signedOutPath, protocol.EnrollmentStartPath, protocol.EnrollmentPollPath, userauth.DeviceStartPath, userauth.DevicePollPath:
 		return true
 	default:
 		return false

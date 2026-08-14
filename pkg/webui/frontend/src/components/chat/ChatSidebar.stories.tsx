@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { fn } from "storybook/test";
+import { fn, userEvent, within } from "storybook/test";
 import ChatSidebar from "./ChatSidebar";
 import { sampleConversations } from "../../stories/fixtures";
 
@@ -18,6 +18,14 @@ const meta = {
 	],
 	args: {
 		activeConversationId: "conv-active",
+		authPrincipal: {
+			id: "https://issuer.example.com|jingkai-he",
+			issuer: "https://issuer.example.com",
+			subject: "jingkai-he",
+			name: "Jingkai He",
+			email: "jingkai@example.com",
+			roles: ["user"],
+		},
 		conversations: sampleConversations,
 		disabled: false,
 		loading: false,
@@ -34,6 +42,23 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const GroupedConversations: Story = {};
+
+export const AccountMenuOpen: Story = {
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const accountButton = canvas.getByRole("button", {
+			name: "Jingkai He account menu",
+		});
+		await userEvent.click(accountButton);
+		accountButton.blur();
+	},
+};
+
+export const WithoutOIDCSession: Story = {
+	args: {
+		authPrincipal: null,
+	},
+};
 
 export const RunningConversation: Story = {
 	args: {

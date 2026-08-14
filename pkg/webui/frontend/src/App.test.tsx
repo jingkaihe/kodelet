@@ -19,6 +19,10 @@ vi.mock('./pages/RunnerEnrollmentPage', () => ({
   default: () => <div data-testid="runner-enrollment-page">Runner enrollment page</div>,
 }));
 
+vi.mock('./pages/SignedOutPage', () => ({
+  default: () => <div data-testid="signed-out-page">Signed out page</div>,
+}));
+
 vi.mock('./components/workspace/TerminalModal', () => ({
   default: () => <div data-testid="terminal-modal">Terminal</div>,
 }));
@@ -62,6 +66,13 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByTestId('runner-enrollment-page')).toBeInTheDocument();
+  });
+
+  it('routes the public signed-out page', async () => {
+    window.history.replaceState({}, '', '/auth/signed-out');
+    render(<App />);
+
+    expect(await screen.findByTestId('signed-out-page')).toBeInTheDocument();
   });
 
   it('tracks the mobile visual viewport', async () => {

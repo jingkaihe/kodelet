@@ -1,12 +1,13 @@
 import React from "react";
-import { ChevronRight, PanelLeft, SquarePen } from "lucide-react";
-import type { Conversation } from "../../types";
+import { ChevronRight, LogOut, PanelLeft, SquarePen } from "lucide-react";
+import type { AuthPrincipal, Conversation } from "../../types";
 import { cn, truncateText } from "../../utils";
 
 const DEFAULT_VISIBLE_CONVERSATIONS_PER_GROUP = 10;
 const VISIBLE_CONVERSATIONS_STEP = 10;
 
 interface ChatSidebarProps {
+	authPrincipal?: AuthPrincipal | null;
 	conversations: Conversation[];
 	activeConversationId: string | null;
 	loading: boolean;
@@ -17,6 +18,25 @@ interface ChatSidebarProps {
 	onForkConversation: (conversationId: string) => void;
 	onDeleteConversation: (conversationId: string) => void;
 }
+
+const getAccountPresentation = (principal: AuthPrincipal) => {
+	const emailName = principal.email?.split("@", 1)[0]?.replace(/[._-]+/g, " ");
+	const fullName = principal.name?.trim() || emailName?.trim() || "Account";
+	const nameParts = fullName.split(/\s+/).filter(Boolean);
+	const firstName = nameParts[0] || "Account";
+	const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1] : "";
+
+	return {
+		fullName,
+		initials: `${firstName[0] || "A"}${lastName[0] || ""}`.toUpperCase(),
+		shortName: lastName ? `${firstName[0]?.toUpperCase()} ${lastName}` : firstName,
+	};
+};
+
+const isOIDCPrincipal = (
+	principal: AuthPrincipal | null | undefined,
+): principal is AuthPrincipal =>
+	Boolean(principal?.issuer?.trim() && principal.subject?.trim());
 
 const previewConversation = (conversation: Conversation): string => {
 	return (
@@ -108,6 +128,7 @@ const isGroupExpandedByDefault = (
 	);
 
 const ChatSidebar: React.FC<ChatSidebarProps> = ({
+	authPrincipal,
 	conversations,
 	activeConversationId,
 	loading,
@@ -121,6 +142,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 	const [openMenuConversationId, setOpenMenuConversationId] = React.useState<
 		string | null
 	>(null);
+	const [accountMenuOpen, setAccountMenuOpen] = React.useState(false);
 	const [expandedGroups, setExpandedGroups] = React.useState<Record<string, boolean>>(
 		{},
 	);
@@ -128,6 +150,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 		Record<string, number>
 	>({});
 	const menuRef = React.useRef<HTMLDivElement | null>(null);
+	const accountMenuRef = React.useRef<HTMLDivElement | null>(null);
 
 	React.useEffect(() => {
 		if (!openMenuConversationId) {
@@ -154,6 +177,32 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 			document.removeEventListener("keydown", handleEscape);
 		};
 	}, [openMenuConversationId]);
+
+	React.useEffect(() => {
+		if (!accountMenuOpen) {
+			return undefined;
+		}
+
+		const handlePointerDown = (event: MouseEvent) => {
+			if (!accountMenuRef.current?.contains(event.target as Node)) {
+				setAccountMenuOpen(false);
+			}
+		};
+
+		const handleEscape = (event: KeyboardEvent) => {
+			if (event.key === "Escape") {
+				setAccountMenuOpen(false);
+			}
+		};
+
+		document.addEventListener("mousedown", handlePointerDown);
+		document.addEventListener("keydown", handleEscape);
+
+		return () => {
+			document.removeEventListener("mousedown", handlePointerDown);
+			document.removeEventListener("keydown", handleEscape);
+		};
+	}, [accountMenuOpen]);
 
 	const groupedConversations = React.useMemo(
 		() => groupConversationsByCwd(conversations),
@@ -200,6 +249,9 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 		});
 	}, [activeConversationId, groupedConversations]);
 	const showLoadingState = loading && conversations.length === 0;
+	const account = isOIDCPrincipal(authPrincipal)
+		? getAccountPresentation(authPrincipal)
+		: null;
 
 	return (
 		<aside className="chat-sidebar-surface relative flex h-full flex-col overflow-visible border-b border-black/8 px-6 py-6 lg:border-b-0">
@@ -374,6 +426,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 														className="conversation-link-more-button"
 														disabled={disabled}
 														onClick={() => {
+															setAccountMenuOpen(false);
 															setOpenMenuConversationId((currentId) =>
 																currentId === conversation.id ? null : conversation.id,
 															);
@@ -458,9 +511,49 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 							})()}
 						</section>
 					))}
+					</div>
 				</div>
-			</div>
 
+			{account ? (
+				<div className="sidebar-account" ref={accountMenuRef}>
+					{accountMenuOpen ? (
+						<div
+							aria-label="Account options"
+							className="sidebar-account-menu"
+							data-testid="sidebar-account-menu"
+							role="menu"
+						>
+							<a
+								className="sidebar-account-menu-item"
+								href="/auth/logout"
+								onClick={() => setAccountMenuOpen(false)}
+								role="menuitem"
+							>
+								<LogOut aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
+								<span>Sign out</span>
+							</a>
+						</div>
+					) : null}
+
+					<button
+						aria-expanded={accountMenuOpen}
+						aria-haspopup="menu"
+						aria-label={`${account.fullName} account menu`}
+						className="sidebar-account-trigger"
+						onClick={() => {
+							setOpenMenuConversationId(null);
+							setAccountMenuOpen((open) => !open);
+						}}
+						title={account.fullName}
+						type="button"
+					>
+						<span aria-hidden="true" className="sidebar-account-avatar">
+							{account.initials}
+						</span>
+						<span className="sidebar-account-name">{account.shortName}</span>
+					</button>
+				</div>
+			) : null}
 		</aside>
 	);
 };

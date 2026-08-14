@@ -19,6 +19,7 @@ import UIInputDialog from '../components/chat/UIInputDialog';
 import { applyChatStreamEvent, conversationToChatMessages } from '../features/chat/state';
 import apiService from '../services/api';
 import type {
+  AuthPrincipal,
   CWDHint,
   ChatSettings,
   ChatStreamEvent,
@@ -421,6 +422,7 @@ const ChatPage: React.FC = () => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState(() => conversationToChatMessages(null));
+  const [authPrincipal, setAuthPrincipal] = useState<AuthPrincipal | null>(null);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(conversationId);
   const [chatSettings, setChatSettings] = useState<ChatSettings>({
     profiles: [],
@@ -631,6 +633,14 @@ const ChatPage: React.FC = () => {
   useEffect(() => {
     void refreshConversations();
     void refreshRunners();
+
+    void apiService
+      .getAuthPrincipal()
+      .then(setAuthPrincipal)
+      .catch((error) => {
+        console.error('Failed to load authenticated principal', error);
+        setAuthPrincipal(null);
+      });
 
     void apiService
       .getChatSettings()
@@ -2670,6 +2680,7 @@ const ChatPage: React.FC = () => {
           >
             <ChatSidebar
               activeConversationId={conversationId}
+              authPrincipal={authPrincipal}
               conversations={conversations}
               disabled={!canStartNewChat}
               loading={sidebarLoading}

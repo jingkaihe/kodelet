@@ -674,6 +674,43 @@ func TestOIDCLoginCallbackCreatesAuthenticatedSession(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, replayedResponse.Code)
 }
 
+func TestLogoutInvalidatesSessionAndStopsOnPublicSignedOutPage(t *testing.T) {
+	store, _ := newAuthStoreTest(t)
+	sessionToken, csrfToken, err := store.CreateWebSession(t.Context(), "issuer", "subject", "User", "user@example.com", []string{string(RoleUser)}, time.Hour)
+	require.NoError(t, err)
+	server := &Server{
+		config:    &ServerConfig{WebAuthMode: WebAuthModeOIDC},
+		authStore: store,
+	}
+
+	logoutRequest := httptest.NewRequest(http.MethodGet, "/auth/logout", nil)
+	logoutRequest.AddCookie(&http.Cookie{Name: webSessionCookieName, Value: sessionToken})
+	logoutRequest.AddCookie(&http.Cookie{Name: webCSRFCookieName, Value: csrfToken})
+	logoutRequest.AddCookie(&http.Cookie{Name: webUIAuthCookieName, Value: "compatibility-token"})
+	logoutResponse := httptest.NewRecorder()
+
+	server.handleLogout(logoutResponse, logoutRequest)
+
+	assert.Equal(t, http.StatusFound, logoutResponse.Code)
+	assert.Equal(t, signedOutPath, logoutResponse.Header().Get("Location"))
+	_, found, err := store.LoadWebSession(t.Context(), sessionToken)
+	require.NoError(t, err)
+	assert.False(t, found)
+	for _, name := range []string{webSessionCookieName, webCSRFCookieName, webUIAuthCookieName} {
+		cookie := responseClearedCookie(t, logoutResponse.Result().Cookies(), name)
+		assert.Empty(t, cookie.Value)
+		assert.Equal(t, -1, cookie.MaxAge)
+	}
+
+	signedOutRequest := httptest.NewRequest(http.MethodGet, signedOutPath, nil)
+	signedOutResponse := httptest.NewRecorder()
+	server.authMiddleware(http.HandlerFunc(server.handleReactSPA)).ServeHTTP(signedOutResponse, signedOutRequest)
+
+	assert.Equal(t, http.StatusOK, signedOutResponse.Code)
+	assert.Empty(t, signedOutResponse.Header().Get("Location"))
+	assert.Contains(t, signedOutResponse.Body.String(), "<html")
+}
+
 func TestAuthMiddlewareAndRoleAuthorization(t *testing.T) {
 	store, _ := newAuthStoreTest(t)
 	userToken, _, err := store.CreateWebSession(t.Context(), "issuer", "user", "User", "user@example.com", []string{string(RoleUser)}, time.Hour)
@@ -804,5 +841,16 @@ func responseCookie(t *testing.T, cookies []*http.Cookie, name string) *http.Coo
 		}
 	}
 	t.Fatalf("response cookie %s was not set", name)
+	return nil
+}
+
+func responseClearedCookie(t *testing.T, cookies []*http.Cookie, name string) *http.Cookie {
+	t.Helper()
+	for _, cookie := range cookies {
+		if cookie.Name == name && cookie.MaxAge < 0 {
+			return cookie
+		}
+	}
+	t.Fatalf("response cookie %s was not cleared", name)
 	return nil
 }
