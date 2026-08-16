@@ -1,10 +1,25 @@
 import React from "react";
-import { ChevronRight, LogOut, PanelLeft, SquarePen } from "lucide-react";
+import {
+	ChevronDown,
+	ChevronRight,
+	LogOut,
+	PanelLeft,
+	Search,
+	SquarePen,
+	X,
+} from "lucide-react";
 import type { AuthPrincipal, Conversation } from "../../types";
 import { cn, truncateText } from "../../utils";
 
 const DEFAULT_VISIBLE_CONVERSATIONS_PER_GROUP = 10;
 const VISIBLE_CONVERSATIONS_STEP = 10;
+const SEARCH_DIALOG_FOCUSABLE_SELECTOR = [
+	"button:not([disabled])",
+	"input:not([disabled])",
+	"select:not([disabled])",
+	"[href]",
+	"[tabindex]:not([tabindex='-1'])",
+].join(",");
 
 interface ChatSidebarProps {
 	authPrincipal?: AuthPrincipal | null;
@@ -14,10 +29,87 @@ interface ChatSidebarProps {
 	disabled?: boolean;
 	onHide?: () => void;
 	onNewChat: () => void;
+	onSearch: () => void;
 	onSelectConversation: (conversationId: string) => void;
 	onForkConversation: (conversationId: string) => void;
 	onDeleteConversation: (conversationId: string) => void;
+	searchActive?: boolean;
 }
+
+interface ChatSidebarCollapsedRailProps {
+	disabled?: boolean;
+	inert?: boolean;
+	searchActive?: boolean;
+	onNewChat: () => void;
+	onOpen: () => void;
+	onSearch: () => void;
+}
+
+interface ConversationSearchDialogProps {
+	conversations: Conversation[];
+	cwdFilter: string;
+	cwdOptions: string[];
+	loading: boolean;
+	searchTerm: string;
+	onClose: () => void;
+	onCwdFilterChange: (cwd: string) => void;
+	onSearchTermChange: (searchTerm: string) => void;
+	onSelectConversation: (conversationId: string) => void;
+}
+
+export const ChatSidebarCollapsedRail: React.FC<ChatSidebarCollapsedRailProps> = ({
+	disabled = false,
+	inert = false,
+	searchActive = false,
+	onNewChat,
+	onOpen,
+	onSearch,
+}) => (
+	<div
+		className="sidebar-collapsed-rail hidden lg:sticky lg:top-0 lg:flex lg:h-full lg:self-start"
+		data-testid="sidebar-collapsed-rail"
+		inert={inert || undefined}
+	>
+		<div className="sidebar-collapsed-actions">
+			<button
+				aria-label="Show panel"
+				className="sidebar-toggle-button sidebar-toggle-button-collapsed"
+				data-testid="sidebar-attached-toggle"
+				onClick={onOpen}
+				type="button"
+			>
+				<PanelLeft aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
+			</button>
+			<button
+				aria-controls="conversation-search-dialog"
+				aria-expanded={searchActive}
+				aria-haspopup="dialog"
+				aria-label="Open conversation search"
+				className={cn(
+					"sidebar-toggle-button sidebar-collapsed-action",
+					searchActive && "is-active",
+				)}
+				data-testid="sidebar-collapsed-search"
+				onClick={onSearch}
+				title="Search conversations"
+				type="button"
+			>
+				<Search aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
+			</button>
+			<button
+				aria-label="New chat"
+				className="sidebar-toggle-button sidebar-collapsed-action"
+				data-testid="sidebar-collapsed-new-chat"
+				disabled={disabled}
+				onClick={onNewChat}
+				title="New chat"
+				type="button"
+			>
+				<SquarePen aria-hidden="true" className="h-4 w-4" strokeWidth={1.75} />
+			</button>
+		</div>
+	</div>
+);
 
 const getAccountPresentation = (principal: AuthPrincipal) => {
 	const emailName = principal.email?.split("@", 1)[0]?.replace(/[._-]+/g, " ");
@@ -74,6 +166,229 @@ const getCwdGroupPrimaryLabel = (cwd?: string): string => {
 
 	const parts = normalized.split(/[\\/]+/).filter(Boolean);
 	return parts[parts.length - 1] || normalized;
+};
+
+export const ConversationSearchDialog: React.FC<ConversationSearchDialogProps> = ({
+	conversations,
+	cwdFilter,
+	cwdOptions,
+	loading,
+	searchTerm,
+	onClose,
+	onCwdFilterChange,
+	onSearchTermChange,
+	onSelectConversation,
+}) => {
+	const dialogRef = React.useRef<HTMLDivElement | null>(null);
+	const inputRef = React.useRef<HTMLInputElement | null>(null);
+	const onCloseRef = React.useRef(onClose);
+	onCloseRef.current = onClose;
+
+	React.useEffect(() => {
+		const previousFocus =
+			document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		const focusInput = window.setTimeout(() => inputRef.current?.focus(), 0);
+		const handleKeyDown = (event: KeyboardEvent) => {
+			const dialog = dialogRef.current;
+			if (!dialog) {
+				return;
+			}
+
+			if (event.key === "Escape") {
+				event.preventDefault();
+				event.stopPropagation();
+				onCloseRef.current();
+				return;
+			}
+
+			if (event.key !== "Tab") {
+				return;
+			}
+
+			const focusableElements = Array.from(
+				dialog.querySelectorAll<HTMLElement>(SEARCH_DIALOG_FOCUSABLE_SELECTOR),
+			).filter((element) => !element.hasAttribute("disabled"));
+			if (focusableElements.length === 0) {
+				event.preventDefault();
+				dialog.focus();
+				return;
+			}
+
+			const firstElement = focusableElements[0];
+			const lastElement = focusableElements[focusableElements.length - 1];
+			if (event.shiftKey && document.activeElement === firstElement) {
+				event.preventDefault();
+				lastElement.focus();
+				return;
+			}
+			if (!event.shiftKey && document.activeElement === lastElement) {
+				event.preventDefault();
+				firstElement.focus();
+			}
+		};
+
+		window.addEventListener("keydown", handleKeyDown, true);
+		return () => {
+			window.clearTimeout(focusInput);
+			window.removeEventListener("keydown", handleKeyDown, true);
+			window.setTimeout(() => {
+				if (previousFocus?.isConnected) {
+					previousFocus.focus();
+					return;
+				}
+				document
+					.querySelector<HTMLElement>(
+						"[data-testid='sidebar-search-toggle'], [data-testid='sidebar-collapsed-search'], [data-testid='sidebar-attached-toggle-mobile']",
+					)
+					?.focus();
+			}, 0);
+		};
+	}, []);
+
+	const trimmedSearchTerm = searchTerm.trim();
+	const resultsLabel = trimmedSearchTerm ? "Search results" : "Recent conversations";
+
+	return (
+		<div
+			className="new-chat-dialog-backdrop conversation-search-backdrop"
+			onMouseDown={(event) => {
+				if (event.target === event.currentTarget) {
+					onClose();
+				}
+			}}
+		>
+			<div
+				aria-labelledby="conversation-search-title"
+				aria-modal="true"
+				className="conversation-search-dialog surface-panel"
+				data-testid="conversation-search-dialog"
+				id="conversation-search-dialog"
+				ref={dialogRef}
+				role="dialog"
+				tabIndex={-1}
+			>
+				<header className="conversation-search-header">
+					<div>
+						<h2 className="conversation-search-title" id="conversation-search-title">
+							Search conversations
+						</h2>
+						<p className="conversation-search-copy">
+							Find a conversation by title, message, ID, or workspace.
+						</p>
+					</div>
+					<button
+						aria-label="Close conversation search"
+						className="new-chat-context-close"
+						onClick={onClose}
+						type="button"
+					>
+						<X aria-hidden="true" className="h-4 w-4" strokeWidth={1.8} />
+					</button>
+				</header>
+
+				<div className="conversation-search-body">
+					<div className="conversation-search-controls">
+						<div className="conversation-search-input-shell">
+							<Search
+								aria-hidden="true"
+								className="conversation-search-input-icon"
+								strokeWidth={1.8}
+							/>
+							<input
+								aria-label="Search conversations"
+								autoCapitalize="off"
+								autoComplete="off"
+								autoCorrect="off"
+								className="conversation-search-input"
+								onChange={(event) => onSearchTermChange(event.target.value)}
+								placeholder="Search conversations"
+								ref={inputRef}
+								spellCheck={false}
+								type="search"
+								value={searchTerm}
+							/>
+							{searchTerm ? (
+								<button
+									aria-label="Clear conversation search"
+									className="conversation-search-clear"
+									onClick={() => onSearchTermChange("")}
+									type="button"
+								>
+									<X aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={2} />
+								</button>
+							) : null}
+						</div>
+
+						<div className="conversation-search-workspace-shell">
+							<select
+								aria-label="Search workspace"
+								className="conversation-search-workspace"
+								onChange={(event) => onCwdFilterChange(event.target.value)}
+								value={cwdFilter}
+							>
+								<option value="">All workspaces</option>
+								{cwdOptions.map((cwd) => (
+									<option key={cwd} value={cwd}>
+										{cwd}
+									</option>
+								))}
+							</select>
+							<ChevronDown
+								aria-hidden="true"
+								className="conversation-search-workspace-chevron"
+								strokeWidth={1.8}
+							/>
+						</div>
+					</div>
+
+					<div aria-busy={loading} className="conversation-search-results">
+						<div aria-live="polite" className="conversation-search-results-header">
+							<span>{resultsLabel}</span>
+							<span>{conversations.length}</span>
+						</div>
+
+						{loading && conversations.length === 0 ? (
+							<div className="conversation-search-empty">Searching…</div>
+						) : null}
+
+						{!loading && conversations.length === 0 ? (
+							<div className="conversation-search-empty">
+								{trimmedSearchTerm
+									? "No conversations match your search."
+									: "No saved conversations yet."}
+							</div>
+						) : null}
+
+						{conversations.map((conversation) => {
+							const preview = previewConversation(conversation);
+							return (
+								<button
+									className="conversation-search-result"
+									key={conversation.id}
+									onClick={() => onSelectConversation(conversation.id)}
+									type="button"
+								>
+									<span className="conversation-search-result-copy">
+										<span className="conversation-search-result-title">
+											{truncateText(preview, 100)}
+										</span>
+										<span className="conversation-search-result-path">
+											{formatCwdGroupLabel(conversation.cwd)}
+										</span>
+									</span>
+									<ChevronRight
+										aria-hidden="true"
+										className="conversation-search-result-chevron"
+										strokeWidth={1.8}
+									/>
+								</button>
+							);
+						})}
+					</div>
+				</div>
+			</div>
+		</div>
+	);
 };
 
 const groupConversationsByCwd = (conversations: Conversation[]) => {
@@ -135,9 +450,11 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 	disabled = false,
 	onHide,
 	onNewChat,
+	onSearch,
 	onSelectConversation,
 	onForkConversation,
 	onDeleteConversation,
+	searchActive = false,
 }) => {
 	const [openMenuConversationId, setOpenMenuConversationId] = React.useState<
 		string | null
@@ -260,17 +577,33 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 					Kodelet
 				</div>
 
-				{onHide ? (
+				<div className="sidebar-header-actions">
 					<button
-						aria-label="Hide panel"
-						className="sidebar-toggle-button sidebar-toggle-button-open"
-						data-testid="sidebar-hide-button"
-						onClick={onHide}
+						aria-controls="conversation-search-dialog"
+						aria-expanded={searchActive}
+						aria-haspopup="dialog"
+						aria-label="Open conversation search"
+						className="sidebar-toggle-button sidebar-search-toggle"
+						data-testid="sidebar-search-toggle"
+						onClick={onSearch}
+						title="Search conversations"
 						type="button"
 					>
-						<PanelLeft aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
+						<Search aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
 					</button>
-				) : null}
+
+					{onHide ? (
+						<button
+							aria-label="Hide panel"
+							className="sidebar-toggle-button sidebar-toggle-button-open"
+							data-testid="sidebar-hide-button"
+							onClick={onHide}
+							type="button"
+						>
+							<PanelLeft aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
+						</button>
+					) : null}
+				</div>
 			</div>
 
 			<div className="flex min-h-0 flex-1 flex-col">
@@ -287,7 +620,10 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 
 				<div className="sidebar-section-title">Recents</div>
 
-				<div className="conversation-list min-h-0 flex-1 overflow-y-auto pr-1">
+				<div
+					aria-busy={loading}
+					className="conversation-list min-h-0 flex-1 overflow-y-auto pr-1"
+				>
 					{conversations.length === 0 && !showLoadingState ? (
 						<div className="px-2 py-2 text-sm text-kodelet-dark/65">
 							No saved conversations yet.

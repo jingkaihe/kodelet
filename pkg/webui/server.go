@@ -1035,6 +1035,7 @@ func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request)
 	query := r.URL.Query()
 	req := &conversations.ListConversationsRequest{
 		SearchTerm: query.Get("search"),
+		CWD:        expandCompactHomePath(query.Get("cwd")),
 		RunnerID:   strings.TrimSpace(query.Get("runnerId")),
 		SortBy:     query.Get("sortBy"),
 		SortOrder:  query.Get("sortOrder"),
@@ -1266,6 +1267,23 @@ func compactHomePath(path string) string {
 		return strings.TrimSpace(path)
 	}
 	return compactPathForHome(path, homeDir)
+}
+
+func expandCompactHomePath(path string) string {
+	path = strings.TrimSpace(path)
+	if path != "~" && !strings.HasPrefix(path, "~/") {
+		return path
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	if path == "~" {
+		return filepath.Clean(homeDir)
+	}
+
+	return filepath.Join(homeDir, filepath.FromSlash(strings.TrimPrefix(path, "~/")))
 }
 
 func compactPathForHome(path, homeDir string) string {

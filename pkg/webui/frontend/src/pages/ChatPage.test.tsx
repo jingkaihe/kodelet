@@ -212,6 +212,10 @@ describe('ChatPage', () => {
     await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
     expect(screen.getAllByText(getGreeting())).toHaveLength(1);
     expect(screen.getByTestId('chat-sidebar-shell')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-new-chat-button').querySelector('svg')).toHaveClass(
+      'lucide-square-pen'
+    );
+    expect(screen.queryByLabelText('Filter conversations by workspace')).not.toBeInTheDocument();
     const sidebarHideButton = screen.getByTestId('sidebar-hide-button');
     expect(sidebarHideButton).toHaveClass('sidebar-toggle-button');
     expect(sidebarHideButton.querySelector('svg')).toHaveClass('lucide-panel-left');
@@ -222,9 +226,39 @@ describe('ChatPage', () => {
     expect(screen.getByTestId('sidebar-attached-toggle').querySelector('svg')).toHaveClass(
       'lucide-panel-left'
     );
+    expect(screen.getByTestId('sidebar-collapsed-search').querySelector('svg')).toHaveClass(
+      'lucide-search'
+    );
+    expect(screen.getByTestId('sidebar-collapsed-new-chat').querySelector('svg')).toHaveClass(
+      'lucide-square-pen'
+    );
 
     fireEvent.click(screen.getByTestId('sidebar-attached-toggle'));
     expect(screen.getByTestId('chat-sidebar-shell')).toBeInTheDocument();
+  });
+
+  it('opens the search dialog and new chat from the collapsed sidebar rail', async () => {
+    render(<ChatPage />);
+
+    await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
+    fireEvent.click(screen.getByTestId('sidebar-hide-button'));
+
+    fireEvent.click(screen.getByTestId('sidebar-collapsed-search'));
+    expect(screen.queryByTestId('chat-sidebar-shell')).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Search conversations' })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole('searchbox', { name: 'Search conversations' })).toHaveFocus()
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Close conversation search' }));
+      await Promise.resolve();
+    });
+    const newChatButton = screen.getByTestId('sidebar-collapsed-new-chat');
+    await waitFor(() => expect(newChatButton).toBeEnabled());
+    fireEvent.click(newChatButton);
+
+    expect(screen.getByTestId('new-chat-dialog')).toBeInTheDocument();
   });
 
   it('shows the account control for an authenticated OIDC session', async () => {
@@ -2824,9 +2858,9 @@ describe('ChatPage', () => {
     render(<ChatPage />);
 
     await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
-    expect(screen.getByText('/workspace/a')).toBeInTheDocument();
-    expect(screen.getByText('/workspace/b')).toBeInTheDocument();
-    expect(screen.getByText('/workspace/c')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /\/workspace\/a 6/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /\/workspace\/b 4/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /\/workspace\/c 2/i })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /\/workspace\/a 6/i }));
     await waitFor(() => expect(screen.getByText('Conversation 1')).toBeInTheDocument());
@@ -2841,6 +2875,113 @@ describe('ChatPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /\/workspace\/b/i }));
     await waitFor(() => expect(screen.getByText('Conversation 7')).toBeInTheDocument());
+  });
+
+  it('searches conversations and filters them by workspace', async () => {
+    vi.useFakeTimers();
+
+    mockGetConversations
+      .mockResolvedValueOnce({
+        conversations: [
+          {
+            id: 'conv-a',
+            createdAt: '2024-01-01T00:00:00Z',
+            updatedAt: '2024-01-02T00:00:00Z',
+            messageCount: 1,
+            summary: 'Alpha conversation',
+            cwd: '/workspace/a',
+          },
+          {
+            id: 'conv-b',
+            createdAt: '2024-01-01T00:00:00Z',
+            updatedAt: '2024-01-01T00:00:00Z',
+            messageCount: 1,
+            summary: 'Beta conversation',
+            cwd: '/workspace/b',
+          },
+        ],
+        hasMore: false,
+        total: 2,
+        limit: 100,
+        offset: 0,
+      })
+      .mockResolvedValue({
+        conversations: [
+          {
+            id: 'conv-b',
+            createdAt: '2024-01-01T00:00:00Z',
+            updatedAt: '2024-01-01T00:00:00Z',
+            messageCount: 1,
+            summary: 'Beta conversation',
+            cwd: '/workspace/b',
+          },
+        ],
+        hasMore: false,
+        total: 1,
+        limit: 100,
+        offset: 0,
+      });
+
+    try {
+      render(<ChatPage />);
+      await flushAsyncUpdates();
+
+      expect(mockGetConversations).toHaveBeenCalledWith({
+        searchTerm: '',
+        cwd: '',
+        limit: 100,
+        sortBy: 'updated',
+        sortOrder: 'desc',
+      });
+
+      fireEvent.click(screen.getByTestId('sidebar-search-toggle'));
+      expect(screen.getByRole('dialog', { name: 'Search conversations' })).toBeInTheDocument();
+      fireEvent.change(screen.getByRole('searchbox', { name: 'Search conversations' }), {
+        target: { value: 'beta' },
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(200);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(mockGetConversations).toHaveBeenLastCalledWith({
+        searchTerm: 'beta',
+        cwd: '',
+        limit: 100,
+        sortBy: 'updated',
+        sortOrder: 'desc',
+      });
+      expect(screen.getByText('Beta conversation')).toBeInTheDocument();
+
+      fireEvent.change(screen.getByLabelText('Search workspace'), {
+        target: { value: '/workspace/b' },
+      });
+      await flushAsyncUpdates();
+
+      expect(mockGetConversations).toHaveBeenLastCalledWith({
+        searchTerm: 'beta',
+        cwd: '/workspace/b',
+        limit: 100,
+        sortBy: 'updated',
+        sortOrder: 'desc',
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /Beta conversation/i }));
+      await flushAsyncUpdates();
+
+      expect(screen.queryByTestId('conversation-search-dialog')).not.toBeInTheDocument();
+      expect(mockNavigate).toHaveBeenCalledWith('/c/conv-b');
+      expect(mockGetConversations).toHaveBeenLastCalledWith({
+        searchTerm: '',
+        cwd: '',
+        limit: 100,
+        sortBy: 'updated',
+        sortOrder: 'desc',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('shows a compact home cwd label in recent chats and hides sidebar metadata', async () => {
@@ -2865,7 +3006,7 @@ describe('ChatPage', () => {
     render(<ChatPage />);
 
     await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
-    expect(screen.getByText('~/workspace/kodelet')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /~\/workspace\/kodelet 1/i })).toBeInTheDocument();
     expect(screen.queryByText(/^ID:/)).not.toBeInTheDocument();
     expect(screen.queryByText(/^Mode:/)).not.toBeInTheDocument();
   });

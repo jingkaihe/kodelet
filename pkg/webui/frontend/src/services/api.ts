@@ -167,6 +167,7 @@ class ApiService {
 		const params = new URLSearchParams();
 
 		if (filters.searchTerm) params.append("search", filters.searchTerm);
+		if (filters.cwd) params.append("cwd", filters.cwd);
 		if (filters.sortBy) params.append("sortBy", filters.sortBy);
 		if (filters.sortOrder) params.append("sortOrder", filters.sortOrder);
 		if (filters.limit) params.append("limit", filters.limit.toString());

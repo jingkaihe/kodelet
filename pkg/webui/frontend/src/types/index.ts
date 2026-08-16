@@ -123,6 +123,7 @@ export interface ConversationStats {
 
 export interface SearchFilters {
   searchTerm: string;
+  cwd: string;
   sortBy: 'updated' | 'created' | 'messages';
   sortOrder: 'asc' | 'desc';
   limit: number;

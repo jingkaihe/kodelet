@@ -188,9 +188,9 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 		args["end_date"] = *options.EndDate
 	}
 
-	if options.SearchTerm != "" {
-		searchPattern := "%" + strings.ToLower(options.SearchTerm) + "%"
-		conditions = append(conditions, "(LOWER(first_message) LIKE :search_term OR LOWER(summary) LIKE :search_term)")
+	if searchTerm := strings.TrimSpace(options.SearchTerm); searchTerm != "" {
+		searchPattern := "%" + strings.ToLower(searchTerm) + "%"
+		conditions = append(conditions, "(LOWER(id) LIKE :search_term OR LOWER(cwd) LIKE :search_term OR LOWER(first_message) LIKE :search_term OR LOWER(summary) LIKE :search_term)")
 		args["search_term"] = searchPattern
 	}
 
@@ -199,7 +199,7 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 		args["provider"] = options.Provider
 	}
 
-	if options.CWD != "" {
+	if options.CWD = strings.TrimSpace(options.CWD); options.CWD != "" {
 		conditions = append(conditions, "cwd = :cwd")
 		args["cwd"] = options.CWD
 	}

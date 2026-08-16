@@ -162,7 +162,7 @@ func TestConversationService_ListConversations(t *testing.T) {
 	}
 }
 
-func TestConversationService_ListConversationsPassesRunnerFilter(t *testing.T) {
+func TestConversationService_ListConversationsPassesFilters(t *testing.T) {
 	mockStore := newMockConversationStore()
 	var received conversations.QueryOptions
 	mockStore.queryFunc = func(_ context.Context, options conversations.QueryOptions) (conversations.QueryResult, error) {
@@ -171,8 +171,15 @@ func TestConversationService_ListConversationsPassesRunnerFilter(t *testing.T) {
 	}
 	service := NewConversationService(mockStore)
 
-	_, err := service.ListConversations(t.Context(), &ListConversationsRequest{RunnerID: "runner-1", Limit: 1})
+	_, err := service.ListConversations(t.Context(), &ListConversationsRequest{
+		SearchTerm: "needle",
+		CWD:        "/workspace/kodelet",
+		RunnerID:   "runner-1",
+		Limit:      1,
+	})
 	require.NoError(t, err)
+	assert.Equal(t, "needle", received.SearchTerm)
+	assert.Equal(t, "/workspace/kodelet", received.CWD)
 	assert.Equal(t, "runner-1", received.RunnerID)
 	assert.Equal(t, 1, received.Limit)
 }

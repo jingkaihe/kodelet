@@ -183,6 +183,7 @@ func TestStore_Query(t *testing.T) {
 	records := []conversations.ConversationRecord{
 		{
 			ID:          "conv-1",
+			CWD:         "/workspace/alpha",
 			RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Hello world"}]}]`),
 			Provider:    "anthropic",
 			Usage:       llmtypes.Usage{InputTokens: 100, OutputTokens: 50},
@@ -194,6 +195,7 @@ func TestStore_Query(t *testing.T) {
 		},
 		{
 			ID:          "conv-2",
+			CWD:         "/workspace/beta",
 			RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Testing search"}]}]`),
 			Provider:    "openai",
 			Usage:       llmtypes.Usage{InputTokens: 200, OutputTokens: 100},
@@ -205,6 +207,7 @@ func TestStore_Query(t *testing.T) {
 		},
 		{
 			ID:          "conv-3",
+			CWD:         "/workspace/alpha",
 			RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Another message"}]}]`),
 			Provider:    "anthropic",
 			Usage:       llmtypes.Usage{InputTokens: 150, OutputTokens: 75},
@@ -229,6 +232,26 @@ func TestStore_Query(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, result.ConversationSummaries, 1)
 	assert.Equal(t, "conv-2", result.ConversationSummaries[0].ID)
+
+	// Test search by conversation ID and working directory
+	result, err = store.Query(ctx, conversations.QueryOptions{SearchTerm: "conv-3"})
+	require.NoError(t, err)
+	assert.Len(t, result.ConversationSummaries, 1)
+	assert.Equal(t, "conv-3", result.ConversationSummaries[0].ID)
+
+	result, err = store.Query(ctx, conversations.QueryOptions{SearchTerm: "beta"})
+	require.NoError(t, err)
+	assert.Len(t, result.ConversationSummaries, 1)
+	assert.Equal(t, "conv-2", result.ConversationSummaries[0].ID)
+
+	// Test exact working directory filter
+	result, err = store.Query(ctx, conversations.QueryOptions{CWD: "/workspace/alpha"})
+	require.NoError(t, err)
+	assert.Len(t, result.ConversationSummaries, 2)
+	assert.Equal(t, 2, result.Total)
+	for _, summary := range result.ConversationSummaries {
+		assert.Equal(t, "/workspace/alpha", summary.CWD)
+	}
 
 	// Test sorting by update time (default)
 	result, err = store.Query(ctx, conversations.QueryOptions{})

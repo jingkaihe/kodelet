@@ -267,6 +267,7 @@ describe("ApiService", () => {
 
 			await apiService.getConversations({
 				searchTerm: "test",
+				cwd: "~/workspace/kodelet",
 				sortBy: "created",
 				sortOrder: "desc",
 				limit: 10,
@@ -274,7 +275,7 @@ describe("ApiService", () => {
 			});
 
 			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/conversations?search=test&sortBy=created&sortOrder=desc&limit=10&offset=20",
+				"/api/conversations?search=test&cwd=%7E%2Fworkspace%2Fkodelet&sortBy=created&sortOrder=desc&limit=10&offset=20",
 				expect.any(Object),
 			);
 		});

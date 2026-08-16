@@ -11,7 +11,10 @@ import React, {
 import { GitCompareArrows, PanelLeft, PanelRight, SquareTerminal } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router';
 import ChatComposer from '../components/chat/ChatComposer';
-import ChatSidebar from '../components/chat/ChatSidebar';
+import ChatSidebar, {
+  ChatSidebarCollapsedRail,
+  ConversationSearchDialog,
+} from '../components/chat/ChatSidebar';
 import ChatTranscript from '../components/chat/ChatTranscript';
 import NewChatContextDialog from '../components/chat/NewChatContextDialog';
 import PendingSteerList from '../components/chat/PendingSteerList';
@@ -420,6 +423,10 @@ const ChatPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const conversationId = id || null;
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [conversationSearchTerm, setConversationSearchTerm] = useState('');
+  const [sidebarSearchOpen, setSidebarSearchOpen] = useState(false);
+  const [conversationCWDFilter, setConversationCWDFilter] = useState('');
+  const [conversationCWDOptions, setConversationCWDOptions] = useState<string[]>([]);
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState(() => conversationToChatMessages(null));
   const [authPrincipal, setAuthPrincipal] = useState<AuthPrincipal | null>(null);
@@ -493,6 +500,9 @@ const ChatPage: React.FC = () => {
   const resumeStreamRef = useRef(0);
   const reasoningSettingsRequestRef = useRef(0);
   const cwdSuggestionRequestRef = useRef(0);
+  const conversationListRequestRef = useRef(0);
+  const conversationSearchTermRef = useRef('');
+  const conversationCWDFilterRef = useRef('');
   const cwdInputFocusedRef = useRef(false);
   const cwdSuggestionSkipQueryRef = useRef<string | null>(null);
   const viewedConversationIdRef = useRef<string | null>(conversationId);
@@ -519,7 +529,8 @@ const ChatPage: React.FC = () => {
   const workspacePanelOpen = workspacePanelView !== null;
   const sidebarOverlayOpen = mobileLayout && sidebarVisible;
   const workspaceOverlayOpen = workspaceOverlayLayout && workspacePanelOpen;
-  const higherPriorityDialogOpen = uiRequestDialog !== null || newChatDialogOpen;
+  const higherPriorityDialogOpen =
+    uiRequestDialog !== null || newChatDialogOpen || sidebarSearchOpen;
 
   const setConversationRunning = useCallback(
     (id: string | null | undefined, isRunning: boolean) => {
@@ -605,21 +616,100 @@ const ChatPage: React.FC = () => {
   );
 
   const refreshConversations = useCallback(async () => {
+    const requestId = conversationListRequestRef.current + 1;
+    conversationListRequestRef.current = requestId;
+    const searchTerm = conversationSearchTermRef.current.trim();
+    const cwdFilter = conversationCWDFilterRef.current.trim();
+
     setSidebarLoading(true);
     try {
       const response = await apiService.getConversations({
+        searchTerm,
+        cwd: cwdFilter,
         limit: SIDEBAR_CONVERSATION_LIMIT,
         sortBy: 'updated',
         sortOrder: 'desc',
       });
+      if (conversationListRequestRef.current !== requestId) {
+        return;
+      }
+
       const nextConversations = response.conversations || [];
       setConversations(nextConversations);
+      const responseCWDs = nextConversations
+        .map((nextConversation) => nextConversation.cwd?.trim())
+        .filter((cwd): cwd is string => Boolean(cwd));
+      setConversationCWDOptions((currentOptions) => {
+        const candidates =
+          searchTerm || cwdFilter ? [...currentOptions, cwdFilter, ...responseCWDs] : responseCWDs;
+        const seen = new Set<string>();
+
+        return candidates.filter((cwd) => {
+          if (!cwd || seen.has(cwd)) {
+            return false;
+          }
+          seen.add(cwd);
+          return true;
+        });
+      });
     } catch (error) {
-      console.error('Failed to load conversations', error);
+      if (conversationListRequestRef.current === requestId) {
+        console.error('Failed to load conversations', error);
+      }
     } finally {
-      setSidebarLoading(false);
+      if (conversationListRequestRef.current === requestId) {
+        setSidebarLoading(false);
+      }
     }
   }, []);
+
+  const requestConversationFilterRefresh = useMemo(
+    () =>
+      debounce(() => {
+        void refreshConversations();
+      }, 200),
+    [refreshConversations]
+  );
+
+  useEffect(() => {
+    return () => {
+      requestConversationFilterRefresh.cancel();
+    };
+  }, [requestConversationFilterRefresh]);
+
+  const handleConversationSearchTermChange = useCallback(
+    (searchTerm: string) => {
+      setConversationSearchTerm(searchTerm);
+      conversationSearchTermRef.current = searchTerm;
+      requestConversationFilterRefresh();
+    },
+    [requestConversationFilterRefresh]
+  );
+
+  const handleConversationCWDFilterChange = useCallback(
+    (cwd: string) => {
+      setConversationCWDFilter(cwd);
+      conversationCWDFilterRef.current = cwd;
+      requestConversationFilterRefresh.cancel();
+      void refreshConversations();
+    },
+    [refreshConversations, requestConversationFilterRefresh]
+  );
+
+  const handleCloseConversationSearch = useCallback(() => {
+    setSidebarSearchOpen(false);
+    requestConversationFilterRefresh.cancel();
+    const hadActiveFilters = Boolean(
+      conversationSearchTermRef.current || conversationCWDFilterRef.current
+    );
+    setConversationSearchTerm('');
+    conversationSearchTermRef.current = '';
+    setConversationCWDFilter('');
+    conversationCWDFilterRef.current = '';
+    if (hadActiveFilters) {
+      void refreshConversations();
+    }
+  }, [refreshConversations, requestConversationFilterRefresh]);
 
   const refreshRunners = useCallback(async () => {
     try {
@@ -1489,6 +1579,11 @@ const ChatPage: React.FC = () => {
     });
   };
 
+  const handleSelectSearchResult = (nextConversationId: string) => {
+    handleCloseConversationSearch();
+    handleSelectConversation(nextConversationId);
+  };
+
   const handleForkConversation = async (sourceConversationId: string) => {
     try {
       const response = await apiService.forkConversation(sourceConversationId);
@@ -1561,6 +1656,11 @@ const ChatPage: React.FC = () => {
         document.querySelector<HTMLElement>('[data-testid="sidebar-attached-toggle"]');
     }
     setSidebarVisible(!sidebarVisible);
+  };
+
+  const handleOpenSidebarSearch = () => {
+    closeMobileSidebar();
+    setSidebarSearchOpen(true);
   };
 
   const handleSidebarResizeStart = (event: React.MouseEvent<HTMLElement>) => {
@@ -2650,6 +2750,20 @@ const ChatPage: React.FC = () => {
         />
       ) : null}
 
+      {sidebarSearchOpen && !uiRequestDialog && !newChatDialogOpen ? (
+        <ConversationSearchDialog
+          conversations={conversations}
+          cwdFilter={conversationCWDFilter}
+          cwdOptions={conversationCWDOptions}
+          loading={sidebarLoading}
+          onClose={handleCloseConversationSearch}
+          onCwdFilterChange={handleConversationCWDFilterChange}
+          onSearchTermChange={handleConversationSearchTermChange}
+          onSelectConversation={handleSelectSearchResult}
+          searchTerm={conversationSearchTerm}
+        />
+      ) : null}
+
       {sidebarOverlayOpen ? (
         <button
           aria-label="Hide sidebar overlay"
@@ -2688,7 +2802,9 @@ const ChatPage: React.FC = () => {
               onForkConversation={handleForkConversation}
               onHide={handleSidebarToggle}
               onNewChat={handleNewChat}
+              onSearch={handleOpenSidebarSearch}
               onSelectConversation={handleSelectConversation}
+              searchActive={sidebarSearchOpen}
             />
             <div
               aria-label="Resize sidebar"
@@ -2704,23 +2820,14 @@ const ChatPage: React.FC = () => {
 
         {!sidebarVisible ? (
           <>
-            <div
-              className="sidebar-collapsed-rail hidden lg:sticky lg:top-0 lg:flex lg:h-full lg:self-start"
-              data-testid="sidebar-collapsed-rail"
-              inert={workspaceOverlayOpen || undefined}
-            >
-              <div className="sidebar-collapsed-actions">
-                <button
-                  aria-label="Show panel"
-                  className="sidebar-toggle-button sidebar-toggle-button-collapsed"
-                  data-testid="sidebar-attached-toggle"
-                  onClick={handleSidebarToggle}
-                  type="button"
-                >
-                  <PanelLeft aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
-                </button>
-              </div>
-            </div>
+            <ChatSidebarCollapsedRail
+              disabled={!canStartNewChat}
+              inert={workspaceOverlayOpen}
+              onNewChat={handleNewChat}
+              onOpen={handleSidebarToggle}
+              onSearch={handleOpenSidebarSearch}
+              searchActive={Boolean(sidebarSearchOpen || conversationSearchTerm)}
+            />
 
             <button
               aria-label="Show panel"

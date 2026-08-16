@@ -1,7 +1,16 @@
+import { useState, type ComponentProps } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn, userEvent, within } from "storybook/test";
-import ChatSidebar from "./ChatSidebar";
+import ChatSidebar, {
+	ChatSidebarCollapsedRail,
+	ConversationSearchDialog,
+} from "./ChatSidebar";
 import { sampleConversations } from "../../stories/fixtures";
+
+const conversationSearchCwdOptions = [
+	"/home/jingkaihe/workspace/kodelet",
+	"/home/jingkaihe/workspace/plugins",
+];
 
 const meta = {
 	title: "Chat/ChatSidebar",
@@ -33,7 +42,9 @@ const meta = {
 		onForkConversation: fn(),
 		onHide: fn(),
 		onNewChat: fn(),
+		onSearch: fn(),
 		onSelectConversation: fn(),
+		searchActive: false,
 	},
 } satisfies Meta<typeof ChatSidebar>;
 
@@ -41,7 +52,62 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
+const ConversationSearchStory = (
+	args: Pick<ComponentProps<typeof ChatSidebar>, "onSelectConversation">,
+) => {
+	const [searchTerm, setSearchTerm] = useState("");
+	const [cwdFilter, setCwdFilter] = useState("");
+	const normalizedSearch = searchTerm.trim().toLowerCase();
+	const conversations = sampleConversations.filter((conversation) => {
+		if (cwdFilter && conversation.cwd !== cwdFilter) {
+			return false;
+		}
+
+		if (!normalizedSearch) {
+			return true;
+		}
+
+		return [
+			conversation.id,
+			conversation.summary,
+			conversation.preview,
+			conversation.firstMessage,
+			conversation.cwd,
+		].some((value) => value?.toLowerCase().includes(normalizedSearch));
+	});
+
+	return (
+		<ConversationSearchDialog
+			conversations={conversations}
+			cwdFilter={cwdFilter}
+			cwdOptions={conversationSearchCwdOptions}
+			loading={false}
+			onClose={fn()}
+			onCwdFilterChange={setCwdFilter}
+			onSearchTermChange={setSearchTerm}
+			onSelectConversation={args.onSelectConversation}
+			searchTerm={searchTerm}
+		/>
+	);
+};
+
 export const GroupedConversations: Story = {};
+
+export const ConversationSearchModal: Story = {
+	render: (args) => <ConversationSearchStory {...args} />,
+};
+
+export const CollapsedRail: Story = {
+	render: (args) => (
+		<ChatSidebarCollapsedRail
+			disabled={args.disabled}
+			onNewChat={args.onNewChat}
+			onOpen={() => args.onHide?.()}
+			onSearch={args.onSearch}
+			searchActive={true}
+		/>
+	),
+};
 
 export const AccountMenuOpen: Story = {
 	play: async ({ canvasElement }) => {
