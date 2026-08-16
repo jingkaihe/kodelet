@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.5.34-beta
+
+Added live conversation forking for extension tools so child agents can inherit the active provider-native context without modifying the source conversation.
+
+Recorded durable source, root, depth, mode, and extension-tool initiator metadata for live and stored conversation forks.
+
+Made fork snapshots safe across Anthropic, OpenAI Chat Completions, and OpenAI Responses by removing unresolved trailing tool calls, preserving provider configuration, and resetting cumulative usage.
+
 ## 0.5.33-beta
 
 Added generic OIDC authentication to `kodelet serve`, with verified email and domain allowlists plus `user`, `terminal`, `runner-admin`, and `admin` roles.
