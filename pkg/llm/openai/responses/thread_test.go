@@ -3510,6 +3510,12 @@ func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T)
 	assert.Equal(t, 456, store.savedRecords[0].Usage.MaxContextWindow)
 	assert.NotContains(t, store.savedRecords[0].Metadata, convtypes.CodexResponsesWindowGenerationMetadataKey)
 	assert.Equal(t, llmtypes.OpenAIAPIMode(""), thread.Config.OpenAI.APIMode)
+	forkMetadata, ok := store.savedRecords[0].Metadata[convtypes.ConversationForkMetadataKey].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, thread.ConversationID, forkMetadata["source_conversation_id"])
+	assert.Equal(t, thread.ConversationID, forkMetadata["root_conversation_id"])
+	assert.Equal(t, 1, forkMetadata["depth"])
+	assert.Equal(t, string(convtypes.ConversationForkModeLiveSnapshot), forkMetadata["mode"])
 }
 
 func TestResponsesSaveConversationKeepsInitialNameAndPreservesExplicitRenames(t *testing.T) {

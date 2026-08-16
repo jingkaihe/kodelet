@@ -4,6 +4,7 @@
 package conversations
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -20,6 +21,10 @@ import (
 var ErrConversationNotFound = errors.New("conversation not found")
 
 const (
+	// ConversationForkMetadataKey stores durable conversation fork lineage.
+	ConversationForkMetadataKey = "conversation_fork"
+	// ConversationForkMetadataVersion is the current fork metadata schema version.
+	ConversationForkMetadataVersion = 1
 	// RunnerIDMetadataKey identifies a conversation whose environment belongs to a remote runner.
 	RunnerIDMetadataKey = "runner_id"
 	// RunnerEnvironmentProfileMetadataKey stores the runner-local profile independently from model policy.
@@ -28,6 +33,66 @@ const (
 	// context-window generation. Forks intentionally start a new generation lineage.
 	CodexResponsesWindowGenerationMetadataKey = "codex_responses_window_generation"
 )
+
+// ConversationForkMode identifies how the source state was obtained.
+type ConversationForkMode string
+
+const (
+	// ConversationForkModeLiveSnapshot captures the active in-memory thread state.
+	ConversationForkModeLiveSnapshot ConversationForkMode = "live_snapshot"
+	// ConversationForkModeStoredCopy duplicates an already persisted conversation record.
+	ConversationForkModeStoredCopy ConversationForkMode = "stored_copy"
+	// ConversationForkInitiatorTypeExtensionTool identifies an extension tool request.
+	ConversationForkInitiatorTypeExtensionTool = "extension_tool"
+)
+
+// ConversationForkInitiator identifies the host operation that requested a fork.
+type ConversationForkInitiator struct {
+	Type        string `json:"type"`
+	ExtensionID string `json:"extension_id,omitempty"`
+	ToolName    string `json:"tool_name,omitempty"`
+}
+
+// ConversationForkMetadata describes the durable lineage of a forked conversation.
+type ConversationForkMetadata struct {
+	Version              int                        `json:"version"`
+	SourceConversationID string                     `json:"source_conversation_id"`
+	RootConversationID   string                     `json:"root_conversation_id"`
+	Depth                int                        `json:"depth"`
+	Mode                 ConversationForkMode       `json:"mode"`
+	Initiator            *ConversationForkInitiator `json:"initiator,omitempty"`
+}
+
+// ConversationForkOptions configures metadata attached to a forked conversation.
+type ConversationForkOptions struct {
+	Mode      ConversationForkMode
+	Initiator *ConversationForkInitiator
+}
+
+type conversationForkInitiatorContextKey struct{}
+
+// ContextWithConversationForkInitiator attaches the operation requesting a live fork.
+func ContextWithConversationForkInitiator(ctx context.Context, initiator ConversationForkInitiator) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	initiator.Type = strings.TrimSpace(initiator.Type)
+	initiator.ExtensionID = strings.TrimSpace(initiator.ExtensionID)
+	initiator.ToolName = strings.TrimSpace(initiator.ToolName)
+	if initiator.Type == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, conversationForkInitiatorContextKey{}, initiator)
+}
+
+// ConversationForkInitiatorFromContext returns the operation requesting a live fork.
+func ConversationForkInitiatorFromContext(ctx context.Context) (ConversationForkInitiator, bool) {
+	if ctx == nil {
+		return ConversationForkInitiator{}, false
+	}
+	initiator, ok := ctx.Value(conversationForkInitiatorContextKey{}).(ConversationForkInitiator)
+	return initiator, ok && initiator.Type != ""
+}
 
 // QueryOptions provides filtering and sorting options for conversation queries
 type QueryOptions struct {
@@ -101,6 +166,14 @@ func NewConversationRecord(id string) ConversationRecord {
 // ForkConversationRecord creates an isolated copy of a conversation while
 // resetting cumulative usage and preserving context-window accounting.
 func ForkConversationRecord(source ConversationRecord) ConversationRecord {
+	return ForkConversationRecordWithOptions(source, ConversationForkOptions{
+		Mode: ConversationForkModeStoredCopy,
+	})
+}
+
+// ForkConversationRecordWithOptions creates an isolated conversation copy and
+// records its durable lineage.
+func ForkConversationRecordWithOptions(source ConversationRecord, options ConversationForkOptions) ConversationRecord {
 	forked := NewConversationRecord("")
 	forked.RawMessages = append(json.RawMessage(nil), source.RawMessages...)
 	forked.CWD = source.CWD
@@ -115,7 +188,72 @@ func ForkConversationRecord(source ConversationRecord) ConversationRecord {
 	if source.ToolResults != nil {
 		forked.ToolResults = maps.Clone(source.ToolResults)
 	}
+
+	mode := options.Mode
+	if mode == "" {
+		mode = ConversationForkModeStoredCopy
+	}
+	rootConversationID := source.ID
+	depth := 1
+	if parentFork, ok := conversationForkMetadataFromMetadata(source.Metadata); ok {
+		rootConversationID = parentFork.RootConversationID
+		depth = parentFork.Depth + 1
+	}
+	forkMetadata := ConversationForkMetadata{
+		Version:              ConversationForkMetadataVersion,
+		SourceConversationID: source.ID,
+		RootConversationID:   rootConversationID,
+		Depth:                depth,
+		Mode:                 mode,
+		Initiator:            options.Initiator,
+	}
+	forked.Metadata[ConversationForkMetadataKey] = conversationForkMetadataValue(forkMetadata)
 	return forked
+}
+
+func conversationForkMetadataFromMetadata(metadata map[string]any) (ConversationForkMetadata, bool) {
+	if metadata == nil {
+		return ConversationForkMetadata{}, false
+	}
+	value, ok := metadata[ConversationForkMetadataKey]
+	if !ok || value == nil {
+		return ConversationForkMetadata{}, false
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return ConversationForkMetadata{}, false
+	}
+	var forkMetadata ConversationForkMetadata
+	if err := json.Unmarshal(raw, &forkMetadata); err != nil {
+		return ConversationForkMetadata{}, false
+	}
+	if forkMetadata.RootConversationID == "" || forkMetadata.Depth < 1 {
+		return ConversationForkMetadata{}, false
+	}
+	return forkMetadata, true
+}
+
+func conversationForkMetadataValue(metadata ConversationForkMetadata) map[string]any {
+	value := map[string]any{
+		"version":                metadata.Version,
+		"source_conversation_id": metadata.SourceConversationID,
+		"root_conversation_id":   metadata.RootConversationID,
+		"depth":                  metadata.Depth,
+		"mode":                   string(metadata.Mode),
+	}
+	if metadata.Initiator != nil {
+		initiator := map[string]any{
+			"type": metadata.Initiator.Type,
+		}
+		if metadata.Initiator.ExtensionID != "" {
+			initiator["extension_id"] = metadata.Initiator.ExtensionID
+		}
+		if metadata.Initiator.ToolName != "" {
+			initiator["tool_name"] = metadata.Initiator.ToolName
+		}
+		value["initiator"] = initiator
+	}
+	return value
 }
 
 // ToSummary converts a ConversationRecord to a ConversationSummary

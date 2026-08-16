@@ -134,7 +134,11 @@ func (t *Thread) ForkConversation(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	forked := convtypes.ForkConversationRecord(record)
+	forkOptions := convtypes.ConversationForkOptions{Mode: convtypes.ConversationForkModeLiveSnapshot}
+	if initiator, ok := convtypes.ConversationForkInitiatorFromContext(ctx); ok {
+		forkOptions.Initiator = &initiator
+	}
+	forked := convtypes.ForkConversationRecordWithOptions(record, forkOptions)
 	if err := t.Store.Save(ctx, forked); err != nil {
 		return "", errors.Wrap(err, "failed to save forked conversation")
 	}

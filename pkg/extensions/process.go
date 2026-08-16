@@ -369,7 +369,12 @@ func (p *Process) executeTool(ctx context.Context, name string, input json.RawMe
 	callContext = extensionCallContextWithUIScope(ctx, callContext)
 	params := executeToolParams{Name: name, Input: input, Context: callContext}
 	var result ToolExecutionResult
-	handler := toolExecutionHostHandler{source: source, onUpdate: onUpdate}
+	handler := toolExecutionHostHandler{
+		source:      source,
+		onUpdate:    onUpdate,
+		extensionID: p.Extension.ID,
+		toolName:    name,
+	}
 	if err := client.callWithHostHandler(ctx, "extension.tool.execute", params, &result, handler); err != nil {
 		if shouldRestartAfterCallError(err) {
 			p.failClientGeneration(client)
@@ -380,8 +385,10 @@ func (p *Process) executeTool(ctx context.Context, name string, input json.RawMe
 }
 
 type toolExecutionHostHandler struct {
-	source   *processExtensionUISource
-	onUpdate func(ToolExecutionResult)
+	source      *processExtensionUISource
+	onUpdate    func(ToolExecutionResult)
+	extensionID string
+	toolName    string
 }
 
 func (h toolExecutionHostHandler) HandleRPCRequest(ctx context.Context, method string, params json.RawMessage) (any, *rpcError) {
@@ -390,6 +397,13 @@ func (h toolExecutionHostHandler) HandleRPCRequest(ctx context.Context, method s
 		forker, ok := toolContext.MetadataStore.(llmtypes.ConversationForker)
 		if !ok {
 			return nil, &rpcError{Code: conversationForkUnavailableCode, Message: "live conversation forking is unavailable for this tool call"}
+		}
+		if strings.TrimSpace(h.extensionID) != "" && strings.TrimSpace(h.toolName) != "" {
+			ctx = conversationtypes.ContextWithConversationForkInitiator(ctx, conversationtypes.ConversationForkInitiator{
+				Type:        conversationtypes.ConversationForkInitiatorTypeExtensionTool,
+				ExtensionID: h.extensionID,
+				ToolName:    h.toolName,
+			})
 		}
 		conversationID, err := forker.ForkConversation(ctx)
 		if err != nil {

@@ -616,6 +616,12 @@ func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T)
 	assert.Zero(t, store.SavedRecords[0].Usage.OutputTokens)
 	assert.Equal(t, 123, store.SavedRecords[0].Usage.CurrentContextWindow)
 	assert.Equal(t, 456, store.SavedRecords[0].Usage.MaxContextWindow)
+	forkMetadata, ok := store.SavedRecords[0].Metadata[conversations.ConversationForkMetadataKey].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, thread.ConversationID, forkMetadata["source_conversation_id"])
+	assert.Equal(t, thread.ConversationID, forkMetadata["root_conversation_id"])
+	assert.Equal(t, 1, forkMetadata["depth"])
+	assert.Equal(t, string(conversations.ConversationForkModeLiveSnapshot), forkMetadata["mode"])
 }
 
 func TestCleanedOpenAIMessagesForForkDropsAssistantWithoutReplayableContent(t *testing.T) {

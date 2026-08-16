@@ -10,6 +10,7 @@ import (
 	"time"
 
 	kodelettools "github.com/jingkaihe/kodelet/pkg/tools"
+	conversationtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
@@ -31,11 +32,20 @@ func TestToolExecutionHostHandlerForksLiveConversation(t *testing.T) {
 	store := &forkableMetadataStore{conversationID: "forked-conversation"}
 	ctx := kodelettools.ContextWithToolContext(context.Background(), kodelettools.ToolContext{MetadataStore: store})
 
-	result, rpcErr := (toolExecutionHostHandler{}).HandleRPCRequest(ctx, ConversationForkMethod, nil)
+	result, rpcErr := (toolExecutionHostHandler{
+		extensionID: "subagent",
+		toolName:    "subagent",
+	}).HandleRPCRequest(ctx, ConversationForkMethod, nil)
 
 	require.Nil(t, rpcErr)
 	assert.Equal(t, conversationForkResult{ConversationID: "forked-conversation"}, result)
 	assert.Equal(t, 1, store.calls)
+	require.True(t, store.hasInitiator)
+	assert.Equal(t, conversationtypes.ConversationForkInitiator{
+		Type:        conversationtypes.ConversationForkInitiatorTypeExtensionTool,
+		ExtensionID: "subagent",
+		ToolName:    "subagent",
+	}, store.initiator)
 }
 
 func TestToolExecutionHostHandlerRejectsUnavailableConversationFork(t *testing.T) {
@@ -340,14 +350,17 @@ type forkableMetadataStore struct {
 	conversationID string
 	calls          int
 	err            error
+	initiator      conversationtypes.ConversationForkInitiator
+	hasInitiator   bool
 }
 
 func (*forkableMetadataStore) GetMetadata() map[string]any { return nil }
 
 func (*forkableMetadataStore) SetMetadataValue(string, any) {}
 
-func (s *forkableMetadataStore) ForkConversation(context.Context) (string, error) {
+func (s *forkableMetadataStore) ForkConversation(ctx context.Context) (string, error) {
 	s.calls++
+	s.initiator, s.hasInitiator = conversationtypes.ConversationForkInitiatorFromContext(ctx)
 	return s.conversationID, s.err
 }
 

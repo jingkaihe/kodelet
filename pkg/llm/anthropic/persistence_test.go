@@ -795,7 +795,12 @@ func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T)
 		},
 	}
 
-	forkedID, err := thread.ForkConversation(context.Background())
+	forkContext := convtypes.ContextWithConversationForkInitiator(context.Background(), convtypes.ConversationForkInitiator{
+		Type:        convtypes.ConversationForkInitiatorTypeExtensionTool,
+		ExtensionID: "subagent",
+		ToolName:    "subagent",
+	})
+	forkedID, err := thread.ForkConversation(forkContext)
 
 	require.NoError(t, err)
 	require.Len(t, store.SavedRecords, 1)
@@ -818,6 +823,18 @@ func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T)
 	assert.Zero(t, store.SavedRecords[0].Usage.OutputTokens)
 	assert.Equal(t, 123, store.SavedRecords[0].Usage.CurrentContextWindow)
 	assert.Equal(t, 456, store.SavedRecords[0].Usage.MaxContextWindow)
+	forkMetadata, ok := store.SavedRecords[0].Metadata[convtypes.ConversationForkMetadataKey].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, convtypes.ConversationForkMetadataVersion, forkMetadata["version"])
+	assert.Equal(t, thread.ConversationID, forkMetadata["source_conversation_id"])
+	assert.Equal(t, thread.ConversationID, forkMetadata["root_conversation_id"])
+	assert.Equal(t, 1, forkMetadata["depth"])
+	assert.Equal(t, string(convtypes.ConversationForkModeLiveSnapshot), forkMetadata["mode"])
+	assert.Equal(t, map[string]any{
+		"type":         convtypes.ConversationForkInitiatorTypeExtensionTool,
+		"extension_id": "subagent",
+		"tool_name":    "subagent",
+	}, forkMetadata["initiator"])
 }
 
 func TestSaveConversationKeepsInitialNameAndPreservesExplicitRenames(t *testing.T) {

@@ -1,6 +1,7 @@
 package conversations
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewConversationRecord(t *testing.T) {
@@ -62,6 +64,14 @@ func TestForkConversationRecord(t *testing.T) {
 	assert.Equal(t, "work", forked.Metadata["profile"])
 	assert.NotContains(t, forked.Metadata, CodexResponsesWindowGenerationMetadataKey)
 	assert.Equal(t, source.ToolResults, forked.ToolResults)
+	forkMetadata, ok := conversationForkMetadataFromMetadata(forked.Metadata)
+	require.True(t, ok)
+	assert.Equal(t, ConversationForkMetadataVersion, forkMetadata.Version)
+	assert.Equal(t, source.ID, forkMetadata.SourceConversationID)
+	assert.Equal(t, source.ID, forkMetadata.RootConversationID)
+	assert.Equal(t, 1, forkMetadata.Depth)
+	assert.Equal(t, ConversationForkModeStoredCopy, forkMetadata.Mode)
+	assert.Nil(t, forkMetadata.Initiator)
 
 	forked.RawMessages[0] = 'x'
 	forked.Metadata["profile"] = "changed"
@@ -69,6 +79,59 @@ func TestForkConversationRecord(t *testing.T) {
 	assert.Equal(t, byte('['), source.RawMessages[0])
 	assert.Equal(t, "work", source.Metadata["profile"])
 	assert.Contains(t, source.ToolResults, "call-1")
+}
+
+func TestForkConversationRecordTracksNestedLineageAndInitiator(t *testing.T) {
+	source := NewConversationRecord("root-conversation")
+	firstFork := ForkConversationRecord(source)
+	persistedMetadata, err := json.Marshal(firstFork.Metadata)
+	require.NoError(t, err)
+	firstFork.Metadata = nil
+	require.NoError(t, json.Unmarshal(persistedMetadata, &firstFork.Metadata))
+	initiator := ConversationForkInitiator{
+		Type:        ConversationForkInitiatorTypeExtensionTool,
+		ExtensionID: "subagent",
+		ToolName:    "subagent",
+	}
+
+	secondFork := ForkConversationRecordWithOptions(firstFork, ConversationForkOptions{
+		Mode:      ConversationForkModeLiveSnapshot,
+		Initiator: &initiator,
+	})
+
+	firstMetadata, ok := conversationForkMetadataFromMetadata(firstFork.Metadata)
+	require.True(t, ok)
+	assert.Equal(t, source.ID, firstMetadata.SourceConversationID)
+	assert.Equal(t, source.ID, firstMetadata.RootConversationID)
+	assert.Equal(t, 1, firstMetadata.Depth)
+	assert.Equal(t, ConversationForkModeStoredCopy, firstMetadata.Mode)
+
+	secondMetadata, ok := conversationForkMetadataFromMetadata(secondFork.Metadata)
+	require.True(t, ok)
+	assert.Equal(t, firstFork.ID, secondMetadata.SourceConversationID)
+	assert.Equal(t, source.ID, secondMetadata.RootConversationID)
+	assert.Equal(t, 2, secondMetadata.Depth)
+	assert.Equal(t, ConversationForkModeLiveSnapshot, secondMetadata.Mode)
+	require.NotNil(t, secondMetadata.Initiator)
+	assert.Equal(t, initiator, *secondMetadata.Initiator)
+}
+
+func TestConversationForkInitiatorContext(t *testing.T) {
+	initiator := ConversationForkInitiator{
+		Type:        ConversationForkInitiatorTypeExtensionTool,
+		ExtensionID: " subagent ",
+		ToolName:    " delegate ",
+	}
+	ctx := ContextWithConversationForkInitiator(context.Background(), initiator)
+
+	actual, ok := ConversationForkInitiatorFromContext(ctx)
+
+	require.True(t, ok)
+	assert.Equal(t, ConversationForkInitiator{
+		Type:        ConversationForkInitiatorTypeExtensionTool,
+		ExtensionID: "subagent",
+		ToolName:    "delegate",
+	}, actual)
 }
 
 func TestConversationSummaryGetters(t *testing.T) {
