@@ -155,8 +155,6 @@ run = [
   "echo 'Checking repository extensions...'",
   "cd .kodelet/extensions/drawing-board && npm run typecheck",
   ".kodelet/extensions/drawing-board/kodelet-extension-drawing-board.ts </dev/null",
-  "cd .kodelet/extensions/dictate && npm run check",
-  ".kodelet/extensions/dictate/kodelet-extension-dictate </dev/null",
 ]
 
 [tasks.frontend-storybook]
@@ -250,7 +248,6 @@ run = [
   "cd sdk && npm install && npm run build",
   "echo 'Installing repository extension npm dependencies...'",
   "cd .kodelet/extensions/drawing-board && npm install",
-  "cd .kodelet/extensions/dictate && npm install",
   "echo 'Installing extension example npm dependencies...'",
   "cd skills/kodelet/examples/extensions/workspace && npm install",
   "echo 'All dependencies installed successfully!'",
