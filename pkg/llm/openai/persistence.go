@@ -57,6 +57,25 @@ func cleanedOpenAIMessages(messages []openai.ChatCompletionMessage) []openai.Cha
 	return cleaned
 }
 
+func cleanedOpenAIMessagesForFork(messages []openai.ChatCompletionMessage) []openai.ChatCompletionMessage {
+	cleaned := slices.Clone(messages)
+	for len(cleaned) > 0 {
+		lastIndex := len(cleaned) - 1
+		lastMessage := cleaned[lastIndex]
+		if lastMessage.Role == openai.ChatMessageRoleAssistant && (len(lastMessage.ToolCalls) > 0 || lastMessage.FunctionCall != nil) {
+			lastMessage.ToolCalls = nil
+			lastMessage.FunctionCall = nil
+			if strings.TrimSpace(lastMessage.Content) == "" && !hasOpenAIMultiContent(lastMessage.MultiContent) {
+				cleaned = cleaned[:lastIndex]
+				continue
+			}
+			cleaned[lastIndex] = lastMessage
+		}
+		break
+	}
+	return cleaned
+}
+
 func isOpenAIInternalFollowupImageMessage(messages []openai.ChatCompletionMessage) bool {
 	if len(messages) < 3 {
 		return false
@@ -117,24 +136,52 @@ func (t *Thread) SaveConversation(ctx context.Context) error {
 	if !t.Persisted || t.Store == nil {
 		return nil
 	}
+	record, err := t.buildConversationRecord(ctx, cleanedOpenAIMessages(t.messages), true)
+	if err != nil {
+		return err
+	}
+	return t.Store.Save(ctx, record)
+}
 
-	// Clean up orphaned messages before saving
-	messagesToSave := cleanedOpenAIMessages(t.messages)
+// ForkConversation snapshots the live thread into a new persisted conversation.
+func (t *Thread) ForkConversation(ctx context.Context) (string, error) {
+	if t.ConversationForkBlocked() {
+		return "", llmtypes.ErrConversationForkUnavailable
+	}
+	t.ConversationMu.Lock()
+	defer t.ConversationMu.Unlock()
+
+	if !t.Persisted || t.Store == nil {
+		return "", llmtypes.ErrConversationForkUnavailable
+	}
+	record, err := t.buildConversationRecord(ctx, cleanedOpenAIMessagesForFork(t.messages), false)
+	if err != nil {
+		return "", err
+	}
+	forked := convtypes.ForkConversationRecord(record)
+	if err := t.Store.Save(ctx, forked); err != nil {
+		return "", errors.Wrap(err, "failed to save forked conversation")
+	}
+	return forked.ID, nil
+}
+
+func (t *Thread) buildConversationRecord(ctx context.Context, messagesToSave []openai.ChatCompletionMessage, updateThreadMetadata bool) (convtypes.ConversationRecord, error) {
+	toolResults := t.GetStructuredToolResults()
 	metadata := t.GetMetadata()
 	metadata = conversations.PreserveStoredConversationName(ctx, t.Store, t.ConversationID, metadata)
-	if explicitName := conversations.ExplicitConversationName(metadata); explicitName != "" {
+	if explicitName := conversations.ExplicitConversationName(metadata); updateThreadMetadata && explicitName != "" {
 		t.SetMetadataValue(conversations.ConversationNameMetadataKey, explicitName)
 	}
-	fallbackName := base.FirstUserMessageName(conversations.ApplyDisplayToStreamableMessages(conversationsFromOpenAI(streamMessagesForName(messagesToSave, t.GetStructuredToolResults())), metadata))
+	fallbackName := base.FirstUserMessageName(conversations.ApplyDisplayToStreamableMessages(conversationsFromOpenAI(streamMessagesForName(messagesToSave, toolResults)), metadata))
 	metadata, name := conversations.EnsureConversationName(metadata, fallbackName)
-	if automaticName := conversations.AutomaticConversationName(metadata); automaticName != "" {
+	if automaticName := conversations.AutomaticConversationName(metadata); updateThreadMetadata && automaticName != "" {
 		t.SetMetadataValue(conversations.ConversationAutoNameMetadataKey, automaticName)
 	}
 
 	// Serialize the thread state
 	messagesJSON, err := json.Marshal(messagesToSave)
 	if err != nil {
-		return errors.Wrap(err, "error marshaling messages")
+		return convtypes.ConversationRecord{}, errors.Wrap(err, "error marshaling messages")
 	}
 
 	metadata["model"] = t.Config.Model
@@ -147,34 +194,33 @@ func (t *Thread) SaveConversation(ctx context.Context) error {
 		metadata["profile"] = profile
 	}
 	snapshotConfig := t.Config
+	if snapshotConfig.OpenAI != nil {
+		openAIConfig := *snapshotConfig.OpenAI
+		snapshotConfig.OpenAI = &openAIConfig
+	} else {
+		snapshotConfig.OpenAI = &llmtypes.OpenAIConfig{}
+	}
 	if strings.TrimSpace(snapshotConfig.Provider) == "" {
 		snapshotConfig.Provider = "openai"
-	}
-	if snapshotConfig.OpenAI == nil {
-		snapshotConfig.OpenAI = &llmtypes.OpenAIConfig{}
 	}
 	snapshotConfig.OpenAI.APIMode = llmtypes.OpenAIAPIModeChatCompletions
 	metadata, err = conversations.AddConfigSnapshot(metadata, snapshotConfig)
 	if err != nil {
-		return errors.Wrap(err, "failed to persist conversation config snapshot")
+		return convtypes.ConversationRecord{}, errors.Wrap(err, "failed to persist conversation config snapshot")
 	}
 
-	// Build the conversation record
-	record := convtypes.ConversationRecord{
+	return convtypes.ConversationRecord{
 		ID:          t.ConversationID,
 		CWD:         t.Config.WorkingDirectory,
 		RawMessages: messagesJSON,
 		Provider:    "openai",
-		Usage:       *t.Usage,
+		Usage:       t.GetUsage(),
 		Metadata:    metadata,
 		Summary:     name,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
-		ToolResults: t.GetStructuredToolResults(),
-	}
-
-	// Save to the store
-	return t.Store.Save(ctx, record)
+		ToolResults: toolResults,
+	}, nil
 }
 
 func streamMessagesForName(messages []openai.ChatCompletionMessage, toolResults map[string]tooltypes.StructuredToolResult) []StreamableMessage {

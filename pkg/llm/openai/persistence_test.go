@@ -568,6 +568,100 @@ func TestSaveConversation_CleansCopyWithoutMutatingLiveMessages(t *testing.T) {
 	assert.Equal(t, openai.ChatMessageRoleTool, savedMessages[len(savedMessages)-1].Role)
 }
 
+func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	thread, err := NewOpenAIThread(llmtypes.Config{Model: "gpt-4.1"})
+	require.NoError(t, err)
+	store := &MockConversationStore{}
+	thread.Store = store
+	thread.Persisted = true
+	thread.ConversationID = "parent-conversation"
+	thread.Config.OpenAI = &llmtypes.OpenAIConfig{}
+	thread.Usage.InputTokens = 10
+	thread.Usage.OutputTokens = 5
+	thread.Usage.CurrentContextWindow = 123
+	thread.Usage.MaxContextWindow = 456
+	thread.messages = []openai.ChatCompletionMessage{
+		{Role: openai.ChatMessageRoleUser, Content: "implement context inheritance"},
+		{
+			Role:    openai.ChatMessageRoleAssistant,
+			Content: "I will inspect the implementation.",
+			ToolCalls: []openai.ToolCall{{
+				ID:   "call-subagent",
+				Type: openai.ToolTypeFunction,
+				Function: openai.FunctionCall{
+					Name:      "subagent",
+					Arguments: `{"task":"inspect"}`,
+				},
+			}},
+		},
+	}
+
+	forkedID, err := thread.ForkConversation(context.Background())
+
+	require.NoError(t, err)
+	require.Len(t, store.SavedRecords, 1)
+	assert.NotEqual(t, thread.ConversationID, forkedID)
+	assert.Equal(t, forkedID, store.SavedRecords[0].ID)
+	assert.Len(t, thread.messages, 2)
+	var savedMessages []openai.ChatCompletionMessage
+	require.NoError(t, json.Unmarshal(store.SavedRecords[0].RawMessages, &savedMessages))
+	require.Len(t, savedMessages, 2)
+	assert.Equal(t, "implement context inheritance", savedMessages[0].Content)
+	assert.Equal(t, "I will inspect the implementation.", savedMessages[1].Content)
+	assert.Empty(t, savedMessages[1].ToolCalls)
+	assert.Equal(t, llmtypes.OpenAIAPIMode(""), thread.Config.OpenAI.APIMode)
+	assert.Zero(t, store.SavedRecords[0].Usage.InputTokens)
+	assert.Zero(t, store.SavedRecords[0].Usage.OutputTokens)
+	assert.Equal(t, 123, store.SavedRecords[0].Usage.CurrentContextWindow)
+	assert.Equal(t, 456, store.SavedRecords[0].Usage.MaxContextWindow)
+}
+
+func TestCleanedOpenAIMessagesForForkDropsAssistantWithoutReplayableContent(t *testing.T) {
+	tests := []struct {
+		name      string
+		assistant openai.ChatCompletionMessage
+	}{
+		{
+			name: "reasoning only",
+			assistant: openai.ChatCompletionMessage{
+				Role:             openai.ChatMessageRoleAssistant,
+				ReasoningContent: "I should delegate this.",
+			},
+		},
+		{
+			name: "refusal only",
+			assistant: openai.ChatCompletionMessage{
+				Role:    openai.ChatMessageRoleAssistant,
+				Refusal: "I cannot complete that directly.",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.assistant.ToolCalls = []openai.ToolCall{{
+				ID:   "call-subagent",
+				Type: openai.ToolTypeFunction,
+				Function: openai.FunctionCall{
+					Name:      "subagent",
+					Arguments: `{"task":"inspect"}`,
+				},
+			}}
+			messages := []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleUser, Content: "inspect this"},
+				tt.assistant,
+			}
+
+			cleaned := cleanedOpenAIMessagesForFork(messages)
+
+			require.Len(t, cleaned, 1)
+			assert.Equal(t, openai.ChatMessageRoleUser, cleaned[0].Role)
+		})
+	}
+}
+
 func TestSaveConversationMetadataIncludesPlatformAndAPIMode(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-key")
 

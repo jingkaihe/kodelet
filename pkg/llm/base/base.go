@@ -7,6 +7,7 @@ import (
 	"context"
 	"maps"
 	"sync"
+	"sync/atomic"
 
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/conversations"
@@ -51,6 +52,26 @@ type Thread struct {
 
 	Mu             sync.Mutex // Mutex for thread-safe operations on usage and tool results
 	ConversationMu sync.Mutex // Mutex for conversation-related operations
+
+	conversationForkBlocks atomic.Int32
+}
+
+// BlockConversationFork prevents live conversation forks until the returned
+// release function is called. Nested callers are reference-counted.
+func (t *Thread) BlockConversationFork() func() {
+	t.conversationForkBlocks.Add(1)
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			t.conversationForkBlocks.Add(-1)
+		})
+	}
+}
+
+// ConversationForkBlocked reports whether the current operation forbids
+// persisting an isolated conversation fork.
+func (t *Thread) ConversationForkBlocked() bool {
+	return t.conversationForkBlocks.Load() > 0
 }
 
 // NewThread creates a new Thread with initialized fields.

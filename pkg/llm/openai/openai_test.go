@@ -1523,7 +1523,12 @@ func TestOpenAISendMessageTextResponse(t *testing.T) {
 }
 
 func TestOpenAISendMessageRestoresMessagesWhenNoSaveConversation(t *testing.T) {
-	client := openai.NewClientWithConfig(openAIHTTPClientConfig(func(_ *http.Request) (*http.Response, error) {
+	var thread *Thread
+	client := openai.NewClientWithConfig(openAIHTTPClientConfig(func(req *http.Request) (*http.Response, error) {
+		assert.True(t, thread.ConversationForkBlocked())
+		forkedID, forkErr := thread.ForkConversation(req.Context())
+		require.ErrorIs(t, forkErr, llm.ErrConversationForkUnavailable)
+		assert.Empty(t, forkedID)
 		return jsonOpenAIResponse(http.StatusOK, `{
 			"id":"chatcmpl-nosave",
 			"model":"gpt-4o",
@@ -1531,10 +1536,13 @@ func TestOpenAISendMessageRestoresMessagesWhenNoSaveConversation(t *testing.T) {
 			"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
 		}`), nil
 	}))
-	thread := newTestOpenAIExchangeThread(client, llm.Config{
+	thread = newTestOpenAIExchangeThread(client, llm.Config{
 		Model:        "gpt-4o",
 		AllowedTools: []string{tools.NoToolsMarker},
 	})
+	store := &MockConversationStore{}
+	thread.Store = store
+	thread.Persisted = true
 	originalMessages := []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: "previous"}}
 	thread.messages = append([]openai.ChatCompletionMessage(nil), originalMessages...)
 	handler := &captureOpenAIMessageHandler{}
@@ -1549,6 +1557,8 @@ func TestOpenAISendMessageRestoresMessagesWhenNoSaveConversation(t *testing.T) {
 	assert.Equal(t, "temporary response", output)
 	assert.Equal(t, 1, handler.done)
 	assert.Equal(t, originalMessages, thread.messages)
+	assert.Empty(t, store.SavedRecords)
+	assert.False(t, thread.ConversationForkBlocked())
 }
 
 func TestOpenAISendMessageStopsWhenContextCancelled(t *testing.T) {

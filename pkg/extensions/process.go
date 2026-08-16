@@ -14,7 +14,9 @@ import (
 
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
+	kodelettools "github.com/jingkaihe/kodelet/pkg/tools"
 	conversationtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 )
 
@@ -263,6 +265,9 @@ func (p *Process) initialize(ctx context.Context, cwd string, client *rpcClient,
 			"tools":       true,
 			"toolUpdates": true,
 			"commands":    true,
+			"conversations": map[string]any{
+				"fork": true,
+			},
 			"ui": map[string]any{
 				"input":      true,
 				"confirm":    true,
@@ -380,6 +385,25 @@ type toolExecutionHostHandler struct {
 }
 
 func (h toolExecutionHostHandler) HandleRPCRequest(ctx context.Context, method string, params json.RawMessage) (any, *rpcError) {
+	if method == ConversationForkMethod {
+		toolContext := kodelettools.ToolContextFromContext(ctx)
+		forker, ok := toolContext.MetadataStore.(llmtypes.ConversationForker)
+		if !ok {
+			return nil, &rpcError{Code: conversationForkUnavailableCode, Message: "live conversation forking is unavailable for this tool call"}
+		}
+		conversationID, err := forker.ForkConversation(ctx)
+		if err != nil {
+			if errors.Is(err, llmtypes.ErrConversationForkUnavailable) {
+				return nil, &rpcError{Code: conversationForkUnavailableCode, Message: err.Error()}
+			}
+			return nil, &rpcError{Code: -32000, Message: err.Error()}
+		}
+		if strings.TrimSpace(conversationID) == "" {
+			return nil, &rpcError{Code: -32000, Message: "live conversation fork returned an empty conversation ID"}
+		}
+		return conversationForkResult{ConversationID: conversationID}, nil
+	}
+
 	if method != "kodelet.tool.update" {
 		return h.source.HandleRPCRequest(ctx, method, params)
 	}

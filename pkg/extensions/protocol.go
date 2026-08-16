@@ -13,7 +13,11 @@ import (
 	"github.com/pkg/errors"
 )
 
-const protocolVersion = "2026-05-30"
+const (
+	protocolVersion                 = "2026-05-30"
+	ConversationForkMethod          = "kodelet.conversation.fork"
+	conversationForkUnavailableCode = -32004
+)
 
 type rpcRequest struct {
 	JSONRPC  string `json:"jsonrpc"`
@@ -53,6 +57,10 @@ type rpcIncomingMessage struct {
 type rpcError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
+}
+
+type conversationForkResult struct {
+	ConversationID string `json:"conversationId"`
 }
 
 type rpcHostRequestHandler interface {
@@ -402,6 +410,9 @@ func (c *rpcClient) dispatchIncomingRequest(msg rpcIncomingMessage) {
 	if msg.Method == "kodelet.tool.update" && !parentMatched {
 		handler = invalidToolUpdateParentHandler{}
 	}
+	if msg.Method == ConversationForkMethod && !parentMatched {
+		handler = invalidConversationForkParentHandler{}
+	}
 	if err := c.handleIncomingRequest(ctx, msg, handler); err != nil {
 		c.fail(err)
 	}
@@ -471,6 +482,12 @@ type invalidToolUpdateParentHandler struct{}
 
 func (invalidToolUpdateParentHandler) HandleRPCRequest(_ context.Context, _ string, _ json.RawMessage) (any, *rpcError) {
 	return nil, &rpcError{Code: -32602, Message: "kodelet.tool.update requires a valid parentId"}
+}
+
+type invalidConversationForkParentHandler struct{}
+
+func (invalidConversationForkParentHandler) HandleRPCRequest(_ context.Context, _ string, _ json.RawMessage) (any, *rpcError) {
+	return nil, &rpcError{Code: -32602, Message: "kodelet.conversation.fork requires a valid parentId"}
 }
 
 func isPersistentExtensionUIRequest(method string) bool {

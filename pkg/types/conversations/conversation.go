@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -95,6 +96,26 @@ func NewConversationRecord(id string) ConversationRecord {
 		Metadata:    make(map[string]any),
 		ToolResults: make(map[string]tools.StructuredToolResult),
 	}
+}
+
+// ForkConversationRecord creates an isolated copy of a conversation while
+// resetting cumulative usage and preserving context-window accounting.
+func ForkConversationRecord(source ConversationRecord) ConversationRecord {
+	forked := NewConversationRecord("")
+	forked.RawMessages = append(json.RawMessage(nil), source.RawMessages...)
+	forked.CWD = source.CWD
+	forked.Provider = source.Provider
+	forked.Summary = source.Summary
+	forked.Usage.CurrentContextWindow = source.Usage.CurrentContextWindow
+	forked.Usage.MaxContextWindow = source.Usage.MaxContextWindow
+	if source.Metadata != nil {
+		forked.Metadata = maps.Clone(source.Metadata)
+		delete(forked.Metadata, CodexResponsesWindowGenerationMetadataKey)
+	}
+	if source.ToolResults != nil {
+		forked.ToolResults = maps.Clone(source.ToolResults)
+	}
+	return forked
 }
 
 // ToSummary converts a ConversationRecord to a ConversationSummary

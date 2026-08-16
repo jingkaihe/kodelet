@@ -772,6 +772,54 @@ func TestSaveConversationPreservesProviderNeutralMetadata(t *testing.T) {
 	assert.Equal(t, "/init focus", store.SavedRecords[len(store.SavedRecords)-1].Summary)
 }
 
+func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T) {
+	thread, err := NewAnthropicThread(llmtypes.Config{Model: anthropic.ModelClaudeSonnet4_6})
+	require.NoError(t, err)
+	store := &MockConversationStore{}
+	thread.Store = store
+	thread.Persisted = true
+	thread.ConversationID = "parent-conversation"
+	thread.Usage.InputTokens = 10
+	thread.Usage.OutputTokens = 5
+	thread.Usage.CurrentContextWindow = 123
+	thread.Usage.MaxContextWindow = 456
+	thread.messages = []anthropic.MessageParam{
+		anthropic.NewUserMessage(anthropic.NewTextBlock("implement context inheritance")),
+		{
+			Role: anthropic.MessageParamRoleAssistant,
+			Content: []anthropic.ContentBlockParamUnion{
+				anthropic.NewThinkingBlock("thinking-signature", "I should delegate this investigation."),
+				anthropic.NewTextBlock("I will inspect the implementation."),
+				anthropic.NewToolUseBlock("call-subagent", map[string]any{"task": "inspect"}, "subagent"),
+			},
+		},
+	}
+
+	forkedID, err := thread.ForkConversation(context.Background())
+
+	require.NoError(t, err)
+	require.Len(t, store.SavedRecords, 1)
+	assert.NotEqual(t, thread.ConversationID, forkedID)
+	assert.Equal(t, forkedID, store.SavedRecords[0].ID)
+	assert.Len(t, thread.messages, 2)
+	var savedMessages []anthropic.MessageParam
+	require.NoError(t, json.Unmarshal(store.SavedRecords[0].RawMessages, &savedMessages))
+	require.Len(t, savedMessages, 2)
+	assert.Equal(t, anthropic.MessageParamRoleUser, savedMessages[0].Role)
+	require.Len(t, savedMessages[1].Content, 2)
+	require.NotNil(t, savedMessages[1].Content[0].OfThinking)
+	assert.Equal(t, "I should delegate this investigation.", savedMessages[1].Content[0].OfThinking.Thinking)
+	require.NotNil(t, savedMessages[1].Content[1].OfText)
+	assert.Equal(t, "I will inspect the implementation.", savedMessages[1].Content[1].OfText.Text)
+	for _, contentBlock := range savedMessages[1].Content {
+		assert.Nil(t, contentBlock.OfToolUse)
+	}
+	assert.Zero(t, store.SavedRecords[0].Usage.InputTokens)
+	assert.Zero(t, store.SavedRecords[0].Usage.OutputTokens)
+	assert.Equal(t, 123, store.SavedRecords[0].Usage.CurrentContextWindow)
+	assert.Equal(t, 456, store.SavedRecords[0].Usage.MaxContextWindow)
+}
+
 func TestSaveConversationKeepsInitialNameAndPreservesExplicitRenames(t *testing.T) {
 	thread, err := NewAnthropicThread(llmtypes.Config{Model: anthropic.ModelClaudeSonnet4_6})
 	require.NoError(t, err)

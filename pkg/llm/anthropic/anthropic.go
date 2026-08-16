@@ -314,6 +314,9 @@ func (t *Thread) SendMessage(
 	handler llmtypes.MessageHandler,
 	opt llmtypes.MessageOpt,
 ) (finalOutput string, err error) {
+	if opt.NoSaveConversation {
+		defer t.BlockConversationFork()()
+	}
 	if _, err = base.OpenEnvironment(ctx, t); err != nil {
 		return "", errors.Wrap(err, "failed to open agent environment")
 	}
@@ -347,7 +350,7 @@ func (t *Thread) SendMessage(
 	}()
 
 	var originalMessages []anthropic.MessageParam
-	if opt.PromptCache {
+	if opt.NoSaveConversation {
 		originalMessages = make([]anthropic.MessageParam, len(t.messages))
 		copy(originalMessages, t.messages)
 	}

@@ -6,7 +6,6 @@ package conversations
 import (
 	"context"
 	"encoding/json"
-	"maps"
 	"time"
 
 	"github.com/pkg/errors"
@@ -247,22 +246,7 @@ func (s *ConversationService) ForkConversation(ctx context.Context, id string) (
 		return nil, errors.Wrap(err, "failed to load conversation")
 	}
 
-	forkedRecord := conversations.NewConversationRecord("")
-	forkedRecord.RawMessages = sourceRecord.RawMessages
-	forkedRecord.CWD = sourceRecord.CWD
-	forkedRecord.Provider = sourceRecord.Provider
-	forkedRecord.Summary = sourceRecord.Summary
-	forkedRecord.Usage.CurrentContextWindow = sourceRecord.Usage.CurrentContextWindow
-	forkedRecord.Usage.MaxContextWindow = sourceRecord.Usage.MaxContextWindow
-
-	if sourceRecord.ToolResults != nil {
-		forkedRecord.ToolResults = maps.Clone(sourceRecord.ToolResults)
-	}
-
-	if sourceRecord.Metadata != nil {
-		forkedRecord.Metadata = maps.Clone(sourceRecord.Metadata)
-		delete(forkedRecord.Metadata, conversations.CodexResponsesWindowGenerationMetadataKey)
-	}
+	forkedRecord := conversations.ForkConversationRecord(sourceRecord)
 
 	if err := s.store.Save(ctx, forkedRecord); err != nil {
 		return nil, errors.Wrap(err, "failed to save forked conversation")

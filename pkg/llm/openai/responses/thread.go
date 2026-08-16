@@ -547,6 +547,9 @@ func (t *Thread) SendMessage(
 ) (finalOutput string, err error) {
 	t.operationMu.Lock()
 	defer t.operationMu.Unlock()
+	if opt.NoSaveConversation {
+		defer t.BlockConversationFork()()
+	}
 
 	if _, err = base.OpenEnvironment(ctx, t); err != nil {
 		return "", errors.Wrap(err, "failed to open agent environment")
@@ -2567,16 +2570,56 @@ func (t *Thread) SaveConversation(ctx context.Context) error {
 	if !t.Persisted || t.Store == nil {
 		return nil
 	}
+	record, err := t.buildConversationRecord(ctx, t.snapshotConversationState(true), true)
+	if err != nil {
+		return err
+	}
+	return t.Store.Save(ctx, record)
+}
 
+// ForkConversation snapshots the live thread into a new persisted conversation.
+func (t *Thread) ForkConversation(ctx context.Context) (string, error) {
+	if t.ConversationForkBlocked() {
+		return "", llmtypes.ErrConversationForkUnavailable
+	}
+	t.ConversationMu.Lock()
+	defer t.ConversationMu.Unlock()
+
+	if !t.Persisted || t.Store == nil {
+		return "", llmtypes.ErrConversationForkUnavailable
+	}
+	record, err := t.buildConversationRecord(ctx, t.snapshotConversationState(false), false)
+	if err != nil {
+		return "", err
+	}
+	forked := convtypes.ForkConversationRecord(record)
+	if err := t.Store.Save(ctx, forked); err != nil {
+		return "", errors.Wrap(err, "failed to save forked conversation")
+	}
+	return forked.ID, nil
+}
+
+type conversationStateSnapshot struct {
+	storedItems      []StoredInputItem
+	windowGeneration uint64
+	usage            llmtypes.Usage
+	toolResults      map[string]tooltypes.StructuredToolResult
+	metadata         map[string]any
+}
+
+func (t *Thread) snapshotConversationState(cleanupLive bool) conversationStateSnapshot {
 	// Lock order is historyMu then base Mu, matching context replacement. This
 	// snapshots transcript, logical window identity, usage, metadata, and tool
 	// results from one coherent checkpoint.
 	t.historyMu.Lock()
-	if t.cleanupOrphanedItemsLocked() {
+	if cleanupLive && t.cleanupOrphanedItemsLocked() {
 		t.historyRevision++
 	}
 	t.Mu.Lock()
 	storedItems := cloneStoredInputItems(t.storedItems)
+	if !cleanupLive {
+		storedItems = cleanedStoredInputItems(storedItems)
+	}
 	windowGeneration := t.codexWindowGeneration
 	usage := llmtypes.Usage{}
 	if t.Usage != nil {
@@ -2586,7 +2629,19 @@ func (t *Thread) SaveConversation(ctx context.Context) error {
 	metadata := maps.Clone(t.Metadata)
 	t.Mu.Unlock()
 	t.historyMu.Unlock()
+	return conversationStateSnapshot{
+		storedItems:      storedItems,
+		windowGeneration: windowGeneration,
+		usage:            usage,
+		toolResults:      toolResults,
+		metadata:         metadata,
+	}
+}
 
+func (t *Thread) buildConversationRecord(ctx context.Context, snapshot conversationStateSnapshot, updateThreadMetadata bool) (convtypes.ConversationRecord, error) {
+	storedItems := snapshot.storedItems
+	toolResults := snapshot.toolResults
+	metadata := snapshot.metadata
 	if toolResults == nil {
 		toolResults = make(map[string]tooltypes.StructuredToolResult)
 	}
@@ -2595,22 +2650,22 @@ func (t *Thread) SaveConversation(ctx context.Context) error {
 	}
 	messages, err := StreamMessages(rawMessagesForName(storedItems), toolResults)
 	if err != nil {
-		return errors.Wrap(err, "failed to parse conversation for naming")
+		return convtypes.ConversationRecord{}, errors.Wrap(err, "failed to parse conversation for naming")
 	}
 	metadata = conversations.PreserveStoredConversationName(ctx, t.Store, t.ConversationID, metadata)
-	if explicitName := conversations.ExplicitConversationName(metadata); explicitName != "" {
+	if explicitName := conversations.ExplicitConversationName(metadata); updateThreadMetadata && explicitName != "" {
 		t.SetMetadataValue(conversations.ConversationNameMetadataKey, explicitName)
 	}
 	fallbackName := base.FirstUserMessageName(conversations.ApplyDisplayToStreamableMessages(conversationsFromResponses(messages), metadata))
 	metadata, name := conversations.EnsureConversationName(metadata, fallbackName)
-	if automaticName := conversations.AutomaticConversationName(metadata); automaticName != "" {
+	if automaticName := conversations.AutomaticConversationName(metadata); updateThreadMetadata && automaticName != "" {
 		t.SetMetadataValue(conversations.ConversationAutoNameMetadataKey, automaticName)
 	}
 
 	// Serialize stored items directly (already built inline during streaming)
 	inputItemsJSON, err := json.Marshal(storedItems)
 	if err != nil {
-		return errors.Wrap(err, "error marshaling input items")
+		return convtypes.ConversationRecord{}, errors.Wrap(err, "error marshaling input items")
 	}
 
 	// Build the conversation record
@@ -2618,7 +2673,7 @@ func (t *Thread) SaveConversation(ctx context.Context) error {
 	metadata["api_mode"] = "responses"
 	metadata["platform"] = resolvePlatformName(t.Config)
 	if t.isCodex {
-		metadata[convtypes.CodexResponsesWindowGenerationMetadataKey] = windowGeneration
+		metadata[convtypes.CodexResponsesWindowGenerationMetadataKey] = snapshot.windowGeneration
 	}
 	if serviceTier := normalizeServiceTier(t.Config); serviceTier != "" {
 		metadata["service_tier"] = string(serviceTier)
@@ -2627,32 +2682,33 @@ func (t *Thread) SaveConversation(ctx context.Context) error {
 		metadata["profile"] = profile
 	}
 	snapshotConfig := t.Config
+	if snapshotConfig.OpenAI != nil {
+		openAIConfig := *snapshotConfig.OpenAI
+		snapshotConfig.OpenAI = &openAIConfig
+	} else {
+		snapshotConfig.OpenAI = &llmtypes.OpenAIConfig{}
+	}
 	if strings.TrimSpace(snapshotConfig.Provider) == "" {
 		snapshotConfig.Provider = "openai"
-	}
-	if snapshotConfig.OpenAI == nil {
-		snapshotConfig.OpenAI = &llmtypes.OpenAIConfig{}
 	}
 	snapshotConfig.OpenAI.APIMode = llmtypes.OpenAIAPIModeResponses
 	metadata, err = conversations.AddConfigSnapshot(metadata, snapshotConfig)
 	if err != nil {
-		return errors.Wrap(err, "failed to persist conversation config snapshot")
+		return convtypes.ConversationRecord{}, errors.Wrap(err, "failed to persist conversation config snapshot")
 	}
 
-	record := convtypes.ConversationRecord{
+	return convtypes.ConversationRecord{
 		ID:          t.ConversationID,
 		CWD:         t.Config.WorkingDirectory,
 		RawMessages: inputItemsJSON,
 		Provider:    "openai",
-		Usage:       usage,
+		Usage:       snapshot.usage,
 		Metadata:    metadata,
 		Summary:     name,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 		ToolResults: toolResults,
-	}
-
-	return t.Store.Save(ctx, record)
+	}, nil
 }
 
 // loadConversation loads a conversation from the store.
@@ -2722,6 +2778,13 @@ func persistedCodexWindowGeneration(metadata map[string]any) uint64 {
 		return 0
 	}
 	return generation
+}
+
+func cleanedStoredInputItems(items []StoredInputItem) []StoredInputItem {
+	for len(items) > 0 && items[len(items)-1].Type == "function_call" {
+		items = items[:len(items)-1]
+	}
+	return items
 }
 
 // cleanupOrphanedItemsLocked removes incomplete tool call sequences from the end.

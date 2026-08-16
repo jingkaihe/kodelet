@@ -324,7 +324,7 @@ Rules:
   log entries as UI notifications; unstructured stderr and lower-severity logs
   remain diagnostics only.
 - Requests use the effective timeout from config, SDK `timeoutInSec`, and runtime defaults. Extension commands may run without a timeout by default.
-- Extensions can call back into the host for transient tool progress with `kodelet.tool.update` and for UI interactions with `kodelet.ui.input`, `kodelet.ui.confirm`, `kodelet.ui.select`, and `kodelet.ui.notify`.
+- Extensions can call back into the host for transient tool progress with `kodelet.tool.update`, live conversation forks with `kodelet.conversation.fork`, and UI interactions with `kodelet.ui.input`, `kodelet.ui.confirm`, `kodelet.ui.select`, and `kodelet.ui.notify`.
 - Persistent interactive hosts can also advertise passive widgets and interactive surfaces. These calls are not scoped to the lifetime of the tool, command, or event request that created them.
 - Reverse-RPC requests can include the originating host request ID as `parentId` while that request remains active. Kodelet also supplies an opaque `uiScopeId` in the extension call context; SDKs copy it to `scopeId` on every persistent UI request, frame, close, input, and resize message so detached UI remains bound to its originating conversation.
 - Cancellation uses `$/cancelRequest`.
@@ -355,6 +355,9 @@ Kodelet starts the extension executable, then sends:
       "tools": true,
       "toolUpdates": true,
       "commands": true,
+      "conversations": {
+        "fork": true
+      },
       "ui": {
         "input": true,
         "confirm": true,
@@ -505,6 +508,14 @@ When initialization advertises `capabilities.toolUpdates: true`, a running tool 
 `taskRun` is an optional generic rendering contract rather than an agent-specific protocol. SDK helpers named `TaskProgress` produce the bounded schema, can track activities directly, and can attach to a child Kodelet session as a convenience adapter.
 
 Renderers accept at most 14 visible activities: up to 8 running, 3 recently completed, and 3 recently failed. SDK helpers retain full observed counters and report hidden entries through the `omittedSucceeded`, `omittedFailed`, and `omittedRunning` fields; labels and previews are length-bounded before publication.
+
+### Live conversation forks
+
+When initialization advertises `capabilities.conversations.fork: true`, an active tool handler may request `kodelet.conversation.fork`. The request must retain the originating `parentId`; parentless calls are not accepted. Kodelet snapshots the provider-native in-memory history, removes the unresolved trailing tool call that invoked the extension, writes an isolated conversation with reset cumulative usage, and returns `{ "conversationId": "..." }`. The source thread is not modified.
+
+The fork preserves the source conversation's provider and model configuration so the serialized provider history remains valid when loaded through ACP. A child agent can therefore inherit context by loading the returned ID, but it cannot use this exact-fork mechanism to switch providers. The Python SDK exposes the low-level operation as `await ctx.fork_conversation()` and the combined child-session flow as `await client.create_session(inherit_context=ctx)`.
+
+Fork availability is invocation-scoped: the active tool call must have access to a persistent live thread. A runner-placed tool or a run with conversation persistence disabled receives the dedicated unavailable error even when the protocol capability is advertised, so extensions that also support fresh sessions should catch the SDK's `ConversationForkUnavailableError` and use their previous profile-based launch as a fallback. Snapshot serialization and persistence failures remain ordinary host RPC errors and must not silently degrade to a fresh context.
 
 ### Persistent widgets and interactive surfaces
 

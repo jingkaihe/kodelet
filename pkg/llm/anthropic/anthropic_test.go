@@ -869,6 +869,64 @@ func TestExecuteToolsParallelHandlesEmptyCancelledAndSubscriptionNames(t *testin
 	assert.Nil(t, results)
 }
 
+func TestAnthropicSendMessageNoSaveBlocksForkAndRestoresMessages(t *testing.T) {
+	var thread *Thread
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		assert.True(t, thread.ConversationForkBlocked())
+		forkedID, forkErr := thread.ForkConversation(req.Context())
+		require.ErrorIs(t, forkErr, llmtypes.ErrConversationForkUnavailable)
+		assert.Empty(t, forkedID)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: message_start\n" +
+			`data: {"type":"message_start","message":{"id":"msg_no_save","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}` + "\n\n" +
+			"event: content_block_start\n" +
+			`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}` + "\n\n" +
+			"event: content_block_delta\n" +
+			`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"temporary response"}}` + "\n\n" +
+			"event: content_block_stop\n" +
+			`data: {"type":"content_block_stop","index":0}` + "\n\n" +
+			"event: message_delta\n" +
+			`data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":1,"output_tokens":2}}` + "\n\n" +
+			"event: message_stop\n" +
+			`data: {"type":"message_stop"}` + "\n\n"))
+	}))
+	defer server.Close()
+
+	config := llmtypes.Config{
+		Provider:     "anthropic",
+		Model:        "claude-sonnet-4-6",
+		AllowedTools: []string{tools.NoToolsMarker},
+	}
+	originalMessages := []anthropic.MessageParam{
+		anthropic.NewUserMessage(anthropic.NewTextBlock("previous")),
+	}
+	thread = &Thread{
+		Thread: base.NewThread(config, "conv-no-save"),
+		client: anthropic.NewClient(
+			option.WithBaseURL(server.URL),
+			option.WithAPIKey("test-key"),
+		),
+		messages: append([]anthropic.MessageParam(nil), originalMessages...),
+	}
+	store := &MockConversationStore{}
+	thread.Store = store
+	thread.Persisted = true
+	thread.SetState(tools.NewBasicState(context.Background(), tools.WithLLMConfig(config)))
+
+	output, err := thread.SendMessage(
+		context.Background(),
+		"transient",
+		&llmtypes.StringCollectorHandler{Silent: true},
+		llmtypes.MessageOpt{MaxTurns: 1, NoSaveConversation: true, DisableUsageLog: true},
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, "temporary response", output)
+	assert.Equal(t, originalMessages, thread.messages)
+	assert.Empty(t, store.SavedRecords)
+	assert.False(t, thread.ConversationForkBlocked())
+}
+
 type captureUserMessageHandler struct {
 	llmtypes.StringCollectorHandler
 	content string

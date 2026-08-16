@@ -892,6 +892,9 @@ func TestSendMessageNoSaveRestoresCodexWindowAndWebSocketIdentity(t *testing.T) 
 		storedItems: []StoredInputItem{{Type: "message", Role: "user", Content: "existing"}},
 		webSocket:   fakeWebSocket,
 	}
+	store := &mockResponsesConversationStore{}
+	thread.Store = store
+	thread.Persisted = true
 	thread.SetState(tools.NewBasicState(context.Background()))
 	thread.SetStructuredToolResult("old-call", tooltypes.StructuredToolResult{ToolName: "bash", Success: true})
 	thread.Usage.InputTokens = 5
@@ -903,13 +906,17 @@ func TestSendMessageNoSaveRestoresCodexWindowAndWebSocketIdentity(t *testing.T) 
 		return remoteCompactionV2Stream(t, "temporary-encrypted-summary")
 	}
 	thread.processMessageExchangeFunc = func(
-		_ context.Context,
+		ctx context.Context,
 		_ llmtypes.MessageHandler,
 		_ string,
 		_ int,
 		_ string,
 		_ llmtypes.MessageOpt,
 	) (string, bool, bool, error) {
+		forkedID, forkErr := thread.ForkConversation(ctx)
+		require.ErrorIs(t, forkErr, llmtypes.ErrConversationForkUnavailable)
+		assert.Empty(t, forkedID)
+		assert.Empty(t, store.savedRecords)
 		assert.Equal(t, uint64(8), thread.codexWindowGenerationSnapshot())
 		history := thread.inputItemsSnapshot()
 		require.Len(t, history, 3)
@@ -937,6 +944,8 @@ func TestSendMessageNoSaveRestoresCodexWindowAndWebSocketIdentity(t *testing.T) 
 	assert.Equal(t, 100, thread.Usage.MaxContextWindow)
 	assert.Contains(t, thread.GetStructuredToolResults(), "old-call")
 	assert.Equal(t, 2, fakeWebSocket.resets, "compaction install and no-save rollback must each reset websocket identity")
+	assert.Empty(t, store.savedRecords)
+	assert.False(t, thread.ConversationForkBlocked())
 }
 
 func TestSendMessageNoSaveRestoresStateAfterExchangeError(t *testing.T) {
@@ -3454,6 +3463,53 @@ func TestSaveConversationSnapshotsCompactionStateCoherently(t *testing.T) {
 	assert.Equal(t, "compaction", liveSnapshot.storedItems[0].Type)
 	assert.Equal(t, 5, thread.GetUsage().CurrentContextWindow)
 	assert.Empty(t, thread.GetStructuredToolResults())
+}
+
+func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T) {
+	config := llmtypes.Config{
+		Provider: "openai",
+		Model:    "gpt-4.1",
+		OpenAI:   &llmtypes.OpenAIConfig{Platform: "codex"},
+	}
+	thread := &Thread{
+		Thread:  base.NewThread(config, "parent-conversation"),
+		isCodex: true,
+		inputItems: []openairesponses.ResponseInputItemUnionParam{
+			openairesponses.ResponseInputItemParamOfMessage("implement context inheritance", openairesponses.EasyInputMessageRoleUser),
+			{OfFunctionCall: &openairesponses.ResponseFunctionToolCallParam{CallID: "call-subagent", Name: "subagent", Arguments: `{"task":"inspect"}`}},
+		},
+		storedItems: []StoredInputItem{
+			{Type: "message", Role: "user", Content: "implement context inheritance"},
+			{Type: "function_call", CallID: "call-subagent", Name: "subagent", Arguments: `{"task":"inspect"}`},
+		},
+		codexWindowGeneration: 3,
+	}
+	thread.Usage.InputTokens = 10
+	thread.Usage.OutputTokens = 5
+	thread.Usage.CurrentContextWindow = 123
+	thread.Usage.MaxContextWindow = 456
+	store := &mockResponsesConversationStore{}
+	thread.Store = store
+	thread.Persisted = true
+
+	forkedID, err := thread.ForkConversation(context.Background())
+
+	require.NoError(t, err)
+	require.Len(t, store.savedRecords, 1)
+	assert.NotEqual(t, thread.ConversationID, forkedID)
+	assert.Equal(t, forkedID, store.savedRecords[0].ID)
+	assert.Len(t, thread.inputItems, 2)
+	assert.Len(t, thread.storedItems, 2)
+	var savedItems []StoredInputItem
+	require.NoError(t, json.Unmarshal(store.savedRecords[0].RawMessages, &savedItems))
+	require.Len(t, savedItems, 1)
+	assert.Equal(t, "implement context inheritance", savedItems[0].Content)
+	assert.Zero(t, store.savedRecords[0].Usage.InputTokens)
+	assert.Zero(t, store.savedRecords[0].Usage.OutputTokens)
+	assert.Equal(t, 123, store.savedRecords[0].Usage.CurrentContextWindow)
+	assert.Equal(t, 456, store.savedRecords[0].Usage.MaxContextWindow)
+	assert.NotContains(t, store.savedRecords[0].Metadata, convtypes.CodexResponsesWindowGenerationMetadataKey)
+	assert.Equal(t, llmtypes.OpenAIAPIMode(""), thread.Config.OpenAI.APIMode)
 }
 
 func TestResponsesSaveConversationKeepsInitialNameAndPreservesExplicitRenames(t *testing.T) {

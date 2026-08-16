@@ -8,6 +8,7 @@ import (
 	"time"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -25,6 +26,49 @@ func TestNewConversationRecord(t *testing.T) {
 	// Test creation with generated ID
 	record = NewConversationRecord("")
 	assert.NotEmpty(t, record.ID, "ID should be generated")
+}
+
+func TestForkConversationRecord(t *testing.T) {
+	source := NewConversationRecord("source")
+	source.RawMessages = json.RawMessage(`[{"role":"user","content":"hello"}]`)
+	source.CWD = "/workspace"
+	source.Provider = "openai"
+	source.Summary = "hello"
+	source.Usage = llmtypes.Usage{
+		InputTokens:          10,
+		OutputTokens:         5,
+		CurrentContextWindow: 123,
+		MaxContextWindow:     456,
+	}
+	source.Metadata = map[string]any{
+		"profile": "work",
+		CodexResponsesWindowGenerationMetadataKey: float64(3),
+	}
+	source.ToolResults = map[string]tooltypes.StructuredToolResult{
+		"call-1": {ToolName: "bash", Success: true},
+	}
+
+	forked := ForkConversationRecord(source)
+
+	assert.NotEqual(t, source.ID, forked.ID)
+	assert.Equal(t, source.RawMessages, forked.RawMessages)
+	assert.Equal(t, source.CWD, forked.CWD)
+	assert.Equal(t, source.Provider, forked.Provider)
+	assert.Equal(t, source.Summary, forked.Summary)
+	assert.Zero(t, forked.Usage.InputTokens)
+	assert.Zero(t, forked.Usage.OutputTokens)
+	assert.Equal(t, 123, forked.Usage.CurrentContextWindow)
+	assert.Equal(t, 456, forked.Usage.MaxContextWindow)
+	assert.Equal(t, "work", forked.Metadata["profile"])
+	assert.NotContains(t, forked.Metadata, CodexResponsesWindowGenerationMetadataKey)
+	assert.Equal(t, source.ToolResults, forked.ToolResults)
+
+	forked.RawMessages[0] = 'x'
+	forked.Metadata["profile"] = "changed"
+	delete(forked.ToolResults, "call-1")
+	assert.Equal(t, byte('['), source.RawMessages[0])
+	assert.Equal(t, "work", source.Metadata["profile"])
+	assert.Contains(t, source.ToolResults, "call-1")
 }
 
 func TestConversationSummaryGetters(t *testing.T) {

@@ -9,6 +9,9 @@ import (
 	"testing"
 	"time"
 
+	kodelettools "github.com/jingkaihe/kodelet/pkg/tools"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -22,6 +25,51 @@ func TestExtensionDataDirUsesKodeletBasePathAndSanitizedID(t *testing.T) {
 	require.NoError(t, err)
 	assert.DirExists(t, dataDir)
 	assert.Contains(t, dataDir, "org@repo_weather")
+}
+
+func TestToolExecutionHostHandlerForksLiveConversation(t *testing.T) {
+	store := &forkableMetadataStore{conversationID: "forked-conversation"}
+	ctx := kodelettools.ContextWithToolContext(context.Background(), kodelettools.ToolContext{MetadataStore: store})
+
+	result, rpcErr := (toolExecutionHostHandler{}).HandleRPCRequest(ctx, ConversationForkMethod, nil)
+
+	require.Nil(t, rpcErr)
+	assert.Equal(t, conversationForkResult{ConversationID: "forked-conversation"}, result)
+	assert.Equal(t, 1, store.calls)
+}
+
+func TestToolExecutionHostHandlerRejectsUnavailableConversationFork(t *testing.T) {
+	t.Run("missing live thread", func(t *testing.T) {
+		result, rpcErr := (toolExecutionHostHandler{}).HandleRPCRequest(context.Background(), ConversationForkMethod, nil)
+
+		assert.Nil(t, result)
+		require.NotNil(t, rpcErr)
+		assert.Equal(t, conversationForkUnavailableCode, rpcErr.Code)
+		assert.Contains(t, rpcErr.Message, "unavailable")
+	})
+
+	t.Run("persistence disabled", func(t *testing.T) {
+		store := &forkableMetadataStore{err: llmtypes.ErrConversationForkUnavailable}
+		ctx := kodelettools.ContextWithToolContext(context.Background(), kodelettools.ToolContext{MetadataStore: store})
+
+		result, rpcErr := (toolExecutionHostHandler{}).HandleRPCRequest(ctx, ConversationForkMethod, nil)
+
+		assert.Nil(t, result)
+		require.NotNil(t, rpcErr)
+		assert.Equal(t, conversationForkUnavailableCode, rpcErr.Code)
+	})
+
+	t.Run("save failure", func(t *testing.T) {
+		store := &forkableMetadataStore{err: errors.New("disk full")}
+		ctx := kodelettools.ContextWithToolContext(context.Background(), kodelettools.ToolContext{MetadataStore: store})
+
+		result, rpcErr := (toolExecutionHostHandler{}).HandleRPCRequest(ctx, ConversationForkMethod, nil)
+
+		assert.Nil(t, result)
+		require.NotNil(t, rpcErr)
+		assert.Equal(t, -32000, rpcErr.Code)
+		assert.Equal(t, "disk full", rpcErr.Message)
+	})
 }
 
 func TestProcessEnsureRunningDisabledAndShutdownBranches(t *testing.T) {
@@ -286,6 +334,21 @@ func TestProcessCloseCancelsAndWaitsForParentlessHostRequests(t *testing.T) {
 type cancelAwareUIInputBroker struct {
 	started  chan struct{}
 	canceled chan struct{}
+}
+
+type forkableMetadataStore struct {
+	conversationID string
+	calls          int
+	err            error
+}
+
+func (*forkableMetadataStore) GetMetadata() map[string]any { return nil }
+
+func (*forkableMetadataStore) SetMetadataValue(string, any) {}
+
+func (s *forkableMetadataStore) ForkConversation(context.Context) (string, error) {
+	s.calls++
+	return s.conversationID, s.err
 }
 
 func (b *cancelAwareUIInputBroker) Input(ctx context.Context, _ UIInputRequest) (UIInputResponse, error) {

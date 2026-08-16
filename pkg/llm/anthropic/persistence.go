@@ -72,6 +72,34 @@ func cleanedAnthropicMessages(messages []anthropic.MessageParam) []anthropic.Mes
 	return cleaned
 }
 
+func cleanedAnthropicMessagesForFork(messages []anthropic.MessageParam) []anthropic.MessageParam {
+	cleaned := slices.Clone(messages)
+	for len(cleaned) > 0 {
+		lastIndex := len(cleaned) - 1
+		lastMessage := cleaned[lastIndex]
+		content := make([]anthropic.ContentBlockParamUnion, 0, len(lastMessage.Content))
+		for _, contentBlock := range lastMessage.Content {
+			if lastMessage.Role == anthropic.MessageParamRoleAssistant && contentBlock.OfToolUse != nil {
+				continue
+			}
+			if isEmptyContentBlock(contentBlock) {
+				continue
+			}
+			content = append(content, contentBlock)
+		}
+		if len(content) == 0 {
+			cleaned = cleaned[:lastIndex]
+			continue
+		}
+		if len(content) != len(lastMessage.Content) {
+			lastMessage.Content = content
+			cleaned[lastIndex] = lastMessage
+		}
+		break
+	}
+	return cleaned
+}
+
 func (t *Thread) cleanupOrphanedMessages() {
 	t.messages = cleanedAnthropicMessages(t.messages)
 }
@@ -84,29 +112,54 @@ func (t *Thread) SaveConversation(ctx context.Context) error {
 	if !t.Persisted || t.Store == nil {
 		return nil
 	}
-
-	// Clean up orphaned messages before saving
-	t.cleanupOrphanedMessages()
-
-	// Marshall the messages to JSON
-	rawMessages, err := json.Marshal(t.messages)
+	record, err := t.buildConversationRecord(ctx, cleanedAnthropicMessages(t.messages), true)
 	if err != nil {
-		return errors.Wrap(err, "failed to marshal conversation messages")
+		return err
+	}
+	return t.Store.Save(ctx, record)
+}
+
+// ForkConversation snapshots the live thread into a new persisted conversation.
+func (t *Thread) ForkConversation(ctx context.Context) (string, error) {
+	if t.ConversationForkBlocked() {
+		return "", llm.ErrConversationForkUnavailable
+	}
+	t.ConversationMu.Lock()
+	defer t.ConversationMu.Unlock()
+
+	if !t.Persisted || t.Store == nil {
+		return "", llm.ErrConversationForkUnavailable
+	}
+	record, err := t.buildConversationRecord(ctx, cleanedAnthropicMessagesForFork(t.messages), false)
+	if err != nil {
+		return "", err
+	}
+	forked := convtypes.ForkConversationRecord(record)
+	if err := t.Store.Save(ctx, forked); err != nil {
+		return "", errors.Wrap(err, "failed to save forked conversation")
+	}
+	return forked.ID, nil
+}
+
+func (t *Thread) buildConversationRecord(ctx context.Context, messagesToSave []anthropic.MessageParam, updateThreadMetadata bool) (convtypes.ConversationRecord, error) {
+	rawMessages, err := json.Marshal(messagesToSave)
+	if err != nil {
+		return convtypes.ConversationRecord{}, errors.Wrap(err, "failed to marshal conversation messages")
 	}
 
 	toolResults := t.GetStructuredToolResults()
 	messages, err := StreamMessages(rawMessages, toolResults)
 	if err != nil {
-		return errors.Wrap(err, "failed to parse conversation messages for naming")
+		return convtypes.ConversationRecord{}, errors.Wrap(err, "failed to parse conversation messages for naming")
 	}
 	metadata := t.GetMetadata()
 	metadata = conversations.PreserveStoredConversationName(ctx, t.Store, t.ConversationID, metadata)
-	if explicitName := conversations.ExplicitConversationName(metadata); explicitName != "" {
+	if explicitName := conversations.ExplicitConversationName(metadata); updateThreadMetadata && explicitName != "" {
 		t.SetMetadataValue(conversations.ConversationNameMetadataKey, explicitName)
 	}
 	fallbackName := base.FirstUserMessageName(conversations.ApplyDisplayToStreamableMessages(conversationsFromAnthropic(messages), metadata))
 	metadata, name := conversations.EnsureConversationName(metadata, fallbackName)
-	if automaticName := conversations.AutomaticConversationName(metadata); automaticName != "" {
+	if automaticName := conversations.AutomaticConversationName(metadata); updateThreadMetadata && automaticName != "" {
 		t.SetMetadataValue(conversations.ConversationAutoNameMetadataKey, automaticName)
 	}
 
@@ -121,24 +174,21 @@ func (t *Thread) SaveConversation(ctx context.Context) error {
 	}
 	metadata, err = conversations.AddConfigSnapshot(metadata, snapshotConfig)
 	if err != nil {
-		return errors.Wrap(err, "failed to persist conversation config snapshot")
+		return convtypes.ConversationRecord{}, errors.Wrap(err, "failed to persist conversation config snapshot")
 	}
 
-	record := convtypes.ConversationRecord{
+	return convtypes.ConversationRecord{
 		ID:          t.ConversationID,
 		CWD:         t.Config.WorkingDirectory,
 		RawMessages: rawMessages,
 		Provider:    "anthropic",
-		Usage:       *t.Usage,
+		Usage:       t.GetUsage(),
 		Metadata:    metadata,
 		Summary:     name,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 		ToolResults: toolResults,
-	}
-
-	// Save the record
-	return t.Store.Save(ctx, record)
+	}, nil
 }
 
 // loadConversation loads a conversation from the store into the thread.

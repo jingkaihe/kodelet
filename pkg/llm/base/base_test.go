@@ -113,6 +113,22 @@ func TestIsPersisted(t *testing.T) {
 	assert.True(t, bt.IsPersisted())
 }
 
+func TestBlockConversationFork(t *testing.T) {
+	thread := NewThread(llmtypes.Config{}, "conversation")
+
+	releaseOuter := thread.BlockConversationFork()
+	releaseInner := thread.BlockConversationFork()
+	assert.True(t, thread.ConversationForkBlocked())
+
+	releaseInner()
+	assert.True(t, thread.ConversationForkBlocked())
+	releaseOuter()
+	assert.False(t, thread.ConversationForkBlocked())
+
+	releaseOuter()
+	assert.False(t, thread.ConversationForkBlocked(), "release must be idempotent")
+}
+
 func TestGetUsage(t *testing.T) {
 	bt := NewThread(llmtypes.Config{}, "")
 

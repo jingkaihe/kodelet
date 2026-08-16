@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -11,6 +12,10 @@ const (
 	InitiatorUser  = "user"
 	InitiatorAgent = "agent"
 )
+
+// ErrConversationForkUnavailable indicates that the active thread cannot create
+// a durable fork, typically because conversation persistence is disabled.
+var ErrConversationForkUnavailable = errors.New("conversation persistence is not enabled")
 
 // Message represents a chat message
 type Message struct {
@@ -70,6 +75,12 @@ func (o MessageOpt) WithTurnInitiator(turnCount int) MessageOpt {
 	}
 	o.Initiator = InitiatorUser
 	return o
+}
+
+// ConversationForker snapshots the current live context into a new persisted
+// conversation without mutating the source thread.
+type ConversationForker interface {
+	ForkConversation(ctx context.Context) (string, error)
 }
 
 // Thread represents a conversation thread with an LLM

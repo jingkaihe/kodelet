@@ -278,6 +278,9 @@ func (t *Thread) SendMessage(
 	handler llmtypes.MessageHandler,
 	opt llmtypes.MessageOpt,
 ) (finalOutput string, err error) {
+	if opt.NoSaveConversation {
+		defer t.BlockConversationFork()()
+	}
 	if _, err = base.OpenEnvironment(ctx, t); err != nil {
 		return "", errors.Wrap(err, "failed to open agent environment")
 	}
