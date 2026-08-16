@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -1136,26 +1135,7 @@ func forkConversationCmd(ctx context.Context, conversationID string) {
 		os.Exit(1)
 	}
 
-	// Create a new conversation record with a new ID
-	forkedRecord := convtypes.NewConversationRecord("")
-
-	// Copy messages and context from source
-	forkedRecord.RawMessages = sourceRecord.RawMessages
-	forkedRecord.CWD = sourceRecord.CWD
-	forkedRecord.Provider = sourceRecord.Provider
-	forkedRecord.Summary = sourceRecord.Summary
-	forkedRecord.ToolResults = sourceRecord.ToolResults
-
-	// Copy Metadata map
-	if sourceRecord.Metadata != nil {
-		forkedRecord.Metadata = make(map[string]any)
-		maps.Copy(forkedRecord.Metadata, sourceRecord.Metadata)
-	}
-
-	// Usage is already initialized to zero by NewConversationRecord
-	// Preserve context window information from source
-	forkedRecord.Usage.CurrentContextWindow = sourceRecord.Usage.CurrentContextWindow
-	forkedRecord.Usage.MaxContextWindow = sourceRecord.Usage.MaxContextWindow
+	forkedRecord := convtypes.ForkConversationRecord(sourceRecord)
 
 	// Save the forked conversation
 	if err := store.Save(ctx, forkedRecord); err != nil {

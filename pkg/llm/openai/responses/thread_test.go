@@ -3488,6 +3488,7 @@ func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T)
 	thread.Usage.OutputTokens = 5
 	thread.Usage.CurrentContextWindow = 123
 	thread.Usage.MaxContextWindow = 456
+	thread.SetMetadataValue(goals.MetadataKey, goals.New("finish the parent task", time.Now()))
 	store := &mockResponsesConversationStore{}
 	thread.Store = store
 	thread.Persisted = true
@@ -3509,6 +3510,7 @@ func TestForkConversationSnapshotsLiveContextWithoutMutatingParent(t *testing.T)
 	assert.Equal(t, 123, store.savedRecords[0].Usage.CurrentContextWindow)
 	assert.Equal(t, 456, store.savedRecords[0].Usage.MaxContextWindow)
 	assert.NotContains(t, store.savedRecords[0].Metadata, convtypes.CodexResponsesWindowGenerationMetadataKey)
+	assert.NotContains(t, store.savedRecords[0].Metadata, goals.MetadataKey)
 	assert.Equal(t, llmtypes.OpenAIAPIMode(""), thread.Config.OpenAI.APIMode)
 	forkMetadata, ok := store.savedRecords[0].Metadata[convtypes.ConversationForkMetadataKey].(map[string]any)
 	require.True(t, ok)

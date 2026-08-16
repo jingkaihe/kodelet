@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,6 +17,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/db"
 	"github.com/jingkaihe/kodelet/pkg/db/migrations"
+	"github.com/jingkaihe/kodelet/pkg/goals"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -115,7 +115,8 @@ func TestConversationFork(t *testing.T) {
 		},
 	}
 	sourceRecord.Metadata = map[string]any{
-		"test_key": "test_value",
+		"test_key":        "test_value",
+		goals.MetadataKey: goals.New("finish the parent task", time.Now()),
 	}
 
 	// Save to store
@@ -128,21 +129,7 @@ func TestConversationFork(t *testing.T) {
 	require.NoError(t, err)
 
 	// Simulate fork operation
-	forkedRecord := convtypes.NewConversationRecord("")
-	forkedRecord.RawMessages = loadedSource.RawMessages
-	forkedRecord.CWD = loadedSource.CWD
-	forkedRecord.Provider = loadedSource.Provider
-	forkedRecord.Summary = loadedSource.Summary
-	forkedRecord.ToolResults = loadedSource.ToolResults
-
-	if loadedSource.Metadata != nil {
-		forkedRecord.Metadata = make(map[string]any)
-		maps.Copy(forkedRecord.Metadata, loadedSource.Metadata)
-	}
-
-	// Preserve context window information from source
-	forkedRecord.Usage.CurrentContextWindow = loadedSource.Usage.CurrentContextWindow
-	forkedRecord.Usage.MaxContextWindow = loadedSource.Usage.MaxContextWindow
+	forkedRecord := convtypes.ForkConversationRecord(loadedSource)
 
 	// Save forked conversation
 	err = store.Save(ctx, forkedRecord)
@@ -159,8 +146,9 @@ func TestConversationFork(t *testing.T) {
 	assert.Equal(t, loadedSource.Summary, loadedForked.Summary)
 	assert.Equal(t, loadedSource.ToolResults, loadedForked.ToolResults)
 
-	// Assert that Metadata is copied (deep copy)
-	assert.Equal(t, loadedSource.Metadata, loadedForked.Metadata)
+	// Assert that ordinary metadata is copied while the parent goal is not inherited.
+	assert.Equal(t, loadedSource.Metadata["test_key"], loadedForked.Metadata["test_key"])
+	assert.NotContains(t, loadedForked.Metadata, goals.MetadataKey)
 
 	// Assert that IDs are different
 	assert.NotEqual(t, loadedSource.ID, loadedForked.ID)
@@ -777,6 +765,7 @@ func TestConversationCommandsWithSQLiteStore(t *testing.T) {
 			assert.Equal(t, "high", forkedSnapshot.ReasoningEffort)
 			require.NotNil(t, forkedSnapshot.OpenAI)
 			assert.Equal(t, "codex", forkedSnapshot.OpenAI.Platform)
+			assert.NotContains(t, summary.Metadata, goals.MetadataKey)
 		}
 
 		deleteOutput := captureAllStdout(t, func() {
@@ -889,8 +878,9 @@ func saveConversationCommandRecord(ctx context.Context, t *testing.T, id string)
 		MaxContextWindow:     1000,
 	}
 	metadata, err := conversations.AddConfigSnapshot(map[string]any{
-		"platform": "codex",
-		"api_mode": "chat_completions",
+		"platform":        "codex",
+		"api_mode":        "chat_completions",
+		goals.MetadataKey: goals.New("finish the parent task", time.Now()),
 	}, llmtypes.Config{
 		Profile:         "codex",
 		Provider:        "openai",

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/goals"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
 )
@@ -184,6 +185,7 @@ func ForkConversationRecordWithOptions(source ConversationRecord, options Conver
 	if source.Metadata != nil {
 		forked.Metadata = maps.Clone(source.Metadata)
 		delete(forked.Metadata, CodexResponsesWindowGenerationMetadataKey)
+		delete(forked.Metadata, goals.MetadataKey)
 	}
 	if source.ToolResults != nil {
 		forked.ToolResults = maps.Clone(source.ToolResults)

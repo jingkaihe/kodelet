@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/goals"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
@@ -45,6 +46,7 @@ func TestForkConversationRecord(t *testing.T) {
 	source.Metadata = map[string]any{
 		"profile": "work",
 		CodexResponsesWindowGenerationMetadataKey: float64(3),
+		goals.MetadataKey:                         goals.New("finish the parent task", time.Now()),
 	}
 	source.ToolResults = map[string]tooltypes.StructuredToolResult{
 		"call-1": {ToolName: "bash", Success: true},
@@ -63,6 +65,7 @@ func TestForkConversationRecord(t *testing.T) {
 	assert.Equal(t, 456, forked.Usage.MaxContextWindow)
 	assert.Equal(t, "work", forked.Metadata["profile"])
 	assert.NotContains(t, forked.Metadata, CodexResponsesWindowGenerationMetadataKey)
+	assert.NotContains(t, forked.Metadata, goals.MetadataKey)
 	assert.Equal(t, source.ToolResults, forked.ToolResults)
 	forkMetadata, ok := conversationForkMetadataFromMetadata(forked.Metadata)
 	require.True(t, ok)
