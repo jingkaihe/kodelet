@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.5.35-beta
+
+Added an accessible Web UI conversation search dialog for finding saved chats by title, first message, ID, or workspace, with workspace filtering and paginated results.
+
+Expanded conversation queries to match working directories, return workspace options, and report pagination accurately.
+
+Made stored conversation forks preserve durable runner affinity while dropping parent goals and conversation-bound runner metadata, with atomic SQLite persistence and cleanup on fallback-store failures.
+
 ## 0.5.34-beta
 
 Added live conversation forking for extension tools so child agents can inherit the active provider-native context without modifying the source conversation.
