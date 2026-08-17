@@ -59,21 +59,23 @@ func GetDefaultConversationService(ctx context.Context) (*ConversationService, e
 
 // ListConversationsRequest represents a request to list conversations
 type ListConversationsRequest struct {
-	StartDate  *time.Time `json:"startDate,omitempty"`
-	EndDate    *time.Time `json:"endDate,omitempty"`
-	SearchTerm string     `json:"searchTerm,omitempty"`
-	CWD        string     `json:"cwd,omitempty"`
-	RunnerID   string     `json:"runnerId,omitempty"`
-	Limit      int        `json:"limit,omitempty"`
-	Offset     int        `json:"offset,omitempty"`
-	SortBy     string     `json:"sortBy,omitempty"`
-	SortOrder  string     `json:"sortOrder,omitempty"`
+	StartDate     *time.Time `json:"startDate,omitempty"`
+	EndDate       *time.Time `json:"endDate,omitempty"`
+	SearchTerm    string     `json:"searchTerm,omitempty"`
+	SearchCWDTerm string     `json:"-"`
+	CWD           string     `json:"cwd,omitempty"`
+	RunnerID      string     `json:"runnerId,omitempty"`
+	Limit         int        `json:"limit,omitempty"`
+	Offset        int        `json:"offset,omitempty"`
+	SortBy        string     `json:"sortBy,omitempty"`
+	SortOrder     string     `json:"sortOrder,omitempty"`
 }
 
 // ListConversationsResponse represents the response from listing conversations
 type ListConversationsResponse struct {
 	Conversations []conversations.ConversationSummary `json:"conversations"`
 	Total         int                                 `json:"total"`
+	CWDs          []string                            `json:"cwds,omitempty"`
 	Limit         int                                 `json:"limit"`
 	Offset        int                                 `json:"offset"`
 	HasMore       bool                                `json:"hasMore"`
@@ -115,15 +117,16 @@ func (s *ConversationService) ListConversations(ctx context.Context, req *ListCo
 
 	// Convert request to query options
 	options := conversations.QueryOptions{
-		StartDate:  req.StartDate,
-		EndDate:    req.EndDate,
-		SearchTerm: req.SearchTerm,
-		CWD:        req.CWD,
-		RunnerID:   req.RunnerID,
-		Limit:      req.Limit,
-		Offset:     req.Offset,
-		SortBy:     req.SortBy,
-		SortOrder:  req.SortOrder,
+		StartDate:     req.StartDate,
+		EndDate:       req.EndDate,
+		SearchTerm:    req.SearchTerm,
+		SearchCWDTerm: req.SearchCWDTerm,
+		CWD:           req.CWD,
+		RunnerID:      req.RunnerID,
+		Limit:         req.Limit,
+		Offset:        req.Offset,
+		SortBy:        req.SortBy,
+		SortOrder:     req.SortOrder,
 	}
 
 	// Query conversations with pagination
@@ -135,8 +138,9 @@ func (s *ConversationService) ListConversations(ctx context.Context, req *ListCo
 	summaries := result.ConversationSummaries
 	total := result.Total
 
-	// Calculate pagination info
-	hasMore := req.Limit > 0 && len(summaries) == req.Limit
+	// Calculate pagination info from the unpaginated total. A full final page
+	// does not imply that another page exists.
+	hasMore := req.Limit > 0 && req.Offset+len(summaries) < total
 
 	// Calculate statistics for the returned conversations
 	var stats *ConversationStatistics
@@ -166,6 +170,7 @@ func (s *ConversationService) ListConversations(ctx context.Context, req *ListCo
 	response := &ListConversationsResponse{
 		Conversations: summaries,
 		Total:         total,
+		CWDs:          result.CWDs,
 		Limit:         req.Limit,
 		Offset:        req.Offset,
 		HasMore:       hasMore,
@@ -248,10 +253,11 @@ func (s *ConversationService) ForkConversation(ctx context.Context, id string) (
 		return nil, errors.Wrap(err, "failed to load conversation")
 	}
 
-	forkedRecord := conversations.ForkConversationRecord(sourceRecord)
-
-	if err := s.store.Save(ctx, forkedRecord); err != nil {
-		return nil, errors.Wrap(err, "failed to save forked conversation")
+	forkedRecord, err := PersistConversationFork(ctx, s.store, sourceRecord, conversations.ConversationForkOptions{
+		Mode: conversations.ConversationForkModeStoredCopy,
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	logger.G(ctx).WithFields(map[string]any{

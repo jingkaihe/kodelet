@@ -49,10 +49,16 @@ interface ConversationSearchDialogProps {
 	conversations: Conversation[];
 	cwdFilter: string;
 	cwdOptions: string[];
+	error?: string | null;
+	hasMore?: boolean;
 	loading: boolean;
+	loadingMore?: boolean;
+	returnFocusSelector?: string;
 	searchTerm: string;
+	total?: number;
 	onClose: () => void;
 	onCwdFilterChange: (cwd: string) => void;
+	onLoadMore?: () => void;
 	onSearchTermChange: (searchTerm: string) => void;
 	onSelectConversation: (conversationId: string) => void;
 }
@@ -172,21 +178,32 @@ export const ConversationSearchDialog: React.FC<ConversationSearchDialogProps> =
 	conversations,
 	cwdFilter,
 	cwdOptions,
+	error = null,
+	hasMore = false,
 	loading,
+	loadingMore = false,
+	returnFocusSelector,
 	searchTerm,
+	total,
 	onClose,
 	onCwdFilterChange,
+	onLoadMore,
 	onSearchTermChange,
 	onSelectConversation,
 }) => {
 	const dialogRef = React.useRef<HTMLDivElement | null>(null);
 	const inputRef = React.useRef<HTMLInputElement | null>(null);
 	const onCloseRef = React.useRef(onClose);
+	const returnFocusSelectorRef = React.useRef(returnFocusSelector);
 	onCloseRef.current = onClose;
+	returnFocusSelectorRef.current = returnFocusSelector;
 
 	React.useEffect(() => {
 		const previousFocus =
-			document.activeElement instanceof HTMLElement ? document.activeElement : null;
+			document.activeElement instanceof HTMLElement &&
+			document.activeElement !== document.body
+				? document.activeElement
+				: null;
 		const focusInput = window.setTimeout(() => inputRef.current?.focus(), 0);
 		const handleKeyDown = (event: KeyboardEvent) => {
 			const dialog = dialogRef.current;
@@ -216,12 +233,18 @@ export const ConversationSearchDialog: React.FC<ConversationSearchDialogProps> =
 
 			const firstElement = focusableElements[0];
 			const lastElement = focusableElements[focusableElements.length - 1];
-			if (event.shiftKey && document.activeElement === firstElement) {
+			const activeElement = document.activeElement;
+			if (!activeElement || !dialog.contains(activeElement)) {
+				event.preventDefault();
+				(event.shiftKey ? lastElement : firstElement).focus();
+				return;
+			}
+			if (event.shiftKey && activeElement === firstElement) {
 				event.preventDefault();
 				lastElement.focus();
 				return;
 			}
-			if (!event.shiftKey && document.activeElement === lastElement) {
+			if (!event.shiftKey && activeElement === lastElement) {
 				event.preventDefault();
 				firstElement.focus();
 			}
@@ -232,6 +255,17 @@ export const ConversationSearchDialog: React.FC<ConversationSearchDialogProps> =
 			window.clearTimeout(focusInput);
 			window.removeEventListener("keydown", handleKeyDown, true);
 			window.setTimeout(() => {
+				if (document.querySelector("[aria-modal='true']")) {
+					return;
+				}
+				const returnFocusSelector = returnFocusSelectorRef.current;
+				if (returnFocusSelector) {
+					const returnFocus = document.querySelector<HTMLElement>(returnFocusSelector);
+					if (returnFocus) {
+						returnFocus.focus();
+						return;
+					}
+				}
 				if (previousFocus?.isConnected) {
 					previousFocus.focus();
 					return;
@@ -246,7 +280,24 @@ export const ConversationSearchDialog: React.FC<ConversationSearchDialogProps> =
 	}, []);
 
 	const trimmedSearchTerm = searchTerm.trim();
-	const resultsLabel = trimmedSearchTerm ? "Search results" : "Recent conversations";
+	const trimmedCwdFilter = cwdFilter.trim();
+	const hasActiveFilters = Boolean(trimmedSearchTerm || trimmedCwdFilter);
+	const resultsLabel = hasActiveFilters ? "Search results" : "Recent conversations";
+	const resultTotal = Math.max(total ?? conversations.length, conversations.length);
+	const initialLoading = loading && conversations.length === 0;
+	const resultCountLabel =
+		initialLoading
+			? "…"
+			: error && conversations.length === 0
+				? "—"
+				: resultTotal > conversations.length
+			? `${conversations.length} of ${resultTotal}`
+			: String(resultTotal);
+	const emptyStateText = trimmedSearchTerm
+		? "No conversations match your search."
+		: trimmedCwdFilter
+			? "No conversations in this workspace."
+			: "No saved conversations yet.";
 
 	return (
 		<div
@@ -273,7 +324,7 @@ export const ConversationSearchDialog: React.FC<ConversationSearchDialogProps> =
 							Search conversations
 						</h2>
 						<p className="conversation-search-copy">
-							Find a conversation by title, message, ID, or workspace.
+							Find a conversation by title, first message, ID, or workspace.
 						</p>
 					</div>
 					<button
@@ -311,7 +362,10 @@ export const ConversationSearchDialog: React.FC<ConversationSearchDialogProps> =
 								<button
 									aria-label="Clear conversation search"
 									className="conversation-search-clear"
-									onClick={() => onSearchTermChange("")}
+									onClick={() => {
+										onSearchTermChange("");
+										inputRef.current?.focus();
+									}}
 									type="button"
 								>
 									<X aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={2} />
@@ -341,25 +395,27 @@ export const ConversationSearchDialog: React.FC<ConversationSearchDialogProps> =
 						</div>
 					</div>
 
-					<div aria-busy={loading} className="conversation-search-results">
+					<div aria-busy={loading || loadingMore} className="conversation-search-results">
 						<div aria-live="polite" className="conversation-search-results-header">
 							<span>{resultsLabel}</span>
-							<span>{conversations.length}</span>
+							<span>{resultCountLabel}</span>
 						</div>
 
-						{loading && conversations.length === 0 ? (
+						{initialLoading ? (
 							<div className="conversation-search-empty">Searching…</div>
 						) : null}
 
-						{!loading && conversations.length === 0 ? (
-							<div className="conversation-search-empty">
-								{trimmedSearchTerm
-									? "No conversations match your search."
-									: "No saved conversations yet."}
+						{!loading && error ? (
+							<div className="conversation-search-empty" role="alert">
+								{error}
 							</div>
 						) : null}
 
-						{conversations.map((conversation) => {
+						{!loading && !error && conversations.length === 0 ? (
+							<div className="conversation-search-empty">{emptyStateText}</div>
+						) : null}
+
+						{!loading && conversations.map((conversation) => {
 							const preview = previewConversation(conversation);
 							return (
 								<button
@@ -373,7 +429,7 @@ export const ConversationSearchDialog: React.FC<ConversationSearchDialogProps> =
 											{truncateText(preview, 100)}
 										</span>
 										<span className="conversation-search-result-path">
-											{formatCwdGroupLabel(conversation.cwd)}
+											{formatCwdGroupLabel(conversation.cwd)} · {conversation.id}
 										</span>
 									</span>
 									<ChevronRight
@@ -384,6 +440,17 @@ export const ConversationSearchDialog: React.FC<ConversationSearchDialogProps> =
 								</button>
 							);
 						})}
+
+						{!loading && conversations.length > 0 && hasMore && onLoadMore ? (
+							<button
+								className="conversation-search-load-more"
+								disabled={loadingMore}
+								onClick={onLoadMore}
+								type="button"
+							>
+								{loadingMore ? "Loading more…" : "Load more"}
+							</button>
+						) : null}
 					</div>
 				</div>
 			</div>
@@ -531,9 +598,13 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 			const nextState: Record<string, boolean> = {};
 
 			groupedConversations.forEach((group, index) => {
-				nextState[group.key] =
-					currentState[group.key] ??
-					isGroupExpandedByDefault(group, index, activeConversationId);
+				const containsActiveConversation = group.conversations.some(
+					(conversation) => conversation.id === activeConversationId,
+				);
+				nextState[group.key] = containsActiveConversation
+					? true
+					: currentState[group.key] ??
+						isGroupExpandedByDefault(group, index, activeConversationId);
 			});
 
 			return nextState;

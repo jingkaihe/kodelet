@@ -1135,10 +1135,10 @@ func forkConversationCmd(ctx context.Context, conversationID string) {
 		os.Exit(1)
 	}
 
-	forkedRecord := convtypes.ForkConversationRecord(sourceRecord)
-
-	// Save the forked conversation
-	if err := store.Save(ctx, forkedRecord); err != nil {
+	forkedRecord, err := conversations.PersistConversationFork(ctx, store, sourceRecord, convtypes.ConversationForkOptions{
+		Mode: convtypes.ConversationForkModeStoredCopy,
+	})
+	if err != nil {
 		presenter.Error(err, "Failed to save forked conversation")
 		os.Exit(1)
 	}

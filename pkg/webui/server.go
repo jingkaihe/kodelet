@@ -40,6 +40,7 @@ import (
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
 	"github.com/jingkaihe/kodelet/pkg/steer"
+	conversationtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
@@ -1033,12 +1034,14 @@ func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request)
 
 	// Parse query parameters
 	query := r.URL.Query()
+	searchTerm := strings.TrimSpace(query.Get("search"))
 	req := &conversations.ListConversationsRequest{
-		SearchTerm: query.Get("search"),
-		CWD:        expandCompactHomePath(query.Get("cwd")),
-		RunnerID:   strings.TrimSpace(query.Get("runnerId")),
-		SortBy:     query.Get("sortBy"),
-		SortOrder:  query.Get("sortOrder"),
+		SearchTerm:    searchTerm,
+		SearchCWDTerm: expandCompactHomePath(searchTerm),
+		CWD:           expandCompactHomePath(query.Get("cwd")),
+		RunnerID:      strings.TrimSpace(query.Get("runnerId")),
+		SortBy:        query.Get("sortBy"),
+		SortOrder:     query.Get("sortOrder"),
 	}
 
 	// Parse limit
@@ -1101,6 +1104,9 @@ func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request)
 				}
 			}
 		}
+	}
+	for i := range response.CWDs {
+		response.CWDs[i] = compactHomePath(response.CWDs[i])
 	}
 
 	s.writeJSONResponse(w, response)
@@ -2481,6 +2487,10 @@ func (s *Server) handleForkConversation(w http.ResponseWriter, r *http.Request) 
 
 	response, err := s.conversationService.ForkConversation(ctx, conversationID)
 	if err != nil {
+		if errors.Is(err, conversationtypes.ErrConversationNotFound) {
+			s.writeErrorResponse(w, http.StatusNotFound, "conversation not found", err)
+			return
+		}
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to fork conversation", err)
 		return
 	}

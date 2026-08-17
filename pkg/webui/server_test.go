@@ -716,7 +716,8 @@ func TestServer_handleListConversations(t *testing.T) {
 
 	mockService := &mockConversationService{
 		listFunc: func(_ context.Context, request *conversations.ListConversationsRequest) (*conversations.ListConversationsResponse, error) {
-			assert.Equal(t, "needle", request.SearchTerm)
+			assert.Equal(t, "~/workspace/kodelet", request.SearchTerm)
+			assert.Equal(t, conversationCWD, request.SearchCWDTerm)
 			assert.Equal(t, conversationCWD, request.CWD)
 			assert.Equal(t, "runner-1", request.RunnerID)
 			return &conversations.ListConversationsResponse{
@@ -730,6 +731,7 @@ func TestServer_handleListConversations(t *testing.T) {
 					},
 					{ID: "2", Summary: "Test 2", Provider: "anthropic"},
 				},
+				CWDs:  []string{conversationCWD},
 				Total: 2,
 			}, nil
 		},
@@ -743,7 +745,7 @@ func TestServer_handleListConversations(t *testing.T) {
 
 	req := httptest.NewRequest(
 		"GET",
-		"/api/conversations?limit=10&runnerId=runner-1&search=needle&cwd="+url.QueryEscape("~/workspace/kodelet"),
+		"/api/conversations?limit=10&runnerId=runner-1&search="+url.QueryEscape("~/workspace/kodelet")+"&cwd="+url.QueryEscape("~/workspace/kodelet"),
 		nil,
 	)
 	w := httptest.NewRecorder()
@@ -760,6 +762,7 @@ func TestServer_handleListConversations(t *testing.T) {
 	assert.Equal(t, 2, response.Total)
 	assert.Equal(t, "OpenAI", response.Conversations[0].Provider)
 	assert.Equal(t, "~/workspace/kodelet", response.Conversations[0].CWD)
+	assert.Equal(t, []string{"~/workspace/kodelet"}, response.CWDs)
 	assert.True(t, response.Conversations[0].IsRunning)
 	assert.Equal(t, "fireworks", response.Conversations[0].Metadata["platform"])
 	assert.Equal(t, "chat_completions", response.Conversations[0].Metadata["api_mode"])
@@ -1612,6 +1615,27 @@ func TestServer_handleForkConversation(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, response.Success)
 	assert.Equal(t, "forked-456", response.ConversationID)
+}
+
+func TestServer_handleForkConversationReturnsNotFound(t *testing.T) {
+	server := &Server{
+		conversationService: &mockConversationService{
+			forkFunc: func(_ context.Context, _ string) (*conversations.GetConversationResponse, error) {
+				return nil, errors.Wrap(convtypes.ErrConversationNotFound, "failed to load conversation")
+			},
+		},
+		router: mux.NewRouter(),
+	}
+
+	req := mux.SetURLVars(
+		httptest.NewRequest(http.MethodPost, "/api/conversations/missing/fork", nil),
+		map[string]string{"id": "missing"},
+	)
+	w := httptest.NewRecorder()
+
+	server.handleForkConversation(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
 func TestServer_handleChat(t *testing.T) {

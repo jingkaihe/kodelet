@@ -97,16 +97,17 @@ func ConversationForkInitiatorFromContext(ctx context.Context) (ConversationFork
 
 // QueryOptions provides filtering and sorting options for conversation queries
 type QueryOptions struct {
-	StartDate  *time.Time // Filter by start date
-	EndDate    *time.Time // Filter by end date
-	SearchTerm string     // Text to search for in messages
-	Provider   string     // Filter by LLM provider (e.g., "anthropic", "openai")
-	CWD        string     // Filter by canonical working directory
-	RunnerID   string     // Filter by durable runner affinity
-	Limit      int        // Maximum number of results
-	Offset     int        // Offset for pagination
-	SortBy     string     // Field to sort by
-	SortOrder  string     // "asc" or "desc"
+	StartDate     *time.Time // Filter by start date
+	EndDate       *time.Time // Filter by end date
+	SearchTerm    string     // Text to search for in IDs, working directories, first messages, or summaries
+	SearchCWDTerm string     // Optional normalized override for working-directory matching
+	Provider      string     // Filter by LLM provider (e.g., "anthropic", "openai")
+	CWD           string     // Filter by canonical working directory
+	RunnerID      string     // Filter by durable runner affinity
+	Limit         int        // Maximum number of results
+	Offset        int        // Offset for pagination
+	SortBy        string     // Field to sort by
+	SortOrder     string     // "asc" or "desc"
 }
 
 // ConversationRecord represents a persisted conversation with its messages and metadata
@@ -141,7 +142,8 @@ type ConversationSummary struct {
 // QueryResult represents the result of a query operation
 type QueryResult struct {
 	ConversationSummaries []ConversationSummary `json:"conversationSummaries"`
-	Total                 int                   `json:"total"` // Represents the total number of the entries that match the query without pagination
+	Total                 int                   `json:"total"`          // Represents the total number of the entries that match the query without pagination
+	CWDs                  []string              `json:"cwds,omitempty"` // All distinct persisted working directories, independent of pagination
 	QueryOptions
 }
 
@@ -186,6 +188,10 @@ func ForkConversationRecordWithOptions(source ConversationRecord, options Conver
 		forked.Metadata = maps.Clone(source.Metadata)
 		delete(forked.Metadata, CodexResponsesWindowGenerationMetadataKey)
 		delete(forked.Metadata, goals.MetadataKey)
+		// Runner affinity is authoritative for a specific conversation ID and
+		// must be explicitly re-established for the forked ID by the caller.
+		delete(forked.Metadata, RunnerIDMetadataKey)
+		delete(forked.Metadata, RunnerEnvironmentProfileMetadataKey)
 	}
 	if source.ToolResults != nil {
 		forked.ToolResults = maps.Clone(source.ToolResults)

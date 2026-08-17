@@ -47,6 +47,8 @@ func TestForkConversationRecord(t *testing.T) {
 		"profile": "work",
 		CodexResponsesWindowGenerationMetadataKey: float64(3),
 		goals.MetadataKey:                         goals.New("finish the parent task", time.Now()),
+		RunnerIDMetadataKey:                       "runner-1",
+		RunnerEnvironmentProfileMetadataKey:       "gpu",
 	}
 	source.ToolResults = map[string]tooltypes.StructuredToolResult{
 		"call-1": {ToolName: "bash", Success: true},
@@ -66,6 +68,8 @@ func TestForkConversationRecord(t *testing.T) {
 	assert.Equal(t, "work", forked.Metadata["profile"])
 	assert.NotContains(t, forked.Metadata, CodexResponsesWindowGenerationMetadataKey)
 	assert.NotContains(t, forked.Metadata, goals.MetadataKey)
+	assert.NotContains(t, forked.Metadata, RunnerIDMetadataKey)
+	assert.NotContains(t, forked.Metadata, RunnerEnvironmentProfileMetadataKey)
 	assert.Equal(t, source.ToolResults, forked.ToolResults)
 	forkMetadata, ok := conversationForkMetadataFromMetadata(forked.Metadata)
 	require.True(t, ok)

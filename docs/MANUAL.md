@@ -496,9 +496,14 @@ kodelet conversation show <conversation-id> --format [text|markdown|json|raw]
 kodelet conversation delete <conversation-id>
 kodelet conversation delete --no-confirm <conversation-id>
 
+# Fork a conversation without carrying over its active thread goal
+kodelet conversation fork [conversation-id]
+
 # Rename a conversation without invoking the model
 kodelet run --resume <conversation-id> "/rename New conversation name"
 ```
+
+`conversation list --search` matches conversation IDs, working directories, first messages, and summaries. `conversation fork` copies the specified conversation, or the most recent conversation when no ID is provided, into a new conversation with the same transcript and execution context; it resets cumulative usage and does not inherit the source conversation's active thread goal.
 
 ### Database Management
 

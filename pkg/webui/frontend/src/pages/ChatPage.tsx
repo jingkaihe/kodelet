@@ -423,7 +423,15 @@ const ChatPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const conversationId = id || null;
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [conversationTotal, setConversationTotal] = useState(0);
   const [conversationSearchTerm, setConversationSearchTerm] = useState('');
+  const [conversationSearchResults, setConversationSearchResults] = useState<Conversation[]>([]);
+  const [conversationSearchError, setConversationSearchError] = useState<string | null>(null);
+  const [conversationSearchHasMore, setConversationSearchHasMore] = useState(false);
+  const [conversationSearchLoading, setConversationSearchLoading] = useState(false);
+  const [conversationSearchLoadingMore, setConversationSearchLoadingMore] = useState(false);
+  const [conversationSearchOffset, setConversationSearchOffset] = useState(0);
+  const [conversationSearchTotal, setConversationSearchTotal] = useState(0);
   const [sidebarSearchOpen, setSidebarSearchOpen] = useState(false);
   const [conversationCWDFilter, setConversationCWDFilter] = useState('');
   const [conversationCWDOptions, setConversationCWDOptions] = useState<string[]>([]);
@@ -501,6 +509,7 @@ const ChatPage: React.FC = () => {
   const reasoningSettingsRequestRef = useRef(0);
   const cwdSuggestionRequestRef = useRef(0);
   const conversationListRequestRef = useRef(0);
+  const conversationSearchRequestRef = useRef(0);
   const conversationSearchTermRef = useRef('');
   const conversationCWDFilterRef = useRef('');
   const cwdInputFocusedRef = useRef(false);
@@ -618,14 +627,10 @@ const ChatPage: React.FC = () => {
   const refreshConversations = useCallback(async () => {
     const requestId = conversationListRequestRef.current + 1;
     conversationListRequestRef.current = requestId;
-    const searchTerm = conversationSearchTermRef.current.trim();
-    const cwdFilter = conversationCWDFilterRef.current.trim();
 
     setSidebarLoading(true);
     try {
       const response = await apiService.getConversations({
-        searchTerm,
-        cwd: cwdFilter,
         limit: SIDEBAR_CONVERSATION_LIMIT,
         sortBy: 'updated',
         sortOrder: 'desc',
@@ -636,22 +641,14 @@ const ChatPage: React.FC = () => {
 
       const nextConversations = response.conversations || [];
       setConversations(nextConversations);
-      const responseCWDs = nextConversations
-        .map((nextConversation) => nextConversation.cwd?.trim())
+      setConversationTotal(response.total ?? nextConversations.length);
+      const responseCWDs = (response.cwds?.length
+        ? response.cwds
+        : nextConversations.map((nextConversation) => nextConversation.cwd)
+      )
+        .map((cwd) => cwd?.trim())
         .filter((cwd): cwd is string => Boolean(cwd));
-      setConversationCWDOptions((currentOptions) => {
-        const candidates =
-          searchTerm || cwdFilter ? [...currentOptions, cwdFilter, ...responseCWDs] : responseCWDs;
-        const seen = new Set<string>();
-
-        return candidates.filter((cwd) => {
-          if (!cwd || seen.has(cwd)) {
-            return false;
-          }
-          seen.add(cwd);
-          return true;
-        });
-      });
+      setConversationCWDOptions(Array.from(new Set(responseCWDs)));
     } catch (error) {
       if (conversationListRequestRef.current === requestId) {
         console.error('Failed to load conversations', error);
@@ -663,17 +660,108 @@ const ChatPage: React.FC = () => {
     }
   }, []);
 
+  const refreshConversationSearch = useCallback(async (offset = 0) => {
+    const requestId = conversationSearchRequestRef.current + 1;
+    conversationSearchRequestRef.current = requestId;
+    const searchTerm = conversationSearchTermRef.current.trim();
+    const cwdFilter = conversationCWDFilterRef.current.trim();
+    const loadingMore = offset > 0;
+
+    setConversationSearchError(null);
+    if (loadingMore) {
+      setConversationSearchLoadingMore(true);
+    } else {
+      setConversationSearchLoading(true);
+    }
+    try {
+      const response = await apiService.getConversations({
+        searchTerm,
+        cwd: cwdFilter,
+        limit: SIDEBAR_CONVERSATION_LIMIT,
+        offset: offset || undefined,
+        sortBy: 'updated',
+        sortOrder: 'desc',
+      });
+      if (conversationSearchRequestRef.current !== requestId) {
+        return;
+      }
+
+      const nextConversations = response.conversations || [];
+      if (loadingMore) {
+        setConversationSearchResults((currentResults) => {
+          const seen = new Set(currentResults.map((conversation) => conversation.id));
+          return [
+            ...currentResults,
+            ...nextConversations.filter((conversation) => {
+              if (seen.has(conversation.id)) {
+                return false;
+              }
+              seen.add(conversation.id);
+              return true;
+            }),
+          ];
+        });
+      } else {
+        setConversationSearchResults(nextConversations);
+      }
+      const nextTotal = response.total ?? offset + nextConversations.length;
+      setConversationSearchOffset(offset + nextConversations.length);
+      setConversationSearchTotal(nextTotal);
+      setConversationSearchHasMore(
+        response.hasMore ?? offset + nextConversations.length < nextTotal
+      );
+      const responseCWDs = (response.cwds?.length
+        ? response.cwds
+        : nextConversations.map((nextConversation) => nextConversation.cwd)
+      )
+        .map((cwd) => cwd?.trim())
+        .filter((cwd): cwd is string => Boolean(cwd));
+      setConversationCWDOptions((currentOptions) => {
+        const seen = new Set<string>();
+        return [...currentOptions, cwdFilter, ...responseCWDs].filter((cwd) => {
+          if (!cwd || seen.has(cwd)) {
+            return false;
+          }
+          seen.add(cwd);
+          return true;
+        });
+      });
+    } catch (error) {
+      if (conversationSearchRequestRef.current === requestId) {
+        console.error('Failed to search conversations', error);
+        if (!loadingMore) {
+          setConversationSearchResults([]);
+          setConversationSearchHasMore(false);
+          setConversationSearchOffset(0);
+          setConversationSearchTotal(0);
+        }
+        setConversationSearchError(
+          error instanceof Error ? error.message : 'Failed to search conversations'
+        );
+      }
+    } finally {
+      if (conversationSearchRequestRef.current === requestId) {
+        if (loadingMore) {
+          setConversationSearchLoadingMore(false);
+        } else {
+          setConversationSearchLoading(false);
+        }
+      }
+    }
+  }, []);
+
   const requestConversationFilterRefresh = useMemo(
     () =>
       debounce(() => {
-        void refreshConversations();
+        void refreshConversationSearch();
       }, 200),
-    [refreshConversations]
+    [refreshConversationSearch]
   );
 
   useEffect(() => {
     return () => {
       requestConversationFilterRefresh.cancel();
+      conversationSearchRequestRef.current += 1;
     };
   }, [requestConversationFilterRefresh]);
 
@@ -681,35 +769,98 @@ const ChatPage: React.FC = () => {
     (searchTerm: string) => {
       setConversationSearchTerm(searchTerm);
       conversationSearchTermRef.current = searchTerm;
+      conversationSearchRequestRef.current += 1;
+      setConversationSearchError(null);
+      setConversationSearchHasMore(false);
+      setConversationSearchLoadingMore(false);
+      setConversationSearchOffset(0);
+      requestConversationFilterRefresh.cancel();
+      if (!searchTerm.trim() && !conversationCWDFilterRef.current.trim()) {
+        setConversationSearchResults(conversations);
+        setConversationSearchLoading(sidebarLoading);
+        setConversationSearchTotal(conversationTotal);
+        return;
+      }
+      setConversationSearchResults([]);
+      setConversationSearchTotal(0);
+      setConversationSearchLoading(true);
       requestConversationFilterRefresh();
     },
-    [requestConversationFilterRefresh]
+    [
+      conversationTotal,
+      conversations,
+      requestConversationFilterRefresh,
+      sidebarLoading,
+    ]
   );
 
   const handleConversationCWDFilterChange = useCallback(
     (cwd: string) => {
       setConversationCWDFilter(cwd);
       conversationCWDFilterRef.current = cwd;
+      conversationSearchRequestRef.current += 1;
+      setConversationSearchError(null);
+      setConversationSearchHasMore(false);
+      setConversationSearchLoadingMore(false);
+      setConversationSearchOffset(0);
       requestConversationFilterRefresh.cancel();
-      void refreshConversations();
+      if (!cwd.trim() && !conversationSearchTermRef.current.trim()) {
+        setConversationSearchResults(conversations);
+        setConversationSearchLoading(sidebarLoading);
+        setConversationSearchTotal(conversationTotal);
+        return;
+      }
+      setConversationSearchResults([]);
+      setConversationSearchTotal(0);
+      setConversationSearchLoading(true);
+      void refreshConversationSearch();
     },
-    [refreshConversations, requestConversationFilterRefresh]
+    [
+      conversationTotal,
+      conversations,
+      refreshConversationSearch,
+      requestConversationFilterRefresh,
+      sidebarLoading,
+    ]
   );
 
   const handleCloseConversationSearch = useCallback(() => {
     setSidebarSearchOpen(false);
     requestConversationFilterRefresh.cancel();
-    const hadActiveFilters = Boolean(
-      conversationSearchTermRef.current || conversationCWDFilterRef.current
-    );
+    conversationSearchRequestRef.current += 1;
     setConversationSearchTerm('');
     conversationSearchTermRef.current = '';
     setConversationCWDFilter('');
     conversationCWDFilterRef.current = '';
-    if (hadActiveFilters) {
-      void refreshConversations();
+    setConversationSearchResults([]);
+    setConversationSearchError(null);
+    setConversationSearchHasMore(false);
+    setConversationSearchLoading(false);
+    setConversationSearchLoadingMore(false);
+    setConversationSearchOffset(0);
+    setConversationSearchTotal(0);
+  }, [requestConversationFilterRefresh]);
+
+  useEffect(() => {
+    if (!sidebarSearchOpen || conversationSearchTerm.trim() || conversationCWDFilter.trim()) {
+      return;
     }
-  }, [refreshConversations, requestConversationFilterRefresh]);
+
+    setConversationSearchResults(conversations);
+    setConversationSearchError(null);
+    setConversationSearchHasMore(false);
+    setConversationSearchLoading(sidebarLoading);
+    setConversationSearchLoadingMore(false);
+    setConversationSearchOffset(conversations.length);
+    setConversationSearchTotal(conversationTotal);
+  }, [
+    conversations,
+    conversationCWDFilter,
+    conversationSearchTerm,
+    conversationTotal,
+    sidebarLoading,
+    sidebarSearchOpen,
+  ]);
 
   const refreshRunners = useCallback(async () => {
     try {
@@ -1580,6 +1731,20 @@ const ChatPage: React.FC = () => {
   };
 
   const handleSelectSearchResult = (nextConversationId: string) => {
+    const selectedConversation = conversationSearchResults.find(
+      (searchResult) => searchResult.id === nextConversationId
+    );
+    if (selectedConversation) {
+      setConversations((currentConversations) => {
+        const existingConversation = currentConversations.find(
+          (currentConversation) => currentConversation.id === nextConversationId
+        );
+        const nextConversation = existingConversation?.isRunning
+          ? { ...selectedConversation, isRunning: true }
+          : selectedConversation;
+        return upsertConversationSummary(currentConversations, nextConversation);
+      });
+    }
     handleCloseConversationSearch();
     handleSelectConversation(nextConversationId);
   };
@@ -1660,7 +1825,27 @@ const ChatPage: React.FC = () => {
 
   const handleOpenSidebarSearch = () => {
     closeMobileSidebar();
+    setConversationSearchResults(conversations);
+    setConversationSearchError(null);
+    setConversationSearchHasMore(false);
+    setConversationSearchLoading(false);
+    setConversationSearchLoadingMore(false);
+    setConversationSearchOffset(conversations.length);
+    setConversationSearchTotal(conversationTotal);
     setSidebarSearchOpen(true);
+  };
+
+  const handleLoadMoreConversationSearch = () => {
+    if (
+      conversationSearchLoading ||
+      conversationSearchLoadingMore ||
+      !conversationSearchHasMore ||
+      (!conversationSearchTermRef.current.trim() && !conversationCWDFilterRef.current.trim())
+    ) {
+      return;
+    }
+
+    void refreshConversationSearch(conversationSearchOffset);
   };
 
   const handleSidebarResizeStart = (event: React.MouseEvent<HTMLElement>) => {
@@ -1693,6 +1878,7 @@ const ChatPage: React.FC = () => {
       reasoningSettingsRequestRef.current += 1;
       requestCwdSuggestions.cancel();
       cwdSuggestionRequestRef.current += 1;
+      handleCloseConversationSearch();
       setNewChatDialogOpen(false);
       setCwdSuggestionsOpen(false);
       setCwdSuggestionIndex(-1);
@@ -2674,6 +2860,11 @@ const ChatPage: React.FC = () => {
   };
 
   const workspacePanelCWDLabel = currentCWDLabel || chatSettings.defaultCWD || '';
+  const conversationSearchReturnFocusSelector = mobileLayout
+    ? '[data-testid="sidebar-attached-toggle-mobile"]'
+    : sidebarVisible
+      ? '[data-testid="sidebar-search-toggle"]'
+      : '[data-testid="sidebar-collapsed-search"]';
   return (
     <div className="relative h-full bg-transparent">
       {uiRequestDialog ? (
@@ -2752,15 +2943,21 @@ const ChatPage: React.FC = () => {
 
       {sidebarSearchOpen && !uiRequestDialog && !newChatDialogOpen ? (
         <ConversationSearchDialog
-          conversations={conversations}
+          conversations={conversationSearchResults}
           cwdFilter={conversationCWDFilter}
           cwdOptions={conversationCWDOptions}
-          loading={sidebarLoading}
+          error={conversationSearchError}
+          hasMore={conversationSearchHasMore}
+          loading={conversationSearchLoading}
+          loadingMore={conversationSearchLoadingMore}
           onClose={handleCloseConversationSearch}
           onCwdFilterChange={handleConversationCWDFilterChange}
+          onLoadMore={handleLoadMoreConversationSearch}
           onSearchTermChange={handleConversationSearchTermChange}
           onSelectConversation={handleSelectSearchResult}
+          returnFocusSelector={conversationSearchReturnFocusSelector}
           searchTerm={conversationSearchTerm}
+          total={conversationSearchTotal}
         />
       ) : null}
 
@@ -2826,7 +3023,7 @@ const ChatPage: React.FC = () => {
               onNewChat={handleNewChat}
               onOpen={handleSidebarToggle}
               onSearch={handleOpenSidebarSearch}
-              searchActive={Boolean(sidebarSearchOpen || conversationSearchTerm)}
+              searchActive={sidebarSearchOpen}
             />
 
             <button

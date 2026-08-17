@@ -43,7 +43,41 @@ func (s *Store) Save(ctx context.Context, record conversations.ConversationRecor
 		return errors.Wrap(err, "failed to begin transaction")
 	}
 	defer tx.Rollback()
+	if err := saveConversationRecord(ctx, tx, record); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
+// SaveConversationFork atomically saves a fork and copies the source runner affinity.
+func (s *Store) SaveConversationFork(ctx context.Context, sourceConversationID string, forked conversations.ConversationRecord) error {
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return errors.Wrap(err, "failed to begin transaction")
+	}
+	defer tx.Rollback()
+
+	if err := saveConversationRecord(ctx, tx, forked); err != nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO conversation_runner_affinity (
+			conversation_id, runner_id, environment_profile, created_at, updated_at
+		)
+		SELECT ?, runner_id, environment_profile, ?, ?
+		FROM conversation_runner_affinity
+		WHERE conversation_id = ?
+	`, forked.ID, now, now, strings.TrimSpace(sourceConversationID))
+	if err != nil {
+		return errors.Wrap(err, "failed to copy conversation runner affinity")
+	}
+
+	return tx.Commit()
+}
+
+func saveConversationRecord(ctx context.Context, tx *sqlx.Tx, record conversations.ConversationRecord) error {
 	// Ensure UpdatedAt is set to current time for saves
 	record.UpdatedAt = time.Now()
 
@@ -70,7 +104,7 @@ func (s *Store) Save(ctx context.Context, record conversations.ConversationRecor
 			metadata = excluded.metadata,
 			tool_results = excluded.tool_results
 	`
-	_, err = tx.NamedExecContext(ctx, conversationQuery, dbRecord)
+	_, err := tx.NamedExecContext(ctx, conversationQuery, dbRecord)
 	if err != nil {
 		return errors.Wrap(err, "failed to save conversation record")
 	}
@@ -96,8 +130,7 @@ func (s *Store) Save(ctx context.Context, record conversations.ConversationRecor
 	if err != nil {
 		return errors.Wrap(err, "failed to save conversation summary")
 	}
-
-	return tx.Commit()
+	return nil
 }
 
 // Load retrieves a conversation record by ID
@@ -136,6 +169,60 @@ func (s *Store) Load(ctx context.Context, id string) (conversations.Conversation
 		record.Metadata[conversations.RunnerEnvironmentProfileMetadataKey] = affinity.EnvironmentProfile
 	}
 	return record, nil
+}
+
+// ConversationRunnerAffinity returns the authoritative runner binding for a conversation.
+func (s *Store) ConversationRunnerAffinity(ctx context.Context, conversationID string) (string, string, bool, error) {
+	var affinity struct {
+		RunnerID           string `db:"runner_id"`
+		EnvironmentProfile string `db:"environment_profile"`
+	}
+	err := s.db.GetContext(ctx, &affinity, `
+		SELECT runner_id, environment_profile
+		FROM conversation_runner_affinity
+		WHERE conversation_id = ?
+	`, strings.TrimSpace(conversationID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", false, nil
+	}
+	if err != nil {
+		return "", "", false, errors.Wrap(err, "failed to load conversation runner affinity")
+	}
+	return affinity.RunnerID, affinity.EnvironmentProfile, true, nil
+}
+
+// BindConversationRunnerAffinity establishes authoritative affinity without moving an existing binding.
+func (s *Store) BindConversationRunnerAffinity(ctx context.Context, conversationID, runnerID, environmentProfile string) error {
+	conversationID = strings.TrimSpace(conversationID)
+	runnerID = strings.TrimSpace(runnerID)
+	environmentProfile = strings.TrimSpace(environmentProfile)
+	if conversationID == "" {
+		return errors.New("conversation id is required")
+	}
+	if runnerID == "" {
+		return errors.New("runner id is required")
+	}
+
+	now := time.Now().UTC()
+	result, err := s.db.ExecContext(ctx, `
+		INSERT INTO conversation_runner_affinity (conversation_id, runner_id, environment_profile, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(conversation_id) DO UPDATE SET
+			updated_at = excluded.updated_at
+		WHERE conversation_runner_affinity.runner_id = excluded.runner_id
+			AND conversation_runner_affinity.environment_profile = excluded.environment_profile
+	`, conversationID, runnerID, environmentProfile, now, now)
+	if err != nil {
+		return errors.Wrap(err, "failed to bind conversation to runner")
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return errors.Wrap(err, "failed to inspect conversation runner binding")
+	}
+	if rows == 0 {
+		return errors.New("conversation is already bound to another runner")
+	}
+	return nil
 }
 
 // Delete removes a conversation and its associated data
@@ -188,10 +275,20 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 		args["end_date"] = *options.EndDate
 	}
 
-	if searchTerm := strings.TrimSpace(options.SearchTerm); searchTerm != "" {
-		searchPattern := "%" + strings.ToLower(searchTerm) + "%"
-		conditions = append(conditions, "(LOWER(id) LIKE :search_term OR LOWER(cwd) LIKE :search_term OR LOWER(first_message) LIKE :search_term OR LOWER(summary) LIKE :search_term)")
+	searchTerm := strings.TrimSpace(options.SearchTerm)
+	searchCWDTerm := strings.TrimSpace(options.SearchCWDTerm)
+	if searchTerm != "" || searchCWDTerm != "" {
+		if searchTerm == "" {
+			searchTerm = searchCWDTerm
+		}
+		if searchCWDTerm == "" {
+			searchCWDTerm = searchTerm
+		}
+		searchPattern := "%" + escapeLikePattern(strings.ToLower(searchTerm)) + "%"
+		searchCWDPattern := "%" + escapeLikePattern(strings.ToLower(searchCWDTerm)) + "%"
+		conditions = append(conditions, `(LOWER(id) LIKE :search_term ESCAPE '\' OR LOWER(cwd) LIKE :search_cwd_term ESCAPE '\' OR LOWER(first_message) LIKE :search_term ESCAPE '\' OR LOWER(summary) LIKE :search_term ESCAPE '\')`)
 		args["search_term"] = searchPattern
+		args["search_cwd_term"] = searchCWDPattern
 	}
 
 	if options.Provider != "" {
@@ -293,11 +390,27 @@ func (s *Store) Query(ctx context.Context, options conversations.QueryOptions) (
 		return conversations.QueryResult{}, errors.Wrap(err, "failed to get total count")
 	}
 
+	var cwds []string
+	err = s.db.SelectContext(ctx, &cwds, `
+		SELECT DISTINCT cwd
+		FROM conversation_summaries
+		WHERE TRIM(cwd) <> ''
+		ORDER BY LOWER(cwd), cwd
+	`)
+	if err != nil {
+		return conversations.QueryResult{}, errors.Wrap(err, "failed to list conversation working directories")
+	}
+
 	return conversations.QueryResult{
 		ConversationSummaries: summaries,
 		Total:                 total,
+		CWDs:                  cwds,
 		QueryOptions:          options,
 	}, nil
+}
+
+func escapeLikePattern(value string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(value)
 }
 
 // Close closes the database connection

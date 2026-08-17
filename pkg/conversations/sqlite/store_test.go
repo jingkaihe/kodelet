@@ -165,6 +165,64 @@ func TestStore_DeleteRemovesRunnerAffinity(t *testing.T) {
 	assert.Zero(t, count)
 }
 
+func TestStore_ConversationRunnerAffinity(t *testing.T) {
+	ctx := t.Context()
+	dbPath := filepath.Join(t.TempDir(), "test_conversations.db")
+	setupTestDB(t, dbPath)
+
+	store, err := NewStore(ctx, dbPath)
+	require.NoError(t, err)
+	defer store.Close()
+
+	now := time.Now().UTC()
+	_, err = store.db.ExecContext(ctx, `
+		INSERT INTO runner_registrations (
+			id, owner_id, host_instance_id, workspace_path, workspace_name, status, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, "runner-one", "local", "host-one", "/work/project", "project", "offline", now, now)
+	require.NoError(t, err)
+	_, err = store.db.ExecContext(ctx, `
+		INSERT INTO runner_registrations (
+			id, owner_id, host_instance_id, workspace_path, workspace_name, status, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, "runner-two", "local", "host-two", "/work/other", "other", "offline", now, now)
+	require.NoError(t, err)
+
+	_, _, ok, err := store.ConversationRunnerAffinity(ctx, "missing")
+	require.NoError(t, err)
+	assert.False(t, ok)
+
+	source := conversations.NewConversationRecord("conversation-one")
+	source.Provider = "openai"
+	require.NoError(t, store.Save(ctx, source))
+	require.NoError(t, store.BindConversationRunnerAffinity(ctx, source.ID, "runner-one", "gpu"))
+	runnerID, environmentProfile, ok, err := store.ConversationRunnerAffinity(ctx, "conversation-one")
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, "runner-one", runnerID)
+	assert.Equal(t, "gpu", environmentProfile)
+
+	forked := conversations.ForkConversationRecord(source)
+	require.NoError(t, store.SaveConversationFork(ctx, source.ID, forked))
+	runnerID, environmentProfile, ok, err = store.ConversationRunnerAffinity(ctx, forked.ID)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, "runner-one", runnerID)
+	assert.Equal(t, "gpu", environmentProfile)
+
+	require.NoError(t, store.BindConversationRunnerAffinity(ctx, source.ID, "runner-one", "gpu"))
+	err = store.BindConversationRunnerAffinity(ctx, source.ID, "runner-one", "cpu")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "already bound")
+
+	conflictingFork := conversations.ForkConversationRecord(source)
+	require.NoError(t, store.BindConversationRunnerAffinity(ctx, conflictingFork.ID, "runner-two", ""))
+	err = store.SaveConversationFork(ctx, source.ID, conflictingFork)
+	require.Error(t, err)
+	_, err = store.Load(ctx, conflictingFork.ID)
+	assert.ErrorIs(t, err, conversations.ErrConversationNotFound)
+}
+
 func TestStore_Query(t *testing.T) {
 	ctx := context.Background()
 
@@ -184,7 +242,7 @@ func TestStore_Query(t *testing.T) {
 		{
 			ID:          "conv-1",
 			CWD:         "/workspace/alpha",
-			RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Hello world"}]}]`),
+			RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Review ~/other/project"}]}]`),
 			Provider:    "anthropic",
 			Usage:       llmtypes.Usage{InputTokens: 100, OutputTokens: 50},
 			Summary:     "First conversation",
@@ -211,7 +269,7 @@ func TestStore_Query(t *testing.T) {
 			RawMessages: json.RawMessage(`[{"role": "user", "content": [{"type": "text", "text": "Another message"}]}]`),
 			Provider:    "anthropic",
 			Usage:       llmtypes.Usage{InputTokens: 150, OutputTokens: 75},
-			Summary:     "Third conversation",
+			Summary:     "Third conversation is 100% ready",
 			CreatedAt:   now,
 			UpdatedAt:   now,
 			Metadata:    map[string]any{},
@@ -232,6 +290,7 @@ func TestStore_Query(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, result.ConversationSummaries, 1)
 	assert.Equal(t, "conv-2", result.ConversationSummaries[0].ID)
+	assert.Equal(t, []string{"/workspace/alpha", "/workspace/beta"}, result.CWDs)
 
 	// Test search by conversation ID and working directory
 	result, err = store.Query(ctx, conversations.QueryOptions{SearchTerm: "conv-3"})
@@ -243,6 +302,34 @@ func TestStore_Query(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, result.ConversationSummaries, 1)
 	assert.Equal(t, "conv-2", result.ConversationSummaries[0].ID)
+
+	// Search visible compact paths against normalized stored CWDs without rewriting
+	// the raw term used for IDs, first messages, and summaries.
+	result, err = store.Query(ctx, conversations.QueryOptions{
+		SearchTerm:    "~/workspace/beta",
+		SearchCWDTerm: "/workspace/beta",
+	})
+	require.NoError(t, err)
+	assert.Len(t, result.ConversationSummaries, 1)
+	assert.Equal(t, "conv-2", result.ConversationSummaries[0].ID)
+
+	result, err = store.Query(ctx, conversations.QueryOptions{
+		SearchTerm:    "~/other/project",
+		SearchCWDTerm: "/home/test/other/project",
+	})
+	require.NoError(t, err)
+	assert.Len(t, result.ConversationSummaries, 1)
+	assert.Equal(t, "conv-1", result.ConversationSummaries[0].ID)
+
+	// LIKE wildcard characters are treated as literal user input.
+	result, err = store.Query(ctx, conversations.QueryOptions{SearchTerm: "%"})
+	require.NoError(t, err)
+	assert.Len(t, result.ConversationSummaries, 1)
+	assert.Equal(t, "conv-3", result.ConversationSummaries[0].ID)
+
+	result, err = store.Query(ctx, conversations.QueryOptions{SearchTerm: "_"})
+	require.NoError(t, err)
+	assert.Empty(t, result.ConversationSummaries)
 
 	// Test exact working directory filter
 	result, err = store.Query(ctx, conversations.QueryOptions{CWD: "/workspace/alpha"})

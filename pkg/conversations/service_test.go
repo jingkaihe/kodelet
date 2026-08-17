@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/jingkaihe/kodelet/pkg/types/tools"
@@ -15,14 +16,16 @@ import (
 
 // mockConversationStore implements ConversationStore for testing
 type mockConversationStore struct {
-	conversations map[string]*conversations.ConversationRecord
-	summaries     []conversations.ConversationSummary
-	saveFunc      func(ctx context.Context, record conversations.ConversationRecord) error
-	queryFunc     func(ctx context.Context, options conversations.QueryOptions) (conversations.QueryResult, error)
-	loadFunc      func(ctx context.Context, id string) (*conversations.ConversationRecord, error)
-	deleteFunc    func(ctx context.Context, id string) error
-	listFunc      func(ctx context.Context) ([]conversations.ConversationSummary, error)
-	closeFunc     func() error
+	conversations    map[string]*conversations.ConversationRecord
+	summaries        []conversations.ConversationSummary
+	saveFunc         func(ctx context.Context, record conversations.ConversationRecord) error
+	queryFunc        func(ctx context.Context, options conversations.QueryOptions) (conversations.QueryResult, error)
+	loadFunc         func(ctx context.Context, id string) (*conversations.ConversationRecord, error)
+	deleteFunc       func(ctx context.Context, id string) error
+	listFunc         func(ctx context.Context) ([]conversations.ConversationSummary, error)
+	affinityFunc     func(ctx context.Context, id string) (string, string, bool, error)
+	bindAffinityFunc func(ctx context.Context, id, runnerID, environmentProfile string) error
+	closeFunc        func() error
 }
 
 func newMockConversationStore() *mockConversationStore {
@@ -81,6 +84,20 @@ func (m *mockConversationStore) Delete(ctx context.Context, id string) error {
 		return m.deleteFunc(ctx, id)
 	}
 	delete(m.conversations, id)
+	return nil
+}
+
+func (m *mockConversationStore) ConversationRunnerAffinity(ctx context.Context, id string) (string, string, bool, error) {
+	if m.affinityFunc != nil {
+		return m.affinityFunc(ctx, id)
+	}
+	return "", "", false, nil
+}
+
+func (m *mockConversationStore) BindConversationRunnerAffinity(ctx context.Context, id, runnerID, environmentProfile string) error {
+	if m.bindAffinityFunc != nil {
+		return m.bindAffinityFunc(ctx, id, runnerID, environmentProfile)
+	}
 	return nil
 }
 
@@ -167,21 +184,60 @@ func TestConversationService_ListConversationsPassesFilters(t *testing.T) {
 	var received conversations.QueryOptions
 	mockStore.queryFunc = func(_ context.Context, options conversations.QueryOptions) (conversations.QueryResult, error) {
 		received = options
-		return conversations.QueryResult{QueryOptions: options}, nil
+		return conversations.QueryResult{
+			CWDs:         []string{"/workspace/kodelet", "/workspace/other"},
+			QueryOptions: options,
+		}, nil
 	}
 	service := NewConversationService(mockStore)
 
-	_, err := service.ListConversations(t.Context(), &ListConversationsRequest{
-		SearchTerm: "needle",
-		CWD:        "/workspace/kodelet",
-		RunnerID:   "runner-1",
-		Limit:      1,
+	response, err := service.ListConversations(t.Context(), &ListConversationsRequest{
+		SearchTerm:    "needle",
+		SearchCWDTerm: "/home/test/workspace/kodelet",
+		CWD:           "/workspace/kodelet",
+		RunnerID:      "runner-1",
+		Limit:         1,
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "needle", received.SearchTerm)
+	assert.Equal(t, "/home/test/workspace/kodelet", received.SearchCWDTerm)
 	assert.Equal(t, "/workspace/kodelet", received.CWD)
 	assert.Equal(t, "runner-1", received.RunnerID)
 	assert.Equal(t, 1, received.Limit)
+	assert.Equal(t, []string{"/workspace/kodelet", "/workspace/other"}, response.CWDs)
+}
+
+func TestConversationService_ListConversationsHasMoreUsesTotal(t *testing.T) {
+	tests := []struct {
+		name     string
+		total    int
+		offset   int
+		expected bool
+	}{
+		{name: "another page remains", total: 3, expected: true},
+		{name: "full final page", total: 2, expected: false},
+		{name: "offset final page", total: 4, offset: 2, expected: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockStore := newMockConversationStore()
+			mockStore.queryFunc = func(_ context.Context, options conversations.QueryOptions) (conversations.QueryResult, error) {
+				return conversations.QueryResult{
+					ConversationSummaries: []conversations.ConversationSummary{{ID: "1"}, {ID: "2"}},
+					Total:                 tt.total,
+					QueryOptions:          options,
+				}, nil
+			}
+
+			response, err := NewConversationService(mockStore).ListConversations(t.Context(), &ListConversationsRequest{
+				Limit:  2,
+				Offset: tt.offset,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, response.HasMore)
+		})
+	}
 }
 
 func TestConversationService_GetConversation(t *testing.T) {
@@ -390,7 +446,10 @@ func TestConversationService_RenameConversationRejectsBlankName(t *testing.T) {
 func TestConversationService_ForkConversation(t *testing.T) {
 	now := time.Now().UTC()
 	metadata, err := AddConfigSnapshot(map[string]any{
-		"profile": "work",
+		"profile":                         "work",
+		goals.MetadataKey:                 goals.New("finish the parent task", now),
+		conversations.RunnerIDMetadataKey: "runner-1",
+		conversations.RunnerEnvironmentProfileMetadataKey:       "gpu",
 		conversations.CodexResponsesWindowGenerationMetadataKey: float64(3),
 	}, llm.Config{
 		Profile:         "work",
@@ -424,6 +483,17 @@ func TestConversationService_ForkConversation(t *testing.T) {
 	t.Run("successful fork", func(t *testing.T) {
 		mockStore := newMockConversationStore()
 		mockStore.conversations[sourceRecord.ID] = &sourceRecord
+		mockStore.affinityFunc = func(_ context.Context, id string) (string, string, bool, error) {
+			assert.Equal(t, sourceRecord.ID, id)
+			return "runner-1", "gpu", true, nil
+		}
+		var boundConversationID string
+		mockStore.bindAffinityFunc = func(_ context.Context, id, runnerID, environmentProfile string) error {
+			boundConversationID = id
+			assert.Equal(t, "runner-1", runnerID)
+			assert.Equal(t, "gpu", environmentProfile)
+			return nil
+		}
 
 		service := NewConversationService(mockStore)
 		response, err := service.ForkConversation(context.Background(), sourceRecord.ID)
@@ -449,6 +519,9 @@ func TestConversationService_ForkConversation(t *testing.T) {
 		assert.Equal(t, sourceRecord.Usage.CurrentContextWindow, forkedRecord.Usage.CurrentContextWindow)
 		assert.Equal(t, sourceRecord.Usage.MaxContextWindow, forkedRecord.Usage.MaxContextWindow)
 		assert.NotContains(t, forkedRecord.Metadata, conversations.CodexResponsesWindowGenerationMetadataKey)
+		assert.NotContains(t, forkedRecord.Metadata, goals.MetadataKey)
+		assert.NotContains(t, forkedRecord.Metadata, conversations.RunnerIDMetadataKey)
+		assert.NotContains(t, forkedRecord.Metadata, conversations.RunnerEnvironmentProfileMetadataKey)
 		assert.Equal(t, sourceRecord.Metadata["profile"], forkedRecord.Metadata["profile"])
 		forkMetadata, ok := forkedRecord.Metadata[conversations.ConversationForkMetadataKey].(map[string]any)
 		require.True(t, ok)
@@ -462,6 +535,7 @@ func TestConversationService_ForkConversation(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, "max", snapshot.ReasoningEffort)
 		assert.Equal(t, sourceRecord.ToolResults, forkedRecord.ToolResults)
+		assert.Equal(t, response.ID, boundConversationID)
 	})
 
 	t.Run("load error", func(t *testing.T) {
@@ -490,6 +564,26 @@ func TestConversationService_ForkConversation(t *testing.T) {
 		assert.Nil(t, response)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to save forked conversation")
+	})
+
+	t.Run("runner affinity bind error cleans up the fork", func(t *testing.T) {
+		mockStore := newMockConversationStore()
+		mockStore.conversations[sourceRecord.ID] = &sourceRecord
+		mockStore.affinityFunc = func(_ context.Context, _ string) (string, string, bool, error) {
+			return "runner-1", "gpu", true, nil
+		}
+		mockStore.bindAffinityFunc = func(_ context.Context, _, _, _ string) error {
+			return assert.AnError
+		}
+
+		service := NewConversationService(mockStore)
+		response, err := service.ForkConversation(context.Background(), sourceRecord.ID)
+
+		assert.Nil(t, response)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to preserve forked conversation runner affinity")
+		assert.Len(t, mockStore.conversations, 1)
+		assert.Contains(t, mockStore.conversations, sourceRecord.ID)
 	})
 }
 

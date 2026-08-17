@@ -134,49 +134,149 @@ describe("ConversationSearchDialog", () => {
 	it("focuses search and exposes search, workspace, and result actions", async () => {
 		const onClose = vi.fn();
 		const onCwdFilterChange = vi.fn();
+		const onLoadMore = vi.fn();
 		const onSearchTermChange = vi.fn();
 		const onSelectConversation = vi.fn();
 
 		render(
-			<ConversationSearchDialog
-				conversations={[
-					{
-						id: "conv-a",
-						createdAt: "2024-01-01T00:00:00Z",
-						updatedAt: "2024-01-01T00:00:00Z",
-						messageCount: 1,
-						summary: "Alpha conversation",
-						cwd: "/workspace/a",
-					},
-				]}
-				cwdFilter=""
-				cwdOptions={["/workspace/a", "/workspace/b"]}
-				loading={false}
-				onClose={onClose}
-				onCwdFilterChange={onCwdFilterChange}
-				onSearchTermChange={onSearchTermChange}
-				onSelectConversation={onSelectConversation}
-				searchTerm="needle"
-			/>,
+			<>
+				<button data-testid="outside-dialog" type="button">
+					Outside dialog
+				</button>
+				<ConversationSearchDialog
+					conversations={[
+						{
+							id: "conv-a",
+							createdAt: "2024-01-01T00:00:00Z",
+							updatedAt: "2024-01-01T00:00:00Z",
+							messageCount: 1,
+							summary: "Alpha conversation",
+							cwd: "/workspace/a",
+						},
+					]}
+					cwdFilter=""
+					cwdOptions={["/workspace/a", "/workspace/b"]}
+					hasMore
+					loading={false}
+					onClose={onClose}
+					onCwdFilterChange={onCwdFilterChange}
+					onLoadMore={onLoadMore}
+					onSearchTermChange={onSearchTermChange}
+					onSelectConversation={onSelectConversation}
+					searchTerm="needle"
+					total={3}
+				/>
+			</>,
 		);
 
 		const searchInput = screen.getByRole("searchbox", { name: "Search conversations" });
 		await waitFor(() => expect(searchInput).toHaveFocus());
+		screen.getByTestId("outside-dialog").focus();
+		fireEvent.keyDown(window, { key: "Tab" });
+		expect(screen.getByRole("button", { name: "Close conversation search" })).toHaveFocus();
+		searchInput.focus();
 		fireEvent.change(searchInput, {
 			target: { value: "updated search" },
 		});
 		fireEvent.click(screen.getByRole("button", { name: "Clear conversation search" }));
+		expect(searchInput).toHaveFocus();
 		fireEvent.change(screen.getByLabelText("Search workspace"), {
 			target: { value: "/workspace/b" },
 		});
 		fireEvent.click(screen.getByRole("button", { name: /Alpha conversation/i }));
+		fireEvent.click(screen.getByRole("button", { name: "Load more" }));
 
 		expect(onSearchTermChange).toHaveBeenNthCalledWith(1, "updated search");
 		expect(onSearchTermChange).toHaveBeenNthCalledWith(2, "");
 		expect(onCwdFilterChange).toHaveBeenCalledWith("/workspace/b");
 		expect(onSelectConversation).toHaveBeenCalledWith("conv-a");
+		expect(onLoadMore).toHaveBeenCalledOnce();
+		expect(screen.getByRole("button", { name: /Alpha conversation/i })).toHaveTextContent(
+			"conv-a",
+		);
+		expect(screen.getByText("1 of 3")).toBeInTheDocument();
 
 		fireEvent.keyDown(window, { key: "Escape" });
 		expect(onClose).toHaveBeenCalledOnce();
+	});
+
+	it("expands the group containing a newly active conversation", async () => {
+		const conversations = [
+			{
+				id: "conv-a",
+				createdAt: "2024-01-01T00:00:00Z",
+				updatedAt: "2024-01-03T00:00:00Z",
+				messageCount: 1,
+				summary: "Alpha conversation",
+				cwd: "/workspace/a",
+			},
+			{
+				id: "conv-b",
+				createdAt: "2024-01-01T00:00:00Z",
+				updatedAt: "2024-01-02T00:00:00Z",
+				messageCount: 1,
+				summary: "Beta conversation",
+				cwd: "/workspace/b",
+			},
+		];
+		const props = {
+			conversations,
+			loading: false,
+			onDeleteConversation: vi.fn(),
+			onForkConversation: vi.fn(),
+			onNewChat: vi.fn(),
+			onSearch: vi.fn(),
+			onSelectConversation: vi.fn(),
+		};
+		const { rerender } = render(
+			<ChatSidebar activeConversationId={null} {...props} />,
+		);
+
+		expect(screen.queryByText("Beta conversation")).not.toBeInTheDocument();
+
+		rerender(<ChatSidebar activeConversationId="conv-b" {...props} />);
+
+		await waitFor(() => expect(screen.getByText("Beta conversation")).toBeInTheDocument());
+	});
+
+	it("reports an empty workspace filter without claiming there are no conversations", () => {
+		render(
+			<ConversationSearchDialog
+				conversations={[]}
+				cwdFilter="/workspace/missing"
+				cwdOptions={["/workspace/missing"]}
+				loading={false}
+				onClose={vi.fn()}
+				onCwdFilterChange={vi.fn()}
+				onSearchTermChange={vi.fn()}
+				onSelectConversation={vi.fn()}
+				searchTerm=""
+			/>,
+		);
+
+		expect(screen.getByText("No conversations in this workspace.")).toBeInTheDocument();
+		expect(screen.queryByText("No saved conversations yet.")).not.toBeInTheDocument();
+	});
+
+	it("reports search failures instead of leaving stale results visible", () => {
+		render(
+			<ConversationSearchDialog
+				conversations={[]}
+				cwdFilter=""
+				cwdOptions={[]}
+				error="Search is temporarily unavailable"
+				loading={false}
+				onClose={vi.fn()}
+				onCwdFilterChange={vi.fn()}
+				onSearchTermChange={vi.fn()}
+				onSelectConversation={vi.fn()}
+				searchTerm="needle"
+			/>,
+		);
+
+		expect(screen.getByRole("alert")).toHaveTextContent(
+			"Search is temporarily unavailable",
+		);
+		expect(screen.queryByText("No conversations match your search.")).not.toBeInTheDocument();
 	});
 });

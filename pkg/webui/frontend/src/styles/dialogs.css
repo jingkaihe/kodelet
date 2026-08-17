@@ -835,6 +835,40 @@
   color: rgba(20, 20, 19, 0.5);
 }
 
+.conversation-search-load-more {
+  align-self: center;
+  margin-top: 0.45rem;
+  border: 1px solid rgba(20, 20, 19, 0.08);
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.46);
+  padding: 0.5rem 0.9rem;
+  color: rgba(20, 20, 19, 0.72);
+  font-family: var(--font-heading);
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
+}
+
+.conversation-search-load-more:hover:not(:disabled) {
+  border-color: rgba(20, 20, 19, 0.14);
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--kodelet-dark);
+}
+
+.conversation-search-load-more:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(217, 119, 87, 0.08);
+}
+
+.conversation-search-load-more:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
 .conversation-search-empty {
   display: flex;
   min-height: 7rem;

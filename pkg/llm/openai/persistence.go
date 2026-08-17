@@ -162,9 +162,9 @@ func (t *Thread) ForkConversation(ctx context.Context) (string, error) {
 	if initiator, ok := convtypes.ConversationForkInitiatorFromContext(ctx); ok {
 		forkOptions.Initiator = &initiator
 	}
-	forked := convtypes.ForkConversationRecordWithOptions(record, forkOptions)
-	if err := t.Store.Save(ctx, forked); err != nil {
-		return "", errors.Wrap(err, "failed to save forked conversation")
+	forked, err := conversations.PersistConversationFork(ctx, t.Store, record, forkOptions)
+	if err != nil {
+		return "", err
 	}
 	return forked.ID, nil
 }

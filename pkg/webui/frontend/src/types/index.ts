@@ -101,6 +101,7 @@ export interface ConversationListResponse {
   conversations: Conversation[];
   hasMore: boolean;
   total: number;
+  cwds?: string[];
   limit: number;
   offset: number;
   stats?: ConversationStats;
@@ -123,7 +124,7 @@ export interface ConversationStats {
 
 export interface SearchFilters {
   searchTerm: string;
-  cwd: string;
+  cwd?: string;
   sortBy: 'updated' | 'created' | 'messages';
   sortOrder: 'asc' | 'desc';
   limit: number;

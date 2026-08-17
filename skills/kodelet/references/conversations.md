@@ -17,16 +17,18 @@ kodelet conversation show <id> --no-header
 
 # Delete or fork
 kodelet conversation delete <id>
-kodelet conversation fork <id>
+kodelet conversation fork [id]
 
 # Rename without invoking the model
 kodelet run --resume <id> "/rename New conversation name"
 kodelet run --follow "/rename New name for the latest conversation"
 ```
 
+`conversation list --search` matches conversation IDs, working directories, first messages, and summaries.
+
 Persisted conversations are named deterministically from the first user message, with whitespace folded and generated names limited to 100 characters. The generated name remains stable across later saves and context compaction. Use `/rename <name>` in terminal chat, ACP, or the Web UI, or use the `kodelet run --resume/--follow` forms above; an explicit rename takes precedence and does not invoke an LLM.
 
-`conversation fork` is an experimental branching workflow. Typical use:
+`conversation fork` is an experimental branching workflow. It copies the specified conversation, or the most recent conversation when no ID is provided, with its transcript and execution context; it resets cumulative usage and does not inherit the source conversation's active thread goal. Typical use:
 
 1. Ensure clean git status.
 2. Fork the conversation to try a different approach.
