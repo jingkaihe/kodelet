@@ -479,6 +479,31 @@ func TestRuntimeOwnsProcessContextLifetime(t *testing.T) {
 	assert.ErrorIs(t, runtimeCtx.Err(), context.Canceled)
 }
 
+func TestRuntimeCloseClosesProcessesBeforeCancelingContext(t *testing.T) {
+	runtimeCtx, cancelRuntime := context.WithCancel(context.Background())
+	processes := []*Process{
+		{client: &rpcClient{}},
+		{client: &rpcClient{}},
+	}
+	contextCanceledAfterProcessClose := true
+	runtime := &Runtime{
+		runtimeCtx: runtimeCtx,
+		cancelRuntime: func() {
+			for _, process := range processes {
+				process.mu.Lock()
+				contextCanceledAfterProcessClose = contextCanceledAfterProcessClose && process.closed
+				process.mu.Unlock()
+			}
+			cancelRuntime()
+		},
+		processes: processes,
+	}
+
+	require.NoError(t, runtime.Close())
+	assert.True(t, contextCanceledAfterProcessClose)
+	assert.ErrorIs(t, runtimeCtx.Err(), context.Canceled)
+}
+
 func TestSafeDataDirNamePreservesPluginIdentity(t *testing.T) {
 	assert.Equal(t, "org@repo_weather", safeDataDirName("org@repo/weather"))
 	assert.Equal(t, "extension", safeDataDirName("///"))

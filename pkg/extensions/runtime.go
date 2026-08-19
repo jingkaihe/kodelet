@@ -326,11 +326,7 @@ func (r *Runtime) Close() error {
 		}
 		r.DispatchSessionEnd(lifecycleCtx, lifecycleCallCtx)
 	}
-	if r.cancelRuntime != nil {
-		r.cancelRuntime()
-	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	var firstErr error
 	for _, proc := range r.processes {
 		if err := proc.Close(); err != nil && firstErr == nil {
@@ -338,5 +334,11 @@ func (r *Runtime) Close() error {
 		}
 	}
 	r.processes = nil
+	r.mu.Unlock()
+	// Process.Close owns process-group teardown. Cancel only after every process
+	// has been reaped so exec.CommandContext cannot kill the group leader first.
+	if r.cancelRuntime != nil {
+		r.cancelRuntime()
+	}
 	return firstErr
 }
