@@ -34,12 +34,18 @@ func TestDecodeMessageValidatesEnvelope(t *testing.T) {
 func TestRegisterParamsValidate(t *testing.T) {
 	valid := RegisterParams{
 		ProtocolVersions: []int{Version},
-		Capabilities:     RunnerCapabilities{ConcurrentRuns: true},
-		Host:             Host{InstanceID: "host-one"},
-		Workspace:        Workspace{Path: "/workspace", Name: "workspace"},
+		Capabilities: RunnerCapabilities{
+			ConcurrentRuns:    true,
+			WorkspaceGitDiff:  true,
+			WorkspaceTerminal: true,
+		},
+		Host:      Host{InstanceID: "host-one"},
+		Workspace: Workspace{Path: "/workspace", Name: "workspace"},
 	}
 	require.NoError(t, valid.Validate())
 	assert.True(t, valid.Capabilities.ConcurrentRuns)
+	assert.True(t, valid.Capabilities.WorkspaceGitDiff)
+	assert.True(t, valid.Capabilities.WorkspaceTerminal)
 
 	unsupported := valid
 	unsupported.ProtocolVersions = []int{Version + 1}

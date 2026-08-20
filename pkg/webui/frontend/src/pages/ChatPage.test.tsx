@@ -4,9 +4,24 @@ import ChatPage from './ChatPage';
 import type { ChatStreamEvent, ConversationListResponse } from '../types';
 
 vi.mock('../components/workspace/TerminalModal', () => ({
-  default: ({ open }: { open: boolean }) =>
+  default: ({
+    open,
+    conversationId,
+    runnerId,
+    showPopOut,
+  }: {
+    open: boolean;
+    conversationId?: string;
+    runnerId?: string;
+    showPopOut?: boolean;
+  }) =>
     open ? (
-      <div data-testid="terminal-panel">
+      <div
+        data-conversation-id={conversationId}
+        data-runner-id={runnerId}
+        data-show-pop-out={String(showPopOut)}
+        data-testid="terminal-panel"
+      >
         <div className="workspace-terminal-host" data-testid="terminal-host" tabIndex={0}>
           Terminal
         </div>
@@ -85,6 +100,13 @@ vi.mock('../services/api', () => ({
 }));
 
 describe('ChatPage', () => {
+  const waitForTerminalAccess = async () => {
+    await waitFor(() => expect(mockGetAuthPrincipal).toHaveBeenCalled());
+    await act(async () => {
+      await Promise.resolve();
+    });
+  };
+
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -367,6 +389,7 @@ describe('ChatPage', () => {
 
     render(<ChatPage />);
     await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
+    await waitForTerminalAccess();
 
     fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
     await screen.findByTestId('terminal-panel');
@@ -423,6 +446,7 @@ describe('ChatPage', () => {
 
     render(<ChatPage />);
     await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
+    await waitForTerminalAccess();
     fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
     await screen.findByTestId('terminal-panel');
 
@@ -493,6 +517,7 @@ describe('ChatPage', () => {
 
     render(<ChatPage />);
     await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
+    await waitForTerminalAccess();
     expect(screen.getByTestId('chat-sidebar-shell')).not.toHaveAttribute('inert');
 
     fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
@@ -742,6 +767,7 @@ describe('ChatPage', () => {
     render(<ChatPage />);
 
     await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
+    await waitForTerminalAccess();
 
     expect(screen.getByTestId('workspace-tools-shell')).toBeInTheDocument();
     expect(screen.queryByTestId('workspace-tools-dock')).not.toBeInTheDocument();
@@ -759,12 +785,15 @@ describe('ChatPage', () => {
 
     await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
     await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
+    await waitForTerminalAccess();
 
     fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
     await waitFor(() => expect(screen.getByTestId('terminal-panel')).toBeInTheDocument());
     fireEvent.click(screen.getByTestId('workspace-tools-diff-tab'));
 
-    await waitFor(() => expect(mockGetGitDiff).toHaveBeenCalledWith('/workspace/default'));
+    await waitFor(() =>
+      expect(mockGetGitDiff).toHaveBeenCalledWith({ cwd: '/workspace/default' })
+    );
     expect(screen.getByTestId('workspace-tools-dock')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId('git-diff-panel')).toBeInTheDocument());
     expect(screen.queryByRole('heading', { name: 'Changes' })).not.toBeInTheDocument();
@@ -777,6 +806,7 @@ describe('ChatPage', () => {
 
     await waitFor(() => expect(mockGetConversations).toHaveBeenCalled());
     await waitFor(() => expect(mockGetChatSettings).toHaveBeenCalled());
+    await waitForTerminalAccess();
 
     fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
     await waitFor(() => expect(screen.getByTestId('terminal-panel')).toBeInTheDocument());
@@ -1199,6 +1229,7 @@ describe('ChatPage', () => {
 
     render(<ChatPage />);
     await waitFor(() => expect(mockGetRunners).toHaveBeenCalled());
+    await waitForTerminalAccess();
     fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
     fireEvent.change(screen.getByLabelText('Environment'), {
       target: { value: 'runner-1' },
@@ -1232,6 +1263,282 @@ describe('ChatPage', () => {
       expect.not.objectContaining({ cwd: expect.anything() }),
       expect.any(Object)
     );
+  });
+
+  it('shows remote terminal and changes when the runner advertises workspace tools', async () => {
+    mockGetRunners.mockResolvedValue({
+      runners: [
+        {
+          id: 'runner-1',
+          displayName: 'kodelet-gpu',
+          host: {
+            instanceId: 'host-1',
+            hostname: 'worker',
+            os: 'linux',
+            arch: 'amd64',
+          },
+          workspace: { path: '/runner/kodelet', name: 'kodelet' },
+          manifestChanged: false,
+          status: 'idle',
+          connected: true,
+          workspaceGitDiff: true,
+          workspaceTerminal: true,
+          generation: 1,
+        },
+      ],
+    });
+
+    render(<ChatPage />);
+    await waitFor(() => expect(mockGetRunners).toHaveBeenCalled());
+    await waitForTerminalAccess();
+    fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
+    fireEvent.change(screen.getByLabelText('Environment'), {
+      target: { value: 'runner-1' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+
+    expect(screen.getByTestId('workspace-tools-shell')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
+
+    const terminal = await screen.findByTestId('terminal-panel');
+    expect(terminal).toHaveAttribute('data-runner-id', 'runner-1');
+    expect(terminal).toHaveAttribute('data-show-pop-out', 'false');
+
+    fireEvent.click(screen.getByTestId('workspace-tools-diff-tab'));
+    await waitFor(() =>
+      expect(mockGetGitDiff).toHaveBeenCalledWith({
+        conversationId: undefined,
+        runnerId: 'runner-1',
+      })
+    );
+  });
+
+  it('uses the runner-only workspace target while a new remote conversation is pending', async () => {
+    mockGetRunners.mockResolvedValue({
+      runners: [
+        {
+          id: 'runner-1',
+          displayName: 'kodelet-gpu',
+          host: {
+            instanceId: 'host-1',
+            hostname: 'worker',
+            os: 'linux',
+            arch: 'amd64',
+          },
+          workspace: { path: '/runner/kodelet', name: 'kodelet' },
+          manifestChanged: false,
+          status: 'idle',
+          connected: true,
+          workspaceGitDiff: true,
+          workspaceTerminal: true,
+          generation: 1,
+        },
+      ],
+    });
+    mockStreamChat.mockImplementation(async () => new Promise(() => undefined));
+
+    const { rerender } = render(<ChatPage />);
+    await waitFor(() => expect(mockGetRunners).toHaveBeenCalled());
+    await waitForTerminalAccess();
+    fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
+    fireEvent.change(screen.getByLabelText('Environment'), {
+      target: { value: 'runner-1' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+      target: { value: 'hello remotely' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
+    const preallocatedId = mockStreamChat.mock.calls[0]?.[0]?.conversationId;
+    expect(preallocatedId).toBeTruthy();
+    routeParams = { id: preallocatedId };
+    rerender(<ChatPage />);
+
+    fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
+    const terminal = await screen.findByTestId('terminal-panel');
+    expect(terminal).not.toHaveAttribute('data-conversation-id');
+    expect(terminal).toHaveAttribute('data-runner-id', 'runner-1');
+    fireEvent.click(screen.getByTestId('workspace-tools-diff-tab'));
+    await waitFor(() =>
+      expect(mockGetGitDiff).toHaveBeenCalledWith({
+        conversationId: undefined,
+        runnerId: 'runner-1',
+      })
+    );
+    expect(mockGetConversation).not.toHaveBeenCalledWith(preallocatedId);
+  });
+
+  it('retains the remote runner binding when retrying a failed optimistic conversation', async () => {
+    mockGetRunners.mockResolvedValue({
+      runners: [
+        {
+          id: 'runner-1',
+          displayName: 'kodelet-gpu',
+          host: {
+            instanceId: 'host-1',
+            hostname: 'worker',
+            os: 'linux',
+            arch: 'amd64',
+          },
+          workspace: { path: '/runner/kodelet', name: 'kodelet' },
+          manifestChanged: false,
+          status: 'idle',
+          connected: true,
+          workspaceGitDiff: true,
+          workspaceTerminal: true,
+          generation: 1,
+        },
+      ],
+    });
+    mockStreamChat
+      .mockRejectedValueOnce(new Error('runner unavailable'))
+      .mockImplementationOnce(async () => new Promise(() => undefined));
+
+    const { rerender } = render(<ChatPage />);
+    await waitFor(() => expect(mockGetRunners).toHaveBeenCalled());
+    fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
+    fireEvent.change(screen.getByLabelText('Environment'), {
+      target: { value: 'runner-1' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+      target: { value: 'first attempt' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(mockStreamChat).toHaveBeenCalledTimes(1));
+    const preallocatedId = mockStreamChat.mock.calls[0]?.[0]?.conversationId;
+    expect(preallocatedId).toBeTruthy();
+    routeParams = { id: preallocatedId };
+    rerender(<ChatPage />);
+    await waitFor(() => expect(screen.getAllByText('runner unavailable').length).toBeGreaterThan(0));
+    expect(mockGetConversation).not.toHaveBeenCalledWith(preallocatedId);
+
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+      target: { value: 'retry' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(mockStreamChat).toHaveBeenCalledTimes(2));
+    expect(mockStreamChat.mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({
+        conversationId: preallocatedId,
+        runnerId: 'runner-1',
+      })
+    );
+  });
+
+  it('hides terminal access from principals without the terminal role', async () => {
+    mockGetAuthPrincipal.mockResolvedValue({
+      id: 'https://issuer.example.com|user-only',
+      issuer: 'https://issuer.example.com',
+      subject: 'user-only',
+      name: 'User Only',
+      email: 'user@example.com',
+      roles: ['user'],
+    });
+    mockGetRunners.mockResolvedValue({
+      runners: [
+        {
+          id: 'runner-1',
+          displayName: 'kodelet-gpu',
+          host: {
+            instanceId: 'host-1',
+            hostname: 'worker',
+            os: 'linux',
+            arch: 'amd64',
+          },
+          workspace: { path: '/runner/kodelet', name: 'kodelet' },
+          manifestChanged: false,
+          status: 'idle',
+          connected: true,
+          workspaceGitDiff: true,
+          workspaceTerminal: true,
+          generation: 1,
+        },
+      ],
+    });
+
+    render(<ChatPage />);
+    await screen.findByRole('button', { name: 'User Only account menu' });
+    await screen.findByText('No saved conversations yet.');
+    await waitFor(() => expect(screen.getByTestId('sidebar-new-chat-button')).toBeEnabled());
+    fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
+    fireEvent.change(screen.getByLabelText('Environment'), {
+      target: { value: 'runner-1' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
+
+    expect(screen.queryByTestId('workspace-tools-terminal-tab')).not.toBeInTheDocument();
+    expect(screen.getByTestId('workspace-tools-diff-tab')).toBeInTheDocument();
+    await screen.findByTestId('git-diff-panel');
+    await waitFor(() => expect(mockGetGitDiff).toHaveBeenCalled());
+  });
+
+  it('hides stale remote workspace tools while a different conversation is loading', async () => {
+    routeParams = { id: 'conv-remote' };
+    const runner = {
+      id: 'runner-1',
+      displayName: 'kodelet-gpu',
+      host: {
+        instanceId: 'host-1',
+        hostname: 'worker',
+        os: 'linux',
+        arch: 'amd64',
+      },
+      workspace: { path: '/runner/kodelet', name: 'kodelet' },
+      manifestChanged: false,
+      status: 'idle' as const,
+      connected: true,
+      workspaceGitDiff: true,
+      workspaceTerminal: true,
+      generation: 1,
+    };
+    mockGetRunners.mockResolvedValue({ runners: [runner] });
+    let resolveLocalConversation: ((value: unknown) => void) | undefined;
+    mockGetConversation.mockImplementation((id: string) => {
+      if (id === 'conv-remote') {
+        return Promise.resolve({
+          id,
+          createdAt: '2026-08-19T00:00:00Z',
+          updatedAt: '2026-08-19T00:00:00Z',
+          messageCount: 1,
+          cwd: '/runner/kodelet',
+          runnerId: runner.id,
+          runner,
+          messages: [{ role: 'user', content: 'remote' }],
+          toolResults: {},
+        });
+      }
+      return new Promise((resolve) => {
+        resolveLocalConversation = resolve;
+      });
+    });
+
+    const { rerender } = render(<ChatPage />);
+    await waitFor(() => expect(screen.getByTestId('workspace-tools-shell')).toBeInTheDocument());
+
+    routeParams = { id: 'conv-local' };
+    rerender(<ChatPage />);
+
+    await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-local'));
+    expect(screen.queryByTestId('workspace-tools-shell')).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolveLocalConversation?.({
+        id: 'conv-local',
+        createdAt: '2026-08-19T00:00:00Z',
+        updatedAt: '2026-08-19T00:00:00Z',
+        messageCount: 1,
+        cwd: '/workspace/local',
+        messages: [{ role: 'user', content: 'local' }],
+        toolResults: {},
+      });
+      await Promise.resolve();
+    });
   });
 
   it('requires a workspace runner when the control-plane workspace is disabled', async () => {
@@ -2254,6 +2561,7 @@ describe('ChatPage', () => {
     await waitFor(() =>
       expect(mockStreamConversation).toHaveBeenCalledWith('conv-123', expect.any(Object))
     );
+    await waitForTerminalAccess();
     fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
     await screen.findByTestId('terminal-panel');
 
@@ -2915,7 +3223,7 @@ describe('ChatPage', () => {
     fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
     fireEvent.click(screen.getByTestId('workspace-tools-diff-tab'));
 
-    await waitFor(() => expect(mockGetGitDiff).toHaveBeenCalledWith('/workspace/alt'));
+    await waitFor(() => expect(mockGetGitDiff).toHaveBeenCalledWith({ cwd: '/workspace/alt' }));
   });
 
   it('groups recent chats by cwd and lets directories collapse independently', async () => {

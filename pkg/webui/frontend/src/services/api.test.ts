@@ -682,13 +682,27 @@ describe("ApiService", () => {
 				json: async () => mockGitDiff,
 			});
 
-			const result = await apiService.getGitDiff("/workspace/project");
+			const result = await apiService.getGitDiff({ cwd: "/workspace/project" });
 
 			expect(mockFetch).toHaveBeenCalledWith(
 				"/api/git/diff?cwd=%2Fworkspace%2Fproject",
 				expect.any(Object),
 			);
 			expect(result).toEqual(mockGitDiff);
+		});
+
+		it("fetches git diff for a remote runner conversation", async () => {
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({ cwd: "/runner/project", diff: "", has_diff: false, exit_code: 0 }),
+			});
+
+			await apiService.getGitDiff({ conversationId: "conv-123", runnerId: "runner-1" });
+
+			expect(mockFetch).toHaveBeenCalledWith(
+				"/api/git/diff?conversationId=conv-123&runnerId=runner-1",
+				expect.any(Object),
+			);
 		});
 	});
 
@@ -715,6 +729,37 @@ describe("ApiService", () => {
 
 			expect(websocketSpy).toHaveBeenCalledWith(
 				"ws://localhost:3000/api/terminal/ws?cwd=%2Fworkspace%2Fproject&rows=24&cols=80",
+			);
+
+			Object.defineProperty(window, "location", {
+				configurable: true,
+				value: originalLocation,
+			});
+		});
+
+		it("creates a websocket for a remote runner conversation", () => {
+			const originalLocation = window.location;
+			const websocketSpy = vi.fn();
+
+			// @ts-expect-error test shim
+			global.WebSocket = websocketSpy;
+			Object.defineProperty(window, "location", {
+				configurable: true,
+				value: {
+					protocol: "https:",
+					host: "kodelet.example",
+				},
+			});
+
+			apiService.createTerminalWebSocket({
+				conversationId: "conv-123",
+				runnerId: "runner-1",
+				rows: 30,
+				cols: 120,
+			});
+
+			expect(websocketSpy).toHaveBeenCalledWith(
+				"wss://kodelet.example/api/terminal/ws?conversationId=conv-123&runnerId=runner-1&rows=30&cols=120",
 			);
 
 			Object.defineProperty(window, "location", {

@@ -424,6 +424,29 @@ describe('GitDiffModal', () => {
     expect(onRefresh).toHaveBeenCalledTimes(1);
   });
 
+  it('warns when a remote diff is truncated', () => {
+    render(
+      <GitDiffModal
+        error={null}
+        gitDiff={{
+          cwd: '/runner/project',
+          diff: 'diff --git a/file.txt b/file.txt\n',
+          exit_code: 0,
+          git_root: '/runner/project',
+          has_diff: true,
+          truncated: true,
+        }}
+        loading={false}
+        onRefresh={vi.fn()}
+        open
+      />
+    );
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Showing a partial diff because the runner output exceeded the display limit.'
+    );
+  });
+
   it('keeps refresh available when there is no diff', () => {
     const onRefresh = vi.fn();
 

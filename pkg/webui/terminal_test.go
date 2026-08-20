@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -51,6 +52,12 @@ func TestWebsocketWriterRejectsNilConnection(t *testing.T) {
 
 	writer = &websocketWriter{}
 	require.ErrorContains(t, writer.Write(websocket.TextMessage, nil), "websocket writer is not initialized")
+}
+
+func TestTerminalExitMessageIncludesZeroCode(t *testing.T) {
+	payload, err := json.Marshal(terminalMessage{Type: "exit", Code: terminalExitCode(0)})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"type":"exit","code":0}`, string(payload))
 }
 
 func TestTerminalAttachmentErrorClosesIgnoresSlowClients(t *testing.T) {
@@ -162,6 +169,48 @@ func TestParseTerminalSignalVariants(t *testing.T) {
 			assert.Equal(t, tt.want, signal)
 		})
 	}
+}
+
+func TestValidateRemoteTerminalRead(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		cursor  uint64
+		result  protocol.WorkspaceTerminalReadResult
+		wantErr string
+	}{
+		{name: "contiguous output", cursor: 5, result: protocol.WorkspaceTerminalReadResult{Data: []byte("next"), NextCursor: 9}},
+		{name: "empty poll", cursor: 5, result: protocol.WorkspaceTerminalReadResult{NextCursor: 5}},
+		{name: "truncated output advances start", cursor: 5, result: protocol.WorkspaceTerminalReadResult{Data: []byte("tail"), NextCursor: 14, Truncated: true}},
+		{name: "cursor moves backwards", cursor: 5, result: protocol.WorkspaceTerminalReadResult{NextCursor: 4}, wantErr: "moved backwards"},
+		{name: "data exceeds cursor", cursor: 0, result: protocol.WorkspaceTerminalReadResult{Data: []byte("bad"), NextCursor: 2}, wantErr: "invalid output cursor"},
+		{name: "chunk exceeds requested size", cursor: 0, result: protocol.WorkspaceTerminalReadResult{Data: make([]byte, remoteTerminalReadBytes+1), NextCursor: remoteTerminalReadBytes + 1}, wantErr: "exceeds the requested chunk size"},
+		{name: "non-contiguous output", cursor: 5, result: protocol.WorkspaceTerminalReadResult{Data: []byte("tail"), NextCursor: 14}, wantErr: "not contiguous"},
+		{name: "invalid truncated output", cursor: 5, result: protocol.WorkspaceTerminalReadResult{Data: []byte("tail"), NextCursor: 8, Truncated: true}, wantErr: "before the requested cursor"},
+		{name: "truncation must advance", cursor: 5, result: protocol.WorkspaceTerminalReadResult{NextCursor: 5, Truncated: true}, wantErr: "without advancing"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateRemoteTerminalRead(test.cursor, test.result)
+			if test.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, test.wantErr)
+		})
+	}
+}
+
+func TestRemoteTerminalAttachmentLimit(t *testing.T) {
+	server := &Server{}
+	for i := 0; i < maxRemoteTerminalAttachments; i++ {
+		assert.True(t, server.acquireRemoteTerminalAttachment("runner-1"))
+	}
+	assert.False(t, server.acquireRemoteTerminalAttachment("runner-1"))
+	assert.True(t, server.acquireRemoteTerminalAttachment("runner-2"))
+
+	server.releaseRemoteTerminalAttachment("runner-1")
+	assert.True(t, server.acquireRemoteTerminalAttachment("runner-1"))
+	server.releaseRemoteTerminalAttachment("runner-2")
+	assert.NotContains(t, server.remoteTerminals, "runner-2")
 }
 
 func TestTerminalOriginAllowedBranches(t *testing.T) {

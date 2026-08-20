@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -182,6 +183,251 @@ func TestRunnerRESTEndpointsExposeRegisteredStatus(t *testing.T) {
 	missingRequest := mux.SetURLVars(httptest.NewRequest(http.MethodGet, "/api/runners/missing", nil), map[string]string{"id": "missing"})
 	server.handleGetRunner(missingRecorder, missingRequest)
 	assert.Equal(t, http.StatusNotFound, missingRecorder.Code)
+}
+
+func TestRemoteWorkspaceGitDiffUsesConversationRunner(t *testing.T) {
+	server := newRunnerTestServer(t, "")
+	link := newRunnerAPITestLink()
+	link.call = func(_ context.Context, method string, params any, result any) error {
+		assert.Equal(t, protocol.MethodWorkspaceGitDiff, method)
+		assert.IsType(t, protocol.WorkspaceGitDiffParams{}, params)
+		output := result.(*protocol.WorkspaceGitDiffResult)
+		*output = protocol.WorkspaceGitDiffResult{
+			CWD:      "/runner/project",
+			GitRoot:  "/runner/project",
+			Diff:     "diff --git a/file.txt b/file.txt\n",
+			HasDiff:  true,
+			ExitCode: 0,
+		}
+		return nil
+	}
+	registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
+		ProtocolVersions: []int{protocol.Version},
+		Capabilities: protocol.RunnerCapabilities{
+			WorkspaceGitDiff: true,
+		},
+		Host:      protocol.Host{InstanceID: "host-git", Hostname: "worker", OS: "linux", Arch: "amd64"},
+		Workspace: protocol.Workspace{Path: "/runner/project", Name: "project"},
+	}, link)
+	require.NoError(t, err)
+	require.NoError(t, server.runnerRegistry.Heartbeat(registration.RunnerID, registration.ConnectionID, registration.Generation, protocol.HeartbeatParams{
+		RunnerID:   registration.RunnerID,
+		Generation: registration.Generation,
+		State:      protocol.RunnerStateIdle,
+	}))
+	require.NoError(t, server.runnerRegistry.BindConversation(t.Context(), "conversation-git", registration.RunnerID))
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/git/diff?conversationId=conversation-git&runnerId="+registration.RunnerID, nil)
+	server.handleGetGitDiff(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response gitDiffResponse
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, "/runner/project", response.CWD)
+	assert.True(t, response.HasDiff)
+	assert.Contains(t, response.Diff, "diff --git")
+}
+
+func TestRemoteWorkspaceTargetRejectsExistingLocalConversation(t *testing.T) {
+	server := newRunnerTestServer(t, "")
+	link := newRunnerAPITestLink()
+	called := false
+	link.call = func(context.Context, string, any, any) error {
+		called = true
+		return nil
+	}
+	registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
+		ProtocolVersions: []int{protocol.Version},
+		Capabilities:     protocol.RunnerCapabilities{WorkspaceGitDiff: true},
+		Host:             protocol.Host{InstanceID: "host-local-target", Hostname: "worker", OS: "linux", Arch: "amd64"},
+		Workspace:        protocol.Workspace{Path: "/runner/project", Name: "project"},
+	}, link)
+	require.NoError(t, err)
+	require.NoError(t, server.runnerRegistry.Heartbeat(registration.RunnerID, registration.ConnectionID, registration.Generation, protocol.HeartbeatParams{
+		RunnerID:   registration.RunnerID,
+		Generation: registration.Generation,
+		State:      protocol.RunnerStateIdle,
+	}))
+	server.conversationService = &mockConversationService{
+		getFunc: func(context.Context, string) (*conversations.GetConversationResponse, error) {
+			return &conversations.GetConversationResponse{ID: "local-conversation"}, nil
+		},
+	}
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/git/diff?conversationId=local-conversation&runnerId="+registration.RunnerID, nil)
+	server.handleGetGitDiff(recorder, request)
+
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	assert.False(t, called)
+}
+
+func TestRemoteWorkspaceTargetRejectsUnreservedConversation(t *testing.T) {
+	server := newRunnerTestServer(t, "")
+	link := newRunnerAPITestLink()
+	called := false
+	link.call = func(context.Context, string, any, any) error {
+		called = true
+		return nil
+	}
+	registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
+		ProtocolVersions: []int{protocol.Version},
+		Capabilities:     protocol.RunnerCapabilities{WorkspaceGitDiff: true},
+		Host:             protocol.Host{InstanceID: "host-preallocated-target", Hostname: "worker", OS: "linux", Arch: "amd64"},
+		Workspace:        protocol.Workspace{Path: "/runner/project", Name: "project"},
+	}, link)
+	require.NoError(t, err)
+	require.NoError(t, server.runnerRegistry.Heartbeat(registration.RunnerID, registration.ConnectionID, registration.Generation, protocol.HeartbeatParams{
+		RunnerID:   registration.RunnerID,
+		Generation: registration.Generation,
+		State:      protocol.RunnerStateIdle,
+	}))
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/git/diff?conversationId=preallocated-conversation&runnerId="+registration.RunnerID, nil)
+	server.handleGetGitDiff(recorder, request)
+
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	assert.False(t, called)
+}
+
+func TestRemoteWorkspaceTerminalProxiesReplayAndExit(t *testing.T) {
+	server := newRunnerTestServer(t, "")
+	link := newRunnerAPITestLink()
+	var readCount atomic.Int32
+	inputReceived := make(chan struct{})
+	link.call = func(_ context.Context, method string, params any, result any) error {
+		switch method {
+		case protocol.MethodWorkspaceTerminalOpen:
+			output := result.(*protocol.WorkspaceTerminalOpenResult)
+			*output = protocol.WorkspaceTerminalOpenResult{
+				SessionID:    "terminal-1",
+				CWD:          "/runner/project",
+				Name:         "bash",
+				Git:          true,
+				PID:          123,
+				ReplayCursor: 0,
+				WriteCursor:  5,
+			}
+		case protocol.MethodWorkspaceTerminalRead:
+			currentRead := readCount.Add(1)
+			output := result.(*protocol.WorkspaceTerminalReadResult)
+			if currentRead == 1 {
+				*output = protocol.WorkspaceTerminalReadResult{Data: []byte("hellolive"), NextCursor: 9}
+			} else {
+				<-inputReceived
+				*output = protocol.WorkspaceTerminalReadResult{NextCursor: 9, Exited: true, ExitCode: 7}
+			}
+		case protocol.MethodWorkspaceTerminalInput:
+			input := params.(protocol.WorkspaceTerminalInputParams)
+			assert.Equal(t, "terminal-1", input.SessionID)
+			assert.Equal(t, []byte("exit 7\n"), input.Data)
+			close(inputReceived)
+		default:
+			return errors.Errorf("unexpected terminal method %s", method)
+		}
+		return nil
+	}
+	registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
+		ProtocolVersions: []int{protocol.Version},
+		Capabilities: protocol.RunnerCapabilities{
+			WorkspaceTerminal: true,
+		},
+		Host:      protocol.Host{InstanceID: "host-terminal", Hostname: "worker", OS: "linux", Arch: "amd64"},
+		Workspace: protocol.Workspace{Path: "/runner/project", Name: "project"},
+	}, link)
+	require.NoError(t, err)
+	require.NoError(t, server.runnerRegistry.Heartbeat(registration.RunnerID, registration.ConnectionID, registration.Generation, protocol.HeartbeatParams{
+		RunnerID:   registration.RunnerID,
+		Generation: registration.Generation,
+		State:      protocol.RunnerStateIdle,
+	}))
+
+	httpServer := httptest.NewServer(http.HandlerFunc(server.handleTerminalWebsocket))
+	t.Cleanup(httpServer.Close)
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http")+"?runnerId="+registration.RunnerID, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	ready := readTerminalReady(t, conn)
+	assert.Equal(t, "/runner/project", ready.CWD)
+	assert.Equal(t, "bash", ready.Name)
+	messageType, payload, err := conn.ReadMessage()
+	require.NoError(t, err)
+	assert.Equal(t, websocket.BinaryMessage, messageType)
+	assert.Equal(t, []byte("hello"), payload)
+
+	messageType, payload, err = conn.ReadMessage()
+	require.NoError(t, err)
+	assert.Equal(t, websocket.TextMessage, messageType)
+	var replayComplete terminalMessage
+	require.NoError(t, json.Unmarshal(payload, &replayComplete))
+	assert.Equal(t, "replay-complete", replayComplete.Type)
+
+	messageType, payload, err = conn.ReadMessage()
+	require.NoError(t, err)
+	assert.Equal(t, websocket.BinaryMessage, messageType)
+	assert.Equal(t, []byte("live"), payload)
+	require.NoError(t, conn.WriteJSON(terminalMessage{Type: "input", Data: "exit 7\n"}))
+
+	messageType, payload, err = conn.ReadMessage()
+	require.NoError(t, err)
+	assert.Equal(t, websocket.TextMessage, messageType)
+	var exit terminalMessage
+	require.NoError(t, json.Unmarshal(payload, &exit))
+	assert.Equal(t, "exit", exit.Type)
+	require.NotNil(t, exit.Code)
+	assert.Equal(t, 7, *exit.Code)
+}
+
+func TestRemoteWorkspaceTerminalCancelsRunnerReadWhenBrowserDisconnects(t *testing.T) {
+	server := newRunnerTestServer(t, "")
+	link := newRunnerAPITestLink()
+	readCanceled := make(chan struct{})
+	link.call = func(ctx context.Context, method string, _ any, result any) error {
+		switch method {
+		case protocol.MethodWorkspaceTerminalOpen:
+			output := result.(*protocol.WorkspaceTerminalOpenResult)
+			*output = protocol.WorkspaceTerminalOpenResult{SessionID: "terminal-cancel", CWD: "/runner/project", Name: "bash"}
+			return nil
+		case protocol.MethodWorkspaceTerminalRead:
+			<-ctx.Done()
+			close(readCanceled)
+			return ctx.Err()
+		default:
+			return errors.Errorf("unexpected terminal method %s", method)
+		}
+	}
+	registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
+		ProtocolVersions: []int{protocol.Version},
+		Capabilities:     protocol.RunnerCapabilities{WorkspaceTerminal: true},
+		Host:             protocol.Host{InstanceID: "host-terminal-cancel", Hostname: "worker", OS: "linux", Arch: "amd64"},
+		Workspace:        protocol.Workspace{Path: "/runner/project", Name: "project"},
+	}, link)
+	require.NoError(t, err)
+	require.NoError(t, server.runnerRegistry.Heartbeat(registration.RunnerID, registration.ConnectionID, registration.Generation, protocol.HeartbeatParams{
+		RunnerID:   registration.RunnerID,
+		Generation: registration.Generation,
+		State:      protocol.RunnerStateIdle,
+	}))
+
+	httpServer := httptest.NewServer(http.HandlerFunc(server.handleTerminalWebsocket))
+	t.Cleanup(httpServer.Close)
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http")+"?runnerId="+registration.RunnerID, nil)
+	require.NoError(t, err)
+	readTerminalReady(t, conn)
+	_, payload, err := conn.ReadMessage()
+	require.NoError(t, err)
+	var replayComplete terminalMessage
+	require.NoError(t, json.Unmarshal(payload, &replayComplete))
+	assert.Equal(t, "replay-complete", replayComplete.Type)
+	require.NoError(t, conn.Close())
+
+	select {
+	case <-readCanceled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runner terminal read was not canceled after browser disconnect")
+	}
 }
 
 func TestRunnerRoutesAllowUserDiscoveryButRequireAdminForInspection(t *testing.T) {

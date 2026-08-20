@@ -231,12 +231,24 @@ func (r *Runner) Close() error {
 		return nil
 	}
 	r.lockMu.Lock()
+	defer r.lockMu.Unlock()
 	lock := r.lock
-	r.lock = nil
-	r.lockMu.Unlock()
 	serviceErr := r.service.Close()
+	var terminalCleanupErr *workspaceTerminalCleanupIncompleteError
+	if errors.As(serviceErr, &terminalCleanupErr) {
+		return serviceErr
+	}
+	if lock == nil {
+		return serviceErr
+	}
 	lockErr := lock.Close()
+	if lockErr == nil && r.lock == lock {
+		r.lock = nil
+	}
 	if serviceErr != nil {
+		if lockErr != nil {
+			return pkgerrors.Wrapf(serviceErr, "workspace lock release also failed: %v", lockErr)
+		}
 		return serviceErr
 	}
 	return lockErr
@@ -311,7 +323,9 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool,
 	params := protocol.RegisterParams{
 		ProtocolVersions: []int{protocol.Version},
 		Capabilities: protocol.RunnerCapabilities{
-			ConcurrentRuns: true,
+			ConcurrentRuns:    true,
+			WorkspaceGitDiff:  true,
+			WorkspaceTerminal: true,
 		},
 		DisplayName: r.config.DisplayName,
 		Host:        r.host,

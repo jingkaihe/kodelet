@@ -508,6 +508,8 @@ const ChatPage: React.FC = () => {
   const resumeStreamRef = useRef(0);
   const reasoningSettingsRequestRef = useRef(0);
   const cwdSuggestionRequestRef = useRef(0);
+  const gitDiffRequestRef = useRef(0);
+  const workspaceTargetKeyRef = useRef('');
   const conversationListRequestRef = useRef(0);
   const conversationSearchRequestRef = useRef(0);
   const conversationSearchTermRef = useRef('');
@@ -516,6 +518,11 @@ const ChatPage: React.FC = () => {
   const cwdSuggestionSkipQueryRef = useRef<string | null>(null);
   const viewedConversationIdRef = useRef<string | null>(conversationId);
   const conversationPathOverrideRef = useRef<string | null>(null);
+  const optimisticRemoteConversationRef = useRef<{
+    conversationId: string;
+    runnerId: string;
+    environmentProfile?: string;
+  } | null>(null);
   const routerConversationIdRef = useRef<string | null>(conversationId);
   const sidebarResizeStartRef = useRef<{
     startX: number;
@@ -1390,7 +1397,18 @@ const ChatPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (conversationId && conversationPathOverrideRef.current === `/c/${conversationId}`) {
+    const optimisticRemoteConversation = optimisticRemoteConversationRef.current;
+    if (
+      optimisticRemoteConversation &&
+      optimisticRemoteConversation.conversationId !== conversationId
+    ) {
+      optimisticRemoteConversationRef.current = null;
+    }
+    if (
+      conversationId &&
+      (conversationPathOverrideRef.current === `/c/${conversationId}` ||
+        optimisticRemoteConversation?.conversationId === conversationId)
+    ) {
       return;
     }
     conversationPathOverrideRef.current = null;
@@ -1614,6 +1632,7 @@ const ChatPage: React.FC = () => {
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
     setConversation(null);
+    optimisticRemoteConversationRef.current = null;
     setActiveConversationId(null);
     setMessages([]);
     setConversationError(null);
@@ -1778,6 +1797,11 @@ const ChatPage: React.FC = () => {
         targetConversationId === activeConversationId ||
         runningConversationIds.includes(targetConversationId)
       ) {
+        if (
+          optimisticRemoteConversationRef.current?.conversationId === targetConversationId
+        ) {
+          optimisticRemoteConversationRef.current = null;
+        }
         const sendController = sendControllersRef.current[targetConversationId];
         if (sendController) {
           sendController.abort();
@@ -2023,8 +2047,23 @@ const ChatPage: React.FC = () => {
     ]);
     const targetConversationId = conversationId || generateConversationId();
     const isNewConversation = !conversationId;
+    const existingOptimisticRemoteConversation =
+      conversationId &&
+      optimisticRemoteConversationRef.current?.conversationId === conversationId
+        ? optimisticRemoteConversationRef.current
+        : null;
+    const requestRunnerID = existingOptimisticRemoteConversation?.runnerId || selectedRunnerID;
+    const requestEnvironmentProfile =
+      existingOptimisticRemoteConversation?.environmentProfile || selectedEnvironmentProfile;
     setStartingNewConversation(false);
     if (isNewConversation) {
+      optimisticRemoteConversationRef.current = requestRunnerID
+        ? {
+            conversationId: targetConversationId,
+            runnerId: requestRunnerID,
+            environmentProfile: requestEnvironmentProfile || undefined,
+          }
+        : null;
       setActiveConversationId(targetConversationId);
       updatePathForStartedConversation(targetConversationId);
     }
@@ -2045,9 +2084,9 @@ const ChatPage: React.FC = () => {
         summary: userPreview,
         preview: userPreview,
         cwd: currentCWDLabel,
-        runnerId: selectedRunnerID || undefined,
-        environmentProfile: selectedRunnerID ? selectedEnvironmentProfile || undefined : undefined,
-        runner: selectedRunnerID ? currentRunner : undefined,
+        runnerId: requestRunnerID || undefined,
+        environmentProfile: requestRunnerID ? requestEnvironmentProfile || undefined : undefined,
+        runner: requestRunnerID ? currentRunner : undefined,
         profile: selectedProfile,
         reasoningEffort: chatSettingsLoaded ? selectedReasoningEffort : undefined,
         isRunning: true,
@@ -2070,19 +2109,25 @@ const ChatPage: React.FC = () => {
           message: prompt,
           content: initialUserContent,
           conversationId: targetConversationId,
-          runnerId: conversationId ? undefined : selectedRunnerID || undefined,
+          runnerId: existingOptimisticRemoteConversation
+            ? existingOptimisticRemoteConversation.runnerId
+            : isNewConversation
+              ? requestRunnerID || undefined
+              : undefined,
           environmentProfile:
-            conversationId || !selectedRunnerID
-              ? undefined
-              : selectedEnvironmentProfile || undefined,
-          profile: conversationId ? undefined : selectedProfile,
+            existingOptimisticRemoteConversation || (isNewConversation && requestRunnerID)
+              ? requestEnvironmentProfile || undefined
+              : undefined,
+          profile: conversationId && !existingOptimisticRemoteConversation ? undefined : selectedProfile,
           reasoningEffort:
-            conversationId || !chatSettingsLoaded ? undefined : selectedReasoningEffort,
+            (conversationId && !existingOptimisticRemoteConversation) || !chatSettingsLoaded
+              ? undefined
+              : selectedReasoningEffort,
           clientCapabilities: {
             interactiveUI: true,
             persistentSurfaces: false,
           },
-          cwd: conversationId || selectedRunnerID ? undefined : currentCWDLabel || undefined,
+          cwd: conversationId || requestRunnerID ? undefined : currentCWDLabel || undefined,
         },
         {
           signal: controller.signal,
@@ -2100,6 +2145,15 @@ const ChatPage: React.FC = () => {
                 streamedId !== streamedConversationId &&
                 shouldAdoptStreamedConversation;
               streamedConversationId = streamedId;
+              if (
+                previousStreamedId &&
+                optimisticRemoteConversationRef.current?.conversationId === previousStreamedId
+              ) {
+                optimisticRemoteConversationRef.current = {
+                  ...optimisticRemoteConversationRef.current,
+                  conversationId: streamedId,
+                };
+              }
               if (shouldAdoptStreamedConversation) {
                 setActiveConversationId(streamedId);
               }
@@ -2223,10 +2277,15 @@ const ChatPage: React.FC = () => {
         const latestConversation = normalizeConversation(
           await apiService.getConversation(streamedConversationId)
         );
+        if (
+          optimisticRemoteConversationRef.current?.conversationId === streamedConversationId
+        ) {
+          optimisticRemoteConversationRef.current = null;
+        }
+        conversationPathOverrideRef.current = null;
         setConversation(latestConversation);
         setMessages(conversationToChatMessages(latestConversation));
         if (streamedConversationId !== routerConversationIdRef.current) {
-          conversationPathOverrideRef.current = null;
           startTransition(() => {
             navigate(`/c/${streamedConversationId}`, { replace: true });
           });
@@ -2437,12 +2496,42 @@ const ChatPage: React.FC = () => {
     return selectedReasoningEffort;
   }, [conversation?.reasoningEffort, conversationId, selectedReasoningEffort]);
 
-  const currentRunnerID = conversationId ? conversation?.runnerId || '' : selectedRunnerID;
+  const isStartedConversationPending =
+    Boolean(conversationId) &&
+    conversationPathOverrideRef.current === `/c/${conversationId}`;
+  const isStartedConversationAwaitingLoad =
+    isStartedConversationPending && loadedConversationId !== conversationId;
+  const hasOptimisticRemoteConversation =
+    Boolean(conversationId) &&
+    optimisticRemoteConversationRef.current?.conversationId === conversationId;
+  const conversationMatchesRoute = !conversationId || conversation?.id === conversationId;
+  const workspaceConversation =
+    conversationMatchesRoute || isStartedConversationAwaitingLoad ? conversation : null;
+  const workspaceContextReady =
+    !conversationId || conversationMatchesRoute || isStartedConversationAwaitingLoad;
+  const currentRunnerID = conversationId ? workspaceConversation?.runnerId || '' : selectedRunnerID;
   const currentRunner = useMemo(
-    () => runners.find((runner) => runner.id === currentRunnerID) || conversation?.runner,
-    [conversation?.runner, currentRunnerID, runners]
+    () => runners.find((runner) => runner.id === currentRunnerID) || workspaceConversation?.runner,
+    [currentRunnerID, runners, workspaceConversation?.runner]
   );
   const isRemoteConversation = Boolean(currentRunnerID);
+  const terminalAuthorized = Boolean(
+    authPrincipal?.roles.includes('terminal') || authPrincipal?.roles.includes('admin')
+  );
+  const runnerWorkspaceAvailable = Boolean(
+    currentRunner?.connected && (currentRunner.status === 'idle' || currentRunner.status === 'busy')
+  );
+  const workspaceTerminalAvailable = isRemoteConversation
+    ? Boolean(terminalAuthorized && runnerWorkspaceAvailable && currentRunner?.workspaceTerminal)
+    : terminalAuthorized && workspaceContextReady && controlPlaneWorkspaceEnabled;
+  const workspaceGitDiffAvailable = isRemoteConversation
+    ? Boolean(runnerWorkspaceAvailable && currentRunner?.workspaceGitDiff)
+    : workspaceContextReady && controlPlaneWorkspaceEnabled;
+  const workspaceToolsAvailable = workspaceTerminalAvailable || workspaceGitDiffAvailable;
+  const remoteWorkspaceConversationID =
+    isRemoteConversation && conversationId && !hasOptimisticRemoteConversation
+      ? conversationId
+      : undefined;
   const executionEnvironmentAvailable = controlPlaneWorkspaceEnabled || isRemoteConversation;
   const currentEnvironmentProfile = conversationId
     ? conversation?.environmentProfile || ''
@@ -2452,28 +2541,28 @@ const ChatPage: React.FC = () => {
     if (currentRunnerID) {
       return currentRunner?.workspace.path || conversation?.cwd || 'Remote runner';
     }
-    const isStartedConversationAwaitingLoad =
-      Boolean(conversationId) &&
-      loadedConversationId !== conversationId &&
-      conversationPathOverrideRef.current === `/c/${conversationId}`;
-
     if (isStartedConversationAwaitingLoad) {
       return selectedCWD || chatSettings.defaultCWD || '';
     }
 
     if (conversationId) {
-      return conversation?.cwd || chatSettings.defaultCWD || '';
+      return workspaceConversation?.cwd || chatSettings.defaultCWD || '';
     }
     return selectedCWD || chatSettings.defaultCWD || '';
   }, [
     chatSettings.defaultCWD,
-    conversation?.cwd,
     conversationId,
     currentRunner?.workspace.path,
     currentRunnerID,
+    isStartedConversationAwaitingLoad,
     loadedConversationId,
     selectedCWD,
+    workspaceConversation?.cwd,
   ]);
+  const workspaceTargetKey = isRemoteConversation
+    ? `runner:${currentRunnerID}:generation:${currentRunner?.generation || 0}:conversation:${remoteWorkspaceConversationID || ''}`
+    : `local:${currentCWDLabel}`;
+  workspaceTargetKeyRef.current = workspaceTargetKey;
 
   useEffect(() => {
     if (isRemoteConversation || !controlPlaneWorkspaceEnabled) {
@@ -2501,10 +2590,19 @@ const ChatPage: React.FC = () => {
   }, [controlPlaneWorkspaceEnabled, currentCWDLabel, isRemoteConversation]);
 
   useEffect(() => {
-    if (isRemoteConversation || !controlPlaneWorkspaceEnabled) {
+    if (
+      !workspaceToolsAvailable ||
+      (workspacePanelView === 'terminal' && !workspaceTerminalAvailable) ||
+      (workspacePanelView === 'diff' && !workspaceGitDiffAvailable)
+    ) {
       setWorkspacePanelView(null);
     }
-  }, [controlPlaneWorkspaceEnabled, isRemoteConversation]);
+  }, [
+    workspaceGitDiffAvailable,
+    workspacePanelView,
+    workspaceTerminalAvailable,
+    workspaceToolsAvailable,
+  ]);
 
   const applyCwdSuggestion = (path: string) => {
     cwdSuggestionSkipQueryRef.current = path;
@@ -2794,27 +2892,66 @@ const ChatPage: React.FC = () => {
   };
 
   const fetchGitDiff = async () => {
+    const requestID = ++gitDiffRequestRef.current;
+    const requestTargetKey = workspaceTargetKey;
     setGitDiffLoading(true);
     setGitDiffError(null);
 
     try {
-      const response = await apiService.getGitDiff(currentCWDLabel || undefined);
-      setGitDiff(response);
+      const response = await apiService.getGitDiff(
+        isRemoteConversation
+          ? {
+              conversationId: remoteWorkspaceConversationID,
+              runnerId: currentRunnerID || undefined,
+            }
+          : { cwd: currentCWDLabel || undefined }
+      );
+      if (
+        requestID === gitDiffRequestRef.current &&
+        requestTargetKey === workspaceTargetKeyRef.current
+      ) {
+        setGitDiff(response);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to load git diff';
-      setGitDiffError(message);
-      setGitDiff(null);
+      if (
+        requestID === gitDiffRequestRef.current &&
+        requestTargetKey === workspaceTargetKeyRef.current
+      ) {
+        setGitDiffError(message);
+        setGitDiff(null);
+      }
     } finally {
-      setGitDiffLoading(false);
+      if (
+        requestID === gitDiffRequestRef.current &&
+        requestTargetKey === workspaceTargetKeyRef.current
+      ) {
+        setGitDiffLoading(false);
+      }
     }
   };
+
+  useEffect(() => {
+    gitDiffRequestRef.current += 1;
+    setGitDiff(null);
+    setGitDiffError(null);
+    setGitDiffLoading(false);
+    if (workspacePanelView === 'diff' && workspaceGitDiffAvailable) {
+      void fetchGitDiff();
+    }
+  }, [workspaceTargetKey]);
 
   const handleToggleWorkspacePanel = () => {
     if (workspacePanelView === null) {
       if (workspaceOverlayLayout) {
         setSidebarVisible(false);
       }
-      setWorkspacePanelView('terminal');
+      if (workspaceTerminalAvailable) {
+        setWorkspacePanelView('terminal');
+      } else if (workspaceGitDiffAvailable) {
+        setWorkspacePanelView('diff');
+        void fetchGitDiff();
+      }
       return;
     }
 
@@ -2822,7 +2959,7 @@ const ChatPage: React.FC = () => {
   };
 
   const handleSelectGitDiffPanel = () => {
-    if (workspacePanelView === 'diff') {
+    if (!workspaceGitDiffAvailable || workspacePanelView === 'diff') {
       return;
     }
 
@@ -2831,7 +2968,9 @@ const ChatPage: React.FC = () => {
   };
 
   const handleSelectTerminalPanel = () => {
-    setWorkspacePanelView('terminal');
+    if (workspaceTerminalAvailable) {
+      setWorkspacePanelView('terminal');
+    }
   };
 
   const handleCommitNewChatContext = () => {
@@ -3147,7 +3286,7 @@ const ChatPage: React.FC = () => {
           />
         </main>
 
-        {controlPlaneWorkspaceEnabled && !isRemoteConversation ? (
+        {workspaceToolsAvailable ? (
           <aside
             aria-label="Workspace tools"
             aria-modal={workspaceOverlayOpen || undefined}
@@ -3165,37 +3304,41 @@ const ChatPage: React.FC = () => {
             {workspacePanelOpen ? (
               <div className="workspace-tools-dock" data-testid="workspace-tools-dock">
                 <div className="workspace-tools-tabs" role="tablist" aria-label="Workspace views">
-                  <button
-                    aria-label="Show terminal"
-                    aria-selected={workspacePanelView === 'terminal'}
-                    className={cn(
-                      'workspace-tools-tab',
-                      workspacePanelView === 'terminal' && 'is-active'
-                    )}
-                    data-testid="workspace-tools-terminal-tab"
-                    onClick={handleSelectTerminalPanel}
-                    role="tab"
-                    type="button"
-                  >
-                    <SquareTerminal aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
-                    <span>Terminal</span>
-                  </button>
+                  {workspaceTerminalAvailable ? (
+                    <button
+                      aria-label="Show terminal"
+                      aria-selected={workspacePanelView === 'terminal'}
+                      className={cn(
+                        'workspace-tools-tab',
+                        workspacePanelView === 'terminal' && 'is-active'
+                      )}
+                      data-testid="workspace-tools-terminal-tab"
+                      onClick={handleSelectTerminalPanel}
+                      role="tab"
+                      type="button"
+                    >
+                      <SquareTerminal aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
+                      <span>Terminal</span>
+                    </button>
+                  ) : null}
 
-                  <button
-                    aria-label="Show changes"
-                    aria-selected={workspacePanelView === 'diff'}
-                    className={cn(
-                      'workspace-tools-tab',
-                      workspacePanelView === 'diff' && 'is-active'
-                    )}
-                    data-testid="workspace-tools-diff-tab"
-                    onClick={handleSelectGitDiffPanel}
-                    role="tab"
-                    type="button"
-                  >
-                    <GitCompareArrows aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
-                    <span>Changes</span>
-                  </button>
+                  {workspaceGitDiffAvailable ? (
+                    <button
+                      aria-label="Show changes"
+                      aria-selected={workspacePanelView === 'diff'}
+                      className={cn(
+                        'workspace-tools-tab',
+                        workspacePanelView === 'diff' && 'is-active'
+                      )}
+                      data-testid="workspace-tools-diff-tab"
+                      onClick={handleSelectGitDiffPanel}
+                      role="tab"
+                      type="button"
+                    >
+                      <GitCompareArrows aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
+                      <span>Changes</span>
+                    </button>
+                  ) : null}
                 </div>
 
                 <div className="workspace-tools-content">
@@ -3208,9 +3351,13 @@ const ChatPage: React.FC = () => {
                   >
                     {workspacePanelView === 'terminal' ? (
                       <TerminalModal
+                        key={workspaceTargetKey}
                         cwdLabel={workspacePanelCWDLabel}
+                        conversationId={remoteWorkspaceConversationID}
+                        runnerId={isRemoteConversation ? currentRunnerID : undefined}
                         open
                         onClose={handleToggleWorkspacePanel}
+                        showPopOut={!isRemoteConversation}
                       />
                     ) : (
                       <GitDiffModal

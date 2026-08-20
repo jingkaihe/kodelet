@@ -227,6 +227,8 @@ export interface Runner {
   status: 'offline' | 'connecting' | 'idle' | 'busy' | 'error' | 'incompatible';
   connected: boolean;
   concurrentRuns?: boolean;
+  workspaceGitDiff?: boolean;
+  workspaceTerminal?: boolean;
   activeRunId?: string;
   activeRunIds?: string[];
   generation: number;
@@ -306,6 +308,13 @@ export interface GitDiffResponse {
   has_diff: boolean;
   git_root?: string;
   exit_code: number;
+  truncated?: boolean;
+}
+
+export interface WorkspaceTarget {
+  cwd?: string;
+  conversationId?: string;
+  runnerId?: string;
 }
 
 export interface TerminalReadyEvent {

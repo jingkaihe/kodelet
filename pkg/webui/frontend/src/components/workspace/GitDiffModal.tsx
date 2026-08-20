@@ -562,6 +562,15 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({
           </div>
         ) : null}
 
+        {gitDiff?.truncated && !loading && !error ? (
+          <div
+            className="surface-panel rounded-2xl border-kodelet-orange/20 px-4 py-3 text-sm text-kodelet-dark"
+            role="status"
+          >
+            Showing a partial diff because the runner output exceeded the display limit.
+          </div>
+        ) : null}
+
         {loading ? (
           <div className="workspace-modal-placeholder">Loading diff…</div>
         ) : gitDiff?.has_diff ? (

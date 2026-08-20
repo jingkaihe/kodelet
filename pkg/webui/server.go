@@ -64,6 +64,8 @@ type Server struct {
 	runCancel             context.CancelFunc
 	terminalSessions      *terminalSessionManager
 	terminalSessionsMu    sync.Mutex
+	remoteTerminals       map[string]int
+	remoteTerminalsMu     sync.Mutex
 	extensionRuntimes     *extensions.RuntimeManager
 	runnerRegistry        *runnerregistry.Registry
 	authStore             *authStore

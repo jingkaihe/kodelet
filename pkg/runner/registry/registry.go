@@ -34,6 +34,8 @@ var (
 	ErrRunnerConnected = errors.New("runner is connected")
 	// ErrRunnerActiveRun indicates inconsistent state that still references an active run.
 	ErrRunnerActiveRun = errors.New("runner has an active run")
+	// ErrRunnerCapabilityUnsupported indicates that the connected generation cannot serve a requested workspace method.
+	ErrRunnerCapabilityUnsupported = errors.New("runner capability is not supported")
 )
 
 // Link is the live symmetric RPC connection retained for one runner generation.
@@ -107,6 +109,8 @@ type Runner struct {
 	Status             RunnerStatus       `json:"status"`
 	Connected          bool               `json:"connected"`
 	ConcurrentRuns     bool               `json:"concurrentRuns"`
+	WorkspaceGitDiff   bool               `json:"workspaceGitDiff"`
+	WorkspaceTerminal  bool               `json:"workspaceTerminal"`
 	ActiveRunID        string             `json:"activeRunId,omitempty"`
 	ActiveRunIDs       []string           `json:"activeRunIds,omitempty"`
 	ConnectionID       string             `json:"connectionId,omitempty"`
@@ -590,6 +594,8 @@ func (r *Registry) register(params protocol.RegisterParams, link Link, principal
 	entry.DisplayName = strings.TrimSpace(params.DisplayName)
 	entry.KodeletVersion = strings.TrimSpace(params.KodeletVersion)
 	entry.ConcurrentRuns = params.Capabilities.ConcurrentRuns
+	entry.WorkspaceGitDiff = params.Capabilities.WorkspaceGitDiff
+	entry.WorkspaceTerminal = params.Capabilities.WorkspaceTerminal
 	entry.ManifestDigest = strings.TrimSpace(params.ManifestDigest)
 	entry.ManifestChanged = false
 	entry.CompatibilityError = ""
@@ -714,6 +720,8 @@ func (r *Registry) recordIncompatibleLocked(params protocol.RegisterParams, iden
 	entry.DisplayName = strings.TrimSpace(params.DisplayName)
 	entry.KodeletVersion = strings.TrimSpace(params.KodeletVersion)
 	entry.ConcurrentRuns = params.Capabilities.ConcurrentRuns
+	entry.WorkspaceGitDiff = params.Capabilities.WorkspaceGitDiff
+	entry.WorkspaceTerminal = params.Capabilities.WorkspaceTerminal
 	entry.ManifestDigest = strings.TrimSpace(params.ManifestDigest)
 	entry.CompatibilityError = message.Error()
 	entry.UpdatedAt = now
@@ -1131,6 +1139,91 @@ func (r *Registry) CallRun(ctx context.Context, runID, method string, params any
 		return err
 	}
 	return link.Call(ctx, method, params, result)
+}
+
+// ValidateRunnerCall checks that one connected runner generation can serve a workspace-scoped method.
+func (r *Registry) ValidateRunnerCall(runnerID string, generation int64, method string) error {
+	if r == nil {
+		return errors.New("runner registry is required")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, _, _, err := r.runnerCallTargetLocked(runnerID, generation, method)
+	return err
+}
+
+// CallRunner invokes a workspace-scoped method on one expected generation of a connected runner.
+func (r *Registry) CallRunner(ctx context.Context, runnerID string, generation int64, method string, params any, result any) error {
+	if r == nil {
+		return errors.New("runner registry is required")
+	}
+	r.mu.Lock()
+	link, connectionID, selectedGeneration, err := r.runnerCallTargetLocked(runnerID, generation, method)
+	r.mu.Unlock()
+	if err != nil {
+		return err
+	}
+
+	if err := link.Call(ctx, method, params, result); err != nil {
+		return err
+	}
+
+	r.mu.Lock()
+	current := r.runners[strings.TrimSpace(runnerID)]
+	valid := current != nil && current.Connected && current.link == link && current.ConnectionID == connectionID && current.Generation == selectedGeneration
+	r.mu.Unlock()
+	if !valid {
+		return errors.New("runner connection changed during workspace operation")
+	}
+	return nil
+}
+
+func (r *Registry) runnerCallTargetLocked(runnerID string, generation int64, method string) (Link, string, int64, error) {
+	runnerID = strings.TrimSpace(runnerID)
+	if runnerID == "" {
+		return nil, "", 0, errors.New("runner id is required")
+	}
+	entry := r.runners[runnerID]
+	if entry == nil {
+		return nil, "", 0, ErrRunnerNotFound
+	}
+	if !entry.Connected || entry.link == nil {
+		return nil, "", 0, errors.New("runner is offline")
+	}
+	if !entry.ready {
+		return nil, "", 0, errors.New("runner has not completed its initial heartbeat")
+	}
+	if entry.Status == RunnerStatusIncompatible || entry.Status == RunnerStatusError {
+		return nil, "", 0, errors.Errorf("runner is not available: %s", entry.Status)
+	}
+	if generation <= 0 {
+		return nil, "", 0, errors.New("runner generation is required")
+	}
+	if entry.Generation != generation {
+		return nil, "", 0, errors.New("runner connection changed before workspace operation")
+	}
+	if !runnerSupportsWorkspaceMethod(entry, method) {
+		return nil, "", 0, errors.Wrapf(ErrRunnerCapabilityUnsupported, "%s", method)
+	}
+	return entry.link, entry.ConnectionID, entry.Generation, nil
+}
+
+func runnerSupportsWorkspaceMethod(entry *runnerEntry, method string) bool {
+	if entry == nil {
+		return false
+	}
+	switch method {
+	case protocol.MethodWorkspaceGitDiff:
+		return entry.WorkspaceGitDiff
+	case protocol.MethodWorkspaceTerminalOpen,
+		protocol.MethodWorkspaceTerminalRead,
+		protocol.MethodWorkspaceTerminalInput,
+		protocol.MethodWorkspaceTerminalResize,
+		protocol.MethodWorkspaceTerminalSignal:
+		return entry.WorkspaceTerminal
+	default:
+		return true
+	}
 }
 
 // ExecuteTool invokes tool.execute and routes replaceable transient updates to the supplied sink.

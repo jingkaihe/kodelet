@@ -228,6 +228,85 @@ func TestRegisterUpsertsWorkspaceIdentityAndFencesStaleConnections(t *testing.T)
 	assert.ErrorContains(t, err, "another host workspace")
 }
 
+func TestCallRunnerRoutesWorkspaceMethodsAndFencesReconnects(t *testing.T) {
+	registry := newTestRegistry(t)
+	link := newFakeLink()
+	params := testRegisterParams("host-workspace", "/work/workspace")
+	params.Capabilities.WorkspaceGitDiff = true
+	params.Capabilities.WorkspaceTerminal = true
+	registration, err := registry.Register(params, link)
+	require.NoError(t, err)
+	require.NoError(t, registry.Heartbeat(registration.RunnerID, registration.ConnectionID, registration.Generation, protocol.HeartbeatParams{
+		RunnerID:   registration.RunnerID,
+		Generation: registration.Generation,
+		State:      protocol.RunnerStateIdle,
+	}))
+
+	link.call = func(_ context.Context, method string, params any, result any) error {
+		assert.Equal(t, protocol.MethodWorkspaceGitDiff, method)
+		assert.IsType(t, protocol.WorkspaceGitDiffParams{}, params)
+		output := result.(*protocol.WorkspaceGitDiffResult)
+		*output = protocol.WorkspaceGitDiffResult{CWD: "/work/workspace", Diff: "diff", HasDiff: true}
+		return nil
+	}
+	var diff protocol.WorkspaceGitDiffResult
+	require.NoError(t, registry.CallRunner(t.Context(), registration.RunnerID, registration.Generation, protocol.MethodWorkspaceGitDiff, protocol.WorkspaceGitDiffParams{}, &diff))
+	assert.True(t, diff.HasDiff)
+	runner, found := registry.Runner(registration.RunnerID)
+	require.True(t, found)
+	assert.True(t, runner.WorkspaceGitDiff)
+	assert.True(t, runner.WorkspaceTerminal)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	link.call = func(context.Context, string, any, any) error {
+		close(started)
+		<-release
+		return nil
+	}
+	callDone := make(chan error, 1)
+	go func() {
+		callDone <- registry.CallRunner(t.Context(), registration.RunnerID, registration.Generation, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{}, nil)
+	}()
+	<-started
+	replacement := newFakeLink()
+	params.RunnerID = registration.RunnerID
+	replacementRegistration, err := registry.Register(params, replacement)
+	require.NoError(t, err)
+	require.NoError(t, registry.Heartbeat(replacementRegistration.RunnerID, replacementRegistration.ConnectionID, replacementRegistration.Generation, protocol.HeartbeatParams{
+		RunnerID:   replacementRegistration.RunnerID,
+		Generation: replacementRegistration.Generation,
+		State:      protocol.RunnerStateIdle,
+	}))
+	close(release)
+	require.ErrorContains(t, <-callDone, "connection changed")
+	require.ErrorContains(t, registry.ValidateRunnerCall(replacementRegistration.RunnerID, registration.Generation, protocol.MethodWorkspaceTerminalOpen), "connection changed")
+
+	registry.Detach(replacementRegistration.RunnerID, replacementRegistration.ConnectionID, replacementRegistration.Generation, nil)
+	require.ErrorContains(t, registry.CallRunner(t.Context(), replacementRegistration.RunnerID, replacementRegistration.Generation, protocol.MethodWorkspaceGitDiff, protocol.WorkspaceGitDiffParams{}, nil), "offline")
+}
+
+func TestCallRunnerRejectsUnsupportedWorkspaceCapabilityBeforeRPC(t *testing.T) {
+	registry := newTestRegistry(t)
+	link := newFakeLink()
+	called := false
+	link.call = func(context.Context, string, any, any) error {
+		called = true
+		return nil
+	}
+	registration, err := registry.Register(testRegisterParams("host-no-workspace-tools", "/work/no-tools"), link)
+	require.NoError(t, err)
+	require.NoError(t, registry.Heartbeat(registration.RunnerID, registration.ConnectionID, registration.Generation, protocol.HeartbeatParams{
+		RunnerID:   registration.RunnerID,
+		Generation: registration.Generation,
+		State:      protocol.RunnerStateIdle,
+	}))
+
+	err = registry.CallRunner(t.Context(), registration.RunnerID, registration.Generation, protocol.MethodWorkspaceGitDiff, protocol.WorkspaceGitDiffParams{}, nil)
+	require.ErrorIs(t, err, ErrRunnerCapabilityUnsupported)
+	assert.False(t, called)
+}
+
 func TestRegisterAuthenticatedBindsConnectionToEnrolledRunnerIdentity(t *testing.T) {
 	registry := newTestRegistry(t)
 	enrollment := testEnrollmentStartRequest(t, "host-enrolled", "/work/enrolled")

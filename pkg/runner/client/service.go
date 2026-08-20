@@ -33,6 +33,24 @@ const toolDisplayOutputTruncationMarker = "\n\n[output truncated for remote disp
 
 var errNoActiveRun = errors.New("runner has no active run")
 
+type workspaceTerminalCleanupIncompleteError struct {
+	err error
+}
+
+func (e *workspaceTerminalCleanupIncompleteError) Error() string {
+	if e == nil || e.err == nil {
+		return "workspace terminal cleanup is incomplete"
+	}
+	return "workspace terminal cleanup is incomplete: " + e.err.Error()
+}
+
+func (e *workspaceTerminalCleanupIncompleteError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
+}
+
 // Peer is the symmetric runner connection used for updates and reverse UI calls.
 type Peer interface {
 	Call(ctx context.Context, method string, params any, result any) error
@@ -86,6 +104,7 @@ type Service struct {
 	configLoader        ConfigLoader
 	environmentFactory  EnvironmentFactory
 	instanceProvider    ExecutionInstanceProvider
+	workspaceTerminals  *workspaceTerminalManager
 	cleanupTimeout      time.Duration
 	snapshotWaitTimeout time.Duration
 	peer                Peer
@@ -94,6 +113,9 @@ type Service struct {
 	runs                map[string]*activeRun
 	lastManifestDigest  string
 	closed              bool
+	closeMu             sync.Mutex
+	closeOnce           sync.Once
+	closeErr            error
 }
 
 type activeRun struct {
@@ -164,6 +186,7 @@ func NewService(parent context.Context, workspace string, options ServiceOptions
 		}
 		service.instanceProvider = provider
 	}
+	service.workspaceTerminals = newWorkspaceTerminalManager(service.ctx, service.workspace)
 	return service, nil
 }
 
@@ -245,6 +268,44 @@ func (s *Service) HandleRequest(ctx context.Context, method string, params json.
 		}
 		result, err := s.executeTool(ctx, value)
 		return rpcResult(result, err)
+	case protocol.MethodWorkspaceGitDiff:
+		if _, rpcErr := decodeParams[protocol.WorkspaceGitDiffParams](params); rpcErr != nil {
+			return nil, rpcErr
+		}
+		result, err := s.workspaceGitDiff(ctx)
+		return rpcResult(result, err)
+	case protocol.MethodWorkspaceTerminalOpen:
+		value, rpcErr := decodeParams[protocol.WorkspaceTerminalOpenParams](params)
+		if rpcErr != nil {
+			return nil, rpcErr
+		}
+		result, err := s.openWorkspaceTerminal(ctx, value)
+		return rpcResult(result, err)
+	case protocol.MethodWorkspaceTerminalRead:
+		value, rpcErr := decodeParams[protocol.WorkspaceTerminalReadParams](params)
+		if rpcErr != nil {
+			return nil, rpcErr
+		}
+		result, err := s.readWorkspaceTerminal(ctx, value)
+		return rpcResult(result, err)
+	case protocol.MethodWorkspaceTerminalInput:
+		value, rpcErr := decodeParams[protocol.WorkspaceTerminalInputParams](params)
+		if rpcErr != nil {
+			return nil, rpcErr
+		}
+		return rpcResult(nil, s.writeWorkspaceTerminal(ctx, value))
+	case protocol.MethodWorkspaceTerminalResize:
+		value, rpcErr := decodeParams[protocol.WorkspaceTerminalResizeParams](params)
+		if rpcErr != nil {
+			return nil, rpcErr
+		}
+		return rpcResult(nil, s.resizeWorkspaceTerminal(value))
+	case protocol.MethodWorkspaceTerminalSignal:
+		value, rpcErr := decodeParams[protocol.WorkspaceTerminalSignalParams](params)
+		if rpcErr != nil {
+			return nil, rpcErr
+		}
+		return rpcResult(nil, s.signalWorkspaceTerminal(ctx, value))
 	default:
 		return nil, &protocol.RPCError{Code: protocol.ErrorCodeMethodNotFound, Message: "runner request method not found"}
 	}
@@ -1041,20 +1102,35 @@ func (s *Service) Close() error {
 	if s == nil {
 		return nil
 	}
-	s.mu.Lock()
-	if s.closed {
+	s.closeMu.Lock()
+	defer s.closeMu.Unlock()
+	s.closeOnce.Do(func() {
+		s.mu.Lock()
+		s.closed = true
 		s.mu.Unlock()
-		return nil
+		activeErr := s.AbortActiveRun(context.Background())
+		if s.ownedRuntime != nil {
+			if err := s.ownedRuntime.Close(); activeErr == nil {
+				activeErr = err
+			}
+		}
+		s.mu.Lock()
+		s.closeErr = activeErr
+		s.mu.Unlock()
+	})
+	terminalErr := error(nil)
+	if s.workspaceTerminals != nil {
+		terminalErr = s.workspaceTerminals.Close()
 	}
-	s.closed = true
+	s.mu.Lock()
+	baseErr := s.closeErr
 	s.mu.Unlock()
-	activeErr := s.AbortActiveRun(context.Background())
-	if s.ownedRuntime != nil {
-		if err := s.ownedRuntime.Close(); activeErr == nil {
-			activeErr = err
+	if terminalErr != nil {
+		return &workspaceTerminalCleanupIncompleteError{
+			err: combineCleanupErrors(terminalErr, baseErr),
 		}
 	}
-	return activeErr
+	return baseErr
 }
 
 func waitForRunOperations(ctx context.Context, timeout time.Duration, run *activeRun) error {

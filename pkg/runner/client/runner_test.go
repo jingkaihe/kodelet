@@ -18,6 +18,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/runner/localstate"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
+	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
@@ -169,6 +170,82 @@ func TestNewRunnerValidatesConfigurationAndAppliesDefaults(t *testing.T) {
 		Store:     store,
 	})
 	require.Error(t, err)
+}
+
+func TestRunnerCloseReleasesWorkspaceLockAfterRunCleanupError(t *testing.T) {
+	workspace := t.TempDir()
+	store, err := localstate.NewStoreAt(t.TempDir())
+	require.NoError(t, err)
+	runner, err := NewRunner(t.Context(), RunnerConfig{
+		Server:    "http://localhost:8080",
+		Workspace: workspace,
+		Store:     store,
+	})
+	require.NoError(t, err)
+	runtime := extensions.EmptyRuntime()
+	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
+	runner.service.runtimeProvider = staticRuntimeProvider{runtime: runtime}
+	runner.service.configLoader = func(string) (llmtypes.Config, error) { return llmtypes.Config{}, nil }
+	runner.service.instanceProvider = &recordingExecutionInstanceProvider{
+		workspace: workspace,
+		closeErr:  errors.New("instance close failed"),
+	}
+	runner.service.Attach(&recordingPeer{})
+	require.NoError(t, runner.service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
+	callService[runnerpayload.Manifest](t, runner.service, protocol.MethodRunOpen, protocol.RunOpenParams{
+		RunID: "run-1", ConversationID: "conversation-1",
+	})
+	require.NoError(t, runner.AcquireWorkspaceLock())
+
+	err = runner.Close()
+	require.ErrorContains(t, err, "instance close failed")
+	held, err := store.WorkspaceLockHeld(workspace)
+	require.NoError(t, err)
+	assert.False(t, held)
+	assert.Nil(t, runner.lock)
+}
+
+func TestRunnerCloseRetainsWorkspaceLockUntilTerminalCleanupCompletes(t *testing.T) {
+	workspace := t.TempDir()
+	store, err := localstate.NewStoreAt(t.TempDir())
+	require.NoError(t, err)
+	runner, err := NewRunner(t.Context(), RunnerConfig{
+		Server:    "http://localhost:8080",
+		Workspace: workspace,
+		Store:     store,
+	})
+	require.NoError(t, err)
+	require.NoError(t, runner.AcquireWorkspaceLock())
+
+	done := make(chan struct{})
+	close(done)
+	session := &workspaceTerminalSession{
+		id:         "terminal-cleanup-pending",
+		done:       done,
+		cleanupErr: errors.New("terminal cleanup pending"),
+	}
+	manager := runner.service.workspaceTerminals
+	manager.mu.Lock()
+	manager.sessions[session.id] = session
+	manager.current = session
+	manager.mu.Unlock()
+
+	err = runner.Close()
+	var terminalCleanupErr *workspaceTerminalCleanupIncompleteError
+	require.ErrorAs(t, err, &terminalCleanupErr)
+	held, err := store.WorkspaceLockHeld(workspace)
+	require.NoError(t, err)
+	assert.True(t, held)
+	assert.NotNil(t, runner.lock)
+
+	session.mu.Lock()
+	session.cleanupErr = nil
+	session.mu.Unlock()
+	require.NoError(t, runner.Close())
+	held, err = store.WorkspaceLockHeld(workspace)
+	require.NoError(t, err)
+	assert.False(t, held)
+	assert.Nil(t, runner.lock)
 }
 
 func TestRunnerRegistersHeartbeatsAndReleasesWorkspaceLock(t *testing.T) {

@@ -23,32 +23,38 @@ const (
 )
 
 const (
-	MethodRunnerRegister        = "runner.register"
-	MethodRunnerHeartbeat       = "runner.heartbeat"
-	MethodRunnerManifestChanged = "runner.manifestChanged"
-	MethodRunnerGoodbye         = "runner.goodbye"
-	MethodRunOpen               = "run.open"
-	MethodRunClose              = "run.close"
-	MethodRunCancel             = "run.cancel"
-	MethodRunEnvironmentError   = "run.environmentError"
-	MethodCommandExecute        = "command.execute"
-	MethodLifecycleDispatch     = "lifecycle.dispatch"
-	MethodToolExecute           = "tool.execute"
-	MethodToolUpdate            = "tool.update"
-	MethodUIInput               = "ui.input"
-	MethodUIConfirm             = "ui.confirm"
-	MethodUISelect              = "ui.select"
-	MethodUINotify              = "ui.notify"
-	MethodUIWidgetSet           = "ui.widget.set"
-	MethodUIWidgetFrame         = "ui.widget.frame"
-	MethodUIWidgetRemove        = "ui.widget.remove"
-	MethodUITranscriptAppend    = "ui.transcript.append"
-	MethodUISurfaceOpen         = "ui.surface.open"
-	MethodUISurfaceFrame        = "ui.surface.frame"
-	MethodUISurfaceClose        = "ui.surface.close"
-	MethodUISurfaceInput        = "ui.surface.input"
-	MethodUISurfaceResize       = "ui.surface.resize"
-	MethodOperationCancel       = "operation.cancel"
+	MethodRunnerRegister          = "runner.register"
+	MethodRunnerHeartbeat         = "runner.heartbeat"
+	MethodRunnerManifestChanged   = "runner.manifestChanged"
+	MethodRunnerGoodbye           = "runner.goodbye"
+	MethodRunOpen                 = "run.open"
+	MethodRunClose                = "run.close"
+	MethodRunCancel               = "run.cancel"
+	MethodRunEnvironmentError     = "run.environmentError"
+	MethodCommandExecute          = "command.execute"
+	MethodLifecycleDispatch       = "lifecycle.dispatch"
+	MethodToolExecute             = "tool.execute"
+	MethodToolUpdate              = "tool.update"
+	MethodWorkspaceGitDiff        = "workspace.git.diff"
+	MethodWorkspaceTerminalOpen   = "workspace.terminal.open"
+	MethodWorkspaceTerminalRead   = "workspace.terminal.read"
+	MethodWorkspaceTerminalInput  = "workspace.terminal.input"
+	MethodWorkspaceTerminalResize = "workspace.terminal.resize"
+	MethodWorkspaceTerminalSignal = "workspace.terminal.signal"
+	MethodUIInput                 = "ui.input"
+	MethodUIConfirm               = "ui.confirm"
+	MethodUISelect                = "ui.select"
+	MethodUINotify                = "ui.notify"
+	MethodUIWidgetSet             = "ui.widget.set"
+	MethodUIWidgetFrame           = "ui.widget.frame"
+	MethodUIWidgetRemove          = "ui.widget.remove"
+	MethodUITranscriptAppend      = "ui.transcript.append"
+	MethodUISurfaceOpen           = "ui.surface.open"
+	MethodUISurfaceFrame          = "ui.surface.frame"
+	MethodUISurfaceClose          = "ui.surface.close"
+	MethodUISurfaceInput          = "ui.surface.input"
+	MethodUISurfaceResize         = "ui.surface.resize"
+	MethodOperationCancel         = "operation.cancel"
 )
 
 const (
@@ -178,7 +184,9 @@ type Workspace struct {
 
 // RunnerCapabilities declares optional behavior supported by this runner process.
 type RunnerCapabilities struct {
-	ConcurrentRuns bool `json:"concurrentRuns,omitempty"`
+	ConcurrentRuns    bool `json:"concurrentRuns,omitempty"`
+	WorkspaceGitDiff  bool `json:"workspaceGitDiff,omitempty"`
+	WorkspaceTerminal bool `json:"workspaceTerminal,omitempty"`
 }
 
 // RegisterParams is the first request sent by a runner connection.
@@ -375,4 +383,70 @@ type EnvironmentErrorParams struct {
 // OperationCancelParams cancels one in-flight JSON-RPC request by its wire ID.
 type OperationCancelParams struct {
 	RequestID string `json:"requestId"`
+}
+
+// WorkspaceGitDiffParams asks a runner to inspect its registered workspace.
+type WorkspaceGitDiffParams struct{}
+
+// WorkspaceGitDiffResult is a bounded git diff snapshot from a runner workspace.
+type WorkspaceGitDiffResult struct {
+	CWD       string `json:"cwd"`
+	Diff      string `json:"diff"`
+	HasDiff   bool   `json:"hasDiff"`
+	GitRoot   string `json:"gitRoot,omitempty"`
+	ExitCode  int    `json:"exitCode"`
+	Truncated bool   `json:"truncated,omitempty"`
+}
+
+// WorkspaceTerminalOpenParams opens or reattaches to the runner workspace terminal.
+type WorkspaceTerminalOpenParams struct {
+	Rows int `json:"rows,omitempty"`
+	Cols int `json:"cols,omitempty"`
+}
+
+// WorkspaceTerminalOpenResult describes one persistent runner terminal session.
+type WorkspaceTerminalOpenResult struct {
+	SessionID    string `json:"sessionId"`
+	CWD          string `json:"cwd"`
+	Name         string `json:"name"`
+	Git          bool   `json:"git"`
+	PID          int    `json:"pid,omitempty"`
+	ReplayCursor uint64 `json:"replayCursor"`
+	WriteCursor  uint64 `json:"writeCursor"`
+}
+
+// WorkspaceTerminalReadParams long-polls terminal output from one absolute cursor.
+type WorkspaceTerminalReadParams struct {
+	SessionID string `json:"sessionId"`
+	Cursor    uint64 `json:"cursor"`
+	MaxBytes  int    `json:"maxBytes,omitempty"`
+	WaitMS    int    `json:"waitMs,omitempty"`
+}
+
+// WorkspaceTerminalReadResult returns the next bounded terminal output chunk.
+type WorkspaceTerminalReadResult struct {
+	Data       []byte `json:"data,omitempty"`
+	NextCursor uint64 `json:"nextCursor"`
+	Truncated  bool   `json:"truncated,omitempty"`
+	Exited     bool   `json:"exited,omitempty"`
+	ExitCode   int    `json:"exitCode,omitempty"`
+}
+
+// WorkspaceTerminalInputParams writes bytes to a runner terminal session.
+type WorkspaceTerminalInputParams struct {
+	SessionID string `json:"sessionId"`
+	Data      []byte `json:"data"`
+}
+
+// WorkspaceTerminalResizeParams resizes a runner terminal session.
+type WorkspaceTerminalResizeParams struct {
+	SessionID string `json:"sessionId"`
+	Rows      int    `json:"rows"`
+	Cols      int    `json:"cols"`
+}
+
+// WorkspaceTerminalSignalParams sends a named signal to a runner terminal session.
+type WorkspaceTerminalSignalParams struct {
+	SessionID string `json:"sessionId"`
+	Name      string `json:"name"`
 }

@@ -219,6 +219,39 @@ describe('TerminalModal', () => {
     expect(terminal.resize).toHaveBeenCalledWith(80, 23);
   });
 
+  it('connects to a remote runner target without enabling local pop-out state', async () => {
+    const socket = new MockWebSocket();
+    createTerminalWebSocketMock.mockReturnValue(socket);
+    writeTerminalPopOutRecord({
+      id: 'local-pop-out',
+      cwd: '/runner/project',
+      state: 'active',
+      updatedAt: Date.now(),
+      version: 2,
+    });
+
+    render(
+      <TerminalModal
+        conversationId="conv-123"
+        cwdLabel="/runner/project"
+        onClose={vi.fn()}
+        open
+        runnerId="runner-1"
+      />
+    );
+
+    await waitFor(() =>
+      expect(createTerminalWebSocketMock).toHaveBeenCalledWith({
+        cwd: undefined,
+        conversationId: 'conv-123',
+        runnerId: 'runner-1',
+        rows: 23,
+        cols: 80,
+      })
+    );
+    expect(screen.queryByRole('button', { name: 'Open terminal in new window' })).not.toBeInTheDocument();
+  });
+
   it('allows ghostty-web to process terminal keystrokes', async () => {
     const socket = new MockWebSocket();
     createTerminalWebSocketMock.mockReturnValue(socket);

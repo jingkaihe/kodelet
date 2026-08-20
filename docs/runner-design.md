@@ -2,7 +2,7 @@
 
 ## Status
 
-Implemented through Phase 3, including multiple concurrent logical runs on one workspace-bound runner. The future ephemeral execution-instance phase remains deliberately deferred until an isolation and durability backend is selected.
+Implemented through Phase 3, including multiple concurrent logical runs and capability-gated Web UI Git diff and terminal access on one workspace-bound runner. The future ephemeral execution-instance phase remains deliberately deferred until an isolation and durability backend is selected.
 
 The current implementation preserves the design's direct-workspace constraints: no worktrees, containers, micro-VMs, filesystem snapshots, process namespaces, or network namespaces. Remote Web UI and TUI conversations are supported, including control-plane conversation browsing and resume; `kodelet run --runner` remains disabled pending a broader one-shot client contract. The runner provisions every run through an `ExecutionInstanceProvider`, but the only built-in provider returns a fresh lifecycle handle backed by the same registered workspace. Concurrent runs are therefore allowed and receive separate run state and extension runtimes, but they intentionally share the workspace filesystem, host processes, network, and ports.
 
@@ -12,7 +12,7 @@ The implemented robustness model includes generation-fenced open reconciliation,
 
 This document defines Kodelet's workspace-bound runner architecture. A central `kodelet serve` process acts as the control plane: it owns the API layer, provider threads, provider credentials, conversation persistence, and the core agentic loop. A runner is a long-running Kodelet process bound to exactly one canonical workspace directory and exposes that workspace as a remote agent environment containing context, tools, skills, extension behavior, and workspace-local commands.
 
-The runner initiates one persistent WebSocket connection to the control plane. Messages use JSON-RPC 2.0 encoded as one JSON object per WebSocket text frame. The connection carries runner registration, heartbeats, run manifests, extension lifecycle proxy calls, tool execution and progress, cancellation, and extension UI requests.
+The runner initiates one persistent WebSocket connection to the control plane. Messages use JSON-RPC 2.0 encoded as one JSON object per WebSocket text frame. The connection carries runner registration, heartbeats, run manifests, extension lifecycle proxy calls, tool execution and progress, cancellation, extension UI requests, and workspace-scoped Web UI operations such as Git diff and terminal sessions.
 
 At the start of each top-level run, the runner returns a versioned environment manifest. The manifest contains a snapshot of workspace context such as `AGENTS.md`, runner-scoped skill and tool definitions, extension-provided resources, and relevant workspace configuration. The control plane pins that manifest for the complete run. Changes discovered by later manifest beats apply to subsequent runs rather than mutating an active run's prompt or tool catalog.
 
@@ -614,6 +614,11 @@ The runner's first request registers the stable runner and negotiates the applic
       "path": "/home/user/src/kodelet",
       "name": "kodelet"
     },
+    "capabilities": {
+      "concurrentRuns": true,
+      "workspaceGitDiff": true,
+      "workspaceTerminal": true
+    },
     "kodeletVersion": "1.2.3",
     "manifestDigest": "sha256:4d7e..."
   }
@@ -719,6 +724,16 @@ While the request is pending, the runner sends transient notifications:
 
 The eventual JSON-RPC response is the authoritative final result. Transient updates are replaceable and are never inserted into provider history as the final tool result.
 
+### Workspace-scoped Web UI operations
+
+Git diff and terminal methods are scoped to the runner's canonical workspace rather than to a top-level run. This lets the Web UI inspect the workspace and keep a terminal session alive between chat turns, when no `runId` lease exists. The control plane resolves an existing conversation through its durable or pending runner affinity. Before that affinity exists, the new-chat UI targets the explicitly selected runner without attaching its optimistic conversation ID. A persisted local conversation cannot be rebound by adding a runner ID, an unreserved conversation ID is rejected, and a caller cannot provide a remote CWD.
+
+`workspace.git.diff` returns a bounded snapshot generated in the registered workspace. The response includes the canonical workspace path, Git root, diff text, exit status, and a truncation flag. The runner caps diff output so a large repository cannot consume an unbounded JSON-RPC frame.
+
+The terminal protocol uses `workspace.terminal.open`, `workspace.terminal.read`, `workspace.terminal.input`, `workspace.terminal.resize`, and `workspace.terminal.signal`. The runner owns one persistent current PTY session for its workspace. `open` creates or reattaches to that session and returns absolute replay and write cursors. `read` performs a bounded long poll from an absolute cursor; the runner retains a bounded replay buffer and reports when earlier output was truncated. Input, resize, and signal calls are short bounded operations, while browser WebSocket attachment and replay framing remain control-plane concerns. The control plane caps concurrent browser attachments per runner so terminal long polls cannot consume the runner connection's general request concurrency.
+
+Every workspace call is capability-gated and generation-fenced. If the runner disconnects or reconnects while an operation is in flight, the control plane rejects the stale result instead of presenting output from a superseded connection.
+
 ### Bidirectional UI requests
 
 The runner can issue requests on the same connection:
@@ -759,6 +774,13 @@ lifecycle.dispatch
 
 tool.execute
 tool.update
+
+workspace.git.diff
+workspace.terminal.open
+workspace.terminal.read
+workspace.terminal.input
+workspace.terminal.resize
+workspace.terminal.signal
 
 ui.input
 ui.confirm
@@ -1013,9 +1035,11 @@ kodelet runner remove kodelet-gpu
 
 The control plane refuses to remove a connected runner or one with active runs. Otherwise removal deletes the registration, credentials, and durable runner-run history and transactionally clears all affinities to that concrete runner. It never deletes the associated conversations, summaries, or transcripts. Those preserved conversations fail closed for remote execution until the user explicitly selects a compatible runner, which establishes a new affinity rather than silently migrating work. `--force` remains accepted only for CLI/API compatibility. The CLI requires confirmation unless `--no-confirm` is supplied, requires `--no-confirm` for JSON output, and conditionally clears a matching local registration cache, DPoP credential, and pending enrollment after successful removal. Server-side deletion cascades to the runner's credential and DPoP replay state. There is no automatic offline-runner TTL in the initial design.
 
-### Initial remote Web UI limitations
+### Remote Web UI workspace tools
 
-Several existing Web UI features execute directly on the `kodelet serve` host. For remote conversations, the initial UI replaces CWD selection with runner selection and hides or disables the integrated terminal, server-local Git diff, server-local CWD suggestions, and server-side workspace command discovery until those features have runner-backed protocols.
+For a remote conversation, the Web UI shows the integrated terminal and Git diff tabs when the connected runner advertises `workspaceTerminal` and `workspaceGitDiff`. Terminal visibility additionally requires the human principal's `terminal` or `admin` role, matching the WebSocket endpoint authorization. Both features operate on the runner's fixed canonical workspace and are proxied through the control plane; they never interpret the runner's path on the `kodelet serve` host. Older or incompatible runners that omit a capability keep the corresponding tab hidden.
+
+The remote terminal survives side-panel close and browser reconnection while its runner process and shell remain alive, with bounded output replay on reattachment. The separate terminal pop-out window remains disabled for remote terminals because its current bootstrap contract is server-local. Runner-backed CWD suggestions and server-side workspace command discovery are still hidden for remote conversations.
 
 Commands submitted in the conversation still resolve through the selected runner's command manifest and `command.execute` operation.
 
@@ -1115,7 +1139,7 @@ The transport package remains a dependency leaf: `agentenv` does not import the 
 - Add remote runner selection to the Web UI and TUI.
 - Persist runner affinity and run records centrally.
 - Expose offline, idle, busy, incompatible, and manifest-changed states.
-- Disable or hide control-plane-local workspace features for remote conversations.
+- Capability-gate and proxy Web UI Git diff and persistent terminal access through the runner while keeping unsupported control-plane-local workspace features hidden.
 - Define remote one-shot CLI behavior before enabling `kodelet run --runner` broadly.
 
 ### Future phase: ephemeral execution instances
@@ -1158,5 +1182,5 @@ This is not selected. Trusted agents commonly need a main run plus parallel code
 
 - Should extension runtimes be runner-lived, run-lived, or configurable once ephemeral execution instances exist?
 - How should edits and artifacts produced in an ephemeral execution instance become durable, and how should conflicting concurrent results be reconciled?
-- Which auxiliary Web UI features should receive runner-backed protocols first: Git diff, terminal, command discovery, or file browsing?
+- Which auxiliary Web UI features should receive runner-backed protocols next: CWD suggestions, slash-command discovery, or file browsing?
 - What subset of existing `kodelet run` flags should the first remote one-shot request support?

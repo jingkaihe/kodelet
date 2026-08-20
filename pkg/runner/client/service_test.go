@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -21,6 +24,7 @@ import (
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 )
 
 type staticRuntimeProvider struct {
@@ -1282,6 +1286,258 @@ func TestServiceOpenRunFailurePathsReleaseCapacityAndInstances(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestServiceWorkspaceGitDiff(t *testing.T) {
+	workspace := t.TempDir()
+	runGit := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = workspace
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, string(output))
+	}
+	runGit("init")
+	runGit("config", "user.email", "test@example.com")
+	runGit("config", "user.name", "Test User")
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, "file.txt"), []byte("old\n"), 0o600))
+	runGit("add", "file.txt")
+	runGit("commit", "-m", "initial")
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, "file.txt"), []byte("new\n"), 0o600))
+
+	service, err := NewService(t.Context(), workspace, ServiceOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	result := callService[protocol.WorkspaceGitDiffResult](t, service, protocol.MethodWorkspaceGitDiff, protocol.WorkspaceGitDiffParams{})
+	assert.Equal(t, workspace, result.CWD)
+	assert.Equal(t, workspace, result.GitRoot)
+	assert.True(t, result.HasDiff)
+	assert.Contains(t, result.Diff, "diff --git a/file.txt b/file.txt")
+	assert.False(t, result.Truncated)
+
+	buffer := &cappedBuffer{limit: 4}
+	written, err := buffer.Write([]byte("abcdef"))
+	require.NoError(t, err)
+	assert.Equal(t, 6, written)
+	assert.Equal(t, "abcd", buffer.String())
+	assert.True(t, buffer.truncated)
+}
+
+func TestServiceWorkspaceTerminalPersistsAndStreamsWithoutActiveRun(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+
+	opened := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{Rows: 24, Cols: 80})
+	require.NotEmpty(t, opened.SessionID)
+	assert.Equal(t, "sh", opened.Name)
+	callService[struct{}](t, service, protocol.MethodWorkspaceTerminalInput, protocol.WorkspaceTerminalInputParams{
+		SessionID: opened.SessionID,
+		Data:      []byte("printf 'remote-terminal-ready\\n'\n"),
+	})
+
+	cursor := opened.ReplayCursor
+	var output strings.Builder
+	require.Eventually(t, func() bool {
+		result := callService[protocol.WorkspaceTerminalReadResult](t, service, protocol.MethodWorkspaceTerminalRead, protocol.WorkspaceTerminalReadParams{
+			SessionID: opened.SessionID,
+			Cursor:    cursor,
+			MaxBytes:  4096,
+			WaitMS:    100,
+		})
+		cursor = result.NextCursor
+		output.Write(result.Data)
+		return strings.Contains(output.String(), "remote-terminal-ready")
+	}, 3*time.Second, 10*time.Millisecond)
+
+	reopened := callService[protocol.WorkspaceTerminalOpenResult](t, service, protocol.MethodWorkspaceTerminalOpen, protocol.WorkspaceTerminalOpenParams{Rows: 30, Cols: 100})
+	assert.Equal(t, opened.SessionID, reopened.SessionID)
+	callService[struct{}](t, service, protocol.MethodWorkspaceTerminalInput, protocol.WorkspaceTerminalInputParams{
+		SessionID: opened.SessionID,
+		Data:      []byte("printf 'final-terminal-output\\n'; exit 7\n"),
+	})
+
+	exited := false
+	require.Eventually(t, func() bool {
+		result := callService[protocol.WorkspaceTerminalReadResult](t, service, protocol.MethodWorkspaceTerminalRead, protocol.WorkspaceTerminalReadParams{
+			SessionID: opened.SessionID,
+			Cursor:    cursor,
+			MaxBytes:  4096,
+			WaitMS:    100,
+		})
+		cursor = result.NextCursor
+		output.Write(result.Data)
+		exited = result.Exited
+		if exited {
+			assert.Equal(t, 7, result.ExitCode)
+		}
+		return exited
+	}, 3*time.Second, 10*time.Millisecond)
+	assert.Contains(t, output.String(), "final-terminal-output")
+}
+
+func TestWorkspaceTerminalOpenHonorsCanceledContext(t *testing.T) {
+	manager := newWorkspaceTerminalManager(t.Context(), t.TempDir())
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err := manager.Open(ctx, 24, 80)
+	require.ErrorIs(t, err, context.Canceled)
+	require.NoError(t, manager.Close())
+}
+
+func TestWorkspaceTerminalManagerCloseReapsHUPIgnoringSession(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PTY terminals are supported on Unix hosts")
+	}
+
+	childPIDPath := filepath.Join(t.TempDir(), "child.pid")
+	shell := filepath.Join(t.TempDir(), "ignore-hup.sh")
+	require.NoError(t, os.WriteFile(shell, []byte("#!/bin/bash\nset -m\ntrap '' HUP TERM\n(trap '' HUP TERM; while :; do :; done) &\necho $! > \"$KODELET_TERMINAL_CHILD_PID_FILE\"\nkill -STOP $$\nwait\n"), 0o700))
+	t.Setenv("SHELL", shell)
+	t.Setenv("KODELET_TERMINAL_CHILD_PID_FILE", childPIDPath)
+	manager := newWorkspaceTerminalManager(t.Context(), t.TempDir())
+	opened, err := manager.Open(t.Context(), 24, 80)
+	require.NoError(t, err)
+	require.NotEmpty(t, opened.SessionID)
+
+	manager.mu.Lock()
+	session := manager.current
+	manager.mu.Unlock()
+	require.NotNil(t, session)
+	require.Eventually(t, func() bool {
+		_, statErr := os.Stat(childPIDPath)
+		return statErr == nil
+	}, time.Second, 10*time.Millisecond)
+	childPIDData, err := os.ReadFile(childPIDPath)
+	require.NoError(t, err)
+	childPID, err := strconv.Atoi(strings.TrimSpace(string(childPIDData)))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = syscall.Kill(childPID, syscall.SIGKILL)
+	})
+	childSID, err := unix.Getsid(childPID)
+	require.NoError(t, err)
+	assert.Equal(t, session.cmd.Process.Pid, childSID)
+	childPGID, err := unix.Getpgid(childPID)
+	require.NoError(t, err)
+	assert.NotEqual(t, session.cmd.Process.Pid, childPGID)
+
+	started := time.Now()
+	require.NoError(t, manager.Close())
+	assert.Less(t, time.Since(started), workspaceTerminalShutdownWait)
+	select {
+	case <-session.done:
+	default:
+		t.Fatal("terminal session was not reaped before manager close returned")
+	}
+	require.NotNil(t, session.cmd.ProcessState)
+	assert.Eventually(t, func() bool {
+		return syscall.Kill(childPID, 0) == syscall.ESRCH
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestWorkspaceTerminalLeaderExitReapsDescendantsHoldingPTY(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PTY terminals are supported on Unix hosts")
+	}
+
+	childPIDPath := filepath.Join(t.TempDir(), "child.pid")
+	shell := filepath.Join(t.TempDir(), "exit-with-child.sh")
+	require.NoError(t, os.WriteFile(shell, []byte("#!/bin/bash\nset -m\ntrap '' HUP TERM\n(trap '' HUP TERM; while :; do sleep 60; done) &\necho $! > \"$KODELET_TERMINAL_CHILD_PID_FILE\"\nexit 7\n"), 0o700))
+	t.Setenv("SHELL", shell)
+	t.Setenv("KODELET_TERMINAL_CHILD_PID_FILE", childPIDPath)
+	manager := newWorkspaceTerminalManager(t.Context(), t.TempDir())
+	opened, err := manager.Open(t.Context(), 24, 80)
+	require.NoError(t, err)
+	require.NotEmpty(t, opened.SessionID)
+	t.Cleanup(func() { _ = manager.Close() })
+
+	require.Eventually(t, func() bool {
+		_, statErr := os.Stat(childPIDPath)
+		return statErr == nil
+	}, time.Second, 10*time.Millisecond)
+	childPIDData, err := os.ReadFile(childPIDPath)
+	require.NoError(t, err)
+	childPID, err := strconv.Atoi(strings.TrimSpace(string(childPIDData)))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = syscall.Kill(childPID, syscall.SIGKILL)
+	})
+
+	cursor := opened.ReplayCursor
+	var exitCode int
+	require.Eventually(t, func() bool {
+		result, readErr := manager.Read(t.Context(), protocol.WorkspaceTerminalReadParams{
+			SessionID: opened.SessionID,
+			Cursor:    cursor,
+			MaxBytes:  4096,
+			WaitMS:    100,
+		})
+		if readErr != nil {
+			return false
+		}
+		cursor = result.NextCursor
+		exitCode = result.ExitCode
+		return result.Exited
+	}, 4*time.Second, 10*time.Millisecond)
+	assert.Equal(t, 7, exitCode)
+	assert.Eventually(t, func() bool {
+		return syscall.Kill(childPID, 0) == syscall.ESRCH
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestWorkspaceTerminalSignalTargetsForegroundProcessGroup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PTY terminals are supported on Unix hosts")
+	}
+
+	readyPath := filepath.Join(t.TempDir(), "ready")
+	signalPath := filepath.Join(t.TempDir(), "signal")
+	foreground := filepath.Join(t.TempDir(), "foreground.sh")
+	require.NoError(t, os.WriteFile(foreground, []byte("#!/bin/bash\ntrap 'printf hit > \"$KODELET_TERMINAL_SIGNAL_FILE\"; exit 0' INT\nprintf ready > \"$KODELET_TERMINAL_READY_FILE\"\nwhile :; do sleep 60; done\n"), 0o700))
+	t.Setenv("SHELL", "/bin/bash")
+	t.Setenv("KODELET_TERMINAL_READY_FILE", readyPath)
+	t.Setenv("KODELET_TERMINAL_SIGNAL_FILE", signalPath)
+	manager := newWorkspaceTerminalManager(t.Context(), t.TempDir())
+	opened, err := manager.Open(t.Context(), 24, 80)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = manager.Close() })
+	require.NoError(t, manager.Write(t.Context(), protocol.WorkspaceTerminalInputParams{
+		SessionID: opened.SessionID,
+		Data:      []byte(strconv.Quote(foreground) + "\n"),
+	}))
+	require.Eventually(t, func() bool {
+		_, statErr := os.Stat(readyPath)
+		return statErr == nil
+	}, time.Second, 10*time.Millisecond)
+
+	require.NoError(t, manager.Signal(t.Context(), protocol.WorkspaceTerminalSignalParams{
+		SessionID: opened.SessionID,
+		Name:      "INT",
+	}))
+	require.Eventually(t, func() bool {
+		payload, readErr := os.ReadFile(signalPath)
+		return readErr == nil && string(payload) == "hit"
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestWorkspaceTerminalReadReportsReplayTruncationAndCancellation(t *testing.T) {
+	session := &workspaceTerminalSession{
+		updated: make(chan struct{}),
+		done:    make(chan struct{}),
+	}
+	session.appendOutput([]byte(strings.Repeat("x", workspaceTerminalReplayBufferLimit+32)))
+	result, err := session.read(t.Context(), 0, 64, 1)
+	require.NoError(t, err)
+	assert.True(t, result.Truncated)
+	assert.Len(t, result.Data, 64)
+	assert.Equal(t, session.baseCursor+64, result.NextCursor)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err = session.read(ctx, session.writeCursor, 64, 1000)
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 func TestServiceAbortAndValidationHelpers(t *testing.T) {

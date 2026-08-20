@@ -21,6 +21,8 @@ import {
 
 interface TerminalModalProps {
   cwdLabel: string;
+  conversationId?: string;
+  runnerId?: string;
   open: boolean;
   onClose: () => void;
   showPopOut?: boolean;
@@ -190,7 +192,15 @@ const drainTerminalResponses = (terminal: Terminal, onResponse: (data: string) =
   }
 };
 
-const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose, showPopOut = true }) => {
+const TerminalModal: React.FC<TerminalModalProps> = ({
+  cwdLabel,
+  conversationId,
+  runnerId,
+  open,
+  onClose,
+  showPopOut = true,
+}) => {
+  const popOutEnabled = showPopOut && !conversationId && !runnerId;
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
@@ -203,7 +213,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose, 
   const [exitCode, setExitCode] = useState<number | null>(null);
   const [popOutActive, setPopOutActive] = useState(
     () =>
-      showPopOut &&
+      popOutEnabled &&
       (getActiveTerminalPopOutWindow(cwdLabel) !== null ||
         readTerminalPopOutRecord(cwdLabel) !== null)
   );
@@ -241,6 +251,12 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose, 
     return statusText === 'Connected' ? '' : statusText;
   }, [connectionError, exitCode, statusText]);
   const statusVariant: TerminalStatusVariant = connectionError ? 'error' : exitCode !== null ? 'idle' : 'live';
+
+  useEffect(() => {
+    if (!popOutEnabled) {
+      setPopOutActive(false);
+    }
+  }, [popOutEnabled]);
 
   useEffect(() => {
     if (!open || popOutActive || !terminalHostRef.current) {
@@ -405,7 +421,9 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose, 
         suppressTerminalInputRef.current = true;
 
         socket = apiService.createTerminalWebSocket({
-          cwd: cwdLabel,
+          cwd: conversationId || runnerId ? undefined : cwdLabel,
+          conversationId,
+          runnerId,
           rows: terminal.rows,
           cols: terminal.cols,
         });
@@ -601,10 +619,10 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose, 
       }
       fitAddonRef.current = null;
     };
-  }, [cwdLabel, fitTerminalToPanel, open, popOutActive]);
+  }, [conversationId, cwdLabel, fitTerminalToPanel, open, popOutActive, runnerId]);
 
   useEffect(() => {
-    if (!showPopOut) {
+    if (!popOutEnabled) {
       return undefined;
     }
 
@@ -683,7 +701,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose, 
       channel?.removeEventListener('message', handleChannelMessage);
       channel?.close();
     };
-  }, [cwdLabel, showPopOut]);
+  }, [cwdLabel, popOutEnabled]);
 
   useEffect(() => {
     if (!open) {
@@ -781,7 +799,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({ cwdLabel, open, onClose, 
       statusVariant={popOutActive ? 'idle' : statusVariant}
       terminalHostRef={terminalHostRef}
       onClose={onClose}
-      onPopOut={showPopOut ? handlePopOut : undefined}
+      onPopOut={popOutEnabled ? handlePopOut : undefined}
     />
   );
 };
