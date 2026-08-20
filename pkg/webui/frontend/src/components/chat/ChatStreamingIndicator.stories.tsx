@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import ChatStreamingIndicator, { StreamingMark } from './ChatStreamingIndicator';
+import Spinner from '../Spinner';
+import ChatStreamingIndicator from './ChatStreamingIndicator';
 
 const meta = {
   title: 'Chat/ChatStreamingIndicator',
@@ -24,6 +25,6 @@ export const LaterTurn: Story = {
   },
 };
 
-export const MarkOnly: Story = {
-  render: () => <StreamingMark />,
+export const SpinnerOnly: Story = {
+  render: () => <Spinner className="chat-streaming-spinner" />,
 };

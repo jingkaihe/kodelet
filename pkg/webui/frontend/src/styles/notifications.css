@@ -81,68 +81,6 @@
   }
 }
 
-@keyframes kodeletSpin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes kodeletDustOrbit {
-  0% {
-    transform: rotate(0deg) scale(0.96);
-  }
-  45% {
-    transform: rotate(178deg) scale(1.05);
-  }
-  100% {
-    transform: rotate(360deg) scale(0.96);
-  }
-}
-
-@keyframes kodeletDustOrbitReverse {
-  0% {
-    transform: rotate(360deg) scale(1);
-  }
-  100% {
-    transform: rotate(0deg) scale(1);
-  }
-}
-
-@keyframes kodeletDustCore {
-  0%,
-  100% {
-    opacity: 0.62;
-    transform: scale(0.94);
-  }
-  50% {
-    opacity: 0.92;
-    transform: scale(1.08);
-  }
-}
-
-@keyframes kodeletDustTrail {
-  0%,
-  100% {
-    stroke-dashoffset: 0;
-    opacity: 0.2;
-  }
-  50% {
-    stroke-dashoffset: -6;
-    opacity: 0.58;
-  }
-}
-
-@keyframes kodeletTextDust {
-  from {
-    transform: translate3d(-0.08rem, 0.06rem, 0) scale(0.7);
-    opacity: 0.18;
-  }
-  to {
-    transform: translate3d(0.14rem, -0.12rem, 0) scale(1.2);
-    opacity: 0.72;
-  }
-}
-
 @keyframes kodeletActivityPulse {
   0%,
   100% {

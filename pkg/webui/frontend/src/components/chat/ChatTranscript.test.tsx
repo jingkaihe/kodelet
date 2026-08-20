@@ -193,7 +193,7 @@ describe('ChatTranscript', () => {
 
     expect(container.querySelector('details')).toBeNull();
     expect(screen.getByText('Thinking')).toBeInTheDocument();
-    expect(container.querySelector('.chat-streaming-mark')).toBeInTheDocument();
+    expect(container.querySelector('.chat-streaming-spinner')).toHaveTextContent('⣾');
 
     rerender(
       <ChatTranscript
@@ -217,7 +217,7 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('details')).not.toHaveAttribute('open');
   });
 
-  it('uses the dust spinner and stable label on in-progress thinking blocks', () => {
+  it('uses the shared TUI dot spinner on in-progress thinking blocks', () => {
     const { container } = render(
       <ChatTranscript
         isStreaming={true}
@@ -237,7 +237,7 @@ describe('ChatTranscript', () => {
     );
 
     expect(screen.getByText('Thinking')).toBeInTheDocument();
-    expect(container.querySelector('.chat-streaming-mark')).toBeInTheDocument();
+    expect(container.querySelector('.chat-streaming-spinner')).toHaveTextContent('⣾');
   });
 
   it('groups consecutive completed thinking blocks into one collapsible thoughts card', () => {

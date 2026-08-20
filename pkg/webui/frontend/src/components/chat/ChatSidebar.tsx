@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import type { AuthPrincipal, Conversation } from "../../types";
 import { cn, truncateText } from "../../utils";
+import Spinner from "../Spinner";
 
 const DEFAULT_VISIBLE_CONVERSATIONS_PER_GROUP = 10;
 const VISIBLE_CONVERSATIONS_STEP = 10;
@@ -819,7 +820,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 															data-testid={`conversation-running-indicator-${conversation.id}`}
 															title="Conversation is running"
 														>
-															<span className="conversation-running-wheel" aria-hidden="true" />
+															<Spinner className="conversation-running-spinner" />
 															<span className="sr-only">Running</span>
 														</span>
 													) : null}

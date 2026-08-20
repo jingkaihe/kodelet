@@ -1,0 +1,7 @@
+.spinner-glyph {
+  display: inline-block;
+  min-width: 1em;
+  font-family: var(--font-mono);
+  line-height: 1;
+  text-align: center;
+}

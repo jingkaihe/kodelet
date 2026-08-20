@@ -21,6 +21,35 @@ const renderSidebar = (authPrincipal?: AuthPrincipal | null) =>
 		</div>,
 	);
 
+describe("ChatSidebar running indicator", () => {
+	it("uses the shared TUI dot spinner for running conversations", () => {
+		render(
+			<ChatSidebar
+				activeConversationId="conv-running"
+				conversations={[
+					{
+						id: "conv-running",
+						createdAt: "2026-08-20T00:00:00Z",
+						updatedAt: "2026-08-20T00:00:00Z",
+						messageCount: 1,
+						summary: "Running conversation",
+						isRunning: true,
+					},
+				]}
+				loading={false}
+				onDeleteConversation={vi.fn()}
+				onForkConversation={vi.fn()}
+				onNewChat={vi.fn()}
+				onSearch={vi.fn()}
+				onSelectConversation={vi.fn()}
+			/>,
+		);
+
+		const indicator = screen.getByTestId("conversation-running-indicator-conv-running");
+		expect(indicator.querySelector(".spinner-glyph")).toHaveTextContent("⣾");
+	});
+});
+
 describe("ChatSidebar account menu", () => {
 	it("only renders the account control for an OIDC principal", () => {
 		const { rerender } = renderSidebar();

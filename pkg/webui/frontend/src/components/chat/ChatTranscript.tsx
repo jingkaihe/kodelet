@@ -6,8 +6,9 @@ import type {
   ChatRenderMessage,
   ContentBlock,
 } from '../../types';
+import Spinner from '../Spinner';
 import ChatMessageFrame from './ChatMessageFrame';
-import ChatStreamingIndicator, { StreamingMark } from './ChatStreamingIndicator';
+import ChatStreamingIndicator from './ChatStreamingIndicator';
 import ChatToolActivity from './ChatToolActivity';
 import { CopyButton } from '../tool-renderers/shared';
 
@@ -272,7 +273,7 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({
               aria-live="polite"
             >
               <div className="tool-summary activity-summary activity-summary-static">
-                <StreamingMark />
+                <Spinner className="chat-streaming-spinner" />
                 <span className="tool-summary-text" title="Thinking">
                   <span className="tool-summary-label">Thinking</span>
                 </span>
