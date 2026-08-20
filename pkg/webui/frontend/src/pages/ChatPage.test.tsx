@@ -1313,6 +1313,51 @@ describe('ChatPage', () => {
     );
   });
 
+  it('enables terminal pop-out for an established remote conversation', async () => {
+    routeParams = { id: 'conv-remote' };
+    const runner = {
+      id: 'runner-1',
+      displayName: 'kodelet-gpu',
+      host: {
+        instanceId: 'host-1',
+        hostname: 'worker',
+        os: 'linux',
+        arch: 'amd64',
+      },
+      workspace: { path: '/runner/kodelet', name: 'kodelet' },
+      manifestChanged: false,
+      status: 'idle' as const,
+      connected: true,
+      workspaceGitDiff: true,
+      workspaceTerminal: true,
+      generation: 1,
+    };
+    mockGetRunners.mockResolvedValue({ runners: [runner] });
+    mockGetConversation.mockResolvedValue({
+      id: 'conv-remote',
+      createdAt: '2026-08-19T00:00:00Z',
+      updatedAt: '2026-08-19T00:00:00Z',
+      messageCount: 1,
+      cwd: '/runner/kodelet',
+      runnerId: runner.id,
+      runner,
+      messages: [{ role: 'user', content: 'remote' }],
+      toolResults: {},
+    });
+
+    render(<ChatPage />);
+
+    await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-remote'));
+    await waitForTerminalAccess();
+    await waitFor(() => expect(screen.getByTestId('workspace-tools-shell')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('workspace-tools-toggle'));
+
+    const terminal = await screen.findByTestId('terminal-panel');
+    expect(terminal).toHaveAttribute('data-conversation-id', 'conv-remote');
+    expect(terminal).toHaveAttribute('data-runner-id', 'runner-1');
+    expect(terminal).toHaveAttribute('data-show-pop-out', 'true');
+  });
+
   it('uses the runner-only workspace target while a new remote conversation is pending', async () => {
     mockGetRunners.mockResolvedValue({
       runners: [

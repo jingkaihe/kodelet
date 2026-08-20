@@ -11,12 +11,14 @@ import TerminalModalFrame, { type TerminalStatusVariant } from './TerminalModalF
 import {
   clearTerminalPopOutRecord,
   createTerminalPopOutChannel,
+  getTerminalPopOutTargetKey,
   isTerminalPopOutMessage,
-  readTerminalPopOutRecord,
+  readTerminalPopOutRecordForTarget,
   readTerminalPopOutRecordById,
   TERMINAL_POP_OUT_HEARTBEAT_INTERVAL,
   TERMINAL_POP_OUT_RELOAD_GRACE_PERIOD,
   TERMINAL_POP_OUT_STORAGE_KEY,
+  type TerminalPopOutTarget,
 } from './terminalPopOut';
 
 interface TerminalModalProps {
@@ -43,30 +45,36 @@ const TERMINAL_POP_OUT_WINDOW_FEATURES = 'popup=yes,width=1120,height=760,resiza
 
 let ghosttyLoadPromise: Promise<Ghostty> | null = null;
 let activeTerminalPopOutWindow: Window | null = null;
-let activeTerminalPopOutCwd = '';
+let activeTerminalPopOutTargetKey = '';
 let activeTerminalPopOutPendingUntil = 0;
 
-const getTerminalPopOutURL = (cwd: string): URL => {
+const getTerminalPopOutURL = (target: TerminalPopOutTarget): URL => {
   const url = new URL('/terminal', window.location.origin);
-  if (cwd) {
-    url.searchParams.set('cwd', cwd);
+  const conversationId = target.conversationId?.trim();
+  if (conversationId) {
+    url.searchParams.set('conversationId', conversationId);
+  } else if (target.cwd) {
+    url.searchParams.set('cwd', target.cwd);
   }
   return url;
 };
 
 const clearActiveTerminalPopOutWindow = () => {
   activeTerminalPopOutWindow = null;
-  activeTerminalPopOutCwd = '';
+  activeTerminalPopOutTargetKey = '';
   activeTerminalPopOutPendingUntil = 0;
 };
 
-const isExpectedTerminalPopOutWindow = (candidate: Window, cwd: string): boolean => {
+const isExpectedTerminalPopOutWindow = (candidate: Window, targetKey: string): boolean => {
   try {
     const url = new URL(candidate.location.href, window.location.href);
     return (
       url.origin === window.location.origin &&
       url.pathname === '/terminal' &&
-      (url.searchParams.get('cwd') ?? '') === cwd
+      getTerminalPopOutTargetKey({
+        cwd: url.searchParams.get('cwd') ?? '',
+        conversationId: url.searchParams.get('conversationId') || undefined,
+      }) === targetKey
     );
   } catch {
     return false;
@@ -75,24 +83,24 @@ const isExpectedTerminalPopOutWindow = (candidate: Window, cwd: string): boolean
 
 const rememberActiveTerminalPopOutWindow = (
   candidate: Window,
-  cwd: string,
+  target: TerminalPopOutTarget,
   pendingNavigation: boolean
 ) => {
   activeTerminalPopOutWindow = candidate;
-  activeTerminalPopOutCwd = cwd;
+  activeTerminalPopOutTargetKey = getTerminalPopOutTargetKey(target);
   activeTerminalPopOutPendingUntil = pendingNavigation
     ? Date.now() + POP_OUT_NAVIGATION_GRACE_PERIOD
     : 0;
 };
 
-const getActiveTerminalPopOutWindow = (cwd?: string) => {
+const getActiveTerminalPopOutWindow = (target?: TerminalPopOutTarget) => {
   if (activeTerminalPopOutWindow?.closed) {
     clearActiveTerminalPopOutWindow();
   } else if (activeTerminalPopOutWindow) {
     if (
       isExpectedTerminalPopOutWindow(
         activeTerminalPopOutWindow,
-        activeTerminalPopOutCwd
+        activeTerminalPopOutTargetKey
       )
     ) {
       activeTerminalPopOutPendingUntil = 0;
@@ -101,7 +109,7 @@ const getActiveTerminalPopOutWindow = (cwd?: string) => {
     }
   }
 
-  return cwd === undefined || activeTerminalPopOutCwd === cwd
+  return target === undefined || activeTerminalPopOutTargetKey === getTerminalPopOutTargetKey(target)
     ? activeTerminalPopOutWindow
     : null;
 };
@@ -200,7 +208,12 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
   onClose,
   showPopOut = true,
 }) => {
-  const popOutEnabled = showPopOut && !conversationId && !runnerId;
+  const popOutTarget = useMemo<TerminalPopOutTarget>(
+    () => ({ cwd: cwdLabel, conversationId }),
+    [conversationId, cwdLabel]
+  );
+  const popOutTargetKey = getTerminalPopOutTargetKey(popOutTarget);
+  const popOutEnabled = showPopOut && (!runnerId || Boolean(conversationId));
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
@@ -214,8 +227,8 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
   const [popOutActive, setPopOutActive] = useState(
     () =>
       popOutEnabled &&
-      (getActiveTerminalPopOutWindow(cwdLabel) !== null ||
-        readTerminalPopOutRecord(cwdLabel) !== null)
+      (getActiveTerminalPopOutWindow(popOutTarget) !== null ||
+        readTerminalPopOutRecordForTarget(popOutTarget) !== null)
   );
 
   const fitTerminalToPanel = useCallback(() => {
@@ -630,19 +643,28 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
     const pendingCloseTimeouts = new Set<number>();
     const syncPopOutState = () => {
       setPopOutActive(
-        getActiveTerminalPopOutWindow(cwdLabel) !== null ||
-          readTerminalPopOutRecord(cwdLabel) !== null
+        getActiveTerminalPopOutWindow(popOutTarget) !== null ||
+          readTerminalPopOutRecordForTarget(popOutTarget) !== null
       );
     };
     const handleChannelMessage = (event: MessageEvent<unknown>) => {
       if (!isTerminalPopOutMessage(event.data)) {
         return;
       }
-      if (event.data.type === 'active' && event.data.record.cwd === cwdLabel) {
+      if (
+        event.data.type === 'active' &&
+        getTerminalPopOutTargetKey(event.data.record) === popOutTargetKey
+      ) {
         setPopOutActive(true);
         return;
       }
-      if (event.data.type === 'closing' && event.data.cwd === cwdLabel) {
+      if (
+        event.data.type === 'closing' &&
+        getTerminalPopOutTargetKey({
+          cwd: event.data.cwd,
+          conversationId: event.data.conversationId,
+        }) === popOutTargetKey
+      ) {
         const closingId = event.data.id;
         const closingRecord = readTerminalPopOutRecordById(closingId);
         channel?.postMessage({ type: 'probe' });
@@ -650,13 +672,13 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
           pendingCloseTimeouts.delete(closeTimeout);
           const currentRecord = readTerminalPopOutRecordById(closingId);
           if (
-            getActiveTerminalPopOutWindow(cwdLabel) === null &&
+            getActiveTerminalPopOutWindow(popOutTarget) === null &&
             closingRecord &&
             currentRecord &&
             currentRecord.id === closingId &&
-            currentRecord.cwd === cwdLabel &&
+            getTerminalPopOutTargetKey(currentRecord) === popOutTargetKey &&
             currentRecord.state === 'closing' &&
-            closingRecord.cwd === cwdLabel &&
+            getTerminalPopOutTargetKey(closingRecord) === popOutTargetKey &&
             currentRecord.updatedAt === closingRecord.updatedAt
           ) {
             clearTerminalPopOutRecord(currentRecord.id);
@@ -701,7 +723,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
       channel?.removeEventListener('message', handleChannelMessage);
       channel?.close();
     };
-  }, [cwdLabel, popOutEnabled]);
+  }, [popOutEnabled, popOutTarget, popOutTargetKey]);
 
   useEffect(() => {
     if (!open) {
@@ -731,14 +753,14 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
   }, [open, onClose]);
 
   const handlePopOut = useCallback(() => {
-    const activePopOut = getActiveTerminalPopOutWindow(cwdLabel);
+    const activePopOut = getActiveTerminalPopOutWindow(popOutTarget);
     if (activePopOut) {
       activePopOut.focus();
       setPopOutActive(true);
       return;
     }
 
-    const persistedPopOut = readTerminalPopOutRecord(cwdLabel);
+    const persistedPopOut = readTerminalPopOutRecordForTarget(popOutTarget);
     if (persistedPopOut) {
       const existingPopOut = window.open(
         '',
@@ -748,11 +770,11 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
       if (existingPopOut) {
         const alreadyShowingTerminal = isExpectedTerminalPopOutWindow(
           existingPopOut,
-          cwdLabel
+          popOutTargetKey
         );
         if (!alreadyShowingTerminal) {
           try {
-            existingPopOut.location.href = getTerminalPopOutURL(cwdLabel).toString();
+            existingPopOut.location.href = getTerminalPopOutURL(popOutTarget).toString();
           } catch {
             clearTerminalPopOutRecord(persistedPopOut.id);
             setPopOutActive(false);
@@ -761,7 +783,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
         }
         rememberActiveTerminalPopOutWindow(
           existingPopOut,
-          cwdLabel,
+          popOutTarget,
           !alreadyShowingTerminal
         );
         setPopOutActive(true);
@@ -770,7 +792,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
       return;
     }
 
-    const url = getTerminalPopOutURL(cwdLabel);
+    const url = getTerminalPopOutURL(popOutTarget);
 
     const popOutWindow = window.open(
       url.toString(),
@@ -782,10 +804,10 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
       return;
     }
 
-    rememberActiveTerminalPopOutWindow(popOutWindow, cwdLabel, true);
+    rememberActiveTerminalPopOutWindow(popOutWindow, popOutTarget, true);
     setPopOutActive(true);
     popOutWindow.focus();
-  }, [cwdLabel]);
+  }, [popOutTarget, popOutTargetKey]);
 
   if (!open) {
     return null;

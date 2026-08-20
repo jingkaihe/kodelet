@@ -14,12 +14,14 @@ import {
 const TerminalPage = () => {
   const params = new URLSearchParams(window.location.search);
   const cwdLabel = params.get('cwd') ?? '';
+  const conversationId = params.get('conversationId')?.trim() || undefined;
 
   useEffect(() => {
     const documentClassName = 'terminal-popout-active';
     let record: TerminalPopOutRecord = {
       id: getTerminalPopOutSessionId(),
       cwd: cwdLabel,
+      conversationId,
       state: 'active',
       updatedAt: Date.now(),
       version: 2,
@@ -74,6 +76,7 @@ const TerminalPage = () => {
         type: 'closing',
         id: record.id,
         cwd: record.cwd,
+        conversationId: record.conversationId,
       } satisfies TerminalPopOutMessage);
     };
 
@@ -115,11 +118,12 @@ const TerminalPage = () => {
       document.documentElement.classList.remove(documentClassName);
       document.body.classList.remove(documentClassName);
     };
-  }, [cwdLabel]);
+  }, [conversationId, cwdLabel]);
 
   return (
     <main className="terminal-popout-page" data-testid="terminal-popout-page">
       <TerminalModal
+        conversationId={conversationId}
         cwdLabel={cwdLabel}
         open
         onClose={() => window.close()}

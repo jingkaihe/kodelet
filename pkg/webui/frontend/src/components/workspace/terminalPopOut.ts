@@ -4,9 +4,13 @@ const TERMINAL_POP_OUT_SESSION_ID_KEY = 'kodelet.terminal.pop-out.id';
 export const TERMINAL_POP_OUT_HEARTBEAT_INTERVAL = 1500;
 export const TERMINAL_POP_OUT_RELOAD_GRACE_PERIOD = 2500;
 
-export interface TerminalPopOutRecord {
-  id: string;
+export interface TerminalPopOutTarget {
   cwd: string;
+  conversationId?: string;
+}
+
+export interface TerminalPopOutRecord extends TerminalPopOutTarget {
+  id: string;
   state?: 'active' | 'closing';
   updatedAt: number;
   version: 2;
@@ -20,7 +24,12 @@ interface TerminalPopOutStore {
 export type TerminalPopOutMessage =
   | { type: 'probe' }
   | { type: 'active'; record: TerminalPopOutRecord }
-  | { type: 'closing'; id: string; cwd: string };
+  | { type: 'closing'; id: string; cwd: string; conversationId?: string };
+
+export const getTerminalPopOutTargetKey = (target: TerminalPopOutTarget): string => {
+  const conversationId = target.conversationId?.trim();
+  return conversationId ? `conversation:${conversationId}` : `cwd:${target.cwd}`;
+};
 
 export const createTerminalPopOutId = (): string =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -52,6 +61,8 @@ const isTerminalPopOutRecord = (value: unknown): value is TerminalPopOutRecord =
     record.version === 2 &&
     typeof record.id === 'string' &&
     typeof record.cwd === 'string' &&
+    (record.conversationId === undefined ||
+      (typeof record.conversationId === 'string' && record.conversationId.trim() !== '')) &&
     (record.state === undefined ||
       record.state === 'active' ||
       record.state === 'closing') &&
@@ -124,18 +135,27 @@ const readTerminalPopOutRecords = (): TerminalPopOutRecord[] => {
   }
 };
 
-export const readTerminalPopOutRecord = (cwd?: string): TerminalPopOutRecord | null =>
+export const readTerminalPopOutRecordForTarget = (
+  target: TerminalPopOutTarget
+): TerminalPopOutRecord | null =>
   readTerminalPopOutRecords()
-    .filter((record) => cwd === undefined || record.cwd === cwd)
+    .filter((record) => getTerminalPopOutTargetKey(record) === getTerminalPopOutTargetKey(target))
     .sort((left, right) => right.updatedAt - left.updatedAt)[0] ?? null;
+
+export const readTerminalPopOutRecord = (cwd?: string): TerminalPopOutRecord | null =>
+  cwd === undefined
+    ? readTerminalPopOutRecords().sort((left, right) => right.updatedAt - left.updatedAt)[0] ?? null
+    : readTerminalPopOutRecordForTarget({ cwd });
 
 export const readTerminalPopOutRecordById = (id: string): TerminalPopOutRecord | null =>
   readTerminalPopOutRecords().find((record) => record.id === id) ?? null;
 
 export const writeTerminalPopOutRecord = (record: TerminalPopOutRecord): void => {
+  const recordTargetKey = getTerminalPopOutTargetKey(record);
   const records = readTerminalPopOutRecords().filter(
     (currentRecord) =>
-      currentRecord.id !== record.id && currentRecord.cwd !== record.cwd
+      currentRecord.id !== record.id &&
+      getTerminalPopOutTargetKey(currentRecord) !== recordTargetKey
   );
   writeTerminalPopOutRecords([...records, record]);
 };
@@ -168,6 +188,7 @@ export const isTerminalPopOutMessage = (value: unknown): value is TerminalPopOut
     record?: unknown;
     id?: unknown;
     cwd?: unknown;
+    conversationId?: unknown;
   };
   if (message.type === 'probe') {
     return true;
@@ -178,6 +199,8 @@ export const isTerminalPopOutMessage = (value: unknown): value is TerminalPopOut
   return (
     message.type === 'closing' &&
     typeof message.id === 'string' &&
-    typeof message.cwd === 'string'
+    typeof message.cwd === 'string' &&
+    (message.conversationId === undefined ||
+      (typeof message.conversationId === 'string' && message.conversationId.trim() !== ''))
   );
 };

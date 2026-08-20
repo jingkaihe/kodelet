@@ -24,7 +24,21 @@ vi.mock('./pages/SignedOutPage', () => ({
 }));
 
 vi.mock('./components/workspace/TerminalModal', () => ({
-  default: () => <div data-testid="terminal-modal">Terminal</div>,
+  default: ({
+    conversationId,
+    cwdLabel,
+  }: {
+    conversationId?: string;
+    cwdLabel: string;
+  }) => (
+    <div
+      data-conversation-id={conversationId}
+      data-cwd-label={cwdLabel}
+      data-testid="terminal-modal"
+    >
+      Terminal
+    </div>
+  ),
 }));
 
 afterEach(() => {
@@ -142,6 +156,26 @@ describe('App', () => {
 });
 
 describe('TerminalPage', () => {
+  it('bootstraps a remote pop-out using only the conversation ID', () => {
+    window.history.replaceState({}, '', '/terminal?conversationId=conv-123');
+
+    const { unmount } = render(<TerminalPage />);
+
+    expect(screen.getByTestId('terminal-modal')).toHaveAttribute(
+      'data-conversation-id',
+      'conv-123'
+    );
+    expect(screen.getByTestId('terminal-modal')).toHaveAttribute('data-cwd-label', '');
+    expect(readTerminalPopOutRecord()).toEqual(
+      expect.objectContaining({
+        conversationId: 'conv-123',
+        cwd: '',
+      })
+    );
+
+    unmount();
+  });
+
   it('removes terminal document overflow styles on cleanup', () => {
     const { unmount } = render(<TerminalPage />);
     expect(document.documentElement).toHaveClass('terminal-popout-active');

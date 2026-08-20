@@ -342,10 +342,11 @@ func TestRemoteWorkspaceTerminalProxiesReplayAndExit(t *testing.T) {
 		Generation: registration.Generation,
 		State:      protocol.RunnerStateIdle,
 	}))
+	require.NoError(t, server.runnerRegistry.BindConversation(t.Context(), "conversation-terminal", registration.RunnerID))
 
 	httpServer := httptest.NewServer(http.HandlerFunc(server.handleTerminalWebsocket))
 	t.Cleanup(httpServer.Close)
-	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http")+"?runnerId="+registration.RunnerID, nil)
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http")+"?conversationId=conversation-terminal", nil)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
 

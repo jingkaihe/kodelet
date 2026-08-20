@@ -767,6 +767,36 @@ describe("ApiService", () => {
 				value: originalLocation,
 			});
 		});
+
+		it("creates a websocket using only remote conversation affinity", () => {
+			const originalLocation = window.location;
+			const websocketSpy = vi.fn();
+
+			// @ts-expect-error test shim
+			global.WebSocket = websocketSpy;
+			Object.defineProperty(window, "location", {
+				configurable: true,
+				value: {
+					protocol: "https:",
+					host: "kodelet.example",
+				},
+			});
+
+			apiService.createTerminalWebSocket({
+				conversationId: "conv-123",
+				rows: 30,
+				cols: 120,
+			});
+
+			expect(websocketSpy).toHaveBeenCalledWith(
+				"wss://kodelet.example/api/terminal/ws?conversationId=conv-123&rows=30&cols=120",
+			);
+
+			Object.defineProperty(window, "location", {
+				configurable: true,
+				value: originalLocation,
+			});
+		});
 	});
 
 	describe("getPendingSteer", () => {

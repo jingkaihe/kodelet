@@ -4,6 +4,7 @@ import TerminalModal from './TerminalModal';
 import {
   clearTerminalPopOutRecord,
   readTerminalPopOutRecord,
+  readTerminalPopOutRecordForTarget,
   TERMINAL_POP_OUT_RELOAD_GRACE_PERIOD,
   TERMINAL_POP_OUT_STORAGE_KEY,
   type TerminalPopOutRecord,
@@ -219,8 +220,9 @@ describe('TerminalModal', () => {
     expect(terminal.resize).toHaveBeenCalledWith(80, 23);
   });
 
-  it('connects to a remote runner target without enabling local pop-out state', async () => {
+  it('opens a remote terminal pop-out using only its conversation affinity', async () => {
     const socket = new MockWebSocket();
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
     createTerminalWebSocketMock.mockReturnValue(socket);
     writeTerminalPopOutRecord({
       id: 'local-pop-out',
@@ -244,6 +246,41 @@ describe('TerminalModal', () => {
       expect(createTerminalWebSocketMock).toHaveBeenCalledWith({
         cwd: undefined,
         conversationId: 'conv-123',
+        runnerId: 'runner-1',
+        rows: 23,
+        cols: 80,
+      })
+    );
+    act(() => {
+      screen.getByRole('button', { name: 'Open terminal in new window' }).click();
+    });
+
+    expect(openSpy).toHaveBeenCalledWith(
+      'http://localhost:3000/terminal?conversationId=conv-123',
+      'kodelet-terminal',
+      'popup=yes,width=1120,height=760,resizable=yes,scrollbars=no'
+    );
+
+    openSpy.mockRestore();
+  });
+
+  it('keeps remote pop-out disabled until conversation affinity is established', async () => {
+    const socket = new MockWebSocket();
+    createTerminalWebSocketMock.mockReturnValue(socket);
+
+    render(
+      <TerminalModal
+        cwdLabel="/runner/project"
+        onClose={vi.fn()}
+        open
+        runnerId="runner-1"
+      />
+    );
+
+    await waitFor(() =>
+      expect(createTerminalWebSocketMock).toHaveBeenCalledWith({
+        cwd: undefined,
+        conversationId: undefined,
         runnerId: 'runner-1',
         rows: 23,
         cols: 80,
@@ -534,6 +571,33 @@ describe('TerminalModal', () => {
 
     expect(readTerminalPopOutRecord('/tmp/first')).toBeNull();
     expect(readTerminalPopOutRecord('/tmp/second')).toEqual(secondRecord);
+  });
+
+  it('keeps local and remote pop-out leases separate for the same cwd', () => {
+    const localRecord: TerminalPopOutRecord = {
+      id: 'local-pop-out',
+      cwd: '/runner/project',
+      updatedAt: Date.now(),
+      version: 2,
+    };
+    const remoteRecord: TerminalPopOutRecord = {
+      id: 'remote-pop-out',
+      cwd: '/runner/project',
+      conversationId: 'conv-123',
+      updatedAt: Date.now() + 1,
+      version: 2,
+    };
+
+    writeTerminalPopOutRecord(localRecord);
+    writeTerminalPopOutRecord(remoteRecord);
+
+    expect(readTerminalPopOutRecord('/runner/project')).toEqual(localRecord);
+    expect(
+      readTerminalPopOutRecordForTarget({
+        cwd: '/runner/project',
+        conversationId: 'conv-123',
+      })
+    ).toEqual(remoteRecord);
   });
 
   it('focuses a persisted pop-out opened from another tab', () => {

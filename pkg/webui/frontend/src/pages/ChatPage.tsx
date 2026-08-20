@@ -3357,7 +3357,7 @@ const ChatPage: React.FC = () => {
                         runnerId={isRemoteConversation ? currentRunnerID : undefined}
                         open
                         onClose={handleToggleWorkspacePanel}
-                        showPopOut={!isRemoteConversation}
+                        showPopOut={!isRemoteConversation || Boolean(remoteWorkspaceConversationID)}
                       />
                     ) : (
                       <GitDiffModal

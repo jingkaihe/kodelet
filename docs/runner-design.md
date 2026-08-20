@@ -1039,7 +1039,7 @@ The control plane refuses to remove a connected runner or one with active runs. 
 
 For a remote conversation, the Web UI shows the integrated terminal and Git diff tabs when the connected runner advertises `workspaceTerminal` and `workspaceGitDiff`. Terminal visibility additionally requires the human principal's `terminal` or `admin` role, matching the WebSocket endpoint authorization. Both features operate on the runner's fixed canonical workspace and are proxied through the control plane; they never interpret the runner's path on the `kodelet serve` host. Older or incompatible runners that omit a capability keep the corresponding tab hidden.
 
-The remote terminal survives side-panel close and browser reconnection while its runner process and shell remain alive, with bounded output replay on reattachment. The separate terminal pop-out window remains disabled for remote terminals because its current bootstrap contract is server-local. Runner-backed CWD suggestions and server-side workspace command discovery are still hidden for remote conversations.
+The remote terminal survives side-panel close, browser reconnection, and pop-out handoff while its runner process and shell remain alive, with bounded output replay on reattachment. Once a conversation has runner affinity, the pop-out carries only its conversation ID; the control plane resolves the associated runner and current generation before attaching. Runner-backed CWD suggestions and server-side workspace command discovery are still hidden for remote conversations.
 
 Commands submitted in the conversation still resolve through the selected runner's command manifest and `command.execute` operation.
 
