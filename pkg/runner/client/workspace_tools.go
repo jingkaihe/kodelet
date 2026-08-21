@@ -316,18 +316,6 @@ func (m *workspaceTerminalManager) Resize(params protocol.WorkspaceTerminalResiz
 	return session.resize(params.Rows, params.Cols)
 }
 
-func (m *workspaceTerminalManager) Signal(ctx context.Context, params protocol.WorkspaceTerminalSignalParams) error {
-	signal, ok := parseWorkspaceTerminalSignal(params.Name)
-	if !ok {
-		return errors.Errorf("unsupported terminal signal %q", params.Name)
-	}
-	session, err := m.session(params.SessionID)
-	if err != nil {
-		return err
-	}
-	return session.signal(ctx, signal)
-}
-
 func (m *workspaceTerminalManager) session(sessionID string) (*workspaceTerminalSession, error) {
 	if m == nil {
 		return nil, errors.New("workspace terminal manager is unavailable")
@@ -540,19 +528,6 @@ func (s *workspaceTerminalSession) resize(rows, cols int) error {
 	})
 }
 
-func (s *workspaceTerminalSession) signal(ctx context.Context, signal syscall.Signal) error {
-	if !s.isAlive() {
-		return errors.New("terminal session is closed")
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	return s.signalForeground(signal)
-}
-
 func (s *workspaceTerminalSession) readPTY() {
 	defer close(s.ptyDone)
 	buffer := make([]byte, 4096)
@@ -638,27 +613,6 @@ func (s *workspaceTerminalSession) finishSupervision(ctx context.Context, proces
 		cleanupErr = combineWorkspaceTerminalErrors(cleanupErr, result.err)
 	}
 	s.finish(result.exitCode, cleanupErr)
-}
-
-func (s *workspaceTerminalSession) signalForeground(signal syscall.Signal) error {
-	if s == nil || s.cmd == nil || s.cmd.Process == nil {
-		return errors.New("terminal session is closed")
-	}
-	s.ptyMu.Lock()
-	foregroundGroup, foregroundErr := unix.IoctlGetInt(int(s.ptmx.Fd()), unix.TIOCGPGRP)
-	s.ptyMu.Unlock()
-	if foregroundErr == nil && foregroundGroup > 0 {
-		if err := syscall.Kill(-foregroundGroup, signal); err == nil || !errors.Is(err, syscall.ESRCH) {
-			return err
-		}
-	}
-	if err := syscall.Kill(-s.cmd.Process.Pid, signal); err != nil {
-		if errors.Is(err, syscall.ESRCH) {
-			return errors.New("terminal session is closed")
-		}
-		return err
-	}
-	return nil
 }
 
 func (s *workspaceTerminalSession) processGroups() []int {
@@ -825,13 +779,6 @@ func (s *Service) resizeWorkspaceTerminal(params protocol.WorkspaceTerminalResiz
 	return s.workspaceTerminals.Resize(params)
 }
 
-func (s *Service) signalWorkspaceTerminal(ctx context.Context, params protocol.WorkspaceTerminalSignalParams) error {
-	if s == nil || s.workspaceTerminals == nil {
-		return errors.New("workspace terminal is unavailable")
-	}
-	return s.workspaceTerminals.Signal(ctx, params)
-}
-
 func newWorkspaceTerminalSessionID() (string, error) {
 	value := make([]byte, 16)
 	if _, err := rand.Read(value); err != nil {
@@ -867,21 +814,6 @@ func workspaceTerminalEnv(shell string) []string {
 		environment = append(environment, "SHELL="+shell)
 	}
 	return environment
-}
-
-func parseWorkspaceTerminalSignal(name string) (syscall.Signal, bool) {
-	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "INT", "SIGINT":
-		return syscall.SIGINT, true
-	case "TERM", "SIGTERM":
-		return syscall.SIGTERM, true
-	case "HUP", "SIGHUP":
-		return syscall.SIGHUP, true
-	case "QUIT", "SIGQUIT":
-		return syscall.SIGQUIT, true
-	default:
-		return 0, false
-	}
 }
 
 func boundedWorkspaceTerminalRows(value int) int {

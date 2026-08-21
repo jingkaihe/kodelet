@@ -40,7 +40,6 @@ const (
 	MethodWorkspaceTerminalRead   = "workspace.terminal.read"
 	MethodWorkspaceTerminalInput  = "workspace.terminal.input"
 	MethodWorkspaceTerminalResize = "workspace.terminal.resize"
-	MethodWorkspaceTerminalSignal = "workspace.terminal.signal"
 	MethodUIInput                 = "ui.input"
 	MethodUIConfirm               = "ui.confirm"
 	MethodUISelect                = "ui.select"
@@ -443,10 +442,4 @@ type WorkspaceTerminalResizeParams struct {
 	SessionID string `json:"sessionId"`
 	Rows      int    `json:"rows"`
 	Cols      int    `json:"cols"`
-}
-
-// WorkspaceTerminalSignalParams sends a named signal to a runner terminal session.
-type WorkspaceTerminalSignalParams struct {
-	SessionID string `json:"sessionId"`
-	Name      string `json:"name"`
 }

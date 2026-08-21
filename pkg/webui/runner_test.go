@@ -392,7 +392,6 @@ func TestRemoteWorkspaceTerminalPersistsAcrossBrowserDetachAndReplaysOutput(t *t
 	var terminalOutput []byte
 	var openCount atomic.Int32
 	readCanceled := make(chan struct{}, 2)
-	signalReceived := make(chan protocol.WorkspaceTerminalSignalParams, 1)
 	link.call = func(ctx context.Context, method string, params any, result any) error {
 		switch method {
 		case protocol.MethodWorkspaceTerminalOpen:
@@ -428,9 +427,6 @@ func TestRemoteWorkspaceTerminalPersistsAcrossBrowserDetachAndReplaysOutput(t *t
 			default:
 			}
 			return ctx.Err()
-		case protocol.MethodWorkspaceTerminalSignal:
-			signalReceived <- params.(protocol.WorkspaceTerminalSignalParams)
-			return nil
 		default:
 			return errors.Errorf("unexpected terminal method %s", method)
 		}
@@ -485,15 +481,6 @@ func TestRemoteWorkspaceTerminalPersistsAcrossBrowserDetachAndReplaysOutput(t *t
 	require.NoError(t, json.Unmarshal(payload, &replayComplete))
 	assert.Equal(t, "replay-complete", replayComplete.Type)
 	assert.Equal(t, int32(2), openCount.Load())
-
-	require.NoError(t, reconnected.WriteJSON(terminalMessage{Type: "signal", Name: "INT"}))
-	select {
-	case signalParams := <-signalReceived:
-		assert.Equal(t, "terminal-persistent", signalParams.SessionID)
-		assert.Equal(t, "INT", signalParams.Name)
-	case <-time.After(2 * time.Second):
-		t.Fatal("runner terminal signal was not proxied")
-	}
 }
 
 func TestRunnerRoutesAllowUserDiscoveryButRequireAdminForInspection(t *testing.T) {

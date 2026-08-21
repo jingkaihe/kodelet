@@ -282,12 +282,6 @@ func (s *Service) HandleRequest(ctx context.Context, method string, params json.
 			return nil, rpcErr
 		}
 		return rpcResult(nil, s.resizeWorkspaceTerminal(value))
-	case protocol.MethodWorkspaceTerminalSignal:
-		value, rpcErr := decodeParams[protocol.WorkspaceTerminalSignalParams](params)
-		if rpcErr != nil {
-			return nil, rpcErr
-		}
-		return rpcResult(nil, s.signalWorkspaceTerminal(ctx, value))
 	default:
 		return nil, &protocol.RPCError{Code: protocol.ErrorCodeMethodNotFound, Message: "runner request method not found"}
 	}

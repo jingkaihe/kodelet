@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import TerminalModal from './TerminalModal';
 import {
   clearTerminalPopOutRecord,
-  readTerminalPopOutRecord,
   readTerminalPopOutRecordForTarget,
   TERMINAL_POP_OUT_RELOAD_GRACE_PERIOD,
   TERMINAL_POP_OUT_STORAGE_KEY,
@@ -667,7 +666,7 @@ describe('TerminalModal', () => {
     expect(createTerminalWebSocketMock).not.toHaveBeenCalled();
     expect(screen.getByTestId('terminal-host')).toHaveAttribute('aria-disabled', 'true');
     expect(screen.getByText('Terminal is open in the pop-out')).toBeInTheDocument();
-    expect(readTerminalPopOutRecord('/tmp/project')).toEqual(record);
+    expect(readTerminalPopOutRecordForTarget(localTarget)).toEqual(record);
   });
 
   it('removes an abandoned closing record after the reload grace period', async () => {
@@ -685,7 +684,7 @@ describe('TerminalModal', () => {
 
     await waitFor(() => expect(createTerminalWebSocketMock).toHaveBeenCalledTimes(1));
     expect(screen.getByTestId('terminal-host')).not.toHaveAttribute('aria-disabled');
-    expect(readTerminalPopOutRecord('/tmp/project')).toBeNull();
+    expect(readTerminalPopOutRecordForTarget(localTarget)).toBeNull();
   });
 
   it('preserves active pop-out leases for other working directories', () => {
@@ -703,13 +702,13 @@ describe('TerminalModal', () => {
     writeTerminalPopOutRecord(firstRecord);
     writeTerminalPopOutRecord(secondRecord);
 
-    expect(readTerminalPopOutRecord('/tmp/first')).toEqual(firstRecord);
-    expect(readTerminalPopOutRecord('/tmp/second')).toEqual(secondRecord);
+    expect(readTerminalPopOutRecordForTarget(firstRecord.target)).toEqual(firstRecord);
+    expect(readTerminalPopOutRecordForTarget(secondRecord.target)).toEqual(secondRecord);
 
     clearTerminalPopOutRecord(firstRecord.id);
 
-    expect(readTerminalPopOutRecord('/tmp/first')).toBeNull();
-    expect(readTerminalPopOutRecord('/tmp/second')).toEqual(secondRecord);
+    expect(readTerminalPopOutRecordForTarget(firstRecord.target)).toBeNull();
+    expect(readTerminalPopOutRecordForTarget(secondRecord.target)).toEqual(secondRecord);
   });
 
   it('keeps local and remote pop-out leases separate for the same cwd', () => {
@@ -727,7 +726,7 @@ describe('TerminalModal', () => {
     writeTerminalPopOutRecord(localRecord);
     writeTerminalPopOutRecord(remoteRecord);
 
-    expect(readTerminalPopOutRecord('/runner/project')).toEqual(localRecord);
+    expect(readTerminalPopOutRecordForTarget(localRecord.target)).toEqual(localRecord);
     expect(
       readTerminalPopOutRecordForTarget({
         kind: 'runner',

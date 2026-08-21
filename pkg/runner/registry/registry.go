@@ -1218,8 +1218,7 @@ func runnerSupportsWorkspaceMethod(entry *runnerEntry, method string) bool {
 	case protocol.MethodWorkspaceTerminalOpen,
 		protocol.MethodWorkspaceTerminalRead,
 		protocol.MethodWorkspaceTerminalInput,
-		protocol.MethodWorkspaceTerminalResize,
-		protocol.MethodWorkspaceTerminalSignal:
+		protocol.MethodWorkspaceTerminalResize:
 		return entry.WorkspaceTerminal
 	default:
 		return false

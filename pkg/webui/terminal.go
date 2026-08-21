@@ -421,13 +421,6 @@ func (s *Server) handleRemoteTerminalWebsocket(w http.ResponseWriter, r *http.Re
 					if err := s.callRemoteTerminal(ctx, runnerID, generation, protocol.MethodWorkspaceTerminalResize, protocol.WorkspaceTerminalResizeParams{SessionID: opened.SessionID, Rows: message.Rows, Cols: message.Cols}); err != nil {
 						return
 					}
-				case "signal":
-					if _, ok := parseTerminalSignal(message.Name); !ok {
-						continue
-					}
-					if err := s.callRemoteTerminal(ctx, runnerID, generation, protocol.MethodWorkspaceTerminalSignal, protocol.WorkspaceTerminalSignalParams{SessionID: opened.SessionID, Name: message.Name}); err != nil {
-						return
-					}
 				}
 			}
 		}

@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import App from './App';
 import TerminalPage from './pages/TerminalPage';
 import {
-  readTerminalPopOutRecord,
+  readTerminalPopOutRecordForTarget,
   TERMINAL_POP_OUT_STORAGE_KEY,
 } from './components/workspace/terminalPopOut';
 import type { WorkspaceTarget } from './types';
@@ -175,6 +175,8 @@ describe('App', () => {
 });
 
 describe('TerminalPage', () => {
+  const localTarget: WorkspaceTarget = { kind: 'local' };
+
   it('bootstraps a validated runner-scoped remote pop-out', async () => {
     window.history.replaceState({}, '', '/terminal?runnerId=runner-1&conversationId=conv-123');
 
@@ -190,7 +192,13 @@ describe('TerminalPage', () => {
     expect(terminal).toHaveAttribute('data-runner-id', 'runner-1');
     expect(terminal).toHaveAttribute('data-target-kind', 'runner');
     expect(terminal).toHaveAttribute('data-cwd-label', '');
-    expect(readTerminalPopOutRecord()).toEqual(
+    expect(
+      readTerminalPopOutRecordForTarget({
+        kind: 'runner',
+        runnerId: 'runner-1',
+        conversationId: 'conv-123',
+      })
+    ).toEqual(
       expect.objectContaining({
         target: {
           kind: 'runner',
@@ -220,30 +228,36 @@ describe('TerminalPage', () => {
       await screen.findByText('The terminal runner does not match this conversation.')
     ).toBeInTheDocument();
     expect(screen.queryByTestId('terminal-modal')).not.toBeInTheDocument();
-    expect(readTerminalPopOutRecord()).toBeNull();
+    expect(window.localStorage.getItem(TERMINAL_POP_OUT_STORAGE_KEY)).toBeNull();
   });
 
   it('resolves a conversation-only remote pop-out without opening a local terminal', async () => {
     mockGetConversation.mockResolvedValue({
-      id: 'conv-legacy',
-      runnerId: 'runner-legacy',
+      id: 'conv-remote',
+      runnerId: 'runner-remote',
     });
-    window.history.replaceState({}, '', '/terminal?conversationId=conv-legacy');
+    window.history.replaceState({}, '', '/terminal?conversationId=conv-remote');
 
     const { unmount } = render(<TerminalPage />);
 
     expect(screen.getByRole('status')).toHaveTextContent('Resolving remote terminal…');
     const terminal = await screen.findByTestId('terminal-modal');
-    expect(mockGetConversation).toHaveBeenCalledWith('conv-legacy');
+    expect(mockGetConversation).toHaveBeenCalledWith('conv-remote');
     expect(terminal).toHaveAttribute('data-target-kind', 'runner');
-    expect(terminal).toHaveAttribute('data-runner-id', 'runner-legacy');
-    expect(terminal).toHaveAttribute('data-conversation-id', 'conv-legacy');
-    expect(readTerminalPopOutRecord()).toEqual(
+    expect(terminal).toHaveAttribute('data-runner-id', 'runner-remote');
+    expect(terminal).toHaveAttribute('data-conversation-id', 'conv-remote');
+    expect(
+      readTerminalPopOutRecordForTarget({
+        kind: 'runner',
+        runnerId: 'runner-remote',
+        conversationId: 'conv-remote',
+      })
+    ).toEqual(
       expect.objectContaining({
         target: {
           kind: 'runner',
-          runnerId: 'runner-legacy',
-          conversationId: 'conv-legacy',
+          runnerId: 'runner-remote',
+          conversationId: 'conv-remote',
         },
       })
     );
@@ -261,33 +275,33 @@ describe('TerminalPage', () => {
       await screen.findByText('This conversation has no remote runner terminal.')
     ).toBeInTheDocument();
     expect(screen.queryByTestId('terminal-modal')).not.toBeInTheDocument();
-    expect(readTerminalPopOutRecord()).toBeNull();
+    expect(window.localStorage.getItem(TERMINAL_POP_OUT_STORAGE_KEY)).toBeNull();
   });
 
   it('removes terminal document overflow styles on cleanup', () => {
     const { unmount } = render(<TerminalPage />);
     expect(document.documentElement).toHaveClass('terminal-popout-active');
     expect(document.body).toHaveClass('terminal-popout-active');
-    expect(readTerminalPopOutRecord()).toEqual(
+    expect(readTerminalPopOutRecordForTarget(localTarget)).toEqual(
       expect.objectContaining({ target: { kind: 'local' } })
     );
 
     unmount();
     expect(document.documentElement).not.toHaveClass('terminal-popout-active');
     expect(document.body).not.toHaveClass('terminal-popout-active');
-    expect(readTerminalPopOutRecord()).toBeNull();
+    expect(readTerminalPopOutRecordForTarget(localTarget)).toBeNull();
   });
 
   it('marks a reload handoff and reuses the pop-out identity', () => {
     const { unmount } = render(<TerminalPage />);
-    const record = readTerminalPopOutRecord();
+    const record = readTerminalPopOutRecordForTarget(localTarget);
     expect(record).not.toBeNull();
     expect(record).toEqual(expect.objectContaining({ state: 'active' }));
 
     window.dispatchEvent(new Event('beforeunload'));
     unmount();
 
-    expect(readTerminalPopOutRecord()).toEqual(
+    expect(readTerminalPopOutRecordForTarget(localTarget)).toEqual(
       expect.objectContaining({
         id: record?.id,
         state: 'closing',
@@ -295,7 +309,7 @@ describe('TerminalPage', () => {
     );
 
     const { unmount: unmountReloadedPage } = render(<TerminalPage />);
-    expect(readTerminalPopOutRecord()).toEqual(
+    expect(readTerminalPopOutRecordForTarget(localTarget)).toEqual(
       expect.objectContaining({
         id: record?.id,
         state: 'active',
@@ -306,14 +320,14 @@ describe('TerminalPage', () => {
 
   it('releases ownership while cached and reclaims it when restored', () => {
     const { unmount } = render(<TerminalPage />);
-    const record = readTerminalPopOutRecord();
+    const record = readTerminalPopOutRecordForTarget(localTarget);
     expect(record).toEqual(expect.objectContaining({ state: 'active' }));
 
     const pageHide = new Event('pagehide');
     Object.defineProperty(pageHide, 'persisted', { value: true });
     window.dispatchEvent(pageHide);
 
-    expect(readTerminalPopOutRecord()).toEqual(
+    expect(readTerminalPopOutRecordForTarget(localTarget)).toEqual(
       expect.objectContaining({
         id: record?.id,
         state: 'closing',
@@ -324,7 +338,7 @@ describe('TerminalPage', () => {
     Object.defineProperty(pageShow, 'persisted', { value: true });
     window.dispatchEvent(pageShow);
 
-    expect(readTerminalPopOutRecord()).toEqual(
+    expect(readTerminalPopOutRecordForTarget(localTarget)).toEqual(
       expect.objectContaining({
         id: record?.id,
         state: 'active',

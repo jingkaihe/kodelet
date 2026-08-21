@@ -205,7 +205,6 @@ func TestServiceWorkspaceTerminalRejectsUnavailableManager(t *testing.T) {
 		{name: "read", method: protocol.MethodWorkspaceTerminalRead, params: protocol.WorkspaceTerminalReadParams{SessionID: "terminal-1"}},
 		{name: "input", method: protocol.MethodWorkspaceTerminalInput, params: protocol.WorkspaceTerminalInputParams{SessionID: "terminal-1", Data: []byte("x")}},
 		{name: "resize", method: protocol.MethodWorkspaceTerminalResize, params: protocol.WorkspaceTerminalResizeParams{SessionID: "terminal-1", Rows: 24, Cols: 80}},
-		{name: "signal", method: protocol.MethodWorkspaceTerminalSignal, params: protocol.WorkspaceTerminalSignalParams{SessionID: "terminal-1", Name: "INT"}},
 	}
 
 	for _, test := range tests {
@@ -235,9 +234,6 @@ func TestWorkspaceTerminalManagerValidatesRequests(t *testing.T) {
 		{name: "resize requires session", run: func() error {
 			return manager.Resize(protocol.WorkspaceTerminalResizeParams{Rows: 24, Cols: 80})
 		}, want: "session id is required"},
-		{name: "signal requires session", run: func() error {
-			return manager.Signal(t.Context(), protocol.WorkspaceTerminalSignalParams{Name: "INT"})
-		}, want: "session id is required"},
 		{name: "missing session", run: func() error {
 			_, readErr := manager.Read(t.Context(), protocol.WorkspaceTerminalReadParams{SessionID: "missing"})
 			return readErr
@@ -245,9 +241,6 @@ func TestWorkspaceTerminalManagerValidatesRequests(t *testing.T) {
 		{name: "oversized input", run: func() error {
 			return manager.Write(t.Context(), protocol.WorkspaceTerminalInputParams{Data: make([]byte, workspaceTerminalMaxInputBytes+1)})
 		}, want: "terminal input exceeds"},
-		{name: "unsupported signal", run: func() error {
-			return manager.Signal(t.Context(), protocol.WorkspaceTerminalSignalParams{Name: "KILL"})
-		}, want: "unsupported terminal signal"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			require.ErrorContains(t, test.run(), test.want)
@@ -399,18 +392,6 @@ func TestWorkspaceTerminalSessionIOEdgeCases(t *testing.T) {
 		require.ErrorContains(t, finished.writeInput(t.Context(), []byte("x")), "session is closed")
 	})
 
-	t.Run("signal handles cancellation and closed sessions", func(t *testing.T) {
-		session := &workspaceTerminalSession{done: make(chan struct{})}
-		canceledBeforeSend, cancelBeforeSend := context.WithCancel(t.Context())
-		cancelBeforeSend()
-		require.ErrorIs(t, session.signal(canceledBeforeSend, syscall.SIGINT), context.Canceled)
-
-		closedDone := make(chan struct{})
-		close(closedDone)
-		closed := &workspaceTerminalSession{done: closedDone}
-		require.ErrorContains(t, closed.signal(t.Context(), syscall.SIGINT), "session is closed")
-	})
-
 	t.Run("resize rejects a closed session", func(t *testing.T) {
 		done := make(chan struct{})
 		close(done)
@@ -543,18 +524,18 @@ func TestWorkspaceTerminalLeaderExitKillsDescendantInShellProcessGroup(t *testin
 	require.NoError(t, manager.Close())
 }
 
-func TestWorkspaceTerminalSignalTargetsForegroundProcessGroup(t *testing.T) {
+func TestWorkspaceTerminalControlInputInterruptsForegroundProcess(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("PTY terminals are supported on Unix hosts")
 	}
 
 	readyPath := filepath.Join(t.TempDir(), "ready")
-	signalPath := filepath.Join(t.TempDir(), "signal")
+	interruptedPath := filepath.Join(t.TempDir(), "interrupted")
 	foreground := filepath.Join(t.TempDir(), "foreground.sh")
-	require.NoError(t, os.WriteFile(foreground, []byte("#!/bin/bash\ntrap 'printf hit > \"$KODELET_TERMINAL_SIGNAL_FILE\"; exit 0' INT\nprintf ready > \"$KODELET_TERMINAL_READY_FILE\"\nwhile :; do sleep 60; done\n"), 0o700))
+	require.NoError(t, os.WriteFile(foreground, []byte("#!/bin/bash\ntrap 'printf interrupted > \"$KODELET_TERMINAL_INTERRUPTED_FILE\"; exit 0' INT\nprintf ready > \"$KODELET_TERMINAL_READY_FILE\"\nwhile :; do sleep 60; done\n"), 0o700))
 	t.Setenv("SHELL", "/bin/bash")
 	t.Setenv("KODELET_TERMINAL_READY_FILE", readyPath)
-	t.Setenv("KODELET_TERMINAL_SIGNAL_FILE", signalPath)
+	t.Setenv("KODELET_TERMINAL_INTERRUPTED_FILE", interruptedPath)
 	service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, service.Close()) })
@@ -568,13 +549,13 @@ func TestWorkspaceTerminalSignalTargetsForegroundProcessGroup(t *testing.T) {
 		return statErr == nil
 	}, time.Second, 10*time.Millisecond)
 
-	callService[struct{}](t, service, protocol.MethodWorkspaceTerminalSignal, protocol.WorkspaceTerminalSignalParams{
+	callService[struct{}](t, service, protocol.MethodWorkspaceTerminalInput, protocol.WorkspaceTerminalInputParams{
 		SessionID: opened.SessionID,
-		Name:      "INT",
+		Data:      []byte{3},
 	})
 	require.Eventually(t, func() bool {
-		payload, readErr := os.ReadFile(signalPath)
-		return readErr == nil && string(payload) == "hit"
+		payload, readErr := os.ReadFile(interruptedPath)
+		return readErr == nil && string(payload) == "interrupted"
 	}, time.Second, 10*time.Millisecond)
 }
 
@@ -612,22 +593,6 @@ func TestWorkspaceTerminalReadReportsReplayTruncationAndCancellation(t *testing.
 }
 
 func TestWorkspaceTerminalValidationHelpers(t *testing.T) {
-	for _, test := range []struct {
-		name string
-		want syscall.Signal
-	}{
-		{name: "INT", want: syscall.SIGINT},
-		{name: "sigterm", want: syscall.SIGTERM},
-		{name: " HUP ", want: syscall.SIGHUP},
-		{name: "SIGQUIT", want: syscall.SIGQUIT},
-	} {
-		signal, ok := parseWorkspaceTerminalSignal(test.name)
-		require.True(t, ok)
-		assert.Equal(t, test.want, signal)
-	}
-	_, ok := parseWorkspaceTerminalSignal("KILL")
-	assert.False(t, ok)
-
 	assert.Equal(t, workspaceTerminalDefaultRows, boundedWorkspaceTerminalRows(0))
 	assert.Equal(t, 42, boundedWorkspaceTerminalRows(42))
 	assert.Equal(t, workspaceTerminalMaxRows, boundedWorkspaceTerminalRows(workspaceTerminalMaxRows+1))

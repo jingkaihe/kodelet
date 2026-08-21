@@ -39,7 +39,7 @@ const TerminalPage = () => {
         if (cancelled) {
           return;
         }
-        const affinityRunnerId = conversation.runnerId || conversation.runner?.id;
+        const affinityRunnerId = conversation.runnerId;
         if (!affinityRunnerId) {
           setTargetError('This conversation has no remote runner terminal.');
           return;

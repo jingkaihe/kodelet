@@ -155,11 +155,6 @@ export const readTerminalPopOutRecordForTarget = (
     )
     .sort((left, right) => right.updatedAt - left.updatedAt)[0] ?? null;
 
-export const readTerminalPopOutRecord = (cwd?: string): TerminalPopOutRecord | null =>
-  cwd === undefined
-    ? readTerminalPopOutRecords().sort((left, right) => right.updatedAt - left.updatedAt)[0] ?? null
-    : readTerminalPopOutRecordForTarget({ kind: 'local', cwd });
-
 export const readTerminalPopOutRecordById = (id: string): TerminalPopOutRecord | null =>
   readTerminalPopOutRecords().find((record) => record.id === id) ?? null;
 
