@@ -35,11 +35,10 @@ const (
 	workspaceTerminalMaxReadWait       = 25 * time.Second
 	workspaceTerminalMaxInputBytes     = 64 * 1024
 	workspaceTerminalInputBufferLength = 128
+	workspaceTerminalGracefulWait      = 500 * time.Millisecond
+	workspaceTerminalCleanupPollWait   = 20 * time.Millisecond
 	workspaceTerminalProcessKillWait   = 2 * time.Second
 	workspaceTerminalShutdownWait      = 4 * time.Second
-	workspaceTerminalPTYCloseWait      = time.Second
-	workspaceTerminalExitPollInterval  = 100 * time.Millisecond
-	workspaceTerminalCleanupRetryDelay = 100 * time.Millisecond
 )
 
 type cappedBuffer struct {
@@ -163,9 +162,9 @@ type workspaceTerminalManager struct {
 	cwd      string
 	mu       sync.Mutex
 	closeMu  sync.Mutex
-	sessions map[string]*workspaceTerminalSession
 	current  *workspaceTerminalSession
 	closed   bool
+	closeErr error
 }
 
 type workspaceTerminalSession struct {
@@ -191,7 +190,7 @@ type workspaceTerminalSession struct {
 	inputCh     chan []byte
 
 	ptyDone      chan struct{}
-	signalCh     chan workspaceTerminalSignalRequest
+	processDone  chan workspaceTerminalProcessResult
 	shutdownCh   chan struct{}
 	done         chan struct{}
 	doneOnce     sync.Once
@@ -200,29 +199,16 @@ type workspaceTerminalSession struct {
 	cleanupErr   error
 }
 
-type workspaceTerminalSignalRequest struct {
-	signal syscall.Signal
-	result chan error
-}
-
-type workspaceTerminalProcess struct {
-	PID       int
-	PGID      int
-	SessionID int
-	Zombie    bool
-	pidfd     int
-	identity  string
+type workspaceTerminalProcessResult struct {
+	exitCode int
+	err      error
 }
 
 func newWorkspaceTerminalManager(ctx context.Context, cwd string) *workspaceTerminalManager {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	manager := &workspaceTerminalManager{
-		ctx:      ctx,
-		cwd:      cwd,
-		sessions: make(map[string]*workspaceTerminalSession),
-	}
+	manager := &workspaceTerminalManager{ctx: ctx, cwd: cwd}
 	if done := ctx.Done(); done != nil {
 		go func() {
 			<-done
@@ -254,11 +240,11 @@ func (m *workspaceTerminalManager) Open(ctx context.Context, rows, cols int) (pr
 		return result, nil
 	}
 	if m.current != nil {
-		if err := m.current.terminate(); err != nil {
+		previous := m.current
+		if err := previous.terminate(); err != nil {
 			m.mu.Unlock()
 			return protocol.WorkspaceTerminalOpenResult{}, errors.Wrap(err, "previous workspace terminal cleanup is incomplete")
 		}
-		delete(m.sessions, m.current.id)
 		m.current = nil
 	}
 	if err := ctx.Err(); err != nil {
@@ -284,16 +270,17 @@ func (m *workspaceTerminalManager) Open(ctx context.Context, rows, cols int) (pr
 		m.mu.Unlock()
 		return protocol.WorkspaceTerminalOpenResult{}, err
 	}
-	m.sessions[sessionID] = session
 	m.current = session
 	session.start(ctx)
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		if terminateErr := session.terminate(); terminateErr != nil {
+		terminateErr := session.terminate()
+		if terminateErr == nil {
+			m.current = nil
+		}
+		if terminateErr != nil {
 			m.mu.Unlock()
 			return protocol.WorkspaceTerminalOpenResult{}, errors.Wrapf(ctxErr, "terminal open was canceled; cleanup failed: %v", terminateErr)
 		}
-		delete(m.sessions, sessionID)
-		m.current = nil
 		m.mu.Unlock()
 		return protocol.WorkspaceTerminalOpenResult{}, ctxErr
 	}
@@ -354,11 +341,10 @@ func (m *workspaceTerminalManager) session(sessionID string) (*workspaceTerminal
 	if m.closed {
 		return nil, errors.New("workspace terminal manager is closed")
 	}
-	session := m.sessions[sessionID]
-	if session == nil {
+	if m.current == nil || m.current.id != sessionID {
 		return nil, errors.New("terminal session was not found")
 	}
-	return session, nil
+	return m.current, nil
 }
 
 func (m *workspaceTerminalManager) Close() error {
@@ -368,29 +354,25 @@ func (m *workspaceTerminalManager) Close() error {
 	m.closeMu.Lock()
 	defer m.closeMu.Unlock()
 	m.mu.Lock()
-	m.closed = true
-	sessions := make([]*workspaceTerminalSession, 0, len(m.sessions))
-	for _, session := range m.sessions {
-		sessions = append(sessions, session)
+	if m.closed {
+		m.mu.Unlock()
+		return m.closeErr
 	}
+	m.closed = true
+	session := m.current
 	m.mu.Unlock()
 
-	var firstErr error
-	for _, session := range sessions {
+	if session != nil {
 		if err := session.terminate(); err != nil {
-			if firstErr == nil {
-				firstErr = errors.Wrap(err, "failed to stop workspace terminal")
-			}
-			continue
+			m.closeErr = errors.Wrap(err, "failed to stop workspace terminal")
 		}
 		m.mu.Lock()
-		delete(m.sessions, session.id)
 		if m.current == session {
 			m.current = nil
 		}
 		m.mu.Unlock()
 	}
-	return firstErr
+	return m.closeErr
 }
 
 func newWorkspaceTerminalSession(ctx context.Context, id, cwd, shell, shellName string, gitRepo bool, rows, cols int) (*workspaceTerminalSession, error) {
@@ -408,26 +390,29 @@ func newWorkspaceTerminalSession(ctx context.Context, id, cwd, shell, shellName 
 		return nil, err
 	}
 	return &workspaceTerminalSession{
-		id:         id,
-		cwd:        cwd,
-		shellName:  shellName,
-		gitRepo:    gitRepo,
-		ctx:        sessionCtx,
-		cancel:     cancel,
-		cmd:        cmd,
-		ptmx:       ptmx,
-		updated:    make(chan struct{}),
-		inputCh:    make(chan []byte, workspaceTerminalInputBufferLength),
-		ptyDone:    make(chan struct{}),
-		signalCh:   make(chan workspaceTerminalSignalRequest),
-		shutdownCh: make(chan struct{}),
-		done:       make(chan struct{}),
+		id:          id,
+		cwd:         cwd,
+		shellName:   shellName,
+		gitRepo:     gitRepo,
+		ctx:         sessionCtx,
+		cancel:      cancel,
+		cmd:         cmd,
+		ptmx:        ptmx,
+		updated:     make(chan struct{}),
+		inputCh:     make(chan []byte, workspaceTerminalInputBufferLength),
+		ptyDone:     make(chan struct{}),
+		processDone: make(chan workspaceTerminalProcessResult, 1),
+		shutdownCh:  make(chan struct{}),
+		done:        make(chan struct{}),
 	}, nil
 }
 
 func (s *workspaceTerminalSession) start(ctx context.Context) {
 	go s.readPTY()
 	go s.writePTY()
+	go func() {
+		s.processDone <- s.waitProcess()
+	}()
 	go s.supervise(ctx)
 }
 
@@ -562,22 +547,10 @@ func (s *workspaceTerminalSession) signal(ctx context.Context, signal syscall.Si
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	request := workspaceTerminalSignalRequest{signal: signal, result: make(chan error, 1)}
-	select {
-	case s.signalCh <- request:
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-s.done:
-		return errors.New("terminal session is closed")
-	}
-	select {
-	case err := <-request.result:
+	if err := ctx.Err(); err != nil {
 		return err
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-s.done:
-		return errors.New("terminal session is closed")
 	}
+	return s.signalForeground(signal)
 }
 
 func (s *workspaceTerminalSession) readPTY() {
@@ -609,55 +582,62 @@ func (s *workspaceTerminalSession) writePTY() {
 }
 
 func (s *workspaceTerminalSession) supervise(ctx context.Context) {
-	ticker := time.NewTicker(workspaceTerminalExitPollInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-s.ptyDone:
-			s.finishSupervision(ctx)
-			return
-		case <-s.shutdownCh:
-			s.cancel()
-			s.finishSupervision(ctx)
-			return
-		case request := <-s.signalCh:
-			request.result <- s.signalForeground(request.signal)
-		case <-ticker.C:
-			exited, err := workspaceTerminalLeaderExited(s.cmd.Process.Pid)
-			if err != nil {
-				logger.G(ctx).WithError(err).Debug("failed to inspect workspace terminal process")
-				continue
-			}
-			if exited {
-				s.finishSupervision(ctx)
-				return
-			}
-		}
+	select {
+	case result := <-s.processDone:
+		s.finishSupervision(ctx, &result)
+	case <-s.ptyDone:
+		s.finishSupervision(ctx, nil)
+	case <-s.shutdownCh:
+		s.finishSupervision(ctx, nil)
 	}
 }
 
-func (s *workspaceTerminalSession) finishSupervision(ctx context.Context) {
+func (s *workspaceTerminalSession) finishSupervision(ctx context.Context, processResult *workspaceTerminalProcessResult) {
+	processGroups := s.processGroups()
 	s.beginEnding()
 	s.cancel()
-	for {
-		cleanupErr := terminateWorkspaceTerminalSession(s.cmd.Process.Pid, workspaceTerminalProcessKillWait)
-		s.setCleanupError(cleanupErr)
-		if cleanupErr == nil {
-			break
-		}
-		logger.G(ctx).WithError(cleanupErr).Warn("workspace terminal cleanup is incomplete; retrying")
-		timer := time.NewTimer(workspaceTerminalCleanupRetryDelay)
-		<-timer.C
-	}
+	graceDeadline := time.Now().Add(workspaceTerminalGracefulWait)
+	cleanupErr := signalWorkspaceTerminalProcessGroups(processGroups, syscall.SIGHUP)
 	s.closePTY()
-	if !waitWorkspaceTerminalDone(s.ptyDone, workspaceTerminalPTYCloseWait) {
-		logger.G(ctx).Warn("workspace terminal PTY did not close before process reap")
+	ptyStopped := waitWorkspaceTerminalDone(s.ptyDone, time.Until(graceDeadline))
+
+	result, exited := workspaceTerminalProcessResult{}, false
+	if processResult != nil {
+		result = *processResult
+		exited = true
+	} else {
+		result, exited = waitWorkspaceTerminalProcess(s.processDone, time.Until(graceDeadline))
 	}
-	exitCode, waitErr := s.waitProcess(ctx)
-	if waitErr != nil {
-		logger.G(ctx).WithError(waitErr).Warn("workspace terminal process could not be reaped cleanly")
+	processGroupsStopped := waitWorkspaceTerminalProcessGroups(processGroups, time.Until(graceDeadline))
+	if !processGroupsStopped {
+		cleanupErr = combineWorkspaceTerminalErrors(cleanupErr, signalWorkspaceTerminalProcessGroups(processGroups, syscall.SIGKILL))
 	}
-	s.finish(exitCode)
+	if !exited || !processGroupsStopped || !ptyStopped {
+		killDeadline := time.Now().Add(workspaceTerminalProcessKillWait)
+		if !exited {
+			result, exited = waitWorkspaceTerminalProcess(s.processDone, time.Until(killDeadline))
+		}
+		if !processGroupsStopped {
+			processGroupsStopped = waitWorkspaceTerminalProcessGroups(processGroups, time.Until(killDeadline))
+		}
+		if !ptyStopped {
+			ptyStopped = waitWorkspaceTerminalDone(s.ptyDone, time.Until(killDeadline))
+		}
+	}
+	if !exited {
+		cleanupErr = combineWorkspaceTerminalErrors(cleanupErr, errors.New("workspace terminal process did not stop before the cleanup deadline"))
+	}
+	if !processGroupsStopped {
+		cleanupErr = combineWorkspaceTerminalErrors(cleanupErr, errors.New("workspace terminal process groups did not stop before the cleanup deadline"))
+	}
+	if !ptyStopped {
+		cleanupErr = combineWorkspaceTerminalErrors(cleanupErr, errors.New("workspace terminal PTY did not close before the cleanup deadline"))
+	}
+	if result.err != nil {
+		logger.G(ctx).WithError(result.err).Warn("workspace terminal process could not be reaped cleanly")
+		cleanupErr = combineWorkspaceTerminalErrors(cleanupErr, result.err)
+	}
+	s.finish(result.exitCode, cleanupErr)
 }
 
 func (s *workspaceTerminalSession) signalForeground(signal syscall.Signal) error {
@@ -667,54 +647,61 @@ func (s *workspaceTerminalSession) signalForeground(signal syscall.Signal) error
 	s.ptyMu.Lock()
 	foregroundGroup, foregroundErr := unix.IoctlGetInt(int(s.ptmx.Fd()), unix.TIOCGPGRP)
 	s.ptyMu.Unlock()
-	processes, err := listWorkspaceTerminalSessionProcesses(s.cmd.Process.Pid)
-	if err != nil {
-		return errors.Wrap(err, "failed to inspect terminal foreground job")
-	}
-	defer closeWorkspaceTerminalProcesses(processes)
-
 	if foregroundErr == nil && foregroundGroup > 0 {
-		matched := false
-		var firstErr error
-		for _, process := range processes {
-			if process.Zombie || process.PGID != foregroundGroup {
-				continue
-			}
-			matched = true
-			if signalErr := signalWorkspaceTerminalProcess(process, signal); signalErr != nil && !errors.Is(signalErr, syscall.ESRCH) {
-				firstErr = combineWorkspaceTerminalErrors(firstErr, signalErr)
-			}
-		}
-		if matched {
-			return firstErr
-		}
-	}
-	for _, process := range processes {
-		if process.PID != s.cmd.Process.Pid || process.Zombie {
-			continue
-		}
-		if err := signalWorkspaceTerminalProcess(process, signal); err != nil {
-			if errors.Is(err, syscall.ESRCH) {
-				break
-			}
+		if err := syscall.Kill(-foregroundGroup, signal); err == nil || !errors.Is(err, syscall.ESRCH) {
 			return err
 		}
-		return nil
 	}
-	return errors.New("terminal session is closed")
+	if err := syscall.Kill(-s.cmd.Process.Pid, signal); err != nil {
+		if errors.Is(err, syscall.ESRCH) {
+			return errors.New("terminal session is closed")
+		}
+		return err
+	}
+	return nil
 }
 
-func (s *workspaceTerminalSession) waitProcess(ctx context.Context) (int, error) {
+func (s *workspaceTerminalSession) processGroups() []int {
+	if s == nil || s.cmd == nil || s.cmd.Process == nil {
+		return nil
+	}
+	groups := make([]int, 0, 2)
+	s.ptyMu.Lock()
+	if s.ptmx != nil {
+		if foregroundGroup, err := unix.IoctlGetInt(int(s.ptmx.Fd()), unix.TIOCGPGRP); err == nil && foregroundGroup > 0 {
+			groups = append(groups, foregroundGroup)
+		}
+	}
+	s.ptyMu.Unlock()
+	if processGroup := s.cmd.Process.Pid; processGroup > 0 && (len(groups) == 0 || groups[0] != processGroup) {
+		groups = append(groups, processGroup)
+	}
+	return groups
+}
+
+func signalWorkspaceTerminalProcessGroups(groups []int, signal syscall.Signal) error {
+	var firstErr error
+	for _, group := range groups {
+		if group <= 0 {
+			continue
+		}
+		if err := syscall.Kill(-group, signal); err != nil && !errors.Is(err, syscall.ESRCH) {
+			firstErr = combineWorkspaceTerminalErrors(firstErr, errors.Wrapf(err, "failed to signal workspace terminal process group %d", group))
+		}
+	}
+	return firstErr
+}
+
+func (s *workspaceTerminalSession) waitProcess() workspaceTerminalProcessResult {
 	waitErr := s.cmd.Wait()
 	if waitErr == nil {
-		return 0, nil
+		return workspaceTerminalProcessResult{}
 	}
 	var exitErr *exec.ExitError
 	if errors.As(waitErr, &exitErr) {
-		return exitErr.ExitCode(), nil
+		return workspaceTerminalProcessResult{exitCode: exitErr.ExitCode()}
 	}
-	logger.G(ctx).WithError(waitErr).Warn("workspace terminal process ended with error")
-	return 0, waitErr
+	return workspaceTerminalProcessResult{err: waitErr}
 }
 
 func (s *workspaceTerminalSession) appendOutput(chunk []byte) {
@@ -742,13 +729,13 @@ func (s *workspaceTerminalSession) appendOutput(chunk []byte) {
 	s.notifyUpdatedLocked()
 }
 
-func (s *workspaceTerminalSession) finish(exitCode int) {
+func (s *workspaceTerminalSession) finish(exitCode int, cleanupErr error) {
 	s.finishOnce.Do(func() {
 		s.mu.Lock()
 		s.ending = true
 		s.exited = true
 		s.exitCode = exitCode
-		s.cleanupErr = nil
+		s.cleanupErr = cleanupErr
 		s.notifyUpdatedLocked()
 		s.mu.Unlock()
 		s.cancel()
@@ -776,7 +763,9 @@ func (s *workspaceTerminalSession) requestShutdown() {
 		return
 	}
 	s.shutdownOnce.Do(func() {
-		close(s.shutdownCh)
+		if s.shutdownCh != nil {
+			close(s.shutdownCh)
+		}
 	})
 }
 
@@ -795,16 +784,12 @@ func (s *workspaceTerminalSession) beginEnding() {
 	s.mu.Unlock()
 }
 
-func (s *workspaceTerminalSession) setCleanupError(err error) {
-	s.mu.Lock()
-	s.cleanupErr = err
-	s.mu.Unlock()
-}
-
 func (s *workspaceTerminalSession) closePTY() {
 	s.ptyMu.Lock()
 	defer s.ptyMu.Unlock()
-	_ = s.ptmx.Close()
+	if s.ptmx != nil {
+		_ = s.ptmx.Close()
+	}
 }
 
 func (s *workspaceTerminalSession) notifyUpdatedLocked() {
@@ -964,6 +949,65 @@ func waitWorkspaceTerminalDone(done <-chan struct{}, timeout time.Duration) bool
 	}
 }
 
+func waitWorkspaceTerminalProcess(done <-chan workspaceTerminalProcessResult, timeout time.Duration) (workspaceTerminalProcessResult, bool) {
+	if done == nil {
+		return workspaceTerminalProcessResult{}, false
+	}
+	if timeout <= 0 {
+		select {
+		case result := <-done:
+			return result, true
+		default:
+			return workspaceTerminalProcessResult{}, false
+		}
+	}
+	timer := time.NewTimer(timeout)
+	defer stopWorkspaceTerminalTimer(timer)
+	select {
+	case result := <-done:
+		return result, true
+	case <-timer.C:
+		return workspaceTerminalProcessResult{}, false
+	}
+}
+
+func waitWorkspaceTerminalProcessGroups(groups []int, timeout time.Duration) bool {
+	if workspaceTerminalProcessGroupsStopped(groups) {
+		return true
+	}
+	if timeout <= 0 {
+		return false
+	}
+
+	timer := time.NewTimer(timeout)
+	ticker := time.NewTicker(workspaceTerminalCleanupPollWait)
+	defer stopWorkspaceTerminalTimer(timer)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if workspaceTerminalProcessGroupsStopped(groups) {
+				return true
+			}
+		case <-timer.C:
+			return workspaceTerminalProcessGroupsStopped(groups)
+		}
+	}
+}
+
+func workspaceTerminalProcessGroupsStopped(groups []int) bool {
+	for _, group := range groups {
+		if group <= 0 {
+			continue
+		}
+		err := syscall.Kill(-group, 0)
+		if err == nil || errors.Is(err, syscall.EPERM) {
+			return false
+		}
+	}
+	return true
+}
+
 func workspaceTerminalDone(done <-chan struct{}) bool {
 	if done == nil {
 		return true
@@ -984,54 +1028,5 @@ func combineWorkspaceTerminalErrors(first, second error) error {
 		return first
 	default:
 		return errors.Wrapf(first, "additional workspace terminal cleanup error: %v", second)
-	}
-}
-
-func workspaceTerminalLeaderExited(sessionID int) (bool, error) {
-	return workspaceTerminalProcessExited(sessionID)
-}
-
-func terminateWorkspaceTerminalSession(sessionID int, timeout time.Duration) error {
-	if sessionID <= 0 {
-		return errors.New("workspace terminal session id is invalid")
-	}
-	deadline := time.Now().Add(timeout)
-	var firstErr error
-	for {
-		processes, err := listWorkspaceTerminalSessionProcesses(sessionID)
-		if err != nil {
-			if leaderErr := syscall.Kill(sessionID, syscall.SIGKILL); leaderErr != nil && !errors.Is(leaderErr, syscall.ESRCH) {
-				firstErr = combineWorkspaceTerminalErrors(firstErr, leaderErr)
-			}
-			return combineWorkspaceTerminalErrors(errors.Wrap(err, "failed to enumerate workspace terminal session"), firstErr)
-		}
-
-		live := false
-		for _, leader := range []bool{false, true} {
-			for _, process := range processes {
-				if process.Zombie || (process.PID == sessionID) != leader {
-					continue
-				}
-				live = true
-				if killErr := signalWorkspaceTerminalProcess(process, syscall.SIGKILL); killErr != nil && !errors.Is(killErr, syscall.ESRCH) {
-					firstErr = combineWorkspaceTerminalErrors(firstErr, errors.Wrapf(killErr, "failed to kill workspace terminal process %d", process.PID))
-				}
-			}
-		}
-		closeWorkspaceTerminalProcesses(processes)
-		if !live {
-			return firstErr
-		}
-		if timeout <= 0 || time.Now().After(deadline) {
-			return combineWorkspaceTerminalErrors(firstErr, errors.New("workspace terminal processes did not stop before the cleanup deadline"))
-		}
-		timer := time.NewTimer(20 * time.Millisecond)
-		<-timer.C
-	}
-}
-
-func closeWorkspaceTerminalProcesses(processes []workspaceTerminalProcess) {
-	for _, process := range processes {
-		closeWorkspaceTerminalProcess(process)
 	}
 }

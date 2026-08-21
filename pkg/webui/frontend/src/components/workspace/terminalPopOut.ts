@@ -1,35 +1,43 @@
+import type { WorkspaceTarget } from '../../types';
+
 export const TERMINAL_POP_OUT_STORAGE_KEY = 'kodelet.terminal.pop-out';
 const TERMINAL_POP_OUT_CHANNEL_NAME = 'kodelet-terminal-pop-out';
 const TERMINAL_POP_OUT_SESSION_ID_KEY = 'kodelet.terminal.pop-out.id';
 export const TERMINAL_POP_OUT_HEARTBEAT_INTERVAL = 1500;
 export const TERMINAL_POP_OUT_RELOAD_GRACE_PERIOD = 2500;
 
-export interface TerminalPopOutTarget {
-  cwd: string;
-  conversationId?: string;
+export interface TerminalPopOutRecord {
+  id: string;
+  target: WorkspaceTarget;
+  state?: 'active' | 'closing';
+  updatedAt: number;
+  version: 3;
 }
 
-export interface TerminalPopOutRecord extends TerminalPopOutTarget {
+export interface LegacyTerminalPopOutRecord {
   id: string;
+  cwd: string;
+  conversationId?: string;
   state?: 'active' | 'closing';
   updatedAt: number;
   version: 2;
 }
 
+export type StoredTerminalPopOutRecord = TerminalPopOutRecord | LegacyTerminalPopOutRecord;
+
 interface TerminalPopOutStore {
-  records: TerminalPopOutRecord[];
+  records: StoredTerminalPopOutRecord[];
   version: 1;
 }
 
 export type TerminalPopOutMessage =
   | { type: 'probe' }
-  | { type: 'active'; record: TerminalPopOutRecord }
+  | { type: 'active'; record: StoredTerminalPopOutRecord }
+  | { type: 'closing'; id: string; target: WorkspaceTarget }
   | { type: 'closing'; id: string; cwd: string; conversationId?: string };
 
-export const getTerminalPopOutTargetKey = (target: TerminalPopOutTarget): string => {
-  const conversationId = target.conversationId?.trim();
-  return conversationId ? `conversation:${conversationId}` : `cwd:${target.cwd}`;
-};
+export const getTerminalPopOutTargetKey = (target: WorkspaceTarget): string =>
+  target.kind === 'runner' ? `runner:${target.runnerId}` : `local:${target.cwd || ''}`;
 
 export const createTerminalPopOutId = (): string =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -51,12 +59,48 @@ export const getTerminalPopOutSessionId = (): string => {
   }
 };
 
+const isWorkspaceTarget = (value: unknown): value is WorkspaceTarget => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+
+  const target = value as Partial<WorkspaceTarget>;
+  if (target.kind === 'local') {
+    return target.cwd === undefined || typeof target.cwd === 'string';
+  }
+  return (
+    target.kind === 'runner' &&
+    typeof target.runnerId === 'string' &&
+    target.runnerId.trim() !== '' &&
+    (target.conversationId === undefined ||
+      (typeof target.conversationId === 'string' && target.conversationId.trim() !== ''))
+  );
+};
+
 const isTerminalPopOutRecord = (value: unknown): value is TerminalPopOutRecord => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return false;
   }
 
   const record = value as Partial<TerminalPopOutRecord>;
+  return (
+    record.version === 3 &&
+    typeof record.id === 'string' &&
+    isWorkspaceTarget(record.target) &&
+    (record.state === undefined ||
+      record.state === 'active' ||
+      record.state === 'closing') &&
+    typeof record.updatedAt === 'number' &&
+    Number.isFinite(record.updatedAt)
+  );
+};
+
+const isLegacyTerminalPopOutRecord = (value: unknown): value is LegacyTerminalPopOutRecord => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+
+  const record = value as Partial<LegacyTerminalPopOutRecord>;
   return (
     record.version === 2 &&
     typeof record.id === 'string' &&
@@ -71,6 +115,59 @@ const isTerminalPopOutRecord = (value: unknown): value is TerminalPopOutRecord =
   );
 };
 
+const isStoredTerminalPopOutRecord = (value: unknown): value is StoredTerminalPopOutRecord =>
+  isTerminalPopOutRecord(value) || isLegacyTerminalPopOutRecord(value);
+
+const legacyTerminalPopOutTargetMatches = (
+  legacy: Pick<LegacyTerminalPopOutRecord, 'cwd' | 'conversationId'>,
+  target: WorkspaceTarget
+): boolean => {
+  const conversationId = legacy.conversationId?.trim();
+  if (conversationId) {
+    return target.kind === 'runner' && target.conversationId === conversationId;
+  }
+  return target.kind === 'local' && (target.cwd || '') === legacy.cwd;
+};
+
+export const terminalPopOutRecordMatchesTarget = (
+  record: StoredTerminalPopOutRecord,
+  target: WorkspaceTarget
+): boolean =>
+  isTerminalPopOutRecord(record)
+    ? getTerminalPopOutTargetKey(record.target) === getTerminalPopOutTargetKey(target)
+    : legacyTerminalPopOutTargetMatches(record, target);
+
+const normalizeTerminalPopOutRecord = (
+  record: StoredTerminalPopOutRecord,
+  target?: WorkspaceTarget
+): TerminalPopOutRecord | null => {
+  if (isTerminalPopOutRecord(record)) {
+    return record;
+  }
+  if (target && legacyTerminalPopOutTargetMatches(record, target)) {
+    return {
+      id: record.id,
+      target:
+        target.kind === 'runner'
+          ? { ...target, conversationId: record.conversationId || target.conversationId }
+          : { kind: 'local', cwd: record.cwd || target.cwd },
+      state: record.state,
+      updatedAt: record.updatedAt,
+      version: 3,
+    };
+  }
+  if (!record.conversationId) {
+    return {
+      id: record.id,
+      target: { kind: 'local', cwd: record.cwd || undefined },
+      state: record.state,
+      updatedAt: record.updatedAt,
+      version: 3,
+    };
+  }
+  return null;
+};
+
 const removeStoredRecords = (): void => {
   try {
     window.localStorage.removeItem(TERMINAL_POP_OUT_STORAGE_KEY);
@@ -79,7 +176,7 @@ const removeStoredRecords = (): void => {
   }
 };
 
-const writeTerminalPopOutRecords = (records: TerminalPopOutRecord[]): void => {
+const writeTerminalPopOutRecords = (records: StoredTerminalPopOutRecord[]): void => {
   try {
     if (records.length === 0) {
       removeStoredRecords();
@@ -93,7 +190,7 @@ const writeTerminalPopOutRecords = (records: TerminalPopOutRecord[]): void => {
   }
 };
 
-const readTerminalPopOutRecords = (): TerminalPopOutRecord[] => {
+const readTerminalPopOutRecords = (): StoredTerminalPopOutRecord[] => {
   try {
     const rawStore = window.localStorage.getItem(TERMINAL_POP_OUT_STORAGE_KEY);
     if (!rawStore) {
@@ -101,7 +198,7 @@ const readTerminalPopOutRecords = (): TerminalPopOutRecord[] => {
     }
 
     const parsed = JSON.parse(rawStore) as unknown;
-    const storedRecords = isTerminalPopOutRecord(parsed)
+    const storedRecords = isStoredTerminalPopOutRecord(parsed)
       ? [parsed]
       : parsed &&
           typeof parsed === 'object' &&
@@ -115,7 +212,7 @@ const readTerminalPopOutRecords = (): TerminalPopOutRecord[] => {
       return [];
     }
 
-    const validRecords = storedRecords.filter(isTerminalPopOutRecord);
+    const validRecords = storedRecords.filter(isStoredTerminalPopOutRecord);
     const retainedRecords = validRecords.filter(
       (record) =>
         record.state !== 'closing' ||
@@ -123,7 +220,7 @@ const readTerminalPopOutRecords = (): TerminalPopOutRecord[] => {
     );
     if (
       retainedRecords.length !== storedRecords.length ||
-      isTerminalPopOutRecord(parsed)
+      isStoredTerminalPopOutRecord(parsed)
     ) {
       writeTerminalPopOutRecords(retainedRecords);
     }
@@ -136,26 +233,42 @@ const readTerminalPopOutRecords = (): TerminalPopOutRecord[] => {
 };
 
 export const readTerminalPopOutRecordForTarget = (
-  target: TerminalPopOutTarget
-): TerminalPopOutRecord | null =>
-  readTerminalPopOutRecords()
-    .filter((record) => getTerminalPopOutTargetKey(record) === getTerminalPopOutTargetKey(target))
-    .sort((left, right) => right.updatedAt - left.updatedAt)[0] ?? null;
+  target: WorkspaceTarget
+): TerminalPopOutRecord | null => {
+  const record = readTerminalPopOutRecords()
+    .filter((storedRecord) => terminalPopOutRecordMatchesTarget(storedRecord, target))
+    .sort((left, right) => right.updatedAt - left.updatedAt)[0];
+  return record ? normalizeTerminalPopOutRecord(record, target) : null;
+};
 
-export const readTerminalPopOutRecord = (cwd?: string): TerminalPopOutRecord | null =>
-  cwd === undefined
-    ? readTerminalPopOutRecords().sort((left, right) => right.updatedAt - left.updatedAt)[0] ?? null
-    : readTerminalPopOutRecordForTarget({ cwd });
+export const readTerminalPopOutRecord = (cwd?: string): TerminalPopOutRecord | null => {
+  if (cwd !== undefined) {
+    return readTerminalPopOutRecordForTarget({ kind: 'local', cwd });
+  }
+  for (const record of readTerminalPopOutRecords().sort(
+    (left, right) => right.updatedAt - left.updatedAt
+  )) {
+    const normalized = normalizeTerminalPopOutRecord(record);
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return null;
+};
 
-export const readTerminalPopOutRecordById = (id: string): TerminalPopOutRecord | null =>
-  readTerminalPopOutRecords().find((record) => record.id === id) ?? null;
+export const readTerminalPopOutRecordById = (
+  id: string,
+  target?: WorkspaceTarget
+): TerminalPopOutRecord | null => {
+  const record = readTerminalPopOutRecords().find((storedRecord) => storedRecord.id === id);
+  return record ? normalizeTerminalPopOutRecord(record, target) : null;
+};
 
 export const writeTerminalPopOutRecord = (record: TerminalPopOutRecord): void => {
-  const recordTargetKey = getTerminalPopOutTargetKey(record);
   const records = readTerminalPopOutRecords().filter(
     (currentRecord) =>
       currentRecord.id !== record.id &&
-      getTerminalPopOutTargetKey(currentRecord) !== recordTargetKey
+      !terminalPopOutRecordMatchesTarget(currentRecord, record.target)
   );
   writeTerminalPopOutRecords([...records, record]);
 };
@@ -187,6 +300,7 @@ export const isTerminalPopOutMessage = (value: unknown): value is TerminalPopOut
     type?: unknown;
     record?: unknown;
     id?: unknown;
+    target?: unknown;
     cwd?: unknown;
     conversationId?: unknown;
   };
@@ -194,13 +308,31 @@ export const isTerminalPopOutMessage = (value: unknown): value is TerminalPopOut
     return true;
   }
   if (message.type === 'active') {
-    return isTerminalPopOutRecord(message.record);
+    return isStoredTerminalPopOutRecord(message.record);
   }
   return (
     message.type === 'closing' &&
     typeof message.id === 'string' &&
-    typeof message.cwd === 'string' &&
-    (message.conversationId === undefined ||
-      (typeof message.conversationId === 'string' && message.conversationId.trim() !== ''))
+    (isWorkspaceTarget(message.target) ||
+      (typeof message.cwd === 'string' &&
+        (message.conversationId === undefined ||
+          (typeof message.conversationId === 'string' &&
+            message.conversationId.trim() !== ''))))
   );
+};
+
+export const terminalPopOutMessageMatchesTarget = (
+  message: TerminalPopOutMessage,
+  target: WorkspaceTarget
+): boolean => {
+  if (message.type === 'probe') {
+    return false;
+  }
+  if (message.type === 'active') {
+    return terminalPopOutRecordMatchesTarget(message.record, target);
+  }
+  if ('target' in message && isWorkspaceTarget(message.target)) {
+    return getTerminalPopOutTargetKey(message.target) === getTerminalPopOutTargetKey(target);
+  }
+  return 'cwd' in message && legacyTerminalPopOutTargetMatches(message, target);
 };

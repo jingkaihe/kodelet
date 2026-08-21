@@ -240,16 +240,17 @@ class ApiService {
 		);
 	}
 
-	async getGitDiff(target: WorkspaceTarget = {}): Promise<GitDiffResponse> {
+	async getGitDiff(target: WorkspaceTarget = { kind: "local" }): Promise<GitDiffResponse> {
 		const params = new URLSearchParams();
-		if (target.cwd) {
-			params.append("cwd", target.cwd);
-		}
-		if (target.conversationId) {
-			params.append("conversationId", target.conversationId);
-		}
-		if (target.runnerId) {
+		if (target.kind === "local") {
+			if (target.cwd) {
+				params.append("cwd", target.cwd);
+			}
+		} else {
 			params.append("runnerId", target.runnerId);
+			if (target.conversationId) {
+				params.append("conversationId", target.conversationId);
+			}
 		}
 
 		const suffix = params.toString();
@@ -259,21 +260,20 @@ class ApiService {
 	}
 
 	createTerminalWebSocket(options: {
-		cwd?: string;
-		conversationId?: string;
-		runnerId?: string;
+		target: WorkspaceTarget;
 		rows?: number;
 		cols?: number;
 	}): WebSocket {
 		const params = new URLSearchParams();
-		if (options.cwd) {
-			params.append("cwd", options.cwd);
-		}
-		if (options.conversationId) {
-			params.append("conversationId", options.conversationId);
-		}
-		if (options.runnerId) {
-			params.append("runnerId", options.runnerId);
+		if (options.target.kind === "local") {
+			if (options.target.cwd) {
+				params.append("cwd", options.target.cwd);
+			}
+		} else {
+			params.append("runnerId", options.target.runnerId);
+			if (options.target.conversationId) {
+				params.append("conversationId", options.target.conversationId);
+			}
 		}
 		if (options.rows) {
 			params.append("rows", String(options.rows));

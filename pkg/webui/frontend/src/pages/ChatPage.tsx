@@ -35,6 +35,7 @@ import type {
   UIConfirmRequestEvent,
   UIInputRequestEvent,
   UISelectRequestEvent,
+  WorkspaceTarget,
 } from '../types';
 import {
   cn,
@@ -1322,11 +1323,10 @@ const ChatPage: React.FC = () => {
         return;
       }
 
-      const target = workspace.querySelector<HTMLElement>(
-        event.shiftKey
-          ? '[data-testid="workspace-tools-diff-tab"]'
-          : '[data-testid="workspace-tools-toggle"]'
-      );
+      const target = event.shiftKey
+        ? workspace.querySelector<HTMLElement>('[data-testid="workspace-tools-diff-tab"]') ||
+          workspace.querySelector<HTMLElement>('[data-testid="workspace-tools-terminal-tab"]')
+        : workspace.querySelector<HTMLElement>('[data-testid="workspace-tools-toggle"]');
       if (!target) {
         return;
       }
@@ -2270,21 +2270,27 @@ const ChatPage: React.FC = () => {
       }
 
       if (
+        optimisticRemoteConversationRef.current?.conversationId === streamedConversationId
+      ) {
+        optimisticRemoteConversationRef.current = null;
+      }
+
+      if (
         streamedConversationId &&
         (viewedConversationIdRef.current === streamedConversationId ||
           finishedOnStartedConversation)
       ) {
-        const latestConversation = normalizeConversation(
-          await apiService.getConversation(streamedConversationId)
-        );
-        if (
-          optimisticRemoteConversationRef.current?.conversationId === streamedConversationId
-        ) {
-          optimisticRemoteConversationRef.current = null;
-        }
         conversationPathOverrideRef.current = null;
-        setConversation(latestConversation);
-        setMessages(conversationToChatMessages(latestConversation));
+        try {
+          const latestConversation = normalizeConversation(
+            await apiService.getConversation(streamedConversationId)
+          );
+          setConversation(latestConversation);
+          setMessages(conversationToChatMessages(latestConversation));
+        } catch {
+          // The streamed conversation is already authoritative enough to continue. A later
+          // conversation load will reconcile the persisted snapshot.
+        }
         if (streamedConversationId !== routerConversationIdRef.current) {
           startTransition(() => {
             navigate(`/c/${streamedConversationId}`, { replace: true });
@@ -2559,9 +2565,21 @@ const ChatPage: React.FC = () => {
     selectedCWD,
     workspaceConversation?.cwd,
   ]);
-  const workspaceTargetKey = isRemoteConversation
-    ? `runner:${currentRunnerID}:generation:${currentRunner?.generation || 0}:conversation:${remoteWorkspaceConversationID || ''}`
-    : `local:${currentCWDLabel}`;
+  const workspaceTarget = useMemo<WorkspaceTarget>(
+    () =>
+      isRemoteConversation
+        ? {
+            kind: 'runner',
+            runnerId: currentRunnerID,
+            conversationId: remoteWorkspaceConversationID,
+          }
+        : { kind: 'local', cwd: currentCWDLabel || undefined },
+    [currentCWDLabel, currentRunnerID, isRemoteConversation, remoteWorkspaceConversationID]
+  );
+  const workspaceTargetKey =
+    workspaceTarget.kind === 'runner'
+      ? `runner:${workspaceTarget.runnerId}:generation:${currentRunner?.generation || 0}`
+      : `local:${workspaceTarget.cwd || ''}`;
   workspaceTargetKeyRef.current = workspaceTargetKey;
 
   useEffect(() => {
@@ -2898,14 +2916,7 @@ const ChatPage: React.FC = () => {
     setGitDiffError(null);
 
     try {
-      const response = await apiService.getGitDiff(
-        isRemoteConversation
-          ? {
-              conversationId: remoteWorkspaceConversationID,
-              runnerId: currentRunnerID || undefined,
-            }
-          : { cwd: currentCWDLabel || undefined }
-      );
+      const response = await apiService.getGitDiff(workspaceTarget);
       if (
         requestID === gitDiffRequestRef.current &&
         requestTargetKey === workspaceTargetKeyRef.current
@@ -3353,11 +3364,9 @@ const ChatPage: React.FC = () => {
                       <TerminalModal
                         key={workspaceTargetKey}
                         cwdLabel={workspacePanelCWDLabel}
-                        conversationId={remoteWorkspaceConversationID}
-                        runnerId={isRemoteConversation ? currentRunnerID : undefined}
                         open
                         onClose={handleToggleWorkspacePanel}
-                        showPopOut={!isRemoteConversation || Boolean(remoteWorkspaceConversationID)}
+                        target={workspaceTarget}
                       />
                     ) : (
                       <GitDiffModal

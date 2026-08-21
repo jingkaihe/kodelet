@@ -311,11 +311,9 @@ export interface GitDiffResponse {
   truncated?: boolean;
 }
 
-export interface WorkspaceTarget {
-  cwd?: string;
-  conversationId?: string;
-  runnerId?: string;
-}
+export type WorkspaceTarget =
+  | { kind: 'local'; cwd?: string }
+  | { kind: 'runner'; runnerId: string; conversationId?: string };
 
 export interface TerminalReadyEvent {
   type: 'ready';

@@ -234,10 +234,6 @@ func (r *Runner) Close() error {
 	defer r.lockMu.Unlock()
 	lock := r.lock
 	serviceErr := r.service.Close()
-	var terminalCleanupErr *workspaceTerminalCleanupIncompleteError
-	if errors.As(serviceErr, &terminalCleanupErr) {
-		return serviceErr
-	}
 	if lock == nil {
 		return serviceErr
 	}

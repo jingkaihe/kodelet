@@ -305,6 +305,27 @@ func TestCallRunnerRejectsUnsupportedWorkspaceCapabilityBeforeRPC(t *testing.T) 
 	err = registry.CallRunner(t.Context(), registration.RunnerID, registration.Generation, protocol.MethodWorkspaceGitDiff, protocol.WorkspaceGitDiffParams{}, nil)
 	require.ErrorIs(t, err, ErrRunnerCapabilityUnsupported)
 	assert.False(t, called)
+
+	capableLink := newFakeLink()
+	capableCalled := false
+	capableLink.call = func(context.Context, string, any, any) error {
+		capableCalled = true
+		return nil
+	}
+	capableParams := testRegisterParams("host-workspace-tools", "/work/tools")
+	capableParams.Capabilities.WorkspaceGitDiff = true
+	capableParams.Capabilities.WorkspaceTerminal = true
+	capableRegistration, err := registry.Register(capableParams, capableLink)
+	require.NoError(t, err)
+	require.NoError(t, registry.Heartbeat(capableRegistration.RunnerID, capableRegistration.ConnectionID, capableRegistration.Generation, protocol.HeartbeatParams{
+		RunnerID:   capableRegistration.RunnerID,
+		Generation: capableRegistration.Generation,
+		State:      protocol.RunnerStateIdle,
+	}))
+
+	err = registry.CallRunner(t.Context(), capableRegistration.RunnerID, capableRegistration.Generation, "workspace.unknown", struct{}{}, nil)
+	require.ErrorIs(t, err, ErrRunnerCapabilityUnsupported)
+	assert.False(t, capableCalled)
 }
 
 func TestRegisterAuthenticatedBindsConnectionToEnrolledRunnerIdentity(t *testing.T) {

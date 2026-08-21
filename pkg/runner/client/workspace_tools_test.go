@@ -17,7 +17,6 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sys/unix"
 )
 
 func TestServiceWorkspaceGitDiff(t *testing.T) {
@@ -220,19 +219,6 @@ func TestServiceWorkspaceTerminalRejectsUnavailableManager(t *testing.T) {
 }
 
 func TestWorkspaceTerminalManagerValidatesRequests(t *testing.T) {
-	var nilManager *workspaceTerminalManager
-	_, err := nilManager.Open(t.Context(), 24, 80)
-	require.ErrorContains(t, err, "manager is unavailable")
-	_, err = nilManager.Read(t.Context(), protocol.WorkspaceTerminalReadParams{SessionID: "terminal-1"})
-	require.ErrorContains(t, err, "manager is unavailable")
-	require.ErrorContains(t, nilManager.Write(t.Context(), protocol.WorkspaceTerminalInputParams{SessionID: "terminal-1", Data: []byte("x")}), "manager is unavailable")
-	require.ErrorContains(t, nilManager.Resize(protocol.WorkspaceTerminalResizeParams{SessionID: "terminal-1", Rows: 24, Cols: 80}), "manager is unavailable")
-	require.ErrorContains(t, nilManager.Signal(t.Context(), protocol.WorkspaceTerminalSignalParams{SessionID: "terminal-1", Name: "INT"}), "manager is unavailable")
-	require.NoError(t, nilManager.Close())
-
-	backgroundManager := newWorkspaceTerminalManager(nil, t.TempDir()) //nolint:staticcheck // Verify a nil parent defaults to a background context.
-	require.NoError(t, backgroundManager.Close())
-
 	manager := newWorkspaceTerminalManager(t.Context(), t.TempDir())
 	for _, test := range []struct {
 		name string
@@ -269,79 +255,67 @@ func TestWorkspaceTerminalManagerValidatesRequests(t *testing.T) {
 	}
 
 	require.NoError(t, manager.Close())
-	_, err = manager.Open(t.Context(), 24, 80)
+	require.NoError(t, manager.Close())
+	_, err := manager.Open(t.Context(), 24, 80)
 	require.ErrorContains(t, err, "manager is closed")
 	_, err = manager.Read(t.Context(), protocol.WorkspaceTerminalReadParams{SessionID: "terminal-1"})
 	require.ErrorContains(t, err, "manager is closed")
 }
 
-func TestWorkspaceTerminalManagerReplacesExitedSessionAndReportsCleanupFailure(t *testing.T) {
-	t.Run("reports incomplete stale session cleanup", func(t *testing.T) {
-		manager := newWorkspaceTerminalManager(t.Context(), t.TempDir())
-		done := make(chan struct{})
-		close(done)
-		stale := &workspaceTerminalSession{
-			id:         "stale",
-			done:       done,
-			cleanupErr: errors.New("cleanup pending"),
-		}
-		manager.sessions[stale.id] = stale
-		manager.current = stale
+func TestWorkspaceTerminalManagerReplacesExitedSession(t *testing.T) {
+	exitShell := filepath.Join(t.TempDir(), "exit-shell.sh")
+	require.NoError(t, os.WriteFile(exitShell, []byte("#!/bin/sh\nexit 7\n"), 0o700))
+	t.Setenv("SHELL", exitShell)
+	manager := newWorkspaceTerminalManager(t.Context(), t.TempDir())
 
-		_, err := manager.Open(t.Context(), 24, 80)
-		require.ErrorContains(t, err, "previous workspace terminal cleanup is incomplete")
-		require.ErrorContains(t, err, "cleanup pending")
+	first, err := manager.Open(t.Context(), 24, 80)
+	require.NoError(t, err)
+	manager.mu.Lock()
+	firstSession := manager.current
+	manager.mu.Unlock()
+	require.NotNil(t, firstSession)
+	require.Eventually(t, func() bool { return workspaceTerminalDone(firstSession.done) }, 3*time.Second, 10*time.Millisecond)
 
-		manager.sessions = make(map[string]*workspaceTerminalSession)
-		manager.current = nil
-		require.NoError(t, manager.Close())
-	})
+	t.Setenv("SHELL", "/bin/sh")
+	second, err := manager.Open(t.Context(), 24, 80)
+	require.NoError(t, err)
+	assert.NotEqual(t, first.SessionID, second.SessionID)
+	_, err = manager.Read(t.Context(), protocol.WorkspaceTerminalReadParams{SessionID: first.SessionID})
+	require.ErrorContains(t, err, "session was not found")
+	require.NoError(t, manager.Close())
+}
 
-	t.Run("replaces an exited session", func(t *testing.T) {
-		t.Setenv("SHELL", "/bin/sh")
-		manager := newWorkspaceTerminalManager(t.Context(), t.TempDir())
-		done := make(chan struct{})
-		close(done)
-		stale := &workspaceTerminalSession{id: "stale", done: done}
-		manager.sessions[stale.id] = stale
-		manager.current = stale
+func TestWorkspaceTerminalManagerRetainsSessionAfterCleanupFailure(t *testing.T) {
+	manager := newWorkspaceTerminalManager(t.Context(), t.TempDir())
+	done := make(chan struct{})
+	close(done)
+	cleanupErr := errors.New("cleanup failed")
+	failed := &workspaceTerminalSession{
+		id:         "terminal-cleanup-failed",
+		done:       done,
+		cleanupErr: cleanupErr,
+	}
+	manager.current = failed
 
-		opened, err := manager.Open(nil, 24, 80) //nolint:staticcheck // Verify a nil request context defaults to a background context.
-		require.NoError(t, err)
-		require.NotEqual(t, stale.id, opened.SessionID)
-		assert.NotContains(t, manager.sessions, stale.id)
-		require.NoError(t, manager.Close())
-	})
+	_, err := manager.Open(t.Context(), 24, 80)
+	require.ErrorContains(t, err, "previous workspace terminal cleanup is incomplete")
+	require.ErrorIs(t, err, cleanupErr)
+	assert.Same(t, failed, manager.current)
 
-	t.Run("returns shell start errors", func(t *testing.T) {
-		t.Setenv("SHELL", filepath.Join(t.TempDir(), "missing-shell"))
-		manager := newWorkspaceTerminalManager(t.Context(), t.TempDir())
+	err = manager.Close()
+	require.ErrorContains(t, err, "failed to stop workspace terminal")
+	require.ErrorIs(t, err, cleanupErr)
+	assert.Nil(t, manager.current)
+	require.ErrorIs(t, manager.Close(), cleanupErr)
+}
 
-		_, err := manager.Open(t.Context(), 24, 80)
-		require.Error(t, err)
-		require.NoError(t, manager.Close())
-	})
+func TestWorkspaceTerminalManagerReturnsShellStartErrors(t *testing.T) {
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "missing-shell"))
+	manager := newWorkspaceTerminalManager(t.Context(), t.TempDir())
 
-	t.Run("returns resize errors from an existing live session", func(t *testing.T) {
-		manager := newWorkspaceTerminalManager(t.Context(), t.TempDir())
-		ptmx, err := os.CreateTemp(t.TempDir(), "closed-pty")
-		require.NoError(t, err)
-		require.NoError(t, ptmx.Close())
-		session := &workspaceTerminalSession{
-			id:   "terminal-live",
-			ptmx: ptmx,
-			done: make(chan struct{}),
-		}
-		manager.sessions[session.id] = session
-		manager.current = session
-
-		_, err = manager.Open(t.Context(), 24, 80)
-		require.Error(t, err)
-
-		manager.sessions = make(map[string]*workspaceTerminalSession)
-		manager.current = nil
-		require.NoError(t, manager.Close())
-	})
+	_, err := manager.Open(t.Context(), 24, 80)
+	require.Error(t, err)
+	require.NoError(t, manager.Close())
 }
 
 func TestWorkspaceTerminalOpenHonorsCanceledContext(t *testing.T) {
@@ -425,61 +399,16 @@ func TestWorkspaceTerminalSessionIOEdgeCases(t *testing.T) {
 		require.ErrorContains(t, finished.writeInput(t.Context(), []byte("x")), "session is closed")
 	})
 
-	t.Run("signal handles success and cancellation while waiting", func(t *testing.T) {
-		sessionCtx, cancelSession := context.WithCancel(context.Background())
-		defer cancelSession()
-		session := &workspaceTerminalSession{
-			ctx:      sessionCtx,
-			done:     make(chan struct{}),
-			signalCh: make(chan workspaceTerminalSignalRequest),
-		}
-		receivedSignal := make(chan syscall.Signal, 1)
-		go func() {
-			request := <-session.signalCh
-			receivedSignal <- request.signal
-			request.result <- nil
-		}()
-		require.NoError(t, session.signal(nil, syscall.SIGTERM)) //nolint:staticcheck // Verify a nil signal context defaults to a background context.
-		assert.Equal(t, syscall.SIGTERM, <-receivedSignal)
-
-		signalErr := errors.New("signal failed")
-		go func() {
-			request := <-session.signalCh
-			request.result <- signalErr
-		}()
-		require.ErrorIs(t, session.signal(t.Context(), syscall.SIGHUP), signalErr)
-
+	t.Run("signal handles cancellation and closed sessions", func(t *testing.T) {
+		session := &workspaceTerminalSession{done: make(chan struct{})}
 		canceledBeforeSend, cancelBeforeSend := context.WithCancel(t.Context())
 		cancelBeforeSend()
 		require.ErrorIs(t, session.signal(canceledBeforeSend, syscall.SIGINT), context.Canceled)
-
-		ctx, cancel := context.WithCancel(t.Context())
-		result := make(chan error, 1)
-		go func() {
-			result <- session.signal(ctx, syscall.SIGINT)
-		}()
-		<-session.signalCh
-		cancel()
-		require.ErrorIs(t, <-result, context.Canceled)
 
 		closedDone := make(chan struct{})
 		close(closedDone)
 		closed := &workspaceTerminalSession{done: closedDone}
 		require.ErrorContains(t, closed.signal(t.Context(), syscall.SIGINT), "session is closed")
-
-		doneWhileWaiting := make(chan struct{})
-		waiting := &workspaceTerminalSession{
-			ctx:      sessionCtx,
-			done:     doneWhileWaiting,
-			signalCh: make(chan workspaceTerminalSignalRequest),
-		}
-		result = make(chan error, 1)
-		go func() {
-			result <- waiting.signal(t.Context(), syscall.SIGINT)
-		}()
-		<-waiting.signalCh
-		close(doneWhileWaiting)
-		require.ErrorContains(t, <-result, "session is closed")
 	})
 
 	t.Run("resize rejects a closed session", func(t *testing.T) {
@@ -490,16 +419,14 @@ func TestWorkspaceTerminalSessionIOEdgeCases(t *testing.T) {
 	})
 }
 
-func TestWorkspaceTerminalManagerCloseReapsHUPIgnoringSession(t *testing.T) {
+func TestWorkspaceTerminalManagerCloseIsBounded(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("PTY terminals are supported on Unix hosts")
 	}
 
-	childPIDPath := filepath.Join(t.TempDir(), "child.pid")
 	shell := filepath.Join(t.TempDir(), "ignore-hup.sh")
-	require.NoError(t, os.WriteFile(shell, []byte("#!/bin/bash\nset -m\ntrap '' HUP TERM\n(trap '' HUP TERM; while :; do :; done) &\necho $! > \"$KODELET_TERMINAL_CHILD_PID_FILE\"\nkill -STOP $$\nwait\n"), 0o700))
+	require.NoError(t, os.WriteFile(shell, []byte("#!/bin/bash\ntrap '' HUP TERM\nwhile :; do sleep 60; done\n"), 0o700))
 	t.Setenv("SHELL", shell)
-	t.Setenv("KODELET_TERMINAL_CHILD_PID_FILE", childPIDPath)
 	manager := newWorkspaceTerminalManager(t.Context(), t.TempDir())
 	opened, err := manager.Open(t.Context(), 24, 80)
 	require.NoError(t, err)
@@ -509,39 +436,16 @@ func TestWorkspaceTerminalManagerCloseReapsHUPIgnoringSession(t *testing.T) {
 	session := manager.current
 	manager.mu.Unlock()
 	require.NotNil(t, session)
-	require.Eventually(t, func() bool {
-		_, statErr := os.Stat(childPIDPath)
-		return statErr == nil
-	}, time.Second, 10*time.Millisecond)
-	childPIDData, err := os.ReadFile(childPIDPath)
-	require.NoError(t, err)
-	childPID, err := strconv.Atoi(strings.TrimSpace(string(childPIDData)))
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		_ = syscall.Kill(childPID, syscall.SIGKILL)
-	})
-	childSID, err := unix.Getsid(childPID)
-	require.NoError(t, err)
-	assert.Equal(t, session.cmd.Process.Pid, childSID)
-	childPGID, err := unix.Getpgid(childPID)
-	require.NoError(t, err)
-	assert.NotEqual(t, session.cmd.Process.Pid, childPGID)
 
 	started := time.Now()
 	require.NoError(t, manager.Close())
 	assert.Less(t, time.Since(started), workspaceTerminalShutdownWait)
-	select {
-	case <-session.done:
-	default:
-		t.Fatal("terminal session was not reaped before manager close returned")
-	}
+	assert.True(t, workspaceTerminalDone(session.done))
 	require.NotNil(t, session.cmd.ProcessState)
-	assert.Eventually(t, func() bool {
-		return syscall.Kill(childPID, 0) == syscall.ESRCH
-	}, time.Second, 10*time.Millisecond)
+	require.NoError(t, manager.Close())
 }
 
-func TestWorkspaceTerminalLeaderExitReapsDescendantsHoldingPTY(t *testing.T) {
+func TestWorkspaceTerminalLeaderExitCompletesWhenDescendantHoldsPTY(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("PTY terminals are supported on Unix hosts")
 	}
@@ -586,9 +490,57 @@ func TestWorkspaceTerminalLeaderExitReapsDescendantsHoldingPTY(t *testing.T) {
 		return result.Exited
 	}, 4*time.Second, 10*time.Millisecond)
 	assert.Equal(t, 7, exitCode)
-	assert.Eventually(t, func() bool {
-		return syscall.Kill(childPID, 0) == syscall.ESRCH
+}
+
+func TestWorkspaceTerminalLeaderExitKillsDescendantInShellProcessGroup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PTY terminals are supported on Unix hosts")
+	}
+
+	childPIDPath := filepath.Join(t.TempDir(), "child.pid")
+	shell := filepath.Join(t.TempDir(), "exit-with-group-child.sh")
+	require.NoError(t, os.WriteFile(shell, []byte("#!/bin/bash\ntrap '' HUP TERM\n(trap '' HUP TERM; while :; do sleep 60; done) &\necho $! > \"$KODELET_TERMINAL_CHILD_PID_FILE\"\nsleep 0.2\nexit 7\n"), 0o700))
+	t.Setenv("SHELL", shell)
+	t.Setenv("KODELET_TERMINAL_CHILD_PID_FILE", childPIDPath)
+	manager := newWorkspaceTerminalManager(t.Context(), t.TempDir())
+	opened, err := manager.Open(t.Context(), 24, 80)
+	require.NoError(t, err)
+
+	manager.mu.Lock()
+	session := manager.current
+	manager.mu.Unlock()
+	require.NotNil(t, session)
+	require.Eventually(t, func() bool {
+		_, statErr := os.Stat(childPIDPath)
+		return statErr == nil
 	}, time.Second, 10*time.Millisecond)
+	childPIDData, err := os.ReadFile(childPIDPath)
+	require.NoError(t, err)
+	childPID, err := strconv.Atoi(strings.TrimSpace(string(childPIDData)))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = syscall.Kill(childPID, syscall.SIGKILL) })
+	childProcessGroup, err := syscall.Getpgid(childPID)
+	require.NoError(t, err)
+	assert.Equal(t, session.cmd.Process.Pid, childProcessGroup)
+
+	cursor := opened.ReplayCursor
+	require.Eventually(t, func() bool {
+		result, readErr := manager.Read(t.Context(), protocol.WorkspaceTerminalReadParams{
+			SessionID: opened.SessionID,
+			Cursor:    cursor,
+			MaxBytes:  4096,
+			WaitMS:    100,
+		})
+		if readErr != nil {
+			return false
+		}
+		cursor = result.NextCursor
+		return result.Exited && result.ExitCode == 7
+	}, 4*time.Second, 10*time.Millisecond)
+	assert.Eventually(t, func() bool {
+		return errors.Is(syscall.Kill(childPID, 0), syscall.ESRCH)
+	}, time.Second, 10*time.Millisecond)
+	require.NoError(t, manager.Close())
 }
 
 func TestWorkspaceTerminalSignalTargetsForegroundProcessGroup(t *testing.T) {
@@ -705,10 +657,17 @@ func TestWorkspaceTerminalValidationHelpers(t *testing.T) {
 	assert.True(t, workspaceTerminalDone(open))
 	assert.True(t, waitWorkspaceTerminalDone(open, time.Second))
 	assert.True(t, waitWorkspaceTerminalDone(nil, time.Second))
-	var nilSession *workspaceTerminalSession
-	require.NoError(t, nilSession.terminate())
-	nilSession.requestShutdown()
-	require.ErrorContains(t, terminateWorkspaceTerminalSession(0, 0), "session id is invalid")
+	processDone := make(chan workspaceTerminalProcessResult, 1)
+	processDone <- workspaceTerminalProcessResult{exitCode: 7}
+	processResult, processExited := waitWorkspaceTerminalProcess(processDone, time.Second)
+	assert.True(t, processExited)
+	assert.Equal(t, 7, processResult.exitCode)
+	_, processExited = waitWorkspaceTerminalProcess(make(chan workspaceTerminalProcessResult), time.Millisecond)
+	assert.False(t, processExited)
+	_, processExited = waitWorkspaceTerminalProcess(make(chan workspaceTerminalProcessResult), 0)
+	assert.False(t, processExited)
+	assert.True(t, waitWorkspaceTerminalProcessGroups(nil, time.Second))
+	assert.True(t, workspaceTerminalProcessGroupsStopped(nil))
 	stopWorkspaceTerminalTimer(nil)
 
 	restoreEnvironmentVariable(t, "TERM")

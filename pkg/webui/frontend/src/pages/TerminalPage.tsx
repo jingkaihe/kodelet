@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import TerminalModal from '../components/workspace/TerminalModal';
 import {
   clearTerminalPopOutRecord,
@@ -10,21 +10,79 @@ import {
   type TerminalPopOutRecord,
   writeTerminalPopOutRecord,
 } from '../components/workspace/terminalPopOut';
+import apiService from '../services/api';
+import type { WorkspaceTarget } from '../types';
 
 const TerminalPage = () => {
   const params = new URLSearchParams(window.location.search);
   const cwdLabel = params.get('cwd') ?? '';
+  const runnerId = params.get('runnerId')?.trim() || undefined;
   const conversationId = params.get('conversationId')?.trim() || undefined;
+  const [resolvedRunnerId, setResolvedRunnerId] = useState(
+    conversationId ? undefined : runnerId
+  );
+  const [targetError, setTargetError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!conversationId) {
+      setResolvedRunnerId(runnerId);
+      setTargetError(null);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setResolvedRunnerId(undefined);
+    setTargetError(null);
+    void apiService
+      .getConversation(conversationId)
+      .then((conversation) => {
+        if (cancelled) {
+          return;
+        }
+        const affinityRunnerId = conversation.runnerId || conversation.runner?.id;
+        if (!affinityRunnerId) {
+          setTargetError('This conversation has no remote runner terminal.');
+          return;
+        }
+        if (runnerId && runnerId !== affinityRunnerId) {
+          setTargetError('The terminal runner does not match this conversation.');
+          return;
+        }
+        setResolvedRunnerId(affinityRunnerId);
+        setTargetError(null);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setTargetError('Unable to resolve the remote terminal.');
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId, runnerId]);
+
+  const target = useMemo<WorkspaceTarget | null>(
+    () =>
+      resolvedRunnerId
+        ? { kind: 'runner', runnerId: resolvedRunnerId, conversationId }
+        : conversationId
+          ? null
+          : { kind: 'local', cwd: cwdLabel || undefined },
+    [conversationId, cwdLabel, resolvedRunnerId]
+  );
+
+  useEffect(() => {
+    if (!target) {
+      return undefined;
+    }
     const documentClassName = 'terminal-popout-active';
     let record: TerminalPopOutRecord = {
       id: getTerminalPopOutSessionId(),
-      cwd: cwdLabel,
-      conversationId,
+      target,
       state: 'active',
       updatedAt: Date.now(),
-      version: 2,
+      version: 3,
     };
     const channel = createTerminalPopOutChannel();
     let active = false;
@@ -75,8 +133,7 @@ const TerminalPage = () => {
       channel?.postMessage({
         type: 'closing',
         id: record.id,
-        cwd: record.cwd,
-        conversationId: record.conversationId,
+        target: record.target,
       } satisfies TerminalPopOutMessage);
     };
 
@@ -118,16 +175,26 @@ const TerminalPage = () => {
       document.documentElement.classList.remove(documentClassName);
       document.body.classList.remove(documentClassName);
     };
-  }, [conversationId, cwdLabel]);
+  }, [target]);
+
+  if (!target) {
+    return (
+      <main className="terminal-popout-page" data-testid="terminal-popout-page">
+        <div className="workspace-modal-placeholder" role={targetError ? 'alert' : 'status'}>
+          {targetError || 'Resolving remote terminal…'}
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="terminal-popout-page" data-testid="terminal-popout-page">
       <TerminalModal
-        conversationId={conversationId}
         cwdLabel={cwdLabel}
         open
         onClose={() => window.close()}
-        showPopOut={false}
+        target={target}
+        allowPopOut={false}
       />
     </main>
   );

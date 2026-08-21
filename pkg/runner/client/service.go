@@ -33,24 +33,6 @@ const toolDisplayOutputTruncationMarker = "\n\n[output truncated for remote disp
 
 var errNoActiveRun = errors.New("runner has no active run")
 
-type workspaceTerminalCleanupIncompleteError struct {
-	err error
-}
-
-func (e *workspaceTerminalCleanupIncompleteError) Error() string {
-	if e == nil || e.err == nil {
-		return "workspace terminal cleanup is incomplete"
-	}
-	return "workspace terminal cleanup is incomplete: " + e.err.Error()
-}
-
-func (e *workspaceTerminalCleanupIncompleteError) Unwrap() error {
-	if e == nil {
-		return nil
-	}
-	return e.err
-}
-
 // Peer is the symmetric runner connection used for updates and reverse UI calls.
 type Peer interface {
 	Call(ctx context.Context, method string, params any, result any) error
@@ -1114,23 +1096,16 @@ func (s *Service) Close() error {
 				activeErr = err
 			}
 		}
+		if s.workspaceTerminals != nil {
+			activeErr = combineCleanupErrors(activeErr, s.workspaceTerminals.Close())
+		}
 		s.mu.Lock()
 		s.closeErr = activeErr
 		s.mu.Unlock()
 	})
-	terminalErr := error(nil)
-	if s.workspaceTerminals != nil {
-		terminalErr = s.workspaceTerminals.Close()
-	}
 	s.mu.Lock()
-	baseErr := s.closeErr
-	s.mu.Unlock()
-	if terminalErr != nil {
-		return &workspaceTerminalCleanupIncompleteError{
-			err: combineCleanupErrors(terminalErr, baseErr),
-		}
-	}
-	return baseErr
+	defer s.mu.Unlock()
+	return s.closeErr
 }
 
 func waitForRunOperations(ctx context.Context, timeout time.Duration, run *activeRun) error {

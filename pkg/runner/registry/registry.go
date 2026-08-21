@@ -1222,7 +1222,7 @@ func runnerSupportsWorkspaceMethod(entry *runnerEntry, method string) bool {
 		protocol.MethodWorkspaceTerminalSignal:
 		return entry.WorkspaceTerminal
 	default:
-		return true
+		return false
 	}
 }
 

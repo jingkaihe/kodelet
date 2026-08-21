@@ -1,4 +1,4 @@
-import { afterEach, describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import App from './App';
 import TerminalPage from './pages/TerminalPage';
@@ -6,6 +6,15 @@ import {
   readTerminalPopOutRecord,
   TERMINAL_POP_OUT_STORAGE_KEY,
 } from './components/workspace/terminalPopOut';
+import type { WorkspaceTarget } from './types';
+
+const mockGetConversation = vi.fn();
+
+vi.mock('./services/api', () => ({
+  default: {
+    getConversation: (...args: unknown[]) => mockGetConversation(...args),
+  },
+}));
 
 vi.mock('./pages/ChatPage', () => ({
   default: () => <div data-testid="chat-page">Chat page</div>,
@@ -25,21 +34,31 @@ vi.mock('./pages/SignedOutPage', () => ({
 
 vi.mock('./components/workspace/TerminalModal', () => ({
   default: ({
-    conversationId,
     cwdLabel,
+    target,
   }: {
-    conversationId?: string;
     cwdLabel: string;
+    target: WorkspaceTarget;
   }) => (
     <div
-      data-conversation-id={conversationId}
+      data-conversation-id={target.kind === 'runner' ? target.conversationId : undefined}
       data-cwd-label={cwdLabel}
+      data-runner-id={target.kind === 'runner' ? target.runnerId : undefined}
+      data-target-kind={target.kind}
       data-testid="terminal-modal"
     >
       Terminal
     </div>
   ),
 }));
+
+beforeEach(() => {
+  mockGetConversation.mockReset();
+  mockGetConversation.mockResolvedValue({
+    id: 'conv-123',
+    runnerId: 'runner-1',
+  });
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -156,24 +175,93 @@ describe('App', () => {
 });
 
 describe('TerminalPage', () => {
-  it('bootstraps a remote pop-out using only the conversation ID', () => {
-    window.history.replaceState({}, '', '/terminal?conversationId=conv-123');
+  it('bootstraps a validated runner-scoped remote pop-out', async () => {
+    window.history.replaceState({}, '', '/terminal?runnerId=runner-1&conversationId=conv-123');
 
     const { unmount } = render(<TerminalPage />);
 
-    expect(screen.getByTestId('terminal-modal')).toHaveAttribute(
+    expect(screen.getByRole('status')).toHaveTextContent('Resolving remote terminal…');
+    const terminal = await screen.findByTestId('terminal-modal');
+    expect(mockGetConversation).toHaveBeenCalledWith('conv-123');
+    expect(terminal).toHaveAttribute(
       'data-conversation-id',
       'conv-123'
     );
-    expect(screen.getByTestId('terminal-modal')).toHaveAttribute('data-cwd-label', '');
+    expect(terminal).toHaveAttribute('data-runner-id', 'runner-1');
+    expect(terminal).toHaveAttribute('data-target-kind', 'runner');
+    expect(terminal).toHaveAttribute('data-cwd-label', '');
     expect(readTerminalPopOutRecord()).toEqual(
       expect.objectContaining({
-        conversationId: 'conv-123',
-        cwd: '',
+        target: {
+          kind: 'runner',
+          runnerId: 'runner-1',
+          conversationId: 'conv-123',
+        },
       })
     );
 
     unmount();
+  });
+
+  it('rejects a mismatched conversation and runner before claiming pop-out ownership', async () => {
+    mockGetConversation.mockResolvedValue({
+      id: 'conv-mismatch',
+      runnerId: 'runner-affinity',
+    });
+    window.history.replaceState(
+      {},
+      '',
+      '/terminal?runnerId=runner-other&conversationId=conv-mismatch'
+    );
+
+    render(<TerminalPage />);
+
+    expect(
+      await screen.findByText('The terminal runner does not match this conversation.')
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('terminal-modal')).not.toBeInTheDocument();
+    expect(readTerminalPopOutRecord()).toBeNull();
+  });
+
+  it('resolves a legacy conversation-only remote pop-out without opening a local terminal', async () => {
+    mockGetConversation.mockResolvedValue({
+      id: 'conv-legacy',
+      runnerId: 'runner-legacy',
+    });
+    window.history.replaceState({}, '', '/terminal?conversationId=conv-legacy');
+
+    const { unmount } = render(<TerminalPage />);
+
+    expect(screen.getByRole('status')).toHaveTextContent('Resolving remote terminal…');
+    const terminal = await screen.findByTestId('terminal-modal');
+    expect(mockGetConversation).toHaveBeenCalledWith('conv-legacy');
+    expect(terminal).toHaveAttribute('data-target-kind', 'runner');
+    expect(terminal).toHaveAttribute('data-runner-id', 'runner-legacy');
+    expect(terminal).toHaveAttribute('data-conversation-id', 'conv-legacy');
+    expect(readTerminalPopOutRecord()).toEqual(
+      expect.objectContaining({
+        target: {
+          kind: 'runner',
+          runnerId: 'runner-legacy',
+          conversationId: 'conv-legacy',
+        },
+      })
+    );
+
+    unmount();
+  });
+
+  it('rejects a conversation-only pop-out without remote affinity', async () => {
+    mockGetConversation.mockResolvedValue({ id: 'conv-local' });
+    window.history.replaceState({}, '', '/terminal?conversationId=conv-local');
+
+    render(<TerminalPage />);
+
+    expect(
+      await screen.findByText('This conversation has no remote runner terminal.')
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('terminal-modal')).not.toBeInTheDocument();
+    expect(readTerminalPopOutRecord()).toBeNull();
   });
 
   it('removes terminal document overflow styles on cleanup', () => {
@@ -181,7 +269,7 @@ describe('TerminalPage', () => {
     expect(document.documentElement).toHaveClass('terminal-popout-active');
     expect(document.body).toHaveClass('terminal-popout-active');
     expect(readTerminalPopOutRecord()).toEqual(
-      expect.objectContaining({ cwd: '' })
+      expect.objectContaining({ target: { kind: 'local' } })
     );
 
     unmount();

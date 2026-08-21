@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -205,7 +206,7 @@ func TestRunnerCloseReleasesWorkspaceLockAfterRunCleanupError(t *testing.T) {
 	assert.Nil(t, runner.lock)
 }
 
-func TestRunnerCloseRetainsWorkspaceLockUntilTerminalCleanupCompletes(t *testing.T) {
+func TestRunnerCloseReleasesWorkspaceLockAfterBoundedTerminalCleanup(t *testing.T) {
 	workspace := t.TempDir()
 	store, err := localstate.NewStoreAt(t.TempDir())
 	require.NoError(t, err)
@@ -217,35 +218,21 @@ func TestRunnerCloseRetainsWorkspaceLockUntilTerminalCleanupCompletes(t *testing
 	require.NoError(t, err)
 	require.NoError(t, runner.AcquireWorkspaceLock())
 
-	done := make(chan struct{})
-	close(done)
-	session := &workspaceTerminalSession{
-		id:         "terminal-cleanup-pending",
-		done:       done,
-		cleanupErr: errors.New("terminal cleanup pending"),
-	}
-	manager := runner.service.workspaceTerminals
-	manager.mu.Lock()
-	manager.sessions[session.id] = session
-	manager.current = session
-	manager.mu.Unlock()
-
-	err = runner.Close()
-	var terminalCleanupErr *workspaceTerminalCleanupIncompleteError
-	require.ErrorAs(t, err, &terminalCleanupErr)
-	held, err := store.WorkspaceLockHeld(workspace)
+	shell := filepath.Join(t.TempDir(), "ignore-hup.sh")
+	require.NoError(t, os.WriteFile(shell, []byte("#!/bin/bash\ntrap '' HUP TERM\nwhile :; do sleep 60; done\n"), 0o700))
+	t.Setenv("SHELL", shell)
+	opened, err := runner.service.workspaceTerminals.Open(t.Context(), 24, 80)
 	require.NoError(t, err)
-	assert.True(t, held)
-	assert.NotNil(t, runner.lock)
+	require.NotEmpty(t, opened.SessionID)
 
-	session.mu.Lock()
-	session.cleanupErr = nil
-	session.mu.Unlock()
+	started := time.Now()
 	require.NoError(t, runner.Close())
-	held, err = store.WorkspaceLockHeld(workspace)
+	assert.Less(t, time.Since(started), workspaceTerminalShutdownWait)
+	held, err := store.WorkspaceLockHeld(workspace)
 	require.NoError(t, err)
 	assert.False(t, held)
 	assert.Nil(t, runner.lock)
+	require.NoError(t, runner.Close())
 }
 
 func TestRunnerRegistersHeartbeatsAndReleasesWorkspaceLock(t *testing.T) {

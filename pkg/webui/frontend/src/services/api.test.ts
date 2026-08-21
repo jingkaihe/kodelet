@@ -682,7 +682,10 @@ describe("ApiService", () => {
 				json: async () => mockGitDiff,
 			});
 
-			const result = await apiService.getGitDiff({ cwd: "/workspace/project" });
+			const result = await apiService.getGitDiff({
+				kind: "local",
+				cwd: "/workspace/project",
+			});
 
 			expect(mockFetch).toHaveBeenCalledWith(
 				"/api/git/diff?cwd=%2Fworkspace%2Fproject",
@@ -697,10 +700,28 @@ describe("ApiService", () => {
 				json: async () => ({ cwd: "/runner/project", diff: "", has_diff: false, exit_code: 0 }),
 			});
 
-			await apiService.getGitDiff({ conversationId: "conv-123", runnerId: "runner-1" });
+			await apiService.getGitDiff({
+				kind: "runner",
+				runnerId: "runner-1",
+				conversationId: "conv-123",
+			});
 
 			expect(mockFetch).toHaveBeenCalledWith(
-				"/api/git/diff?conversationId=conv-123&runnerId=runner-1",
+				"/api/git/diff?runnerId=runner-1&conversationId=conv-123",
+				expect.any(Object),
+			);
+		});
+
+		it("fetches git diff directly from a selected runner", async () => {
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({ cwd: "/runner/project", diff: "", has_diff: false, exit_code: 0 }),
+			});
+
+			await apiService.getGitDiff({ kind: "runner", runnerId: "runner-1" });
+
+			expect(mockFetch).toHaveBeenCalledWith(
+				"/api/git/diff?runnerId=runner-1",
 				expect.any(Object),
 			);
 		});
@@ -722,7 +743,7 @@ describe("ApiService", () => {
 			});
 
 			apiService.createTerminalWebSocket({
-				cwd: "/workspace/project",
+				target: { kind: "local", cwd: "/workspace/project" },
 				rows: 24,
 				cols: 80,
 			});
@@ -752,14 +773,17 @@ describe("ApiService", () => {
 			});
 
 			apiService.createTerminalWebSocket({
-				conversationId: "conv-123",
-				runnerId: "runner-1",
+				target: {
+					kind: "runner",
+					runnerId: "runner-1",
+					conversationId: "conv-123",
+				},
 				rows: 30,
 				cols: 120,
 			});
 
 			expect(websocketSpy).toHaveBeenCalledWith(
-				"wss://kodelet.example/api/terminal/ws?conversationId=conv-123&runnerId=runner-1&rows=30&cols=120",
+				"wss://kodelet.example/api/terminal/ws?runnerId=runner-1&conversationId=conv-123&rows=30&cols=120",
 			);
 
 			Object.defineProperty(window, "location", {
@@ -768,7 +792,7 @@ describe("ApiService", () => {
 			});
 		});
 
-		it("creates a websocket using only remote conversation affinity", () => {
+		it("creates a websocket directly for a selected runner", () => {
 			const originalLocation = window.location;
 			const websocketSpy = vi.fn();
 
@@ -783,13 +807,13 @@ describe("ApiService", () => {
 			});
 
 			apiService.createTerminalWebSocket({
-				conversationId: "conv-123",
+				target: { kind: "runner", runnerId: "runner-1" },
 				rows: 30,
 				cols: 120,
 			});
 
 			expect(websocketSpy).toHaveBeenCalledWith(
-				"wss://kodelet.example/api/terminal/ws?conversationId=conv-123&rows=30&cols=120",
+				"wss://kodelet.example/api/terminal/ws?runnerId=runner-1&rows=30&cols=120",
 			);
 
 			Object.defineProperty(window, "location", {
