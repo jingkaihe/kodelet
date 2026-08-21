@@ -187,6 +187,9 @@ func (r *Runner) Run(ctx context.Context) error {
 	// runner lifetime rather than the short periodic-refresh timeout.
 	initialDigest, err := r.service.ProbeManifestDigest(ctx)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
 		return pkgerrors.Wrap(err, "failed to discover initial runner manifest")
 	}
 

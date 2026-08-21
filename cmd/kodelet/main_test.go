@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -10,6 +13,124 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type failOnceWriter struct {
+	bytes.Buffer
+	failed bool
+}
+
+func (w *failOnceWriter) Write(data []byte) (int, error) {
+	if !w.failed {
+		w.failed = true
+		return 0, errors.New("write failed")
+	}
+	return w.Buffer.Write(data)
+}
+
+func TestExecuteCLICommandShowsUsageOnlyForInvocationErrors(t *testing.T) {
+	executionError := errors.New("runner authentication failed with HTTP 401")
+	executionHooks := []struct {
+		name      string
+		configure func(*cobra.Command)
+	}{
+		{name: "persistent pre-run", configure: func(cmd *cobra.Command) {
+			cmd.PersistentPreRunE = func(*cobra.Command, []string) error { return executionError }
+		}},
+		{name: "pre-run", configure: func(cmd *cobra.Command) {
+			cmd.PreRunE = func(*cobra.Command, []string) error { return executionError }
+		}},
+		{name: "run", configure: func(cmd *cobra.Command) {
+			cmd.RunE = func(*cobra.Command, []string) error { return executionError }
+		}},
+		{name: "post-run", configure: func(cmd *cobra.Command) {
+			cmd.PostRunE = func(*cobra.Command, []string) error { return executionError }
+		}},
+		{name: "persistent post-run", configure: func(cmd *cobra.Command) {
+			cmd.PersistentPostRunE = func(*cobra.Command, []string) error { return executionError }
+		}},
+	}
+	for _, test := range executionHooks {
+		t.Run(test.name+" error", func(t *testing.T) {
+			root := &cobra.Command{Use: "kodelet"}
+			runner := &cobra.Command{Use: "runner"}
+			start := &cobra.Command{
+				Use:  "start",
+				Args: cobra.NoArgs,
+				RunE: func(*cobra.Command, []string) error { return nil },
+			}
+			test.configure(start)
+			runner.AddCommand(start)
+			root.AddCommand(runner)
+			var output bytes.Buffer
+			root.SetOut(&output)
+			root.SetErr(&output)
+			root.SetArgs([]string{"runner", "start"})
+
+			err := executeCLICommand(t.Context(), root)
+
+			require.ErrorIs(t, err, executionError)
+			assert.Equal(t, 1, strings.Count(output.String(), executionError.Error()))
+			assert.NotContains(t, output.String(), "Usage:")
+			assert.False(t, start.SilenceUsage)
+		})
+	}
+
+	t.Run("argument error", func(t *testing.T) {
+		root := &cobra.Command{Use: "kodelet"}
+		inspect := &cobra.Command{
+			Use:  "inspect <runner>",
+			Args: cobra.ExactArgs(1),
+			RunE: func(*cobra.Command, []string) error { return nil },
+		}
+		root.AddCommand(inspect)
+		var output bytes.Buffer
+		root.SetOut(&output)
+		root.SetErr(&output)
+		root.SetArgs([]string{"inspect"})
+
+		err := executeCLICommand(t.Context(), root)
+
+		require.Error(t, err)
+		assert.Contains(t, output.String(), "Usage:")
+		assert.Contains(t, output.String(), "inspect <runner>")
+	})
+
+	t.Run("flag error", func(t *testing.T) {
+		root := &cobra.Command{Use: "kodelet"}
+		start := &cobra.Command{
+			Use:  "start",
+			Args: cobra.NoArgs,
+			RunE: func(*cobra.Command, []string) error { return nil },
+		}
+		root.AddCommand(start)
+		var output bytes.Buffer
+		root.SetOut(&output)
+		root.SetErr(&output)
+		root.SetArgs([]string{"start", "--unknown"})
+
+		err := executeCLICommand(t.Context(), root)
+
+		require.Error(t, err)
+		assert.Contains(t, output.String(), "unknown flag: --unknown")
+		assert.Contains(t, output.String(), "Usage:")
+	})
+
+	t.Run("generated completion execution error", func(t *testing.T) {
+		root := &cobra.Command{Use: "kodelet"}
+		root.AddCommand(&cobra.Command{Use: "start", Run: func(*cobra.Command, []string) {}})
+		var output failOnceWriter
+		var errorOutput bytes.Buffer
+		root.SetOut(&output)
+		root.SetErr(&errorOutput)
+		root.SetArgs([]string{"completion", "bash"})
+
+		err := executeCLICommand(t.Context(), root)
+
+		require.ErrorContains(t, err, "write failed")
+		assert.Equal(t, 1, strings.Count(errorOutput.String(), "write failed"))
+		assert.NotContains(t, output.String(), "Usage:")
+	})
+}
 
 func TestAuthTokenFlagOrEnvironment(t *testing.T) {
 	const environmentName = "KODELET_TEST_AUTH_TOKEN"

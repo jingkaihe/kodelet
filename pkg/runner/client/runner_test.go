@@ -39,6 +39,12 @@ type delayedInitialProbeInstanceProvider struct {
 	delay     time.Duration
 }
 
+type blockingInitialProbeInstanceProvider struct {
+	workspace string
+	started   chan struct{}
+	once      sync.Once
+}
+
 func saveTestRunnerCredential(t *testing.T, store *localstate.Store, server, workspace, credentialID string) localstate.Credential {
 	t.Helper()
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
@@ -67,6 +73,15 @@ func (p *delayedInitialProbeInstanceProvider) Create(ctx context.Context, spec E
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
+	}
+	return &directWorkspaceInstance{workspace: p.workspace}, nil
+}
+
+func (p *blockingInitialProbeInstanceProvider) Create(ctx context.Context, spec ExecutionInstanceSpec) (ExecutionInstance, error) {
+	if spec.Probe {
+		p.once.Do(func() { close(p.started) })
+		<-ctx.Done()
+		return nil, ctx.Err()
 	}
 	return &directWorkspaceInstance{workspace: p.workspace}, nil
 }
@@ -352,6 +367,45 @@ func TestRunnerRegistersHeartbeatsAndReleasesWorkspaceLock(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, found)
 	assert.NotNil(t, metadata.StoppedAt)
+}
+
+func TestRunnerStopsCleanlyWhenInitialManifestProbeIsCanceled(t *testing.T) {
+	workspace := t.TempDir()
+	store, err := localstate.NewStoreAt(t.TempDir())
+	require.NoError(t, err)
+	runner, err := NewRunner(t.Context(), RunnerConfig{
+		Server:    "http://localhost:8080",
+		Workspace: workspace,
+		Store:     store,
+	})
+	require.NoError(t, err)
+	runtime := extensions.EmptyRuntime()
+	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
+	runner.service.runtimeProvider = staticRuntimeProvider{runtime: runtime}
+	runner.service.configLoader = func(string) (llmtypes.Config, error) { return llmtypes.Config{}, nil }
+	provider := &blockingInitialProbeInstanceProvider{workspace: workspace, started: make(chan struct{})}
+	runner.service.instanceProvider = provider
+
+	runCtx, cancel := context.WithCancel(t.Context())
+	runDone := make(chan error, 1)
+	go func() { runDone <- runner.Run(runCtx) }()
+	select {
+	case <-provider.started:
+	case <-time.After(time.Second):
+		cancel()
+		t.Fatal("initial manifest probe did not start")
+	}
+	cancel()
+
+	select {
+	case err = <-runDone:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("runner did not stop after initial manifest cancellation")
+	}
+	held, err := store.WorkspaceLockHeld(workspace)
+	require.NoError(t, err)
+	assert.False(t, held)
 }
 
 func TestManifestRefreshDoesNotBlockRunnerHeartbeats(t *testing.T) {

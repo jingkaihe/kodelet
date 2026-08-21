@@ -291,6 +291,61 @@ var rootCmd = &cobra.Command{
 	},
 }
 
+func executeCLICommand(ctx context.Context, root *cobra.Command) error {
+	// Cobra adds these commands lazily during Execute. Initialize them before
+	// wrapping the tree so their execution errors follow the same usage policy.
+	root.InitDefaultHelpCmd()
+	root.InitDefaultCompletionCmd()
+
+	var restore []func()
+	wrapExecutionHook := func(hook func(*cobra.Command, []string) error) func(*cobra.Command, []string) error {
+		if hook == nil {
+			return nil
+		}
+		return func(cmd *cobra.Command, args []string) error {
+			err := hook(cmd, args)
+			if err != nil {
+				// Usage helps with command discovery, flags, and argument shape. Once
+				// execution has begun, it obscures the actionable failure instead.
+				cmd.SilenceUsage = true
+			}
+			return err
+		}
+	}
+	var configure func(*cobra.Command)
+	configure = func(command *cobra.Command) {
+		originalPersistentPreRunE := command.PersistentPreRunE
+		originalPreRunE := command.PreRunE
+		originalRunE := command.RunE
+		originalPostRunE := command.PostRunE
+		originalPersistentPostRunE := command.PersistentPostRunE
+		originalSilenceUsage := command.SilenceUsage
+		command.PersistentPreRunE = wrapExecutionHook(originalPersistentPreRunE)
+		command.PreRunE = wrapExecutionHook(originalPreRunE)
+		command.RunE = wrapExecutionHook(originalRunE)
+		command.PostRunE = wrapExecutionHook(originalPostRunE)
+		command.PersistentPostRunE = wrapExecutionHook(originalPersistentPostRunE)
+		restore = append(restore, func() {
+			command.PersistentPreRunE = originalPersistentPreRunE
+			command.PreRunE = originalPreRunE
+			command.RunE = originalRunE
+			command.PostRunE = originalPostRunE
+			command.PersistentPostRunE = originalPersistentPostRunE
+			command.SilenceUsage = originalSilenceUsage
+		})
+		for _, child := range command.Commands() {
+			configure(child)
+		}
+	}
+	configure(root)
+	defer func() {
+		for i := len(restore) - 1; i >= 0; i-- {
+			restore[i]()
+		}
+	}()
+	return root.ExecuteContext(ctx)
+}
+
 func main() {
 	ctx := context.Background()
 	if configFileLoadError != nil {
@@ -420,8 +475,7 @@ func main() {
 	rootCmd.SetContext(ctx)
 
 	// Execute
-	if err := rootCmd.ExecuteContext(ctx); err != nil {
-		logger.G(context.TODO()).WithField("error", err).Error("Failed to execute command")
+	if err := executeCLICommand(ctx, rootCmd); err != nil {
 		os.Exit(1)
 	}
 }

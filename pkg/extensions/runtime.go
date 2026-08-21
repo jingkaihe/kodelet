@@ -99,8 +99,14 @@ func (r *Runtime) initialize(ctx context.Context, discovery *Discovery) error {
 		return err
 	}
 	for _, ext := range extensions {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		proc, err := StartProcess(r.runtimeCtx, ext, r.config, r.workingDir)
 		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
 			logger.G(ctx).WithError(err).WithField("extension", ext.ID).Warn("failed to start extension; disabling for this process")
 			continue
 		}
@@ -109,8 +115,15 @@ func (r *Runtime) initialize(ctx context.Context, discovery *Discovery) error {
 		cancel()
 		if err != nil {
 			_ = proc.Close()
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
 			logger.G(ctx).WithError(err).WithField("extension", ext.ID).Warn("failed to initialize extension; disabling for this process")
 			continue
+		}
+		if err := ctx.Err(); err != nil {
+			_ = proc.Close()
+			return err
 		}
 		r.processes = append(r.processes, proc)
 		if err := r.register(ctx, proc, result); err != nil {

@@ -2,6 +2,7 @@ package extensions
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,9 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jingkaihe/kodelet/pkg/logger"
 	kodelettools "github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -449,6 +452,49 @@ func TestRuntimeProcessSurvivesInitializationContextCancellation(t *testing.T) {
 	require.NotNil(t, result)
 	assert.True(t, result.Matched)
 	assert.Equal(t, "All extensions are healthy for conv-after-cancel.", result.Response)
+}
+
+func TestRuntimeInitializationReturnsCallerCancellationWithoutWarning(t *testing.T) {
+	rootDir := t.TempDir()
+	startedPath := filepath.Join(rootDir, "started")
+	extDir := filepath.Join(rootDir, "blocking")
+	writeExecutable(t, filepath.Join(extDir, "kodelet-extension-blocking"), fmt.Sprintf("#!/bin/sh\n: > %q\nsleep 60\n", startedPath))
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+
+	var logOutput bytes.Buffer
+	testLogger := logrus.New()
+	testLogger.SetOutput(&logOutput)
+	ctx, cancel := context.WithCancel(logger.WithLogger(context.Background(), logrus.NewEntry(testLogger)))
+	t.Cleanup(cancel)
+
+	type runtimeResult struct {
+		runtime *Runtime
+		err     error
+	}
+	done := make(chan runtimeResult, 1)
+	go func() {
+		runtime, err := NewRuntime(
+			ctx,
+			WithConfig(DefaultConfig()),
+			WithWorkingDir(rootDir),
+			WithRoots(Root{Dir: rootDir, Kind: SourceKindLocalStandalone}),
+		)
+		done <- runtimeResult{runtime: runtime, err: err}
+	}()
+	require.Eventually(t, func() bool {
+		_, err := os.Stat(startedPath)
+		return err == nil
+	}, time.Second, 10*time.Millisecond)
+	cancel()
+
+	select {
+	case result := <-done:
+		assert.Nil(t, result.runtime)
+		require.ErrorIs(t, result.err, context.Canceled)
+	case <-time.After(5 * time.Second):
+		t.Fatal("runtime initialization did not stop after cancellation")
+	}
+	assert.NotContains(t, logOutput.String(), "failed to initialize extension")
 }
 
 func TestRuntimeOwnsProcessContextLifetime(t *testing.T) {
