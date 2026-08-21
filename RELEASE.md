@@ -1,5 +1,17 @@
 # Kodelet
 
+## 0.5.36-beta
+
+Added capability-gated Git diff and terminal workspace tools for remote Web UI conversations, proxied through the selected runner instead of the control-plane host.
+
+Made runner terminals persist across side-panel closes, browser reconnects, and pop-out handoffs, with bounded output replay and safe cleanup when the runner shuts down.
+
+Improved runner workspace targeting and availability handling so unsupported or offline controls stay hidden, stale results cannot cross conversations, and terminal access respects Web UI roles.
+
+Simplified Web UI streaming indicators with reusable accessible spinners and lower rendering overhead.
+
+Stopped command execution errors from dumping CLI usage or being reported twice, while runner startup interruptions no longer emit misleading extension warnings.
+
 ## 0.5.35-beta
 
 Added an accessible Web UI conversation search dialog for finding saved chats by title, first message, ID, or workspace, with workspace filtering and paginated results.
