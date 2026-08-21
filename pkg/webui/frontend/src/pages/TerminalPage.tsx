@@ -82,7 +82,6 @@ const TerminalPage = () => {
       target,
       state: 'active',
       updatedAt: Date.now(),
-      version: 3,
     };
     const channel = createTerminalPopOutChannel();
     let active = false;

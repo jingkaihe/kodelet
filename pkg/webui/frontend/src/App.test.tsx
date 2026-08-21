@@ -223,7 +223,7 @@ describe('TerminalPage', () => {
     expect(readTerminalPopOutRecord()).toBeNull();
   });
 
-  it('resolves a legacy conversation-only remote pop-out without opening a local terminal', async () => {
+  it('resolves a conversation-only remote pop-out without opening a local terminal', async () => {
     mockGetConversation.mockResolvedValue({
       id: 'conv-legacy',
       runnerId: 'runner-legacy',

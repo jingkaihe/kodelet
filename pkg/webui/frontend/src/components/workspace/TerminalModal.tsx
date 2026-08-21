@@ -693,11 +693,11 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
         terminalPopOutMessageMatchesTarget(event.data, target)
       ) {
         const closingId = event.data.id;
-        const closingRecord = readTerminalPopOutRecordById(closingId, target);
+        const closingRecord = readTerminalPopOutRecordById(closingId);
         channel?.postMessage({ type: 'probe' });
         const closeTimeout = window.setTimeout(() => {
           pendingCloseTimeouts.delete(closeTimeout);
-          const currentRecord = readTerminalPopOutRecordById(closingId, target);
+          const currentRecord = readTerminalPopOutRecordById(closingId);
           if (
             getActiveTerminalPopOutWindow(target) === null &&
             closingRecord &&

@@ -231,7 +231,6 @@ describe('TerminalModal', () => {
       target: { kind: 'local', cwd: '/runner/project' },
       state: 'active',
       updatedAt: Date.now(),
-      version: 3,
     });
 
     render(
@@ -302,7 +301,6 @@ describe('TerminalModal', () => {
       target: { kind: 'runner', runnerId: 'runner-1', conversationId: 'conv-a' },
       state: 'active',
       updatedAt: Date.now(),
-      version: 3,
     });
 
     render(
@@ -335,7 +333,6 @@ describe('TerminalModal', () => {
       target: { kind: 'runner', runnerId: 'runner-1', conversationId: 'conv-a' },
       state: 'active',
       updatedAt: Date.now(),
-      version: 3,
     });
 
     render(
@@ -356,48 +353,6 @@ describe('TerminalModal', () => {
     expect(screen.queryByText('Terminal is open in the pop-out')).not.toBeInTheDocument();
     await waitFor(() => expect(createTerminalWebSocketMock).toHaveBeenCalledTimes(1));
     openSpy.mockRestore();
-  });
-
-  it('recognizes a version 2 conversation-scoped pop-out during rolling upgrades', () => {
-    window.localStorage.setItem(
-      TERMINAL_POP_OUT_STORAGE_KEY,
-      JSON.stringify({
-        id: 'legacy-runner-pop-out',
-        cwd: '/runner/project',
-        conversationId: 'conv-legacy',
-        state: 'active',
-        updatedAt: Date.now(),
-        version: 2,
-      })
-    );
-
-    render(
-      <TerminalModal
-        cwdLabel="/runner/project"
-        onClose={vi.fn()}
-        open
-        target={{ kind: 'runner', runnerId: 'runner-1', conversationId: 'conv-legacy' }}
-      />
-    );
-
-    expect(screen.getByText('Terminal is open in the pop-out')).toBeInTheDocument();
-    expect(createTerminalWebSocketMock).not.toHaveBeenCalled();
-    expect(
-      readTerminalPopOutRecordForTarget({
-        kind: 'runner',
-        runnerId: 'runner-1',
-        conversationId: 'conv-legacy',
-      })
-    ).toEqual(
-      expect.objectContaining({
-        id: 'legacy-runner-pop-out',
-        target: {
-          kind: 'runner',
-          runnerId: 'runner-1',
-          conversationId: 'conv-legacy',
-        },
-      })
-    );
   });
 
   it('keeps one terminal attachment when conversation validation changes on the same runner', async () => {
@@ -433,7 +388,6 @@ describe('TerminalModal', () => {
       target: { kind: 'runner', runnerId: 'runner-1', conversationId: 'conv-a' },
       state: 'active',
       updatedAt: Date.now(),
-      version: 3,
     });
 
     render(
@@ -683,12 +637,15 @@ describe('TerminalModal', () => {
       id: 'existing-pop-out',
       target: localTarget,
       updatedAt: Date.now(),
-      version: 3,
     };
-    window.localStorage.setItem(
-      TERMINAL_POP_OUT_STORAGE_KEY,
-      JSON.stringify(record)
-    );
+    writeTerminalPopOutRecord(record);
+
+    expect(
+      JSON.parse(window.localStorage.getItem(TERMINAL_POP_OUT_STORAGE_KEY) || 'null')
+    ).toEqual({
+      records: [record],
+      version: 2,
+    });
 
     render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
 
@@ -703,12 +660,8 @@ describe('TerminalModal', () => {
       target: localTarget,
       state: 'active',
       updatedAt: Date.now() - 60_000,
-      version: 3,
     };
-    window.localStorage.setItem(
-      TERMINAL_POP_OUT_STORAGE_KEY,
-      JSON.stringify(record)
-    );
+    writeTerminalPopOutRecord(record);
     render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
 
     expect(createTerminalWebSocketMock).not.toHaveBeenCalled();
@@ -724,12 +677,8 @@ describe('TerminalModal', () => {
       target: localTarget,
       state: 'closing',
       updatedAt: Date.now() - TERMINAL_POP_OUT_RELOAD_GRACE_PERIOD - 1,
-      version: 3,
     };
-    window.localStorage.setItem(
-      TERMINAL_POP_OUT_STORAGE_KEY,
-      JSON.stringify(record)
-    );
+    writeTerminalPopOutRecord(record);
     createTerminalWebSocketMock.mockReturnValue(socket);
 
     render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
@@ -744,13 +693,11 @@ describe('TerminalModal', () => {
       id: 'first-pop-out',
       target: { kind: 'local', cwd: '/tmp/first' },
       updatedAt: Date.now(),
-      version: 3,
     };
     const secondRecord: TerminalPopOutRecord = {
       id: 'second-pop-out',
       target: { kind: 'local', cwd: '/tmp/second' },
       updatedAt: Date.now() + 1,
-      version: 3,
     };
 
     writeTerminalPopOutRecord(firstRecord);
@@ -770,13 +717,11 @@ describe('TerminalModal', () => {
       id: 'local-pop-out',
       target: { kind: 'local', cwd: '/runner/project' },
       updatedAt: Date.now(),
-      version: 3,
     };
     const remoteRecord: TerminalPopOutRecord = {
       id: 'remote-pop-out',
       target: { kind: 'runner', runnerId: 'runner-1', conversationId: 'conv-123' },
       updatedAt: Date.now() + 1,
-      version: 3,
     };
 
     writeTerminalPopOutRecord(localRecord);
@@ -807,7 +752,6 @@ describe('TerminalModal', () => {
       id: 'other-tab-pop-out',
       target: localTarget,
       updatedAt: Date.now(),
-      version: 3,
     };
     writeTerminalPopOutRecord(record);
 
@@ -844,7 +788,6 @@ describe('TerminalModal', () => {
       target: localTarget,
       state: 'active',
       updatedAt: Date.now(),
-      version: 3,
     });
 
     render(<TerminalModal cwdLabel="/tmp/project" onClose={vi.fn()} open target={localTarget} />);
@@ -893,7 +836,6 @@ describe('TerminalModal', () => {
       target: localTarget,
       state: 'closing',
       updatedAt: Date.now() - TERMINAL_POP_OUT_RELOAD_GRACE_PERIOD - 1,
-      version: 3,
     });
     act(() => {
       window.dispatchEvent(new Event('focus'));
