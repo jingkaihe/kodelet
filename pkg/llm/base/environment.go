@@ -2,9 +2,11 @@ package base
 
 import (
 	"context"
+	"strings"
 
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/pkg/errors"
@@ -44,7 +46,7 @@ func OpenEnvironment(ctx context.Context, thread llmtypes.Thread) (agentenv.Mani
 			ConversationID: thread.GetConversationID(),
 			Config:         thread.GetConfig(),
 			Metadata:       thread.GetMetadata(),
-			InvokedBy:      "main",
+			InvokedBy:      invokedByForThread(thread),
 		})
 		if err != nil {
 			return agentenv.Manifest{}, err
@@ -62,6 +64,28 @@ func OpenEnvironment(ctx context.Context, thread llmtypes.Thread) (agentenv.Mani
 		host.SetEnvironmentState(stateProvider.State())
 	}
 	return manifest, nil
+}
+
+func invokedByForThread(thread llmtypes.Thread) string {
+	if thread == nil {
+		return "main"
+	}
+	return ExtensionInvokedByFromMetadata(thread.GetMetadata())
+}
+
+// ExtensionInvokedByFromMetadata returns the extension origin for a persisted conversation fork.
+func ExtensionInvokedByFromMetadata(metadata map[string]any) string {
+	initiator, ok := convtypes.ConversationForkInitiatorFromMetadata(metadata)
+	if !ok || initiator.Type != convtypes.ConversationForkInitiatorTypeExtensionTool {
+		return "main"
+	}
+	if toolName := strings.TrimSpace(initiator.ToolName); toolName != "" {
+		return toolName
+	}
+	if extensionID := strings.TrimSpace(initiator.ExtensionID); extensionID != "" {
+		return extensionID
+	}
+	return "main"
 }
 
 // CloseEnvironment closes the environment snapshot for one top-level SendMessage call.

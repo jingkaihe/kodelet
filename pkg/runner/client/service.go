@@ -103,6 +103,7 @@ type Service struct {
 type activeRun struct {
 	id                 string
 	conversationID     string
+	invokedBy          string
 	clientCaps         protocol.ClientCapabilities
 	config             llmtypes.Config
 	runtime            *extensions.Runtime
@@ -338,6 +339,7 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 	run := &activeRun{
 		id:                 params.RunID,
 		conversationID:     params.ConversationID,
+		invokedBy:          firstNonEmpty(params.Agent.InvokedBy, "main"),
 		clientCaps:         params.ClientCapabilities,
 		ctx:                runCtx,
 		cancel:             cancel,
@@ -404,7 +406,7 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 		Model:          config.Model,
 		Profile:        config.Profile,
 		RecipeName:     config.RecipeName,
-		InvokedBy:      firstNonEmpty(params.Agent.InvokedBy, "main"),
+		InvokedBy:      run.invokedBy,
 	}
 	variant := normalizeEnvironmentProfile(params.Agent.EnvironmentProfile)
 	var runtime *extensions.Runtime
@@ -734,13 +736,14 @@ func (s *Service) executeCommand(ctx context.Context, params runnerpayload.Comma
 	defer finish()
 	s.mu.Lock()
 	runConfig := run.config
+	invokedBy := run.invokedBy
 	s.mu.Unlock()
 	result, err := run.environment.ExecuteCommand(operationCtx, agentenv.CommandRequest{
 		Message: params.Message,
 		RunSpec: agentenv.RunSpec{
 			ConversationID: run.conversationID,
 			Config:         runConfig,
-			InvokedBy:      "main",
+			InvokedBy:      invokedBy,
 		},
 	})
 	if err != nil {

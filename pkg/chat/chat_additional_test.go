@@ -275,6 +275,22 @@ func TestDefaultChatRunnerExecutesRemoteDirectCommandAndPersistsAffinityMetadata
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
 	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
+	initiator := convtypes.ConversationForkInitiator{
+		Type:     convtypes.ConversationForkInitiatorTypeExtensionTool,
+		ToolName: "subagent",
+	}
+	child := convtypes.ForkConversationRecordWithOptions(
+		convtypes.NewConversationRecord("conversation-parent"),
+		convtypes.ConversationForkOptions{Mode: convtypes.ConversationForkModeLiveSnapshot, Initiator: &initiator},
+	)
+	child.ID = "conversation-remote-command"
+	child.Provider = "anthropic"
+	child.Metadata[RunnerIDMetadataKey] = "runner-one"
+	child.Metadata[EnvironmentProfileMetadataKey] = "gpu"
+	store, err := conversations.GetConversationStore(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, store.Save(t.Context(), child))
+	require.NoError(t, store.Close())
 
 	environment := &directCommandEnvironment{result: agentenv.CommandResult{
 		Matched:     true,
@@ -302,6 +318,7 @@ func TestDefaultChatRunnerExecutesRemoteDirectCommandAndPersistsAffinityMetadata
 	assert.Empty(t, resolver.config.WorkingDirectory)
 	assert.Equal(t, "/runner-status", environment.request.Message)
 	assert.Equal(t, "gpu", environment.request.RunSpec.EnvironmentProfile)
+	assert.Equal(t, "subagent", environment.request.RunSpec.InvokedBy)
 	require.Len(t, sink.events, 2)
 	assert.Equal(t, "conversation", sink.events[0].Kind)
 	assert.Equal(t, "runner ready", sink.events[1].Content)
@@ -332,6 +349,7 @@ func TestDefaultChatRunnerStreamsAndPersistsExplicitCommandDisplay(t *testing.T)
 	viper.Set("provider", "openai")
 	viper.Set("model", "gpt-4.1")
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
 	conversationID := "conversation-dictate-display"
 	config, _, err := ResolveRemoteConfigWithReasoningAndEnvironmentProfile(t.Context(), conversationID, "", "", "")
 	require.NoError(t, err)
@@ -391,6 +409,7 @@ func TestDefaultChatRunnerIncludesImagesInExplicitCommandDisplay(t *testing.T) {
 	viper.Set("provider", "openai")
 	viper.Set("model", "gpt-4.1")
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
 	conversationID := "conversation-dictate-display-image"
 	config, _, err := ResolveRemoteConfigWithReasoningAndEnvironmentProfile(t.Context(), conversationID, "", "", "")
 	require.NoError(t, err)
@@ -488,6 +507,7 @@ func TestDefaultChatRunnerRenameCommandPersistsWithoutCallingModel(t *testing.T)
 	viper.Set("provider", "openai")
 	viper.Set("model", "gpt-4.1")
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
 	workspace := t.TempDir()
 	conversationID := "conv-rename"
 	config, _, err := ResolveConfigWithReasoning(context.Background(), conversationID, "", "", workspace, workspace)

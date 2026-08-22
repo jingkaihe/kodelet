@@ -10,6 +10,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/goals"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/attribute"
@@ -101,10 +102,12 @@ type projectedEnvironment struct {
 	agentenv.Environment
 	manifest agentenv.Manifest
 	opened   bool
+	spec     agentenv.RunSpec
 }
 
-func (e *projectedEnvironment) Open(context.Context, agentenv.RunSpec) (agentenv.Manifest, error) {
+func (e *projectedEnvironment) Open(_ context.Context, spec agentenv.RunSpec) (agentenv.Manifest, error) {
 	e.opened = true
+	e.spec = spec.Clone()
 	return e.manifest.Clone(), nil
 }
 
@@ -295,6 +298,36 @@ func TestOpenEnvironmentAppliesPinnedRunnerConfiguration(t *testing.T) {
 	assert.Equal(t, "darwin", config.SystemInformation.Platform)
 	assert.Equal(t, "macOS 26.0", config.SystemInformation.OSVersion)
 	assert.Equal(t, "2026-08-09", config.SystemInformation.Date)
+}
+
+func TestForkInitiatorBecomesExtensionInvokedBy(t *testing.T) {
+	initiator := convtypes.ConversationForkInitiator{
+		Type:        convtypes.ConversationForkInitiatorTypeExtensionTool,
+		ExtensionID: "subagent-extension",
+		ToolName:    "subagent",
+	}
+	child := convtypes.ForkConversationRecordWithOptions(
+		convtypes.NewConversationRecord("parent"),
+		convtypes.ConversationForkOptions{
+			Mode:      convtypes.ConversationForkModeLiveSnapshot,
+			Initiator: &initiator,
+		},
+	)
+	environment := &projectedEnvironment{}
+	thread := &environmentThreadStub{
+		threadStub: &threadStub{
+			conversationID: child.ID,
+			metadata:       child.Metadata,
+		},
+		environment: environment,
+	}
+
+	_, err := OpenEnvironment(t.Context(), thread)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, CloseEnvironment(t.Context(), thread)) })
+
+	assert.Equal(t, "subagent", environment.spec.InvokedBy)
+	assert.Equal(t, "subagent", buildExtensionCallContext(thread, nil).InvokedBy)
 }
 
 func TestExecuteEnvironmentToolForwardsUpdatesAndNormalizesResults(t *testing.T) {

@@ -184,7 +184,7 @@ func TestRemoteEnvironmentProxiesPinnedRunnerContract(t *testing.T) {
 			Profile:    "workspace",
 			RecipeName: "initial",
 		},
-		InvokedBy: "main",
+		InvokedBy: "subagent",
 	})
 	require.NoError(t, err)
 	assert.True(t, environment.IsOpen())
@@ -192,6 +192,7 @@ func TestRemoteEnvironmentProxiesPinnedRunnerContract(t *testing.T) {
 	assert.Equal(t, "conversation-1", controller.openParams.ConversationID)
 	assert.Equal(t, "workspace", controller.openParams.Agent.Profile)
 	assert.Equal(t, "runner-workspace", controller.openParams.Agent.EnvironmentProfile)
+	assert.Equal(t, "subagent", controller.openParams.Agent.InvokedBy)
 	assert.ElementsMatch(t, []string{"get_goal", "update_goal", "read_conversation"}, controller.openParams.ReservedToolNames)
 	assert.Equal(t, contextContent, manifest.Contexts["/runner/workspace/AGENTS.md"])
 	require.NotNil(t, manifest.Config)

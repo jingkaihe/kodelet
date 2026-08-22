@@ -329,6 +329,13 @@ func runDefaultChat(
 	if sessionID == "" {
 		sessionID = convtypes.GenerateID()
 	}
+	invokedBy := "main"
+	if strings.TrimSpace(req.ConversationID) != "" {
+		invokedBy, err = resolveConversationInvokedBy(ctx, sessionID)
+		if err != nil {
+			return sessionID, err
+		}
+	}
 
 	var llmConfig llmtypes.Config
 	var resolvedCWD string
@@ -375,7 +382,7 @@ func runDefaultChat(
 				Model:          llmConfig.Model,
 				Profile:        llmConfig.Profile,
 				RecipeName:     llmConfig.RecipeName,
-				InvokedBy:      "main",
+				InvokedBy:      invokedBy,
 			})
 		} else {
 			extensionRuntime, err = extensionRuntimes.Runtime(ctx, resolvedCWD)
@@ -414,7 +421,7 @@ func runDefaultChat(
 		ConversationID:     sessionID,
 		EnvironmentProfile: environmentProfile,
 		Config:             llmConfig,
-		InvokedBy:          "main",
+		InvokedBy:          invokedBy,
 	}
 	commandResult, err := environment.ExecuteCommand(ctx, agentenv.CommandRequest{Message: message, RunSpec: runSpec})
 	if err != nil {
@@ -735,6 +742,23 @@ func closeDefaultChatSession(session *defaultChatSession) error {
 	session.thread = nil
 	session.configFingerprint = ""
 	return err
+}
+
+func resolveConversationInvokedBy(ctx context.Context, conversationID string) (string, error) {
+	service, err := conversationservice.GetDefaultConversationService(ctx)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to open conversation service")
+	}
+	defer func() { _ = service.Close() }()
+
+	record, err := service.GetConversation(ctx, strings.TrimSpace(conversationID))
+	if errors.Is(err, convtypes.ErrConversationNotFound) {
+		return "main", nil
+	}
+	if err != nil {
+		return "", errors.Wrap(err, "failed to load conversation origin")
+	}
+	return llmbase.ExtensionInvokedByFromMetadata(record.Metadata), nil
 }
 
 func ResolveConfig(ctx context.Context, conversationID, requestedProfile, requestedCWD, defaultCWDInput string) (llmtypes.Config, string, error) {

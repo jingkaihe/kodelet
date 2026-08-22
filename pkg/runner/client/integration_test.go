@@ -19,6 +19,7 @@ import (
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
@@ -47,13 +48,17 @@ func (e *forkCallbackEnvironment) ExecuteTool(ctx context.Context, request agent
 	return agentenv.ToolExecution{Input: request.Input, Result: result, StructuredResult: structured}, nil
 }
 
-type integrationConversationForker struct{}
+type integrationConversationForker struct {
+	initiator convtypes.ConversationForkInitiator
+	has       bool
+}
 
 func (*integrationConversationForker) GetMetadata() map[string]any { return nil }
 
 func (*integrationConversationForker) SetMetadataValue(string, any) {}
 
-func (*integrationConversationForker) ForkConversation(context.Context) (string, error) {
+func (f *integrationConversationForker) ForkConversation(ctx context.Context) (string, error) {
+	f.initiator, f.has = convtypes.ConversationForkInitiatorFromContext(ctx)
 	return "conversation-child", nil
 }
 
@@ -195,6 +200,11 @@ func TestRunnerServiceRoundTripsThroughSymmetricWebsocketProtocol(t *testing.T) 
 	}, nil)
 	require.NoError(t, err)
 	assert.Contains(t, result.Result.AssistantFacing, "conversation-child")
+	require.True(t, forker.has)
+	assert.Equal(t, convtypes.ConversationForkInitiator{
+		Type:     convtypes.ConversationForkInitiatorTypeExtensionTool,
+		ToolName: "fork_callback",
+	}, forker.initiator)
 	childRunnerID, ok := registry.RunnerForConversation("conversation-child")
 	require.True(t, ok)
 	assert.Equal(t, registration.RunnerID, childRunnerID)

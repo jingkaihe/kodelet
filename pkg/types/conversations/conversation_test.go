@@ -121,6 +121,9 @@ func TestForkConversationRecordTracksNestedLineageAndInitiator(t *testing.T) {
 	assert.Equal(t, ConversationForkModeLiveSnapshot, secondMetadata.Mode)
 	require.NotNil(t, secondMetadata.Initiator)
 	assert.Equal(t, initiator, *secondMetadata.Initiator)
+	persistedInitiator, ok := ConversationForkInitiatorFromMetadata(secondFork.Metadata)
+	require.True(t, ok)
+	assert.Equal(t, initiator, persistedInitiator)
 }
 
 func TestConversationForkInitiatorContext(t *testing.T) {

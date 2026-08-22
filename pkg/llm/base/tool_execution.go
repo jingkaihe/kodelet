@@ -507,7 +507,7 @@ func buildExtensionCallContext(thread llmtypes.Thread, state tooltypes.State) ex
 		Model:          config.Model,
 		Profile:        config.Profile,
 		RecipeName:     recipeName,
-		InvokedBy:      "main",
+		InvokedBy:      invokedByForThread(thread),
 	}
 }
 

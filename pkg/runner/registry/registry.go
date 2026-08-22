@@ -17,6 +17,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	"github.com/jingkaihe/kodelet/pkg/tools"
+	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 )
@@ -260,7 +261,7 @@ type Registry struct {
 	runs              map[string]*runEntry
 	affinities        *affinityIndex
 	toolUpdates       *toolUpdateRouter
-	toolForkers       map[toolForkKey]llmtypes.ConversationForker
+	toolForkers       map[toolForkKey]*toolForkRegistration
 	onRunFailure      func(string)
 	heartbeatInterval time.Duration
 	heartbeatTimeout  time.Duration
@@ -277,6 +278,11 @@ type Registry struct {
 type toolForkKey struct {
 	runID      string
 	toolCallID string
+}
+
+type toolForkRegistration struct {
+	forker   llmtypes.ConversationForker
+	toolName string
 }
 
 // New creates a live registry and restores any configured durable state.
@@ -306,7 +312,7 @@ func New(parent context.Context, options Options) (*Registry, error) {
 		runs:              make(map[string]*runEntry),
 		affinities:        newAffinityIndex(),
 		toolUpdates:       newToolUpdateRouter(),
-		toolForkers:       make(map[toolForkKey]llmtypes.ConversationForker),
+		toolForkers:       make(map[toolForkKey]*toolForkRegistration),
 		heartbeatInterval: options.HeartbeatInterval,
 		heartbeatTimeout:  options.HeartbeatTimeout,
 		runLeaseGrace:     options.RunLeaseGrace,
@@ -1253,7 +1259,7 @@ func (r *Registry) ExecuteTool(ctx context.Context, params runnerpayload.ToolExe
 	}
 	toolContext := tools.ToolContextFromContext(ctx)
 	if forker, ok := toolContext.MetadataStore.(llmtypes.ConversationForker); ok {
-		cleanupForker := r.registerToolForker(params.RunID, params.ToolCallID, forker)
+		cleanupForker := r.registerToolForker(params.RunID, params.ToolCallID, params.Name, forker)
 		defer cleanupForker()
 	}
 	var result runnerpayload.ToolExecuteResult
@@ -1269,14 +1275,17 @@ func (r *Registry) ExecuteTool(ctx context.Context, params runnerpayload.ToolExe
 	return result, nil
 }
 
-func (r *Registry) registerToolForker(runID, toolCallID string, forker llmtypes.ConversationForker) func() {
+func (r *Registry) registerToolForker(runID, toolCallID, toolName string, forker llmtypes.ConversationForker) func() {
 	key := toolForkKey{runID: strings.TrimSpace(runID), toolCallID: strings.TrimSpace(toolCallID)}
+	registration := &toolForkRegistration{forker: forker, toolName: strings.TrimSpace(toolName)}
 	r.mu.Lock()
-	r.toolForkers[key] = forker
+	r.toolForkers[key] = registration
 	r.mu.Unlock()
 	return func() {
 		r.mu.Lock()
-		delete(r.toolForkers, key)
+		if r.toolForkers[key] == registration {
+			delete(r.toolForkers, key)
+		}
 		r.mu.Unlock()
 	}
 }
@@ -1285,15 +1294,21 @@ func (r *Registry) forkToolConversation(ctx context.Context, runnerID, connectio
 	key := toolForkKey{runID: strings.TrimSpace(params.RunID), toolCallID: strings.TrimSpace(params.ToolCallID)}
 	r.mu.RLock()
 	run := r.runs[key.runID]
-	forker := r.toolForkers[key]
+	registration := r.toolForkers[key]
 	valid := run != nil && run.Status == RunStatusRunning && run.RunnerID == runnerID && run.connectionID == connectionID && run.generation == generation
-	if !valid || forker == nil {
+	if !valid || registration == nil || registration.forker == nil {
 		r.mu.RUnlock()
 		return runnerpayload.ConversationForkResult{}, llmtypes.ErrConversationForkUnavailable
 	}
 	affinity, _ := r.affinities.get(run.ConversationID)
 	r.mu.RUnlock()
-	conversationID, err := forker.ForkConversation(ctx)
+	if registration.toolName != "" {
+		ctx = convtypes.ContextWithConversationForkInitiator(ctx, convtypes.ConversationForkInitiator{
+			Type:     convtypes.ConversationForkInitiatorTypeExtensionTool,
+			ToolName: registration.toolName,
+		})
+	}
+	conversationID, err := registration.forker.ForkConversation(ctx)
 	if err != nil {
 		return runnerpayload.ConversationForkResult{}, err
 	}

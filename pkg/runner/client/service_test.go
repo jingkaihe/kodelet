@@ -144,6 +144,16 @@ type blockingToolEnvironment struct {
 	once    sync.Once
 }
 
+type recordingCommandEnvironment struct {
+	agentenv.Environment
+	request agentenv.CommandRequest
+}
+
+func (e *recordingCommandEnvironment) ExecuteCommand(ctx context.Context, request agentenv.CommandRequest) (agentenv.CommandResult, error) {
+	e.request = request
+	return e.Environment.ExecuteCommand(ctx, request)
+}
+
 func (e *blockingToolEnvironment) ExecuteTool(_ context.Context, request agentenv.ToolRequest, _ agentenv.ToolUpdateSink) (agentenv.ToolExecution, error) {
 	e.once.Do(func() { close(e.started) })
 	<-e.release
@@ -707,8 +717,13 @@ func TestServiceManifestProbeDoesNotStartRunLifecycle(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
 	provider := &recordingRuntimeProvider{runtime: runtime}
 	var loadedProfiles []string
+	var commandEnvironment *recordingCommandEnvironment
 	service, err := NewService(t.Context(), workspace, ServiceOptions{
 		RuntimeProvider: provider,
+		EnvironmentFactory: func(workingDirectory string, runtime *extensions.Runtime) agentenv.Environment {
+			commandEnvironment = &recordingCommandEnvironment{Environment: agentenv.NewLocalEnvironment(workingDirectory, runtime)}
+			return commandEnvironment
+		},
 		ConfigLoader: func(profile string) (llmtypes.Config, error) {
 			loadedProfiles = append(loadedProfiles, profile)
 			return llmtypes.Config{
@@ -731,7 +746,7 @@ func TestServiceManifestProbeDoesNotStartRunLifecycle(t *testing.T) {
 
 	callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
 		RunID: "run-1", ConversationID: "conversation-1",
-		Agent: protocol.AgentDescriptor{Provider: "anthropic", Model: "claude-test", EnvironmentProfile: "runner-work"},
+		Agent: protocol.AgentDescriptor{Provider: "anthropic", Model: "claude-test", EnvironmentProfile: "runner-work", InvokedBy: "subagent"},
 	})
 	assert.Equal(t, 1, provider.activeCalls)
 	assert.Equal(t, []string{"", "runner-work"}, loadedProfiles)
@@ -740,6 +755,10 @@ func TestServiceManifestProbeDoesNotStartRunLifecycle(t *testing.T) {
 	assert.Equal(t, "conversation-1", provider.activeCallContext.ConversationID)
 	assert.Equal(t, "anthropic", provider.activeCallContext.Provider)
 	assert.Equal(t, "claude-test", provider.activeCallContext.Model)
+	assert.Equal(t, "subagent", provider.activeCallContext.InvokedBy)
+	callService[runnerpayload.CommandExecuteResult](t, service, protocol.MethodCommandExecute, runnerpayload.CommandExecuteParams{RunID: "run-1", Message: "hello"})
+	require.NotNil(t, commandEnvironment)
+	assert.Equal(t, "subagent", commandEnvironment.request.RunSpec.InvokedBy)
 	callService[any](t, service, protocol.MethodRunClose, protocol.RunCloseParams{RunID: "run-1"})
 }
 

@@ -95,6 +95,19 @@ func ConversationForkInitiatorFromContext(ctx context.Context) (ConversationFork
 	return initiator, ok && initiator.Type != ""
 }
 
+// ConversationForkInitiatorFromMetadata returns the operation that created a persisted fork.
+func ConversationForkInitiatorFromMetadata(metadata map[string]any) (ConversationForkInitiator, bool) {
+	forkMetadata, ok := conversationForkMetadataFromMetadata(metadata)
+	if !ok || forkMetadata.Initiator == nil {
+		return ConversationForkInitiator{}, false
+	}
+	initiator := *forkMetadata.Initiator
+	initiator.Type = strings.TrimSpace(initiator.Type)
+	initiator.ExtensionID = strings.TrimSpace(initiator.ExtensionID)
+	initiator.ToolName = strings.TrimSpace(initiator.ToolName)
+	return initiator, initiator.Type != ""
+}
+
 // QueryOptions provides filtering and sorting options for conversation queries
 type QueryOptions struct {
 	StartDate     *time.Time // Filter by start date

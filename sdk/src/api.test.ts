@@ -218,10 +218,13 @@ test("preserves explicit zero timeout and merges event timeout options", async (
 
 test("agent.init can patch the system prompt and tool list", async () => {
   const extension = defineExtension((ext) => {
-    ext.on("agent.init", () => ({
-      systemPrompt: { append: "Use safe tools only." },
-      tools: { disable: ["bash"], enable: ["get_weather"] },
-    }));
+    ext.on("agent.init", (_event, ctx) => {
+      assert.equal(ctx.invokedBy, "subagent");
+      return {
+        systemPrompt: { append: "Use safe tools only." },
+        tools: { disable: ["bash"], enable: ["get_weather"] },
+      };
+    });
   });
 
   const harness = await createTestHarness(extension);
@@ -229,6 +232,7 @@ test("agent.init can patch the system prompt and tool list", async () => {
     id: "evt_agent_init",
     event: "agent.init",
     payload: { systemPrompt: "base" },
+    context: { invokedBy: "subagent" },
   });
 
   assert.deepEqual(result, {
