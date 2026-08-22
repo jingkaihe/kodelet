@@ -185,6 +185,9 @@ func runRunnerStart(ctx context.Context, config runnerStartConfig) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to determine current workspace")
 	}
+	if err := os.Setenv(controlPlaneServerEnv, strings.TrimSpace(config.Server)); err != nil {
+		return errors.Wrap(err, "failed to expose the control-plane server to runner subprocesses")
+	}
 
 	var registered bool
 	runner, err := runnerclient.NewRunner(ctx, runnerclient.RunnerConfig{

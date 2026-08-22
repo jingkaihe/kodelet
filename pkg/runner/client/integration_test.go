@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -12,14 +13,49 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/jingkaihe/kodelet/pkg/agentenv"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
+	"github.com/jingkaihe/kodelet/pkg/tools"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
+	tooltypes "github.com/jingkaihe/kodelet/pkg/types/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type forkCallbackEnvironment struct {
+	agentenv.Environment
+}
+
+func (e *forkCallbackEnvironment) ExecuteTool(ctx context.Context, request agentenv.ToolRequest, updates agentenv.ToolUpdateSink) (agentenv.ToolExecution, error) {
+	if request.Name != "fork_callback" {
+		return e.Environment.ExecuteTool(ctx, request, updates)
+	}
+	forker, ok := tools.ToolContextFromContext(ctx).MetadataStore.(llmtypes.ConversationForker)
+	if !ok {
+		return agentenv.ToolExecution{}, llmtypes.ErrConversationForkUnavailable
+	}
+	conversationID, err := forker.ForkConversation(ctx)
+	if err != nil {
+		return agentenv.ToolExecution{}, err
+	}
+	result := tooltypes.BaseToolResult{Result: conversationID}
+	structured := result.StructuredData()
+	structured.ToolName = request.Name
+	return agentenv.ToolExecution{Input: request.Input, Result: result, StructuredResult: structured}, nil
+}
+
+type integrationConversationForker struct{}
+
+func (*integrationConversationForker) GetMetadata() map[string]any { return nil }
+
+func (*integrationConversationForker) SetMetadataValue(string, any) {}
+
+func (*integrationConversationForker) ForkConversation(context.Context) (string, error) {
+	return "conversation-child", nil
+}
 
 func TestRunnerServiceRoundTripsThroughSymmetricWebsocketProtocol(t *testing.T) {
 	workspace := t.TempDir()
@@ -68,6 +104,9 @@ func TestRunnerServiceRoundTripsThroughSymmetricWebsocketProtocol(t *testing.T) 
 		RuntimeProvider: staticRuntimeProvider{runtime: runtime},
 		ConfigLoader: func(string) (llmtypes.Config, error) {
 			return llmtypes.Config{AllowedTools: []string{"file_read"}}, nil
+		},
+		EnvironmentFactory: func(workingDirectory string, runtime *extensions.Runtime) agentenv.Environment {
+			return &forkCallbackEnvironment{Environment: agentenv.NewLocalEnvironment(workingDirectory, runtime)}
 		},
 	})
 	require.NoError(t, err)
@@ -142,6 +181,31 @@ func TestRunnerServiceRoundTripsThroughSymmetricWebsocketProtocol(t *testing.T) 
 	require.NoError(t, err)
 	assert.Contains(t, result.Result.AssistantFacing, "over the wire")
 	assert.True(t, result.Result.Structured.Success)
+
+	forker := &integrationConversationForker{}
+	forkCtx := tools.ContextWithToolContext(t.Context(), tools.ToolContext{
+		ConversationID: "conversation-wire",
+		MetadataStore:  forker,
+	})
+	result, err = registry.ExecuteTool(forkCtx, runnerpayload.ToolExecuteParams{
+		RunID:      "run-wire",
+		ToolCallID: "tool-fork",
+		Name:       "fork_callback",
+		Input:      json.RawMessage(`{}`),
+	}, nil)
+	require.NoError(t, err)
+	assert.Contains(t, result.Result.AssistantFacing, "conversation-child")
+	childRunnerID, ok := registry.RunnerForConversation("conversation-child")
+	require.True(t, ok)
+	assert.Equal(t, registration.RunnerID, childRunnerID)
+
+	var lateFork runnerpayload.ConversationForkResult
+	err = peer.Call(t.Context(), protocol.MethodConversationFork, runnerpayload.ConversationForkParams{
+		RunID: "run-wire", ToolCallID: "tool-fork",
+	}, &lateFork)
+	var rpcErr *protocol.RPCError
+	require.ErrorAs(t, err, &rpcErr)
+	assert.Equal(t, protocol.ErrorCodeUnavailable, rpcErr.Code)
 
 	require.NoError(t, registry.CloseRun(t.Context(), "run-wire", runnerregistry.RunStatusSucceeded, nil))
 	run, ok := registry.Run("run-wire")

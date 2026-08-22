@@ -16,6 +16,8 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
+	"github.com/jingkaihe/kodelet/pkg/tools"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 )
 
@@ -258,6 +260,7 @@ type Registry struct {
 	runs              map[string]*runEntry
 	affinities        *affinityIndex
 	toolUpdates       *toolUpdateRouter
+	toolForkers       map[toolForkKey]llmtypes.ConversationForker
 	onRunFailure      func(string)
 	heartbeatInterval time.Duration
 	heartbeatTimeout  time.Duration
@@ -269,6 +272,11 @@ type Registry struct {
 	ctx               context.Context
 	cancel            context.CancelFunc
 	closed            bool
+}
+
+type toolForkKey struct {
+	runID      string
+	toolCallID string
 }
 
 // New creates a live registry and restores any configured durable state.
@@ -298,6 +306,7 @@ func New(parent context.Context, options Options) (*Registry, error) {
 		runs:              make(map[string]*runEntry),
 		affinities:        newAffinityIndex(),
 		toolUpdates:       newToolUpdateRouter(),
+		toolForkers:       make(map[toolForkKey]llmtypes.ConversationForker),
 		heartbeatInterval: options.HeartbeatInterval,
 		heartbeatTimeout:  options.HeartbeatTimeout,
 		runLeaseGrace:     options.RunLeaseGrace,
@@ -1242,6 +1251,11 @@ func (r *Registry) ExecuteTool(ctx context.Context, params runnerpayload.ToolExe
 	if err != nil {
 		return runnerpayload.ToolExecuteResult{}, err
 	}
+	toolContext := tools.ToolContextFromContext(ctx)
+	if forker, ok := toolContext.MetadataStore.(llmtypes.ConversationForker); ok {
+		cleanupForker := r.registerToolForker(params.RunID, params.ToolCallID, forker)
+		defer cleanupForker()
+	}
 	var result runnerpayload.ToolExecuteResult
 	if err := link.CallTracked(ctx, protocol.MethodToolExecute, params, &result, func(requestID string) {
 		r.toolUpdates.setRequestID(params.RunID, params.ToolCallID, requestID)
@@ -1253,6 +1267,44 @@ func (r *Registry) ExecuteTool(ctx context.Context, params runnerpayload.ToolExe
 		return runnerpayload.ToolExecuteResult{}, errors.Wrap(err, "runner tool response was not received; execution may have started and side effects are uncertain")
 	}
 	return result, nil
+}
+
+func (r *Registry) registerToolForker(runID, toolCallID string, forker llmtypes.ConversationForker) func() {
+	key := toolForkKey{runID: strings.TrimSpace(runID), toolCallID: strings.TrimSpace(toolCallID)}
+	r.mu.Lock()
+	r.toolForkers[key] = forker
+	r.mu.Unlock()
+	return func() {
+		r.mu.Lock()
+		delete(r.toolForkers, key)
+		r.mu.Unlock()
+	}
+}
+
+func (r *Registry) forkToolConversation(ctx context.Context, runnerID, connectionID string, generation int64, params runnerpayload.ConversationForkParams) (runnerpayload.ConversationForkResult, error) {
+	key := toolForkKey{runID: strings.TrimSpace(params.RunID), toolCallID: strings.TrimSpace(params.ToolCallID)}
+	r.mu.RLock()
+	run := r.runs[key.runID]
+	forker := r.toolForkers[key]
+	valid := run != nil && run.Status == RunStatusRunning && run.RunnerID == runnerID && run.connectionID == connectionID && run.generation == generation
+	if !valid || forker == nil {
+		r.mu.RUnlock()
+		return runnerpayload.ConversationForkResult{}, llmtypes.ErrConversationForkUnavailable
+	}
+	affinity, _ := r.affinities.get(run.ConversationID)
+	r.mu.RUnlock()
+	conversationID, err := forker.ForkConversation(ctx)
+	if err != nil {
+		return runnerpayload.ConversationForkResult{}, err
+	}
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
+		return runnerpayload.ConversationForkResult{}, errors.New("live conversation fork returned an empty conversation ID")
+	}
+	if err := r.BindConversationWithEnvironmentProfile(ctx, conversationID, runnerID, affinity.EnvironmentProfile); err != nil {
+		return runnerpayload.ConversationForkResult{}, err
+	}
+	return runnerpayload.ConversationForkResult{ConversationID: conversationID}, nil
 }
 
 // DeliverToolUpdate forwards a generation-fenced transient tool update.

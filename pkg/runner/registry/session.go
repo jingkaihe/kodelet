@@ -9,6 +9,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
+	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
 )
 
@@ -52,9 +53,24 @@ func (s *Session) HandleRequest(ctx context.Context, method string, params json.
 	if method == protocol.MethodRunnerRegister {
 		return s.handleRegister(params)
 	}
-	runnerID, registered := s.identity()
+	runnerID, connectionID, generation, registered := s.connectionIdentity()
 	if !registered {
 		return nil, &protocol.RPCError{Code: protocol.ErrorCodeInvalidRequest, Message: "runner.register must be the first request"}
+	}
+	if method == protocol.MethodConversationFork {
+		value, err := decodeParams[runnerpayload.ConversationForkParams](params)
+		if err != nil {
+			return nil, &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: err.Error()}
+		}
+		result, err := s.registry.forkToolConversation(ctx, runnerID, connectionID, generation, value)
+		if err != nil {
+			code := protocol.ErrorCodeInternal
+			if errors.Is(err, llmtypes.ErrConversationForkUnavailable) {
+				code = protocol.ErrorCodeUnavailable
+			}
+			return nil, &protocol.RPCError{Code: code, Message: err.Error()}
+		}
+		return result, nil
 	}
 	if isUIRequest(method) {
 		if s.ui == nil {
@@ -131,12 +147,6 @@ func (s *Session) handleRegister(params json.RawMessage) (any, *protocol.RPCErro
 	s.generation = result.Generation
 	s.registered = true
 	return result, nil
-}
-
-func (s *Session) identity() (string, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.runnerID, s.registered
 }
 
 func (s *Session) connectionIdentity() (string, string, int64, bool) {

@@ -35,6 +35,7 @@ const (
 	MethodLifecycleDispatch       = "lifecycle.dispatch"
 	MethodToolExecute             = "tool.execute"
 	MethodToolUpdate              = "tool.update"
+	MethodConversationFork        = "conversation.fork"
 	MethodWorkspaceGitDiff        = "workspace.git.diff"
 	MethodWorkspaceTerminalOpen   = "workspace.terminal.open"
 	MethodWorkspaceTerminalRead   = "workspace.terminal.read"

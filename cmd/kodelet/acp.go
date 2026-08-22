@@ -103,6 +103,9 @@ func runRemoteACP(ctx context.Context, cmd *cobra.Command, rawServerURL string) 
 	if err != nil {
 		return err
 	}
+	if err := os.Setenv(controlPlaneServerEnv, serverURL); err != nil {
+		return errors.Wrap(err, "failed to expose the control-plane server to ACP subprocesses")
+	}
 	apiAuthToken, runnerAuthToken, err := resolveRemoteACPAuthTokens(cmd, serverURL)
 	if err != nil {
 		return err

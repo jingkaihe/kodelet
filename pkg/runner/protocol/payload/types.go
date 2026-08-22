@@ -185,6 +185,17 @@ type ToolExecuteResult struct {
 	Modified bool            `json:"modified,omitempty"`
 }
 
+// ConversationForkParams identifies the active runner tool requesting a live fork.
+type ConversationForkParams struct {
+	RunID      string `json:"runId"`
+	ToolCallID string `json:"toolCallId"`
+}
+
+// ConversationForkResult identifies the centrally persisted child conversation.
+type ConversationForkResult struct {
+	ConversationID string `json:"conversationId"`
+}
+
 // ToolUpdateParams is a replaceable transient tool snapshot linked to one request ID.
 type ToolUpdateParams struct {
 	RunID      string     `json:"runId"`

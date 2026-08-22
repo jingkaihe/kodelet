@@ -854,6 +854,11 @@ func (s *Service) executeTool(ctx context.Context, params runnerpayload.ToolExec
 	defer finish()
 
 	peer := s.currentPeer()
+	toolContext := tools.ToolContextFromThreadState(run.config, run.conversationID, run.manifest.WorkingDirectory, nil)
+	if peer != nil {
+		toolContext.MetadataStore = &controlPlaneConversationForker{peer: peer, runID: run.id, toolCallID: params.ToolCallID}
+	}
+	operationCtx = tools.ContextWithToolContext(operationCtx, toolContext)
 	var updateSink agentenv.ToolUpdateSink
 	if params.WantUpdates {
 		requestID := protocol.RequestIDFromContext(operationCtx)
@@ -891,6 +896,36 @@ func (s *Service) executeTool(ctx context.Context, params runnerpayload.ToolExec
 		Result:   serializeToolResult(execution.Result, execution.StructuredResult),
 		Modified: execution.Modified,
 	}, nil
+}
+
+type controlPlaneConversationForker struct {
+	peer       Peer
+	runID      string
+	toolCallID string
+}
+
+func (*controlPlaneConversationForker) GetMetadata() map[string]any { return nil }
+
+func (*controlPlaneConversationForker) SetMetadataValue(string, any) {}
+
+func (f *controlPlaneConversationForker) ForkConversation(ctx context.Context) (string, error) {
+	if f == nil || f.peer == nil {
+		return "", llmtypes.ErrConversationForkUnavailable
+	}
+	params := runnerpayload.ConversationForkParams{RunID: f.runID, ToolCallID: f.toolCallID}
+	var result runnerpayload.ConversationForkResult
+	if err := f.peer.Call(ctx, protocol.MethodConversationFork, params, &result); err != nil {
+		var rpcErr *protocol.RPCError
+		if errors.As(err, &rpcErr) && rpcErr.Code == protocol.ErrorCodeUnavailable {
+			return "", llmtypes.ErrConversationForkUnavailable
+		}
+		return "", err
+	}
+	result.ConversationID = strings.TrimSpace(result.ConversationID)
+	if result.ConversationID == "" {
+		return "", errors.New("control plane returned an empty conversation fork ID")
+	}
+	return result.ConversationID, nil
 }
 
 func serializeToolResult(result tooltypes.ToolResult, structured tooltypes.StructuredToolResult) runnerpayload.ToolResult {
