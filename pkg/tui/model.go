@@ -300,11 +300,6 @@ func listBaseSlashCommands(ctx context.Context, cwd string) ([]slashcommands.Com
 	return withTUIBuiltInSlashCommands(slashcommands.List(ctx, processor)), nil
 }
 
-func listExtensionSlashCommands(ctx context.Context, cwd string, runtimeManager *extensions.RuntimeManager) ([]slashcommands.Command, error) {
-	commands, _, err := listExtensionResources(ctx, cwd, runtimeManager)
-	return commands, err
-}
-
 type extensionResourceRuntimeProvider interface {
 	RuntimeForCommandDiscovery(context.Context, string) (*extensions.Runtime, error)
 }

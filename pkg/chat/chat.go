@@ -737,20 +737,26 @@ func closeDefaultChatSession(session *defaultChatSession) error {
 }
 
 func resolveConversationInvokedBy(ctx context.Context, conversationID string) (string, error) {
+	invokedBy, _, err := resolveConversationExtensionMetadata(ctx, conversationID)
+	return invokedBy, err
+}
+
+func resolveConversationExtensionMetadata(ctx context.Context, conversationID string) (string, string, error) {
 	service, err := conversationservice.GetDefaultConversationService(ctx)
 	if err != nil {
-		return "", errors.Wrap(err, "failed to open conversation service")
+		return "", "", errors.Wrap(err, "failed to open conversation service")
 	}
 	defer func() { _ = service.Close() }()
 
 	record, err := service.GetConversation(ctx, strings.TrimSpace(conversationID))
 	if errors.Is(err, convtypes.ErrConversationNotFound) {
-		return "main", nil
+		return "main", "", nil
 	}
 	if err != nil {
-		return "", errors.Wrap(err, "failed to load conversation origin")
+		return "", "", errors.Wrap(err, "failed to load conversation context")
 	}
-	return llmbase.ExtensionInvokedByFromMetadata(record.Metadata), nil
+	recipeName, _ := record.Metadata["recipe_name"].(string)
+	return llmbase.ExtensionInvokedByFromMetadata(record.Metadata), strings.TrimSpace(recipeName), nil
 }
 
 // ResolveExtensionCallContext builds the extension context for an interactive
@@ -758,12 +764,16 @@ func resolveConversationInvokedBy(ctx context.Context, conversationID string) (s
 func ResolveExtensionCallContext(ctx context.Context, conversationID, cwd string, config llmtypes.Config) (extensions.ExtensionCallContext, error) {
 	conversationID = strings.TrimSpace(conversationID)
 	invokedBy := "main"
+	persistedRecipeName := ""
 	if conversationID != "" {
 		var err error
-		invokedBy, err = resolveConversationInvokedBy(ctx, conversationID)
+		invokedBy, persistedRecipeName, err = resolveConversationExtensionMetadata(ctx, conversationID)
 		if err != nil {
 			return extensions.ExtensionCallContext{}, err
 		}
+	}
+	if strings.TrimSpace(config.RecipeName) == "" {
+		config.RecipeName = persistedRecipeName
 	}
 	return extensionCallContext(conversationID, cwd, config, invokedBy), nil
 }

@@ -154,6 +154,8 @@ test("rejects unsupported and terminal-ambiguous shortcut forms", async () => {
     "f13",
     "ctrl+unknown",
     "ctrl+é",
+    "alt+İ",
+    "alt+K",
   ]) {
     await assert.rejects(
       createTestHarness(

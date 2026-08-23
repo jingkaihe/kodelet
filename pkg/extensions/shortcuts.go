@@ -10,10 +10,14 @@ import (
 // NormalizeShortcutKey validates and canonicalizes a native TUI shortcut key.
 func NormalizeShortcutKey(key string) (string, error) {
 	original := key
-	key = strings.ToLower(strings.TrimSpace(key))
+	key = strings.TrimSpace(key)
 	if key == "" {
 		return "", errors.New("shortcut key is required")
 	}
+	if !isASCII(key) {
+		return "", errors.Errorf("unsupported shortcut %q: shortcut identifiers must use ASCII characters", original)
+	}
+	key = strings.ToLower(key)
 	if strings.ContainsAny(key, " \t\r\n") {
 		return "", errors.Errorf("invalid shortcut key %q", original)
 	}
@@ -64,7 +68,8 @@ func NormalizeShortcutKey(key string) (string, error) {
 	if !ctrl && !alt {
 		return "", errors.Errorf("unsupported shortcut %q: use ctrl+letter, alt+letter-or-digit, ctrl+alt+letter, or f1 through f12", original)
 	}
-	if !isASCIILetter(base) && !(alt && !ctrl && isASCIIDigit(base)) {
+	validBase := isASCIILetter(base) || (alt && !ctrl && isASCIIDigit(base))
+	if !validBase {
 		return "", errors.Errorf("unsupported shortcut key %q", original)
 	}
 	if ctrl && (base == "i" || base == "m") {
@@ -82,6 +87,15 @@ func NormalizeShortcutKey(key string) (string, error) {
 		}
 	}
 	return strings.Join(append(parts, base), "+"), nil
+}
+
+func isASCII(value string) bool {
+	for index := 0; index < len(value); index++ {
+		if value[index] > 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 func isASCIILetter(base string) bool {

@@ -278,16 +278,16 @@ func TestResolveExtensionCallContextIncludesRecipeAndPersistedOrigin(t *testing.
 		},
 	)
 	child.ID = "conversation-shortcut"
+	child.Metadata["recipe_name"] = " persisted-review "
 	store, err := conversations.GetConversationStore(t.Context())
 	require.NoError(t, err)
 	require.NoError(t, store.Save(t.Context(), child))
 	require.NoError(t, store.Close())
 
 	callContext, err := ResolveExtensionCallContext(t.Context(), " conversation-shortcut ", " /workspace/project ", llmtypes.Config{
-		Provider:   " anthropic ",
-		Model:      " claude-test ",
-		Profile:    " work ",
-		RecipeName: " review ",
+		Provider: " anthropic ",
+		Model:    " claude-test ",
+		Profile:  " work ",
 	})
 	require.NoError(t, err)
 	assert.Equal(t, extensions.ExtensionCallContext{
@@ -296,9 +296,13 @@ func TestResolveExtensionCallContextIncludesRecipeAndPersistedOrigin(t *testing.
 		Provider:       "anthropic",
 		Model:          "claude-test",
 		Profile:        "work",
-		RecipeName:     "review",
+		RecipeName:     "persisted-review",
 		InvokedBy:      "subagent",
 	}, callContext)
+
+	configuredContext, err := ResolveExtensionCallContext(t.Context(), "conversation-shortcut", "/workspace/project", llmtypes.Config{RecipeName: "configured-review"})
+	require.NoError(t, err)
+	assert.Equal(t, "configured-review", configuredContext.RecipeName)
 }
 
 func TestResolveExtensionCallContextDefaultsNewConversationOrigin(t *testing.T) {

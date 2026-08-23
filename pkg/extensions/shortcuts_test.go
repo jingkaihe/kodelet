@@ -42,6 +42,8 @@ func TestNormalizeShortcutKey(t *testing.T) {
 		"alt+space",
 		"ctrl+unknown",
 		"ctrl+é",
+		"alt+İ",
+		"alt+K",
 	} {
 		t.Run("invalid "+input, func(t *testing.T) {
 			_, err := NormalizeShortcutKey(input)

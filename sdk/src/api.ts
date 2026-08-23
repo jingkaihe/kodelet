@@ -341,10 +341,14 @@ function normalizeCommandName(name: string): string {
 }
 
 function normalizeShortcutKey(shortcut: string): string {
-  const value = shortcut.trim().toLowerCase();
-  if (!value) {
+  const trimmed = shortcut.trim();
+  if (!trimmed) {
     throw new Error("Extension shortcut key is required");
   }
+  if ([...trimmed].some((character) => (character.codePointAt(0) ?? 0) > 0x7f)) {
+    throw new Error(`Unsupported extension shortcut: ${shortcut}; shortcut identifiers must use ASCII characters`);
+  }
+  const value = trimmed.toLowerCase();
   if (/\s/.test(value)) {
     throw new Error(`Invalid extension shortcut: ${shortcut}`);
   }

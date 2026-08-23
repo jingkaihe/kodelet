@@ -370,7 +370,9 @@ type unreadableBashDisplayResult struct{}
 func (unreadableBashDisplayResult) AssistantFacing() string { return "bounded" }
 func (unreadableBashDisplayResult) IsError() bool           { return false }
 func (unreadableBashDisplayResult) GetError() string        { return "" }
-func (unreadableBashDisplayResult) GetResult() string { panic("full bash output must not be read") }
+func (unreadableBashDisplayResult) GetResult() string {
+	panic("full bash output must not be read")
+}
 
 func (unreadableBashDisplayResult) StructuredData() tooltypes.StructuredToolResult {
 	return tooltypes.StructuredToolResult{ToolName: "bash", Success: true}
