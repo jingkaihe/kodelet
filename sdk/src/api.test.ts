@@ -105,7 +105,28 @@ test("registers tools, commands, events and executes handlers", async () => {
   assert.deepEqual(agentEndResult, { followUpMessages: ["inspect tests"] });
 });
 
-test("rejects duplicate and unsupported shortcut registrations", async () => {
+test("normalizes the supported shortcut forms", async () => {
+  const shortcuts = [
+    ["Control+R", "ctrl+r"],
+    ["option+p", "alt+p"],
+    ["ALT+5", "alt+5"],
+    ["option+control+r", "ctrl+alt+r"],
+    ["F12", "f12"],
+  ] as const;
+
+  for (const [input, expected] of shortcuts) {
+    const harness = await createTestHarness(
+      defineExtension((ext) => {
+        ext.registerShortcut(input, { handler() {} });
+      }),
+    );
+    assert.deepEqual(harness.initialize({ extension: { id: "shortcut", cwd: process.cwd() } }).shortcuts, [
+      { key: expected },
+    ]);
+  }
+});
+
+test("rejects duplicate shortcut registrations", async () => {
   await assert.rejects(
     createTestHarness(
       defineExtension((ext) => {
@@ -115,15 +136,35 @@ test("rejects duplicate and unsupported shortcut registrations", async () => {
     ),
     /Duplicate extension shortcut registration: ctrl\+alt\+r/,
   );
+});
 
-  await assert.rejects(
-    createTestHarness(
-      defineExtension((ext) => {
-        ext.registerShortcut("command+r", { handler() {} });
-      }),
-    ),
-    /Unsupported extension shortcut modifier: command/,
-  );
+test("rejects unsupported and terminal-ambiguous shortcut forms", async () => {
+  for (const shortcut of [
+    "r",
+    "shift+r",
+    "ctrl+shift+r",
+    "command+r",
+    "ctrl+i",
+    "ctrl+m",
+    "ctrl+alt+i",
+    "ctrl+1",
+    "alt+space",
+    "alt+f5",
+    "ctrl+up",
+    "f13",
+    "ctrl+unknown",
+    "ctrl+é",
+  ]) {
+    await assert.rejects(
+      createTestHarness(
+        defineExtension((ext) => {
+          ext.registerShortcut(shortcut, { handler() {} });
+        }),
+      ),
+      /Unsupported extension shortcut|Invalid extension shortcut/,
+      shortcut,
+    );
+  }
 });
 
 test("registerTool preserves raw JSON Schema and passes input through", async () => {

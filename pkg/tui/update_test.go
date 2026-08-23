@@ -1,11 +1,16 @@
 package tui
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -26,6 +31,19 @@ type recordingRunner struct {
 	req            chat.ChatRequest
 	conversationID string
 	err            error
+}
+
+type recordingExtensionResourceRuntimeProvider struct {
+	ctx     context.Context
+	cwd     string
+	runtime *extensions.Runtime
+	err     error
+}
+
+func (p *recordingExtensionResourceRuntimeProvider) RuntimeForCommandDiscovery(ctx context.Context, cwd string) (*extensions.Runtime, error) {
+	p.ctx = ctx
+	p.cwd = cwd
+	return p.runtime, p.err
 }
 
 type remoteControlRecordingRunner struct {
@@ -965,11 +983,29 @@ func TestSlashCommandLoadCommandsAndCWDHelpers(t *testing.T) {
 	assert.Equal(t, "./requested", m.slashCommandCWD())
 }
 
+func TestListExtensionResourcesReleasesDiscoveryLease(t *testing.T) {
+	workspace := t.TempDir()
+	runtime := extensions.EmptyRuntime()
+	t.Cleanup(func() { assert.NoError(t, runtime.Close()) })
+	provider := &recordingExtensionResourceRuntimeProvider{runtime: runtime}
+
+	commands, shortcuts, err := listExtensionResources(t.Context(), workspace, provider)
+
+	require.NoError(t, err)
+	assert.Empty(t, commands)
+	assert.Empty(t, shortcuts)
+	assert.Equal(t, workspace, provider.cwd)
+	require.NotNil(t, provider.ctx)
+	assert.ErrorIs(t, provider.ctx.Err(), context.Canceled)
+}
+
 func TestEffectiveExtensionShortcutsFiltersReservedBindings(t *testing.T) {
 	shortcuts := effectiveExtensionShortcuts(context.Background(), []extensions.Shortcut{
 		{Key: "ctrl+c", Description: "Unsafe", ExtensionID: "first"},
 		{Key: "ctrl+r", Description: "Refresh", ExtensionID: "second"},
 		{Key: "F5", Description: "Rebuild", ExtensionID: "third"},
+		{Key: "ctrl+i", Description: "Ambiguous", ExtensionID: "fourth"},
+		{Key: "shift+r", Description: "Unrepresentable", ExtensionID: "fifth"},
 	})
 
 	assert.Equal(t, []extensions.Shortcut{
@@ -993,6 +1029,88 @@ func TestExtensionShortcutOverridesBuiltInComposerBinding(t *testing.T) {
 	for _, call := range m.shortcutCalls {
 		call.cancel()
 	}
+}
+
+func TestExtensionShortcutDispatchesSupportedTeaKeyMessages(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		key  string
+		msg  tea.KeyMsg
+	}{
+		{name: "control letter", key: "ctrl+r", msg: tea.KeyMsg{Type: tea.KeyCtrlR}},
+		{name: "alt letter", key: "alt+p", msg: tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}, Alt: true}},
+		{name: "alt digit", key: "alt+5", msg: tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}, Alt: true}},
+		{name: "control alt letter", key: "ctrl+alt+r", msg: tea.KeyMsg{Type: tea.KeyCtrlR, Alt: true}},
+		{name: "function key", key: "f5", msg: tea.KeyMsg{Type: tea.KeyF5}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			m := newModel(context.Background(), Config{})
+			t.Cleanup(m.cancel)
+			t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+			m.extensionShortcuts = []extensions.Shortcut{{Key: test.key, Description: "Action", ExtensionID: "workspace"}}
+
+			updated, cmd := m.Update(test.msg)
+			m = updated.(model)
+
+			require.NotNil(t, cmd)
+			require.Len(t, m.shortcutCalls, 1)
+			for _, call := range m.shortcutCalls {
+				call.cancel()
+			}
+		})
+	}
+}
+
+func TestExtensionShortcutCommandExecutesWithResolvedContext(t *testing.T) {
+	workspace := t.TempDir()
+	extensionRoot := t.TempDir()
+	contextPath := filepath.Join(t.TempDir(), "shortcut-context.json")
+	writeTUIShortcutExtension(t, extensionRoot)
+	t.Setenv("KODELET_TUI_SHORTCUT_CONTEXT_PATH", contextPath)
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	withTUIViper(t, map[string]any{
+		"provider":                   "anthropic",
+		"model":                      "claude-test",
+		"recipe_name":                "review",
+		"extensions.enabled":         true,
+		"extensions.local_dir":       extensionRoot,
+		"extensions.global_dir":      t.TempDir(),
+		"extensions.max_output_size": 102400,
+	})
+
+	m := newModel(t.Context(), Config{CWD: workspace, Profile: "default"})
+	t.Cleanup(m.cancel)
+	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+	m.extensionShortcuts = []extensions.Shortcut{{Key: "ctrl+r", Description: "Refresh", ExtensionID: "shortcut-test"}}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	m = updated.(model)
+	require.NotNil(t, cmd)
+	done, ok := cmd().(extensionShortcutDoneMsg)
+	require.True(t, ok)
+	require.NoError(t, done.err)
+	assert.True(t, done.matched)
+
+	payload, err := os.ReadFile(contextPath)
+	require.NoError(t, err)
+	var request struct {
+		Key     string                          `json:"key"`
+		Context extensions.ExtensionCallContext `json:"context"`
+	}
+	require.NoError(t, json.Unmarshal(payload, &request))
+	assert.Equal(t, "ctrl+r", request.Key)
+	assert.Equal(t, workspace, request.Context.CWD)
+	assert.Equal(t, "anthropic", request.Context.Provider)
+	assert.Equal(t, "claude-test", request.Context.Model)
+	assert.Equal(t, "default", request.Context.Profile)
+	assert.Equal(t, "review", request.Context.RecipeName)
+	assert.Equal(t, "main", request.Context.InvokedBy)
+	assert.Equal(t, m.key, request.Context.UIScopeID)
+
+	updated, followUp := m.Update(done)
+	m = updated.(model)
+	assert.Nil(t, followUp)
+	assert.Empty(t, m.shortcutCalls)
 }
 
 func TestExtensionShortcutDoesNotOverrideActiveSlashSuggestions(t *testing.T) {
@@ -1058,6 +1176,89 @@ func writeTUIRecipe(t *testing.T, workspace, name, content string) {
 	recipeDir := filepath.Join(workspace, ".kodelet", "recipes")
 	require.NoError(t, os.MkdirAll(recipeDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(recipeDir, name+".md"), []byte(content), 0o644))
+}
+
+func TestTUIShortcutExtensionHelperProcess(t *testing.T) {
+	if os.Getenv("KODELET_TUI_SHORTCUT_HELPER") != "1" {
+		return
+	}
+	runTUIShortcutExtensionHelper()
+	os.Exit(0)
+}
+
+func writeTUIShortcutExtension(t *testing.T, root string) {
+	t.Helper()
+	executable, err := os.Executable()
+	require.NoError(t, err)
+	script := fmt.Sprintf("#!/bin/sh\nKODELET_TUI_SHORTCUT_HELPER=1 exec %q -test.run TestTUIShortcutExtensionHelperProcess --\n", executable)
+	path := filepath.Join(root, "kodelet-extension-shortcut-test")
+	require.NoError(t, os.WriteFile(path, []byte(script), 0o755))
+}
+
+func runTUIShortcutExtensionHelper() {
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		payload, err := readTUIShortcutExtensionFrame(reader)
+		if err != nil {
+			return
+		}
+		var request struct {
+			ID     int64           `json:"id"`
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		if json.Unmarshal(payload, &request) != nil {
+			return
+		}
+
+		var result any
+		switch request.Method {
+		case "extension.initialize":
+			result = map[string]any{
+				"name": "shortcut-test",
+				"shortcuts": []map[string]any{{
+					"key":         "ctrl+r",
+					"description": "Refresh",
+				}},
+			}
+		case "extension.shortcut.execute":
+			if path := os.Getenv("KODELET_TUI_SHORTCUT_CONTEXT_PATH"); path != "" {
+				_ = os.WriteFile(path, request.Params, 0o644)
+			}
+			result = nil
+		default:
+			result = nil
+		}
+		response, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
+		_, _ = fmt.Fprintf(os.Stdout, "Content-Length: %d\r\n\r\n%s", len(response), response)
+	}
+}
+
+func readTUIShortcutExtensionFrame(reader *bufio.Reader) ([]byte, error) {
+	contentLength := -1
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return nil, err
+		}
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" {
+			break
+		}
+		key, value, ok := strings.Cut(line, ":")
+		if ok && strings.EqualFold(strings.TrimSpace(key), "Content-Length") {
+			contentLength, err = strconv.Atoi(strings.TrimSpace(value))
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	if contentLength < 0 {
+		return nil, errors.New("missing Content-Length header")
+	}
+	payload := make([]byte, contentLength)
+	_, err := io.ReadFull(reader, payload)
+	return payload, err
 }
 
 func withTUIViper(t *testing.T, values map[string]any) {

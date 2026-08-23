@@ -2,9 +2,7 @@ package extensions
 
 import (
 	"context"
-	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/pkg/errors"
 )
@@ -24,12 +22,6 @@ func NormalizeShortcutKey(key string) (string, error) {
 		"control": "ctrl",
 		"option":  "alt",
 	}
-	baseAliases := map[string]string{
-		"escape":   "esc",
-		"return":   "enter",
-		"pageup":   "pgup",
-		"pagedown": "pgdown",
-	}
 	modifiers := map[string]bool{}
 	base := ""
 	for _, rawPart := range strings.Split(key, "+") {
@@ -41,35 +33,50 @@ func NormalizeShortcutKey(key string) (string, error) {
 			part = alias
 		}
 		switch part {
-		case "ctrl", "alt", "shift":
+		case "ctrl", "alt":
 			if modifiers[part] {
 				return "", errors.Errorf("invalid shortcut key %q", original)
 			}
 			modifiers[part] = true
 			continue
+		case "shift":
+			return "", errors.Errorf("unsupported shortcut modifier %q", rawPart)
 		case "cmd", "command", "meta", "super":
 			return "", errors.Errorf("unsupported shortcut modifier %q", rawPart)
 		}
 		if base != "" {
 			return "", errors.Errorf("invalid shortcut key %q", original)
 		}
-		if alias := baseAliases[part]; alias != "" {
-			part = alias
-		}
 		base = part
 	}
 	if base == "" {
 		return "", errors.Errorf("invalid shortcut key %q", original)
 	}
-	if !validShortcutBase(base) {
-		return "", errors.Errorf("invalid shortcut key %q", original)
+
+	ctrl := modifiers["ctrl"]
+	alt := modifiers["alt"]
+	if isFunctionKey(base) {
+		if ctrl || alt {
+			return "", errors.Errorf("unsupported shortcut %q: function keys must not use modifiers", original)
+		}
+		return base, nil
 	}
-	if !modifiers["ctrl"] && !modifiers["alt"] && !isFunctionKey(base) {
-		return "", errors.Errorf("shortcut %q must use ctrl or alt, or be a function key", original)
+	if !ctrl && !alt {
+		return "", errors.Errorf("unsupported shortcut %q: use ctrl+letter, alt+letter-or-digit, ctrl+alt+letter, or f1 through f12", original)
+	}
+	if !isASCIILetter(base) && !(alt && !ctrl && isASCIIDigit(base)) {
+		return "", errors.Errorf("unsupported shortcut key %q", original)
+	}
+	if ctrl && (base == "i" || base == "m") {
+		terminalKey := "tab"
+		if base == "m" {
+			terminalKey = "enter"
+		}
+		return "", errors.Errorf("unsupported shortcut %q: terminals report ctrl+%s as %s", original, base, terminalKey)
 	}
 
-	parts := make([]string, 0, 4)
-	for _, modifier := range []string{"ctrl", "alt", "shift"} {
+	parts := make([]string, 0, 3)
+	for _, modifier := range []string{"ctrl", "alt"} {
 		if modifiers[modifier] {
 			parts = append(parts, modifier)
 		}
@@ -77,27 +84,21 @@ func NormalizeShortcutKey(key string) (string, error) {
 	return strings.Join(append(parts, base), "+"), nil
 }
 
-func validShortcutBase(base string) bool {
-	if utf8.RuneCountInString(base) == 1 {
-		return true
-	}
-	if isFunctionKey(base) {
-		return true
-	}
+func isASCIILetter(base string) bool {
+	return len(base) == 1 && base[0] >= 'a' && base[0] <= 'z'
+}
+
+func isASCIIDigit(base string) bool {
+	return len(base) == 1 && base[0] >= '0' && base[0] <= '9'
+}
+
+func isFunctionKey(base string) bool {
 	switch base {
-	case "esc", "enter", "tab", "space", "backspace", "delete", "insert", "home", "end", "pgup", "pgdown", "up", "down", "left", "right":
+	case "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12":
 		return true
 	default:
 		return false
 	}
-}
-
-func isFunctionKey(base string) bool {
-	if !strings.HasPrefix(base, "f") {
-		return false
-	}
-	n, err := strconv.Atoi(strings.TrimPrefix(base, "f"))
-	return err == nil && n >= 1 && n <= 12
 }
 
 // ExecuteShortcut invokes the effective extension shortcut registered for key.

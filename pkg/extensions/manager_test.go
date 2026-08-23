@@ -218,6 +218,35 @@ func TestRuntimeManagerClosesRetiredRuntimeAfterItsCallerLeaseEnds(t *testing.T)
 	}, time.Second, time.Millisecond)
 }
 
+func TestRuntimeManagerClosesRetiredRuntimeAfterDiscoveryLeaseEnds(t *testing.T) {
+	manager := newRuntimeManager(func(_ context.Context, _ string, _ Config) (*Runtime, error) {
+		return EmptyRuntime(), nil
+	})
+	t.Cleanup(func() { assert.NoError(t, manager.Close()) })
+
+	fingerprint := "first"
+	manager.fingerprint = func(string, Config) (string, error) {
+		return fingerprint, nil
+	}
+	discoveryCtx, cancelDiscovery := context.WithCancel(context.Background())
+	first, err := manager.RuntimeForCommandDiscovery(discoveryCtx, "/workspace")
+	require.NoError(t, err)
+	cancelDiscovery()
+
+	fingerprint = "second"
+	replacement, err := manager.RuntimeForCommandDiscovery(context.Background(), "/workspace")
+	require.NoError(t, err)
+	assert.NotSame(t, first, replacement)
+	require.Eventually(t, func() bool {
+		select {
+		case <-first.runtimeCtx.Done():
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
+}
+
 func TestRuntimeManagerIsolatesConcurrentCallerLeases(t *testing.T) {
 	var calls int
 	manager := newRuntimeManager(func(_ context.Context, _ string, _ Config) (*Runtime, error) {

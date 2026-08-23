@@ -305,13 +305,19 @@ func listExtensionSlashCommands(ctx context.Context, cwd string, runtimeManager 
 	return commands, err
 }
 
-func listExtensionResources(ctx context.Context, cwd string, runtimeManager *extensions.RuntimeManager) ([]slashcommands.Command, []extensions.Shortcut, error) {
+type extensionResourceRuntimeProvider interface {
+	RuntimeForCommandDiscovery(context.Context, string) (*extensions.Runtime, error)
+}
+
+func listExtensionResources(ctx context.Context, cwd string, runtimeManager extensionResourceRuntimeProvider) ([]slashcommands.Command, []extensions.Shortcut, error) {
 	resolvedCWD, err := resolveSlashCommandCWD(cwd)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	extensionRuntime, err := runtimeManager.RuntimeForCommandDiscovery(ctx, resolvedCWD)
+	discoveryCtx, cancelDiscovery := context.WithCancel(ctx)
+	defer cancelDiscovery()
+	extensionRuntime, err := runtimeManager.RuntimeForCommandDiscovery(discoveryCtx, resolvedCWD)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "failed to initialize extensions for interactive resources")
 	}
@@ -319,7 +325,9 @@ func listExtensionResources(ctx context.Context, cwd string, runtimeManager *ext
 		return nil, nil, nil
 	}
 
-	return extensionRuntime.SlashCommands(), extensionRuntime.Shortcuts(), nil
+	commands := extensionRuntime.SlashCommands()
+	shortcuts := extensionRuntime.Shortcuts()
+	return commands, shortcuts, nil
 }
 
 func resolveSlashCommandCWD(cwd string) (string, error) {

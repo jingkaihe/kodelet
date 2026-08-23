@@ -261,6 +261,53 @@ func TestRunDefaultChatPassesConversationContextToRuntimeProvider(t *testing.T) 
 	assert.Equal(t, "main", provider.callContext.InvokedBy)
 }
 
+func TestResolveExtensionCallContextIncludesRecipeAndPersistedOrigin(t *testing.T) {
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	require.NoError(t, db.RunMigrations(t.Context(), migrations.All()))
+
+	initiator := convtypes.ConversationForkInitiator{
+		Type:        convtypes.ConversationForkInitiatorTypeExtensionTool,
+		ExtensionID: "review-extension",
+		ToolName:    "subagent",
+	}
+	child := convtypes.ForkConversationRecordWithOptions(
+		convtypes.NewConversationRecord("conversation-parent"),
+		convtypes.ConversationForkOptions{
+			Mode:      convtypes.ConversationForkModeLiveSnapshot,
+			Initiator: &initiator,
+		},
+	)
+	child.ID = "conversation-shortcut"
+	store, err := conversations.GetConversationStore(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, store.Save(t.Context(), child))
+	require.NoError(t, store.Close())
+
+	callContext, err := ResolveExtensionCallContext(t.Context(), " conversation-shortcut ", " /workspace/project ", llmtypes.Config{
+		Provider:   " anthropic ",
+		Model:      " claude-test ",
+		Profile:    " work ",
+		RecipeName: " review ",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, extensions.ExtensionCallContext{
+		ConversationID: "conversation-shortcut",
+		CWD:            "/workspace/project",
+		Provider:       "anthropic",
+		Model:          "claude-test",
+		Profile:        "work",
+		RecipeName:     "review",
+		InvokedBy:      "subagent",
+	}, callContext)
+}
+
+func TestResolveExtensionCallContextDefaultsNewConversationOrigin(t *testing.T) {
+	callContext, err := ResolveExtensionCallContext(t.Context(), "", "/workspace", llmtypes.Config{RecipeName: "review"})
+	require.NoError(t, err)
+	assert.Equal(t, "main", callContext.InvokedBy)
+	assert.Equal(t, "review", callContext.RecipeName)
+}
+
 func TestDefaultChatRunnerExecutesRemoteDirectCommandAndPersistsAffinityMetadata(t *testing.T) {
 	originalSettings := viper.AllSettings()
 	defer func() {

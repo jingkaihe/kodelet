@@ -353,12 +353,6 @@ function normalizeShortcutKey(shortcut: string): string {
     control: "ctrl",
     option: "alt",
   };
-  const baseAliases: Record<string, string> = {
-    escape: "esc",
-    return: "enter",
-    pageup: "pgup",
-    pagedown: "pgdown",
-  };
   const parts = value.split("+");
   if (parts.some((part) => !part)) {
     throw new Error(`Invalid extension shortcut: ${shortcut}`);
@@ -368,12 +362,15 @@ function normalizeShortcutKey(shortcut: string): string {
   let base = "";
   for (const rawPart of parts) {
     const part = modifierAliases[rawPart] ?? rawPart;
-    if (part === "ctrl" || part === "alt" || part === "shift") {
+    if (part === "ctrl" || part === "alt") {
       if (modifiers.has(part)) {
         throw new Error(`Invalid extension shortcut: ${shortcut}`);
       }
       modifiers.add(part);
       continue;
+    }
+    if (part === "shift") {
+      throw new Error(`Unsupported extension shortcut modifier: ${rawPart}`);
     }
     if (part === "cmd" || part === "command" || part === "meta" || part === "super") {
       throw new Error(`Unsupported extension shortcut modifier: ${rawPart}`);
@@ -381,37 +378,37 @@ function normalizeShortcutKey(shortcut: string): string {
     if (base) {
       throw new Error(`Invalid extension shortcut: ${shortcut}`);
     }
-    base = baseAliases[part] ?? part;
+    base = part;
   }
   if (!base) {
     throw new Error(`Invalid extension shortcut: ${shortcut}`);
   }
 
+  const ctrl = modifiers.has("ctrl");
+  const alt = modifiers.has("alt");
   const functionKey = /^f(?:[1-9]|1[0-2])$/.test(base);
-  const namedKey = new Set([
-    "esc",
-    "enter",
-    "tab",
-    "space",
-    "backspace",
-    "delete",
-    "insert",
-    "home",
-    "end",
-    "pgup",
-    "pgdown",
-    "up",
-    "down",
-    "left",
-    "right",
-  ]).has(base);
-  if ([...base].length !== 1 && !functionKey && !namedKey) {
-    throw new Error(`Invalid extension shortcut: ${shortcut}`);
+  if (functionKey) {
+    if (ctrl || alt) {
+      throw new Error(`Unsupported extension shortcut: ${shortcut}; function keys must not use modifiers`);
+    }
+    return base;
   }
-  if (!modifiers.has("ctrl") && !modifiers.has("alt") && !functionKey) {
-    throw new Error(`Extension shortcut must use ctrl or alt, or be a function key: ${shortcut}`);
+  if (!ctrl && !alt) {
+    throw new Error(
+      `Unsupported extension shortcut: ${shortcut}; use ctrl+letter, alt+letter-or-digit, ctrl+alt+letter, or f1 through f12`,
+    );
   }
 
-  const orderedModifiers = ["ctrl", "alt", "shift"].filter((modifier) => modifiers.has(modifier));
+  const asciiLetter = /^[a-z]$/.test(base);
+  const asciiDigit = /^[0-9]$/.test(base);
+  if (!asciiLetter && !(alt && !ctrl && asciiDigit)) {
+    throw new Error(`Unsupported extension shortcut key: ${shortcut}`);
+  }
+  if (ctrl && (base === "i" || base === "m")) {
+    const terminalKey = base === "i" ? "tab" : "enter";
+    throw new Error(`Unsupported extension shortcut: ${shortcut}; terminals report ctrl+${base} as ${terminalKey}`);
+  }
+
+  const orderedModifiers = ["ctrl", "alt"].filter((modifier) => modifiers.has(modifier));
   return [...orderedModifiers, base].join("+");
 }

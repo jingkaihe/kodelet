@@ -375,15 +375,7 @@ func runDefaultChat(
 	}
 	if environment == nil && extensionRuntimes != nil {
 		if contextualProvider, ok := extensionRuntimes.(contextualExtensionRuntimeProvider); ok {
-			extensionRuntime, err = contextualProvider.RuntimeWithCallContext(ctx, resolvedCWD, extensions.ExtensionCallContext{
-				ConversationID: sessionID,
-				CWD:            resolvedCWD,
-				Provider:       llmConfig.Provider,
-				Model:          llmConfig.Model,
-				Profile:        llmConfig.Profile,
-				RecipeName:     llmConfig.RecipeName,
-				InvokedBy:      invokedBy,
-			})
+			extensionRuntime, err = contextualProvider.RuntimeWithCallContext(ctx, resolvedCWD, extensionCallContext(sessionID, resolvedCWD, llmConfig, invokedBy))
 		} else {
 			extensionRuntime, err = extensionRuntimes.Runtime(ctx, resolvedCWD)
 		}
@@ -759,6 +751,33 @@ func resolveConversationInvokedBy(ctx context.Context, conversationID string) (s
 		return "", errors.Wrap(err, "failed to load conversation origin")
 	}
 	return llmbase.ExtensionInvokedByFromMetadata(record.Metadata), nil
+}
+
+// ResolveExtensionCallContext builds the extension context for an interactive
+// operation, including the persisted origin of a resumed conversation.
+func ResolveExtensionCallContext(ctx context.Context, conversationID, cwd string, config llmtypes.Config) (extensions.ExtensionCallContext, error) {
+	conversationID = strings.TrimSpace(conversationID)
+	invokedBy := "main"
+	if conversationID != "" {
+		var err error
+		invokedBy, err = resolveConversationInvokedBy(ctx, conversationID)
+		if err != nil {
+			return extensions.ExtensionCallContext{}, err
+		}
+	}
+	return extensionCallContext(conversationID, cwd, config, invokedBy), nil
+}
+
+func extensionCallContext(conversationID, cwd string, config llmtypes.Config, invokedBy string) extensions.ExtensionCallContext {
+	return extensions.ExtensionCallContext{
+		ConversationID: strings.TrimSpace(conversationID),
+		CWD:            strings.TrimSpace(cwd),
+		Provider:       strings.TrimSpace(config.Provider),
+		Model:          strings.TrimSpace(config.Model),
+		Profile:        strings.TrimSpace(config.Profile),
+		RecipeName:     strings.TrimSpace(config.RecipeName),
+		InvokedBy:      strings.TrimSpace(invokedBy),
+	}
 }
 
 func ResolveConfig(ctx context.Context, conversationID, requestedProfile, requestedCWD, defaultCWDInput string) (llmtypes.Config, string, error) {

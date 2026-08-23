@@ -1,8 +1,10 @@
 # Kodelet
 
-## 0.5.37-beta
+## Unreleased
 
-Added extension-registered keyboard shortcuts for the native chat TUI through the TypeScript SDK's `registerShortcut(key, { description?, handler })` API, with conversation-scoped UI support, conflict diagnostics, and dynamic shortcut help.
+Added extension-registered keyboard shortcuts for the native chat TUI through the TypeScript SDK's `registerShortcut(key, { description?, handler })` API, with validated terminal-representable key chords, resolved recipe and invocation context, conversation-scoped UI support, prompt resource-discovery lease release, conflict diagnostics, dynamic shortcut help, and SDK, runtime, and TUI coverage.
+
+## 0.5.37-beta
 
 Enabled extension tools running on workspace runners to create live conversation forks through the control plane, preserving runner affinity and the selected environment profile for child agents.
 

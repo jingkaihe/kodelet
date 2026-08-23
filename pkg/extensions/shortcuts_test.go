@@ -16,9 +16,9 @@ func TestNormalizeShortcutKey(t *testing.T) {
 	}{
 		{name: "canonical", input: "ctrl+r", expected: "ctrl+r"},
 		{name: "modifier aliases and order", input: " Option+Control+R ", expected: "ctrl+alt+r"},
-		{name: "option alias", input: "option+f5", expected: "alt+f5"},
+		{name: "option alias", input: "option+p", expected: "alt+p"},
+		{name: "alt digit", input: "ALT+5", expected: "alt+5"},
 		{name: "function key", input: "F12", expected: "f12"},
-		{name: "named key", input: "ALT+PageUp", expected: "alt+pgup"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			actual, err := NormalizeShortcutKey(test.input)
@@ -27,10 +27,44 @@ func TestNormalizeShortcutKey(t *testing.T) {
 		})
 	}
 
-	for _, input := range []string{"", "r", "shift+r", "cmd+r", "ctrl+r extra", "ctrl+ctrl+r", "f13", "ctrl+unknown"} {
+	for _, input := range []string{
+		"",
+		"r",
+		"shift+r",
+		"ctrl+shift+r",
+		"cmd+r",
+		"ctrl+r extra",
+		"ctrl+ctrl+r",
+		"f13",
+		"alt+f5",
+		"ctrl+1",
+		"ctrl+up",
+		"alt+space",
+		"ctrl+unknown",
+		"ctrl+é",
+	} {
 		t.Run("invalid "+input, func(t *testing.T) {
 			_, err := NormalizeShortcutKey(input)
 			require.Error(t, err)
+		})
+	}
+}
+
+func TestNormalizeShortcutKeyRejectsTerminalAliases(t *testing.T) {
+	for _, test := range []struct {
+		input       string
+		terminalKey string
+	}{
+		{input: "ctrl+i", terminalKey: "tab"},
+		{input: "ctrl+m", terminalKey: "enter"},
+		{input: "ctrl+alt+i", terminalKey: "tab"},
+		{input: "alt+ctrl+m", terminalKey: "enter"},
+	} {
+		t.Run(test.input, func(t *testing.T) {
+			_, err := NormalizeShortcutKey(test.input)
+			require.Error(t, err)
+			assert.ErrorContains(t, err, "terminals report")
+			assert.ErrorContains(t, err, test.terminalKey)
 		})
 	}
 }
@@ -60,10 +94,10 @@ func TestRuntimeSkipsInvalidShortcutRegistration(t *testing.T) {
 	ctx := ContextWithDiagnosticSink(context.Background(), sink)
 
 	require.NoError(t, runtime.register(ctx, &Process{Extension: Extension{ID: "bad"}}, &InitializeResult{
-		Shortcuts: []ShortcutRegistration{{Key: "command+r", Description: "Unavailable"}},
+		Shortcuts: []ShortcutRegistration{{Key: "ctrl+i", Description: "Unavailable"}},
 	}))
 
 	assert.Empty(t, runtime.Shortcuts())
 	diagnostic := receiveDiagnostic(t, sink.ch)
-	assert.Contains(t, diagnostic.Message, "unsupported shortcut modifier")
+	assert.Contains(t, diagnostic.Message, "terminals report ctrl+i as tab")
 }

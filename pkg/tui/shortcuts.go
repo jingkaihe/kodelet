@@ -12,11 +12,10 @@ import (
 )
 
 var hardReservedExtensionShortcutKeys = map[string]string{
-	"ctrl+c":    "cancel the active run or quit",
-	"ctrl+d":    "cancel the active run or quit",
-	"ctrl+j":    "insert a newline",
-	"ctrl+l":    "browse and switch conversations",
-	"alt+enter": "insert a newline",
+	"ctrl+c": "cancel the active run or quit",
+	"ctrl+d": "cancel the active run or quit",
+	"ctrl+j": "insert a newline",
+	"ctrl+l": "browse and switch conversations",
 }
 
 var overridableTUIShortcutKeys = map[string]string{
@@ -130,19 +129,16 @@ func (m *model) startExtensionShortcut(shortcut extensions.Shortcut) tea.Cmd {
 		)
 		matched := false
 		if err == nil {
-			extensionCallContext := extensions.ExtensionCallContext{
-				ConversationID: strings.TrimSpace(conversationID),
-				CWD:            resolvedCWD,
-				Provider:       strings.TrimSpace(llmConfig.Provider),
-				Model:          strings.TrimSpace(llmConfig.Model),
-				Profile:        strings.TrimSpace(llmConfig.Profile),
-				InvokedBy:      "main",
-			}
-			extensionRuntime, runtimeErr := runtimeManager.RuntimeWithCallContext(callCtx, resolvedCWD, extensionCallContext)
-			if runtimeErr != nil {
-				err = errors.Wrap(runtimeErr, "failed to initialize extensions for shortcut")
+			extensionCallContext, contextErr := chat.ResolveExtensionCallContext(callCtx, conversationID, resolvedCWD, llmConfig)
+			if contextErr != nil {
+				err = errors.Wrap(contextErr, "failed to resolve extension shortcut context")
 			} else {
-				matched, err = extensionRuntime.ExecuteShortcut(callCtx, shortcut.Key, extensionCallContext)
+				extensionRuntime, runtimeErr := runtimeManager.RuntimeWithCallContext(callCtx, resolvedCWD, extensionCallContext)
+				if runtimeErr != nil {
+					err = errors.Wrap(runtimeErr, "failed to initialize extensions for shortcut")
+				} else {
+					matched, err = extensionRuntime.ExecuteShortcut(callCtx, shortcut.Key, extensionCallContext)
+				}
 			}
 		}
 		return extensionShortcutDoneMsg{
