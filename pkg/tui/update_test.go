@@ -956,12 +956,84 @@ func TestSlashCommandLoadCommandsAndCWDHelpers(t *testing.T) {
 	assert.True(t, extensionMsg.extensionsOnly)
 	assert.NoError(t, extensionMsg.err)
 	assert.Empty(t, extensionMsg.commands)
+	assert.Empty(t, extensionMsg.shortcuts)
 
 	m := newModel(context.Background(), Config{CWD: workspace})
 	t.Cleanup(m.cancel)
 	assert.Equal(t, workspace, m.slashCommandCWD())
 	m.requestedCWD = "./requested"
 	assert.Equal(t, "./requested", m.slashCommandCWD())
+}
+
+func TestEffectiveExtensionShortcutsFiltersReservedBindings(t *testing.T) {
+	shortcuts := effectiveExtensionShortcuts(context.Background(), []extensions.Shortcut{
+		{Key: "ctrl+c", Description: "Unsafe", ExtensionID: "first"},
+		{Key: "ctrl+r", Description: "Refresh", ExtensionID: "second"},
+		{Key: "F5", Description: "Rebuild", ExtensionID: "third"},
+	})
+
+	assert.Equal(t, []extensions.Shortcut{
+		{Key: "ctrl+r", Description: "Refresh", ExtensionID: "second"},
+		{Key: "f5", Description: "Rebuild", ExtensionID: "third"},
+	}, shortcuts)
+}
+
+func TestExtensionShortcutOverridesBuiltInComposerBinding(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+	m.extensionShortcuts = []extensions.Shortcut{{Key: "ctrl+r", Description: "Refresh", ExtensionID: "workspace"}}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	m = updated.(model)
+
+	require.NotNil(t, cmd)
+	assert.Nil(t, m.historySearch)
+	require.Len(t, m.shortcutCalls, 1)
+	for _, call := range m.shortcutCalls {
+		call.cancel()
+	}
+}
+
+func TestExtensionShortcutDoesNotOverrideActiveSlashSuggestions(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+	m.extensionShortcuts = []extensions.Shortcut{{Key: "ctrl+r", Description: "Refresh", ExtensionID: "workspace"}}
+	m.slashCommands = []slashcommands.Command{{Name: "review", Description: "Review code"}}
+	m.textarea.SetValue("/")
+	require.True(t, m.slashCommandSuggestionsOpen())
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	m = updated.(model)
+
+	assert.NotNil(t, m.historySearch)
+	assert.Empty(t, m.shortcutCalls)
+}
+
+func TestExtensionShortcutCompletionReportsErrorsWithoutFailingConversation(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+	m.shortcutCalls[7] = &extensionShortcutCall{conversationKey: m.key}
+
+	updated, cmd := m.Update(extensionShortcutDoneMsg{
+		callID:          7,
+		conversationKey: m.key,
+		key:             "ctrl+r",
+		extensionID:     "workspace",
+		matched:         true,
+		err:             errors.New("refresh failed"),
+	})
+	m = updated.(model)
+
+	require.NotNil(t, cmd)
+	assert.Empty(t, m.shortcutCalls)
+	assert.Nil(t, m.err)
+	assert.Equal(t, "ready", m.status)
+	require.NotEmpty(t, m.uiNotifications)
+	assert.Equal(t, "Extension shortcut failed", m.uiNotifications[len(m.uiNotifications)-1].title)
+	assert.Contains(t, m.uiNotifications[len(m.uiNotifications)-1].message, "workspace")
 }
 
 func TestSlashCommandLoaderErrorsForInvalidCWD(t *testing.T) {

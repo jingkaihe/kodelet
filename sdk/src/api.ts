@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { createCommandContext, createEventContext, createToolContext } from "./context.js";
+import { createCommandContext, createEventContext, createShortcutContext, createToolContext } from "./context.js";
 import type {
   AnyZodSchema,
   BaseCallContext,
@@ -11,6 +11,7 @@ import type {
   EventResult,
   EventSubscriptionOptions,
   ExecuteCommandParams,
+  ExecuteShortcutParams,
   ExecuteToolParams,
   ExtensionAPI,
   ExtensionEntrypoint,
@@ -19,6 +20,7 @@ import type {
   HandleEventParams,
   InitializeParams,
   InitializeResult,
+  ShortcutOptions,
   ToolExecutionResult,
   ToolInputSchema,
   ToolRegistration,
@@ -35,6 +37,11 @@ interface RegisteredCommand {
   inputSchema?: Record<string, unknown>;
 }
 
+interface RegisteredShortcut {
+  key: string;
+  options: ShortcutOptions;
+}
+
 interface RegisteredEventHandler {
   event: EventName;
   priority: number;
@@ -47,6 +54,7 @@ export class ExtensionHost implements ExtensionAPI {
   private metadata: ExtensionMetadata = {};
   private tools = new Map<string, RegisteredTool>();
   private commands = new Map<string, RegisteredCommand>();
+  private shortcuts = new Map<string, RegisteredShortcut>();
   private handlers: RegisteredEventHandler[] = [];
   private order = 0;
   private initParams?: InitializeParams;
@@ -84,6 +92,14 @@ export class ExtensionHost implements ExtensionAPI {
       registration: registration as CommandRegistration<AnyZodSchema | undefined>,
       inputSchema: registration.inputSchema ? zodSchemaToJsonSchema(registration.inputSchema) : undefined,
     });
+  }
+
+  registerShortcut(shortcut: string, options: ShortcutOptions): void {
+    const key = normalizeShortcutKey(shortcut);
+    if (this.shortcuts.has(key)) {
+      throw new Error(`Duplicate extension shortcut registration: ${key}`);
+    }
+    this.shortcuts.set(key, { key, options });
   }
 
   on<Name extends EventName>(event: Name, handler: EventHandler<Name>): void;
@@ -126,6 +142,10 @@ export class ExtensionHost implements ExtensionAPI {
         kind: registration.kind,
         ...optionalTimeout(registration.timeoutInSec),
       })),
+      shortcuts: [...this.shortcuts.values()].map(({ key, options }) => ({
+        key,
+        ...(options.description === undefined ? {} : { description: options.description }),
+      })),
       subscriptions: this.subscriptions(),
     };
   }
@@ -163,6 +183,15 @@ export class ExtensionHost implements ExtensionAPI {
       createCommandContext(this.initParams, params.context, params.invocation, signal),
     );
     return result ?? { action: "pass" };
+  }
+
+  async executeShortcut(params: ExecuteShortcutParams, signal?: AbortSignal): Promise<void> {
+    const key = normalizeShortcutKey(params.key);
+    const shortcut = this.shortcuts.get(key);
+    if (!shortcut) {
+      throw new Error(`Unknown extension shortcut: ${key}`);
+    }
+    await shortcut.options.handler(createShortcutContext(this.initParams, params.context, signal));
   }
 
   async handleEvent<Name extends EventName>(params: HandleEventParams<Name>, signal?: AbortSignal): Promise<EventResult> {
@@ -309,4 +338,80 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function normalizeCommandName(name: string): string {
   return name.trim().replace(/^\/+/, "");
+}
+
+function normalizeShortcutKey(shortcut: string): string {
+  const value = shortcut.trim().toLowerCase();
+  if (!value) {
+    throw new Error("Extension shortcut key is required");
+  }
+  if (/\s/.test(value)) {
+    throw new Error(`Invalid extension shortcut: ${shortcut}`);
+  }
+
+  const modifierAliases: Record<string, string> = {
+    control: "ctrl",
+    option: "alt",
+  };
+  const baseAliases: Record<string, string> = {
+    escape: "esc",
+    return: "enter",
+    pageup: "pgup",
+    pagedown: "pgdown",
+  };
+  const parts = value.split("+");
+  if (parts.some((part) => !part)) {
+    throw new Error(`Invalid extension shortcut: ${shortcut}`);
+  }
+
+  const modifiers = new Set<string>();
+  let base = "";
+  for (const rawPart of parts) {
+    const part = modifierAliases[rawPart] ?? rawPart;
+    if (part === "ctrl" || part === "alt" || part === "shift") {
+      if (modifiers.has(part)) {
+        throw new Error(`Invalid extension shortcut: ${shortcut}`);
+      }
+      modifiers.add(part);
+      continue;
+    }
+    if (part === "cmd" || part === "command" || part === "meta" || part === "super") {
+      throw new Error(`Unsupported extension shortcut modifier: ${rawPart}`);
+    }
+    if (base) {
+      throw new Error(`Invalid extension shortcut: ${shortcut}`);
+    }
+    base = baseAliases[part] ?? part;
+  }
+  if (!base) {
+    throw new Error(`Invalid extension shortcut: ${shortcut}`);
+  }
+
+  const functionKey = /^f(?:[1-9]|1[0-2])$/.test(base);
+  const namedKey = new Set([
+    "esc",
+    "enter",
+    "tab",
+    "space",
+    "backspace",
+    "delete",
+    "insert",
+    "home",
+    "end",
+    "pgup",
+    "pgdown",
+    "up",
+    "down",
+    "left",
+    "right",
+  ]).has(base);
+  if ([...base].length !== 1 && !functionKey && !namedKey) {
+    throw new Error(`Invalid extension shortcut: ${shortcut}`);
+  }
+  if (!modifiers.has("ctrl") && !modifiers.has("alt") && !functionKey) {
+    throw new Error(`Extension shortcut must use ctrl or alt, or be a function key: ${shortcut}`);
+  }
+
+  const orderedModifiers = ["ctrl", "alt", "shift"].filter((modifier) => modifiers.has(modifier));
+  return [...orderedModifiers, base].join("+");
 }

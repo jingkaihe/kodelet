@@ -292,6 +292,8 @@ export interface CommandContext extends SharedContext {
   input: CommandInvocation;
 }
 
+export interface ShortcutContext extends SharedContext {}
+
 export interface EventContext extends SharedContext {}
 
 export interface ToolRegistration<Schema extends ToolInputSchema = ToolInputSchema> {
@@ -310,6 +312,11 @@ export interface CommandRegistration<Schema extends AnyZodSchema | undefined = u
   kind?: CommandKind;
   timeoutInSec?: number;
   execute(input: InferInput<Schema>, ctx: CommandContext): Awaitable<CommandResult | undefined>;
+}
+
+export interface ShortcutOptions {
+  description?: string;
+  handler(ctx: ShortcutContext): Awaitable<void>;
 }
 
 export type EventName =
@@ -448,6 +455,7 @@ export interface ExtensionAPI {
   registerCommand<Schema extends AnyZodSchema | undefined = undefined>(
     registration: CommandRegistration<Schema>,
   ): void;
+  registerShortcut(shortcut: string, options: ShortcutOptions): void;
   on<Name extends EventName>(event: Name, handler: EventHandler<Name>): void;
   on<Name extends EventName>(event: Name, options: EventSubscriptionOptions, handler: EventHandler<Name>): void;
 }
@@ -483,6 +491,10 @@ export interface InitializeResult {
     kind?: CommandKind;
     timeoutInSec?: number;
   }>;
+  shortcuts: Array<{
+    key: string;
+    description?: string;
+  }>;
   subscriptions: Array<{
     event: string;
     priority?: number;
@@ -501,6 +513,11 @@ export interface ExecuteCommandParams {
   input?: Record<string, unknown>;
   context?: BaseCallContext;
   invocation: CommandInvocation;
+}
+
+export interface ExecuteShortcutParams {
+  key: string;
+  context?: BaseCallContext;
 }
 
 export interface HandleEventParams<Name extends EventName = EventName> {

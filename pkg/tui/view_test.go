@@ -65,6 +65,44 @@ func TestViewAndFormattingHelpers(t *testing.T) {
 	assert.True(t, strings.HasPrefix(rightLabeledBorder("╭", "╮", 12, "label"), "╭"))
 }
 
+func TestShortcutsDialogIncludesExtensionShortcuts(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+	m.width = 100
+	m.height = 40
+	m.extensionShortcuts = []extensions.Shortcut{{
+		Key:         "ctrl+alt+r",
+		Description: "Refresh project context",
+		ExtensionID: "workspace",
+	}}
+
+	dialog := m.renderShortcutsDialog()
+
+	assert.Contains(t, dialog, "Ctrl+Alt+R")
+	assert.Contains(t, dialog, "Refresh project context")
+	assert.Contains(t, dialog, "workspace")
+}
+
+func TestShortcutsDialogShowsEffectiveOverrideOnce(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+	m.width = 100
+	m.height = 40
+	m.extensionShortcuts = []extensions.Shortcut{{
+		Key:         "ctrl+r",
+		Description: "Refresh project context",
+		ExtensionID: "workspace",
+	}}
+
+	dialog := m.renderShortcutsDialog()
+
+	assert.Equal(t, 1, strings.Count(dialog, "Ctrl+R"))
+	assert.NotContains(t, dialog, "Search previous sent messages")
+	assert.Contains(t, dialog, "Refresh project context")
+}
+
 func TestInitialMessageRendersCenteredWithShortcutHint(t *testing.T) {
 	withANSI256ColorProfile(t)
 

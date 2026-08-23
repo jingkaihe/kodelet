@@ -2,6 +2,8 @@
 
 ## 0.5.37-beta
 
+Added extension-registered keyboard shortcuts for the native chat TUI through the TypeScript SDK's `registerShortcut(key, { description?, handler })` API, with conversation-scoped UI support, conflict diagnostics, and dynamic shortcut help.
+
 Enabled extension tools running on workspace runners to create live conversation forks through the control plane, preserving runner affinity and the selected environment profile for child agents.
 
 Preserved extension origin and control-plane targeting across forked and resumed local, ACP, and runner execution so nested agents receive the correct `invokedBy` context and reconnect to the same server.

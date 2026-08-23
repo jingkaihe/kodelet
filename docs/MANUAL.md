@@ -53,6 +53,7 @@ Kodelet is a lightweight agentic SWE Agent that runs as an interactive CLI tool 
   - [Requesting User Input from Extensions](#requesting-user-input-from-extensions)
   - [Extension Discovery](#extension-discovery)
   - [Extension Commands and Dynamic Recipes](#extension-commands-and-dynamic-recipes)
+  - [Extension Shortcuts](#extension-shortcuts)
   - [Extension Events](#extension-events)
   - [Extensions Configuration](#extensions-configuration)
 - [Agentic Skills](#agentic-skills)
@@ -1246,7 +1247,7 @@ If a token is expired, run `kodelet anthropic login --alias <alias>` to re-authe
 
 ## Extensions
 
-Extensions are Kodelet's unified external extensibility primitive. They replace the old executable custom-tool and lifecycle-hook systems with one long-running subprocess that can register model tools, prompt commands, dynamic recipes, and lifecycle event handlers.
+Extensions are Kodelet's unified external extensibility primitive. They replace the old executable custom-tool and lifecycle-hook systems with one long-running subprocess that can register model tools, prompt commands, dynamic recipes, native TUI shortcuts, and lifecycle event handlers.
 
 Extensions communicate with Kodelet over stdio JSON-RPC using `Content-Length` framing. `stdout` is reserved for protocol messages and `stderr` is used for logs.
 
@@ -1609,6 +1610,30 @@ Recipe-like commands appear in `kodelet recipe list` and can be invoked through 
 
 `runAgent` commands may set `display` to control the persisted user-facing text while `prompt` remains the model input.
 
+### Extension Shortcuts
+
+Extensions can register direct keyboard shortcut handlers for the native `kodelet chat` TUI:
+
+```typescript
+ext.registerShortcut("ctrl+alt+r", {
+  description: "Refresh project context",
+  async handler(ctx) {
+    await ctx.ui.notify({
+      title: "Project context",
+      message: `Refreshed context for ${ctx.cwd}`,
+    });
+  },
+});
+```
+
+`registerShortcut` is independent from `registerCommand`: pressing the key invokes the shortcut handler directly rather than submitting a slash command. The handler receives the same workspace, storage, process, environment, logging, cancellation, and UI helpers exposed by other extension contexts. Effective extension shortcuts appear in the TUI's `?` shortcuts dialog.
+
+Shortcut identifiers are case-insensitive single key chords. Use `ctrl`, `alt`, and `shift` modifiers with a key, or an unmodified function key from `f1` through `f12`. `control` normalizes to `ctrl`, `option` normalizes to `alt`, and modifier order does not matter. Terminal support varies for modified special keys. Command/Meta/Super modifiers are not supported because terminal applications generally consume or do not report them to Kodelet.
+
+The native TUI reserves `ctrl+c`, `ctrl+d`, `ctrl+l`, `ctrl+j`, and `alt+enter`; conflicting registrations are skipped with a warning. An extension shortcut may override other built-in composer bindings such as `ctrl+r`, also with a warning. If multiple extensions register the same normalized shortcut, the later-loaded extension wins and Kodelet reports the conflict. A shortcut does not run while a dialog, picker, slash-command completion list, history search, or capturing extension surface owns keyboard focus.
+
+Extension shortcuts are currently available only in local native `kodelet chat` sessions. They are not advertised to the Web UI, ACP clients, or remote runner-backed TUI sessions.
+
 ### Extension Events
 
 Extensions subscribe to dot-separated lifecycle events with `ext.on(...)`. Mutating/blocking events run sequentially by priority, then discovery order, then registration order. The first blocking handler stops the operation.
@@ -1762,7 +1787,7 @@ kodelet plugin list
 kodelet plugin show orgname/extensions
 ```
 
-Extension-provided tools, commands, and dynamic recipes are loaded through the extension runtime when extensions are enabled.
+Extension-provided tools, commands, dynamic recipes, and native TUI shortcuts are loaded through the extension runtime when extensions are enabled.
 
 ### Disabling Skills
 
@@ -1830,7 +1855,7 @@ For detailed skill creation guide, see [docs/SKILLS.md](SKILLS.md).
 - **Interactive Architecture Design**: Collaboratively design and refine system architectures through natural dialogue.
 - **Continuous Code Intelligence**: Analyzes, understands, and improves your codebase while answering technical questions in context.
 - **Agent Context Files**: Automatic loading of project-specific context from `AGENTS.md` files for enhanced project understanding.
-- **Extensions**: Extend Kodelet with long-running tools, prompt commands, dynamic recipes, and lifecycle event handlers over stdio JSON-RPC.
+- **Extensions**: Extend Kodelet with long-running tools, prompt commands, dynamic recipes, native TUI shortcuts, and lifecycle event handlers over stdio JSON-RPC.
 - **Vision Capabilities**: Support for image inputs including screenshots, diagrams, and mockups (Anthropic Claude models).
 - **Multiple LLM Providers**: Supports both Anthropic Claude and OpenAI models, giving you flexibility in choosing the best model for your needs.
 

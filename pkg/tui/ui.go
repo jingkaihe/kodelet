@@ -36,6 +36,7 @@ const (
 )
 
 type uiPromptState struct {
+	runID    int
 	mode     uiPromptMode
 	origin   uiPromptOrigin
 	id       string
@@ -379,7 +380,20 @@ func (m *model) uiBrokerState(runID int, conversationKey string) *conversationSt
 		}
 		return nil
 	}
+	if call := m.shortcutCalls[runID]; call != nil {
+		if strings.TrimSpace(conversationKey) != "" && strings.TrimSpace(conversationKey) != call.conversationKey {
+			return nil
+		}
+		return m.stateForKey(call.conversationKey)
+	}
 	return m.stateForRun(runID)
+}
+
+func (m model) uiBrokerRunCancelling(runID int, state *conversationState) bool {
+	if state == nil || m.shortcutCalls[runID] != nil {
+		return false
+	}
+	return state.runCancelling
 }
 
 func respondUIPrompt(prompt uiPromptState, response extensions.UIInputResponse) bool {

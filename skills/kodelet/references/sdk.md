@@ -268,6 +268,23 @@ Command result actions:
 
 Recipe-like commands use `kind: "recipe"`, appear in `kodelet recipe list`, can be invoked with `kodelet run -r review --arg target=main`, and can be invoked directly as `/review target=main`.
 
+## Native TUI shortcuts
+
+Register a direct keyboard handler with `ext.registerShortcut(...)`:
+
+```typescript
+ext.registerShortcut("ctrl+alt+r", {
+  description: "Refresh project context",
+  async handler(ctx) {
+    await ctx.ui.notify({ title: "Project context", message: `Refreshed ${ctx.cwd}` });
+  },
+});
+```
+
+The handler is independent from slash commands and receives a `ShortcutContext` with the normal shared extension helpers and cancellation signal. Effective shortcuts appear in the native TUI's `?` dialog. Keys are case-insensitive single chords using `ctrl`, `alt`, and `shift`, or unmodified `f1` through `f12`; `control` and `option` are aliases. Command/Meta/Super modifiers are unsupported. Reserved host bindings are skipped, other built-in composer bindings may be overridden with a warning, and later-loaded extensions win extension-to-extension conflicts.
+
+Shortcuts currently execute only in local native `kodelet chat` sessions, not Web UI, ACP, or runner-backed hosts.
+
 ## Lifecycle events
 
 Subscribe with `ext.on(...)`.

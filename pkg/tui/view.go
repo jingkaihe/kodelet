@@ -272,10 +272,7 @@ func (m model) renderShortcutsDialog() string {
 	shortcutWidth = min(shortcutWidth, max(1, contentWidth/2))
 	descriptionWidth := max(1, contentWidth-shortcutWidth-2)
 
-	rows := []struct {
-		shortcut    string
-		description string
-	}{
+	baseRows := []shortcutHelpRow{
 		{shortcut: "Enter", description: "Send message"},
 		{shortcut: "Shift+Enter", description: "Insert newline"},
 		{shortcut: "Ctrl+G", description: "Edit draft in $EDITOR"},
@@ -287,6 +284,26 @@ func (m model) renderShortcutsDialog() string {
 		{shortcut: "PgUp/PgDown", description: "Scroll transcript"},
 		{shortcut: "Esc", description: "Cancel or dismiss"},
 		{shortcut: "Ctrl+C", description: "Cancel run or quit"},
+	}
+	overridden := make(map[string]struct{}, len(m.extensionShortcuts))
+	for _, shortcut := range m.extensionShortcuts {
+		overridden[shortcut.Key] = struct{}{}
+	}
+	rows := make([]shortcutHelpRow, 0, len(baseRows)+len(m.extensionShortcuts))
+	for _, row := range baseRows {
+		key, err := extensions.NormalizeShortcutKey(row.shortcut)
+		if err == nil {
+			if _, ok := overridden[key]; ok {
+				continue
+			}
+		}
+		rows = append(rows, row)
+	}
+	for _, shortcut := range m.extensionShortcuts {
+		rows = append(rows, shortcutHelpRow{
+			shortcut:    formatShortcutKey(shortcut.Key),
+			description: extensionShortcutDescription(shortcut),
+		})
 	}
 
 	lines := []string{
@@ -308,6 +325,11 @@ func (m model) renderShortcutsDialog() string {
 	}
 	boxLines = append(boxLines, bottom)
 	return strings.Join(boxLines, "\n")
+}
+
+type shortcutHelpRow struct {
+	shortcut    string
+	description string
 }
 
 func (m model) overlayUINotifications(lines []string) []string {

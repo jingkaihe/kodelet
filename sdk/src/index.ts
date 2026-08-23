@@ -87,6 +87,8 @@ export type {
   SessionEndEvent,
   SessionStartEvent,
   SharedContext,
+  ShortcutContext,
+  ShortcutOptions,
   StorageContext,
   SystemPromptPatch,
   ToolCallDetails,

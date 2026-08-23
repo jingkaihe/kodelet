@@ -2,6 +2,7 @@ package extensions
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -22,6 +23,7 @@ type Runtime struct {
 	processes           []*Process
 	tools               map[string]*Tool
 	commands            []Command
+	shortcuts           map[string]registeredShortcut
 	subs                []Subscription
 	eventHandlersByName map[string][]eventHandler
 	lifecycleStarted    bool
@@ -34,6 +36,18 @@ type Command struct {
 	ExtensionID  string
 	Process      *Process
 	Registration CommandRegistration
+}
+
+// Shortcut describes an effective extension shortcut exposed to an interactive host.
+type Shortcut struct {
+	Key         string
+	Description string
+	ExtensionID string
+}
+
+type registeredShortcut struct {
+	Shortcut
+	process *Process
 }
 
 // EmptyRuntime creates an extension runtime with no processes or registrations.
@@ -53,6 +67,7 @@ func emptyRuntimeWithContext(ctx context.Context) *Runtime {
 		runtimeCtx:          runtimeCtx,
 		cancelRuntime:       cancelRuntime,
 		tools:               map[string]*Tool{},
+		shortcuts:           map[string]registeredShortcut{},
 		eventHandlersByName: map[string][]eventHandler{},
 	}
 }
@@ -156,7 +171,7 @@ func (r *Runtime) startLifecycle(ctx context.Context, callContext ExtensionCallC
 	r.DispatchResourcesDiscover(ctx, callContext)
 }
 
-func (r *Runtime) register(_ context.Context, proc *Process, result *InitializeResult) error {
+func (r *Runtime) register(ctx context.Context, proc *Process, result *InitializeResult) error {
 	if result == nil {
 		return nil
 	}
@@ -196,6 +211,30 @@ func (r *Runtime) register(_ context.Context, proc *Process, result *InitializeR
 		}
 		r.commands = append(r.commands, Command{ExtensionID: proc.Extension.ID, Process: proc, Registration: command})
 	}
+	for _, registration := range result.Shortcuts {
+		key, err := NormalizeShortcutKey(registration.Key)
+		if err != nil {
+			r.reportShortcutDiagnostic(ctx, proc.Extension.ID, errors.Wrap(err, "invalid extension shortcut").Error())
+			continue
+		}
+		registration.Key = key
+		if existing, ok := r.shortcuts[key]; ok {
+			r.reportShortcutDiagnostic(ctx, proc.Extension.ID, fmt.Sprintf(
+				"shortcut %q conflicts with extension %s; using %s",
+				key,
+				existing.ExtensionID,
+				proc.Extension.ID,
+			))
+		}
+		r.shortcuts[key] = registeredShortcut{
+			Shortcut: Shortcut{
+				Key:         key,
+				Description: strings.TrimSpace(registration.Description),
+				ExtensionID: proc.Extension.ID,
+			},
+			process: proc,
+		}
+	}
 	for _, subscription := range result.Subscriptions {
 		r.subs = append(r.subs, subscription)
 		r.eventHandlersByName[subscription.Event] = append(r.eventHandlersByName[subscription.Event], eventHandler{
@@ -205,6 +244,17 @@ func (r *Runtime) register(_ context.Context, proc *Process, result *InitializeR
 		})
 	}
 	return nil
+}
+
+func (r *Runtime) reportShortcutDiagnostic(ctx context.Context, extensionID, message string) {
+	logger.G(ctx).WithField("extension", extensionID).Warn(message)
+	if sink, ok := DiagnosticSinkFromContext(ctx); ok {
+		sink.ReportDiagnostic(ctx, Diagnostic{
+			Level:     DiagnosticLevelWarning,
+			Extension: extensionID,
+			Message:   message,
+		})
+	}
 }
 
 func addCommandAlias(names map[string]struct{}, name string) error {
@@ -284,6 +334,20 @@ func (r *Runtime) Commands() []Command {
 		return strings.Compare(commands[i].Registration.Name, commands[j].Registration.Name) < 0
 	})
 	return commands
+}
+
+// Shortcuts returns effective extension shortcuts sorted by key.
+func (r *Runtime) Shortcuts() []Shortcut {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	shortcuts := make([]Shortcut, 0, len(r.shortcuts))
+	for _, shortcut := range r.shortcuts {
+		shortcuts = append(shortcuts, shortcut.Shortcut)
+	}
+	sort.SliceStable(shortcuts, func(i, j int) bool {
+		return strings.Compare(shortcuts[i].Key, shortcuts[j].Key) < 0
+	})
+	return shortcuts
 }
 
 // Subscriptions returns registered extension event subscriptions.

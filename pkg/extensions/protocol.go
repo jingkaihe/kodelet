@@ -89,6 +89,12 @@ type CommandRegistration struct {
 	TimeoutInSec *float64       `json:"timeoutInSec,omitempty"`
 }
 
+// ShortcutRegistration is returned by an extension during initialization.
+type ShortcutRegistration struct {
+	Key         string `json:"key"`
+	Description string `json:"description,omitempty"`
+}
+
 // Subscription declares an event handler registered by an extension.
 type Subscription struct {
 	Event        string   `json:"event"`
@@ -112,11 +118,12 @@ type initializeExtensionInfo struct {
 
 // InitializeResult is returned by extension.initialize.
 type InitializeResult struct {
-	Name          string                `json:"name"`
-	Version       string                `json:"version,omitempty"`
-	Tools         []ToolRegistration    `json:"tools,omitempty"`
-	Commands      []CommandRegistration `json:"commands,omitempty"`
-	Subscriptions []Subscription        `json:"subscriptions,omitempty"`
+	Name          string                 `json:"name"`
+	Version       string                 `json:"version,omitempty"`
+	Tools         []ToolRegistration     `json:"tools,omitempty"`
+	Commands      []CommandRegistration  `json:"commands,omitempty"`
+	Shortcuts     []ShortcutRegistration `json:"shortcuts,omitempty"`
+	Subscriptions []Subscription         `json:"subscriptions,omitempty"`
 }
 
 type executeToolParams struct {
@@ -132,6 +139,11 @@ type executeCommandParams struct {
 	Invocation CommandInvocation    `json:"invocation"`
 }
 
+type executeShortcutParams struct {
+	Key     string               `json:"key"`
+	Context ExtensionCallContext `json:"context"`
+}
+
 type eventParams struct {
 	ID      string               `json:"id"`
 	Event   string               `json:"event"`
@@ -139,7 +151,7 @@ type eventParams struct {
 	Payload any                  `json:"payload"`
 }
 
-// ExtensionCallContext is passed to extension tool/event/command calls.
+// ExtensionCallContext is passed to extension tool, event, command, and shortcut calls.
 type ExtensionCallContext struct {
 	SessionID      string `json:"sessionId,omitempty"`
 	ConversationID string `json:"conversationId,omitempty"`

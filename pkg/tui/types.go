@@ -150,6 +150,7 @@ type conversationState struct {
 	slashCommandIndex    int
 	slashCommandErr      error
 	slashDismissedDraft  string
+	extensionShortcuts   []extensions.Shortcut
 
 	messageHistoryScopeCWD        string
 	initialHistoryPending         bool
@@ -198,6 +199,11 @@ type conversationDefaults struct {
 type conversationRun struct {
 	conversationKey string
 	turnID          string
+	cancel          context.CancelFunc
+}
+
+type extensionShortcutCall struct {
+	conversationKey string
 	cancel          context.CancelFunc
 }
 
@@ -256,11 +262,12 @@ type model struct {
 	thoughtMarkdownRenderer        *glamour.TermRenderer
 	thoughtMarkdownRendererWidth   int
 
-	quitAfterRun bool
-	nextRunID    int
-	runs         map[int]*conversationRun
-	runByState   map[string]int
-	runCh        chan tea.Msg
+	quitAfterRun  bool
+	nextRunID     int
+	runs          map[int]*conversationRun
+	runByState    map[string]int
+	shortcutCalls map[int]*extensionShortcutCall
+	runCh         chan tea.Msg
 
 	terminalTitleEpoch   time.Time
 	lastTerminalTitle    string
@@ -309,12 +316,22 @@ type extensionLifecycleMsg struct {
 	err             error
 }
 
+type extensionShortcutDoneMsg struct {
+	callID          int
+	conversationKey string
+	key             string
+	extensionID     string
+	matched         bool
+	err             error
+}
+
 type transcriptRefreshMsg struct{}
 
 type slashCommandsMsg struct {
 	conversationKey string
 	cwd             string
 	commands        []slashcommands.Command
+	shortcuts       []extensions.Shortcut
 	extensionsOnly  bool
 	err             error
 }

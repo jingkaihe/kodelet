@@ -17,7 +17,7 @@ For details, choose the reference that matches the task:
 - `references/recipes.md` — `AGENTS.md`, fragments, and recipes.
 - `references/skills.md` — agentic skills, skill layout, configuration, and skill plugins.
 - `references/extensions.md` — extension runtime, discovery, configuration, plugins, persistent TUI widgets/surfaces, and operational behavior.
-- `references/sdk.md` — TypeScript SDK agent sessions, extension authoring API, tools, commands/dynamic recipes, lifecycle events, UI helpers, persistent surfaces, and examples.
+- `references/sdk.md` — TypeScript SDK agent sessions, extension authoring API, tools, commands/dynamic recipes, native TUI shortcuts, lifecycle events, UI helpers, persistent surfaces, and examples.
 
 Examples now live with the skill under `examples/`:
 
@@ -56,7 +56,7 @@ kodelet serve
 - Context files: Kodelet automatically loads `AGENTS.md`; bootstrap one with `kodelet run -r init`.
 - Recipes/fragments: User-invoked prompt templates in `./recipes/` or `~/.kodelet/recipes/`; list with `kodelet recipe list`, inspect with `kodelet recipe show <name>`, run with `kodelet run -r <name>`.
 - Skills: Model-invoked domain guidance in `.kodelet/skills/<name>/SKILL.md`, plugins, or global skill dirs; disable with `--no-skills`.
-- Extensions: Long-running subprocesses can register model tools, prompt commands/dynamic recipes, and lifecycle event handlers; inspect with `kodelet extension list` and disable with `--no-extensions`.
+- Extensions: Long-running subprocesses can register model tools, prompt commands/dynamic recipes, native TUI shortcuts, and lifecycle event handlers; inspect with `kodelet extension list` and disable with `--no-extensions`.
 - Plugins: Install bundled skills, recipes, and extensions with `kodelet plugin add org/repo`; inspect with `kodelet plugin list` and `kodelet plugin show org/repo`.
 - Conversations: Use `kodelet conversation list/show/delete/fork` for persisted runs.
 - Git helpers: `kodelet commit` generates commit messages; `kodelet pr` creates PRs.

@@ -206,6 +206,7 @@ func newModel(ctx context.Context, config Config) model {
 		spinner:               sp,
 		runs:                  map[int]*conversationRun{},
 		runByState:            map[string]int{},
+		shortcutCalls:         map[int]*extensionShortcutCall{},
 		runCh:                 runCh,
 		terminalTitleEpoch:    time.Now(),
 	}
@@ -244,8 +245,15 @@ func loadExtensionSlashCommands(ctx context.Context, cwd string, runtimeManager 
 
 func loadExtensionSlashCommandsForConversation(ctx context.Context, conversationKey, cwd string, runtimeManager *extensions.RuntimeManager) tea.Cmd {
 	return func() tea.Msg {
-		commands, err := listExtensionSlashCommands(ctx, cwd, runtimeManager)
-		return slashCommandsMsg{conversationKey: conversationKey, cwd: strings.TrimSpace(cwd), commands: commands, extensionsOnly: true, err: err}
+		commands, shortcuts, err := listExtensionResources(ctx, cwd, runtimeManager)
+		return slashCommandsMsg{
+			conversationKey: conversationKey,
+			cwd:             strings.TrimSpace(cwd),
+			commands:        commands,
+			shortcuts:       shortcuts,
+			extensionsOnly:  true,
+			err:             err,
+		}
 	}
 }
 
@@ -293,20 +301,25 @@ func listBaseSlashCommands(ctx context.Context, cwd string) ([]slashcommands.Com
 }
 
 func listExtensionSlashCommands(ctx context.Context, cwd string, runtimeManager *extensions.RuntimeManager) ([]slashcommands.Command, error) {
+	commands, _, err := listExtensionResources(ctx, cwd, runtimeManager)
+	return commands, err
+}
+
+func listExtensionResources(ctx context.Context, cwd string, runtimeManager *extensions.RuntimeManager) ([]slashcommands.Command, []extensions.Shortcut, error) {
 	resolvedCWD, err := resolveSlashCommandCWD(cwd)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	extensionRuntime, err := runtimeManager.RuntimeForCommandDiscovery(ctx, resolvedCWD)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to initialize extensions for slash commands")
+		return nil, nil, errors.Wrap(err, "failed to initialize extensions for interactive resources")
 	}
 	if extensionRuntime == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 
-	return extensionRuntime.SlashCommands(), nil
+	return extensionRuntime.SlashCommands(), extensionRuntime.Shortcuts(), nil
 }
 
 func resolveSlashCommandCWD(cwd string) (string, error) {
@@ -327,8 +340,15 @@ func resolveSlashCommandCWD(cwd string) (string, error) {
 }
 
 func (m model) slashCommandCWD() string {
-	if strings.TrimSpace(m.requestedCWD) != "" {
-		return m.requestedCWD
+	return slashCommandCWDForState(m.conversationState)
+}
+
+func slashCommandCWDForState(state *conversationState) string {
+	if state == nil {
+		return ""
 	}
-	return m.cwd
+	if strings.TrimSpace(state.requestedCWD) != "" {
+		return state.requestedCWD
+	}
+	return state.cwd
 }

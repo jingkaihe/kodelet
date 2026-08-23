@@ -162,10 +162,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			respondUIPrompt(msg.prompt, extensions.UIInputResponse{Status: extensions.UIInputStatusUnavailable, Reason: "tui input request is no longer active"})
 			return m, waitForMsg(m.runCh)
 		}
-		if state.runCancelling {
+		if m.uiBrokerRunCancelling(msg.runID, state) {
 			respondUIPrompt(msg.prompt, extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
 			return m, waitForMsg(m.runCh)
 		}
+		msg.prompt.runID = msg.runID
 		cmd := m.openUIPromptForState(state, msg.prompt)
 		return m, tea.Batch(waitForMsg(m.runCh), cmd)
 
@@ -175,7 +176,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			respondUINotification(msg, extensions.UIInputResponse{Status: extensions.UIInputStatusUnavailable, Reason: "tui notification is no longer active"})
 			return m, waitForMsg(m.runCh)
 		}
-		if state.runCancelling {
+		if m.uiBrokerRunCancelling(msg.runID, state) {
 			respondUINotification(msg, extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
 			return m, waitForMsg(m.runCh)
 		}
@@ -373,8 +374,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.extensionsOnly {
 			m.slashCommands = mergeSlashCommands(m.slashCommands, msg.commands)
+			m.extensionShortcuts = effectiveExtensionShortcuts(m.ctx, msg.shortcuts)
 		} else {
 			m.slashCommands = msg.commands
+			m.extensionShortcuts = nil
 			if !m.extensionDiscoveryBlocked {
 				cmds = append(cmds, loadExtensionSlashCommandsForConversation(m.ctx, state.key, m.slashCommandCWD(), m.extensionRuntimes))
 			}
@@ -386,6 +389,41 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.resize()
 			m.refreshViewport(false)
 		}
+
+	case extensionShortcutDoneMsg:
+		call := m.shortcutCalls[msg.callID]
+		delete(m.shortcutCalls, msg.callID)
+		if call == nil {
+			break
+		}
+		state := m.stateForKey(call.conversationKey)
+		if state == nil {
+			break
+		}
+		var promptFocusCmd tea.Cmd
+		if state.activeUIPrompt != nil && state.activeUIPrompt.runID == msg.callID {
+			promptFocusCmd = m.resolveUIPromptForState(state, extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
+		}
+		if msg.err != nil && !errors.Is(msg.err, context.Canceled) {
+			if state != m.conversationState {
+				state.unread = true
+			}
+			message := fmt.Sprintf("%s: %v", formatShortcutKey(msg.key), msg.err)
+			if extensionID := strings.TrimSpace(msg.extensionID); extensionID != "" {
+				message = fmt.Sprintf("%s (%s): %v", formatShortcutKey(msg.key), extensionID, msg.err)
+			}
+			notificationCmd := m.addUINotification(uiNotification{
+				conversationKey: state.key,
+				level:           uiNotificationError,
+				title:           "Extension shortcut failed",
+				message:         message,
+			})
+			return m, tea.Batch(promptFocusCmd, notificationCmd)
+		}
+		if !msg.matched && !m.remote {
+			return m, tea.Batch(promptFocusCmd, loadExtensionSlashCommandsForConversation(m.ctx, state.key, slashCommandCWDForState(state), m.extensionRuntimes))
+		}
+		return m, promptFocusCmd
 
 	case messageHistoryMsg:
 		state := m.stateForKey(msg.conversationKey)
@@ -450,6 +488,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateHistorySearchKey(msg)
 			m.resize()
 			return m, nil
+		}
+		if shortcut, ok := m.extensionShortcutForKey(key); ok {
+			return m, m.startExtensionShortcut(shortcut)
 		}
 		switch key {
 		case "ctrl+c", "ctrl+d":
@@ -684,6 +725,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		active := state == m.conversationState
 		if prompt, ok := promptFromChatEvent(msg.event); ok {
+			prompt.runID = msg.runID
 			cmd := m.openUIPromptForState(state, prompt)
 			return m, tea.Batch(waitForMsg(m.runCh), cmd)
 		}
@@ -728,7 +770,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setConversationID(state, msg.conversationID)
 		}
 		var promptFocusCmd tea.Cmd
-		if state.activeUIPrompt != nil {
+		if state.activeUIPrompt != nil && (state.activeUIPrompt.runID == 0 || state.activeUIPrompt.runID == msg.runID) {
 			promptFocusCmd = m.resolveUIPromptForState(state, extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
 		}
 		currentState := m.conversationState

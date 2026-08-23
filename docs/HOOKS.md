@@ -1,6 +1,6 @@
 # Agent Lifecycle Hooks
 
-Agent lifecycle hooks have been removed. Kodelet now uses **Extensions** as the single external extensibility primitive for model tools, prompt commands, dynamic recipes, and lifecycle event handlers.
+Agent lifecycle hooks have been removed. Kodelet now uses **Extensions** as the single external extensibility primitive for model tools, prompt commands, dynamic recipes, native TUI shortcuts, and lifecycle event handlers.
 
 ## Replacement
 

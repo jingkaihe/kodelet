@@ -117,6 +117,40 @@ func TestRuntimeExtensionToolCanRequestUIInput(t *testing.T) {
 	assert.Equal(t, "User answered 2", result.GetResult())
 }
 
+func TestRuntimeExecutesRegisteredShortcut(t *testing.T) {
+	rootDir := t.TempDir()
+	extDir := filepath.Join(rootDir, "shortcut")
+	writeExecutable(t, filepath.Join(extDir, "kodelet-extension-shortcut"), helperExtensionScript(t))
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+
+	runtime, err := NewRuntime(
+		context.Background(),
+		WithConfig(DefaultConfig()),
+		WithWorkingDir(rootDir),
+		WithRoots(Root{Dir: rootDir, Kind: SourceKindLocalStandalone}),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, runtime.Close()) })
+
+	assert.Contains(t, runtime.Shortcuts(), Shortcut{
+		Key:         "ctrl+alt+r",
+		Description: "Refresh project context",
+		ExtensionID: "shortcut",
+	})
+	ctx := ContextWithExtensionUIScope(context.Background(), "conversation-scope")
+	matched, err := runtime.ExecuteShortcut(ctx, "alt+control+r", ExtensionCallContext{
+		ConversationID: "conv-shortcut",
+		CWD:            rootDir,
+		InvokedBy:      "main",
+	})
+	require.NoError(t, err)
+	assert.True(t, matched)
+
+	matched, err = runtime.ExecuteShortcut(context.Background(), "ctrl+alt+x", ExtensionCallContext{})
+	require.NoError(t, err)
+	assert.False(t, matched)
+}
+
 func TestRuntimeExtensionToolStreamsAccumulatedUpdates(t *testing.T) {
 	rootDir := t.TempDir()
 	extDir := filepath.Join(rootDir, "stream")
@@ -732,6 +766,10 @@ func runExtensionHelperProcess() {
 					Description: "Run extension review",
 					Kind:        "recipe",
 				}},
+				Shortcuts: []ShortcutRegistration{{
+					Key:         "ctrl+alt+r",
+					Description: "Refresh project context",
+				}},
 				Subscriptions: []Subscription{
 					{Event: EventSessionStart, Priority: 10},
 					{Event: EventResourcesDiscover, Priority: 10},
@@ -811,6 +849,17 @@ func runExtensionHelperProcess() {
 				continue
 			}
 			writeHelperResponse(request.ID, handleHelperCommand(params), nil)
+		case "extension.shortcut.execute":
+			var params executeShortcutParams
+			if err := json.Unmarshal(request.Params, &params); err != nil {
+				writeHelperResponse(request.ID, nil, &rpcError{Code: -32602, Message: err.Error()})
+				continue
+			}
+			if params.Key != "ctrl+alt+r" || params.Context.ConversationID != "conv-shortcut" || params.Context.UIScopeID != "conversation-scope" {
+				writeHelperResponse(request.ID, nil, &rpcError{Code: -32602, Message: "unexpected shortcut context"})
+				continue
+			}
+			writeHelperResponse(request.ID, nil, nil)
 		default:
 			writeHelperResponse(request.ID, nil, &rpcError{Code: -32601, Message: "method not found"})
 		}

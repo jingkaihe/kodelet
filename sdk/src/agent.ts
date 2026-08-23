@@ -1211,6 +1211,9 @@ class ExtensionSocketServer {
         return await this.host.executeTool(message.params as never, signal);
       case "extension.command.execute":
         return await this.host.executeCommand(message.params as never, signal);
+      case "extension.shortcut.execute":
+        await this.host.executeShortcut(message.params as never, signal);
+        return null;
       case "extension.event.handle":
         return await this.host.handleEvent(message.params as never, signal);
       default:

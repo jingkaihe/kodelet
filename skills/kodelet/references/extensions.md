@@ -1,6 +1,6 @@
 # Extensions
 
-Extensions are Kodelet's unified external extensibility primitive. They are long-running subprocess that can register model tools, prompt commands, dynamic recipes, and lifecycle event handlers.
+Extensions are Kodelet's unified external extensibility primitive. They are long-running subprocess that can register model tools, prompt commands, dynamic recipes, native TUI shortcuts, and lifecycle event handlers.
 
 Extensions communicate over stdio JSON-RPC using `Content-Length` framing. `stdout` is reserved for protocol messages; `stderr` is used for logs.
 
@@ -9,6 +9,7 @@ Extensions communicate over stdio JSON-RPC using `Content-Length` framing. `stdo
 - **Model tools**: tools exposed alongside built-in and MCP tools.
 - **Prompt commands**: slash-style or named commands checked before the LLM sees the prompt.
 - **Dynamic recipes**: command registrations with `kind: "recipe"` that appear in recipe listings and can be run with `kodelet run -r`.
+- **Native TUI shortcuts**: direct keyboard handlers registered with `ext.registerShortcut(...)`.
 - **Lifecycle event handlers**: observers/mutators/blockers for session, user, agent, turn, and tool events.
 - **Persistent TUI UI**: passive styled widgets above/below the composer and interactive overlay surfaces with focus, keyboard, mouse, and resize notifications.
 
@@ -59,6 +60,13 @@ const extension = defineExtension((ext) => {
     },
   });
 
+  ext.registerShortcut("ctrl+alt+r", {
+    description: "Refresh project context",
+    async handler(ctx) {
+      await ctx.ui.notify({ title: "Project context", message: `Refreshed ${ctx.cwd}` });
+    },
+  });
+
   ext.on("tool.call", { priority: 100, timeoutInSec: 5 }, async (event) => {
     if (
       event.tool.name === "bash" &&
@@ -95,6 +103,7 @@ During local development, a wrapper can run `tsx` against `src/index.ts`, as sho
 
 - Tools use `ext.registerTool(...)`, a Zod `inputSchema`, and return either a string or `{ content, data?, error? }`.
 - Prompt commands use `ext.registerCommand(...)` and return `pass`, `respond`, or `runAgent` actions.
+- Native TUI shortcuts use `ext.registerShortcut(key, { description?, handler })` and execute the handler directly.
 - `runAgent` results may set `display` when the visible and persisted user message should differ from the model-facing `prompt`.
 - Recipe-like commands use `kind: "recipe"`, appear in `kodelet recipe list`, and can be invoked through `kodelet run -r` or directly as `/name`.
 - Lifecycle handlers use `ext.on(...)` for events like `session.start`, `user.message`, `agent.init`, `turn.start`, `tool.call`, `tool.update`, `tool.result`, and `agent.end`.
@@ -116,7 +125,9 @@ Legacy hook mapping:
 
 Extension subprocesses communicate with Kodelet over stdio JSON-RPC using `Content-Length` framing. Kodelet sends initialization, tool execution, command execution, and lifecycle event requests to the extension process. Extension code should reserve `stdout` for protocol messages and write logs to `stderr`.
 
-The TypeScript SDK's `runExtension(...)` helper implements this protocol for extensions. Non-SDK extensions can implement the same JSON-RPC methods directly. Kodelet supplies an opaque `context.uiScopeId` for conversation-scoped calls, and persistent UI messages carry it as `scopeId`, including an explicit empty string for host-global objects, parentless frame updates, and later surface close requests. Host input and resize arrive as `extension.ui.surface.input` and `extension.ui.surface.resize` notifications with the same scope. Positive sequence numbers reject stale frames/events per scoped object, and the TUI coalesces pending presentation frames to the latest snapshot.
+The TypeScript SDK's `runExtension(...)` helper implements this protocol for extensions. Non-SDK extensions can implement the same JSON-RPC methods directly. Shortcut handlers are invoked through `extension.shortcut.execute`. Kodelet supplies an opaque `context.uiScopeId` for conversation-scoped calls, and persistent UI messages carry it as `scopeId`, including an explicit empty string for host-global objects, parentless frame updates, and later surface close requests. Host input and resize arrive as `extension.ui.surface.input` and `extension.ui.surface.resize` notifications with the same scope. Positive sequence numbers reject stale frames/events per scoped object, and the TUI coalesces pending presentation frames to the latest snapshot.
+
+Shortcut keys are case-insensitive single chords. Use `ctrl`, `alt`, and `shift`, or an unmodified `f1` through `f12`; `control` and `option` are accepted aliases. Command/Meta/Super modifiers are unsupported. The native TUI skips conflicts with reserved host keys, allows other built-in composer bindings to be overridden with a warning, and uses the later-loaded extension when two extensions register the same shortcut. Shortcuts currently run only in local native `kodelet chat` sessions.
 
 ## Discovery
 
@@ -199,7 +210,7 @@ kodelet plugin list
 kodelet plugin show orgname/extensions
 ```
 
-Extension-provided tools, commands, and dynamic recipes load through the extension runtime when extensions are enabled.
+Extension-provided tools, commands, dynamic recipes, and native TUI shortcuts load through the extension runtime when extensions are enabled.
 
 ## Example project
 

@@ -454,6 +454,27 @@ func (p *Process) ExecuteCommand(ctx context.Context, name string, input map[str
 	return &result, nil
 }
 
+// ExecuteShortcut invokes an extension-provided keyboard shortcut over JSON-RPC.
+func (p *Process) ExecuteShortcut(ctx context.Context, key string, callContext ExtensionCallContext) error {
+	if err := p.ensureRunning(ctx); err != nil {
+		return err
+	}
+	client, source := p.rpcSession()
+	if client == nil || source == nil {
+		return errors.Errorf("extension %s is not running", p.Extension.ID)
+	}
+
+	callContext = extensionCallContextWithUIScope(ctx, callContext)
+	params := executeShortcutParams{Key: key, Context: callContext}
+	if err := client.callWithHostHandler(ctx, "extension.shortcut.execute", params, nil, source); err != nil {
+		if shouldRestartAfterCallError(err) {
+			p.failClientGeneration(client)
+		}
+		return err
+	}
+	return nil
+}
+
 // HandleEvent invokes an extension event handler.
 func (p *Process) HandleEvent(ctx context.Context, eventID string, eventName string, payload any, callContext ExtensionCallContext) (*EventResult, error) {
 	if err := p.ensureRunning(ctx); err != nil {

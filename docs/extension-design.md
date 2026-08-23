@@ -37,7 +37,7 @@ This document proposes replacing hooks and executable custom tools with a unifie
 
 ## User-facing extension API
 
-An extension is an executable process that registers tools, commands, and lifecycle event handlers. A TypeScript authoring package can hide the JSON-RPC details.
+An extension is an executable process that registers tools, commands, native TUI shortcuts, and lifecycle event handlers. A TypeScript authoring package can hide the JSON-RPC details.
 
 Example:
 
@@ -885,6 +885,39 @@ When `kind: "recipe"` is set, Kodelet should:
 
 This unifies recipes and commands without forcing all recipes to become extensions: Markdown recipes remain simple static templates, while extension commands cover dynamic recipes that need code, external APIs, state, or richer argument parsing.
 
+## Extension shortcuts
+
+Extensions may register direct native-TUI keyboard handlers independently from prompt commands:
+
+```typescript
+ext.registerShortcut("ctrl+alt+r", {
+  description: "Refresh project context",
+  async handler(ctx) {
+    await ctx.ui.notify({ title: "Project context", message: `Refreshed ${ctx.cwd}` });
+  },
+});
+```
+
+The TypeScript contract is intentionally similar to Pi's shortcut API:
+
+```typescript
+interface ExtensionAPI {
+  registerShortcut(
+    shortcut: string,
+    options: {
+      description?: string;
+      handler(ctx: ShortcutContext): Promise<void> | void;
+    },
+  ): void;
+}
+```
+
+Shortcut registrations are returned from `extension.initialize` as `{ key, description? }` records. The native TUI invokes the winning registration through `extension.shortcut.execute` with the active conversation call context. The request remains open while the async handler runs so parented UI requests use the correct conversation broker and UI scope.
+
+Shortcut names are normalized to lowercase with canonical modifier order. `control` aliases `ctrl`, `option` aliases `alt`, and Command/Meta/Super modifiers are rejected because the current terminal input layer cannot represent them reliably. Duplicate shortcuts within one SDK extension fail registration. Across extensions, later discovery wins with a warning. The native TUI skips hard-reserved host keys, allows selected composer bindings to be overridden with a warning, and routes dialogs, pickers, history search, slash completion, and focused extension surfaces before registered shortcuts.
+
+The first implementation is intentionally native-TUI-only. Web UI, ACP, and runner-backed hosts do not advertise or execute extension shortcut registrations. User remapping can be added later as a host-owned layer between registrations and effective TUI bindings without changing the extension RPC contract.
+
 ## Lifecycle overview
 
 ```mermaid
@@ -974,7 +1007,7 @@ Add `pkg/extensions` with:
 - extension discovery;
 - process supervision;
 - JSON-RPC client;
-- registry for tools, commands, and subscriptions;
+- registry for tools, commands, shortcuts, and subscriptions;
 - unit tests with fake extension processes.
 
 No agent integration is required in this phase.
@@ -990,12 +1023,13 @@ Required SDK surface:
 - `z` re-export from Zod for all-in-one imports;
 - `registerTool(...)` with Zod-inferred input types;
 - `registerCommand(...)` with Zod-inferred input types;
+- `registerShortcut(...)` with a direct async handler;
 - `on(event, handler)` with typed event payloads and typed handler results;
-- `CommandContext`, `ToolContext`, and `EventContext` types;
+- `CommandContext`, `ShortcutContext`, `ToolContext`, and `EventContext` types;
 - JSON-RPC stdio runner used by generated extension executables;
 - Zod-to-JSON-Schema conversion for tool and command registrations;
 - validation of command/tool inputs before invoking extension handlers;
-- small test harness for extension authors to invoke tools, commands, and event handlers in-process.
+- small test harness for extension authors to invoke tools, commands, shortcuts, and event handlers in-process.
 
 Example SDK entry point:
 
@@ -1093,7 +1127,7 @@ The first implementation should aim for:
   - equivalent global/plugin-root paths.
 - Starting extension subprocesses.
 - JSON-RPC initialization.
-- TypeScript SDK with `ExtensionAPI`, `registerTool`, `registerCommand`, event handlers, Zod re-export, Zod-to-JSON-Schema conversion, and stdio runner.
+- TypeScript SDK with `ExtensionAPI`, `registerTool`, `registerCommand`, `registerShortcut`, event handlers, Zod re-export, Zod-to-JSON-Schema conversion, and stdio runner.
 - Extension tool registration.
 - Extension tool execution.
 - `tool.call`, `tool.update`, and `tool.result` event dispatch.

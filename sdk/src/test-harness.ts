@@ -5,6 +5,7 @@ import type {
   EventName,
   EventResult,
   ExecuteCommandParams,
+  ExecuteShortcutParams,
   ExecuteToolParams,
   ExtensionEntrypoint,
   HandleEventParams,
@@ -17,6 +18,7 @@ export interface ExtensionTestHarness {
   initialize(params?: Partial<InitializeParams>): InitializeResult;
   executeTool(params: ExecuteToolParams): Promise<ToolExecutionResult>;
   executeCommand(params: ExecuteCommandParams): Promise<CommandResult>;
+  executeShortcut(params: ExecuteShortcutParams): Promise<void>;
   handleEvent<Name extends EventName>(params: HandleEventParams<Name>): Promise<EventResult>;
 }
 
@@ -64,6 +66,10 @@ export async function createTestHarness(
     async executeCommand(params) {
       ensureInitialized();
       return await runWithHostRPCClient(hostRPCClient, () => host.executeCommand(params));
+    },
+    async executeShortcut(params) {
+      ensureInitialized();
+      await runWithHostRPCClient(hostRPCClient, () => host.executeShortcut(params));
     },
     async handleEvent(params) {
       ensureInitialized();

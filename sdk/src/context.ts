@@ -15,6 +15,7 @@ import type {
   FileInfo,
   InitializeParams,
   LogContext,
+  ShortcutContext,
   SharedContext,
   ToolContext,
   ToolUpdateRequest,
@@ -101,6 +102,14 @@ export function createEventContext(
   context: BaseCallContext = {},
   signal: AbortSignal = new AbortController().signal,
 ): EventContext {
+  return createSharedContext(init, context, signal, currentHostRPCClient());
+}
+
+export function createShortcutContext(
+  init: InitializeParams | undefined,
+  context: BaseCallContext = {},
+  signal: AbortSignal = new AbortController().signal,
+): ShortcutContext {
   return createSharedContext(init, context, signal, currentHostRPCClient());
 }
 
