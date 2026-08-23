@@ -1,6 +1,6 @@
 # Kodelet
 
-## Unreleased
+## 0.5.38-beta
 
 Added extension-registered keyboard shortcuts for the native chat TUI through the TypeScript SDK's `registerShortcut(key, { description?, handler })` API, with validated terminal-representable key chords, active conversation context, conversation-scoped UI support, short-lived extension-discovery leases, conflict diagnostics, dynamic shortcut help, and SDK, runtime, and TUI coverage.
 
