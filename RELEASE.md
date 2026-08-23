@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.5.37-beta
+
+Enabled extension tools running on workspace runners to create live conversation forks through the control plane, preserving runner affinity and the selected environment profile for child agents.
+
+Preserved extension origin and control-plane targeting across forked and resumed local, ACP, and runner execution so nested agents receive the correct `invokedBy` context and reconnect to the same server.
+
+Improved Web UI chat code block readability with tighter spacing and clearer code sizing.
+
 ## 0.5.36-beta
 
 Added capability-gated Git diff and terminal workspace tools for remote Web UI conversations, proxied through the selected runner instead of the control-plane host.
