@@ -252,6 +252,15 @@ pre code {
   word-break: normal;
 }
 
+.chat-prose pre {
+  padding: 0.75rem;
+}
+
+.chat-prose pre code {
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
 /* Enhanced prose styling for subagent and other technical content */
 .prose-enhanced {
   max-width: none;
