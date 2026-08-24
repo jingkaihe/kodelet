@@ -250,11 +250,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.initialHistoryPending = false
 		m.deferSubmitUntilHistory = false
 		queuedHistoryMessage := m.submitAfterHistoryLoad
+		queuedHistoryPreserveComposer := m.submitAfterHistoryLoadPreserveComposer
 		m.submitAfterHistoryLoad = ""
+		m.submitAfterHistoryLoadPreserveComposer = false
 		reloadSlashCommands := wasInitialHistoryPending && !m.remote
 		m.extensionDiscoveryBlocked = m.remote || (wasInitialHistoryPending && msg.err != nil)
 		var reloadMessageHistory tea.Cmd
 		var remoteQueuedSubmit string
+		var remoteQueuedSubmitPreserveComposer bool
 		if msg.err != nil {
 			m.err = msg.err
 			m.status = "history load failed"
@@ -307,10 +310,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.loaded && wasInitialHistoryPending && !m.running && m.remote {
 			remoteQueuedSubmit = strings.TrimSpace(queuedHistoryMessage)
+			remoteQueuedSubmitPreserveComposer = queuedHistoryPreserveComposer
 		} else if msg.loaded && wasInitialHistoryPending && !m.running {
 			m.extensionLifecyclePending = true
 			if strings.TrimSpace(queuedHistoryMessage) != "" {
 				m.submitAfterExtensionLifecycle = queuedHistoryMessage
+				m.submitAfterExtensionLifecyclePreserveComposer = queuedHistoryPreserveComposer
 			}
 			lifecycleBroker := newTUIUIBrokerForConversation(m.runCh, 0, state.key)
 			lifecycleCtx := contextWithTUIConversation(m.ctx, state.key)
@@ -322,7 +327,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.conversationState = currentState
 		if remoteQueuedSubmit != "" {
-			cmds = append(cmds, m.startConversationRun(state, remoteQueuedSubmit))
+			if remoteQueuedSubmitPreserveComposer {
+				cmds = append(cmds, m.startConversationRunPreservingComposer(state, remoteQueuedSubmit))
+			} else {
+				cmds = append(cmds, m.startConversationRun(state, remoteQueuedSubmit))
+			}
 		}
 		if active {
 			m.refreshViewport(true)
@@ -341,9 +350,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.slashCommandErr = msg.err
 		}
 		queuedMessage := m.submitAfterExtensionLifecycle
+		queuedPreserveComposer := m.submitAfterExtensionLifecyclePreserveComposer
 		m.submitAfterExtensionLifecycle = ""
+		m.submitAfterExtensionLifecyclePreserveComposer = false
 		if strings.TrimSpace(queuedMessage) != "" {
-			if active {
+			if queuedPreserveComposer {
+				m.conversationState = currentState
+				cmds = append(cmds, m.startConversationRunPreservingComposer(state, queuedMessage))
+				m.conversationState = state
+			} else if active {
 				currentDraft := m.textarea.Value()
 				m.textarea.SetValue(queuedMessage)
 				cmds = append(cmds, m.submit())
@@ -404,6 +419,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if state.activeUIPrompt != nil && state.activeUIPrompt.runID == msg.callID {
 			promptFocusCmd = m.resolveUIPromptForState(state, extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
 		}
+		if msg.err == nil && msg.result != nil {
+			switch msg.result.Action {
+			case extensions.ShortcutActionSubmit:
+				if strings.TrimSpace(msg.result.Message) == "" {
+					msg.err = errors.New("extension shortcut returned an empty submit message")
+				}
+			default:
+				msg.err = errors.Errorf("extension shortcut returned unknown action %q", msg.result.Action)
+			}
+		}
 		if msg.err != nil && !errors.Is(msg.err, context.Canceled) {
 			if state != m.conversationState {
 				state.unread = true
@@ -422,6 +447,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if !msg.matched && !m.remote {
 			return m, tea.Batch(promptFocusCmd, loadExtensionSlashCommandsForConversation(m.ctx, state.key, slashCommandCWDForState(state), m.extensionRuntimes))
+		}
+		if msg.err == nil && msg.result != nil && msg.result.Action == extensions.ShortcutActionSubmit {
+			return m, tea.Batch(promptFocusCmd, m.submitShortcutMessage(state, msg.result.Message))
 		}
 		return m, promptFocusCmd
 
@@ -1155,6 +1183,7 @@ func (m *model) submit() tea.Cmd {
 	if m.initialHistoryPending && m.deferSubmitUntilHistory {
 		if strings.TrimSpace(m.submitAfterHistoryLoad) == "" {
 			m.submitAfterHistoryLoad = message
+			m.submitAfterHistoryLoadPreserveComposer = false
 		}
 		m.status = "loading conversation"
 		return nil
@@ -1162,11 +1191,52 @@ func (m *model) submit() tea.Cmd {
 	if m.extensionLifecyclePending {
 		if strings.TrimSpace(m.submitAfterExtensionLifecycle) == "" {
 			m.submitAfterExtensionLifecycle = message
+			m.submitAfterExtensionLifecyclePreserveComposer = false
 		}
 		m.status = "restoring extensions"
 		return nil
 	}
 	return m.startConversationRun(m.conversationState, message)
+}
+
+func (m *model) submitShortcutMessage(state *conversationState, message string) tea.Cmd {
+	message = strings.TrimSpace(message)
+	if state == nil || message == "" {
+		return nil
+	}
+	active := state == m.conversationState
+	if state.running {
+		state.queuedFollowUps = append(state.queuedFollowUps, message)
+		state.steerError = ""
+		state.status = "command queued"
+		if active {
+			m.refreshViewport(true)
+		}
+		return nil
+	}
+	if state.initialHistoryPending && state.deferSubmitUntilHistory {
+		if strings.TrimSpace(state.submitAfterHistoryLoad) == "" {
+			state.submitAfterHistoryLoad = message
+			state.submitAfterHistoryLoadPreserveComposer = true
+			state.status = "loading conversation"
+		} else {
+			state.queuedFollowUps = append(state.queuedFollowUps, message)
+			state.status = "command queued"
+		}
+		return nil
+	}
+	if state.extensionLifecyclePending {
+		if strings.TrimSpace(state.submitAfterExtensionLifecycle) == "" {
+			state.submitAfterExtensionLifecycle = message
+			state.submitAfterExtensionLifecyclePreserveComposer = true
+			state.status = "restoring extensions"
+		} else {
+			state.queuedFollowUps = append(state.queuedFollowUps, message)
+			state.status = "command queued"
+		}
+		return nil
+	}
+	return m.startConversationRunPreservingComposer(state, message)
 }
 
 func (m *model) startConversationRun(state *conversationState, message string) tea.Cmd {

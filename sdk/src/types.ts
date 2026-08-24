@@ -294,6 +294,13 @@ export interface CommandContext extends SharedContext {
 
 export interface ShortcutContext extends SharedContext {}
 
+export interface ShortcutSubmitResult {
+  action: "submit";
+  message: string;
+}
+
+export type ShortcutResult = ShortcutSubmitResult;
+
 export interface EventContext extends SharedContext {}
 
 export interface ToolRegistration<Schema extends ToolInputSchema = ToolInputSchema> {
@@ -316,7 +323,7 @@ export interface CommandRegistration<Schema extends AnyZodSchema | undefined = u
 
 export interface ShortcutOptions {
   description?: string;
-  handler(ctx: ShortcutContext): Awaitable<void>;
+  handler(ctx: ShortcutContext): Awaitable<ShortcutResult | void>;
 }
 
 export type EventName =

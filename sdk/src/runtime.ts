@@ -302,8 +302,7 @@ async function dispatch(
     case "extension.command.execute":
       return await host.executeCommand(request.params as never, signal);
     case "extension.shortcut.execute":
-      await host.executeShortcut(request.params as never, signal);
-      return null;
+      return (await host.executeShortcut(request.params as never, signal)) ?? null;
     case "extension.event.handle": {
       if (isRecord(request.params) && request.params.event === "session.end") {
         return await handleSessionEnd(request.params as unknown as HandleEventParams<"session.end">, signal);

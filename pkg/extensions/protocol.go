@@ -188,6 +188,13 @@ type CommandResult struct {
 	Display    string `json:"display,omitempty"`
 }
 
+// ShortcutResult is returned by extension.shortcut.execute when a shortcut
+// asks the native TUI to submit a conversation message.
+type ShortcutResult struct {
+	Action  string `json:"action"`
+	Message string `json:"message,omitempty"`
+}
+
 // EventResult is returned by extension.event.handle.
 type EventResult struct {
 	Input            json.RawMessage    `json:"input,omitempty"`

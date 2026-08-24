@@ -138,17 +138,58 @@ func TestRuntimeExecutesRegisteredShortcut(t *testing.T) {
 		ExtensionID: "shortcut",
 	})
 	ctx := ContextWithExtensionUIScope(context.Background(), "conversation-scope")
-	matched, err := runtime.ExecuteShortcut(ctx, "alt+control+r", ExtensionCallContext{
+	matched, result, err := runtime.ExecuteShortcutWithResult(ctx, "alt+control+r", ExtensionCallContext{
 		ConversationID: "conv-shortcut",
 		CWD:            rootDir,
 		InvokedBy:      "main",
 	})
 	require.NoError(t, err)
 	assert.True(t, matched)
+	require.NotNil(t, result)
+	assert.Equal(t, ShortcutActionSubmit, result.Action)
+	assert.Equal(t, "/refresh", result.Message)
 
-	matched, err = runtime.ExecuteShortcut(context.Background(), "ctrl+alt+x", ExtensionCallContext{})
+	matched, err = runtime.ExecuteShortcut(ctx, "ctrl+alt+r", ExtensionCallContext{
+		ConversationID: "conv-shortcut",
+	})
+	assert.True(t, matched)
+	assert.ErrorContains(t, err, "use ExecuteShortcutWithResult")
+
+	matched, result, err = runtime.ExecuteShortcutWithResult(context.Background(), "ctrl+alt+x", ExtensionCallContext{})
 	require.NoError(t, err)
 	assert.False(t, matched)
+	assert.Nil(t, result)
+}
+
+func TestRuntimeExecutesShortcutWithoutResult(t *testing.T) {
+	rootDir := t.TempDir()
+	extDir := filepath.Join(rootDir, "shortcut")
+	writeExecutable(t, filepath.Join(extDir, "kodelet-extension-shortcut"), helperExtensionScript(t))
+	t.Setenv("KODELET_BASE_PATH", t.TempDir())
+	t.Setenv("KODELET_TEST_SHORTCUT_NULL_RESULT", "1")
+
+	runtime, err := NewRuntime(
+		context.Background(),
+		WithConfig(DefaultConfig()),
+		WithWorkingDir(rootDir),
+		WithRoots(Root{Dir: rootDir, Kind: SourceKindLocalStandalone}),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, runtime.Close()) })
+
+	ctx := ContextWithExtensionUIScope(context.Background(), "conversation-scope")
+	matched, result, err := runtime.ExecuteShortcutWithResult(ctx, "ctrl+alt+r", ExtensionCallContext{
+		ConversationID: "conv-shortcut",
+	})
+	require.NoError(t, err)
+	assert.True(t, matched)
+	assert.Nil(t, result)
+
+	matched, err = runtime.ExecuteShortcut(ctx, "ctrl+alt+r", ExtensionCallContext{
+		ConversationID: "conv-shortcut",
+	})
+	require.NoError(t, err)
+	assert.True(t, matched)
 }
 
 func TestRuntimeExtensionToolStreamsAccumulatedUpdates(t *testing.T) {
@@ -859,7 +900,11 @@ func runExtensionHelperProcess() {
 				writeHelperResponse(request.ID, nil, &rpcError{Code: -32602, Message: "unexpected shortcut context"})
 				continue
 			}
-			writeHelperResponse(request.ID, nil, nil)
+			if os.Getenv("KODELET_TEST_SHORTCUT_NULL_RESULT") == "1" {
+				writeHelperResponse(request.ID, nil, nil)
+			} else {
+				writeHelperResponse(request.ID, ShortcutResult{Action: ShortcutActionSubmit, Message: "/refresh"}, nil)
+			}
 		default:
 			writeHelperResponse(request.ID, nil, &rpcError{Code: -32601, Message: "method not found"})
 		}

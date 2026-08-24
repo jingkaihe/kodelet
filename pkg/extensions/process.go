@@ -265,6 +265,9 @@ func (p *Process) initialize(ctx context.Context, cwd string, client *rpcClient,
 			"tools":       true,
 			"toolUpdates": true,
 			"commands":    true,
+			"shortcuts": map[string]any{
+				"submit": true,
+			},
 			"conversations": map[string]any{
 				"fork": true,
 			},
@@ -456,23 +459,37 @@ func (p *Process) ExecuteCommand(ctx context.Context, name string, input map[str
 
 // ExecuteShortcut invokes an extension-provided keyboard shortcut over JSON-RPC.
 func (p *Process) ExecuteShortcut(ctx context.Context, key string, callContext ExtensionCallContext) error {
-	if err := p.ensureRunning(ctx); err != nil {
+	result, err := p.ExecuteShortcutWithResult(ctx, key, callContext)
+	if err != nil {
 		return err
+	}
+	if result != nil {
+		return errors.New("extension shortcut returned a host action; use ExecuteShortcutWithResult")
+	}
+	return nil
+}
+
+// ExecuteShortcutWithResult invokes an extension-provided keyboard shortcut
+// and returns its optional host action.
+func (p *Process) ExecuteShortcutWithResult(ctx context.Context, key string, callContext ExtensionCallContext) (*ShortcutResult, error) {
+	if err := p.ensureRunning(ctx); err != nil {
+		return nil, err
 	}
 	client, source := p.rpcSession()
 	if client == nil || source == nil {
-		return errors.Errorf("extension %s is not running", p.Extension.ID)
+		return nil, errors.Errorf("extension %s is not running", p.Extension.ID)
 	}
 
 	callContext = extensionCallContextWithUIScope(ctx, callContext)
 	params := executeShortcutParams{Key: key, Context: callContext}
-	if err := client.callWithHostHandler(ctx, "extension.shortcut.execute", params, nil, source); err != nil {
+	var result *ShortcutResult
+	if err := client.callWithHostHandler(ctx, "extension.shortcut.execute", params, &result, source); err != nil {
 		if shouldRestartAfterCallError(err) {
 			p.failClientGeneration(client)
 		}
-		return err
+		return nil, err
 	}
-	return nil
+	return result, nil
 }
 
 // HandleEvent invokes an extension event handler.

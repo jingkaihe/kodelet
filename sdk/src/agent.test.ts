@@ -535,6 +535,12 @@ test("Session can expose in-process extensions over a TCP bridge", { timeout: 50
         return { action: "respond", response: "done" };
       },
     });
+    ext.registerShortcut("ctrl+alt+r", {
+      description: "Run review command",
+      handler() {
+        return { action: "submit", message: "/review" };
+      },
+    });
   });
 
   const client = new Client({ cwd: workspace, spawn });
@@ -573,9 +579,22 @@ test("Session can expose in-process extensions over a TCP bridge", { timeout: 50
     protocolVersion: "2026-05-30",
     kodelet: { version: "test" },
     extension: { id: "workspace", cwd: workspace, dataDir: "" },
-    capabilities: { toolUpdates: true, ui: { widgets: true, surfaces: true, transcript: true } },
+    capabilities: {
+      toolUpdates: true,
+      shortcuts: { submit: true },
+      ui: { widgets: true, surfaces: true, transcript: true },
+    },
   });
   assert.equal((init as { name?: string }).name, "workspace");
+  assert.deepEqual((init as { shortcuts?: unknown }).shortcuts, [
+    { key: "ctrl+alt+r", description: "Run review command" },
+  ]);
+
+  const shortcutResult = await bridge.call("extension.shortcut.execute", {
+    key: "ctrl+alt+r",
+    context: { cwd: workspace, uiScopeId: "conversation-shortcut" },
+  });
+  assert.deepEqual(shortcutResult, { action: "submit", message: "/review" });
 
   const first = bridge.beginCall("extension.tool.execute", {
     name: "ask_user_question",

@@ -89,6 +89,8 @@ export type {
   SharedContext,
   ShortcutContext,
   ShortcutOptions,
+  ShortcutResult,
+  ShortcutSubmitResult,
   StorageContext,
   SystemPromptPatch,
   ToolCallDetails,

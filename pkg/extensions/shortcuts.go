@@ -7,6 +7,11 @@ import (
 	"github.com/pkg/errors"
 )
 
+const (
+	// ShortcutActionSubmit asks the native TUI to submit a conversation message.
+	ShortcutActionSubmit = "submit"
+)
+
 // NormalizeShortcutKey validates and canonicalizes a native TUI shortcut key.
 func NormalizeShortcutKey(key string) (string, error) {
 	original := key
@@ -117,25 +122,39 @@ func isFunctionKey(base string) bool {
 
 // ExecuteShortcut invokes the effective extension shortcut registered for key.
 func (r *Runtime) ExecuteShortcut(ctx context.Context, key string, callContext ExtensionCallContext) (bool, error) {
+	matched, result, err := r.ExecuteShortcutWithResult(ctx, key, callContext)
+	if err != nil {
+		return matched, err
+	}
+	if result != nil {
+		return matched, errors.New("extension shortcut returned a host action; use ExecuteShortcutWithResult")
+	}
+	return matched, nil
+}
+
+// ExecuteShortcutWithResult invokes the effective extension shortcut
+// registered for key and returns its optional host action.
+func (r *Runtime) ExecuteShortcutWithResult(ctx context.Context, key string, callContext ExtensionCallContext) (bool, *ShortcutResult, error) {
 	if r == nil {
-		return false, nil
+		return false, nil, nil
 	}
 	normalized, err := NormalizeShortcutKey(key)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 
 	r.mu.RLock()
 	shortcut, ok := r.shortcuts[normalized]
 	r.mu.RUnlock()
 	if !ok {
-		return false, nil
+		return false, nil, nil
 	}
 	if shortcut.process == nil {
-		return true, errors.Errorf("extension shortcut %s has no process", normalized)
+		return true, nil, errors.Errorf("extension shortcut %s has no process", normalized)
 	}
-	if err := shortcut.process.ExecuteShortcut(ctx, normalized, callContext); err != nil {
-		return true, errors.Wrapf(err, "failed to execute extension shortcut %s from %s", normalized, shortcut.ExtensionID)
+	result, err := shortcut.process.ExecuteShortcutWithResult(ctx, normalized, callContext)
+	if err != nil {
+		return true, nil, errors.Wrapf(err, "failed to execute extension shortcut %s from %s", normalized, shortcut.ExtensionID)
 	}
-	return true, nil
+	return true, result, nil
 }

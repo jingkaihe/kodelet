@@ -21,6 +21,7 @@ import type {
   InitializeParams,
   InitializeResult,
   ShortcutOptions,
+  ShortcutResult,
   ToolExecutionResult,
   ToolInputSchema,
   ToolRegistration,
@@ -185,13 +186,17 @@ export class ExtensionHost implements ExtensionAPI {
     return result ?? { action: "pass" };
   }
 
-  async executeShortcut(params: ExecuteShortcutParams, signal?: AbortSignal): Promise<void> {
+  async executeShortcut(params: ExecuteShortcutParams, signal?: AbortSignal): Promise<ShortcutResult | void> {
     const key = normalizeShortcutKey(params.key);
     const shortcut = this.shortcuts.get(key);
     if (!shortcut) {
       throw new Error(`Unknown extension shortcut: ${key}`);
     }
-    await shortcut.options.handler(createShortcutContext(this.initParams, params.context, signal));
+    const result = await shortcut.options.handler(createShortcutContext(this.initParams, params.context, signal));
+    if (result !== undefined && !shortcutSubmitSupported(this.initParams)) {
+      throw new Error("Shortcut submit results are not supported by this host");
+    }
+    return result;
   }
 
   async handleEvent<Name extends EventName>(params: HandleEventParams<Name>, signal?: AbortSignal): Promise<EventResult> {
@@ -334,6 +339,11 @@ function mergeToolPatch(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function shortcutSubmitSupported(init: InitializeParams | undefined): boolean {
+  const shortcuts = init?.capabilities?.shortcuts;
+  return isRecord(shortcuts) && shortcuts.submit === true;
 }
 
 function normalizeCommandName(name: string): string {

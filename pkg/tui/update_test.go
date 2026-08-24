@@ -1065,6 +1065,7 @@ func TestExtensionShortcutCommandExecutesWithResolvedContext(t *testing.T) {
 	workspace := t.TempDir()
 	extensionRoot := t.TempDir()
 	contextPath := filepath.Join(t.TempDir(), "shortcut-context.json")
+	runner := &recordingRunner{conversationID: "conversation-shortcut"}
 	writeTUIShortcutExtension(t, extensionRoot)
 	t.Setenv("KODELET_TUI_SHORTCUT_CONTEXT_PATH", contextPath)
 	t.Setenv("KODELET_BASE_PATH", t.TempDir())
@@ -1078,7 +1079,7 @@ func TestExtensionShortcutCommandExecutesWithResolvedContext(t *testing.T) {
 		"extensions.max_output_size": 102400,
 	})
 
-	m := newModel(t.Context(), Config{CWD: workspace, Profile: "default"})
+	m := newModel(t.Context(), Config{CWD: workspace, Profile: "default", Runner: runner})
 	t.Cleanup(m.cancel)
 	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
 	m.extensionShortcuts = []extensions.Shortcut{{Key: "ctrl+r", Description: "Refresh", ExtensionID: "shortcut-test"}}
@@ -1090,6 +1091,7 @@ func TestExtensionShortcutCommandExecutesWithResolvedContext(t *testing.T) {
 	require.True(t, ok)
 	require.NoError(t, done.err)
 	assert.True(t, done.matched)
+	assert.Equal(t, &extensions.ShortcutResult{Action: extensions.ShortcutActionSubmit, Message: "/dictate"}, done.result)
 
 	payload, err := os.ReadFile(contextPath)
 	require.NoError(t, err)
@@ -1109,8 +1111,105 @@ func TestExtensionShortcutCommandExecutesWithResolvedContext(t *testing.T) {
 
 	updated, followUp := m.Update(done)
 	m = updated.(model)
-	assert.Nil(t, followUp)
+	require.NotNil(t, followUp)
 	assert.Empty(t, m.shortcutCalls)
+	assert.True(t, m.running)
+	require.Len(t, m.entries, 1)
+	assert.Equal(t, chatEntry{kind: entryUser, content: "/dictate"}, m.entries[0])
+}
+
+func TestExtensionShortcutSubmitPreservesComposerAndQueuesDuringRun(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+	m.running = true
+	m.textarea.SetValue("keep this draft")
+	m.shortcutCalls[7] = &extensionShortcutCall{conversationKey: m.key}
+
+	updated, cmd := m.Update(extensionShortcutDoneMsg{
+		callID:          7,
+		conversationKey: m.key,
+		key:             "ctrl+alt+r",
+		extensionID:     "dictate",
+		matched:         true,
+		result:          &extensions.ShortcutResult{Action: extensions.ShortcutActionSubmit, Message: "/dictate"},
+	})
+	m = updated.(model)
+
+	assert.Nil(t, cmd)
+	assert.Equal(t, "keep this draft", m.textarea.Value())
+	assert.Equal(t, []string{"/dictate"}, m.queuedFollowUps)
+	assert.Equal(t, "command queued", m.status)
+}
+
+func TestExtensionShortcutSubmitDefersUntilLifecycleWithoutClearingDraft(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+	m.extensionLifecyclePending = true
+	m.textarea.SetValue("keep this draft")
+	m.shortcutCalls[7] = &extensionShortcutCall{conversationKey: m.key}
+
+	updated, cmd := m.Update(extensionShortcutDoneMsg{
+		callID:          7,
+		conversationKey: m.key,
+		key:             "ctrl+alt+r",
+		extensionID:     "dictate",
+		matched:         true,
+		result:          &extensions.ShortcutResult{Action: extensions.ShortcutActionSubmit, Message: "/dictate"},
+	})
+	m = updated.(model)
+
+	assert.Nil(t, cmd)
+	assert.Equal(t, "/dictate", m.submitAfterExtensionLifecycle)
+	assert.True(t, m.submitAfterExtensionLifecyclePreserveComposer)
+	assert.Equal(t, "keep this draft", m.textarea.Value())
+}
+
+func TestExtensionShortcutSubmitQueuesWhenLifecycleAlreadyHasDeferredMessage(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+	m.extensionLifecyclePending = true
+	m.submitAfterExtensionLifecycle = "first message"
+	m.shortcutCalls[7] = &extensionShortcutCall{conversationKey: m.key}
+
+	updated, cmd := m.Update(extensionShortcutDoneMsg{
+		callID:          7,
+		conversationKey: m.key,
+		key:             "ctrl+alt+r",
+		extensionID:     "dictate",
+		matched:         true,
+		result:          &extensions.ShortcutResult{Action: extensions.ShortcutActionSubmit, Message: "/dictate"},
+	})
+	m = updated.(model)
+
+	assert.Nil(t, cmd)
+	assert.Equal(t, "first message", m.submitAfterExtensionLifecycle)
+	assert.Equal(t, []string{"/dictate"}, m.queuedFollowUps)
+	assert.Equal(t, "command queued", m.status)
+}
+
+func TestExtensionShortcutRejectsInvalidSubmitResult(t *testing.T) {
+	m := newModel(context.Background(), Config{})
+	t.Cleanup(m.cancel)
+	t.Cleanup(func() { assert.NoError(t, m.extensionRuntimes.Close()) })
+	m.shortcutCalls[7] = &extensionShortcutCall{conversationKey: m.key}
+
+	updated, cmd := m.Update(extensionShortcutDoneMsg{
+		callID:          7,
+		conversationKey: m.key,
+		key:             "ctrl+alt+r",
+		extensionID:     "dictate",
+		matched:         true,
+		result:          &extensions.ShortcutResult{Action: extensions.ShortcutActionSubmit},
+	})
+	m = updated.(model)
+
+	require.NotNil(t, cmd)
+	require.NotEmpty(t, m.uiNotifications)
+	assert.Equal(t, "Extension shortcut failed", m.uiNotifications[len(m.uiNotifications)-1].title)
+	assert.Contains(t, m.uiNotifications[len(m.uiNotifications)-1].message, "empty submit message")
 }
 
 func TestExtensionShortcutDoesNotOverrideActiveSlashSuggestions(t *testing.T) {
@@ -1225,7 +1324,7 @@ func runTUIShortcutExtensionHelper() {
 			if path := os.Getenv("KODELET_TUI_SHORTCUT_CONTEXT_PATH"); path != "" {
 				_ = os.WriteFile(path, request.Params, 0o644)
 			}
-			result = nil
+			result = extensions.ShortcutResult{Action: extensions.ShortcutActionSubmit, Message: "/dictate"}
 		default:
 			result = nil
 		}

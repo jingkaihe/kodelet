@@ -45,6 +45,7 @@ test("registers tools, commands, events and executes handlers", async () => {
       description: "Refresh project context",
       async handler(ctx) {
         shortcutContext = { conversationId: ctx.conversationId, cwd: ctx.cwd, profile: ctx.profile };
+        return { action: "submit", message: "/refresh" };
       },
     });
 
@@ -84,10 +85,11 @@ test("registers tools, commands, events and executes handlers", async () => {
   });
   assert.deepEqual(commandResult, { action: "respond", response: "doctor: healthy" });
 
-  await harness.executeShortcut({
+  const shortcutResult = await harness.executeShortcut({
     key: "CTRL+ALT+R",
     context: { conversationId: "conv-shortcut", cwd: process.cwd(), profile: "default" },
   });
+  assert.deepEqual(shortcutResult, { action: "submit", message: "/refresh" });
   assert.deepEqual(shortcutContext, { conversationId: "conv-shortcut", cwd: process.cwd(), profile: "default" });
 
   const eventResult = await harness.handleEvent({
@@ -167,6 +169,24 @@ test("rejects unsupported and terminal-ambiguous shortcut forms", async () => {
       shortcut,
     );
   }
+});
+
+test("rejects shortcut submit results when the host does not advertise support", async () => {
+  const harness = await createTestHarness(
+    defineExtension((ext) => {
+      ext.registerShortcut("ctrl+alt+r", {
+        handler() {
+          return { action: "submit", message: "/refresh" };
+        },
+      });
+    }),
+  );
+  harness.initialize({ capabilities: {} });
+
+  await assert.rejects(
+    harness.executeShortcut({ key: "ctrl+alt+r" }),
+    /Shortcut submit results are not supported by this host/,
+  );
 });
 
 test("registerTool preserves raw JSON Schema and passes input through", async () => {
@@ -936,7 +956,12 @@ test("runtime serves JSON-RPC over stdio", async (t) => {
           description: "Record shortcut context",
           handler(ctx) {
             if (ctx.conversationId !== "conv-rpc") throw new Error("missing shortcut context");
+            return { action: "submit", message: "/echo" };
           },
+        });
+        ext.registerShortcut("alt+n", {
+          description: "No result",
+          handler() {},
         });
       }));
     `,
@@ -954,11 +979,14 @@ test("runtime serves JSON-RPC over stdio", async (t) => {
     protocolVersion: "2026-05-30",
     kodelet: { version: "test" },
     extension: { id: "rpc", cwd: process.cwd(), dataDir: "" },
-    capabilities: {},
+    capabilities: { shortcuts: { submit: true } },
   });
   assert.equal(init.name, "rpc");
   assert.equal(init.tools[0].name, "echo");
-  assert.deepEqual(init.shortcuts, [{ key: "ctrl+alt+e", description: "Record shortcut context" }]);
+  assert.deepEqual(init.shortcuts, [
+    { key: "ctrl+alt+e", description: "Record shortcut context" },
+    { key: "alt+n", description: "No result" },
+  ]);
 
   const result = await client.call("extension.tool.execute", {
     name: "echo",
@@ -971,7 +999,13 @@ test("runtime serves JSON-RPC over stdio", async (t) => {
     key: "ctrl+alt+e",
     context: { conversationId: "conv-rpc", cwd: process.cwd() },
   });
-  assert.equal(shortcutResult, null);
+  assert.deepEqual(shortcutResult, { action: "submit", message: "/echo" });
+
+  const emptyShortcutResult = await client.call("extension.shortcut.execute", {
+    key: "alt+n",
+    context: { conversationId: "conv-rpc", cwd: process.cwd() },
+  });
+  assert.equal(emptyShortcutResult, null);
 });
 
 test("runtime runs bounded session cleanup and exits when the host disconnects", async (t) => {

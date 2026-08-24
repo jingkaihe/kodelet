@@ -128,6 +128,7 @@ func (m *model) startExtensionShortcut(shortcut extensions.Shortcut) tea.Cmd {
 			"",
 		)
 		matched := false
+		var result *extensions.ShortcutResult
 		if err == nil {
 			extensionCallContext, contextErr := chat.ResolveExtensionCallContext(callCtx, conversationID, resolvedCWD, llmConfig)
 			if contextErr != nil {
@@ -137,7 +138,7 @@ func (m *model) startExtensionShortcut(shortcut extensions.Shortcut) tea.Cmd {
 				if runtimeErr != nil {
 					err = errors.Wrap(runtimeErr, "failed to initialize extensions for shortcut")
 				} else {
-					matched, err = extensionRuntime.ExecuteShortcut(callCtx, shortcut.Key, extensionCallContext)
+					matched, result, err = extensionRuntime.ExecuteShortcutWithResult(callCtx, shortcut.Key, extensionCallContext)
 				}
 			}
 		}
@@ -147,6 +148,7 @@ func (m *model) startExtensionShortcut(shortcut extensions.Shortcut) tea.Cmd {
 			key:             shortcut.Key,
 			extensionID:     shortcut.ExtensionID,
 			matched:         matched,
+			result:          result,
 			err:             err,
 		}
 	}

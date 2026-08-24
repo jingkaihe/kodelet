@@ -1626,7 +1626,7 @@ ext.registerShortcut("ctrl+alt+r", {
 });
 ```
 
-`registerShortcut` is independent from `registerCommand`: pressing the key invokes the shortcut handler directly rather than submitting a slash command. The handler receives the same workspace, storage, process, environment, logging, cancellation, and UI helpers exposed by other extension contexts. Effective extension shortcuts appear in the TUI's `?` shortcuts dialog.
+`registerShortcut` invokes the handler directly with a `ShortcutContext`. A handler may return `{ action: "submit", message }` to submit a message such as `/dictate`; this requires `capabilities.shortcuts.submit` and preserves the composer draft. Effective shortcuts appear in the TUI's `?` dialog.
 
 Shortcut identifiers are case-insensitive ASCII single key chords. The initial supported forms are `ctrl+<ASCII letter>`, `alt+<ASCII letter-or-digit>`, `ctrl+alt+<ASCII letter>`, and an unmodified function key from `f1` through `f12`. `control` normalizes to `ctrl`, `option` normalizes to `alt`, and modifier order does not matter. `ctrl+i` and `ctrl+m`, including their Ctrl+Alt forms, are rejected because terminals report those control codes as Tab and Enter. Shift, Command/Meta/Super, modified function keys, punctuation, spaces, non-ASCII characters, and navigation-key combinations are not currently supported. Alt and function-key delivery can still depend on terminal or operating-system configuration.
 

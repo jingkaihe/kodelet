@@ -750,6 +750,8 @@ func TestBackgroundLifecycleQueuedSubmitPreservesActiveDraft(t *testing.T) {
 	background := newConversationState("conversation-background", "conversation-background", true, m.conversationDefaults)
 	background.extensionLifecyclePending = true
 	background.submitAfterExtensionLifecycle = "queued background request"
+	background.submitAfterExtensionLifecyclePreserveComposer = true
+	background.draft = "background draft"
 	m.conversations[background.key] = background
 
 	updated, cmd := m.Update(extensionLifecycleMsg{
@@ -761,6 +763,7 @@ func TestBackgroundLifecycleQueuedSubmitPreservesActiveDraft(t *testing.T) {
 	require.NotNil(t, cmd)
 	assert.Same(t, active, m.conversationState)
 	assert.Equal(t, "active draft", m.textarea.Value())
+	assert.Equal(t, "background draft", background.draft)
 	assert.True(t, background.running)
 	assert.Equal(t, "queued background request", background.entries[0].content)
 }

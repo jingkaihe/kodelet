@@ -152,15 +152,17 @@ type conversationState struct {
 	slashDismissedDraft  string
 	extensionShortcuts   []extensions.Shortcut
 
-	messageHistoryScopeCWD        string
-	initialHistoryPending         bool
-	deferSubmitUntilHistory       bool
-	submitAfterHistoryLoad        string
-	extensionDiscoveryBlocked     bool
-	extensionLifecyclePending     bool
-	submitAfterExtensionLifecycle string
-	messageHistory                []string
-	historySearch                 *historySearchState
+	messageHistoryScopeCWD                        string
+	initialHistoryPending                         bool
+	deferSubmitUntilHistory                       bool
+	submitAfterHistoryLoad                        string
+	submitAfterHistoryLoadPreserveComposer        bool
+	extensionDiscoveryBlocked                     bool
+	extensionLifecyclePending                     bool
+	submitAfterExtensionLifecycle                 string
+	submitAfterExtensionLifecyclePreserveComposer bool
+	messageHistory                                []string
+	historySearch                                 *historySearchState
 
 	draft          string
 	viewportOffset int
@@ -322,6 +324,7 @@ type extensionShortcutDoneMsg struct {
 	key             string
 	extensionID     string
 	matched         bool
+	result          *extensions.ShortcutResult
 	err             error
 }
 
