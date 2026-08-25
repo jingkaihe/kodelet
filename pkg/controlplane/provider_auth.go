@@ -47,6 +47,45 @@ func (defaultCodexProviderAuthService) SaveCredentials(credentials *providerauth
 	return err
 }
 
+type copilotProviderAuthService interface {
+	Connected() (bool, error)
+	RequestDeviceCode(context.Context) (*providerauth.CopilotDeviceCodeResponse, error)
+	CompleteDeviceCodeLogin(context.Context, *providerauth.CopilotDeviceCodeResponse) (*providerauth.CopilotCredentials, error)
+	SaveCredentials(*providerauth.CopilotCredentials) error
+}
+
+type defaultCopilotProviderAuthService struct{}
+
+func (defaultCopilotProviderAuthService) Connected() (bool, error) {
+	return providerauth.GetCopilotCredentialsExists()
+}
+
+func (defaultCopilotProviderAuthService) RequestDeviceCode(ctx context.Context) (*providerauth.CopilotDeviceCodeResponse, error) {
+	return providerauth.GenerateCopilotDeviceFlow(ctx)
+}
+
+func (defaultCopilotProviderAuthService) CompleteDeviceCodeLogin(ctx context.Context, deviceCode *providerauth.CopilotDeviceCodeResponse) (*providerauth.CopilotCredentials, error) {
+	token, err := providerauth.PollCopilotToken(ctx, deviceCode.DeviceCode, deviceCode.Interval)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get GitHub OAuth access token")
+	}
+	copilotToken, err := providerauth.ExchangeCopilotToken(ctx, token.AccessToken)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to exchange GitHub Copilot token")
+	}
+	return &providerauth.CopilotCredentials{
+		AccessToken:    token.AccessToken,
+		CopilotToken:   copilotToken.Token,
+		Scope:          token.Scope,
+		CopilotExpires: copilotToken.ExpiresAt,
+	}, nil
+}
+
+func (defaultCopilotProviderAuthService) SaveCredentials(credentials *providerauth.CopilotCredentials) error {
+	_, err := providerauth.SaveCopilotCredentials(credentials)
+	return err
+}
+
 type anthropicProviderAuthService interface {
 	Connected() (bool, error)
 	GenerateAuthURL() (authURL string, verifier string, err error)
@@ -101,11 +140,12 @@ const (
 	codexDeviceLoginFailed    codexDeviceLoginStatus = "failed"
 	codexDeviceLoginCanceled  codexDeviceLoginStatus = "canceled"
 
-	codexDeviceLoginTimeout     = 15 * time.Minute
-	codexDeviceCodeRequestLimit = 30 * time.Second
-	anthropicOAuthLoginTimeout  = 15 * time.Minute
-	anthropicOAuthExchangeLimit = 30 * time.Second
-	providerLoginBodyLimit      = 16 << 10
+	codexDeviceLoginTimeout       = 15 * time.Minute
+	codexDeviceCodeRequestLimit   = 30 * time.Second
+	copilotDeviceCodeRequestLimit = 30 * time.Second
+	anthropicOAuthLoginTimeout    = 15 * time.Minute
+	anthropicOAuthExchangeLimit   = 30 * time.Second
+	providerLoginBodyLimit        = 16 << 10
 )
 
 type codexDeviceLoginSession struct {
@@ -123,6 +163,33 @@ type codexDeviceLoginResponse struct {
 	VerificationURL string                 `json:"verificationUrl,omitempty"`
 	UserCode        string                 `json:"userCode,omitempty"`
 	Message         string                 `json:"message,omitempty"`
+}
+
+type copilotDeviceLoginStatus string
+
+const (
+	copilotDeviceLoginStarting  copilotDeviceLoginStatus = "starting"
+	copilotDeviceLoginPending   copilotDeviceLoginStatus = "pending"
+	copilotDeviceLoginConnected copilotDeviceLoginStatus = "connected"
+	copilotDeviceLoginFailed    copilotDeviceLoginStatus = "failed"
+	copilotDeviceLoginCanceled  copilotDeviceLoginStatus = "canceled"
+)
+
+type copilotDeviceLoginSession struct {
+	ID              string
+	Status          copilotDeviceLoginStatus
+	VerificationURL string
+	UserCode        string
+	Message         string
+	cancel          context.CancelFunc
+}
+
+type copilotDeviceLoginResponse struct {
+	ID              string                   `json:"id"`
+	Status          copilotDeviceLoginStatus `json:"status"`
+	VerificationURL string                   `json:"verificationUrl,omitempty"`
+	UserCode        string                   `json:"userCode,omitempty"`
+	Message         string                   `json:"message,omitempty"`
 }
 
 type anthropicOAuthLoginStatus string
@@ -166,6 +233,13 @@ func (s *Server) codexProviderAuth() codexProviderAuthService {
 		return s.codexAuth
 	}
 	return defaultCodexProviderAuthService{}
+}
+
+func (s *Server) copilotProviderAuth() copilotProviderAuthService {
+	if s.copilotAuth != nil {
+		return s.copilotAuth
+	}
+	return defaultCopilotProviderAuthService{}
 }
 
 func (s *Server) anthropicProviderAuth() anthropicProviderAuthService {
@@ -330,6 +404,169 @@ func codexDeviceLoginActive(session *codexDeviceLoginSession) bool {
 
 func codexDeviceLoginResponseFromSession(session *codexDeviceLoginSession) codexDeviceLoginResponse {
 	return codexDeviceLoginResponse{
+		ID:              session.ID,
+		Status:          session.Status,
+		VerificationURL: session.VerificationURL,
+		UserCode:        session.UserCode,
+		Message:         session.Message,
+	}
+}
+
+func (s *Server) handleGetCopilotProvider(w http.ResponseWriter, _ *http.Request) {
+	setProviderResponseHeaders(w)
+	connected, err := s.copilotProviderAuth().Connected()
+	if err != nil {
+		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to read GitHub Copilot provider status", err)
+		return
+	}
+	s.writeJSONResponse(w, providerConnectionResponse{Provider: "copilot", Connected: connected})
+}
+
+func (s *Server) handleStartCopilotDeviceLogin(w http.ResponseWriter, r *http.Request) {
+	setProviderResponseHeaders(w)
+	loginID, err := newAuthID("copilot_login")
+	if err != nil {
+		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to start GitHub Copilot device login", err)
+		return
+	}
+
+	session := &copilotDeviceLoginSession{ID: loginID, Status: copilotDeviceLoginStarting}
+	s.copilotDeviceLoginMu.Lock()
+	if copilotDeviceLoginActive(s.copilotDeviceLogin) {
+		s.copilotDeviceLoginMu.Unlock()
+		s.writeErrorResponse(w, http.StatusConflict, "GitHub Copilot device login is already in progress", nil)
+		return
+	}
+	s.copilotDeviceLogin = session
+	s.copilotDeviceLoginMu.Unlock()
+
+	deviceCodeCtx, cancelDeviceCode := context.WithTimeout(r.Context(), copilotDeviceCodeRequestLimit)
+	deviceCode, err := s.copilotProviderAuth().RequestDeviceCode(deviceCodeCtx)
+	cancelDeviceCode()
+	if err != nil {
+		s.copilotDeviceLoginMu.Lock()
+		if s.copilotDeviceLogin != nil && s.copilotDeviceLogin.ID == loginID {
+			s.copilotDeviceLogin = nil
+		}
+		s.copilotDeviceLoginMu.Unlock()
+		s.writeErrorResponse(w, http.StatusBadGateway, "failed to request a GitHub Copilot device code", err)
+		return
+	}
+
+	baseCtx := s.runCtx
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
+	baseCtx = logger.WithLogger(baseCtx, logger.G(r.Context()))
+	loginCtx, cancelLogin := context.WithTimeout(baseCtx, time.Duration(deviceCode.ExpiresIn)*time.Second)
+
+	s.copilotDeviceLoginMu.Lock()
+	if s.copilotDeviceLogin == nil || s.copilotDeviceLogin.ID != loginID {
+		s.copilotDeviceLoginMu.Unlock()
+		cancelLogin()
+		s.writeErrorResponse(w, http.StatusConflict, "GitHub Copilot device login is no longer available", nil)
+		return
+	}
+	session.Status = copilotDeviceLoginPending
+	session.VerificationURL = deviceCode.VerificationURI
+	session.UserCode = deviceCode.UserCode
+	session.cancel = cancelLogin
+	response := copilotDeviceLoginResponseFromSession(session)
+	s.copilotDeviceLoginMu.Unlock()
+
+	go func() {
+		defer cancelLogin()
+		s.completeCopilotDeviceLogin(loginCtx, loginID, deviceCode)
+	}()
+	s.writeJSONResponse(w, response)
+}
+
+func (s *Server) completeCopilotDeviceLogin(ctx context.Context, loginID string, deviceCode *providerauth.CopilotDeviceCodeResponse) {
+	defer func() {
+		s.copilotDeviceLoginMu.Lock()
+		if s.copilotDeviceLogin != nil && s.copilotDeviceLogin.ID == loginID {
+			s.copilotDeviceLogin.cancel = nil
+		}
+		s.copilotDeviceLoginMu.Unlock()
+	}()
+
+	credentials, err := s.copilotProviderAuth().CompleteDeviceCodeLogin(ctx, deviceCode)
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			s.finishCopilotDeviceLogin(loginID, copilotDeviceLoginCanceled, "GitHub Copilot sign-in was canceled.")
+			return
+		}
+		logger.G(ctx).WithError(err).Error("failed to complete GitHub Copilot device login")
+		s.finishCopilotDeviceLogin(loginID, copilotDeviceLoginFailed, "Could not complete GitHub Copilot sign-in. Please try again.")
+		return
+	}
+
+	if err := s.copilotProviderAuth().SaveCredentials(credentials); err != nil {
+		logger.G(ctx).WithError(err).Error("failed to save GitHub Copilot credentials")
+		s.finishCopilotDeviceLogin(loginID, copilotDeviceLoginFailed, "Could not save the GitHub Copilot connection. Please try again.")
+		return
+	}
+	s.finishCopilotDeviceLogin(loginID, copilotDeviceLoginConnected, "GitHub Copilot subscription connected.")
+}
+
+func (s *Server) finishCopilotDeviceLogin(loginID string, status copilotDeviceLoginStatus, message string) {
+	s.copilotDeviceLoginMu.Lock()
+	defer s.copilotDeviceLoginMu.Unlock()
+	if s.copilotDeviceLogin == nil || s.copilotDeviceLogin.ID != loginID {
+		return
+	}
+	s.copilotDeviceLogin.Status = status
+	s.copilotDeviceLogin.Message = message
+}
+
+func (s *Server) handleGetCopilotDeviceLogin(w http.ResponseWriter, r *http.Request) {
+	setProviderResponseHeaders(w)
+	loginID := strings.TrimSpace(mux.Vars(r)["id"])
+	if loginID == "" {
+		s.writeErrorResponse(w, http.StatusBadRequest, "GitHub Copilot device login ID is required", nil)
+		return
+	}
+
+	s.copilotDeviceLoginMu.Lock()
+	if s.copilotDeviceLogin == nil || s.copilotDeviceLogin.ID != loginID {
+		s.copilotDeviceLoginMu.Unlock()
+		s.writeErrorResponse(w, http.StatusNotFound, "GitHub Copilot device login not found", nil)
+		return
+	}
+	response := copilotDeviceLoginResponseFromSession(s.copilotDeviceLogin)
+	s.copilotDeviceLoginMu.Unlock()
+	s.writeJSONResponse(w, response)
+}
+
+func (s *Server) handleCancelCopilotDeviceLogin(w http.ResponseWriter, r *http.Request) {
+	setProviderResponseHeaders(w)
+	loginID := strings.TrimSpace(mux.Vars(r)["id"])
+	if loginID == "" {
+		s.writeErrorResponse(w, http.StatusBadRequest, "GitHub Copilot device login ID is required", nil)
+		return
+	}
+
+	s.copilotDeviceLoginMu.Lock()
+	if s.copilotDeviceLogin == nil || s.copilotDeviceLogin.ID != loginID {
+		s.copilotDeviceLoginMu.Unlock()
+		s.writeErrorResponse(w, http.StatusNotFound, "GitHub Copilot device login not found", nil)
+		return
+	}
+	cancel := s.copilotDeviceLogin.cancel
+	s.copilotDeviceLoginMu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func copilotDeviceLoginActive(session *copilotDeviceLoginSession) bool {
+	return session != nil && (session.Status == copilotDeviceLoginStarting || session.Status == copilotDeviceLoginPending)
+}
+
+func copilotDeviceLoginResponseFromSession(session *copilotDeviceLoginSession) copilotDeviceLoginResponse {
+	return copilotDeviceLoginResponse{
 		ID:              session.ID,
 		Status:          session.Status,
 		VerificationURL: session.VerificationURL,

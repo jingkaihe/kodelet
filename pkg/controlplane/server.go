@@ -97,6 +97,9 @@ type Server struct {
 	codexAuth             codexProviderAuthService
 	codexDeviceLogin      *codexDeviceLoginSession
 	codexDeviceLoginMu    sync.Mutex
+	copilotAuth           copilotProviderAuthService
+	copilotDeviceLogin    *copilotDeviceLoginSession
+	copilotDeviceLoginMu  sync.Mutex
 	anthropicAuth         anthropicProviderAuthService
 	anthropicOAuthLogin   *anthropicOAuthLoginSession
 	anthropicOAuthLoginMu sync.Mutex
@@ -367,6 +370,10 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/providers/codex/device-login", s.requireRole(RoleAdmin, s.handleStartCodexDeviceLogin)).Methods("POST")
 	api.HandleFunc("/providers/codex/device-login/{id}", s.requireRole(RoleAdmin, s.handleGetCodexDeviceLogin)).Methods("GET")
 	api.HandleFunc("/providers/codex/device-login/{id}", s.requireRole(RoleAdmin, s.handleCancelCodexDeviceLogin)).Methods("DELETE")
+	api.HandleFunc("/providers/copilot", s.requireRole(RoleAdmin, s.handleGetCopilotProvider)).Methods("GET")
+	api.HandleFunc("/providers/copilot/device-login", s.requireRole(RoleAdmin, s.handleStartCopilotDeviceLogin)).Methods("POST")
+	api.HandleFunc("/providers/copilot/device-login/{id}", s.requireRole(RoleAdmin, s.handleGetCopilotDeviceLogin)).Methods("GET")
+	api.HandleFunc("/providers/copilot/device-login/{id}", s.requireRole(RoleAdmin, s.handleCancelCopilotDeviceLogin)).Methods("DELETE")
 	api.HandleFunc("/providers/anthropic", s.requireRole(RoleAdmin, s.handleGetAnthropicProvider)).Methods("GET")
 	api.HandleFunc("/providers/anthropic/oauth-login", s.requireRole(RoleAdmin, s.handleStartAnthropicOAuthLogin)).Methods("POST")
 	api.HandleFunc("/providers/anthropic/oauth-login/{id}/complete", s.requireRole(RoleAdmin, s.handleCompleteAnthropicOAuthLogin)).Methods("POST")

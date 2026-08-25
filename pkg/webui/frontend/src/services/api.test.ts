@@ -298,6 +298,76 @@ describe("ApiService", () => {
 
 	});
 
+	describe("GitHub Copilot provider authentication", () => {
+		it("loads the GitHub Copilot subscription connection status", async () => {
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				status: 200,
+				json: async () => ({ provider: "copilot", connected: true }),
+			});
+
+			await expect(apiService.getCopilotProviderStatus()).resolves.toEqual({
+				provider: "copilot",
+				connected: true,
+			});
+			expect(mockFetch).toHaveBeenCalledWith(
+				"/api/providers/copilot",
+				expect.any(Object),
+			);
+		});
+
+		it("starts and polls device login with CSRF protection", async () => {
+			setTestCookie("kodelet_csrf=csrf-provider; Path=/");
+			const login = {
+				id: "copilot_login_123",
+				status: "pending",
+				verificationUrl: "https://github.com/login/device",
+				userCode: "ABCD-EFGH",
+			};
+			mockFetch
+				.mockResolvedValueOnce({ ok: true, status: 200, json: async () => login })
+				.mockResolvedValueOnce({
+					ok: true,
+					status: 200,
+					json: async () => ({ ...login, status: "connected" }),
+				});
+
+			await expect(apiService.startCopilotDeviceLogin()).resolves.toEqual(login);
+			await expect(apiService.getCopilotDeviceLogin(login.id)).resolves.toMatchObject({
+				status: "connected",
+			});
+
+			expect(mockFetch).toHaveBeenNthCalledWith(
+				1,
+				"/api/providers/copilot/device-login",
+				expect.objectContaining({
+					method: "POST",
+					headers: expect.objectContaining({ "X-CSRF-Token": "csrf-provider" }),
+				}),
+			);
+			expect(mockFetch).toHaveBeenNthCalledWith(
+				2,
+				"/api/providers/copilot/device-login/copilot_login_123",
+				expect.any(Object),
+			);
+		});
+
+		it("cancels pending device login", async () => {
+			setTestCookie("kodelet_csrf=csrf-provider; Path=/");
+			mockFetch.mockResolvedValueOnce({ ok: true, status: 204 });
+
+			await apiService.cancelCopilotDeviceLogin("copilot_login_123");
+
+			expect(mockFetch).toHaveBeenCalledWith(
+				"/api/providers/copilot/device-login/copilot_login_123",
+				expect.objectContaining({
+					method: "DELETE",
+					headers: expect.objectContaining({ "X-CSRF-Token": "csrf-provider" }),
+				}),
+			);
+		});
+	});
+
 	describe("getConversations", () => {
 		it("fetches conversations without filters", async () => {
 			const mockResponse: ConversationListResponse = {

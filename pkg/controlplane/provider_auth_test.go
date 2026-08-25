@@ -33,6 +33,23 @@ type fakeCodexProviderAuthService struct {
 	saveCount      int
 }
 
+type fakeCopilotCompletion struct {
+	credentials *providerauth.CopilotCredentials
+	err         error
+}
+
+type fakeCopilotProviderAuthService struct {
+	mu             sync.Mutex
+	connected      bool
+	deviceCode     *providerauth.CopilotDeviceCodeResponse
+	requestErr     error
+	requestStarted chan struct{}
+	releaseRequest chan struct{}
+	completion     chan fakeCopilotCompletion
+	requestOnce    sync.Once
+	saveCount      int
+}
+
 type fakeAnthropicProviderAuthService struct {
 	mu               sync.Mutex
 	connected        bool
@@ -89,6 +106,43 @@ func (f *fakeCodexProviderAuthService) SaveCredentials(_ *providerauth.CodexCred
 	return nil
 }
 
+func (f *fakeCopilotProviderAuthService) Connected() (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.connected, nil
+}
+
+func (f *fakeCopilotProviderAuthService) RequestDeviceCode(ctx context.Context) (*providerauth.CopilotDeviceCodeResponse, error) {
+	if f.requestStarted != nil {
+		f.requestOnce.Do(func() { close(f.requestStarted) })
+	}
+	if f.releaseRequest != nil {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-f.releaseRequest:
+		}
+	}
+	return f.deviceCode, f.requestErr
+}
+
+func (f *fakeCopilotProviderAuthService) CompleteDeviceCodeLogin(ctx context.Context, _ *providerauth.CopilotDeviceCodeResponse) (*providerauth.CopilotCredentials, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case result := <-f.completion:
+		return result.credentials, result.err
+	}
+}
+
+func (f *fakeCopilotProviderAuthService) SaveCredentials(_ *providerauth.CopilotCredentials) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.connected = true
+	f.saveCount++
+	return nil
+}
+
 func (f *fakeAnthropicProviderAuthService) Connected() (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -138,6 +192,16 @@ func testCodexDeviceCode() *providerauth.CodexDeviceCode {
 	return &providerauth.CodexDeviceCode{
 		VerificationURL: "https://auth.openai.test/codex/device",
 		UserCode:        "CODE-123",
+	}
+}
+
+func testCopilotDeviceCode() *providerauth.CopilotDeviceCodeResponse {
+	return &providerauth.CopilotDeviceCodeResponse{
+		DeviceCode:      "device-123",
+		UserCode:        "USER-123",
+		VerificationURI: "https://github.com/login/device",
+		ExpiresIn:       900,
+		Interval:        5,
 	}
 }
 
@@ -248,6 +312,119 @@ func TestServerCancelsCodexDeviceLogin(t *testing.T) {
 		server.codexDeviceLoginMu.Lock()
 		defer server.codexDeviceLoginMu.Unlock()
 		return server.codexDeviceLogin != nil && server.codexDeviceLogin.Status == codexDeviceLoginCanceled
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestServerHandleGetCopilotProvider(t *testing.T) {
+	server := &Server{copilotAuth: &fakeCopilotProviderAuthService{connected: true}}
+	response := httptest.NewRecorder()
+
+	server.handleGetCopilotProvider(response, httptest.NewRequest(http.MethodGet, "/api/providers/copilot", nil))
+
+	assert.Equal(t, http.StatusOK, response.Code)
+	var payload providerConnectionResponse
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &payload))
+	assert.Equal(t, "copilot", payload.Provider)
+	assert.True(t, payload.Connected)
+}
+
+func TestServerAllowsOnlyOneCopilotDeviceLoginInFlight(t *testing.T) {
+	service := &fakeCopilotProviderAuthService{
+		deviceCode:     testCopilotDeviceCode(),
+		requestStarted: make(chan struct{}),
+		releaseRequest: make(chan struct{}),
+		completion:     make(chan fakeCopilotCompletion),
+	}
+	server := &Server{copilotAuth: service, runCtx: t.Context()}
+	firstResponse := httptest.NewRecorder()
+	firstDone := make(chan struct{})
+	go func() {
+		server.handleStartCopilotDeviceLogin(firstResponse, httptest.NewRequest(http.MethodPost, "/api/providers/copilot/device-login", nil))
+		close(firstDone)
+	}()
+
+	select {
+	case <-service.requestStarted:
+	case <-time.After(time.Second):
+		require.FailNow(t, "first GitHub Copilot device login did not start")
+	}
+
+	secondResponse := httptest.NewRecorder()
+	server.handleStartCopilotDeviceLogin(secondResponse, httptest.NewRequest(http.MethodPost, "/api/providers/copilot/device-login", nil))
+	assert.Equal(t, http.StatusConflict, secondResponse.Code)
+
+	close(service.releaseRequest)
+	select {
+	case <-firstDone:
+	case <-time.After(time.Second):
+		require.FailNow(t, "first GitHub Copilot device login did not return its device code")
+	}
+	assert.Equal(t, http.StatusOK, firstResponse.Code)
+
+	thirdResponse := httptest.NewRecorder()
+	server.handleStartCopilotDeviceLogin(thirdResponse, httptest.NewRequest(http.MethodPost, "/api/providers/copilot/device-login", nil))
+	assert.Equal(t, http.StatusConflict, thirdResponse.Code)
+}
+
+func TestServerCopilotDeviceLoginCompletes(t *testing.T) {
+	service := &fakeCopilotProviderAuthService{
+		deviceCode: testCopilotDeviceCode(),
+		completion: make(chan fakeCopilotCompletion, 1),
+	}
+	server := &Server{copilotAuth: service, runCtx: t.Context()}
+	startResponse := httptest.NewRecorder()
+	server.handleStartCopilotDeviceLogin(startResponse, httptest.NewRequest(http.MethodPost, "/api/providers/copilot/device-login", nil))
+
+	var login copilotDeviceLoginResponse
+	require.NoError(t, json.Unmarshal(startResponse.Body.Bytes(), &login))
+	assert.Equal(t, copilotDeviceLoginPending, login.Status)
+	assert.Equal(t, "USER-123", login.UserCode)
+	service.completion <- fakeCopilotCompletion{credentials: &providerauth.CopilotCredentials{
+		AccessToken:    "github-access-token",
+		CopilotToken:   "copilot-token",
+		Scope:          "copilot",
+		CopilotExpires: 4102444800,
+	}}
+
+	require.Eventually(t, func() bool {
+		statusResponse := httptest.NewRecorder()
+		statusRequest := mux.SetURLVars(
+			httptest.NewRequest(http.MethodGet, "/api/providers/copilot/device-login/"+login.ID, nil),
+			map[string]string{"id": login.ID},
+		)
+		server.handleGetCopilotDeviceLogin(statusResponse, statusRequest)
+		var status copilotDeviceLoginResponse
+		return statusResponse.Code == http.StatusOK && json.Unmarshal(statusResponse.Body.Bytes(), &status) == nil && status.Status == copilotDeviceLoginConnected
+	}, time.Second, 10*time.Millisecond)
+
+	service.mu.Lock()
+	assert.Equal(t, 1, service.saveCount)
+	service.mu.Unlock()
+}
+
+func TestServerCancelsCopilotDeviceLogin(t *testing.T) {
+	service := &fakeCopilotProviderAuthService{
+		deviceCode: testCopilotDeviceCode(),
+		completion: make(chan fakeCopilotCompletion),
+	}
+	server := &Server{copilotAuth: service, runCtx: t.Context()}
+	startResponse := httptest.NewRecorder()
+	server.handleStartCopilotDeviceLogin(startResponse, httptest.NewRequest(http.MethodPost, "/api/providers/copilot/device-login", nil))
+	var login copilotDeviceLoginResponse
+	require.NoError(t, json.Unmarshal(startResponse.Body.Bytes(), &login))
+
+	cancelResponse := httptest.NewRecorder()
+	cancelRequest := mux.SetURLVars(
+		httptest.NewRequest(http.MethodDelete, "/api/providers/copilot/device-login/"+login.ID, nil),
+		map[string]string{"id": login.ID},
+	)
+	server.handleCancelCopilotDeviceLogin(cancelResponse, cancelRequest)
+	assert.Equal(t, http.StatusNoContent, cancelResponse.Code)
+
+	require.Eventually(t, func() bool {
+		server.copilotDeviceLoginMu.Lock()
+		defer server.copilotDeviceLoginMu.Unlock()
+		return server.copilotDeviceLogin != nil && server.copilotDeviceLogin.Status == copilotDeviceLoginCanceled
 	}, time.Second, 10*time.Millisecond)
 }
 

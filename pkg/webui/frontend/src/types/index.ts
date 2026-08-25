@@ -160,6 +160,21 @@ export interface CodexDeviceLogin {
   message?: string;
 }
 
+export interface CopilotProviderStatus {
+  provider: 'copilot';
+  connected: boolean;
+}
+
+export type CopilotDeviceLoginStatus = 'pending' | 'connected' | 'failed' | 'canceled';
+
+export interface CopilotDeviceLogin {
+  id: string;
+  status: CopilotDeviceLoginStatus;
+  verificationUrl?: string;
+  userCode?: string;
+  message?: string;
+}
+
 export interface AnthropicProviderStatus {
   provider: 'anthropic';
   connected: boolean;

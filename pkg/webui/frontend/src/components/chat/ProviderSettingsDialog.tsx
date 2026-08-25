@@ -6,6 +6,8 @@ import type {
   AnthropicProviderStatus,
   CodexDeviceLogin,
   CodexProviderStatus,
+  CopilotDeviceLogin,
+  CopilotProviderStatus,
 } from '../../types';
 import { copyToClipboard } from '../../utils';
 import Spinner from '../Spinner';
@@ -15,7 +17,7 @@ const PROVIDER_DIALOG_FOCUSABLE_SELECTOR = [
   '[href]',
   "[tabindex]:not([tabindex='-1'])",
 ].join(',');
-const CODEX_DEVICE_LOGIN_POLL_INTERVAL = 1200;
+const DEVICE_LOGIN_POLL_INTERVAL = 1200;
 
 const formatProviderURL = (value?: string): string => {
   if (!value) {
@@ -41,7 +43,13 @@ const AnthropicIcon: React.FC<{ className?: string }> = ({ className }) => (
   </svg>
 );
 
-type ProviderLogin = 'codex' | 'anthropic';
+const GitHubIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg aria-hidden="true" className={className} fill="currentColor" viewBox="0 0 24 24">
+    <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.084-.729.084-.729 1.205.084 1.838 1.237 1.838 1.237 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297 24 5.67 18.627.297 12 .297Z" />
+  </svg>
+);
+
+type ProviderLogin = 'codex' | 'copilot' | 'anthropic';
 
 interface ProviderSettingsDialogProps {
   onClose: () => void;
@@ -49,12 +57,15 @@ interface ProviderSettingsDialogProps {
 
 const ProviderSettingsDialog: React.FC<ProviderSettingsDialogProps> = ({ onClose }) => {
   const [codexStatus, setCodexStatus] = React.useState<CodexProviderStatus | null>(null);
+  const [copilotStatus, setCopilotStatus] = React.useState<CopilotProviderStatus | null>(null);
   const [anthropicStatus, setAnthropicStatus] = React.useState<AnthropicProviderStatus | null>(null);
   const [codexLoading, setCodexLoading] = React.useState(true);
+  const [copilotLoading, setCopilotLoading] = React.useState(true);
   const [anthropicLoading, setAnthropicLoading] = React.useState(true);
   const [providerError, setProviderError] = React.useState<string | null>(null);
   const [activeProvider, setActiveProvider] = React.useState<ProviderLogin | null>(null);
   const [codexLogin, setCodexLogin] = React.useState<CodexDeviceLogin | null>(null);
+  const [copilotLogin, setCopilotLogin] = React.useState<CopilotDeviceLogin | null>(null);
   const [anthropicLogin, setAnthropicLogin] = React.useState<AnthropicOAuthLogin | null>(null);
   const [anthropicCode, setAnthropicCode] = React.useState('');
   const [loginStarting, setLoginStarting] = React.useState<ProviderLogin | null>(null);
@@ -70,6 +81,11 @@ const ProviderSettingsDialog: React.FC<ProviderSettingsDialogProps> = ({ onClose
         console.error('Failed to cancel Codex device login', error);
       });
     }
+    if (activeProvider === 'copilot' && copilotLogin?.status === 'pending') {
+      void apiService.cancelCopilotDeviceLogin(copilotLogin.id).catch((error) => {
+        console.error('Failed to cancel GitHub Copilot device login', error);
+      });
+    }
     if (
       activeProvider === 'anthropic' &&
       anthropicLogin?.status === 'pending' &&
@@ -80,7 +96,7 @@ const ProviderSettingsDialog: React.FC<ProviderSettingsDialogProps> = ({ onClose
       });
     }
     onClose();
-  }, [activeProvider, anthropicLogin, anthropicSubmitting, codexLogin, onClose]);
+  }, [activeProvider, anthropicLogin, anthropicSubmitting, codexLogin, copilotLogin, onClose]);
   onCloseRef.current = closeDialog;
 
   React.useEffect(() => {
@@ -124,6 +140,27 @@ const ProviderSettingsDialog: React.FC<ProviderSettingsDialogProps> = ({ onClose
       .finally(() => {
         if (!disposed) {
           setAnthropicLoading(false);
+        }
+      });
+
+    void apiService
+      .getCopilotProviderStatus()
+      .then((status) => {
+        if (!disposed) {
+          setCopilotStatus(status);
+        }
+      })
+      .catch((error) => {
+        if (!disposed) {
+          console.error('Failed to load GitHub Copilot provider status', error);
+          setProviderError(
+            error instanceof Error ? error.message : 'Could not load provider status.'
+          );
+        }
+      })
+      .finally(() => {
+        if (!disposed) {
+          setCopilotLoading(false);
         }
       });
 
@@ -205,7 +242,7 @@ const ProviderSettingsDialog: React.FC<ProviderSettingsDialogProps> = ({ onClose
           return;
         }
         if (nextLogin.status === 'pending') {
-          pollTimer = window.setTimeout(poll, CODEX_DEVICE_LOGIN_POLL_INTERVAL);
+          pollTimer = window.setTimeout(poll, DEVICE_LOGIN_POLL_INTERVAL);
         }
       } catch (error) {
         if (disposed) {
@@ -229,16 +266,73 @@ const ProviderSettingsDialog: React.FC<ProviderSettingsDialogProps> = ({ onClose
         }
         console.error('Failed to poll Codex device login', error);
         setPollError('Connection status is temporarily unavailable. Still waiting…');
-        pollTimer = window.setTimeout(poll, CODEX_DEVICE_LOGIN_POLL_INTERVAL);
+        pollTimer = window.setTimeout(poll, DEVICE_LOGIN_POLL_INTERVAL);
       }
     };
 
-    pollTimer = window.setTimeout(poll, CODEX_DEVICE_LOGIN_POLL_INTERVAL);
+    pollTimer = window.setTimeout(poll, DEVICE_LOGIN_POLL_INTERVAL);
     return () => {
       disposed = true;
       window.clearTimeout(pollTimer);
     };
   }, [activeProvider, codexLogin?.id, codexLogin?.status]);
+
+  React.useEffect(() => {
+    if (activeProvider !== 'copilot' || !copilotLogin || copilotLogin.status !== 'pending') {
+      return undefined;
+    }
+
+    let disposed = false;
+    let pollTimer = 0;
+    const poll = async () => {
+      try {
+        const nextLogin = await apiService.getCopilotDeviceLogin(copilotLogin.id);
+        if (disposed) {
+          return;
+        }
+        setCopilotLogin(nextLogin);
+        setPollError(null);
+        if (nextLogin.status === 'connected') {
+          setCopilotStatus({ provider: 'copilot', connected: true });
+          setCopilotLogin(null);
+          setActiveProvider(null);
+          return;
+        }
+        if (nextLogin.status === 'pending') {
+          pollTimer = window.setTimeout(poll, DEVICE_LOGIN_POLL_INTERVAL);
+        }
+      } catch (error) {
+        if (disposed) {
+          return;
+        }
+        const status =
+          typeof error === 'object' && error !== null && 'status' in error
+            ? Number((error as { status?: unknown }).status)
+            : 0;
+        if (status >= 400 && status < 500 && status !== 429) {
+          const failedLogin: CopilotDeviceLogin = {
+            ...copilotLogin,
+            status: 'failed',
+            message:
+              error instanceof Error
+                ? error.message
+                : 'The device sign-in session is no longer available.',
+          };
+          setCopilotLogin(failedLogin);
+          return;
+        }
+        console.error('Failed to poll GitHub Copilot device login', error);
+        setPollError('Connection status is temporarily unavailable. Still waiting…');
+        pollTimer = window.setTimeout(poll, DEVICE_LOGIN_POLL_INTERVAL);
+      }
+    };
+
+    pollTimer = window.setTimeout(poll, DEVICE_LOGIN_POLL_INTERVAL);
+    return () => {
+      disposed = true;
+      window.clearTimeout(pollTimer);
+    };
+  }, [activeProvider, copilotLogin?.id, copilotLogin?.status]);
 
   const startCodexLogin = async () => {
     setLoginStarting('codex');
@@ -257,6 +351,30 @@ const ProviderSettingsDialog: React.FC<ProviderSettingsDialogProps> = ({ onClose
     } catch (error) {
       console.error('Failed to start Codex device login', error);
       setProviderError(error instanceof Error ? error.message : 'Could not start ChatGPT sign-in.');
+    } finally {
+      setLoginStarting(null);
+    }
+  };
+
+  const startCopilotLogin = async () => {
+    setLoginStarting('copilot');
+    setProviderError(null);
+    setPollError(null);
+    try {
+      const nextLogin = await apiService.startCopilotDeviceLogin();
+      if (nextLogin.status === 'connected') {
+        setCopilotStatus({ provider: 'copilot', connected: true });
+        setCopilotLogin(null);
+        setActiveProvider(null);
+      } else {
+        setCopilotLogin(nextLogin);
+        setActiveProvider('copilot');
+      }
+    } catch (error) {
+      console.error('Failed to start GitHub Copilot device login', error);
+      setProviderError(
+        error instanceof Error ? error.message : 'Could not start GitHub Copilot sign-in.'
+      );
     } finally {
       setLoginStarting(null);
     }
@@ -316,10 +434,26 @@ const ProviderSettingsDialog: React.FC<ProviderSettingsDialogProps> = ({ onClose
   };
 
   const codexConnected = codexStatus?.connected === true;
+  const copilotConnected = copilotStatus?.connected === true;
   const anthropicConnected = anthropicStatus?.connected === true;
-  const activeProviderName = activeProvider === 'anthropic' ? 'Anthropic' : 'ChatGPT';
+  const activeProviderName =
+    activeProvider === 'anthropic'
+      ? 'Anthropic'
+      : activeProvider === 'copilot'
+        ? 'GitHub Copilot'
+        : 'ChatGPT';
+  const activeDeviceLogin =
+    activeProvider === 'copilot'
+      ? copilotLogin
+      : activeProvider === 'codex'
+        ? codexLogin
+        : null;
   const activeLoginMessage =
-    activeProvider === 'anthropic' ? anthropicLogin?.message : codexLogin?.message;
+    activeProvider === 'anthropic'
+      ? anthropicLogin?.message
+      : activeProvider === 'copilot'
+        ? copilotLogin?.message
+        : codexLogin?.message;
 
   return (
     <div className="new-chat-dialog-backdrop provider-settings-backdrop">
@@ -444,10 +578,57 @@ const ProviderSettingsDialog: React.FC<ProviderSettingsDialogProps> = ({ onClose
                   </div>
                 </div>
               </article>
+              <article aria-label="GitHub Copilot" className="provider-settings-provider">
+                <div className="provider-settings-provider-icon" aria-hidden="true">
+                  <GitHubIcon className="h-4 w-4" />
+                </div>
+                <div className="provider-settings-provider-body">
+                  <div className="provider-settings-provider-copy">
+                    <h3>GitHub Copilot</h3>
+                    <p>Use your Copilot subscription.</p>
+                  </div>
+                  <div className="provider-settings-provider-controls">
+                    <span
+                      className={`provider-settings-status${copilotConnected ? ' is-connected' : ''}`}
+                      role="status"
+                    >
+                      {copilotLoading ? (
+                        <>
+                          <Spinner className="provider-settings-status-spinner" />
+                          Checking
+                        </>
+                      ) : copilotConnected ? (
+                        <>
+                          <Check aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={2.2} />
+                          Connected
+                        </>
+                      ) : (
+                        'Not connected'
+                      )}
+                    </span>
+                    <button
+                      aria-label={`${copilotConnected ? 'Reconnect' : 'Connect'} GitHub Copilot`}
+                      className={`panel-action-button provider-settings-provider-action${copilotConnected ? ' is-reconnect' : ''}`}
+                      disabled={copilotLoading || loginStarting !== null}
+                      onClick={() => void startCopilotLogin()}
+                      type="button"
+                    >
+                      {loginStarting === 'copilot' ? (
+                        <Spinner className="provider-settings-button-spinner" />
+                      ) : null}
+                      {loginStarting === 'copilot'
+                        ? 'Connecting…'
+                        : copilotConnected
+                          ? 'Reconnect'
+                          : 'Connect'}
+                    </button>
+                  </div>
+                </div>
+              </article>
             </section>
-          ) : activeProvider === 'codex' && codexLogin?.status === 'pending' ? (
-            <section className="provider-device-flow" aria-label="Connect ChatGPT">
-              <h3 className="provider-device-title">Connect ChatGPT</h3>
+          ) : activeDeviceLogin?.status === 'pending' ? (
+            <section className="provider-device-flow" aria-label={`Connect ${activeProviderName}`}>
+              <h3 className="provider-device-title">Connect {activeProviderName}</h3>
               <ol className="provider-device-steps">
                 <li className="provider-device-step">
                   <span className="provider-device-step-index" aria-hidden="true">
@@ -457,11 +638,11 @@ const ProviderSettingsDialog: React.FC<ProviderSettingsDialogProps> = ({ onClose
                     <span className="provider-device-step-label">Open this link</span>
                     <a
                       className="tool-action-link provider-device-link"
-                      href={codexLogin.verificationUrl}
+                      href={activeDeviceLogin.verificationUrl}
                       rel="noreferrer"
                       target="_blank"
                     >
-                      <span>{formatProviderURL(codexLogin.verificationUrl)}</span>
+                      <span>{formatProviderURL(activeDeviceLogin.verificationUrl)}</span>
                       <ExternalLink aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={1.9} />
                     </a>
                   </div>
@@ -472,14 +653,17 @@ const ProviderSettingsDialog: React.FC<ProviderSettingsDialogProps> = ({ onClose
                   </span>
                   <div className="provider-device-step-content">
                     <span className="provider-device-step-label">Enter this code</span>
-                    <output aria-label="ChatGPT device code" className="provider-device-code">
-                      {codexLogin.userCode}
+                    <output
+                      aria-label={`${activeProviderName} device code`}
+                      className="provider-device-code"
+                    >
+                      {activeDeviceLogin.userCode}
                     </output>
                   </div>
                   <button
                     aria-label="Copy device code"
                     className="panel-action-button provider-device-step-action provider-device-code-copy"
-                    onClick={() => void copyToClipboard(codexLogin.userCode || '')}
+                    onClick={() => void copyToClipboard(activeDeviceLogin.userCode || '')}
                     title="Copy device code"
                     type="button"
                   >
@@ -572,7 +756,9 @@ const ProviderSettingsDialog: React.FC<ProviderSettingsDialogProps> = ({ onClose
                 onClick={() =>
                   void (activeProvider === 'anthropic'
                     ? startAnthropicLogin()
-                    : startCodexLogin())
+                    : activeProvider === 'copilot'
+                      ? startCopilotLogin()
+                      : startCodexLogin())
                 }
                 type="button"
               >

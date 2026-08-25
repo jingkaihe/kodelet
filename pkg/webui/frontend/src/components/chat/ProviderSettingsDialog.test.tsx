@@ -6,6 +6,10 @@ const mockGetCodexProviderStatus = vi.fn();
 const mockStartCodexDeviceLogin = vi.fn();
 const mockGetCodexDeviceLogin = vi.fn();
 const mockCancelCodexDeviceLogin = vi.fn();
+const mockGetCopilotProviderStatus = vi.fn();
+const mockStartCopilotDeviceLogin = vi.fn();
+const mockGetCopilotDeviceLogin = vi.fn();
+const mockCancelCopilotDeviceLogin = vi.fn();
 const mockGetAnthropicProviderStatus = vi.fn();
 const mockStartAnthropicOAuthLogin = vi.fn();
 const mockCompleteAnthropicOAuthLogin = vi.fn();
@@ -17,6 +21,10 @@ vi.mock('../../services/api', () => ({
     startCodexDeviceLogin: (...args: unknown[]) => mockStartCodexDeviceLogin(...args),
     getCodexDeviceLogin: (...args: unknown[]) => mockGetCodexDeviceLogin(...args),
     cancelCodexDeviceLogin: (...args: unknown[]) => mockCancelCodexDeviceLogin(...args),
+    getCopilotProviderStatus: (...args: unknown[]) => mockGetCopilotProviderStatus(...args),
+    startCopilotDeviceLogin: (...args: unknown[]) => mockStartCopilotDeviceLogin(...args),
+    getCopilotDeviceLogin: (...args: unknown[]) => mockGetCopilotDeviceLogin(...args),
+    cancelCopilotDeviceLogin: (...args: unknown[]) => mockCancelCopilotDeviceLogin(...args),
     getAnthropicProviderStatus: (...args: unknown[]) => mockGetAnthropicProviderStatus(...args),
     startAnthropicOAuthLogin: (...args: unknown[]) => mockStartAnthropicOAuthLogin(...args),
     completeAnthropicOAuthLogin: (...args: unknown[]) =>
@@ -39,6 +47,8 @@ describe('ProviderSettingsDialog', () => {
     vi.clearAllMocks();
     mockGetCodexProviderStatus.mockResolvedValue({ provider: 'codex', connected: false });
     mockCancelCodexDeviceLogin.mockResolvedValue(undefined);
+    mockGetCopilotProviderStatus.mockResolvedValue({ provider: 'copilot', connected: false });
+    mockCancelCopilotDeviceLogin.mockResolvedValue(undefined);
     mockGetAnthropicProviderStatus.mockResolvedValue({
       provider: 'anthropic',
       connected: false,
@@ -57,12 +67,58 @@ describe('ProviderSettingsDialog', () => {
     expect(screen.getByRole('dialog', { name: 'Provider settings' })).toBeInTheDocument();
     const chatGPT = screen.getByRole('article', { name: 'ChatGPT' });
     const anthropic = screen.getByRole('article', { name: 'Anthropic' });
+    const copilot = screen.getByRole('article', { name: 'GitHub Copilot' });
     expect(within(chatGPT).getByText('Use your subscription for Codex.')).toBeInTheDocument();
     expect(within(chatGPT).getByText('Not connected')).toBeInTheDocument();
     expect(within(chatGPT).getByRole('button', { name: 'Connect ChatGPT' })).toBeEnabled();
     expect(within(anthropic).getByText('Use your Claude subscription.')).toBeInTheDocument();
     expect(within(anthropic).getByText('Not connected')).toBeInTheDocument();
     expect(within(anthropic).getByRole('button', { name: 'Connect Anthropic' })).toBeEnabled();
+    expect(within(copilot).getByText('Use your Copilot subscription.')).toBeInTheDocument();
+    expect(within(copilot).getByText('Not connected')).toBeInTheDocument();
+    expect(
+      within(copilot).getByRole('button', { name: 'Connect GitHub Copilot' })
+    ).toBeEnabled();
+  });
+
+  it('shows the GitHub device code and updates when Copilot sign-in completes', async () => {
+    mockStartCopilotDeviceLogin.mockResolvedValue({
+      id: 'copilot_login_123',
+      status: 'pending',
+      verificationUrl: 'https://github.com/login/device',
+      userCode: 'USER-123',
+    });
+    mockGetCopilotDeviceLogin.mockResolvedValue({
+      id: 'copilot_login_123',
+      status: 'connected',
+      message: 'GitHub Copilot subscription connected.',
+    });
+    render(<ProviderSettingsDialog onClose={vi.fn()} />);
+    await flushPromises();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Connect GitHub Copilot' }));
+    await flushPromises();
+
+    expect(screen.getByRole('heading', { name: 'Connect GitHub Copilot' })).toBeInTheDocument();
+    expect(screen.getByLabelText('GitHub Copilot device code')).toHaveTextContent('USER-123');
+    expect(screen.getByRole('link', { name: 'github.com/login/device' })).toHaveAttribute(
+      'href',
+      'https://github.com/login/device'
+    );
+    expect(screen.getByRole('button', { name: 'Copy device code' })).not.toHaveTextContent('Copy');
+
+    await act(async () => {
+      vi.advanceTimersByTime(1200);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockGetCopilotDeviceLogin).toHaveBeenCalledWith('copilot_login_123');
+    const copilot = screen.getByRole('article', { name: 'GitHub Copilot' });
+    expect(within(copilot).getByText('Connected')).toBeInTheDocument();
+    expect(
+      within(copilot).getByRole('button', { name: 'Reconnect GitHub Copilot' })
+    ).toHaveClass('is-reconnect');
   });
 
   it('shows the device code and updates when sign-in completes', async () => {
@@ -179,6 +235,25 @@ describe('ProviderSettingsDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close provider settings' }));
 
     expect(mockCancelAnthropicOAuthLogin).toHaveBeenCalledWith('anthropic_login_123');
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('cancels a pending GitHub Copilot login when the dialog closes', async () => {
+    const onClose = vi.fn();
+    mockStartCopilotDeviceLogin.mockResolvedValue({
+      id: 'copilot_login_123',
+      status: 'pending',
+      verificationUrl: 'https://github.com/login/device',
+      userCode: 'USER-123',
+    });
+    render(<ProviderSettingsDialog onClose={onClose} />);
+    await flushPromises();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Connect GitHub Copilot' }));
+    await flushPromises();
+    fireEvent.click(screen.getByRole('button', { name: 'Close provider settings' }));
+
+    expect(mockCancelCopilotDeviceLogin).toHaveBeenCalledWith('copilot_login_123');
     expect(onClose).toHaveBeenCalledOnce();
   });
 

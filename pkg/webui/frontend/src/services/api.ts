@@ -25,6 +25,8 @@ import {
 	WorkspaceTarget,
 	CodexProviderStatus,
 	CodexDeviceLogin,
+	CopilotProviderStatus,
+	CopilotDeviceLogin,
 	AnthropicProviderStatus,
 	AnthropicOAuthLogin,
 } from "../types";
@@ -141,6 +143,30 @@ class ApiService {
 	async cancelCodexDeviceLogin(id: string): Promise<void> {
 		await this.request(
 			`/api/providers/codex/device-login/${encodeURIComponent(id)}`,
+			{ method: "DELETE" },
+		);
+	}
+
+	async getCopilotProviderStatus(): Promise<CopilotProviderStatus> {
+		return this.request<CopilotProviderStatus>("/api/providers/copilot");
+	}
+
+	async startCopilotDeviceLogin(): Promise<CopilotDeviceLogin> {
+		return this.request<CopilotDeviceLogin>(
+			"/api/providers/copilot/device-login",
+			{ method: "POST" },
+		);
+	}
+
+	async getCopilotDeviceLogin(id: string): Promise<CopilotDeviceLogin> {
+		return this.request<CopilotDeviceLogin>(
+			`/api/providers/copilot/device-login/${encodeURIComponent(id)}`,
+		);
+	}
+
+	async cancelCopilotDeviceLogin(id: string): Promise<void> {
+		await this.request(
+			`/api/providers/copilot/device-login/${encodeURIComponent(id)}`,
 			{ method: "DELETE" },
 		);
 	}
