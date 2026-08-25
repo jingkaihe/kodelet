@@ -124,9 +124,8 @@ func runRemoteACP(ctx context.Context, cmd *cobra.Command, rawServerURL string) 
 		Store:          store,
 		ServiceOptions: remoteACPServiceOptions(cmd),
 		OnRegistered:   provider.registeredRunner,
-		OnRetry: func(connectionErr error, delay time.Duration) {
+		OnRetry: func(_ error, _ time.Duration) {
 			provider.unavailable()
-			logger.G(ctx).WithError(connectionErr).WithField("retry_in", delay).Warn("Embedded ACP runner connection lost")
 		},
 	})
 	if err != nil {

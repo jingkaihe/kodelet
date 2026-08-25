@@ -113,7 +113,15 @@ func NewRunner(ctx context.Context, config RunnerConfig) (*Runner, error) {
 	config.Server = server
 	config.Workspace = workspace
 	config.DisplayName = strings.TrimSpace(config.DisplayName)
-	service, err := NewService(ctx, workspace, config.ServiceOptions)
+	host := protocol.Host{
+		InstanceID: identity.InstanceID,
+		Hostname:   hostname,
+		OS:         runtime.GOOS,
+		Arch:       runtime.GOARCH,
+		PID:        os.Getpid(),
+	}
+	serviceCtx := withRunnerLogFields(ctx, server, workspace, config.DisplayName, host)
+	service, err := NewService(serviceCtx, workspace, config.ServiceOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -124,14 +132,8 @@ func NewRunner(ctx context.Context, config RunnerConfig) (*Runner, error) {
 		server:       server,
 		websocketURL: websocketURL,
 		credential:   credential,
-		host: protocol.Host{
-			InstanceID: identity.InstanceID,
-			Hostname:   hostname,
-			OS:         runtime.GOOS,
-			Arch:       runtime.GOARCH,
-			PID:        os.Getpid(),
-		},
-		service: service,
+		host:         host,
+		service:      service,
 	}, nil
 }
 
@@ -173,13 +175,28 @@ func (r *Runner) AcquireWorkspaceLock() error {
 }
 
 // Run acquires the workspace lock and keeps the runner connected until cancellation.
-func (r *Runner) Run(ctx context.Context) error {
+func (r *Runner) Run(ctx context.Context) (runErr error) {
+	if r == nil || r.service == nil {
+		return pkgerrors.New("runner is not initialized")
+	}
+	ctx = r.loggingContext(ctx)
+	startedAt := time.Now()
+	logger.G(ctx).Info("starting workspace runner")
+	defer func() {
+		log := logger.G(r.loggingContext(ctx)).WithField("duration", time.Since(startedAt))
+		if runErr != nil {
+			log.WithError(runErr).Error("workspace runner stopped with error")
+			return
+		}
+		log.Info("workspace runner stopped")
+	}()
+
 	if err := r.AcquireWorkspaceLock(); err != nil {
 		return err
 	}
 	defer func() {
 		if err := r.Close(); err != nil {
-			logger.G(ctx).WithError(err).Warn("failed to close runner")
+			logger.G(r.loggingContext(ctx)).WithError(err).Warn("failed to close runner")
 		}
 	}()
 
@@ -192,6 +209,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 		return pkgerrors.Wrap(err, "failed to discover initial runner manifest")
 	}
+	logger.G(ctx).WithField("manifest_digest", initialDigest).Debug("discovered initial runner manifest")
 
 	backoff := r.config.ReconnectMin
 	for {
@@ -209,10 +227,17 @@ func (r *Runner) Run(ctx context.Context) error {
 		if isPermanentConnectionError(err) {
 			return err
 		}
+		retryCtx := r.loggingContext(ctx)
+		if connected {
+			retryCtx = r.registrationLoggingContext(retryCtx)
+		}
+		logger.G(retryCtx).
+			WithError(err).
+			WithField("retry_in", backoff).
+			WithField("connection_registered", connected).
+			Warn("runner connection lost; retrying")
 		if r.config.OnRetry != nil {
 			r.config.OnRetry(err, backoff)
-		} else {
-			logger.G(ctx).WithError(err).WithField("retry_in", backoff).Warn("runner connection lost; retrying")
 		}
 		timer := time.NewTimer(backoff)
 		select {
@@ -254,6 +279,8 @@ func (r *Runner) Close() error {
 }
 
 func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool, error) {
+	ctx = r.loggingContext(ctx)
+	logger.G(ctx).Debug("connecting runner to control plane")
 	if _, err := r.refreshStoredCredential(); err != nil {
 		return false, &permanentConnectionError{err: pkgerrors.Wrap(err, "failed to reload enrolled runner credential")}
 	}
@@ -310,7 +337,7 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool,
 	}
 	defer func() {
 		_ = peer.Close()
-		if abortErr := r.service.AbortActiveRun(context.Background()); abortErr != nil {
+		if abortErr := r.service.AbortActiveRun(context.WithoutCancel(ctx)); abortErr != nil {
 			logger.G(ctx).WithError(abortErr).Warn("failed to abort runner environment after disconnect")
 		}
 	}()
@@ -359,13 +386,18 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool,
 	if err := r.lock.WriteMetadata(metadata); err != nil {
 		return connected, err
 	}
-	if r.config.OnRegistered != nil {
-		r.config.OnRegistered(registration)
-	}
 
 	heartbeatInterval := time.Duration(registration.HeartbeatIntervalMS) * time.Millisecond
 	if heartbeatInterval <= 0 {
 		heartbeatInterval = 15 * time.Second
+	}
+	ctx = withRunnerRegistrationLogFields(ctx, registration)
+	logger.G(ctx).WithFields(map[string]any{
+		"heartbeat_interval": heartbeatInterval,
+		"manifest_digest":    initialDigest,
+	}).Info("runner registered with control plane")
+	if r.config.OnRegistered != nil {
+		r.config.OnRegistered(registration)
 	}
 	if err := r.sendHeartbeat(ctx, peer, registration); err != nil {
 		return connected, err
@@ -387,6 +419,7 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool,
 	for {
 		select {
 		case <-ctx.Done():
+			logger.G(ctx).Debug("stopping runner control-plane connection")
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), connectionShutdownPeriod)
 			_ = peer.Notify(shutdownCtx, protocol.MethodRunnerGoodbye, protocol.GoodbyeParams{
 				RunnerID:   registration.RunnerID,
@@ -428,10 +461,65 @@ func (r *Runner) runConnection(ctx context.Context, initialDigest string) (bool,
 				}); err != nil {
 					return connected, err
 				}
+				logger.G(ctx).WithFields(map[string]any{
+					"previous_manifest_digest": lastAdvertisedDigest,
+					"manifest_digest":          result.digest,
+				}).Info("runner manifest changed")
 				lastAdvertisedDigest = result.digest
 			}
 		}
 	}
+}
+
+func (r *Runner) loggingContext(ctx context.Context) context.Context {
+	if r == nil {
+		if ctx == nil {
+			return context.Background()
+		}
+		return ctx
+	}
+	return withRunnerLogFields(ctx, r.server, r.workspace, r.config.DisplayName, r.host)
+}
+
+func (r *Runner) registrationLoggingContext(ctx context.Context) context.Context {
+	ctx = r.loggingContext(ctx)
+	if r.service == nil {
+		return ctx
+	}
+	r.service.mu.Lock()
+	registration := protocol.RegisterResult{
+		RunnerID:   r.service.runnerID,
+		Generation: r.service.generation,
+	}
+	r.service.mu.Unlock()
+	if strings.TrimSpace(registration.RunnerID) == "" || registration.Generation <= 0 {
+		return ctx
+	}
+	return withRunnerRegistrationLogFields(ctx, registration)
+}
+
+func withRunnerLogFields(ctx context.Context, server, workspace, displayName string, host protocol.Host) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	log := logger.G(ctx).WithFields(map[string]any{
+		"server":           server,
+		"workspace":        workspace,
+		"host_instance_id": host.InstanceID,
+		"hostname":         host.Hostname,
+		"pid":              host.PID,
+	})
+	if displayName = strings.TrimSpace(displayName); displayName != "" {
+		log = log.WithField("display_name", displayName)
+	}
+	return logger.WithLogger(ctx, log)
+}
+
+func withRunnerRegistrationLogFields(ctx context.Context, registration protocol.RegisterResult) context.Context {
+	return logger.WithLogger(ctx, logger.G(ctx).WithFields(map[string]any{
+		"runner_id":  strings.TrimSpace(registration.RunnerID),
+		"generation": registration.Generation,
+	}))
 }
 
 func (r *Runner) connectionHeaders() (http.Header, bool, error) {

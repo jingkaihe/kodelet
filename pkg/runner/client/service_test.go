@@ -414,6 +414,62 @@ Review the runner workspace.`), 0o600))
 	assert.Equal(t, manifest.Digest, heartbeatDigest)
 }
 
+func TestServiceEmitsStructuredRunLifecycleLogs(t *testing.T) {
+	logCtx, logOutput := newStructuredRunnerTestLogger(t)
+	workspace := t.TempDir()
+	runtime := extensions.EmptyRuntime()
+	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
+	service, err := NewService(logCtx, workspace, ServiceOptions{
+		RuntimeProvider: staticRuntimeProvider{runtime: runtime},
+		ConfigLoader:    func(string) (llmtypes.Config, error) { return llmtypes.Config{}, nil },
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-logs", Generation: 3}))
+
+	params := protocol.RunOpenParams{
+		RunID:          "run-logs",
+		ConversationID: "conversation-logs",
+		Agent: protocol.AgentDescriptor{
+			Provider:           "openai",
+			Model:              "gpt-test",
+			Profile:            "control-profile",
+			EnvironmentProfile: "runner-profile",
+			InvokedBy:          "subagent",
+		},
+	}
+	value, rpcErr := service.HandleRequest(logCtx, protocol.MethodRunOpen, mustJSON(t, params))
+	require.Nil(t, rpcErr)
+	manifest, ok := value.(runnerpayload.Manifest)
+	require.True(t, ok)
+	require.NotEmpty(t, manifest.Digest)
+	_, rpcErr = service.HandleRequest(logCtx, protocol.MethodRunClose, mustJSON(t, protocol.RunCloseParams{RunID: params.RunID}))
+	require.Nil(t, rpcErr)
+
+	entries := decodeStructuredRunnerLogs(t, logOutput)
+	openingEntry := requireStructuredRunnerLog(t, entries, "opening runner run")
+	assert.Equal(t, workspace, openingEntry["workspace"])
+	assert.Equal(t, "runner-logs", openingEntry["runner_id"])
+	assert.Equal(t, float64(3), openingEntry["generation"])
+	assert.Equal(t, params.RunID, openingEntry["run_id"])
+	assert.Equal(t, params.ConversationID, openingEntry["conversation_id"])
+	assert.Equal(t, params.Agent.Provider, openingEntry["provider"])
+	assert.Equal(t, params.Agent.Model, openingEntry["model"])
+	assert.Equal(t, params.Agent.EnvironmentProfile, openingEntry["environment_profile"])
+	assert.Equal(t, params.Agent.InvokedBy, openingEntry["invoked_by"])
+
+	openedEntry := requireStructuredRunnerLog(t, entries, "runner run opened")
+	assert.Equal(t, manifest.Digest, openedEntry["manifest_digest"])
+	assert.Equal(t, workspace, openedEntry["working_directory"])
+	assert.NotNil(t, openedEntry["duration"])
+
+	closingEntry := requireStructuredRunnerLog(t, entries, "closing runner run")
+	assert.Equal(t, params.RunID, closingEntry["run_id"])
+	closedEntry := requireStructuredRunnerLog(t, entries, "runner run closed")
+	assert.Equal(t, params.ConversationID, closedEntry["conversation_id"])
+	assert.NotNil(t, closedEntry["duration"])
+}
+
 func TestSerializeToolResultCapsRemoteDisplayOutput(t *testing.T) {
 	result := serializeToolResult(
 		tooltypes.BaseToolResult{Result: strings.Repeat("界", maxToolDisplayOutputBytes)},

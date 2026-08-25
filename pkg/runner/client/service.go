@@ -229,7 +229,7 @@ func (s *Service) HandleRequest(ctx context.Context, method string, params json.
 		if rpcErr != nil {
 			return nil, rpcErr
 		}
-		return rpcResult(nil, s.cancelRun(value.RunID))
+		return rpcResult(nil, s.cancelRun(ctx, value.RunID))
 	case protocol.MethodCommandExecute:
 		value, rpcErr := decodeParams[runnerpayload.CommandExecuteParams](params)
 		if rpcErr != nil {
@@ -307,14 +307,35 @@ func (s *Service) HandleNotification(ctx context.Context, method string, params 
 		}
 	}
 	if err != nil {
-		s.reportEnvironmentError(runID, err)
+		s.reportEnvironmentError(ctx, runID, err)
 	}
 }
 
-func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (runnerpayload.Manifest, error) {
+func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (result runnerpayload.Manifest, runErr error) {
 	if err := params.Validate(); err != nil {
 		return runnerpayload.Manifest{}, err
 	}
+	logCtx := s.decorateRunLogContext(ctx, params.RunID, params.ConversationID)
+	startedAt := time.Now()
+	logger.G(logCtx).WithFields(map[string]any{
+		"provider":            params.Agent.Provider,
+		"model":               params.Agent.Model,
+		"profile":             params.Agent.Profile,
+		"environment_profile": params.Agent.EnvironmentProfile,
+		"recipe":              params.Agent.RecipeName,
+		"invoked_by":          firstNonEmpty(params.Agent.InvokedBy, "main"),
+	}).Info("opening runner run")
+	defer func() {
+		log := logger.G(logCtx).WithField("duration", time.Since(startedAt))
+		if runErr != nil {
+			log.WithError(runErr).Warn("failed to open runner run")
+			return
+		}
+		log.WithFields(map[string]any{
+			"manifest_digest":   result.Digest,
+			"working_directory": result.WorkingDirectory,
+		}).Info("runner run opened")
+	}()
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -494,9 +515,10 @@ func (s *Service) failOpen(run *activeRun) {
 	if run == nil {
 		return
 	}
+	logCtx := s.decorateRunLogContext(s.ctx, run.id, run.conversationID)
 	run.cancel()
 	if err := s.releaseRunRuntime(context.Background(), run); err != nil {
-		logger.G(s.ctx).WithError(err).Warn("failed to close runner extension runtime after open failure")
+		logger.G(logCtx).WithError(err).Warn("failed to close runner extension runtime after open failure")
 	}
 	s.mu.Lock()
 	if s.runs[run.id] == run {
@@ -505,14 +527,19 @@ func (s *Service) failOpen(run *activeRun) {
 	s.mu.Unlock()
 }
 
-func (s *Service) cancelRun(runID string) error {
+func (s *Service) cancelRun(ctx context.Context, runID string) error {
 	s.mu.Lock()
 	run, err := s.activeRunLocked(runID)
+	conversationID := ""
 	if err == nil {
+		conversationID = run.conversationID
 		run.stopping = true
 		run.cancel()
 	}
 	s.mu.Unlock()
+	if err == nil {
+		logger.G(s.decorateRunLogContext(ctx, runID, conversationID)).Info("runner run cancellation requested")
+	}
 	return err
 }
 
@@ -532,6 +559,18 @@ func (s *Service) closeActiveRun(ctx context.Context, run *activeRun) error {
 		return nil
 	}
 	run.cleanupOnce.Do(func() {
+		logCtx := s.decorateRunLogContext(ctx, run.id, run.conversationID)
+		startedAt := time.Now()
+		logger.G(logCtx).Info("closing runner run")
+		defer func() {
+			log := logger.G(logCtx).WithField("duration", time.Since(startedAt))
+			if run.cleanupErr != nil {
+				log.WithError(run.cleanupErr).Warn("runner run closed with cleanup errors")
+				return
+			}
+			log.Info("runner run closed")
+		}()
+
 		s.mu.Lock()
 		run.closing = true
 		run.stopping = true
@@ -1007,10 +1046,40 @@ func runOperationContext(ctx context.Context, run *activeRun) (context.Context, 
 }
 
 func (s *Service) decorateRunContext(ctx context.Context, runID, conversationID string) context.Context {
+	ctx = s.decorateRunLogContext(ctx, runID, conversationID)
 	ctx = extensions.ContextWithUIInputBroker(ctx, s)
 	ctx = extensions.ContextWithExtensionUIHost(ctx, s)
 	ctx = extensions.ContextWithExtensionUIScope(ctx, conversationID)
 	return context.WithValue(ctx, runnerRunIDContextKey{}, strings.TrimSpace(runID))
+}
+
+func (s *Service) decorateRunLogContext(ctx context.Context, runID, conversationID string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if s == nil {
+		return ctx
+	}
+	s.mu.Lock()
+	runnerID := s.runnerID
+	generation := s.generation
+	workspace := s.workspace
+	s.mu.Unlock()
+	log := logger.G(ctx).WithFields(map[string]any{
+		"workspace":       workspace,
+		"run_id":          strings.TrimSpace(runID),
+		"conversation_id": strings.TrimSpace(conversationID),
+	})
+	if runnerID = strings.TrimSpace(runnerID); runnerID != "" {
+		log = log.WithField("runner_id", runnerID)
+	}
+	if generation > 0 {
+		log = log.WithField("generation", generation)
+	}
+	if requestID := protocol.RequestIDFromContext(ctx); requestID != "" {
+		log = log.WithField("request_id", requestID)
+	}
+	return logger.WithLogger(ctx, log)
 }
 
 func (s *Service) activeRunLocked(runID string) (*activeRun, error) {
@@ -1031,18 +1100,28 @@ func (s *Service) currentPeer() Peer {
 	return s.peer
 }
 
-func (s *Service) reportEnvironmentError(runID string, err error) {
+func (s *Service) reportEnvironmentError(ctx context.Context, runID string, err error) {
 	if err == nil {
 		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	s.mu.Lock()
 	peer := s.peer
 	run := s.runs[strings.TrimSpace(runID)]
 	s.mu.Unlock()
-	if peer != nil && run != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if run == nil {
+		return
+	}
+	logCtx := s.decorateRunLogContext(ctx, run.id, run.conversationID)
+	logger.G(logCtx).WithError(err).Error("runner environment error")
+	if peer != nil {
+		notifyCtx, cancel := context.WithTimeout(context.WithoutCancel(logCtx), 10*time.Second)
 		defer cancel()
-		_ = peer.Notify(ctx, protocol.MethodRunEnvironmentError, protocol.EnvironmentErrorParams{RunID: run.id, Message: err.Error()})
+		if notifyErr := peer.Notify(notifyCtx, protocol.MethodRunEnvironmentError, protocol.EnvironmentErrorParams{RunID: run.id, Message: err.Error()}); notifyErr != nil {
+			logger.G(logCtx).WithError(notifyErr).Warn("failed to report runner environment error to control plane")
+		}
 	}
 }
 
@@ -1122,7 +1201,11 @@ func (s *Service) Close() error {
 		s.mu.Lock()
 		s.closed = true
 		s.mu.Unlock()
-		activeErr := s.AbortActiveRun(context.Background())
+		cleanupCtx := context.Background()
+		if s.ctx != nil {
+			cleanupCtx = context.WithoutCancel(s.ctx)
+		}
+		activeErr := s.AbortActiveRun(cleanupCtx)
 		if s.ownedRuntime != nil {
 			if err := s.ownedRuntime.Close(); activeErr == nil {
 				activeErr = err

@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -17,12 +18,14 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
+	pkglogger "github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/runner/localstate"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
 	runnerregistry "github.com/jingkaihe/kodelet/pkg/runner/registry"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -799,6 +802,132 @@ func TestRunnerReconnectBackoffResetsAfterSuccessfulRegistration(t *testing.T) {
 	seenProofsMu.Lock()
 	assert.Len(t, seenProofs, int(attempts.Load()))
 	seenProofsMu.Unlock()
+}
+
+func TestRunnerEmitsStructuredLifecycleLogsWhenRetryCallbackIsConfigured(t *testing.T) {
+	logCtx, logOutput := newStructuredRunnerTestLogger(t)
+	workspace := t.TempDir()
+	store, err := localstate.NewStoreAt(t.TempDir())
+	require.NoError(t, err)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(server.Close)
+
+	retried := make(chan struct{}, 1)
+	runner, err := NewRunner(logCtx, RunnerConfig{
+		Server:           server.URL,
+		Workspace:        workspace,
+		Store:            store,
+		ReconnectMin:     time.Hour,
+		ReconnectMax:     time.Hour,
+		ManifestInterval: time.Hour,
+		OnRetry: func(error, time.Duration) {
+			select {
+			case retried <- struct{}{}:
+			default:
+			}
+		},
+	})
+	require.NoError(t, err)
+	runtime := extensions.EmptyRuntime()
+	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
+	runner.service.runtimeProvider = staticRuntimeProvider{runtime: runtime}
+	runner.service.configLoader = func(string) (llmtypes.Config, error) { return llmtypes.Config{}, nil }
+
+	runCtx, cancel := context.WithCancel(logCtx)
+	runDone := make(chan error, 1)
+	go func() { runDone <- runner.Run(runCtx) }()
+	select {
+	case <-retried:
+		cancel()
+	case <-time.After(5 * time.Second):
+		cancel()
+		t.Fatal("runner did not attempt to reconnect")
+	}
+	select {
+	case err = <-runDone:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("runner did not stop after cancellation")
+	}
+
+	entries := decodeStructuredRunnerLogs(t, logOutput)
+	startEntry := requireStructuredRunnerLog(t, entries, "starting workspace runner")
+	assert.Equal(t, server.URL, startEntry["server"])
+	assert.Equal(t, workspace, startEntry["workspace"])
+	assert.Equal(t, runner.host.InstanceID, startEntry["host_instance_id"])
+	assert.Equal(t, runner.host.Hostname, startEntry["hostname"])
+	assert.Equal(t, float64(runner.host.PID), startEntry["pid"])
+
+	retryEntry := requireStructuredRunnerLog(t, entries, "runner connection lost; retrying")
+	assert.Equal(t, server.URL, retryEntry["server"])
+	assert.Equal(t, workspace, retryEntry["workspace"])
+	assert.Equal(t, float64(time.Hour), retryEntry["retry_in"])
+	assert.Equal(t, false, retryEntry["connection_registered"])
+	assert.Contains(t, retryEntry["error"], "failed to connect runner websocket")
+
+	stopEntry := requireStructuredRunnerLog(t, entries, "workspace runner stopped")
+	assert.Equal(t, server.URL, stopEntry["server"])
+	assert.NotNil(t, stopEntry["duration"])
+}
+
+func TestRunnerScopesRegistrationFieldsToRegisteredConnections(t *testing.T) {
+	logCtx, _ := newStructuredRunnerTestLogger(t)
+	store, err := localstate.NewStoreAt(t.TempDir())
+	require.NoError(t, err)
+	runner, err := NewRunner(logCtx, RunnerConfig{
+		Server:    "http://localhost:8080",
+		Workspace: t.TempDir(),
+		Store:     store,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, runner.Close()) })
+	require.NoError(t, runner.service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-current", Generation: 7}))
+
+	baseFields := pkglogger.G(runner.loggingContext(logCtx)).Data
+	assert.NotContains(t, baseFields, "runner_id")
+	assert.NotContains(t, baseFields, "generation")
+
+	registrationFields := pkglogger.G(runner.registrationLoggingContext(logCtx)).Data
+	assert.Equal(t, "runner-current", registrationFields["runner_id"])
+	assert.Equal(t, int64(7), registrationFields["generation"])
+}
+
+func newStructuredRunnerTestLogger(t *testing.T) (context.Context, *bytes.Buffer) {
+	t.Helper()
+	output := &bytes.Buffer{}
+	testLogger := logrus.New()
+	testLogger.SetOutput(output)
+	testLogger.SetLevel(logrus.DebugLevel)
+	pkglogger.SetLogFormatForLogger(testLogger, "json")
+	return pkglogger.WithLogger(t.Context(), logrus.NewEntry(testLogger)), output
+}
+
+func decodeStructuredRunnerLogs(t *testing.T, output *bytes.Buffer) []map[string]any {
+	t.Helper()
+	lines := strings.Split(strings.TrimSpace(output.String()), "\n")
+	entries := make([]map[string]any, 0, len(lines))
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var entry map[string]any
+		require.NoError(t, json.Unmarshal([]byte(line), &entry))
+		entries = append(entries, entry)
+	}
+	return entries
+}
+
+func requireStructuredRunnerLog(t *testing.T, entries []map[string]any, message string) map[string]any {
+	t.Helper()
+	for _, entry := range entries {
+		if entry["message"] == message {
+			return entry
+		}
+	}
+	t.Fatalf("structured log %q not found in %#v", message, entries)
+	return nil
 }
 
 func verifyRunnerDPoPRequest(t *testing.T, request *http.Request, credential localstate.Credential) protocol.VerifiedDPoPProof {
