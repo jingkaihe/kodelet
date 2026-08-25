@@ -1,4 +1,4 @@
-package webui
+package controlplane
 
 import (
 	"encoding/json"
@@ -116,7 +116,7 @@ func (s *Server) handleUserLoginVerificationPage(w http.ResponseWriter, r *http.
 		s.writeAuthError(w, r, http.StatusForbidden, "an active OIDC web session is required")
 		return
 	}
-	s.handleReactSPA(w, r)
+	s.serveFrontend(w, r)
 }
 
 func (s *Server) handleUserLoginContext(w http.ResponseWriter, r *http.Request) {

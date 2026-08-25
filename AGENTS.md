@@ -9,13 +9,14 @@ cmd/kodelet/     # CLI commands
 pkg/             # Core packages
   ├── auth/      # Authentication
   ├── binaries/  # External binary management (ripgrep, fd)
+  ├── controlplane/  # Central HTTP API, auth, chat, and runner coordination
   ├── conversations/  # Conversation storage (SQLite)
   ├── fragments/ # Fragment/recipe templates
   ├── llm/       # LLM clients (anthropic/, openai/)
   ├── plugins/   # Unified plugin system
   ├── skills/    # Agentic skills system
   ├── tools/     # Tool implementations
-  ├── webui/     # Web UI (React/TypeScript SPA embedded in binary)
+  ├── webui/     # Embedded React/TypeScript SPA and HTTP handler
   └── ...        # logger/, presenter/, sysprompt/, telemetry/, types/, utils/
 docs/            # Documentation (MANUAL.md, DEVELOPMENT.md, SKILLS.md, etc.)
 skills/          # Built-in skills

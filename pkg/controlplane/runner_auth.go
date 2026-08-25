@@ -1,4 +1,4 @@
-package webui
+package controlplane
 
 import (
 	"context"
@@ -206,7 +206,7 @@ func (s *Server) handleRunnerEnrollmentPage(w http.ResponseWriter, r *http.Reque
 		s.writeAuthError(w, r, http.StatusUnauthorized, "authentication required")
 		return
 	}
-	s.handleReactSPA(w, r)
+	s.serveFrontend(w, r)
 }
 
 func (s *Server) handleRunnerEnrollmentContext(w http.ResponseWriter, r *http.Request) {

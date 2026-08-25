@@ -200,6 +200,7 @@ mise run frontend-storybook-build
 ├── docs/                # Documentation files
 ├── pkg/                 # Core packages
 │   ├── conversations/   # Conversation storage and management
+│   ├── controlplane/    # Central HTTP API, auth, chat, and runner coordination
 │   ├── llm/             # LLM client for AI interactions
 │   │   ├── anthropic/   # Anthropic Claude API client
 │   │   └── openai/      # OpenAI API client
@@ -210,7 +211,7 @@ mise run frontend-storybook-build
 │   ├── tui/             # Terminal UI components
 │   ├── types/           # Common types
 │   ├── utils/           # Utility functions
-│   └── webui/           # Web UI server and React frontend
+│   └── webui/           # Embedded React frontend and SPA handler
 │       ├── frontend/    # React/TypeScript SPA with Vite build
 │       └── dist/        # Built frontend assets (embedded in binary)
 ├── scripts/             # Build and release automation scripts

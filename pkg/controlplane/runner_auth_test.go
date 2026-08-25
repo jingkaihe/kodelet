@@ -1,4 +1,4 @@
-package webui
+package controlplane
 
 import (
 	"context"
@@ -184,7 +184,8 @@ func TestRunnerEnrollmentPageServesSPAAndDecisionAPIRequiresManualCodeEntry(t *t
 			AuthToken:      "web-token",
 			RunnerAuthMode: RunnerAuthModeEnrollment,
 		},
-		authStore: store,
+		authStore:       store,
+		frontendHandler: testFrontendHandler(),
 	}
 	server.setupRoutes()
 	principal := administrativePrincipal("manual-entry-test")

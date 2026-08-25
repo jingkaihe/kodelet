@@ -1,4 +1,4 @@
-package webui
+package controlplane
 
 import (
 	"context"
@@ -780,7 +780,7 @@ func TestCommitRunnerAffinityOnlyReleasesPendingBindingWhenConversationIsMissing
 	assert.False(t, found)
 }
 
-func TestWebUIChatRunnerResolvesAffinityBeforeChatValidation(t *testing.T) {
+func TestServerChatRunnerResolvesAffinityBeforeChatValidation(t *testing.T) {
 	server := newRunnerTestServer(t, "")
 	registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
 		ProtocolVersions: []int{protocol.Version},
@@ -791,7 +791,7 @@ func TestWebUIChatRunnerResolvesAffinityBeforeChatValidation(t *testing.T) {
 	require.NoError(t, server.runnerRegistry.BindConversationWithEnvironmentProfile(t.Context(), "conversation-chat", registration.RunnerID, "gpu"))
 
 	defaultRunner := NewDefaultChatRunner("")
-	runner := &webUIChatRunner{runner: defaultRunner, server: server}
+	runner := &serverChatRunner{runner: defaultRunner, server: server}
 	defaultRunner.SetEnvironmentResolver(runner)
 	server.config.DisableControlPlaneWorkspace = true
 	active := newActiveChatRun(func() {})
@@ -820,7 +820,7 @@ func TestWebUIChatRunnerResolvesAffinityBeforeChatValidation(t *testing.T) {
 	require.ErrorContains(t, err, "control-plane workspace is disabled; select a workspace runner")
 	assert.Equal(t, "local-conversation", conversationID)
 
-	var nilRunner *webUIChatRunner
+	var nilRunner *serverChatRunner
 	conversationID, err = nilRunner.Run(t.Context(), ChatRequest{ConversationID: "local-conversation", Message: " "}, &recordingChatSink{})
 	require.ErrorContains(t, err, "message cannot be empty")
 	assert.Equal(t, "local-conversation", conversationID)
@@ -830,10 +830,10 @@ func TestWebUIChatRunnerResolvesAffinityBeforeChatValidation(t *testing.T) {
 	require.NoError(t, runner.CloseConversation("conversation-chat"))
 	require.NoError(t, runner.Close())
 	require.NoError(t, runner.Close())
-	require.NoError(t, (*webUIChatRunner)(nil).CloseConversation("conversation-chat"))
+	require.NoError(t, (*serverChatRunner)(nil).CloseConversation("conversation-chat"))
 }
 
-func TestWebUIChatRunnerRejectsExistingLocalConversationRunnerMigration(t *testing.T) {
+func TestServerChatRunnerRejectsExistingLocalConversationRunnerMigration(t *testing.T) {
 	server := newRunnerTestServer(t, "")
 	server.config.DisableControlPlaneWorkspace = true
 	registration, err := server.runnerRegistry.Register(protocol.RegisterParams{
@@ -854,7 +854,7 @@ func TestWebUIChatRunnerRejectsExistingLocalConversationRunnerMigration(t *testi
 			return nil, errors.Errorf("unexpected conversation lookup %q", id)
 		}
 	}}
-	runner := &webUIChatRunner{server: server}
+	runner := &serverChatRunner{server: server}
 
 	conversationID, err := runner.Run(t.Context(), ChatRequest{
 		ConversationID: "local-conversation",
@@ -883,8 +883,8 @@ func TestWebUIChatRunnerRejectsExistingLocalConversationRunnerMigration(t *testi
 	assert.Equal(t, "remote-conversation", conversationID)
 }
 
-func TestWebUIChatRunnerResolveEnvironmentValidatesRunnerState(t *testing.T) {
-	runner := &webUIChatRunner{}
+func TestServerChatRunnerResolveEnvironmentValidatesRunnerState(t *testing.T) {
+	runner := &serverChatRunner{}
 	_, err := runner.ResolveEnvironment(t.Context(), ChatRequest{}, "conversation", llmtypes.Config{}, "")
 	require.ErrorContains(t, err, "runner id is required")
 	_, err = runner.ResolveEnvironment(t.Context(), ChatRequest{RunnerID: "runner"}, "conversation", llmtypes.Config{}, "")

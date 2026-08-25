@@ -100,7 +100,7 @@ describe('ChatTranscript', () => {
               {
                 type: 'message',
                 content:
-                  'Run `go test ./pkg/webui -run TestServer_convertToWebMessages -count=1` and inspect `pkg/webui/server.go`.',
+                  'Run `go test ./pkg/controlplane -run TestServer_convertToWebMessages -count=1` and inspect `pkg/controlplane/server.go`.',
               },
             ],
           },
@@ -114,9 +114,9 @@ describe('ChatTranscript', () => {
     expect(paragraph).toBeInTheDocument();
     expect(codeSpans).toHaveLength(2);
     expect(codeSpans[0]?.textContent).toBe(
-      'go test ./pkg/webui -run TestServer_convertToWebMessages -count=1'
+      'go test ./pkg/controlplane -run TestServer_convertToWebMessages -count=1'
     );
-    expect(codeSpans[1]?.textContent).toBe('pkg/webui/server.go');
+    expect(codeSpans[1]?.textContent).toBe('pkg/controlplane/server.go');
     expect(container.querySelector('.chat-prose pre')).toBeNull();
   });
 

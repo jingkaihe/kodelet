@@ -1,4 +1,4 @@
-package webui
+package controlplane
 
 import (
 	"context"
@@ -285,6 +285,19 @@ func TestOIDCConfigValidateIssuerURL(t *testing.T) {
 			require.ErrorContains(t, err, test.wantError)
 		})
 	}
+}
+
+func TestOIDCConfigValidateRedirectPathWithCustomFlow(t *testing.T) {
+	config := OIDCConfig{
+		Flow:         testOIDCFlow{},
+		RedirectURL:  "https://kodelet.example/different/callback",
+		AllowAnyUser: true,
+	}
+
+	require.ErrorContains(t, config.Validate(), "OIDC redirect URL path must be "+OIDCCallbackPath)
+
+	config.RedirectURL = "https://kodelet.example" + OIDCCallbackPath + "?tenant=one"
+	require.NoError(t, config.Validate())
 }
 
 func TestOIDCConfigPrincipalAccessRules(t *testing.T) {
@@ -628,7 +641,7 @@ func TestOIDCLoginCallbackCreatesAuthenticatedSession(t *testing.T) {
 	server.handleOIDCLogin(loginResponse, loginRequest)
 	require.Equal(t, http.StatusFound, loginResponse.Code)
 	stateCookie := responseCookie(t, loginResponse.Result().Cookies(), oidcStateCookieName)
-	assert.Equal(t, oidcCallbackPath, stateCookie.Path)
+	assert.Equal(t, OIDCCallbackPath, stateCookie.Path)
 	assert.True(t, stateCookie.HttpOnly)
 	assert.Equal(t, flow.state, stateCookie.Value)
 	assert.NotEmpty(t, flow.nonce)
@@ -637,7 +650,7 @@ func TestOIDCLoginCallbackCreatesAuthenticatedSession(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, flow.state, authorizationURL.Query().Get("state"))
 
-	callbackRequest := httptest.NewRequest(http.MethodGet, oidcCallbackPath+"?state="+url.QueryEscape(flow.state)+"&code=authorization-code", nil)
+	callbackRequest := httptest.NewRequest(http.MethodGet, OIDCCallbackPath+"?state="+url.QueryEscape(flow.state)+"&code=authorization-code", nil)
 	callbackRequest.AddCookie(stateCookie)
 	callbackResponse := httptest.NewRecorder()
 	server.handleOIDCCallback(callbackResponse, callbackRequest)
@@ -704,7 +717,7 @@ func TestLogoutInvalidatesSessionAndStopsOnPublicSignedOutPage(t *testing.T) {
 
 	signedOutRequest := httptest.NewRequest(http.MethodGet, signedOutPath, nil)
 	signedOutResponse := httptest.NewRecorder()
-	server.authMiddleware(http.HandlerFunc(server.handleReactSPA)).ServeHTTP(signedOutResponse, signedOutRequest)
+	server.authMiddleware(testFrontendHandler()).ServeHTTP(signedOutResponse, signedOutRequest)
 
 	assert.Equal(t, http.StatusOK, signedOutResponse.Code)
 	assert.Empty(t, signedOutResponse.Header().Get("Location"))

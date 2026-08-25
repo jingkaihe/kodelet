@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jingkaihe/kodelet/pkg/webui"
+	"github.com/jingkaihe/kodelet/pkg/controlplane"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -224,15 +224,15 @@ func TestResolveServeAuthModes(t *testing.T) {
 	tests := []struct {
 		name               string
 		config             *ServeConfig
-		expectedWebMode    webui.WebAuthMode
-		expectedRunnerMode webui.RunnerAuthMode
+		expectedWebMode    controlplane.WebAuthMode
+		expectedRunnerMode controlplane.RunnerAuthMode
 		expectedError      string
 	}{
 		{
 			name:               "legacy defaults",
 			config:             NewServeConfig(),
-			expectedWebMode:    webui.WebAuthModeToken,
-			expectedRunnerMode: webui.RunnerAuthModeToken,
+			expectedWebMode:    controlplane.WebAuthModeToken,
+			expectedRunnerMode: controlplane.RunnerAuthModeToken,
 		},
 		{
 			name: "explicit modes are normalized",
@@ -240,31 +240,31 @@ func TestResolveServeAuthModes(t *testing.T) {
 				WebAuthMode:    " OIDC ",
 				RunnerAuthMode: " Enrollment ",
 			},
-			expectedWebMode:    webui.WebAuthModeOIDC,
-			expectedRunnerMode: webui.RunnerAuthModeEnrollment,
+			expectedWebMode:    controlplane.WebAuthModeOIDC,
+			expectedRunnerMode: controlplane.RunnerAuthModeEnrollment,
 		},
 		{
 			name: "skip auth resolves both modes to none",
 			config: &ServeConfig{
 				SkipAuth: true,
 			},
-			expectedWebMode:    webui.WebAuthModeNone,
-			expectedRunnerMode: webui.RunnerAuthModeNone,
+			expectedWebMode:    controlplane.WebAuthModeNone,
+			expectedRunnerMode: controlplane.RunnerAuthModeNone,
 		},
 		{
 			name: "skip auth permits explicit none modes",
 			config: &ServeConfig{
-				WebAuthMode:    webui.WebAuthModeNone,
-				RunnerAuthMode: webui.RunnerAuthModeNone,
+				WebAuthMode:    controlplane.WebAuthModeNone,
+				RunnerAuthMode: controlplane.RunnerAuthModeNone,
 				SkipAuth:       true,
 			},
-			expectedWebMode:    webui.WebAuthModeNone,
-			expectedRunnerMode: webui.RunnerAuthModeNone,
+			expectedWebMode:    controlplane.WebAuthModeNone,
+			expectedRunnerMode: controlplane.RunnerAuthModeNone,
 		},
 		{
 			name: "skip auth conflicts with web mode",
 			config: &ServeConfig{
-				WebAuthMode: webui.WebAuthModeOIDC,
+				WebAuthMode: controlplane.WebAuthModeOIDC,
 				SkipAuth:    true,
 			},
 			expectedError: "disabled authentication conflicts with a non-none web authentication mode",
@@ -272,7 +272,7 @@ func TestResolveServeAuthModes(t *testing.T) {
 		{
 			name: "skip auth conflicts with runner mode",
 			config: &ServeConfig{
-				RunnerAuthMode: webui.RunnerAuthModeEnrollment,
+				RunnerAuthMode: controlplane.RunnerAuthModeEnrollment,
 				SkipAuth:       true,
 			},
 			expectedError: "disabled authentication conflicts with a non-none runner authentication mode",
@@ -332,7 +332,7 @@ func TestValidateServeAuthConfig(t *testing.T) {
 		{
 			name: "web token conflicts with none mode",
 			configure: func(config *ServeConfig) {
-				config.WebAuthMode = webui.WebAuthModeNone
+				config.WebAuthMode = controlplane.WebAuthModeNone
 				config.AuthToken = "web-token"
 			},
 			expectedError: "web auth token cannot be used when web authentication mode is none",
@@ -340,7 +340,7 @@ func TestValidateServeAuthConfig(t *testing.T) {
 		{
 			name: "runner token conflicts with none mode",
 			configure: func(config *ServeConfig) {
-				config.RunnerAuthMode = webui.RunnerAuthModeNone
+				config.RunnerAuthMode = controlplane.RunnerAuthModeNone
 				config.RunnerAuthToken = "runner-token"
 			},
 			expectedError: "runner auth token cannot be used when runner authentication mode is none",
@@ -348,7 +348,7 @@ func TestValidateServeAuthConfig(t *testing.T) {
 		{
 			name: "runner token requires token accepting mode",
 			configure: func(config *ServeConfig) {
-				config.RunnerAuthMode = webui.RunnerAuthModeEnrollment
+				config.RunnerAuthMode = controlplane.RunnerAuthModeEnrollment
 				config.RunnerAuthToken = "runner-token"
 			},
 			expectedError: "runner auth token requires runner authentication mode token",
@@ -356,15 +356,15 @@ func TestValidateServeAuthConfig(t *testing.T) {
 		{
 			name: "enrollment requires web authentication",
 			configure: func(config *ServeConfig) {
-				config.WebAuthMode = webui.WebAuthModeNone
-				config.RunnerAuthMode = webui.RunnerAuthModeEnrollment
+				config.WebAuthMode = controlplane.WebAuthModeNone
+				config.RunnerAuthMode = controlplane.RunnerAuthModeEnrollment
 			},
 			expectedError: "runner enrollment requires web authentication",
 		},
 		{
 			name: "OIDC requires secret file",
 			configure: func(config *ServeConfig) {
-				config.WebAuthMode = webui.WebAuthModeOIDC
+				config.WebAuthMode = controlplane.WebAuthModeOIDC
 			},
 			expectedError: "OIDC client secret file is required",
 		},
@@ -404,7 +404,7 @@ func TestValidateServeAuthConfig(t *testing.T) {
 			name: "OIDC enrollment requires an approver",
 			configure: func(config *ServeConfig) {
 				configureValidOIDC(config, writeOIDCSecretFile(t, "secret"))
-				config.RunnerAuthMode = webui.RunnerAuthModeEnrollment
+				config.RunnerAuthMode = controlplane.RunnerAuthModeEnrollment
 				config.OIDC.RunnerAdminEmails = nil
 			},
 			expectedError: "requires a runner-admin/admin email",
@@ -423,13 +423,13 @@ func TestValidateServeAuthConfig(t *testing.T) {
 	}
 }
 
-func TestBuildWebUIServerConfigAuthResolution(t *testing.T) {
+func TestBuildControlPlaneServerConfigAuthResolution(t *testing.T) {
 	t.Run("legacy defaults generate separate tokens", func(t *testing.T) {
-		serverConfig, err := buildWebUIServerConfig(NewServeConfig())
+		serverConfig, err := buildControlPlaneServerConfig(NewServeConfig())
 		require.NoError(t, err)
 
-		assert.Equal(t, webui.WebAuthModeToken, serverConfig.WebAuthMode)
-		assert.Equal(t, webui.RunnerAuthModeToken, serverConfig.RunnerAuthMode)
+		assert.Equal(t, controlplane.WebAuthModeToken, serverConfig.WebAuthMode)
+		assert.Equal(t, controlplane.RunnerAuthModeToken, serverConfig.RunnerAuthMode)
 		assert.NotEmpty(t, serverConfig.AuthToken)
 		assert.NotEmpty(t, serverConfig.RunnerAuthToken)
 		assert.NotEqual(t, serverConfig.AuthToken, serverConfig.RunnerAuthToken)
@@ -438,10 +438,10 @@ func TestBuildWebUIServerConfigAuthResolution(t *testing.T) {
 	t.Run("OIDC does not generate a web token", func(t *testing.T) {
 		config := newValidOIDCServeConfig(t)
 
-		serverConfig, err := buildWebUIServerConfig(config)
+		serverConfig, err := buildControlPlaneServerConfig(config)
 		require.NoError(t, err)
 
-		assert.Equal(t, webui.WebAuthModeOIDC, serverConfig.WebAuthMode)
+		assert.Equal(t, controlplane.WebAuthModeOIDC, serverConfig.WebAuthMode)
 		assert.Empty(t, serverConfig.AuthToken)
 		assert.Equal(t, "client-secret", serverConfig.OIDC.ClientSecret)
 	})
@@ -450,7 +450,7 @@ func TestBuildWebUIServerConfigAuthResolution(t *testing.T) {
 		config := newValidOIDCServeConfig(t)
 		config.AuthToken = "compat-admin-token"
 
-		serverConfig, err := buildWebUIServerConfig(config)
+		serverConfig, err := buildControlPlaneServerConfig(config)
 		require.NoError(t, err)
 
 		assert.Equal(t, "compat-admin-token", serverConfig.AuthToken)
@@ -458,14 +458,14 @@ func TestBuildWebUIServerConfigAuthResolution(t *testing.T) {
 
 	t.Run("enrollment does not generate a runner token", func(t *testing.T) {
 		config := NewServeConfig()
-		config.RunnerAuthMode = webui.RunnerAuthModeEnrollment
+		config.RunnerAuthMode = controlplane.RunnerAuthModeEnrollment
 
-		serverConfig, err := buildWebUIServerConfig(config)
+		serverConfig, err := buildControlPlaneServerConfig(config)
 		require.NoError(t, err)
 
-		assert.Equal(t, webui.WebAuthModeToken, serverConfig.WebAuthMode)
+		assert.Equal(t, controlplane.WebAuthModeToken, serverConfig.WebAuthMode)
 		assert.NotEmpty(t, serverConfig.AuthToken)
-		assert.Equal(t, webui.RunnerAuthModeEnrollment, serverConfig.RunnerAuthMode)
+		assert.Equal(t, controlplane.RunnerAuthModeEnrollment, serverConfig.RunnerAuthMode)
 		assert.Empty(t, serverConfig.RunnerAuthToken)
 	})
 
@@ -473,11 +473,11 @@ func TestBuildWebUIServerConfigAuthResolution(t *testing.T) {
 		config := NewServeConfig()
 		config.SkipAuth = true
 
-		serverConfig, err := buildWebUIServerConfig(config)
+		serverConfig, err := buildControlPlaneServerConfig(config)
 		require.NoError(t, err)
 
-		assert.Equal(t, webui.WebAuthModeNone, serverConfig.WebAuthMode)
-		assert.Equal(t, webui.RunnerAuthModeNone, serverConfig.RunnerAuthMode)
+		assert.Equal(t, controlplane.WebAuthModeNone, serverConfig.WebAuthMode)
+		assert.Equal(t, controlplane.RunnerAuthModeNone, serverConfig.RunnerAuthMode)
 		assert.Empty(t, serverConfig.AuthToken)
 		assert.Empty(t, serverConfig.RunnerAuthToken)
 	})
@@ -486,7 +486,7 @@ func TestBuildWebUIServerConfigAuthResolution(t *testing.T) {
 		config := NewServeConfig()
 		config.DisableControlPlaneWorkspace = true
 
-		serverConfig, err := buildWebUIServerConfig(config)
+		serverConfig, err := buildControlPlaneServerConfig(config)
 		require.NoError(t, err)
 
 		assert.True(t, serverConfig.DisableControlPlaneWorkspace)
@@ -596,8 +596,8 @@ func TestGetServeConfigFromFlags_UsesTrustedYAMLSettings(t *testing.T) {
 	assert.Equal(t, "127.0.0.1", config.Host)
 	assert.Equal(t, 8443, config.Port)
 	assert.Equal(t, "/srv/kodelet", config.CWD)
-	assert.Equal(t, webui.WebAuthModeOIDC, config.WebAuthMode)
-	assert.Equal(t, webui.RunnerAuthModeEnrollment, config.RunnerAuthMode)
+	assert.Equal(t, controlplane.WebAuthModeOIDC, config.WebAuthMode)
+	assert.Equal(t, controlplane.RunnerAuthModeEnrollment, config.RunnerAuthMode)
 	assert.Equal(t, "compat-token", config.AuthToken)
 	assert.Empty(t, config.RunnerAuthToken)
 	assert.False(t, config.DisableControlPlaneWorkspace)
@@ -633,8 +633,8 @@ func TestGetServeConfigFromFlags_DoesNotUseServeEnvironmentVariables(t *testing.
 	config := getServeConfigFromFlags(newServeCommandForTest())
 
 	require.NoError(t, config.ConfigError)
-	assert.Equal(t, webui.WebAuthModeToken, config.WebAuthMode)
-	assert.Equal(t, webui.RunnerAuthModeToken, config.RunnerAuthMode)
+	assert.Equal(t, controlplane.WebAuthModeToken, config.WebAuthMode)
+	assert.Equal(t, controlplane.RunnerAuthModeToken, config.RunnerAuthMode)
 	assert.False(t, config.SkipAuth)
 	assert.Equal(t, "https://issuer.example.com", config.OIDC.IssuerURL)
 }
@@ -665,8 +665,8 @@ func TestGetServeConfigFromFlags_ExplicitFlagsOverrideTrustedYAML(t *testing.T) 
 	config := getServeConfigFromFlags(cmd)
 	require.NoError(t, config.ConfigError)
 	assert.Equal(t, "0.0.0.0", config.Host)
-	assert.Equal(t, webui.WebAuthModeOIDC, config.WebAuthMode)
-	assert.Equal(t, webui.RunnerAuthModeNone, config.RunnerAuthMode)
+	assert.Equal(t, controlplane.WebAuthModeOIDC, config.WebAuthMode)
+	assert.Equal(t, controlplane.RunnerAuthModeNone, config.RunnerAuthMode)
 	assert.Equal(t, "flag-token", config.AuthToken)
 	assert.False(t, config.DisableControlPlaneWorkspace)
 	assert.Equal(t, "https://flag-issuer.example.com", config.OIDC.IssuerURL)
@@ -767,8 +767,8 @@ func TestGetServeConfigFromFlags_ParsesAuthenticationFlags(t *testing.T) {
 	}))
 
 	config := getServeConfigFromFlags(cmd)
-	assert.Equal(t, webui.WebAuthModeOIDC, config.WebAuthMode)
-	assert.Equal(t, webui.RunnerAuthModeEnrollment, config.RunnerAuthMode)
+	assert.Equal(t, controlplane.WebAuthModeOIDC, config.WebAuthMode)
+	assert.Equal(t, controlplane.RunnerAuthModeEnrollment, config.RunnerAuthMode)
 	assert.Equal(t, "compat-token", config.AuthToken)
 	assert.Empty(t, config.RunnerAuthToken)
 	assert.Equal(t, "https://issuer.example.com", config.OIDC.IssuerURL)
@@ -816,8 +816,8 @@ func newValidOIDCServeConfig(t *testing.T) *ServeConfig {
 }
 
 func configureValidOIDC(config *ServeConfig, clientSecretFile string) {
-	config.WebAuthMode = webui.WebAuthModeOIDC
-	config.RunnerAuthMode = webui.RunnerAuthModeNone
+	config.WebAuthMode = controlplane.WebAuthModeOIDC
+	config.RunnerAuthMode = controlplane.RunnerAuthModeNone
 	config.OIDCClientSecretFile = clientSecretFile
 	config.OIDC.IssuerURL = "https://issuer.example.com"
 	config.OIDC.ClientID = "kodelet"

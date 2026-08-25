@@ -1,4 +1,4 @@
-package webui
+package controlplane
 
 import (
 	"bufio"
@@ -111,6 +111,27 @@ func (r *cancellationCheckingChatRunner) Close() error {
 		return errors.New("chat runner closed before run context was canceled")
 	}
 	return nil
+}
+
+type testFrontend struct{}
+
+func (testFrontend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	_, _ = w.Write([]byte("<html><body><div id=\"root\"></div></body></html>"))
+}
+
+func (testFrontend) IsPublicPath(path string) bool {
+	return strings.HasPrefix(path, "/assets/") || path == "/favicon.ico"
+}
+
+func testFrontendHandler() FrontendHandler {
+	return testFrontend{}
 }
 
 func (m *mockConversationService) GetToolResult(ctx context.Context, conversationID, toolCallID string) (*conversations.GetToolResultResponse, error) {
@@ -430,7 +451,7 @@ func TestNewServerInitializesRoutesAndNormalizesConfig(t *testing.T) {
 		CORSOrigins:     []string{"https://Example.com"},
 	}
 
-	server, err := NewServer(context.Background(), config)
+	server, err := NewServer(context.Background(), config, testFrontendHandler())
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, server.Stop()) })
 
@@ -443,15 +464,88 @@ func TestNewServerInitializesRoutesAndNormalizesConfig(t *testing.T) {
 	assert.Equal(t, []string{"https://example.com"}, config.CORSOrigins)
 
 	req := httptest.NewRequest("GET", "/", nil)
+	req.AddCookie(&http.Cookie{Name: webUIAuthCookieName, Value: "token"})
 	w := httptest.NewRecorder()
-	server.handleReactSPA(w, req)
+	server.router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "text/html; charset=utf-8", w.Header().Get("Content-Type"))
 	assert.Contains(t, w.Body.String(), "<html")
 }
 
-func TestReactSPACanonicalizesAuthApprovalPaths(t *testing.T) {
-	server := &Server{}
+func TestServerWithoutFrontendUsesMiddlewareAndUnavailableFallback(t *testing.T) {
+	server := &Server{
+		router: mux.NewRouter(),
+		config: &ServerConfig{WebAuthMode: WebAuthModeNone},
+	}
+	server.setupRoutes()
+
+	t.Run("read returns not found", func(t *testing.T) {
+		request := httptest.NewRequest(http.MethodGet, "/", nil)
+		response := httptest.NewRecorder()
+		server.router.ServeHTTP(response, request)
+
+		assert.Equal(t, http.StatusNotFound, response.Code)
+	})
+
+	t.Run("write preserves frontend method contract", func(t *testing.T) {
+		request := httptest.NewRequest(http.MethodPost, "/AUTH/DEVICE/", nil)
+		response := httptest.NewRecorder()
+		server.router.ServeHTTP(response, request)
+
+		assert.Equal(t, http.StatusMethodNotAllowed, response.Code)
+		assert.Equal(t, "GET, HEAD", response.Header().Get("Allow"))
+	})
+
+	t.Run("preflight still reaches CORS middleware", func(t *testing.T) {
+		request := httptest.NewRequest(http.MethodOptions, "/api/chat", nil)
+		response := httptest.NewRecorder()
+		server.router.ServeHTTP(response, request)
+
+		assert.Equal(t, http.StatusOK, response.Code)
+	})
+}
+
+func TestNewServerRequiresFrontendForBrowserApprovalFlows(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		config *ServerConfig
+	}{
+		{
+			name: "OIDC",
+			config: &ServerConfig{
+				Host:         "localhost",
+				Port:         8080,
+				CompactRatio: 0.8,
+				WebAuthMode:  WebAuthModeOIDC,
+				OIDC: OIDCConfig{
+					AllowAnyUser: true,
+					Flow:         testOIDCFlow{},
+				},
+			},
+		},
+		{
+			name: "runner enrollment",
+			config: &ServerConfig{
+				Host:           "localhost",
+				Port:           8080,
+				CompactRatio:   0.8,
+				WebAuthMode:    WebAuthModeToken,
+				AuthToken:      "web-token",
+				RunnerAuthMode: RunnerAuthModeEnrollment,
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server, err := NewServer(t.Context(), test.config, nil)
+
+			require.ErrorContains(t, err, "frontend handler is required")
+			assert.Nil(t, server)
+		})
+	}
+}
+
+func TestFrontendCanonicalizesAuthApprovalPaths(t *testing.T) {
+	server := &Server{frontendHandler: testFrontendHandler()}
 	for _, test := range []struct {
 		path     string
 		location string
@@ -463,7 +557,7 @@ func TestReactSPACanonicalizesAuthApprovalPaths(t *testing.T) {
 			request := httptest.NewRequest(http.MethodGet, test.path, nil)
 			response := httptest.NewRecorder()
 
-			server.handleReactSPA(response, request)
+			server.serveFrontend(response, request)
 
 			assert.Equal(t, http.StatusPermanentRedirect, response.Code)
 			assert.Equal(t, test.location, response.Header().Get("Location"))
@@ -680,12 +774,13 @@ func TestAuthHelpersAdditionalBranches(t *testing.T) {
 	assert.Equal(t, "raw-value", authHeaderToken(" raw-value "))
 	assert.Empty(t, authHeaderToken("   "))
 
-	assert.False(t, shouldRedirectTokenRequest(httptest.NewRequest("POST", "/app?token=x", nil)))
+	server := &Server{frontendHandler: testFrontendHandler()}
+	assert.False(t, server.shouldRedirectTokenRequest(httptest.NewRequest("POST", "/app?token=x", nil)))
 	wsReq := httptest.NewRequest("GET", "/app?token=x", nil)
 	wsReq.Header.Set("Upgrade", "websocket")
-	assert.False(t, shouldRedirectTokenRequest(wsReq))
-	assert.False(t, shouldRedirectTokenRequest(httptest.NewRequest("GET", "/api/chat?token=x", nil)))
-	assert.False(t, shouldRedirectTokenRequest(httptest.NewRequest("GET", "/assets/main.js?token=x", nil)))
+	assert.False(t, server.shouldRedirectTokenRequest(wsReq))
+	assert.False(t, server.shouldRedirectTokenRequest(httptest.NewRequest("GET", "/api/chat?token=x", nil)))
+	assert.False(t, server.shouldRedirectTokenRequest(httptest.NewRequest("GET", "/assets/main.js?token=x", nil)))
 
 	req = httptest.NewRequest("GET", "/?token=x", nil)
 	assert.Equal(t, "/", tokenlessURL(req))

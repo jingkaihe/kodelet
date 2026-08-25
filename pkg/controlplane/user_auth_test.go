@@ -1,4 +1,4 @@
-package webui
+package controlplane
 
 import (
 	"bytes"
@@ -398,9 +398,10 @@ func TestUserCredentialMiddlewareVerificationAndSelfRevocation(t *testing.T) {
 
 func newUserAuthRouteServer(config *ServerConfig, store *authStore) *Server {
 	server := &Server{
-		router:    mux.NewRouter(),
-		config:    config,
-		authStore: store,
+		router:          mux.NewRouter(),
+		config:          config,
+		authStore:       store,
+		frontendHandler: testFrontendHandler(),
 	}
 	server.setupRoutes()
 	return server

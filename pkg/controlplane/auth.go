@@ -1,4 +1,4 @@
-package webui
+package controlplane
 
 import (
 	"context"
@@ -25,9 +25,11 @@ const (
 	webCSRFCookieName    = "kodelet_csrf"
 	webCSRFHeaderName    = "X-CSRF-Token"
 	oidcStateCookieName  = "kodelet_oidc_state"
-	oidcCallbackPath     = "/auth/oidc/callback"
 	signedOutPath        = "/auth/signed-out"
 )
+
+// OIDCCallbackPath is the control-plane route used for OIDC authorization callbacks.
+const OIDCCallbackPath = "/auth/oidc/callback"
 
 // WebAuthMode selects the authentication mechanism for browser and control-plane API requests.
 type WebAuthMode string
@@ -250,12 +252,17 @@ func (c OIDCConfig) Validate() error {
 		if c.RedirectURL == "" {
 			return errors.New("OIDC redirect URL is required")
 		}
+	}
+	if c.RedirectURL != "" {
 		redirect, err := url.Parse(c.RedirectURL)
 		if err != nil || redirect.Host == "" || (redirect.Scheme != "http" && redirect.Scheme != "https") || redirect.Fragment != "" {
 			return errors.New("OIDC redirect URL must be an absolute http:// or https:// URL without a fragment")
 		}
 		if redirect.Scheme == "http" && !controlplaneurl.IsLoopbackHostname(redirect.Hostname()) {
 			return errors.New("OIDC redirect URL must use https except on loopback hosts")
+		}
+		if redirect.Path != OIDCCallbackPath {
+			return errors.Errorf("OIDC redirect URL path must be %s", OIDCCallbackPath)
 		}
 	}
 	if !c.AllowAnyUser && len(c.AllowedEmails) == 0 && len(c.AllowedDomains) == 0 && len(c.AdminEmails) == 0 && len(c.TerminalEmails) == 0 && len(c.RunnerAdminEmails) == 0 {
@@ -475,7 +482,7 @@ func (s *Server) handleOIDCLogin(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     oidcStateCookieName,
 		Value:    state,
-		Path:     oidcCallbackPath,
+		Path:     OIDCCallbackPath,
 		MaxAge:   int(defaultOIDCTransactionTTL.Seconds()),
 		HttpOnly: true,
 		Secure:   isHTTPSRequest(r),
@@ -520,7 +527,7 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	setWebSessionCookies(w, r, sessionToken, csrfToken, s.config.OIDC.SessionDuration)
-	clearCookie(w, r, oidcStateCookieName, oidcCallbackPath, true)
+	clearCookie(w, r, oidcStateCookieName, OIDCCallbackPath, true)
 	http.Redirect(w, r, sanitizeReturnTo(transaction.ReturnTo), http.StatusFound)
 }
 
@@ -545,7 +552,7 @@ func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodOptions || isPublicAuthPath(r.URL.Path) {
+		if r.Method == http.MethodOptions || s.isPublicRequestPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -607,7 +614,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 				return
 			}
 			setWebUIAuthCookie(w, r, s.config.AuthToken)
-			if shouldRedirectTokenRequest(r) {
+			if s.shouldRedirectTokenRequest(r) {
 				http.Redirect(w, r, tokenlessURL(r), http.StatusFound)
 				return
 			}
@@ -703,12 +710,13 @@ func principalFromUserSnapshot(snapshot userauth.PrincipalSnapshot) Principal {
 	}
 }
 
-func isPublicAuthPath(path string) bool {
-	if strings.HasPrefix(path, "/assets/") || path == "/favicon.ico" {
-		return true
-	}
+func (s *Server) isPublicRequestPath(path string) bool {
+	return isPublicControlPlanePath(path) || s.isPublicFrontendPath(path)
+}
+
+func isPublicControlPlanePath(path string) bool {
 	switch path {
-	case "/auth/login", oidcCallbackPath, "/auth/logout", signedOutPath, protocol.EnrollmentStartPath, protocol.EnrollmentPollPath, userauth.DeviceStartPath, userauth.DevicePollPath:
+	case "/auth/login", OIDCCallbackPath, "/auth/logout", signedOutPath, protocol.EnrollmentStartPath, protocol.EnrollmentPollPath, userauth.DeviceStartPath, userauth.DevicePollPath:
 		return true
 	default:
 		return false

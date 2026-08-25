@@ -1,17 +1,15 @@
-// Package webui provides a web server and HTTP API for kodelet's web interface.
-// It serves the embedded React frontend and provides REST endpoints for
-// conversation management and LLM interactions through a browser interface.
-package webui
+// Package controlplane provides Kodelet's central HTTP API and server runtime.
+// It owns authentication, conversations, chat execution, runner coordination,
+// and workspace proxying while accepting an optional frontend HTTP handler.
+package controlplane
 
 import (
 	"bufio"
 	"context"
 	"crypto/rand"
-	"embed"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"net"
 	"net/http"
 	"net/url"
@@ -48,18 +46,36 @@ import (
 	"github.com/spf13/viper"
 )
 
-//go:generate bash -c "cd frontend && npm install && npm run build"
-//go:embed all:dist/*
-var embedFS embed.FS
+// FrontendHandler serves an optional browser frontend and identifies static
+// frontend resources that must remain public before browser authentication.
+type FrontendHandler interface {
+	http.Handler
+	IsPublicPath(path string) bool
+}
 
-// Server represents the web UI server
+type unavailableFrontendHandler struct{}
+
+func (unavailableFrontendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	http.NotFound(w, r)
+}
+
+func (unavailableFrontendHandler) IsPublicPath(string) bool {
+	return false
+}
+
+// Server represents the Kodelet control-plane server.
 type Server struct {
 	router                *mux.Router
 	conversationService   conversations.ConversationServiceInterface
-	chatRunner            ChatRunner
+	chatRunner            chat.ChatRunner
 	config                *ServerConfig
 	server                *http.Server
-	staticFS              fs.FS
+	frontendHandler       FrontendHandler
 	runCtx                context.Context
 	runCancel             context.CancelFunc
 	terminalSessions      *terminalSessionManager
@@ -143,7 +159,7 @@ func (r *activeChatRun) markDone() {
 	})
 }
 
-// ServerConfig holds the configuration for the web server
+// ServerConfig holds the configuration for the control-plane server.
 type ServerConfig struct {
 	Host                         string
 	Port                         int
@@ -208,11 +224,15 @@ func (c *ServerConfig) Validate() error {
 	return nil
 }
 
-// NewServer creates a new web UI server
-func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
+// NewServer creates a control-plane server. frontendHandler may be nil only for
+// API-only token or unauthenticated deployments.
+func NewServer(ctx context.Context, config *ServerConfig, frontendHandler FrontendHandler) (*Server, error) {
 	// Validate configuration
 	if err := config.Validate(); err != nil {
 		return nil, errors.Wrap(err, "invalid server configuration")
+	}
+	if frontendHandler == nil && (config.resolvedWebAuthMode() == WebAuthModeOIDC || config.resolvedRunnerAuthMode() == RunnerAuthModeEnrollment) {
+		return nil, errors.New("frontend handler is required when OIDC authentication or runner enrollment is enabled")
 	}
 
 	if strings.TrimSpace(config.CWD) != "" {
@@ -232,12 +252,6 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 	conversationService, err := conversations.GetDefaultConversationService(ctx)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create conversation service")
-	}
-
-	// Create a sub-filesystem for static files from dist/assets
-	staticFS, err := fs.Sub(embedFS, "dist/assets")
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to create static filesystem")
 	}
 
 	runCtx, runCancel := context.WithCancel(ctx)
@@ -293,11 +307,11 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 	s := &Server{
 		router:              mux.NewRouter(),
 		conversationService: conversationService,
-		chatRunner: &webUIChatRunner{
+		chatRunner: &serverChatRunner{
 			runner: chat.NewDefaultChatRunner(config.CWD, extensionRuntimes),
 		},
 		config:                config,
-		staticFS:              staticFS,
+		frontendHandler:       frontendHandler,
 		runCtx:                runCtx,
 		runCancel:             runCancel,
 		terminalSessions:      terminalSessions,
@@ -313,7 +327,7 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 	runnerRegistry.SetEnvironmentErrorHandler(func(conversationID string) {
 		s.cancelActiveChat(conversationID)
 	})
-	if runner, ok := s.chatRunner.(*webUIChatRunner); ok {
+	if runner, ok := s.chatRunner.(*serverChatRunner); ok {
 		runner.server = s
 		runner.runner.SetEnvironmentResolver(runner)
 	}
@@ -328,7 +342,7 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 func (s *Server) setupRoutes() {
 	// Authentication and browser approval routes.
 	s.router.HandleFunc("/auth/login", s.handleOIDCLogin).Methods("GET")
-	s.router.HandleFunc("/auth/oidc/callback", s.handleOIDCCallback).Methods("GET")
+	s.router.HandleFunc(OIDCCallbackPath, s.handleOIDCCallback).Methods("GET")
 	s.router.HandleFunc("/auth/logout", s.handleLogout).Methods("GET")
 	s.router.HandleFunc(userauth.DeviceVerificationPath, s.handleUserLoginVerificationPage).Methods("GET", "HEAD")
 	s.router.HandleFunc(userauth.DeviceStartPath, s.handleStartUserLogin).Methods("POST")
@@ -366,11 +380,11 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/conversations/{id}", s.handleDeleteConversation).Methods("DELETE")
 	api.HandleFunc("/chat", s.handleChat).Methods("POST")
 
-	// Static assets from the React build
-	s.router.PathPrefix("/assets/").Handler(s.staticFileHandler())
-
-	// All other routes serve the React SPA
-	s.router.PathPrefix("/").HandlerFunc(s.handleReactSPA)
+	// A frontend is composed by the caller and mounted after every control-plane
+	// route so API ownership stays independent from the browser implementation.
+	// The unavailable fallback keeps middleware behavior consistent in API-only
+	// deployments, including CORS preflight and request logging for unmatched paths.
+	s.router.PathPrefix("/").HandlerFunc(s.serveFrontend)
 
 	// Add middleware
 	s.router.Use(s.loggingMiddleware)
@@ -378,37 +392,31 @@ func (s *Server) setupRoutes() {
 	s.router.Use(s.authMiddleware)
 }
 
-// staticFileHandler serves static files from the embedded filesystem
-func (s *Server) staticFileHandler() http.Handler {
-	return http.StripPrefix("/assets/", http.FileServer(http.FS(s.staticFS)))
+func (s *Server) serveFrontend(w http.ResponseWriter, r *http.Request) {
+	frontendHandler := FrontendHandler(unavailableFrontendHandler{})
+	if s != nil && s.frontendHandler != nil {
+		frontendHandler = s.frontendHandler
+	}
+	if r != nil && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
+		if canonicalPath, ok := canonicalAuthApprovalPath(r.URL.Path); ok && r.URL.Path != canonicalPath {
+			target := canonicalPath
+			if r.URL.RawQuery != "" {
+				target += "?" + r.URL.RawQuery
+			}
+			http.Redirect(w, r, target, http.StatusPermanentRedirect)
+			return
+		}
+	}
+	frontendHandler.ServeHTTP(w, r)
 }
 
-// handleReactSPA serves the React single-page application
-func (s *Server) handleReactSPA(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+// ServeHTTP serves the configured control-plane routes and browser frontend.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if s == nil || s.router == nil {
+		http.NotFound(w, r)
 		return
 	}
-	if canonicalPath, ok := canonicalAuthApprovalPath(r.URL.Path); ok && r.URL.Path != canonicalPath {
-		target := canonicalPath
-		if r.URL.RawQuery != "" {
-			target += "?" + r.URL.RawQuery
-		}
-		http.Redirect(w, r, target, http.StatusPermanentRedirect)
-		return
-	}
-	// Serve index.html for all non-API routes
-	indexContent, err := embedFS.ReadFile("dist/index.html")
-	if err != nil {
-		logger.G(r.Context()).WithError(err).Error("failed to read index.html")
-		http.Error(w, "failed to load application", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-	w.Write(indexContent)
+	s.router.ServeHTTP(w, r)
 }
 
 func canonicalAuthApprovalPath(path string) (string, bool) {
@@ -679,13 +687,17 @@ func authHeaderToken(headerValue string) string {
 	return headerValue
 }
 
-func shouldRedirectTokenRequest(r *http.Request) bool {
+func (s *Server) shouldRedirectTokenRequest(r *http.Request) bool {
 	if r.Method != http.MethodGet || isWebsocketUpgrade(r) {
 		return false
 	}
 
 	path := r.URL.Path
-	return !strings.HasPrefix(path, "/api/") && !strings.HasPrefix(path, "/assets/")
+	return !strings.HasPrefix(path, "/api/") && !s.isPublicFrontendPath(path)
+}
+
+func (s *Server) isPublicFrontendPath(path string) bool {
+	return s != nil && s.frontendHandler != nil && s.frontendHandler.IsPublicPath(path)
 }
 
 func isWebsocketUpgrade(r *http.Request) bool {
@@ -993,7 +1005,7 @@ func (s *Server) removeChatSubscriber(conversationID string, sink *subscriberEve
 	}
 }
 
-func (s *Server) broadcastChatEvent(conversationID string, event ChatEvent) {
+func (s *Server) broadcastChatEvent(conversationID string, event chat.ChatEvent) {
 	if strings.TrimSpace(conversationID) == "" {
 		return
 	}
@@ -1204,13 +1216,24 @@ type WebMessage struct {
 }
 
 // WebContentBlock represents a typed content block rendered by the web UI.
-type WebContentBlock = chat.ChatContentBlock
+type WebContentBlock struct {
+	Type     string          `json:"type"`
+	Text     string          `json:"text,omitempty"`
+	Command  string          `json:"command,omitempty"`
+	Source   *WebImageSource `json:"source,omitempty"`
+	ImageURL *WebImageURL    `json:"image_url,omitempty"`
+}
 
 // WebImageSource represents inline image data for a web content block.
-type WebImageSource = chat.ChatImageSource
+type WebImageSource struct {
+	Data      string `json:"data"`
+	MediaType string `json:"media_type"`
+}
 
 // WebImageURL represents a remote image URL for a web content block.
-type WebImageURL = chat.ChatImageURLSource
+type WebImageURL struct {
+	URL string `json:"url"`
+}
 
 // WebToolCall represents a tool call for the web UI
 type WebToolCall struct {
@@ -2067,7 +2090,7 @@ func (s *Server) extractOpenAIResponsesInputContent(rawMessage json.RawMessage) 
 			}
 			if strings.HasPrefix(part.ImageURL, "data:") {
 				if source, ok := chat.ParseDataURL(part.ImageURL); ok {
-					contentBlocks = append(contentBlocks, WebContentBlock{Type: "image", Source: source})
+					contentBlocks = append(contentBlocks, WebContentBlock{Type: "image", Source: webImageSource(source)})
 					continue
 				}
 			}
@@ -2209,7 +2232,7 @@ func (s *Server) extractOpenAIContent(rawMessage json.RawMessage) (any, string, 
 			imageURL := part.ImageURL.URL
 			if strings.HasPrefix(imageURL, "data:") {
 				if source, ok := chat.ParseDataURL(imageURL); ok {
-					contentBlocks = append(contentBlocks, WebContentBlock{Type: "image", Source: source})
+					contentBlocks = append(contentBlocks, WebContentBlock{Type: "image", Source: webImageSource(source)})
 					continue
 				}
 			}
@@ -2280,7 +2303,7 @@ func (s *Server) handleStreamConversation(w http.ResponseWriter, r *http.Request
 	}()
 
 	if s.isActiveChat(conversationID) {
-		_ = sink.Send(ChatEvent{
+		_ = sink.Send(chat.ChatEvent{
 			Kind:           "conversation",
 			ConversationID: conversationID,
 			Role:           "assistant",
@@ -2334,8 +2357,8 @@ func (s *Server) handleGetPendingSteer(w http.ResponseWriter, r *http.Request) {
 }
 
 type steerConversationRequest struct {
-	Message string             `json:"message"`
-	Content []ChatContentBlock `json:"content,omitempty"`
+	Message string                  `json:"message"`
+	Content []chat.ChatContentBlock `json:"content,omitempty"`
 }
 
 type steerConversationResponse struct {
@@ -2362,7 +2385,7 @@ func (s *Server) handleSteerConversation(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	message, imageInputs, err := chat.NormalizeRequest(ChatRequest{
+	message, imageInputs, err := chat.NormalizeRequest(chat.ChatRequest{
 		Message: req.Message,
 		Content: req.Content,
 	})
@@ -2650,6 +2673,16 @@ func normalizeWebContent(textParts []string, blocks []WebContentBlock) any {
 		return strings.Join(textParts, "\n")
 	}
 	return blocks
+}
+
+func webImageSource(source *chat.ChatImageSource) *WebImageSource {
+	if source == nil {
+		return nil
+	}
+	return &WebImageSource{
+		Data:      source.Data,
+		MediaType: source.MediaType,
+	}
 }
 
 func applyWebContentDisplay(content any, metadata map[string]any, consumedDisplays map[string]struct{}) any {

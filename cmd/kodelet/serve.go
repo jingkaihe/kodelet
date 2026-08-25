@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/go-viper/mapstructure/v2"
+	"github.com/jingkaihe/kodelet/pkg/controlplane"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/presenter"
@@ -24,7 +25,6 @@ import (
 )
 
 const (
-	oidcCallbackPath           = "/auth/oidc/callback"
 	defaultOIDCSessionDuration = 12 * time.Hour
 )
 
@@ -37,9 +37,9 @@ type ServeConfig struct {
 	CompactRatio                 float64
 	AuthToken                    string
 	RunnerAuthToken              string
-	WebAuthMode                  webui.WebAuthMode
-	RunnerAuthMode               webui.RunnerAuthMode
-	OIDC                         webui.OIDCConfig
+	WebAuthMode                  controlplane.WebAuthMode
+	RunnerAuthMode               controlplane.RunnerAuthMode
+	OIDC                         controlplane.OIDCConfig
 	OIDCClientSecretFile         string
 	SkipAuth                     bool
 	DisableControlPlaneWorkspace bool
@@ -82,7 +82,7 @@ func NewServeConfig() *ServeConfig {
 		Port:         8080,
 		CWD:          "",
 		CompactRatio: llmtypes.DefaultCompactRatio,
-		OIDC: webui.OIDCConfig{
+		OIDC: controlplane.OIDCConfig{
 			Scopes:          append([]string(nil), defaultOIDCScopes...),
 			SessionDuration: defaultOIDCSessionDuration,
 		},
@@ -122,7 +122,7 @@ func addServeFlags(cmd *cobra.Command, defaults *ServeConfig) {
 	cmd.Flags().String("oidc-issuer", defaults.OIDC.IssuerURL, "OIDC issuer URL")
 	cmd.Flags().String("oidc-client-id", defaults.OIDC.ClientID, "OIDC client ID")
 	cmd.Flags().String("oidc-client-secret-file", defaults.OIDCClientSecretFile, "Path to a file containing the OIDC client secret")
-	cmd.Flags().String("oidc-redirect-url", defaults.OIDC.RedirectURL, "OIDC redirect URL; its path must be /auth/oidc/callback")
+	cmd.Flags().String("oidc-redirect-url", defaults.OIDC.RedirectURL, fmt.Sprintf("OIDC redirect URL; its path must be %s", controlplane.OIDCCallbackPath))
 	cmd.Flags().StringSlice("oidc-scopes", defaults.OIDC.Scopes, "OIDC scopes (comma-separated or repeated)")
 	cmd.Flags().StringSlice("oidc-allowed-emails", defaults.OIDC.AllowedEmails, "Email addresses allowed to sign in with OIDC (comma-separated or repeated)")
 	cmd.Flags().StringSlice("oidc-allowed-domains", defaults.OIDC.AllowedDomains, "Email domains allowed to sign in with OIDC (comma-separated or repeated)")
@@ -150,10 +150,10 @@ func getServeConfigFromFlags(cmd *cobra.Command) *ServeConfig {
 		config.CWD = strings.TrimSpace(cwd)
 	}
 	if webAuthMode, err := cmd.Flags().GetString("web-auth-mode"); err == nil && cmd.Flags().Changed("web-auth-mode") {
-		config.WebAuthMode = webui.WebAuthMode(webAuthMode)
+		config.WebAuthMode = controlplane.WebAuthMode(webAuthMode)
 	}
 	if runnerAuthMode, err := cmd.Flags().GetString("runner-auth-mode"); err == nil && cmd.Flags().Changed("runner-auth-mode") {
-		config.RunnerAuthMode = webui.RunnerAuthMode(runnerAuthMode)
+		config.RunnerAuthMode = controlplane.RunnerAuthMode(runnerAuthMode)
 	}
 	if authToken, err := cmd.Flags().GetString("auth-token"); err == nil && cmd.Flags().Changed("auth-token") {
 		config.AuthToken = authToken
@@ -249,10 +249,10 @@ func applyTrustedServeConfig(config *ServeConfig) error {
 		config.RunnerAuthToken = *trusted.RunnerAuthToken
 	}
 	if trusted.WebAuthMode != nil {
-		config.WebAuthMode = webui.WebAuthMode(*trusted.WebAuthMode)
+		config.WebAuthMode = controlplane.WebAuthMode(*trusted.WebAuthMode)
 	}
 	if trusted.RunnerAuthMode != nil {
-		config.RunnerAuthMode = webui.RunnerAuthMode(*trusted.RunnerAuthMode)
+		config.RunnerAuthMode = controlplane.RunnerAuthMode(*trusted.RunnerAuthMode)
 	}
 	if trusted.SkipAuth != nil {
 		config.SkipAuth = *trusted.SkipAuth
@@ -345,28 +345,28 @@ func validateServeConfig(config *ServeConfig) error {
 		return err
 	}
 
-	if err := webui.ValidateAuthToken(config.AuthToken); err != nil {
+	if err := controlplane.ValidateAuthToken(config.AuthToken); err != nil {
 		return err
 	}
-	if err := webui.ValidateAuthToken(config.RunnerAuthToken); err != nil {
+	if err := controlplane.ValidateAuthToken(config.RunnerAuthToken); err != nil {
 		return errors.Wrap(err, "invalid runner auth token")
 	}
 	if config.AuthToken != "" && config.RunnerAuthToken != "" && config.AuthToken == config.RunnerAuthToken {
 		return errors.New("runner auth token must differ from web auth token")
 	}
-	if webAuthMode == webui.WebAuthModeNone && config.AuthToken != "" {
+	if webAuthMode == controlplane.WebAuthModeNone && config.AuthToken != "" {
 		return errors.New("web auth token cannot be used when web authentication mode is none")
 	}
-	if runnerAuthMode == webui.RunnerAuthModeNone && config.RunnerAuthToken != "" {
+	if runnerAuthMode == controlplane.RunnerAuthModeNone && config.RunnerAuthToken != "" {
 		return errors.New("runner auth token cannot be used when runner authentication mode is none")
 	}
-	if runnerAuthMode == webui.RunnerAuthModeEnrollment && config.RunnerAuthToken != "" {
+	if runnerAuthMode == controlplane.RunnerAuthModeEnrollment && config.RunnerAuthToken != "" {
 		return errors.New("runner auth token requires runner authentication mode token")
 	}
-	if runnerAuthMode == webui.RunnerAuthModeEnrollment && webAuthMode == webui.WebAuthModeNone {
+	if runnerAuthMode == controlplane.RunnerAuthModeEnrollment && webAuthMode == controlplane.WebAuthModeNone {
 		return errors.New("runner enrollment requires web authentication")
 	}
-	if webAuthMode == webui.WebAuthModeOIDC {
+	if webAuthMode == controlplane.WebAuthModeOIDC {
 		if strings.TrimSpace(config.OIDCClientSecretFile) == "" {
 			return errors.New("OIDC client secret file is required when web authentication mode is oidc")
 		}
@@ -379,32 +379,25 @@ func validateServeConfig(config *ServeConfig) error {
 		if err := oidcConfig.Validate(); err != nil {
 			return errors.Wrap(err, "invalid OIDC configuration")
 		}
-		redirectURL, err := url.Parse(strings.TrimSpace(oidcConfig.RedirectURL))
-		if err != nil {
-			return errors.Wrap(err, "invalid OIDC redirect URL")
-		}
-		if redirectURL.Path != oidcCallbackPath {
-			return errors.Errorf("OIDC redirect URL path must be %s", oidcCallbackPath)
-		}
-		if runnerAuthMode == webui.RunnerAuthModeEnrollment && config.AuthToken == "" && len(oidcConfig.AdminEmails) == 0 && len(oidcConfig.RunnerAdminEmails) == 0 {
+		if runnerAuthMode == controlplane.RunnerAuthModeEnrollment && config.AuthToken == "" && len(oidcConfig.AdminEmails) == 0 && len(oidcConfig.RunnerAdminEmails) == 0 {
 			return errors.New("OIDC runner enrollment requires a runner-admin/admin email or an administrative compatibility token")
 		}
 	}
 
-	if err := webui.ValidateCORSOrigins(config.CORSOrigins); err != nil {
+	if err := controlplane.ValidateCORSOrigins(config.CORSOrigins); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func resolveServeAuthModes(config *ServeConfig) (webui.WebAuthMode, webui.RunnerAuthMode, error) {
+func resolveServeAuthModes(config *ServeConfig) (controlplane.WebAuthMode, controlplane.RunnerAuthMode, error) {
 	if config == nil {
 		return "", "", errors.New("server configuration is required")
 	}
 
-	webAuthMode := webui.WebAuthMode(strings.ToLower(strings.TrimSpace(string(config.WebAuthMode))))
-	runnerAuthMode := webui.RunnerAuthMode(strings.ToLower(strings.TrimSpace(string(config.RunnerAuthMode))))
+	webAuthMode := controlplane.WebAuthMode(strings.ToLower(strings.TrimSpace(string(config.WebAuthMode))))
+	runnerAuthMode := controlplane.RunnerAuthMode(strings.ToLower(strings.TrimSpace(string(config.RunnerAuthMode))))
 	if config.SkipAuth {
 		if config.AuthToken != "" {
 			return "", "", errors.New("web auth token cannot be used when authentication is disabled")
@@ -412,29 +405,29 @@ func resolveServeAuthModes(config *ServeConfig) (webui.WebAuthMode, webui.Runner
 		if config.RunnerAuthToken != "" {
 			return "", "", errors.New("runner auth token cannot be used when authentication is disabled")
 		}
-		if webAuthMode != "" && webAuthMode != webui.WebAuthModeNone {
+		if webAuthMode != "" && webAuthMode != controlplane.WebAuthModeNone {
 			return "", "", errors.New("disabled authentication conflicts with a non-none web authentication mode")
 		}
-		if runnerAuthMode != "" && runnerAuthMode != webui.RunnerAuthModeNone {
+		if runnerAuthMode != "" && runnerAuthMode != controlplane.RunnerAuthModeNone {
 			return "", "", errors.New("disabled authentication conflicts with a non-none runner authentication mode")
 		}
-		return webui.WebAuthModeNone, webui.RunnerAuthModeNone, nil
+		return controlplane.WebAuthModeNone, controlplane.RunnerAuthModeNone, nil
 	}
 
 	if webAuthMode == "" {
-		webAuthMode = webui.WebAuthModeToken
+		webAuthMode = controlplane.WebAuthModeToken
 	}
 	switch webAuthMode {
-	case webui.WebAuthModeToken, webui.WebAuthModeOIDC, webui.WebAuthModeNone:
+	case controlplane.WebAuthModeToken, controlplane.WebAuthModeOIDC, controlplane.WebAuthModeNone:
 	default:
 		return "", "", errors.Errorf("invalid web authentication mode %q: must be token, oidc, or none", config.WebAuthMode)
 	}
 
 	if runnerAuthMode == "" {
-		runnerAuthMode = webui.RunnerAuthModeToken
+		runnerAuthMode = controlplane.RunnerAuthModeToken
 	}
 	switch runnerAuthMode {
-	case webui.RunnerAuthModeToken, webui.RunnerAuthModeEnrollment, webui.RunnerAuthModeNone:
+	case controlplane.RunnerAuthModeToken, controlplane.RunnerAuthModeEnrollment, controlplane.RunnerAuthModeNone:
 	default:
 		return "", "", errors.Errorf("invalid runner authentication mode %q: must be token, enrollment, or none", config.RunnerAuthMode)
 	}
@@ -476,7 +469,7 @@ func loadOIDCClientSecret(path string) (string, error) {
 	return clientSecret, nil
 }
 
-func buildWebUIServerConfig(config *ServeConfig) (*webui.ServerConfig, error) {
+func buildControlPlaneServerConfig(config *ServeConfig) (*controlplane.ServerConfig, error) {
 	if err := validateServeConfig(config); err != nil {
 		return nil, err
 	}
@@ -487,23 +480,23 @@ func buildWebUIServerConfig(config *ServeConfig) (*webui.ServerConfig, error) {
 	}
 	authToken := config.AuthToken
 	runnerAuthToken := config.RunnerAuthToken
-	if webAuthMode == webui.WebAuthModeToken && authToken == "" {
-		authToken, err = webui.NewAuthToken()
+	if webAuthMode == controlplane.WebAuthModeToken && authToken == "" {
+		authToken, err = controlplane.NewAuthToken()
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to generate web auth token")
 		}
 	}
-	if runnerAuthMode == webui.RunnerAuthModeToken && runnerAuthToken == "" {
+	if runnerAuthMode == controlplane.RunnerAuthModeToken && runnerAuthToken == "" {
 		for runnerAuthToken == "" || runnerAuthToken == authToken {
-			runnerAuthToken, err = webui.NewAuthToken()
+			runnerAuthToken, err = controlplane.NewAuthToken()
 			if err != nil {
 				return nil, errors.Wrap(err, "failed to generate runner auth token")
 			}
 		}
 	}
 
-	var oidcConfig webui.OIDCConfig
-	if webAuthMode == webui.WebAuthModeOIDC {
+	var oidcConfig controlplane.OIDCConfig
+	if webAuthMode == controlplane.WebAuthModeOIDC {
 		oidcConfig = config.OIDC
 		oidcConfig.ClientSecret, err = loadOIDCClientSecret(config.OIDCClientSecretFile)
 		if err != nil {
@@ -511,7 +504,7 @@ func buildWebUIServerConfig(config *ServeConfig) (*webui.ServerConfig, error) {
 		}
 	}
 
-	serverConfig := &webui.ServerConfig{
+	serverConfig := &controlplane.ServerConfig{
 		Host:                         config.Host,
 		Port:                         config.Port,
 		CWD:                          config.CWD,
@@ -531,7 +524,7 @@ func buildWebUIServerConfig(config *ServeConfig) (*webui.ServerConfig, error) {
 }
 
 func runServeCommand(ctx context.Context, config *ServeConfig) {
-	serverConfig, err := buildWebUIServerConfig(config)
+	serverConfig, err := buildControlPlaneServerConfig(config)
 	if err != nil {
 		presenter.Error(err, "invalid server configuration")
 		os.Exit(1)
@@ -543,9 +536,14 @@ func runServeCommand(ctx context.Context, config *ServeConfig) {
 		"web_auth_mode":                    serverConfig.WebAuthMode,
 		"runner_auth_mode":                 serverConfig.RunnerAuthMode,
 		"control_plane_workspace_disabled": serverConfig.DisableControlPlaneWorkspace,
-	}).Info("Starting web UI server")
+	}).Info("Starting control-plane server")
 
-	server, err := webui.NewServer(ctx, serverConfig)
+	frontend, err := webui.NewHandler()
+	if err != nil {
+		presenter.Error(err, "failed to create Web UI handler")
+		os.Exit(1)
+	}
+	server, err := controlplane.NewServer(ctx, serverConfig, frontend)
 	if err != nil {
 		presenter.Error(err, "failed to create web server")
 		os.Exit(1)
@@ -564,7 +562,7 @@ func runServeCommand(ctx context.Context, config *ServeConfig) {
 	runnerTokenConfigured := strings.TrimSpace(config.RunnerAuthToken) != ""
 	presenter.Success(fmt.Sprintf("Web UI server starting on %s", baseURL))
 	switch serverConfig.WebAuthMode {
-	case webui.WebAuthModeToken:
+	case controlplane.WebAuthModeToken:
 		presenter.Info("Web UI authentication mode: token")
 		if webTokenConfigured {
 			presenter.Info("Authentication token: configured (value not displayed)")
@@ -572,13 +570,13 @@ func runServeCommand(ctx context.Context, config *ServeConfig) {
 			presenter.Info(fmt.Sprintf("Authentication token: %s", serverConfig.AuthToken))
 			presenter.Info(fmt.Sprintf("Open this URL: %s", serveURLWithToken(baseURL, serverConfig.AuthToken)))
 		}
-	case webui.WebAuthModeOIDC:
+	case controlplane.WebAuthModeOIDC:
 		presenter.Info("Web UI authentication mode: OIDC")
 		presenter.Info(fmt.Sprintf("Open this URL: %s", baseURL))
 		if serverConfig.AuthToken != "" {
 			presenter.Info("OIDC admin compatibility token: configured (value not displayed)")
 		}
-	case webui.WebAuthModeNone:
+	case controlplane.WebAuthModeNone:
 		if config.SkipAuth {
 			presenter.Warning("Web UI authentication disabled (--skip-auth)")
 		} else {
@@ -586,17 +584,17 @@ func runServeCommand(ctx context.Context, config *ServeConfig) {
 		}
 	}
 	switch serverConfig.RunnerAuthMode {
-	case webui.RunnerAuthModeToken:
+	case controlplane.RunnerAuthModeToken:
 		presenter.Info("Runner authentication mode: token")
 		if runnerTokenConfigured {
 			presenter.Info("Runner authentication token: configured (value not displayed)")
 		} else {
 			presenter.Info(fmt.Sprintf("Runner authentication token: %s", serverConfig.RunnerAuthToken))
 		}
-	case webui.RunnerAuthModeEnrollment:
+	case controlplane.RunnerAuthModeEnrollment:
 		presenter.Info("Runner authentication mode: enrollment")
 		presenter.Info(fmt.Sprintf("Approve runner enrollments at: %s/runner/enroll", baseURL))
-	case webui.RunnerAuthModeNone:
+	case controlplane.RunnerAuthModeNone:
 		if config.SkipAuth {
 			presenter.Warning("Runner authentication disabled (--skip-auth)")
 		} else {

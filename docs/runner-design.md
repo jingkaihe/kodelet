@@ -1089,9 +1089,13 @@ Keep extension discovery, subprocess management, stdio JSON-RPC, event ordering,
 
 `ChatRunner` remains the client-facing persisted-run interface, but `DefaultChatRunner` must be refactored so central run setup can open either a local or remote `agentenv.Environment` before constructing the provider turn flow.
 
+### `pkg/controlplane`
+
+The control-plane server owns its HTTP API, authentication, runner registration, run state, client event fan-out, cancellation, workspace proxying, and extension UI routing. Current process-local active-run maps should become views over the central run service where necessary.
+
 ### `pkg/webui`
 
-The Web server owns runner registration, run state, client event fan-out, cancellation, and extension UI routing. Current process-local active-run maps should become views over the central run service where necessary.
+The Web UI package owns only the embedded React assets and SPA HTTP handler. `cmd/kodelet` composes that handler with the control-plane server, keeping API and runtime ownership independent from the browser implementation.
 
 ### `pkg/acp`
 
@@ -1105,12 +1109,14 @@ Potential package boundaries are:
 
 ```text
 pkg/agentenv/          local and remote agent-environment contracts
+pkg/controlplane/      central HTTP API, auth, chat execution, and runner coordination
 pkg/runner/protocol/   leaf JSON-RPC envelope, registration, heartbeat, and run-lease types
 pkg/runner/protocol/payload/ application payloads that depend on tools, extensions, commands, and model types
 pkg/runner/client/     workspace-bound runner process
 pkg/runner/registry/   control-plane connections and run-state coordination
   affinity.go          pending and durable conversation affinity
   tool_updates.go      run-scoped transient tool-update routing
+pkg/webui/             embedded browser assets and SPA handler
 ```
 
 The transport package remains a dependency leaf: `agentenv` does not import the registry or database graph, and the core protocol envelope does not import the extension or tool stack.

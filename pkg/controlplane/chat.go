@@ -1,4 +1,4 @@
-package webui
+package controlplane
 
 import (
 	"context"
@@ -20,29 +20,12 @@ import (
 	"github.com/pkg/errors"
 )
 
-type (
-	ChatRequest        = chat.ChatRequest
-	ChatContentBlock   = chat.ChatContentBlock
-	ChatImageSource    = chat.ChatImageSource
-	ChatImageURLSource = chat.ChatImageURLSource
-	ChatEvent          = chat.ChatEvent
-	UIInputEvent       = chat.UIInputEvent
-	UIConfirmEvent     = chat.UIConfirmEvent
-	UISelectEvent      = chat.UISelectEvent
-	UINotifyEvent      = chat.UINotifyEvent
-	ChatEventSink      = chat.ChatEventSink
-	ChatRunner         = chat.ChatRunner
-	DefaultChatRunner  = chat.DefaultChatRunner
-)
-
-var NewDefaultChatRunner = chat.NewDefaultChatRunner
-
-type webUIChatRunner struct {
+type serverChatRunner struct {
 	runner *chat.DefaultChatRunner
 	server *Server
 }
 
-func (r *webUIChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatEventSink) (string, error) {
+func (r *serverChatRunner) Run(ctx context.Context, req chat.ChatRequest, sink chat.ChatEventSink) (string, error) {
 	conversationID := strings.TrimSpace(req.ConversationID)
 	hasRunnerAffinity := false
 	if r != nil && r.server != nil && r.server.runnerRegistry != nil && conversationID != "" {
@@ -102,7 +85,7 @@ func (r *webUIChatRunner) Run(ctx context.Context, req ChatRequest, sink ChatEve
 	return resultConversationID, runErr
 }
 
-func (r *webUIChatRunner) ResolveEnvironment(ctx context.Context, req ChatRequest, conversationID string, _ llmtypes.Config, _ string) (agentenv.Environment, error) {
+func (r *serverChatRunner) ResolveEnvironment(ctx context.Context, req chat.ChatRequest, conversationID string, _ llmtypes.Config, _ string) (agentenv.Environment, error) {
 	runnerID := strings.TrimSpace(req.RunnerID)
 	if runnerID == "" {
 		return nil, errors.New("runner id is required")
@@ -148,18 +131,18 @@ func (s *Server) commitRunnerAffinity(ctx context.Context, conversationID string
 	return s.runnerRegistry.CommitConversationAffinity(ctx, conversationID)
 }
 
-func chatSupportsInteractiveUI(req ChatRequest) bool {
+func chatSupportsInteractiveUI(req chat.ChatRequest) bool {
 	return req.ClientCapabilities != nil && req.ClientCapabilities.InteractiveUI
 }
 
-func (r *webUIChatRunner) Close() error {
+func (r *serverChatRunner) Close() error {
 	if r == nil || r.runner == nil {
 		return nil
 	}
 	return r.runner.Close()
 }
 
-func (r *webUIChatRunner) CloseConversation(conversationID string) error {
+func (r *serverChatRunner) CloseConversation(conversationID string) error {
 	if r == nil || r.runner == nil {
 		return nil
 	}
@@ -173,7 +156,7 @@ type ndjsonEventSink struct {
 }
 
 type subscriberEventSink struct {
-	ch     chan ChatEvent
+	ch     chan chat.ChatEvent
 	mu     sync.RWMutex
 	closed bool
 }
@@ -190,7 +173,7 @@ func newNDJSONEventSink(w http.ResponseWriter) (*ndjsonEventSink, error) {
 	}, nil
 }
 
-func (s *ndjsonEventSink) Send(event ChatEvent) error {
+func (s *ndjsonEventSink) Send(event chat.ChatEvent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -217,10 +200,10 @@ func (s *ndjsonEventSink) KeepAlive() error {
 }
 
 func newSubscriberEventSink() *subscriberEventSink {
-	return &subscriberEventSink{ch: make(chan ChatEvent, 128)}
+	return &subscriberEventSink{ch: make(chan chat.ChatEvent, 128)}
 }
 
-func (s *subscriberEventSink) Send(event ChatEvent) error {
+func (s *subscriberEventSink) Send(event chat.ChatEvent) error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.closed {
@@ -247,7 +230,7 @@ func (s *subscriberEventSink) Close() {
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	requestCtx := r.Context()
 
-	var req ChatRequest
+	var req chat.ChatRequest
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&req); err != nil {
@@ -302,7 +285,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 	run.uiInput = newWebUIInputBroker(conversationID, broadcastingSink)
 
-	s.broadcastChatEvent(conversationID, ChatEvent{
+	s.broadcastChatEvent(conversationID, chat.ChatEvent{
 		Kind:           "conversation",
 		ConversationID: conversationID,
 		Role:           "assistant",
@@ -311,7 +294,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	if contentBlocks := chat.ContentBlocksForUserInput(message, imageInputs); len(contentBlocks) > 0 {
 		userContent = contentBlocks
 	}
-	s.broadcastChatEvent(conversationID, ChatEvent{
+	s.broadcastChatEvent(conversationID, chat.ChatEvent{
 		Kind:           "user-message",
 		ConversationID: conversationID,
 		Role:           "user",
@@ -325,7 +308,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	if runErr != nil {
 		if stdErrors.Is(runErr, io.ErrClosedPipe) || stdErrors.Is(runErr, context.Canceled) {
 			s.unregisterActiveChat(registeredConversationID, run)
-			s.broadcastChatEvent(conversationID, ChatEvent{
+			s.broadcastChatEvent(conversationID, chat.ChatEvent{
 				Kind:           "done",
 				ConversationID: conversationID,
 				Role:           "assistant",
@@ -336,13 +319,13 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 		logger.G(ctx).WithError(runErr).Error("chat request failed")
 		s.unregisterActiveChat(registeredConversationID, run)
-		s.broadcastChatEvent(conversationID, ChatEvent{
+		s.broadcastChatEvent(conversationID, chat.ChatEvent{
 			Kind:           "error",
 			ConversationID: conversationID,
 			Role:           "assistant",
 			Error:          runErr.Error(),
 		})
-		_ = sink.Send(ChatEvent{
+		_ = sink.Send(chat.ChatEvent{
 			Kind:           "error",
 			ConversationID: conversationID,
 			Role:           "assistant",
@@ -352,12 +335,12 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.unregisterActiveChat(registeredConversationID, run)
-	s.broadcastChatEvent(conversationID, ChatEvent{
+	s.broadcastChatEvent(conversationID, chat.ChatEvent{
 		Kind:           "done",
 		ConversationID: conversationID,
 		Role:           "assistant",
 	})
-	_ = sink.Send(ChatEvent{
+	_ = sink.Send(chat.ChatEvent{
 		Kind:           "done",
 		ConversationID: conversationID,
 		Role:           "assistant",
@@ -365,12 +348,12 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 }
 
 type broadcastingEventSink struct {
-	primary        ChatEventSink
-	broadcast      func(string, ChatEvent)
+	primary        chat.ChatEventSink
+	broadcast      func(string, chat.ChatEvent)
 	conversationID string
 }
 
-func (s *broadcastingEventSink) Send(event ChatEvent) error {
+func (s *broadcastingEventSink) Send(event chat.ChatEvent) error {
 	if err := s.primary.Send(event); err != nil {
 		if s.broadcast != nil {
 			s.broadcast(s.conversationID, event)

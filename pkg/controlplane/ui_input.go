@@ -1,21 +1,22 @@
-package webui
+package controlplane
 
 import (
 	"context"
 	"strings"
 	"sync"
 
+	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 )
 
 type webUIInputBroker struct {
 	conversationID string
-	sink           ChatEventSink
+	sink           chat.ChatEventSink
 	pending        map[string]chan extensions.UIInputResponse
 	mu             sync.Mutex
 }
 
-func newWebUIInputBroker(conversationID string, sink ChatEventSink) *webUIInputBroker {
+func newWebUIInputBroker(conversationID string, sink chat.ChatEventSink) *webUIInputBroker {
 	return &webUIInputBroker{
 		conversationID: conversationID,
 		sink:           sink,
@@ -32,11 +33,11 @@ func (b *webUIInputBroker) Input(ctx context.Context, request extensions.UIInput
 		request.ID = extensions.NewUIInputRequestID()
 	}
 
-	return b.prompt(ctx, request.ID, ChatEvent{
+	return b.prompt(ctx, request.ID, chat.ChatEvent{
 		Kind:           "ui-input-request",
 		ConversationID: b.conversationID,
 		Role:           "assistant",
-		UIInput: &UIInputEvent{
+		UIInput: &chat.UIInputEvent{
 			ID:               request.ID,
 			Title:            request.Title,
 			HelpText:         request.HelpText,
@@ -60,11 +61,11 @@ func (b *webUIInputBroker) Confirm(ctx context.Context, request extensions.UICon
 		request.ID = extensions.NewUIInputRequestID()
 	}
 
-	return b.prompt(ctx, request.ID, ChatEvent{
+	return b.prompt(ctx, request.ID, chat.ChatEvent{
 		Kind:           "ui-confirm-request",
 		ConversationID: b.conversationID,
 		Role:           "assistant",
-		UIConfirm: &UIConfirmEvent{
+		UIConfirm: &chat.UIConfirmEvent{
 			ID:                request.ID,
 			Title:             request.Title,
 			Message:           request.Message,
@@ -83,11 +84,11 @@ func (b *webUIInputBroker) Select(ctx context.Context, request extensions.UISele
 		request.ID = extensions.NewUIInputRequestID()
 	}
 
-	return b.prompt(ctx, request.ID, ChatEvent{
+	return b.prompt(ctx, request.ID, chat.ChatEvent{
 		Kind:           "ui-select-request",
 		ConversationID: b.conversationID,
 		Role:           "assistant",
-		UISelect: &UISelectEvent{
+		UISelect: &chat.UISelectEvent{
 			ID:               request.ID,
 			Title:            request.Title,
 			Message:          request.Message,
@@ -105,11 +106,11 @@ func (b *webUIInputBroker) Notify(ctx context.Context, request extensions.UINoti
 	if err := ctx.Err(); err != nil {
 		return extensions.UIInputResponse{}, err
 	}
-	if err := b.sink.Send(ChatEvent{
+	if err := b.sink.Send(chat.ChatEvent{
 		Kind:           "ui-notification",
 		ConversationID: b.conversationID,
 		Role:           "assistant",
-		UINotify: &UINotifyEvent{
+		UINotify: &chat.UINotifyEvent{
 			Title:   request.Title,
 			Message: request.Message,
 		},
@@ -119,7 +120,7 @@ func (b *webUIInputBroker) Notify(ctx context.Context, request extensions.UINoti
 	return extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted}, nil
 }
 
-func (b *webUIInputBroker) prompt(ctx context.Context, requestID string, event ChatEvent) (extensions.UIInputResponse, error) {
+func (b *webUIInputBroker) prompt(ctx context.Context, requestID string, event chat.ChatEvent) (extensions.UIInputResponse, error) {
 	responseCh := make(chan extensions.UIInputResponse, 1)
 
 	b.mu.Lock()
