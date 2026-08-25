@@ -117,7 +117,12 @@ func tuiBuiltInSlashCommands() []slashcommands.Command {
 			Hint:        "search (optional)",
 			Placeholder: "/sessions [search]",
 		},
-		{Name: "new", Description: "Start a new conversation"},
+		{
+			Name:        "new",
+			Description: "Start a new conversation",
+			Hint:        "cwd (optional)",
+			Placeholder: "/new [cwd]",
+		},
 	}
 }
 
@@ -155,7 +160,7 @@ func (m *model) handleLocalSlashCommand(message string) (tea.Cmd, bool) {
 	case "new":
 		m.textarea.Reset()
 		m.dismissSlashCommandSuggestions()
-		return m.createNewConversation(), true
+		return m.openNewConversationPrompt(args), true
 	default:
 		return nil, false
 	}

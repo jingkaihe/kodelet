@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -520,13 +521,432 @@ func TestConversationPickerKeyboardNavigationEditingAndNewConversation(t *testin
 	assert.Empty(t, m.conversationPicker.query)
 
 	previousKey := m.activeConversationKey
+	previousCount := len(m.conversations)
 	m.conversationPicker.selected = itemCount + 10
 	cmd := m.updateConversationPickerKey(tea.KeyMsg{Type: tea.KeyEnter})
 
 	require.NotNil(t, cmd)
+	require.NotNil(t, m.conversationPicker)
+	require.NotNil(t, m.activeUIPrompt)
+	assert.Equal(t, uiPromptNewConversation, m.activeUIPrompt.origin)
+	assert.Equal(t, uiPromptInput, m.activeUIPrompt.mode)
+	assert.Equal(t, "Back", m.activeUIPrompt.cancelButtonText)
+	assert.Equal(t, previousKey, m.activeConversationKey)
+	assert.Len(t, m.conversations, previousCount)
+
+	cmd = m.updateUIPromptKey(tea.KeyMsg{Type: tea.KeyEnter})
+
+	require.NotNil(t, cmd)
 	assert.Nil(t, m.conversationPicker)
+	assert.Nil(t, m.activeUIPrompt)
 	assert.NotEqual(t, previousKey, m.activeConversationKey)
 	assert.True(t, strings.HasPrefix(m.activeConversationKey, "new:"))
+}
+
+func TestConversationPickerKeepsIdenticalUntitledRowsStable(t *testing.T) {
+	workspace := t.TempDir()
+	m := newModel(context.Background(), Config{CWD: workspace})
+	t.Cleanup(m.cancel)
+	first := m.conversationState
+	second := newConversationState("new:2", "", false, m.conversationDefaults)
+	third := newConversationState("new:3", "", false, m.conversationDefaults)
+	m.conversations = map[string]*conversationState{
+		first.key:  first,
+		second.key: second,
+		third.key:  third,
+	}
+	m.activeConversationKey = third.key
+	m.conversationState = third
+	m.conversationPicker = &conversationPickerState{query: workspace}
+	wantKeys := []string{first.key, second.key, third.key}
+
+	for range 50 {
+		items := m.filteredConversationPickerItems()
+		keys := make([]string, 0, len(items))
+		for _, item := range items {
+			keys = append(keys, item.key)
+			if item.key == third.key {
+				assert.Contains(t, m.conversationPickerItemStatus(item), "›")
+			} else {
+				assert.NotContains(t, m.conversationPickerItemStatus(item), "›")
+			}
+		}
+		assert.Equal(t, wantKeys, keys)
+	}
+}
+
+func TestNewConversationPromptDefaultsToActiveCWDAndReturnsToPickerOnCancel(t *testing.T) {
+	startupCWD := t.TempDir()
+	activeCWD := t.TempDir()
+	m := newModel(context.Background(), Config{CWD: startupCWD})
+	t.Cleanup(m.cancel)
+	m.width = 100
+	m.height = 30
+	m.resize()
+	m.cwd = activeCWD
+	m.requestedCWD = ""
+	m.conversationPicker = &conversationPickerState{}
+	previousKey := m.activeConversationKey
+
+	cmd := m.openNewConversationPrompt("")
+
+	require.NotNil(t, cmd)
+	require.NotNil(t, m.activeUIPrompt)
+	assert.Equal(t, uiPromptNewConversation, m.activeUIPrompt.origin)
+	assert.Equal(t, displayCWD(activeCWD), m.activeUIPrompt.input.Value())
+	assert.Equal(t, activeCWD, m.activeUIPrompt.newConversationCWDBase)
+	assert.Equal(t, "Back", m.activeUIPrompt.cancelButtonText)
+	assert.Contains(t, xansi.Strip(m.renderUIDialog()), "Working directory")
+
+	m.dismissUIPrompt()
+
+	assert.Nil(t, m.activeUIPrompt)
+	require.NotNil(t, m.conversationPicker)
+	assert.Equal(t, previousKey, m.activeConversationKey)
+
+	m.openNewConversationPrompt("")
+	cmd = m.submitUIPrompt()
+
+	require.NotNil(t, cmd)
+	assert.Nil(t, m.activeUIPrompt)
+	assert.Nil(t, m.conversationPicker)
+	assert.NotEqual(t, previousKey, m.activeConversationKey)
+	expectedCWD, err := conversations.NormalizeCWD(activeCWD)
+	require.NoError(t, err)
+	assert.Equal(t, expectedCWD, m.cwd)
+	assert.Equal(t, expectedCWD, m.requestedCWD)
+	assert.Equal(t, startupCWD, m.conversationDefaults.cwd)
+	assert.Equal(t, startupCWD, m.conversationDefaults.requestedCWD)
+}
+
+func TestNewSlashCommandPrefillsAndCreatesConversationInRelativeCWD(t *testing.T) {
+	currentCWD := t.TempDir()
+	targetCWD := t.TempDir()
+	relativeCWD, err := filepath.Rel(currentCWD, targetCWD)
+	require.NoError(t, err)
+	m := newModel(context.Background(), Config{CWD: currentCWD})
+	t.Cleanup(m.cancel)
+	previousKey := m.activeConversationKey
+	m.textarea.SetValue("/new " + relativeCWD)
+
+	cmd := m.submit()
+
+	require.NotNil(t, cmd)
+	require.NotNil(t, m.activeUIPrompt)
+	assert.Equal(t, uiPromptNewConversation, m.activeUIPrompt.origin)
+	assert.Equal(t, relativeCWD, m.activeUIPrompt.input.Value())
+	assert.Equal(t, currentCWD, m.activeUIPrompt.newConversationCWDBase)
+	assert.Equal(t, "Cancel", m.activeUIPrompt.cancelButtonText)
+	assert.Equal(t, previousKey, m.activeConversationKey)
+	assert.Empty(t, m.textarea.Value())
+
+	cmd = m.submitUIPrompt()
+
+	require.NotNil(t, cmd)
+	expectedCWD, err := conversations.NormalizeCWD(targetCWD)
+	require.NoError(t, err)
+	assert.NotEqual(t, previousKey, m.activeConversationKey)
+	assert.Equal(t, expectedCWD, m.cwd)
+	assert.Equal(t, expectedCWD, m.requestedCWD)
+	assert.Equal(t, currentCWD, m.conversationDefaults.cwd)
+	assert.Equal(t, currentCWD, m.conversationDefaults.requestedCWD)
+}
+
+func TestNewConversationPromptRejectsInvalidCWDBeforeCreatingState(t *testing.T) {
+	baseCWD := t.TempDir()
+	missingCWD := filepath.Join(baseCWD, "missing-workspace")
+	m := newModel(context.Background(), Config{CWD: baseCWD})
+	t.Cleanup(m.cancel)
+	m.width = 100
+	m.height = 30
+	m.resize()
+	m.openNewConversationPrompt(missingCWD)
+	previousKey := m.activeConversationKey
+	previousCount := len(m.conversations)
+	previousNextKey := m.nextConversationKey
+
+	cmd := m.submitUIPrompt()
+
+	require.NotNil(t, cmd)
+	require.NotNil(t, m.activeUIPrompt)
+	require.Len(t, m.uiNotifications, 1)
+	notification := m.uiNotifications[0]
+	assert.Equal(t, uiNotificationError, notification.level)
+	assert.Equal(t, "Working directory unavailable", notification.title)
+	assert.Equal(t, "Directory does not exist: "+missingCWD, notification.message)
+	assert.NotContains(t, xansi.Strip(m.renderUIDialog()), "Directory does not exist")
+	assert.Equal(t, previousKey, m.activeConversationKey)
+	assert.Len(t, m.conversations, previousCount)
+	assert.Equal(t, previousNextKey, m.nextConversationKey)
+}
+
+func TestNewConversationCWDNotificationRendersAbovePickerAndDialog(t *testing.T) {
+	baseCWD := t.TempDir()
+	missingCWD := filepath.Join(baseCWD, "missing-workspace")
+	m := newModel(context.Background(), Config{CWD: baseCWD})
+	t.Cleanup(m.cancel)
+	m.width = 100
+	m.height = 16
+	m.resize()
+	m.conversationPicker = &conversationPickerState{}
+	for index := range 20 {
+		m.conversationPicker.summaries = append(m.conversationPicker.summaries, convtypes.ConversationSummary{
+			ID:           fmt.Sprintf("conversation-%02d", index),
+			FirstMessage: fmt.Sprintf("Conversation %02d", index),
+		})
+	}
+	m.openNewConversationPrompt(missingCWD)
+
+	require.NotNil(t, m.submitUIPrompt())
+	view := xansi.Strip(m.View())
+
+	assert.Contains(t, view, "Working directory unavailable")
+	assert.Contains(t, view, "Directory does not exist")
+	require.NotNil(t, m.conversationPicker)
+	require.NotNil(t, m.activeUIPrompt)
+	assert.Equal(t, missingCWD, m.activeUIPrompt.input.Value())
+}
+
+func TestRunCompletionKeepsNewConversationPromptOpen(t *testing.T) {
+	m := newModel(context.Background(), Config{CWD: t.TempDir(), Runner: &recordingRunner{}})
+	t.Cleanup(m.cancel)
+	state := m.conversationState
+	require.NotNil(t, m.startConversationRun(state, "background request"))
+	runID := state.activeRunID
+	targetCWD := t.TempDir()
+	m.openNewConversationPrompt("")
+	require.NotNil(t, m.activeUIPrompt)
+	m.activeUIPrompt.input.SetValue(targetCWD)
+
+	updated, _ := m.Update(chatDoneMsg{
+		runID:           runID,
+		conversationKey: state.key,
+		conversationID:  state.conversationID,
+	})
+	m = updated.(model)
+
+	require.NotNil(t, m.activeUIPrompt)
+	assert.Equal(t, uiPromptNewConversation, m.activeUIPrompt.origin)
+	assert.Equal(t, targetCWD, m.activeUIPrompt.input.Value())
+	assert.Equal(t, "ready", m.status)
+}
+
+func TestNewConversationPromptPreservesCompletedRunStatusOnDismiss(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		err        error
+		cancelling bool
+		wantStatus string
+	}{
+		{name: "error", err: errors.New("run failed"), wantStatus: "error"},
+		{name: "cancelled", cancelling: true, wantStatus: "cancelled"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			m := newModel(context.Background(), Config{CWD: t.TempDir(), Runner: &recordingRunner{}})
+			t.Cleanup(m.cancel)
+			state := m.conversationState
+			require.NotNil(t, m.startConversationRun(state, "background request"))
+			runID := state.activeRunID
+			state.runCancelling = test.cancelling
+			m.openNewConversationPrompt("")
+
+			updated, _ := m.Update(chatDoneMsg{
+				runID:           runID,
+				conversationKey: state.key,
+				conversationID:  state.conversationID,
+				err:             test.err,
+			})
+			m = updated.(model)
+
+			require.NotNil(t, m.activeUIPrompt)
+			assert.Equal(t, test.wantStatus, m.status)
+			m.dismissUIPrompt()
+			assert.Nil(t, m.activeUIPrompt)
+			assert.Equal(t, test.wantStatus, m.status)
+		})
+	}
+}
+
+func TestExtensionPromptTemporarilySuspendsNewConversationPrompt(t *testing.T) {
+	m := newModel(context.Background(), Config{CWD: t.TempDir(), Runner: &recordingRunner{}})
+	t.Cleanup(m.cancel)
+	state := m.conversationState
+	require.NotNil(t, m.startConversationRun(state, "background request"))
+	runID := state.activeRunID
+	targetCWD := t.TempDir()
+	m.openNewConversationPrompt("")
+	require.NotNil(t, m.activeUIPrompt)
+	m.activeUIPrompt.input.SetValue(targetCWD)
+	responses := make(chan extensions.UIInputResponse, 1)
+
+	updated, _ := m.Update(uiPromptRequestMsg{
+		runID:           runID,
+		conversationKey: state.key,
+		prompt: uiPromptState{
+			mode:     uiPromptConfirm,
+			title:    "Approve extension action",
+			response: responses,
+		},
+	})
+	m = updated.(model)
+
+	require.NotNil(t, m.activeUIPrompt)
+	assert.Equal(t, uiPromptExtension, m.activeUIPrompt.origin)
+	assert.Equal(t, "Approve extension action", m.activeUIPrompt.title)
+	require.NotNil(t, m.suspendedUIPrompt)
+	assert.Equal(t, uiPromptNewConversation, m.suspendedUIPrompt.origin)
+	assert.Equal(t, targetCWD, m.suspendedUIPrompt.input.Value())
+
+	require.NotNil(t, m.submitUIPrompt())
+	require.NotNil(t, m.activeUIPrompt)
+	assert.Nil(t, m.suspendedUIPrompt)
+	assert.Equal(t, uiPromptNewConversation, m.activeUIPrompt.origin)
+	assert.Equal(t, targetCWD, m.activeUIPrompt.input.Value())
+	assert.Equal(t, "working", m.status)
+	select {
+	case response := <-responses:
+		assert.Equal(t, extensions.UIInputStatusSubmitted, response.Status)
+		assert.True(t, response.Confirmed)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for extension prompt response")
+	}
+}
+
+func TestInitialHistoryRefreshesNewConversationPromptCWD(t *testing.T) {
+	shellCWD := t.TempDir()
+	projectCWD := t.TempDir()
+	m := newModel(context.Background(), Config{ConversationID: "conversation-resumed", CWD: shellCWD})
+	t.Cleanup(m.cancel)
+	m.openNewConversationPrompt("")
+	require.NotNil(t, m.activeUIPrompt)
+	assert.Equal(t, displayCWD(shellCWD), m.activeUIPrompt.input.Value())
+
+	updated, _ := m.Update(initialHistoryMsg{loaded: true, cwd: projectCWD})
+	m = updated.(model)
+
+	require.NotNil(t, m.activeUIPrompt)
+	assert.Equal(t, displayCWD(projectCWD), m.activeUIPrompt.input.Value())
+	assert.Equal(t, displayCWD(projectCWD), m.activeUIPrompt.defaultValue)
+	assert.Equal(t, projectCWD, m.activeUIPrompt.newConversationCWDBase)
+}
+
+func TestInitialHistoryRefreshPreservesEditedNewConversationPath(t *testing.T) {
+	shellCWD := t.TempDir()
+	projectCWD := t.TempDir()
+	targetCWD := filepath.Join(projectCWD, "nested")
+	require.NoError(t, os.Mkdir(targetCWD, 0o755))
+	m := newModel(context.Background(), Config{ConversationID: "conversation-resumed", CWD: shellCWD})
+	t.Cleanup(m.cancel)
+	m.openNewConversationPrompt("")
+	require.NotNil(t, m.activeUIPrompt)
+	m.activeUIPrompt.input.SetValue("nested")
+
+	updated, _ := m.Update(initialHistoryMsg{loaded: true, cwd: projectCWD})
+	m = updated.(model)
+
+	require.NotNil(t, m.activeUIPrompt)
+	assert.Equal(t, "nested", m.activeUIPrompt.input.Value())
+	assert.Equal(t, projectCWD, m.activeUIPrompt.newConversationCWDBase)
+	require.NotNil(t, m.submitUIPrompt())
+	expectedCWD, err := conversations.NormalizeCWD(targetCWD)
+	require.NoError(t, err)
+	assert.Equal(t, expectedCWD, m.cwd)
+}
+
+func TestInitialHistoryRefreshesSuspendedNewConversationPromptCWD(t *testing.T) {
+	shellCWD := t.TempDir()
+	projectCWD := t.TempDir()
+	targetCWD := filepath.Join(projectCWD, "nested")
+	require.NoError(t, os.Mkdir(targetCWD, 0o755))
+	m := newModel(context.Background(), Config{
+		ConversationID: "conversation-resumed",
+		CWD:            shellCWD,
+		Runner:         &recordingRunner{},
+	})
+	t.Cleanup(m.cancel)
+	state := m.conversationState
+	require.NotNil(t, m.startConversationRun(state, "fast request"))
+	runID := state.activeRunID
+	m.openNewConversationPrompt("")
+	require.NotNil(t, m.activeUIPrompt)
+	m.activeUIPrompt.input.SetValue("nested")
+	responses := make(chan extensions.UIInputResponse, 1)
+
+	updated, _ := m.Update(uiPromptRequestMsg{
+		runID:           runID,
+		conversationKey: state.key,
+		prompt: uiPromptState{
+			mode:     uiPromptConfirm,
+			title:    "Approve extension action",
+			response: responses,
+		},
+	})
+	m = updated.(model)
+	require.NotNil(t, m.suspendedUIPrompt)
+
+	updated, _ = m.Update(initialHistoryMsg{loaded: true, cwd: projectCWD})
+	m = updated.(model)
+
+	require.NotNil(t, m.suspendedUIPrompt)
+	assert.Equal(t, "nested", m.suspendedUIPrompt.input.Value())
+	assert.Equal(t, projectCWD, m.suspendedUIPrompt.newConversationCWDBase)
+	require.NotNil(t, m.submitUIPrompt())
+	require.NotNil(t, m.activeUIPrompt)
+	assert.Equal(t, uiPromptNewConversation, m.activeUIPrompt.origin)
+	require.NotNil(t, m.submitUIPrompt())
+	expectedCWD, err := conversations.NormalizeCWD(targetCWD)
+	require.NoError(t, err)
+	assert.Equal(t, expectedCWD, m.cwd)
+	select {
+	case response := <-responses:
+		assert.Equal(t, extensions.UIInputStatusSubmitted, response.Status)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for extension prompt response")
+	}
+}
+
+func TestRemoteNewConversationPromptConfirmsOwnedWorkspace(t *testing.T) {
+	m := newModel(context.Background(), Config{
+		CWD:    "~/runner/kodelet",
+		Runner: &recordingRunner{},
+		Remote: true,
+	})
+	t.Cleanup(m.cancel)
+	m.conversationPicker = &conversationPickerState{}
+	previousKey := m.activeConversationKey
+
+	m.openNewConversationPrompt("")
+
+	require.NotNil(t, m.activeUIPrompt)
+	assert.Equal(t, uiPromptNewConversation, m.activeUIPrompt.origin)
+	assert.Equal(t, uiPromptConfirm, m.activeUIPrompt.mode)
+	assert.Contains(t, m.activeUIPrompt.message, "~/runner/kodelet")
+	assert.Equal(t, "Back", m.activeUIPrompt.cancelButtonText)
+	require.NotNil(t, m.conversationPicker)
+
+	cmd := m.submitUIPrompt()
+
+	require.NotNil(t, cmd)
+	assert.Nil(t, m.activeUIPrompt)
+	assert.Nil(t, m.conversationPicker)
+	assert.NotEqual(t, previousKey, m.activeConversationKey)
+	assert.Equal(t, "~/runner/kodelet", m.cwd)
+	assert.Empty(t, m.requestedCWD)
+}
+
+func TestRemoteNewConversationPromptShowsRejectedCWDOverride(t *testing.T) {
+	m := newModel(context.Background(), Config{Runner: &recordingRunner{}, Remote: true})
+	t.Cleanup(m.cancel)
+	m.conversationDefaults.cwd = ""
+
+	m.openNewConversationPrompt("/tmp/client-workspace")
+
+	require.NotNil(t, m.activeUIPrompt)
+	assert.Equal(t, uiPromptNewConversation, m.activeUIPrompt.origin)
+	assert.Equal(t, uiPromptConfirm, m.activeUIPrompt.mode)
+	assert.Equal(t, "The server or runner will select the working directory.", m.activeUIPrompt.message)
+	assert.Contains(t, m.activeUIPrompt.helpText, "/tmp/client-workspace")
+	assert.Contains(t, m.activeUIPrompt.helpText, "cannot be used")
 }
 
 func TestConversationPickerRendersLoadingErrorAndEmptyState(t *testing.T) {

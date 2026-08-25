@@ -179,12 +179,13 @@ type conversationState struct {
 	workingFrame  int
 	cancelRun     context.CancelFunc
 
-	queuedSteering  []string
-	queuedFollowUps []string
-	steerError      string
-	status          string
-	err             error
-	activeUIPrompt  *uiPromptState
+	queuedSteering    []string
+	queuedFollowUps   []string
+	steerError        string
+	status            string
+	err               error
+	activeUIPrompt    *uiPromptState
+	suspendedUIPrompt *uiPromptState
 }
 
 type conversationDefaults struct {

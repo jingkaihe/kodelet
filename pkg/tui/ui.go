@@ -33,6 +33,7 @@ type uiPromptOrigin int
 const (
 	uiPromptExtension uiPromptOrigin = iota
 	uiPromptTheme
+	uiPromptNewConversation
 )
 
 type uiPromptState struct {
@@ -50,6 +51,8 @@ type uiPromptState struct {
 	cancelButtonText string
 	required         bool
 	secret           bool
+
+	newConversationCWDBase string
 
 	options      []string
 	optionValues []string
@@ -462,8 +465,12 @@ func (m *model) openUIPromptForState(state *conversationState, prompt uiPromptSt
 		oldFocus = m.extensionSurfaces[oldFocusKey]
 	}
 	if state.activeUIPrompt != nil {
-		previous := *state.activeUIPrompt
-		respondUIPrompt(previous, extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
+		if prompt.origin == uiPromptExtension && state.activeUIPrompt.origin != uiPromptExtension && state.suspendedUIPrompt == nil {
+			state.suspendedUIPrompt = state.activeUIPrompt
+		} else {
+			previous := *state.activeUIPrompt
+			respondUIPrompt(previous, extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
+		}
 	}
 	state.profilePickerOpen = false
 	state.reasoningPickerOpen = false
@@ -472,7 +479,9 @@ func (m *model) openUIPromptForState(state *conversationState, prompt uiPromptSt
 		prompt = newInputPromptModel(prompt, m.uiDialogInputWidth())
 	}
 	state.activeUIPrompt = &prompt
-	state.status = "waiting for input"
+	if prompt.origin == uiPromptExtension {
+		state.status = "waiting for input"
+	}
 	if active {
 		m.resize()
 		m.refreshViewport(false)
@@ -516,10 +525,12 @@ func (m *model) resolveUIPromptForState(state *conversationState, response exten
 	}
 	prompt := *state.activeUIPrompt
 	state.activeUIPrompt = nil
-	if state.running {
-		state.status = "working"
-	} else {
-		state.status = "ready"
+	if prompt.origin == uiPromptExtension {
+		if state.running {
+			state.status = "working"
+		} else {
+			state.status = "ready"
+		}
 	}
 	if response.Status == "" {
 		response.Status = extensions.UIInputStatusDismissed
@@ -528,10 +539,20 @@ func (m *model) resolveUIPromptForState(state *conversationState, response exten
 	case prompt.response <- response:
 	default:
 	}
+	restoredInputPrompt := false
+	if prompt.origin == uiPromptExtension && state.suspendedUIPrompt != nil {
+		state.activeUIPrompt = state.suspendedUIPrompt
+		state.suspendedUIPrompt = nil
+		restoredInputPrompt = state.activeUIPrompt.mode == uiPromptInput
+	}
 	if state == m.conversationState {
 		m.resize()
 		m.refreshViewport(false)
-		return tea.Sequence(m.extensionSurfaceFocusTransitionCommands(oldFocusKey, oldFocused, oldFocus)...)
+		focusCmd := tea.Sequence(m.extensionSurfaceFocusTransitionCommands(oldFocusKey, oldFocused, oldFocus)...)
+		if restoredInputPrompt {
+			return tea.Batch(focusCmd, textinput.Blink)
+		}
+		return focusCmd
 	}
 	return nil
 }
@@ -547,9 +568,26 @@ func (m *model) submitUIPrompt() tea.Cmd {
 		if prompt.required && strings.TrimSpace(value) == "" {
 			return nil
 		}
+		if prompt.origin == uiPromptNewConversation {
+			cwd, err := resolveNewConversationCWD(value, prompt.newConversationCWDBase)
+			if err != nil {
+				return m.addUINotification(uiNotification{
+					conversationKey: m.activeConversationKey,
+					level:           uiNotificationError,
+					title:           "Working directory unavailable",
+					message:         newConversationCWDErrorMessage(err),
+				})
+			}
+			focusCmd := m.resolveUIPrompt(extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted, Value: cwd})
+			return tea.Batch(focusCmd, m.createNewConversationAt(cwd))
+		}
 		return m.resolveUIPrompt(extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted, Value: value})
 	case uiPromptConfirm:
-		return m.resolveUIPrompt(extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted, Confirmed: true, Value: "true"})
+		focusCmd := m.resolveUIPrompt(extensions.UIInputResponse{Status: extensions.UIInputStatusSubmitted, Confirmed: true, Value: "true"})
+		if prompt.origin == uiPromptNewConversation {
+			return tea.Batch(focusCmd, m.createNewConversation())
+		}
+		return focusCmd
 	case uiPromptSelect:
 		if len(prompt.options) == 0 {
 			return nil

@@ -7,6 +7,8 @@ import (
 
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/jingkaihe/kodelet/pkg/chat"
+	"github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/messagehistory"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
@@ -132,9 +134,20 @@ func (m *model) activateConversation(key string) (bool, tea.Cmd) {
 }
 
 func (m *model) createNewConversation() tea.Cmd {
+	return m.createNewConversationAt("")
+}
+
+func (m *model) createNewConversationAt(cwd string) tea.Cmd {
 	m.nextConversationKey++
 	key := fmt.Sprintf("new:%d", m.nextConversationKey)
-	state := newConversationState(key, "", false, m.conversationDefaults)
+	defaults := m.conversationDefaults
+	if !m.remote {
+		if cwd = strings.TrimSpace(cwd); cwd != "" {
+			defaults.cwd = cwd
+			defaults.requestedCWD = cwd
+		}
+	}
+	state := newConversationState(key, "", false, defaults)
 	if !m.remote {
 		state.messageHistoryScopeCWD, _ = messagehistory.ResolveScopeCWD(state.cwd)
 	}
@@ -153,6 +166,117 @@ func (m *model) createNewConversation() tea.Cmd {
 		)
 	}
 	return tea.Batch(cmds...)
+}
+
+func (m *model) openNewConversationPrompt(initialCWD string) tea.Cmd {
+	cancelButtonText := "Cancel"
+	if m.conversationPicker != nil {
+		cancelButtonText = "Back"
+	}
+
+	baseCWD := m.newConversationDefaultCWD()
+	if m.remote {
+		message := "The server or runner will select the working directory."
+		if strings.TrimSpace(baseCWD) != "" {
+			message = "Working directory: " + displayCWD(baseCWD)
+		}
+		helpText := "The server or runner owns this workspace."
+		if requestedCWD := strings.TrimSpace(initialCWD); requestedCWD != "" {
+			helpText = fmt.Sprintf("Requested working directory %q cannot be used because the server or runner owns this workspace.", requestedCWD)
+		}
+		return m.openUIPrompt(uiPromptState{
+			mode:             uiPromptConfirm,
+			origin:           uiPromptNewConversation,
+			title:            "New conversation",
+			message:          message,
+			helpText:         helpText,
+			submitButtonText: "Create",
+			cancelButtonText: cancelButtonText,
+		})
+	}
+
+	value := strings.TrimSpace(initialCWD)
+	if value == "" {
+		value = displayCWD(baseCWD)
+	}
+	return m.openUIPrompt(uiPromptState{
+		mode:                   uiPromptInput,
+		origin:                 uiPromptNewConversation,
+		title:                  "New conversation",
+		message:                "Working directory",
+		helpText:               "Relative paths are resolved from the current workspace.",
+		defaultValue:           value,
+		submitButtonText:       "Create",
+		cancelButtonText:       cancelButtonText,
+		required:               true,
+		newConversationCWDBase: baseCWD,
+	})
+}
+
+func (m model) newConversationDefaultCWD() string {
+	if !m.remote && m.conversationState != nil {
+		if cwd := strings.TrimSpace(slashCommandCWDForState(m.conversationState)); cwd != "" {
+			return cwd
+		}
+	}
+	return strings.TrimSpace(m.conversationDefaults.cwd)
+}
+
+func (m *model) refreshNewConversationPromptCWD(cwd string) {
+	cwd = strings.TrimSpace(cwd)
+	if cwd == "" {
+		return
+	}
+
+	for _, prompt := range []*uiPromptState{m.activeUIPrompt, m.suspendedUIPrompt} {
+		if prompt == nil || prompt.origin != uiPromptNewConversation || prompt.mode != uiPromptInput {
+			continue
+		}
+		inputUnchanged := prompt.input.Value() == prompt.defaultValue
+		prompt.newConversationCWDBase = cwd
+		prompt.defaultValue = displayCWD(cwd)
+		if inputUnchanged {
+			prompt.input.SetValue(prompt.defaultValue)
+		}
+	}
+}
+
+func resolveNewConversationCWD(input, baseCWD string) (string, error) {
+	processCWD, err := chat.ResolveConfiguredDefaultCWD("")
+	if err != nil {
+		return "", err
+	}
+
+	expandedBase := strings.TrimSpace(baseCWD)
+	if expandedBase == "" {
+		expandedBase = processCWD
+	} else {
+		expandedBase, err = chat.ExpandCWDInput(expandedBase, processCWD)
+		if err != nil {
+			return "", err
+		}
+		if normalizedBase, normalizeErr := conversations.NormalizeCWD(expandedBase); normalizeErr == nil {
+			expandedBase = normalizedBase
+		}
+	}
+
+	expandedCWD, err := chat.ExpandCWDInput(input, expandedBase)
+	if err != nil {
+		return "", err
+	}
+	return conversations.NormalizeCWD(expandedCWD)
+}
+
+func newConversationCWDErrorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	message := err.Error()
+	const missingDirectoryPrefix = "cwd directory does not exist:"
+	if path, found := strings.CutPrefix(message, missingDirectoryPrefix); found {
+		return "Directory does not exist:" + path
+	}
+	return message
 }
 
 func (m *model) ensureConversationID(state *conversationState) string {

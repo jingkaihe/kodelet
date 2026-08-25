@@ -204,9 +204,6 @@ func (m model) renderUIOverlays(content string) string {
 		lines = m.overlayExtensionSurfaces(lines)
 	}
 
-	if len(m.uiNotifications) > 0 {
-		lines = m.overlayUINotifications(lines)
-	}
 	if m.conversationPicker != nil {
 		lines = m.overlayConversationPicker(lines)
 	}
@@ -215,6 +212,10 @@ func (m model) renderUIOverlays(content string) string {
 	}
 	if m.shortcutsOpen {
 		lines = m.overlayShortcutsDialog(lines)
+	}
+	// Notifications stay topmost so modal overlays cannot obscure transient feedback.
+	if len(m.uiNotifications) > 0 {
+		lines = m.overlayUINotifications(lines)
 	}
 	return strings.Join(lines, "\n")
 }

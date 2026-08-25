@@ -186,7 +186,13 @@ func (m model) mergeConversationPickerItems(summaries []convtypes.ConversationSu
 		if !left.updatedAt.Equal(right.updatedAt) {
 			return left.updatedAt.After(right.updatedAt)
 		}
-		return strings.ToLower(left.title) < strings.ToLower(right.title)
+		leftTitle := strings.ToLower(left.title)
+		rightTitle := strings.ToLower(right.title)
+		if leftTitle != rightTitle {
+			return leftTitle < rightTitle
+		}
+		// Items originate from a map, so equal visible fields still need a stable order.
+		return left.key < right.key
 	})
 	return items
 }
@@ -362,7 +368,7 @@ func (m *model) selectConversationPickerItem() tea.Cmd {
 	index := m.conversationPickerSelectedIndex(items)
 	item := items[index]
 	if item.isNew {
-		return m.createNewConversation()
+		return m.openNewConversationPrompt("")
 	}
 	if activated, cmd := m.activateConversation(item.key); activated {
 		return tea.Batch(cmd, m.closeConversationPicker())
@@ -431,7 +437,7 @@ func (m model) renderConversationPicker() string {
 			lines = append(lines, renderPersistentStyle(uiDialogMutedStyle, fitVisible("↓ more", contentWidth)))
 		}
 	}
-	lines = append(lines, "", renderPersistentStyle(uiDialogMutedStyle, fitVisible("Enter open · Esc close · /new creates immediately", contentWidth)))
+	lines = append(lines, "", renderPersistentStyle(uiDialogMutedStyle, fitVisible("Enter open · Esc close · /new opens setup", contentWidth)))
 	if maxContentRows := max(0, m.height-2); len(lines) > maxContentRows {
 		lines = lines[:maxContentRows]
 	}

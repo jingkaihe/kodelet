@@ -290,6 +290,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if strings.TrimSpace(msg.cwd) != "" {
 				reloadSlashCommands = reloadSlashCommands || (!m.remote && strings.TrimSpace(m.requestedCWD) == "" && strings.TrimSpace(m.cwd) != strings.TrimSpace(msg.cwd))
 				m.cwd = strings.TrimSpace(msg.cwd)
+				m.refreshNewConversationPromptCWD(m.cwd)
 				if !m.remote {
 					reloadMessageHistory = m.updateMessageHistoryScope(m.cwd)
 				}
@@ -798,7 +799,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setConversationID(state, msg.conversationID)
 		}
 		var promptFocusCmd tea.Cmd
-		if state.activeUIPrompt != nil && (state.activeUIPrompt.runID == 0 || state.activeUIPrompt.runID == msg.runID) {
+		if state.activeUIPrompt != nil && state.activeUIPrompt.origin == uiPromptExtension && (state.activeUIPrompt.runID == 0 || state.activeUIPrompt.runID == msg.runID) {
 			promptFocusCmd = m.resolveUIPromptForState(state, extensions.UIInputResponse{Status: extensions.UIInputStatusDismissed})
 		}
 		currentState := m.conversationState
