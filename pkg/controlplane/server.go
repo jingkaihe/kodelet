@@ -94,6 +94,9 @@ type Server struct {
 	chatSubscribersMu     sync.Mutex
 	publicAuthRates       map[string]publicAuthRateEntry
 	publicAuthRatesMu     sync.Mutex
+	codexAuth             codexProviderAuthService
+	codexDeviceLogin      *codexDeviceLoginSession
+	codexDeviceLoginMu    sync.Mutex
 	shutdownTimeout       time.Duration
 }
 
@@ -357,6 +360,10 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/auth/me", s.handleAuthMe).Methods("GET")
 	api.HandleFunc("/auth/v1/device/context", s.handleUserLoginContext).Methods("GET")
 	api.HandleFunc("/auth/v1/device/decision", s.handleUserLoginDecision).Methods("POST")
+	api.HandleFunc("/providers/codex", s.requireRole(RoleAdmin, s.handleGetCodexProvider)).Methods("GET")
+	api.HandleFunc("/providers/codex/device-login", s.requireRole(RoleAdmin, s.handleStartCodexDeviceLogin)).Methods("POST")
+	api.HandleFunc("/providers/codex/device-login/{id}", s.requireRole(RoleAdmin, s.handleGetCodexDeviceLogin)).Methods("GET")
+	api.HandleFunc("/providers/codex/device-login/{id}", s.requireRole(RoleAdmin, s.handleCancelCodexDeviceLogin)).Methods("DELETE")
 	api.HandleFunc("/runner/v1/enrollment/context", s.requireRole(RoleRunnerAdmin, s.handleRunnerEnrollmentContext)).Methods("GET")
 	api.HandleFunc("/runner/v1/enrollment/decision", s.requireRole(RoleRunnerAdmin, s.handleRunnerEnrollmentDecision)).Methods("POST")
 	api.HandleFunc("/chat/settings", s.handleGetChatSettings).Methods("GET")

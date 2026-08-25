@@ -145,6 +145,21 @@ export interface AuthPrincipal {
   roles: string[];
 }
 
+export interface CodexProviderStatus {
+  provider: 'codex';
+  connected: boolean;
+}
+
+export type CodexDeviceLoginStatus = 'pending' | 'connected' | 'failed' | 'canceled';
+
+export interface CodexDeviceLogin {
+  id: string;
+  status: CodexDeviceLoginStatus;
+  verificationUrl?: string;
+  userCode?: string;
+  message?: string;
+}
+
 export type ApprovalStatus = 'pending' | 'approved' | 'denied' | 'expired';
 
 export interface UserLoginAuthorization {

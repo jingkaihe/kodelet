@@ -34,6 +34,10 @@ const mockGetAuthPrincipal = vi.fn();
 const mockGetConversations = vi.fn();
 const mockGetConversation = vi.fn();
 const mockGetChatSettings = vi.fn();
+const mockGetCodexProviderStatus = vi.fn();
+const mockStartCodexDeviceLogin = vi.fn();
+const mockGetCodexDeviceLogin = vi.fn();
+const mockCancelCodexDeviceLogin = vi.fn();
 const mockGetRunners = vi.fn();
 const mockGetSlashCommands = vi.fn();
 const mockStreamChat = vi.fn();
@@ -102,6 +106,10 @@ vi.mock('../services/api', () => ({
     getConversations: (...args: unknown[]) => mockGetConversations(...args),
     getConversation: (...args: unknown[]) => mockGetConversation(...args),
     getChatSettings: (...args: unknown[]) => mockGetChatSettings(...args),
+    getCodexProviderStatus: (...args: unknown[]) => mockGetCodexProviderStatus(...args),
+    startCodexDeviceLogin: (...args: unknown[]) => mockStartCodexDeviceLogin(...args),
+    getCodexDeviceLogin: (...args: unknown[]) => mockGetCodexDeviceLogin(...args),
+    cancelCodexDeviceLogin: (...args: unknown[]) => mockCancelCodexDeviceLogin(...args),
     getRunners: (...args: unknown[]) => mockGetRunners(...args),
     getSlashCommands: (...args: unknown[]) => mockGetSlashCommands(...args),
     getCWDHints: (...args: unknown[]) => mockGetCWDHints(...args),
@@ -134,6 +142,8 @@ describe('ChatPage', () => {
     window.localStorage.clear();
     window.HTMLElement.prototype.scrollIntoView = vi.fn();
     mockGetAuthPrincipal.mockResolvedValue({ id: 'anonymous', roles: ['admin'] });
+    mockGetCodexProviderStatus.mockResolvedValue({ provider: 'codex', connected: false });
+    mockCancelCodexDeviceLogin.mockResolvedValue(undefined);
     mockGetRunners.mockResolvedValue({ runners: [] });
     mockGetChatSettings.mockImplementation((profile?: string) => {
       const selectedProfile = profile || 'work';
@@ -344,6 +354,27 @@ describe('ChatPage', () => {
     expect(
       await screen.findByRole('button', { name: 'Jingkai He account menu' })
     ).toHaveTextContent('J He');
+  });
+
+  it('opens provider settings from the administrator account menu', async () => {
+    mockGetAuthPrincipal.mockResolvedValue({
+      id: 'https://issuer.example.com|admin',
+      issuer: 'https://issuer.example.com',
+      subject: 'admin',
+      name: 'Admin User',
+      roles: ['admin'],
+    });
+    render(<ChatPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Admin User account menu' }));
+    const providerSettings = screen.getByRole('menuitem', { name: 'Provider settings' });
+    fireEvent.click(providerSettings);
+
+    expect(await screen.findByRole('dialog', { name: 'Provider settings' })).toBeInTheDocument();
+    expect(mockGetCodexProviderStatus).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close provider settings' }));
+    expect(screen.queryByRole('dialog', { name: 'Provider settings' })).not.toBeInTheDocument();
   });
 
   it('starts with the sidebar closed on mobile and closes it before opening a new chat', async () => {

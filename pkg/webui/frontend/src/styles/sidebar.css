@@ -578,12 +578,15 @@
   align-items: center;
   gap: 0.62rem;
   width: 100%;
+  border: 0;
+  background: transparent;
   padding: 0.62rem 0.72rem;
   border-radius: 10px;
   color: #3d3a35;
   font-family: var(--font-heading);
   font-size: 0.84rem;
   font-weight: 500;
+  text-align: left;
   text-decoration: none;
 }
 

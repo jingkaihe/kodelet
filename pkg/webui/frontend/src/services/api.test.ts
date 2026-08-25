@@ -227,6 +227,77 @@ describe("ApiService", () => {
 		});
 	});
 
+	describe("Codex provider authentication", () => {
+		it("loads the ChatGPT subscription connection status", async () => {
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				status: 200,
+				json: async () => ({ provider: "codex", connected: true }),
+			});
+
+			await expect(apiService.getCodexProviderStatus()).resolves.toEqual({
+				provider: "codex",
+				connected: true,
+			});
+			expect(mockFetch).toHaveBeenCalledWith(
+				"/api/providers/codex",
+				expect.any(Object),
+			);
+		});
+
+		it("starts and polls device login with CSRF protection", async () => {
+			setTestCookie("kodelet_csrf=csrf-provider; Path=/");
+			const login = {
+				id: "codex_login_123",
+				status: "pending",
+				verificationUrl: "https://auth.openai.com/codex/device",
+				userCode: "ABCD-EFGH",
+			};
+			mockFetch
+				.mockResolvedValueOnce({ ok: true, status: 200, json: async () => login })
+				.mockResolvedValueOnce({
+					ok: true,
+					status: 200,
+					json: async () => ({ ...login, status: "connected" }),
+				});
+
+			await expect(apiService.startCodexDeviceLogin()).resolves.toEqual(login);
+			await expect(apiService.getCodexDeviceLogin(login.id)).resolves.toMatchObject({
+				status: "connected",
+			});
+
+			expect(mockFetch).toHaveBeenNthCalledWith(
+				1,
+				"/api/providers/codex/device-login",
+				expect.objectContaining({
+					method: "POST",
+					headers: expect.objectContaining({ "X-CSRF-Token": "csrf-provider" }),
+				}),
+			);
+			expect(mockFetch).toHaveBeenNthCalledWith(
+				2,
+				"/api/providers/codex/device-login/codex_login_123",
+				expect.any(Object),
+			);
+		});
+
+		it("cancels pending device login", async () => {
+			setTestCookie("kodelet_csrf=csrf-provider; Path=/");
+			mockFetch.mockResolvedValueOnce({ ok: true, status: 204 });
+
+			await apiService.cancelCodexDeviceLogin("codex_login_123");
+
+			expect(mockFetch).toHaveBeenCalledWith(
+				"/api/providers/codex/device-login/codex_login_123",
+				expect.objectContaining({
+					method: "DELETE",
+					headers: expect.objectContaining({ "X-CSRF-Token": "csrf-provider" }),
+				}),
+			);
+		});
+
+	});
+
 	describe("getConversations", () => {
 		it("fetches conversations without filters", async () => {
 			const mockResponse: ConversationListResponse = {

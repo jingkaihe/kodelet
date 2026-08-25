@@ -23,6 +23,8 @@ import {
 	UserLoginDecisionResponse,
 	RunnerEnrollmentDecisionResponse,
 	WorkspaceTarget,
+	CodexProviderStatus,
+	CodexDeviceLogin,
 } from "../types";
 
 class ApiService {
@@ -116,6 +118,29 @@ class ApiService {
 
 	async getAuthPrincipal(): Promise<AuthPrincipal> {
 		return this.request<AuthPrincipal>("/api/auth/me");
+	}
+
+	async getCodexProviderStatus(): Promise<CodexProviderStatus> {
+		return this.request<CodexProviderStatus>("/api/providers/codex");
+	}
+
+	async startCodexDeviceLogin(): Promise<CodexDeviceLogin> {
+		return this.request<CodexDeviceLogin>("/api/providers/codex/device-login", {
+			method: "POST",
+		});
+	}
+
+	async getCodexDeviceLogin(id: string): Promise<CodexDeviceLogin> {
+		return this.request<CodexDeviceLogin>(
+			`/api/providers/codex/device-login/${encodeURIComponent(id)}`,
+		);
+	}
+
+	async cancelCodexDeviceLogin(id: string): Promise<void> {
+		await this.request(
+			`/api/providers/codex/device-login/${encodeURIComponent(id)}`,
+			{ method: "DELETE" },
+		);
 	}
 
 	async getUserLoginPrincipal(): Promise<AuthPrincipal> {

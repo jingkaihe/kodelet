@@ -5,6 +5,7 @@ import {
 	LogOut,
 	PanelLeft,
 	Search,
+	Settings2,
 	SquarePen,
 	X,
 } from "lucide-react";
@@ -30,6 +31,7 @@ interface ChatSidebarProps {
 	disabled?: boolean;
 	onHide?: () => void;
 	onNewChat: () => void;
+	onOpenProviderSettings?: () => void;
 	onSearch: () => void;
 	onSelectConversation: (conversationId: string) => void;
 	onForkConversation: (conversationId: string) => void;
@@ -518,6 +520,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 	disabled = false,
 	onHide,
 	onNewChat,
+	onOpenProviderSettings,
 	onSearch,
 	onSelectConversation,
 	onForkConversation,
@@ -641,6 +644,9 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 	const account = isOIDCPrincipal(authPrincipal)
 		? getAccountPresentation(authPrincipal)
 		: null;
+	const canManageProviders = Boolean(
+		account && onOpenProviderSettings && authPrincipal?.roles.includes("admin"),
+	);
 
 	return (
 		<aside className="chat-sidebar-surface relative flex h-full flex-col overflow-visible border-b border-black/8 px-6 py-6 lg:border-b-0">
@@ -931,6 +937,21 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 							data-testid="sidebar-account-menu"
 							role="menu"
 						>
+							{canManageProviders ? (
+								<button
+									className="sidebar-account-menu-item"
+									data-testid="sidebar-provider-settings"
+									onClick={() => {
+										setAccountMenuOpen(false);
+										onOpenProviderSettings?.();
+									}}
+									role="menuitem"
+									type="button"
+								>
+									<Settings2 aria-hidden="true" className="h-4 w-4" strokeWidth={1.8} />
+									<span>Provider settings</span>
+								</button>
+							) : null}
 							<a
 								className="sidebar-account-menu-item"
 								href="/auth/logout"

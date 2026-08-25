@@ -18,6 +18,7 @@ import ChatSidebar, {
 import ChatTranscript from '../components/chat/ChatTranscript';
 import NewChatContextDialog from '../components/chat/NewChatContextDialog';
 import PendingSteerList from '../components/chat/PendingSteerList';
+import ProviderSettingsDialog from '../components/chat/ProviderSettingsDialog';
 import UIInputDialog from '../components/chat/UIInputDialog';
 import { applyChatStreamEvent, conversationToChatMessages } from '../features/chat/state';
 import apiService from '../services/api';
@@ -495,6 +496,7 @@ const ChatPage: React.FC = () => {
   const [sidebarWidth, setSidebarWidth] = useState(readStoredSidebarWidth);
   const [isResizingSidebar, setIsResizingSidebar] = useState(false);
   const [newChatDialogOpen, setNewChatDialogOpen] = useState(false);
+  const [providerSettingsOpen, setProviderSettingsOpen] = useState(false);
   const [uiRequestDialog, setUIRequestDialog] = useState<UIRequestDialogState | null>(null);
   const [uiInputSubmitting, setUIInputSubmitting] = useState(false);
   const [statusTick, setStatusTick] = useState(0);
@@ -547,7 +549,7 @@ const ChatPage: React.FC = () => {
   const sidebarOverlayOpen = mobileLayout && sidebarVisible;
   const workspaceOverlayOpen = workspaceOverlayLayout && workspacePanelOpen;
   const higherPriorityDialogOpen =
-    uiRequestDialog !== null || newChatDialogOpen || sidebarSearchOpen;
+    uiRequestDialog !== null || newChatDialogOpen || providerSettingsOpen || sidebarSearchOpen;
 
   const setConversationRunning = useCallback(
     (id: string | null | undefined, isRunning: boolean) => {
@@ -3034,7 +3036,11 @@ const ChatPage: React.FC = () => {
         />
       ) : null}
 
-      {newChatDialogOpen && !uiRequestDialog ? (
+      {providerSettingsOpen && !uiRequestDialog && !newChatDialogOpen && !sidebarSearchOpen ? (
+        <ProviderSettingsDialog onClose={() => setProviderSettingsOpen(false)} />
+      ) : null}
+
+      {newChatDialogOpen && !uiRequestDialog && !providerSettingsOpen ? (
         <NewChatContextDialog
           availableProfiles={availableProfiles}
           cwdInputRef={cwdInputRef}
@@ -3091,7 +3097,7 @@ const ChatPage: React.FC = () => {
         />
       ) : null}
 
-      {sidebarSearchOpen && !uiRequestDialog && !newChatDialogOpen ? (
+      {sidebarSearchOpen && !uiRequestDialog && !newChatDialogOpen && !providerSettingsOpen ? (
         <ConversationSearchDialog
           conversations={conversationSearchResults}
           cwdFilter={conversationCWDFilter}
@@ -3149,6 +3155,7 @@ const ChatPage: React.FC = () => {
               onForkConversation={handleForkConversation}
               onHide={handleSidebarToggle}
               onNewChat={handleNewChat}
+              onOpenProviderSettings={() => setProviderSettingsOpen(true)}
               onSearch={handleOpenSidebarSearch}
               onSelectConversation={handleSelectConversation}
               searchActive={sidebarSearchOpen}

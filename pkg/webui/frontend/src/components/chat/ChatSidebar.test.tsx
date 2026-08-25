@@ -105,6 +105,72 @@ describe("ChatSidebar account menu", () => {
 	});
 });
 
+describe("ChatSidebar provider settings", () => {
+	it("shows provider settings inside the administrator account menu", async () => {
+		const user = userEvent.setup();
+		const onOpenProviderSettings = vi.fn();
+		render(
+			<div className="h-screen w-[320px]">
+				<ChatSidebar
+					activeConversationId={null}
+					authPrincipal={{
+						id: "https://issuer.example.com|admin",
+						issuer: "https://issuer.example.com",
+						subject: "admin",
+						name: "Admin User",
+						roles: ["admin"],
+					}}
+					conversations={[]}
+					loading={false}
+					onDeleteConversation={vi.fn()}
+					onForkConversation={vi.fn()}
+					onNewChat={vi.fn()}
+					onOpenProviderSettings={onOpenProviderSettings}
+					onSearch={vi.fn()}
+					onSelectConversation={vi.fn()}
+				/>
+			</div>,
+		);
+
+		expect(screen.queryByRole("menuitem", { name: "Provider settings" })).not.toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "Admin User account menu" }));
+		const providerSettings = screen.getByRole("menuitem", { name: "Provider settings" });
+		expect(providerSettings.querySelector("svg")).toHaveClass("lucide-settings-2");
+		await user.click(providerSettings);
+		expect(onOpenProviderSettings).toHaveBeenCalledOnce();
+		expect(screen.queryByRole("menuitem", { name: "Provider settings" })).not.toBeInTheDocument();
+	});
+
+	it("does not expose server provider credentials to non-admin users", async () => {
+		const user = userEvent.setup();
+		render(
+			<div className="h-screen w-[320px]">
+				<ChatSidebar
+					activeConversationId={null}
+					authPrincipal={{
+						id: "https://issuer.example.com|user",
+						issuer: "https://issuer.example.com",
+						subject: "user",
+						name: "Regular User",
+						roles: ["user"],
+					}}
+					conversations={[]}
+					loading={false}
+					onDeleteConversation={vi.fn()}
+					onForkConversation={vi.fn()}
+					onNewChat={vi.fn()}
+					onOpenProviderSettings={vi.fn()}
+					onSearch={vi.fn()}
+					onSelectConversation={vi.fn()}
+				/>
+			</div>,
+		);
+
+		await user.click(screen.getByRole("button", { name: "Regular User account menu" }));
+		expect(screen.queryByRole("menuitem", { name: "Provider settings" })).not.toBeInTheDocument();
+	});
+});
+
 describe("ChatSidebar conversation actions", () => {
 	it("delegates search to a dialog trigger in the header", () => {
 		const onSearch = vi.fn();
