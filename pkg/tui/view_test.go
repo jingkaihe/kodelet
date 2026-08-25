@@ -81,7 +81,7 @@ func TestShortcutsDialogIncludesExtensionShortcuts(t *testing.T) {
 
 	assert.Contains(t, dialog, "Ctrl+Alt+R")
 	assert.Contains(t, dialog, "Refresh project context")
-	assert.Contains(t, dialog, "workspace")
+	assert.NotContains(t, dialog, "workspace")
 }
 
 func TestShortcutsDialogShowsEffectiveOverrideOnce(t *testing.T) {

@@ -182,8 +182,5 @@ func extensionShortcutDescription(shortcut extensions.Shortcut) string {
 	if description == "" {
 		description = "Run extension shortcut"
 	}
-	if extensionID := strings.TrimSpace(shortcut.ExtensionID); extensionID != "" {
-		description += " · " + extensionID
-	}
 	return description
 }
