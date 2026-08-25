@@ -1,7 +1,12 @@
 import React from 'react';
 import { Check, CircleAlert, Copy, ExternalLink, X } from 'lucide-react';
 import apiService from '../../services/api';
-import type { CodexDeviceLogin, CodexProviderStatus } from '../../types';
+import type {
+  AnthropicOAuthLogin,
+  AnthropicProviderStatus,
+  CodexDeviceLogin,
+  CodexProviderStatus,
+} from '../../types';
 import { copyToClipboard } from '../../utils';
 import Spinner from '../Spinner';
 
@@ -12,9 +17,9 @@ const PROVIDER_DIALOG_FOCUSABLE_SELECTOR = [
 ].join(',');
 const CODEX_DEVICE_LOGIN_POLL_INTERVAL = 1200;
 
-const formatVerificationURL = (value?: string): string => {
+const formatProviderURL = (value?: string): string => {
   if (!value) {
-    return 'ChatGPT sign-in';
+    return 'Sign-in page';
   }
   try {
     const url = new URL(value);
@@ -30,29 +35,52 @@ const OpenAIIcon: React.FC<{ className?: string }> = ({ className }) => (
   </svg>
 );
 
+const AnthropicIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg aria-hidden="true" className={className} fill="currentColor" viewBox="0 0 24 24">
+    <path d="M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z" />
+  </svg>
+);
+
+type ProviderLogin = 'codex' | 'anthropic';
+
 interface ProviderSettingsDialogProps {
   onClose: () => void;
 }
 
 const ProviderSettingsDialog: React.FC<ProviderSettingsDialogProps> = ({ onClose }) => {
-  const [providerStatus, setProviderStatus] = React.useState<CodexProviderStatus | null>(null);
-  const [providerLoading, setProviderLoading] = React.useState(true);
+  const [codexStatus, setCodexStatus] = React.useState<CodexProviderStatus | null>(null);
+  const [anthropicStatus, setAnthropicStatus] = React.useState<AnthropicProviderStatus | null>(null);
+  const [codexLoading, setCodexLoading] = React.useState(true);
+  const [anthropicLoading, setAnthropicLoading] = React.useState(true);
   const [providerError, setProviderError] = React.useState<string | null>(null);
-  const [login, setLogin] = React.useState<CodexDeviceLogin | null>(null);
-  const [loginStarting, setLoginStarting] = React.useState(false);
+  const [activeProvider, setActiveProvider] = React.useState<ProviderLogin | null>(null);
+  const [codexLogin, setCodexLogin] = React.useState<CodexDeviceLogin | null>(null);
+  const [anthropicLogin, setAnthropicLogin] = React.useState<AnthropicOAuthLogin | null>(null);
+  const [anthropicCode, setAnthropicCode] = React.useState('');
+  const [loginStarting, setLoginStarting] = React.useState<ProviderLogin | null>(null);
+  const [anthropicSubmitting, setAnthropicSubmitting] = React.useState(false);
   const [pollError, setPollError] = React.useState<string | null>(null);
   const dialogRef = React.useRef<HTMLDivElement | null>(null);
   const closeButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const onCloseRef = React.useRef(onClose);
 
   const closeDialog = React.useCallback(() => {
-    if (login?.status === 'pending') {
-      void apiService.cancelCodexDeviceLogin(login.id).catch((error) => {
+    if (activeProvider === 'codex' && codexLogin?.status === 'pending') {
+      void apiService.cancelCodexDeviceLogin(codexLogin.id).catch((error) => {
         console.error('Failed to cancel Codex device login', error);
       });
     }
+    if (
+      activeProvider === 'anthropic' &&
+      anthropicLogin?.status === 'pending' &&
+      !anthropicSubmitting
+    ) {
+      void apiService.cancelAnthropicOAuthLogin(anthropicLogin.id).catch((error) => {
+        console.error('Failed to cancel Anthropic OAuth login', error);
+      });
+    }
     onClose();
-  }, [login, onClose]);
+  }, [activeProvider, anthropicLogin, anthropicSubmitting, codexLogin, onClose]);
   onCloseRef.current = closeDialog;
 
   React.useEffect(() => {
@@ -61,8 +89,7 @@ const ProviderSettingsDialog: React.FC<ProviderSettingsDialogProps> = ({ onClose
       .getCodexProviderStatus()
       .then((status) => {
         if (!disposed) {
-          setProviderStatus(status);
-          setProviderError(null);
+          setCodexStatus(status);
         }
       })
       .catch((error) => {
@@ -75,7 +102,28 @@ const ProviderSettingsDialog: React.FC<ProviderSettingsDialogProps> = ({ onClose
       })
       .finally(() => {
         if (!disposed) {
-          setProviderLoading(false);
+          setCodexLoading(false);
+        }
+      });
+
+    void apiService
+      .getAnthropicProviderStatus()
+      .then((status) => {
+        if (!disposed) {
+          setAnthropicStatus(status);
+        }
+      })
+      .catch((error) => {
+        if (!disposed) {
+          console.error('Failed to load Anthropic provider status', error);
+          setProviderError(
+            error instanceof Error ? error.message : 'Could not load provider status.'
+          );
+        }
+      })
+      .finally(() => {
+        if (!disposed) {
+          setAnthropicLoading(false);
         }
       });
 
@@ -136,7 +184,7 @@ const ProviderSettingsDialog: React.FC<ProviderSettingsDialogProps> = ({ onClose
   }, []);
 
   React.useEffect(() => {
-    if (!login || login.status !== 'pending') {
+    if (activeProvider !== 'codex' || !codexLogin || codexLogin.status !== 'pending') {
       return undefined;
     }
 
@@ -144,15 +192,16 @@ const ProviderSettingsDialog: React.FC<ProviderSettingsDialogProps> = ({ onClose
     let pollTimer = 0;
     const poll = async () => {
       try {
-        const nextLogin = await apiService.getCodexDeviceLogin(login.id);
+        const nextLogin = await apiService.getCodexDeviceLogin(codexLogin.id);
         if (disposed) {
           return;
         }
-        setLogin(nextLogin);
+        setCodexLogin(nextLogin);
         setPollError(null);
         if (nextLogin.status === 'connected') {
-          setProviderStatus({ provider: 'codex', connected: true });
-          setLogin(null);
+          setCodexStatus({ provider: 'codex', connected: true });
+          setCodexLogin(null);
+          setActiveProvider(null);
           return;
         }
         if (nextLogin.status === 'pending') {
@@ -168,14 +217,14 @@ const ProviderSettingsDialog: React.FC<ProviderSettingsDialogProps> = ({ onClose
             : 0;
         if (status >= 400 && status < 500 && status !== 429) {
           const failedLogin: CodexDeviceLogin = {
-            ...login,
+            ...codexLogin,
             status: 'failed',
             message:
               error instanceof Error
                 ? error.message
                 : 'The device sign-in session is no longer available.',
           };
-          setLogin(failedLogin);
+          setCodexLogin(failedLogin);
           return;
         }
         console.error('Failed to poll Codex device login', error);
@@ -189,31 +238,88 @@ const ProviderSettingsDialog: React.FC<ProviderSettingsDialogProps> = ({ onClose
       disposed = true;
       window.clearTimeout(pollTimer);
     };
-  }, [login?.id, login?.status]);
+  }, [activeProvider, codexLogin?.id, codexLogin?.status]);
 
-  const startLogin = async () => {
-    setLoginStarting(true);
+  const startCodexLogin = async () => {
+    setLoginStarting('codex');
     setProviderError(null);
     setPollError(null);
     try {
       const nextLogin = await apiService.startCodexDeviceLogin();
       if (nextLogin.status === 'connected') {
-        setProviderStatus({ provider: 'codex', connected: true });
-        setLogin(null);
+        setCodexStatus({ provider: 'codex', connected: true });
+        setCodexLogin(null);
+        setActiveProvider(null);
       } else {
-        setLogin(nextLogin);
+        setCodexLogin(nextLogin);
+        setActiveProvider('codex');
       }
     } catch (error) {
       console.error('Failed to start Codex device login', error);
       setProviderError(error instanceof Error ? error.message : 'Could not start ChatGPT sign-in.');
     } finally {
-      setLoginStarting(false);
+      setLoginStarting(null);
     }
   };
 
-  const connected = providerStatus?.connected === true;
-  const loginFailed = login?.status === 'failed' || login?.status === 'canceled';
-  const showDeviceFlow = login?.status === 'pending' || loginFailed;
+  const startAnthropicLogin = async () => {
+    setLoginStarting('anthropic');
+    setProviderError(null);
+    setAnthropicCode('');
+    try {
+      const nextLogin = await apiService.startAnthropicOAuthLogin();
+      if (nextLogin.status === 'connected') {
+        setAnthropicStatus({ provider: 'anthropic', connected: true });
+        setAnthropicLogin(null);
+        setActiveProvider(null);
+      } else {
+        setAnthropicLogin(nextLogin);
+        setActiveProvider('anthropic');
+      }
+    } catch (error) {
+      console.error('Failed to start Anthropic OAuth login', error);
+      setProviderError(error instanceof Error ? error.message : 'Could not start Anthropic sign-in.');
+    } finally {
+      setLoginStarting(null);
+    }
+  };
+
+  const completeAnthropicLogin = async () => {
+    if (!anthropicLogin || !anthropicCode.trim()) {
+      return;
+    }
+    setAnthropicSubmitting(true);
+    setProviderError(null);
+    try {
+      const nextLogin = await apiService.completeAnthropicOAuthLogin(
+        anthropicLogin.id,
+        anthropicCode.trim()
+      );
+      if (nextLogin.status === 'connected') {
+        setAnthropicStatus({ provider: 'anthropic', connected: true });
+        setAnthropicLogin(null);
+        setAnthropicCode('');
+        setActiveProvider(null);
+      } else {
+        setAnthropicLogin(nextLogin);
+      }
+    } catch (error) {
+      console.error('Failed to complete Anthropic OAuth login', error);
+      setAnthropicLogin({
+        ...anthropicLogin,
+        status: 'failed',
+        message: error instanceof Error ? error.message : 'Could not complete Anthropic sign-in.',
+      });
+    } finally {
+      setAnthropicSubmitting(false);
+    }
+  };
+
+  const codexConnected = codexStatus?.connected === true;
+  const anthropicConnected = anthropicStatus?.connected === true;
+  const activeProviderName = activeProvider === 'anthropic' ? 'Anthropic' : 'ChatGPT';
+  const activeLoginMessage =
+    activeProvider === 'anthropic' ? anthropicLogin?.message : codexLogin?.message;
 
   return (
     <div className="new-chat-dialog-backdrop provider-settings-backdrop">
@@ -242,9 +348,9 @@ const ProviderSettingsDialog: React.FC<ProviderSettingsDialogProps> = ({ onClose
         </header>
 
         <div className="provider-settings-content">
-          {!showDeviceFlow ? (
+          {!activeProvider ? (
             <section className="provider-settings-list" aria-label="Providers">
-              <article className="provider-settings-provider">
+              <article aria-label="ChatGPT" className="provider-settings-provider">
                 <div className="provider-settings-provider-icon" aria-hidden="true">
                   <OpenAIIcon className="h-4 w-4" />
                 </div>
@@ -255,15 +361,15 @@ const ProviderSettingsDialog: React.FC<ProviderSettingsDialogProps> = ({ onClose
                   </div>
                   <div className="provider-settings-provider-controls">
                     <span
-                      className={`provider-settings-status${connected ? ' is-connected' : ''}`}
+                      className={`provider-settings-status${codexConnected ? ' is-connected' : ''}`}
                       role="status"
                     >
-                      {providerLoading ? (
+                      {codexLoading ? (
                         <>
                           <Spinner className="provider-settings-status-spinner" />
                           Checking
                         </>
-                      ) : connected ? (
+                      ) : codexConnected ? (
                         <>
                           <Check aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={2.2} />
                           Connected
@@ -273,21 +379,73 @@ const ProviderSettingsDialog: React.FC<ProviderSettingsDialogProps> = ({ onClose
                       )}
                     </span>
                     <button
-                      className={`panel-action-button provider-settings-provider-action${connected ? ' is-reconnect' : ''}`}
-                      disabled={providerLoading || loginStarting}
-                      onClick={() => void startLogin()}
+                      aria-label={`${codexConnected ? 'Reconnect' : 'Connect'} ChatGPT`}
+                      className={`panel-action-button provider-settings-provider-action${codexConnected ? ' is-reconnect' : ''}`}
+                      disabled={codexLoading || loginStarting !== null}
+                      onClick={() => void startCodexLogin()}
                       type="button"
                     >
-                      {loginStarting ? (
+                      {loginStarting === 'codex' ? (
                         <Spinner className="provider-settings-button-spinner" />
                       ) : null}
-                      {loginStarting ? 'Connecting…' : connected ? 'Reconnect' : 'Connect'}
+                      {loginStarting === 'codex'
+                        ? 'Connecting…'
+                        : codexConnected
+                          ? 'Reconnect'
+                          : 'Connect'}
+                    </button>
+                  </div>
+                </div>
+              </article>
+              <article aria-label="Anthropic" className="provider-settings-provider">
+                <div className="provider-settings-provider-icon" aria-hidden="true">
+                  <AnthropicIcon className="h-4 w-4" />
+                </div>
+                <div className="provider-settings-provider-body">
+                  <div className="provider-settings-provider-copy">
+                    <h3>Anthropic</h3>
+                    <p>Use your Claude subscription.</p>
+                  </div>
+                  <div className="provider-settings-provider-controls">
+                    <span
+                      className={`provider-settings-status${anthropicConnected ? ' is-connected' : ''}`}
+                      role="status"
+                    >
+                      {anthropicLoading ? (
+                        <>
+                          <Spinner className="provider-settings-status-spinner" />
+                          Checking
+                        </>
+                      ) : anthropicConnected ? (
+                        <>
+                          <Check aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={2.2} />
+                          Connected
+                        </>
+                      ) : (
+                        'Not connected'
+                      )}
+                    </span>
+                    <button
+                      aria-label={`${anthropicConnected ? 'Reconnect' : 'Connect'} Anthropic`}
+                      className={`panel-action-button provider-settings-provider-action${anthropicConnected ? ' is-reconnect' : ''}`}
+                      disabled={anthropicLoading || loginStarting !== null}
+                      onClick={() => void startAnthropicLogin()}
+                      type="button"
+                    >
+                      {loginStarting === 'anthropic' ? (
+                        <Spinner className="provider-settings-button-spinner" />
+                      ) : null}
+                      {loginStarting === 'anthropic'
+                        ? 'Connecting…'
+                        : anthropicConnected
+                          ? 'Reconnect'
+                          : 'Connect'}
                     </button>
                   </div>
                 </div>
               </article>
             </section>
-          ) : login?.status === 'pending' ? (
+          ) : activeProvider === 'codex' && codexLogin?.status === 'pending' ? (
             <section className="provider-device-flow" aria-label="Connect ChatGPT">
               <h3 className="provider-device-title">Connect ChatGPT</h3>
               <ol className="provider-device-steps">
@@ -299,11 +457,11 @@ const ProviderSettingsDialog: React.FC<ProviderSettingsDialogProps> = ({ onClose
                     <span className="provider-device-step-label">Open this link</span>
                     <a
                       className="tool-action-link provider-device-link"
-                      href={login.verificationUrl}
+                      href={codexLogin.verificationUrl}
                       rel="noreferrer"
                       target="_blank"
                     >
-                      <span>{formatVerificationURL(login.verificationUrl)}</span>
+                      <span>{formatProviderURL(codexLogin.verificationUrl)}</span>
                       <ExternalLink aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={1.9} />
                     </a>
                   </div>
@@ -315,13 +473,13 @@ const ProviderSettingsDialog: React.FC<ProviderSettingsDialogProps> = ({ onClose
                   <div className="provider-device-step-content">
                     <span className="provider-device-step-label">Enter this code</span>
                     <output aria-label="ChatGPT device code" className="provider-device-code">
-                      {login.userCode}
+                      {codexLogin.userCode}
                     </output>
                   </div>
                   <button
                     aria-label="Copy device code"
                     className="panel-action-button provider-device-step-action provider-device-code-copy"
-                    onClick={() => void copyToClipboard(login.userCode || '')}
+                    onClick={() => void copyToClipboard(codexLogin.userCode || '')}
                     title="Copy device code"
                     type="button"
                   >
@@ -335,21 +493,93 @@ const ProviderSettingsDialog: React.FC<ProviderSettingsDialogProps> = ({ onClose
                 <span>{pollError || 'Waiting for sign-in…'}</span>
               </div>
             </section>
+          ) : activeProvider === 'anthropic' && anthropicLogin?.status === 'pending' ? (
+            <form
+              aria-label="Connect Anthropic"
+              className="provider-device-flow"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void completeAnthropicLogin();
+              }}
+            >
+              <h3 className="provider-device-title">Connect Anthropic</h3>
+              <ol className="provider-device-steps">
+                <li className="provider-device-step">
+                  <span className="provider-device-step-index" aria-hidden="true">
+                    1
+                  </span>
+                  <div className="provider-device-step-content">
+                    <span className="provider-device-step-label">Open this link</span>
+                    <a
+                      className="tool-action-link provider-device-link"
+                      href={anthropicLogin.authorizationUrl}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      <span>{formatProviderURL(anthropicLogin.authorizationUrl)}</span>
+                      <ExternalLink aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={1.9} />
+                    </a>
+                  </div>
+                </li>
+                <li className="provider-device-step">
+                  <span className="provider-device-step-index" aria-hidden="true">
+                    2
+                  </span>
+                  <div className="provider-device-step-content">
+                    <label className="provider-device-step-label" htmlFor="anthropic-authorization-code">
+                      Paste the code
+                    </label>
+                    <input
+                      aria-label="Anthropic authorization code"
+                      autoComplete="off"
+                      className="provider-auth-code-input"
+                      disabled={anthropicSubmitting}
+                      id="anthropic-authorization-code"
+                      onChange={(event) => setAnthropicCode(event.target.value)}
+                      placeholder="code#state"
+                      spellCheck={false}
+                      value={anthropicCode}
+                    />
+                  </div>
+                  <button
+                    aria-label="Complete Anthropic sign-in"
+                    className="panel-action-button provider-device-step-action provider-auth-code-submit"
+                    disabled={!anthropicCode.trim() || anthropicSubmitting}
+                    type="submit"
+                  >
+                    {anthropicSubmitting ? (
+                      <Spinner className="provider-settings-button-spinner" />
+                    ) : (
+                      'Connect'
+                    )}
+                  </button>
+                </li>
+              </ol>
+            </form>
           ) : (
-            <section className="provider-device-flow" aria-label="ChatGPT sign-in failed">
-              <h3 className="provider-device-title">Couldn’t connect ChatGPT</h3>
+            <section
+              className="provider-device-flow"
+              aria-label={`${activeProviderName} sign-in failed`}
+            >
+              <h3 className="provider-device-title">Couldn’t connect {activeProviderName}</h3>
               <div className="provider-settings-error" role="alert">
                 <CircleAlert aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
-                <span>{login?.message || 'Sign-in did not complete.'}</span>
+                <span>{activeLoginMessage || 'Sign-in did not complete.'}</span>
               </div>
               <button
                 className="panel-action-button provider-device-retry"
-                disabled={loginStarting}
-                onClick={() => void startLogin()}
+                disabled={loginStarting !== null}
+                onClick={() =>
+                  void (activeProvider === 'anthropic'
+                    ? startAnthropicLogin()
+                    : startCodexLogin())
+                }
                 type="button"
               >
-                {loginStarting ? <Spinner className="provider-settings-button-spinner" /> : null}
-                {loginStarting ? 'Connecting…' : 'Try again'}
+                {loginStarting !== null ? (
+                  <Spinner className="provider-settings-button-spinner" />
+                ) : null}
+                {loginStarting !== null ? 'Connecting…' : 'Try again'}
               </button>
             </section>
           )}

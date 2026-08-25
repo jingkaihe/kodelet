@@ -25,6 +25,8 @@ import {
 	WorkspaceTarget,
 	CodexProviderStatus,
 	CodexDeviceLogin,
+	AnthropicProviderStatus,
+	AnthropicOAuthLogin,
 } from "../types";
 
 class ApiService {
@@ -139,6 +141,37 @@ class ApiService {
 	async cancelCodexDeviceLogin(id: string): Promise<void> {
 		await this.request(
 			`/api/providers/codex/device-login/${encodeURIComponent(id)}`,
+			{ method: "DELETE" },
+		);
+	}
+
+	async getAnthropicProviderStatus(): Promise<AnthropicProviderStatus> {
+		return this.request<AnthropicProviderStatus>("/api/providers/anthropic");
+	}
+
+	async startAnthropicOAuthLogin(): Promise<AnthropicOAuthLogin> {
+		return this.request<AnthropicOAuthLogin>(
+			"/api/providers/anthropic/oauth-login",
+			{ method: "POST" },
+		);
+	}
+
+	async completeAnthropicOAuthLogin(
+		id: string,
+		code: string,
+	): Promise<AnthropicOAuthLogin> {
+		return this.request<AnthropicOAuthLogin>(
+			`/api/providers/anthropic/oauth-login/${encodeURIComponent(id)}/complete`,
+			{
+				method: "POST",
+				body: JSON.stringify({ code }),
+			},
+		);
+	}
+
+	async cancelAnthropicOAuthLogin(id: string): Promise<void> {
+		await this.request(
+			`/api/providers/anthropic/oauth-login/${encodeURIComponent(id)}`,
 			{ method: "DELETE" },
 		);
 	}

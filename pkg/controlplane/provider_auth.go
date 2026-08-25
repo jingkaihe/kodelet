@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -46,6 +47,51 @@ func (defaultCodexProviderAuthService) SaveCredentials(credentials *providerauth
 	return err
 }
 
+type anthropicProviderAuthService interface {
+	Connected() (bool, error)
+	GenerateAuthURL() (authURL string, verifier string, err error)
+	ExchangeCode(context.Context, string, string) (*providerauth.AnthropicCredentials, error)
+	SaveCredentials(*providerauth.AnthropicCredentials) error
+}
+
+type defaultAnthropicProviderAuthService struct{}
+
+func (defaultAnthropicProviderAuthService) Connected() (bool, error) {
+	accounts, err := providerauth.ListAnthropicAccounts()
+	if err != nil {
+		return false, err
+	}
+	for _, account := range accounts {
+		if account.IsDefault {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (defaultAnthropicProviderAuthService) GenerateAuthURL() (string, string, error) {
+	return providerauth.GenerateAnthropicAuthURL()
+}
+
+func (defaultAnthropicProviderAuthService) ExchangeCode(ctx context.Context, code string, verifier string) (*providerauth.AnthropicCredentials, error) {
+	return providerauth.ExchangeAnthropicCode(ctx, code, verifier)
+}
+
+func (defaultAnthropicProviderAuthService) SaveCredentials(credentials *providerauth.AnthropicCredentials) error {
+	accounts, err := providerauth.ListAnthropicAccounts()
+	if err != nil {
+		return err
+	}
+	for _, account := range accounts {
+		if account.IsDefault {
+			_, err = providerauth.SaveAnthropicCredentialsWithAlias(account.Alias, credentials)
+			return err
+		}
+	}
+	_, err = providerauth.SaveAnthropicCredentials(credentials)
+	return err
+}
+
 type codexDeviceLoginStatus string
 
 const (
@@ -57,6 +103,9 @@ const (
 
 	codexDeviceLoginTimeout     = 15 * time.Minute
 	codexDeviceCodeRequestLimit = 30 * time.Second
+	anthropicOAuthLoginTimeout  = 15 * time.Minute
+	anthropicOAuthExchangeLimit = 30 * time.Second
+	providerLoginBodyLimit      = 16 << 10
 )
 
 type codexDeviceLoginSession struct {
@@ -68,17 +117,48 @@ type codexDeviceLoginSession struct {
 	cancel          context.CancelFunc
 }
 
-type codexProviderResponse struct {
-	Provider  string `json:"provider"`
-	Connected bool   `json:"connected"`
-}
-
 type codexDeviceLoginResponse struct {
 	ID              string                 `json:"id"`
 	Status          codexDeviceLoginStatus `json:"status"`
 	VerificationURL string                 `json:"verificationUrl,omitempty"`
 	UserCode        string                 `json:"userCode,omitempty"`
 	Message         string                 `json:"message,omitempty"`
+}
+
+type anthropicOAuthLoginStatus string
+
+const (
+	anthropicOAuthLoginStarting   anthropicOAuthLoginStatus = "starting"
+	anthropicOAuthLoginPending    anthropicOAuthLoginStatus = "pending"
+	anthropicOAuthLoginCompleting anthropicOAuthLoginStatus = "completing"
+	anthropicOAuthLoginConnected  anthropicOAuthLoginStatus = "connected"
+	anthropicOAuthLoginFailed     anthropicOAuthLoginStatus = "failed"
+	anthropicOAuthLoginCanceled   anthropicOAuthLoginStatus = "canceled"
+)
+
+type anthropicOAuthLoginSession struct {
+	ID               string
+	Status           anthropicOAuthLoginStatus
+	AuthorizationURL string
+	Verifier         string
+	Message          string
+	ExpiresAt        time.Time
+}
+
+type providerConnectionResponse struct {
+	Provider  string `json:"provider"`
+	Connected bool   `json:"connected"`
+}
+
+type anthropicOAuthLoginResponse struct {
+	ID               string                    `json:"id"`
+	Status           anthropicOAuthLoginStatus `json:"status"`
+	AuthorizationURL string                    `json:"authorizationUrl,omitempty"`
+	Message          string                    `json:"message,omitempty"`
+}
+
+type completeAnthropicOAuthLoginRequest struct {
+	Code string `json:"code"`
 }
 
 func (s *Server) codexProviderAuth() codexProviderAuthService {
@@ -88,18 +168,25 @@ func (s *Server) codexProviderAuth() codexProviderAuthService {
 	return defaultCodexProviderAuthService{}
 }
 
+func (s *Server) anthropicProviderAuth() anthropicProviderAuthService {
+	if s.anthropicAuth != nil {
+		return s.anthropicAuth
+	}
+	return defaultAnthropicProviderAuthService{}
+}
+
 func (s *Server) handleGetCodexProvider(w http.ResponseWriter, _ *http.Request) {
-	setCodexProviderResponseHeaders(w)
+	setProviderResponseHeaders(w)
 	connected, err := s.codexProviderAuth().Connected()
 	if err != nil {
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to read Codex provider status", err)
 		return
 	}
-	s.writeJSONResponse(w, codexProviderResponse{Provider: "codex", Connected: connected})
+	s.writeJSONResponse(w, providerConnectionResponse{Provider: "codex", Connected: connected})
 }
 
 func (s *Server) handleStartCodexDeviceLogin(w http.ResponseWriter, r *http.Request) {
-	setCodexProviderResponseHeaders(w)
+	setProviderResponseHeaders(w)
 	loginID, err := newAuthID("codex_login")
 	if err != nil {
 		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to start Codex device login", err)
@@ -196,7 +283,7 @@ func (s *Server) finishCodexDeviceLogin(loginID string, status codexDeviceLoginS
 }
 
 func (s *Server) handleGetCodexDeviceLogin(w http.ResponseWriter, r *http.Request) {
-	setCodexProviderResponseHeaders(w)
+	setProviderResponseHeaders(w)
 	loginID := strings.TrimSpace(mux.Vars(r)["id"])
 	if loginID == "" {
 		s.writeErrorResponse(w, http.StatusBadRequest, "Codex device login ID is required", nil)
@@ -215,7 +302,7 @@ func (s *Server) handleGetCodexDeviceLogin(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleCancelCodexDeviceLogin(w http.ResponseWriter, r *http.Request) {
-	setCodexProviderResponseHeaders(w)
+	setProviderResponseHeaders(w)
 	loginID := strings.TrimSpace(mux.Vars(r)["id"])
 	if loginID == "" {
 		s.writeErrorResponse(w, http.StatusBadRequest, "Codex device login ID is required", nil)
@@ -251,6 +338,187 @@ func codexDeviceLoginResponseFromSession(session *codexDeviceLoginSession) codex
 	}
 }
 
-func setCodexProviderResponseHeaders(w http.ResponseWriter) {
+func (s *Server) handleGetAnthropicProvider(w http.ResponseWriter, _ *http.Request) {
+	setProviderResponseHeaders(w)
+	connected, err := s.anthropicProviderAuth().Connected()
+	if err != nil {
+		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to read Anthropic provider status", err)
+		return
+	}
+	s.writeJSONResponse(w, providerConnectionResponse{Provider: "anthropic", Connected: connected})
+}
+
+func (s *Server) handleStartAnthropicOAuthLogin(w http.ResponseWriter, _ *http.Request) {
+	setProviderResponseHeaders(w)
+	loginID, err := newAuthID("anthropic_login")
+	if err != nil {
+		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to start Anthropic login", err)
+		return
+	}
+
+	session := &anthropicOAuthLoginSession{
+		ID:        loginID,
+		Status:    anthropicOAuthLoginStarting,
+		ExpiresAt: time.Now().Add(anthropicOAuthLoginTimeout),
+	}
+	s.anthropicOAuthLoginMu.Lock()
+	if anthropicOAuthLoginActive(s.anthropicOAuthLogin) {
+		s.anthropicOAuthLoginMu.Unlock()
+		s.writeErrorResponse(w, http.StatusConflict, "Anthropic login is already in progress", nil)
+		return
+	}
+	s.anthropicOAuthLogin = session
+	s.anthropicOAuthLoginMu.Unlock()
+
+	authorizationURL, verifier, err := s.anthropicProviderAuth().GenerateAuthURL()
+	if err != nil {
+		s.anthropicOAuthLoginMu.Lock()
+		if s.anthropicOAuthLogin != nil && s.anthropicOAuthLogin.ID == loginID {
+			s.anthropicOAuthLogin = nil
+		}
+		s.anthropicOAuthLoginMu.Unlock()
+		s.writeErrorResponse(w, http.StatusInternalServerError, "failed to generate Anthropic authorization URL", err)
+		return
+	}
+
+	s.anthropicOAuthLoginMu.Lock()
+	if s.anthropicOAuthLogin == nil || s.anthropicOAuthLogin.ID != loginID {
+		s.anthropicOAuthLoginMu.Unlock()
+		s.writeErrorResponse(w, http.StatusConflict, "Anthropic login is no longer available", nil)
+		return
+	}
+	session.Status = anthropicOAuthLoginPending
+	session.AuthorizationURL = authorizationURL
+	session.Verifier = verifier
+	response := anthropicOAuthLoginResponseFromSession(session)
+	s.anthropicOAuthLoginMu.Unlock()
+	s.writeJSONResponse(w, response)
+}
+
+func (s *Server) handleCompleteAnthropicOAuthLogin(w http.ResponseWriter, r *http.Request) {
+	setProviderResponseHeaders(w)
+	loginID := strings.TrimSpace(mux.Vars(r)["id"])
+	if loginID == "" {
+		s.writeErrorResponse(w, http.StatusBadRequest, "Anthropic login ID is required", nil)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, providerLoginBodyLimit)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	var request completeAnthropicOAuthLoginRequest
+	if err := decoder.Decode(&request); err != nil {
+		s.writeErrorResponse(w, http.StatusBadRequest, "invalid Anthropic login request", err)
+		return
+	}
+	request.Code = strings.TrimSpace(request.Code)
+	if request.Code == "" {
+		s.writeErrorResponse(w, http.StatusBadRequest, "Anthropic authorization code is required", nil)
+		return
+	}
+
+	s.anthropicOAuthLoginMu.Lock()
+	if s.anthropicOAuthLogin == nil || s.anthropicOAuthLogin.ID != loginID {
+		s.anthropicOAuthLoginMu.Unlock()
+		s.writeErrorResponse(w, http.StatusNotFound, "Anthropic login not found", nil)
+		return
+	}
+	if s.anthropicOAuthLogin.Status != anthropicOAuthLoginPending {
+		s.anthropicOAuthLoginMu.Unlock()
+		s.writeErrorResponse(w, http.StatusConflict, "Anthropic login is not awaiting a code", nil)
+		return
+	}
+	s.anthropicOAuthLogin.Status = anthropicOAuthLoginCompleting
+	verifier := s.anthropicOAuthLogin.Verifier
+	s.anthropicOAuthLoginMu.Unlock()
+
+	exchangeCtx, cancelExchange := context.WithTimeout(r.Context(), anthropicOAuthExchangeLimit)
+	credentials, err := s.anthropicProviderAuth().ExchangeCode(exchangeCtx, request.Code, verifier)
+	cancelExchange()
+	if err != nil {
+		logger.G(r.Context()).WithError(err).Error("failed to complete Anthropic OAuth login")
+		s.finishAnthropicOAuthLogin(loginID, anthropicOAuthLoginFailed, "Could not complete Anthropic sign-in. Please try again.")
+		s.writeAnthropicOAuthLoginResponse(w, loginID)
+		return
+	}
+
+	if err := s.anthropicProviderAuth().SaveCredentials(credentials); err != nil {
+		logger.G(r.Context()).WithError(err).Error("failed to save Anthropic credentials")
+		s.finishAnthropicOAuthLogin(loginID, anthropicOAuthLoginFailed, "Could not save the Anthropic connection. Please try again.")
+		s.writeAnthropicOAuthLoginResponse(w, loginID)
+		return
+	}
+
+	s.finishAnthropicOAuthLogin(loginID, anthropicOAuthLoginConnected, "Anthropic subscription connected.")
+	s.writeAnthropicOAuthLoginResponse(w, loginID)
+}
+
+func (s *Server) handleCancelAnthropicOAuthLogin(w http.ResponseWriter, r *http.Request) {
+	setProviderResponseHeaders(w)
+	loginID := strings.TrimSpace(mux.Vars(r)["id"])
+	if loginID == "" {
+		s.writeErrorResponse(w, http.StatusBadRequest, "Anthropic login ID is required", nil)
+		return
+	}
+
+	s.anthropicOAuthLoginMu.Lock()
+	if s.anthropicOAuthLogin == nil || s.anthropicOAuthLogin.ID != loginID {
+		s.anthropicOAuthLoginMu.Unlock()
+		s.writeErrorResponse(w, http.StatusNotFound, "Anthropic login not found", nil)
+		return
+	}
+	if s.anthropicOAuthLogin.Status == anthropicOAuthLoginCompleting {
+		s.anthropicOAuthLoginMu.Unlock()
+		s.writeErrorResponse(w, http.StatusConflict, "Anthropic login is already completing", nil)
+		return
+	}
+	s.anthropicOAuthLogin.Status = anthropicOAuthLoginCanceled
+	s.anthropicOAuthLogin.Message = "Anthropic sign-in was canceled."
+	s.anthropicOAuthLoginMu.Unlock()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) finishAnthropicOAuthLogin(loginID string, status anthropicOAuthLoginStatus, message string) {
+	s.anthropicOAuthLoginMu.Lock()
+	defer s.anthropicOAuthLoginMu.Unlock()
+	if s.anthropicOAuthLogin == nil || s.anthropicOAuthLogin.ID != loginID {
+		return
+	}
+	s.anthropicOAuthLogin.Status = status
+	s.anthropicOAuthLogin.Message = message
+}
+
+func (s *Server) writeAnthropicOAuthLoginResponse(w http.ResponseWriter, loginID string) {
+	s.anthropicOAuthLoginMu.Lock()
+	if s.anthropicOAuthLogin == nil || s.anthropicOAuthLogin.ID != loginID {
+		s.anthropicOAuthLoginMu.Unlock()
+		s.writeErrorResponse(w, http.StatusNotFound, "Anthropic login not found", nil)
+		return
+	}
+	response := anthropicOAuthLoginResponseFromSession(s.anthropicOAuthLogin)
+	s.anthropicOAuthLoginMu.Unlock()
+	s.writeJSONResponse(w, response)
+}
+
+func anthropicOAuthLoginActive(session *anthropicOAuthLoginSession) bool {
+	if session == nil {
+		return false
+	}
+	if session.Status == anthropicOAuthLoginStarting || session.Status == anthropicOAuthLoginCompleting {
+		return true
+	}
+	return session.Status == anthropicOAuthLoginPending && time.Now().Before(session.ExpiresAt)
+}
+
+func anthropicOAuthLoginResponseFromSession(session *anthropicOAuthLoginSession) anthropicOAuthLoginResponse {
+	return anthropicOAuthLoginResponse{
+		ID:               session.ID,
+		Status:           session.Status,
+		AuthorizationURL: session.AuthorizationURL,
+		Message:          session.Message,
+	}
+}
+
+func setProviderResponseHeaders(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-store")
 }

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ProviderSettingsDialog from './ProviderSettingsDialog';
 
@@ -6,6 +6,10 @@ const mockGetCodexProviderStatus = vi.fn();
 const mockStartCodexDeviceLogin = vi.fn();
 const mockGetCodexDeviceLogin = vi.fn();
 const mockCancelCodexDeviceLogin = vi.fn();
+const mockGetAnthropicProviderStatus = vi.fn();
+const mockStartAnthropicOAuthLogin = vi.fn();
+const mockCompleteAnthropicOAuthLogin = vi.fn();
+const mockCancelAnthropicOAuthLogin = vi.fn();
 
 vi.mock('../../services/api', () => ({
   default: {
@@ -13,6 +17,11 @@ vi.mock('../../services/api', () => ({
     startCodexDeviceLogin: (...args: unknown[]) => mockStartCodexDeviceLogin(...args),
     getCodexDeviceLogin: (...args: unknown[]) => mockGetCodexDeviceLogin(...args),
     cancelCodexDeviceLogin: (...args: unknown[]) => mockCancelCodexDeviceLogin(...args),
+    getAnthropicProviderStatus: (...args: unknown[]) => mockGetAnthropicProviderStatus(...args),
+    startAnthropicOAuthLogin: (...args: unknown[]) => mockStartAnthropicOAuthLogin(...args),
+    completeAnthropicOAuthLogin: (...args: unknown[]) =>
+      mockCompleteAnthropicOAuthLogin(...args),
+    cancelAnthropicOAuthLogin: (...args: unknown[]) => mockCancelAnthropicOAuthLogin(...args),
   },
 }));
 
@@ -30,21 +39,30 @@ describe('ProviderSettingsDialog', () => {
     vi.clearAllMocks();
     mockGetCodexProviderStatus.mockResolvedValue({ provider: 'codex', connected: false });
     mockCancelCodexDeviceLogin.mockResolvedValue(undefined);
+    mockGetAnthropicProviderStatus.mockResolvedValue({
+      provider: 'anthropic',
+      connected: false,
+    });
+    mockCancelAnthropicOAuthLogin.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it('shows ChatGPT status and the connection action', async () => {
+  it('shows each subscription provider and its connection action', async () => {
     render(<ProviderSettingsDialog onClose={vi.fn()} />);
     await flushPromises();
 
     expect(screen.getByRole('dialog', { name: 'Provider settings' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'ChatGPT' })).toBeInTheDocument();
-    expect(screen.getByText('Use your subscription for Codex.')).toBeInTheDocument();
-    expect(screen.getByText('Not connected')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Connect' })).toBeEnabled();
+    const chatGPT = screen.getByRole('article', { name: 'ChatGPT' });
+    const anthropic = screen.getByRole('article', { name: 'Anthropic' });
+    expect(within(chatGPT).getByText('Use your subscription for Codex.')).toBeInTheDocument();
+    expect(within(chatGPT).getByText('Not connected')).toBeInTheDocument();
+    expect(within(chatGPT).getByRole('button', { name: 'Connect ChatGPT' })).toBeEnabled();
+    expect(within(anthropic).getByText('Use your Claude subscription.')).toBeInTheDocument();
+    expect(within(anthropic).getByText('Not connected')).toBeInTheDocument();
+    expect(within(anthropic).getByRole('button', { name: 'Connect Anthropic' })).toBeEnabled();
   });
 
   it('shows the device code and updates when sign-in completes', async () => {
@@ -62,7 +80,7 @@ describe('ProviderSettingsDialog', () => {
     render(<ProviderSettingsDialog onClose={vi.fn()} />);
     await flushPromises();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Connect ChatGPT' }));
     await flushPromises();
 
     expect(screen.getByText('Open this link')).toBeInTheDocument();
@@ -83,7 +101,48 @@ describe('ProviderSettingsDialog', () => {
 
     expect(mockGetCodexDeviceLogin).toHaveBeenCalledWith('codex_login_123');
     expect(screen.getByText('Connected')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Reconnect' })).toHaveClass('is-reconnect');
+    expect(screen.getByRole('button', { name: 'Reconnect ChatGPT' })).toHaveClass(
+      'is-reconnect'
+    );
+  });
+
+  it('opens the Anthropic authorization link and connects with the returned code', async () => {
+    mockStartAnthropicOAuthLogin.mockResolvedValue({
+      id: 'anthropic_login_123',
+      status: 'pending',
+      authorizationUrl: 'https://claude.ai/oauth/authorize?test=1',
+    });
+    mockCompleteAnthropicOAuthLogin.mockResolvedValue({
+      id: 'anthropic_login_123',
+      status: 'connected',
+      message: 'Anthropic subscription connected.',
+    });
+    render(<ProviderSettingsDialog onClose={vi.fn()} />);
+    await flushPromises();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Anthropic' }));
+    await flushPromises();
+
+    expect(screen.getByRole('heading', { name: 'Connect Anthropic' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'claude.ai/oauth/authorize' })).toHaveAttribute(
+      'href',
+      'https://claude.ai/oauth/authorize?test=1'
+    );
+    fireEvent.change(screen.getByLabelText('Anthropic authorization code'), {
+      target: { value: 'authorization-code#state' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Complete Anthropic sign-in' }));
+    await flushPromises();
+
+    expect(mockCompleteAnthropicOAuthLogin).toHaveBeenCalledWith(
+      'anthropic_login_123',
+      'authorization-code#state'
+    );
+    const anthropic = screen.getByRole('article', { name: 'Anthropic' });
+    expect(within(anthropic).getByText('Connected')).toBeInTheDocument();
+    expect(within(anthropic).getByRole('button', { name: 'Reconnect Anthropic' })).toHaveClass(
+      'is-reconnect'
+    );
   });
 
   it('cancels a pending device login when the dialog closes', async () => {
@@ -97,11 +156,29 @@ describe('ProviderSettingsDialog', () => {
     render(<ProviderSettingsDialog onClose={onClose} />);
     await flushPromises();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Connect ChatGPT' }));
     await flushPromises();
     fireEvent.click(screen.getByRole('button', { name: 'Close provider settings' }));
 
     expect(mockCancelCodexDeviceLogin).toHaveBeenCalledWith('codex_login_123');
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('cancels a pending Anthropic login when the dialog closes', async () => {
+    const onClose = vi.fn();
+    mockStartAnthropicOAuthLogin.mockResolvedValue({
+      id: 'anthropic_login_123',
+      status: 'pending',
+      authorizationUrl: 'https://claude.ai/oauth/authorize?test=1',
+    });
+    render(<ProviderSettingsDialog onClose={onClose} />);
+    await flushPromises();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Anthropic' }));
+    await flushPromises();
+    fireEvent.click(screen.getByRole('button', { name: 'Close provider settings' }));
+
+    expect(mockCancelAnthropicOAuthLogin).toHaveBeenCalledWith('anthropic_login_123');
     expect(onClose).toHaveBeenCalledOnce();
   });
 
@@ -117,7 +194,7 @@ describe('ProviderSettingsDialog', () => {
     );
     render(<ProviderSettingsDialog onClose={vi.fn()} />);
     await flushPromises();
-    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Connect ChatGPT' }));
     await flushPromises();
 
     await act(async () => {

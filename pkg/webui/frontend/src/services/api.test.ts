@@ -402,6 +402,79 @@ describe("ApiService", () => {
 		});
 	});
 
+	describe("Anthropic provider authentication", () => {
+		it("loads the Anthropic subscription connection status", async () => {
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				status: 200,
+				json: async () => ({ provider: "anthropic", connected: true }),
+			});
+
+			await expect(apiService.getAnthropicProviderStatus()).resolves.toEqual({
+				provider: "anthropic",
+				connected: true,
+			});
+			expect(mockFetch).toHaveBeenCalledWith(
+				"/api/providers/anthropic",
+				expect.any(Object),
+			);
+		});
+
+		it("starts and completes OAuth login with CSRF protection", async () => {
+			setTestCookie("kodelet_csrf=csrf-provider; Path=/");
+			const login = {
+				id: "anthropic_login_123",
+				status: "pending",
+				authorizationUrl: "https://claude.ai/oauth/authorize?test=1",
+			};
+			mockFetch
+				.mockResolvedValueOnce({ ok: true, status: 200, json: async () => login })
+				.mockResolvedValueOnce({
+					ok: true,
+					status: 200,
+					json: async () => ({ ...login, status: "connected" }),
+				});
+
+			await expect(apiService.startAnthropicOAuthLogin()).resolves.toEqual(login);
+			await expect(
+				apiService.completeAnthropicOAuthLogin(login.id, "code#state"),
+			).resolves.toMatchObject({ status: "connected" });
+
+			expect(mockFetch).toHaveBeenNthCalledWith(
+				1,
+				"/api/providers/anthropic/oauth-login",
+				expect.objectContaining({
+					method: "POST",
+					headers: expect.objectContaining({ "X-CSRF-Token": "csrf-provider" }),
+				}),
+			);
+			expect(mockFetch).toHaveBeenNthCalledWith(
+				2,
+				"/api/providers/anthropic/oauth-login/anthropic_login_123/complete",
+				expect.objectContaining({
+					method: "POST",
+					headers: expect.objectContaining({ "X-CSRF-Token": "csrf-provider" }),
+					body: JSON.stringify({ code: "code#state" }),
+				}),
+			);
+		});
+
+		it("cancels a pending OAuth login", async () => {
+			setTestCookie("kodelet_csrf=csrf-provider; Path=/");
+			mockFetch.mockResolvedValueOnce({ ok: true, status: 204 });
+
+			await apiService.cancelAnthropicOAuthLogin("anthropic_login_123");
+
+			expect(mockFetch).toHaveBeenCalledWith(
+				"/api/providers/anthropic/oauth-login/anthropic_login_123",
+				expect.objectContaining({
+					method: "DELETE",
+					headers: expect.objectContaining({ "X-CSRF-Token": "csrf-provider" }),
+				}),
+			);
+		});
+	});
+
 	describe("stopConversation", () => {
 		it("posts to the conversation stop endpoint", async () => {
 			mockFetch.mockResolvedValueOnce({

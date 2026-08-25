@@ -97,6 +97,9 @@ type Server struct {
 	codexAuth             codexProviderAuthService
 	codexDeviceLogin      *codexDeviceLoginSession
 	codexDeviceLoginMu    sync.Mutex
+	anthropicAuth         anthropicProviderAuthService
+	anthropicOAuthLogin   *anthropicOAuthLoginSession
+	anthropicOAuthLoginMu sync.Mutex
 	shutdownTimeout       time.Duration
 }
 
@@ -364,6 +367,10 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/providers/codex/device-login", s.requireRole(RoleAdmin, s.handleStartCodexDeviceLogin)).Methods("POST")
 	api.HandleFunc("/providers/codex/device-login/{id}", s.requireRole(RoleAdmin, s.handleGetCodexDeviceLogin)).Methods("GET")
 	api.HandleFunc("/providers/codex/device-login/{id}", s.requireRole(RoleAdmin, s.handleCancelCodexDeviceLogin)).Methods("DELETE")
+	api.HandleFunc("/providers/anthropic", s.requireRole(RoleAdmin, s.handleGetAnthropicProvider)).Methods("GET")
+	api.HandleFunc("/providers/anthropic/oauth-login", s.requireRole(RoleAdmin, s.handleStartAnthropicOAuthLogin)).Methods("POST")
+	api.HandleFunc("/providers/anthropic/oauth-login/{id}/complete", s.requireRole(RoleAdmin, s.handleCompleteAnthropicOAuthLogin)).Methods("POST")
+	api.HandleFunc("/providers/anthropic/oauth-login/{id}", s.requireRole(RoleAdmin, s.handleCancelAnthropicOAuthLogin)).Methods("DELETE")
 	api.HandleFunc("/runner/v1/enrollment/context", s.requireRole(RoleRunnerAdmin, s.handleRunnerEnrollmentContext)).Methods("GET")
 	api.HandleFunc("/runner/v1/enrollment/decision", s.requireRole(RoleRunnerAdmin, s.handleRunnerEnrollmentDecision)).Methods("POST")
 	api.HandleFunc("/chat/settings", s.handleGetChatSettings).Methods("GET")

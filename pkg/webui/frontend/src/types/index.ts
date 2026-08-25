@@ -160,6 +160,25 @@ export interface CodexDeviceLogin {
   message?: string;
 }
 
+export interface AnthropicProviderStatus {
+  provider: 'anthropic';
+  connected: boolean;
+}
+
+export type AnthropicOAuthLoginStatus =
+  | 'pending'
+  | 'completing'
+  | 'connected'
+  | 'failed'
+  | 'canceled';
+
+export interface AnthropicOAuthLogin {
+  id: string;
+  status: AnthropicOAuthLoginStatus;
+  authorizationUrl?: string;
+  message?: string;
+}
+
 export type ApprovalStatus = 'pending' | 'approved' | 'denied' | 'expired';
 
 export interface UserLoginAuthorization {

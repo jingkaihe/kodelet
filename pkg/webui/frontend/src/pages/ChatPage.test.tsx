@@ -38,6 +38,10 @@ const mockGetCodexProviderStatus = vi.fn();
 const mockStartCodexDeviceLogin = vi.fn();
 const mockGetCodexDeviceLogin = vi.fn();
 const mockCancelCodexDeviceLogin = vi.fn();
+const mockGetAnthropicProviderStatus = vi.fn();
+const mockStartAnthropicOAuthLogin = vi.fn();
+const mockCompleteAnthropicOAuthLogin = vi.fn();
+const mockCancelAnthropicOAuthLogin = vi.fn();
 const mockGetRunners = vi.fn();
 const mockGetSlashCommands = vi.fn();
 const mockStreamChat = vi.fn();
@@ -110,6 +114,10 @@ vi.mock('../services/api', () => ({
     startCodexDeviceLogin: (...args: unknown[]) => mockStartCodexDeviceLogin(...args),
     getCodexDeviceLogin: (...args: unknown[]) => mockGetCodexDeviceLogin(...args),
     cancelCodexDeviceLogin: (...args: unknown[]) => mockCancelCodexDeviceLogin(...args),
+    getAnthropicProviderStatus: (...args: unknown[]) => mockGetAnthropicProviderStatus(...args),
+    startAnthropicOAuthLogin: (...args: unknown[]) => mockStartAnthropicOAuthLogin(...args),
+    completeAnthropicOAuthLogin: (...args: unknown[]) => mockCompleteAnthropicOAuthLogin(...args),
+    cancelAnthropicOAuthLogin: (...args: unknown[]) => mockCancelAnthropicOAuthLogin(...args),
     getRunners: (...args: unknown[]) => mockGetRunners(...args),
     getSlashCommands: (...args: unknown[]) => mockGetSlashCommands(...args),
     getCWDHints: (...args: unknown[]) => mockGetCWDHints(...args),
@@ -144,6 +152,11 @@ describe('ChatPage', () => {
     mockGetAuthPrincipal.mockResolvedValue({ id: 'anonymous', roles: ['admin'] });
     mockGetCodexProviderStatus.mockResolvedValue({ provider: 'codex', connected: false });
     mockCancelCodexDeviceLogin.mockResolvedValue(undefined);
+    mockGetAnthropicProviderStatus.mockResolvedValue({
+      provider: 'anthropic',
+      connected: false,
+    });
+    mockCancelAnthropicOAuthLogin.mockResolvedValue(undefined);
     mockGetRunners.mockResolvedValue({ runners: [] });
     mockGetChatSettings.mockImplementation((profile?: string) => {
       const selectedProfile = profile || 'work';
@@ -372,6 +385,7 @@ describe('ChatPage', () => {
 
     expect(await screen.findByRole('dialog', { name: 'Provider settings' })).toBeInTheDocument();
     expect(mockGetCodexProviderStatus).toHaveBeenCalledOnce();
+    expect(mockGetAnthropicProviderStatus).toHaveBeenCalledOnce();
 
     fireEvent.click(screen.getByRole('button', { name: 'Close provider settings' }));
     expect(screen.queryByRole('dialog', { name: 'Provider settings' })).not.toBeInTheDocument();
