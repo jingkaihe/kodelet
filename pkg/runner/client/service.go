@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
+	conversationmeta "github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/llm"
 	"github.com/jingkaihe/kodelet/pkg/logger"
@@ -954,7 +955,11 @@ func (f *controlPlaneConversationForker) ForkConversation(ctx context.Context) (
 	if f == nil || f.peer == nil {
 		return "", llmtypes.ErrConversationForkUnavailable
 	}
-	params := runnerpayload.ConversationForkParams{RunID: f.runID, ToolCallID: f.toolCallID}
+	params := runnerpayload.ConversationForkParams{
+		RunID:      f.runID,
+		ToolCallID: f.toolCallID,
+		Name:       conversationmeta.ConversationForkNameFromContext(ctx),
+	}
 	var result runnerpayload.ConversationForkResult
 	if err := f.peer.Call(ctx, protocol.MethodConversationFork, params, &result); err != nil {
 		var rpcErr *protocol.RPCError

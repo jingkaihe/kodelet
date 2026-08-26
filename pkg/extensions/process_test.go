@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	conversationmeta "github.com/jingkaihe/kodelet/pkg/conversations"
 	kodelettools "github.com/jingkaihe/kodelet/pkg/tools"
 	conversationtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -35,7 +36,7 @@ func TestToolExecutionHostHandlerForksLiveConversation(t *testing.T) {
 	result, rpcErr := (toolExecutionHostHandler{
 		extensionID: "subagent",
 		toolName:    "subagent",
-	}).HandleRPCRequest(ctx, ConversationForkMethod, nil)
+	}).HandleRPCRequest(ctx, ConversationForkMethod, json.RawMessage(`{"name":"  Investigate\n fork naming  "}`))
 
 	require.Nil(t, rpcErr)
 	assert.Equal(t, conversationForkResult{ConversationID: "forked-conversation"}, result)
@@ -46,9 +47,22 @@ func TestToolExecutionHostHandlerForksLiveConversation(t *testing.T) {
 		ExtensionID: "subagent",
 		ToolName:    "subagent",
 	}, store.initiator)
+	assert.Equal(t, "Investigate fork naming", store.name)
 }
 
 func TestToolExecutionHostHandlerRejectsUnavailableConversationFork(t *testing.T) {
+	t.Run("invalid params", func(t *testing.T) {
+		store := &forkableMetadataStore{conversationID: "forked-conversation"}
+		ctx := kodelettools.ContextWithToolContext(context.Background(), kodelettools.ToolContext{MetadataStore: store})
+
+		result, rpcErr := (toolExecutionHostHandler{}).HandleRPCRequest(ctx, ConversationForkMethod, json.RawMessage(`{"name":42}`))
+
+		assert.Nil(t, result)
+		require.NotNil(t, rpcErr)
+		assert.Equal(t, -32602, rpcErr.Code)
+		assert.Zero(t, store.calls)
+	})
+
 	t.Run("missing live thread", func(t *testing.T) {
 		result, rpcErr := (toolExecutionHostHandler{}).HandleRPCRequest(context.Background(), ConversationForkMethod, nil)
 
@@ -352,6 +366,7 @@ type forkableMetadataStore struct {
 	err            error
 	initiator      conversationtypes.ConversationForkInitiator
 	hasInitiator   bool
+	name           string
 }
 
 func (*forkableMetadataStore) GetMetadata() map[string]any { return nil }
@@ -361,6 +376,7 @@ func (*forkableMetadataStore) SetMetadataValue(string, any) {}
 func (s *forkableMetadataStore) ForkConversation(ctx context.Context) (string, error) {
 	s.calls++
 	s.initiator, s.hasInitiator = conversationtypes.ConversationForkInitiatorFromContext(ctx)
+	s.name = conversationmeta.ConversationForkNameFromContext(ctx)
 	return s.conversationID, s.err
 }
 

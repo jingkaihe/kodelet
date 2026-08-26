@@ -63,6 +63,10 @@ type conversationForkResult struct {
 	ConversationID string `json:"conversationId"`
 }
 
+type conversationForkParams struct {
+	Name string `json:"name,omitempty"`
+}
+
 type rpcHostRequestHandler interface {
 	HandleRPCRequest(ctx context.Context, method string, params json.RawMessage) (any, *rpcError)
 }

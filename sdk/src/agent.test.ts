@@ -7,7 +7,7 @@ import path from "node:path";
 import { Readable, Writable } from "node:stream";
 import test from "node:test";
 
-import { Client, Profile, defineExtension, z } from "./index.js";
+import { Client, ConversationForkUnavailableError, Profile, defineExtension, z } from "./index.js";
 import type { SpawnFunction, SpawnedProcess, ToolUpdateData } from "./agent.js";
 
 interface JsonRPCRequest {
@@ -516,6 +516,22 @@ test("Session can expose in-process extensions over a TCP bridge", { timeout: 50
         return selected ?? "dismissed";
       },
     });
+    ext.registerTool({
+      name: "fork_context",
+      description: "Fork the current conversation",
+      inputSchema: z.object({}),
+      async execute(_input, ctx) {
+        try {
+          await ctx.forkConversation({ name: "Delegated task" });
+          return "unexpected";
+        } catch (error) {
+          if (error instanceof ConversationForkUnavailableError) {
+            return "unavailable";
+          }
+          throw error;
+        }
+      },
+    });
     ext.registerCommand({
       name: "surface",
       description: "Open a persistent surface",
@@ -580,6 +596,7 @@ test("Session can expose in-process extensions over a TCP bridge", { timeout: 50
     kodelet: { version: "test" },
     extension: { id: "workspace", cwd: workspace, dataDir: "" },
     capabilities: {
+      conversations: { fork: true },
       toolUpdates: true,
       shortcuts: { submit: true },
       ui: { widgets: true, surfaces: true, transcript: true },
@@ -589,6 +606,22 @@ test("Session can expose in-process extensions over a TCP bridge", { timeout: 50
   assert.deepEqual((init as { shortcuts?: unknown }).shortcuts, [
     { key: "ctrl+alt+r", description: "Run review command" },
   ]);
+
+  bridge.setRespondToHostRequests(false);
+  const forkCall = bridge.beginCall("extension.tool.execute", {
+    name: "fork_context",
+    input: {},
+    context: { cwd: workspace, conversationId: "conversation-fork" },
+  });
+  await bridge.waitForHostRequests(1);
+  const forkRequest = bridge.hostRequests[0];
+  assert.equal(forkRequest?.method, "kodelet.conversation.fork");
+  assert.equal(forkRequest?.parentId, forkCall.id);
+  assert.deepEqual(forkRequest?.params, { name: "Delegated task" });
+  bridge.respondHostError(forkRequest!.id!, { code: -32004, message: "fork unavailable" });
+  assert.deepEqual(await forkCall.response, { content: "unavailable" });
+  bridge.setRespondToHostRequests(true);
+  bridge.hostRequests.length = 0;
 
   const shortcutResult = await bridge.call("extension.shortcut.execute", {
     key: "ctrl+alt+r",
@@ -894,6 +927,17 @@ class BridgeTestClient {
 
   notify(method: string, params: unknown): void {
     const payload = JSON.stringify({ jsonrpc: "2.0", method, params });
+    this.stdin.write(`Content-Length: ${Buffer.byteLength(payload)}\r\n\r\n${payload}`);
+  }
+
+  async waitForHostRequests(count: number): Promise<void> {
+    while (this.hostRequests.length < count) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  }
+
+  respondHostError(id: number | string, error: { code: number; message: string; data?: unknown }): void {
+    const payload = JSON.stringify({ jsonrpc: "2.0", id, error });
     this.stdin.write(`Content-Length: ${Buffer.byteLength(payload)}\r\n\r\n${payload}`);
   }
 

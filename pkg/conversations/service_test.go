@@ -28,6 +28,16 @@ type mockConversationStore struct {
 	closeFunc        func() error
 }
 
+type atomicMockConversationStore struct {
+	*mockConversationStore
+	sourceConversationID string
+}
+
+func (m *atomicMockConversationStore) SaveConversationFork(ctx context.Context, sourceConversationID string, forked conversations.ConversationRecord) error {
+	m.sourceConversationID = sourceConversationID
+	return m.Save(ctx, forked)
+}
+
 func newMockConversationStore() *mockConversationStore {
 	return &mockConversationStore{
 		conversations: make(map[string]*conversations.ConversationRecord),
@@ -536,6 +546,25 @@ func TestConversationService_ForkConversation(t *testing.T) {
 		assert.Equal(t, "max", snapshot.ReasoningEffort)
 		assert.Equal(t, sourceRecord.ToolResults, forkedRecord.ToolResults)
 		assert.Equal(t, response.ID, boundConversationID)
+	})
+
+	t.Run("named fork", func(t *testing.T) {
+		mockStore := &atomicMockConversationStore{mockConversationStore: newMockConversationStore()}
+		mockStore.conversations[sourceRecord.ID] = &sourceRecord
+		service := NewConversationService(mockStore)
+		ctx := ContextWithConversationForkName(context.Background(), "  Investigate\n fork naming  ")
+
+		response, err := service.ForkConversation(ctx, sourceRecord.ID)
+
+		require.NoError(t, err)
+		require.NotNil(t, response)
+		assert.Equal(t, "Investigate fork naming", response.Summary)
+		forkedRecord, exists := mockStore.conversations[response.ID]
+		require.True(t, exists)
+		assert.Equal(t, "Investigate fork naming", forkedRecord.Summary)
+		assert.Equal(t, "Investigate fork naming", ExplicitConversationName(forkedRecord.Metadata))
+		assert.Equal(t, sourceRecord.ID, mockStore.sourceConversationID)
+		assert.Equal(t, "Source conversation", sourceRecord.Summary)
 	})
 
 	t.Run("load error", func(t *testing.T) {

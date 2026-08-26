@@ -172,6 +172,16 @@ return {
 
 Per-tool enablement lives under `extensions.tools.<tool-name>.enabled`. Tool timeouts use SDK `timeoutInSec` or the built-in 10 minute fallback.
 
+### Live conversation forks
+
+Create a named child conversation from an active tool context:
+
+```typescript
+const conversationId = await ctx.forkConversation({ name: "Investigate authentication" });
+```
+
+Omit `name` to preserve the source title. Unavailable forks raise `ConversationForkUnavailableError`.
+
 ## User input from extensions
 
 Tool and event contexts can request UI input from the host:

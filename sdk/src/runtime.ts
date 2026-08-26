@@ -1,7 +1,7 @@
 import nodeProcess from "node:process";
 
 import { createExtensionHost, type ExtensionHost } from "./api.js";
-import { runWithHostRPCClient, type HostRPCClient } from "./context.js";
+import { HostRPCError, runWithHostRPCClient, type HostRPCClient } from "./context.js";
 import type { ExtensionEntrypoint, HandleEventParams } from "./types.js";
 
 const hostDisconnectShutdownTimeoutMs = 1000;
@@ -21,6 +21,7 @@ interface JsonRpcResponse {
   error?: {
     code: number;
     message: string;
+    data?: unknown;
   };
 }
 
@@ -121,7 +122,7 @@ class StdioHostRPCClient implements HostRPCClient {
     }
     this.pending.delete(response.id);
     if (response.error) {
-      pending.reject(new Error(response.error.message));
+      pending.reject(new HostRPCError(response.error));
     } else {
       pending.resolve(response.result);
     }

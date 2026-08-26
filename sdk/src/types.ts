@@ -273,6 +273,11 @@ export interface UIContext {
   openSurface(options: UISurfaceOpenOptions): Promise<UISurface>;
 }
 
+export interface ConversationForkOptions {
+  /** Explicit user-facing name for the forked conversation. */
+  name?: string;
+}
+
 export interface SharedContext extends Required<Pick<BaseCallContext, "cwd">>, Omit<BaseCallContext, "cwd"> {
   signal: AbortSignal;
   storage: StorageContext;
@@ -286,6 +291,7 @@ export interface SharedContext extends Required<Pick<BaseCallContext, "cwd">>, O
 
 export interface ToolContext extends SharedContext {
   update(content: string, data?: Record<string, unknown>): Promise<void>;
+  forkConversation(options?: ConversationForkOptions): Promise<string>;
 }
 
 export interface CommandContext extends SharedContext {

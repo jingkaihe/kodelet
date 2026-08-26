@@ -22,11 +22,35 @@ const (
 	MessageDisplayKindGoal          = "goal"
 )
 
-type conversationNameOverrideContextKey struct{}
+type (
+	conversationNameOverrideContextKey struct{}
+	conversationForkNameContextKey     struct{}
+)
 
 // NormalizeConversationName converts a conversation name into a single-line label.
 func NormalizeConversationName(name string) string {
 	return strings.Join(strings.Fields(name), " ")
+}
+
+// ContextWithConversationForkName attaches an explicit name requested for a new fork.
+func ContextWithConversationForkName(ctx context.Context, name string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	name = NormalizeConversationName(name)
+	if name == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, conversationForkNameContextKey{}, name)
+}
+
+// ConversationForkNameFromContext returns the explicit name requested for a new fork.
+func ConversationForkNameFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	name, _ := ctx.Value(conversationForkNameContextKey{}).(string)
+	return NormalizeConversationName(name)
 }
 
 // SetConversationName records an explicit user-facing conversation name in metadata.

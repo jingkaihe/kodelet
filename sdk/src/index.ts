@@ -24,7 +24,12 @@ export type {
   ToolUpdateData,
   ToolResultData,
 } from "./agent.js";
-export { runWithHostRPCClient, setActiveHostRPCClient } from "./context.js";
+export {
+  ConversationForkUnavailableError,
+  HostRPCError,
+  runWithHostRPCClient,
+  setActiveHostRPCClient,
+} from "./context.js";
 export type { HostRPCClient } from "./context.js";
 export type { RenderTemplateOptions, TemplateView } from "./template.js";
 export type {
@@ -58,6 +63,7 @@ export type {
   CommandRespondResult,
   CommandResult,
   CommandRunAgentResult,
+  ConversationForkOptions,
   EnvContext,
   EmptyEvent,
   EventBlock,

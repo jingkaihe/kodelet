@@ -10,6 +10,7 @@ import type {
   BaseCallContext,
   CommandContext,
   CommandInvocation,
+  ConversationForkOptions,
   EventContext,
   ExecResult,
   FileInfo,
@@ -31,6 +32,26 @@ import type {
 } from "./types.js";
 
 const execFileAsync = promisify(execFile);
+const conversationForkUnavailableCode = -32004;
+
+export class HostRPCError extends Error {
+  readonly code: number;
+  readonly data?: unknown;
+
+  constructor(error: { code: number; message: string; data?: unknown }) {
+    super(error.message);
+    this.name = "HostRPCError";
+    this.code = error.code;
+    this.data = error.data;
+  }
+}
+
+export class ConversationForkUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ConversationForkUnavailableError";
+  }
+}
 
 export interface HostRPCClient {
   request(method: string, params?: unknown): Promise<unknown>;
@@ -80,6 +101,35 @@ export function createToolContext(
         payload.data = data;
       }
       await client.request("kodelet.tool.update", payload);
+    },
+    async forkConversation(options: ConversationForkOptions = {}) {
+      if (!conversationForkSupported(init)) {
+        throw new ConversationForkUnavailableError("Live conversation forking is not supported by this Kodelet host");
+      }
+      if (!client) {
+        throw new ConversationForkUnavailableError("Live conversation forking requires an active tool request");
+      }
+
+      const requestedName = options.name?.trim();
+      try {
+        const response = await client.request(
+          "kodelet.conversation.fork",
+          requestedName ? { name: options.name } : undefined,
+        );
+        if (!isRecord(response)) {
+          throw new Error("Invalid conversation fork response from Kodelet host");
+        }
+        const conversationId = response.conversationId;
+        if (typeof conversationId !== "string" || conversationId.trim() === "") {
+          throw new Error("Conversation fork response did not include a conversation ID");
+        }
+        return conversationId.trim();
+      } catch (error) {
+        if (error instanceof HostRPCError && error.code === conversationForkUnavailableCode) {
+          throw new ConversationForkUnavailableError(error.message);
+        }
+        throw error;
+      }
     },
   };
 }
@@ -669,4 +719,9 @@ function toolUpdatesSupported(init: InitializeParams | undefined): boolean {
     return true;
   }
   return isRecord(capabilities.tools) && capabilities.tools.updates === true;
+}
+
+function conversationForkSupported(init: InitializeParams | undefined): boolean {
+  const conversations = init?.capabilities?.conversations;
+  return isRecord(conversations) && conversations.fork === true;
 }

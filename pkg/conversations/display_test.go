@@ -1,6 +1,7 @@
 package conversations
 
 import (
+	"context"
 	"testing"
 
 	llmtypes "github.com/jingkaihe/kodelet/pkg/types/llm"
@@ -39,6 +40,12 @@ func TestSetConversationNameIgnoresBlankName(t *testing.T) {
 
 	assert.Equal(t, metadata, SetConversationName(metadata, " \n "))
 	assert.NotContains(t, metadata, ConversationNameMetadataKey)
+}
+
+func TestConversationForkNameContext(t *testing.T) {
+	ctx := ContextWithConversationForkName(context.Background(), "  Investigate\n fork naming  ")
+
+	assert.Equal(t, "Investigate fork naming", ConversationForkNameFromContext(ctx))
 }
 
 func TestAddSlashCommandDisplayAndLookup(t *testing.T) {

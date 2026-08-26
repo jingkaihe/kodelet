@@ -14,6 +14,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/jingkaihe/kodelet/pkg/agentenv"
+	conversationmeta "github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
@@ -38,6 +39,7 @@ func (e *forkCallbackEnvironment) ExecuteTool(ctx context.Context, request agent
 	if !ok {
 		return agentenv.ToolExecution{}, llmtypes.ErrConversationForkUnavailable
 	}
+	ctx = conversationmeta.ContextWithConversationForkName(ctx, "Investigate runner fork naming")
 	conversationID, err := forker.ForkConversation(ctx)
 	if err != nil {
 		return agentenv.ToolExecution{}, err
@@ -51,6 +53,7 @@ func (e *forkCallbackEnvironment) ExecuteTool(ctx context.Context, request agent
 type integrationConversationForker struct {
 	initiator convtypes.ConversationForkInitiator
 	has       bool
+	name      string
 }
 
 func (*integrationConversationForker) GetMetadata() map[string]any { return nil }
@@ -59,6 +62,7 @@ func (*integrationConversationForker) SetMetadataValue(string, any) {}
 
 func (f *integrationConversationForker) ForkConversation(ctx context.Context) (string, error) {
 	f.initiator, f.has = convtypes.ConversationForkInitiatorFromContext(ctx)
+	f.name = conversationmeta.ConversationForkNameFromContext(ctx)
 	return "conversation-child", nil
 }
 
@@ -205,6 +209,7 @@ func TestRunnerServiceRoundTripsThroughSymmetricWebsocketProtocol(t *testing.T) 
 		Type:     convtypes.ConversationForkInitiatorTypeExtensionTool,
 		ToolName: "fork_callback",
 	}, forker.initiator)
+	assert.Equal(t, "Investigate runner fork naming", forker.name)
 	childRunnerID, ok := registry.RunnerForConversation("conversation-child")
 	require.True(t, ok)
 	assert.Equal(t, registration.RunnerID, childRunnerID)

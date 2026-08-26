@@ -511,11 +511,11 @@ Renderers accept at most 14 visible activities: up to 8 running, 3 recently comp
 
 ### Live conversation forks
 
-When initialization advertises `capabilities.conversations.fork: true`, an active tool handler may request `kodelet.conversation.fork`. The request must retain the originating `parentId`; parentless calls are not accepted. Kodelet snapshots the provider-native in-memory history, removes the unresolved trailing tool call that invoked the extension, writes an isolated conversation with reset cumulative usage, and returns `{ "conversationId": "..." }`. The source thread is not modified.
+When initialization advertises `capabilities.conversations.fork: true`, an active tool handler may request `kodelet.conversation.fork` with optional params `{ "name": "Delegated task" }`. The request requires the originating `parentId` and returns `{ "conversationId": "..." }`.
 
-The fork preserves the source conversation's provider and model configuration so the serialized provider history remains valid when loaded through ACP. A child agent can therefore inherit context by loading the returned ID, but it cannot use this exact-fork mechanism to switch providers. The Python SDK exposes the low-level operation as `await ctx.fork_conversation()` and the combined child-session flow as `await client.create_session(inherit_context=ctx)`.
+SDK calls are `ctx.forkConversation({ name })` in TypeScript and `ctx.fork_conversation(name=name)` in Python. Omitting `name` preserves the source title.
 
-Fork availability is invocation-scoped: the active tool call must have access to a persistent live thread. A runner-placed tool or a run with conversation persistence disabled receives the dedicated unavailable error even when the protocol capability is advertised, so extensions that also support fresh sessions should catch the SDK's `ConversationForkUnavailableError` and use their previous profile-based launch as a fallback. Snapshot serialization and persistence failures remain ordinary host RPC errors and must not silently degrade to a fresh context.
+Fork availability is invocation-scoped and requires a persistent live thread. Unavailable forks use `ConversationForkUnavailableError`; persistence failures remain ordinary host RPC errors.
 
 ### Persistent widgets and interactive surfaces
 

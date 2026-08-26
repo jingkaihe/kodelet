@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	conversationmeta "github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/runner/protocol"
 	runnerpayload "github.com/jingkaihe/kodelet/pkg/runner/protocol/payload"
@@ -1308,6 +1309,7 @@ func (r *Registry) forkToolConversation(ctx context.Context, runnerID, connectio
 			ToolName: registration.toolName,
 		})
 	}
+	ctx = conversationmeta.ContextWithConversationForkName(ctx, params.Name)
 	conversationID, err := registration.forker.ForkConversation(ctx)
 	if err != nil {
 		return runnerpayload.ConversationForkResult{}, err

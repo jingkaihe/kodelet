@@ -5,7 +5,15 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { createTestHarness, defineExtension, renderTemplate, z, type JSONSchema } from "./index.js";
+import {
+  ConversationForkUnavailableError,
+  HostRPCError,
+  createTestHarness,
+  defineExtension,
+  renderTemplate,
+  z,
+  type JSONSchema,
+} from "./index.js";
 
 test("registers tools, commands, events and executes handlers", async () => {
   let shortcutContext: { conversationId?: string; cwd: string; profile?: string } | undefined;
@@ -456,6 +464,78 @@ test("tool updates are ignored when the host does not advertise support", async 
   harness.initialize({ capabilities: {} });
   assert.deepEqual(await harness.executeTool({ name: "stream", input: {} }), { content: "done" });
   assert.deepEqual(requests, []);
+});
+
+test("tool context can request a named live conversation fork", async () => {
+  const extension = defineExtension((ext) => {
+    ext.registerTool({
+      name: "fork",
+      description: "Fork the current conversation",
+      inputSchema: z.object({}),
+      async execute(_input, ctx) {
+        return await ctx.forkConversation({ name: "  Investigate fork naming  " });
+      },
+    });
+  });
+  const requests: Array<{ method: string; params?: unknown }> = [];
+  const harness = await createTestHarness(extension, {
+    async request(method, params) {
+      requests.push({ method, params });
+      return { conversationId: " forked-conversation " };
+    },
+  });
+  harness.initialize({ capabilities: { conversations: { fork: true } } });
+
+  assert.deepEqual(await harness.executeTool({ name: "fork", input: {} }), { content: "forked-conversation" });
+  assert.deepEqual(requests, [
+    { method: "kodelet.conversation.fork", params: { name: "  Investigate fork naming  " } },
+  ]);
+});
+
+test("tool context rejects unavailable live conversation forks", async () => {
+  const extension = defineExtension((ext) => {
+    ext.registerTool({
+      name: "fork",
+      description: "Fork the current conversation",
+      inputSchema: z.object({}),
+      async execute(_input, ctx) {
+        await assert.rejects(
+          () => ctx.forkConversation(),
+          (error) => error instanceof ConversationForkUnavailableError && /not supported/.test(error.message),
+        );
+        return "unsupported";
+      },
+    });
+  });
+  const harness = await createTestHarness(extension);
+  harness.initialize({ capabilities: {} });
+
+  assert.deepEqual(await harness.executeTool({ name: "fork", input: {} }), { content: "unsupported" });
+});
+
+test("tool context translates fork unavailable host errors", async () => {
+  const extension = defineExtension((ext) => {
+    ext.registerTool({
+      name: "fork",
+      description: "Fork the current conversation",
+      inputSchema: z.object({}),
+      async execute(_input, ctx) {
+        await assert.rejects(
+          () => ctx.forkConversation(),
+          (error) => error instanceof ConversationForkUnavailableError && /fork unavailable/.test(error.message),
+        );
+        return "unavailable";
+      },
+    });
+  });
+  const harness = await createTestHarness(extension, {
+    async request() {
+      throw new HostRPCError({ code: -32004, message: "fork unavailable" });
+    },
+  });
+  harness.initialize({ capabilities: { conversations: { fork: true } } });
+
+  assert.deepEqual(await harness.executeTool({ name: "fork", input: {} }), { content: "unavailable" });
 });
 
 test("widgets use sequences and surfaces route host events", async () => {
@@ -1073,11 +1153,12 @@ test("runtime supports extension-initiated host RPC", async (t) => {
           inputSchema: z.object({}),
           async execute(_, ctx) {
             await ctx.update("Working", { step: 1 });
+            const conversationId = await ctx.forkConversation({ name: "Investigate fork naming" });
             const answer = await ctx.ui.input({ title: "Choose" });
             const confirmed = await ctx.ui.confirm({ title: "Allow?" });
             const selection = await ctx.ui.select({ title: "Food", options: ["Pasta", "Pizza"] });
             await ctx.ui.notify("Done");
-            return { content: [answer ?? "none", confirmed, selection ?? "none"].join(":") };
+            return { content: [conversationId, answer ?? "none", confirmed, selection ?? "none"].join(":") };
           },
         });
       }));
@@ -1096,7 +1177,7 @@ test("runtime supports extension-initiated host RPC", async (t) => {
     protocolVersion: "2026-05-30",
     kodelet: { version: "test" },
     extension: { id: "rpc-ui", cwd: process.cwd(), dataDir: "" },
-    capabilities: { toolUpdates: true, ui: { input: true } },
+    capabilities: { conversations: { fork: true }, toolUpdates: true, ui: { input: true } },
   });
   assert.equal(init.tools[0].name, "ask");
 
@@ -1107,14 +1188,66 @@ test("runtime supports extension-initiated host RPC", async (t) => {
   });
   assert.deepEqual(client.hostRequests.map((request) => request.method), [
     "kodelet.tool.update",
+    "kodelet.conversation.fork",
     "kodelet.ui.input",
     "kodelet.ui.confirm",
     "kodelet.ui.select",
     "kodelet.ui.notify",
   ]);
-  assert.deepEqual(client.hostRequests.map((request) => request.parentId), [2, 2, 2, 2, 2]);
+  assert.deepEqual(client.hostRequests.map((request) => request.parentId), [2, 2, 2, 2, 2, 2]);
   assert.deepEqual(client.hostRequests[0]?.params, { content: "Working", data: { step: 1 } });
-  assert.deepEqual(result, { content: "from-host:true:Pizza" });
+  assert.deepEqual(client.hostRequests[1]?.params, { name: "Investigate fork naming" });
+  assert.deepEqual(result, { content: "forked-conversation:from-host:true:Pizza" });
+});
+
+test("runtime preserves fork unavailable host errors", async (t) => {
+  const extensionFile = path.join(await mkdtemp(path.join(os.tmpdir(), "kodelet-sdk-fork-error-")), "extension.ts");
+  await writeFile(
+    extensionFile,
+    `
+      import { ConversationForkUnavailableError, defineExtension, runExtension, z } from ${JSON.stringify(path.resolve("src/index.ts"))};
+
+      runExtension(defineExtension((ext) => {
+        ext.registerTool({
+          name: "fork",
+          description: "Fork context",
+          inputSchema: z.object({}),
+          async execute(_, ctx) {
+            try {
+              await ctx.forkConversation({ name: "Delegated task" });
+              return "unexpected";
+            } catch (error) {
+              if (error instanceof ConversationForkUnavailableError) return "unavailable";
+              throw error;
+            }
+          },
+        });
+      }));
+    `,
+    "utf8",
+  );
+
+  const child = spawn(process.execPath, ["--import", "tsx", extensionFile], {
+    cwd: process.cwd(),
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  t.after(() => child.kill());
+
+  const client = new RpcTestClient(child.stdout, child.stdin, false);
+  await client.call("extension.initialize", {
+    protocolVersion: "2026-05-30",
+    extension: { id: "fork-error", cwd: process.cwd(), dataDir: "" },
+    capabilities: { conversations: { fork: true } },
+  });
+  const tool = client.beginCall("extension.tool.execute", {
+    name: "fork",
+    input: {},
+    context: { conversationId: "conv-rpc", cwd: process.cwd() },
+  });
+  await client.waitForHostRequests(1);
+  client.respondHostError(client.hostRequests[0]!.id, { code: -32004, message: "fork unavailable" });
+
+  assert.deepEqual(await tool.response, { content: "unavailable" });
 });
 
 test("runtime correlates concurrent persistent widget requests", { timeout: 5000 }, async (t) => {
@@ -1428,6 +1561,11 @@ class RpcTestClient {
     this.stdin.write(`Content-Length: ${Buffer.byteLength(payload)}\r\n\r\n${payload}`);
   }
 
+  respondHostError(id: number | string, error: { code: number; message: string; data?: unknown }): void {
+    const payload = JSON.stringify({ jsonrpc: "2.0", id, error });
+    this.stdin.write(`Content-Length: ${Buffer.byteLength(payload)}\r\n\r\n${payload}`);
+  }
+
   async waitForHostRequests(count: number): Promise<void> {
     while (this.hostRequests.length < count) {
       await new Promise((resolve) => setTimeout(resolve, 5));
@@ -1470,6 +1608,9 @@ class RpcTestClient {
         }
         let result: unknown;
         switch (response.method) {
+          case "kodelet.conversation.fork":
+            result = { conversationId: "forked-conversation" };
+            break;
           case "kodelet.ui.input":
             result = { status: "submitted", value: "from-host" };
             break;

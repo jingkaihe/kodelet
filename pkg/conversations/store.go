@@ -44,6 +44,10 @@ func PersistConversationFork(
 	options conversations.ConversationForkOptions,
 ) (conversations.ConversationRecord, error) {
 	forked := conversations.ForkConversationRecordWithOptions(source, options)
+	if name := ConversationForkNameFromContext(ctx); name != "" {
+		forked.Metadata = SetConversationName(forked.Metadata, name)
+		forked.Summary = name
+	}
 	if atomicStore, ok := store.(AtomicConversationForkStore); ok {
 		if err := atomicStore.SaveConversationFork(ctx, source.ID, forked); err != nil {
 			return conversations.ConversationRecord{}, errors.Wrap(err, "failed to save forked conversation")

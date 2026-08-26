@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	conversationmeta "github.com/jingkaihe/kodelet/pkg/conversations"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/osutil"
 	kodelettools "github.com/jingkaihe/kodelet/pkg/tools"
@@ -396,6 +397,12 @@ type toolExecutionHostHandler struct {
 
 func (h toolExecutionHostHandler) HandleRPCRequest(ctx context.Context, method string, params json.RawMessage) (any, *rpcError) {
 	if method == ConversationForkMethod {
+		var forkParams conversationForkParams
+		if len(params) > 0 && string(params) != "null" {
+			if err := json.Unmarshal(params, &forkParams); err != nil {
+				return nil, &rpcError{Code: -32602, Message: err.Error()}
+			}
+		}
 		toolContext := kodelettools.ToolContextFromContext(ctx)
 		forker, ok := toolContext.MetadataStore.(llmtypes.ConversationForker)
 		if !ok {
@@ -408,6 +415,7 @@ func (h toolExecutionHostHandler) HandleRPCRequest(ctx context.Context, method s
 				ToolName:    h.toolName,
 			})
 		}
+		ctx = conversationmeta.ContextWithConversationForkName(ctx, forkParams.Name)
 		conversationID, err := forker.ForkConversation(ctx)
 		if err != nil {
 			if errors.Is(err, llmtypes.ErrConversationForkUnavailable) {
