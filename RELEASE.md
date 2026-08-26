@@ -1,5 +1,15 @@
 # Kodelet
 
+## 0.5.40-beta
+
+Added admin-managed provider connections in the Web UI for Codex, Anthropic subscriptions, and GitHub Copilot, with device or OAuth login flows hosted by the control plane.
+
+Added working-directory setup for new native TUI conversations through `/new [PATH]` and the conversation picker.
+
+Allowed extension-created live conversation forks to set a name through the TypeScript and Python SDKs while preserving the source title when omitted.
+
+Improved workspace runner lifecycle and run logging, and separated the reusable control plane from the embedded Web UI.
+
 ## 0.5.39-beta
 
 Allowed native TUI extension shortcuts to submit conversation messages, enabling keybindings for existing extension commands while preserving drafts.
