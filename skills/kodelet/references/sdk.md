@@ -99,6 +99,25 @@ Listeners receive every `tool.update`. To keep completed responses bounded, `res
 
 Inline extensions passed to `createSession({ extensions: [...] })` are exposed to Kodelet through a temporary JSON-RPC bridge for that session. The bridge uses a Unix domain socket (or Windows named pipe) by default; set `extensionTransport: "tcp"` to use an ephemeral loopback TCP port instead. Sessions without inline extensions use the normal `.kodelet/extensions` and plugin discovery flow.
 
+### Steering an active session
+
+Use `session.steer(message)` to add guidance to the prompt that is currently running. Wait for a streaming event that confirms ACP has started the prompt before steering:
+
+```typescript
+const active = new Promise<void>((resolve) => {
+  session.once("assistant.thinking_start", () => resolve());
+});
+const run = session.runAndWait({
+  message: "Review the persistence implementation",
+});
+
+await active;
+const steering = await session.steer("Also check transaction boundaries");
+const response = await run;
+```
+
+`steer()` uses the ACP `_session/steering` extension and returns an outcome such as `{ outcome: "injected" }`. It rejects when the session has no active run or the ACP server does not advertise `_meta.steering.supported`. The SDK requests `idleBehavior: "promptRequired"`, so an end-of-turn race returns `{ outcome: "promptRequired", reason: "noRunningTurn" }` rather than silently starting another turn. `injected` means Kodelet queued the message, not that the model consumed it before the prompt ended; guidance left unconsumed remains on the conversation for a later run. Blank messages are rejected locally.
+
 ## Extension definitions
 
 ```typescript

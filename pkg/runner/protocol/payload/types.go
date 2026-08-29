@@ -53,6 +53,7 @@ type EnvironmentConfig struct {
 type EnvironmentCapabilities struct {
 	ToolUpdates        bool `json:"toolUpdates"`
 	InteractiveUI      bool `json:"interactiveUI"`
+	PersistentWidgets  bool `json:"persistentWidgets"`
 	PersistentSurfaces bool `json:"persistentSurfaces"`
 	Commands           bool `json:"commands"`
 }

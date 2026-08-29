@@ -27,6 +27,10 @@ type serverChatRunner struct {
 
 func (r *serverChatRunner) Run(ctx context.Context, req chat.ChatRequest, sink chat.ChatEventSink) (string, error) {
 	conversationID := strings.TrimSpace(req.ConversationID)
+	if r != nil && r.server != nil && r.server.extensionUI != nil && conversationID != "" {
+		ctx = extensions.ContextWithExtensionUIHost(ctx, r.server.extensionUI)
+		ctx = extensions.ContextWithExtensionUIScope(ctx, conversationID)
+	}
 	hasRunnerAffinity := false
 	if r != nil && r.server != nil && r.server.runnerRegistry != nil && conversationID != "" {
 		affinity, ok, err := r.server.runnerRegistry.ResolveConversationAffinity(ctx, conversationID)
@@ -109,6 +113,7 @@ func (r *serverChatRunner) ResolveEnvironment(ctx context.Context, req chat.Chat
 	capabilities := protocol.ClientCapabilities{}
 	if req.ClientCapabilities != nil {
 		capabilities.InteractiveUI = req.ClientCapabilities.InteractiveUI
+		capabilities.PersistentWidgets = req.ClientCapabilities.PersistentWidgets
 		capabilities.PersistentSurfaces = req.ClientCapabilities.PersistentSurfaces
 	}
 	return agentenv.NewRemoteEnvironment(
@@ -270,6 +275,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(s.chatExecutionContext(requestCtx))
 	run := newActiveChatRun(cancel)
 	run.turnID = strings.TrimSpace(req.TurnID)
+	run.eventSink = sink
 	if !s.registerActiveChat(conversationID, run) {
 		cancel()
 		s.writeErrorResponse(w, http.StatusConflict, "conversation already has an active run", nil)

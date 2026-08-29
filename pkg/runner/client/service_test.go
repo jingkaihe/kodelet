@@ -27,6 +27,11 @@ type staticRuntimeProvider struct {
 	runtime *extensions.Runtime
 }
 
+func TestDecorateRunContextDisablesBackgroundTasks(t *testing.T) {
+	ctx := (&Service{}).decorateRunContext(context.Background(), "run-1", "conversation-1")
+	assert.False(t, extensions.RuntimeCapabilitiesFromContext(ctx).BackgroundTasks)
+}
+
 func (p staticRuntimeProvider) RuntimeWithConfigAndCallContext(context.Context, string, string, extensions.Config, extensions.ExtensionCallContext) (*extensions.Runtime, error) {
 	return p.runtime, nil
 }
@@ -297,6 +302,7 @@ Review the runner workspace.`), 0o600))
 	assert.Equal(t, workspace, manifest.WorkingDirectory)
 	assert.Equal(t, "runner prompt {{.WorkingDirectory}}", manifest.Config.SystemPromptContent)
 	assert.NotEmpty(t, manifest.Digest)
+	assert.True(t, manifest.Capabilities.PersistentWidgets)
 	assert.NotContains(t, manifestToolNames(manifest), "get_goal")
 	assert.Contains(t, manifestToolNames(manifest), "file_read")
 	require.NotEmpty(t, manifest.ContextFiles)
@@ -973,7 +979,7 @@ func TestServiceProxiesInteractiveAndPersistentUI(t *testing.T) {
 	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
 	callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
 		RunID: "run-1", ConversationID: "conversation-1",
-		ClientCapabilities: protocol.ClientCapabilities{InteractiveUI: true, PersistentSurfaces: true},
+		ClientCapabilities: protocol.ClientCapabilities{InteractiveUI: true, PersistentWidgets: true, PersistentSurfaces: true},
 	})
 
 	source := &recordingUIExtensionSource{owner: extensions.UIExtensionOwner{ExtensionID: "extension-1", Generation: 4}}
@@ -1073,7 +1079,11 @@ func TestServicePersistentUIRequiresCapabilityAndSource(t *testing.T) {
 	_, err = service.SetWidget(t.Context(), nil, extensions.UIWidgetSetRequest{})
 	require.ErrorContains(t, err, "source is required")
 	source := &recordingUIExtensionSource{owner: extensions.UIExtensionOwner{ExtensionID: "extension-1", Generation: 1}}
-	frameResponse, err := service.OpenSurface(t.Context(), source, extensions.UISurfaceOpenRequest{ID: "surface"})
+	frameResponse, err := service.SetWidget(t.Context(), source, extensions.UIWidgetSetRequest{ID: "widget", Frame: extensions.UIFrame{Sequence: 1}})
+	require.NoError(t, err)
+	assert.False(t, frameResponse.Accepted)
+	assert.Contains(t, frameResponse.Reason, "not available")
+	frameResponse, err = service.OpenSurface(t.Context(), source, extensions.UISurfaceOpenRequest{ID: "surface"})
 	require.NoError(t, err)
 	assert.False(t, frameResponse.Accepted)
 	assert.Contains(t, frameResponse.Reason, "not available")

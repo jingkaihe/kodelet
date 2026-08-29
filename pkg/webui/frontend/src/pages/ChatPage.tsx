@@ -16,6 +16,7 @@ import ChatSidebar, {
   ConversationSearchDialog,
 } from '../components/chat/ChatSidebar';
 import ChatTranscript from '../components/chat/ChatTranscript';
+import ExtensionWidgets from '../components/chat/ExtensionWidgets';
 import NewChatContextDialog from '../components/chat/NewChatContextDialog';
 import PendingSteerList from '../components/chat/PendingSteerList';
 import ProviderSettingsDialog from '../components/chat/ProviderSettingsDialog';
@@ -36,6 +37,7 @@ import type {
   UIConfirmRequestEvent,
   UIInputRequestEvent,
   UISelectRequestEvent,
+  UIWidgetEvent,
   WorkspaceTarget,
 } from '../types';
 import {
@@ -346,6 +348,37 @@ const isBlockingUIRequestEvent = (event: ChatStreamEvent): boolean =>
   event.kind === 'ui-confirm-request' ||
   event.kind === 'ui-select-request';
 
+const widgetsFromSnapshot = (widgets: UIWidgetEvent[] | undefined): Record<string, UIWidgetEvent> =>
+  Object.fromEntries(
+    (widgets || []).filter((widget) => !widget.removed).map((widget) => [widget.key, widget])
+  );
+
+interface UIWidgetVersion {
+  generation: string;
+  sequence: number;
+}
+
+const widgetGenerationParts = (generation: string | undefined): [bigint, bigint] => {
+  const [runnerGeneration = '0', extensionGeneration = '0'] = (generation || '0:0').split(':', 2);
+  try {
+    return [BigInt(runnerGeneration), BigInt(extensionGeneration)];
+  } catch {
+    return [0n, 0n];
+  }
+};
+
+const compareWidgetGenerations = (left: string | undefined, right: string | undefined): number => {
+  const [leftRunner, leftExtension] = widgetGenerationParts(left);
+  const [rightRunner, rightExtension] = widgetGenerationParts(right);
+  if (leftRunner !== rightRunner) {
+    return leftRunner > rightRunner ? 1 : -1;
+  }
+  if (leftExtension === rightExtension) {
+    return 0;
+  }
+  return leftExtension > rightExtension ? 1 : -1;
+};
+
 const upsertConversationSummary = (
   conversations: Conversation[],
   nextConversation: Conversation
@@ -439,6 +472,7 @@ const ChatPage: React.FC = () => {
   const [conversationCWDOptions, setConversationCWDOptions] = useState<string[]>([]);
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState(() => conversationToChatMessages(null));
+  const [extensionWidgets, setExtensionWidgets] = useState<Record<string, UIWidgetEvent>>({});
   const [authPrincipal, setAuthPrincipal] = useState<AuthPrincipal | null>(null);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(conversationId);
   const [chatSettings, setChatSettings] = useState<ChatSettings>({
@@ -481,6 +515,7 @@ const ChatPage: React.FC = () => {
   const [conversationLoading, setConversationLoading] = useState(false);
   const [conversationError, setConversationError] = useState<string | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
+  const [conversationStreamVersion, setConversationStreamVersion] = useState(0);
   const [steering, setSteering] = useState(false);
   const [startingNewConversation, setStartingNewConversation] = useState(false);
   const [locallyRunningConversationIds, setLocallyRunningConversationIds] = useState<string[]>([]);
@@ -526,6 +561,7 @@ const ChatPage: React.FC = () => {
     runnerId: string;
     environmentProfile?: string;
   } | null>(null);
+  const extensionWidgetVersionsRef = useRef<Record<string, UIWidgetVersion>>({});
   const routerConversationIdRef = useRef<string | null>(conversationId);
   const sidebarResizeStartRef = useRef<{
     startX: number;
@@ -550,6 +586,61 @@ const ChatPage: React.FC = () => {
   const workspaceOverlayOpen = workspaceOverlayLayout && workspacePanelOpen;
   const higherPriorityDialogOpen =
     uiRequestDialog !== null || newChatDialogOpen || providerSettingsOpen || sidebarSearchOpen;
+
+  const handleExtensionWidgetEvent = useCallback((event: ChatStreamEvent): boolean => {
+    if (event.kind === 'ui-widgets') {
+      const widgets = widgetsFromSnapshot(event.ui_widgets);
+      extensionWidgetVersionsRef.current = Object.fromEntries(
+        Object.values(widgets).map((widget) => [
+          widget.key,
+          { generation: widget.generation || '0:0', sequence: widget.frame.sequence },
+        ])
+      );
+      setExtensionWidgets(widgets);
+      return true;
+    }
+    if (event.kind !== 'ui-widget' || !event.ui_widget) {
+      return false;
+    }
+
+    const widget = event.ui_widget;
+    if (!widget.frame || typeof widget.frame.sequence !== 'number') {
+      return true;
+    }
+    const incomingVersion: UIWidgetVersion = {
+      generation: widget.generation || '0:0',
+      sequence: widget.frame.sequence,
+    };
+    const currentVersion = extensionWidgetVersionsRef.current[widget.key];
+    if (currentVersion) {
+      const generationOrder = compareWidgetGenerations(
+        incomingVersion.generation,
+        currentVersion.generation
+      );
+      if (
+        generationOrder < 0 ||
+        (generationOrder === 0 && incomingVersion.sequence <= currentVersion.sequence)
+      ) {
+        return true;
+      }
+    }
+    extensionWidgetVersionsRef.current = {
+      ...extensionWidgetVersionsRef.current,
+      [widget.key]: incomingVersion,
+    };
+    setExtensionWidgets((currentWidgets) => {
+      if (widget.removed) {
+        if (!currentWidgets[widget.key]) {
+          return currentWidgets;
+        }
+        const nextWidgets = { ...currentWidgets };
+        delete nextWidgets[widget.key];
+        return nextWidgets;
+      }
+      return { ...currentWidgets, [widget.key]: widget };
+    });
+    return true;
+  }, []);
 
   const setConversationRunning = useCallback(
     (id: string | null | undefined, isRunning: boolean) => {
@@ -652,9 +743,10 @@ const ChatPage: React.FC = () => {
       const nextConversations = response.conversations || [];
       setConversations(nextConversations);
       setConversationTotal(response.total ?? nextConversations.length);
-      const responseCWDs = (response.cwds?.length
-        ? response.cwds
-        : nextConversations.map((nextConversation) => nextConversation.cwd)
+      const responseCWDs = (
+        response.cwds?.length
+          ? response.cwds
+          : nextConversations.map((nextConversation) => nextConversation.cwd)
       )
         .map((cwd) => cwd?.trim())
         .filter((cwd): cwd is string => Boolean(cwd));
@@ -720,9 +812,10 @@ const ChatPage: React.FC = () => {
       setConversationSearchHasMore(
         response.hasMore ?? offset + nextConversations.length < nextTotal
       );
-      const responseCWDs = (response.cwds?.length
-        ? response.cwds
-        : nextConversations.map((nextConversation) => nextConversation.cwd)
+      const responseCWDs = (
+        response.cwds?.length
+          ? response.cwds
+          : nextConversations.map((nextConversation) => nextConversation.cwd)
       )
         .map((cwd) => cwd?.trim())
         .filter((cwd): cwd is string => Boolean(cwd));
@@ -796,12 +889,7 @@ const ChatPage: React.FC = () => {
       setConversationSearchLoading(true);
       requestConversationFilterRefresh();
     },
-    [
-      conversationTotal,
-      conversations,
-      requestConversationFilterRefresh,
-      sidebarLoading,
-    ]
+    [conversationTotal, conversations, requestConversationFilterRefresh, sidebarLoading]
   );
 
   const handleConversationCWDFilterChange = useCallback(
@@ -1418,6 +1506,8 @@ const ChatPage: React.FC = () => {
 
     resumeStreamRef.current += 1;
     setActiveConversationId(conversationId);
+    extensionWidgetVersionsRef.current = {};
+    setExtensionWidgets({});
     setSteering(false);
     setStreamError(null);
 
@@ -1496,6 +1586,9 @@ const ChatPage: React.FC = () => {
           }
 
           sawEvent = true;
+          if (handleExtensionWidgetEvent(event)) {
+            return;
+          }
           if (event.kind === 'conversation' && event.conversation_id) {
             watchedTurn += 1;
             setActiveConversationId(event.conversation_id);
@@ -1605,6 +1698,8 @@ const ChatPage: React.FC = () => {
     clearRunningConversation,
     conversationId,
     conversationLoading,
+    conversationStreamVersion,
+    handleExtensionWidgetEvent,
     loadedConversationId,
     markConversationRunning,
     refreshConversations,
@@ -1637,6 +1732,8 @@ const ChatPage: React.FC = () => {
     optimisticRemoteConversationRef.current = null;
     setActiveConversationId(null);
     setMessages([]);
+    extensionWidgetVersionsRef.current = {};
+    setExtensionWidgets({});
     setConversationError(null);
     setStreamError(null);
     setSelectedProfile(chatSettings.currentProfile || 'default');
@@ -1799,9 +1896,7 @@ const ChatPage: React.FC = () => {
         targetConversationId === activeConversationId ||
         runningConversationIds.includes(targetConversationId)
       ) {
-        if (
-          optimisticRemoteConversationRef.current?.conversationId === targetConversationId
-        ) {
+        if (optimisticRemoteConversationRef.current?.conversationId === targetConversationId) {
           optimisticRemoteConversationRef.current = null;
         }
         const sendController = sendControllersRef.current[targetConversationId];
@@ -2050,8 +2145,7 @@ const ChatPage: React.FC = () => {
     const targetConversationId = conversationId || generateConversationId();
     const isNewConversation = !conversationId;
     const existingOptimisticRemoteConversation =
-      conversationId &&
-      optimisticRemoteConversationRef.current?.conversationId === conversationId
+      conversationId && optimisticRemoteConversationRef.current?.conversationId === conversationId
         ? optimisticRemoteConversationRef.current
         : null;
     const requestRunnerID = existingOptimisticRemoteConversation?.runnerId || selectedRunnerID;
@@ -2120,13 +2214,15 @@ const ChatPage: React.FC = () => {
             existingOptimisticRemoteConversation || (isNewConversation && requestRunnerID)
               ? requestEnvironmentProfile || undefined
               : undefined,
-          profile: conversationId && !existingOptimisticRemoteConversation ? undefined : selectedProfile,
+          profile:
+            conversationId && !existingOptimisticRemoteConversation ? undefined : selectedProfile,
           reasoningEffort:
             (conversationId && !existingOptimisticRemoteConversation) || !chatSettingsLoaded
               ? undefined
               : selectedReasoningEffort,
           clientCapabilities: {
             interactiveUI: true,
+            persistentWidgets: true,
             persistentSurfaces: false,
           },
           cwd: conversationId || requestRunnerID ? undefined : currentCWDLabel || undefined,
@@ -2215,6 +2311,10 @@ const ChatPage: React.FC = () => {
               return;
             }
 
+            if (shouldUpdateCurrentView && handleExtensionWidgetEvent(event)) {
+              return;
+            }
+
             if (event.kind === 'usage' && event.usage) {
               if (shouldUpdateCurrentView) {
                 setConversation((currentConversation) =>
@@ -2271,9 +2371,7 @@ const ChatPage: React.FC = () => {
         return;
       }
 
-      if (
-        optimisticRemoteConversationRef.current?.conversationId === streamedConversationId
-      ) {
+      if (optimisticRemoteConversationRef.current?.conversationId === streamedConversationId) {
         optimisticRemoteConversationRef.current = null;
       }
 
@@ -2331,6 +2429,7 @@ const ChatPage: React.FC = () => {
         setStartingNewConversation(false);
       }
       clearRunningConversationForController(streamedConversationId, controller);
+      setConversationStreamVersion((currentVersion) => currentVersion + 1);
     }
   };
 
@@ -2505,8 +2604,7 @@ const ChatPage: React.FC = () => {
   }, [conversation?.reasoningEffort, conversationId, selectedReasoningEffort]);
 
   const isStartedConversationPending =
-    Boolean(conversationId) &&
-    conversationPathOverrideRef.current === `/c/${conversationId}`;
+    Boolean(conversationId) && conversationPathOverrideRef.current === `/c/${conversationId}`;
   const isStartedConversationAwaitingLoad =
     isStartedConversationPending && loadedConversationId !== conversationId;
   const hasOptimisticRemoteConversation =
@@ -3245,6 +3343,7 @@ const ChatPage: React.FC = () => {
             )}
           </div>
 
+          <ExtensionWidgets placement="aboveComposer" widgets={Object.values(extensionWidgets)} />
           <ChatComposer
             addImageDisabled={
               !executionEnvironmentAvailable ||
@@ -3302,6 +3401,7 @@ const ChatPage: React.FC = () => {
             onStop={handleStop}
             onSubmit={handleSubmit}
           />
+          <ExtensionWidgets placement="belowComposer" widgets={Object.values(extensionWidgets)} />
         </main>
 
         {workspaceToolsAvailable ? (

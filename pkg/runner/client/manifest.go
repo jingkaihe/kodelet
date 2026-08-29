@@ -132,6 +132,7 @@ func buildWireManifest(
 		Capabilities: runnerpayload.EnvironmentCapabilities{
 			ToolUpdates:        true,
 			InteractiveUI:      true,
+			PersistentWidgets:  true,
 			PersistentSurfaces: true,
 			Commands:           true,
 		},

@@ -24,6 +24,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/extensions"
 	"github.com/jingkaihe/kodelet/pkg/fragments"
 	"github.com/jingkaihe/kodelet/pkg/goals"
+	"github.com/jingkaihe/kodelet/pkg/steer"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -204,6 +205,7 @@ func TestServer_Initialize(t *testing.T) {
 	assert.Equal(t, float64(1), result["protocolVersion"])
 	assert.NotNil(t, result["agentCapabilities"])
 	assert.NotNil(t, result["agentInfo"])
+	assert.Equal(t, true, result["_meta"].(map[string]any)["steering"].(map[string]any)["supported"])
 
 	agentInfo := result["agentInfo"].(map[string]any)
 	assert.Equal(t, "kodelet", agentInfo["name"])
@@ -738,6 +740,90 @@ func TestServer_Shutdown_WithUnavailableStorage(t *testing.T) {
 	case <-server.ctx.Done():
 	default:
 		t.Error("context should be cancelled after Shutdown")
+	}
+}
+
+func TestServer_SessionSteeringReturnsPromptRequiredWhenIdleAndQueuesDuringPrompt(t *testing.T) {
+	basePath := t.TempDir()
+	t.Setenv("KODELET_BASE_PATH", basePath)
+	require.NoError(t, db.RunMigrations(context.Background(), migrations.All()))
+	output := bytes.NewBuffer(nil)
+	server := NewServer(
+		WithOutput(output),
+		WithContext(context.Background()),
+		WithConfig(&ServerConfig{Provider: "anthropic", Model: "claude-test", NoSkills: true}),
+	)
+	t.Cleanup(server.Shutdown)
+	server.initialized.Store(true)
+	sess, err := server.sessionManager.NewSession(context.Background(), acptypes.NewSessionRequest{CWD: t.TempDir()})
+	require.NoError(t, err)
+	sessionID := sess.ID
+
+	require.NoError(t, server.handleSessionSteering(&acptypes.Request{
+		ID:     json.RawMessage(`1`),
+		Params: mustJSONRawMessage(t, sessionSteeringRequest(sessionID, "focus")),
+	}))
+	assert.Equal(t, map[string]any{"outcome": "promptRequired", "reason": "noRunningTurn"}, readJSONRPCMessage(t, output)["result"])
+
+	server.activePromptsMu.Lock()
+	prompt := &activePrompt{cancel: func() {}, steerable: true}
+	server.activePrompts[sessionID] = prompt
+	server.activePromptsMu.Unlock()
+	require.NoError(t, server.handleSessionSteering(&acptypes.Request{
+		ID:     json.RawMessage(`2`),
+		Params: mustJSONRawMessage(t, sessionSteeringRequest(sessionID, "  focus on locking  ")),
+	}))
+	message := readJSONRPCMessage(t, output)
+	assert.Equal(t, map[string]any{"outcome": "injected"}, message["result"])
+
+	store, err := steer.NewSteerStore(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	pending, err := store.Peek(context.Background(), string(sessionID))
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	assert.Equal(t, "focus on locking", pending[0].Content)
+
+	server.closePromptSteering(prompt)
+	pending, err = store.Peek(context.Background(), string(sessionID))
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	assert.Equal(t, "focus on locking", pending[0].Content)
+	require.NoError(t, server.handleSessionSteering(&acptypes.Request{
+		ID:     json.RawMessage(`3`),
+		Params: mustJSONRawMessage(t, sessionSteeringRequest(sessionID, "too late")),
+	}))
+	assert.Equal(t, map[string]any{"outcome": "promptRequired", "reason": "noRunningTurn"}, readJSONRPCMessage(t, output)["result"])
+}
+
+func TestServer_SessionSteeringValidatesPrompt(t *testing.T) {
+	output := bytes.NewBuffer(nil)
+	server := NewServer(WithOutput(output), WithContext(context.Background()))
+	server.initialized.Store(true)
+	sessionID := acptypes.SessionID("session-steer")
+	server.activePrompts[sessionID] = &activePrompt{cancel: func() {}}
+
+	for index, message := range []string{" ", strings.Repeat("x", steer.MaxMessageLength+1)} {
+		require.NoError(t, server.handleSessionSteering(&acptypes.Request{
+			ID:     mustJSONRawMessage(t, index+1),
+			Params: mustJSONRawMessage(t, sessionSteeringRequest(sessionID, message)),
+		}))
+		assertRPCErrorCode(t, readJSONRPCMessage(t, output), acptypes.ErrCodeInvalidParams)
+	}
+}
+
+func sessionSteeringRequest(sessionID acptypes.SessionID, message string) acptypes.SessionSteeringRequest {
+	return acptypes.SessionSteeringRequest{
+		SessionID: sessionID,
+		Prompt: []acptypes.ContentBlock{{
+			Type: acptypes.ContentTypeText,
+			Text: message,
+		}},
+		Meta: &acptypes.SessionSteeringMeta{
+			Steering: &acptypes.SessionSteeringOptions{
+				IdleBehavior: acptypes.SteeringIdleBehaviorPromptRequired,
+			},
+		},
 	}
 }
 

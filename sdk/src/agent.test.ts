@@ -23,6 +23,8 @@ interface JsonRPCRequest {
 interface FakeACPProcessOptions {
   sessionId?: string;
   onPrompt?(request: JsonRPCRequest, process: FakeACPProcess): Promise<void> | void;
+  steerResult?: unknown;
+  steeringSupported?: boolean;
 }
 
 class FakeACPProcess extends EventEmitter implements SpawnedProcess {
@@ -91,7 +93,12 @@ class FakeACPProcess extends EventEmitter implements SpawnedProcess {
   private handleRequest(request: JsonRPCRequest): void {
     switch (request.method) {
       case "initialize":
-        this.respond(request.id, { protocolVersion: 1, agentCapabilities: {}, authMethods: [] });
+        this.respond(request.id, {
+          protocolVersion: 1,
+          agentCapabilities: {},
+          authMethods: [],
+          _meta: this.options.steeringSupported === false ? undefined : { steering: { supported: true } },
+        });
         return;
       case "session/new":
         this.respond(request.id, { sessionId: this.options.sessionId ?? "conv-1" });
@@ -104,6 +111,9 @@ class FakeACPProcess extends EventEmitter implements SpawnedProcess {
           () => this.respond(request.id, { stopReason: "end_turn" }),
           (error) => this.respondError(request.id, error instanceof Error ? error.message : String(error)),
         );
+        return;
+      case "_session/steering":
+        this.respond(request.id, this.options.steerResult ?? { outcome: "injected" });
         return;
       default:
         this.respondError(request.id, `Unexpected method: ${request.method}`);
@@ -389,6 +399,105 @@ test("Client rejects child spawn failures without crashing the process", async (
   const client = new Client({ spawn });
 
   await assert.rejects(() => client.createSession(), /spawn failed/);
+});
+
+test("Session steers an active run", async () => {
+  let releasePrompt!: () => void;
+  const processes: FakeACPProcess[] = [];
+  const spawn: SpawnFunction = () => {
+    const process = new FakeACPProcess({
+      onPrompt() {
+        return new Promise<void>((resolve) => {
+          releasePrompt = resolve;
+          queueMicrotask(() => promptReady());
+        });
+      },
+    });
+    processes.push(process);
+    return process;
+  };
+  let promptReady!: () => void;
+  const active = new Promise<void>((resolve) => {
+    promptReady = resolve;
+  });
+
+  const client = new Client({ spawn });
+  const session = await client.createSession();
+  const run = session.runAndWait({ message: "inspect" });
+  await active;
+
+  await assert.rejects(() => session.steer("   "), /non-empty/);
+  assert.deepEqual(await session.steer("  focus on locking  "), {
+    outcome: "injected",
+  });
+  assert.deepEqual(
+    processes[0]?.requests.filter((request) => request.method === "_session/steering").map((request) => request.params),
+    [{
+      sessionId: "conv-1",
+      prompt: [{ type: "text", text: "focus on locking" }],
+      _meta: { steering: { idleBehavior: "promptRequired" } },
+    }],
+  );
+
+  releasePrompt();
+  await run;
+  await assert.rejects(() => session.steer("late"), /without an active run/);
+  await session.close();
+});
+
+test("Session rejects malformed steering responses", async () => {
+  let releasePrompt!: () => void;
+  let promptReady!: () => void;
+  const active = new Promise<void>((resolve) => {
+    promptReady = resolve;
+  });
+  const client = new Client({
+    spawn: () =>
+      new FakeACPProcess({
+        steerResult: { outcome: "unknown" },
+        onPrompt() {
+          promptReady();
+          return new Promise<void>((resolve) => {
+            releasePrompt = resolve;
+          });
+        },
+      }),
+  });
+  const session = await client.createSession();
+  const run = session.runAndWait({ message: "inspect" });
+  await active;
+  await assert.rejects(() => session.steer("focus"), /Invalid _session\/steering response/);
+  releasePrompt();
+  await run;
+  await client.close();
+});
+
+test("Session requires the ACP steering capability", async () => {
+  let releasePrompt!: () => void;
+  let promptReady!: () => void;
+  const active = new Promise<void>((resolve) => {
+    promptReady = resolve;
+  });
+  const process = new FakeACPProcess({
+    steeringSupported: false,
+    onPrompt() {
+      promptReady();
+      return new Promise<void>((resolve) => {
+        releasePrompt = resolve;
+      });
+    },
+  });
+  const client = new Client({ spawn: () => process });
+  const session = await client.createSession();
+  const run = session.runAndWait({ message: "inspect" });
+  await active;
+
+  await assert.rejects(() => session.steer("focus"), /does not advertise session steering support/);
+  assert.equal(process.requests.some((request) => request.method === "_session/steering"), false);
+
+  releasePrompt();
+  await run;
+  await client.close();
 });
 
 test("Session rejects already-aborted run signals without starting a run", async () => {

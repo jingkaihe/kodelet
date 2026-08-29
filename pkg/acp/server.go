@@ -26,6 +26,7 @@ import (
 	"github.com/jingkaihe/kodelet/pkg/goals"
 	"github.com/jingkaihe/kodelet/pkg/logger"
 	"github.com/jingkaihe/kodelet/pkg/slashcommands"
+	"github.com/jingkaihe/kodelet/pkg/steer"
 	convtypes "github.com/jingkaihe/kodelet/pkg/types/conversations"
 	"github.com/jingkaihe/kodelet/pkg/version"
 	pkgerrors "github.com/pkg/errors"
@@ -72,6 +73,10 @@ type Server struct {
 }
 
 type activePrompt struct {
+	steerMu       sync.Mutex
+	steerWG       sync.WaitGroup
+	steerable     bool
+	ctx           context.Context
 	cancel        context.CancelFunc
 	turnID        string
 	remoteClient  RemoteChatClient
@@ -80,6 +85,8 @@ type activePrompt struct {
 	stopping      bool
 	stopDone      chan struct{}
 }
+
+var errNoRunningTurn = errors.New("session does not have a running turn")
 
 // ServerConfig holds configuration for the ACP server
 type ServerConfig struct {
@@ -316,11 +323,136 @@ func (s *Server) handleRequest(data []byte) error {
 		return s.handleSessionLoad(&req)
 	case "session/prompt":
 		return s.handleSessionPrompt(&req)
+	case acptypes.SessionSteeringMethod:
+		return s.handleSessionSteering(&req)
 	case "session/set_mode":
 		return s.handleSetMode(&req)
 	default:
 		return s.sendError(req.ID, acptypes.ErrCodeMethodNotFound, "Method not found", nil)
 	}
+}
+
+func (s *Server) handleSessionSteering(req *acptypes.Request) error {
+	if !s.initialized.Load() {
+		return s.sendError(req.ID, acptypes.ErrCodeInternalError, "Not initialized", nil)
+	}
+
+	var params acptypes.SessionSteeringRequest
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, "Invalid params", err.Error())
+	}
+	params.SessionID = acptypes.SessionID(strings.TrimSpace(string(params.SessionID)))
+	if params.SessionID == "" {
+		return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, "session ID is required", nil)
+	}
+	if len(params.Prompt) == 0 {
+		return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, "steering prompt is required", nil)
+	}
+	if params.Meta != nil && params.Meta.Steering != nil {
+		idleBehavior := params.Meta.Steering.IdleBehavior
+		if idleBehavior != "" && idleBehavior != acptypes.SteeringIdleBehaviorPromptRequired {
+			return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, "unsupported steering idle behavior", nil)
+		}
+	}
+	message, images := bridge.ContentBlocksToMessage(params.Prompt)
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, "steering prompt must contain text", nil)
+	}
+	if len(message) > steer.MaxMessageLength {
+		return s.sendError(req.ID, acptypes.ErrCodeInvalidParams, fmt.Sprintf("steering message must be %d characters or fewer", steer.MaxMessageLength), nil)
+	}
+	if err := s.requireSession(params.SessionID); err != nil {
+		return s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
+	}
+
+	err := s.enqueueSessionSteering(params.SessionID, message, images)
+	if errors.Is(err, errNoRunningTurn) {
+		return s.sendResult(req.ID, acptypes.SessionSteeringResponse{
+			Outcome: acptypes.SessionSteeringOutcomePromptRequired,
+			Reason:  "noRunningTurn",
+		})
+	}
+	if err != nil {
+		return s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
+	}
+	return s.sendResult(req.ID, acptypes.SessionSteeringResponse{Outcome: acptypes.SessionSteeringOutcomeInjected})
+}
+
+func (s *Server) requireSession(sessionID acptypes.SessionID) error {
+	if s.remoteSessions != nil {
+		if !s.remoteSessions.hasSession(sessionID) {
+			return errors.New("session not found")
+		}
+		return nil
+	}
+	_, err := s.sessionManager.GetSession(sessionID)
+	return err
+}
+
+func (s *Server) enqueueSessionSteering(sessionID acptypes.SessionID, message string, images []string) error {
+	s.activePromptsMu.Lock()
+	prompt := s.activePrompts[sessionID]
+	if prompt == nil || prompt.cancelling || prompt.stopping {
+		s.activePromptsMu.Unlock()
+		return errNoRunningTurn
+	}
+	s.activePromptsMu.Unlock()
+
+	prompt.steerMu.Lock()
+	if !prompt.steerable {
+		prompt.steerMu.Unlock()
+		return errNoRunningTurn
+	}
+	prompt.steerWG.Add(1)
+	remoteClient := prompt.remoteClient
+	promptCtx := prompt.ctx
+	prompt.steerMu.Unlock()
+	defer prompt.steerWG.Done()
+	if promptCtx == nil {
+		promptCtx = s.ctx
+	}
+	steerCtx, cancel := context.WithTimeout(promptCtx, 15*time.Second)
+	defer cancel()
+	if s.remoteSessions != nil {
+		if remoteClient == nil {
+			return errNoRunningTurn
+		}
+		_, err := remoteClient.SteerConversation(steerCtx, string(sessionID), message, images)
+		return err
+	}
+
+	store, err := steer.NewSteerStore(steerCtx)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	_, err = store.Enqueue(steerCtx, string(sessionID), message, images)
+	return err
+}
+
+func (s *Server) enablePromptSteering(prompt *activePrompt) {
+	if prompt == nil {
+		return
+	}
+	prompt.steerMu.Lock()
+	prompt.steerable = true
+	prompt.steerMu.Unlock()
+}
+
+func (s *Server) closePromptSteering(prompt *activePrompt) {
+	if prompt == nil {
+		return
+	}
+	prompt.steerMu.Lock()
+	if !prompt.steerable {
+		prompt.steerMu.Unlock()
+		return
+	}
+	prompt.steerable = false
+	prompt.steerMu.Unlock()
+	prompt.steerWG.Wait()
+	prompt.cancel()
 }
 
 func (s *Server) handleNotification(method string, data []byte) error {
@@ -412,6 +544,11 @@ func (s *Server) handleInitialize(req *acptypes.Request) error {
 			Version: version.Version,
 		},
 		AuthMethods: []acptypes.AuthMethod{},
+		Meta: map[string]any{
+			"steering": map[string]any{
+				"supported": true,
+			},
+		},
 	}
 
 	s.initialized.Store(true)
@@ -548,7 +685,7 @@ func (s *Server) handleSessionPrompt(req *acptypes.Request) error {
 
 func (s *Server) registerActivePrompt(sessionID acptypes.SessionID) (context.Context, *activePrompt, error) {
 	promptCtx, promptCancel := context.WithCancel(s.ctx)
-	active := &activePrompt{cancel: promptCancel}
+	active := &activePrompt{ctx: promptCtx, cancel: promptCancel}
 	if s.remoteSessions != nil {
 		active.turnID = convtypes.GenerateID()
 	}
@@ -574,7 +711,7 @@ func (s *Server) handlePreparedSessionPrompt(promptCtx context.Context, active *
 		s.activePromptsMu.Unlock()
 	}()
 	if s.remoteSessions != nil {
-		return s.handleRemoteSessionPrompt(promptCtx, req, params)
+		return s.handleRemoteSessionPrompt(promptCtx, active, req, params)
 	}
 
 	sess, err := s.sessionManager.GetSession(params.SessionID)
@@ -648,7 +785,9 @@ func (s *Server) handlePreparedSessionPrompt(promptCtx context.Context, active *
 		}
 	}
 
+	s.enablePromptSteering(active)
 	stopReason, err := sess.HandlePrompt(promptCtx, prompt, s)
+	s.closePromptSteering(active)
 	if err != nil {
 		if sess.IsCancelled() || errors.Is(err, context.Canceled) {
 			stopReason = acptypes.StopReasonCancelled
@@ -670,7 +809,7 @@ func (s *Server) handlePreparedSessionPrompt(promptCtx context.Context, active *
 	return s.sendResult(req.ID, result)
 }
 
-func (s *Server) handleRemoteSessionPrompt(promptCtx context.Context, req *acptypes.Request, params acptypes.PromptRequest) error {
+func (s *Server) handleRemoteSessionPrompt(promptCtx context.Context, active *activePrompt, req *acptypes.Request, params acptypes.PromptRequest) error {
 	firstPrompt, environmentProfile, err := s.remoteSessions.beginPrompt(params.SessionID)
 	if err != nil {
 		return s.sendError(req.ID, acptypes.ErrCodeInternalError, err.Error(), nil)
@@ -691,6 +830,7 @@ func (s *Server) handleRemoteSessionPrompt(promptCtx context.Context, req *acpty
 	if !started {
 		return s.sendResult(req.ID, acptypes.PromptResponse{StopReason: acptypes.StopReasonCancelled})
 	}
+	defer s.closePromptSteering(active)
 	message, images := bridge.ContentBlocksToMessage(params.Prompt)
 	request := chat.ChatRequest{
 		Message:        message,
@@ -767,6 +907,7 @@ func (s *Server) startRemotePrompt(sessionID acptypes.SessionID, client RemoteCh
 	}
 	prompt.remoteClient = client
 	prompt.remoteStarted = true
+	s.enablePromptSteering(prompt)
 	return prompt.turnID, true
 }
 

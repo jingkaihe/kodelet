@@ -29,6 +29,106 @@ func TestExtensionDataDirUsesKodeletBasePathAndSanitizedID(t *testing.T) {
 	assert.Contains(t, dataDir, "org@repo_weather")
 }
 
+func TestRuntimeCapabilitiesDefaultAndOverride(t *testing.T) {
+	assert.True(t, RuntimeCapabilitiesFromContext(context.Background()).BackgroundTasks)
+
+	ctx := ContextWithRuntimeCapabilities(context.Background(), RuntimeCapabilities{BackgroundTasks: false})
+	assert.False(t, RuntimeCapabilitiesFromContext(ctx).BackgroundTasks)
+}
+
+type capabilityRecordingExtensionUIHost struct {
+	*recordingExtensionUIHost
+	capabilities ExtensionUIHostCapabilities
+}
+
+func (h *capabilityRecordingExtensionUIHost) ExtensionUIHostCapabilities(context.Context) ExtensionUIHostCapabilities {
+	return h.capabilities
+}
+
+func TestProcessInitializeAdvertisesRuntimeBackgroundTasks(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		ctx            context.Context
+		expected       bool
+		uiCapabilities *ExtensionUIHostCapabilities
+	}{
+		{name: "local default", ctx: context.Background(), expected: true},
+		{name: "explicitly unavailable", ctx: ContextWithRuntimeCapabilities(context.Background(), RuntimeCapabilities{BackgroundTasks: false}), expected: false},
+		{name: "widget-only UI host", ctx: context.Background(), expected: true, uiCapabilities: &ExtensionUIHostCapabilities{Widgets: true}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			clientReader, serverWriter := io.Pipe()
+			serverReader, clientWriter := io.Pipe()
+			t.Cleanup(func() {
+				_ = clientReader.Close()
+				_ = serverWriter.Close()
+				_ = serverReader.Close()
+				_ = clientWriter.Close()
+			})
+
+			client := newRPCClient(clientReader, clientWriter)
+			process := &Process{Extension: Extension{ID: "runtime-capabilities"}, client: client}
+			source := &processExtensionUISource{process: process, client: client}
+			process.uiSource = source
+			client.setHostRequestHandler(source)
+
+			type initializeCall struct {
+				result *InitializeResult
+				err    error
+			}
+			initializeDone := make(chan initializeCall, 1)
+			initializeCtx := test.ctx
+			if test.uiCapabilities != nil {
+				initializeCtx = ContextWithExtensionUIHost(initializeCtx, &capabilityRecordingExtensionUIHost{
+					recordingExtensionUIHost: &recordingExtensionUIHost{},
+					capabilities:             *test.uiCapabilities,
+				})
+			}
+			go func() {
+				result, err := process.Initialize(initializeCtx, "/workspace")
+				initializeDone <- initializeCall{result: result, err: err}
+			}()
+
+			payload, err := readFrame(bufio.NewReader(serverReader))
+			require.NoError(t, err)
+			var request struct {
+				ID     int64            `json:"id"`
+				Method string           `json:"method"`
+				Params initializeParams `json:"params"`
+			}
+			require.NoError(t, json.Unmarshal(payload, &request))
+			assert.Equal(t, "extension.initialize", request.Method)
+			runtimeCapabilities, ok := request.Params.Capabilities["runtime"].(map[string]any)
+			require.True(t, ok)
+			assert.Equal(t, test.expected, runtimeCapabilities["backgroundTasks"])
+			uiCapabilities, ok := request.Params.Capabilities["ui"].(map[string]any)
+			require.True(t, ok)
+			if test.uiCapabilities == nil {
+				assert.False(t, uiCapabilities["widgets"].(bool))
+				assert.False(t, uiCapabilities["surfaces"].(bool))
+			} else {
+				assert.Equal(t, test.uiCapabilities.Widgets, uiCapabilities["widgets"])
+				assert.Equal(t, test.uiCapabilities.Surfaces, uiCapabilities["surfaces"])
+				assert.Equal(t, test.uiCapabilities.Transcript, uiCapabilities["transcript"])
+			}
+
+			resultPayload, err := json.Marshal(InitializeResult{Name: "runtime-capabilities"})
+			require.NoError(t, err)
+			responsePayload, err := json.Marshal(rpcResponse{JSONRPC: "2.0", ID: request.ID, Result: resultPayload})
+			require.NoError(t, err)
+			require.NoError(t, writeFrame(serverWriter, responsePayload))
+
+			select {
+			case call := <-initializeDone:
+				require.NoError(t, call.err)
+				require.NotNil(t, call.result)
+			case <-time.After(time.Second):
+				t.Fatal("extension initialization did not complete")
+			}
+		})
+	}
+}
+
 func TestToolExecutionHostHandlerForksLiveConversation(t *testing.T) {
 	store := &forkableMetadataStore{conversationID: "forked-conversation"}
 	ctx := kodelettools.ContextWithToolContext(context.Background(), kodelettools.ToolContext{MetadataStore: store})

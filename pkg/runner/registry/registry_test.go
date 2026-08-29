@@ -142,13 +142,13 @@ func (p *testPersistence) upsertRun(run Run) {
 }
 
 type fakeUIRequestRouter struct {
-	runnerID string
+	identity UIRequestIdentity
 	method   string
 	params   json.RawMessage
 }
 
-func (r *fakeUIRequestRouter) HandleRunnerUIRequest(_ context.Context, runnerID string, method string, params json.RawMessage) (any, *protocol.RPCError) {
-	r.runnerID = runnerID
+func (r *fakeUIRequestRouter) HandleRunnerUIRequest(_ context.Context, identity UIRequestIdentity, method string, params json.RawMessage) (any, *protocol.RPCError) {
+	r.identity = identity
 	r.method = method
 	r.params = append(json.RawMessage(nil), params...)
 	return map[string]bool{"ok": true}, nil
@@ -2200,7 +2200,11 @@ func TestSessionRoutesUIAndRunnerNotifications(t *testing.T) {
 		result, rpcErr := session.HandleRequest(t.Context(), method, json.RawMessage(`{"runId":"run-one"}`))
 		require.Nil(t, rpcErr)
 		assert.Equal(t, map[string]bool{"ok": true}, result)
-		assert.Equal(t, registration.RunnerID, router.runnerID)
+		assert.Equal(t, UIRequestIdentity{
+			RunnerID:     registration.RunnerID,
+			ConnectionID: registration.ConnectionID,
+			Generation:   registration.Generation,
+		}, router.identity)
 		assert.Equal(t, method, router.method)
 	}
 	_, rpcErr = session.HandleRequest(t.Context(), "runner.unknown", json.RawMessage(`{}`))

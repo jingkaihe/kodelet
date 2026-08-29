@@ -83,6 +83,7 @@ type Server struct {
 	remoteTerminals       map[string]int
 	remoteTerminalsMu     sync.Mutex
 	extensionRuntimes     *extensions.RuntimeManager
+	extensionUI           *webExtensionUIHost
 	runnerRegistry        *runnerregistry.Registry
 	authStore             *authStore
 	oidcFlow              OIDCFlow
@@ -113,6 +114,7 @@ type activeChatRun struct {
 	turnID        string
 	stopRequested bool
 	uiInput       *webUIInputBroker
+	eventSink     chat.ChatEventSink
 }
 
 const (
@@ -333,6 +335,7 @@ func NewServer(ctx context.Context, config *ServerConfig, frontendHandler Fronte
 		deletingConversations: make(map[string]struct{}),
 		chatSubscribers:       make(map[string]map[*subscriberEventSink]struct{}),
 	}
+	s.extensionUI = newWebExtensionUIHost(s.emitExtensionUIEvent)
 	runnerRegistry.SetEnvironmentErrorHandler(func(conversationID string) {
 		s.cancelActiveChat(conversationID)
 	})
@@ -1046,6 +1049,27 @@ func (s *Server) broadcastChatEvent(conversationID string, event chat.ChatEvent)
 	}
 }
 
+func (s *Server) emitExtensionUIEvent(conversationID string, event chat.ChatEvent) {
+	if strings.TrimSpace(conversationID) == "" {
+		return
+	}
+
+	var primary chat.ChatEventSink
+	s.activeChatsMu.Lock()
+	if run := s.activeChats[conversationID]; run != nil && !run.stopRequested {
+		primary = run.eventSink
+	}
+	s.activeChatsMu.Unlock()
+
+	if primary != nil {
+		if err := primary.Send(event); err == nil {
+			s.broadcastChatEvent(conversationID, event)
+			return
+		}
+	}
+	s.broadcastChatEvent(conversationID, event)
+}
+
 func (s *Server) closeChatSubscribers(conversationID string) {
 	if strings.TrimSpace(conversationID) == "" {
 		return
@@ -1582,13 +1606,17 @@ func (s *Server) handleGetSlashCommands(w http.ResponseWriter, r *http.Request) 
 	}
 
 	commands := slashcommands.List(r.Context(), processor)
+	extensionCtx := r.Context()
+	if s.extensionUI != nil {
+		extensionCtx = extensions.ContextWithExtensionUIHost(extensionCtx, s.extensionUI)
+	}
 	var extensionRuntime *extensions.Runtime
 	if s.extensionRuntimes != nil {
-		extensionRuntime, err = s.extensionRuntimes.RuntimeForCommandDiscovery(r.Context(), resolvedCWD)
+		extensionRuntime, err = s.extensionRuntimes.RuntimeForCommandDiscovery(extensionCtx, resolvedCWD)
 	} else {
 		runtimeManager := extensions.NewRuntimeManager()
 		defer func() { _ = runtimeManager.Close() }()
-		extensionRuntime, err = runtimeManager.RuntimeForCommandDiscovery(r.Context(), resolvedCWD)
+		extensionRuntime, err = runtimeManager.RuntimeForCommandDiscovery(extensionCtx, resolvedCWD)
 	}
 	if err != nil {
 		logger.G(r.Context()).WithError(err).Warn("Failed to initialize extensions for slash command discovery")
@@ -2323,13 +2351,22 @@ func (s *Server) handleStreamConversation(w http.ResponseWriter, r *http.Request
 		subscriber.Close()
 	}()
 
-	if s.isActiveChat(conversationID) {
+	active := s.isActiveChat(conversationID)
+	if active {
 		_ = sink.Send(chat.ChatEvent{
 			Kind:           "conversation",
 			ConversationID: conversationID,
 			Role:           "assistant",
 		})
-	} else {
+	}
+	if s.extensionUI != nil {
+		widgets := s.extensionUI.Snapshot(conversationID)
+		_ = sink.Send(chat.ChatEvent{
+			Kind:           "ui-widgets",
+			ConversationID: conversationID,
+			UIWidgets:      widgets,
+		})
+	} else if !active {
 		_ = sink.KeepAlive()
 	}
 	keepAlive := time.NewTicker(conversationStreamKeepAliveInterval)
@@ -2572,6 +2609,9 @@ func (s *Server) handleDeleteConversation(w http.ResponseWriter, r *http.Request
 		if err := closer.CloseConversation(id); err != nil {
 			logger.G(ctx).WithError(err).WithField("conversation_id", id).Warn("failed to close cached conversation thread")
 		}
+	}
+	if s.extensionUI != nil {
+		s.extensionUI.RemoveConversation(id)
 	}
 	s.closeChatSubscribers(id)
 

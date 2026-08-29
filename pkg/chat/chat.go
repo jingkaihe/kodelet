@@ -57,6 +57,7 @@ const (
 // ChatClientCapabilities describes UI behavior supported by the client attached to a chat run.
 type ChatClientCapabilities struct {
 	InteractiveUI      bool `json:"interactiveUI"`
+	PersistentWidgets  bool `json:"persistentWidgets"`
 	PersistentSurfaces bool `json:"persistentSurfaces"`
 }
 
@@ -98,6 +99,8 @@ type ChatEvent struct {
 	UIConfirm        *UIConfirmEvent                 `json:"ui_confirm,omitempty"`
 	UISelect         *UISelectEvent                  `json:"ui_select,omitempty"`
 	UINotify         *UINotifyEvent                  `json:"ui_notify,omitempty"`
+	UIWidget         *UIWidgetEvent                  `json:"ui_widget,omitempty"`
+	UIWidgets        []UIWidgetEvent                 `json:"ui_widgets,omitempty"`
 	Error            string                          `json:"error,omitempty"`
 }
 
@@ -138,6 +141,17 @@ type UISelectEvent struct {
 type UINotifyEvent struct {
 	Title   string `json:"title,omitempty"`
 	Message string `json:"message"`
+}
+
+// UIWidgetEvent carries one persistent extension widget snapshot or removal.
+type UIWidgetEvent struct {
+	Key         string             `json:"key"`
+	ExtensionID string             `json:"extension_id"`
+	Generation  string             `json:"generation"`
+	ID          string             `json:"id"`
+	Placement   string             `json:"placement,omitempty"`
+	Frame       extensions.UIFrame `json:"frame"`
+	Removed     bool               `json:"removed,omitempty"`
 }
 
 // ChatEventSink receives streamed chat events.

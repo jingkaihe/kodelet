@@ -247,6 +247,7 @@ export interface ChatRequest {
   cwd?: string;
   clientCapabilities?: {
     interactiveUI: boolean;
+    persistentWidgets: boolean;
     persistentSurfaces: boolean;
   };
 }
@@ -429,6 +430,8 @@ export interface ChatStreamEvent {
     | 'ui-confirm-request'
     | 'ui-select-request'
     | 'ui-notification'
+    | 'ui-widget'
+    | 'ui-widgets'
     | 'thinking-start'
     | 'thinking-delta'
     | 'thinking-end'
@@ -456,7 +459,42 @@ export interface ChatStreamEvent {
   ui_confirm?: UIConfirmRequestEvent;
   ui_select?: UISelectRequestEvent;
   ui_notify?: UINotifyEvent;
+  ui_widget?: UIWidgetEvent;
+  ui_widgets?: UIWidgetEvent[];
   error?: string;
+}
+
+export interface UIStyle {
+  foreground?: string;
+  background?: string;
+  bold?: boolean;
+  dim?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strikethrough?: boolean;
+  reverse?: boolean;
+}
+
+export interface UIStyledSpan {
+  text: string;
+  style?: UIStyle;
+}
+
+export type UIFrameLine = string | { spans: UIStyledSpan[] };
+
+export interface UIFrame {
+  sequence: number;
+  lines: UIFrameLine[];
+}
+
+export interface UIWidgetEvent {
+  key: string;
+  extension_id: string;
+  generation?: string;
+  id: string;
+  placement?: 'aboveComposer' | 'belowComposer' | string;
+  frame: UIFrame;
+  removed?: boolean;
 }
 
 export interface UIInputRequestEvent {

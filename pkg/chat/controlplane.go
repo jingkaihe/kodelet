@@ -514,8 +514,8 @@ func (r *ControlPlaneChatRunner) StopConversationTurn(ctx context.Context, conve
 	return nil
 }
 
-// SteerConversation queues a steering message in the control plane that owns the active provider loop.
-func (r *ControlPlaneChatRunner) SteerConversation(ctx context.Context, conversationID, message string) (bool, error) {
+// SteerConversation queues steering content in the control plane that owns the active provider loop.
+func (r *ControlPlaneChatRunner) SteerConversation(ctx context.Context, conversationID, message string, images []string) (bool, error) {
 	conversationID = strings.TrimSpace(conversationID)
 	message = strings.TrimSpace(message)
 	if conversationID == "" {
@@ -529,8 +529,12 @@ func (r *ControlPlaneChatRunner) SteerConversation(ctx context.Context, conversa
 		return false, err
 	}
 	payload, err := json.Marshal(struct {
-		Message string `json:"message"`
-	}{Message: message})
+		Message string             `json:"message"`
+		Content []ChatContentBlock `json:"content,omitempty"`
+	}{
+		Message: message,
+		Content: ContentBlocksForUserInput(message, images),
+	})
 	if err != nil {
 		return false, errors.Wrap(err, "failed to encode control-plane steering request")
 	}
@@ -549,10 +553,15 @@ func (r *ControlPlaneChatRunner) SteerConversation(ctx context.Context, conversa
 		return false, controlPlaneResponseError(response)
 	}
 	var result struct {
-		Queued bool `json:"queued"`
+		Success        bool   `json:"success"`
+		ConversationID string `json:"conversation_id"`
+		Queued         bool   `json:"queued"`
 	}
 	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&result); err != nil {
 		return false, errors.Wrap(err, "failed to decode control-plane steering response")
+	}
+	if !result.Success || strings.TrimSpace(result.ConversationID) != conversationID {
+		return false, errors.New("control-plane returned an invalid steering response")
 	}
 	return result.Queued, nil
 }

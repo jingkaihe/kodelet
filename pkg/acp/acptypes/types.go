@@ -103,6 +103,7 @@ type InitializeResponse struct {
 	AgentCapabilities AgentCapabilities `json:"agentCapabilities"`
 	AgentInfo         *Implementation   `json:"agentInfo,omitempty"`
 	AuthMethods       []AuthMethod      `json:"authMethods"`
+	Meta              map[string]any    `json:"_meta,omitempty"`
 }
 
 // AuthMethod describes an authentication method
@@ -189,6 +190,46 @@ type PromptRequest struct {
 type PromptResponse struct {
 	StopReason StopReason     `json:"stopReason"`
 	Meta       map[string]any `json:"_meta,omitempty"`
+}
+
+// SessionSteeringMethod is the established ACP extension method for steering a session.
+const SessionSteeringMethod = "_session/steering"
+
+// SteeringIdleBehaviorPromptRequired asks the agent to leave idle steering content host-owned.
+const SteeringIdleBehaviorPromptRequired = "promptRequired"
+
+// SessionSteeringOptions configures steering behavior for an idle session.
+type SessionSteeringOptions struct {
+	IdleBehavior string `json:"idleBehavior,omitempty"`
+}
+
+// SessionSteeringMeta contains extension-specific steering options.
+type SessionSteeringMeta struct {
+	Steering *SessionSteeringOptions `json:"steering,omitempty"`
+}
+
+// SessionSteeringRequest injects prompt content into a running session turn.
+type SessionSteeringRequest struct {
+	SessionID SessionID            `json:"sessionId"`
+	Prompt    []ContentBlock       `json:"prompt"`
+	Meta      *SessionSteeringMeta `json:"_meta,omitempty"`
+}
+
+// SessionSteeringOutcome describes how a steering request was handled.
+type SessionSteeringOutcome string
+
+// Session steering outcomes.
+const (
+	SessionSteeringOutcomeInjected       SessionSteeringOutcome = "injected"
+	SessionSteeringOutcomeStartedNewTurn SessionSteeringOutcome = "startedNewTurn"
+	SessionSteeringOutcomePromptRequired SessionSteeringOutcome = "promptRequired"
+	SessionSteeringOutcomeFailed         SessionSteeringOutcome = "failed"
+)
+
+// SessionSteeringResponse reports how the steering prompt was handled.
+type SessionSteeringResponse struct {
+	Outcome SessionSteeringOutcome `json:"outcome"`
+	Reason  string                 `json:"reason,omitempty"`
 }
 
 // StopReason indicates why the agent stopped

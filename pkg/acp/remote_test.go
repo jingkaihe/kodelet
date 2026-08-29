@@ -84,6 +84,11 @@ type fakeRemoteChatClient struct {
 	stopErr  error
 	requests []chat.ChatRequest
 	stopped  []string
+	steered  []string
+
+	steerStarted   chan struct{}
+	steerRelease   chan struct{}
+	steerCancelled bool
 }
 
 func (c *fakeRemoteChatClient) Run(ctx context.Context, request chat.ChatRequest, sink chat.ChatEventSink) (string, error) {
@@ -102,6 +107,31 @@ func (c *fakeRemoteChatClient) ListConversations(context.Context, int) ([]convty
 
 func (c *fakeRemoteChatClient) LoadConversation(context.Context, string) (chat.ConversationHistory, error) {
 	return c.history, nil
+}
+
+func (c *fakeRemoteChatClient) SteerConversation(ctx context.Context, conversationID, message string, _ []string) (bool, error) {
+	c.mu.Lock()
+	started := c.steerStarted
+	release := c.steerRelease
+	if started != nil {
+		close(started)
+		c.steerStarted = nil
+	}
+	c.mu.Unlock()
+	if release != nil {
+		select {
+		case <-release:
+		case <-ctx.Done():
+			c.mu.Lock()
+			c.steerCancelled = true
+			c.mu.Unlock()
+			return false, ctx.Err()
+		}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.steered = append(c.steered, conversationID+":"+message)
+	return len(c.steered) > 1, nil
 }
 
 func (c *fakeRemoteChatClient) StopConversation(_ context.Context, conversationID string) error {
@@ -130,6 +160,82 @@ func (c *fakeRemoteChatClient) recordedRequests() []chat.ChatRequest {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return append([]chat.ChatRequest(nil), c.requests...)
+}
+
+func TestRemoteACPSessionSteering(t *testing.T) {
+	client := &fakeRemoteChatClient{}
+	output := bytes.NewBuffer(nil)
+	server := newRemoteACPTestServer(t, t.TempDir(), client, output)
+	server.initialized.Store(true)
+	sessionID := acptypes.SessionID("remote-steer")
+	server.remoteSessions.mu.Lock()
+	server.remoteSessions.sessions[sessionID] = &remoteSession{id: sessionID, started: true, active: true}
+	server.remoteSessions.mu.Unlock()
+	server.activePrompts[sessionID] = &activePrompt{cancel: func() {}, remoteClient: client, remoteStarted: true, steerable: true}
+
+	require.NoError(t, server.handleSessionSteering(&acptypes.Request{
+		ID:     json.RawMessage(`1`),
+		Params: mustJSONRawMessage(t, sessionSteeringRequest(sessionID, "focus")),
+	}))
+	message := readJSONRPCMessage(t, output)
+	assert.Equal(t, map[string]any{"outcome": "injected"}, message["result"])
+
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	assert.Equal(t, []string{"remote-steer:focus"}, client.steered)
+}
+
+func TestRemoteACPSessionSteeringFinishesBeforePromptCloses(t *testing.T) {
+	steerStarted := make(chan struct{})
+	steerRelease := make(chan struct{})
+	client := &fakeRemoteChatClient{
+		steerStarted: steerStarted,
+		steerRelease: steerRelease,
+	}
+	output := bytes.NewBuffer(nil)
+	server := newRemoteACPTestServer(t, t.TempDir(), client, output)
+	sessionID := acptypes.SessionID("remote-steer-race")
+	server.remoteSessions.mu.Lock()
+	server.remoteSessions.sessions[sessionID] = &remoteSession{id: sessionID, started: true, active: true}
+	server.remoteSessions.mu.Unlock()
+	promptCtx, promptCancel := context.WithCancel(t.Context())
+	prompt := &activePrompt{
+		ctx:           promptCtx,
+		cancel:        promptCancel,
+		remoteClient:  client,
+		remoteStarted: true,
+		steerable:     true,
+	}
+	server.activePrompts[sessionID] = prompt
+	params := mustJSONRawMessage(t, sessionSteeringRequest(sessionID, "focus"))
+
+	steerDone := make(chan error, 1)
+	go func() {
+		steerDone <- server.handleSessionSteering(&acptypes.Request{
+			ID:     json.RawMessage(`1`),
+			Params: params,
+		})
+	}()
+	<-steerStarted
+
+	closeDone := make(chan struct{})
+	go func() {
+		server.closePromptSteering(prompt)
+		close(closeDone)
+	}()
+	select {
+	case <-closeDone:
+		t.Fatal("prompt steering closed before the admitted request completed")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(steerRelease)
+	require.NoError(t, <-steerDone)
+	<-closeDone
+	assert.Equal(t, map[string]any{"outcome": "injected"}, readJSONRPCMessage(t, output)["result"])
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	assert.False(t, client.steerCancelled)
 }
 
 func newRemoteACPTestServer(t *testing.T, workspace string, client RemoteChatClient, output *bytes.Buffer) *Server {

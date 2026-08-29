@@ -3,6 +3,7 @@ package controlplane
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -599,6 +600,7 @@ func (s *runnerUIEventSink) Send(event ChatEvent) error {
 func TestHandleRunnerUIRequestRoutesInteractivePrompts(t *testing.T) {
 	server := newRunnerTestServer(t, "")
 	registration, sink, broker := openRunnerUIRun(t, server)
+	identity := runnerUIRequestIdentity(registration)
 
 	tests := []struct {
 		name      string
@@ -642,7 +644,7 @@ func TestHandleRunnerUIRequestRoutesInteractivePrompts(t *testing.T) {
 			}
 			resultCh := make(chan result, 1)
 			go func() {
-				value, rpcErr := server.HandleRunnerUIRequest(t.Context(), registration.RunnerID, test.method, mustRunnerJSON(t, test.params))
+				value, rpcErr := server.HandleRunnerUIRequest(t.Context(), identity, test.method, mustRunnerJSON(t, test.params))
 				resultCh <- result{value: value, rpcErr: rpcErr}
 			}()
 
@@ -665,7 +667,7 @@ func TestHandleRunnerUIRequestRoutesInteractivePrompts(t *testing.T) {
 		})
 	}
 
-	notify, rpcErr := server.HandleRunnerUIRequest(t.Context(), registration.RunnerID, protocol.MethodUINotify, mustRunnerJSON(t, runnerpayload.UINotifyParams{
+	notify, rpcErr := server.HandleRunnerUIRequest(t.Context(), identity, protocol.MethodUINotify, mustRunnerJSON(t, runnerpayload.UINotifyParams{
 		RunID: "run-ui", Request: extensions.UINotifyRequest{Title: "Notice", Message: "done"},
 	}))
 	require.Nil(t, rpcErr)
@@ -682,53 +684,117 @@ func TestHandleRunnerUIRequestRoutesInteractivePrompts(t *testing.T) {
 func TestHandleRunnerUIRequestValidatesRunAndPersistentCapabilities(t *testing.T) {
 	server := newRunnerTestServer(t, "")
 	registration, _, _ := openRunnerUIRun(t, server)
+	identity := runnerUIRequestIdentity(registration)
 
 	server.activeChatsMu.Lock()
 	delete(server.activeChats, "conversation-ui")
 	server.activeChatsMu.Unlock()
-	value, rpcErr := server.HandleRunnerUIRequest(t.Context(), registration.RunnerID, protocol.MethodUIInput, mustRunnerJSON(t, runnerpayload.UIInputParams{
+	value, rpcErr := server.HandleRunnerUIRequest(t.Context(), identity, protocol.MethodUIInput, mustRunnerJSON(t, runnerpayload.UIInputParams{
 		RunID: "run-ui", Request: extensions.UIInputRequest{ID: "input-1", Title: "Input"},
 	}))
 	require.Nil(t, rpcErr)
 	response := value.(extensions.UIInputResponse)
 	assert.Equal(t, extensions.UIInputStatusUnavailable, response.Status)
 
-	value, rpcErr = server.HandleRunnerUIRequest(t.Context(), registration.RunnerID, protocol.MethodUITranscriptAppend, mustRunnerJSON(t, runnerpayload.UITranscriptAppendParams{RunID: "run-ui"}))
+	value, rpcErr = server.HandleRunnerUIRequest(t.Context(), identity, protocol.MethodUITranscriptAppend, mustRunnerJSON(t, runnerpayload.UITranscriptAppendParams{RunID: "run-ui"}))
 	require.Nil(t, rpcErr)
 	assert.Contains(t, value.(extensions.UITranscriptAppendResponse).Reason, "not available")
+	owner := runnerpayload.ExtensionOwner{ExtensionID: "subagent", Generation: 1}
+	value, rpcErr = server.HandleRunnerUIRequest(t.Context(), identity, protocol.MethodUIWidgetSet, mustRunnerJSON(t, runnerpayload.UIWidgetSetParams{
+		RunID: "run-ui",
+		Owner: owner,
+		Request: extensions.UIWidgetSetRequest{
+			ID:        "background-agents",
+			Placement: extensions.UIWidgetPlacementAboveComposer,
+			Frame: extensions.UIFrame{
+				Sequence: 1,
+				Lines:    []extensions.UIFrameLine{{Spans: []extensions.UIStyledSpan{{Text: "1 active"}}}},
+			},
+		},
+	}))
+	require.Nil(t, rpcErr)
+	assert.True(t, value.(extensions.UIFrameResponse).Accepted)
+	snapshot := server.extensionUI.Snapshot("conversation-ui")
+	require.Len(t, snapshot, 1)
+	assert.Equal(t, fmt.Sprintf("%d:1", identity.Generation), snapshot[0].Generation)
+
+	value, rpcErr = server.HandleRunnerUIRequest(t.Context(), identity, protocol.MethodUIWidgetFrame, mustRunnerJSON(t, runnerpayload.UIWidgetFrameParams{
+		RunID: "run-ui",
+		Owner: owner,
+		Request: extensions.UIWidgetFrameRequest{
+			ID: "background-agents",
+			Frame: extensions.UIFrame{
+				Sequence: 2,
+				Lines:    []extensions.UIFrameLine{{Spans: []extensions.UIStyledSpan{{Text: "1 completed"}}}},
+			},
+		},
+	}))
+	require.Nil(t, rpcErr)
+	assert.True(t, value.(extensions.UIFrameResponse).Accepted)
+
+	_, rpcErr = server.HandleRunnerUIRequest(t.Context(), identity, protocol.MethodUIWidgetSet, mustRunnerJSON(t, runnerpayload.UIWidgetSetParams{
+		RunID: "run-ui",
+		Owner: owner,
+		Request: extensions.UIWidgetSetRequest{
+			ScopeID:   "another-conversation",
+			ID:        "other",
+			Placement: extensions.UIWidgetPlacementAboveComposer,
+			Frame:     extensions.UIFrame{Sequence: 1},
+		},
+	}))
+	require.NotNil(t, rpcErr)
+	assert.Equal(t, protocol.ErrorCodeInvalidParams, rpcErr.Code)
+
+	value, rpcErr = server.HandleRunnerUIRequest(t.Context(), identity, protocol.MethodUIWidgetRemove, mustRunnerJSON(t, runnerpayload.UIWidgetRemoveParams{
+		RunID:   "run-ui",
+		Owner:   owner,
+		Request: extensions.UIWidgetRemoveRequest{ID: "background-agents", Sequence: 3},
+	}))
+	require.Nil(t, rpcErr)
+	assert.True(t, value.(extensions.UIFrameResponse).Accepted)
+	assert.Empty(t, server.extensionUI.Snapshot("conversation-ui"))
+
 	for _, method := range []string{
-		protocol.MethodUIWidgetSet,
-		protocol.MethodUIWidgetFrame,
-		protocol.MethodUIWidgetRemove,
 		protocol.MethodUISurfaceOpen,
 		protocol.MethodUISurfaceFrame,
 		protocol.MethodUISurfaceClose,
 	} {
-		value, rpcErr = server.HandleRunnerUIRequest(t.Context(), registration.RunnerID, method, json.RawMessage(`{"runId":"run-ui"}`))
+		value, rpcErr = server.HandleRunnerUIRequest(t.Context(), identity, method, json.RawMessage(`{"runId":"run-ui"}`))
 		require.Nil(t, rpcErr)
 		assert.Contains(t, value.(extensions.UIFrameResponse).Reason, "not available")
 	}
 
-	_, rpcErr = server.HandleRunnerUIRequest(t.Context(), registration.RunnerID, protocol.MethodUIInput, json.RawMessage(`not-json`))
+	_, rpcErr = server.HandleRunnerUIRequest(t.Context(), identity, protocol.MethodUIInput, json.RawMessage(`not-json`))
 	require.NotNil(t, rpcErr)
 	assert.Equal(t, protocol.ErrorCodeInvalidParams, rpcErr.Code)
-	_, rpcErr = server.HandleRunnerUIRequest(t.Context(), registration.RunnerID, protocol.MethodUIInput, mustRunnerJSON(t, runnerpayload.UIInputParams{}))
+	_, rpcErr = server.HandleRunnerUIRequest(t.Context(), identity, protocol.MethodUIInput, mustRunnerJSON(t, runnerpayload.UIInputParams{}))
 	require.NotNil(t, rpcErr)
 	assert.Equal(t, protocol.ErrorCodeInvalidParams, rpcErr.Code)
-	_, rpcErr = server.HandleRunnerUIRequest(t.Context(), "another-runner", protocol.MethodUIInput, mustRunnerJSON(t, runnerpayload.UIInputParams{RunID: "run-ui"}))
+	_, rpcErr = server.HandleRunnerUIRequest(t.Context(), runnerregistry.UIRequestIdentity{
+		RunnerID:     "another-runner",
+		ConnectionID: identity.ConnectionID,
+		Generation:   identity.Generation,
+	}, protocol.MethodUIInput, mustRunnerJSON(t, runnerpayload.UIInputParams{RunID: "run-ui"}))
 	require.NotNil(t, rpcErr)
 	assert.Equal(t, protocol.ErrorCodeStale, rpcErr.Code)
-	_, rpcErr = server.HandleRunnerUIRequest(t.Context(), registration.RunnerID, "ui.unknown", json.RawMessage(`{}`))
+	_, rpcErr = server.HandleRunnerUIRequest(t.Context(), runnerregistry.UIRequestIdentity{
+		RunnerID:     identity.RunnerID,
+		ConnectionID: identity.ConnectionID,
+		Generation:   identity.Generation + 1,
+	}, protocol.MethodUIInput, mustRunnerJSON(t, runnerpayload.UIInputParams{RunID: "run-ui"}))
+	require.NotNil(t, rpcErr)
+	assert.Equal(t, protocol.ErrorCodeStale, rpcErr.Code)
+	_, rpcErr = server.HandleRunnerUIRequest(t.Context(), identity, "ui.unknown", json.RawMessage(`{}`))
 	require.NotNil(t, rpcErr)
 	assert.Equal(t, protocol.ErrorCodeMethodNotFound, rpcErr.Code)
 
 	require.NoError(t, server.runnerRegistry.CloseRun(t.Context(), "run-ui", runnerregistry.RunStatusSucceeded, nil))
-	_, rpcErr = server.HandleRunnerUIRequest(t.Context(), registration.RunnerID, protocol.MethodUIInput, mustRunnerJSON(t, runnerpayload.UIInputParams{RunID: "run-ui"}))
+	_, rpcErr = server.HandleRunnerUIRequest(t.Context(), identity, protocol.MethodUIInput, mustRunnerJSON(t, runnerpayload.UIInputParams{RunID: "run-ui"}))
 	require.NotNil(t, rpcErr)
 	assert.Equal(t, protocol.ErrorCodeStale, rpcErr.Code)
 
 	nilServer := &Server{}
-	_, rpcErr = nilServer.HandleRunnerUIRequest(t.Context(), registration.RunnerID, protocol.MethodUIInput, mustRunnerJSON(t, runnerpayload.UIInputParams{RunID: "run-ui"}))
+	_, rpcErr = nilServer.HandleRunnerUIRequest(t.Context(), identity, protocol.MethodUIInput, mustRunnerJSON(t, runnerpayload.UIInputParams{RunID: "run-ui"}))
 	require.NotNil(t, rpcErr)
 	assert.Equal(t, protocol.ErrorCodeUnavailable, rpcErr.Code)
 	assert.Nil(t, nilServer.runnerUIBroker("run-ui"))
@@ -985,6 +1051,14 @@ func mustRunnerJSON(t *testing.T, value any) json.RawMessage {
 	return payload
 }
 
+func runnerUIRequestIdentity(registration protocol.RegisterResult) runnerregistry.UIRequestIdentity {
+	return runnerregistry.UIRequestIdentity{
+		RunnerID:     registration.RunnerID,
+		ConnectionID: registration.ConnectionID,
+		Generation:   registration.Generation,
+	}
+}
+
 func newRunnerTestServer(t *testing.T, authToken string) *Server {
 	t.Helper()
 	runCtx, runCancel := context.WithCancel(t.Context())
@@ -1010,6 +1084,7 @@ func newRunnerTestServer(t *testing.T, authToken string) *Server {
 		activeChats:     make(map[string]*activeChatRun),
 		chatSubscribers: make(map[string]map[*subscriberEventSink]struct{}),
 	}
+	server.extensionUI = newWebExtensionUIHost(server.emitExtensionUIEvent)
 	registry.SetEnvironmentErrorHandler(func(conversationID string) {
 		server.cancelActiveChat(conversationID)
 	})

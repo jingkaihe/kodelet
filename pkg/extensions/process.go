@@ -42,6 +42,31 @@ type Process struct {
 	uiSource     *processExtensionUISource
 }
 
+// RuntimeCapabilities describes execution-lifetime guarantees available to an extension process.
+type RuntimeCapabilities struct {
+	BackgroundTasks bool
+}
+
+type runtimeCapabilitiesContextKey struct{}
+
+// ContextWithRuntimeCapabilities overrides extension runtime capabilities for an execution environment.
+func ContextWithRuntimeCapabilities(ctx context.Context, capabilities RuntimeCapabilities) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, runtimeCapabilitiesContextKey{}, capabilities)
+}
+
+// RuntimeCapabilitiesFromContext returns runtime capabilities, defaulting to persistent local background tasks.
+func RuntimeCapabilitiesFromContext(ctx context.Context) RuntimeCapabilities {
+	if ctx != nil {
+		if capabilities, ok := ctx.Value(runtimeCapabilitiesContextKey{}).(RuntimeCapabilities); ok {
+			return capabilities
+		}
+	}
+	return RuntimeCapabilities{BackgroundTasks: true}
+}
+
 var extensionProcessGeneration atomic.Uint64
 
 const (
@@ -246,6 +271,15 @@ func (p *Process) initialize(ctx context.Context, cwd string, client *rpcClient,
 	hasExtensionUI = activeUIHost != nil
 	_, hasExtensionTranscript := activeUIHost.(ExtensionUITranscriptHost)
 	p.uiMu.RUnlock()
+	hasExtensionWidgets := hasExtensionUI
+	hasExtensionSurfaces := hasExtensionUI
+	if capabilityProvider, ok := activeUIHost.(ExtensionUIHostCapabilityProvider); ok {
+		capabilities := capabilityProvider.ExtensionUIHostCapabilities(ctx)
+		hasExtensionWidgets = capabilities.Widgets
+		hasExtensionSurfaces = capabilities.Surfaces
+		hasExtensionTranscript = capabilities.Transcript
+	}
+	runtimeCapabilities := RuntimeCapabilitiesFromContext(ctx)
 
 	dataDir, err := extensionDataDir(p.Extension.ID)
 	if err != nil {
@@ -266,6 +300,9 @@ func (p *Process) initialize(ctx context.Context, cwd string, client *rpcClient,
 			"tools":       true,
 			"toolUpdates": true,
 			"commands":    true,
+			"runtime": map[string]any{
+				"backgroundTasks": runtimeCapabilities.BackgroundTasks,
+			},
 			"shortcuts": map[string]any{
 				"submit": true,
 			},
@@ -277,8 +314,8 @@ func (p *Process) initialize(ctx context.Context, cwd string, client *rpcClient,
 				"confirm":    true,
 				"select":     true,
 				"notify":     true,
-				"widgets":    hasExtensionUI,
-				"surfaces":   hasExtensionUI,
+				"widgets":    hasExtensionWidgets,
+				"surfaces":   hasExtensionSurfaces,
 				"transcript": hasExtensionTranscript,
 			},
 			"events": []string{

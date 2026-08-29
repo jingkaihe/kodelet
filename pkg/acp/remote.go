@@ -18,6 +18,7 @@ import (
 type RemoteChatClient interface {
 	chat.ChatRunner
 	chat.ConversationSource
+	SteerConversation(ctx context.Context, conversationID, message string, images []string) (bool, error)
 	StopConversation(ctx context.Context, conversationID string) error
 	StopConversationTurn(ctx context.Context, conversationID, turnID string) error
 }
@@ -178,6 +179,12 @@ func (m *remoteSessionManager) isActive(sessionID acptypes.SessionID) bool {
 	defer m.mu.Unlock()
 	session := m.sessions[sessionID]
 	return session != nil && session.active
+}
+
+func (m *remoteSessionManager) hasSession(sessionID acptypes.SessionID) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.sessions[sessionID] != nil
 }
 
 func (m *remoteSessionManager) client(ctx context.Context) (RemoteChatClient, string, error) {

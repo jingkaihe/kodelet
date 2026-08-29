@@ -358,6 +358,9 @@ Kodelet starts the extension executable, then sends:
       "conversations": {
         "fork": true
       },
+      "runtime": {
+        "backgroundTasks": true
+      },
       "ui": {
         "input": true,
         "confirm": true,
@@ -517,9 +520,21 @@ SDK calls are `ctx.forkConversation({ name })` in TypeScript and `ctx.fork_conve
 
 Fork availability is invocation-scoped and requires a persistent live thread. Unavailable forks use `ConversationForkUnavailableError`; persistence failures remain ordinary host RPC errors.
 
+### Background extension work
+
+`capabilities.runtime.backgroundTasks` tells an extension whether its process and persistent host-RPC connection may remain available after an individual tool request returns. Local runtimes advertise `true`; runner-backed runtimes advertise `false` because their process and workspace are torn down with the parent run. Extensions must hide tools that require asynchronous continuation when this capability is unavailable.
+
+This is a lifetime capability, not a host-owned task or persistence API. An extension that needs recovery across process loss should persist its own domain state beneath `extension.dataDir`, fence concurrent workers itself, and reconcile that state during initialization and `session.end`.
+
+### Steering child ACP sessions
+
+Agent SDK sessions can queue additional guidance for the prompt currently running in that child session. Kodelet advertises the established ACP steering extension through top-level `InitializeResponse._meta.steering.supported` and handles `_session/steering` requests shaped as `{ "sessionId": "...", "prompt": [{ "type": "text", "text": "..." }], "_meta": { "steering": { "idleBehavior": "promptRequired" } } }`. TypeScript and Python expose this as `session.steer(message)` and require an active SDK run. The normal result is `{ "outcome": "injected" }`; if the turn ends during the request, Kodelet returns `{ "outcome": "promptRequired", "reason": "noRunningTurn" }` instead of silently starting a detached turn. Injection confirms admission to the conversation's steering queue, not model consumption; guidance not consumed before the current prompt ends remains available to a later run of the same conversation.
+
 ### Persistent widgets and interactive surfaces
 
-The native Bubble Tea TUI advertises `capabilities.ui.transcript`, `capabilities.ui.widgets`, and `capabilities.ui.surfaces`. One-shot CLI, ACP, and Web UI runtimes currently advertise these capabilities as false, so extension authors must treat them as optional. The TypeScript SDK makes `ctx.ui.appendTranscript(...)` and `ctx.ui.setWidget(...)` no-ops when unavailable and rejects `ctx.ui.openSurface(...)` when surfaces are unavailable.
+The native Bubble Tea TUI advertises `capabilities.ui.transcript`, `capabilities.ui.widgets`, and `capabilities.ui.surfaces`. The browser Web UI advertises widgets only; one-shot CLI and ACP hosts advertise all three as unavailable. Runner-backed runtimes mirror the attached client's persistent UI capabilities, so a browser-backed runner proxies widgets but not transcript entries or interactive surfaces. Extension authors must treat every persistent UI capability as optional. The TypeScript and Python SDKs make transcript and widget helpers no-ops when unavailable and reject surface creation when surfaces are unavailable.
+
+The Web UI control plane keeps the latest widget frame in memory per conversation and streams `ui-widget` updates over the durable conversation stream, including after the parent turn emits `done`. A newly attached browser receives a `ui-widgets` snapshot before subsequent live updates. Deleting the conversation removes its widgets; restarting the control plane also clears these presentation snapshots, so extensions that need recovery must rebuild them from extension-owned state during a later lifecycle event.
 
 Every UI object is scoped to one extension process generation, an opaque `scopeId`, and an extension-chosen ID. Kodelet supplies the originating conversation as `context.uiScopeId`, and SDK helpers automatically copy it into every persistent UI message, including an explicit empty string for a host-global widget or surface; transcript appends require a conversation scope in the native TUI. The same extension may therefore reuse an object ID independently in multiple conversations. When a process fails or restarts, the host removes every widget and surface owned by the failed generation, restores focus to the next visible capturing surface, and rejects queued events from the old generation. Switching conversations hides scoped widgets, notifications, and surfaces from other conversations and prevents hidden surfaces from receiving keyboard or mouse input.
 
@@ -544,7 +559,7 @@ Host-to-extension methods are parentless notifications:
 | `extension.ui.surface.input` | Deliver `key`, `mouse`, `focus`, or `blur` input. Mouse coordinates are relative to the surface origin. |
 | `extension.ui.surface.resize` | Report the surface's allocated terminal-cell width and height. |
 
-A presentation frame is `{ "sequence": 1, "lines": [...] }`. Each line is either a plain string or `{ "spans": [{ "text": "...", "style": { ... } }] }`; supported style fields are `foreground`, `background`, `bold`, `dim`, `italic`, `underline`, `strikethrough`, and `reverse`. The TUI strips embedded ANSI/control sequences from extension text and accepts `#RRGGBB` colors. Passive widgets are placed above or below the composer. A multi-line widget uses its first line as its always-visible summary, starts expanded, and can be folded by clicking that summary or by using the TUI's global `Ctrl+O` detail toggle; frame updates preserve the host-owned fold state. Each placement uses a mouse-wheel-scrollable viewport of at most ten visible rows.
+A presentation frame is `{ "sequence": 1, "lines": [...] }`. Each line is either a plain string or `{ "spans": [{ "text": "...", "style": { ... } }] }`; supported style fields are `foreground`, `background`, `bold`, `dim`, `italic`, `underline`, `strikethrough`, and `reverse`. The TUI strips embedded ANSI/control sequences from extension text and accepts `#RRGGBB` colors; the Web UI renders safe named ANSI colors and hex colors. Passive widgets are placed above or below the composer. In the TUI, a multi-line widget uses its first line as its always-visible summary, starts expanded, and can be folded by clicking that summary or by using the global `Ctrl+O` detail toggle; frame updates preserve the host-owned fold state. Each TUI placement uses a mouse-wheel-scrollable viewport of at most ten visible rows, while the Web UI displays the current frame inline.
 
 Widget and surface presentation sequences are positive and monotonically increasing for the lifetime of a scoped object ID in one process generation. For each surface, the SDK permits at most one transport write in flight and one replaceable latest pending frame. The host reads presentation notifications synchronously, rejects stale frames, and keeps only the newest pending frame per scoped object before the next Bubble Tea update, so a high-frequency renderer cannot build an unbounded presentation queue in either runtime. Input, focus, and resize notifications share a separate monotonically increasing per-surface event sequence; SDK handles discard stale host notifications. A surface ID remains owned until `close` is acknowledged; a failed close keeps the handle active so the extension can retry safely.
 

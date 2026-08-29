@@ -2156,6 +2156,81 @@ func TestServer_handleStreamConversationForwardsUsageEvents(t *testing.T) {
 	}
 }
 
+func TestServer_handleStreamConversationSendsPersistentWidgetSnapshot(t *testing.T) {
+	server := &Server{
+		conversationService: &mockConversationService{},
+		activeChats:         make(map[string]*activeChatRun),
+		chatSubscribers:     make(map[string]map[*subscriberEventSink]struct{}),
+	}
+	server.extensionUI = newWebExtensionUIHost(server.emitExtensionUIEvent)
+	source := testWebExtensionUISource{owner: extensions.UIExtensionOwner{ExtensionID: "subagent", Generation: 1}}
+	_, err := server.extensionUI.SetWidget(t.Context(), source, extensions.UIWidgetSetRequest{
+		ScopeID:   "conv-123",
+		ID:        "background-agents",
+		Placement: extensions.UIWidgetPlacementAboveComposer,
+		Frame: extensions.UIFrame{
+			Sequence: 1,
+			Lines:    []extensions.UIFrameLine{{Spans: []extensions.UIStyledSpan{{Text: "1 active"}}}},
+		},
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest("GET", "/api/conversations/conv-123/stream", nil)
+	req = mux.SetURLVars(req, map[string]string{"id": "conv-123"})
+	w := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		server.handleStreamConversation(w, req)
+		close(done)
+	}()
+
+	require.Eventually(t, func() bool {
+		server.chatSubscribersMu.Lock()
+		defer server.chatSubscribersMu.Unlock()
+		return len(server.chatSubscribers["conv-123"]) == 1
+	}, time.Second, 10*time.Millisecond)
+	server.closeChatSubscribers("conv-123")
+	<-done
+
+	var event ChatEvent
+	require.NoError(t, json.Unmarshal([]byte(strings.TrimSpace(w.Body.String())), &event))
+	assert.Equal(t, "ui-widgets", event.Kind)
+	require.Len(t, event.UIWidgets, 1)
+	assert.Equal(t, "subagent", event.UIWidgets[0].ExtensionID)
+	assert.Equal(t, uint64(1), event.UIWidgets[0].Frame.Sequence)
+}
+
+func TestServer_handleStreamConversationSendsEmptyPersistentWidgetSnapshot(t *testing.T) {
+	server := &Server{
+		conversationService: &mockConversationService{},
+		activeChats:         make(map[string]*activeChatRun),
+		chatSubscribers:     make(map[string]map[*subscriberEventSink]struct{}),
+	}
+	server.extensionUI = newWebExtensionUIHost(server.emitExtensionUIEvent)
+
+	req := httptest.NewRequest("GET", "/api/conversations/conv-123/stream", nil)
+	req = mux.SetURLVars(req, map[string]string{"id": "conv-123"})
+	w := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		server.handleStreamConversation(w, req)
+		close(done)
+	}()
+
+	require.Eventually(t, func() bool {
+		server.chatSubscribersMu.Lock()
+		defer server.chatSubscribersMu.Unlock()
+		return len(server.chatSubscribers["conv-123"]) == 1
+	}, time.Second, 10*time.Millisecond)
+	server.closeChatSubscribers("conv-123")
+	<-done
+
+	var event ChatEvent
+	require.NoError(t, json.Unmarshal([]byte(strings.TrimSpace(w.Body.String())), &event))
+	assert.Equal(t, "ui-widgets", event.Kind)
+	assert.Empty(t, event.UIWidgets)
+}
+
 func TestServer_handleStreamConversationFollowsFutureChatRun(t *testing.T) {
 	const conversationID = "conv-123"
 	server := &Server{

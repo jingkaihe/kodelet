@@ -328,6 +328,22 @@ type ExtensionUIHost interface {
 	CleanupExtensionUI(owner UIExtensionOwner)
 }
 
+// ExtensionUIHostCapabilities describes the persistent UI features implemented
+// by a host. Hosts that do not implement ExtensionUIHostCapabilityProvider are
+// treated as supporting both widgets and interactive surfaces.
+type ExtensionUIHostCapabilities struct {
+	Widgets    bool
+	Surfaces   bool
+	Transcript bool
+}
+
+// ExtensionUIHostCapabilityProvider lets a host advertise persistent UI
+// features independently. This is useful for frontends that support passive
+// widgets without implementing interactive overlay surfaces.
+type ExtensionUIHostCapabilityProvider interface {
+	ExtensionUIHostCapabilities(ctx context.Context) ExtensionUIHostCapabilities
+}
+
 // ExtensionUITranscriptHost optionally accepts persistent informational transcript entries.
 type ExtensionUITranscriptHost interface {
 	AppendTranscript(ctx context.Context, source UIExtensionSource, request UITranscriptAppendRequest) (UITranscriptAppendResponse, error)

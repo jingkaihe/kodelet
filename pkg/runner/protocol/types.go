@@ -341,6 +341,7 @@ type AgentDescriptor struct {
 // ClientCapabilities describes the interactive client attached to a run.
 type ClientCapabilities struct {
 	InteractiveUI      bool `json:"interactiveUI"`
+	PersistentWidgets  bool `json:"persistentWidgets"`
 	PersistentSurfaces bool `json:"persistentSurfaces"`
 }
 

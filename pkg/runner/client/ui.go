@@ -74,12 +74,12 @@ func (s *Service) Notify(ctx context.Context, request extensions.UINotifyRequest
 }
 
 func (s *Service) SetWidget(ctx context.Context, source extensions.UIExtensionSource, request extensions.UIWidgetSetRequest) (extensions.UIFrameResponse, error) {
-	peer, runID, owner, available, err := s.persistentUITarget(ctx, source)
+	peer, runID, owner, capabilities, err := s.persistentUITarget(ctx, source)
 	if err != nil {
 		return extensions.UIFrameResponse{}, err
 	}
-	if !available {
-		return extensions.UIFrameResponse{Reason: "client persistent extension surfaces are not available"}, nil
+	if !capabilities.PersistentWidgets {
+		return extensions.UIFrameResponse{Reason: "client persistent extension widgets are not available"}, nil
 	}
 	var response extensions.UIFrameResponse
 	err = peer.Call(ctx, protocol.MethodUIWidgetSet, runnerpayload.UIWidgetSetParams{RunID: runID, Owner: owner, Request: request}, &response)
@@ -87,12 +87,12 @@ func (s *Service) SetWidget(ctx context.Context, source extensions.UIExtensionSo
 }
 
 func (s *Service) UpdateWidget(ctx context.Context, source extensions.UIExtensionSource, request extensions.UIWidgetFrameRequest) (extensions.UIFrameResponse, error) {
-	peer, runID, owner, available, err := s.persistentUITarget(ctx, source)
+	peer, runID, owner, capabilities, err := s.persistentUITarget(ctx, source)
 	if err != nil {
 		return extensions.UIFrameResponse{}, err
 	}
-	if !available {
-		return extensions.UIFrameResponse{Reason: "client persistent extension surfaces are not available"}, nil
+	if !capabilities.PersistentWidgets {
+		return extensions.UIFrameResponse{Reason: "client persistent extension widgets are not available"}, nil
 	}
 	var response extensions.UIFrameResponse
 	err = peer.Call(ctx, protocol.MethodUIWidgetFrame, runnerpayload.UIWidgetFrameParams{RunID: runID, Owner: owner, Request: request}, &response)
@@ -100,12 +100,12 @@ func (s *Service) UpdateWidget(ctx context.Context, source extensions.UIExtensio
 }
 
 func (s *Service) RemoveWidget(ctx context.Context, source extensions.UIExtensionSource, request extensions.UIWidgetRemoveRequest) (extensions.UIFrameResponse, error) {
-	peer, runID, owner, available, err := s.persistentUITarget(ctx, source)
+	peer, runID, owner, capabilities, err := s.persistentUITarget(ctx, source)
 	if err != nil {
 		return extensions.UIFrameResponse{}, err
 	}
-	if !available {
-		return extensions.UIFrameResponse{Reason: "client persistent extension surfaces are not available"}, nil
+	if !capabilities.PersistentWidgets {
+		return extensions.UIFrameResponse{Reason: "client persistent extension widgets are not available"}, nil
 	}
 	var response extensions.UIFrameResponse
 	err = peer.Call(ctx, protocol.MethodUIWidgetRemove, runnerpayload.UIWidgetRemoveParams{RunID: runID, Owner: owner, Request: request}, &response)
@@ -113,11 +113,11 @@ func (s *Service) RemoveWidget(ctx context.Context, source extensions.UIExtensio
 }
 
 func (s *Service) AppendTranscript(ctx context.Context, source extensions.UIExtensionSource, request extensions.UITranscriptAppendRequest) (extensions.UITranscriptAppendResponse, error) {
-	peer, runID, owner, available, err := s.persistentUITarget(ctx, source)
+	peer, runID, owner, capabilities, err := s.persistentUITarget(ctx, source)
 	if err != nil {
 		return extensions.UITranscriptAppendResponse{}, err
 	}
-	if !available {
+	if !capabilities.PersistentSurfaces {
 		return extensions.UITranscriptAppendResponse{Reason: "client persistent extension surfaces are not available"}, nil
 	}
 	var response extensions.UITranscriptAppendResponse
@@ -126,11 +126,11 @@ func (s *Service) AppendTranscript(ctx context.Context, source extensions.UIExte
 }
 
 func (s *Service) OpenSurface(ctx context.Context, source extensions.UIExtensionSource, request extensions.UISurfaceOpenRequest) (extensions.UIFrameResponse, error) {
-	peer, runID, owner, available, err := s.persistentUITarget(ctx, source)
+	peer, runID, owner, capabilities, err := s.persistentUITarget(ctx, source)
 	if err != nil {
 		return extensions.UIFrameResponse{}, err
 	}
-	if !available {
+	if !capabilities.PersistentSurfaces {
 		return extensions.UIFrameResponse{Reason: "client persistent extension surfaces are not available"}, nil
 	}
 	var response extensions.UIFrameResponse
@@ -139,11 +139,11 @@ func (s *Service) OpenSurface(ctx context.Context, source extensions.UIExtension
 }
 
 func (s *Service) UpdateSurface(ctx context.Context, source extensions.UIExtensionSource, request extensions.UISurfaceFrameRequest) (extensions.UIFrameResponse, error) {
-	peer, runID, owner, available, err := s.persistentUITarget(ctx, source)
+	peer, runID, owner, capabilities, err := s.persistentUITarget(ctx, source)
 	if err != nil {
 		return extensions.UIFrameResponse{}, err
 	}
-	if !available {
+	if !capabilities.PersistentSurfaces {
 		return extensions.UIFrameResponse{Reason: "client persistent extension surfaces are not available"}, nil
 	}
 	var response extensions.UIFrameResponse
@@ -152,11 +152,11 @@ func (s *Service) UpdateSurface(ctx context.Context, source extensions.UIExtensi
 }
 
 func (s *Service) CloseSurface(ctx context.Context, source extensions.UIExtensionSource, request extensions.UISurfaceCloseRequest) (extensions.UIFrameResponse, error) {
-	peer, runID, owner, available, err := s.persistentUITarget(ctx, source)
+	peer, runID, owner, capabilities, err := s.persistentUITarget(ctx, source)
 	if err != nil {
 		return extensions.UIFrameResponse{}, err
 	}
-	if !available {
+	if !capabilities.PersistentSurfaces {
 		return extensions.UIFrameResponse{Reason: "client persistent extension surfaces are not available"}, nil
 	}
 	var response extensions.UIFrameResponse
@@ -164,8 +164,23 @@ func (s *Service) CloseSurface(ctx context.Context, source extensions.UIExtensio
 	return response, err
 }
 
-// CleanupExtensionUI is best-effort; the control plane also closes run-scoped UI when the run ends.
+// CleanupExtensionUI is best-effort. Runner-proxied widgets are conversation-scoped
+// and remain owned by the control plane after a top-level run ends.
 func (s *Service) CleanupExtensionUI(extensions.UIExtensionOwner) {}
+
+// ExtensionUIHostCapabilities reports the persistent UI features available to
+// the client attached to the active runner run.
+func (s *Service) ExtensionUIHostCapabilities(ctx context.Context) extensions.ExtensionUIHostCapabilities {
+	_, _, capabilities, err := s.uiTarget(ctx)
+	if err != nil {
+		return extensions.ExtensionUIHostCapabilities{}
+	}
+	return extensions.ExtensionUIHostCapabilities{
+		Widgets:    capabilities.PersistentWidgets,
+		Surfaces:   capabilities.PersistentSurfaces,
+		Transcript: capabilities.PersistentSurfaces,
+	}
+}
 
 func (s *Service) uiTarget(ctx context.Context) (Peer, string, protocol.ClientCapabilities, error) {
 	s.mu.Lock()
@@ -187,16 +202,16 @@ func (s *Service) uiTarget(ctx context.Context) (Peer, string, protocol.ClientCa
 	return s.peer, run.id, run.clientCaps, nil
 }
 
-func (s *Service) persistentUITarget(ctx context.Context, source extensions.UIExtensionSource) (Peer, string, runnerpayload.ExtensionOwner, bool, error) {
+func (s *Service) persistentUITarget(ctx context.Context, source extensions.UIExtensionSource) (Peer, string, runnerpayload.ExtensionOwner, protocol.ClientCapabilities, error) {
 	if source == nil {
-		return nil, "", runnerpayload.ExtensionOwner{}, false, errors.New("extension UI source is required")
+		return nil, "", runnerpayload.ExtensionOwner{}, protocol.ClientCapabilities{}, errors.New("extension UI source is required")
 	}
 	peer, runID, capabilities, err := s.uiTarget(ctx)
 	if err != nil {
-		return nil, "", runnerpayload.ExtensionOwner{}, false, err
+		return nil, "", runnerpayload.ExtensionOwner{}, protocol.ClientCapabilities{}, err
 	}
 	owner := source.ExtensionUIOwner()
-	return peer, runID, runnerpayload.ExtensionOwner{ExtensionID: owner.ExtensionID, Generation: owner.Generation}, capabilities.PersistentSurfaces, nil
+	return peer, runID, runnerpayload.ExtensionOwner{ExtensionID: owner.ExtensionID, Generation: owner.Generation}, capabilities, nil
 }
 
 func interactiveUIOwner(ctx context.Context) runnerpayload.ExtensionOwner {

@@ -299,7 +299,7 @@ func TestRemoteEnvironmentLifecycleHelpersAndToolProxy(t *testing.T) {
 		Capabilities: runnerpayload.EnvironmentCapabilities{ToolUpdates: true},
 	}}
 	environment := NewRemoteEnvironment(controller, "runner-1",
-		WithRemoteClientCapabilities(protocol.ClientCapabilities{InteractiveUI: true, PersistentSurfaces: true}),
+		WithRemoteClientCapabilities(protocol.ClientCapabilities{InteractiveUI: true, PersistentWidgets: true, PersistentSurfaces: true}),
 		WithRemoteRunIDGenerator(func() (string, error) { return "run-1", nil }),
 	)
 	manifest, err := environment.Open(t.Context(), RunSpec{ConversationID: "conversation-1"})
@@ -307,6 +307,7 @@ func TestRemoteEnvironmentLifecycleHelpersAndToolProxy(t *testing.T) {
 	assert.Equal(t, "run-1", environment.RunID())
 	assert.Equal(t, manifest.WorkingDirectory, environment.Manifest().WorkingDirectory)
 	assert.True(t, controller.openParams.ClientCapabilities.InteractiveUI)
+	assert.True(t, controller.openParams.ClientCapabilities.PersistentWidgets)
 	assert.True(t, controller.openParams.ClientCapabilities.PersistentSurfaces)
 	assert.True(t, environment.CanStreamToolUpdates())
 

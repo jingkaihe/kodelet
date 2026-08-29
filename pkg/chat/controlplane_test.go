@@ -197,7 +197,7 @@ func TestControlPlaneChatRunnerSettingsSteeringAndStop(t *testing.T) {
 			}
 			require.NoError(t, json.NewDecoder(request.Body).Decode(&payload))
 			assert.Equal(t, "focus", payload.Message)
-			_, _ = w.Write([]byte(`{"queued":true}`))
+			_, _ = w.Write([]byte(`{"success":true,"conversation_id":"conversation-1","queued":true}`))
 		case "/base/api/conversations/conversation-1/stop":
 			assert.Equal(t, "turn-1", request.URL.Query().Get("turnId"))
 			_, _ = w.Write([]byte(`{"stopped":true}`))
@@ -213,7 +213,7 @@ func TestControlPlaneChatRunnerSettingsSteeringAndStop(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "work", settings.CurrentProfile)
 	assert.Equal(t, []string{"low", "high"}, settings.ReasoningEffortOptions)
-	queued, err := runner.SteerConversation(t.Context(), "conversation-1", "focus")
+	queued, err := runner.SteerConversation(t.Context(), "conversation-1", "focus", nil)
 	require.NoError(t, err)
 	assert.True(t, queued)
 	require.NoError(t, runner.StopConversationTurn(t.Context(), "conversation-1", "turn-1"))
@@ -491,12 +491,12 @@ func TestControlPlaneChatRunnerValidationAndMalformedResponses(t *testing.T) {
 	require.ErrorContains(t, err, "failed to decode control-plane chat event")
 	_, err = runner.ChatSettings(t.Context(), "")
 	require.ErrorContains(t, err, "failed to decode control-plane chat settings")
-	_, err = runner.SteerConversation(t.Context(), "conversation", "message")
+	_, err = runner.SteerConversation(t.Context(), "conversation", "message", nil)
 	require.ErrorContains(t, err, "failed to decode control-plane steering response")
 	require.ErrorContains(t, runner.StopConversation(t.Context(), " "), "conversation id is required")
-	_, err = runner.SteerConversation(t.Context(), " ", "message")
+	_, err = runner.SteerConversation(t.Context(), " ", "message", nil)
 	require.ErrorContains(t, err, "conversation id is required")
-	_, err = runner.SteerConversation(t.Context(), "conversation", " ")
+	_, err = runner.SteerConversation(t.Context(), "conversation", " ", nil)
 	require.ErrorContains(t, err, "steering message is required")
 
 	sinkErr := errors.New("sink closed")
@@ -508,6 +508,15 @@ func TestControlPlaneChatRunnerValidationAndMalformedResponses(t *testing.T) {
 	require.NoError(t, err)
 	_, err = runner.Run(t.Context(), ChatRequest{Message: "hello"}, failingControlPlaneChatSink{err: sinkErr})
 	require.ErrorIs(t, err, sinkErr)
+
+	invalidSteeringServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer invalidSteeringServer.Close()
+	runner, err = NewControlPlaneChatRunner(invalidSteeringServer.URL, "", "runner-1")
+	require.NoError(t, err)
+	_, err = runner.SteerConversation(t.Context(), "conversation", "message", nil)
+	require.ErrorContains(t, err, "invalid steering response")
 
 	assert.Equal(t, "first", firstNonEmptyString(" ", "first", "second"))
 	assert.Empty(t, firstNonEmptyString(" ", "\t"))

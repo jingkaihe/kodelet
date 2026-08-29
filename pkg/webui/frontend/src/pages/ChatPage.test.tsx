@@ -1450,6 +1450,7 @@ describe('ChatPage', () => {
         environmentProfile: 'gpu',
         clientCapabilities: {
           interactiveUI: true,
+          persistentWidgets: true,
           persistentSurfaces: false,
         },
       }),
@@ -1584,7 +1585,9 @@ describe('ChatPage', () => {
     expect(preallocatedId).toBeTruthy();
     routeParams = { id: preallocatedId };
     rerender(<ChatPage />);
-    await waitFor(() => expect(screen.getAllByText('runner unavailable').length).toBeGreaterThan(0));
+    await waitFor(() =>
+      expect(screen.getAllByText('runner unavailable').length).toBeGreaterThan(0)
+    );
     expect(mockGetConversation).not.toHaveBeenCalledWith(preallocatedId);
 
     fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
@@ -1639,9 +1642,7 @@ describe('ChatPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => expect(mockStreamChat).toHaveBeenCalledTimes(2));
-    expect(mockStreamChat.mock.calls[1]?.[0]).toEqual(
-      expect.objectContaining({ conversationId })
-    );
+    expect(mockStreamChat.mock.calls[1]?.[0]).toEqual(expect.objectContaining({ conversationId }));
     expect(mockStreamChat.mock.calls[1]?.[0]?.runnerId).toBeUndefined();
     expect(mockStreamChat.mock.calls[1]?.[0]?.environmentProfile).toBeUndefined();
   });
@@ -2080,6 +2081,161 @@ describe('ChatPage', () => {
 
     await waitFor(() => expect(screen.getByText('sent from the tui')).toBeInTheDocument());
     expect(screen.getByText('hello from the runner')).toBeInTheDocument();
+  });
+
+  it('restores persistent extension widgets from the conversation stream', async () => {
+    routeParams = { id: 'conv-123' };
+    mockGetConversation.mockResolvedValue({
+      id: 'conv-123',
+      createdAt: '2026-08-29T00:00:00Z',
+      updatedAt: '2026-08-29T00:00:00Z',
+      messageCount: 1,
+      messages: [],
+      toolResults: {},
+    });
+    let streamListener: ((event: ChatStreamEvent) => void) | null = null;
+    mockStreamConversation.mockImplementation(async (_id, options) => {
+      streamListener = (options as { onEvent: (event: ChatStreamEvent) => void }).onEvent;
+      return new Promise(() => undefined);
+    });
+
+    render(<ChatPage />);
+
+    await waitFor(() => expect(streamListener).not.toBeNull());
+    await act(async () => {
+      streamListener?.({
+        kind: 'ui-widgets',
+        conversation_id: 'conv-123',
+        ui_widgets: [
+          {
+            key: 'subagent-widget',
+            extension_id: 'subagent',
+            id: 'background-agents',
+            placement: 'aboveComposer',
+            frame: {
+              sequence: 4,
+              lines: [
+                {
+                  spans: [
+                    { text: 'Background agents', style: { bold: true } },
+                    { text: '  1 active', style: { dim: true } },
+                  ],
+                },
+                '● Inspect authentication  running',
+              ],
+            },
+          },
+        ],
+      });
+    });
+
+    expect(screen.getByTestId('extension-widgets-aboveComposer')).toBeInTheDocument();
+    expect(screen.getByText(/Background agents/)).toBeInTheDocument();
+    expect(screen.getByText(/Inspect authentication/)).toBeInTheDocument();
+
+    await act(async () => {
+      streamListener?.({
+        kind: 'ui-widget',
+        conversation_id: 'conv-123',
+        ui_widget: {
+          key: 'subagent-widget',
+          extension_id: 'subagent',
+          generation: '0:2',
+          id: 'background-agents',
+          placement: 'aboveComposer',
+          frame: { sequence: 1, lines: ['Restarted agent generation'] },
+        },
+      });
+      streamListener?.({
+        kind: 'ui-widget',
+        conversation_id: 'conv-123',
+        ui_widget: {
+          key: 'subagent-widget',
+          extension_id: 'subagent',
+          generation: '0:1',
+          id: 'background-agents',
+          placement: 'aboveComposer',
+          frame: { sequence: 5, lines: [] },
+          removed: true,
+        },
+      });
+    });
+
+    expect(screen.getByText('Restarted agent generation')).toBeInTheDocument();
+
+    await act(async () => {
+      streamListener?.({
+        kind: 'ui-widget',
+        conversation_id: 'conv-123',
+        ui_widget: {
+          key: 'subagent-widget',
+          extension_id: 'subagent',
+          generation: '0:2',
+          id: 'background-agents',
+          placement: 'aboveComposer',
+          frame: { sequence: 3, lines: [] },
+          removed: true,
+        },
+      });
+      streamListener?.({
+        kind: 'ui-widget',
+        conversation_id: 'conv-123',
+        ui_widget: {
+          key: 'subagent-widget',
+          extension_id: 'subagent',
+          generation: '0:2',
+          id: 'background-agents',
+          placement: 'aboveComposer',
+          frame: { sequence: 2, lines: ['Delayed stale update'] },
+        },
+      });
+    });
+
+    expect(screen.queryByText('Restarted agent generation')).not.toBeInTheDocument();
+    expect(screen.queryByText('Delayed stale update')).not.toBeInTheDocument();
+  });
+
+  it('keeps a background-agent widget visible after the parent turn completes', async () => {
+    routeParams = { id: 'conv-123' };
+    mockGetConversation.mockResolvedValue({
+      id: 'conv-123',
+      createdAt: '2026-08-29T00:00:00Z',
+      updatedAt: '2026-08-29T00:00:00Z',
+      messageCount: 1,
+      messages: [],
+      toolResults: {},
+    });
+    mockStreamChat.mockImplementation(async (_request, options) => {
+      const onEvent = (options as { onEvent: (event: ChatStreamEvent) => void }).onEvent;
+      onEvent({
+        kind: 'ui-widget',
+        conversation_id: 'conv-123',
+        ui_widget: {
+          key: 'subagent-widget',
+          extension_id: 'subagent',
+          id: 'background-agents',
+          placement: 'aboveComposer',
+          frame: { sequence: 1, lines: ['Background agents  1 active'] },
+        },
+      });
+      onEvent({ kind: 'done', conversation_id: 'conv-123' });
+    });
+
+    render(<ChatPage />);
+    await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith('conv-123'));
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+      target: { value: 'delegate this task' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(mockStreamChat).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(screen.getByTestId('extension-widgets-aboveComposer')).toHaveTextContent(
+        'Background agents 1 active'
+      )
+    );
+    expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument();
+    await waitFor(() => expect(mockStreamConversation.mock.calls.length).toBeGreaterThanOrEqual(2));
   });
 
   it('allows steering a TUI-started conversation while its remote runner is busy', async () => {

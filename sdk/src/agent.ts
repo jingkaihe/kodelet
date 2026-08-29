@@ -86,6 +86,13 @@ export interface AgentResponse {
   stopReason?: string;
 }
 
+export type SessionSteeringOutcome = "injected" | "startedNewTurn" | "promptRequired" | "failed";
+
+export interface SessionSteerResult {
+  outcome: SessionSteeringOutcome;
+  reason?: string;
+}
+
 export interface AgentStreamEvent<T = unknown> {
   type: string;
   data: T;
@@ -468,6 +475,20 @@ export class Session extends EventEmitter {
     }
   }
 
+  async steer(message: string): Promise<SessionSteerResult> {
+    if (this.closed) {
+      throw new Error("Cannot steer a closed Kodelet session");
+    }
+    if (!this.running) {
+      throw new Error("Cannot steer a Kodelet session without an active run");
+    }
+    const normalized = message.trim();
+    if (normalized === "") {
+      throw new Error("Steering message must be a non-empty string");
+    }
+    return await this.rpc.steerSession(this.conversationId, normalized);
+  }
+
   async close(): Promise<void> {
     if (this.closed) {
       return;
@@ -606,6 +627,7 @@ class ACPRPCClient {
   private readonly stderrChunks: string[] = [];
   private readonly notificationHandlers = new Set<(method: string, params: unknown) => void>();
   private closed = false;
+  private steeringSupported = false;
 
   constructor(private readonly child: SpawnedProcess) {
     if (!child.stdin) {
@@ -632,7 +654,7 @@ class ACPRPCClient {
   }
 
   async initialize(): Promise<void> {
-    await this.request("initialize", {
+    const result = await this.request("initialize", {
       protocolVersion: ACP_PROTOCOL_VERSION,
       clientCapabilities: {
         terminal: true,
@@ -640,6 +662,10 @@ class ACPRPCClient {
       },
       clientInfo: { name: "kodelet-sdk", title: "Kodelet SDK" },
     });
+    this.steeringSupported = isRecord(result)
+      && isRecord(result._meta)
+      && isRecord(result._meta.steering)
+      && result._meta.steering.supported === true;
   }
 
   async createSession(cwd: string): Promise<string> {
@@ -661,6 +687,28 @@ class ACPRPCClient {
       return {};
     }
     return { stopReason: stringField(result, "stopReason") };
+  }
+
+  async steerSession(sessionId: string, message: string): Promise<SessionSteerResult> {
+    if (!this.steeringSupported) {
+      throw new Error("kodelet acp does not advertise session steering support");
+    }
+    const result = await this.request("_session/steering", {
+      sessionId,
+      prompt: [{ type: "text", text: message }],
+      _meta: { steering: { idleBehavior: "promptRequired" } },
+    });
+    if (!isRecord(result) || !isSessionSteeringOutcome(result.outcome)) {
+      throw new Error("Invalid _session/steering response from kodelet acp");
+    }
+    if (result.reason !== undefined && result.reason !== null && typeof result.reason !== "string") {
+      throw new Error("Invalid _session/steering response from kodelet acp");
+    }
+    const reason = stringField(result, "reason");
+    if (result.outcome === "promptRequired" && reason !== "noRunningTurn") {
+      throw new Error("Invalid _session/steering response from kodelet acp");
+    }
+    return reason === undefined ? { outcome: result.outcome } : { outcome: result.outcome, reason };
   }
 
   cancelSession(sessionId: string): void {
@@ -1462,6 +1510,13 @@ function stringField(record: Record<string, unknown>, key: string): string | und
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isSessionSteeringOutcome(value: unknown): value is SessionSteeringOutcome {
+  return value === "injected"
+    || value === "startedNewTurn"
+    || value === "promptRequired"
+    || value === "failed";
 }
 
 function isPlainObject(value: unknown): value is ProfileObject {

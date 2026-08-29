@@ -1508,7 +1508,7 @@ func (m *model) submitSteering() tea.Cmd {
 	}
 	if m.remote {
 		controller, ok := m.runner.(interface {
-			SteerConversation(context.Context, string, string) (bool, error)
+			SteerConversation(context.Context, string, string, []string) (bool, error)
 		})
 		if !ok {
 			m.err = errors.New("remote chat runner does not support steering")
@@ -1526,7 +1526,7 @@ func (m *model) submitSteering() tea.Cmd {
 		return func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.WithoutCancel(m.ctx), 5*time.Second)
 			defer cancel()
-			queued, err := controller.SteerConversation(ctx, conversationID, message)
+			queued, err := controller.SteerConversation(ctx, conversationID, message, nil)
 			return remoteSteerMsg{conversationKey: conversationKey, message: message, queued: queued, err: err}
 		}
 	}

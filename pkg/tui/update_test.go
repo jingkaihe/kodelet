@@ -57,7 +57,7 @@ type remoteControlRecordingRunner struct {
 	stoppedTurnID       string
 }
 
-func (r *remoteControlRecordingRunner) SteerConversation(_ context.Context, _ string, message string) (bool, error) {
+func (r *remoteControlRecordingRunner) SteerConversation(_ context.Context, _ string, message string, _ []string) (bool, error) {
 	r.actions = append(r.actions, "steer")
 	r.steerMessage = message
 	return r.steerQueued, r.steerErr

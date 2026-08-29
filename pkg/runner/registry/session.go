@@ -15,7 +15,14 @@ import (
 
 // UIRequestRouter handles runner-originated extension UI requests in the control plane.
 type UIRequestRouter interface {
-	HandleRunnerUIRequest(ctx context.Context, runnerID string, method string, params json.RawMessage) (any, *protocol.RPCError)
+	HandleRunnerUIRequest(ctx context.Context, identity UIRequestIdentity, method string, params json.RawMessage) (any, *protocol.RPCError)
+}
+
+// UIRequestIdentity fences runner-originated UI requests to one registered connection generation.
+type UIRequestIdentity struct {
+	RunnerID     string
+	ConnectionID string
+	Generation   int64
 }
 
 // Session binds one WebSocket peer to a generation-fenced runner registration.
@@ -76,7 +83,11 @@ func (s *Session) HandleRequest(ctx context.Context, method string, params json.
 		if s.ui == nil {
 			return nil, &protocol.RPCError{Code: protocol.ErrorCodeUnavailable, Message: "runner UI routing is unavailable"}
 		}
-		return s.ui.HandleRunnerUIRequest(ctx, runnerID, method, params)
+		return s.ui.HandleRunnerUIRequest(ctx, UIRequestIdentity{
+			RunnerID:     runnerID,
+			ConnectionID: connectionID,
+			Generation:   generation,
+		}, method, params)
 	}
 	return nil, &protocol.RPCError{Code: protocol.ErrorCodeMethodNotFound, Message: "runner request method not found"}
 }

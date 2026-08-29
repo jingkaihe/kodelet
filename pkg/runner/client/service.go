@@ -1052,6 +1052,7 @@ func runOperationContext(ctx context.Context, run *activeRun) (context.Context, 
 
 func (s *Service) decorateRunContext(ctx context.Context, runID, conversationID string) context.Context {
 	ctx = s.decorateRunLogContext(ctx, runID, conversationID)
+	ctx = extensions.ContextWithRuntimeCapabilities(ctx, extensions.RuntimeCapabilities{BackgroundTasks: false})
 	ctx = extensions.ContextWithUIInputBroker(ctx, s)
 	ctx = extensions.ContextWithExtensionUIHost(ctx, s)
 	ctx = extensions.ContextWithExtensionUIScope(ctx, conversationID)

@@ -17,6 +17,8 @@ export type {
   CreateSessionOptions,
   ProfileInput,
   RunOptions,
+  SessionSteerResult,
+  SessionSteeringOutcome,
   SessionEventMap,
   SpawnFunction,
   SpawnedProcess,
