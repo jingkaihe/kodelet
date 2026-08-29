@@ -94,6 +94,10 @@ type Service struct {
 	runnerID            string
 	generation          int64
 	runs                map[string]*activeRun
+	backgrounds         map[string]*runnerBackgroundResources
+	backgroundRunIDs    map[string]*runnerBackgroundResources
+	backgroundLeases    map[string]*runnerBackgroundResources
+	backgroundCleanup   map[*runnerBackgroundResources]struct{}
 	lastManifestDigest  string
 	closed              bool
 	closeMu             sync.Mutex
@@ -102,28 +106,27 @@ type Service struct {
 }
 
 type activeRun struct {
-	id                 string
-	conversationID     string
-	invokedBy          string
-	clientCaps         protocol.ClientCapabilities
-	config             llmtypes.Config
-	runtime            *extensions.Runtime
-	runtimeRelease     func() error
-	runtimeReleaseOnce sync.Once
-	runtimeReleaseErr  error
-	instance           ExecutionInstance
-	environment        agentenv.Environment
-	manifest           runnerpayload.Manifest
-	ctx                context.Context
-	cancel             context.CancelFunc
-	runtimeLeaseCancel context.CancelFunc
-	updates            atomic.Uint64
-	ops                sync.WaitGroup
-	opening            bool
-	closing            bool
-	stopping           bool
-	cleanupOnce        sync.Once
-	cleanupErr         error
+	id                   string
+	conversationID       string
+	invokedBy            string
+	clientCaps           protocol.ClientCapabilities
+	config               llmtypes.Config
+	runtime              *extensions.Runtime
+	instance             ExecutionInstance
+	resources            *runnerBackgroundResources
+	environment          agentenv.Environment
+	environmentCloseOnce sync.Once
+	environmentCloseErr  error
+	manifest             runnerpayload.Manifest
+	ctx                  context.Context
+	cancel               context.CancelFunc
+	updates              atomic.Uint64
+	ops                  sync.WaitGroup
+	opening              bool
+	closing              bool
+	stopping             bool
+	cleanupOnce          sync.Once
+	cleanupErr           error
 }
 
 // NewService creates a runner-side request handler bound to one canonical workspace.
@@ -147,6 +150,10 @@ func NewService(parent context.Context, workspace string, options ServiceOptions
 		cleanupTimeout:      options.CleanupTimeout,
 		snapshotWaitTimeout: options.SnapshotWaitTimeout,
 		runs:                make(map[string]*activeRun),
+		backgrounds:         make(map[string]*runnerBackgroundResources),
+		backgroundRunIDs:    make(map[string]*runnerBackgroundResources),
+		backgroundLeases:    make(map[string]*runnerBackgroundResources),
+		backgroundCleanup:   make(map[*runnerBackgroundResources]struct{}),
 	}
 	if service.cleanupTimeout <= 0 {
 		service.cleanupTimeout = defaultCleanupTimeout
@@ -316,6 +323,7 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 	if err := params.Validate(); err != nil {
 		return runnerpayload.Manifest{}, err
 	}
+	variant := normalizeEnvironmentProfile(params.Agent.EnvironmentProfile)
 	logCtx := s.decorateRunLogContext(ctx, params.RunID, params.ConversationID)
 	startedAt := time.Now()
 	logger.G(logCtx).WithFields(map[string]any{
@@ -356,17 +364,36 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 			return runnerpayload.Manifest{}, errors.Errorf("conversation already has active run %s", active.id)
 		}
 	}
+	resources := s.backgrounds[params.ConversationID]
+	if resources != nil {
+		if resources.attachedRunID != "" {
+			s.mu.Unlock()
+			return runnerpayload.Manifest{}, errors.Errorf("conversation already has attached background run %s", resources.attachedRunID)
+		}
+		if resources.variant != variant {
+			s.mu.Unlock()
+			return runnerpayload.Manifest{}, errors.Errorf("background resources use runner profile %q, not %q", firstNonEmpty(resources.variant, "default"), firstNonEmpty(variant, "default"))
+		}
+		resources.attachedRunID = params.RunID
+		resources.lastRunID = params.RunID
+		resources.runIDs[params.RunID] = struct{}{}
+		resources.clientCaps = mergePersistentClientCapabilities(resources.clientCaps, params.ClientCapabilities)
+		s.backgroundRunIDs[params.RunID] = resources
+	}
 	runCtx, cancel := context.WithCancel(s.ctx)
-	runtimeLeaseCtx, runtimeLeaseCancel := context.WithCancel(s.ctx)
 	run := &activeRun{
-		id:                 params.RunID,
-		conversationID:     params.ConversationID,
-		invokedBy:          firstNonEmpty(params.Agent.InvokedBy, "main"),
-		clientCaps:         params.ClientCapabilities,
-		ctx:                runCtx,
-		cancel:             cancel,
-		runtimeLeaseCancel: runtimeLeaseCancel,
-		opening:            true,
+		id:             params.RunID,
+		conversationID: params.ConversationID,
+		invokedBy:      firstNonEmpty(params.Agent.InvokedBy, "main"),
+		clientCaps:     params.ClientCapabilities,
+		resources:      resources,
+		ctx:            runCtx,
+		cancel:         cancel,
+		opening:        true,
+	}
+	if resources != nil {
+		run.runtime = resources.runtime
+		run.instance = resources.instance
 	}
 	run.ops.Add(1)
 	defer run.ops.Done()
@@ -383,28 +410,56 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 		return runnerpayload.Manifest{}, err
 	}
 	defer s.unlockSnapshot()
-	instance, err := s.instanceProvider.Create(operationCtx, ExecutionInstanceSpec{
-		RunID:          params.RunID,
-		ConversationID: params.ConversationID,
-	})
-	if err != nil {
-		s.failOpen(run)
-		return runnerpayload.Manifest{}, errors.Wrap(err, "failed to create runner execution instance")
+	if resources == nil {
+		instance, err := s.instanceProvider.Create(operationCtx, ExecutionInstanceSpec{
+			RunID:          params.RunID,
+			ConversationID: params.ConversationID,
+		})
+		if err != nil {
+			s.failOpen(run)
+			return runnerpayload.Manifest{}, errors.Wrap(err, "failed to create runner execution instance")
+		}
+		if instance == nil {
+			s.failOpen(run)
+			return runnerpayload.Manifest{}, errors.New("runner execution instance provider returned nil")
+		}
+		workingDirectory := strings.TrimSpace(instance.WorkingDirectory())
+		if workingDirectory == "" {
+			_ = runBoundedCleanup(operationCtx, s.cleanupTimeout, "runner execution instance", instance.Close)
+			s.failOpen(run)
+			return runnerpayload.Manifest{}, errors.New("runner execution instance returned an empty working directory")
+		}
+		runtimeLeaseCtx, runtimeLeaseCancel := context.WithCancel(s.ctx)
+		resources = &runnerBackgroundResources{
+			conversationID:     params.ConversationID,
+			variant:            variant,
+			workingDirectory:   workingDirectory,
+			runtimeLeaseCancel: runtimeLeaseCancel,
+			runtimeLeaseCtx:    runtimeLeaseCtx,
+			instance:           instance,
+			clientCaps:         params.ClientCapabilities,
+			attachedRunID:      params.RunID,
+			lastRunID:          params.RunID,
+			runIDs:             map[string]struct{}{params.RunID: {}},
+			leases:             make(map[string]runnerBackgroundLease),
+			cleanupDone:        make(chan struct{}),
+		}
+		s.mu.Lock()
+		if s.runs[run.id] != run || run.closing {
+			s.mu.Unlock()
+			resources.runtimeLeaseCancel()
+			_ = runBoundedCleanup(operationCtx, s.cleanupTimeout, "runner execution instance", instance.Close)
+			s.failOpen(run)
+			return runnerpayload.Manifest{}, errors.New("runner run was canceled while opening")
+		}
+		run.resources = resources
+		run.instance = instance
+		s.mu.Unlock()
 	}
-	if instance == nil {
-		s.failOpen(run)
-		return runnerpayload.Manifest{}, errors.New("runner execution instance provider returned nil")
-	}
-	workingDirectory := strings.TrimSpace(instance.WorkingDirectory())
-	if workingDirectory == "" {
-		s.closeOpeningResources(operationCtx, nil, instance)
-		s.failOpen(run)
-		return runnerpayload.Manifest{}, errors.New("runner execution instance returned an empty working directory")
-	}
+	workingDirectory := resources.workingDirectory
 
 	config, err := s.configLoader(params.Agent.EnvironmentProfile)
 	if err != nil {
-		s.closeOpeningResources(operationCtx, nil, instance)
 		s.failOpen(run)
 		return runnerpayload.Manifest{}, errors.Wrap(err, "failed to load runner configuration")
 	}
@@ -415,7 +470,6 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 	config.RecipeName = params.Agent.RecipeName
 	extensionConfig, err := extensions.LoadConfigFromSettings(config.ExtensionSettings)
 	if err != nil {
-		s.closeOpeningResources(operationCtx, nil, instance)
 		s.failOpen(run)
 		return runnerpayload.Manifest{}, errors.Wrap(err, "failed to load runner extension configuration")
 	}
@@ -430,29 +484,34 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 		RecipeName:     config.RecipeName,
 		InvokedBy:      run.invokedBy,
 	}
-	variant := normalizeEnvironmentProfile(params.Agent.EnvironmentProfile)
-	var runtime *extensions.Runtime
-	var runtimeRelease func() error
-	if provider, ok := s.runtimeProvider.(isolatedRuntimeLeaseProvider); ok {
-		runtime, runtimeRelease, err = provider.RuntimeWithConfigAndCallContextForIsolatedLease(operationCtx, runtimeLeaseCtx, workingDirectory, variant, extensionConfig, callContext)
-	} else if provider, ok := s.runtimeProvider.(runtimeLeaseProvider); ok {
-		runtime, err = provider.RuntimeWithConfigAndCallContextForLease(operationCtx, runtimeLeaseCtx, workingDirectory, variant, extensionConfig, callContext)
-	} else {
-		runtime, err = s.runtimeProvider.RuntimeWithConfigAndCallContext(operationCtx, workingDirectory, variant, extensionConfig, callContext)
+	runtime := resources.runtime
+	if runtime == nil {
+		var runtimeRelease func() error
+		runtimeLeaseCtx := resources.runtimeLeaseCtx
+		if runtimeLeaseCtx == nil {
+			runtimeLeaseCtx = s.ctx
+		}
+		if provider, ok := s.runtimeProvider.(isolatedRuntimeLeaseProvider); ok {
+			runtime, runtimeRelease, err = provider.RuntimeWithConfigAndCallContextForIsolatedLease(operationCtx, runtimeLeaseCtx, workingDirectory, variant, extensionConfig, callContext)
+		} else if provider, ok := s.runtimeProvider.(runtimeLeaseProvider); ok {
+			runtime, err = provider.RuntimeWithConfigAndCallContextForLease(operationCtx, runtimeLeaseCtx, workingDirectory, variant, extensionConfig, callContext)
+		} else {
+			runtime, err = s.runtimeProvider.RuntimeWithConfigAndCallContext(operationCtx, workingDirectory, variant, extensionConfig, callContext)
+		}
+		if err != nil {
+			s.failOpen(run)
+			return runnerpayload.Manifest{}, errors.Wrap(err, "failed to initialize runner extensions")
+		}
+		resources.runtime = runtime
+		resources.runtimeRelease = runtimeRelease
 	}
-	if err != nil {
-		s.closeOpeningResources(operationCtx, nil, instance)
-		s.failOpen(run)
-		return runnerpayload.Manifest{}, errors.Wrap(err, "failed to initialize runner extensions")
-	}
-	run.runtimeRelease = runtimeRelease
 	config.Extensions = runtime
 	environment := s.environmentFactory(workingDirectory, runtime)
 	if environment == nil {
-		s.closeOpeningResources(operationCtx, nil, instance)
 		s.failOpen(run)
 		return runnerpayload.Manifest{}, errors.New("runner environment factory returned nil")
 	}
+	run.environment = environment
 	spec := agentenv.RunSpec{
 		ConversationID: params.ConversationID,
 		Config:         config,
@@ -460,7 +519,6 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 	}
 	localManifest, err := environment.Open(operationCtx, spec)
 	if err != nil {
-		s.closeOpeningResources(operationCtx, environment, instance)
 		s.failOpen(run)
 		return runnerpayload.Manifest{}, errors.Wrap(err, "failed to open runner environment")
 	}
@@ -469,7 +527,6 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 		err = operationCtx.Err()
 	}
 	if err != nil {
-		s.closeOpeningResources(operationCtx, environment, instance)
 		s.failOpen(run)
 		return runnerpayload.Manifest{}, err
 	}
@@ -477,25 +534,17 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 	s.mu.Lock()
 	if s.runs[run.id] != run || run.closing {
 		s.mu.Unlock()
-		s.closeOpeningResources(operationCtx, environment, instance)
 		s.failOpen(run)
 		return runnerpayload.Manifest{}, errors.New("runner run was canceled while opening")
 	}
 	run.config = config
 	run.runtime = runtime
-	run.instance = instance
 	run.environment = environment
 	run.manifest = wireManifest
 	run.opening = false
 	s.lastManifestDigest = wireManifest.Digest
 	s.mu.Unlock()
 	return wireManifest, nil
-}
-
-func (s *Service) closeOpeningResources(ctx context.Context, environment agentenv.Environment, instance ExecutionInstance) {
-	if err := closeExecutionResources(ctx, s.cleanupTimeout, environment, instance); err != nil {
-		logger.G(ctx).WithError(err).Warn("failed to clean up runner execution instance after open failure")
-	}
 }
 
 func (s *Service) closeProbeResources(ctx context.Context, environment agentenv.Environment, instance ExecutionInstance, cause error) error {
@@ -518,14 +567,35 @@ func (s *Service) failOpen(run *activeRun) {
 	}
 	logCtx := s.decorateRunLogContext(s.ctx, run.id, run.conversationID)
 	run.cancel()
-	if err := s.releaseRunRuntime(context.Background(), run); err != nil {
-		logger.G(logCtx).WithError(err).Warn("failed to close runner extension runtime after open failure")
+	if err := s.closeRunEnvironment(context.Background(), run); err != nil {
+		logger.G(logCtx).WithError(err).Warn("failed to close runner environment after open failure")
 	}
 	s.mu.Lock()
 	if s.runs[run.id] == run {
 		delete(s.runs, run.id)
 	}
+	resources := run.resources
+	cleanup := false
+	if resources != nil && resources.attachedRunID == run.id {
+		resources.attachedRunID = ""
+		cleanup = s.detachBackgroundResourcesIfUnusedLocked(resources)
+	}
 	s.mu.Unlock()
+	if cleanup {
+		if err := s.closeBackgroundResources(context.Background(), resources); err != nil {
+			logger.G(logCtx).WithError(err).Warn("failed to close runner background resources after open failure")
+		}
+	}
+}
+
+func (s *Service) closeRunEnvironment(ctx context.Context, run *activeRun) error {
+	if run == nil || run.environment == nil {
+		return nil
+	}
+	run.environmentCloseOnce.Do(func() {
+		run.environmentCloseErr = runBoundedCleanup(ctx, s.cleanupTimeout, "runner environment", run.environment.Close)
+	})
+	return run.environmentCloseErr
 }
 
 func (s *Service) cancelRun(ctx context.Context, runID string) error {
@@ -579,33 +649,24 @@ func (s *Service) closeActiveRun(ctx context.Context, run *activeRun) error {
 		s.mu.Unlock()
 
 		waitErr := waitForRunOperations(ctx, s.cleanupTimeout, run)
-		closeErr := closeExecutionResources(ctx, s.cleanupTimeout, run.environment, run.instance)
+		closeErr := s.closeRunEnvironment(ctx, run)
 		run.cleanupErr = combineCleanupErrors(waitErr, closeErr)
-		run.cleanupErr = combineCleanupErrors(run.cleanupErr, s.releaseRunRuntime(ctx, run))
 		s.mu.Lock()
 		if s.runs[run.id] == run {
 			delete(s.runs, run.id)
 		}
+		resources := run.resources
+		cleanup := false
+		if resources != nil && resources.attachedRunID == run.id {
+			resources.attachedRunID = ""
+			cleanup = s.detachBackgroundResourcesIfUnusedLocked(resources)
+		}
 		s.mu.Unlock()
+		if cleanup {
+			run.cleanupErr = combineCleanupErrors(run.cleanupErr, s.closeBackgroundResources(ctx, resources))
+		}
 	})
 	return run.cleanupErr
-}
-
-func (s *Service) releaseRunRuntime(ctx context.Context, run *activeRun) error {
-	if run == nil {
-		return nil
-	}
-	var err error
-	if run.runtimeRelease != nil {
-		err = runBoundedCleanup(ctx, s.cleanupTimeout, "runner extension runtime", func(context.Context) error {
-			run.runtimeReleaseOnce.Do(func() {
-				run.runtimeReleaseErr = run.runtimeRelease()
-			})
-			return run.runtimeReleaseErr
-		})
-	}
-	run.runtimeLeaseCancel()
-	return err
 }
 
 // ProbeManifestDigest snapshots idle runner resources without reserving a control-plane run.
@@ -1052,7 +1113,10 @@ func runOperationContext(ctx context.Context, run *activeRun) (context.Context, 
 
 func (s *Service) decorateRunContext(ctx context.Context, runID, conversationID string) context.Context {
 	ctx = s.decorateRunLogContext(ctx, runID, conversationID)
-	ctx = extensions.ContextWithRuntimeCapabilities(ctx, extensions.RuntimeCapabilities{BackgroundTasks: false})
+	ctx = extensions.ContextWithRuntimeCapabilities(ctx, extensions.RuntimeCapabilities{
+		BackgroundTasks: true,
+	})
+	ctx = extensions.ContextWithBackgroundTaskHost(ctx, s)
 	ctx = extensions.ContextWithUIInputBroker(ctx, s)
 	ctx = extensions.ContextWithExtensionUIHost(ctx, s)
 	ctx = extensions.ContextWithExtensionUIScope(ctx, conversationID)
@@ -1212,6 +1276,7 @@ func (s *Service) Close() error {
 			cleanupCtx = context.WithoutCancel(s.ctx)
 		}
 		activeErr := s.AbortActiveRun(cleanupCtx)
+		activeErr = combineCleanupErrors(activeErr, s.closeAllBackgroundResources(cleanupCtx))
 		if s.ownedRuntime != nil {
 			if err := s.ownedRuntime.Close(); activeErr == nil {
 				activeErr = err

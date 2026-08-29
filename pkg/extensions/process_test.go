@@ -41,6 +41,29 @@ type capabilityRecordingExtensionUIHost struct {
 	capabilities ExtensionUIHostCapabilities
 }
 
+type recordingBackgroundTaskHost struct {
+	acquired []BackgroundTaskAcquireRequest
+	released []BackgroundTaskReleaseRequest
+	owners   []UIExtensionOwner
+	cleanups []UIExtensionOwner
+}
+
+func (h *recordingBackgroundTaskHost) AcquireBackgroundTask(_ context.Context, source UIExtensionSource, request BackgroundTaskAcquireRequest) (BackgroundTaskAcquireResponse, error) {
+	h.acquired = append(h.acquired, request)
+	h.owners = append(h.owners, source.ExtensionUIOwner())
+	return BackgroundTaskAcquireResponse{LeaseID: "lease-1"}, nil
+}
+
+func (h *recordingBackgroundTaskHost) ReleaseBackgroundTask(_ context.Context, source UIExtensionSource, request BackgroundTaskReleaseRequest) (BackgroundTaskReleaseResponse, error) {
+	h.released = append(h.released, request)
+	h.owners = append(h.owners, source.ExtensionUIOwner())
+	return BackgroundTaskReleaseResponse{Released: true}, nil
+}
+
+func (h *recordingBackgroundTaskHost) CleanupBackgroundTasks(owner UIExtensionOwner) {
+	h.cleanups = append(h.cleanups, owner)
+}
+
 func (h *capabilityRecordingExtensionUIHost) ExtensionUIHostCapabilities(context.Context) ExtensionUIHostCapabilities {
 	return h.capabilities
 }
@@ -55,6 +78,7 @@ func TestProcessInitializeAdvertisesRuntimeBackgroundTasks(t *testing.T) {
 		{name: "local default", ctx: context.Background(), expected: true},
 		{name: "explicitly unavailable", ctx: ContextWithRuntimeCapabilities(context.Background(), RuntimeCapabilities{BackgroundTasks: false}), expected: false},
 		{name: "widget-only UI host", ctx: context.Background(), expected: true, uiCapabilities: &ExtensionUIHostCapabilities{Widgets: true}},
+		{name: "runner host", ctx: ContextWithBackgroundTaskHost(ContextWithRuntimeCapabilities(context.Background(), RuntimeCapabilities{BackgroundTasks: true}), &recordingBackgroundTaskHost{}), expected: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			clientReader, serverWriter := io.Pipe()
@@ -413,6 +437,74 @@ func TestProcessHandleRPCRequestSupportsUIConfirmSelectAndNotify(t *testing.T) {
 	notification, ok := result.(UIInputResponse)
 	require.True(t, ok)
 	assert.Equal(t, UIInputStatusSubmitted, notification.Status)
+}
+
+func TestProcessHandleRPCRequestDelegatesBackgroundTasksToHost(t *testing.T) {
+	host := &recordingBackgroundTaskHost{}
+	process := &Process{}
+	source := &processExtensionUISource{
+		process: process,
+		owner:   UIExtensionOwner{ExtensionID: "subagent", Generation: 4},
+	}
+	process.uiSource = source
+	ctx := ContextWithBackgroundTaskHost(context.Background(), host)
+
+	result, rpcErr := process.handleRPCRequest(ctx, source, BackgroundTaskAcquireMethod, json.RawMessage(`{"description":"child agent"}`))
+	require.Nil(t, rpcErr)
+	acquired, ok := result.(BackgroundTaskAcquireResponse)
+	require.True(t, ok)
+	assert.Equal(t, "lease-1", acquired.LeaseID)
+	require.Equal(t, []BackgroundTaskAcquireRequest{{Description: "child agent"}}, host.acquired)
+
+	result, rpcErr = process.handleRPCRequest(ctx, source, BackgroundTaskReleaseMethod, json.RawMessage(`{"leaseId":"lease-1"}`))
+	require.Nil(t, rpcErr)
+	released, ok := result.(BackgroundTaskReleaseResponse)
+	require.True(t, ok)
+	assert.True(t, released.Released)
+	require.Equal(t, []BackgroundTaskReleaseRequest{{LeaseID: "lease-1"}}, host.released)
+	assert.Equal(t, []UIExtensionOwner{source.owner, source.owner}, host.owners)
+}
+
+func TestProcessHandleRPCRequestReturnsNoopLeaseForPersistentRuntime(t *testing.T) {
+	process := &Process{}
+	ctx := ContextWithRuntimeCapabilities(context.Background(), RuntimeCapabilities{BackgroundTasks: true})
+
+	result, rpcErr := process.handleRPCRequest(ctx, nil, BackgroundTaskAcquireMethod, nil)
+	require.Nil(t, rpcErr)
+	acquired, ok := result.(BackgroundTaskAcquireResponse)
+	require.True(t, ok)
+	assert.Empty(t, acquired.LeaseID)
+
+	result, rpcErr = process.handleRPCRequest(ctx, nil, BackgroundTaskReleaseMethod, json.RawMessage(`{"leaseId":"ignored"}`))
+	require.Nil(t, rpcErr)
+	released, ok := result.(BackgroundTaskReleaseResponse)
+	require.True(t, ok)
+	assert.True(t, released.Released)
+
+	_, rpcErr = process.handleRPCRequest(
+		ContextWithRuntimeCapabilities(context.Background(), RuntimeCapabilities{BackgroundTasks: false}),
+		nil,
+		BackgroundTaskAcquireMethod,
+		nil,
+	)
+	require.NotNil(t, rpcErr)
+	assert.Contains(t, rpcErr.Message, "not available")
+}
+
+func TestProcessCloseCleansBackgroundTasks(t *testing.T) {
+	host := &recordingBackgroundTaskHost{}
+	client := newRPCClient(strings.NewReader(""), io.Discard)
+	process := &Process{client: client}
+	source := &processExtensionUISource{
+		process: process,
+		client:  client,
+		owner:   UIExtensionOwner{ExtensionID: "subagent", Generation: 8},
+	}
+	source.setHostContext(ContextWithBackgroundTaskHost(context.Background(), host))
+	process.uiSource = source
+
+	require.NoError(t, process.Close())
+	assert.Equal(t, []UIExtensionOwner{source.owner}, host.cleanups)
 }
 
 func TestProcessCloseCancelsAndWaitsForParentlessHostRequests(t *testing.T) {

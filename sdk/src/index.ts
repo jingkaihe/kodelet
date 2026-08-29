@@ -56,6 +56,7 @@ export type {
   AgentStartEvent,
   Awaitable,
   BaseCallContext,
+  BackgroundTaskLease,
   CommandFlagValue,
   CommandContext,
   CommandInvocation,

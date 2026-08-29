@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -27,9 +28,12 @@ type staticRuntimeProvider struct {
 	runtime *extensions.Runtime
 }
 
-func TestDecorateRunContextDisablesBackgroundTasks(t *testing.T) {
+func TestDecorateRunContextEnablesBackgroundTasks(t *testing.T) {
 	ctx := (&Service{}).decorateRunContext(context.Background(), "run-1", "conversation-1")
-	assert.False(t, extensions.RuntimeCapabilitiesFromContext(ctx).BackgroundTasks)
+	capabilities := extensions.RuntimeCapabilitiesFromContext(ctx)
+	assert.True(t, capabilities.BackgroundTasks)
+	_, ok := extensions.BackgroundTaskHostFromContext(ctx)
+	assert.True(t, ok)
 }
 
 func (p staticRuntimeProvider) RuntimeWithConfigAndCallContext(context.Context, string, string, extensions.Config, extensions.ExtensionCallContext) (*extensions.Runtime, error) {
@@ -56,6 +60,35 @@ type isolatedRuntimeProvider struct {
 	releaseStarted chan struct{}
 	releaseGate    chan struct{}
 	startedOnce    sync.Once
+}
+
+type reusableIsolatedRuntimeProvider struct {
+	mu       sync.Mutex
+	runtime  *extensions.Runtime
+	calls    int
+	releases int
+}
+
+func (p *reusableIsolatedRuntimeProvider) RuntimeWithConfigAndCallContext(context.Context, string, string, extensions.Config, extensions.ExtensionCallContext) (*extensions.Runtime, error) {
+	return p.runtime, nil
+}
+
+func (p *reusableIsolatedRuntimeProvider) RuntimeWithConfigAndCallContextForIsolatedLease(context.Context, context.Context, string, string, extensions.Config, extensions.ExtensionCallContext) (*extensions.Runtime, func() error, error) {
+	p.mu.Lock()
+	p.calls++
+	p.mu.Unlock()
+	return p.runtime, func() error {
+		p.mu.Lock()
+		p.releases++
+		p.mu.Unlock()
+		return nil
+	}, nil
+}
+
+func (p *reusableIsolatedRuntimeProvider) counts() (int, int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.calls, p.releases
 }
 
 func (p *isolatedRuntimeProvider) RuntimeWithConfigAndCallContext(context.Context, string, string, extensions.Config, extensions.ExtensionCallContext) (*extensions.Runtime, error) {
@@ -142,6 +175,12 @@ type failingOpenEnvironment struct {
 	closed bool
 }
 
+type blockingOpenEnvironment struct {
+	agentenv.Environment
+	started    chan struct{}
+	closeCalls atomic.Int32
+}
+
 type blockingToolEnvironment struct {
 	agentenv.Environment
 	started chan struct{}
@@ -174,6 +213,17 @@ func (*failingOpenEnvironment) Open(context.Context, agentenv.RunSpec) (agentenv
 
 func (e *failingOpenEnvironment) Close(context.Context) error {
 	e.closed = true
+	return nil
+}
+
+func (e *blockingOpenEnvironment) Open(ctx context.Context, _ agentenv.RunSpec) (agentenv.Manifest, error) {
+	close(e.started)
+	<-ctx.Done()
+	return agentenv.Manifest{}, ctx.Err()
+}
+
+func (e *blockingOpenEnvironment) Close(context.Context) error {
+	e.closeCalls.Add(1)
 	return nil
 }
 
@@ -580,6 +630,120 @@ func TestServiceCloseWaitsForIsolatedExtensionRuntimeRelease(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("run.close did not complete after isolated extension runtime release")
 	}
+}
+
+func TestServiceBackgroundLeaseRetainsAndReattachesRunnerResources(t *testing.T) {
+	runtime := extensions.EmptyRuntime()
+	provider := &reusableIsolatedRuntimeProvider{runtime: runtime}
+	instances := &recordingExecutionInstanceProvider{workspace: t.TempDir()}
+	service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{
+		RuntimeProvider:           provider,
+		ExecutionInstanceProvider: instances,
+		ConfigLoader:              func(string) (llmtypes.Config, error) { return llmtypes.Config{}, nil },
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, service.Close())
+		require.NoError(t, runtime.Close())
+	})
+	peer := &recordingPeer{}
+	service.Attach(peer)
+	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
+	callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
+		RunID: "run-1", ConversationID: "conversation-1",
+		ClientCapabilities: protocol.ClientCapabilities{PersistentWidgets: true},
+	})
+
+	source := &recordingUIExtensionSource{owner: extensions.UIExtensionOwner{ExtensionID: "subagent", Generation: 7}}
+	runOneCtx := service.decorateRunContext(t.Context(), "run-1", "conversation-1")
+	lease, err := service.AcquireBackgroundTask(runOneCtx, source, extensions.BackgroundTaskAcquireRequest{Description: "subagent worker"})
+	require.NoError(t, err)
+	assert.NotEmpty(t, lease.LeaseID)
+
+	callService[any](t, service, protocol.MethodRunClose, protocol.RunCloseParams{RunID: "run-1"})
+	state, runIDs, _ := service.HeartbeatSnapshotRuns()
+	assert.Equal(t, protocol.RunnerStateIdle, state)
+	assert.Empty(t, runIDs)
+	require.Len(t, instances.instances, 1)
+	assert.False(t, instances.instances[0].closed)
+	calls, releases := provider.counts()
+	assert.Equal(t, 1, calls)
+	assert.Zero(t, releases)
+	service.Attach(nil)
+	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 2}))
+	service.Attach(peer)
+
+	frame := extensions.UIFrame{Sequence: 1, Lines: []extensions.UIFrameLine{{Spans: []extensions.UIStyledSpan{{Text: "still running"}}}}}
+	response, err := service.SetWidget(runOneCtx, source, extensions.UIWidgetSetRequest{
+		ScopeID: "conversation-1", ID: "background-agents", Placement: extensions.UIWidgetPlacementAboveComposer, Frame: frame,
+	})
+	require.NoError(t, err)
+	assert.True(t, response.Accepted)
+
+	manifest := callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{
+		RunID: "run-2", ConversationID: "conversation-1",
+		ClientCapabilities: protocol.ClientCapabilities{PersistentWidgets: true},
+	})
+	assert.Equal(t, "run-2", manifest.RunID)
+	require.Len(t, instances.instances, 1)
+	calls, releases = provider.counts()
+	assert.Equal(t, 1, calls)
+	assert.Zero(t, releases)
+
+	frame.Sequence++
+	_, err = service.UpdateWidget(runOneCtx, source, extensions.UIWidgetFrameRequest{
+		ScopeID: "conversation-1", ID: "background-agents", Frame: frame,
+	})
+	require.NoError(t, err)
+	peer.mu.Lock()
+	lastParams := peer.callParams[len(peer.callParams)-1].(runnerpayload.UIWidgetFrameParams)
+	peer.mu.Unlock()
+	assert.Equal(t, "run-2", lastParams.RunID)
+
+	callService[any](t, service, protocol.MethodRunClose, protocol.RunCloseParams{RunID: "run-2"})
+	assert.False(t, instances.instances[0].closed)
+	service.mu.Lock()
+	resources := service.backgrounds["conversation-1"]
+	service.mu.Unlock()
+	require.NotNil(t, resources)
+	released, err := service.ReleaseBackgroundTask(runOneCtx, source, extensions.BackgroundTaskReleaseRequest(lease))
+	require.NoError(t, err)
+	assert.True(t, released.Released)
+	require.NotNil(t, released.AfterResponse)
+	released.AfterResponse()
+	select {
+	case <-resources.cleanupDone:
+	case <-time.After(time.Second):
+		t.Fatal("background resources were not released")
+	}
+	assert.True(t, instances.instances[0].closed)
+	_, releasedCount := provider.counts()
+	assert.Equal(t, 1, releasedCount)
+}
+
+func TestServiceCloseReleasesOutstandingBackgroundResources(t *testing.T) {
+	runtime := extensions.EmptyRuntime()
+	provider := &reusableIsolatedRuntimeProvider{runtime: runtime}
+	instances := &recordingExecutionInstanceProvider{workspace: t.TempDir()}
+	service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{
+		RuntimeProvider:           provider,
+		ExecutionInstanceProvider: instances,
+		ConfigLoader:              func(string) (llmtypes.Config, error) { return llmtypes.Config{}, nil },
+	})
+	require.NoError(t, err)
+	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
+	callService[runnerpayload.Manifest](t, service, protocol.MethodRunOpen, protocol.RunOpenParams{RunID: "run-1", ConversationID: "conversation-1"})
+	source := &recordingUIExtensionSource{owner: extensions.UIExtensionOwner{ExtensionID: "subagent", Generation: 3}}
+	_, err = service.AcquireBackgroundTask(service.decorateRunContext(t.Context(), "run-1", "conversation-1"), source, extensions.BackgroundTaskAcquireRequest{})
+	require.NoError(t, err)
+	callService[any](t, service, protocol.MethodRunClose, protocol.RunCloseParams{RunID: "run-1"})
+
+	require.NoError(t, service.Close())
+	require.Len(t, instances.instances, 1)
+	assert.True(t, instances.instances[0].closed)
+	_, releases := provider.counts()
+	assert.Equal(t, 1, releases)
+	require.NoError(t, runtime.Close())
 }
 
 func TestManifestHelpersLoadSystemPromptAndDefensivelyCloneSchemas(t *testing.T) {
@@ -1164,6 +1328,59 @@ func TestServiceCleansExecutionInstanceWhenEnvironmentOpenFails(t *testing.T) {
 	require.NotNil(t, rpcErr)
 	assert.Contains(t, rpcErr.Message, "open failed")
 	assert.True(t, environment.closed)
+	require.Len(t, provider.instances, 1)
+	assert.True(t, provider.instances[0].closed)
+}
+
+func TestServiceCloseWhileRunOpeningClosesResourcesOnce(t *testing.T) {
+	provider := &recordingExecutionInstanceProvider{workspace: t.TempDir()}
+	environment := &blockingOpenEnvironment{started: make(chan struct{})}
+	runtime := extensions.EmptyRuntime()
+	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
+	service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{
+		RuntimeProvider:           staticRuntimeProvider{runtime: runtime},
+		ConfigLoader:              func(string) (llmtypes.Config, error) { return llmtypes.Config{}, nil },
+		EnvironmentFactory:        func(string, *extensions.Runtime) agentenv.Environment { return environment },
+		ExecutionInstanceProvider: provider,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	service.Attach(&recordingPeer{})
+	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
+
+	openDone := make(chan *protocol.RPCError, 1)
+	go func() {
+		_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodRunOpen, mustJSON(t, protocol.RunOpenParams{
+			RunID: "run-1", ConversationID: "conversation-1",
+		}))
+		openDone <- rpcErr
+	}()
+	select {
+	case <-environment.started:
+	case <-time.After(time.Second):
+		t.Fatal("runner environment did not start opening")
+	}
+
+	closeDone := make(chan *protocol.RPCError, 1)
+	go func() {
+		_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodRunClose, mustJSON(t, protocol.RunCloseParams{RunID: "run-1"}))
+		closeDone <- rpcErr
+	}()
+	select {
+	case rpcErr := <-openDone:
+		require.NotNil(t, rpcErr)
+		assert.Contains(t, rpcErr.Message, "context canceled")
+	case <-time.After(time.Second):
+		t.Fatal("opening runner run did not stop")
+	}
+	select {
+	case rpcErr := <-closeDone:
+		require.Nil(t, rpcErr)
+	case <-time.After(time.Second):
+		t.Fatal("runner run close did not finish")
+	}
+
+	assert.Equal(t, int32(1), environment.closeCalls.Load())
 	require.Len(t, provider.instances, 1)
 	assert.True(t, provider.instances[0].closed)
 }

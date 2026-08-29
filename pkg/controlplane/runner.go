@@ -233,14 +233,14 @@ func (s *Server) HandleRunnerUIRequest(ctx context.Context, identity runnerregis
 		_ = value
 		return extensions.UITranscriptAppendResponse{Reason: "web ui extension transcript proxy is not available"}, nil
 	case protocol.MethodUIWidgetSet:
-		value, rpcErr := decodeRunnerUIParams[runnerpayload.UIWidgetSetParams](s, runnerID, params)
+		value, rpcErr := decodeRunnerUIWidgetParams[runnerpayload.UIWidgetSetParams](params)
 		if rpcErr != nil {
 			return nil, rpcErr
 		}
 		if s.extensionUI == nil {
 			return extensions.UIFrameResponse{Reason: "web ui persistent extension widgets are not available"}, nil
 		}
-		value.Request.ScopeID, rpcErr = s.runnerWidgetScope(runnerID, value.RunID, value.Request.ScopeID)
+		value.Request.ScopeID, rpcErr = s.runnerWidgetScope(ctx, runnerID, value.RunID, value.Request.ScopeID)
 		if rpcErr != nil {
 			return nil, rpcErr
 		}
@@ -251,14 +251,14 @@ func (s *Server) HandleRunnerUIRequest(ctx context.Context, identity runnerregis
 		}, value.Request)
 		return runnerWidgetResponse(response, err)
 	case protocol.MethodUIWidgetFrame:
-		value, rpcErr := decodeRunnerUIParams[runnerpayload.UIWidgetFrameParams](s, runnerID, params)
+		value, rpcErr := decodeRunnerUIWidgetParams[runnerpayload.UIWidgetFrameParams](params)
 		if rpcErr != nil {
 			return nil, rpcErr
 		}
 		if s.extensionUI == nil {
 			return extensions.UIFrameResponse{Reason: "web ui persistent extension widgets are not available"}, nil
 		}
-		value.Request.ScopeID, rpcErr = s.runnerWidgetScope(runnerID, value.RunID, value.Request.ScopeID)
+		value.Request.ScopeID, rpcErr = s.runnerWidgetScope(ctx, runnerID, value.RunID, value.Request.ScopeID)
 		if rpcErr != nil {
 			return nil, rpcErr
 		}
@@ -269,14 +269,14 @@ func (s *Server) HandleRunnerUIRequest(ctx context.Context, identity runnerregis
 		}, value.Request)
 		return runnerWidgetResponse(response, err)
 	case protocol.MethodUIWidgetRemove:
-		value, rpcErr := decodeRunnerUIParams[runnerpayload.UIWidgetRemoveParams](s, runnerID, params)
+		value, rpcErr := decodeRunnerUIWidgetParams[runnerpayload.UIWidgetRemoveParams](params)
 		if rpcErr != nil {
 			return nil, rpcErr
 		}
 		if s.extensionUI == nil {
 			return extensions.UIFrameResponse{Reason: "web ui persistent extension widgets are not available"}, nil
 		}
-		value.Request.ScopeID, rpcErr = s.runnerWidgetScope(runnerID, value.RunID, value.Request.ScopeID)
+		value.Request.ScopeID, rpcErr = s.runnerWidgetScope(ctx, runnerID, value.RunID, value.Request.ScopeID)
 		if rpcErr != nil {
 			return nil, rpcErr
 		}
@@ -309,20 +309,36 @@ func validateRunnerUIIdentity(s *Server, identity runnerregistry.UIRequestIdenti
 	return nil
 }
 
-func (s *Server) runnerWidgetScope(runnerID, runID, scopeID string) (string, *protocol.RPCError) {
+func (s *Server) runnerWidgetScope(ctx context.Context, runnerID, runID, scopeID string) (string, *protocol.RPCError) {
 	if s == nil || s.runnerRegistry == nil {
 		return "", &protocol.RPCError{Code: protocol.ErrorCodeUnavailable, Message: "runner registry is unavailable"}
 	}
 	run, ok := s.runnerRegistry.Run(strings.TrimSpace(runID))
-	if !ok || run.RunnerID != runnerID || (run.Status != runnerregistry.RunStatusOpening && run.Status != runnerregistry.RunStatusRunning) {
-		return "", &protocol.RPCError{Code: protocol.ErrorCodeStale, Message: "runner UI request belongs to an inactive run"}
-	}
 	scopeID = strings.TrimSpace(scopeID)
-	if scopeID == "" {
-		return run.ConversationID, nil
+	if ok && run.RunnerID == runnerID && (run.Status == runnerregistry.RunStatusOpening || run.Status == runnerregistry.RunStatusRunning) {
+		if scopeID == "" {
+			return run.ConversationID, nil
+		}
+		if scopeID != run.ConversationID {
+			return "", &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: "extension widget scope does not match the runner conversation"}
+		}
+		return scopeID, nil
 	}
-	if scopeID != run.ConversationID {
-		return "", &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: "extension widget scope does not match the runner conversation"}
+	if ok && run.RunnerID != runnerID {
+		return "", &protocol.RPCError{Code: protocol.ErrorCodeStale, Message: "runner UI request belongs to another runner"}
+	}
+	if scopeID == "" {
+		return "", &protocol.RPCError{Code: protocol.ErrorCodeStale, Message: "background extension widget requires its conversation scope"}
+	}
+	if ok && scopeID != run.ConversationID {
+		return "", &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: "background extension widget scope does not match the runner conversation"}
+	}
+	affinity, bound, err := s.runnerRegistry.ResolveConversationAffinity(ctx, scopeID)
+	if err != nil {
+		return "", &protocol.RPCError{Code: protocol.ErrorCodeInternal, Message: err.Error()}
+	}
+	if !bound || affinity.RunnerID != runnerID {
+		return "", &protocol.RPCError{Code: protocol.ErrorCodeStale, Message: "background extension widget belongs to an unbound runner conversation"}
 	}
 	return scopeID, nil
 }
@@ -349,6 +365,23 @@ func decodeRunnerUIParams[T any](s *Server, runnerID string, params json.RawMess
 	}
 	if rpcErr := validateRunnerUIRun(s, runnerID, payload); rpcErr != nil {
 		return value, rpcErr
+	}
+	return value, nil
+}
+
+func decodeRunnerUIWidgetParams[T any](params json.RawMessage) (T, *protocol.RPCError) {
+	var value T
+	if err := json.Unmarshal(params, &value); err != nil {
+		return value, &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: err.Error()}
+	}
+	var envelope struct {
+		RunID string `json:"runId"`
+	}
+	if err := json.Unmarshal(params, &envelope); err != nil {
+		return value, &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: err.Error()}
+	}
+	if strings.TrimSpace(envelope.RunID) == "" {
+		return value, &protocol.RPCError{Code: protocol.ErrorCodeInvalidParams, Message: "runId is required"}
 	}
 	return value, nil
 }

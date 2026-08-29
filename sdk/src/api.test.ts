@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  type BackgroundTaskLease,
   ConversationForkUnavailableError,
   HostRPCError,
   createTestHarness,
@@ -536,6 +537,119 @@ test("tool context translates fork unavailable host errors", async () => {
   harness.initialize({ capabilities: { conversations: { fork: true } } });
 
   assert.deepEqual(await harness.executeTool({ name: "fork", input: {} }), { content: "unavailable" });
+});
+
+test("background task leases use persistent host RPC and retry failed release", async () => {
+  let lease: BackgroundTaskLease | undefined;
+  let releaseAttempts = 0;
+  const requests: Array<{ method: string; params?: unknown; persistent: boolean }> = [];
+  const host = {
+    async request(method: string, params?: unknown) {
+      requests.push({ method, params, persistent: false });
+      assert.equal(method, "kodelet.runtime.background.acquire");
+      return { leaseId: " lease-1 " };
+    },
+    async requestPersistent(method: string, params?: unknown) {
+      requests.push({ method, params, persistent: true });
+      releaseAttempts++;
+      if (releaseAttempts === 1) {
+        throw new Error("temporary release failure");
+      }
+      return { released: true };
+    },
+  };
+  const extension = defineExtension((ext) => {
+    ext.registerTool({
+      name: "background",
+      description: "Start background work",
+      inputSchema: z.object({}),
+      async execute(_input, ctx) {
+        lease = await ctx.acquireBackgroundTask("  index repository  ");
+        return lease.id ?? "local";
+      },
+    });
+  });
+  const harness = await createTestHarness(extension, host);
+  harness.initialize({ capabilities: { runtime: { backgroundTasks: true } } });
+
+  assert.deepEqual(await harness.executeTool({ name: "background", input: {} }), { content: "lease-1" });
+  assert.ok(lease);
+  await assert.rejects(() => lease.close(), /temporary release failure/);
+  await lease.close();
+  await lease.close();
+  assert.deepEqual(requests, [
+    {
+      method: "kodelet.runtime.background.acquire",
+      params: { description: "index repository" },
+      persistent: false,
+    },
+    {
+      method: "kodelet.runtime.background.release",
+      params: { leaseId: "lease-1" },
+      persistent: true,
+    },
+    {
+      method: "kodelet.runtime.background.release",
+      params: { leaseId: "lease-1" },
+      persistent: true,
+    },
+  ]);
+});
+
+test("background task capability returns a local no-op lease and rejects unavailable hosts", async () => {
+  let localLease: BackgroundTaskLease | undefined;
+  const persistentRequests: Array<{ method: string; params?: unknown }> = [];
+  const extension = defineExtension((ext) => {
+    ext.registerTool({
+      name: "background",
+      description: "Start background work",
+      inputSchema: z.object({}),
+      async execute(_input, ctx) {
+        localLease = await ctx.acquireBackgroundTask();
+        return localLease.id ?? "local";
+      },
+    });
+  });
+  const harness = await createTestHarness(extension, {
+    async request(method: string, params?: unknown) {
+      persistentRequests.push({ method, params });
+      return {};
+    },
+  });
+  harness.initialize({ capabilities: { runtime: { backgroundTasks: true } } });
+  assert.deepEqual(await harness.executeTool({ name: "background", input: {} }), { content: "local" });
+  assert.ok(localLease);
+  await localLease.close();
+  await localLease.close();
+  assert.deepEqual(persistentRequests, [{ method: "kodelet.runtime.background.acquire", params: undefined }]);
+
+  const legacyHarness = await createTestHarness(extension, {
+    async request() {
+      throw new HostRPCError({ code: -32601, message: "host request method not found" });
+    },
+  });
+  legacyHarness.initialize({ capabilities: { runtime: { backgroundTasks: true } } });
+  assert.deepEqual(await legacyHarness.executeTool({ name: "background", input: {} }), { content: "local" });
+  assert.ok(localLease);
+  await localLease.close();
+
+  const unavailableHarness = await createTestHarness(
+    defineExtension((ext) => {
+      ext.registerTool({
+        name: "background",
+        description: "Start background work",
+        inputSchema: z.object({}),
+        async execute(_input, ctx) {
+          await assert.rejects(() => ctx.acquireBackgroundTask(), /not available/);
+          return "unavailable";
+        },
+      });
+    }),
+  );
+  unavailableHarness.initialize({ capabilities: {} });
+  assert.deepEqual(await unavailableHarness.executeTool({ name: "background", input: {} }), {
+    content: "unavailable",
+  });
 });
 
 test("widgets use sequences and surfaces route host events", async () => {

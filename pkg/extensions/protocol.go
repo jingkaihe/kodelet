@@ -75,6 +75,10 @@ type rpcNotificationHandler interface {
 	HandleRPCNotification(method string, params json.RawMessage)
 }
 
+type rpcAfterResponseHandler interface {
+	afterRPCResponse()
+}
+
 // ToolRegistration is returned by an extension during initialization.
 type ToolRegistration struct {
 	Name         string         `json:"name"`
@@ -568,6 +572,9 @@ func (c *rpcClient) handleIncomingRequest(ctx context.Context, msg rpcIncomingMe
 	if rpcErr != nil {
 		response.Error = rpcErr
 		return c.writeResponse(response)
+	}
+	if afterResponse, ok := result.(rpcAfterResponseHandler); ok {
+		defer afterResponse.afterRPCResponse()
 	}
 	if result != nil {
 		payload, err := json.Marshal(result)

@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 
 import type {
   BaseCallContext,
+  BackgroundTaskLease,
   CommandContext,
   CommandInvocation,
   ConversationForkOptions,
@@ -188,6 +189,16 @@ function createSharedContext(
     return await persistentClient.request(method, scopedParams);
   };
 
+  const requestPersistent = async (method: string, params?: unknown): Promise<unknown> => {
+    if (client?.requestPersistent) {
+      return await client.requestPersistent(method, params);
+    }
+    if (!persistentClient) {
+      throw new Error("Persistent extension host RPC is not available in this host");
+    }
+    return await persistentClient.request(method, params);
+  };
+
   const resolveWorkspacePath = (target: string): string => {
     const resolved = path.resolve(cwd, target || ".");
     if (!isPathInside(resolved, cwd)) {
@@ -327,6 +338,40 @@ function createSharedContext(
       },
     },
     log,
+    async acquireBackgroundTask(description?: string) {
+      if (!runtimeCapabilitySupported(init, "backgroundTasks")) {
+        throw new Error("Background extension tasks are not available in this host");
+      }
+      if (!client) {
+        return new BackgroundTaskLeaseHandle(undefined, async () => undefined);
+      }
+      const normalizedDescription = description?.trim();
+      let response: unknown;
+      try {
+        response = await client.request(
+          "kodelet.runtime.background.acquire",
+          normalizedDescription ? { description: normalizedDescription } : undefined,
+        );
+      } catch (error) {
+        if (error instanceof HostRPCError && error.code === -32601) {
+          return new BackgroundTaskLeaseHandle(undefined, async () => undefined);
+        }
+        throw error;
+      }
+      if (!isRecord(response)) {
+        throw new Error("Invalid background task lease response from Kodelet host");
+      }
+      if (response.leaseId === undefined) {
+        return new BackgroundTaskLeaseHandle(undefined, async () => undefined);
+      }
+      if (typeof response.leaseId !== "string" || response.leaseId.trim() === "") {
+        throw new Error("Background task lease response did not include a lease ID");
+      }
+      const leaseId = response.leaseId.trim();
+      return new BackgroundTaskLeaseHandle(leaseId, async () => {
+        await requestPersistent("kodelet.runtime.background.release", { leaseId });
+      });
+    },
     ui: {
       async input(request: UIInputRequest) {
         if (!client) {
@@ -422,6 +467,23 @@ function createSharedContext(
       },
     },
   };
+}
+
+class BackgroundTaskLeaseHandle implements BackgroundTaskLease {
+  private closed = false;
+
+  constructor(
+    readonly id: string | undefined,
+    private readonly release: () => Promise<void>,
+  ) {}
+
+  async close(): Promise<void> {
+    if (this.closed) {
+      return;
+    }
+    await this.release();
+    this.closed = true;
+  }
 }
 
 class UISurfaceHandle implements UISurface {
@@ -673,6 +735,11 @@ function validateUIObjectID(id: string): string {
 function extensionUISupported(init: InitializeParams | undefined, feature: "widgets" | "surfaces" | "transcript"): boolean {
   const ui = init?.capabilities?.ui;
   return isRecord(ui) && ui[feature] === true;
+}
+
+function runtimeCapabilitySupported(init: InitializeParams | undefined, feature: "backgroundTasks"): boolean {
+  const runtime = init?.capabilities?.runtime;
+  return isRecord(runtime) && runtime[feature] === true;
 }
 
 function isSurfaceInputEvent(value: Record<string, unknown>): value is Record<string, unknown> & UISurfaceInputEvent {

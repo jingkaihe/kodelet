@@ -1471,7 +1471,7 @@ await ctx.ui.notify({
 
 ### Persistent TUI Widgets and Interactive Surfaces
 
-The native `kodelet chat` TUI lets extensions append informational transcript entries and keep passive widgets and interactive overlay surfaces alive after the command, tool, or event handler that created them returns. UI created from a conversation-scoped handler stays with that conversation: switching sessions hides its informational notifications, widgets, and surfaces, and hidden surfaces cannot capture keyboard or mouse input. Host-level diagnostics and other context-free UI remain global. These APIs are capability-gated: `ctx.ui.appendTranscript(...)` and `ctx.ui.setWidget(...)` do nothing when unavailable, while `ctx.ui.openSurface(...)` rejects when the host has no interactive surface support. The Web UI, ACP, and one-shot CLI do not currently advertise these capabilities.
+The native `kodelet chat` TUI supports persistent extension transcript entries, passive widgets, and interactive surfaces. Conversation-scoped UI follows the active conversation. The Web UI supports passive widgets only; ACP and one-shot CLI hosts do not support persistent extension UI. These APIs are capability-gated: transcript and widget calls are ignored when unavailable, while opening an unsupported interactive surface returns an error.
 
 Informational transcript entries are persistent within the active TUI session and render as distinct non-user, non-assistant entries. They are useful for durable extension status and copyable file paths.
 

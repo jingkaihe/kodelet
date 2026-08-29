@@ -203,6 +203,51 @@ func TestRPCClientUsesPersistentHostContextForParentlessRequests(t *testing.T) {
 	assert.Equal(t, map[string]any{"accepted": true, "conversation": "conversation-host"}, result)
 }
 
+func TestRPCClientRunsPostResponseHookAfterWriteAttempt(t *testing.T) {
+	t.Run("successful write", func(t *testing.T) {
+		var outbound bytes.Buffer
+		writtenBeforeCallback := false
+		client := newRPCClient(strings.NewReader(""), &outbound)
+		handler := fixedRPCResponseHandler{result: BackgroundTaskReleaseResponse{
+			Released: true,
+			AfterResponse: func() {
+				writtenBeforeCallback = outbound.Len() > 0
+			},
+		}}
+
+		err := client.handleIncomingRequest(context.Background(), rpcIncomingMessage{
+			ID:     json.RawMessage(`7`),
+			Method: BackgroundTaskReleaseMethod,
+		}, handler)
+
+		require.NoError(t, err)
+		assert.True(t, writtenBeforeCallback)
+		frames := readAllTestFrames(t, outbound.Bytes())
+		require.Len(t, frames, 1)
+		var response rpcResponse
+		require.NoError(t, json.Unmarshal(frames[0], &response))
+		assert.JSONEq(t, `{"released":true}`, string(response.Result))
+	})
+
+	t.Run("failed write", func(t *testing.T) {
+		wantErr := errors.New("writer disconnected")
+		callbackCalled := false
+		client := newRPCClient(strings.NewReader(""), failingRPCWriter{err: wantErr})
+		handler := fixedRPCResponseHandler{result: BackgroundTaskReleaseResponse{
+			Released:      true,
+			AfterResponse: func() { callbackCalled = true },
+		}}
+
+		err := client.handleIncomingRequest(context.Background(), rpcIncomingMessage{
+			ID:     json.RawMessage(`7`),
+			Method: BackgroundTaskReleaseMethod,
+		}, handler)
+
+		require.ErrorIs(t, err, wantErr)
+		assert.True(t, callbackCalled)
+	})
+}
+
 func TestRPCClientNotificationWriteFailureTerminatesClient(t *testing.T) {
 	wantErr := errors.New("writer disconnected")
 	failed := make(chan error, 1)
@@ -337,6 +382,14 @@ func TestRPCClientCallsRunConcurrentlyAndRouteHostRequests(t *testing.T) {
 }
 
 type testHostRequestHandler struct{}
+
+type fixedRPCResponseHandler struct {
+	result any
+}
+
+func (h fixedRPCResponseHandler) HandleRPCRequest(context.Context, string, json.RawMessage) (any, *rpcError) {
+	return h.result, nil
+}
 
 func (testHostRequestHandler) HandleRPCRequest(_ context.Context, method string, params json.RawMessage) (any, *rpcError) {
 	if method != "kodelet.ui.input" {

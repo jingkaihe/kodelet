@@ -201,6 +201,21 @@ const conversationId = await ctx.forkConversation({ name: "Investigate authentic
 
 Omit `name` to preserve the source title. Unavailable forks raise `ConversationForkUnavailableError`.
 
+### Background extension work
+
+Acquire a host lifetime lease before starting work that can continue after the current handler returns, and release it only after the worker and its final state or UI updates finish:
+
+```typescript
+const lease = await ctx.acquireBackgroundTask("index repository");
+try {
+  await runBackgroundWorker();
+} finally {
+  await lease.close();
+}
+```
+
+Persistent local runtimes return a no-op lease. Runner-backed runtimes use the lease to retain the conversation's extension process and execution instance after the parent run closes. The lease is not task persistence: extensions that need crash recovery should store their own state beneath `ctx.storage.dataDir` and reconcile it when the process starts again.
+
 ## User input from extensions
 
 Tool and event contexts can request UI input from the host:

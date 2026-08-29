@@ -792,6 +792,48 @@ func TestHandleRunnerUIRequestValidatesRunAndPersistentCapabilities(t *testing.T
 	_, rpcErr = server.HandleRunnerUIRequest(t.Context(), identity, protocol.MethodUIInput, mustRunnerJSON(t, runnerpayload.UIInputParams{RunID: "run-ui"}))
 	require.NotNil(t, rpcErr)
 	assert.Equal(t, protocol.ErrorCodeStale, rpcErr.Code)
+	value, rpcErr = server.HandleRunnerUIRequest(t.Context(), identity, protocol.MethodUIWidgetSet, mustRunnerJSON(t, runnerpayload.UIWidgetSetParams{
+		RunID: "run-ui",
+		Owner: owner,
+		Request: extensions.UIWidgetSetRequest{
+			ScopeID:   "conversation-ui",
+			ID:        "background-after-close",
+			Placement: extensions.UIWidgetPlacementAboveComposer,
+			Frame: extensions.UIFrame{
+				Sequence: 1,
+				Lines:    []extensions.UIFrameLine{{Spans: []extensions.UIStyledSpan{{Text: "still running"}}}},
+			},
+		},
+	}))
+	require.Nil(t, rpcErr)
+	assert.True(t, value.(extensions.UIFrameResponse).Accepted)
+	backgroundSnapshot := server.extensionUI.Snapshot("conversation-ui")
+	require.Len(t, backgroundSnapshot, 1)
+	assert.Equal(t, "background-after-close", backgroundSnapshot[0].ID)
+
+	_, rpcErr = server.HandleRunnerUIRequest(t.Context(), identity, protocol.MethodUIWidgetSet, mustRunnerJSON(t, runnerpayload.UIWidgetSetParams{
+		RunID: "run-ui",
+		Owner: owner,
+		Request: extensions.UIWidgetSetRequest{
+			ID:        "missing-scope",
+			Placement: extensions.UIWidgetPlacementAboveComposer,
+			Frame:     extensions.UIFrame{Sequence: 1},
+		},
+	}))
+	require.NotNil(t, rpcErr)
+	assert.Equal(t, protocol.ErrorCodeStale, rpcErr.Code)
+	_, rpcErr = server.HandleRunnerUIRequest(t.Context(), identity, protocol.MethodUIWidgetSet, mustRunnerJSON(t, runnerpayload.UIWidgetSetParams{
+		RunID: "run-ui",
+		Owner: owner,
+		Request: extensions.UIWidgetSetRequest{
+			ScopeID:   "another-conversation",
+			ID:        "wrong-background-scope",
+			Placement: extensions.UIWidgetPlacementAboveComposer,
+			Frame:     extensions.UIFrame{Sequence: 1},
+		},
+	}))
+	require.NotNil(t, rpcErr)
+	assert.Equal(t, protocol.ErrorCodeInvalidParams, rpcErr.Code)
 
 	nilServer := &Server{}
 	_, rpcErr = nilServer.HandleRunnerUIRequest(t.Context(), identity, protocol.MethodUIInput, mustRunnerJSON(t, runnerpayload.UIInputParams{RunID: "run-ui"}))

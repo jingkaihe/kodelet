@@ -188,8 +188,7 @@ func (s *Service) uiTarget(ctx context.Context) (Peer, string, protocol.ClientCa
 	if s.peer == nil {
 		return nil, "", protocol.ClientCapabilities{}, errors.New("runner control connection is unavailable")
 	}
-	runID, _ := ctx.Value(runnerRunIDContextKey{}).(string)
-	runID = strings.TrimSpace(runID)
+	runID := runnerRunIDFromContext(ctx)
 	if runID == "" && len(s.runs) == 1 {
 		for candidate := range s.runs {
 			runID = candidate
@@ -206,12 +205,33 @@ func (s *Service) persistentUITarget(ctx context.Context, source extensions.UIEx
 	if source == nil {
 		return nil, "", runnerpayload.ExtensionOwner{}, protocol.ClientCapabilities{}, errors.New("extension UI source is required")
 	}
-	peer, runID, capabilities, err := s.uiTarget(ctx)
-	if err != nil {
-		return nil, "", runnerpayload.ExtensionOwner{}, protocol.ClientCapabilities{}, err
-	}
 	owner := source.ExtensionUIOwner()
-	return peer, runID, runnerpayload.ExtensionOwner{ExtensionID: owner.ExtensionID, Generation: owner.Generation}, capabilities, nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.peer == nil {
+		return nil, "", runnerpayload.ExtensionOwner{}, protocol.ClientCapabilities{}, errors.New("runner control connection is unavailable")
+	}
+	runID := runnerRunIDFromContext(ctx)
+	if runID == "" && len(s.runs) == 1 {
+		for candidate := range s.runs {
+			runID = candidate
+		}
+	}
+	if run := s.runs[runID]; run != nil && !run.closing {
+		return s.peer, run.id, runnerpayload.ExtensionOwner{ExtensionID: owner.ExtensionID, Generation: owner.Generation}, run.clientCaps, nil
+	}
+	resources := s.backgroundRunIDs[runID]
+	if resources == nil || len(resources.leases) == 0 {
+		return nil, "", runnerpayload.ExtensionOwner{}, protocol.ClientCapabilities{}, errors.New("runner has no active persistent UI scope")
+	}
+	targetRunID := resources.lastRunID
+	if resources.attachedRunID != "" {
+		targetRunID = resources.attachedRunID
+	}
+	if targetRunID == "" {
+		return nil, "", runnerpayload.ExtensionOwner{}, protocol.ClientCapabilities{}, errors.New("runner background scope has no UI route")
+	}
+	return s.peer, targetRunID, runnerpayload.ExtensionOwner{ExtensionID: owner.ExtensionID, Generation: owner.Generation}, resources.clientCaps, nil
 }
 
 func interactiveUIOwner(ctx context.Context) runnerpayload.ExtensionOwner {

@@ -278,6 +278,13 @@ export interface ConversationForkOptions {
   name?: string;
 }
 
+export interface BackgroundTaskLease {
+  /** Host-generated lease ID, or undefined when the host already has a persistent lifetime. */
+  readonly id?: string;
+  /** Release the host-owned lifetime lease. Repeated calls are harmless. */
+  close(): Promise<void>;
+}
+
 export interface SharedContext extends Required<Pick<BaseCallContext, "cwd">>, Omit<BaseCallContext, "cwd"> {
   signal: AbortSignal;
   storage: StorageContext;
@@ -287,6 +294,7 @@ export interface SharedContext extends Required<Pick<BaseCallContext, "cwd">>, O
   env: EnvContext;
   log: LogContext;
   ui: UIContext;
+  acquireBackgroundTask(description?: string): Promise<BackgroundTaskLease>;
 }
 
 export interface ToolContext extends SharedContext {

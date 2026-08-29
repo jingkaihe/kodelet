@@ -576,6 +576,42 @@ func (p *Process) handleRPCRequest(ctx context.Context, source UIExtensionSource
 		ctx = ContextWithExtensionUIImplicitScope(ctx)
 	}
 	switch method {
+	case BackgroundTaskAcquireMethod:
+		if !RuntimeCapabilitiesFromContext(ctx).BackgroundTasks {
+			return nil, &rpcError{Code: -32000, Message: "extension background tasks are not available"}
+		}
+		var request BackgroundTaskAcquireRequest
+		if len(params) > 0 && string(params) != "null" {
+			if err := json.Unmarshal(params, &request); err != nil {
+				return nil, &rpcError{Code: -32602, Message: err.Error()}
+			}
+		}
+		host, ok := BackgroundTaskHostFromContext(ctx)
+		if !ok {
+			return BackgroundTaskAcquireResponse{}, nil
+		}
+		response, err := host.AcquireBackgroundTask(ctx, source, request)
+		if err != nil {
+			return nil, &rpcError{Code: -32000, Message: err.Error()}
+		}
+		return response, nil
+	case BackgroundTaskReleaseMethod:
+		if !RuntimeCapabilitiesFromContext(ctx).BackgroundTasks {
+			return nil, &rpcError{Code: -32000, Message: "extension background tasks are not available"}
+		}
+		var request BackgroundTaskReleaseRequest
+		if err := json.Unmarshal(params, &request); err != nil {
+			return nil, &rpcError{Code: -32602, Message: err.Error()}
+		}
+		host, ok := BackgroundTaskHostFromContext(ctx)
+		if !ok {
+			return BackgroundTaskReleaseResponse{Released: true}, nil
+		}
+		response, err := host.ReleaseBackgroundTask(ctx, source, request)
+		if err != nil {
+			return nil, &rpcError{Code: -32000, Message: err.Error()}
+		}
+		return response, nil
 	case UIWidgetSetMethod:
 		var request UIWidgetSetRequest
 		if err := json.Unmarshal(params, &request); err != nil {
@@ -1022,6 +1058,10 @@ func (p *Process) Close() error {
 
 func (p *Process) closeProcessLocked() (*rpcClient, error) {
 	client := p.client
+	var backgroundHost BackgroundTaskHost
+	if p.uiSource != nil {
+		backgroundHost, _ = BackgroundTaskHostFromContext(p.uiSource.hostContext())
+	}
 	if p.uiSource != nil {
 		p.uiSource.cancelHostContext()
 	}
@@ -1039,6 +1079,9 @@ func (p *Process) closeProcessLocked() (*rpcClient, error) {
 	p.uiMu.RUnlock()
 	if uiHost != nil && owner.Generation != 0 {
 		uiHost.CleanupExtensionUI(owner)
+	}
+	if backgroundHost != nil && owner.Generation != 0 {
+		backgroundHost.CleanupBackgroundTasks(owner)
 	}
 	if p.cmd == nil || p.cmd.Process == nil {
 		return client, nil
