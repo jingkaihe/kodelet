@@ -1,4 +1,5 @@
-import type { CSSProperties } from 'react';
+import { ChevronDown } from 'lucide-react';
+import { useState, type CSSProperties } from 'react';
 import type { UIFrameLine, UIStyle, UIStyledSpan, UIWidgetEvent } from '../../types';
 
 interface ExtensionWidgetsProps {
@@ -83,6 +84,7 @@ const spansForLine = (line: UIFrameLine): UIStyledSpan[] => {
 };
 
 const ExtensionWidgets = ({ placement, widgets }: ExtensionWidgetsProps) => {
+  const [collapsedWidgets, setCollapsedWidgets] = useState<Record<string, boolean>>({});
   const placedWidgets = widgets
     .filter((widget) => (widget.placement || 'aboveComposer') === placement)
     .slice(0, MAX_RENDERED_WIDGETS);
@@ -97,33 +99,62 @@ const ExtensionWidgets = ({ placement, widgets }: ExtensionWidgetsProps) => {
       data-placement={placement}
       data-testid={`extension-widgets-${placement}`}
     >
-      {placedWidgets.map((widget) => (
-        <div
-          aria-label={`${widget.extension_id} status`}
-          className="extension-widget-frame"
-          data-testid={`extension-widget-${widget.key}`}
-          key={widget.key}
-        >
-          {(Array.isArray(widget.frame?.lines) ? widget.frame.lines : [])
-            .slice(0, MAX_RENDERED_WIDGET_LINES)
-            .map((line, lineIndex) => (
+      {placedWidgets.map((widget) => {
+        const lines = (Array.isArray(widget.frame?.lines) ? widget.frame.lines : []).slice(
+          0,
+          MAX_RENDERED_WIDGET_LINES
+        );
+        const headerLine = lines[0] ?? widget.id;
+        const collapsed = collapsedWidgets[widget.key] === true;
+
+        return (
+          <div
+            aria-label={`${widget.extension_id} status`}
+            className="extension-widget-frame"
+            data-testid={`extension-widget-${widget.key}`}
+            key={widget.key}
+          >
+            <button
+              aria-expanded={!collapsed}
+              className="extension-widget-toggle"
+              onClick={() =>
+                setCollapsedWidgets((current) => ({
+                  ...current,
+                  [widget.key]: current[widget.key] !== true,
+                }))
+              }
+              type="button"
+            >
               <div
-                className={
-                  lineIndex === 0
-                    ? 'extension-widget-line extension-widget-line-header'
-                    : 'extension-widget-line'
-                }
-                key={`${widget.frame.sequence}-${lineIndex}`}
+                className="extension-widget-line extension-widget-line-header"
               >
-                {spansForLine(line).map((span, spanIndex) => (
+                {spansForLine(headerLine).map((span, spanIndex) => (
                   <span key={spanIndex} style={spanStyle(span.style)}>
                     {span.text}
                   </span>
                 ))}
               </div>
-            ))}
-        </div>
-      ))}
+              <ChevronDown aria-hidden="true" className="extension-widget-chevron" />
+            </button>
+            {collapsed ? null : (
+              <div className="extension-widget-content">
+                {lines.slice(1).map((line, lineIndex) => (
+                  <div
+                    className="extension-widget-line"
+                    key={`${widget.frame.sequence}-${lineIndex + 1}`}
+                  >
+                    {spansForLine(line).map((span, spanIndex) => (
+                      <span key={spanIndex} style={spanStyle(span.style)}>
+                        {span.text}
+                      </span>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </section>
   );
 };

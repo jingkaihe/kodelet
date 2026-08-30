@@ -2137,6 +2137,13 @@ describe('ChatPage', () => {
       'extension-widget-line-header'
     );
     expect(screen.getByText(/Inspect authentication/)).toBeInTheDocument();
+    const widgetToggle = screen.getByRole('button', { name: /Background agents/ });
+    expect(widgetToggle).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(widgetToggle);
+    expect(widgetToggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText(/Inspect authentication/)).not.toBeInTheDocument();
+    fireEvent.click(widgetToggle);
+    expect(screen.getByText(/Inspect authentication/)).toBeInTheDocument();
 
     await act(async () => {
       streamListener?.({

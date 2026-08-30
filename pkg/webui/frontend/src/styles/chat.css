@@ -24,23 +24,67 @@
 }
 
 .extension-widgets[data-placement="aboveComposer"] {
-  padding-bottom: 0.2rem;
+  padding-bottom: 0.38rem;
 }
 
 .extension-widgets[data-placement="belowComposer"] {
-  padding-top: 0.2rem;
+  padding-top: 0.38rem;
 }
 
 .extension-widget-frame {
-  max-height: 11rem;
+  min-width: 0;
+  padding: 0.18rem 1rem 0.24rem;
+  color: rgba(20, 20, 19, 0.62);
+}
+
+.extension-widget-frame + .extension-widget-frame {
+  margin-top: 0.18rem;
+  padding-top: 0.48rem;
+  border-top: 1px solid rgba(20, 20, 19, 0.06);
+}
+
+.extension-widget-toggle {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.36rem;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  text-align: left;
+}
+
+.extension-widget-toggle:hover,
+.extension-widget-toggle:active {
+  transform: none;
+}
+
+.extension-widget-toggle:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(217, 119, 87, 0.08);
+}
+
+.extension-widget-chevron {
+  width: 0.86rem;
+  height: 0.86rem;
+  flex: 0 0 auto;
+  color: rgba(20, 20, 19, 0.34);
+  transition: transform 140ms ease;
+}
+
+.extension-widget-toggle[aria-expanded="false"] .extension-widget-chevron {
+  transform: rotate(-90deg);
+}
+
+.extension-widget-content {
+  max-height: 8rem;
   overflow-y: auto;
   overscroll-behavior: contain;
-  border: 1px solid rgba(93, 83, 64, 0.08);
-  border-radius: 0.9rem;
-  background: rgba(236, 229, 216, 0.44);
-  padding: 0.62rem 0.82rem;
-  color: rgba(20, 20, 19, 0.72);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  padding-top: 0.08rem;
   scrollbar-color: rgba(93, 83, 64, 0.22) transparent;
   scrollbar-width: thin;
 }
@@ -49,8 +93,8 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-family: var(--font-mono);
-  font-size: 0.7rem;
-  line-height: 1.55;
+  font-size: 0.68rem;
+  line-height: 1.5;
 }
 
 .extension-widget-line + .extension-widget-line {
@@ -58,11 +102,11 @@
 }
 
 .extension-widget-line-header {
-  margin-bottom: 0.16rem;
+  min-width: 0;
   font-family: var(--font-heading);
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   line-height: 1.4;
-  color: rgba(20, 20, 19, 0.78);
+  color: rgba(20, 20, 19, 0.66);
 }
 
 .chat-message-panel {
