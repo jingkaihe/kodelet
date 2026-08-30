@@ -1,5 +1,13 @@
 # Kodelet
 
+## 0.5.41-beta
+
+Added ACP session steering so active child-agent prompts can receive additional guidance through the TypeScript SDK without starting a detached turn.
+
+Added persistent extension widgets to the Web UI, including conversation-scoped snapshots and live updates from local or runner-backed extensions.
+
+Added background task leases so asynchronous extension work can retain runner-backed runtime resources after the originating turn finishes.
+
 ## 0.5.40-beta
 
 Added admin-managed provider connections in the Web UI for Codex, Anthropic subscriptions, and GitHub Copilot, with device or OAuth login flows hosted by the control plane.
