@@ -358,25 +358,25 @@ interface UIWidgetVersion {
   sequence: number;
 }
 
-const widgetGenerationParts = (generation: string | undefined): [bigint, bigint] => {
-  const [runnerGeneration = '0', extensionGeneration = '0'] = (generation || '0:0').split(':', 2);
+const numericVersionParts = (version: string | undefined): [bigint, bigint] => {
+  const [major = '0', minor = '0'] = (version || '0:0').split(':', 2);
   try {
-    return [BigInt(runnerGeneration), BigInt(extensionGeneration)];
+    return [BigInt(major), BigInt(minor)];
   } catch {
     return [0n, 0n];
   }
 };
 
-const compareWidgetGenerations = (left: string | undefined, right: string | undefined): number => {
-  const [leftRunner, leftExtension] = widgetGenerationParts(left);
-  const [rightRunner, rightExtension] = widgetGenerationParts(right);
-  if (leftRunner !== rightRunner) {
-    return leftRunner > rightRunner ? 1 : -1;
+const compareNumericVersions = (left: string | undefined, right: string | undefined): number => {
+  const [leftMajor, leftMinor] = numericVersionParts(left);
+  const [rightMajor, rightMinor] = numericVersionParts(right);
+  if (leftMajor !== rightMajor) {
+    return leftMajor > rightMajor ? 1 : -1;
   }
-  if (leftExtension === rightExtension) {
+  if (leftMinor === rightMinor) {
     return 0;
   }
-  return leftExtension > rightExtension ? 1 : -1;
+  return leftMinor > rightMinor ? 1 : -1;
 };
 
 const upsertConversationSummary = (
@@ -562,6 +562,8 @@ const ChatPage: React.FC = () => {
     environmentProfile?: string;
   } | null>(null);
   const extensionWidgetVersionsRef = useRef<Record<string, UIWidgetVersion>>({});
+  const extensionWidgetRevisionRef = useRef<string | null>(null);
+  const extensionWidgetSnapshotRevisionRef = useRef<string | null>(null);
   const routerConversationIdRef = useRef<string | null>(conversationId);
   const sidebarResizeStartRef = useRef<{
     startX: number;
@@ -589,7 +591,20 @@ const ChatPage: React.FC = () => {
 
   const handleExtensionWidgetEvent = useCallback((event: ChatStreamEvent): boolean => {
     if (event.kind === 'ui-widgets') {
+      const incomingRevision = event.ui_widget_revision;
+      const currentRevision = extensionWidgetRevisionRef.current;
+      if (
+        incomingRevision &&
+        currentRevision &&
+        compareNumericVersions(incomingRevision, currentRevision) < 0
+      ) {
+        return true;
+      }
       const widgets = widgetsFromSnapshot(event.ui_widgets);
+      if (incomingRevision) {
+        extensionWidgetRevisionRef.current = incomingRevision;
+        extensionWidgetSnapshotRevisionRef.current = incomingRevision;
+      }
       extensionWidgetVersionsRef.current = Object.fromEntries(
         Object.values(widgets).map((widget) => [
           widget.key,
@@ -603,6 +618,22 @@ const ChatPage: React.FC = () => {
       return false;
     }
 
+    const incomingRevision = event.ui_widget_revision;
+    if (
+      incomingRevision &&
+      extensionWidgetSnapshotRevisionRef.current &&
+      compareNumericVersions(incomingRevision, extensionWidgetSnapshotRevisionRef.current) <= 0
+    ) {
+      return true;
+    }
+    if (
+      incomingRevision &&
+      (!extensionWidgetRevisionRef.current ||
+        compareNumericVersions(incomingRevision, extensionWidgetRevisionRef.current) > 0)
+    ) {
+      extensionWidgetRevisionRef.current = incomingRevision;
+    }
+
     const widget = event.ui_widget;
     if (!widget.frame || typeof widget.frame.sequence !== 'number') {
       return true;
@@ -613,7 +644,7 @@ const ChatPage: React.FC = () => {
     };
     const currentVersion = extensionWidgetVersionsRef.current[widget.key];
     if (currentVersion) {
-      const generationOrder = compareWidgetGenerations(
+      const generationOrder = compareNumericVersions(
         incomingVersion.generation,
         currentVersion.generation
       );
@@ -1506,6 +1537,8 @@ const ChatPage: React.FC = () => {
 
     resumeStreamRef.current += 1;
     setActiveConversationId(conversationId);
+    extensionWidgetRevisionRef.current = null;
+    extensionWidgetSnapshotRevisionRef.current = null;
     extensionWidgetVersionsRef.current = {};
     setExtensionWidgets({});
     setSteering(false);
@@ -1732,6 +1765,8 @@ const ChatPage: React.FC = () => {
     optimisticRemoteConversationRef.current = null;
     setActiveConversationId(null);
     setMessages([]);
+    extensionWidgetRevisionRef.current = null;
+    extensionWidgetSnapshotRevisionRef.current = null;
     extensionWidgetVersionsRef.current = {};
     setExtensionWidgets({});
     setConversationError(null);

@@ -2360,11 +2360,12 @@ func (s *Server) handleStreamConversation(w http.ResponseWriter, r *http.Request
 		})
 	}
 	if s.extensionUI != nil {
-		widgets := s.extensionUI.Snapshot(conversationID)
+		revision, widgets := s.extensionUI.Snapshot(conversationID)
 		_ = sink.Send(chat.ChatEvent{
-			Kind:           "ui-widgets",
-			ConversationID: conversationID,
-			UIWidgets:      widgets,
+			Kind:             "ui-widgets",
+			ConversationID:   conversationID,
+			UIWidgets:        widgets,
+			UIWidgetRevision: revision,
 		})
 	} else if !active {
 		_ = sink.KeepAlive()

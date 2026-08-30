@@ -101,6 +101,7 @@ type ChatEvent struct {
 	UINotify         *UINotifyEvent                  `json:"ui_notify,omitempty"`
 	UIWidget         *UIWidgetEvent                  `json:"ui_widget,omitempty"`
 	UIWidgets        []UIWidgetEvent                 `json:"ui_widgets,omitempty"`
+	UIWidgetRevision string                          `json:"ui_widget_revision,omitempty"`
 	Error            string                          `json:"error,omitempty"`
 }
 

@@ -49,8 +49,9 @@ func TestWebExtensionUIHostStoresAndEmitsConversationWidgets(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, response.Accepted)
 
-	snapshot := host.Snapshot("conversation-1")
+	snapshotRevision, snapshot := host.Snapshot("conversation-1")
 	require.Len(t, snapshot, 1)
+	assert.Regexp(t, `^\d+:1$`, snapshotRevision)
 	assert.Equal(t, "subagent", snapshot[0].ExtensionID)
 	assert.Equal(t, "0:1", snapshot[0].Generation)
 	assert.Equal(t, uint64(1), snapshot[0].Frame.Sequence)
@@ -64,7 +65,10 @@ func TestWebExtensionUIHostStoresAndEmitsConversationWidgets(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.True(t, response.Accepted)
-	assert.Equal(t, uint64(2), host.Snapshot("conversation-1")[0].Frame.Sequence)
+	updatedRevision, updatedSnapshot := host.Snapshot("conversation-1")
+	require.Len(t, updatedSnapshot, 1)
+	assert.Regexp(t, `^\d+:2$`, updatedRevision)
+	assert.Equal(t, uint64(2), updatedSnapshot[0].Frame.Sequence)
 
 	response, err = host.RemoveWidget(ctx, source, extensions.UIWidgetRemoveRequest{
 		ID:       "background-agents",
@@ -72,7 +76,9 @@ func TestWebExtensionUIHostStoresAndEmitsConversationWidgets(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.True(t, response.Accepted)
-	assert.Empty(t, host.Snapshot("conversation-1"))
+	removedRevision, removedSnapshot := host.Snapshot("conversation-1")
+	assert.Regexp(t, `^\d+:3$`, removedRevision)
+	assert.Empty(t, removedSnapshot)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -82,6 +88,9 @@ func TestWebExtensionUIHostStoresAndEmitsConversationWidgets(t *testing.T) {
 		events[1].UIWidget.Removed,
 		events[2].UIWidget.Removed,
 	})
+	assert.Equal(t, snapshotRevision, events[0].UIWidgetRevision)
+	assert.Equal(t, updatedRevision, events[1].UIWidgetRevision)
+	assert.Equal(t, removedRevision, events[2].UIWidgetRevision)
 }
 
 func TestServerExtensionUIEventsReachActiveChatStream(t *testing.T) {
@@ -107,6 +116,7 @@ func TestServerExtensionUIEventsReachActiveChatStream(t *testing.T) {
 	assert.Equal(t, "ui-widget", events[0].Kind)
 	require.NotNil(t, events[0].UIWidget)
 	assert.Equal(t, "0:1", events[0].UIWidget.Generation)
+	assert.Regexp(t, `^\d+:1$`, events[0].UIWidgetRevision)
 }
 
 func TestWebExtensionUIHostBoundsAndNormalizesFrames(t *testing.T) {
@@ -120,8 +130,9 @@ func TestWebExtensionUIHostBoundsAndNormalizesFrames(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.True(t, response.Accepted)
-	require.Len(t, host.Snapshot("conversation-1"), 1)
-	assert.NotNil(t, host.Snapshot("conversation-1")[0].Frame.Lines)
+	_, snapshot := host.Snapshot("conversation-1")
+	require.Len(t, snapshot, 1)
+	assert.NotNil(t, snapshot[0].Frame.Lines)
 
 	_, err = host.SetWidget(t.Context(), source, extensions.UIWidgetSetRequest{
 		ScopeID:   "conversation-1",

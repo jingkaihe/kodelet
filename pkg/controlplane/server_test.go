@@ -2195,6 +2195,7 @@ func TestServer_handleStreamConversationSendsPersistentWidgetSnapshot(t *testing
 	var event ChatEvent
 	require.NoError(t, json.Unmarshal([]byte(strings.TrimSpace(w.Body.String())), &event))
 	assert.Equal(t, "ui-widgets", event.Kind)
+	assert.Regexp(t, `^\d+:1$`, event.UIWidgetRevision)
 	require.Len(t, event.UIWidgets, 1)
 	assert.Equal(t, "subagent", event.UIWidgets[0].ExtensionID)
 	assert.Equal(t, uint64(1), event.UIWidgets[0].Frame.Sequence)
@@ -2228,6 +2229,7 @@ func TestServer_handleStreamConversationSendsEmptyPersistentWidgetSnapshot(t *te
 	var event ChatEvent
 	require.NoError(t, json.Unmarshal([]byte(strings.TrimSpace(w.Body.String())), &event))
 	assert.Equal(t, "ui-widgets", event.Kind)
+	assert.Regexp(t, `^\d+:0$`, event.UIWidgetRevision)
 	assert.Empty(t, event.UIWidgets)
 }
 

@@ -461,6 +461,7 @@ export interface ChatStreamEvent {
   ui_notify?: UINotifyEvent;
   ui_widget?: UIWidgetEvent;
   ui_widgets?: UIWidgetEvent[];
+  ui_widget_revision?: string;
   error?: string;
 }
 

@@ -93,13 +93,14 @@ const ExtensionWidgets = ({ placement, widgets }: ExtensionWidgetsProps) => {
   return (
     <section
       aria-label="Extension status"
-      className="mx-auto grid w-full max-w-5xl gap-2 px-3 sm:px-4 md:px-8"
+      className="extension-widgets mx-auto flex w-full max-w-5xl flex-col gap-1.5 px-3 sm:px-4 md:px-8"
+      data-placement={placement}
       data-testid={`extension-widgets-${placement}`}
     >
       {placedWidgets.map((widget) => (
         <div
           aria-label={`${widget.extension_id} status`}
-          className="max-h-56 overflow-y-auto rounded-2xl border border-kodelet-dark/10 bg-white/80 px-4 py-2.5 text-kodelet-dark shadow-sm backdrop-blur"
+          className="extension-widget-frame"
           data-testid={`extension-widget-${widget.key}`}
           key={widget.key}
         >
@@ -107,7 +108,11 @@ const ExtensionWidgets = ({ placement, widgets }: ExtensionWidgetsProps) => {
             .slice(0, MAX_RENDERED_WIDGET_LINES)
             .map((line, lineIndex) => (
               <div
-                className="whitespace-pre-wrap break-words font-mono text-xs leading-5"
+                className={
+                  lineIndex === 0
+                    ? 'extension-widget-line extension-widget-line-header'
+                    : 'extension-widget-line'
+                }
                 key={`${widget.frame.sequence}-${lineIndex}`}
               >
                 {spansForLine(line).map((span, spanIndex) => (

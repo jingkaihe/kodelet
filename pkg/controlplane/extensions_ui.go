@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	chat "github.com/jingkaihe/kodelet/pkg/chat"
 	"github.com/jingkaihe/kodelet/pkg/extensions"
@@ -40,9 +41,11 @@ type webExtensionWidget struct {
 }
 
 type webExtensionUIHost struct {
-	mu      sync.Mutex
-	widgets map[webExtensionUIKey]webExtensionWidget
-	emit    func(string, chat.ChatEvent)
+	mu       sync.Mutex
+	epoch    uint64
+	revision uint64
+	widgets  map[webExtensionUIKey]webExtensionWidget
+	emit     func(string, chat.ChatEvent)
 }
 
 type webExtensionUINamespacedSource interface {
@@ -55,6 +58,7 @@ type webExtensionUIRunnerGenerationSource interface {
 
 func newWebExtensionUIHost(emit func(string, chat.ChatEvent)) *webExtensionUIHost {
 	return &webExtensionUIHost{
+		epoch:   uint64(time.Now().UnixNano()),
 		widgets: make(map[webExtensionUIKey]webExtensionWidget),
 		emit:    emit,
 	}
@@ -108,9 +112,10 @@ func (h *webExtensionUIHost) SetWidget(ctx context.Context, source extensions.UI
 	}
 	widget := webExtensionWidget{key: key, owner: owner, ownerGeneration: ownerGeneration, placement: placement, frame: request.Frame}
 	h.widgets[key] = widget
+	revision := h.nextRevisionLocked()
 	h.mu.Unlock()
 
-	h.emitWidget(widget, false)
+	h.emitWidget(widget, false, revision)
 	return extensions.UIFrameResponse{Accepted: true, LatestSequence: request.Frame.Sequence}, nil
 }
 
@@ -139,9 +144,10 @@ func (h *webExtensionUIHost) UpdateWidget(ctx context.Context, source extensions
 	}
 	widget.frame = request.Frame
 	h.widgets[key] = widget
+	revision := h.nextRevisionLocked()
 	h.mu.Unlock()
 
-	h.emitWidget(widget, false)
+	h.emitWidget(widget, false, revision)
 	return extensions.UIFrameResponse{Accepted: true, LatestSequence: request.Frame.Sequence}, nil
 }
 
@@ -167,9 +173,10 @@ func (h *webExtensionUIHost) RemoveWidget(ctx context.Context, source extensions
 	}
 	delete(h.widgets, key)
 	widget.frame = extensions.UIFrame{Sequence: request.Sequence}
+	revision := h.nextRevisionLocked()
 	h.mu.Unlock()
 
-	h.emitWidget(widget, true)
+	h.emitWidget(widget, true, revision)
 	return extensions.UIFrameResponse{Accepted: true, LatestSequence: request.Sequence}, nil
 }
 
@@ -191,19 +198,26 @@ func (h *webExtensionUIHost) CleanupExtensionUI(owner extensions.UIExtensionOwne
 	}
 
 	h.mu.Lock()
-	removed := make([]webExtensionWidget, 0)
+	type removedWidget struct {
+		widget   webExtensionWidget
+		revision string
+	}
+	removed := make([]removedWidget, 0)
 	for key, widget := range h.widgets {
 		if key.namespace != localExtensionUINamespace || widget.owner != owner {
 			continue
 		}
 		delete(h.widgets, key)
 		widget.frame = extensions.UIFrame{Sequence: widget.frame.Sequence + 1}
-		removed = append(removed, widget)
+		removed = append(removed, removedWidget{
+			widget:   widget,
+			revision: h.nextRevisionLocked(),
+		})
 	}
 	h.mu.Unlock()
 
-	for _, widget := range removed {
-		h.emitWidget(widget, true)
+	for _, removedWidget := range removed {
+		h.emitWidget(removedWidget.widget, true, removedWidget.revision)
 	}
 }
 
@@ -224,12 +238,13 @@ func (h *webExtensionUIHost) RemoveConversation(scopeID string) {
 	h.mu.Unlock()
 }
 
-func (h *webExtensionUIHost) Snapshot(scopeID string) []chat.UIWidgetEvent {
+func (h *webExtensionUIHost) Snapshot(scopeID string) (string, []chat.UIWidgetEvent) {
 	if h == nil {
-		return nil
+		return "", nil
 	}
 	scopeID = strings.TrimSpace(scopeID)
 	h.mu.Lock()
+	revision := h.currentRevisionLocked()
 	widgets := make([]webExtensionWidget, 0)
 	for _, widget := range h.widgets {
 		if widget.key.scopeID == scopeID {
@@ -250,17 +265,27 @@ func (h *webExtensionUIHost) Snapshot(scopeID string) []chat.UIWidgetEvent {
 	for _, widget := range widgets {
 		events = append(events, webExtensionWidgetEvent(widget, false))
 	}
-	return events
+	return revision, events
 }
 
-func (h *webExtensionUIHost) emitWidget(widget webExtensionWidget, removed bool) {
+func (h *webExtensionUIHost) currentRevisionLocked() string {
+	return strconv.FormatUint(h.epoch, 10) + ":" + strconv.FormatUint(h.revision, 10)
+}
+
+func (h *webExtensionUIHost) nextRevisionLocked() string {
+	h.revision++
+	return h.currentRevisionLocked()
+}
+
+func (h *webExtensionUIHost) emitWidget(widget webExtensionWidget, removed bool, revision string) {
 	if h == nil || h.emit == nil {
 		return
 	}
 	h.emit(widget.key.scopeID, chat.ChatEvent{
-		Kind:           "ui-widget",
-		ConversationID: widget.key.scopeID,
-		UIWidget:       pointerTo(webExtensionWidgetEvent(widget, removed)),
+		Kind:             "ui-widget",
+		ConversationID:   widget.key.scopeID,
+		UIWidget:         pointerTo(webExtensionWidgetEvent(widget, removed)),
+		UIWidgetRevision: revision,
 	})
 }
 

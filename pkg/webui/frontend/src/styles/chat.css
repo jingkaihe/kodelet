@@ -19,6 +19,52 @@
   backdrop-filter: blur(10px);
 }
 
+.extension-widgets {
+  flex-shrink: 0;
+}
+
+.extension-widgets[data-placement="aboveComposer"] {
+  padding-bottom: 0.2rem;
+}
+
+.extension-widgets[data-placement="belowComposer"] {
+  padding-top: 0.2rem;
+}
+
+.extension-widget-frame {
+  max-height: 11rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid rgba(93, 83, 64, 0.08);
+  border-radius: 0.9rem;
+  background: rgba(236, 229, 216, 0.44);
+  padding: 0.62rem 0.82rem;
+  color: rgba(20, 20, 19, 0.72);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  scrollbar-color: rgba(93, 83, 64, 0.22) transparent;
+  scrollbar-width: thin;
+}
+
+.extension-widget-line {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  line-height: 1.55;
+}
+
+.extension-widget-line + .extension-widget-line {
+  margin-top: 0.04rem;
+}
+
+.extension-widget-line-header {
+  margin-bottom: 0.16rem;
+  font-family: var(--font-heading);
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: rgba(20, 20, 19, 0.78);
+}
+
 .chat-message-panel {
   border: 1px solid rgba(20, 20, 19, 0.08);
   background: var(--kodelet-panel);

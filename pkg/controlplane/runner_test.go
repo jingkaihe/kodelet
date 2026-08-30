@@ -714,7 +714,7 @@ func TestHandleRunnerUIRequestValidatesRunAndPersistentCapabilities(t *testing.T
 	}))
 	require.Nil(t, rpcErr)
 	assert.True(t, value.(extensions.UIFrameResponse).Accepted)
-	snapshot := server.extensionUI.Snapshot("conversation-ui")
+	_, snapshot := server.extensionUI.Snapshot("conversation-ui")
 	require.Len(t, snapshot, 1)
 	assert.Equal(t, fmt.Sprintf("%d:1", identity.Generation), snapshot[0].Generation)
 
@@ -752,7 +752,8 @@ func TestHandleRunnerUIRequestValidatesRunAndPersistentCapabilities(t *testing.T
 	}))
 	require.Nil(t, rpcErr)
 	assert.True(t, value.(extensions.UIFrameResponse).Accepted)
-	assert.Empty(t, server.extensionUI.Snapshot("conversation-ui"))
+	_, snapshot = server.extensionUI.Snapshot("conversation-ui")
+	assert.Empty(t, snapshot)
 
 	for _, method := range []string{
 		protocol.MethodUISurfaceOpen,
@@ -807,7 +808,7 @@ func TestHandleRunnerUIRequestValidatesRunAndPersistentCapabilities(t *testing.T
 	}))
 	require.Nil(t, rpcErr)
 	assert.True(t, value.(extensions.UIFrameResponse).Accepted)
-	backgroundSnapshot := server.extensionUI.Snapshot("conversation-ui")
+	_, backgroundSnapshot := server.extensionUI.Snapshot("conversation-ui")
 	require.Len(t, backgroundSnapshot, 1)
 	assert.Equal(t, "background-after-close", backgroundSnapshot[0].ID)
 

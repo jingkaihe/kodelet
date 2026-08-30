@@ -2130,7 +2130,12 @@ describe('ChatPage', () => {
     });
 
     expect(screen.getByTestId('extension-widgets-aboveComposer')).toBeInTheDocument();
-    expect(screen.getByText(/Background agents/)).toBeInTheDocument();
+    expect(screen.getByTestId('extension-widget-subagent-widget')).toHaveClass(
+      'extension-widget-frame'
+    );
+    expect(screen.getByText(/Background agents/).closest('.extension-widget-line')).toHaveClass(
+      'extension-widget-line-header'
+    );
     expect(screen.getByText(/Inspect authentication/)).toBeInTheDocument();
 
     await act(async () => {
@@ -2197,6 +2202,7 @@ describe('ChatPage', () => {
 
   it('keeps a background-agent widget visible after the parent turn completes', async () => {
     routeParams = { id: 'conv-123' };
+    const streamListeners: Array<(event: ChatStreamEvent) => void> = [];
     mockGetConversation.mockResolvedValue({
       id: 'conv-123',
       createdAt: '2026-08-29T00:00:00Z',
@@ -2205,11 +2211,18 @@ describe('ChatPage', () => {
       messages: [],
       toolResults: {},
     });
+    mockStreamConversation.mockImplementation(async (_id, options) => {
+      streamListeners.push(
+        (options as { onEvent: (event: ChatStreamEvent) => void }).onEvent
+      );
+      return new Promise(() => undefined);
+    });
     mockStreamChat.mockImplementation(async (_request, options) => {
       const onEvent = (options as { onEvent: (event: ChatStreamEvent) => void }).onEvent;
       onEvent({
         kind: 'ui-widget',
         conversation_id: 'conv-123',
+        ui_widget_revision: '100:1',
         ui_widget: {
           key: 'subagent-widget',
           extension_id: 'subagent',
@@ -2236,6 +2249,47 @@ describe('ChatPage', () => {
     );
     expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument();
     await waitFor(() => expect(mockStreamConversation.mock.calls.length).toBeGreaterThanOrEqual(2));
+
+    await act(async () => {
+      streamListeners[streamListeners.length - 1]?.({
+        kind: 'ui-widgets',
+        conversation_id: 'conv-123',
+        ui_widget_revision: '100:0',
+        ui_widgets: [],
+      });
+    });
+
+    expect(screen.getByTestId('extension-widgets-aboveComposer')).toHaveTextContent(
+      'Background agents 1 active'
+    );
+
+    await act(async () => {
+      streamListeners[streamListeners.length - 1]?.({
+        kind: 'ui-widgets',
+        conversation_id: 'conv-123',
+        ui_widget_revision: '100:2',
+        ui_widgets: [],
+      });
+    });
+
+    expect(screen.queryByTestId('extension-widgets-aboveComposer')).not.toBeInTheDocument();
+
+    await act(async () => {
+      streamListeners[streamListeners.length - 1]?.({
+        kind: 'ui-widget',
+        conversation_id: 'conv-123',
+        ui_widget_revision: '100:1',
+        ui_widget: {
+          key: 'subagent-widget',
+          extension_id: 'subagent',
+          id: 'background-agents',
+          placement: 'aboveComposer',
+          frame: { sequence: 1, lines: ['Delayed stale widget'] },
+        },
+      });
+    });
+
+    expect(screen.queryByText('Delayed stale widget')).not.toBeInTheDocument();
   });
 
   it('allows steering a TUI-started conversation while its remote runner is busy', async () => {
