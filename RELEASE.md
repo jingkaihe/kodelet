@@ -1,5 +1,9 @@
 # Kodelet
 
+## 0.5.42-beta
+
+Added a multi-architecture control-plane container image for Linux amd64 and arm64, published to GitHub Container Registry from version tags with provenance and SBOM attestations.
+
 ## 0.5.41-beta
 
 Added ACP session steering so active child-agent prompts can receive additional guidance through the TypeScript SDK without starting a detached turn.
