@@ -228,34 +228,6 @@ kodelet serve --auth-token "your-secret-token"
 
 Explicit tokens may contain only letters, numbers, and URL-safe punctuation (`-._~`). Web authentication modes are `token`, `oidc`, and `none`; runner authentication modes are `token`, `enrollment`, and `none`.
 
-#### Control-plane container
-
-The container runs the control plane as unprivileged UID/GID `65532` and starts with the equivalent of:
-
-```bash
-kodelet serve --host=0.0.0.0 --disable-control-plane-workspace
-```
-
-Binding to `0.0.0.0` is required for a container-published port to reach the server; it does not itself restart the container. Use your container runtime's restart policy for that behavior.
-
-Run it with persistent control-plane state and stable authentication tokens:
-
-```bash
-docker volume create kodelet-data
-docker run -d \
-  --name kodelet-control-plane \
-  --restart unless-stopped \
-  --publish 8080:8080 \
-  --mount type=volume,src=kodelet-data,dst=/home/nonroot/.kodelet \
-  ghcr.io/jingkaihe/kodelet:VERSION \
-  --auth-token=REPLACE_WITH_A_LONG_RANDOM_WEB_TOKEN \
-  --runner-auth-token=REPLACE_WITH_A_DIFFERENT_LONG_RANDOM_RUNNER_TOKEN
-```
-
-Arguments after the image name are appended to the fixed `serve` entrypoint, so normal `serve` flags can configure the container. Persist `/home/nonroot/.kodelet` because it contains the SQLite conversation, runner, and authentication state. Explicit tokens also prevent credentials from changing on every restart; alternatively, configure OIDC and runner enrollment through a trusted configuration file whose ownership and permissions allow UID `65532` to read it.
-
-Workspace execution belongs on separately deployed `kodelet runner start` processes. Put the control plane behind an HTTPS reverse proxy or ingress before connecting non-loopback clients or runners over an untrusted network.
-
 To use OIDC, create a Web application with your identity provider, register a redirect URL ending in `/auth/oidc/callback`, and keep the client secret in an owner-only file:
 
 ```bash
@@ -323,6 +295,34 @@ For trusted local-only use, disable both human and runner authentication with:
 ```bash
 kodelet serve --skip-auth
 ```
+
+#### Control-plane container
+
+The container runs the control plane as unprivileged UID/GID `65532` and starts with the equivalent of:
+
+```bash
+kodelet serve --host=0.0.0.0 --disable-control-plane-workspace
+```
+
+Binding to `0.0.0.0` is required for a container-published port to reach the server; it does not itself restart the container. Use your container runtime's restart policy for that behavior.
+
+Run it with persistent control-plane state and stable authentication tokens:
+
+```bash
+docker volume create kodelet-data
+docker run -d \
+  --name kodelet-control-plane \
+  --restart unless-stopped \
+  --publish 8080:8080 \
+  --mount type=volume,src=kodelet-data,dst=/home/nonroot/.kodelet \
+  ghcr.io/jingkaihe/kodelet:VERSION \
+  --auth-token=REPLACE_WITH_A_LONG_RANDOM_WEB_TOKEN \
+  --runner-auth-token=REPLACE_WITH_A_DIFFERENT_LONG_RANDOM_RUNNER_TOKEN
+```
+
+Arguments after the image name are appended to the fixed `serve` entrypoint, so normal `serve` flags can configure the container. Persist `/home/nonroot/.kodelet` because it contains the SQLite conversation, runner, and authentication state. Explicit tokens also prevent credentials from changing on every restart; alternatively, configure OIDC and runner enrollment through a trusted configuration file whose ownership and permissions allow UID `65532` to read it.
+
+Workspace execution belongs on separately deployed `kodelet runner start` processes. Put the control plane behind an HTTPS reverse proxy or ingress before connecting non-loopback clients or runners over an untrusted network.
 
 ### Workspace-bound Runners
 
