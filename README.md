@@ -44,7 +44,16 @@ export OPENAI_API_KEY="your-api-key"
 
 ## Development
 
-For detailed development instructions, including prerequisites, running locally, configuration options, and available mise tasks, please see the [Development Guide](docs/DEVELOPMENT.md).
+Kodelet uses `mise` for tool versions and development tasks:
+
+```bash
+mise install
+mise run install
+mise run lint
+mise run test
+```
+
+Run `mise tasks` to list the remaining build, frontend, SDK, packaging, and container tasks.
 
 ## License
 

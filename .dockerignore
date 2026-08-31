@@ -1,8 +1,19 @@
 .git
 .dockerignore
 Dockerfile
-*.json
-*.md
+
+# Repository content that is not part of the runtime build.
+/.build/
+/.github/
+/bin/
+/dist/
+/docs/
+/examples/
+/recipes/
+/sdk/
+/skills/
+/tests/
+/*.md
 
 # Frontend build artifacts and dependencies (will be built fresh in container)
 pkg/webui/dist/

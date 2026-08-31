@@ -147,7 +147,7 @@ describe('ChatToolActivity', () => {
               operation: 'update',
             },
             {
-              path: 'docs/DEVELOPMENT.md',
+              path: 'docs/MANUAL.md',
               operation: 'update',
             },
           ],

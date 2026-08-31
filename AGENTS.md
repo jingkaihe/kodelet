@@ -18,7 +18,7 @@ pkg/             # Core packages
   ├── tools/     # Tool implementations
   ├── webui/     # Embedded React/TypeScript SPA and HTTP handler
   └── ...        # logger/, presenter/, sysprompt/, telemetry/, types/, utils/
-docs/            # Documentation (MANUAL.md, DEVELOPMENT.md, SKILLS.md, etc.)
+docs/            # Documentation (MANUAL.md, SKILLS.md, design docs, etc.)
 skills/          # Built-in skills
   └── kodelet/   # Kodelet skill docs, references, and examples
 recipes/         # Sample fragment/recipe templates
@@ -147,7 +147,6 @@ Managed binaries in `~/.kodelet/bin/`: ripgrep (15.2.0), fd (10.3.0). Auto-downl
 
 ## Resources
 - [docs/MANUAL.md](docs/MANUAL.md) - CLI reference
-- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) - Development guide
 - [docs/SKILLS.md](docs/SKILLS.md) - Skills system
 - [docs/extension-design.md](docs/extension-design.md) - Extension system design
 - [docs/FRAGMENTS.md](docs/FRAGMENTS.md) - Template system

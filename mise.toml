@@ -184,6 +184,39 @@ run = [
   "CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags=\"-s -w -X '$VERSION_PKG.Version=$VERSION' -X '$VERSION_PKG.GitCommit=$GIT_COMMIT' -X '$VERSION_PKG.BuildTime=$BUILD_TIME'\" -o ./bin/kodelet-darwin-arm64 ./cmd/kodelet/",
 ]
 
+[tasks.docker-build]
+description = "Build the control-plane container image for the local platform"
+run = ['''
+set -eu
+
+image="${IMAGE:-kodelet:local}"
+docker build \
+  --build-arg VERSION="$VERSION" \
+  --build-arg GIT_COMMIT="$GIT_COMMIT" \
+  --build-arg BUILD_TIME="$BUILD_TIME" \
+  --tag "$image" \
+  .
+''']
+
+[tasks.docker-build-multiarch]
+description = "Build and push the amd64/arm64 control-plane image"
+run = ['''
+set -eu
+
+: "${IMAGE:?set IMAGE to a registry tag, for example ghcr.io/jingkaihe/kodelet:dev}"
+platforms="${PLATFORMS:-linux/amd64,linux/arm64}"
+docker buildx build \
+  --platform "$platforms" \
+  --build-arg VERSION="$VERSION" \
+  --build-arg GIT_COMMIT="$GIT_COMMIT" \
+  --build-arg BUILD_TIME="$BUILD_TIME" \
+  --provenance=mode=max \
+  --sbom=true \
+  --tag "$IMAGE" \
+  --push \
+  .
+''']
+
 [tasks.release-snapshot]
 description = "Build GoReleaser snapshot artifacts"
 run = [
