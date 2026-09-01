@@ -564,6 +564,7 @@ const ChatPage: React.FC = () => {
     runnerId: string;
     environmentProfile?: string;
     cwd?: string;
+    confirmed: boolean;
   } | null>(null);
   const extensionWidgetVersionsRef = useRef<Record<string, UIWidgetVersion>>({});
   const extensionWidgetRevisionRef = useRef<string | null>(null);
@@ -2203,6 +2204,7 @@ const ChatPage: React.FC = () => {
             runnerId: requestRunnerID,
             environmentProfile: requestEnvironmentProfile || undefined,
             cwd: requestCWD,
+            confirmed: false,
           }
         : null;
       setActiveConversationId(targetConversationId);
@@ -2243,6 +2245,14 @@ const ChatPage: React.FC = () => {
 
     let streamedConversationId = targetConversationId;
     let streamedError: string | null = null;
+    const clearConfirmedOptimisticConversation = () => {
+      if (
+        optimisticRemoteConversationRef.current?.conversationId === streamedConversationId &&
+        optimisticRemoteConversationRef.current.confirmed
+      ) {
+        optimisticRemoteConversationRef.current = null;
+      }
+    };
 
     try {
       await apiService.streamChat(
@@ -2277,7 +2287,8 @@ const ChatPage: React.FC = () => {
           onEvent: (event: ChatStreamEvent) => {
             if (event.kind === 'conversation' && event.conversation_id) {
               const streamedId = event.conversation_id;
-              const effectiveCWD = event.cwd?.trim() || currentCWDLabel;
+              const canonicalCWD = event.cwd?.trim();
+              const effectiveCWD = canonicalCWD || currentCWDLabel;
               const previousStreamedId = streamedConversationId;
               const shouldAdoptStreamedConversation =
                 viewedConversationIdRef.current === viewConversationIdAtStart ||
@@ -2297,6 +2308,8 @@ const ChatPage: React.FC = () => {
                   ...optimisticRemoteConversationRef.current,
                   conversationId: streamedId,
                   cwd: effectiveCWD || optimisticRemoteConversationRef.current.cwd,
+                  confirmed:
+                    optimisticRemoteConversationRef.current.confirmed || Boolean(canonicalCWD),
                 };
               }
               if (shouldAdoptStreamedConversation) {
@@ -2412,6 +2425,7 @@ const ChatPage: React.FC = () => {
       );
 
       if (streamedError) {
+        clearConfirmedOptimisticConversation();
         if (
           viewedConversationIdRef.current === viewConversationIdAtStart ||
           finishedOnStartedConversation
@@ -2456,6 +2470,8 @@ const ChatPage: React.FC = () => {
         clearRunningConversationForController(streamedConversationId, controller);
         return;
       }
+
+      clearConfirmedOptimisticConversation();
 
       const failedOnStartedConversation = Boolean(
         !viewConversationIdAtStart &&
@@ -2662,6 +2678,9 @@ const ChatPage: React.FC = () => {
   const hasOptimisticRemoteConversation =
     Boolean(conversationId) &&
     optimisticRemoteConversationRef.current?.conversationId === conversationId;
+  const optimisticConversationContextEditable =
+    hasOptimisticRemoteConversation &&
+    optimisticRemoteConversationRef.current?.confirmed === false;
   const conversationMatchesRoute = !conversationId || conversation?.id === conversationId;
   const workspaceConversation =
     conversationMatchesRoute || isStartedConversationAwaitingLoad ? conversation : null;
@@ -3148,13 +3167,64 @@ const ChatPage: React.FC = () => {
       return;
     }
 
-    setSelectedProfile(newChatProfileDraft || 'default');
+    const nextProfile = newChatProfileDraft || 'default';
+    const nextEnvironmentProfile = newChatRunnerDraft
+      ? newChatEnvironmentProfileDraft.trim()
+      : '';
+    const nextCWD = cwdQuery.trim();
+    const optimisticConversation = optimisticRemoteConversationRef.current;
+    if (
+      conversationId &&
+      optimisticConversation?.conversationId === conversationId &&
+      !optimisticConversation.confirmed
+    ) {
+      const nextRunner = runners.find((runner) => runner.id === newChatRunnerDraft);
+      const effectiveCWD = newChatRunnerDraft
+        ? nextCWD || nextRunner?.workspace.path || ''
+        : nextCWD || chatSettings.defaultCWD || '';
+      optimisticRemoteConversationRef.current = {
+        ...optimisticConversation,
+        runnerId: newChatRunnerDraft,
+        environmentProfile: nextEnvironmentProfile || undefined,
+        cwd: nextCWD || undefined,
+      };
+      setConversation((currentConversation) =>
+        currentConversation?.id === conversationId
+          ? {
+              ...currentConversation,
+              profile: nextProfile,
+              reasoningEffort: newChatReasoningEffortDraft || undefined,
+              cwd: effectiveCWD,
+              runnerId: newChatRunnerDraft || undefined,
+              environmentProfile: nextEnvironmentProfile || undefined,
+              runner: nextRunner,
+            }
+          : currentConversation
+      );
+      setConversations((currentConversations) =>
+        currentConversations.map((currentConversation) =>
+          currentConversation.id === conversationId
+            ? {
+                ...currentConversation,
+                profile: nextProfile,
+                reasoningEffort: newChatReasoningEffortDraft || undefined,
+                cwd: effectiveCWD,
+                runnerId: newChatRunnerDraft || undefined,
+                environmentProfile: nextEnvironmentProfile || undefined,
+                runner: nextRunner,
+              }
+            : currentConversation
+        )
+      );
+    }
+
+    setSelectedProfile(nextProfile);
     setSelectedReasoningEffort(newChatReasoningEffortDraft);
     setSelectedReasoningEffortOptions(newChatReasoningEffortOptions);
     setSelectedReasoningEffortExplicit(newChatReasoningEffortExplicit);
     setSelectedRunnerID(newChatRunnerDraft);
-    setSelectedEnvironmentProfile(newChatRunnerDraft ? newChatEnvironmentProfileDraft.trim() : '');
-    setSelectedCWD(cwdQuery.trim());
+    setSelectedEnvironmentProfile(nextEnvironmentProfile);
+    setSelectedCWD(nextCWD);
     cwdSuggestionSkipQueryRef.current = null;
     requestCwdSuggestions.cancel();
     cwdSuggestionRequestRef.current += 1;
@@ -3415,7 +3485,7 @@ const ChatPage: React.FC = () => {
             attachments={attachments}
             canStop={canStopActiveConversation}
             contextDisabled={currentConversationIsStreaming || steering}
-            contextIsStatic={Boolean(conversationId)}
+            contextIsStatic={Boolean(conversationId) && !optimisticConversationContextEditable}
             contextText={composerContextText}
             dragActive={dragActive}
             draft={draft}

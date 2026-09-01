@@ -345,16 +345,13 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 			"working_directory": result.WorkingDirectory,
 		}).Info("runner run opened")
 	}()
-	requestedCWD := strings.TrimSpace(params.CWD)
-	resolvedRequestedCWD := requestedCWD
-	if requestedCWD != "" {
-		if resolver, ok := s.instanceProvider.(ExecutionInstanceWorkingDirectoryResolver); ok {
-			var err error
-			resolvedRequestedCWD, err = resolver.ResolveWorkingDirectory(ctx, requestedCWD)
-			if err != nil {
-				return runnerpayload.Manifest{}, errors.Wrap(err, "failed to resolve requested runner working directory")
-			}
-		}
+	resolvedRequestedCWD, err := s.instanceProvider.ResolveWorkingDirectory(ctx, params.CWD)
+	if err != nil {
+		return runnerpayload.Manifest{}, errors.Wrap(err, "failed to resolve requested runner working directory")
+	}
+	resolvedRequestedCWD = strings.TrimSpace(resolvedRequestedCWD)
+	if resolvedRequestedCWD == "" {
+		return runnerpayload.Manifest{}, errors.New("runner execution instance provider resolved an empty working directory")
 	}
 	s.mu.Lock()
 	if s.closed {
@@ -385,7 +382,7 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 			s.mu.Unlock()
 			return runnerpayload.Manifest{}, errors.Errorf("background resources use runner profile %q, not %q", firstNonEmpty(resources.variant, "default"), firstNonEmpty(variant, "default"))
 		}
-		if resolvedRequestedCWD != "" && resolvedRequestedCWD != resources.workingDirectory {
+		if resolvedRequestedCWD != resources.workingDirectory {
 			s.mu.Unlock()
 			return runnerpayload.Manifest{}, errors.Errorf("conversation is bound to working directory %q, not %q", resources.workingDirectory, resolvedRequestedCWD)
 		}
@@ -430,14 +427,10 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 	}
 	defer s.unlockSnapshot()
 	if resources == nil {
-		instanceCWD := params.CWD
-		if resolvedRequestedCWD != "" {
-			instanceCWD = resolvedRequestedCWD
-		}
 		instance, err := s.instanceProvider.Create(operationCtx, ExecutionInstanceSpec{
 			RunID:          params.RunID,
 			ConversationID: params.ConversationID,
-			CWD:            instanceCWD,
+			CWD:            resolvedRequestedCWD,
 		})
 		if err != nil {
 			s.failOpen(run)
@@ -452,6 +445,11 @@ func (s *Service) openRun(ctx context.Context, params protocol.RunOpenParams) (r
 			_ = runBoundedCleanup(operationCtx, s.cleanupTimeout, "runner execution instance", instance.Close)
 			s.failOpen(run)
 			return runnerpayload.Manifest{}, errors.New("runner execution instance returned an empty working directory")
+		}
+		if workingDirectory != resolvedRequestedCWD {
+			_ = runBoundedCleanup(operationCtx, s.cleanupTimeout, "runner execution instance", instance.Close)
+			s.failOpen(run)
+			return runnerpayload.Manifest{}, errors.Errorf("runner execution instance returned working directory %q, expected %q", workingDirectory, resolvedRequestedCWD)
 		}
 		if expectedCWD := strings.TrimSpace(params.ExpectedCWD); expectedCWD != "" && workingDirectory != expectedCWD {
 			_ = runBoundedCleanup(operationCtx, s.cleanupTimeout, "runner execution instance", instance.Close)
@@ -751,9 +749,18 @@ func (s *Service) probeManifestLocked(ctx context.Context, environmentProfile st
 	runnerID := s.runnerID
 	generation := s.generation
 	s.mu.Unlock()
+	resolvedCWD, err := s.instanceProvider.ResolveWorkingDirectory(ctx, "")
+	if err != nil {
+		return runnerpayload.Manifest{}, errors.Wrap(err, "failed to resolve runner manifest probe working directory")
+	}
+	resolvedCWD = strings.TrimSpace(resolvedCWD)
+	if resolvedCWD == "" {
+		return runnerpayload.Manifest{}, errors.New("runner manifest probe instance provider resolved an empty working directory")
+	}
 	instance, err := s.instanceProvider.Create(ctx, ExecutionInstanceSpec{
 		RunID:          "runner-manifest-probe",
 		ConversationID: "runner-manifest-probe",
+		CWD:            resolvedCWD,
 		Probe:          true,
 	})
 	if err != nil {
@@ -765,6 +772,9 @@ func (s *Service) probeManifestLocked(ctx context.Context, environmentProfile st
 	workingDirectory := strings.TrimSpace(instance.WorkingDirectory())
 	if workingDirectory == "" {
 		return runnerpayload.Manifest{}, s.closeProbeResources(ctx, nil, instance, errors.New("runner manifest probe instance returned an empty working directory"))
+	}
+	if workingDirectory != resolvedCWD {
+		return runnerpayload.Manifest{}, s.closeProbeResources(ctx, nil, instance, errors.Errorf("runner manifest probe instance returned working directory %q, expected %q", workingDirectory, resolvedCWD))
 	}
 
 	config, err := s.configLoader(environmentProfile)
@@ -1438,6 +1448,8 @@ func rpcResult(result any, err error) (any, *protocol.RPCError) {
 	switch {
 	case errors.Is(err, errNoActiveRun):
 		return nil, &protocol.RPCError{Code: protocol.ErrorCodeStale, Message: message, Data: protocol.RPCErrorData{Reason: protocol.ErrorReasonRunNotActive}}
+	case errors.Is(err, ErrInvalidWorkingDirectory):
+		code = protocol.ErrorCodeInvalidParams
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		code = protocol.ErrorCodeUnavailable
 	case strings.Contains(message, "busy"), strings.Contains(message, "active run"):

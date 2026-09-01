@@ -528,7 +528,7 @@ func runDefaultChat(
 		if err != nil {
 			return sessionID, err
 		}
-		if err := sink.Send(ChatEvent{Kind: "conversation", ConversationID: sessionID, ConversationName: name, Role: "assistant"}); err != nil {
+		if err := sink.Send(ChatEvent{Kind: "conversation", ConversationID: sessionID, ConversationName: name, CWD: llmConfig.WorkingDirectory, Role: "assistant"}); err != nil {
 			return sessionID, err
 		}
 		if err := sink.Send(ChatEvent{

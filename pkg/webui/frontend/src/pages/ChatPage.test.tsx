@@ -1558,7 +1558,7 @@ describe('ChatPage', () => {
     expect(mockGetConversation).not.toHaveBeenCalledWith(preallocatedId);
   });
 
-  it('retains the remote runner binding when retrying a failed optimistic conversation', async () => {
+  it('allows correcting runner context before retrying a failed optimistic conversation', async () => {
     mockGetRunners.mockResolvedValue({
       runners: [makeRunner({ workspaceGitDiff: true, workspaceTerminal: true })],
     });
@@ -1591,6 +1591,19 @@ describe('ChatPage', () => {
     );
     expect(mockGetConversation).not.toHaveBeenCalledWith(preallocatedId);
 
+    const contextButton = document.querySelector<HTMLButtonElement>(
+      'button.composer-inline-context'
+    );
+    if (!contextButton) {
+      throw new Error('expected optimistic conversation context to remain editable');
+    }
+    fireEvent.click(contextButton);
+    await screen.findByTestId('new-chat-dialog');
+    fireEvent.change(screen.getByLabelText('Working directory'), {
+      target: { value: '../corrected-project' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+
     fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
       target: { value: 'retry' },
     });
@@ -1601,9 +1614,193 @@ describe('ChatPage', () => {
       expect.objectContaining({
         conversationId: preallocatedId,
         runnerId: 'runner-1',
-        cwd: '../other-project',
+        cwd: '../corrected-project',
       })
     );
+  });
+
+  it('locks optimistic context after the server confirms the conversation', async () => {
+    mockGetRunners.mockResolvedValue({ runners: [makeRunner()] });
+    let streamOptions: { onEvent: (event: ChatStreamEvent) => void } | undefined;
+    mockStreamChat.mockImplementation(async (_request, options) => {
+      streamOptions = options as { onEvent: (event: ChatStreamEvent) => void };
+      return new Promise(() => undefined);
+    });
+
+    const { rerender } = render(<ChatPage />);
+    await waitFor(() => expect(mockGetRunners).toHaveBeenCalled());
+    fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
+    fireEvent.change(screen.getByLabelText('Environment'), {
+      target: { value: 'runner-1' },
+    });
+    fireEvent.change(screen.getByLabelText('Working directory'), {
+      target: { value: '../other-project' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+      target: { value: 'confirm context' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(mockStreamChat).toHaveBeenCalledTimes(1));
+    const preallocatedId = mockStreamChat.mock.calls[0]?.[0]?.conversationId;
+    expect(preallocatedId).toBeTruthy();
+    routeParams = { id: preallocatedId };
+    rerender(<ChatPage />);
+
+    await act(async () => {
+      streamOptions?.onEvent({
+        kind: 'conversation',
+        conversation_id: preallocatedId,
+        cwd: '/runner/canonical-project',
+      });
+    });
+
+    expect(screen.getByTestId('composer-inline-context')).toHaveTextContent(
+      '/runner/canonical-project'
+    );
+    expect(document.querySelector('button.composer-inline-context')).toBeNull();
+  });
+
+  it('keeps optimistic context editable until the server supplies a canonical cwd', async () => {
+    mockGetRunners.mockResolvedValue({ runners: [makeRunner()] });
+    let streamOptions: { onEvent: (event: ChatStreamEvent) => void } | undefined;
+    mockStreamChat.mockImplementation(async (_request, options) => {
+      streamOptions = options as { onEvent: (event: ChatStreamEvent) => void };
+      return new Promise(() => undefined);
+    });
+
+    const { rerender } = render(<ChatPage />);
+    await waitFor(() => expect(mockGetRunners).toHaveBeenCalled());
+    fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
+    fireEvent.change(screen.getByLabelText('Environment'), {
+      target: { value: 'runner-1' },
+    });
+    fireEvent.change(screen.getByLabelText('Working directory'), {
+      target: { value: '../other-project' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+      target: { value: 'await canonical cwd' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(mockStreamChat).toHaveBeenCalledTimes(1));
+    const preallocatedId = mockStreamChat.mock.calls[0]?.[0]?.conversationId;
+    expect(preallocatedId).toBeTruthy();
+    routeParams = { id: preallocatedId };
+    rerender(<ChatPage />);
+
+    await act(async () => {
+      streamOptions?.onEvent({
+        kind: 'conversation',
+        conversation_id: preallocatedId,
+      });
+    });
+
+    expect(document.querySelector('button.composer-inline-context')).not.toBeNull();
+  });
+
+  it('clears confirmed optimistic parameters when the stream later reports an error', async () => {
+    mockGetRunners.mockResolvedValue({ runners: [makeRunner()] });
+    mockGetConversation.mockRejectedValue(new Error('conversation refresh failed'));
+    mockStreamChat
+      .mockImplementationOnce(async (request, options) => {
+        const streamRequest = request as { conversationId: string };
+        const streamOptions = options as { onEvent: (event: ChatStreamEvent) => void };
+        streamOptions.onEvent({
+          kind: 'conversation',
+          conversation_id: streamRequest.conversationId,
+          cwd: '/runner/canonical-project',
+        });
+        streamOptions.onEvent({
+          kind: 'error',
+          conversation_id: streamRequest.conversationId,
+          error: 'model failed after opening the conversation',
+        });
+      })
+      .mockImplementationOnce(async () => new Promise(() => undefined));
+
+    const { rerender } = render(<ChatPage />);
+    await waitFor(() => expect(mockGetRunners).toHaveBeenCalled());
+    fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
+    fireEvent.change(screen.getByLabelText('Environment'), {
+      target: { value: 'runner-1' },
+    });
+    fireEvent.change(screen.getByLabelText('Working directory'), {
+      target: { value: '../other-project' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+      target: { value: 'first attempt' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(mockStreamChat).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(
+        screen.getAllByText('model failed after opening the conversation').length
+      ).toBeGreaterThan(0)
+    );
+    const conversationId = mockStreamChat.mock.calls[0]?.[0]?.conversationId;
+    expect(conversationId).toBeTruthy();
+    routeParams = { id: conversationId };
+    rerender(<ChatPage />);
+    await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith(conversationId));
+
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+      target: { value: 'retry established conversation' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(mockStreamChat).toHaveBeenCalledTimes(2));
+    expect(mockStreamChat.mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({ conversationId })
+    );
+    expect(mockStreamChat.mock.calls[1]?.[0]?.runnerId).toBeUndefined();
+    expect(mockStreamChat.mock.calls[1]?.[0]?.environmentProfile).toBeUndefined();
+    expect(mockStreamChat.mock.calls[1]?.[0]?.cwd).toBeUndefined();
+  });
+
+  it('loads a confirmed conversation normally when the stream later rejects', async () => {
+    mockGetRunners.mockResolvedValue({ runners: [makeRunner()] });
+    mockGetConversation.mockRejectedValue(new Error('conversation refresh failed'));
+    mockStreamChat.mockImplementationOnce(async (request, options) => {
+      const streamRequest = request as { conversationId: string };
+      const streamOptions = options as { onEvent: (event: ChatStreamEvent) => void };
+      streamOptions.onEvent({
+        kind: 'conversation',
+        conversation_id: streamRequest.conversationId,
+        cwd: '/runner/canonical-project',
+      });
+      throw new Error('connection lost after confirmation');
+    });
+
+    const { rerender } = render(<ChatPage />);
+    await waitFor(() => expect(mockGetRunners).toHaveBeenCalled());
+    fireEvent.click(screen.getByTestId('sidebar-new-chat-button'));
+    fireEvent.change(screen.getByLabelText('Environment'), {
+      target: { value: 'runner-1' },
+    });
+    fireEvent.change(screen.getByLabelText('Working directory'), {
+      target: { value: '../other-project' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    fireEvent.change(screen.getByPlaceholderText('Ask kodelet anything...'), {
+      target: { value: 'first attempt' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(mockStreamChat).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(screen.getAllByText('connection lost after confirmation').length).toBeGreaterThan(0)
+    );
+    const conversationId = mockStreamChat.mock.calls[0]?.[0]?.conversationId;
+    expect(conversationId).toBeTruthy();
+    routeParams = { id: conversationId };
+    rerender(<ChatPage />);
+
+    await waitFor(() => expect(mockGetConversation).toHaveBeenCalledWith(conversationId));
   });
 
   it('clears optimistic runner parameters after a successful stream even when refresh fails', async () => {

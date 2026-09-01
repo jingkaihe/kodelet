@@ -25,15 +25,39 @@ type ExecutionInstance interface {
 	Close(ctx context.Context) error
 }
 
-// ExecutionInstanceProvider creates the backing used before runner configuration, extensions, and tools are discovered.
+// ExecutionInstanceProvider resolves and creates the backing used before runner configuration, extensions, and tools are discovered.
+// Create must return an instance whose working directory exactly matches the canonical path returned by ResolveWorkingDirectory.
+// ResolveWorkingDirectory should wrap ErrInvalidWorkingDirectory when the requested path is invalid.
 type ExecutionInstanceProvider interface {
+	ResolveWorkingDirectory(ctx context.Context, requestedCWD string) (string, error)
 	Create(ctx context.Context, spec ExecutionInstanceSpec) (ExecutionInstance, error)
 }
 
-// ExecutionInstanceWorkingDirectoryResolver canonicalizes a requested working directory without creating an instance.
-// Providers that retain instances across runs should implement this so the service can validate reattachment requests.
-type ExecutionInstanceWorkingDirectoryResolver interface {
-	ResolveWorkingDirectory(ctx context.Context, requestedCWD string) (string, error)
+// ErrInvalidWorkingDirectory identifies a caller-provided working directory that cannot be used.
+var ErrInvalidWorkingDirectory = errors.New("invalid runner working directory")
+
+type invalidWorkingDirectoryError struct {
+	err error
+}
+
+func (e *invalidWorkingDirectoryError) Error() string {
+	if e == nil || e.err == nil {
+		return "invalid runner working directory"
+	}
+	return e.err.Error()
+}
+
+func (e *invalidWorkingDirectoryError) Unwrap() error { return e.err }
+
+func (*invalidWorkingDirectoryError) Is(target error) bool {
+	return target == ErrInvalidWorkingDirectory
+}
+
+func invalidWorkingDirectory(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &invalidWorkingDirectoryError{err: err}
 }
 
 // DirectWorkspaceInstanceProvider creates per-run handles backed by directories on the runner host.
@@ -87,7 +111,7 @@ func resolveDirectWorkingDirectory(workspace, requestedCWD string) (string, erro
 	} else if strings.HasPrefix(requestedCWD, "~") {
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
-			return "", errors.Wrap(err, "failed to resolve runner home directory")
+			return "", invalidWorkingDirectory(errors.Wrap(err, "failed to resolve runner home directory"))
 		}
 		switch {
 		case requestedCWD == "~":
@@ -95,7 +119,7 @@ func resolveDirectWorkingDirectory(workspace, requestedCWD string) (string, erro
 		case strings.HasPrefix(requestedCWD, "~/"):
 			requestedCWD = filepath.Join(homeDir, strings.TrimPrefix(requestedCWD, "~/"))
 		default:
-			return "", errors.New("runner working directory supports only ~ or ~/ paths")
+			return "", invalidWorkingDirectory(errors.New("runner working directory supports only ~ or ~/ paths"))
 		}
 	}
 	if !filepath.IsAbs(requestedCWD) {
@@ -103,7 +127,7 @@ func resolveDirectWorkingDirectory(workspace, requestedCWD string) (string, erro
 	}
 	workingDirectory, err := conversations.NormalizeCWD(requestedCWD)
 	if err != nil {
-		return "", errors.Wrap(err, "failed to resolve runner working directory")
+		return "", invalidWorkingDirectory(errors.Wrap(err, "failed to resolve runner working directory"))
 	}
 	return workingDirectory, nil
 }
@@ -122,7 +146,6 @@ func (i *directWorkspaceInstance) WorkingDirectory() string {
 func (*directWorkspaceInstance) Close(context.Context) error { return nil }
 
 var (
-	_ ExecutionInstanceProvider                 = (*DirectWorkspaceInstanceProvider)(nil)
-	_ ExecutionInstanceWorkingDirectoryResolver = (*DirectWorkspaceInstanceProvider)(nil)
-	_ ExecutionInstance                         = (*directWorkspaceInstance)(nil)
+	_ ExecutionInstanceProvider = (*DirectWorkspaceInstanceProvider)(nil)
+	_ ExecutionInstance         = (*directWorkspaceInstance)(nil)
 )

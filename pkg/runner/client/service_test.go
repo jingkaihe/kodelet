@@ -129,12 +129,33 @@ func (p *recordingRuntimeProvider) RuntimeWithConfigAndCallContext(_ context.Con
 }
 
 type recordingExecutionInstanceProvider struct {
-	workspace string
-	err       error
-	closeErr  error
-	returnNil bool
-	specs     []ExecutionInstanceSpec
-	instances []*recordingExecutionInstance
+	workspace         string
+	resolvedWorkspace string
+	resolveErr        error
+	err               error
+	closeErr          error
+	returnNil         bool
+	specs             []ExecutionInstanceSpec
+	instances         []*recordingExecutionInstance
+}
+
+func (p *recordingExecutionInstanceProvider) ResolveWorkingDirectory(ctx context.Context, requestedCWD string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if p.resolveErr != nil {
+		return "", p.resolveErr
+	}
+	if p.resolvedWorkspace != "" {
+		return p.resolvedWorkspace, nil
+	}
+	if p.workspace != "" {
+		return p.workspace, nil
+	}
+	if requestedCWD != "" {
+		return requestedCWD, nil
+	}
+	return "/runner/workspace", nil
 }
 
 func (p *recordingExecutionInstanceProvider) Create(_ context.Context, spec ExecutionInstanceSpec) (ExecutionInstance, error) {
@@ -1362,11 +1383,41 @@ func TestServiceCreatesEnvironmentInsideExecutionInstanceAndCleansItUp(t *testin
 	assert.Equal(t, instanceWorkspace, environmentWorkspace)
 	assert.Equal(t, instanceWorkspace, manifest.WorkingDirectory)
 	require.Len(t, provider.specs, 1)
-	assert.Equal(t, ExecutionInstanceSpec{RunID: "run-1", ConversationID: "conversation-1", CWD: "/requested/workspace"}, provider.specs[0])
+	assert.Equal(t, ExecutionInstanceSpec{RunID: "run-1", ConversationID: "conversation-1", CWD: instanceWorkspace}, provider.specs[0])
 	require.Len(t, provider.instances, 1)
 	assert.False(t, provider.instances[0].closed)
 	callService[any](t, service, protocol.MethodRunClose, protocol.RunCloseParams{RunID: "run-1"})
 	assert.True(t, provider.instances[0].closed)
+}
+
+func TestServiceRejectsExecutionInstanceWorkingDirectoryMismatch(t *testing.T) {
+	resolvedWorkspace := t.TempDir()
+	instanceWorkspace := t.TempDir()
+	provider := &recordingExecutionInstanceProvider{
+		resolvedWorkspace: resolvedWorkspace,
+		workspace:         instanceWorkspace,
+	}
+	service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{
+		ExecutionInstanceProvider: provider,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	service.Attach(&recordingPeer{})
+	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
+
+	_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodRunOpen, mustJSON(t, protocol.RunOpenParams{
+		RunID: "run-1", ConversationID: "conversation-1", CWD: "/requested/workspace",
+	}))
+
+	require.NotNil(t, rpcErr)
+	assert.Equal(t, protocol.ErrorCodeInternal, rpcErr.Code)
+	assert.Contains(t, rpcErr.Message, "returned working directory")
+	assert.Contains(t, rpcErr.Message, resolvedWorkspace)
+	require.Len(t, provider.instances, 1)
+	assert.True(t, provider.instances[0].closed)
+	state, runIDs, _ := service.HeartbeatSnapshotRuns()
+	assert.Equal(t, protocol.RunnerStateIdle, state)
+	assert.Empty(t, runIDs)
 }
 
 func TestServiceCleansExecutionInstanceWhenEnvironmentOpenFails(t *testing.T) {
@@ -1541,8 +1592,56 @@ func TestDirectWorkspaceInstanceProviderReturnsFreshHandles(t *testing.T) {
 
 	_, err = provider.Create(t.Context(), ExecutionInstanceSpec{RunID: "run-missing", CWD: filepath.Join(workspace, "missing")})
 	require.ErrorContains(t, err, "cwd directory does not exist")
+	assert.ErrorIs(t, err, ErrInvalidWorkingDirectory)
 	_, err = provider.Create(t.Context(), ExecutionInstanceSpec{RunID: "run-other-home", CWD: "~another-user/project"})
 	require.ErrorContains(t, err, "supports only ~ or ~/")
+	assert.ErrorIs(t, err, ErrInvalidWorkingDirectory)
+}
+
+func TestServiceClassifiesInvalidRequestedCWD(t *testing.T) {
+	workspace := t.TempDir()
+	service, err := NewService(t.Context(), workspace, ServiceOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	service.Attach(&recordingPeer{})
+	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
+
+	_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodRunOpen, mustJSON(t, protocol.RunOpenParams{
+		RunID:          "run-1",
+		ConversationID: "conversation-1",
+		CWD:            filepath.Join(workspace, "missing"),
+	}))
+
+	require.NotNil(t, rpcErr)
+	assert.Equal(t, protocol.ErrorCodeInvalidParams, rpcErr.Code)
+	assert.Contains(t, rpcErr.Message, "cwd directory does not exist")
+	state, runIDs, _ := service.HeartbeatSnapshotRuns()
+	assert.Equal(t, protocol.RunnerStateIdle, state)
+	assert.Empty(t, runIDs)
+}
+
+func TestServiceClassifiesProviderInvalidWorkingDirectory(t *testing.T) {
+	provider := &recordingExecutionInstanceProvider{
+		resolveErr: errors.Join(errors.New("custom provider rejected cwd"), ErrInvalidWorkingDirectory),
+	}
+	service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{
+		ExecutionInstanceProvider: provider,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	service.Attach(&recordingPeer{})
+	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
+
+	_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodRunOpen, mustJSON(t, protocol.RunOpenParams{
+		RunID:          "run-1",
+		ConversationID: "conversation-1",
+		CWD:            "/provider-specific/path",
+	}))
+
+	require.NotNil(t, rpcErr)
+	assert.Equal(t, protocol.ErrorCodeInvalidParams, rpcErr.Code)
+	assert.Contains(t, rpcErr.Message, "custom provider rejected cwd")
+	assert.Empty(t, provider.instances)
 }
 
 func TestServiceResolvesRequestedCWDBeforeCheckingConversationBinding(t *testing.T) {

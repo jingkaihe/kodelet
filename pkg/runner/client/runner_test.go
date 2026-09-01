@@ -48,6 +48,27 @@ type blockingInitialProbeInstanceProvider struct {
 	once      sync.Once
 }
 
+func (p *delayedInitialProbeInstanceProvider) ResolveWorkingDirectory(ctx context.Context, _ string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return p.workspace, nil
+}
+
+func (p *blockingInitialProbeInstanceProvider) ResolveWorkingDirectory(ctx context.Context, _ string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return p.workspace, nil
+}
+
+func (p *blockingRefreshInstanceProvider) ResolveWorkingDirectory(ctx context.Context, _ string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return p.workspace, nil
+}
+
 func saveTestRunnerCredential(t *testing.T, store *localstate.Store, server, workspace, credentialID string) localstate.Credential {
 	t.Helper()
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
