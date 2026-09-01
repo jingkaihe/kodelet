@@ -3182,6 +3182,14 @@ const ChatPage: React.FC = () => {
       const effectiveCWD = newChatRunnerDraft
         ? nextCWD || nextRunner?.workspace.path || ''
         : nextCWD || chatSettings.defaultCWD || '';
+      const contextUpdate = {
+        profile: nextProfile,
+        reasoningEffort: newChatReasoningEffortDraft || undefined,
+        cwd: effectiveCWD,
+        runnerId: newChatRunnerDraft || undefined,
+        environmentProfile: nextEnvironmentProfile || undefined,
+        runner: nextRunner,
+      };
       optimisticRemoteConversationRef.current = {
         ...optimisticConversation,
         runnerId: newChatRunnerDraft,
@@ -3190,29 +3198,13 @@ const ChatPage: React.FC = () => {
       };
       setConversation((currentConversation) =>
         currentConversation?.id === conversationId
-          ? {
-              ...currentConversation,
-              profile: nextProfile,
-              reasoningEffort: newChatReasoningEffortDraft || undefined,
-              cwd: effectiveCWD,
-              runnerId: newChatRunnerDraft || undefined,
-              environmentProfile: nextEnvironmentProfile || undefined,
-              runner: nextRunner,
-            }
+          ? { ...currentConversation, ...contextUpdate }
           : currentConversation
       );
       setConversations((currentConversations) =>
         currentConversations.map((currentConversation) =>
           currentConversation.id === conversationId
-            ? {
-                ...currentConversation,
-                profile: nextProfile,
-                reasoningEffort: newChatReasoningEffortDraft || undefined,
-                cwd: effectiveCWD,
-                runnerId: newChatRunnerDraft || undefined,
-                environmentProfile: nextEnvironmentProfile || undefined,
-                runner: nextRunner,
-              }
+            ? { ...currentConversation, ...contextUpdate }
             : currentConversation
         )
       );

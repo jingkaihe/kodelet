@@ -305,6 +305,16 @@ func (p *recordingPeer) NotifyUpdate(_ string, params any) error {
 	return nil
 }
 
+func newRegisteredTestService(t *testing.T, workspace string, options ServiceOptions) *Service {
+	t.Helper()
+	service, err := NewService(t.Context(), workspace, options)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	service.Attach(&recordingPeer{})
+	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
+	return service
+}
+
 func TestServiceOpensPinnedManifestAndExecutesRunnerTool(t *testing.T) {
 	workspace := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(workspace, "AGENTS.md"), []byte("# Workspace rules"), 0o600))
@@ -1397,13 +1407,9 @@ func TestServiceRejectsExecutionInstanceWorkingDirectoryMismatch(t *testing.T) {
 		resolvedWorkspace: resolvedWorkspace,
 		workspace:         instanceWorkspace,
 	}
-	service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{
+	service := newRegisteredTestService(t, t.TempDir(), ServiceOptions{
 		ExecutionInstanceProvider: provider,
 	})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, service.Close()) })
-	service.Attach(&recordingPeer{})
-	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
 
 	_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodRunOpen, mustJSON(t, protocol.RunOpenParams{
 		RunID: "run-1", ConversationID: "conversation-1", CWD: "/requested/workspace",
@@ -1600,11 +1606,7 @@ func TestDirectWorkspaceInstanceProviderReturnsFreshHandles(t *testing.T) {
 
 func TestServiceClassifiesInvalidRequestedCWD(t *testing.T) {
 	workspace := t.TempDir()
-	service, err := NewService(t.Context(), workspace, ServiceOptions{})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, service.Close()) })
-	service.Attach(&recordingPeer{})
-	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
+	service := newRegisteredTestService(t, workspace, ServiceOptions{})
 
 	_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodRunOpen, mustJSON(t, protocol.RunOpenParams{
 		RunID:          "run-1",
@@ -1624,13 +1626,9 @@ func TestServiceClassifiesProviderInvalidWorkingDirectory(t *testing.T) {
 	provider := &recordingExecutionInstanceProvider{
 		resolveErr: errors.Join(errors.New("custom provider rejected cwd"), ErrInvalidWorkingDirectory),
 	}
-	service, err := NewService(t.Context(), t.TempDir(), ServiceOptions{
+	service := newRegisteredTestService(t, t.TempDir(), ServiceOptions{
 		ExecutionInstanceProvider: provider,
 	})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, service.Close()) })
-	service.Attach(&recordingPeer{})
-	require.NoError(t, service.SetRegistration(protocol.RegisterResult{RunnerID: "runner-1", Generation: 1}))
 
 	_, rpcErr := service.HandleRequest(t.Context(), protocol.MethodRunOpen, mustJSON(t, protocol.RunOpenParams{
 		RunID:          "run-1",
